@@ -321,6 +321,67 @@ def read_second() -> u8:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsRuntimeBackedArrayAndViewIndexing(t *testing.T) {
+	src := `repr(c) struct DynArray[T]:
+	items: mutable T&?
+	count: mutable usize
+	capacity: mutable usize
+
+repr(c) struct DynArrayView:
+	items: mutable void&?
+	count: mutable usize
+
+def read_array(values: DArray[i32, row]) -> i32:
+	return values[0]
+
+def read_view(view: DArrayView[i32]) -> i32:
+	return view[0]
+`
+	_, errs := parseAndAnalyze(t, "runtime_backed_array_index.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsRuntimeBackedListAndViewIndexing(t *testing.T) {
+	src := `repr(c) struct CtxList:
+	items: mutable void&?
+	count: mutable usize
+	capacity: mutable usize
+
+repr(c) struct CtxListView:
+	items: mutable void&?
+	count: mutable usize
+
+def read_list(values: DList[i32, row]) -> i32:
+	return values[0]
+
+def read_view(view: DListView[i32]) -> i32:
+	return view[0]
+`
+	_, errs := parseAndAnalyze(t, "runtime_backed_list_index.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsDStrIndexingAsI64(t *testing.T) {
+	src := `def read_codepoint(text: DStr[row]) -> i64:
+	return text[0]
+`
+	_, errs := parseAndAnalyze(t, "runtime_backed_dstr_index.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsAssigningToDStrIndex(t *testing.T) {
+	src := `def bad(text: DStr[row]) -> void:
+	text[0] <- 1
+`
+	_, errs := parseAndAnalyze(t, "dstr_index_assignment.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot assign to string index") {
+		t.Fatalf("expected string index assignment diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeAcceptsImplicitDArrayShapeParams(t *testing.T) {
 	src := `def identity[T](array: DArray[T, shape_in]) -> DArray[T, shape_in]:
     return array

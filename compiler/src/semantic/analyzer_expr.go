@@ -377,6 +377,21 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		a.checkConstantArrayIndexBounds(arr, expr.Index)
 		return arr.Elem
 	}
+	if darray, ok := objType.(*DArrayType); ok {
+		return darray.Elem
+	}
+	if view, ok := objType.(*DArrayViewType); ok {
+		return view.Elem
+	}
+	if dlist, ok := objType.(*DListType); ok {
+		return dlist.Elem
+	}
+	if view, ok := objType.(*DListViewType); ok {
+		return view.Elem
+	}
+	if _, ok := objType.(*DStrType); ok {
+		return a.namedTypes["i64"]
+	}
 	if ref, ok := objType.(*RefType); ok {
 		if ref.State != RefStateNonNull {
 			a.errorf(expr.Pos(), "indexing requires proven non-null reference, got %s", objType.String())
@@ -385,6 +400,18 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		if arr, ok := ref.Elem.(*ArrayType); ok {
 			a.checkConstantArrayIndexBounds(arr, expr.Index)
 			return arr.Elem
+		}
+		if darray, ok := ref.Elem.(*DArrayType); ok {
+			return darray.Elem
+		}
+		if view, ok := ref.Elem.(*DArrayViewType); ok {
+			return view.Elem
+		}
+		if view, ok := ref.Elem.(*DListViewType); ok {
+			return view.Elem
+		}
+		if _, ok := ref.Elem.(*DStrType); ok {
+			return a.namedTypes["i64"]
 		}
 		return ref.Elem
 	}
@@ -433,7 +460,12 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 		}
 		return field.Type
 	case *ast.IndexExpr:
-		return a.analyzeIndexExpr(n)
+		targetType := a.analyzeIndexExpr(n)
+		if indexProducesValueOnly(a.exprTypes[n.Object]) {
+			a.errorf(n.Pos(), "cannot assign to string index")
+			return invalidType
+		}
+		return targetType
 	default:
 		a.errorf(expr.Pos(), "invalid assignment target")
 		return invalidType
@@ -470,7 +502,12 @@ func (a *Analyzer) asRefTargetType(expr ast.Expr, asKind string) Type {
 		}
 		return a.refTypeWithAsKind(field.Type, asKind)
 	case *ast.IndexExpr:
-		return a.refTypeWithAsKind(a.analyzeIndexExpr(n), asKind)
+		targetType := a.analyzeIndexExpr(n)
+		if indexProducesValueOnly(a.exprTypes[n.Object]) {
+			a.errorf(n.Pos(), "cannot take a reference to string index")
+			return invalidType
+		}
+		return a.refTypeWithAsKind(targetType, asKind)
 	default:
 		a.errorf(expr.Pos(), "invalid assignment target")
 		return invalidType
@@ -568,4 +605,16 @@ func (a *Analyzer) runtimeBackedStructType(t Type) Type {
 		return nil
 	}
 	return &GenericInstanceType{Name: "DynArray", Base: base, Args: []Type{darray.Elem}}
+}
+
+func indexProducesValueOnly(t Type) bool {
+	if _, ok := t.(*DStrType); ok {
+		return true
+	}
+	ref, ok := t.(*RefType)
+	if !ok {
+		return false
+	}
+	_, ok = ref.Elem.(*DStrType)
+	return ok
 }

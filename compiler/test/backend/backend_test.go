@@ -342,6 +342,102 @@ def rem_unsigned() -> u32:
 	}
 }
 
+func TestGenerateLLVMIRIndexesRuntimeBackedArraysAndViews(t *testing.T) {
+	src := `repr(c) struct DynArray[T]:
+    items: mutable T&?
+    count: mutable usize
+    capacity: mutable usize
+
+repr(c) struct DynArrayView:
+    items: mutable void&?
+    count: mutable usize
+
+def read_array(values: DArray[i32, row]) -> i32:
+    return values[1]
+
+def read_view(view: DArrayView[i32]) -> i32:
+    return view[2]
+`
+	result := parseAndAnalyze(t, "backend_runtime_index.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%DynArray__i32 = type { ptr, i64, i64 }",
+		"%DynArrayView = type { ptr, i64 }",
+		"define i32 @read_array(%DynArray__i32",
+		"define i32 @read_view(%DynArrayView",
+		"getelementptr inbounds nuw %DynArray__i32",
+		"getelementptr inbounds nuw %DynArrayView",
+		"getelementptr i32, ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRIndexesRuntimeBackedListsAndViews(t *testing.T) {
+	src := `repr(c) struct CtxList:
+    items: mutable void&?
+    count: mutable usize
+    capacity: mutable usize
+
+repr(c) struct CtxListView:
+    items: mutable void&?
+    count: mutable usize
+
+def read_list(values: DList[i32, row]) -> i32:
+    return values[1]
+
+def read_view(view: DListView[i32]) -> i32:
+    return view[2]
+`
+	result := parseAndAnalyze(t, "backend_runtime_list_index.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%CtxList = type { ptr, i64, i64 }",
+		"%CtxListView = type { ptr, i64 }",
+		"define i32 @read_list(ptr",
+		"define i32 @read_view(%CtxListView",
+		"getelementptr i32, ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRIndexesDStrViaRuntimeHelper(t *testing.T) {
+	src := `def read_codepoint(text: DStr[row]) -> i64:
+    return text[1]
+`
+	result := parseAndAnalyze(t, "backend_runtime_dstr_index.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"define i64 @read_codepoint(ptr",
+		"declare i64 @ctx_stage1rt_string_index(ptr, i64)",
+		"call i64 @ctx_stage1rt_string_index(ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersStaticIfInFunctionBodies(t *testing.T) {
 	src := `const ENABLE_FAST = 2 > 1
 

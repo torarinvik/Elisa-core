@@ -362,12 +362,60 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, sema
 }
 
 func (s *functionState) emitIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if stringType, ok := dstrIndexedOperandType(s.exprType(expr.Object)); ok {
+		return s.emitRuntimeStringIndexExpr(expr, stringType)
+	}
 	ptr, elemType, err := s.emitIndexAddress(expr)
 	if err != nil {
 		return nil, nil, err
 	}
 	value, err := s.loadValue(ptr, elemType, "idx")
 	return value, elemType, err
+}
+
+func (s *functionState) emitRuntimeStringIndexExpr(expr *ast.IndexExpr, stringType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+	stringValue, _, err := s.emitExpr(expr.Object, stringType)
+	if err != nil {
+		return nil, nil, err
+	}
+	indexType := s.g.result.NamedTypes["i64"]
+	indexValue, _, err := s.emitExpr(expr.Index, indexType)
+	if err != nil {
+		return nil, nil, err
+	}
+	helperType := &semantic.FuncType{
+		Name:   "ctx_stage1rt_string_index",
+		Params: []semantic.Type{stringType, indexType},
+		Return: indexType,
+	}
+	callee, err := s.g.ensureFunctionDeclared("ctx_stage1rt_string_index", helperType)
+	if err != nil {
+		return nil, nil, err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, nil, err
+	}
+	args := []C.LLVMValueRef{stringValue, indexValue}
+	call := C.LLVMBuildCall2(s.builder, llvmFnType, callee, llvmValueSlicePtr(args), C.unsigned(len(args)), cStringFree("stridx"))
+	return call, indexType, nil
+}
+
+func dstrIndexedOperandType(t semantic.Type) (semantic.Type, bool) {
+	if _, ok := t.(*semantic.DStrType); ok {
+		return t, true
+	}
+	ref, ok := t.(*semantic.RefType)
+	if !ok {
+		return nil, false
+	}
+	if ref.State != semantic.RefStateNonNull {
+		return nil, false
+	}
+	if _, ok := ref.Elem.(*semantic.DStrType); ok {
+		return ref.Elem, true
+	}
+	return nil, false
 }
 
 func (s *functionState) emitCastExpr(expr *ast.CastExpr) (C.LLVMValueRef, semantic.Type, error) {

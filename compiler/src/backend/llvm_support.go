@@ -84,6 +84,32 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr) (C.LLVMValueRef, s
 		indices := []C.LLVMValueRef{zero, indexValue}
 		ptr := C.LLVMBuildGEP2(s.builder, arrayLLVMType, arrayPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("idx.ptr"))
 		return ptr, t.Elem, nil
+	case *semantic.DArrayType:
+		containerPtr, _, err := s.emitAddress(expr.Object)
+		if err != nil {
+			return nil, nil, err
+		}
+		return s.emitRuntimeIndexedAddress(containerPtr, t, t.Elem, indexValue)
+	case *semantic.DArrayViewType:
+		containerPtr, _, err := s.emitAddress(expr.Object)
+		if err != nil {
+			return nil, nil, err
+		}
+		return s.emitRuntimeIndexedAddress(containerPtr, t, t.Elem, indexValue)
+	case *semantic.DListType:
+		basePtr, _, err := s.emitExpr(expr.Object, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		return s.emitRuntimePointerIndexedAddress(basePtr, func() (C.LLVMTypeRef, error) {
+			return s.g.ensureRuntimeCtxList()
+		}, t.Elem, indexValue)
+	case *semantic.DListViewType:
+		containerPtr, _, err := s.emitAddress(expr.Object)
+		if err != nil {
+			return nil, nil, err
+		}
+		return s.emitRuntimeIndexedAddress(containerPtr, t, t.Elem, indexValue)
 	case *semantic.RefType:
 		basePtr, _, err := s.emitExpr(expr.Object, nil)
 		if err != nil {
@@ -98,6 +124,12 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr) (C.LLVMValueRef, s
 			ptr := C.LLVMBuildGEP2(s.builder, arrayLLVMType, basePtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("idx.ptr"))
 			return ptr, arrayElem.Elem, nil
 		}
+		if elemType, ok := runtimeIndexedElemType(t.Elem); ok {
+			return s.emitRuntimeIndexedAddress(basePtr, t.Elem, elemType, indexValue)
+		}
+		if view, ok := t.Elem.(*semantic.DListViewType); ok {
+			return s.emitRuntimeIndexedAddress(basePtr, view, view.Elem, indexValue)
+		}
 		elemLLVMType, err := s.g.lowerType(t.Elem)
 		if err != nil {
 			return nil, nil, err
@@ -107,6 +139,50 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr) (C.LLVMValueRef, s
 		return ptr, t.Elem, nil
 	default:
 		return nil, nil, fmt.Errorf("indexing is not implemented for %s", objType.String())
+	}
+}
+
+func (s *functionState) emitRuntimeIndexedAddress(containerPtr C.LLVMValueRef, containerType semantic.Type, elemType semantic.Type, indexValue C.LLVMValueRef) (C.LLVMValueRef, semantic.Type, error) {
+	containerLLVMType, err := s.g.lowerType(containerType)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.emitRuntimePointerIndexedAddressWithType(containerPtr, containerLLVMType, elemType, indexValue)
+}
+
+func (s *functionState) emitRuntimePointerIndexedAddress(containerPtr C.LLVMValueRef, lowerContainer func() (C.LLVMTypeRef, error), elemType semantic.Type, indexValue C.LLVMValueRef) (C.LLVMValueRef, semantic.Type, error) {
+	containerLLVMType, err := lowerContainer()
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.emitRuntimePointerIndexedAddressWithType(containerPtr, containerLLVMType, elemType, indexValue)
+}
+
+func (s *functionState) emitRuntimePointerIndexedAddressWithType(containerPtr C.LLVMValueRef, containerLLVMType C.LLVMTypeRef, elemType semantic.Type, indexValue C.LLVMValueRef) (C.LLVMValueRef, semantic.Type, error) {
+	dataFieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, containerPtr, 0, cStringFree("idx.data.ptr"))
+	dataPtr, err := s.loadValue(dataFieldPtr, &semantic.RefType{Elem: elemType, State: semantic.RefStateNullable}, "idx.data")
+	if err != nil {
+		return nil, nil, err
+	}
+	elemLLVMType, err := s.g.lowerType(elemType)
+	if err != nil {
+		return nil, nil, err
+	}
+	indices := []C.LLVMValueRef{indexValue}
+	ptr := C.LLVMBuildGEP2(s.builder, elemLLVMType, dataPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("idx.ptr"))
+	return ptr, elemType, nil
+}
+
+func runtimeIndexedElemType(t semantic.Type) (semantic.Type, bool) {
+	switch tt := t.(type) {
+	case *semantic.DArrayType:
+		return tt.Elem, true
+	case *semantic.DArrayViewType:
+		return tt.Elem, true
+	case *semantic.DListViewType:
+		return tt.Elem, true
+	default:
+		return nil, false
 	}
 }
 
