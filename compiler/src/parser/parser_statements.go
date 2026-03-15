@@ -200,6 +200,15 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		}
 	}
 
+	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ASSIGN {
+		name := p.cur().Text
+		p.advance()
+		p.advance()
+		value := p.parseExpr()
+		p.expectNewline()
+		return &ast.VarDeclStmt{Position: pos, Name: name, Value: value}
+	}
+
 	expr := p.parseExpr()
 
 	switch p.peek() {

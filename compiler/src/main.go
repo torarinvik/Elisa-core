@@ -336,6 +336,12 @@ func exprStr(e ast.Expr) string {
 		return "null"
 	case *ast.ZeroedLit:
 		return "zeroed"
+	case *ast.ListLitExpr:
+		var elems []string
+		for _, elem := range n.Elems {
+			elems = append(elems, exprStr(elem))
+		}
+		return fmt.Sprintf("[%s]", strings.Join(elems, ", "))
 	case *ast.BinaryExpr:
 		return fmt.Sprintf("(%s %s %s)", exprStr(n.Left), lexer.TokenName(n.Op), exprStr(n.Right))
 	case *ast.UnaryExpr:
@@ -350,6 +356,8 @@ func exprStr(e ast.Expr) string {
 		return fmt.Sprintf("%s.%s", exprStr(n.Object), n.Field)
 	case *ast.IndexExpr:
 		return fmt.Sprintf("%s[%s]", exprStr(n.Object), exprStr(n.Index))
+	case *ast.SliceExpr:
+		return fmt.Sprintf("%s[%s:%s]", exprStr(n.Object), exprStr(n.Start), exprStr(n.End))
 	case *ast.CastExpr:
 		return fmt.Sprintf("%s.%s()", exprStr(n.Operand), typeStr(n.Target))
 	case *ast.SizeofExpr:

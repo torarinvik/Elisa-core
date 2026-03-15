@@ -209,6 +209,18 @@ type IndexExpr struct {
 	Index    Expr
 }
 
+type SliceExpr struct {
+	Position lexer.Pos
+	Object   Expr
+	Start    Expr
+	End      Expr
+}
+
+type ListLitExpr struct {
+	Position lexer.Pos
+	Elems    []Expr
+}
+
 type CastExpr struct {
 	Position lexer.Pos
 	Operand  Expr
@@ -366,6 +378,8 @@ func (n *UnaryExpr) Pos() lexer.Pos       { return n.Position }
 func (n *CallExpr) Pos() lexer.Pos        { return n.Position }
 func (n *FieldExpr) Pos() lexer.Pos       { return n.Position }
 func (n *IndexExpr) Pos() lexer.Pos       { return n.Position }
+func (n *SliceExpr) Pos() lexer.Pos       { return n.Position }
+func (n *ListLitExpr) Pos() lexer.Pos     { return n.Position }
 func (n *CastExpr) Pos() lexer.Pos        { return n.Position }
 func (n *SizeofExpr) Pos() lexer.Pos      { return n.Position }
 func (n *TernaryExpr) Pos() lexer.Pos     { return n.Position }
@@ -411,6 +425,8 @@ func (*UnaryExpr) nodeTag()       {}
 func (*CallExpr) nodeTag()        {}
 func (*FieldExpr) nodeTag()       {}
 func (*IndexExpr) nodeTag()       {}
+func (*SliceExpr) nodeTag()       {}
+func (*ListLitExpr) nodeTag()     {}
 func (*CastExpr) nodeTag()        {}
 func (*SizeofExpr) nodeTag()      {}
 func (*TernaryExpr) nodeTag()     {}
@@ -458,6 +474,8 @@ func (*UnaryExpr) exprTag()     {}
 func (*CallExpr) exprTag()      {}
 func (*FieldExpr) exprTag()     {}
 func (*IndexExpr) exprTag()     {}
+func (*SliceExpr) exprTag()     {}
+func (*ListLitExpr) exprTag()   {}
 func (*CastExpr) exprTag()      {}
 func (*SizeofExpr) exprTag()    {}
 func (*TernaryExpr) exprTag()   {}

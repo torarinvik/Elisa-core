@@ -8,18 +8,26 @@ import (
 func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 	switch n := stmt.(type) {
 	case *ast.VarDeclStmt:
-		declType := a.resolveType(n.Type)
+		var declType Type
+		if n.Type != nil {
+			declType = a.resolveType(n.Type)
+		}
 		if n.Value != nil {
-			valueType := a.analyzeExpr(n.Value)
-			if !AssignableTo(declType, valueType) {
+			valueType := a.analyzeValueExpr(n.Value, declType)
+			if declType == nil {
+				declType = valueType
+			} else if !AssignableTo(declType, valueType) {
 				a.errorf(n.Pos(), "variable %q expects %s, got %s", n.Name, declType.String(), valueType.String())
 				a.reportShapeMismatchNotes(n.Pos(), declType, valueType)
 			}
+		} else if declType == nil {
+			a.errorf(n.Pos(), "variable %q requires a type or initializer", n.Name)
+			declType = invalidType
 		}
 		a.defineLocal(&Symbol{Name: n.Name, Kind: SymbolLocal, Type: declType, Node: n, Mutable: n.Mutable}, n.Pos())
 	case *ast.AssignStmt:
 		targetType := a.assignmentTargetType(n.Target)
-		valueType := a.analyzeExpr(n.Value)
+		valueType := a.analyzeValueExpr(n.Value, targetType)
 		if !AssignableTo(targetType, valueType) {
 			a.errorf(n.Pos(), "cannot assign %s to %s", valueType.String(), targetType.String())
 			a.reportShapeMismatchNotes(n.Pos(), targetType, valueType)
@@ -33,7 +41,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 	case *ast.AsRefAssignStmt:
 		targetType := a.asRefTargetType(n.Target, n.AsKind)
-		valueType := a.analyzeExpr(n.Value)
+		valueType := a.analyzeValueExpr(n.Value, targetType)
 		if !AssignableTo(targetType, valueType) {
 			a.errorf(n.Pos(), "cannot assign %s to %s", valueType.String(), targetType.String())
 			a.reportShapeMismatchNotes(n.Pos(), targetType, valueType)
@@ -46,7 +54,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			}
 			return
 		}
-		valueType := a.analyzeExpr(n.Value)
+		valueType := a.analyzeValueExpr(n.Value, a.currentReturn)
 		if a.currentReturn == nil {
 			a.errorf(n.Pos(), "unexpected return value")
 			return

@@ -275,9 +275,15 @@ func (p *Parser) parsePostfix() ast.Expr {
 		case lexer.TOKEN_LBRACKET:
 			pos := p.cur().Pos
 			p.advance()
-			index := p.parseExpr()
+			start := p.parseExpr()
+			if p.match(lexer.TOKEN_COLON) {
+				end := p.parseExpr()
+				p.expect(lexer.TOKEN_RBRACKET)
+				expr = &ast.SliceExpr{Position: pos, Object: expr, Start: start, End: end}
+				continue
+			}
 			p.expect(lexer.TOKEN_RBRACKET)
-			expr = &ast.IndexExpr{Position: pos, Object: expr, Index: index}
+			expr = &ast.IndexExpr{Position: pos, Object: expr, Index: start}
 
 		case lexer.TOKEN_LPAREN:
 			pos := p.cur().Pos
@@ -331,6 +337,20 @@ func (p *Parser) parsePrimary() ast.Expr {
 	case lexer.TOKEN_ZEROED:
 		tok := p.advance()
 		return &ast.ZeroedLit{Position: tok.Pos}
+	case lexer.TOKEN_LBRACKET:
+		pos := p.cur().Pos
+		p.advance()
+		var elems []ast.Expr
+		if p.peek() != lexer.TOKEN_RBRACKET {
+			for {
+				elems = append(elems, p.parseExpr())
+				if !p.match(lexer.TOKEN_COMMA) {
+					break
+				}
+			}
+		}
+		p.expect(lexer.TOKEN_RBRACKET)
+		return &ast.ListLitExpr{Position: pos, Elems: elems}
 	case lexer.TOKEN_SIZEOF:
 		pos := p.cur().Pos
 		p.advance()

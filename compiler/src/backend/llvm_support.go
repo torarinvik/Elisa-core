@@ -474,6 +474,15 @@ func (s *functionState) exprType(expr ast.Expr) semantic.Type {
 
 func (s *functionState) resolveDynamicShapeType(expr *ast.GenericType) (semantic.Type, bool, error) {
 	switch expr.Name {
+	case "view":
+		if len(expr.Args) != 1 {
+			return nil, true, fmt.Errorf("view expects 1 argument, got %d", len(expr.Args))
+		}
+		elem, err := s.resolveTypeExpr(expr.Args[0])
+		if err != nil {
+			return nil, true, err
+		}
+		return &semantic.DListViewType{Elem: elem}, true, nil
 	case "DArray":
 		if len(expr.Args) != 2 {
 			return nil, true, fmt.Errorf("DArray expects 2 arguments, got %d", len(expr.Args))

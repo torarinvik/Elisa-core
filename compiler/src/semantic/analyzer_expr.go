@@ -59,6 +59,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	case *ast.ZeroedLit:
 		result = invalidType
 		return
+	case *ast.ListLitExpr:
+		result = a.analyzeListLitExprWithExpected(n, nil)
+		return
 	case *ast.BinaryExpr:
 		result = a.analyzeBinaryExpr(n)
 		return
@@ -77,6 +80,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		return
 	case *ast.IndexExpr:
 		result = a.analyzeIndexExpr(n)
+		return
+	case *ast.SliceExpr:
+		result = a.analyzeSliceExpr(n)
 		return
 	case *ast.CastExpr:
 		src := a.analyzeExpr(n.Operand)
@@ -136,6 +142,9 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 		}
 		return a.namedTypes["bool"]
 	case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
+		if runtimeStringComparable(left, right) {
+			return a.namedTypes["bool"]
+		}
 		if IsNumericType(left) && IsNumericType(right) {
 			return a.namedTypes["bool"]
 		}
@@ -216,14 +225,18 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 		limit = len(expr.Args)
 	}
 	for i := 0; i < len(expr.Args); i++ {
-		argType := a.analyzeExpr(expr.Args[i])
+		var argType Type
 		if i < limit {
-			a.collectTypeBindings(ft.Params[i], argType, bindings, shapeBindings)
 			expectedType := a.substituteType(ft.Params[i], bindings, shapeBindings)
+			argType = a.analyzeValueExpr(expr.Args[i], expectedType)
+			a.collectTypeBindings(ft.Params[i], argType, bindings, shapeBindings)
+			expectedType = a.substituteType(ft.Params[i], bindings, shapeBindings)
 			if !AssignableTo(expectedType, argType) {
 				a.errorf(expr.Args[i].Pos(), "argument %d to %q expects %s, got %s", i+1, ft.Name, expectedType.String(), argType.String())
 				a.reportShapeMismatchNotes(expr.Args[i].Pos(), expectedType, argType)
 			}
+		} else {
+			argType = a.analyzeExpr(expr.Args[i])
 		}
 	}
 	if ft.Return == nil {
@@ -360,6 +373,9 @@ func (a *Analyzer) bindFreshShape(shape Shape, origin string, bindings map[strin
 }
 
 func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
+	if field, ok := dstrSyntheticField(a.analyzeExpr(expr.Object), expr.Field); ok {
+		return field.Type
+	}
 	field, ok := a.lookupField(a.analyzeExpr(expr.Object), expr.Field, expr.Pos())
 	if !ok {
 		return invalidType
@@ -392,6 +408,9 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	if _, ok := objType.(*DStrType); ok {
 		return a.namedTypes["i64"]
 	}
+	if isCtxStringViewType(objType) {
+		return a.namedTypes["i64"]
+	}
 	if ref, ok := objType.(*RefType); ok {
 		if ref.State != RefStateNonNull {
 			a.errorf(expr.Pos(), "indexing requires proven non-null reference, got %s", objType.String())
@@ -413,10 +432,179 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		if _, ok := ref.Elem.(*DStrType); ok {
 			return a.namedTypes["i64"]
 		}
+		if isCtxStringViewType(ref.Elem) {
+			return a.namedTypes["i64"]
+		}
 		return ref.Elem
 	}
 	a.errorf(expr.Pos(), "indexing requires array or reference type, got %s", objType.String())
 	return invalidType
+}
+
+func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
+	objType := a.analyzeExpr(expr.Object)
+	startType := a.analyzeExpr(expr.Start)
+	endType := a.analyzeExpr(expr.End)
+	if !IsNumericType(startType) {
+		a.errorf(expr.Start.Pos(), "slice start must be numeric, got %s", startType.String())
+	}
+	if !IsNumericType(endType) {
+		a.errorf(expr.End.Pos(), "slice end must be numeric, got %s", endType.String())
+	}
+	if dstr, ok := objType.(*DStrType); ok {
+		_ = dstr
+		if viewType, ok := a.namedTypes["CtxStringView"]; ok {
+			return viewType
+		}
+		a.errorf(expr.Pos(), "slice on DStr requires CtxStringView runtime type")
+		return invalidType
+	}
+	if view, ok := objType.(*DListType); ok {
+		return &DListViewType{Elem: view.Elem}
+	}
+	if view, ok := objType.(*DListViewType); ok {
+		return &DListViewType{Elem: view.Elem}
+	}
+	if isCtxStringViewType(objType) {
+		return objType
+	}
+	if ref, ok := objType.(*RefType); ok {
+		if ref.State != RefStateNonNull {
+			a.errorf(expr.Pos(), "slicing requires proven non-null reference, got %s", objType.String())
+			return invalidType
+		}
+		if _, ok := ref.Elem.(*DStrType); ok {
+			if viewType, ok := a.namedTypes["CtxStringView"]; ok {
+				return viewType
+			}
+			a.errorf(expr.Pos(), "slice on DStr requires CtxStringView runtime type")
+			return invalidType
+		}
+		if view, ok := ref.Elem.(*DListType); ok {
+			return &DListViewType{Elem: view.Elem}
+		}
+		if view, ok := ref.Elem.(*DListViewType); ok {
+			return &DListViewType{Elem: view.Elem}
+		}
+		if isCtxStringViewType(ref.Elem) {
+			return ref.Elem
+		}
+	}
+	a.errorf(expr.Pos(), "slicing requires string, list, or view type, got %s", objType.String())
+	return invalidType
+}
+
+func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
+	if list, ok := expr.(*ast.ListLitExpr); ok {
+		return a.analyzeListLitExprWithExpected(list, expected)
+	}
+	return a.analyzeExpr(expr)
+}
+
+func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expected Type) Type {
+	if expr == nil {
+		return invalidType
+	}
+	expectedList, useExpected := contextualListLiteralType(expected)
+	if len(expr.Elems) == 0 {
+		if useExpected {
+			a.exprTypes[expr] = expectedList
+			return expectedList
+		}
+		a.errorf(expr.Pos(), "empty list literal requires an expected DList type")
+		a.exprTypes[expr] = invalidType
+		return invalidType
+	}
+
+	var elemType Type
+	if useExpected {
+		elemType = expectedList.Elem
+	}
+
+	for _, elem := range expr.Elems {
+		itemType := a.analyzeValueExpr(elem, elemType)
+		if useExpected {
+			if !AssignableTo(expectedList.Elem, itemType) {
+				a.errorf(elem.Pos(), "list literal element expects %s, got %s", expectedList.Elem.String(), itemType.String())
+			}
+			continue
+		}
+		if elemType == nil {
+			elemType = itemType
+			continue
+		}
+		merged := MergeTypes(elemType, itemType)
+		if IsInvalidType(merged) {
+			a.errorf(elem.Pos(), "list literal elements are incompatible: %s and %s", elemType.String(), itemType.String())
+			a.exprTypes[expr] = invalidType
+			return invalidType
+		}
+		elemType = merged
+	}
+
+	if useExpected {
+		a.exprTypes[expr] = expectedList
+		return expectedList
+	}
+	if elemType == nil || IsInvalidType(elemType) {
+		a.exprTypes[expr] = invalidType
+		return invalidType
+	}
+	a.freshShapeCounter++
+	result := &DListType{Elem: elemType, Shape: &FreshShape{ID: a.freshShapeCounter, Label: "shape_out", Origin: "list literal"}}
+	a.exprTypes[expr] = result
+	return result
+}
+
+func contextualListLiteralType(expected Type) (*DListType, bool) {
+	listType, ok := expected.(*DListType)
+	if !ok {
+		return nil, false
+	}
+	if listType == nil || containsTypeParam(listType.Elem) {
+		return listType, false
+	}
+	if _, ok := listType.Shape.(*ShapeParam); ok {
+		return listType, false
+	}
+	return listType, true
+}
+
+func containsTypeParam(t Type) bool {
+	switch n := t.(type) {
+	case nil:
+		return false
+	case *TypeParamType:
+		return true
+	case *RefType:
+		return containsTypeParam(n.Elem)
+	case *ArrayType:
+		return containsTypeParam(n.Elem)
+	case *DArrayType:
+		return containsTypeParam(n.Elem)
+	case *DArrayViewType:
+		return containsTypeParam(n.Elem)
+	case *DListType:
+		return containsTypeParam(n.Elem)
+	case *DListViewType:
+		return containsTypeParam(n.Elem)
+	case *GenericInstanceType:
+		for _, arg := range n.Args {
+			if containsTypeParam(arg) {
+				return true
+			}
+		}
+		return containsTypeParam(n.Base)
+	case *FuncType:
+		for _, param := range n.Params {
+			if containsTypeParam(param) {
+				return true
+			}
+		}
+		return containsTypeParam(n.Return)
+	default:
+		return false
+	}
 }
 
 func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
@@ -461,8 +649,8 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 		return field.Type
 	case *ast.IndexExpr:
 		targetType := a.analyzeIndexExpr(n)
-		if indexProducesValueOnly(a.exprTypes[n.Object]) {
-			a.errorf(n.Pos(), "cannot assign to string index")
+		if kind, ok := valueOnlyIndexKind(a.exprTypes[n.Object]); ok {
+			a.errorf(n.Pos(), "cannot assign to %s", kind)
 			return invalidType
 		}
 		return targetType
@@ -503,8 +691,8 @@ func (a *Analyzer) asRefTargetType(expr ast.Expr, asKind string) Type {
 		return a.refTypeWithAsKind(field.Type, asKind)
 	case *ast.IndexExpr:
 		targetType := a.analyzeIndexExpr(n)
-		if indexProducesValueOnly(a.exprTypes[n.Object]) {
-			a.errorf(n.Pos(), "cannot take a reference to string index")
+		if kind, ok := valueOnlyIndexKind(a.exprTypes[n.Object]); ok {
+			a.errorf(n.Pos(), "cannot take a reference to %s", kind)
 			return invalidType
 		}
 		return a.refTypeWithAsKind(targetType, asKind)
@@ -530,6 +718,9 @@ func (a *Analyzer) refTypeWithAsKind(t Type, asKind string) Type {
 }
 
 func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (Field, bool) {
+	if field, ok := dstrSyntheticField(objType, fieldName); ok {
+		return field, true
+	}
 	if ref, ok := objType.(*RefType); ok {
 		if ref.State != RefStateNonNull {
 			a.errorf(pos, "field access requires proven non-null reference, got %s", objType.String())
@@ -607,14 +798,89 @@ func (a *Analyzer) runtimeBackedStructType(t Type) Type {
 	return &GenericInstanceType{Name: "DynArray", Base: base, Args: []Type{darray.Elem}}
 }
 
-func indexProducesValueOnly(t Type) bool {
+func valueOnlyIndexKind(t Type) (string, bool) {
 	if _, ok := t.(*DStrType); ok {
-		return true
+		return "string index", true
+	}
+	if isCtxStringViewType(t) {
+		return "string view index", true
 	}
 	ref, ok := t.(*RefType)
 	if !ok {
+		return "", false
+	}
+	if _, ok := ref.Elem.(*DStrType); ok {
+		return "string index", true
+	}
+	if isCtxStringViewType(ref.Elem) {
+		return "string view index", true
+	}
+	return "", false
+}
+
+func isCtxStringViewType(t Type) bool {
+	st, ok := t.(*StructType)
+	return ok && st.Name == "CtxStringView"
+}
+
+func dstrSyntheticField(t Type, fieldName string) (Field, bool) {
+	if fieldName != "len" {
+		return Field{}, false
+	}
+	if _, ok := t.(*DStrType); ok {
+		return Field{Name: "len", Type: builtinI64Type(), Mutable: false}, true
+	}
+	ref, ok := t.(*RefType)
+	if !ok {
+		return Field{}, false
+	}
+	if _, ok := ref.Elem.(*DStrType); ok {
+		return Field{Name: "len", Type: builtinI64Type(), Mutable: false}, true
+	}
+	return Field{}, false
+}
+
+func builtinI64Type() Type {
+	return &BuiltinType{Name: "i64"}
+}
+
+type runtimeStringKind int
+
+const (
+	runtimeStringNone runtimeStringKind = iota
+	runtimeStringDStr
+	runtimeStringView
+	runtimeStringRaw
+)
+
+func runtimeStringComparable(left Type, right Type) bool {
+	leftKind := runtimeStringKindOf(left)
+	rightKind := runtimeStringKindOf(right)
+	if leftKind == runtimeStringNone || rightKind == runtimeStringNone {
 		return false
 	}
-	_, ok = ref.Elem.(*DStrType)
-	return ok
+	if leftKind == runtimeStringRaw && rightKind == runtimeStringRaw {
+		return false
+	}
+	return leftKind != runtimeStringNone && rightKind != runtimeStringNone
+}
+
+func runtimeStringKindOf(t Type) runtimeStringKind {
+	if t == nil {
+		return runtimeStringNone
+	}
+	if _, ok := t.(*DStrType); ok {
+		return runtimeStringDStr
+	}
+	if isCtxStringViewType(t) {
+		return runtimeStringView
+	}
+	ref, ok := t.(*RefType)
+	if !ok {
+		return runtimeStringNone
+	}
+	if builtin, ok := ref.Elem.(*BuiltinType); ok && builtin.Name == "u8" {
+		return runtimeStringRaw
+	}
+	return runtimeStringNone
 }

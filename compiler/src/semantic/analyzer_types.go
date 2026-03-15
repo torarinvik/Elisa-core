@@ -98,6 +98,12 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 
 func (a *Analyzer) resolveDynamicShapeType(expr *ast.GenericType) (Type, bool) {
 	switch expr.Name {
+	case "view":
+		if len(expr.Args) != 1 {
+			a.errorf(expr.Pos(), "view expects 1 argument, got %d", len(expr.Args))
+			return invalidType, true
+		}
+		return &DListViewType{Elem: a.resolveType(expr.Args[0])}, true
 	case "DArray":
 		if len(expr.Args) != 2 {
 			a.errorf(expr.Pos(), "DArray expects 2 arguments, got %d", len(expr.Args))

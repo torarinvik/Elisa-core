@@ -113,9 +113,20 @@ func (s *functionState) emitBlock(stmts []ast.Stmt, scoped bool) error {
 func (s *functionState) emitStmt(stmt ast.Stmt) error {
 	switch n := stmt.(type) {
 	case *ast.VarDeclStmt:
-		declType, err := s.resolveTypeExpr(n.Type)
-		if err != nil {
-			return err
+		var declType semantic.Type
+		var err error
+		if n.Type != nil {
+			declType, err = s.resolveTypeExpr(n.Type)
+			if err != nil {
+				return err
+			}
+		} else if n.Value != nil {
+			declType = s.exprType(n.Value)
+			if declType == nil {
+				return fmt.Errorf("cannot infer type for variable %s", n.Name)
+			}
+		} else {
+			return fmt.Errorf("variable %s requires a type or initializer", n.Name)
 		}
 		alloca, err := s.createEntryAlloca(n.Name, declType)
 		if err != nil {

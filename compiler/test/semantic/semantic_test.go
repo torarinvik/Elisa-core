@@ -382,6 +382,133 @@ func TestAnalyzeRejectsAssigningToDStrIndex(t *testing.T) {
 	}
 }
 
+func TestAnalyzeAcceptsCtxStringViewIndexingAsI64(t *testing.T) {
+	src := `repr(c) struct CtxStringView:
+	data: mutable u8&
+	len: mutable i64
+
+def read_codepoint(view: CtxStringView) -> i64:
+	return view[0]
+`
+	_, errs := parseAndAnalyze(t, "ctx_string_view_index.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsRuntimeStringEqualityOperators(t *testing.T) {
+	src := `repr(c) struct CtxStringView:
+	data: mutable u8&
+	len: mutable i64
+
+def same_text(left: DStr[row], right: DStr[col]) -> bool:
+	return left == right
+
+def same_view_text(view: CtxStringView, text: DStr[row]) -> bool:
+	return view == text
+
+def same_text_view(text: DStr[row], view: CtxStringView) -> bool:
+	return text == view
+
+def different_views(left: CtxStringView, right: CtxStringView) -> bool:
+	return left != right
+
+def same_literal(text: DStr[row]) -> bool:
+	return text == "hello"
+`
+	_, errs := parseAndAnalyze(t, "runtime_string_equality.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsDStrLenField(t *testing.T) {
+	src := `def text_len(text: DStr[row]) -> i64:
+	return text.len
+`
+	_, errs := parseAndAnalyze(t, "dstr_len_field.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsViewAliasAndListSliceSyntax(t *testing.T) {
+	src := `def middle(values: DList[i32, row]) -> view[i32]:
+	part: view[i32] = values[1:3]
+	return part
+`
+	_, errs := parseAndAnalyze(t, "view_alias_and_slice.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsListLiteralWithInferredLocalAndViewSlice(t *testing.T) {
+	src := `def middle() -> int:
+	values = [1, 2, 3, 4]
+	part: view[int] = values[1:3]
+	return part[0]
+`
+	_, errs := parseAndAnalyze(t, "list_literal_inferred_local.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsTypedListLiteralInitialization(t *testing.T) {
+	src := `def first() -> i32:
+	values: DList[i32, row] = [1, 2, 3]
+	return values[0]
+`
+	_, errs := parseAndAnalyze(t, "typed_list_literal_init.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsEmptyListLiteralWithoutContext(t *testing.T) {
+	src := `def bad() -> void:
+	values = []
+`
+	_, errs := parseAndAnalyze(t, "empty_list_literal_needs_context.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "empty list literal requires an expected DList type") {
+		t.Fatalf("expected empty-list context diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeAcceptsStringSliceSyntax(t *testing.T) {
+	src := `repr(c) struct CtxStringView:
+	data: mutable u8&
+	len: mutable i64
+
+def middle(text: DStr[row]) -> CtxStringView:
+	return text[1:3]
+`
+	_, errs := parseAndAnalyze(t, "string_slice_syntax.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsAssigningToDStrLenField(t *testing.T) {
+	src := `def bad(text: DStr[row]) -> void:
+	text.len <- 1
+`
+	_, errs := parseAndAnalyze(t, "dstr_len_assign.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "field \"len\" is immutable") {
+		t.Fatalf("expected immutable len-field diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsAssigningToCtxStringViewIndex(t *testing.T) {
+	src := `repr(c) struct CtxStringView:
+	data: mutable u8&
+	len: mutable i64
+
+def bad(view: CtxStringView) -> void:
+	view[0] <- 1
+`
+	_, errs := parseAndAnalyze(t, "ctx_string_view_index_assignment.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot assign to string view index") {
+		t.Fatalf("expected string view index assignment diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeAcceptsImplicitDArrayShapeParams(t *testing.T) {
 	src := `def identity[T](array: DArray[T, shape_in]) -> DArray[T, shape_in]:
     return array

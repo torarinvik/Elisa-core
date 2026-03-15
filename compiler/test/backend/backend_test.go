@@ -438,6 +438,174 @@ func TestGenerateLLVMIRIndexesDStrViaRuntimeHelper(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRIndexesCtxStringViewViaRuntimeHelper(t *testing.T) {
+	src := `repr(c) struct CtxStringView:
+    data: mutable u8&
+    len: mutable i64
+
+def read_view(view: CtxStringView) -> i64:
+    return view[1]
+`
+	result := parseAndAnalyze(t, "backend_runtime_string_view_index.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%CtxStringView = type { ptr, i64 }",
+		"define i64 @read_view(%CtxStringView",
+		"declare i64 @ctx_stage1rt_string_view_index(%CtxStringView, i64)",
+		"call i64 @ctx_stage1rt_string_view_index(%CtxStringView",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersRuntimeStringEqualityHelpers(t *testing.T) {
+	src := `repr(c) struct CtxStringView:
+    data: mutable u8&
+    len: mutable i64
+
+def same_text(left: DStr[row], right: DStr[col]) -> bool:
+    return left == right
+
+def same_view_text(view: CtxStringView, text: DStr[row]) -> bool:
+    return view == text
+
+def same_text_view(text: DStr[row], view: CtxStringView) -> bool:
+    return text == view
+
+def different_views(left: CtxStringView, right: CtxStringView) -> bool:
+    return left != right
+`
+	result := parseAndAnalyze(t, "backend_runtime_string_equality.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"declare i64 @ctx_stage1rt_streq(ptr, ptr)",
+		"declare i64 @ctx_stage1rt_string_view_eq(%CtxStringView, ptr)",
+		"declare i64 @ctx_stage1rt_string_views_eq(%CtxStringView, %CtxStringView)",
+		"call i64 @ctx_stage1rt_streq(ptr",
+		"call i64 @ctx_stage1rt_string_view_eq(%CtxStringView",
+		"call i64 @ctx_stage1rt_string_views_eq(%CtxStringView",
+		"icmp ne i64",
+		"icmp eq i64",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersDStrLenFieldViaRuntimeHelper(t *testing.T) {
+	src := `def text_len(text: DStr[row]) -> i64:
+    return text.len
+`
+	result := parseAndAnalyze(t, "backend_dstr_len.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"define i64 @text_len(ptr",
+		"declare i64 @ctx_stage1rt_strlen(ptr)",
+		"call i64 @ctx_stage1rt_strlen(ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersListSliceSyntaxViaRuntimeHelpers(t *testing.T) {
+	src := `def head_of_middle(values: DList[i32, row]) -> i32:
+    part: view[i32] = values[1:3]
+    return part[0]
+`
+	result := parseAndAnalyze(t, "backend_list_slice_syntax.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"define i32 @head_of_middle(ptr",
+		"declare %CtxListView @ctx_stage1rt_tlist_view(ptr, i64, i64)",
+		"call %CtxListView @ctx_stage1rt_tlist_view(ptr",
+		"getelementptr i32, ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersListLiteralAndInferredLocalViaRuntimeHelpers(t *testing.T) {
+	src := `def head_of_middle() -> int:
+	values = [1, 2, 3, 4]
+	part: view[int] = values[1:3]
+	return part[0]
+`
+	result := parseAndAnalyze(t, "backend_list_literal_inferred_local.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"define i64 @head_of_middle()",
+		"declare ptr @ctx_stage1rt_tlist_new(ptr)",
+		"declare ptr @ctx_stage1rt_tlist_push(ptr, ptr)",
+		"call ptr @ctx_stage1rt_tlist_new(ptr",
+		"call ptr @ctx_stage1rt_tlist_push(ptr",
+		"call %CtxListView @ctx_stage1rt_tlist_view(ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersStringSliceSyntaxViaRuntimeHelpers(t *testing.T) {
+	src := `repr(c) struct CtxStringView:
+    data: mutable u8&
+    len: mutable i64
+
+def head_codepoint(text: DStr[row]) -> i64:
+    view: CtxStringView = text[1:3]
+    return view[0]
+`
+	result := parseAndAnalyze(t, "backend_string_slice_syntax.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%CtxStringView = type { ptr, i64 }",
+		"declare %CtxStringView @ctx_stage1rt_string_view(ptr, i64, i64)",
+		"call %CtxStringView @ctx_stage1rt_string_view(ptr",
+		"call i64 @ctx_stage1rt_string_view_index(%CtxStringView",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersStaticIfInFunctionBodies(t *testing.T) {
 	src := `const ENABLE_FAST = 2 > 1
 
