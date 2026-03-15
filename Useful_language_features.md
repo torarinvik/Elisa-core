@@ -1102,7 +1102,7 @@ But let the type system expose a stronger logical wrapper notion, something like
 OwnedArray[T, n]
 ```
 
-where operations like `push`, `resize`, `truncate`, `concat` produce new logical types.
+where operations like `push`, `resize`, `append_many`, `truncate`, `clear`, `concat`, and `strcat` produce new logical types.
 
 This can still compile to the same C-like struct representation.
 
@@ -1580,7 +1580,10 @@ Teach the typechecker that operations like:
 - `resize`
 - `push`
 - `append_many`
+- `truncate`
+- `clear`
 - `concat`
+- `strcat`
 
 produce a new logical shape identity.
 
@@ -1621,9 +1624,12 @@ as logical length-indexed owned containers.
 ### And define core APIs like
 
 ```text
-resize : DArray[T, shape_in] × usize -> DArray[T, shape_out]
-push   : DArray[T, shape_in] × T -> DArray[T, shape_out]
-concat : DStr[shape_left] × DStr[shape_right] -> DStr[shape_result]
+resize      : DArray[T, shape_in] × usize -> DArray[T, shape_out]
+push        : DArray[T, shape_in] × T -> DArray[T, shape_out]
+append_many : DArray[T, shape_in] × DArray[T, chunk] -> DArray[T, shape_out]
+truncate    : DArray[T, shape_in] × usize -> DArray[T, shape_out]
+clear       : DArray[T, shape_in] -> DArray[T, shape_out]
+concat      : DStr[shape_left] × DStr[shape_right] -> DStr[shape_result]
 ```
 
 where each shape-changing operation returns a new logical shape.
@@ -1924,6 +1930,7 @@ Example categories:
 - `push`
 - `append_many`
 - `concat`
+- `strcat`
 - `truncate`
 - `clear`
 
@@ -1967,7 +1974,15 @@ Example good diagnostic style:
 
 ```text
 cannot assign DArray[u8, row] to DArray[u8, shape_after]
-note: resize/push operations produce a new logical length state
+note: resize returns a fresh logical shape for shape_out
+```
+
+And when the mismatch comes from comparing two separate fresh-producing calls, a second note should explain that they do not unify implicitly:
+
+```text
+argument 2 to "same" expects DArray[i32, shape_after#1], got DArray[i32, shape_after#2]
+note: grow returns a fresh logical shape for shape_after
+note: separate calls that produce fresh shapes do not share the same logical shape identity
 ```
 
 That kind of message teaches the model, not just the failure.

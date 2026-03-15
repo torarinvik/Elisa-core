@@ -38,8 +38,9 @@ type NamedShape struct {
 }
 
 type FreshShape struct {
-	ID    int
-	Label string
+	ID     int
+	Label  string
+	Origin string
 }
 
 type RefState int
@@ -97,12 +98,13 @@ type GenericInstanceType struct {
 }
 
 type FuncType struct {
-	Name        string
-	TypeParams  []string
-	ShapeParams []string
-	Params      []Type
-	Return      Type
-	Variadic    bool
+	Name                   string
+	TypeParams             []string
+	ShapeParams            []string
+	FreshReturnShapeParams []string
+	Params                 []Type
+	Return                 Type
+	Variadic               bool
 }
 
 func (*InvalidType) isType()         {}
@@ -256,6 +258,9 @@ func SameType(a, b Type) bool {
 	if IsInvalidType(a) || IsInvalidType(b) {
 		return true
 	}
+	if darrayRuntimeCompatible(a, b) {
+		return true
+	}
 	switch ta := a.(type) {
 	case *NullType:
 		_, ok := b.(*NullType)
@@ -297,7 +302,7 @@ func SameType(a, b Type) bool {
 		return SameType(ta.Base, tb.Base)
 	case *FuncType:
 		tb, ok := b.(*FuncType)
-		if !ok || ta.Variadic != tb.Variadic || len(ta.TypeParams) != len(tb.TypeParams) || len(ta.ShapeParams) != len(tb.ShapeParams) || len(ta.Params) != len(tb.Params) || !SameType(ta.Return, tb.Return) {
+		if !ok || ta.Variadic != tb.Variadic || len(ta.TypeParams) != len(tb.TypeParams) || len(ta.ShapeParams) != len(tb.ShapeParams) || len(ta.FreshReturnShapeParams) != len(tb.FreshReturnShapeParams) || len(ta.Params) != len(tb.Params) || !SameType(ta.Return, tb.Return) {
 			return false
 		}
 		for i := range ta.TypeParams {
@@ -307,6 +312,11 @@ func SameType(a, b Type) bool {
 		}
 		for i := range ta.ShapeParams {
 			if ta.ShapeParams[i] != tb.ShapeParams[i] {
+				return false
+			}
+		}
+		for i := range ta.FreshReturnShapeParams {
+			if ta.FreshReturnShapeParams[i] != tb.FreshReturnShapeParams[i] {
 				return false
 			}
 		}
@@ -326,6 +336,15 @@ func AssignableTo(dst, src Type) bool {
 		return false
 	}
 	if IsInvalidType(dst) || IsInvalidType(src) {
+		return true
+	}
+	if darrayRuntimeCompatible(dst, src) {
+		return true
+	}
+	if darrayCtxListCompatible(dst, src) {
+		return true
+	}
+	if dstrRuntimeCompatible(dst, src) {
 		return true
 	}
 	if matchTypePattern(dst, src) {
@@ -365,6 +384,15 @@ func matchTypePattern(pattern, actual Type) bool {
 		return pattern == actual
 	}
 	if IsInvalidType(pattern) || IsInvalidType(actual) {
+		return true
+	}
+	if darrayRuntimePatternCompatible(pattern, actual) {
+		return true
+	}
+	if darrayCtxListPatternCompatible(pattern, actual) {
+		return true
+	}
+	if dstrRuntimePatternCompatible(pattern, actual) {
 		return true
 	}
 	if _, ok := pattern.(*TypeParamType); ok {
@@ -414,8 +442,13 @@ func matchTypePattern(pattern, actual Type) bool {
 		return matchTypePattern(p.Base, a.Base)
 	case *FuncType:
 		a, ok := actual.(*FuncType)
-		if !ok || p.Variadic != a.Variadic || len(p.ShapeParams) != len(a.ShapeParams) || len(p.Params) != len(a.Params) {
+		if !ok || p.Variadic != a.Variadic || len(p.ShapeParams) != len(a.ShapeParams) || len(p.FreshReturnShapeParams) != len(a.FreshReturnShapeParams) || len(p.Params) != len(a.Params) {
 			return false
+		}
+		for i := range p.FreshReturnShapeParams {
+			if p.FreshReturnShapeParams[i] != a.FreshReturnShapeParams[i] {
+				return false
+			}
 		}
 		for i := range p.Params {
 			if !matchTypePattern(p.Params[i], a.Params[i]) {
@@ -515,4 +548,129 @@ func shapeMatchesPattern(pattern, actual Shape) bool {
 		return pattern == actual
 	}
 	return SameShape(pattern, actual)
+}
+
+func dynArrayRuntimeInstance(t Type) (*GenericInstanceType, bool) {
+	gi, ok := t.(*GenericInstanceType)
+	if !ok || gi.Name != "DynArray" || len(gi.Args) != 1 {
+		return nil, false
+	}
+	return gi, true
+}
+
+func darrayRuntimeCompatible(a, b Type) bool {
+	if da, ok := a.(*DArrayType); ok {
+		if gi, ok := dynArrayRuntimeInstance(b); ok {
+			return SameType(da.Elem, gi.Args[0])
+		}
+	}
+	if gi, ok := dynArrayRuntimeInstance(a); ok {
+		if da, ok := b.(*DArrayType); ok {
+			return SameType(gi.Args[0], da.Elem)
+		}
+	}
+	return false
+}
+
+func darrayRuntimePatternCompatible(pattern, actual Type) bool {
+	if p, ok := pattern.(*DArrayType); ok {
+		if gi, ok := dynArrayRuntimeInstance(actual); ok {
+			return matchTypePattern(p.Elem, gi.Args[0])
+		}
+	}
+	if gi, ok := dynArrayRuntimeInstance(pattern); ok {
+		if actualDArray, ok := actual.(*DArrayType); ok {
+			return matchTypePattern(gi.Args[0], actualDArray.Elem)
+		}
+	}
+	return false
+}
+
+func isVoidRefType(t Type) bool {
+	ref, ok := t.(*RefType)
+	if !ok {
+		return false
+	}
+	builtin, ok := ref.Elem.(*BuiltinType)
+	return ok && builtin.Name == "void"
+}
+
+func ctxListRuntimeRef(t Type) (*RefType, bool) {
+	ref, ok := t.(*RefType)
+	if !ok {
+		return nil, false
+	}
+	st, ok := ref.Elem.(*StructType)
+	if !ok || st.Name != "CtxList" {
+		return nil, false
+	}
+	return ref, true
+}
+
+func darrayCtxListCompatible(a, b Type) bool {
+	if da, ok := a.(*DArrayType); ok && isVoidRefType(da.Elem) {
+		if _, ok := ctxListRuntimeRef(b); ok {
+			return true
+		}
+	}
+	if da, ok := b.(*DArrayType); ok && isVoidRefType(da.Elem) {
+		if _, ok := ctxListRuntimeRef(a); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func darrayCtxListPatternCompatible(pattern, actual Type) bool {
+	if da, ok := pattern.(*DArrayType); ok && isVoidRefType(da.Elem) {
+		if _, ok := ctxListRuntimeRef(actual); ok {
+			return true
+		}
+	}
+	if da, ok := actual.(*DArrayType); ok && isVoidRefType(da.Elem) {
+		if _, ok := ctxListRuntimeRef(pattern); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func u8RuntimeRef(t Type) (*RefType, bool) {
+	ref, ok := t.(*RefType)
+	if !ok {
+		return nil, false
+	}
+	builtin, ok := ref.Elem.(*BuiltinType)
+	if !ok || builtin.Name != "u8" {
+		return nil, false
+	}
+	return ref, true
+}
+
+func dstrRuntimeCompatible(a, b Type) bool {
+	if _, ok := a.(*DStrType); ok {
+		if _, ok := u8RuntimeRef(b); ok {
+			return true
+		}
+	}
+	if _, ok := b.(*DStrType); ok {
+		if _, ok := u8RuntimeRef(a); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func dstrRuntimePatternCompatible(pattern, actual Type) bool {
+	if _, ok := pattern.(*DStrType); ok {
+		if _, ok := u8RuntimeRef(actual); ok {
+			return true
+		}
+	}
+	if _, ok := actual.(*DStrType); ok {
+		if _, ok := u8RuntimeRef(pattern); ok {
+			return true
+		}
+	}
+	return false
 }

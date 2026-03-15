@@ -27,28 +27,57 @@ type ConstValue struct {
 }
 
 type ShapeTransformSpec struct {
-	FreshReturnShapes bool
+	FreshReturnShapeParams []string
 }
 
 var shapeTransformTable = map[string]ShapeTransformSpec{
-	"resize": {FreshReturnShapes: true},
-	"push":   {FreshReturnShapes: true},
-	"concat": {FreshReturnShapes: true},
-	"strcat": {FreshReturnShapes: true},
+	"resize":                              {FreshReturnShapeParams: []string{"shape_out"}},
+	"push":                                {FreshReturnShapeParams: []string{"shape_out"}},
+	"append_many":                         {FreshReturnShapeParams: []string{"shape_out"}},
+	"truncate":                            {FreshReturnShapeParams: []string{"shape_out"}},
+	"clear":                               {FreshReturnShapeParams: []string{"shape_out"}},
+	"concat":                              {FreshReturnShapeParams: []string{"shape_result"}},
+	"strcat":                              {FreshReturnShapeParams: []string{"shape_result"}},
+	"arena_da_append":                     {FreshReturnShapeParams: []string{"shape_out"}},
+	"arena_da_append_many":                {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_concat2":                {FreshReturnShapeParams: []string{"shape_result"}},
+	"ctx_stage1rt_concat2_scratch":        {FreshReturnShapeParams: []string{"shape_result"}},
+	"ctx_stage1rt_string_builder_finish":  {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_int_to_string":          {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_int_to_string_scratch":  {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_bool_to_string":         {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_bool_to_string_scratch": {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_char_to_string":         {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_char_to_string_scratch": {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_string_slice":           {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_list_new":               {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_list_new_reserve":       {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_list_push":              {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_list_push_mut":          {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_list_concat":            {FreshReturnShapeParams: []string{"shape_result"}},
 }
 
+type freshReturnStatus int
+
+const (
+	freshReturnUnknown freshReturnStatus = iota
+	freshReturnAlways
+	freshReturnNotFresh
+)
+
 type Analyzer struct {
-	file              *ast.File
-	diagnostics       []Diagnostic
-	namedTypes        map[string]Type
-	globalScope       *Scope
-	functionTypes     map[string]*FuncType
-	constValues       map[string]ConstValue
-	typeParamScopes   []map[string]Type
-	shapeParamScopes  []map[string]Shape
-	freshShapeCounter int
-	currentScope      *Scope
-	currentReturn     Type
+	file                   *ast.File
+	diagnostics            []Diagnostic
+	namedTypes             map[string]Type
+	globalScope            *Scope
+	functionTypes          map[string]*FuncType
+	constValues            map[string]ConstValue
+	typeParamScopes        []map[string]Type
+	shapeParamScopes       []map[string]Shape
+	freshShapeCounter      int
+	returnFreshShapeStatus map[string]freshReturnStatus
+	currentScope           *Scope
+	currentReturn          Type
 }
 
 func Analyze(file *ast.File) *Result {
@@ -265,9 +294,11 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	fnType, _ := sym.Type.(*FuncType)
 	savedScope := a.currentScope
 	savedReturn := a.currentReturn
+	savedReturnFreshStatus := a.returnFreshShapeStatus
 	a.currentScope = NewScope(a.globalScope)
 	if fnType != nil {
 		a.currentReturn = fnType.Return
+		a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)
 	}
 	a.withTypeParams(fn.TypeParams, nil, func() {
 		a.withShapeParams(fnType.ShapeParams, func() {
@@ -283,8 +314,12 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 			}
 		})
 	})
+	if fnType != nil {
+		fnType.FreshReturnShapeParams = mergeShapeParamNames(fnType.FreshReturnShapeParams, inferredFreshReturnShapeParams(a.returnFreshShapeStatus))
+	}
 	a.currentScope = savedScope
 	a.currentReturn = savedReturn
+	a.returnFreshShapeStatus = savedReturnFreshStatus
 }
 
 func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
@@ -295,6 +330,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			valueType := a.analyzeExpr(n.Value)
 			if !AssignableTo(declType, valueType) {
 				a.errorf(n.Pos(), "variable %q expects %s, got %s", n.Name, declType.String(), valueType.String())
+				a.reportShapeMismatchNotes(n.Pos(), declType, valueType)
 			}
 		}
 		a.defineLocal(&Symbol{Name: n.Name, Kind: SymbolLocal, Type: declType, Node: n, Mutable: n.Mutable}, n.Pos())
@@ -303,6 +339,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		valueType := a.analyzeExpr(n.Value)
 		if !AssignableTo(targetType, valueType) {
 			a.errorf(n.Pos(), "cannot assign %s to %s", valueType.String(), targetType.String())
+			a.reportShapeMismatchNotes(n.Pos(), targetType, valueType)
 		}
 		a.recordAssignmentRefinement(n.Target, targetType, valueType)
 	case *ast.AugAssignStmt:
@@ -316,6 +353,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		valueType := a.analyzeExpr(n.Value)
 		if !AssignableTo(targetType, valueType) {
 			a.errorf(n.Pos(), "cannot assign %s to %s", valueType.String(), targetType.String())
+			a.reportShapeMismatchNotes(n.Pos(), targetType, valueType)
 		}
 		a.recordAssignmentRefinement(n.Target, targetType, targetType)
 	case *ast.ReturnStmt:
@@ -330,9 +368,11 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "unexpected return value")
 			return
 		}
+		a.recordFreshReturnBindings(valueType)
 		expectedReturn := a.matchReturnType(valueType)
 		if !AssignableTo(expectedReturn, valueType) {
 			a.errorf(n.Pos(), "return type expects %s, got %s", expectedReturn.String(), valueType.String())
+			a.reportShapeMismatchNotes(n.Pos(), expectedReturn, valueType)
 		}
 	case *ast.IfStmt:
 		condType := a.analyzeCondExpr(n.Cond)
@@ -858,6 +898,7 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 			expectedType := a.substituteType(ft.Params[i], bindings, shapeBindings)
 			if !AssignableTo(expectedType, argType) {
 				a.errorf(expr.Args[i].Pos(), "argument %d to %q expects %s, got %s", i+1, ft.Name, expectedType.String(), argType.String())
+				a.reportShapeMismatchNotes(expr.Args[i].Pos(), expectedType, argType)
 			}
 		}
 	}
@@ -889,12 +930,20 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		if act, ok := actual.(*DArrayType); ok {
 			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings)
 			a.collectShapeBinding(p.Shape, act.Shape, shapeBindings)
+		} else if act, ok := dynArrayRuntimeInstance(actual); ok {
+			a.collectTypeBindings(p.Elem, act.Args[0], bindings, shapeBindings)
 		}
 	case *DStrType:
 		if act, ok := actual.(*DStrType); ok {
 			a.collectShapeBinding(p.Shape, act.Shape, shapeBindings)
 		}
 	case *GenericInstanceType:
+		if p.Name == "DynArray" && len(p.Args) == 1 {
+			if act, ok := actual.(*DArrayType); ok {
+				a.collectTypeBindings(p.Args[0], act.Elem, bindings, shapeBindings)
+				return
+			}
+		}
 		if act, ok := actual.(*GenericInstanceType); ok && p.Name == act.Name && len(p.Args) == len(act.Args) {
 			for i := range p.Args {
 				a.collectTypeBindings(p.Args[i], act.Args[i], bindings, shapeBindings)
@@ -938,40 +987,12 @@ func (a *Analyzer) bindFreshReturnShapes(fn *FuncType, bindings map[string]Shape
 	if fn == nil || fn.Return == nil {
 		return
 	}
-	spec, ok := shapeTransformTable[fn.Name]
-	if !ok || !spec.FreshReturnShapes {
-		return
-	}
-	a.bindFreshShapesInType(fn.Return, bindings)
-}
-
-func (a *Analyzer) bindFreshShapesInType(t Type, bindings map[string]Shape) {
-	if t == nil {
-		return
-	}
-	switch n := t.(type) {
-	case *RefType:
-		a.bindFreshShapesInType(n.Elem, bindings)
-	case *ArrayType:
-		a.bindFreshShapesInType(n.Elem, bindings)
-	case *DArrayType:
-		a.bindFreshShape(n.Shape, bindings)
-		a.bindFreshShapesInType(n.Elem, bindings)
-	case *DStrType:
-		a.bindFreshShape(n.Shape, bindings)
-	case *GenericInstanceType:
-		for _, arg := range n.Args {
-			a.bindFreshShapesInType(arg, bindings)
-		}
-	case *FuncType:
-		for _, param := range n.Params {
-			a.bindFreshShapesInType(param, bindings)
-		}
-		a.bindFreshShapesInType(n.Return, bindings)
+	for _, name := range fn.FreshReturnShapeParams {
+		a.bindFreshShape(&ShapeParam{Name: name}, fn.Name, bindings)
 	}
 }
 
-func (a *Analyzer) bindFreshShape(shape Shape, bindings map[string]Shape) {
+func (a *Analyzer) bindFreshShape(shape Shape, origin string, bindings map[string]Shape) {
 	param, ok := shape.(*ShapeParam)
 	if !ok {
 		return
@@ -980,7 +1001,7 @@ func (a *Analyzer) bindFreshShape(shape Shape, bindings map[string]Shape) {
 		return
 	}
 	a.freshShapeCounter++
-	bindings[param.Name] = &FreshShape{ID: a.freshShapeCounter, Label: param.Name}
+	bindings[param.Name] = &FreshShape{ID: a.freshShapeCounter, Label: param.Name, Origin: origin}
 }
 
 func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
@@ -1124,6 +1145,9 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 		}
 		objType = ref.Elem
 	}
+	if runtimeBacked := a.runtimeBackedStructType(objType); runtimeBacked != nil {
+		objType = runtimeBacked
+	}
 	switch t := objType.(type) {
 	case *StructType:
 		field, ok := t.Fields[fieldName]
@@ -1157,6 +1181,18 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 	}
 }
 
+func (a *Analyzer) runtimeBackedStructType(t Type) Type {
+	darray, ok := t.(*DArrayType)
+	if !ok {
+		return nil
+	}
+	base, ok := a.namedTypes["DynArray"]
+	if !ok {
+		return nil
+	}
+	return &GenericInstanceType{Name: "DynArray", Base: base, Args: []Type{darray.Elem}}
+}
+
 func (a *Analyzer) defineGlobal(sym *Symbol, pos lexer.Pos) {
 	if existing, ok := a.globalScope.Define(sym); !ok {
 		a.errorf(pos, "duplicate declaration %q (already defined as %s)", existing.Name, existing.Kind)
@@ -1186,7 +1222,15 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, params []a
 			}
 		})
 	})
-	return &FuncType{Name: name, TypeParams: append([]string(nil), typeParams...), ShapeParams: shapeParams, Params: ptypes, Return: retType, Variadic: variadic}
+	return &FuncType{
+		Name:                   name,
+		TypeParams:             append([]string(nil), typeParams...),
+		ShapeParams:            shapeParams,
+		FreshReturnShapeParams: knownFreshReturnShapeParams(name, retType),
+		Params:                 ptypes,
+		Return:                 retType,
+		Variadic:               variadic,
+	}
 }
 
 func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
@@ -1420,7 +1464,7 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 		for _, param := range n.Params {
 			params = append(params, a.substituteType(param, bindings, shapeBindings))
 		}
-		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), ShapeParams: append([]string(nil), n.ShapeParams...), Params: params, Return: a.substituteType(n.Return, bindings, shapeBindings), Variadic: n.Variadic}
+		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), ShapeParams: append([]string(nil), n.ShapeParams...), FreshReturnShapeParams: append([]string(nil), n.FreshReturnShapeParams...), Params: params, Return: a.substituteType(n.Return, bindings, shapeBindings), Variadic: n.Variadic}
 	default:
 		return t
 	}
@@ -1528,6 +1572,235 @@ func isImplicitShapeWitnessName(name string) bool {
 		return false
 	}
 	return unicode.In(runes[0], unicode.Greek)
+}
+
+func freshReturnTracker(t Type) map[string]freshReturnStatus {
+	if t == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	collectShapeParamsInType(t, seen)
+	if len(seen) == 0 {
+		return nil
+	}
+	tracker := make(map[string]freshReturnStatus, len(seen))
+	for name := range seen {
+		tracker[name] = freshReturnUnknown
+	}
+	return tracker
+}
+
+func collectShapeParamsInType(t Type, out map[string]bool) {
+	if t == nil || out == nil {
+		return
+	}
+	switch n := t.(type) {
+	case *RefType:
+		collectShapeParamsInType(n.Elem, out)
+	case *ArrayType:
+		collectShapeParamsInType(n.Elem, out)
+	case *DArrayType:
+		if param, ok := n.Shape.(*ShapeParam); ok {
+			out[param.Name] = true
+		}
+		collectShapeParamsInType(n.Elem, out)
+	case *DStrType:
+		if param, ok := n.Shape.(*ShapeParam); ok {
+			out[param.Name] = true
+		}
+	case *GenericInstanceType:
+		for _, arg := range n.Args {
+			collectShapeParamsInType(arg, out)
+		}
+	case *FuncType:
+		for _, param := range n.Params {
+			collectShapeParamsInType(param, out)
+		}
+		collectShapeParamsInType(n.Return, out)
+	}
+}
+
+func inferredFreshReturnShapeParams(status map[string]freshReturnStatus) []string {
+	if len(status) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(status))
+	for name, shapeStatus := range status {
+		if shapeStatus == freshReturnAlways {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func mergeShapeParamNames(existing []string, extra []string) []string {
+	if len(extra) == 0 {
+		return append([]string(nil), existing...)
+	}
+	seen := make(map[string]bool, len(existing)+len(extra))
+	out := make([]string, 0, len(existing)+len(extra))
+	for _, name := range existing {
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	for _, name := range extra {
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
+}
+
+func knownFreshReturnShapeParams(name string, ret Type) []string {
+	spec, ok := shapeTransformTable[name]
+	if !ok || len(spec.FreshReturnShapeParams) == 0 {
+		return nil
+	}
+	returnShapeParams := map[string]bool{}
+	collectShapeParamsInType(ret, returnShapeParams)
+	out := make([]string, 0, len(spec.FreshReturnShapeParams))
+	for _, param := range spec.FreshReturnShapeParams {
+		if returnShapeParams[param] {
+			out = append(out, param)
+		}
+	}
+	return out
+}
+
+func (a *Analyzer) recordFreshReturnBindings(actual Type) {
+	if a.currentReturn == nil || actual == nil || len(a.returnFreshShapeStatus) == 0 {
+		return
+	}
+	shapeBindings := map[string]Shape{}
+	a.collectTypeBindings(a.currentReturn, actual, map[string]Type{}, shapeBindings)
+	for name, current := range a.returnFreshShapeStatus {
+		shape, ok := shapeBindings[name]
+		if !ok {
+			continue
+		}
+		_, isFresh := shape.(*FreshShape)
+		switch current {
+		case freshReturnUnknown:
+			if isFresh {
+				a.returnFreshShapeStatus[name] = freshReturnAlways
+			} else {
+				a.returnFreshShapeStatus[name] = freshReturnNotFresh
+			}
+		case freshReturnAlways:
+			if !isFresh {
+				a.returnFreshShapeStatus[name] = freshReturnNotFresh
+			}
+		}
+	}
+}
+
+func (a *Analyzer) reportShapeMismatchNotes(pos lexer.Pos, expected Type, actual Type) {
+	for _, note := range shapeMismatchNotes(expected, actual) {
+		a.errorf(pos, "note: %s", note)
+	}
+}
+
+func shapeMismatchNotes(expected Type, actual Type) []string {
+	actualFresh := collectFreshShapesInType(actual)
+	if len(actualFresh) == 0 {
+		return nil
+	}
+	notes := make([]string, 0, 2)
+	seen := map[string]bool{}
+	for _, fresh := range actualFresh {
+		if fresh == nil {
+			continue
+		}
+		note := freshShapeOriginNote(fresh)
+		if note == "" || seen[note] {
+			continue
+		}
+		seen[note] = true
+		notes = append(notes, note)
+	}
+	expectedFresh := collectFreshShapesInType(expected)
+	if len(expectedFresh) > 0 {
+		sameFresh := false
+		for _, lhs := range expectedFresh {
+			for _, rhs := range actualFresh {
+				if lhs != nil && rhs != nil && lhs.ID == rhs.ID {
+					sameFresh = true
+					break
+				}
+			}
+			if sameFresh {
+				break
+			}
+		}
+		if !sameFresh {
+			note := "separate calls that produce fresh shapes do not share the same logical shape identity"
+			if !seen[note] {
+				notes = append(notes, note)
+			}
+		}
+	}
+	return notes
+}
+
+func collectFreshShapesInType(t Type) []*FreshShape {
+	if t == nil {
+		return nil
+	}
+	seen := map[int]bool{}
+	out := make([]*FreshShape, 0)
+	collectFreshShapesInto(t, seen, &out)
+	return out
+}
+
+func collectFreshShapesInto(t Type, seen map[int]bool, out *[]*FreshShape) {
+	if t == nil {
+		return
+	}
+	switch n := t.(type) {
+	case *RefType:
+		collectFreshShapesInto(n.Elem, seen, out)
+	case *ArrayType:
+		collectFreshShapesInto(n.Elem, seen, out)
+	case *DArrayType:
+		if fresh, ok := n.Shape.(*FreshShape); ok && !seen[fresh.ID] {
+			seen[fresh.ID] = true
+			*out = append(*out, fresh)
+		}
+		collectFreshShapesInto(n.Elem, seen, out)
+	case *DStrType:
+		if fresh, ok := n.Shape.(*FreshShape); ok && !seen[fresh.ID] {
+			seen[fresh.ID] = true
+			*out = append(*out, fresh)
+		}
+	case *GenericInstanceType:
+		for _, arg := range n.Args {
+			collectFreshShapesInto(arg, seen, out)
+		}
+	case *FuncType:
+		for _, param := range n.Params {
+			collectFreshShapesInto(param, seen, out)
+		}
+		collectFreshShapesInto(n.Return, seen, out)
+	}
+}
+
+func freshShapeOriginNote(shape *FreshShape) string {
+	if shape == nil {
+		return ""
+	}
+	label := shape.Label
+	if label == "" {
+		label = "shape"
+	}
+	if shape.Origin != "" {
+		return fmt.Sprintf("%s returns a fresh logical shape for %s", shape.Origin, label)
+	}
+	return fmt.Sprintf("this expression has a fresh logical shape for %s", label)
 }
 
 func (a *Analyzer) resolveArrayType(expr *ast.ArrayType) Type {

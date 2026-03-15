@@ -735,10 +735,10 @@ def ctx_stage0_string_slice(value: u8&?, start: i64, end: i64) -> u8&:
 # Stage 1 runtime forwarding wrappers
 # ============================================================
 
-def ctx_stage1rt_concat2(lhs: u8&?, rhs: u8&?) -> u8&:
+def ctx_stage1rt_concat2(lhs: DStr[shape_left], rhs: DStr[shape_right]) -> DStr[shape_result]:
     return ctx_stage0_concat2(lhs, rhs)
 
-def ctx_stage1rt_concat2_scratch(lhs: u8&?, rhs: u8&?) -> u8&:
+def ctx_stage1rt_concat2_scratch(lhs: DStr[shape_left], rhs: DStr[shape_right]) -> DStr[shape_result]:
     return ctx_stage0_concat2_scratch(lhs, rhs)
 
 def ctx_stage1rt_string_builder_new(initial: u8&?) -> StringBuilder&:
@@ -747,67 +747,67 @@ def ctx_stage1rt_string_builder_new(initial: u8&?) -> StringBuilder&:
 def ctx_stage1rt_string_builder_append(builder: StringBuilder&?, suffix: u8&?) -> StringBuilder&:
     return ctx_stage0_string_builder_append(builder, suffix)
 
-def ctx_stage1rt_string_builder_finish(builder: StringBuilder&?) -> u8&:
+def ctx_stage1rt_string_builder_finish(builder: StringBuilder&?) -> DStr[shape_out]:
     return ctx_stage0_string_builder_finish(builder)
 
-def ctx_stage1rt_int_to_string(value: i64) -> u8&:
+def ctx_stage1rt_int_to_string(value: i64) -> DStr[shape_out]:
     return ctx_stage0_int_to_string(value)
 
-def ctx_stage1rt_int_to_string_scratch(value: i64) -> u8&:
+def ctx_stage1rt_int_to_string_scratch(value: i64) -> DStr[shape_out]:
     return ctx_stage0_int_to_string_scratch(value)
 
-def ctx_stage1rt_bool_to_string(value: int) -> u8&:
+def ctx_stage1rt_bool_to_string(value: int) -> DStr[shape_out]:
     return ctx_stage0_bool_to_string(value)
 
-def ctx_stage1rt_bool_to_string_scratch(value: int) -> u8&:
+def ctx_stage1rt_bool_to_string_scratch(value: int) -> DStr[shape_out]:
     return ctx_stage0_bool_to_string_scratch(value)
 
-def ctx_stage1rt_char_to_string(value: i64) -> u8&:
+def ctx_stage1rt_char_to_string(value: i64) -> DStr[shape_out]:
     return ctx_stage0_char_to_string(value)
 
-def ctx_stage1rt_char_to_string_scratch(value: i64) -> u8&:
+def ctx_stage1rt_char_to_string_scratch(value: i64) -> DStr[shape_out]:
     return ctx_stage0_char_to_string_scratch(value)
 
-def ctx_stage1rt_strlen(value: u8&?) -> i64:
+def ctx_stage1rt_strlen(value: DStr[shape_in]) -> i64:
     return ctx_stage0_strlen(value)
 
-def ctx_stage1rt_streq(lhs: u8&?, rhs: u8&?) -> int:
+def ctx_stage1rt_streq(lhs: DStr[shape_left], rhs: DStr[shape_right]) -> int:
     return ctx_stage0_streq(lhs, rhs)
 
-def ctx_stage1rt_string_slice_eq(value: u8&?, start: i64, end: i64, other: u8&?) -> int:
+def ctx_stage1rt_string_slice_eq(value: DStr[shape_in], start: i64, end: i64, other: DStr[shape_other]) -> int:
     return ctx_stage0_string_slice_eq(value, start, end, other)
 
-def ctx_stage1rt_string_slices_eq(lhs: u8&?, lhs_start: i64, lhs_end: i64, rhs: u8&?, rhs_start: i64, rhs_end: i64) -> int:
+def ctx_stage1rt_string_slices_eq(lhs: DStr[shape_left], lhs_start: i64, lhs_end: i64, rhs: DStr[shape_right], rhs_start: i64, rhs_end: i64) -> int:
     return ctx_stage0_string_slices_eq(lhs, lhs_start, lhs_end, rhs, rhs_start, rhs_end)
 
-def ctx_stage1rt_string_index(value: u8&?, index: i64) -> i64:
+def ctx_stage1rt_string_index(value: DStr[shape_in], index: i64) -> i64:
     return ctx_stage0_string_index(value, index)
 
-def ctx_stage1rt_string_slice(value: u8&?, start: i64, end: i64) -> u8&:
+def ctx_stage1rt_string_slice(value: DStr[shape_in], start: i64, end: i64) -> DStr[shape_out]:
     return ctx_stage0_string_slice(value, start, end)
 
-def ctx_stage1rt_list_new() -> CtxList&:
+def ctx_stage1rt_list_new() -> DArray[void&, shape_out]:
     return ctx_stage0_list_new()
 
-def ctx_stage1rt_list_new_reserve(cap: i64, elem_size: i64) -> CtxList&:
+def ctx_stage1rt_list_new_reserve(cap: i64, elem_size: i64) -> DArray[void&, shape_out]:
     return ctx_stage0_list_new_reserve(cap, elem_size)
 
-def ctx_stage1rt_list_push(values: CtxList&?, elem: void&?, elem_size: i64) -> CtxList&?:
+def ctx_stage1rt_list_push(values: DArray[void&, shape_in], elem: void&?, elem_size: i64) -> DArray[void&, shape_out]:
     return ctx_stage0_list_push(values, elem, elem_size)
 
-def ctx_stage1rt_list_push_mut(values: CtxList&?, elem: void&?, elem_size: i64) -> CtxList&?:
+def ctx_stage1rt_list_push_mut(values: DArray[void&, shape_in], elem: void&?, elem_size: i64) -> DArray[void&, shape_out]:
     return ctx_stage0_list_push_mut(values, elem, elem_size)
 
-def ctx_stage1rt_list_concat(left: CtxList&?, right: CtxList&?) -> CtxList&:
+def ctx_stage1rt_list_concat(left: DArray[void&, shape_left], right: DArray[void&, shape_right]) -> DArray[void&, shape_result]:
     return ctx_stage0_list_concat(left, right)
 
-def ctx_stage1rt_list_len(values: CtxList&?) -> i64:
+def ctx_stage1rt_list_len(values: DArray[void&, shape_in]) -> i64:
     return ctx_stage0_list_len(values)
 
-def ctx_stage1rt_list_get(values: CtxList&?, index: i64, elem_size: i64) -> void&:
+def ctx_stage1rt_list_get(values: DArray[void&, shape_in], index: i64, elem_size: i64) -> void&:
     return ctx_stage0_list_get(values, index, elem_size)
 
-def ctx_stage1rt_list_set(values: CtxList&?, index: i64, elem: void&?, elem_size: i64) -> i64:
+def ctx_stage1rt_list_set(values: DArray[void&, shape_in], index: i64, elem: void&?, elem_size: i64) -> i64:
     return ctx_stage0_list_set(values, index, elem, elem_size)
 
 def ctx_stage1rt_reset_scratch():

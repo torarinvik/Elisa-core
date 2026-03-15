@@ -333,7 +333,7 @@ def arena_trim(a: Arena&):
 # Dynamic array helpers (replacement for C macros)
 # ------------------------------------------------------------
 
-def arena_da_append[T](a: Arena&, da: DynArray[T]&, item: T):
+def arena_da_append[T](a: Arena&, da: DArray[T, shape_in]&, item: T) -> DArray[T, shape_out]&:
     if da.count >= da.capacity:
         new_capacity: usize = ARENA_DA_INIT_CAP if da.capacity == 0 else da.capacity * 2
 
@@ -356,8 +356,9 @@ def arena_da_append[T](a: Arena&, da: DynArray[T]&, item: T):
 
     da.items[da.count] <- item
     da.count <- da.count + 1
+    return da
 
-def arena_da_append_many[T](a: Arena&, da: DynArray[T]&, new_items: T&, new_items_count: usize):
+def arena_da_append_many[T](a: Arena&, da: DArray[T, shape_in]&, new_items: T&, new_items_count: usize) -> DArray[T, shape_out]&:
     needed: usize = da.count + new_items_count
 
     if needed > da.capacity:
@@ -392,16 +393,17 @@ def arena_da_append_many[T](a: Arena&, da: DynArray[T]&, new_items: T&, new_item
     )
 
     da.count <- da.count + new_items_count
+    return da
 
-def arena_sb_append_buf(a: Arena&, sb: DynArray[u8]&, buf: u8&, n: usize):
-    arena_da_append_many(a, sb, buf, n)
+def arena_sb_append_buf(a: Arena&, sb: DArray[u8, shape_in]&, buf: u8&, n: usize) -> DArray[u8, shape_out]&:
+    return arena_da_append_many(a, sb, buf, n)
 
-def arena_sb_append_cstr(a: Arena&, sb: DynArray[u8]&, cstr: u8&):
+def arena_sb_append_cstr(a: Arena&, sb: DArray[u8, shape_in]&, cstr: u8&) -> DArray[u8, shape_out]&:
     n: usize = arena_strlen(cstr)
-    arena_da_append_many(a, sb, cstr, n)
+    return arena_da_append_many(a, sb, cstr, n)
 
-def arena_sb_append_null(a: Arena&, sb: DynArray[u8]&):
-    arena_da_append(a, sb, 0u8)
+def arena_sb_append_null(a: Arena&, sb: DArray[u8, shape_in]&) -> DArray[u8, shape_out]&:
+    return arena_da_append(a, sb, 0u8)
 
 # ------------------------------------------------------------
 # Optional stdio formatting stubs
