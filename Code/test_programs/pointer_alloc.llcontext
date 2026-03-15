@@ -3,7 +3,7 @@ repr(c) struct Node:
     next: mutable Node&?
 
 extern alloc_node() -> Node&?
-extern free_node(node: Node&?)
+extern sfree_node(node: Node&) -> Node!
 
 def make_node_value() -> int:
     node: mutable Node&? = alloc_node()
@@ -13,6 +13,6 @@ def make_node_value() -> int:
     node.value <- 42
     return node.value
 
-def release_node(node: Node&?):
+def release_node(node: mutable Node&?):
     if node != null:
-        free_node(node)
+        node as ! <- sfree_node(node)

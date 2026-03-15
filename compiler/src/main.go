@@ -166,11 +166,15 @@ func typeStr(t ast.TypeExpr) string {
 	case *ast.NamedType:
 		return n.Name
 	case *ast.RefType:
-		s := typeStr(n.Elem) + "&"
-		if n.Nullable {
-			s += "?"
+		s := typeStr(n.Elem)
+		switch n.State {
+		case ast.RefStateNullable:
+			return s + "&?"
+		case ast.RefStateNull:
+			return s + "!"
+		default:
+			return s + "&"
 		}
-		return s
 	case *ast.GenericType:
 		var args []string
 		for _, a := range n.Args {

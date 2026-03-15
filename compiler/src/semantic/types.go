@@ -24,9 +24,17 @@ type TypeParamType struct {
 	Name string
 }
 
+type RefState int
+
+const (
+	RefStateNonNull RefState = iota
+	RefStateNullable
+	RefStateNull
+)
+
 type RefType struct {
-	Elem     Type
-	Nullable bool
+	Elem  Type
+	State RefState
 }
 
 type ArrayType struct {
@@ -85,9 +93,14 @@ func (t *BuiltinType) String() string {
 }
 func (t *TypeParamType) String() string { return t.Name }
 func (t *RefType) String() string {
-	s := t.Elem.String() + "&"
-	if t.Nullable {
-		s += "?"
+	s := t.Elem.String()
+	switch t.State {
+	case RefStateNullable:
+		s += "&?"
+	case RefStateNull:
+		s += "!"
+	default:
+		s += "&"
 	}
 	return s
 }
@@ -160,6 +173,32 @@ func IsRefType(t Type) (*RefType, bool) {
 	return r, ok
 }
 
+func refStateAssignable(dst, src RefState) bool {
+	switch dst {
+	case RefStateNullable:
+		return true
+	case RefStateNonNull:
+		return src == RefStateNonNull
+	case RefStateNull:
+		return src == RefStateNull
+	default:
+		return false
+	}
+}
+
+func mergeRefStates(a, b RefState) (RefState, bool) {
+	if a == b {
+		return a, true
+	}
+	if a == RefStateNullable || b == RefStateNullable {
+		return RefStateNullable, true
+	}
+	if (a == RefStateNonNull && b == RefStateNull) || (a == RefStateNull && b == RefStateNonNull) {
+		return RefStateNullable, true
+	}
+	return RefStateNullable, false
+}
+
 func SameType(a, b Type) bool {
 	if a == nil || b == nil {
 		return a == b
@@ -179,7 +218,7 @@ func SameType(a, b Type) bool {
 		return ok && ta.Name == tb.Name
 	case *RefType:
 		tb, ok := b.(*RefType)
-		return ok && ta.Nullable == tb.Nullable && SameType(ta.Elem, tb.Elem)
+		return ok && ta.State == tb.State && SameType(ta.Elem, tb.Elem)
 	case *ArrayType:
 		tb, ok := b.(*ArrayType)
 		return ok && ta.Size == tb.Size && SameType(ta.Elem, tb.Elem)
@@ -245,7 +284,7 @@ func AssignableTo(dst, src Type) bool {
 	}
 	if IsNullType(src) {
 		if r, ok := dst.(*RefType); ok {
-			return r.Nullable
+			return r.State != RefStateNonNull
 		}
 		return false
 	}
@@ -254,10 +293,7 @@ func AssignableTo(dst, src Type) bool {
 			if !SameType(dr.Elem, sr.Elem) {
 				return false
 			}
-			if dr.Nullable {
-				return true
-			}
-			return !sr.Nullable
+			return refStateAssignable(dr.State, sr.State)
 		}
 	}
 	return false
@@ -285,7 +321,7 @@ func matchTypePattern(pattern, actual Type) bool {
 		if !ok {
 			return false
 		}
-		if !p.Nullable && a.Nullable {
+		if !refStateAssignable(p.State, a.State) {
 			return false
 		}
 		return matchTypePattern(p.Elem, a.Elem)
@@ -332,14 +368,31 @@ func MergeTypes(a, b Type) Type {
 	if IsNumericType(a) && IsNumericType(b) {
 		return CommonNumericType(a, b)
 	}
+	if ar, ok := a.(*RefType); ok {
+		if br, ok := b.(*RefType); ok && SameType(ar.Elem, br.Elem) {
+			if state, ok := mergeRefStates(ar.State, br.State); ok {
+				return &RefType{Elem: ar.Elem, State: state}
+			}
+		}
+	}
 	if IsNullType(a) {
-		if r, ok := b.(*RefType); ok && r.Nullable {
-			return b
+		if r, ok := b.(*RefType); ok {
+			switch r.State {
+			case RefStateNull, RefStateNullable:
+				return b
+			case RefStateNonNull:
+				return &RefType{Elem: r.Elem, State: RefStateNullable}
+			}
 		}
 	}
 	if IsNullType(b) {
-		if r, ok := a.(*RefType); ok && r.Nullable {
-			return a
+		if r, ok := a.(*RefType); ok {
+			switch r.State {
+			case RefStateNull, RefStateNullable:
+				return a
+			case RefStateNonNull:
+				return &RefType{Elem: r.Elem, State: RefStateNullable}
+			}
 		}
 	}
 	return invalidType

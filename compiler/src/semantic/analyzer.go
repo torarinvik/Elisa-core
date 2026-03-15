@@ -178,7 +178,7 @@ func (a *Analyzer) populateStructFields(decls []ast.Decl) {
 				}
 				fieldType := a.resolveType(field.Type)
 				if field.IsTail {
-					fieldType = &RefType{Elem: fieldType, Nullable: false}
+					fieldType = &RefType{Elem: fieldType, State: RefStateNonNull}
 				}
 				st.Fields[field.Name] = Field{
 					Name:    field.Name,
@@ -294,7 +294,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "augmented assignment requires numeric operands")
 		}
 	case *ast.AsRefAssignStmt:
-		targetType := a.asRefTargetType(n.Target)
+		targetType := a.asRefTargetType(n.Target, n.AsKind)
 		valueType := a.analyzeExpr(n.Value)
 		if !AssignableTo(targetType, valueType) {
 			a.errorf(n.Pos(), "cannot assign %s to %s", valueType.String(), targetType.String())
@@ -319,21 +319,25 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if !IsBoolType(condType) {
 			a.errorf(n.Pos(), "if condition must be bool, got %s", condType.String())
 		}
-		a.analyzeBlock(n.Then)
+		a.analyzeBlockInScope(n.Then, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
 		for _, elif := range n.Elifs {
 			elifType := a.analyzeExpr(elif.Cond)
 			if !IsBoolType(elifType) {
 				a.errorf(elif.Position, "elif condition must be bool, got %s", elifType.String())
 			}
-			a.analyzeBlock(elif.Body)
+			a.analyzeBlockInScope(elif.Body, a.refinedScopeForCondition(a.currentScope, elif.Cond, true))
 		}
-		a.analyzeBlock(n.Else)
+		if len(n.Elifs) == 0 {
+			a.analyzeBlockInScope(n.Else, a.refinedScopeForCondition(a.currentScope, n.Cond, false))
+		} else {
+			a.analyzeBlock(n.Else)
+		}
 	case *ast.WhileStmt:
 		condType := a.analyzeExpr(n.Cond)
 		if !IsBoolType(condType) {
 			a.errorf(n.Pos(), "while condition must be bool, got %s", condType.String())
 		}
-		a.analyzeBlock(n.Body)
+		a.analyzeBlockInScope(n.Body, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
 	case *ast.PassStmt:
 		return
 	case *ast.PanicStmt:
@@ -362,6 +366,106 @@ func (a *Analyzer) analyzeBlock(stmts []ast.Stmt) {
 		a.analyzeStmt(stmt)
 	}
 	a.currentScope = saved
+}
+
+func (a *Analyzer) analyzeBlockInScope(stmts []ast.Stmt, scope *Scope) {
+	saved := a.currentScope
+	a.currentScope = scope
+	for _, stmt := range stmts {
+		a.analyzeStmt(stmt)
+	}
+	a.currentScope = saved
+}
+
+func (a *Analyzer) refinedScopeForCondition(parent *Scope, cond ast.Expr, truthy bool) *Scope {
+	scope := NewScope(parent)
+	a.applyConditionRefinements(scope, cond, truthy)
+	return scope
+}
+
+func (a *Analyzer) applyConditionRefinements(scope *Scope, expr ast.Expr, truthy bool) {
+	switch n := expr.(type) {
+	case *ast.BinaryExpr:
+		switch n.Op {
+		case lexer.TOKEN_AND:
+			if truthy {
+				a.applyConditionRefinements(scope, n.Left, true)
+				a.applyConditionRefinements(scope, n.Right, true)
+			}
+		case lexer.TOKEN_OR:
+			if !truthy {
+				a.applyConditionRefinements(scope, n.Left, false)
+				a.applyConditionRefinements(scope, n.Right, false)
+			}
+		case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
+			name, state, ok := refinedIdentNullState(n, truthy)
+			if ok {
+				a.shadowRefinedSymbol(scope, name, state)
+			}
+		}
+	case *ast.UnaryExpr:
+		if n.Op == lexer.TOKEN_NOT {
+			a.applyConditionRefinements(scope, n.Operand, !truthy)
+		}
+	case *ast.ParenExpr:
+		a.applyConditionRefinements(scope, n.Inner, truthy)
+	}
+}
+
+func refinedIdentNullState(expr *ast.BinaryExpr, truthy bool) (string, RefState, bool) {
+	leftIdent, leftOK := expr.Left.(*ast.Ident)
+	_, leftNull := expr.Right.(*ast.NullLit)
+	rightIdent, rightOK := expr.Right.(*ast.Ident)
+	_, rightNull := expr.Left.(*ast.NullLit)
+
+	name := ""
+	switch {
+	case leftOK && leftNull:
+		name = leftIdent.Name
+	case rightOK && rightNull:
+		name = rightIdent.Name
+	default:
+		return "", RefStateNullable, false
+	}
+
+	if expr.Op == lexer.TOKEN_EQEQ {
+		if truthy {
+			return name, RefStateNull, true
+		}
+		return name, RefStateNonNull, true
+	}
+	if truthy {
+		return name, RefStateNonNull, true
+	}
+	return name, RefStateNull, true
+}
+
+func (a *Analyzer) shadowRefinedSymbol(scope *Scope, name string, state RefState) {
+	base, ok := scope.Parent.Lookup(name)
+	if !ok {
+		return
+	}
+	ref, ok := base.Type.(*RefType)
+	if !ok {
+		return
+	}
+	if !refinementCompatible(ref.State, state) {
+		return
+	}
+	refined := *base
+	refined.Type = &RefType{Elem: ref.Elem, State: state}
+	scope.Symbols[name] = &refined
+}
+
+func refinementCompatible(current, desired RefState) bool {
+	switch desired {
+	case RefStateNonNull:
+		return current == RefStateNonNull || current == RefStateNullable
+	case RefStateNull:
+		return current == RefStateNull || current == RefStateNullable
+	default:
+		return true
+	}
 }
 
 func (a *Analyzer) analyzeExprInScope(expr ast.Expr, scope *Scope) Type {
@@ -399,7 +503,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) Type {
 		}
 		return a.namedTypes["int"]
 	case *ast.StringLit:
-		return &RefType{Elem: a.namedTypes["u8"], Nullable: false}
+		return &RefType{Elem: a.namedTypes["u8"], State: RefStateNonNull}
 	case *ast.BoolLit:
 		return a.namedTypes["bool"]
 	case *ast.NullLit:
@@ -440,7 +544,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) Type {
 		return merged
 	case *ast.AddrOfExpr:
 		inner := a.analyzeExpr(n.Operand)
-		return &RefType{Elem: inner, Nullable: false}
+		return &RefType{Elem: inner, State: RefStateNonNull}
 	case *ast.StructLitExpr:
 		if t, ok := a.namedTypes[n.Name]; ok {
 			if st, ok := t.(*StructType); ok {
@@ -539,20 +643,61 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	if ft.Variadic && len(expr.Args) < len(ft.Params) {
 		a.errorf(expr.Pos(), "variadic function %q expects at least %d arguments, got %d", ft.Name, len(ft.Params), len(expr.Args))
 	}
+	bindings := map[string]Type{}
 	limit := len(ft.Params)
 	if len(expr.Args) < limit {
 		limit = len(expr.Args)
 	}
 	for i := 0; i < len(expr.Args); i++ {
 		argType := a.analyzeExpr(expr.Args[i])
-		if i < limit && !AssignableTo(ft.Params[i], argType) {
-			a.errorf(expr.Args[i].Pos(), "argument %d to %q expects %s, got %s", i+1, ft.Name, ft.Params[i].String(), argType.String())
+		if i < limit {
+			a.collectTypeBindings(ft.Params[i], argType, bindings)
+			if !AssignableTo(ft.Params[i], argType) {
+				a.errorf(expr.Args[i].Pos(), "argument %d to %q expects %s, got %s", i+1, ft.Name, ft.Params[i].String(), argType.String())
+			}
 		}
 	}
 	if ft.Return == nil {
 		return a.namedTypes["void"]
 	}
-	return ft.Return
+	return a.substituteType(ft.Return, bindings)
+}
+
+func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string]Type) {
+	if pattern == nil || actual == nil {
+		return
+	}
+	switch p := pattern.(type) {
+	case *TypeParamType:
+		if _, exists := bindings[p.Name]; !exists {
+			bindings[p.Name] = actual
+		}
+	case *RefType:
+		if act, ok := actual.(*RefType); ok {
+			a.collectTypeBindings(p.Elem, act.Elem, bindings)
+		}
+	case *ArrayType:
+		if act, ok := actual.(*ArrayType); ok {
+			a.collectTypeBindings(p.Elem, act.Elem, bindings)
+		}
+	case *GenericInstanceType:
+		if act, ok := actual.(*GenericInstanceType); ok && p.Name == act.Name && len(p.Args) == len(act.Args) {
+			for i := range p.Args {
+				a.collectTypeBindings(p.Args[i], act.Args[i], bindings)
+			}
+		}
+	case *FuncType:
+		if act, ok := actual.(*FuncType); ok {
+			limit := len(p.Params)
+			if len(act.Params) < limit {
+				limit = len(act.Params)
+			}
+			for i := 0; i < limit; i++ {
+				a.collectTypeBindings(p.Params[i], act.Params[i], bindings)
+			}
+			a.collectTypeBindings(p.Return, act.Return, bindings)
+		}
+	}
 }
 
 func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
@@ -605,6 +750,13 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 			a.errorf(n.Pos(), "cannot assign to immutable %s %q", sym.Kind, sym.Name)
 			return sym.Type
 		}
+		if a.currentScope != nil {
+			if current, exists := a.currentScope.Symbols[n.Name]; exists && current == sym && a.currentScope.Parent != nil {
+				if parent, ok := a.currentScope.Parent.Lookup(n.Name); ok && parent.Node == sym.Node && parent.Kind == sym.Kind && parent.Mutable {
+					return parent.Type
+				}
+			}
+		}
 		return sym.Type
 	case *ast.FieldExpr:
 		field, ok := a.lookupField(a.analyzeExpr(n.Object), n.Field, n.Pos())
@@ -623,7 +775,7 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 	}
 }
 
-func (a *Analyzer) asRefTargetType(expr ast.Expr) Type {
+func (a *Analyzer) asRefTargetType(expr ast.Expr, asKind string) Type {
 	switch n := expr.(type) {
 	case *ast.Ident:
 		var (
@@ -642,7 +794,7 @@ func (a *Analyzer) asRefTargetType(expr ast.Expr) Type {
 		if !sym.Mutable {
 			a.errorf(n.Pos(), "cannot assign to immutable %s %q", sym.Kind, sym.Name)
 		}
-		return sym.Type
+		return a.refTypeWithAsKind(sym.Type, asKind)
 	case *ast.FieldExpr:
 		field, ok := a.lookupField(a.analyzeExpr(n.Object), n.Field, n.Pos())
 		if !ok {
@@ -651,12 +803,27 @@ func (a *Analyzer) asRefTargetType(expr ast.Expr) Type {
 		if !field.Mutable {
 			a.errorf(n.Pos(), "field %q is immutable", n.Field)
 		}
-		return field.Type
+		return a.refTypeWithAsKind(field.Type, asKind)
 	case *ast.IndexExpr:
-		return a.analyzeIndexExpr(n)
+		return a.refTypeWithAsKind(a.analyzeIndexExpr(n), asKind)
 	default:
 		a.errorf(expr.Pos(), "invalid assignment target")
 		return invalidType
+	}
+}
+
+func (a *Analyzer) refTypeWithAsKind(t Type, asKind string) Type {
+	ref, ok := t.(*RefType)
+	if !ok {
+		return t
+	}
+	switch asKind {
+	case "&":
+		return &RefType{Elem: ref.Elem, State: RefStateNonNull}
+	case "!":
+		return &RefType{Elem: ref.Elem, State: RefStateNull}
+	default:
+		return t
 	}
 }
 
@@ -738,13 +905,13 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		a.errorf(n.Pos(), "unknown type %q", n.Name)
 		return invalidType
 	case *ast.RefType:
-		return &RefType{Elem: a.resolveType(n.Elem), Nullable: n.Nullable}
+		return &RefType{Elem: a.resolveType(n.Elem), State: RefState(n.State)}
 	case *ast.ArrayType:
 		return &ArrayType{Elem: a.resolveType(n.Elem), Size: a.exprSummary(n.Size)}
 	case *ast.MutableType:
 		return a.resolveType(n.Elem)
 	case *ast.TailType:
-		return &RefType{Elem: a.resolveType(n.Elem), Nullable: false}
+		return &RefType{Elem: a.resolveType(n.Elem), State: RefStateNonNull}
 	case *ast.GenericType:
 		args := make([]Type, 0, len(n.Args))
 		for _, arg := range n.Args {
@@ -780,7 +947,7 @@ func (a *Analyzer) inferLiteralType(expr ast.Expr) Type {
 		}
 		return a.namedTypes["int"]
 	case *ast.StringLit:
-		return &RefType{Elem: a.namedTypes["u8"], Nullable: false}
+		return &RefType{Elem: a.namedTypes["u8"], State: RefStateNonNull}
 	case *ast.BoolLit:
 		return a.namedTypes["bool"]
 	case *ast.NullLit:
@@ -802,6 +969,11 @@ func (a *Analyzer) validCast(src, dst Type) bool {
 	}
 	if IsNumericType(src) && IsNumericType(dst) {
 		return true
+	}
+	if IsNullType(src) {
+		if ref, ok := dst.(*RefType); ok {
+			return ref.State != RefStateNonNull
+		}
 	}
 	if isRefLike(src) && IsNumericType(dst) {
 		return true
@@ -864,7 +1036,7 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type) Type {
 		}
 		return n
 	case *RefType:
-		return &RefType{Elem: a.substituteType(n.Elem, bindings), Nullable: n.Nullable}
+		return &RefType{Elem: a.substituteType(n.Elem, bindings), State: n.State}
 	case *ArrayType:
 		return &ArrayType{Elem: a.substituteType(n.Elem, bindings), Size: n.Size}
 	case *GenericInstanceType:
@@ -1058,7 +1230,7 @@ func (a *Analyzer) errorf(pos lexer.Pos, format string, args ...interface{}) {
 
 func isNullableRef(t Type) bool {
 	r, ok := t.(*RefType)
-	return ok && r.Nullable
+	return ok && r.State == RefStateNullable
 }
 
 func isRefLike(t Type) bool {

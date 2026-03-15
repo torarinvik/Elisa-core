@@ -107,10 +107,18 @@ type NamedType struct {
 	Name     string
 }
 
+type RefState int
+
+const (
+	RefStateNonNull RefState = iota
+	RefStateNullable
+	RefStateNull
+)
+
 type RefType struct {
 	Position lexer.Pos
 	Elem     TypeExpr
-	Nullable bool
+	State    RefState
 }
 
 type GenericType struct {

@@ -147,6 +147,41 @@ func TestAnalyzeTypeMismatchAssignment(t *testing.T) {
 	}
 }
 
+func TestAnalyzeRejectsNullIntoNonNullRef(t *testing.T) {
+	src := `repr(c) struct Box:
+    value: int
+
+def bad() -> void:
+    box: Box& = null
+`
+	_, errs := parseAndAnalyze(t, "nonnull_ref_rejects_null.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "expects Box&, got null") {
+		t.Fatalf("expected non-null ref rejection, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzePointerTypestateBranches(t *testing.T) {
+	src := `repr(c) struct Box:
+    value: mutable int
+
+extern alloc_box() -> Box&?
+extern sfree_box(box: Box&) -> Box!
+
+def release_box() -> void:
+    box: mutable Box&? = alloc_box()
+    if box != null:
+        box as ! <- sfree_box(box)
+
+def missing_box() -> Box!:
+    return null
+`
+	_, errs := parseAndAnalyze(t, "pointer_typestate.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzePointerFixture(t *testing.T) {
 	fixture := filepath.Join(repoRootFromTestFile(t), "Code", "test_programs", "pointer_alloc.llcontext")
 	src, err := os.ReadFile(fixture)

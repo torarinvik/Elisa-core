@@ -619,6 +619,26 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 	return p.parseBaseType()
 }
 
+func (p *Parser) parseRefTypeSuffixes(base ast.TypeExpr, pos lexer.Pos) ast.TypeExpr {
+	typ := base
+	for {
+		switch p.peek() {
+		case lexer.TOKEN_AMPERSAND:
+			p.advance()
+			state := ast.RefStateNonNull
+			if p.match(lexer.TOKEN_QUESTION) {
+				state = ast.RefStateNullable
+			}
+			typ = &ast.RefType{Position: pos, Elem: typ, State: state}
+		case lexer.TOKEN_BANG:
+			p.advance()
+			typ = &ast.RefType{Position: pos, Elem: typ, State: ast.RefStateNull}
+		default:
+			return typ
+		}
+	}
+}
+
 func (p *Parser) parseBaseType() ast.TypeExpr {
 	pos := p.cur().Pos
 	name := p.expect(lexer.TOKEN_IDENT).Text
@@ -637,7 +657,7 @@ func (p *Parser) parseBaseType() ast.TypeExpr {
 			// If IDENT is followed by something NOT type-like (not &, ?, ], ,, [), it's an array index
 			afterIdent := p.tokens[p.pos+2].Kind
 			isArray = afterIdent != lexer.TOKEN_AMPERSAND && afterIdent != lexer.TOKEN_QUESTION &&
-				afterIdent != lexer.TOKEN_RBRACKET && afterIdent != lexer.TOKEN_COMMA &&
+				afterIdent != lexer.TOKEN_BANG && afterIdent != lexer.TOKEN_RBRACKET && afterIdent != lexer.TOKEN_COMMA &&
 				afterIdent != lexer.TOKEN_LBRACKET
 		}
 
@@ -660,12 +680,7 @@ func (p *Parser) parseBaseType() ast.TypeExpr {
 		}
 	}
 
-	// Reference chain: Type& or Type&&? etc.
-	for p.peek() == lexer.TOKEN_AMPERSAND {
-		p.advance()
-		nullable := p.match(lexer.TOKEN_QUESTION)
-		typ = &ast.RefType{Position: pos, Elem: typ, Nullable: nullable}
-	}
+	typ = p.parseRefTypeSuffixes(typ, pos)
 
 	// Array type after ref: Type&?[Size]
 	if p.peek() == lexer.TOKEN_LBRACKET {
@@ -838,27 +853,18 @@ func (p *Parser) parsePostfix() ast.Expr {
 			p.advance()
 			field := p.expect(lexer.TOKEN_IDENT).Text
 
-			// Check for cast: expr.Type&() or expr.Type&&?() or expr.Type()
-			if p.peek() == lexer.TOKEN_AMPERSAND {
-				// Could be cast to ref type (possibly chained: &&, &&&, etc.)
+			// Check for cast: expr.Type&(), expr.Type!(), expr.Type&&?(), or expr.Type()
+			if p.peek() == lexer.TOKEN_AMPERSAND || p.peek() == lexer.TOKEN_BANG {
 				castPos := pos
-				castName := field
 				savedCastPos := p.pos
-				var target ast.TypeExpr = &ast.NamedType{Position: castPos, Name: castName}
-				ampCount := 0
-				for p.peek() == lexer.TOKEN_AMPERSAND {
-					p.advance()
-					ampCount++
-					nullable := p.match(lexer.TOKEN_QUESTION)
-					target = &ast.RefType{Position: castPos, Elem: target, Nullable: nullable}
-				}
+				var target ast.TypeExpr = &ast.NamedType{Position: castPos, Name: field}
+				target = p.parseRefTypeSuffixes(target, castPos)
 				if p.peek() == lexer.TOKEN_LPAREN {
 					p.advance() // (
 					p.expect(lexer.TOKEN_RPAREN)
 					expr = &ast.CastExpr{Position: castPos, Operand: expr, Target: target}
 					continue
 				}
-				// Not a cast, rewind
 				p.pos = savedCastPos
 			}
 

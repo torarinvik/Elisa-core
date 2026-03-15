@@ -109,9 +109,9 @@ def inv_handle(ptr: void&?) -> bool:
 # Pointer-state helpers
 # ------------------------------------------------------------
 
-def free_and_null[T](ptr: mutable T&?):
+def sfree[T](ptr: T&) -> T!:
     free(ptr.void&())
-    ptr as ! <- null
+    return null
 
 # ------------------------------------------------------------
 # Region allocation / freeing
@@ -294,23 +294,23 @@ def arena_rewind(a: Arena&, m: ArenaMark):
         arena_reset(a)
         return
 
-    m.region.count <- m.count
+    region: Region& = m.region.Region&()
+    region.count <- m.count
 
-	r: mutable Region&? = m.region.next
+    r: mutable Region&? = region.next
     while r != null:
         r.count <- 0
         r <- r.next
 
-    a.end as & <- m.region
+    a.end as & <- region
 
 def arena_free(a: Arena&):
     r: mutable Region&? = a.begin
 
     while r != null:
-        r0: mutable Region&? = r
+        r0: mutable Region& = r
         r <- r.next
-        free(r0.void&())
-        r0 as ! <- null
+        r0 as ! <- sfree(r0)
 
     a.begin as ! <- null
     a.end as ! <- null
@@ -321,10 +321,9 @@ def arena_trim(a: Arena&):
 
     r: mutable Region&? = a.end.next
     while r != null:
-        r0: mutable Region&? = r
+        r0: mutable Region& = r
         r <- r.next
-        free(r0.void&())
-        r0 as ! <- null
+        r0 as ! <- sfree(r0)
 
     a.end.next as ! <- null
 
