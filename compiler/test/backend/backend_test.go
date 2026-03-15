@@ -270,6 +270,70 @@ func TestWriteLLVMObjectFile(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRUsesABISizeofForPaddedStructs(t *testing.T) {
+	src := `repr(c) struct Padded:
+    tag: i8
+    value: i32
+
+def padded_size() -> usize:
+    return sizeof(Padded)
+
+def array_view_size() -> usize:
+    return sizeof(DArrayView[i32])
+`
+	result := parseAndAnalyze(t, "backend_sizeof.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"target datalayout =",
+		"target triple =",
+		"define i64 @padded_size()",
+		"ret i64 8",
+		"define i64 @array_view_size()",
+		"ret i64 16",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersStaticIfInFunctionBodies(t *testing.T) {
+	src := `const ENABLE_FAST = 2 > 1
+
+def choose() -> i32:
+    static if ENABLE_FAST:
+        return 7
+	static else:
+        return 9
+`
+	result := parseAndAnalyze(t, "backend_static_if.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"define i32 @choose()",
+		"ret i32 7",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "ret i32 9") {
+		t.Fatalf("expected inactive static-if branch to be omitted, got:\n%s", output)
+	}
+	if strings.Contains(output, "br i1") {
+		t.Fatalf("expected static-if lowering not to emit a runtime conditional branch, got:\n%s", output)
+	}
+}
+
 func looksLikeObjectFile(data []byte) bool {
 	if len(data) < 4 {
 		return false

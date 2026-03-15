@@ -216,7 +216,7 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		_, _, err := s.emitExpr(n.Value, nil)
 		return err
 	case *ast.StaticIfStmt:
-		return fmt.Errorf("static if lowering inside function bodies is not implemented yet")
+		return s.emitStaticIf(n)
 	case *ast.StaticErrorStmt:
 		return fmt.Errorf("static error should not reach LLVM lowering")
 	default:
@@ -308,6 +308,42 @@ func (s *functionState) emitWhile(stmt *ast.WhileStmt) error {
 
 	C.LLVMPositionBuilderAtEnd(s.builder, exitBB)
 	return nil
+}
+
+func (s *functionState) emitStaticIf(stmt *ast.StaticIfStmt) error {
+	branch, err := s.activeStmtBranch(stmt)
+	if err != nil {
+		return err
+	}
+	for _, inner := range branch {
+		if s.currentBlockTerminated() {
+			break
+		}
+		if err := s.emitStmt(inner); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *functionState) activeStmtBranch(stmt *ast.StaticIfStmt) ([]ast.Stmt, error) {
+	selected, ok := s.evalConstBoolExpr(stmt.Cond)
+	if !ok {
+		return nil, fmt.Errorf("static if condition must be a compile-time bool")
+	}
+	if selected {
+		return stmt.Then, nil
+	}
+	for _, elif := range stmt.Elifs {
+		selected, ok := s.evalConstBoolExpr(elif.Cond)
+		if !ok {
+			return nil, fmt.Errorf("static elif condition must be a compile-time bool")
+		}
+		if selected {
+			return elif.Body, nil
+		}
+	}
+	return stmt.Else, nil
 }
 
 func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
@@ -1273,70 +1309,7 @@ func (g *llvmGenerator) runtimeBackedStructType(t semantic.Type) semantic.Type {
 }
 
 func (s *functionState) sizeOfType(t semantic.Type) (uint64, error) {
-	switch tt := t.(type) {
-	case *semantic.BuiltinType:
-		switch tt.Name {
-		case "bool", "i8", "u8":
-			return 1, nil
-		case "i16", "u16":
-			return 2, nil
-		case "i32", "u32":
-			return 4, nil
-		case "void":
-			return 0, nil
-		case "i64", "u64", "int", "isize", "usize", "uintptr":
-			return uint64(s.g.wordBits / 8), nil
-		default:
-			return 0, fmt.Errorf("unsupported builtin type %q", tt.Name)
-		}
-	case *semantic.RefType, *semantic.NullType, *semantic.DStrType, *semantic.DListType, *semantic.FuncType:
-		return uint64(s.g.wordBits / 8), nil
-	case *semantic.ArrayType:
-		elemSize, err := s.sizeOfType(tt.Elem)
-		if err != nil {
-			return 0, err
-		}
-		if !tt.HasConstSize {
-			return 0, fmt.Errorf("array %s is missing a compile-time size", tt.String())
-		}
-		return elemSize * uint64(tt.ConstSize), nil
-	case *semantic.StructType:
-		if tt.Decl == nil {
-			return 0, fmt.Errorf("struct %s is missing declaration metadata", tt.Name)
-		}
-		var total uint64
-		for _, fieldDecl := range tt.Decl.Fields {
-			field := tt.Fields[fieldDecl.Name]
-			sz, err := s.sizeOfType(field.Type)
-			if err != nil {
-				return 0, err
-			}
-			total += sz
-		}
-		return total, nil
-	case *semantic.GenericInstanceType:
-		llvmType, err := s.g.lowerType(tt)
-		if err != nil {
-			return 0, err
-		}
-		fieldCount := int(C.LLVMCountStructElementTypes(llvmType))
-		if fieldCount == 0 {
-			return 0, nil
-		}
-		fields := make([]C.LLVMTypeRef, fieldCount)
-		C.LLVMGetStructElementTypes(llvmType, llvmTypeSlicePtr(fields))
-		var total uint64
-		for _, fieldType := range fields {
-			total += llvmTypeSize(fieldType, s.g.wordBits)
-		}
-		return total, nil
-	case *semantic.DArrayType:
-		return uint64((s.g.wordBits / 8) * 3), nil
-	case *semantic.DArrayViewType, *semantic.DListViewType:
-		return uint64((s.g.wordBits / 8) * 2), nil
-	default:
-		return 0, fmt.Errorf("sizeof is not implemented for %T", t)
-	}
+	return s.g.abiSizeOfType(t)
 }
 
 func shapeFromTypeExpr(expr ast.TypeExpr) semantic.Shape {
@@ -1359,66 +1332,186 @@ func normalizeIf(stmt *ast.IfStmt) *ast.IfStmt {
 }
 
 func (s *functionState) evalConstIntExpr(expr ast.Expr) (int64, error) {
+	value, ok := s.evalConstExpr(expr)
+	if !ok || value.Kind != semantic.ConstInt {
+		return 0, fmt.Errorf("expression is not a compile-time integer constant")
+	}
+	return value.Int, nil
+}
+
+func (s *functionState) evalConstBoolExpr(expr ast.Expr) (bool, bool) {
+	value, ok := s.evalConstExpr(expr)
+	if !ok || value.Kind != semantic.ConstBool {
+		return false, false
+	}
+	return value.Bool, true
+}
+
+func (s *functionState) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool) {
 	switch n := expr.(type) {
 	case *ast.IntLit:
-		return strconv.ParseInt(n.Value, 0, 64)
-	case *ast.Ident:
-		if value, ok := s.g.constValue(n.Name); ok && value.Kind == semantic.ConstInt {
-			return value.Int, nil
-		}
-		return 0, fmt.Errorf("identifier %q is not a compile-time integer constant", n.Name)
-	case *ast.ParenExpr:
-		return s.evalConstIntExpr(n.Inner)
-	case *ast.UnaryExpr:
-		value, err := s.evalConstIntExpr(n.Operand)
+		value, err := strconv.ParseInt(n.Value, 0, 64)
 		if err != nil {
-			return 0, err
+			return semantic.ConstValue{}, false
+		}
+		return semantic.ConstValue{Kind: semantic.ConstInt, Int: value}, true
+	case *ast.BoolLit:
+		return semantic.ConstValue{Kind: semantic.ConstBool, Bool: n.Value}, true
+	case *ast.StringLit:
+		return semantic.ConstValue{Kind: semantic.ConstString, String: n.Value}, true
+	case *ast.Ident:
+		if value, ok := s.g.constValue(n.Name); ok {
+			return value, true
+		}
+		return semantic.ConstValue{}, false
+	case *ast.ParenExpr:
+		return s.evalConstExpr(n.Inner)
+	case *ast.UnaryExpr:
+		operand, ok := s.evalConstExpr(n.Operand)
+		if !ok {
+			return semantic.ConstValue{}, false
 		}
 		switch n.Op {
+		case lexer.TOKEN_NOT:
+			if operand.Kind != semantic.ConstBool {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstBool, Bool: !operand.Bool}, true
 		case lexer.TOKEN_MINUS:
-			return -value, nil
+			if operand.Kind != semantic.ConstInt {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstInt, Int: -operand.Int}, true
 		case lexer.TOKEN_TILDE:
-			return ^value, nil
+			if operand.Kind != semantic.ConstInt {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstInt, Int: ^operand.Int}, true
 		default:
-			return 0, fmt.Errorf("unsupported compile-time unary operator %s", lexer.TokenName(n.Op))
+			return semantic.ConstValue{}, false
 		}
 	case *ast.BinaryExpr:
-		left, err := s.evalConstIntExpr(n.Left)
-		if err != nil {
-			return 0, err
+		left, ok := s.evalConstExpr(n.Left)
+		if !ok {
+			return semantic.ConstValue{}, false
 		}
-		right, err := s.evalConstIntExpr(n.Right)
-		if err != nil {
-			return 0, err
+		right, ok := s.evalConstExpr(n.Right)
+		if !ok {
+			return semantic.ConstValue{}, false
 		}
 		switch n.Op {
-		case lexer.TOKEN_PLUS:
-			return left + right, nil
-		case lexer.TOKEN_MINUS:
-			return left - right, nil
-		case lexer.TOKEN_STAR:
-			return left * right, nil
-		case lexer.TOKEN_SLASH:
-			if right == 0 {
-				return 0, fmt.Errorf("division by zero in compile-time integer expression")
+		case lexer.TOKEN_AND:
+			if left.Kind != semantic.ConstBool || right.Kind != semantic.ConstBool {
+				return semantic.ConstValue{}, false
 			}
-			return left / right, nil
+			return semantic.ConstValue{Kind: semantic.ConstBool, Bool: left.Bool && right.Bool}, true
+		case lexer.TOKEN_OR:
+			if left.Kind != semantic.ConstBool || right.Kind != semantic.ConstBool {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstBool, Bool: left.Bool || right.Bool}, true
+		case lexer.TOKEN_EQEQ:
+			return evalConstEquality(left, right, true)
+		case lexer.TOKEN_BANGEQ:
+			return evalConstEquality(left, right, false)
+		case lexer.TOKEN_PLUS:
+			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstInt, Int: left.Int + right.Int}, true
+		case lexer.TOKEN_MINUS:
+			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstInt, Int: left.Int - right.Int}, true
+		case lexer.TOKEN_STAR:
+			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstInt, Int: left.Int * right.Int}, true
+		case lexer.TOKEN_SLASH:
+			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt || right.Int == 0 {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstInt, Int: left.Int / right.Int}, true
+		case lexer.TOKEN_LT:
+			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstBool, Bool: left.Int < right.Int}, true
+		case lexer.TOKEN_GT:
+			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstBool, Bool: left.Int > right.Int}, true
+		case lexer.TOKEN_LTEQ:
+			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstBool, Bool: left.Int <= right.Int}, true
+		case lexer.TOKEN_GTEQ:
+			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstBool, Bool: left.Int >= right.Int}, true
 		case lexer.TOKEN_LSHIFT:
-			return left << right, nil
+			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstInt, Int: left.Int << right.Int}, true
 		case lexer.TOKEN_RSHIFT:
-			return left >> right, nil
+			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstInt, Int: left.Int >> right.Int}, true
 		case lexer.TOKEN_AMPERSAND:
-			return left & right, nil
+			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstInt, Int: left.Int & right.Int}, true
 		case lexer.TOKEN_PIPE:
-			return left | right, nil
+			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstInt, Int: left.Int | right.Int}, true
 		case lexer.TOKEN_CARET:
-			return left ^ right, nil
+			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstInt, Int: left.Int ^ right.Int}, true
 		default:
-			return 0, fmt.Errorf("unsupported compile-time binary operator %s", lexer.TokenName(n.Op))
+			return semantic.ConstValue{}, false
 		}
+	case *ast.TernaryExpr:
+		cond, ok := s.evalConstBoolExpr(n.Cond)
+		if !ok {
+			return semantic.ConstValue{}, false
+		}
+		if cond {
+			return s.evalConstExpr(n.Value)
+		}
+		return s.evalConstExpr(n.Alt)
 	default:
-		return 0, fmt.Errorf("unsupported compile-time integer expression %T", expr)
+		return semantic.ConstValue{}, false
 	}
+}
+
+func evalConstEquality(left, right semantic.ConstValue, equal bool) (semantic.ConstValue, bool) {
+	matched := false
+	switch {
+	case left.Kind == semantic.ConstInt && right.Kind == semantic.ConstInt:
+		matched = left.Int == right.Int
+	case left.Kind == semantic.ConstBool && right.Kind == semantic.ConstBool:
+		matched = left.Bool == right.Bool
+	case left.Kind == semantic.ConstString && right.Kind == semantic.ConstString:
+		matched = left.String == right.String
+	default:
+		return semantic.ConstValue{}, false
+	}
+	if !equal {
+		matched = !matched
+	}
+	return semantic.ConstValue{Kind: semantic.ConstBool, Bool: matched}, true
 }
 
 func isZeroedExpr(expr ast.Expr) bool {
@@ -1515,23 +1608,6 @@ func llvmIntPredicate(op lexer.TokenKind, operandType semantic.Type) (C.LLVMIntP
 		return C.LLVMIntUGE, nil
 	default:
 		return 0, fmt.Errorf("unsupported comparison operator %s", lexer.TokenName(op))
-	}
-}
-
-func llvmTypeSize(t C.LLVMTypeRef, wordBits int) uint64 {
-	switch C.LLVMGetTypeKind(t) {
-	case C.LLVMIntegerTypeKind:
-		bits := uint64(C.LLVMGetIntTypeWidth(t))
-		if bits == 1 {
-			return 1
-		}
-		return bits / 8
-	case C.LLVMPointerTypeKind:
-		return uint64(wordBits / 8)
-	case C.LLVMArrayTypeKind:
-		return uint64(C.LLVMGetArrayLength2(t)) * llvmTypeSize(C.LLVMGetElementType(t), wordBits)
-	default:
-		return uint64(wordBits / 8)
 	}
 }
 

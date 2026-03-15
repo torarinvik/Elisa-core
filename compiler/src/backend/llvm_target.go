@@ -61,33 +61,34 @@ func (g *llvmGenerator) writeBitcodeFile(outputPath string) error {
 }
 
 func (g *llvmGenerator) writeObjectFile(outputPath string) error {
-	tm, disposeTarget, err := g.createNativeTargetMachine()
-	if err != nil {
+	if err := g.ensureTargetMachine(); err != nil {
 		return err
 	}
-	defer disposeTarget()
 
 	pathC := cString(outputPath)
 	defer C.free(unsafe.Pointer(pathC))
 
 	var message *C.char
-	if C.LLVMTargetMachineEmitToFile(tm, g.module, pathC, C.LLVMObjectFile, &message) != 0 {
+	if C.LLVMTargetMachineEmitToFile(g.targetMachine, g.module, pathC, C.LLVMObjectFile, &message) != 0 {
 		return fmt.Errorf("failed to write LLVM object file to %s: %s", outputPath, disposeLLVMMessage(message, "unknown LLVM target emission error"))
 	}
 	return nil
 }
 
-func (g *llvmGenerator) createNativeTargetMachine() (C.LLVMTargetMachineRef, func(), error) {
+func (g *llvmGenerator) ensureTargetMachine() error {
+	if g.targetMachine != nil && g.targetData != nil && g.targetTriple != nil {
+		return nil
+	}
 	if C.llcontextInitializeNativeTarget() != 0 {
-		return nil, nil, fmt.Errorf("failed to initialize native LLVM target")
+		return fmt.Errorf("failed to initialize native LLVM target")
 	}
 	if C.llcontextInitializeNativeAsmPrinter() != 0 {
-		return nil, nil, fmt.Errorf("failed to initialize native LLVM asm printer")
+		return fmt.Errorf("failed to initialize native LLVM asm printer")
 	}
 
 	triple := C.LLVMGetDefaultTargetTriple()
 	if triple == nil {
-		return nil, nil, fmt.Errorf("failed to determine default target triple")
+		return fmt.Errorf("failed to determine default target triple")
 	}
 
 	var target C.LLVMTargetRef
@@ -96,7 +97,7 @@ func (g *llvmGenerator) createNativeTargetMachine() (C.LLVMTargetMachineRef, fun
 		errText := disposeLLVMMessage(message, "unknown LLVM target lookup error")
 		tripleText := C.GoString(triple)
 		C.LLVMDisposeMessage(triple)
-		return nil, nil, fmt.Errorf("failed to resolve LLVM target %q: %s", tripleText, errText)
+		return fmt.Errorf("failed to resolve LLVM target %q: %s", tripleText, errText)
 	}
 
 	cpu := cString("")
@@ -107,7 +108,7 @@ func (g *llvmGenerator) createNativeTargetMachine() (C.LLVMTargetMachineRef, fun
 	if tm == nil {
 		tripleText := C.GoString(triple)
 		C.LLVMDisposeMessage(triple)
-		return nil, nil, fmt.Errorf("failed to create LLVM target machine for %s", tripleText)
+		return fmt.Errorf("failed to create LLVM target machine for %s", tripleText)
 	}
 
 	dataLayout := C.LLVMCreateTargetDataLayout(tm)
@@ -115,13 +116,24 @@ func (g *llvmGenerator) createNativeTargetMachine() (C.LLVMTargetMachineRef, fun
 	C.LLVMSetDataLayout(g.module, layoutText)
 	C.LLVMSetTarget(g.module, triple)
 	C.LLVMDisposeMessage(layoutText)
-	C.LLVMDisposeTargetData(dataLayout)
+	g.targetMachine = tm
+	g.targetData = dataLayout
+	g.targetTriple = triple
+	return nil
+}
 
-	dispose := func() {
-		C.LLVMDisposeTargetMachine(tm)
-		C.LLVMDisposeMessage(triple)
+func (g *llvmGenerator) abiSizeOfType(t semantic.Type) (uint64, error) {
+	if isVoidType(t) {
+		return 0, nil
 	}
-	return tm, dispose, nil
+	if err := g.ensureTargetMachine(); err != nil {
+		return 0, err
+	}
+	llvmType, err := g.lowerType(t)
+	if err != nil {
+		return 0, err
+	}
+	return uint64(C.LLVMABISizeOfType(g.targetData, llvmType)), nil
 }
 
 func disposeLLVMMessage(message *C.char, fallback string) string {

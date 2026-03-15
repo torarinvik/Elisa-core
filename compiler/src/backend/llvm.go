@@ -10,6 +10,8 @@ package backend
 #include <stdlib.h>
 #include <llvm-c/Analysis.h>
 #include <llvm-c/Core.h>
+#include <llvm-c/Target.h>
+#include <llvm-c/TargetMachine.h>
 */
 import "C"
 
@@ -53,6 +55,9 @@ type llvmGenerator struct {
 	result        *semantic.Result
 	context       C.LLVMContextRef
 	module        C.LLVMModuleRef
+	targetMachine C.LLVMTargetMachineRef
+	targetData    C.LLVMTargetDataRef
+	targetTriple  *C.char
 	symbolsByNode map[ast.Node]*semantic.Symbol
 	structTypes   map[string]C.LLVMTypeRef
 	structBodies  map[string]bool
@@ -90,6 +95,15 @@ func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
 }
 
 func (g *llvmGenerator) dispose() {
+	if g.targetData != nil {
+		C.LLVMDisposeTargetData(g.targetData)
+	}
+	if g.targetMachine != nil {
+		C.LLVMDisposeTargetMachine(g.targetMachine)
+	}
+	if g.targetTriple != nil {
+		C.LLVMDisposeMessage(g.targetTriple)
+	}
 	if g.module != nil {
 		C.LLVMDisposeModule(g.module)
 	}
