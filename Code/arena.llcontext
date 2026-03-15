@@ -17,21 +17,21 @@ const ARENA_WASM_PAGE_SIZE: usize = 64 * 1024
 # Basic low-level types
 # ------------------------------------------------------------
 
-struct Region:
+repr(c) struct Region:
     next: mutable Region&?
     count: mutable usize
     capacity: usize
     data: tail uintptr
 
-struct Arena:
+repr(c) struct Arena:
     begin:mutable Region&?
     end:mutable Region&?
 
-struct ArenaMark:
+repr(c) struct ArenaMark:
     region: Region&?
     count: usize
 
-struct DynArray[T]:
+repr(c) struct DynArray[T]:
     items: mutable T&?
     count: mutable usize
     capacity: mutable usize
@@ -307,7 +307,7 @@ def arena_free(a: Arena&):
     r: mutable Region&? = a.begin
 
     while r != null:
-	r0: mutable Region&? = r
+        r0: mutable Region&? = r
         r <- r.next
         free(r0.void&())
         r0 as ! <- null
@@ -340,7 +340,7 @@ def arena_da_append[T](a: Arena&, da: DynArray[T]&, item: T):
         new_size: usize = new_capacity * sizeof(T)
 
         if da.items == null:
-            da.items as & <- arena_alloc(a, new_size).T&())
+            da.items as & <- arena_alloc(a, new_size).T&()
         else:
             da.items as & <- arena_realloc(
                 a,
@@ -382,7 +382,7 @@ def arena_da_append_many[T](a: Arena&, da: DynArray[T]&, new_items: T&, new_item
 
     arena_memcpy(
         (da.items + da.count).void&(),
-        new_items.void&()),
+        new_items.void&(),
         new_items_count * sizeof(T)
     )
 
@@ -420,7 +420,7 @@ def arena_vsprintf(a: Arena&, format: u8&, args: va_list) -> u8&:
 
     assert n >= 0
 
-    result: u8& = arena_alloc(a, n.usize() + 1).u8&())
+    result: u8& = arena_alloc(a, n.usize() + 1).u8&()
     _ = vsnprintf(result, n.usize() + 1, format, args)
     return result
 

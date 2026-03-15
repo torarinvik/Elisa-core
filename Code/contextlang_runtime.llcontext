@@ -38,22 +38,22 @@ global mutable ctx_stage0_scratch_arena: Arena = Arena(null, null)
 # Struct definitions
 # ------------------------------------------------------------
 
-struct SmallStringCacheEntry:
+repr(c) struct SmallStringCacheEntry:
     next: mutable SmallStringCacheEntry&?
     len: usize
     text: tail u8
 
-struct StringLenCacheEntry:
+repr(c) struct StringLenCacheEntry:
     next: mutable StringLenCacheEntry&?
     ptr: u8&
     len: mutable usize
 
-struct StringBuilder:
+repr(c) struct StringBuilder:
     len: mutable i64
     cap: mutable i64
     data: mutable u8&?
 
-struct CtxList:
+repr(c) struct CtxList:
     len: mutable i64
     cap: i64
     elem_size: mutable i64
