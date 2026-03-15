@@ -3,6 +3,7 @@ package lexer
 import (
 	"fmt"
 	"unicode"
+	"unicode/utf8"
 )
 
 type Lexer struct {
@@ -44,6 +45,17 @@ func (l *Lexer) peek() byte {
 	return l.src[l.pos]
 }
 
+func (l *Lexer) peekRune() (rune, int) {
+	if l.pos >= len(l.src) {
+		return 0, 0
+	}
+	r, size := utf8.DecodeRune(l.src[l.pos:])
+	if r == utf8.RuneError && size == 1 {
+		return rune(l.src[l.pos]), 1
+	}
+	return r, size
+}
+
 func (l *Lexer) peekAt(offset int) byte {
 	idx := l.pos + offset
 	if idx >= len(l.src) {
@@ -65,6 +77,17 @@ func (l *Lexer) advance() byte {
 		l.col++
 	}
 	return ch
+}
+
+func (l *Lexer) advanceRune() rune {
+	r, size := l.peekRune()
+	if size == 0 {
+		return 0
+	}
+	for i := 0; i < size; i++ {
+		l.advance()
+	}
+	return r
 }
 
 func (l *Lexer) match(expected byte) bool {
@@ -225,8 +248,12 @@ func (l *Lexer) readTypeSuffix() string {
 func (l *Lexer) readIdent() Token {
 	p := l.curPos()
 	start := l.pos
-	for l.pos < len(l.src) && isIdentChar(l.peek()) {
-		l.advance()
+	for l.pos < len(l.src) {
+		r, _ := l.peekRune()
+		if !isIdentCharRune(r) {
+			break
+		}
+		l.advanceRune()
 	}
 	text := string(l.src[start:l.pos])
 	kind := LookupKeyword(text)
@@ -304,7 +331,7 @@ func (l *Lexer) NextToken() Token {
 	}
 
 	// Identifiers and keywords
-	if isIdentStart(ch) {
+	if r, _ := l.peekRune(); isIdentStartRune(r) {
 		return l.readIdent()
 	}
 
@@ -497,6 +524,14 @@ func isIdentStart(ch byte) bool {
 
 func isIdentChar(ch byte) bool {
 	return ch == '_' || isAlpha(ch) || isDigit(ch)
+}
+
+func isIdentStartRune(r rune) bool {
+	return r == '_' || unicode.IsLetter(r)
+}
+
+func isIdentCharRune(r rune) bool {
+	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
 // Error helper

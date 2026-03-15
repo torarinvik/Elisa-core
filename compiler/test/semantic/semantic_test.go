@@ -307,6 +307,58 @@ def read_last() -> u8:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsImplicitDArrayShapeParams(t *testing.T) {
+	src := `def identity[T](array: DArray[T, α]) -> DArray[T, α]:
+    return array
+
+def keep(array: DArray[i32, row]) -> DArray[i32, row]:
+    return identity(array)
+`
+	_, errs := parseAndAnalyze(t, "implicit_darray_shape_params.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsMismatchedDArrayShapes(t *testing.T) {
+	src := `def bad(array: DArray[i32, row]) -> DArray[i32, col]:
+    return array
+`
+	_, errs := parseAndAnalyze(t, "mismatched_darray_shapes.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "return type expects DArray[i32, col], got DArray[i32, row]") {
+		t.Fatalf("expected dynamic shape mismatch diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeAcceptsImplicitDStrShapeParams(t *testing.T) {
+	src := `def echo(text: DStr[α]) -> DStr[α]:
+    return text
+
+def keep(text: DStr[row]) -> DStr[row]:
+    return echo(text)
+`
+	_, errs := parseAndAnalyze(t, "implicit_dstr_shape_params.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsWrongDynamicShapeArity(t *testing.T) {
+	src := `def bad_array(x: DArray[i32]) -> void:
+    pass
+
+def bad_str(x: DStr[row, col]) -> void:
+    pass
+`
+	_, errs := parseAndAnalyze(t, "dynamic_shape_arity.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic errors, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "DArray expects 2 arguments, got 1") || !strings.Contains(all, "DStr expects 1 argument, got 2") {
+		t.Fatalf("expected dynamic shape arity diagnostics, got:\n%s", all)
+	}
+}
+
 func TestAnalyzePointerFixture(t *testing.T) {
 	fixture := filepath.Join(repoRootFromTestFile(t), "Code", "test_programs", "pointer_alloc.llcontext")
 	src, err := os.ReadFile(fixture)

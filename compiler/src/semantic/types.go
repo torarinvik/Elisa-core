@@ -12,6 +12,11 @@ type Type interface {
 	isType()
 }
 
+type Shape interface {
+	String() string
+	isShape()
+}
+
 type InvalidType struct{}
 
 type NullType struct{}
@@ -21,6 +26,14 @@ type BuiltinType struct {
 }
 
 type TypeParamType struct {
+	Name string
+}
+
+type ShapeParam struct {
+	Name string
+}
+
+type NamedShape struct {
 	Name string
 }
 
@@ -42,6 +55,15 @@ type ArrayType struct {
 	Size         string
 	HasConstSize bool
 	ConstSize    int64
+}
+
+type DArrayType struct {
+	Elem  Type
+	Shape Shape
+}
+
+type DStrType struct {
+	Shape Shape
 }
 
 type Field struct {
@@ -70,11 +92,12 @@ type GenericInstanceType struct {
 }
 
 type FuncType struct {
-	Name       string
-	TypeParams []string
-	Params     []Type
-	Return     Type
-	Variadic   bool
+	Name        string
+	TypeParams  []string
+	ShapeParams []string
+	Params      []Type
+	Return      Type
+	Variadic    bool
 }
 
 func (*InvalidType) isType()         {}
@@ -83,10 +106,15 @@ func (*BuiltinType) isType()         {}
 func (*TypeParamType) isType()       {}
 func (*RefType) isType()             {}
 func (*ArrayType) isType()           {}
+func (*DArrayType) isType()          {}
+func (*DStrType) isType()            {}
 func (*StructType) isType()          {}
 func (*OpaqueType) isType()          {}
 func (*GenericInstanceType) isType() {}
 func (*FuncType) isType()            {}
+
+func (*ShapeParam) isShape() {}
+func (*NamedShape) isShape() {}
 
 func (*InvalidType) String() string { return "<invalid>" }
 func (*NullType) String() string    { return "null" }
@@ -94,6 +122,8 @@ func (t *BuiltinType) String() string {
 	return t.Name
 }
 func (t *TypeParamType) String() string { return t.Name }
+func (s *ShapeParam) String() string    { return s.Name }
+func (s *NamedShape) String() string    { return s.Name }
 func (t *RefType) String() string {
 	s := t.Elem.String()
 	switch t.State {
@@ -108,6 +138,12 @@ func (t *RefType) String() string {
 }
 func (t *ArrayType) String() string {
 	return fmt.Sprintf("%s[%s]", t.Elem.String(), t.Size)
+}
+func (t *DArrayType) String() string {
+	return fmt.Sprintf("DArray[%s, %s]", t.Elem.String(), t.Shape.String())
+}
+func (t *DStrType) String() string {
+	return fmt.Sprintf("DStr[%s]", t.Shape.String())
 }
 func (t *StructType) String() string { return t.Name }
 func (t *OpaqueType) String() string { return t.Name }
@@ -224,6 +260,12 @@ func SameType(a, b Type) bool {
 	case *ArrayType:
 		tb, ok := b.(*ArrayType)
 		return ok && arraySizesEqual(ta, tb) && SameType(ta.Elem, tb.Elem)
+	case *DArrayType:
+		tb, ok := b.(*DArrayType)
+		return ok && SameType(ta.Elem, tb.Elem) && SameShape(ta.Shape, tb.Shape)
+	case *DStrType:
+		tb, ok := b.(*DStrType)
+		return ok && SameShape(ta.Shape, tb.Shape)
 	case *StructType:
 		tb, ok := b.(*StructType)
 		return ok && ta.Name == tb.Name
@@ -243,11 +285,16 @@ func SameType(a, b Type) bool {
 		return SameType(ta.Base, tb.Base)
 	case *FuncType:
 		tb, ok := b.(*FuncType)
-		if !ok || ta.Variadic != tb.Variadic || len(ta.TypeParams) != len(tb.TypeParams) || len(ta.Params) != len(tb.Params) || !SameType(ta.Return, tb.Return) {
+		if !ok || ta.Variadic != tb.Variadic || len(ta.TypeParams) != len(tb.TypeParams) || len(ta.ShapeParams) != len(tb.ShapeParams) || len(ta.Params) != len(tb.Params) || !SameType(ta.Return, tb.Return) {
 			return false
 		}
 		for i := range ta.TypeParams {
 			if ta.TypeParams[i] != tb.TypeParams[i] {
+				return false
+			}
+		}
+		for i := range ta.ShapeParams {
+			if ta.ShapeParams[i] != tb.ShapeParams[i] {
 				return false
 			}
 		}
@@ -330,6 +377,12 @@ func matchTypePattern(pattern, actual Type) bool {
 	case *ArrayType:
 		a, ok := actual.(*ArrayType)
 		return ok && arraySizesEqual(p, a) && matchTypePattern(p.Elem, a.Elem)
+	case *DArrayType:
+		a, ok := actual.(*DArrayType)
+		return ok && matchTypePattern(p.Elem, a.Elem) && shapeMatchesPattern(p.Shape, a.Shape)
+	case *DStrType:
+		a, ok := actual.(*DStrType)
+		return ok && shapeMatchesPattern(p.Shape, a.Shape)
 	case *StructType:
 		a, ok := actual.(*StructType)
 		return ok && p.Name == a.Name
@@ -349,7 +402,7 @@ func matchTypePattern(pattern, actual Type) bool {
 		return matchTypePattern(p.Base, a.Base)
 	case *FuncType:
 		a, ok := actual.(*FuncType)
-		if !ok || p.Variadic != a.Variadic || len(p.Params) != len(a.Params) {
+		if !ok || p.Variadic != a.Variadic || len(p.ShapeParams) != len(a.ShapeParams) || len(p.Params) != len(a.Params) {
 			return false
 		}
 		for i := range p.Params {
@@ -424,4 +477,27 @@ func arraySizesEqual(a, b *ArrayType) bool {
 		return a.ConstSize == b.ConstSize
 	}
 	return a.Size == b.Size
+}
+
+func SameShape(a, b Shape) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	switch sa := a.(type) {
+	case *ShapeParam:
+		sb, ok := b.(*ShapeParam)
+		return ok && sa.Name == sb.Name
+	case *NamedShape:
+		sb, ok := b.(*NamedShape)
+		return ok && sa.Name == sb.Name
+	default:
+		return false
+	}
+}
+
+func shapeMatchesPattern(pattern, actual Shape) bool {
+	if pattern == nil || actual == nil {
+		return pattern == actual
+	}
+	return SameShape(pattern, actual)
 }

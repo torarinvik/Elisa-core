@@ -25,15 +25,16 @@ type ConstValue struct {
 }
 
 type Analyzer struct {
-	file            *ast.File
-	diagnostics     []Diagnostic
-	namedTypes      map[string]Type
-	globalScope     *Scope
-	functionTypes   map[string]*FuncType
-	constValues     map[string]ConstValue
-	typeParamScopes []map[string]Type
-	currentScope    *Scope
-	currentReturn   Type
+	file             *ast.File
+	diagnostics      []Diagnostic
+	namedTypes       map[string]Type
+	globalScope      *Scope
+	functionTypes    map[string]*FuncType
+	constValues      map[string]ConstValue
+	typeParamScopes  []map[string]Type
+	shapeParamScopes []map[string]Shape
+	currentScope     *Scope
+	currentReturn    Type
 }
 
 func Analyze(file *ast.File) *Result {
@@ -255,16 +256,18 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 		a.currentReturn = fnType.Return
 	}
 	a.withTypeParams(fn.TypeParams, nil, func() {
-		for i, param := range fn.Params {
-			var ptype Type = invalidType
-			if fnType != nil && i < len(fnType.Params) {
-				ptype = fnType.Params[i]
+		a.withShapeParams(fnType.ShapeParams, func() {
+			for i, param := range fn.Params {
+				var ptype Type = invalidType
+				if fnType != nil && i < len(fnType.Params) {
+					ptype = fnType.Params[i]
+				}
+				a.defineLocal(&Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, Mutable: a.paramIsMutable(param)}, param.Position)
 			}
-			a.defineLocal(&Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, Mutable: a.paramIsMutable(param)}, param.Position)
-		}
-		for _, stmt := range fn.Body {
-			a.analyzeStmt(stmt)
-		}
+			for _, stmt := range fn.Body {
+				a.analyzeStmt(stmt)
+			}
+		})
 	})
 	a.currentScope = savedScope
 	a.currentReturn = savedReturn
@@ -828,6 +831,7 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 		a.errorf(expr.Pos(), "variadic function %q expects at least %d arguments, got %d", ft.Name, len(ft.Params), len(expr.Args))
 	}
 	bindings := map[string]Type{}
+	shapeBindings := map[string]Shape{}
 	limit := len(ft.Params)
 	if len(expr.Args) < limit {
 		limit = len(expr.Args)
@@ -835,19 +839,20 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	for i := 0; i < len(expr.Args); i++ {
 		argType := a.analyzeExpr(expr.Args[i])
 		if i < limit {
-			a.collectTypeBindings(ft.Params[i], argType, bindings)
-			if !AssignableTo(ft.Params[i], argType) {
-				a.errorf(expr.Args[i].Pos(), "argument %d to %q expects %s, got %s", i+1, ft.Name, ft.Params[i].String(), argType.String())
+			a.collectTypeBindings(ft.Params[i], argType, bindings, shapeBindings)
+			expectedType := a.substituteType(ft.Params[i], bindings, shapeBindings)
+			if !AssignableTo(expectedType, argType) {
+				a.errorf(expr.Args[i].Pos(), "argument %d to %q expects %s, got %s", i+1, ft.Name, expectedType.String(), argType.String())
 			}
 		}
 	}
 	if ft.Return == nil {
 		return a.namedTypes["void"]
 	}
-	return a.substituteType(ft.Return, bindings)
+	return a.substituteType(ft.Return, bindings, shapeBindings)
 }
 
-func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string]Type) {
+func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string]Type, shapeBindings map[string]Shape) {
 	if pattern == nil || actual == nil {
 		return
 	}
@@ -858,16 +863,25 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		}
 	case *RefType:
 		if act, ok := actual.(*RefType); ok {
-			a.collectTypeBindings(p.Elem, act.Elem, bindings)
+			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings)
 		}
 	case *ArrayType:
 		if act, ok := actual.(*ArrayType); ok {
-			a.collectTypeBindings(p.Elem, act.Elem, bindings)
+			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings)
+		}
+	case *DArrayType:
+		if act, ok := actual.(*DArrayType); ok {
+			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings)
+			a.collectShapeBinding(p.Shape, act.Shape, shapeBindings)
+		}
+	case *DStrType:
+		if act, ok := actual.(*DStrType); ok {
+			a.collectShapeBinding(p.Shape, act.Shape, shapeBindings)
 		}
 	case *GenericInstanceType:
 		if act, ok := actual.(*GenericInstanceType); ok && p.Name == act.Name && len(p.Args) == len(act.Args) {
 			for i := range p.Args {
-				a.collectTypeBindings(p.Args[i], act.Args[i], bindings)
+				a.collectTypeBindings(p.Args[i], act.Args[i], bindings, shapeBindings)
 			}
 		}
 	case *FuncType:
@@ -877,10 +891,20 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 				limit = len(act.Params)
 			}
 			for i := 0; i < limit; i++ {
-				a.collectTypeBindings(p.Params[i], act.Params[i], bindings)
+				a.collectTypeBindings(p.Params[i], act.Params[i], bindings, shapeBindings)
 			}
-			a.collectTypeBindings(p.Return, act.Return, bindings)
+			a.collectTypeBindings(p.Return, act.Return, bindings, shapeBindings)
 		}
+	}
+}
+
+func (a *Analyzer) collectShapeBinding(pattern, actual Shape, bindings map[string]Shape) {
+	param, ok := pattern.(*ShapeParam)
+	if !ok {
+		return
+	}
+	if _, exists := bindings[param.Name]; !exists {
+		bindings[param.Name] = actual
 	}
 }
 
@@ -1050,7 +1074,7 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 				bindings[name] = t.Args[i]
 			}
 		}
-		field.Type = a.substituteType(field.Type, bindings)
+		field.Type = a.substituteType(field.Type, bindings, nil)
 		return field, true
 	default:
 		a.errorf(pos, "field access requires struct type, got %s", objType.String())
@@ -1076,15 +1100,18 @@ func (a *Analyzer) defineLocal(sym *Symbol, pos lexer.Pos) {
 func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
 	ptypes := make([]Type, 0, len(params))
 	retType := a.namedTypes["void"]
+	shapeParams := a.collectImplicitShapeParams(params, ret)
 	a.withTypeParams(typeParams, nil, func() {
-		for _, p := range params {
-			ptypes = append(ptypes, a.resolveType(p.Type))
-		}
-		if ret != nil {
-			retType = a.resolveType(ret)
-		}
+		a.withShapeParams(shapeParams, func() {
+			for _, p := range params {
+				ptypes = append(ptypes, a.resolveType(p.Type))
+			}
+			if ret != nil {
+				retType = a.resolveType(ret)
+			}
+		})
 	})
-	return &FuncType{Name: name, TypeParams: append([]string(nil), typeParams...), Params: ptypes, Return: retType, Variadic: variadic}
+	return &FuncType{Name: name, TypeParams: append([]string(nil), typeParams...), ShapeParams: shapeParams, Params: ptypes, Return: retType, Variadic: variadic}
 }
 
 func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
@@ -1107,6 +1134,9 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 	case *ast.TailType:
 		return &RefType{Elem: a.resolveType(n.Elem), State: RefStateNonNull}
 	case *ast.GenericType:
+		if shaped, ok := a.resolveDynamicShapeType(n); ok {
+			return shaped
+		}
 		if arrayExpr, ok := a.genericTypeAsArrayType(n); ok {
 			return a.resolveArrayType(arrayExpr)
 		}
@@ -1129,6 +1159,37 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 	default:
 		return invalidType
 	}
+}
+
+func (a *Analyzer) resolveDynamicShapeType(expr *ast.GenericType) (Type, bool) {
+	switch expr.Name {
+	case "DArray":
+		if len(expr.Args) != 2 {
+			a.errorf(expr.Pos(), "DArray expects 2 arguments, got %d", len(expr.Args))
+			return invalidType, true
+		}
+		return &DArrayType{Elem: a.resolveType(expr.Args[0]), Shape: a.resolveShapeArg(expr.Args[1])}, true
+	case "DStr":
+		if len(expr.Args) != 1 {
+			a.errorf(expr.Pos(), "DStr expects 1 argument, got %d", len(expr.Args))
+			return invalidType, true
+		}
+		return &DStrType{Shape: a.resolveShapeArg(expr.Args[0])}, true
+	default:
+		return nil, false
+	}
+}
+
+func (a *Analyzer) resolveShapeArg(expr ast.TypeExpr) Shape {
+	name, ok := shapeNameFromTypeExpr(expr)
+	if !ok {
+		a.errorf(expr.Pos(), "shape witness must be an identifier")
+		return &NamedShape{Name: "?"}
+	}
+	if shape, ok := a.lookupShapeParam(name); ok {
+		return shape
+	}
+	return &NamedShape{Name: name}
 }
 
 func (a *Analyzer) genericTypeAsArrayType(expr *ast.GenericType) (*ast.ArrayType, bool) {
@@ -1249,7 +1310,16 @@ func (a *Analyzer) lookupTypeParam(name string) (Type, bool) {
 	return nil, false
 }
 
-func (a *Analyzer) substituteType(t Type, bindings map[string]Type) Type {
+func (a *Analyzer) lookupShapeParam(name string) (Shape, bool) {
+	for i := len(a.shapeParamScopes) - 1; i >= 0; i-- {
+		if t, ok := a.shapeParamScopes[i][name]; ok {
+			return t, true
+		}
+	}
+	return nil, false
+}
+
+func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBindings map[string]Shape) Type {
 	switch n := t.(type) {
 	case *TypeParamType:
 		if resolved, ok := bindings[n.Name]; ok {
@@ -1257,24 +1327,39 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type) Type {
 		}
 		return n
 	case *RefType:
-		return &RefType{Elem: a.substituteType(n.Elem, bindings), State: n.State}
+		return &RefType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), State: n.State}
 	case *ArrayType:
-		return &ArrayType{Elem: a.substituteType(n.Elem, bindings), Size: n.Size, HasConstSize: n.HasConstSize, ConstSize: n.ConstSize}
+		return &ArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Size: n.Size, HasConstSize: n.HasConstSize, ConstSize: n.ConstSize}
+	case *DArrayType:
+		return &DArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Shape: a.substituteShape(n.Shape, shapeBindings)}
+	case *DStrType:
+		return &DStrType{Shape: a.substituteShape(n.Shape, shapeBindings)}
 	case *GenericInstanceType:
 		args := make([]Type, 0, len(n.Args))
 		for _, arg := range n.Args {
-			args = append(args, a.substituteType(arg, bindings))
+			args = append(args, a.substituteType(arg, bindings, shapeBindings))
 		}
 		return &GenericInstanceType{Name: n.Name, Base: n.Base, Args: args}
 	case *FuncType:
 		params := make([]Type, 0, len(n.Params))
 		for _, param := range n.Params {
-			params = append(params, a.substituteType(param, bindings))
+			params = append(params, a.substituteType(param, bindings, shapeBindings))
 		}
-		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), Params: params, Return: a.substituteType(n.Return, bindings), Variadic: n.Variadic}
+		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), ShapeParams: append([]string(nil), n.ShapeParams...), Params: params, Return: a.substituteType(n.Return, bindings, shapeBindings), Variadic: n.Variadic}
 	default:
 		return t
 	}
+}
+
+func (a *Analyzer) substituteShape(shape Shape, bindings map[string]Shape) Shape {
+	param, ok := shape.(*ShapeParam)
+	if !ok {
+		return shape
+	}
+	if resolved, ok := bindings[param.Name]; ok {
+		return resolved
+	}
+	return shape
 }
 
 func (a *Analyzer) paramIsMutable(param ast.ParamDecl) bool {
@@ -1283,6 +1368,80 @@ func (a *Analyzer) paramIsMutable(param ast.ParamDecl) bool {
 	}
 	_, ok := param.Type.(*ast.MutableType)
 	return ok
+}
+
+func (a *Analyzer) withShapeParams(names []string, fn func()) {
+	if len(names) == 0 {
+		fn()
+		return
+	}
+	bindings := make(map[string]Shape, len(names))
+	for _, name := range names {
+		bindings[name] = &ShapeParam{Name: name}
+	}
+	a.shapeParamScopes = append(a.shapeParamScopes, bindings)
+	fn()
+	a.shapeParamScopes = a.shapeParamScopes[:len(a.shapeParamScopes)-1]
+}
+
+func (a *Analyzer) collectImplicitShapeParams(params []ast.ParamDecl, ret ast.TypeExpr) []string {
+	seen := map[string]bool{}
+	order := make([]string, 0)
+	for _, param := range params {
+		a.collectImplicitShapeParamsFromType(param.Type, seen, &order)
+	}
+	if ret != nil {
+		a.collectImplicitShapeParamsFromType(ret, seen, &order)
+	}
+	return order
+}
+
+func (a *Analyzer) collectImplicitShapeParamsFromType(expr ast.TypeExpr, seen map[string]bool, order *[]string) {
+	if expr == nil {
+		return
+	}
+	switch n := expr.(type) {
+	case *ast.RefType:
+		a.collectImplicitShapeParamsFromType(n.Elem, seen, order)
+	case *ast.MutableType:
+		a.collectImplicitShapeParamsFromType(n.Elem, seen, order)
+	case *ast.TailType:
+		a.collectImplicitShapeParamsFromType(n.Elem, seen, order)
+	case *ast.ArrayType:
+		a.collectImplicitShapeParamsFromType(n.Elem, seen, order)
+	case *ast.GenericType:
+		switch n.Name {
+		case "DArray":
+			if len(n.Args) > 0 {
+				a.collectImplicitShapeParamsFromType(n.Args[0], seen, order)
+			}
+			if len(n.Args) > 1 {
+				if name, ok := shapeNameFromTypeExpr(n.Args[1]); ok && !seen[name] {
+					seen[name] = true
+					*order = append(*order, name)
+				}
+			}
+		case "DStr":
+			if len(n.Args) > 0 {
+				if name, ok := shapeNameFromTypeExpr(n.Args[0]); ok && !seen[name] {
+					seen[name] = true
+					*order = append(*order, name)
+				}
+			}
+		default:
+			for _, arg := range n.Args {
+				a.collectImplicitShapeParamsFromType(arg, seen, order)
+			}
+		}
+	}
+}
+
+func shapeNameFromTypeExpr(expr ast.TypeExpr) (string, bool) {
+	name, ok := expr.(*ast.NamedType)
+	if !ok {
+		return "", false
+	}
+	return name.Name, true
 }
 
 func (a *Analyzer) resolveArrayType(expr *ast.ArrayType) Type {
