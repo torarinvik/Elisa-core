@@ -182,6 +182,68 @@ def missing_box() -> Box!:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeRejectsNullableFieldAccessWithoutProof(t *testing.T) {
+	src := `repr(c) struct Box:
+    value: mutable int
+
+extern maybe_box() -> Box&?
+
+def bad() -> int:
+    box: Box&? = maybe_box()
+    return box.value
+`
+	_, errs := parseAndAnalyze(t, "nullable_field_access.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "field access requires proven non-null reference") {
+		t.Fatalf("expected nullable field access rejection, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeGuardClauseRefinesAfterReturn(t *testing.T) {
+	src := `repr(c) struct Box:
+    value: mutable int
+
+extern maybe_box() -> Box&?
+
+def read_box() -> int:
+    box: Box&? = maybe_box()
+    if box == null:
+        return 0
+    return box.value
+`
+	_, errs := parseAndAnalyze(t, "guard_clause_refinement.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeTernaryRefinesNullablePointerBranch(t *testing.T) {
+	src := `def choose_text(value: u8&?) -> u8&:
+    return value if value != null else ""
+`
+	_, errs := parseAndAnalyze(t, "ternary_refinement.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsNullableToNonNullCastWithoutProof(t *testing.T) {
+	src := `repr(c) struct Box:
+    value: int
+
+extern maybe_box() -> Box&?
+
+def bad() -> Box&:
+    box: Box&? = maybe_box()
+    return box.Box&()
+`
+	_, errs := parseAndAnalyze(t, "nonnull_cast_rejection.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "invalid cast from Box&? to Box&") {
+		t.Fatalf("expected invalid cast diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzePointerFixture(t *testing.T) {
 	fixture := filepath.Join(repoRootFromTestFile(t), "Code", "test_programs", "pointer_alloc.llcontext")
 	src, err := os.ReadFile(fixture)

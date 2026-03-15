@@ -54,12 +54,13 @@ type Symbol struct {
 }
 
 type Scope struct {
-	Parent  *Scope
-	Symbols map[string]*Symbol
+	Parent      *Scope
+	Symbols     map[string]*Symbol
+	Refinements map[string]Type
 }
 
 func NewScope(parent *Scope) *Scope {
-	return &Scope{Parent: parent, Symbols: map[string]*Symbol{}}
+	return &Scope{Parent: parent, Symbols: map[string]*Symbol{}, Refinements: map[string]Type{}}
 }
 
 func (s *Scope) Define(sym *Symbol) (*Symbol, bool) {
@@ -74,6 +75,15 @@ func (s *Scope) Lookup(name string) (*Symbol, bool) {
 	for cur := s; cur != nil; cur = cur.Parent {
 		if sym, ok := cur.Symbols[name]; ok {
 			return sym, true
+		}
+	}
+	return nil, false
+}
+
+func (s *Scope) LookupRefinement(key string) (Type, bool) {
+	for cur := s; cur != nil; cur = cur.Parent {
+		if t, ok := cur.Refinements[key]; ok {
+			return t, true
 		}
 	}
 	return nil, false

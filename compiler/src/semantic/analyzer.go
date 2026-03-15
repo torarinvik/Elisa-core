@@ -287,6 +287,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if !AssignableTo(targetType, valueType) {
 			a.errorf(n.Pos(), "cannot assign %s to %s", valueType.String(), targetType.String())
 		}
+		a.recordAssignmentRefinement(n.Target, targetType, valueType)
 	case *ast.AugAssignStmt:
 		targetType := a.assignmentTargetType(n.Target)
 		valueType := a.analyzeExpr(n.Value)
@@ -299,6 +300,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if !AssignableTo(targetType, valueType) {
 			a.errorf(n.Pos(), "cannot assign %s to %s", valueType.String(), targetType.String())
 		}
+		a.recordAssignmentRefinement(n.Target, targetType, targetType)
 	case *ast.ReturnStmt:
 		if n.Value == nil {
 			if a.currentReturn != nil && !SameType(a.currentReturn, a.namedTypes["void"]) {
@@ -315,7 +317,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "return type expects %s, got %s", a.currentReturn.String(), valueType.String())
 		}
 	case *ast.IfStmt:
-		condType := a.analyzeExpr(n.Cond)
+		condType := a.analyzeCondExpr(n.Cond)
 		if !IsBoolType(condType) {
 			a.errorf(n.Pos(), "if condition must be bool, got %s", condType.String())
 		}
@@ -332,8 +334,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		} else {
 			a.analyzeBlock(n.Else)
 		}
+		a.applyPostIfFallthroughRefinement(n)
 	case *ast.WhileStmt:
-		condType := a.analyzeExpr(n.Cond)
+		condType := a.analyzeCondExpr(n.Cond)
 		if !IsBoolType(condType) {
 			a.errorf(n.Pos(), "while condition must be bool, got %s", condType.String())
 		}
@@ -343,6 +346,14 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 	case *ast.PanicStmt:
 		a.analyzeExpr(n.Message)
 	case *ast.ExprStmt:
+		if cond, ok := assertedCondition(n.Expr); ok {
+			condType := a.analyzeCondExpr(cond)
+			if !IsBoolType(condType) {
+				a.errorf(n.Pos(), "assert condition must be bool, got %s", condType.String())
+			}
+			a.applyConditionRefinements(a.currentScope, cond, true)
+			return
+		}
 		a.analyzeExpr(n.Expr)
 	case *ast.StaticIfStmt:
 		for _, stmt := range a.activeStmtBranch(n) {
@@ -398,9 +409,9 @@ func (a *Analyzer) applyConditionRefinements(scope *Scope, expr ast.Expr, truthy
 				a.applyConditionRefinements(scope, n.Right, false)
 			}
 		case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
-			name, state, ok := refinedIdentNullState(n, truthy)
+			targetExpr, state, ok := refinedExprNullState(n, truthy)
 			if ok {
-				a.shadowRefinedSymbol(scope, name, state)
+				a.shadowRefinedExpr(scope, targetExpr, state)
 			}
 		}
 	case *ast.UnaryExpr:
@@ -412,49 +423,53 @@ func (a *Analyzer) applyConditionRefinements(scope *Scope, expr ast.Expr, truthy
 	}
 }
 
-func refinedIdentNullState(expr *ast.BinaryExpr, truthy bool) (string, RefState, bool) {
-	leftIdent, leftOK := expr.Left.(*ast.Ident)
-	_, leftNull := expr.Right.(*ast.NullLit)
-	rightIdent, rightOK := expr.Right.(*ast.Ident)
-	_, rightNull := expr.Left.(*ast.NullLit)
+func refinedExprNullState(expr *ast.BinaryExpr, truthy bool) (ast.Expr, RefState, bool) {
+	_, leftNull := expr.Left.(*ast.NullLit)
+	_, rightNull := expr.Right.(*ast.NullLit)
 
-	name := ""
+	targetExpr := ast.Expr(nil)
 	switch {
-	case leftOK && leftNull:
-		name = leftIdent.Name
-	case rightOK && rightNull:
-		name = rightIdent.Name
+	case rightNull:
+		targetExpr = expr.Left
+	case leftNull:
+		targetExpr = expr.Right
 	default:
-		return "", RefStateNullable, false
+		return nil, RefStateNullable, false
+	}
+
+	if _, ok := exprRefinementKey(targetExpr); !ok {
+		return nil, RefStateNullable, false
 	}
 
 	if expr.Op == lexer.TOKEN_EQEQ {
 		if truthy {
-			return name, RefStateNull, true
+			return targetExpr, RefStateNull, true
 		}
-		return name, RefStateNonNull, true
+		return targetExpr, RefStateNonNull, true
 	}
 	if truthy {
-		return name, RefStateNonNull, true
+		return targetExpr, RefStateNonNull, true
 	}
-	return name, RefStateNull, true
+	return targetExpr, RefStateNull, true
 }
 
-func (a *Analyzer) shadowRefinedSymbol(scope *Scope, name string, state RefState) {
-	base, ok := scope.Parent.Lookup(name)
+func (a *Analyzer) shadowRefinedExpr(scope *Scope, expr ast.Expr, state RefState) {
+	if scope == nil {
+		return
+	}
+	key, ok := exprRefinementKey(expr)
 	if !ok {
 		return
 	}
-	ref, ok := base.Type.(*RefType)
+	baseType := a.analyzeExprInScope(expr, scope)
+	ref, ok := baseType.(*RefType)
 	if !ok {
 		return
 	}
 	if !refinementCompatible(ref.State, state) {
 		return
 	}
-	refined := *base
-	refined.Type = &RefType{Elem: ref.Elem, State: state}
-	scope.Symbols[name] = &refined
+	scope.Refinements[key] = &RefType{Elem: ref.Elem, State: state}
 }
 
 func refinementCompatible(current, desired RefState) bool {
@@ -468,6 +483,124 @@ func refinementCompatible(current, desired RefState) bool {
 	}
 }
 
+func exprRefinementKey(expr ast.Expr) (string, bool) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return exprRefinementKey(n.Inner)
+	case *ast.Ident:
+		return n.Name, true
+	case *ast.FieldExpr:
+		base, ok := exprRefinementKey(n.Object)
+		if !ok {
+			return "", false
+		}
+		return base + "." + n.Field, true
+	default:
+		return "", false
+	}
+}
+
+func (a *Analyzer) lookupRefinedExprType(expr ast.Expr) (Type, bool) {
+	if a.currentScope == nil {
+		return nil, false
+	}
+	key, ok := exprRefinementKey(expr)
+	if !ok {
+		return nil, false
+	}
+	return a.currentScope.LookupRefinement(key)
+}
+
+func (a *Analyzer) applyPostIfFallthroughRefinement(stmt *ast.IfStmt) {
+	if a.currentScope == nil || len(stmt.Elifs) > 0 {
+		return
+	}
+	if blockDefinitelyExits(stmt.Then) {
+		a.applyConditionRefinements(a.currentScope, stmt.Cond, false)
+	}
+	if len(stmt.Else) > 0 && blockDefinitelyExits(stmt.Else) {
+		a.applyConditionRefinements(a.currentScope, stmt.Cond, true)
+	}
+}
+
+func blockDefinitelyExits(stmts []ast.Stmt) bool {
+	if len(stmts) == 0 {
+		return false
+	}
+	return stmtDefinitelyExits(stmts[len(stmts)-1])
+}
+
+func stmtDefinitelyExits(stmt ast.Stmt) bool {
+	switch n := stmt.(type) {
+	case *ast.ReturnStmt, *ast.PanicStmt, *ast.StaticErrorStmt:
+		return true
+	case *ast.IfStmt:
+		if !blockDefinitelyExits(n.Then) {
+			return false
+		}
+		for _, elif := range n.Elifs {
+			if !blockDefinitelyExits(elif.Body) {
+				return false
+			}
+		}
+		return len(n.Else) > 0 && blockDefinitelyExits(n.Else)
+	case *ast.StaticIfStmt:
+		if !blockDefinitelyExits(n.Then) {
+			return false
+		}
+		for _, elif := range n.Elifs {
+			if !blockDefinitelyExits(elif.Body) {
+				return false
+			}
+		}
+		return len(n.Else) > 0 && blockDefinitelyExits(n.Else)
+	default:
+		return false
+	}
+}
+
+func (a *Analyzer) recordAssignmentRefinement(target ast.Expr, targetType Type, valueType Type) {
+	if a.currentScope == nil {
+		return
+	}
+	key, ok := exprRefinementKey(target)
+	if !ok {
+		return
+	}
+	refined := assignedRefinementType(targetType, valueType)
+	if refined == nil {
+		delete(a.currentScope.Refinements, key)
+		return
+	}
+	a.currentScope.Refinements[key] = refined
+}
+
+func assignedRefinementType(targetType Type, valueType Type) Type {
+	targetRef, ok := targetType.(*RefType)
+	if !ok {
+		return nil
+	}
+	if IsNullType(valueType) {
+		return &RefType{Elem: targetRef.Elem, State: RefStateNull}
+	}
+	if valueRef, ok := valueType.(*RefType); ok {
+		return &RefType{Elem: valueRef.Elem, State: valueRef.State}
+	}
+	return targetRef
+}
+
+func assertedCondition(expr ast.Expr) (ast.Expr, bool) {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 {
+		return nil, false
+	}
+	ident, ok := call.Func.(*ast.Ident)
+	if !ok || ident.Name != "assert" {
+		return nil, false
+	}
+	return call.Args[0], true
+}
+
 func (a *Analyzer) analyzeExprInScope(expr ast.Expr, scope *Scope) Type {
 	saved := a.currentScope
 	a.currentScope = scope
@@ -476,9 +609,57 @@ func (a *Analyzer) analyzeExprInScope(expr ast.Expr, scope *Scope) Type {
 	return result
 }
 
+func (a *Analyzer) analyzeCondExpr(expr ast.Expr) Type {
+	return a.analyzeCondExprInScope(expr, a.currentScope)
+}
+
+func (a *Analyzer) analyzeCondExprInScope(expr ast.Expr, scope *Scope) Type {
+	saved := a.currentScope
+	a.currentScope = scope
+	defer func() { a.currentScope = saved }()
+
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return a.analyzeCondExprInScope(n.Inner, scope)
+	case *ast.UnaryExpr:
+		if n.Op == lexer.TOKEN_NOT {
+			operand := a.analyzeCondExprInScope(n.Operand, scope)
+			if !IsBoolType(operand) {
+				a.errorf(n.Pos(), "not operator requires bool operand")
+			}
+			return a.namedTypes["bool"]
+		}
+		return a.analyzeExpr(n)
+	case *ast.BinaryExpr:
+		switch n.Op {
+		case lexer.TOKEN_AND:
+			left := a.analyzeCondExprInScope(n.Left, scope)
+			right := a.analyzeCondExprInScope(n.Right, a.refinedScopeForCondition(scope, n.Left, true))
+			if !IsBoolType(left) || !IsBoolType(right) {
+				a.errorf(n.Pos(), "logical operator requires bool operands")
+			}
+			return a.namedTypes["bool"]
+		case lexer.TOKEN_OR:
+			left := a.analyzeCondExprInScope(n.Left, scope)
+			right := a.analyzeCondExprInScope(n.Right, a.refinedScopeForCondition(scope, n.Left, false))
+			if !IsBoolType(left) || !IsBoolType(right) {
+				a.errorf(n.Pos(), "logical operator requires bool operands")
+			}
+			return a.namedTypes["bool"]
+		default:
+			return a.analyzeExpr(n)
+		}
+	default:
+		return a.analyzeExpr(expr)
+	}
+}
+
 func (a *Analyzer) analyzeExpr(expr ast.Expr) Type {
 	switch n := expr.(type) {
 	case *ast.Ident:
+		if t, ok := a.lookupRefinedExprType(n); ok {
+			return t
+		}
 		if a.currentScope != nil {
 			if sym, ok := a.currentScope.Lookup(n.Name); ok {
 				return sym.Type
@@ -517,6 +698,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) Type {
 	case *ast.CallExpr:
 		return a.analyzeCallExpr(n)
 	case *ast.FieldExpr:
+		if t, ok := a.lookupRefinedExprType(n); ok {
+			return t
+		}
 		return a.analyzeFieldExpr(n)
 	case *ast.IndexExpr:
 		return a.analyzeIndexExpr(n)
@@ -531,12 +715,12 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) Type {
 		a.resolveType(n.Type)
 		return a.namedTypes["usize"]
 	case *ast.TernaryExpr:
-		condType := a.analyzeExpr(n.Cond)
+		condType := a.analyzeCondExpr(n.Cond)
 		if !IsBoolType(condType) {
 			a.errorf(n.Pos(), "ternary condition must be bool, got %s", condType.String())
 		}
-		left := a.analyzeExpr(n.Value)
-		right := a.analyzeExpr(n.Alt)
+		left := a.analyzeExprInScope(n.Value, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
+		right := a.analyzeExprInScope(n.Alt, a.refinedScopeForCondition(a.currentScope, n.Cond, false))
 		merged := MergeTypes(left, right)
 		if IsInvalidType(merged) {
 			a.errorf(n.Pos(), "ternary branches are incompatible: %s and %s", left.String(), right.String())
@@ -718,6 +902,10 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		return arr.Elem
 	}
 	if ref, ok := objType.(*RefType); ok {
+		if ref.State != RefStateNonNull {
+			a.errorf(expr.Pos(), "indexing requires proven non-null reference, got %s", objType.String())
+			return invalidType
+		}
 		if arr, ok := ref.Elem.(*ArrayType); ok {
 			return arr.Elem
 		}
@@ -829,6 +1017,10 @@ func (a *Analyzer) refTypeWithAsKind(t Type, asKind string) Type {
 
 func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (Field, bool) {
 	if ref, ok := objType.(*RefType); ok {
+		if ref.State != RefStateNonNull {
+			a.errorf(pos, "field access requires proven non-null reference, got %s", objType.String())
+			return Field{}, false
+		}
 		objType = ref.Elem
 	}
 	switch t := objType.(type) {
@@ -981,9 +1173,10 @@ func (a *Analyzer) validCast(src, dst Type) bool {
 	if IsNumericType(src) && isRefLike(dst) {
 		return true
 	}
-	if _, ok := src.(*RefType); ok {
-		_, ok = dst.(*RefType)
-		return ok
+	if srcRef, ok := src.(*RefType); ok {
+		if dstRef, ok := dst.(*RefType); ok {
+			return refStateAssignable(dstRef.State, srcRef.State)
+		}
 	}
 	return false
 }

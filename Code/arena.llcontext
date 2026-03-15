@@ -207,6 +207,8 @@ def arena_alloc(a: Arena&, size_bytes: usize) -> void&:
         a.end as & <- new_region(capacity)
         a.begin <- a.end
 
+    assert a.end != null
+
     while a.end.count + size > a.end.capacity and a.end.next != null:
         a.end <- a.end.next
 
@@ -294,7 +296,7 @@ def arena_rewind(a: Arena&, m: ArenaMark):
         arena_reset(a)
         return
 
-    region: Region& = m.region.Region&()
+    region: Region& = m.region
     region.count <- m.count
 
     r: mutable Region&? = region.next
@@ -350,6 +352,8 @@ def arena_da_append[T](a: Arena&, da: DynArray[T]&, item: T):
 
         da.capacity <- new_capacity
 
+    assert da.items != null
+
     da.items[da.count] <- item
     da.count <- da.count + 1
 
@@ -378,6 +382,8 @@ def arena_da_append_many[T](a: Arena&, da: DynArray[T]&, new_items: T&, new_item
             ).T&()
 
         da.capacity <- new_capacity
+
+    assert da.items != null
 
     arena_memcpy(
         (da.items + da.count).void&(),
