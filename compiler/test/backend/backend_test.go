@@ -118,6 +118,61 @@ func TestGenerateLLVMIRTernaryUsesPhi(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRDefinesGlobalsWithInitializers(t *testing.T) {
+	src := `repr(c) struct Pair:
+    left: i32
+    right: i32
+
+const ANSWER = 42
+
+global seed: i32 = ANSWER
+global pair: Pair = Pair(1, 2)
+global flags: i32[4] = zeroed
+`
+	result := parseAndAnalyze(t, "backend_globals.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%Pair = type { i32, i32 }",
+		"@seed = global i32 42",
+		"@pair = global %Pair { i32 1, i32 2 }",
+		"@flags = global [4 x i32] zeroinitializer",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRSpecializesGenericFunctions(t *testing.T) {
+	src := `def identity[T](value: T) -> T:
+    return value
+
+def use_identity(value: i32) -> i32:
+    return identity(value)
+`
+	result := parseAndAnalyze(t, "backend_generic_specialization.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"define i32 @use_identity(i32",
+		"define i32 @identity__i32(i32",
+		"call i32 @identity__i32(i32",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowerRuntimeBackedTypes(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
     items: mutable T&?

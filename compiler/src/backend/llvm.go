@@ -126,6 +126,9 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 		if err := g.noteType(sym.Type); err != nil {
 			return err
 		}
+		if fnDecl, ok := decl.(*ast.FuncDecl); ok && len(fnDecl.TypeParams) > 0 {
+			return nil
+		}
 		fn, ok := sym.Type.(*semantic.FuncType)
 		if !ok {
 			return fmt.Errorf("function %s does not resolve to semantic function type", sym.Name)
@@ -140,7 +143,7 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 		if err := g.noteType(sym.Type); err != nil {
 			return err
 		}
-		_, err := g.ensureGlobalDeclared(sym.Name, sym.Type)
+		_, err := g.ensureGlobalDeclared(sym.Name, sym.Type, declIsExternVar(decl))
 		return err
 	case *ast.ConstDecl, *ast.StaticIfDecl:
 		return nil
@@ -179,7 +182,20 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 			return err
 		}
 		return g.defineFunctionBody(n, fn, fnValue)
-	case *ast.ExternFuncDecl, *ast.GlobalDecl, *ast.ExternVarDecl:
+	case *ast.ExternFuncDecl:
+		return nil
+	case *ast.GlobalDecl, *ast.ExternVarDecl:
+		sym, ok := g.symbolsByNode[decl]
+		if !ok {
+			return fmt.Errorf("missing semantic symbol for global declaration")
+		}
+		globalValue, err := g.ensureGlobalDeclared(sym.Name, sym.Type, declIsExternVar(decl))
+		if err != nil {
+			return err
+		}
+		if globalDecl, ok := decl.(*ast.GlobalDecl); ok {
+			return g.defineGlobal(globalDecl, sym.Type, globalValue)
+		}
 		return nil
 	case *ast.ExternTypeDecl, *ast.StaticIfDecl:
 		return nil
@@ -271,11 +287,11 @@ func (g *llvmGenerator) ensureFunctionDeclared(name string, fn *semantic.FuncTyp
 	return value, nil
 }
 
-func (g *llvmGenerator) ensureGlobalDeclared(name string, t semantic.Type) (C.LLVMValueRef, error) {
+func (g *llvmGenerator) ensureGlobalDeclared(name string, t semantic.Type, external bool) (C.LLVMValueRef, error) {
 	if value, ok := g.globals[name]; ok {
 		return value, nil
 	}
-	value, err := g.addGlobal(name, t)
+	value, err := g.addGlobal(name, t, external)
 	if err != nil {
 		return nil, err
 	}
@@ -295,7 +311,7 @@ func (g *llvmGenerator) addFunction(name string, fn *semantic.FuncType) (C.LLVMV
 	return value, nil
 }
 
-func (g *llvmGenerator) addGlobal(name string, t semantic.Type) (C.LLVMValueRef, error) {
+func (g *llvmGenerator) addGlobal(name string, t semantic.Type, external bool) (C.LLVMValueRef, error) {
 	globalType, err := g.lowerType(t)
 	if err != nil {
 		return nil, err
@@ -304,6 +320,7 @@ func (g *llvmGenerator) addGlobal(name string, t semantic.Type) (C.LLVMValueRef,
 	defer C.free(unsafe.Pointer(nameC))
 	value := C.LLVMAddGlobal(g.module, globalType, nameC)
 	C.LLVMSetLinkage(value, C.LLVMExternalLinkage)
+	_ = external
 	return value, nil
 }
 
@@ -641,6 +658,11 @@ func llvmTypeSlicePtr(types []C.LLVMTypeRef) *C.LLVMTypeRef {
 		return nil
 	}
 	return (*C.LLVMTypeRef)(unsafe.Pointer(&types[0]))
+}
+
+func declIsExternVar(decl ast.Decl) bool {
+	_, ok := decl.(*ast.ExternVarDecl)
+	return ok
 }
 
 func llvmValueSlicePtr(values []C.LLVMValueRef) *C.LLVMValueRef {

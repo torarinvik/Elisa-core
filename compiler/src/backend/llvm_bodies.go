@@ -35,9 +35,14 @@ type functionState struct {
 	fnType  *semantic.FuncType
 	builder C.LLVMBuilderRef
 	scope   *codegenScope
+	typeMap map[string]semantic.Type
 }
 
 func (g *llvmGenerator) defineFunctionBody(decl *ast.FuncDecl, fnType *semantic.FuncType, fnValue C.LLVMValueRef) error {
+	return g.defineFunctionBodyWithBindings(decl, fnType, fnValue, nil)
+}
+
+func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnType *semantic.FuncType, fnValue C.LLVMValueRef, typeBindings map[string]semantic.Type) error {
 	if decl == nil || fnType == nil || fnValue == nil {
 		return fmt.Errorf("cannot define function body without declaration, type, and value")
 	}
@@ -60,6 +65,7 @@ func (g *llvmGenerator) defineFunctionBody(decl *ast.FuncDecl, fnType *semantic.
 		fnType:  fnType,
 		builder: builder,
 		scope:   &codegenScope{bindings: map[string]valueBinding{}},
+		typeMap: typeBindings,
 	}
 
 	for i, param := range decl.Params {
@@ -309,7 +315,7 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		return nil, nil, fmt.Errorf("cannot emit nil expression")
 	}
 
-	actualType := s.g.exprType(expr)
+	actualType := s.exprType(expr)
 	if expected != nil && isZeroedExpr(expr) {
 		value, err := s.zeroValue(expected)
 		return value, expected, err
@@ -390,7 +396,7 @@ func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Typ
 			value, err := s.g.ensureFunctionDeclared(expr.Name, fnType)
 			return value, fnType, err
 		case semantic.SymbolGlobal, semantic.SymbolExternVar:
-			global, err := s.g.ensureGlobalDeclared(expr.Name, sym.Type)
+			global, err := s.g.ensureGlobalDeclared(expr.Name, sym.Type, sym.Kind == semantic.SymbolExternVar)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -407,7 +413,7 @@ func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Typ
 }
 
 func (s *functionState) emitIntLiteral(expr *ast.IntLit) (C.LLVMValueRef, semantic.Type, error) {
-	t := s.g.exprType(expr)
+	t := s.exprType(expr)
 	if t == nil {
 		t = s.g.result.NamedTypes["int"]
 	}
@@ -428,7 +434,7 @@ func (s *functionState) emitStringLiteral(expr *ast.StringLit) (C.LLVMValueRef, 
 	text := cString(expr.Value)
 	defer C.free(unsafe.Pointer(text))
 	value := C.LLVMBuildGlobalStringPtr(s.builder, text, name)
-	return value, s.g.exprType(expr), nil
+	return value, s.exprType(expr), nil
 }
 
 func (s *functionState) emitBoolLiteral(expr *ast.BoolLit) (C.LLVMValueRef, semantic.Type, error) {
@@ -452,9 +458,9 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 	if expr.Op == lexer.TOKEN_AND || expr.Op == lexer.TOKEN_OR {
 		return s.emitLogicalExpr(expr)
 	}
-	leftType := s.g.exprType(expr.Left)
-	rightType := s.g.exprType(expr.Right)
-	resultType := s.g.exprType(expr)
+	leftType := s.exprType(expr.Left)
+	rightType := s.exprType(expr.Right)
+	resultType := s.exprType(expr)
 	operandType := s.binaryOperandType(expr.Op, leftType, rightType)
 
 	left, _, err := s.emitExpr(expr.Left, operandType)
@@ -544,12 +550,12 @@ func (s *functionState) emitLogicalExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, s
 }
 
 func (s *functionState) emitUnaryExpr(expr *ast.UnaryExpr) (C.LLVMValueRef, semantic.Type, error) {
-	operandType := s.g.exprType(expr.Operand)
+	operandType := s.exprType(expr.Operand)
 	value, _, err := s.emitExpr(expr.Operand, operandType)
 	if err != nil {
 		return nil, nil, err
 	}
-	resultType := s.g.exprType(expr)
+	resultType := s.exprType(expr)
 	switch expr.Op {
 	case lexer.TOKEN_NOT:
 		return C.LLVMBuildNot(s.builder, value, cStringFree("nottmp")), resultType, nil
@@ -563,13 +569,12 @@ func (s *functionState) emitUnaryExpr(expr *ast.UnaryExpr) (C.LLVMValueRef, sema
 }
 
 func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, error) {
-	funcType, ok := s.g.exprType(expr.Func).(*semantic.FuncType)
-	if !ok {
-		return nil, nil, fmt.Errorf("call target does not have a function type")
-	}
-	callee, err := s.emitCallee(expr.Func, funcType)
+	callee, funcType, err := s.resolveCallTarget(expr)
 	if err != nil {
 		return nil, nil, err
+	}
+	if funcType == nil {
+		return nil, nil, fmt.Errorf("call target does not have a function type")
 	}
 	llvmFnType, err := s.g.lowerFunctionType(funcType)
 	if err != nil {
@@ -595,16 +600,32 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	return call, funcType.Return, nil
 }
 
-func (s *functionState) emitCallee(expr ast.Expr, funcType *semantic.FuncType) (C.LLVMValueRef, error) {
-	if ident, ok := expr.(*ast.Ident); ok {
+func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *semantic.FuncType, error) {
+	if ident, ok := expr.Func.(*ast.Ident); ok {
 		if sym, ok := s.g.result.GlobalScope.Lookup(ident.Name); ok {
-			if sym.Kind == semantic.SymbolFunc || sym.Kind == semantic.SymbolExternFunc {
-				return s.g.ensureFunctionDeclared(ident.Name, funcType)
+			fnType, ok := sym.Type.(*semantic.FuncType)
+			if !ok {
+				return nil, nil, fmt.Errorf("call target %s does not resolve to a function type", ident.Name)
 			}
+			if decl, ok := sym.Node.(*ast.FuncDecl); ok && len(decl.TypeParams) > 0 {
+				argTypes := make([]semantic.Type, 0, len(expr.Args))
+				for _, arg := range expr.Args {
+					argTypes = append(argTypes, s.exprType(arg))
+				}
+				bindings := inferTypeBindingsFromCall(fnType, expr.Args, argTypes)
+				value, specialized, err := s.g.ensureSpecializedFunction(decl, fnType, bindings)
+				return value, specialized, err
+			}
+			value, err := s.g.ensureFunctionDeclared(ident.Name, specializeFuncType(fnType, s.typeMap))
+			return value, specializeFuncType(fnType, s.typeMap), err
 		}
 	}
-	callee, _, err := s.emitExpr(expr, nil)
-	return callee, err
+	calleeType, ok := s.exprType(expr.Func).(*semantic.FuncType)
+	if !ok {
+		return nil, nil, fmt.Errorf("call target does not have a function type")
+	}
+	callee, _, err := s.emitExpr(expr.Func, nil)
+	return callee, calleeType, err
 }
 
 func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, error) {
@@ -669,7 +690,7 @@ func (s *functionState) emitSizeofExpr(expr *ast.SizeofExpr) (C.LLVMValueRef, se
 }
 
 func (s *functionState) emitTernaryExpr(expr *ast.TernaryExpr) (C.LLVMValueRef, semantic.Type, error) {
-	resultType := s.g.exprType(expr)
+	resultType := s.exprType(expr)
 	condValue, _, err := s.emitExpr(expr.Cond, s.g.result.NamedTypes["bool"])
 	if err != nil {
 		return nil, nil, err
@@ -722,7 +743,7 @@ func (s *functionState) emitAddrOfExpr(expr *ast.AddrOfExpr) (C.LLVMValueRef, se
 }
 
 func (s *functionState) emitStructLitExpr(expr *ast.StructLitExpr) (C.LLVMValueRef, semantic.Type, error) {
-	structType := s.g.exprType(expr)
+	structType := s.exprType(expr)
 	llvmType, err := s.g.lowerType(structType)
 	if err != nil {
 		return nil, nil, err
@@ -755,7 +776,7 @@ func (s *functionState) emitAddress(expr ast.Expr) (C.LLVMValueRef, semantic.Typ
 		}
 		if sym, ok := s.g.result.GlobalScope.Lookup(n.Name); ok {
 			if sym.Kind == semantic.SymbolGlobal || sym.Kind == semantic.SymbolExternVar {
-				global, err := s.g.ensureGlobalDeclared(n.Name, sym.Type)
+				global, err := s.g.ensureGlobalDeclared(n.Name, sym.Type, sym.Kind == semantic.SymbolExternVar)
 				return global, sym.Type, err
 			}
 		}
@@ -772,7 +793,7 @@ func (s *functionState) emitAddress(expr ast.Expr) (C.LLVMValueRef, semantic.Typ
 }
 
 func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, error) {
-	objType := s.g.exprType(expr.Object)
+	objType := s.exprType(expr.Object)
 	fieldType, index, containerType, pointerLike, err := s.g.fieldInfo(objType, expr.Field)
 	if err != nil {
 		return nil, nil, err
@@ -795,7 +816,7 @@ func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, s
 }
 
 func (s *functionState) emitIndexAddress(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, error) {
-	objType := s.g.exprType(expr.Object)
+	objType := s.exprType(expr.Object)
 	indexValue, _, err := s.emitExpr(expr.Index, s.g.result.NamedTypes["usize"])
 	if err != nil {
 		return nil, nil, err
@@ -1060,6 +1081,9 @@ func (s *functionState) ensureTrapFunction() (C.LLVMValueRef, error) {
 func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error) {
 	switch n := expr.(type) {
 	case *ast.NamedType:
+		if bound, ok := s.typeMap[n.Name]; ok {
+			return bound, nil
+		}
 		if t, ok := s.g.result.NamedTypes[n.Name]; ok {
 			return t, nil
 		}
@@ -1108,6 +1132,14 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 	default:
 		return nil, fmt.Errorf("unsupported type expression %T", expr)
 	}
+}
+
+func (s *functionState) exprType(expr ast.Expr) semantic.Type {
+	t := s.g.exprType(expr)
+	if t == nil || len(s.typeMap) == 0 {
+		return t
+	}
+	return substituteType(t, s.typeMap)
 }
 
 func (s *functionState) resolveDynamicShapeType(expr *ast.GenericType) (semantic.Type, bool, error) {
