@@ -18,7 +18,8 @@ This directory contains the Go-based frontend for `.llcontext` source files.
 Build the compiler binary from the `src` package tree:
 
 ```text
-go build -o llcontext ./src
+mkdir -p bin
+go build -o bin/llcontext ./src
 ```
 
 ## Test
@@ -45,5 +46,6 @@ These commands were verified in this workspace:
 
 ```text
 go test ./...
-go build -o llcontext ./src
+mkdir -p bin
+go build -o bin/llcontext ./src
 ```

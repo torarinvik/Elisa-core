@@ -5,6 +5,7 @@ import (
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
 	"llcontext/src/parser"
+	"llcontext/src/semantic"
 	"os"
 	"strings"
 )
@@ -29,6 +30,14 @@ func main() {
 	file := p.ParseFile(filename)
 
 	if errs := p.Errors(); len(errs) > 0 {
+		for _, e := range errs {
+			fmt.Fprintf(os.Stderr, "%s\n", e)
+		}
+		os.Exit(1)
+	}
+
+	result := semantic.Analyze(file)
+	if errs := result.Errors(); len(errs) > 0 {
 		for _, e := range errs {
 			fmt.Fprintf(os.Stderr, "%s\n", e)
 		}
