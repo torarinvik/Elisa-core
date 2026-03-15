@@ -68,6 +68,15 @@ type DArrayType struct {
 	Shape Shape
 }
 
+type DListType struct {
+	Elem  Type
+	Shape Shape
+}
+
+type DListViewType struct {
+	Elem Type
+}
+
 type DStrType struct {
 	Shape Shape
 }
@@ -114,6 +123,8 @@ func (*TypeParamType) isType()       {}
 func (*RefType) isType()             {}
 func (*ArrayType) isType()           {}
 func (*DArrayType) isType()          {}
+func (*DListType) isType()           {}
+func (*DListViewType) isType()       {}
 func (*DStrType) isType()            {}
 func (*StructType) isType()          {}
 func (*OpaqueType) isType()          {}
@@ -155,6 +166,12 @@ func (t *ArrayType) String() string {
 }
 func (t *DArrayType) String() string {
 	return fmt.Sprintf("DArray[%s, %s]", t.Elem.String(), t.Shape.String())
+}
+func (t *DListType) String() string {
+	return fmt.Sprintf("DList[%s, %s]", t.Elem.String(), t.Shape.String())
+}
+func (t *DListViewType) String() string {
+	return fmt.Sprintf("DListView[%s]", t.Elem.String())
 }
 func (t *DStrType) String() string {
 	return fmt.Sprintf("DStr[%s]", t.Shape.String())
@@ -280,6 +297,12 @@ func SameType(a, b Type) bool {
 	case *DArrayType:
 		tb, ok := b.(*DArrayType)
 		return ok && SameType(ta.Elem, tb.Elem) && SameShape(ta.Shape, tb.Shape)
+	case *DListType:
+		tb, ok := b.(*DListType)
+		return ok && SameType(ta.Elem, tb.Elem) && SameShape(ta.Shape, tb.Shape)
+	case *DListViewType:
+		tb, ok := b.(*DListViewType)
+		return ok && SameType(ta.Elem, tb.Elem)
 	case *DStrType:
 		tb, ok := b.(*DStrType)
 		return ok && SameShape(ta.Shape, tb.Shape)
@@ -408,6 +431,12 @@ func matchTypePattern(pattern, actual Type) bool {
 	case *DArrayType:
 		a, ok := actual.(*DArrayType)
 		return ok && matchTypePattern(p.Elem, a.Elem) && shapeMatchesPattern(p.Shape, a.Shape)
+	case *DListType:
+		a, ok := actual.(*DListType)
+		return ok && matchTypePattern(p.Elem, a.Elem) && shapeMatchesPattern(p.Shape, a.Shape)
+	case *DListViewType:
+		a, ok := actual.(*DListViewType)
+		return ok && matchTypePattern(p.Elem, a.Elem)
 	case *DStrType:
 		a, ok := actual.(*DStrType)
 		return ok && shapeMatchesPattern(p.Shape, a.Shape)
@@ -551,17 +580,22 @@ type runtimeBridgeKind int
 const (
 	runtimeBridgeNone runtimeBridgeKind = iota
 	runtimeBridgeDArrayDynArray
+	runtimeBridgeDListCtxList
+	runtimeBridgeDListViewCtxListView
 	runtimeBridgeDArrayCtxList
 	runtimeBridgeDStrU8Ref
 )
 
 type runtimeBridgeMatch struct {
-	Kind     runtimeBridgeKind
-	DArray   *DArrayType
-	DynArray *GenericInstanceType
-	CtxList  *RefType
-	DStr     *DStrType
-	U8Ref    *RefType
+	Kind        runtimeBridgeKind
+	DArray      *DArrayType
+	DList       *DListType
+	DListView   *DListViewType
+	DynArray    *GenericInstanceType
+	CtxList     *RefType
+	CtxListView *StructType
+	DStr        *DStrType
+	U8Ref       *RefType
 }
 
 func isVoidRefType(t Type) bool {
@@ -597,6 +631,14 @@ func u8RuntimeRef(t Type) (*RefType, bool) {
 	return ref, true
 }
 
+func ctxListViewRuntimeType(t Type) (*StructType, bool) {
+	st, ok := t.(*StructType)
+	if !ok || st.Name != "CtxListView" {
+		return nil, false
+	}
+	return st, true
+}
+
 func classifyRuntimeBridge(a, b Type) (runtimeBridgeMatch, bool) {
 	if da, ok := a.(*DArrayType); ok {
 		if dynArray, ok := dynArrayRuntimeInstance(b); ok {
@@ -608,6 +650,16 @@ func classifyRuntimeBridge(a, b Type) (runtimeBridgeMatch, bool) {
 			}
 		}
 	}
+	if dl, ok := a.(*DListType); ok {
+		if ctxList, ok := ctxListRuntimeRef(b); ok {
+			return runtimeBridgeMatch{Kind: runtimeBridgeDListCtxList, DList: dl, CtxList: ctxList}, true
+		}
+	}
+	if dlv, ok := a.(*DListViewType); ok {
+		if ctxListView, ok := ctxListViewRuntimeType(b); ok {
+			return runtimeBridgeMatch{Kind: runtimeBridgeDListViewCtxListView, DListView: dlv, CtxListView: ctxListView}, true
+		}
+	}
 	if da, ok := b.(*DArrayType); ok {
 		if dynArray, ok := dynArrayRuntimeInstance(a); ok {
 			return runtimeBridgeMatch{Kind: runtimeBridgeDArrayDynArray, DArray: da, DynArray: dynArray}, true
@@ -616,6 +668,16 @@ func classifyRuntimeBridge(a, b Type) (runtimeBridgeMatch, bool) {
 			if ctxList, ok := ctxListRuntimeRef(a); ok {
 				return runtimeBridgeMatch{Kind: runtimeBridgeDArrayCtxList, DArray: da, CtxList: ctxList}, true
 			}
+		}
+	}
+	if dl, ok := b.(*DListType); ok {
+		if ctxList, ok := ctxListRuntimeRef(a); ok {
+			return runtimeBridgeMatch{Kind: runtimeBridgeDListCtxList, DList: dl, CtxList: ctxList}, true
+		}
+	}
+	if dlv, ok := b.(*DListViewType); ok {
+		if ctxListView, ok := ctxListViewRuntimeType(a); ok {
+			return runtimeBridgeMatch{Kind: runtimeBridgeDListViewCtxListView, DListView: dlv, CtxListView: ctxListView}, true
 		}
 	}
 	if dstr, ok := a.(*DStrType); ok {
@@ -652,7 +714,7 @@ func assignableRuntimeCompatible(dst, src Type) bool {
 	switch bridge.Kind {
 	case runtimeBridgeDArrayDynArray:
 		return SameType(bridge.DArray.Elem, bridge.DynArray.Args[0])
-	case runtimeBridgeDArrayCtxList, runtimeBridgeDStrU8Ref:
+	case runtimeBridgeDListCtxList, runtimeBridgeDListViewCtxListView, runtimeBridgeDArrayCtxList, runtimeBridgeDStrU8Ref:
 		return true
 	default:
 		return false
@@ -673,7 +735,7 @@ func patternRuntimeCompatible(pattern, actual Type) bool {
 			return matchTypePattern(patternDynArray.Args[0], bridge.DArray.Elem)
 		}
 		return false
-	case runtimeBridgeDArrayCtxList, runtimeBridgeDStrU8Ref:
+	case runtimeBridgeDListCtxList, runtimeBridgeDListViewCtxListView, runtimeBridgeDArrayCtxList, runtimeBridgeDStrU8Ref:
 		return true
 	default:
 		return false

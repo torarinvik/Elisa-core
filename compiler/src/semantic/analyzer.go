@@ -60,6 +60,15 @@ var shapeTransformTable = map[string]ShapeTransformSpec{
 	"ctx_stage1rt_list_truncate":          {FreshReturnShapeParams: []string{"shape_out"}},
 	"ctx_stage1rt_list_clear":             {FreshReturnShapeParams: []string{"shape_out"}},
 	"ctx_stage1rt_list_from_view":         {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_tlist_new":              {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_tlist_new_reserve":      {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_tlist_reserve":          {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_tlist_push":             {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_tlist_push_mut":         {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_tlist_concat":           {FreshReturnShapeParams: []string{"shape_result"}},
+	"ctx_stage1rt_tlist_truncate":         {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_tlist_clear":            {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_tlist_from_view":        {FreshReturnShapeParams: []string{"shape_out"}},
 }
 
 type freshReturnStatus int
@@ -930,7 +939,7 @@ func (a *Analyzer) collectRuntimeBridgeBindings(pattern, actual Type, bindings m
 			return true
 		}
 		return true
-	case runtimeBridgeDArrayCtxList, runtimeBridgeDStrU8Ref:
+	case runtimeBridgeDListCtxList, runtimeBridgeDListViewCtxListView, runtimeBridgeDArrayCtxList, runtimeBridgeDStrU8Ref:
 		return true
 	default:
 		return false
@@ -961,6 +970,15 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		if act, ok := actual.(*DArrayType); ok {
 			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings)
 			a.collectShapeBinding(p.Shape, act.Shape, shapeBindings)
+		}
+	case *DListType:
+		if act, ok := actual.(*DListType); ok {
+			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings)
+			a.collectShapeBinding(p.Shape, act.Shape, shapeBindings)
+		}
+	case *DListViewType:
+		if act, ok := actual.(*DListViewType); ok {
+			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings)
 		}
 	case *DStrType:
 		if act, ok := actual.(*DStrType); ok {
@@ -1205,6 +1223,20 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 }
 
 func (a *Analyzer) runtimeBackedStructType(t Type) Type {
+	if _, ok := t.(*DListType); ok {
+		base, ok := a.namedTypes["CtxList"]
+		if !ok {
+			return nil
+		}
+		return base
+	}
+	if _, ok := t.(*DListViewType); ok {
+		base, ok := a.namedTypes["CtxListView"]
+		if !ok {
+			return nil
+		}
+		return base
+	}
 	darray, ok := t.(*DArrayType)
 	if !ok {
 		return nil
@@ -1311,6 +1343,18 @@ func (a *Analyzer) resolveDynamicShapeType(expr *ast.GenericType) (Type, bool) {
 			return invalidType, true
 		}
 		return &DArrayType{Elem: a.resolveType(expr.Args[0]), Shape: a.resolveShapeArg(expr.Args[1])}, true
+	case "DList":
+		if len(expr.Args) != 2 {
+			a.errorf(expr.Pos(), "DList expects 2 arguments, got %d", len(expr.Args))
+			return invalidType, true
+		}
+		return &DListType{Elem: a.resolveType(expr.Args[0]), Shape: a.resolveShapeArg(expr.Args[1])}, true
+	case "DListView":
+		if len(expr.Args) != 1 {
+			a.errorf(expr.Pos(), "DListView expects 1 argument, got %d", len(expr.Args))
+			return invalidType, true
+		}
+		return &DListViewType{Elem: a.resolveType(expr.Args[0])}, true
 	case "DStr":
 		if len(expr.Args) != 1 {
 			a.errorf(expr.Pos(), "DStr expects 1 argument, got %d", len(expr.Args))
@@ -1474,6 +1518,10 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 		return &ArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Size: n.Size, HasConstSize: n.HasConstSize, ConstSize: n.ConstSize}
 	case *DArrayType:
 		return &DArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Shape: a.substituteShape(n.Shape, shapeBindings)}
+	case *DListType:
+		return &DListType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Shape: a.substituteShape(n.Shape, shapeBindings)}
+	case *DListViewType:
+		return &DListViewType{Elem: a.substituteType(n.Elem, bindings, shapeBindings)}
 	case *DStrType:
 		return &DStrType{Shape: a.substituteShape(n.Shape, shapeBindings)}
 	case *GenericInstanceType:
@@ -1563,12 +1611,26 @@ func (a *Analyzer) collectImplicitShapeParamsFromType(expr ast.TypeExpr, seen ma
 					*order = append(*order, name)
 				}
 			}
+		case "DList":
+			if len(n.Args) > 0 {
+				a.collectImplicitShapeParamsFromType(n.Args[0], seen, order)
+			}
+			if len(n.Args) > 1 {
+				if name, ok := shapeNameFromTypeExpr(n.Args[1]); ok && isImplicitShapeWitnessName(name) && !seen[name] {
+					seen[name] = true
+					*order = append(*order, name)
+				}
+			}
 		case "DStr":
 			if len(n.Args) > 0 {
 				if name, ok := shapeNameFromTypeExpr(n.Args[0]); ok && isImplicitShapeWitnessName(name) && !seen[name] {
 					seen[name] = true
 					*order = append(*order, name)
 				}
+			}
+		case "DListView":
+			if len(n.Args) > 0 {
+				a.collectImplicitShapeParamsFromType(n.Args[0], seen, order)
 			}
 		default:
 			for _, arg := range n.Args {
@@ -1626,6 +1688,13 @@ func collectShapeParamsInType(t Type, out map[string]bool) {
 		if param, ok := n.Shape.(*ShapeParam); ok {
 			out[param.Name] = true
 		}
+		collectShapeParamsInType(n.Elem, out)
+	case *DListType:
+		if param, ok := n.Shape.(*ShapeParam); ok {
+			out[param.Name] = true
+		}
+		collectShapeParamsInType(n.Elem, out)
+	case *DListViewType:
 		collectShapeParamsInType(n.Elem, out)
 	case *DStrType:
 		if param, ok := n.Shape.(*ShapeParam); ok {
@@ -1794,6 +1863,10 @@ func usesCtxListLogicalShape(t Type) bool {
 		return usesCtxListLogicalShape(n.Elem)
 	case *DArrayType:
 		return isVoidRefType(n.Elem)
+	case *DListType:
+		return true
+	case *DListViewType:
+		return false
 	case *GenericInstanceType:
 		for _, arg := range n.Args {
 			if usesCtxListLogicalShape(arg) {
@@ -1837,6 +1910,14 @@ func collectFreshShapesInto(t Type, seen map[int]bool, out *[]*FreshShape) {
 			seen[fresh.ID] = true
 			*out = append(*out, fresh)
 		}
+		collectFreshShapesInto(n.Elem, seen, out)
+	case *DListType:
+		if fresh, ok := n.Shape.(*FreshShape); ok && !seen[fresh.ID] {
+			seen[fresh.ID] = true
+			*out = append(*out, fresh)
+		}
+		collectFreshShapesInto(n.Elem, seen, out)
+	case *DListViewType:
 		collectFreshShapesInto(n.Elem, seen, out)
 	case *DStrType:
 		if fresh, ok := n.Shape.(*FreshShape); ok && !seen[fresh.ID] {

@@ -377,6 +377,17 @@ def keep(text: DStr[row]) -> DStr[row]:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsImplicitDListShapeParams(t *testing.T) {
+	src := `def identity[T](values: DList[T, shape_in]) -> DList[T, shape_in]:
+    return values
+
+def keep(values: DList[i32, row]) -> DList[i32, row]:
+    return identity(values)
+`
+	_, errs := parseAndAnalyze(t, "implicit_dlist_shape_params.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeDStrRuntimeBridgeWorksBothDirections(t *testing.T) {
 	src := `def take_raw(text: u8&) -> void:
 	pass
@@ -399,6 +410,12 @@ func TestAnalyzeRejectsWrongDynamicShapeArity(t *testing.T) {
 	src := `def bad_array(x: DArray[i32]) -> void:
     pass
 
+def bad_list(x: DList[i32]) -> void:
+	pass
+
+def bad_list_view(x: DListView[i32, row]) -> void:
+	pass
+
 def bad_str(x: DStr[row, col]) -> void:
     pass
 `
@@ -407,9 +424,35 @@ def bad_str(x: DStr[row, col]) -> void:
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "DArray expects 2 arguments, got 1") || !strings.Contains(all, "DStr expects 1 argument, got 2") {
+	if !strings.Contains(all, "DArray expects 2 arguments, got 1") || !strings.Contains(all, "DList expects 2 arguments, got 1") || !strings.Contains(all, "DListView expects 1 argument, got 2") || !strings.Contains(all, "DStr expects 1 argument, got 2") {
 		t.Fatalf("expected dynamic shape arity diagnostics, got:\n%s", all)
 	}
+}
+
+func TestAnalyzeDListUsesCtxListRuntimeFields(t *testing.T) {
+	src := `repr(c) struct CtxList:
+    len: mutable i64
+    cap: mutable i64
+    elem_size: mutable i64
+
+def has_room[T](values: DList[T, row]&) -> bool:
+    return values.len < values.cap
+`
+	_, errs := parseAndAnalyze(t, "dlist_runtime_field_access.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeDListViewUsesCtxListViewRuntimeFields(t *testing.T) {
+	src := `repr(c) struct CtxListView:
+    data: mutable void&&?
+    len: mutable i64
+    elem_size: mutable i64
+
+def non_empty[T](view: DListView[T]) -> bool:
+    return view.len > 0 and view.elem_size > 0
+`
+	_, errs := parseAndAnalyze(t, "dlist_view_runtime_field_access.llcontext", src)
+	requireNoErrors(t, errs)
 }
 
 func TestAnalyzeShapeChangingResizeReturnsFreshShape(t *testing.T) {
@@ -687,6 +730,151 @@ def bad(values: DArray[void&, row], elem: void&) -> DArray[void&, row]:
 	}
 }
 
+func TestAnalyzeStage1TypedListWrappersReduceVoidBottleneck(t *testing.T) {
+	src := `repr(c) struct CtxList:
+	len: mutable i64
+	cap: mutable i64
+	elem_size: mutable i64
+	data: mutable void&&?
+	inline_boxes: mutable u8&?
+	inline_box_stride: mutable i64
+
+repr(c) struct CtxListView:
+	data: mutable void&&?
+	len: mutable i64
+	elem_size: mutable i64
+
+extern ctx_stage0_list_new_reserve(cap: i64, elem_size: i64) -> CtxList&
+
+def ctx_stage0_list_push(values: CtxList&?, elem: void&?, elem_size: i64) -> CtxList&?:
+	return values
+
+def ctx_stage0_list_view(values: CtxList&?, start: i64, end: i64) -> CtxListView:
+	return CtxListView(null, 0, 0)
+
+def ctx_stage0_list_view_len(view: CtxListView) -> i64:
+	return view.len
+
+def ctx_stage0_list_view_slice(view: CtxListView, start: i64, end: i64) -> CtxListView:
+	return view
+
+def ctx_stage0_list_get(values: CtxList&?, index: i64, elem_size: i64) -> void&:
+	return 0.void&()
+
+def ctx_stage0_list_view_get(view: CtxListView, index: i64, elem_size: i64) -> void&:
+	return 0.void&()
+
+extern ctx_stage0_list_view_copy(view: CtxListView) -> CtxList&
+
+def ctx_stage1rt_tlist_new[T](type_hint: T&) -> DList[T, shape_out]:
+	_ = type_hint
+	return ctx_stage0_list_new_reserve(0, sizeof(T).i64())
+
+def ctx_stage1rt_tlist_push[T](values: DList[T, shape_in], elem: T&) -> DList[T, shape_out]:
+	return ctx_stage0_list_push(values, elem.void&(), sizeof(T).i64())
+
+def ctx_stage1rt_tlist_view[T](values: DList[T, shape_in], start: i64, end: i64) -> DListView[T]:
+	return ctx_stage0_list_view(values, start, end)
+
+def ctx_stage1rt_tlist_view_len[T](view: DListView[T]) -> i64:
+	return ctx_stage0_list_view_len(view)
+
+def ctx_stage1rt_tlist_view_slice[T](view: DListView[T], start: i64, end: i64) -> DListView[T]:
+	return ctx_stage0_list_view_slice(view, start, end)
+
+def ctx_stage1rt_tlist_get[T](values: DList[T, shape_in], index: i64) -> T&:
+	return ctx_stage0_list_get(values, index, sizeof(T).i64()).T&()
+
+def ctx_stage1rt_tlist_view_get[T](view: DListView[T], index: i64) -> T&:
+	return ctx_stage0_list_view_get(view, index, sizeof(T).i64()).T&()
+
+def ctx_stage1rt_tlist_from_view[T](view: DListView[T]) -> DList[T, shape_out]:
+	return ctx_stage0_list_view_copy(view)
+
+def use(seed: i64&) -> i64&:
+	view: DListView[i64] = ctx_stage1rt_tlist_view(ctx_stage1rt_tlist_push(ctx_stage1rt_tlist_new(seed), seed), 0, 2)
+	sub: DListView[i64] = ctx_stage1rt_tlist_view_slice(view, 0, 1)
+	if ctx_stage1rt_tlist_view_len(sub) > 0:
+		_ = ctx_stage1rt_tlist_view_get(sub, 0)
+	return ctx_stage1rt_tlist_get(ctx_stage1rt_tlist_from_view(sub), 0)
+`
+	_, errs := parseAndAnalyze(t, "stage1_typed_list_wrappers.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeStage1TypedListPushReturnsFreshShape(t *testing.T) {
+	src := `repr(c) struct CtxList:
+	len: mutable i64
+	cap: mutable i64
+	elem_size: mutable i64
+	data: mutable void&&?
+	inline_boxes: mutable u8&?
+	inline_box_stride: mutable i64
+
+extern ctx_stage0_list_new_reserve(cap: i64, elem_size: i64) -> CtxList&
+
+def ctx_stage0_list_push(values: CtxList&?, elem: void&?, elem_size: i64) -> CtxList&?:
+	return values
+
+def ctx_stage1rt_tlist_new[T](type_hint: T&) -> DList[T, shape_out]:
+	_ = type_hint
+	return ctx_stage0_list_new_reserve(0, sizeof(T).i64())
+
+def ctx_stage1rt_tlist_push[T](values: DList[T, shape_in], elem: T&) -> DList[T, shape_out]:
+	return ctx_stage0_list_push(values, elem.void&(), sizeof(T).i64())
+
+def bad(seed: i64&) -> DList[i64, row]:
+	return ctx_stage1rt_tlist_push(ctx_stage1rt_tlist_new(seed), seed)
+`
+	_, errs := parseAndAnalyze(t, "stage1_typed_list_push_fresh_shape.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "return type expects DList[i64, row], got DList[i64, shape_out#") || !strings.Contains(all, "note: ctx_stage1rt_tlist_push returns a fresh logical shape for shape_out") || !strings.Contains(all, "note: CtxList-backed list wrappers keep the same runtime layout; this mismatch is about the logical shape witness") {
+		t.Fatalf("expected fresh typed-list push diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeStage1TypedListFromViewReturnsFreshShape(t *testing.T) {
+	src := `repr(c) struct CtxList:
+	len: mutable i64
+	cap: mutable i64
+	elem_size: mutable i64
+	data: mutable void&&?
+	inline_boxes: mutable u8&?
+	inline_box_stride: mutable i64
+
+repr(c) struct CtxListView:
+	data: mutable void&&?
+	len: mutable i64
+	elem_size: mutable i64
+
+def ctx_stage0_list_view(values: CtxList&?, start: i64, end: i64) -> CtxListView:
+	return CtxListView(null, 0, 0)
+
+extern ctx_stage0_list_view_copy(view: CtxListView) -> CtxList&
+
+def ctx_stage1rt_tlist_view[T](values: DList[T, shape_in], start: i64, end: i64) -> DListView[T]:
+	return ctx_stage0_list_view(values, start, end)
+
+def ctx_stage1rt_tlist_from_view[T](view: DListView[T]) -> DList[T, shape_out]:
+	return ctx_stage0_list_view_copy(view)
+
+def bad(values: DList[i64, row]) -> DList[i64, row]:
+	view: DListView[i64] = ctx_stage1rt_tlist_view(values, 0, 1)
+	return ctx_stage1rt_tlist_from_view(view)
+`
+	_, errs := parseAndAnalyze(t, "stage1_typed_list_from_view_fresh_shape.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "return type expects DList[i64, row], got DList[i64, shape_out#") || !strings.Contains(all, "note: ctx_stage1rt_tlist_from_view returns a fresh logical shape for shape_out") || !strings.Contains(all, "note: CtxList-backed list wrappers keep the same runtime layout; this mismatch is about the logical shape witness") {
+		t.Fatalf("expected fresh typed-list from-view diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeAdditionalStage1ListWrappersReturnFreshShapes(t *testing.T) {
 	src := `repr(c) struct CtxList:
     len: mutable i64
@@ -786,6 +974,52 @@ def bad(text: DStr[row]) -> DStr[row]:
 	}
 }
 
+func TestAnalyzeStage1StringViewHelpersAcceptSubviewAndEquality(t *testing.T) {
+	src := `repr(c) struct CtxStringView:
+	data: mutable u8&
+	len: mutable i64
+
+def ctx_stage0_string_view(value: u8&?, start: i64, end: i64) -> CtxStringView:
+	return CtxStringView("", 0)
+
+def ctx_stage0_string_view_len(view: CtxStringView) -> i64:
+	return view.len
+
+def ctx_stage0_string_view_slice(view: CtxStringView, start: i64, end: i64) -> CtxStringView:
+	return view
+
+def ctx_stage0_string_view_eq(view: CtxStringView, other: u8&?) -> int:
+	return 1
+
+def ctx_stage0_string_views_eq(lhs: CtxStringView, rhs: CtxStringView) -> int:
+	return 1
+
+def ctx_stage1rt_string_view(value: DStr[shape_in], start: i64, end: i64) -> CtxStringView:
+	return ctx_stage0_string_view(value, start, end)
+
+def ctx_stage1rt_string_view_len(view: CtxStringView) -> i64:
+	return ctx_stage0_string_view_len(view)
+
+def ctx_stage1rt_string_view_slice(view: CtxStringView, start: i64, end: i64) -> CtxStringView:
+	return ctx_stage0_string_view_slice(view, start, end)
+
+def ctx_stage1rt_string_view_eq(view: CtxStringView, other: DStr[shape_other]) -> int:
+	return ctx_stage0_string_view_eq(view, other)
+
+def ctx_stage1rt_string_views_eq(lhs: CtxStringView, rhs: CtxStringView) -> int:
+	return ctx_stage0_string_views_eq(lhs, rhs)
+
+def probe(text: DStr[row], other: DStr[col]) -> int:
+	view: CtxStringView = ctx_stage1rt_string_view(text, 0, 4)
+	sub: CtxStringView = ctx_stage1rt_string_view_slice(view, 1, 3)
+	if ctx_stage1rt_string_view_eq(sub, other) != 0:
+		return ctx_stage1rt_string_views_eq(sub, view)
+	return ctx_stage1rt_string_view_len(sub)
+`
+	_, errs := parseAndAnalyze(t, "stage1_string_view_helpers.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeStage1ListViewWrappersSupportBoundedViews(t *testing.T) {
 	src := `repr(c) struct CtxList:
 	len: mutable i64
@@ -807,7 +1041,7 @@ def ctx_stage0_list_view_len(view: CtxListView) -> i64:
 	return view.len
 
 def ctx_stage0_list_view_get(view: CtxListView, index: i64, elem_size: i64) -> void&:
-	return null.void&()
+	return 0.void&()
 
 def ctx_stage0_list_view_copy(view: CtxListView) -> CtxList&:
 	return CtxList(0, 0, 0, null, null, 0)
@@ -841,6 +1075,54 @@ def bad(values: DArray[void&, row]) -> DArray[void&, row]:
 	if !strings.Contains(all, "return type expects DArray[void&, row], got DArray[void&, shape_out#") || !strings.Contains(all, "note: ctx_stage1rt_list_from_view returns a fresh logical shape for shape_out") || !strings.Contains(all, "note: CtxList-backed list wrappers keep the same runtime layout; this mismatch is about the logical shape witness") {
 		t.Fatalf("expected bounded list view fresh-shape diagnostic, got:\n%s", all)
 	}
+}
+
+func TestAnalyzeStage1ListViewHelpersAcceptNestedSubview(t *testing.T) {
+	src := `repr(c) struct CtxList:
+	len: mutable i64
+	cap: mutable i64
+	elem_size: mutable i64
+	data: mutable void&&?
+	inline_boxes: mutable u8&?
+	inline_box_stride: mutable i64
+
+repr(c) struct CtxListView:
+	data: mutable void&&?
+	len: mutable i64
+	elem_size: mutable i64
+
+def ctx_stage0_list_view(values: CtxList&?, start: i64, end: i64) -> CtxListView:
+	return CtxListView(null, 0, 0)
+
+def ctx_stage0_list_view_len(view: CtxListView) -> i64:
+	return view.len
+
+def ctx_stage0_list_view_slice(view: CtxListView, start: i64, end: i64) -> CtxListView:
+	return view
+
+def ctx_stage0_list_view_get(view: CtxListView, index: i64, elem_size: i64) -> void&:
+	return 0.void&()
+
+def ctx_stage1rt_list_view(values: DArray[void&, shape_in], start: i64, end: i64) -> CtxListView:
+	return ctx_stage0_list_view(values, start, end)
+
+def ctx_stage1rt_list_view_len(view: CtxListView) -> i64:
+	return ctx_stage0_list_view_len(view)
+
+def ctx_stage1rt_list_view_slice(view: CtxListView, start: i64, end: i64) -> CtxListView:
+	return ctx_stage0_list_view_slice(view, start, end)
+
+def ctx_stage1rt_list_view_get(view: CtxListView, index: i64, elem_size: i64) -> void&:
+	return ctx_stage0_list_view_get(view, index, elem_size)
+
+def probe(values: DArray[void&, row]) -> i64:
+	view: CtxListView = ctx_stage1rt_list_view(values, 0, 4)
+	sub: CtxListView = ctx_stage1rt_list_view_slice(view, 1, 3)
+	_ = ctx_stage1rt_list_view_get(sub, 0, 8)
+	return ctx_stage1rt_list_view_len(sub)
+`
+	_, errs := parseAndAnalyze(t, "stage1_list_view_helpers.llcontext", src)
+	requireNoErrors(t, errs)
 }
 
 func TestAnalyzeCtxListRuntimeBridgeWorksBothDirections(t *testing.T) {

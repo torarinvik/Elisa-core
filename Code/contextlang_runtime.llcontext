@@ -563,6 +563,25 @@ def ctx_stage0_list_view(list: CtxList&?, start: i64, end: i64) -> CtxListView:
 def ctx_stage0_list_view_len(view: CtxListView) -> i64:
     return view.len
 
+def ctx_stage0_list_view_slice(view: CtxListView, start: i64, end: i64) -> CtxListView:
+    if view.data == null or view.len <= 0:
+        return CtxListView(null, 0, view.elem_size)
+
+    lo: mutable i64 = start if start > 0 else 0
+    hi: mutable i64 = end if end >= 0 else view.len
+
+    if lo > view.len:
+        lo <- view.len
+    if hi > view.len:
+        hi <- view.len
+    if hi < lo:
+        hi <- lo
+
+    if hi == lo:
+        return CtxListView(null, 0, view.elem_size)
+
+    return CtxListView(view.data + lo.usize(), hi - lo, view.elem_size)
+
 def ctx_stage0_list_view_get(view: CtxListView, index: i64, elem_size: i64) -> void&:
     if view.data == null or index < 0 or index >= view.len:
         fallback_elem_size: i64 = elem_size if elem_size > 0 else view.elem_size
@@ -862,11 +881,47 @@ def ctx_stage0_string_view(value: u8&?, start: i64, end: i64) -> CtxStringView:
 def ctx_stage0_string_view_len(view: CtxStringView) -> i64:
     return view.len
 
+def ctx_stage0_string_view_slice(view: CtxStringView, start: i64, end: i64) -> CtxStringView:
+    lo: mutable i64 = start if start > 0 else 0
+    hi: mutable i64 = end if end >= 0 else view.len
+
+    if lo > view.len:
+        lo <- view.len
+    if hi > view.len:
+        hi <- view.len
+    if hi < lo:
+        hi <- lo
+
+    return CtxStringView(view.data + lo.usize(), hi - lo)
+
 def ctx_stage0_string_view_index(view: CtxStringView, index: i64) -> i64:
     if index < 0 or index >= view.len:
         return -1
 
     return view.data[index.usize()].i64()
+
+def ctx_stage0_string_view_eq(view: CtxStringView, other: u8&?) -> int:
+    rhs: u8& = other if other != null else ""
+    rhs_len: usize = ctx_stage0_runtime_strlen(rhs)
+
+    if view.len < 0 or view.len.usize() != rhs_len:
+        return 0
+    if view.len == 0:
+        return 1
+    if view.data == rhs:
+        return 1
+
+    return 1 if memcmp(view.data.void&(), rhs.void&(), view.len.usize()) == 0 else 0
+
+def ctx_stage0_string_views_eq(lhs: CtxStringView, rhs: CtxStringView) -> int:
+    if lhs.len != rhs.len:
+        return 0
+    if lhs.len == 0:
+        return 1
+    if lhs.data == rhs.data:
+        return 1
+
+    return 1 if memcmp(lhs.data.void&(), rhs.data.void&(), lhs.len.usize()) == 0 else 0
 
 def ctx_stage0_string_view_copy(view: CtxStringView) -> u8&:
     if view.len <= 0:
@@ -942,8 +997,17 @@ def ctx_stage1rt_string_view(value: DStr[shape_in], start: i64, end: i64) -> Ctx
 def ctx_stage1rt_string_view_len(view: CtxStringView) -> i64:
     return ctx_stage0_string_view_len(view)
 
+def ctx_stage1rt_string_view_slice(view: CtxStringView, start: i64, end: i64) -> CtxStringView:
+    return ctx_stage0_string_view_slice(view, start, end)
+
 def ctx_stage1rt_string_view_index(view: CtxStringView, index: i64) -> i64:
     return ctx_stage0_string_view_index(view, index)
+
+def ctx_stage1rt_string_view_eq(view: CtxStringView, other: DStr[shape_other]) -> int:
+    return ctx_stage0_string_view_eq(view, other)
+
+def ctx_stage1rt_string_views_eq(lhs: CtxStringView, rhs: CtxStringView) -> int:
+    return ctx_stage0_string_views_eq(lhs, rhs)
 
 def ctx_stage1rt_string_from_view(view: CtxStringView) -> DStr[shape_out]:
     return ctx_stage0_string_view_copy(view)
@@ -978,11 +1042,64 @@ def ctx_stage1rt_list_view(values: DArray[void&, shape_in], start: i64, end: i64
 def ctx_stage1rt_list_view_len(view: CtxListView) -> i64:
     return ctx_stage0_list_view_len(view)
 
+def ctx_stage1rt_list_view_slice(view: CtxListView, start: i64, end: i64) -> CtxListView:
+    return ctx_stage0_list_view_slice(view, start, end)
+
 def ctx_stage1rt_list_view_get(view: CtxListView, index: i64, elem_size: i64) -> void&:
     return ctx_stage0_list_view_get(view, index, elem_size)
 
 def ctx_stage1rt_list_from_view(view: CtxListView) -> DArray[void&, shape_out]:
     return ctx_stage0_list_view_copy(view)
+
+def ctx_stage1rt_tlist_new[T](type_hint: T&) -> DList[T, shape_out]:
+    _ = type_hint
+    return ctx_stage0_list_new_reserve(0, sizeof(T).i64())
+
+def ctx_stage1rt_tlist_new_reserve[T](cap: i64, type_hint: T&) -> DList[T, shape_out]:
+    _ = type_hint
+    return ctx_stage0_list_new_reserve(cap, sizeof(T).i64())
+
+def ctx_stage1rt_tlist_reserve[T](values: DList[T, shape_in], cap: i64) -> DList[T, shape_out]:
+    return ctx_stage0_list_reserve(values, cap, sizeof(T).i64())
+
+def ctx_stage1rt_tlist_push[T](values: DList[T, shape_in], elem: T&) -> DList[T, shape_out]:
+    return ctx_stage0_list_push(values, elem.void&(), sizeof(T).i64())
+
+def ctx_stage1rt_tlist_push_mut[T](values: DList[T, shape_in], elem: T&) -> DList[T, shape_out]:
+    return ctx_stage0_list_push_mut(values, elem.void&(), sizeof(T).i64())
+
+def ctx_stage1rt_tlist_concat[T](left: DList[T, shape_left], right: DList[T, shape_right]) -> DList[T, shape_result]:
+    return ctx_stage0_list_concat(left, right)
+
+def ctx_stage1rt_tlist_truncate[T](values: DList[T, shape_in], size: i64) -> DList[T, shape_out]:
+    return ctx_stage0_list_truncate(values, size)
+
+def ctx_stage1rt_tlist_clear[T](values: DList[T, shape_in]) -> DList[T, shape_out]:
+    return ctx_stage0_list_clear(values)
+
+def ctx_stage1rt_tlist_view[T](values: DList[T, shape_in], start: i64, end: i64) -> DListView[T]:
+    return ctx_stage0_list_view(values, start, end)
+
+def ctx_stage1rt_tlist_view_len[T](view: DListView[T]) -> i64:
+    return ctx_stage0_list_view_len(view)
+
+def ctx_stage1rt_tlist_view_slice[T](view: DListView[T], start: i64, end: i64) -> DListView[T]:
+    return ctx_stage0_list_view_slice(view, start, end)
+
+def ctx_stage1rt_tlist_from_view[T](view: DListView[T]) -> DList[T, shape_out]:
+    return ctx_stage0_list_view_copy(view)
+
+def ctx_stage1rt_tlist_len[T](values: DList[T, shape_in]) -> i64:
+    return ctx_stage0_list_len(values)
+
+def ctx_stage1rt_tlist_get[T](values: DList[T, shape_in], index: i64) -> T&:
+    return ctx_stage0_list_get(values, index, sizeof(T).i64()).T&()
+
+def ctx_stage1rt_tlist_set[T](values: DList[T, shape_in], index: i64, elem: T&) -> i64:
+    return ctx_stage0_list_set(values, index, elem.void&(), sizeof(T).i64())
+
+def ctx_stage1rt_tlist_view_get[T](view: DListView[T], index: i64) -> T&:
+    return ctx_stage0_list_view_get(view, index, sizeof(T).i64()).T&()
 
 def ctx_stage1rt_list_len(values: DArray[void&, shape_in]) -> i64:
     return ctx_stage0_list_len(values)

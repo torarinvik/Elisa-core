@@ -471,6 +471,33 @@ long long ctx_stage0_list_view_len(ctx_stage0_list_view view) {
     return view.len;
 }
 
+ctx_stage0_list_view ctx_stage0_list_view_slice(ctx_stage0_list_view view, long long start, long long end) {
+    ctx_stage0_list_view out;
+    out.data = NULL;
+    out.len = 0;
+    out.elem_size = view.elem_size;
+    if (view.data == NULL || view.len <= 0) {
+        return out;
+    }
+    long long lo = start > 0 ? start : 0;
+    long long hi = end >= 0 ? end : view.len;
+    if (lo > view.len) {
+        lo = view.len;
+    }
+    if (hi > view.len) {
+        hi = view.len;
+    }
+    if (hi < lo) {
+        hi = lo;
+    }
+    if (hi == lo) {
+        return out;
+    }
+    out.data = view.data + lo;
+    out.len = hi - lo;
+    return out;
+}
+
 void *ctx_stage0_list_view_get(ctx_stage0_list_view view, long long index, long long elem_size) {
     if (view.data == NULL || index < 0 || index >= view.len) {
         long long fallback_elem_size = elem_size > 0 ? elem_size : view.elem_size;
@@ -786,11 +813,57 @@ long long ctx_stage0_string_view_len(ctx_stage0_string_view view) {
     return view.len;
 }
 
+ctx_stage0_string_view ctx_stage0_string_view_slice(ctx_stage0_string_view view, long long start, long long end) {
+    long long lo = start > 0 ? start : 0;
+    long long hi = end >= 0 ? end : view.len;
+    if (lo > view.len) {
+        lo = view.len;
+    }
+    if (hi > view.len) {
+        hi = view.len;
+    }
+    if (hi < lo) {
+        hi = lo;
+    }
+    ctx_stage0_string_view out;
+    out.data = view.data + lo;
+    out.len = hi - lo;
+    return out;
+}
+
 long long ctx_stage0_string_view_index(ctx_stage0_string_view view, long long index) {
     if (index < 0 || index >= view.len) {
         return -1;
     }
     return (unsigned char)view.data[index];
+}
+
+int ctx_stage0_string_view_eq(ctx_stage0_string_view view, const char *other) {
+    const char *rhs = other ? other : "";
+    size_t rhs_len = ctx_stage0_runtime_strlen(rhs);
+    if (view.len < 0 || (size_t)view.len != rhs_len) {
+        return 0;
+    }
+    if (view.len == 0) {
+        return 1;
+    }
+    if (view.data == rhs) {
+        return 1;
+    }
+    return memcmp(view.data, rhs, (size_t)view.len) == 0 ? 1 : 0;
+}
+
+int ctx_stage0_string_views_eq(ctx_stage0_string_view lhs, ctx_stage0_string_view rhs) {
+    if (lhs.len != rhs.len) {
+        return 0;
+    }
+    if (lhs.len == 0) {
+        return 1;
+    }
+    if (lhs.data == rhs.data) {
+        return 1;
+    }
+    return memcmp(lhs.data, rhs.data, (size_t)lhs.len) == 0 ? 1 : 0;
 }
 
 char *ctx_stage0_string_view_copy(ctx_stage0_string_view view) {
@@ -883,8 +956,20 @@ long long ctx_stage1rt_string_view_len(ctx_stage0_string_view view) {
     return ctx_stage0_string_view_len(view);
 }
 
+ctx_stage0_string_view ctx_stage1rt_string_view_slice(ctx_stage0_string_view view, long long start, long long end) {
+    return ctx_stage0_string_view_slice(view, start, end);
+}
+
 long long ctx_stage1rt_string_view_index(ctx_stage0_string_view view, long long index) {
     return ctx_stage0_string_view_index(view, index);
+}
+
+int ctx_stage1rt_string_view_eq(ctx_stage0_string_view view, const char *other) {
+    return ctx_stage0_string_view_eq(view, other);
+}
+
+int ctx_stage1rt_string_views_eq(ctx_stage0_string_view lhs, ctx_stage0_string_view rhs) {
+    return ctx_stage0_string_views_eq(lhs, rhs);
 }
 
 char *ctx_stage1rt_string_from_view(ctx_stage0_string_view view) {
@@ -929,6 +1014,10 @@ ctx_stage0_list_view ctx_stage1rt_list_view(ctx_stage0_list *values, long long s
 
 long long ctx_stage1rt_list_view_len(ctx_stage0_list_view view) {
     return ctx_stage0_list_view_len(view);
+}
+
+ctx_stage0_list_view ctx_stage1rt_list_view_slice(ctx_stage0_list_view view, long long start, long long end) {
+    return ctx_stage0_list_view_slice(view, start, end);
 }
 
 void *ctx_stage1rt_list_view_get(ctx_stage0_list_view view, long long index, long long elem_size) {
