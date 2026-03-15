@@ -32,6 +32,62 @@ func requireNoErrors(t *testing.T, errs []string) {
 	}
 }
 
+func repoRootFromTestFile(t *testing.T) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("failed to determine test file path")
+	}
+	return filepath.Join(filepath.Dir(thisFile), "..", "..", "..")
+}
+
+func loadSourceWithIncludes(t *testing.T, filename string, seen map[string]bool) string {
+	t.Helper()
+	abs, err := filepath.Abs(filename)
+	if err != nil {
+		t.Fatalf("failed to resolve %s: %v", filename, err)
+	}
+	if seen[abs] {
+		t.Fatalf("cyclic include detected for %s", abs)
+	}
+	seen[abs] = true
+	defer delete(seen, abs)
+
+	raw, err := os.ReadFile(abs)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", abs, err)
+	}
+
+	lines := strings.Split(string(raw), "\n")
+	var out strings.Builder
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if includePath, ok := parseIncludeDirective(trimmed); ok {
+			out.WriteString(loadSourceWithIncludes(t, filepath.Join(filepath.Dir(abs), includePath), seen))
+			if out.Len() == 0 || !strings.HasSuffix(out.String(), "\n") {
+				out.WriteByte('\n')
+			}
+			continue
+		}
+		out.WriteString(line)
+		if i < len(lines)-1 {
+			out.WriteByte('\n')
+		}
+	}
+	return out.String()
+}
+
+func parseIncludeDirective(line string) (string, bool) {
+	if !strings.HasPrefix(line, "# include ") {
+		return "", false
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(line, "# include "))
+	if len(rest) < 2 || rest[0] != '"' || rest[len(rest)-1] != '"' {
+		return "", false
+	}
+	return rest[1 : len(rest)-1], true
+}
+
 func TestAnalyzeValidInlineProgram(t *testing.T) {
 	src := `repr(c) struct Box:
     value: mutable int
@@ -92,15 +148,28 @@ func TestAnalyzeTypeMismatchAssignment(t *testing.T) {
 }
 
 func TestAnalyzePointerFixture(t *testing.T) {
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("failed to determine test file path")
-	}
-	fixture := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "Code", "test_programs", "pointer_alloc.llcontext")
+	fixture := filepath.Join(repoRootFromTestFile(t), "Code", "test_programs", "pointer_alloc.llcontext")
 	src, err := os.ReadFile(fixture)
 	if err != nil {
 		t.Fatalf("failed to read fixture: %v", err)
 	}
 	_, errs := parseAndAnalyze(t, fixture, string(src))
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeArenaRuntimeFile(t *testing.T) {
+	fixture := filepath.Join(repoRootFromTestFile(t), "Code", "arena.llcontext")
+	src, err := os.ReadFile(fixture)
+	if err != nil {
+		t.Fatalf("failed to read arena runtime fixture: %v", err)
+	}
+	_, errs := parseAndAnalyze(t, fixture, string(src))
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeContextRuntimeFile(t *testing.T) {
+	fixture := filepath.Join(repoRootFromTestFile(t), "Code", "contextlang_runtime.llcontext")
+	src := loadSourceWithIncludes(t, fixture, map[string]bool{})
+	_, errs := parseAndAnalyze(t, fixture, src)
 	requireNoErrors(t, errs)
 }

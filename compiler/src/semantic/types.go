@@ -20,6 +20,10 @@ type BuiltinType struct {
 	Name string
 }
 
+type TypeParamType struct {
+	Name string
+}
+
 type RefType struct {
 	Elem     Type
 	Nullable bool
@@ -38,37 +42,48 @@ type Field struct {
 }
 
 type StructType struct {
-	Name   string
-	Fields map[string]Field
-	ReprC  bool
-	Decl   *ast.StructDecl
+	Name       string
+	TypeParams []string
+	Fields     map[string]Field
+	ReprC      bool
+	Decl       *ast.StructDecl
 }
 
 type OpaqueType struct {
 	Name string
 }
 
-type FuncType struct {
-	Name     string
-	Params   []Type
-	Return   Type
-	Variadic bool
+type GenericInstanceType struct {
+	Name string
+	Base Type
+	Args []Type
 }
 
-func (*InvalidType) isType() {}
-func (*NullType) isType()    {}
-func (*BuiltinType) isType() {}
-func (*RefType) isType()     {}
-func (*ArrayType) isType()   {}
-func (*StructType) isType()  {}
-func (*OpaqueType) isType()  {}
-func (*FuncType) isType()    {}
+type FuncType struct {
+	Name       string
+	TypeParams []string
+	Params     []Type
+	Return     Type
+	Variadic   bool
+}
+
+func (*InvalidType) isType()         {}
+func (*NullType) isType()            {}
+func (*BuiltinType) isType()         {}
+func (*TypeParamType) isType()       {}
+func (*RefType) isType()             {}
+func (*ArrayType) isType()           {}
+func (*StructType) isType()          {}
+func (*OpaqueType) isType()          {}
+func (*GenericInstanceType) isType() {}
+func (*FuncType) isType()            {}
 
 func (*InvalidType) String() string { return "<invalid>" }
 func (*NullType) String() string    { return "null" }
 func (t *BuiltinType) String() string {
 	return t.Name
 }
+func (t *TypeParamType) String() string { return t.Name }
 func (t *RefType) String() string {
 	s := t.Elem.String() + "&"
 	if t.Nullable {
@@ -81,6 +96,13 @@ func (t *ArrayType) String() string {
 }
 func (t *StructType) String() string { return t.Name }
 func (t *OpaqueType) String() string { return t.Name }
+func (t *GenericInstanceType) String() string {
+	parts := make([]string, 0, len(t.Args))
+	for _, arg := range t.Args {
+		parts = append(parts, arg.String())
+	}
+	return fmt.Sprintf("%s[%s]", t.Name, strings.Join(parts, ", "))
+}
 func (t *FuncType) String() string {
 	parts := make([]string, 0, len(t.Params))
 	for _, p := range t.Params {
@@ -128,6 +150,11 @@ func IsNumericType(t Type) bool {
 	}
 }
 
+func IsTypeParamType(t Type) (*TypeParamType, bool) {
+	tp, ok := t.(*TypeParamType)
+	return tp, ok
+}
+
 func IsRefType(t Type) (*RefType, bool) {
 	r, ok := t.(*RefType)
 	return r, ok
@@ -147,6 +174,9 @@ func SameType(a, b Type) bool {
 	case *BuiltinType:
 		tb, ok := b.(*BuiltinType)
 		return ok && ta.Name == tb.Name
+	case *TypeParamType:
+		tb, ok := b.(*TypeParamType)
+		return ok && ta.Name == tb.Name
 	case *RefType:
 		tb, ok := b.(*RefType)
 		return ok && ta.Nullable == tb.Nullable && SameType(ta.Elem, tb.Elem)
@@ -159,10 +189,26 @@ func SameType(a, b Type) bool {
 	case *OpaqueType:
 		tb, ok := b.(*OpaqueType)
 		return ok && ta.Name == tb.Name
+	case *GenericInstanceType:
+		tb, ok := b.(*GenericInstanceType)
+		if !ok || ta.Name != tb.Name || len(ta.Args) != len(tb.Args) {
+			return false
+		}
+		for i := range ta.Args {
+			if !SameType(ta.Args[i], tb.Args[i]) {
+				return false
+			}
+		}
+		return SameType(ta.Base, tb.Base)
 	case *FuncType:
 		tb, ok := b.(*FuncType)
-		if !ok || ta.Variadic != tb.Variadic || len(ta.Params) != len(tb.Params) || !SameType(ta.Return, tb.Return) {
+		if !ok || ta.Variadic != tb.Variadic || len(ta.TypeParams) != len(tb.TypeParams) || len(ta.Params) != len(tb.Params) || !SameType(ta.Return, tb.Return) {
 			return false
+		}
+		for i := range ta.TypeParams {
+			if ta.TypeParams[i] != tb.TypeParams[i] {
+				return false
+			}
 		}
 		for i := range ta.Params {
 			if !SameType(ta.Params[i], tb.Params[i]) {
@@ -182,7 +228,19 @@ func AssignableTo(dst, src Type) bool {
 	if IsInvalidType(dst) || IsInvalidType(src) {
 		return true
 	}
+	if matchTypePattern(dst, src) {
+		return true
+	}
+	if _, ok := dst.(*TypeParamType); ok {
+		return true
+	}
+	if _, ok := src.(*TypeParamType); ok {
+		return true
+	}
 	if SameType(dst, src) {
+		return true
+	}
+	if IsNumericType(dst) && IsNumericType(src) {
 		return true
 	}
 	if IsNullType(src) {
@@ -205,9 +263,74 @@ func AssignableTo(dst, src Type) bool {
 	return false
 }
 
+func matchTypePattern(pattern, actual Type) bool {
+	if pattern == nil || actual == nil {
+		return pattern == actual
+	}
+	if IsInvalidType(pattern) || IsInvalidType(actual) {
+		return true
+	}
+	if _, ok := pattern.(*TypeParamType); ok {
+		return true
+	}
+	switch p := pattern.(type) {
+	case *BuiltinType:
+		a, ok := actual.(*BuiltinType)
+		return ok && p.Name == a.Name
+	case *NullType:
+		_, ok := actual.(*NullType)
+		return ok
+	case *RefType:
+		a, ok := actual.(*RefType)
+		if !ok {
+			return false
+		}
+		if !p.Nullable && a.Nullable {
+			return false
+		}
+		return matchTypePattern(p.Elem, a.Elem)
+	case *ArrayType:
+		a, ok := actual.(*ArrayType)
+		return ok && p.Size == a.Size && matchTypePattern(p.Elem, a.Elem)
+	case *StructType:
+		a, ok := actual.(*StructType)
+		return ok && p.Name == a.Name
+	case *OpaqueType:
+		a, ok := actual.(*OpaqueType)
+		return ok && p.Name == a.Name
+	case *GenericInstanceType:
+		a, ok := actual.(*GenericInstanceType)
+		if !ok || p.Name != a.Name || len(p.Args) != len(a.Args) {
+			return false
+		}
+		for i := range p.Args {
+			if !matchTypePattern(p.Args[i], a.Args[i]) {
+				return false
+			}
+		}
+		return matchTypePattern(p.Base, a.Base)
+	case *FuncType:
+		a, ok := actual.(*FuncType)
+		if !ok || p.Variadic != a.Variadic || len(p.Params) != len(a.Params) {
+			return false
+		}
+		for i := range p.Params {
+			if !matchTypePattern(p.Params[i], a.Params[i]) {
+				return false
+			}
+		}
+		return matchTypePattern(p.Return, a.Return)
+	default:
+		return SameType(pattern, actual)
+	}
+}
+
 func MergeTypes(a, b Type) Type {
 	if SameType(a, b) {
 		return a
+	}
+	if IsNumericType(a) && IsNumericType(b) {
+		return CommonNumericType(a, b)
 	}
 	if IsNullType(a) {
 		if r, ok := b.(*RefType); ok && r.Nullable {
@@ -220,4 +343,20 @@ func MergeTypes(a, b Type) Type {
 		}
 	}
 	return invalidType
+}
+
+func CommonNumericType(a, b Type) Type {
+	if !IsNumericType(a) || !IsNumericType(b) {
+		return invalidType
+	}
+	if SameType(a, b) {
+		return a
+	}
+	if ta, ok := a.(*BuiltinType); ok && ta.Name == "int" {
+		return b
+	}
+	if tb, ok := b.(*BuiltinType); ok && tb.Name == "int" {
+		return a
+	}
+	return a
 }

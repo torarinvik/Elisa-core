@@ -7,6 +7,7 @@ import (
 	"llcontext/src/parser"
 	"llcontext/src/semantic"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -17,7 +18,7 @@ func main() {
 	}
 
 	filename := os.Args[1]
-	src, err := os.ReadFile(filename)
+	src, err := readSourceWithIncludes(filename, map[string]bool{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)
@@ -45,6 +46,56 @@ func main() {
 	}
 
 	printFile(file)
+}
+
+func readSourceWithIncludes(filename string, seen map[string]bool) ([]byte, error) {
+	abs, err := filepath.Abs(filename)
+	if err != nil {
+		return nil, err
+	}
+	if seen[abs] {
+		return nil, fmt.Errorf("cyclic include detected for %s", abs)
+	}
+	seen[abs] = true
+	defer delete(seen, abs)
+
+	raw, err := os.ReadFile(abs)
+	if err != nil {
+		return nil, err
+	}
+
+	lines := strings.Split(string(raw), "\n")
+	var out strings.Builder
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if includePath, ok := parseIncludeDirective(trimmed); ok {
+			included, err := readSourceWithIncludes(filepath.Join(filepath.Dir(abs), includePath), seen)
+			if err != nil {
+				return nil, err
+			}
+			out.Write(included)
+			if len(included) == 0 || included[len(included)-1] != '\n' {
+				out.WriteByte('\n')
+			}
+			continue
+		}
+		out.WriteString(line)
+		if i < len(lines)-1 {
+			out.WriteByte('\n')
+		}
+	}
+	return []byte(out.String()), nil
+}
+
+func parseIncludeDirective(line string) (string, bool) {
+	if !strings.HasPrefix(line, "# include ") {
+		return "", false
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(line, "# include "))
+	if len(rest) < 2 || rest[0] != '"' || rest[len(rest)-1] != '"' {
+		return "", false
+	}
+	return rest[1 : len(rest)-1], true
 }
 
 func printFile(f *ast.File) {

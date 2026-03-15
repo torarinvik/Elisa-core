@@ -40,12 +40,12 @@ global mutable ctx_stage0_scratch_arena: Arena = Arena(null, null)
 
 repr(c) struct SmallStringCacheEntry:
     next: mutable SmallStringCacheEntry&?
-    len: usize
+    len: mutable usize
     text: tail u8
 
 repr(c) struct StringLenCacheEntry:
     next: mutable StringLenCacheEntry&?
-    ptr: u8&
+    ptr: mutable u8&
     len: mutable usize
 
 repr(c) struct StringBuilder:
@@ -55,11 +55,11 @@ repr(c) struct StringBuilder:
 
 repr(c) struct CtxList:
     len: mutable i64
-    cap: i64
+    cap: mutable i64
     elem_size: mutable i64
     data: mutable void&&?
     inline_boxes: mutable u8&?
-    inline_box_stride: i64
+    inline_box_stride: mutable i64
 
 # ------------------------------------------------------------
 # Global caches (zero-initialized)

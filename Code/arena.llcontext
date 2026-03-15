@@ -423,13 +423,3 @@ def arena_vsprintf(a: Arena&, format: u8&, args: va_list) -> u8&:
     result: u8& = arena_alloc(a, n.usize() + 1).u8&()
     _ = vsnprintf(result, n.usize() + 1, format, args)
     return result
-
-# ------------------------------------------------------------
-# Example helper from earlier discussion
-# ------------------------------------------------------------
-
-global mutable ctx_stage0_perm_arena: Arena = Arena(null, null)
-
-def ctx_stage0_alloc_perm(size: i64) -> void&:
-    resolved: usize = size.usize() if size > 0 else 1u
-    return arena_alloc(&ctx_stage0_perm_arena, resolved)

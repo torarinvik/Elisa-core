@@ -8,14 +8,32 @@ import (
 	"llcontext/src/lexer"
 )
 
+type ConstValueKind int
+
+const (
+	ConstUnknown ConstValueKind = iota
+	ConstInt
+	ConstBool
+	ConstString
+)
+
+type ConstValue struct {
+	Kind   ConstValueKind
+	Int    int64
+	Bool   bool
+	String string
+}
+
 type Analyzer struct {
-	file          *ast.File
-	diagnostics   []Diagnostic
-	namedTypes    map[string]Type
-	globalScope   *Scope
-	functionTypes map[string]*FuncType
-	currentScope  *Scope
-	currentReturn Type
+	file            *ast.File
+	diagnostics     []Diagnostic
+	namedTypes      map[string]Type
+	globalScope     *Scope
+	functionTypes   map[string]*FuncType
+	constValues     map[string]ConstValue
+	typeParamScopes []map[string]Type
+	currentScope    *Scope
+	currentReturn   Type
 }
 
 func Analyze(file *ast.File) *Result {
@@ -24,12 +42,15 @@ func Analyze(file *ast.File) *Result {
 		namedTypes:    map[string]Type{},
 		globalScope:   NewScope(nil),
 		functionTypes: map[string]*FuncType{},
+		constValues:   map[string]ConstValue{},
 	}
 	a.registerBuiltins()
-	a.collectNamedTypes()
-	a.populateStructFields()
-	a.collectValueSymbols()
-	a.analyzeDecls()
+	a.collectConstValues(file.Decls)
+	activeDecls := a.expandActiveDecls(file.Decls)
+	a.collectNamedTypes(activeDecls)
+	a.populateStructFields(activeDecls)
+	a.collectValueSymbols(activeDecls)
+	a.analyzeDecls(activeDecls)
 	return &Result{
 		File:        file,
 		GlobalScope: a.globalScope,
@@ -44,15 +65,90 @@ func (a *Analyzer) registerBuiltins() {
 	}
 }
 
-func (a *Analyzer) collectNamedTypes() {
-	for _, decl := range a.file.Decls {
+func (a *Analyzer) collectConstValues(decls []ast.Decl) {
+	for _, decl := range decls {
+		switch n := decl.(type) {
+		case *ast.ConstDecl:
+			if value, ok := a.evalConstExpr(n.Value); ok {
+				a.constValues[n.Name] = value
+			}
+		case *ast.StaticIfDecl:
+			a.collectConstValues(a.activeDeclBranch(n))
+		}
+	}
+}
+
+func (a *Analyzer) expandActiveDecls(decls []ast.Decl) []ast.Decl {
+	out := make([]ast.Decl, 0, len(decls))
+	for _, decl := range decls {
+		if n, ok := decl.(*ast.StaticIfDecl); ok {
+			out = append(out, a.expandActiveDecls(a.activeDeclBranch(n))...)
+			continue
+		}
+		out = append(out, decl)
+	}
+	return out
+}
+
+func (a *Analyzer) activeDeclBranch(n *ast.StaticIfDecl) []ast.Decl {
+	if selected, ok := a.evalConstBoolExpr(n.Cond); ok {
+		if selected {
+			return n.Then
+		}
+	} else {
+		a.errorf(n.Pos(), "static if condition must be a compile-time bool")
+		return n.Then
+	}
+	for _, elif := range n.Elifs {
+		selected, ok := a.evalConstBoolExpr(elif.Cond)
+		if !ok {
+			a.errorf(elif.Position, "static elif condition must be a compile-time bool")
+			continue
+		}
+		if selected {
+			return elif.Body
+		}
+	}
+	return n.Else
+}
+
+func (a *Analyzer) activeStmtBranch(n *ast.StaticIfStmt) []ast.Stmt {
+	if selected, ok := a.evalConstBoolExpr(n.Cond); ok {
+		if selected {
+			return n.Then
+		}
+	} else {
+		a.errorf(n.Pos(), "static if condition must be a compile-time bool")
+		return n.Then
+	}
+	for _, elif := range n.Elifs {
+		selected, ok := a.evalConstBoolExpr(elif.Cond)
+		if !ok {
+			a.errorf(elif.Position, "static elif condition must be a compile-time bool")
+			continue
+		}
+		if selected {
+			return elif.Body
+		}
+	}
+	return n.Else
+}
+
+func (a *Analyzer) collectNamedTypes(decls []ast.Decl) {
+	for _, decl := range decls {
 		switch n := decl.(type) {
 		case *ast.StructDecl:
 			if _, exists := a.namedTypes[n.Name]; exists {
 				a.errorf(n.Pos(), "duplicate type %q", n.Name)
 				continue
 			}
-			st := &StructType{Name: n.Name, Fields: map[string]Field{}, ReprC: n.ReprC, Decl: n}
+			st := &StructType{
+				Name:       n.Name,
+				TypeParams: append([]string(nil), n.TypeParams...),
+				Fields:     map[string]Field{},
+				ReprC:      n.ReprC,
+				Decl:       n,
+			}
 			a.namedTypes[n.Name] = st
 		case *ast.ExternTypeDecl:
 			if _, exists := a.namedTypes[n.Name]; exists {
@@ -60,14 +156,12 @@ func (a *Analyzer) collectNamedTypes() {
 				continue
 			}
 			a.namedTypes[n.Name] = &OpaqueType{Name: n.Name}
-		case *ast.StaticIfDecl:
-			a.errorf(n.Pos(), "static if is not supported in semantic MVP yet")
 		}
 	}
 }
 
-func (a *Analyzer) populateStructFields() {
-	for _, decl := range a.file.Decls {
+func (a *Analyzer) populateStructFields(decls []ast.Decl) {
+	for _, decl := range decls {
 		stDecl, ok := decl.(*ast.StructDecl)
 		if !ok {
 			continue
@@ -76,23 +170,29 @@ func (a *Analyzer) populateStructFields() {
 		if st == nil {
 			continue
 		}
-		for _, field := range stDecl.Fields {
-			if _, exists := st.Fields[field.Name]; exists {
-				a.errorf(field.Position, "duplicate field %q in struct %q", field.Name, stDecl.Name)
-				continue
+		a.withTypeParams(stDecl.TypeParams, nil, func() {
+			for _, field := range stDecl.Fields {
+				if _, exists := st.Fields[field.Name]; exists {
+					a.errorf(field.Position, "duplicate field %q in struct %q", field.Name, stDecl.Name)
+					continue
+				}
+				fieldType := a.resolveType(field.Type)
+				if field.IsTail {
+					fieldType = &RefType{Elem: fieldType, Nullable: false}
+				}
+				st.Fields[field.Name] = Field{
+					Name:    field.Name,
+					Type:    fieldType,
+					Mutable: field.Mutable,
+					IsTail:  field.IsTail,
+				}
 			}
-			st.Fields[field.Name] = Field{
-				Name:    field.Name,
-				Type:    a.resolveType(field.Type),
-				Mutable: field.Mutable,
-				IsTail:  field.IsTail,
-			}
-		}
+		})
 	}
 }
 
-func (a *Analyzer) collectValueSymbols() {
-	for _, decl := range a.file.Decls {
+func (a *Analyzer) collectValueSymbols(decls []ast.Decl) {
+	for _, decl := range decls {
 		switch n := decl.(type) {
 		case *ast.ConstDecl:
 			var declType Type = invalidType
@@ -106,11 +206,11 @@ func (a *Analyzer) collectValueSymbols() {
 			declType := a.resolveType(n.Type)
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolGlobal, Type: declType, Node: n, Mutable: n.Mutable}, n.Pos())
 		case *ast.FuncDecl:
-			fnType := a.funcTypeFromDecl(n.Name, n.Params, n.ReturnType, false)
+			fnType := a.funcTypeFromDecl(n.Name, n.TypeParams, n.Params, n.ReturnType, false)
 			a.functionTypes[n.Name] = fnType
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolFunc, Type: fnType, Node: n, Mutable: false}, n.Pos())
 		case *ast.ExternFuncDecl:
-			fnType := a.funcTypeFromDecl(n.Name, n.Params, n.ReturnType, n.Variadic)
+			fnType := a.funcTypeFromDecl(n.Name, nil, n.Params, n.ReturnType, n.Variadic)
 			a.functionTypes[n.Name] = fnType
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolExternFunc, Type: fnType, Node: n, Mutable: false}, n.Pos())
 		case *ast.ExternVarDecl:
@@ -120,8 +220,8 @@ func (a *Analyzer) collectValueSymbols() {
 	}
 }
 
-func (a *Analyzer) analyzeDecls() {
-	for _, decl := range a.file.Decls {
+func (a *Analyzer) analyzeDecls(decls []ast.Decl) {
+	for _, decl := range decls {
 		switch n := decl.(type) {
 		case *ast.ConstDecl:
 			if sym, ok := a.globalScope.Lookup(n.Name); ok {
@@ -141,8 +241,6 @@ func (a *Analyzer) analyzeDecls() {
 			}
 		case *ast.FuncDecl:
 			a.analyzeFunc(n)
-		case *ast.StaticIfDecl:
-			// already diagnosed during discovery phase
 		}
 	}
 }
@@ -156,16 +254,18 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	if fnType != nil {
 		a.currentReturn = fnType.Return
 	}
-	for i, param := range fn.Params {
-		var ptype Type = invalidType
-		if fnType != nil && i < len(fnType.Params) {
-			ptype = fnType.Params[i]
+	a.withTypeParams(fn.TypeParams, nil, func() {
+		for i, param := range fn.Params {
+			var ptype Type = invalidType
+			if fnType != nil && i < len(fnType.Params) {
+				ptype = fnType.Params[i]
+			}
+			a.defineLocal(&Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, Mutable: a.paramIsMutable(param)}, param.Position)
 		}
-		a.defineLocal(&Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, Mutable: param.Mutable}, param.Position)
-	}
-	for _, stmt := range fn.Body {
-		a.analyzeStmt(stmt)
-	}
+		for _, stmt := range fn.Body {
+			a.analyzeStmt(stmt)
+		}
+	})
 	a.currentScope = savedScope
 	a.currentReturn = savedReturn
 }
@@ -194,7 +294,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "augmented assignment requires numeric operands")
 		}
 	case *ast.AsRefAssignStmt:
-		targetType := a.assignmentTargetType(n.Target)
+		targetType := a.asRefTargetType(n.Target)
 		valueType := a.analyzeExpr(n.Value)
 		if !AssignableTo(targetType, valueType) {
 			a.errorf(n.Pos(), "cannot assign %s to %s", valueType.String(), targetType.String())
@@ -241,9 +341,15 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 	case *ast.ExprStmt:
 		a.analyzeExpr(n.Expr)
 	case *ast.StaticIfStmt:
-		a.errorf(n.Pos(), "static if is not supported in semantic MVP yet")
+		for _, stmt := range a.activeStmtBranch(n) {
+			a.analyzeStmt(stmt)
+		}
 	case *ast.StaticErrorStmt:
-		a.errorf(n.Pos(), "static error is not supported in semantic MVP yet")
+		if msg, ok := a.evalConstStringExpr(n.Message); ok {
+			a.errorf(n.Pos(), "static error: %s", msg)
+		} else {
+			a.errorf(n.Pos(), "static error triggered")
+		}
 	case *ast.DiscardStmt:
 		a.analyzeExpr(n.Value)
 	}
@@ -283,6 +389,12 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) Type {
 		if n.Suffix != "" {
 			if t, ok := a.namedTypes[n.Suffix]; ok {
 				return t
+			}
+			switch n.Suffix {
+			case "u":
+				return a.namedTypes["usize"]
+			case "i":
+				return a.namedTypes["int"]
 			}
 		}
 		return a.namedTypes["int"]
@@ -354,7 +466,10 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 		}
 		return a.namedTypes["bool"]
 	case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
-		if !(AssignableTo(left, right) || AssignableTo(right, left) || (IsNullType(left) && isNullableRef(right)) || (IsNullType(right) && isNullableRef(left))) {
+		if IsNumericType(left) && IsNumericType(right) {
+			return a.namedTypes["bool"]
+		}
+		if !(AssignableTo(left, right) || AssignableTo(right, left) || (IsNullType(left) && isRefLike(right)) || (IsNullType(right) && isRefLike(left))) {
 			a.errorf(expr.Pos(), "cannot compare %s and %s", left.String(), right.String())
 		}
 		return a.namedTypes["bool"]
@@ -363,14 +478,28 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 			a.errorf(expr.Pos(), "comparison requires numeric operands")
 		}
 		return a.namedTypes["bool"]
-	case lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR, lexer.TOKEN_SLASH,
+	case lexer.TOKEN_PLUS, lexer.TOKEN_MINUS:
+		if lref, ok := left.(*RefType); ok && IsNumericType(right) {
+			return lref
+		}
+		if expr.Op == lexer.TOKEN_PLUS {
+			if rref, ok := right.(*RefType); ok && IsNumericType(left) {
+				return rref
+			}
+		}
+		if !IsNumericType(left) || !IsNumericType(right) {
+			a.errorf(expr.Pos(), "operator requires numeric operands")
+			return invalidType
+		}
+		return CommonNumericType(left, right)
+	case lexer.TOKEN_STAR, lexer.TOKEN_SLASH,
 		lexer.TOKEN_CARET, lexer.TOKEN_PIPE, lexer.TOKEN_AMPERSAND,
 		lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
 		if !IsNumericType(left) || !IsNumericType(right) {
 			a.errorf(expr.Pos(), "operator requires numeric operands")
 			return invalidType
 		}
-		return left
+		return CommonNumericType(left, right)
 	default:
 		return invalidType
 	}
@@ -427,18 +556,8 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 }
 
 func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
-	objType := a.analyzeExpr(expr.Object)
-	if ref, ok := objType.(*RefType); ok {
-		objType = ref.Elem
-	}
-	st, ok := objType.(*StructType)
+	field, ok := a.lookupField(a.analyzeExpr(expr.Object), expr.Field, expr.Pos())
 	if !ok {
-		a.errorf(expr.Pos(), "field access requires struct type, got %s", objType.String())
-		return invalidType
-	}
-	field, ok := st.Fields[expr.Field]
-	if !ok {
-		a.errorf(expr.Pos(), "struct %q has no field %q", st.Name, expr.Field)
 		return invalidType
 	}
 	return field.Type
@@ -457,15 +576,63 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		if arr, ok := ref.Elem.(*ArrayType); ok {
 			return arr.Elem
 		}
+		return ref.Elem
 	}
-	a.errorf(expr.Pos(), "indexing requires array type, got %s", objType.String())
+	a.errorf(expr.Pos(), "indexing requires array or reference type, got %s", objType.String())
 	return invalidType
 }
 
 func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 	switch n := expr.(type) {
 	case *ast.Ident:
-		sym, ok := a.currentScope.Lookup(n.Name)
+		var (
+			sym *Symbol
+			ok  bool
+		)
+		if a.currentScope != nil {
+			sym, ok = a.currentScope.Lookup(n.Name)
+		}
+		if !ok {
+			if sym, ok = a.globalScope.Lookup(n.Name); !ok {
+				a.errorf(n.Pos(), "undefined assignment target %q", n.Name)
+				return invalidType
+			}
+		}
+		if !sym.Mutable {
+			if ref, ok := sym.Type.(*RefType); ok {
+				return ref.Elem
+			}
+			a.errorf(n.Pos(), "cannot assign to immutable %s %q", sym.Kind, sym.Name)
+			return sym.Type
+		}
+		return sym.Type
+	case *ast.FieldExpr:
+		field, ok := a.lookupField(a.analyzeExpr(n.Object), n.Field, n.Pos())
+		if !ok {
+			return invalidType
+		}
+		if !field.Mutable {
+			a.errorf(n.Pos(), "field %q is immutable", n.Field)
+		}
+		return field.Type
+	case *ast.IndexExpr:
+		return a.analyzeIndexExpr(n)
+	default:
+		a.errorf(expr.Pos(), "invalid assignment target")
+		return invalidType
+	}
+}
+
+func (a *Analyzer) asRefTargetType(expr ast.Expr) Type {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		var (
+			sym *Symbol
+			ok  bool
+		)
+		if a.currentScope != nil {
+			sym, ok = a.currentScope.Lookup(n.Name)
+		}
 		if !ok {
 			if sym, ok = a.globalScope.Lookup(n.Name); !ok {
 				a.errorf(n.Pos(), "undefined assignment target %q", n.Name)
@@ -477,22 +644,12 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 		}
 		return sym.Type
 	case *ast.FieldExpr:
-		objType := a.analyzeExpr(n.Object)
-		if ref, ok := objType.(*RefType); ok {
-			objType = ref.Elem
-		}
-		st, ok := objType.(*StructType)
+		field, ok := a.lookupField(a.analyzeExpr(n.Object), n.Field, n.Pos())
 		if !ok {
-			a.errorf(n.Pos(), "field assignment requires struct type, got %s", objType.String())
-			return invalidType
-		}
-		field, ok := st.Fields[n.Field]
-		if !ok {
-			a.errorf(n.Pos(), "struct %q has no field %q", st.Name, n.Field)
 			return invalidType
 		}
 		if !field.Mutable {
-			a.errorf(n.Pos(), "field %q on %s is immutable", n.Field, st.Name)
+			a.errorf(n.Pos(), "field %q is immutable", n.Field)
 		}
 		return field.Type
 	case *ast.IndexExpr:
@@ -500,6 +657,43 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 	default:
 		a.errorf(expr.Pos(), "invalid assignment target")
 		return invalidType
+	}
+}
+
+func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (Field, bool) {
+	if ref, ok := objType.(*RefType); ok {
+		objType = ref.Elem
+	}
+	switch t := objType.(type) {
+	case *StructType:
+		field, ok := t.Fields[fieldName]
+		if !ok {
+			a.errorf(pos, "struct %q has no field %q", t.Name, fieldName)
+			return Field{}, false
+		}
+		return field, true
+	case *GenericInstanceType:
+		baseStruct, ok := t.Base.(*StructType)
+		if !ok {
+			a.errorf(pos, "field access requires struct type, got %s", objType.String())
+			return Field{}, false
+		}
+		field, ok := baseStruct.Fields[fieldName]
+		if !ok {
+			a.errorf(pos, "struct %q has no field %q", baseStruct.Name, fieldName)
+			return Field{}, false
+		}
+		bindings := map[string]Type{}
+		for i, name := range baseStruct.TypeParams {
+			if i < len(t.Args) {
+				bindings[name] = t.Args[i]
+			}
+		}
+		field.Type = a.substituteType(field.Type, bindings)
+		return field, true
+	default:
+		a.errorf(pos, "field access requires struct type, got %s", objType.String())
+		return Field{}, false
 	}
 }
 
@@ -518,21 +712,26 @@ func (a *Analyzer) defineLocal(sym *Symbol, pos lexer.Pos) {
 	}
 }
 
-func (a *Analyzer) funcTypeFromDecl(name string, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
+func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
 	ptypes := make([]Type, 0, len(params))
-	for _, p := range params {
-		ptypes = append(ptypes, a.resolveType(p.Type))
-	}
 	retType := a.namedTypes["void"]
-	if ret != nil {
-		retType = a.resolveType(ret)
-	}
-	return &FuncType{Name: name, Params: ptypes, Return: retType, Variadic: variadic}
+	a.withTypeParams(typeParams, nil, func() {
+		for _, p := range params {
+			ptypes = append(ptypes, a.resolveType(p.Type))
+		}
+		if ret != nil {
+			retType = a.resolveType(ret)
+		}
+	})
+	return &FuncType{Name: name, TypeParams: append([]string(nil), typeParams...), Params: ptypes, Return: retType, Variadic: variadic}
 }
 
 func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 	switch n := expr.(type) {
 	case *ast.NamedType:
+		if t, ok := a.lookupTypeParam(n.Name); ok {
+			return t
+		}
 		if t, ok := a.namedTypes[n.Name]; ok {
 			return t
 		}
@@ -545,10 +744,24 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 	case *ast.MutableType:
 		return a.resolveType(n.Elem)
 	case *ast.TailType:
-		return a.resolveType(n.Elem)
+		return &RefType{Elem: a.resolveType(n.Elem), Nullable: false}
 	case *ast.GenericType:
-		a.errorf(n.Pos(), "generic types are not supported in semantic MVP yet")
-		return invalidType
+		args := make([]Type, 0, len(n.Args))
+		for _, arg := range n.Args {
+			args = append(args, a.resolveType(arg))
+		}
+		base, ok := a.namedTypes[n.Name]
+		if !ok {
+			a.errorf(n.Pos(), "unknown type %q", n.Name)
+			return invalidType
+		}
+		switch base.(type) {
+		case *StructType, *OpaqueType:
+			return &GenericInstanceType{Name: n.Name, Base: base, Args: args}
+		default:
+			a.errorf(n.Pos(), "type %q cannot be used with generic arguments", n.Name)
+			return invalidType
+		}
 	default:
 		return invalidType
 	}
@@ -560,6 +773,9 @@ func (a *Analyzer) inferLiteralType(expr ast.Expr) Type {
 		if n.Suffix != "" {
 			if t, ok := a.namedTypes[n.Suffix]; ok {
 				return t
+			}
+			if n.Suffix == "u" {
+				return a.namedTypes["usize"]
 			}
 		}
 		return a.namedTypes["int"]
@@ -578,7 +794,19 @@ func (a *Analyzer) validCast(src, dst Type) bool {
 	if SameType(src, dst) || IsInvalidType(src) || IsInvalidType(dst) {
 		return true
 	}
+	if _, ok := src.(*TypeParamType); ok {
+		return true
+	}
+	if _, ok := dst.(*TypeParamType); ok {
+		return true
+	}
 	if IsNumericType(src) && IsNumericType(dst) {
+		return true
+	}
+	if isRefLike(src) && IsNumericType(dst) {
+		return true
+	}
+	if IsNumericType(src) && isRefLike(dst) {
 		return true
 	}
 	if _, ok := src.(*RefType); ok {
@@ -601,6 +829,229 @@ func (a *Analyzer) exprSummary(expr ast.Expr) string {
 	}
 }
 
+func (a *Analyzer) withTypeParams(names []string, args []Type, fn func()) {
+	if len(names) == 0 {
+		fn()
+		return
+	}
+	bindings := make(map[string]Type, len(names))
+	for i, name := range names {
+		if i < len(args) && args[i] != nil {
+			bindings[name] = args[i]
+		} else {
+			bindings[name] = &TypeParamType{Name: name}
+		}
+	}
+	a.typeParamScopes = append(a.typeParamScopes, bindings)
+	fn()
+	a.typeParamScopes = a.typeParamScopes[:len(a.typeParamScopes)-1]
+}
+
+func (a *Analyzer) lookupTypeParam(name string) (Type, bool) {
+	for i := len(a.typeParamScopes) - 1; i >= 0; i-- {
+		if t, ok := a.typeParamScopes[i][name]; ok {
+			return t, true
+		}
+	}
+	return nil, false
+}
+
+func (a *Analyzer) substituteType(t Type, bindings map[string]Type) Type {
+	switch n := t.(type) {
+	case *TypeParamType:
+		if resolved, ok := bindings[n.Name]; ok {
+			return resolved
+		}
+		return n
+	case *RefType:
+		return &RefType{Elem: a.substituteType(n.Elem, bindings), Nullable: n.Nullable}
+	case *ArrayType:
+		return &ArrayType{Elem: a.substituteType(n.Elem, bindings), Size: n.Size}
+	case *GenericInstanceType:
+		args := make([]Type, 0, len(n.Args))
+		for _, arg := range n.Args {
+			args = append(args, a.substituteType(arg, bindings))
+		}
+		return &GenericInstanceType{Name: n.Name, Base: n.Base, Args: args}
+	case *FuncType:
+		params := make([]Type, 0, len(n.Params))
+		for _, param := range n.Params {
+			params = append(params, a.substituteType(param, bindings))
+		}
+		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), Params: params, Return: a.substituteType(n.Return, bindings), Variadic: n.Variadic}
+	default:
+		return t
+	}
+}
+
+func (a *Analyzer) paramIsMutable(param ast.ParamDecl) bool {
+	if param.Mutable {
+		return true
+	}
+	_, ok := param.Type.(*ast.MutableType)
+	return ok
+}
+
+func (a *Analyzer) evalConstBoolExpr(expr ast.Expr) (bool, bool) {
+	value, ok := a.evalConstExpr(expr)
+	if !ok || value.Kind != ConstBool {
+		return false, false
+	}
+	return value.Bool, true
+}
+
+func (a *Analyzer) evalConstStringExpr(expr ast.Expr) (string, bool) {
+	value, ok := a.evalConstExpr(expr)
+	if !ok || value.Kind != ConstString {
+		return "", false
+	}
+	return value.String, true
+}
+
+func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
+	switch n := expr.(type) {
+	case *ast.IntLit:
+		value, ok := ParseIntLiteral(n)
+		if !ok {
+			return ConstValue{}, false
+		}
+		return ConstValue{Kind: ConstInt, Int: value}, true
+	case *ast.BoolLit:
+		return ConstValue{Kind: ConstBool, Bool: n.Value}, true
+	case *ast.StringLit:
+		return ConstValue{Kind: ConstString, String: n.Value}, true
+	case *ast.Ident:
+		value, ok := a.constValues[n.Name]
+		return value, ok
+	case *ast.ParenExpr:
+		return a.evalConstExpr(n.Inner)
+	case *ast.UnaryExpr:
+		operand, ok := a.evalConstExpr(n.Operand)
+		if !ok {
+			return ConstValue{}, false
+		}
+		switch n.Op {
+		case lexer.TOKEN_NOT:
+			if operand.Kind != ConstBool {
+				return ConstValue{}, false
+			}
+			return ConstValue{Kind: ConstBool, Bool: !operand.Bool}, true
+		case lexer.TOKEN_MINUS:
+			if operand.Kind != ConstInt {
+				return ConstValue{}, false
+			}
+			return ConstValue{Kind: ConstInt, Int: -operand.Int}, true
+		case lexer.TOKEN_TILDE:
+			if operand.Kind != ConstInt {
+				return ConstValue{}, false
+			}
+			return ConstValue{Kind: ConstInt, Int: ^operand.Int}, true
+		default:
+			return ConstValue{}, false
+		}
+	case *ast.BinaryExpr:
+		left, ok := a.evalConstExpr(n.Left)
+		if !ok {
+			return ConstValue{}, false
+		}
+		right, ok := a.evalConstExpr(n.Right)
+		if !ok {
+			return ConstValue{}, false
+		}
+		switch n.Op {
+		case lexer.TOKEN_AND:
+			if left.Kind != ConstBool || right.Kind != ConstBool {
+				return ConstValue{}, false
+			}
+			return ConstValue{Kind: ConstBool, Bool: left.Bool && right.Bool}, true
+		case lexer.TOKEN_OR:
+			if left.Kind != ConstBool || right.Kind != ConstBool {
+				return ConstValue{}, false
+			}
+			return ConstValue{Kind: ConstBool, Bool: left.Bool || right.Bool}, true
+		case lexer.TOKEN_EQEQ:
+			return a.evalConstEquality(left, right, true)
+		case lexer.TOKEN_BANGEQ:
+			return a.evalConstEquality(left, right, false)
+		case lexer.TOKEN_LT, lexer.TOKEN_GT, lexer.TOKEN_LTEQ, lexer.TOKEN_GTEQ,
+			lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR, lexer.TOKEN_SLASH,
+			lexer.TOKEN_CARET, lexer.TOKEN_PIPE, lexer.TOKEN_AMPERSAND,
+			lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
+			if left.Kind != ConstInt || right.Kind != ConstInt {
+				return ConstValue{}, false
+			}
+			return evalConstIntBinary(n.Op, left.Int, right.Int)
+		default:
+			return ConstValue{}, false
+		}
+	case *ast.TernaryExpr:
+		cond, ok := a.evalConstBoolExpr(n.Cond)
+		if !ok {
+			return ConstValue{}, false
+		}
+		if cond {
+			return a.evalConstExpr(n.Value)
+		}
+		return a.evalConstExpr(n.Alt)
+	default:
+		return ConstValue{}, false
+	}
+}
+
+func (a *Analyzer) evalConstEquality(left, right ConstValue, equal bool) (ConstValue, bool) {
+	matched := false
+	switch {
+	case left.Kind == ConstInt && right.Kind == ConstInt:
+		matched = left.Int == right.Int
+	case left.Kind == ConstBool && right.Kind == ConstBool:
+		matched = left.Bool == right.Bool
+	case left.Kind == ConstString && right.Kind == ConstString:
+		matched = left.String == right.String
+	default:
+		return ConstValue{}, false
+	}
+	if !equal {
+		matched = !matched
+	}
+	return ConstValue{Kind: ConstBool, Bool: matched}, true
+}
+
+func evalConstIntBinary(op lexer.TokenKind, left, right int64) (ConstValue, bool) {
+	switch op {
+	case lexer.TOKEN_LT:
+		return ConstValue{Kind: ConstBool, Bool: left < right}, true
+	case lexer.TOKEN_GT:
+		return ConstValue{Kind: ConstBool, Bool: left > right}, true
+	case lexer.TOKEN_LTEQ:
+		return ConstValue{Kind: ConstBool, Bool: left <= right}, true
+	case lexer.TOKEN_GTEQ:
+		return ConstValue{Kind: ConstBool, Bool: left >= right}, true
+	case lexer.TOKEN_PLUS:
+		return ConstValue{Kind: ConstInt, Int: left + right}, true
+	case lexer.TOKEN_MINUS:
+		return ConstValue{Kind: ConstInt, Int: left - right}, true
+	case lexer.TOKEN_STAR:
+		return ConstValue{Kind: ConstInt, Int: left * right}, true
+	case lexer.TOKEN_SLASH:
+		if right == 0 {
+			return ConstValue{}, false
+		}
+		return ConstValue{Kind: ConstInt, Int: left / right}, true
+	case lexer.TOKEN_CARET:
+		return ConstValue{Kind: ConstInt, Int: left ^ right}, true
+	case lexer.TOKEN_PIPE:
+		return ConstValue{Kind: ConstInt, Int: left | right}, true
+	case lexer.TOKEN_AMPERSAND:
+		return ConstValue{Kind: ConstInt, Int: left & right}, true
+	case lexer.TOKEN_LSHIFT:
+		return ConstValue{Kind: ConstInt, Int: left << right}, true
+	case lexer.TOKEN_RSHIFT:
+		return ConstValue{Kind: ConstInt, Int: left >> right}, true
+	default:
+		return ConstValue{}, false
+	}
+}
+
 func (a *Analyzer) errorf(pos lexer.Pos, format string, args ...interface{}) {
 	a.diagnostics = append(a.diagnostics, Diagnostic{Pos: pos, Message: fmt.Sprintf(format, args...)})
 }
@@ -608,6 +1059,11 @@ func (a *Analyzer) errorf(pos lexer.Pos, format string, args ...interface{}) {
 func isNullableRef(t Type) bool {
 	r, ok := t.(*RefType)
 	return ok && r.Nullable
+}
+
+func isRefLike(t Type) bool {
+	_, ok := t.(*RefType)
+	return ok
 }
 
 func ParseIntLiteral(expr *ast.IntLit) (int64, bool) {
