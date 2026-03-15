@@ -1,0 +1,809 @@
+# ============================================================
+# Contextlang Runtime - low level Contextlang dialect
+# Translated from contextlang_runtime.c
+# ============================================================
+
+# include "arena.llcontext"
+
+# ------------------------------------------------------------
+# External C function declarations
+# ------------------------------------------------------------
+
+extern strlen(s: u8&) -> usize
+extern strcmp(lhs: u8&, rhs: u8&) -> int
+extern memcpy(dest: void&, src: void&, n: usize) -> void&
+extern memcmp(lhs: void&, rhs: void&, n: usize) -> int
+extern memset(dest: void&, val: int, n: usize) -> void&
+extern snprintf(buf: u8&?, bufsize: usize, fmt: u8&, ...) -> int
+extern puts(s: u8&) -> int
+extern fprintf(stream: void&, fmt: u8&, ...) -> int
+extern exit(code: int)
+extern stderr: void&
+
+# ------------------------------------------------------------
+# Constants
+# ------------------------------------------------------------
+
+const CTX_SMALL_STRING_CACHE_BUCKETS: usize = 1024
+const CTX_STRING_LEN_CACHE_BUCKETS: usize = 4096
+
+# ------------------------------------------------------------
+# Global arena state
+# ------------------------------------------------------------
+
+global mutable ctx_stage0_perm_arena: Arena = Arena(null, null)
+global mutable ctx_stage0_scratch_arena: Arena = Arena(null, null)
+
+# ------------------------------------------------------------
+# Struct definitions
+# ------------------------------------------------------------
+
+struct SmallStringCacheEntry:
+    next: mutable SmallStringCacheEntry&?
+    len: usize
+    text: tail u8
+
+struct StringLenCacheEntry:
+    next: mutable StringLenCacheEntry&?
+    ptr: u8&
+    len: mutable usize
+
+struct StringBuilder:
+    len: mutable i64
+    cap: mutable i64
+    data: mutable u8&?
+
+struct CtxList:
+    len: mutable i64
+    cap: i64
+    elem_size: mutable i64
+    data: mutable void&&?
+    inline_boxes: mutable u8&?
+    inline_box_stride: i64
+
+# ------------------------------------------------------------
+# Global caches (zero-initialized)
+# ------------------------------------------------------------
+
+global mutable ctx_stage0_small_string_cache: SmallStringCacheEntry&?[CTX_SMALL_STRING_CACHE_BUCKETS] = zeroed
+global mutable ctx_stage0_string_len_cache: StringLenCacheEntry&?[CTX_STRING_LEN_CACHE_BUCKETS] = zeroed
+
+# ------------------------------------------------------------
+# Permanent / scratch arena allocation
+# ------------------------------------------------------------
+
+def ctx_stage0_alloc_perm(size: i64) -> void&:
+    resolved: usize = size.usize() if size > 0 else 1
+    return arena_alloc(&ctx_stage0_perm_arena, resolved)
+
+def ctx_stage0_alloc_scratch(size: i64) -> void&:
+    resolved: usize = size.usize() if size > 0 else 1
+    return arena_alloc(&ctx_stage0_scratch_arena, resolved)
+
+def ctx_stage0_reset_scratch():
+    arena_reset(&ctx_stage0_scratch_arena)
+
+# ------------------------------------------------------------
+# String length cache (pointer-keyed hash table)
+# ------------------------------------------------------------
+
+def ctx_stage0_string_len_bucket(ptr: u8&) -> usize:
+    bits: mutable uintptr = ptr.uintptr()
+    bits ^= (bits >> 33)
+    bits *= 0xff51afd7ed558ccd.uintptr()
+    bits ^= (bits >> 33)
+    return (bits & (CTX_STRING_LEN_CACHE_BUCKETS - 1).uintptr()).usize()
+
+def ctx_stage0_register_perm_string_len(ptr: u8&?, len: usize):
+    if ptr == null or len == 0:
+        return
+
+    bucket: usize = ctx_stage0_string_len_bucket(ptr.u8&())
+
+    entry: mutable StringLenCacheEntry&? = ctx_stage0_string_len_cache[bucket]
+    while entry != null:
+        if entry.ptr == ptr.u8&():
+            entry.len <- len
+            return
+        entry <- entry.next
+
+    new_entry: StringLenCacheEntry& = ctx_stage0_alloc_perm(sizeof(StringLenCacheEntry).i64()).StringLenCacheEntry&()
+    new_entry.next <- ctx_stage0_string_len_cache[bucket]
+    new_entry.ptr <- ptr.u8&()
+    new_entry.len <- len
+    ctx_stage0_string_len_cache[bucket] <- new_entry
+
+def ctx_stage0_lookup_cached_string_len(ptr: u8&?, len_out: usize&) -> int:
+    if ptr == null:
+        return 0
+
+    bucket: usize = ctx_stage0_string_len_bucket(ptr.u8&())
+
+    prev: mutable StringLenCacheEntry&? = null
+    entry: mutable StringLenCacheEntry&? = ctx_stage0_string_len_cache[bucket]
+
+    while entry != null:
+        if entry.ptr == ptr.u8&():
+            # Move-to-front heuristic
+            if prev != null:
+                prev.next <- entry.next
+                entry.next <- ctx_stage0_string_len_cache[bucket]
+                ctx_stage0_string_len_cache[bucket] <- entry
+            len_out <- entry.len
+            return 1
+        prev <- entry
+        entry <- entry.next
+
+    return 0
+
+# ------------------------------------------------------------
+# Runtime strlen (cache-aware)
+# ------------------------------------------------------------
+
+def ctx_stage0_runtime_strlen(value: u8&?) -> usize:
+    src: u8& = value.u8&() if value != null else ""
+
+    if src[0] == 0:
+        return 0
+
+    len: mutable usize = 0
+    if ctx_stage0_lookup_cached_string_len(src, &len) != 0:
+        return len
+
+    return strlen(src)
+
+# ------------------------------------------------------------
+# Small string interning
+# ------------------------------------------------------------
+
+def ctx_stage0_intern_small_string(src: u8&, len: usize) -> u8&:
+    if len == 0:
+        return ""
+
+    # FNV-1a hash
+    hash: mutable u64 = 1469598103934665603u64
+    i: mutable usize = 0
+    while i < len:
+        hash ^= src[i].u64()
+        hash *= 1099511628211u64
+        i += 1
+
+    bucket: usize = (hash & (CTX_SMALL_STRING_CACHE_BUCKETS - 1).u64()).usize()
+
+    entry: mutable SmallStringCacheEntry&? = ctx_stage0_small_string_cache[bucket]
+    while entry != null:
+        if entry.len == len and memcmp((&entry.text[0]).void&(), src.void&(), len) == 0:
+            return (&entry.text[0]).u8&()
+        entry <- entry.next
+
+    new_entry: SmallStringCacheEntry& = ctx_stage0_alloc_perm(
+        (sizeof(SmallStringCacheEntry) + len + 1).i64()
+    ).SmallStringCacheEntry&()
+
+    new_entry.next <- ctx_stage0_small_string_cache[bucket]
+    new_entry.len <- len
+    memcpy((&new_entry.text[0]).void&(), src.void&(), len)
+    new_entry.text[len] <- 0
+    ctx_stage0_small_string_cache[bucket] <- new_entry
+
+    ctx_stage0_register_perm_string_len((&new_entry.text[0]).u8&(), len)
+
+    return (&new_entry.text[0]).u8&()
+
+# ------------------------------------------------------------
+# Integer / bool / char to string conversion
+# ------------------------------------------------------------
+
+def ctx_stage0_int_to_string_into(arena: Arena&, value: i64) -> u8&:
+    len: int = snprintf(null, 0, "%lld", value)
+
+    if len > 0 and len <= 8:
+        text: u8[9]
+        snprintf((&text[0]).u8&(), len.usize() + 1, "%lld", value)
+        return ctx_stage0_intern_small_string((&text[0]).u8&(), len.usize())
+
+    out: u8& = arena_alloc(arena, len.usize() + 1).u8&()
+    snprintf(out, len.usize() + 1, "%lld", value)
+
+    if arena == &ctx_stage0_perm_arena:
+        ctx_stage0_register_perm_string_len(out, len.usize())
+
+    return out
+
+def ctx_stage0_bool_to_string_into(arena: Arena&, value: int) -> u8&:
+    _ = arena
+    return "True" if value != 0 else "False"
+
+def ctx_stage0_char_to_string_into(arena: Arena&, value: i64) -> u8&:
+    _ = arena
+    text: u8[2]
+    text[0] <- value.u8()
+    text[1] <- 0
+    return ctx_stage0_intern_small_string((&text[0]).u8&(), 1)
+
+# ------------------------------------------------------------
+# String builder
+# ------------------------------------------------------------
+
+def ctx_stage0_string_builder_next_cap(min_cap: i64) -> i64:
+    cap: mutable i64 = 16
+    while cap < min_cap:
+        cap *= 2
+    return cap
+
+def ctx_stage0_string_builder_new(initial: u8&?) -> StringBuilder&:
+    src: u8& = initial.u8&() if initial != null else ""
+    len: usize = ctx_stage0_runtime_strlen(src)
+
+    builder: StringBuilder& = ctx_stage0_alloc_perm(sizeof(StringBuilder).i64()).StringBuilder&()
+    builder.len <- len.i64()
+    builder.cap <- ctx_stage0_string_builder_next_cap(len.i64() + 1)
+    builder.data <- ctx_stage0_alloc_perm(builder.cap).u8&()
+
+    if len > 0:
+        memcpy(builder.data.void&(), src.void&(), len)
+
+    builder.data[len] <- 0
+    return builder
+
+def ctx_stage0_string_builder_append(builder: StringBuilder&?, suffix: u8&?) -> StringBuilder&:
+    src: u8& = suffix.u8&() if suffix != null else ""
+    suffix_len: usize = ctx_stage0_runtime_strlen(src)
+
+    if builder == null:
+        return ctx_stage0_string_builder_new(src)
+
+    if suffix_len == 0:
+        return builder.StringBuilder&()
+
+    b: StringBuilder& = builder.StringBuilder&()
+    needed: i64 = b.len + suffix_len.i64() + 1
+
+    if needed > b.cap:
+        new_cap: i64 = ctx_stage0_string_builder_next_cap(needed)
+        new_data: u8& = ctx_stage0_alloc_perm(new_cap).u8&()
+        if b.len > 0:
+            memcpy(new_data.void&(), b.data.void&(), b.len.usize())
+        b.data <- new_data
+        b.cap <- new_cap
+
+    memcpy((b.data + b.len.usize()).void&(), src.void&(), suffix_len)
+    b.len += suffix_len.i64()
+    b.data[b.len.usize()] <- 0
+    return b
+
+def ctx_stage0_string_builder_finish(builder: StringBuilder&?) -> u8&:
+    if builder == null:
+        return ""
+
+    b: StringBuilder& = builder.StringBuilder&()
+    if b.len <= 0:
+        return ""
+
+    if b.len <= 8:
+        return ctx_stage0_intern_small_string(b.data.u8&(), b.len.usize())
+
+    ctx_stage0_register_perm_string_len(b.data, b.len.usize())
+    return b.data.u8&()
+
+# ------------------------------------------------------------
+# List: allocation helpers
+# ------------------------------------------------------------
+
+def ctx_stage0_list_alloc_with_boxes(cap: i64, elem_size: i64, preallocate_boxes: int) -> CtxList&:
+    resolved_cap: i64 = cap if cap >= 0 else 0
+
+    data_bytes: usize = resolved_cap.usize() * sizeof(void&) if resolved_cap > 0 else 0
+    inline_box_size: usize = elem_size.usize() if preallocate_boxes != 0 and elem_size > 0 else 0
+    inline_box_bytes: usize = resolved_cap.usize() * inline_box_size if inline_box_size > 0 and resolved_cap > 0 else 0
+    total_bytes: usize = sizeof(CtxList) + data_bytes + inline_box_bytes
+
+    raw: u8& = ctx_stage0_alloc_perm(total_bytes.i64()).u8&()
+    out: CtxList& = raw.CtxList&()
+
+    out.len <- 0
+    out.cap <- resolved_cap
+    out.elem_size <- elem_size if elem_size > 0 else 0
+
+    if resolved_cap > 0:
+        out.data <- (raw + sizeof(CtxList)).void&&()
+    else:
+        out.data <- null
+
+    if inline_box_bytes > 0:
+        out.inline_boxes <- raw + sizeof(CtxList) + data_bytes
+    else:
+        out.inline_boxes <- null
+
+    out.inline_box_stride <- inline_box_size.i64() if inline_box_size > 0 else 0
+
+    return out
+
+def ctx_stage0_list_alloc(cap: i64, elem_size: i64) -> CtxList&:
+    return ctx_stage0_list_alloc_with_boxes(cap, elem_size, 0)
+
+# ------------------------------------------------------------
+# List: box value helpers
+# ------------------------------------------------------------
+
+def ctx_stage0_box_value(value: void&?, elem_size: i64) -> void&:
+    box_size: i64 = elem_size if elem_size > 0 else 1
+    out: void& = ctx_stage0_alloc_perm(box_size)
+    memset(out, 0, box_size.usize())
+    if value != null and elem_size > 0:
+        memcpy(out, value.void&(), elem_size.usize())
+    return out
+
+def ctx_stage0_write_box_value(out: void&, value: void&?, elem_size: i64):
+    box_size: i64 = elem_size if elem_size > 0 else 1
+    memset(out, 0, box_size.usize())
+    if value != null and elem_size > 0:
+        memcpy(out, value.void&(), elem_size.usize())
+
+# ------------------------------------------------------------
+# List: public API
+# ------------------------------------------------------------
+
+def ctx_stage0_list_new() -> CtxList&:
+    return ctx_stage0_list_alloc(0, 0)
+
+def ctx_stage0_list_new_reserve(cap: i64, elem_size: i64) -> CtxList&:
+    return ctx_stage0_list_alloc_with_boxes(cap, elem_size, 1)
+
+def ctx_stage0_list_push_mut(list: CtxList&?, value: void&?, elem_size: i64) -> CtxList&?:
+    resolved_elem_size: mutable i64 = list.elem_size if list != null and list.elem_size > 0 else elem_size
+    box_size: mutable i64 = resolved_elem_size if resolved_elem_size > 0 else 1
+
+    current: mutable CtxList&? = list
+    if current == null:
+        current <- ctx_stage0_list_alloc(4, resolved_elem_size)
+        if current == null:
+            return null
+
+    if current.elem_size <= 0 and elem_size > 0:
+        current.elem_size <- elem_size
+        resolved_elem_size <- elem_size
+        box_size <- resolved_elem_size
+
+    if current.len >= current.cap:
+        new_cap: i64 = current.cap * 2 if current.cap > 0 else 4
+        grown: CtxList& = ctx_stage0_list_alloc_with_boxes(new_cap, resolved_elem_size, 1)
+        grown.len <- current.len
+
+        if current.len > 0 and current.data != null:
+            if current.inline_boxes != null and current.inline_box_stride == grown.inline_box_stride:
+                # Fast path: memcpy inline boxes
+                memcpy(
+                    grown.inline_boxes.void&(),
+                    current.inline_boxes.void&(),
+                    current.len.usize() * grown.inline_box_stride.usize()
+                )
+                i: mutable i64 = 0
+                while i < current.len:
+                    grown.data[i.usize()] <- (grown.inline_boxes + i.usize() * grown.inline_box_stride.usize()).void&()
+                    i += 1
+            else:
+                # Slow path: copy each element
+                i: mutable i64 = 0
+                while i < current.len:
+                    slot: void& = (grown.inline_boxes + i.usize() * grown.inline_box_stride.usize()).void&()
+                    grown.data[i.usize()] <- slot
+                    ctx_stage0_write_box_value(slot, current.data[i.usize()], resolved_elem_size)
+                    i += 1
+
+        grown.data[grown.len.usize()] <- (grown.inline_boxes + grown.len.usize() * grown.inline_box_stride.usize()).void&()
+        ctx_stage0_write_box_value(grown.data[grown.len.usize()], value, resolved_elem_size)
+        grown.len += 1
+        return grown
+
+    if current.inline_boxes != null and current.inline_box_stride == resolved_elem_size:
+        current.data[current.len.usize()] <- (current.inline_boxes + current.len.usize() * current.inline_box_stride.usize()).void&()
+        ctx_stage0_write_box_value(current.data[current.len.usize()], value, resolved_elem_size)
+    else:
+        current.data[current.len.usize()] <- ctx_stage0_box_value(value, resolved_elem_size)
+
+    current.len += 1
+    return current
+
+def ctx_stage0_list_push(list: CtxList&?, value: void&?, elem_size: i64) -> CtxList&?:
+    old_len: i64 = list.len if list != null else 0
+    old_cap: i64 = list.cap if list != null else 0
+    new_cap: mutable i64 = old_cap if old_cap > old_len else old_len + 1
+    resolved_elem_size: i64 = list.elem_size if list != null and list.elem_size > 0 else elem_size
+    box_size: i64 = resolved_elem_size if resolved_elem_size > 0 else 1
+
+    if new_cap < 4:
+        new_cap <- 4
+
+    data_bytes: usize = new_cap.usize() * sizeof(void&)
+    total_bytes: usize = sizeof(CtxList) + data_bytes + box_size.usize()
+
+    raw: u8& = ctx_stage0_alloc_perm(total_bytes.i64()).u8&()
+    out: CtxList& = raw.CtxList&()
+
+    out.len <- 0
+    out.cap <- new_cap
+    out.elem_size <- resolved_elem_size
+    out.data <- (raw + sizeof(CtxList)).void&&()
+
+    if list != null and list.len > 0 and list.data != null:
+        memcpy(out.data.void&(), list.data.void&(), list.len.usize() * sizeof(void&))
+
+    out.len <- old_len + 1
+    out.data[old_len.usize()] <- (raw + sizeof(CtxList) + data_bytes).void&()
+    ctx_stage0_write_box_value(out.data[old_len.usize()], value, resolved_elem_size)
+    return out
+
+def ctx_stage0_list_concat(lhs: CtxList&?, rhs: CtxList&?) -> CtxList&:
+    left_len: i64 = lhs.len if lhs != null else 0
+    right_len: i64 = rhs.len if rhs != null else 0
+
+    if left_len == 0:
+        return rhs.CtxList&() if rhs != null else ctx_stage0_list_new()
+
+    if right_len == 0:
+        return lhs.CtxList&()
+
+    elem_size: mutable i64 = 0
+    if lhs != null and lhs.elem_size > 0:
+        elem_size <- lhs.elem_size
+    elif rhs != null:
+        elem_size <- rhs.elem_size
+
+    out: CtxList& = ctx_stage0_list_alloc(left_len + right_len, elem_size)
+
+    if lhs != null and lhs.len > 0 and lhs.data != null:
+        memcpy(out.data.void&(), lhs.data.void&(), lhs.len.usize() * sizeof(void&))
+
+    if rhs != null and rhs.len > 0 and rhs.data != null:
+        memcpy((out.data + left_len.usize()).void&(), rhs.data.void&(), rhs.len.usize() * sizeof(void&))
+
+    out.len <- left_len + right_len
+    return out
+
+def ctx_stage0_list_len(list: CtxList&?) -> i64:
+    return list.len if list != null else 0
+
+def ctx_stage0_list_get(list: CtxList&?, index: i64, elem_size: i64) -> void&:
+    if list == null or index < 0 or index >= list.len:
+        fallback_elem_size: i64 = elem_size if elem_size > 0 else (list.elem_size if list != null else 0)
+        return ctx_stage0_box_value(null, fallback_elem_size)
+    return list.data[index.usize()]
+
+def ctx_stage0_list_set(list: CtxList&?, index: i64, value: void&?, elem_size: i64) -> i64:
+    if list == null or index < 0 or index >= list.len:
+        return 0
+
+    if list.elem_size <= 0 and elem_size > 0:
+        list.elem_size <- elem_size
+
+    resolved_elem_size: i64 = list.elem_size if list.elem_size > 0 else elem_size
+
+    if list.data[index.usize()] == null:
+        list.data[index.usize()] <- ctx_stage0_box_value(value, resolved_elem_size)
+    else:
+        ctx_stage0_write_box_value(list.data[index.usize()], value, resolved_elem_size)
+
+    return 1
+
+# ------------------------------------------------------------
+# String concatenation
+# ------------------------------------------------------------
+
+def ctx_stage0_concat2(lhs: u8&?, rhs: u8&?) -> u8&:
+    left: u8& = lhs.u8&() if lhs != null else ""
+    right: u8& = rhs.u8&() if rhs != null else ""
+
+    left_len: usize = ctx_stage0_runtime_strlen(left)
+    right_len: usize = ctx_stage0_runtime_strlen(right)
+
+    if left_len == 0:
+        return right
+
+    if right_len == 0:
+        return left
+
+    if left_len + right_len <= 8:
+        text: u8[9]
+        memcpy((&text[0]).void&(), left.void&(), left_len)
+        memcpy((&text[0] + left_len).void&(), right.void&(), right_len)
+        text[left_len + right_len] <- 0
+        return ctx_stage0_intern_small_string((&text[0]).u8&(), left_len + right_len)
+
+    out: u8& = ctx_stage0_alloc_perm((left_len + right_len + 1).i64()).u8&()
+    memcpy(out.void&(), left.void&(), left_len)
+    memcpy((out + left_len).void&(), right.void&(), right_len)
+    out[left_len + right_len] <- 0
+    ctx_stage0_register_perm_string_len(out, left_len + right_len)
+    return out
+
+def ctx_stage0_concat2_scratch(lhs: u8&?, rhs: u8&?) -> u8&:
+    left: u8& = lhs.u8&() if lhs != null else ""
+    right: u8& = rhs.u8&() if rhs != null else ""
+
+    left_len: usize = ctx_stage0_runtime_strlen(left)
+    right_len: usize = ctx_stage0_runtime_strlen(right)
+
+    if left_len == 0:
+        return right
+
+    if right_len == 0:
+        return left
+
+    if left_len + right_len <= 8:
+        text: u8[9]
+        memcpy((&text[0]).void&(), left.void&(), left_len)
+        memcpy((&text[0] + left_len).void&(), right.void&(), right_len)
+        text[left_len + right_len] <- 0
+        return ctx_stage0_intern_small_string((&text[0]).u8&(), left_len + right_len)
+
+    out: u8& = ctx_stage0_alloc_scratch((left_len + right_len + 1).i64()).u8&()
+    memcpy(out.void&(), left.void&(), left_len)
+    memcpy((out + left_len).void&(), right.void&(), right_len)
+    out[left_len + right_len] <- 0
+    return out
+
+# ------------------------------------------------------------
+# Type-to-string public API
+# ------------------------------------------------------------
+
+def ctx_stage0_int_to_string(value: i64) -> u8&:
+    return ctx_stage0_int_to_string_into(&ctx_stage0_perm_arena, value)
+
+def ctx_stage0_int_to_string_scratch(value: i64) -> u8&:
+    return ctx_stage0_int_to_string_into(&ctx_stage0_scratch_arena, value)
+
+def ctx_stage0_bool_to_string(value: int) -> u8&:
+    return ctx_stage0_bool_to_string_into(&ctx_stage0_perm_arena, value)
+
+def ctx_stage0_bool_to_string_scratch(value: int) -> u8&:
+    return ctx_stage0_bool_to_string_into(&ctx_stage0_scratch_arena, value)
+
+def ctx_stage0_char_to_string(value: i64) -> u8&:
+    return ctx_stage0_char_to_string_into(&ctx_stage0_perm_arena, value)
+
+def ctx_stage0_char_to_string_scratch(value: i64) -> u8&:
+    return ctx_stage0_char_to_string_into(&ctx_stage0_scratch_arena, value)
+
+# ------------------------------------------------------------
+# String operations
+# ------------------------------------------------------------
+
+def ctx_stage0_strlen(value: u8&?) -> i64:
+    return ctx_stage0_runtime_strlen(value).i64()
+
+def ctx_stage0_streq(lhs: u8&?, rhs: u8&?) -> int:
+    left: u8& = lhs.u8&() if lhs != null else ""
+    right: u8& = rhs.u8&() if rhs != null else ""
+
+    if left == right:
+        return 1
+
+    return 1 if strcmp(left, right) == 0 else 0
+
+def ctx_stage0_string_index(value: u8&?, index: i64) -> i64:
+    src: u8& = value.u8&() if value != null else ""
+    len: usize = ctx_stage0_runtime_strlen(src)
+
+    if index < 0 or index.usize() >= len:
+        return -1
+
+    return src[index.usize()].i64()
+
+def ctx_stage0_string_slice_eq(value: u8&?, start: i64, end: i64, other: u8&?) -> int:
+    src: u8& = value.u8&() if value != null else ""
+    rhs: u8& = other.u8&() if other != null else ""
+    len: usize = ctx_stage0_runtime_strlen(src)
+
+    lo: mutable usize = 0
+    hi: mutable usize = len
+
+    if start > 0:
+        lo <- start.usize()
+        if lo > len:
+            lo <- len
+
+    if end >= 0:
+        hi <- end.usize()
+        if hi > len:
+            hi <- len
+
+    if hi < lo:
+        hi <- lo
+
+    slice_len: usize = hi - lo
+    rhs_len: usize = ctx_stage0_runtime_strlen(rhs)
+
+    if slice_len != rhs_len:
+        return 0
+
+    if slice_len == 0:
+        return 1
+
+    if src + lo == rhs:
+        return 1
+
+    return 1 if memcmp((src + lo).void&(), rhs.void&(), slice_len) == 0 else 0
+
+def ctx_stage0_string_slices_eq(lhs: u8&?, lhs_start: i64, lhs_end: i64, rhs: u8&?, rhs_start: i64, rhs_end: i64) -> int:
+    left: u8& = lhs.u8&() if lhs != null else ""
+    right: u8& = rhs.u8&() if rhs != null else ""
+    left_len: usize = ctx_stage0_runtime_strlen(left)
+    right_len: usize = ctx_stage0_runtime_strlen(right)
+
+    left_lo: mutable usize = 0
+    left_hi: mutable usize = left_len
+    right_lo: mutable usize = 0
+    right_hi: mutable usize = right_len
+
+    if lhs_start > 0:
+        left_lo <- lhs_start.usize()
+        if left_lo > left_len:
+            left_lo <- left_len
+
+    if lhs_end >= 0:
+        left_hi <- lhs_end.usize()
+        if left_hi > left_len:
+            left_hi <- left_len
+
+    if left_hi < left_lo:
+        left_hi <- left_lo
+
+    if rhs_start > 0:
+        right_lo <- rhs_start.usize()
+        if right_lo > right_len:
+            right_lo <- right_len
+
+    if rhs_end >= 0:
+        right_hi <- rhs_end.usize()
+        if right_hi > right_len:
+            right_hi <- right_len
+
+    if right_hi < right_lo:
+        right_hi <- right_lo
+
+    left_slice_len: usize = left_hi - left_lo
+    right_slice_len: usize = right_hi - right_lo
+
+    if left_slice_len != right_slice_len:
+        return 0
+
+    if left_slice_len == 0:
+        return 1
+
+    if left + left_lo == right + right_lo:
+        return 1
+
+    return 1 if memcmp((left + left_lo).void&(), (right + right_lo).void&(), left_slice_len) == 0 else 0
+
+def ctx_stage0_string_slice(value: u8&?, start: i64, end: i64) -> u8&:
+    src: u8& = value.u8&() if value != null else ""
+    len: usize = ctx_stage0_runtime_strlen(src)
+
+    lo: mutable usize = 0
+    hi: mutable usize = len
+
+    if start > 0:
+        lo <- start.usize()
+        if lo > len:
+            lo <- len
+
+    if end >= 0:
+        hi <- end.usize()
+        if hi > len:
+            hi <- len
+
+    if hi < lo:
+        hi <- lo
+
+    if lo == 0 and hi == len:
+        return src
+
+    out_len: usize = hi - lo
+
+    if out_len == 0:
+        return ""
+
+    if out_len <= 8:
+        return ctx_stage0_intern_small_string(src + lo, out_len)
+
+    out: u8& = ctx_stage0_alloc_perm((out_len + 1).i64()).u8&()
+    memcpy(out.void&(), (src + lo).void&(), out_len)
+    out[out_len] <- 0
+    ctx_stage0_register_perm_string_len(out, out_len)
+    return out
+
+# ============================================================
+# Stage 1 runtime forwarding wrappers
+# ============================================================
+
+def ctx_stage1rt_concat2(lhs: u8&?, rhs: u8&?) -> u8&:
+    return ctx_stage0_concat2(lhs, rhs)
+
+def ctx_stage1rt_concat2_scratch(lhs: u8&?, rhs: u8&?) -> u8&:
+    return ctx_stage0_concat2_scratch(lhs, rhs)
+
+def ctx_stage1rt_string_builder_new(initial: u8&?) -> StringBuilder&:
+    return ctx_stage0_string_builder_new(initial)
+
+def ctx_stage1rt_string_builder_append(builder: StringBuilder&?, suffix: u8&?) -> StringBuilder&:
+    return ctx_stage0_string_builder_append(builder, suffix)
+
+def ctx_stage1rt_string_builder_finish(builder: StringBuilder&?) -> u8&:
+    return ctx_stage0_string_builder_finish(builder)
+
+def ctx_stage1rt_int_to_string(value: i64) -> u8&:
+    return ctx_stage0_int_to_string(value)
+
+def ctx_stage1rt_int_to_string_scratch(value: i64) -> u8&:
+    return ctx_stage0_int_to_string_scratch(value)
+
+def ctx_stage1rt_bool_to_string(value: int) -> u8&:
+    return ctx_stage0_bool_to_string(value)
+
+def ctx_stage1rt_bool_to_string_scratch(value: int) -> u8&:
+    return ctx_stage0_bool_to_string_scratch(value)
+
+def ctx_stage1rt_char_to_string(value: i64) -> u8&:
+    return ctx_stage0_char_to_string(value)
+
+def ctx_stage1rt_char_to_string_scratch(value: i64) -> u8&:
+    return ctx_stage0_char_to_string_scratch(value)
+
+def ctx_stage1rt_strlen(value: u8&?) -> i64:
+    return ctx_stage0_strlen(value)
+
+def ctx_stage1rt_streq(lhs: u8&?, rhs: u8&?) -> int:
+    return ctx_stage0_streq(lhs, rhs)
+
+def ctx_stage1rt_string_slice_eq(value: u8&?, start: i64, end: i64, other: u8&?) -> int:
+    return ctx_stage0_string_slice_eq(value, start, end, other)
+
+def ctx_stage1rt_string_slices_eq(lhs: u8&?, lhs_start: i64, lhs_end: i64, rhs: u8&?, rhs_start: i64, rhs_end: i64) -> int:
+    return ctx_stage0_string_slices_eq(lhs, lhs_start, lhs_end, rhs, rhs_start, rhs_end)
+
+def ctx_stage1rt_string_index(value: u8&?, index: i64) -> i64:
+    return ctx_stage0_string_index(value, index)
+
+def ctx_stage1rt_string_slice(value: u8&?, start: i64, end: i64) -> u8&:
+    return ctx_stage0_string_slice(value, start, end)
+
+def ctx_stage1rt_list_new() -> CtxList&:
+    return ctx_stage0_list_new()
+
+def ctx_stage1rt_list_new_reserve(cap: i64, elem_size: i64) -> CtxList&:
+    return ctx_stage0_list_new_reserve(cap, elem_size)
+
+def ctx_stage1rt_list_push(values: CtxList&?, elem: void&?, elem_size: i64) -> CtxList&?:
+    return ctx_stage0_list_push(values, elem, elem_size)
+
+def ctx_stage1rt_list_push_mut(values: CtxList&?, elem: void&?, elem_size: i64) -> CtxList&?:
+    return ctx_stage0_list_push_mut(values, elem, elem_size)
+
+def ctx_stage1rt_list_concat(left: CtxList&?, right: CtxList&?) -> CtxList&:
+    return ctx_stage0_list_concat(left, right)
+
+def ctx_stage1rt_list_len(values: CtxList&?) -> i64:
+    return ctx_stage0_list_len(values)
+
+def ctx_stage1rt_list_get(values: CtxList&?, index: i64, elem_size: i64) -> void&:
+    return ctx_stage0_list_get(values, index, elem_size)
+
+def ctx_stage1rt_list_set(values: CtxList&?, index: i64, elem: void&?, elem_size: i64) -> i64:
+    return ctx_stage0_list_set(values, index, elem, elem_size)
+
+def ctx_stage1rt_reset_scratch():
+    ctx_stage0_reset_scratch()
+
+def ctx_stage1rt_puts(value: u8&?) -> int:
+    return puts(value.u8&() if value != null else "")
+
+# ------------------------------------------------------------
+# Fatal error handler (weak linkage)
+# ------------------------------------------------------------
+
+# weak
+def ctx_llvm_codegen_fatal(msg: u8&?):
+    actual_msg: u8& = msg.u8&() if msg != null else "<null>"
+    fprintf(stderr, "ctx_llvm_codegen_fatal: %s\n", actual_msg)
+    exit(1)

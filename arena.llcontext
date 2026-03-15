@@ -1,0 +1,435 @@
+# ============================================================
+# Arena allocator - low level Contextlang runtime dialect
+# ============================================================
+
+const ARENA_BACKEND_LIBC_MALLOC = 0
+const ARENA_BACKEND_LINUX_MMAP = 1
+const ARENA_BACKEND_WIN32_VIRTUALALLOC = 2
+const ARENA_BACKEND_WASM_HEAPBASE = 3
+
+const ARENA_BACKEND: int = ARENA_BACKEND_LIBC_MALLOC
+
+const ARENA_REGION_DEFAULT_CAPACITY: usize = 8 * 1024
+const ARENA_DA_INIT_CAP: usize = 256
+const ARENA_WASM_PAGE_SIZE: usize = 64 * 1024
+
+# ------------------------------------------------------------
+# Basic low-level types
+# ------------------------------------------------------------
+
+struct Region:
+    next: mutable Region&?
+    count: mutable usize
+    capacity: usize
+    data: tail uintptr
+
+struct Arena:
+    begin:mutable Region&?
+    end:mutable Region&?
+
+struct ArenaMark:
+    region: Region&?
+    count: usize
+
+struct DynArray[T]:
+    items: mutable T&?
+    count: mutable usize
+    capacity: mutable usize
+
+# ------------------------------------------------------------
+# Backend FFI declarations
+# ------------------------------------------------------------
+
+static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
+    extern malloc(size: usize) -> void&?
+    extern free(ptr: void&)
+
+static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
+    const PROT_READ = 0x1
+    const PROT_WRITE = 0x2
+    const MAP_PRIVATE = 0x02
+    const MAP_ANONYMOUS = 0x20
+
+    extern mmap(
+        addr: void&?,
+        length: usize,
+        prot: int,
+        flags: int,
+        fd: int,
+        offset: isize
+    ) -> void&?
+
+    extern munmap(addr: void&, length: usize) -> int
+    extern MAP_FAILED() -> void&?
+
+static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
+    const MEM_COMMIT = 0x1000
+    const MEM_RESERVE = 0x2000
+    const MEM_RELEASE = 0x8000
+    const PAGE_READWRITE = 0x04
+
+    extern GetCurrentProcess() -> void&
+    extern VirtualAllocEx(
+        process: void&,
+        address: void&?,
+        size: usize,
+        alloc_type: int,
+        protect: int
+    ) -> void&?
+
+    extern VirtualFreeEx(
+        process: void&,
+        address: void&,
+        size: usize,
+        free_type: int
+    ) -> bool
+
+static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
+    extern __heap_base: u8&
+    extern wasm_memory_size(index: int) -> int
+    extern wasm_memory_grow(index: int, pages: usize) -> int
+
+    global mutable bump_pointer: u8& = __heap_base
+
+# ------------------------------------------------------------
+# Small utilities
+# ------------------------------------------------------------
+
+def assert(condition: bool):
+    if not condition:
+        panic("assert failed")
+
+def max(a: usize, b: usize) -> usize:
+    return a if a > b else b
+
+def inv_handle(ptr: void&?) -> bool:
+    return ptr == null
+
+# ------------------------------------------------------------
+# Pointer-state helpers
+# ------------------------------------------------------------
+
+def free_and_null[T](ptr: mutable T&?):
+    free(ptr.void&())
+    ptr as ! <- null
+
+# ------------------------------------------------------------
+# Region allocation / freeing
+# ------------------------------------------------------------
+
+def new_region(capacity: usize) -> Region&:
+    size_bytes: usize = sizeof(Region) + sizeof(uintptr) * capacity
+
+    static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
+        raw: void&? = malloc(size_bytes)
+        assert raw != null
+        r: Region& = raw.Region&()
+
+    static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
+        raw: void&? = mmap(
+            null,
+            size_bytes,
+            PROT_READ | PROT_WRITE,
+            MAP_ANONYMOUS | MAP_PRIVATE,
+            -1,
+            0
+        )
+        assert raw != MAP_FAILED()
+        r: Region& = raw.Region&()
+
+    static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
+        raw: void&? = VirtualAllocEx(
+            GetCurrentProcess(),
+            null,
+            size_bytes,
+            MEM_COMMIT | MEM_RESERVE,
+            PAGE_READWRITE
+        )
+        assert not inv_handle(raw)
+        r: Region& = raw.Region&()
+
+    static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
+        r: Region& = bump_pointer.Region&()
+        current_memory_size: usize = ARENA_WASM_PAGE_SIZE * wasm_memory_size(0).usize()
+        desired_memory_size: usize = bump_pointer.usize() + size_bytes
+
+        if desired_memory_size > current_memory_size:
+            delta_bytes: usize = desired_memory_size - current_memory_size
+            delta_pages: usize = (delta_bytes + (ARENA_WASM_PAGE_SIZE - 1)) / ARENA_WASM_PAGE_SIZE
+
+            grow_result: int = wasm_memory_grow(0, delta_pages)
+            assert grow_result >= 0
+
+        bump_pointer <- bump_pointer + size_bytes
+
+    static else:
+        static error("Unknown arena backend")
+
+    r.next <- null
+    r.count <- 0
+    return r
+
+def free_region(r: Region&):
+    static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
+        free(r.void&())
+
+    static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
+        size_bytes: usize = sizeof(Region) + sizeof(uintptr) * r.capacity
+        ret: int = munmap(r.void&(), size_bytes)
+        assert ret == 0
+
+    static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
+        ok: bool = VirtualFreeEx(
+            GetCurrentProcess(),
+            r.void&(),
+            0,
+            MEM_RELEASE
+        )
+        assert ok
+
+    static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
+        pass
+
+# ------------------------------------------------------------
+# Core arena allocation
+# ------------------------------------------------------------
+
+def arena_alloc(a: Arena&, size_bytes: usize) -> void&:
+    size: usize = (size_bytes + sizeof(uintptr) - 1) / sizeof(uintptr)
+
+    if a.end == null:
+        assert a.begin == null
+
+        capacity:mutable usize = ARENA_REGION_DEFAULT_CAPACITY
+        if capacity < size:
+            capacity <- size
+
+        a.end as & <- new_region(capacity)
+        a.begin <- a.end
+
+    while a.end.count + size > a.end.capacity and a.end.next != null:
+        a.end <- a.end.next
+
+    if a.end.count + size > a.end.capacity:
+        assert a.end.next == null
+
+        capacity:mutable usize = ARENA_REGION_DEFAULT_CAPACITY
+        if capacity < size:
+            capacity <- size
+
+        a.end.next as & <- new_region(capacity)
+        a.end <- a.end.next
+
+    result: void& = (&a.end.data[a.end.count]).void&()
+    a.end.count <- a.end.count + size
+    return result
+
+def arena_realloc(a: Arena&, oldptr: void&, oldsz: usize, newsz: usize) -> void&:
+    if newsz <= oldsz:
+        return oldptr
+
+    newptr: void& = arena_alloc(a, newsz)
+    newptr_bytes: u8& = newptr.u8&()
+    oldptr_bytes: u8& = oldptr.u8&()
+
+    i: mutable usize = 0
+    while i < oldsz:
+        newptr_bytes[i] <- oldptr_bytes[i]
+        i <- i + 1
+
+    return newptr
+
+# ------------------------------------------------------------
+# Memory/string helpers
+# ------------------------------------------------------------
+
+def arena_strlen(s: u8&) -> usize:
+    n:mutable usize = 0
+    while s[n] != 0:
+        n <- n + 1
+    return n
+
+def arena_memcpy(dest: void&, src: void&, n: usize) -> void&:
+    d: u8& = dest.u8&()
+    s: u8& = src.u8&()
+
+	i: mutable usize = 0
+    while i < n:
+        d[i] <- s[i]
+        i <- i + 1
+
+    return dest
+
+def arena_strdup(a: Arena&, cstr: u8&) -> u8&:
+    n: usize = arena_strlen(cstr)
+    dup: u8& = arena_alloc(a, n + 1).u8&()
+    arena_memcpy(dup.void&(), cstr.void&(), n)
+    dup[n] <- 0
+    return dup
+
+def arena_memdup(a: Arena&, data: void&, size: usize) -> void&:
+    return arena_memcpy(arena_alloc(a, size), data, size)
+
+# ------------------------------------------------------------
+# Snapshot / rewind / reset / free / trim
+# ------------------------------------------------------------
+
+def arena_snapshot(a: Arena&) -> ArenaMark:
+    if a.end == null:
+        assert a.begin == null
+        return ArenaMark(null, 0)
+
+    return ArenaMark(a.end, a.end.count)
+
+def arena_reset(a: Arena&):
+    r: mutable Region&? = a.begin
+    while r != null:
+        r.count <- 0
+        r <- r.next
+
+    a.end <- a.begin
+
+def arena_rewind(a: Arena&, m: ArenaMark):
+    if m.region == null:
+        arena_reset(a)
+        return
+
+    m.region.count <- m.count
+
+	r: mutable Region&? = m.region.next
+    while r != null:
+        r.count <- 0
+        r <- r.next
+
+    a.end as & <- m.region
+
+def arena_free(a: Arena&):
+    r: mutable Region&? = a.begin
+
+    while r != null:
+	r0: mutable Region&? = r
+        r <- r.next
+        free(r0.void&())
+        r0 as ! <- null
+
+    a.begin as ! <- null
+    a.end as ! <- null
+
+def arena_trim(a: Arena&):
+    if a.end == null:
+        return
+
+    r: mutable Region&? = a.end.next
+    while r != null:
+        r0: mutable Region&? = r
+        r <- r.next
+        free(r0.void&())
+        r0 as ! <- null
+
+    a.end.next as ! <- null
+
+# ------------------------------------------------------------
+# Dynamic array helpers (replacement for C macros)
+# ------------------------------------------------------------
+
+def arena_da_append[T](a: Arena&, da: DynArray[T]&, item: T):
+    if da.count >= da.capacity:
+        new_capacity: usize = ARENA_DA_INIT_CAP if da.capacity == 0 else da.capacity * 2
+
+        old_size: usize = da.capacity * sizeof(T)
+        new_size: usize = new_capacity * sizeof(T)
+
+        if da.items == null:
+            da.items as & <- arena_alloc(a, new_size).T&())
+        else:
+            da.items as & <- arena_realloc(
+                a,
+                da.items.void&(),
+                old_size,
+                new_size
+            ).T&()
+
+        da.capacity <- new_capacity
+
+    da.items[da.count] <- item
+    da.count <- da.count + 1
+
+def arena_da_append_many[T](a: Arena&, da: DynArray[T]&, new_items: T&, new_items_count: usize):
+    needed: usize = da.count + new_items_count
+
+    if needed > da.capacity:
+        new_capacity: mutable usize = da.capacity
+        if new_capacity == 0:
+            new_capacity <- ARENA_DA_INIT_CAP
+
+        while needed > new_capacity:
+            new_capacity <- new_capacity * 2
+
+        old_size: usize = da.capacity * sizeof(T)
+        new_size: usize = new_capacity * sizeof(T)
+
+        if da.items == null:
+            da.items as & <- arena_alloc(a, new_size).T&()
+        else:
+            da.items as & <- arena_realloc(
+                a,
+                da.items.void&(),
+                old_size,
+                new_size
+            ).T&()
+
+        da.capacity <- new_capacity
+
+    arena_memcpy(
+        (da.items + da.count).void&(),
+        new_items.void&()),
+        new_items_count * sizeof(T)
+    )
+
+    da.count <- da.count + new_items_count
+
+def arena_sb_append_buf(a: Arena&, sb: DynArray[u8]&, buf: u8&, n: usize):
+    arena_da_append_many(a, sb, buf, n)
+
+def arena_sb_append_cstr(a: Arena&, sb: DynArray[u8]&, cstr: u8&):
+    n: usize = arena_strlen(cstr)
+    arena_da_append_many(a, sb, cstr, n)
+
+def arena_sb_append_null(a: Arena&, sb: DynArray[u8]&):
+    arena_da_append(a, sb, 0u8)
+
+# ------------------------------------------------------------
+# Optional stdio formatting stubs
+# ------------------------------------------------------------
+
+extern va_list
+extern va_copy(args: va_list) -> va_list
+extern va_end(args: va_list)
+
+extern vsnprintf(
+    buffer: u8&?,
+    buffer_size: usize,
+    format: u8&,
+    args: va_list
+) -> int
+
+def arena_vsprintf(a: Arena&, format: u8&, args: va_list) -> u8&:
+    args_copy: va_list = va_copy(args)
+    n: int = vsnprintf(null, 0, format, args_copy)
+    va_end(args_copy)
+
+    assert n >= 0
+
+    result: u8& = arena_alloc(a, n.usize() + 1).u8&())
+    _ = vsnprintf(result, n.usize() + 1, format, args)
+    return result
+
+# ------------------------------------------------------------
+# Example helper from earlier discussion
+# ------------------------------------------------------------
+
+global mutable ctx_stage0_perm_arena: Arena = Arena(null, null)
+
+def ctx_stage0_alloc_perm(size: i64) -> void&:
+    resolved: usize = size.usize() if size > 0 else 1u
+    return arena_alloc(&ctx_stage0_perm_arena, resolved)
