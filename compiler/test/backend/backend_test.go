@@ -1,6 +1,9 @@
 package backend_test
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -219,4 +222,76 @@ extern take_str(text: DStr[row]) -> void
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
+}
+
+func TestWriteLLVMBitcodeFile(t *testing.T) {
+	src := `def increment(value: i32) -> i32:
+    return value + 1
+`
+	result := parseAndAnalyze(t, "backend_bitcode.llcontext", src)
+	outputPath := filepath.Join(t.TempDir(), "module.bc")
+
+	if err := backend.WriteLLVMBitcodeFile(result, outputPath); err != nil {
+		t.Fatalf("WriteLLVMBitcodeFile returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("expected bitcode file to exist: %v", err)
+	}
+	if len(data) < 4 {
+		t.Fatalf("expected non-empty bitcode output, got %d bytes", len(data))
+	}
+	if !bytes.HasPrefix(data, []byte{'B', 'C'}) {
+		t.Fatalf("expected bitcode magic prefix, got % x", data[:min(len(data), 4)])
+	}
+}
+
+func TestWriteLLVMObjectFile(t *testing.T) {
+	src := `def increment(value: i32) -> i32:
+    return value + 1
+`
+	result := parseAndAnalyze(t, "backend_object.llcontext", src)
+	outputPath := filepath.Join(t.TempDir(), "module.o")
+
+	if err := backend.WriteLLVMObjectFile(result, outputPath); err != nil {
+		t.Fatalf("WriteLLVMObjectFile returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("expected object file to exist: %v", err)
+	}
+	if len(data) < 4 {
+		t.Fatalf("expected non-empty object output, got %d bytes", len(data))
+	}
+	if !looksLikeObjectFile(data) {
+		t.Fatalf("expected native object file magic, got % x", data[:min(len(data), 4)])
+	}
+}
+
+func looksLikeObjectFile(data []byte) bool {
+	if len(data) < 4 {
+		return false
+	}
+	magics := [][]byte{
+		{0x7f, 'E', 'L', 'F'},
+		{0xcf, 0xfa, 0xed, 0xfe},
+		{0xce, 0xfa, 0xed, 0xfe},
+		{0xfe, 0xed, 0xfa, 0xcf},
+		{0xfe, 0xed, 0xfa, 0xce},
+	}
+	for _, magic := range magics {
+		if bytes.Equal(data[:4], magic) {
+			return true
+		}
+	}
+	return false
+}
+
+func min(left int, right int) int {
+	if left < right {
+		return left
+	}
+	return right
 }

@@ -14,3 +14,19 @@ func GenerateLLVMIR(result *semantic.Result) (string, error) {
 	}
 	return "", fmt.Errorf("LLVM backend requires cgo and LLVM development libraries")
 }
+
+func WriteLLVMBitcodeFile(result *semantic.Result, outputPath string) error {
+	if result == nil {
+		return fmt.Errorf("backend requires a semantic result")
+	}
+	_ = outputPath
+	return fmt.Errorf("LLVM backend requires cgo and LLVM development libraries")
+}
+
+func WriteLLVMObjectFile(result *semantic.Result, outputPath string) error {
+	if result == nil {
+		return fmt.Errorf("backend requires a semantic result")
+	}
+	_ = outputPath
+	return fmt.Errorf("LLVM backend requires cgo and LLVM development libraries")
+}

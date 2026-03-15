@@ -49,6 +49,10 @@ func main() {
 
 	switch options.emit {
 	case emitAST:
+		if options.output != "" {
+			fmt.Fprintf(os.Stderr, "error: -o is not supported for -emit %s\n", emitAST)
+			os.Exit(1)
+		}
 		printFile(file)
 	case emitLLVM:
 		output, err := backend.GenerateLLVMIR(result)
@@ -56,7 +60,24 @@ func main() {
 			fmt.Fprintf(os.Stderr, "error: %s\n", err)
 			os.Exit(1)
 		}
-		fmt.Print(output)
+		if options.output != "" {
+			if err := os.WriteFile(options.output, []byte(output), 0o644); err != nil {
+				fmt.Fprintf(os.Stderr, "error: %s\n", err)
+				os.Exit(1)
+			}
+		} else {
+			fmt.Print(output)
+		}
+	case emitBitcode:
+		if err := backend.WriteLLVMBitcodeFile(result, outputPathForEmit(options.filename, options.output, ".bc")); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %s\n", err)
+			os.Exit(1)
+		}
+	case emitObject:
+		if err := backend.WriteLLVMObjectFile(result, outputPathForEmit(options.filename, options.output, ".o")); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %s\n", err)
+			os.Exit(1)
+		}
 	default:
 		fmt.Fprintf(os.Stderr, "error: unsupported emit mode %q\n", options.emit)
 		printUsage()
@@ -65,13 +86,16 @@ func main() {
 }
 
 const (
-	emitAST  = "ast"
-	emitLLVM = "llvm"
+	emitAST     = "ast"
+	emitLLVM    = "llvm"
+	emitBitcode = "bc"
+	emitObject  = "obj"
 )
 
 type cliOptions struct {
 	emit     string
 	filename string
+	output   string
 }
 
 func parseArgs(args []string) (cliOptions, error) {
@@ -87,6 +111,14 @@ func parseArgs(args []string) (cliOptions, error) {
 				return cliOptions{}, fmt.Errorf("missing value after -emit")
 			}
 			options.emit = strings.TrimSpace(args[i])
+		case strings.HasPrefix(arg, "-o="):
+			options.output = strings.TrimSpace(strings.TrimPrefix(arg, "-o="))
+		case arg == "-o":
+			i++
+			if i >= len(args) {
+				return cliOptions{}, fmt.Errorf("missing value after -o")
+			}
+			options.output = strings.TrimSpace(args[i])
 		case strings.HasPrefix(arg, "-"):
 			return cliOptions{}, fmt.Errorf("unknown option %q", arg)
 		default:
@@ -99,6 +131,7 @@ func parseArgs(args []string) (cliOptions, error) {
 	if options.filename == "" {
 		return cliOptions{}, fmt.Errorf("missing input file")
 	}
+	options.emit = normalizeEmitMode(options.emit)
 	if options.emit == "" {
 		return cliOptions{}, fmt.Errorf("emit mode cannot be empty")
 	}
@@ -106,7 +139,33 @@ func parseArgs(args []string) (cliOptions, error) {
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, "Usage: llcontext [-emit %s|%s] <file.llcontext>\n", emitAST, emitLLVM)
+	fmt.Fprintf(os.Stderr, "Usage: llcontext [-emit %s|%s|%s|%s] [-o <output>] <file.llcontext>\n", emitAST, emitLLVM, emitBitcode, emitObject)
+}
+
+func normalizeEmitMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case emitAST:
+		return emitAST
+	case emitLLVM:
+		return emitLLVM
+	case emitBitcode, "bitcode":
+		return emitBitcode
+	case emitObject, "object":
+		return emitObject
+	default:
+		return strings.TrimSpace(value)
+	}
+}
+
+func outputPathForEmit(inputPath string, explicit string, ext string) string {
+	if explicit != "" {
+		return explicit
+	}
+	base := strings.TrimSuffix(inputPath, filepath.Ext(inputPath))
+	if base == "" {
+		return inputPath + ext
+	}
+	return base + ext
 }
 
 func readSourceWithIncludes(filename string, seen map[string]bool) ([]byte, error) {

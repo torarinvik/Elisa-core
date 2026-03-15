@@ -25,19 +25,28 @@ import (
 // GenerateLLVMIR lowers the analyzed program into an LLVM module using the LLVM C API
 // and returns the textual IR produced by LLVM itself.
 func GenerateLLVMIR(result *semantic.Result) (string, error) {
-	g, err := newLLVMGenerator(result)
+	g, err := compileLLVMModule(result)
 	if err != nil {
 		return "", err
 	}
 	defer g.dispose()
+	return g.printModule(), nil
+}
 
+func compileLLVMModule(result *semantic.Result) (*llvmGenerator, error) {
+	g, err := newLLVMGenerator(result)
+	if err != nil {
+		return nil, err
+	}
 	if err := g.emitModule(); err != nil {
-		return "", err
+		g.dispose()
+		return nil, err
 	}
 	if err := g.verify(); err != nil {
-		return "", err
+		g.dispose()
+		return nil, err
 	}
-	return g.printModule(), nil
+	return g, nil
 }
 
 type llvmGenerator struct {
