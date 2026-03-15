@@ -410,6 +410,9 @@ func TestAnalyzeRejectsWrongDynamicShapeArity(t *testing.T) {
 	src := `def bad_array(x: DArray[i32]) -> void:
     pass
 
+def bad_array_view(x: DArrayView[i32, row]) -> void:
+	pass
+
 def bad_list(x: DList[i32]) -> void:
 	pass
 
@@ -424,7 +427,7 @@ def bad_str(x: DStr[row, col]) -> void:
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "DArray expects 2 arguments, got 1") || !strings.Contains(all, "DList expects 2 arguments, got 1") || !strings.Contains(all, "DListView expects 1 argument, got 2") || !strings.Contains(all, "DStr expects 1 argument, got 2") {
+	if !strings.Contains(all, "DArray expects 2 arguments, got 1") || !strings.Contains(all, "DArrayView expects 1 argument, got 2") || !strings.Contains(all, "DList expects 2 arguments, got 1") || !strings.Contains(all, "DListView expects 1 argument, got 2") || !strings.Contains(all, "DStr expects 1 argument, got 2") {
 		t.Fatalf("expected dynamic shape arity diagnostics, got:\n%s", all)
 	}
 }
@@ -452,6 +455,19 @@ def non_empty[T](view: DListView[T]) -> bool:
     return view.len > 0 and view.elem_size > 0
 `
 	_, errs := parseAndAnalyze(t, "dlist_view_runtime_field_access.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeDArrayViewUsesDynArrayViewRuntimeFields(t *testing.T) {
+	src := `repr(c) struct DynArrayView:
+    data: mutable void&?
+    len: mutable usize
+    elem_size: mutable usize
+
+def non_empty[T](view: DArrayView[T]) -> bool:
+    return view.len > 0u and view.elem_size > 0u
+`
+	_, errs := parseAndAnalyze(t, "darray_view_runtime_field_access.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
@@ -802,6 +818,76 @@ def use(seed: i64&) -> i64&:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeStage1TypedListConvenienceHelpersUseTypedViews(t *testing.T) {
+	src := `repr(c) struct CtxList:
+	len: mutable i64
+	cap: mutable i64
+	elem_size: mutable i64
+	data: mutable void&&?
+	inline_boxes: mutable u8&?
+	inline_box_stride: mutable i64
+
+repr(c) struct CtxListView:
+	data: mutable void&&?
+	len: mutable i64
+	elem_size: mutable i64
+
+extern ctx_stage0_list_new_reserve(cap: i64, elem_size: i64) -> CtxList&
+
+def ctx_stage0_list_push(values: CtxList&?, elem: void&?, elem_size: i64) -> CtxList&?:
+	return values
+
+def ctx_stage0_list_view(values: CtxList&?, start: i64, end: i64) -> CtxListView:
+	return CtxListView(null, 0, 0)
+
+def ctx_stage0_list_view_len(view: CtxListView) -> i64:
+	return view.len
+
+def ctx_stage0_list_view_get(view: CtxListView, index: i64, elem_size: i64) -> void&:
+	return 0.void&()
+
+def ctx_stage1rt_tlist_new[T](type_hint: T&) -> DList[T, shape_out]:
+	_ = type_hint
+	return ctx_stage0_list_new_reserve(0, sizeof(T).i64())
+
+def ctx_stage1rt_tlist_push[T](values: DList[T, shape_in], elem: T&) -> DList[T, shape_out]:
+	return ctx_stage0_list_push(values, elem.void&(), sizeof(T).i64())
+
+def ctx_stage1rt_tlist_view[T](values: DList[T, shape_in], start: i64, end: i64) -> DListView[T]:
+	return ctx_stage0_list_view(values, start, end)
+
+def ctx_stage1rt_tlist_view_len[T](view: DListView[T]) -> i64:
+	return ctx_stage0_list_view_len(view)
+
+def ctx_stage1rt_tlist_take[T](values: DList[T, shape_in], count: i64) -> DListView[T]:
+	return ctx_stage1rt_tlist_view(values, 0, count)
+
+def ctx_stage1rt_tlist_drop[T](values: DList[T, shape_in], count: i64) -> DListView[T]:
+	return ctx_stage1rt_tlist_view(values, count, ctx_stage1rt_tlist_view_len(ctx_stage1rt_tlist_view(values, 0, 8)))
+
+def ctx_stage1rt_tlist_get[T](values: DList[T, shape_in], index: i64) -> T&:
+	return ctx_stage0_list_view_get(ctx_stage0_list_view(values, index, index + 1), 0, sizeof(T).i64()).T&()
+
+def ctx_stage1rt_tlist_first[T](values: DList[T, shape_in]) -> T&:
+	return ctx_stage1rt_tlist_get(values, 0)
+
+def ctx_stage1rt_tlist_view_get[T](view: DListView[T], index: i64) -> T&:
+	return ctx_stage0_list_view_get(view, index, sizeof(T).i64()).T&()
+
+def ctx_stage1rt_tlist_view_first[T](view: DListView[T]) -> T&:
+	return ctx_stage1rt_tlist_view_get(view, 0)
+
+def use(seed: i64&) -> i64&:
+	left: DListView[i64] = ctx_stage1rt_tlist_take(ctx_stage1rt_tlist_push(ctx_stage1rt_tlist_new(seed), seed), 1)
+	right: DListView[i64] = ctx_stage1rt_tlist_drop(ctx_stage1rt_tlist_push(ctx_stage1rt_tlist_new(seed), seed), 0)
+	if ctx_stage1rt_tlist_view_len(left) > 0:
+		_ = ctx_stage1rt_tlist_view_first(left)
+	return ctx_stage1rt_tlist_first(ctx_stage1rt_tlist_push(ctx_stage1rt_tlist_new(seed), ctx_stage1rt_tlist_view_first(right)))
+`
+	_, errs := parseAndAnalyze(t, "stage1_typed_list_convenience_helpers.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeStage1TypedListPushReturnsFreshShape(t *testing.T) {
 	src := `repr(c) struct CtxList:
 	len: mutable i64
@@ -872,6 +958,89 @@ def bad(values: DList[i64, row]) -> DList[i64, row]:
 	all := strings.Join(errs, "\n")
 	if !strings.Contains(all, "return type expects DList[i64, row], got DList[i64, shape_out#") || !strings.Contains(all, "note: ctx_stage1rt_tlist_from_view returns a fresh logical shape for shape_out") || !strings.Contains(all, "note: CtxList-backed list wrappers keep the same runtime layout; this mismatch is about the logical shape witness") {
 		t.Fatalf("expected fresh typed-list from-view diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeArenaArrayViewHelpersCarryElementTypes(t *testing.T) {
+	src := `repr(c) struct DynArray[T]:
+	items: mutable T&?
+	count: mutable usize
+	capacity: mutable usize
+
+repr(c) struct DynArrayView:
+	data: mutable void&?
+	len: mutable usize
+	elem_size: mutable usize
+
+def arena_da_view[T](values: DArray[T, shape_in]&, start: usize, end: usize) -> DArrayView[T]:
+	_ = start
+	_ = end
+	if values.items != null:
+		return DynArrayView(values.items.void&(), values.count, sizeof(T))
+	return DynArrayView(null, 0, sizeof(T))
+
+def arena_da_view_len[T](view: DArrayView[T]) -> usize:
+	return view.len
+
+def arena_da_view_slice[T](view: DArrayView[T], start: usize, end: usize) -> DArrayView[T]:
+	_ = start
+	_ = end
+	return view
+
+def arena_da_view_get[T](view: DArrayView[T], index: usize) -> T:
+	_ = view
+	_ = index
+	return zeroed
+
+def use(values: DArray[i32, row]&) -> i32:
+	view: DArrayView[i32] = arena_da_view(values, 0u, values.count)
+	sub: DArrayView[i32] = arena_da_view_slice(view, 0u, 1u)
+	if arena_da_view_len(sub) > 0u:
+		return arena_da_view_get(sub, 0u)
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "arena_array_view_helpers.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeArenaArrayFromViewReturnsFreshShape(t *testing.T) {
+	src := `repr(c) struct Arena:
+	begin: mutable void&?
+	end: mutable void&?
+
+repr(c) struct DynArray[T]:
+	items: mutable T&?
+	count: mutable usize
+	capacity: mutable usize
+
+repr(c) struct DynArrayView:
+	data: mutable void&?
+	len: mutable usize
+	elem_size: mutable usize
+
+def arena_da_view[T](values: DArray[T, shape_in]&, start: usize, end: usize) -> DArrayView[T]:
+	_ = start
+	_ = end
+	if values.items != null:
+		return DynArrayView(values.items.void&(), values.count, sizeof(T))
+	return DynArrayView(null, 0, sizeof(T))
+
+def arena_da_from_view[T](a: Arena&, view: DArrayView[T]) -> DArray[T, shape_out]:
+	_ = a
+	_ = view
+	return zeroed
+
+def bad(a: Arena&, values: DArray[i32, row]&) -> DArray[i32, row]:
+	view: DArrayView[i32] = arena_da_view(values, 0u, values.count)
+	return arena_da_from_view(a, view)
+`
+	_, errs := parseAndAnalyze(t, "arena_array_from_view_fresh_shape.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "return type expects DArray[i32, row], got DArray[i32, shape_out#") || !strings.Contains(all, "note: arena_da_from_view returns a fresh logical shape for shape_out") {
+		t.Fatalf("expected fresh arena from-view diagnostic, got:\n%s", all)
 	}
 }
 

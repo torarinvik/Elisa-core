@@ -36,6 +36,11 @@ repr(c) struct DynArray[T]:
     count: mutable usize
     capacity: mutable usize
 
+repr(c) struct DynArrayView:
+    data: mutable void&?
+    len: mutable usize
+    elem_size: mutable usize
+
 # ------------------------------------------------------------
 # Backend FFI declarations
 # ------------------------------------------------------------
@@ -332,6 +337,61 @@ def arena_trim(a: Arena&):
 # ------------------------------------------------------------
 # Dynamic array helpers (replacement for C macros)
 # ------------------------------------------------------------
+
+def arena_da_view[T](da: DArray[T, shape_in]&, start: usize, end: usize) -> DArrayView[T]:
+    elem_size: usize = sizeof(T)
+    if da.items == null or da.count == 0:
+        return DynArrayView(null, 0, elem_size)
+
+    lo: mutable usize = start if start < da.count else da.count
+    hi: mutable usize = end if end < da.count else da.count
+    if hi < lo:
+        hi <- lo
+
+    if hi == lo:
+        return DynArrayView(null, 0, elem_size)
+
+    return DynArrayView((da.items + lo).void&(), hi - lo, elem_size)
+
+def arena_da_view_len[T](view: DArrayView[T]) -> usize:
+    return view.len
+
+def arena_da_view_slice[T](view: DArrayView[T], start: usize, end: usize) -> DArrayView[T]:
+    if view.data == null or view.len == 0:
+        return DynArrayView(null, 0, view.elem_size)
+
+    lo: mutable usize = start if start < view.len else view.len
+    hi: mutable usize = end if end < view.len else view.len
+    if hi < lo:
+        hi <- lo
+
+    if hi == lo:
+        return DynArrayView(null, 0, view.elem_size)
+
+    offset: usize = lo * view.elem_size
+    return DynArrayView((view.data.u8&() + offset).void&(), hi - lo, view.elem_size)
+
+def arena_da_view_get[T](view: DArrayView[T], index: usize) -> T:
+    assert index < view.len
+    assert view.data != null
+
+    offset: usize = index * view.elem_size
+    base: T& = (view.data.u8&() + offset).T&()
+    return base[0]
+
+def arena_da_from_view[T](a: Arena&, view: DArrayView[T]) -> DArray[T, shape_out]:
+    if view.len == 0:
+        return zeroed
+
+    items: T& = arena_alloc(a, view.len * sizeof(T)).T&()
+    assert view.data != null
+    arena_memcpy(items.void&(), view.data.void&(), view.len * view.elem_size)
+
+    out: mutable DArray[T, shape_out] = zeroed
+    out.items as & <- items
+    out.count <- view.len
+    out.capacity <- view.len
+    return out
 
 def arena_da_append[T](a: Arena&, da: DArray[T, shape_in]&, item: T) -> DArray[T, shape_out]&:
     if da.count >= da.capacity:

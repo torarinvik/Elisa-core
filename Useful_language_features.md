@@ -2043,7 +2043,8 @@ The codebase is already following this staged approach:
 
 - low-level stage 0 runtime code still uses representation-first types such as `DynArray[T]`, `CtxList`, `StringBuilder`, and raw `u8&` string values
 - `arena.llcontext` now exposes shape-typed append helpers such as `arena_da_append` and `arena_da_append_many`
-- `contextlang_runtime.llcontext` stage 1 wrappers now expose shape-typed list/string APIs such as `ctx_stage1rt_list_push`, `ctx_stage1rt_list_concat`, `ctx_stage1rt_concat2`, and `ctx_stage1rt_string_slice`
+- `contextlang_runtime.llcontext` stage 1 wrappers now expose typed logical APIs such as `ctx_stage1rt_tlist_push`, `ctx_stage1rt_tlist_view`, `ctx_stage1rt_concat2`, and `ctx_stage1rt_string_slice`
+- `arena.llcontext` now also exposes typed non-owning `DArrayView[T]` helpers such as `arena_da_view`, `arena_da_view_slice`, and `arena_da_view_get`
 - the semantic layer bridges these wrappers back onto the underlying runtime representations rather than forcing an immediate full runtime rewrite
 
 For example, the stage 1 wrappers now look like this:
@@ -2052,8 +2053,11 @@ For example, the stage 1 wrappers now look like this:
 def ctx_stage1rt_concat2(lhs: DStr[shape_left], rhs: DStr[shape_right]) -> DStr[shape_result]:
     return ctx_stage0_concat2(lhs, rhs)
 
-def ctx_stage1rt_list_push(values: DArray[void&, shape_in], elem: void&?, elem_size: i64) -> DArray[void&, shape_out]:
-    return ctx_stage0_list_push(values, elem, elem_size)
+def ctx_stage1rt_tlist_push[T](values: DList[T, shape_in], elem: T&) -> DList[T, shape_out]:
+    return ctx_stage0_list_push(values, elem.void&(), sizeof(T).i64())
+
+def ctx_stage1rt_tlist_view[T](values: DList[T, shape_in], start: i64, end: i64) -> DListView[T]:
+    return ctx_stage0_list_view(values, start, end)
 ```
 
 And the arena-backed container helpers now look like this:
@@ -2066,6 +2070,10 @@ def arena_da_append[T](a: Arena&, da: DArray[T, shape_in]&, item: T) -> DArray[T
 def arena_da_append_many[T](a: Arena&, da: DArray[T, shape_in]&, new_items: T&, new_items_count: usize) -> DArray[T, shape_out]&:
     # implementation grows/copies as needed
     return da
+
+def arena_da_view[T](da: DArray[T, shape_in]&, start: usize, end: usize) -> DArrayView[T]:
+    # implementation creates a typed non-owning view
+    return DynArrayView(null, 0, sizeof(T))
 ```
 
 So the public runtime-facing layer carries logical shape transitions, while the lower-level implementation stays close to the original C-like representation.
@@ -2073,8 +2081,11 @@ So the public runtime-facing layer carries logical shape transitions, while the 
 More concretely, the current semantic bridge is intentionally narrow and wrapper-oriented:
 
 - `DStr[shape_id]` is allowed to flow across the runtime boundary as raw `u8&` / `u8&?` string values
-- `DArray[void&, shape_id]` is allowed to flow across the runtime boundary as `CtxList&` / `CtxList&?`
+- `DList[T, shape_id]` and `DListView[T]` are allowed to flow across the runtime boundary as `CtxList&` / `CtxList&?` and `CtxListView`
 - `DArray[T, shape_id]` can likewise ride on the existing `DynArray[T]` representation for arena-backed helpers
+- `DArrayView[T]` is allowed to flow across the runtime boundary as `DynArrayView`
+
+The older raw list wrappers (`ctx_stage1rt_list_*` with `DArray[void&, shape]` and `CtxListView`) still exist as compatibility shims, but the typed `ctx_stage1rt_tlist_*` surface is the preferred API for new code.
 
 That means the typechecker can track logical shape states at the wrapper/API level while still reusing the existing low-level runtime layouts internally.
 

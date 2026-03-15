@@ -20,6 +20,8 @@ type Result struct {
 	File        *ast.File
 	GlobalScope *Scope
 	NamedTypes  map[string]Type
+	ConstValues map[string]ConstValue
+	ExprTypes   map[ast.Expr]Type
 	Diagnostics []Diagnostic
 }
 

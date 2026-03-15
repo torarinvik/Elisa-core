@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"llcontext/src/ast"
+	"llcontext/src/backend"
 	"llcontext/src/lexer"
 	"llcontext/src/parser"
 	"llcontext/src/semantic"
@@ -12,23 +13,24 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: llcontext <file.llcontext>\n")
+	options, err := parseArgs(os.Args[1:])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %s\n", err)
+		printUsage()
 		os.Exit(1)
 	}
 
-	filename := os.Args[1]
-	src, err := readSourceWithIncludes(filename, map[string]bool{})
+	src, err := readSourceWithIncludes(options.filename, map[string]bool{})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		os.Exit(1)
 	}
 
-	l := lexer.New(filename, src)
+	l := lexer.New(options.filename, src)
 	tokens := l.Tokenize()
 
 	p := parser.New(tokens)
-	file := p.ParseFile(filename)
+	file := p.ParseFile(options.filename)
 
 	if errs := p.Errors(); len(errs) > 0 {
 		for _, e := range errs {
@@ -45,7 +47,66 @@ func main() {
 		os.Exit(1)
 	}
 
-	printFile(file)
+	switch options.emit {
+	case emitAST:
+		printFile(file)
+	case emitLLVM:
+		output, err := backend.GenerateLLVMIR(result)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %s\n", err)
+			os.Exit(1)
+		}
+		fmt.Print(output)
+	default:
+		fmt.Fprintf(os.Stderr, "error: unsupported emit mode %q\n", options.emit)
+		printUsage()
+		os.Exit(1)
+	}
+}
+
+const (
+	emitAST  = "ast"
+	emitLLVM = "llvm"
+)
+
+type cliOptions struct {
+	emit     string
+	filename string
+}
+
+func parseArgs(args []string) (cliOptions, error) {
+	options := cliOptions{emit: emitAST}
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case strings.HasPrefix(arg, "-emit="):
+			options.emit = strings.TrimSpace(strings.TrimPrefix(arg, "-emit="))
+		case arg == "-emit":
+			i++
+			if i >= len(args) {
+				return cliOptions{}, fmt.Errorf("missing value after -emit")
+			}
+			options.emit = strings.TrimSpace(args[i])
+		case strings.HasPrefix(arg, "-"):
+			return cliOptions{}, fmt.Errorf("unknown option %q", arg)
+		default:
+			if options.filename != "" {
+				return cliOptions{}, fmt.Errorf("expected a single input file, got %q", arg)
+			}
+			options.filename = arg
+		}
+	}
+	if options.filename == "" {
+		return cliOptions{}, fmt.Errorf("missing input file")
+	}
+	if options.emit == "" {
+		return cliOptions{}, fmt.Errorf("emit mode cannot be empty")
+	}
+	return options, nil
+}
+
+func printUsage() {
+	fmt.Fprintf(os.Stderr, "Usage: llcontext [-emit %s|%s] <file.llcontext>\n", emitAST, emitLLVM)
 }
 
 func readSourceWithIncludes(filename string, seen map[string]bool) ([]byte, error) {

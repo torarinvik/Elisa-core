@@ -1012,6 +1012,12 @@ def ctx_stage1rt_string_views_eq(lhs: CtxStringView, rhs: CtxStringView) -> int:
 def ctx_stage1rt_string_from_view(view: CtxStringView) -> DStr[shape_out]:
     return ctx_stage0_string_view_copy(view)
 
+# ------------------------------------------------------------
+# Legacy raw CtxList compatibility shims
+# Prefer ctx_stage1rt_tlist_* / DList[T, shape] / DListView[T]
+# for new code so element types flow through the API.
+# ------------------------------------------------------------
+
 def ctx_stage1rt_list_new() -> DArray[void&, shape_out]:
     return ctx_stage0_list_new()
 
@@ -1051,6 +1057,10 @@ def ctx_stage1rt_list_view_get(view: CtxListView, index: i64, elem_size: i64) ->
 def ctx_stage1rt_list_from_view(view: CtxListView) -> DArray[void&, shape_out]:
     return ctx_stage0_list_view_copy(view)
 
+# ------------------------------------------------------------
+# Preferred typed CtxList wrappers
+# ------------------------------------------------------------
+
 def ctx_stage1rt_tlist_new[T](type_hint: T&) -> DList[T, shape_out]:
     _ = type_hint
     return ctx_stage0_list_new_reserve(0, sizeof(T).i64())
@@ -1086,6 +1096,12 @@ def ctx_stage1rt_tlist_view_len[T](view: DListView[T]) -> i64:
 def ctx_stage1rt_tlist_view_slice[T](view: DListView[T], start: i64, end: i64) -> DListView[T]:
     return ctx_stage0_list_view_slice(view, start, end)
 
+def ctx_stage1rt_tlist_take[T](values: DList[T, shape_in], count: i64) -> DListView[T]:
+    return ctx_stage1rt_tlist_view(values, 0, count)
+
+def ctx_stage1rt_tlist_drop[T](values: DList[T, shape_in], count: i64) -> DListView[T]:
+    return ctx_stage1rt_tlist_view(values, count, ctx_stage1rt_tlist_len(values))
+
 def ctx_stage1rt_tlist_from_view[T](view: DListView[T]) -> DList[T, shape_out]:
     return ctx_stage0_list_view_copy(view)
 
@@ -1098,8 +1114,19 @@ def ctx_stage1rt_tlist_get[T](values: DList[T, shape_in], index: i64) -> T&:
 def ctx_stage1rt_tlist_set[T](values: DList[T, shape_in], index: i64, elem: T&) -> i64:
     return ctx_stage0_list_set(values, index, elem.void&(), sizeof(T).i64())
 
+def ctx_stage1rt_tlist_first[T](values: DList[T, shape_in]) -> T&:
+    return ctx_stage1rt_tlist_get(values, 0)
+
 def ctx_stage1rt_tlist_view_get[T](view: DListView[T], index: i64) -> T&:
     return ctx_stage0_list_view_get(view, index, sizeof(T).i64()).T&()
+
+def ctx_stage1rt_tlist_view_first[T](view: DListView[T]) -> T&:
+    return ctx_stage1rt_tlist_view_get(view, 0)
+
+# ------------------------------------------------------------
+# Legacy raw CtxList compatibility shims
+# Prefer ctx_stage1rt_tlist_len/get/set for typed code.
+# ------------------------------------------------------------
 
 def ctx_stage1rt_list_len(values: DArray[void&, shape_in]) -> i64:
     return ctx_stage0_list_len(values)

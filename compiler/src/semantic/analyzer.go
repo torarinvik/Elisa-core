@@ -69,6 +69,7 @@ var shapeTransformTable = map[string]ShapeTransformSpec{
 	"ctx_stage1rt_tlist_truncate":         {FreshReturnShapeParams: []string{"shape_out"}},
 	"ctx_stage1rt_tlist_clear":            {FreshReturnShapeParams: []string{"shape_out"}},
 	"ctx_stage1rt_tlist_from_view":        {FreshReturnShapeParams: []string{"shape_out"}},
+	"arena_da_from_view":                  {FreshReturnShapeParams: []string{"shape_out"}},
 }
 
 type freshReturnStatus int
@@ -86,6 +87,7 @@ type Analyzer struct {
 	globalScope            *Scope
 	functionTypes          map[string]*FuncType
 	constValues            map[string]ConstValue
+	exprTypes              map[ast.Expr]Type
 	typeParamScopes        []map[string]Type
 	shapeParamScopes       []map[string]Shape
 	freshShapeCounter      int
@@ -101,6 +103,7 @@ func Analyze(file *ast.File) *Result {
 		globalScope:   NewScope(nil),
 		functionTypes: map[string]*FuncType{},
 		constValues:   map[string]ConstValue{},
+		exprTypes:     map[ast.Expr]Type{},
 	}
 	a.registerBuiltins()
 	a.collectConstValues(file.Decls)
@@ -113,6 +116,8 @@ func Analyze(file *ast.File) *Result {
 		File:        file,
 		GlobalScope: a.globalScope,
 		NamedTypes:  a.namedTypes,
+		ConstValues: a.constValues,
+		ExprTypes:   a.exprTypes,
 		Diagnostics: a.diagnostics,
 	}
 }
@@ -726,66 +731,91 @@ func (a *Analyzer) analyzeCondExprInScope(expr ast.Expr, scope *Scope) Type {
 	}
 }
 
-func (a *Analyzer) analyzeExpr(expr ast.Expr) Type {
+func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
+	defer func() {
+		if expr != nil {
+			a.exprTypes[expr] = result
+		}
+	}()
 	switch n := expr.(type) {
 	case *ast.Ident:
 		if t, ok := a.lookupRefinedExprType(n); ok {
-			return t
+			result = t
+			return
 		}
 		if a.currentScope != nil {
 			if sym, ok := a.currentScope.Lookup(n.Name); ok {
-				return sym.Type
+				result = sym.Type
+				return
 			}
 		}
 		if sym, ok := a.globalScope.Lookup(n.Name); ok {
-			return sym.Type
+			result = sym.Type
+			return
 		}
 		a.errorf(n.Pos(), "undefined identifier %q", n.Name)
-		return invalidType
+		result = invalidType
+		return
 	case *ast.IntLit:
 		if n.Suffix != "" {
 			if t, ok := a.namedTypes[n.Suffix]; ok {
-				return t
+				result = t
+				return
 			}
 			switch n.Suffix {
 			case "u":
-				return a.namedTypes["usize"]
+				result = a.namedTypes["usize"]
+				return
 			case "i":
-				return a.namedTypes["int"]
+				result = a.namedTypes["int"]
+				return
 			}
 		}
-		return a.namedTypes["int"]
+		result = a.namedTypes["int"]
+		return
 	case *ast.StringLit:
-		return &RefType{Elem: a.namedTypes["u8"], State: RefStateNonNull}
+		result = &RefType{Elem: a.namedTypes["u8"], State: RefStateNonNull}
+		return
 	case *ast.BoolLit:
-		return a.namedTypes["bool"]
+		result = a.namedTypes["bool"]
+		return
 	case *ast.NullLit:
-		return nullType
+		result = nullType
+		return
 	case *ast.ZeroedLit:
-		return invalidType
+		result = invalidType
+		return
 	case *ast.BinaryExpr:
-		return a.analyzeBinaryExpr(n)
+		result = a.analyzeBinaryExpr(n)
+		return
 	case *ast.UnaryExpr:
-		return a.analyzeUnaryExpr(n)
+		result = a.analyzeUnaryExpr(n)
+		return
 	case *ast.CallExpr:
-		return a.analyzeCallExpr(n)
+		result = a.analyzeCallExpr(n)
+		return
 	case *ast.FieldExpr:
 		if t, ok := a.lookupRefinedExprType(n); ok {
-			return t
+			result = t
+			return
 		}
-		return a.analyzeFieldExpr(n)
+		result = a.analyzeFieldExpr(n)
+		return
 	case *ast.IndexExpr:
-		return a.analyzeIndexExpr(n)
+		result = a.analyzeIndexExpr(n)
+		return
 	case *ast.CastExpr:
 		src := a.analyzeExpr(n.Operand)
 		dst := a.resolveType(n.Target)
 		if !a.validCast(src, dst) {
 			a.errorf(n.Pos(), "invalid cast from %s to %s", src.String(), dst.String())
 		}
-		return dst
+		result = dst
+		return
 	case *ast.SizeofExpr:
 		a.resolveType(n.Type)
-		return a.namedTypes["usize"]
+		result = a.namedTypes["usize"]
+		return
 	case *ast.TernaryExpr:
 		condType := a.analyzeCondExpr(n.Cond)
 		if !IsBoolType(condType) {
@@ -797,22 +827,28 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) Type {
 		if IsInvalidType(merged) {
 			a.errorf(n.Pos(), "ternary branches are incompatible: %s and %s", left.String(), right.String())
 		}
-		return merged
+		result = merged
+		return
 	case *ast.AddrOfExpr:
 		inner := a.analyzeExpr(n.Operand)
-		return &RefType{Elem: inner, State: RefStateNonNull}
+		result = &RefType{Elem: inner, State: RefStateNonNull}
+		return
 	case *ast.StructLitExpr:
 		if t, ok := a.namedTypes[n.Name]; ok {
 			if st, ok := t.(*StructType); ok {
-				return st
+				result = st
+				return
 			}
 		}
 		a.errorf(n.Pos(), "unknown struct %q", n.Name)
-		return invalidType
+		result = invalidType
+		return
 	case *ast.ParenExpr:
-		return a.analyzeExpr(n.Inner)
+		result = a.analyzeExpr(n.Inner)
+		return
 	default:
-		return invalidType
+		result = invalidType
+		return
 	}
 }
 
@@ -939,7 +975,7 @@ func (a *Analyzer) collectRuntimeBridgeBindings(pattern, actual Type, bindings m
 			return true
 		}
 		return true
-	case runtimeBridgeDListCtxList, runtimeBridgeDListViewCtxListView, runtimeBridgeDArrayCtxList, runtimeBridgeDStrU8Ref:
+	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeDListCtxList, runtimeBridgeDListViewCtxListView, runtimeBridgeDArrayCtxList, runtimeBridgeDStrU8Ref:
 		return true
 	default:
 		return false
@@ -970,6 +1006,10 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		if act, ok := actual.(*DArrayType); ok {
 			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings)
 			a.collectShapeBinding(p.Shape, act.Shape, shapeBindings)
+		}
+	case *DArrayViewType:
+		if act, ok := actual.(*DArrayViewType); ok {
+			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings)
 		}
 	case *DListType:
 		if act, ok := actual.(*DListType); ok {
@@ -1223,6 +1263,14 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 }
 
 func (a *Analyzer) runtimeBackedStructType(t Type) Type {
+	if dav, ok := t.(*DArrayViewType); ok {
+		base, ok := a.namedTypes["DynArrayView"]
+		if !ok {
+			return nil
+		}
+		_ = dav
+		return base
+	}
 	if _, ok := t.(*DListType); ok {
 		base, ok := a.namedTypes["CtxList"]
 		if !ok {
@@ -1343,6 +1391,12 @@ func (a *Analyzer) resolveDynamicShapeType(expr *ast.GenericType) (Type, bool) {
 			return invalidType, true
 		}
 		return &DArrayType{Elem: a.resolveType(expr.Args[0]), Shape: a.resolveShapeArg(expr.Args[1])}, true
+	case "DArrayView":
+		if len(expr.Args) != 1 {
+			a.errorf(expr.Pos(), "DArrayView expects 1 argument, got %d", len(expr.Args))
+			return invalidType, true
+		}
+		return &DArrayViewType{Elem: a.resolveType(expr.Args[0])}, true
 	case "DList":
 		if len(expr.Args) != 2 {
 			a.errorf(expr.Pos(), "DList expects 2 arguments, got %d", len(expr.Args))
@@ -1518,6 +1572,8 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 		return &ArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Size: n.Size, HasConstSize: n.HasConstSize, ConstSize: n.ConstSize}
 	case *DArrayType:
 		return &DArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Shape: a.substituteShape(n.Shape, shapeBindings)}
+	case *DArrayViewType:
+		return &DArrayViewType{Elem: a.substituteType(n.Elem, bindings, shapeBindings)}
 	case *DListType:
 		return &DListType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Shape: a.substituteShape(n.Shape, shapeBindings)}
 	case *DListViewType:
@@ -1611,6 +1667,10 @@ func (a *Analyzer) collectImplicitShapeParamsFromType(expr ast.TypeExpr, seen ma
 					*order = append(*order, name)
 				}
 			}
+		case "DArrayView":
+			if len(n.Args) > 0 {
+				a.collectImplicitShapeParamsFromType(n.Args[0], seen, order)
+			}
 		case "DList":
 			if len(n.Args) > 0 {
 				a.collectImplicitShapeParamsFromType(n.Args[0], seen, order)
@@ -1688,6 +1748,8 @@ func collectShapeParamsInType(t Type, out map[string]bool) {
 		if param, ok := n.Shape.(*ShapeParam); ok {
 			out[param.Name] = true
 		}
+		collectShapeParamsInType(n.Elem, out)
+	case *DArrayViewType:
 		collectShapeParamsInType(n.Elem, out)
 	case *DListType:
 		if param, ok := n.Shape.(*ShapeParam); ok {
@@ -1910,6 +1972,8 @@ func collectFreshShapesInto(t Type, seen map[int]bool, out *[]*FreshShape) {
 			seen[fresh.ID] = true
 			*out = append(*out, fresh)
 		}
+		collectFreshShapesInto(n.Elem, seen, out)
+	case *DArrayViewType:
 		collectFreshShapesInto(n.Elem, seen, out)
 	case *DListType:
 		if fresh, ok := n.Shape.(*FreshShape); ok && !seen[fresh.ID] {
