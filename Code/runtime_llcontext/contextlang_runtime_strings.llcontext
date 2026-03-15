@@ -1,0 +1,276 @@
+# ============================================================
+# Contextlang Runtime - string primitives and views
+# ============================================================
+
+# ------------------------------------------------------------
+# String concatenation
+# ------------------------------------------------------------
+
+def ctx_stage0_concat2(lhs: u8&?, rhs: u8&?) -> u8&:
+    left: u8& = lhs.u8&() if lhs != null else ""
+    right: u8& = rhs.u8&() if rhs != null else ""
+
+    left_len: usize = ctx_stage0_runtime_strlen(left)
+    right_len: usize = ctx_stage0_runtime_strlen(right)
+
+    if left_len == 0:
+        return right
+
+    if right_len == 0:
+        return left
+
+    if left_len + right_len <= 8:
+        text: u8[9]
+        memcpy((&text[0]).void&(), left.void&(), left_len)
+        memcpy((&text[0] + left_len).void&(), right.void&(), right_len)
+        text[left_len + right_len] <- 0
+        return ctx_stage0_intern_small_string((&text[0]).u8&(), left_len + right_len)
+
+    out: u8& = ctx_stage0_alloc_perm((left_len + right_len + 1).i64()).u8&()
+    memcpy(out.void&(), left.void&(), left_len)
+    memcpy((out + left_len).void&(), right.void&(), right_len)
+    out[left_len + right_len] <- 0
+    ctx_stage0_register_perm_string_len(out, left_len + right_len)
+    return out
+
+def ctx_stage0_concat2_scratch(lhs: u8&?, rhs: u8&?) -> u8&:
+    left: u8& = lhs.u8&() if lhs != null else ""
+    right: u8& = rhs.u8&() if rhs != null else ""
+
+    left_len: usize = ctx_stage0_runtime_strlen(left)
+    right_len: usize = ctx_stage0_runtime_strlen(right)
+
+    if left_len == 0:
+        return right
+
+    if right_len == 0:
+        return left
+
+    if left_len + right_len <= 8:
+        text: u8[9]
+        memcpy((&text[0]).void&(), left.void&(), left_len)
+        memcpy((&text[0] + left_len).void&(), right.void&(), right_len)
+        text[left_len + right_len] <- 0
+        return ctx_stage0_intern_small_string((&text[0]).u8&(), left_len + right_len)
+
+    out: u8& = ctx_stage0_alloc_scratch((left_len + right_len + 1).i64()).u8&()
+    memcpy(out.void&(), left.void&(), left_len)
+    memcpy((out + left_len).void&(), right.void&(), right_len)
+    out[left_len + right_len] <- 0
+    return out
+
+# ------------------------------------------------------------
+# String operations
+# ------------------------------------------------------------
+
+def ctx_stage0_string_index(value: u8&?, index: i64) -> i64:
+    src: u8& = value if value != null else ""
+    len: usize = ctx_stage0_runtime_strlen(src)
+
+    if index < 0 or index.usize() >= len:
+        return -1
+
+    return src[index.usize()].i64()
+
+def ctx_stage0_string_slice_eq(value: u8&?, start: i64, end: i64, other: u8&?) -> int:
+    src: u8& = value if value != null else ""
+    rhs: u8& = other if other != null else ""
+    len: usize = ctx_stage0_runtime_strlen(src)
+
+    lo: mutable usize = 0
+    hi: mutable usize = len
+
+    if start > 0:
+        lo <- start.usize()
+        if lo > len:
+            lo <- len
+
+    if end >= 0:
+        hi <- end.usize()
+        if hi > len:
+            hi <- len
+
+    if hi < lo:
+        hi <- lo
+
+    slice_len: usize = hi - lo
+    rhs_len: usize = ctx_stage0_runtime_strlen(rhs)
+
+    if slice_len != rhs_len:
+        return 0
+
+    if slice_len == 0:
+        return 1
+
+    if src + lo == rhs:
+        return 1
+
+    return 1 if memcmp((src + lo).void&(), rhs.void&(), slice_len) == 0 else 0
+
+def ctx_stage0_string_slices_eq(lhs: u8&?, lhs_start: i64, lhs_end: i64, rhs: u8&?, rhs_start: i64, rhs_end: i64) -> int:
+    left: u8& = lhs if lhs != null else ""
+    right: u8& = rhs if rhs != null else ""
+    left_len: usize = ctx_stage0_runtime_strlen(left)
+    right_len: usize = ctx_stage0_runtime_strlen(right)
+
+    left_lo: mutable usize = 0
+    left_hi: mutable usize = left_len
+    right_lo: mutable usize = 0
+    right_hi: mutable usize = right_len
+
+    if lhs_start > 0:
+        left_lo <- lhs_start.usize()
+        if left_lo > left_len:
+            left_lo <- left_len
+
+    if lhs_end >= 0:
+        left_hi <- lhs_end.usize()
+        if left_hi > left_len:
+            left_hi <- left_len
+
+    if left_hi < left_lo:
+        left_hi <- left_lo
+
+    if rhs_start > 0:
+        right_lo <- rhs_start.usize()
+        if right_lo > right_len:
+            right_lo <- right_len
+
+    if rhs_end >= 0:
+        right_hi <- rhs_end.usize()
+        if right_hi > right_len:
+            right_hi <- right_len
+
+    if right_hi < right_lo:
+        right_hi <- right_lo
+
+    left_slice_len: usize = left_hi - left_lo
+    right_slice_len: usize = right_hi - right_lo
+
+    if left_slice_len != right_slice_len:
+        return 0
+
+    if left_slice_len == 0:
+        return 1
+
+    if left + left_lo == right + right_lo:
+        return 1
+
+    return 1 if memcmp((left + left_lo).void&(), (right + right_lo).void&(), left_slice_len) == 0 else 0
+
+def ctx_stage0_string_slice(value: u8&?, start: i64, end: i64) -> u8&:
+    src: u8& = value if value != null else ""
+    len: usize = ctx_stage0_runtime_strlen(src)
+
+    lo: mutable usize = 0
+    hi: mutable usize = len
+
+    if start > 0:
+        lo <- start.usize()
+        if lo > len:
+            lo <- len
+
+    if end >= 0:
+        hi <- end.usize()
+        if hi > len:
+            hi <- len
+
+    if hi < lo:
+        hi <- lo
+
+    if lo == 0 and hi == len:
+        return src
+
+    out_len: usize = hi - lo
+
+    if out_len == 0:
+        return ""
+
+    if out_len <= 8:
+        return ctx_stage0_intern_small_string(src + lo, out_len)
+
+    out: u8& = ctx_stage0_alloc_perm((out_len + 1).i64()).u8&()
+    memcpy(out.void&(), (src + lo).void&(), out_len)
+    out[out_len] <- 0
+    ctx_stage0_register_perm_string_len(out, out_len)
+    return out
+
+def ctx_stage0_string_view(value: u8&?, start: i64, end: i64) -> CtxStringView:
+    src: u8& = value if value != null else ""
+    len: usize = ctx_stage0_runtime_strlen(src)
+
+    lo: mutable usize = 0
+    hi: mutable usize = len
+
+    if start > 0:
+        lo <- start.usize()
+        if lo > len:
+            lo <- len
+
+    if end >= 0:
+        hi <- end.usize()
+        if hi > len:
+            hi <- len
+
+    if hi < lo:
+        hi <- lo
+
+    return CtxStringView(src + lo, (hi - lo).i64())
+
+def ctx_stage0_string_view_len(view: CtxStringView) -> i64:
+    return view.len
+
+def ctx_stage0_string_view_slice(view: CtxStringView, start: i64, end: i64) -> CtxStringView:
+    lo: mutable i64 = start if start > 0 else 0
+    hi: mutable i64 = end if end >= 0 else view.len
+
+    if lo > view.len:
+        lo <- view.len
+    if hi > view.len:
+        hi <- view.len
+    if hi < lo:
+        hi <- lo
+
+    return CtxStringView(view.data + lo.usize(), hi - lo)
+
+def ctx_stage0_string_view_index(view: CtxStringView, index: i64) -> i64:
+    if index < 0 or index >= view.len:
+        return -1
+
+    return view.data[index.usize()].i64()
+
+def ctx_stage0_string_view_eq(view: CtxStringView, other: u8&?) -> int:
+    rhs: u8& = other if other != null else ""
+    rhs_len: usize = ctx_stage0_runtime_strlen(rhs)
+
+    if view.len < 0 or view.len.usize() != rhs_len:
+        return 0
+    if view.len == 0:
+        return 1
+    if view.data == rhs:
+        return 1
+
+    return 1 if memcmp(view.data.void&(), rhs.void&(), view.len.usize()) == 0 else 0
+
+def ctx_stage0_string_views_eq(lhs: CtxStringView, rhs: CtxStringView) -> int:
+    if lhs.len != rhs.len:
+        return 0
+    if lhs.len == 0:
+        return 1
+    if lhs.data == rhs.data:
+        return 1
+
+    return 1 if memcmp(lhs.data.void&(), rhs.data.void&(), lhs.len.usize()) == 0 else 0
+
+def ctx_stage0_string_view_copy(view: CtxStringView) -> u8&:
+    if view.len <= 0:
+        return ""
+
+    if view.len <= 8:
+        return ctx_stage0_intern_small_string(view.data, view.len.usize())
+
+    out: u8& = ctx_stage0_alloc_perm((view.len + 1).usize()).u8&()
+    memcpy(out.void&(), view.data.void&(), view.len.usize())
+    out[view.len.usize()] <- 0
+    ctx_stage0_register_perm_string_len(out, view.len.usize())
+    return out

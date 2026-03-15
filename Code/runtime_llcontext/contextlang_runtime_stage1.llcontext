@@ -1,0 +1,258 @@
+# ============================================================
+# Contextlang Runtime - public wrappers and stage 1 adapters
+# ============================================================
+
+# ------------------------------------------------------------
+# Type-to-string public API
+# ------------------------------------------------------------
+
+def ctx_stage0_int_to_string(value: i64) -> u8&:
+    return ctx_stage0_int_to_string_into(&ctx_stage0_perm_arena, value)
+
+def ctx_stage0_int_to_string_scratch(value: i64) -> u8&:
+    return ctx_stage0_int_to_string_into(&ctx_stage0_scratch_arena, value)
+
+def ctx_stage0_bool_to_string(value: int) -> u8&:
+    return ctx_stage0_bool_to_string_into(&ctx_stage0_perm_arena, value)
+
+def ctx_stage0_bool_to_string_scratch(value: int) -> u8&:
+    return ctx_stage0_bool_to_string_into(&ctx_stage0_scratch_arena, value)
+
+def ctx_stage0_char_to_string(value: i64) -> u8&:
+    return ctx_stage0_char_to_string_into(&ctx_stage0_perm_arena, value)
+
+def ctx_stage0_char_to_string_scratch(value: i64) -> u8&:
+    return ctx_stage0_char_to_string_into(&ctx_stage0_scratch_arena, value)
+
+# ------------------------------------------------------------
+# Basic string predicates
+# ------------------------------------------------------------
+
+def ctx_stage0_strlen(value: u8&?) -> i64:
+    return ctx_stage0_runtime_strlen(value).i64()
+
+def ctx_stage0_streq(lhs: u8&?, rhs: u8&?) -> int:
+    left: u8& = lhs if lhs != null else ""
+    right: u8& = rhs if rhs != null else ""
+
+    if left == right:
+        return 1
+
+    return 1 if strcmp(left, right) == 0 else 0
+
+# ============================================================
+# Stage 1 runtime forwarding wrappers
+# ============================================================
+
+def ctx_stage1rt_concat2(lhs: DStr[shape_left], rhs: DStr[shape_right]) -> DStr[shape_result]:
+    return ctx_stage0_concat2(lhs, rhs)
+
+def ctx_stage1rt_concat2_scratch(lhs: DStr[shape_left], rhs: DStr[shape_right]) -> DStr[shape_result]:
+    return ctx_stage0_concat2_scratch(lhs, rhs)
+
+def ctx_stage1rt_string_builder_new(initial: u8&?) -> StringBuilder&:
+    return ctx_stage0_string_builder_new(initial)
+
+def ctx_stage1rt_string_builder_append(builder: StringBuilder&?, suffix: u8&?) -> StringBuilder&:
+    return ctx_stage0_string_builder_append(builder, suffix)
+
+def ctx_stage1rt_string_builder_finish(builder: StringBuilder&?) -> DStr[shape_out]:
+    return ctx_stage0_string_builder_finish(builder)
+
+def ctx_stage1rt_int_to_string(value: i64) -> DStr[shape_out]:
+    return ctx_stage0_int_to_string(value)
+
+def ctx_stage1rt_int_to_string_scratch(value: i64) -> DStr[shape_out]:
+    return ctx_stage0_int_to_string_scratch(value)
+
+def ctx_stage1rt_bool_to_string(value: int) -> DStr[shape_out]:
+    return ctx_stage0_bool_to_string(value)
+
+def ctx_stage1rt_bool_to_string_scratch(value: int) -> DStr[shape_out]:
+    return ctx_stage0_bool_to_string_scratch(value)
+
+def ctx_stage1rt_char_to_string(value: i64) -> DStr[shape_out]:
+    return ctx_stage0_char_to_string(value)
+
+def ctx_stage1rt_char_to_string_scratch(value: i64) -> DStr[shape_out]:
+    return ctx_stage0_char_to_string_scratch(value)
+
+def ctx_stage1rt_strlen(value: DStr[shape_in]) -> i64:
+    return ctx_stage0_strlen(value)
+
+def ctx_stage1rt_streq(lhs: DStr[shape_left], rhs: DStr[shape_right]) -> int:
+    return ctx_stage0_streq(lhs, rhs)
+
+def ctx_stage1rt_string_slice_eq(value: DStr[shape_in], start: i64, end: i64, other: DStr[shape_other]) -> int:
+    return ctx_stage0_string_slice_eq(value, start, end, other)
+
+def ctx_stage1rt_string_slices_eq(lhs: DStr[shape_left], lhs_start: i64, lhs_end: i64, rhs: DStr[shape_right], rhs_start: i64, rhs_end: i64) -> int:
+    return ctx_stage0_string_slices_eq(lhs, lhs_start, lhs_end, rhs, rhs_start, rhs_end)
+
+def ctx_stage1rt_string_index(value: DStr[shape_in], index: i64) -> i64:
+    return ctx_stage0_string_index(value, index)
+
+def ctx_stage1rt_string_slice(value: DStr[shape_in], start: i64, end: i64) -> DStr[shape_out]:
+    return ctx_stage0_string_slice(value, start, end)
+
+def ctx_stage1rt_string_view(value: DStr[shape_in], start: i64, end: i64) -> CtxStringView:
+    return ctx_stage0_string_view(value, start, end)
+
+def ctx_stage1rt_string_view_len(view: CtxStringView) -> i64:
+    return ctx_stage0_string_view_len(view)
+
+def ctx_stage1rt_string_view_slice(view: CtxStringView, start: i64, end: i64) -> CtxStringView:
+    return ctx_stage0_string_view_slice(view, start, end)
+
+def ctx_stage1rt_string_view_index(view: CtxStringView, index: i64) -> i64:
+    return ctx_stage0_string_view_index(view, index)
+
+def ctx_stage1rt_string_view_eq(view: CtxStringView, other: DStr[shape_other]) -> int:
+    return ctx_stage0_string_view_eq(view, other)
+
+def ctx_stage1rt_string_views_eq(lhs: CtxStringView, rhs: CtxStringView) -> int:
+    return ctx_stage0_string_views_eq(lhs, rhs)
+
+def ctx_stage1rt_string_from_view(view: CtxStringView) -> DStr[shape_out]:
+    return ctx_stage0_string_view_copy(view)
+
+# ------------------------------------------------------------
+# Legacy raw CtxList compatibility shims
+# Prefer ctx_stage1rt_tlist_* / DList[T, shape] / DListView[T]
+# for new code so element types flow through the API.
+# ------------------------------------------------------------
+
+def ctx_stage1rt_list_new() -> DArray[void&, shape_out]:
+    return ctx_stage0_list_new()
+
+def ctx_stage1rt_list_new_reserve(cap: i64, elem_size: i64) -> DArray[void&, shape_out]:
+    return ctx_stage0_list_new_reserve(cap, elem_size)
+
+def ctx_stage1rt_list_reserve(values: DArray[void&, shape_in], cap: i64, elem_size: i64) -> DArray[void&, shape_out]:
+    return ctx_stage0_list_reserve(values, cap, elem_size)
+
+def ctx_stage1rt_list_push(values: DArray[void&, shape_in], elem: void&?, elem_size: i64) -> DArray[void&, shape_out]:
+    return ctx_stage0_list_push(values, elem, elem_size)
+
+def ctx_stage1rt_list_push_mut(values: DArray[void&, shape_in], elem: void&?, elem_size: i64) -> DArray[void&, shape_out]:
+    return ctx_stage0_list_push_mut(values, elem, elem_size)
+
+def ctx_stage1rt_list_concat(left: DArray[void&, shape_left], right: DArray[void&, shape_right]) -> DArray[void&, shape_result]:
+    return ctx_stage0_list_concat(left, right)
+
+def ctx_stage1rt_list_truncate(values: DArray[void&, shape_in], size: i64) -> DArray[void&, shape_out]:
+    return ctx_stage0_list_truncate(values, size)
+
+def ctx_stage1rt_list_clear(values: DArray[void&, shape_in]) -> DArray[void&, shape_out]:
+    return ctx_stage0_list_clear(values)
+
+def ctx_stage1rt_list_view(values: DArray[void&, shape_in], start: i64, end: i64) -> CtxListView:
+    return ctx_stage0_list_view(values, start, end)
+
+def ctx_stage1rt_list_view_len(view: CtxListView) -> i64:
+    return ctx_stage0_list_view_len(view)
+
+def ctx_stage1rt_list_view_slice(view: CtxListView, start: i64, end: i64) -> CtxListView:
+    return ctx_stage0_list_view_slice(view, start, end)
+
+def ctx_stage1rt_list_view_get(view: CtxListView, index: i64, elem_size: i64) -> void&:
+    return ctx_stage0_list_view_get(view, index, elem_size)
+
+def ctx_stage1rt_list_from_view(view: CtxListView) -> DArray[void&, shape_out]:
+    return ctx_stage0_list_view_copy(view)
+
+# ------------------------------------------------------------
+# Preferred typed CtxList wrappers
+# ------------------------------------------------------------
+
+def ctx_stage1rt_tlist_new[T](type_hint: T&) -> DList[T, shape_out]:
+    _ = type_hint
+    return ctx_stage0_list_new_reserve(0, sizeof(T).i64())
+
+def ctx_stage1rt_tlist_new_reserve[T](cap: i64, type_hint: T&) -> DList[T, shape_out]:
+    _ = type_hint
+    return ctx_stage0_list_new_reserve(cap, sizeof(T).i64())
+
+def ctx_stage1rt_tlist_reserve[T](values: DList[T, shape_in], cap: i64) -> DList[T, shape_out]:
+    return ctx_stage0_list_reserve(values, cap, sizeof(T).i64())
+
+def ctx_stage1rt_tlist_push[T](values: DList[T, shape_in], elem: T&) -> DList[T, shape_out]:
+    return ctx_stage0_list_push(values, elem.void&(), sizeof(T).i64())
+
+def ctx_stage1rt_tlist_push_mut[T](values: DList[T, shape_in], elem: T&) -> DList[T, shape_out]:
+    return ctx_stage0_list_push_mut(values, elem.void&(), sizeof(T).i64())
+
+def ctx_stage1rt_tlist_concat[T](left: DList[T, shape_left], right: DList[T, shape_right]) -> DList[T, shape_result]:
+    return ctx_stage0_list_concat(left, right)
+
+def ctx_stage1rt_tlist_truncate[T](values: DList[T, shape_in], size: i64) -> DList[T, shape_out]:
+    return ctx_stage0_list_truncate(values, size)
+
+def ctx_stage1rt_tlist_clear[T](values: DList[T, shape_in]) -> DList[T, shape_out]:
+    return ctx_stage0_list_clear(values)
+
+def ctx_stage1rt_tlist_view[T](values: DList[T, shape_in], start: i64, end: i64) -> DListView[T]:
+    return ctx_stage0_list_view(values, start, end)
+
+def ctx_stage1rt_tlist_view_len[T](view: DListView[T]) -> i64:
+    return ctx_stage0_list_view_len(view)
+
+def ctx_stage1rt_tlist_view_slice[T](view: DListView[T], start: i64, end: i64) -> DListView[T]:
+    return ctx_stage0_list_view_slice(view, start, end)
+
+def ctx_stage1rt_tlist_take[T](values: DList[T, shape_in], count: i64) -> DListView[T]:
+    return ctx_stage1rt_tlist_view(values, 0, count)
+
+def ctx_stage1rt_tlist_drop[T](values: DList[T, shape_in], count: i64) -> DListView[T]:
+    return ctx_stage1rt_tlist_view(values, count, ctx_stage1rt_tlist_len(values))
+
+def ctx_stage1rt_tlist_from_view[T](view: DListView[T]) -> DList[T, shape_out]:
+    return ctx_stage0_list_view_copy(view)
+
+def ctx_stage1rt_tlist_len[T](values: DList[T, shape_in]) -> i64:
+    return ctx_stage0_list_len(values)
+
+def ctx_stage1rt_tlist_get[T](values: DList[T, shape_in], index: i64) -> T&:
+    return ctx_stage0_list_get(values, index, sizeof(T).i64()).T&()
+
+def ctx_stage1rt_tlist_set[T](values: DList[T, shape_in], index: i64, elem: T&) -> i64:
+    return ctx_stage0_list_set(values, index, elem.void&(), sizeof(T).i64())
+
+def ctx_stage1rt_tlist_first[T](values: DList[T, shape_in]) -> T&:
+    return ctx_stage1rt_tlist_get(values, 0)
+
+def ctx_stage1rt_tlist_view_get[T](view: DListView[T], index: i64) -> T&:
+    return ctx_stage0_list_view_get(view, index, sizeof(T).i64()).T&()
+
+def ctx_stage1rt_tlist_view_first[T](view: DListView[T]) -> T&:
+    return ctx_stage1rt_tlist_view_get(view, 0)
+
+# ------------------------------------------------------------
+# Legacy raw CtxList compatibility shims
+# Prefer ctx_stage1rt_tlist_len/get/set for typed code.
+# ------------------------------------------------------------
+
+def ctx_stage1rt_list_len(values: DArray[void&, shape_in]) -> i64:
+    return ctx_stage0_list_len(values)
+
+def ctx_stage1rt_list_get(values: DArray[void&, shape_in], index: i64, elem_size: i64) -> void&:
+    return ctx_stage0_list_get(values, index, elem_size)
+
+def ctx_stage1rt_list_set(values: DArray[void&, shape_in], index: i64, elem: void&?, elem_size: i64) -> i64:
+    return ctx_stage0_list_set(values, index, elem, elem_size)
+
+def ctx_stage1rt_reset_scratch():
+    ctx_stage0_reset_scratch()
+
+def ctx_stage1rt_puts(value: u8&?) -> int:
+    return puts(value if value != null else "")
+
+# ------------------------------------------------------------
+# Fatal error handler (weak linkage)
+# ------------------------------------------------------------
+
+# weak
+def ctx_llvm_codegen_fatal(msg: u8&?):
+    actual_msg: u8& = msg if msg != null else "<null>"
+    fprintf(stderr, "ctx_llvm_codegen_fatal: %s\n", actual_msg)
+    exit(1)
