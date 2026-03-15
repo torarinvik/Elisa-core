@@ -50,11 +50,16 @@ var shapeTransformTable = map[string]ShapeTransformSpec{
 	"ctx_stage1rt_char_to_string":         {FreshReturnShapeParams: []string{"shape_out"}},
 	"ctx_stage1rt_char_to_string_scratch": {FreshReturnShapeParams: []string{"shape_out"}},
 	"ctx_stage1rt_string_slice":           {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_string_from_view":       {FreshReturnShapeParams: []string{"shape_out"}},
 	"ctx_stage1rt_list_new":               {FreshReturnShapeParams: []string{"shape_out"}},
 	"ctx_stage1rt_list_new_reserve":       {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_list_reserve":           {FreshReturnShapeParams: []string{"shape_out"}},
 	"ctx_stage1rt_list_push":              {FreshReturnShapeParams: []string{"shape_out"}},
 	"ctx_stage1rt_list_push_mut":          {FreshReturnShapeParams: []string{"shape_out"}},
 	"ctx_stage1rt_list_concat":            {FreshReturnShapeParams: []string{"shape_result"}},
+	"ctx_stage1rt_list_truncate":          {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_list_clear":             {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_stage1rt_list_from_view":         {FreshReturnShapeParams: []string{"shape_out"}},
 }
 
 type freshReturnStatus int
@@ -909,8 +914,34 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	return a.substituteType(ft.Return, bindings, shapeBindings)
 }
 
+func (a *Analyzer) collectRuntimeBridgeBindings(pattern, actual Type, bindings map[string]Type, shapeBindings map[string]Shape) bool {
+	bridge, ok := classifyRuntimeBridge(pattern, actual)
+	if !ok {
+		return false
+	}
+	switch bridge.Kind {
+	case runtimeBridgeDArrayDynArray:
+		if patternDArray, ok := pattern.(*DArrayType); ok {
+			a.collectTypeBindings(patternDArray.Elem, bridge.DynArray.Args[0], bindings, shapeBindings)
+			return true
+		}
+		if patternDynArray, ok := dynArrayRuntimeInstance(pattern); ok {
+			a.collectTypeBindings(patternDynArray.Args[0], bridge.DArray.Elem, bindings, shapeBindings)
+			return true
+		}
+		return true
+	case runtimeBridgeDArrayCtxList, runtimeBridgeDStrU8Ref:
+		return true
+	default:
+		return false
+	}
+}
+
 func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string]Type, shapeBindings map[string]Shape) {
 	if pattern == nil || actual == nil {
+		return
+	}
+	if a.collectRuntimeBridgeBindings(pattern, actual, bindings, shapeBindings) {
 		return
 	}
 	switch p := pattern.(type) {
@@ -930,20 +961,12 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		if act, ok := actual.(*DArrayType); ok {
 			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings)
 			a.collectShapeBinding(p.Shape, act.Shape, shapeBindings)
-		} else if act, ok := dynArrayRuntimeInstance(actual); ok {
-			a.collectTypeBindings(p.Elem, act.Args[0], bindings, shapeBindings)
 		}
 	case *DStrType:
 		if act, ok := actual.(*DStrType); ok {
 			a.collectShapeBinding(p.Shape, act.Shape, shapeBindings)
 		}
 	case *GenericInstanceType:
-		if p.Name == "DynArray" && len(p.Args) == 1 {
-			if act, ok := actual.(*DArrayType); ok {
-				a.collectTypeBindings(p.Args[0], act.Elem, bindings, shapeBindings)
-				return
-			}
-		}
 		if act, ok := actual.(*GenericInstanceType); ok && p.Name == act.Name && len(p.Args) == len(act.Args) {
 			for i := range p.Args {
 				a.collectTypeBindings(p.Args[i], act.Args[i], bindings, shapeBindings)
@@ -1708,7 +1731,7 @@ func (a *Analyzer) reportShapeMismatchNotes(pos lexer.Pos, expected Type, actual
 func shapeMismatchNotes(expected Type, actual Type) []string {
 	actualFresh := collectFreshShapesInType(actual)
 	if len(actualFresh) == 0 {
-		return nil
+		return runtimeBackedShapeMismatchNotes(expected, actual)
 	}
 	notes := make([]string, 0, 2)
 	seen := map[string]bool{}
@@ -1744,7 +1767,50 @@ func shapeMismatchNotes(expected Type, actual Type) []string {
 			}
 		}
 	}
+	for _, note := range runtimeBackedShapeMismatchNotes(expected, actual) {
+		if !seen[note] {
+			seen[note] = true
+			notes = append(notes, note)
+		}
+	}
 	return notes
+}
+
+func runtimeBackedShapeMismatchNotes(expected Type, actual Type) []string {
+	if usesCtxListLogicalShape(expected) || usesCtxListLogicalShape(actual) {
+		return []string{"CtxList-backed list wrappers keep the same runtime layout; this mismatch is about the logical shape witness"}
+	}
+	return nil
+}
+
+func usesCtxListLogicalShape(t Type) bool {
+	if t == nil {
+		return false
+	}
+	switch n := t.(type) {
+	case *RefType:
+		return usesCtxListLogicalShape(n.Elem)
+	case *ArrayType:
+		return usesCtxListLogicalShape(n.Elem)
+	case *DArrayType:
+		return isVoidRefType(n.Elem)
+	case *GenericInstanceType:
+		for _, arg := range n.Args {
+			if usesCtxListLogicalShape(arg) {
+				return true
+			}
+		}
+		return false
+	case *FuncType:
+		for _, param := range n.Params {
+			if usesCtxListLogicalShape(param) {
+				return true
+			}
+		}
+		return usesCtxListLogicalShape(n.Return)
+	default:
+		return false
+	}
 }
 
 func collectFreshShapesInType(t Type) []*FreshShape {

@@ -258,7 +258,7 @@ func SameType(a, b Type) bool {
 	if IsInvalidType(a) || IsInvalidType(b) {
 		return true
 	}
-	if darrayRuntimeCompatible(a, b) {
+	if sameTypeRuntimeCompatible(a, b) {
 		return true
 	}
 	switch ta := a.(type) {
@@ -338,13 +338,7 @@ func AssignableTo(dst, src Type) bool {
 	if IsInvalidType(dst) || IsInvalidType(src) {
 		return true
 	}
-	if darrayRuntimeCompatible(dst, src) {
-		return true
-	}
-	if darrayCtxListCompatible(dst, src) {
-		return true
-	}
-	if dstrRuntimeCompatible(dst, src) {
+	if assignableRuntimeCompatible(dst, src) {
 		return true
 	}
 	if matchTypePattern(dst, src) {
@@ -386,13 +380,7 @@ func matchTypePattern(pattern, actual Type) bool {
 	if IsInvalidType(pattern) || IsInvalidType(actual) {
 		return true
 	}
-	if darrayRuntimePatternCompatible(pattern, actual) {
-		return true
-	}
-	if darrayCtxListPatternCompatible(pattern, actual) {
-		return true
-	}
-	if dstrRuntimePatternCompatible(pattern, actual) {
+	if patternRuntimeCompatible(pattern, actual) {
 		return true
 	}
 	if _, ok := pattern.(*TypeParamType); ok {
@@ -558,32 +546,22 @@ func dynArrayRuntimeInstance(t Type) (*GenericInstanceType, bool) {
 	return gi, true
 }
 
-func darrayRuntimeCompatible(a, b Type) bool {
-	if da, ok := a.(*DArrayType); ok {
-		if gi, ok := dynArrayRuntimeInstance(b); ok {
-			return SameType(da.Elem, gi.Args[0])
-		}
-	}
-	if gi, ok := dynArrayRuntimeInstance(a); ok {
-		if da, ok := b.(*DArrayType); ok {
-			return SameType(gi.Args[0], da.Elem)
-		}
-	}
-	return false
-}
+type runtimeBridgeKind int
 
-func darrayRuntimePatternCompatible(pattern, actual Type) bool {
-	if p, ok := pattern.(*DArrayType); ok {
-		if gi, ok := dynArrayRuntimeInstance(actual); ok {
-			return matchTypePattern(p.Elem, gi.Args[0])
-		}
-	}
-	if gi, ok := dynArrayRuntimeInstance(pattern); ok {
-		if actualDArray, ok := actual.(*DArrayType); ok {
-			return matchTypePattern(gi.Args[0], actualDArray.Elem)
-		}
-	}
-	return false
+const (
+	runtimeBridgeNone runtimeBridgeKind = iota
+	runtimeBridgeDArrayDynArray
+	runtimeBridgeDArrayCtxList
+	runtimeBridgeDStrU8Ref
+)
+
+type runtimeBridgeMatch struct {
+	Kind     runtimeBridgeKind
+	DArray   *DArrayType
+	DynArray *GenericInstanceType
+	CtxList  *RefType
+	DStr     *DStrType
+	U8Ref    *RefType
 }
 
 func isVoidRefType(t Type) bool {
@@ -607,34 +585,6 @@ func ctxListRuntimeRef(t Type) (*RefType, bool) {
 	return ref, true
 }
 
-func darrayCtxListCompatible(a, b Type) bool {
-	if da, ok := a.(*DArrayType); ok && isVoidRefType(da.Elem) {
-		if _, ok := ctxListRuntimeRef(b); ok {
-			return true
-		}
-	}
-	if da, ok := b.(*DArrayType); ok && isVoidRefType(da.Elem) {
-		if _, ok := ctxListRuntimeRef(a); ok {
-			return true
-		}
-	}
-	return false
-}
-
-func darrayCtxListPatternCompatible(pattern, actual Type) bool {
-	if da, ok := pattern.(*DArrayType); ok && isVoidRefType(da.Elem) {
-		if _, ok := ctxListRuntimeRef(actual); ok {
-			return true
-		}
-	}
-	if da, ok := actual.(*DArrayType); ok && isVoidRefType(da.Elem) {
-		if _, ok := ctxListRuntimeRef(pattern); ok {
-			return true
-		}
-	}
-	return false
-}
-
 func u8RuntimeRef(t Type) (*RefType, bool) {
 	ref, ok := t.(*RefType)
 	if !ok {
@@ -647,30 +597,85 @@ func u8RuntimeRef(t Type) (*RefType, bool) {
 	return ref, true
 }
 
-func dstrRuntimeCompatible(a, b Type) bool {
-	if _, ok := a.(*DStrType); ok {
-		if _, ok := u8RuntimeRef(b); ok {
-			return true
+func classifyRuntimeBridge(a, b Type) (runtimeBridgeMatch, bool) {
+	if da, ok := a.(*DArrayType); ok {
+		if dynArray, ok := dynArrayRuntimeInstance(b); ok {
+			return runtimeBridgeMatch{Kind: runtimeBridgeDArrayDynArray, DArray: da, DynArray: dynArray}, true
+		}
+		if isVoidRefType(da.Elem) {
+			if ctxList, ok := ctxListRuntimeRef(b); ok {
+				return runtimeBridgeMatch{Kind: runtimeBridgeDArrayCtxList, DArray: da, CtxList: ctxList}, true
+			}
 		}
 	}
-	if _, ok := b.(*DStrType); ok {
-		if _, ok := u8RuntimeRef(a); ok {
-			return true
+	if da, ok := b.(*DArrayType); ok {
+		if dynArray, ok := dynArrayRuntimeInstance(a); ok {
+			return runtimeBridgeMatch{Kind: runtimeBridgeDArrayDynArray, DArray: da, DynArray: dynArray}, true
+		}
+		if isVoidRefType(da.Elem) {
+			if ctxList, ok := ctxListRuntimeRef(a); ok {
+				return runtimeBridgeMatch{Kind: runtimeBridgeDArrayCtxList, DArray: da, CtxList: ctxList}, true
+			}
 		}
 	}
-	return false
+	if dstr, ok := a.(*DStrType); ok {
+		if u8Ref, ok := u8RuntimeRef(b); ok {
+			return runtimeBridgeMatch{Kind: runtimeBridgeDStrU8Ref, DStr: dstr, U8Ref: u8Ref}, true
+		}
+	}
+	if dstr, ok := b.(*DStrType); ok {
+		if u8Ref, ok := u8RuntimeRef(a); ok {
+			return runtimeBridgeMatch{Kind: runtimeBridgeDStrU8Ref, DStr: dstr, U8Ref: u8Ref}, true
+		}
+	}
+	return runtimeBridgeMatch{}, false
 }
 
-func dstrRuntimePatternCompatible(pattern, actual Type) bool {
-	if _, ok := pattern.(*DStrType); ok {
-		if _, ok := u8RuntimeRef(actual); ok {
-			return true
-		}
+func sameTypeRuntimeCompatible(a, b Type) bool {
+	bridge, ok := classifyRuntimeBridge(a, b)
+	if !ok {
+		return false
 	}
-	if _, ok := actual.(*DStrType); ok {
-		if _, ok := u8RuntimeRef(pattern); ok {
-			return true
-		}
+	switch bridge.Kind {
+	case runtimeBridgeDArrayDynArray:
+		return SameType(bridge.DArray.Elem, bridge.DynArray.Args[0])
+	default:
+		return false
 	}
-	return false
+}
+
+func assignableRuntimeCompatible(dst, src Type) bool {
+	bridge, ok := classifyRuntimeBridge(dst, src)
+	if !ok {
+		return false
+	}
+	switch bridge.Kind {
+	case runtimeBridgeDArrayDynArray:
+		return SameType(bridge.DArray.Elem, bridge.DynArray.Args[0])
+	case runtimeBridgeDArrayCtxList, runtimeBridgeDStrU8Ref:
+		return true
+	default:
+		return false
+	}
+}
+
+func patternRuntimeCompatible(pattern, actual Type) bool {
+	bridge, ok := classifyRuntimeBridge(pattern, actual)
+	if !ok {
+		return false
+	}
+	switch bridge.Kind {
+	case runtimeBridgeDArrayDynArray:
+		if patternDArray, ok := pattern.(*DArrayType); ok {
+			return matchTypePattern(patternDArray.Elem, bridge.DynArray.Args[0])
+		}
+		if patternDynArray, ok := dynArrayRuntimeInstance(pattern); ok {
+			return matchTypePattern(patternDynArray.Args[0], bridge.DArray.Elem)
+		}
+		return false
+	case runtimeBridgeDArrayCtxList, runtimeBridgeDStrU8Ref:
+		return true
+	default:
+		return false
+	}
 }

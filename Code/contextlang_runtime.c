@@ -23,6 +23,11 @@ typedef struct ctx_stage0_string_len_cache_entry {
     size_t len;
 } ctx_stage0_string_len_cache_entry;
 
+typedef struct {
+    char *data;
+    long long len;
+} ctx_stage0_string_view;
+
 static ctx_stage0_small_string_cache_entry *ctx_stage0_small_string_cache[CTX_STAGE0_SMALL_STRING_CACHE_BUCKETS] = {0};
 static ctx_stage0_string_len_cache_entry *ctx_stage0_string_len_cache[CTX_STAGE0_STRING_LEN_CACHE_BUCKETS] = {0};
 
@@ -225,6 +230,12 @@ typedef struct {
     long long inline_box_stride;
 } ctx_stage0_list;
 
+typedef struct {
+    void **data;
+    long long len;
+    long long elem_size;
+} ctx_stage0_list_view;
+
 static ctx_stage0_list *ctx_stage0_list_alloc_with_boxes(long long cap, long long elem_size, int preallocate_boxes) {
     if (cap < 0) {
         cap = 0;
@@ -272,6 +283,37 @@ ctx_stage0_list *ctx_stage0_list_new(void) {
 
 ctx_stage0_list *ctx_stage0_list_new_reserve(long long cap, long long elem_size) {
     return ctx_stage0_list_alloc_with_boxes(cap, elem_size, 1);
+}
+
+ctx_stage0_list *ctx_stage0_list_reserve(ctx_stage0_list *list, long long cap, long long elem_size) {
+    long long resolved_cap = cap >= 0 ? cap : 0;
+    long long resolved_elem_size = list && list->elem_size > 0 ? list->elem_size : elem_size;
+    if (list == NULL) {
+        return ctx_stage0_list_new_reserve(resolved_cap, resolved_elem_size);
+    }
+    if (list->elem_size <= 0 && elem_size > 0) {
+        list->elem_size = elem_size;
+        resolved_elem_size = elem_size;
+    }
+    if (resolved_cap <= list->cap) {
+        return list;
+    }
+    ctx_stage0_list *grown = ctx_stage0_list_alloc_with_boxes(resolved_cap, resolved_elem_size, 1);
+    if (grown == NULL) {
+        return NULL;
+    }
+    grown->len = list->len;
+    if (list->len > 0 && list->data != NULL) {
+        if (list->inline_boxes != NULL && list->inline_box_stride == grown->inline_box_stride) {
+            memcpy(grown->inline_boxes, list->inline_boxes, (size_t)list->len * (size_t)grown->inline_box_stride);
+            for (long long i = 0; i < list->len; i++) {
+                grown->data[i] = grown->inline_boxes + ((size_t)i * (size_t)grown->inline_box_stride);
+            }
+        } else {
+            memcpy(grown->data, list->data, (size_t)list->len * sizeof(void *));
+        }
+    }
+    return grown;
 }
 
 ctx_stage0_list *ctx_stage0_list_push_mut(ctx_stage0_list *list, const void *value, long long elem_size) {
@@ -376,6 +418,79 @@ ctx_stage0_list *ctx_stage0_list_concat(ctx_stage0_list *lhs, ctx_stage0_list *r
         memcpy(out->data + left_len, rhs->data, (size_t)rhs->len * sizeof(void *));
     }
     out->len = left_len + right_len;
+    return out;
+}
+
+ctx_stage0_list *ctx_stage0_list_truncate(ctx_stage0_list *list, long long size) {
+    if (list == NULL) {
+        return ctx_stage0_list_new();
+    }
+    long long new_len = size;
+    if (new_len < 0) {
+        new_len = 0;
+    }
+    if (new_len > list->len) {
+        new_len = list->len;
+    }
+    list->len = new_len;
+    return list;
+}
+
+ctx_stage0_list *ctx_stage0_list_clear(ctx_stage0_list *list) {
+    return ctx_stage0_list_truncate(list, 0);
+}
+
+ctx_stage0_list_view ctx_stage0_list_view_make(ctx_stage0_list *list, long long start, long long end) {
+    ctx_stage0_list_view view;
+    view.data = NULL;
+    view.len = 0;
+    view.elem_size = list ? list->elem_size : 0;
+    if (list == NULL || list->len <= 0 || list->data == NULL) {
+        return view;
+    }
+    long long lo = start > 0 ? start : 0;
+    long long hi = end >= 0 ? end : list->len;
+    if (lo > list->len) {
+        lo = list->len;
+    }
+    if (hi > list->len) {
+        hi = list->len;
+    }
+    if (hi < lo) {
+        hi = lo;
+    }
+    if (hi == lo) {
+        return view;
+    }
+    view.data = list->data + lo;
+    view.len = hi - lo;
+    return view;
+}
+
+long long ctx_stage0_list_view_len(ctx_stage0_list_view view) {
+    return view.len;
+}
+
+void *ctx_stage0_list_view_get(ctx_stage0_list_view view, long long index, long long elem_size) {
+    if (view.data == NULL || index < 0 || index >= view.len) {
+        long long fallback_elem_size = elem_size > 0 ? elem_size : view.elem_size;
+        return ctx_stage0_box_value(NULL, fallback_elem_size);
+    }
+    return view.data[index];
+}
+
+ctx_stage0_list *ctx_stage0_list_view_copy(ctx_stage0_list_view view) {
+    if (view.len <= 0) {
+        return ctx_stage0_list_new_reserve(0, view.elem_size);
+    }
+    ctx_stage0_list *out = ctx_stage0_list_alloc(view.len, view.elem_size);
+    if (out == NULL) {
+        return NULL;
+    }
+    out->len = view.len;
+    if (view.data != NULL && out->data != NULL) {
+        memcpy(out->data, view.data, (size_t)view.len * sizeof(void *));
+    }
     return out;
 }
 
@@ -641,6 +756,57 @@ char *ctx_stage0_string_slice(const char *value, long long start, long long end)
     return out;
 }
 
+ctx_stage0_string_view ctx_stage0_string_view_make(const char *value, long long start, long long end) {
+    const char *src = value ? value : "";
+    size_t len = ctx_stage0_runtime_strlen(src);
+    size_t lo = 0;
+    size_t hi = len;
+    if (start > 0) {
+        lo = (size_t)start;
+        if (lo > len) {
+            lo = len;
+        }
+    }
+    if (end >= 0) {
+        hi = (size_t)end;
+        if (hi > len) {
+            hi = len;
+        }
+    }
+    if (hi < lo) {
+        hi = lo;
+    }
+    ctx_stage0_string_view view;
+    view.data = (char *)(src + lo);
+    view.len = (long long)(hi - lo);
+    return view;
+}
+
+long long ctx_stage0_string_view_len(ctx_stage0_string_view view) {
+    return view.len;
+}
+
+long long ctx_stage0_string_view_index(ctx_stage0_string_view view, long long index) {
+    if (index < 0 || index >= view.len) {
+        return -1;
+    }
+    return (unsigned char)view.data[index];
+}
+
+char *ctx_stage0_string_view_copy(ctx_stage0_string_view view) {
+    if (view.len <= 0) {
+        return "";
+    }
+    if (view.len <= 8) {
+        return ctx_stage0_intern_small_string(view.data, (size_t)view.len);
+    }
+    char *out = (char *)ctx_stage0_alloc_perm(view.len + 1);
+    memcpy(out, view.data, (size_t)view.len);
+    out[view.len] = '\0';
+    ctx_stage0_register_perm_string_len(out, (size_t)view.len);
+    return out;
+}
+
 char *ctx_stage1rt_concat2(const char *lhs, const char *rhs) {
     return ctx_stage0_concat2(lhs, rhs);
 }
@@ -709,12 +875,32 @@ char *ctx_stage1rt_string_slice(const char *value, long long start, long long en
     return ctx_stage0_string_slice(value, start, end);
 }
 
+ctx_stage0_string_view ctx_stage1rt_string_view(const char *value, long long start, long long end) {
+    return ctx_stage0_string_view_make(value, start, end);
+}
+
+long long ctx_stage1rt_string_view_len(ctx_stage0_string_view view) {
+    return ctx_stage0_string_view_len(view);
+}
+
+long long ctx_stage1rt_string_view_index(ctx_stage0_string_view view, long long index) {
+    return ctx_stage0_string_view_index(view, index);
+}
+
+char *ctx_stage1rt_string_from_view(ctx_stage0_string_view view) {
+    return ctx_stage0_string_view_copy(view);
+}
+
 ctx_stage0_list *ctx_stage1rt_list_new(void) {
     return ctx_stage0_list_new();
 }
 
 ctx_stage0_list *ctx_stage1rt_list_new_reserve(long long cap, long long elem_size) {
     return ctx_stage0_list_new_reserve(cap, elem_size);
+}
+
+ctx_stage0_list *ctx_stage1rt_list_reserve(ctx_stage0_list *values, long long cap, long long elem_size) {
+    return ctx_stage0_list_reserve(values, cap, elem_size);
 }
 
 ctx_stage0_list *ctx_stage1rt_list_push(ctx_stage0_list *values, const void *elem, long long elem_size) {
@@ -727,6 +913,30 @@ ctx_stage0_list *ctx_stage1rt_list_push_mut(ctx_stage0_list *values, const void 
 
 ctx_stage0_list *ctx_stage1rt_list_concat(ctx_stage0_list *left, ctx_stage0_list *right) {
     return ctx_stage0_list_concat(left, right);
+}
+
+ctx_stage0_list *ctx_stage1rt_list_truncate(ctx_stage0_list *values, long long size) {
+    return ctx_stage0_list_truncate(values, size);
+}
+
+ctx_stage0_list *ctx_stage1rt_list_clear(ctx_stage0_list *values) {
+    return ctx_stage0_list_clear(values);
+}
+
+ctx_stage0_list_view ctx_stage1rt_list_view(ctx_stage0_list *values, long long start, long long end) {
+    return ctx_stage0_list_view_make(values, start, end);
+}
+
+long long ctx_stage1rt_list_view_len(ctx_stage0_list_view view) {
+    return ctx_stage0_list_view_len(view);
+}
+
+void *ctx_stage1rt_list_view_get(ctx_stage0_list_view view, long long index, long long elem_size) {
+    return ctx_stage0_list_view_get(view, index, elem_size);
+}
+
+ctx_stage0_list *ctx_stage1rt_list_from_view(ctx_stage0_list_view view) {
+    return ctx_stage0_list_view_copy(view);
 }
 
 long long ctx_stage1rt_list_len(ctx_stage0_list *values) {

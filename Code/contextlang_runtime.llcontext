@@ -53,6 +53,10 @@ repr(c) struct StringBuilder:
     cap: mutable i64
     data: mutable u8&?
 
+repr(c) struct CtxStringView:
+    data: mutable u8&
+    len: mutable i64
+
 repr(c) struct CtxList:
     len: mutable i64
     cap: mutable i64
@@ -60,6 +64,11 @@ repr(c) struct CtxList:
     data: mutable void&&?
     inline_boxes: mutable u8&?
     inline_box_stride: mutable i64
+
+repr(c) struct CtxListView:
+    data: mutable void&&?
+    len: mutable i64
+    elem_size: mutable i64
 
 # ------------------------------------------------------------
 # Global caches (zero-initialized)
@@ -354,6 +363,43 @@ def ctx_stage0_list_new() -> CtxList&:
 def ctx_stage0_list_new_reserve(cap: i64, elem_size: i64) -> CtxList&:
     return ctx_stage0_list_alloc_with_boxes(cap, elem_size, 1)
 
+def ctx_stage0_list_reserve(list: CtxList&?, cap: i64, elem_size: i64) -> CtxList&?:
+    resolved_cap: mutable i64 = cap if cap >= 0 else 0
+    resolved_elem_size: mutable i64 = list.elem_size if list != null and list.elem_size > 0 else elem_size
+
+    if list == null:
+        return ctx_stage0_list_new_reserve(resolved_cap, resolved_elem_size)
+
+    assert list != null
+
+    if list.elem_size <= 0 and elem_size > 0:
+        list.elem_size <- elem_size
+        resolved_elem_size <- elem_size
+
+    if resolved_cap <= list.cap:
+        return list
+
+    grown: CtxList& = ctx_stage0_list_alloc_with_boxes(resolved_cap, resolved_elem_size, 1)
+    grown.len <- list.len
+
+    if list.len > 0 and list.data != null:
+        assert grown.data != null
+        if list.inline_boxes != null and list.inline_box_stride == grown.inline_box_stride:
+            assert grown.inline_boxes != null
+            memcpy(
+                grown.inline_boxes.void&(),
+                list.inline_boxes.void&(),
+                list.len.usize() * grown.inline_box_stride.usize()
+            )
+            i: mutable i64 = 0
+            while i < list.len:
+                grown.data[i.usize()] <- (grown.inline_boxes + i.usize() * grown.inline_box_stride.usize()).void&()
+                i += 1
+        else:
+            memcpy(grown.data.void&(), list.data.void&(), list.len.usize() * sizeof(void&))
+
+    return grown
+
 def ctx_stage0_list_push_mut(list: CtxList&?, value: void&?, elem_size: i64) -> CtxList&?:
     resolved_elem_size: mutable i64 = list.elem_size if list != null and list.elem_size > 0 else elem_size
     box_size: mutable i64 = resolved_elem_size if resolved_elem_size > 0 else 1
@@ -475,6 +521,66 @@ def ctx_stage0_list_concat(lhs: CtxList&?, rhs: CtxList&?) -> CtxList&:
         memcpy((out.data + left_len.usize()).void&(), rhs.data.void&(), rhs.len.usize() * sizeof(void&))
 
     out.len <- left_len + right_len
+    return out
+
+def ctx_stage0_list_truncate(list: CtxList&?, size: i64) -> CtxList&?:
+    if list == null:
+        return ctx_stage0_list_new()
+
+    new_len: mutable i64 = size
+    if new_len < 0:
+        new_len <- 0
+    if new_len > list.len:
+        new_len <- list.len
+
+    list.len <- new_len
+    return list
+
+def ctx_stage0_list_clear(list: CtxList&?) -> CtxList&?:
+    return ctx_stage0_list_truncate(list, 0)
+
+def ctx_stage0_list_view(list: CtxList&?, start: i64, end: i64) -> CtxListView:
+    elem_size: i64 = list.elem_size if list != null else 0
+    if list == null or list.len <= 0 or list.data == null:
+        return CtxListView(null, 0, elem_size)
+
+    lo: mutable i64 = start if start > 0 else 0
+    hi: mutable i64 = end if end >= 0 else list.len
+
+    if lo > list.len:
+        lo <- list.len
+    if hi > list.len:
+        hi <- list.len
+    if hi < lo:
+        hi <- lo
+
+    if hi == lo:
+        return CtxListView(null, 0, elem_size)
+
+    assert list.data != null
+    return CtxListView(list.data.void&&() + lo.usize(), hi - lo, elem_size)
+
+def ctx_stage0_list_view_len(view: CtxListView) -> i64:
+    return view.len
+
+def ctx_stage0_list_view_get(view: CtxListView, index: i64, elem_size: i64) -> void&:
+    if view.data == null or index < 0 or index >= view.len:
+        fallback_elem_size: i64 = elem_size if elem_size > 0 else view.elem_size
+        return ctx_stage0_box_value(null, fallback_elem_size)
+
+    assert view.data != null
+    return view.data[index.usize()]
+
+def ctx_stage0_list_view_copy(view: CtxListView) -> CtxList&:
+    if view.len <= 0:
+        return ctx_stage0_list_new_reserve(0, view.elem_size)
+
+    out: CtxList& = ctx_stage0_list_alloc(view.len, view.elem_size)
+    out.len <- view.len
+
+    if view.data != null and out.data != null:
+        memcpy(out.data.void&(), view.data.void&(), view.len.usize() * sizeof(void&))
+
     return out
 
 def ctx_stage0_list_len(list: CtxList&?) -> i64:
@@ -731,6 +837,50 @@ def ctx_stage0_string_slice(value: u8&?, start: i64, end: i64) -> u8&:
     ctx_stage0_register_perm_string_len(out, out_len)
     return out
 
+def ctx_stage0_string_view(value: u8&?, start: i64, end: i64) -> CtxStringView:
+    src: u8& = value if value != null else ""
+    len: usize = ctx_stage0_runtime_strlen(src)
+
+    lo: mutable usize = 0
+    hi: mutable usize = len
+
+    if start > 0:
+        lo <- start.usize()
+        if lo > len:
+            lo <- len
+
+    if end >= 0:
+        hi <- end.usize()
+        if hi > len:
+            hi <- len
+
+    if hi < lo:
+        hi <- lo
+
+    return CtxStringView(src + lo, (hi - lo).i64())
+
+def ctx_stage0_string_view_len(view: CtxStringView) -> i64:
+    return view.len
+
+def ctx_stage0_string_view_index(view: CtxStringView, index: i64) -> i64:
+    if index < 0 or index >= view.len:
+        return -1
+
+    return view.data[index.usize()].i64()
+
+def ctx_stage0_string_view_copy(view: CtxStringView) -> u8&:
+    if view.len <= 0:
+        return ""
+
+    if view.len <= 8:
+        return ctx_stage0_intern_small_string(view.data, view.len.usize())
+
+    out: u8& = ctx_stage0_alloc_perm((view.len + 1).usize()).u8&()
+    memcpy(out.void&(), view.data.void&(), view.len.usize())
+    out[view.len.usize()] <- 0
+    ctx_stage0_register_perm_string_len(out, view.len.usize())
+    return out
+
 # ============================================================
 # Stage 1 runtime forwarding wrappers
 # ============================================================
@@ -786,11 +936,26 @@ def ctx_stage1rt_string_index(value: DStr[shape_in], index: i64) -> i64:
 def ctx_stage1rt_string_slice(value: DStr[shape_in], start: i64, end: i64) -> DStr[shape_out]:
     return ctx_stage0_string_slice(value, start, end)
 
+def ctx_stage1rt_string_view(value: DStr[shape_in], start: i64, end: i64) -> CtxStringView:
+    return ctx_stage0_string_view(value, start, end)
+
+def ctx_stage1rt_string_view_len(view: CtxStringView) -> i64:
+    return ctx_stage0_string_view_len(view)
+
+def ctx_stage1rt_string_view_index(view: CtxStringView, index: i64) -> i64:
+    return ctx_stage0_string_view_index(view, index)
+
+def ctx_stage1rt_string_from_view(view: CtxStringView) -> DStr[shape_out]:
+    return ctx_stage0_string_view_copy(view)
+
 def ctx_stage1rt_list_new() -> DArray[void&, shape_out]:
     return ctx_stage0_list_new()
 
 def ctx_stage1rt_list_new_reserve(cap: i64, elem_size: i64) -> DArray[void&, shape_out]:
     return ctx_stage0_list_new_reserve(cap, elem_size)
+
+def ctx_stage1rt_list_reserve(values: DArray[void&, shape_in], cap: i64, elem_size: i64) -> DArray[void&, shape_out]:
+    return ctx_stage0_list_reserve(values, cap, elem_size)
 
 def ctx_stage1rt_list_push(values: DArray[void&, shape_in], elem: void&?, elem_size: i64) -> DArray[void&, shape_out]:
     return ctx_stage0_list_push(values, elem, elem_size)
@@ -800,6 +965,24 @@ def ctx_stage1rt_list_push_mut(values: DArray[void&, shape_in], elem: void&?, el
 
 def ctx_stage1rt_list_concat(left: DArray[void&, shape_left], right: DArray[void&, shape_right]) -> DArray[void&, shape_result]:
     return ctx_stage0_list_concat(left, right)
+
+def ctx_stage1rt_list_truncate(values: DArray[void&, shape_in], size: i64) -> DArray[void&, shape_out]:
+    return ctx_stage0_list_truncate(values, size)
+
+def ctx_stage1rt_list_clear(values: DArray[void&, shape_in]) -> DArray[void&, shape_out]:
+    return ctx_stage0_list_clear(values)
+
+def ctx_stage1rt_list_view(values: DArray[void&, shape_in], start: i64, end: i64) -> CtxListView:
+    return ctx_stage0_list_view(values, start, end)
+
+def ctx_stage1rt_list_view_len(view: CtxListView) -> i64:
+    return ctx_stage0_list_view_len(view)
+
+def ctx_stage1rt_list_view_get(view: CtxListView, index: i64, elem_size: i64) -> void&:
+    return ctx_stage0_list_view_get(view, index, elem_size)
+
+def ctx_stage1rt_list_from_view(view: CtxListView) -> DArray[void&, shape_out]:
+    return ctx_stage0_list_view_copy(view)
 
 def ctx_stage1rt_list_len(values: DArray[void&, shape_in]) -> i64:
     return ctx_stage0_list_len(values)
