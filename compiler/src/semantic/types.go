@@ -37,6 +37,11 @@ type NamedShape struct {
 	Name string
 }
 
+type FreshShape struct {
+	ID    int
+	Label string
+}
+
 type RefState int
 
 const (
@@ -115,6 +120,7 @@ func (*FuncType) isType()            {}
 
 func (*ShapeParam) isShape() {}
 func (*NamedShape) isShape() {}
+func (*FreshShape) isShape() {}
 
 func (*InvalidType) String() string { return "<invalid>" }
 func (*NullType) String() string    { return "null" }
@@ -124,6 +130,12 @@ func (t *BuiltinType) String() string {
 func (t *TypeParamType) String() string { return t.Name }
 func (s *ShapeParam) String() string    { return s.Name }
 func (s *NamedShape) String() string    { return s.Name }
+func (s *FreshShape) String() string {
+	if s.Label != "" {
+		return fmt.Sprintf("%s#%d", s.Label, s.ID)
+	}
+	return fmt.Sprintf("shape#%d", s.ID)
+}
 func (t *RefType) String() string {
 	s := t.Elem.String()
 	switch t.State {
@@ -490,6 +502,9 @@ func SameShape(a, b Shape) bool {
 	case *NamedShape:
 		sb, ok := b.(*NamedShape)
 		return ok && sa.Name == sb.Name
+	case *FreshShape:
+		sb, ok := b.(*FreshShape)
+		return ok && sa.ID == sb.ID
 	default:
 		return false
 	}

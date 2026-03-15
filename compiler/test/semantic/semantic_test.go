@@ -308,7 +308,7 @@ def read_last() -> u8:
 }
 
 func TestAnalyzeAcceptsImplicitDArrayShapeParams(t *testing.T) {
-	src := `def identity[T](array: DArray[T, α]) -> DArray[T, α]:
+	src := `def identity[T](array: DArray[T, shape_in]) -> DArray[T, shape_in]:
     return array
 
 def keep(array: DArray[i32, row]) -> DArray[i32, row]:
@@ -332,7 +332,7 @@ func TestAnalyzeRejectsMismatchedDArrayShapes(t *testing.T) {
 }
 
 func TestAnalyzeAcceptsImplicitDStrShapeParams(t *testing.T) {
-	src := `def echo(text: DStr[α]) -> DStr[α]:
+	src := `def echo(text: DStr[shape_text]) -> DStr[shape_text]:
     return text
 
 def keep(text: DStr[row]) -> DStr[row]:
@@ -359,11 +359,111 @@ def bad_str(x: DStr[row, col]) -> void:
 	}
 }
 
+func TestAnalyzeShapeChangingResizeReturnsFreshShape(t *testing.T) {
+	src := `extern resize(array: DArray[i32, shape_in], size: usize) -> DArray[i32, shape_out]
+
+def bad(array: DArray[i32, row]) -> DArray[i32, row]:
+    return resize(array, 8)
+`
+	_, errs := parseAndAnalyze(t, "resize_returns_fresh_shape.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "return type expects DArray[i32, row], got DArray[i32, shape_out#") {
+		t.Fatalf("expected fresh resize witness diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeShapeChangingPushReturnsFreshShape(t *testing.T) {
+	src := `extern push(array: DArray[i32, shape_in], element: i32) -> DArray[i32, shape_out]
+
+def bad(array: DArray[i32, row]) -> DArray[i32, row]:
+    return push(array, 1)
+`
+	_, errs := parseAndAnalyze(t, "push_returns_fresh_shape.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "return type expects DArray[i32, row], got DArray[i32, shape_out#") {
+		t.Fatalf("expected fresh push witness diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeShapeChangingConcatReturnsFreshShape(t *testing.T) {
+	src := `extern concat(array1: DArray[i32, shape_left], array2: DArray[i32, shape_right]) -> DArray[i32, shape_result]
+
+def bad(left: DArray[i32, row], right: DArray[i32, col]) -> DArray[i32, row]:
+    return concat(left, right)
+`
+	_, errs := parseAndAnalyze(t, "concat_returns_fresh_shape.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "return type expects DArray[i32, row], got DArray[i32, shape_result#") {
+		t.Fatalf("expected fresh concat witness diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeShapeChangingCallCanBeDiscarded(t *testing.T) {
+	src := `extern resize(array: DArray[i32, shape_in], size: usize) -> DArray[i32, shape_out]
+
+def grow(array: DArray[i32, row]) -> void:
+    _ = resize(array, 8)
+`
+	_, errs := parseAndAnalyze(t, "discard_shape_changing_call.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeShapeChangingStringConcatReturnsFreshShape(t *testing.T) {
+	src := `extern concat(left: DStr[shape_left], right: DStr[shape_right]) -> DStr[shape_result]
+
+def bad(left: DStr[row], right: DStr[col]) -> DStr[row]:
+    return concat(left, right)
+`
+	_, errs := parseAndAnalyze(t, "concat_dstr_returns_fresh_shape.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "return type expects DStr[row], got DStr[shape_result#") {
+		t.Fatalf("expected fresh DStr concat witness diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeWrapperCanReturnFreshResizeShape(t *testing.T) {
+	src := `extern resize(array: DArray[i32, shape_in], size: usize) -> DArray[i32, shape_out]
+
+def grow(array: DArray[i32, row]) -> DArray[i32, shape_after]:
+    return resize(array, 8)
+`
+	_, errs := parseAndAnalyze(t, "wrapper_returns_fresh_resize_shape.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeWrapperCanReturnFreshStringShape(t *testing.T) {
+	src := `extern strcat(left: DStr[shape_left], right: DStr[shape_right]) -> DStr[shape_result]
+
+def merge(left: DStr[row], right: DStr[col]) -> DStr[shape_after]:
+    return strcat(left, right)
+`
+	_, errs := parseAndAnalyze(t, "wrapper_returns_fresh_string_shape.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzePointerFixture(t *testing.T) {
 	fixture := filepath.Join(repoRootFromTestFile(t), "Code", "test_programs", "pointer_alloc.llcontext")
 	src, err := os.ReadFile(fixture)
 	if err != nil {
 		t.Fatalf("failed to read fixture: %v", err)
+	}
+	_, errs := parseAndAnalyze(t, fixture, string(src))
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeShapeOpsFixture(t *testing.T) {
+	fixture := filepath.Join(repoRootFromTestFile(t), "Code", "test_programs", "shape_ops.llcontext")
+	src, err := os.ReadFile(fixture)
+	if err != nil {
+		t.Fatalf("failed to read shape ops fixture: %v", err)
 	}
 	_, errs := parseAndAnalyze(t, fixture, string(src))
 	requireNoErrors(t, errs)

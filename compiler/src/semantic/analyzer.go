@@ -3,6 +3,8 @@ package semantic
 import (
 	"fmt"
 	"strconv"
+	"strings"
+	"unicode"
 
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
@@ -24,17 +26,29 @@ type ConstValue struct {
 	String string
 }
 
+type ShapeTransformSpec struct {
+	FreshReturnShapes bool
+}
+
+var shapeTransformTable = map[string]ShapeTransformSpec{
+	"resize": {FreshReturnShapes: true},
+	"push":   {FreshReturnShapes: true},
+	"concat": {FreshReturnShapes: true},
+	"strcat": {FreshReturnShapes: true},
+}
+
 type Analyzer struct {
-	file             *ast.File
-	diagnostics      []Diagnostic
-	namedTypes       map[string]Type
-	globalScope      *Scope
-	functionTypes    map[string]*FuncType
-	constValues      map[string]ConstValue
-	typeParamScopes  []map[string]Type
-	shapeParamScopes []map[string]Shape
-	currentScope     *Scope
-	currentReturn    Type
+	file              *ast.File
+	diagnostics       []Diagnostic
+	namedTypes        map[string]Type
+	globalScope       *Scope
+	functionTypes     map[string]*FuncType
+	constValues       map[string]ConstValue
+	typeParamScopes   []map[string]Type
+	shapeParamScopes  []map[string]Shape
+	freshShapeCounter int
+	currentScope      *Scope
+	currentReturn     Type
 }
 
 func Analyze(file *ast.File) *Result {
@@ -316,8 +330,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "unexpected return value")
 			return
 		}
-		if !AssignableTo(a.currentReturn, valueType) {
-			a.errorf(n.Pos(), "return type expects %s, got %s", a.currentReturn.String(), valueType.String())
+		expectedReturn := a.matchReturnType(valueType)
+		if !AssignableTo(expectedReturn, valueType) {
+			a.errorf(n.Pos(), "return type expects %s, got %s", expectedReturn.String(), valueType.String())
 		}
 	case *ast.IfStmt:
 		condType := a.analyzeCondExpr(n.Cond)
@@ -849,6 +864,7 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	if ft.Return == nil {
 		return a.namedTypes["void"]
 	}
+	a.bindFreshReturnShapes(ft, shapeBindings)
 	return a.substituteType(ft.Return, bindings, shapeBindings)
 }
 
@@ -906,6 +922,65 @@ func (a *Analyzer) collectShapeBinding(pattern, actual Shape, bindings map[strin
 	if _, exists := bindings[param.Name]; !exists {
 		bindings[param.Name] = actual
 	}
+}
+
+func (a *Analyzer) matchReturnType(actual Type) Type {
+	if a.currentReturn == nil || actual == nil {
+		return a.currentReturn
+	}
+	bindings := map[string]Type{}
+	shapeBindings := map[string]Shape{}
+	a.collectTypeBindings(a.currentReturn, actual, bindings, shapeBindings)
+	return a.substituteType(a.currentReturn, bindings, shapeBindings)
+}
+
+func (a *Analyzer) bindFreshReturnShapes(fn *FuncType, bindings map[string]Shape) {
+	if fn == nil || fn.Return == nil {
+		return
+	}
+	spec, ok := shapeTransformTable[fn.Name]
+	if !ok || !spec.FreshReturnShapes {
+		return
+	}
+	a.bindFreshShapesInType(fn.Return, bindings)
+}
+
+func (a *Analyzer) bindFreshShapesInType(t Type, bindings map[string]Shape) {
+	if t == nil {
+		return
+	}
+	switch n := t.(type) {
+	case *RefType:
+		a.bindFreshShapesInType(n.Elem, bindings)
+	case *ArrayType:
+		a.bindFreshShapesInType(n.Elem, bindings)
+	case *DArrayType:
+		a.bindFreshShape(n.Shape, bindings)
+		a.bindFreshShapesInType(n.Elem, bindings)
+	case *DStrType:
+		a.bindFreshShape(n.Shape, bindings)
+	case *GenericInstanceType:
+		for _, arg := range n.Args {
+			a.bindFreshShapesInType(arg, bindings)
+		}
+	case *FuncType:
+		for _, param := range n.Params {
+			a.bindFreshShapesInType(param, bindings)
+		}
+		a.bindFreshShapesInType(n.Return, bindings)
+	}
+}
+
+func (a *Analyzer) bindFreshShape(shape Shape, bindings map[string]Shape) {
+	param, ok := shape.(*ShapeParam)
+	if !ok {
+		return
+	}
+	if _, exists := bindings[param.Name]; exists {
+		return
+	}
+	a.freshShapeCounter++
+	bindings[param.Name] = &FreshShape{ID: a.freshShapeCounter, Label: param.Name}
 }
 
 func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
@@ -1416,14 +1491,14 @@ func (a *Analyzer) collectImplicitShapeParamsFromType(expr ast.TypeExpr, seen ma
 				a.collectImplicitShapeParamsFromType(n.Args[0], seen, order)
 			}
 			if len(n.Args) > 1 {
-				if name, ok := shapeNameFromTypeExpr(n.Args[1]); ok && !seen[name] {
+				if name, ok := shapeNameFromTypeExpr(n.Args[1]); ok && isImplicitShapeWitnessName(name) && !seen[name] {
 					seen[name] = true
 					*order = append(*order, name)
 				}
 			}
 		case "DStr":
 			if len(n.Args) > 0 {
-				if name, ok := shapeNameFromTypeExpr(n.Args[0]); ok && !seen[name] {
+				if name, ok := shapeNameFromTypeExpr(n.Args[0]); ok && isImplicitShapeWitnessName(name) && !seen[name] {
 					seen[name] = true
 					*order = append(*order, name)
 				}
@@ -1442,6 +1517,17 @@ func shapeNameFromTypeExpr(expr ast.TypeExpr) (string, bool) {
 		return "", false
 	}
 	return name.Name, true
+}
+
+func isImplicitShapeWitnessName(name string) bool {
+	if strings.HasPrefix(name, "shape_") || strings.HasPrefix(name, "s_") {
+		return true
+	}
+	runes := []rune(name)
+	if len(runes) != 1 {
+		return false
+	}
+	return unicode.In(runes[0], unicode.Greek)
 }
 
 func (a *Analyzer) resolveArrayType(expr *ast.ArrayType) Type {

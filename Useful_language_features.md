@@ -1305,10 +1305,10 @@ Instead of giving the typechecker full arithmetic over runtime naturals, give ea
 Conceptually:
 
 ```text
-DArray[T, α]
+DArray[T, shape_id]
 ```
 
-where `α` is a shape witness / logical length identity.
+where `shape_id` is a shape witness / logical length identity.
 
 Operationally:
 
@@ -1319,14 +1319,17 @@ Operationally:
 So:
 
 ```text
-resize : DArray[T, α] × usize -> DArray[T, β]
-push   : DArray[T, α] × T     -> DArray[T, β]
-concat : DArray[T, α] × DArray[T, β] -> DArray[T, γ]
+resize : DArray[T, shape_in] × usize -> DArray[T, shape_out]
+push   : DArray[T, shape_in] × T     -> DArray[T, shape_out]
+concat : DArray[T, shape_left] × DArray[T, shape_right] -> DArray[T, shape_result]
 ```
 
-where `β`, `γ` are fresh post-operation shapes.
+where `shape_out`, `shape_result` are fresh post-operation shapes.
 
-This avoids requiring the compiler to prove that `γ = α + β` at the type-equality level.
+This avoids requiring the compiler to prove that `shape_result = shape_left + shape_right` at the type-equality level.
+
+In examples below, ASCII witness names such as `shape_in`, `shape_out`, `shape_result`, and `shape_after` are preferred.
+Greek-letter shorthands are acceptable as mathematical shorthand, but they are not required in source code.
 
 It preserves the key safety idea:
 
@@ -1408,10 +1411,10 @@ For Contextlang, I would keep the low-level spirit and make this a policy choice
 For the recommended lightweight model:
 
 ```text
-Γ ⊢ e : DArray[T, α]
+Γ ⊢ e : DArray[T, shape_id]
 ```
 
-where `α` is a logical shape witness.
+where `shape_id` is a logical shape witness.
 
 ### Length observation
 
@@ -1421,20 +1424,20 @@ At runtime:
 len(e) : usize
 ```
 
-At the type level, `α` means “the current logical length fact associated with this value”, not necessarily a normalized arithmetic term.
+At the type level, `shape_id` means “the current logical length fact associated with this value”, not necessarily a normalized arithmetic term.
 
 ### Resize rule
 
 Resize changes shape identity:
 
 ```text
-Γ ⊢ a : DArray[T, α]
+Γ ⊢ a : DArray[T, shape_in]
 Γ ⊢ m : usize
 --------------------------------
-Γ ⊢ resize(a, m) : DArray[T, β]
+Γ ⊢ resize(a, m) : DArray[T, shape_out]
 ```
 
-where `β` is fresh.
+where `shape_out` is fresh.
 
 This matches your idea exactly:
 
@@ -1445,24 +1448,24 @@ The important part is that this cast is **logical and zero-overhead**, not a run
 ### Push / append rule
 
 ```text
-Γ ⊢ a : DArray[T, α]
+Γ ⊢ a : DArray[T, shape_in]
 Γ ⊢ x : T
 --------------------------------
-Γ ⊢ push(a, x) : DArray[T, β]
+Γ ⊢ push(a, x) : DArray[T, shape_out]
 ```
 
-Again `β` is fresh, because the logical shape changed.
+Again `shape_out` is fresh, because the logical shape changed.
 
 ### Concatenation rule
 
 ```text
-Γ ⊢ a : DArray[T, α]
-Γ ⊢ b : DArray[T, β]
+Γ ⊢ a : DArray[T, shape_left]
+Γ ⊢ b : DArray[T, shape_right]
 --------------------------------
-Γ ⊢ concat(a, b) : DArray[T, γ]
+Γ ⊢ concat(a, b) : DArray[T, shape_result]
 ```
 
-`γ` is fresh.
+`shape_result` is fresh.
 
 The exact arithmetic relation can remain part of library semantics/documentation instead of core type equality.
 
@@ -1485,10 +1488,10 @@ This is useful for:
 ### Dynamic strings
 
 ```text
-Γ ⊢ s : DStr[α]
+Γ ⊢ s : DStr[shape_id]
 ```
 
-with exactly the same logical-shape story as `DArray[u8, α]`.
+with exactly the same logical-shape story as `DArray[u8, shape_id]`.
 
 ### Relationship to byte arrays
 
@@ -1618,9 +1621,9 @@ as logical length-indexed owned containers.
 ### And define core APIs like
 
 ```text
-resize : DArray[T, α] × usize -> DArray[T, β]
-push   : DArray[T, α] × T -> DArray[T, β]
-concat : DStr[α] × DStr[β] -> DStr[γ]
+resize : DArray[T, shape_in] × usize -> DArray[T, shape_out]
+push   : DArray[T, shape_in] × T -> DArray[T, shape_out]
+concat : DStr[shape_left] × DStr[shape_right] -> DStr[shape_result]
 ```
 
 where each shape-changing operation returns a new logical shape.
@@ -1712,12 +1715,12 @@ Once `DArray[T, n]` exists, teach the analyzer that specific operations return a
 For example:
 
 ```text
-resize : DArray[T, α] × usize -> DArray[T, β]
-push   : DArray[T, α] × T -> DArray[T, β]
-concat : DArray[T, α] × DArray[T, β] -> DArray[T, γ]
+resize : DArray[T, shape_in] × usize -> DArray[T, shape_out]
+push   : DArray[T, shape_in] × T -> DArray[T, shape_out]
+concat : DArray[T, shape_left] × DArray[T, shape_right] -> DArray[T, shape_result]
 ```
 
-where `β`, `γ` are fresh logical shape identities.
+where `shape_out`, `shape_result` are fresh logical shape identities.
 
 This captures the safety idea without needing arithmetic reasoning.
 
@@ -1939,7 +1942,7 @@ Strings should reuse the same machinery as arrays as much as possible.
 
 Recommended internal rule:
 
-- `DStr[α]` is semantically very close to `DynArrayType{Elem: u8, Shape: α}`
+- `DStr[shape_id]` is semantically very close to `DynArrayType{Elem: u8, Shape: shape_id}`
 - `Str[N]` is semantically very close to `Array(u8, N)` plus string-specific intent
 
 Whether you expose them as separate semantic types or thin wrappers is mostly an ergonomics decision.
@@ -1963,7 +1966,7 @@ Important errors to support clearly:
 Example good diagnostic style:
 
 ```text
-cannot assign DArray[u8, α] to DArray[u8, β]
+cannot assign DArray[u8, row] to DArray[u8, shape_after]
 note: resize/push operations produce a new logical length state
 ```
 
@@ -1996,15 +1999,15 @@ The test plan should also be phased.
 ### Example regression style
 
 ```context
-def grow(a: DArray[u8, α]) -> DArray[u8, β]:
+def grow(a: DArray[u8, row]) -> DArray[u8, shape_after]:
     return resize(a, 16)
 ```
 
 and:
 
 ```context
-def bad(a: DArray[u8, α]) -> DArray[u8, α]:
-    return resize(a, 16)   # should fail if resize returns fresh β
+def bad(a: DArray[u8, row]) -> DArray[u8, row]:
+    return resize(a, 16)   # should fail if resize returns fresh shape_after
 ```
 
 That is exactly the kind of “dependent-ish” safety check the language should advertise.
