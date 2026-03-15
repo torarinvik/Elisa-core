@@ -131,6 +131,16 @@ func (g *llvmGenerator) constExprValue(expr ast.Expr, expected semantic.Type) (C
 	case *ast.ParenExpr:
 		return g.constExprValue(n.Inner, expected)
 	default:
+		if value, ok := g.evalConstExpr(expr); ok {
+			coercedType := expected
+			if coercedType == nil {
+				coercedType = constValueType(g.result, value)
+			}
+			if coercedType == nil {
+				return nil, fmt.Errorf("could not infer type for constant global initializer %T", expr)
+			}
+			return g.constValueAsLLVM(value, coercedType)
+		}
 		return nil, fmt.Errorf("unsupported global initializer expression %T", expr)
 	}
 }

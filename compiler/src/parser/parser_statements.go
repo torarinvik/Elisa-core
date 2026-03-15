@@ -209,7 +209,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		p.expectNewline()
 		return &ast.AssignStmt{Position: pos, Target: expr, Value: value}
 
-	case lexer.TOKEN_PLUSEQ, lexer.TOKEN_MINUSEQ, lexer.TOKEN_STAREQ, lexer.TOKEN_SLASHEQ,
+	case lexer.TOKEN_PLUSEQ, lexer.TOKEN_MINUSEQ, lexer.TOKEN_STAREQ, lexer.TOKEN_SLASHEQ, lexer.TOKEN_PERCENTEQ,
 		lexer.TOKEN_CARETEQ, lexer.TOKEN_PIPEEQ, lexer.TOKEN_AMPEQ,
 		lexer.TOKEN_LSHIFTEQ, lexer.TOKEN_RSHIFTEQ:
 		op := p.advance()

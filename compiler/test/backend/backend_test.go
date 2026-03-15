@@ -129,7 +129,10 @@ func TestGenerateLLVMIRDefinesGlobalsWithInitializers(t *testing.T) {
 const ANSWER = 42
 
 global seed: i32 = ANSWER
-global pair: Pair = Pair(1, 2)
+global offset: i32 = ANSWER + 8
+global choice: i32 = 7 if ANSWER > 0 else 9
+global negated: i32 = -(ANSWER / 21)
+global pair: Pair = Pair(ANSWER - 41, 1 + 1)
 global flags: i32[4] = zeroed
 `
 	result := parseAndAnalyze(t, "backend_globals.llcontext", src)
@@ -141,6 +144,9 @@ global flags: i32[4] = zeroed
 	checks := []string{
 		"%Pair = type { i32, i32 }",
 		"@seed = global i32 42",
+		"@offset = global i32 50",
+		"@choice = global i32 7",
+		"@negated = global i32 -2",
 		"@pair = global %Pair { i32 1, i32 2 }",
 		"@flags = global [4 x i32] zeroinitializer",
 	}
@@ -299,6 +305,40 @@ def array_view_size() -> usize:
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
+	}
+}
+
+func TestGenerateLLVMIRLowersModuloAndModuloAssign(t *testing.T) {
+	src := `global folded_mod: i32 = 20 % 6
+
+def rem_signed(left: i32, right: i32) -> i32:
+    return left % right
+
+def rem_unsigned() -> u32:
+    value: mutable u32 = 10u32
+    value %= 4u32
+    return value
+`
+	result := parseAndAnalyze(t, "backend_modulo.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"@folded_mod = global i32 2",
+		"define i32 @rem_signed(i32",
+		"srem i32",
+		"define i32 @rem_unsigned()",
+		"urem i32",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Count(output, "urem i32") < 1 {
+		t.Fatalf("expected modulo assignment to lower via urem, got:\n%s", output)
 	}
 }
 

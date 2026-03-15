@@ -49,7 +49,7 @@ func (s *functionState) evalConstIntExpr(expr ast.Expr) (int64, error) {
 }
 
 func (s *functionState) evalConstBoolExpr(expr ast.Expr) (bool, bool) {
-	value, ok := s.evalConstExpr(expr)
+	value, ok := evalConstExprWithLookup(expr, s.g.constValue)
 	if !ok || value.Kind != semantic.ConstBool {
 		return false, false
 	}
@@ -57,6 +57,14 @@ func (s *functionState) evalConstBoolExpr(expr ast.Expr) (bool, bool) {
 }
 
 func (s *functionState) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool) {
+	return evalConstExprWithLookup(expr, s.g.constValue)
+}
+
+func (g *llvmGenerator) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool) {
+	return evalConstExprWithLookup(expr, g.constValue)
+}
+
+func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstValue, bool)) (semantic.ConstValue, bool) {
 	switch n := expr.(type) {
 	case *ast.IntLit:
 		value, err := strconv.ParseInt(n.Value, 0, 64)
@@ -69,14 +77,16 @@ func (s *functionState) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool)
 	case *ast.StringLit:
 		return semantic.ConstValue{Kind: semantic.ConstString, String: n.Value}, true
 	case *ast.Ident:
-		if value, ok := s.g.constValue(n.Name); ok {
-			return value, true
+		if lookup != nil {
+			if value, ok := lookup(n.Name); ok {
+				return value, true
+			}
 		}
 		return semantic.ConstValue{}, false
 	case *ast.ParenExpr:
-		return s.evalConstExpr(n.Inner)
+		return evalConstExprWithLookup(n.Inner, lookup)
 	case *ast.UnaryExpr:
-		operand, ok := s.evalConstExpr(n.Operand)
+		operand, ok := evalConstExprWithLookup(n.Operand, lookup)
 		if !ok {
 			return semantic.ConstValue{}, false
 		}
@@ -100,11 +110,11 @@ func (s *functionState) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool)
 			return semantic.ConstValue{}, false
 		}
 	case *ast.BinaryExpr:
-		left, ok := s.evalConstExpr(n.Left)
+		left, ok := evalConstExprWithLookup(n.Left, lookup)
 		if !ok {
 			return semantic.ConstValue{}, false
 		}
-		right, ok := s.evalConstExpr(n.Right)
+		right, ok := evalConstExprWithLookup(n.Right, lookup)
 		if !ok {
 			return semantic.ConstValue{}, false
 		}
@@ -143,6 +153,11 @@ func (s *functionState) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool)
 				return semantic.ConstValue{}, false
 			}
 			return semantic.ConstValue{Kind: semantic.ConstInt, Int: left.Int / right.Int}, true
+		case lexer.TOKEN_PERCENT:
+			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt || right.Int == 0 {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstInt, Int: left.Int % right.Int}, true
 		case lexer.TOKEN_LT:
 			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt {
 				return semantic.ConstValue{}, false
@@ -192,14 +207,14 @@ func (s *functionState) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool)
 			return semantic.ConstValue{}, false
 		}
 	case *ast.TernaryExpr:
-		cond, ok := s.evalConstBoolExpr(n.Cond)
-		if !ok {
+		condValue, ok := evalConstExprWithLookup(n.Cond, lookup)
+		if !ok || condValue.Kind != semantic.ConstBool {
 			return semantic.ConstValue{}, false
 		}
-		if cond {
-			return s.evalConstExpr(n.Value)
+		if condValue.Bool {
+			return evalConstExprWithLookup(n.Value, lookup)
 		}
-		return s.evalConstExpr(n.Alt)
+		return evalConstExprWithLookup(n.Alt, lookup)
 	default:
 		return semantic.ConstValue{}, false
 	}

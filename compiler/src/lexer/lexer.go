@@ -413,6 +413,13 @@ func (l *Lexer) NextToken() Token {
 		}
 		return Token{Kind: TOKEN_SLASH, Text: "/", Pos: p}
 
+	case '%':
+		l.advance()
+		if l.match('=') {
+			return Token{Kind: TOKEN_PERCENTEQ, Text: "%=", Pos: p}
+		}
+		return Token{Kind: TOKEN_PERCENT, Text: "%", Pos: p}
+
 	case '^':
 		l.advance()
 		if l.match('=') {

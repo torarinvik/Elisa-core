@@ -187,7 +187,7 @@ func (s *functionState) binaryOperandType(op lexer.TokenKind, left semantic.Type
 		}
 		return left
 	case lexer.TOKEN_LT, lexer.TOKEN_GT, lexer.TOKEN_LTEQ, lexer.TOKEN_GTEQ,
-		lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR, lexer.TOKEN_SLASH,
+		lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR, lexer.TOKEN_SLASH, lexer.TOKEN_PERCENT,
 		lexer.TOKEN_PIPE, lexer.TOKEN_CARET, lexer.TOKEN_AMPERSAND,
 		lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
 		if isNumericType(left) && isNumericType(right) {
@@ -210,6 +210,11 @@ func (s *functionState) emitAugmentedValue(op lexer.TokenKind, left C.LLVMValueR
 			return C.LLVMBuildSDiv(s.builder, left, right, cStringFree("slasheq")), nil
 		}
 		return C.LLVMBuildUDiv(s.builder, left, right, cStringFree("slasheq")), nil
+	case lexer.TOKEN_PERCENTEQ:
+		if isSignedIntegerType(t) {
+			return C.LLVMBuildSRem(s.builder, left, right, cStringFree("percenteq")), nil
+		}
+		return C.LLVMBuildURem(s.builder, left, right, cStringFree("percenteq")), nil
 	case lexer.TOKEN_CARETEQ:
 		return C.LLVMBuildXor(s.builder, left, right, cStringFree("careteq")), nil
 	case lexer.TOKEN_PIPEEQ:

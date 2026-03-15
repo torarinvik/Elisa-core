@@ -61,13 +61,23 @@ func TestComparison(t *testing.T) {
 }
 
 func TestAugmentedAssign(t *testing.T) {
-	tokens := collectTokens("x += 1\ny -= 2\nz *= 3\nw ^= 4\n")
+	tokens := collectTokens("x += 1\ny -= 2\nz *= 3\nr %= 5\nw ^= 4\n")
 	expect := []lexer.TokenKind{
 		lexer.TOKEN_IDENT, lexer.TOKEN_PLUSEQ, lexer.TOKEN_INT_LIT, lexer.TOKEN_NEWLINE,
 		lexer.TOKEN_IDENT, lexer.TOKEN_MINUSEQ, lexer.TOKEN_INT_LIT, lexer.TOKEN_NEWLINE,
 		lexer.TOKEN_IDENT, lexer.TOKEN_STAREQ, lexer.TOKEN_INT_LIT, lexer.TOKEN_NEWLINE,
+		lexer.TOKEN_IDENT, lexer.TOKEN_PERCENTEQ, lexer.TOKEN_INT_LIT, lexer.TOKEN_NEWLINE,
 		lexer.TOKEN_IDENT, lexer.TOKEN_CARETEQ, lexer.TOKEN_INT_LIT, lexer.TOKEN_NEWLINE,
 		lexer.TOKEN_EOF,
+	}
+	assertKinds(t, tokens, expect)
+}
+
+func TestModuloOps(t *testing.T) {
+	tokens := collectTokens("x % 3\n")
+	expect := []lexer.TokenKind{
+		lexer.TOKEN_IDENT, lexer.TOKEN_PERCENT, lexer.TOKEN_INT_LIT,
+		lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF,
 	}
 	assertKinds(t, tokens, expect)
 }

@@ -119,7 +119,7 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 		case lexer.TOKEN_BANGEQ:
 			return a.evalConstEquality(left, right, false)
 		case lexer.TOKEN_LT, lexer.TOKEN_GT, lexer.TOKEN_LTEQ, lexer.TOKEN_GTEQ,
-			lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR, lexer.TOKEN_SLASH,
+			lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR, lexer.TOKEN_SLASH, lexer.TOKEN_PERCENT,
 			lexer.TOKEN_CARET, lexer.TOKEN_PIPE, lexer.TOKEN_AMPERSAND,
 			lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
 			if left.Kind != ConstInt || right.Kind != ConstInt {
@@ -182,6 +182,11 @@ func evalConstIntBinary(op lexer.TokenKind, left, right int64) (ConstValue, bool
 			return ConstValue{}, false
 		}
 		return ConstValue{Kind: ConstInt, Int: left / right}, true
+	case lexer.TOKEN_PERCENT:
+		if right == 0 {
+			return ConstValue{}, false
+		}
+		return ConstValue{Kind: ConstInt, Int: left % right}, true
 	case lexer.TOKEN_CARET:
 		return ConstValue{Kind: ConstInt, Int: left ^ right}, true
 	case lexer.TOKEN_PIPE:

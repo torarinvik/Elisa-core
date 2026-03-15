@@ -307,6 +307,20 @@ def read_last() -> u8:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsModuloExpressionsAndConstModulo(t *testing.T) {
+	src := `const IDX: usize = 10 % 3
+
+def remainder(left: i32, right: i32) -> i32:
+    return left % right
+
+def read_second() -> u8:
+    buf: u8[4] = zeroed
+    return buf[IDX]
+`
+	_, errs := parseAndAnalyze(t, "modulo_expr_and_const.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeAcceptsImplicitDArrayShapeParams(t *testing.T) {
 	src := `def identity[T](array: DArray[T, shape_in]) -> DArray[T, shape_in]:
     return array

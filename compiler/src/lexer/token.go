@@ -64,17 +64,18 @@ const (
 	TOKEN_ELLIPSIS  // ...
 
 	// Assignment
-	TOKEN_LARROW   // <-
-	TOKEN_PLUSEQ   // +=
-	TOKEN_MINUSEQ  // -=
-	TOKEN_STAREQ   // *=
-	TOKEN_SLASHEQ  // /=
-	TOKEN_CARETEQ  // ^=
-	TOKEN_PIPEEQ   // |=
-	TOKEN_AMPEQ    // &=
-	TOKEN_LSHIFTEQ // <<=
-	TOKEN_RSHIFTEQ // >>=
-	TOKEN_ASSIGN   // =
+	TOKEN_LARROW    // <-
+	TOKEN_PLUSEQ    // +=
+	TOKEN_MINUSEQ   // -=
+	TOKEN_STAREQ    // *=
+	TOKEN_SLASHEQ   // /=
+	TOKEN_PERCENTEQ // %=
+	TOKEN_CARETEQ   // ^=
+	TOKEN_PIPEEQ    // |=
+	TOKEN_AMPEQ     // &=
+	TOKEN_LSHIFTEQ  // <<=
+	TOKEN_RSHIFTEQ  // >>=
+	TOKEN_ASSIGN    // =
 
 	// Comparison
 	TOKEN_EQEQ   // ==
@@ -85,10 +86,11 @@ const (
 	TOKEN_GTEQ   // >=
 
 	// Arithmetic
-	TOKEN_PLUS  // +
-	TOKEN_MINUS // -
-	TOKEN_STAR  // *
-	TOKEN_SLASH // /
+	TOKEN_PLUS    // +
+	TOKEN_MINUS   // -
+	TOKEN_STAR    // *
+	TOKEN_SLASH   // /
+	TOKEN_PERCENT // %
 
 	// Bitwise
 	TOKEN_PIPE   // |
@@ -153,17 +155,18 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_AT:        "@",
 	TOKEN_ELLIPSIS:  "...",
 
-	TOKEN_LARROW:   "<-",
-	TOKEN_PLUSEQ:   "+=",
-	TOKEN_MINUSEQ:  "-=",
-	TOKEN_STAREQ:   "*=",
-	TOKEN_SLASHEQ:  "/=",
-	TOKEN_CARETEQ:  "^=",
-	TOKEN_PIPEEQ:   "|=",
-	TOKEN_AMPEQ:    "&=",
-	TOKEN_LSHIFTEQ: "<<=",
-	TOKEN_RSHIFTEQ: ">>=",
-	TOKEN_ASSIGN:   "=",
+	TOKEN_LARROW:    "<-",
+	TOKEN_PLUSEQ:    "+=",
+	TOKEN_MINUSEQ:   "-=",
+	TOKEN_STAREQ:    "*=",
+	TOKEN_SLASHEQ:   "/=",
+	TOKEN_PERCENTEQ: "%=",
+	TOKEN_CARETEQ:   "^=",
+	TOKEN_PIPEEQ:    "|=",
+	TOKEN_AMPEQ:     "&=",
+	TOKEN_LSHIFTEQ:  "<<=",
+	TOKEN_RSHIFTEQ:  ">>=",
+	TOKEN_ASSIGN:    "=",
 
 	TOKEN_EQEQ:   "==",
 	TOKEN_BANGEQ: "!=",
@@ -172,10 +175,11 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_LTEQ:   "<=",
 	TOKEN_GTEQ:   ">=",
 
-	TOKEN_PLUS:  "+",
-	TOKEN_MINUS: "-",
-	TOKEN_STAR:  "*",
-	TOKEN_SLASH: "/",
+	TOKEN_PLUS:    "+",
+	TOKEN_MINUS:   "-",
+	TOKEN_STAR:    "*",
+	TOKEN_SLASH:   "/",
+	TOKEN_PERCENT: "%",
 
 	TOKEN_PIPE:   "|",
 	TOKEN_CARET:  "^",

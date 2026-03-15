@@ -162,7 +162,7 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 			return invalidType
 		}
 		return CommonNumericType(left, right)
-	case lexer.TOKEN_STAR, lexer.TOKEN_SLASH,
+	case lexer.TOKEN_STAR, lexer.TOKEN_SLASH, lexer.TOKEN_PERCENT,
 		lexer.TOKEN_CARET, lexer.TOKEN_PIPE, lexer.TOKEN_AMPERSAND,
 		lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
 		if !IsNumericType(left) || !IsNumericType(right) {

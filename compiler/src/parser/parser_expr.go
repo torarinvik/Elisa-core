@@ -207,7 +207,7 @@ func (p *Parser) parseAddSub() ast.Expr {
 
 func (p *Parser) parseMulDiv() ast.Expr {
 	left := p.parseUnary()
-	for p.peek() == lexer.TOKEN_STAR || p.peek() == lexer.TOKEN_SLASH {
+	for p.peek() == lexer.TOKEN_STAR || p.peek() == lexer.TOKEN_SLASH || p.peek() == lexer.TOKEN_PERCENT {
 		pos := p.cur().Pos
 		op := p.advance()
 		right := p.parseUnary()

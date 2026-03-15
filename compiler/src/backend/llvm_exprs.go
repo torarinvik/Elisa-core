@@ -192,6 +192,11 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 			return C.LLVMBuildSDiv(s.builder, left, right, cStringFree("divtmp")), resultType, nil
 		}
 		return C.LLVMBuildUDiv(s.builder, left, right, cStringFree("divtmp")), resultType, nil
+	case lexer.TOKEN_PERCENT:
+		if isSignedIntegerType(operandType) {
+			return C.LLVMBuildSRem(s.builder, left, right, cStringFree("remtmp")), resultType, nil
+		}
+		return C.LLVMBuildURem(s.builder, left, right, cStringFree("remtmp")), resultType, nil
 	case lexer.TOKEN_PIPE:
 		return C.LLVMBuildOr(s.builder, left, right, cStringFree("ortmp")), resultType, nil
 	case lexer.TOKEN_CARET:
