@@ -2,8 +2,8 @@ package parser
 
 import (
 	"fmt"
-	"llcontext/ast"
-	"llcontext/lexer"
+	"llcontext/src/ast"
+	"llcontext/src/lexer"
 )
 
 type Parser struct {

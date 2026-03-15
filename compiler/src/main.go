@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
-	"llcontext/ast"
-	"llcontext/lexer"
-	"llcontext/parser"
+	"llcontext/src/ast"
+	"llcontext/src/lexer"
+	"llcontext/src/parser"
 	"os"
 	"strings"
 )

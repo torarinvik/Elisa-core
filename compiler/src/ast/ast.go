@@ -1,6 +1,6 @@
 package ast
 
-import "llcontext/lexer"
+import "llcontext/src/lexer"
 
 type Node interface {
 	Pos() lexer.Pos
