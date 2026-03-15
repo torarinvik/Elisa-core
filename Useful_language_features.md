@@ -995,7 +995,7 @@ This is the more ambitious part.
 Conceptually:
 
 ```text
-DArray(T, n)
+DArray[T, n]
 ```
 
 where `n` is a value-level natural number tracked in the type.
@@ -1003,7 +1003,7 @@ where `n` is a value-level natural number tracked in the type.
 Then resize operations become type transitions:
 
 ```text
-resize : DArray(T, n) × m -> DArray(T, m)
+resize : DArray[T, n] × m -> DArray[T, m]
 ```
 
 That is elegant and very much in the spirit of the pointer system.
@@ -1017,7 +1017,7 @@ There are two realistic choices.
 #### A. Fully dependent runtime index
 
 ```text
-DArray(T, n)
+DArray[T, n]
 ```
 
 where `n` is any runtime integer value.
@@ -1036,7 +1036,7 @@ This is beautiful, but it is no longer “small extension” territory.
 Instead of true full dependence, you can make length-indexing existential/brand-based:
 
 ```text
-exists n. DArray(T, n)
+exists n. DArray[T, n]
 ```
 
 or operationally, “an array carries a statically tracked length identity, and resize returns a new identity”.
@@ -1099,7 +1099,7 @@ repr(c) struct DArray[T]:
 But let the type system expose a stronger logical wrapper notion, something like:
 
 ```text
-OwnedArray(T, n)
+OwnedArray[T, n]
 ```
 
 where operations like `push`, `resize`, `truncate`, `concat` produce new logical types.
@@ -1253,9 +1253,9 @@ Formally, let the type layer have:
 
 ```text
 Array(T, N)      fixed-size array, N compile-time known
-DArray(T, n)     owned dynamic array, logical length index n
-Str(N)           fixed string of logical length N
-DStr(n)          owned dynamic string of logical length n
+DArray[T, n]     owned dynamic array, logical length index n
+Str[N]           fixed string of logical length N
+DStr[n]          owned dynamic string of logical length n
 ```
 
 Where:
@@ -1272,7 +1272,7 @@ The critical design choice is what kind of thing `n` is.
 This is the mathematically strongest version.
 
 ```text
-DArray(T, n)
+DArray[T, n]
 ```
 
 where `n` is an actual runtime value appearing in the type.
@@ -1280,9 +1280,9 @@ where `n` is an actual runtime value appearing in the type.
 Then you can write signatures like:
 
 ```text
-push    : DArray(T, n) × T -> DArray(T, n + 1)
-concat  : DArray(T, a) × DArray(T, b) -> DArray(T, a + b)
-slice   : DArray(T, n) × i × j -> DArray(T, j - i)
+push    : DArray[T, n] × T -> DArray[T, n + 1]
+concat  : DArray[T, a] × DArray[T, b] -> DArray[T, a + b]
+slice   : DArray[T, n] × i × j -> DArray[T, j - i]
 ```
 
 This is gorgeous.
@@ -1305,7 +1305,7 @@ Instead of giving the typechecker full arithmetic over runtime naturals, give ea
 Conceptually:
 
 ```text
-DArray(T, α)
+DArray[T, α]
 ```
 
 where `α` is a shape witness / logical length identity.
@@ -1319,9 +1319,9 @@ Operationally:
 So:
 
 ```text
-resize : DArray(T, α) × usize -> DArray(T, β)
-push   : DArray(T, α) × T     -> DArray(T, β)
-concat : DArray(T, α) × DArray(T, β) -> DArray(T, γ)
+resize : DArray[T, α] × usize -> DArray[T, β]
+push   : DArray[T, α] × T     -> DArray[T, β]
+concat : DArray[T, α] × DArray[T, β] -> DArray[T, γ]
 ```
 
 where `β`, `γ` are fresh post-operation shapes.
@@ -1408,7 +1408,7 @@ For Contextlang, I would keep the low-level spirit and make this a policy choice
 For the recommended lightweight model:
 
 ```text
-Γ ⊢ e : DArray(T, α)
+Γ ⊢ e : DArray[T, α]
 ```
 
 where `α` is a logical shape witness.
@@ -1428,10 +1428,10 @@ At the type level, `α` means “the current logical length fact associated with
 Resize changes shape identity:
 
 ```text
-Γ ⊢ a : DArray(T, α)
+Γ ⊢ a : DArray[T, α]
 Γ ⊢ m : usize
 --------------------------------
-Γ ⊢ resize(a, m) : DArray(T, β)
+Γ ⊢ resize(a, m) : DArray[T, β]
 ```
 
 where `β` is fresh.
@@ -1445,10 +1445,10 @@ The important part is that this cast is **logical and zero-overhead**, not a run
 ### Push / append rule
 
 ```text
-Γ ⊢ a : DArray(T, α)
+Γ ⊢ a : DArray[T, α]
 Γ ⊢ x : T
 --------------------------------
-Γ ⊢ push(a, x) : DArray(T, β)
+Γ ⊢ push(a, x) : DArray[T, β]
 ```
 
 Again `β` is fresh, because the logical shape changed.
@@ -1456,10 +1456,10 @@ Again `β` is fresh, because the logical shape changed.
 ### Concatenation rule
 
 ```text
-Γ ⊢ a : DArray(T, α)
-Γ ⊢ b : DArray(T, β)
+Γ ⊢ a : DArray[T, α]
+Γ ⊢ b : DArray[T, β]
 --------------------------------
-Γ ⊢ concat(a, b) : DArray(T, γ)
+Γ ⊢ concat(a, b) : DArray[T, γ]
 ```
 
 `γ` is fresh.
@@ -1473,7 +1473,7 @@ Strings should mirror arrays closely.
 ### Fixed strings
 
 ```text
-Γ ⊢ s : Str(N)
+Γ ⊢ s : Str[N]
 ```
 
 This is useful for:
@@ -1485,25 +1485,25 @@ This is useful for:
 ### Dynamic strings
 
 ```text
-Γ ⊢ s : DStr(α)
+Γ ⊢ s : DStr[α]
 ```
 
-with exactly the same logical-shape story as `DArray(u8, α)`.
+with exactly the same logical-shape story as `DArray[u8, α]`.
 
 ### Relationship to byte arrays
 
 You can define:
 
 ```text
-Str(N)  ≈ Array(u8, N+1)  # if you include trailing zero in representation
-Str(N)  ≈ Array(u8, N)    # if logical string length excludes terminator and representation policy is separate
+Str[N]  ≈ Array(u8, N+1)  # if you include trailing zero in representation
+Str[N]  ≈ Array(u8, N)    # if logical string length excludes terminator and representation policy is separate
 ```
 
 I would keep the logical length separate from terminator policy.
 
 That is:
 
-- `Str(N)` means logical content length `N`
+- `Str[N]` means logical content length `N`
 - whether a trailing `0` exists is a representation convention, not the type-level meaning
 
 That keeps the model cleaner.
@@ -1589,7 +1589,7 @@ Only if the language really wants it later, add exact arithmetic forms like:
 
 ```text
 append : Array(T, n) × T -> Array(T, n+1)
-concat : Str(A) × Str(B) -> Str(A+B)
+concat : Str[A] × Str[B] -> Str[A+B]
 ```
 
 This is beautiful, but it should be a later stage, not the starting point.
@@ -1618,9 +1618,9 @@ as logical length-indexed owned containers.
 ### And define core APIs like
 
 ```text
-resize : DArray(T, α) × usize -> DArray(T, β)
-push   : DArray(T, α) × T -> DArray(T, β)
-concat : DStr(α) × DStr(β) -> DStr(γ)
+resize : DArray[T, α] × usize -> DArray[T, β]
+push   : DArray[T, α] × T -> DArray[T, β]
+concat : DStr[α] × DStr[β] -> DStr[γ]
 ```
 
 where each shape-changing operation returns a new logical shape.
@@ -1639,3 +1639,417 @@ If pointers are typestated by validity, arrays and strings should be typestated 
 That gives Contextlang a very crisp identity:
 
 > C-like memory model, with lightweight dependent typing for validity and shape.
+
+---
+
+# Compiler Implementation Plan for Shape-Typed Arrays and Strings
+
+This section turns the array/string design into a concrete compiler roadmap.
+
+The goal is **not** to implement full dependent typing immediately.
+The goal is to get the high-value safety properties first while keeping the frontend simple enough to evolve.
+
+## Guiding implementation principle
+
+Implement this as:
+
+- **exact shape typing for fixed arrays**
+- **logical shape identities for dynamic owned arrays/strings**
+- **no arithmetic normalization in the first implementation**
+
+In one sentence:
+
+> make shape part of the type, but make shape *equality* cheap.
+
+## Recommended rollout order
+
+There is a very clear best order.
+
+### Phase 1 — strengthen existing fixed arrays
+
+This should be the MVP.
+
+Why first:
+
+- syntax already exists: `T[N]`
+- the parser already understands array type forms
+- the semantic system already has `ArrayType`
+- it gives immediate value with relatively low compiler churn
+
+Ship in this phase:
+
+- treat array length as an exact type-level property everywhere
+- reject assigning `T[4]` to `T[5]`
+- support exact array literals / construction typing if desired
+- improve compile-time constant index diagnostics
+
+This phase is cheap and gives a lot of shape safety immediately.
+
+### Phase 2 — add owned dynamic array/string surface types
+
+Add syntax and semantic meaning for:
+
+```context
+DArray[T, n]
+DStr[n]
+```
+
+But initially interpret `n` as a **logical shape witness**, not a symbolic arithmetic term.
+
+This phase should focus on:
+
+- syntax
+- type representation
+- assignability rules
+- runtime representation conventions
+
+not on complicated inference.
+
+### Phase 3 — teach shape-changing APIs to produce fresh post-state shapes
+
+Once `DArray[T, n]` exists, teach the analyzer that specific operations return a *new* shape.
+
+For example:
+
+```text
+resize : DArray[T, α] × usize -> DArray[T, β]
+push   : DArray[T, α] × T -> DArray[T, β]
+concat : DArray[T, α] × DArray[T, β] -> DArray[T, γ]
+```
+
+where `β`, `γ` are fresh logical shape identities.
+
+This captures the safety idea without needing arithmetic reasoning.
+
+### Phase 4 — optional symbolic arithmetic later
+
+Only later, if it proves worthwhile, add exact arithmetic shape forms like:
+
+```text
+n + 1
+a + b
+j - i
+```
+
+This should be an explicit later milestone, not part of the initial implementation.
+
+## Concrete compiler plan by subsystem
+
+## 1. AST plan
+
+### Phase 1 AST changes
+
+Fixed arrays may not need major AST changes if current `ArrayType` already stores:
+
+- element type
+- size expression
+
+But the AST should preserve whether the size expression is:
+
+- a compile-time constant literal
+- a named constant
+- a general expression
+
+If not already represented cleanly, this is the moment to formalize that.
+
+### Phase 2 AST additions
+
+For dynamic arrays/strings, add distinct type nodes rather than overloading `GenericType` too much semantically.
+
+Recommended AST additions:
+
+```text
+DynArrayType {
+    Elem TypeExpr
+    Shape TypeExpr or ShapeExpr
+}
+
+DynStringType {
+    Shape TypeExpr or ShapeExpr
+}
+```
+
+Why distinct nodes are better than generic-only treatment:
+
+- clearer semantic handling
+- clearer diagnostics
+- easier to special-case shape evolution later
+- avoids burying important language concepts in generic sugar
+
+If you want lighter syntax implementation at first, parsing them as special generic names is acceptable, but semantically they should become dedicated internal forms.
+
+## 2. Parser plan
+
+### Phase 1 parser work
+
+Very small.
+
+Likely just:
+
+- keep `T[N]`
+- ensure array size expressions are preserved accurately
+- optionally add array literal parsing if desired
+
+### Phase 2 parser work
+
+Teach the parser to recognize:
+
+```context
+DArray[T, n]
+DStr[n]
+```
+
+Recommendation:
+
+- parse them first as special named/generic forms
+- lower them into dedicated AST nodes during parse or semantic resolution
+
+That keeps syntax work small.
+
+### Syntax recommendation
+
+I would use:
+
+```context
+DArray[T, n]
+DStr[n]
+```
+
+not something more magical.
+
+This keeps the feature visually explicit and predictable.
+
+## 3. Semantic type representation plan
+
+### Phase 1 semantic work
+
+Strengthen existing fixed arrays.
+
+Current semantic `ArrayType` likely already contains:
+
+- element type
+- size summary
+
+Improve it to distinguish exact shape identity more rigorously.
+
+Recommended representation:
+
+```text
+ArrayType {
+    Elem Type
+    Size ShapeTerm
+}
+```
+
+Where `ShapeTerm` in phase 1 can simply be:
+
+- integer literal
+- resolved named constant
+- opaque textual fallback for diagnostics
+
+### Phase 2 semantic additions
+
+Add explicit semantic types:
+
+```text
+DynArrayType {
+    Elem Type
+    Shape ShapeWitness
+}
+
+DynStringType {
+    Shape ShapeWitness
+}
+```
+
+Where `ShapeWitness` is intentionally lightweight.
+
+Recommended initial `ShapeWitness` forms:
+
+```text
+ConstShape(n)
+NamedShape(name)
+FreshShape(id)
+OpaqueShape(text)
+```
+
+This is enough to express:
+
+- exact fixed lengths
+- named lengths
+- post-operation fresh dynamic lengths
+- diagnostics for unresolved/opaque forms
+
+without symbolic arithmetic.
+
+## 4. Assignability and equality rules
+
+### Fixed arrays
+
+Require exact equality of:
+
+- element type
+- shape term
+
+So:
+
+```text
+Array(T, 4)  ≠ Array(T, 5)
+Array(T, N)  = Array(T, N)
+```
+
+### Dynamic owned arrays
+
+Require exact equality of:
+
+- element type
+- shape witness
+
+So after a resize-like operation, the returned value is *not* interchangeable with the input type unless explicitly rebound.
+
+That is a feature, not a bug.
+
+It is exactly the safety guarantee you asked for.
+
+## 5. Builtin/API knowledge plan
+
+To make dynamic shapes useful without deep dependence, the analyzer should learn a small number of shape-transforming operations specially.
+
+Example categories:
+
+- `resize`
+- `push`
+- `append_many`
+- `concat`
+- `truncate`
+- `clear`
+
+The easiest implementation strategy is:
+
+- keep a table of known shape-transforming functions
+- when the analyzer sees those calls, synthesize a fresh result shape witness
+
+This is similar in spirit to how many compilers treat intrinsics specially.
+
+It is much cheaper than making every function truly dependently typed.
+
+## 6. String plan
+
+Strings should reuse the same machinery as arrays as much as possible.
+
+Recommended internal rule:
+
+- `DStr[α]` is semantically very close to `DynArrayType{Elem: u8, Shape: α}`
+- `Str[N]` is semantically very close to `Array(u8, N)` plus string-specific intent
+
+Whether you expose them as separate semantic types or thin wrappers is mostly an ergonomics decision.
+
+My preference:
+
+- keep separate semantic string types for diagnostics and language clarity
+- internally reuse array/shape machinery as much as possible
+
+## 7. Diagnostics plan
+
+This feature will only feel good if diagnostics are excellent.
+
+Important errors to support clearly:
+
+- mismatched fixed lengths
+- using an old dynamic-shape value where a post-resize shape is required
+- indexing with compile-time out-of-bounds constants
+- illegal implicit weakening/forgetting of shape facts
+
+Example good diagnostic style:
+
+```text
+cannot assign DArray[u8, α] to DArray[u8, β]
+note: resize/push operations produce a new logical length state
+```
+
+That kind of message teaches the model, not just the failure.
+
+## 8. Testing plan
+
+The test plan should also be phased.
+
+### Phase 1 tests
+
+- exact equality for fixed arrays
+- rejecting mismatched fixed lengths
+- constant-index bounds diagnostics
+- fixed-array literals/initialization if added
+
+### Phase 2 tests
+
+- parsing `DArray[T, n]` and `DStr[n]`
+- type equality for dynamic shape witnesses
+- shape witness preservation across plain assignment
+
+### Phase 3 tests
+
+- `resize` returns a new shape witness
+- `push` returns a new shape witness
+- `concat` returns a fresh result witness
+- old-shape values rejected where new-shape values are expected
+
+### Example regression style
+
+```context
+def grow(a: DArray[u8, α]) -> DArray[u8, β]:
+    return resize(a, 16)
+```
+
+and:
+
+```context
+def bad(a: DArray[u8, α]) -> DArray[u8, α]:
+    return resize(a, 16)   # should fail if resize returns fresh β
+```
+
+That is exactly the kind of “dependent-ish” safety check the language should advertise.
+
+## 9. Example/runtime plan
+
+Do not rewrite all runtime code around dynamic shape typing immediately.
+
+Recommended rollout:
+
+1. keep runtime structs plain and C-like
+2. add a few example programs using the new typed wrappers
+3. only later migrate runtime/container helpers if the model feels good in practice
+
+This reduces risk and keeps experimentation cheap.
+
+## 10. Recommended MVP boundary
+
+If I were choosing the concrete first implementation boundary, it would be:
+
+### MVP
+
+- exact fixed-array typing for `T[N]`
+- improved constant-index checking
+- syntax support for `DArray[T, n]` and `DStr[n]`
+- semantic representation for dynamic shape witnesses
+- no arithmetic shape expressions yet
+- no full generic dependent inference
+
+### First post-MVP
+
+- known builtins/API table for shape-changing operations
+- fresh witness generation on `resize` / `push` / `concat`
+- stronger diagnostics
+
+### Later
+
+- arithmetic shape expressions
+- richer subrange/view story
+- optional proofs for index constraints
+
+## Best practical recommendation
+
+If I had to turn all this into one concrete engineering instruction, it would be:
+
+> implement exact fixed arrays first, then implement dynamic arrays/strings as C-like runtime structs with lightweight logical shape witnesses, and only later consider symbolic arithmetic on shapes.
+
+That gives you the dependent-style safety you want while keeping the compiler tractable.

@@ -244,6 +244,69 @@ def bad() -> Box&:
 	}
 }
 
+func TestAnalyzeAcceptsEquivalentConstArrayShapes(t *testing.T) {
+	src := `const N: usize = 4
+
+def same_shape(buf: u8[N]) -> u8[2 + 2]:
+    return buf
+`
+	_, errs := parseAndAnalyze(t, "equivalent_const_array_shapes.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsMismatchedFixedArrayShapes(t *testing.T) {
+	src := `def bad(buf: u8[4]) -> u8[5]:
+    return buf
+`
+	_, errs := parseAndAnalyze(t, "mismatched_fixed_array_shapes.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "return type expects u8[5], got u8[4]") {
+		t.Fatalf("expected fixed-array mismatch diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsRuntimeArraySizeExpression(t *testing.T) {
+	src := `def bad(n: usize) -> void:
+    buf: u8[n] = zeroed
+`
+	_, errs := parseAndAnalyze(t, "runtime_array_size.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "array size must be a compile-time integer") {
+		t.Fatalf("expected compile-time array size diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsConstantOutOfBoundsArrayIndex(t *testing.T) {
+	src := `const IDX: usize = 4
+
+def bad() -> u8:
+    buf: u8[4] = zeroed
+    return buf[IDX]
+`
+	_, errs := parseAndAnalyze(t, "constant_oob_array_index.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "constant index 4 out of bounds for u8[4]") {
+		t.Fatalf("expected out-of-bounds diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeAcceptsConstantInBoundsArrayIndex(t *testing.T) {
+	src := `const IDX: usize = 3
+
+def read_last() -> u8:
+    buf: u8[4] = zeroed
+    return buf[IDX]
+`
+	_, errs := parseAndAnalyze(t, "constant_in_bounds_array_index.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzePointerFixture(t *testing.T) {
 	fixture := filepath.Join(repoRootFromTestFile(t), "Code", "test_programs", "pointer_alloc.llcontext")
 	src, err := os.ReadFile(fixture)

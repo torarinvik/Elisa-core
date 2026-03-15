@@ -38,8 +38,10 @@ type RefType struct {
 }
 
 type ArrayType struct {
-	Elem Type
-	Size string
+	Elem         Type
+	Size         string
+	HasConstSize bool
+	ConstSize    int64
 }
 
 type Field struct {
@@ -221,7 +223,7 @@ func SameType(a, b Type) bool {
 		return ok && ta.State == tb.State && SameType(ta.Elem, tb.Elem)
 	case *ArrayType:
 		tb, ok := b.(*ArrayType)
-		return ok && ta.Size == tb.Size && SameType(ta.Elem, tb.Elem)
+		return ok && arraySizesEqual(ta, tb) && SameType(ta.Elem, tb.Elem)
 	case *StructType:
 		tb, ok := b.(*StructType)
 		return ok && ta.Name == tb.Name
@@ -327,7 +329,7 @@ func matchTypePattern(pattern, actual Type) bool {
 		return matchTypePattern(p.Elem, a.Elem)
 	case *ArrayType:
 		a, ok := actual.(*ArrayType)
-		return ok && p.Size == a.Size && matchTypePattern(p.Elem, a.Elem)
+		return ok && arraySizesEqual(p, a) && matchTypePattern(p.Elem, a.Elem)
 	case *StructType:
 		a, ok := actual.(*StructType)
 		return ok && p.Name == a.Name
@@ -412,4 +414,14 @@ func CommonNumericType(a, b Type) Type {
 		return a
 	}
 	return a
+}
+
+func arraySizesEqual(a, b *ArrayType) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if a.HasConstSize && b.HasConstSize {
+		return a.ConstSize == b.ConstSize
+	}
+	return a.Size == b.Size
 }

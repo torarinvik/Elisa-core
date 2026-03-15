@@ -899,6 +899,7 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		a.errorf(expr.Index.Pos(), "index must be numeric, got %s", indexType.String())
 	}
 	if arr, ok := objType.(*ArrayType); ok {
+		a.checkConstantArrayIndexBounds(arr, expr.Index)
 		return arr.Elem
 	}
 	if ref, ok := objType.(*RefType); ok {
@@ -907,6 +908,7 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 			return invalidType
 		}
 		if arr, ok := ref.Elem.(*ArrayType); ok {
+			a.checkConstantArrayIndexBounds(arr, expr.Index)
 			return arr.Elem
 		}
 		return ref.Elem
@@ -1099,12 +1101,15 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 	case *ast.RefType:
 		return &RefType{Elem: a.resolveType(n.Elem), State: RefState(n.State)}
 	case *ast.ArrayType:
-		return &ArrayType{Elem: a.resolveType(n.Elem), Size: a.exprSummary(n.Size)}
+		return a.resolveArrayType(n)
 	case *ast.MutableType:
 		return a.resolveType(n.Elem)
 	case *ast.TailType:
 		return &RefType{Elem: a.resolveType(n.Elem), State: RefStateNonNull}
 	case *ast.GenericType:
+		if arrayExpr, ok := a.genericTypeAsArrayType(n); ok {
+			return a.resolveArrayType(arrayExpr)
+		}
 		args := make([]Type, 0, len(n.Args))
 		for _, arg := range n.Args {
 			args = append(args, a.resolveType(arg))
@@ -1124,6 +1129,29 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 	default:
 		return invalidType
 	}
+}
+
+func (a *Analyzer) genericTypeAsArrayType(expr *ast.GenericType) (*ast.ArrayType, bool) {
+	if len(expr.Args) != 1 {
+		return nil, false
+	}
+	base, ok := a.namedTypes[expr.Name]
+	if !ok {
+		return nil, false
+	}
+	switch base.(type) {
+	case *StructType, *OpaqueType:
+		return nil, false
+	}
+	sizeTypeExpr, ok := expr.Args[0].(*ast.NamedType)
+	if !ok {
+		return nil, false
+	}
+	return &ast.ArrayType{
+		Position: expr.Position,
+		Elem:     &ast.NamedType{Position: expr.Position, Name: expr.Name},
+		Size:     &ast.Ident{Position: sizeTypeExpr.Position, Name: sizeTypeExpr.Name},
+	}, true
 }
 
 func (a *Analyzer) inferLiteralType(expr ast.Expr) Type {
@@ -1231,7 +1259,7 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type) Type {
 	case *RefType:
 		return &RefType{Elem: a.substituteType(n.Elem, bindings), State: n.State}
 	case *ArrayType:
-		return &ArrayType{Elem: a.substituteType(n.Elem, bindings), Size: n.Size}
+		return &ArrayType{Elem: a.substituteType(n.Elem, bindings), Size: n.Size, HasConstSize: n.HasConstSize, ConstSize: n.ConstSize}
 	case *GenericInstanceType:
 		args := make([]Type, 0, len(n.Args))
 		for _, arg := range n.Args {
@@ -1255,6 +1283,35 @@ func (a *Analyzer) paramIsMutable(param ast.ParamDecl) bool {
 	}
 	_, ok := param.Type.(*ast.MutableType)
 	return ok
+}
+
+func (a *Analyzer) resolveArrayType(expr *ast.ArrayType) Type {
+	arr := &ArrayType{Elem: a.resolveType(expr.Elem), Size: a.exprSummary(expr.Size)}
+	value, ok := a.evalConstExpr(expr.Size)
+	if !ok || value.Kind != ConstInt {
+		a.errorf(expr.Size.Pos(), "array size must be a compile-time integer")
+		return arr
+	}
+	if value.Int < 0 {
+		a.errorf(expr.Size.Pos(), "array size must be non-negative, got %d", value.Int)
+		return arr
+	}
+	arr.HasConstSize = true
+	arr.ConstSize = value.Int
+	return arr
+}
+
+func (a *Analyzer) checkConstantArrayIndexBounds(arr *ArrayType, indexExpr ast.Expr) {
+	if arr == nil || !arr.HasConstSize {
+		return
+	}
+	value, ok := a.evalConstExpr(indexExpr)
+	if !ok || value.Kind != ConstInt {
+		return
+	}
+	if value.Int < 0 || value.Int >= arr.ConstSize {
+		a.errorf(indexExpr.Pos(), "constant index %d out of bounds for %s", value.Int, arr.String())
+	}
 }
 
 func (a *Analyzer) evalConstBoolExpr(expr ast.Expr) (bool, bool) {
