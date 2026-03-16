@@ -3,8 +3,10 @@
 package backend
 
 /*
-#cgo darwin CFLAGS: -I/opt/homebrew/opt/llvm/include -I/usr/local/opt/llvm/include
-#cgo darwin LDFLAGS: -L/opt/homebrew/opt/llvm/lib -L/usr/local/opt/llvm/lib -lLLVM-C -lLLVM
+#cgo darwin,arm64 CFLAGS: -I/opt/homebrew/opt/llvm/include
+#cgo darwin,arm64 LDFLAGS: -L/opt/homebrew/opt/llvm/lib -lLLVM-C -lLLVM
+#cgo darwin,amd64 CFLAGS: -I/usr/local/opt/llvm/include
+#cgo darwin,amd64 LDFLAGS: -L/usr/local/opt/llvm/lib -lLLVM-C -lLLVM
 #cgo linux CFLAGS: -I/usr/include -I/usr/lib/llvm-21/include -I/usr/lib/llvm-20/include -I/usr/lib/llvm-19/include -I/usr/lib/llvm-18/include -I/usr/lib/llvm-17/include -I/usr/lib/llvm-16/include -I/usr/lib/llvm-15/include
 #cgo linux LDFLAGS: -L/usr/lib/llvm-21/lib -L/usr/lib/llvm-20/lib -L/usr/lib/llvm-19/lib -L/usr/lib/llvm-18/lib -L/usr/lib/llvm-17/lib -L/usr/lib/llvm-16/lib -L/usr/lib/llvm-15/lib -lLLVM-C -lLLVM
 #include <stdlib.h>
