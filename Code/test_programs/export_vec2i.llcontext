@@ -4,6 +4,8 @@ repr(c) struct Vec[T]:
 
 export type Vec[i32] as Vec2i
 
+global seed: i32 = 7
+
 def vec_add_i32(left: Vec[i32], right: Vec[i32]) -> Vec[i32]:
 	result: Vec[i32] = zeroed
 	result.x <- left.x + right.x
@@ -13,5 +15,6 @@ def vec_add_i32(left: Vec[i32], right: Vec[i32]) -> Vec[i32]:
 def keep_left[T](left: T, right: T) -> T:
 	return left
 
+export global seed as ctx_seed
 export func vec2i_add(left: Vec2i, right: Vec2i) -> Vec2i = vec_add_i32
 export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[i32]]

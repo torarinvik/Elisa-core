@@ -273,6 +273,8 @@ func TestAnalyzeAcceptsExportedConcreteWrappers(t *testing.T) {
 
 export type Vec[i32] as Vec2i
 
+global seed: i32 = 7
+
 def vec_add_i32(left: Vec[i32], right: Vec[i32]) -> Vec[i32]:
 	result: Vec[i32] = zeroed
 	result.x <- left.x + right.x
@@ -282,6 +284,7 @@ def vec_add_i32(left: Vec[i32], right: Vec[i32]) -> Vec[i32]:
 def keep_left[T](left: T, right: T) -> T:
 	return left
 
+export global seed as ctx_seed
 export func vec2i_add(left: Vec2i, right: Vec2i) -> Vec2i = vec_add_i32
 export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[i32]]
 `
@@ -293,8 +296,14 @@ export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[
 	if len(result.ExportedFuncs) != 2 {
 		t.Fatalf("expected 2 exported funcs, got %d", len(result.ExportedFuncs))
 	}
+	if len(result.ExportedGlobals) != 1 {
+		t.Fatalf("expected 1 exported global, got %d", len(result.ExportedGlobals))
+	}
 	if _, ok := result.NamedTypes["Vec2i"]; !ok {
 		t.Fatal("expected Vec2i type alias to be available")
+	}
+	if result.ExportedGlobals[0].PublicName != "ctx_seed" {
+		t.Fatalf("expected exported global name ctx_seed, got %s", result.ExportedGlobals[0].PublicName)
 	}
 	if result.ExportedFuncs[1].TargetGenericDecl == nil {
 		t.Fatal("expected generic export target metadata for vec2i_keep_left")
@@ -304,6 +313,35 @@ export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[
 	}
 	if result.ExportedFuncs[0].Signature.Return.String() != "Vec[i32]" {
 		t.Fatalf("expected exported wrapper return to resolve concretely, got %s", result.ExportedFuncs[0].Signature.Return.String())
+	}
+}
+
+func TestAnalyzeRejectsExportedNonGlobalSymbol(t *testing.T) {
+	src := `const MAGIC = 1337
+
+export global MAGIC as ctx_magic
+`
+	_, errs := parseAndAnalyze(t, "export_non_global_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "must target a global") {
+		t.Fatalf("expected exported-global target rejection, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsExportedArrayBoundaryTypes(t *testing.T) {
+	src := `def pass_array(value: i32[4]) -> i32[4]:
+	return value
+
+export func pass_array_c(value: i32[4]) -> i32[4] = pass_array
+`
+	_, errs := parseAndAnalyze(t, "export_array_boundary_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "export func \"pass_array_c\" is not C-ABI-compatible") {
+		t.Fatalf("expected export array boundary rejection, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
 

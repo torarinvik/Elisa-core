@@ -78,6 +78,21 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 			fmt.Fprint(stdout, output)
 		}
 		return 0
+	case emitHeader:
+		output, err := backend.GenerateCHeader(result)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %s\n", err)
+			return 1
+		}
+		if options.output != "" {
+			if err := os.WriteFile(options.output, []byte(output), 0o644); err != nil {
+				fmt.Fprintf(stderr, "error: %s\n", err)
+				return 1
+			}
+		} else {
+			fmt.Fprint(stdout, output)
+		}
+		return 0
 	case emitBitcode:
 		if err := backend.WriteLLVMBitcodeFile(result, outputPathForEmit(options.filename, options.output, ".bc")); err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
@@ -100,6 +115,7 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 const (
 	emitAST     = "ast"
 	emitLLVM    = "llvm"
+	emitHeader  = "header"
 	emitBitcode = "bc"
 	emitObject  = "obj"
 )
@@ -151,7 +167,7 @@ func parseArgs(args []string) (cliOptions, error) {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprintf(w, "Usage: llcontext [-emit %s|%s|%s|%s] [-o <output>] <file.llcontext>\n", emitAST, emitLLVM, emitBitcode, emitObject)
+	fmt.Fprintf(w, "Usage: llcontext [-emit %s|%s|%s|%s|%s] [-o <output>] <file.llcontext>\n", emitAST, emitLLVM, emitHeader, emitBitcode, emitObject)
 }
 
 func normalizeEmitMode(value string) string {
@@ -160,6 +176,8 @@ func normalizeEmitMode(value string) string {
 		return emitAST
 	case emitLLVM:
 		return emitLLVM
+	case emitHeader:
+		return emitHeader
 	case emitBitcode, "bitcode":
 		return emitBitcode
 	case emitObject, "object":
@@ -298,6 +316,8 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 			target += "[" + strings.Join(parts, ", ") + "]"
 		}
 		fmt.Fprintf(w, "%sexport func %s(%d params)%s = %s\n", prefix, n.Name, len(n.Params), ret, target)
+	case *ast.ExportGlobalDecl:
+		fmt.Fprintf(w, "%sexport global %s as %s\n", prefix, n.TargetName, n.Alias)
 	case *ast.StaticIfDecl:
 		fmt.Fprintf(w, "%sstatic if %s: (%d then, %d elifs)\n", prefix, exprStr(n.Cond), len(n.Then), len(n.Elifs))
 		for _, then := range n.Then {

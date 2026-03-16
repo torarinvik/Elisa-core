@@ -89,6 +89,7 @@ type Analyzer struct {
 	returnFreshShapeStatus map[string]freshReturnStatus
 	exportedTypes          []*ExportedType
 	exportedFuncs          []*ExportedFunc
+	exportedGlobals        []*ExportedGlobal
 	currentScope           *Scope
 	currentReturn          Type
 }
@@ -112,14 +113,15 @@ func Analyze(file *ast.File) *Result {
 	a.analyzeDecls(activeDecls)
 	a.analyzeExports(activeDecls)
 	return &Result{
-		File:          file,
-		GlobalScope:   a.globalScope,
-		NamedTypes:    a.namedTypes,
-		ConstValues:   a.constValues,
-		ExprTypes:     a.exprTypes,
-		ExportedTypes: a.exportedTypes,
-		ExportedFuncs: a.exportedFuncs,
-		Diagnostics:   a.diagnostics,
+		File:            file,
+		GlobalScope:     a.globalScope,
+		NamedTypes:      a.namedTypes,
+		ConstValues:     a.constValues,
+		ExprTypes:       a.exprTypes,
+		ExportedTypes:   a.exportedTypes,
+		ExportedFuncs:   a.exportedFuncs,
+		ExportedGlobals: a.exportedGlobals,
+		Diagnostics:     a.diagnostics,
 	}
 }
 
@@ -328,7 +330,7 @@ func (a *Analyzer) collectNamedTypes(decls []ast.Decl) {
 				continue
 			}
 			a.namedTypes[n.Name] = &OpaqueType{Name: n.Name}
-		case *ast.ExportTypeDecl, *ast.ExportFuncDecl:
+		case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			continue
 		}
 	}
@@ -393,7 +395,7 @@ func (a *Analyzer) collectValueSymbols(decls []ast.Decl) {
 		case *ast.ExternVarDecl:
 			declType := a.resolveType(n.Type)
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolExternVar, Type: declType, Node: n, Mutable: true}, n.Pos())
-		case *ast.ExportTypeDecl, *ast.ExportFuncDecl:
+		case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			continue
 		}
 	}
@@ -420,7 +422,7 @@ func (a *Analyzer) analyzeDecls(decls []ast.Decl) {
 			}
 		case *ast.FuncDecl:
 			a.analyzeFunc(n)
-		case *ast.ExportTypeDecl, *ast.ExportFuncDecl:
+		case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			continue
 		}
 	}

@@ -309,8 +309,19 @@ func (p *Parser) parseExternDecl() ast.Decl {
 func (p *Parser) parseExportDecl() ast.Decl {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_EXPORT)
-	kind := p.expect(lexer.TOKEN_IDENT)
-	switch kind.Text {
+	kindText := ""
+	switch p.peek() {
+	case lexer.TOKEN_IDENT:
+		kindText = p.advance().Text
+	case lexer.TOKEN_GLOBAL:
+		p.advance()
+		kindText = "global"
+	default:
+		p.errorf("expected export type, export func, or export global, got %s", p.cur())
+		p.skipNewlines()
+		return nil
+	}
+	switch kindText {
 	case "type":
 		target := p.parseTypeExpr()
 		p.expect(lexer.TOKEN_AS)
@@ -342,8 +353,16 @@ func (p *Parser) parseExportDecl() ast.Decl {
 		}
 		p.expectNewline()
 		return &ast.ExportFuncDecl{Position: pos, Name: name, Params: params, ReturnType: retType, TargetName: targetName, TargetTypeArgs: targetTypeArgs}
+	case "global":
+		targetName := p.expect(lexer.TOKEN_IDENT).Text
+		alias := targetName
+		if p.match(lexer.TOKEN_AS) {
+			alias = p.expect(lexer.TOKEN_IDENT).Text
+		}
+		p.expectNewline()
+		return &ast.ExportGlobalDecl{Position: pos, TargetName: targetName, Alias: alias}
 	default:
-		p.errorf("expected export type or export func, got %q", kind.Text)
+		p.errorf("expected export type, export func, or export global, got %q", kindText)
 		p.skipNewlines()
 		return nil
 	}

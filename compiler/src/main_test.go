@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -215,6 +216,86 @@ func TestRunCLIEmitsBitcodeAndObjectForFixtureProgram(t *testing.T) {
 			}
 			test.check(t, data)
 		})
+	}
+}
+
+func TestRunCLIEmitsHeaderForExportFixture(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "export_vec2i.llcontext")
+	outputPath := filepath.Join(t.TempDir(), "export_vec2i.h")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "header", "-o", outputPath, fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected header emit with -o not to write stdout, got:\n%s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("expected header output file %s to exist: %v", outputPath, err)
+	}
+	header := string(data)
+	checks := []string{
+		"typedef struct Vec2i Vec2i;",
+		"struct Vec2i {",
+		"int32_t x;",
+		"int32_t y;",
+		"extern int32_t ctx_seed;",
+		"Vec2i vec2i_add(Vec2i arg0, Vec2i arg1);",
+	}
+	for _, check := range checks {
+		if !strings.Contains(header, check) {
+			t.Fatalf("expected header to contain %q, got:\n%s", check, header)
+		}
+	}
+}
+
+func TestRunCLIGeneratedHeaderInteropHarness(t *testing.T) {
+	clangPath, err := exec.LookPath("clang")
+	if err != nil {
+		t.Skip("clang not available")
+	}
+	repoRoot := repoRootFromMainTest(t)
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "export_vec2i.llcontext")
+	harnessPath := filepath.Join(repoRoot, "Code", "test_programs", "export_vec2i_generated_harness.c")
+	outputDir := t.TempDir()
+	headerPath := filepath.Join(outputDir, "export_vec2i.h")
+	objectPath := filepath.Join(outputDir, "export_vec2i.o")
+	exePath := filepath.Join(outputDir, "export_vec2i_generated_harness")
+
+	for _, args := range [][]string{
+		{"-emit", "header", "-o", headerPath, fixturePath},
+		{"-emit", "obj", "-o", objectPath, fixturePath},
+	} {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		exitCode := runCLI(args, &stdout, &stderr)
+		if exitCode != 0 {
+			t.Fatalf("runCLI(%v) returned %d\nstderr:\n%s", args, exitCode, stderr.String())
+		}
+		if stdout.Len() != 0 {
+			t.Fatalf("expected no stdout for %v, got:\n%s", args, stdout.String())
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("expected no stderr for %v, got:\n%s", args, stderr.String())
+		}
+	}
+
+	compileCmd := exec.Command(clangPath, "-I", outputDir, harnessPath, objectPath, "-o", exePath)
+	compileOutput, err := compileCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clang failed: %v\n%s", err, string(compileOutput))
+	}
+	runCmd := exec.Command(exePath)
+	runOutput, err := runCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated-header interop harness failed: %v\n%s", err, string(runOutput))
 	}
 }
 

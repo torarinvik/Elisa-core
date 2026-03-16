@@ -123,6 +123,11 @@ func (g *llvmGenerator) emitModule() error {
 			return err
 		}
 	}
+	for _, exported := range g.result.ExportedGlobals {
+		if err := g.emitExportedGlobal(exported); err != nil {
+			return err
+		}
+	}
 	for _, exported := range g.result.ExportedFuncs {
 		if err := g.emitExportedFunction(exported); err != nil {
 			return err
@@ -175,7 +180,7 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 		return err
 	case *ast.ConstDecl, *ast.StaticIfDecl:
 		return nil
-	case *ast.ExportTypeDecl, *ast.ExportFuncDecl:
+	case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 		return nil
 	default:
 		return fmt.Errorf("unsupported declaration %T", decl)
@@ -229,7 +234,7 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 		return nil
 	case *ast.ExternTypeDecl, *ast.StaticIfDecl:
 		return nil
-	case *ast.ExportTypeDecl, *ast.ExportFuncDecl:
+	case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 		return nil
 	default:
 		return fmt.Errorf("unsupported declaration %T", decl)

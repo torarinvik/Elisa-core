@@ -20,6 +20,33 @@ type exportABILowering struct {
 	needsCoercion bool
 }
 
+func (g *llvmGenerator) emitExportedGlobal(exported *semantic.ExportedGlobal) error {
+	if exported == nil {
+		return nil
+	}
+	target, err := g.ensureGlobalDeclared(exported.TargetName, exported.Type, false)
+	if err != nil {
+		return err
+	}
+	if exported.PublicName == exported.TargetName {
+		g.globals[exported.PublicName] = target
+		return nil
+	}
+	if _, ok := g.globals[exported.PublicName]; ok {
+		return nil
+	}
+	llvmType, err := g.lowerType(exported.Type)
+	if err != nil {
+		return err
+	}
+	nameC := cString(exported.PublicName)
+	defer C.free(unsafe.Pointer(nameC))
+	alias := C.LLVMAddAlias2(g.module, llvmType, 0, target, nameC)
+	C.LLVMSetLinkage(alias, C.LLVMExternalLinkage)
+	g.globals[exported.PublicName] = alias
+	return nil
+}
+
 func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) error {
 	if exported == nil || exported.Signature == nil {
 		return nil

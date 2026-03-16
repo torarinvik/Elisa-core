@@ -138,7 +138,7 @@ This is optional sugar; the core feature should still be the explicit `export fu
 ### Exporting a global
 
 ```context
-const MAGIC: i32 = 1337
+global MAGIC: i32 = 1337
 
 export global MAGIC as ctx_magic
 ```
@@ -195,6 +195,11 @@ These are good MVP candidates:
 - pointers / references lowered as raw pointers
 - `repr(c)` structs whose fields are all themselves C-ABI-compatible
 - opaque handle-like pointers once explicit opaque/exported types exist
+
+For exported **function boundaries**, be stricter than the general field rule:
+
+- top-level fixed arrays should be rejected as parameters and returns
+- if array-shaped data must cross the ABI, wrap it in an explicit `repr(c)` struct
 
 ### Allow later or with caution
 
@@ -266,16 +271,9 @@ This keeps the public ABI stable even if the internal specialization strategy ch
 
 ## Header generation
 
-An `export` feature becomes much more useful if the compiler can also emit a C header.
+The compiler-side export table can now also drive a generated C header.
 
-Recommended CLI growth path:
-
-- existing object emission stays as-is:
-  - `-emit obj`
-- add a new header emission mode later:
-  - `-emit header`
-
-Example future workflow:
+Current workflow:
 
 ```text
 llcontext -emit obj -o math2d.o math2d.llcontext

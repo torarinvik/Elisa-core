@@ -1,14 +1,5 @@
+#include "export_vec2i.h"
 #include <assert.h>
-#include <stdint.h>
-
-typedef struct Vec2i {
-    int32_t x;
-    int32_t y;
-} Vec2i;
-
-Vec2i vec2i_add(Vec2i left, Vec2i right);
-Vec2i vec2i_keep_left(Vec2i left, Vec2i right);
-int32_t ctx_seed;
 
 int main(void) {
     Vec2i a = {1, 2};

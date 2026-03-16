@@ -343,6 +343,8 @@ func TestGenerateLLVMIRLowersExportWrappers(t *testing.T) {
 
 export type Vec[i32] as Vec2i
 
+global seed: i32 = 7
+
 def vec_add_i32(left: Vec[i32], right: Vec[i32]) -> Vec[i32]:
 	result: Vec[i32] = zeroed
 	result.x <- left.x + right.x
@@ -352,6 +354,7 @@ def vec_add_i32(left: Vec[i32], right: Vec[i32]) -> Vec[i32]:
 def keep_left[T](left: T, right: T) -> T:
 	return left
 
+export global seed as ctx_seed
 export func vec2i_add(left: Vec2i, right: Vec2i) -> Vec2i = vec_add_i32
 export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[i32]]
 `
@@ -363,6 +366,8 @@ export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[
 
 	checks := []string{
 		"%Vec__i32 = type { i32, i32 }",
+		"@seed = global i32 7",
+		"@ctx_seed = alias i32, ptr @seed",
 		"define %Vec__i32 @vec_add_i32(%Vec__i32",
 		"define %Vec__i32 @keep_left__Vec_i32(%Vec__i32",
 		"define i64 @vec2i_add(i64",
@@ -374,6 +379,90 @@ export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
+	}
+}
+
+func TestGenerateCHeaderForExportedVec2i(t *testing.T) {
+	src := `repr(c) struct Vec[T]:
+	x: mutable T
+	y: mutable T
+
+export type Vec[i32] as Vec2i
+
+global seed: i32 = 7
+
+def vec_add_i32(left: Vec[i32], right: Vec[i32]) -> Vec[i32]:
+	result: Vec[i32] = zeroed
+	result.x <- left.x + right.x
+	result.y <- left.y + right.y
+	return result
+
+def keep_left[T](left: T, right: T) -> T:
+	return left
+
+export global seed as ctx_seed
+export func vec2i_add(left: Vec2i, right: Vec2i) -> Vec2i = vec_add_i32
+export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[i32]]
+`
+	result := parseAndAnalyze(t, "backend_export_header.llcontext", src)
+	header, err := backend.GenerateCHeader(result)
+	if err != nil {
+		t.Fatalf("GenerateCHeader returned error: %v", err)
+	}
+	checks := []string{
+		"#ifndef BACKEND_EXPORT_HEADER_H",
+		"#include <stdint.h>",
+		"typedef struct Vec2i Vec2i;",
+		"struct Vec2i {",
+		"int32_t x;",
+		"int32_t y;",
+		"extern int32_t ctx_seed;",
+		"Vec2i vec2i_add(Vec2i arg0, Vec2i arg1);",
+		"Vec2i vec2i_keep_left(Vec2i arg0, Vec2i arg1);",
+	}
+	for _, check := range checks {
+		if !strings.Contains(header, check) {
+			t.Fatalf("expected header to contain %q, got:\n%s", check, header)
+		}
+	}
+	if strings.Contains(header, "Vec__i32 vec2i_add") {
+		t.Fatalf("expected public header not to leak backend mangled aggregate names, got:\n%s", header)
+	}
+}
+
+func TestGenerateCHeaderOrdersAggregateDefinitionsByValueDependencies(t *testing.T) {
+	src := `repr(c) struct Node:
+	value: mutable i32
+	next: mutable Node&?
+
+repr(c) struct Wrapper:
+	node: mutable Node
+	next_ref: mutable Node&?
+
+export type Wrapper as CtxWrapper
+export type Node as CtxNode
+
+global root: Wrapper = zeroed
+export global root as ctx_root
+`
+	result := parseAndAnalyze(t, "backend_export_header_order.llcontext", src)
+	header, err := backend.GenerateCHeader(result)
+	if err != nil {
+		t.Fatalf("GenerateCHeader returned error: %v", err)
+	}
+	nodeIndex := strings.Index(header, "struct CtxNode {")
+	wrapperIndex := strings.Index(header, "struct CtxWrapper {")
+	if nodeIndex == -1 || wrapperIndex == -1 {
+		t.Fatalf("expected both exported structs in header, got:\n%s", header)
+	}
+	if nodeIndex > wrapperIndex {
+		t.Fatalf("expected Node definition before Wrapper definition, got:\n%s", header)
+	}
+	if !strings.Contains(header, "CtxNode *next;") {
+		t.Fatalf("expected pointer field to use forward-declared public name, got:\n%s", header)
+	}
+	if !strings.Contains(header, "extern CtxWrapper ctx_root;") {
+		t.Fatalf("expected exported global declaration, got:\n%s", header)
 	}
 }
 

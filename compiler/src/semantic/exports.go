@@ -37,11 +37,12 @@ func (a *Analyzer) analyzeExports(decls []ast.Decl) {
 		}
 	}
 	for _, decl := range decls {
-		exportDecl, ok := decl.(*ast.ExportFuncDecl)
-		if !ok {
-			continue
+		switch exportDecl := decl.(type) {
+		case *ast.ExportFuncDecl:
+			a.analyzeExportFunc(exportDecl, seenPublicNames)
+		case *ast.ExportGlobalDecl:
+			a.analyzeExportGlobal(exportDecl, seenPublicNames)
 		}
-		a.analyzeExportFunc(exportDecl, seenPublicNames)
 	}
 }
 
@@ -119,6 +120,47 @@ func (a *Analyzer) analyzeExportFunc(decl *ast.ExportFuncDecl, seenPublicNames m
 	})
 }
 
+func (a *Analyzer) analyzeExportGlobal(decl *ast.ExportGlobalDecl, seenPublicNames map[string]bool) {
+	publicName := decl.Alias
+	if publicName == "" {
+		publicName = decl.TargetName
+	}
+	if seenPublicNames[publicName] {
+		a.errorf(decl.Pos(), "duplicate export name %q", publicName)
+		return
+	}
+	if existing, ok := a.globalScope.Lookup(publicName); ok {
+		if publicName != decl.TargetName || existing.Kind != SymbolGlobal {
+			a.errorf(decl.Pos(), "exported symbol %q collides with existing %s", publicName, existing.Kind)
+			return
+		}
+	}
+
+	targetSym, ok := a.globalScope.Lookup(decl.TargetName)
+	if !ok {
+		a.errorf(decl.Pos(), "export target %q is undefined", decl.TargetName)
+		return
+	}
+	if targetSym.Kind != SymbolGlobal {
+		a.errorf(decl.Pos(), "export global %q must target a global, got %s", publicName, targetSym.Kind)
+		return
+	}
+	if !isCABICompatibleType(targetSym.Type) {
+		a.errorf(decl.Pos(), "export global %q is not C-ABI-compatible", publicName)
+		return
+	}
+
+	seenPublicNames[publicName] = true
+	a.exportedGlobals = append(a.exportedGlobals, &ExportedGlobal{
+		PublicName: publicName,
+		Type:       targetSym.Type,
+		TargetName: decl.TargetName,
+		TargetKind: targetSym.Kind,
+		Mutable:    targetSym.Mutable,
+		Decl:       decl,
+	})
+}
+
 func specializeExportFuncType(a *Analyzer, base *FuncType, bindings map[string]Type) *FuncType {
 	if base == nil {
 		return nil
@@ -170,11 +212,18 @@ func isCABICompatibleFuncType(fn *FuncType) bool {
 		return false
 	}
 	for _, param := range fn.Params {
-		if !isCABICompatibleType(param) {
+		if !isCABIFunctionBoundaryType(param) {
 			return false
 		}
 	}
-	return isCABICompatibleType(fn.Return)
+	return isCABIFunctionBoundaryType(fn.Return)
+}
+
+func isCABIFunctionBoundaryType(t Type) bool {
+	if _, ok := t.(*ArrayType); ok {
+		return false
+	}
+	return isCABICompatibleType(t)
 }
 
 func isCABICompatibleType(t Type) bool {

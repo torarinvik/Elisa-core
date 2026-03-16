@@ -17,14 +17,15 @@ func (d Diagnostic) String() string {
 }
 
 type Result struct {
-	File          *ast.File
-	GlobalScope   *Scope
-	NamedTypes    map[string]Type
-	ConstValues   map[string]ConstValue
-	ExprTypes     map[ast.Expr]Type
-	ExportedTypes []*ExportedType
-	ExportedFuncs []*ExportedFunc
-	Diagnostics   []Diagnostic
+	File            *ast.File
+	GlobalScope     *Scope
+	NamedTypes      map[string]Type
+	ConstValues     map[string]ConstValue
+	ExprTypes       map[ast.Expr]Type
+	ExportedTypes   []*ExportedType
+	ExportedFuncs   []*ExportedFunc
+	ExportedGlobals []*ExportedGlobal
+	Diagnostics     []Diagnostic
 }
 
 type ExportedType struct {
@@ -42,6 +43,15 @@ type ExportedFunc struct {
 	TargetGenericDecl *ast.FuncDecl
 	TargetBindings    map[string]Type
 	Decl              *ast.ExportFuncDecl
+}
+
+type ExportedGlobal struct {
+	PublicName string
+	Type       Type
+	TargetName string
+	TargetKind SymbolKind
+	Mutable    bool
+	Decl       *ast.ExportGlobalDecl
 }
 
 func (r *Result) Errors() []string {

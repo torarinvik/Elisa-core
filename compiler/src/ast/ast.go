@@ -98,6 +98,12 @@ type ExportFuncDecl struct {
 	TargetTypeArgs []TypeExpr
 }
 
+type ExportGlobalDecl struct {
+	Position   lexer.Pos
+	TargetName string
+	Alias      string
+}
+
 type StaticIfDecl struct {
 	Position lexer.Pos
 	Cond     Expr
@@ -375,15 +381,18 @@ type StaticElifClause struct {
 
 // ---------- Tag implementations ----------
 
-func (n *ConstDecl) Pos() lexer.Pos       { return n.Position }
-func (n *GlobalDecl) Pos() lexer.Pos      { return n.Position }
-func (n *StructDecl) Pos() lexer.Pos      { return n.Position }
-func (n *FuncDecl) Pos() lexer.Pos        { return n.Position }
-func (n *ExternFuncDecl) Pos() lexer.Pos  { return n.Position }
-func (n *ExternVarDecl) Pos() lexer.Pos   { return n.Position }
-func (n *ExternTypeDecl) Pos() lexer.Pos  { return n.Position }
-func (n *ExportTypeDecl) Pos() lexer.Pos  { return n.Position }
-func (n *ExportFuncDecl) Pos() lexer.Pos  { return n.Position }
+func (n *ConstDecl) Pos() lexer.Pos      { return n.Position }
+func (n *GlobalDecl) Pos() lexer.Pos     { return n.Position }
+func (n *StructDecl) Pos() lexer.Pos     { return n.Position }
+func (n *FuncDecl) Pos() lexer.Pos       { return n.Position }
+func (n *ExternFuncDecl) Pos() lexer.Pos { return n.Position }
+func (n *ExternVarDecl) Pos() lexer.Pos  { return n.Position }
+func (n *ExternTypeDecl) Pos() lexer.Pos { return n.Position }
+func (n *ExportTypeDecl) Pos() lexer.Pos { return n.Position }
+func (n *ExportFuncDecl) Pos() lexer.Pos { return n.Position }
+func (n *ExportGlobalDecl) Pos() lexer.Pos {
+	return n.Position
+}
 func (n *StaticIfDecl) Pos() lexer.Pos    { return n.Position }
 func (n *NamedType) Pos() lexer.Pos       { return n.Position }
 func (n *RefType) Pos() lexer.Pos         { return n.Position }
@@ -425,66 +434,68 @@ func (n *StaticIfStmt) Pos() lexer.Pos    { return n.Position }
 func (n *StaticErrorStmt) Pos() lexer.Pos { return n.Position }
 func (n *DiscardStmt) Pos() lexer.Pos     { return n.Position }
 
-func (*ConstDecl) nodeTag()       {}
-func (*GlobalDecl) nodeTag()      {}
-func (*StructDecl) nodeTag()      {}
-func (*FuncDecl) nodeTag()        {}
-func (*ExternFuncDecl) nodeTag()  {}
-func (*ExternVarDecl) nodeTag()   {}
-func (*ExternTypeDecl) nodeTag()  {}
-func (*ExportTypeDecl) nodeTag()  {}
-func (*ExportFuncDecl) nodeTag()  {}
-func (*StaticIfDecl) nodeTag()    {}
-func (*NamedType) nodeTag()       {}
-func (*RefType) nodeTag()         {}
-func (*GenericType) nodeTag()     {}
-func (*MutableType) nodeTag()     {}
-func (*TailType) nodeTag()        {}
-func (*ArrayType) nodeTag()       {}
-func (*BuiltinTypeExpr) nodeTag() {}
-func (*Ident) nodeTag()           {}
-func (*IntLit) nodeTag()          {}
-func (*StringLit) nodeTag()       {}
-func (*BoolLit) nodeTag()         {}
-func (*NullLit) nodeTag()         {}
-func (*ZeroedLit) nodeTag()       {}
-func (*BinaryExpr) nodeTag()      {}
-func (*UnaryExpr) nodeTag()       {}
-func (*CallExpr) nodeTag()        {}
-func (*FieldExpr) nodeTag()       {}
-func (*IndexExpr) nodeTag()       {}
-func (*SliceExpr) nodeTag()       {}
-func (*ListLitExpr) nodeTag()     {}
-func (*CastExpr) nodeTag()        {}
-func (*SizeofExpr) nodeTag()      {}
-func (*TernaryExpr) nodeTag()     {}
-func (*AddrOfExpr) nodeTag()      {}
-func (*StructLitExpr) nodeTag()   {}
-func (*ParenExpr) nodeTag()       {}
-func (*AssignStmt) nodeTag()      {}
-func (*AugAssignStmt) nodeTag()   {}
-func (*AsRefAssignStmt) nodeTag() {}
-func (*VarDeclStmt) nodeTag()     {}
-func (*ReturnStmt) nodeTag()      {}
-func (*IfStmt) nodeTag()          {}
-func (*WhileStmt) nodeTag()       {}
-func (*PassStmt) nodeTag()        {}
-func (*PanicStmt) nodeTag()       {}
-func (*ExprStmt) nodeTag()        {}
-func (*StaticIfStmt) nodeTag()    {}
-func (*StaticErrorStmt) nodeTag() {}
-func (*DiscardStmt) nodeTag()     {}
+func (*ConstDecl) nodeTag()        {}
+func (*GlobalDecl) nodeTag()       {}
+func (*StructDecl) nodeTag()       {}
+func (*FuncDecl) nodeTag()         {}
+func (*ExternFuncDecl) nodeTag()   {}
+func (*ExternVarDecl) nodeTag()    {}
+func (*ExternTypeDecl) nodeTag()   {}
+func (*ExportTypeDecl) nodeTag()   {}
+func (*ExportFuncDecl) nodeTag()   {}
+func (*ExportGlobalDecl) nodeTag() {}
+func (*StaticIfDecl) nodeTag()     {}
+func (*NamedType) nodeTag()        {}
+func (*RefType) nodeTag()          {}
+func (*GenericType) nodeTag()      {}
+func (*MutableType) nodeTag()      {}
+func (*TailType) nodeTag()         {}
+func (*ArrayType) nodeTag()        {}
+func (*BuiltinTypeExpr) nodeTag()  {}
+func (*Ident) nodeTag()            {}
+func (*IntLit) nodeTag()           {}
+func (*StringLit) nodeTag()        {}
+func (*BoolLit) nodeTag()          {}
+func (*NullLit) nodeTag()          {}
+func (*ZeroedLit) nodeTag()        {}
+func (*BinaryExpr) nodeTag()       {}
+func (*UnaryExpr) nodeTag()        {}
+func (*CallExpr) nodeTag()         {}
+func (*FieldExpr) nodeTag()        {}
+func (*IndexExpr) nodeTag()        {}
+func (*SliceExpr) nodeTag()        {}
+func (*ListLitExpr) nodeTag()      {}
+func (*CastExpr) nodeTag()         {}
+func (*SizeofExpr) nodeTag()       {}
+func (*TernaryExpr) nodeTag()      {}
+func (*AddrOfExpr) nodeTag()       {}
+func (*StructLitExpr) nodeTag()    {}
+func (*ParenExpr) nodeTag()        {}
+func (*AssignStmt) nodeTag()       {}
+func (*AugAssignStmt) nodeTag()    {}
+func (*AsRefAssignStmt) nodeTag()  {}
+func (*VarDeclStmt) nodeTag()      {}
+func (*ReturnStmt) nodeTag()       {}
+func (*IfStmt) nodeTag()           {}
+func (*WhileStmt) nodeTag()        {}
+func (*PassStmt) nodeTag()         {}
+func (*PanicStmt) nodeTag()        {}
+func (*ExprStmt) nodeTag()         {}
+func (*StaticIfStmt) nodeTag()     {}
+func (*StaticErrorStmt) nodeTag()  {}
+func (*DiscardStmt) nodeTag()      {}
 
-func (*ConstDecl) declTag()      {}
-func (*GlobalDecl) declTag()     {}
-func (*StructDecl) declTag()     {}
-func (*FuncDecl) declTag()       {}
-func (*ExternFuncDecl) declTag() {}
-func (*ExternVarDecl) declTag()  {}
-func (*ExternTypeDecl) declTag() {}
-func (*ExportTypeDecl) declTag() {}
-func (*ExportFuncDecl) declTag() {}
-func (*StaticIfDecl) declTag()   {}
+func (*ConstDecl) declTag()        {}
+func (*GlobalDecl) declTag()       {}
+func (*StructDecl) declTag()       {}
+func (*FuncDecl) declTag()         {}
+func (*ExternFuncDecl) declTag()   {}
+func (*ExternVarDecl) declTag()    {}
+func (*ExternTypeDecl) declTag()   {}
+func (*ExportTypeDecl) declTag()   {}
+func (*ExportFuncDecl) declTag()   {}
+func (*ExportGlobalDecl) declTag() {}
+func (*StaticIfDecl) declTag()     {}
 
 func (*NamedType) typeExprTag()       {}
 func (*RefType) typeExprTag()         {}
