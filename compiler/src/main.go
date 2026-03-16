@@ -64,7 +64,7 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 		printFile(stdout, file)
 		return 0
 	case emitLLVM:
-		output, err := backend.GenerateLLVMIR(result)
+		output, err := backend.GenerateLLVMIRWithOpt(result, effectiveOptimizationLevel(options))
 		if err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
@@ -94,13 +94,13 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 		}
 		return 0
 	case emitBitcode:
-		if err := backend.WriteLLVMBitcodeFile(result, outputPathForEmit(options.filename, options.output, ".bc")); err != nil {
+		if err := backend.WriteLLVMBitcodeFileWithOpt(result, outputPathForEmit(options.filename, options.output, ".bc"), effectiveOptimizationLevel(options)); err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
 		}
 		return 0
 	case emitObject:
-		if err := backend.WriteLLVMObjectFile(result, outputPathForEmit(options.filename, options.output, ".o")); err != nil {
+		if err := backend.WriteLLVMObjectFileWithOpt(result, outputPathForEmit(options.filename, options.output, ".o"), effectiveOptimizationLevel(options)); err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
 		}
@@ -121,9 +121,11 @@ const (
 )
 
 type cliOptions struct {
-	emit     string
-	filename string
-	output   string
+	emit        string
+	filename    string
+	output      string
+	optLevel    backend.OptimizationLevel
+	hasOptLevel bool
 }
 
 func parseArgs(args []string) (cliOptions, error) {
@@ -131,6 +133,31 @@ func parseArgs(args []string) (cliOptions, error) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
+		case arg == "-O0" || arg == "-O2" || arg == "-O3":
+			level, err := parseOptimizationArg(strings.TrimPrefix(arg, "-O"))
+			if err != nil {
+				return cliOptions{}, err
+			}
+			options.optLevel = level
+			options.hasOptLevel = true
+		case strings.HasPrefix(arg, "-O="):
+			level, err := parseOptimizationArg(strings.TrimSpace(strings.TrimPrefix(arg, "-O=")))
+			if err != nil {
+				return cliOptions{}, err
+			}
+			options.optLevel = level
+			options.hasOptLevel = true
+		case arg == "-O":
+			i++
+			if i >= len(args) {
+				return cliOptions{}, fmt.Errorf("missing value after -O")
+			}
+			level, err := parseOptimizationArg(strings.TrimSpace(args[i]))
+			if err != nil {
+				return cliOptions{}, err
+			}
+			options.optLevel = level
+			options.hasOptLevel = true
 		case strings.HasPrefix(arg, "-emit="):
 			options.emit = strings.TrimSpace(strings.TrimPrefix(arg, "-emit="))
 		case arg == "-emit":
@@ -167,7 +194,32 @@ func parseArgs(args []string) (cliOptions, error) {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprintf(w, "Usage: llcontext [-emit %s|%s|%s|%s|%s] [-o <output>] <file.llcontext>\n", emitAST, emitLLVM, emitHeader, emitBitcode, emitObject)
+	fmt.Fprintf(w, "Usage: llcontext [-emit %s|%s|%s|%s|%s] [-O0|-O2|-O3] [-o <output>] <file.llcontext>\n", emitAST, emitLLVM, emitHeader, emitBitcode, emitObject)
+}
+
+func parseOptimizationArg(value string) (backend.OptimizationLevel, error) {
+	switch strings.TrimSpace(strings.TrimPrefix(strings.ToUpper(value), "O")) {
+	case "0":
+		return backend.OptimizationLevel0, nil
+	case "2":
+		return backend.OptimizationLevel2, nil
+	case "3":
+		return backend.OptimizationLevel3, nil
+	default:
+		return 0, fmt.Errorf("unsupported optimization level %q (expected O0, O2, or O3)", value)
+	}
+}
+
+func effectiveOptimizationLevel(options cliOptions) backend.OptimizationLevel {
+	if options.hasOptLevel {
+		return options.optLevel
+	}
+	switch options.emit {
+	case emitBitcode, emitObject:
+		return backend.OptimizationLevel3
+	default:
+		return backend.OptimizationLevel0
+	}
 }
 
 func normalizeEmitMode(value string) string {

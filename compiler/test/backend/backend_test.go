@@ -649,7 +649,7 @@ func TestWriteLLVMBitcodeFile(t *testing.T) {
 	if len(data) < 4 {
 		t.Fatalf("expected non-empty bitcode output, got %d bytes", len(data))
 	}
-	if !bytes.HasPrefix(data, []byte{'B', 'C'}) {
+	if !looksLikeBitcodeFile(data) {
 		t.Fatalf("expected bitcode magic prefix, got % x", data[:min(len(data), 4)])
 	}
 }
@@ -1243,6 +1243,13 @@ func looksLikeObjectFile(data []byte) bool {
 		}
 	}
 	return false
+}
+
+func looksLikeBitcodeFile(data []byte) bool {
+	if len(data) < 4 {
+		return false
+	}
+	return bytes.HasPrefix(data, []byte{'B', 'C'}) || bytes.Equal(data[:4], []byte{0xde, 0xc0, 0x17, 0x0b})
 }
 
 func min(left int, right int) int {

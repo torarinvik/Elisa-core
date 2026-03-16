@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"llcontext/src/backend"
 )
 
 func repoRootFromMainTest(t *testing.T) string {
@@ -174,7 +176,7 @@ func TestRunCLIEmitsBitcodeAndObjectForFixtureProgram(t *testing.T) {
 			outputPath: bitcodePath,
 			check: func(t *testing.T, data []byte) {
 				t.Helper()
-				if len(data) < 2 || !bytes.HasPrefix(data, []byte{'B', 'C'}) {
+				if !looksLikeBitcodeFile(data) {
 					t.Fatalf("expected bitcode magic prefix, got % x", data[:min(len(data), 4)])
 				}
 			},
@@ -253,6 +255,61 @@ func TestRunCLIEmitsHeaderForExportFixture(t *testing.T) {
 		if !strings.Contains(header, check) {
 			t.Fatalf("expected header to contain %q, got:\n%s", check, header)
 		}
+	}
+}
+
+func TestParseArgsAcceptsOptimizationShorthands(t *testing.T) {
+	tests := []struct {
+		name  string
+		args  []string
+		level int
+	}{
+		{name: "shorthand", args: []string{"-O3", "fixture.llcontext"}, level: 3},
+		{name: "equals", args: []string{"-O=2", "fixture.llcontext"}, level: 2},
+		{name: "separate", args: []string{"-O", "0", "fixture.llcontext"}, level: 0},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			options, err := parseArgs(test.args)
+			if err != nil {
+				t.Fatalf("parseArgs returned error: %v", err)
+			}
+			if !options.hasOptLevel {
+				t.Fatal("expected optimization flag to be marked as explicitly set")
+			}
+			if int(options.optLevel) != test.level {
+				t.Fatalf("expected opt level O%d, got O%d", test.level, int(options.optLevel))
+			}
+		})
+	}
+}
+
+func TestEffectiveOptimizationLevelDefaultsByEmitMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		emit     string
+		explicit bool
+		level    int
+		expect   int
+	}{
+		{name: "llvm default raw", emit: emitLLVM, expect: 0},
+		{name: "bitcode default optimized", emit: emitBitcode, expect: 3},
+		{name: "object default optimized", emit: emitObject, expect: 3},
+		{name: "explicit overrides default", emit: emitObject, explicit: true, level: 2, expect: 2},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			options := cliOptions{emit: test.emit}
+			if test.explicit {
+				options.hasOptLevel = true
+				options.optLevel = backend.OptimizationLevel(test.level)
+			}
+			if got := int(effectiveOptimizationLevel(options)); got != test.expect {
+				t.Fatalf("expected effective opt level O%d, got O%d", test.expect, got)
+			}
+		})
 	}
 }
 
@@ -343,6 +400,13 @@ func looksLikeObjectFile(data []byte) bool {
 		}
 	}
 	return false
+}
+
+func looksLikeBitcodeFile(data []byte) bool {
+	if len(data) < 4 {
+		return false
+	}
+	return bytes.HasPrefix(data, []byte{'B', 'C'}) || bytes.Equal(data[:4], []byte{0xde, 0xc0, 0x17, 0x0b})
 }
 
 func min(left int, right int) int {

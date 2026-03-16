@@ -34,9 +34,10 @@ static LLVMTargetMachineRef llcontextCreateTargetMachineAggressive(
 		LLVMCodeModelDefault);
 }
 
-static char *llcontextOptimizeModuleForCodegen(
+static char *llcontextRunOptimizationPipeline(
 	LLVMModuleRef Module,
-	LLVMTargetMachineRef TargetMachine) {
+	LLVMTargetMachineRef TargetMachine,
+	char *PassPipeline) {
 	LLVMPassBuilderOptionsRef Options = LLVMCreatePassBuilderOptions();
 	if (Options == NULL) {
 		return LLVMGetErrorMessage(LLVMCreateStringError("failed to create LLVM pass builder options"));
@@ -46,7 +47,7 @@ static char *llcontextOptimizeModuleForCodegen(
 	LLVMPassBuilderOptionsSetLoopVectorization(Options, 1);
 	LLVMPassBuilderOptionsSetSLPVectorization(Options, 1);
 	LLVMPassBuilderOptionsSetLoopUnrolling(Options, 1);
-	LLVMErrorRef Err = LLVMRunPasses(Module, "default<O3>", TargetMachine, Options);
+	LLVMErrorRef Err = LLVMRunPasses(Module, PassPipeline, TargetMachine, Options);
 	LLVMDisposePassBuilderOptions(Options);
 	if (Err == NULL) {
 		return NULL;
@@ -71,6 +72,10 @@ import (
 )
 
 func WriteLLVMBitcodeFile(result *semantic.Result, outputPath string) error {
+	return WriteLLVMBitcodeFileWithOpt(result, outputPath, OptimizationLevel3)
+}
+
+func WriteLLVMBitcodeFileWithOpt(result *semantic.Result, outputPath string, optLevel OptimizationLevel) error {
 	if strings.TrimSpace(outputPath) == "" {
 		return fmt.Errorf("output path cannot be empty")
 	}
@@ -79,10 +84,17 @@ func WriteLLVMBitcodeFile(result *semantic.Result, outputPath string) error {
 		return err
 	}
 	defer g.dispose()
+	if err := g.optimizeModule(optLevel); err != nil {
+		return err
+	}
 	return g.writeBitcodeFile(outputPath)
 }
 
 func WriteLLVMObjectFile(result *semantic.Result, outputPath string) error {
+	return WriteLLVMObjectFileWithOpt(result, outputPath, OptimizationLevel3)
+}
+
+func WriteLLVMObjectFileWithOpt(result *semantic.Result, outputPath string, optLevel OptimizationLevel) error {
 	if strings.TrimSpace(outputPath) == "" {
 		return fmt.Errorf("output path cannot be empty")
 	}
@@ -91,7 +103,7 @@ func WriteLLVMObjectFile(result *semantic.Result, outputPath string) error {
 		return err
 	}
 	defer g.dispose()
-	return g.writeObjectFile(outputPath)
+	return g.writeObjectFile(outputPath, optLevel)
 }
 
 func (g *llvmGenerator) writeBitcodeFile(outputPath string) error {
@@ -103,11 +115,11 @@ func (g *llvmGenerator) writeBitcodeFile(outputPath string) error {
 	return nil
 }
 
-func (g *llvmGenerator) writeObjectFile(outputPath string) error {
+func (g *llvmGenerator) writeObjectFile(outputPath string, optLevel OptimizationLevel) error {
 	if err := g.ensureTargetMachine(); err != nil {
 		return err
 	}
-	if err := g.optimizeForCodegen(); err != nil {
+	if err := g.optimizeModule(optLevel); err != nil {
 		return err
 	}
 
@@ -121,7 +133,10 @@ func (g *llvmGenerator) writeObjectFile(outputPath string) error {
 	return nil
 }
 
-func (g *llvmGenerator) optimizeForCodegen() error {
+func (g *llvmGenerator) optimizeModule(optLevel OptimizationLevel) error {
+	if optLevel == OptimizationLevel0 {
+		return nil
+	}
 	if g.optimizedForCodegen {
 		return nil
 	}
@@ -132,7 +147,9 @@ func (g *llvmGenerator) optimizeForCodegen() error {
 		return err
 	}
 
-	errMessage := C.llcontextOptimizeModuleForCodegen(g.module, g.targetMachine)
+	passPipeline := cString(fmt.Sprintf("default<O%d>", int(optLevel)))
+	defer C.free(unsafe.Pointer(passPipeline))
+	errMessage := C.llcontextRunOptimizationPipeline(g.module, g.targetMachine, passPipeline)
 	if errMessage != nil {
 		return fmt.Errorf("failed to optimize LLVM module for code generation: %s", disposeLLVMErrorMessage(errMessage, "unknown LLVM pass pipeline error"))
 	}

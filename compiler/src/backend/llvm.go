@@ -27,11 +27,20 @@ import (
 // GenerateLLVMIR lowers the analyzed program into an LLVM module using the LLVM C API
 // and returns the textual IR produced by LLVM itself.
 func GenerateLLVMIR(result *semantic.Result) (string, error) {
+	return GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+}
+
+// GenerateLLVMIRWithOpt lowers the analyzed program and optionally optimizes the
+// module before returning textual LLVM IR.
+func GenerateLLVMIRWithOpt(result *semantic.Result, optLevel OptimizationLevel) (string, error) {
 	g, err := compileLLVMModule(result)
 	if err != nil {
 		return "", err
 	}
 	defer g.dispose()
+	if err := g.optimizeModule(optLevel); err != nil {
+		return "", err
+	}
 	return g.printModule(), nil
 }
 
