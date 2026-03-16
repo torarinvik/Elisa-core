@@ -89,6 +89,14 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 	return value, actualType, nil
 }
 
+func (s *functionState) buildCall(llvmFnType C.LLVMTypeRef, callee C.LLVMValueRef, args []C.LLVMValueRef, name string) C.LLVMValueRef {
+	argCount := len(args)
+	argPtr := llvmValueSlicePtr(args)
+	nameC := cString(name)
+	defer C.free(unsafe.Pointer(nameC))
+	return C.LLVMBuildCall2(s.builder, llvmFnType, callee, argPtr, C.unsigned(argCount), nameC)
+}
+
 func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Type, error) {
 	if binding, ok := s.lookupBinding(expr.Name); ok {
 		value, err := s.loadValue(binding.ptr, binding.typ, expr.Name)
@@ -171,7 +179,7 @@ func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic
 	if err != nil {
 		return nil, nil, err
 	}
-	current := C.LLVMBuildCall2(s.builder, newLLVMType, newCallee, llvmValueSlicePtr([]C.LLVMValueRef{typeHintPtr}), 1, cStringFree("listnew"))
+	current := s.buildCall(newLLVMType, newCallee, []C.LLVMValueRef{typeHintPtr}, "listnew")
 
 	pushHelperType := &semantic.FuncType{
 		Name:   "ctx_stage1rt_tlist_push",
@@ -197,7 +205,7 @@ func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic
 			return nil, nil, err
 		}
 		args := []C.LLVMValueRef{current, elemPtr}
-		current = C.LLVMBuildCall2(s.builder, pushLLVMType, pushCallee, llvmValueSlicePtr(args), C.unsigned(len(args)), cStringFree("listpush"))
+		current = s.buildCall(pushLLVMType, pushCallee, args, "listpush")
 	}
 	return current, listType, nil
 }
@@ -411,7 +419,7 @@ func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helpe
 		return nil, nil, err
 	}
 	args := []C.LLVMValueRef{firstValue, secondValue}
-	call := C.LLVMBuildCall2(s.builder, llvmFnType, callee, llvmValueSlicePtr(args), C.unsigned(len(args)), cStringFree("streqtmp"))
+	call := s.buildCall(llvmFnType, callee, args, "streqtmp")
 	helperLLVMType, err := s.g.lowerType(helperReturn)
 	if err != nil {
 		return nil, nil, err
@@ -513,7 +521,7 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if !isVoidType(funcType.Return) {
 		callName = "calltmp"
 	}
-	call := C.LLVMBuildCall2(s.builder, llvmFnType, callee, llvmValueSlicePtr(args), C.unsigned(len(args)), cStringFree(callName))
+	call := s.buildCall(llvmFnType, callee, args, callName)
 	return call, funcType.Return, nil
 }
 
@@ -549,7 +557,8 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, sema
 	if fieldType, ok := dstrSyntheticFieldType(s.exprType(expr.Object), expr.Field); ok {
 		return s.emitRuntimeStringLenExpr(expr.Object, fieldType)
 	}
-	if ptr, fieldType, err := s.emitFieldAddress(expr); err == nil {
+	ptr, fieldType, addressErr := s.emitFieldAddress(expr)
+	if addressErr == nil {
 		value, loadErr := s.loadValue(ptr, fieldType, expr.Field)
 		return value, fieldType, loadErr
 	}
@@ -562,7 +571,7 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, sema
 		return nil, nil, err
 	}
 	if pointerLike {
-		return nil, nil, fmt.Errorf("field %s requires an addressable object", expr.Field)
+		return nil, nil, fmt.Errorf("field %s requires an addressable object (base %T: %v)", expr.Field, expr.Object, addressErr)
 	}
 	value := C.LLVMBuildExtractValue(s.builder, objValue, C.unsigned(index), cStringFree(expr.Field))
 	return value, fieldType, nil
@@ -614,7 +623,7 @@ func (s *functionState) emitSliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, sema
 	if isVoidType(info.resultType) {
 		callName = ""
 	}
-	call := C.LLVMBuildCall2(s.builder, llvmFnType, callee, llvmValueSlicePtr(args), C.unsigned(len(args)), cStringFree(callName))
+	call := s.buildCall(llvmFnType, callee, args, callName)
 	return call, info.resultType, nil
 }
 
@@ -723,7 +732,7 @@ func (s *functionState) emitRuntimeStringLenExpr(object ast.Expr, fieldType sema
 		return nil, nil, err
 	}
 	args := []C.LLVMValueRef{stringValue}
-	call := C.LLVMBuildCall2(s.builder, llvmFnType, callee, llvmValueSlicePtr(args), C.unsigned(len(args)), cStringFree("strlen"))
+	call := s.buildCall(llvmFnType, callee, args, "strlen")
 	return call, fieldType, nil
 }
 
@@ -763,7 +772,7 @@ func (s *functionState) emitRuntimeStringIndexExpr(expr *ast.IndexExpr, helperNa
 		return nil, nil, err
 	}
 	args := []C.LLVMValueRef{stringValue, indexValue}
-	call := C.LLVMBuildCall2(s.builder, llvmFnType, callee, llvmValueSlicePtr(args), C.unsigned(len(args)), cStringFree("stridx"))
+	call := s.buildCall(llvmFnType, callee, args, "stridx")
 	return call, indexType, nil
 }
 

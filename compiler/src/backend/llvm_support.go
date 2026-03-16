@@ -43,6 +43,9 @@ func (s *functionState) emitAddress(expr ast.Expr) (C.LLVMValueRef, semantic.Typ
 
 func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, error) {
 	objType := s.exprType(expr.Object)
+	if objType == nil {
+		return nil, nil, fmt.Errorf("missing semantic type for field base when lowering .%s", expr.Field)
+	}
 	fieldType, index, containerType, pointerLike, err := s.g.fieldInfo(objType, expr.Field)
 	if err != nil {
 		return nil, nil, err
@@ -486,6 +489,42 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 
 func (s *functionState) exprType(expr ast.Expr) semantic.Type {
 	t := s.g.exprType(expr)
+	if t == nil {
+		switch n := expr.(type) {
+		case *ast.Ident:
+			if binding, ok := s.lookupBinding(n.Name); ok {
+				t = binding.typ
+			} else if sym, ok := s.g.result.GlobalScope.Lookup(n.Name); ok {
+				t = sym.Type
+			}
+		case *ast.FieldExpr:
+			if fieldType, ok := dstrSyntheticFieldType(s.exprType(n.Object), n.Field); ok {
+				t = fieldType
+				break
+			}
+			objType := s.exprType(n.Object)
+			if objType != nil {
+				fieldType, _, _, _, err := s.g.fieldInfo(objType, n.Field)
+				if err == nil {
+					t = fieldType
+				}
+			}
+		case *ast.CastExpr:
+			resolved, err := s.resolveTypeExpr(n.Target)
+			if err == nil {
+				t = resolved
+			}
+		case *ast.SizeofExpr:
+			t = s.g.result.NamedTypes["usize"]
+		case *ast.AddrOfExpr:
+			innerType := s.exprType(n.Operand)
+			if innerType != nil {
+				t = &semantic.RefType{Elem: innerType, State: semantic.RefStateNonNull}
+			}
+		case *ast.ParenExpr:
+			return s.exprType(n.Inner)
+		}
+	}
 	if t == nil || len(s.typeMap) == 0 {
 		return t
 	}
@@ -550,6 +589,9 @@ func (s *functionState) resolveDynamicShapeType(expr *ast.GenericType) (semantic
 }
 
 func (g *llvmGenerator) fieldInfo(objType semantic.Type, fieldName string) (semantic.Type, int, semantic.Type, bool, error) {
+	if objType == nil {
+		return nil, 0, nil, false, fmt.Errorf("field access requires a typed base expression for .%s", fieldName)
+	}
 	pointerLike := false
 	if ref, ok := objType.(*semantic.RefType); ok {
 		pointerLike = true

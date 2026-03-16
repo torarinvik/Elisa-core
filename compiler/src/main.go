@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"llcontext/src/ast"
 	"llcontext/src/backend"
 	"llcontext/src/lexer"
@@ -13,17 +14,24 @@ import (
 )
 
 func main() {
-	options, err := parseArgs(os.Args[1:])
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %s\n", err)
-		printUsage()
-		os.Exit(1)
-	}
+	os.Exit(runCLI(os.Args[1:], os.Stdout, os.Stderr))
+}
 
+func runCLI(args []string, stdout io.Writer, stderr io.Writer) int {
+	options, err := parseArgs(args)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %s\n", err)
+		printUsage(stderr)
+		return 1
+	}
+	return runWithOptions(options, stdout, stderr)
+}
+
+func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int {
 	src, err := readSourceWithIncludes(options.filename, map[string]bool{})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %s\n", err)
-		os.Exit(1)
+		fmt.Fprintf(stderr, "error: %s\n", err)
+		return 1
 	}
 
 	l := lexer.New(options.filename, src)
@@ -34,54 +42,58 @@ func main() {
 
 	if errs := p.Errors(); len(errs) > 0 {
 		for _, e := range errs {
-			fmt.Fprintf(os.Stderr, "%s\n", e)
+			fmt.Fprintf(stderr, "%s\n", e)
 		}
-		os.Exit(1)
+		return 1
 	}
 
 	result := semantic.Analyze(file)
 	if errs := result.Errors(); len(errs) > 0 {
 		for _, e := range errs {
-			fmt.Fprintf(os.Stderr, "%s\n", e)
+			fmt.Fprintf(stderr, "%s\n", e)
 		}
-		os.Exit(1)
+		return 1
 	}
 
 	switch options.emit {
 	case emitAST:
 		if options.output != "" {
-			fmt.Fprintf(os.Stderr, "error: -o is not supported for -emit %s\n", emitAST)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", emitAST)
+			return 1
 		}
-		printFile(file)
+		printFile(stdout, file)
+		return 0
 	case emitLLVM:
 		output, err := backend.GenerateLLVMIR(result)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %s\n", err)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "error: %s\n", err)
+			return 1
 		}
 		if options.output != "" {
 			if err := os.WriteFile(options.output, []byte(output), 0o644); err != nil {
-				fmt.Fprintf(os.Stderr, "error: %s\n", err)
-				os.Exit(1)
+				fmt.Fprintf(stderr, "error: %s\n", err)
+				return 1
 			}
 		} else {
-			fmt.Print(output)
+			fmt.Fprint(stdout, output)
 		}
+		return 0
 	case emitBitcode:
 		if err := backend.WriteLLVMBitcodeFile(result, outputPathForEmit(options.filename, options.output, ".bc")); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %s\n", err)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "error: %s\n", err)
+			return 1
 		}
+		return 0
 	case emitObject:
 		if err := backend.WriteLLVMObjectFile(result, outputPathForEmit(options.filename, options.output, ".o")); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %s\n", err)
-			os.Exit(1)
+			fmt.Fprintf(stderr, "error: %s\n", err)
+			return 1
 		}
+		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "error: unsupported emit mode %q\n", options.emit)
-		printUsage()
-		os.Exit(1)
+		fmt.Fprintf(stderr, "error: unsupported emit mode %q\n", options.emit)
+		printUsage(stderr)
+		return 1
 	}
 }
 
@@ -138,8 +150,8 @@ func parseArgs(args []string) (cliOptions, error) {
 	return options, nil
 }
 
-func printUsage() {
-	fmt.Fprintf(os.Stderr, "Usage: llcontext [-emit %s|%s|%s|%s] [-o <output>] <file.llcontext>\n", emitAST, emitLLVM, emitBitcode, emitObject)
+func printUsage(w io.Writer) {
+	fmt.Fprintf(w, "Usage: llcontext [-emit %s|%s|%s|%s] [-o <output>] <file.llcontext>\n", emitAST, emitLLVM, emitBitcode, emitObject)
 }
 
 func normalizeEmitMode(value string) string {
@@ -218,10 +230,10 @@ func parseIncludeDirective(line string) (string, bool) {
 	return rest[1 : len(rest)-1], true
 }
 
-func printFile(f *ast.File) {
-	fmt.Printf("File: %s (%d declarations)\n", f.Filename, len(f.Decls))
+func printFile(w io.Writer, f *ast.File) {
+	fmt.Fprintf(w, "File: %s (%d declarations)\n", f.Filename, len(f.Decls))
 	for _, d := range f.Decls {
-		printDecl(d, 0)
+		printDecl(w, d, 0)
 	}
 }
 
@@ -229,17 +241,17 @@ func ind(level int) string {
 	return strings.Repeat("  ", level)
 }
 
-func printDecl(d ast.Decl, level int) {
+func printDecl(w io.Writer, d ast.Decl, level int) {
 	prefix := ind(level)
 	switch n := d.(type) {
 	case *ast.ConstDecl:
-		fmt.Printf("%sconst %s = %s\n", prefix, n.Name, exprStr(n.Value))
+		fmt.Fprintf(w, "%sconst %s = %s\n", prefix, n.Name, exprStr(n.Value))
 	case *ast.GlobalDecl:
 		mut := ""
 		if n.Mutable {
 			mut = "mutable "
 		}
-		fmt.Printf("%sglobal %s%s: %s\n", prefix, mut, n.Name, typeStr(n.Type))
+		fmt.Fprintf(w, "%sglobal %s%s: %s\n", prefix, mut, n.Name, typeStr(n.Type))
 	case *ast.StructDecl:
 		repr := ""
 		if n.ReprC {
@@ -249,7 +261,7 @@ func printDecl(d ast.Decl, level int) {
 		if len(n.TypeParams) > 0 {
 			tparams = "[" + strings.Join(n.TypeParams, ", ") + "]"
 		}
-		fmt.Printf("%s%sstruct %s%s (%d fields)\n", prefix, repr, n.Name, tparams, len(n.Fields))
+		fmt.Fprintf(w, "%s%sstruct %s%s (%d fields)\n", prefix, repr, n.Name, tparams, len(n.Fields))
 	case *ast.FuncDecl:
 		tparams := ""
 		if len(n.TypeParams) > 0 {
@@ -259,21 +271,21 @@ func printDecl(d ast.Decl, level int) {
 		if n.ReturnType != nil {
 			ret = " -> " + typeStr(n.ReturnType)
 		}
-		fmt.Printf("%sdef %s%s(%d params)%s (%d stmts)\n", prefix, n.Name, tparams, len(n.Params), ret, len(n.Body))
+		fmt.Fprintf(w, "%sdef %s%s(%d params)%s (%d stmts)\n", prefix, n.Name, tparams, len(n.Params), ret, len(n.Body))
 	case *ast.ExternFuncDecl:
 		ret := ""
 		if n.ReturnType != nil {
 			ret = " -> " + typeStr(n.ReturnType)
 		}
-		fmt.Printf("%sextern %s(%d params)%s\n", prefix, n.Name, len(n.Params), ret)
+		fmt.Fprintf(w, "%sextern %s(%d params)%s\n", prefix, n.Name, len(n.Params), ret)
 	case *ast.ExternVarDecl:
-		fmt.Printf("%sextern %s: %s\n", prefix, n.Name, typeStr(n.Type))
+		fmt.Fprintf(w, "%sextern %s: %s\n", prefix, n.Name, typeStr(n.Type))
 	case *ast.ExternTypeDecl:
-		fmt.Printf("%sextern type %s\n", prefix, n.Name)
+		fmt.Fprintf(w, "%sextern type %s\n", prefix, n.Name)
 	case *ast.StaticIfDecl:
-		fmt.Printf("%sstatic if %s: (%d then, %d elifs)\n", prefix, exprStr(n.Cond), len(n.Then), len(n.Elifs))
+		fmt.Fprintf(w, "%sstatic if %s: (%d then, %d elifs)\n", prefix, exprStr(n.Cond), len(n.Then), len(n.Elifs))
 		for _, then := range n.Then {
-			printDecl(then, level+1)
+			printDecl(w, then, level+1)
 		}
 	}
 }

@@ -5,6 +5,30 @@ This section turns the array/string design into a concrete compiler roadmap.
 The goal is **not** to implement full dependent typing immediately.
 The goal is to get the high-value safety properties first while keeping the frontend simple enough to evolve.
 
+## Current implementation snapshot (March 2026)
+
+This document started as a forward-looking roadmap, but several of the earlier phases are now implemented in the compiler.
+
+Implemented today:
+
+- exact fixed-array typing for `T[N]`
+- mismatched fixed-array rejection
+- compile-time constant out-of-bounds diagnostics for fixed arrays
+- lightweight shape witnesses for `DArray[T, shape]`, `DStr[shape]`, and `DList[T, shape]`
+- fresh post-operation shapes for shape-changing APIs such as `resize`, `push`, `concat`, and `strcat`
+- indexing for `DArray`, `DArrayView`, `DList`, `DListView`, `DStr`, and `CtxStringView`
+- slice syntax for `DArray`, `DArrayView`, fixed arrays, `DList`, `DListView`, `DStr`, and `CtxStringView`
+- the lowercase `view[T]` alias for `DListView[T]`
+- pointer arithmetic lowering (`ref + int`, `int + ref`, `ref - int`)
+- explicit reference comparisons (`ref == null`, `ref != null`, `ref == ref`)
+- end-to-end fixture coverage through the real CLI pipeline for `Code/test_programs/pointer_alloc.llcontext` and `Code/test_programs/shape_ops.llcontext`
+
+Still intentionally deferred:
+
+- symbolic arithmetic normalization for shape expressions such as `a + b` and `j - i`
+- proof-carrying index constraints
+- a richer algebra of subrange/view identities beyond the current lightweight model
+
 ## Guiding implementation principle
 
 Implement this as:
@@ -39,6 +63,8 @@ Ship in this phase:
 - support exact array literals / construction typing if desired
 - improve compile-time constant index diagnostics
 
+Status: complete for exact fixed-array typing, mismatch rejection, and constant-index diagnostics. Exact fixed-array literal typing is still a possible follow-on, but it is no longer blocking the array-shape MVP.
+
 This phase is cheap and gives a lot of shape safety immediately.
 
 ### Phase 2 — add owned dynamic array/string surface types
@@ -61,6 +87,8 @@ This phase should focus on:
 
 not on complicated inference.
 
+Status: complete for `DArray[T, shape]`, `DStr[shape]`, `DList[T, shape]`, `DArrayView[T]`, and `DListView[T]` under the current lightweight shape-witness model.
+
 ### Phase 3 — teach shape-changing APIs to produce fresh post-state shapes
 
 Once `DArray[T, n]` exists, teach the analyzer that specific operations return a *new* shape.
@@ -76,6 +104,8 @@ concat : DArray[T, shape_left] × DArray[T, shape_right] -> DArray[T, shape_resu
 where `shape_out`, `shape_result` are fresh logical shape identities.
 
 This captures the safety idea without needing arithmetic reasoning.
+
+Status: complete for the currently-known shape-changing APIs in the semantic layer.
 
 ### Phase 4 — optional symbolic arithmetic later
 
@@ -345,11 +375,15 @@ The test plan should also be phased.
 - constant-index bounds diagnostics
 - fixed-array literals/initialization if added
 
+Current coverage includes exact fixed-array equality, mismatch rejection, and constant out-of-bounds diagnostics.
+
 ### Phase 2 tests
 
 - parsing `DArray[T, n]` and `DStr[n]`
 - type equality for dynamic shape witnesses
 - shape witness preservation across plain assignment
+
+Current coverage includes parsing and semantic checks for `DArray`, `DStr`, `DList`, `DArrayView`, `DListView`, and their runtime-bridge behavior.
 
 ### Phase 3 tests
 
@@ -357,6 +391,17 @@ The test plan should also be phased.
 - `push` returns a new shape witness
 - `concat` returns a fresh result witness
 - old-shape values rejected where new-shape values are expected
+
+Current coverage includes fresh-shape behavior for shape-changing APIs and regression tests around runtime-backed indexing, slicing, string helpers, pointer arithmetic, and reference comparisons.
+
+### Current end-to-end coverage
+
+Beyond semantic/backend unit regressions, the compiler now also has CLI-level fixture tests that compile real source files from `Code/test_programs/`:
+
+- `pointer_alloc.llcontext`
+- `shape_ops.llcontext`
+
+Those tests exercise the actual include expansion, parse, semantic, and emit pipeline for LLVM IR, and also cover bitcode/object emission for a fixture program.
 
 ### Example regression style
 
@@ -451,17 +496,23 @@ If I were choosing the concrete first implementation boundary, it would be:
 - no arithmetic shape expressions yet
 - no full generic dependent inference
 
+Status: this MVP boundary has effectively been reached and pushed beyond. The current compiler also includes runtime-backed indexing/slicing, view types, string helper lowering, pointer arithmetic, reference comparisons, and CLI-level fixture tests.
+
 ### First post-MVP
 
 - known builtins/API table for shape-changing operations
 - fresh witness generation on `resize` / `push` / `concat`
 - stronger diagnostics
 
+Status: the builtins/API knowledge and fresh witness generation are in place for the currently-supported surface. Better mismatch notes and explanation-oriented diagnostics are still worth improving.
+
 ### Later
 
 - arithmetic shape expressions
 - richer subrange/view story
 - optional proofs for index constraints
+
+This remains the right bucket for future work.
 
 ## Best practical recommendation
 

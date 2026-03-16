@@ -213,9 +213,7 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		if err != nil {
 			return err
 		}
-		callName := cString("")
-		defer C.free(unsafe.Pointer(callName))
-		C.LLVMBuildCall2(s.builder, trapType, trapFn, nil, 0, callName)
+		s.buildCall(trapType, trapFn, nil, "")
 		C.LLVMBuildUnreachable(s.builder)
 		return nil
 	case *ast.ExprStmt:

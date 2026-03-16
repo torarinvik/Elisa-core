@@ -21,6 +21,15 @@ import (
 	"llcontext/src/semantic"
 )
 
+func isVoidRefLikeType(t semantic.Type) bool {
+	ref, ok := t.(*semantic.RefType)
+	if !ok {
+		return false
+	}
+	builtin, ok := ref.Elem.(*semantic.BuiltinType)
+	return ok && builtin.Name == "void"
+}
+
 func (g *llvmGenerator) noteType(t semantic.Type) error {
 	if t == nil {
 		return nil
@@ -33,6 +42,10 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 	case *semantic.ArrayType:
 		return g.noteType(tt.Elem)
 	case *semantic.DArrayType:
+		if isVoidRefLikeType(tt.Elem) {
+			_, err := g.ensureRuntimeCtxList()
+			return err
+		}
 		_, err := g.ensureRuntimeDynArray(tt.Elem)
 		return err
 	case *semantic.DArrayViewType:
@@ -94,6 +107,12 @@ func (g *llvmGenerator) ensureGlobalDeclared(name string, t semantic.Type, exter
 }
 
 func (g *llvmGenerator) addFunction(name string, fn *semantic.FuncType) (C.LLVMValueRef, error) {
+	if intrinsicID, overloadedParamTypes, ok, err := g.lookupIntrinsic(name, fn); err != nil {
+		return nil, err
+	} else if ok {
+		return C.LLVMGetIntrinsicDeclaration(g.module, intrinsicID, llvmTypeSlicePtr(overloadedParamTypes), C.size_t(len(overloadedParamTypes))), nil
+	}
+
 	fnType, err := g.lowerFunctionType(fn)
 	if err != nil {
 		return nil, err
@@ -103,6 +122,24 @@ func (g *llvmGenerator) addFunction(name string, fn *semantic.FuncType) (C.LLVMV
 	value := C.LLVMAddFunction(g.module, nameC, fnType)
 	C.LLVMSetLinkage(value, C.LLVMExternalLinkage)
 	return value, nil
+}
+
+func (g *llvmGenerator) lookupIntrinsic(name string, fn *semantic.FuncType) (C.uint, []C.LLVMTypeRef, bool, error) {
+	nameC := cString(name)
+	defer C.free(unsafe.Pointer(nameC))
+	intrinsicID := C.LLVMLookupIntrinsicID(nameC, C.size_t(len(name)))
+	if intrinsicID == 0 {
+		return 0, nil, false, nil
+	}
+	paramTypes := make([]C.LLVMTypeRef, 0, len(fn.Params))
+	for _, param := range fn.Params {
+		paramType, err := g.lowerType(param)
+		if err != nil {
+			return 0, nil, false, err
+		}
+		paramTypes = append(paramTypes, paramType)
+	}
+	return intrinsicID, paramTypes, true, nil
 }
 
 func (g *llvmGenerator) addGlobal(name string, t semantic.Type, external bool) (C.LLVMValueRef, error) {
@@ -159,6 +196,12 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		}
 		return nil, fmt.Errorf("array type %s is missing a compile-time constant size", tt.String())
 	case *semantic.DArrayType:
+		if isVoidRefLikeType(tt.Elem) {
+			if _, err := g.ensureRuntimeCtxList(); err != nil {
+				return nil, err
+			}
+			return C.LLVMPointerTypeInContext(g.context, 0), nil
+		}
 		return g.ensureRuntimeDynArray(tt.Elem)
 	case *semantic.DArrayViewType:
 		return g.ensureRuntimeDynArrayView()
@@ -177,7 +220,7 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		}
 		return nil, fmt.Errorf("cannot lower generic struct %s without concrete type arguments", tt.Name)
 	case *semantic.OpaqueType:
-		return g.ensureNamedStructType(tt.Name)
+		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	case *semantic.GenericInstanceType:
 		return g.ensureGenericInstanceStruct(tt)
 	case *semantic.FuncType:

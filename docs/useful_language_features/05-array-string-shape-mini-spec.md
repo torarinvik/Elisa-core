@@ -13,6 +13,27 @@ In short:
 
 > Arrays and strings should carry **shape facts** in the type in the same way pointers carry **validity facts** in the type.
 
+## Current implementation snapshot (March 2026)
+
+The current compiler follows the recommended lightweight model rather than full arithmetic dependence.
+
+Implemented today:
+
+- exact fixed-array typing for `T[N]`
+- dynamic shape witnesses for `DArray[T, shape]`, `DStr[shape]`, and `DList[T, shape]`
+- non-owning view types `DArrayView[T]`, `DListView[T]`, and `CtxStringView`
+- indexing for fixed arrays, dynamic arrays/views, lists/views, strings, and string views
+- slice syntax producing view-like results:
+    - `T[N]` / `T[N]&` slices lower to `DArrayView[T]`
+    - `DArray[T, shape]` and `DArrayView[T]` slices produce `DArrayView[T]`
+    - `DList[T, shape]` and `DListView[T]` slices produce `DListView[T]`
+    - `DStr[shape]` and `CtxStringView` slices produce `CtxStringView`
+
+Still deferred:
+
+- symbolic arithmetic equality over shape expressions such as `a + b` or `j - i`
+- proof terms or solver-backed index constraints
+
 ## High-level design split
 
 There are three natural families:
@@ -310,6 +331,8 @@ This is useful for:
 
 with exactly the same logical-shape story as `DArray[u8, shape_id]`.
 
+In the current implementation, `DStr[shape_id]` is also paired with a non-owning runtime-backed `CtxStringView` for slicing and view-style APIs.
+
 ### Relationship to byte arrays
 
 You can define:
@@ -330,7 +353,9 @@ That keeps the model cleaner.
 
 ## Do you still need spans/views?
 
-Not immediately.
+In the original design discussion, the answer here was “not immediately.”
+
+That has since changed in the implementation: view types are now part of the practical surface because they are the simplest zero-copy result for slices and subranges.
 
 If owned arrays and strings already carry length, you can get very far without separate view types.
 
@@ -338,6 +363,12 @@ That said, I would frame it like this:
 
 - **first implementation:** no spans/views required
 - **long-term:** likely still useful for subranges and non-owning windows
+
+Current status:
+
+- `DArrayView[T]` exists for dynamic-array and fixed-array slice results
+- `DListView[T]` exists and is also exposed as the alias `view[T]`
+- `CtxStringView` exists for string slices and runtime-backed string views
 
 So I agree with your instinct as an implementation priority:
 
@@ -375,6 +406,8 @@ Do this first.
 
 This is high value and relatively cheap.
 
+Status: implemented, including exact fixed-array typing and constant compile-time out-of-bounds diagnostics.
+
 ### Stage 2 — library/runtime-owned dynamic arrays
 
 Add a runtime struct like:
@@ -389,6 +422,8 @@ repr(c) struct DArray[T]:
 Then expose compiler-level logical shape wrappers incrementally.
 
 At first, this can even be mostly API-discipline plus type wrappers.
+
+Status: implemented for `DArray`, `DStr`, `DList`, and the current runtime bridge.
 
 ### Stage 3 — logical post-operation shape change
 
@@ -406,6 +441,8 @@ produce a new logical shape identity.
 
 This gets you the safety effect you want without arithmetic normalization.
 
+Status: implemented for the current known shape-changing APIs.
+
 ### Stage 4 — optional arithmetic indexing
 
 Only if the language really wants it later, add exact arithmetic forms like:
@@ -416,6 +453,8 @@ concat : Str[A] × Str[B] -> Str[A+B]
 ```
 
 This is beautiful, but it should be a later stage, not the starting point.
+
+Status: still deferred, which is intentional.
 
 ## Recommended surface-language summary
 

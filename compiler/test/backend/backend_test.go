@@ -99,6 +99,55 @@ def countdown(start: i32) -> i32:
 	}
 }
 
+func TestGenerateLLVMIRLowersVoidReturnCalls(t *testing.T) {
+	src := `extern touch(value: i32)
+
+def call_touch(value: i32) -> i32:
+	touch(value)
+	return value
+`
+	result := parseAndAnalyze(t, "backend_void_call.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"declare void @touch(i32)",
+		"define i32 @call_touch(i32",
+		"call void @touch(i32",
+		"ret i32",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersPanicViaTrapCall(t *testing.T) {
+	src := `def fail() -> void:
+	panic("boom")
+`
+	result := parseAndAnalyze(t, "backend_panic_stmt.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"declare void @llvm.trap()",
+		"define void @fail()",
+		"call void @llvm.trap()",
+		"unreachable",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersReferenceComparisons(t *testing.T) {
 	src := `repr(c) struct Box:
     value: i32
