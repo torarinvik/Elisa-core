@@ -336,14 +336,16 @@ func (a *Analyzer) collectNamedTypes(decls []ast.Decl) {
 				continue
 			}
 			seenTags := map[string]bool{}
+			resolvedTags := make([]string, 0, len(n.Tags))
 			for _, tag := range n.Tags {
 				if seenTags[tag] {
 					a.errorf(n.Pos(), "duplicate error tag %q in error set %q", tag, n.Name)
 					continue
 				}
 				seenTags[tag] = true
+				resolvedTags = append(resolvedTags, QualifyErrorTag(n.Name, tag))
 			}
-			a.namedTypes[n.Name] = &ErrorSetType{Name: n.Name, Tags: append([]string(nil), n.Tags...)}
+			a.namedTypes[n.Name] = &ErrorSetType{Name: n.Name, Tags: resolvedTags}
 		case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			continue
 		}

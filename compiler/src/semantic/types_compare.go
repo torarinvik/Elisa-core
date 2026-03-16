@@ -25,7 +25,7 @@ func SameType(a, b Type) bool {
 		return ok && ta.Name == tb.Name
 	case *ErrorSetType:
 		tb, ok := b.(*ErrorSetType)
-		return ok && ta.Name == tb.Name
+		return ok && ErrorSetTagsEqual(ta, tb)
 	case *ErrorUnionType:
 		tb, ok := b.(*ErrorUnionType)
 		return ok && SameType(ta.Value, tb.Value) && SameType(ta.Errors, tb.Errors)

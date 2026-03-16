@@ -10,7 +10,6 @@ import "C"
 
 import (
 	"fmt"
-	"strings"
 	"unsafe"
 
 	"llcontext/src/ast"
@@ -315,9 +314,13 @@ func (s *functionState) remapErrorCode(value C.LLVMValueRef, actual *semantic.Er
 		if !ok {
 			continue
 		}
-		expectedCode, ok := expected.TagCode(tag)
+		mappedTag, ok := semantic.MatchErrorTag(expected, tag)
 		if !ok {
 			return nil, fmt.Errorf("cannot remap missing tag %s into %s", tag, expected.String())
+		}
+		expectedCode, ok := expected.TagCode(mappedTag)
+		if !ok {
+			return nil, fmt.Errorf("cannot remap missing tag %s into %s", mappedTag, expected.String())
 		}
 		actualConst, err := s.errorCodeConstant(actualCode)
 		if err != nil {
@@ -664,57 +667,54 @@ func (s *functionState) resolveErrorSetExpr(expr *ast.ErrorSetExpr) (semantic.Ty
 	if expr.HasEllipsis && containsWildcardErrorTag(expr.Tags) {
 		return nil, fmt.Errorf("error[Set.*, ...] is no longer supported; use error[Set, ...] or error[Set] instead")
 	}
-	if containsBareFamily(expr.Tags) {
-		if containsWildcardErrorTag(expr.Tags) {
-			return nil, fmt.Errorf("error[Set.*] is no longer supported; use error[Set] instead")
-		}
-		if len(expr.Tags) != 1 {
-			return nil, fmt.Errorf("error[Set] or error[Set, ...] cannot be mixed with explicit tags or multiple families")
-		}
-		tag := expr.Tags[0]
-		_, errSet, err := s.lookupDeclaredErrorSet(tag)
-		if err != nil {
-			return nil, err
-		}
-		return errSet, nil
-	}
 	if containsWildcardErrorTag(expr.Tags) {
 		return nil, fmt.Errorf("error[Set.*] is no longer supported; use error[Set] instead")
 	}
-	if expr.HasEllipsis {
-		first, errSet, err := s.lookupDeclaredErrorSet(expr.Tags[0])
+	if len(expr.Tags) == 1 && expr.Tags[0].Tag == "" {
+		_, errSet, err := s.lookupDeclaredErrorSet(expr.Tags[0])
 		if err != nil {
 			return nil, err
 		}
-		for _, tag := range expr.Tags {
-			if tag.SetName != first {
-				return nil, fmt.Errorf("error[..., ...] with ellipsis must reference a single declared error set")
-			}
-			if !errSet.HasTag(tag.Tag) {
-				return nil, fmt.Errorf("error set %q has no tag %q", tag.SetName, tag.Tag)
-			}
-		}
 		return errSet, nil
 	}
-	tags := make([]string, 0, len(expr.Tags))
-	nameParts := make([]string, 0, len(expr.Tags))
+	if expr.HasEllipsis {
+		return s.resolveExpandedErrorFamilies(expr)
+	}
+	familySets := map[string]*semantic.ErrorSetType{}
+	fullFamilies := map[string]bool{}
+	selectedTags := map[string]map[string]bool{}
 	seenTags := map[string]ast.ErrorTagExpr{}
 	for _, tag := range expr.Tags {
 		_, errSet, err := s.lookupDeclaredErrorSet(tag)
 		if err != nil {
 			return nil, err
 		}
-		if !errSet.HasTag(tag.Tag) {
+		familySets[tag.SetName] = errSet
+		if tag.Tag == "" {
+			fullFamilies[tag.SetName] = true
+			for _, qualifiedTag := range errSet.Tags {
+				if prev, ok := seenTags[qualifiedTag]; ok {
+					_, shortName := semantic.SplitErrorTagName(qualifiedTag)
+					return nil, fmt.Errorf("duplicate error tag %q in error set via %s.%s and %s", shortName, prev.SetName, prev.Tag, tag.SetName)
+				}
+				seenTags[qualifiedTag] = ast.ErrorTagExpr{Position: tag.Position, SetName: tag.SetName, Tag: semantic.ErrorTagShortName(qualifiedTag)}
+			}
+			continue
+		}
+		qualifiedTag := semantic.QualifyErrorTag(tag.SetName, tag.Tag)
+		if !errSet.HasTag(qualifiedTag) {
 			return nil, fmt.Errorf("error set %q has no tag %q", tag.SetName, tag.Tag)
 		}
-		if prev, ok := seenTags[tag.Tag]; ok {
-			return nil, fmt.Errorf("inline error set tag %q is ambiguous between %s.%s and %s.%s", tag.Tag, prev.SetName, prev.Tag, tag.SetName, tag.Tag)
+		if prev, ok := seenTags[qualifiedTag]; ok {
+			return nil, fmt.Errorf("duplicate error tag %q in error set via %s.%s and %s.%s", tag.Tag, prev.SetName, prev.Tag, tag.SetName, tag.Tag)
 		}
-		seenTags[tag.Tag] = tag
-		tags = append(tags, tag.Tag)
-		nameParts = append(nameParts, tag.SetName+"."+tag.Tag)
+		seenTags[qualifiedTag] = tag
+		if selectedTags[tag.SetName] == nil {
+			selectedTags[tag.SetName] = map[string]bool{}
+		}
+		selectedTags[tag.SetName][qualifiedTag] = true
 	}
-	return &semantic.ErrorSetType{Name: "error[" + strings.Join(nameParts, ", ") + "]", Tags: tags}, nil
+	return semantic.CanonicalizeErrorSetSelections(familySets, fullFamilies, selectedTags), nil
 }
 
 func (s *functionState) lookupDeclaredErrorSet(tag ast.ErrorTagExpr) (string, *semantic.ErrorSetType, error) {
@@ -745,6 +745,49 @@ func containsBareFamily(tags []ast.ErrorTagExpr) bool {
 		}
 	}
 	return false
+}
+
+func (s *functionState) resolveExpandedErrorFamilies(expr *ast.ErrorSetExpr) (semantic.Type, error) {
+	familySets := map[string]*semantic.ErrorSetType{}
+	fullFamilies := map[string]bool{}
+	for _, tag := range expr.Tags {
+		_, errSet, err := s.lookupDeclaredErrorSet(tag)
+		if err != nil {
+			return nil, err
+		}
+		if tag.Tag != "" && !errSet.HasQualifiedTag(tag.SetName, tag.Tag) {
+			return nil, fmt.Errorf("error set %q has no tag %q", tag.SetName, tag.Tag)
+		}
+		familySets[tag.SetName] = errSet
+		fullFamilies[tag.SetName] = true
+	}
+	return semantic.CanonicalizeErrorSetSelections(familySets, fullFamilies, nil), nil
+}
+
+func onlyBareFamilies(tags []ast.ErrorTagExpr) bool {
+	for _, tag := range tags {
+		if tag.Tag != "" {
+			return false
+		}
+	}
+	return len(tags) > 0
+}
+
+func singleExplicitErrorFamily(tags []ast.ErrorTagExpr) (string, bool) {
+	family := ""
+	for _, tag := range tags {
+		if tag.Tag == "" {
+			return "", false
+		}
+		if family == "" {
+			family = tag.SetName
+			continue
+		}
+		if tag.SetName != family {
+			return "", false
+		}
+	}
+	return family, family != ""
 }
 
 func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr) (semantic.Type, error) {

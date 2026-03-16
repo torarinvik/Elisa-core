@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"llcontext/src/ast"
@@ -193,6 +194,130 @@ func (t *ErrorUnionType) String() string {
 	}
 	return fmt.Sprintf("%s | %s", t.Value.String(), t.Errors.String())
 }
+
+func QualifyErrorTag(setName string, tagName string) string {
+	if setName == "" {
+		return tagName
+	}
+	if tagName == "" {
+		return setName
+	}
+	return setName + "." + tagName
+}
+
+func SplitErrorTagName(name string) (string, string) {
+	parts := strings.SplitN(name, ".", 2)
+	if len(parts) != 2 {
+		return "", name
+	}
+	return parts[0], parts[1]
+}
+
+func ErrorTagShortName(name string) string {
+	_, tag := SplitErrorTagName(name)
+	return tag
+}
+
+func ErrorTagDiagnosticName(tag string) string {
+	if tag == "" {
+		return "<invalid-error-tag>"
+	}
+	return tag
+}
+
+func ErrorSetDiagnosticName(errSet *ErrorSetType) string {
+	if errSet == nil {
+		return "<invalid-error-set>"
+	}
+	return errSet.String()
+}
+
+func ErrorTypeDiagnosticName(t Type) string {
+	if t == nil {
+		return "<invalid>"
+	}
+	switch tt := t.(type) {
+	case *ErrorSetType:
+		return ErrorSetDiagnosticName(tt)
+	default:
+		return t.String()
+	}
+}
+
+func ErrorSetTagsEqual(a *ErrorSetType, b *ErrorSetType) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if len(a.Tags) != len(b.Tags) {
+		return false
+	}
+	for i := range a.Tags {
+		if a.Tags[i] != b.Tags[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func CanonicalizeErrorSetSelections(familySets map[string]*ErrorSetType, fullFamilies map[string]bool, selectedTags map[string]map[string]bool) *ErrorSetType {
+	if len(familySets) == 0 {
+		return &ErrorSetType{Name: "error[]"}
+	}
+	familyNames := make([]string, 0, len(familySets))
+	for familyName := range familySets {
+		familyNames = append(familyNames, familyName)
+	}
+	sort.Strings(familyNames)
+
+	if len(familyNames) == 1 {
+		familyName := familyNames[0]
+		errSet := familySets[familyName]
+		if fullFamilies[familyName] || errorSetSelectionIsFull(errSet, selectedTags[familyName]) {
+			return errSet
+		}
+	}
+
+	nameParts := make([]string, 0)
+	canonicalTags := make([]string, 0)
+	for _, familyName := range familyNames {
+		errSet := familySets[familyName]
+		if errSet == nil {
+			continue
+		}
+		selected := selectedTags[familyName]
+		if fullFamilies[familyName] || errorSetSelectionIsFull(errSet, selected) {
+			nameParts = append(nameParts, familyName)
+			canonicalTags = append(canonicalTags, errSet.Tags...)
+			continue
+		}
+		for _, qualifiedTag := range errSet.Tags {
+			if selected == nil || !selected[qualifiedTag] {
+				continue
+			}
+			nameParts = append(nameParts, qualifiedTag)
+			canonicalTags = append(canonicalTags, qualifiedTag)
+		}
+	}
+	return &ErrorSetType{Name: "error[" + strings.Join(nameParts, ", ") + "]", Tags: canonicalTags}
+}
+
+func errorSetSelectionIsFull(errSet *ErrorSetType, selected map[string]bool) bool {
+	if errSet == nil {
+		return false
+	}
+	if len(errSet.Tags) == 0 {
+		return true
+	}
+	if len(selected) < len(errSet.Tags) {
+		return false
+	}
+	for _, tag := range errSet.Tags {
+		if !selected[tag] {
+			return false
+		}
+	}
+	return true
+}
 func (s *ShapeParam) String() string { return s.Name }
 func (s *NamedShape) String() string { return s.Name }
 func (s *FreshShape) String() string {
@@ -325,6 +450,10 @@ func (t *ErrorSetType) HasTag(name string) bool {
 	return false
 }
 
+func (t *ErrorSetType) HasQualifiedTag(setName string, tagName string) bool {
+	return t.HasTag(QualifyErrorTag(setName, tagName))
+}
+
 func (t *ErrorSetType) TagCode(name string) (uint32, bool) {
 	if t == nil {
 		return 0, false
@@ -337,12 +466,40 @@ func (t *ErrorSetType) TagCode(name string) (uint32, bool) {
 	return 0, false
 }
 
+func (t *ErrorSetType) TagCodeFor(setName string, tagName string) (uint32, bool) {
+	return t.TagCode(QualifyErrorTag(setName, tagName))
+}
+
+func MatchErrorTag(dst *ErrorSetType, srcTag string) (string, bool) {
+	if dst == nil {
+		return "", false
+	}
+	if dst.HasTag(srcTag) {
+		return srcTag, true
+	}
+	shortName := ErrorTagShortName(srcTag)
+	match := ""
+	for _, candidate := range dst.Tags {
+		if ErrorTagShortName(candidate) != shortName {
+			continue
+		}
+		if match != "" {
+			return "", false
+		}
+		match = candidate
+	}
+	if match == "" {
+		return "", false
+	}
+	return match, true
+}
+
 func ErrorSetAssignable(dst, src *ErrorSetType) bool {
 	if dst == nil || src == nil {
 		return dst == src
 	}
 	for _, tag := range src.Tags {
-		if !dst.HasTag(tag) {
+		if _, ok := MatchErrorTag(dst, tag); !ok {
 			return false
 		}
 	}

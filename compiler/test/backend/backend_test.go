@@ -855,14 +855,123 @@ def fail_now() -> int error[BroadError.NotFound, ...]:
 		"declare i32 @read_value(ptr)",
 		"define i32 @bubble(ptr ",
 		"define i32 @fail_now(ptr ",
-		"errmap_is_NotFound",
-		"errmap_is_PermissionDenied",
+		"errmap_is_SourceError_NotFound",
+		"errmap_is_SourceError_PermissionDenied",
 		"ret i32 3",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
+	}
+}
+
+func TestGenerateLLVMIRComposesMultipleErrorFamilies(t *testing.T) {
+	src := `error FileError:
+	NotFound
+	PermissionDenied
+
+error NetworkError:
+	Timeout
+	NotFound
+
+extern read_disk() -> int error[FileError]
+extern read_network() -> int error[NetworkError.Timeout]
+
+def bubble_disk() -> int error[FileError, NetworkError]:
+	return try read_disk()
+
+def bubble_network() -> int error[FileError, NetworkError]:
+	return try read_network()
+`
+	result := parseAndAnalyze(t, "backend_error_multi_family.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%ErrUnion__FileError__int = type { i32, i64 }",
+		"declare i32 @read_disk(ptr)",
+		"declare i32 @read_network(ptr)",
+		"define i32 @bubble_disk(ptr ",
+		"define i32 @bubble_network(ptr ",
+		"errmap_is_FileError_NotFound",
+		"errmap_is_FileError_PermissionDenied",
+		"errmap_is_NetworkError_Timeout",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRExpandsMixedRowStyleFamilies(t *testing.T) {
+	src := `error FileError:
+	NotFound
+	PermissionDenied
+
+error NetworkError:
+	Timeout
+	Disconnected
+
+extern read_disk() -> int error[FileError]
+extern read_network() -> int error[NetworkError.Timeout]
+
+def bubble_disk() -> int error[FileError.NotFound, NetworkError.Timeout, ...]:
+	return try read_disk()
+
+def bubble_network() -> int error[FileError.NotFound, NetworkError.Timeout, ...]:
+	return try read_network()
+
+def fail_disk() -> int error[FileError.NotFound, NetworkError.Timeout, ...]:
+	raise FileError.PermissionDenied
+`
+	result := parseAndAnalyze(t, "backend_error_mixed_row_style.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"define i32 @bubble_disk(ptr ",
+		"define i32 @bubble_network(ptr ",
+		"define i32 @fail_disk(ptr ",
+		"errmap_is_FileError_NotFound",
+		"errmap_is_FileError_PermissionDenied",
+		"errmap_is_NetworkError_Timeout",
+		"ret i32 2",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRCanonicalizesErrorUnionNames(t *testing.T) {
+	src := `error FileError:
+	NotFound
+	PermissionDenied
+
+error NetworkError:
+	Timeout
+	Disconnected
+
+extern read_value() -> int error[NetworkError, FileError]
+
+def by_reverse_family_order() -> int error[NetworkError, FileError]:
+	return try read_value()
+`
+	result := parseAndAnalyze(t, "backend_error_canonicalization.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	if !strings.Contains(output, "%ErrUnion__error_FileError__NetworkError__int = type { i32, i64 }") {
+		t.Fatalf("expected canonical error union struct name, got:\n%s", output)
 	}
 }
 

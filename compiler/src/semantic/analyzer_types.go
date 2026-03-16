@@ -121,26 +121,6 @@ func (a *Analyzer) resolveErrorSetExpr(expr *ast.ErrorSetExpr) Type {
 		a.errorf(expr.Pos(), "error[Set.*, ...] is no longer supported; use error[Set, ...] or error[Set] instead")
 		return invalidType
 	}
-	if containsBareFamily(expr.Tags) {
-		if containsWildcardErrorTag(expr.Tags) {
-			a.errorf(expr.Pos(), "error[Set.*] is no longer supported; use error[Set] instead")
-			return invalidType
-		}
-		if len(expr.Tags) != 1 {
-			a.errorf(expr.Pos(), "error[Set] or error[Set, ...] cannot be mixed with explicit tags or multiple families")
-			return invalidType
-		}
-		tag := expr.Tags[0]
-		_, errSet := a.lookupDeclaredErrorSet(tag)
-		if errSet == nil {
-			return invalidType
-		}
-		if tag.Tag != "" {
-			a.errorf(tag.Position, "internal error: family shorthand expected empty tag")
-			return invalidType
-		}
-		return errSet
-	}
 	if containsWildcardErrorTag(expr.Tags) {
 		if len(expr.Tags) != 1 {
 			a.errorf(expr.Pos(), "error[Set.*] cannot be mixed with explicit tags")
@@ -149,45 +129,55 @@ func (a *Analyzer) resolveErrorSetExpr(expr *ast.ErrorSetExpr) Type {
 		a.errorf(expr.Pos(), "error[Set.*] is no longer supported; use error[Set] instead")
 		return invalidType
 	}
-	if expr.HasEllipsis {
-		firstSet, errSet := a.lookupDeclaredErrorSet(expr.Tags[0])
+	if len(expr.Tags) == 1 && expr.Tags[0].Tag == "" {
+		_, errSet := a.lookupDeclaredErrorSet(expr.Tags[0])
 		if errSet == nil {
 			return invalidType
 		}
-		for _, tag := range expr.Tags {
-			if tag.SetName != firstSet {
-				a.errorf(tag.Position, "error[..., ...] with ellipsis must reference a single declared error set")
-				return invalidType
-			}
-			if !errSet.HasTag(tag.Tag) {
-				a.errorf(tag.Position, "error set %q has no tag %q", tag.SetName, tag.Tag)
-				return invalidType
-			}
-		}
 		return errSet
 	}
+	if expr.HasEllipsis {
+		return a.resolveExpandedErrorFamilies(expr)
+	}
 
-	tags := make([]string, 0, len(expr.Tags))
-	nameParts := make([]string, 0, len(expr.Tags))
+	familySets := map[string]*ErrorSetType{}
+	fullFamilies := map[string]bool{}
+	selectedTags := map[string]map[string]bool{}
 	seenTags := map[string]ast.ErrorTagExpr{}
 	for _, tag := range expr.Tags {
 		_, errSet := a.lookupDeclaredErrorSet(tag)
 		if errSet == nil {
 			return invalidType
 		}
-		if !errSet.HasTag(tag.Tag) {
+		familySets[tag.SetName] = errSet
+		if tag.Tag == "" {
+			fullFamilies[tag.SetName] = true
+			for _, qualifiedTag := range errSet.Tags {
+				if prev, ok := seenTags[qualifiedTag]; ok {
+					_, shortName := SplitErrorTagName(qualifiedTag)
+					a.errorf(tag.Position, "duplicate error tag %q in error set via %s.%s and %s", shortName, prev.SetName, prev.Tag, tag.SetName)
+					return invalidType
+				}
+				seenTags[qualifiedTag] = ast.ErrorTagExpr{Position: tag.Position, SetName: tag.SetName, Tag: ErrorTagShortName(qualifiedTag)}
+			}
+			continue
+		}
+		qualifiedTag := QualifyErrorTag(tag.SetName, tag.Tag)
+		if !errSet.HasTag(qualifiedTag) {
 			a.errorf(tag.Position, "error set %q has no tag %q", tag.SetName, tag.Tag)
 			return invalidType
 		}
-		if prev, ok := seenTags[tag.Tag]; ok {
-			a.errorf(tag.Position, "inline error set tag %q is ambiguous between %s.%s and %s.%s", tag.Tag, prev.SetName, prev.Tag, tag.SetName, tag.Tag)
+		if prev, ok := seenTags[qualifiedTag]; ok {
+			a.errorf(tag.Position, "duplicate error tag %q in error set via %s.%s and %s.%s", tag.Tag, prev.SetName, prev.Tag, tag.SetName, tag.Tag)
 			return invalidType
 		}
-		seenTags[tag.Tag] = tag
-		tags = append(tags, tag.Tag)
-		nameParts = append(nameParts, tag.SetName+"."+tag.Tag)
+		seenTags[qualifiedTag] = tag
+		if selectedTags[tag.SetName] == nil {
+			selectedTags[tag.SetName] = map[string]bool{}
+		}
+		selectedTags[tag.SetName][qualifiedTag] = true
 	}
-	return &ErrorSetType{Name: "error[" + strings.Join(nameParts, ", ") + "]", Tags: tags}
+	return CanonicalizeErrorSetSelections(familySets, fullFamilies, selectedTags)
 }
 
 func (a *Analyzer) lookupDeclaredErrorSet(tag ast.ErrorTagExpr) (string, *ErrorSetType) {
@@ -220,6 +210,50 @@ func containsBareFamily(tags []ast.ErrorTagExpr) bool {
 		}
 	}
 	return false
+}
+
+func (a *Analyzer) resolveExpandedErrorFamilies(expr *ast.ErrorSetExpr) Type {
+	familySets := map[string]*ErrorSetType{}
+	fullFamilies := map[string]bool{}
+	for _, tag := range expr.Tags {
+		_, errSet := a.lookupDeclaredErrorSet(tag)
+		if errSet == nil {
+			return invalidType
+		}
+		if tag.Tag != "" && !errSet.HasQualifiedTag(tag.SetName, tag.Tag) {
+			a.errorf(tag.Position, "error set %q has no tag %q", tag.SetName, tag.Tag)
+			return invalidType
+		}
+		familySets[tag.SetName] = errSet
+		fullFamilies[tag.SetName] = true
+	}
+	return CanonicalizeErrorSetSelections(familySets, fullFamilies, nil)
+}
+
+func onlyBareFamilies(tags []ast.ErrorTagExpr) bool {
+	for _, tag := range tags {
+		if tag.Tag != "" {
+			return false
+		}
+	}
+	return len(tags) > 0
+}
+
+func singleExplicitErrorFamily(tags []ast.ErrorTagExpr) (string, bool) {
+	family := ""
+	for _, tag := range tags {
+		if tag.Tag == "" {
+			return "", false
+		}
+		if family == "" {
+			family = tag.SetName
+			continue
+		}
+		if tag.SetName != family {
+			return "", false
+		}
+	}
+	return family, family != ""
 }
 
 func (a *Analyzer) resolveDynamicShapeType(expr *ast.GenericType) (Type, bool) {

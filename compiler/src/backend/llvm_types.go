@@ -420,7 +420,7 @@ func (g *llvmGenerator) ensureErrorUnionType(unionType *semantic.ErrorUnionType)
 	if unionType == nil || unionType.Errors == nil {
 		return nil, fmt.Errorf("missing error union metadata")
 	}
-	name := sanitizeIdentifier("ErrUnion__" + unionType.Errors.Name + "__" + unionType.Value.String())
+	name := "ErrUnion__" + sanitizeIdentifier(unionType.Errors.String()) + "__" + sanitizeIdentifier(unionType.Value.String())
 	ty, err := g.ensureNamedStructType(name)
 	if err != nil {
 		return nil, err

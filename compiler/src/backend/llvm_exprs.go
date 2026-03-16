@@ -152,17 +152,21 @@ func (s *functionState) errorTagInfo(expr *ast.FieldExpr) (*semantic.ErrorSetTyp
 		return nil, "", false
 	}
 	errSet, ok := base.(*semantic.ErrorSetType)
-	if !ok || !errSet.HasTag(expr.Field) {
+	if !ok || !errSet.HasQualifiedTag(ident.Name, expr.Field) {
 		return nil, "", false
 	}
-	return errSet, expr.Field, true
+	return errSet, semantic.QualifyErrorTag(ident.Name, expr.Field), true
 }
 
 func (s *functionState) emitErrorTagExpr(expr *ast.FieldExpr, errorType *semantic.ErrorSetType) (C.LLVMValueRef, semantic.Type, error) {
 	if errorType == nil {
 		return nil, nil, fmt.Errorf("missing error set for tag expression")
 	}
-	code, ok := errorType.TagCode(expr.Field)
+	ident, ok := expr.Object.(*ast.Ident)
+	if !ok {
+		return nil, nil, fmt.Errorf("missing error set qualifier for tag expression")
+	}
+	code, ok := errorType.TagCodeFor(ident.Name, expr.Field)
 	if !ok {
 		return nil, nil, fmt.Errorf("unknown error tag %s.%s", errorType.Name, expr.Field)
 	}
@@ -184,13 +188,18 @@ func (s *functionState) emitRaiseExpr(expr *ast.RaiseExpr) (C.LLVMValueRef, sema
 		err        error
 	)
 	if fieldExpr, ok := expr.Error.(*ast.FieldExpr); ok {
-		if _, tagName, ok := s.errorTagInfo(fieldExpr); ok && currentUnion.Errors.HasTag(tagName) {
-			code, ok := currentUnion.Errors.TagCode(tagName)
-			if !ok {
-				return nil, nil, fmt.Errorf("missing destination error tag %s.%s", currentUnion.Errors.Name, tagName)
+		if _, qualifiedTag, ok := s.errorTagInfo(fieldExpr); ok {
+			mappedTag, matched := semantic.MatchErrorTag(currentUnion.Errors, qualifiedTag)
+			if matched {
+				code, ok := currentUnion.Errors.TagCode(mappedTag)
+				if !ok {
+					return nil, nil, fmt.Errorf("missing destination error tag %s", mappedTag)
+				}
+				errorValue, err = s.errorCodeConstant(code)
+				errorType = currentUnion.Errors
+			} else {
+				errorValue, errorType, err = s.emitExpr(expr.Error, currentUnion.Errors)
 			}
-			errorValue, err = s.errorCodeConstant(code)
-			errorType = currentUnion.Errors
 		} else {
 			errorValue, errorType, err = s.emitExpr(expr.Error, currentUnion.Errors)
 		}

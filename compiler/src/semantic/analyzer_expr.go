@@ -92,15 +92,15 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			result = neverType
 			return
 		}
-		if tagName, ok := a.errorExprTagName(n.Error); ok {
-			if !currentUnion.Errors.HasTag(tagName) {
-				a.errorf(n.Pos(), "raise cannot propagate tag %q into %s", tagName, currentUnion.Errors.String())
+		if qualifiedTag, ok := a.errorExprTagName(n.Error); ok {
+			if _, ok := MatchErrorTag(currentUnion.Errors, qualifiedTag); !ok {
+				a.errorf(n.Pos(), "raise cannot propagate tag %q into %s", ErrorTagDiagnosticName(qualifiedTag), ErrorSetDiagnosticName(currentUnion.Errors))
 			}
 			result = neverType
 			return
 		}
 		if errSet, ok := errorType.(*ErrorSetType); !ok || !ErrorSetAssignable(currentUnion.Errors, errSet) {
-			a.errorf(n.Pos(), "raise expects %s, got %s", currentUnion.Errors.String(), errorType.String())
+			a.errorf(n.Pos(), "raise expects %s, got %s", ErrorSetDiagnosticName(currentUnion.Errors), ErrorTypeDiagnosticName(errorType))
 		}
 		result = neverType
 		return
@@ -117,7 +117,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			if !ok {
 				a.errorf(n.Pos(), "try without else requires the current function to return an error union")
 			} else if !ErrorSetAssignable(currentUnion.Errors, unionType.Errors) {
-				a.errorf(n.Pos(), "cannot propagate %s from a function returning %s", unionType.Errors.String(), currentUnion.Errors.String())
+				a.errorf(n.Pos(), "cannot propagate %s from a function returning %s", ErrorSetDiagnosticName(unionType.Errors), ErrorSetDiagnosticName(currentUnion.Errors))
 			}
 			result = unionType.Value
 			return
@@ -219,10 +219,10 @@ func (a *Analyzer) errorExprTagName(expr ast.Expr) (string, bool) {
 		return "", false
 	}
 	errSet, ok := base.(*ErrorSetType)
-	if !ok || !errSet.HasTag(fieldExpr.Field) {
+	if !ok || !errSet.HasQualifiedTag(ident.Name, fieldExpr.Field) {
 		return "", false
 	}
-	return fieldExpr.Field, true
+	return QualifyErrorTag(ident.Name, fieldExpr.Field), true
 }
 
 func (a *Analyzer) errorTagType(expr *ast.FieldExpr) (Type, bool) {
@@ -238,8 +238,8 @@ func (a *Analyzer) errorTagType(expr *ast.FieldExpr) (Type, bool) {
 	if !ok {
 		return nil, false
 	}
-	if !errSet.HasTag(expr.Field) {
-		a.errorf(expr.Pos(), "error set %q has no tag %q", errSet.Name, expr.Field)
+	if !errSet.HasQualifiedTag(ident.Name, expr.Field) {
+		a.errorf(expr.Pos(), "error set %q has no tag %q", ErrorSetDiagnosticName(errSet), expr.Field)
 		return invalidType, true
 	}
 	return errSet, true

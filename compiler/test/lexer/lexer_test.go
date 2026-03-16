@@ -203,6 +203,20 @@ func TestErrorHandlingWildcardSyntax(t *testing.T) {
 	assertKinds(t, tokens, expect)
 }
 
+func TestErrorHandlingMultiFamilySyntax(t *testing.T) {
+	tokens := collectTokens("def foo() -> int error[IoError, NetworkError]:\n    pass\n")
+	expect := []lexer.TokenKind{
+		lexer.TOKEN_DEF, lexer.TOKEN_IDENT, lexer.TOKEN_LPAREN, lexer.TOKEN_RPAREN,
+		lexer.TOKEN_ARROW, lexer.TOKEN_IDENT, lexer.TOKEN_ERROR, lexer.TOKEN_LBRACKET,
+		lexer.TOKEN_IDENT, lexer.TOKEN_COMMA, lexer.TOKEN_IDENT, lexer.TOKEN_RBRACKET,
+		lexer.TOKEN_COLON, lexer.TOKEN_NEWLINE, lexer.TOKEN_INDENT,
+		lexer.TOKEN_PASS, lexer.TOKEN_NEWLINE,
+		lexer.TOKEN_DEDENT,
+		lexer.TOKEN_EOF,
+	}
+	assertKinds(t, tokens, expect)
+}
+
 func TestShiftOps(t *testing.T) {
 	tokens := collectTokens("x << 3 >> 2\n")
 	expect := []lexer.TokenKind{

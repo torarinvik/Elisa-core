@@ -615,6 +615,138 @@ def bubble() -> int error[FileError, ...]:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsMultiFamilyErrorComposition(t *testing.T) {
+	src := `error FileError:
+	NotFound
+	PermissionDenied
+
+error NetworkError:
+	Timeout
+	NotFound
+
+extern read_disk() -> int error[FileError]
+extern read_network() -> int error[NetworkError.Timeout]
+
+def load_any(use_disk: bool) -> int error[FileError, NetworkError]:
+	if use_disk:
+		return try read_disk()
+	return try read_network()
+`
+	_, errs := parseAndAnalyze(t, "error_multi_family_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsMixedRowStyleFamilyExpansion(t *testing.T) {
+	src := `error FileError:
+	NotFound
+	PermissionDenied
+
+error NetworkError:
+	Timeout
+	Disconnected
+
+extern read_disk() -> int error[FileError]
+extern read_network() -> int error[NetworkError.Timeout]
+
+def load_any(use_disk: bool) -> int error[FileError.NotFound, NetworkError.Timeout, ...]:
+	if use_disk:
+		return try read_disk()
+	return try read_network()
+
+def fail_disk() -> int error[FileError.NotFound, NetworkError.Timeout, ...]:
+	raise FileError.PermissionDenied
+`
+	_, errs := parseAndAnalyze(t, "error_mixed_row_expansion_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeCanonicalizesEquivalentErrorSetSpellings(t *testing.T) {
+	src := `error FileError:
+	NotFound
+	PermissionDenied
+
+error NetworkError:
+	Timeout
+	Disconnected
+
+def by_full_subset() -> int error[FileError.NotFound, FileError.PermissionDenied]:
+	return 1
+
+def by_reverse_family_order() -> int error[NetworkError, FileError]:
+	return 2
+`
+	result, errs := parseAndAnalyze(t, "error_canonicalization.llcontext", src)
+	requireNoErrors(t, errs)
+
+	fullSubset, ok := result.GlobalScope.Lookup("by_full_subset")
+	if !ok {
+		t.Fatal("expected by_full_subset symbol")
+	}
+	fullSubsetFn, ok := fullSubset.Type.(*semantic.FuncType)
+	if !ok {
+		t.Fatalf("expected function type, got %T", fullSubset.Type)
+	}
+	if fullSubsetFn.Return.String() != "int | FileError" {
+		t.Fatalf("expected canonical single-family return type, got %s", fullSubsetFn.Return.String())
+	}
+
+	reversed, ok := result.GlobalScope.Lookup("by_reverse_family_order")
+	if !ok {
+		t.Fatal("expected by_reverse_family_order symbol")
+	}
+	reversedFn, ok := reversed.Type.(*semantic.FuncType)
+	if !ok {
+		t.Fatalf("expected function type, got %T", reversed.Type)
+	}
+	if reversedFn.Return.String() != "int | error[FileError, NetworkError]" {
+		t.Fatalf("expected canonical multi-family return type, got %s", reversedFn.Return.String())
+	}
+}
+
+func TestAnalyzeRejectsAmbiguousCrossFamilyRaiseIntoMultiFamilySet(t *testing.T) {
+	src := `error LegacyError:
+	NotFound
+
+error FileError:
+	NotFound
+
+error NetworkError:
+	NotFound
+
+def fail() -> int error[FileError, NetworkError]:
+	raise LegacyError.NotFound
+`
+	_, errs := parseAndAnalyze(t, "error_multi_family_ambiguous_raise.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "raise cannot propagate tag \"LegacyError.NotFound\" into error[FileError, NetworkError]") {
+		t.Fatalf("expected ambiguous multi-family raise diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeCanonicalizesRaiseDestinationInDiagnostics(t *testing.T) {
+	src := `error LegacyError:
+	Busy
+
+error FileError:
+	NotFound
+
+error NetworkError:
+	Disconnected
+
+def fail() -> int error[NetworkError, FileError]:
+	raise LegacyError.Busy
+`
+	_, errs := parseAndAnalyze(t, "error_canonical_raise_diag.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "raise cannot propagate tag \"LegacyError.Busy\" into error[FileError, NetworkError]") {
+		t.Fatalf("expected canonical raise destination diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeRejectsLegacyWildcardErrorSetShorthand(t *testing.T) {
 	src := `error FileError:
 	NotFound
@@ -650,6 +782,31 @@ def bubble() -> int error[AppError.NotFound, ...]:
 	}
 	if !strings.Contains(strings.Join(errs, "\n"), "cannot propagate FileError from a function returning AppError") {
 		t.Fatalf("expected propagation diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeCanonicalizesTryDestinationInDiagnostics(t *testing.T) {
+	src := `error FileError:
+	NotFound
+	PermissionDenied
+
+error NetworkError:
+	Timeout
+
+error AppError:
+	Busy
+
+extern read_value() -> int error[AppError]
+
+def bubble() -> int error[NetworkError, FileError]:
+	return try read_value()
+`
+	_, errs := parseAndAnalyze(t, "error_canonical_try_diag.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot propagate AppError from a function returning error[FileError, NetworkError]") {
+		t.Fatalf("expected canonical try destination diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
 
