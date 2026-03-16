@@ -6,8 +6,10 @@ package backend
 #include <stdlib.h>
 #include <llvm-c/BitWriter.h>
 #include <llvm-c/Core.h>
+#include <llvm-c/Error.h>
 #include <llvm-c/Target.h>
 #include <llvm-c/TargetMachine.h>
+#include <llvm-c/Transforms/PassBuilder.h>
 
 static LLVMBool llcontextInitializeNativeTarget(void) {
 	return LLVMInitializeNativeTarget();
@@ -15,6 +17,47 @@ static LLVMBool llcontextInitializeNativeTarget(void) {
 
 static LLVMBool llcontextInitializeNativeAsmPrinter(void) {
 	return LLVMInitializeNativeAsmPrinter();
+}
+
+static LLVMTargetMachineRef llcontextCreateTargetMachineAggressive(
+	LLVMTargetRef Target,
+	char *Triple,
+	char *CPU,
+	char *Features) {
+	return LLVMCreateTargetMachine(
+		Target,
+		Triple,
+		CPU,
+		Features,
+		LLVMCodeGenLevelAggressive,
+		LLVMRelocDefault,
+		LLVMCodeModelDefault);
+}
+
+static char *llcontextOptimizeModuleForCodegen(
+	LLVMModuleRef Module,
+	LLVMTargetMachineRef TargetMachine) {
+	LLVMPassBuilderOptionsRef Options = LLVMCreatePassBuilderOptions();
+	if (Options == NULL) {
+		return LLVMGetErrorMessage(LLVMCreateStringError("failed to create LLVM pass builder options"));
+	}
+	LLVMPassBuilderOptionsSetVerifyEach(Options, 1);
+	LLVMPassBuilderOptionsSetLoopInterleaving(Options, 1);
+	LLVMPassBuilderOptionsSetLoopVectorization(Options, 1);
+	LLVMPassBuilderOptionsSetSLPVectorization(Options, 1);
+	LLVMPassBuilderOptionsSetLoopUnrolling(Options, 1);
+	LLVMErrorRef Err = LLVMRunPasses(Module, "default<O3>", TargetMachine, Options);
+	LLVMDisposePassBuilderOptions(Options);
+	if (Err == NULL) {
+		return NULL;
+	}
+	return LLVMGetErrorMessage(Err);
+}
+
+static void llcontextDisposeLLVMErrorMessage(char *ErrMsg) {
+	if (ErrMsg != NULL) {
+		LLVMDisposeErrorMessage(ErrMsg);
+	}
 }
 */
 import "C"
@@ -64,6 +107,9 @@ func (g *llvmGenerator) writeObjectFile(outputPath string) error {
 	if err := g.ensureTargetMachine(); err != nil {
 		return err
 	}
+	if err := g.optimizeForCodegen(); err != nil {
+		return err
+	}
 
 	pathC := cString(outputPath)
 	defer C.free(unsafe.Pointer(pathC))
@@ -72,6 +118,28 @@ func (g *llvmGenerator) writeObjectFile(outputPath string) error {
 	if C.LLVMTargetMachineEmitToFile(g.targetMachine, g.module, pathC, C.LLVMObjectFile, &message) != 0 {
 		return fmt.Errorf("failed to write LLVM object file to %s: %s", outputPath, disposeLLVMMessage(message, "unknown LLVM target emission error"))
 	}
+	return nil
+}
+
+func (g *llvmGenerator) optimizeForCodegen() error {
+	if g.optimizedForCodegen {
+		return nil
+	}
+	if g.module == nil {
+		return fmt.Errorf("cannot optimize a nil LLVM module")
+	}
+	if err := g.ensureTargetMachine(); err != nil {
+		return err
+	}
+
+	errMessage := C.llcontextOptimizeModuleForCodegen(g.module, g.targetMachine)
+	if errMessage != nil {
+		return fmt.Errorf("failed to optimize LLVM module for code generation: %s", disposeLLVMErrorMessage(errMessage, "unknown LLVM pass pipeline error"))
+	}
+	if err := g.verify(); err != nil {
+		return fmt.Errorf("optimized LLVM module failed verification: %w", err)
+	}
+	g.optimizedForCodegen = true
 	return nil
 }
 
@@ -102,7 +170,7 @@ func (g *llvmGenerator) ensureTargetMachine() error {
 
 	cpu := cString("")
 	features := cString("")
-	tm := C.LLVMCreateTargetMachine(target, triple, cpu, features, C.LLVMCodeGenLevelDefault, C.LLVMRelocDefault, C.LLVMCodeModelDefault)
+	tm := C.llcontextCreateTargetMachineAggressive(target, triple, cpu, features)
 	C.free(unsafe.Pointer(cpu))
 	C.free(unsafe.Pointer(features))
 	if tm == nil {
@@ -142,6 +210,18 @@ func disposeLLVMMessage(message *C.char, fallback string) string {
 	}
 	text := strings.TrimSpace(C.GoString(message))
 	C.LLVMDisposeMessage(message)
+	if text == "" {
+		return fallback
+	}
+	return text
+}
+
+func disposeLLVMErrorMessage(message *C.char, fallback string) string {
+	if message == nil {
+		return fallback
+	}
+	text := strings.TrimSpace(C.GoString(message))
+	C.llcontextDisposeLLVMErrorMessage(message)
 	if text == "" {
 		return fallback
 	}

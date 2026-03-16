@@ -52,18 +52,19 @@ func compileLLVMModule(result *semantic.Result) (*llvmGenerator, error) {
 }
 
 type llvmGenerator struct {
-	result        *semantic.Result
-	context       C.LLVMContextRef
-	module        C.LLVMModuleRef
-	targetMachine C.LLVMTargetMachineRef
-	targetData    C.LLVMTargetDataRef
-	targetTriple  *C.char
-	symbolsByNode map[ast.Node]*semantic.Symbol
-	structTypes   map[string]C.LLVMTypeRef
-	structBodies  map[string]bool
-	functions     map[string]C.LLVMValueRef
-	globals       map[string]C.LLVMValueRef
-	wordBits      int
+	result              *semantic.Result
+	context             C.LLVMContextRef
+	module              C.LLVMModuleRef
+	targetMachine       C.LLVMTargetMachineRef
+	targetData          C.LLVMTargetDataRef
+	targetTriple        *C.char
+	optimizedForCodegen bool
+	symbolsByNode       map[ast.Node]*semantic.Symbol
+	structTypes         map[string]C.LLVMTypeRef
+	structBodies        map[string]bool
+	functions           map[string]C.LLVMValueRef
+	globals             map[string]C.LLVMValueRef
+	wordBits            int
 }
 
 func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
