@@ -1,16 +1,16 @@
-extern resize(array: DArray[i32, shape_in], size: usize) -> DArray[i32, shape_out]
-extern push(array: DArray[i32, shape_in], element: i32) -> DArray[i32, shape_out]
-extern concat(array1: DArray[i32, shape_left], array2: DArray[i32, shape_right]) -> DArray[i32, shape_result]
-extern strcat(left: DStr[shape_left], right: DStr[shape_right]) -> DStr[shape_result]
+extern resize(array: darray[i32, shape_in], size: usize) -> darray[i32, shape_out]
+extern push(array: darray[i32, shape_in], element: i32) -> darray[i32, shape_out]
+extern concat(array1: darray[i32, shape_left], array2: darray[i32, shape_right]) -> darray[i32, shape_result]
+extern strcat(left: dstr[shape_left], right: dstr[shape_right]) -> dstr[shape_result]
 
-def grow_once(array: DArray[i32, row]) -> DArray[i32, shape_after]:
+def grow_once(array: darray[i32, row]) -> darray[i32, shape_after]:
     return resize(array, 8)
 
-def append_once(array: DArray[i32, row]) -> DArray[i32, shape_after]:
+def append_once(array: darray[i32, row]) -> darray[i32, shape_after]:
     return push(array, 1)
 
-def merge_arrays(left: DArray[i32, row], right: DArray[i32, col]) -> DArray[i32, shape_joined]:
+def merge_arrays(left: darray[i32, row], right: darray[i32, col]) -> darray[i32, shape_joined]:
     return concat(left, right)
 
-def merge_strings(left: DStr[row], right: DStr[col]) -> DStr[shape_joined]:
+def merge_strings(left: dstr[row], right: dstr[col]) -> dstr[shape_joined]:
     return strcat(left, right)

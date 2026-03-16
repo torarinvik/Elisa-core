@@ -143,6 +143,13 @@ type ArrayType struct {
 	Size     Expr
 }
 
+type BuiltinTypeExpr struct {
+	Position  lexer.Pos
+	Name      string
+	TypeArgs  []TypeExpr
+	ValueArgs []Expr
+}
+
 type Expr interface {
 	Node
 	exprTag()
@@ -367,6 +374,7 @@ func (n *GenericType) Pos() lexer.Pos     { return n.Position }
 func (n *MutableType) Pos() lexer.Pos     { return n.Position }
 func (n *TailType) Pos() lexer.Pos        { return n.Position }
 func (n *ArrayType) Pos() lexer.Pos       { return n.Position }
+func (n *BuiltinTypeExpr) Pos() lexer.Pos { return n.Position }
 func (n *Ident) Pos() lexer.Pos           { return n.Position }
 func (n *IntLit) Pos() lexer.Pos          { return n.Position }
 func (n *StringLit) Pos() lexer.Pos       { return n.Position }
@@ -414,6 +422,7 @@ func (*GenericType) nodeTag()     {}
 func (*MutableType) nodeTag()     {}
 func (*TailType) nodeTag()        {}
 func (*ArrayType) nodeTag()       {}
+func (*BuiltinTypeExpr) nodeTag() {}
 func (*Ident) nodeTag()           {}
 func (*IntLit) nodeTag()          {}
 func (*StringLit) nodeTag()       {}
@@ -456,12 +465,13 @@ func (*ExternVarDecl) declTag()  {}
 func (*ExternTypeDecl) declTag() {}
 func (*StaticIfDecl) declTag()   {}
 
-func (*NamedType) typeExprTag()   {}
-func (*RefType) typeExprTag()     {}
-func (*GenericType) typeExprTag() {}
-func (*MutableType) typeExprTag() {}
-func (*TailType) typeExprTag()    {}
-func (*ArrayType) typeExprTag()   {}
+func (*NamedType) typeExprTag()       {}
+func (*RefType) typeExprTag()         {}
+func (*GenericType) typeExprTag()     {}
+func (*MutableType) typeExprTag()     {}
+func (*TailType) typeExprTag()        {}
+func (*ArrayType) typeExprTag()       {}
+func (*BuiltinTypeExpr) typeExprTag() {}
 
 func (*Ident) exprTag()         {}
 func (*IntLit) exprTag()        {}

@@ -19,15 +19,17 @@ The current compiler follows the recommended lightweight model rather than full 
 
 Implemented today:
 
-- exact fixed-array typing for `T[N]`
-- dynamic shape witnesses for `DArray[T, shape]`, `DStr[shape]`, and `DList[T, shape]`
-- non-owning view types `DArrayView[T]`, `DListView[T]`, and `CtxStringView`
+- exact fixed-array typing for `array[T, N]` and `T[N]`
+- dynamic shape witnesses for `darray[T, shape]`, `dstr[shape]`, and `DList[T, shape]`
+- non-owning view types `view[T, begin, end]`, `DListView[T]`, and `sview[begin, end]`
 - indexing for fixed arrays, dynamic arrays/views, lists/views, strings, and string views
 - slice syntax producing view-like results:
-    - `T[N]` / `T[N]&` slices lower to `DArrayView[T]`
-    - `DArray[T, shape]` and `DArrayView[T]` slices produce `DArrayView[T]`
+    - `array[T, N]`, `T[N]`, and their non-null references slice to `view[T, start, end]`
+    - `darray[T, shape]` and `view[T, begin, end]` slices produce `view[T, start, end]`
     - `DList[T, shape]` and `DListView[T]` slices produce `DListView[T]`
-    - `DStr[shape]` and `CtxStringView` slices produce `CtxStringView`
+    - `dstr[shape]`, `str[N]`, and `sview[begin, end]` slices produce `sview[start, end]`
+
+The compiler still accepts `string[...]` and `dstring[...]` as compatibility aliases, but `str[...]` and `dstr[...]` are now the canonical user-facing spellings.
 
 Still deferred:
 
@@ -49,9 +51,12 @@ I think the cleanest surface story is:
 ### Static arrays
 
 ```context
+array[u8, 16]
+array[Node, 4]
+array[T, N]
+
+# shorthand form still accepted for fixed arrays
 u8[16]
-Node[4]
-T[N]
 ```
 
 This is already very good and should remain the canonical syntax for fixed-length arrays.
@@ -61,14 +66,14 @@ This is already very good and should remain the canonical syntax for fixed-lengt
 I would suggest one of these explicit forms:
 
 ```context
-DArray[T, n]
-OwnedArray[T, n]
+darray[T, n]
+owned_array[T, n]
 ```
 
 I slightly prefer:
 
 ```context
-DArray[T, n]
+darray[T, n]
 ```
 
 because it makes the “this is dynamic storage” distinction very obvious.
@@ -78,22 +83,22 @@ because it makes the “this is dynamic storage” distinction very obvious.
 For strings I would distinguish between logical string length and raw byte arrays:
 
 ```context
-u8[N]       # raw fixed byte array
-Str[N]      # fixed string / byte-string with known logical length
-DStr[n]     # owned dynamic string with tracked logical length
+u8[N]             # raw fixed byte array
+str[N]            # fixed string / byte-string with known logical length
+dstr[n]           # owned dynamic string with tracked logical length
 ```
 
-If you want maximum minimalism, `Str[N]` and `DStr[n]` can just be library-level wrappers over `u8[N]` and `DArray[u8, n]`.
+If you want maximum minimalism, `str[N]` and `dstr[n]` can just be language-level wrappers over `u8[N]` and `darray[u8, n]`.
 
 ## Core type constructors
 
 Formally, let the type layer have:
 
 ```text
-Array(T, N)      fixed-size array, N compile-time known
-DArray[T, n]     owned dynamic array, logical length index n
-Str[N]           fixed string of logical length N
-DStr[n]          owned dynamic string of logical length n
+array[T, N]      fixed-size array, N compile-time known
+darray[T, n]     owned dynamic array, logical length index n
+str[N]           fixed string of logical length N
+dstr[n]          owned dynamic string of logical length n
 ```
 
 Where:
@@ -110,7 +115,7 @@ The critical design choice is what kind of thing `n` is.
 This is the mathematically strongest version.
 
 ```text
-DArray[T, n]
+darray[T, n]
 ```
 
 where `n` is an actual runtime value appearing in the type.
@@ -118,9 +123,9 @@ where `n` is an actual runtime value appearing in the type.
 Then you can write signatures like:
 
 ```text
-push    : DArray[T, n] × T -> DArray[T, n + 1]
-concat  : DArray[T, a] × DArray[T, b] -> DArray[T, a + b]
-slice   : DArray[T, n] × i × j -> DArray[T, j - i]
+push    : darray[T, n] × T -> darray[T, n + 1]
+concat  : darray[T, a] × darray[T, b] -> darray[T, a + b]
+slice   : darray[T, n] × i × j -> view[T, i, j]
 ```
 
 This is gorgeous.
@@ -143,7 +148,7 @@ Instead of giving the typechecker full arithmetic over runtime naturals, give ea
 Conceptually:
 
 ```text
-DArray[T, shape_id]
+darray[T, shape_id]
 ```
 
 where `shape_id` is a shape witness / logical length identity.
@@ -157,9 +162,9 @@ Operationally:
 So:
 
 ```text
-resize : DArray[T, shape_in] × usize -> DArray[T, shape_out]
-push   : DArray[T, shape_in] × T     -> DArray[T, shape_out]
-concat : DArray[T, shape_left] × DArray[T, shape_right] -> DArray[T, shape_result]
+resize : darray[T, shape_in] × usize -> darray[T, shape_out]
+push   : darray[T, shape_in] × T     -> darray[T, shape_out]
+concat : darray[T, shape_left] × darray[T, shape_right] -> darray[T, shape_result]
 ```
 
 where `shape_out`, `shape_result` are fresh post-operation shapes.
@@ -181,21 +186,15 @@ I would keep representation brutally simple.
 
 ### Dynamic array representation
 
-```context
-repr(c) struct DArray[T]:
-    data: T&?
-    len: usize
-    cap: usize
-```
+User-facing code should talk in terms of the built-in `darray[T, shape]` surface.
+
+Internally, the runtime representation can still stay equivalent to a simple C-like carrier with a data pointer, length, and capacity.
 
 ### Dynamic string representation
 
-```context
-repr(c) struct DStr:
-    data: u8&?
-    len: usize
-    cap: usize
-```
+User-facing code should talk in terms of `str[N]`, `dstr[shape]`, and `sview[begin, end]`.
+
+Internally, the runtime representation can still stay equivalent to a simple C-like byte-buffer carrier.
 
 This is excellent because it is:
 
@@ -249,7 +248,7 @@ For Contextlang, I would keep the low-level spirit and make this a policy choice
 For the recommended lightweight model:
 
 ```text
-Γ ⊢ e : DArray[T, shape_id]
+Γ ⊢ e : darray[T, shape_id]
 ```
 
 where `shape_id` is a logical shape witness.
@@ -269,10 +268,10 @@ At the type level, `shape_id` means “the current logical length fact associate
 Resize changes shape identity:
 
 ```text
-Γ ⊢ a : DArray[T, shape_in]
+Γ ⊢ a : darray[T, shape_in]
 Γ ⊢ m : usize
 --------------------------------
-Γ ⊢ resize(a, m) : DArray[T, shape_out]
+Γ ⊢ resize(a, m) : darray[T, shape_out]
 ```
 
 where `shape_out` is fresh.
@@ -286,10 +285,10 @@ The important part is that this cast is **logical and zero-overhead**, not a run
 ### Push / append rule
 
 ```text
-Γ ⊢ a : DArray[T, shape_in]
+Γ ⊢ a : darray[T, shape_in]
 Γ ⊢ x : T
 --------------------------------
-Γ ⊢ push(a, x) : DArray[T, shape_out]
+Γ ⊢ push(a, x) : darray[T, shape_out]
 ```
 
 Again `shape_out` is fresh, because the logical shape changed.
@@ -297,10 +296,10 @@ Again `shape_out` is fresh, because the logical shape changed.
 ### Concatenation rule
 
 ```text
-Γ ⊢ a : DArray[T, shape_left]
-Γ ⊢ b : DArray[T, shape_right]
+Γ ⊢ a : darray[T, shape_left]
+Γ ⊢ b : darray[T, shape_right]
 --------------------------------
-Γ ⊢ concat(a, b) : DArray[T, shape_result]
+Γ ⊢ concat(a, b) : darray[T, shape_result]
 ```
 
 `shape_result` is fresh.
@@ -314,7 +313,7 @@ Strings should mirror arrays closely.
 ### Fixed strings
 
 ```text
-Γ ⊢ s : Str[N]
+Γ ⊢ s : str[N]
 ```
 
 This is useful for:
@@ -326,27 +325,27 @@ This is useful for:
 ### Dynamic strings
 
 ```text
-Γ ⊢ s : DStr[shape_id]
+Γ ⊢ s : dstr[shape_id]
 ```
 
-with exactly the same logical-shape story as `DArray[u8, shape_id]`.
+with exactly the same logical-shape story as `darray[u8, shape_id]`.
 
-In the current implementation, `DStr[shape_id]` is also paired with a non-owning runtime-backed `CtxStringView` for slicing and view-style APIs.
+In the current implementation, `dstr[shape_id]` and `str[N]` are also paired with a non-owning runtime-backed `sview[begin, end]` surface for slicing and view-style APIs.
 
 ### Relationship to byte arrays
 
 You can define:
 
 ```text
-Str[N]  ≈ Array(u8, N+1)  # if you include trailing zero in representation
-Str[N]  ≈ Array(u8, N)    # if logical string length excludes terminator and representation policy is separate
+str[N]  ≈ array[u8, N+1]  # if you include trailing zero in representation
+str[N]  ≈ array[u8, N]    # if logical string length excludes terminator and representation policy is separate
 ```
 
 I would keep the logical length separate from terminator policy.
 
 That is:
 
-- `Str[N]` means logical content length `N`
+- `str[N]` means logical content length `N`
 - whether a trailing `0` exists is a representation convention, not the type-level meaning
 
 That keeps the model cleaner.
@@ -366,9 +365,9 @@ That said, I would frame it like this:
 
 Current status:
 
-- `DArrayView[T]` exists for dynamic-array and fixed-array slice results
-- `DListView[T]` exists and is also exposed as the alias `view[T]`
-- `CtxStringView` exists for string slices and runtime-backed string views
+- `view[T, begin, end]` is the preferred surface for dynamic-array and fixed-array slice results
+- `DListView[T]` remains the explicit Stage 1 typed-list view surface for the older list runtime helpers
+- `sview[begin, end]` is the preferred surface for string slices and runtime-backed string views
 
 So I agree with your instinct as an implementation priority:
 
@@ -410,20 +409,13 @@ Status: implemented, including exact fixed-array typing and constant compile-tim
 
 ### Stage 2 — library/runtime-owned dynamic arrays
 
-Add a runtime struct like:
-
-```context
-repr(c) struct DArray[T]:
-    data: T&?
-    len: usize
-    cap: usize
-```
+Add a runtime carrier equivalent to a C-like growable array with a data pointer, length, and capacity.
 
 Then expose compiler-level logical shape wrappers incrementally.
 
 At first, this can even be mostly API-discipline plus type wrappers.
 
-Status: implemented for `DArray`, `DStr`, `DList`, and the current runtime bridge.
+Status: implemented for `darray`, `dstring`, `DList`, and the current runtime bridge.
 
 ### Stage 3 — logical post-operation shape change
 
@@ -448,8 +440,8 @@ Status: implemented for the current known shape-changing APIs.
 Only if the language really wants it later, add exact arithmetic forms like:
 
 ```text
-append : Array(T, n) × T -> Array(T, n+1)
-concat : Str[A] × Str[B] -> Str[A+B]
+append : array[T, n] × T -> array[T, n+1]
+concat : str[A] × str[B] -> str[A+B]
 ```
 
 This is beautiful, but it should be a later stage, not the starting point.
@@ -471,8 +463,10 @@ for static arrays.
 ### Add
 
 ```context
-DArray[T, n]
-DStr[n]
+darray[T, n]
+dstr[n]
+view[T, begin, end]
+sview[begin, end]
 ```
 
 as logical length-indexed owned containers.
@@ -480,12 +474,22 @@ as logical length-indexed owned containers.
 ### And define core APIs like
 
 ```text
-resize      : DArray[T, shape_in] × usize -> DArray[T, shape_out]
-push        : DArray[T, shape_in] × T -> DArray[T, shape_out]
-append_many : DArray[T, shape_in] × DArray[T, chunk] -> DArray[T, shape_out]
-truncate    : DArray[T, shape_in] × usize -> DArray[T, shape_out]
-clear       : DArray[T, shape_in] -> DArray[T, shape_out]
-concat      : DStr[shape_left] × DStr[shape_right] -> DStr[shape_result]
+resize      : darray[T, shape_in] × usize -> darray[T, shape_out]
+push        : darray[T, shape_in] × T -> darray[T, shape_out]
+append_many : darray[T, shape_in] × darray[T, chunk] -> darray[T, shape_out]
+truncate    : darray[T, shape_in] × usize -> darray[T, shape_out]
+clear       : darray[T, shape_in] -> darray[T, shape_out]
+concat      : dstr[shape_left] × dstr[shape_right] -> dstr[shape_result]
+```
+
+String indexing now yields `char`. Cast explicitly when you want an integer code unit:
+
+```context
+def first_char(text: str[4]) -> char:
+    return text[0]
+
+def first_code(text: str[4]) -> i64:
+    return text[0].i64()
 ```
 
 where each shape-changing operation returns a new logical shape.

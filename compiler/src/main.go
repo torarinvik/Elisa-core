@@ -319,6 +319,15 @@ func typeStr(t ast.TypeExpr) string {
 		return "tail " + typeStr(n.Elem)
 	case *ast.ArrayType:
 		return typeStr(n.Elem) + "[" + exprStr(n.Size) + "]"
+	case *ast.BuiltinTypeExpr:
+		parts := make([]string, 0, len(n.TypeArgs)+len(n.ValueArgs))
+		for _, arg := range n.TypeArgs {
+			parts = append(parts, typeStr(arg))
+		}
+		for _, arg := range n.ValueArgs {
+			parts = append(parts, exprStr(arg))
+		}
+		return n.Name + "[" + strings.Join(parts, ", ") + "]"
 	default:
 		return "<type>"
 	}

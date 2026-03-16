@@ -11,17 +11,19 @@ This document started as a forward-looking roadmap, but several of the earlier p
 
 Implemented today:
 
-- exact fixed-array typing for `T[N]`
+- exact fixed-array typing for `array[T, N]` and `T[N]`
 - mismatched fixed-array rejection
 - compile-time constant out-of-bounds diagnostics for fixed arrays
-- lightweight shape witnesses for `DArray[T, shape]`, `DStr[shape]`, and `DList[T, shape]`
+- lightweight shape witnesses for `darray[T, shape]`, `dstr[shape]`, and `DList[T, shape]`
 - fresh post-operation shapes for shape-changing APIs such as `resize`, `push`, `concat`, and `strcat`
-- indexing for `DArray`, `DArrayView`, `DList`, `DListView`, `DStr`, and `CtxStringView`
-- slice syntax for `DArray`, `DArrayView`, fixed arrays, `DList`, `DListView`, `DStr`, and `CtxStringView`
-- the lowercase `view[T]` alias for `DListView[T]`
+- indexing for `darray`, `view`, `DList`, `DListView`, `dstr`, `str`, and `sview`
+- slice syntax for `darray`, `view`, fixed arrays, `DList`, `DListView`, `dstr`, `str`, and `sview`
+- the built-in `view[T, begin, end]` / `sview[begin, end]` surface syntax, with `view[T]` retained as a shorthand for array views
 - pointer arithmetic lowering (`ref + int`, `int + ref`, `ref - int`)
 - explicit reference comparisons (`ref == null`, `ref != null`, `ref == ref`)
 - end-to-end fixture coverage through the real CLI pipeline for `Code/test_programs/pointer_alloc.llcontext` and `Code/test_programs/shape_ops.llcontext`
+
+The compiler still accepts `string[...]` and `dstring[...]` as compatibility aliases, but the canonical user-facing spellings are now `str[...]` and `dstr[...]`.
 
 Still intentionally deferred:
 
@@ -72,8 +74,10 @@ This phase is cheap and gives a lot of shape safety immediately.
 Add syntax and semantic meaning for:
 
 ```context
-DArray[T, n]
-DStr[n]
+darray[T, n]
+dstr[n]
+view[T, begin, end]
+sview[begin, end]
 ```
 
 But initially interpret `n` as a **logical shape witness**, not a symbolic arithmetic term.
@@ -87,18 +91,18 @@ This phase should focus on:
 
 not on complicated inference.
 
-Status: complete for `DArray[T, shape]`, `DStr[shape]`, `DList[T, shape]`, `DArrayView[T]`, and `DListView[T]` under the current lightweight shape-witness model.
+Status: complete for `darray[T, shape]`, `dstr[shape]`, `DList[T, shape]`, `view[T, begin, end]`, and `DListView[T]` under the current lightweight shape-witness model.
 
 ### Phase 3 — teach shape-changing APIs to produce fresh post-state shapes
 
-Once `DArray[T, n]` exists, teach the analyzer that specific operations return a *new* shape.
+Once `darray[T, n]` exists, teach the analyzer that specific operations return a *new* shape.
 
 For example:
 
 ```text
-resize : DArray[T, shape_in] × usize -> DArray[T, shape_out]
-push   : DArray[T, shape_in] × T -> DArray[T, shape_out]
-concat : DArray[T, shape_left] × DArray[T, shape_right] -> DArray[T, shape_result]
+resize : darray[T, shape_in] × usize -> darray[T, shape_out]
+push   : darray[T, shape_in] × T -> darray[T, shape_out]
+concat : darray[T, shape_left] × darray[T, shape_right] -> darray[T, shape_result]
 ```
 
 where `shape_out`, `shape_result` are fresh logical shape identities.
@@ -181,8 +185,10 @@ Likely just:
 Teach the parser to recognize:
 
 ```context
-DArray[T, n]
-DStr[n]
+darray[T, n]
+dstr[n]
+view[T, begin, end]
+sview[begin, end]
 ```
 
 Recommendation:
@@ -197,8 +203,10 @@ That keeps syntax work small.
 I would use:
 
 ```context
-DArray[T, n]
-DStr[n]
+darray[T, n]
+dstr[n]
+view[T, begin, end]
+sview[begin, end]
 ```
 
 not something more magical.
@@ -326,8 +334,8 @@ Strings should reuse the same machinery as arrays as much as possible.
 
 Recommended internal rule:
 
-- `DStr[shape_id]` is semantically very close to `DynArrayType{Elem: u8, Shape: shape_id}`
-- `Str[N]` is semantically very close to `Array(u8, N)` plus string-specific intent
+- `dstr[shape_id]` is semantically very close to `DynArrayType{Elem: u8, Shape: shape_id}`
+- `str[N]` is semantically very close to `array[u8, N]` plus string-specific intent
 
 Whether you expose them as separate semantic types or thin wrappers is mostly an ergonomics decision.
 
@@ -350,14 +358,14 @@ Important errors to support clearly:
 Example good diagnostic style:
 
 ```text
-cannot assign DArray[u8, row] to DArray[u8, shape_after]
+cannot assign darray[u8, row] to darray[u8, shape_after]
 note: resize returns a fresh logical shape for shape_out
 ```
 
 And when the mismatch comes from comparing two separate fresh-producing calls, a second note should explain that they do not unify implicitly:
 
 ```text
-argument 2 to "same" expects DArray[i32, shape_after#1], got DArray[i32, shape_after#2]
+argument 2 to "same" expects darray[i32, shape_after#1], got darray[i32, shape_after#2]
 note: grow returns a fresh logical shape for shape_after
 note: separate calls that produce fresh shapes do not share the same logical shape identity
 ```
@@ -379,11 +387,11 @@ Current coverage includes exact fixed-array equality, mismatch rejection, and co
 
 ### Phase 2 tests
 
-- parsing `DArray[T, n]` and `DStr[n]`
+- parsing `darray[T, n]`, `dstr[n]`, `view[T, begin, end]`, and `sview[begin, end]`
 - type equality for dynamic shape witnesses
 - shape witness preservation across plain assignment
 
-Current coverage includes parsing and semantic checks for `DArray`, `DStr`, `DList`, `DArrayView`, `DListView`, and their runtime-bridge behavior.
+Current coverage includes parsing and semantic checks for `darray`, `dstr`, `DList`, `view`, `sview`, `DListView`, and their runtime-bridge behavior.
 
 ### Phase 3 tests
 
@@ -406,14 +414,14 @@ Those tests exercise the actual include expansion, parse, semantic, and emit pip
 ### Example regression style
 
 ```context
-def grow(a: DArray[u8, row]) -> DArray[u8, shape_after]:
+def grow(a: darray[u8, row]) -> darray[u8, shape_after]:
     return resize(a, 16)
 ```
 
 and:
 
 ```context
-def bad(a: DArray[u8, row]) -> DArray[u8, row]:
+def bad(a: darray[u8, row]) -> darray[u8, row]:
     return resize(a, 16)   # should fail if resize returns fresh shape_after
 ```
 
@@ -436,13 +444,13 @@ The codebase is already following this staged approach:
 - low-level stage 0 runtime code still uses representation-first types such as `DynArray[T]`, `CtxList`, `StringBuilder`, and raw `u8&` string values
 - `arena.llcontext` now exposes shape-typed append helpers such as `arena_da_append` and `arena_da_append_many`
 - `contextlang_runtime.llcontext` stage 1 wrappers now expose typed logical APIs such as `ctx_stage1rt_tlist_push`, `ctx_stage1rt_tlist_view`, `ctx_stage1rt_concat2`, and `ctx_stage1rt_string_slice`
-- `arena.llcontext` now also exposes typed non-owning `DArrayView[T]` helpers such as `arena_da_view`, `arena_da_view_slice`, and `arena_da_view_get`
+- `arena.llcontext` now also exposes typed non-owning `view[T, begin, end]` helpers such as `arena_da_view`, `arena_da_view_slice`, and `arena_da_view_get`
 - the semantic layer bridges these wrappers back onto the underlying runtime representations rather than forcing an immediate full runtime rewrite
 
 For example, the stage 1 wrappers now look like this:
 
 ```context
-def ctx_stage1rt_concat2(lhs: DStr[shape_left], rhs: DStr[shape_right]) -> DStr[shape_result]:
+def ctx_stage1rt_concat2(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[shape_result]:
     return ctx_stage0_concat2(lhs, rhs)
 
 def ctx_stage1rt_tlist_push[T](values: DList[T, shape_in], elem: T&) -> DList[T, shape_out]:
@@ -455,15 +463,15 @@ def ctx_stage1rt_tlist_view[T](values: DList[T, shape_in], start: i64, end: i64)
 And the arena-backed container helpers now look like this:
 
 ```context
-def arena_da_append[T](a: Arena&, da: DArray[T, shape_in]&, item: T) -> DArray[T, shape_out]&:
+def arena_da_append[T](a: Arena&, da: darray[T, shape_in]&, item: T) -> darray[T, shape_out]&:
     # implementation mutates storage/capacity as needed
     return da
 
-def arena_da_append_many[T](a: Arena&, da: DArray[T, shape_in]&, new_items: T&, new_items_count: usize) -> DArray[T, shape_out]&:
+def arena_da_append_many[T](a: Arena&, da: darray[T, shape_in]&, new_items: T&, new_items_count: usize) -> darray[T, shape_out]&:
     # implementation grows/copies as needed
     return da
 
-def arena_da_view[T](da: DArray[T, shape_in]&, start: usize, end: usize) -> DArrayView[T]:
+def arena_da_view[T](da: darray[T, shape_in]&, start: usize, end: usize) -> view[T, start, end]:
     # implementation creates a typed non-owning view
     return DynArrayView(null, 0, sizeof(T))
 ```
@@ -472,12 +480,12 @@ So the public runtime-facing layer carries logical shape transitions, while the 
 
 More concretely, the current semantic bridge is intentionally narrow and wrapper-oriented:
 
-- `DStr[shape_id]` is allowed to flow across the runtime boundary as raw `u8&` / `u8&?` string values
+- `dstr[shape_id]` is allowed to flow across the runtime boundary as raw `u8&` / `u8&?` string values
 - `DList[T, shape_id]` and `DListView[T]` are allowed to flow across the runtime boundary as `CtxList&` / `CtxList&?` and `CtxListView`
-- `DArray[T, shape_id]` can likewise ride on the existing `DynArray[T]` representation for arena-backed helpers
-- `DArrayView[T]` is allowed to flow across the runtime boundary as `DynArrayView`
+- `darray[T, shape_id]` can likewise ride on the existing `DynArray[T]` representation for arena-backed helpers
+- `view[T, begin, end]` is allowed to flow across the runtime boundary as `DynArrayView`
 
-The older raw list wrappers (`ctx_stage1rt_list_*` with `DArray[void&, shape]` and `CtxListView`) still exist as compatibility shims, but the typed `ctx_stage1rt_tlist_*` surface is the preferred API for new code.
+The older raw list wrappers (`ctx_stage1rt_list_*` with `darray[void&, shape]` and `CtxListView`) still exist as compatibility shims, but the typed `ctx_stage1rt_tlist_*` surface is the preferred API for new code.
 
 That means the typechecker can track logical shape states at the wrapper/API level while still reusing the existing low-level runtime layouts internally.
 
@@ -491,12 +499,14 @@ If I were choosing the concrete first implementation boundary, it would be:
 
 - exact fixed-array typing for `T[N]`
 - improved constant-index checking
-- syntax support for `DArray[T, n]` and `DStr[n]`
+- syntax support for `darray[T, n]`, `dstr[n]`, `view[T, begin, end]`, and `sview[begin, end]`
 - semantic representation for dynamic shape witnesses
 - no arithmetic shape expressions yet
 - no full generic dependent inference
 
-Status: this MVP boundary has effectively been reached and pushed beyond. The current compiler also includes runtime-backed indexing/slicing, view types, string helper lowering, pointer arithmetic, reference comparisons, and CLI-level fixture tests.
+Status: this MVP boundary has effectively been reached and pushed beyond. The current compiler also includes runtime-backed indexing/slicing, `view` / `sview` surface types, string helper lowering, pointer arithmetic, reference comparisons, and CLI-level fixture tests.
+
+String indexing now yields `char`; convert explicitly with `.i64()` when you want a numeric code unit.
 
 ### First post-MVP
 

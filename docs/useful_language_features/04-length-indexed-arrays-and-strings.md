@@ -11,18 +11,25 @@ I think the design splits naturally into **three** array/string families.
 This is the easy win and is already very natural.
 
 ```text
-Array(T, N)
+array[T, N]
 ```
 
-or surface syntax like:
+with the existing short fixed-array form still valid when you want it:
 
 ```context
+array[u8, 16]
+array[Node, 4]
+array[T, N]
+
+# low-ceremony equivalent for fixed arrays
 T[N]
 ```
 
 This is already a length-indexed type.
 Its length is compile-time known, zero-overhead, and perfect for stack/local/static data.
+`array[T, N]` is the explicit built-in spelling; `T[N]` remains the concise fixed-array form.
 
+This is already a length-indexed type.
 ### 2. Dynamic owned arrays with length in the type
 
 This is the more ambitious part.
@@ -30,7 +37,7 @@ This is the more ambitious part.
 Conceptually:
 
 ```text
-DArray[T, n]
+darray[T, n]
 ```
 
 where `n` is a value-level natural number tracked in the type.
@@ -38,7 +45,7 @@ where `n` is a value-level natural number tracked in the type.
 Then resize operations become type transitions:
 
 ```text
-resize : DArray[T, n] × m -> DArray[T, m]
+resize : darray[T, n] × m -> darray[T, m]
 ```
 
 That is elegant and very much in the spirit of the pointer system.
@@ -52,7 +59,7 @@ There are two realistic choices.
 #### A. Fully dependent runtime index
 
 ```text
-DArray[T, n]
+darray[T, n]
 ```
 
 where `n` is any runtime integer value.
@@ -71,7 +78,7 @@ This is beautiful, but it is no longer “small extension” territory.
 Instead of true full dependence, you can make length-indexing existential/brand-based:
 
 ```text
-exists n. DArray[T, n]
+exists n. darray[T, n]
 ```
 
 or operationally, “an array carries a statically tracked length identity, and resize returns a new identity”.
@@ -86,14 +93,21 @@ Strings can follow the same pattern.
 
 You could distinguish:
 
-- `u8[N]` — fixed-size byte array
-- `Str[N]` — UTF-8 or byte string known to have logical length `N`
-- `DStr[n]` — dynamically allocated owned string with tracked length
+- `str[N]` — fixed string / byte string known to have logical length `N`
+- `dstr[n]` — dynamically allocated owned string with tracked length `n`
+- `u8[N]` — raw fixed-size byte array when you do not want string semantics
 
 Then concatenation could produce a new indexed type:
 
 ```text
-concat : Str[A] × Str[B] -> Str[A + B]
+concat : str[A] × str[B] -> str[A + B]
+```
+
+And if you want the numeric code unit explicitly, the cast stays direct:
+
+```context
+def first_code(text: str[4]) -> i64:
+	return text[0].i64()
 ```
 
 or for dynamic owned strings, a resized result brand.
@@ -124,17 +138,16 @@ This gives you:
 
 Keep runtime representation C-like:
 
-```context
-repr(c) struct DArray[T]:
-    data: T&?
-    len: usize
-    cap: usize
+```text
+darray[T, n]
 ```
+
+with a compiler-known runtime carrier that stays C-like internally.
 
 But let the type system expose a stronger logical wrapper notion, something like:
 
 ```text
-OwnedArray[T, n]
+darray[T, n]
 ```
 
 where operations like `push`, `resize`, `append_many`, `truncate`, `clear`, `concat`, and `strcat` produce new logical types.

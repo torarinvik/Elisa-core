@@ -61,15 +61,20 @@ type ArrayType struct {
 	Size         string
 	HasConstSize bool
 	ConstSize    int64
+	SurfaceName  string
 }
 
 type DArrayType struct {
-	Elem  Type
-	Shape Shape
+	Elem        Type
+	Shape       Shape
+	SurfaceName string
 }
 
 type DArrayViewType struct {
-	Elem Type
+	Elem        Type
+	Begin       string
+	End         string
+	SurfaceName string
 }
 
 type DListType struct {
@@ -82,7 +87,13 @@ type DListViewType struct {
 }
 
 type DStrType struct {
-	Shape Shape
+	Shape       Shape
+	SurfaceName string
+}
+
+type SViewType struct {
+	Begin string
+	End   string
 }
 
 type Field struct {
@@ -98,6 +109,7 @@ type StructType struct {
 	Fields     map[string]Field
 	ReprC      bool
 	Decl       *ast.StructDecl
+	Builtin    bool
 }
 
 type OpaqueType struct {
@@ -131,6 +143,7 @@ func (*DArrayViewType) isType()      {}
 func (*DListType) isType()           {}
 func (*DListViewType) isType()       {}
 func (*DStrType) isType()            {}
+func (*SViewType) isType()           {}
 func (*StructType) isType()          {}
 func (*OpaqueType) isType()          {}
 func (*GenericInstanceType) isType() {}
@@ -167,12 +180,27 @@ func (t *RefType) String() string {
 	return s
 }
 func (t *ArrayType) String() string {
+	if t.SurfaceName == "str" || t.SurfaceName == "string" {
+		return fmt.Sprintf("str[%s]", t.Size)
+	}
+	if t.SurfaceName == "array" {
+		return fmt.Sprintf("array[%s, %s]", t.Elem.String(), t.Size)
+	}
 	return fmt.Sprintf("%s[%s]", t.Elem.String(), t.Size)
 }
 func (t *DArrayType) String() string {
+	if t.SurfaceName == "darray" {
+		return fmt.Sprintf("darray[%s, %s]", t.Elem.String(), t.Shape.String())
+	}
 	return fmt.Sprintf("DArray[%s, %s]", t.Elem.String(), t.Shape.String())
 }
 func (t *DArrayViewType) String() string {
+	if t.SurfaceName == "view" || t.Begin != "" || t.End != "" {
+		if t.Begin != "" || t.End != "" {
+			return fmt.Sprintf("view[%s, %s, %s]", t.Elem.String(), t.Begin, t.End)
+		}
+		return fmt.Sprintf("view[%s]", t.Elem.String())
+	}
 	return fmt.Sprintf("DArrayView[%s]", t.Elem.String())
 }
 func (t *DListType) String() string {
@@ -182,7 +210,13 @@ func (t *DListViewType) String() string {
 	return fmt.Sprintf("DListView[%s]", t.Elem.String())
 }
 func (t *DStrType) String() string {
+	if t.SurfaceName == "dstr" || t.SurfaceName == "dstring" {
+		return fmt.Sprintf("dstr[%s]", t.Shape.String())
+	}
 	return fmt.Sprintf("DStr[%s]", t.Shape.String())
+}
+func (t *SViewType) String() string {
+	return fmt.Sprintf("sview[%s, %s]", t.Begin, t.End)
 }
 func (t *StructType) String() string { return t.Name }
 func (t *OpaqueType) String() string { return t.Name }
@@ -233,7 +267,7 @@ func IsNumericType(t Type) bool {
 		return false
 	}
 	switch b.Name {
-	case "int", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize", "uintptr":
+	case "char", "int", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize", "uintptr":
 		return true
 	default:
 		return false
@@ -281,6 +315,12 @@ func CommonNumericType(a, b Type) Type {
 		return invalidType
 	}
 	if SameType(a, b) {
+		return a
+	}
+	if ta, ok := a.(*BuiltinType); ok && ta.Name == "char" {
+		return b
+	}
+	if tb, ok := b.(*BuiltinType); ok && tb.Name == "char" {
 		return a
 	}
 	if ta, ok := a.(*BuiltinType); ok && ta.Name == "int" {

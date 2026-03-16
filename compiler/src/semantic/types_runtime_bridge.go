@@ -18,20 +18,23 @@ const (
 	runtimeBridgeDListViewCtxListView
 	runtimeBridgeDArrayCtxList
 	runtimeBridgeDStrU8Ref
+	runtimeBridgeSViewCtxStringView
 )
 
 type runtimeBridgeMatch struct {
-	Kind         runtimeBridgeKind
-	DArray       *DArrayType
-	DArrayView   *DArrayViewType
-	DList        *DListType
-	DListView    *DListViewType
-	DynArray     *GenericInstanceType
-	DynArrayView *StructType
-	CtxList      *RefType
-	CtxListView  *StructType
-	DStr         *DStrType
-	U8Ref        *RefType
+	Kind          runtimeBridgeKind
+	DArray        *DArrayType
+	DArrayView    *DArrayViewType
+	DList         *DListType
+	DListView     *DListViewType
+	DynArray      *GenericInstanceType
+	DynArrayView  *StructType
+	CtxList       *RefType
+	CtxListView   *StructType
+	DStr          *DStrType
+	U8Ref         *RefType
+	SView         *SViewType
+	CtxStringView *StructType
 }
 
 func isVoidRefType(t Type) bool {
@@ -78,6 +81,14 @@ func ctxListViewRuntimeType(t Type) (*StructType, bool) {
 func dynArrayViewRuntimeType(t Type) (*StructType, bool) {
 	st, ok := t.(*StructType)
 	if !ok || st.Name != "DynArrayView" {
+		return nil, false
+	}
+	return st, true
+}
+
+func ctxStringViewRuntimeType(t Type) (*StructType, bool) {
+	st, ok := t.(*StructType)
+	if !ok || st.Name != "CtxStringView" {
 		return nil, false
 	}
 	return st, true
@@ -144,6 +155,16 @@ func classifyRuntimeBridge(a, b Type) (runtimeBridgeMatch, bool) {
 			return runtimeBridgeMatch{Kind: runtimeBridgeDStrU8Ref, DStr: dstr, U8Ref: u8Ref}, true
 		}
 	}
+	if sview, ok := a.(*SViewType); ok {
+		if ctxStringView, ok := ctxStringViewRuntimeType(b); ok {
+			return runtimeBridgeMatch{Kind: runtimeBridgeSViewCtxStringView, SView: sview, CtxStringView: ctxStringView}, true
+		}
+	}
+	if sview, ok := b.(*SViewType); ok {
+		if ctxStringView, ok := ctxStringViewRuntimeType(a); ok {
+			return runtimeBridgeMatch{Kind: runtimeBridgeSViewCtxStringView, SView: sview, CtxStringView: ctxStringView}, true
+		}
+	}
 	return runtimeBridgeMatch{}, false
 }
 
@@ -155,6 +176,8 @@ func sameTypeRuntimeCompatible(a, b Type) bool {
 	switch bridge.Kind {
 	case runtimeBridgeDArrayDynArray:
 		return SameType(bridge.DArray.Elem, bridge.DynArray.Args[0])
+	case runtimeBridgeSViewCtxStringView:
+		return true
 	default:
 		return false
 	}
@@ -168,7 +191,7 @@ func assignableRuntimeCompatible(dst, src Type) bool {
 	switch bridge.Kind {
 	case runtimeBridgeDArrayDynArray:
 		return SameType(bridge.DArray.Elem, bridge.DynArray.Args[0])
-	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeDListCtxList, runtimeBridgeDListViewCtxListView, runtimeBridgeDArrayCtxList, runtimeBridgeDStrU8Ref:
+	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeDListCtxList, runtimeBridgeDListViewCtxListView, runtimeBridgeDArrayCtxList, runtimeBridgeDStrU8Ref, runtimeBridgeSViewCtxStringView:
 		return true
 	default:
 		return false
@@ -189,7 +212,7 @@ func patternRuntimeCompatible(pattern, actual Type) bool {
 			return matchTypePattern(patternDynArray.Args[0], bridge.DArray.Elem)
 		}
 		return false
-	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeDListCtxList, runtimeBridgeDListViewCtxListView, runtimeBridgeDArrayCtxList, runtimeBridgeDStrU8Ref:
+	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeDListCtxList, runtimeBridgeDListViewCtxListView, runtimeBridgeDArrayCtxList, runtimeBridgeDStrU8Ref, runtimeBridgeSViewCtxStringView:
 		return true
 	default:
 		return false

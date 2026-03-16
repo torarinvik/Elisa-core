@@ -217,6 +217,29 @@ def read_box() -> int:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsBuiltinSurfaceCollectionTypes(t *testing.T) {
+	src := `extern take_array(values: array[i32, 4]) -> void
+extern take_darray(values: darray[i32, row]) -> void
+extern take_dstr(text: dstr[row]) -> void
+extern take_view(values: view[i32, 0u, 2u]) -> void
+extern take_sview(text: sview[1, 4]) -> void
+
+def use(values: array[i32, 4], dyn: darray[i32, row], text: str[5], dyn_text: dstr[row]) -> char:
+	sub_array: view[i32, 0u, 2u] = values[0u:2u]
+	sub_text: sview[1, 4] = text[1:4]
+	dyn_sub: sview[0, 1] = dyn_text[0:1]
+	take_array(values)
+	take_darray(dyn)
+	take_dstr(dyn_text)
+	take_view(sub_array)
+	take_sview(sub_text)
+	take_sview(dyn_sub)
+	return text[0]
+`
+	_, errs := parseAndAnalyze(t, "builtin_surface_types.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeTernaryRefinesNullablePointerBranch(t *testing.T) {
 	src := `def choose_text(value: u8&?) -> u8&:
     return value if value != null else ""
@@ -407,12 +430,23 @@ def read_list_ref(values: DList[i32, row]&) -> i32:
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeAcceptsDStrIndexingAsI64(t *testing.T) {
-	src := `def read_codepoint(text: DStr[row]) -> i64:
+func TestAnalyzeAcceptsDStrIndexingAsChar(t *testing.T) {
+	src := `def read_codepoint(text: DStr[row]) -> char:
 	return text[0]
 `
-	_, errs := parseAndAnalyze(t, "runtime_backed_dstr_index.llcontext", src)
+	result, errs := parseAndAnalyze(t, "runtime_backed_dstr_index.llcontext", src)
 	requireNoErrors(t, errs)
+	fn, ok := result.GlobalScope.Lookup("read_codepoint")
+	if !ok {
+		t.Fatal("expected read_codepoint symbol")
+	}
+	ft, ok := fn.Type.(*semantic.FuncType)
+	if !ok {
+		t.Fatalf("expected function type, got %T", fn.Type)
+	}
+	if ft.Return.String() != "char" {
+		t.Fatalf("expected return type char, got %s", ft.Return.String())
+	}
 }
 
 func TestAnalyzeRejectsAssigningToDStrIndex(t *testing.T) {
@@ -428,24 +462,27 @@ func TestAnalyzeRejectsAssigningToDStrIndex(t *testing.T) {
 	}
 }
 
-func TestAnalyzeAcceptsCtxStringViewIndexingAsI64(t *testing.T) {
-	src := `repr(c) struct CtxStringView:
-	data: mutable u8&
-	len: mutable i64
-
-def read_codepoint(view: CtxStringView) -> i64:
+func TestAnalyzeAcceptsCtxStringViewIndexingAsChar(t *testing.T) {
+	src := `def read_codepoint(view: CtxStringView) -> char:
 	return view[0]
 `
-	_, errs := parseAndAnalyze(t, "ctx_string_view_index.llcontext", src)
+	result, errs := parseAndAnalyze(t, "ctx_string_view_index.llcontext", src)
 	requireNoErrors(t, errs)
+	fn, ok := result.GlobalScope.Lookup("read_codepoint")
+	if !ok {
+		t.Fatal("expected read_codepoint symbol")
+	}
+	ft, ok := fn.Type.(*semantic.FuncType)
+	if !ok {
+		t.Fatalf("expected function type, got %T", fn.Type)
+	}
+	if ft.Return.String() != "char" {
+		t.Fatalf("expected return type char, got %s", ft.Return.String())
+	}
 }
 
 func TestAnalyzeAcceptsRuntimeStringEqualityOperators(t *testing.T) {
-	src := `repr(c) struct CtxStringView:
-	data: mutable u8&
-	len: mutable i64
-
-def same_text(left: DStr[row], right: DStr[col]) -> bool:
+	src := `def same_text(left: DStr[row], right: DStr[col]) -> bool:
 	return left == right
 
 def same_view_text(view: CtxStringView, text: DStr[row]) -> bool:
@@ -472,12 +509,21 @@ func TestAnalyzeAcceptsDStrLenField(t *testing.T) {
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeAcceptsViewAliasAndListSliceSyntax(t *testing.T) {
-	src := `def middle(values: DList[i32, row]) -> view[i32]:
-	part: view[i32] = values[1:3]
+func TestAnalyzeAcceptsViewAliasForArraySlices(t *testing.T) {
+	src := `def middle(values: i32[4]) -> view[i32]:
+	part: view[i32] = values[1u:3u]
 	return part
 `
 	_, errs := parseAndAnalyze(t, "view_alias_and_slice.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsExplicitListViewSliceSyntax(t *testing.T) {
+	src := `def middle(values: DList[i32, row]) -> DListView[i32]:
+	part: DListView[i32] = values[1:3]
+	return part
+`
+	_, errs := parseAndAnalyze(t, "explicit_list_view_slice.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
@@ -502,21 +548,7 @@ func TestAnalyzeAcceptsFixedArraySliceSyntax(t *testing.T) {
 }
 
 func TestAnalyzeAcceptsNestedCollectionAccessOnReturnedValues(t *testing.T) {
-	src := `repr(c) struct DynArray[T]:
-	items: mutable T&?
-	count: mutable usize
-	capacity: mutable usize
-
-repr(c) struct DynArrayView:
-	data: mutable void&?
-	len: mutable usize
-	elem_size: mutable usize
-
-repr(c) struct CtxListView:
-	items: mutable void&?
-	count: mutable usize
-
-extern make_array() -> DArray[i32, row]
+	src := `extern make_array() -> DArray[i32, row]
 extern make_array_view() -> DArrayView[i32]
 extern make_list_view() -> DListView[i32]
 
@@ -536,44 +568,53 @@ def read_list_view_index() -> i32:
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeAcceptsListLiteralWithInferredLocalAndViewSlice(t *testing.T) {
+func TestAnalyzeAcceptsArrayLiteralWithInferredLocalAndViewSlice(t *testing.T) {
 	src := `def middle() -> int:
 	values = [1, 2, 3, 4]
 	part: view[int] = values[1:3]
 	return part[0]
 `
-	_, errs := parseAndAnalyze(t, "list_literal_inferred_local.llcontext", src)
+	_, errs := parseAndAnalyze(t, "array_literal_inferred_local.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeAcceptsTypedListLiteralInitialization(t *testing.T) {
+func TestAnalyzeAcceptsTypedFixedArrayLiteralInitialization(t *testing.T) {
 	src := `def first() -> i32:
-	values: DList[i32, row] = [1, 2, 3]
+	values: i32[3] = [1, 2, 3]
 	return values[0]
 `
-	_, errs := parseAndAnalyze(t, "typed_list_literal_init.llcontext", src)
+	_, errs := parseAndAnalyze(t, "typed_array_literal_init.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeRejectsEmptyListLiteralWithoutContext(t *testing.T) {
+func TestAnalyzeRejectsEmptyArrayLiteralWithoutContext(t *testing.T) {
 	src := `def bad() -> void:
 	values = []
 `
-	_, errs := parseAndAnalyze(t, "empty_list_literal_needs_context.llcontext", src)
+	_, errs := parseAndAnalyze(t, "empty_array_literal_needs_context.llcontext", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "empty list literal requires an expected DList type") {
-		t.Fatalf("expected empty-list context diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	if !strings.Contains(strings.Join(errs, "\n"), "empty array literal requires an expected array type") {
+		t.Fatalf("expected empty-array context diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsMismatchedFixedArrayLiteralLength(t *testing.T) {
+	src := `def bad() -> void:
+	values: i32[2] = [1, 2, 3]
+`
+	_, errs := parseAndAnalyze(t, "fixed_array_literal_length_mismatch.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "array literal expects 2 elements, got 3") {
+		t.Fatalf("expected array-length diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
 
 func TestAnalyzeAcceptsStringSliceSyntax(t *testing.T) {
-	src := `repr(c) struct CtxStringView:
-	data: mutable u8&
-	len: mutable i64
-
-def middle(text: DStr[row]) -> CtxStringView:
+	src := `def middle(text: DStr[row]) -> CtxStringView:
 	return text[1:3]
 `
 	_, errs := parseAndAnalyze(t, "string_slice_syntax.llcontext", src)
@@ -594,11 +635,7 @@ func TestAnalyzeRejectsAssigningToDStrLenField(t *testing.T) {
 }
 
 func TestAnalyzeRejectsAssigningToCtxStringViewIndex(t *testing.T) {
-	src := `repr(c) struct CtxStringView:
-	data: mutable u8&
-	len: mutable i64
-
-def bad(view: CtxStringView) -> void:
+	src := `def bad(view: CtxStringView) -> void:
 	view[0] <- 1
 `
 	_, errs := parseAndAnalyze(t, "ctx_string_view_index_assignment.llcontext", src)
@@ -622,12 +659,7 @@ def keep(array: DArray[i32, row]) -> DArray[i32, row]:
 }
 
 func TestAnalyzeDArrayUsesDynArrayRuntimeFields(t *testing.T) {
-	src := `repr(c) struct DynArray[T]:
-    items: mutable T&?
-    count: mutable usize
-    capacity: mutable usize
-
-def needs_grow[T](array: DArray[T, row]&) -> bool:
+	src := `def needs_grow[T](array: DArray[T, row]&) -> bool:
     return array.count >= array.capacity
 `
 	_, errs := parseAndAnalyze(t, "darray_runtime_field_access.llcontext", src)
@@ -635,12 +667,7 @@ def needs_grow[T](array: DArray[T, row]&) -> bool:
 }
 
 func TestAnalyzeDynArrayRuntimeBridgeWorksBothDirections(t *testing.T) {
-	src := `repr(c) struct DynArray[T]:
-	items: mutable T&?
-	count: mutable usize
-	capacity: mutable usize
-
-def take_raw[T](values: DynArray[T]) -> void:
+	src := `def take_raw[T](values: DynArray[T]) -> void:
 	pass
 
 def take_logical[T](values: DArray[T, shape_in]) -> void:
@@ -736,12 +763,7 @@ def bad_str(x: DStr[row, col]) -> void:
 }
 
 func TestAnalyzeDListUsesCtxListRuntimeFields(t *testing.T) {
-	src := `repr(c) struct CtxList:
-    len: mutable i64
-    cap: mutable i64
-    elem_size: mutable i64
-
-def has_room[T](values: DList[T, row]&) -> bool:
+	src := `def has_room[T](values: DList[T, row]&) -> bool:
     return values.len < values.cap
 `
 	_, errs := parseAndAnalyze(t, "dlist_runtime_field_access.llcontext", src)
@@ -749,12 +771,7 @@ def has_room[T](values: DList[T, row]&) -> bool:
 }
 
 func TestAnalyzeDListViewUsesCtxListViewRuntimeFields(t *testing.T) {
-	src := `repr(c) struct CtxListView:
-    data: mutable void&&?
-    len: mutable i64
-    elem_size: mutable i64
-
-def non_empty[T](view: DListView[T]) -> bool:
+	src := `def non_empty[T](view: DListView[T]) -> bool:
     return view.len > 0 and view.elem_size > 0
 `
 	_, errs := parseAndAnalyze(t, "dlist_view_runtime_field_access.llcontext", src)
@@ -762,12 +779,7 @@ def non_empty[T](view: DListView[T]) -> bool:
 }
 
 func TestAnalyzeDArrayViewUsesDynArrayViewRuntimeFields(t *testing.T) {
-	src := `repr(c) struct DynArrayView:
-    data: mutable void&?
-    len: mutable usize
-    elem_size: mutable usize
-
-def non_empty[T](view: DArrayView[T]) -> bool:
+	src := `def non_empty[T](view: DArrayView[T]) -> bool:
     return view.len > 0u and view.elem_size > 0u
 `
 	_, errs := parseAndAnalyze(t, "darray_view_runtime_field_access.llcontext", src)

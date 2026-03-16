@@ -45,34 +45,38 @@ func (p *Parser) parseBaseType() ast.TypeExpr {
 	var typ ast.TypeExpr = &ast.NamedType{Position: pos, Name: name}
 
 	if p.peek() == lexer.TOKEN_LBRACKET {
-		afterBracket := lexer.TOKEN_EOF
-		if p.pos+1 < len(p.tokens) {
-			afterBracket = p.tokens[p.pos+1].Kind
-		}
-		isArray := afterBracket == lexer.TOKEN_INT_LIT || afterBracket == lexer.TOKEN_HEX_LIT
-		if afterBracket == lexer.TOKEN_IDENT && p.pos+2 < len(p.tokens) {
-			afterIdent := p.tokens[p.pos+2].Kind
-			isArray = afterIdent != lexer.TOKEN_AMPERSAND && afterIdent != lexer.TOKEN_QUESTION &&
-				afterIdent != lexer.TOKEN_BANG && afterIdent != lexer.TOKEN_RBRACKET && afterIdent != lexer.TOKEN_COMMA &&
-				afterIdent != lexer.TOKEN_LBRACKET
-		}
-
-		if isArray {
-			p.advance()
-			size := p.parseExpr()
-			p.expect(lexer.TOKEN_RBRACKET)
-			typ = &ast.ArrayType{Position: pos, Elem: typ, Size: size}
+		if builtin := p.parseBuiltinTypeExpr(pos, name); builtin != nil {
+			typ = builtin
 		} else {
-			p.advance()
-			var args []ast.TypeExpr
-			for {
-				args = append(args, p.parseTypeExpr())
-				if !p.match(lexer.TOKEN_COMMA) {
-					break
-				}
+			afterBracket := lexer.TOKEN_EOF
+			if p.pos+1 < len(p.tokens) {
+				afterBracket = p.tokens[p.pos+1].Kind
 			}
-			p.expect(lexer.TOKEN_RBRACKET)
-			typ = &ast.GenericType{Position: pos, Name: name, Args: args}
+			isArray := afterBracket == lexer.TOKEN_INT_LIT || afterBracket == lexer.TOKEN_HEX_LIT
+			if afterBracket == lexer.TOKEN_IDENT && p.pos+2 < len(p.tokens) {
+				afterIdent := p.tokens[p.pos+2].Kind
+				isArray = afterIdent != lexer.TOKEN_AMPERSAND && afterIdent != lexer.TOKEN_QUESTION &&
+					afterIdent != lexer.TOKEN_BANG && afterIdent != lexer.TOKEN_RBRACKET && afterIdent != lexer.TOKEN_COMMA &&
+					afterIdent != lexer.TOKEN_LBRACKET
+			}
+
+			if isArray {
+				p.advance()
+				size := p.parseExpr()
+				p.expect(lexer.TOKEN_RBRACKET)
+				typ = &ast.ArrayType{Position: pos, Elem: typ, Size: size}
+			} else {
+				p.advance()
+				var args []ast.TypeExpr
+				for {
+					args = append(args, p.parseTypeExpr())
+					if !p.match(lexer.TOKEN_COMMA) {
+						break
+					}
+				}
+				p.expect(lexer.TOKEN_RBRACKET)
+				typ = &ast.GenericType{Position: pos, Name: name, Args: args}
+			}
 		}
 	}
 
@@ -86,6 +90,49 @@ func (p *Parser) parseBaseType() ast.TypeExpr {
 	}
 
 	return typ
+}
+
+func (p *Parser) parseBuiltinTypeExpr(pos lexer.Pos, name string) ast.TypeExpr {
+	switch name {
+	case "array", "darray":
+		p.advance()
+		elem := p.parseTypeExpr()
+		p.expect(lexer.TOKEN_COMMA)
+		size := p.parseExpr()
+		p.expect(lexer.TOKEN_RBRACKET)
+		return &ast.BuiltinTypeExpr{Position: pos, Name: name, TypeArgs: []ast.TypeExpr{elem}, ValueArgs: []ast.Expr{size}}
+	case "str", "string":
+		p.advance()
+		size := p.parseExpr()
+		p.expect(lexer.TOKEN_RBRACKET)
+		return &ast.BuiltinTypeExpr{Position: pos, Name: "str", ValueArgs: []ast.Expr{size}}
+	case "dstr", "dstring":
+		p.advance()
+		size := p.parseExpr()
+		p.expect(lexer.TOKEN_RBRACKET)
+		return &ast.BuiltinTypeExpr{Position: pos, Name: "dstr", ValueArgs: []ast.Expr{size}}
+	case "view":
+		p.advance()
+		elem := p.parseTypeExpr()
+		if p.match(lexer.TOKEN_RBRACKET) {
+			return &ast.BuiltinTypeExpr{Position: pos, Name: name, TypeArgs: []ast.TypeExpr{elem}}
+		}
+		p.expect(lexer.TOKEN_COMMA)
+		begin := p.parseExpr()
+		p.expect(lexer.TOKEN_COMMA)
+		end := p.parseExpr()
+		p.expect(lexer.TOKEN_RBRACKET)
+		return &ast.BuiltinTypeExpr{Position: pos, Name: name, TypeArgs: []ast.TypeExpr{elem}, ValueArgs: []ast.Expr{begin, end}}
+	case "sview":
+		p.advance()
+		begin := p.parseExpr()
+		p.expect(lexer.TOKEN_COMMA)
+		end := p.parseExpr()
+		p.expect(lexer.TOKEN_RBRACKET)
+		return &ast.BuiltinTypeExpr{Position: pos, Name: name, ValueArgs: []ast.Expr{begin, end}}
+	default:
+		return nil
+	}
 }
 
 // ---------- Expression parsing (precedence climbing) ----------

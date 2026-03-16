@@ -112,6 +112,28 @@ func (g *llvmGenerator) constExprValue(expr ast.Expr, expected semantic.Type) (C
 			values = append(values, fieldValue)
 		}
 		return C.LLVMConstNamedStruct(llvmType, llvmValueSlicePtr(values), C.unsigned(len(values))), nil
+	case *ast.ListLitExpr:
+		arrayType := expected
+		if arrayType == nil {
+			arrayType = g.exprType(expr)
+		}
+		fixedArray, ok := arrayType.(*semantic.ArrayType)
+		if !ok {
+			return nil, fmt.Errorf("array literal global initializer requires a fixed array type")
+		}
+		elemLLVMType, err := g.lowerType(fixedArray.Elem)
+		if err != nil {
+			return nil, err
+		}
+		values := make([]C.LLVMValueRef, 0, len(n.Elems))
+		for _, elem := range n.Elems {
+			elemValue, err := g.constExprValue(elem, fixedArray.Elem)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, elemValue)
+		}
+		return C.LLVMConstArray2(elemLLVMType, llvmValueSlicePtr(values), C.ulonglong(len(values))), nil
 	case *ast.CastExpr:
 		targetType, err := g.lowerType(expected)
 		if err != nil {

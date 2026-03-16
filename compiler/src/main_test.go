@@ -47,6 +47,79 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"define ptr @merge_strings(ptr",
 			},
 		},
+		{
+			name: "variadic_stdio",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "variadic_stdio.llcontext"),
+			checks: []string{
+				"declare i64 @snprintf(ptr, i64, ptr, ...)",
+				"define i64 @format_len(ptr",
+				"define i64 @write_into(ptr %0, i64 %1, ptr %2)",
+				"call i64 (ptr, i64, ptr, ...) @snprintf(",
+			},
+		},
+		{
+			name: "runtime_bridges",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "runtime_bridges.llcontext"),
+			checks: []string{
+				"declare i64 @ctx_stage0_list_len(ptr)",
+				"define i64 @raw_list_len(ptr",
+				"call i64 @ctx_stage0_list_len(ptr",
+			},
+		},
+		{
+			name: "pointer_casts",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "pointer_casts.llcontext"),
+			checks: []string{
+				"define i64 @ptr_bits(ptr",
+				"ptrtoint ptr",
+				"define ptr @bits_ptr(i64",
+				"inttoptr i64",
+				"define ptr @advance_raw(ptr %0, i64 %1)",
+				"getelementptr i8, ptr",
+			},
+		},
+		{
+			name: "nested_access",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "nested_access.llcontext"),
+			checks: []string{
+				"declare %DynArray__i32 @make_array()",
+				"declare %DynArrayView @make_array_view()",
+				"declare %CtxListView @make_list_view()",
+				"call %DynArray__i32 @make_array()",
+				"call %DynArrayView @make_array_view()",
+				"call %CtxListView @make_list_view()",
+				"call %DynArrayView @arena_da_view(ptr",
+				"alloca %DynArray__i32",
+				"alloca %DynArrayView",
+				"alloca %CtxListView",
+			},
+		},
+		{
+			name: "typed_list_views",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "typed_list_views.llcontext"),
+			checks: []string{
+				"define i32 @head_of_middle(%DynArray__i32",
+				"declare %DynArrayView @arena_da_view(ptr, i64, i64)",
+				"call %DynArrayView @arena_da_view(ptr",
+				"define i64 @inferred_literal_head()",
+				"alloca [4 x i64]",
+				"getelementptr [4 x i64], ptr",
+				"insertvalue %DynArrayView",
+			},
+		},
+		{
+			name: "string_view_ops",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "string_view_ops.llcontext"),
+			checks: []string{
+				"%CtxStringView = type { ptr, i64 }",
+				"declare %CtxStringView @ctx_stage1rt_string_view(ptr, i64, i64)",
+				"call %CtxStringView @ctx_stage1rt_string_view(ptr",
+				"declare i64 @ctx_stage1rt_string_view_index(%CtxStringView, i64)",
+				"declare i64 @ctx_stage1rt_strlen(ptr)",
+				"declare i64 @ctx_stage1rt_string_view_eq(%CtxStringView, ptr)",
+				"declare i64 @ctx_stage1rt_string_views_eq(%CtxStringView, %CtxStringView)",
+			},
+		},
 	}
 
 	for _, fixture := range fixtures {

@@ -457,6 +457,8 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			return nil, err
 		}
 		return &semantic.ArrayType{Elem: elem, Size: fmt.Sprintf("%d", size), HasConstSize: true, ConstSize: size}, nil
+	case *ast.BuiltinTypeExpr:
+		return s.resolveBuiltinSurfaceTypeExpr(n)
 	case *ast.MutableType:
 		return s.resolveTypeExpr(n.Elem)
 	case *ast.TailType:
@@ -484,6 +486,76 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 		return &semantic.GenericInstanceType{Name: n.Name, Base: base, Args: args}, nil
 	default:
 		return nil, fmt.Errorf("unsupported type expression %T", expr)
+	}
+}
+
+func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr) (semantic.Type, error) {
+	switch expr.Name {
+	case "array":
+		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 1 {
+			return nil, fmt.Errorf("array expects 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+		}
+		resolved, err := s.resolveTypeExpr(&ast.ArrayType{Position: expr.Position, Elem: expr.TypeArgs[0], Size: expr.ValueArgs[0]})
+		if err != nil {
+			return nil, err
+		}
+		if arrayType, ok := resolved.(*semantic.ArrayType); ok {
+			arrayType.SurfaceName = "array"
+		}
+		return resolved, nil
+	case "darray":
+		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 1 {
+			return nil, fmt.Errorf("darray expects 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+		}
+		elem, err := s.resolveTypeExpr(expr.TypeArgs[0])
+		if err != nil {
+			return nil, err
+		}
+		return &semantic.DArrayType{Elem: elem, Shape: shapeFromValueExpr(expr.ValueArgs[0]), SurfaceName: "darray"}, nil
+	case "str", "string":
+		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 1 {
+			return nil, fmt.Errorf("str expects 1 argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+		}
+		resolved, err := s.resolveTypeExpr(&ast.ArrayType{
+			Position: expr.Position,
+			Elem:     &ast.NamedType{Position: expr.Position, Name: "u8"},
+			Size:     expr.ValueArgs[0],
+		})
+		if err != nil {
+			return nil, err
+		}
+		if arrayType, ok := resolved.(*semantic.ArrayType); ok {
+			arrayType.SurfaceName = "str"
+		}
+		return resolved, nil
+	case "dstr", "dstring":
+		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 1 {
+			return nil, fmt.Errorf("dstr expects 1 argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+		}
+		return &semantic.DStrType{Shape: shapeFromValueExpr(expr.ValueArgs[0]), SurfaceName: "dstr"}, nil
+	case "view":
+		if len(expr.TypeArgs) != 1 {
+			return nil, fmt.Errorf("view expects 1 type argument, got %d", len(expr.TypeArgs))
+		}
+		elem, err := s.resolveTypeExpr(expr.TypeArgs[0])
+		if err != nil {
+			return nil, err
+		}
+		viewType := &semantic.DArrayViewType{Elem: elem, SurfaceName: "view"}
+		if len(expr.ValueArgs) == 2 {
+			viewType.Begin = exprSummary(expr.ValueArgs[0])
+			viewType.End = exprSummary(expr.ValueArgs[1])
+		} else if len(expr.ValueArgs) != 0 {
+			return nil, fmt.Errorf("view expects either 1 or 3 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+		}
+		return viewType, nil
+	case "sview":
+		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 2 {
+			return nil, fmt.Errorf("sview expects 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+		}
+		return &semantic.SViewType{Begin: exprSummary(expr.ValueArgs[0]), End: exprSummary(expr.ValueArgs[1])}, nil
+	default:
+		return nil, fmt.Errorf("unknown built-in type %q", expr.Name)
 	}
 }
 
@@ -541,7 +613,7 @@ func (s *functionState) resolveDynamicShapeType(expr *ast.GenericType) (semantic
 		if err != nil {
 			return nil, true, err
 		}
-		return &semantic.DListViewType{Elem: elem}, true, nil
+		return &semantic.DArrayViewType{Elem: elem, SurfaceName: "view"}, true, nil
 	case "DArray":
 		if len(expr.Args) != 2 {
 			return nil, true, fmt.Errorf("DArray expects 2 arguments, got %d", len(expr.Args))
@@ -663,6 +735,12 @@ func (g *llvmGenerator) runtimeBackedStructType(t semantic.Type) semantic.Type {
 		}
 		return nil
 	}
+	if _, ok := t.(*semantic.SViewType); ok {
+		if base, ok := g.result.NamedTypes["CtxStringView"]; ok {
+			return base
+		}
+		return nil
+	}
 	if darray, ok := t.(*semantic.DArrayType); ok {
 		base, ok := g.result.NamedTypes["DynArray"]
 		if !ok {
@@ -671,4 +749,15 @@ func (g *llvmGenerator) runtimeBackedStructType(t semantic.Type) semantic.Type {
 		return &semantic.GenericInstanceType{Name: "DynArray", Base: base, Args: []semantic.Type{darray.Elem}}
 	}
 	return nil
+}
+
+func exprSummary(expr ast.Expr) string {
+	switch n := expr.(type) {
+	case *ast.IntLit:
+		return n.Value
+	case *ast.Ident:
+		return n.Name
+	default:
+		return "?"
+	}
 }

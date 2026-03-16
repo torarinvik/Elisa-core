@@ -28,6 +28,17 @@ func shapeFromTypeExpr(expr ast.TypeExpr) semantic.Shape {
 	return &semantic.NamedShape{Name: "?"}
 }
 
+func shapeFromValueExpr(expr ast.Expr) semantic.Shape {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return &semantic.NamedShape{Name: n.Name}
+	case *ast.IntLit:
+		return &semantic.NamedShape{Name: n.Value}
+	default:
+		return &semantic.NamedShape{Name: "?"}
+	}
+}
+
 func normalizeIf(stmt *ast.IfStmt) *ast.IfStmt {
 	if stmt == nil || len(stmt.Elifs) == 0 {
 		return stmt
@@ -270,7 +281,7 @@ func isSignedIntegerType(t semantic.Type) bool {
 		return false
 	}
 	switch b.Name {
-	case "int", "isize", "i8", "i16", "i32", "i64":
+	case "char", "int", "isize", "i8", "i16", "i32", "i64":
 		return true
 	default:
 		return false
@@ -294,7 +305,7 @@ func integerBitWidth(t semantic.Type, wordBits int) int {
 		return 16
 	case "i32", "u32":
 		return 32
-	case "i64", "u64":
+	case "char", "i64", "u64":
 		return 64
 	case "int", "isize", "usize", "uintptr":
 		return wordBits

@@ -64,6 +64,8 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		return &RefType{Elem: a.resolveType(n.Elem), State: RefState(n.State)}
 	case *ast.ArrayType:
 		return a.resolveArrayType(n)
+	case *ast.BuiltinTypeExpr:
+		return a.resolveBuiltinSurfaceType(n)
 	case *ast.MutableType:
 		return a.resolveType(n.Elem)
 	case *ast.TailType:
@@ -103,7 +105,7 @@ func (a *Analyzer) resolveDynamicShapeType(expr *ast.GenericType) (Type, bool) {
 			a.errorf(expr.Pos(), "view expects 1 argument, got %d", len(expr.Args))
 			return invalidType, true
 		}
-		return &DListViewType{Elem: a.resolveType(expr.Args[0])}, true
+		return &DArrayViewType{Elem: a.resolveType(expr.Args[0]), SurfaceName: "view"}, true
 	case "DArray":
 		if len(expr.Args) != 2 {
 			a.errorf(expr.Pos(), "DArray expects 2 arguments, got %d", len(expr.Args))
@@ -139,11 +141,86 @@ func (a *Analyzer) resolveDynamicShapeType(expr *ast.GenericType) (Type, bool) {
 	}
 }
 
+func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
+	switch expr.Name {
+	case "array":
+		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 1 {
+			a.errorf(expr.Pos(), "array expects 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		resolved := a.resolveArrayType(&ast.ArrayType{Position: expr.Position, Elem: expr.TypeArgs[0], Size: expr.ValueArgs[0]})
+		if arrayType, ok := resolved.(*ArrayType); ok {
+			arrayType.SurfaceName = "array"
+		}
+		return resolved
+	case "darray":
+		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 1 {
+			a.errorf(expr.Pos(), "darray expects 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		return &DArrayType{Elem: a.resolveType(expr.TypeArgs[0]), Shape: a.resolveShapeExpr(expr.ValueArgs[0]), SurfaceName: "darray"}
+	case "str", "string":
+		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 1 {
+			a.errorf(expr.Pos(), "str expects 1 argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		resolved := a.resolveArrayType(&ast.ArrayType{
+			Position: expr.Position,
+			Elem:     &ast.NamedType{Position: expr.Position, Name: "u8"},
+			Size:     expr.ValueArgs[0],
+		})
+		if arrayType, ok := resolved.(*ArrayType); ok {
+			arrayType.SurfaceName = "str"
+		}
+		return resolved
+	case "dstr", "dstring":
+		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 1 {
+			a.errorf(expr.Pos(), "dstr expects 1 argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		return &DStrType{Shape: a.resolveShapeExpr(expr.ValueArgs[0]), SurfaceName: "dstr"}
+	case "view":
+		if len(expr.TypeArgs) != 1 {
+			a.errorf(expr.Pos(), "view expects 1 type argument, got %d", len(expr.TypeArgs))
+			return invalidType
+		}
+		viewType := &DArrayViewType{Elem: a.resolveType(expr.TypeArgs[0]), SurfaceName: "view"}
+		if len(expr.ValueArgs) == 2 {
+			viewType.Begin = a.exprSummary(expr.ValueArgs[0])
+			viewType.End = a.exprSummary(expr.ValueArgs[1])
+		} else if len(expr.ValueArgs) != 0 {
+			a.errorf(expr.Pos(), "view expects either 1 or 3 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		return viewType
+	case "sview":
+		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 2 {
+			a.errorf(expr.Pos(), "sview expects 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		return &SViewType{Begin: a.exprSummary(expr.ValueArgs[0]), End: a.exprSummary(expr.ValueArgs[1])}
+	default:
+		a.errorf(expr.Pos(), "unknown built-in type %q", expr.Name)
+		return invalidType
+	}
+}
+
 func (a *Analyzer) resolveShapeArg(expr ast.TypeExpr) Shape {
 	name, ok := shapeNameFromTypeExpr(expr)
 	if !ok {
 		a.errorf(expr.Pos(), "shape witness must be an identifier")
 		return &NamedShape{Name: "?"}
+	}
+	if shape, ok := a.lookupShapeParam(name); ok {
+		return shape
+	}
+	return &NamedShape{Name: name}
+}
+
+func (a *Analyzer) resolveShapeExpr(expr ast.Expr) Shape {
+	name, ok := shapeNameFromValueExpr(expr)
+	if !ok {
+		return &NamedShape{Name: a.exprSummary(expr)}
 	}
 	if shape, ok := a.lookupShapeParam(name); ok {
 		return shape
@@ -288,17 +365,19 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 	case *RefType:
 		return &RefType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), State: n.State}
 	case *ArrayType:
-		return &ArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Size: n.Size, HasConstSize: n.HasConstSize, ConstSize: n.ConstSize}
+		return &ArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Size: n.Size, HasConstSize: n.HasConstSize, ConstSize: n.ConstSize, SurfaceName: n.SurfaceName}
 	case *DArrayType:
-		return &DArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Shape: a.substituteShape(n.Shape, shapeBindings)}
+		return &DArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Shape: a.substituteShape(n.Shape, shapeBindings), SurfaceName: n.SurfaceName}
 	case *DArrayViewType:
-		return &DArrayViewType{Elem: a.substituteType(n.Elem, bindings, shapeBindings)}
+		return &DArrayViewType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Begin: n.Begin, End: n.End, SurfaceName: n.SurfaceName}
 	case *DListType:
 		return &DListType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Shape: a.substituteShape(n.Shape, shapeBindings)}
 	case *DListViewType:
 		return &DListViewType{Elem: a.substituteType(n.Elem, bindings, shapeBindings)}
 	case *DStrType:
-		return &DStrType{Shape: a.substituteShape(n.Shape, shapeBindings)}
+		return &DStrType{Shape: a.substituteShape(n.Shape, shapeBindings), SurfaceName: n.SurfaceName}
+	case *SViewType:
+		return &SViewType{Begin: n.Begin, End: n.End}
 	case *GenericInstanceType:
 		args := make([]Type, 0, len(n.Args))
 		for _, arg := range n.Args {
@@ -374,6 +453,30 @@ func (a *Analyzer) collectImplicitShapeParamsFromType(expr ast.TypeExpr, seen ma
 		a.collectImplicitShapeParamsFromType(n.Elem, seen, order)
 	case *ast.ArrayType:
 		a.collectImplicitShapeParamsFromType(n.Elem, seen, order)
+	case *ast.BuiltinTypeExpr:
+		switch n.Name {
+		case "array", "view":
+			for _, arg := range n.TypeArgs {
+				a.collectImplicitShapeParamsFromType(arg, seen, order)
+			}
+		case "darray":
+			if len(n.TypeArgs) > 0 {
+				a.collectImplicitShapeParamsFromType(n.TypeArgs[0], seen, order)
+			}
+			if len(n.ValueArgs) > 0 {
+				if name, ok := shapeNameFromValueExpr(n.ValueArgs[0]); ok && isImplicitShapeWitnessName(name) && !seen[name] {
+					seen[name] = true
+					*order = append(*order, name)
+				}
+			}
+		case "dstr", "dstring":
+			if len(n.ValueArgs) > 0 {
+				if name, ok := shapeNameFromValueExpr(n.ValueArgs[0]); ok && isImplicitShapeWitnessName(name) && !seen[name] {
+					seen[name] = true
+					*order = append(*order, name)
+				}
+			}
+		}
 	case *ast.GenericType:
 		switch n.Name {
 		case "DArray":
@@ -425,6 +528,14 @@ func shapeNameFromTypeExpr(expr ast.TypeExpr) (string, bool) {
 		return "", false
 	}
 	return name.Name, true
+}
+
+func shapeNameFromValueExpr(expr ast.Expr) (string, bool) {
+	ident, ok := expr.(*ast.Ident)
+	if !ok {
+		return "", false
+	}
+	return ident.Name, true
 }
 
 func isImplicitShapeWitnessName(name string) bool {

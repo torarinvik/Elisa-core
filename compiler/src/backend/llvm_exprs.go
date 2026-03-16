@@ -158,67 +158,37 @@ func (s *functionState) emitStringLiteral(expr *ast.StringLit) (C.LLVMValueRef, 
 }
 
 func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
-	listType, err := s.listLiteralTargetType(expr, expected)
+	arrayType, err := s.listLiteralTargetType(expr, expected)
 	if err != nil {
 		return nil, nil, err
 	}
-	typeHintPtr, err := s.emitStackTempZeroed(listType.Elem, "listlit.hint")
+	if arrayType.HasConstSize && arrayType.ConstSize != int64(len(expr.Elems)) {
+		return nil, nil, fmt.Errorf("array literal resolved to %s but has %d elements", arrayType.String(), len(expr.Elems))
+	}
+	llvmType, err := s.g.lowerType(arrayType)
 	if err != nil {
 		return nil, nil, err
 	}
-	newHelperType := &semantic.FuncType{
-		Name:   "ctx_stage1rt_tlist_new",
-		Params: []semantic.Type{&semantic.RefType{Elem: listType.Elem, State: semantic.RefStateNonNull}},
-		Return: listType,
-	}
-	newCallee, err := s.g.ensureFunctionDeclared("ctx_stage1rt_tlist_new", newHelperType)
-	if err != nil {
-		return nil, nil, err
-	}
-	newLLVMType, err := s.g.lowerFunctionType(newHelperType)
-	if err != nil {
-		return nil, nil, err
-	}
-	current := s.buildCall(newLLVMType, newCallee, []C.LLVMValueRef{typeHintPtr}, "listnew")
-
-	pushHelperType := &semantic.FuncType{
-		Name:   "ctx_stage1rt_tlist_push",
-		Params: []semantic.Type{listType, &semantic.RefType{Elem: listType.Elem, State: semantic.RefStateNonNull}},
-		Return: listType,
-	}
-	pushCallee, err := s.g.ensureFunctionDeclared("ctx_stage1rt_tlist_push", pushHelperType)
-	if err != nil {
-		return nil, nil, err
-	}
-	pushLLVMType, err := s.g.lowerFunctionType(pushHelperType)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	for _, elem := range expr.Elems {
-		elemValue, _, err := s.emitExpr(elem, listType.Elem)
+	current := C.LLVMGetUndef(llvmType)
+	for i, elem := range expr.Elems {
+		elemValue, _, err := s.emitExpr(elem, arrayType.Elem)
 		if err != nil {
 			return nil, nil, err
 		}
-		elemPtr, err := s.emitStackTempValue(elemValue, listType.Elem, "listlit.elem")
-		if err != nil {
-			return nil, nil, err
-		}
-		args := []C.LLVMValueRef{current, elemPtr}
-		current = s.buildCall(pushLLVMType, pushCallee, args, "listpush")
+		current = C.LLVMBuildInsertValue(s.builder, current, elemValue, C.unsigned(i), cStringFree("arraylit.elem"))
 	}
-	return current, listType, nil
+	return current, arrayType, nil
 }
 
-func (s *functionState) listLiteralTargetType(expr *ast.ListLitExpr, expected semantic.Type) (*semantic.DListType, error) {
-	if expectedList, ok := expected.(*semantic.DListType); ok {
-		return expectedList, nil
+func (s *functionState) listLiteralTargetType(expr *ast.ListLitExpr, expected semantic.Type) (*semantic.ArrayType, error) {
+	if expectedArray, ok := expected.(*semantic.ArrayType); ok {
+		return expectedArray, nil
 	}
-	actualList, ok := s.exprType(expr).(*semantic.DListType)
+	actualArray, ok := s.exprType(expr).(*semantic.ArrayType)
 	if !ok {
-		return nil, fmt.Errorf("list literal did not resolve to a DList type")
+		return nil, fmt.Errorf("array literal did not resolve to a fixed array type")
 	}
-	return actualList, nil
+	return actualArray, nil
 }
 
 func (s *functionState) emitStackTempZeroed(t semantic.Type, name string) (C.LLVMValueRef, error) {
@@ -664,6 +634,12 @@ func (s *functionState) emitFixedArraySliceExpr(expr *ast.SliceExpr) (C.LLVMValu
 	if err != nil {
 		return nil, nil, true, err
 	}
+	if _, ok := resultType.(*semantic.SViewType); ok {
+		viewValue := C.LLVMGetUndef(viewLLVMType)
+		viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, dataPtr, 0, cStringFree("strslice.view.data"))
+		viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, sliceLen, 1, cStringFree("strslice.view.len"))
+		return viewValue, resultType, true, nil
+	}
 	elemSize, err := s.sizeOfType(arrayType.Elem)
 	if err != nil {
 		return nil, nil, true, err
@@ -737,6 +713,9 @@ func (s *functionState) emitRuntimeStringLenExpr(object ast.Expr, fieldType sema
 }
 
 func (s *functionState) emitIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if _, ok := semanticStringArrayType(s.exprType(expr.Object)); ok {
+		return s.emitStaticStringIndexExpr(expr)
+	}
 	if helperName, operandType, ok := runtimeStringIndexedOperand(s.exprType(expr.Object)); ok {
 		return s.emitRuntimeStringIndexExpr(expr, helperName, operandType)
 	}
@@ -754,6 +733,7 @@ func (s *functionState) emitRuntimeStringIndexExpr(expr *ast.IndexExpr, helperNa
 		return nil, nil, err
 	}
 	indexType := s.g.result.NamedTypes["i64"]
+	resultType := s.g.result.NamedTypes["char"]
 	indexValue, _, err := s.emitExpr(expr.Index, indexType)
 	if err != nil {
 		return nil, nil, err
@@ -761,7 +741,7 @@ func (s *functionState) emitRuntimeStringIndexExpr(expr *ast.IndexExpr, helperNa
 	helperType := &semantic.FuncType{
 		Name:   helperName,
 		Params: []semantic.Type{operandType, indexType},
-		Return: indexType,
+		Return: resultType,
 	}
 	callee, err := s.g.ensureFunctionDeclared(helperName, helperType)
 	if err != nil {
@@ -773,12 +753,51 @@ func (s *functionState) emitRuntimeStringIndexExpr(expr *ast.IndexExpr, helperNa
 	}
 	args := []C.LLVMValueRef{stringValue, indexValue}
 	call := s.buildCall(llvmFnType, callee, args, "stridx")
-	return call, indexType, nil
+	return call, resultType, nil
+}
+
+func semanticStringArrayType(t semantic.Type) (*semantic.ArrayType, bool) {
+	if arrayType, ok := t.(*semantic.ArrayType); ok {
+		if arrayType.SurfaceName == "str" || arrayType.SurfaceName == "string" {
+			return arrayType, true
+		}
+		return nil, false
+	}
+	ref, ok := t.(*semantic.RefType)
+	if !ok || ref.State != semantic.RefStateNonNull {
+		return nil, false
+	}
+	arrayType, ok := ref.Elem.(*semantic.ArrayType)
+	if !ok || (arrayType.SurfaceName != "str" && arrayType.SurfaceName != "string") {
+		return nil, false
+	}
+	return arrayType, true
+}
+
+func (s *functionState) emitStaticStringIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, error) {
+	ptr, _, err := s.emitIndexAddress(expr)
+	if err != nil {
+		return nil, nil, err
+	}
+	byteType := s.g.result.NamedTypes["u8"]
+	loaded, err := s.loadValue(ptr, byteType, "str.byte")
+	if err != nil {
+		return nil, nil, err
+	}
+	resultType := s.g.result.NamedTypes["char"]
+	llvmResultType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, err
+	}
+	return C.LLVMBuildZExt(s.builder, loaded, llvmResultType, cStringFree("stridx.zext")), resultType, nil
 }
 
 func runtimeStringIndexedOperand(t semantic.Type) (string, semantic.Type, bool) {
 	if _, ok := t.(*semantic.DStrType); ok {
 		return "ctx_stage1rt_string_index", t, true
+	}
+	if _, ok := t.(*semantic.SViewType); ok {
+		return "ctx_stage1rt_string_view_index", t, true
 	}
 	if st, ok := t.(*semantic.StructType); ok && st.Name == "CtxStringView" {
 		return "ctx_stage1rt_string_view_index", t, true
@@ -792,6 +811,9 @@ func runtimeStringIndexedOperand(t semantic.Type) (string, semantic.Type, bool) 
 	}
 	if _, ok := ref.Elem.(*semantic.DStrType); ok {
 		return "ctx_stage1rt_string_index", ref.Elem, true
+	}
+	if _, ok := ref.Elem.(*semantic.SViewType); ok {
+		return "ctx_stage1rt_string_view_index", ref.Elem, true
 	}
 	if st, ok := ref.Elem.(*semantic.StructType); ok && st.Name == "CtxStringView" {
 		return "ctx_stage1rt_string_view_index", ref.Elem, true
@@ -857,6 +879,9 @@ func runtimeSliceOperandInfo(objectType semantic.Type, resultType semantic.Type)
 	if _, ok := objectType.(*semantic.DStrType); ok {
 		return runtimeSliceInfo{helperName: "ctx_stage1rt_string_view", operandType: objectType, resultType: resultType, indexType: i64Type}, true
 	}
+	if _, ok := objectType.(*semantic.SViewType); ok {
+		return runtimeSliceInfo{helperName: "ctx_stage1rt_string_view_slice", operandType: objectType, resultType: resultType, indexType: i64Type}, true
+	}
 	if view, ok := objectType.(*semantic.DListType); ok {
 		return runtimeSliceInfo{helperName: "ctx_stage1rt_tlist_view", operandType: objectType, resultType: &semantic.DListViewType{Elem: view.Elem}, indexType: i64Type}, true
 	}
@@ -880,6 +905,9 @@ func runtimeSliceOperandInfo(objectType semantic.Type, resultType semantic.Type)
 	}
 	if _, ok := ref.Elem.(*semantic.DStrType); ok {
 		return runtimeSliceInfo{helperName: "ctx_stage1rt_string_view", operandType: ref.Elem, resultType: resultType, indexType: i64Type}, true
+	}
+	if _, ok := ref.Elem.(*semantic.SViewType); ok {
+		return runtimeSliceInfo{helperName: "ctx_stage1rt_string_view_slice", operandType: ref.Elem, resultType: resultType, indexType: i64Type}, true
 	}
 	if view, ok := ref.Elem.(*semantic.DListType); ok {
 		return runtimeSliceInfo{helperName: "ctx_stage1rt_tlist_view", operandType: ref.Elem, resultType: &semantic.DListViewType{Elem: view.Elem}, indexType: i64Type}, true
@@ -930,6 +958,9 @@ func classifyRuntimeStringCompareKind(t semantic.Type) runtimeStringCompareKind 
 	if _, ok := t.(*semantic.DStrType); ok {
 		return runtimeStringCompareDStr
 	}
+	if _, ok := t.(*semantic.SViewType); ok {
+		return runtimeStringCompareView
+	}
 	if st, ok := t.(*semantic.StructType); ok && st.Name == "CtxStringView" {
 		return runtimeStringCompareView
 	}
@@ -939,6 +970,9 @@ func classifyRuntimeStringCompareKind(t semantic.Type) runtimeStringCompareKind 
 	}
 	if builtin, ok := ref.Elem.(*semantic.BuiltinType); ok && builtin.Name == "u8" {
 		return runtimeStringCompareRaw
+	}
+	if _, ok := ref.Elem.(*semantic.SViewType); ok {
+		return runtimeStringCompareView
 	}
 	return runtimeStringCompareNone
 }

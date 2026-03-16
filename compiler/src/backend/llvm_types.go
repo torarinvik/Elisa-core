@@ -37,6 +37,12 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 	switch tt := t.(type) {
 	case *semantic.InvalidType, *semantic.NullType, *semantic.BuiltinType, *semantic.TypeParamType, *semantic.DStrType:
 		return nil
+	case *semantic.SViewType:
+		if st, ok := g.lookupStructType("CtxStringView"); ok {
+			_, err := g.ensureStructBody(st.Name, st)
+			return err
+		}
+		return fmt.Errorf("missing runtime struct CtxStringView")
 	case *semantic.RefType:
 		return g.noteType(tt.Elem)
 	case *semantic.ArrayType:
@@ -214,6 +220,12 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		return g.ensureRuntimeCtxListView()
 	case *semantic.DStrType:
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
+	case *semantic.SViewType:
+		st, ok := g.lookupStructType("CtxStringView")
+		if !ok {
+			return nil, fmt.Errorf("missing runtime struct CtxStringView")
+		}
+		return g.ensureStructBody(st.Name, st)
 	case *semantic.StructType:
 		if len(tt.TypeParams) == 0 {
 			return g.ensureStructBody(tt.Name, tt)
@@ -236,6 +248,8 @@ func (g *llvmGenerator) lowerBuiltin(name string) (C.LLVMTypeRef, error) {
 		return C.LLVMVoidTypeInContext(g.context), nil
 	case "bool":
 		return C.LLVMInt1TypeInContext(g.context), nil
+	case "char":
+		return C.LLVMInt64TypeInContext(g.context), nil
 	case "i8", "u8":
 		return C.LLVMInt8TypeInContext(g.context), nil
 	case "i16", "u16":
@@ -323,11 +337,11 @@ func (g *llvmGenerator) ensureRuntimeDynArray(elem semantic.Type) (C.LLVMTypeRef
 }
 
 func (g *llvmGenerator) ensureRuntimeDynArrayView() (C.LLVMTypeRef, error) {
-	return g.ensureRuntimeSizedStruct("DynArrayView", 2)
+	return g.ensureRuntimeSizedStruct("DynArrayView", 3)
 }
 
 func (g *llvmGenerator) ensureRuntimeCtxList() (C.LLVMTypeRef, error) {
-	return g.ensureRuntimeSizedStruct("CtxList", 3)
+	return g.ensureRuntimeSizedStruct("CtxListHandle", 3)
 }
 
 func (g *llvmGenerator) ensureRuntimeCtxListView() (C.LLVMTypeRef, error) {
@@ -409,15 +423,17 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type) semantic.Ty
 	case *semantic.RefType:
 		return &semantic.RefType{Elem: substituteType(tt.Elem, subst), State: tt.State}
 	case *semantic.ArrayType:
-		return &semantic.ArrayType{Elem: substituteType(tt.Elem, subst), Size: tt.Size, HasConstSize: tt.HasConstSize, ConstSize: tt.ConstSize}
+		return &semantic.ArrayType{Elem: substituteType(tt.Elem, subst), Size: tt.Size, HasConstSize: tt.HasConstSize, ConstSize: tt.ConstSize, SurfaceName: tt.SurfaceName}
 	case *semantic.DArrayType:
-		return &semantic.DArrayType{Elem: substituteType(tt.Elem, subst), Shape: tt.Shape}
+		return &semantic.DArrayType{Elem: substituteType(tt.Elem, subst), Shape: tt.Shape, SurfaceName: tt.SurfaceName}
 	case *semantic.DArrayViewType:
-		return &semantic.DArrayViewType{Elem: substituteType(tt.Elem, subst)}
+		return &semantic.DArrayViewType{Elem: substituteType(tt.Elem, subst), Begin: tt.Begin, End: tt.End, SurfaceName: tt.SurfaceName}
 	case *semantic.DListType:
 		return &semantic.DListType{Elem: substituteType(tt.Elem, subst), Shape: tt.Shape}
 	case *semantic.DListViewType:
 		return &semantic.DListViewType{Elem: substituteType(tt.Elem, subst)}
+	case *semantic.SViewType:
+		return &semantic.SViewType{Begin: tt.Begin, End: tt.End}
 	case *semantic.GenericInstanceType:
 		args := make([]semantic.Type, 0, len(tt.Args))
 		for _, arg := range tt.Args {

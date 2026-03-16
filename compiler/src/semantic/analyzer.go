@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"llcontext/src/ast"
+	"llcontext/src/lexer"
 )
 
 type ConstValueKind int
@@ -117,8 +118,113 @@ func Analyze(file *ast.File) *Result {
 }
 
 func (a *Analyzer) registerBuiltins() {
-	for _, name := range []string{"void", "bool", "int", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize", "uintptr"} {
+	for _, name := range []string{"void", "bool", "char", "int", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize", "uintptr"} {
 		a.namedTypes[name] = &BuiltinType{Name: name}
+	}
+	a.registerBuiltinRuntimeStructs()
+}
+
+func (a *Analyzer) registerBuiltinRuntimeStructs() {
+	a.registerBuiltinStructType("CtxStringView", nil, []builtinFieldSpec{
+		{name: "data", typ: refTypeExpr("u8", false), mutable: true},
+		{name: "len", typ: namedTypeExpr("i64", false), mutable: true},
+	})
+	a.registerBuiltinStructType("CtxList", nil, []builtinFieldSpec{
+		{name: "len", typ: namedTypeExpr("i64", false), mutable: true},
+		{name: "cap", typ: namedTypeExpr("i64", false), mutable: true},
+		{name: "elem_size", typ: namedTypeExpr("i64", false), mutable: true},
+		{name: "data", typ: nestedRefTypeExpr("void", true, true), mutable: true},
+		{name: "inline_boxes", typ: refTypeExpr("u8", true), mutable: true},
+		{name: "inline_box_stride", typ: namedTypeExpr("i64", false), mutable: true},
+	})
+	a.registerBuiltinStructType("CtxListView", nil, []builtinFieldSpec{
+		{name: "data", typ: nestedRefTypeExpr("void", true, true), mutable: true},
+		{name: "len", typ: namedTypeExpr("i64", false), mutable: true},
+		{name: "elem_size", typ: namedTypeExpr("i64", false), mutable: true},
+	})
+	a.registerBuiltinStructType("DynArray", []string{"T"}, []builtinFieldSpec{
+		{name: "items", typ: refTypeParamExpr("T", true), mutable: true},
+		{name: "count", typ: namedTypeExpr("usize", false), mutable: true},
+		{name: "capacity", typ: namedTypeExpr("usize", false), mutable: true},
+	})
+	a.registerBuiltinStructType("DynArrayView", nil, []builtinFieldSpec{
+		{name: "data", typ: refTypeExpr("void", true), mutable: true},
+		{name: "len", typ: namedTypeExpr("usize", false), mutable: true},
+		{name: "elem_size", typ: namedTypeExpr("usize", false), mutable: true},
+	})
+}
+
+type builtinFieldSpec struct {
+	name    string
+	typ     ast.TypeExpr
+	mutable bool
+}
+
+func (a *Analyzer) registerBuiltinStructType(name string, typeParams []string, fields []builtinFieldSpec) {
+	declFields := make([]ast.FieldDecl, 0, len(fields))
+	semanticFields := make(map[string]Field, len(fields))
+	decl := &ast.StructDecl{Position: lexer.Pos{}, Name: name, TypeParams: append([]string(nil), typeParams...), ReprC: true}
+	a.withTypeParams(typeParams, nil, func() {
+		for _, field := range fields {
+			declField := ast.FieldDecl{Position: lexer.Pos{}, Name: field.name, Mutable: field.mutable, Type: field.typ}
+			declFields = append(declFields, declField)
+			semanticFields[field.name] = Field{Name: field.name, Type: a.resolveType(field.typ), Mutable: field.mutable}
+		}
+	})
+	decl.Fields = declFields
+	a.namedTypes[name] = &StructType{
+		Name:       name,
+		TypeParams: append([]string(nil), typeParams...),
+		Fields:     semanticFields,
+		ReprC:      true,
+		Decl:       decl,
+		Builtin:    true,
+	}
+}
+
+func namedTypeExpr(name string, mutable bool) ast.TypeExpr {
+	base := ast.TypeExpr(&ast.NamedType{Position: lexer.Pos{}, Name: name})
+	if mutable {
+		return &ast.MutableType{Position: lexer.Pos{}, Elem: base}
+	}
+	return base
+}
+
+func refTypeExpr(name string, nullable bool) ast.TypeExpr {
+	state := ast.RefStateNonNull
+	if nullable {
+		state = ast.RefStateNullable
+	}
+	return &ast.RefType{Position: lexer.Pos{}, Elem: &ast.NamedType{Position: lexer.Pos{}, Name: name}, State: state}
+}
+
+func refTypeParamExpr(name string, nullable bool) ast.TypeExpr {
+	state := ast.RefStateNonNull
+	if nullable {
+		state = ast.RefStateNullable
+	}
+	return &ast.RefType{Position: lexer.Pos{}, Elem: &ast.NamedType{Position: lexer.Pos{}, Name: name}, State: state}
+}
+
+func nestedRefTypeExpr(name string, innerNonNull bool, outerNullable bool) ast.TypeExpr {
+	innerState := ast.RefStateNullable
+	if innerNonNull {
+		innerState = ast.RefStateNonNull
+	}
+	outerState := ast.RefStateNonNull
+	if outerNullable {
+		outerState = ast.RefStateNullable
+	}
+	inner := &ast.RefType{Position: lexer.Pos{}, Elem: &ast.NamedType{Position: lexer.Pos{}, Name: name}, State: innerState}
+	return &ast.RefType{Position: lexer.Pos{}, Elem: inner, State: outerState}
+}
+
+func isBuiltinRuntimeStructName(name string) bool {
+	switch name {
+	case "CtxStringView", "CtxList", "CtxListView", "DynArray", "DynArrayView":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -195,7 +301,10 @@ func (a *Analyzer) collectNamedTypes(decls []ast.Decl) {
 	for _, decl := range decls {
 		switch n := decl.(type) {
 		case *ast.StructDecl:
-			if _, exists := a.namedTypes[n.Name]; exists {
+			if existing, exists := a.namedTypes[n.Name]; exists {
+				if st, ok := existing.(*StructType); ok && st.Builtin && isBuiltinRuntimeStructName(n.Name) {
+					continue
+				}
 				a.errorf(n.Pos(), "duplicate type %q", n.Name)
 				continue
 			}
@@ -225,6 +334,9 @@ func (a *Analyzer) populateStructFields(decls []ast.Decl) {
 		}
 		st, _ := a.namedTypes[stDecl.Name].(*StructType)
 		if st == nil {
+			continue
+		}
+		if st.Builtin && isBuiltinRuntimeStructName(stDecl.Name) {
 			continue
 		}
 		a.withTypeParams(stDecl.TypeParams, nil, func() {
