@@ -221,6 +221,34 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 	if expected == nil || actual == nil || semantic.SameType(actual, expected) {
 		return value, nil
 	}
+	if expectedUnion, ok := expected.(*semantic.ErrorUnionType); ok {
+		if actualUnion, ok := actual.(*semantic.ErrorUnionType); ok {
+			codeValue, err := s.extractErrorUnionCode(value, actualUnion)
+			if err != nil {
+				return nil, err
+			}
+			if isVoidType(expectedUnion.Value) {
+				return codeValue, nil
+			}
+			payloadValue, err := s.extractErrorUnionPayload(value, actualUnion)
+			if err != nil {
+				return nil, err
+			}
+			payloadValue, err = s.coerceValue(payloadValue, actualUnion.Value, expectedUnion.Value)
+			if err != nil {
+				return nil, err
+			}
+			return s.buildErrorUnionValue(expectedUnion, codeValue, payloadValue)
+		}
+		if semantic.SameType(expectedUnion.Errors, actual) {
+			return s.buildErrorUnionFailure(expectedUnion, value)
+		}
+		payloadValue, err := s.coerceValue(value, actual, expectedUnion.Value)
+		if err != nil {
+			return nil, err
+		}
+		return s.buildErrorUnionSuccess(expectedUnion, payloadValue)
+	}
 	actualLLVM, err := s.g.lowerType(actual)
 	if err != nil {
 		return nil, err
@@ -248,6 +276,70 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 		return C.LLVMBuildIntToPtr(s.builder, value, expectedLLVM, cStringFree("inttoptr")), nil
 	}
 	return value, nil
+}
+
+func (s *functionState) buildErrorUnionSuccess(unionType *semantic.ErrorUnionType, payload C.LLVMValueRef) (C.LLVMValueRef, error) {
+	zeroCode, err := s.errorCodeConstant(0)
+	if err != nil {
+		return nil, err
+	}
+	return s.buildErrorUnionValue(unionType, zeroCode, payload)
+}
+
+func (s *functionState) buildErrorUnionFailure(unionType *semantic.ErrorUnionType, errorCode C.LLVMValueRef) (C.LLVMValueRef, error) {
+	if unionType == nil {
+		return nil, fmt.Errorf("missing error union type")
+	}
+	if isVoidType(unionType.Value) {
+		return errorCode, nil
+	}
+	payload, err := s.zeroValue(unionType.Value)
+	if err != nil {
+		return nil, err
+	}
+	return s.buildErrorUnionValue(unionType, errorCode, payload)
+}
+
+func (s *functionState) buildErrorUnionValue(unionType *semantic.ErrorUnionType, errorCode C.LLVMValueRef, payload C.LLVMValueRef) (C.LLVMValueRef, error) {
+	if unionType == nil {
+		return nil, fmt.Errorf("missing error union type")
+	}
+	if isVoidType(unionType.Value) {
+		return errorCode, nil
+	}
+	llvmType, err := s.g.lowerType(unionType)
+	if err != nil {
+		return nil, err
+	}
+	value := C.LLVMGetUndef(llvmType)
+	value = C.LLVMBuildInsertValue(s.builder, value, errorCode, 0, cStringFree("errunion.err"))
+	value = C.LLVMBuildInsertValue(s.builder, value, payload, 1, cStringFree("errunion.value"))
+	return value, nil
+}
+
+func (s *functionState) extractErrorUnionCode(value C.LLVMValueRef, unionType *semantic.ErrorUnionType) (C.LLVMValueRef, error) {
+	if unionType == nil {
+		return nil, fmt.Errorf("missing error union type")
+	}
+	if isVoidType(unionType.Value) {
+		return value, nil
+	}
+	return C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("errunion.code")), nil
+}
+
+func (s *functionState) extractErrorUnionPayload(value C.LLVMValueRef, unionType *semantic.ErrorUnionType) (C.LLVMValueRef, error) {
+	if unionType == nil || isVoidType(unionType.Value) {
+		return nil, fmt.Errorf("error union has no payload")
+	}
+	return C.LLVMBuildExtractValue(s.builder, value, 1, cStringFree("errunion.payload")), nil
+}
+
+func (s *functionState) errorCodeConstant(code uint32) (C.LLVMValueRef, error) {
+	llvmType, err := s.g.lowerBuiltin("u32")
+	if err != nil {
+		return nil, err
+	}
+	return C.LLVMConstInt(llvmType, C.ulonglong(code), 0), nil
 }
 
 func (s *functionState) coerceNumericValue(value C.LLVMValueRef, actual semantic.Type, expected semantic.Type) (C.LLVMValueRef, error) {
@@ -441,6 +533,20 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			return t, nil
 		}
 		return nil, fmt.Errorf("unknown type %q", n.Name)
+	case *ast.ErrorUnionTypeExpr:
+		valueType, err := s.resolveTypeExpr(n.Value)
+		if err != nil {
+			return nil, err
+		}
+		errorType, err := s.resolveTypeExpr(n.Errors)
+		if err != nil {
+			return nil, err
+		}
+		errSet, ok := errorType.(*semantic.ErrorSetType)
+		if !ok {
+			return nil, fmt.Errorf("error union expects an error set on the right-hand side")
+		}
+		return &semantic.ErrorUnionType{Value: valueType, Errors: errSet}, nil
 	case *ast.RefType:
 		elem, err := s.resolveTypeExpr(n.Elem)
 		if err != nil {

@@ -115,7 +115,7 @@ func (p *Parser) parseStaticStmt() ast.Stmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_STATIC)
 
-	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "error" {
+	if p.peek() == lexer.TOKEN_ERROR {
 		p.advance()
 		p.expect(lexer.TOKEN_LPAREN)
 		msg := p.parseExpr()

@@ -60,6 +60,15 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		}
 		a.errorf(n.Pos(), "unknown type %q", n.Name)
 		return invalidType
+	case *ast.ErrorUnionTypeExpr:
+		valueType := a.resolveType(n.Value)
+		errorType := a.resolveType(n.Errors)
+		errSet, ok := errorType.(*ErrorSetType)
+		if !ok {
+			a.errorf(n.Pos(), "error union expects an error set on the right-hand side, got %s", errorType.String())
+			return invalidType
+		}
+		return &ErrorUnionType{Value: valueType, Errors: errSet}
 	case *ast.RefType:
 		return &RefType{Elem: a.resolveType(n.Elem), State: RefState(n.State), Storage: RefStorage(n.Storage), ExplicitStorage: n.Explicit}
 	case *ast.ArrayType:
@@ -362,6 +371,8 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 			return resolved
 		}
 		return n
+	case *ErrorUnionType:
+		return &ErrorUnionType{Value: a.substituteType(n.Value, bindings, shapeBindings), Errors: n.Errors}
 	case *RefType:
 		return &RefType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), State: n.State, Storage: n.Storage, ExplicitStorage: n.ExplicitStorage}
 	case *ArrayType:
@@ -445,6 +456,9 @@ func (a *Analyzer) collectImplicitShapeParamsFromType(expr ast.TypeExpr, seen ma
 		return
 	}
 	switch n := expr.(type) {
+	case *ast.ErrorUnionTypeExpr:
+		a.collectImplicitShapeParamsFromType(n.Value, seen, order)
+		a.collectImplicitShapeParamsFromType(n.Errors, seen, order)
 	case *ast.RefType:
 		a.collectImplicitShapeParamsFromType(n.Elem, seen, order)
 	case *ast.MutableType:

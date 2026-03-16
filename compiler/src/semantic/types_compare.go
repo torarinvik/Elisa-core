@@ -11,6 +11,9 @@ func SameType(a, b Type) bool {
 		return true
 	}
 	switch ta := a.(type) {
+	case *NeverType:
+		_, ok := b.(*NeverType)
+		return ok
 	case *NullType:
 		_, ok := b.(*NullType)
 		return ok
@@ -20,6 +23,12 @@ func SameType(a, b Type) bool {
 	case *TypeParamType:
 		tb, ok := b.(*TypeParamType)
 		return ok && ta.Name == tb.Name
+	case *ErrorSetType:
+		tb, ok := b.(*ErrorSetType)
+		return ok && ta.Name == tb.Name
+	case *ErrorUnionType:
+		tb, ok := b.(*ErrorUnionType)
+		return ok && SameType(ta.Value, tb.Value) && SameType(ta.Errors, tb.Errors)
 	case *RefType:
 		tb, ok := b.(*RefType)
 		return ok && ta.State == tb.State && ta.Storage == tb.Storage && SameType(ta.Elem, tb.Elem)
@@ -99,6 +108,9 @@ func AssignableTo(dst, src Type) bool {
 	if IsInvalidType(dst) || IsInvalidType(src) {
 		return true
 	}
+	if IsNeverType(src) {
+		return true
+	}
 	if assignableRuntimeCompatible(dst, src) {
 		return true
 	}
@@ -113,6 +125,15 @@ func AssignableTo(dst, src Type) bool {
 	}
 	if SameType(dst, src) {
 		return true
+	}
+	if du, ok := dst.(*ErrorUnionType); ok {
+		if su, ok := src.(*ErrorUnionType); ok {
+			return SameType(du.Errors, su.Errors) && AssignableTo(du.Value, su.Value)
+		}
+		if AssignableTo(du.Value, src) {
+			return true
+		}
+		return SameType(du.Errors, src)
 	}
 	if IsNumericType(dst) && IsNumericType(src) {
 		return true
@@ -148,12 +169,23 @@ func matchTypePattern(pattern, actual Type) bool {
 		return true
 	}
 	switch p := pattern.(type) {
+	case *NeverType:
+		_, ok := actual.(*NeverType)
+		return ok
 	case *BuiltinType:
 		a, ok := actual.(*BuiltinType)
 		return ok && p.Name == a.Name
 	case *NullType:
 		_, ok := actual.(*NullType)
 		return ok
+	case *ErrorSetType:
+		a, ok := actual.(*ErrorSetType)
+		return ok && p.Name == a.Name
+	case *ErrorUnionType:
+		if a, ok := actual.(*ErrorUnionType); ok {
+			return matchTypePattern(p.Value, a.Value) && matchTypePattern(p.Errors, a.Errors)
+		}
+		return matchTypePattern(p.Value, actual)
 	case *RefType:
 		a, ok := actual.(*RefType)
 		if !ok {
@@ -226,8 +258,22 @@ func matchTypePattern(pattern, actual Type) bool {
 }
 
 func MergeTypes(a, b Type) Type {
+	if IsNeverType(a) {
+		return b
+	}
+	if IsNeverType(b) {
+		return a
+	}
 	if SameType(a, b) {
 		return a
+	}
+	if au, ok := a.(*ErrorUnionType); ok {
+		if bu, ok := b.(*ErrorUnionType); ok && SameType(au.Errors, bu.Errors) {
+			merged := MergeTypes(au.Value, bu.Value)
+			if !IsInvalidType(merged) {
+				return &ErrorUnionType{Value: merged, Errors: au.Errors}
+			}
+		}
 	}
 	if IsNumericType(a) && IsNumericType(b) {
 		return CommonNumericType(a, b)

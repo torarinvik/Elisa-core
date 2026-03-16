@@ -74,11 +74,69 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = a.analyzeCallExpr(n)
 		return
 	case *ast.FieldExpr:
+		if errorType, ok := a.errorTagType(n); ok {
+			result = errorType
+			return
+		}
 		if t, ok := a.lookupRefinedExprType(n); ok {
 			result = t
 			return
 		}
 		result = a.analyzeFieldExpr(n)
+		return
+	case *ast.RaiseExpr:
+		errorType := a.analyzeExpr(n.Error)
+		currentUnion, ok := a.currentReturn.(*ErrorUnionType)
+		if !ok {
+			a.errorf(n.Pos(), "raise requires the current function to return an error union")
+			result = neverType
+			return
+		}
+		if !SameType(currentUnion.Errors, errorType) {
+			a.errorf(n.Pos(), "raise expects %s, got %s", currentUnion.Errors.String(), errorType.String())
+		}
+		result = neverType
+		return
+	case *ast.TryExpr:
+		valueType := a.analyzeExpr(n.Value)
+		unionType, ok := valueType.(*ErrorUnionType)
+		if !ok {
+			a.errorf(n.Pos(), "try requires a fallible expression, got %s", valueType.String())
+			result = invalidType
+			return
+		}
+		if n.Fallback == nil {
+			currentUnion, ok := a.currentReturn.(*ErrorUnionType)
+			if !ok {
+				a.errorf(n.Pos(), "try without else requires the current function to return an error union")
+			} else if !SameType(currentUnion.Errors, unionType.Errors) {
+				a.errorf(n.Pos(), "cannot propagate %s from a function returning %s", unionType.Errors.String(), currentUnion.Errors.String())
+			}
+			result = unionType.Value
+			return
+		}
+		fallbackType := a.analyzeExpr(n.Fallback)
+		if !IsNeverType(fallbackType) && !AssignableTo(unionType.Value, fallbackType) {
+			a.errorf(n.Pos(), "try fallback expects %s, got %s", unionType.Value.String(), fallbackType.String())
+			a.reportShapeMismatchNotes(n.Pos(), unionType.Value, fallbackType)
+		}
+		result = unionType.Value
+		return
+	case *ast.UnwrapElseExpr:
+		valueType := a.analyzeExpr(n.Value)
+		refType, ok := valueType.(*RefType)
+		if !ok || refType.State == RefStateNonNull {
+			a.errorf(n.Pos(), "else recovery requires a nullable reference, got %s", valueType.String())
+			result = invalidType
+			return
+		}
+		resultType := cloneRefTypeWithState(refType, RefStateNonNull)
+		fallbackType := a.analyzeExpr(n.Fallback)
+		if !IsNeverType(fallbackType) && !AssignableTo(resultType, fallbackType) {
+			a.errorf(n.Pos(), "else fallback expects %s, got %s", resultType.String(), fallbackType.String())
+			a.reportShapeMismatchNotes(n.Pos(), resultType, fallbackType)
+		}
+		result = resultType
 		return
 	case *ast.IndexExpr:
 		result = a.analyzeIndexExpr(n)
@@ -138,6 +196,26 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = invalidType
 		return
 	}
+}
+
+func (a *Analyzer) errorTagType(expr *ast.FieldExpr) (Type, bool) {
+	ident, ok := expr.Object.(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+	base, ok := a.namedTypes[ident.Name]
+	if !ok {
+		return nil, false
+	}
+	errSet, ok := base.(*ErrorSetType)
+	if !ok {
+		return nil, false
+	}
+	if !errSet.HasTag(expr.Field) {
+		a.errorf(expr.Pos(), "error set %q has no tag %q", errSet.Name, expr.Field)
+		return invalidType, true
+	}
+	return errSet, true
 }
 
 func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
@@ -289,6 +367,12 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		if _, exists := bindings[p.Name]; !exists {
 			bindings[p.Name] = actual
 		}
+	case *ErrorUnionType:
+		if act, ok := actual.(*ErrorUnionType); ok {
+			a.collectTypeBindings(p.Value, act.Value, bindings, shapeBindings)
+			return
+		}
+		a.collectTypeBindings(p.Value, actual, bindings, shapeBindings)
 	case *RefType:
 		if act, ok := actual.(*RefType); ok {
 			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings)
@@ -610,6 +694,8 @@ func containsTypeParam(t Type) bool {
 		return false
 	case *TypeParamType:
 		return true
+	case *ErrorUnionType:
+		return containsTypeParam(n.Value)
 	case *RefType:
 		return containsTypeParam(n.Elem)
 	case *ArrayType:

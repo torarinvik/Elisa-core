@@ -2,6 +2,27 @@
 
 This directory contains the Go-based frontend for `.llcontext` source files.
 
+## Error handling syntax
+
+The frontend now supports lightweight typed error handling with compile-time error sets and explicit propagation/recovery syntax:
+
+```text
+error MemoryError:
+  OutOfMemory
+
+extern malloc(size: usize) -> heap void&?
+
+def alloc_or_fail(size: usize) -> heap void& | MemoryError:
+  ptr: heap void& = malloc(size) else raise MemoryError.OutOfMemory
+  return ptr
+
+def alloc_or_null(size: usize) -> any void&:
+  ptr: any void& = try alloc_or_fail(size) else null.cast[any void&]()
+  return ptr
+```
+
+Current lowering in the backend uses integer error codes at runtime; `void | ErrorSet` lowers to an error code, while value-carrying results currently lower to a compact `{err, value}` LLVM struct.
+
 ## Layout
 
 - `src/` — active compiler source code

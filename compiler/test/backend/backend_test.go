@@ -776,6 +776,55 @@ def rewind(ptr: any u8&, offset: usize) -> any u8&:
 	}
 }
 
+func TestGenerateLLVMIRLowersErrorUnionsTryAndRaise(t *testing.T) {
+	src := `error MemoryError:
+	OutOfMemory
+
+error IoError:
+	NotFound
+
+extern alloc(size: usize) -> heap void&?
+extern read_file(path: any u8&) -> dstr[file_text] | IoError
+
+def checked_alloc(size: usize) -> heap void& | MemoryError:
+	ptr: heap void& = alloc(size) else raise MemoryError.OutOfMemory
+	return ptr
+
+def load_text(path: any u8&) -> dstr[file_text] | IoError:
+	text: dstr[file_text] = try read_file(path)
+	return text
+
+def load_with_fallback(path: any u8&) -> any u8&:
+	text: any u8& = try read_file(path) else "".cast[any u8&]()
+	return text
+`
+	result := parseAndAnalyze(t, "backend_error_handling.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%ErrUnion__IoError__dstr_file_text = type { i32, ptr }",
+		"%ErrUnion__MemoryError__heap_void = type { i32, ptr }",
+		"declare ptr @alloc(i64)",
+		"declare %ErrUnion__IoError__dstr_file_text @read_file(ptr)",
+		"define %ErrUnion__MemoryError__heap_void @checked_alloc(i64)",
+		"define %ErrUnion__IoError__dstr_file_text @load_text(ptr)",
+		"define ptr @load_with_fallback(ptr)",
+		"extractvalue %ErrUnion__IoError__dstr_file_text",
+		"insertvalue %ErrUnion__IoError__dstr_file_text",
+		"icmp eq i32",
+		"phi ptr",
+		"ret %ErrUnion__IoError__dstr_file_text",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRIndexesRuntimeBackedArraysAndViews(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
 	items: mutable any T&?

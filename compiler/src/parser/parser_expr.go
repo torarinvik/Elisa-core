@@ -17,7 +17,12 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 		return &ast.TailType{Position: elem.Pos(), Elem: elem}
 	}
 	storage, explicit, label := p.parseRefStorageQualifier()
-	return p.parseBaseType(storage, explicit, label)
+	typ := p.parseBaseType(storage, explicit, label)
+	if p.match(lexer.TOKEN_PIPE) {
+		errType := p.parseTypeExpr()
+		return &ast.ErrorUnionTypeExpr{Position: typ.Pos(), Value: typ, Errors: errType}
+	}
+	return typ
 }
 
 func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string) {
@@ -177,6 +182,16 @@ func (p *Parser) parseExpr() ast.Expr {
 		p.expect(lexer.TOKEN_ELSE)
 		alt := p.parseExpr()
 		return &ast.TernaryExpr{Position: pos, Value: expr, Cond: cond, Alt: alt}
+	}
+	if p.peek() == lexer.TOKEN_ELSE {
+		pos := p.cur().Pos
+		p.advance()
+		alt := p.parseExpr()
+		if tryExpr, ok := expr.(*ast.TryExpr); ok && tryExpr.Fallback == nil {
+			tryExpr.Fallback = alt
+			return tryExpr
+		}
+		return &ast.UnwrapElseExpr{Position: pos, Value: expr, Fallback: alt}
 	}
 
 	return expr
@@ -391,7 +406,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 		case lexer.TOKEN_IF:
 			pos := p.cur().Pos
 			p.advance()
-			cond := p.parseExpr()
+			cond := p.parseOr()
 			p.expect(lexer.TOKEN_ELSE)
 			alt := p.parseExpr()
 			expr = &ast.TernaryExpr{Position: pos, Value: expr, Cond: cond, Alt: alt}
@@ -446,6 +461,16 @@ func (p *Parser) parsePrimary() ast.Expr {
 		typ := p.parseTypeExpr()
 		p.expect(lexer.TOKEN_RPAREN)
 		return &ast.SizeofExpr{Position: pos, Type: typ}
+	case lexer.TOKEN_TRY:
+		pos := p.cur().Pos
+		p.advance()
+		value := p.parseOr()
+		return &ast.TryExpr{Position: pos, Value: value}
+	case lexer.TOKEN_RAISE:
+		pos := p.cur().Pos
+		p.advance()
+		errExpr := p.parseOr()
+		return &ast.RaiseExpr{Position: pos, Error: errExpr}
 	case lexer.TOKEN_IDENT:
 		tok := p.advance()
 		if p.peek() == lexer.TOKEN_LPAREN && len(tok.Text) > 0 && tok.Text[0] >= 'A' && tok.Text[0] <= 'Z' {

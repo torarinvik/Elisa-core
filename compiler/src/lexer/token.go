@@ -19,6 +19,7 @@ const (
 
 	// Keywords
 	TOKEN_DEF
+	TOKEN_ERROR
 	TOKEN_STRUCT
 	TOKEN_CONST
 	TOKEN_GLOBAL
@@ -48,6 +49,8 @@ const (
 	TOKEN_ZEROED
 	TOKEN_SIZEOF
 	TOKEN_TAIL
+	TOKEN_TRY
+	TOKEN_RAISE
 	TOKEN_AS
 	TOKEN_IN
 
@@ -116,6 +119,7 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_STRING_LIT: "STRING",
 
 	TOKEN_DEF:     "def",
+	TOKEN_ERROR:   "error",
 	TOKEN_STRUCT:  "struct",
 	TOKEN_CONST:   "const",
 	TOKEN_GLOBAL:  "global",
@@ -145,6 +149,8 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_ZEROED:  "zeroed",
 	TOKEN_SIZEOF:  "sizeof",
 	TOKEN_TAIL:    "tail",
+	TOKEN_TRY:     "try",
+	TOKEN_RAISE:   "raise",
 	TOKEN_AS:      "as",
 	TOKEN_IN:      "in",
 
@@ -198,6 +204,7 @@ var tokenNames = map[TokenKind]string{
 
 var keywords = map[string]TokenKind{
 	"def":     TOKEN_DEF,
+	"error":   TOKEN_ERROR,
 	"struct":  TOKEN_STRUCT,
 	"const":   TOKEN_CONST,
 	"global":  TOKEN_GLOBAL,
@@ -227,6 +234,8 @@ var keywords = map[string]TokenKind{
 	"zeroed":  TOKEN_ZEROED,
 	"sizeof":  TOKEN_SIZEOF,
 	"tail":    TOKEN_TAIL,
+	"try":     TOKEN_TRY,
+	"raise":   TOKEN_RAISE,
 	"as":      TOKEN_AS,
 	"in":      TOKEN_IN,
 }

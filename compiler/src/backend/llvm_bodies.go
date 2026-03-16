@@ -86,6 +86,12 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	if !state.currentBlockTerminated() {
 		if isVoidType(fnType.Return) {
 			C.LLVMBuildRetVoid(builder)
+		} else if retUnion, ok := fnType.Return.(*semantic.ErrorUnionType); ok && isVoidType(retUnion.Value) {
+			zeroCode, err := state.errorCodeConstant(0)
+			if err != nil {
+				return err
+			}
+			C.LLVMBuildRet(builder, zeroCode)
 		} else {
 			return fmt.Errorf("function %s may fall through without returning a value", decl.Name)
 		}
@@ -184,6 +190,14 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		return nil
 	case *ast.ReturnStmt:
 		if n.Value == nil {
+			if retUnion, ok := s.fnType.Return.(*semantic.ErrorUnionType); ok && isVoidType(retUnion.Value) {
+				zeroCode, err := s.errorCodeConstant(0)
+				if err != nil {
+					return err
+				}
+				C.LLVMBuildRet(s.builder, zeroCode)
+				return nil
+			}
 			C.LLVMBuildRetVoid(s.builder)
 			return nil
 		}

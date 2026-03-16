@@ -49,6 +49,12 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.recordAssignmentRefinement(n.Target, targetType, targetType)
 	case *ast.ReturnStmt:
 		if n.Value == nil {
+			if currentUnion, ok := a.currentReturn.(*ErrorUnionType); ok {
+				if !SameType(currentUnion.Value, a.namedTypes["void"]) {
+					a.errorf(n.Pos(), "return value required for %s", a.currentReturn.String())
+				}
+				return
+			}
 			if a.currentReturn != nil && !SameType(a.currentReturn, a.namedTypes["void"]) {
 				a.errorf(n.Pos(), "return value required for %s", a.currentReturn.String())
 			}
@@ -283,6 +289,9 @@ func stmtDefinitelyExits(stmt ast.Stmt) bool {
 	switch n := stmt.(type) {
 	case *ast.ReturnStmt, *ast.PanicStmt, *ast.StaticErrorStmt:
 		return true
+	case *ast.ExprStmt:
+		_, ok := n.Expr.(*ast.RaiseExpr)
+		return ok
 	case *ast.IfStmt:
 		if !blockDefinitelyExits(n.Then) {
 			return false

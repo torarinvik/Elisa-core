@@ -550,6 +550,76 @@ def rewind(ptr: any u8&, offset: usize) -> any u8&:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsErrorDeclarationsAndTryRecovery(t *testing.T) {
+	src := `error MemoryError:
+	OutOfMemory
+
+error IoError:
+	NotFound
+
+extern alloc(size: usize) -> heap void&?
+extern read_file(path: any u8&) -> dstr[file_text] | IoError
+
+def checked_alloc(size: usize) -> heap void& | MemoryError:
+	ptr: heap void& = alloc(size) else raise MemoryError.OutOfMemory
+	return ptr
+
+def load_text(path: any u8&) -> dstr[file_text] | IoError:
+	text: dstr[file_text] = try read_file(path)
+	return text
+
+def load_with_fallback(path: any u8&) -> any u8&:
+	text: any u8& = try read_file(path) else "".cast[any u8&]()
+	return text
+`
+	_, errs := parseAndAnalyze(t, "error_handling_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsRaiseOutsideErrorUnionFunction(t *testing.T) {
+	src := `error IoError:
+	NotFound
+
+def bad() -> int:
+	raise IoError.NotFound
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "raise_outside_error_union.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "raise requires the current function to return an error union") {
+		t.Fatalf("expected raise diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsTryOnNonFallibleExpression(t *testing.T) {
+	src := `def bad() -> int:
+	value: int = try 7
+	return value
+`
+	_, errs := parseAndAnalyze(t, "try_on_non_fallible.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "try requires a fallible expression") {
+		t.Fatalf("expected try diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsElseOnNonNullableReference(t *testing.T) {
+	src := `def bad(value: any u8&) -> any u8&:
+	return value else "".cast[any u8&]()
+`
+	_, errs := parseAndAnalyze(t, "else_on_nonnullable_ref.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "else recovery requires a nullable reference") {
+		t.Fatalf("expected else recovery diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeAcceptsRuntimeBackedArrayAndViewIndexing(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
 	items: mutable any T&?

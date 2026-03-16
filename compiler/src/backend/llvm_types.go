@@ -31,8 +31,13 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 		return nil
 	}
 	switch tt := t.(type) {
-	case *semantic.InvalidType, *semantic.NullType, *semantic.BuiltinType, *semantic.TypeParamType, *semantic.DStrType:
+	case *semantic.InvalidType, *semantic.NeverType, *semantic.NullType, *semantic.BuiltinType, *semantic.TypeParamType, *semantic.DStrType, *semantic.ErrorSetType:
 		return nil
+	case *semantic.ErrorUnionType:
+		if err := g.noteType(tt.Value); err != nil {
+			return err
+		}
+		return g.noteType(tt.Errors)
 	case *semantic.SViewType:
 		if st, ok := g.lookupStructType("CtxStringView"); ok {
 			_, err := g.ensureStructBody(st.Name, st)
@@ -180,10 +185,23 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 	switch tt := t.(type) {
 	case *semantic.InvalidType:
 		return C.LLVMVoidTypeInContext(g.context), nil
+	case *semantic.NeverType:
+		return C.LLVMVoidTypeInContext(g.context), nil
 	case *semantic.NullType:
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	case *semantic.BuiltinType:
 		return g.lowerBuiltin(tt.Name)
+	case *semantic.ErrorSetType:
+		return g.lowerBuiltin("u32")
+	case *semantic.ErrorUnionType:
+		errType, err := g.lowerType(tt.Errors)
+		if err != nil {
+			return nil, err
+		}
+		if isVoidType(tt.Value) {
+			return errType, nil
+		}
+		return g.ensureErrorUnionType(tt)
 	case *semantic.TypeParamType:
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	case *semantic.RefType:
@@ -366,6 +384,32 @@ func (g *llvmGenerator) ensureRuntimeSizedStruct(name string, fieldCount int) (C
 	return ty, nil
 }
 
+func (g *llvmGenerator) ensureErrorUnionType(unionType *semantic.ErrorUnionType) (C.LLVMTypeRef, error) {
+	if unionType == nil || unionType.Errors == nil {
+		return nil, fmt.Errorf("missing error union metadata")
+	}
+	name := sanitizeIdentifier("ErrUnion__" + unionType.Errors.Name + "__" + unionType.Value.String())
+	ty, err := g.ensureNamedStructType(name)
+	if err != nil {
+		return nil, err
+	}
+	if g.structBodies[name] {
+		return ty, nil
+	}
+	errType, err := g.lowerType(unionType.Errors)
+	if err != nil {
+		return nil, err
+	}
+	valueType, err := g.lowerType(unionType.Value)
+	if err != nil {
+		return nil, err
+	}
+	fields := []C.LLVMTypeRef{errType, valueType}
+	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	g.structBodies[name] = true
+	return ty, nil
+}
+
 func (g *llvmGenerator) ensureGenericInstanceStruct(inst *semantic.GenericInstanceType) (C.LLVMTypeRef, error) {
 	name := mangleGenericType(inst.Name, inst.Args)
 	ty, err := g.ensureNamedStructType(name)
@@ -416,6 +460,8 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type) semantic.Ty
 			return mapped
 		}
 		return t
+	case *semantic.ErrorUnionType:
+		return &semantic.ErrorUnionType{Value: substituteType(tt.Value, subst), Errors: tt.Errors}
 	case *semantic.RefType:
 		return &semantic.RefType{Elem: substituteType(tt.Elem, subst), State: tt.State, Storage: tt.Storage, ExplicitStorage: tt.ExplicitStorage}
 	case *semantic.ArrayType:

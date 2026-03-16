@@ -19,6 +19,8 @@ type Shape interface {
 
 type InvalidType struct{}
 
+type NeverType struct{}
+
 type NullType struct{}
 
 type BuiltinType struct {
@@ -27,6 +29,16 @@ type BuiltinType struct {
 
 type TypeParamType struct {
 	Name string
+}
+
+type ErrorSetType struct {
+	Name string
+	Tags []string
+}
+
+type ErrorUnionType struct {
+	Value  Type
+	Errors *ErrorSetType
 }
 
 type ShapeParam struct {
@@ -144,9 +156,12 @@ type FuncType struct {
 }
 
 func (*InvalidType) isType()         {}
+func (*NeverType) isType()           {}
 func (*NullType) isType()            {}
 func (*BuiltinType) isType()         {}
 func (*TypeParamType) isType()       {}
+func (*ErrorSetType) isType()        {}
+func (*ErrorUnionType) isType()      {}
 func (*RefType) isType()             {}
 func (*ArrayType) isType()           {}
 func (*DArrayType) isType()          {}
@@ -165,13 +180,21 @@ func (*NamedShape) isShape() {}
 func (*FreshShape) isShape() {}
 
 func (*InvalidType) String() string { return "<invalid>" }
+func (*NeverType) String() string   { return "<never>" }
 func (*NullType) String() string    { return "null" }
 func (t *BuiltinType) String() string {
 	return t.Name
 }
 func (t *TypeParamType) String() string { return t.Name }
-func (s *ShapeParam) String() string    { return s.Name }
-func (s *NamedShape) String() string    { return s.Name }
+func (t *ErrorSetType) String() string  { return t.Name }
+func (t *ErrorUnionType) String() string {
+	if t == nil || t.Value == nil || t.Errors == nil {
+		return "<invalid-error-union>"
+	}
+	return fmt.Sprintf("%s | %s", t.Value.String(), t.Errors.String())
+}
+func (s *ShapeParam) String() string { return s.Name }
+func (s *NamedShape) String() string { return s.Name }
 func (s *FreshShape) String() string {
 	if s.Label != "" {
 		return fmt.Sprintf("%s#%d", s.Label, s.ID)
@@ -271,6 +294,7 @@ func (t *FuncType) String() string {
 
 var (
 	invalidType = &InvalidType{}
+	neverType   = &NeverType{}
 	nullType    = &NullType{}
 )
 
@@ -279,9 +303,38 @@ func IsInvalidType(t Type) bool {
 	return ok
 }
 
+func IsNeverType(t Type) bool {
+	_, ok := t.(*NeverType)
+	return ok
+}
+
 func IsNullType(t Type) bool {
 	_, ok := t.(*NullType)
 	return ok
+}
+
+func (t *ErrorSetType) HasTag(name string) bool {
+	if t == nil {
+		return false
+	}
+	for _, tag := range t.Tags {
+		if tag == name {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *ErrorSetType) TagCode(name string) (uint32, bool) {
+	if t == nil {
+		return 0, false
+	}
+	for i, tag := range t.Tags {
+		if tag == name {
+			return uint32(i + 1), true
+		}
+	}
+	return 0, false
 }
 
 func IsBoolType(t Type) bool {

@@ -56,7 +56,17 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 	case *ast.CallExpr:
 		value, actualType, err = s.emitCallExpr(n)
 	case *ast.FieldExpr:
-		value, actualType, err = s.emitFieldExpr(n)
+		if errorType, _, ok := s.errorTagInfo(n); ok {
+			value, actualType, err = s.emitErrorTagExpr(n, errorType)
+		} else {
+			value, actualType, err = s.emitFieldExpr(n)
+		}
+	case *ast.RaiseExpr:
+		value, actualType, err = s.emitRaiseExpr(n)
+	case *ast.TryExpr:
+		value, actualType, err = s.emitTryExpr(n)
+	case *ast.UnwrapElseExpr:
+		value, actualType, err = s.emitUnwrapElseExpr(n)
 	case *ast.IndexExpr:
 		value, actualType, err = s.emitIndexExpr(n)
 	case *ast.SliceExpr:
@@ -130,6 +140,221 @@ func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Typ
 		}
 	}
 	return nil, nil, fmt.Errorf("unknown identifier %q during LLVM lowering", expr.Name)
+}
+
+func (s *functionState) errorTagInfo(expr *ast.FieldExpr) (*semantic.ErrorSetType, string, bool) {
+	ident, ok := expr.Object.(*ast.Ident)
+	if !ok {
+		return nil, "", false
+	}
+	base, ok := s.g.result.NamedTypes[ident.Name]
+	if !ok {
+		return nil, "", false
+	}
+	errSet, ok := base.(*semantic.ErrorSetType)
+	if !ok || !errSet.HasTag(expr.Field) {
+		return nil, "", false
+	}
+	return errSet, expr.Field, true
+}
+
+func (s *functionState) emitErrorTagExpr(expr *ast.FieldExpr, errorType *semantic.ErrorSetType) (C.LLVMValueRef, semantic.Type, error) {
+	if errorType == nil {
+		return nil, nil, fmt.Errorf("missing error set for tag expression")
+	}
+	code, ok := errorType.TagCode(expr.Field)
+	if !ok {
+		return nil, nil, fmt.Errorf("unknown error tag %s.%s", errorType.Name, expr.Field)
+	}
+	value, err := s.errorCodeConstant(code)
+	if err != nil {
+		return nil, nil, err
+	}
+	return value, errorType, nil
+}
+
+func (s *functionState) emitRaiseExpr(expr *ast.RaiseExpr) (C.LLVMValueRef, semantic.Type, error) {
+	currentUnion, ok := s.fnType.Return.(*semantic.ErrorUnionType)
+	if !ok {
+		return nil, nil, fmt.Errorf("raise requires an error-union return type")
+	}
+	errorValue, _, err := s.emitExpr(expr.Error, currentUnion.Errors)
+	if err != nil {
+		return nil, nil, err
+	}
+	retValue, err := s.buildErrorUnionFailure(currentUnion, errorValue)
+	if err != nil {
+		return nil, nil, err
+	}
+	C.LLVMBuildRet(s.builder, retValue)
+	return nil, s.exprType(expr), nil
+}
+
+func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic.Type, error) {
+	unionType, ok := s.exprType(expr.Value).(*semantic.ErrorUnionType)
+	if !ok {
+		return nil, nil, fmt.Errorf("try requires a lowered error-union operand")
+	}
+	resultType := s.exprType(expr)
+	fallibleValue, _, err := s.emitExpr(expr.Value, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	errorCode, err := s.extractErrorUnionCode(fallibleValue, unionType)
+	if err != nil {
+		return nil, nil, err
+	}
+	zeroCode, err := s.errorCodeConstant(0)
+	if err != nil {
+		return nil, nil, err
+	}
+	successCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), errorCode, zeroCode, cStringFree("try.ok"))
+
+	if expr.Fallback == nil {
+		okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.ok"))
+		errBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.err"))
+		C.LLVMBuildCondBr(s.builder, successCond, okBB, errBB)
+
+		C.LLVMPositionBuilderAtEnd(s.builder, errBB)
+		currentUnion, ok := s.fnType.Return.(*semantic.ErrorUnionType)
+		if !ok {
+			return nil, nil, fmt.Errorf("try propagation requires an error-union function return")
+		}
+		retValue, err := s.buildErrorUnionFailure(currentUnion, errorCode)
+		if err != nil {
+			return nil, nil, err
+		}
+		C.LLVMBuildRet(s.builder, retValue)
+
+		C.LLVMPositionBuilderAtEnd(s.builder, okBB)
+		if isVoidType(resultType) {
+			return nil, resultType, nil
+		}
+		payload, err := s.extractErrorUnionPayload(fallibleValue, unionType)
+		if err != nil {
+			return nil, nil, err
+		}
+		return payload, resultType, nil
+	}
+
+	okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.value"))
+	fallbackBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.fallback"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.merge"))
+	C.LLVMBuildCondBr(s.builder, successCond, okBB, fallbackBB)
+
+	incomingValues := make([]C.LLVMValueRef, 0, 2)
+	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, 2)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, okBB)
+	var okValue C.LLVMValueRef
+	if !isVoidType(resultType) {
+		okValue, err = s.extractErrorUnionPayload(fallibleValue, unionType)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	if !s.currentBlockTerminated() {
+		okEnd := C.LLVMGetInsertBlock(s.builder)
+		C.LLVMBuildBr(s.builder, mergeBB)
+		if !isVoidType(resultType) {
+			incomingValues = append(incomingValues, okValue)
+			incomingBlocks = append(incomingBlocks, okEnd)
+		}
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, fallbackBB)
+	fallbackValue, _, err := s.emitExpr(expr.Fallback, resultType)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !s.currentBlockTerminated() {
+		fallbackEnd := C.LLVMGetInsertBlock(s.builder)
+		C.LLVMBuildBr(s.builder, mergeBB)
+		if !isVoidType(resultType) {
+			incomingValues = append(incomingValues, fallbackValue)
+			incomingBlocks = append(incomingBlocks, fallbackEnd)
+		}
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	if len(incomingBlocks) == 0 {
+		C.LLVMBuildUnreachable(s.builder)
+		return nil, resultType, nil
+	}
+	if isVoidType(resultType) {
+		return nil, resultType, nil
+	}
+	if len(incomingValues) == 1 {
+		return incomingValues[0], resultType, nil
+	}
+	phiType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, err
+	}
+	phi := C.LLVMBuildPhi(s.builder, phiType, cStringFree("tryphi"))
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+	return phi, resultType, nil
+}
+
+func (s *functionState) emitUnwrapElseExpr(expr *ast.UnwrapElseExpr) (C.LLVMValueRef, semantic.Type, error) {
+	valueType, ok := s.exprType(expr.Value).(*semantic.RefType)
+	if !ok {
+		return nil, nil, fmt.Errorf("else recovery requires a reference operand")
+	}
+	resultType := s.exprType(expr)
+	value, _, err := s.emitExpr(expr.Value, valueType)
+	if err != nil {
+		return nil, nil, err
+	}
+	llvmRefType, err := s.g.lowerType(valueType)
+	if err != nil {
+		return nil, nil, err
+	}
+	nullValue := C.LLVMConstNull(llvmRefType)
+	nonNullCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), value, nullValue, cStringFree("unwrap.nonnull"))
+	okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("unwrap.ok"))
+	fallbackBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("unwrap.fallback"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("unwrap.merge"))
+	C.LLVMBuildCondBr(s.builder, nonNullCond, okBB, fallbackBB)
+
+	incomingValues := make([]C.LLVMValueRef, 0, 2)
+	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, 2)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, okBB)
+	if !s.currentBlockTerminated() {
+		okEnd := C.LLVMGetInsertBlock(s.builder)
+		C.LLVMBuildBr(s.builder, mergeBB)
+		incomingValues = append(incomingValues, value)
+		incomingBlocks = append(incomingBlocks, okEnd)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, fallbackBB)
+	fallbackValue, _, err := s.emitExpr(expr.Fallback, resultType)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !s.currentBlockTerminated() {
+		fallbackEnd := C.LLVMGetInsertBlock(s.builder)
+		C.LLVMBuildBr(s.builder, mergeBB)
+		incomingValues = append(incomingValues, fallbackValue)
+		incomingBlocks = append(incomingBlocks, fallbackEnd)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	if len(incomingValues) == 0 {
+		C.LLVMBuildUnreachable(s.builder)
+		return nil, resultType, nil
+	}
+	if len(incomingValues) == 1 {
+		return incomingValues[0], resultType, nil
+	}
+	phiType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, err
+	}
+	phi := C.LLVMBuildPhi(s.builder, phiType, cStringFree("unwrapphi"))
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+	return phi, resultType, nil
 }
 
 func (s *functionState) emitIntLiteral(expr *ast.IntLit) (C.LLVMValueRef, semantic.Type, error) {

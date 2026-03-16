@@ -330,6 +330,20 @@ func (a *Analyzer) collectNamedTypes(decls []ast.Decl) {
 				continue
 			}
 			a.namedTypes[n.Name] = &OpaqueType{Name: n.Name}
+		case *ast.ErrorDecl:
+			if _, exists := a.namedTypes[n.Name]; exists {
+				a.errorf(n.Pos(), "duplicate type %q", n.Name)
+				continue
+			}
+			seenTags := map[string]bool{}
+			for _, tag := range n.Tags {
+				if seenTags[tag] {
+					a.errorf(n.Pos(), "duplicate error tag %q in error set %q", tag, n.Name)
+					continue
+				}
+				seenTags[tag] = true
+			}
+			a.namedTypes[n.Name] = &ErrorSetType{Name: n.Name, Tags: append([]string(nil), n.Tags...)}
 		case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			continue
 		}
@@ -395,6 +409,8 @@ func (a *Analyzer) collectValueSymbols(decls []ast.Decl) {
 		case *ast.ExternVarDecl:
 			declType := a.resolveType(n.Type)
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolExternVar, Type: declType, Node: n, Mutable: true}, n.Pos())
+		case *ast.ErrorDecl:
+			continue
 		case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			continue
 		}
@@ -422,6 +438,8 @@ func (a *Analyzer) analyzeDecls(decls []ast.Decl) {
 			}
 		case *ast.FuncDecl:
 			a.analyzeFunc(n)
+		case *ast.ErrorDecl:
+			continue
 		case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			continue
 		}

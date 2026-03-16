@@ -174,6 +174,16 @@ func TestStorageKeywordsAndCastTokens(t *testing.T) {
 	assertKinds(t, tokens, expect)
 }
 
+func TestErrorHandlingKeywords(t *testing.T) {
+	tokens := collectTokens("error IoError:\ntry raise\n")
+	expect := []lexer.TokenKind{
+		lexer.TOKEN_ERROR, lexer.TOKEN_IDENT, lexer.TOKEN_COLON, lexer.TOKEN_NEWLINE,
+		lexer.TOKEN_TRY, lexer.TOKEN_RAISE, lexer.TOKEN_NEWLINE,
+		lexer.TOKEN_EOF,
+	}
+	assertKinds(t, tokens, expect)
+}
+
 func TestShiftOps(t *testing.T) {
 	tokens := collectTokens("x << 3 >> 2\n")
 	expect := []lexer.TokenKind{

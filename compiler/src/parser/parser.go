@@ -84,6 +84,8 @@ func (p *Parser) parseDecl() ast.Decl {
 	switch p.peek() {
 	case lexer.TOKEN_CONST:
 		return p.parseConstDecl()
+	case lexer.TOKEN_ERROR:
+		return p.parseErrorDecl()
 	case lexer.TOKEN_GLOBAL:
 		return p.parseGlobalDecl()
 	case lexer.TOKEN_REPR:
@@ -103,6 +105,28 @@ func (p *Parser) parseDecl() ast.Decl {
 		p.advance()
 		return nil
 	}
+}
+
+func (p *Parser) parseErrorDecl() *ast.ErrorDecl {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_ERROR)
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+
+	var tags []string
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		tags = append(tags, p.expect(lexer.TOKEN_IDENT).Text)
+		p.expectNewline()
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+
+	return &ast.ErrorDecl{Position: pos, Name: name, Tags: tags}
 }
 
 func (p *Parser) parseConstDecl() *ast.ConstDecl {

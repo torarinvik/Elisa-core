@@ -2,16 +2,24 @@ repr(c) struct Node:
     value: mutable int
     next: mutable any Node&?
 
+error MemoryError:
+    OutOfMemory
+
 extern alloc_node() -> any Node&?
 extern sfree_node(node: any Node&) -> any Node!
 
-def make_node_value() -> int:
-    node: mutable any Node&? = alloc_node()
-    if node == null:
-        return 0
+def require_node() -> any Node& | MemoryError:
+    node: any Node& = alloc_node() else raise MemoryError.OutOfMemory
+    return node
 
+def make_node_value() -> int | MemoryError:
+    node: any Node& = try require_node()
     node.value <- 42
     return node.value
+
+def make_node_value_or_zero() -> int:
+    value: int = try make_node_value() else 0
+    return value
 
 def release_node(node: mutable any Node&?):
     if node != null:
