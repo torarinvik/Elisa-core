@@ -99,6 +99,42 @@ def countdown(start: i32) -> i32:
 	}
 }
 
+func TestGenerateLLVMIRLowersReferenceComparisons(t *testing.T) {
+	src := `repr(c) struct Box:
+    value: i32
+
+extern maybe_box() -> Box&?
+
+def is_missing() -> bool:
+    return maybe_box() == null
+
+def is_present() -> bool:
+    return maybe_box() != null
+
+def same_box(left: Box&, right: Box&) -> bool:
+    return left == right
+`
+	result := parseAndAnalyze(t, "backend_reference_comparisons.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"declare ptr @maybe_box()",
+		"define i1 @is_missing()",
+		"define i1 @is_present()",
+		"define i1 @same_box(ptr",
+		"icmp eq ptr",
+		"icmp ne ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRTernaryUsesPhi(t *testing.T) {
 	src := `def choose(flag: bool, left: i32, right: i32) -> i32:
     return left if flag else right
@@ -342,6 +378,39 @@ def rem_unsigned() -> u32:
 	}
 }
 
+func TestGenerateLLVMIRLowersPointerArithmetic(t *testing.T) {
+	src := `def advance(ptr: u8&, offset: usize) -> u8&:
+    return ptr + offset
+
+def advance_commutative(offset: usize, ptr: u8&) -> u8&:
+    return offset + ptr
+
+def rewind(ptr: u8&, offset: usize) -> u8&:
+    return ptr - offset
+`
+	result := parseAndAnalyze(t, "backend_pointer_arithmetic.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"define ptr @advance(ptr",
+		"define ptr @advance_commutative(i64",
+		"define ptr @rewind(ptr",
+		"getelementptr i8, ptr",
+		"sub i64 0,",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Count(output, "getelementptr i8, ptr") < 3 {
+		t.Fatalf("expected pointer arithmetic to lower via GEP in all functions, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRIndexesRuntimeBackedArraysAndViews(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
     items: mutable T&?
@@ -407,6 +476,33 @@ def read_view(view: DListView[i32]) -> i32:
 		"%CtxListView = type { ptr, i64 }",
 		"define i32 @read_list(ptr",
 		"define i32 @read_view(%CtxListView",
+		"getelementptr i32, ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRIndexesRuntimeBackedListRefs(t *testing.T) {
+	src := `repr(c) struct CtxList:
+    items: mutable void&?
+    count: mutable usize
+    capacity: mutable usize
+
+def read_list_ref(values: DList[i32, row]&) -> i32:
+    return values[1]
+`
+	result := parseAndAnalyze(t, "backend_runtime_list_ref_index.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%CtxList = type { ptr, i64, i64 }",
+		"define i32 @read_list_ref(ptr",
 		"getelementptr i32, ptr",
 	}
 	for _, check := range checks {
@@ -543,6 +639,142 @@ func TestGenerateLLVMIRLowersListSliceSyntaxViaRuntimeHelpers(t *testing.T) {
 		"declare %CtxListView @ctx_stage1rt_tlist_view(ptr, i64, i64)",
 		"call %CtxListView @ctx_stage1rt_tlist_view(ptr",
 		"getelementptr i32, ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersArraySliceSyntaxViaRuntimeHelpers(t *testing.T) {
+	src := `repr(c) struct DynArray[T]:
+    items: mutable T&?
+    count: mutable usize
+    capacity: mutable usize
+
+repr(c) struct DynArrayView:
+    data: mutable void&?
+    len: mutable usize
+    elem_size: mutable usize
+
+def head_owned(values: DArray[i32, row]) -> i32:
+    part: DArrayView[i32] = values[1u:3u]
+    return part[0u]
+
+def head_view(view: DArrayView[i32]) -> i32:
+    part: DArrayView[i32] = view[0u:1u]
+    return part[0u]
+`
+	result := parseAndAnalyze(t, "backend_array_slice_syntax.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%DynArray__i32 = type { ptr, i64, i64 }",
+		"%DynArrayView = type { ptr, i64, i64 }",
+		"define i32 @head_owned(%DynArray__i32",
+		"define i32 @head_view(%DynArrayView",
+		"declare %DynArrayView @arena_da_view(ptr, i64, i64)",
+		"declare %DynArrayView @arena_da_view_slice(%DynArrayView, i64, i64)",
+		"call %DynArrayView @arena_da_view(ptr",
+		"call %DynArrayView @arena_da_view_slice(%DynArrayView",
+		"getelementptr i32, ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersFixedArraySliceSyntaxWithoutRuntimeHelpers(t *testing.T) {
+	src := `repr(c) struct DynArrayView:
+	data: mutable void&?
+	len: mutable usize
+	elem_size: mutable usize
+
+def slice_owned(values: i32[4]) -> DArrayView[i32]:
+	return values[1u:3u]
+
+def head_ref(values: i32[4]&) -> i32:
+	return values[1u:3u][0u]
+`
+	result := parseAndAnalyze(t, "backend_fixed_array_slice.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%DynArrayView = type { ptr, i64, i64 }",
+		"define %DynArrayView @slice_owned([4 x i32]",
+		"define i32 @head_ref(ptr",
+		"getelementptr [4 x i32], ptr",
+		"insertvalue %DynArrayView",
+		"getelementptr i32, ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "@arena_da_view") || strings.Contains(output, "@arena_da_view_slice") {
+		t.Fatalf("expected fixed-array slicing not to depend on dynamic array runtime helpers, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRLowersNestedCollectionAccessOnReturnedValues(t *testing.T) {
+	src := `repr(c) struct DynArray[T]:
+    items: mutable T&?
+    count: mutable usize
+    capacity: mutable usize
+
+repr(c) struct DynArrayView:
+    data: mutable void&?
+    len: mutable usize
+    elem_size: mutable usize
+
+repr(c) struct CtxListView:
+    items: mutable void&?
+    count: mutable usize
+
+extern make_array() -> DArray[i32, row]
+extern make_array_view() -> DArrayView[i32]
+extern make_list_view() -> DListView[i32]
+
+def read_array_index() -> i32:
+    return make_array()[1u]
+
+def read_array_slice_index() -> i32:
+    return make_array()[1u:3u][0u]
+
+def read_array_view_index() -> i32:
+    return make_array_view()[0u]
+
+def read_list_view_index() -> i32:
+    return make_list_view()[0]
+`
+	result := parseAndAnalyze(t, "backend_nested_collection_access_returns.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"declare %DynArray__i32 @make_array()",
+		"declare %DynArrayView @make_array_view()",
+		"declare %CtxListView @make_list_view()",
+		"call %DynArray__i32 @make_array()",
+		"call %DynArrayView @make_array_view()",
+		"call %CtxListView @make_list_view()",
+		"call %DynArrayView @arena_da_view(ptr",
+		"getelementptr i32, ptr",
+		"alloca %DynArray__i32",
+		"alloca %DynArrayView",
+		"alloca %CtxListView",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {

@@ -426,6 +426,9 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		if view, ok := ref.Elem.(*DArrayViewType); ok {
 			return view.Elem
 		}
+		if dlist, ok := ref.Elem.(*DListType); ok {
+			return dlist.Elem
+		}
 		if view, ok := ref.Elem.(*DListViewType); ok {
 			return view.Elem
 		}
@@ -451,6 +454,15 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 	if !IsNumericType(endType) {
 		a.errorf(expr.End.Pos(), "slice end must be numeric, got %s", endType.String())
 	}
+	if array, ok := objType.(*ArrayType); ok {
+		return &DArrayViewType{Elem: array.Elem}
+	}
+	if view, ok := objType.(*DArrayType); ok {
+		return &DArrayViewType{Elem: view.Elem}
+	}
+	if view, ok := objType.(*DArrayViewType); ok {
+		return &DArrayViewType{Elem: view.Elem}
+	}
 	if dstr, ok := objType.(*DStrType); ok {
 		_ = dstr
 		if viewType, ok := a.namedTypes["CtxStringView"]; ok {
@@ -473,6 +485,15 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 			a.errorf(expr.Pos(), "slicing requires proven non-null reference, got %s", objType.String())
 			return invalidType
 		}
+		if array, ok := ref.Elem.(*ArrayType); ok {
+			return &DArrayViewType{Elem: array.Elem}
+		}
+		if view, ok := ref.Elem.(*DArrayType); ok {
+			return &DArrayViewType{Elem: view.Elem}
+		}
+		if view, ok := ref.Elem.(*DArrayViewType); ok {
+			return &DArrayViewType{Elem: view.Elem}
+		}
 		if _, ok := ref.Elem.(*DStrType); ok {
 			if viewType, ok := a.namedTypes["CtxStringView"]; ok {
 				return viewType
@@ -490,7 +511,7 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 			return ref.Elem
 		}
 	}
-	a.errorf(expr.Pos(), "slicing requires string, list, or view type, got %s", objType.String())
+	a.errorf(expr.Pos(), "slicing requires string, array, list, or view type, got %s", objType.String())
 	return invalidType
 }
 

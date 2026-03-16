@@ -244,6 +244,25 @@ def bad() -> Box&:
 	}
 }
 
+func TestAnalyzeAcceptsReferenceComparisons(t *testing.T) {
+	src := `repr(c) struct Box:
+	value: int
+
+extern maybe_box() -> Box&?
+
+def is_missing() -> bool:
+	return maybe_box() == null
+
+def is_present() -> bool:
+	return maybe_box() != null
+
+def same_box(left: Box&, right: Box&) -> bool:
+	return left == right
+`
+	_, errs := parseAndAnalyze(t, "reference_comparisons.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeAcceptsEquivalentConstArrayShapes(t *testing.T) {
 	src := `const N: usize = 4
 
@@ -321,6 +340,20 @@ def read_second() -> u8:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsPointerArithmetic(t *testing.T) {
+	src := `def advance(ptr: u8&, offset: usize) -> u8&:
+	return ptr + offset
+
+def advance_commutative(offset: usize, ptr: u8&) -> u8&:
+	return offset + ptr
+
+def rewind(ptr: u8&, offset: usize) -> u8&:
+	return ptr - offset
+`
+	_, errs := parseAndAnalyze(t, "pointer_arithmetic.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeAcceptsRuntimeBackedArrayAndViewIndexing(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
 	items: mutable T&?
@@ -358,6 +391,19 @@ def read_view(view: DListView[i32]) -> i32:
 	return view[0]
 `
 	_, errs := parseAndAnalyze(t, "runtime_backed_list_index.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsRuntimeBackedListRefIndexing(t *testing.T) {
+	src := `repr(c) struct CtxList:
+	items: mutable void&?
+	count: mutable usize
+	capacity: mutable usize
+
+def read_list_ref(values: DList[i32, row]&) -> i32:
+	return values[0]
+`
+	_, errs := parseAndAnalyze(t, "runtime_backed_list_ref_index.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
@@ -432,6 +478,61 @@ func TestAnalyzeAcceptsViewAliasAndListSliceSyntax(t *testing.T) {
 	return part
 `
 	_, errs := parseAndAnalyze(t, "view_alias_and_slice.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsArrayAndArrayViewSliceSyntax(t *testing.T) {
+	src := `def middle(values: DArray[i32, row], view: DArrayView[i32]) -> i32:
+	part: DArrayView[i32] = values[1u:3u]
+	sub: DArrayView[i32] = view[0u:1u]
+	return part[0u] + sub[0u]
+`
+	_, errs := parseAndAnalyze(t, "array_and_array_view_slice.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsFixedArraySliceSyntax(t *testing.T) {
+	src := `def middle(values: i32[4], view: i32[4]&) -> i32:
+	part: DArrayView[i32] = values[1u:3u]
+	sub: DArrayView[i32] = view[0u:2u]
+	return part[0u] + sub[1u]
+`
+	_, errs := parseAndAnalyze(t, "fixed_array_slice.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsNestedCollectionAccessOnReturnedValues(t *testing.T) {
+	src := `repr(c) struct DynArray[T]:
+	items: mutable T&?
+	count: mutable usize
+	capacity: mutable usize
+
+repr(c) struct DynArrayView:
+	data: mutable void&?
+	len: mutable usize
+	elem_size: mutable usize
+
+repr(c) struct CtxListView:
+	items: mutable void&?
+	count: mutable usize
+
+extern make_array() -> DArray[i32, row]
+extern make_array_view() -> DArrayView[i32]
+extern make_list_view() -> DListView[i32]
+
+def read_array_index() -> i32:
+	return make_array()[1u]
+
+def read_array_slice_index() -> i32:
+	return make_array()[1u:3u][0u]
+
+def read_array_view_index() -> i32:
+	return make_array_view()[0u]
+
+def read_list_view_index() -> i32:
+	return make_list_view()[0]
+`
+	_, errs := parseAndAnalyze(t, "nested_collection_access_returns.llcontext", src)
 	requireNoErrors(t, errs)
 }
 

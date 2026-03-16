@@ -257,6 +257,12 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 	leftType := s.exprType(expr.Left)
 	rightType := s.exprType(expr.Right)
 	resultType := s.exprType(expr)
+	if value, actualType, handled, err := s.emitPointerCompareExpr(expr, leftType, rightType, resultType); handled {
+		return value, actualType, err
+	}
+	if value, actualType, handled, err := s.emitPointerArithmeticExpr(expr, leftType, rightType, resultType); handled {
+		return value, actualType, err
+	}
 	operandType := s.binaryOperandType(expr.Op, leftType, rightType)
 
 	left, _, err := s.emitExpr(expr.Left, operandType)
@@ -307,6 +313,73 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 	default:
 		return nil, nil, fmt.Errorf("unsupported binary operator %s", lexer.TokenName(expr.Op))
 	}
+}
+
+func (s *functionState) emitPointerCompareExpr(expr *ast.BinaryExpr, leftType semantic.Type, rightType semantic.Type, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if expr.Op != lexer.TOKEN_EQEQ && expr.Op != lexer.TOKEN_BANGEQ {
+		return nil, nil, false, nil
+	}
+	leftPointerish := isPointerLikeType(leftType) || semantic.IsNullType(leftType)
+	rightPointerish := isPointerLikeType(rightType) || semantic.IsNullType(rightType)
+	if !leftPointerish || !rightPointerish {
+		return nil, nil, false, nil
+	}
+	operandType := s.binaryOperandType(expr.Op, leftType, rightType)
+	left, _, err := s.emitExpr(expr.Left, operandType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	right, _, err := s.emitExpr(expr.Right, operandType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	pred := C.LLVMIntPredicate(C.LLVMIntEQ)
+	if expr.Op == lexer.TOKEN_BANGEQ {
+		pred = C.LLVMIntPredicate(C.LLVMIntNE)
+	}
+	cmp := C.LLVMBuildICmp(s.builder, pred, left, right, cStringFree("ptrcmptmp"))
+	return cmp, resultType, true, nil
+}
+
+func (s *functionState) emitPointerArithmeticExpr(expr *ast.BinaryExpr, leftType semantic.Type, rightType semantic.Type, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, bool, error) {
+	leftRef, leftIsRef := leftType.(*semantic.RefType)
+	rightRef, rightIsRef := rightType.(*semantic.RefType)
+	leftIsNumeric := isNumericType(leftType)
+	rightIsNumeric := isNumericType(rightType)
+
+	var (
+		baseExpr  ast.Expr
+		baseType  *semantic.RefType
+		indexExpr ast.Expr
+	)
+
+	switch {
+	case leftIsRef && rightIsNumeric && (expr.Op == lexer.TOKEN_PLUS || expr.Op == lexer.TOKEN_MINUS):
+		baseExpr, baseType, indexExpr = expr.Left, leftRef, expr.Right
+	case expr.Op == lexer.TOKEN_PLUS && leftIsNumeric && rightIsRef:
+		baseExpr, baseType, indexExpr = expr.Right, rightRef, expr.Left
+	default:
+		return nil, nil, false, nil
+	}
+
+	baseValue, _, err := s.emitExpr(baseExpr, baseType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	indexValue, _, err := s.emitExpr(indexExpr, nil)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if expr.Op == lexer.TOKEN_MINUS {
+		indexValue = C.LLVMBuildNeg(s.builder, indexValue, cStringFree("ptridx.neg"))
+	}
+	elemLLVMType, err := s.g.lowerType(baseType.Elem)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	indices := []C.LLVMValueRef{indexValue}
+	ptr := C.LLVMBuildGEP2(s.builder, elemLLVMType, baseValue, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("ptrarith"))
+	return ptr, resultType, true, nil
 }
 
 func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helperName string, firstType semantic.Type, secondType semantic.Type, swap bool) (C.LLVMValueRef, semantic.Type, error) {
@@ -496,29 +569,39 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, sema
 }
 
 func (s *functionState) emitSliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, semantic.Type, error) {
-	helperName, operandType, resultType, ok := runtimeSliceOperandInfo(s.exprType(expr.Object), s.exprType(expr))
+	if value, resultType, handled, err := s.emitFixedArraySliceExpr(expr); handled {
+		return value, resultType, err
+	}
+	info, ok := runtimeSliceOperandInfo(s.exprType(expr.Object), s.exprType(expr))
 	if !ok {
 		return nil, nil, fmt.Errorf("slice is not implemented for %s", s.exprType(expr.Object).String())
 	}
-	objectValue, _, err := s.emitExpr(expr.Object, operandType)
+	var (
+		objectValue C.LLVMValueRef
+		err         error
+	)
+	if info.useAddress {
+		objectValue, _, err = s.emitAddressOrTemp(expr.Object)
+	} else {
+		objectValue, _, err = s.emitExpr(expr.Object, info.operandType)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
-	indexType := s.g.result.NamedTypes["i64"]
-	startValue, _, err := s.emitExpr(expr.Start, indexType)
+	startValue, _, err := s.emitExpr(expr.Start, info.indexType)
 	if err != nil {
 		return nil, nil, err
 	}
-	endValue, _, err := s.emitExpr(expr.End, indexType)
+	endValue, _, err := s.emitExpr(expr.End, info.indexType)
 	if err != nil {
 		return nil, nil, err
 	}
 	helperType := &semantic.FuncType{
-		Name:   helperName,
-		Params: []semantic.Type{operandType, indexType, indexType},
-		Return: resultType,
+		Name:   info.helperName,
+		Params: []semantic.Type{info.operandType, info.indexType, info.indexType},
+		Return: info.resultType,
 	}
-	callee, err := s.g.ensureFunctionDeclared(helperName, helperType)
+	callee, err := s.g.ensureFunctionDeclared(info.helperName, helperType)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -528,11 +611,93 @@ func (s *functionState) emitSliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, sema
 	}
 	args := []C.LLVMValueRef{objectValue, startValue, endValue}
 	callName := "slicetmp"
-	if isVoidType(resultType) {
+	if isVoidType(info.resultType) {
 		callName = ""
 	}
 	call := C.LLVMBuildCall2(s.builder, llvmFnType, callee, llvmValueSlicePtr(args), C.unsigned(len(args)), cStringFree(callName))
-	return call, resultType, nil
+	return call, info.resultType, nil
+}
+
+func (s *functionState) emitFixedArraySliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	arrayType, arrayPtr, handled, err := s.fixedArraySliceBase(expr.Object)
+	if err != nil || !handled {
+		return nil, nil, handled, err
+	}
+	resultType := s.exprType(expr)
+	usizeSemanticType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeSemanticType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	startValue, _, err := s.emitExpr(expr.Start, usizeSemanticType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	endValue, _, err := s.emitExpr(expr.End, usizeSemanticType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	arrayLen := C.LLVMConstInt(usizeLLVMType, C.ulonglong(arrayType.ConstSize), 0)
+	startClamped := s.emitUnsignedMin(startValue, arrayLen, usizeLLVMType, "arrayslice.start.clamped")
+	endClamped := s.emitUnsignedMin(endValue, arrayLen, usizeLLVMType, "arrayslice.end.clamped")
+	boundedStart := s.emitUnsignedMin(startClamped, endClamped, usizeLLVMType, "arrayslice.start.bounded")
+	sliceLen := C.LLVMBuildSub(s.builder, endClamped, boundedStart, cStringFree("arrayslice.len"))
+
+	llvmArrayType, err := s.g.lowerType(arrayType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	zeroIndex := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	indices := []C.LLVMValueRef{zeroIndex, boundedStart}
+	dataPtr := C.LLVMBuildGEP2(s.builder, llvmArrayType, arrayPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("arrayslice.data"))
+
+	viewLLVMType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	elemSize, err := s.sizeOfType(arrayType.Elem)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	elemSizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(elemSize), 0)
+	viewValue := C.LLVMGetUndef(viewLLVMType)
+	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, dataPtr, 0, cStringFree("arrayslice.view.data"))
+	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, sliceLen, 1, cStringFree("arrayslice.view.len"))
+	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, elemSizeValue, 2, cStringFree("arrayslice.view.elem_size"))
+	return viewValue, resultType, true, nil
+}
+
+func (s *functionState) fixedArraySliceBase(object ast.Expr) (*semantic.ArrayType, C.LLVMValueRef, bool, error) {
+	objectType := s.exprType(object)
+	if arrayType, ok := objectType.(*semantic.ArrayType); ok {
+		arrayPtr, _, err := s.emitAddressOrTemp(object)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		return arrayType, arrayPtr, true, nil
+	}
+	refType, ok := objectType.(*semantic.RefType)
+	if !ok || refType.State != semantic.RefStateNonNull {
+		return nil, nil, false, nil
+	}
+	arrayType, ok := refType.Elem.(*semantic.ArrayType)
+	if !ok {
+		return nil, nil, false, nil
+	}
+	arrayPtr, _, err := s.emitExpr(object, objectType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	return arrayType, arrayPtr, true, nil
+}
+
+func (s *functionState) emitUnsignedMin(left C.LLVMValueRef, right C.LLVMValueRef, llvmType C.LLVMTypeRef, name string) C.LLVMValueRef {
+	cmp := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULE), left, right, cStringFree(name+".cmp"))
+	mask := C.LLVMBuildZExt(s.builder, cmp, llvmType, cStringFree(name+".mask"))
+	negMask := C.LLVMBuildSub(s.builder, C.LLVMConstNull(llvmType), mask, cStringFree(name+".negmask"))
+	diff := C.LLVMBuildXor(s.builder, left, right, cStringFree(name+".diff"))
+	maskedDiff := C.LLVMBuildAnd(s.builder, diff, negMask, cStringFree(name+".masked"))
+	return C.LLVMBuildXor(s.builder, right, maskedDiff, cStringFree(name))
 }
 
 func (s *functionState) emitRuntimeStringLenExpr(object ast.Expr, fieldType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
@@ -652,36 +817,71 @@ func dstrFieldOperandType(t semantic.Type) (semantic.Type, bool) {
 	return nil, false
 }
 
-func runtimeSliceOperandInfo(objectType semantic.Type, resultType semantic.Type) (string, semantic.Type, semantic.Type, bool) {
+type runtimeSliceInfo struct {
+	helperName  string
+	operandType semantic.Type
+	resultType  semantic.Type
+	indexType   semantic.Type
+	useAddress  bool
+}
+
+func runtimeSliceOperandInfo(objectType semantic.Type, resultType semantic.Type) (runtimeSliceInfo, bool) {
+	i64Type := &semantic.BuiltinType{Name: "i64"}
+	usizeType := &semantic.BuiltinType{Name: "usize"}
+	if view, ok := objectType.(*semantic.DArrayType); ok {
+		return runtimeSliceInfo{
+			helperName:  "arena_da_view",
+			operandType: &semantic.RefType{Elem: objectType, State: semantic.RefStateNonNull},
+			resultType:  &semantic.DArrayViewType{Elem: view.Elem},
+			indexType:   usizeType,
+			useAddress:  true,
+		}, true
+	}
+	if view, ok := objectType.(*semantic.DArrayViewType); ok {
+		return runtimeSliceInfo{
+			helperName:  "arena_da_view_slice",
+			operandType: objectType,
+			resultType:  &semantic.DArrayViewType{Elem: view.Elem},
+			indexType:   usizeType,
+		}, true
+	}
 	if _, ok := objectType.(*semantic.DStrType); ok {
-		return "ctx_stage1rt_string_view", objectType, resultType, true
+		return runtimeSliceInfo{helperName: "ctx_stage1rt_string_view", operandType: objectType, resultType: resultType, indexType: i64Type}, true
 	}
 	if view, ok := objectType.(*semantic.DListType); ok {
-		return "ctx_stage1rt_tlist_view", objectType, &semantic.DListViewType{Elem: view.Elem}, true
+		return runtimeSliceInfo{helperName: "ctx_stage1rt_tlist_view", operandType: objectType, resultType: &semantic.DListViewType{Elem: view.Elem}, indexType: i64Type}, true
 	}
 	if view, ok := objectType.(*semantic.DListViewType); ok {
-		return "ctx_stage1rt_tlist_view_slice", objectType, &semantic.DListViewType{Elem: view.Elem}, true
+		return runtimeSliceInfo{helperName: "ctx_stage1rt_tlist_view_slice", operandType: objectType, resultType: &semantic.DListViewType{Elem: view.Elem}, indexType: i64Type}, true
 	}
 	if st, ok := objectType.(*semantic.StructType); ok && st.Name == "CtxStringView" {
-		return "ctx_stage1rt_string_view_slice", objectType, resultType, true
+		return runtimeSliceInfo{helperName: "ctx_stage1rt_string_view_slice", operandType: objectType, resultType: resultType, indexType: i64Type}, true
 	}
 	ref, ok := objectType.(*semantic.RefType)
 	if !ok || ref.State != semantic.RefStateNonNull {
-		return "", nil, nil, false
+		return runtimeSliceInfo{}, false
+	}
+	if view, ok := ref.Elem.(*semantic.DArrayType); ok {
+		return runtimeSliceInfo{
+			helperName:  "arena_da_view",
+			operandType: objectType,
+			resultType:  &semantic.DArrayViewType{Elem: view.Elem},
+			indexType:   usizeType,
+		}, true
 	}
 	if _, ok := ref.Elem.(*semantic.DStrType); ok {
-		return "ctx_stage1rt_string_view", ref.Elem, resultType, true
+		return runtimeSliceInfo{helperName: "ctx_stage1rt_string_view", operandType: ref.Elem, resultType: resultType, indexType: i64Type}, true
 	}
 	if view, ok := ref.Elem.(*semantic.DListType); ok {
-		return "ctx_stage1rt_tlist_view", ref.Elem, &semantic.DListViewType{Elem: view.Elem}, true
+		return runtimeSliceInfo{helperName: "ctx_stage1rt_tlist_view", operandType: ref.Elem, resultType: &semantic.DListViewType{Elem: view.Elem}, indexType: i64Type}, true
 	}
 	if view, ok := ref.Elem.(*semantic.DListViewType); ok {
-		return "ctx_stage1rt_tlist_view_slice", ref.Elem, &semantic.DListViewType{Elem: view.Elem}, true
+		return runtimeSliceInfo{helperName: "ctx_stage1rt_tlist_view_slice", operandType: ref.Elem, resultType: &semantic.DListViewType{Elem: view.Elem}, indexType: i64Type}, true
 	}
 	if st, ok := ref.Elem.(*semantic.StructType); ok && st.Name == "CtxStringView" {
-		return "ctx_stage1rt_string_view_slice", ref.Elem, resultType, true
+		return runtimeSliceInfo{helperName: "ctx_stage1rt_string_view_slice", operandType: ref.Elem, resultType: resultType, indexType: i64Type}, true
 	}
-	return "", nil, nil, false
+	return runtimeSliceInfo{}, false
 }
 
 func runtimeStringCompareInfo(leftType semantic.Type, rightType semantic.Type) (string, semantic.Type, semantic.Type, bool, bool) {

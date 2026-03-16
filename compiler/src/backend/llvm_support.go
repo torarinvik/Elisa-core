@@ -64,6 +64,21 @@ func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, s
 	return fieldPtr, fieldType, nil
 }
 
+func (s *functionState) emitAddressOrTemp(expr ast.Expr) (C.LLVMValueRef, semantic.Type, error) {
+	if ptr, typ, err := s.emitAddress(expr); err == nil {
+		return ptr, typ, nil
+	}
+	value, typ, err := s.emitExpr(expr, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	ptr, err := s.emitStackTempValue(value, typ, "addr.tmp")
+	if err != nil {
+		return nil, nil, err
+	}
+	return ptr, typ, nil
+}
+
 func (s *functionState) emitIndexAddress(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, error) {
 	objType := s.exprType(expr.Object)
 	indexValue, _, err := s.emitExpr(expr.Index, s.g.result.NamedTypes["usize"])
@@ -73,7 +88,7 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr) (C.LLVMValueRef, s
 	zero := C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), 0, 0)
 	switch t := objType.(type) {
 	case *semantic.ArrayType:
-		arrayPtr, _, err := s.emitAddress(expr.Object)
+		arrayPtr, _, err := s.emitAddressOrTemp(expr.Object)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -85,13 +100,13 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr) (C.LLVMValueRef, s
 		ptr := C.LLVMBuildGEP2(s.builder, arrayLLVMType, arrayPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("idx.ptr"))
 		return ptr, t.Elem, nil
 	case *semantic.DArrayType:
-		containerPtr, _, err := s.emitAddress(expr.Object)
+		containerPtr, _, err := s.emitAddressOrTemp(expr.Object)
 		if err != nil {
 			return nil, nil, err
 		}
 		return s.emitRuntimeIndexedAddress(containerPtr, t, t.Elem, indexValue)
 	case *semantic.DArrayViewType:
-		containerPtr, _, err := s.emitAddress(expr.Object)
+		containerPtr, _, err := s.emitAddressOrTemp(expr.Object)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -105,7 +120,7 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr) (C.LLVMValueRef, s
 			return s.g.ensureRuntimeCtxList()
 		}, t.Elem, indexValue)
 	case *semantic.DListViewType:
-		containerPtr, _, err := s.emitAddress(expr.Object)
+		containerPtr, _, err := s.emitAddressOrTemp(expr.Object)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -126,6 +141,11 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr) (C.LLVMValueRef, s
 		}
 		if elemType, ok := runtimeIndexedElemType(t.Elem); ok {
 			return s.emitRuntimeIndexedAddress(basePtr, t.Elem, elemType, indexValue)
+		}
+		if dlist, ok := t.Elem.(*semantic.DListType); ok {
+			return s.emitRuntimePointerIndexedAddress(basePtr, func() (C.LLVMTypeRef, error) {
+				return s.g.ensureRuntimeCtxList()
+			}, dlist.Elem, indexValue)
 		}
 		if view, ok := t.Elem.(*semantic.DListViewType); ok {
 			return s.emitRuntimeIndexedAddress(basePtr, view, view.Elem, indexValue)
