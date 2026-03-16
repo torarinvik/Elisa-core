@@ -245,6 +245,33 @@ This is nice because it matches the real machine-level story:
 - after free: not valid to use anymore
 - compiler state becomes null-proven
 
+## Error handling pairs well with pointer proofs
+
+Typed errors are a good fit for the common pattern “nullable FFI result at the edge, proven non-null pointer in the rest of the program”.
+
+Using the current explicit storage qualifiers, a practical wrapper looks like this:
+
+```context
+error MemoryError:
+    OutOfMemory
+
+extern alloc_node() -> any Node&?
+
+def require_node() -> any Node& error[MemoryError]:
+    node: any Node& = alloc_node() else raise MemoryError.OutOfMemory
+    return node
+
+def make_node_value() -> int error[MemoryError]:
+    node: any Node& = try require_node()
+    node.value <- 42
+    return node.value
+
+def make_node_value_or_zero() -> int:
+    return try make_node_value() else 0
+```
+
+That keeps the low-level boundary honest (`alloc_node` may return null), while the rest of the example works with a proven non-null pointer plus explicit propagation and recovery.
+
 ## Illegal strengthening rule
 
 The compiler must reject attempts to strengthen pointer proof without evidence.

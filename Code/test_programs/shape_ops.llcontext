@@ -1,16 +1,19 @@
-extern resize(array: darray[i32, shape_in], size: usize) -> darray[i32, shape_out]
-extern push(array: darray[i32, shape_in], element: i32) -> darray[i32, shape_out]
-extern concat(array1: darray[i32, shape_left], array2: darray[i32, shape_right]) -> darray[i32, shape_result]
-extern strcat(left: dstr[shape_left], right: dstr[shape_right]) -> dstr[shape_result]
+error ShapeOpError:
+    AllocationFailed
 
-def grow_once(array: darray[i32, row]) -> darray[i32, shape_after]:
-    return resize(array, 8)
+extern resize(array: darray[i32, shape_in], size: usize) -> darray[i32, shape_out] error[ShapeOpError]
+extern push(array: darray[i32, shape_in], element: i32) -> darray[i32, shape_out] error[ShapeOpError]
+extern concat(array1: darray[i32, shape_left], array2: darray[i32, shape_right]) -> darray[i32, shape_result] error[ShapeOpError]
+extern strcat(left: dstr[shape_left], right: dstr[shape_right]) -> dstr[shape_result] error[ShapeOpError]
 
-def append_once(array: darray[i32, row]) -> darray[i32, shape_after]:
-    return push(array, 1)
+def grow_once(array: darray[i32, row]) -> darray[i32, shape_after] error[ShapeOpError]:
+    return try resize(array, 8)
 
-def merge_arrays(left: darray[i32, row], right: darray[i32, col]) -> darray[i32, shape_joined]:
-    return concat(left, right)
+def append_once(array: darray[i32, row]) -> darray[i32, shape_after] error[ShapeOpError]:
+    return try push(array, 1)
 
-def merge_strings(left: dstr[row], right: dstr[col]) -> dstr[shape_joined]:
-    return strcat(left, right)
+def merge_arrays(left: darray[i32, row], right: darray[i32, col]) -> darray[i32, shape_joined] error[ShapeOpError]:
+    return try concat(left, right)
+
+def merge_strings(left: dstr[row], right: dstr[col]) -> dstr[shape_joined] error[ShapeOpError]:
+    return try strcat(left, right)

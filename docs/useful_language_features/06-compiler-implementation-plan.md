@@ -414,15 +414,18 @@ Those tests exercise the actual include expansion, parse, semantic, and emit pip
 ### Example regression style
 
 ```context
-def grow(a: darray[u8, row]) -> darray[u8, shape_after]:
-    return resize(a, 16)
+error ShapeOpError:
+    AllocationFailed
+
+def grow(a: darray[u8, row]) -> darray[u8, shape_after] error[ShapeOpError]:
+    return try resize(a, 16)
 ```
 
 and:
 
 ```context
-def bad(a: darray[u8, row]) -> darray[u8, row]:
-    return resize(a, 16)   # should fail if resize returns fresh shape_after
+def bad(a: darray[u8, row]) -> darray[u8, row] error[ShapeOpError]:
+    return try resize(a, 16)   # should still fail if resize returns fresh shape_after
 ```
 
 That is exactly the kind of “dependent-ish” safety check the language should advertise.
@@ -450,11 +453,16 @@ The codebase is already following this staged approach:
 For example, the stage 1 wrappers now look like this:
 
 ```context
-def ctx_stage1rt_concat2(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[shape_result]:
-    return ctx_stage0_concat2(lhs, rhs)
+error RuntimeError:
+    AllocationFailed
 
-def ctx_stage1rt_tlist_push[T](values: DList[T, shape_in], elem: T&) -> DList[T, shape_out]:
-    return ctx_stage0_list_push(values, elem.void&(), sizeof(T).i64())
+def ctx_stage1rt_concat2(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[shape_result] error[RuntimeError]:
+    text: dstr[shape_result] = ctx_stage0_concat2(lhs, rhs) else raise RuntimeError.AllocationFailed
+    return text
+
+def ctx_stage1rt_tlist_push[T](values: DList[T, shape_in], elem: T&) -> DList[T, shape_out] error[RuntimeError]:
+    next: DList[T, shape_out] = ctx_stage0_list_push(values, elem.void&(), sizeof(T).i64()) else raise RuntimeError.AllocationFailed
+    return next
 
 def ctx_stage1rt_tlist_view[T](values: DList[T, shape_in], start: i64, end: i64) -> DListView[T]:
     return ctx_stage0_list_view(values, start, end)
@@ -463,11 +471,11 @@ def ctx_stage1rt_tlist_view[T](values: DList[T, shape_in], start: i64, end: i64)
 And the arena-backed container helpers now look like this:
 
 ```context
-def arena_da_append[T](a: Arena&, da: darray[T, shape_in]&, item: T) -> darray[T, shape_out]&:
+def arena_da_append[T](a: Arena&, da: darray[T, shape_in]&, item: T) -> darray[T, shape_out]& error[RuntimeError]:
     # implementation mutates storage/capacity as needed
     return da
 
-def arena_da_append_many[T](a: Arena&, da: darray[T, shape_in]&, new_items: T&, new_items_count: usize) -> darray[T, shape_out]&:
+def arena_da_append_many[T](a: Arena&, da: darray[T, shape_in]&, new_items: T&, new_items_count: usize) -> darray[T, shape_out]& error[RuntimeError]:
     # implementation grows/copies as needed
     return da
 
@@ -487,7 +495,7 @@ More concretely, the current semantic bridge is intentionally narrow and wrapper
 
 The older raw list wrappers (`ctx_stage1rt_list_*` with `darray[void&, shape]` and `CtxListView`) still exist as compatibility shims, but the typed `ctx_stage1rt_tlist_*` surface is the preferred API for new code.
 
-That means the typechecker can track logical shape states at the wrapper/API level while still reusing the existing low-level runtime layouts internally.
+That means the typechecker can track logical shape states at the wrapper/API level while still reusing the existing low-level runtime layouts internally, and the public wrappers can expose typed `error[...]` returns when allocation or growth may fail.
 
 This keeps the experimental surface high-value while preserving the zero-overhead, C-like runtime core.
 

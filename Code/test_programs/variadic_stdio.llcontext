@@ -1,7 +1,22 @@
+error FormatError:
+    WriteFailed
+
 extern snprintf(buffer: any u8&?, buffer_size: usize, format: any u8&, ...) -> int
 
+def checked_format_len(format: any u8&) -> int error[FormatError]:
+    written: int = snprintf(null, 0u, format, 7, 9)
+    if written < 0:
+        raise FormatError.WriteFailed
+    return written
+
 def format_len(format: any u8&) -> int:
-    return snprintf(null, 0u, format, 7, 9)
+    return try checked_format_len(format) else -1
+
+def checked_write_into(buffer: any u8&, size: usize, format: any u8&) -> int error[FormatError]:
+    written: int = snprintf(buffer, size, format, 11)
+    if written < 0:
+        raise FormatError.WriteFailed
+    return written
 
 def write_into(buffer: any u8&, size: usize, format: any u8&) -> int:
-    return snprintf(buffer, size, format, 11)
+    return try checked_write_into(buffer, size, format) else -1

@@ -267,11 +267,18 @@ At the type level, `shape_id` means “the current logical length fact associate
 
 Resize changes shape identity:
 
+Assuming the operation may need to allocate, the most honest surface is a fallible one:
+
+```text
+error ShapeOpError:
+    AllocationFailed
+```
+
 ```text
 Γ ⊢ a : darray[T, shape_in]
 Γ ⊢ m : usize
 --------------------------------
-Γ ⊢ resize(a, m) : darray[T, shape_out]
+Γ ⊢ resize(a, m) : darray[T, shape_out] error[ShapeOpError]
 ```
 
 where `shape_out` is fresh.
@@ -288,7 +295,7 @@ The important part is that this cast is **logical and zero-overhead**, not a run
 Γ ⊢ a : darray[T, shape_in]
 Γ ⊢ x : T
 --------------------------------
-Γ ⊢ push(a, x) : darray[T, shape_out]
+Γ ⊢ push(a, x) : darray[T, shape_out] error[ShapeOpError]
 ```
 
 Again `shape_out` is fresh, because the logical shape changed.
@@ -299,7 +306,7 @@ Again `shape_out` is fresh, because the logical shape changed.
 Γ ⊢ a : darray[T, shape_left]
 Γ ⊢ b : darray[T, shape_right]
 --------------------------------
-Γ ⊢ concat(a, b) : darray[T, shape_result]
+Γ ⊢ concat(a, b) : darray[T, shape_result] error[ShapeOpError]
 ```
 
 `shape_result` is fresh.
@@ -474,12 +481,12 @@ as logical length-indexed owned containers.
 ### And define core APIs like
 
 ```text
-resize      : darray[T, shape_in] × usize -> darray[T, shape_out]
-push        : darray[T, shape_in] × T -> darray[T, shape_out]
-append_many : darray[T, shape_in] × darray[T, chunk] -> darray[T, shape_out]
+resize      : darray[T, shape_in] × usize -> darray[T, shape_out] error[ShapeOpError]
+push        : darray[T, shape_in] × T -> darray[T, shape_out] error[ShapeOpError]
+append_many : darray[T, shape_in] × darray[T, chunk] -> darray[T, shape_out] error[ShapeOpError]
 truncate    : darray[T, shape_in] × usize -> darray[T, shape_out]
 clear       : darray[T, shape_in] -> darray[T, shape_out]
-concat      : dstr[shape_left] × dstr[shape_right] -> dstr[shape_result]
+concat      : dstr[shape_left] × dstr[shape_right] -> dstr[shape_result] error[ShapeOpError]
 ```
 
 String indexing now yields `char`. Cast explicitly when you want an integer code unit:
@@ -496,7 +503,7 @@ Current meaning note: today `char` is best understood as the element/code-unit t
 
 That also leaves room for future extensions such as encoding-qualified character forms if the language eventually wants to distinguish byte-oriented characters from wider text elements.
 
-where each shape-changing operation returns a new logical shape.
+where each shape-changing operation returns a new logical shape, and allocation-sensitive ones can report failure explicitly instead of silently smuggling it through null/sentinel conventions.
 
 That gives you the flavor you want:
 
