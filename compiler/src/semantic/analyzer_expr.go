@@ -117,9 +117,15 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		return
 	case *ast.StructLitExpr:
 		if t, ok := a.namedTypes[n.Name]; ok {
-			if st, ok := t.(*StructType); ok {
-				result = st
+			switch tt := t.(type) {
+			case *StructType:
+				result = tt
 				return
+			case *GenericInstanceType:
+				if _, ok := tt.Base.(*StructType); ok {
+					result = tt
+					return
+				}
 			}
 		}
 		a.errorf(n.Pos(), "unknown struct %q", n.Name)

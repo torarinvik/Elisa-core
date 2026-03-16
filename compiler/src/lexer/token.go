@@ -23,6 +23,7 @@ const (
 	TOKEN_CONST
 	TOKEN_GLOBAL
 	TOKEN_EXTERN
+	TOKEN_EXPORT
 	TOKEN_IF
 	TOKEN_ELIF
 	TOKEN_ELSE
@@ -116,6 +117,7 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_CONST:   "const",
 	TOKEN_GLOBAL:  "global",
 	TOKEN_EXTERN:  "extern",
+	TOKEN_EXPORT:  "export",
 	TOKEN_IF:      "if",
 	TOKEN_ELIF:    "elif",
 	TOKEN_ELSE:    "else",
@@ -194,6 +196,7 @@ var keywords = map[string]TokenKind{
 	"const":   TOKEN_CONST,
 	"global":  TOKEN_GLOBAL,
 	"extern":  TOKEN_EXTERN,
+	"export":  TOKEN_EXPORT,
 	"if":      TOKEN_IF,
 	"elif":    TOKEN_ELIF,
 	"else":    TOKEN_ELSE,

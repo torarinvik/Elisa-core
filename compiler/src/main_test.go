@@ -120,6 +120,16 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"declare i64 @ctx_stage1rt_string_views_eq(%CtxStringView, %CtxStringView)",
 			},
 		},
+		{
+			name: "export_vec2i",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "export_vec2i.llcontext"),
+			checks: []string{
+				"define %Vec__i32 @vec_add_i32(%Vec__i32",
+				"define %Vec__i32 @keep_left__Vec_i32(%Vec__i32",
+				"define i64 @vec2i_add(i64",
+				"define i64 @vec2i_keep_left(i64",
+			},
+		},
 	}
 
 	for _, fixture := range fixtures {

@@ -83,6 +83,21 @@ type ExternTypeDecl struct {
 	Name     string
 }
 
+type ExportTypeDecl struct {
+	Position     lexer.Pos
+	ExportedType TypeExpr
+	Alias        string
+}
+
+type ExportFuncDecl struct {
+	Position       lexer.Pos
+	Name           string
+	Params         []ParamDecl
+	ReturnType     TypeExpr
+	TargetName     string
+	TargetTypeArgs []TypeExpr
+}
+
 type StaticIfDecl struct {
 	Position lexer.Pos
 	Cond     Expr
@@ -367,6 +382,8 @@ func (n *FuncDecl) Pos() lexer.Pos        { return n.Position }
 func (n *ExternFuncDecl) Pos() lexer.Pos  { return n.Position }
 func (n *ExternVarDecl) Pos() lexer.Pos   { return n.Position }
 func (n *ExternTypeDecl) Pos() lexer.Pos  { return n.Position }
+func (n *ExportTypeDecl) Pos() lexer.Pos  { return n.Position }
+func (n *ExportFuncDecl) Pos() lexer.Pos  { return n.Position }
 func (n *StaticIfDecl) Pos() lexer.Pos    { return n.Position }
 func (n *NamedType) Pos() lexer.Pos       { return n.Position }
 func (n *RefType) Pos() lexer.Pos         { return n.Position }
@@ -415,6 +432,8 @@ func (*FuncDecl) nodeTag()        {}
 func (*ExternFuncDecl) nodeTag()  {}
 func (*ExternVarDecl) nodeTag()   {}
 func (*ExternTypeDecl) nodeTag()  {}
+func (*ExportTypeDecl) nodeTag()  {}
+func (*ExportFuncDecl) nodeTag()  {}
 func (*StaticIfDecl) nodeTag()    {}
 func (*NamedType) nodeTag()       {}
 func (*RefType) nodeTag()         {}
@@ -463,6 +482,8 @@ func (*FuncDecl) declTag()       {}
 func (*ExternFuncDecl) declTag() {}
 func (*ExternVarDecl) declTag()  {}
 func (*ExternTypeDecl) declTag() {}
+func (*ExportTypeDecl) declTag() {}
+func (*ExportFuncDecl) declTag() {}
 func (*StaticIfDecl) declTag()   {}
 
 func (*NamedType) typeExprTag()       {}

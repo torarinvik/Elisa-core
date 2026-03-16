@@ -282,6 +282,22 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		fmt.Fprintf(w, "%sextern %s: %s\n", prefix, n.Name, typeStr(n.Type))
 	case *ast.ExternTypeDecl:
 		fmt.Fprintf(w, "%sextern type %s\n", prefix, n.Name)
+	case *ast.ExportTypeDecl:
+		fmt.Fprintf(w, "%sexport type %s as %s\n", prefix, typeStr(n.ExportedType), n.Alias)
+	case *ast.ExportFuncDecl:
+		ret := ""
+		if n.ReturnType != nil {
+			ret = " -> " + typeStr(n.ReturnType)
+		}
+		target := n.TargetName
+		if len(n.TargetTypeArgs) > 0 {
+			parts := make([]string, 0, len(n.TargetTypeArgs))
+			for _, arg := range n.TargetTypeArgs {
+				parts = append(parts, typeStr(arg))
+			}
+			target += "[" + strings.Join(parts, ", ") + "]"
+		}
+		fmt.Fprintf(w, "%sexport func %s(%d params)%s = %s\n", prefix, n.Name, len(n.Params), ret, target)
 	case *ast.StaticIfDecl:
 		fmt.Fprintf(w, "%sstatic if %s: (%d then, %d elifs)\n", prefix, exprStr(n.Cond), len(n.Then), len(n.Elifs))
 		for _, then := range n.Then {

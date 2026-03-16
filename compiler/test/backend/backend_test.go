@@ -336,6 +336,47 @@ def use_identity(value: i32) -> i32:
 	}
 }
 
+func TestGenerateLLVMIRLowersExportWrappers(t *testing.T) {
+	src := `repr(c) struct Vec[T]:
+	x: mutable T
+	y: mutable T
+
+export type Vec[i32] as Vec2i
+
+def vec_add_i32(left: Vec[i32], right: Vec[i32]) -> Vec[i32]:
+	result: Vec[i32] = zeroed
+	result.x <- left.x + right.x
+	result.y <- left.y + right.y
+	return result
+
+def keep_left[T](left: T, right: T) -> T:
+	return left
+
+export func vec2i_add(left: Vec2i, right: Vec2i) -> Vec2i = vec_add_i32
+export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[i32]]
+`
+	result := parseAndAnalyze(t, "backend_export_wrappers.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%Vec__i32 = type { i32, i32 }",
+		"define %Vec__i32 @vec_add_i32(%Vec__i32",
+		"define %Vec__i32 @keep_left__Vec_i32(%Vec__i32",
+		"define i64 @vec2i_add(i64",
+		"define i64 @vec2i_keep_left(i64",
+		"call %Vec__i32 @vec_add_i32(%Vec__i32",
+		"call %Vec__i32 @keep_left__Vec_i32(%Vec__i32",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersVariadicExternCalls(t *testing.T) {
 	src := `extern snprintf(buffer: u8&?, buffer_size: usize, format: u8&, ...) -> int
 

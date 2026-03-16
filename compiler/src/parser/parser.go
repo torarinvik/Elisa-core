@@ -94,6 +94,8 @@ func (p *Parser) parseDecl() ast.Decl {
 		return p.parseFuncDecl()
 	case lexer.TOKEN_EXTERN:
 		return p.parseExternDecl()
+	case lexer.TOKEN_EXPORT:
+		return p.parseExportDecl()
 	case lexer.TOKEN_STATIC:
 		return p.parseStaticIfDecl()
 	default:
@@ -302,6 +304,49 @@ func (p *Parser) parseExternDecl() ast.Decl {
 	p.expectNewline()
 
 	return &ast.ExternFuncDecl{Position: pos, Name: name, Params: params, ReturnType: retType, Variadic: variadic}
+}
+
+func (p *Parser) parseExportDecl() ast.Decl {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_EXPORT)
+	kind := p.expect(lexer.TOKEN_IDENT)
+	switch kind.Text {
+	case "type":
+		target := p.parseTypeExpr()
+		p.expect(lexer.TOKEN_AS)
+		alias := p.expect(lexer.TOKEN_IDENT).Text
+		p.expectNewline()
+		return &ast.ExportTypeDecl{Position: pos, ExportedType: target, Alias: alias}
+	case "func":
+		name := p.expect(lexer.TOKEN_IDENT).Text
+		p.expect(lexer.TOKEN_LPAREN)
+		params := p.parseParamList()
+		p.expect(lexer.TOKEN_RPAREN)
+
+		var retType ast.TypeExpr
+		if p.match(lexer.TOKEN_ARROW) {
+			retType = p.parseTypeExpr()
+		}
+
+		p.expect(lexer.TOKEN_ASSIGN)
+		targetName := p.expect(lexer.TOKEN_IDENT).Text
+		var targetTypeArgs []ast.TypeExpr
+		if p.match(lexer.TOKEN_LBRACKET) {
+			for {
+				targetTypeArgs = append(targetTypeArgs, p.parseTypeExpr())
+				if !p.match(lexer.TOKEN_COMMA) {
+					break
+				}
+			}
+			p.expect(lexer.TOKEN_RBRACKET)
+		}
+		p.expectNewline()
+		return &ast.ExportFuncDecl{Position: pos, Name: name, Params: params, ReturnType: retType, TargetName: targetName, TargetTypeArgs: targetTypeArgs}
+	default:
+		p.errorf("expected export type or export func, got %q", kind.Text)
+		p.skipNewlines()
+		return nil
+	}
 }
 
 func (p *Parser) parseStaticIfDecl() *ast.StaticIfDecl {

@@ -266,6 +266,47 @@ def bump(ch: char) -> i64:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsExportedConcreteWrappers(t *testing.T) {
+	src := `repr(c) struct Vec[T]:
+	x: mutable T
+	y: mutable T
+
+export type Vec[i32] as Vec2i
+
+def vec_add_i32(left: Vec[i32], right: Vec[i32]) -> Vec[i32]:
+	result: Vec[i32] = zeroed
+	result.x <- left.x + right.x
+	result.y <- left.y + right.y
+	return result
+
+def keep_left[T](left: T, right: T) -> T:
+	return left
+
+export func vec2i_add(left: Vec2i, right: Vec2i) -> Vec2i = vec_add_i32
+export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[i32]]
+`
+	result, errs := parseAndAnalyze(t, "export_wrappers.llcontext", src)
+	requireNoErrors(t, errs)
+	if len(result.ExportedTypes) != 1 {
+		t.Fatalf("expected 1 exported type, got %d", len(result.ExportedTypes))
+	}
+	if len(result.ExportedFuncs) != 2 {
+		t.Fatalf("expected 2 exported funcs, got %d", len(result.ExportedFuncs))
+	}
+	if _, ok := result.NamedTypes["Vec2i"]; !ok {
+		t.Fatal("expected Vec2i type alias to be available")
+	}
+	if result.ExportedFuncs[1].TargetGenericDecl == nil {
+		t.Fatal("expected generic export target metadata for vec2i_keep_left")
+	}
+	if result.ExportedFuncs[1].TargetBindings["T"] == nil {
+		t.Fatal("expected generic export binding for keep_left")
+	}
+	if result.ExportedFuncs[0].Signature.Return.String() != "Vec[i32]" {
+		t.Fatalf("expected exported wrapper return to resolve concretely, got %s", result.ExportedFuncs[0].Signature.Return.String())
+	}
+}
+
 func TestAnalyzeTernaryRefinesNullablePointerBranch(t *testing.T) {
 	src := `def choose_text(value: u8&?) -> u8&:
     return value if value != null else ""

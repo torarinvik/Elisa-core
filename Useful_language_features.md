@@ -10,6 +10,7 @@ This document is now a landing page for the split design notes in `docs/useful_l
 4. [`04-length-indexed-arrays-and-strings.md`](docs/useful_language_features/04-length-indexed-arrays-and-strings.md) — design discussion for length-indexed arrays and strings.
 5. [`05-array-string-shape-mini-spec.md`](docs/useful_language_features/05-array-string-shape-mini-spec.md) — mini-spec for shape-typed arrays and strings.
 6. [`06-compiler-implementation-plan.md`](docs/useful_language_features/06-compiler-implementation-plan.md) — staged compiler roadmap for shape-typed arrays and strings.
+7. [`07-export-and-c-abi.md`](docs/useful_language_features/07-export-and-c-abi.md) — mini-spec for explicit export declarations, stable C ABI names, and header/object-file interop.
 
 ## Notes
 

@@ -1068,18 +1068,16 @@ func (s *functionState) emitStructLitExpr(expr *ast.StructLitExpr) (C.LLVMValueR
 	if err != nil {
 		return nil, nil, err
 	}
-	value := C.LLVMGetUndef(llvmType)
-	st, ok := structType.(*semantic.StructType)
-	if !ok {
-		return nil, nil, fmt.Errorf("struct literal %s did not resolve to a concrete struct type", expr.Name)
+	fields, err := s.g.structLiteralFields(structType)
+	if err != nil {
+		return nil, nil, err
 	}
+	value := C.LLVMGetUndef(llvmType)
 	for i, arg := range expr.Args {
-		if i >= len(st.Decl.Fields) {
+		if i >= len(fields) {
 			break
 		}
-		fieldDecl := st.Decl.Fields[i]
-		field := st.Fields[fieldDecl.Name]
-		fieldValue, _, err := s.emitExpr(arg, field.Type)
+		fieldValue, _, err := s.emitExpr(arg, fields[i].Type)
 		if err != nil {
 			return nil, nil, err
 		}

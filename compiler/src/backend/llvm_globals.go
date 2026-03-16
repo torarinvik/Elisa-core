@@ -94,18 +94,16 @@ func (g *llvmGenerator) constExprValue(expr ast.Expr, expected semantic.Type) (C
 		if err != nil {
 			return nil, err
 		}
-		st, ok := stType.(*semantic.StructType)
-		if !ok {
-			return nil, fmt.Errorf("struct literal %s is not a concrete repr(c) struct", n.Name)
+		fields, err := g.structLiteralFields(stType)
+		if err != nil {
+			return nil, err
 		}
-		values := make([]C.LLVMValueRef, 0, len(st.Decl.Fields))
+		values := make([]C.LLVMValueRef, 0, len(fields))
 		for i, arg := range n.Args {
-			if i >= len(st.Decl.Fields) {
+			if i >= len(fields) {
 				break
 			}
-			fieldDecl := st.Decl.Fields[i]
-			field := st.Fields[fieldDecl.Name]
-			fieldValue, err := g.constExprValue(arg, field.Type)
+			fieldValue, err := g.constExprValue(arg, fields[i].Type)
 			if err != nil {
 				return nil, err
 			}

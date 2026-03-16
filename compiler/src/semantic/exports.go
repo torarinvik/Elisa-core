@@ -1,0 +1,261 @@
+package semantic
+
+import "llcontext/src/ast"
+
+func (a *Analyzer) collectExportTypeAliases(decls []ast.Decl) {
+	for _, decl := range decls {
+		exportDecl, ok := decl.(*ast.ExportTypeDecl)
+		if !ok {
+			continue
+		}
+		if _, exists := a.namedTypes[exportDecl.Alias]; exists {
+			a.errorf(exportDecl.Pos(), "duplicate type %q", exportDecl.Alias)
+			continue
+		}
+		resolved := a.resolveType(exportDecl.ExportedType)
+		if IsInvalidType(resolved) {
+			continue
+		}
+		if !exportedNamedTypeAllowed(resolved) {
+			a.errorf(exportDecl.Pos(), "export type %q must name a concrete repr(c) struct or concrete instantiation", exportDecl.Alias)
+			continue
+		}
+		if !isCABICompatibleType(resolved) {
+			a.errorf(exportDecl.Pos(), "export type %q is not C-ABI-compatible", exportDecl.Alias)
+			continue
+		}
+		a.namedTypes[exportDecl.Alias] = resolved
+		a.exportedTypes = append(a.exportedTypes, &ExportedType{PublicName: exportDecl.Alias, Type: resolved, Decl: exportDecl})
+	}
+}
+
+func (a *Analyzer) analyzeExports(decls []ast.Decl) {
+	seenPublicNames := map[string]bool{}
+	for _, exported := range a.exportedTypes {
+		if exported != nil {
+			seenPublicNames[exported.PublicName] = true
+		}
+	}
+	for _, decl := range decls {
+		exportDecl, ok := decl.(*ast.ExportFuncDecl)
+		if !ok {
+			continue
+		}
+		a.analyzeExportFunc(exportDecl, seenPublicNames)
+	}
+}
+
+func (a *Analyzer) analyzeExportFunc(decl *ast.ExportFuncDecl, seenPublicNames map[string]bool) {
+	if seenPublicNames[decl.Name] {
+		a.errorf(decl.Pos(), "duplicate export name %q", decl.Name)
+		return
+	}
+	if existing, ok := a.globalScope.Lookup(decl.Name); ok {
+		a.errorf(decl.Pos(), "exported symbol %q collides with existing %s", decl.Name, existing.Kind)
+		return
+	}
+
+	signature := a.funcTypeFromDecl(decl.Name, nil, decl.Params, decl.ReturnType, false)
+	if !isCABICompatibleFuncType(signature) {
+		a.errorf(decl.Pos(), "export func %q is not C-ABI-compatible", decl.Name)
+		return
+	}
+
+	targetSym, ok := a.globalScope.Lookup(decl.TargetName)
+	if !ok {
+		a.errorf(decl.Pos(), "export target %q is undefined", decl.TargetName)
+		return
+	}
+	targetBase, ok := targetSym.Type.(*FuncType)
+	if !ok {
+		a.errorf(decl.Pos(), "export target %q is not a function", decl.TargetName)
+		return
+	}
+
+	bindings := map[string]Type{}
+	targetSpecialized := targetBase
+	targetGenericDecl, _ := targetSym.Node.(*ast.FuncDecl)
+	if len(targetBase.TypeParams) > 0 {
+		if targetGenericDecl == nil {
+			a.errorf(decl.Pos(), "export target %q does not support generic specialization", decl.TargetName)
+			return
+		}
+		if len(decl.TargetTypeArgs) != len(targetBase.TypeParams) {
+			a.errorf(decl.Pos(), "export target %q expects %d type arguments, got %d", decl.TargetName, len(targetBase.TypeParams), len(decl.TargetTypeArgs))
+			return
+		}
+		for i, arg := range decl.TargetTypeArgs {
+			resolved := a.resolveType(arg)
+			if IsInvalidType(resolved) {
+				return
+			}
+			if containsTypeParam(resolved) {
+				a.errorf(arg.Pos(), "export target specialization arguments must be concrete")
+				return
+			}
+			bindings[targetBase.TypeParams[i]] = resolved
+		}
+		targetSpecialized = specializeExportFuncType(a, targetBase, bindings)
+	} else if len(decl.TargetTypeArgs) > 0 {
+		a.errorf(decl.Pos(), "export target %q is not generic", decl.TargetName)
+		return
+	}
+
+	if !sameExportSignature(signature, targetSpecialized) {
+		a.errorf(decl.Pos(), "export func %q signature %s does not match target %q as %s", decl.Name, signature.String(), decl.TargetName, targetSpecialized.String())
+		return
+	}
+
+	seenPublicNames[decl.Name] = true
+	a.exportedFuncs = append(a.exportedFuncs, &ExportedFunc{
+		PublicName:        decl.Name,
+		Signature:         signature,
+		TargetName:        decl.TargetName,
+		TargetBase:        targetBase,
+		TargetSpecialized: targetSpecialized,
+		TargetGenericDecl: targetGenericDecl,
+		TargetBindings:    copyTypeBindings(bindings),
+		Decl:              decl,
+	})
+}
+
+func specializeExportFuncType(a *Analyzer, base *FuncType, bindings map[string]Type) *FuncType {
+	if base == nil {
+		return nil
+	}
+	specialized, _ := a.substituteType(base, bindings, nil).(*FuncType)
+	if specialized == nil {
+		return base
+	}
+	return &FuncType{
+		Name:                   specialized.Name,
+		TypeParams:             nil,
+		ShapeParams:            append([]string(nil), specialized.ShapeParams...),
+		FreshReturnShapeParams: append([]string(nil), specialized.FreshReturnShapeParams...),
+		Params:                 append([]Type(nil), specialized.Params...),
+		Return:                 specialized.Return,
+		Variadic:               specialized.Variadic,
+	}
+}
+
+func sameExportSignature(left *FuncType, right *FuncType) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	if left.Variadic != right.Variadic || len(left.Params) != len(right.Params) {
+		return false
+	}
+	for i := range left.Params {
+		if !SameType(left.Params[i], right.Params[i]) {
+			return false
+		}
+	}
+	return SameType(left.Return, right.Return)
+}
+
+func exportedNamedTypeAllowed(t Type) bool {
+	switch tt := t.(type) {
+	case *StructType:
+		return tt.ReprC && len(tt.TypeParams) == 0
+	case *GenericInstanceType:
+		base, ok := tt.Base.(*StructType)
+		return ok && base.ReprC && len(base.TypeParams) == len(tt.Args)
+	default:
+		return false
+	}
+}
+
+func isCABICompatibleFuncType(fn *FuncType) bool {
+	if fn == nil || fn.Variadic || len(fn.TypeParams) > 0 {
+		return false
+	}
+	for _, param := range fn.Params {
+		if !isCABICompatibleType(param) {
+			return false
+		}
+	}
+	return isCABICompatibleType(fn.Return)
+}
+
+func isCABICompatibleType(t Type) bool {
+	switch tt := t.(type) {
+	case nil:
+		return true
+	case *BuiltinType:
+		switch tt.Name {
+		case "void", "char", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "int", "isize", "usize", "uintptr":
+			return true
+		default:
+			return false
+		}
+	case *RefType:
+		return true
+	case *ArrayType:
+		return tt.HasConstSize && isCABICompatibleType(tt.Elem)
+	case *StructType:
+		if !tt.ReprC || len(tt.TypeParams) > 0 || tt.Decl == nil {
+			return false
+		}
+		for _, fieldDecl := range tt.Decl.Fields {
+			field, ok := tt.Fields[fieldDecl.Name]
+			if !ok || !isCABICompatibleType(field.Type) {
+				return false
+			}
+		}
+		return true
+	case *GenericInstanceType:
+		base, ok := tt.Base.(*StructType)
+		if !ok || !base.ReprC || base.Decl == nil || len(base.TypeParams) != len(tt.Args) {
+			return false
+		}
+		bindings := make(map[string]Type, len(base.TypeParams))
+		for i, name := range base.TypeParams {
+			bindings[name] = tt.Args[i]
+		}
+		for _, fieldDecl := range base.Decl.Fields {
+			field, ok := base.Fields[fieldDecl.Name]
+			if !ok || !isCABICompatibleType(substituteExportType(field.Type, bindings)) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func substituteExportType(t Type, bindings map[string]Type) Type {
+	if len(bindings) == 0 {
+		return t
+	}
+	switch tt := t.(type) {
+	case *TypeParamType:
+		if resolved, ok := bindings[tt.Name]; ok {
+			return resolved
+		}
+		return tt
+	case *RefType:
+		return &RefType{Elem: substituteExportType(tt.Elem, bindings), State: tt.State}
+	case *ArrayType:
+		return &ArrayType{Elem: substituteExportType(tt.Elem, bindings), Size: tt.Size, HasConstSize: tt.HasConstSize, ConstSize: tt.ConstSize, SurfaceName: tt.SurfaceName}
+	case *GenericInstanceType:
+		args := make([]Type, 0, len(tt.Args))
+		for _, arg := range tt.Args {
+			args = append(args, substituteExportType(arg, bindings))
+		}
+		return &GenericInstanceType{Name: tt.Name, Base: tt.Base, Args: args}
+	default:
+		return t
+	}
+}
+
+func copyTypeBindings(bindings map[string]Type) map[string]Type {
+	if len(bindings) == 0 {
+		return nil
+	}
+	out := make(map[string]Type, len(bindings))
+	for key, value := range bindings {
+		out[key] = value
+	}
+	return out
+}
