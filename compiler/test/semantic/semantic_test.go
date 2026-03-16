@@ -240,6 +240,32 @@ def use(values: array[i32, 4], dyn: darray[i32, row], text: str[5], dyn_text: ds
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsCharCastAndComparisonFromStringIndexing(t *testing.T) {
+	src := `def first_code(text: str[4]) -> i64:
+	ch: char = text[0]
+	return ch.i64()
+
+def same_head(left: dstr[row], right: dstr[col]) -> bool:
+	return left[0] == right[0]
+`
+	_, errs := parseAndAnalyze(t, "char_cast_and_compare.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsStandaloneCharLocalsParamsAndCasts(t *testing.T) {
+	src := `def normalize(code: i64) -> char:
+	ch: char = code.char()
+	if ch == 0.char():
+		return 65.char()
+	return ch
+
+def bump(ch: char) -> i64:
+	return (ch + 1).i64()
+`
+	_, errs := parseAndAnalyze(t, "standalone_char_values.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeTernaryRefinesNullablePointerBranch(t *testing.T) {
 	src := `def choose_text(value: u8&?) -> u8&:
     return value if value != null else ""

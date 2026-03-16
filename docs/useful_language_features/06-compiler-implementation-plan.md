@@ -508,6 +508,8 @@ Status: this MVP boundary has effectively been reached and pushed beyond. The cu
 
 String indexing now yields `char`; convert explicitly with `.i64()` when you want a numeric code unit.
 
+At the moment, `char` should be read as the string element/code-unit type produced by `str`, `dstr`, and `sview` indexing. That keeps the current model simple and low-level while still leaving the door open to future encoding-qualified character forms if the language later wants to distinguish ASCII-like byte chars from wider text elements.
+
 ### First post-MVP
 
 - known builtins/API table for shape-changing operations

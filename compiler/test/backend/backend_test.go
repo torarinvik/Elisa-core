@@ -187,6 +187,36 @@ def view_char(text: sview[0, 4]) -> char:
 	}
 }
 
+func TestGenerateLLVMIRLowersStandaloneCharValues(t *testing.T) {
+	src := `def normalize(code: i64) -> char:
+	ch: char = code.char()
+	if ch == 0.char():
+		return 65.char()
+	return ch
+
+def bump(ch: char) -> i64:
+	return (ch + 1).i64()
+`
+	result := parseAndAnalyze(t, "backend_standalone_char_values.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"define i64 @normalize(i64",
+		"icmp eq i64",
+		"ret i64 65",
+		"define i64 @bump(i64",
+		"add i64",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersReferenceComparisons(t *testing.T) {
 	src := `repr(c) struct Box:
     value: i32

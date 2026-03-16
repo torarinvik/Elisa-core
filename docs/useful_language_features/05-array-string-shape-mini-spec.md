@@ -492,6 +492,10 @@ def first_code(text: str[4]) -> i64:
     return text[0].i64()
 ```
 
+Current meaning note: today `char` is best understood as the element/code-unit type yielded by `str`, `dstr`, and `sview` indexing. In the current implementation it lowers like an `i64`, but user-facing code should treat it as a distinct scalar rather than “just an integer with a funny hat”.
+
+That also leaves room for future extensions such as encoding-qualified character forms if the language eventually wants to distinguish byte-oriented characters from wider text elements.
+
 where each shape-changing operation returns a new logical shape.
 
 That gives you the flavor you want:
