@@ -808,15 +808,15 @@ def load_with_fallback(path: any u8&) -> any u8&:
 		"%ErrUnion__IoError__dstr_file_text = type { i32, ptr }",
 		"%ErrUnion__MemoryError__heap_void = type { i32, ptr }",
 		"declare ptr @alloc(i64)",
-		"declare %ErrUnion__IoError__dstr_file_text @read_file(ptr)",
-		"define %ErrUnion__MemoryError__heap_void @checked_alloc(i64)",
-		"define %ErrUnion__IoError__dstr_file_text @load_text(ptr)",
-		"define ptr @load_with_fallback(ptr)",
+		"declare i32 @read_file(ptr, ptr)",
+		"define i32 @checked_alloc(ptr ",
+		"define i32 @load_text(ptr ",
+		"define ptr @load_with_fallback(ptr ",
 		"extractvalue %ErrUnion__IoError__dstr_file_text",
 		"insertvalue %ErrUnion__IoError__dstr_file_text",
 		"icmp eq i32",
 		"phi ptr",
-		"ret %ErrUnion__IoError__dstr_file_text",
+		"ret i32",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {

@@ -27,13 +27,14 @@ type codegenScope struct {
 }
 
 type functionState struct {
-	g       *llvmGenerator
-	decl    *ast.FuncDecl
-	fnValue C.LLVMValueRef
-	fnType  *semantic.FuncType
-	builder C.LLVMBuilderRef
-	scope   *codegenScope
-	typeMap map[string]semantic.Type
+	g          *llvmGenerator
+	decl       *ast.FuncDecl
+	fnValue    C.LLVMValueRef
+	fnType     *semantic.FuncType
+	builder    C.LLVMBuilderRef
+	scope      *codegenScope
+	typeMap    map[string]semantic.Type
+	resultSlot C.LLVMValueRef
 }
 
 func (g *llvmGenerator) defineFunctionBody(decl *ast.FuncDecl, fnType *semantic.FuncType, fnValue C.LLVMValueRef) error {
@@ -66,6 +67,12 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		typeMap: typeBindings,
 	}
 
+	paramOffset := 0
+	if _, ok := nonVoidErrorUnion(fnType.Return); ok {
+		state.resultSlot = C.LLVMGetParam(fnValue, 0)
+		paramOffset = 1
+	}
+
 	for i, param := range decl.Params {
 		if i >= len(fnType.Params) {
 			break
@@ -74,7 +81,7 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		if err != nil {
 			return err
 		}
-		paramValue := C.LLVMGetParam(fnValue, C.unsigned(i))
+		paramValue := C.LLVMGetParam(fnValue, C.unsigned(i+paramOffset))
 		C.LLVMBuildStore(builder, paramValue, alloca)
 		state.defineBinding(param.Name, valueBinding{ptr: alloca, typ: fnType.Params[i]})
 	}
@@ -97,6 +104,39 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		}
 	}
 
+	return nil
+}
+
+func (s *functionState) emitFunctionReturn(value C.LLVMValueRef, actual semantic.Type) error {
+	if retUnion, ok := s.fnType.Return.(*semantic.ErrorUnionType); ok {
+		coerced, err := s.coerceValue(value, actual, retUnion)
+		if err != nil {
+			return err
+		}
+		if isVoidType(retUnion.Value) {
+			C.LLVMBuildRet(s.builder, coerced)
+			return nil
+		}
+		if s.resultSlot == nil {
+			return fmt.Errorf("function %s is missing a hidden return slot for %s", s.decl.Name, retUnion.String())
+		}
+		errorCode, err := s.extractErrorUnionCode(coerced, retUnion)
+		if err != nil {
+			return err
+		}
+		payload, err := s.extractErrorUnionPayload(coerced, retUnion)
+		if err != nil {
+			return err
+		}
+		C.LLVMBuildStore(s.builder, payload, s.resultSlot)
+		C.LLVMBuildRet(s.builder, errorCode)
+		return nil
+	}
+	coerced, err := s.coerceValue(value, actual, s.fnType.Return)
+	if err != nil {
+		return err
+	}
+	C.LLVMBuildRet(s.builder, coerced)
 	return nil
 }
 
@@ -201,12 +241,11 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			C.LLVMBuildRetVoid(s.builder)
 			return nil
 		}
-		value, _, err := s.emitExpr(n.Value, s.fnType.Return)
+		value, valueType, err := s.emitExpr(n.Value, nil)
 		if err != nil {
 			return err
 		}
-		C.LLVMBuildRet(s.builder, value)
-		return nil
+		return s.emitFunctionReturn(value, valueType)
 	case *ast.IfStmt:
 		return s.emitIf(n)
 	case *ast.WhileStmt:

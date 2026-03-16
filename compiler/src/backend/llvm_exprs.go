@@ -178,15 +178,13 @@ func (s *functionState) emitRaiseExpr(expr *ast.RaiseExpr) (C.LLVMValueRef, sema
 	if !ok {
 		return nil, nil, fmt.Errorf("raise requires an error-union return type")
 	}
-	errorValue, _, err := s.emitExpr(expr.Error, currentUnion.Errors)
+	errorValue, errorType, err := s.emitExpr(expr.Error, currentUnion.Errors)
 	if err != nil {
 		return nil, nil, err
 	}
-	retValue, err := s.buildErrorUnionFailure(currentUnion, errorValue)
-	if err != nil {
+	if err := s.emitFunctionReturn(errorValue, errorType); err != nil {
 		return nil, nil, err
 	}
-	C.LLVMBuildRet(s.builder, retValue)
 	return nil, s.exprType(expr), nil
 }
 
@@ -216,15 +214,12 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 		C.LLVMBuildCondBr(s.builder, successCond, okBB, errBB)
 
 		C.LLVMPositionBuilderAtEnd(s.builder, errBB)
-		currentUnion, ok := s.fnType.Return.(*semantic.ErrorUnionType)
-		if !ok {
+		if _, ok := s.fnType.Return.(*semantic.ErrorUnionType); !ok {
 			return nil, nil, fmt.Errorf("try propagation requires an error-union function return")
 		}
-		retValue, err := s.buildErrorUnionFailure(currentUnion, errorCode)
-		if err != nil {
+		if err := s.emitFunctionReturn(errorCode, unionType.Errors); err != nil {
 			return nil, nil, err
 		}
-		C.LLVMBuildRet(s.builder, retValue)
 
 		C.LLVMPositionBuilderAtEnd(s.builder, okBB)
 		if isVoidType(resultType) {
@@ -711,6 +706,25 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 			return nil, nil, err
 		}
 		args = append(args, value)
+	}
+	if retUnion, ok := nonVoidErrorUnion(funcType.Return); ok {
+		resultSlot, err := s.emitStackTempZeroed(retUnion.Value, "call.result")
+		if err != nil {
+			return nil, nil, err
+		}
+		callArgs := make([]C.LLVMValueRef, 0, len(args)+1)
+		callArgs = append(callArgs, resultSlot)
+		callArgs = append(callArgs, args...)
+		call := s.buildCall(llvmFnType, callee, callArgs, "calltmp")
+		payload, err := s.loadValue(resultSlot, retUnion.Value, "call.payload")
+		if err != nil {
+			return nil, nil, err
+		}
+		unionValue, err := s.buildErrorUnionValue(retUnion, call, payload)
+		if err != nil {
+			return nil, nil, err
+		}
+		return unionValue, funcType.Return, nil
 	}
 	callName := ""
 	if !isVoidType(funcType.Return) {

@@ -119,7 +119,31 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 	if !isVoidType(targetType.Return) {
 		callName = "export.call"
 	}
-	call := C.LLVMBuildCall2(builder, llvmTargetType, targetValue, llvmValueSlicePtr(args), C.unsigned(len(args)), cStringFree(callName))
+	var call C.LLVMValueRef
+	var targetResult C.LLVMValueRef
+	if retUnion, ok := nonVoidErrorUnion(targetType.Return); ok {
+		resultLLVMType, err := g.lowerType(retUnion.Value)
+		if err != nil {
+			return err
+		}
+		resultSlot := C.LLVMBuildAlloca(builder, resultLLVMType, cStringFree("export.ret.slot"))
+		C.LLVMBuildStore(builder, C.LLVMConstNull(resultLLVMType), resultSlot)
+		callArgs := make([]C.LLVMValueRef, 0, len(args)+1)
+		callArgs = append(callArgs, resultSlot)
+		callArgs = append(callArgs, args...)
+		call = C.LLVMBuildCall2(builder, llvmTargetType, targetValue, llvmValueSlicePtr(callArgs), C.unsigned(len(callArgs)), cStringFree(callName))
+		payload := C.LLVMBuildLoad2(builder, resultLLVMType, resultSlot, cStringFree("export.ret.payload"))
+		unionLLVMType, err := g.lowerType(targetType.Return)
+		if err != nil {
+			return err
+		}
+		targetResult = C.LLVMGetUndef(unionLLVMType)
+		targetResult = C.LLVMBuildInsertValue(builder, targetResult, call, 0, cStringFree("export.ret.err"))
+		targetResult = C.LLVMBuildInsertValue(builder, targetResult, payload, 1, cStringFree("export.ret.val"))
+	} else {
+		call = C.LLVMBuildCall2(builder, llvmTargetType, targetValue, llvmValueSlicePtr(args), C.unsigned(len(args)), cStringFree(callName))
+		targetResult = call
+	}
 	if isVoidType(targetType.Return) {
 		C.LLVMBuildRetVoid(builder)
 		return nil
@@ -127,7 +151,7 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 	if !semantic.SameType(exported.Signature.Return, targetType.Return) {
 		return fmt.Errorf("export wrapper %s return type %s does not match target return type %s", exported.PublicName, exported.Signature.Return.String(), targetType.Return.String())
 	}
-	packed, err := g.packExportABIValue(builder, call, targetType.Return, returnLowering, "export.ret")
+	packed, err := g.packExportABIValue(builder, targetResult, targetType.Return, returnLowering, "export.ret")
 	if err != nil {
 		return err
 	}

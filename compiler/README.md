@@ -21,7 +21,7 @@ def alloc_or_null(size: usize) -> any void&:
   return ptr
 ```
 
-Current lowering in the backend uses integer error codes at runtime; `void | ErrorSet` lowers to an error code, while value-carrying results currently lower to a compact `{err, value}` LLVM struct.
+Current lowering in the backend uses integer error codes at runtime; `void | ErrorSet` lowers directly to an error code, while value-carrying fallible functions now return that code plus a hidden payload out-parameter. Inside expressions and locals, the backend still materializes compact `{err, value}` LLVM structs when it needs a first-class error-union value.
 
 ## Layout
 

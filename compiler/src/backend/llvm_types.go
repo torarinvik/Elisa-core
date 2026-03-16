@@ -26,6 +26,14 @@ func isVoidRefLikeType(t semantic.Type) bool {
 	return ok && builtin.Name == "void"
 }
 
+func nonVoidErrorUnion(t semantic.Type) (*semantic.ErrorUnionType, bool) {
+	unionType, ok := t.(*semantic.ErrorUnionType)
+	if !ok || unionType == nil || isVoidType(unionType.Value) {
+		return nil, false
+	}
+	return unionType, true
+}
+
 func (g *llvmGenerator) noteType(t semantic.Type) error {
 	if t == nil {
 		return nil
@@ -163,11 +171,18 @@ func (g *llvmGenerator) addGlobal(name string, t semantic.Type, external bool) (
 }
 
 func (g *llvmGenerator) lowerFunctionType(fn *semantic.FuncType) (C.LLVMTypeRef, error) {
-	returnType, err := g.lowerType(fn.Return)
+	returnType, err := g.lowerFunctionReturnType(fn.Return)
 	if err != nil {
 		return nil, err
 	}
 	params := make([]C.LLVMTypeRef, 0, len(fn.Params))
+	if unionType, ok := nonVoidErrorUnion(fn.Return); ok {
+		outParamType, err := g.lowerErrorUnionOutParamType(unionType)
+		if err != nil {
+			return nil, err
+		}
+		params = append(params, outParamType)
+	}
 	for _, param := range fn.Params {
 		paramType, err := g.lowerType(param)
 		if err != nil {
@@ -176,6 +191,23 @@ func (g *llvmGenerator) lowerFunctionType(fn *semantic.FuncType) (C.LLVMTypeRef,
 		params = append(params, paramType)
 	}
 	return C.LLVMFunctionType(returnType, llvmTypeSlicePtr(params), C.unsigned(len(params)), boolToLLVMBool(fn.Variadic)), nil
+}
+
+func (g *llvmGenerator) lowerFunctionReturnType(t semantic.Type) (C.LLVMTypeRef, error) {
+	if unionType, ok := nonVoidErrorUnion(t); ok {
+		return g.lowerType(unionType.Errors)
+	}
+	return g.lowerType(t)
+}
+
+func (g *llvmGenerator) lowerErrorUnionOutParamType(unionType *semantic.ErrorUnionType) (C.LLVMTypeRef, error) {
+	if unionType == nil || isVoidType(unionType.Value) {
+		return nil, fmt.Errorf("missing value-carrying error union metadata")
+	}
+	if _, err := g.lowerType(unionType.Value); err != nil {
+		return nil, err
+	}
+	return C.LLVMPointerTypeInContext(g.context, 0), nil
 }
 
 func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
