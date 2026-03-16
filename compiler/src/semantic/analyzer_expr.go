@@ -50,7 +50,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = a.namedTypes["int"]
 		return
 	case *ast.StringLit:
-		result = &RefType{Elem: a.namedTypes["u8"], State: RefStateNonNull}
+		result = &RefType{Elem: a.namedTypes["u8"], State: RefStateNonNull, Storage: RefStorageStatic, ExplicitStorage: true}
 		return
 	case *ast.BoolLit:
 		result = a.namedTypes["bool"]
@@ -113,7 +113,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		return
 	case *ast.AddrOfExpr:
 		inner := a.analyzeExpr(n.Operand)
-		result = &RefType{Elem: inner, State: RefStateNonNull}
+		result = &RefType{Elem: inner, State: RefStateNonNull, Storage: a.inferAddrOfStorage(n.Operand), ExplicitStorage: true}
 		return
 	case *ast.StructLitExpr:
 		if t, ok := a.namedTypes[n.Name]; ok {
@@ -743,12 +743,34 @@ func (a *Analyzer) refTypeWithAsKind(t Type, asKind string) Type {
 	}
 	switch asKind {
 	case "&":
-		return &RefType{Elem: ref.Elem, State: RefStateNonNull}
+		return cloneRefTypeWithState(ref, RefStateNonNull)
 	case "!":
-		return &RefType{Elem: ref.Elem, State: RefStateNull}
+		return cloneRefTypeWithState(ref, RefStateNull)
 	default:
 		return t
 	}
+}
+
+func (a *Analyzer) inferAddrOfStorage(expr ast.Expr) RefStorage {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return a.inferAddrOfStorage(n.Inner)
+	case *ast.Ident:
+		if a.currentScope != nil {
+			if sym, ok := a.currentScope.Lookup(n.Name); ok {
+				switch sym.Kind {
+				case SymbolLocal, SymbolParam:
+					return RefStorageStack
+				case SymbolGlobal:
+					return RefStorageStatic
+				}
+			}
+		}
+		if sym, ok := a.globalScope.Lookup(n.Name); ok && sym.Kind == SymbolGlobal {
+			return RefStorageStatic
+		}
+	}
+	return RefStorageAny
 }
 
 func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (Field, bool) {

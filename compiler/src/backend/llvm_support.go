@@ -183,7 +183,7 @@ func (s *functionState) emitRuntimePointerIndexedAddress(containerPtr C.LLVMValu
 
 func (s *functionState) emitRuntimePointerIndexedAddressWithType(containerPtr C.LLVMValueRef, containerLLVMType C.LLVMTypeRef, elemType semantic.Type, indexValue C.LLVMValueRef) (C.LLVMValueRef, semantic.Type, error) {
 	dataFieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, containerPtr, 0, cStringFree("idx.data.ptr"))
-	dataPtr, err := s.loadValue(dataFieldPtr, &semantic.RefType{Elem: elemType, State: semantic.RefStateNullable}, "idx.data")
+	dataPtr, err := s.loadValue(dataFieldPtr, &semantic.RefType{Elem: elemType, State: semantic.RefStateNullable, Storage: semantic.RefStorageAny}, "idx.data")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -408,7 +408,7 @@ func (s *functionState) emitConstValue(value semantic.ConstValue) (C.LLVMValueRe
 		defer C.free(unsafe.Pointer(name))
 		text := cString(value.String)
 		defer C.free(unsafe.Pointer(text))
-		return C.LLVMBuildGlobalStringPtr(s.builder, text, name), &semantic.RefType{Elem: s.g.result.NamedTypes["u8"], State: semantic.RefStateNonNull}, nil
+		return C.LLVMBuildGlobalStringPtr(s.builder, text, name), &semantic.RefType{Elem: s.g.result.NamedTypes["u8"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageStatic, ExplicitStorage: true}, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported const kind %d", value.Kind)
 	}
@@ -446,7 +446,7 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 		if err != nil {
 			return nil, err
 		}
-		return &semantic.RefType{Elem: elem, State: semantic.RefState(n.State)}, nil
+		return &semantic.RefType{Elem: elem, State: semantic.RefState(n.State), Storage: semantic.RefStorage(n.Storage), ExplicitStorage: n.Explicit}, nil
 	case *ast.ArrayType:
 		elem, err := s.resolveTypeExpr(n.Elem)
 		if err != nil {
@@ -466,7 +466,7 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 		if err != nil {
 			return nil, err
 		}
-		return &semantic.RefType{Elem: elem, State: semantic.RefStateNonNull}, nil
+		return &semantic.RefType{Elem: elem, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny}, nil
 	case *ast.GenericType:
 		if t, ok, err := s.resolveDynamicShapeType(n); ok || err != nil {
 			return t, err

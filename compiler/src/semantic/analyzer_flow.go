@@ -218,7 +218,7 @@ func (a *Analyzer) shadowRefinedExpr(scope *Scope, expr ast.Expr, state RefState
 	if !refinementCompatible(ref.State, state) {
 		return
 	}
-	scope.Refinements[key] = &RefType{Elem: ref.Elem, State: state}
+	scope.Refinements[key] = cloneRefTypeWithState(ref, state)
 }
 
 func refinementCompatible(current, desired RefState) bool {
@@ -330,10 +330,10 @@ func assignedRefinementType(targetType Type, valueType Type) Type {
 		return nil
 	}
 	if IsNullType(valueType) {
-		return &RefType{Elem: targetRef.Elem, State: RefStateNull}
+		return cloneRefTypeWithState(targetRef, RefStateNull)
 	}
 	if valueRef, ok := valueType.(*RefType); ok {
-		return &RefType{Elem: valueRef.Elem, State: valueRef.State}
+		return cloneRefType(valueRef)
 	}
 	return targetRef
 }

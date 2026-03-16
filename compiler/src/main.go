@@ -387,13 +387,26 @@ func typeStr(t ast.TypeExpr) string {
 		return n.Name
 	case *ast.RefType:
 		s := typeStr(n.Elem)
+		prefix := ""
+		if n.Explicit || n.Storage != ast.RefStorageAny {
+			switch n.Storage {
+			case ast.RefStorageHeap:
+				prefix = "heap "
+			case ast.RefStorageStack:
+				prefix = "stack "
+			case ast.RefStorageStatic:
+				prefix = "static "
+			default:
+				prefix = "any "
+			}
+		}
 		switch n.State {
 		case ast.RefStateNullable:
-			return s + "&?"
+			return prefix + s + "&?"
 		case ast.RefStateNull:
-			return s + "!"
+			return prefix + s + "!"
 		default:
-			return s + "&"
+			return prefix + s + "&"
 		}
 	case *ast.GenericType:
 		var args []string

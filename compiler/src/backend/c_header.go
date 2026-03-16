@@ -334,7 +334,7 @@ func substituteHeaderType(t semantic.Type, bindings map[string]semantic.Type) se
 		}
 		return tt
 	case *semantic.RefType:
-		return &semantic.RefType{Elem: substituteHeaderType(tt.Elem, bindings), State: tt.State}
+		return &semantic.RefType{Elem: substituteHeaderType(tt.Elem, bindings), State: tt.State, Storage: tt.Storage, ExplicitStorage: tt.ExplicitStorage}
 	case *semantic.ArrayType:
 		return &semantic.ArrayType{Elem: substituteHeaderType(tt.Elem, bindings), Size: tt.Size, HasConstSize: tt.HasConstSize, ConstSize: tt.ConstSize, SurfaceName: tt.SurfaceName}
 	case *semantic.GenericInstanceType:

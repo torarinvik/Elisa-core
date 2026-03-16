@@ -61,7 +61,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		a.errorf(n.Pos(), "unknown type %q", n.Name)
 		return invalidType
 	case *ast.RefType:
-		return &RefType{Elem: a.resolveType(n.Elem), State: RefState(n.State)}
+		return &RefType{Elem: a.resolveType(n.Elem), State: RefState(n.State), Storage: RefStorage(n.Storage), ExplicitStorage: n.Explicit}
 	case *ast.ArrayType:
 		return a.resolveArrayType(n)
 	case *ast.BuiltinTypeExpr:
@@ -69,7 +69,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 	case *ast.MutableType:
 		return a.resolveType(n.Elem)
 	case *ast.TailType:
-		return &RefType{Elem: a.resolveType(n.Elem), State: RefStateNonNull}
+		return &RefType{Elem: a.resolveType(n.Elem), State: RefStateNonNull, Storage: RefStorageAny}
 	case *ast.GenericType:
 		if shaped, ok := a.resolveDynamicShapeType(n); ok {
 			return shaped
@@ -264,7 +264,7 @@ func (a *Analyzer) inferLiteralType(expr ast.Expr) Type {
 		}
 		return a.namedTypes["int"]
 	case *ast.StringLit:
-		return &RefType{Elem: a.namedTypes["u8"], State: RefStateNonNull}
+		return &RefType{Elem: a.namedTypes["u8"], State: RefStateNonNull, Storage: RefStorageStatic, ExplicitStorage: true}
 	case *ast.BoolLit:
 		return a.namedTypes["bool"]
 	case *ast.NullLit:
@@ -363,7 +363,7 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 		}
 		return n
 	case *RefType:
-		return &RefType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), State: n.State}
+		return &RefType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), State: n.State, Storage: n.Storage, ExplicitStorage: n.ExplicitStorage}
 	case *ArrayType:
 		return &ArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Size: n.Size, HasConstSize: n.HasConstSize, ConstSize: n.ConstSize, SurfaceName: n.SurfaceName}
 	case *DArrayType:

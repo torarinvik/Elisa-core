@@ -16,11 +16,32 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 		elem := p.parseTypeExpr()
 		return &ast.TailType{Position: elem.Pos(), Elem: elem}
 	}
-	return p.parseBaseType()
+	storage, explicit, label := p.parseRefStorageQualifier()
+	return p.parseBaseType(storage, explicit, label)
 }
 
-func (p *Parser) parseRefTypeSuffixes(base ast.TypeExpr, pos lexer.Pos) ast.TypeExpr {
+func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string) {
+	switch p.peek() {
+	case lexer.TOKEN_ANY:
+		tok := p.advance()
+		return ast.RefStorageAny, true, tok.Text
+	case lexer.TOKEN_HEAP:
+		tok := p.advance()
+		return ast.RefStorageHeap, true, tok.Text
+	case lexer.TOKEN_STACK:
+		tok := p.advance()
+		return ast.RefStorageStack, true, tok.Text
+	case lexer.TOKEN_STATIC:
+		tok := p.advance()
+		return ast.RefStorageStatic, true, tok.Text
+	default:
+		return ast.RefStorageAny, false, ""
+	}
+}
+
+func (p *Parser) parseRefTypeSuffixes(base ast.TypeExpr, pos lexer.Pos, storage ast.RefStorage, explicit bool) (ast.TypeExpr, int) {
 	typ := base
+	count := 0
 	for {
 		switch p.peek() {
 		case lexer.TOKEN_AMPERSAND:
@@ -29,17 +50,19 @@ func (p *Parser) parseRefTypeSuffixes(base ast.TypeExpr, pos lexer.Pos) ast.Type
 			if p.match(lexer.TOKEN_QUESTION) {
 				state = ast.RefStateNullable
 			}
-			typ = &ast.RefType{Position: pos, Elem: typ, State: state}
+			typ = &ast.RefType{Position: pos, Elem: typ, State: state, Storage: storage, Explicit: explicit}
+			count++
 		case lexer.TOKEN_BANG:
 			p.advance()
-			typ = &ast.RefType{Position: pos, Elem: typ, State: ast.RefStateNull}
+			typ = &ast.RefType{Position: pos, Elem: typ, State: ast.RefStateNull, Storage: storage, Explicit: explicit}
+			count++
 		default:
-			return typ
+			return typ, count
 		}
 	}
 }
 
-func (p *Parser) parseBaseType() ast.TypeExpr {
+func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label string) ast.TypeExpr {
 	pos := p.cur().Pos
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	var typ ast.TypeExpr = &ast.NamedType{Position: pos, Name: name}
@@ -80,7 +103,11 @@ func (p *Parser) parseBaseType() ast.TypeExpr {
 		}
 	}
 
-	typ = p.parseRefTypeSuffixes(typ, pos)
+	refCount := 0
+	typ, refCount = p.parseRefTypeSuffixes(typ, pos, storage, explicit)
+	if explicit && refCount == 0 {
+		p.errorf("storage qualifier %q requires a pointer type", label)
+	}
 
 	if p.peek() == lexer.TOKEN_LBRACKET {
 		p.advance()
@@ -294,11 +321,21 @@ func (p *Parser) parsePostfix() ast.Expr {
 			p.advance()
 			field := p.expect(lexer.TOKEN_IDENT).Text
 
+			if field == "cast" && p.peek() == lexer.TOKEN_LBRACKET {
+				p.advance()
+				target := p.parseTypeExpr()
+				p.expect(lexer.TOKEN_RBRACKET)
+				p.expect(lexer.TOKEN_LPAREN)
+				p.expect(lexer.TOKEN_RPAREN)
+				expr = &ast.CastExpr{Position: pos, Operand: expr, Target: target}
+				continue
+			}
+
 			if p.peek() == lexer.TOKEN_AMPERSAND || p.peek() == lexer.TOKEN_BANG {
 				castPos := pos
 				savedCastPos := p.pos
 				var target ast.TypeExpr = &ast.NamedType{Position: castPos, Name: field}
-				target = p.parseRefTypeSuffixes(target, castPos)
+				target, _ = p.parseRefTypeSuffixes(target, castPos, ast.RefStorageAny, false)
 				if p.peek() == lexer.TOKEN_LPAREN {
 					p.advance()
 					p.expect(lexer.TOKEN_RPAREN)

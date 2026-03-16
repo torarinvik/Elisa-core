@@ -136,10 +136,21 @@ const (
 	RefStateNull
 )
 
+type RefStorage int
+
+const (
+	RefStorageAny RefStorage = iota
+	RefStorageHeap
+	RefStorageStack
+	RefStorageStatic
+)
+
 type RefType struct {
 	Position lexer.Pos
 	Elem     TypeExpr
 	State    RefState
+	Storage  RefStorage
+	Explicit bool
 }
 
 type GenericType struct {

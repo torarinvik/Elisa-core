@@ -421,7 +421,7 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type) semantic.Ty
 		}
 		return t
 	case *semantic.RefType:
-		return &semantic.RefType{Elem: substituteType(tt.Elem, subst), State: tt.State}
+		return &semantic.RefType{Elem: substituteType(tt.Elem, subst), State: tt.State, Storage: tt.Storage, ExplicitStorage: tt.ExplicitStorage}
 	case *semantic.ArrayType:
 		return &semantic.ArrayType{Elem: substituteType(tt.Elem, subst), Size: tt.Size, HasConstSize: tt.HasConstSize, ConstSize: tt.ConstSize, SurfaceName: tt.SurfaceName}
 	case *semantic.DArrayType:

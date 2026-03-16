@@ -391,6 +391,45 @@ def same_box(left: Box&, right: Box&) -> bool:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsStorageQualifiedPointersAndCastSyntax(t *testing.T) {
+	src := `repr(c) struct Box:
+	value: int
+
+extern maybe_heap_box() -> heap Box&?
+
+def widen(box: heap Box&?) -> any Box&?:
+	return box.cast[any Box&?]()
+
+def keep_heap(box: heap Box&?) -> heap Box&?:
+	return box.cast[heap Box&?]()
+
+def coerce_text() -> any u8&:
+	return "hello".cast[any u8&]()
+
+def use_source() -> any Box&?:
+	return maybe_heap_box().cast[any Box&?]()
+`
+	_, errs := parseAndAnalyze(t, "storage_cast_syntax.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsImplicitStorageMismatchWithoutCast(t *testing.T) {
+	src := `repr(c) struct Box:
+	value: int
+
+def bad(box: heap Box&) -> any Box&:
+	return box
+`
+	_, errs := parseAndAnalyze(t, "storage_mismatch_without_cast.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "return type expects any Box&, got heap Box&") {
+		t.Fatalf("expected storage-mismatch diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeAcceptsEquivalentConstArrayShapes(t *testing.T) {
 	src := `const N: usize = 4
 

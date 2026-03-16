@@ -51,9 +51,20 @@ const (
 	RefStateNull
 )
 
+type RefStorage int
+
+const (
+	RefStorageAny RefStorage = iota
+	RefStorageHeap
+	RefStorageStack
+	RefStorageStatic
+)
+
 type RefType struct {
-	Elem  Type
-	State RefState
+	Elem            Type
+	State           RefState
+	Storage         RefStorage
+	ExplicitStorage bool
 }
 
 type ArrayType struct {
@@ -167,8 +178,25 @@ func (s *FreshShape) String() string {
 	}
 	return fmt.Sprintf("shape#%d", s.ID)
 }
+
+func RefStorageName(storage RefStorage) string {
+	switch storage {
+	case RefStorageHeap:
+		return "heap"
+	case RefStorageStack:
+		return "stack"
+	case RefStorageStatic:
+		return "static"
+	default:
+		return "any"
+	}
+}
+
 func (t *RefType) String() string {
 	s := t.Elem.String()
+	if t.ExplicitStorage || t.Storage != RefStorageAny {
+		s = RefStorageName(t.Storage) + " " + s
+	}
 	switch t.State {
 	case RefStateNullable:
 		s += "&?"
@@ -284,6 +312,20 @@ func IsRefType(t Type) (*RefType, bool) {
 	return r, ok
 }
 
+func cloneRefTypeWithState(ref *RefType, state RefState) *RefType {
+	if ref == nil {
+		return nil
+	}
+	return &RefType{Elem: ref.Elem, State: state, Storage: ref.Storage, ExplicitStorage: ref.ExplicitStorage}
+}
+
+func cloneRefType(ref *RefType) *RefType {
+	if ref == nil {
+		return nil
+	}
+	return cloneRefTypeWithState(ref, ref.State)
+}
+
 func refStateAssignable(dst, src RefState) bool {
 	switch dst {
 	case RefStateNullable:
@@ -295,6 +337,23 @@ func refStateAssignable(dst, src RefState) bool {
 	default:
 		return false
 	}
+}
+
+func refStorageAssignable(dstStorage, srcStorage RefStorage, dstExplicit, srcExplicit bool) bool {
+	if !dstExplicit || !srcExplicit {
+		return true
+	}
+	return dstStorage == srcStorage
+}
+
+func mergeRefStorages(aStorage, bStorage RefStorage, aExplicit, bExplicit bool) (RefStorage, bool, bool) {
+	if !aExplicit || !bExplicit {
+		return RefStorageAny, false, true
+	}
+	if aStorage == bStorage {
+		return aStorage, true, true
+	}
+	return RefStorageAny, false, false
 }
 
 func mergeRefStates(a, b RefState) (RefState, bool) {

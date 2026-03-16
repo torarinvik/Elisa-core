@@ -162,6 +162,18 @@ func TestRefType(t *testing.T) {
 	assertKinds(t, tokens, expect)
 }
 
+func TestStorageKeywordsAndCastTokens(t *testing.T) {
+	tokens := collectTokens("heap Region&\nfoo.cast[stack i64&]()\n")
+	expect := []lexer.TokenKind{
+		lexer.TOKEN_HEAP, lexer.TOKEN_IDENT, lexer.TOKEN_AMPERSAND, lexer.TOKEN_NEWLINE,
+		lexer.TOKEN_IDENT, lexer.TOKEN_DOT, lexer.TOKEN_IDENT, lexer.TOKEN_LBRACKET,
+		lexer.TOKEN_STACK, lexer.TOKEN_IDENT, lexer.TOKEN_AMPERSAND, lexer.TOKEN_RBRACKET,
+		lexer.TOKEN_LPAREN, lexer.TOKEN_RPAREN, lexer.TOKEN_NEWLINE,
+		lexer.TOKEN_EOF,
+	}
+	assertKinds(t, tokens, expect)
+}
+
 func TestShiftOps(t *testing.T) {
 	tokens := collectTokens("x << 3 >> 2\n")
 	expect := []lexer.TokenKind{

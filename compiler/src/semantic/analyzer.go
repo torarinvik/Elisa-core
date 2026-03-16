@@ -203,7 +203,7 @@ func refTypeExpr(name string, nullable bool) ast.TypeExpr {
 	if nullable {
 		state = ast.RefStateNullable
 	}
-	return &ast.RefType{Position: lexer.Pos{}, Elem: &ast.NamedType{Position: lexer.Pos{}, Name: name}, State: state}
+	return &ast.RefType{Position: lexer.Pos{}, Elem: &ast.NamedType{Position: lexer.Pos{}, Name: name}, State: state, Storage: ast.RefStorageAny}
 }
 
 func refTypeParamExpr(name string, nullable bool) ast.TypeExpr {
@@ -211,7 +211,7 @@ func refTypeParamExpr(name string, nullable bool) ast.TypeExpr {
 	if nullable {
 		state = ast.RefStateNullable
 	}
-	return &ast.RefType{Position: lexer.Pos{}, Elem: &ast.NamedType{Position: lexer.Pos{}, Name: name}, State: state}
+	return &ast.RefType{Position: lexer.Pos{}, Elem: &ast.NamedType{Position: lexer.Pos{}, Name: name}, State: state, Storage: ast.RefStorageAny}
 }
 
 func nestedRefTypeExpr(name string, innerNonNull bool, outerNullable bool) ast.TypeExpr {
@@ -223,8 +223,8 @@ func nestedRefTypeExpr(name string, innerNonNull bool, outerNullable bool) ast.T
 	if outerNullable {
 		outerState = ast.RefStateNullable
 	}
-	inner := &ast.RefType{Position: lexer.Pos{}, Elem: &ast.NamedType{Position: lexer.Pos{}, Name: name}, State: innerState}
-	return &ast.RefType{Position: lexer.Pos{}, Elem: inner, State: outerState}
+	inner := &ast.RefType{Position: lexer.Pos{}, Elem: &ast.NamedType{Position: lexer.Pos{}, Name: name}, State: innerState, Storage: ast.RefStorageAny}
+	return &ast.RefType{Position: lexer.Pos{}, Elem: inner, State: outerState, Storage: ast.RefStorageAny}
 }
 
 func isBuiltinRuntimeStructName(name string) bool {
@@ -357,7 +357,7 @@ func (a *Analyzer) populateStructFields(decls []ast.Decl) {
 				}
 				fieldType := a.resolveType(field.Type)
 				if field.IsTail {
-					fieldType = &RefType{Elem: fieldType, State: RefStateNonNull}
+					fieldType = &RefType{Elem: fieldType, State: RefStateNonNull, Storage: RefStorageAny}
 				}
 				st.Fields[field.Name] = Field{
 					Name:    field.Name,

@@ -29,6 +29,9 @@ const (
 	TOKEN_ELSE
 	TOKEN_WHILE
 	TOKEN_RETURN
+	TOKEN_ANY
+	TOKEN_HEAP
+	TOKEN_STACK
 	TOKEN_STATIC
 	TOKEN_MUTABLE
 	TOKEN_REPR
@@ -123,6 +126,9 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_ELSE:    "else",
 	TOKEN_WHILE:   "while",
 	TOKEN_RETURN:  "return",
+	TOKEN_ANY:     "any",
+	TOKEN_HEAP:    "heap",
+	TOKEN_STACK:   "stack",
 	TOKEN_STATIC:  "static",
 	TOKEN_MUTABLE: "mutable",
 	TOKEN_REPR:    "repr",
@@ -202,6 +208,9 @@ var keywords = map[string]TokenKind{
 	"else":    TOKEN_ELSE,
 	"while":   TOKEN_WHILE,
 	"return":  TOKEN_RETURN,
+	"any":     TOKEN_ANY,
+	"heap":    TOKEN_HEAP,
+	"stack":   TOKEN_STACK,
 	"static":  TOKEN_STATIC,
 	"mutable": TOKEN_MUTABLE,
 	"repr":    TOKEN_REPR,
