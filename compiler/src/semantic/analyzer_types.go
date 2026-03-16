@@ -60,6 +60,8 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		}
 		a.errorf(n.Pos(), "unknown type %q", n.Name)
 		return invalidType
+	case *ast.ErrorSetExpr:
+		return a.resolveErrorSetExpr(n)
 	case *ast.ErrorUnionTypeExpr:
 		valueType := a.resolveType(n.Value)
 		errorType := a.resolveType(n.Errors)
@@ -105,6 +107,119 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 	default:
 		return invalidType
 	}
+}
+
+func (a *Analyzer) resolveErrorSetExpr(expr *ast.ErrorSetExpr) Type {
+	if expr == nil {
+		return invalidType
+	}
+	if len(expr.Tags) == 0 {
+		a.errorf(expr.Pos(), "error[...] requires at least one qualified error tag")
+		return invalidType
+	}
+	if expr.HasEllipsis && containsWildcardErrorTag(expr.Tags) {
+		a.errorf(expr.Pos(), "error[Set.*, ...] is no longer supported; use error[Set, ...] or error[Set] instead")
+		return invalidType
+	}
+	if containsBareFamily(expr.Tags) {
+		if containsWildcardErrorTag(expr.Tags) {
+			a.errorf(expr.Pos(), "error[Set.*] is no longer supported; use error[Set] instead")
+			return invalidType
+		}
+		if len(expr.Tags) != 1 {
+			a.errorf(expr.Pos(), "error[Set] or error[Set, ...] cannot be mixed with explicit tags or multiple families")
+			return invalidType
+		}
+		tag := expr.Tags[0]
+		_, errSet := a.lookupDeclaredErrorSet(tag)
+		if errSet == nil {
+			return invalidType
+		}
+		if tag.Tag != "" {
+			a.errorf(tag.Position, "internal error: family shorthand expected empty tag")
+			return invalidType
+		}
+		return errSet
+	}
+	if containsWildcardErrorTag(expr.Tags) {
+		if len(expr.Tags) != 1 {
+			a.errorf(expr.Pos(), "error[Set.*] cannot be mixed with explicit tags")
+			return invalidType
+		}
+		a.errorf(expr.Pos(), "error[Set.*] is no longer supported; use error[Set] instead")
+		return invalidType
+	}
+	if expr.HasEllipsis {
+		firstSet, errSet := a.lookupDeclaredErrorSet(expr.Tags[0])
+		if errSet == nil {
+			return invalidType
+		}
+		for _, tag := range expr.Tags {
+			if tag.SetName != firstSet {
+				a.errorf(tag.Position, "error[..., ...] with ellipsis must reference a single declared error set")
+				return invalidType
+			}
+			if !errSet.HasTag(tag.Tag) {
+				a.errorf(tag.Position, "error set %q has no tag %q", tag.SetName, tag.Tag)
+				return invalidType
+			}
+		}
+		return errSet
+	}
+
+	tags := make([]string, 0, len(expr.Tags))
+	nameParts := make([]string, 0, len(expr.Tags))
+	seenTags := map[string]ast.ErrorTagExpr{}
+	for _, tag := range expr.Tags {
+		_, errSet := a.lookupDeclaredErrorSet(tag)
+		if errSet == nil {
+			return invalidType
+		}
+		if !errSet.HasTag(tag.Tag) {
+			a.errorf(tag.Position, "error set %q has no tag %q", tag.SetName, tag.Tag)
+			return invalidType
+		}
+		if prev, ok := seenTags[tag.Tag]; ok {
+			a.errorf(tag.Position, "inline error set tag %q is ambiguous between %s.%s and %s.%s", tag.Tag, prev.SetName, prev.Tag, tag.SetName, tag.Tag)
+			return invalidType
+		}
+		seenTags[tag.Tag] = tag
+		tags = append(tags, tag.Tag)
+		nameParts = append(nameParts, tag.SetName+"."+tag.Tag)
+	}
+	return &ErrorSetType{Name: "error[" + strings.Join(nameParts, ", ") + "]", Tags: tags}
+}
+
+func (a *Analyzer) lookupDeclaredErrorSet(tag ast.ErrorTagExpr) (string, *ErrorSetType) {
+	t, ok := a.namedTypes[tag.SetName]
+	if !ok {
+		a.errorf(tag.Position, "unknown error set %q", tag.SetName)
+		return "", nil
+	}
+	errSet, ok := t.(*ErrorSetType)
+	if !ok {
+		a.errorf(tag.Position, "%q is not an error set", tag.SetName)
+		return "", nil
+	}
+	return tag.SetName, errSet
+}
+
+func containsWildcardErrorTag(tags []ast.ErrorTagExpr) bool {
+	for _, tag := range tags {
+		if tag.Tag == "*" {
+			return true
+		}
+	}
+	return false
+}
+
+func containsBareFamily(tags []ast.ErrorTagExpr) bool {
+	for _, tag := range tags {
+		if tag.Tag == "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Analyzer) resolveDynamicShapeType(expr *ast.GenericType) (Type, bool) {
@@ -459,6 +574,8 @@ func (a *Analyzer) collectImplicitShapeParamsFromType(expr ast.TypeExpr, seen ma
 	case *ast.ErrorUnionTypeExpr:
 		a.collectImplicitShapeParamsFromType(n.Value, seen, order)
 		a.collectImplicitShapeParamsFromType(n.Errors, seen, order)
+	case *ast.ErrorSetExpr:
+		return
 	case *ast.RefType:
 		a.collectImplicitShapeParamsFromType(n.Elem, seen, order)
 	case *ast.MutableType:

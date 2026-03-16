@@ -126,14 +126,22 @@ func AssignableTo(dst, src Type) bool {
 	if SameType(dst, src) {
 		return true
 	}
+	if dstErr, ok := dst.(*ErrorSetType); ok {
+		if srcErr, ok := src.(*ErrorSetType); ok {
+			return ErrorSetAssignable(dstErr, srcErr)
+		}
+	}
 	if du, ok := dst.(*ErrorUnionType); ok {
 		if su, ok := src.(*ErrorUnionType); ok {
-			return SameType(du.Errors, su.Errors) && AssignableTo(du.Value, su.Value)
+			return ErrorSetAssignable(du.Errors, su.Errors) && AssignableTo(du.Value, su.Value)
 		}
 		if AssignableTo(du.Value, src) {
 			return true
 		}
-		return SameType(du.Errors, src)
+		if srcErr, ok := src.(*ErrorSetType); ok {
+			return ErrorSetAssignable(du.Errors, srcErr)
+		}
+		return false
 	}
 	if IsNumericType(dst) && IsNumericType(src) {
 		return true
@@ -180,7 +188,7 @@ func matchTypePattern(pattern, actual Type) bool {
 		return ok
 	case *ErrorSetType:
 		a, ok := actual.(*ErrorSetType)
-		return ok && p.Name == a.Name
+		return ok && ErrorSetAssignable(p, a)
 	case *ErrorUnionType:
 		if a, ok := actual.(*ErrorUnionType); ok {
 			return matchTypePattern(p.Value, a.Value) && matchTypePattern(p.Errors, a.Errors)
@@ -268,10 +276,16 @@ func MergeTypes(a, b Type) Type {
 		return a
 	}
 	if au, ok := a.(*ErrorUnionType); ok {
-		if bu, ok := b.(*ErrorUnionType); ok && SameType(au.Errors, bu.Errors) {
+		if bu, ok := b.(*ErrorUnionType); ok {
 			merged := MergeTypes(au.Value, bu.Value)
-			if !IsInvalidType(merged) {
+			if IsInvalidType(merged) {
+				return invalidType
+			}
+			switch {
+			case ErrorSetAssignable(au.Errors, bu.Errors):
 				return &ErrorUnionType{Value: merged, Errors: au.Errors}
+			case ErrorSetAssignable(bu.Errors, au.Errors):
+				return &ErrorUnionType{Value: merged, Errors: bu.Errors}
 			}
 		}
 	}

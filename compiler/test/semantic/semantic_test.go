@@ -558,13 +558,13 @@ error IoError:
 	NotFound
 
 extern alloc(size: usize) -> heap void&?
-extern read_file(path: any u8&) -> dstr[file_text] | IoError
+extern read_file(path: any u8&) -> dstr[file_text] error[IoError.NotFound, ...]
 
-def checked_alloc(size: usize) -> heap void& | MemoryError:
+def checked_alloc(size: usize) -> heap void& error[MemoryError.OutOfMemory, ...]:
 	ptr: heap void& = alloc(size) else raise MemoryError.OutOfMemory
 	return ptr
 
-def load_text(path: any u8&) -> dstr[file_text] | IoError:
+def load_text(path: any u8&) -> dstr[file_text] error[IoError.NotFound, ...]:
 	text: dstr[file_text] = try read_file(path)
 	return text
 
@@ -574,6 +574,83 @@ def load_with_fallback(path: any u8&) -> any u8&:
 `
 	_, errs := parseAndAnalyze(t, "error_handling_ok.llcontext", src)
 	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsErrorSetWideningAndTagRaise(t *testing.T) {
+	src := `error FileError:
+	NotFound
+	PermissionDenied
+
+error AppError:
+	PermissionDenied
+	Busy
+	NotFound
+
+error OneTagError:
+	NotFound
+
+extern read_value() -> int error[FileError.NotFound, ...]
+
+def bubble() -> int error[AppError.NotFound, ...]:
+	return try read_value()
+
+def fail_now() -> int error[OneTagError.NotFound]:
+	raise FileError.NotFound
+`
+	_, errs := parseAndAnalyze(t, "error_set_widening_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsWildcardErrorSetShorthand(t *testing.T) {
+	src := `error FileError:
+	NotFound
+	PermissionDenied
+
+extern read_value() -> int error[FileError]
+
+def bubble() -> int error[FileError, ...]:
+	return try read_value()
+`
+	_, errs := parseAndAnalyze(t, "error_set_wildcard_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsLegacyWildcardErrorSetShorthand(t *testing.T) {
+	src := `error FileError:
+	NotFound
+	PermissionDenied
+
+extern read_value() -> int error[FileError.*]
+`
+	_, errs := parseAndAnalyze(t, "error_set_wildcard_mixed.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "error[Set.*] is no longer supported; use error[Set] instead") {
+		t.Fatalf("expected wildcard migration diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsTryPropagationWhenDestinationMissesErrorTags(t *testing.T) {
+	src := `error FileError:
+	NotFound
+	PermissionDenied
+
+error AppError:
+	NotFound
+
+extern read_value() -> int error[FileError.NotFound, ...]
+
+def bubble() -> int error[AppError.NotFound, ...]:
+	return try read_value()
+`
+	_, errs := parseAndAnalyze(t, "error_set_widening_rejects_missing_tags.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot propagate FileError from a function returning AppError") {
+		t.Fatalf("expected propagation diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
 }
 
 func TestAnalyzeRejectsRaiseOutsideErrorUnionFunction(t *testing.T) {
@@ -590,6 +667,25 @@ def bad() -> int:
 	}
 	if !strings.Contains(strings.Join(errs, "\n"), "raise requires the current function to return an error union") {
 		t.Fatalf("expected raise diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsLegacyPipeErrorSyntax(t *testing.T) {
+	src := `error IoError:
+	NotFound
+
+extern read_file(path: any u8&) -> int | IoError
+`
+	_, errs := parseAndAnalyze(t, "legacy_pipe_error_syntax.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected parser error, got none")
+	}
+	joined := strings.Join(errs, "\n")
+	if !strings.Contains(joined, "legacy fallible return syntax `T | ErrorSet` is no longer supported") {
+		t.Fatalf("expected legacy syntax migration diagnostic, got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "use `T error[SomeSet]` instead") {
+		t.Fatalf("expected migration guidance, got:\n%s", joined)
 	}
 }
 

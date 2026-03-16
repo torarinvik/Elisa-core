@@ -784,13 +784,13 @@ error IoError:
 	NotFound
 
 extern alloc(size: usize) -> heap void&?
-extern read_file(path: any u8&) -> dstr[file_text] | IoError
+extern read_file(path: any u8&) -> dstr[file_text] error[IoError.NotFound, ...]
 
-def checked_alloc(size: usize) -> heap void& | MemoryError:
+def checked_alloc(size: usize) -> heap void& error[MemoryError.OutOfMemory, ...]:
 	ptr: heap void& = alloc(size) else raise MemoryError.OutOfMemory
 	return ptr
 
-def load_text(path: any u8&) -> dstr[file_text] | IoError:
+def load_text(path: any u8&) -> dstr[file_text] error[IoError.NotFound, ...]:
 	text: dstr[file_text] = try read_file(path)
 	return text
 
@@ -817,6 +817,75 @@ def load_with_fallback(path: any u8&) -> any u8&:
 		"icmp eq i32",
 		"phi ptr",
 		"ret i32",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRRemapsErrorCodesWhenWideningErrorSets(t *testing.T) {
+	src := `error SourceError:
+	NotFound
+	PermissionDenied
+
+error BroadError:
+	PermissionDenied
+	Busy
+	NotFound
+
+extern read_value() -> int error[SourceError.NotFound, ...]
+
+def bubble() -> int error[BroadError.NotFound, ...]:
+	return try read_value()
+
+def fail_now() -> int error[BroadError.NotFound, ...]:
+	raise SourceError.NotFound
+`
+	result := parseAndAnalyze(t, "backend_error_set_widening.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%ErrUnion__SourceError__int = type { i32, i64 }",
+		"%ErrUnion__BroadError__int = type { i32, i64 }",
+		"declare i32 @read_value(ptr)",
+		"define i32 @bubble(ptr ",
+		"define i32 @fail_now(ptr ",
+		"errmap_is_NotFound",
+		"errmap_is_PermissionDenied",
+		"ret i32 3",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRAcceptsBareFamilyErrorSetShorthand(t *testing.T) {
+	src := `error IoError:
+	NotFound
+
+extern read_file(path: any u8&) -> dstr[file_text] error[IoError]
+
+def load_text(path: any u8&) -> dstr[file_text] error[IoError, ...]:
+	text: dstr[file_text] = try read_file(path)
+	return text
+`
+	result := parseAndAnalyze(t, "backend_error_set_wildcard.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%ErrUnion__IoError__dstr_file_text = type { i32, ptr }",
+		"declare i32 @read_file(ptr, ptr)",
+		"define i32 @load_text(ptr ",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {

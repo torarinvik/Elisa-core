@@ -20,9 +20,55 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 	typ := p.parseBaseType(storage, explicit, label)
 	if p.match(lexer.TOKEN_PIPE) {
 		errType := p.parseTypeExpr()
+		p.errorf("legacy fallible return syntax `T | ErrorSet` is no longer supported; use `T error[SomeSet]` instead")
+		return &ast.ErrorUnionTypeExpr{Position: typ.Pos(), Value: typ, Errors: errType}
+	}
+	if p.peek() == lexer.TOKEN_ERROR {
+		errType := p.parseErrorSetExpr()
 		return &ast.ErrorUnionTypeExpr{Position: typ.Pos(), Value: typ, Errors: errType}
 	}
 	return typ
+}
+
+func (p *Parser) parseErrorSetExpr() *ast.ErrorSetExpr {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_ERROR)
+	p.expect(lexer.TOKEN_LBRACKET)
+
+	tags := make([]ast.ErrorTagExpr, 0)
+	hasEllipsis := false
+	for p.peek() != lexer.TOKEN_RBRACKET && p.peek() != lexer.TOKEN_EOF {
+		if p.peek() == lexer.TOKEN_ELLIPSIS {
+			hasEllipsis = true
+			p.advance()
+			break
+		}
+		tags = append(tags, p.parseErrorSetItem())
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+		if p.peek() == lexer.TOKEN_ELLIPSIS {
+			hasEllipsis = true
+			p.advance()
+			break
+		}
+	}
+	p.expect(lexer.TOKEN_RBRACKET)
+	return &ast.ErrorSetExpr{Position: pos, Tags: tags, HasEllipsis: hasEllipsis}
+}
+
+func (p *Parser) parseErrorSetItem() ast.ErrorTagExpr {
+	pos := p.cur().Pos
+	setName := p.expect(lexer.TOKEN_IDENT).Text
+	tag := ""
+	if p.match(lexer.TOKEN_DOT) {
+		if p.peek() == lexer.TOKEN_STAR {
+			tag = p.advance().Text
+		} else {
+			tag = p.expect(lexer.TOKEN_IDENT).Text
+		}
+	}
+	return ast.ErrorTagExpr{Position: pos, SetName: setName, Tag: tag}
 }
 
 func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string) {

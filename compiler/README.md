@@ -12,7 +12,7 @@ error MemoryError:
 
 extern malloc(size: usize) -> heap void&?
 
-def alloc_or_fail(size: usize) -> heap void& | MemoryError:
+def alloc_or_fail(size: usize) -> heap void& error[MemoryError]:
   ptr: heap void& = malloc(size) else raise MemoryError.OutOfMemory
   return ptr
 
@@ -20,6 +20,8 @@ def alloc_or_null(size: usize) -> any void&:
   ptr: any void& = try alloc_or_fail(size) else null.cast[any void&]()
   return ptr
 ```
+
+When propagating fallible results, a function may return a broader error set than its callees as long as it contains all of the callee's tags. Direct `raise SomeError.Tag` also works across different error sets when the destination set contains that specific tag. The surface syntax is now `-> T error[SomeSet]` for a full declared set, `-> T error[SomeSet, ...]` for the row-flavored family alias, and `-> T error[SomeSet.SomeTag]` for an exact inline subset. The old `-> T | ErrorSet` spelling is rejected with a parser migration diagnostic, and the temporary `error[SomeSet.*]` shorthand has been retired in favor of `error[SomeSet]`.
 
 Current lowering in the backend uses integer error codes at runtime; `void | ErrorSet` lowers directly to an error code, while value-carrying fallible functions now return that code plus a hidden payload out-parameter. Inside expressions and locals, the backend still materializes compact `{err, value}` LLVM structs when it needs a first-class error-union value.
 

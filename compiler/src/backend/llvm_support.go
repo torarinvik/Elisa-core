@@ -10,6 +10,7 @@ import "C"
 
 import (
 	"fmt"
+	"strings"
 	"unsafe"
 
 	"llcontext/src/ast"
@@ -221,9 +222,18 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 	if expected == nil || actual == nil || semantic.SameType(actual, expected) {
 		return value, nil
 	}
+	if expectedErrSet, ok := expected.(*semantic.ErrorSetType); ok {
+		if actualErrSet, ok := actual.(*semantic.ErrorSetType); ok {
+			return s.remapErrorCode(value, actualErrSet, expectedErrSet)
+		}
+	}
 	if expectedUnion, ok := expected.(*semantic.ErrorUnionType); ok {
 		if actualUnion, ok := actual.(*semantic.ErrorUnionType); ok {
 			codeValue, err := s.extractErrorUnionCode(value, actualUnion)
+			if err != nil {
+				return nil, err
+			}
+			codeValue, err = s.remapErrorCode(codeValue, actualUnion.Errors, expectedUnion.Errors)
 			if err != nil {
 				return nil, err
 			}
@@ -240,8 +250,12 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 			}
 			return s.buildErrorUnionValue(expectedUnion, codeValue, payloadValue)
 		}
-		if semantic.SameType(expectedUnion.Errors, actual) {
-			return s.buildErrorUnionFailure(expectedUnion, value)
+		if actualErrSet, ok := actual.(*semantic.ErrorSetType); ok && semantic.ErrorSetAssignable(expectedUnion.Errors, actualErrSet) {
+			mappedCode, err := s.remapErrorCode(value, actualErrSet, expectedUnion.Errors)
+			if err != nil {
+				return nil, err
+			}
+			return s.buildErrorUnionFailure(expectedUnion, mappedCode)
 		}
 		payloadValue, err := s.coerceValue(value, actual, expectedUnion.Value)
 		if err != nil {
@@ -276,6 +290,52 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 		return C.LLVMBuildIntToPtr(s.builder, value, expectedLLVM, cStringFree("inttoptr")), nil
 	}
 	return value, nil
+}
+
+func (s *functionState) remapErrorCode(value C.LLVMValueRef, actual *semantic.ErrorSetType, expected *semantic.ErrorSetType) (C.LLVMValueRef, error) {
+	if actual == nil || expected == nil {
+		return nil, fmt.Errorf("missing error set for code remap")
+	}
+	if semantic.SameType(actual, expected) {
+		return value, nil
+	}
+	if !semantic.ErrorSetAssignable(expected, actual) {
+		return nil, fmt.Errorf("cannot remap %s into %s", actual.String(), expected.String())
+	}
+	errorCodeType, err := s.g.lowerBuiltin("u32")
+	if err != nil {
+		return nil, err
+	}
+	mapped, err := s.errorCodeConstant(0)
+	if err != nil {
+		return nil, err
+	}
+	for _, tag := range actual.Tags {
+		actualCode, ok := actual.TagCode(tag)
+		if !ok {
+			continue
+		}
+		expectedCode, ok := expected.TagCode(tag)
+		if !ok {
+			return nil, fmt.Errorf("cannot remap missing tag %s into %s", tag, expected.String())
+		}
+		actualConst, err := s.errorCodeConstant(actualCode)
+		if err != nil {
+			return nil, err
+		}
+		expectedConst, err := s.errorCodeConstant(expectedCode)
+		if err != nil {
+			return nil, err
+		}
+		tagID := sanitizeIdentifier(tag)
+		cmp := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), value, actualConst, cStringFree("errmap_is_"+tagID))
+		mask := C.LLVMBuildZExt(s.builder, cmp, errorCodeType, cStringFree("errmap_mask_"+tagID))
+		negMask := C.LLVMBuildSub(s.builder, C.LLVMConstNull(errorCodeType), mask, cStringFree("errmap_negmask_"+tagID))
+		diff := C.LLVMBuildXor(s.builder, mapped, expectedConst, cStringFree("errmap_diff_"+tagID))
+		maskedDiff := C.LLVMBuildAnd(s.builder, diff, negMask, cStringFree("errmap_masked_"+tagID))
+		mapped = C.LLVMBuildXor(s.builder, mapped, maskedDiff, cStringFree("errmap_"+tagID))
+	}
+	return mapped, nil
 }
 
 func (s *functionState) buildErrorUnionSuccess(unionType *semantic.ErrorUnionType, payload C.LLVMValueRef) (C.LLVMValueRef, error) {
@@ -533,6 +593,8 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			return t, nil
 		}
 		return nil, fmt.Errorf("unknown type %q", n.Name)
+	case *ast.ErrorSetExpr:
+		return s.resolveErrorSetExpr(n)
 	case *ast.ErrorUnionTypeExpr:
 		valueType, err := s.resolveTypeExpr(n.Value)
 		if err != nil {
@@ -593,6 +655,96 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 	default:
 		return nil, fmt.Errorf("unsupported type expression %T", expr)
 	}
+}
+
+func (s *functionState) resolveErrorSetExpr(expr *ast.ErrorSetExpr) (semantic.Type, error) {
+	if expr == nil || len(expr.Tags) == 0 {
+		return nil, fmt.Errorf("error[...] requires at least one qualified error tag")
+	}
+	if expr.HasEllipsis && containsWildcardErrorTag(expr.Tags) {
+		return nil, fmt.Errorf("error[Set.*, ...] is no longer supported; use error[Set, ...] or error[Set] instead")
+	}
+	if containsBareFamily(expr.Tags) {
+		if containsWildcardErrorTag(expr.Tags) {
+			return nil, fmt.Errorf("error[Set.*] is no longer supported; use error[Set] instead")
+		}
+		if len(expr.Tags) != 1 {
+			return nil, fmt.Errorf("error[Set] or error[Set, ...] cannot be mixed with explicit tags or multiple families")
+		}
+		tag := expr.Tags[0]
+		_, errSet, err := s.lookupDeclaredErrorSet(tag)
+		if err != nil {
+			return nil, err
+		}
+		return errSet, nil
+	}
+	if containsWildcardErrorTag(expr.Tags) {
+		return nil, fmt.Errorf("error[Set.*] is no longer supported; use error[Set] instead")
+	}
+	if expr.HasEllipsis {
+		first, errSet, err := s.lookupDeclaredErrorSet(expr.Tags[0])
+		if err != nil {
+			return nil, err
+		}
+		for _, tag := range expr.Tags {
+			if tag.SetName != first {
+				return nil, fmt.Errorf("error[..., ...] with ellipsis must reference a single declared error set")
+			}
+			if !errSet.HasTag(tag.Tag) {
+				return nil, fmt.Errorf("error set %q has no tag %q", tag.SetName, tag.Tag)
+			}
+		}
+		return errSet, nil
+	}
+	tags := make([]string, 0, len(expr.Tags))
+	nameParts := make([]string, 0, len(expr.Tags))
+	seenTags := map[string]ast.ErrorTagExpr{}
+	for _, tag := range expr.Tags {
+		_, errSet, err := s.lookupDeclaredErrorSet(tag)
+		if err != nil {
+			return nil, err
+		}
+		if !errSet.HasTag(tag.Tag) {
+			return nil, fmt.Errorf("error set %q has no tag %q", tag.SetName, tag.Tag)
+		}
+		if prev, ok := seenTags[tag.Tag]; ok {
+			return nil, fmt.Errorf("inline error set tag %q is ambiguous between %s.%s and %s.%s", tag.Tag, prev.SetName, prev.Tag, tag.SetName, tag.Tag)
+		}
+		seenTags[tag.Tag] = tag
+		tags = append(tags, tag.Tag)
+		nameParts = append(nameParts, tag.SetName+"."+tag.Tag)
+	}
+	return &semantic.ErrorSetType{Name: "error[" + strings.Join(nameParts, ", ") + "]", Tags: tags}, nil
+}
+
+func (s *functionState) lookupDeclaredErrorSet(tag ast.ErrorTagExpr) (string, *semantic.ErrorSetType, error) {
+	t, ok := s.g.result.NamedTypes[tag.SetName]
+	if !ok {
+		return "", nil, fmt.Errorf("unknown error set %q", tag.SetName)
+	}
+	errSet, ok := t.(*semantic.ErrorSetType)
+	if !ok {
+		return "", nil, fmt.Errorf("%q is not an error set", tag.SetName)
+	}
+	return tag.SetName, errSet, nil
+}
+
+func containsWildcardErrorTag(tags []ast.ErrorTagExpr) bool {
+	for _, tag := range tags {
+		if tag.Tag == "*" {
+			return true
+		}
+	}
+	return false
+}
+
+func containsBareFamily(tags []ast.ErrorTagExpr) bool {
+	for _, tag := range tags {
+		if tag.Tag == "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr) (semantic.Type, error) {

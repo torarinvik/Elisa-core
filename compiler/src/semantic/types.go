@@ -337,6 +337,18 @@ func (t *ErrorSetType) TagCode(name string) (uint32, bool) {
 	return 0, false
 }
 
+func ErrorSetAssignable(dst, src *ErrorSetType) bool {
+	if dst == nil || src == nil {
+		return dst == src
+	}
+	for _, tag := range src.Tags {
+		if !dst.HasTag(tag) {
+			return false
+		}
+	}
+	return true
+}
+
 func IsBoolType(t Type) bool {
 	b, ok := t.(*BuiltinType)
 	return ok && b.Name == "bool"

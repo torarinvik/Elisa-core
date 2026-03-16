@@ -8,11 +8,11 @@ error MemoryError:
 extern alloc_node() -> any Node&?
 extern sfree_node(node: any Node&) -> any Node!
 
-def require_node() -> any Node& | MemoryError:
+def require_node() -> any Node& error[MemoryError]:
     node: any Node& = alloc_node() else raise MemoryError.OutOfMemory
     return node
 
-def make_node_value() -> int | MemoryError:
+def make_node_value() -> int error[MemoryError]:
     node: any Node& = try require_node()
     node.value <- 42
     return node.value

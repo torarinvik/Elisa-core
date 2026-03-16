@@ -178,7 +178,25 @@ func (s *functionState) emitRaiseExpr(expr *ast.RaiseExpr) (C.LLVMValueRef, sema
 	if !ok {
 		return nil, nil, fmt.Errorf("raise requires an error-union return type")
 	}
-	errorValue, errorType, err := s.emitExpr(expr.Error, currentUnion.Errors)
+	var (
+		errorValue C.LLVMValueRef
+		errorType  semantic.Type
+		err        error
+	)
+	if fieldExpr, ok := expr.Error.(*ast.FieldExpr); ok {
+		if _, tagName, ok := s.errorTagInfo(fieldExpr); ok && currentUnion.Errors.HasTag(tagName) {
+			code, ok := currentUnion.Errors.TagCode(tagName)
+			if !ok {
+				return nil, nil, fmt.Errorf("missing destination error tag %s.%s", currentUnion.Errors.Name, tagName)
+			}
+			errorValue, err = s.errorCodeConstant(code)
+			errorType = currentUnion.Errors
+		} else {
+			errorValue, errorType, err = s.emitExpr(expr.Error, currentUnion.Errors)
+		}
+	} else {
+		errorValue, errorType, err = s.emitExpr(expr.Error, currentUnion.Errors)
+	}
 	if err != nil {
 		return nil, nil, err
 	}

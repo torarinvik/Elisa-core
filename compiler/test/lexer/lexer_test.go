@@ -175,10 +175,29 @@ func TestStorageKeywordsAndCastTokens(t *testing.T) {
 }
 
 func TestErrorHandlingKeywords(t *testing.T) {
-	tokens := collectTokens("error IoError:\ntry raise\n")
+	tokens := collectTokens("error IoError:\ndef foo() -> int error[IoError.NotFound, ...]:\n    try raise\n")
 	expect := []lexer.TokenKind{
 		lexer.TOKEN_ERROR, lexer.TOKEN_IDENT, lexer.TOKEN_COLON, lexer.TOKEN_NEWLINE,
+		lexer.TOKEN_DEF, lexer.TOKEN_IDENT, lexer.TOKEN_LPAREN, lexer.TOKEN_RPAREN,
+		lexer.TOKEN_ARROW, lexer.TOKEN_IDENT, lexer.TOKEN_ERROR, lexer.TOKEN_LBRACKET,
+		lexer.TOKEN_IDENT, lexer.TOKEN_DOT, lexer.TOKEN_IDENT, lexer.TOKEN_COMMA, lexer.TOKEN_ELLIPSIS, lexer.TOKEN_RBRACKET,
+		lexer.TOKEN_COLON, lexer.TOKEN_NEWLINE, lexer.TOKEN_INDENT,
 		lexer.TOKEN_TRY, lexer.TOKEN_RAISE, lexer.TOKEN_NEWLINE,
+		lexer.TOKEN_DEDENT,
+		lexer.TOKEN_EOF,
+	}
+	assertKinds(t, tokens, expect)
+}
+
+func TestErrorHandlingWildcardSyntax(t *testing.T) {
+	tokens := collectTokens("def foo() -> int error[IoError, ...]:\n    pass\n")
+	expect := []lexer.TokenKind{
+		lexer.TOKEN_DEF, lexer.TOKEN_IDENT, lexer.TOKEN_LPAREN, lexer.TOKEN_RPAREN,
+		lexer.TOKEN_ARROW, lexer.TOKEN_IDENT, lexer.TOKEN_ERROR, lexer.TOKEN_LBRACKET,
+		lexer.TOKEN_IDENT, lexer.TOKEN_COMMA, lexer.TOKEN_ELLIPSIS, lexer.TOKEN_RBRACKET,
+		lexer.TOKEN_COLON, lexer.TOKEN_NEWLINE, lexer.TOKEN_INDENT,
+		lexer.TOKEN_PASS, lexer.TOKEN_NEWLINE,
+		lexer.TOKEN_DEDENT,
 		lexer.TOKEN_EOF,
 	}
 	assertKinds(t, tokens, expect)

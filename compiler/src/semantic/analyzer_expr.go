@@ -92,7 +92,14 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			result = neverType
 			return
 		}
-		if !SameType(currentUnion.Errors, errorType) {
+		if tagName, ok := a.errorExprTagName(n.Error); ok {
+			if !currentUnion.Errors.HasTag(tagName) {
+				a.errorf(n.Pos(), "raise cannot propagate tag %q into %s", tagName, currentUnion.Errors.String())
+			}
+			result = neverType
+			return
+		}
+		if errSet, ok := errorType.(*ErrorSetType); !ok || !ErrorSetAssignable(currentUnion.Errors, errSet) {
 			a.errorf(n.Pos(), "raise expects %s, got %s", currentUnion.Errors.String(), errorType.String())
 		}
 		result = neverType
@@ -109,7 +116,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			currentUnion, ok := a.currentReturn.(*ErrorUnionType)
 			if !ok {
 				a.errorf(n.Pos(), "try without else requires the current function to return an error union")
-			} else if !SameType(currentUnion.Errors, unionType.Errors) {
+			} else if !ErrorSetAssignable(currentUnion.Errors, unionType.Errors) {
 				a.errorf(n.Pos(), "cannot propagate %s from a function returning %s", unionType.Errors.String(), currentUnion.Errors.String())
 			}
 			result = unionType.Value
@@ -196,6 +203,26 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = invalidType
 		return
 	}
+}
+
+func (a *Analyzer) errorExprTagName(expr ast.Expr) (string, bool) {
+	fieldExpr, ok := expr.(*ast.FieldExpr)
+	if !ok {
+		return "", false
+	}
+	ident, ok := fieldExpr.Object.(*ast.Ident)
+	if !ok {
+		return "", false
+	}
+	base, ok := a.namedTypes[ident.Name]
+	if !ok {
+		return "", false
+	}
+	errSet, ok := base.(*ErrorSetType)
+	if !ok || !errSet.HasTag(fieldExpr.Field) {
+		return "", false
+	}
+	return fieldExpr.Field, true
 }
 
 func (a *Analyzer) errorTagType(expr *ast.FieldExpr) (Type, bool) {
