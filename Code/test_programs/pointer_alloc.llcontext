@@ -1,18 +1,18 @@
 repr(c) struct Node:
     value: mutable int
-    next: mutable Node&?
+    next: mutable any Node&?
 
-extern alloc_node() -> Node&?
-extern sfree_node(node: Node&) -> Node!
+extern alloc_node() -> any Node&?
+extern sfree_node(node: any Node&) -> any Node!
 
 def make_node_value() -> int:
-    node: mutable Node&? = alloc_node()
+    node: mutable any Node&? = alloc_node()
     if node == null:
         return 0
 
     node.value <- 42
     return node.value
 
-def release_node(node: mutable Node&?):
+def release_node(node: mutable any Node&?):
     if node != null:
         node as ! <- sfree_node(node)

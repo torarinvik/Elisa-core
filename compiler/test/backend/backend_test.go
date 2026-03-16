@@ -33,11 +33,11 @@ func TestGenerateLLVMIRDefinesSimpleFunctionBody(t *testing.T) {
 	src := `repr(c) struct Box:
     value: i32
 
-extern alloc_box() -> Box&
+extern alloc_box() -> any Box&
 extern take_box(box: Box) -> void
 extern errno_value: i32
 
-def read_box(box: Box&) -> i32:
+def read_box(box: any Box&) -> i32:
     return box.value
 `
 	result := parseAndAnalyze(t, "backend_box.llcontext", src)
@@ -221,7 +221,7 @@ func TestGenerateLLVMIRLowersReferenceComparisons(t *testing.T) {
 	src := `repr(c) struct Box:
     value: i32
 
-extern maybe_box() -> Box&?
+extern maybe_box() -> any Box&?
 
 def is_missing() -> bool:
     return maybe_box() == null
@@ -229,7 +229,7 @@ def is_missing() -> bool:
 def is_present() -> bool:
     return maybe_box() != null
 
-def same_box(left: Box&, right: Box&) -> bool:
+def same_box(left: any Box&, right: any Box&) -> bool:
     return left == right
 `
 	result := parseAndAnalyze(t, "backend_reference_comparisons.llcontext", src)
@@ -433,11 +433,11 @@ export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[
 func TestGenerateCHeaderOrdersAggregateDefinitionsByValueDependencies(t *testing.T) {
 	src := `repr(c) struct Node:
 	value: mutable i32
-	next: mutable Node&?
+	next: mutable any Node&?
 
 repr(c) struct Wrapper:
 	node: mutable Node
-	next_ref: mutable Node&?
+	next_ref: mutable any Node&?
 
 export type Wrapper as CtxWrapper
 export type Node as CtxNode
@@ -467,9 +467,9 @@ export global root as ctx_root
 }
 
 func TestGenerateLLVMIRLowersVariadicExternCalls(t *testing.T) {
-	src := `extern snprintf(buffer: u8&?, buffer_size: usize, format: u8&, ...) -> int
+	src := `extern snprintf(buffer: any u8&?, buffer_size: usize, format: any u8&, ...) -> int
 
-def format_len(format: u8&) -> int:
+def format_len(format: any u8&) -> int:
 	return snprintf(null, 0u, format, 7, 9)
 `
 	result := parseAndAnalyze(t, "backend_variadic_call.llcontext", src)
@@ -493,11 +493,11 @@ def format_len(format: u8&) -> int:
 }
 
 func TestGenerateLLVMIRLowersPointerIntegerCasts(t *testing.T) {
-	src := `def ptr_bits(ptr: u8&) -> uintptr:
+	src := `def ptr_bits(ptr: any u8&) -> uintptr:
 	return ptr.uintptr()
 
-def bits_ptr(bits: uintptr) -> u8&:
-	return bits.u8&()
+def bits_ptr(bits: uintptr) -> any u8&:
+	return bits.cast[any u8&]()
 `
 	result := parseAndAnalyze(t, "backend_pointer_integer_casts.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -523,13 +523,13 @@ func TestGenerateLLVMIRLowersRawListRuntimeBridgeCalls(t *testing.T) {
 	len: mutable i64
 	cap: mutable i64
 	elem_size: mutable i64
-	data: mutable void&&?
-	inline_boxes: mutable u8&?
+	data: mutable any void&&?
+	inline_boxes: mutable any u8&?
 	inline_box_stride: mutable i64
 
-extern ctx_stage0_list_len(list: CtxList&?) -> i64
+extern ctx_stage0_list_len(list: any CtxList&?) -> i64
 
-def raw_list_len(values: DArray[void&, row]) -> i64:
+def raw_list_len(values: DArray[any void&, row]) -> i64:
 	return ctx_stage0_list_len(values)
 `
 	result := parseAndAnalyze(t, "backend_raw_list_bridge.llcontext", src)
@@ -585,21 +585,21 @@ def read_nested_return() -> i32:
 
 func TestGenerateLLVMIRLowerRuntimeBackedTypes(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
-    items: mutable T&?
+	items: mutable any T&?
     count: mutable usize
     capacity: mutable usize
 
 repr(c) struct DynArrayView:
-    items: mutable void&?
+	items: mutable any void&?
     count: mutable usize
 
 repr(c) struct CtxList:
-    items: mutable void&?
+	items: mutable any void&?
     count: mutable usize
     capacity: mutable usize
 
 repr(c) struct CtxListView:
-    items: mutable void&?
+	items: mutable any void&?
     count: mutable usize
 
 extern take_array(values: DArray[i32, row]) -> void
@@ -744,13 +744,13 @@ def rem_unsigned() -> u32:
 }
 
 func TestGenerateLLVMIRLowersPointerArithmetic(t *testing.T) {
-	src := `def advance(ptr: u8&, offset: usize) -> u8&:
+	src := `def advance(ptr: any u8&, offset: usize) -> any u8&:
     return ptr + offset
 
-def advance_commutative(offset: usize, ptr: u8&) -> u8&:
+def advance_commutative(offset: usize, ptr: any u8&) -> any u8&:
     return offset + ptr
 
-def rewind(ptr: u8&, offset: usize) -> u8&:
+def rewind(ptr: any u8&, offset: usize) -> any u8&:
     return ptr - offset
 `
 	result := parseAndAnalyze(t, "backend_pointer_arithmetic.llcontext", src)
@@ -778,12 +778,12 @@ def rewind(ptr: u8&, offset: usize) -> u8&:
 
 func TestGenerateLLVMIRIndexesRuntimeBackedArraysAndViews(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
-    items: mutable T&?
+	items: mutable any T&?
     count: mutable usize
     capacity: mutable usize
 
 repr(c) struct DynArrayView:
-    items: mutable void&?
+	items: mutable any void&?
     count: mutable usize
 
 def read_array(values: DArray[i32, row]) -> i32:
@@ -816,12 +816,12 @@ def read_view(view: DArrayView[i32]) -> i32:
 
 func TestGenerateLLVMIRIndexesRuntimeBackedListsAndViews(t *testing.T) {
 	src := `repr(c) struct CtxList:
-    items: mutable void&?
+	items: mutable any void&?
     count: mutable usize
     capacity: mutable usize
 
 repr(c) struct CtxListView:
-    items: mutable void&?
+	items: mutable any void&?
     count: mutable usize
 
 def read_list(values: DList[i32, row]) -> i32:
@@ -851,11 +851,11 @@ def read_view(view: DListView[i32]) -> i32:
 
 func TestGenerateLLVMIRIndexesRuntimeBackedListRefs(t *testing.T) {
 	src := `repr(c) struct CtxList:
-    items: mutable void&?
+	items: mutable any void&?
     count: mutable usize
     capacity: mutable usize
 
-def read_list_ref(values: DList[i32, row]&) -> i32:
+def read_list_ref(values: any DList[i32, row]&) -> i32:
     return values[1]
 `
 	result := parseAndAnalyze(t, "backend_runtime_list_ref_index.llcontext", src)
@@ -1004,12 +1004,12 @@ func TestGenerateLLVMIRLowersListSliceSyntaxViaRuntimeHelpers(t *testing.T) {
 
 func TestGenerateLLVMIRLowersArraySliceSyntaxViaRuntimeHelpers(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
-    items: mutable T&?
+	items: mutable any T&?
     count: mutable usize
     capacity: mutable usize
 
 repr(c) struct DynArrayView:
-    data: mutable void&?
+	data: mutable any void&?
     len: mutable usize
     elem_size: mutable usize
 
@@ -1047,14 +1047,14 @@ def head_view(view: DArrayView[i32]) -> i32:
 
 func TestGenerateLLVMIRLowersFixedArraySliceSyntaxWithoutRuntimeHelpers(t *testing.T) {
 	src := `repr(c) struct DynArrayView:
-	data: mutable void&?
+	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
 
 def slice_owned(values: i32[4]) -> DArrayView[i32]:
 	return values[1u:3u]
 
-def head_ref(values: i32[4]&) -> i32:
+def head_ref(values: any i32[4]&) -> i32:
 	return values[1u:3u][0u]
 `
 	result := parseAndAnalyze(t, "backend_fixed_array_slice.llcontext", src)
@@ -1083,17 +1083,17 @@ def head_ref(values: i32[4]&) -> i32:
 
 func TestGenerateLLVMIRLowersNestedCollectionAccessOnReturnedValues(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
-    items: mutable T&?
+	items: mutable any T&?
     count: mutable usize
     capacity: mutable usize
 
 repr(c) struct DynArrayView:
-    data: mutable void&?
+	data: mutable any void&?
     len: mutable usize
     elem_size: mutable usize
 
 repr(c) struct CtxListView:
-    items: mutable void&?
+	items: mutable any void&?
     count: mutable usize
 
 extern make_array() -> DArray[i32, row]
@@ -1168,7 +1168,7 @@ func TestGenerateLLVMIRLowersArrayLiteralAndInferredLocalViaFixedArrayLowering(t
 
 func TestGenerateLLVMIRLowersStringSliceSyntaxViaRuntimeHelpers(t *testing.T) {
 	src := `repr(c) struct CtxStringView:
-    data: mutable u8&
+	data: mutable any u8&
     len: mutable i64
 
 def head_codepoint(text: DStr[row]) -> char:

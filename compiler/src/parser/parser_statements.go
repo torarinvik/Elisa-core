@@ -179,7 +179,8 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		if colonPos+1 < len(p.tokens) {
 			afterColon = p.tokens[colonPos+1].Kind
 		}
-		if afterColon == lexer.TOKEN_IDENT || afterColon == lexer.TOKEN_MUTABLE || afterColon == lexer.TOKEN_TAIL {
+		if afterColon == lexer.TOKEN_IDENT || afterColon == lexer.TOKEN_MUTABLE || afterColon == lexer.TOKEN_TAIL ||
+			afterColon == lexer.TOKEN_ANY || afterColon == lexer.TOKEN_HEAP || afterColon == lexer.TOKEN_STACK || afterColon == lexer.TOKEN_STATIC {
 			name := p.cur().Text
 			p.advance()
 			p.advance()

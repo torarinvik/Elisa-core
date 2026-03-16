@@ -1,4 +1,4 @@
-def mix_u64_impl(data: u64&, len: usize, rounds: usize, seed: u64) -> u64:
+def mix_u64_impl(data: any u64&, len: usize, rounds: usize, seed: u64) -> u64:
     acc: mutable u64 = seed
     round: mutable usize = 0
 
@@ -20,4 +20,4 @@ def mix_u64_impl(data: u64&, len: usize, rounds: usize, seed: u64) -> u64:
 
     return acc
 
-export func llctx_mix_u64(data: u64&, len: usize, rounds: usize, seed: u64) -> u64 = mix_u64_impl
+export func llctx_mix_u64(data: any u64&, len: usize, rounds: usize, seed: u64) -> u64 = mix_u64_impl

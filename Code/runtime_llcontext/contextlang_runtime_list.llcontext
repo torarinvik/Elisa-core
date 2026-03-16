@@ -6,23 +6,23 @@
 # List: allocation helpers
 # ------------------------------------------------------------
 
-def ctx_stage0_list_alloc_with_boxes(cap: i64, elem_size: i64, preallocate_boxes: int) -> CtxList&:
+def ctx_stage0_list_alloc_with_boxes(cap: i64, elem_size: i64, preallocate_boxes: int) -> any CtxList&:
     resolved_cap: i64 = cap if cap >= 0 else 0
 
-    data_bytes: usize = resolved_cap.usize() * sizeof(void&) if resolved_cap > 0 else 0
+    data_bytes: usize = resolved_cap.usize() * sizeof(any void&) if resolved_cap > 0 else 0
     inline_box_size: usize = elem_size.usize() if preallocate_boxes != 0 and elem_size > 0 else 0
     inline_box_bytes: usize = resolved_cap.usize() * inline_box_size if inline_box_size > 0 and resolved_cap > 0 else 0
     total_bytes: usize = sizeof(CtxList) + data_bytes + inline_box_bytes
 
-    raw: u8& = ctx_stage0_alloc_perm(total_bytes.i64()).u8&()
-    out: CtxList& = raw.CtxList&()
+    raw: any u8& = ctx_stage0_alloc_perm(total_bytes.i64()).cast[any u8&]()
+    out: any CtxList& = raw.cast[any CtxList&]()
 
     out.len <- 0
     out.cap <- resolved_cap
     out.elem_size <- elem_size if elem_size > 0 else 0
 
     if resolved_cap > 0:
-        out.data <- (raw + sizeof(CtxList)).void&&()
+        out.data <- (raw + sizeof(CtxList)).cast[any void&&]()
     else:
         out.data <- null
 
@@ -35,38 +35,38 @@ def ctx_stage0_list_alloc_with_boxes(cap: i64, elem_size: i64, preallocate_boxes
 
     return out
 
-def ctx_stage0_list_alloc(cap: i64, elem_size: i64) -> CtxList&:
+def ctx_stage0_list_alloc(cap: i64, elem_size: i64) -> any CtxList&:
     return ctx_stage0_list_alloc_with_boxes(cap, elem_size, 0)
 
 # ------------------------------------------------------------
 # List: box value helpers
 # ------------------------------------------------------------
 
-def ctx_stage0_box_value(value: void&?, elem_size: i64) -> void&:
+def ctx_stage0_box_value(value: any void&?, elem_size: i64) -> any void&:
     box_size: i64 = elem_size if elem_size > 0 else 1
-    out: void& = ctx_stage0_alloc_perm(box_size)
+    out: any void& = ctx_stage0_alloc_perm(box_size)
     memset(out, 0, box_size.usize())
     if value != null and elem_size > 0:
-        memcpy(out, value.void&(), elem_size.usize())
+        memcpy(out, value.cast[any void&](), elem_size.usize())
     return out
 
-def ctx_stage0_write_box_value(out: void&, value: void&?, elem_size: i64):
+def ctx_stage0_write_box_value(out: any void&, value: any void&?, elem_size: i64):
     box_size: i64 = elem_size if elem_size > 0 else 1
     memset(out, 0, box_size.usize())
     if value != null and elem_size > 0:
-        memcpy(out, value.void&(), elem_size.usize())
+        memcpy(out, value.cast[any void&](), elem_size.usize())
 
 # ------------------------------------------------------------
 # List: public API
 # ------------------------------------------------------------
 
-def ctx_stage0_list_new() -> CtxList&:
+def ctx_stage0_list_new() -> any CtxList&:
     return ctx_stage0_list_alloc(0, 0)
 
-def ctx_stage0_list_new_reserve(cap: i64, elem_size: i64) -> CtxList&:
+def ctx_stage0_list_new_reserve(cap: i64, elem_size: i64) -> any CtxList&:
     return ctx_stage0_list_alloc_with_boxes(cap, elem_size, 1)
 
-def ctx_stage0_list_reserve(list: CtxList&?, cap: i64, elem_size: i64) -> CtxList&?:
+def ctx_stage0_list_reserve(list: any CtxList&?, cap: i64, elem_size: i64) -> any CtxList&?:
     resolved_cap: mutable i64 = cap if cap >= 0 else 0
     resolved_elem_size: mutable i64 = list.elem_size if list != null and list.elem_size > 0 else elem_size
 
@@ -82,7 +82,7 @@ def ctx_stage0_list_reserve(list: CtxList&?, cap: i64, elem_size: i64) -> CtxLis
     if resolved_cap <= list.cap:
         return list
 
-    grown: CtxList& = ctx_stage0_list_alloc_with_boxes(resolved_cap, resolved_elem_size, 1)
+    grown: any CtxList& = ctx_stage0_list_alloc_with_boxes(resolved_cap, resolved_elem_size, 1)
     grown.len <- list.len
 
     if list.len > 0 and list.data != null:
@@ -90,24 +90,24 @@ def ctx_stage0_list_reserve(list: CtxList&?, cap: i64, elem_size: i64) -> CtxLis
         if list.inline_boxes != null and list.inline_box_stride == grown.inline_box_stride:
             assert grown.inline_boxes != null
             memcpy(
-                grown.inline_boxes.void&(),
-                list.inline_boxes.void&(),
+                grown.inline_boxes.cast[any void&](),
+                list.inline_boxes.cast[any void&](),
                 list.len.usize() * grown.inline_box_stride.usize()
             )
             i: mutable i64 = 0
             while i < list.len:
-                grown.data[i.usize()] <- (grown.inline_boxes + i.usize() * grown.inline_box_stride.usize()).void&()
+                grown.data[i.usize()] <- (grown.inline_boxes + i.usize() * grown.inline_box_stride.usize()).cast[any void&]()
                 i += 1
         else:
-            memcpy(grown.data.void&(), list.data.void&(), list.len.usize() * sizeof(void&))
+            memcpy(grown.data.cast[any void&](), list.data.cast[any void&](), list.len.usize() * sizeof(any void&))
 
     return grown
 
-def ctx_stage0_list_push_mut(list: CtxList&?, value: void&?, elem_size: i64) -> CtxList&?:
+def ctx_stage0_list_push_mut(list: any CtxList&?, value: any void&?, elem_size: i64) -> any CtxList&?:
     resolved_elem_size: mutable i64 = list.elem_size if list != null and list.elem_size > 0 else elem_size
     box_size: mutable i64 = resolved_elem_size if resolved_elem_size > 0 else 1
 
-    current: mutable CtxList&? = list
+    current: mutable any CtxList&? = list
     if current == null:
         current <- ctx_stage0_list_alloc(4, resolved_elem_size)
         if current == null:
@@ -122,7 +122,7 @@ def ctx_stage0_list_push_mut(list: CtxList&?, value: void&?, elem_size: i64) -> 
 
     if current.len >= current.cap:
         new_cap: i64 = current.cap * 2 if current.cap > 0 else 4
-        grown: CtxList& = ctx_stage0_list_alloc_with_boxes(new_cap, resolved_elem_size, 1)
+        grown: any CtxList& = ctx_stage0_list_alloc_with_boxes(new_cap, resolved_elem_size, 1)
         grown.len <- current.len
         assert grown.data != null
 
@@ -131,26 +131,26 @@ def ctx_stage0_list_push_mut(list: CtxList&?, value: void&?, elem_size: i64) -> 
                 # Fast path: memcpy inline boxes
                 assert grown.inline_boxes != null
                 memcpy(
-                    grown.inline_boxes.void&(),
-                    current.inline_boxes.void&(),
+                    grown.inline_boxes.cast[any void&](),
+                    current.inline_boxes.cast[any void&](),
                     current.len.usize() * grown.inline_box_stride.usize()
                 )
                 i: mutable i64 = 0
                 while i < current.len:
-                    grown.data[i.usize()] <- (grown.inline_boxes + i.usize() * grown.inline_box_stride.usize()).void&()
+                    grown.data[i.usize()] <- (grown.inline_boxes + i.usize() * grown.inline_box_stride.usize()).cast[any void&]()
                     i += 1
             else:
                 # Slow path: copy each element
                 assert grown.inline_boxes != null
                 i: mutable i64 = 0
                 while i < current.len:
-                    slot: void& = (grown.inline_boxes + i.usize() * grown.inline_box_stride.usize()).void&()
+                    slot: any void& = (grown.inline_boxes + i.usize() * grown.inline_box_stride.usize()).cast[any void&]()
                     grown.data[i.usize()] <- slot
                     ctx_stage0_write_box_value(slot, current.data[i.usize()], resolved_elem_size)
                     i += 1
 
         assert grown.inline_boxes != null
-        grown.data[grown.len.usize()] <- (grown.inline_boxes + grown.len.usize() * grown.inline_box_stride.usize()).void&()
+        grown.data[grown.len.usize()] <- (grown.inline_boxes + grown.len.usize() * grown.inline_box_stride.usize()).cast[any void&]()
         ctx_stage0_write_box_value(grown.data[grown.len.usize()], value, resolved_elem_size)
         grown.len += 1
         return grown
@@ -158,7 +158,7 @@ def ctx_stage0_list_push_mut(list: CtxList&?, value: void&?, elem_size: i64) -> 
     assert current.data != null
     if current.inline_boxes != null and current.inline_box_stride == resolved_elem_size:
         assert current.inline_boxes != null
-        current.data[current.len.usize()] <- (current.inline_boxes + current.len.usize() * current.inline_box_stride.usize()).void&()
+        current.data[current.len.usize()] <- (current.inline_boxes + current.len.usize() * current.inline_box_stride.usize()).cast[any void&]()
         ctx_stage0_write_box_value(current.data[current.len.usize()], value, resolved_elem_size)
     else:
         current.data[current.len.usize()] <- ctx_stage0_box_value(value, resolved_elem_size)
@@ -166,7 +166,7 @@ def ctx_stage0_list_push_mut(list: CtxList&?, value: void&?, elem_size: i64) -> 
     current.len += 1
     return current
 
-def ctx_stage0_list_push(list: CtxList&?, value: void&?, elem_size: i64) -> CtxList&?:
+def ctx_stage0_list_push(list: any CtxList&?, value: any void&?, elem_size: i64) -> any CtxList&?:
     old_len: i64 = list.len if list != null else 0
     old_cap: i64 = list.cap if list != null else 0
     new_cap: mutable i64 = old_cap if old_cap > old_len else old_len + 1
@@ -176,26 +176,26 @@ def ctx_stage0_list_push(list: CtxList&?, value: void&?, elem_size: i64) -> CtxL
     if new_cap < 4:
         new_cap <- 4
 
-    data_bytes: usize = new_cap.usize() * sizeof(void&)
+    data_bytes: usize = new_cap.usize() * sizeof(any void&)
     total_bytes: usize = sizeof(CtxList) + data_bytes + box_size.usize()
 
-    raw: u8& = ctx_stage0_alloc_perm(total_bytes.i64()).u8&()
-    out: CtxList& = raw.CtxList&()
+    raw: any u8& = ctx_stage0_alloc_perm(total_bytes.i64()).cast[any u8&]()
+    out: any CtxList& = raw.cast[any CtxList&]()
 
     out.len <- 0
     out.cap <- new_cap
     out.elem_size <- resolved_elem_size
-    out.data <- (raw + sizeof(CtxList)).void&&()
+    out.data <- (raw + sizeof(CtxList)).cast[any void&&]()
 
     if list != null and list.len > 0 and list.data != null:
-        memcpy(out.data.void&(), list.data.void&(), list.len.usize() * sizeof(void&))
+        memcpy(out.data.cast[any void&](), list.data.cast[any void&](), list.len.usize() * sizeof(any void&))
 
     out.len <- old_len + 1
-    out.data[old_len.usize()] <- (raw + sizeof(CtxList) + data_bytes).void&()
+    out.data[old_len.usize()] <- (raw + sizeof(CtxList) + data_bytes).cast[any void&]()
     ctx_stage0_write_box_value(out.data[old_len.usize()], value, resolved_elem_size)
     return out
 
-def ctx_stage0_list_concat(lhs: CtxList&?, rhs: CtxList&?) -> CtxList&:
+def ctx_stage0_list_concat(lhs: any CtxList&?, rhs: any CtxList&?) -> any CtxList&:
     left_len: i64 = lhs.len if lhs != null else 0
     right_len: i64 = rhs.len if rhs != null else 0
 
@@ -212,21 +212,21 @@ def ctx_stage0_list_concat(lhs: CtxList&?, rhs: CtxList&?) -> CtxList&:
     elif rhs != null:
         elem_size <- rhs.elem_size
 
-    out: CtxList& = ctx_stage0_list_alloc(left_len + right_len, elem_size)
+    out: any CtxList& = ctx_stage0_list_alloc(left_len + right_len, elem_size)
     assert out.data != null
 
     if lhs != null and lhs.len > 0 and lhs.data != null:
         assert lhs.data != null
-        memcpy(out.data.void&(), lhs.data.void&(), lhs.len.usize() * sizeof(void&))
+        memcpy(out.data.cast[any void&](), lhs.data.cast[any void&](), lhs.len.usize() * sizeof(any void&))
 
     if rhs != null and rhs.len > 0 and rhs.data != null:
         assert rhs.data != null
-        memcpy((out.data + left_len.usize()).void&(), rhs.data.void&(), rhs.len.usize() * sizeof(void&))
+        memcpy((out.data + left_len.usize()).cast[any void&](), rhs.data.cast[any void&](), rhs.len.usize() * sizeof(any void&))
 
     out.len <- left_len + right_len
     return out
 
-def ctx_stage0_list_truncate(list: CtxList&?, size: i64) -> CtxList&?:
+def ctx_stage0_list_truncate(list: any CtxList&?, size: i64) -> any CtxList&?:
     if list == null:
         return ctx_stage0_list_new()
 
@@ -239,10 +239,10 @@ def ctx_stage0_list_truncate(list: CtxList&?, size: i64) -> CtxList&?:
     list.len <- new_len
     return list
 
-def ctx_stage0_list_clear(list: CtxList&?) -> CtxList&?:
+def ctx_stage0_list_clear(list: any CtxList&?) -> any CtxList&?:
     return ctx_stage0_list_truncate(list, 0)
 
-def ctx_stage0_list_view(list: CtxList&?, start: i64, end: i64) -> CtxListView:
+def ctx_stage0_list_view(list: any CtxList&?, start: i64, end: i64) -> CtxListView:
     elem_size: i64 = list.elem_size if list != null else 0
     if list == null or list.len <= 0 or list.data == null:
         return CtxListView(null, 0, elem_size)
@@ -261,7 +261,7 @@ def ctx_stage0_list_view(list: CtxList&?, start: i64, end: i64) -> CtxListView:
         return CtxListView(null, 0, elem_size)
 
     assert list.data != null
-    return CtxListView(list.data.void&&() + lo.usize(), hi - lo, elem_size)
+    return CtxListView(list.data.cast[any void&&]() + lo.usize(), hi - lo, elem_size)
 
 def ctx_stage0_list_view_len(view: CtxListView) -> i64:
     return view.len
@@ -285,7 +285,7 @@ def ctx_stage0_list_view_slice(view: CtxListView, start: i64, end: i64) -> CtxLi
 
     return CtxListView(view.data + lo.usize(), hi - lo, view.elem_size)
 
-def ctx_stage0_list_view_get(view: CtxListView, index: i64, elem_size: i64) -> void&:
+def ctx_stage0_list_view_get(view: CtxListView, index: i64, elem_size: i64) -> any void&:
     if view.data == null or index < 0 or index >= view.len:
         fallback_elem_size: i64 = elem_size if elem_size > 0 else view.elem_size
         return ctx_stage0_box_value(null, fallback_elem_size)
@@ -293,29 +293,29 @@ def ctx_stage0_list_view_get(view: CtxListView, index: i64, elem_size: i64) -> v
     assert view.data != null
     return view.data[index.usize()]
 
-def ctx_stage0_list_view_copy(view: CtxListView) -> CtxList&:
+def ctx_stage0_list_view_copy(view: CtxListView) -> any CtxList&:
     if view.len <= 0:
         return ctx_stage0_list_new_reserve(0, view.elem_size)
 
-    out: CtxList& = ctx_stage0_list_alloc(view.len, view.elem_size)
+    out: any CtxList& = ctx_stage0_list_alloc(view.len, view.elem_size)
     out.len <- view.len
 
     if view.data != null and out.data != null:
-        memcpy(out.data.void&(), view.data.void&(), view.len.usize() * sizeof(void&))
+        memcpy(out.data.cast[any void&](), view.data.cast[any void&](), view.len.usize() * sizeof(any void&))
 
     return out
 
-def ctx_stage0_list_len(list: CtxList&?) -> i64:
+def ctx_stage0_list_len(list: any CtxList&?) -> i64:
     return list.len if list != null else 0
 
-def ctx_stage0_list_get(list: CtxList&?, index: i64, elem_size: i64) -> void&:
+def ctx_stage0_list_get(list: any CtxList&?, index: i64, elem_size: i64) -> any void&:
     if list == null or index < 0 or index >= list.len:
         fallback_elem_size: i64 = elem_size if elem_size > 0 else (list.elem_size if list != null else 0)
         return ctx_stage0_box_value(null, fallback_elem_size)
     assert list.data != null
     return list.data[index.usize()]
 
-def ctx_stage0_list_set(list: CtxList&?, index: i64, value: void&?, elem_size: i64) -> i64:
+def ctx_stage0_list_set(list: any CtxList&?, index: i64, value: any void&?, elem_size: i64) -> i64:
     if list == null or index < 0 or index >= list.len:
         return 0
 

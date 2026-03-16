@@ -10,21 +10,21 @@ func TestAnalyzeStage1TypedListWrappersReduceVoidBottleneck(t *testing.T) {
 	len: mutable i64
 	cap: mutable i64
 	elem_size: mutable i64
-	data: mutable void&&?
-	inline_boxes: mutable u8&?
+	data: mutable any void&&?
+	inline_boxes: mutable any u8&?
 	inline_box_stride: mutable i64
 
 repr(c) struct CtxListView:
-	data: mutable void&&?
+	data: mutable any void&&?
 	len: mutable i64
 	elem_size: mutable i64
 
-extern ctx_stage0_list_new_reserve(cap: i64, elem_size: i64) -> CtxList&
+extern ctx_stage0_list_new_reserve(cap: i64, elem_size: i64) -> any CtxList&
 
-def ctx_stage0_list_push(values: CtxList&?, elem: void&?, elem_size: i64) -> CtxList&?:
+def ctx_stage0_list_push(values: any CtxList&?, elem: any void&?, elem_size: i64) -> any CtxList&?:
 	return values
 
-def ctx_stage0_list_view(values: CtxList&?, start: i64, end: i64) -> CtxListView:
+def ctx_stage0_list_view(values: any CtxList&?, start: i64, end: i64) -> CtxListView:
 	return CtxListView(null, 0, 0)
 
 def ctx_stage0_list_view_len(view: CtxListView) -> i64:
@@ -33,20 +33,20 @@ def ctx_stage0_list_view_len(view: CtxListView) -> i64:
 def ctx_stage0_list_view_slice(view: CtxListView, start: i64, end: i64) -> CtxListView:
 	return view
 
-def ctx_stage0_list_get(values: CtxList&?, index: i64, elem_size: i64) -> void&:
-	return 0.void&()
+def ctx_stage0_list_get(values: any CtxList&?, index: i64, elem_size: i64) -> any void&:
+	return 0.cast[any void&]()
 
-def ctx_stage0_list_view_get(view: CtxListView, index: i64, elem_size: i64) -> void&:
-	return 0.void&()
+def ctx_stage0_list_view_get(view: CtxListView, index: i64, elem_size: i64) -> any void&:
+	return 0.cast[any void&]()
 
-extern ctx_stage0_list_view_copy(view: CtxListView) -> CtxList&
+extern ctx_stage0_list_view_copy(view: CtxListView) -> any CtxList&
 
-def ctx_stage1rt_tlist_new[T](type_hint: T&) -> DList[T, shape_out]:
+def ctx_stage1rt_tlist_new[T](type_hint: any T&) -> DList[T, shape_out]:
 	_ = type_hint
 	return ctx_stage0_list_new_reserve(0, sizeof(T).i64())
 
-def ctx_stage1rt_tlist_push[T](values: DList[T, shape_in], elem: T&) -> DList[T, shape_out]:
-	return ctx_stage0_list_push(values, elem.void&(), sizeof(T).i64())
+def ctx_stage1rt_tlist_push[T](values: DList[T, shape_in], elem: any T&) -> DList[T, shape_out]:
+	return ctx_stage0_list_push(values, elem.cast[any void&](), sizeof(T).i64())
 
 def ctx_stage1rt_tlist_view[T](values: DList[T, shape_in], start: i64, end: i64) -> DListView[T]:
 	return ctx_stage0_list_view(values, start, end)
@@ -57,16 +57,16 @@ def ctx_stage1rt_tlist_view_len[T](view: DListView[T]) -> i64:
 def ctx_stage1rt_tlist_view_slice[T](view: DListView[T], start: i64, end: i64) -> DListView[T]:
 	return ctx_stage0_list_view_slice(view, start, end)
 
-def ctx_stage1rt_tlist_get[T](values: DList[T, shape_in], index: i64) -> T&:
-	return ctx_stage0_list_get(values, index, sizeof(T).i64()).T&()
+def ctx_stage1rt_tlist_get[T](values: DList[T, shape_in], index: i64) -> any T&:
+	return ctx_stage0_list_get(values, index, sizeof(T).i64()).cast[any T&]()
 
-def ctx_stage1rt_tlist_view_get[T](view: DListView[T], index: i64) -> T&:
-	return ctx_stage0_list_view_get(view, index, sizeof(T).i64()).T&()
+def ctx_stage1rt_tlist_view_get[T](view: DListView[T], index: i64) -> any T&:
+	return ctx_stage0_list_view_get(view, index, sizeof(T).i64()).cast[any T&]()
 
 def ctx_stage1rt_tlist_from_view[T](view: DListView[T]) -> DList[T, shape_out]:
 	return ctx_stage0_list_view_copy(view)
 
-def use(seed: i64&) -> i64&:
+def use(seed: any i64&) -> any i64&:
 	view: DListView[i64] = ctx_stage1rt_tlist_view(ctx_stage1rt_tlist_push(ctx_stage1rt_tlist_new(seed), seed), 0, 2)
 	sub: DListView[i64] = ctx_stage1rt_tlist_view_slice(view, 0, 1)
 	if ctx_stage1rt_tlist_view_len(sub) > 0:
@@ -82,35 +82,35 @@ func TestAnalyzeStage1TypedListConvenienceHelpersUseTypedViews(t *testing.T) {
 	len: mutable i64
 	cap: mutable i64
 	elem_size: mutable i64
-	data: mutable void&&?
-	inline_boxes: mutable u8&?
+	data: mutable any void&&?
+	inline_boxes: mutable any u8&?
 	inline_box_stride: mutable i64
 
 repr(c) struct CtxListView:
-	data: mutable void&&?
+	data: mutable any void&&?
 	len: mutable i64
 	elem_size: mutable i64
 
-extern ctx_stage0_list_new_reserve(cap: i64, elem_size: i64) -> CtxList&
+extern ctx_stage0_list_new_reserve(cap: i64, elem_size: i64) -> any CtxList&
 
-def ctx_stage0_list_push(values: CtxList&?, elem: void&?, elem_size: i64) -> CtxList&?:
+def ctx_stage0_list_push(values: any CtxList&?, elem: any void&?, elem_size: i64) -> any CtxList&?:
 	return values
 
-def ctx_stage0_list_view(values: CtxList&?, start: i64, end: i64) -> CtxListView:
+def ctx_stage0_list_view(values: any CtxList&?, start: i64, end: i64) -> CtxListView:
 	return CtxListView(null, 0, 0)
 
 def ctx_stage0_list_view_len(view: CtxListView) -> i64:
 	return view.len
 
-def ctx_stage0_list_view_get(view: CtxListView, index: i64, elem_size: i64) -> void&:
-	return 0.void&()
+def ctx_stage0_list_view_get(view: CtxListView, index: i64, elem_size: i64) -> any void&:
+	return 0.cast[any void&]()
 
-def ctx_stage1rt_tlist_new[T](type_hint: T&) -> DList[T, shape_out]:
+def ctx_stage1rt_tlist_new[T](type_hint: any T&) -> DList[T, shape_out]:
 	_ = type_hint
 	return ctx_stage0_list_new_reserve(0, sizeof(T).i64())
 
-def ctx_stage1rt_tlist_push[T](values: DList[T, shape_in], elem: T&) -> DList[T, shape_out]:
-	return ctx_stage0_list_push(values, elem.void&(), sizeof(T).i64())
+def ctx_stage1rt_tlist_push[T](values: DList[T, shape_in], elem: any T&) -> DList[T, shape_out]:
+	return ctx_stage0_list_push(values, elem.cast[any void&](), sizeof(T).i64())
 
 def ctx_stage1rt_tlist_view[T](values: DList[T, shape_in], start: i64, end: i64) -> DListView[T]:
 	return ctx_stage0_list_view(values, start, end)
@@ -124,19 +124,19 @@ def ctx_stage1rt_tlist_take[T](values: DList[T, shape_in], count: i64) -> DListV
 def ctx_stage1rt_tlist_drop[T](values: DList[T, shape_in], count: i64) -> DListView[T]:
 	return ctx_stage1rt_tlist_view(values, count, ctx_stage1rt_tlist_view_len(ctx_stage1rt_tlist_view(values, 0, 8)))
 
-def ctx_stage1rt_tlist_get[T](values: DList[T, shape_in], index: i64) -> T&:
-	return ctx_stage0_list_view_get(ctx_stage0_list_view(values, index, index + 1), 0, sizeof(T).i64()).T&()
+def ctx_stage1rt_tlist_get[T](values: DList[T, shape_in], index: i64) -> any T&:
+	return ctx_stage0_list_view_get(ctx_stage0_list_view(values, index, index + 1), 0, sizeof(T).i64()).cast[any T&]()
 
-def ctx_stage1rt_tlist_first[T](values: DList[T, shape_in]) -> T&:
+def ctx_stage1rt_tlist_first[T](values: DList[T, shape_in]) -> any T&:
 	return ctx_stage1rt_tlist_get(values, 0)
 
-def ctx_stage1rt_tlist_view_get[T](view: DListView[T], index: i64) -> T&:
-	return ctx_stage0_list_view_get(view, index, sizeof(T).i64()).T&()
+def ctx_stage1rt_tlist_view_get[T](view: DListView[T], index: i64) -> any T&:
+	return ctx_stage0_list_view_get(view, index, sizeof(T).i64()).cast[any T&]()
 
-def ctx_stage1rt_tlist_view_first[T](view: DListView[T]) -> T&:
+def ctx_stage1rt_tlist_view_first[T](view: DListView[T]) -> any T&:
 	return ctx_stage1rt_tlist_view_get(view, 0)
 
-def use(seed: i64&) -> i64&:
+def use(seed: any i64&) -> any i64&:
 	left: DListView[i64] = ctx_stage1rt_tlist_take(ctx_stage1rt_tlist_push(ctx_stage1rt_tlist_new(seed), seed), 1)
 	right: DListView[i64] = ctx_stage1rt_tlist_drop(ctx_stage1rt_tlist_push(ctx_stage1rt_tlist_new(seed), seed), 0)
 	if ctx_stage1rt_tlist_view_len(left) > 0:
@@ -152,23 +152,23 @@ func TestAnalyzeStage1TypedListPushReturnsFreshShape(t *testing.T) {
 	len: mutable i64
 	cap: mutable i64
 	elem_size: mutable i64
-	data: mutable void&&?
-	inline_boxes: mutable u8&?
+	data: mutable any void&&?
+	inline_boxes: mutable any u8&?
 	inline_box_stride: mutable i64
 
-extern ctx_stage0_list_new_reserve(cap: i64, elem_size: i64) -> CtxList&
+extern ctx_stage0_list_new_reserve(cap: i64, elem_size: i64) -> any CtxList&
 
-def ctx_stage0_list_push(values: CtxList&?, elem: void&?, elem_size: i64) -> CtxList&?:
+def ctx_stage0_list_push(values: any CtxList&?, elem: any void&?, elem_size: i64) -> any CtxList&?:
 	return values
 
-def ctx_stage1rt_tlist_new[T](type_hint: T&) -> DList[T, shape_out]:
+def ctx_stage1rt_tlist_new[T](type_hint: any T&) -> DList[T, shape_out]:
 	_ = type_hint
 	return ctx_stage0_list_new_reserve(0, sizeof(T).i64())
 
-def ctx_stage1rt_tlist_push[T](values: DList[T, shape_in], elem: T&) -> DList[T, shape_out]:
-	return ctx_stage0_list_push(values, elem.void&(), sizeof(T).i64())
+def ctx_stage1rt_tlist_push[T](values: DList[T, shape_in], elem: any T&) -> DList[T, shape_out]:
+	return ctx_stage0_list_push(values, elem.cast[any void&](), sizeof(T).i64())
 
-def bad(seed: i64&) -> DList[i64, row]:
+def bad(seed: any i64&) -> DList[i64, row]:
 	return ctx_stage1rt_tlist_push(ctx_stage1rt_tlist_new(seed), seed)
 `
 	_, errs := parseAndAnalyze(t, "stage1_typed_list_push_fresh_shape.llcontext", src)
@@ -186,19 +186,19 @@ func TestAnalyzeStage1TypedListFromViewReturnsFreshShape(t *testing.T) {
 	len: mutable i64
 	cap: mutable i64
 	elem_size: mutable i64
-	data: mutable void&&?
-	inline_boxes: mutable u8&?
+	data: mutable any void&&?
+	inline_boxes: mutable any u8&?
 	inline_box_stride: mutable i64
 
 repr(c) struct CtxListView:
-	data: mutable void&&?
+	data: mutable any void&&?
 	len: mutable i64
 	elem_size: mutable i64
 
-def ctx_stage0_list_view(values: CtxList&?, start: i64, end: i64) -> CtxListView:
+def ctx_stage0_list_view(values: any CtxList&?, start: i64, end: i64) -> CtxListView:
 	return CtxListView(null, 0, 0)
 
-extern ctx_stage0_list_view_copy(view: CtxListView) -> CtxList&
+extern ctx_stage0_list_view_copy(view: CtxListView) -> any CtxList&
 
 def ctx_stage1rt_tlist_view[T](values: DList[T, shape_in], start: i64, end: i64) -> DListView[T]:
 	return ctx_stage0_list_view(values, start, end)
@@ -222,20 +222,20 @@ def bad(values: DList[i64, row]) -> DList[i64, row]:
 
 func TestAnalyzeArenaArrayViewHelpersCarryElementTypes(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
-	items: mutable T&?
+	items: mutable any T&?
 	count: mutable usize
 	capacity: mutable usize
 
 repr(c) struct DynArrayView:
-	data: mutable void&?
+	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: DArray[T, shape_in]&, start: usize, end: usize) -> DArrayView[T]:
+def arena_da_view[T](values: any DArray[T, shape_in]&, start: usize, end: usize) -> DArrayView[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.void&(), values.count, sizeof(T))
+		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
 	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_view_len[T](view: DArrayView[T]) -> usize:
@@ -251,7 +251,7 @@ def arena_da_view_get[T](view: DArrayView[T], index: usize) -> T:
 	_ = index
 	return zeroed
 
-def use(values: DArray[i32, row]&) -> i32:
+def use(values: any DArray[i32, row]&) -> i32:
 	view: DArrayView[i32] = arena_da_view(values, 0u, values.count)
 	sub: DArrayView[i32] = arena_da_view_slice(view, 0u, 1u)
 	if arena_da_view_len(sub) > 0u:
@@ -264,32 +264,32 @@ def use(values: DArray[i32, row]&) -> i32:
 
 func TestAnalyzeArenaArrayFromViewReturnsFreshShape(t *testing.T) {
 	src := `repr(c) struct Arena:
-	begin: mutable void&?
-	end: mutable void&?
+	begin: mutable any void&?
+	end: mutable any void&?
 
 repr(c) struct DynArray[T]:
-	items: mutable T&?
+	items: mutable any T&?
 	count: mutable usize
 	capacity: mutable usize
 
 repr(c) struct DynArrayView:
-	data: mutable void&?
+	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: DArray[T, shape_in]&, start: usize, end: usize) -> DArrayView[T]:
+def arena_da_view[T](values: any DArray[T, shape_in]&, start: usize, end: usize) -> DArrayView[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.void&(), values.count, sizeof(T))
+		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
 	return DynArrayView(null, 0, sizeof(T))
 
-def arena_da_from_view[T](a: Arena&, view: DArrayView[T]) -> DArray[T, shape_out]:
+def arena_da_from_view[T](a: any Arena&, view: DArrayView[T]) -> DArray[T, shape_out]:
 	_ = a
 	_ = view
 	return zeroed
 
-def bad(a: Arena&, values: DArray[i32, row]&) -> DArray[i32, row]:
+def bad(a: any Arena&, values: any DArray[i32, row]&) -> DArray[i32, row]:
 	view: DArrayView[i32] = arena_da_view(values, 0u, values.count)
 	return arena_da_from_view(a, view)
 `
@@ -308,31 +308,31 @@ func TestAnalyzeAdditionalStage1ListWrappersReturnFreshShapes(t *testing.T) {
     len: mutable i64
     cap: mutable i64
 
-def ctx_stage0_list_reserve(values: CtxList&?, cap: i64, elem_size: i64) -> CtxList&?:
+def ctx_stage0_list_reserve(values: any CtxList&?, cap: i64, elem_size: i64) -> any CtxList&?:
     return values
 
-def ctx_stage0_list_truncate(values: CtxList&?, size: i64) -> CtxList&?:
+def ctx_stage0_list_truncate(values: any CtxList&?, size: i64) -> any CtxList&?:
     return values
 
-def ctx_stage0_list_clear(values: CtxList&?) -> CtxList&?:
+def ctx_stage0_list_clear(values: any CtxList&?) -> any CtxList&?:
     return values
 
-def ctx_stage1rt_list_reserve(values: DArray[void&, shape_in], cap: i64, elem_size: i64) -> DArray[void&, shape_out]:
+def ctx_stage1rt_list_reserve(values: DArray[any void&, shape_in], cap: i64, elem_size: i64) -> DArray[any void&, shape_out]:
     return ctx_stage0_list_reserve(values, cap, elem_size)
 
-def ctx_stage1rt_list_truncate(values: DArray[void&, shape_in], size: i64) -> DArray[void&, shape_out]:
+def ctx_stage1rt_list_truncate(values: DArray[any void&, shape_in], size: i64) -> DArray[any void&, shape_out]:
     return ctx_stage0_list_truncate(values, size)
 
-def ctx_stage1rt_list_clear(values: DArray[void&, shape_in]) -> DArray[void&, shape_out]:
+def ctx_stage1rt_list_clear(values: DArray[any void&, shape_in]) -> DArray[any void&, shape_out]:
     return ctx_stage0_list_clear(values)
 
-def bad_reserve(values: DArray[void&, row]) -> DArray[void&, row]:
+def bad_reserve(values: DArray[any void&, row]) -> DArray[any void&, row]:
     return ctx_stage1rt_list_reserve(values, 16, 8)
 
-def bad_truncate(values: DArray[void&, row]) -> DArray[void&, row]:
+def bad_truncate(values: DArray[any void&, row]) -> DArray[any void&, row]:
     return ctx_stage1rt_list_truncate(values, 2)
 
-def bad_clear(values: DArray[void&, row]) -> DArray[void&, row]:
+def bad_clear(values: DArray[any void&, row]) -> DArray[any void&, row]:
     return ctx_stage1rt_list_clear(values)
 `
 	_, errs := parseAndAnalyze(t, "stage1_list_extra_wrappers.llcontext", src)
@@ -349,7 +349,7 @@ def bad_clear(values: DArray[void&, row]) -> DArray[void&, row]:
 			t.Fatalf("expected diagnostic containing %q, got:\n%s", want, all)
 		}
 	}
-	if strings.Count(all, "return type expects DArray[void&, row], got DArray[void&, shape_out#") != 3 {
+	if strings.Count(all, "return type expects DArray[any void&, row], got DArray[any void&, shape_out#") != 3 {
 		t.Fatalf("expected 3 fresh list wrapper mismatch diagnostics, got:\n%s", all)
 	}
 }

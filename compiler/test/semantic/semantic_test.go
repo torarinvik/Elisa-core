@@ -92,10 +92,10 @@ func TestAnalyzeValidInlineProgram(t *testing.T) {
 	src := `repr(c) struct Box:
     value: mutable int
 
-extern make_box() -> Box&?
+extern make_box() -> any Box&?
 
 def read_box() -> int:
-    box: mutable Box&? = make_box()
+	box: mutable any Box&? = make_box()
     if box == null:
         return 0
     box.value <- 7
@@ -152,13 +152,13 @@ func TestAnalyzeRejectsNullIntoNonNullRef(t *testing.T) {
     value: int
 
 def bad() -> void:
-    box: Box& = null
+    box: any Box& = null
 `
 	_, errs := parseAndAnalyze(t, "nonnull_ref_rejects_null.llcontext", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "expects Box&, got null") {
+	if !strings.Contains(strings.Join(errs, "\n"), "expects any Box&, got null") {
 		t.Fatalf("expected non-null ref rejection, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -167,15 +167,15 @@ func TestAnalyzePointerTypestateBranches(t *testing.T) {
 	src := `repr(c) struct Box:
     value: mutable int
 
-extern alloc_box() -> Box&?
-extern sfree_box(box: Box&) -> Box!
+extern alloc_box() -> any Box&?
+extern sfree_box(box: any Box&) -> any Box!
 
 def release_box() -> void:
-    box: mutable Box&? = alloc_box()
+	box: mutable any Box&? = alloc_box()
     if box != null:
         box as ! <- sfree_box(box)
 
-def missing_box() -> Box!:
+def missing_box() -> any Box!:
     return null
 `
 	_, errs := parseAndAnalyze(t, "pointer_typestate.llcontext", src)
@@ -186,10 +186,10 @@ func TestAnalyzeRejectsNullableFieldAccessWithoutProof(t *testing.T) {
 	src := `repr(c) struct Box:
     value: mutable int
 
-extern maybe_box() -> Box&?
+extern maybe_box() -> any Box&?
 
 def bad() -> int:
-    box: Box&? = maybe_box()
+	box: any Box&? = maybe_box()
     return box.value
 `
 	_, errs := parseAndAnalyze(t, "nullable_field_access.llcontext", src)
@@ -205,10 +205,10 @@ func TestAnalyzeGuardClauseRefinesAfterReturn(t *testing.T) {
 	src := `repr(c) struct Box:
     value: mutable int
 
-extern maybe_box() -> Box&?
+extern maybe_box() -> any Box&?
 
 def read_box() -> int:
-    box: Box&? = maybe_box()
+	box: any Box&? = maybe_box()
     if box == null:
         return 0
     return box.value
@@ -346,8 +346,8 @@ export func pass_array_c(value: i32[4]) -> i32[4] = pass_array
 }
 
 func TestAnalyzeTernaryRefinesNullablePointerBranch(t *testing.T) {
-	src := `def choose_text(value: u8&?) -> u8&:
-    return value if value != null else ""
+	src := `def choose_text(value: any u8&?) -> any u8&:
+	return value if value != null else "".cast[any u8&]()
 `
 	_, errs := parseAndAnalyze(t, "ternary_refinement.llcontext", src)
 	requireNoErrors(t, errs)
@@ -357,17 +357,17 @@ func TestAnalyzeRejectsNullableToNonNullCastWithoutProof(t *testing.T) {
 	src := `repr(c) struct Box:
     value: int
 
-extern maybe_box() -> Box&?
+extern maybe_box() -> any Box&?
 
-def bad() -> Box&:
-    box: Box&? = maybe_box()
-    return box.Box&()
+def bad() -> any Box&:
+    box: any Box&? = maybe_box()
+    return box.cast[any Box&]()
 `
 	_, errs := parseAndAnalyze(t, "nonnull_cast_rejection.llcontext", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "invalid cast from Box&? to Box&") {
+	if !strings.Contains(strings.Join(errs, "\n"), "invalid cast from any Box&? to any Box&") {
 		t.Fatalf("expected invalid cast diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -376,7 +376,7 @@ func TestAnalyzeAcceptsReferenceComparisons(t *testing.T) {
 	src := `repr(c) struct Box:
 	value: int
 
-extern maybe_box() -> Box&?
+extern maybe_box() -> any Box&?
 
 def is_missing() -> bool:
 	return maybe_box() == null
@@ -384,11 +384,40 @@ def is_missing() -> bool:
 def is_present() -> bool:
 	return maybe_box() != null
 
-def same_box(left: Box&, right: Box&) -> bool:
+def same_box(left: any Box&, right: any Box&) -> bool:
 	return left == right
 `
 	_, errs := parseAndAnalyze(t, "reference_comparisons.llcontext", src)
 	requireNoErrors(t, errs)
+}
+
+func TestParseRejectsBareReferenceTypeSyntax(t *testing.T) {
+	src := `repr(c) struct Box:
+	value: int
+
+def read(box: Box&) -> int:
+	return box.value
+`
+	_, errs := parseAndAnalyze(t, "bare_reference_type_parse_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected parse error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference types require an explicit storage qualifier") {
+		t.Fatalf("expected explicit-storage parse diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestParseRejectsLegacyDotReferenceCastSyntax(t *testing.T) {
+	src := `def bits_ptr(bits: uintptr) -> any u8&:
+	return bits.u8&()
+`
+	_, errs := parseAndAnalyze(t, "legacy_reference_cast_parse_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected parse error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "legacy reference cast syntax is no longer supported") {
+		t.Fatalf("expected legacy reference cast parse diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
 }
 
 func TestAnalyzeAcceptsStorageQualifiedPointersAndCastSyntax(t *testing.T) {
@@ -508,13 +537,13 @@ def read_second() -> u8:
 }
 
 func TestAnalyzeAcceptsPointerArithmetic(t *testing.T) {
-	src := `def advance(ptr: u8&, offset: usize) -> u8&:
+	src := `def advance(ptr: any u8&, offset: usize) -> any u8&:
 	return ptr + offset
 
-def advance_commutative(offset: usize, ptr: u8&) -> u8&:
+def advance_commutative(offset: usize, ptr: any u8&) -> any u8&:
 	return offset + ptr
 
-def rewind(ptr: u8&, offset: usize) -> u8&:
+def rewind(ptr: any u8&, offset: usize) -> any u8&:
 	return ptr - offset
 `
 	_, errs := parseAndAnalyze(t, "pointer_arithmetic.llcontext", src)
@@ -523,12 +552,12 @@ def rewind(ptr: u8&, offset: usize) -> u8&:
 
 func TestAnalyzeAcceptsRuntimeBackedArrayAndViewIndexing(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
-	items: mutable T&?
+	items: mutable any T&?
 	count: mutable usize
 	capacity: mutable usize
 
 repr(c) struct DynArrayView:
-	items: mutable void&?
+	items: mutable any void&?
 	count: mutable usize
 
 def read_array(values: DArray[i32, row]) -> i32:
@@ -543,12 +572,12 @@ def read_view(view: DArrayView[i32]) -> i32:
 
 func TestAnalyzeAcceptsRuntimeBackedListAndViewIndexing(t *testing.T) {
 	src := `repr(c) struct CtxList:
-	items: mutable void&?
+	items: mutable any void&?
 	count: mutable usize
 	capacity: mutable usize
 
 repr(c) struct CtxListView:
-	items: mutable void&?
+	items: mutable any void&?
 	count: mutable usize
 
 def read_list(values: DList[i32, row]) -> i32:
@@ -563,11 +592,11 @@ def read_view(view: DListView[i32]) -> i32:
 
 func TestAnalyzeAcceptsRuntimeBackedListRefIndexing(t *testing.T) {
 	src := `repr(c) struct CtxList:
-	items: mutable void&?
+	items: mutable any void&?
 	count: mutable usize
 	capacity: mutable usize
 
-def read_list_ref(values: DList[i32, row]&) -> i32:
+def read_list_ref(values: any DList[i32, row]&) -> i32:
 	return values[0]
 `
 	_, errs := parseAndAnalyze(t, "runtime_backed_list_ref_index.llcontext", src)
@@ -682,7 +711,7 @@ func TestAnalyzeAcceptsArrayAndArrayViewSliceSyntax(t *testing.T) {
 }
 
 func TestAnalyzeAcceptsFixedArraySliceSyntax(t *testing.T) {
-	src := `def middle(values: i32[4], view: i32[4]&) -> i32:
+	src := `def middle(values: i32[4], view: any i32[4]&) -> i32:
 	part: DArrayView[i32] = values[1u:3u]
 	sub: DArrayView[i32] = view[0u:2u]
 	return part[0u] + sub[1u]
@@ -803,7 +832,7 @@ def keep(array: DArray[i32, row]) -> DArray[i32, row]:
 }
 
 func TestAnalyzeDArrayUsesDynArrayRuntimeFields(t *testing.T) {
-	src := `def needs_grow[T](array: DArray[T, row]&) -> bool:
+	src := `def needs_grow[T](array: any DArray[T, row]&) -> bool:
     return array.count >= array.capacity
 `
 	_, errs := parseAndAnalyze(t, "darray_runtime_field_access.llcontext", src)
@@ -863,17 +892,17 @@ def keep(values: DList[i32, row]) -> DList[i32, row]:
 }
 
 func TestAnalyzeDStrRuntimeBridgeWorksBothDirections(t *testing.T) {
-	src := `def take_raw(text: u8&) -> void:
+	src := `def take_raw(text: any u8&) -> void:
 	pass
 
 def take_logical(text: DStr[shape_text]) -> void:
 	pass
 
-def roundtrip(text: DStr[row], raw: u8&) -> DStr[row]:
+def roundtrip(text: DStr[row], raw: any u8&) -> DStr[row]:
 	take_raw(text)
 	take_logical(raw)
 	bridged: DStr[row] = raw
-	raw_value: u8& = text
+	raw_value: any u8& = text
 	return raw_value
 `
 	_, errs := parseAndAnalyze(t, "dstr_runtime_bridge_roundtrip.llcontext", src)
@@ -907,7 +936,7 @@ def bad_str(x: DStr[row, col]) -> void:
 }
 
 func TestAnalyzeDListUsesCtxListRuntimeFields(t *testing.T) {
-	src := `def has_room[T](values: DList[T, row]&) -> bool:
+	src := `def has_room[T](values: any DList[T, row]&) -> bool:
     return values.len < values.cap
 `
 	_, errs := parseAndAnalyze(t, "dlist_runtime_field_access.llcontext", src)

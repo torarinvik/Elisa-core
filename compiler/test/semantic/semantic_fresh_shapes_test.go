@@ -213,16 +213,16 @@ func TestAnalyzeArenaAppendReturnsFreshShape(t *testing.T) {
     dummy: usize
 
 repr(c) struct DynArray[T]:
-    items: mutable T&?
+    items: mutable any T&?
     count: mutable usize
     capacity: mutable usize
 
-def arena_da_append[T](a: Arena&, da: DArray[T, shape_in]&, item: T) -> DArray[T, shape_out]&:
+def arena_da_append[T](a: any Arena&, da: any DArray[T, shape_in]&, item: T) -> any DArray[T, shape_out]&:
     if da.count >= da.capacity:
         pass
     return da
 
-def bad(a: Arena&, da: DArray[i32, row]&) -> DArray[i32, row]&:
+def bad(a: any Arena&, da: any DArray[i32, row]&) -> any DArray[i32, row]&:
     return arena_da_append(a, da, 1)
 `
 	_, errs := parseAndAnalyze(t, "arena_append_returns_fresh_shape.llcontext", src)
@@ -230,14 +230,14 @@ def bad(a: Arena&, da: DArray[i32, row]&) -> DArray[i32, row]&:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "return type expects DArray[i32, row]&, got DArray[i32, shape_out#") || !strings.Contains(all, "note: arena_da_append returns a fresh logical shape for shape_out") {
+	if !strings.Contains(all, "return type expects any DArray[i32, row]&, got any DArray[i32, shape_out#") || !strings.Contains(all, "note: arena_da_append returns a fresh logical shape for shape_out") {
 		t.Fatalf("expected fresh arena append diagnostic, got:\n%s", all)
 	}
 }
 
 func TestAnalyzeStage1StringConcatWrapperReturnsFreshShape(t *testing.T) {
-	src := `def ctx_stage0_concat2(lhs: u8&?, rhs: u8&?) -> u8&:
-    return lhs if lhs != null else rhs.u8&()
+	src := `def ctx_stage0_concat2(lhs: any u8&?, rhs: any u8&?) -> any u8&:
+	return lhs if lhs != null else rhs.cast[any u8&]()
 
 def ctx_stage1rt_concat2(lhs: DStr[shape_left], rhs: DStr[shape_right]) -> DStr[shape_result]:
     return ctx_stage0_concat2(lhs, rhs)
@@ -259,15 +259,15 @@ func TestAnalyzeStage1ListPushWrapperReturnsFreshShape(t *testing.T) {
 	src := `repr(c) struct CtxList:
     len: mutable i64
 
-extern make_list() -> CtxList&
+extern make_list() -> any CtxList&
 
-def ctx_stage0_list_push(values: CtxList&?, elem: void&?, elem_size: i64) -> CtxList&?:
+def ctx_stage0_list_push(values: any CtxList&?, elem: any void&?, elem_size: i64) -> any CtxList&?:
     return values
 
-def ctx_stage1rt_list_push(values: DArray[void&, shape_in], elem: void&?, elem_size: i64) -> DArray[void&, shape_out]:
+def ctx_stage1rt_list_push(values: DArray[any void&, shape_in], elem: any void&?, elem_size: i64) -> DArray[any void&, shape_out]:
     return ctx_stage0_list_push(values, elem, elem_size)
 
-def bad(values: DArray[void&, row], elem: void&) -> DArray[void&, row]:
+def bad(values: DArray[any void&, row], elem: any void&) -> DArray[any void&, row]:
     return ctx_stage1rt_list_push(values, elem, 8)
 `
 	_, errs := parseAndAnalyze(t, "stage1_list_push_wrapper.llcontext", src)
@@ -275,7 +275,7 @@ def bad(values: DArray[void&, row], elem: void&) -> DArray[void&, row]:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "return type expects DArray[void&, row], got DArray[void&, shape_out#") || !strings.Contains(all, "note: ctx_stage1rt_list_push returns a fresh logical shape for shape_out") || !strings.Contains(all, "note: CtxList-backed list wrappers keep the same runtime layout; this mismatch is about the logical shape witness") {
+	if !strings.Contains(all, "return type expects DArray[any void&, row], got DArray[any void&, shape_out#") || !strings.Contains(all, "note: ctx_stage1rt_list_push returns a fresh logical shape for shape_out") || !strings.Contains(all, "note: CtxList-backed list wrappers keep the same runtime layout; this mismatch is about the logical shape witness") {
 		t.Fatalf("expected fresh stage1 list push diagnostic, got:\n%s", all)
 	}
 }

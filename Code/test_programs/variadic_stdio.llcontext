@@ -1,7 +1,7 @@
-extern snprintf(buffer: u8&?, buffer_size: usize, format: u8&, ...) -> int
+extern snprintf(buffer: any u8&?, buffer_size: usize, format: any u8&, ...) -> int
 
-def format_len(format: u8&) -> int:
+def format_len(format: any u8&) -> int:
     return snprintf(null, 0u, format, 7, 9)
 
-def write_into(buffer: u8&, size: usize, format: u8&) -> int:
+def write_into(buffer: any u8&, size: usize, format: any u8&) -> int:
     return snprintf(buffer, size, format, 11)

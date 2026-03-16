@@ -153,10 +153,10 @@ func TestEllipsis(t *testing.T) {
 }
 
 func TestRefType(t *testing.T) {
-	tokens := collectTokens("Region& Arena&?\n")
+	tokens := collectTokens("any Region& any Arena&?\n")
 	expect := []lexer.TokenKind{
-		lexer.TOKEN_IDENT, lexer.TOKEN_AMPERSAND,
-		lexer.TOKEN_IDENT, lexer.TOKEN_AMPERSAND, lexer.TOKEN_QUESTION,
+		lexer.TOKEN_ANY, lexer.TOKEN_IDENT, lexer.TOKEN_AMPERSAND,
+		lexer.TOKEN_ANY, lexer.TOKEN_IDENT, lexer.TOKEN_AMPERSAND, lexer.TOKEN_QUESTION,
 		lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF,
 	}
 	assertKinds(t, tokens, expect)
