@@ -255,14 +255,14 @@ Using the current explicit storage qualifiers, a practical wrapper looks like th
 error MemoryError:
     OutOfMemory
 
-extern alloc_node() -> any Node&?
+extern alloc_node() -> heap Node&?
 
-def require_node() -> any Node& error[MemoryError]:
-    node: any Node& = alloc_node() else raise MemoryError.OutOfMemory
+def require_node() -> heap Node& error[MemoryError]:
+    node: heap Node& = alloc_node() else raise MemoryError.OutOfMemory
     return node
 
 def make_node_value() -> int error[MemoryError]:
-    node: any Node& = try require_node()
+    node: heap Node& = try require_node()
     node.value <- 42
     return node.value
 
@@ -270,7 +270,7 @@ def make_node_value_or_zero() -> int:
     return try make_node_value() else 0
 ```
 
-That keeps the low-level boundary honest (`alloc_node` may return null), while the rest of the example works with a proven non-null pointer plus explicit propagation and recovery.
+That keeps the low-level boundary honest (`alloc_node` may return null), preserves the fact that the pointer is heap-backed once it succeeds, and lets the rest of the example work with a proven non-null pointer plus explicit propagation and recovery.
 
 ## Illegal strengthening rule
 

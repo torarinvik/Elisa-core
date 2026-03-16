@@ -42,10 +42,17 @@ darray[T, n]
 
 where `n` is a value-level natural number tracked in the type.
 
+If the operation may allocate, the practical surface should also admit failure explicitly:
+
+```context
+error ShapeOpError:
+	AllocationFailed
+```
+
 Then resize operations become type transitions:
 
 ```text
-resize : darray[T, n] × m -> darray[T, m]
+resize : darray[T, n] × m -> darray[T, m] error[ShapeOpError]
 ```
 
 That is elegant and very much in the spirit of the pointer system.
@@ -150,7 +157,7 @@ But let the type system expose a stronger logical wrapper notion, something like
 darray[T, n]
 ```
 
-where operations like `push`, `resize`, `append_many`, `truncate`, `clear`, `concat`, and `strcat` produce new logical types.
+where operations like `push`, `resize`, `append_many`, `truncate`, `clear`, `concat`, and `strcat` produce new logical types. In the practical surface, the allocation-sensitive ones should usually be fallible, for example `push : darray[T, n] × T -> darray[T, n+1] error[ShapeOpError]` and `concat : dstr[a] × dstr[b] -> dstr[a+b] error[ShapeOpError]`.
 
 This can still compile to the same C-like struct representation.
 

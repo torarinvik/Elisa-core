@@ -16,8 +16,8 @@ def alloc_or_fail(size: usize) -> heap void& error[MemoryError]:
   ptr: heap void& = malloc(size) else raise MemoryError.OutOfMemory
   return ptr
 
-def alloc_or_null(size: usize) -> any void&:
-  ptr: any void& = try alloc_or_fail(size) else null.cast[any void&]()
+def alloc_or_null(size: usize) -> heap void&?
+  ptr: heap void&? = try alloc_or_fail(size) else null
   return ptr
 ```
 

@@ -32,7 +32,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			name: "pointer_alloc",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "pointer_alloc.llcontext"),
 			checks: []string{
-				"%ErrUnion__MemoryError__any_Node = type { i32, ptr }",
+				"%ErrUnion__MemoryError__heap_Node = type { i32, ptr }",
 				"%ErrUnion__MemoryError__int = type { i32, i64 }",
 				"%Node = type { i64, ptr }",
 				"declare ptr @alloc_node()",
