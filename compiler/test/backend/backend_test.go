@@ -684,14 +684,8 @@ repr(c) struct CtxList:
     count: mutable usize
     capacity: mutable usize
 
-repr(c) struct CtxListView:
-	items: mutable any void&?
-    count: mutable usize
-
 extern take_array(values: DArray[i32, row]) -> void
 extern take_array_view(view: DArrayView[i32]) -> usize
-extern take_list(values: DList[i32, row]) -> void
-extern take_list_view(view: DListView[i32]) -> usize
 extern take_str(text: DStr[row]) -> void
 `
 	result := parseAndAnalyze(t, "backend_runtime_types.llcontext", src)
@@ -703,11 +697,8 @@ extern take_str(text: DStr[row]) -> void
 	checks := []string{
 		"%DynArray__i32 = type { ptr, i64, i64 }",
 		"%DynArrayView = type { ptr, i64, i64 }",
-		"%CtxListView = type { ptr, i64, i64 }",
 		"declare void @take_array(%DynArray__i32)",
 		"declare i64 @take_array_view(%DynArrayView)",
-		"declare void @take_list(ptr)",
-		"declare i64 @take_list_view(%CtxListView)",
 		"declare void @take_str(ptr)",
 	}
 	for _, check := range checks {
@@ -1192,67 +1183,6 @@ def read_view(view: DArrayView[i32]) -> i32:
 	}
 }
 
-func TestGenerateLLVMIRIndexesRuntimeBackedListsAndViews(t *testing.T) {
-	src := `repr(c) struct CtxList:
-	items: mutable any void&?
-    count: mutable usize
-    capacity: mutable usize
-
-repr(c) struct CtxListView:
-	items: mutable any void&?
-    count: mutable usize
-
-def read_list(values: DList[i32, row]) -> i32:
-    return values[1]
-
-def read_view(view: DListView[i32]) -> i32:
-    return view[2]
-`
-	result := parseAndAnalyze(t, "backend_runtime_list_index.llcontext", src)
-	output, err := backend.GenerateLLVMIR(result)
-	if err != nil {
-		t.Fatalf("GenerateLLVMIR returned error: %v", err)
-	}
-
-	checks := []string{
-		"%CtxListView = type { ptr, i64, i64 }",
-		"define i32 @read_list(ptr",
-		"define i32 @read_view(%CtxListView",
-		"getelementptr i32, ptr",
-	}
-	for _, check := range checks {
-		if !strings.Contains(output, check) {
-			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
-		}
-	}
-}
-
-func TestGenerateLLVMIRIndexesRuntimeBackedListRefs(t *testing.T) {
-	src := `repr(c) struct CtxList:
-	items: mutable any void&?
-    count: mutable usize
-    capacity: mutable usize
-
-def read_list_ref(values: any DList[i32, row]&) -> i32:
-    return values[1]
-`
-	result := parseAndAnalyze(t, "backend_runtime_list_ref_index.llcontext", src)
-	output, err := backend.GenerateLLVMIR(result)
-	if err != nil {
-		t.Fatalf("GenerateLLVMIR returned error: %v", err)
-	}
-
-	checks := []string{
-		"define i32 @read_list_ref(ptr",
-		"getelementptr i32, ptr",
-	}
-	for _, check := range checks {
-		if !strings.Contains(output, check) {
-			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
-		}
-	}
-}
-
 func TestGenerateLLVMIRIndexesDStrViaRuntimeHelper(t *testing.T) {
 	src := `def read_codepoint(text: DStr[row]) -> char:
     return text[1]
@@ -1380,30 +1310,6 @@ func TestGenerateLLVMIRLowersDStrLenFieldViaRuntimeHelper(t *testing.T) {
 	}
 }
 
-func TestGenerateLLVMIRLowersListSliceSyntaxViaRuntimeHelpers(t *testing.T) {
-	src := `def head_of_middle(values: DList[i32, row]) -> i32:
-	part: DListView[i32] = values[1:3]
-    return part[0]
-`
-	result := parseAndAnalyze(t, "backend_list_slice_syntax.llcontext", src)
-	output, err := backend.GenerateLLVMIR(result)
-	if err != nil {
-		t.Fatalf("GenerateLLVMIR returned error: %v", err)
-	}
-
-	checks := []string{
-		"define i32 @head_of_middle(ptr",
-		"declare %CtxListView @ctx_stage1rt_tlist_view(ptr, i64, i64)",
-		"call %CtxListView @ctx_stage1rt_tlist_view(ptr",
-		"getelementptr i32, ptr",
-	}
-	for _, check := range checks {
-		if !strings.Contains(output, check) {
-			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
-		}
-	}
-}
-
 func TestGenerateLLVMIRLowersArraySliceSyntaxViaRuntimeHelpers(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
 	items: mutable any T&?
@@ -1494,13 +1400,8 @@ repr(c) struct DynArrayView:
     len: mutable usize
     elem_size: mutable usize
 
-repr(c) struct CtxListView:
-	items: mutable any void&?
-    count: mutable usize
-
 extern make_array() -> DArray[i32, row]
 extern make_array_view() -> DArrayView[i32]
-extern make_list_view() -> DListView[i32]
 
 def read_array_index() -> i32:
     return make_array()[1u]
@@ -1510,9 +1411,6 @@ def read_array_slice_index() -> i32:
 
 def read_array_view_index() -> i32:
     return make_array_view()[0u]
-
-def read_list_view_index() -> i32:
-    return make_list_view()[0]
 `
 	result := parseAndAnalyze(t, "backend_nested_collection_access_returns.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -1523,15 +1421,12 @@ def read_list_view_index() -> i32:
 	checks := []string{
 		"declare %DynArray__i32 @make_array()",
 		"declare %DynArrayView @make_array_view()",
-		"declare %CtxListView @make_list_view()",
 		"call %DynArray__i32 @make_array()",
 		"call %DynArrayView @make_array_view()",
-		"call %CtxListView @make_list_view()",
 		"call %DynArrayView @arena_da_view(ptr",
 		"getelementptr i32, ptr",
 		"alloca %DynArray__i32",
 		"alloca %DynArrayView",
-		"alloca %CtxListView",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {

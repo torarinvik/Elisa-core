@@ -122,14 +122,11 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			checks: []string{
 				"declare %DynArray__i32 @make_array()",
 				"declare %DynArrayView @make_array_view()",
-				"declare %CtxListView @make_list_view()",
 				"call %DynArray__i32 @make_array()",
 				"call %DynArrayView @make_array_view()",
-				"call %CtxListView @make_list_view()",
 				"call %DynArrayView @arena_da_view(ptr",
 				"alloca %DynArray__i32",
 				"alloca %DynArrayView",
-				"alloca %CtxListView",
 			},
 		},
 		{

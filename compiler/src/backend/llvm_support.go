@@ -934,23 +934,9 @@ func (s *functionState) resolveDynamicShapeType(expr *ast.GenericType) (semantic
 		}
 		return &semantic.DArrayViewType{Elem: elem}, true, nil
 	case "DList":
-		if len(expr.Args) != 2 {
-			return nil, true, fmt.Errorf("DList expects 2 arguments, got %d", len(expr.Args))
-		}
-		elem, err := s.resolveTypeExpr(expr.Args[0])
-		if err != nil {
-			return nil, true, err
-		}
-		return &semantic.DListType{Elem: elem, Shape: shapeFromTypeExpr(expr.Args[1])}, true, nil
+		return nil, true, fmt.Errorf("DList has been removed from the language; use DArray/darray instead")
 	case "DListView":
-		if len(expr.Args) != 1 {
-			return nil, true, fmt.Errorf("DListView expects 1 argument, got %d", len(expr.Args))
-		}
-		elem, err := s.resolveTypeExpr(expr.Args[0])
-		if err != nil {
-			return nil, true, err
-		}
-		return &semantic.DListViewType{Elem: elem}, true, nil
+		return nil, true, fmt.Errorf("DListView has been removed from the language; use DArrayView/view or raw CtxListView instead")
 	case "DStr":
 		if len(expr.Args) != 1 {
 			return nil, true, fmt.Errorf("DStr expects 1 argument, got %d", len(expr.Args))

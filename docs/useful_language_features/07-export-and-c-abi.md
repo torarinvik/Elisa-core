@@ -215,8 +215,6 @@ These should **not** be exported directly in the first version:
 - `dstr[...]`
 - `view[...]`
 - `sview[...]`
-- `DList[...]`
-- `DListView[...]`
 - shape-typed logical container wrappers in general
 
 Reason:

@@ -14,10 +14,10 @@ Implemented today:
 - exact fixed-array typing for `array[T, N]` and `T[N]`
 - mismatched fixed-array rejection
 - compile-time constant out-of-bounds diagnostics for fixed arrays
-- lightweight shape witnesses for `darray[T, shape]`, `dstr[shape]`, and `DList[T, shape]`
+- lightweight shape witnesses for `darray[T, shape]` and `dstr[shape]`
 - fresh post-operation shapes for shape-changing APIs such as `resize`, `push`, `concat`, and `strcat`
-- indexing for `darray`, `view`, `DList`, `DListView`, `dstr`, `str`, and `sview`
-- slice syntax for `darray`, `view`, fixed arrays, `DList`, `DListView`, `dstr`, `str`, and `sview`
+- indexing for `darray`, `view`, `dstr`, `str`, and `sview`
+- slice syntax for `darray`, `view`, fixed arrays, `dstr`, `str`, and `sview`
 - the built-in `view[T, begin, end]` / `sview[begin, end]` surface syntax, with `view[T]` retained as a shorthand for array views
 - pointer arithmetic lowering (`ref + int`, `int + ref`, `ref - int`)
 - explicit reference comparisons (`ref == null`, `ref != null`, `ref == ref`)
@@ -91,7 +91,7 @@ This phase should focus on:
 
 not on complicated inference.
 
-Status: complete for `darray[T, shape]`, `dstr[shape]`, `DList[T, shape]`, `view[T, begin, end]`, and `DListView[T]` under the current lightweight shape-witness model. The compiler also accepts `darray[T]` / `DArray[T]` and bare `dstr` / `DStr` as shape-erasing shorthand when code does not need to preserve an explicit logical shape relationship.
+Status: complete for `darray[T, shape]`, `dstr[shape]`, and `view[T, begin, end]` under the current lightweight shape-witness model. The compiler also accepts `darray[T]` / `DArray[T]` and bare `dstr` / `DStr` as shape-erasing shorthand when code does not need to preserve an explicit logical shape relationship. The older `DList` / `DListView` surface has been removed from the language.
 
 ### Phase 3 — teach shape-changing APIs to produce fresh post-state shapes
 
@@ -391,7 +391,7 @@ Current coverage includes exact fixed-array equality, mismatch rejection, and co
 - type equality for dynamic shape witnesses
 - shape witness preservation across plain assignment
 
-Current coverage includes parsing and semantic checks for `darray`, `dstr`, `DList`, `view`, `sview`, `DListView`, and their runtime-bridge behavior.
+Current coverage includes parsing and semantic checks for `darray`, `dstr`, `view`, `sview`, and their runtime-bridge behavior.
 
 ### Phase 3 tests
 
@@ -446,7 +446,7 @@ The codebase is already following this staged approach:
 
 - low-level stage 0 runtime code still uses representation-first types such as `DynArray[T]`, `CtxList`, `StringBuilder`, and raw `u8&` string values
 - `arena.llcontext` now exposes shape-typed append helpers such as `arena_da_append` and `arena_da_append_many`
-- `contextlang_runtime.llcontext` stage 1 wrappers now expose typed logical APIs such as `ctx_stage1rt_tlist_push`, `ctx_stage1rt_tlist_view`, `ctx_stage1rt_concat2`, and `ctx_stage1rt_string_slice`
+- `contextlang_runtime.llcontext` stage 1 wrappers now expose typed logical APIs such as `ctx_stage1rt_concat2`, `ctx_stage1rt_string_slice`, and the raw `ctx_stage1rt_list_*` bridge helpers where list-shaped runtime carriers are still needed
 - `arena.llcontext` now also exposes typed non-owning `view[T, begin, end]` helpers such as `arena_da_view`, `arena_da_view_slice`, and `arena_da_view_get`
 - the semantic layer bridges these wrappers back onto the underlying runtime representations rather than forcing an immediate full runtime rewrite
 
@@ -460,11 +460,11 @@ def ctx_stage1rt_concat2(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[
     text: dstr[shape_result] = ctx_stage0_concat2(lhs, rhs) else raise RuntimeError.AllocationFailed
     return text
 
-def ctx_stage1rt_tlist_push[T](values: DList[T, shape_in], elem: T&) -> DList[T, shape_out] error[RuntimeError]:
-    next: DList[T, shape_out] = ctx_stage0_list_push(values, elem.void&(), sizeof(T).i64()) else raise RuntimeError.AllocationFailed
+def ctx_stage1rt_list_push(values: darray[any void&, shape_in], elem: any void&?, elem_size: i64) -> darray[any void&, shape_out] error[RuntimeError]:
+    next: darray[any void&, shape_out] = ctx_stage0_list_push(values, elem, elem_size) else raise RuntimeError.AllocationFailed
     return next
 
-def ctx_stage1rt_tlist_view[T](values: DList[T, shape_in], start: i64, end: i64) -> DListView[T]:
+def ctx_stage1rt_list_view(values: darray[any void&, shape_in], start: i64, end: i64) -> CtxListView:
     return ctx_stage0_list_view(values, start, end)
 ```
 
@@ -489,11 +489,11 @@ So the public runtime-facing layer carries logical shape transitions, while the 
 More concretely, the current semantic bridge is intentionally narrow and wrapper-oriented:
 
 - `dstr[shape_id]` is allowed to flow across the runtime boundary as raw `u8&` / `u8&?` string values
-- `DList[T, shape_id]` and `DListView[T]` are allowed to flow across the runtime boundary as `CtxList&` / `CtxList&?` and `CtxListView`
 - `darray[T, shape_id]` can likewise ride on the existing `DynArray[T]` representation for arena-backed helpers
 - `view[T, begin, end]` is allowed to flow across the runtime boundary as `DynArrayView`
+- raw list-shaped bridge code can still use `darray[any void&, shape_id]` together with `CtxList&` / `CtxList&?` and `CtxListView`
 
-The older raw list wrappers (`ctx_stage1rt_list_*` with `darray[void&, shape]` and `CtxListView`) still exist as compatibility shims, but the typed `ctx_stage1rt_tlist_*` surface is the preferred API for new code.
+The raw list wrappers (`ctx_stage1rt_list_*` with `darray[void&, shape]` and `CtxListView`) still exist as compatibility shims for low-level bridge code. The older typed `DList` / `DListView` surface has been removed from the language.
 
 That means the typechecker can track logical shape states at the wrapper/API level while still reusing the existing low-level runtime layouts internally, and the public wrappers can expose typed `error[...]` returns when allocation or growth may fail.
 

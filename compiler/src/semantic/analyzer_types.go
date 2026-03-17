@@ -286,17 +286,11 @@ func (a *Analyzer) resolveDynamicShapeType(expr *ast.GenericType) (Type, bool) {
 		}
 		return &DArrayViewType{Elem: a.resolveType(expr.Args[0])}, true
 	case "DList":
-		if len(expr.Args) != 2 {
-			a.errorf(expr.Pos(), "DList expects 2 arguments, got %d", len(expr.Args))
-			return invalidType, true
-		}
-		return &DListType{Elem: a.resolveType(expr.Args[0]), Shape: a.resolveShapeArg(expr.Args[1])}, true
+		a.errorf(expr.Pos(), "DList has been removed from the language; use DArray/darray instead")
+		return invalidType, true
 	case "DListView":
-		if len(expr.Args) != 1 {
-			a.errorf(expr.Pos(), "DListView expects 1 argument, got %d", len(expr.Args))
-			return invalidType, true
-		}
-		return &DListViewType{Elem: a.resolveType(expr.Args[0])}, true
+		a.errorf(expr.Pos(), "DListView has been removed from the language; use DArrayView/view or raw CtxListView instead")
+		return invalidType, true
 	case "DStr":
 		if len(expr.Args) != 1 {
 			a.errorf(expr.Pos(), "DStr expects 1 argument, got %d", len(expr.Args))

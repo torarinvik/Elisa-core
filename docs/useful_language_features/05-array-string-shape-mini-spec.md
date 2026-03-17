@@ -20,13 +20,12 @@ The current compiler follows the recommended lightweight model rather than full 
 Implemented today:
 
 - exact fixed-array typing for `array[T, N]` and `T[N]`
-- dynamic shape witnesses for `darray[T, shape]`, `dstr[shape]`, and `DList[T, shape]`
-- non-owning view types `view[T, begin, end]`, `DListView[T]`, and `sview[begin, end]`
-- indexing for fixed arrays, dynamic arrays/views, lists/views, strings, and string views
+- dynamic shape witnesses for `darray[T, shape]` and `dstr[shape]`
+- non-owning view types `view[T, begin, end]` and `sview[begin, end]`
+- indexing for fixed arrays, dynamic arrays/views, strings, and string views
 - slice syntax producing view-like results:
     - `array[T, N]`, `T[N]`, and their non-null references slice to `view[T, start, end]`
     - `darray[T, shape]` and `view[T, begin, end]` slices produce `view[T, start, end]`
-    - `DList[T, shape]` and `DListView[T]` slices produce `DListView[T]`
     - `dstr[shape]`, `str[N]`, and `sview[begin, end]` slices produce `sview[start, end]`
 
 The compiler still accepts `string[...]` and `dstring[...]` as compatibility aliases, but `str[...]` and `dstr[...]` are now the canonical user-facing spellings.
@@ -377,7 +376,6 @@ That said, I would frame it like this:
 Current status:
 
 - `view[T, begin, end]` is the preferred surface for dynamic-array and fixed-array slice results
-- `DListView[T]` remains the explicit Stage 1 typed-list view surface for the older list runtime helpers
 - `sview[begin, end]` is the preferred surface for string slices and runtime-backed string views
 
 So I agree with your instinct as an implementation priority:
@@ -426,7 +424,7 @@ Then expose compiler-level logical shape wrappers incrementally.
 
 At first, this can even be mostly API-discipline plus type wrappers.
 
-Status: implemented for `darray`, `dstring`, `DList`, and the current runtime bridge.
+Status: implemented for `darray`, `dstring`, and the current runtime bridge. The older `DList` / `DListView` surface has been removed from the language.
 
 ### Stage 3 — logical post-operation shape change
 

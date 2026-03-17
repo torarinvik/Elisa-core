@@ -117,9 +117,7 @@ def ctx_stage1rt_string_from_view(view: CtxStringView) -> DStr[shape_out]:
     return ctx_stage0_string_view_copy(view)
 
 # ------------------------------------------------------------
-# Legacy raw CtxList compatibility shims
-# Prefer ctx_stage1rt_tlist_* / DList[T, shape] / DListView[T]
-# for new code so element types flow through the API.
+# Raw CtxList compatibility shims
 # ------------------------------------------------------------
 
 def ctx_stage1rt_list_new() -> DArray[any void&, shape_out]:
@@ -162,74 +160,8 @@ def ctx_stage1rt_list_from_view(view: CtxListView) -> DArray[any void&, shape_ou
     return ctx_stage0_list_view_copy(view)
 
 # ------------------------------------------------------------
-# Preferred typed CtxList wrappers
-# ------------------------------------------------------------
-
-def ctx_stage1rt_tlist_new[T](type_hint: any T&) -> DList[T, shape_out]:
-    _ = type_hint
-    return ctx_stage0_list_new_reserve(0, sizeof(T).i64())
-
-def ctx_stage1rt_tlist_new_reserve[T](cap: i64, type_hint: any T&) -> DList[T, shape_out]:
-    _ = type_hint
-    return ctx_stage0_list_new_reserve(cap, sizeof(T).i64())
-
-def ctx_stage1rt_tlist_reserve[T](values: DList[T, shape_in], cap: i64) -> DList[T, shape_out]:
-    return ctx_stage0_list_reserve(values, cap, sizeof(T).i64())
-
-def ctx_stage1rt_tlist_push[T](values: DList[T, shape_in], elem: any T&) -> DList[T, shape_out]:
-    return ctx_stage0_list_push(values, elem.cast[any void&](), sizeof(T).i64())
-
-def ctx_stage1rt_tlist_push_mut[T](values: DList[T, shape_in], elem: any T&) -> DList[T, shape_out]:
-    return ctx_stage0_list_push_mut(values, elem.cast[any void&](), sizeof(T).i64())
-
-def ctx_stage1rt_tlist_concat[T](left: DList[T, shape_left], right: DList[T, shape_right]) -> DList[T, shape_result]:
-    return ctx_stage0_list_concat(left, right)
-
-def ctx_stage1rt_tlist_truncate[T](values: DList[T, shape_in], size: i64) -> DList[T, shape_out]:
-    return ctx_stage0_list_truncate(values, size)
-
-def ctx_stage1rt_tlist_clear[T](values: DList[T, shape_in]) -> DList[T, shape_out]:
-    return ctx_stage0_list_clear(values)
-
-def ctx_stage1rt_tlist_view[T](values: DList[T, shape_in], start: i64, end: i64) -> DListView[T]:
-    return ctx_stage0_list_view(values, start, end)
-
-def ctx_stage1rt_tlist_view_len[T](view: DListView[T]) -> i64:
-    return ctx_stage0_list_view_len(view)
-
-def ctx_stage1rt_tlist_view_slice[T](view: DListView[T], start: i64, end: i64) -> DListView[T]:
-    return ctx_stage0_list_view_slice(view, start, end)
-
-def ctx_stage1rt_tlist_take[T](values: DList[T, shape_in], count: i64) -> DListView[T]:
-    return ctx_stage1rt_tlist_view(values, 0, count)
-
-def ctx_stage1rt_tlist_drop[T](values: DList[T, shape_in], count: i64) -> DListView[T]:
-    return ctx_stage1rt_tlist_view(values, count, ctx_stage1rt_tlist_len(values))
-
-def ctx_stage1rt_tlist_from_view[T](view: DListView[T]) -> DList[T, shape_out]:
-    return ctx_stage0_list_view_copy(view)
-
-def ctx_stage1rt_tlist_len[T](values: DList[T, shape_in]) -> i64:
-    return ctx_stage0_list_len(values)
-
-def ctx_stage1rt_tlist_get[T](values: DList[T, shape_in], index: i64) -> any T&:
-    return ctx_stage0_list_get(values, index, sizeof(T).i64()).cast[any T&]()
-
-def ctx_stage1rt_tlist_set[T](values: DList[T, shape_in], index: i64, elem: any T&) -> i64:
-    return ctx_stage0_list_set(values, index, elem.cast[any void&](), sizeof(T).i64())
-
-def ctx_stage1rt_tlist_first[T](values: DList[T, shape_in]) -> any T&:
-    return ctx_stage1rt_tlist_get(values, 0)
-
-def ctx_stage1rt_tlist_view_get[T](view: DListView[T], index: i64) -> any T&:
-    return ctx_stage0_list_view_get(view, index, sizeof(T).i64()).cast[any T&]()
-
-def ctx_stage1rt_tlist_view_first[T](view: DListView[T]) -> any T&:
-    return ctx_stage1rt_tlist_view_get(view, 0)
-
-# ------------------------------------------------------------
 # Legacy raw CtxList compatibility shims
-# Prefer ctx_stage1rt_tlist_len/get/set for typed code.
+# Use these raw CtxList helpers when bridging list-like runtime values.
 # ------------------------------------------------------------
 
 def ctx_stage1rt_list_len(values: DArray[any void&, shape_in]) -> i64:

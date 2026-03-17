@@ -55,15 +55,6 @@ var shapeTransformTable = map[string]ShapeTransformSpec{
 	"ctx_stage1rt_list_truncate":          {FreshReturnShapeParams: []string{"shape_out"}},
 	"ctx_stage1rt_list_clear":             {FreshReturnShapeParams: []string{"shape_out"}},
 	"ctx_stage1rt_list_from_view":         {FreshReturnShapeParams: []string{"shape_out"}},
-	"ctx_stage1rt_tlist_new":              {FreshReturnShapeParams: []string{"shape_out"}},
-	"ctx_stage1rt_tlist_new_reserve":      {FreshReturnShapeParams: []string{"shape_out"}},
-	"ctx_stage1rt_tlist_reserve":          {FreshReturnShapeParams: []string{"shape_out"}},
-	"ctx_stage1rt_tlist_push":             {FreshReturnShapeParams: []string{"shape_out"}},
-	"ctx_stage1rt_tlist_push_mut":         {FreshReturnShapeParams: []string{"shape_out"}},
-	"ctx_stage1rt_tlist_concat":           {FreshReturnShapeParams: []string{"shape_result"}},
-	"ctx_stage1rt_tlist_truncate":         {FreshReturnShapeParams: []string{"shape_out"}},
-	"ctx_stage1rt_tlist_clear":            {FreshReturnShapeParams: []string{"shape_out"}},
-	"ctx_stage1rt_tlist_from_view":        {FreshReturnShapeParams: []string{"shape_out"}},
 	"arena_da_from_view":                  {FreshReturnShapeParams: []string{"shape_out"}},
 }
 

@@ -893,39 +893,6 @@ def read_view(view: DArrayView[i32]) -> i32:
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeAcceptsRuntimeBackedListAndViewIndexing(t *testing.T) {
-	src := `repr(c) struct CtxList:
-	items: mutable any void&?
-	count: mutable usize
-	capacity: mutable usize
-
-repr(c) struct CtxListView:
-	items: mutable any void&?
-	count: mutable usize
-
-def read_list(values: DList[i32, row]) -> i32:
-	return values[0]
-
-def read_view(view: DListView[i32]) -> i32:
-	return view[0]
-`
-	_, errs := parseAndAnalyze(t, "runtime_backed_list_index.llcontext", src)
-	requireNoErrors(t, errs)
-}
-
-func TestAnalyzeAcceptsRuntimeBackedListRefIndexing(t *testing.T) {
-	src := `repr(c) struct CtxList:
-	items: mutable any void&?
-	count: mutable usize
-	capacity: mutable usize
-
-def read_list_ref(values: any DList[i32, row]&) -> i32:
-	return values[0]
-`
-	_, errs := parseAndAnalyze(t, "runtime_backed_list_ref_index.llcontext", src)
-	requireNoErrors(t, errs)
-}
-
 func TestAnalyzeAcceptsDStrIndexingAsChar(t *testing.T) {
 	src := `def read_codepoint(text: DStr[row]) -> char:
 	return text[0]
@@ -1014,15 +981,6 @@ func TestAnalyzeAcceptsViewAliasForArraySlices(t *testing.T) {
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeAcceptsExplicitListViewSliceSyntax(t *testing.T) {
-	src := `def middle(values: DList[i32, row]) -> DListView[i32]:
-	part: DListView[i32] = values[1:3]
-	return part
-`
-	_, errs := parseAndAnalyze(t, "explicit_list_view_slice.llcontext", src)
-	requireNoErrors(t, errs)
-}
-
 func TestAnalyzeAcceptsArrayAndArrayViewSliceSyntax(t *testing.T) {
 	src := `def middle(values: DArray[i32, row], view: DArrayView[i32]) -> i32:
 	part: DArrayView[i32] = values[1u:3u]
@@ -1046,7 +1004,6 @@ func TestAnalyzeAcceptsFixedArraySliceSyntax(t *testing.T) {
 func TestAnalyzeAcceptsNestedCollectionAccessOnReturnedValues(t *testing.T) {
 	src := `extern make_array() -> DArray[i32, row]
 extern make_array_view() -> DArrayView[i32]
-extern make_list_view() -> DListView[i32]
 
 def read_array_index() -> i32:
 	return make_array()[1u]
@@ -1056,9 +1013,6 @@ def read_array_slice_index() -> i32:
 
 def read_array_view_index() -> i32:
 	return make_array_view()[0u]
-
-def read_list_view_index() -> i32:
-	return make_list_view()[0]
 `
 	_, errs := parseAndAnalyze(t, "nested_collection_access_returns.llcontext", src)
 	requireNoErrors(t, errs)
@@ -1297,17 +1251,6 @@ func TestAnalyzeRejectsRecoveringExplicitShapeFromDStrShorthand(t *testing.T) {
 	}
 }
 
-func TestAnalyzeAcceptsImplicitDListShapeParams(t *testing.T) {
-	src := `def identity[T](values: DList[T, shape_in]) -> DList[T, shape_in]:
-    return values
-
-def keep(values: DList[i32, row]) -> DList[i32, row]:
-    return identity(values)
-`
-	_, errs := parseAndAnalyze(t, "implicit_dlist_shape_params.llcontext", src)
-	requireNoErrors(t, errs)
-}
-
 func TestAnalyzeDStrRuntimeBridgeWorksBothDirections(t *testing.T) {
 	src := `def take_raw(text: any u8&) -> void:
 	pass
@@ -1336,12 +1279,6 @@ def bad_array(x: DArray[i32, left, right]) -> void:
 def bad_array_view(x: DArrayView[i32, row]) -> void:
 	pass
 
-def bad_list(x: DList[i32]) -> void:
-	pass
-
-def bad_list_view(x: DListView[i32, row]) -> void:
-	pass
-
 def bad_str(x: DStr[row, col]) -> void:
     pass
 `
@@ -1350,25 +1287,26 @@ def bad_str(x: DStr[row, col]) -> void:
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "DArray expects 1 or 2 arguments, got 3") || !strings.Contains(all, "DArrayView expects 1 argument, got 2") || !strings.Contains(all, "DList expects 2 arguments, got 1") || !strings.Contains(all, "DListView expects 1 argument, got 2") || !strings.Contains(all, "DStr expects 1 argument, got 2") {
+	if !strings.Contains(all, "DArray expects 1 or 2 arguments, got 3") || !strings.Contains(all, "DArrayView expects 1 argument, got 2") || !strings.Contains(all, "DStr expects 1 argument, got 2") {
 		t.Fatalf("expected dynamic shape arity diagnostics, got:\n%s", all)
 	}
 }
 
-func TestAnalyzeDListUsesCtxListRuntimeFields(t *testing.T) {
-	src := `def has_room[T](values: any DList[T, row]&) -> bool:
-    return values.len < values.cap
-`
-	_, errs := parseAndAnalyze(t, "dlist_runtime_field_access.llcontext", src)
-	requireNoErrors(t, errs)
-}
+func TestAnalyzeRejectsRemovedDListTypes(t *testing.T) {
+	src := `def bad_list(values: DList[i32, row]) -> void:
+	pass
 
-func TestAnalyzeDListViewUsesCtxListViewRuntimeFields(t *testing.T) {
-	src := `def non_empty[T](view: DListView[T]) -> bool:
-    return view.len > 0 and view.elem_size > 0
+def bad_list_view(view: DListView[i32]) -> void:
+	pass
 `
-	_, errs := parseAndAnalyze(t, "dlist_view_runtime_field_access.llcontext", src)
-	requireNoErrors(t, errs)
+	_, errs := parseAndAnalyze(t, "removed_dlist_surface.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic errors, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "DList has been removed from the language") || !strings.Contains(all, "DListView has been removed from the language") {
+		t.Fatalf("expected removed-DList diagnostics, got:\n%s", all)
+	}
 }
 
 func TestAnalyzeDArrayViewUsesDynArrayViewRuntimeFields(t *testing.T) {
