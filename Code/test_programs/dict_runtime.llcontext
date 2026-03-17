@@ -1,0 +1,39 @@
+error RuntimeError:
+    OutOfMemory
+
+def arena_dict_new__i32(a: any Arena&, initial_capacity: usize) -> Dict[DStr[key_shape], i32]:
+    out: Dict[DStr[key_shape], i32] = zeroed
+    return out
+
+def arena_dict_reserve__i32(a: any Arena&, m: any Dict[DStr[key_shape], i32]&, min_capacity: usize) -> void error[RuntimeError]:
+    return
+
+def arena_dict_get__i32(m: any Dict[DStr[key_shape], i32]&, key: DStr[key_shape]) -> any i32&?:
+    return null
+
+def arena_dict_put__i32(a: any Arena&, m: any Dict[DStr[key_shape], i32]&, key: DStr[key_shape], value: i32) -> any i32&? error[RuntimeError]:
+    return arena_dict_get__i32(m, key)
+
+def arena_dict_contains__i32(m: any Dict[DStr[key_shape], i32]&, key: DStr[key_shape]) -> bool:
+    return arena_dict_get__i32(m, key) != null
+
+def arena_dict_remove__i32(m: any Dict[DStr[key_shape], i32]&, key: DStr[key_shape]) -> bool:
+    return false
+
+def arena_dict_clear__i32(m: any Dict[DStr[key_shape], i32]&):
+    return
+
+def touch_dict(a: any Arena&, key: DStr[key_shape]) -> bool error[RuntimeError]:
+    values: mutable Dict[DStr[key_shape], i32] = arena_dict_new__i32(a, 4u)
+    try arena_dict_reserve__i32(a, (&values).cast[any Dict[DStr[key_shape], i32]&](), 8u)
+
+    slot: any i32&? = try arena_dict_put__i32(a, (&values).cast[any Dict[DStr[key_shape], i32]&](), key, 7) else null
+    if slot == null:
+        return false
+
+    present: bool = arena_dict_contains__i32((&values).cast[any Dict[DStr[key_shape], i32]&](), key)
+    fetched: any i32&? = arena_dict_get__i32((&values).cast[any Dict[DStr[key_shape], i32]&](), key)
+    removed: bool = arena_dict_remove__i32((&values).cast[any Dict[DStr[key_shape], i32]&](), key)
+    arena_dict_clear__i32((&values).cast[any Dict[DStr[key_shape], i32]&]())
+
+    return present and fetched != null and removed

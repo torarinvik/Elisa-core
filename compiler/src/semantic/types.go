@@ -108,9 +108,29 @@ type DStrType struct {
 	SurfaceName string
 }
 
+type DictType struct {
+	Key         Type
+	Value       Type
+	SurfaceName string
+}
+
 type SViewType struct {
 	Begin string
 	End   string
+}
+
+type EnumVariant struct {
+	Name    string
+	Tag     uint32
+	Payload []Type
+	Decl    *ast.EnumVariantDecl
+}
+
+type EnumType struct {
+	Name       string
+	Variants   []*EnumVariant
+	VariantMap map[string]*EnumVariant
+	Decl       *ast.EnumDecl
 }
 
 type Field struct {
@@ -161,7 +181,9 @@ func (*ArrayType) isType()           {}
 func (*DArrayType) isType()          {}
 func (*DArrayViewType) isType()      {}
 func (*DStrType) isType()            {}
+func (*DictType) isType()            {}
 func (*SViewType) isType()           {}
+func (*EnumType) isType()            {}
 func (*StructType) isType()          {}
 func (*OpaqueType) isType()          {}
 func (*GenericInstanceType) isType() {}
@@ -390,9 +412,19 @@ func (t *DStrType) String() string {
 	}
 	return fmt.Sprintf("DStr[%s]", t.Shape.String())
 }
+func (t *DictType) String() string {
+	if t == nil || t.Key == nil || t.Value == nil {
+		return "<invalid-dict>"
+	}
+	if t.SurfaceName == "dict" {
+		return fmt.Sprintf("dict[%s, %s]", t.Key.String(), t.Value.String())
+	}
+	return fmt.Sprintf("Dict[%s, %s]", t.Key.String(), t.Value.String())
+}
 func (t *SViewType) String() string {
 	return fmt.Sprintf("sview[%s, %s]", t.Begin, t.End)
 }
+func (t *EnumType) String() string   { return t.Name }
 func (t *StructType) String() string { return t.Name }
 func (t *OpaqueType) String() string { return t.Name }
 func (t *GenericInstanceType) String() string {
@@ -533,6 +565,14 @@ func IsRefType(t Type) (*RefType, bool) {
 	return r, ok
 }
 
+func (t *EnumType) Variant(name string) (*EnumVariant, bool) {
+	if t == nil || t.VariantMap == nil {
+		return nil, false
+	}
+	variant, ok := t.VariantMap[name]
+	return variant, ok
+}
+
 func cloneRefTypeWithState(ref *RefType, state RefState) *RefType {
 	if ref == nil {
 		return nil
@@ -656,5 +696,10 @@ func shapeMatchesPattern(pattern, actual Shape) bool {
 
 func isWildcardShape(shape Shape) bool {
 	_, ok := shape.(*WildcardShape)
+	return ok
+}
+
+func isDictRuntimeKeyType(t Type) bool {
+	_, ok := t.(*DStrType)
 	return ok
 }

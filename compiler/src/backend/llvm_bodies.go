@@ -293,6 +293,8 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		return s.emitFunctionReturn(value, valueType)
 	case *ast.IfStmt:
 		return s.emitIf(n)
+	case *ast.MatchStmt:
+		return s.emitMatch(n)
 	case *ast.WhileStmt:
 		return s.emitWhile(n)
 	case *ast.PassStmt:
@@ -470,6 +472,179 @@ func (s *functionState) emitWhile(stmt *ast.WhileStmt) error {
 
 	C.LLVMPositionBuilderAtEnd(s.builder, exitBB)
 	return nil
+}
+
+func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
+	enumType, ok := s.exprType(stmt.Value).(*semantic.EnumType)
+	if !ok {
+		return fmt.Errorf("match requires an enum value")
+	}
+	enumValue, _, err := s.emitExpr(stmt.Value, enumType)
+	if err != nil {
+		return err
+	}
+	enumPtr, err := s.emitStackTempValue(enumValue, enumType, "match.value")
+	if err != nil {
+		return err
+	}
+	tagValue, err := s.loadEnumTag(enumPtr, enumType)
+	if err != nil {
+		return err
+	}
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.end"))
+	covered := map[string]bool{}
+	hasWildcard := false
+	allTerminated := true
+
+	for i, arm := range stmt.Arms {
+		if i > 0 {
+			current := C.LLVMGetInsertBlock(s.builder)
+			if current != nil && C.LLVMGetBasicBlockTerminator(current) != nil {
+				continue
+			}
+		}
+
+		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.arm"))
+		var nextBB C.LLVMBasicBlockRef
+		isLast := i == len(stmt.Arms)-1
+
+		switch pattern := arm.Pattern.(type) {
+		case *ast.MatchWildcardPattern:
+			hasWildcard = true
+			C.LLVMBuildBr(s.builder, bodyBB)
+		case *ast.MatchVariantPattern:
+			variant, ok := enumType.Variant(pattern.Variant)
+			if !ok {
+				return fmt.Errorf("enum %s has no variant %s", enumType.Name, pattern.Variant)
+			}
+			covered[variant.Name] = true
+			tagConst, err := s.enumTagConstant(variant.Tag)
+			if err != nil {
+				return err
+			}
+			pred := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), tagValue, tagConst, cStringFree("match.tag"))
+			if isLast {
+				nextBB = mergeBB
+			} else {
+				nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.next"))
+			}
+			C.LLVMBuildCondBr(s.builder, pred, bodyBB, nextBB)
+		default:
+			return fmt.Errorf("unsupported match pattern %T", arm.Pattern)
+		}
+
+		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+		s.pushScope()
+		switch pattern := arm.Pattern.(type) {
+		case *ast.MatchVariantPattern:
+			variant, _ := enumType.Variant(pattern.Variant)
+			if err := s.bindMatchPattern(enumPtr, enumType, variant, pattern); err != nil {
+				s.popScope()
+				return err
+			}
+		}
+		if err := s.emitBlock(arm.Body, false); err != nil {
+			s.popScope()
+			return err
+		}
+		s.popScope()
+		if !s.currentBlockTerminated() {
+			allTerminated = false
+			C.LLVMBuildBr(s.builder, mergeBB)
+		}
+
+		if hasWildcard {
+			break
+		}
+		if nextBB != nil && nextBB != mergeBB {
+			C.LLVMPositionBuilderAtEnd(s.builder, nextBB)
+		}
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	if allTerminated && (hasWildcard || len(covered) == len(enumType.Variants)) {
+		C.LLVMBuildUnreachable(s.builder)
+	}
+	return nil
+}
+
+func (s *functionState) bindMatchPattern(enumPtr C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, pattern *ast.MatchVariantPattern) error {
+	if variant == nil || pattern == nil || len(pattern.Bindings) == 0 {
+		return nil
+	}
+	values, err := s.loadEnumVariantPayload(enumPtr, enumType, variant)
+	if err != nil {
+		return err
+	}
+	limit := len(pattern.Bindings)
+	if len(values) < limit {
+		limit = len(values)
+	}
+	for i := 0; i < limit; i++ {
+		if pattern.Bindings[i] == "_" {
+			continue
+		}
+		alloca, err := s.createEntryAlloca(pattern.Bindings[i], variant.Payload[i])
+		if err != nil {
+			return err
+		}
+		C.LLVMBuildStore(s.builder, values[i], alloca)
+		s.defineBinding(pattern.Bindings[i], valueBinding{ptr: alloca, typ: variant.Payload[i]})
+	}
+	return nil
+}
+
+func (s *functionState) loadEnumTag(enumPtr C.LLVMValueRef, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
+	enumLLVMType, err := s.g.lowerType(enumType)
+	if err != nil {
+		return nil, err
+	}
+	tagPtr := C.LLVMBuildStructGEP2(s.builder, enumLLVMType, enumPtr, 0, cStringFree("match.tag.ptr"))
+	tagType, err := s.g.lowerBuiltin("u32")
+	if err != nil {
+		return nil, err
+	}
+	return C.LLVMBuildLoad2(s.builder, tagType, tagPtr, cStringFree("match.tag.value")), nil
+}
+
+func (s *functionState) loadEnumVariantPayload(enumPtr C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant) ([]C.LLVMValueRef, error) {
+	if variant == nil || len(variant.Payload) == 0 {
+		return nil, nil
+	}
+	payloadPtr, err := s.enumPayloadPtr(enumPtr, enumType)
+	if err != nil {
+		return nil, err
+	}
+	payloadType, err := s.g.lowerEnumVariantPayloadType(variant)
+	if err != nil {
+		return nil, err
+	}
+	if len(variant.Payload) == 1 {
+		value := C.LLVMBuildLoad2(s.builder, payloadType, payloadPtr, cStringFree("match.payload"))
+		return []C.LLVMValueRef{value}, nil
+	}
+	aggregate := C.LLVMBuildLoad2(s.builder, payloadType, payloadPtr, cStringFree("match.payload"))
+	values := make([]C.LLVMValueRef, 0, len(variant.Payload))
+	for i := range variant.Payload {
+		values = append(values, C.LLVMBuildExtractValue(s.builder, aggregate, C.unsigned(i), cStringFree("match.payload.field")))
+	}
+	return values, nil
+}
+
+func (s *functionState) enumPayloadPtr(enumPtr C.LLVMValueRef, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
+	enumLLVMType, err := s.g.lowerType(enumType)
+	if err != nil {
+		return nil, err
+	}
+	return C.LLVMBuildStructGEP2(s.builder, enumLLVMType, enumPtr, 1, cStringFree("enum.payload.ptr")), nil
+}
+
+func (s *functionState) enumTagConstant(tag uint32) (C.LLVMValueRef, error) {
+	tagType, err := s.g.lowerBuiltin("u32")
+	if err != nil {
+		return nil, err
+	}
+	return C.LLVMConstInt(tagType, C.ulonglong(tag), 0), nil
 }
 
 func (s *functionState) emitStaticIf(stmt *ast.StaticIfStmt) error {

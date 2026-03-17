@@ -156,6 +156,24 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"define i64 @vec2i_keep_left(i64",
 			},
 		},
+		{
+			name: "dict_runtime",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "dict_runtime.llcontext"),
+			checks: []string{
+				"%DynDict__i32 = type { ptr, i64, i64, i64, ptr }",
+				"%ErrUnion__RuntimeError__any_i32 = type { i32, ptr }",
+				"define %DynDict__i32 @arena_dict_new__i32(",
+				"define i32 @arena_dict_reserve__i32(",
+				"define ptr @arena_dict_get__i32(",
+				"define i32 @arena_dict_put__i32(",
+				"define i1 @arena_dict_contains__i32(",
+				"define i1 @arena_dict_remove__i32(",
+				"define void @arena_dict_clear__i32(",
+				"define i32 @touch_dict(ptr ",
+				"call %DynDict__i32 @arena_dict_new__i32(ptr",
+				"call i32 @arena_dict_put__i32(ptr",
+			},
+		},
 	}
 
 	for _, fixture := range fixtures {
@@ -399,6 +417,14 @@ func TestRunCLICompilesStage1RuntimeToLLVM(t *testing.T) {
 		"define ptr @ctx_stage1rt_string_builder_new(ptr",
 		"%StringView = type { ptr, i64 }",
 		"define i64 @ctx_stage1rt_string_view_len(%StringView",
+		"%DynDict__i64 = type { ptr, i64, i64, i64, ptr }",
+		"define %DynDict__i64 @arena_dict_new__i64(",
+		"define i32 @arena_dict_reserve__i64(",
+		"define ptr @arena_dict_get__i64(",
+		"define i32 @arena_dict_put__i64(",
+		"define i1 @arena_dict_contains__i64(",
+		"define i1 @arena_dict_remove__i64(",
+		"define void @arena_dict_clear__i64(",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {

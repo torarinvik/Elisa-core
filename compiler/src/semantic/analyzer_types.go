@@ -264,6 +264,12 @@ func singleExplicitErrorFamily(tags []ast.ErrorTagExpr) (string, bool) {
 
 func (a *Analyzer) resolveDynamicShapeType(expr *ast.GenericType) (Type, bool) {
 	switch expr.Name {
+	case "Dict":
+		if len(expr.Args) != 2 {
+			a.errorf(expr.Pos(), "Dict expects 2 arguments, got %d", len(expr.Args))
+			return invalidType, true
+		}
+		return a.resolveDictType(expr.Args[0], expr.Args[1], "Dict"), true
 	case "view":
 		if len(expr.Args) != 1 {
 			a.errorf(expr.Pos(), "view expects 1 argument, got %d", len(expr.Args))
@@ -323,6 +329,12 @@ func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
 			return &DArrayType{Elem: a.resolveType(expr.TypeArgs[0]), Shape: &WildcardShape{}, SurfaceName: "darray"}
 		}
 		return &DArrayType{Elem: a.resolveType(expr.TypeArgs[0]), Shape: a.resolveShapeExpr(expr.ValueArgs[0]), SurfaceName: "darray"}
+	case "dict":
+		if len(expr.TypeArgs) != 2 || len(expr.ValueArgs) != 0 {
+			a.errorf(expr.Pos(), "dict expects 2 type arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		return a.resolveDictType(expr.TypeArgs[0], expr.TypeArgs[1], "dict")
 	case "str", "string":
 		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 1 {
 			a.errorf(expr.Pos(), "str expects 1 argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
@@ -367,6 +379,19 @@ func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
 		a.errorf(expr.Pos(), "unknown built-in type %q", expr.Name)
 		return invalidType
 	}
+}
+
+func (a *Analyzer) resolveDictType(keyExpr ast.TypeExpr, valueExpr ast.TypeExpr, surfaceName string) Type {
+	keyType := a.resolveType(keyExpr)
+	valueType := a.resolveType(valueExpr)
+	if IsInvalidType(keyType) || IsInvalidType(valueType) {
+		return invalidType
+	}
+	if !isDictRuntimeKeyType(keyType) {
+		a.errorf(keyExpr.Pos(), "dict currently only supports dstr keys in the first runtime-backed slice, got %s", keyType.String())
+		return invalidType
+	}
+	return &DictType{Key: keyType, Value: valueType, SurfaceName: surfaceName}
 }
 
 func (a *Analyzer) resolveShapeArg(expr ast.TypeExpr) Shape {
@@ -538,6 +563,8 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 		return &DArrayViewType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Begin: n.Begin, End: n.End, SurfaceName: n.SurfaceName}
 	case *DStrType:
 		return &DStrType{Shape: a.substituteShape(n.Shape, shapeBindings), SurfaceName: n.SurfaceName}
+	case *DictType:
+		return &DictType{Key: a.substituteType(n.Key, bindings, shapeBindings), Value: a.substituteType(n.Value, bindings, shapeBindings), SurfaceName: n.SurfaceName}
 	case *SViewType:
 		return &SViewType{Begin: n.Begin, End: n.End}
 	case *GenericInstanceType:
@@ -623,6 +650,10 @@ func (a *Analyzer) collectImplicitShapeParamsFromType(expr ast.TypeExpr, seen ma
 	case *ast.BuiltinTypeExpr:
 		switch n.Name {
 		case "array", "view":
+			for _, arg := range n.TypeArgs {
+				a.collectImplicitShapeParamsFromType(arg, seen, order)
+			}
+		case "dict":
 			for _, arg := range n.TypeArgs {
 				a.collectImplicitShapeParamsFromType(arg, seen, order)
 			}

@@ -62,6 +62,29 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 	case *semantic.DArrayViewType:
 		_, err := g.ensureRuntimeDynArrayView()
 		return err
+	case *semantic.DictType:
+		if err := g.noteType(tt.Key); err != nil {
+			return err
+		}
+		if err := g.noteType(tt.Value); err != nil {
+			return err
+		}
+		base, ok := g.result.NamedTypes["DynDict"]
+		if !ok {
+			return fmt.Errorf("missing runtime struct DynDict")
+		}
+		_, err := g.ensureGenericInstanceStruct(&semantic.GenericInstanceType{Name: "DynDict", Base: base, Args: []semantic.Type{tt.Value}})
+		return err
+	case *semantic.EnumType:
+		for _, variant := range tt.Variants {
+			for _, payload := range variant.Payload {
+				if err := g.noteType(payload); err != nil {
+					return err
+				}
+			}
+		}
+		_, err := g.ensureEnumBody(tt.Name, tt)
+		return err
 	case *semantic.StructType:
 		if len(tt.TypeParams) == 0 {
 			_, err := g.ensureStructBody(tt.Name, tt)
@@ -243,12 +266,20 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		return g.ensureRuntimeDynArrayView()
 	case *semantic.DStrType:
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
+	case *semantic.DictType:
+		base, ok := g.result.NamedTypes["DynDict"]
+		if !ok {
+			return nil, fmt.Errorf("missing runtime struct DynDict")
+		}
+		return g.ensureGenericInstanceStruct(&semantic.GenericInstanceType{Name: "DynDict", Base: base, Args: []semantic.Type{tt.Value}})
 	case *semantic.SViewType:
 		st, ok := g.lookupStructType("StringView")
 		if !ok {
 			return nil, fmt.Errorf("missing runtime struct StringView")
 		}
 		return g.ensureStructBody(st.Name, st)
+	case *semantic.EnumType:
+		return g.ensureEnumBody(tt.Name, tt)
 	case *semantic.StructType:
 		if len(tt.TypeParams) == 0 {
 			return g.ensureStructBody(tt.Name, tt)
@@ -334,6 +365,79 @@ func (g *llvmGenerator) ensureStructBody(name string, st *semantic.StructType) (
 	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
 	g.structBodies[name] = true
 	return ty, nil
+}
+
+func (g *llvmGenerator) ensureEnumBody(name string, enum *semantic.EnumType) (C.LLVMTypeRef, error) {
+	ty, err := g.ensureNamedStructType(name)
+	if err != nil {
+		return nil, err
+	}
+	if g.structBodies[name] || enum == nil {
+		return ty, nil
+	}
+	tagType, err := g.lowerBuiltin("u32")
+	if err != nil {
+		return nil, err
+	}
+	wordType, err := g.lowerBuiltin("uintptr")
+	if err != nil {
+		return nil, err
+	}
+	maxSlots := uint64(0)
+	for _, variant := range enum.Variants {
+		slots, err := g.enumVariantPayloadSlots(variant)
+		if err != nil {
+			return nil, err
+		}
+		if slots > maxSlots {
+			maxSlots = slots
+		}
+	}
+	payloadType := C.LLVMArrayType2(wordType, C.ulonglong(maxSlots))
+	fields := []C.LLVMTypeRef{tagType, payloadType}
+	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	g.structBodies[name] = true
+	return ty, nil
+}
+
+func (g *llvmGenerator) enumVariantPayloadSlots(variant *semantic.EnumVariant) (uint64, error) {
+	if variant == nil || len(variant.Payload) == 0 {
+		return 0, nil
+	}
+	if err := g.ensureTargetMachine(); err != nil {
+		return 0, err
+	}
+	payloadType, err := g.lowerEnumVariantPayloadType(variant)
+	if err != nil {
+		return 0, err
+	}
+	sizeBytes, err := g.abiSizeOfLLVMType(payloadType)
+	if err != nil {
+		return 0, err
+	}
+	wordBytes := uint64(g.wordBits / 8)
+	if wordBytes == 0 {
+		wordBytes = 8
+	}
+	return (sizeBytes + wordBytes - 1) / wordBytes, nil
+}
+
+func (g *llvmGenerator) lowerEnumVariantPayloadType(variant *semantic.EnumVariant) (C.LLVMTypeRef, error) {
+	if variant == nil || len(variant.Payload) == 0 {
+		return C.LLVMVoidTypeInContext(g.context), nil
+	}
+	if len(variant.Payload) == 1 {
+		return g.lowerType(variant.Payload[0])
+	}
+	fields := make([]C.LLVMTypeRef, 0, len(variant.Payload))
+	for _, payload := range variant.Payload {
+		fieldType, err := g.lowerType(payload)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, fieldType)
+	}
+	return C.LLVMStructType(llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0), nil
 }
 
 func (g *llvmGenerator) ensureRuntimeDynArray(elem semantic.Type) (C.LLVMTypeRef, error) {
@@ -471,6 +575,8 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type) semantic.Ty
 		return &semantic.DArrayType{Elem: substituteType(tt.Elem, subst), Shape: tt.Shape, SurfaceName: tt.SurfaceName}
 	case *semantic.DArrayViewType:
 		return &semantic.DArrayViewType{Elem: substituteType(tt.Elem, subst), Begin: tt.Begin, End: tt.End, SurfaceName: tt.SurfaceName}
+	case *semantic.DictType:
+		return &semantic.DictType{Key: substituteType(tt.Key, subst), Value: substituteType(tt.Value, subst), SurfaceName: tt.SurfaceName}
 	case *semantic.SViewType:
 		return &semantic.SViewType{Begin: tt.Begin, End: tt.End}
 	case *semantic.GenericInstanceType:

@@ -78,6 +78,14 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			result = errorType
 			return
 		}
+		if enumType, ctorType, ok := a.enumVariantExprType(n); ok {
+			if ctorType != nil {
+				result = ctorType
+			} else {
+				result = enumType
+			}
+			return
+		}
 		if t, ok := a.lookupRefinedExprType(n); ok {
 			result = t
 			return
@@ -309,6 +317,57 @@ func (a *Analyzer) errorTagType(expr *ast.FieldExpr) (Type, bool) {
 	return errSet, true
 }
 
+func (a *Analyzer) enumVariantExprType(expr *ast.FieldExpr) (*EnumType, Type, bool) {
+	ident, ok := expr.Object.(*ast.Ident)
+	if !ok {
+		return nil, nil, false
+	}
+	base, ok := a.namedTypes[ident.Name]
+	if !ok {
+		return nil, nil, false
+	}
+	enumType, ok := base.(*EnumType)
+	if !ok {
+		return nil, nil, false
+	}
+	variant, ok := enumType.Variant(expr.Field)
+	if !ok {
+		a.errorf(expr.Pos(), "enum %q has no variant %q", enumType.Name, expr.Field)
+		return enumType, invalidType, true
+	}
+	if len(variant.Payload) == 0 {
+		return enumType, nil, true
+	}
+	params := make([]Type, len(variant.Payload))
+	copy(params, variant.Payload)
+	return enumType, &FuncType{Name: enumType.Name + "." + variant.Name, Params: params, Return: enumType}, true
+}
+
+func (a *Analyzer) enumConstructorCall(expr *ast.CallExpr) (*EnumType, *EnumVariant, bool) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok {
+		return nil, nil, false
+	}
+	ident, ok := fieldExpr.Object.(*ast.Ident)
+	if !ok {
+		return nil, nil, false
+	}
+	base, ok := a.namedTypes[ident.Name]
+	if !ok {
+		return nil, nil, false
+	}
+	enumType, ok := base.(*EnumType)
+	if !ok {
+		return nil, nil, false
+	}
+	variant, ok := enumType.Variant(fieldExpr.Field)
+	if !ok {
+		a.errorf(fieldExpr.Pos(), "enum %q has no variant %q", enumType.Name, fieldExpr.Field)
+		return enumType, nil, true
+	}
+	return enumType, variant, true
+}
+
 func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 	left := a.analyzeExpr(expr.Left)
 	right := a.analyzeExpr(expr.Right)
@@ -380,6 +439,32 @@ func (a *Analyzer) analyzeUnaryExpr(expr *ast.UnaryExpr) Type {
 }
 
 func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
+	if enumType, variant, ok := a.enumConstructorCall(expr); ok {
+		if variant == nil {
+			for _, arg := range expr.Args {
+				a.analyzeExpr(arg)
+			}
+			return invalidType
+		}
+		if len(expr.Args) != len(variant.Payload) {
+			a.errorf(expr.Pos(), "enum constructor %q expects %d arguments, got %d", enumType.Name+"."+variant.Name, len(variant.Payload), len(expr.Args))
+		}
+		limit := len(expr.Args)
+		if len(variant.Payload) < limit {
+			limit = len(variant.Payload)
+		}
+		for i := 0; i < len(expr.Args); i++ {
+			if i < limit {
+				actual := a.analyzeValueExpr(expr.Args[i], variant.Payload[i])
+				if !AssignableTo(variant.Payload[i], actual) {
+					a.errorf(expr.Args[i].Pos(), "enum constructor argument %d to %q expects %s, got %s", i+1, enumType.Name+"."+variant.Name, variant.Payload[i].String(), actual.String())
+				}
+			} else {
+				a.analyzeExpr(expr.Args[i])
+			}
+		}
+		return enumType
+	}
 	fnType := a.analyzeExpr(expr.Func)
 	ft, ok := fnType.(*FuncType)
 	if !ok {
@@ -439,6 +524,16 @@ func (a *Analyzer) collectRuntimeBridgeBindings(pattern, actual Type, bindings m
 			return true
 		}
 		return true
+	case runtimeBridgeDictDynDict:
+		if patternDict, ok := pattern.(*DictType); ok {
+			a.collectTypeBindings(patternDict.Value, bridge.DynDict.Args[0], bindings, shapeBindings)
+			return true
+		}
+		if patternDynDict, ok := dynDictRuntimeInstance(pattern); ok {
+			a.collectTypeBindings(patternDynDict.Args[0], bridge.Dict.Value, bindings, shapeBindings)
+			return true
+		}
+		return true
 	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeDStrU8Ref:
 		return true
 	default:
@@ -485,8 +580,15 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		if act, ok := actual.(*DStrType); ok {
 			a.collectShapeBinding(p.Shape, act.Shape, shapeBindings)
 		}
+	case *DictType:
+		if act, ok := actual.(*DictType); ok {
+			a.collectTypeBindings(p.Key, act.Key, bindings, shapeBindings)
+			a.collectTypeBindings(p.Value, act.Value, bindings, shapeBindings)
+		}
 	case *SViewType:
 		_, _ = actual.(*SViewType)
+	case *EnumType:
+		_, _ = actual.(*EnumType)
 	case *GenericInstanceType:
 		if act, ok := actual.(*GenericInstanceType); ok && p.Name == act.Name && len(p.Args) == len(act.Args) {
 			for i := range p.Args {
@@ -776,6 +878,15 @@ func containsTypeParam(t Type) bool {
 			}
 		}
 		return containsTypeParam(n.Return)
+	case *EnumType:
+		for _, variant := range n.Variants {
+			for _, payload := range variant.Payload {
+				if containsTypeParam(payload) {
+					return true
+				}
+			}
+		}
+		return false
 	default:
 		return false
 	}
@@ -990,6 +1101,13 @@ func (a *Analyzer) runtimeBackedStructType(t Type) Type {
 			return nil
 		}
 		return base
+	}
+	if dict, ok := t.(*DictType); ok {
+		base, ok := a.namedTypes["DynDict"]
+		if !ok {
+			return nil
+		}
+		return &GenericInstanceType{Name: "DynDict", Base: base, Args: []Type{dict.Value}}
 	}
 	darray, ok := t.(*DArrayType)
 	if !ok {

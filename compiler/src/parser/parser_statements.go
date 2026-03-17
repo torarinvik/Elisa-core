@@ -46,6 +46,8 @@ func (p *Parser) parseStmt() ast.Stmt {
 		return p.parsePanic()
 	case lexer.TOKEN_IF:
 		return p.parseIf()
+	case lexer.TOKEN_MATCH:
+		return p.parseMatch()
 	case lexer.TOKEN_WHILE:
 		return p.parseWhile()
 	case lexer.TOKEN_STATIC:
@@ -53,6 +55,60 @@ func (p *Parser) parseStmt() ast.Stmt {
 	default:
 		return p.parseExprOrAssignStmt()
 	}
+}
+
+func (p *Parser) parseMatch() *ast.MatchStmt {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_MATCH)
+	value := p.parseExpr()
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+
+	arms := make([]ast.MatchArm, 0)
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		arms = append(arms, p.parseMatchArm())
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+
+	return &ast.MatchStmt{Position: pos, Value: value, Arms: arms}
+}
+
+func (p *Parser) parseMatchArm() ast.MatchArm {
+	pos := p.cur().Pos
+	pattern := p.parseMatchPattern()
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	body := p.parseBlock()
+	return ast.MatchArm{Position: pos, Pattern: pattern, Body: body}
+}
+
+func (p *Parser) parseMatchPattern() ast.MatchPattern {
+	pos := p.cur().Pos
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_" {
+		p.advance()
+		return &ast.MatchWildcardPattern{Position: pos}
+	}
+	enumName := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_DOT)
+	variant := p.expect(lexer.TOKEN_IDENT).Text
+	bindings := make([]string, 0)
+	if p.match(lexer.TOKEN_LPAREN) {
+		if p.peek() != lexer.TOKEN_RPAREN {
+			for {
+				bindings = append(bindings, p.expect(lexer.TOKEN_IDENT).Text)
+				if !p.match(lexer.TOKEN_COMMA) {
+					break
+				}
+			}
+		}
+		p.expect(lexer.TOKEN_RPAREN)
+	}
+	return &ast.MatchVariantPattern{Position: pos, EnumName: enumName, Variant: variant, Bindings: bindings}
 }
 
 func (p *Parser) parseRegion() *ast.RegionStmt {

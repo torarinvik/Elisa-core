@@ -160,6 +160,17 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 				return err
 			}
 		}
+	case *ast.EnumDecl:
+		t, ok := g.result.NamedTypes[n.Name]
+		if !ok {
+			return fmt.Errorf("missing semantic enum type %s", n.Name)
+		}
+		enumType, ok := t.(*semantic.EnumType)
+		if !ok {
+			return fmt.Errorf("declaration %s does not resolve to enum type", n.Name)
+		}
+		_, err := g.ensureEnumBody(n.Name, enumType)
+		return err
 	case *ast.ExternTypeDecl:
 		_, err := g.ensureNamedStructType(n.Name)
 		return err
@@ -214,6 +225,17 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 			}
 		}
 		return nil
+	case *ast.EnumDecl:
+		t, ok := g.result.NamedTypes[n.Name]
+		if !ok {
+			return fmt.Errorf("missing semantic enum type %s", n.Name)
+		}
+		enumType, ok := t.(*semantic.EnumType)
+		if !ok {
+			return fmt.Errorf("declaration %s does not resolve to enum type", n.Name)
+		}
+		_, err := g.ensureEnumBody(n.Name, enumType)
+		return err
 	case *ast.FuncDecl:
 		if len(n.TypeParams) > 0 {
 			return nil

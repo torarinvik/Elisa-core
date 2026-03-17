@@ -13,6 +13,14 @@ const ARENA_REGION_DEFAULT_CAPACITY: usize = 8 * 1024
 const ARENA_DA_INIT_CAP: usize = 256
 const ARENA_WASM_PAGE_SIZE: usize = 64 * 1024
 
+const DICT_BUCKET_EMPTY: u8 = 0u8
+const DICT_BUCKET_FULL: u8 = 1u8
+const DICT_BUCKET_TOMBSTONE: u8 = 2u8
+const DICT_INIT_CAP: usize = 8
+
+error RuntimeError:
+    OutOfMemory
+
 # ------------------------------------------------------------
 # Basic low-level types
 # ------------------------------------------------------------
@@ -40,6 +48,24 @@ repr(c) struct DynArrayView:
     data: mutable any void&?
     len: mutable usize
     elem_size: mutable usize
+
+repr(c) struct DictBucket[T]:
+    state: mutable u8
+    hash: mutable u64
+    key_data: mutable any u8&?
+    key_len: mutable i64
+    value: mutable T
+
+repr(c) struct DynDict[T]:
+    items: mutable any DictBucket[T]&?
+    count: mutable usize
+    used: mutable usize
+    capacity: mutable usize
+    arena: mutable any Arena&?
+
+repr(c) struct DictProbeResult:
+    index: mutable usize
+    found: mutable bool
 
 # ------------------------------------------------------------
 # Backend FFI declarations
@@ -267,6 +293,18 @@ def arena_memcpy(dest: any void&, src: any void&, n: usize) -> any void&:
 
     return dest
 
+def arena_memeq(lhs: any void&, rhs: any void&, n: usize) -> bool:
+    left: any u8& = lhs.cast[any u8&]()
+    right: any u8& = rhs.cast[any u8&]()
+
+    i: mutable usize = 0
+    while i < n:
+        if left[i] != right[i]:
+            return false
+        i <- i + 1
+
+    return true
+
 def arena_strdup(a: any Arena&, cstr: any u8&) -> any u8&:
     n: usize = arena_strlen(cstr)
     dup: any u8& = arena_alloc(a, n + 1).cast[any u8&]()
@@ -337,6 +375,393 @@ def arena_trim(a: any Arena&):
 # ------------------------------------------------------------
 # Dynamic array helpers (replacement for C macros)
 # ------------------------------------------------------------
+
+def arena_dict_next_capacity(min_capacity: usize) -> usize:
+    if min_capacity == 0:
+        return 0
+
+    cap: mutable usize = DICT_INIT_CAP
+    while cap < min_capacity:
+        cap <- cap * 2
+    return cap
+
+def arena_dict_hash_dstr(key: DStr[key_shape]) -> u64:
+    hash: mutable u64 = 1469598103934665603u64
+    key_len: usize = arena_strlen(key)
+    i: mutable usize = 0
+
+    while i < key_len:
+        hash ^= key[i].u64()
+        hash *= 1099511628211u64
+        i <- i + 1
+
+    return hash
+
+def arena_dict_key_eq[T](bucket: any DictBucket[T]&, key: DStr[key_shape], hash: u64, key_len: usize) -> bool:
+    key_bytes: any u8& = key
+
+    if bucket.hash != hash:
+        return false
+
+    if bucket.key_len != key_len.i64():
+        return false
+
+    if key_len == 0:
+        return true
+
+    if bucket.key_data == key_bytes:
+        return true
+
+    if bucket.key_data == null:
+        return false
+
+    return arena_memeq(bucket.key_data.cast[any void&](), key_bytes.cast[any void&](), key_len)
+
+def arena_dict_probe_slot[T](m: any dict[DStr[key_shape], T]&, key: DStr[key_shape], hash: u64, key_len: usize) -> DictProbeResult:
+    if m.capacity == 0 or m.items == null:
+        return DictProbeResult(0, false)
+
+    items: any DictBucket[T]& = m.items
+    mask: usize = m.capacity - 1
+    index: mutable usize = (hash & mask.u64()).usize()
+    first_tombstone: mutable usize = 0
+    have_tombstone: mutable bool = false
+    probes: mutable usize = 0
+
+    while probes < m.capacity:
+        bucket: any DictBucket[T]& = &items[index]
+
+        if bucket.state == DICT_BUCKET_EMPTY:
+            if have_tombstone:
+                return DictProbeResult(first_tombstone, false)
+            return DictProbeResult(index, false)
+
+        if bucket.state == DICT_BUCKET_TOMBSTONE:
+            if not have_tombstone:
+                first_tombstone <- index
+                have_tombstone <- true
+        elif arena_dict_key_eq(bucket, key, hash, key_len):
+            return DictProbeResult(index, true)
+
+        index <- (index + 1) & mask
+        probes <- probes + 1
+
+    if have_tombstone:
+        return DictProbeResult(first_tombstone, false)
+
+    return DictProbeResult(0, false)
+
+def arena_dict_zero_buckets[T](items: any DictBucket[T]&, capacity: usize):
+    i: mutable usize = 0
+    while i < capacity:
+        items[i] <- zeroed
+        i <- i + 1
+
+def arena_dict_copy_key(a: any Arena&, key: DStr[key_shape]) -> any u8&:
+    key_len: usize = arena_strlen(key)
+    key_bytes: any u8& = key
+
+    if key_len == 0:
+        return "".cast[any u8&]()
+
+    out: any u8& = arena_alloc(a, key_len + 1).cast[any u8&]()
+    arena_memcpy(out.cast[any void&](), key_bytes.cast[any void&](), key_len)
+    out[key_len] <- 0
+    return out
+
+def arena_dict_insert_existing_bucket[T](m: any dict[DStr[key_shape], T]&, bucket: DictBucket[T]) -> any DictBucket[T]&:
+    assert m.capacity > 0
+    assert m.items != null
+
+    items: any DictBucket[T]& = m.items
+    key: DStr[key_shape] = bucket.key_data if bucket.key_data != null else ""
+    probe: DictProbeResult = arena_dict_probe_slot(m, key, bucket.hash, bucket.key_len.usize())
+
+    items[probe.index] <- bucket
+    if not probe.found:
+        m.count <- m.count + 1
+        m.used <- m.used + 1
+
+    return &items[probe.index]
+
+def arena_dict_should_rehash[T](m: any dict[DStr[key_shape], T]&, extra_live: usize) -> bool:
+    if m.capacity == 0:
+        return true
+
+    needed_used: usize = m.used + extra_live
+    if needed_used * 4 >= m.capacity * 3:
+        return true
+
+    if m.used > m.count and m.count * 2 < m.used:
+        return true
+
+    return false
+
+def arena_dict_new[T](a: any Arena&, initial_capacity: usize) -> dict[DStr[key_shape], T]:
+    out: mutable dict[DStr[key_shape], T] = zeroed
+    out.arena as & <- a
+
+    capacity: usize = arena_dict_next_capacity(initial_capacity)
+    if capacity == 0:
+        return out
+
+    items: any DictBucket[T]& = arena_alloc(a, capacity * sizeof(DictBucket[T])).cast[any DictBucket[T]&]()
+    arena_dict_zero_buckets(items, capacity)
+
+    out.items as & <- items
+    out.capacity <- capacity
+    return out
+
+def arena_dict_reserve[T](a: any Arena&, m: any dict[DStr[key_shape], T]&, min_capacity: usize) -> void error[RuntimeError]:
+    target_capacity: usize = arena_dict_next_capacity(min_capacity)
+    if target_capacity == 0:
+        return
+
+    should_rebuild: bool = m.used > m.count and m.count * 2 < m.used
+    if target_capacity <= m.capacity and not should_rebuild:
+        return
+
+    owner: any Arena& = m.arena if m.arena != null else a
+    new_items: any DictBucket[T]& = arena_alloc(owner, target_capacity * sizeof(DictBucket[T])).cast[any DictBucket[T]&]()
+    arena_dict_zero_buckets(new_items, target_capacity)
+
+    rebuilt: mutable dict[DStr[key_shape], T] = zeroed
+    rebuilt.items as & <- new_items
+    rebuilt.capacity <- target_capacity
+    rebuilt.arena as & <- owner
+
+    if m.items != null:
+        old_items: any DictBucket[T]& = m.items
+        i: mutable usize = 0
+        while i < m.capacity:
+            if old_items[i].state == DICT_BUCKET_FULL:
+                _ = arena_dict_insert_existing_bucket((&rebuilt).cast[any dict[DStr[key_shape], T]&](), old_items[i])
+            i <- i + 1
+
+    m.items as & <- rebuilt.items
+    m.count <- rebuilt.count
+    m.used <- rebuilt.used
+    m.capacity <- rebuilt.capacity
+    m.arena as & <- owner
+    return
+
+def arena_dict_get[T](m: any dict[DStr[key_shape], T]&, key: DStr[key_shape]) -> any T&?:
+    if m.capacity == 0 or m.items == null:
+        return null
+
+    hash: u64 = arena_dict_hash_dstr(key)
+    key_len: usize = arena_strlen(key)
+    probe: DictProbeResult = arena_dict_probe_slot(m, key, hash, key_len)
+    if not probe.found:
+        return null
+
+    items: any DictBucket[T]& = m.items
+    return &items[probe.index].value
+
+def arena_dict_put[T](a: any Arena&, m: any dict[DStr[key_shape], T]&, key: DStr[key_shape], value: T) -> any T&? error[RuntimeError]:
+    owner: any Arena& = m.arena if m.arena != null else a
+    if m.arena == null:
+        m.arena as & <- owner
+
+    if arena_dict_should_rehash(m, 1):
+        target_capacity: mutable usize = DICT_INIT_CAP if m.capacity == 0 else m.capacity * 2
+        if target_capacity < m.count + 1:
+            target_capacity <- m.count + 1
+        try arena_dict_reserve(owner, m, target_capacity)
+
+    if m.items == null or m.capacity == 0:
+        try arena_dict_reserve(owner, m, DICT_INIT_CAP)
+
+    assert m.items != null
+    assert m.capacity > 0
+
+    hash: u64 = arena_dict_hash_dstr(key)
+    key_len: usize = arena_strlen(key)
+    probe: DictProbeResult = arena_dict_probe_slot(m, key, hash, key_len)
+    items: any DictBucket[T]& = m.items
+    bucket: any DictBucket[T]& = &items[probe.index]
+
+    if probe.found:
+        bucket.value <- value
+        return &bucket.value
+
+    if bucket.state == DICT_BUCKET_EMPTY:
+        m.used <- m.used + 1
+
+    bucket.state <- DICT_BUCKET_FULL
+    bucket.hash <- hash
+    bucket.key_len <- key_len.i64()
+    bucket.key_data as & <- arena_dict_copy_key(owner, key)
+    bucket.value <- value
+    m.count <- m.count + 1
+    return &bucket.value
+
+def arena_dict_contains[T](m: any dict[DStr[key_shape], T]&, key: DStr[key_shape]) -> bool:
+    return arena_dict_get(m, key) != null
+
+def arena_dict_remove[T](m: any dict[DStr[key_shape], T]&, key: DStr[key_shape]) -> bool:
+    if m.capacity == 0 or m.items == null:
+        return false
+
+    hash: u64 = arena_dict_hash_dstr(key)
+    key_len: usize = arena_strlen(key)
+    probe: DictProbeResult = arena_dict_probe_slot(m, key, hash, key_len)
+    if not probe.found:
+        return false
+
+    items: any DictBucket[T]& = m.items
+    bucket: any DictBucket[T]& = &items[probe.index]
+    bucket.state <- DICT_BUCKET_TOMBSTONE
+    bucket.hash <- 0u64
+    bucket.key_data <- null
+    bucket.key_len <- 0
+    bucket.value <- zeroed
+    m.count <- m.count - 1
+    return true
+
+def arena_dict_clear[T](m: any dict[DStr[key_shape], T]&):
+    if m.items == null or m.capacity == 0:
+        m.count <- 0
+        m.used <- 0
+        return
+
+    items: any DictBucket[T]& = m.items
+    arena_dict_zero_buckets(items, m.capacity)
+    m.count <- 0
+    m.used <- 0
+
+def arena_dict_new__i64(a: any Arena&, initial_capacity: usize) -> DynDict[i64]:
+    out: mutable DynDict[i64] = zeroed
+    out.arena as & <- a
+
+    capacity: usize = arena_dict_next_capacity(initial_capacity)
+    if capacity == 0:
+        return out
+
+    items: any DictBucket[i64]& = arena_alloc(a, capacity * sizeof(DictBucket[i64])).cast[any DictBucket[i64]&]()
+    arena_dict_zero_buckets(items, capacity)
+
+    out.items as & <- items
+    out.capacity <- capacity
+    return out
+
+def arena_dict_reserve__i64(a: any Arena&, m: any DynDict[i64]&, min_capacity: usize) -> void error[RuntimeError]:
+    target_capacity: usize = arena_dict_next_capacity(min_capacity)
+    if target_capacity == 0:
+        return
+
+    should_rebuild: bool = m.used > m.count and m.count * 2 < m.used
+    if target_capacity <= m.capacity and not should_rebuild:
+        return
+
+    owner: any Arena& = m.arena if m.arena != null else a
+    new_items: any DictBucket[i64]& = arena_alloc(owner, target_capacity * sizeof(DictBucket[i64])).cast[any DictBucket[i64]&]()
+    arena_dict_zero_buckets(new_items, target_capacity)
+
+    rebuilt: mutable DynDict[i64] = zeroed
+    rebuilt.items as & <- new_items
+    rebuilt.capacity <- target_capacity
+    rebuilt.arena as & <- owner
+
+    if m.items != null:
+        old_items: any DictBucket[i64]& = m.items
+        i: mutable usize = 0
+        while i < m.capacity:
+            if old_items[i].state == DICT_BUCKET_FULL:
+                _ = arena_dict_insert_existing_bucket((&rebuilt).cast[any DynDict[i64]&](), old_items[i])
+            i <- i + 1
+
+    m.items as & <- rebuilt.items
+    m.count <- rebuilt.count
+    m.used <- rebuilt.used
+    m.capacity <- rebuilt.capacity
+    m.arena as & <- owner
+    return
+
+def arena_dict_get__i64(m: any DynDict[i64]&, key: any u8&) -> any i64&?:
+    if m.capacity == 0 or m.items == null:
+        return null
+
+    hash: u64 = arena_dict_hash_dstr(key)
+    key_len: usize = arena_strlen(key)
+    probe: DictProbeResult = arena_dict_probe_slot(m, key, hash, key_len)
+    if not probe.found:
+        return null
+
+    items: any DictBucket[i64]& = m.items
+    return &items[probe.index].value
+
+def arena_dict_put__i64(a: any Arena&, m: any DynDict[i64]&, key: any u8&, value: i64) -> any i64&? error[RuntimeError]:
+    owner: any Arena& = m.arena if m.arena != null else a
+    if m.arena == null:
+        m.arena as & <- owner
+
+    if arena_dict_should_rehash(m, 1):
+        target_capacity: mutable usize = DICT_INIT_CAP if m.capacity == 0 else m.capacity * 2
+        if target_capacity < m.count + 1:
+            target_capacity <- m.count + 1
+        try arena_dict_reserve__i64(owner, m, target_capacity)
+
+    if m.items == null or m.capacity == 0:
+        try arena_dict_reserve__i64(owner, m, DICT_INIT_CAP)
+
+    assert m.items != null
+    assert m.capacity > 0
+
+    hash: u64 = arena_dict_hash_dstr(key)
+    key_len: usize = arena_strlen(key)
+    probe: DictProbeResult = arena_dict_probe_slot(m, key, hash, key_len)
+    items: any DictBucket[i64]& = m.items
+    bucket: any DictBucket[i64]& = &items[probe.index]
+
+    if probe.found:
+        bucket.value <- value
+        return &bucket.value
+
+    if bucket.state == DICT_BUCKET_EMPTY:
+        m.used <- m.used + 1
+
+    bucket.state <- DICT_BUCKET_FULL
+    bucket.hash <- hash
+    bucket.key_len <- key_len.i64()
+    bucket.key_data as & <- arena_dict_copy_key(owner, key)
+    bucket.value <- value
+    m.count <- m.count + 1
+    return &bucket.value
+
+def arena_dict_contains__i64(m: any DynDict[i64]&, key: any u8&) -> bool:
+    return arena_dict_get__i64(m, key) != null
+
+def arena_dict_remove__i64(m: any DynDict[i64]&, key: any u8&) -> bool:
+    if m.capacity == 0 or m.items == null:
+        return false
+
+    hash: u64 = arena_dict_hash_dstr(key)
+    key_len: usize = arena_strlen(key)
+    probe: DictProbeResult = arena_dict_probe_slot(m, key, hash, key_len)
+    if not probe.found:
+        return false
+
+    items: any DictBucket[i64]& = m.items
+    bucket: any DictBucket[i64]& = &items[probe.index]
+    bucket.state <- DICT_BUCKET_TOMBSTONE
+    bucket.hash <- 0u64
+    bucket.key_data <- null
+    bucket.key_len <- 0
+    bucket.value <- zeroed
+    m.count <- m.count - 1
+    return true
+
+def arena_dict_clear__i64(m: any DynDict[i64]&):
+    if m.items == null or m.capacity == 0:
+        m.count <- 0
+        m.used <- 0
+        return
+
+    items: any DictBucket[i64]& = m.items
+    arena_dict_zero_buckets(items, m.capacity)
+    m.count <- 0
+    m.used <- 0
 
 def arena_da_view[T](da: any DArray[T, shape_in]&, start: usize, end: usize) -> DArrayView[T]:
     elem_size: usize = sizeof(T)

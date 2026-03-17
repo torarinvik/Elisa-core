@@ -540,3 +540,295 @@ If I had to turn all this into one concrete engineering instruction, it would be
 > implement exact fixed arrays first, then implement dynamic arrays/strings as C-like runtime structs with lightweight logical shape witnesses, and only later consider symbolic arithmetic on shapes.
 
 That gives you the dependent-style safety you want while keeping the compiler tractable.
+
+## Next collection candidate — dictionary MVP (`dict[dstr, V]` first)
+
+The next natural runtime-backed collection after `darray` / `view` is a dictionary.
+
+The long-term surface goal is:
+
+```context
+dict[K, V]
+```
+
+where the key type `K` and value type `V` may differ.
+
+That means values like these should be ordinary and well-typed:
+
+```context
+dict[dstr, Expr]
+dict[u64, dstr]
+dict[TokenKind, i32]
+```
+
+The recommended MVP, however, is intentionally narrower:
+
+```context
+dict[dstr, V]
+```
+
+That first slice is enough to support parser-/compiler-style maps, symbol tables, JSON-ish objects, and other string-keyed transient structures without committing the runtime to full heterogeneous key support immediately.
+
+### Surface/runtime split
+
+The language-level type should still be presented as:
+
+```context
+dict[K, V]
+```
+
+But the first runtime bridge should be specialized to string keys.
+
+Recommended internal split:
+
+- surface semantic type: `dict[K, V]`
+- first runtime carrier: `DynDict[V]`
+- first bridge: `dict[dstr, V] <-> DynDict[V]`
+
+This matches the current style where:
+
+- `darray[T, shape]` bridges to `DynArray[T]`
+- `view[T, begin, end]` bridges to `DynArrayView`
+- `dstr[shape]` bridges to raw `u8&`
+- `sview[begin, end]` bridges to `StringView`
+
+The important idea is that the user-facing type stays general even if the first runtime bridge is intentionally narrow.
+
+### Runtime carrier shape
+
+The first dictionary runtime should use a flat open-addressed table with inline buckets, not node-per-entry allocation.
+
+Conceptually:
+
+```text
+DynDict[V] {
+    items: any DictBucket[V]&?
+    count: usize
+    used: usize
+    capacity: usize
+    arena: any Arena&?
+}
+```
+
+and:
+
+```text
+DictBucket[V] {
+    state: u8          # 0 = empty, 1 = full, 2 = tombstone
+    hash: u64
+    key_data: any u8&?
+    key_len: i64
+    value: V
+}
+```
+
+The current runtime uses plain C-like carriers for dynamic arrays and string views, and the dictionary should follow the same rule:
+
+> keep the carrier simple and contiguous; put safety and intent in the type layer and helper semantics.
+
+### Why this layout is the right first one
+
+The dictionary should not allocate one heap node per entry.
+
+Instead:
+
+- the bucket array is contiguous
+- probing happens in-place
+- insert usually mutates an existing allocation
+- allocation only happens when:
+    - the dict is first created
+    - the bucket array grows / rehashes
+    - a new string key must be copied into owned storage
+
+This mirrors the performance model used by modern flat hash maps (including Rust's standard-library style hash tables) far better than a linked-node design.
+
+### Allocation and ownership rule for `dstr` keys
+
+The best first ownership rule is:
+
+> **borrow for lookup, own on successful new insert**
+
+Operationally:
+
+- `get` / `contains` / `remove` take a borrowed key and do not allocate
+- `put` hashes and probes using the borrowed key
+- if the key already exists, update the existing bucket in place
+- if the key is new, copy its bytes into dictionary-owned storage and install the new bucket
+
+For the MVP, the copied string bytes should go into an arena/region when one is attached to the dictionary.
+
+That gives the right cost profile for compiler-style workloads:
+
+- lookups: no allocation
+- repeated insertion of existing keys: no allocation
+- insertion of a truly new key: one cheap arena copy, not a general-purpose `malloc`
+
+### Arena interaction
+
+The first runtime should support an explicit arena-backed mode.
+
+Recommended rule:
+
+- if `arena != null`, newly-owned string keys are copied into that arena
+- if `arena == null`, later work may choose a heap-backed ownership policy, but that is not required for the first slice
+
+For transient parser/compiler maps, arena-backed ownership is the preferred default.
+
+This implies an important resizing rule:
+
+- rehash/grow allocates a fresh bucket array
+- if the bucket array itself is arena-backed, old bucket arrays become dead space until arena reset/destroy
+
+That is acceptable for transient workloads and consistent with the current arena model.
+
+To make this predictable, the API should expose `reserve` early.
+
+### Probing strategy
+
+Recommended first implementation:
+
+- open addressing
+- power-of-two capacities
+- linear probing
+- cached per-bucket 64-bit hashes
+
+More sophisticated schemes like Robin Hood probing or SwissTable-style control bytes are reasonable later, but they are not required to make the first slice useful.
+
+Suggested load policy:
+
+- grow when `used` exceeds roughly 75% of `capacity`
+- track `used = live + tombstones`
+- rebuild if tombstones accumulate badly, even when `count` is lower
+
+This is simple, robust, and more than adequate for the first compiler-integrated version.
+
+### Hash and equality hooks
+
+The generic surface `dict[K, V]` needs one key-specific hash/equality pair per supported key family.
+
+For the first slice, the compiler should treat these as built-in runtime bridge hooks rather than user-defined traits.
+
+For `dict[dstr, V]`, the required key operations are:
+
+```text
+dict_hash_dstr(key: dstr) -> u64
+dict_eq_dstr(bucket_key_data: any u8&?, bucket_key_len: i64, probe_key: dstr) -> bool
+```
+
+Required semantics:
+
+- hash uses the key bytes and length, not pointer identity
+- equality checks pointer equality as a fast path, then length equality, then byte equality
+- bucket comparison must not call `strlen`; the stored `key_len` is authoritative
+
+The first built-in key-family table should be small and explicit:
+
+- `dstr`
+- integer keys (later)
+- `bool` (later)
+- enum keys without payloads or fully-hashable enums (later)
+
+The MVP should not attempt arbitrary user-defined hash/equality derivation yet.
+
+### Recommended helper surface
+
+To match the current `arena_da_*` / `ctx_stage1rt_*` naming style, the first dict helpers should be arena-oriented.
+
+Recommended helper family:
+
+```text
+arena_dict_new[V]
+arena_dict_reserve[V]
+arena_dict_get[V]
+arena_dict_put[V]
+arena_dict_contains[V]
+arena_dict_remove[V]
+arena_dict_clear[V]
+```
+
+Suggested first signatures:
+
+```text
+arena_dict_new[V](a: Arena&, initial_capacity: usize) -> dict[dstr, V]
+
+arena_dict_reserve[V](a: Arena&, m: dict[dstr, V]&, min_capacity: usize) -> void error[RuntimeError]
+
+arena_dict_get[V](m: dict[dstr, V]&, key: dstr) -> any V&?
+
+arena_dict_put[V](a: Arena&, m: dict[dstr, V]&, key: dstr, value: V) -> any V& error[RuntimeError]
+
+arena_dict_contains[V](m: dict[dstr, V]&, key: dstr) -> bool
+
+arena_dict_remove[V](m: dict[dstr, V]&, key: dstr) -> bool
+
+arena_dict_clear[V](m: dict[dstr, V]&) -> void
+```
+
+Notes:
+
+- `get` returns a nullable reference to the stored value slot
+- `put` returns a non-null reference to the installed/stored value slot
+- `put` and `reserve` are fallible because they may need to grow the bucket array or copy a new key
+- `remove` returns whether an entry was present
+
+The signatures intentionally use mutable-reference style container mutation rather than returning a new logical shape-bearing dictionary value. That keeps the first slice consistent with how arena-backed runtime containers already behave operationally.
+
+### Semantic/runtime bridge plan
+
+The bridge should be modeled like the existing container bridges.
+
+Recommended first bridge classification:
+
+```text
+dict[dstr, V] <-> DynDict[V]
+```
+
+That implies later additions in the semantic bridge layer analogous to:
+
+- `runtimeBridgeDArrayDynArray`
+- `runtimeBridgeDArrayViewDynArrayView`
+- `runtimeBridgeDStrU8Ref`
+
+with a new family such as:
+
+```text
+runtimeBridgeDictDynDict
+```
+
+where compatibility requires:
+
+- the source dict key type is exactly `dstr`
+- the value type matches the runtime carrier's type argument exactly
+
+This should stay deliberately narrow until the runtime has real key-family hook support for more than strings.
+
+### Recommended MVP boundary
+
+The best first end-to-end dictionary milestone is:
+
+- parse and type-check `dict[K, V]`
+- semantically accept only `dict[dstr, V]` for runtime-backed operations at first
+- add the `DynDict[V]` runtime carrier as a built-in compiler-known struct
+- implement `arena_dict_new`, `reserve`, `get`, `put`, `contains`, and `remove`
+- lower dict operations through helper calls rather than inline probing logic in the compiler backend
+
+That keeps the backend simple and matches the current strategy already used for strings and arena-backed dynamic arrays.
+
+### What should remain deferred
+
+The following should be treated as later phases, not part of the first dict landing:
+
+- heap-backed persistent dict ownership mode
+- user-defined hash/equality derivation
+- mixed runtime key types inside one dictionary instance
+- more advanced probing schemes
+- dict views / iterators / ordered maps
+- shape- or capacity-indexed dict types
+
+### Concise implementation slogan
+
+If `darray` is “contiguous storage plus logical shape”, then the first dict should be:
+
+> a flat open-addressed table plus borrowed lookup / owned-on-insert string keys.
+
+That is the best fit for the current Contextlang runtime style and the compiler-like workloads the language is clearly growing toward.

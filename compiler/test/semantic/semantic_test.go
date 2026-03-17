@@ -560,6 +560,62 @@ func TestAnalyzeAcceptsManualRegions(t *testing.T) {
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsEnumConstructorsAndMatch(t *testing.T) {
+	src := `enum MaybeInt:
+	None
+	Some(int)
+	Pair(int, int)
+
+def unwrap_or(value: MaybeInt, fallback: int) -> int:
+	match value:
+		MaybeInt.None:
+			return fallback
+		MaybeInt.Some(inner):
+			return inner
+		MaybeInt.Pair(left, right):
+			return left + right
+
+def make_pair() -> MaybeInt:
+	return MaybeInt.Pair(3, 4)
+
+def make_none() -> MaybeInt:
+	return MaybeInt.None
+`
+	_, errs := parseAndAnalyze(t, "enum_match_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsDictSurfaceTypesAndRuntimeBridge(t *testing.T) {
+	src := `extern take_runtime(values: DynDict[i32]) -> void
+extern make_runtime() -> DynDict[i32]
+
+def id[V](values: dict[dstr, V]) -> dict[dstr, V]:
+	return values
+
+def keep(values: dict[dstr, i32]) -> dict[dstr, i32]:
+	return id(values)
+
+def use(values: Dict[DStr[row], i32]) -> dict[dstr, i32]:
+	take_runtime(values)
+	return make_runtime()
+`
+	_, errs := parseAndAnalyze(t, "dict_surface_and_bridge_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsUnsupportedDictKeyTypes(t *testing.T) {
+	src := `def bad(values: dict[i32, i32]) -> void:
+	pass
+`
+	_, errs := parseAndAnalyze(t, "dict_bad_key.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "dict currently only supports dstr keys") {
+		t.Fatalf("expected dict-key diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeRejectsAllocatingFromDestroyedRegion(t *testing.T) {
 	src := `def bad() -> void:
 	region scratch

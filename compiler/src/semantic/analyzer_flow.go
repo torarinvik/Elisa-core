@@ -119,6 +119,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.analyzeBlockWithRegionClone(n.Else, NewScope(a.currentScope))
 		}
 		a.applyPostIfFallthroughRefinement(n)
+	case *ast.MatchStmt:
+		a.analyzeMatchStmt(n)
 	case *ast.WhileStmt:
 		condType := a.analyzeCondExpr(n.Cond)
 		if !IsBoolType(condType) {
@@ -151,6 +153,54 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 	case *ast.DiscardStmt:
 		a.analyzeExpr(n.Value)
+	}
+}
+
+func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
+	valueType := a.analyzeExpr(stmt.Value)
+	enumType, ok := valueType.(*EnumType)
+	if !ok {
+		a.errorf(stmt.Pos(), "match requires an enum value, got %s", valueType.String())
+		for _, arm := range stmt.Arms {
+			a.analyzeBlockWithRegionClone(arm.Body, NewScope(a.currentScope))
+		}
+		return
+	}
+	for i, arm := range stmt.Arms {
+		scope := NewScope(a.currentScope)
+		switch pattern := arm.Pattern.(type) {
+		case *ast.MatchWildcardPattern:
+			if i != len(stmt.Arms)-1 {
+				a.errorf(pattern.Pos(), "wildcard match arm must be the final arm")
+			}
+			// No bindings.
+		case *ast.MatchVariantPattern:
+			if pattern.EnumName != enumType.Name {
+				a.errorf(pattern.Pos(), "match arm expects enum %q, got %q", enumType.Name, pattern.EnumName)
+				break
+			}
+			variant, ok := enumType.Variant(pattern.Variant)
+			if !ok {
+				a.errorf(pattern.Pos(), "enum %q has no variant %q", enumType.Name, pattern.Variant)
+				break
+			}
+			if len(pattern.Bindings) != len(variant.Payload) {
+				a.errorf(pattern.Pos(), "match arm %q expects %d bindings, got %d", enumType.Name+"."+variant.Name, len(variant.Payload), len(pattern.Bindings))
+			}
+			limit := len(pattern.Bindings)
+			if len(variant.Payload) < limit {
+				limit = len(variant.Payload)
+			}
+			for i := 0; i < limit; i++ {
+				if pattern.Bindings[i] == "_" {
+					continue
+				}
+				a.defineLocal(&Symbol{Name: pattern.Bindings[i], Kind: SymbolLocal, Type: variant.Payload[i], Node: pattern, Mutable: false}, pattern.Pos())
+			}
+		default:
+			a.errorf(arm.Position, "unsupported match pattern %T", arm.Pattern)
+		}
+		a.analyzeBlockWithRegionClone(arm.Body, scope)
 	}
 }
 
@@ -364,6 +414,20 @@ func stmtDefinitelyExits(stmt ast.Stmt) bool {
 			}
 		}
 		return len(n.Else) > 0 && blockDefinitelyExits(n.Else)
+	case *ast.MatchStmt:
+		if len(n.Arms) == 0 {
+			return false
+		}
+		hasWildcard := false
+		for _, arm := range n.Arms {
+			if _, ok := arm.Pattern.(*ast.MatchWildcardPattern); ok {
+				hasWildcard = true
+			}
+			if !blockDefinitelyExits(arm.Body) {
+				return false
+			}
+		}
+		return hasWildcard
 	case *ast.StaticIfStmt:
 		if !blockDefinitelyExits(n.Then) {
 			return false

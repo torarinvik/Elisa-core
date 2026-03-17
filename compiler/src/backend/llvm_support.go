@@ -789,6 +789,19 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 			return nil, err
 		}
 		return &semantic.DArrayType{Elem: elem, Shape: shapeFromValueExpr(expr.ValueArgs[0]), SurfaceName: "darray"}, nil
+	case "dict":
+		if len(expr.TypeArgs) != 2 || len(expr.ValueArgs) != 0 {
+			return nil, fmt.Errorf("dict expects 2 type arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+		}
+		keyType, err := s.resolveTypeExpr(expr.TypeArgs[0])
+		if err != nil {
+			return nil, err
+		}
+		valueType, err := s.resolveTypeExpr(expr.TypeArgs[1])
+		if err != nil {
+			return nil, err
+		}
+		return resolveBackendDictType(keyType, valueType, "dict")
 	case "str", "string":
 		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 1 {
 			return nil, fmt.Errorf("str expects 1 argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
@@ -834,6 +847,13 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 	default:
 		return nil, fmt.Errorf("unknown built-in type %q", expr.Name)
 	}
+}
+
+func resolveBackendDictType(keyType semantic.Type, valueType semantic.Type, surfaceName string) (semantic.Type, error) {
+	if !isRuntimeDictKeyType(keyType) {
+		return nil, fmt.Errorf("dict currently only supports dstr keys in the first runtime-backed slice, got %s", keyType.String())
+	}
+	return &semantic.DictType{Key: keyType, Value: valueType, SurfaceName: surfaceName}, nil
 }
 
 func (s *functionState) exprType(expr ast.Expr) semantic.Type {
@@ -882,6 +902,20 @@ func (s *functionState) exprType(expr ast.Expr) semantic.Type {
 
 func (s *functionState) resolveDynamicShapeType(expr *ast.GenericType) (semantic.Type, bool, error) {
 	switch expr.Name {
+	case "Dict":
+		if len(expr.Args) != 2 {
+			return nil, true, fmt.Errorf("Dict expects 2 arguments, got %d", len(expr.Args))
+		}
+		keyType, err := s.resolveTypeExpr(expr.Args[0])
+		if err != nil {
+			return nil, true, err
+		}
+		valueType, err := s.resolveTypeExpr(expr.Args[1])
+		if err != nil {
+			return nil, true, err
+		}
+		resolved, err := resolveBackendDictType(keyType, valueType, "Dict")
+		return resolved, true, err
 	case "view":
 		if len(expr.Args) != 1 {
 			return nil, true, fmt.Errorf("view expects 1 argument, got %d", len(expr.Args))
@@ -983,6 +1017,13 @@ func (g *llvmGenerator) runtimeBackedStructType(t semantic.Type) semantic.Type {
 		}
 		return nil
 	}
+	if dict, ok := t.(*semantic.DictType); ok {
+		base, ok := g.result.NamedTypes["DynDict"]
+		if !ok {
+			return nil
+		}
+		return &semantic.GenericInstanceType{Name: "DynDict", Base: base, Args: []semantic.Type{dict.Value}}
+	}
 	if darray, ok := t.(*semantic.DArrayType); ok {
 		base, ok := g.result.NamedTypes["DynArray"]
 		if !ok {
@@ -991,6 +1032,11 @@ func (g *llvmGenerator) runtimeBackedStructType(t semantic.Type) semantic.Type {
 		return &semantic.GenericInstanceType{Name: "DynArray", Base: base, Args: []semantic.Type{darray.Elem}}
 	}
 	return nil
+}
+
+func isRuntimeDictKeyType(t semantic.Type) bool {
+	_, ok := t.(*semantic.DStrType)
+	return ok
 }
 
 func exprSummary(expr ast.Expr) string {

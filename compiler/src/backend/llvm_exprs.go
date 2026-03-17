@@ -58,6 +58,8 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 	case *ast.FieldExpr:
 		if errorType, _, ok := s.errorTagInfo(n); ok {
 			value, actualType, err = s.emitErrorTagExpr(n, errorType)
+		} else if enumType, variant, ok := s.enumConstructorInfoFromField(n); ok && variant != nil && len(variant.Payload) == 0 {
+			value, actualType, err = s.emitEnumConstructorValue(enumType, variant, nil)
 		} else {
 			value, actualType, err = s.emitFieldExpr(n)
 		}
@@ -752,6 +754,12 @@ func (s *functionState) emitRegionAllocExpr(expr *ast.RegionAllocExpr) (C.LLVMVa
 }
 
 func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if enumType, variant, ok := s.enumConstructorInfo(expr); ok {
+		if variant == nil {
+			return nil, nil, fmt.Errorf("unknown enum constructor")
+		}
+		return s.emitEnumConstructorValue(enumType, variant, expr.Args)
+	}
 	callee, funcType, err := s.resolveCallTarget(expr)
 	if err != nil {
 		return nil, nil, err
@@ -831,6 +839,14 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 }
 
 func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if enumType, variant, ok := s.enumConstructorInfoFromField(expr); ok {
+		if variant == nil {
+			return nil, nil, fmt.Errorf("unknown enum constructor %s.%s", enumType.Name, expr.Field)
+		}
+		if len(variant.Payload) == 0 {
+			return s.emitEnumConstructorValue(enumType, variant, nil)
+		}
+	}
 	if fieldType, ok := dstrSyntheticFieldType(s.exprType(expr.Object), expr.Field); ok {
 		return s.emitRuntimeStringLenExpr(expr.Object, fieldType)
 	}
@@ -1379,4 +1395,87 @@ func (s *functionState) emitStructLitExpr(expr *ast.StructLitExpr) (C.LLVMValueR
 		value = C.LLVMBuildInsertValue(s.builder, value, fieldValue, C.unsigned(i), cStringFree("ins"))
 	}
 	return value, structType, nil
+}
+
+func (s *functionState) enumConstructorInfo(expr *ast.CallExpr) (*semantic.EnumType, *semantic.EnumVariant, bool) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok {
+		return nil, nil, false
+	}
+	return s.enumConstructorInfoFromField(fieldExpr)
+}
+
+func (s *functionState) enumConstructorInfoFromField(expr *ast.FieldExpr) (*semantic.EnumType, *semantic.EnumVariant, bool) {
+	ident, ok := expr.Object.(*ast.Ident)
+	if !ok {
+		return nil, nil, false
+	}
+	base, ok := s.g.result.NamedTypes[ident.Name]
+	if !ok {
+		return nil, nil, false
+	}
+	enumType, ok := base.(*semantic.EnumType)
+	if !ok {
+		return nil, nil, false
+	}
+	variant, ok := enumType.Variant(expr.Field)
+	if !ok {
+		return enumType, nil, true
+	}
+	return enumType, variant, true
+}
+
+func (s *functionState) emitEnumConstructorValue(enumType *semantic.EnumType, variant *semantic.EnumVariant, args []ast.Expr) (C.LLVMValueRef, semantic.Type, error) {
+	if enumType == nil || variant == nil {
+		return nil, nil, fmt.Errorf("missing enum constructor metadata")
+	}
+	if len(args) != len(variant.Payload) {
+		return nil, nil, fmt.Errorf("enum constructor %s.%s expects %d arguments, got %d", enumType.Name, variant.Name, len(variant.Payload), len(args))
+	}
+	enumPtr, err := s.emitStackTempZeroed(enumType, "enum.ctor")
+	if err != nil {
+		return nil, nil, err
+	}
+	enumLLVMType, err := s.g.lowerType(enumType)
+	if err != nil {
+		return nil, nil, err
+	}
+	tagValue, err := s.enumTagConstant(variant.Tag)
+	if err != nil {
+		return nil, nil, err
+	}
+	tagPtr := C.LLVMBuildStructGEP2(s.builder, enumLLVMType, enumPtr, 0, cStringFree("enum.tag.ptr"))
+	C.LLVMBuildStore(s.builder, tagValue, tagPtr)
+	if len(variant.Payload) > 0 {
+		payloadPtr, err := s.enumPayloadPtr(enumPtr, enumType)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(variant.Payload) == 1 {
+			argValue, _, err := s.emitExpr(args[0], variant.Payload[0])
+			if err != nil {
+				return nil, nil, err
+			}
+			C.LLVMBuildStore(s.builder, argValue, payloadPtr)
+		} else {
+			payloadType, err := s.g.lowerEnumVariantPayloadType(variant)
+			if err != nil {
+				return nil, nil, err
+			}
+			aggregate := C.LLVMGetUndef(payloadType)
+			for i, payload := range variant.Payload {
+				argValue, _, err := s.emitExpr(args[i], payload)
+				if err != nil {
+					return nil, nil, err
+				}
+				aggregate = C.LLVMBuildInsertValue(s.builder, aggregate, argValue, C.unsigned(i), cStringFree("enum.payload.ins"))
+			}
+			C.LLVMBuildStore(s.builder, aggregate, payloadPtr)
+		}
+	}
+	value, err := s.loadValue(enumPtr, enumType, "enum.value")
+	if err != nil {
+		return nil, nil, err
+	}
+	return value, enumType, nil
 }

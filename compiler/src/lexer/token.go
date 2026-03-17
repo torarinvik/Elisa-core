@@ -20,12 +20,14 @@ const (
 	// Keywords
 	TOKEN_DEF
 	TOKEN_ERROR
+	TOKEN_ENUM
 	TOKEN_STRUCT
 	TOKEN_CONST
 	TOKEN_GLOBAL
 	TOKEN_EXTERN
 	TOKEN_EXPORT
 	TOKEN_IF
+	TOKEN_MATCH
 	TOKEN_ELIF
 	TOKEN_ELSE
 	TOKEN_WHILE
@@ -123,12 +125,14 @@ var tokenNames = map[TokenKind]string{
 
 	TOKEN_DEF:     "def",
 	TOKEN_ERROR:   "error",
+	TOKEN_ENUM:    "enum",
 	TOKEN_STRUCT:  "struct",
 	TOKEN_CONST:   "const",
 	TOKEN_GLOBAL:  "global",
 	TOKEN_EXTERN:  "extern",
 	TOKEN_EXPORT:  "export",
 	TOKEN_IF:      "if",
+	TOKEN_MATCH:   "match",
 	TOKEN_ELIF:    "elif",
 	TOKEN_ELSE:    "else",
 	TOKEN_WHILE:   "while",
@@ -211,12 +215,14 @@ var tokenNames = map[TokenKind]string{
 var keywords = map[string]TokenKind{
 	"def":     TOKEN_DEF,
 	"error":   TOKEN_ERROR,
+	"enum":    TOKEN_ENUM,
 	"struct":  TOKEN_STRUCT,
 	"const":   TOKEN_CONST,
 	"global":  TOKEN_GLOBAL,
 	"extern":  TOKEN_EXTERN,
 	"export":  TOKEN_EXPORT,
 	"if":      TOKEN_IF,
+	"match":   TOKEN_MATCH,
 	"elif":    TOKEN_ELIF,
 	"else":    TOKEN_ELSE,
 	"while":   TOKEN_WHILE,

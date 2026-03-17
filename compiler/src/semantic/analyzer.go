@@ -95,6 +95,7 @@ func Analyze(file *ast.File) *Result {
 	activeDecls := a.expandActiveDecls(file.Decls)
 	a.collectNamedTypes(activeDecls)
 	a.populateStructFields(activeDecls)
+	a.populateEnumVariants(activeDecls)
 	a.collectExportTypeAliases(activeDecls)
 	a.collectValueSymbols(activeDecls)
 	a.analyzeDecls(activeDecls)
@@ -144,6 +145,20 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 		{name: "len", typ: namedTypeExpr("usize", false), mutable: true},
 		{name: "elem_size", typ: namedTypeExpr("usize", false), mutable: true},
 	})
+	a.registerBuiltinStructType("DictBucket", []string{"T"}, []builtinFieldSpec{
+		{name: "state", typ: namedTypeExpr("u8", false), mutable: true},
+		{name: "hash", typ: namedTypeExpr("u64", false), mutable: true},
+		{name: "key_data", typ: refTypeExpr("u8", true), mutable: true},
+		{name: "key_len", typ: namedTypeExpr("i64", false), mutable: true},
+		{name: "value", typ: namedTypeExpr("T", false), mutable: true},
+	})
+	a.registerBuiltinStructType("DynDict", []string{"T"}, []builtinFieldSpec{
+		{name: "items", typ: refToTypeExpr(genericTypeExpr("DictBucket", namedTypeExpr("T", false)), true), mutable: true},
+		{name: "count", typ: namedTypeExpr("usize", false), mutable: true},
+		{name: "used", typ: namedTypeExpr("usize", false), mutable: true},
+		{name: "capacity", typ: namedTypeExpr("usize", false), mutable: true},
+		{name: "arena", typ: refTypeExpr("Arena", true), mutable: true},
+	})
 }
 
 type builtinFieldSpec struct {
@@ -188,20 +203,24 @@ func namedTypeExpr(name string, mutable bool) ast.TypeExpr {
 	return base
 }
 
-func refTypeExpr(name string, nullable bool) ast.TypeExpr {
+func genericTypeExpr(name string, args ...ast.TypeExpr) ast.TypeExpr {
+	return &ast.GenericType{Position: lexer.Pos{}, Name: name, Args: args}
+}
+
+func refToTypeExpr(elem ast.TypeExpr, nullable bool) ast.TypeExpr {
 	state := ast.RefStateNonNull
 	if nullable {
 		state = ast.RefStateNullable
 	}
-	return &ast.RefType{Position: lexer.Pos{}, Elem: &ast.NamedType{Position: lexer.Pos{}, Name: name}, State: state, Storage: ast.RefStorageAny}
+	return &ast.RefType{Position: lexer.Pos{}, Elem: elem, State: state, Storage: ast.RefStorageAny}
+}
+
+func refTypeExpr(name string, nullable bool) ast.TypeExpr {
+	return refToTypeExpr(&ast.NamedType{Position: lexer.Pos{}, Name: name}, nullable)
 }
 
 func refTypeParamExpr(name string, nullable bool) ast.TypeExpr {
-	state := ast.RefStateNonNull
-	if nullable {
-		state = ast.RefStateNullable
-	}
-	return &ast.RefType{Position: lexer.Pos{}, Elem: &ast.NamedType{Position: lexer.Pos{}, Name: name}, State: state, Storage: ast.RefStorageAny}
+	return refToTypeExpr(&ast.NamedType{Position: lexer.Pos{}, Name: name}, nullable)
 }
 
 func nestedRefTypeExpr(name string, innerNonNull bool, outerNullable bool) ast.TypeExpr {
@@ -219,7 +238,7 @@ func nestedRefTypeExpr(name string, innerNonNull bool, outerNullable bool) ast.T
 
 func isBuiltinRuntimeStructName(name string) bool {
 	switch name {
-	case "Region", "Arena", "StringView", "DynArray", "DynArrayView":
+	case "Region", "Arena", "StringView", "DynArray", "DynArrayView", "DictBucket", "DynDict":
 		return true
 	default:
 		return false
@@ -314,6 +333,12 @@ func (a *Analyzer) collectNamedTypes(decls []ast.Decl) {
 				Decl:       n,
 			}
 			a.namedTypes[n.Name] = st
+		case *ast.EnumDecl:
+			if _, exists := a.namedTypes[n.Name]; exists {
+				a.errorf(n.Pos(), "duplicate type %q", n.Name)
+				continue
+			}
+			a.namedTypes[n.Name] = &EnumType{Name: n.Name, VariantMap: map[string]*EnumVariant{}, Decl: n}
 		case *ast.ExternTypeDecl:
 			if _, exists := a.namedTypes[n.Name]; exists {
 				a.errorf(n.Pos(), "duplicate type %q", n.Name)
@@ -339,6 +364,39 @@ func (a *Analyzer) collectNamedTypes(decls []ast.Decl) {
 		case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			continue
 		}
+	}
+}
+
+func (a *Analyzer) populateEnumVariants(decls []ast.Decl) {
+	for _, decl := range decls {
+		enumDecl, ok := decl.(*ast.EnumDecl)
+		if !ok {
+			continue
+		}
+		enumType, _ := a.namedTypes[enumDecl.Name].(*EnumType)
+		if enumType == nil {
+			continue
+		}
+		variants := make([]*EnumVariant, 0, len(enumDecl.Variants))
+		for i := range enumDecl.Variants {
+			variantDecl := &enumDecl.Variants[i]
+			if _, exists := enumType.VariantMap[variantDecl.Name]; exists {
+				a.errorf(variantDecl.Position, "duplicate variant %q in enum %q", variantDecl.Name, enumDecl.Name)
+				continue
+			}
+			payload := make([]Type, 0, len(variantDecl.Payload))
+			for _, payloadExpr := range variantDecl.Payload {
+				payloadType := a.resolveType(payloadExpr)
+				if SameType(payloadType, enumType) {
+					a.errorf(payloadExpr.Pos(), "enum %q variant %q cannot contain %q by value; use a reference type instead", enumDecl.Name, variantDecl.Name, enumDecl.Name)
+				}
+				payload = append(payload, payloadType)
+			}
+			variant := &EnumVariant{Name: variantDecl.Name, Tag: uint32(i), Payload: payload, Decl: variantDecl}
+			enumType.VariantMap[variant.Name] = variant
+			variants = append(variants, variant)
+		}
+		enumType.Variants = variants
 	}
 }
 
@@ -401,6 +459,8 @@ func (a *Analyzer) collectValueSymbols(decls []ast.Decl) {
 		case *ast.ExternVarDecl:
 			declType := a.resolveType(n.Type)
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolExternVar, Type: declType, Node: n, Mutable: true}, n.Pos())
+		case *ast.EnumDecl:
+			continue
 		case *ast.ErrorDecl:
 			continue
 		case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
@@ -430,6 +490,8 @@ func (a *Analyzer) analyzeDecls(decls []ast.Decl) {
 			}
 		case *ast.FuncDecl:
 			a.analyzeFunc(n)
+		case *ast.EnumDecl:
+			continue
 		case *ast.ErrorDecl:
 			continue
 		case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:

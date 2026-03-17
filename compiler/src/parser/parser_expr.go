@@ -194,6 +194,13 @@ func (p *Parser) parseBuiltinTypeExpr(pos lexer.Pos, name string) ast.TypeExpr {
 		size := p.parseExpr()
 		p.expect(lexer.TOKEN_RBRACKET)
 		return &ast.BuiltinTypeExpr{Position: pos, Name: "str", ValueArgs: []ast.Expr{size}}
+	case "dict":
+		p.advance()
+		key := p.parseTypeExpr()
+		p.expect(lexer.TOKEN_COMMA)
+		value := p.parseTypeExpr()
+		p.expect(lexer.TOKEN_RBRACKET)
+		return &ast.BuiltinTypeExpr{Position: pos, Name: name, TypeArgs: []ast.TypeExpr{key, value}}
 	case "dstr", "dstring":
 		p.advance()
 		size := p.parseExpr()

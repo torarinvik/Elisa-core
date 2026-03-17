@@ -869,6 +869,124 @@ func TestGenerateLLVMIRLowersManualRegions(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRLowersEnumConstructorsAndMatch(t *testing.T) {
+	src := `enum MaybeInt:
+	None
+	Some(int)
+	Pair(int, int)
+
+def make_pair() -> MaybeInt:
+	return MaybeInt.Pair(3, 4)
+
+def unwrap_or(value: MaybeInt, fallback: int) -> int:
+	match value:
+		MaybeInt.None:
+			return fallback
+		MaybeInt.Some(inner):
+			return inner
+		MaybeInt.Pair(left, right):
+			return left + right
+`
+	result := parseAndAnalyze(t, "backend_enum_match.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%MaybeInt = type { i32, [2 x i64] }",
+		"define %MaybeInt @make_pair()",
+		"define i64 @unwrap_or(%MaybeInt",
+		"icmp eq i32",
+		"store i32 2",
+		"extractvalue { i64, i64 }",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersDictSurfaceTypesViaDynDictCarrier(t *testing.T) {
+	src := `extern take_runtime(values: DynDict[i32]) -> void
+extern make_runtime() -> DynDict[i32]
+
+def id[V](values: dict[dstr, V]) -> dict[dstr, V]:
+	return values
+
+def keep(values: dict[dstr, i32]) -> dict[dstr, i32]:
+	return id(values)
+
+def pass_runtime(values: dict[dstr, i32]) -> void:
+	take_runtime(values)
+
+def from_runtime() -> dict[dstr, i32]:
+	return make_runtime()
+`
+	result := parseAndAnalyze(t, "backend_dict_runtime_bridge.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%DynDict__i32 = type { ptr, i64, i64, i64, ptr }",
+		"declare void @take_runtime(%DynDict__i32)",
+		"declare %DynDict__i32 @make_runtime()",
+		"define %DynDict__i32 @id__i32(%DynDict__i32",
+		"define %DynDict__i32 @keep(%DynDict__i32",
+		"call %DynDict__i32 @id__i32(%DynDict__i32",
+		"define void @pass_runtime(%DynDict__i32",
+		"call void @take_runtime(%DynDict__i32",
+		"define %DynDict__i32 @from_runtime()",
+		"call %DynDict__i32 @make_runtime()",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRSpecializesDictHelperStyleFunctions(t *testing.T) {
+	src := `error RuntimeError:
+	OutOfMemory
+
+def arena_dict_get[V](m: any dict[dstr, V]&, key: dstr) -> any V&?:
+	return null
+
+def arena_dict_put[V](a: any Arena&, m: any dict[dstr, V]&, key: dstr, value: V) -> any V&? error[RuntimeError]:
+	raise RuntimeError.OutOfMemory
+
+def touch(a: any Arena&, m: any dict[dstr, i32]&, key: dstr) -> bool:
+	slot: any i32&? = try arena_dict_put(a, m, key, 7) else null
+	if slot == null:
+		return false
+	maybe_slot: any i32&? = arena_dict_get(m, key)
+	return maybe_slot != null
+`
+	result := parseAndAnalyze(t, "backend_dict_helper_calls.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%ErrUnion__RuntimeError__any_i32 = type { i32, ptr }",
+		"define ptr @arena_dict_get__i32(ptr",
+		"define i32 @arena_dict_put__i32(ptr",
+		"define i1 @touch(ptr %0, ptr %1, ptr %2)",
+		"call i32 @arena_dict_put__i32(ptr",
+		"call ptr @arena_dict_get__i32(ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersAllocatorOwnershipFixture(t *testing.T) {
 	src := loadFixtureSource(t, "Code", "test_programs", "allocator_ownership.llcontext")
 	result := parseAndAnalyze(t, "backend_allocator_ownership.llcontext", src)

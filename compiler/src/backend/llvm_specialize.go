@@ -78,9 +78,29 @@ func inferTypeBindingsFromCall(fn *semantic.FuncType, args []ast.Expr, argTypes 
 	return bindings
 }
 
+func dynDictRuntimeInstance(t semantic.Type) (*semantic.GenericInstanceType, bool) {
+	gi, ok := t.(*semantic.GenericInstanceType)
+	if !ok || gi.Name != "DynDict" || len(gi.Args) != 1 {
+		return nil, false
+	}
+	return gi, true
+}
+
 func collectSpecializationBindings(pattern semantic.Type, actual semantic.Type, bindings map[string]semantic.Type) {
 	if pattern == nil || actual == nil {
 		return
+	}
+	if patternDynDict, ok := dynDictRuntimeInstance(pattern); ok {
+		if actualDict, ok := actual.(*semantic.DictType); ok {
+			collectSpecializationBindings(patternDynDict.Args[0], actualDict.Value, bindings)
+			return
+		}
+	}
+	if patternDict, ok := pattern.(*semantic.DictType); ok {
+		if actualDynDict, ok := dynDictRuntimeInstance(actual); ok {
+			collectSpecializationBindings(patternDict.Value, actualDynDict.Args[0], bindings)
+			return
+		}
 	}
 	switch p := pattern.(type) {
 	case *semantic.TypeParamType:
@@ -102,6 +122,11 @@ func collectSpecializationBindings(pattern semantic.Type, actual semantic.Type, 
 	case *semantic.DArrayViewType:
 		if a, ok := actual.(*semantic.DArrayViewType); ok {
 			collectSpecializationBindings(p.Elem, a.Elem, bindings)
+		}
+	case *semantic.DictType:
+		if a, ok := actual.(*semantic.DictType); ok {
+			collectSpecializationBindings(p.Key, a.Key, bindings)
+			collectSpecializationBindings(p.Value, a.Value, bindings)
 		}
 	case *semantic.GenericInstanceType:
 		if a, ok := actual.(*semantic.GenericInstanceType); ok && p.Name == a.Name && len(p.Args) == len(a.Args) {

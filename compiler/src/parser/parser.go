@@ -86,6 +86,8 @@ func (p *Parser) parseDecl() ast.Decl {
 		return p.parseConstDecl()
 	case lexer.TOKEN_ERROR:
 		return p.parseErrorDecl()
+	case lexer.TOKEN_ENUM:
+		return p.parseEnumDecl()
 	case lexer.TOKEN_GLOBAL:
 		return p.parseGlobalDecl()
 	case lexer.TOKEN_REPR:
@@ -127,6 +129,46 @@ func (p *Parser) parseErrorDecl() *ast.ErrorDecl {
 	p.expect(lexer.TOKEN_DEDENT)
 
 	return &ast.ErrorDecl{Position: pos, Name: name, Tags: tags}
+}
+
+func (p *Parser) parseEnumDecl() *ast.EnumDecl {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_ENUM)
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+
+	variants := make([]ast.EnumVariantDecl, 0)
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		variants = append(variants, p.parseEnumVariantDecl())
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+
+	return &ast.EnumDecl{Position: pos, Name: name, Variants: variants}
+}
+
+func (p *Parser) parseEnumVariantDecl() ast.EnumVariantDecl {
+	pos := p.cur().Pos
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	payload := make([]ast.TypeExpr, 0)
+	if p.match(lexer.TOKEN_LPAREN) {
+		if p.peek() != lexer.TOKEN_RPAREN {
+			for {
+				payload = append(payload, p.parseTypeExpr())
+				if !p.match(lexer.TOKEN_COMMA) {
+					break
+				}
+			}
+		}
+		p.expect(lexer.TOKEN_RPAREN)
+	}
+	p.expectNewline()
+	return ast.EnumVariantDecl{Position: pos, Name: name, Payload: payload}
 }
 
 func (p *Parser) parseConstDecl() *ast.ConstDecl {

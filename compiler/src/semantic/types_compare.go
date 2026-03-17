@@ -44,9 +44,15 @@ func SameType(a, b Type) bool {
 	case *DStrType:
 		tb, ok := b.(*DStrType)
 		return ok && SameShape(ta.Shape, tb.Shape)
+	case *DictType:
+		tb, ok := b.(*DictType)
+		return ok && SameType(ta.Key, tb.Key) && SameType(ta.Value, tb.Value)
 	case *SViewType:
 		_, ok := b.(*SViewType)
 		return ok
+	case *EnumType:
+		tb, ok := b.(*EnumType)
+		return ok && ta.Name == tb.Name
 	case *StructType:
 		tb, ok := b.(*StructType)
 		return ok && ta.Name == tb.Name
@@ -212,9 +218,15 @@ func matchTypePattern(pattern, actual Type) bool {
 	case *DStrType:
 		a, ok := actual.(*DStrType)
 		return ok && shapeMatchesPattern(p.Shape, a.Shape)
+	case *DictType:
+		a, ok := actual.(*DictType)
+		return ok && matchTypePattern(p.Key, a.Key) && matchTypePattern(p.Value, a.Value)
 	case *SViewType:
 		_, ok := actual.(*SViewType)
 		return ok
+	case *EnumType:
+		a, ok := actual.(*EnumType)
+		return ok && p.Name == a.Name
 	case *StructType:
 		a, ok := actual.(*StructType)
 		return ok && p.Name == a.Name
