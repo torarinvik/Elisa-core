@@ -56,7 +56,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		case "dstr", "dstring":
 			return &DStrType{Shape: &WildcardShape{}, SurfaceName: "dstr"}
 		case "DStr":
-			return &DStrType{Shape: &WildcardShape{}}
+			return &DStrType{Shape: &WildcardShape{}, SurfaceName: "dstr"}
 		}
 		if t, ok := a.lookupTypeParam(n.Name); ok {
 			return t
@@ -269,7 +269,7 @@ func (a *Analyzer) resolveDynamicShapeType(expr *ast.GenericType) (Type, bool) {
 			a.errorf(expr.Pos(), "Dict expects 2 arguments, got %d", len(expr.Args))
 			return invalidType, true
 		}
-		return a.resolveDictType(expr.Args[0], expr.Args[1], "Dict"), true
+		return a.resolveDictType(expr.Args[0], expr.Args[1], "dict"), true
 	case "view":
 		if len(expr.Args) != 1 {
 			a.errorf(expr.Pos(), "view expects 1 argument, got %d", len(expr.Args))
@@ -282,27 +282,27 @@ func (a *Analyzer) resolveDynamicShapeType(expr *ast.GenericType) (Type, bool) {
 			return invalidType, true
 		}
 		if len(expr.Args) == 1 {
-			return &DArrayType{Elem: a.resolveType(expr.Args[0]), Shape: &WildcardShape{}}, true
+			return &DArrayType{Elem: a.resolveType(expr.Args[0]), Shape: &WildcardShape{}, SurfaceName: "darray"}, true
 		}
-		return &DArrayType{Elem: a.resolveType(expr.Args[0]), Shape: a.resolveShapeArg(expr.Args[1])}, true
+		return &DArrayType{Elem: a.resolveType(expr.Args[0]), Shape: a.resolveShapeArg(expr.Args[1]), SurfaceName: "darray"}, true
 	case "DArrayView":
 		if len(expr.Args) != 1 {
 			a.errorf(expr.Pos(), "DArrayView expects 1 argument, got %d", len(expr.Args))
 			return invalidType, true
 		}
-		return &DArrayViewType{Elem: a.resolveType(expr.Args[0])}, true
+		return &DArrayViewType{Elem: a.resolveType(expr.Args[0]), SurfaceName: "view"}, true
 	case "DList":
-		a.errorf(expr.Pos(), "DList has been removed from the language; use DArray/darray instead")
+		a.errorf(expr.Pos(), "DList has been removed from the language; use darray instead")
 		return invalidType, true
 	case "DListView":
-		a.errorf(expr.Pos(), "DListView has been removed from the language; use DArrayView/view instead")
+		a.errorf(expr.Pos(), "DListView has been removed from the language; use view instead")
 		return invalidType, true
 	case "DStr":
 		if len(expr.Args) != 1 {
 			a.errorf(expr.Pos(), "DStr expects 1 argument, got %d", len(expr.Args))
 			return invalidType, true
 		}
-		return &DStrType{Shape: a.resolveShapeArg(expr.Args[0])}, true
+		return &DStrType{Shape: a.resolveShapeArg(expr.Args[0]), SurfaceName: "dstr"}, true
 	default:
 		return nil, false
 	}

@@ -381,45 +381,27 @@ func (t *ArrayType) String() string {
 }
 func (t *DArrayType) String() string {
 	if isWildcardShape(t.Shape) {
-		if t.SurfaceName == "darray" {
-			return fmt.Sprintf("darray[%s]", t.Elem.String())
-		}
-		return fmt.Sprintf("DArray[%s]", t.Elem.String())
+		return fmt.Sprintf("darray[%s]", t.Elem.String())
 	}
-	if t.SurfaceName == "darray" {
-		return fmt.Sprintf("darray[%s, %s]", t.Elem.String(), t.Shape.String())
-	}
-	return fmt.Sprintf("DArray[%s, %s]", t.Elem.String(), t.Shape.String())
+	return fmt.Sprintf("darray[%s, %s]", t.Elem.String(), t.Shape.String())
 }
 func (t *DArrayViewType) String() string {
-	if t.SurfaceName == "view" || t.Begin != "" || t.End != "" {
-		if t.Begin != "" || t.End != "" {
-			return fmt.Sprintf("view[%s, %s, %s]", t.Elem.String(), t.Begin, t.End)
-		}
-		return fmt.Sprintf("view[%s]", t.Elem.String())
+	if t.Begin != "" || t.End != "" {
+		return fmt.Sprintf("view[%s, %s, %s]", t.Elem.String(), t.Begin, t.End)
 	}
-	return fmt.Sprintf("DArrayView[%s]", t.Elem.String())
+	return fmt.Sprintf("view[%s]", t.Elem.String())
 }
 func (t *DStrType) String() string {
 	if isWildcardShape(t.Shape) {
-		if t.SurfaceName == "dstr" || t.SurfaceName == "dstring" {
-			return "dstr"
-		}
-		return "DStr"
+		return "dstr"
 	}
-	if t.SurfaceName == "dstr" || t.SurfaceName == "dstring" {
-		return fmt.Sprintf("dstr[%s]", t.Shape.String())
-	}
-	return fmt.Sprintf("DStr[%s]", t.Shape.String())
+	return fmt.Sprintf("dstr[%s]", t.Shape.String())
 }
 func (t *DictType) String() string {
 	if t == nil || t.Key == nil || t.Value == nil {
 		return "<invalid-dict>"
 	}
-	if t.SurfaceName == "dict" {
-		return fmt.Sprintf("dict[%s, %s]", t.Key.String(), t.Value.String())
-	}
-	return fmt.Sprintf("Dict[%s, %s]", t.Key.String(), t.Value.String())
+	return fmt.Sprintf("dict[%s, %s]", t.Key.String(), t.Value.String())
 }
 func (t *SViewType) String() string {
 	return fmt.Sprintf("sview[%s, %s]", t.Begin, t.End)

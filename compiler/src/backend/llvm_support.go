@@ -565,6 +565,10 @@ func (s *functionState) ensureTrapFunction() (C.LLVMValueRef, error) {
 func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error) {
 	switch n := expr.(type) {
 	case *ast.NamedType:
+		switch n.Name {
+		case "dstr", "dstring", "DStr":
+			return &semantic.DStrType{Shape: &semantic.WildcardShape{}, SurfaceName: "dstr"}, nil
+		}
 		if bound, ok := s.typeMap[n.Name]; ok {
 			return bound, nil
 		}
@@ -781,12 +785,15 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 		}
 		return resolved, nil
 	case "darray":
-		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 1 {
-			return nil, fmt.Errorf("darray expects 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) > 1 {
+			return nil, fmt.Errorf("darray expects 1 or 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
 		}
 		elem, err := s.resolveTypeExpr(expr.TypeArgs[0])
 		if err != nil {
 			return nil, err
+		}
+		if len(expr.ValueArgs) == 0 {
+			return &semantic.DArrayType{Elem: elem, Shape: &semantic.WildcardShape{}, SurfaceName: "darray"}, nil
 		}
 		return &semantic.DArrayType{Elem: elem, Shape: shapeFromValueExpr(expr.ValueArgs[0]), SurfaceName: "darray"}, nil
 	case "dict":
@@ -914,7 +921,7 @@ func (s *functionState) resolveDynamicShapeType(expr *ast.GenericType) (semantic
 		if err != nil {
 			return nil, true, err
 		}
-		resolved, err := resolveBackendDictType(keyType, valueType, "Dict")
+		resolved, err := resolveBackendDictType(keyType, valueType, "dict")
 		return resolved, true, err
 	case "view":
 		if len(expr.Args) != 1 {
@@ -926,14 +933,17 @@ func (s *functionState) resolveDynamicShapeType(expr *ast.GenericType) (semantic
 		}
 		return &semantic.DArrayViewType{Elem: elem, SurfaceName: "view"}, true, nil
 	case "DArray":
-		if len(expr.Args) != 2 {
-			return nil, true, fmt.Errorf("DArray expects 2 arguments, got %d", len(expr.Args))
+		if len(expr.Args) != 1 && len(expr.Args) != 2 {
+			return nil, true, fmt.Errorf("DArray expects 1 or 2 arguments, got %d", len(expr.Args))
 		}
 		elem, err := s.resolveTypeExpr(expr.Args[0])
 		if err != nil {
 			return nil, true, err
 		}
-		return &semantic.DArrayType{Elem: elem, Shape: shapeFromTypeExpr(expr.Args[1])}, true, nil
+		if len(expr.Args) == 1 {
+			return &semantic.DArrayType{Elem: elem, Shape: &semantic.WildcardShape{}, SurfaceName: "darray"}, true, nil
+		}
+		return &semantic.DArrayType{Elem: elem, Shape: shapeFromTypeExpr(expr.Args[1]), SurfaceName: "darray"}, true, nil
 	case "DArrayView":
 		if len(expr.Args) != 1 {
 			return nil, true, fmt.Errorf("DArrayView expects 1 argument, got %d", len(expr.Args))
@@ -942,16 +952,16 @@ func (s *functionState) resolveDynamicShapeType(expr *ast.GenericType) (semantic
 		if err != nil {
 			return nil, true, err
 		}
-		return &semantic.DArrayViewType{Elem: elem}, true, nil
+		return &semantic.DArrayViewType{Elem: elem, SurfaceName: "view"}, true, nil
 	case "DList":
-		return nil, true, fmt.Errorf("DList has been removed from the language; use DArray/darray instead")
+		return nil, true, fmt.Errorf("DList has been removed from the language; use darray instead")
 	case "DListView":
-		return nil, true, fmt.Errorf("DListView has been removed from the language; use DArrayView/view instead")
+		return nil, true, fmt.Errorf("DListView has been removed from the language; use view instead")
 	case "DStr":
 		if len(expr.Args) != 1 {
 			return nil, true, fmt.Errorf("DStr expects 1 argument, got %d", len(expr.Args))
 		}
-		return &semantic.DStrType{Shape: shapeFromTypeExpr(expr.Args[0])}, true, nil
+		return &semantic.DStrType{Shape: shapeFromTypeExpr(expr.Args[0]), SurfaceName: "dstr"}, true, nil
 	default:
 		return nil, false, nil
 	}

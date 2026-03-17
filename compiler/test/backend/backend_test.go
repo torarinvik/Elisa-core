@@ -647,9 +647,9 @@ repr(c) struct DynArrayView:
 	items: mutable any void&?
     count: mutable usize
 
-extern take_array(values: DArray[i32, row]) -> void
-extern take_array_view(view: DArrayView[i32]) -> usize
-extern take_str(text: DStr[row]) -> void
+extern take_array(values: darray[i32, row]) -> void
+extern take_array_view(view: view[i32]) -> usize
+extern take_str(text: dstr[row]) -> void
 `
 	result := parseAndAnalyze(t, "backend_runtime_types.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -675,7 +675,7 @@ func TestGenerateLLVMIRAcceptsShapeErasingDArrayShorthand(t *testing.T) {
 	src := `def keep(values: darray[i32]) -> darray[i32]:
     return values
 
-def erase(values: DArray[i32, row]) -> DArray[i32]:
+def erase(values: DArray[i32, row]) -> darray[i32]:
     return values
 `
 	result := parseAndAnalyze(t, "backend_darray_shorthand.llcontext", src)
@@ -751,7 +751,7 @@ def padded_size() -> usize:
     return sizeof(Padded)
 
 def array_view_size() -> usize:
-    return sizeof(DArrayView[i32])
+	return sizeof(view[i32])
 `
 	result := parseAndAnalyze(t, "backend_sizeof.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -1264,10 +1264,10 @@ repr(c) struct DynArrayView:
 	items: mutable any void&?
     count: mutable usize
 
-def read_array(values: DArray[i32, row]) -> i32:
+def read_array(values: darray[i32, row]) -> i32:
     return values[1]
 
-def read_view(view: DArrayView[i32]) -> i32:
+def read_view(view: view[i32]) -> i32:
     return view[2]
 `
 	result := parseAndAnalyze(t, "backend_runtime_index.llcontext", src)
@@ -1293,7 +1293,7 @@ def read_view(view: DArrayView[i32]) -> i32:
 }
 
 func TestGenerateLLVMIRIndexesDStrViaRuntimeHelper(t *testing.T) {
-	src := `def read_codepoint(text: DStr[row]) -> char:
+	src := `def read_codepoint(text: dstr[row]) -> char:
     return text[1]
 `
 	result := parseAndAnalyze(t, "backend_runtime_dstr_index.llcontext", src)
@@ -1318,7 +1318,7 @@ func TestGenerateLLVMIRAcceptsShapeErasingDStrShorthand(t *testing.T) {
 	src := `def keep(text: dstr) -> dstr:
     return text
 
-def erase(text: DStr[row]) -> DStr:
+def erase(text: DStr[row]) -> dstr:
     return text
 `
 	result := parseAndAnalyze(t, "backend_dstr_shorthand.llcontext", src)
@@ -1362,17 +1362,17 @@ func TestGenerateLLVMIRIndexesStringViewViaRuntimeHelper(t *testing.T) {
 }
 
 func TestGenerateLLVMIRLowersRuntimeStringEqualityHelpers(t *testing.T) {
-	src := `def same_text(left: DStr[row], right: DStr[col]) -> bool:
-    return left == right
+	src := `def same_text(left: dstr[row], right: dstr[col]) -> bool:
+	return left == right
 
-def same_view_text(view: StringView, text: DStr[row]) -> bool:
-    return view == text
+def same_view_text(view: StringView, text: dstr[row]) -> bool:
+	return view == text
 
-def same_text_view(text: DStr[row], view: StringView) -> bool:
-    return text == view
+def same_text_view(text: dstr[row], view: StringView) -> bool:
+	return text == view
 
 def different_views(left: StringView, right: StringView) -> bool:
-    return left != right
+	return left != right
 `
 	result := parseAndAnalyze(t, "backend_runtime_string_equality.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -1398,7 +1398,7 @@ def different_views(left: StringView, right: StringView) -> bool:
 }
 
 func TestGenerateLLVMIRLowersDStrLenFieldViaRuntimeHelper(t *testing.T) {
-	src := `def text_len(text: DStr[row]) -> i64:
+	src := `def text_len(text: dstr[row]) -> i64:
     return text.len
 `
 	result := parseAndAnalyze(t, "backend_dstr_len.llcontext", src)
@@ -1430,12 +1430,12 @@ repr(c) struct DynArrayView:
     len: mutable usize
     elem_size: mutable usize
 
-def head_owned(values: DArray[i32, row]) -> i32:
-    part: DArrayView[i32] = values[1u:3u]
+def head_owned(values: darray[i32, row]) -> i32:
+	part: view[i32] = values[1u:3u]
     return part[0u]
 
-def head_view(view: DArrayView[i32]) -> i32:
-    part: DArrayView[i32] = view[0u:1u]
+def head_view(view: view[i32]) -> i32:
+	part: view[i32] = view[0u:1u]
     return part[0u]
 `
 	result := parseAndAnalyze(t, "backend_array_slice_syntax.llcontext", src)
@@ -1468,7 +1468,7 @@ func TestGenerateLLVMIRLowersFixedArraySliceSyntaxWithoutRuntimeHelpers(t *testi
 	len: mutable usize
 	elem_size: mutable usize
 
-def slice_owned(values: i32[4]) -> DArrayView[i32]:
+def slice_owned(values: i32[4]) -> view[i32]:
 	return values[1u:3u]
 
 def head_ref(values: any i32[4]&) -> i32:
@@ -1509,8 +1509,8 @@ repr(c) struct DynArrayView:
     len: mutable usize
     elem_size: mutable usize
 
-extern make_array() -> DArray[i32, row]
-extern make_array_view() -> DArrayView[i32]
+extern make_array() -> darray[i32, row]
+extern make_array_view() -> view[i32]
 
 def read_array_index() -> i32:
     return make_array()[1u]
@@ -1577,7 +1577,7 @@ func TestGenerateLLVMIRLowersStringSliceSyntaxViaRuntimeHelpers(t *testing.T) {
 	data: mutable any u8&
     len: mutable i64
 
-def head_codepoint(text: DStr[row]) -> char:
+def head_codepoint(text: dstr[row]) -> char:
 	view: StringView = text[1:3]
     return view[0]
 `

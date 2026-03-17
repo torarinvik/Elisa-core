@@ -964,10 +964,10 @@ repr(c) struct DynArrayView:
 	items: mutable any void&?
 	count: mutable usize
 
-def read_array(values: DArray[i32, row]) -> i32:
+def read_array(values: darray[i32, row]) -> i32:
 	return values[0]
 
-def read_view(view: DArrayView[i32]) -> i32:
+def read_view(view: view[i32]) -> i32:
 	return view[0]
 `
 	_, errs := parseAndAnalyze(t, "runtime_backed_array_index.llcontext", src)
@@ -975,7 +975,7 @@ def read_view(view: DArrayView[i32]) -> i32:
 }
 
 func TestAnalyzeAcceptsDStrIndexingAsChar(t *testing.T) {
-	src := `def read_codepoint(text: DStr[row]) -> char:
+	src := `def read_codepoint(text: dstr[row]) -> char:
 	return text[0]
 `
 	result, errs := parseAndAnalyze(t, "runtime_backed_dstr_index.llcontext", src)
@@ -994,7 +994,7 @@ func TestAnalyzeAcceptsDStrIndexingAsChar(t *testing.T) {
 }
 
 func TestAnalyzeRejectsAssigningToDStrIndex(t *testing.T) {
-	src := `def bad(text: DStr[row]) -> void:
+	src := `def bad(text: dstr[row]) -> void:
 	text[0] <- 1
 `
 	_, errs := parseAndAnalyze(t, "dstr_index_assignment.llcontext", src)
@@ -1026,19 +1026,19 @@ func TestAnalyzeAcceptsStringViewIndexingAsChar(t *testing.T) {
 }
 
 func TestAnalyzeAcceptsRuntimeStringEqualityOperators(t *testing.T) {
-	src := `def same_text(left: DStr[row], right: DStr[col]) -> bool:
+	src := `def same_text(left: dstr[row], right: dstr[col]) -> bool:
 	return left == right
 
-def same_view_text(view: StringView, text: DStr[row]) -> bool:
+def same_view_text(view: StringView, text: dstr[row]) -> bool:
 	return view == text
 
-def same_text_view(text: DStr[row], view: StringView) -> bool:
+def same_text_view(text: dstr[row], view: StringView) -> bool:
 	return text == view
 
 def different_views(left: StringView, right: StringView) -> bool:
 	return left != right
 
-def same_literal(text: DStr[row]) -> bool:
+def same_literal(text: dstr[row]) -> bool:
 	return text == "hello"
 `
 	_, errs := parseAndAnalyze(t, "runtime_string_equality.llcontext", src)
@@ -1046,7 +1046,7 @@ def same_literal(text: DStr[row]) -> bool:
 }
 
 func TestAnalyzeAcceptsDStrLenField(t *testing.T) {
-	src := `def text_len(text: DStr[row]) -> i64:
+	src := `def text_len(text: dstr[row]) -> i64:
 	return text.len
 `
 	_, errs := parseAndAnalyze(t, "dstr_len_field.llcontext", src)
@@ -1063,9 +1063,9 @@ func TestAnalyzeAcceptsViewAliasForArraySlices(t *testing.T) {
 }
 
 func TestAnalyzeAcceptsArrayAndArrayViewSliceSyntax(t *testing.T) {
-	src := `def middle(values: DArray[i32, row], view: DArrayView[i32]) -> i32:
-	part: DArrayView[i32] = values[1u:3u]
-	sub: DArrayView[i32] = view[0u:1u]
+	src := `def middle(values: darray[i32, row], view: view[i32]) -> i32:
+	part: view[i32] = values[1u:3u]
+	sub: view[i32] = view[0u:1u]
 	return part[0u] + sub[0u]
 `
 	_, errs := parseAndAnalyze(t, "array_and_array_view_slice.llcontext", src)
@@ -1074,8 +1074,8 @@ func TestAnalyzeAcceptsArrayAndArrayViewSliceSyntax(t *testing.T) {
 
 func TestAnalyzeAcceptsFixedArraySliceSyntax(t *testing.T) {
 	src := `def middle(values: i32[4], view: any i32[4]&) -> i32:
-	part: DArrayView[i32] = values[1u:3u]
-	sub: DArrayView[i32] = view[0u:2u]
+	part: view[i32] = values[1u:3u]
+	sub: view[i32] = view[0u:2u]
 	return part[0u] + sub[1u]
 `
 	_, errs := parseAndAnalyze(t, "fixed_array_slice.llcontext", src)
@@ -1083,8 +1083,8 @@ func TestAnalyzeAcceptsFixedArraySliceSyntax(t *testing.T) {
 }
 
 func TestAnalyzeAcceptsNestedCollectionAccessOnReturnedValues(t *testing.T) {
-	src := `extern make_array() -> DArray[i32, row]
-extern make_array_view() -> DArrayView[i32]
+	src := `extern make_array() -> darray[i32, row]
+extern make_array_view() -> view[i32]
 
 def read_array_index() -> i32:
 	return make_array()[1u]
@@ -1185,7 +1185,7 @@ func TestAnalyzeRejectsMismatchedFixedArrayLiteralLength(t *testing.T) {
 }
 
 func TestAnalyzeAcceptsStringSliceSyntax(t *testing.T) {
-	src := `def middle(text: DStr[row]) -> StringView:
+	src := `def middle(text: dstr[row]) -> StringView:
 	return text[1:3]
 `
 	_, errs := parseAndAnalyze(t, "string_slice_syntax.llcontext", src)
@@ -1193,7 +1193,7 @@ func TestAnalyzeAcceptsStringSliceSyntax(t *testing.T) {
 }
 
 func TestAnalyzeRejectsAssigningToDStrLenField(t *testing.T) {
-	src := `def bad(text: DStr[row]) -> void:
+	src := `def bad(text: dstr[row]) -> void:
 	text.len <- 1
 `
 	_, errs := parseAndAnalyze(t, "dstr_len_assign.llcontext", src)
@@ -1219,11 +1219,11 @@ func TestAnalyzeRejectsAssigningToStringViewIndex(t *testing.T) {
 }
 
 func TestAnalyzeAcceptsImplicitDArrayShapeParams(t *testing.T) {
-	src := `def identity[T](array: DArray[T, shape_in]) -> DArray[T, shape_in]:
-    return array
+	src := `def identity[T](array: darray[T, shape_in]) -> darray[T, shape_in]:
+	return array
 
-def keep(array: DArray[i32, row]) -> DArray[i32, row]:
-    return identity(array)
+def keep(array: darray[i32, row]) -> darray[i32, row]:
+	return identity(array)
 `
 	_, errs := parseAndAnalyze(t, "implicit_darray_shape_params.llcontext", src)
 	requireNoErrors(t, errs)
@@ -1231,34 +1231,34 @@ def keep(array: DArray[i32, row]) -> DArray[i32, row]:
 
 func TestAnalyzeAcceptsShapeErasingDArrayShorthand(t *testing.T) {
 	src := `def keep_surface(values: darray[i32]) -> darray[i32]:
-    return values
+	return values
 
-def keep_generic(values: DArray[i32]) -> DArray[i32]:
-    return values
+def keep_generic(values: DArray[i32]) -> darray[i32]:
+	return values
 
-def erase_explicit(values: DArray[i32, row]) -> DArray[i32]:
-    return values
+def erase_explicit(values: DArray[i32, row]) -> darray[i32]:
+	return values
 `
 	_, errs := parseAndAnalyze(t, "darray_shorthand_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
 func TestAnalyzeRejectsRecoveringExplicitShapeFromShorthand(t *testing.T) {
-	src := `def bad(values: DArray[i32]) -> DArray[i32, row]:
-    return values
+	src := `def bad(values: DArray[i32]) -> darray[i32, row]:
+	return values
 `
 	_, errs := parseAndAnalyze(t, "darray_shorthand_reject.llcontext", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "return type expects DArray[i32, row], got DArray[i32]") {
+	if !strings.Contains(strings.Join(errs, "\n"), "return type expects darray[i32, row], got darray[i32]") {
 		t.Fatalf("expected omitted-shape to explicit-shape rejection, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
 
 func TestAnalyzeDArrayUsesDynArrayRuntimeFields(t *testing.T) {
-	src := `def needs_grow[T](array: any DArray[T, row]&) -> bool:
-    return array.count >= array.capacity
+	src := `def needs_grow[T](array: any darray[T, row]&) -> bool:
+	return array.count >= array.capacity
 `
 	_, errs := parseAndAnalyze(t, "darray_runtime_field_access.llcontext", src)
 	requireNoErrors(t, errs)
@@ -1268,10 +1268,10 @@ func TestAnalyzeDynArrayRuntimeBridgeWorksBothDirections(t *testing.T) {
 	src := `def take_raw[T](values: DynArray[T]) -> void:
 	pass
 
-def take_logical[T](values: DArray[T, shape_in]) -> void:
+def take_logical[T](values: darray[T, shape_in]) -> void:
 	pass
 
-def roundtrip(values: DArray[i32, row], raw: DynArray[i32]) -> DArray[i32, row]:
+def roundtrip(values: darray[i32, row], raw: DynArray[i32]) -> darray[i32, row]:
 	take_raw(values)
 	take_logical(raw)
 	bridged: DynArray[i32] = values
@@ -1282,24 +1282,24 @@ def roundtrip(values: DArray[i32, row], raw: DynArray[i32]) -> DArray[i32, row]:
 }
 
 func TestAnalyzeRejectsMismatchedDArrayShapes(t *testing.T) {
-	src := `def bad(array: DArray[i32, row]) -> DArray[i32, col]:
-    return array
+	src := `def bad(array: darray[i32, row]) -> darray[i32, col]:
+	return array
 `
 	_, errs := parseAndAnalyze(t, "mismatched_darray_shapes.llcontext", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "return type expects DArray[i32, col], got DArray[i32, row]") {
+	if !strings.Contains(strings.Join(errs, "\n"), "return type expects darray[i32, col], got darray[i32, row]") {
 		t.Fatalf("expected dynamic shape mismatch diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
 
 func TestAnalyzeAcceptsImplicitDStrShapeParams(t *testing.T) {
-	src := `def echo(text: DStr[shape_text]) -> DStr[shape_text]:
-    return text
+	src := `def echo(text: dstr[shape_text]) -> dstr[shape_text]:
+	return text
 
-def keep(text: DStr[row]) -> DStr[row]:
-    return echo(text)
+def keep(text: dstr[row]) -> dstr[row]:
+	return echo(text)
 `
 	_, errs := parseAndAnalyze(t, "implicit_dstr_shape_params.llcontext", src)
 	requireNoErrors(t, errs)
@@ -1307,13 +1307,13 @@ def keep(text: DStr[row]) -> DStr[row]:
 
 func TestAnalyzeAcceptsShapeErasingDStrShorthand(t *testing.T) {
 	src := `def keep_surface(text: dstr) -> dstr:
-    return text
+	return text
 
 def keep_generic(text: DStr) -> DStr:
-    return text
+	return text
 
 def erase_explicit(text: DStr[row]) -> DStr:
-    return text
+	return text
 `
 	_, errs := parseAndAnalyze(t, "dstr_shorthand_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -1321,13 +1321,13 @@ def erase_explicit(text: DStr[row]) -> DStr:
 
 func TestAnalyzeRejectsRecoveringExplicitShapeFromDStrShorthand(t *testing.T) {
 	src := `def bad(text: DStr) -> DStr[row]:
-    return text
+	return text
 `
 	_, errs := parseAndAnalyze(t, "dstr_shorthand_reject.llcontext", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "return type expects DStr[row], got DStr") {
+	if !strings.Contains(strings.Join(errs, "\n"), "return type expects dstr[row], got dstr") {
 		t.Fatalf("expected omitted-shape DStr to explicit-shape rejection, got:\n%s", strings.Join(errs, "\n"))
 	}
 }

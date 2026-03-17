@@ -24,7 +24,7 @@ def ctx_stage0_string_view_index(view: StringView, index: i64) -> i64:
 def ctx_stage0_string_view_copy(view: StringView) -> any u8&:
 	return view.data
 
-def ctx_stage1rt_string_view(value: DStr[shape_in], start: i64, end: i64) -> StringView:
+def ctx_stage1rt_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
 	return ctx_stage0_string_view(value, start, end)
 
 def ctx_stage1rt_string_view_len(view: StringView) -> i64:
@@ -33,15 +33,15 @@ def ctx_stage1rt_string_view_len(view: StringView) -> i64:
 def ctx_stage1rt_string_view_index(view: StringView, index: i64) -> i64:
 	return ctx_stage0_string_view_index(view, index)
 
-def ctx_stage1rt_string_from_view(view: StringView) -> DStr[shape_out]:
+def ctx_stage1rt_string_from_view(view: StringView) -> dstr[shape_out]:
 	return ctx_stage0_string_view_copy(view)
 
-def probe(text: DStr[row]) -> i64:
+def probe(text: dstr[row]) -> i64:
 	view: StringView = ctx_stage1rt_string_view(text, 0, 2)
 	_ = ctx_stage1rt_string_view_index(view, 0)
 	return ctx_stage1rt_string_view_len(view)
 
-def bad(text: DStr[row]) -> DStr[row]:
+def bad(text: dstr[row]) -> dstr[row]:
 	view: StringView = ctx_stage1rt_string_view(text, 0, 2)
 	return ctx_stage1rt_string_from_view(view)
 `
@@ -50,7 +50,7 @@ def bad(text: DStr[row]) -> DStr[row]:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "return type expects DStr[row], got DStr[shape_out#") || !strings.Contains(all, "note: ctx_stage1rt_string_from_view returns a fresh logical shape for shape_out") {
+	if !strings.Contains(all, "return type expects dstr[row], got dstr[shape_out#") || !strings.Contains(all, "note: ctx_stage1rt_string_from_view returns a fresh logical shape for shape_out") {
 		t.Fatalf("expected bounded string view fresh-shape diagnostic, got:\n%s", all)
 	}
 }
@@ -75,7 +75,7 @@ def ctx_stage0_string_view_eq(view: StringView, other: any u8&?) -> int:
 def ctx_stage0_string_views_eq(lhs: StringView, rhs: StringView) -> int:
 	return 1
 
-def ctx_stage1rt_string_view(value: DStr[shape_in], start: i64, end: i64) -> StringView:
+def ctx_stage1rt_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
 	return ctx_stage0_string_view(value, start, end)
 
 def ctx_stage1rt_string_view_len(view: StringView) -> i64:
@@ -84,13 +84,13 @@ def ctx_stage1rt_string_view_len(view: StringView) -> i64:
 def ctx_stage1rt_string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
 	return ctx_stage0_string_view_slice(view, start, end)
 
-def ctx_stage1rt_string_view_eq(view: StringView, other: DStr[shape_other]) -> int:
+def ctx_stage1rt_string_view_eq(view: StringView, other: dstr[shape_other]) -> int:
 	return ctx_stage0_string_view_eq(view, other)
 
 def ctx_stage1rt_string_views_eq(lhs: StringView, rhs: StringView) -> int:
 	return ctx_stage0_string_views_eq(lhs, rhs)
 
-def probe(text: DStr[row], other: DStr[col]) -> int:
+def probe(text: dstr[row], other: dstr[col]) -> int:
 	view: StringView = ctx_stage1rt_string_view(text, 0, 4)
 	sub: StringView = ctx_stage1rt_string_view_slice(view, 1, 3)
 	if ctx_stage1rt_string_view_eq(sub, other) != 0:
