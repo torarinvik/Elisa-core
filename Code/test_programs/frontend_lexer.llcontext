@@ -42,9 +42,29 @@ def frontend_kind_eq(actual: FrontendTokenKind, expected: FrontendTokenKind) -> 
             match actual:
                 FrontendTokenKind.Def:
                     return true
+        FrontendTokenKind.Any:
+            match actual:
+                FrontendTokenKind.Any:
+                    return true
+        FrontendTokenKind.Region:
+            match actual:
+                FrontendTokenKind.Region:
+                    return true
+        FrontendTokenKind.Destroy:
+            match actual:
+                FrontendTokenKind.Destroy:
+                    return true
+        FrontendTokenKind.New:
+            match actual:
+                FrontendTokenKind.New:
+                    return true
         FrontendTokenKind.Colon:
             match actual:
                 FrontendTokenKind.Colon:
+                    return true
+        FrontendTokenKind.Assign:
+            match actual:
+                FrontendTokenKind.Assign:
                     return true
         FrontendTokenKind.LParen:
             match actual:
@@ -54,9 +74,21 @@ def frontend_kind_eq(actual: FrontendTokenKind, expected: FrontendTokenKind) -> 
             match actual:
                 FrontendTokenKind.RParen:
                     return true
+        FrontendTokenKind.LBracket:
+            match actual:
+                FrontendTokenKind.LBracket:
+                    return true
+        FrontendTokenKind.RBracket:
+            match actual:
+                FrontendTokenKind.RBracket:
+                    return true
         FrontendTokenKind.Comma:
             match actual:
                 FrontendTokenKind.Comma:
+                    return true
+        FrontendTokenKind.Ampersand:
+            match actual:
+                FrontendTokenKind.Ampersand:
                     return true
         FrontendTokenKind.Ellipsis:
             match actual:
@@ -193,6 +225,16 @@ def frontend_case_paren_suppresses_newline() -> bool:
     return frontend_expect_kind(tokens, 0u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 1u, FrontendTokenKind.LParen) and frontend_expect_kind(tokens, 2u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 3u, FrontendTokenKind.Comma) and frontend_expect_kind(tokens, 4u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 5u, FrontendTokenKind.RParen) and frontend_expect_kind(tokens, 6u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 7u, FrontendTokenKind.Eof)
 
 
+def frontend_case_region_alloc_syntax() -> bool:
+    region scratch(4096u)
+    a: any Arena& = (&scratch).cast[any Arena&]()
+    source: static u8& = "region parse\nvalue: any i32& = new[parse] 1\ndestroy parse\n"
+    tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, source.cast[any u8&]())
+    ok: bool = frontend_expect_token_count(tokens, 19u) and frontend_expect_kind(tokens, 0u, FrontendTokenKind.Region) and frontend_expect_kind(tokens, 1u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 2u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 3u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 4u, FrontendTokenKind.Colon) and frontend_expect_kind(tokens, 5u, FrontendTokenKind.Any) and frontend_expect_kind(tokens, 6u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 7u, FrontendTokenKind.Ampersand) and frontend_expect_kind(tokens, 8u, FrontendTokenKind.Assign) and frontend_expect_kind(tokens, 9u, FrontendTokenKind.New) and frontend_expect_kind(tokens, 10u, FrontendTokenKind.LBracket) and frontend_expect_kind(tokens, 11u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 12u, FrontendTokenKind.RBracket) and frontend_expect_kind(tokens, 13u, FrontendTokenKind.IntLit) and frontend_expect_kind(tokens, 14u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 15u, FrontendTokenKind.Destroy) and frontend_expect_kind(tokens, 16u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 17u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 18u, FrontendTokenKind.Eof)
+    destroy scratch
+    return ok
+
+
 def frontend_lexer_parity_suite_impl() -> int:
     if not frontend_case_simple_ident():
         return 0
@@ -208,6 +250,8 @@ def frontend_lexer_parity_suite_impl() -> int:
         return 0
     if not frontend_case_paren_suppresses_newline():
         return 0
+    if not frontend_case_region_alloc_syntax():
+        return 0
     return 1
 
 
@@ -216,9 +260,9 @@ def frontend_count_tokens(a: any Arena&, filename: any u8&, source: any u8&) -> 
     count: mutable usize = 0u
 
     while true:
-        token: FrontendToken = frontend_next_token((&lexer).cast[any FrontendLexer&]())
+        kind: FrontendTokenKind = frontend_next_token_kind((&lexer).cast[any FrontendLexer&]())
         count <- count + 1u
-        match token.kind:
+        match kind:
             FrontendTokenKind.Eof:
                 return count
 
