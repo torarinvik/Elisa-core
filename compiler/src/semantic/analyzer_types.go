@@ -52,6 +52,12 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, params []a
 func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 	switch n := expr.(type) {
 	case *ast.NamedType:
+		switch n.Name {
+		case "dstr", "dstring":
+			return &DStrType{Shape: &WildcardShape{}, SurfaceName: "dstr"}
+		case "DStr":
+			return &DStrType{Shape: &WildcardShape{}}
+		}
 		if t, ok := a.lookupTypeParam(n.Name); ok {
 			return t
 		}
@@ -265,9 +271,12 @@ func (a *Analyzer) resolveDynamicShapeType(expr *ast.GenericType) (Type, bool) {
 		}
 		return &DArrayViewType{Elem: a.resolveType(expr.Args[0]), SurfaceName: "view"}, true
 	case "DArray":
-		if len(expr.Args) != 2 {
-			a.errorf(expr.Pos(), "DArray expects 2 arguments, got %d", len(expr.Args))
+		if len(expr.Args) != 1 && len(expr.Args) != 2 {
+			a.errorf(expr.Pos(), "DArray expects 1 or 2 arguments, got %d", len(expr.Args))
 			return invalidType, true
+		}
+		if len(expr.Args) == 1 {
+			return &DArrayType{Elem: a.resolveType(expr.Args[0]), Shape: &WildcardShape{}}, true
 		}
 		return &DArrayType{Elem: a.resolveType(expr.Args[0]), Shape: a.resolveShapeArg(expr.Args[1])}, true
 	case "DArrayView":
@@ -312,9 +321,12 @@ func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
 		}
 		return resolved
 	case "darray":
-		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 1 {
-			a.errorf(expr.Pos(), "darray expects 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) > 1 {
+			a.errorf(expr.Pos(), "darray expects 1 or 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
 			return invalidType
+		}
+		if len(expr.ValueArgs) == 0 {
+			return &DArrayType{Elem: a.resolveType(expr.TypeArgs[0]), Shape: &WildcardShape{}, SurfaceName: "darray"}
 		}
 		return &DArrayType{Elem: a.resolveType(expr.TypeArgs[0]), Shape: a.resolveShapeExpr(expr.ValueArgs[0]), SurfaceName: "darray"}
 	case "str", "string":

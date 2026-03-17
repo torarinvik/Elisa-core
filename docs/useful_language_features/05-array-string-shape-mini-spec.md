@@ -186,13 +186,17 @@ I would keep representation brutally simple.
 
 ### Dynamic array representation
 
-User-facing code should talk in terms of the built-in `darray[T, shape]` surface.
+User-facing code can talk in terms of the built-in `darray[T, shape]` surface when it wants to preserve explicit logical shape relationships, or use `darray[T]` as the shape-erasing shorthand when it does not need to name or preserve the shape witness.
+
+Intuitively, `darray[T]` means “some logical shape exists here, but this API is not exposing it”.
 
 Internally, the runtime representation can still stay equivalent to a simple C-like carrier with a data pointer, length, and capacity.
 
 ### Dynamic string representation
 
-User-facing code should talk in terms of `str[N]`, `dstr[shape]`, and `sview[begin, end]`.
+User-facing code should talk in terms of `str[N]`, `dstr[shape]`, and `sview[begin, end]` when it wants explicit shape relationships, or use bare `dstr` / `DStr` as shape-erasing shorthand when it only cares that a value is a dynamic string.
+
+As with `darray[T]`, bare `dstr` means “some logical string shape exists here, but this API is not naming or preserving it”.
 
 Internally, the runtime representation can still stay equivalent to a simple C-like byte-buffer carrier.
 

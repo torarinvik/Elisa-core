@@ -178,6 +178,13 @@ func (p *Parser) parseBuiltinTypeExpr(pos lexer.Pos, name string) ast.TypeExpr {
 	case "array", "darray":
 		p.advance()
 		elem := p.parseTypeExpr()
+		if p.match(lexer.TOKEN_RBRACKET) {
+			if name == "darray" {
+				return &ast.BuiltinTypeExpr{Position: pos, Name: name, TypeArgs: []ast.TypeExpr{elem}}
+			}
+			p.errorf("array expects 2 arguments, got 1")
+			return &ast.BuiltinTypeExpr{Position: pos, Name: name, TypeArgs: []ast.TypeExpr{elem}}
+		}
 		p.expect(lexer.TOKEN_COMMA)
 		size := p.parseExpr()
 		p.expect(lexer.TOKEN_RBRACKET)

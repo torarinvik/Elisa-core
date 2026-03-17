@@ -69,6 +69,22 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			},
 		},
 		{
+			name: "allocator_ownership",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "allocator_ownership.llcontext"),
+			checks: []string{
+				"%HeapPairNode = type { %FuzzPair, ptr }",
+				"declare ptr @alloc_heap_pair_node()",
+				"declare ptr @sfree_heap_pair_node(ptr)",
+				"declare ptr @alloc_bytes(i64)",
+				"declare ptr @sfree_bytes(ptr)",
+				"declare i64 @snprintf(ptr, i64, ptr, ...)",
+				"define i32 @build_pair_chain_sum(ptr ",
+				"define i32 @borrow_then_release_single_pair(ptr ",
+				"@recursive_format_or_fallback(",
+				"@allocator_ownership_combo(",
+			},
+		},
+		{
 			name: "runtime_bridges",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "runtime_bridges.llcontext"),
 			checks: []string{

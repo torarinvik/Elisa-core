@@ -1107,6 +1107,13 @@ def from_local_array_elem() -> int:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsAllocatorOwnershipFixturePatterns(t *testing.T) {
+	repoRoot := repoRootFromTestFile(t)
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "test_programs", "allocator_ownership.llcontext"), map[string]bool{})
+	_, errs := parseAndAnalyze(t, "allocator_ownership.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeAcceptsTypedFixedArrayLiteralInitialization(t *testing.T) {
 	src := `def first() -> i32:
 	values: i32[3] = [1, 2, 3]
@@ -1187,6 +1194,33 @@ def keep(array: DArray[i32, row]) -> DArray[i32, row]:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsShapeErasingDArrayShorthand(t *testing.T) {
+	src := `def keep_surface(values: darray[i32]) -> darray[i32]:
+    return values
+
+def keep_generic(values: DArray[i32]) -> DArray[i32]:
+    return values
+
+def erase_explicit(values: DArray[i32, row]) -> DArray[i32]:
+    return values
+`
+	_, errs := parseAndAnalyze(t, "darray_shorthand_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsRecoveringExplicitShapeFromShorthand(t *testing.T) {
+	src := `def bad(values: DArray[i32]) -> DArray[i32, row]:
+    return values
+`
+	_, errs := parseAndAnalyze(t, "darray_shorthand_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "return type expects DArray[i32, row], got DArray[i32]") {
+		t.Fatalf("expected omitted-shape to explicit-shape rejection, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeDArrayUsesDynArrayRuntimeFields(t *testing.T) {
 	src := `def needs_grow[T](array: any DArray[T, row]&) -> bool:
     return array.count >= array.capacity
@@ -1236,6 +1270,33 @@ def keep(text: DStr[row]) -> DStr[row]:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsShapeErasingDStrShorthand(t *testing.T) {
+	src := `def keep_surface(text: dstr) -> dstr:
+    return text
+
+def keep_generic(text: DStr) -> DStr:
+    return text
+
+def erase_explicit(text: DStr[row]) -> DStr:
+    return text
+`
+	_, errs := parseAndAnalyze(t, "dstr_shorthand_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsRecoveringExplicitShapeFromDStrShorthand(t *testing.T) {
+	src := `def bad(text: DStr) -> DStr[row]:
+    return text
+`
+	_, errs := parseAndAnalyze(t, "dstr_shorthand_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "return type expects DStr[row], got DStr") {
+		t.Fatalf("expected omitted-shape DStr to explicit-shape rejection, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeAcceptsImplicitDListShapeParams(t *testing.T) {
 	src := `def identity[T](values: DList[T, shape_in]) -> DList[T, shape_in]:
     return values
@@ -1266,7 +1327,10 @@ def roundtrip(text: DStr[row], raw: any u8&) -> DStr[row]:
 }
 
 func TestAnalyzeRejectsWrongDynamicShapeArity(t *testing.T) {
-	src := `def bad_array(x: DArray[i32]) -> void:
+	src := `def ok_array(x: DArray[i32]) -> void:
+    pass
+
+def bad_array(x: DArray[i32, left, right]) -> void:
     pass
 
 def bad_array_view(x: DArrayView[i32, row]) -> void:
@@ -1286,7 +1350,7 @@ def bad_str(x: DStr[row, col]) -> void:
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "DArray expects 2 arguments, got 1") || !strings.Contains(all, "DArrayView expects 1 argument, got 2") || !strings.Contains(all, "DList expects 2 arguments, got 1") || !strings.Contains(all, "DListView expects 1 argument, got 2") || !strings.Contains(all, "DStr expects 1 argument, got 2") {
+	if !strings.Contains(all, "DArray expects 1 or 2 arguments, got 3") || !strings.Contains(all, "DArrayView expects 1 argument, got 2") || !strings.Contains(all, "DList expects 2 arguments, got 1") || !strings.Contains(all, "DListView expects 1 argument, got 2") || !strings.Contains(all, "DStr expects 1 argument, got 2") {
 		t.Fatalf("expected dynamic shape arity diagnostics, got:\n%s", all)
 	}
 }

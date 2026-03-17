@@ -42,6 +42,15 @@ func (g *llvmGenerator) constExprValue(expr ast.Expr, expected semantic.Type) (C
 	if actual == nil {
 		actual = g.exprType(expr)
 	}
+	if resolvedExpr, resolvedType, changed, err := g.resolveConstAggregateExpr(expr); err != nil {
+		return nil, err
+	} else if changed {
+		coercedType := expected
+		if coercedType == nil {
+			coercedType = resolvedType
+		}
+		return g.constExprValue(resolvedExpr, coercedType)
+	}
 	switch n := expr.(type) {
 	case *ast.IntLit:
 		llvmType, err := g.lowerType(actual)
@@ -163,6 +172,128 @@ func (g *llvmGenerator) constExprValue(expr ast.Expr, expected semantic.Type) (C
 		}
 		return nil, fmt.Errorf("unsupported global initializer expression %T", expr)
 	}
+}
+
+func (g *llvmGenerator) resolveConstAggregateExpr(expr ast.Expr) (ast.Expr, semantic.Type, bool, error) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		resolved, resolvedType, changed, err := g.resolveConstAggregateExpr(n.Inner)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		if changed {
+			return resolved, resolvedType, true, nil
+		}
+		return n.Inner, g.exprType(n.Inner), true, nil
+	case *ast.Ident:
+		decl, declType, ok := g.lookupGlobalConstDecl(n.Name)
+		if !ok || decl.Value == nil {
+			return nil, nil, false, nil
+		}
+		return decl.Value, declType, true, nil
+	case *ast.IndexExpr:
+		resolvedObj, objType, changed, err := g.resolveConstAggregateExpr(n.Object)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		if !changed {
+			resolvedObj = n.Object
+			objType = g.exprType(n.Object)
+		}
+		arrayType, ok := constAggregateIndexedArrayType(objType)
+		if !ok {
+			return nil, nil, false, nil
+		}
+		indexValue, ok := g.evalConstExpr(n.Index)
+		if !ok || indexValue.Kind != semantic.ConstInt {
+			return nil, nil, false, fmt.Errorf("global initializer index must be a compile-time integer constant")
+		}
+		switch obj := resolvedObj.(type) {
+		case *ast.ListLitExpr:
+			if indexValue.Int < 0 || int(indexValue.Int) >= len(obj.Elems) {
+				return nil, nil, false, fmt.Errorf("global initializer index %d out of bounds", indexValue.Int)
+			}
+			selected := obj.Elems[indexValue.Int]
+			if resolved, resolvedType, changed, err := g.resolveConstAggregateExpr(selected); err != nil {
+				return nil, nil, false, err
+			} else if changed {
+				return resolved, resolvedType, true, nil
+			}
+			return selected, arrayType.Elem, true, nil
+		case *ast.ZeroedLit:
+			return &ast.ZeroedLit{Position: obj.Position}, arrayType.Elem, true, nil
+		default:
+			return nil, nil, false, nil
+		}
+	case *ast.FieldExpr:
+		resolvedObj, objType, changed, err := g.resolveConstAggregateExpr(n.Object)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		if !changed {
+			resolvedObj = n.Object
+			objType = g.exprType(n.Object)
+		}
+		fieldType, index, _, pointerLike, err := g.fieldInfo(objType, n.Field)
+		if err != nil {
+			return nil, nil, false, nil
+		}
+		if pointerLike {
+			return nil, nil, false, nil
+		}
+		structType := objType
+		if ref, ok := objType.(*semantic.RefType); ok {
+			structType = ref.Elem
+		}
+		if runtimeBacked := g.runtimeBackedStructType(structType); runtimeBacked != nil {
+			structType = runtimeBacked
+		}
+		switch obj := resolvedObj.(type) {
+		case *ast.StructLitExpr:
+			fields, err := g.structLiteralFields(structType)
+			if err != nil {
+				return nil, nil, false, err
+			}
+			if index < 0 || index >= len(obj.Args) {
+				return nil, nil, false, fmt.Errorf("global initializer field index %d out of bounds", index)
+			}
+			selected := obj.Args[index]
+			if resolved, resolvedType, changed, err := g.resolveConstAggregateExpr(selected); err != nil {
+				return nil, nil, false, err
+			} else if changed {
+				return resolved, resolvedType, true, nil
+			}
+			return selected, fields[index].Type, true, nil
+		case *ast.ZeroedLit:
+			return &ast.ZeroedLit{Position: obj.Position}, fieldType, true, nil
+		default:
+			return nil, nil, false, nil
+		}
+	default:
+		return nil, nil, false, nil
+	}
+}
+
+func (g *llvmGenerator) lookupGlobalConstDecl(name string) (*ast.GlobalDecl, semantic.Type, bool) {
+	if g == nil || g.result == nil || g.result.GlobalScope == nil {
+		return nil, nil, false
+	}
+	sym, ok := g.result.GlobalScope.Lookup(name)
+	if !ok || sym == nil {
+		return nil, nil, false
+	}
+	decl, ok := sym.Node.(*ast.GlobalDecl)
+	if !ok {
+		return nil, nil, false
+	}
+	return decl, sym.Type, true
+}
+
+func constAggregateIndexedArrayType(t semantic.Type) (*semantic.ArrayType, bool) {
+	if arrayType, ok := t.(*semantic.ArrayType); ok {
+		return arrayType, true
+	}
+	return nil, false
 }
 
 func (g *llvmGenerator) constZero(t semantic.Type) (C.LLVMValueRef, error) {

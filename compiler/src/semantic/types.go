@@ -50,6 +50,8 @@ type NamedShape struct {
 	Name string
 }
 
+type WildcardShape struct{}
+
 type FreshShape struct {
 	ID     int
 	Label  string
@@ -176,9 +178,10 @@ func (*OpaqueType) isType()          {}
 func (*GenericInstanceType) isType() {}
 func (*FuncType) isType()            {}
 
-func (*ShapeParam) isShape() {}
-func (*NamedShape) isShape() {}
-func (*FreshShape) isShape() {}
+func (*ShapeParam) isShape()    {}
+func (*NamedShape) isShape()    {}
+func (*WildcardShape) isShape() {}
+func (*FreshShape) isShape()    {}
 
 func (*InvalidType) String() string { return "<invalid>" }
 func (*NeverType) String() string   { return "<never>" }
@@ -318,8 +321,9 @@ func errorSetSelectionIsFull(errSet *ErrorSetType, selected map[string]bool) boo
 	}
 	return true
 }
-func (s *ShapeParam) String() string { return s.Name }
-func (s *NamedShape) String() string { return s.Name }
+func (s *ShapeParam) String() string    { return s.Name }
+func (s *NamedShape) String() string    { return s.Name }
+func (s *WildcardShape) String() string { return "_" }
 func (s *FreshShape) String() string {
 	if s.Label != "" {
 		return fmt.Sprintf("%s#%d", s.Label, s.ID)
@@ -365,6 +369,12 @@ func (t *ArrayType) String() string {
 	return fmt.Sprintf("%s[%s]", t.Elem.String(), t.Size)
 }
 func (t *DArrayType) String() string {
+	if isWildcardShape(t.Shape) {
+		if t.SurfaceName == "darray" {
+			return fmt.Sprintf("darray[%s]", t.Elem.String())
+		}
+		return fmt.Sprintf("DArray[%s]", t.Elem.String())
+	}
 	if t.SurfaceName == "darray" {
 		return fmt.Sprintf("darray[%s, %s]", t.Elem.String(), t.Shape.String())
 	}
@@ -386,6 +396,12 @@ func (t *DListViewType) String() string {
 	return fmt.Sprintf("DListView[%s]", t.Elem.String())
 }
 func (t *DStrType) String() string {
+	if isWildcardShape(t.Shape) {
+		if t.SurfaceName == "dstr" || t.SurfaceName == "dstring" {
+			return "dstr"
+		}
+		return "DStr"
+	}
 	if t.SurfaceName == "dstr" || t.SurfaceName == "dstring" {
 		return fmt.Sprintf("dstr[%s]", t.Shape.String())
 	}
@@ -634,6 +650,9 @@ func SameShape(a, b Shape) bool {
 	case *NamedShape:
 		sb, ok := b.(*NamedShape)
 		return ok && sa.Name == sb.Name
+	case *WildcardShape:
+		_, ok := b.(*WildcardShape)
+		return ok
 	case *FreshShape:
 		sb, ok := b.(*FreshShape)
 		return ok && sa.ID == sb.ID
@@ -646,5 +665,13 @@ func shapeMatchesPattern(pattern, actual Shape) bool {
 	if pattern == nil || actual == nil {
 		return pattern == actual
 	}
+	if isWildcardShape(pattern) {
+		return true
+	}
 	return SameShape(pattern, actual)
+}
+
+func isWildcardShape(shape Shape) bool {
+	_, ok := shape.(*WildcardShape)
+	return ok
 }

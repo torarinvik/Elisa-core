@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -27,6 +28,21 @@ func parseAndAnalyze(t *testing.T, filename string, src string) *semantic.Result
 		t.Fatalf("semantic errors:\n%s", strings.Join(errs, "\n"))
 	}
 	return result
+}
+
+func loadFixtureSource(t *testing.T, relParts ...string) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("failed to determine test file path")
+	}
+	parts := append([]string{filepath.Dir(thisFile), "..", "..", ".."}, relParts...)
+	path := filepath.Join(parts...)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", path, err)
+	}
+	return string(raw)
 }
 
 func TestGenerateLLVMIRDefinesSimpleFunctionBody(t *testing.T) {
@@ -335,6 +351,44 @@ global flags: i32[4] = zeroed
 		"@negated = global i32 -2",
 		"@pair = global %Pair { i32 1, i32 2 }",
 		"@flags = global [4 x i32] zeroinitializer",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRAllowsAggregateGlobalReferencesInInitializers(t *testing.T) {
+	src := `repr(c) struct Pair:
+	left: i32
+	right: i32
+
+repr(c) struct Holder:
+	pair: Pair
+
+global base: Pair = Pair(1, 2)
+global table: Pair[2] = [base, Pair(3, 4)]
+global picked: Pair = table[1u]
+global wrapped: Holder = Holder(table[0u])
+global first_left: i32 = table[0u].left
+`
+	result := parseAndAnalyze(t, "backend_global_aggregate_refs.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%Pair = type { i32, i32 }",
+		"%Holder = type { %Pair }",
+		"@base = global %Pair { i32 1, i32 2 }",
+		"@table = global [2 x %Pair]",
+		"%Pair { i32 1, i32 2 }",
+		"%Pair { i32 3, i32 4 }",
+		"@picked = global %Pair { i32 3, i32 4 }",
+		"@wrapped = global %Holder { %Pair { i32 1, i32 2 } }",
+		"@first_left = global i32 1",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -663,6 +717,31 @@ extern take_str(text: DStr[row]) -> void
 	}
 }
 
+func TestGenerateLLVMIRAcceptsShapeErasingDArrayShorthand(t *testing.T) {
+	src := `def keep(values: darray[i32]) -> darray[i32]:
+    return values
+
+def erase(values: DArray[i32, row]) -> DArray[i32]:
+    return values
+`
+	result := parseAndAnalyze(t, "backend_darray_shorthand.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%DynArray__i32 = type { ptr, i64, i64 }",
+		"define %DynArray__i32 @keep(%DynArray__i32",
+		"define %DynArray__i32 @erase(%DynArray__i32",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestWriteLLVMBitcodeFile(t *testing.T) {
 	src := `def increment(value: i32) -> i32:
     return value + 1
@@ -805,6 +884,46 @@ def rewind(ptr: any u8&, offset: usize) -> any u8&:
 	}
 	if strings.Count(output, "getelementptr i8, ptr") < 3 {
 		t.Fatalf("expected pointer arithmetic to lower via GEP in all functions, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRLowersAllocatorOwnershipFixture(t *testing.T) {
+	src := loadFixtureSource(t, "Code", "test_programs", "allocator_ownership.llcontext")
+	result := parseAndAnalyze(t, "backend_allocator_ownership.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%FuzzPair = type { i64, i64 }",
+		"%HeapPairNode = type { %FuzzPair, ptr }",
+		"declare ptr @alloc_heap_pair_node()",
+		"declare ptr @sfree_heap_pair_node(ptr)",
+		"declare ptr @alloc_bytes(i64)",
+		"declare ptr @sfree_bytes(ptr)",
+		"declare i64 @snprintf(ptr, i64, ptr, ...)",
+		"define i32 @recursive_pair_node_sum(ptr ",
+		"define i32 @recursive_free_pair_chain(ptr ",
+		"define i32 @build_pair_chain_sum(ptr ",
+		"call i32 @recursive_pair_node_sum(ptr ",
+		"call i32 @recursive_free_pair_chain(ptr ",
+		"define i32 @alloc_and_format_heap_buffer(ptr ",
+		"call i64 (ptr, i64, ptr, ...) @snprintf(",
+		"@recursive_format_or_fallback(",
+		"@allocator_ownership_combo(",
+		"alloca [32 x i8]",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Count(output, "call ptr @sfree_heap_pair_node(ptr") < 2 {
+		t.Fatalf("expected multiple heap-pair frees in ownership fixture lowering, got:\n%s", output)
+	}
+	if strings.Count(output, "call i32 @require_heap_pair_node(ptr") < 3 {
+		t.Fatalf("expected repeated heap-pair acquisition helper lowering, got:\n%s", output)
 	}
 }
 
@@ -1148,6 +1267,30 @@ func TestGenerateLLVMIRIndexesDStrViaRuntimeHelper(t *testing.T) {
 		"define i64 @read_codepoint(ptr",
 		"declare i64 @ctx_stage1rt_string_index(ptr, i64)",
 		"call i64 @ctx_stage1rt_string_index(ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRAcceptsShapeErasingDStrShorthand(t *testing.T) {
+	src := `def keep(text: dstr) -> dstr:
+    return text
+
+def erase(text: DStr[row]) -> DStr:
+    return text
+`
+	result := parseAndAnalyze(t, "backend_dstr_shorthand.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"define ptr @keep(ptr",
+		"define ptr @erase(ptr",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
