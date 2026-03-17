@@ -1,0 +1,14 @@
+repr(c) struct ScratchSlot:
+    value: mutable int
+
+error StackError:
+    EmptySlot
+
+def checked_stack_slot(slot: stack ScratchSlot&) -> int error[StackError]:
+    if slot.value == 0:
+        raise StackError.EmptySlot
+    return slot.value
+
+def stack_slot_or_zero() -> int:
+    scratch: ScratchSlot = ScratchSlot(7)
+    return try checked_stack_slot(&scratch) else 0

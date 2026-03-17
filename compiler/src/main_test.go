@@ -90,6 +90,17 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			},
 		},
 		{
+			name: "stack_pointers",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "stack_pointers.llcontext"),
+			checks: []string{
+				"%ErrUnion__StackError__int = type { i32, i64 }",
+				"%ScratchSlot = type { i64 }",
+				"define i32 @checked_stack_slot(ptr",
+				"define i64 @stack_slot_or_zero()",
+				"alloca %ScratchSlot",
+			},
+		},
+		{
 			name: "nested_access",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "nested_access.llcontext"),
 			checks: []string{

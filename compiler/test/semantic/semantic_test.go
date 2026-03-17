@@ -1074,6 +1074,39 @@ func TestAnalyzeAcceptsArrayLiteralWithInferredLocalAndViewSlice(t *testing.T) {
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzePreservesStackStorageForAddressableLocalSubobjects(t *testing.T) {
+	src := `repr(c) struct ScratchPair:
+	left: mutable int
+	right: mutable int
+
+
+repr(c) struct ScratchHolder:
+	pair: mutable ScratchPair
+
+
+error ProbeError:
+	Zero
+
+
+def checked_pair(slot: stack ScratchPair&) -> int error[ProbeError]:
+		if slot.left == 0:
+			raise ProbeError.Zero
+		return slot.left + slot.right
+
+
+def from_local_field() -> int:
+		holder: ScratchHolder = ScratchHolder(ScratchPair(1, 2))
+		return try checked_pair(&holder.pair) else 0
+
+
+def from_local_array_elem() -> int:
+		values: ScratchPair[2] = [ScratchPair(1, 2), ScratchPair(5, 6)]
+		return try checked_pair(&values[1u]) else 0
+`
+	_, errs := parseAndAnalyze(t, "stack_storage_local_subobjects.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeAcceptsTypedFixedArrayLiteralInitialization(t *testing.T) {
 	src := `def first() -> i32:
 	values: i32[3] = [1, 2, 3]

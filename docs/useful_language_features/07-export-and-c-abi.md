@@ -192,7 +192,7 @@ These are good MVP candidates:
 
 - fixed-width integers: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`
 - `char` (current byte/code-unit scalar)
-- pointers / references lowered as raw pointers
+- pointers / references lowered as raw pointers when the lifetime/ownership contract is intentionally C-facing rather than a Contextlang-only proof such as `stack T&`
 - `repr(c)` structs whose fields are all themselves C-ABI-compatible
 - opaque handle-like pointers once explicit opaque/exported types exist
 
@@ -296,7 +296,7 @@ If an exported function returns pointers or accepts pointer-owning contracts, th
 Practical recommendation for MVP:
 
 - prefer exported values and POD-style `repr(c)` structs
-- avoid exposing arena-backed, scratch-backed, or lifetime-sensitive pointer returns directly
+- avoid exposing arena-backed, `stack T&`-style borrowed, scratch-backed, or otherwise lifetime-sensitive pointer returns directly
 - push richer ownership semantics to a later phase once the ABI annotations story exists
 
 ## Validation rule for exported types

@@ -249,6 +249,8 @@ This is nice because it matches the real machine-level story:
 
 Typed errors are a good fit for the common pattern “nullable FFI result at the edge, proven non-null pointer in the rest of the program”.
 
+For the formal storage-qualifier rules behind `any`, `heap`, `stack`, and `static`, see `03-pointer-typestate-formal.md`, especially the sections “Storage qualifiers as a separate axis”, “Storage assignability relation”, and “Construction / inference rules for storage”.
+
 Using the current explicit storage qualifiers, a practical wrapper looks like this:
 
 ```context
@@ -271,6 +273,39 @@ def make_node_value_or_zero() -> int:
 ```
 
 That keeps the low-level boundary honest (`alloc_node` may return null), preserves the fact that the pointer is heap-backed once it succeeds, and lets the rest of the example work with a proven non-null pointer plus explicit propagation and recovery.
+
+## Stack-qualified refs are for single-slot borrows
+
+`stack` is a good fit when the pointer really is “borrowed from one local slot in the caller's frame” rather than heap-owned or globally static.
+
+For example, a fallible helper that reads one caller-owned scratch cell can say so directly:
+
+```context
+repr(c) struct ScratchSlot:
+    value: mutable int
+
+error StackError:
+    EmptySlot
+
+def checked_stack_slot(slot: stack ScratchSlot&) -> int error[StackError]:
+    if slot.value == 0:
+        raise StackError.EmptySlot
+    return slot.value
+
+def stack_slot_or_zero() -> int:
+    scratch: ScratchSlot = ScratchSlot(7)
+    return try checked_stack_slot(&scratch) else 0
+```
+
+Here `&scratch` is inferred as a `stack ScratchSlot&`, which documents that the callee is borrowing one local stack slot rather than receiving a heap pointer or an ownership-transferring handle.
+
+For more than one stack element, prefer the fixed-array value type itself:
+
+```context
+scratch: i32[4] = [7, 8, 9, 10]
+```
+
+In other words, `stack` is for `stack T&`, while multi-element stack storage should be modeled as `array[T, N]` / `T[N]` values rather than as a special “stack array pointer” type.
 
 ## Illegal strengthening rule
 

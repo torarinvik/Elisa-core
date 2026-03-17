@@ -27,6 +27,7 @@ T[N]
 
 This is already a length-indexed type.
 Its length is compile-time known, zero-overhead, and perfect for stack/local/static data.
+That describes where the array value may live in memory, not a pointer qualifier; if you later borrow one element or one local object by reference, that is where `stack T&`, `static T&`, or `heap T&` enters the story.
 `array[T, N]` is the explicit built-in spelling; `T[N]` remains the concise fixed-array form.
 
 This is already a length-indexed type.

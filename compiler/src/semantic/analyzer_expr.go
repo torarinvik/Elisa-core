@@ -184,10 +184,19 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		if t, ok := a.namedTypes[n.Name]; ok {
 			switch tt := t.(type) {
 			case *StructType:
+				a.analyzeStructLiteralArgs(n, tt, nil)
 				result = tt
 				return
 			case *GenericInstanceType:
 				if _, ok := tt.Base.(*StructType); ok {
+					base := tt.Base.(*StructType)
+					bindings := map[string]Type{}
+					for i, name := range base.TypeParams {
+						if i < len(tt.Args) {
+							bindings[name] = tt.Args[i]
+						}
+					}
+					a.analyzeStructLiteralArgs(n, base, bindings)
 					result = tt
 					return
 				}
@@ -202,6 +211,41 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	default:
 		result = invalidType
 		return
+	}
+}
+
+func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *StructType, bindings map[string]Type) {
+	if base == nil || base.Decl == nil {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return
+	}
+	if len(expr.Args) != len(base.Decl.Fields) {
+		a.errorf(expr.Pos(), "struct literal %q expects %d arguments, got %d", expr.Name, len(base.Decl.Fields), len(expr.Args))
+	}
+	limit := len(expr.Args)
+	if len(base.Decl.Fields) < limit {
+		limit = len(base.Decl.Fields)
+	}
+	for i := 0; i < limit; i++ {
+		fieldDecl := base.Decl.Fields[i]
+		field, ok := base.Fields[fieldDecl.Name]
+		if !ok {
+			a.analyzeExpr(expr.Args[i])
+			continue
+		}
+		expected := field.Type
+		if len(bindings) > 0 {
+			expected = a.substituteType(expected, bindings, nil)
+		}
+		actual := a.analyzeValueExpr(expr.Args[i], expected)
+		if !AssignableTo(expected, actual) {
+			a.errorf(expr.Args[i].Pos(), "struct literal field %q expects %s, got %s", fieldDecl.Name, expected.String(), actual.String())
+		}
+	}
+	for i := limit; i < len(expr.Args); i++ {
+		a.analyzeExpr(expr.Args[i])
 	}
 }
 
@@ -881,6 +925,21 @@ func (a *Analyzer) inferAddrOfStorage(expr ast.Expr) RefStorage {
 		}
 		if sym, ok := a.globalScope.Lookup(n.Name); ok && sym.Kind == SymbolGlobal {
 			return RefStorageStatic
+		}
+	case *ast.FieldExpr:
+		if objType, ok := a.exprTypes[n.Object].(*RefType); ok {
+			return objType.Storage
+		}
+		return a.inferAddrOfStorage(n.Object)
+	case *ast.IndexExpr:
+		switch objType := a.exprTypes[n.Object].(type) {
+		case *RefType:
+			if _, ok := objType.Elem.(*ArrayType); ok {
+				return objType.Storage
+			}
+			return RefStorageAny
+		case *ArrayType:
+			return a.inferAddrOfStorage(n.Object)
 		}
 	}
 	return RefStorageAny

@@ -25,6 +25,41 @@ Ref(T, may)   written T&?
 Ref(T, null)  written T!
 ```
 
+### Storage qualifiers as a separate axis
+
+Reference types also carry a storage qualifier.
+
+Let:
+
+```text
+σ ∈ { any, heap, stack, static }
+```
+
+and refine the reference family to:
+
+```text
+Ref(σ, T, nn)    written σ T&
+Ref(σ, T, may)   written σ T&?
+Ref(σ, T, null)  written σ T!
+```
+
+Intended meaning:
+
+- `any` means storage/provenance is intentionally erased or unspecified at the type level
+- `heap` means the referenced object is heap-backed
+- `stack` means the referenced object is one caller-frame/local stack slot
+- `static` means the referenced object is static/global storage
+
+The important design point is that storage qualifiers classify **one referenced object**, not cardinality.
+
+So:
+
+- `stack T&` means “a reference to one stack-resident object of type `T`”
+- multi-element stack storage is modeled by the value type `Array(T, N)` / `T[N]`
+- the array value may itself live on the stack, but that does not create a separate “stack array pointer” concept
+
+This keeps storage provenance and aggregate shape as separate axes in the type system.
+
 ### Assignability relation
 
 For equal pointee type `T`:
@@ -54,6 +89,31 @@ Null ≤ Ref(T, may)
 Null ≤ Ref(T, null)
 Null ≰ Ref(T, nn)
 ```
+
+### Storage assignability relation
+
+For ordinary assignment / return / parameter matching, explicit storage qualifiers are invariant.
+
+For equal pointee type `T` and state `s`:
+
+```text
+Ref(σ, T, s) ≤ Ref(σ, T, s)
+```
+
+But, for distinct qualifiers:
+
+```text
+Ref(heap,   T, s) ≰ Ref(any,    T, s)
+Ref(stack,  T, s) ≰ Ref(any,    T, s)
+Ref(static, T, s) ≰ Ref(any,    T, s)
+Ref(heap,   T, s) ≰ Ref(stack,  T, s)
+Ref(heap,   T, s) ≰ Ref(static, T, s)
+... and so on
+```
+
+So storage is not an ordinary subtyping lattice in the way nullness is.
+
+This is why a `heap Box&` does not implicitly flow into an `any Box&` parameter or return type: if you want to erase storage provenance, that must be an explicit cast, not an incidental assignment.
 
 ### Use rules
 
@@ -226,6 +286,34 @@ Assertions are runtime checks that also refine the environment for following cod
 
 So `assert p != null` is formally a proof-producing operation.
 
+### Construction / inference rules for storage
+
+Storage can also be inferred at construction sites.
+
+Address-of a local or parameter:
+
+```text
+Γ(x) = T      x is a local or parameter
+---------------------------------------
+Γ ⊢ &x : Ref(stack, T, nn)
+```
+
+Address-of a global:
+
+```text
+Γ(g) = T      g is a global
+---------------------------
+Γ ⊢ &g : Ref(static, T, nn)
+```
+
+String literals:
+
+```text
+Γ ⊢ "text" : Ref(static, u8, nn)
+```
+
+The role of `any` is different: it is the explicit “do not track storage provenance here” spelling, commonly used at FFI boundaries, raw-pointer bridges, and deliberate casts.
+
 ### Cast rule
 
 Let casts preserve representation changes but never strengthen nullness without proof.
@@ -250,6 +338,19 @@ Ref(T, null) -> Ref(U, nn)
 ```
 
 even if the underlying pointer bit-pattern representation is identical.
+
+Storage-changing casts are conceptually separate from nullness.
+An explicit cast may deliberately erase or reinterpret storage classification when the implementation treats the runtime representation as compatible, but this should never happen implicitly through plain assignment.
+
+So, informally:
+
+```text
+Ref(heap, T, nn)  -> Ref(any, T, nn)   may be allowed by explicit cast
+Ref(stack, T, nn) -> Ref(any, T, nn)   may be allowed by explicit cast
+Ref(static, T, nn)-> Ref(any, T, nn)   may be allowed by explicit cast
+```
+
+while ordinary assignment still requires storage equality for explicit user-written qualifiers.
 
 ### Safe free rule
 

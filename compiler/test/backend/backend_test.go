@@ -63,6 +63,38 @@ def read_box(box: any Box&) -> i32:
 	}
 }
 
+func TestGenerateLLVMIRLowersNestedStructLiterals(t *testing.T) {
+	src := `repr(c) struct ScratchPair:
+	left: mutable int
+	right: mutable int
+
+
+repr(c) struct ScratchHolder:
+	pair: mutable ScratchPair
+
+
+def make_holder() -> ScratchHolder:
+		return ScratchHolder(ScratchPair(8, 9))
+`
+	result := parseAndAnalyze(t, "backend_nested_struct_literals.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%ScratchPair = type { i64, i64 }",
+		"%ScratchHolder = type { %ScratchPair }",
+		"define %ScratchHolder @make_holder()",
+		"ret %ScratchHolder { %ScratchPair { i64 8, i64 9 } }",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersLocalsCallsAndControlFlow(t *testing.T) {
 	src := `extern add_one(value: i32) -> i32
 
