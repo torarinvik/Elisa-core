@@ -3,71 +3,13 @@
 # ============================================================
 
 
-def frontend_heap_alloc(size: usize) -> any void&:
-    resolved: usize = size if size > 0u else 1u
-    raw: any void&? = malloc(resolved)
-    assert raw != null
-    return raw
-
-
-def frontend_heap_reserve_usizes(values: any darray[usize]&, min_capacity: usize):
-    if values.capacity >= min_capacity:
-        return
-
-    new_capacity: mutable usize = values.capacity
-    if new_capacity == 0u:
-        new_capacity <- 4u
-    while new_capacity < min_capacity:
-        new_capacity <- new_capacity * 2u
-
-    new_items: any usize& = frontend_heap_alloc(new_capacity * sizeof(usize)).cast[any usize&]()
-    if values.items != null and values.count > 0u:
-        _ = memcpy(new_items.cast[any void&](), values.items.cast[any void&](), values.count * sizeof(usize))
-        free(values.items.cast[any void&]())
-
-    values.items as & <- new_items
-    values.capacity <- new_capacity
-
-
-def frontend_heap_append_usize(values: any darray[usize]&, value: usize):
-    if values.count >= values.capacity:
-        frontend_heap_reserve_usizes(values, values.count + 1u)
-    assert values.items != null
-    values.items[values.count] <- value
-    values.count <- values.count + 1u
-
-
-def frontend_heap_reserve_tokens(values: any darray[FrontendToken]&, min_capacity: usize):
-    if values.capacity >= min_capacity:
-        return
-
-    new_capacity: mutable usize = values.capacity
-    if new_capacity == 0u:
-        new_capacity <- 8u
-    while new_capacity < min_capacity:
-        new_capacity <- new_capacity * 2u
-
-    new_items: any FrontendToken& = frontend_heap_alloc(new_capacity * sizeof(FrontendToken)).cast[any FrontendToken&]()
-    if values.items != null and values.count > 0u:
-        _ = memcpy(new_items.cast[any void&](), values.items.cast[any void&](), values.count * sizeof(FrontendToken))
-        free(values.items.cast[any void&]())
-
-    values.items as & <- new_items
-    values.capacity <- new_capacity
-
-
-def frontend_heap_append_token(values: any darray[FrontendToken]&, value: FrontendToken):
-    if values.count >= values.capacity:
-        frontend_heap_reserve_tokens(values, values.count + 1u)
-    assert values.items != null
-    values.items[values.count] <- value
-    values.count <- values.count + 1u
+def frontend_require_arena(lexer: any FrontendLexer&) -> any Arena&:
+    assert lexer.arena != null
+    return lexer.arena
 
 
 def frontend_new_lexer(a: any Arena&, filename: any u8&, source: any u8&) -> FrontendLexer:
     out: mutable FrontendLexer = zeroed
-    indent_items: any usize& = frontend_heap_alloc(sizeof(usize)).cast[any usize&]()
-    indent_items[0u] <- 0u
     out.arena as & <- a
     out.filename <- filename
     out.source <- source
@@ -78,9 +20,7 @@ def frontend_new_lexer(a: any Arena&, filename: any u8&, source: any u8&) -> Fro
     out.pending_index <- 0u
     out.at_line_start <- true
     out.paren_depth <- 0
-    out.indent_stack.items as & <- indent_items
-    out.indent_stack.count <- 1u
-    out.indent_stack.capacity <- 1u
+    _ = arena_da_append(a, (&out.indent_stack).cast[any darray[usize]&](), 0u)
     return out
 
 
@@ -142,7 +82,7 @@ def frontend_pending_has_tokens(lexer: any FrontendLexer&) -> bool:
 
 
 def frontend_push_pending(lexer: any FrontendLexer&, token: FrontendToken):
-    frontend_heap_append_token((&lexer.pending_tokens).cast[any darray[FrontendToken]&](), token)
+    _ = arena_da_append(frontend_require_arena(lexer), (&lexer.pending_tokens).cast[any darray[FrontendToken]&](), token)
 
 
 def frontend_pop_pending(lexer: any FrontendLexer&) -> FrontendToken:
@@ -186,7 +126,7 @@ def frontend_indent_top(lexer: any FrontendLexer&) -> usize:
 
 
 def frontend_push_indent(lexer: any FrontendLexer&, value: usize):
-    frontend_heap_append_usize((&lexer.indent_stack).cast[any darray[usize]&](), value)
+    _ = arena_da_append(frontend_require_arena(lexer), (&lexer.indent_stack).cast[any darray[usize]&](), value)
 
 
 def frontend_pop_indent(lexer: any FrontendLexer&):
@@ -597,7 +537,7 @@ def frontend_tokenize(a: any Arena&, filename: any u8&, source: any u8&) -> darr
 
     while true:
         token: FrontendToken = frontend_next_token((&lexer).cast[any FrontendLexer&]())
-        frontend_heap_append_token((&tokens).cast[any darray[FrontendToken]&](), token)
+        _ = arena_da_append(a, (&tokens).cast[any darray[FrontendToken]&](), token)
         match token.kind:
             FrontendTokenKind.Eof:
                 return tokens

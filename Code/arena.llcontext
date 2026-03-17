@@ -28,7 +28,7 @@ error RuntimeError:
 repr(c) struct Region:
     next: mutable any Region&?
     count: mutable usize
-    capacity: usize
+    capacity: mutable usize
     data: tail uintptr
 
 repr(c) struct Arena:
@@ -198,6 +198,7 @@ def new_region(capacity: usize) -> any Region&:
 
     r.next <- null
     r.count <- 0
+    r.capacity <- capacity
     return r
 
 def free_region(r: any Region&):
@@ -253,7 +254,9 @@ def arena_alloc(a: any Arena&, size_bytes: usize) -> any void&:
         a.end.next as & <- new_region(capacity)
         a.end <- a.end.next
 
-    result: any void& = (&a.end.data[a.end.count]).cast[any void&]()
+    data_base: any u8& = (a.end.cast[any u8&]() + sizeof(Region)).cast[any u8&]()
+    offset_bytes: usize = a.end.count * sizeof(uintptr)
+    result: any void& = (data_base + offset_bytes).cast[any void&]()
     a.end.count <- a.end.count + size
     return result
 
@@ -355,7 +358,7 @@ def arena_free(a: any Arena&):
     while r != null:
         r0: mutable any Region& = r
         r <- r.next
-        r0 as ! <- sfree(r0)
+        free_region(r0)
 
     a.begin as ! <- null
     a.end as ! <- null
@@ -368,7 +371,7 @@ def arena_trim(a: any Arena&):
     while r != null:
         r0: mutable any Region& = r
         r <- r.next
-        r0 as ! <- sfree(r0)
+        free_region(r0)
 
     a.end.next as ! <- null
 

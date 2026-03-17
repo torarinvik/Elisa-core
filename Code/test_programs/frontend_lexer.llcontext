@@ -96,15 +96,15 @@ def frontend_expect_suffix(tokens: darray[FrontendToken], index: usize, expected
     return ctx_stage0_string_view_eq(tokens[index].suffix, expected.cast[any u8&]()) != 0
 
 
-def frontend_tokenize_test_source(source: any u8&) -> darray[FrontendToken]:
-    region scratch(4096u)
-    a: any Arena& = (&scratch).cast[any Arena&]()
+def frontend_tokenize_test_source(a: any Arena&, source: any u8&) -> darray[FrontendToken]:
     return frontend_tokenize(a, "frontend_lexer_test.llcontext".cast[any u8&](), source)
 
 
 def frontend_case_simple_ident() -> bool:
+    region scratch(4096u)
+    a: any Arena& = (&scratch).cast[any Arena&]()
     bytes: u8[7] = [104u8, 101u8, 108u8, 108u8, 111u8, 10u8, 0u8]
-    tokens: darray[FrontendToken] = frontend_tokenize_test_source((&bytes[0u]).cast[any u8&]())
+    tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, (&bytes[0u]).cast[any u8&]())
     if not frontend_expect_token_count(tokens, 3u):
         return false
     if not frontend_expect_kind(tokens, 0u, FrontendTokenKind.Ident):
@@ -117,16 +117,20 @@ def frontend_case_simple_ident() -> bool:
 
 
 def frontend_case_arrow_ops() -> bool:
+    region scratch(4096u)
+    a: any Arena& = (&scratch).cast[any Arena&]()
     bytes: u8[14] = [120u8, 32u8, 60u8, 45u8, 32u8, 121u8, 32u8, 45u8, 62u8, 32u8, 122u8, 10u8, 0u8, 0u8]
-    tokens: darray[FrontendToken] = frontend_tokenize_test_source((&bytes[0u]).cast[any u8&]())
+    tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, (&bytes[0u]).cast[any u8&]())
     if not frontend_expect_token_count(tokens, 7u):
         return false
     return frontend_expect_kind(tokens, 0u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 1u, FrontendTokenKind.LArrow) and frontend_expect_kind(tokens, 2u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 3u, FrontendTokenKind.Arrow) and frontend_expect_kind(tokens, 4u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 5u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 6u, FrontendTokenKind.Eof)
 
 
 def frontend_case_number_literals() -> bool:
+    region scratch(4096u)
+    a: any Arena& = (&scratch).cast[any Arena&]()
     bytes: u8[25] = [52u8, 50u8, 32u8, 48u8, 120u8, 102u8, 102u8, 32u8, 49u8, 50u8, 51u8, 117u8, 54u8, 52u8, 32u8, 48u8, 120u8, 65u8, 66u8, 105u8, 51u8, 50u8, 10u8, 0u8, 0u8]
-    tokens: darray[FrontendToken] = frontend_tokenize_test_source((&bytes[0u]).cast[any u8&]())
+    tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, (&bytes[0u]).cast[any u8&]())
     if not frontend_expect_token_count(tokens, 6u):
         return false
     if not frontend_expect_kind(tokens, 0u, FrontendTokenKind.IntLit):
@@ -147,32 +151,40 @@ def frontend_case_number_literals() -> bool:
 
 
 def frontend_case_indent_dedent() -> bool:
+    region scratch(4096u)
+    a: any Arena& = (&scratch).cast[any Arena&]()
     bytes: u8[39] = [100u8, 101u8, 102u8, 32u8, 102u8, 111u8, 111u8, 58u8, 10u8, 32u8, 32u8, 32u8, 32u8, 120u8, 32u8, 60u8, 45u8, 32u8, 49u8, 10u8, 32u8, 32u8, 32u8, 32u8, 121u8, 32u8, 60u8, 45u8, 32u8, 50u8, 10u8, 122u8, 32u8, 60u8, 45u8, 32u8, 51u8, 10u8, 0u8]
-    tokens: darray[FrontendToken] = frontend_tokenize_test_source((&bytes[0u]).cast[any u8&]())
+    tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, (&bytes[0u]).cast[any u8&]())
     if not frontend_expect_token_count(tokens, 19u):
         return false
     return frontend_expect_kind(tokens, 0u, FrontendTokenKind.Def) and frontend_expect_kind(tokens, 1u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 2u, FrontendTokenKind.Colon) and frontend_expect_kind(tokens, 3u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 4u, FrontendTokenKind.Indent) and frontend_expect_kind(tokens, 9u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 13u, FrontendTokenKind.Dedent) and frontend_expect_kind(tokens, 18u, FrontendTokenKind.Eof)
 
 
 def frontend_case_comment_and_ellipsis() -> bool:
+    region scratch(4096u)
+    a: any Arena& = (&scratch).cast[any Arena&]()
     bytes: u8[9] = [35u8, 120u8, 10u8, 46u8, 46u8, 46u8, 10u8, 0u8, 0u8]
-    tokens: darray[FrontendToken] = frontend_tokenize_test_source((&bytes[0u]).cast[any u8&]())
+    tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, (&bytes[0u]).cast[any u8&]())
     if not frontend_expect_token_count(tokens, 3u):
         return false
     return frontend_expect_kind(tokens, 0u, FrontendTokenKind.Ellipsis) and frontend_expect_kind(tokens, 1u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 2u, FrontendTokenKind.Eof)
 
 
 def frontend_case_shift_ops() -> bool:
+    region scratch(4096u)
+    a: any Arena& = (&scratch).cast[any Arena&]()
     bytes: u8[13] = [120u8, 32u8, 60u8, 60u8, 32u8, 51u8, 32u8, 62u8, 62u8, 32u8, 50u8, 10u8, 0u8]
-    tokens: darray[FrontendToken] = frontend_tokenize_test_source((&bytes[0u]).cast[any u8&]())
+    tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, (&bytes[0u]).cast[any u8&]())
     if not frontend_expect_token_count(tokens, 7u):
         return false
     return frontend_expect_kind(tokens, 0u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 1u, FrontendTokenKind.LShift) and frontend_expect_kind(tokens, 2u, FrontendTokenKind.IntLit) and frontend_expect_kind(tokens, 3u, FrontendTokenKind.RShift) and frontend_expect_kind(tokens, 4u, FrontendTokenKind.IntLit) and frontend_expect_kind(tokens, 5u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 6u, FrontendTokenKind.Eof)
 
 
 def frontend_case_paren_suppresses_newline() -> bool:
+    region scratch(4096u)
+    a: any Arena& = (&scratch).cast[any Arena&]()
     bytes: u8[15] = [102u8, 111u8, 111u8, 40u8, 97u8, 44u8, 10u8, 32u8, 32u8, 32u8, 32u8, 98u8, 41u8, 10u8, 0u8]
-    tokens: darray[FrontendToken] = frontend_tokenize_test_source((&bytes[0u]).cast[any u8&]())
+    tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, (&bytes[0u]).cast[any u8&]())
     if not frontend_expect_token_count(tokens, 8u):
         return false
     return frontend_expect_kind(tokens, 0u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 1u, FrontendTokenKind.LParen) and frontend_expect_kind(tokens, 2u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 3u, FrontendTokenKind.Comma) and frontend_expect_kind(tokens, 4u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 5u, FrontendTokenKind.RParen) and frontend_expect_kind(tokens, 6u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 7u, FrontendTokenKind.Eof)

@@ -124,7 +124,7 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 	a.registerBuiltinStructType("Region", nil, []builtinFieldSpec{
 		{name: "next", typ: refTypeExpr("Region", true), mutable: true},
 		{name: "count", typ: namedTypeExpr("usize", false), mutable: true},
-		{name: "capacity", typ: namedTypeExpr("usize", false)},
+		{name: "capacity", typ: namedTypeExpr("usize", false), mutable: true},
 		{name: "data", typ: namedTypeExpr("uintptr", false), isTail: true},
 	})
 	a.registerBuiltinStructType("Arena", nil, []builtinFieldSpec{
