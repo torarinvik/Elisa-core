@@ -41,12 +41,6 @@ func SameType(a, b Type) bool {
 	case *DArrayViewType:
 		tb, ok := b.(*DArrayViewType)
 		return ok && SameType(ta.Elem, tb.Elem)
-	case *DListType:
-		tb, ok := b.(*DListType)
-		return ok && SameType(ta.Elem, tb.Elem) && SameShape(ta.Shape, tb.Shape)
-	case *DListViewType:
-		tb, ok := b.(*DListViewType)
-		return ok && SameType(ta.Elem, tb.Elem)
 	case *DStrType:
 		tb, ok := b.(*DStrType)
 		return ok && SameShape(ta.Shape, tb.Shape)
@@ -214,12 +208,6 @@ func matchTypePattern(pattern, actual Type) bool {
 		return ok && matchTypePattern(p.Elem, a.Elem) && shapeMatchesPattern(p.Shape, a.Shape)
 	case *DArrayViewType:
 		a, ok := actual.(*DArrayViewType)
-		return ok && matchTypePattern(p.Elem, a.Elem)
-	case *DListType:
-		a, ok := actual.(*DListType)
-		return ok && matchTypePattern(p.Elem, a.Elem) && shapeMatchesPattern(p.Shape, a.Shape)
-	case *DListViewType:
-		a, ok := actual.(*DListViewType)
 		return ok && matchTypePattern(p.Elem, a.Elem)
 	case *DStrType:
 		a, ok := actual.(*DStrType)

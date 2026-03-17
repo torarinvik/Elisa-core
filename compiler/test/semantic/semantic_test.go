@@ -925,8 +925,8 @@ func TestAnalyzeRejectsAssigningToDStrIndex(t *testing.T) {
 	}
 }
 
-func TestAnalyzeAcceptsCtxStringViewIndexingAsChar(t *testing.T) {
-	src := `def read_codepoint(view: CtxStringView) -> char:
+func TestAnalyzeAcceptsStringViewIndexingAsChar(t *testing.T) {
+	src := `def read_codepoint(view: StringView) -> char:
 	return view[0]
 `
 	result, errs := parseAndAnalyze(t, "ctx_string_view_index.llcontext", src)
@@ -948,13 +948,13 @@ func TestAnalyzeAcceptsRuntimeStringEqualityOperators(t *testing.T) {
 	src := `def same_text(left: DStr[row], right: DStr[col]) -> bool:
 	return left == right
 
-def same_view_text(view: CtxStringView, text: DStr[row]) -> bool:
+def same_view_text(view: StringView, text: DStr[row]) -> bool:
 	return view == text
 
-def same_text_view(text: DStr[row], view: CtxStringView) -> bool:
+def same_text_view(text: DStr[row], view: StringView) -> bool:
 	return text == view
 
-def different_views(left: CtxStringView, right: CtxStringView) -> bool:
+def different_views(left: StringView, right: StringView) -> bool:
 	return left != right
 
 def same_literal(text: DStr[row]) -> bool:
@@ -1104,7 +1104,7 @@ func TestAnalyzeRejectsMismatchedFixedArrayLiteralLength(t *testing.T) {
 }
 
 func TestAnalyzeAcceptsStringSliceSyntax(t *testing.T) {
-	src := `def middle(text: DStr[row]) -> CtxStringView:
+	src := `def middle(text: DStr[row]) -> StringView:
 	return text[1:3]
 `
 	_, errs := parseAndAnalyze(t, "string_slice_syntax.llcontext", src)
@@ -1124,8 +1124,8 @@ func TestAnalyzeRejectsAssigningToDStrLenField(t *testing.T) {
 	}
 }
 
-func TestAnalyzeRejectsAssigningToCtxStringViewIndex(t *testing.T) {
-	src := `def bad(view: CtxStringView) -> void:
+func TestAnalyzeRejectsAssigningToStringViewIndex(t *testing.T) {
+	src := `def bad(view: StringView) -> void:
 	view[0] <- 1
 `
 	_, errs := parseAndAnalyze(t, "ctx_string_view_index_assignment.llcontext", src)

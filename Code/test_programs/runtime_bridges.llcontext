@@ -1,5 +1,0 @@
-extern ctx_stage0_list_len(list: any CtxList&?) -> i64
-
-
-def raw_list_len(values: darray[any void&, row]) -> i64:
-    return ctx_stage0_list_len(values)

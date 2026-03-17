@@ -195,7 +195,7 @@ def ctx_stage0_string_slice(value: any u8&?, start: i64, end: i64) -> any u8&:
     ctx_stage0_register_perm_string_len(out, out_len)
     return out
 
-def ctx_stage0_string_view(value: any u8&?, start: i64, end: i64) -> CtxStringView:
+def ctx_stage0_string_view(value: any u8&?, start: i64, end: i64) -> StringView:
     src: any u8& = value if value != null else "".cast[any u8&]()
     len: usize = ctx_stage0_runtime_strlen(src)
 
@@ -215,12 +215,12 @@ def ctx_stage0_string_view(value: any u8&?, start: i64, end: i64) -> CtxStringVi
     if hi < lo:
         hi <- lo
 
-    return CtxStringView(src + lo, (hi - lo).i64())
+    return StringView(src + lo, (hi - lo).i64())
 
-def ctx_stage0_string_view_len(view: CtxStringView) -> i64:
+def ctx_stage0_string_view_len(view: StringView) -> i64:
     return view.len
 
-def ctx_stage0_string_view_slice(view: CtxStringView, start: i64, end: i64) -> CtxStringView:
+def ctx_stage0_string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
     lo: mutable i64 = start if start > 0 else 0
     hi: mutable i64 = end if end >= 0 else view.len
 
@@ -231,15 +231,15 @@ def ctx_stage0_string_view_slice(view: CtxStringView, start: i64, end: i64) -> C
     if hi < lo:
         hi <- lo
 
-    return CtxStringView(view.data + lo.usize(), hi - lo)
+    return StringView(view.data + lo.usize(), hi - lo)
 
-def ctx_stage0_string_view_index(view: CtxStringView, index: i64) -> i64:
+def ctx_stage0_string_view_index(view: StringView, index: i64) -> i64:
     if index < 0 or index >= view.len:
         return -1
 
     return view.data[index.usize()].i64()
 
-def ctx_stage0_string_view_eq(view: CtxStringView, other: any u8&?) -> int:
+def ctx_stage0_string_view_eq(view: StringView, other: any u8&?) -> int:
     rhs: any u8& = other if other != null else "".cast[any u8&]()
     rhs_len: usize = ctx_stage0_runtime_strlen(rhs)
 
@@ -252,7 +252,7 @@ def ctx_stage0_string_view_eq(view: CtxStringView, other: any u8&?) -> int:
 
     return 1 if memcmp(view.data.cast[any void&](), rhs.cast[any void&](), view.len.usize()) == 0 else 0
 
-def ctx_stage0_string_views_eq(lhs: CtxStringView, rhs: CtxStringView) -> int:
+def ctx_stage0_string_views_eq(lhs: StringView, rhs: StringView) -> int:
     if lhs.len != rhs.len:
         return 0
     if lhs.len == 0:
@@ -262,7 +262,7 @@ def ctx_stage0_string_views_eq(lhs: CtxStringView, rhs: CtxStringView) -> int:
 
     return 1 if memcmp(lhs.data.cast[any void&](), rhs.data.cast[any void&](), lhs.len.usize()) == 0 else 0
 
-def ctx_stage0_string_view_copy(view: CtxStringView) -> any u8&:
+def ctx_stage0_string_view_copy(view: StringView) -> any u8&:
     if view.len <= 0:
         return "".cast[any u8&]()
 

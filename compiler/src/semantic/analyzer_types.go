@@ -289,7 +289,7 @@ func (a *Analyzer) resolveDynamicShapeType(expr *ast.GenericType) (Type, bool) {
 		a.errorf(expr.Pos(), "DList has been removed from the language; use DArray/darray instead")
 		return invalidType, true
 	case "DListView":
-		a.errorf(expr.Pos(), "DListView has been removed from the language; use DArrayView/view or raw CtxListView instead")
+		a.errorf(expr.Pos(), "DListView has been removed from the language; use DArrayView/view instead")
 		return invalidType, true
 	case "DStr":
 		if len(expr.Args) != 1 {
@@ -536,10 +536,6 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 		return &DArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Shape: a.substituteShape(n.Shape, shapeBindings), SurfaceName: n.SurfaceName}
 	case *DArrayViewType:
 		return &DArrayViewType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Begin: n.Begin, End: n.End, SurfaceName: n.SurfaceName}
-	case *DListType:
-		return &DListType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Shape: a.substituteShape(n.Shape, shapeBindings)}
-	case *DListViewType:
-		return &DListViewType{Elem: a.substituteType(n.Elem, bindings, shapeBindings)}
 	case *DStrType:
 		return &DStrType{Shape: a.substituteShape(n.Shape, shapeBindings), SurfaceName: n.SurfaceName}
 	case *SViewType:
@@ -664,26 +660,12 @@ func (a *Analyzer) collectImplicitShapeParamsFromType(expr ast.TypeExpr, seen ma
 			if len(n.Args) > 0 {
 				a.collectImplicitShapeParamsFromType(n.Args[0], seen, order)
 			}
-		case "DList":
-			if len(n.Args) > 0 {
-				a.collectImplicitShapeParamsFromType(n.Args[0], seen, order)
-			}
-			if len(n.Args) > 1 {
-				if name, ok := shapeNameFromTypeExpr(n.Args[1]); ok && isImplicitShapeWitnessName(name) && !seen[name] {
-					seen[name] = true
-					*order = append(*order, name)
-				}
-			}
 		case "DStr":
 			if len(n.Args) > 0 {
 				if name, ok := shapeNameFromTypeExpr(n.Args[0]); ok && isImplicitShapeWitnessName(name) && !seen[name] {
 					seen[name] = true
 					*order = append(*order, name)
 				}
-			}
-		case "DListView":
-			if len(n.Args) > 0 {
-				a.collectImplicitShapeParamsFromType(n.Args[0], seen, order)
 			}
 		default:
 			for _, arg := range n.Args {

@@ -254,28 +254,3 @@ def bad(left: DStr[row], right: DStr[col]) -> DStr[row]:
 		t.Fatalf("expected fresh stage1 string concat diagnostic, got:\n%s", all)
 	}
 }
-
-func TestAnalyzeStage1ListPushWrapperReturnsFreshShape(t *testing.T) {
-	src := `repr(c) struct CtxList:
-    len: mutable i64
-
-extern make_list() -> any CtxList&
-
-def ctx_stage0_list_push(values: any CtxList&?, elem: any void&?, elem_size: i64) -> any CtxList&?:
-    return values
-
-def ctx_stage1rt_list_push(values: DArray[any void&, shape_in], elem: any void&?, elem_size: i64) -> DArray[any void&, shape_out]:
-    return ctx_stage0_list_push(values, elem, elem_size)
-
-def bad(values: DArray[any void&, row], elem: any void&) -> DArray[any void&, row]:
-    return ctx_stage1rt_list_push(values, elem, 8)
-`
-	_, errs := parseAndAnalyze(t, "stage1_list_push_wrapper.llcontext", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
-	}
-	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "return type expects DArray[any void&, row], got DArray[any void&, shape_out#") || !strings.Contains(all, "note: ctx_stage1rt_list_push returns a fresh logical shape for shape_out") || !strings.Contains(all, "note: CtxList-backed list wrappers keep the same runtime layout; this mismatch is about the logical shape witness") {
-		t.Fatalf("expected fresh stage1 list push diagnostic, got:\n%s", all)
-	}
-}

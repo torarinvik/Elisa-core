@@ -444,9 +444,9 @@ Recommended rollout is now:
 
 The codebase is already following this staged approach:
 
-- low-level stage 0 runtime code still uses representation-first types such as `DynArray[T]`, `CtxList`, `StringBuilder`, and raw `u8&` string values
+- low-level stage 0 runtime code still uses representation-first types such as `DynArray[T]`, `StringBuilder`, `StringView`, and raw `u8&` string values
 - `arena.llcontext` now exposes shape-typed append helpers such as `arena_da_append` and `arena_da_append_many`
-- `contextlang_runtime.llcontext` stage 1 wrappers now expose typed logical APIs such as `ctx_stage1rt_concat2`, `ctx_stage1rt_string_slice`, and the raw `ctx_stage1rt_list_*` bridge helpers where list-shaped runtime carriers are still needed
+- `contextlang_runtime.llcontext` stage 1 wrappers now expose typed logical APIs such as `ctx_stage1rt_concat2`, `ctx_stage1rt_string_slice`, and the `ctx_stage1rt_string_view*` helpers for string subviews
 - `arena.llcontext` now also exposes typed non-owning `view[T, begin, end]` helpers such as `arena_da_view`, `arena_da_view_slice`, and `arena_da_view_get`
 - the semantic layer bridges these wrappers back onto the underlying runtime representations rather than forcing an immediate full runtime rewrite
 
@@ -460,12 +460,11 @@ def ctx_stage1rt_concat2(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[
     text: dstr[shape_result] = ctx_stage0_concat2(lhs, rhs) else raise RuntimeError.AllocationFailed
     return text
 
-def ctx_stage1rt_list_push(values: darray[any void&, shape_in], elem: any void&?, elem_size: i64) -> darray[any void&, shape_out] error[RuntimeError]:
-    next: darray[any void&, shape_out] = ctx_stage0_list_push(values, elem, elem_size) else raise RuntimeError.AllocationFailed
-    return next
+def ctx_stage1rt_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
+    return ctx_stage0_string_view(value, start, end)
 
-def ctx_stage1rt_list_view(values: darray[any void&, shape_in], start: i64, end: i64) -> CtxListView:
-    return ctx_stage0_list_view(values, start, end)
+def ctx_stage1rt_string_from_view(view: StringView) -> dstr[shape_out]:
+    return ctx_stage0_string_view_copy(view)
 ```
 
 And the arena-backed container helpers now look like this:
@@ -491,9 +490,9 @@ More concretely, the current semantic bridge is intentionally narrow and wrapper
 - `dstr[shape_id]` is allowed to flow across the runtime boundary as raw `u8&` / `u8&?` string values
 - `darray[T, shape_id]` can likewise ride on the existing `DynArray[T]` representation for arena-backed helpers
 - `view[T, begin, end]` is allowed to flow across the runtime boundary as `DynArrayView`
-- raw list-shaped bridge code can still use `darray[any void&, shape_id]` together with `CtxList&` / `CtxList&?` and `CtxListView`
+- `sview[begin, end]` / `StringView` is allowed to flow across the runtime boundary as the raw string-view carrier
 
-The raw list wrappers (`ctx_stage1rt_list_*` with `darray[void&, shape]` and `CtxListView`) still exist as compatibility shims for low-level bridge code. The older typed `DList` / `DListView` surface has been removed from the language.
+Legacy raw list wrappers and carriers have been removed entirely. The older typed `DList` / `DListView` surface is also gone; dynamic collection work now goes through `darray` / `DArray` and `view` / `DArrayView` only.
 
 That means the typechecker can track logical shape states at the wrapper/API level while still reusing the existing low-level runtime layouts internally, and the public wrappers can expose typed `error[...]` returns when allocation or growth may fail.
 

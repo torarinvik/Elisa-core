@@ -114,20 +114,6 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr) (C.LLVMValueRef, s
 			return nil, nil, err
 		}
 		return s.emitRuntimeIndexedAddress(containerPtr, t, t.Elem, indexValue)
-	case *semantic.DListType:
-		basePtr, _, err := s.emitExpr(expr.Object, nil)
-		if err != nil {
-			return nil, nil, err
-		}
-		return s.emitRuntimePointerIndexedAddress(basePtr, func() (C.LLVMTypeRef, error) {
-			return s.g.ensureRuntimeCtxList()
-		}, t.Elem, indexValue)
-	case *semantic.DListViewType:
-		containerPtr, _, err := s.emitAddressOrTemp(expr.Object)
-		if err != nil {
-			return nil, nil, err
-		}
-		return s.emitRuntimeIndexedAddress(containerPtr, t, t.Elem, indexValue)
 	case *semantic.RefType:
 		basePtr, _, err := s.emitExpr(expr.Object, nil)
 		if err != nil {
@@ -144,14 +130,6 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr) (C.LLVMValueRef, s
 		}
 		if elemType, ok := runtimeIndexedElemType(t.Elem); ok {
 			return s.emitRuntimeIndexedAddress(basePtr, t.Elem, elemType, indexValue)
-		}
-		if dlist, ok := t.Elem.(*semantic.DListType); ok {
-			return s.emitRuntimePointerIndexedAddress(basePtr, func() (C.LLVMTypeRef, error) {
-				return s.g.ensureRuntimeCtxList()
-			}, dlist.Elem, indexValue)
-		}
-		if view, ok := t.Elem.(*semantic.DListViewType); ok {
-			return s.emitRuntimeIndexedAddress(basePtr, view, view.Elem, indexValue)
 		}
 		elemLLVMType, err := s.g.lowerType(t.Elem)
 		if err != nil {
@@ -201,8 +179,6 @@ func runtimeIndexedElemType(t semantic.Type) (semantic.Type, bool) {
 	case *semantic.DArrayType:
 		return tt.Elem, true
 	case *semantic.DArrayViewType:
-		return tt.Elem, true
-	case *semantic.DListViewType:
 		return tt.Elem, true
 	default:
 		return nil, false
@@ -936,7 +912,7 @@ func (s *functionState) resolveDynamicShapeType(expr *ast.GenericType) (semantic
 	case "DList":
 		return nil, true, fmt.Errorf("DList has been removed from the language; use DArray/darray instead")
 	case "DListView":
-		return nil, true, fmt.Errorf("DListView has been removed from the language; use DArrayView/view or raw CtxListView instead")
+		return nil, true, fmt.Errorf("DListView has been removed from the language; use DArrayView/view instead")
 	case "DStr":
 		if len(expr.Args) != 1 {
 			return nil, true, fmt.Errorf("DStr expects 1 argument, got %d", len(expr.Args))
@@ -955,9 +931,6 @@ func (g *llvmGenerator) fieldInfo(objType semantic.Type, fieldName string) (sema
 	if ref, ok := objType.(*semantic.RefType); ok {
 		pointerLike = true
 		objType = ref.Elem
-	}
-	if _, ok := objType.(*semantic.DListType); ok {
-		pointerLike = true
 	}
 	if runtimeBacked := g.runtimeBackedStructType(objType); runtimeBacked != nil {
 		objType = runtimeBacked
@@ -1004,26 +977,8 @@ func fieldInfoFromStruct(st *semantic.StructType, fieldName string) (int, semant
 }
 
 func (g *llvmGenerator) runtimeBackedStructType(t semantic.Type) semantic.Type {
-	if _, ok := t.(*semantic.DListType); ok {
-		if base, ok := g.result.NamedTypes["CtxList"]; ok {
-			return base
-		}
-		return nil
-	}
-	if _, ok := t.(*semantic.DListViewType); ok {
-		if base, ok := g.result.NamedTypes["CtxListView"]; ok {
-			return base
-		}
-		return nil
-	}
-	if _, ok := t.(*semantic.DArrayViewType); ok {
-		if base, ok := g.result.NamedTypes["DynArrayView"]; ok {
-			return base
-		}
-		return nil
-	}
 	if _, ok := t.(*semantic.SViewType); ok {
-		if base, ok := g.result.NamedTypes["CtxStringView"]; ok {
+		if base, ok := g.result.NamedTypes["StringView"]; ok {
 			return base
 		}
 		return nil

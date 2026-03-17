@@ -85,15 +85,6 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			},
 		},
 		{
-			name: "runtime_bridges",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "runtime_bridges.llcontext"),
-			checks: []string{
-				"declare i64 @ctx_stage0_list_len(ptr)",
-				"define i64 @raw_list_len(ptr",
-				"call i64 @ctx_stage0_list_len(ptr",
-			},
-		},
-		{
 			name: "pointer_casts",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "pointer_casts.llcontext"),
 			checks: []string{
@@ -146,13 +137,13 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			name: "string_view_ops",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "string_view_ops.llcontext"),
 			checks: []string{
-				"%CtxStringView = type { ptr, i64 }",
-				"declare %CtxStringView @ctx_stage1rt_string_view(ptr, i64, i64)",
-				"call %CtxStringView @ctx_stage1rt_string_view(ptr",
-				"declare i64 @ctx_stage1rt_string_view_index(%CtxStringView, i64)",
+				"%StringView = type { ptr, i64 }",
+				"declare %StringView @ctx_stage1rt_string_view(ptr, i64, i64)",
+				"call %StringView @ctx_stage1rt_string_view(ptr",
+				"declare i64 @ctx_stage1rt_string_view_index(%StringView, i64)",
 				"declare i64 @ctx_stage1rt_strlen(ptr)",
-				"declare i64 @ctx_stage1rt_string_view_eq(%CtxStringView, ptr)",
-				"declare i64 @ctx_stage1rt_string_views_eq(%CtxStringView, %CtxStringView)",
+				"declare i64 @ctx_stage1rt_string_view_eq(%StringView, ptr)",
+				"declare i64 @ctx_stage1rt_string_views_eq(%StringView, %StringView)",
 			},
 		},
 		{
@@ -406,7 +397,8 @@ func TestRunCLICompilesStage1RuntimeToLLVM(t *testing.T) {
 		"define ptr @ctx_stage0_int_to_string(i64",
 		"define ptr @ctx_stage1rt_concat2(ptr",
 		"define ptr @ctx_stage1rt_string_builder_new(ptr",
-		"define i64 @ctx_stage1rt_list_len(ptr",
+		"%StringView = type { ptr, i64 }",
+		"define i64 @ctx_stage1rt_string_view_len(%StringView",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {

@@ -46,15 +46,6 @@ var shapeTransformTable = map[string]ShapeTransformSpec{
 	"ctx_stage1rt_char_to_string_scratch": {FreshReturnShapeParams: []string{"shape_out"}},
 	"ctx_stage1rt_string_slice":           {FreshReturnShapeParams: []string{"shape_out"}},
 	"ctx_stage1rt_string_from_view":       {FreshReturnShapeParams: []string{"shape_out"}},
-	"ctx_stage1rt_list_new":               {FreshReturnShapeParams: []string{"shape_out"}},
-	"ctx_stage1rt_list_new_reserve":       {FreshReturnShapeParams: []string{"shape_out"}},
-	"ctx_stage1rt_list_reserve":           {FreshReturnShapeParams: []string{"shape_out"}},
-	"ctx_stage1rt_list_push":              {FreshReturnShapeParams: []string{"shape_out"}},
-	"ctx_stage1rt_list_push_mut":          {FreshReturnShapeParams: []string{"shape_out"}},
-	"ctx_stage1rt_list_concat":            {FreshReturnShapeParams: []string{"shape_result"}},
-	"ctx_stage1rt_list_truncate":          {FreshReturnShapeParams: []string{"shape_out"}},
-	"ctx_stage1rt_list_clear":             {FreshReturnShapeParams: []string{"shape_out"}},
-	"ctx_stage1rt_list_from_view":         {FreshReturnShapeParams: []string{"shape_out"}},
 	"arena_da_from_view":                  {FreshReturnShapeParams: []string{"shape_out"}},
 }
 
@@ -124,22 +115,9 @@ func (a *Analyzer) registerBuiltins() {
 }
 
 func (a *Analyzer) registerBuiltinRuntimeStructs() {
-	a.registerBuiltinStructType("CtxStringView", nil, []builtinFieldSpec{
+	a.registerBuiltinStructType("StringView", nil, []builtinFieldSpec{
 		{name: "data", typ: refTypeExpr("u8", false), mutable: true},
 		{name: "len", typ: namedTypeExpr("i64", false), mutable: true},
-	})
-	a.registerBuiltinStructType("CtxList", nil, []builtinFieldSpec{
-		{name: "len", typ: namedTypeExpr("i64", false), mutable: true},
-		{name: "cap", typ: namedTypeExpr("i64", false), mutable: true},
-		{name: "elem_size", typ: namedTypeExpr("i64", false), mutable: true},
-		{name: "data", typ: nestedRefTypeExpr("void", true, true), mutable: true},
-		{name: "inline_boxes", typ: refTypeExpr("u8", true), mutable: true},
-		{name: "inline_box_stride", typ: namedTypeExpr("i64", false), mutable: true},
-	})
-	a.registerBuiltinStructType("CtxListView", nil, []builtinFieldSpec{
-		{name: "data", typ: nestedRefTypeExpr("void", true, true), mutable: true},
-		{name: "len", typ: namedTypeExpr("i64", false), mutable: true},
-		{name: "elem_size", typ: namedTypeExpr("i64", false), mutable: true},
 	})
 	a.registerBuiltinStructType("DynArray", []string{"T"}, []builtinFieldSpec{
 		{name: "items", typ: refTypeParamExpr("T", true), mutable: true},
@@ -220,7 +198,7 @@ func nestedRefTypeExpr(name string, innerNonNull bool, outerNullable bool) ast.T
 
 func isBuiltinRuntimeStructName(name string) bool {
 	switch name {
-	case "CtxStringView", "CtxList", "CtxListView", "DynArray", "DynArrayView":
+	case "StringView", "DynArray", "DynArrayView":
 		return true
 	default:
 		return false

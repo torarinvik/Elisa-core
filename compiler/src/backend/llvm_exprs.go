@@ -1065,7 +1065,7 @@ func runtimeStringIndexedOperand(t semantic.Type) (string, semantic.Type, bool) 
 	if _, ok := t.(*semantic.SViewType); ok {
 		return "ctx_stage1rt_string_view_index", t, true
 	}
-	if st, ok := t.(*semantic.StructType); ok && st.Name == "CtxStringView" {
+	if st, ok := t.(*semantic.StructType); ok && st.Name == "StringView" {
 		return "ctx_stage1rt_string_view_index", t, true
 	}
 	ref, ok := t.(*semantic.RefType)
@@ -1081,7 +1081,7 @@ func runtimeStringIndexedOperand(t semantic.Type) (string, semantic.Type, bool) 
 	if _, ok := ref.Elem.(*semantic.SViewType); ok {
 		return "ctx_stage1rt_string_view_index", ref.Elem, true
 	}
-	if st, ok := ref.Elem.(*semantic.StructType); ok && st.Name == "CtxStringView" {
+	if st, ok := ref.Elem.(*semantic.StructType); ok && st.Name == "StringView" {
 		return "ctx_stage1rt_string_view_index", ref.Elem, true
 	}
 	return "", nil, false
@@ -1148,13 +1148,7 @@ func runtimeSliceOperandInfo(objectType semantic.Type, resultType semantic.Type)
 	if _, ok := objectType.(*semantic.SViewType); ok {
 		return runtimeSliceInfo{helperName: "ctx_stage1rt_string_view_slice", operandType: objectType, resultType: resultType, indexType: i64Type}, true
 	}
-	if view, ok := objectType.(*semantic.DListType); ok {
-		return runtimeSliceInfo{helperName: "ctx_stage1rt_tlist_view", operandType: objectType, resultType: &semantic.DListViewType{Elem: view.Elem}, indexType: i64Type}, true
-	}
-	if view, ok := objectType.(*semantic.DListViewType); ok {
-		return runtimeSliceInfo{helperName: "ctx_stage1rt_tlist_view_slice", operandType: objectType, resultType: &semantic.DListViewType{Elem: view.Elem}, indexType: i64Type}, true
-	}
-	if st, ok := objectType.(*semantic.StructType); ok && st.Name == "CtxStringView" {
+	if st, ok := objectType.(*semantic.StructType); ok && st.Name == "StringView" {
 		return runtimeSliceInfo{helperName: "ctx_stage1rt_string_view_slice", operandType: objectType, resultType: resultType, indexType: i64Type}, true
 	}
 	ref, ok := objectType.(*semantic.RefType)
@@ -1175,13 +1169,7 @@ func runtimeSliceOperandInfo(objectType semantic.Type, resultType semantic.Type)
 	if _, ok := ref.Elem.(*semantic.SViewType); ok {
 		return runtimeSliceInfo{helperName: "ctx_stage1rt_string_view_slice", operandType: ref.Elem, resultType: resultType, indexType: i64Type}, true
 	}
-	if view, ok := ref.Elem.(*semantic.DListType); ok {
-		return runtimeSliceInfo{helperName: "ctx_stage1rt_tlist_view", operandType: ref.Elem, resultType: &semantic.DListViewType{Elem: view.Elem}, indexType: i64Type}, true
-	}
-	if view, ok := ref.Elem.(*semantic.DListViewType); ok {
-		return runtimeSliceInfo{helperName: "ctx_stage1rt_tlist_view_slice", operandType: ref.Elem, resultType: &semantic.DListViewType{Elem: view.Elem}, indexType: i64Type}, true
-	}
-	if st, ok := ref.Elem.(*semantic.StructType); ok && st.Name == "CtxStringView" {
+	if st, ok := ref.Elem.(*semantic.StructType); ok && st.Name == "StringView" {
 		return runtimeSliceInfo{helperName: "ctx_stage1rt_string_view_slice", operandType: ref.Elem, resultType: resultType, indexType: i64Type}, true
 	}
 	return runtimeSliceInfo{}, false
@@ -1227,7 +1215,7 @@ func classifyRuntimeStringCompareKind(t semantic.Type) runtimeStringCompareKind 
 	if _, ok := t.(*semantic.SViewType); ok {
 		return runtimeStringCompareView
 	}
-	if st, ok := t.(*semantic.StructType); ok && st.Name == "CtxStringView" {
+	if st, ok := t.(*semantic.StructType); ok && st.Name == "StringView" {
 		return runtimeStringCompareView
 	}
 	ref, ok := t.(*semantic.RefType)

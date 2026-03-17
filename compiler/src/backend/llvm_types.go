@@ -47,30 +47,20 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 		}
 		return g.noteType(tt.Errors)
 	case *semantic.SViewType:
-		if st, ok := g.lookupStructType("CtxStringView"); ok {
+		if st, ok := g.lookupStructType("StringView"); ok {
 			_, err := g.ensureStructBody(st.Name, st)
 			return err
 		}
-		return fmt.Errorf("missing runtime struct CtxStringView")
+		return fmt.Errorf("missing runtime struct StringView")
 	case *semantic.RefType:
 		return g.noteType(tt.Elem)
 	case *semantic.ArrayType:
 		return g.noteType(tt.Elem)
 	case *semantic.DArrayType:
-		if isVoidRefLikeType(tt.Elem) {
-			_, err := g.ensureRuntimeCtxList()
-			return err
-		}
 		_, err := g.ensureRuntimeDynArray(tt.Elem)
 		return err
 	case *semantic.DArrayViewType:
 		_, err := g.ensureRuntimeDynArrayView()
-		return err
-	case *semantic.DListType:
-		_, err := g.ensureRuntimeCtxList()
-		return err
-	case *semantic.DListViewType:
-		_, err := g.ensureRuntimeCtxListView()
 		return err
 	case *semantic.StructType:
 		if len(tt.TypeParams) == 0 {
@@ -248,28 +238,15 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		}
 		return nil, fmt.Errorf("array type %s is missing a compile-time constant size", tt.String())
 	case *semantic.DArrayType:
-		if isVoidRefLikeType(tt.Elem) {
-			if _, err := g.ensureRuntimeCtxList(); err != nil {
-				return nil, err
-			}
-			return C.LLVMPointerTypeInContext(g.context, 0), nil
-		}
 		return g.ensureRuntimeDynArray(tt.Elem)
 	case *semantic.DArrayViewType:
 		return g.ensureRuntimeDynArrayView()
-	case *semantic.DListType:
-		if _, err := g.ensureRuntimeCtxList(); err != nil {
-			return nil, err
-		}
-		return C.LLVMPointerTypeInContext(g.context, 0), nil
-	case *semantic.DListViewType:
-		return g.ensureRuntimeCtxListView()
 	case *semantic.DStrType:
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	case *semantic.SViewType:
-		st, ok := g.lookupStructType("CtxStringView")
+		st, ok := g.lookupStructType("StringView")
 		if !ok {
-			return nil, fmt.Errorf("missing runtime struct CtxStringView")
+			return nil, fmt.Errorf("missing runtime struct StringView")
 		}
 		return g.ensureStructBody(st.Name, st)
 	case *semantic.StructType:
@@ -386,14 +363,6 @@ func (g *llvmGenerator) ensureRuntimeDynArrayView() (C.LLVMTypeRef, error) {
 	return g.ensureRuntimeSizedStruct("DynArrayView", 3)
 }
 
-func (g *llvmGenerator) ensureRuntimeCtxList() (C.LLVMTypeRef, error) {
-	return g.ensureRuntimeSizedStruct("CtxListHandle", 3)
-}
-
-func (g *llvmGenerator) ensureRuntimeCtxListView() (C.LLVMTypeRef, error) {
-	return g.ensureRuntimeSizedStruct("CtxListView", 2)
-}
-
 func (g *llvmGenerator) ensureRuntimeSizedStruct(name string, fieldCount int) (C.LLVMTypeRef, error) {
 	ty, err := g.ensureNamedStructType(name)
 	if err != nil {
@@ -502,10 +471,6 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type) semantic.Ty
 		return &semantic.DArrayType{Elem: substituteType(tt.Elem, subst), Shape: tt.Shape, SurfaceName: tt.SurfaceName}
 	case *semantic.DArrayViewType:
 		return &semantic.DArrayViewType{Elem: substituteType(tt.Elem, subst), Begin: tt.Begin, End: tt.End, SurfaceName: tt.SurfaceName}
-	case *semantic.DListType:
-		return &semantic.DListType{Elem: substituteType(tt.Elem, subst), Shape: tt.Shape}
-	case *semantic.DListViewType:
-		return &semantic.DListViewType{Elem: substituteType(tt.Elem, subst)}
 	case *semantic.SViewType:
 		return &semantic.SViewType{Begin: tt.Begin, End: tt.End}
 	case *semantic.GenericInstanceType:

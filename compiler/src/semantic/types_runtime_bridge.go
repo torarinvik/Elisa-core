@@ -14,27 +14,20 @@ const (
 	runtimeBridgeNone runtimeBridgeKind = iota
 	runtimeBridgeDArrayDynArray
 	runtimeBridgeDArrayViewDynArrayView
-	runtimeBridgeDListCtxList
-	runtimeBridgeDListViewCtxListView
-	runtimeBridgeDArrayCtxList
 	runtimeBridgeDStrU8Ref
-	runtimeBridgeSViewCtxStringView
+	runtimeBridgeSViewStringView
 )
 
 type runtimeBridgeMatch struct {
-	Kind          runtimeBridgeKind
-	DArray        *DArrayType
-	DArrayView    *DArrayViewType
-	DList         *DListType
-	DListView     *DListViewType
-	DynArray      *GenericInstanceType
-	DynArrayView  *StructType
-	CtxList       *RefType
-	CtxListView   *StructType
-	DStr          *DStrType
-	U8Ref         *RefType
-	SView         *SViewType
-	CtxStringView *StructType
+	Kind         runtimeBridgeKind
+	DArray       *DArrayType
+	DArrayView   *DArrayViewType
+	DynArray     *GenericInstanceType
+	DynArrayView *StructType
+	DStr         *DStrType
+	U8Ref        *RefType
+	SView        *SViewType
+	StringView   *StructType
 }
 
 func isVoidRefType(t Type) bool {
@@ -44,18 +37,6 @@ func isVoidRefType(t Type) bool {
 	}
 	builtin, ok := ref.Elem.(*BuiltinType)
 	return ok && builtin.Name == "void"
-}
-
-func ctxListRuntimeRef(t Type) (*RefType, bool) {
-	ref, ok := t.(*RefType)
-	if !ok {
-		return nil, false
-	}
-	st, ok := ref.Elem.(*StructType)
-	if !ok || st.Name != "CtxList" {
-		return nil, false
-	}
-	return ref, true
 }
 
 func u8RuntimeRef(t Type) (*RefType, bool) {
@@ -70,14 +51,6 @@ func u8RuntimeRef(t Type) (*RefType, bool) {
 	return ref, true
 }
 
-func ctxListViewRuntimeType(t Type) (*StructType, bool) {
-	st, ok := t.(*StructType)
-	if !ok || st.Name != "CtxListView" {
-		return nil, false
-	}
-	return st, true
-}
-
 func dynArrayViewRuntimeType(t Type) (*StructType, bool) {
 	st, ok := t.(*StructType)
 	if !ok || st.Name != "DynArrayView" {
@@ -86,9 +59,9 @@ func dynArrayViewRuntimeType(t Type) (*StructType, bool) {
 	return st, true
 }
 
-func ctxStringViewRuntimeType(t Type) (*StructType, bool) {
+func stringViewRuntimeType(t Type) (*StructType, bool) {
 	st, ok := t.(*StructType)
-	if !ok || st.Name != "CtxStringView" {
+	if !ok || st.Name != "StringView" {
 		return nil, false
 	}
 	return st, true
@@ -99,50 +72,20 @@ func classifyRuntimeBridge(a, b Type) (runtimeBridgeMatch, bool) {
 		if dynArray, ok := dynArrayRuntimeInstance(b); ok {
 			return runtimeBridgeMatch{Kind: runtimeBridgeDArrayDynArray, DArray: da, DynArray: dynArray}, true
 		}
-		if isVoidRefType(da.Elem) {
-			if ctxList, ok := ctxListRuntimeRef(b); ok {
-				return runtimeBridgeMatch{Kind: runtimeBridgeDArrayCtxList, DArray: da, CtxList: ctxList}, true
-			}
-		}
 	}
 	if dav, ok := a.(*DArrayViewType); ok {
 		if dynArrayView, ok := dynArrayViewRuntimeType(b); ok {
 			return runtimeBridgeMatch{Kind: runtimeBridgeDArrayViewDynArrayView, DArrayView: dav, DynArrayView: dynArrayView}, true
 		}
 	}
-	if dl, ok := a.(*DListType); ok {
-		if ctxList, ok := ctxListRuntimeRef(b); ok {
-			return runtimeBridgeMatch{Kind: runtimeBridgeDListCtxList, DList: dl, CtxList: ctxList}, true
-		}
-	}
-	if dlv, ok := a.(*DListViewType); ok {
-		if ctxListView, ok := ctxListViewRuntimeType(b); ok {
-			return runtimeBridgeMatch{Kind: runtimeBridgeDListViewCtxListView, DListView: dlv, CtxListView: ctxListView}, true
-		}
-	}
 	if da, ok := b.(*DArrayType); ok {
 		if dynArray, ok := dynArrayRuntimeInstance(a); ok {
 			return runtimeBridgeMatch{Kind: runtimeBridgeDArrayDynArray, DArray: da, DynArray: dynArray}, true
-		}
-		if isVoidRefType(da.Elem) {
-			if ctxList, ok := ctxListRuntimeRef(a); ok {
-				return runtimeBridgeMatch{Kind: runtimeBridgeDArrayCtxList, DArray: da, CtxList: ctxList}, true
-			}
 		}
 	}
 	if dav, ok := b.(*DArrayViewType); ok {
 		if dynArrayView, ok := dynArrayViewRuntimeType(a); ok {
 			return runtimeBridgeMatch{Kind: runtimeBridgeDArrayViewDynArrayView, DArrayView: dav, DynArrayView: dynArrayView}, true
-		}
-	}
-	if dl, ok := b.(*DListType); ok {
-		if ctxList, ok := ctxListRuntimeRef(a); ok {
-			return runtimeBridgeMatch{Kind: runtimeBridgeDListCtxList, DList: dl, CtxList: ctxList}, true
-		}
-	}
-	if dlv, ok := b.(*DListViewType); ok {
-		if ctxListView, ok := ctxListViewRuntimeType(a); ok {
-			return runtimeBridgeMatch{Kind: runtimeBridgeDListViewCtxListView, DListView: dlv, CtxListView: ctxListView}, true
 		}
 	}
 	if dstr, ok := a.(*DStrType); ok {
@@ -156,13 +99,13 @@ func classifyRuntimeBridge(a, b Type) (runtimeBridgeMatch, bool) {
 		}
 	}
 	if sview, ok := a.(*SViewType); ok {
-		if ctxStringView, ok := ctxStringViewRuntimeType(b); ok {
-			return runtimeBridgeMatch{Kind: runtimeBridgeSViewCtxStringView, SView: sview, CtxStringView: ctxStringView}, true
+		if stringView, ok := stringViewRuntimeType(b); ok {
+			return runtimeBridgeMatch{Kind: runtimeBridgeSViewStringView, SView: sview, StringView: stringView}, true
 		}
 	}
 	if sview, ok := b.(*SViewType); ok {
-		if ctxStringView, ok := ctxStringViewRuntimeType(a); ok {
-			return runtimeBridgeMatch{Kind: runtimeBridgeSViewCtxStringView, SView: sview, CtxStringView: ctxStringView}, true
+		if stringView, ok := stringViewRuntimeType(a); ok {
+			return runtimeBridgeMatch{Kind: runtimeBridgeSViewStringView, SView: sview, StringView: stringView}, true
 		}
 	}
 	return runtimeBridgeMatch{}, false
@@ -176,7 +119,7 @@ func sameTypeRuntimeCompatible(a, b Type) bool {
 	switch bridge.Kind {
 	case runtimeBridgeDArrayDynArray:
 		return SameType(bridge.DArray.Elem, bridge.DynArray.Args[0])
-	case runtimeBridgeSViewCtxStringView:
+	case runtimeBridgeSViewStringView:
 		return true
 	default:
 		return false
@@ -191,7 +134,7 @@ func assignableRuntimeCompatible(dst, src Type) bool {
 	switch bridge.Kind {
 	case runtimeBridgeDArrayDynArray:
 		return SameType(bridge.DArray.Elem, bridge.DynArray.Args[0])
-	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeDListCtxList, runtimeBridgeDListViewCtxListView, runtimeBridgeDArrayCtxList, runtimeBridgeDStrU8Ref, runtimeBridgeSViewCtxStringView:
+	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeDStrU8Ref, runtimeBridgeSViewStringView:
 		return true
 	default:
 		return false
@@ -212,7 +155,7 @@ func patternRuntimeCompatible(pattern, actual Type) bool {
 			return matchTypePattern(patternDynArray.Args[0], bridge.DArray.Elem)
 		}
 		return false
-	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeDListCtxList, runtimeBridgeDListViewCtxListView, runtimeBridgeDArrayCtxList, runtimeBridgeDStrU8Ref, runtimeBridgeSViewCtxStringView:
+	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeDStrU8Ref, runtimeBridgeSViewStringView:
 		return true
 	default:
 		return false

@@ -38,13 +38,6 @@ func collectShapeParamsInType(t Type, out map[string]bool) {
 		collectShapeParamsInType(n.Elem, out)
 	case *DArrayViewType:
 		collectShapeParamsInType(n.Elem, out)
-	case *DListType:
-		if param, ok := n.Shape.(*ShapeParam); ok {
-			out[param.Name] = true
-		}
-		collectShapeParamsInType(n.Elem, out)
-	case *DListViewType:
-		collectShapeParamsInType(n.Elem, out)
 	case *DStrType:
 		if param, ok := n.Shape.(*ShapeParam); ok {
 			out[param.Name] = true
@@ -195,44 +188,7 @@ func shapeMismatchNotes(expected Type, actual Type) []string {
 }
 
 func runtimeBackedShapeMismatchNotes(expected Type, actual Type) []string {
-	if usesCtxListLogicalShape(expected) || usesCtxListLogicalShape(actual) {
-		return []string{"CtxList-backed list wrappers keep the same runtime layout; this mismatch is about the logical shape witness"}
-	}
 	return nil
-}
-
-func usesCtxListLogicalShape(t Type) bool {
-	if t == nil {
-		return false
-	}
-	switch n := t.(type) {
-	case *RefType:
-		return usesCtxListLogicalShape(n.Elem)
-	case *ArrayType:
-		return usesCtxListLogicalShape(n.Elem)
-	case *DArrayType:
-		return isVoidRefType(n.Elem)
-	case *DListType:
-		return true
-	case *DListViewType:
-		return false
-	case *GenericInstanceType:
-		for _, arg := range n.Args {
-			if usesCtxListLogicalShape(arg) {
-				return true
-			}
-		}
-		return false
-	case *FuncType:
-		for _, param := range n.Params {
-			if usesCtxListLogicalShape(param) {
-				return true
-			}
-		}
-		return usesCtxListLogicalShape(n.Return)
-	default:
-		return false
-	}
 }
 
 func collectFreshShapesInType(t Type) []*FreshShape {
@@ -261,14 +217,6 @@ func collectFreshShapesInto(t Type, seen map[int]bool, out *[]*FreshShape) {
 		}
 		collectFreshShapesInto(n.Elem, seen, out)
 	case *DArrayViewType:
-		collectFreshShapesInto(n.Elem, seen, out)
-	case *DListType:
-		if fresh, ok := n.Shape.(*FreshShape); ok && !seen[fresh.ID] {
-			seen[fresh.ID] = true
-			*out = append(*out, fresh)
-		}
-		collectFreshShapesInto(n.Elem, seen, out)
-	case *DListViewType:
 		collectFreshShapesInto(n.Elem, seen, out)
 	case *DStrType:
 		if fresh, ok := n.Shape.(*FreshShape); ok && !seen[fresh.ID] {

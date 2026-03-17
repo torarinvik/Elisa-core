@@ -103,15 +103,6 @@ type DArrayViewType struct {
 	SurfaceName string
 }
 
-type DListType struct {
-	Elem  Type
-	Shape Shape
-}
-
-type DListViewType struct {
-	Elem Type
-}
-
 type DStrType struct {
 	Shape       Shape
 	SurfaceName string
@@ -169,8 +160,6 @@ func (*RefType) isType()             {}
 func (*ArrayType) isType()           {}
 func (*DArrayType) isType()          {}
 func (*DArrayViewType) isType()      {}
-func (*DListType) isType()           {}
-func (*DListViewType) isType()       {}
 func (*DStrType) isType()            {}
 func (*SViewType) isType()           {}
 func (*StructType) isType()          {}
@@ -388,12 +377,6 @@ func (t *DArrayViewType) String() string {
 		return fmt.Sprintf("view[%s]", t.Elem.String())
 	}
 	return fmt.Sprintf("DArrayView[%s]", t.Elem.String())
-}
-func (t *DListType) String() string {
-	return fmt.Sprintf("DList[%s, %s]", t.Elem.String(), t.Shape.String())
-}
-func (t *DListViewType) String() string {
-	return fmt.Sprintf("DListView[%s]", t.Elem.String())
 }
 func (t *DStrType) String() string {
 	if isWildcardShape(t.Shape) {

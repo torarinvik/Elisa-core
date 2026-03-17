@@ -216,14 +216,14 @@ def view_char(text: sview[0, 4]) -> char:
 	}
 
 	checks := []string{
-		"%CtxStringView = type { ptr, i64 }",
+		"%StringView = type { ptr, i64 }",
 		"define i64 @first_char([4 x i8]",
 		"define i64 @first_code([4 x i8]",
 		"zext i8",
-		"define %CtxStringView @slice_text([4 x i8]",
-		"insertvalue %CtxStringView",
-		"define i64 @view_char(%CtxStringView",
-		"declare i64 @ctx_stage1rt_string_view_index(%CtxStringView, i64)",
+		"define %StringView @slice_text([4 x i8]",
+		"insertvalue %StringView",
+		"define i64 @view_char(%StringView",
+		"declare i64 @ctx_stage1rt_string_view_index(%StringView, i64)",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -604,38 +604,6 @@ def bits_ptr(bits: uintptr) -> any u8&:
 	}
 }
 
-func TestGenerateLLVMIRLowersRawListRuntimeBridgeCalls(t *testing.T) {
-	src := `repr(c) struct CtxList:
-	len: mutable i64
-	cap: mutable i64
-	elem_size: mutable i64
-	data: mutable any void&&?
-	inline_boxes: mutable any u8&?
-	inline_box_stride: mutable i64
-
-extern ctx_stage0_list_len(list: any CtxList&?) -> i64
-
-def raw_list_len(values: DArray[any void&, row]) -> i64:
-	return ctx_stage0_list_len(values)
-`
-	result := parseAndAnalyze(t, "backend_raw_list_bridge.llcontext", src)
-	output, err := backend.GenerateLLVMIR(result)
-	if err != nil {
-		t.Fatalf("GenerateLLVMIR returned error: %v", err)
-	}
-
-	checks := []string{
-		"declare i64 @ctx_stage0_list_len(ptr)",
-		"define i64 @raw_list_len(ptr",
-		"call i64 @ctx_stage0_list_len(ptr",
-	}
-	for _, check := range checks {
-		if !strings.Contains(output, check) {
-			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
-		}
-	}
-}
-
 func TestGenerateLLVMIRLowersNestedFieldAccessOnReturnedStructValues(t *testing.T) {
 	src := `repr(c) struct Inner:
 	value: i32
@@ -678,11 +646,6 @@ func TestGenerateLLVMIRLowerRuntimeBackedTypes(t *testing.T) {
 repr(c) struct DynArrayView:
 	items: mutable any void&?
     count: mutable usize
-
-repr(c) struct CtxList:
-	items: mutable any void&?
-    count: mutable usize
-    capacity: mutable usize
 
 extern take_array(values: DArray[i32, row]) -> void
 extern take_array_view(view: DArrayView[i32]) -> usize
@@ -1229,8 +1192,8 @@ def erase(text: DStr[row]) -> DStr:
 	}
 }
 
-func TestGenerateLLVMIRIndexesCtxStringViewViaRuntimeHelper(t *testing.T) {
-	src := `def read_view(view: CtxStringView) -> char:
+func TestGenerateLLVMIRIndexesStringViewViaRuntimeHelper(t *testing.T) {
+	src := `def read_view(view: StringView) -> char:
     return view[1]
 `
 	result := parseAndAnalyze(t, "backend_runtime_string_view_index.llcontext", src)
@@ -1240,10 +1203,10 @@ func TestGenerateLLVMIRIndexesCtxStringViewViaRuntimeHelper(t *testing.T) {
 	}
 
 	checks := []string{
-		"%CtxStringView = type { ptr, i64 }",
-		"define i64 @read_view(%CtxStringView",
-		"declare i64 @ctx_stage1rt_string_view_index(%CtxStringView, i64)",
-		"call i64 @ctx_stage1rt_string_view_index(%CtxStringView",
+		"%StringView = type { ptr, i64 }",
+		"define i64 @read_view(%StringView",
+		"declare i64 @ctx_stage1rt_string_view_index(%StringView, i64)",
+		"call i64 @ctx_stage1rt_string_view_index(%StringView",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -1256,13 +1219,13 @@ func TestGenerateLLVMIRLowersRuntimeStringEqualityHelpers(t *testing.T) {
 	src := `def same_text(left: DStr[row], right: DStr[col]) -> bool:
     return left == right
 
-def same_view_text(view: CtxStringView, text: DStr[row]) -> bool:
+def same_view_text(view: StringView, text: DStr[row]) -> bool:
     return view == text
 
-def same_text_view(text: DStr[row], view: CtxStringView) -> bool:
+def same_text_view(text: DStr[row], view: StringView) -> bool:
     return text == view
 
-def different_views(left: CtxStringView, right: CtxStringView) -> bool:
+def different_views(left: StringView, right: StringView) -> bool:
     return left != right
 `
 	result := parseAndAnalyze(t, "backend_runtime_string_equality.llcontext", src)
@@ -1273,11 +1236,11 @@ def different_views(left: CtxStringView, right: CtxStringView) -> bool:
 
 	checks := []string{
 		"declare i64 @ctx_stage1rt_streq(ptr, ptr)",
-		"declare i64 @ctx_stage1rt_string_view_eq(%CtxStringView, ptr)",
-		"declare i64 @ctx_stage1rt_string_views_eq(%CtxStringView, %CtxStringView)",
+		"declare i64 @ctx_stage1rt_string_view_eq(%StringView, ptr)",
+		"declare i64 @ctx_stage1rt_string_views_eq(%StringView, %StringView)",
 		"call i64 @ctx_stage1rt_streq(ptr",
-		"call i64 @ctx_stage1rt_string_view_eq(%CtxStringView",
-		"call i64 @ctx_stage1rt_string_views_eq(%CtxStringView",
+		"call i64 @ctx_stage1rt_string_view_eq(%StringView",
+		"call i64 @ctx_stage1rt_string_views_eq(%StringView",
 		"icmp ne i64",
 		"icmp eq i64",
 	}
@@ -1464,12 +1427,12 @@ func TestGenerateLLVMIRLowersArrayLiteralAndInferredLocalViaFixedArrayLowering(t
 }
 
 func TestGenerateLLVMIRLowersStringSliceSyntaxViaRuntimeHelpers(t *testing.T) {
-	src := `repr(c) struct CtxStringView:
+	src := `repr(c) struct StringView:
 	data: mutable any u8&
     len: mutable i64
 
 def head_codepoint(text: DStr[row]) -> char:
-    view: CtxStringView = text[1:3]
+	view: StringView = text[1:3]
     return view[0]
 `
 	result := parseAndAnalyze(t, "backend_string_slice_syntax.llcontext", src)
@@ -1479,10 +1442,10 @@ def head_codepoint(text: DStr[row]) -> char:
 	}
 
 	checks := []string{
-		"%CtxStringView = type { ptr, i64 }",
-		"declare %CtxStringView @ctx_stage1rt_string_view(ptr, i64, i64)",
-		"call %CtxStringView @ctx_stage1rt_string_view(ptr",
-		"call i64 @ctx_stage1rt_string_view_index(%CtxStringView",
+		"%StringView = type { ptr, i64 }",
+		"declare %StringView @ctx_stage1rt_string_view(ptr, i64, i64)",
+		"call %StringView @ctx_stage1rt_string_view(ptr",
+		"call i64 @ctx_stage1rt_string_view_index(%StringView",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {

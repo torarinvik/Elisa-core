@@ -419,7 +419,7 @@ func (a *Analyzer) collectRuntimeBridgeBindings(pattern, actual Type, bindings m
 			return true
 		}
 		return true
-	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeDListCtxList, runtimeBridgeDListViewCtxListView, runtimeBridgeDArrayCtxList, runtimeBridgeDStrU8Ref:
+	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeDStrU8Ref:
 		return true
 	default:
 		return false
@@ -459,15 +459,6 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		}
 	case *DArrayViewType:
 		if act, ok := actual.(*DArrayViewType); ok {
-			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings)
-		}
-	case *DListType:
-		if act, ok := actual.(*DListType); ok {
-			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings)
-			a.collectShapeBinding(p.Shape, act.Shape, shapeBindings)
-		}
-	case *DListViewType:
-		if act, ok := actual.(*DListViewType); ok {
 			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings)
 		}
 	case *DStrType:
@@ -567,12 +558,6 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	if view, ok := objType.(*DArrayViewType); ok {
 		return view.Elem
 	}
-	if dlist, ok := objType.(*DListType); ok {
-		return dlist.Elem
-	}
-	if view, ok := objType.(*DListViewType); ok {
-		return view.Elem
-	}
 	if _, ok := objType.(*DStrType); ok {
 		return a.namedTypes["char"]
 	}
@@ -597,12 +582,6 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		if view, ok := ref.Elem.(*DArrayViewType); ok {
 			return view.Elem
 		}
-		if dlist, ok := ref.Elem.(*DListType); ok {
-			return dlist.Elem
-		}
-		if view, ok := ref.Elem.(*DListViewType); ok {
-			return view.Elem
-		}
 		if _, ok := ref.Elem.(*DStrType); ok {
 			return a.namedTypes["char"]
 		}
@@ -611,7 +590,7 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		}
 		return ref.Elem
 	}
-	a.errorf(expr.Pos(), "indexing requires array or reference type, got %s", objType.String())
+	a.errorf(expr.Pos(), "indexing requires string, array, view, or reference type, got %s", objType.String())
 	return invalidType
 }
 
@@ -641,12 +620,6 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 		_ = dstr
 		return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
 	}
-	if view, ok := objType.(*DListType); ok {
-		return &DListViewType{Elem: view.Elem}
-	}
-	if view, ok := objType.(*DListViewType); ok {
-		return &DListViewType{Elem: view.Elem}
-	}
 	if isStringViewType(objType) {
 		return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
 	}
@@ -670,17 +643,11 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 		if _, ok := ref.Elem.(*DStrType); ok {
 			return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
 		}
-		if view, ok := ref.Elem.(*DListType); ok {
-			return &DListViewType{Elem: view.Elem}
-		}
-		if view, ok := ref.Elem.(*DListViewType); ok {
-			return &DListViewType{Elem: view.Elem}
-		}
 		if isStringViewType(ref.Elem) {
 			return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
 		}
 	}
-	a.errorf(expr.Pos(), "slicing requires string, array, list, or view type, got %s", objType.String())
+	a.errorf(expr.Pos(), "slicing requires string, array, or view type, got %s", objType.String())
 	return invalidType
 }
 
@@ -774,10 +741,6 @@ func containsTypeParam(t Type) bool {
 	case *DArrayType:
 		return containsTypeParam(n.Elem)
 	case *DArrayViewType:
-		return containsTypeParam(n.Elem)
-	case *DListType:
-		return containsTypeParam(n.Elem)
-	case *DListViewType:
 		return containsTypeParam(n.Elem)
 	case *GenericInstanceType:
 		for _, arg := range n.Args {
@@ -1001,22 +964,8 @@ func (a *Analyzer) runtimeBackedStructType(t Type) Type {
 		_ = dav
 		return base
 	}
-	if _, ok := t.(*DListType); ok {
-		base, ok := a.namedTypes["CtxList"]
-		if !ok {
-			return nil
-		}
-		return base
-	}
-	if _, ok := t.(*DListViewType); ok {
-		base, ok := a.namedTypes["CtxListView"]
-		if !ok {
-			return nil
-		}
-		return base
-	}
 	if _, ok := t.(*SViewType); ok {
-		base, ok := a.namedTypes["CtxStringView"]
+		base, ok := a.namedTypes["StringView"]
 		if !ok {
 			return nil
 		}
@@ -1067,12 +1016,12 @@ func isStringViewType(t Type) bool {
 	if _, ok := t.(*SViewType); ok {
 		return true
 	}
-	return isCtxStringViewType(t)
+	return isRuntimeStringViewType(t)
 }
 
-func isCtxStringViewType(t Type) bool {
+func isRuntimeStringViewType(t Type) bool {
 	st, ok := t.(*StructType)
-	return ok && st.Name == "CtxStringView"
+	return ok && st.Name == "StringView"
 }
 
 func dstrSyntheticField(t Type, fieldName string) (Field, bool) {

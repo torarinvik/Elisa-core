@@ -53,22 +53,9 @@ repr(c) struct StringBuilder:
 	cap: mutable i64
 	data: mutable any u8&?
 
-repr(c) struct CtxStringView:
+repr(c) struct StringView:
 	data: mutable any u8&
 	len: mutable i64
-
-repr(c) struct CtxList:
-	len: mutable i64
-	cap: mutable i64
-	elem_size: mutable i64
-	data: mutable any void&&?
-	inline_boxes: mutable any u8&?
-	inline_box_stride: mutable i64
-
-repr(c) struct CtxListView:
-	data: mutable any void&&?
-	len: mutable i64
-	elem_size: mutable i64
 
 # ------------------------------------------------------------
 # Global caches (zero-initialized)

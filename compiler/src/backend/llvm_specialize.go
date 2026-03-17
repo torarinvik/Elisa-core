@@ -103,14 +103,6 @@ func collectSpecializationBindings(pattern semantic.Type, actual semantic.Type, 
 		if a, ok := actual.(*semantic.DArrayViewType); ok {
 			collectSpecializationBindings(p.Elem, a.Elem, bindings)
 		}
-	case *semantic.DListType:
-		if a, ok := actual.(*semantic.DListType); ok {
-			collectSpecializationBindings(p.Elem, a.Elem, bindings)
-		}
-	case *semantic.DListViewType:
-		if a, ok := actual.(*semantic.DListViewType); ok {
-			collectSpecializationBindings(p.Elem, a.Elem, bindings)
-		}
 	case *semantic.GenericInstanceType:
 		if a, ok := actual.(*semantic.GenericInstanceType); ok && p.Name == a.Name && len(p.Args) == len(a.Args) {
 			for i := range p.Args {
