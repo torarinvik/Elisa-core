@@ -304,6 +304,10 @@ def frontend_lookup_keyword(text: StringView) -> FrontendTokenKind:
     return FrontendTokenKind.Ident
 
 
+def frontend_maybe_keyword_first_char(ch: i64) -> bool:
+    return ch == 97 or ch == 99 or ch == 100 or ch == 101 or ch == 102 or ch == 103 or ch == 104 or ch == 105 or ch == 109 or ch == 110 or ch == 111 or ch == 112 or ch == 114 or ch == 115 or ch == 116 or ch == 119 or ch == 122
+
+
 def frontend_read_string(lexer: any FrontendLexer&) -> FrontendToken:
     pos: FrontendPos = frontend_cur_pos(lexer)
     _ = frontend_advance_char(lexer)
@@ -395,20 +399,31 @@ def frontend_read_ident_kind(lexer: any FrontendLexer&) -> FrontendTokenKind:
     start: usize = lexer.pos
     while not frontend_is_eof(lexer) and frontend_is_ident_char(frontend_cur_char(lexer)):
         _ = frontend_advance_char(lexer)
+
+    length: usize = lexer.pos - start
+    if length < 2u or length > 7u:
+        return FrontendTokenKind.Ident
+
+    first: i64 = lexer.source[start].i64()
+    if not frontend_maybe_keyword_first_char(first):
+        return FrontendTokenKind.Ident
+
     text: StringView = frontend_make_lexer_view(lexer, start, lexer.pos)
     return frontend_lookup_keyword(text)
 
 
 def frontend_next_token_kind(lexer: any FrontendLexer&) -> FrontendTokenKind:
     if frontend_pending_has_tokens(lexer):
-        return frontend_pop_pending(lexer).kind
+        token: FrontendToken = frontend_pop_pending(lexer)
+        return token.kind
 
     if lexer.at_line_start:
         lexer.at_line_start <- false
         if lexer.paren_depth == 0:
             frontend_handle_indentation(lexer)
             if frontend_pending_has_tokens(lexer):
-                return frontend_pop_pending(lexer).kind
+                token: FrontendToken = frontend_pop_pending(lexer)
+                return token.kind
 
     frontend_skip_spaces(lexer)
 

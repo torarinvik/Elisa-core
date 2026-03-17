@@ -38,6 +38,18 @@ def frontend_kind_eq(actual: FrontendTokenKind, expected: FrontendTokenKind) -> 
             match actual:
                 FrontendTokenKind.HexLit:
                     return true
+        FrontendTokenKind.True:
+            match actual:
+                FrontendTokenKind.True:
+                    return true
+        FrontendTokenKind.False:
+            match actual:
+                FrontendTokenKind.False:
+                    return true
+        FrontendTokenKind.Zeroed:
+            match actual:
+                FrontendTokenKind.Zeroed:
+                    return true
         FrontendTokenKind.Def:
             match actual:
                 FrontendTokenKind.Def:
@@ -228,11 +240,38 @@ def frontend_case_paren_suppresses_newline() -> bool:
 def frontend_case_region_alloc_syntax() -> bool:
     region scratch(4096u)
     a: any Arena& = (&scratch).cast[any Arena&]()
-    source: static u8& = "region parse\nvalue: any i32& = new[parse] 1\ndestroy parse\n"
-    tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, source.cast[any u8&]())
+    bytes: u8[59] = [114u8, 101u8, 103u8, 105u8, 111u8, 110u8, 32u8, 112u8, 97u8, 114u8, 115u8, 101u8, 10u8, 118u8, 97u8, 108u8, 117u8, 101u8, 58u8, 32u8, 97u8, 110u8, 121u8, 32u8, 105u8, 51u8, 50u8, 38u8, 32u8, 61u8, 32u8, 110u8, 101u8, 119u8, 91u8, 112u8, 97u8, 114u8, 115u8, 101u8, 93u8, 32u8, 49u8, 10u8, 100u8, 101u8, 115u8, 116u8, 114u8, 111u8, 121u8, 32u8, 112u8, 97u8, 114u8, 115u8, 101u8, 10u8, 0u8]
+    tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, (&bytes[0u]).cast[any u8&]())
     ok: bool = frontend_expect_token_count(tokens, 19u) and frontend_expect_kind(tokens, 0u, FrontendTokenKind.Region) and frontend_expect_kind(tokens, 1u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 2u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 3u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 4u, FrontendTokenKind.Colon) and frontend_expect_kind(tokens, 5u, FrontendTokenKind.Any) and frontend_expect_kind(tokens, 6u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 7u, FrontendTokenKind.Ampersand) and frontend_expect_kind(tokens, 8u, FrontendTokenKind.Assign) and frontend_expect_kind(tokens, 9u, FrontendTokenKind.New) and frontend_expect_kind(tokens, 10u, FrontendTokenKind.LBracket) and frontend_expect_kind(tokens, 11u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 12u, FrontendTokenKind.RBracket) and frontend_expect_kind(tokens, 13u, FrontendTokenKind.IntLit) and frontend_expect_kind(tokens, 14u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 15u, FrontendTokenKind.Destroy) and frontend_expect_kind(tokens, 16u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 17u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 18u, FrontendTokenKind.Eof)
     destroy scratch
     return ok
+
+
+def frontend_case_kind_only_keyword_path() -> bool:
+    region scratch(4096u)
+    a: any Arena& = (&scratch).cast[any Arena&]()
+    bytes: u8[53] = [102u8, 97u8, 108u8, 115u8, 101u8, 32u8, 116u8, 114u8, 117u8, 101u8, 32u8, 122u8, 101u8, 114u8, 111u8, 101u8, 100u8, 32u8, 114u8, 101u8, 103u8, 105u8, 111u8, 110u8, 32u8, 110u8, 101u8, 119u8, 32u8, 100u8, 101u8, 115u8, 116u8, 114u8, 111u8, 121u8, 32u8, 49u8, 50u8, 51u8, 117u8, 54u8, 52u8, 32u8, 48u8, 120u8, 65u8, 66u8, 105u8, 51u8, 50u8, 10u8, 0u8]
+    lexer: mutable FrontendLexer = frontend_new_lexer(a, "frontend_kind_only_test.llcontext".cast[any u8&](), (&bytes[0u]).cast[any u8&]())
+
+    if not frontend_kind_eq(frontend_next_token_kind((&lexer).cast[any FrontendLexer&]()), FrontendTokenKind.False):
+        return false
+    if not frontend_kind_eq(frontend_next_token_kind((&lexer).cast[any FrontendLexer&]()), FrontendTokenKind.True):
+        return false
+    if not frontend_kind_eq(frontend_next_token_kind((&lexer).cast[any FrontendLexer&]()), FrontendTokenKind.Zeroed):
+        return false
+    if not frontend_kind_eq(frontend_next_token_kind((&lexer).cast[any FrontendLexer&]()), FrontendTokenKind.Region):
+        return false
+    if not frontend_kind_eq(frontend_next_token_kind((&lexer).cast[any FrontendLexer&]()), FrontendTokenKind.New):
+        return false
+    if not frontend_kind_eq(frontend_next_token_kind((&lexer).cast[any FrontendLexer&]()), FrontendTokenKind.Destroy):
+        return false
+    if not frontend_kind_eq(frontend_next_token_kind((&lexer).cast[any FrontendLexer&]()), FrontendTokenKind.IntLit):
+        return false
+    if not frontend_kind_eq(frontend_next_token_kind((&lexer).cast[any FrontendLexer&]()), FrontendTokenKind.HexLit):
+        return false
+    if not frontend_kind_eq(frontend_next_token_kind((&lexer).cast[any FrontendLexer&]()), FrontendTokenKind.Newline):
+        return false
+    return frontend_kind_eq(frontend_next_token_kind((&lexer).cast[any FrontendLexer&]()), FrontendTokenKind.Eof)
 
 
 def frontend_lexer_parity_suite_impl() -> int:
@@ -251,6 +290,8 @@ def frontend_lexer_parity_suite_impl() -> int:
     if not frontend_case_paren_suppresses_newline():
         return 0
     if not frontend_case_region_alloc_syntax():
+        return 0
+    if not frontend_case_kind_only_keyword_path():
         return 0
     return 1
 
@@ -273,7 +314,6 @@ def frontend_lexer_token_count_impl(source: any u8&) -> i64:
     arena: any Arena& = (&frontend_lexer_bench_arena).cast[any Arena&]()
     arena_reset(arena)
     return frontend_count_tokens(arena, "frontend_lexer_bench.llcontext".cast[any u8&](), source).i64()
-
 
 export func frontend_lexer_parity_suite() -> int = frontend_lexer_parity_suite_impl
 export func frontend_lexer_token_count(source: any u8&) -> i64 = frontend_lexer_token_count_impl

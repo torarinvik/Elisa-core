@@ -908,6 +908,49 @@ def unwrap_or(value: MaybeInt, fallback: int) -> int:
 	}
 }
 
+func TestGenerateLLVMIRLowersEnumEqualityViaTagAndPayloadWords(t *testing.T) {
+	src := `enum MaybeInt:
+	None
+	Some(int)
+	Pair(int, int)
+
+def same_none(left: MaybeInt, right: MaybeInt) -> bool:
+	return left == right
+
+def differs(left: MaybeInt, right: MaybeInt) -> bool:
+	return left != right
+
+def compare_payload() -> bool:
+	return MaybeInt.Pair(3, 4) == MaybeInt.Pair(3, 4)
+`
+	result := parseAndAnalyze(t, "backend_enum_equality.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%MaybeInt = type { i32, [2 x i64] }",
+		"define i1 @same_none(%MaybeInt",
+		"define i1 @differs(%MaybeInt",
+		"define i1 @compare_payload()",
+		"extractvalue %MaybeInt",
+		"extractvalue [2 x i64]",
+		"icmp eq i32",
+		"and i1",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	for _, bad := range []string{"icmp eq %MaybeInt", "icmp ne %MaybeInt"} {
+		if strings.Contains(output, bad) {
+			t.Fatalf("expected enum comparisons to avoid aggregate icmp %q, got:\n%s", bad, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersDictSurfaceTypesViaDynDictCarrier(t *testing.T) {
 	src := `extern take_runtime(values: DynDict[i32]) -> void
 extern make_runtime() -> DynDict[i32]

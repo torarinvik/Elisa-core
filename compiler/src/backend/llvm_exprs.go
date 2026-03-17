@@ -502,6 +502,9 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 	if err != nil {
 		return nil, nil, err
 	}
+	if enumType, ok := operandType.(*semantic.EnumType); ok && (expr.Op == lexer.TOKEN_EQEQ || expr.Op == lexer.TOKEN_BANGEQ) {
+		return s.emitEnumCompareExpr(expr.Op, enumType, left, right, resultType)
+	}
 
 	switch expr.Op {
 	case lexer.TOKEN_PLUS:
@@ -542,6 +545,52 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 	default:
 		return nil, nil, fmt.Errorf("unsupported binary operator %s", lexer.TokenName(expr.Op))
 	}
+}
+
+func (s *functionState) emitEnumCompareExpr(op lexer.TokenKind, enumType *semantic.EnumType, left C.LLVMValueRef, right C.LLVMValueRef, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+	if enumType == nil {
+		return nil, nil, fmt.Errorf("missing enum type for comparison")
+	}
+	leftTag := C.LLVMBuildExtractValue(s.builder, left, 0, cStringFree("enumcmp.left.tag"))
+	rightTag := C.LLVMBuildExtractValue(s.builder, right, 0, cStringFree("enumcmp.right.tag"))
+	equal := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), leftTag, rightTag, cStringFree("enumcmp.tag.eq"))
+
+	payloadSlots, err := s.enumPayloadWordCount(enumType)
+	if err != nil {
+		return nil, nil, err
+	}
+	if payloadSlots > 0 {
+		leftPayload := C.LLVMBuildExtractValue(s.builder, left, 1, cStringFree("enumcmp.left.payload"))
+		rightPayload := C.LLVMBuildExtractValue(s.builder, right, 1, cStringFree("enumcmp.right.payload"))
+		for i := uint64(0); i < payloadSlots; i++ {
+			nameSuffix := fmt.Sprintf(".%d", i)
+			leftWord := C.LLVMBuildExtractValue(s.builder, leftPayload, C.unsigned(i), cStringFree("enumcmp.left.word"+nameSuffix))
+			rightWord := C.LLVMBuildExtractValue(s.builder, rightPayload, C.unsigned(i), cStringFree("enumcmp.right.word"+nameSuffix))
+			wordEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), leftWord, rightWord, cStringFree("enumcmp.word.eq"+nameSuffix))
+			equal = C.LLVMBuildAnd(s.builder, equal, wordEqual, cStringFree("enumcmp.and"+nameSuffix))
+		}
+	}
+	if op == lexer.TOKEN_BANGEQ {
+		return C.LLVMBuildNot(s.builder, equal, cStringFree("enumcmp.ne")), resultType, nil
+	}
+	return equal, resultType, nil
+}
+
+func (s *functionState) enumPayloadWordCount(enumType *semantic.EnumType) (uint64, error) {
+	if enumType == nil {
+		return 0, nil
+	}
+	maxSlots := uint64(0)
+	for _, variant := range enumType.Variants {
+		slots, err := s.g.enumVariantPayloadSlots(variant)
+		if err != nil {
+			return 0, err
+		}
+		if slots > maxSlots {
+			maxSlots = slots
+		}
+	}
+	return maxSlots, nil
 }
 
 func (s *functionState) emitPointerCompareExpr(expr *ast.BinaryExpr, leftType semantic.Type, rightType semantic.Type, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, bool, error) {
