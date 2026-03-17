@@ -1,0 +1,176 @@
+# ============================================================
+# Self-hosted frontend token model
+# ============================================================
+
+enum FrontendTokenKind:
+    Eof
+    Newline
+    Indent
+    Dedent
+    Ident
+    IntLit
+    HexLit
+    StringLit
+    Def
+    Error
+    Enum
+    Struct
+    Const
+    Global
+    Extern
+    Export
+    If
+    Match
+    Elif
+    Else
+    While
+    Return
+    Any
+    Heap
+    Stack
+    Static
+    Mutable
+    Repr
+    Packed
+    Aligned
+    Pass
+    Panic
+    Not
+    And
+    Or
+    Null
+    True
+    False
+    Zeroed
+    Sizeof
+    Tail
+    Try
+    Raise
+    Region
+    Destroy
+    New
+    As
+    In
+    Colon
+    Arrow
+    Dot
+    Comma
+    LParen
+    RParen
+    LBracket
+    RBracket
+    Hash
+    Ampersand
+    Question
+    Bang
+    At
+    Ellipsis
+    LArrow
+    PlusEq
+    MinusEq
+    StarEq
+    SlashEq
+    PercentEq
+    CaretEq
+    PipeEq
+    AmpEq
+    LShiftEq
+    RShiftEq
+    Assign
+    EqEq
+    BangEq
+    Lt
+    Gt
+    LtEq
+    GtEq
+    Plus
+    Minus
+    Star
+    Slash
+    Percent
+    Pipe
+    Caret
+    LShift
+    RShift
+    Tilde
+
+repr(c) struct FrontendPos:
+    line: mutable int
+    col: mutable int
+    offset: mutable usize
+
+repr(c) struct FrontendToken:
+    kind: mutable FrontendTokenKind
+    pos: mutable FrontendPos
+    text: mutable StringView
+    suffix: mutable StringView
+
+repr(c) struct FrontendLexer:
+    arena: mutable any Arena&?
+    filename: mutable any u8&
+    source: mutable any u8&
+    source_len: mutable usize
+    pos: mutable usize
+    line: mutable int
+    col: mutable int
+    indent_stack: mutable darray[usize]
+    pending_tokens: mutable darray[FrontendToken]
+    pending_index: mutable usize
+    at_line_start: mutable bool
+    paren_depth: mutable int
+
+const FRONTEND_CH_NUL = 0
+const FRONTEND_CH_TAB = 9
+const FRONTEND_CH_NL = 10
+const FRONTEND_CH_SPACE = 32
+const FRONTEND_CH_BANG = 33
+const FRONTEND_CH_DQUOTE = 34
+const FRONTEND_CH_HASH = 35
+const FRONTEND_CH_PERCENT = 37
+const FRONTEND_CH_AMP = 38
+const FRONTEND_CH_LPAREN = 40
+const FRONTEND_CH_RPAREN = 41
+const FRONTEND_CH_STAR = 42
+const FRONTEND_CH_PLUS = 43
+const FRONTEND_CH_COMMA = 44
+const FRONTEND_CH_MINUS = 45
+const FRONTEND_CH_DOT = 46
+const FRONTEND_CH_SLASH = 47
+const FRONTEND_CH_COLON = 58
+const FRONTEND_CH_LT = 60
+const FRONTEND_CH_ASSIGN = 61
+const FRONTEND_CH_GT = 62
+const FRONTEND_CH_QUESTION = 63
+const FRONTEND_CH_AT = 64
+const FRONTEND_CH_LBRACKET = 91
+const FRONTEND_CH_BSLASH = 92
+const FRONTEND_CH_RBRACKET = 93
+const FRONTEND_CH_CARET = 94
+const FRONTEND_CH_UNDERSCORE = 95
+const FRONTEND_CH_a = 97
+const FRONTEND_CH_f = 102
+const FRONTEND_CH_i = 105
+const FRONTEND_CH_u = 117
+const FRONTEND_CH_x = 120
+const FRONTEND_CH_A = 65
+const FRONTEND_CH_F = 70
+const FRONTEND_CH_X = 88
+const FRONTEND_CH_TILDE = 126
+
+const FRONTEND_TAB_WIDTH: usize = 4
+
+
+def frontend_empty_view() -> StringView:
+    return StringView("".cast[any u8&](), 0)
+
+
+def frontend_make_pos(line: int, col: int, offset: usize) -> FrontendPos:
+    return FrontendPos(line, col, offset)
+
+
+def frontend_make_token(kind: FrontendTokenKind, pos: FrontendPos, text: StringView, suffix: StringView) -> FrontendToken:
+    return FrontendToken(kind, pos, text, suffix)
+
+
+def frontend_sv_eq_literal(view: StringView, literal: static u8&) -> bool:
+    return ctx_stage0_string_view_eq(view, literal.cast[any u8&]()) != 0

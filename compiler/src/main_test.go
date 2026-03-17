@@ -175,6 +175,19 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			},
 		},
 		{
+			name: "frontend_lexer",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "frontend_lexer.llcontext"),
+			checks: []string{
+				"%FrontendPos = type { i64, i64, i64 }",
+				"%FrontendToken = type { %FrontendTokenKind, %FrontendPos, %StringView, %StringView }",
+				"define i64 @frontend_advance_char(ptr",
+				"define %FrontendToken @frontend_next_token(ptr",
+				"define %DynArray__FrontendToken @frontend_tokenize(ptr",
+				"define i64 @frontend_lexer_parity_suite()",
+				"define i64 @frontend_lexer_token_count(ptr ",
+			},
+		},
+		{
 			name: "frontend_stress",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "frontend_stress.llcontext"),
 			checks: []string{
@@ -414,6 +427,54 @@ func TestRunCLIGeneratedHeaderInteropHarness(t *testing.T) {
 	runOutput, err := runCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("generated-header interop harness failed: %v\n%s", err, string(runOutput))
+	}
+}
+
+func TestRunCLIFrontendLexerGeneratedHeaderInteropHarness(t *testing.T) {
+	clangPath, err := exec.LookPath("clang")
+	if err != nil {
+		t.Skip("clang not available")
+	}
+	repoRoot := repoRootFromMainTest(t)
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "frontend_lexer.llcontext")
+	harnessPath := filepath.Join(repoRoot, "Code", "test_programs", "frontend_lexer_generated_harness.c")
+	shimPath := filepath.Join(repoRoot, "Code", "benchmarks", "frontend_lexer_runtime_shims.c")
+	outputDir := t.TempDir()
+	headerPath := filepath.Join(outputDir, "frontend_lexer.h")
+	objectPath := filepath.Join(outputDir, "frontend_lexer.o")
+	exePath := filepath.Join(outputDir, "frontend_lexer_generated_harness")
+
+	for _, args := range [][]string{
+		{"-emit", "header", "-o", headerPath, fixturePath},
+		{"-emit", "obj", "-o", objectPath, fixturePath},
+	} {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		exitCode := runCLI(args, &stdout, &stderr)
+		if exitCode != 0 {
+			t.Fatalf("runCLI(%v) returned %d\nstderr:\n%s", args, exitCode, stderr.String())
+		}
+		if stdout.Len() != 0 {
+			t.Fatalf("expected no stdout for %v, got:\n%s", args, stdout.String())
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("expected no stderr for %v, got:\n%s", args, stderr.String())
+		}
+	}
+
+	compileArgs := []string{"-I", outputDir, harnessPath, shimPath, objectPath, "-o", exePath}
+	if runtime.GOOS == "darwin" {
+		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
+	}
+	compileCmd := exec.Command(clangPath, compileArgs...)
+	compileOutput, err := compileCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clang failed: %v\n%s", err, string(compileOutput))
+	}
+	runCmd := exec.Command(exePath)
+	runOutput, err := runCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("frontend-lexer generated-header interop harness failed: %v\n%s", err, string(runOutput))
 	}
 }
 
