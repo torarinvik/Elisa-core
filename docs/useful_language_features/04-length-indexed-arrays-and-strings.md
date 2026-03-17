@@ -144,13 +144,13 @@ This gives you:
 
 ### Stage 2 — owned dynamic arrays with explicit runtime length field, but abstract typed constructors
 
-Keep runtime representation C-like:
+Keep the runtime representation simple and low-level:
 
 ```text
 darray[T, n]
 ```
 
-with a compiler-known runtime carrier that stays C-like internally.
+with a compiler-known runtime carrier that stays plain-data internally.
 
 But let the type system expose a stronger logical wrapper notion, something like:
 
@@ -160,7 +160,7 @@ darray[T, n]
 
 where operations like `push`, `resize`, `append_many`, `truncate`, `clear`, `concat`, and `strcat` produce new logical types. In the practical surface, the allocation-sensitive ones should usually be fallible, for example `push : darray[T, n] × T -> darray[T, n+1] error[ShapeOpError]` and `concat : dstr[a] × dstr[b] -> dstr[a+b] error[ShapeOpError]`.
 
-This can still compile to the same C-like struct representation.
+This can still compile to the same plain-data struct representation.
 
 That preserves your zero-overhead requirement while keeping safety facts in the type layer.
 

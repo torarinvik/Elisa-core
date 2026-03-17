@@ -1,5 +1,5 @@
 #define ARENA_IMPLEMENTATION
-#include "../arena.h"
+#include "arena_reference.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -83,7 +83,7 @@ static void llctx_da_append_many_i32(Arena *a, bench_i32_array *da, const int *i
 }
 
 static bench_result run_append_macro(size_t n, int rounds) {
-    bench_result out = {.name = "arena.h macro append", .best_ns = UINT64_MAX, .ns_per_op = 0.0, .checksum = 0};
+    bench_result out = {.name = "baseline macro append", .best_ns = UINT64_MAX, .ns_per_op = 0.0, .checksum = 0};
 
     for (int round = 0; round < rounds; ++round) {
         Arena arena = {0};
@@ -129,7 +129,7 @@ static bench_result run_append_llctx(size_t n, int rounds) {
 }
 
 static bench_result run_append_many_macro(size_t n, size_t chunk_size, int rounds) {
-    bench_result out = {.name = "arena.h macro append_many", .best_ns = UINT64_MAX, .ns_per_op = 0.0, .checksum = 0};
+    bench_result out = {.name = "baseline macro append_many", .best_ns = UINT64_MAX, .ns_per_op = 0.0, .checksum = 0};
 
     for (int round = 0; round < rounds; ++round) {
         Arena arena = {0};

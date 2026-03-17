@@ -53,6 +53,16 @@ Run all tests:
 go test ./...
 ```
 
+## Runtime source of truth
+
+The active runtime implementation lives in llcontext source files under `../Code/`.
+
+- `../Code/contextlang_runtime.llcontext` — canonical runtime entrypoint
+- `../Code/runtime_llcontext/` — staged runtime helpers and wrappers
+- `../Code/arena.llcontext` — arena, dynamic-array, and dictionary support
+
+Retained C sources under `../Code/benchmarks/` are benchmark scaffolding only and are not part of the active runtime implementation.
+
 ## Script sync
 
 The scripts in `scripts/` are safe sync wrappers for the canonical files in `src/`:

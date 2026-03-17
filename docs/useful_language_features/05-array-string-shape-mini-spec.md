@@ -4,7 +4,7 @@ This section proposes a shape/length-typed array and string model for Contextlan
 
 The goal is the same as the pointer typestate goal:
 
-- keep runtime representation simple and C-like
+- keep runtime representation simple and low-level
 - keep operations zero-overhead where possible
 - move important safety facts into the type system
 - avoid borrow checking and lifetime analysis
@@ -21,11 +21,11 @@ Implemented today:
 
 - exact fixed-array typing for `array[T, N]` and `T[N]`
 - dynamic shape witnesses for `darray[T, shape]` and `dstr[shape]`
-- non-owning view types `view[T, begin, end]` and `sview[begin, end]`
+- non-owning view types `view[T, begin, end]`, `dview[T]`, and `sview[begin, end]`
 - indexing for fixed arrays, dynamic arrays/views, strings, and string views
 - slice syntax producing view-like results:
     - `array[T, N]`, `T[N]`, and their non-null references slice to `view[T, start, end]`
-    - `darray[T, shape]` and `view[T, begin, end]` slices produce `view[T, start, end]`
+    - `darray[T, shape]` and `dview[T]` slices produce `dview[T]`
     - `dstr[shape]`, `str[N]`, and `sview[begin, end]` slices produce `sview[start, end]`
 
 The user-facing built-in spellings are lowercase only: use `str[...]` and `dstr[...]`, not legacy aliases like `string[...]` or `dstring[...]`.
@@ -189,7 +189,7 @@ User-facing code can talk in terms of the built-in `darray[T, shape]` surface wh
 
 Intuitively, `darray[T]` means “some logical shape exists here, but this API is not exposing it”.
 
-Internally, the runtime representation can still stay equivalent to a simple C-like carrier with a data pointer, length, and capacity.
+Internally, the runtime representation can still stay equivalent to a simple low-level carrier with a data pointer, length, and capacity.
 
 ### Dynamic string representation
 
@@ -197,7 +197,7 @@ User-facing code should talk in terms of `str[N]`, `dstr[shape]`, and `sview[beg
 
 As with `darray[T]`, bare `dstr` means “some logical string shape exists here, but this API is not naming or preserving it”.
 
-Internally, the runtime representation can still stay equivalent to a simple C-like byte-buffer carrier.
+Internally, the runtime representation can still stay equivalent to a simple low-level byte-buffer carrier.
 
 This is excellent because it is:
 
@@ -375,7 +375,8 @@ That said, I would frame it like this:
 
 Current status:
 
-- `view[T, begin, end]` is the preferred surface for dynamic-array and fixed-array slice results
+- `view[T, begin, end]` is the preferred surface for fixed-array slice results
+- `dview[T]` is the preferred surface for dynamic-array slices and runtime-backed array views
 - `sview[begin, end]` is the preferred surface for string slices and runtime-backed string views
 
 So I agree with your instinct as an implementation priority:
@@ -418,7 +419,7 @@ Status: implemented, including exact fixed-array typing and constant compile-tim
 
 ### Stage 2 — library/runtime-owned dynamic arrays
 
-Add a runtime carrier equivalent to a C-like growable array with a data pointer, length, and capacity.
+Add a runtime carrier equivalent to a low-level growable array with a data pointer, length, and capacity.
 
 Then expose compiler-level logical shape wrappers incrementally.
 
@@ -520,4 +521,4 @@ If pointers are typestated by validity, arrays and strings should be typestated 
 
 That gives Contextlang a very crisp identity:
 
-> C-like memory model, with lightweight dependent typing for validity and shape.
+> low-level, ABI-friendly memory model, with lightweight dependent typing for validity and shape.

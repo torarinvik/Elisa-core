@@ -1,6 +1,6 @@
 # ============================================================
 # Contextlang Runtime - low level Contextlang dialect
-# Translated from contextlang_runtime.c
+# Canonical llcontext runtime entrypoint.
 # Split into focused include fragments.
 # ============================================================
 

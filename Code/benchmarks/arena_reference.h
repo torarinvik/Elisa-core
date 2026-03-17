@@ -1,3 +1,7 @@
+// Benchmark-only reference arena header.
+// This file is retained for C microbenchmarks and is not part of the active
+// llcontext runtime implementation.
+
 // Copyright 2022 Alexey Kutepov <reximkut@gmail.com>
 
 // Permission is hereby granted, free of charge, to any person obtaining
