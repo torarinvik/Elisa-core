@@ -59,6 +59,9 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 	case *semantic.DArrayType:
 		_, err := g.ensureRuntimeDynArray(tt.Elem)
 		return err
+	case *semantic.ViewType:
+		_, err := g.ensureRuntimeDynArrayView()
+		return err
 	case *semantic.DArrayViewType:
 		_, err := g.ensureRuntimeDynArrayView()
 		return err
@@ -262,6 +265,8 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		return nil, fmt.Errorf("array type %s is missing a compile-time constant size", tt.String())
 	case *semantic.DArrayType:
 		return g.ensureRuntimeDynArray(tt.Elem)
+	case *semantic.ViewType:
+		return g.ensureRuntimeDynArrayView()
 	case *semantic.DArrayViewType:
 		return g.ensureRuntimeDynArrayView()
 	case *semantic.DStrType:
@@ -573,6 +578,8 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type) semantic.Ty
 		return &semantic.ArrayType{Elem: substituteType(tt.Elem, subst), Size: tt.Size, HasConstSize: tt.HasConstSize, ConstSize: tt.ConstSize, SurfaceName: tt.SurfaceName}
 	case *semantic.DArrayType:
 		return &semantic.DArrayType{Elem: substituteType(tt.Elem, subst), Shape: tt.Shape, SurfaceName: tt.SurfaceName}
+	case *semantic.ViewType:
+		return &semantic.ViewType{Elem: substituteType(tt.Elem, subst), Begin: tt.Begin, End: tt.End}
 	case *semantic.DArrayViewType:
 		return &semantic.DArrayViewType{Elem: substituteType(tt.Elem, subst), Begin: tt.Begin, End: tt.End, SurfaceName: tt.SurfaceName}
 	case *semantic.DictType:

@@ -763,7 +763,7 @@ def arena_dict_clear__i64(m: any DynDict[i64]&):
     m.count <- 0
     m.used <- 0
 
-def arena_da_view[T](da: any darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
+def arena_da_view[T](da: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
     elem_size: usize = sizeof(T)
     if da.items == null or da.count == 0:
         return DynArrayView(null, 0, elem_size)
@@ -778,10 +778,10 @@ def arena_da_view[T](da: any darray[T, shape_in]&, start: usize, end: usize) -> 
 
     return DynArrayView((da.items + lo).cast[any void&](), hi - lo, elem_size)
 
-def arena_da_view_len[T](view: view[T]) -> usize:
+def arena_da_view_len[T](view: dview[T]) -> usize:
     return view.len
 
-def arena_da_view_slice[T](view: view[T], start: usize, end: usize) -> view[T]:
+def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
     if view.data == null or view.len == 0:
         return DynArrayView(null, 0, view.elem_size)
 
@@ -796,7 +796,7 @@ def arena_da_view_slice[T](view: view[T], start: usize, end: usize) -> view[T]:
     offset: usize = lo * view.elem_size
     return DynArrayView((view.data.cast[any u8&]() + offset).cast[any void&](), hi - lo, view.elem_size)
 
-def arena_da_view_get[T](view: view[T], index: usize) -> T:
+def arena_da_view_get[T](view: dview[T], index: usize) -> T:
     assert index < view.len
     assert view.data != null
 
@@ -804,7 +804,7 @@ def arena_da_view_get[T](view: view[T], index: usize) -> T:
     base: any T& = (view.data.cast[any u8&]() + offset).cast[any T&]()
     return base[0]
 
-def arena_da_from_view[T](a: any Arena&, view: view[T]) -> darray[T, shape_out]:
+def arena_da_from_view[T](a: any Arena&, view: dview[T]) -> darray[T, shape_out]:
     if view.len == 0:
         return zeroed
 

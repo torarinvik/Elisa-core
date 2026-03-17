@@ -174,6 +174,26 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"call i32 @arena_dict_put__i32(ptr",
 			},
 		},
+		{
+			name: "frontend_stress",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "frontend_stress.llcontext"),
+			checks: []string{
+				"%SourceSpan = type { i64, i64 }",
+				"%Token = type { %TokenKind, %SourceSpan, ptr }",
+				"%DynDict__Symbol = type { ptr, i64, i64, i64, ptr }",
+				"%Scope = type { ptr, %DynDict__Symbol, i64 }",
+				"%ParserState = type { %DynArrayView, i64, ptr }",
+				"define %DynArrayView @make_tokens()",
+				"define i32 @frontend_scope_stress(ptr",
+				"define i64 @frontend_region_token(i64",
+				"define i32 @frontend_smoke(ptr",
+				"define %DynDict__Symbol @arena_dict_new__Symbol(ptr",
+				"define i32 @arena_dict_put__Symbol(ptr",
+				"define i1 @arena_dict_contains__Symbol(ptr",
+				"call ptr @new_region(i64 2048)",
+				"call ptr @arena_alloc(ptr",
+			},
+		},
 	}
 
 	for _, fixture := range fixtures {

@@ -38,6 +38,9 @@ func SameType(a, b Type) bool {
 	case *DArrayType:
 		tb, ok := b.(*DArrayType)
 		return ok && SameType(ta.Elem, tb.Elem) && SameShape(ta.Shape, tb.Shape)
+	case *ViewType:
+		tb, ok := b.(*ViewType)
+		return ok && SameType(ta.Elem, tb.Elem) && viewBoundsEqual(ta, tb)
 	case *DArrayViewType:
 		tb, ok := b.(*DArrayViewType)
 		return ok && SameType(ta.Elem, tb.Elem)
@@ -212,6 +215,9 @@ func matchTypePattern(pattern, actual Type) bool {
 	case *DArrayType:
 		a, ok := actual.(*DArrayType)
 		return ok && matchTypePattern(p.Elem, a.Elem) && shapeMatchesPattern(p.Shape, a.Shape)
+	case *ViewType:
+		a, ok := actual.(*ViewType)
+		return ok && matchTypePattern(p.Elem, a.Elem) && viewBoundsMatch(p, a)
 	case *DArrayViewType:
 		a, ok := actual.(*DArrayViewType)
 		return ok && matchTypePattern(p.Elem, a.Elem)
@@ -301,6 +307,14 @@ func MergeTypes(a, b Type) Type {
 			if state, ok := mergeRefStates(ar.State, br.State); ok {
 				return &RefType{Elem: ar.Elem, State: state, Storage: storage, ExplicitStorage: explicit}
 			}
+		}
+	}
+	if av, ok := a.(*ViewType); ok {
+		if bv, ok := b.(*ViewType); ok && SameType(av.Elem, bv.Elem) {
+			if viewBoundsEqual(av, bv) {
+				return av
+			}
+			return &ViewType{Elem: av.Elem}
 		}
 	}
 	if IsNullType(a) {

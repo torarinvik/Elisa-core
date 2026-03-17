@@ -677,6 +677,9 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	if darray, ok := objType.(*DArrayType); ok {
 		return darray.Elem
 	}
+	if view, ok := objType.(*ViewType); ok {
+		return view.Elem
+	}
 	if view, ok := objType.(*DArrayViewType); ok {
 		return view.Elem
 	}
@@ -700,6 +703,9 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		}
 		if darray, ok := ref.Elem.(*DArrayType); ok {
 			return darray.Elem
+		}
+		if view, ok := ref.Elem.(*ViewType); ok {
+			return view.Elem
 		}
 		if view, ok := ref.Elem.(*DArrayViewType); ok {
 			return view.Elem
@@ -730,10 +736,13 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 		if isStringArrayType(array) {
 			return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
 		}
-		return &DArrayViewType{Elem: array.Elem}
+		return &ViewType{Elem: array.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
 	}
 	if view, ok := objType.(*DArrayType); ok {
 		return &DArrayViewType{Elem: view.Elem}
+	}
+	if view, ok := objType.(*ViewType); ok {
+		return &ViewType{Elem: view.Elem}
 	}
 	if view, ok := objType.(*DArrayViewType); ok {
 		return &DArrayViewType{Elem: view.Elem}
@@ -754,10 +763,13 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 			if isStringArrayType(array) {
 				return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
 			}
-			return &DArrayViewType{Elem: array.Elem}
+			return &ViewType{Elem: array.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
 		}
 		if view, ok := ref.Elem.(*DArrayType); ok {
 			return &DArrayViewType{Elem: view.Elem}
+		}
+		if view, ok := ref.Elem.(*ViewType); ok {
+			return &ViewType{Elem: view.Elem}
 		}
 		if view, ok := ref.Elem.(*DArrayViewType); ok {
 			return &DArrayViewType{Elem: view.Elem}
@@ -861,6 +873,8 @@ func containsTypeParam(t Type) bool {
 	case *ArrayType:
 		return containsTypeParam(n.Elem)
 	case *DArrayType:
+		return containsTypeParam(n.Elem)
+	case *ViewType:
 		return containsTypeParam(n.Elem)
 	case *DArrayViewType:
 		return containsTypeParam(n.Elem)

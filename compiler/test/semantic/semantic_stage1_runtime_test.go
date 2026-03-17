@@ -16,29 +16,29 @@ repr(c) struct DynArrayView:
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
+def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
 	_ = start
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
 	return DynArrayView(null, 0, sizeof(T))
 
-def arena_da_view_len[T](view: view[T]) -> usize:
+def arena_da_view_len[T](view: dview[T]) -> usize:
 	return view.len
 
-def arena_da_view_slice[T](view: view[T], start: usize, end: usize) -> view[T]:
+def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
 	_ = start
 	_ = end
 	return view
 
-def arena_da_view_get[T](view: view[T], index: usize) -> T:
+def arena_da_view_get[T](view: dview[T], index: usize) -> T:
 	_ = view
 	_ = index
 	return zeroed
 
 def use(values: any darray[i32, row]&) -> i32:
-	view: view[i32] = arena_da_view(values, 0u, values.count)
-	sub: view[i32] = arena_da_view_slice(view, 0u, 1u)
+	view: dview[i32] = arena_da_view(values, 0u, values.count)
+	sub: dview[i32] = arena_da_view_slice(view, 0u, 1u)
 	if arena_da_view_len(sub) > 0u:
 		return arena_da_view_get(sub, 0u)
 	return 0
@@ -62,20 +62,20 @@ repr(c) struct DynArrayView:
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
+def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
 	_ = start
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
 	return DynArrayView(null, 0, sizeof(T))
 
-def arena_da_from_view[T](a: any Arena&, view: view[T]) -> darray[T, shape_out]:
+def arena_da_from_view[T](a: any Arena&, view: dview[T]) -> darray[T, shape_out]:
 	_ = a
 	_ = view
 	return zeroed
 
 def bad(a: any Arena&, values: any darray[i32, row]&) -> darray[i32, row]:
-	view: view[i32] = arena_da_view(values, 0u, values.count)
+	view: dview[i32] = arena_da_view(values, 0u, values.count)
 	return arena_da_from_view(a, view)
 `
 	_, errs := parseAndAnalyze(t, "arena_array_from_view_fresh_shape.llcontext", src)

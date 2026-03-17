@@ -648,7 +648,7 @@ repr(c) struct DynArrayView:
     count: mutable usize
 
 extern take_array(values: darray[i32, row]) -> void
-extern take_array_view(view: view[i32]) -> usize
+extern take_array_view(view: dview[i32]) -> usize
 extern take_str(text: dstr[row]) -> void
 `
 	result := parseAndAnalyze(t, "backend_runtime_types.llcontext", src)
@@ -987,6 +987,37 @@ def touch(a: any Arena&, m: any dict[dstr, i32]&, key: dstr) -> bool:
 	}
 }
 
+func TestGenerateLLVMIRLowersFrontendStressFixture(t *testing.T) {
+	src := loadFixtureSource(t, "Code", "test_programs", "frontend_stress.llcontext")
+	result := parseAndAnalyze(t, "backend_frontend_stress.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%SourceSpan = type { i64, i64 }",
+		"%Token = type { %TokenKind, %SourceSpan, ptr }",
+		"%DynDict__Symbol = type { ptr, i64, i64, i64, ptr }",
+		"%Scope = type { ptr, %DynDict__Symbol, i64 }",
+		"%ParserState = type { %DynArrayView, i64, ptr }",
+		"define %DynArrayView @make_tokens()",
+		"define i32 @frontend_scope_stress(ptr",
+		"define i64 @frontend_region_token(i64",
+		"define i32 @frontend_smoke(ptr",
+		"define %DynDict__Symbol @arena_dict_new__Symbol(ptr",
+		"define i32 @arena_dict_put__Symbol(ptr",
+		"define i1 @arena_dict_contains__Symbol(ptr",
+		"call ptr @new_region(i64 2048)",
+		"call ptr @arena_alloc(ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersAllocatorOwnershipFixture(t *testing.T) {
 	src := loadFixtureSource(t, "Code", "test_programs", "allocator_ownership.llcontext")
 	result := parseAndAnalyze(t, "backend_allocator_ownership.llcontext", src)
@@ -1267,7 +1298,7 @@ repr(c) struct DynArrayView:
 def read_array(values: darray[i32, row]) -> i32:
     return values[1]
 
-def read_view(view: view[i32]) -> i32:
+def read_view(view: dview[i32]) -> i32:
     return view[2]
 `
 	result := parseAndAnalyze(t, "backend_runtime_index.llcontext", src)
@@ -1419,6 +1450,32 @@ func TestGenerateLLVMIRLowersDStrLenFieldViaRuntimeHelper(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRLowersDArrayViewRuntimeFields(t *testing.T) {
+	src := `def non_empty[T](view: dview[T]) -> bool:
+	return view.len > 0u and view.elem_size > 0u
+
+def probe(view: dview[i64]) -> bool:
+	return non_empty(view)
+`
+	result := parseAndAnalyze(t, "backend_darray_view_runtime_fields.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%DynArrayView = type { ptr, i64, i64 }",
+		"define i1 @non_empty__i64(%DynArrayView",
+		"getelementptr inbounds nuw %DynArrayView",
+		"icmp ugt i64",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersArraySliceSyntaxViaRuntimeHelpers(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
 	items: mutable any T&?
@@ -1431,11 +1488,11 @@ repr(c) struct DynArrayView:
     elem_size: mutable usize
 
 def head_owned(values: darray[i32, row]) -> i32:
-	part: view[i32] = values[1u:3u]
+	part: dview[i32] = values[1u:3u]
     return part[0u]
 
-def head_view(view: view[i32]) -> i32:
-	part: view[i32] = view[0u:1u]
+def head_view(view: dview[i32]) -> i32:
+	part: dview[i32] = view[0u:1u]
     return part[0u]
 `
 	result := parseAndAnalyze(t, "backend_array_slice_syntax.llcontext", src)
@@ -1510,7 +1567,7 @@ repr(c) struct DynArrayView:
     elem_size: mutable usize
 
 extern make_array() -> darray[i32, row]
-extern make_array_view() -> view[i32]
+extern make_array_view() -> dview[i32]
 
 def read_array_index() -> i32:
     return make_array()[1u]

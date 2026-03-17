@@ -96,6 +96,12 @@ type DArrayType struct {
 	SurfaceName string
 }
 
+type ViewType struct {
+	Elem  Type
+	Begin string
+	End   string
+}
+
 type DArrayViewType struct {
 	Elem        Type
 	Begin       string
@@ -179,6 +185,7 @@ func (*ErrorUnionType) isType()      {}
 func (*RefType) isType()             {}
 func (*ArrayType) isType()           {}
 func (*DArrayType) isType()          {}
+func (*ViewType) isType()            {}
 func (*DArrayViewType) isType()      {}
 func (*DStrType) isType()            {}
 func (*DictType) isType()            {}
@@ -385,11 +392,14 @@ func (t *DArrayType) String() string {
 	}
 	return fmt.Sprintf("darray[%s, %s]", t.Elem.String(), t.Shape.String())
 }
-func (t *DArrayViewType) String() string {
+func (t *ViewType) String() string {
 	if t.Begin != "" || t.End != "" {
 		return fmt.Sprintf("view[%s, %s, %s]", t.Elem.String(), t.Begin, t.End)
 	}
 	return fmt.Sprintf("view[%s]", t.Elem.String())
+}
+func (t *DArrayViewType) String() string {
+	return fmt.Sprintf("dview[%s]", t.Elem.String())
 }
 func (t *DStrType) String() string {
 	if isWildcardShape(t.Shape) {
@@ -642,6 +652,23 @@ func arraySizesEqual(a, b *ArrayType) bool {
 		return a.ConstSize == b.ConstSize
 	}
 	return a.Size == b.Size
+}
+
+func viewBoundsEqual(a, b *ViewType) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Begin == b.Begin && a.End == b.End
+}
+
+func viewBoundsMatch(pattern, actual *ViewType) bool {
+	if pattern == nil || actual == nil {
+		return pattern == actual
+	}
+	if pattern.Begin == "" && pattern.End == "" {
+		return true
+	}
+	return viewBoundsEqual(pattern, actual)
 }
 
 func SameShape(a, b Shape) bool {

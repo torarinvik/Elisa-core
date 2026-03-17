@@ -1,5 +1,5 @@
 extern make_array() -> darray[i32, row]
-extern make_array_view() -> view[i32, 0u, 3u]
+extern make_array_view() -> dview[i32]
 
 def read_array_index() -> i32:
     return make_array()[1u]

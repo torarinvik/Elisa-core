@@ -1191,6 +1191,14 @@ func runtimeSliceOperandInfo(objectType semantic.Type, resultType semantic.Type)
 			useAddress:  true,
 		}, true
 	}
+	if view, ok := objectType.(*semantic.ViewType); ok {
+		return runtimeSliceInfo{
+			helperName:  "arena_da_view_slice",
+			operandType: objectType,
+			resultType:  &semantic.ViewType{Elem: view.Elem},
+			indexType:   usizeType,
+		}, true
+	}
 	if view, ok := objectType.(*semantic.DArrayViewType); ok {
 		return runtimeSliceInfo{
 			helperName:  "arena_da_view_slice",
@@ -1219,6 +1227,9 @@ func runtimeSliceOperandInfo(objectType semantic.Type, resultType semantic.Type)
 			resultType:  &semantic.DArrayViewType{Elem: view.Elem},
 			indexType:   usizeType,
 		}, true
+	}
+	if view, ok := ref.Elem.(*semantic.ViewType); ok {
+		return runtimeSliceInfo{helperName: "arena_da_view_slice", operandType: ref.Elem, resultType: &semantic.ViewType{Elem: view.Elem}, indexType: usizeType}, true
 	}
 	if _, ok := ref.Elem.(*semantic.DStrType); ok {
 		return runtimeSliceInfo{helperName: "ctx_stage1rt_string_view", operandType: ref.Elem, resultType: resultType, indexType: i64Type}, true

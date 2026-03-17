@@ -36,6 +36,8 @@ func collectShapeParamsInType(t Type, out map[string]bool) {
 			out[param.Name] = true
 		}
 		collectShapeParamsInType(n.Elem, out)
+	case *ViewType:
+		collectShapeParamsInType(n.Elem, out)
 	case *DArrayViewType:
 		collectShapeParamsInType(n.Elem, out)
 	case *DStrType:
@@ -215,6 +217,8 @@ func collectFreshShapesInto(t Type, seen map[int]bool, out *[]*FreshShape) {
 			seen[fresh.ID] = true
 			*out = append(*out, fresh)
 		}
+		collectFreshShapesInto(n.Elem, seen, out)
+	case *ViewType:
 		collectFreshShapesInto(n.Elem, seen, out)
 	case *DArrayViewType:
 		collectFreshShapesInto(n.Elem, seen, out)

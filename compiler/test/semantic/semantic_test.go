@@ -631,6 +631,13 @@ func TestAnalyzeRejectsAllocatingFromDestroyedRegion(t *testing.T) {
 	}
 }
 
+func TestAnalyzeAcceptsFrontendStressFixture(t *testing.T) {
+	repoRoot := repoRootFromTestFile(t)
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "test_programs", "frontend_stress.llcontext"), map[string]bool{})
+	_, errs := parseAndAnalyze(t, "frontend_stress.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeAcceptsErrorDeclarationsAndTryRecovery(t *testing.T) {
 	src := `error MemoryError:
 	OutOfMemory
@@ -967,7 +974,7 @@ repr(c) struct DynArrayView:
 def read_array(values: darray[i32, row]) -> i32:
 	return values[0]
 
-def read_view(view: view[i32]) -> i32:
+def read_view(view: dview[i32]) -> i32:
 	return view[0]
 `
 	_, errs := parseAndAnalyze(t, "runtime_backed_array_index.llcontext", src)
@@ -1063,9 +1070,9 @@ func TestAnalyzeAcceptsViewAliasForArraySlices(t *testing.T) {
 }
 
 func TestAnalyzeAcceptsArrayAndArrayViewSliceSyntax(t *testing.T) {
-	src := `def middle(values: darray[i32, row], view: view[i32]) -> i32:
-	part: view[i32] = values[1u:3u]
-	sub: view[i32] = view[0u:1u]
+	src := `def middle(values: darray[i32, row], view: dview[i32]) -> i32:
+	part: dview[i32] = values[1u:3u]
+	sub: dview[i32] = view[0u:1u]
 	return part[0u] + sub[0u]
 `
 	_, errs := parseAndAnalyze(t, "array_and_array_view_slice.llcontext", src)
@@ -1084,7 +1091,7 @@ func TestAnalyzeAcceptsFixedArraySliceSyntax(t *testing.T) {
 
 func TestAnalyzeAcceptsNestedCollectionAccessOnReturnedValues(t *testing.T) {
 	src := `extern make_array() -> darray[i32, row]
-extern make_array_view() -> view[i32]
+extern make_array_view() -> dview[i32]
 
 def read_array_index() -> i32:
 	return make_array()[1u]
@@ -1364,7 +1371,7 @@ def bad_dict(values: Dict[dstr, i32]) -> void:
 	all := strings.Join(errs, "\n")
 	for _, want := range []string{
 		"legacy built-in \"DArray\" has been replaced; use \"darray\" instead",
-		"legacy built-in \"DArrayView\" has been replaced; use \"view\" instead",
+		"legacy built-in \"DArrayView\" has been replaced; use \"dview\" instead",
 		"legacy built-in \"DStr\" has been replaced; use \"dstr\" instead",
 		"legacy built-in \"Dict\" has been replaced; use \"dict\" instead",
 	} {
@@ -1409,7 +1416,7 @@ def bad_list_view(view: DListView[i32]) -> void:
 }
 
 func TestAnalyzeDArrayViewUsesDynArrayViewRuntimeFields(t *testing.T) {
-	src := `def non_empty[T](view: view[T]) -> bool:
+	src := `def non_empty[T](view: dview[T]) -> bool:
 	return view.len > 0u and view.elem_size > 0u
 `
 	_, errs := parseAndAnalyze(t, "darray_view_runtime_field_access.llcontext", src)

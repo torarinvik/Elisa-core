@@ -280,18 +280,24 @@ func (a *Analyzer) resolveDynamicShapeType(expr *ast.GenericType) (Type, bool) {
 			a.errorf(expr.Pos(), "view expects 1 argument, got %d", len(expr.Args))
 			return invalidType, true
 		}
-		return &DArrayViewType{Elem: a.resolveType(expr.Args[0]), SurfaceName: "view"}, true
+		return &ViewType{Elem: a.resolveType(expr.Args[0])}, true
+	case "dview":
+		if len(expr.Args) != 1 {
+			a.errorf(expr.Pos(), "dview expects 1 argument, got %d", len(expr.Args))
+			return invalidType, true
+		}
+		return &DArrayViewType{Elem: a.resolveType(expr.Args[0]), SurfaceName: "dview"}, true
 	case "DArray":
 		a.errorLegacyBuiltinReplacement(expr.Pos(), "DArray", "darray")
 		return invalidType, true
 	case "DArrayView":
-		a.errorLegacyBuiltinReplacement(expr.Pos(), "DArrayView", "view")
+		a.errorLegacyBuiltinReplacement(expr.Pos(), "DArrayView", "dview")
 		return invalidType, true
 	case "DList":
 		a.errorf(expr.Pos(), "DList has been removed from the language; use darray instead")
 		return invalidType, true
 	case "DListView":
-		a.errorf(expr.Pos(), "DListView has been removed from the language; use view instead")
+		a.errorf(expr.Pos(), "DListView has been removed from the language; use dview instead")
 		return invalidType, true
 	case "DStr":
 		a.errorLegacyBuiltinReplacement(expr.Pos(), "DStr", "dstr")
@@ -359,7 +365,7 @@ func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
 			a.errorf(expr.Pos(), "view expects 1 type argument, got %d", len(expr.TypeArgs))
 			return invalidType
 		}
-		viewType := &DArrayViewType{Elem: a.resolveType(expr.TypeArgs[0]), SurfaceName: "view"}
+		viewType := &ViewType{Elem: a.resolveType(expr.TypeArgs[0])}
 		if len(expr.ValueArgs) == 2 {
 			viewType.Begin = a.exprSummary(expr.ValueArgs[0])
 			viewType.End = a.exprSummary(expr.ValueArgs[1])
@@ -368,6 +374,12 @@ func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
 			return invalidType
 		}
 		return viewType
+	case "dview":
+		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
+			a.errorf(expr.Pos(), "dview expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		return &DArrayViewType{Elem: a.resolveType(expr.TypeArgs[0]), SurfaceName: "dview"}
 	case "sview":
 		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 2 {
 			a.errorf(expr.Pos(), "sview expects 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
@@ -558,6 +570,8 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 		return &ArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Size: n.Size, HasConstSize: n.HasConstSize, ConstSize: n.ConstSize, SurfaceName: n.SurfaceName}
 	case *DArrayType:
 		return &DArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Shape: a.substituteShape(n.Shape, shapeBindings), SurfaceName: n.SurfaceName}
+	case *ViewType:
+		return &ViewType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Begin: n.Begin, End: n.End}
 	case *DArrayViewType:
 		return &DArrayViewType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Begin: n.Begin, End: n.End, SurfaceName: n.SurfaceName}
 	case *DStrType:
@@ -648,7 +662,7 @@ func (a *Analyzer) collectImplicitShapeParamsFromType(expr ast.TypeExpr, seen ma
 		a.collectImplicitShapeParamsFromType(n.Elem, seen, order)
 	case *ast.BuiltinTypeExpr:
 		switch n.Name {
-		case "array", "view":
+		case "array", "view", "dview":
 			for _, arg := range n.TypeArgs {
 				a.collectImplicitShapeParamsFromType(arg, seen, order)
 			}
