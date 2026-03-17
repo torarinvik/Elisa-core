@@ -35,6 +35,13 @@ type functionState struct {
 	scope      *codegenScope
 	typeMap    map[string]semantic.Type
 	resultSlot C.LLVMValueRef
+	regions    []regionBinding
+}
+
+type regionBinding struct {
+	name string
+	ptr  C.LLVMValueRef
+	typ  semantic.Type
 }
 
 func (g *llvmGenerator) defineFunctionBody(decl *ast.FuncDecl, fnType *semantic.FuncType, fnValue C.LLVMValueRef) error {
@@ -91,6 +98,9 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	}
 
 	if !state.currentBlockTerminated() {
+		if err := state.emitRegionCleanup(); err != nil {
+			return err
+		}
 		if isVoidType(fnType.Return) {
 			C.LLVMBuildRetVoid(builder)
 		} else if retUnion, ok := fnType.Return.(*semantic.ErrorUnionType); ok && isVoidType(retUnion.Value) {
@@ -108,6 +118,9 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 }
 
 func (s *functionState) emitFunctionReturn(value C.LLVMValueRef, actual semantic.Type) error {
+	if err := s.emitRegionCleanup(); err != nil {
+		return err
+	}
 	if retUnion, ok := s.fnType.Return.(*semantic.ErrorUnionType); ok {
 		coerced, err := s.coerceValue(value, actual, retUnion)
 		if err != nil {
@@ -137,6 +150,15 @@ func (s *functionState) emitFunctionReturn(value C.LLVMValueRef, actual semantic
 		return err
 	}
 	C.LLVMBuildRet(s.builder, coerced)
+	return nil
+}
+
+func (s *functionState) emitRegionCleanup() error {
+	for i := len(s.regions) - 1; i >= 0; i-- {
+		if err := s.emitArenaFree(s.regions[i].ptr, s.regions[i].typ); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -187,6 +209,29 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			C.LLVMBuildStore(s.builder, value, alloca)
 		}
 		return nil
+	case *ast.RegionStmt:
+		arenaType := s.g.result.NamedTypes["Arena"]
+		if arenaType == nil {
+			return fmt.Errorf("missing builtin Arena type for region %s", n.Name)
+		}
+		alloca, err := s.createEntryAlloca(n.Name, arenaType)
+		if err != nil {
+			return err
+		}
+		zero, err := s.zeroValue(arenaType)
+		if err != nil {
+			return err
+		}
+		C.LLVMBuildStore(s.builder, zero, alloca)
+		s.defineBinding(n.Name, valueBinding{ptr: alloca, typ: arenaType})
+		s.regions = append(s.regions, regionBinding{name: n.Name, ptr: alloca, typ: arenaType})
+		return s.emitRegionInit(alloca, arenaType, n.Capacity)
+	case *ast.DestroyStmt:
+		binding, ok := s.lookupBinding(n.Name)
+		if !ok {
+			return fmt.Errorf("unknown region %q during LLVM lowering", n.Name)
+		}
+		return s.emitArenaFree(binding.ptr, binding.typ)
 	case *ast.AssignStmt:
 		ptr, targetType, err := s.emitAddress(n.Target)
 		if err != nil {
@@ -282,6 +327,63 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 	default:
 		return fmt.Errorf("unsupported statement %T", stmt)
 	}
+}
+
+func (s *functionState) emitRegionInit(arenaPtr C.LLVMValueRef, arenaType semantic.Type, capacityExpr ast.Expr) error {
+	capacityType := s.g.result.NamedTypes["usize"]
+	var capacityValue C.LLVMValueRef
+	if capacityExpr != nil {
+		value, _, err := s.emitExpr(capacityExpr, capacityType)
+		if err != nil {
+			return err
+		}
+		capacityValue = value
+	} else {
+		usizeLLVMType, err := s.g.lowerType(capacityType)
+		if err != nil {
+			return err
+		}
+		capacityValue = C.LLVMConstInt(usizeLLVMType, 8*1024, 0)
+	}
+	regionType := s.g.result.NamedTypes["Region"]
+	if regionType == nil {
+		return fmt.Errorf("missing builtin Region type for region initialization")
+	}
+	regionRefType := &semantic.RefType{Elem: regionType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	helperType := &semantic.FuncType{Name: "new_region", Params: []semantic.Type{capacityType}, Return: regionRefType}
+	callee, err := s.g.ensureFunctionDeclared("new_region", helperType)
+	if err != nil {
+		return err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return err
+	}
+	regionValue := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{capacityValue}, "region.init")
+	arenaLLVMType, err := s.g.lowerType(arenaType)
+	if err != nil {
+		return err
+	}
+	beginPtr := C.LLVMBuildStructGEP2(s.builder, arenaLLVMType, arenaPtr, 0, cStringFree("region.begin"))
+	endPtr := C.LLVMBuildStructGEP2(s.builder, arenaLLVMType, arenaPtr, 1, cStringFree("region.end"))
+	C.LLVMBuildStore(s.builder, regionValue, beginPtr)
+	C.LLVMBuildStore(s.builder, regionValue, endPtr)
+	return nil
+}
+
+func (s *functionState) emitArenaFree(arenaPtr C.LLVMValueRef, arenaType semantic.Type) error {
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	helperType := &semantic.FuncType{Name: "arena_free", Params: []semantic.Type{arenaRefType}, Return: s.g.result.NamedTypes["void"]}
+	callee, err := s.g.ensureFunctionDeclared("arena_free", helperType)
+	if err != nil {
+		return err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return err
+	}
+	s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaPtr}, "")
+	return nil
 }
 
 func (s *functionState) emitIf(stmt *ast.IfStmt) error {

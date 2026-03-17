@@ -550,6 +550,31 @@ def rewind(ptr: any u8&, offset: usize) -> any u8&:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsManualRegions(t *testing.T) {
+	src := `def sum_region(seed: i32) -> i32:
+	region scratch(1024u)
+	value: any i32& = new[scratch] seed + 1
+	return value[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsAllocatingFromDestroyedRegion(t *testing.T) {
+	src := `def bad() -> void:
+	region scratch
+	destroy scratch
+	value: any i32& = new[scratch] 1
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_destroyed_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot allocate from destroyed region \"scratch\"") {
+		t.Fatalf("expected destroyed-region diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeAcceptsErrorDeclarationsAndTryRecovery(t *testing.T) {
 	src := `error MemoryError:
 	OutOfMemory

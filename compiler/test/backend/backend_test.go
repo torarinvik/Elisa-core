@@ -841,6 +841,34 @@ def rewind(ptr: any u8&, offset: usize) -> any u8&:
 	}
 }
 
+func TestGenerateLLVMIRLowersManualRegions(t *testing.T) {
+	src := `def region_value(seed: i32) -> i32:
+	region scratch(1024u)
+	value: any i32& = new[scratch] seed + 1
+	return value[0u]
+`
+	result := parseAndAnalyze(t, "backend_manual_regions.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%Arena = type { ptr, ptr }",
+		"declare ptr @new_region(i64)",
+		"declare ptr @arena_alloc(ptr, i64)",
+		"declare void @arena_free(ptr)",
+		"call ptr @new_region(i64 1024)",
+		"call ptr @arena_alloc(ptr",
+		"call void @arena_free(ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersAllocatorOwnershipFixture(t *testing.T) {
 	src := loadFixtureSource(t, "Code", "test_programs", "allocator_ownership.llcontext")
 	result := parseAndAnalyze(t, "backend_allocator_ownership.llcontext", src)

@@ -145,6 +145,26 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		}
 		result = resultType
 		return
+	case *ast.RegionAllocExpr:
+		_, state := a.lookupRegionState(n.Region)
+		if a.currentScope == nil {
+			a.errorf(n.Pos(), "region allocation requires function scope")
+			result = invalidType
+			return
+		}
+		if sym, ok := a.currentScope.Lookup(n.Region); !ok || sym.Kind != SymbolRegion {
+			a.errorf(n.Pos(), "undefined region %q", n.Region)
+			result = invalidType
+			return
+		}
+		if state.Destroyed {
+			a.errorf(n.Pos(), "cannot allocate from destroyed region %q", n.Region)
+			result = invalidType
+			return
+		}
+		valueType := a.analyzeExpr(n.Value)
+		result = &RefType{Elem: valueType, State: RefStateNonNull, Storage: RefStorageAny, ExplicitStorage: true}
+		return
 	case *ast.IndexExpr:
 		result = a.analyzeIndexExpr(n)
 		return
@@ -879,7 +899,7 @@ func (a *Analyzer) inferAddrOfStorage(expr ast.Expr) RefStorage {
 		if a.currentScope != nil {
 			if sym, ok := a.currentScope.Lookup(n.Name); ok {
 				switch sym.Kind {
-				case SymbolLocal, SymbolParam:
+				case SymbolLocal, SymbolParam, SymbolRegion:
 					return RefStorageStack
 				case SymbolGlobal:
 					return RefStorageStatic

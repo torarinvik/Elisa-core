@@ -51,6 +51,9 @@ const (
 	TOKEN_TAIL
 	TOKEN_TRY
 	TOKEN_RAISE
+	TOKEN_REGION
+	TOKEN_DESTROY
+	TOKEN_NEW
 	TOKEN_AS
 	TOKEN_IN
 
@@ -151,6 +154,9 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_TAIL:    "tail",
 	TOKEN_TRY:     "try",
 	TOKEN_RAISE:   "raise",
+	TOKEN_REGION:  "region",
+	TOKEN_DESTROY: "destroy",
+	TOKEN_NEW:     "new",
 	TOKEN_AS:      "as",
 	TOKEN_IN:      "in",
 

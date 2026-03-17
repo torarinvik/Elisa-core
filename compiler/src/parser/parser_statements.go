@@ -25,6 +25,18 @@ func (p *Parser) parseBlock() []ast.Stmt {
 }
 
 func (p *Parser) parseStmt() ast.Stmt {
+	if p.peek() == lexer.TOKEN_IDENT {
+		switch p.cur().Text {
+		case "region":
+			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+				return p.parseRegion()
+			}
+		case "destroy":
+			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+				return p.parseDestroy()
+			}
+		}
+	}
 	switch p.peek() {
 	case lexer.TOKEN_RETURN:
 		return p.parseReturn()
@@ -41,6 +53,27 @@ func (p *Parser) parseStmt() ast.Stmt {
 	default:
 		return p.parseExprOrAssignStmt()
 	}
+}
+
+func (p *Parser) parseRegion() *ast.RegionStmt {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_IDENT)
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	var capacity ast.Expr
+	if p.match(lexer.TOKEN_LPAREN) {
+		capacity = p.parseExpr()
+		p.expect(lexer.TOKEN_RPAREN)
+	}
+	p.expectNewline()
+	return &ast.RegionStmt{Position: pos, Name: name, Capacity: capacity}
+}
+
+func (p *Parser) parseDestroy() *ast.DestroyStmt {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_IDENT)
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expectNewline()
+	return &ast.DestroyStmt{Position: pos, Name: name}
 }
 
 func (p *Parser) parseReturn() *ast.ReturnStmt {

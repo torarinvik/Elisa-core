@@ -335,6 +335,12 @@ type UnwrapElseExpr struct {
 	Fallback Expr
 }
 
+type RegionAllocExpr struct {
+	Position lexer.Pos
+	Region   string
+	Value    Expr
+}
+
 type Stmt interface {
 	Node
 	stmtTag()
@@ -419,6 +425,17 @@ type DiscardStmt struct {
 	Value    Expr
 }
 
+type RegionStmt struct {
+	Position lexer.Pos
+	Name     string
+	Capacity Expr
+}
+
+type DestroyStmt struct {
+	Position lexer.Pos
+	Name     string
+}
+
 type ElifClause struct {
 	Position lexer.Pos
 	Cond     Expr
@@ -480,6 +497,7 @@ func (n *ParenExpr) Pos() lexer.Pos       { return n.Position }
 func (n *RaiseExpr) Pos() lexer.Pos       { return n.Position }
 func (n *TryExpr) Pos() lexer.Pos         { return n.Position }
 func (n *UnwrapElseExpr) Pos() lexer.Pos  { return n.Position }
+func (n *RegionAllocExpr) Pos() lexer.Pos { return n.Position }
 func (n *AssignStmt) Pos() lexer.Pos      { return n.Position }
 func (n *AugAssignStmt) Pos() lexer.Pos   { return n.Position }
 func (n *AsRefAssignStmt) Pos() lexer.Pos { return n.Position }
@@ -493,6 +511,8 @@ func (n *ExprStmt) Pos() lexer.Pos        { return n.Position }
 func (n *StaticIfStmt) Pos() lexer.Pos    { return n.Position }
 func (n *StaticErrorStmt) Pos() lexer.Pos { return n.Position }
 func (n *DiscardStmt) Pos() lexer.Pos     { return n.Position }
+func (n *RegionStmt) Pos() lexer.Pos      { return n.Position }
+func (n *DestroyStmt) Pos() lexer.Pos     { return n.Position }
 
 func (*ConstDecl) nodeTag()          {}
 func (*ErrorDecl) nodeTag()          {}
@@ -537,6 +557,7 @@ func (*ParenExpr) nodeTag()          {}
 func (*RaiseExpr) nodeTag()          {}
 func (*TryExpr) nodeTag()            {}
 func (*UnwrapElseExpr) nodeTag()     {}
+func (*RegionAllocExpr) nodeTag()    {}
 func (*AssignStmt) nodeTag()         {}
 func (*AugAssignStmt) nodeTag()      {}
 func (*AsRefAssignStmt) nodeTag()    {}
@@ -550,6 +571,8 @@ func (*ExprStmt) nodeTag()           {}
 func (*StaticIfStmt) nodeTag()       {}
 func (*StaticErrorStmt) nodeTag()    {}
 func (*DiscardStmt) nodeTag()        {}
+func (*RegionStmt) nodeTag()         {}
+func (*DestroyStmt) nodeTag()        {}
 
 func (*ConstDecl) declTag()        {}
 func (*ErrorDecl) declTag()        {}
@@ -574,28 +597,29 @@ func (*BuiltinTypeExpr) typeExprTag()    {}
 func (*ErrorSetExpr) typeExprTag()       {}
 func (*ErrorUnionTypeExpr) typeExprTag() {}
 
-func (*Ident) exprTag()          {}
-func (*IntLit) exprTag()         {}
-func (*StringLit) exprTag()      {}
-func (*BoolLit) exprTag()        {}
-func (*NullLit) exprTag()        {}
-func (*ZeroedLit) exprTag()      {}
-func (*BinaryExpr) exprTag()     {}
-func (*UnaryExpr) exprTag()      {}
-func (*CallExpr) exprTag()       {}
-func (*FieldExpr) exprTag()      {}
-func (*IndexExpr) exprTag()      {}
-func (*SliceExpr) exprTag()      {}
-func (*ListLitExpr) exprTag()    {}
-func (*CastExpr) exprTag()       {}
-func (*SizeofExpr) exprTag()     {}
-func (*TernaryExpr) exprTag()    {}
-func (*AddrOfExpr) exprTag()     {}
-func (*StructLitExpr) exprTag()  {}
-func (*ParenExpr) exprTag()      {}
-func (*RaiseExpr) exprTag()      {}
-func (*TryExpr) exprTag()        {}
-func (*UnwrapElseExpr) exprTag() {}
+func (*Ident) exprTag()           {}
+func (*IntLit) exprTag()          {}
+func (*StringLit) exprTag()       {}
+func (*BoolLit) exprTag()         {}
+func (*NullLit) exprTag()         {}
+func (*ZeroedLit) exprTag()       {}
+func (*BinaryExpr) exprTag()      {}
+func (*UnaryExpr) exprTag()       {}
+func (*CallExpr) exprTag()        {}
+func (*FieldExpr) exprTag()       {}
+func (*IndexExpr) exprTag()       {}
+func (*SliceExpr) exprTag()       {}
+func (*ListLitExpr) exprTag()     {}
+func (*CastExpr) exprTag()        {}
+func (*SizeofExpr) exprTag()      {}
+func (*TernaryExpr) exprTag()     {}
+func (*AddrOfExpr) exprTag()      {}
+func (*StructLitExpr) exprTag()   {}
+func (*ParenExpr) exprTag()       {}
+func (*RaiseExpr) exprTag()       {}
+func (*TryExpr) exprTag()         {}
+func (*UnwrapElseExpr) exprTag()  {}
+func (*RegionAllocExpr) exprTag() {}
 
 func (*AssignStmt) stmtTag()      {}
 func (*AugAssignStmt) stmtTag()   {}
@@ -610,3 +634,5 @@ func (*ExprStmt) stmtTag()        {}
 func (*StaticIfStmt) stmtTag()    {}
 func (*StaticErrorStmt) stmtTag() {}
 func (*DiscardStmt) stmtTag()     {}
+func (*RegionStmt) stmtTag()      {}
+func (*DestroyStmt) stmtTag()     {}

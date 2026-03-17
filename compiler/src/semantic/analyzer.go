@@ -74,6 +74,11 @@ type Analyzer struct {
 	exportedGlobals        []*ExportedGlobal
 	currentScope           *Scope
 	currentReturn          Type
+	currentRegions         map[*Symbol]regionState
+}
+
+type regionState struct {
+	Destroyed bool
 }
 
 func Analyze(file *ast.File) *Result {
@@ -115,6 +120,16 @@ func (a *Analyzer) registerBuiltins() {
 }
 
 func (a *Analyzer) registerBuiltinRuntimeStructs() {
+	a.registerBuiltinStructType("Region", nil, []builtinFieldSpec{
+		{name: "next", typ: refTypeExpr("Region", true), mutable: true},
+		{name: "count", typ: namedTypeExpr("usize", false), mutable: true},
+		{name: "capacity", typ: namedTypeExpr("usize", false)},
+		{name: "data", typ: namedTypeExpr("uintptr", false), isTail: true},
+	})
+	a.registerBuiltinStructType("Arena", nil, []builtinFieldSpec{
+		{name: "begin", typ: refTypeExpr("Region", true), mutable: true},
+		{name: "end", typ: refTypeExpr("Region", true), mutable: true},
+	})
 	a.registerBuiltinStructType("StringView", nil, []builtinFieldSpec{
 		{name: "data", typ: refTypeExpr("u8", false), mutable: true},
 		{name: "len", typ: namedTypeExpr("i64", false), mutable: true},
@@ -135,21 +150,14 @@ type builtinFieldSpec struct {
 	name    string
 	typ     ast.TypeExpr
 	mutable bool
+	isTail  bool
 }
 
 func (a *Analyzer) registerBuiltinStructType(name string, typeParams []string, fields []builtinFieldSpec) {
 	declFields := make([]ast.FieldDecl, 0, len(fields))
 	semanticFields := make(map[string]Field, len(fields))
 	decl := &ast.StructDecl{Position: lexer.Pos{}, Name: name, TypeParams: append([]string(nil), typeParams...), ReprC: true}
-	a.withTypeParams(typeParams, nil, func() {
-		for _, field := range fields {
-			declField := ast.FieldDecl{Position: lexer.Pos{}, Name: field.name, Mutable: field.mutable, Type: field.typ}
-			declFields = append(declFields, declField)
-			semanticFields[field.name] = Field{Name: field.name, Type: a.resolveType(field.typ), Mutable: field.mutable}
-		}
-	})
-	decl.Fields = declFields
-	a.namedTypes[name] = &StructType{
+	st := &StructType{
 		Name:       name,
 		TypeParams: append([]string(nil), typeParams...),
 		Fields:     semanticFields,
@@ -157,6 +165,19 @@ func (a *Analyzer) registerBuiltinStructType(name string, typeParams []string, f
 		Decl:       decl,
 		Builtin:    true,
 	}
+	a.namedTypes[name] = st
+	a.withTypeParams(typeParams, nil, func() {
+		for _, field := range fields {
+			declField := ast.FieldDecl{Position: lexer.Pos{}, Name: field.name, Mutable: field.mutable, IsTail: field.isTail, Type: field.typ}
+			declFields = append(declFields, declField)
+			fieldType := a.resolveType(field.typ)
+			if field.isTail {
+				fieldType = &RefType{Elem: fieldType, State: RefStateNonNull, Storage: RefStorageAny}
+			}
+			semanticFields[field.name] = Field{Name: field.name, Type: fieldType, Mutable: field.mutable, IsTail: field.isTail}
+		}
+	})
+	decl.Fields = declFields
 }
 
 func namedTypeExpr(name string, mutable bool) ast.TypeExpr {
@@ -198,7 +219,7 @@ func nestedRefTypeExpr(name string, innerNonNull bool, outerNullable bool) ast.T
 
 func isBuiltinRuntimeStructName(name string) bool {
 	switch name {
-	case "StringView", "DynArray", "DynArrayView":
+	case "Region", "Arena", "StringView", "DynArray", "DynArrayView":
 		return true
 	default:
 		return false
@@ -423,7 +444,9 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	savedScope := a.currentScope
 	savedReturn := a.currentReturn
 	savedReturnFreshStatus := a.returnFreshShapeStatus
+	savedRegions := a.currentRegions
 	a.currentScope = NewScope(a.globalScope)
+	a.currentRegions = map[*Symbol]regionState{}
 	if fnType != nil {
 		a.currentReturn = fnType.Return
 		a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)
@@ -448,4 +471,5 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentScope = savedScope
 	a.currentReturn = savedReturn
 	a.returnFreshShapeStatus = savedReturnFreshStatus
+	a.currentRegions = savedRegions
 }

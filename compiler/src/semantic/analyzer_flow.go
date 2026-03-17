@@ -25,6 +25,35 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			declType = invalidType
 		}
 		a.defineLocal(&Symbol{Name: n.Name, Kind: SymbolLocal, Type: declType, Node: n, Mutable: n.Mutable}, n.Pos())
+	case *ast.RegionStmt:
+		if n.Capacity != nil {
+			capacityType := a.analyzeExpr(n.Capacity)
+			if !IsNumericType(capacityType) {
+				a.errorf(n.Capacity.Pos(), "region capacity must be numeric, got %s", capacityType.String())
+			}
+		}
+		arenaType, ok := a.namedTypes["Arena"]
+		if !ok {
+			a.errorf(n.Pos(), "missing builtin Arena type for region lowering")
+			arenaType = invalidType
+		}
+		sym := &Symbol{Name: n.Name, Kind: SymbolRegion, Type: arenaType, Node: n, Mutable: false}
+		a.defineLocal(sym, n.Pos())
+		if a.currentRegions != nil {
+			a.currentRegions[sym] = regionState{}
+		}
+	case *ast.DestroyStmt:
+		sym, state := a.lookupRegionState(n.Name)
+		if sym == nil {
+			a.errorf(n.Pos(), "undefined region %q", n.Name)
+			return
+		}
+		if state.Destroyed {
+			a.errorf(n.Pos(), "region %q has already been destroyed", n.Name)
+			return
+		}
+		state.Destroyed = true
+		a.currentRegions[sym] = state
 	case *ast.AssignStmt:
 		targetType := a.assignmentTargetType(n.Target)
 		valueType := a.analyzeValueExpr(n.Value, targetType)
@@ -76,18 +105,18 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if !IsBoolType(condType) {
 			a.errorf(n.Pos(), "if condition must be bool, got %s", condType.String())
 		}
-		a.analyzeBlockInScope(n.Then, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
+		a.analyzeBlockWithRegionClone(n.Then, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
 		for _, elif := range n.Elifs {
 			elifType := a.analyzeExpr(elif.Cond)
 			if !IsBoolType(elifType) {
 				a.errorf(elif.Position, "elif condition must be bool, got %s", elifType.String())
 			}
-			a.analyzeBlockInScope(elif.Body, a.refinedScopeForCondition(a.currentScope, elif.Cond, true))
+			a.analyzeBlockWithRegionClone(elif.Body, a.refinedScopeForCondition(a.currentScope, elif.Cond, true))
 		}
 		if len(n.Elifs) == 0 {
-			a.analyzeBlockInScope(n.Else, a.refinedScopeForCondition(a.currentScope, n.Cond, false))
+			a.analyzeBlockWithRegionClone(n.Else, a.refinedScopeForCondition(a.currentScope, n.Cond, false))
 		} else {
-			a.analyzeBlock(n.Else)
+			a.analyzeBlockWithRegionClone(n.Else, NewScope(a.currentScope))
 		}
 		a.applyPostIfFallthroughRefinement(n)
 	case *ast.WhileStmt:
@@ -95,7 +124,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if !IsBoolType(condType) {
 			a.errorf(n.Pos(), "while condition must be bool, got %s", condType.String())
 		}
-		a.analyzeBlockInScope(n.Body, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
+		a.analyzeBlockWithRegionClone(n.Body, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
 	case *ast.PassStmt:
 		return
 	case *ast.PanicStmt:
@@ -141,6 +170,39 @@ func (a *Analyzer) analyzeBlockInScope(stmts []ast.Stmt, scope *Scope) {
 		a.analyzeStmt(stmt)
 	}
 	a.currentScope = saved
+}
+
+func (a *Analyzer) analyzeBlockWithRegionClone(stmts []ast.Stmt, scope *Scope) {
+	savedRegions := a.currentRegions
+	a.currentRegions = a.cloneRegionStates()
+	a.analyzeBlockInScope(stmts, scope)
+	a.currentRegions = savedRegions
+}
+
+func (a *Analyzer) cloneRegionStates() map[*Symbol]regionState {
+	if a.currentRegions == nil {
+		return nil
+	}
+	cloned := make(map[*Symbol]regionState, len(a.currentRegions))
+	for sym, state := range a.currentRegions {
+		cloned[sym] = state
+	}
+	return cloned
+}
+
+func (a *Analyzer) lookupRegionState(name string) (*Symbol, regionState) {
+	if a.currentScope == nil {
+		return nil, regionState{}
+	}
+	sym, ok := a.currentScope.Lookup(name)
+	if !ok || sym.Kind != SymbolRegion {
+		return nil, regionState{}
+	}
+	state, ok := a.currentRegions[sym]
+	if !ok {
+		return nil, regionState{}
+	}
+	return sym, state
 }
 
 func (a *Analyzer) refinedScopeForCondition(parent *Scope, cond ast.Expr, truthy bool) *Scope {

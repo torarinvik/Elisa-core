@@ -74,6 +74,7 @@ const (
 	SymbolExternType SymbolKind = "extern-type"
 	SymbolParam      SymbolKind = "param"
 	SymbolLocal      SymbolKind = "local"
+	SymbolRegion     SymbolKind = "region"
 )
 
 type Symbol struct {

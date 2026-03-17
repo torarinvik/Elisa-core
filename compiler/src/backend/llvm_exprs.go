@@ -67,6 +67,8 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, actualType, err = s.emitTryExpr(n)
 	case *ast.UnwrapElseExpr:
 		value, actualType, err = s.emitUnwrapElseExpr(n)
+	case *ast.RegionAllocExpr:
+		value, actualType, err = s.emitRegionAllocExpr(n)
 	case *ast.IndexExpr:
 		value, actualType, err = s.emitIndexExpr(n)
 	case *ast.SliceExpr:
@@ -708,6 +710,45 @@ func (s *functionState) emitUnaryExpr(expr *ast.UnaryExpr) (C.LLVMValueRef, sema
 	default:
 		return nil, nil, fmt.Errorf("unsupported unary operator %s", lexer.TokenName(expr.Op))
 	}
+}
+
+func (s *functionState) emitRegionAllocExpr(expr *ast.RegionAllocExpr) (C.LLVMValueRef, semantic.Type, error) {
+	binding, ok := s.lookupBinding(expr.Region)
+	if !ok {
+		return nil, nil, fmt.Errorf("unknown region %q during LLVM lowering", expr.Region)
+	}
+	valueType := s.exprType(expr.Value)
+	if valueType == nil {
+		return nil, nil, fmt.Errorf("missing semantic type for region allocation value in %q", expr.Region)
+	}
+	value, _, err := s.emitExpr(expr.Value, valueType)
+	if err != nil {
+		return nil, nil, err
+	}
+	sizeBytes, err := s.sizeOfType(valueType)
+	if err != nil {
+		return nil, nil, err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, nil, err
+	}
+	sizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(sizeBytes), 0)
+	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	arenaRefType := &semantic.RefType{Elem: binding.typ, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	helperType := &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
+	callee, err := s.g.ensureFunctionDeclared("arena_alloc", helperType)
+	if err != nil {
+		return nil, nil, err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, nil, err
+	}
+	allocPtr := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{binding.ptr, sizeValue}, "region.alloc")
+	C.LLVMBuildStore(s.builder, value, allocPtr)
+	return allocPtr, s.exprType(expr), nil
 }
 
 func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, error) {

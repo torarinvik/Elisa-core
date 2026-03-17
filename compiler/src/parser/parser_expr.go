@@ -362,6 +362,9 @@ func (p *Parser) parseMulDiv() ast.Expr {
 }
 
 func (p *Parser) parseUnary() ast.Expr {
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "new" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACKET {
+		return p.parseRegionAllocExpr()
+	}
 	if p.peek() == lexer.TOKEN_MINUS {
 		pos := p.cur().Pos
 		p.advance()
@@ -381,6 +384,16 @@ func (p *Parser) parseUnary() ast.Expr {
 		return &ast.AddrOfExpr{Position: pos, Operand: operand}
 	}
 	return p.parsePostfix()
+}
+
+func (p *Parser) parseRegionAllocExpr() ast.Expr {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_IDENT)
+	p.expect(lexer.TOKEN_LBRACKET)
+	region := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_RBRACKET)
+	value := p.parseExpr()
+	return &ast.RegionAllocExpr{Position: pos, Region: region, Value: value}
 }
 
 func (p *Parser) parsePostfix() ast.Expr {
