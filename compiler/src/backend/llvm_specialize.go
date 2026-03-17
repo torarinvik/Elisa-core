@@ -36,6 +36,7 @@ func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *sema
 	if err != nil {
 		return nil, nil, err
 	}
+	g.setDefinedFunctionLinkage(specializedName, fnValue)
 	g.functions[specializedName] = fnValue
 	if err := g.defineFunctionBodyWithBindings(decl, specializedType, fnValue, typeBindings); err != nil {
 		return nil, nil, err

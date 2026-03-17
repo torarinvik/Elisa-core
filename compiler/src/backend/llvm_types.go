@@ -155,6 +155,35 @@ func (g *llvmGenerator) addFunction(name string, fn *semantic.FuncType) (C.LLVMV
 	return value, nil
 }
 
+func (g *llvmGenerator) isDirectlyExportedFunction(name string) bool {
+	if g == nil || g.result == nil {
+		return false
+	}
+	for _, exported := range g.result.ExportedFuncs {
+		if exported == nil {
+			continue
+		}
+		if exported.PublicName == name && exported.TargetName == name {
+			return true
+		}
+	}
+	return false
+}
+
+func (g *llvmGenerator) setDefinedFunctionLinkage(name string, value C.LLVMValueRef) {
+	if value == nil {
+		return
+	}
+	linkage := C.LLVMLinkage(C.LLVMExternalLinkage)
+	if g.preferPrivateLinkage && !g.isDirectlyExportedFunction(name) {
+		linkage = C.LLVMLinkage(C.LLVMPrivateLinkage)
+	}
+	if g.isDirectlyExportedFunction(name) {
+		linkage = C.LLVMLinkage(C.LLVMExternalLinkage)
+	}
+	C.LLVMSetLinkage(value, linkage)
+}
+
 func (g *llvmGenerator) lookupIntrinsic(name string, fn *semantic.FuncType) (C.uint, []C.LLVMTypeRef, bool, error) {
 	nameC := cString(name)
 	defer C.free(unsafe.Pointer(nameC))

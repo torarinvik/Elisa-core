@@ -35,7 +35,7 @@ func GenerateLLVMIR(result *semantic.Result) (string, error) {
 // GenerateLLVMIRWithOpt lowers the analyzed program and optionally optimizes the
 // module before returning textual LLVM IR.
 func GenerateLLVMIRWithOpt(result *semantic.Result, optLevel OptimizationLevel) (string, error) {
-	g, err := compileLLVMModule(result)
+	g, err := compileLLVMModule(result, optLevel)
 	if err != nil {
 		return "", err
 	}
@@ -46,11 +46,12 @@ func GenerateLLVMIRWithOpt(result *semantic.Result, optLevel OptimizationLevel) 
 	return g.printModule(), nil
 }
 
-func compileLLVMModule(result *semantic.Result) (*llvmGenerator, error) {
+func compileLLVMModule(result *semantic.Result, optLevel OptimizationLevel) (*llvmGenerator, error) {
 	g, err := newLLVMGenerator(result)
 	if err != nil {
 		return nil, err
 	}
+	g.preferPrivateLinkage = optLevel != OptimizationLevel0
 	if err := g.emitModule(); err != nil {
 		g.dispose()
 		return nil, err
@@ -63,19 +64,20 @@ func compileLLVMModule(result *semantic.Result) (*llvmGenerator, error) {
 }
 
 type llvmGenerator struct {
-	result              *semantic.Result
-	context             C.LLVMContextRef
-	module              C.LLVMModuleRef
-	targetMachine       C.LLVMTargetMachineRef
-	targetData          C.LLVMTargetDataRef
-	targetTriple        *C.char
-	optimizedForCodegen bool
-	symbolsByNode       map[ast.Node]*semantic.Symbol
-	structTypes         map[string]C.LLVMTypeRef
-	structBodies        map[string]bool
-	functions           map[string]C.LLVMValueRef
-	globals             map[string]C.LLVMValueRef
-	wordBits            int
+	result               *semantic.Result
+	context              C.LLVMContextRef
+	module               C.LLVMModuleRef
+	targetMachine        C.LLVMTargetMachineRef
+	targetData           C.LLVMTargetDataRef
+	targetTriple         *C.char
+	optimizedForCodegen  bool
+	preferPrivateLinkage bool
+	symbolsByNode        map[ast.Node]*semantic.Symbol
+	structTypes          map[string]C.LLVMTypeRef
+	structBodies         map[string]bool
+	functions            map[string]C.LLVMValueRef
+	globals              map[string]C.LLVMValueRef
+	wordBits             int
 }
 
 func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
@@ -252,6 +254,7 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 		if err != nil {
 			return err
 		}
+		g.setDefinedFunctionLinkage(sym.Name, fnValue)
 		return g.defineFunctionBody(n, fn, fnValue)
 	case *ast.ExternFuncDecl:
 		return nil

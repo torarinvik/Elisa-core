@@ -191,6 +191,12 @@ def frontend_is_ident_char(ch: i64) -> bool:
     return ch == FRONTEND_CH_UNDERSCORE or frontend_is_ascii_alnum(ch)
 
 
+def frontend_sv_first_char(view: StringView) -> i64:
+    if view.len <= 0:
+        return FRONTEND_CH_NUL
+    return view.data[0u].i64()
+
+
 def frontend_valid_suffix(view: StringView) -> bool:
     return frontend_sv_eq_literal(view, "u8") or frontend_sv_eq_literal(view, "u16") or frontend_sv_eq_literal(view, "u32") or frontend_sv_eq_literal(view, "u64") or frontend_sv_eq_literal(view, "u") or frontend_sv_eq_literal(view, "i8") or frontend_sv_eq_literal(view, "i16") or frontend_sv_eq_literal(view, "i32") or frontend_sv_eq_literal(view, "i64") or frontend_sv_eq_literal(view, "usize") or frontend_sv_eq_literal(view, "isize")
 

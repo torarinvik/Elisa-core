@@ -1,6 +1,9 @@
 # include "../frontend_llcontext/contextlang_frontend.llcontext"
 
 
+global mutable frontend_lexer_bench_arena: Arena = zeroed
+
+
 def frontend_expect_token_count(tokens: darray[FrontendToken], expected: usize) -> bool:
     return tokens.count == expected
 
@@ -208,11 +211,24 @@ def frontend_lexer_parity_suite_impl() -> int:
     return 1
 
 
+def frontend_count_tokens(a: any Arena&, filename: any u8&, source: any u8&) -> usize:
+    lexer: mutable FrontendLexer = frontend_new_lexer(a, filename, source)
+    count: mutable usize = 0u
+
+    while true:
+        token: FrontendToken = frontend_next_token((&lexer).cast[any FrontendLexer&]())
+        count <- count + 1u
+        match token.kind:
+            FrontendTokenKind.Eof:
+                return count
+
+    return count
+
+
 def frontend_lexer_token_count_impl(source: any u8&) -> i64:
-    region scratch(4096u)
-    a: any Arena& = (&scratch).cast[any Arena&]()
-    tokens: darray[FrontendToken] = frontend_tokenize(a, "frontend_lexer_bench.llcontext".cast[any u8&](), source)
-    return tokens.count.i64()
+    arena: any Arena& = (&frontend_lexer_bench_arena).cast[any Arena&]()
+    arena_reset(arena)
+    return frontend_count_tokens(arena, "frontend_lexer_bench.llcontext".cast[any u8&](), source).i64()
 
 
 export func frontend_lexer_parity_suite() -> int = frontend_lexer_parity_suite_impl

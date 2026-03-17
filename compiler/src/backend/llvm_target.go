@@ -79,7 +79,7 @@ func WriteLLVMBitcodeFileWithOpt(result *semantic.Result, outputPath string, opt
 	if strings.TrimSpace(outputPath) == "" {
 		return fmt.Errorf("output path cannot be empty")
 	}
-	g, err := compileLLVMModule(result)
+	g, err := compileLLVMModule(result, optLevel)
 	if err != nil {
 		return err
 	}
@@ -98,7 +98,7 @@ func WriteLLVMObjectFileWithOpt(result *semantic.Result, outputPath string, optL
 	if strings.TrimSpace(outputPath) == "" {
 		return fmt.Errorf("output path cannot be empty")
 	}
-	g, err := compileLLVMModule(result)
+	g, err := compileLLVMModule(result, optLevel)
 	if err != nil {
 		return err
 	}

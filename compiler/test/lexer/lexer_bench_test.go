@@ -36,3 +36,33 @@ func BenchmarkTokenizeSelfHostedFrontendSource(b *testing.B) {
 		}
 	}
 }
+
+func countTokens(sourcePath string, raw []byte) int {
+	l := lexer.New(sourcePath, raw)
+	count := 0
+	for {
+		tok := l.NextToken()
+		count++
+		if tok.Kind == lexer.TOKEN_EOF {
+			return count
+		}
+	}
+}
+
+func BenchmarkCountTokensSelfHostedFrontendSource(b *testing.B) {
+	repoRoot := repoRootFromLexerBench(b)
+	sourcePath := filepath.Join(repoRoot, "Code", "frontend_llcontext", "frontend_lexer.llcontext")
+	raw, err := os.ReadFile(sourcePath)
+	if err != nil {
+		b.Fatalf("failed to read %s: %v", sourcePath, err)
+	}
+
+	b.SetBytes(int64(len(raw)))
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		count := countTokens(sourcePath, raw)
+		if count == 0 {
+			b.Fatal("expected at least one token")
+		}
+	}
+}
