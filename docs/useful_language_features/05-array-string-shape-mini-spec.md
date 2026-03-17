@@ -28,7 +28,7 @@ Implemented today:
     - `darray[T, shape]` and `view[T, begin, end]` slices produce `view[T, start, end]`
     - `dstr[shape]`, `str[N]`, and `sview[begin, end]` slices produce `sview[start, end]`
 
-The compiler still accepts `string[...]` and `dstring[...]` as compatibility aliases, but `str[...]` and `dstr[...]` are now the canonical user-facing spellings.
+The user-facing built-in spellings are lowercase only: use `str[...]` and `dstr[...]`, not legacy aliases like `string[...]` or `dstring[...]`.
 
 Still deferred:
 
@@ -193,7 +193,7 @@ Internally, the runtime representation can still stay equivalent to a simple C-l
 
 ### Dynamic string representation
 
-User-facing code should talk in terms of `str[N]`, `dstr[shape]`, and `sview[begin, end]` when it wants explicit shape relationships, or use bare `dstr` / `DStr` as shape-erasing shorthand when it only cares that a value is a dynamic string.
+User-facing code should talk in terms of `str[N]`, `dstr[shape]`, and `sview[begin, end]` when it wants explicit shape relationships, or use bare `dstr` as shape-erasing shorthand when it only cares that a value is a dynamic string.
 
 As with `darray[T]`, bare `dstr` means “some logical string shape exists here, but this API is not naming or preserving it”.
 
@@ -424,7 +424,7 @@ Then expose compiler-level logical shape wrappers incrementally.
 
 At first, this can even be mostly API-discipline plus type wrappers.
 
-Status: implemented for `darray`, `dstring`, and the current runtime bridge. The older `DList` / `DListView` surface has been removed from the language.
+Status: implemented for `darray`, `dstr`, and the current runtime bridge. The older `DList` / `DListView` surface has been removed from the language.
 
 ### Stage 3 — logical post-operation shape change
 

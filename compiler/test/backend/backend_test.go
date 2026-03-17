@@ -675,7 +675,7 @@ func TestGenerateLLVMIRAcceptsShapeErasingDArrayShorthand(t *testing.T) {
 	src := `def keep(values: darray[i32]) -> darray[i32]:
     return values
 
-def erase(values: DArray[i32, row]) -> darray[i32]:
+def erase(values: darray[i32, row]) -> darray[i32]:
     return values
 `
 	result := parseAndAnalyze(t, "backend_darray_shorthand.llcontext", src)
@@ -1318,7 +1318,7 @@ func TestGenerateLLVMIRAcceptsShapeErasingDStrShorthand(t *testing.T) {
 	src := `def keep(text: dstr) -> dstr:
     return text
 
-def erase(text: DStr[row]) -> dstr:
+def erase(text: dstr[row]) -> dstr:
     return text
 `
 	result := parseAndAnalyze(t, "backend_dstr_shorthand.llcontext", src)

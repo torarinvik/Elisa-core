@@ -17,6 +17,10 @@ import (
 	"llcontext/src/semantic"
 )
 
+func legacyBuiltinReplacementError(oldName, replacement string) error {
+	return fmt.Errorf("legacy built-in %q has been replaced; use %q instead", oldName, replacement)
+}
+
 func (s *functionState) emitAddress(expr ast.Expr) (C.LLVMValueRef, semantic.Type, error) {
 	switch n := expr.(type) {
 	case *ast.Ident:
@@ -566,8 +570,12 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 	switch n := expr.(type) {
 	case *ast.NamedType:
 		switch n.Name {
-		case "dstr", "dstring", "DStr":
+		case "dstr":
 			return &semantic.DStrType{Shape: &semantic.WildcardShape{}, SurfaceName: "dstr"}, nil
+		case "dstring":
+			return nil, legacyBuiltinReplacementError("dstring", "dstr")
+		case "DStr":
+			return nil, legacyBuiltinReplacementError("DStr", "dstr")
 		}
 		if bound, ok := s.typeMap[n.Name]; ok {
 			return bound, nil
@@ -809,7 +817,7 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 			return nil, err
 		}
 		return resolveBackendDictType(keyType, valueType, "dict")
-	case "str", "string":
+	case "str":
 		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 1 {
 			return nil, fmt.Errorf("str expects 1 argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
 		}
@@ -825,11 +833,15 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 			arrayType.SurfaceName = "str"
 		}
 		return resolved, nil
-	case "dstr", "dstring":
+	case "string":
+		return nil, legacyBuiltinReplacementError("string", "str")
+	case "dstr":
 		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 1 {
 			return nil, fmt.Errorf("dstr expects 1 argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
 		}
 		return &semantic.DStrType{Shape: shapeFromValueExpr(expr.ValueArgs[0]), SurfaceName: "dstr"}, nil
+	case "dstring":
+		return nil, legacyBuiltinReplacementError("dstring", "dstr")
 	case "view":
 		if len(expr.TypeArgs) != 1 {
 			return nil, fmt.Errorf("view expects 1 type argument, got %d", len(expr.TypeArgs))
@@ -910,19 +922,7 @@ func (s *functionState) exprType(expr ast.Expr) semantic.Type {
 func (s *functionState) resolveDynamicShapeType(expr *ast.GenericType) (semantic.Type, bool, error) {
 	switch expr.Name {
 	case "Dict":
-		if len(expr.Args) != 2 {
-			return nil, true, fmt.Errorf("Dict expects 2 arguments, got %d", len(expr.Args))
-		}
-		keyType, err := s.resolveTypeExpr(expr.Args[0])
-		if err != nil {
-			return nil, true, err
-		}
-		valueType, err := s.resolveTypeExpr(expr.Args[1])
-		if err != nil {
-			return nil, true, err
-		}
-		resolved, err := resolveBackendDictType(keyType, valueType, "dict")
-		return resolved, true, err
+		return nil, true, legacyBuiltinReplacementError("Dict", "dict")
 	case "view":
 		if len(expr.Args) != 1 {
 			return nil, true, fmt.Errorf("view expects 1 argument, got %d", len(expr.Args))
@@ -933,35 +933,15 @@ func (s *functionState) resolveDynamicShapeType(expr *ast.GenericType) (semantic
 		}
 		return &semantic.DArrayViewType{Elem: elem, SurfaceName: "view"}, true, nil
 	case "DArray":
-		if len(expr.Args) != 1 && len(expr.Args) != 2 {
-			return nil, true, fmt.Errorf("DArray expects 1 or 2 arguments, got %d", len(expr.Args))
-		}
-		elem, err := s.resolveTypeExpr(expr.Args[0])
-		if err != nil {
-			return nil, true, err
-		}
-		if len(expr.Args) == 1 {
-			return &semantic.DArrayType{Elem: elem, Shape: &semantic.WildcardShape{}, SurfaceName: "darray"}, true, nil
-		}
-		return &semantic.DArrayType{Elem: elem, Shape: shapeFromTypeExpr(expr.Args[1]), SurfaceName: "darray"}, true, nil
+		return nil, true, legacyBuiltinReplacementError("DArray", "darray")
 	case "DArrayView":
-		if len(expr.Args) != 1 {
-			return nil, true, fmt.Errorf("DArrayView expects 1 argument, got %d", len(expr.Args))
-		}
-		elem, err := s.resolveTypeExpr(expr.Args[0])
-		if err != nil {
-			return nil, true, err
-		}
-		return &semantic.DArrayViewType{Elem: elem, SurfaceName: "view"}, true, nil
+		return nil, true, legacyBuiltinReplacementError("DArrayView", "view")
 	case "DList":
 		return nil, true, fmt.Errorf("DList has been removed from the language; use darray instead")
 	case "DListView":
 		return nil, true, fmt.Errorf("DListView has been removed from the language; use view instead")
 	case "DStr":
-		if len(expr.Args) != 1 {
-			return nil, true, fmt.Errorf("DStr expects 1 argument, got %d", len(expr.Args))
-		}
-		return &semantic.DStrType{Shape: shapeFromTypeExpr(expr.Args[0]), SurfaceName: "dstr"}, true, nil
+		return nil, true, legacyBuiltinReplacementError("DStr", "dstr")
 	default:
 		return nil, false, nil
 	}

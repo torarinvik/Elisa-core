@@ -1011,7 +1011,7 @@ func (s *functionState) emitUnsignedMin(left C.LLVMValueRef, right C.LLVMValueRe
 func (s *functionState) emitRuntimeStringLenExpr(object ast.Expr, fieldType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
 	stringType, ok := dstrFieldOperandType(s.exprType(object))
 	if !ok {
-		return nil, nil, fmt.Errorf("string len requires DStr operand")
+		return nil, nil, fmt.Errorf("string len requires dstr operand")
 	}
 	stringValue, _, err := s.emitExpr(object, stringType)
 	if err != nil {

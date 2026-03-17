@@ -595,7 +595,7 @@ def id[V](values: dict[dstr, V]) -> dict[dstr, V]:
 def keep(values: dict[dstr, i32]) -> dict[dstr, i32]:
 	return id(values)
 
-def use(values: Dict[DStr[row], i32]) -> dict[dstr, i32]:
+def use(values: dict[dstr[row], i32]) -> dict[dstr, i32]:
 	take_runtime(values)
 	return make_runtime()
 `
@@ -1233,10 +1233,7 @@ func TestAnalyzeAcceptsShapeErasingDArrayShorthand(t *testing.T) {
 	src := `def keep_surface(values: darray[i32]) -> darray[i32]:
 	return values
 
-def keep_generic(values: DArray[i32]) -> darray[i32]:
-	return values
-
-def erase_explicit(values: DArray[i32, row]) -> darray[i32]:
+def erase_explicit(values: darray[i32, row]) -> darray[i32]:
 	return values
 `
 	_, errs := parseAndAnalyze(t, "darray_shorthand_ok.llcontext", src)
@@ -1244,7 +1241,7 @@ def erase_explicit(values: DArray[i32, row]) -> darray[i32]:
 }
 
 func TestAnalyzeRejectsRecoveringExplicitShapeFromShorthand(t *testing.T) {
-	src := `def bad(values: DArray[i32]) -> darray[i32, row]:
+	src := `def bad(values: darray[i32]) -> darray[i32, row]:
 	return values
 `
 	_, errs := parseAndAnalyze(t, "darray_shorthand_reject.llcontext", src)
@@ -1309,10 +1306,7 @@ func TestAnalyzeAcceptsShapeErasingDStrShorthand(t *testing.T) {
 	src := `def keep_surface(text: dstr) -> dstr:
 	return text
 
-def keep_generic(text: DStr) -> DStr:
-	return text
-
-def erase_explicit(text: DStr[row]) -> DStr:
+def erase_explicit(text: dstr[row]) -> dstr:
 	return text
 `
 	_, errs := parseAndAnalyze(t, "dstr_shorthand_ok.llcontext", src)
@@ -1320,7 +1314,7 @@ def erase_explicit(text: DStr[row]) -> DStr:
 }
 
 func TestAnalyzeRejectsRecoveringExplicitShapeFromDStrShorthand(t *testing.T) {
-	src := `def bad(text: DStr) -> DStr[row]:
+	src := `def bad(text: dstr) -> dstr[row]:
 	return text
 `
 	_, errs := parseAndAnalyze(t, "dstr_shorthand_reject.llcontext", src)
@@ -1336,13 +1330,13 @@ func TestAnalyzeDStrRuntimeBridgeWorksBothDirections(t *testing.T) {
 	src := `def take_raw(text: any u8&) -> void:
 	pass
 
-def take_logical(text: DStr[shape_text]) -> void:
+def take_logical(text: dstr[shape_text]) -> void:
 	pass
 
-def roundtrip(text: DStr[row], raw: any u8&) -> DStr[row]:
+def roundtrip(text: dstr[row], raw: any u8&) -> dstr[row]:
 	take_raw(text)
 	take_logical(raw)
-	bridged: DStr[row] = raw
+	bridged: dstr[row] = raw
 	raw_value: any u8& = text
 	return raw_value
 `
@@ -1350,26 +1344,50 @@ def roundtrip(text: DStr[row], raw: any u8&) -> DStr[row]:
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeRejectsWrongDynamicShapeArity(t *testing.T) {
-	src := `def ok_array(x: DArray[i32]) -> void:
-    pass
-
-def bad_array(x: DArray[i32, left, right]) -> void:
-    pass
-
-def bad_array_view(x: DArrayView[i32, row]) -> void:
+func TestAnalyzeRejectsLegacyUppercaseBuiltinTypes(t *testing.T) {
+	src := `def bad_array(values: DArray[i32]) -> void:
 	pass
 
-def bad_str(x: DStr[row, col]) -> void:
-    pass
+def bad_array_view(values: DArrayView[i32]) -> void:
+	pass
+
+def bad_str(text: DStr[row]) -> void:
+	pass
+
+def bad_dict(values: Dict[dstr, i32]) -> void:
+	pass
 `
 	_, errs := parseAndAnalyze(t, "dynamic_shape_arity.llcontext", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "DArray expects 1 or 2 arguments, got 3") || !strings.Contains(all, "DArrayView expects 1 argument, got 2") || !strings.Contains(all, "DStr expects 1 argument, got 2") {
-		t.Fatalf("expected dynamic shape arity diagnostics, got:\n%s", all)
+	for _, want := range []string{
+		"legacy built-in \"DArray\" has been replaced; use \"darray\" instead",
+		"legacy built-in \"DArrayView\" has been replaced; use \"view\" instead",
+		"legacy built-in \"DStr\" has been replaced; use \"dstr\" instead",
+		"legacy built-in \"Dict\" has been replaced; use \"dict\" instead",
+	} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("expected legacy-builtin diagnostic containing %q, got:\n%s", want, all)
+		}
+	}
+}
+
+func TestAnalyzeRejectsLegacyStringBuiltinAliases(t *testing.T) {
+	src := `def bad_fixed(text: string[5]) -> void:
+	pass
+
+def bad_dynamic(text: dstring[row]) -> void:
+	pass
+`
+	_, errs := parseAndAnalyze(t, "legacy_string_aliases.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic errors, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "legacy built-in \"string\" has been replaced; use \"str\" instead") || !strings.Contains(all, "legacy built-in \"dstring\" has been replaced; use \"dstr\" instead") {
+		t.Fatalf("expected legacy string alias diagnostics, got:\n%s", all)
 	}
 }
 
@@ -1391,8 +1409,8 @@ def bad_list_view(view: DListView[i32]) -> void:
 }
 
 func TestAnalyzeDArrayViewUsesDynArrayViewRuntimeFields(t *testing.T) {
-	src := `def non_empty[T](view: DArrayView[T]) -> bool:
-    return view.len > 0u and view.elem_size > 0u
+	src := `def non_empty[T](view: view[T]) -> bool:
+	return view.len > 0u and view.elem_size > 0u
 `
 	_, errs := parseAndAnalyze(t, "darray_view_runtime_field_access.llcontext", src)
 	requireNoErrors(t, errs)

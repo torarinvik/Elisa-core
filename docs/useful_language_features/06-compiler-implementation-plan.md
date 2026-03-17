@@ -23,7 +23,7 @@ Implemented today:
 - explicit reference comparisons (`ref == null`, `ref != null`, `ref == ref`)
 - end-to-end fixture coverage through the real CLI pipeline for `Code/test_programs/pointer_alloc.llcontext` and `Code/test_programs/shape_ops.llcontext`
 
-The compiler still accepts `string[...]` and `dstring[...]` as compatibility aliases, but the canonical user-facing spellings are now `str[...]` and `dstr[...]`.
+The user-facing built-in spellings are lowercase only: use `str[...]` and `dstr[...]`, not legacy aliases like `string[...]` or `dstring[...]`.
 
 Still intentionally deferred:
 
@@ -91,7 +91,7 @@ This phase should focus on:
 
 not on complicated inference.
 
-Status: complete for `darray[T, shape]`, `dstr[shape]`, and `view[T, begin, end]` under the current lightweight shape-witness model. The compiler also accepts `darray[T]` / `DArray[T]` and bare `dstr` / `DStr` as shape-erasing shorthand when code does not need to preserve an explicit logical shape relationship. The older `DList` / `DListView` surface has been removed from the language.
+Status: complete for `darray[T, shape]`, `dstr[shape]`, and `view[T, begin, end]` under the current lightweight shape-witness model. The compiler accepts lowercase shape-erasing shorthand such as `darray[T]` and bare `dstr` when code does not need to preserve an explicit logical shape relationship. The older `DList` / `DListView` surface has been removed from the language.
 
 ### Phase 3 — teach shape-changing APIs to produce fresh post-state shapes
 
@@ -492,7 +492,7 @@ More concretely, the current semantic bridge is intentionally narrow and wrapper
 - `view[T, begin, end]` is allowed to flow across the runtime boundary as `DynArrayView`
 - `sview[begin, end]` / `StringView` is allowed to flow across the runtime boundary as the raw string-view carrier
 
-Legacy raw list wrappers and carriers have been removed entirely. The older typed `DList` / `DListView` surface is also gone; dynamic collection work now goes through `darray` / `DArray` and `view` / `DArrayView` only.
+Legacy raw list wrappers and carriers have been removed entirely. The older typed `DList` / `DListView` surface is also gone; dynamic collection work now goes through lowercase `darray` and `view` only.
 
 That means the typechecker can track logical shape states at the wrapper/API level while still reusing the existing low-level runtime layouts internally, and the public wrappers can expose typed `error[...]` returns when allocation or growth may fail.
 
