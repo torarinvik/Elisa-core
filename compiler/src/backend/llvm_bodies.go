@@ -24,8 +24,8 @@ type valueBinding struct {
 }
 
 type codegenScope struct {
-	parent   *codegenScope
-	bindings map[string]valueBinding
+	parent         *codegenScope
+	bindings       map[string]valueBinding
 	packedEnumPtrs map[string]packedEnumStorageBinding
 }
 
@@ -845,7 +845,6 @@ func (s *functionState) resolveMatchPatternArgs(pattern *ast.MatchVariantPattern
 	}
 	return ordered, nil
 }
-
 
 func (s *functionState) extractEnumTagValue(enumValue C.LLVMValueRef, decodedEnumValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding) (C.LLVMValueRef, error) {
 	if enumType != nil && enumType.Packed {

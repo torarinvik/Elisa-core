@@ -89,6 +89,9 @@ func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, s
 		if err != nil {
 			return nil, nil, err
 		}
+		if ident, ok := expr.Object.(*ast.Ident); ok {
+			s.bindPackedEnumStorage(ident.Name, enumType, objPtr)
+		}
 	}
 	fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, objPtr, C.unsigned(index), cStringFree(expr.Field))
 	return fieldPtr, fieldType, nil

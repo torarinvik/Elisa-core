@@ -98,3 +98,33 @@ def fold() -> int:
 		}
 	}
 }
+
+func TestGenerateLLVMIRReusesLazyPackedFieldDecodeForRepeatedCommonFieldReads(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Lit(value: int)
+
+def fold_common() -> int:
+	region scratch(256u)
+	store: Expr.Store = Expr.Store(scratch)
+	in store:
+		node: Expr = new Expr.Lit(span: 7, value: 5)
+		return node.span + node.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_field_cache.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
+	if decodeCalls != 2 {
+		t.Fatalf("expected constructor lowering plus one lazy packed field decode, got %d decode calls:\n%s", decodeCalls, output)
+	}
+	for _, check := range []string{"packed.decode.store.arena", "packed.decode.store.state"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
