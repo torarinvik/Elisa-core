@@ -585,6 +585,219 @@ def make_none() -> MaybeInt:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsMatchExpressionsAndNestedPatterns(t *testing.T) {
+	src := `enum Inner:
+	A(int)
+	B
+
+enum Outer:
+	Wrap(Inner)
+	Empty
+
+def score(value: Outer) -> int:
+	return match value:
+		Outer.Wrap(Inner.A(inner)):
+			inner
+		Outer.Wrap(Inner.B):
+			0
+		Outer.Empty:
+			-1
+`
+	_, errs := parseAndAnalyze(t, "enum_match_expr_nested_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsNamedEnumPayloadFieldsAndPatterns(t *testing.T) {
+	src := `enum PairOrInt:
+	Just(value: int)
+	Pair(left: int, right: int)
+
+def make_pair() -> PairOrInt:
+	return PairOrInt.Pair(3, 4)
+
+def score(value: PairOrInt) -> int:
+	return match value:
+		PairOrInt.Just(value: inner):
+			inner
+		PairOrInt.Pair(right: r, left: l):
+			l + r
+`
+	_, errs := parseAndAnalyze(t, "enum_named_payloads_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsNamedEnumConstructorArgs(t *testing.T) {
+	src := `enum PairOrInt:
+	Just(value: int)
+	Pair(left: int, right: int)
+
+def make_pair() -> PairOrInt:
+	return PairOrInt.Pair(right: 4, left: 3)
+`
+	_, errs := parseAndAnalyze(t, "enum_named_ctor_args_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsNamedPatternsForUnnamedEnumPayloads(t *testing.T) {
+	src := `enum MaybeInt:
+	Some(int)
+
+def unwrap(value: MaybeInt) -> int:
+	return match value:
+		MaybeInt.Some(value: inner):
+			inner
+`
+	_, errs := parseAndAnalyze(t, "enum_named_payloads_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "match arm \"MaybeInt.Some\" does not declare named payload fields") {
+		t.Fatalf("expected named-payload diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsNamedConstructorArgsForUnnamedEnumPayloads(t *testing.T) {
+	src := `enum MaybeInt:
+	Some(int)
+
+def make_some() -> MaybeInt:
+	return MaybeInt.Some(value: 1)
+`
+	_, errs := parseAndAnalyze(t, "enum_named_ctor_args_unnamed_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "enum constructor \"MaybeInt.Some\" does not declare named payload fields") {
+		t.Fatalf("expected named-constructor diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsMixedNamedAndPositionalEnumConstructorArgs(t *testing.T) {
+	src := `enum PairOrInt:
+	Pair(left: int, right: int)
+
+def make_pair() -> PairOrInt:
+	return PairOrInt.Pair(left: 3, 4)
+`
+	_, errs := parseAndAnalyze(t, "enum_named_ctor_args_mixed_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "enum constructor \"PairOrInt.Pair\" cannot mix positional and named arguments") {
+		t.Fatalf("expected mixed-argument diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsNamedArgumentsForNonEnumCalls(t *testing.T) {
+	src := `extern add(left: int, right: int) -> int
+
+def bad() -> int:
+	return add(left: 1, right: 2)
+`
+	_, errs := parseAndAnalyze(t, "named_args_non_enum_call_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "named arguments are only supported for enum constructors") {
+		t.Fatalf("expected non-enum named-argument diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsShadowedStatementMatchArms(t *testing.T) {
+	src := `enum MaybeInt:
+	None
+	Some(int)
+
+def unwrap(value: MaybeInt) -> int:
+	match value:
+		MaybeInt.Some(first):
+			return first
+		MaybeInt.Some(second):
+			return second
+		MaybeInt.None:
+			return 0
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "enum_match_shadowed_stmt.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "match arm \"MaybeInt.Some(second)\" is unreachable because an earlier arm already matches it") {
+		t.Fatalf("expected shadowed-arm diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsNonExhaustiveMatchesWithMissingVariants(t *testing.T) {
+	src := `enum MaybeInt:
+	None
+	Some(int)
+	Pair(int, int)
+
+def unwrap(value: MaybeInt) -> int:
+	return match value:
+		MaybeInt.Some(inner):
+			inner
+`
+	_, errs := parseAndAnalyze(t, "enum_match_non_exhaustive.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "non-exhaustive match over \"MaybeInt\"; missing variants: MaybeInt.None, MaybeInt.Pair") {
+		t.Fatalf("expected non-exhaustive match diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsRecursiveEnumPayloadByValue(t *testing.T) {
+	src := `enum Expr:
+	Int(int)
+	Add(Expr, Expr)
+`
+	_, errs := parseAndAnalyze(t, "enum_recursive_by_value_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "enum \"Expr\" variant \"Add\" cannot contain \"Expr\" by value; use a reference type instead") {
+		t.Fatalf("expected recursive-enum by-value diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsRecursiveEnumPayloadByReference(t *testing.T) {
+	src := `enum Expr:
+	Int(value: int)
+	Add(left: any Expr&, right: any Expr&)
+
+def eval(node: any Expr&) -> int:
+	return match node[0u]:
+		Expr.Int(value: value):
+			value
+		Expr.Add(left: left, right: right):
+			eval(left) + eval(right)
+`
+	_, errs := parseAndAnalyze(t, "enum_recursive_by_ref_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsPackedEnumsAsNotYetImplemented(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_not_implemented.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "packed enum \"Expr\" is not implemented yet") {
+		t.Fatalf("expected packed-enum diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeAcceptsDictSurfaceTypesAndRuntimeBridge(t *testing.T) {
 	src := `extern take_runtime(values: DynDict[i32]) -> void
 extern make_runtime() -> DynDict[i32]

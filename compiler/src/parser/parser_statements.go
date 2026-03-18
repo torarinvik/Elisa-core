@@ -61,6 +61,11 @@ func (p *Parser) parseMatch() *ast.MatchStmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_MATCH)
 	value := p.parseExpr()
+	arms := p.parseMatchArms()
+	return &ast.MatchStmt{Position: pos, Value: value, Arms: arms}
+}
+
+func (p *Parser) parseMatchArms() []ast.MatchArm {
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
@@ -74,8 +79,7 @@ func (p *Parser) parseMatch() *ast.MatchStmt {
 		arms = append(arms, p.parseMatchArm())
 	}
 	p.expect(lexer.TOKEN_DEDENT)
-
-	return &ast.MatchStmt{Position: pos, Value: value, Arms: arms}
+	return arms
 }
 
 func (p *Parser) parseMatchArm() ast.MatchArm {
@@ -88,19 +92,32 @@ func (p *Parser) parseMatchArm() ast.MatchArm {
 }
 
 func (p *Parser) parseMatchPattern() ast.MatchPattern {
+	pattern := p.parseNestedMatchPattern()
+	switch pattern.(type) {
+	case *ast.MatchWildcardPattern, *ast.MatchVariantPattern:
+		return pattern
+	default:
+		p.errorf("top-level match arm must use Enum.Variant(...) or _")
+		return pattern
+	}
+}
+
+func (p *Parser) parseNestedMatchPattern() ast.MatchPattern {
 	pos := p.cur().Pos
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_" {
 		p.advance()
 		return &ast.MatchWildcardPattern{Position: pos}
 	}
-	enumName := p.expect(lexer.TOKEN_IDENT).Text
-	p.expect(lexer.TOKEN_DOT)
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	if !p.match(lexer.TOKEN_DOT) {
+		return &ast.MatchBindPattern{Position: pos, Name: name}
+	}
 	variant := p.expect(lexer.TOKEN_IDENT).Text
-	bindings := make([]string, 0)
+	args := make([]ast.MatchPatternArg, 0)
 	if p.match(lexer.TOKEN_LPAREN) {
 		if p.peek() != lexer.TOKEN_RPAREN {
 			for {
-				bindings = append(bindings, p.expect(lexer.TOKEN_IDENT).Text)
+				args = append(args, p.parseMatchPatternArg())
 				if !p.match(lexer.TOKEN_COMMA) {
 					break
 				}
@@ -108,7 +125,19 @@ func (p *Parser) parseMatchPattern() ast.MatchPattern {
 		}
 		p.expect(lexer.TOKEN_RPAREN)
 	}
-	return &ast.MatchVariantPattern{Position: pos, EnumName: enumName, Variant: variant, Bindings: bindings}
+	return &ast.MatchVariantPattern{Position: pos, EnumName: name, Variant: variant, Args: args}
+}
+
+func (p *Parser) parseMatchPatternArg() ast.MatchPatternArg {
+	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
+		pos := p.cur().Pos
+		name := p.expect(lexer.TOKEN_IDENT).Text
+		p.expect(lexer.TOKEN_COLON)
+		pattern := p.parseNestedMatchPattern()
+		return ast.MatchPatternArg{Position: pos, Name: name, Pattern: pattern}
+	}
+	pattern := p.parseNestedMatchPattern()
+	return ast.MatchPatternArg{Position: pattern.Pos(), Pattern: pattern}
 }
 
 func (p *Parser) parseRegion() *ast.RegionStmt {

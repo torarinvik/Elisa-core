@@ -81,6 +81,9 @@ func (p *Parser) ParseFile(filename string) *ast.File {
 }
 
 func (p *Parser) parseDecl() ast.Decl {
+	if p.peek() == lexer.TOKEN_PACKED && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ENUM {
+		return p.parsePackedEnumDecl()
+	}
 	switch p.peek() {
 	case lexer.TOKEN_CONST:
 		return p.parseConstDecl()
@@ -109,6 +112,13 @@ func (p *Parser) parseDecl() ast.Decl {
 	}
 }
 
+func (p *Parser) parsePackedEnumDecl() *ast.EnumDecl {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_PACKED)
+	p.expect(lexer.TOKEN_ENUM)
+	return p.parseEnumDeclRest(pos, true)
+}
+
 func (p *Parser) parseErrorDecl() *ast.ErrorDecl {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_ERROR)
@@ -134,6 +144,10 @@ func (p *Parser) parseErrorDecl() *ast.ErrorDecl {
 func (p *Parser) parseEnumDecl() *ast.EnumDecl {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_ENUM)
+	return p.parseEnumDeclRest(pos, false)
+}
+
+func (p *Parser) parseEnumDeclRest(pos lexer.Pos, packed bool) *ast.EnumDecl {
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
@@ -149,17 +163,17 @@ func (p *Parser) parseEnumDecl() *ast.EnumDecl {
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.EnumDecl{Position: pos, Name: name, Variants: variants}
+	return &ast.EnumDecl{Position: pos, Name: name, Packed: packed, Variants: variants}
 }
 
 func (p *Parser) parseEnumVariantDecl() ast.EnumVariantDecl {
 	pos := p.cur().Pos
 	name := p.expect(lexer.TOKEN_IDENT).Text
-	payload := make([]ast.TypeExpr, 0)
+	payload := make([]ast.EnumPayloadDecl, 0)
 	if p.match(lexer.TOKEN_LPAREN) {
 		if p.peek() != lexer.TOKEN_RPAREN {
 			for {
-				payload = append(payload, p.parseTypeExpr())
+				payload = append(payload, p.parseEnumPayloadDecl())
 				if !p.match(lexer.TOKEN_COMMA) {
 					break
 				}
@@ -169,6 +183,18 @@ func (p *Parser) parseEnumVariantDecl() ast.EnumVariantDecl {
 	}
 	p.expectNewline()
 	return ast.EnumVariantDecl{Position: pos, Name: name, Payload: payload}
+}
+
+func (p *Parser) parseEnumPayloadDecl() ast.EnumPayloadDecl {
+	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
+		pos := p.cur().Pos
+		name := p.expect(lexer.TOKEN_IDENT).Text
+		p.expect(lexer.TOKEN_COLON)
+		typ := p.parseTypeExpr()
+		return ast.EnumPayloadDecl{Position: pos, Name: name, Type: typ}
+	}
+	typ := p.parseTypeExpr()
+	return ast.EnumPayloadDecl{Position: typ.Pos(), Type: typ}
 }
 
 func (p *Parser) parseConstDecl() *ast.ConstDecl {

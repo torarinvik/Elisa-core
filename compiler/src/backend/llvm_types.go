@@ -47,79 +47,97 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 	if t == nil {
 		return nil
 	}
+	key := noteTypeKey(t)
+	if g.noteTypeDone[key] || g.noteTypeInProgress[key] {
+		return nil
+	}
+	g.noteTypeInProgress[key] = true
+	defer delete(g.noteTypeInProgress, key)
+	var err error
 	switch tt := t.(type) {
 	case *semantic.InvalidType, *semantic.NeverType, *semantic.NullType, *semantic.BuiltinType, *semantic.TypeParamType, *semantic.DStrType, *semantic.ErrorSetType:
-		return nil
+		err = nil
 	case *semantic.ErrorUnionType:
-		if err := g.noteType(tt.Value); err != nil {
-			return err
+		if err = g.noteType(tt.Value); err != nil {
+			break
 		}
-		return g.noteType(tt.Errors)
+		err = g.noteType(tt.Errors)
 	case *semantic.SViewType:
 		if st, ok := g.lookupStructType("StringView"); ok {
-			_, err := g.ensureStructBody(st.Name, st)
-			return err
+			_, err = g.ensureStructBody(st.Name, st)
+			break
 		}
-		return fmt.Errorf("missing runtime struct StringView")
+		err = fmt.Errorf("missing runtime struct StringView")
 	case *semantic.RefType:
-		return g.noteType(tt.Elem)
+		err = g.noteType(tt.Elem)
 	case *semantic.ArrayType:
-		return g.noteType(tt.Elem)
+		err = g.noteType(tt.Elem)
 	case *semantic.DArrayType:
-		_, err := g.ensureRuntimeDynArray(tt.Elem)
-		return err
+		_, err = g.ensureRuntimeDynArray(tt.Elem)
 	case *semantic.ViewType:
-		_, err := g.ensureRuntimeDynArrayView()
-		return err
+		_, err = g.ensureRuntimeDynArrayView()
 	case *semantic.DArrayViewType:
-		_, err := g.ensureRuntimeDynArrayView()
-		return err
+		_, err = g.ensureRuntimeDynArrayView()
 	case *semantic.DictType:
-		if err := g.noteType(tt.Key); err != nil {
-			return err
+		if err = g.noteType(tt.Key); err != nil {
+			break
 		}
-		if err := g.noteType(tt.Value); err != nil {
-			return err
+		if err = g.noteType(tt.Value); err != nil {
+			break
 		}
 		base, ok := g.result.NamedTypes["DynDict"]
 		if !ok {
-			return fmt.Errorf("missing runtime struct DynDict")
+			err = fmt.Errorf("missing runtime struct DynDict")
+			break
 		}
-		_, err := g.ensureGenericInstanceStruct(&semantic.GenericInstanceType{Name: "DynDict", Base: base, Args: []semantic.Type{tt.Value}})
-		return err
+		_, err = g.ensureGenericInstanceStruct(&semantic.GenericInstanceType{Name: "DynDict", Base: base, Args: []semantic.Type{tt.Value}})
 	case *semantic.EnumType:
 		for _, variant := range tt.Variants {
 			for _, payload := range variant.Payload {
-				if err := g.noteType(payload); err != nil {
-					return err
+				if err = g.noteType(payload); err != nil {
+					break
 				}
 			}
-		}
-		_, err := g.ensureEnumBody(tt.Name, tt)
-		return err
-	case *semantic.StructType:
-		if len(tt.TypeParams) == 0 {
-			_, err := g.ensureStructBody(tt.Name, tt)
-			return err
-		}
-		_, err := g.ensureNamedStructType(tt.Name)
-		return err
-	case *semantic.OpaqueType:
-		_, err := g.ensureNamedStructType(tt.Name)
-		return err
-	case *semantic.GenericInstanceType:
-		_, err := g.ensureGenericInstanceStruct(tt)
-		return err
-	case *semantic.FuncType:
-		for _, param := range tt.Params {
-			if err := g.noteType(param); err != nil {
-				return err
+			if err != nil {
+				break
 			}
 		}
-		return g.noteType(tt.Return)
+		if err == nil {
+			_, err = g.ensureEnumBody(tt.Name, tt)
+		}
+	case *semantic.StructType:
+		if len(tt.TypeParams) == 0 {
+			_, err = g.ensureStructBody(tt.Name, tt)
+			break
+		}
+		_, err = g.ensureNamedStructType(tt.Name)
+	case *semantic.OpaqueType:
+		_, err = g.ensureNamedStructType(tt.Name)
+	case *semantic.GenericInstanceType:
+		_, err = g.ensureGenericInstanceStruct(tt)
+	case *semantic.FuncType:
+		for _, param := range tt.Params {
+			if err = g.noteType(param); err != nil {
+				break
+			}
+		}
+		if err == nil {
+			err = g.noteType(tt.Return)
+		}
 	default:
-		return fmt.Errorf("unsupported semantic type %T", t)
+		err = fmt.Errorf("unsupported semantic type %T", t)
 	}
+	if err == nil {
+		g.noteTypeDone[key] = true
+	}
+	return err
+}
+
+func noteTypeKey(t semantic.Type) string {
+	if t == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%T:%s", t, t.String())
 }
 
 func (g *llvmGenerator) ensureFunctionDeclared(name string, fn *semantic.FuncType) (C.LLVMValueRef, error) {

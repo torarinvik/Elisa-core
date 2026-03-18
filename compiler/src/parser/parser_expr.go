@@ -421,6 +421,45 @@ func (p *Parser) parseRegionAllocExpr() ast.Expr {
 	return &ast.RegionAllocExpr{Position: pos, Region: region, Value: value}
 }
 
+func (p *Parser) parseMatchExpr() ast.Expr {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_MATCH)
+	value := p.parseExpr()
+	arms := p.parseMatchArms()
+	return &ast.MatchExpr{Position: pos, Value: value, Arms: arms}
+}
+
+func (p *Parser) parseCallArgs() ([]ast.Expr, []string) {
+	var args []ast.Expr
+	var argNames []string
+	if p.peek() == lexer.TOKEN_RPAREN {
+		return nil, nil
+	}
+	for {
+		name := ""
+		if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
+			name = p.advance().Text
+			p.expect(lexer.TOKEN_COLON)
+		}
+		args = append(args, p.parseExpr())
+		argNames = append(argNames, name)
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	hasNamed := false
+	for _, name := range argNames {
+		if name != "" {
+			hasNamed = true
+			break
+		}
+	}
+	if !hasNamed {
+		return args, nil
+	}
+	return args, argNames
+}
+
 func (p *Parser) parsePostfix() ast.Expr {
 	expr := p.parsePrimary()
 	for {
@@ -482,17 +521,9 @@ func (p *Parser) parsePostfix() ast.Expr {
 		case lexer.TOKEN_LPAREN:
 			pos := p.cur().Pos
 			p.advance()
-			var args []ast.Expr
-			if p.peek() != lexer.TOKEN_RPAREN {
-				for {
-					args = append(args, p.parseExpr())
-					if !p.match(lexer.TOKEN_COMMA) {
-						break
-					}
-				}
-			}
+			args, argNames := p.parseCallArgs()
 			p.expect(lexer.TOKEN_RPAREN)
-			expr = &ast.CallExpr{Position: pos, Func: expr, Args: args}
+			expr = &ast.CallExpr{Position: pos, Func: expr, Args: args, ArgNames: argNames}
 
 		case lexer.TOKEN_IF:
 			pos := p.cur().Pos
@@ -562,6 +593,8 @@ func (p *Parser) parsePrimary() ast.Expr {
 		p.advance()
 		errExpr := p.parseOr()
 		return &ast.RaiseExpr{Position: pos, Error: errExpr}
+	case lexer.TOKEN_MATCH:
+		return p.parseMatchExpr()
 	case lexer.TOKEN_IDENT:
 		tok := p.advance()
 		if p.peek() == lexer.TOKEN_LPAREN && len(tok.Text) > 0 && tok.Text[0] >= 'A' && tok.Text[0] <= 'Z' {

@@ -173,6 +173,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		valueType := a.analyzeExpr(n.Value)
 		result = &RefType{Elem: valueType, State: RefStateNonNull, Storage: RefStorageAny, ExplicitStorage: true}
 		return
+	case *ast.MatchExpr:
+		result = a.analyzeMatchExpr(n)
+		return
 	case *ast.IndexExpr:
 		result = a.analyzeIndexExpr(n)
 		return
@@ -446,21 +449,30 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 			}
 			return invalidType
 		}
-		if len(expr.Args) != len(variant.Payload) {
+		orderedArgs, ok := a.resolveEnumConstructorArgs(expr, enumType, variant)
+		if !ok {
+			return enumType
+		}
+		if len(orderedArgs) != len(variant.Payload) {
 			a.errorf(expr.Pos(), "enum constructor %q expects %d arguments, got %d", enumType.Name+"."+variant.Name, len(variant.Payload), len(expr.Args))
 		}
-		limit := len(expr.Args)
+		limit := len(orderedArgs)
 		if len(variant.Payload) < limit {
 			limit = len(variant.Payload)
 		}
-		for i := 0; i < len(expr.Args); i++ {
+		for i := 0; i < len(orderedArgs); i++ {
 			if i < limit {
-				actual := a.analyzeValueExpr(expr.Args[i], variant.Payload[i])
+				actual := a.analyzeValueExpr(orderedArgs[i], variant.Payload[i])
 				if !AssignableTo(variant.Payload[i], actual) {
-					a.errorf(expr.Args[i].Pos(), "enum constructor argument %d to %q expects %s, got %s", i+1, enumType.Name+"."+variant.Name, variant.Payload[i].String(), actual.String())
+					label := variant.PayloadLabel(i)
+					if label != "" {
+						a.errorf(orderedArgs[i].Pos(), "enum constructor argument %d (%s) to %q expects %s, got %s", i+1, label, enumType.Name+"."+variant.Name, variant.Payload[i].String(), actual.String())
+					} else {
+						a.errorf(orderedArgs[i].Pos(), "enum constructor argument %d to %q expects %s, got %s", i+1, enumType.Name+"."+variant.Name, variant.Payload[i].String(), actual.String())
+					}
 				}
 			} else {
-				a.analyzeExpr(expr.Args[i])
+				a.analyzeExpr(orderedArgs[i])
 			}
 		}
 		return enumType
@@ -473,6 +485,9 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 			a.analyzeExpr(arg)
 		}
 		return invalidType
+	}
+	if expr.NamedArgCount() != 0 {
+		a.errorf(expr.Pos(), "named arguments are only supported for enum constructors")
 	}
 	if !ft.Variadic && len(expr.Args) != len(ft.Params) {
 		a.errorf(expr.Pos(), "function %q expects %d arguments, got %d", ft.Name, len(ft.Params), len(expr.Args))
@@ -506,6 +521,69 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	}
 	a.bindFreshReturnShapes(ft, shapeBindings)
 	return a.substituteType(ft.Return, bindings, shapeBindings)
+}
+
+func (a *Analyzer) resolveEnumConstructorArgs(expr *ast.CallExpr, enumType *EnumType, variant *EnumVariant) ([]ast.Expr, bool) {
+	if expr == nil || variant == nil {
+		return nil, false
+	}
+	namedCount := expr.NamedArgCount()
+	if namedCount == 0 {
+		return expr.Args, true
+	}
+	if namedCount != len(expr.Args) {
+		a.errorf(expr.Pos(), "enum constructor %q cannot mix positional and named arguments", enumType.Name+"."+variant.Name)
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return nil, false
+	}
+	if !variant.HasNamedPayloads() {
+		a.errorf(expr.Pos(), "enum constructor %q does not declare named payload fields", enumType.Name+"."+variant.Name)
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return nil, false
+	}
+	if len(expr.Args) != len(variant.Payload) {
+		a.errorf(expr.Pos(), "enum constructor %q expects %d arguments, got %d", enumType.Name+"."+variant.Name, len(variant.Payload), len(expr.Args))
+	}
+	ordered := make([]ast.Expr, len(variant.Payload))
+	seen := make([]bool, len(variant.Payload))
+	ok := true
+	for i, arg := range expr.Args {
+		name := expr.ArgName(i)
+		index, found := variant.PayloadIndex(name)
+		if !found {
+			a.errorf(arg.Pos(), "enum constructor %q has no payload field %q", enumType.Name+"."+variant.Name, name)
+			a.analyzeExpr(arg)
+			ok = false
+			continue
+		}
+		if seen[index] {
+			a.errorf(arg.Pos(), "enum constructor %q payload field %q is specified more than once", enumType.Name+"."+variant.Name, name)
+			a.analyzeExpr(arg)
+			ok = false
+			continue
+		}
+		ordered[index] = arg
+		seen[index] = true
+	}
+	for i, wasSeen := range seen {
+		if !wasSeen {
+			label := variant.PayloadLabel(i)
+			if label != "" {
+				a.errorf(expr.Pos(), "enum constructor %q is missing payload field %q", enumType.Name+"."+variant.Name, label)
+			} else {
+				a.errorf(expr.Pos(), "enum constructor %q is missing argument %d", enumType.Name+"."+variant.Name, i+1)
+			}
+			ok = false
+		}
+	}
+	if !ok {
+		return nil, false
+	}
+	return ordered, true
 }
 
 func (a *Analyzer) collectRuntimeBridgeBindings(pattern, actual Type, bindings map[string]Type, shapeBindings map[string]Shape) bool {

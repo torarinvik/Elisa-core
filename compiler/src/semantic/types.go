@@ -126,10 +126,11 @@ type SViewType struct {
 }
 
 type EnumVariant struct {
-	Name    string
-	Tag     uint32
-	Payload []Type
-	Decl    *ast.EnumVariantDecl
+	Name         string
+	Tag          uint32
+	Payload      []Type
+	PayloadNames []string
+	Decl         *ast.EnumVariantDecl
 }
 
 type EnumType struct {
@@ -563,6 +564,32 @@ func (t *EnumType) Variant(name string) (*EnumVariant, bool) {
 	}
 	variant, ok := t.VariantMap[name]
 	return variant, ok
+}
+
+func (v *EnumVariant) HasNamedPayloads() bool {
+	if v == nil || len(v.PayloadNames) == 0 {
+		return false
+	}
+	return v.PayloadNames[0] != ""
+}
+
+func (v *EnumVariant) PayloadIndex(name string) (int, bool) {
+	if v == nil {
+		return 0, false
+	}
+	for i, payloadName := range v.PayloadNames {
+		if payloadName == name {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+func (v *EnumVariant) PayloadLabel(index int) string {
+	if v == nil || index < 0 || index >= len(v.PayloadNames) {
+		return ""
+	}
+	return v.PayloadNames[index]
 }
 
 func cloneRefTypeWithState(ref *RefType, state RefState) *RefType {

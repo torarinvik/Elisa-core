@@ -59,7 +59,7 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		if errorType, _, ok := s.errorTagInfo(n); ok {
 			value, actualType, err = s.emitErrorTagExpr(n, errorType)
 		} else if enumType, variant, ok := s.enumConstructorInfoFromField(n); ok && variant != nil && len(variant.Payload) == 0 {
-			value, actualType, err = s.emitEnumConstructorValue(enumType, variant, nil)
+			value, actualType, err = s.emitEnumConstructorValue(enumType, variant, nil, nil)
 		} else {
 			value, actualType, err = s.emitFieldExpr(n)
 		}
@@ -71,6 +71,8 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, actualType, err = s.emitUnwrapElseExpr(n)
 	case *ast.RegionAllocExpr:
 		value, actualType, err = s.emitRegionAllocExpr(n)
+	case *ast.MatchExpr:
+		value, actualType, err = s.emitMatchExpr(n)
 	case *ast.IndexExpr:
 		value, actualType, err = s.emitIndexExpr(n)
 	case *ast.SliceExpr:
@@ -1106,7 +1108,7 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 		if variant == nil {
 			return nil, nil, fmt.Errorf("unknown enum constructor")
 		}
-		return s.emitEnumConstructorValue(enumType, variant, expr.Args)
+		return s.emitEnumConstructorValue(enumType, variant, expr.Args, expr.ArgNames)
 	}
 	if value, actualType, handled, err := s.emitSpecializedRuntimeCall(expr); handled {
 		return value, actualType, err
@@ -1195,7 +1197,7 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, sema
 			return nil, nil, fmt.Errorf("unknown enum constructor %s.%s", enumType.Name, expr.Field)
 		}
 		if len(variant.Payload) == 0 {
-			return s.emitEnumConstructorValue(enumType, variant, nil)
+			return s.emitEnumConstructorValue(enumType, variant, nil, nil)
 		}
 	}
 	if fieldType, ok := dstrSyntheticFieldType(s.exprType(expr.Object), expr.Field); ok {
@@ -1787,11 +1789,15 @@ func (s *functionState) enumConstructorInfoFromField(expr *ast.FieldExpr) (*sema
 	return enumType, variant, true
 }
 
-func (s *functionState) emitEnumConstructorValue(enumType *semantic.EnumType, variant *semantic.EnumVariant, args []ast.Expr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitEnumConstructorValue(enumType *semantic.EnumType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string) (C.LLVMValueRef, semantic.Type, error) {
 	if enumType == nil || variant == nil {
 		return nil, nil, fmt.Errorf("missing enum constructor metadata")
 	}
-	if len(args) != len(variant.Payload) {
+	orderedArgs, err := s.resolveEnumConstructorArgs(enumType, variant, args, argNames)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(orderedArgs) != len(variant.Payload) {
 		return nil, nil, fmt.Errorf("enum constructor %s.%s expects %d arguments, got %d", enumType.Name, variant.Name, len(variant.Payload), len(args))
 	}
 	if enumIsTagOnly(enumType) {
@@ -1821,7 +1827,7 @@ func (s *functionState) emitEnumConstructorValue(enumType *semantic.EnumType, va
 			return nil, nil, err
 		}
 		if len(variant.Payload) == 1 {
-			argValue, _, err := s.emitExpr(args[0], variant.Payload[0])
+			argValue, _, err := s.emitExpr(orderedArgs[0], variant.Payload[0])
 			if err != nil {
 				return nil, nil, err
 			}
@@ -1833,7 +1839,7 @@ func (s *functionState) emitEnumConstructorValue(enumType *semantic.EnumType, va
 			}
 			aggregate := C.LLVMGetUndef(payloadType)
 			for i, payload := range variant.Payload {
-				argValue, _, err := s.emitExpr(args[i], payload)
+				argValue, _, err := s.emitExpr(orderedArgs[i], payload)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -1847,4 +1853,52 @@ func (s *functionState) emitEnumConstructorValue(enumType *semantic.EnumType, va
 		return nil, nil, err
 	}
 	return value, enumType, nil
+}
+
+func (s *functionState) resolveEnumConstructorArgs(enumType *semantic.EnumType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string) ([]ast.Expr, error) {
+	if variant == nil {
+		return nil, fmt.Errorf("missing enum constructor metadata")
+	}
+	namedCount := 0
+	for _, name := range argNames {
+		if name != "" {
+			namedCount++
+		}
+	}
+	if namedCount == 0 {
+		return args, nil
+	}
+	if namedCount != len(args) {
+		return nil, fmt.Errorf("enum constructor %s.%s cannot mix positional and named arguments", enumType.Name, variant.Name)
+	}
+	if !variant.HasNamedPayloads() {
+		return nil, fmt.Errorf("enum constructor %s.%s does not declare named payload fields", enumType.Name, variant.Name)
+	}
+	ordered := make([]ast.Expr, len(variant.Payload))
+	seen := make([]bool, len(variant.Payload))
+	for i, arg := range args {
+		name := ""
+		if i < len(argNames) {
+			name = argNames[i]
+		}
+		index, ok := variant.PayloadIndex(name)
+		if !ok {
+			return nil, fmt.Errorf("enum constructor %s.%s has no payload field %q", enumType.Name, variant.Name, name)
+		}
+		if seen[index] {
+			return nil, fmt.Errorf("enum constructor %s.%s payload field %q is specified more than once", enumType.Name, variant.Name, name)
+		}
+		ordered[index] = arg
+		seen[index] = true
+	}
+	for i, wasSeen := range seen {
+		if !wasSeen {
+			label := variant.PayloadLabel(i)
+			if label == "" {
+				return nil, fmt.Errorf("enum constructor %s.%s is missing argument %d", enumType.Name, variant.Name, i+1)
+			}
+			return nil, fmt.Errorf("enum constructor %s.%s is missing payload field %q", enumType.Name, variant.Name, label)
+		}
+	}
+	return ordered, nil
 }

@@ -908,6 +908,141 @@ def unwrap_or(value: MaybeInt, fallback: int) -> int:
 	}
 }
 
+func TestGenerateLLVMIRLowersMatchExpressionsViaPhi(t *testing.T) {
+	src := `enum MaybeInt:
+	None
+	Some(int)
+	Pair(int, int)
+
+def unwrap_or(value: MaybeInt, fallback: int) -> int:
+	return match value:
+		MaybeInt.None:
+			fallback
+		MaybeInt.Some(inner):
+			inner
+		MaybeInt.Pair(left, right):
+			left + right
+`
+	result := parseAndAnalyze(t, "backend_enum_match_expr.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%MaybeInt = type { i32, [2 x i64] }",
+		"define i64 @unwrap_or(%MaybeInt",
+		"phi i64",
+		"icmp eq i32",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersNestedMatchPatterns(t *testing.T) {
+	src := `enum Inner:
+	A(int)
+	B
+
+enum Outer:
+	Wrap(Inner)
+	Empty
+
+def nested_value(value: Outer) -> int:
+	return match value:
+		Outer.Wrap(Inner.A(inner)):
+			inner
+		Outer.Wrap(Inner.B):
+			0
+		Outer.Empty:
+			-1
+`
+	result := parseAndAnalyze(t, "backend_nested_match_patterns.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%Inner = type { i32, [1 x i64] }",
+		"%Outer = type { i32, [2 x i64] }",
+		"define i64 @nested_value(%Outer",
+		"extractvalue %Outer",
+		"extractvalue %Inner",
+		"phi i64",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Count(output, "icmp eq i32") < 3 {
+		t.Fatalf("expected nested match lowering to compare multiple enum tags, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRLowersNamedEnumPayloadPatterns(t *testing.T) {
+	src := `enum PairOrInt:
+	Just(value: int)
+	Pair(left: int, right: int)
+
+def score(value: PairOrInt) -> int:
+	return match value:
+		PairOrInt.Just(value: inner):
+			inner
+		PairOrInt.Pair(right: r, left: l):
+			l + r
+`
+	result := parseAndAnalyze(t, "backend_enum_named_payload_patterns.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%PairOrInt = type { i32, [2 x i64] }",
+		"define i64 @score(%PairOrInt",
+		"extractvalue %PairOrInt",
+		"phi i64",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Count(output, "extractvalue { i64, i64 }") < 1 {
+		t.Fatalf("expected named payload pattern lowering to unpack pair payloads, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRLowersNamedEnumConstructorArgs(t *testing.T) {
+	src := `enum PairOrInt:
+	Pair(left: int, right: int)
+
+def make_pair() -> PairOrInt:
+	return PairOrInt.Pair(right: 4, left: 3)
+`
+	result := parseAndAnalyze(t, "backend_enum_named_ctor_args.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%PairOrInt = type { i32, [2 x i64] }",
+		"define %PairOrInt @make_pair()",
+		"store { i64, i64 } { i64 3, i64 4 }, ptr %enum.payload.ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersEnumEqualityViaTagAndPayloadWords(t *testing.T) {
 	src := `enum MaybeInt:
 	None

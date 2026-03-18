@@ -470,7 +470,11 @@ func exprStr(e ast.Expr) string {
 		return fmt.Sprintf("(%s %s)", lexer.TokenName(n.Op), exprStr(n.Operand))
 	case *ast.CallExpr:
 		var args []string
-		for _, a := range n.Args {
+		for i, a := range n.Args {
+			if name := n.ArgName(i); name != "" {
+				args = append(args, name+": "+exprStr(a))
+				continue
+			}
 			args = append(args, exprStr(a))
 		}
 		return fmt.Sprintf("%s(%s)", exprStr(n.Func), strings.Join(args, ", "))

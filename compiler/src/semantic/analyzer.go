@@ -334,6 +334,9 @@ func (a *Analyzer) collectNamedTypes(decls []ast.Decl) {
 			}
 			a.namedTypes[n.Name] = st
 		case *ast.EnumDecl:
+			if n.Packed {
+				a.errorf(n.Pos(), "packed enum %q is not implemented yet", n.Name)
+			}
 			if _, exists := a.namedTypes[n.Name]; exists {
 				a.errorf(n.Pos(), "duplicate type %q", n.Name)
 				continue
@@ -385,14 +388,31 @@ func (a *Analyzer) populateEnumVariants(decls []ast.Decl) {
 				continue
 			}
 			payload := make([]Type, 0, len(variantDecl.Payload))
-			for _, payloadExpr := range variantDecl.Payload {
-				payloadType := a.resolveType(payloadExpr)
+			payloadNames := make([]string, 0, len(variantDecl.Payload))
+			seenPayloadNames := map[string]bool{}
+			hasNamedPayloads := false
+			hasUnnamedPayloads := false
+			for _, payloadDecl := range variantDecl.Payload {
+				if payloadDecl.Name != "" {
+					hasNamedPayloads = true
+					if seenPayloadNames[payloadDecl.Name] {
+						a.errorf(payloadDecl.Position, "duplicate payload field %q in enum variant %q.%q", payloadDecl.Name, enumDecl.Name, variantDecl.Name)
+					}
+					seenPayloadNames[payloadDecl.Name] = true
+				} else {
+					hasUnnamedPayloads = true
+				}
+				payloadType := a.resolveType(payloadDecl.Type)
 				if SameType(payloadType, enumType) {
-					a.errorf(payloadExpr.Pos(), "enum %q variant %q cannot contain %q by value; use a reference type instead", enumDecl.Name, variantDecl.Name, enumDecl.Name)
+					a.errorf(payloadDecl.Type.Pos(), "enum %q variant %q cannot contain %q by value; use a reference type instead", enumDecl.Name, variantDecl.Name, enumDecl.Name)
 				}
 				payload = append(payload, payloadType)
+				payloadNames = append(payloadNames, payloadDecl.Name)
 			}
-			variant := &EnumVariant{Name: variantDecl.Name, Tag: uint32(i), Payload: payload, Decl: variantDecl}
+			if hasNamedPayloads && hasUnnamedPayloads {
+				a.errorf(variantDecl.Position, "enum variant %q.%q must name either all payload fields or none", enumDecl.Name, variantDecl.Name)
+			}
+			variant := &EnumVariant{Name: variantDecl.Name, Tag: uint32(i), Payload: payload, PayloadNames: payloadNames, Decl: variantDecl}
 			enumType.VariantMap[variant.Name] = variant
 			variants = append(variants, variant)
 		}

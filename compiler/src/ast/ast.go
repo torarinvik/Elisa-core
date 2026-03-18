@@ -33,13 +33,20 @@ type ErrorDecl struct {
 type EnumDecl struct {
 	Position lexer.Pos
 	Name     string
+	Packed   bool
 	Variants []EnumVariantDecl
 }
 
 type EnumVariantDecl struct {
 	Position lexer.Pos
 	Name     string
-	Payload  []TypeExpr
+	Payload  []EnumPayloadDecl
+}
+
+type EnumPayloadDecl struct {
+	Position lexer.Pos
+	Name     string
+	Type     TypeExpr
 }
 
 type GlobalDecl struct {
@@ -270,6 +277,7 @@ type CallExpr struct {
 	Position lexer.Pos
 	Func     Expr
 	Args     []Expr
+	ArgNames []string
 }
 
 type FieldExpr struct {
@@ -353,6 +361,12 @@ type RegionAllocExpr struct {
 	Value    Expr
 }
 
+type MatchExpr struct {
+	Position lexer.Pos
+	Value    Expr
+	Arms     []MatchArm
+}
+
 type MatchPattern interface {
 	Node
 	matchPatternTag()
@@ -362,11 +376,22 @@ type MatchWildcardPattern struct {
 	Position lexer.Pos
 }
 
+type MatchBindPattern struct {
+	Position lexer.Pos
+	Name     string
+}
+
 type MatchVariantPattern struct {
 	Position lexer.Pos
 	EnumName string
 	Variant  string
-	Bindings []string
+	Args     []MatchPatternArg
+}
+
+type MatchPatternArg struct {
+	Position lexer.Pos
+	Name     string
+	Pattern  MatchPattern
 }
 
 type Stmt interface {
@@ -539,9 +564,11 @@ func (n *RaiseExpr) Pos() lexer.Pos       { return n.Position }
 func (n *TryExpr) Pos() lexer.Pos         { return n.Position }
 func (n *UnwrapElseExpr) Pos() lexer.Pos  { return n.Position }
 func (n *RegionAllocExpr) Pos() lexer.Pos { return n.Position }
+func (n *MatchExpr) Pos() lexer.Pos       { return n.Position }
 func (n *MatchWildcardPattern) Pos() lexer.Pos {
 	return n.Position
 }
+func (n *MatchBindPattern) Pos() lexer.Pos    { return n.Position }
 func (n *MatchVariantPattern) Pos() lexer.Pos { return n.Position }
 func (n *AssignStmt) Pos() lexer.Pos          { return n.Position }
 func (n *AugAssignStmt) Pos() lexer.Pos       { return n.Position }
@@ -605,7 +632,9 @@ func (*RaiseExpr) nodeTag()            {}
 func (*TryExpr) nodeTag()              {}
 func (*UnwrapElseExpr) nodeTag()       {}
 func (*RegionAllocExpr) nodeTag()      {}
+func (*MatchExpr) nodeTag()            {}
 func (*MatchWildcardPattern) nodeTag() {}
+func (*MatchBindPattern) nodeTag()     {}
 func (*MatchVariantPattern) nodeTag()  {}
 func (*AssignStmt) nodeTag()           {}
 func (*AugAssignStmt) nodeTag()        {}
@@ -662,6 +691,7 @@ func (*IndexExpr) exprTag()  {}
 func (*SliceExpr) exprTag()  {}
 
 func (*MatchWildcardPattern) matchPatternTag() {}
+func (*MatchBindPattern) matchPatternTag()     {}
 func (*MatchVariantPattern) matchPatternTag()  {}
 func (*ListLitExpr) exprTag()                  {}
 func (*CastExpr) exprTag()                     {}
@@ -671,6 +701,7 @@ func (*AddrOfExpr) exprTag()                   {}
 func (*StructLitExpr) exprTag()                {}
 func (*ParenExpr) exprTag()                    {}
 func (*RaiseExpr) exprTag()                    {}
+func (*MatchExpr) exprTag()                    {}
 func (*MatchStmt) stmtTag()                    {}
 func (*TryExpr) exprTag()                      {}
 func (*UnwrapElseExpr) exprTag()               {}
@@ -691,3 +722,23 @@ func (*StaticErrorStmt) stmtTag() {}
 func (*DiscardStmt) stmtTag()     {}
 func (*RegionStmt) stmtTag()      {}
 func (*DestroyStmt) stmtTag()     {}
+
+func (n *CallExpr) ArgName(index int) string {
+	if n == nil || index < 0 || index >= len(n.ArgNames) {
+		return ""
+	}
+	return n.ArgNames[index]
+}
+
+func (n *CallExpr) NamedArgCount() int {
+	if n == nil {
+		return 0
+	}
+	count := 0
+	for _, name := range n.ArgNames {
+		if name != "" {
+			count++
+		}
+	}
+	return count
+}

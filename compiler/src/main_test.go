@@ -207,6 +207,17 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"call ptr @arena_alloc(ptr",
 			},
 		},
+		{
+			name: "recursive_enum",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "recursive_enum.llcontext"),
+			checks: []string{
+				"%Expr = type { i32, [2 x i64] }",
+				"define i64 @eval(ptr",
+				"define i64 @make_sum()",
+				"call ptr @arena_alloc(ptr",
+				"call i64 @eval(ptr",
+			},
+		},
 	}
 
 	for _, fixture := range fixtures {

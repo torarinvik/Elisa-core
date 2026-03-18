@@ -3,6 +3,8 @@ package semantic
 import (
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
+	"sort"
+	"strings"
 )
 
 func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
@@ -166,42 +168,375 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 		}
 		return
 	}
+	priorPatterns := make([]ast.MatchPattern, 0, len(stmt.Arms))
 	for i, arm := range stmt.Arms {
-		scope := NewScope(a.currentScope)
-		switch pattern := arm.Pattern.(type) {
-		case *ast.MatchWildcardPattern:
-			if i != len(stmt.Arms)-1 {
-				a.errorf(pattern.Pos(), "wildcard match arm must be the final arm")
-			}
-			// No bindings.
-		case *ast.MatchVariantPattern:
-			if pattern.EnumName != enumType.Name {
-				a.errorf(pattern.Pos(), "match arm expects enum %q, got %q", enumType.Name, pattern.EnumName)
-				break
-			}
-			variant, ok := enumType.Variant(pattern.Variant)
-			if !ok {
-				a.errorf(pattern.Pos(), "enum %q has no variant %q", enumType.Name, pattern.Variant)
-				break
-			}
-			if len(pattern.Bindings) != len(variant.Payload) {
-				a.errorf(pattern.Pos(), "match arm %q expects %d bindings, got %d", enumType.Name+"."+variant.Name, len(variant.Payload), len(pattern.Bindings))
-			}
-			limit := len(pattern.Bindings)
-			if len(variant.Payload) < limit {
-				limit = len(variant.Payload)
-			}
-			for i := 0; i < limit; i++ {
-				if pattern.Bindings[i] == "_" {
-					continue
-				}
-				a.defineLocal(&Symbol{Name: pattern.Bindings[i], Kind: SymbolLocal, Type: variant.Payload[i], Node: pattern, Mutable: false}, pattern.Pos())
-			}
-		default:
-			a.errorf(arm.Position, "unsupported match pattern %T", arm.Pattern)
+		if a.matchPatternShadowedByPrevious(arm.Pattern, enumType, priorPatterns) {
+			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
 		}
+		scope := NewScope(a.currentScope)
+		a.analyzeTopLevelMatchPattern(arm.Pattern, enumType, scope, i, len(stmt.Arms), nil)
 		a.analyzeBlockWithRegionClone(arm.Body, scope)
+		priorPatterns = append(priorPatterns, arm.Pattern)
 	}
+}
+
+func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
+	valueType := a.analyzeExpr(expr.Value)
+	enumType, ok := valueType.(*EnumType)
+	if !ok {
+		a.errorf(expr.Pos(), "match requires an enum value, got %s", valueType.String())
+		for _, arm := range expr.Arms {
+			a.analyzeMatchExprArmBody(arm.Body, NewScope(a.currentScope))
+		}
+		return invalidType
+	}
+	covered := map[string]bool{}
+	hasWildcard := false
+	resultType := Type(nil)
+	priorPatterns := make([]ast.MatchPattern, 0, len(expr.Arms))
+	for i, arm := range expr.Arms {
+		if a.matchPatternShadowedByPrevious(arm.Pattern, enumType, priorPatterns) {
+			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
+		}
+		scope := NewScope(a.currentScope)
+		if a.analyzeTopLevelMatchPattern(arm.Pattern, enumType, scope, i, len(expr.Arms), covered) {
+			hasWildcard = true
+		}
+		armType := a.analyzeMatchExprArmBody(arm.Body, scope)
+		if resultType == nil {
+			resultType = armType
+			priorPatterns = append(priorPatterns, arm.Pattern)
+			continue
+		}
+		merged := MergeTypes(resultType, armType)
+		if IsInvalidType(merged) {
+			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType.String(), armType.String())
+			resultType = invalidType
+			priorPatterns = append(priorPatterns, arm.Pattern)
+			continue
+		}
+		resultType = merged
+		priorPatterns = append(priorPatterns, arm.Pattern)
+	}
+	a.reportNonExhaustiveMatch(expr.Pos(), enumType, covered, hasWildcard)
+	if resultType == nil {
+		return neverType
+	}
+	return resultType
+}
+
+func (a *Analyzer) matchPatternShadowedByPrevious(pattern ast.MatchPattern, enumType *EnumType, prior []ast.MatchPattern) bool {
+	for _, prev := range prior {
+		if a.matchPatternCovers(prev, pattern, enumType) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Analyzer) matchPatternCovers(prev ast.MatchPattern, current ast.MatchPattern, expected Type) bool {
+	switch p := prev.(type) {
+	case *ast.MatchWildcardPattern:
+		return true
+	case *ast.MatchBindPattern:
+		return true
+	case *ast.MatchVariantPattern:
+		currVariant, ok := current.(*ast.MatchVariantPattern)
+		if !ok {
+			return false
+		}
+		enumType, ok := expected.(*EnumType)
+		if !ok || p.EnumName != enumType.Name || currVariant.EnumName != enumType.Name || p.Variant != currVariant.Variant {
+			return false
+		}
+		variant, ok := enumType.Variant(p.Variant)
+		if !ok {
+			return false
+		}
+		prevArgs, ok := orderedMatchPatternArgs(p, variant)
+		if !ok {
+			return false
+		}
+		currArgs, ok := orderedMatchPatternArgs(currVariant, variant)
+		if !ok {
+			return false
+		}
+		for i := range prevArgs {
+			if prevArgs[i] == nil || currArgs[i] == nil {
+				return false
+			}
+			if !a.matchPatternCovers(prevArgs[i].Pattern, currArgs[i].Pattern, variant.Payload[i]) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func orderedMatchPatternArgs(pattern *ast.MatchVariantPattern, variant *EnumVariant) ([]*ast.MatchPatternArg, bool) {
+	ordered := make([]*ast.MatchPatternArg, len(variant.Payload))
+	if len(pattern.Args) == 0 {
+		return ordered, true
+	}
+	namedCount := 0
+	for i := range pattern.Args {
+		if pattern.Args[i].Name != "" {
+			namedCount++
+		}
+	}
+	if namedCount != 0 && namedCount != len(pattern.Args) {
+		return nil, false
+	}
+	if namedCount == 0 {
+		if len(pattern.Args) != len(variant.Payload) {
+			return nil, false
+		}
+		for i := range pattern.Args {
+			ordered[i] = &pattern.Args[i]
+		}
+		return ordered, true
+	}
+	if !variant.HasNamedPayloads() || len(pattern.Args) != len(variant.Payload) {
+		return nil, false
+	}
+	seen := map[int]bool{}
+	for i := range pattern.Args {
+		arg := &pattern.Args[i]
+		index, ok := variant.PayloadIndex(arg.Name)
+		if !ok || seen[index] {
+			return nil, false
+		}
+		seen[index] = true
+		ordered[index] = arg
+	}
+	for i := range ordered {
+		if ordered[i] == nil {
+			return nil, false
+		}
+	}
+	return ordered, true
+}
+func matchPatternSummary(pattern ast.MatchPattern) string {
+	switch p := pattern.(type) {
+	case *ast.MatchWildcardPattern:
+		return "_"
+	case *ast.MatchBindPattern:
+		return p.Name
+	case *ast.MatchVariantPattern:
+		if len(p.Args) == 0 {
+			return p.EnumName + "." + p.Variant
+		}
+		parts := make([]string, 0, len(p.Args))
+		for _, arg := range p.Args {
+			part := matchPatternSummary(arg.Pattern)
+			if arg.Name != "" {
+				part = arg.Name + ": " + part
+			}
+			parts = append(parts, part)
+		}
+		return p.EnumName + "." + p.Variant + "(" + strings.Join(parts, ", ") + ")"
+	default:
+		return "<pattern>"
+	}
+}
+
+func (a *Analyzer) analyzeMatchExprArmBody(body []ast.Stmt, scope *Scope) Type {
+	savedScope := a.currentScope
+	savedRegions := a.currentRegions
+	a.currentScope = scope
+	a.currentRegions = a.cloneRegionStates()
+	defer func() {
+		a.currentScope = savedScope
+		a.currentRegions = savedRegions
+	}()
+	if len(body) == 0 {
+		return invalidType
+	}
+	for i, stmt := range body {
+		isLast := i == len(body)-1
+		if !isLast {
+			a.analyzeStmt(stmt)
+			if stmtDefinitelyExits(stmt) {
+				return neverType
+			}
+			continue
+		}
+		if exprStmt, ok := stmt.(*ast.ExprStmt); ok {
+			return a.analyzeExpr(exprStmt.Expr)
+		}
+		a.analyzeStmt(stmt)
+		if stmtDefinitelyExits(stmt) {
+			return neverType
+		}
+		a.errorf(stmt.Pos(), "match expression arm must end with an expression")
+		return invalidType
+	}
+	return invalidType
+}
+
+func (a *Analyzer) analyzeTopLevelMatchPattern(pattern ast.MatchPattern, enumType *EnumType, scope *Scope, index int, armCount int, covered map[string]bool) bool {
+	savedScope := a.currentScope
+	a.currentScope = scope
+	defer func() { a.currentScope = savedScope }()
+	switch p := pattern.(type) {
+	case *ast.MatchWildcardPattern:
+		if index != armCount-1 {
+			a.errorf(p.Pos(), "wildcard match arm must be the final arm")
+		}
+		return true
+	case *ast.MatchVariantPattern:
+		if p.EnumName != enumType.Name {
+			a.errorf(p.Pos(), "match arm expects enum %q, got %q", enumType.Name, p.EnumName)
+			return false
+		}
+		variant, ok := enumType.Variant(p.Variant)
+		if !ok {
+			a.errorf(p.Pos(), "enum %q has no variant %q", enumType.Name, p.Variant)
+			return false
+		}
+		qualified := enumType.Name + "." + variant.Name
+		if covered != nil {
+			covered[variant.Name] = true
+		}
+		orderedArgs := a.resolveMatchPatternArgs(p, variant, qualified, false)
+		for i, arg := range orderedArgs {
+			if arg == nil {
+				continue
+			}
+			a.analyzeNestedMatchPattern(arg.Pattern, variant.Payload[i], scope)
+		}
+		return false
+	case *ast.MatchBindPattern:
+		a.errorf(p.Pos(), "top-level match arm must use %q variants or _", enumType.Name)
+		return false
+	default:
+		a.errorf(pattern.Pos(), "unsupported match pattern %T", pattern)
+		return false
+	}
+}
+
+func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected Type, scope *Scope) {
+	savedScope := a.currentScope
+	a.currentScope = scope
+	defer func() { a.currentScope = savedScope }()
+	switch p := pattern.(type) {
+	case *ast.MatchWildcardPattern:
+		return
+	case *ast.MatchBindPattern:
+		a.defineLocal(&Symbol{Name: p.Name, Kind: SymbolLocal, Type: expected, Node: p, Mutable: false}, p.Pos())
+	case *ast.MatchVariantPattern:
+		enumType, ok := expected.(*EnumType)
+		if !ok {
+			a.errorf(p.Pos(), "nested variant pattern %q requires an enum payload, got %s", p.EnumName+"."+p.Variant, expected.String())
+			return
+		}
+		if p.EnumName != enumType.Name {
+			a.errorf(p.Pos(), "nested match pattern expects enum %q, got %q", enumType.Name, p.EnumName)
+			return
+		}
+		variant, ok := enumType.Variant(p.Variant)
+		if !ok {
+			a.errorf(p.Pos(), "enum %q has no variant %q", enumType.Name, p.Variant)
+			return
+		}
+		orderedArgs := a.resolveMatchPatternArgs(p, variant, enumType.Name+"."+variant.Name, true)
+		for i, arg := range orderedArgs {
+			if arg == nil {
+				continue
+			}
+			a.analyzeNestedMatchPattern(arg.Pattern, variant.Payload[i], scope)
+		}
+	default:
+		a.errorf(pattern.Pos(), "unsupported nested match pattern %T", pattern)
+	}
+}
+
+func (a *Analyzer) resolveMatchPatternArgs(pattern *ast.MatchVariantPattern, variant *EnumVariant, qualified string, nested bool) []*ast.MatchPatternArg {
+	ordered := make([]*ast.MatchPatternArg, len(variant.Payload))
+	if len(pattern.Args) == 0 {
+		return ordered
+	}
+	namedCount := 0
+	for i := range pattern.Args {
+		if pattern.Args[i].Name != "" {
+			namedCount++
+		}
+	}
+	if namedCount != 0 && namedCount != len(pattern.Args) {
+		a.errorf(pattern.Pos(), "%s cannot mix positional and named payload patterns", matchPatternContext(qualified, nested))
+	}
+	if namedCount == 0 {
+		if len(pattern.Args) != len(variant.Payload) {
+			a.errorf(pattern.Pos(), "%s expects %d payload patterns, got %d", matchPatternContext(qualified, nested), len(variant.Payload), len(pattern.Args))
+		}
+		limit := len(pattern.Args)
+		if len(ordered) < limit {
+			limit = len(ordered)
+		}
+		for i := 0; i < limit; i++ {
+			ordered[i] = &pattern.Args[i]
+		}
+		return ordered
+	}
+	if !variant.HasNamedPayloads() {
+		a.errorf(pattern.Pos(), "%s does not declare named payload fields", matchPatternContext(qualified, nested))
+		return ordered
+	}
+	seen := map[int]lexer.Pos{}
+	for i := range pattern.Args {
+		arg := &pattern.Args[i]
+		index, ok := variant.PayloadIndex(arg.Name)
+		if !ok {
+			a.errorf(arg.Position, "%s has no payload field %q", matchPatternContext(qualified, nested), arg.Name)
+			continue
+		}
+		if prev, exists := seen[index]; exists {
+			a.errorf(arg.Position, "%s payload field %q is matched more than once (first at %s:%d:%d)", matchPatternContext(qualified, nested), arg.Name, prev.File, prev.Line, prev.Col)
+			continue
+		}
+		seen[index] = arg.Position
+		ordered[index] = arg
+	}
+	missing := make([]string, 0)
+	for i := range ordered {
+		if ordered[i] == nil {
+			missing = append(missing, variant.PayloadLabel(i))
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		a.errorf(pattern.Pos(), "%s is missing named payload patterns for: %s", matchPatternContext(qualified, nested), strings.Join(missing, ", "))
+	}
+	return ordered
+}
+
+func matchPatternContext(qualified string, nested bool) string {
+	if nested {
+		return "nested match arm " + strconvQuote(qualified)
+	}
+	return "match arm " + strconvQuote(qualified)
+}
+
+func strconvQuote(s string) string {
+	return "\"" + s + "\""
+}
+
+func (a *Analyzer) reportNonExhaustiveMatch(pos lexer.Pos, enumType *EnumType, covered map[string]bool, hasWildcard bool) {
+	if enumType == nil || hasWildcard {
+		return
+	}
+	missing := make([]string, 0)
+	for _, variant := range enumType.Variants {
+		if !covered[variant.Name] {
+			missing = append(missing, enumType.Name+"."+variant.Name)
+		}
+	}
+	if len(missing) == 0 {
+		return
+	}
+	a.errorf(pos, "non-exhaustive match over %q; missing variants: %s", enumType.Name, strings.Join(missing, ", "))
 }
 
 func (a *Analyzer) analyzeBlock(stmts []ast.Stmt) {

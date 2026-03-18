@@ -77,6 +77,8 @@ type llvmGenerator struct {
 	structBodies         map[string]bool
 	functions            map[string]C.LLVMValueRef
 	globals              map[string]C.LLVMValueRef
+	noteTypeInProgress   map[string]bool
+	noteTypeDone         map[string]bool
 	wordBits             int
 }
 
@@ -89,15 +91,17 @@ func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
 	defer C.free(unsafe.Pointer(moduleName))
 	mod := C.LLVMModuleCreateWithNameInContext(moduleName, ctx)
 	g := &llvmGenerator{
-		result:        result,
-		context:       ctx,
-		module:        mod,
-		symbolsByNode: map[ast.Node]*semantic.Symbol{},
-		structTypes:   map[string]C.LLVMTypeRef{},
-		structBodies:  map[string]bool{},
-		functions:     map[string]C.LLVMValueRef{},
-		globals:       map[string]C.LLVMValueRef{},
-		wordBits:      int(unsafe.Sizeof(uintptr(0)) * 8),
+		result:             result,
+		context:            ctx,
+		module:             mod,
+		symbolsByNode:      map[ast.Node]*semantic.Symbol{},
+		structTypes:        map[string]C.LLVMTypeRef{},
+		structBodies:       map[string]bool{},
+		functions:          map[string]C.LLVMValueRef{},
+		globals:            map[string]C.LLVMValueRef{},
+		noteTypeInProgress: map[string]bool{},
+		noteTypeDone:       map[string]bool{},
+		wordBits:           int(unsafe.Sizeof(uintptr(0)) * 8),
 	}
 	for _, sym := range result.GlobalScope.Symbols {
 		if sym == nil || sym.Node == nil {
