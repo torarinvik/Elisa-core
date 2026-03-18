@@ -231,6 +231,19 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"load i64, ptr",
 			},
 		},
+		{
+			name: "json_parser",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "json_parser.llcontext"),
+			checks: []string{
+				"%JsonCursor = type { ptr, i64, i64 }",
+				"define i64 @json_parse_string(ptr",
+				"define i64 @json_parse_number(ptr",
+				"define i64 @json_parse_array(ptr",
+				"define i64 @json_parse_object(ptr",
+				"define i64 @json_parser_parity_suite()",
+				"define i64 @json_parser_checksum(ptr",
+			},
+		},
 	}
 
 	for _, fixture := range fixtures {
@@ -499,6 +512,54 @@ func TestRunCLIFrontendLexerGeneratedHeaderInteropHarness(t *testing.T) {
 	runOutput, err := runCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("frontend-lexer generated-header interop harness failed: %v\n%s", err, string(runOutput))
+	}
+}
+
+func TestRunCLIJSONParserGeneratedHeaderInteropHarness(t *testing.T) {
+	clangPath, err := exec.LookPath("clang")
+	if err != nil {
+		t.Skip("clang not available")
+	}
+	repoRoot := repoRootFromMainTest(t)
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.llcontext")
+	harnessPath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser_generated_harness.c")
+	shimPath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c")
+	outputDir := t.TempDir()
+	headerPath := filepath.Join(outputDir, "json_parser.h")
+	objectPath := filepath.Join(outputDir, "json_parser.o")
+	exePath := filepath.Join(outputDir, "json_parser_generated_harness")
+
+	for _, args := range [][]string{
+		{"-emit", "header", "-o", headerPath, fixturePath},
+		{"-emit", "obj", "-o", objectPath, fixturePath},
+	} {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		exitCode := runCLI(args, &stdout, &stderr)
+		if exitCode != 0 {
+			t.Fatalf("runCLI(%v) returned %d\nstderr:\n%s", args, exitCode, stderr.String())
+		}
+		if stdout.Len() != 0 {
+			t.Fatalf("expected no stdout for %v, got:\n%s", args, stdout.String())
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("expected no stderr for %v, got:\n%s", args, stderr.String())
+		}
+	}
+
+	compileArgs := []string{"-I", outputDir, harnessPath, shimPath, objectPath, "-o", exePath}
+	if runtime.GOOS == "darwin" {
+		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
+	}
+	compileCmd := exec.Command(clangPath, compileArgs...)
+	compileOutput, err := compileCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clang failed: %v\n%s", err, string(compileOutput))
+	}
+	runCmd := exec.Command(exePath)
+	runOutput, err := runCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("json-parser generated-header interop harness failed: %v\n%s", err, string(runOutput))
 	}
 }
 

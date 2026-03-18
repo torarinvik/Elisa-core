@@ -88,6 +88,23 @@ go test ./test/benchmarks -run '^TestSyntheticJSONCorpusIsValid$'
 go test ./test/benchmarks -run '^$' -bench '^BenchmarkEncodingJSONParseSyntheticCorpus$' -benchmem
 ```
 
+There is also now a self-hosted parser fixture at `../Code/test_programs/json_parser.llcontext` plus benchmark helpers:
+
+- `../Code/test_programs/json_parser.llcontext` exports `json_parser_checksum(...)` and `json_parser_parity_suite()`
+- `../Code/benchmarks/json_parser_bench.c` is a standalone benchmark executable for file-backed corpora
+- `test/benchmarks/cmd/gen_synthetic_json` writes the same deterministic corpus family to disk for external benchmarking
+
+One way to compare the self-hosted parser against the Go baseline is:
+
+```text
+go run ./test/benchmarks/cmd/gen_synthetic_json -case large -o /tmp/llcontext-large.json
+go run ./src -O3 -emit header -o /tmp/json_parser.h ../Code/test_programs/json_parser.llcontext
+go run ./src -O3 -emit obj -o /tmp/json_parser.o ../Code/test_programs/json_parser.llcontext
+clang -O3 -Wl,-undefined,dynamic_lookup -I /tmp ../Code/benchmarks/json_parser_bench.c ../Code/benchmarks/json_parser_runtime_shims.c /tmp/json_parser.o -o /tmp/json_parser_bench
+/tmp/json_parser_bench /tmp/llcontext-large.json 20
+go test ./test/benchmarks -run '^$' -bench '^BenchmarkEncodingJSONParseSyntheticCorpus/large$' -benchmem -benchtime=20x
+```
+
 ## Layout
 
 - `src/` — active compiler source code

@@ -1,0 +1,318 @@
+# include "../contextlang_runtime.llcontext"
+
+const JSON_CH_NUL = 0
+const JSON_CH_TAB = 9
+const JSON_CH_NL = 10
+const JSON_CH_CR = 13
+const JSON_CH_SPACE = 32
+const JSON_CH_DQUOTE = 34
+const JSON_CH_PLUS = 43
+const JSON_CH_COMMA = 44
+const JSON_CH_MINUS = 45
+const JSON_CH_DOT = 46
+const JSON_CH_0 = 48
+const JSON_CH_9 = 57
+const JSON_CH_COLON = 58
+const JSON_CH_E = 69
+const JSON_CH_LBRACKET = 91
+const JSON_CH_BSLASH = 92
+const JSON_CH_RBRACKET = 93
+const JSON_CH_a = 97
+const JSON_CH_b = 98
+const JSON_CH_e = 101
+const JSON_CH_f = 102
+const JSON_CH_l = 108
+const JSON_CH_n = 110
+const JSON_CH_r = 114
+const JSON_CH_t = 116
+const JSON_CH_u = 117
+const JSON_CH_LBRACE = 123
+const JSON_CH_RBRACE = 125
+
+repr(c) struct JsonCursor:
+    source: mutable any u8&
+    source_len: mutable usize
+    pos: mutable usize
+
+
+def json_new_cursor(source: any u8&) -> JsonCursor:
+    out: mutable JsonCursor = zeroed
+    out.source <- source
+    out.source_len <- ctx_stage0_runtime_strlen(source)
+    out.pos <- 0u
+    return out
+
+
+def json_char_at(source: any u8&, source_len: usize, index: usize) -> i64:
+    if index >= source_len:
+        return JSON_CH_NUL
+    return source[index].i64()
+
+
+def json_cur_char(cursor: any JsonCursor&) -> i64:
+    return json_char_at(cursor.source, cursor.source_len, cursor.pos)
+
+
+def json_peek_char(cursor: any JsonCursor&, offset: usize) -> i64:
+    return json_char_at(cursor.source, cursor.source_len, cursor.pos + offset)
+
+
+def json_advance_char(cursor: any JsonCursor&) -> i64:
+    ch: i64 = json_cur_char(cursor)
+    if cursor.pos < cursor.source_len:
+        cursor.pos <- cursor.pos + 1u
+    return ch
+
+
+def json_is_digit(ch: i64) -> bool:
+    return ch >= JSON_CH_0 and ch <= JSON_CH_9
+
+
+def json_is_hex_digit(ch: i64) -> bool:
+    return json_is_digit(ch) or (ch >= 65 and ch <= 70) or (ch >= JSON_CH_a and ch <= JSON_CH_f)
+
+
+def json_skip_ws(cursor: any JsonCursor&):
+    scanning: mutable bool = true
+    while scanning:
+        ch: i64 = json_cur_char(cursor)
+        if ch == JSON_CH_SPACE or ch == JSON_CH_TAB or ch == JSON_CH_NL or ch == JSON_CH_CR:
+            _ = json_advance_char(cursor)
+        else:
+            scanning <- false
+
+
+def json_expect_literal(cursor: any JsonCursor&, literal: any u8&) -> bool:
+    literal_len: usize = ctx_stage0_runtime_strlen(literal)
+    if cursor.pos + literal_len > cursor.source_len:
+        return false
+
+    i: mutable usize = 0u
+    while i < literal_len:
+        if cursor.source[cursor.pos + i].i64() != literal[i].i64():
+            return false
+        i <- i + 1u
+
+    cursor.pos <- cursor.pos + literal_len
+    return true
+
+
+def json_parse_string(cursor: any JsonCursor&) -> i64:
+    if json_advance_char(cursor) != JSON_CH_DQUOTE:
+        return -1
+
+    length: mutable i64 = 0
+    done: mutable bool = false
+    while not done:
+        if cursor.pos >= cursor.source_len:
+            return -1
+
+        ch: i64 = json_advance_char(cursor)
+        if ch == JSON_CH_DQUOTE:
+            return 17 + length
+
+        if ch == JSON_CH_BSLASH:
+            if cursor.pos >= cursor.source_len:
+                return -1
+            esc: i64 = json_advance_char(cursor)
+            if esc == JSON_CH_u:
+                digits: mutable usize = 0u
+                while digits < 4u:
+                    if cursor.pos >= cursor.source_len or not json_is_hex_digit(json_cur_char(cursor)):
+                        return -1
+                    _ = json_advance_char(cursor)
+                    digits <- digits + 1u
+            length <- length + 1
+        elif ch == JSON_CH_NL or ch == JSON_CH_CR:
+            return -1
+        else:
+            length <- length + 1
+
+    return -1
+
+
+def json_parse_number(cursor: any JsonCursor&) -> i64:
+    start: usize = cursor.pos
+    ch: mutable i64 = json_cur_char(cursor)
+    if ch == JSON_CH_MINUS:
+        _ = json_advance_char(cursor)
+
+    ch <- json_cur_char(cursor)
+    if ch == JSON_CH_0:
+        _ = json_advance_char(cursor)
+    elif json_is_digit(ch):
+        while json_is_digit(json_cur_char(cursor)):
+            _ = json_advance_char(cursor)
+    else:
+        return -1
+
+    if json_cur_char(cursor) == JSON_CH_DOT:
+        _ = json_advance_char(cursor)
+        if not json_is_digit(json_cur_char(cursor)):
+            return -1
+        while json_is_digit(json_cur_char(cursor)):
+            _ = json_advance_char(cursor)
+
+    ch <- json_cur_char(cursor)
+    if ch == JSON_CH_e or ch == JSON_CH_E:
+        _ = json_advance_char(cursor)
+        ch <- json_cur_char(cursor)
+        if ch == JSON_CH_PLUS or ch == JSON_CH_MINUS:
+            _ = json_advance_char(cursor)
+        if not json_is_digit(json_cur_char(cursor)):
+            return -1
+        while json_is_digit(json_cur_char(cursor)):
+            _ = json_advance_char(cursor)
+
+    return 23 + (cursor.pos - start).i64()
+
+
+def json_parse_array(cursor: any JsonCursor&) -> i64:
+    if json_advance_char(cursor) != JSON_CH_LBRACKET:
+        return -1
+
+    json_skip_ws(cursor)
+    if json_cur_char(cursor) == JSON_CH_RBRACKET:
+        _ = json_advance_char(cursor)
+        return 43
+
+    total: mutable i64 = 43
+    done: mutable bool = false
+    while not done:
+        item: i64 = json_parse_value(cursor)
+        if item < 0:
+            return -1
+        total <- total + item
+        json_skip_ws(cursor)
+
+        ch: i64 = json_cur_char(cursor)
+        if ch == JSON_CH_COMMA:
+            _ = json_advance_char(cursor)
+            json_skip_ws(cursor)
+        elif ch == JSON_CH_RBRACKET:
+            _ = json_advance_char(cursor)
+            done <- true
+        else:
+            return -1
+
+    return total
+
+
+def json_parse_object(cursor: any JsonCursor&) -> i64:
+    if json_advance_char(cursor) != JSON_CH_LBRACE:
+        return -1
+
+    json_skip_ws(cursor)
+    if json_cur_char(cursor) == JSON_CH_RBRACE:
+        _ = json_advance_char(cursor)
+        return 47
+
+    total: mutable i64 = 47
+    done: mutable bool = false
+    while not done:
+        key: i64 = json_parse_string(cursor)
+        if key < 0:
+            return -1
+        total <- total + key
+        json_skip_ws(cursor)
+        if json_advance_char(cursor) != JSON_CH_COLON:
+            return -1
+        json_skip_ws(cursor)
+
+        value: i64 = json_parse_value(cursor)
+        if value < 0:
+            return -1
+        total <- total + value
+        json_skip_ws(cursor)
+
+        ch: i64 = json_cur_char(cursor)
+        if ch == JSON_CH_COMMA:
+            _ = json_advance_char(cursor)
+            json_skip_ws(cursor)
+        elif ch == JSON_CH_RBRACE:
+            _ = json_advance_char(cursor)
+            done <- true
+        else:
+            return -1
+
+    return total
+
+
+def json_parse_true(cursor: any JsonCursor&) -> i64:
+    if json_expect_literal(cursor, "true".cast[any u8&]()):
+        return 31
+    return -1
+
+
+def json_parse_false(cursor: any JsonCursor&) -> i64:
+    if json_expect_literal(cursor, "false".cast[any u8&]()):
+        return 37
+    return -1
+
+
+def json_parse_null(cursor: any JsonCursor&) -> i64:
+    if json_expect_literal(cursor, "null".cast[any u8&]()):
+        return 41
+    return -1
+
+
+def json_parse_value(cursor: any JsonCursor&) -> i64:
+    json_skip_ws(cursor)
+    ch: i64 = json_cur_char(cursor)
+    if ch == JSON_CH_DQUOTE:
+        return json_parse_string(cursor)
+    if ch == JSON_CH_LBRACE:
+        return json_parse_object(cursor)
+    if ch == JSON_CH_LBRACKET:
+        return json_parse_array(cursor)
+    if ch == JSON_CH_t:
+        return json_parse_true(cursor)
+    if ch == JSON_CH_f:
+        return json_parse_false(cursor)
+    if ch == JSON_CH_n:
+        return json_parse_null(cursor)
+    if ch == JSON_CH_MINUS or json_is_digit(ch):
+        return json_parse_number(cursor)
+    return -1
+
+
+def json_parser_checksum_impl(source: any u8&) -> i64:
+    cursor: mutable JsonCursor = json_new_cursor(source)
+    json_skip_ws((&cursor).cast[any JsonCursor&]())
+    checksum: i64 = json_parse_value((&cursor).cast[any JsonCursor&]())
+    if checksum < 0:
+        return -1
+    json_skip_ws((&cursor).cast[any JsonCursor&]())
+    if cursor.pos != cursor.source_len:
+        return -1
+    return checksum
+
+
+def json_expect_checksum(source: static u8&, expected: i64) -> bool:
+    return json_parser_checksum_impl(source.cast[any u8&]()) == expected
+
+
+def json_expect_invalid(source: static u8&) -> bool:
+    return json_parser_checksum_impl(source.cast[any u8&]()) < 0
+
+
+def json_parser_parity_suite_impl() -> int:
+    if not json_expect_checksum("{}", 47):
+        return 0
+    if not json_expect_checksum("[]", 43):
+        return 0
+    if not json_expect_checksum("[1,2,3]", 115):
+        return 0
+    if not json_expect_checksum("[true,false,null]", 152):
+        return 0
+    if not json_expect_checksum("[-12,3.5,null]", 136):
+        return 0
+    if not json_expect_invalid("[1,2}"):
+        return 0
+    if not json_expect_invalid("[1,,2]"):
+        return 0
+    return 1
+
+
+export func json_parser_parity_suite() -> int = json_parser_parity_suite_impl
+export func json_parser_checksum(source: any u8&) -> i64 = json_parser_checksum_impl
