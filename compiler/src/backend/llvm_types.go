@@ -30,6 +30,7 @@ type packedEnumABIMode int
 
 const (
 	packedEnumABIRowHandle packedEnumABIMode = iota
+	packedEnumABIWordHandle
 )
 
 func isVoidRefLikeType(t semantic.Type) bool {
@@ -405,6 +406,8 @@ func (g *llvmGenerator) lowerPackedEnumType(enumType *semantic.EnumType) (C.LLVM
 	switch g.packedEnumABI {
 	case packedEnumABIRowHandle:
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
+	case packedEnumABIWordHandle:
+		return g.lowerBuiltin("uintptr")
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedEnumABI)
 	}
@@ -416,7 +419,9 @@ func (g *llvmGenerator) lowerPackedEnumStoreType(storeType *semantic.PackedEnumS
 	}
 	switch g.packedEnumABI {
 	case packedEnumABIRowHandle:
-		return C.LLVMPointerTypeInContext(g.context, 0), nil
+		fallthrough
+	case packedEnumABIWordHandle:
+		return g.ensurePackedEnumStoreCarrierType(storeType)
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedEnumABI)
 	}
@@ -428,6 +433,8 @@ func (g *llvmGenerator) ensurePackedEnumStorageType(enumType *semantic.EnumType)
 	}
 	switch g.packedEnumABI {
 	case packedEnumABIRowHandle:
+		fallthrough
+	case packedEnumABIWordHandle:
 		return g.ensurePackedEnumRowType(enumType.Name, enumType)
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedEnumABI)
@@ -440,6 +447,8 @@ func (g *llvmGenerator) packedEnumPayloadFieldIndex(enumType *semantic.EnumType)
 	}
 	switch g.packedEnumABI {
 	case packedEnumABIRowHandle:
+		fallthrough
+	case packedEnumABIWordHandle:
 		payloadIndex := 1
 		if enumType.Decl != nil {
 			payloadIndex += len(enumType.Decl.Common)
@@ -448,6 +457,34 @@ func (g *llvmGenerator) packedEnumPayloadFieldIndex(enumType *semantic.EnumType)
 	default:
 		return 0, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedEnumABI)
 	}
+}
+
+func (g *llvmGenerator) ensurePackedEnumStoreCarrierType(storeType *semantic.PackedEnumStoreType) (C.LLVMTypeRef, error) {
+	if storeType == nil {
+		return nil, fmt.Errorf("missing packed enum store type")
+	}
+	name := packedEnumStoreCarrierName(storeType)
+	ty, err := g.ensureNamedStructType(name)
+	if err != nil {
+		return nil, err
+	}
+	if g.structBodies[name] {
+		return ty, nil
+	}
+	fields := []C.LLVMTypeRef{C.LLVMPointerTypeInContext(g.context, 0)}
+	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	g.structBodies[name] = true
+	return ty, nil
+}
+
+func packedEnumStoreCarrierName(storeType *semantic.PackedEnumStoreType) string {
+	if storeType == nil {
+		return "PackedEnumStore"
+	}
+	if storeType.Enum != nil && storeType.Enum.Name != "" {
+		return sanitizeIdentifier(storeType.Enum.Name) + "__Store"
+	}
+	return sanitizeIdentifier(storeType.Name)
 }
 
 func (g *llvmGenerator) lowerBuiltin(name string) (C.LLVMTypeRef, error) {

@@ -860,6 +860,13 @@ func (s *functionState) loadEnumTag(enumPtr C.LLVMValueRef, enumType *semantic.E
 		}
 		return C.LLVMBuildLoad2(s.builder, tagType, enumPtr, cStringFree("match.tag.value")), nil
 	}
+	if enumType != nil && enumType.Packed {
+		var err error
+		enumPtr, err = s.decodePackedEnumHandle(enumPtr, enumType)
+		if err != nil {
+			return nil, err
+		}
+	}
 	enumLLVMType, err := s.loweredEnumStorageType(enumType)
 	if err != nil {
 		return nil, err
@@ -875,6 +882,13 @@ func (s *functionState) loadEnumTag(enumPtr C.LLVMValueRef, enumType *semantic.E
 func (s *functionState) loadEnumVariantPayload(enumPtr C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant) ([]C.LLVMValueRef, error) {
 	if variant == nil || len(variant.Payload) == 0 {
 		return nil, nil
+	}
+	if enumType != nil && enumType.Packed {
+		var err error
+		enumPtr, err = s.decodePackedEnumHandle(enumPtr, enumType)
+		if err != nil {
+			return nil, err
+		}
 	}
 	payloadPtr, err := s.enumPayloadPtr(enumPtr, enumType)
 	if err != nil {

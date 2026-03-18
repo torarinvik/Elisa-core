@@ -1181,10 +1181,12 @@ def fold() -> int:
 	}
 
 	checks := []string{
+		"%Expr__Store = type { ptr }",
 		"%Expr = type { i32, [2 x i64] }",
 		"define i64 @fold()",
 		"call ptr @new_region(i64 1024)",
 		"call ptr @arena_alloc(ptr",
+		"extractvalue %Expr__Store",
 		"load i32, ptr",
 		"load { ptr, ptr }, ptr",
 	}
@@ -1193,7 +1195,7 @@ def fold() -> int:
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
-	if strings.Contains(output, "extractvalue %Expr") {
+	if strings.Contains(output, "extractvalue %Expr,") {
 		t.Fatalf("expected packed enum matching to load through handles rather than extract aggregate enum values, got:\n%s", output)
 	}
 }
@@ -1299,7 +1301,7 @@ def read(node: Expr) -> int:
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
-	if strings.Contains(output, "extractvalue %Expr") {
+	if strings.Contains(output, "extractvalue %Expr,") {
 		t.Fatalf("expected packed common field access to lower through the row handle, got:\n%s", output)
 	}
 }

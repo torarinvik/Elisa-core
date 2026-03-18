@@ -592,6 +592,38 @@ func (s *functionState) emitEnumCompareExpr(op lexer.TokenKind, enumType *semant
 	return equal, resultType, nil
 }
 
+func (s *functionState) encodePackedEnumHandle(rowPtr C.LLVMValueRef, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
+	if enumType == nil || !enumType.Packed {
+		return nil, fmt.Errorf("missing packed enum handle metadata")
+	}
+	switch s.g.packedEnumABI {
+	case packedEnumABIRowHandle:
+		return rowPtr, nil
+	case packedEnumABIWordHandle:
+		handleType, err := s.g.lowerPackedEnumType(enumType)
+		if err != nil {
+			return nil, err
+		}
+		return C.LLVMBuildPtrToInt(s.builder, rowPtr, handleType, cStringFree("packed.handle.encode")), nil
+	default:
+		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedEnumABI)
+	}
+}
+
+func (s *functionState) decodePackedEnumHandle(handleValue C.LLVMValueRef, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
+	if enumType == nil || !enumType.Packed {
+		return nil, fmt.Errorf("missing packed enum handle metadata")
+	}
+	switch s.g.packedEnumABI {
+	case packedEnumABIRowHandle:
+		return handleValue, nil
+	case packedEnumABIWordHandle:
+		return C.LLVMBuildIntToPtr(s.builder, handleValue, C.LLVMPointerTypeInContext(s.g.context, 0), cStringFree("packed.handle.decode")), nil
+	default:
+		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedEnumABI)
+	}
+}
+
 func (s *functionState) enumPayloadWordCount(enumType *semantic.EnumType) (uint64, error) {
 	if enumType == nil {
 		return 0, nil
@@ -1249,11 +1281,37 @@ func (s *functionState) emitPackedStoreValue(arenaExpr ast.Expr, storeType *sema
 	}
 	switch s.g.packedEnumABI {
 	case packedEnumABIRowHandle:
+		fallthrough
+	case packedEnumABIWordHandle:
 		arenaPtr, _, err := s.emitAddressOrTemp(arenaExpr)
 		if err != nil {
 			return nil, err
 		}
-		return arenaPtr, nil
+		storeLLVMType, err := s.g.lowerPackedEnumStoreType(storeType)
+		if err != nil {
+			return nil, err
+		}
+		storeValue := C.LLVMGetUndef(storeLLVMType)
+		storeValue = C.LLVMBuildInsertValue(s.builder, storeValue, arenaPtr, 0, cStringFree("packed.store.arena"))
+		return storeValue, nil
+	default:
+		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedEnumABI)
+	}
+}
+
+func (s *functionState) emitPackedStoreArenaValue(storeValue C.LLVMValueRef, storeType *semantic.PackedEnumStoreType) (C.LLVMValueRef, error) {
+	if storeType == nil {
+		return nil, fmt.Errorf("missing packed enum store type")
+	}
+	switch s.g.packedEnumABI {
+	case packedEnumABIRowHandle:
+		fallthrough
+	case packedEnumABIWordHandle:
+		_, err := s.g.lowerPackedEnumStoreType(storeType)
+		if err != nil {
+			return nil, err
+		}
+		return C.LLVMBuildExtractValue(s.builder, storeValue, 0, cStringFree("packed.store.arena.value")), nil
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedEnumABI)
 	}
@@ -2047,7 +2105,11 @@ func (s *functionState) emitPackedEnumConstructorAlloc(storeValue C.LLVMValueRef
 			C.LLVMBuildStore(s.builder, aggregate, payloadPtr)
 		}
 	}
-	return allocPtr, enumType, nil
+	encodedValue, err := s.encodePackedEnumHandle(allocPtr, enumType)
+	if err != nil {
+		return nil, nil, err
+	}
+	return encodedValue, enumType, nil
 }
 
 func (s *functionState) emitPackedEnumStorageAlloc(storeValue C.LLVMValueRef, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
@@ -2060,6 +2122,16 @@ func (s *functionState) emitPackedEnumStorageAlloc(storeValue C.LLVMValueRef, en
 	}
 	switch s.g.packedEnumABI {
 	case packedEnumABIRowHandle:
+		fallthrough
+	case packedEnumABIWordHandle:
+		storeType := enumType.StoreType
+		if storeType == nil {
+			return nil, fmt.Errorf("packed enum %s is missing store metadata", enumType.Name)
+		}
+		arenaValue, err := s.emitPackedStoreArenaValue(storeValue, storeType)
+		if err != nil {
+			return nil, err
+		}
 		sizeBytes, err := s.g.abiSizeOfLLVMType(storageType)
 		if err != nil {
 			return nil, err
@@ -2082,7 +2154,7 @@ func (s *functionState) emitPackedEnumStorageAlloc(storeValue C.LLVMValueRef, en
 		if err != nil {
 			return nil, err
 		}
-		return s.buildCall(llvmFnType, callee, []C.LLVMValueRef{storeValue, sizeValue}, "packed.alloc"), nil
+		return s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, sizeValue}, "packed.alloc"), nil
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedEnumABI)
 	}

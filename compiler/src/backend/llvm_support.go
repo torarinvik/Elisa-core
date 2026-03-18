@@ -72,8 +72,30 @@ func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, s
 	if err != nil {
 		return nil, nil, err
 	}
+	if enumType, ok := containerType.(*semantic.EnumType); ok && enumType.Packed {
+		objPtr, err = s.packedEnumStoragePtrFromExprValue(objPtr, objType, enumType)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 	fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, objPtr, C.unsigned(index), cStringFree(expr.Field))
 	return fieldPtr, fieldType, nil
+}
+
+func (s *functionState) packedEnumStoragePtrFromExprValue(value C.LLVMValueRef, exprType semantic.Type, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
+	if enumType == nil || !enumType.Packed {
+		return value, nil
+	}
+	if refType, ok := exprType.(*semantic.RefType); ok {
+		if refEnum, ok := refType.Elem.(*semantic.EnumType); ok && refEnum == enumType {
+			handleValue, err := s.loadValue(value, enumType, "packed.enum.handle")
+			if err != nil {
+				return nil, err
+			}
+			return s.decodePackedEnumHandle(handleValue, enumType)
+		}
+	}
+	return s.decodePackedEnumHandle(value, enumType)
 }
 
 func (s *functionState) emitAddressOrTemp(expr ast.Expr) (C.LLVMValueRef, semantic.Type, error) {
