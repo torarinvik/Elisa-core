@@ -61,8 +61,12 @@ func (p *Parser) parseMatch() *ast.MatchStmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_MATCH)
 	value := p.parseExpr()
+	var store ast.Expr
+	if p.match(lexer.TOKEN_IN) {
+		store = p.parseExpr()
+	}
 	arms := p.parseMatchArms()
-	return &ast.MatchStmt{Position: pos, Value: value, Arms: arms}
+	return &ast.MatchStmt{Position: pos, Value: value, Store: store, Arms: arms}
 }
 
 func (p *Parser) parseMatchArms() []ast.MatchArm {

@@ -1123,6 +1123,204 @@ def next_kind() -> TokenKind:
 	}
 }
 
+func TestGenerateLLVMIRLowersPackedEnumStoresAllocationsAndMatches(t *testing.T) {
+	src := `packed enum Expr:
+	Lit(int)
+	Add(Expr, Expr)
+
+def fold() -> int:
+	region scratch(1024u)
+	store: Expr.Store = Expr.Store(scratch)
+	left: Expr = new[store] Expr.Lit(3)
+	right: Expr = new[store] Expr.Lit(4)
+	node: Expr = new[store] Expr.Add(left, right)
+	return match node in store:
+		Expr.Lit(value):
+			value
+		Expr.Add(lhs, rhs):
+			1 if lhs != rhs else 0
+`
+	result := parseAndAnalyze(t, "backend_packed_enum_match.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%Expr = type { i32, [2 x i64] }",
+		"define i64 @fold()",
+		"call ptr @new_region(i64 1024)",
+		"call ptr @arena_alloc(ptr",
+		"load i32, ptr",
+		"load { ptr, ptr }, ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "extractvalue %Expr") {
+		t.Fatalf("expected packed enum matching to load through handles rather than extract aggregate enum values, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRLowersPayloadlessPackedEnumsAsHandles(t *testing.T) {
+	src := `packed enum Token:
+	Ident
+	Region
+
+def differs(left: Token, right: Token) -> bool:
+	return left != right
+`
+	result := parseAndAnalyze(t, "backend_packed_payloadless_enum.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"define i1 @differs(ptr",
+		"icmp ne ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	for _, bad := range []string{"ret i32", "icmp ne i32"} {
+		if strings.Contains(output, bad) {
+			t.Fatalf("expected payloadless packed enums to stay handle-backed and avoid %q, got:\n%s", bad, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersPackedCommonFieldAccess(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+
+def read(node: Expr) -> int:
+	return node.span
+`
+	result := parseAndAnalyze(t, "backend_packed_common_field.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%Expr = type { i32, i64, [1 x i64] }",
+		"define i64 @read(ptr",
+		"getelementptr inbounds",
+		"%Expr, ptr",
+		"load i64, ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "extractvalue %Expr") {
+		t.Fatalf("expected packed common field access to lower through the row handle, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRLowersPackedCommonFieldInitialization(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+
+def build() -> Expr:
+	region scratch(256u)
+	store: Expr.Store = Expr.Store(scratch)
+	return new[store] Expr.Int(span: 9, value: 5)
+`
+	result := parseAndAnalyze(t, "backend_packed_common_field_init.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%Expr = type { i32, i64, [1 x i64] }",
+		"define ptr @build()",
+		"store i64 9, ptr %packed.enum.common.ptr",
+		"store i64 5, ptr %enum.payload.ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "unknown enum constructor") {
+		t.Fatalf("expected packed common-field initialization to lower successfully, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRLowersPayloadlessPackedCommonFieldInitialization(t *testing.T) {
+	src := `packed enum Token:
+	common:
+		span: int
+	Region
+
+def build() -> Token:
+	region scratch(256u)
+	store: Token.Store = Token.Store(scratch)
+	return new[store] Token.Region(span: 4)
+`
+	result := parseAndAnalyze(t, "backend_payloadless_packed_common_init.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%Token = type { i32, i64 }",
+		"define ptr @build()",
+		"store i64 4, ptr %packed.enum.common.ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersPayloadlessPackedAllocationFromQualifiedConstructor(t *testing.T) {
+	src := `packed enum Token:
+	Ident
+	Region
+
+def build() -> Token:
+	region scratch(256u)
+	store: Token.Store = Token.Store(scratch)
+	return new[store] Token.Region
+`
+	result := parseAndAnalyze(t, "backend_payloadless_packed_alloc.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%Token = type { i32 }",
+		"define ptr @build()",
+		"call ptr @new_region(i64 256)",
+		"call ptr @arena_alloc(ptr",
+		"store i32 1, ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "unknown enum constructor") {
+		t.Fatalf("expected payloadless packed allocation to lower successfully, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersDictSurfaceTypesViaDynDictCarrier(t *testing.T) {
 	src := `extern take_runtime(values: DynDict[i32]) -> void
 extern make_runtime() -> DynDict[i32]

@@ -153,17 +153,40 @@ func (p *Parser) parseEnumDeclRest(pos lexer.Pos, packed bool) *ast.EnumDecl {
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
 
+	commonFields := make([]ast.FieldDecl, 0)
 	variants := make([]ast.EnumVariantDecl, 0)
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 		p.skipNewlines()
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
 		}
+		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "common" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
+			commonFields = append(commonFields, p.parseEnumCommonFields()...)
+			continue
+		}
 		variants = append(variants, p.parseEnumVariantDecl())
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.EnumDecl{Position: pos, Name: name, Packed: packed, Variants: variants}
+	return &ast.EnumDecl{Position: pos, Name: name, Packed: packed, Common: commonFields, Variants: variants}
+}
+
+func (p *Parser) parseEnumCommonFields() []ast.FieldDecl {
+	p.expect(lexer.TOKEN_IDENT)
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+
+	fields := make([]ast.FieldDecl, 0)
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		fields = append(fields, p.parseFieldDecl())
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	return fields
 }
 
 func (p *Parser) parseEnumVariantDecl() ast.EnumVariantDecl {

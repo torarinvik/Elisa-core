@@ -54,7 +54,12 @@ func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, s
 	if err != nil {
 		return nil, nil, err
 	}
-	containerLLVMType, err := s.g.lowerType(containerType)
+	var containerLLVMType C.LLVMTypeRef
+	if enumType, ok := containerType.(*semantic.EnumType); ok && enumType.Packed {
+		containerLLVMType, err = s.loweredEnumStorageType(enumType)
+	} else {
+		containerLLVMType, err = s.g.lowerType(containerType)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -182,6 +187,16 @@ func (s *functionState) emitRuntimePointerIndexedAddressWithType(containerPtr C.
 	indices := []C.LLVMValueRef{indexValue}
 	ptr := C.LLVMBuildGEP2(s.builder, elemLLVMType, dataPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("idx.ptr"))
 	return ptr, elemType, nil
+}
+
+func (s *functionState) loweredEnumStorageType(enumType *semantic.EnumType) (C.LLVMTypeRef, error) {
+	if enumType == nil {
+		return nil, fmt.Errorf("missing enum type")
+	}
+	if enumType.Packed {
+		return s.g.ensurePackedEnumRowType(enumType.Name, enumType)
+	}
+	return s.g.lowerType(enumType)
 }
 
 func runtimeIndexedElemType(t semantic.Type) (semantic.Type, bool) {
@@ -981,6 +996,22 @@ func (g *llvmGenerator) fieldInfo(objType semantic.Type, fieldName string) (sema
 	if ref, ok := objType.(*semantic.RefType); ok {
 		pointerLike = true
 		objType = ref.Elem
+	}
+	if enumType, ok := objType.(*semantic.EnumType); ok && enumType.Packed {
+		if enumType.Decl == nil {
+			return nil, 0, nil, false, fmt.Errorf("packed enum %s is missing declaration metadata", enumType.Name)
+		}
+		for i, fieldDecl := range enumType.Decl.Common {
+			if fieldDecl.Name != fieldName {
+				continue
+			}
+			field, ok := enumType.Common[fieldName]
+			if !ok {
+				return nil, 0, nil, false, fmt.Errorf("missing packed enum common field %s.%s", enumType.Name, fieldName)
+			}
+			return field.Type, 1 + i, enumType, true, nil
+		}
+		return nil, 0, nil, false, fmt.Errorf("packed enum %s has no common field %s", enumType.Name, fieldName)
 	}
 	if runtimeBacked := g.runtimeBackedStructType(objType); runtimeBacked != nil {
 		objType = runtimeBacked

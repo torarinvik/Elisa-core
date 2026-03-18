@@ -34,6 +34,7 @@ type EnumDecl struct {
 	Position lexer.Pos
 	Name     string
 	Packed   bool
+	Common   []FieldDecl
 	Variants []EnumVariantDecl
 }
 
@@ -355,15 +356,16 @@ type UnwrapElseExpr struct {
 	Fallback Expr
 }
 
-type RegionAllocExpr struct {
+type AllocExpr struct {
 	Position lexer.Pos
-	Region   string
+	Owner    Expr
 	Value    Expr
 }
 
 type MatchExpr struct {
 	Position lexer.Pos
 	Value    Expr
+	Store    Expr
 	Arms     []MatchArm
 }
 
@@ -449,6 +451,7 @@ type WhileStmt struct {
 type MatchStmt struct {
 	Position lexer.Pos
 	Value    Expr
+	Store    Expr
 	Arms     []MatchArm
 }
 
@@ -541,30 +544,30 @@ func (n *ErrorSetExpr) Pos() lexer.Pos    { return n.Position }
 func (n *ErrorUnionTypeExpr) Pos() lexer.Pos {
 	return n.Position
 }
-func (n *Ident) Pos() lexer.Pos           { return n.Position }
-func (n *IntLit) Pos() lexer.Pos          { return n.Position }
-func (n *StringLit) Pos() lexer.Pos       { return n.Position }
-func (n *BoolLit) Pos() lexer.Pos         { return n.Position }
-func (n *NullLit) Pos() lexer.Pos         { return n.Position }
-func (n *ZeroedLit) Pos() lexer.Pos       { return n.Position }
-func (n *BinaryExpr) Pos() lexer.Pos      { return n.Position }
-func (n *UnaryExpr) Pos() lexer.Pos       { return n.Position }
-func (n *CallExpr) Pos() lexer.Pos        { return n.Position }
-func (n *FieldExpr) Pos() lexer.Pos       { return n.Position }
-func (n *IndexExpr) Pos() lexer.Pos       { return n.Position }
-func (n *SliceExpr) Pos() lexer.Pos       { return n.Position }
-func (n *ListLitExpr) Pos() lexer.Pos     { return n.Position }
-func (n *CastExpr) Pos() lexer.Pos        { return n.Position }
-func (n *SizeofExpr) Pos() lexer.Pos      { return n.Position }
-func (n *TernaryExpr) Pos() lexer.Pos     { return n.Position }
-func (n *AddrOfExpr) Pos() lexer.Pos      { return n.Position }
-func (n *StructLitExpr) Pos() lexer.Pos   { return n.Position }
-func (n *ParenExpr) Pos() lexer.Pos       { return n.Position }
-func (n *RaiseExpr) Pos() lexer.Pos       { return n.Position }
-func (n *TryExpr) Pos() lexer.Pos         { return n.Position }
-func (n *UnwrapElseExpr) Pos() lexer.Pos  { return n.Position }
-func (n *RegionAllocExpr) Pos() lexer.Pos { return n.Position }
-func (n *MatchExpr) Pos() lexer.Pos       { return n.Position }
+func (n *Ident) Pos() lexer.Pos          { return n.Position }
+func (n *IntLit) Pos() lexer.Pos         { return n.Position }
+func (n *StringLit) Pos() lexer.Pos      { return n.Position }
+func (n *BoolLit) Pos() lexer.Pos        { return n.Position }
+func (n *NullLit) Pos() lexer.Pos        { return n.Position }
+func (n *ZeroedLit) Pos() lexer.Pos      { return n.Position }
+func (n *BinaryExpr) Pos() lexer.Pos     { return n.Position }
+func (n *UnaryExpr) Pos() lexer.Pos      { return n.Position }
+func (n *CallExpr) Pos() lexer.Pos       { return n.Position }
+func (n *FieldExpr) Pos() lexer.Pos      { return n.Position }
+func (n *IndexExpr) Pos() lexer.Pos      { return n.Position }
+func (n *SliceExpr) Pos() lexer.Pos      { return n.Position }
+func (n *ListLitExpr) Pos() lexer.Pos    { return n.Position }
+func (n *CastExpr) Pos() lexer.Pos       { return n.Position }
+func (n *SizeofExpr) Pos() lexer.Pos     { return n.Position }
+func (n *TernaryExpr) Pos() lexer.Pos    { return n.Position }
+func (n *AddrOfExpr) Pos() lexer.Pos     { return n.Position }
+func (n *StructLitExpr) Pos() lexer.Pos  { return n.Position }
+func (n *ParenExpr) Pos() lexer.Pos      { return n.Position }
+func (n *RaiseExpr) Pos() lexer.Pos      { return n.Position }
+func (n *TryExpr) Pos() lexer.Pos        { return n.Position }
+func (n *UnwrapElseExpr) Pos() lexer.Pos { return n.Position }
+func (n *AllocExpr) Pos() lexer.Pos      { return n.Position }
+func (n *MatchExpr) Pos() lexer.Pos      { return n.Position }
 func (n *MatchWildcardPattern) Pos() lexer.Pos {
 	return n.Position
 }
@@ -631,7 +634,7 @@ func (*ParenExpr) nodeTag()            {}
 func (*RaiseExpr) nodeTag()            {}
 func (*TryExpr) nodeTag()              {}
 func (*UnwrapElseExpr) nodeTag()       {}
-func (*RegionAllocExpr) nodeTag()      {}
+func (*AllocExpr) nodeTag()            {}
 func (*MatchExpr) nodeTag()            {}
 func (*MatchWildcardPattern) nodeTag() {}
 func (*MatchBindPattern) nodeTag()     {}
@@ -705,7 +708,7 @@ func (*MatchExpr) exprTag()                    {}
 func (*MatchStmt) stmtTag()                    {}
 func (*TryExpr) exprTag()                      {}
 func (*UnwrapElseExpr) exprTag()               {}
-func (*RegionAllocExpr) exprTag()              {}
+func (*AllocExpr) exprTag()                    {}
 
 func (*AssignStmt) stmtTag()      {}
 func (*AugAssignStmt) stmtTag()   {}

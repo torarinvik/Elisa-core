@@ -481,6 +481,11 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 	if !ok {
 		return fmt.Errorf("match requires an enum value")
 	}
+	if stmt.Store != nil {
+		if _, _, err := s.emitExpr(stmt.Store, nil); err != nil {
+			return err
+		}
+	}
 	enumValue, _, err := s.emitExpr(stmt.Value, enumType)
 	if err != nil {
 		return err
@@ -537,6 +542,11 @@ func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, sema
 	enumType, ok := s.exprType(expr.Value).(*semantic.EnumType)
 	if !ok {
 		return nil, nil, fmt.Errorf("match requires an enum value")
+	}
+	if expr.Store != nil {
+		if _, _, err := s.emitExpr(expr.Store, nil); err != nil {
+			return nil, nil, err
+		}
 	}
 	enumValue, _, err := s.emitExpr(expr.Value, enumType)
 	if err != nil {
@@ -765,6 +775,9 @@ func (s *functionState) resolveMatchPatternArgs(pattern *ast.MatchVariantPattern
 }
 
 func (s *functionState) extractEnumTagValue(enumValue C.LLVMValueRef, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
+	if enumType != nil && enumType.Packed {
+		return s.loadEnumTag(enumValue, enumType)
+	}
 	if enumIsTagOnly(enumType) {
 		return enumValue, nil
 	}
@@ -774,6 +787,9 @@ func (s *functionState) extractEnumTagValue(enumValue C.LLVMValueRef, enumType *
 func (s *functionState) extractEnumVariantPayloadValues(enumValue C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant) ([]C.LLVMValueRef, error) {
 	if variant == nil || len(variant.Payload) == 0 {
 		return nil, nil
+	}
+	if enumType != nil && enumType.Packed {
+		return s.loadEnumVariantPayload(enumValue, enumType, variant)
 	}
 	enumPtr, err := s.emitStackTempValue(enumValue, enumType, "match.payload.tmp")
 	if err != nil {
@@ -799,14 +815,14 @@ func matchIsExhaustive(enumType *semantic.EnumType, arms []ast.MatchArm) bool {
 }
 
 func (s *functionState) loadEnumTag(enumPtr C.LLVMValueRef, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
-	if enumIsTagOnly(enumType) {
+	if enumType != nil && !enumType.Packed && enumIsTagOnly(enumType) {
 		tagType, err := s.g.lowerBuiltin("u32")
 		if err != nil {
 			return nil, err
 		}
 		return C.LLVMBuildLoad2(s.builder, tagType, enumPtr, cStringFree("match.tag.value")), nil
 	}
-	enumLLVMType, err := s.g.lowerType(enumType)
+	enumLLVMType, err := s.loweredEnumStorageType(enumType)
 	if err != nil {
 		return nil, err
 	}
@@ -846,11 +862,15 @@ func (s *functionState) enumPayloadPtr(enumPtr C.LLVMValueRef, enumType *semanti
 	if enumIsTagOnly(enumType) {
 		return nil, fmt.Errorf("enum %s has no lowered payload storage", enumType.Name)
 	}
-	enumLLVMType, err := s.g.lowerType(enumType)
+	enumLLVMType, err := s.loweredEnumStorageType(enumType)
 	if err != nil {
 		return nil, err
 	}
-	return C.LLVMBuildStructGEP2(s.builder, enumLLVMType, enumPtr, 1, cStringFree("enum.payload.ptr")), nil
+	payloadIndex := 1
+	if enumType != nil && enumType.Packed && enumType.Decl != nil {
+		payloadIndex += len(enumType.Decl.Common)
+	}
+	return C.LLVMBuildStructGEP2(s.builder, enumLLVMType, enumPtr, C.unsigned(payloadIndex), cStringFree("enum.payload.ptr")), nil
 }
 
 func (s *functionState) enumTagConstant(tag uint32) (C.LLVMValueRef, error) {

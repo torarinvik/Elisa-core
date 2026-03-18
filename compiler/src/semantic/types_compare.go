@@ -53,6 +53,9 @@ func SameType(a, b Type) bool {
 	case *SViewType:
 		_, ok := b.(*SViewType)
 		return ok
+	case *PackedEnumStoreType:
+		tb, ok := b.(*PackedEnumStoreType)
+		return ok && ta.Name == tb.Name
 	case *EnumType:
 		tb, ok := b.(*EnumType)
 		return ok && ta.Name == tb.Name
@@ -230,6 +233,9 @@ func matchTypePattern(pattern, actual Type) bool {
 	case *SViewType:
 		_, ok := actual.(*SViewType)
 		return ok
+	case *PackedEnumStoreType:
+		a, ok := actual.(*PackedEnumStoreType)
+		return ok && p.Name == a.Name
 	case *EnumType:
 		a, ok := actual.(*EnumType)
 		return ok && p.Name == a.Name

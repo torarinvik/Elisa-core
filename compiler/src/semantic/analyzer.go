@@ -334,14 +334,22 @@ func (a *Analyzer) collectNamedTypes(decls []ast.Decl) {
 			}
 			a.namedTypes[n.Name] = st
 		case *ast.EnumDecl:
-			if n.Packed {
-				a.errorf(n.Pos(), "packed enum %q is not implemented yet", n.Name)
-			}
 			if _, exists := a.namedTypes[n.Name]; exists {
 				a.errorf(n.Pos(), "duplicate type %q", n.Name)
 				continue
 			}
-			a.namedTypes[n.Name] = &EnumType{Name: n.Name, VariantMap: map[string]*EnumVariant{}, Decl: n}
+			enumType := &EnumType{Name: n.Name, Packed: n.Packed, Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: n}
+			a.namedTypes[n.Name] = enumType
+			if n.Packed {
+				storeName := packedEnumStoreTypeName(n.Name)
+				if _, exists := a.namedTypes[storeName]; exists {
+					a.errorf(n.Pos(), "duplicate type %q", storeName)
+					continue
+				}
+				storeType := &PackedEnumStoreType{Name: storeName, Enum: enumType}
+				enumType.StoreType = storeType
+				a.namedTypes[storeName] = storeType
+			}
 		case *ast.ExternTypeDecl:
 			if _, exists := a.namedTypes[n.Name]; exists {
 				a.errorf(n.Pos(), "duplicate type %q", n.Name)
@@ -370,6 +378,10 @@ func (a *Analyzer) collectNamedTypes(decls []ast.Decl) {
 	}
 }
 
+func packedEnumStoreTypeName(enumName string) string {
+	return enumName + ".Store"
+}
+
 func (a *Analyzer) populateEnumVariants(decls []ast.Decl) {
 	for _, decl := range decls {
 		enumDecl, ok := decl.(*ast.EnumDecl)
@@ -379,6 +391,22 @@ func (a *Analyzer) populateEnumVariants(decls []ast.Decl) {
 		enumType, _ := a.namedTypes[enumDecl.Name].(*EnumType)
 		if enumType == nil {
 			continue
+		}
+		if len(enumDecl.Common) > 0 && !enumDecl.Packed {
+			a.errorf(enumDecl.Pos(), "enum %q only supports common: fields for packed enums", enumDecl.Name)
+		}
+		for _, commonDecl := range enumDecl.Common {
+			if commonDecl.Mutable {
+				a.errorf(commonDecl.Position, "packed enum %q common field %q cannot be mutable in v1", enumDecl.Name, commonDecl.Name)
+			}
+			if commonDecl.IsTail {
+				a.errorf(commonDecl.Position, "packed enum %q common field %q cannot be tail-allocated", enumDecl.Name, commonDecl.Name)
+			}
+			if _, exists := enumType.Common[commonDecl.Name]; exists {
+				a.errorf(commonDecl.Position, "duplicate common field %q in enum %q", commonDecl.Name, enumDecl.Name)
+				continue
+			}
+			enumType.Common[commonDecl.Name] = Field{Name: commonDecl.Name, Type: a.resolveType(commonDecl.Type), Mutable: false}
 		}
 		variants := make([]*EnumVariant, 0, len(enumDecl.Variants))
 		for i := range enumDecl.Variants {
@@ -403,7 +431,7 @@ func (a *Analyzer) populateEnumVariants(decls []ast.Decl) {
 					hasUnnamedPayloads = true
 				}
 				payloadType := a.resolveType(payloadDecl.Type)
-				if SameType(payloadType, enumType) {
+				if !enumDecl.Packed && SameType(payloadType, enumType) {
 					a.errorf(payloadDecl.Type.Pos(), "enum %q variant %q cannot contain %q by value; use a reference type instead", enumDecl.Name, variantDecl.Name, enumDecl.Name)
 				}
 				payload = append(payload, payloadType)

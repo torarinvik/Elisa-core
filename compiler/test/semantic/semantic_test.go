@@ -784,18 +784,140 @@ def eval(node: any Expr&) -> int:
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeRejectsPackedEnumsAsNotYetImplemented(t *testing.T) {
+func TestAnalyzeAcceptsPackedEnumsWithExplicitStoreCore(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def build(store_owner: Arena) -> Expr:
+	store: Expr.Store = Expr.Store(store_owner)
+	one: Expr = new[store] Expr.Int(value: 1)
+	two: Expr = new[store] Expr.Int(value: 2)
+	return new[store] Expr.Add(left: one, right: two)
+
+def eval(node: Expr, store: Expr.Store) -> int:
+	return match node in store:
+		Expr.Int(value: value):
+			value
+		Expr.Add(left: left, right: right):
+			eval(left, store) + eval(right, store)
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_explicit_store_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsBarePackedEnumConstructorCall(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)
+
+def bad() -> Expr:
+	return Expr.Int(value: 1)
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_not_implemented.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_ctor_without_store_reject.llcontext", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "packed enum \"Expr\" is not implemented yet") {
-		t.Fatalf("expected packed-enum diagnostic, got:\n%s", all)
+	if !strings.Contains(all, "packed enum constructor \"Expr.Int\" must be allocated with new[Expr.Store]") {
+		t.Fatalf("expected packed constructor diagnostic, got:\n%s", all)
 	}
+}
+
+func TestAnalyzeRejectsPackedMatchWithoutStoreClause(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+def bad(node: Expr) -> int:
+	return match node:
+		Expr.Int(value: value):
+			value
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_match_missing_store_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "packed enum match over \"Expr\" requires an in Expr.Store clause") {
+		t.Fatalf("expected packed match-store diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsOrdinaryEnumMatchWithStoreClause(t *testing.T) {
+	src := `enum Expr:
+	Int(value: int)
+
+packed enum PackedExpr:
+	Int(value: int)
+
+def bad(node: Expr, store: PackedExpr.Store) -> int:
+	return match node in store:
+		Expr.Int(value: value):
+			value
+`
+	_, errs := parseAndAnalyze(t, "ordinary_enum_match_store_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "ordinary enum match over \"Expr\" does not take an in-store clause") {
+		t.Fatalf("expected ordinary enum in-store rejection, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsPackedCommonFieldAccess(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+
+def read(node: Expr) -> int:
+	return node.span
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_common_field_access_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsPackedCommonFieldInitializationWithNamedArgs(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+
+def build(store_owner: Arena) -> Expr:
+	store: Expr.Store = Expr.Store(store_owner)
+	return new[store] Expr.Int(span: 7, value: 1)
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_common_field_init_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsPayloadlessPackedCommonFieldInitialization(t *testing.T) {
+	src := `packed enum Token:
+	common:
+		span: int
+	Region
+
+def build(store_owner: Arena) -> Token:
+	store: Token.Store = Token.Store(store_owner)
+	return new[store] Token.Region(span: 4)
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_payloadless_common_field_init_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsPayloadlessPackedConstructorInAlloc(t *testing.T) {
+	src := `packed enum Token:
+	Ident
+	Region
+
+def build(store_owner: Arena) -> Token:
+	store: Token.Store = Token.Store(store_owner)
+	return new[store] Token.Region
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_payloadless_alloc_ok.llcontext", src)
+	requireNoErrors(t, errs)
 }
 
 func TestAnalyzeAcceptsDictSurfaceTypesAndRuntimeBridge(t *testing.T) {

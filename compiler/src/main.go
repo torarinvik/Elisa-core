@@ -478,6 +478,8 @@ func exprStr(e ast.Expr) string {
 			args = append(args, exprStr(a))
 		}
 		return fmt.Sprintf("%s(%s)", exprStr(n.Func), strings.Join(args, ", "))
+	case *ast.AllocExpr:
+		return fmt.Sprintf("new[%s] %s", exprStr(n.Owner), exprStr(n.Value))
 	case *ast.FieldExpr:
 		return fmt.Sprintf("%s.%s", exprStr(n.Object), n.Field)
 	case *ast.IndexExpr:

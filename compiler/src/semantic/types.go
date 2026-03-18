@@ -133,8 +133,16 @@ type EnumVariant struct {
 	Decl         *ast.EnumVariantDecl
 }
 
+type PackedEnumStoreType struct {
+	Name string
+	Enum *EnumType
+}
+
 type EnumType struct {
 	Name       string
+	Packed     bool
+	Common     map[string]Field
+	StoreType  *PackedEnumStoreType
 	Variants   []*EnumVariant
 	VariantMap map[string]*EnumVariant
 	Decl       *ast.EnumDecl
@@ -191,6 +199,7 @@ func (*DArrayViewType) isType()      {}
 func (*DStrType) isType()            {}
 func (*DictType) isType()            {}
 func (*SViewType) isType()           {}
+func (*PackedEnumStoreType) isType() {}
 func (*EnumType) isType()            {}
 func (*StructType) isType()          {}
 func (*OpaqueType) isType()          {}
@@ -416,6 +425,12 @@ func (t *DictType) String() string {
 }
 func (t *SViewType) String() string {
 	return fmt.Sprintf("sview[%s, %s]", t.Begin, t.End)
+}
+func (t *PackedEnumStoreType) String() string {
+	if t == nil {
+		return "<invalid-packed-store>"
+	}
+	return t.Name
 }
 func (t *EnumType) String() string   { return t.Name }
 func (t *StructType) String() string { return t.Name }

@@ -69,8 +69,8 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, actualType, err = s.emitTryExpr(n)
 	case *ast.UnwrapElseExpr:
 		value, actualType, err = s.emitUnwrapElseExpr(n)
-	case *ast.RegionAllocExpr:
-		value, actualType, err = s.emitRegionAllocExpr(n)
+	case *ast.AllocExpr:
+		value, actualType, err = s.emitAllocExpr(n)
 	case *ast.MatchExpr:
 		value, actualType, err = s.emitMatchExpr(n)
 	case *ast.IndexExpr:
@@ -552,6 +552,13 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 func (s *functionState) emitEnumCompareExpr(op lexer.TokenKind, enumType *semantic.EnumType, left C.LLVMValueRef, right C.LLVMValueRef, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
 	if enumType == nil {
 		return nil, nil, fmt.Errorf("missing enum type for comparison")
+	}
+	if enumType.Packed {
+		pred := C.LLVMIntPredicate(C.LLVMIntEQ)
+		if op == lexer.TOKEN_BANGEQ {
+			pred = C.LLVMIntPredicate(C.LLVMIntNE)
+		}
+		return C.LLVMBuildICmp(s.builder, pred, left, right, cStringFree("enumcmp.packed")), resultType, nil
 	}
 	if enumIsTagOnly(enumType) {
 		pred := C.LLVMIntPredicate(C.LLVMIntEQ)
@@ -1064,14 +1071,21 @@ func (s *functionState) emitUnaryExpr(expr *ast.UnaryExpr) (C.LLVMValueRef, sema
 	}
 }
 
-func (s *functionState) emitRegionAllocExpr(expr *ast.RegionAllocExpr) (C.LLVMValueRef, semantic.Type, error) {
-	binding, ok := s.lookupBinding(expr.Region)
+func (s *functionState) emitAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if _, ok := s.exprType(expr.Owner).(*semantic.PackedEnumStoreType); ok {
+		return s.emitPackedAllocExpr(expr)
+	}
+	ownerIdent, ok := expr.Owner.(*ast.Ident)
 	if !ok {
-		return nil, nil, fmt.Errorf("unknown region %q during LLVM lowering", expr.Region)
+		return nil, nil, fmt.Errorf("only region-backed new[...] is lowered so far")
+	}
+	binding, ok := s.lookupBinding(ownerIdent.Name)
+	if !ok {
+		return nil, nil, fmt.Errorf("unknown region %q during LLVM lowering", ownerIdent.Name)
 	}
 	valueType := s.exprType(expr.Value)
 	if valueType == nil {
-		return nil, nil, fmt.Errorf("missing semantic type for region allocation value in %q", expr.Region)
+		return nil, nil, fmt.Errorf("missing semantic type for region allocation value in %q", ownerIdent.Name)
 	}
 	value, _, err := s.emitExpr(expr.Value, valueType)
 	if err != nil {
@@ -1103,7 +1117,32 @@ func (s *functionState) emitRegionAllocExpr(expr *ast.RegionAllocExpr) (C.LLVMVa
 	return allocPtr, s.exprType(expr), nil
 }
 
+func (s *functionState) emitPackedAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, semantic.Type, error) {
+	storeValue, _, err := s.emitExpr(expr.Owner, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	if fieldExpr, ok := expr.Value.(*ast.FieldExpr); ok {
+		enumType, variant, ok := s.enumConstructorInfoFromField(fieldExpr)
+		if ok && enumType != nil && variant != nil && enumType.Packed && len(variant.Payload) == 0 {
+			return s.emitPackedEnumConstructorAlloc(storeValue, enumType, variant, nil, nil)
+		}
+	}
+	callExpr, ok := expr.Value.(*ast.CallExpr)
+	if !ok {
+		return nil, nil, fmt.Errorf("packed enum allocation expects a constructor call")
+	}
+	enumType, variant, ok := s.enumConstructorInfo(callExpr)
+	if !ok || enumType == nil || variant == nil || !enumType.Packed {
+		return nil, nil, fmt.Errorf("packed enum allocation expects a packed enum constructor call")
+	}
+	return s.emitPackedEnumConstructorAlloc(storeValue, enumType, variant, callExpr.Args, callExpr.ArgNames)
+}
+
 func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if storeType, ok := s.packedStoreConstructorCall(expr); ok {
+		return s.emitPackedStoreConstructorValue(expr, storeType)
+	}
 	if enumType, variant, ok := s.enumConstructorInfo(expr); ok {
 		if variant == nil {
 			return nil, nil, fmt.Errorf("unknown enum constructor")
@@ -1161,6 +1200,17 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	}
 	call := s.buildCall(llvmFnType, callee, args, callName)
 	return call, funcType.Return, nil
+}
+
+func (s *functionState) emitPackedStoreConstructorValue(expr *ast.CallExpr, storeType *semantic.PackedEnumStoreType) (C.LLVMValueRef, semantic.Type, error) {
+	if expr == nil || len(expr.Args) != 1 {
+		return nil, nil, fmt.Errorf("packed store constructor expects exactly one arena argument")
+	}
+	arenaPtr, _, err := s.emitAddressOrTemp(expr.Args[0])
+	if err != nil {
+		return nil, nil, err
+	}
+	return arenaPtr, storeType, nil
 }
 
 func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *semantic.FuncType, error) {
@@ -1221,6 +1271,30 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, sema
 	}
 	value := C.LLVMBuildExtractValue(s.builder, objValue, C.unsigned(index), cStringFree(expr.Field))
 	return value, fieldType, nil
+}
+
+func (s *functionState) packedStoreConstructorInfoFromField(expr *ast.FieldExpr) (*semantic.PackedEnumStoreType, bool) {
+	ident, ok := expr.Object.(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+	base, ok := s.g.result.NamedTypes[ident.Name]
+	if !ok {
+		return nil, false
+	}
+	enumType, ok := base.(*semantic.EnumType)
+	if !ok || !enumType.Packed || expr.Field != "Store" || enumType.StoreType == nil {
+		return nil, false
+	}
+	return enumType.StoreType, true
+}
+
+func (s *functionState) packedStoreConstructorCall(expr *ast.CallExpr) (*semantic.PackedEnumStoreType, bool) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok {
+		return nil, false
+	}
+	return s.packedStoreConstructorInfoFromField(fieldExpr)
 }
 
 func (s *functionState) emitSliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, semantic.Type, error) {
@@ -1793,6 +1867,9 @@ func (s *functionState) emitEnumConstructorValue(enumType *semantic.EnumType, va
 	if enumType == nil || variant == nil {
 		return nil, nil, fmt.Errorf("missing enum constructor metadata")
 	}
+	if enumType.Packed {
+		return nil, nil, fmt.Errorf("packed enum constructor %s.%s must be allocated with new[%s]", enumType.Name, variant.Name, enumType.StoreType.Name)
+	}
 	orderedArgs, err := s.resolveEnumConstructorArgs(enumType, variant, args, argNames)
 	if err != nil {
 		return nil, nil, err
@@ -1855,6 +1932,97 @@ func (s *functionState) emitEnumConstructorValue(enumType *semantic.EnumType, va
 	return value, enumType, nil
 }
 
+func (s *functionState) emitPackedEnumConstructorAlloc(storeValue C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string) (C.LLVMValueRef, semantic.Type, error) {
+	if enumType == nil || variant == nil || !enumType.Packed {
+		return nil, nil, fmt.Errorf("missing packed enum constructor metadata")
+	}
+	orderedArgs, commonArgs, err := s.resolvePackedEnumConstructorArgs(enumType, variant, args, argNames)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(orderedArgs) != len(variant.Payload) {
+		return nil, nil, fmt.Errorf("enum constructor %s.%s expects %d arguments, got %d", enumType.Name, variant.Name, len(variant.Payload), len(args))
+	}
+	rowType, err := s.g.ensurePackedEnumRowType(enumType.Name, enumType)
+	if err != nil {
+		return nil, nil, err
+	}
+	sizeBytes, err := s.g.abiSizeOfLLVMType(rowType)
+	if err != nil {
+		return nil, nil, err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, nil, err
+	}
+	sizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(sizeBytes), 0)
+	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	helperType := &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
+	callee, err := s.g.ensureFunctionDeclared("arena_alloc", helperType)
+	if err != nil {
+		return nil, nil, err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, nil, err
+	}
+	allocPtr := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{storeValue, sizeValue}, "packed.alloc")
+	C.LLVMBuildStore(s.builder, C.LLVMConstNull(rowType), allocPtr)
+	tagValue, err := s.enumTagConstant(variant.Tag)
+	if err != nil {
+		return nil, nil, err
+	}
+	tagPtr := C.LLVMBuildStructGEP2(s.builder, rowType, allocPtr, 0, cStringFree("packed.enum.tag.ptr"))
+	C.LLVMBuildStore(s.builder, tagValue, tagPtr)
+	for i, commonDecl := range enumType.Decl.Common {
+		arg, ok := commonArgs[commonDecl.Name]
+		if !ok {
+			continue
+		}
+		field, ok := enumType.Common[commonDecl.Name]
+		if !ok {
+			return nil, nil, fmt.Errorf("missing packed enum common field %s.%s", enumType.Name, commonDecl.Name)
+		}
+		fieldValue, _, err := s.emitExpr(arg, field.Type)
+		if err != nil {
+			return nil, nil, err
+		}
+		fieldPtr := C.LLVMBuildStructGEP2(s.builder, rowType, allocPtr, C.unsigned(1+i), cStringFree("packed.enum.common.ptr"))
+		C.LLVMBuildStore(s.builder, fieldValue, fieldPtr)
+	}
+	if len(variant.Payload) > 0 {
+		payloadPtr, err := s.enumPayloadPtr(allocPtr, enumType)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(variant.Payload) == 1 {
+			argValue, _, err := s.emitExpr(orderedArgs[0], variant.Payload[0])
+			if err != nil {
+				return nil, nil, err
+			}
+			C.LLVMBuildStore(s.builder, argValue, payloadPtr)
+		} else {
+			payloadType, err := s.g.lowerEnumVariantPayloadType(variant)
+			if err != nil {
+				return nil, nil, err
+			}
+			aggregate := C.LLVMGetUndef(payloadType)
+			for i, payload := range variant.Payload {
+				argValue, _, err := s.emitExpr(orderedArgs[i], payload)
+				if err != nil {
+					return nil, nil, err
+				}
+				aggregate = C.LLVMBuildInsertValue(s.builder, aggregate, argValue, C.unsigned(i), cStringFree("packed.enum.payload.ins"))
+			}
+			C.LLVMBuildStore(s.builder, aggregate, payloadPtr)
+		}
+	}
+	return allocPtr, enumType, nil
+}
+
 func (s *functionState) resolveEnumConstructorArgs(enumType *semantic.EnumType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string) ([]ast.Expr, error) {
 	if variant == nil {
 		return nil, fmt.Errorf("missing enum constructor metadata")
@@ -1901,4 +2069,57 @@ func (s *functionState) resolveEnumConstructorArgs(enumType *semantic.EnumType, 
 		}
 	}
 	return ordered, nil
+}
+
+func (s *functionState) resolvePackedEnumConstructorArgs(enumType *semantic.EnumType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string) ([]ast.Expr, map[string]ast.Expr, error) {
+	if enumType == nil || variant == nil {
+		return nil, nil, fmt.Errorf("missing packed enum constructor metadata")
+	}
+	namedCount := 0
+	for _, name := range argNames {
+		if name != "" {
+			namedCount++
+		}
+	}
+	if namedCount == 0 {
+		return args, nil, nil
+	}
+	if namedCount != len(args) {
+		return nil, nil, fmt.Errorf("enum constructor %s.%s cannot mix positional and named arguments", enumType.Name, variant.Name)
+	}
+	ordered := make([]ast.Expr, len(variant.Payload))
+	seenPayload := make([]bool, len(variant.Payload))
+	commonArgs := make(map[string]ast.Expr)
+	for i, arg := range args {
+		name := ""
+		if i < len(argNames) {
+			name = argNames[i]
+		}
+		if index, ok := variant.PayloadIndex(name); ok {
+			if seenPayload[index] {
+				return nil, nil, fmt.Errorf("enum constructor %s.%s payload field %q is specified more than once", enumType.Name, variant.Name, name)
+			}
+			ordered[index] = arg
+			seenPayload[index] = true
+			continue
+		}
+		if _, ok := enumType.Common[name]; ok {
+			if _, exists := commonArgs[name]; exists {
+				return nil, nil, fmt.Errorf("packed enum constructor %s.%s common field %q is specified more than once", enumType.Name, variant.Name, name)
+			}
+			commonArgs[name] = arg
+			continue
+		}
+		return nil, nil, fmt.Errorf("packed enum constructor %s.%s has no payload or common field %q", enumType.Name, variant.Name, name)
+	}
+	for i, wasSeen := range seenPayload {
+		if !wasSeen {
+			label := variant.PayloadLabel(i)
+			if label == "" {
+				return nil, nil, fmt.Errorf("enum constructor %s.%s is missing argument %d", enumType.Name, variant.Name, i+1)
+			}
+			return nil, nil, fmt.Errorf("enum constructor %s.%s is missing payload field %q", enumType.Name, variant.Name, label)
+		}
+	}
+	return ordered, commonArgs, nil
 }

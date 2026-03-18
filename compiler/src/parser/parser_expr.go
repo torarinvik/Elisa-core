@@ -116,6 +116,9 @@ func (p *Parser) parseRefTypeSuffixes(base ast.TypeExpr, pos lexer.Pos, storage 
 func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label string) ast.TypeExpr {
 	pos := p.cur().Pos
 	name := p.expect(lexer.TOKEN_IDENT).Text
+	for p.match(lexer.TOKEN_DOT) {
+		name += "." + p.expect(lexer.TOKEN_IDENT).Text
+	}
 	var typ ast.TypeExpr = &ast.NamedType{Position: pos, Name: name}
 
 	if p.peek() == lexer.TOKEN_LBRACKET {
@@ -388,7 +391,7 @@ func (p *Parser) parseMulDiv() ast.Expr {
 
 func (p *Parser) parseUnary() ast.Expr {
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "new" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACKET {
-		return p.parseRegionAllocExpr()
+		return p.parseAllocExpr()
 	}
 	if p.peek() == lexer.TOKEN_MINUS {
 		pos := p.cur().Pos
@@ -411,22 +414,26 @@ func (p *Parser) parseUnary() ast.Expr {
 	return p.parsePostfix()
 }
 
-func (p *Parser) parseRegionAllocExpr() ast.Expr {
+func (p *Parser) parseAllocExpr() ast.Expr {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_IDENT)
 	p.expect(lexer.TOKEN_LBRACKET)
-	region := p.expect(lexer.TOKEN_IDENT).Text
+	owner := p.parseExpr()
 	p.expect(lexer.TOKEN_RBRACKET)
 	value := p.parseExpr()
-	return &ast.RegionAllocExpr{Position: pos, Region: region, Value: value}
+	return &ast.AllocExpr{Position: pos, Owner: owner, Value: value}
 }
 
 func (p *Parser) parseMatchExpr() ast.Expr {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_MATCH)
 	value := p.parseExpr()
+	var store ast.Expr
+	if p.match(lexer.TOKEN_IN) {
+		store = p.parseExpr()
+	}
 	arms := p.parseMatchArms()
-	return &ast.MatchExpr{Position: pos, Value: value, Arms: arms}
+	return &ast.MatchExpr{Position: pos, Value: value, Store: store, Arms: arms}
 }
 
 func (p *Parser) parseCallArgs() ([]ast.Expr, []string) {

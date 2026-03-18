@@ -78,6 +78,14 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			result = errorType
 			return
 		}
+		if storeType, ctorType, ok := a.packedStoreExprType(n); ok {
+			if ctorType != nil {
+				result = ctorType
+			} else {
+				result = storeType
+			}
+			return
+		}
 		if enumType, ctorType, ok := a.enumVariantExprType(n); ok {
 			if ctorType != nil {
 				result = ctorType
@@ -153,25 +161,8 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		}
 		result = resultType
 		return
-	case *ast.RegionAllocExpr:
-		_, state := a.lookupRegionState(n.Region)
-		if a.currentScope == nil {
-			a.errorf(n.Pos(), "region allocation requires function scope")
-			result = invalidType
-			return
-		}
-		if sym, ok := a.currentScope.Lookup(n.Region); !ok || sym.Kind != SymbolRegion {
-			a.errorf(n.Pos(), "undefined region %q", n.Region)
-			result = invalidType
-			return
-		}
-		if state.Destroyed {
-			a.errorf(n.Pos(), "cannot allocate from destroyed region %q", n.Region)
-			result = invalidType
-			return
-		}
-		valueType := a.analyzeExpr(n.Value)
-		result = &RefType{Elem: valueType, State: RefStateNonNull, Storage: RefStorageAny, ExplicitStorage: true}
+	case *ast.AllocExpr:
+		result = a.analyzeAllocExpr(n)
 		return
 	case *ast.MatchExpr:
 		result = a.analyzeMatchExpr(n)
@@ -243,6 +234,116 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = invalidType
 		return
 	}
+}
+
+func (a *Analyzer) analyzeAllocExpr(expr *ast.AllocExpr) Type {
+	if expr == nil {
+		return invalidType
+	}
+	ownerType := a.analyzeExpr(expr.Owner)
+	if storeType, ok := ownerType.(*PackedEnumStoreType); ok {
+		return a.analyzePackedAllocExpr(expr, storeType)
+	}
+	ident, ok := expr.Owner.(*ast.Ident)
+	if !ok {
+		a.errorf(expr.Pos(), "new[...] owner must be a region name or packed enum store, got %s", ownerType.String())
+		a.analyzeExpr(expr.Value)
+		return invalidType
+	}
+	_, state := a.lookupRegionState(ident.Name)
+	if a.currentScope == nil {
+		a.errorf(expr.Pos(), "region allocation requires function scope")
+		return invalidType
+	}
+	if sym, ok := a.currentScope.Lookup(ident.Name); !ok || sym.Kind != SymbolRegion {
+		a.errorf(expr.Pos(), "new[...] owner must be a region name or packed enum store, got %s", ownerType.String())
+		a.analyzeExpr(expr.Value)
+		return invalidType
+	}
+	if state.Destroyed {
+		a.errorf(expr.Pos(), "cannot allocate from destroyed region %q", ident.Name)
+		return invalidType
+	}
+	valueType := a.analyzeExpr(expr.Value)
+	return &RefType{Elem: valueType, State: RefStateNonNull, Storage: RefStorageAny, ExplicitStorage: true}
+}
+
+func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *PackedEnumStoreType) Type {
+	if fieldExpr, ok := expr.Value.(*ast.FieldExpr); ok {
+		ident, ok := fieldExpr.Object.(*ast.Ident)
+		if ok {
+			base, ok := a.namedTypes[ident.Name]
+			if ok {
+				enumType, ok := base.(*EnumType)
+				if ok {
+					variant, ok := enumType.Variant(fieldExpr.Field)
+					if ok && enumType.Packed && len(variant.Payload) == 0 {
+						if storeType.Enum != enumType {
+							a.errorf(expr.Owner.Pos(), "packed enum constructor %q requires store %q, got %q", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name), storeType.String())
+						}
+						return enumType
+					}
+				}
+			}
+		}
+	}
+	callExpr, ok := expr.Value.(*ast.CallExpr)
+	if !ok {
+		valueType := a.analyzeExpr(expr.Value)
+		a.errorf(expr.Value.Pos(), "new[%s] expects a packed enum constructor call, got %s", storeType.String(), valueType.String())
+		return invalidType
+	}
+	enumType, variant, ok := a.enumConstructorCall(callExpr)
+	if !ok || enumType == nil || variant == nil || !enumType.Packed {
+		valueType := a.analyzeExpr(expr.Value)
+		a.errorf(expr.Value.Pos(), "new[%s] expects a packed enum constructor call, got %s", storeType.String(), valueType.String())
+		return invalidType
+	}
+	if storeType.Enum != enumType {
+		a.errorf(expr.Owner.Pos(), "packed enum constructor %q requires store %q, got %q", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name), storeType.String())
+	}
+	orderedArgs, commonArgs, ok := a.resolvePackedEnumConstructorArgs(callExpr, enumType, variant)
+	if !ok {
+		return enumType
+	}
+	if len(orderedArgs) != len(variant.Payload) {
+		a.errorf(callExpr.Pos(), "enum constructor %q expects %d arguments, got %d", enumType.Name+"."+variant.Name, len(variant.Payload), len(callExpr.Args))
+	}
+	limit := len(orderedArgs)
+	if len(variant.Payload) < limit {
+		limit = len(variant.Payload)
+	}
+	for i := 0; i < len(orderedArgs); i++ {
+		if i < limit {
+			actual := a.analyzeValueExpr(orderedArgs[i], variant.Payload[i])
+			if !AssignableTo(variant.Payload[i], actual) {
+				label := variant.PayloadLabel(i)
+				if label != "" {
+					a.errorf(orderedArgs[i].Pos(), "enum constructor argument %d (%s) to %q expects %s, got %s", i+1, label, enumType.Name+"."+variant.Name, variant.Payload[i].String(), actual.String())
+				} else {
+					a.errorf(orderedArgs[i].Pos(), "enum constructor argument %d to %q expects %s, got %s", i+1, enumType.Name+"."+variant.Name, variant.Payload[i].String(), actual.String())
+				}
+			}
+		} else {
+			a.analyzeExpr(orderedArgs[i])
+		}
+	}
+	for _, commonDecl := range enumType.Decl.Common {
+		arg, ok := commonArgs[commonDecl.Name]
+		if !ok {
+			continue
+		}
+		field, ok := enumType.Common[commonDecl.Name]
+		if !ok {
+			a.analyzeExpr(arg)
+			continue
+		}
+		actual := a.analyzeValueExpr(arg, field.Type)
+		if !AssignableTo(field.Type, actual) {
+			a.errorf(arg.Pos(), "packed enum common field %q for %q expects %s, got %s", commonDecl.Name, enumType.Name+"."+variant.Name, field.Type.String(), actual.String())
+		}
+	}
+	return enumType
 }
 
 func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *StructType, bindings map[string]Type) {
@@ -338,12 +439,66 @@ func (a *Analyzer) enumVariantExprType(expr *ast.FieldExpr) (*EnumType, Type, bo
 		a.errorf(expr.Pos(), "enum %q has no variant %q", enumType.Name, expr.Field)
 		return enumType, invalidType, true
 	}
+	if enumType.Packed {
+		a.errorf(expr.Pos(), "packed enum constructor %q must be allocated with new[%s]", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name))
+		return enumType, invalidType, true
+	}
 	if len(variant.Payload) == 0 {
 		return enumType, nil, true
 	}
 	params := make([]Type, len(variant.Payload))
 	copy(params, variant.Payload)
 	return enumType, &FuncType{Name: enumType.Name + "." + variant.Name, Params: params, Return: enumType}, true
+}
+
+func (a *Analyzer) packedStoreExprType(expr *ast.FieldExpr) (*PackedEnumStoreType, Type, bool) {
+	ident, ok := expr.Object.(*ast.Ident)
+	if !ok {
+		return nil, nil, false
+	}
+	base, ok := a.namedTypes[ident.Name]
+	if !ok {
+		return nil, nil, false
+	}
+	enumType, ok := base.(*EnumType)
+	if !ok || !enumType.Packed || expr.Field != "Store" {
+		return nil, nil, false
+	}
+	if enumType.StoreType == nil {
+		return nil, invalidType, true
+	}
+	arenaType, ok := a.namedTypes["Arena"]
+	if !ok {
+		return enumType.StoreType, invalidType, true
+	}
+	return enumType.StoreType, &FuncType{Name: enumType.StoreType.Name, Params: []Type{arenaType}, Return: enumType.StoreType}, true
+}
+
+func (a *Analyzer) packedStoreConstructorCall(expr *ast.CallExpr) (*PackedEnumStoreType, bool) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok {
+		return nil, false
+	}
+	storeType, _, ok := a.packedStoreExprType(fieldExpr)
+	if !ok {
+		return nil, false
+	}
+	if len(expr.Args) != 1 {
+		a.errorf(expr.Pos(), "store constructor %q expects 1 argument, got %d", storeType.String(), len(expr.Args))
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return storeType, true
+	}
+	if arenaType, ok := a.namedTypes["Arena"]; ok {
+		actual := a.analyzeValueExpr(expr.Args[0], arenaType)
+		if !AssignableTo(arenaType, actual) {
+			a.errorf(expr.Args[0].Pos(), "store constructor %q expects %s, got %s", storeType.String(), arenaType.String(), actual.String())
+		}
+	} else {
+		a.analyzeExpr(expr.Args[0])
+	}
+	return storeType, true
 }
 
 func (a *Analyzer) enumConstructorCall(expr *ast.CallExpr) (*EnumType, *EnumVariant, bool) {
@@ -442,12 +597,22 @@ func (a *Analyzer) analyzeUnaryExpr(expr *ast.UnaryExpr) Type {
 }
 
 func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
+	if storeType, ok := a.packedStoreConstructorCall(expr); ok {
+		return storeType
+	}
 	if enumType, variant, ok := a.enumConstructorCall(expr); ok {
 		if variant == nil {
 			for _, arg := range expr.Args {
 				a.analyzeExpr(arg)
 			}
 			return invalidType
+		}
+		if enumType.Packed {
+			a.errorf(expr.Pos(), "packed enum constructor %q must be allocated with new[%s]", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name))
+			for _, arg := range expr.Args {
+				a.analyzeExpr(arg)
+			}
+			return enumType
 		}
 		orderedArgs, ok := a.resolveEnumConstructorArgs(expr, enumType, variant)
 		if !ok {
@@ -584,6 +749,69 @@ func (a *Analyzer) resolveEnumConstructorArgs(expr *ast.CallExpr, enumType *Enum
 		return nil, false
 	}
 	return ordered, true
+}
+
+func (a *Analyzer) resolvePackedEnumConstructorArgs(expr *ast.CallExpr, enumType *EnumType, variant *EnumVariant) ([]ast.Expr, map[string]ast.Expr, bool) {
+	if expr == nil || enumType == nil || variant == nil {
+		return nil, nil, false
+	}
+	namedCount := expr.NamedArgCount()
+	if namedCount == 0 {
+		return expr.Args, nil, true
+	}
+	if namedCount != len(expr.Args) {
+		a.errorf(expr.Pos(), "enum constructor %q cannot mix positional and named arguments", enumType.Name+"."+variant.Name)
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return nil, nil, false
+	}
+	ordered := make([]ast.Expr, len(variant.Payload))
+	seenPayload := make([]bool, len(variant.Payload))
+	commonArgs := make(map[string]ast.Expr)
+	ok := true
+	for i, arg := range expr.Args {
+		name := expr.ArgName(i)
+		if index, found := variant.PayloadIndex(name); found {
+			if seenPayload[index] {
+				a.errorf(arg.Pos(), "enum constructor %q payload field %q is specified more than once", enumType.Name+"."+variant.Name, name)
+				a.analyzeExpr(arg)
+				ok = false
+				continue
+			}
+			ordered[index] = arg
+			seenPayload[index] = true
+			continue
+		}
+		if _, found := enumType.Common[name]; found {
+			if _, exists := commonArgs[name]; exists {
+				a.errorf(arg.Pos(), "packed enum constructor %q common field %q is specified more than once", enumType.Name+"."+variant.Name, name)
+				a.analyzeExpr(arg)
+				ok = false
+				continue
+			}
+			commonArgs[name] = arg
+			continue
+		}
+		a.errorf(arg.Pos(), "packed enum constructor %q has no payload or common field %q", enumType.Name+"."+variant.Name, name)
+		a.analyzeExpr(arg)
+		ok = false
+	}
+	for i, wasSeen := range seenPayload {
+		if !wasSeen {
+			label := variant.PayloadLabel(i)
+			if label != "" {
+				a.errorf(expr.Pos(), "enum constructor %q is missing payload field %q", enumType.Name+"."+variant.Name, label)
+			} else {
+				a.errorf(expr.Pos(), "enum constructor %q is missing argument %d", enumType.Name+"."+variant.Name, i+1)
+			}
+			ok = false
+		}
+	}
+	if !ok {
+		return nil, nil, false
+	}
+	return ordered, commonArgs, true
 }
 
 func (a *Analyzer) collectRuntimeBridgeBindings(pattern, actual Type, bindings map[string]Type, shapeBindings map[string]Shape) bool {
@@ -1141,6 +1369,14 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 			return Field{}, false
 		}
 		objType = ref.Elem
+	}
+	if enumType, ok := objType.(*EnumType); ok && enumType.Packed {
+		field, ok := enumType.Common[fieldName]
+		if !ok {
+			a.errorf(pos, "packed enum %q has no common field %q", enumType.Name, fieldName)
+			return Field{}, false
+		}
+		return field, true
 	}
 	if runtimeBacked := a.runtimeBackedStructType(objType); runtimeBacked != nil {
 		objType = runtimeBacked

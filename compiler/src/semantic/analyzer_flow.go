@@ -168,6 +168,7 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 		}
 		return
 	}
+	a.validateMatchStore(stmt.Pos(), enumType, stmt.Store)
 	priorPatterns := make([]ast.MatchPattern, 0, len(stmt.Arms))
 	for i, arm := range stmt.Arms {
 		if a.matchPatternShadowedByPrevious(arm.Pattern, enumType, priorPatterns) {
@@ -190,6 +191,7 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 		}
 		return invalidType
 	}
+	a.validateMatchStore(expr.Pos(), enumType, expr.Store)
 	covered := map[string]bool{}
 	hasWildcard := false
 	resultType := Type(nil)
@@ -223,6 +225,31 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 		return neverType
 	}
 	return resultType
+}
+
+func (a *Analyzer) validateMatchStore(pos lexer.Pos, enumType *EnumType, storeExpr ast.Expr) {
+	if enumType == nil {
+		return
+	}
+	if !enumType.Packed {
+		if storeExpr != nil {
+			a.errorf(storeExpr.Pos(), "ordinary enum match over %q does not take an in-store clause", enumType.Name)
+		}
+		return
+	}
+	if storeExpr == nil {
+		a.errorf(pos, "packed enum match over %q requires an in %s clause", enumType.Name, packedEnumStoreTypeName(enumType.Name))
+		return
+	}
+	storeType := a.analyzeExpr(storeExpr)
+	packedStore, ok := storeType.(*PackedEnumStoreType)
+	if !ok {
+		a.errorf(storeExpr.Pos(), "packed enum match over %q requires store type %q, got %s", enumType.Name, packedEnumStoreTypeName(enumType.Name), storeType.String())
+		return
+	}
+	if packedStore.Enum != enumType {
+		a.errorf(storeExpr.Pos(), "packed enum match over %q requires store type %q, got %s", enumType.Name, packedEnumStoreTypeName(enumType.Name), storeType.String())
+	}
 }
 
 func (a *Analyzer) matchPatternShadowedByPrevious(pattern ast.MatchPattern, enumType *EnumType, prior []ast.MatchPattern) bool {

@@ -175,6 +175,10 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 		if !ok {
 			return fmt.Errorf("declaration %s does not resolve to enum type", n.Name)
 		}
+		if enumType.Packed {
+			_, err := g.ensurePackedEnumRowType(n.Name, enumType)
+			return err
+		}
 		_, err := g.ensureEnumBody(n.Name, enumType)
 		return err
 	case *ast.ExternTypeDecl:
@@ -239,6 +243,10 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 		enumType, ok := t.(*semantic.EnumType)
 		if !ok {
 			return fmt.Errorf("declaration %s does not resolve to enum type", n.Name)
+		}
+		if enumType.Packed {
+			_, err := g.ensurePackedEnumRowType(n.Name, enumType)
+			return err
 		}
 		_, err := g.ensureEnumBody(n.Name, enumType)
 		return err

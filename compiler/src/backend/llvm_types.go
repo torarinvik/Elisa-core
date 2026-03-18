@@ -57,6 +57,8 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 	switch tt := t.(type) {
 	case *semantic.InvalidType, *semantic.NeverType, *semantic.NullType, *semantic.BuiltinType, *semantic.TypeParamType, *semantic.DStrType, *semantic.ErrorSetType:
 		err = nil
+	case *semantic.PackedEnumStoreType:
+		err = nil
 	case *semantic.ErrorUnionType:
 		if err = g.noteType(tt.Value); err != nil {
 			break
@@ -92,6 +94,20 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 		}
 		_, err = g.ensureGenericInstanceStruct(&semantic.GenericInstanceType{Name: "DynDict", Base: base, Args: []semantic.Type{tt.Value}})
 	case *semantic.EnumType:
+		if tt.Decl != nil {
+			for _, fieldDecl := range tt.Decl.Common {
+				field, ok := tt.Common[fieldDecl.Name]
+				if !ok {
+					continue
+				}
+				if err = g.noteType(field.Type); err != nil {
+					break
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
 		for _, variant := range tt.Variants {
 			for _, payload := range variant.Payload {
 				if err = g.noteType(payload); err != nil {
@@ -103,7 +119,11 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 			}
 		}
 		if err == nil {
-			_, err = g.ensureEnumBody(tt.Name, tt)
+			if tt.Packed {
+				_, err = g.ensurePackedEnumRowType(tt.Name, tt)
+			} else {
+				_, err = g.ensureEnumBody(tt.Name, tt)
+			}
 		}
 	case *semantic.StructType:
 		if len(tt.TypeParams) == 0 {
@@ -320,6 +340,8 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	case *semantic.RefType:
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
+	case *semantic.PackedEnumStoreType:
+		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	case *semantic.ArrayType:
 		elemType, err := g.lowerType(tt.Elem)
 		if err != nil {
@@ -350,6 +372,9 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		}
 		return g.ensureStructBody(st.Name, st)
 	case *semantic.EnumType:
+		if tt.Packed {
+			return C.LLVMPointerTypeInContext(g.context, 0), nil
+		}
 		return g.ensureEnumBody(tt.Name, tt)
 	case *semantic.StructType:
 		if len(tt.TypeParams) == 0 {
@@ -469,6 +494,55 @@ func (g *llvmGenerator) ensureEnumBody(name string, enum *semantic.EnumType) (C.
 	}
 	payloadType := C.LLVMArrayType2(wordType, C.ulonglong(maxSlots))
 	fields := []C.LLVMTypeRef{tagType, payloadType}
+	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	g.structBodies[name] = true
+	return ty, nil
+}
+
+func (g *llvmGenerator) ensurePackedEnumRowType(name string, enum *semantic.EnumType) (C.LLVMTypeRef, error) {
+	ty, err := g.ensureNamedStructType(name)
+	if err != nil {
+		return nil, err
+	}
+	if g.structBodies[name] || enum == nil {
+		return ty, nil
+	}
+	tagType, err := g.lowerBuiltin("u32")
+	if err != nil {
+		return nil, err
+	}
+	fields := []C.LLVMTypeRef{tagType}
+	if enum.Decl != nil {
+		for _, fieldDecl := range enum.Decl.Common {
+			field, ok := enum.Common[fieldDecl.Name]
+			if !ok {
+				return nil, fmt.Errorf("missing packed enum common field %s.%s", enum.Name, fieldDecl.Name)
+			}
+			fieldType, err := g.lowerType(field.Type)
+			if err != nil {
+				return nil, err
+			}
+			fields = append(fields, fieldType)
+		}
+	}
+	maxSlots := uint64(0)
+	for _, variant := range enum.Variants {
+		slots, err := g.enumVariantPayloadSlots(variant)
+		if err != nil {
+			return nil, err
+		}
+		if slots > maxSlots {
+			maxSlots = slots
+		}
+	}
+	if maxSlots > 0 {
+		wordType, err := g.lowerBuiltin("uintptr")
+		if err != nil {
+			return nil, err
+		}
+		payloadType := C.LLVMArrayType2(wordType, C.ulonglong(maxSlots))
+		fields = append(fields, payloadType)
+	}
 	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
 	g.structBodies[name] = true
 	return ty, nil
