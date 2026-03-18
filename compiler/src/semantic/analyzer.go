@@ -133,6 +133,7 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 	a.registerBuiltinStructType("Arena", nil, []builtinFieldSpec{
 		{name: "begin", typ: refTypeExpr("Region", true), mutable: true},
 		{name: "end", typ: refTypeExpr("Region", true), mutable: true},
+		{name: "end_index", typ: namedTypeExpr("usize", false), mutable: true},
 	})
 	a.registerBuiltinStructType("StringView", nil, []builtinFieldSpec{
 		{name: "data", typ: refTypeExpr("u8", false), mutable: true},

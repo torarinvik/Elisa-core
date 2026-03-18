@@ -31,8 +31,8 @@ const CTX_STRING_LEN_CACHE_BUCKETS: usize = 4096
 # Global arena state
 # ------------------------------------------------------------
 
-global mutable ctx_stage0_perm_arena: Arena = Arena(null, null)
-global mutable ctx_stage0_scratch_arena: Arena = Arena(null, null)
+global mutable ctx_stage0_perm_arena: Arena = Arena(null, null, 0)
+global mutable ctx_stage0_scratch_arena: Arena = Arena(null, null, 0)
 
 # ------------------------------------------------------------
 # Struct definitions

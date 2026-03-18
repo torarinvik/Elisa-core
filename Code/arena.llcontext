@@ -34,6 +34,7 @@ repr(c) struct Region:
 repr(c) struct Arena:
     begin:mutable any Region&?
     end:mutable any Region&?
+    end_index: mutable usize
 
 repr(c) struct ArenaMark:
     region: any Region&?
@@ -238,11 +239,13 @@ def arena_alloc(a: any Arena&, size_bytes: usize) -> any void&:
 
         a.end as & <- new_region(capacity)
         a.begin <- a.end
+        a.end_index <- 0
 
     assert a.end != null
 
     while a.end.count + size > a.end.capacity and a.end.next != null:
         a.end <- a.end.next
+        a.end_index <- a.end_index + 1
 
     if a.end.count + size > a.end.capacity:
         assert a.end.next == null
@@ -253,6 +256,7 @@ def arena_alloc(a: any Arena&, size_bytes: usize) -> any void&:
 
         a.end.next as & <- new_region(capacity)
         a.end <- a.end.next
+        a.end_index <- a.end_index + 1
 
     data_base: any u8& = (a.end.cast[any u8&]() + sizeof(Region)).cast[any u8&]()
     offset_bytes: usize = a.end.count * sizeof(uintptr)
@@ -318,6 +322,70 @@ def arena_strdup(a: any Arena&, cstr: any u8&) -> any u8&:
 def arena_memdup(a: any Arena&, data: any void&, size: usize) -> any void&:
     return arena_memcpy(arena_alloc(a, size), data, size)
 
+def packed_store_region_data(r: any Region&) -> any u8&:
+    return (r.cast[any u8&]() + sizeof(Region)).cast[any u8&]()
+
+def ctx_packed_store_alloc(a: any Arena&, size_bytes: usize) -> uintptr:
+    ptr: any void& = arena_alloc(a, size_bytes)
+    assert a.end != null
+
+    data_base: any u8& = packed_store_region_data(a.end)
+    offset_bytes: uintptr = ptr.cast[any u8&]().uintptr() - data_base.uintptr()
+    offset_words: uintptr = offset_bytes / sizeof(uintptr).uintptr()
+    return (a.end_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
+
+def ctx_packed_store_encode(a: any Arena&, ptr: any void&) -> uintptr:
+    raw: uintptr = ptr.cast[any u8&]().uintptr()
+
+    if a.end != null:
+        end_data_base: any u8& = packed_store_region_data(a.end)
+        end_data_begin: uintptr = end_data_base.uintptr()
+        end_data_end: uintptr = end_data_begin + (a.end.capacity * sizeof(uintptr)).uintptr()
+
+        if raw >= end_data_begin and raw < end_data_end:
+            end_offset_bytes: uintptr = raw - end_data_begin
+            end_offset_words: uintptr = end_offset_bytes / sizeof(uintptr).uintptr()
+            return (a.end_index.uintptr() << 32u64.uintptr()) | (end_offset_words + 1u64.uintptr())
+
+    region_index: mutable usize = 0
+    r: mutable any Region&? = a.begin
+
+    while r != null:
+        data_base: any u8& = packed_store_region_data(r)
+        data_begin: uintptr = data_base.uintptr()
+        data_end: uintptr = data_begin + (r.capacity * sizeof(uintptr)).uintptr()
+
+        if raw >= data_begin and raw < data_end:
+            offset_bytes: uintptr = raw - data_begin
+            offset_words: uintptr = offset_bytes / sizeof(uintptr).uintptr()
+            return (region_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
+
+        region_index <- region_index + 1
+        r <- r.next
+
+    panic("packed store encode pointer outside arena")
+
+def ctx_packed_store_decode(a: any Arena&, handle: uintptr) -> any void&:
+    assert handle != 0u64.uintptr()
+
+    region_index: usize = (handle >> 32u64.uintptr()).usize()
+    offset_words_plus_one: usize = (handle & 0xffffffffu64.uintptr()).usize()
+    assert offset_words_plus_one > 0
+
+    r: mutable any Region&? = a.begin
+    i: mutable usize = 0
+    while i < region_index and r != null:
+        r <- r.next
+        i <- i + 1
+
+    assert r != null
+
+    offset_words: usize = offset_words_plus_one - 1
+    assert offset_words < r.capacity
+
+    data_base: any u8& = packed_store_region_data(r)
+    return (data_base + offset_words * sizeof(uintptr)).cast[any void&]()
+
 # ------------------------------------------------------------
 # Snapshot / rewind / reset / free / trim
 # ------------------------------------------------------------
@@ -336,6 +404,7 @@ def arena_reset(a: any Arena&):
         r <- r.next
 
     a.end <- a.begin
+    a.end_index <- 0
 
 def arena_rewind(a: any Arena&, m: ArenaMark):
     if m.region == null:
@@ -352,6 +421,15 @@ def arena_rewind(a: any Arena&, m: ArenaMark):
 
     a.end as & <- region
 
+    region_index: mutable usize = 0
+    current: mutable any Region&? = a.begin
+    while current != null and current != region:
+        current <- current.next
+        region_index <- region_index + 1
+
+    assert current != null
+    a.end_index <- region_index
+
 def arena_free(a: any Arena&):
     r: mutable any Region&? = a.begin
 
@@ -362,6 +440,7 @@ def arena_free(a: any Arena&):
 
     a.begin as ! <- null
     a.end as ! <- null
+    a.end_index <- 0
 
 def arena_trim(a: any Arena&):
     if a.end == null:

@@ -888,7 +888,7 @@ func TestGenerateLLVMIRLowersManualRegions(t *testing.T) {
 	}
 
 	checks := []string{
-		"%Arena = type { ptr, ptr }",
+		"%Arena = type { ptr, ptr, i64 }",
 		"declare ptr @new_region(i64)",
 		"declare ptr @arena_alloc(ptr, i64)",
 		"declare void @arena_free(ptr)",

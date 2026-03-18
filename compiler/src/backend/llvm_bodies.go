@@ -511,14 +511,9 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 	if !ok {
 		return fmt.Errorf("match requires an enum value")
 	}
-	if stmt.Store != nil {
-		if _, _, err := s.emitExpr(stmt.Store, nil); err != nil {
-			return err
-		}
-	} else if enumType.Packed {
-		if _, ok := s.lookupPackedStore(enumType); !ok {
-			return fmt.Errorf("missing active packed enum store for %s", enumType.Name)
-		}
+	storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, stmt.Store)
+	if err != nil {
+		return err
 	}
 	enumValue, _, err := s.emitExpr(stmt.Value, enumType)
 	if err != nil {
@@ -536,7 +531,7 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 		} else {
 			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.next"))
 		}
-		if err := s.emitMatchPatternTest(arm.Pattern, enumValue, enumType, bodyBB, nextBB); err != nil {
+		if err := s.emitMatchPatternTest(arm.Pattern, enumValue, enumType, storeBinding, bodyBB, nextBB); err != nil {
 			return err
 		}
 
@@ -577,14 +572,9 @@ func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, sema
 	if !ok {
 		return nil, nil, fmt.Errorf("match requires an enum value")
 	}
-	if expr.Store != nil {
-		if _, _, err := s.emitExpr(expr.Store, nil); err != nil {
-			return nil, nil, err
-		}
-	} else if enumType.Packed {
-		if _, ok := s.lookupPackedStore(enumType); !ok {
-			return nil, nil, fmt.Errorf("missing active packed enum store for %s", enumType.Name)
-		}
+	storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, expr.Store)
+	if err != nil {
+		return nil, nil, err
 	}
 	enumValue, _, err := s.emitExpr(expr.Value, enumType)
 	if err != nil {
@@ -602,7 +592,7 @@ func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, sema
 		} else {
 			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.next"))
 		}
-		if err := s.emitMatchPatternTest(arm.Pattern, enumValue, enumType, bodyBB, nextBB); err != nil {
+		if err := s.emitMatchPatternTest(arm.Pattern, enumValue, enumType, storeBinding, bodyBB, nextBB); err != nil {
 			return nil, nil, err
 		}
 
@@ -691,7 +681,7 @@ func (s *functionState) emitMatchExprArmBody(body []ast.Stmt, resultType semanti
 	return nil, false, fmt.Errorf("match expression arm must end with an expression")
 }
 
-func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualValue C.LLVMValueRef, actualType semantic.Type, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) error {
+func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualValue C.LLVMValueRef, actualType semantic.Type, store *packedStoreBinding, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) error {
 	switch p := pattern.(type) {
 	case *ast.MatchWildcardPattern:
 		C.LLVMBuildBr(s.builder, successBB)
@@ -714,7 +704,7 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		if !ok {
 			return fmt.Errorf("enum %s has no variant %s", enumType.Name, p.Variant)
 		}
-		tagValue, err := s.extractEnumTagValue(actualValue, enumType)
+		tagValue, err := s.extractEnumTagValue(actualValue, enumType, store)
 		if err != nil {
 			return err
 		}
@@ -735,7 +725,7 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 			C.LLVMBuildBr(s.builder, successBB)
 			return nil
 		}
-		payloadValues, err := s.extractEnumVariantPayloadValues(actualValue, enumType, variant)
+		payloadValues, err := s.extractEnumVariantPayloadValues(actualValue, enumType, variant, store)
 		if err != nil {
 			return err
 		}
@@ -747,7 +737,7 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 			if i != len(orderedArgs)-1 {
 				nextSuccess = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.pattern.next"))
 			}
-			if err := s.emitMatchPatternTest(orderedArgs[i].Pattern, payloadValues[i], variant.Payload[i], nextSuccess, failureBB); err != nil {
+			if err := s.emitMatchPatternTest(orderedArgs[i].Pattern, payloadValues[i], variant.Payload[i], store, nextSuccess, failureBB); err != nil {
 				return err
 			}
 			if i != len(orderedArgs)-1 {
@@ -812,9 +802,9 @@ func (s *functionState) resolveMatchPatternArgs(pattern *ast.MatchVariantPattern
 	return ordered, nil
 }
 
-func (s *functionState) extractEnumTagValue(enumValue C.LLVMValueRef, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
+func (s *functionState) extractEnumTagValue(enumValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding) (C.LLVMValueRef, error) {
 	if enumType != nil && enumType.Packed {
-		return s.loadEnumTag(enumValue, enumType)
+		return s.loadEnumTag(enumValue, enumType, store)
 	}
 	if enumIsTagOnly(enumType) {
 		return enumValue, nil
@@ -822,18 +812,18 @@ func (s *functionState) extractEnumTagValue(enumValue C.LLVMValueRef, enumType *
 	return C.LLVMBuildExtractValue(s.builder, enumValue, 0, cStringFree("match.tag.value")), nil
 }
 
-func (s *functionState) extractEnumVariantPayloadValues(enumValue C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant) ([]C.LLVMValueRef, error) {
+func (s *functionState) extractEnumVariantPayloadValues(enumValue C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, store *packedStoreBinding) ([]C.LLVMValueRef, error) {
 	if variant == nil || len(variant.Payload) == 0 {
 		return nil, nil
 	}
 	if enumType != nil && enumType.Packed {
-		return s.loadEnumVariantPayload(enumValue, enumType, variant)
+		return s.loadEnumVariantPayload(enumValue, enumType, variant, store)
 	}
 	enumPtr, err := s.emitStackTempValue(enumValue, enumType, "match.payload.tmp")
 	if err != nil {
 		return nil, err
 	}
-	return s.loadEnumVariantPayload(enumPtr, enumType, variant)
+	return s.loadEnumVariantPayload(enumPtr, enumType, variant, store)
 }
 
 func matchIsExhaustive(enumType *semantic.EnumType, arms []ast.MatchArm) bool {
@@ -852,7 +842,7 @@ func matchIsExhaustive(enumType *semantic.EnumType, arms []ast.MatchArm) bool {
 	return len(covered) == len(enumType.Variants)
 }
 
-func (s *functionState) loadEnumTag(enumPtr C.LLVMValueRef, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
+func (s *functionState) loadEnumTag(enumPtr C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding) (C.LLVMValueRef, error) {
 	if enumType != nil && !enumType.Packed && enumIsTagOnly(enumType) {
 		tagType, err := s.g.lowerBuiltin("u32")
 		if err != nil {
@@ -862,7 +852,7 @@ func (s *functionState) loadEnumTag(enumPtr C.LLVMValueRef, enumType *semantic.E
 	}
 	if enumType != nil && enumType.Packed {
 		var err error
-		enumPtr, err = s.decodePackedEnumHandle(enumPtr, enumType)
+		enumPtr, err = s.decodePackedEnumHandleWithStore(enumPtr, enumType, store)
 		if err != nil {
 			return nil, err
 		}
@@ -879,13 +869,13 @@ func (s *functionState) loadEnumTag(enumPtr C.LLVMValueRef, enumType *semantic.E
 	return C.LLVMBuildLoad2(s.builder, tagType, tagPtr, cStringFree("match.tag.value")), nil
 }
 
-func (s *functionState) loadEnumVariantPayload(enumPtr C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant) ([]C.LLVMValueRef, error) {
+func (s *functionState) loadEnumVariantPayload(enumPtr C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, store *packedStoreBinding) ([]C.LLVMValueRef, error) {
 	if variant == nil || len(variant.Payload) == 0 {
 		return nil, nil
 	}
 	if enumType != nil && enumType.Packed {
 		var err error
-		enumPtr, err = s.decodePackedEnumHandle(enumPtr, enumType)
+		enumPtr, err = s.decodePackedEnumHandleWithStore(enumPtr, enumType, store)
 		if err != nil {
 			return nil, err
 		}
@@ -926,6 +916,29 @@ func (s *functionState) enumPayloadPtr(enumPtr C.LLVMValueRef, enumType *semanti
 		}
 	}
 	return C.LLVMBuildStructGEP2(s.builder, enumLLVMType, enumPtr, C.unsigned(payloadIndex), cStringFree("enum.payload.ptr")), nil
+}
+
+func (s *functionState) resolvePackedMatchStoreBinding(enumType *semantic.EnumType, storeExpr ast.Expr) (*packedStoreBinding, error) {
+	if enumType == nil || !enumType.Packed {
+		return nil, nil
+	}
+	if storeExpr != nil {
+		storeValue, actualType, err := s.emitExpr(storeExpr, nil)
+		if err != nil {
+			return nil, err
+		}
+		storeType, ok := actualType.(*semantic.PackedEnumStoreType)
+		if !ok {
+			return nil, fmt.Errorf("packed match over %s requires a packed store, got %s", enumType.Name, actualType.String())
+		}
+		binding := &packedStoreBinding{value: storeValue, typ: storeType}
+		return binding, nil
+	}
+	binding, ok := s.lookupPackedStore(enumType)
+	if !ok {
+		return nil, fmt.Errorf("missing active packed enum store for %s", enumType.Name)
+	}
+	return &binding, nil
 }
 
 func (s *functionState) enumTagConstant(tag uint32) (C.LLVMValueRef, error) {

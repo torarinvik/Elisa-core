@@ -58,10 +58,11 @@ def differs(left: Expr, right: Expr) -> bool:
 def fold() -> int:
 	region scratch(256u)
 	store: Expr.Store = Expr.Store(scratch)
-	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
-	return match node in store:
-		Expr.Lit(value):
-			value + node.span
+	in store:
+		node: Expr = new Expr.Lit(span: 7, value: 5)
+		return match node:
+			Expr.Lit(value):
+				value + node.span
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_word_handle.llcontext", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
@@ -73,16 +74,17 @@ def fold() -> int:
 		"%Expr__Store = type { ptr }",
 		"define i1 @differs(i64",
 		"icmp ne i64",
-		"ptrtoint ptr %packed.alloc to i64",
-		"inttoptr i64",
+		"call i64 @ctx_packed_store_alloc(ptr %packed.alloc.store.arena, i64",
+		"call ptr @ctx_packed_store_decode(ptr %packed.decode.store.arena, i64",
 		"extractvalue %Expr__Store",
+		"packed.decode.store.arena",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
-	for _, bad := range []string{"define i1 @differs(ptr", "icmp ne ptr"} {
+	for _, bad := range []string{"define i1 @differs(ptr", "icmp ne ptr", "call i64 @ctx_packed_store_encode(", "ptrtoint ptr %packed.alloc to i64", "inttoptr i64"} {
 		if strings.Contains(output, bad) {
 			t.Fatalf("expected alternate packed ABI to lower values as integer handles and avoid %q, got:\n%s", bad, output)
 		}

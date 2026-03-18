@@ -73,7 +73,11 @@ func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, s
 		return nil, nil, err
 	}
 	if enumType, ok := containerType.(*semantic.EnumType); ok && enumType.Packed {
-		objPtr, err = s.packedEnumStoragePtrFromExprValue(objPtr, objType, enumType)
+		var activeStore *packedStoreBinding
+		if binding, ok := s.lookupPackedStore(enumType); ok {
+			activeStore = &binding
+		}
+		objPtr, err = s.packedEnumStoragePtrFromExprValue(objPtr, objType, enumType, activeStore)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -82,7 +86,7 @@ func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, s
 	return fieldPtr, fieldType, nil
 }
 
-func (s *functionState) packedEnumStoragePtrFromExprValue(value C.LLVMValueRef, exprType semantic.Type, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
+func (s *functionState) packedEnumStoragePtrFromExprValue(value C.LLVMValueRef, exprType semantic.Type, enumType *semantic.EnumType, store *packedStoreBinding) (C.LLVMValueRef, error) {
 	if enumType == nil || !enumType.Packed {
 		return value, nil
 	}
@@ -92,10 +96,10 @@ func (s *functionState) packedEnumStoragePtrFromExprValue(value C.LLVMValueRef, 
 			if err != nil {
 				return nil, err
 			}
-			return s.decodePackedEnumHandle(handleValue, enumType)
+			return s.decodePackedEnumHandleWithStore(handleValue, enumType, store)
 		}
 	}
-	return s.decodePackedEnumHandle(value, enumType)
+	return s.decodePackedEnumHandleWithStore(value, enumType, store)
 }
 
 func (s *functionState) emitAddressOrTemp(expr ast.Expr) (C.LLVMValueRef, semantic.Type, error) {
