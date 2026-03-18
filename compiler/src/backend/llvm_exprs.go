@@ -551,6 +551,13 @@ func (s *functionState) emitEnumCompareExpr(op lexer.TokenKind, enumType *semant
 	if enumType == nil {
 		return nil, nil, fmt.Errorf("missing enum type for comparison")
 	}
+	if enumIsTagOnly(enumType) {
+		pred := C.LLVMIntPredicate(C.LLVMIntEQ)
+		if op == lexer.TOKEN_BANGEQ {
+			pred = C.LLVMIntPredicate(C.LLVMIntNE)
+		}
+		return C.LLVMBuildICmp(s.builder, pred, left, right, cStringFree("enumcmp.tagonly")), resultType, nil
+	}
 	leftTag := C.LLVMBuildExtractValue(s.builder, left, 0, cStringFree("enumcmp.left.tag"))
 	rightTag := C.LLVMBuildExtractValue(s.builder, right, 0, cStringFree("enumcmp.right.tag"))
 	equal := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), leftTag, rightTag, cStringFree("enumcmp.tag.eq"))
@@ -1491,6 +1498,13 @@ func (s *functionState) emitEnumConstructorValue(enumType *semantic.EnumType, va
 	}
 	if len(args) != len(variant.Payload) {
 		return nil, nil, fmt.Errorf("enum constructor %s.%s expects %d arguments, got %d", enumType.Name, variant.Name, len(variant.Payload), len(args))
+	}
+	if enumIsTagOnly(enumType) {
+		tagValue, err := s.enumTagConstant(variant.Tag)
+		if err != nil {
+			return nil, nil, err
+		}
+		return tagValue, enumType, nil
 	}
 	enumPtr, err := s.emitStackTempZeroed(enumType, "enum.ctor")
 	if err != nil {

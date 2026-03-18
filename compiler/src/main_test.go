@@ -179,7 +179,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			path: filepath.Join(repoRoot, "Code", "test_programs", "frontend_lexer.llcontext"),
 			checks: []string{
 				"%FrontendPos = type { i64, i64, i64 }",
-				"%FrontendToken = type { %FrontendTokenKind, %FrontendPos, %StringView, %StringView }",
+				"%FrontendToken = type { i32, %FrontendPos, %StringView, %StringView }",
 				"define i64 @frontend_advance_char(ptr",
 				"define %FrontendToken @frontend_next_token(ptr",
 				"define %DynArray__FrontendToken @frontend_tokenize(ptr",
@@ -192,7 +192,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			path: filepath.Join(repoRoot, "Code", "test_programs", "frontend_stress.llcontext"),
 			checks: []string{
 				"%SourceSpan = type { i64, i64 }",
-				"%Token = type { %TokenKind, %SourceSpan, ptr }",
+				"%Token = type { i32, %SourceSpan, ptr }",
 				"%DynDict__Symbol = type { ptr, i64, i64, i64, ptr }",
 				"%Scope = type { ptr, %DynDict__Symbol, i64 }",
 				"%ParserState = type { %DynArrayView, i64, ptr }",

@@ -483,13 +483,17 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 	if err != nil {
 		return err
 	}
-	enumPtr, err := s.emitStackTempValue(enumValue, enumType, "match.value")
-	if err != nil {
-		return err
-	}
-	tagValue, err := s.loadEnumTag(enumPtr, enumType)
-	if err != nil {
-		return err
+	var enumPtr C.LLVMValueRef
+	tagValue := enumValue
+	if !enumIsTagOnly(enumType) {
+		enumPtr, err = s.emitStackTempValue(enumValue, enumType, "match.value")
+		if err != nil {
+			return err
+		}
+		tagValue, err = s.loadEnumTag(enumPtr, enumType)
+		if err != nil {
+			return err
+		}
 	}
 	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.end"))
 	covered := map[string]bool{}
@@ -595,6 +599,13 @@ func (s *functionState) bindMatchPattern(enumPtr C.LLVMValueRef, enumType *seman
 }
 
 func (s *functionState) loadEnumTag(enumPtr C.LLVMValueRef, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
+	if enumIsTagOnly(enumType) {
+		tagType, err := s.g.lowerBuiltin("u32")
+		if err != nil {
+			return nil, err
+		}
+		return C.LLVMBuildLoad2(s.builder, tagType, enumPtr, cStringFree("match.tag.value")), nil
+	}
 	enumLLVMType, err := s.g.lowerType(enumType)
 	if err != nil {
 		return nil, err
@@ -632,6 +643,9 @@ func (s *functionState) loadEnumVariantPayload(enumPtr C.LLVMValueRef, enumType 
 }
 
 func (s *functionState) enumPayloadPtr(enumPtr C.LLVMValueRef, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
+	if enumIsTagOnly(enumType) {
+		return nil, fmt.Errorf("enum %s has no lowered payload storage", enumType.Name)
+	}
 	enumLLVMType, err := s.g.lowerType(enumType)
 	if err != nil {
 		return nil, err

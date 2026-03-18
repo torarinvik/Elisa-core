@@ -5,6 +5,15 @@ package backend
 /*
 #include <stdlib.h>
 #include <llvm-c/Core.h>
+
+static void llcontextAddAlwaysInlineAttr(LLVMContextRef Ctx, LLVMValueRef Fn) {
+	unsigned Kind = LLVMGetEnumAttributeKindForName("alwaysinline", 12);
+	if (Kind == 0) {
+		return;
+	}
+	LLVMAttributeRef Attr = LLVMCreateEnumAttribute(Ctx, Kind, 0);
+	LLVMAddAttributeAtIndex(Fn, LLVMAttributeFunctionIndex, Attr);
+}
 */
 import "C"
 
@@ -182,6 +191,16 @@ func (g *llvmGenerator) setDefinedFunctionLinkage(name string, value C.LLVMValue
 		linkage = C.LLVMLinkage(C.LLVMExternalLinkage)
 	}
 	C.LLVMSetLinkage(value, linkage)
+	if linkage == C.LLVMLinkage(C.LLVMPrivateLinkage) {
+		g.addAlwaysInlineAttribute(value)
+	}
+}
+
+func (g *llvmGenerator) addAlwaysInlineAttribute(fn C.LLVMValueRef) {
+	if g == nil || g.context == nil || fn == nil {
+		return
+	}
+	C.llcontextAddAlwaysInlineAttr(g.context, fn)
 }
 
 func (g *llvmGenerator) lookupIntrinsic(name string, fn *semantic.FuncType) (C.uint, []C.LLVMTypeRef, bool, error) {
@@ -402,6 +421,9 @@ func (g *llvmGenerator) ensureStructBody(name string, st *semantic.StructType) (
 }
 
 func (g *llvmGenerator) ensureEnumBody(name string, enum *semantic.EnumType) (C.LLVMTypeRef, error) {
+	if enumIsTagOnly(enum) {
+		return g.lowerBuiltin("u32")
+	}
 	ty, err := g.ensureNamedStructType(name)
 	if err != nil {
 		return nil, err
@@ -432,6 +454,18 @@ func (g *llvmGenerator) ensureEnumBody(name string, enum *semantic.EnumType) (C.
 	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
 	g.structBodies[name] = true
 	return ty, nil
+}
+
+func enumIsTagOnly(enum *semantic.EnumType) bool {
+	if enum == nil {
+		return false
+	}
+	for _, variant := range enum.Variants {
+		if variant != nil && len(variant.Payload) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func (g *llvmGenerator) enumVariantPayloadSlots(variant *semantic.EnumVariant) (uint64, error) {

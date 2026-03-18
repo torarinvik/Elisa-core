@@ -951,6 +951,43 @@ def compare_payload() -> bool:
 	}
 }
 
+func TestGenerateLLVMIRLowersPayloadlessEnumsAsPlainTags(t *testing.T) {
+	src := `enum TokenKind:
+	Ident
+	Region
+	Destroy
+	New
+
+def is_region(kind: TokenKind) -> bool:
+	return kind == TokenKind.Region
+
+def next_kind() -> TokenKind:
+	return TokenKind.Destroy
+`
+	result := parseAndAnalyze(t, "backend_payloadless_enum_tags.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"define i1 @is_region(i32",
+		"define i32 @next_kind()",
+		"icmp eq i32",
+		"ret i32 2",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	for _, bad := range []string{"%TokenKind = type", "[0 x i64]", "extractvalue %TokenKind"} {
+		if strings.Contains(output, bad) {
+			t.Fatalf("expected payloadless enum lowering to avoid %q, got:\n%s", bad, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersDictSurfaceTypesViaDynDictCarrier(t *testing.T) {
 	src := `extern take_runtime(values: DynDict[i32]) -> void
 extern make_runtime() -> DynDict[i32]
@@ -1040,7 +1077,7 @@ func TestGenerateLLVMIRLowersFrontendStressFixture(t *testing.T) {
 
 	checks := []string{
 		"%SourceSpan = type { i64, i64 }",
-		"%Token = type { %TokenKind, %SourceSpan, ptr }",
+		"%Token = type { i32, %SourceSpan, ptr }",
 		"%DynDict__Symbol = type { ptr, i64, i64, i64, ptr }",
 		"%Scope = type { ptr, %DynDict__Symbol, i64 }",
 		"%ParserState = type { %DynArrayView, i64, ptr }",
