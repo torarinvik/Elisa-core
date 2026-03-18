@@ -1181,7 +1181,7 @@ def fold() -> int:
 	}
 
 	checks := []string{
-		"%Expr__Store = type { ptr, i64 }",
+		"%Expr__Store = type { ptr, i64, ptr }",
 		"%Expr = type { i32, [2 x i64] }",
 		"define i64 @fold()",
 		"call ptr @new_region(i64 1024)",

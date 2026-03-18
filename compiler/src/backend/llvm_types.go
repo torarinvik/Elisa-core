@@ -475,7 +475,7 @@ func (g *llvmGenerator) ensurePackedEnumStoreCarrierType(storeType *semantic.Pac
 	if err != nil {
 		return nil, err
 	}
-	fields := []C.LLVMTypeRef{C.LLVMPointerTypeInContext(g.context, 0), usizeType}
+	fields := []C.LLVMTypeRef{C.LLVMPointerTypeInContext(g.context, 0), usizeType, C.LLVMPointerTypeInContext(g.context, 0)}
 	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
 	g.structBodies[name] = true
 	return ty, nil

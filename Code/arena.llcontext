@@ -40,6 +40,10 @@ repr(c) struct ArenaMark:
     region: any Region&?
     count: usize
 
+repr(c) struct PackedStoreState:
+    region: mutable any Region&?
+    region_index: mutable usize
+
 repr(c) struct DynArray[T]:
     items: mutable any T&?
     count: mutable usize
@@ -325,14 +329,28 @@ def arena_memdup(a: any Arena&, data: any void&, size: usize) -> any void&:
 def packed_store_region_data(r: any Region&) -> any u8&:
     return (r.cast[any u8&]() + sizeof(Region)).cast[any u8&]()
 
-def ctx_packed_store_alloc(a: any Arena&, size_bytes: usize) -> uintptr:
+def ctx_packed_store_state_new(a: any Arena&) -> any void&:
+    state: any PackedStoreState& = arena_alloc(a, sizeof(PackedStoreState)).cast[any PackedStoreState&]()
+    state.region <- a.end
+    state.region_index <- a.end_index
+    return state.cast[any void&]()
+
+def ctx_packed_store_alloc(a: any Arena&, size_bytes: usize, state_bits: any void&) -> uintptr:
+    assert state_bits != null
+
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
     ptr: any void& = arena_alloc(a, size_bytes)
     assert a.end != null
 
-    data_base: any u8& = packed_store_region_data(a.end)
+    state.region <- a.end
+    state.region_index <- a.end_index
+
+    assert state.region != null
+
+    data_base: any u8& = packed_store_region_data(state.region)
     offset_bytes: uintptr = ptr.cast[any u8&]().uintptr() - data_base.uintptr()
     offset_words: uintptr = offset_bytes / sizeof(uintptr).uintptr()
-    return (a.end_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
+    return (state.region_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
 
 def ctx_packed_store_encode(a: any Arena&, ptr: any void&) -> uintptr:
     raw: uintptr = ptr.cast[any u8&]().uintptr()
