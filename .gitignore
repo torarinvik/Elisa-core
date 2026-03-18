@@ -6,6 +6,4 @@ Code/benchmarks/reduce_sum_u64_bench_O0
 Code/benchmarks/reduce_sum_u64_bench_O2
 Code/benchmarks/reduce_sum_u64_bench_O3
 Code/test_programs/mutating_fuzzer_temp.llcontext
-/compiler/.tmp_opt_inspect
-/compiler/.tmp_frontend_compare
-/compiler/.tmp_frontend_compare_after_inline
+.*/ 

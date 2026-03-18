@@ -673,6 +673,18 @@ func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helpe
 	if swap {
 		firstExpr, secondExpr = secondExpr, firstExpr
 	}
+	if helperName == "ctx_stage1rt_string_view_eq" {
+		if literalText, ok := s.staticCStringLiteral(secondExpr); ok {
+			cmp, err := s.emitStringViewStaticLiteralEqual(firstExpr, firstType, secondExpr, literalText)
+			if err != nil {
+				return nil, nil, err
+			}
+			if expr.Op == lexer.TOKEN_BANGEQ {
+				cmp = C.LLVMBuildNot(s.builder, cmp, cStringFree("strcmp.lit.not"))
+			}
+			return cmp, s.g.result.NamedTypes["bool"], nil
+		}
+	}
 	firstValue, _, err := s.emitExpr(firstExpr, firstType)
 	if err != nil {
 		return nil, nil, err
@@ -708,6 +720,286 @@ func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helpe
 	}
 	cmp := C.LLVMBuildICmp(s.builder, pred, call, zero, cStringFree("strcmp"))
 	return cmp, s.g.result.NamedTypes["bool"], nil
+}
+
+func (s *functionState) emitSpecializedRuntimeCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if value, actualType, handled, err := s.emitSpecializedStringViewLiteralCall(expr); handled {
+		return value, actualType, true, err
+	}
+	ident, ok := expr.Func.(*ast.Ident)
+	if !ok {
+		return nil, nil, false, nil
+	}
+	if ident.Name != "ctx_stage0_string_view_eq" && ident.Name != "ctx_stage1rt_string_view_eq" {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 2 {
+		return nil, nil, false, nil
+	}
+	literalText, ok := s.staticCStringLiteral(expr.Args[1])
+	if !ok {
+		return nil, nil, false, nil
+	}
+	firstType := s.exprType(expr.Args[0])
+	if classifyRuntimeStringCompareKind(firstType) != runtimeStringCompareView {
+		return nil, nil, false, nil
+	}
+	cmp, err := s.emitStringViewStaticLiteralEqual(expr.Args[0], firstType, expr.Args[1], literalText)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	intType := s.g.result.NamedTypes["int"]
+	intLLVMType, err := s.g.lowerType(intType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	return C.LLVMBuildZExt(s.builder, cmp, intLLVMType, cStringFree("svlit.eq.int")), intType, true, nil
+}
+
+func (s *functionState) emitSpecializedStringViewLiteralCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	ident, ok := expr.Func.(*ast.Ident)
+	if !ok {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 2 {
+		return nil, nil, false, nil
+	}
+	viewArgIndex, literalArgIndex, returnsInt, ok := s.specializedStringViewLiteralCallShape(ident.Name)
+	if !ok {
+		return nil, nil, false, nil
+	}
+	literalText, ok := s.staticCStringLiteral(expr.Args[literalArgIndex])
+	if !ok {
+		return nil, nil, false, nil
+	}
+	viewType := s.exprType(expr.Args[viewArgIndex])
+	if classifyRuntimeStringCompareKind(viewType) != runtimeStringCompareView {
+		return nil, nil, false, nil
+	}
+	cmp, err := s.emitStringViewStaticLiteralEqual(expr.Args[viewArgIndex], viewType, expr.Args[literalArgIndex], literalText)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if !returnsInt {
+		return cmp, s.exprType(expr), true, nil
+	}
+	intType := s.g.result.NamedTypes["int"]
+	intLLVMType, err := s.g.lowerType(intType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	return C.LLVMBuildZExt(s.builder, cmp, intLLVMType, cStringFree("svlit.eq.int")), intType, true, nil
+}
+
+func (s *functionState) specializedStringViewLiteralCallShape(funcName string) (int, int, bool, bool) {
+	if funcName == "ctx_stage0_string_view_eq" || funcName == "ctx_stage1rt_string_view_eq" {
+		return 0, 1, true, true
+	}
+	sym, ok := s.g.result.GlobalScope.Lookup(funcName)
+	if !ok {
+		return 0, 0, false, false
+	}
+	decl, ok := sym.Node.(*ast.FuncDecl)
+	if !ok || len(decl.Params) != 2 || len(decl.Body) != 1 {
+		return 0, 0, false, false
+	}
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok || ret.Value == nil {
+		return 0, 0, false, false
+	}
+	callExpr, ok := s.boolStringViewLiteralWrapperCall(ret.Value, decl.Params[0].Name, decl.Params[1].Name)
+	if !ok || callExpr == nil {
+		return 0, 0, false, false
+	}
+	callee, ok := callExpr.Func.(*ast.Ident)
+	if !ok {
+		return 0, 0, false, false
+	}
+	if callee.Name != "ctx_stage0_string_view_eq" && callee.Name != "ctx_stage1rt_string_view_eq" {
+		return 0, 0, false, false
+	}
+	return 0, 1, false, true
+}
+
+func (s *functionState) boolStringViewLiteralWrapperCall(expr ast.Expr, viewParam string, literalParam string) (*ast.CallExpr, bool) {
+	binary, ok := expr.(*ast.BinaryExpr)
+	if !ok {
+		return nil, false
+	}
+	if binary.Op != lexer.TOKEN_EQEQ && binary.Op != lexer.TOKEN_BANGEQ {
+		return nil, false
+	}
+	callExpr, intLit, ok := unwrapCallComparedToZero(binary.Left, binary.Right)
+	if !ok {
+		callExpr, intLit, ok = unwrapCallComparedToZero(binary.Right, binary.Left)
+	}
+	if !ok || intLit == nil || intLit.Value != "0" {
+		return nil, false
+	}
+	if binary.Op != lexer.TOKEN_BANGEQ {
+		return nil, false
+	}
+	if !matchesStringViewLiteralWrapperArgs(callExpr, viewParam, literalParam) {
+		return nil, false
+	}
+	return callExpr, true
+}
+
+func unwrapCallComparedToZero(left ast.Expr, right ast.Expr) (*ast.CallExpr, *ast.IntLit, bool) {
+	callExpr, ok := left.(*ast.CallExpr)
+	if !ok {
+		return nil, nil, false
+	}
+	intLit, ok := right.(*ast.IntLit)
+	if !ok {
+		return nil, nil, false
+	}
+	return callExpr, intLit, true
+}
+
+func matchesStringViewLiteralWrapperArgs(callExpr *ast.CallExpr, viewParam string, literalParam string) bool {
+	if callExpr == nil || len(callExpr.Args) != 2 {
+		return false
+	}
+	viewIdent, ok := callExpr.Args[0].(*ast.Ident)
+	if !ok || viewIdent.Name != viewParam {
+		return false
+	}
+	return exprIsParamOrCastOfParam(callExpr.Args[1], literalParam)
+}
+
+func exprIsParamOrCastOfParam(expr ast.Expr, paramName string) bool {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return n.Name == paramName
+	case *ast.ParenExpr:
+		return exprIsParamOrCastOfParam(n.Inner, paramName)
+	case *ast.CastExpr:
+		return exprIsParamOrCastOfParam(n.Operand, paramName)
+	default:
+		return false
+	}
+}
+
+func (s *functionState) emitStringViewStaticLiteralEqual(viewExpr ast.Expr, viewType semantic.Type, literalExpr ast.Expr, literalText string) (C.LLVMValueRef, error) {
+	viewValue, _, err := s.emitExpr(viewExpr, viewType)
+	if err != nil {
+		return nil, err
+	}
+	viewData := C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree("svlit.data"))
+	viewLen := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree("svlit.len"))
+	literalLen := len([]byte(literalText))
+	lenLLVMType, err := s.g.lowerBuiltin("i64")
+	if err != nil {
+		return nil, err
+	}
+	lenValue := C.LLVMConstInt(lenLLVMType, C.ulonglong(literalLen), 0)
+	lenEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), viewLen, lenValue, cStringFree("svlit.len.eq"))
+	if literalLen == 0 {
+		return lenEqual, nil
+	}
+
+	entryBlock := C.LLVMGetInsertBlock(s.builder)
+	compareBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("svlit.compare"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("svlit.merge"))
+	C.LLVMBuildCondBr(s.builder, lenEqual, compareBB, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, compareBB)
+	var compareValue C.LLVMValueRef
+	if literalLen <= 8 {
+		compareValue, err = s.emitStringViewLiteralBytesEqual(viewData, literalText)
+	} else {
+		literalValue, _, emitErr := s.emitExpr(literalExpr, nil)
+		if emitErr != nil {
+			return nil, emitErr
+		}
+		compareValue, err = s.emitMemcmpEqual(viewData, literalValue, literalLen)
+	}
+	if err != nil {
+		return nil, err
+	}
+	compareEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	boolType := C.LLVMInt1TypeInContext(s.g.context)
+	phi := C.LLVMBuildPhi(s.builder, boolType, cStringFree("svlit.eq"))
+	falseValue := C.LLVMConstInt(boolType, 0, 0)
+	values := []C.LLVMValueRef{falseValue, compareValue}
+	blocks := []C.LLVMBasicBlockRef{entryBlock, compareEnd}
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	return phi, nil
+}
+
+func (s *functionState) emitStringViewLiteralBytesEqual(viewData C.LLVMValueRef, literalText string) (C.LLVMValueRef, error) {
+	boolType := C.LLVMInt1TypeInContext(s.g.context)
+	byteType := C.LLVMInt8TypeInContext(s.g.context)
+	indexType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return nil, err
+	}
+	result := C.LLVMConstInt(boolType, 1, 0)
+	for i, b := range []byte(literalText) {
+		indexValue := C.LLVMConstInt(indexType, C.ulonglong(i), 0)
+		indices := []C.LLVMValueRef{indexValue}
+		bytePtr := C.LLVMBuildGEP2(s.builder, byteType, viewData, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("svlit.byte.ptr"))
+		byteValue := C.LLVMBuildLoad2(s.builder, byteType, bytePtr, cStringFree("svlit.byte"))
+		literalValue := C.LLVMConstInt(byteType, C.ulonglong(b), 0)
+		byteEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), byteValue, literalValue, cStringFree("svlit.byte.eq"))
+		result = C.LLVMBuildAnd(s.builder, result, byteEqual, cStringFree("svlit.bytes.and"))
+	}
+	return result, nil
+}
+
+func (s *functionState) emitMemcmpEqual(left C.LLVMValueRef, right C.LLVMValueRef, length int) (C.LLVMValueRef, error) {
+	voidType := s.g.result.NamedTypes["void"]
+	usizeType := s.g.result.NamedTypes["usize"]
+	intType := s.g.result.NamedTypes["int"]
+	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	helperType := &semantic.FuncType{
+		Name:   "memcmp",
+		Params: []semantic.Type{voidRefType, voidRefType, usizeType},
+		Return: intType,
+	}
+	callee, err := s.g.ensureFunctionDeclared("memcmp", helperType)
+	if err != nil {
+		return nil, err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, err
+	}
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, err
+	}
+	lengthValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(length), 0)
+	call := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{left, right, lengthValue}, "svlit.memcmp")
+	intLLVMType, err := s.g.lowerType(intType)
+	if err != nil {
+		return nil, err
+	}
+	zero := C.LLVMConstInt(intLLVMType, 0, 0)
+	return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), call, zero, cStringFree("svlit.memcmp.eq")), nil
+}
+
+func (s *functionState) staticCStringLiteral(expr ast.Expr) (string, bool) {
+	switch n := expr.(type) {
+	case *ast.StringLit:
+		return n.Value, true
+	case *ast.ParenExpr:
+		return s.staticCStringLiteral(n.Inner)
+	case *ast.CastExpr:
+		return s.staticCStringLiteral(n.Operand)
+	case *ast.Ident:
+		value, ok := s.g.constValue(n.Name)
+		if !ok || value.Kind != semantic.ConstString {
+			return "", false
+		}
+		return value.String, true
+	default:
+		return "", false
+	}
 }
 
 func (s *functionState) emitLogicalExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, semantic.Type, error) {
@@ -815,6 +1107,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 			return nil, nil, fmt.Errorf("unknown enum constructor")
 		}
 		return s.emitEnumConstructorValue(enumType, variant, expr.Args)
+	}
+	if value, actualType, handled, err := s.emitSpecializedRuntimeCall(expr); handled {
+		return value, actualType, err
 	}
 	callee, funcType, err := s.resolveCallTarget(expr)
 	if err != nil {

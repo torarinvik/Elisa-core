@@ -1508,6 +1508,107 @@ def different_views(left: StringView, right: StringView) -> bool:
 	}
 }
 
+func TestGenerateLLVMIRSpecializesTinyStringViewLiteralEquality(t *testing.T) {
+	src := `def same_empty(view: StringView) -> bool:
+	return view == ""
+
+def same_short(view: StringView) -> bool:
+	return view == "def"
+
+def differs_short(view: StringView) -> bool:
+	return view != "region"
+`
+	result := parseAndAnalyze(t, "backend_runtime_string_literal_eq_tiny.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%StringView = type { ptr, i64 }",
+		"define i1 @same_empty(%StringView",
+		"define i1 @same_short(%StringView",
+		"define i1 @differs_short(%StringView",
+		"extractvalue %StringView",
+		"getelementptr i8, ptr",
+		"load i8, ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	for _, bad := range []string{"ctx_stage1rt_string_view_eq", "@memcmp("} {
+		if strings.Contains(output, bad) {
+			t.Fatalf("expected tiny StringView literal equality to avoid %q, got:\n%s", bad, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRSpecializesLongStringViewLiteralHelperCalls(t *testing.T) {
+	src := `extern ctx_stage0_string_view_eq(view: StringView, other: any u8&?) -> int
+
+def same_long(view: StringView) -> bool:
+	return ctx_stage0_string_view_eq(view, "destroy_region".cast[any u8&]()) != 0
+`
+	result := parseAndAnalyze(t, "backend_runtime_string_literal_eq_long.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%StringView = type { ptr, i64 }",
+		"define i1 @same_long(%StringView",
+		"declare i64 @memcmp(ptr, ptr, i64)",
+		"call i64 @memcmp(ptr",
+		"zext i1",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "call i64 @ctx_stage0_string_view_eq") {
+		t.Fatalf("expected literal helper call lowering to avoid calling ctx_stage0_string_view_eq, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRSpecializesStringViewLiteralWrapperCalls(t *testing.T) {
+	src := `extern ctx_stage0_string_view_eq(view: StringView, other: any u8&?) -> int
+
+def frontend_sv_eq_literal(view: StringView, literal: static u8&) -> bool:
+	return ctx_stage0_string_view_eq(view, literal.cast[any u8&]()) != 0
+
+def same_short(view: StringView) -> bool:
+	return frontend_sv_eq_literal(view, "def")
+
+def same_long(view: StringView) -> bool:
+	return frontend_sv_eq_literal(view, "destroy_region")
+`
+	result := parseAndAnalyze(t, "backend_runtime_string_literal_wrapper_eq.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"define i1 @same_short(%StringView",
+		"define i1 @same_long(%StringView",
+		"declare i64 @memcmp(ptr, ptr, i64)",
+		"call i64 @memcmp(ptr",
+		"load i8, ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "call i1 @frontend_sv_eq_literal") {
+		t.Fatalf("expected wrapper literal lowering to inline away frontend_sv_eq_literal at call sites, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersDStrLenFieldViaRuntimeHelper(t *testing.T) {
 	src := `def text_len(text: dstr[row]) -> i64:
     return text.len
