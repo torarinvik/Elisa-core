@@ -650,10 +650,14 @@ func (s *functionState) decodePackedEnumHandleWithStore(handleValue C.LLVMValueR
 		if err != nil {
 			return nil, err
 		}
+		stateValue, err := s.emitPackedStoreStateValueNamed(store.value, store.typ, "packed.decode.store.state")
+		if err != nil {
+			return nil, err
+		}
 		arenaType := s.g.result.NamedTypes["Arena"]
 		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 		voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-		helperType := &semantic.FuncType{Name: "ctx_packed_store_decode", Params: []semantic.Type{arenaRefType, s.g.result.NamedTypes["uintptr"]}, Return: voidRefType}
+		helperType := &semantic.FuncType{Name: "ctx_packed_store_decode", Params: []semantic.Type{arenaRefType, s.g.result.NamedTypes["uintptr"], voidRefType}, Return: voidRefType}
 		callee, err := s.g.ensureFunctionDeclared("ctx_packed_store_decode", helperType)
 		if err != nil {
 			return nil, err
@@ -666,7 +670,7 @@ func (s *functionState) decodePackedEnumHandleWithStore(handleValue C.LLVMValueR
 		if err != nil {
 			return nil, err
 		}
-		return s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, coercedHandle}, "packed.handle.decode"), nil
+		return s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, coercedHandle, stateValue}, "packed.handle.decode"), nil
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedEnumABI)
 	}
@@ -1388,7 +1392,7 @@ func (s *functionState) emitPackedStoreValue(arenaExpr ast.Expr, storeType *sema
 		arenaType := s.g.result.NamedTypes["Arena"]
 		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 		voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-		stateHelperType := &semantic.FuncType{Name: "ctx_packed_store_state_new", Params: []semantic.Type{arenaRefType}, Return: voidRefType}
+		stateHelperType := &semantic.FuncType{Name: "ctx_packed_store_state_new", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
 		stateCallee, err := s.g.ensureFunctionDeclared("ctx_packed_store_state_new", stateHelperType)
 		if err != nil {
 			return nil, err
@@ -1397,7 +1401,7 @@ func (s *functionState) emitPackedStoreValue(arenaExpr ast.Expr, storeType *sema
 		if err != nil {
 			return nil, err
 		}
-		stateValue := s.buildCall(stateLLVMFnType, stateCallee, []C.LLVMValueRef{arenaPtr}, "packed.store.state")
+		stateValue := s.buildCall(stateLLVMFnType, stateCallee, []C.LLVMValueRef{arenaPtr, rowSizeValue}, "packed.store.state")
 		storeValue := C.LLVMGetUndef(storeLLVMType)
 		storeValue = C.LLVMBuildInsertValue(s.builder, storeValue, arenaPtr, 0, cStringFree("packed.store.arena"))
 		storeValue = C.LLVMBuildInsertValue(s.builder, storeValue, rowSizeValue, 1, cStringFree("packed.store.row_bytes"))

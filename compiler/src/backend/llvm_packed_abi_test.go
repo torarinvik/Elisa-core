@@ -74,18 +74,21 @@ def fold() -> int:
 		"%Expr__Store = type { ptr, i64, ptr }",
 		"define i1 @differs(i64",
 		"icmp ne i64",
+		"declare ptr @ctx_packed_store_state_new(ptr, i64)",
 		"call ptr @ctx_packed_store_state_new(ptr",
 		"call i64 @ctx_packed_store_alloc(ptr %packed.alloc.store.arena, i64 %packed.alloc.store.row_bytes, ptr %packed.alloc.store.state)",
 		"call ptr @ctx_packed_store_decode(ptr %packed.decode.store.arena, i64",
+		"ptr %packed.decode.store.state)",
 		"extractvalue %Expr__Store",
 		"packed.decode.store.arena",
+		"packed.decode.store.state",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
-	for _, bad := range []string{"define i1 @differs(ptr", "icmp ne ptr", "call i64 @ctx_packed_store_encode(", "ptrtoint ptr %packed.alloc to i64", "inttoptr i64"} {
+	for _, bad := range []string{"define i1 @differs(ptr", "icmp ne ptr", "call i64 @ctx_packed_store_encode(", "call ptr @arena_alloc(", "ptrtoint ptr %packed.alloc to i64", "inttoptr i64"} {
 		if strings.Contains(output, bad) {
 			t.Fatalf("expected alternate packed ABI to lower values as integer handles and avoid %q, got:\n%s", bad, output)
 		}

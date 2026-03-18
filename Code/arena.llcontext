@@ -12,6 +12,7 @@ const ARENA_BACKEND: int = ARENA_BACKEND_LIBC_MALLOC
 const ARENA_REGION_DEFAULT_CAPACITY: usize = 8 * 1024
 const ARENA_DA_INIT_CAP: usize = 256
 const ARENA_WASM_PAGE_SIZE: usize = 64 * 1024
+const PACKED_STORE_MIN_ROWS_PER_REGION: usize = 64
 
 const DICT_BUCKET_EMPTY: u8 = 0u8
 const DICT_BUCKET_FULL: u8 = 1u8
@@ -41,8 +42,12 @@ repr(c) struct ArenaMark:
     count: usize
 
 repr(c) struct PackedStoreState:
-    region: mutable any Region&?
-    region_index: mutable usize
+    alloc_region: mutable any Region&?
+    alloc_region_index: mutable usize
+    decode_region: mutable any Region&?
+    decode_region_index: mutable usize
+    row_words: mutable usize
+    preferred_region_capacity: mutable usize
 
 repr(c) struct DynArray[T]:
     items: mutable any T&?
@@ -329,28 +334,90 @@ def arena_memdup(a: any Arena&, data: any void&, size: usize) -> any void&:
 def packed_store_region_data(r: any Region&) -> any u8&:
     return (r.cast[any u8&]() + sizeof(Region)).cast[any u8&]()
 
-def ctx_packed_store_state_new(a: any Arena&) -> any void&:
+def ctx_packed_store_state_new(a: any Arena&, row_bytes: usize) -> any void&:
     state: any PackedStoreState& = arena_alloc(a, sizeof(PackedStoreState)).cast[any PackedStoreState&]()
-    state.region <- a.end
-    state.region_index <- a.end_index
+    row_words: usize = (row_bytes + sizeof(uintptr) - 1) / sizeof(uintptr)
+    preferred_region_capacity: mutable usize = ARENA_REGION_DEFAULT_CAPACITY
+    hinted_capacity: usize = row_words * PACKED_STORE_MIN_ROWS_PER_REGION
+
+    if preferred_region_capacity < hinted_capacity:
+        preferred_region_capacity <- hinted_capacity
+    if preferred_region_capacity < row_words:
+        preferred_region_capacity <- row_words
+
+    state.alloc_region <- a.end
+    state.alloc_region_index <- a.end_index
+    state.decode_region <- a.end
+    state.decode_region_index <- a.end_index
+    state.row_words <- row_words
+    state.preferred_region_capacity <- preferred_region_capacity
     return state.cast[any void&]()
 
 def ctx_packed_store_alloc(a: any Arena&, size_bytes: usize, state_bits: any void&) -> uintptr:
     assert state_bits != null
 
     state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
-    ptr: any void& = arena_alloc(a, size_bytes)
-    assert a.end != null
+    size: usize = (size_bytes + sizeof(uintptr) - 1) / sizeof(uintptr)
 
-    state.region <- a.end
-    state.region_index <- a.end_index
+    if state.row_words < size:
+        state.row_words <- size
 
-    assert state.region != null
+    hinted_capacity: usize = state.row_words * PACKED_STORE_MIN_ROWS_PER_REGION
+    if state.preferred_region_capacity < hinted_capacity:
+        state.preferred_region_capacity <- hinted_capacity
+    if state.preferred_region_capacity < state.row_words:
+        state.preferred_region_capacity <- state.row_words
 
-    data_base: any u8& = packed_store_region_data(state.region)
-    offset_bytes: uintptr = ptr.cast[any u8&]().uintptr() - data_base.uintptr()
+    if state.alloc_region == null:
+        if a.end == null:
+            assert a.begin == null
+
+            capacity: mutable usize = state.preferred_region_capacity
+            if capacity < size:
+                capacity <- size
+
+            a.end as & <- new_region(capacity)
+            a.begin <- a.end
+            a.end_index <- 0
+
+        state.alloc_region <- a.end
+        state.alloc_region_index <- a.end_index
+
+    assert state.alloc_region != null
+
+    while state.alloc_region.count + size > state.alloc_region.capacity and state.alloc_region.next != null:
+        state.alloc_region <- state.alloc_region.next
+        state.alloc_region_index <- state.alloc_region_index + 1
+
+    if state.alloc_region.count + size > state.alloc_region.capacity:
+        assert state.alloc_region.next == null
+
+        capacity: mutable usize = state.preferred_region_capacity
+        grown_capacity: usize = state.alloc_region.capacity * 2
+        if capacity < grown_capacity:
+            capacity <- grown_capacity
+        if capacity < size:
+            capacity <- size
+
+        state.alloc_region.next as & <- new_region(capacity)
+        state.alloc_region <- state.alloc_region.next
+        state.alloc_region_index <- state.alloc_region_index + 1
+        a.end as & <- state.alloc_region
+        a.end_index <- state.alloc_region_index
+
+    data_base: any u8& = packed_store_region_data(state.alloc_region)
+    offset_bytes: uintptr = (state.alloc_region.count * sizeof(uintptr)).uintptr()
+    ptr: any void& = (data_base + state.alloc_region.count * sizeof(uintptr)).cast[any void&]()
+    state.alloc_region.count <- state.alloc_region.count + size
+    state.decode_region <- state.alloc_region
+    state.decode_region_index <- state.alloc_region_index
+
+    if a.end == null:
+        a.end as & <- state.alloc_region
+        a.end_index <- state.alloc_region_index
+
     offset_words: uintptr = offset_bytes / sizeof(uintptr).uintptr()
-    return (state.region_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
+    return (state.alloc_region_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
 
 def ctx_packed_store_encode(a: any Arena&, ptr: any void&) -> uintptr:
     raw: uintptr = ptr.cast[any u8&]().uintptr()
@@ -383,15 +450,43 @@ def ctx_packed_store_encode(a: any Arena&, ptr: any void&) -> uintptr:
 
     panic("packed store encode pointer outside arena")
 
-def ctx_packed_store_decode(a: any Arena&, handle: uintptr) -> any void&:
+def ctx_packed_store_decode(a: any Arena&, handle: uintptr, state_bits: any void&) -> any void&:
     assert handle != 0u64.uintptr()
 
     region_index: usize = (handle >> 32u64.uintptr()).usize()
     offset_words_plus_one: usize = (handle & 0xffffffffu64.uintptr()).usize()
     assert offset_words_plus_one > 0
 
+    if state_bits != null:
+        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+        if state.alloc_region != null and state.alloc_region_index == region_index:
+            offset_words: usize = offset_words_plus_one - 1
+            assert offset_words < state.alloc_region.capacity
+
+            data_base: any u8& = packed_store_region_data(state.alloc_region)
+            return (data_base + offset_words * sizeof(uintptr)).cast[any void&]()
+
+        if state.decode_region != null and state.decode_region_index == region_index:
+            offset_words: usize = offset_words_plus_one - 1
+            assert offset_words < state.decode_region.capacity
+
+            data_base: any u8& = packed_store_region_data(state.decode_region)
+            return (data_base + offset_words * sizeof(uintptr)).cast[any void&]()
+
     r: mutable any Region&? = a.begin
     i: mutable usize = 0
+
+    if state_bits != null:
+        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+        if state.alloc_region != null and state.alloc_region_index < region_index:
+            r <- state.alloc_region
+            i <- state.alloc_region_index
+
+        if state.decode_region != null and state.decode_region_index < region_index:
+            if r == null or state.decode_region_index > i:
+                r <- state.decode_region
+                i <- state.decode_region_index
+
     while i < region_index and r != null:
         r <- r.next
         i <- i + 1
@@ -400,6 +495,11 @@ def ctx_packed_store_decode(a: any Arena&, handle: uintptr) -> any void&:
 
     offset_words: usize = offset_words_plus_one - 1
     assert offset_words < r.capacity
+
+    if state_bits != null:
+        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+        state.decode_region <- r
+        state.decode_region_index <- region_index
 
     data_base: any u8& = packed_store_region_data(r)
     return (data_base + offset_words * sizeof(uintptr)).cast[any void&]()
