@@ -160,7 +160,9 @@ def frontend_case_simple_ident() -> bool:
         return false
     if not frontend_expect_kind(tokens, 2u, FrontendTokenKind.Eof):
         return false
-    return frontend_expect_text(tokens, 0u, "hello")
+    if 0u >= tokens.count:
+        return false
+    return frontend_sv_eq_literal(tokens[0u].text, "hello")
 
 
 def frontend_case_arrow_ops() -> bool:
@@ -192,9 +194,13 @@ def frontend_case_number_literals() -> bool:
         return false
     if not frontend_expect_kind(tokens, 5u, FrontendTokenKind.Eof):
         return false
-    if not frontend_expect_suffix(tokens, 2u, "u64"):
+    if 2u >= tokens.count:
         return false
-    return frontend_expect_suffix(tokens, 3u, "i32")
+    if not frontend_sv_eq_literal(tokens[2u].suffix, "u64"):
+        return false
+    if 3u >= tokens.count:
+        return false
+    return frontend_sv_eq_literal(tokens[3u].suffix, "i32")
 
 
 def frontend_case_indent_dedent() -> bool:
