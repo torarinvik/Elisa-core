@@ -33,6 +33,39 @@ const (
 	packedEnumABIWordHandle
 )
 
+type PackedEnumABI string
+
+const (
+	PackedEnumABIRowHandle  PackedEnumABI = "row-handle"
+	PackedEnumABIWordHandle PackedEnumABI = "word-handle"
+)
+
+func ParsePackedEnumABI(value string) (PackedEnumABI, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", string(PackedEnumABIRowHandle), "row", "rowhandle":
+		return PackedEnumABIRowHandle, nil
+	case string(PackedEnumABIWordHandle), "word", "wordhandle":
+		return PackedEnumABIWordHandle, nil
+	default:
+		return "", fmt.Errorf("unsupported packed enum ABI %q (expected %q or %q)", value, PackedEnumABIRowHandle, PackedEnumABIWordHandle)
+	}
+}
+
+func (abi PackedEnumABI) mode() (packedEnumABIMode, error) {
+	normalized, err := ParsePackedEnumABI(string(abi))
+	if err != nil {
+		return packedEnumABIRowHandle, err
+	}
+	switch normalized {
+	case PackedEnumABIRowHandle:
+		return packedEnumABIRowHandle, nil
+	case PackedEnumABIWordHandle:
+		return packedEnumABIWordHandle, nil
+	default:
+		return packedEnumABIRowHandle, fmt.Errorf("unsupported packed enum ABI %q", abi)
+	}
+}
+
 func isVoidRefLikeType(t semantic.Type) bool {
 	ref, ok := t.(*semantic.RefType)
 	if !ok {

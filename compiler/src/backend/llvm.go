@@ -35,7 +35,11 @@ func GenerateLLVMIR(result *semantic.Result) (string, error) {
 // GenerateLLVMIRWithOpt lowers the analyzed program and optionally optimizes the
 // module before returning textual LLVM IR.
 func GenerateLLVMIRWithOpt(result *semantic.Result, optLevel OptimizationLevel) (string, error) {
-	g, err := compileLLVMModule(result, optLevel)
+	return GenerateLLVMIRWithOptAndPackedABI(result, optLevel, PackedEnumABIRowHandle)
+}
+
+func GenerateLLVMIRWithOptAndPackedABI(result *semantic.Result, optLevel OptimizationLevel, packedABI PackedEnumABI) (string, error) {
+	g, err := compileLLVMModule(result, optLevel, packedABI)
 	if err != nil {
 		return "", err
 	}
@@ -46,11 +50,17 @@ func GenerateLLVMIRWithOpt(result *semantic.Result, optLevel OptimizationLevel) 
 	return g.printModule(), nil
 }
 
-func compileLLVMModule(result *semantic.Result, optLevel OptimizationLevel) (*llvmGenerator, error) {
+func compileLLVMModule(result *semantic.Result, optLevel OptimizationLevel, packedABI PackedEnumABI) (*llvmGenerator, error) {
 	g, err := newLLVMGenerator(result)
 	if err != nil {
 		return nil, err
 	}
+	mode, err := packedABI.mode()
+	if err != nil {
+		g.dispose()
+		return nil, err
+	}
+	g.packedEnumABI = mode
 	g.preferPrivateLinkage = optLevel != OptimizationLevel0
 	if err := g.emitModule(); err != nil {
 		g.dispose()

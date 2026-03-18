@@ -79,9 +79,9 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", emitTest)
 			return 1
 		}
-		return executeSelectedTests(options.filename, result, options.filter, effectiveOptimizationLevel(options), stdout, stderr)
+		return executeSelectedTests(options.filename, result, options.filter, effectiveOptimizationLevel(options), options.packedABI, stdout, stderr)
 	case emitLLVM:
-		output, err := backend.GenerateLLVMIRWithOpt(result, effectiveOptimizationLevel(options))
+		output, err := backend.GenerateLLVMIRWithOptAndPackedABI(result, effectiveOptimizationLevel(options), options.packedABI)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
@@ -111,13 +111,13 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 		}
 		return 0
 	case emitBitcode:
-		if err := backend.WriteLLVMBitcodeFileWithOpt(result, outputPathForEmit(options.filename, options.output, ".bc"), effectiveOptimizationLevel(options)); err != nil {
+		if err := backend.WriteLLVMBitcodeFileWithOptAndPackedABI(result, outputPathForEmit(options.filename, options.output, ".bc"), effectiveOptimizationLevel(options), options.packedABI); err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
 		}
 		return 0
 	case emitObject:
-		if err := backend.WriteLLVMObjectFileWithOpt(result, outputPathForEmit(options.filename, options.output, ".o"), effectiveOptimizationLevel(options)); err != nil {
+		if err := backend.WriteLLVMObjectFileWithOptAndPackedABI(result, outputPathForEmit(options.filename, options.output, ".o"), effectiveOptimizationLevel(options), options.packedABI); err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
 		}
@@ -177,12 +177,13 @@ type cliOptions struct {
 	filename    string
 	output      string
 	filter      string
+	packedABI   backend.PackedEnumABI
 	optLevel    backend.OptimizationLevel
 	hasOptLevel bool
 }
 
 func parseArgs(args []string) (cliOptions, error) {
-	options := cliOptions{emit: emitAST}
+	options := cliOptions{emit: emitAST, packedABI: backend.PackedEnumABIRowHandle}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
@@ -227,6 +228,22 @@ func parseArgs(args []string) (cliOptions, error) {
 				return cliOptions{}, fmt.Errorf("missing value after -filter")
 			}
 			options.filter = strings.TrimSpace(args[i])
+		case strings.HasPrefix(arg, "-packed-abi="):
+			abi, err := backend.ParsePackedEnumABI(strings.TrimSpace(strings.TrimPrefix(arg, "-packed-abi=")))
+			if err != nil {
+				return cliOptions{}, err
+			}
+			options.packedABI = abi
+		case arg == "-packed-abi":
+			i++
+			if i >= len(args) {
+				return cliOptions{}, fmt.Errorf("missing value after -packed-abi")
+			}
+			abi, err := backend.ParsePackedEnumABI(strings.TrimSpace(args[i]))
+			if err != nil {
+				return cliOptions{}, err
+			}
+			options.packedABI = abi
 		case strings.HasPrefix(arg, "-o="):
 			options.output = strings.TrimSpace(strings.TrimPrefix(arg, "-o="))
 		case arg == "-o":
@@ -255,7 +272,7 @@ func parseArgs(args []string) (cliOptions, error) {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprintf(w, "Usage: llcontext [-emit %s|%s|%s|%s|%s|%s|%s|%s|%s|%s] [-filter <substring>] [-O0|-O2|-O3] [-o <output>] <file.llcontext>\n", emitAST, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitHeader, emitBitcode, emitObject)
+	fmt.Fprintf(w, "Usage: llcontext [-emit %s|%s|%s|%s|%s|%s|%s|%s|%s|%s] [-filter <substring>] [-packed-abi %s|%s] [-O0|-O2|-O3] [-o <output>] <file.llcontext>\n", emitAST, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitHeader, emitBitcode, emitObject, backend.PackedEnumABIRowHandle, backend.PackedEnumABIWordHandle)
 }
 
 func parseOptimizationArg(value string) (backend.OptimizationLevel, error) {

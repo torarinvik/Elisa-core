@@ -410,6 +410,63 @@ func TestParseArgsAcceptsOptimizationShorthands(t *testing.T) {
 	}
 }
 
+func TestParseArgsAcceptsPackedABI(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want backend.PackedEnumABI
+	}{
+		{name: "equals", args: []string{"-packed-abi=word-handle", "fixture.llcontext"}, want: backend.PackedEnumABIWordHandle},
+		{name: "separate", args: []string{"-packed-abi", "row-handle", "fixture.llcontext"}, want: backend.PackedEnumABIRowHandle},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			options, err := parseArgs(test.args)
+			if err != nil {
+				t.Fatalf("parseArgs returned error: %v", err)
+			}
+			if options.packedABI != test.want {
+				t.Fatalf("expected packed ABI %q, got %q", test.want, options.packedABI)
+			}
+		})
+	}
+}
+
+func TestRunCLICompilesJSONParserWithPackedWordHandleABI(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.llcontext")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", "-packed-abi", "word-handle", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	checks := []string{
+		"%JsonNode__Store = type { ptr, i64, ptr }",
+		"define i64 @json_parse_value_node(ptr",
+		"define i64 @json_parse_array_node(ptr",
+		"define i64 @json_parse_object_node(ptr",
+		"call i64 @ctx_packed_store_alloc(ptr %packed.alloc.store.arena, i64 %packed.alloc.store.row_bytes, ptr %packed.alloc.store.state)",
+		"call ptr @ctx_packed_store_decode(ptr %packed.decode.store.arena, i64",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	for _, bad := range []string{"define ptr @json_parse_value_node(ptr", "define ptr @json_parse_array_node(ptr", "define ptr @json_parse_object_node(ptr"} {
+		if strings.Contains(output, bad) {
+			t.Fatalf("expected packed word-handle CLI path to avoid %q, got:\n%s", bad, output)
+		}
+	}
+}
+
 func TestEffectiveOptimizationLevelDefaultsByEmitMode(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -83,7 +83,7 @@ func generateTestRunnerSource(inputFile string, result *semantic.Result, filter 
 	return out.String(), nil
 }
 
-func executeSelectedTests(inputFile string, result *semantic.Result, filter string, optLevel backend.OptimizationLevel, stdout io.Writer, stderr io.Writer) int {
+func executeSelectedTests(inputFile string, result *semantic.Result, filter string, optLevel backend.OptimizationLevel, packedABI backend.PackedEnumABI, stdout io.Writer, stderr io.Writer) int {
 	runnerSource, err := generateTestRunnerSource(inputFile, result, filter)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %s\n", err)
@@ -110,7 +110,7 @@ func executeSelectedTests(inputFile string, result *semantic.Result, filter stri
 	}
 
 	objectPath := filepath.Join(tempDir, "generated_runner.o")
-	if err := backend.WriteLLVMObjectFileWithOpt(runnerResult, objectPath, optLevel); err != nil {
+	if err := backend.WriteLLVMObjectFileWithOptAndPackedABI(runnerResult, objectPath, optLevel, packedABI); err != nil {
 		fmt.Fprintf(stderr, "error: %s\n", err)
 		return 1
 	}

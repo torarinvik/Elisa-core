@@ -63,6 +63,14 @@ func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, s
 	if err != nil {
 		return nil, nil, err
 	}
+	if enumType, ok := containerType.(*semantic.EnumType); ok && enumType.Packed {
+		if ident, ok := expr.Object.(*ast.Ident); ok {
+			if cachedPtr, ok := s.lookupPackedEnumStorage(ident.Name, enumType); ok {
+				fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, cachedPtr, C.unsigned(index), cStringFree(expr.Field))
+				return fieldPtr, fieldType, nil
+			}
+		}
+	}
 	var objPtr C.LLVMValueRef
 	if pointerLike {
 		objPtr, _, err = s.emitExpr(expr.Object, nil)
@@ -544,7 +552,7 @@ func (s *functionState) currentBlockTerminated() bool {
 }
 
 func (s *functionState) pushScope() {
-	s.scope = &codegenScope{parent: s.scope, bindings: map[string]valueBinding{}}
+	s.scope = &codegenScope{parent: s.scope, bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}}
 }
 
 func (s *functionState) popScope() {
@@ -575,10 +583,22 @@ func (s *functionState) lookupPackedStore(enumType *semantic.EnumType) (packedSt
 	return binding, true
 }
 
+func (s *functionState) bindPackedStoreValue(t semantic.Type, value C.LLVMValueRef) {
+	storeType, ok := t.(*semantic.PackedEnumStoreType)
+	if !ok || storeType == nil || storeType.Enum == nil || value == nil {
+		return
+	}
+	if s.packedStores == nil {
+		s.packedStores = map[string]packedStoreBinding{}
+	}
+	s.packedStores[storeType.Enum.Name] = packedStoreBinding{value: value, typ: storeType}
+}
+
 func (s *functionState) defineBinding(name string, binding valueBinding) {
 	if s.scope == nil {
-		s.scope = &codegenScope{bindings: map[string]valueBinding{}}
+		s.scope = &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}}
 	}
+	s.invalidatePackedEnumStorage(name)
 	s.scope.bindings[name] = binding
 }
 
@@ -589,6 +609,44 @@ func (s *functionState) lookupBinding(name string) (valueBinding, bool) {
 		}
 	}
 	return valueBinding{}, false
+}
+
+func (s *functionState) bindPackedEnumStorage(name string, enumType *semantic.EnumType, ptr C.LLVMValueRef) {
+	if name == "" || enumType == nil || !enumType.Packed || ptr == nil {
+		return
+	}
+	if s.scope == nil {
+		s.scope = &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}}
+	}
+	if s.scope.packedEnumPtrs == nil {
+		s.scope.packedEnumPtrs = map[string]packedEnumStorageBinding{}
+	}
+	s.scope.packedEnumPtrs[name] = packedEnumStorageBinding{ptr: ptr, typ: enumType}
+}
+
+func (s *functionState) lookupPackedEnumStorage(name string, enumType *semantic.EnumType) (C.LLVMValueRef, bool) {
+	if name == "" || enumType == nil || !enumType.Packed {
+		return nil, false
+	}
+	for scope := s.scope; scope != nil; scope = scope.parent {
+		binding, ok := scope.packedEnumPtrs[name]
+		if !ok {
+			continue
+		}
+		if binding.typ == enumType && binding.ptr != nil {
+			return binding.ptr, true
+		}
+	}
+	return nil, false
+}
+
+func (s *functionState) invalidatePackedEnumStorage(name string) {
+	if name == "" {
+		return
+	}
+	for scope := s.scope; scope != nil; scope = scope.parent {
+		delete(scope.packedEnumPtrs, name)
+	}
 }
 
 func (s *functionState) emitConstValue(value semantic.ConstValue) (C.LLVMValueRef, semantic.Type, error) {

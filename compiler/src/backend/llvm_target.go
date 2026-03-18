@@ -76,10 +76,14 @@ func WriteLLVMBitcodeFile(result *semantic.Result, outputPath string) error {
 }
 
 func WriteLLVMBitcodeFileWithOpt(result *semantic.Result, outputPath string, optLevel OptimizationLevel) error {
+	return WriteLLVMBitcodeFileWithOptAndPackedABI(result, outputPath, optLevel, PackedEnumABIRowHandle)
+}
+
+func WriteLLVMBitcodeFileWithOptAndPackedABI(result *semantic.Result, outputPath string, optLevel OptimizationLevel, packedABI PackedEnumABI) error {
 	if strings.TrimSpace(outputPath) == "" {
 		return fmt.Errorf("output path cannot be empty")
 	}
-	g, err := compileLLVMModule(result, optLevel)
+	g, err := compileLLVMModule(result, optLevel, packedABI)
 	if err != nil {
 		return err
 	}
@@ -95,10 +99,14 @@ func WriteLLVMObjectFile(result *semantic.Result, outputPath string) error {
 }
 
 func WriteLLVMObjectFileWithOpt(result *semantic.Result, outputPath string, optLevel OptimizationLevel) error {
+	return WriteLLVMObjectFileWithOptAndPackedABI(result, outputPath, optLevel, PackedEnumABIRowHandle)
+}
+
+func WriteLLVMObjectFileWithOptAndPackedABI(result *semantic.Result, outputPath string, optLevel OptimizationLevel, packedABI PackedEnumABI) error {
 	if strings.TrimSpace(outputPath) == "" {
 		return fmt.Errorf("output path cannot be empty")
 	}
-	g, err := compileLLVMModule(result, optLevel)
+	g, err := compileLLVMModule(result, optLevel, packedABI)
 	if err != nil {
 		return err
 	}

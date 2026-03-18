@@ -88,6 +88,10 @@ def fold() -> int:
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
+	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
+	if decodeCalls != 2 {
+		t.Fatalf("expected constructor lowering plus one reused packed-match decode, got %d decode calls:\n%s", decodeCalls, output)
+	}
 	for _, bad := range []string{"define i1 @differs(ptr", "icmp ne ptr", "call i64 @ctx_packed_store_encode(", "call ptr @arena_alloc(", "ptrtoint ptr %packed.alloc to i64", "inttoptr i64"} {
 		if strings.Contains(output, bad) {
 			t.Fatalf("expected alternate packed ABI to lower values as integer handles and avoid %q, got:\n%s", bad, output)
