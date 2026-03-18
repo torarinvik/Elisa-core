@@ -69,6 +69,7 @@ type Analyzer struct {
 	shapeParamScopes       []map[string]Shape
 	freshShapeCounter      int
 	returnFreshShapeStatus map[string]freshReturnStatus
+	annotatedFuncs         []*AnnotatedFunc
 	exportedTypes          []*ExportedType
 	exportedFuncs          []*ExportedFunc
 	exportedGlobals        []*ExportedGlobal
@@ -107,6 +108,7 @@ func Analyze(file *ast.File) *Result {
 		NamedTypes:      a.namedTypes,
 		ConstValues:     a.constValues,
 		ExprTypes:       a.exprTypes,
+		AnnotatedFuncs:  a.annotatedFuncs,
 		ExportedTypes:   a.exportedTypes,
 		ExportedFuncs:   a.exportedFuncs,
 		ExportedGlobals: a.exportedGlobals,
@@ -538,6 +540,7 @@ func (a *Analyzer) analyzeDecls(decls []ast.Decl) {
 				}
 			}
 		case *ast.FuncDecl:
+			a.analyzeFunctionAnnotations(n)
 			a.analyzeFunc(n)
 		case *ast.EnumDecl:
 			continue
@@ -547,6 +550,92 @@ func (a *Analyzer) analyzeDecls(decls []ast.Decl) {
 			continue
 		}
 	}
+}
+
+func (a *Analyzer) analyzeFunctionAnnotations(fn *ast.FuncDecl) {
+	if len(fn.Annotations) == 0 {
+		return
+	}
+
+	valid := make([]ast.Annotation, 0, len(fn.Annotations))
+	seen := make(map[string]lexer.Pos, len(fn.Annotations))
+	for _, annotation := range fn.Annotations {
+		if prev, exists := seen[annotation.Name]; exists {
+			a.errorf(annotation.Position, "duplicate @%s annotation on function %q (first seen at %s:%d:%d)", annotation.Name, fn.Name, prev.File, prev.Line, prev.Col)
+			continue
+		}
+		seen[annotation.Name] = annotation.Position
+		if !isSupportedFunctionAnnotation(annotation.Name) {
+			a.errorf(annotation.Position, "unknown function annotation @%s on %q", annotation.Name, fn.Name)
+			continue
+		}
+		valid = append(valid, annotation)
+	}
+
+	if len(valid) == 0 {
+		return
+	}
+
+	var signature *FuncType
+	if sym, ok := a.globalScope.Lookup(fn.Name); ok {
+		signature, _ = sym.Type.(*FuncType)
+	}
+	accepted := make([]ast.Annotation, 0, len(valid))
+	for _, annotation := range valid {
+		if a.validateFunctionAnnotation(annotation, fn, signature) {
+			accepted = append(accepted, annotation)
+		}
+	}
+	if len(accepted) == 0 {
+		return
+	}
+	a.annotatedFuncs = append(a.annotatedFuncs, &AnnotatedFunc{
+		Name:        fn.Name,
+		Annotations: accepted,
+		Signature:   signature,
+		Decl:        fn,
+	})
+}
+
+func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) bool {
+	if signature == nil {
+		a.errorf(annotation.Position, "cannot resolve signature for @%s function %q", annotation.Name, fn.Name)
+		return false
+	}
+	if len(signature.TypeParams) > 0 || len(signature.ShapeParams) > 0 {
+		a.errorf(annotation.Position, "@%s function %q must not have type or shape parameters; got %s", annotation.Name, fn.Name, signature.String())
+		return false
+	}
+	if signature.Variadic {
+		a.errorf(annotation.Position, "@%s function %q must not be variadic", annotation.Name, fn.Name)
+		return false
+	}
+	if len(signature.Params) > 0 {
+		a.errorf(annotation.Position, "@%s function %q must not take parameters; got %s", annotation.Name, fn.Name, signature.String())
+		return false
+	}
+	switch annotation.Name {
+	case "test", "bench":
+		if !isVoidType(signature.Return) {
+			a.errorf(annotation.Position, "@%s function %q must return void, got %s", annotation.Name, fn.Name, signature.Return.String())
+			return false
+		}
+	}
+	return true
+}
+
+func isSupportedFunctionAnnotation(name string) bool {
+	switch name {
+	case "test", "bench", "fixture":
+		return true
+	default:
+		return false
+	}
+}
+
+func isVoidType(t Type) bool {
+	builtin, ok := t.(*BuiltinType)
+	return ok && builtin.Name == "void"
 }
 
 func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {

@@ -2,12 +2,19 @@ package lexer_test
 
 import (
 	"llcontext/src/lexer"
+	"strings"
 	"testing"
 )
 
 func collectTokens(src string) []lexer.Token {
 	l := lexer.New("test.llcontext", []byte(src))
 	return l.Tokenize()
+}
+
+func collectTokensWithErrors(src string) ([]lexer.Token, []string) {
+	l := lexer.New("test.llcontext", []byte(src))
+	tokens := l.Tokenize()
+	return tokens, l.Errors()
 }
 
 func assertKinds(t *testing.T, got []lexer.Token, expected []lexer.TokenKind) {
@@ -104,6 +111,54 @@ func TestStringLiteral(t *testing.T) {
 	if tokens[0].Text != "hello world" {
 		t.Errorf("expected 'hello world', got %q", tokens[0].Text)
 	}
+}
+
+func TestStringLiteralDecodesEscapes(t *testing.T) {
+	tokens, errs := collectTokensWithErrors("\"line\\n\\t\\\"\\\\\\0\"\n")
+	if len(errs) != 0 {
+		t.Fatalf("expected no lexer errors, got:\n%s", strings.Join(errs, "\n"))
+	}
+	expect := []lexer.TokenKind{lexer.TOKEN_STRING_LIT, lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF}
+	assertKinds(t, tokens, expect)
+	want := []byte{'l', 'i', 'n', 'e', '\n', '\t', '"', '\\', 0}
+	got := []byte(tokens[0].Text)
+	if string(got) != string(want) {
+		t.Fatalf("expected decoded bytes %v, got %v", want, got)
+	}
+}
+
+func TestStringLiteralDecodesHexAndUnicodeEscapes(t *testing.T) {
+	tokens, errs := collectTokensWithErrors("\"A\\x42\\u263A\"\n")
+	if len(errs) != 0 {
+		t.Fatalf("expected no lexer errors, got:\n%s", strings.Join(errs, "\n"))
+	}
+	expect := []lexer.TokenKind{lexer.TOKEN_STRING_LIT, lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF}
+	assertKinds(t, tokens, expect)
+	if tokens[0].Text != "AB☺" {
+		t.Fatalf("expected decoded string %q, got %q", "AB☺", tokens[0].Text)
+	}
+}
+
+func TestStringLiteralReportsInvalidEscape(t *testing.T) {
+	_, errs := collectTokensWithErrors("\"bad\\q\"\n")
+	if len(errs) == 0 {
+		t.Fatal("expected lexer error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "invalid escape sequence \\\\q in string literal") {
+		t.Fatalf("expected invalid escape diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestStringLiteralReportsUnterminatedLiteral(t *testing.T) {
+	tokens, errs := collectTokensWithErrors("\"bad\n")
+	if len(errs) == 0 {
+		t.Fatal("expected lexer error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "unterminated string literal") {
+		t.Fatalf("expected unterminated string diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+	expect := []lexer.TokenKind{lexer.TOKEN_STRING_LIT, lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF}
+	assertKinds(t, tokens, expect)
 }
 
 func TestIndentDedent(t *testing.T) {

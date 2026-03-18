@@ -74,13 +74,19 @@ type FieldDecl struct {
 	Type     TypeExpr
 }
 
+type Annotation struct {
+	Position lexer.Pos
+	Name     string
+}
+
 type FuncDecl struct {
-	Position   lexer.Pos
-	Name       string
-	TypeParams []string
-	Params     []ParamDecl
-	ReturnType TypeExpr
-	Body       []Stmt
+	Position    lexer.Pos
+	Annotations []Annotation
+	Name        string
+	TypeParams  []string
+	Params      []ParamDecl
+	ReturnType  TypeExpr
+	Body        []Stmt
 }
 
 type ParamDecl struct {

@@ -236,12 +236,26 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			path: filepath.Join(repoRoot, "Code", "test_programs", "json_parser.llcontext"),
 			checks: []string{
 				"%JsonCursor = type { ptr, i64, i64 }",
+				"%JsonNode = type { i32, i64, [3 x i64] }",
 				"define i64 @json_parse_string(ptr",
 				"define i64 @json_parse_number(ptr",
 				"define i64 @json_parse_array(ptr",
 				"define i64 @json_parse_object(ptr",
+				"define ptr @json_parse_value_node(ptr",
+				"define ptr @json_parse_array_node(ptr",
+				"define ptr @json_parse_object_node(ptr",
 				"define i64 @json_parser_parity_suite()",
 				"define i64 @json_parser_checksum(ptr",
+				"define i64 @json_parser_ast_checksum(ptr",
+			},
+		},
+		{
+			name: "string_escapes",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "string_escapes.llcontext"),
+			checks: []string{
+				"define ptr @newline_text()",
+				"define ptr @quoted_text()",
+				"define ptr @unicode_text()",
 			},
 		},
 	}
@@ -563,6 +577,37 @@ func TestRunCLIJSONParserGeneratedHeaderInteropHarness(t *testing.T) {
 	}
 }
 
+func TestRunCLIExecutesJSONParserSelfHostedTests(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser_tests.llcontext")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to execute json parser tests successfully, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] checksum_suite_matches_expected_values",
+		"[ RUN      ] ast_checksum_matches_expected_values",
+		"[ RUN      ] ast_and_checksum_paths_agree_on_nested_inputs",
+		"[ RUN      ] invalid_inputs_are_rejected",
+		"[ SUMMARY  ] 4 test(s) selected",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected json parser self-hosted test output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunCLICompilesStage1RuntimeToLLVM(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "contextlang_runtime.llcontext")
@@ -596,6 +641,361 @@ func TestRunCLICompilesStage1RuntimeToLLVM(t *testing.T) {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
+	}
+}
+
+func TestRunCLIRejectsInvalidStringEscape(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "invalid_escape.llcontext")
+	if err := os.WriteFile(fixturePath, []byte("def bad() -> any u8&:\n    return \"oops\\q\".cast[any u8&]()\n"), 0o644); err != nil {
+		t.Fatalf("failed to write invalid fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", fixturePath}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected runCLI to fail, got stdout:\n%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "invalid escape sequence \\\\q in string literal") {
+		t.Fatalf("expected invalid escape diagnostic, got:\n%s", stderr.String())
+	}
+}
+
+func TestRunCLIPrintsAnnotatedFunctionsInAST(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "annotated.llcontext")
+	src := "@test\ndef sample_case() -> void:\n    pass\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write annotated fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "ast", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{"@test", "def sample_case(0 params) -> void (1 stmts)"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected AST output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestRunCLIListsAnnotatedFunctionsByKind(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "annotated_lists.llcontext")
+	src := "@test\ndef alpha_case() -> void:\n    pass\n\n@fixture\ndef shared_seed() -> int:\n    return 7\n\n@bench\ndef bench_hot_loop() -> void:\n    pass\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write annotated list fixture: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		args     []string
+		contains []string
+		omits    []string
+	}{
+		{
+			name:     "tests",
+			args:     []string{"-emit", "tests", fixturePath},
+			contains: []string{"alpha_case\tfunc() -> void"},
+			omits:    []string{"shared_seed", "bench_hot_loop"},
+		},
+		{
+			name:     "benches",
+			args:     []string{"-emit", "benches", fixturePath},
+			contains: []string{"bench_hot_loop\tfunc() -> void"},
+			omits:    []string{"alpha_case", "shared_seed"},
+		},
+		{
+			name:     "fixtures",
+			args:     []string{"-emit", "fixtures", fixturePath},
+			contains: []string{"shared_seed\tfunc() -> int"},
+			omits:    []string{"alpha_case", "bench_hot_loop"},
+		},
+		{
+			name:     "tests filtered",
+			args:     []string{"-emit", "tests", "-filter", "alpha", fixturePath},
+			contains: []string{"alpha_case\tfunc() -> void"},
+			omits:    []string{"bench_hot_loop", "shared_seed"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			exitCode := runCLI(test.args, &stdout, &stderr)
+			if exitCode != 0 {
+				t.Fatalf("expected runCLI to succeed, stderr:\n%s", stderr.String())
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+			}
+			output := stdout.String()
+			for _, want := range test.contains {
+				if !strings.Contains(output, want) {
+					t.Fatalf("expected output to contain %q, got:\n%s", want, output)
+				}
+			}
+			for _, omit := range test.omits {
+				if strings.Contains(output, omit) {
+					t.Fatalf("expected output not to contain %q, got:\n%s", omit, output)
+				}
+			}
+		})
+	}
+}
+
+func TestRunCLIRejectsFilterOutsideAnnotationListModes(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "filter_reject.llcontext")
+	if err := os.WriteFile(fixturePath, []byte("def sample_case() -> void:\n    pass\n"), 0o644); err != nil {
+		t.Fatalf("failed to write filter rejection fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "ast", "-filter", "sample", fixturePath}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected runCLI to fail, got stdout:\n%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "-filter is only supported for -emit tests, benches, fixtures, test-runner, or test") {
+		t.Fatalf("expected filter-mode diagnostic, got:\n%s", stderr.String())
+	}
+}
+
+func TestRunCLIGeneratesTestRunnerSource(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "test_runner_fixture.llcontext")
+	src := "@test\ndef alpha_case() -> void:\n    pass\n\n@test\ndef beta_case() -> void:\n    pass\n\ndef helper() -> void:\n    pass\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write runner fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test-runner", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"@test",
+		"def ctx_test_main() -> int:",
+		"alpha_case()",
+		"beta_case()",
+		"export func main() -> int = ctx_test_main",
+		"[ SUMMARY  ] 2 test(s) selected",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected test runner output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "\thelper()\n") {
+		t.Fatalf("expected helper function not to be invoked by the generated runner, got:\n%s", output)
+	}
+}
+
+func TestRunCLIGeneratesFilteredTestRunnerSource(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "filtered_test_runner_fixture.llcontext")
+	src := "@test\ndef alpha_case() -> void:\n    pass\n\n@test\ndef beta_case() -> void:\n    pass\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write filtered runner fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test-runner", "-filter", "beta", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "beta_case()") {
+		t.Fatalf("expected filtered runner to invoke beta_case, got:\n%s", output)
+	}
+	if strings.Contains(output, "\talpha_case()\n") {
+		t.Fatalf("expected filtered runner not to invoke alpha_case, got:\n%s", output)
+	}
+	if !strings.Contains(output, "[ SUMMARY  ] 1 test(s) selected") {
+		t.Fatalf("expected filtered runner summary, got:\n%s", output)
+	}
+}
+
+func TestRunCLIRunsGeneratedTestRunner(t *testing.T) {
+	clangPath, err := exec.LookPath("clang")
+	if err != nil {
+		t.Skip("clang not available")
+	}
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "generated_runner_fixture.llcontext")
+	src := "@test\ndef alpha_case() -> void:\n    pass\n\n@test\ndef beta_case() -> void:\n    pass\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write generated runner fixture: %v", err)
+	}
+
+	var runnerStdout bytes.Buffer
+	var runnerStderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test-runner", fixturePath}, &runnerStdout, &runnerStderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to generate runner, stderr:\n%s", runnerStderr.String())
+	}
+	if runnerStderr.Len() != 0 {
+		t.Fatalf("expected no stderr while generating runner, got:\n%s", runnerStderr.String())
+	}
+
+	runnerPath := filepath.Join(fixtureDir, "generated_runner.llcontext")
+	if err := os.WriteFile(runnerPath, runnerStdout.Bytes(), 0o644); err != nil {
+		t.Fatalf("failed to write generated runner source: %v", err)
+	}
+	objectPath := filepath.Join(fixtureDir, "generated_runner.o")
+
+	var objectStdout bytes.Buffer
+	var objectStderr bytes.Buffer
+	exitCode = runCLI([]string{"-emit", "obj", "-o", objectPath, runnerPath}, &objectStdout, &objectStderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to compile generated runner, stderr:\n%s", objectStderr.String())
+	}
+	if objectStdout.Len() != 0 {
+		t.Fatalf("expected no stdout while compiling generated runner, got:\n%s", objectStdout.String())
+	}
+	if objectStderr.Len() != 0 {
+		t.Fatalf("expected no stderr while compiling generated runner, got:\n%s", objectStderr.String())
+	}
+
+	exePath := filepath.Join(fixtureDir, "generated_runner")
+	compileCmd := exec.Command(clangPath, objectPath, "-o", exePath)
+	compileOutput, err := compileCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clang failed: %v\n%s", err, string(compileOutput))
+	}
+
+	runCmd := exec.Command(exePath)
+	runOutput, err := runCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated test runner failed: %v\n%s", err, string(runOutput))
+	}
+	output := string(runOutput)
+	for _, check := range []string{
+		"[ RUN      ] alpha_case",
+		"[       OK ] alpha_case",
+		"[ RUN      ] beta_case",
+		"[       OK ] beta_case",
+		"[ SUMMARY  ] 2 test(s) selected",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected generated runner output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestRunCLIExecutesSelectedTests(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "execute_tests_fixture.llcontext")
+	src := "@test\ndef alpha_case() -> void:\n    pass\n\n@test\ndef beta_case() -> void:\n    pass\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write execute-tests fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to execute tests successfully, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] alpha_case",
+		"[       OK ] alpha_case",
+		"[ RUN      ] beta_case",
+		"[       OK ] beta_case",
+		"[ SUMMARY  ] 2 test(s) selected",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected direct test execution output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestRunCLIExecutesFilteredSelectedTests(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "execute_filtered_tests_fixture.llcontext")
+	src := "@test\ndef alpha_case() -> void:\n    pass\n\n@test\ndef beta_case() -> void:\n    pass\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write filtered execute-tests fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", "-filter", "beta", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected filtered test execution to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	if strings.Contains(output, "[ RUN      ] alpha_case") {
+		t.Fatalf("expected filtered execution not to run alpha_case, got:\n%s", output)
+	}
+	for _, check := range []string{
+		"[ RUN      ] beta_case",
+		"[       OK ] beta_case",
+		"[ SUMMARY  ] 1 test(s) selected",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected filtered execution output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestRunCLIReturnsNonZeroWhenNoTestsMatchExecutionFilter(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "execute_no_tests_fixture.llcontext")
+	src := "@test\ndef alpha_case() -> void:\n    pass\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write no-match execute-tests fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", "-filter", "beta", fixturePath}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected no-match test execution to fail, stdout:\n%s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "[ NO TESTS ] no @test functions matched filter \"beta\"") {
+		t.Fatalf("expected no-tests execution output, got:\n%s", stdout.String())
 	}
 }
 

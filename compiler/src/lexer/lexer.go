@@ -3,6 +3,7 @@ package lexer
 import (
 	"fmt"
 	"unicode"
+	"unicode/utf16"
 	"unicode/utf8"
 )
 
@@ -20,6 +21,7 @@ type Lexer struct {
 
 	// Track paren/bracket depth to suppress INDENT/DEDENT inside groupings
 	parenDepth int
+	errors     []string
 }
 
 func New(filename string, src []byte) *Lexer {
@@ -36,6 +38,15 @@ func New(filename string, src []byte) *Lexer {
 
 func (l *Lexer) curPos() Pos {
 	return Pos{File: l.filename, Line: l.line, Col: l.col, Offset: l.pos}
+}
+
+func (l *Lexer) Errors() []string {
+	if len(l.errors) == 0 {
+		return nil
+	}
+	out := make([]string, len(l.errors))
+	copy(out, l.errors)
+	return out
 }
 
 func (l *Lexer) peek() byte {
@@ -174,18 +185,109 @@ func (l *Lexer) handleIndentation() {
 func (l *Lexer) readString() Token {
 	p := l.curPos()
 	l.advance() // consume opening "
-	start := l.pos
-	for l.pos < len(l.src) && l.peek() != '"' && l.peek() != '\n' {
-		if l.peek() == '\\' {
-			l.advance() // skip escape char
+	decoded := make([]byte, 0, 16)
+	for l.pos < len(l.src) {
+		ch := l.peek()
+		if ch == '"' {
+			l.advance()
+			return Token{Kind: TOKEN_STRING_LIT, Text: string(decoded), Pos: p}
 		}
-		l.advance()
+		if ch == '\n' {
+			l.reportErrorAt(p, "unterminated string literal")
+			return Token{Kind: TOKEN_STRING_LIT, Text: string(decoded), Pos: p}
+		}
+		if ch != '\\' {
+			decoded = append(decoded, ch)
+			l.advance()
+			continue
+		}
+
+		escapePos := l.curPos()
+		l.advance() // consume backslash
+		if l.pos >= len(l.src) {
+			l.reportErrorAt(escapePos, "unterminated escape sequence in string literal")
+			return Token{Kind: TOKEN_STRING_LIT, Text: string(decoded), Pos: p}
+		}
+
+		esc := l.peek()
+		switch esc {
+		case '\\':
+			decoded = append(decoded, '\\')
+			l.advance()
+		case '"':
+			decoded = append(decoded, '"')
+			l.advance()
+		case 'n':
+			decoded = append(decoded, '\n')
+			l.advance()
+		case 'r':
+			decoded = append(decoded, '\r')
+			l.advance()
+		case 't':
+			decoded = append(decoded, '\t')
+			l.advance()
+		case '0':
+			decoded = append(decoded, 0)
+			l.advance()
+		case 'x':
+			l.advance()
+			value, ok := l.readFixedHexDigits(2)
+			if !ok {
+				l.reportErrorAt(escapePos, "invalid hex escape in string literal")
+				continue
+			}
+			decoded = append(decoded, byte(value))
+		case 'u':
+			l.advance()
+			value, ok := l.readFixedHexDigits(4)
+			if !ok {
+				l.reportErrorAt(escapePos, "invalid unicode escape in string literal")
+				continue
+			}
+			if value >= 0xD800 && value <= 0xDBFF {
+				pairPos := l.curPos()
+				if l.peek() != '\\' || l.peekAt(1) != 'u' {
+					l.reportErrorAt(escapePos, "invalid unicode surrogate pair in string literal")
+					continue
+				}
+				l.advance()
+				l.advance()
+				lowValue, ok := l.readFixedHexDigits(4)
+				if !ok || lowValue < 0xDC00 || lowValue > 0xDFFF {
+					l.reportErrorAt(pairPos, "invalid unicode surrogate pair in string literal")
+					continue
+				}
+				r := utf16.DecodeRune(rune(value), rune(lowValue))
+				decoded = utf8.AppendRune(decoded, r)
+				continue
+			}
+			if value >= 0xDC00 && value <= 0xDFFF {
+				l.reportErrorAt(escapePos, "invalid unicode surrogate pair in string literal")
+				continue
+			}
+			decoded = utf8.AppendRune(decoded, rune(value))
+		case '\n':
+			l.reportErrorAt(p, "unterminated string literal")
+			return Token{Kind: TOKEN_STRING_LIT, Text: string(decoded), Pos: p}
+		default:
+			l.reportErrorAt(escapePos, "invalid escape sequence \\\\%c in string literal", esc)
+			l.advance()
+		}
 	}
-	text := string(l.src[start:l.pos])
-	if l.peek() == '"' {
-		l.advance() // consume closing "
+
+	l.reportErrorAt(p, "unterminated string literal")
+	return Token{Kind: TOKEN_STRING_LIT, Text: string(decoded), Pos: p}
+}
+
+func (l *Lexer) readFixedHexDigits(count int) (int, bool) {
+	value := 0
+	for i := 0; i < count; i++ {
+		if l.pos >= len(l.src) || !isHexDigit(l.peek()) {
+			return 0, false
+		}
+		value = (value << 4) | hexDigitValue(l.advance())
 	}
-	return Token{Kind: TOKEN_STRING_LIT, Text: text, Pos: p}
+	return value, true
 }
 
 func (l *Lexer) readNumber() Token {
@@ -545,4 +647,22 @@ func isIdentCharRune(r rune) bool {
 func (l *Lexer) errorf(format string, args ...interface{}) error {
 	prefix := fmt.Sprintf("%s:%d:%d: ", l.filename, l.line, l.col)
 	return fmt.Errorf(prefix+format, args...)
+}
+
+func (l *Lexer) reportErrorAt(pos Pos, format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	l.errors = append(l.errors, fmt.Sprintf("%s:%d:%d: %s", pos.File, pos.Line, pos.Col, msg))
+}
+
+func hexDigitValue(ch byte) int {
+	switch {
+	case ch >= '0' && ch <= '9':
+		return int(ch - '0')
+	case ch >= 'a' && ch <= 'f':
+		return int(ch-'a') + 10
+	case ch >= 'A' && ch <= 'F':
+		return int(ch-'A') + 10
+	default:
+		return 0
+	}
 }

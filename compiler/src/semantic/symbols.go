@@ -22,10 +22,18 @@ type Result struct {
 	NamedTypes      map[string]Type
 	ConstValues     map[string]ConstValue
 	ExprTypes       map[ast.Expr]Type
+	AnnotatedFuncs  []*AnnotatedFunc
 	ExportedTypes   []*ExportedType
 	ExportedFuncs   []*ExportedFunc
 	ExportedGlobals []*ExportedGlobal
 	Diagnostics     []Diagnostic
+}
+
+type AnnotatedFunc struct {
+	Name        string
+	Annotations []ast.Annotation
+	Signature   *FuncType
+	Decl        *ast.FuncDecl
 }
 
 type ExportedType struct {

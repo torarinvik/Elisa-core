@@ -18,6 +18,9 @@ func parseAndAnalyze(t *testing.T, filename string, src string) *semantic.Result
 	t.Helper()
 	l := lexer.New(filename, []byte(src))
 	tokens := l.Tokenize()
+	if errs := l.Errors(); len(errs) > 0 {
+		t.Fatalf("lexer errors:\n%s", strings.Join(errs, "\n"))
+	}
 	p := parser.New(tokens)
 	file := p.ParseFile(filename)
 	if errs := p.Errors(); len(errs) > 0 {
@@ -232,6 +235,37 @@ def view_char(text: sview[0, 4]) -> char:
 	}
 	if strings.Contains(output, "@ctx_stage1rt_string_view(ptr") {
 		t.Fatalf("expected fixed string slice lowering to avoid runtime string view helper, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRLowersEscapedStringLiteralBytes(t *testing.T) {
+	src := `def newline_text() -> any u8&:
+	return "line\nbreak".cast[any u8&]()
+
+def quoted_text() -> any u8&:
+	return "quote: \" slash: \\ hex: \x41".cast[any u8&]()
+
+def unicode_text() -> any u8&:
+	return "\u263A".cast[any u8&]()
+`
+	result := parseAndAnalyze(t, "backend_string_escapes.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"define ptr @newline_text()",
+		"define ptr @quoted_text()",
+		"define ptr @unicode_text()",
+		"c\"line\\0Abreak\\00\"",
+		"c\"quote: \\22 slash: \\\\ hex: A\\00\"",
+		"c\"\\E2\\98\\BA\\00\"",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
 	}
 }
 

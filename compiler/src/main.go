@@ -28,30 +28,19 @@ func runCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 }
 
 func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int {
+	if options.filter != "" && !emitSupportsFilter(options.emit) {
+		fmt.Fprintf(stderr, "error: -filter is only supported for -emit %s\n", supportedFilterEmitModes())
+		return 1
+	}
+
 	src, err := readSourceWithIncludes(options.filename, map[string]bool{})
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %s\n", err)
 		return 1
 	}
 
-	l := lexer.New(options.filename, src)
-	tokens := l.Tokenize()
-
-	p := parser.New(tokens)
-	file := p.ParseFile(options.filename)
-
-	if errs := p.Errors(); len(errs) > 0 {
-		for _, e := range errs {
-			fmt.Fprintf(stderr, "%s\n", e)
-		}
-		return 1
-	}
-
-	result := semantic.Analyze(file)
-	if errs := result.Errors(); len(errs) > 0 {
-		for _, e := range errs {
-			fmt.Fprintf(stderr, "%s\n", e)
-		}
+	file, result, ok := analyzeProgram(options.filename, src, stderr)
+	if !ok {
 		return 1
 	}
 
@@ -63,6 +52,34 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 		}
 		printFile(stdout, file)
 		return 0
+	case emitTests, emitBenches, emitFixtures:
+		if options.output != "" {
+			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", options.emit)
+			return 1
+		}
+		printAnnotatedFunctions(stdout, result, options.emit, options.filter)
+		return 0
+	case emitTestRunner:
+		runnerSource, err := generateTestRunnerSource(options.filename, result, options.filter)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %s\n", err)
+			return 1
+		}
+		if options.output != "" {
+			if err := os.WriteFile(options.output, []byte(runnerSource), 0o644); err != nil {
+				fmt.Fprintf(stderr, "error: %s\n", err)
+				return 1
+			}
+		} else {
+			fmt.Fprint(stdout, runnerSource)
+		}
+		return 0
+	case emitTest:
+		if options.output != "" {
+			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", emitTest)
+			return 1
+		}
+		return executeSelectedTests(options.filename, result, options.filter, effectiveOptimizationLevel(options), stdout, stderr)
 	case emitLLVM:
 		output, err := backend.GenerateLLVMIRWithOpt(result, effectiveOptimizationLevel(options))
 		if err != nil {
@@ -112,18 +129,54 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 	}
 }
 
+func analyzeProgram(filename string, src []byte, stderr io.Writer) (*ast.File, *semantic.Result, bool) {
+	l := lexer.New(filename, src)
+	tokens := l.Tokenize()
+	if errs := l.Errors(); len(errs) > 0 {
+		for _, e := range errs {
+			fmt.Fprintf(stderr, "%s\n", e)
+		}
+		return nil, nil, false
+	}
+
+	p := parser.New(tokens)
+	file := p.ParseFile(filename)
+	if errs := p.Errors(); len(errs) > 0 {
+		for _, e := range errs {
+			fmt.Fprintf(stderr, "%s\n", e)
+		}
+		return nil, nil, false
+	}
+
+	result := semantic.Analyze(file)
+	if errs := result.Errors(); len(errs) > 0 {
+		for _, e := range errs {
+			fmt.Fprintf(stderr, "%s\n", e)
+		}
+		return nil, nil, false
+	}
+
+	return file, result, true
+}
+
 const (
-	emitAST     = "ast"
-	emitLLVM    = "llvm"
-	emitHeader  = "header"
-	emitBitcode = "bc"
-	emitObject  = "obj"
+	emitAST        = "ast"
+	emitTests      = "tests"
+	emitBenches    = "benches"
+	emitFixtures   = "fixtures"
+	emitTest       = "test"
+	emitTestRunner = "test-runner"
+	emitLLVM       = "llvm"
+	emitHeader     = "header"
+	emitBitcode    = "bc"
+	emitObject     = "obj"
 )
 
 type cliOptions struct {
 	emit        string
 	filename    string
 	output      string
+	filter      string
 	optLevel    backend.OptimizationLevel
 	hasOptLevel bool
 }
@@ -166,6 +219,14 @@ func parseArgs(args []string) (cliOptions, error) {
 				return cliOptions{}, fmt.Errorf("missing value after -emit")
 			}
 			options.emit = strings.TrimSpace(args[i])
+		case strings.HasPrefix(arg, "-filter="):
+			options.filter = strings.TrimSpace(strings.TrimPrefix(arg, "-filter="))
+		case arg == "-filter":
+			i++
+			if i >= len(args) {
+				return cliOptions{}, fmt.Errorf("missing value after -filter")
+			}
+			options.filter = strings.TrimSpace(args[i])
 		case strings.HasPrefix(arg, "-o="):
 			options.output = strings.TrimSpace(strings.TrimPrefix(arg, "-o="))
 		case arg == "-o":
@@ -194,7 +255,7 @@ func parseArgs(args []string) (cliOptions, error) {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprintf(w, "Usage: llcontext [-emit %s|%s|%s|%s|%s] [-O0|-O2|-O3] [-o <output>] <file.llcontext>\n", emitAST, emitLLVM, emitHeader, emitBitcode, emitObject)
+	fmt.Fprintf(w, "Usage: llcontext [-emit %s|%s|%s|%s|%s|%s|%s|%s|%s|%s] [-filter <substring>] [-O0|-O2|-O3] [-o <output>] <file.llcontext>\n", emitAST, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitHeader, emitBitcode, emitObject)
 }
 
 func parseOptimizationArg(value string) (backend.OptimizationLevel, error) {
@@ -226,6 +287,16 @@ func normalizeEmitMode(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case emitAST:
 		return emitAST
+	case emitTests, "test-list":
+		return emitTests
+	case emitBenches, "bench-list":
+		return emitBenches
+	case emitFixtures, "fixture-list":
+		return emitFixtures
+	case emitTest, "run-test", "run-tests":
+		return emitTest
+	case emitTestRunner, "runner":
+		return emitTestRunner
 	case emitLLVM:
 		return emitLLVM
 	case emitHeader:
@@ -237,6 +308,19 @@ func normalizeEmitMode(value string) string {
 	default:
 		return strings.TrimSpace(value)
 	}
+}
+
+func emitSupportsFilter(emit string) bool {
+	switch emit {
+	case emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner:
+		return true
+	default:
+		return false
+	}
+}
+
+func supportedFilterEmitModes() string {
+	return fmt.Sprintf("%s, %s, %s, %s, or %s", emitTests, emitBenches, emitFixtures, emitTestRunner, emitTest)
 }
 
 func outputPathForEmit(inputPath string, explicit string, ext string) string {
@@ -307,6 +391,42 @@ func printFile(w io.Writer, f *ast.File) {
 	}
 }
 
+func printAnnotatedFunctions(w io.Writer, result *semantic.Result, emitMode string, filter string) {
+	annotationName := annotationNameForEmitMode(emitMode)
+	for _, fn := range selectAnnotatedFunctions(result, annotationName, filter) {
+		signature := "<missing-signature>"
+		if fn.Signature != nil {
+			signature = fn.Signature.String()
+		}
+		fmt.Fprintf(w, "%s\t%s\n", fn.Name, signature)
+	}
+}
+
+func annotationNameForEmitMode(emitMode string) string {
+	switch emitMode {
+	case emitTests:
+		return "test"
+	case emitBenches:
+		return "bench"
+	case emitFixtures:
+		return "fixture"
+	default:
+		return ""
+	}
+}
+
+func hasAnnotation(fn *semantic.AnnotatedFunc, annotationName string) bool {
+	if fn == nil || annotationName == "" {
+		return false
+	}
+	for _, annotation := range fn.Annotations {
+		if annotation.Name == annotationName {
+			return true
+		}
+	}
+	return false
+}
+
 func ind(level int) string {
 	return strings.Repeat("  ", level)
 }
@@ -333,6 +453,9 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		}
 		fmt.Fprintf(w, "%s%sstruct %s%s (%d fields)\n", prefix, repr, n.Name, tparams, len(n.Fields))
 	case *ast.FuncDecl:
+		for _, annotation := range n.Annotations {
+			fmt.Fprintf(w, "%s@%s\n", prefix, annotation.Name)
+		}
 		tparams := ""
 		if len(n.TypeParams) > 0 {
 			tparams = "[" + strings.Join(n.TypeParams, ", ") + "]"

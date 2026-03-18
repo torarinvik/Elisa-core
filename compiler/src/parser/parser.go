@@ -81,6 +81,14 @@ func (p *Parser) ParseFile(filename string) *ast.File {
 }
 
 func (p *Parser) parseDecl() ast.Decl {
+	if p.peek() == lexer.TOKEN_AT {
+		annotations := p.parseFuncAnnotations()
+		if p.peek() != lexer.TOKEN_DEF {
+			p.errorf("function annotations must be followed by def, got %s", p.cur())
+			return nil
+		}
+		return p.parseFuncDeclWithAnnotations(annotations)
+	}
 	if p.peek() == lexer.TOKEN_PACKED && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ENUM {
 		return p.parsePackedEnumDecl()
 	}
@@ -110,6 +118,18 @@ func (p *Parser) parseDecl() ast.Decl {
 		p.advance()
 		return nil
 	}
+}
+
+func (p *Parser) parseFuncAnnotations() []ast.Annotation {
+	annotations := make([]ast.Annotation, 0, 1)
+	for p.peek() == lexer.TOKEN_AT {
+		pos := p.cur().Pos
+		p.advance()
+		name := p.expect(lexer.TOKEN_IDENT).Text
+		annotations = append(annotations, ast.Annotation{Position: pos, Name: name})
+		p.skipNewlines()
+	}
+	return annotations
 }
 
 func (p *Parser) parsePackedEnumDecl() *ast.EnumDecl {
@@ -317,6 +337,10 @@ func (p *Parser) parseFieldDecl() ast.FieldDecl {
 }
 
 func (p *Parser) parseFuncDecl() *ast.FuncDecl {
+	return p.parseFuncDeclWithAnnotations(nil)
+}
+
+func (p *Parser) parseFuncDeclWithAnnotations(annotations []ast.Annotation) *ast.FuncDecl {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_DEF)
 	name := p.expect(lexer.TOKEN_IDENT).Text
@@ -345,7 +369,7 @@ func (p *Parser) parseFuncDecl() *ast.FuncDecl {
 	p.expectNewline()
 
 	body := p.parseBlock()
-	return &ast.FuncDecl{Position: pos, Name: name, TypeParams: typeParams, Params: params, ReturnType: retType, Body: body}
+	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, Params: params, ReturnType: retType, Body: body}
 }
 
 func (p *Parser) parseParamList() []ast.ParamDecl {

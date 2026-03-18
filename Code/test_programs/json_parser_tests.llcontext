@@ -1,0 +1,31 @@
+# include "json_parser.llcontext"
+
+
+@test
+def checksum_suite_matches_expected_values() -> void:
+    assert(json_expect_checksum("{}", 47))
+    assert(json_expect_checksum("[]", 43))
+    assert(json_expect_checksum("{\"a\":1}", 89))
+    assert(json_expect_checksum("[true,false,null]", 152))
+
+
+@test
+def ast_checksum_matches_expected_values() -> void:
+    assert(json_expect_ast_checksum("{}", 47))
+    assert(json_expect_ast_checksum("[]", 43))
+    assert(json_expect_ast_checksum("{\"a\":1}", 89))
+    assert(json_expect_ast_checksum("[true,false,null]", 152))
+
+
+@test
+def ast_and_checksum_paths_agree_on_nested_inputs() -> void:
+    assert(json_parser_ast_checksum_impl("{\"items\":[1,2,3],\"ok\":true}".cast[any u8&]()) == json_parser_checksum_impl("{\"items\":[1,2,3],\"ok\":true}".cast[any u8&]()))
+    assert(json_parser_ast_checksum_impl("[-12,3.5,null]".cast[any u8&]()) == json_parser_checksum_impl("[-12,3.5,null]".cast[any u8&]()))
+
+
+@test
+def invalid_inputs_are_rejected() -> void:
+    assert(json_expect_invalid("{\"a\":[1,2}"))
+    assert(json_expect_invalid_ast("{\"a\":[1,2}"))
+    assert(json_expect_invalid("[1,,2]"))
+    assert(json_expect_invalid_ast("[1,,2]"))

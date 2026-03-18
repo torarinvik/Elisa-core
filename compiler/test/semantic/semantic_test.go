@@ -16,6 +16,9 @@ func parseAndAnalyze(t *testing.T, filename string, src string) (*semantic.Resul
 	t.Helper()
 	l := lexer.New(filename, []byte(src))
 	tokens := l.Tokenize()
+	if errs := l.Errors(); len(errs) > 0 {
+		return nil, errs
+	}
 	p := parser.New(tokens)
 	file := p.ParseFile(filename)
 	if errs := p.Errors(); len(errs) > 0 {
@@ -313,6 +316,124 @@ export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[
 	}
 	if result.ExportedFuncs[0].Signature.Return.String() != "Vec[i32]" {
 		t.Fatalf("expected exported wrapper return to resolve concretely, got %s", result.ExportedFuncs[0].Signature.Return.String())
+	}
+}
+
+func TestAnalyzeCollectsKnownFunctionAnnotations(t *testing.T) {
+	src := `@test
+def sample_case() -> void:
+	pass
+
+@fixture
+def shared_seed() -> int:
+	return 7
+
+@bench
+def hot_loop() -> void:
+	pass
+`
+	result, errs := parseAndAnalyze(t, "function_annotations_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	if len(result.AnnotatedFuncs) != 3 {
+		t.Fatalf("expected 3 annotated funcs, got %d", len(result.AnnotatedFuncs))
+	}
+	if result.AnnotatedFuncs[0].Name != "sample_case" {
+		t.Fatalf("expected first annotated func to be sample_case, got %q", result.AnnotatedFuncs[0].Name)
+	}
+	if len(result.AnnotatedFuncs[0].Annotations) != 1 {
+		t.Fatalf("expected sample_case to carry 1 annotation, got %d", len(result.AnnotatedFuncs[0].Annotations))
+	}
+	if got := result.AnnotatedFuncs[0].Annotations[0].Name; got != "test" {
+		t.Fatalf("expected first annotation to be test, got %q", got)
+	}
+	if result.AnnotatedFuncs[0].Signature == nil || result.AnnotatedFuncs[0].Signature.Return.String() != "void" {
+		t.Fatalf("expected sample_case signature to resolve to void return, got %#v", result.AnnotatedFuncs[0].Signature)
+	}
+	if result.AnnotatedFuncs[1].Name != "shared_seed" {
+		t.Fatalf("expected second annotated func to be shared_seed, got %q", result.AnnotatedFuncs[1].Name)
+	}
+	if len(result.AnnotatedFuncs[1].Annotations) != 1 || result.AnnotatedFuncs[1].Annotations[0].Name != "fixture" {
+		t.Fatalf("expected shared_seed to carry a single fixture annotation, got %#v", result.AnnotatedFuncs[1].Annotations)
+	}
+	if result.AnnotatedFuncs[1].Signature == nil || result.AnnotatedFuncs[1].Signature.Return.String() != "int" {
+		t.Fatalf("expected shared_seed signature to resolve to int return, got %#v", result.AnnotatedFuncs[1].Signature)
+	}
+	if result.AnnotatedFuncs[2].Name != "hot_loop" {
+		t.Fatalf("expected third annotated func to be hot_loop, got %q", result.AnnotatedFuncs[2].Name)
+	}
+	if len(result.AnnotatedFuncs[2].Annotations) != 1 || result.AnnotatedFuncs[2].Annotations[0].Name != "bench" {
+		t.Fatalf("expected hot_loop to carry a single bench annotation, got %#v", result.AnnotatedFuncs[2].Annotations)
+	}
+}
+
+func TestAnalyzeRejectsUnknownFunctionAnnotation(t *testing.T) {
+	src := `@smoke
+def sample_case() -> int:
+	return 7
+`
+	_, errs := parseAndAnalyze(t, "function_annotations_unknown.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "unknown function annotation @smoke") {
+		t.Fatalf("expected unknown-annotation diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsDuplicateFunctionAnnotation(t *testing.T) {
+	src := `@test
+@test
+def sample_case() -> int:
+	return 7
+`
+	_, errs := parseAndAnalyze(t, "function_annotations_duplicate.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "duplicate @test annotation on function \"sample_case\"") {
+		t.Fatalf("expected duplicate-annotation diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsTestFunctionParameters(t *testing.T) {
+	src := `@test
+def sample_case(value: int) -> void:
+	pass
+`
+	_, errs := parseAndAnalyze(t, "function_annotations_test_params.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "@test function \"sample_case\" must not take parameters") {
+		t.Fatalf("expected test-parameter diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsBenchFunctionNonVoidReturn(t *testing.T) {
+	src := `@bench
+def hot_loop() -> int:
+	return 7
+`
+	_, errs := parseAndAnalyze(t, "function_annotations_bench_return.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "@bench function \"hot_loop\" must return void, got int") {
+		t.Fatalf("expected bench-return diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsGenericFixtureFunction(t *testing.T) {
+	src := `@fixture
+def shared_seed[T]() -> int:
+	return 7
+`
+	_, errs := parseAndAnalyze(t, "function_annotations_fixture_generic.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "@fixture function \"shared_seed\" must not have type or shape parameters") {
+		t.Fatalf("expected fixture-generic diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
 
