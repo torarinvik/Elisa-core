@@ -527,6 +527,28 @@ func (s *functionState) popScope() {
 	}
 }
 
+func (s *functionState) clonePackedStores() map[string]packedStoreBinding {
+	if s.packedStores == nil {
+		return nil
+	}
+	cloned := make(map[string]packedStoreBinding, len(s.packedStores))
+	for name, binding := range s.packedStores {
+		cloned[name] = binding
+	}
+	return cloned
+}
+
+func (s *functionState) lookupPackedStore(enumType *semantic.EnumType) (packedStoreBinding, bool) {
+	if s.packedStores == nil || enumType == nil {
+		return packedStoreBinding{}, false
+	}
+	binding, ok := s.packedStores[enumType.Name]
+	if !ok || binding.typ == nil {
+		return packedStoreBinding{}, false
+	}
+	return binding, true
+}
+
 func (s *functionState) defineBinding(name string, binding valueBinding) {
 	if s.scope == nil {
 		s.scope = &codegenScope{bindings: map[string]valueBinding{}}

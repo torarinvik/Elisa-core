@@ -808,6 +808,32 @@ def eval(node: Expr, store: Expr.Store) -> int:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsPackedEnumsWithinInStoreBlocks(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def build(store_owner: Arena) -> Expr:
+	store: Expr.Store = Expr.Store(store_owner)
+	in store:
+		left: Expr = new Expr.Int(span: 1, value: 1)
+		right: Expr = new Expr.Int(span: 2, value: 2)
+		return new Expr.Add(span: 3, left: left, right: right)
+
+def eval(node: Expr, store: Expr.Store) -> int:
+	in store:
+		return match node:
+			Expr.Int(value: value):
+				value + node.span
+			Expr.Add(left: left, right: right):
+				node.span + eval(left, store) + eval(right, store)
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_in_store_block_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeRejectsBarePackedEnumConstructorCall(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)
@@ -822,6 +848,23 @@ def bad() -> Expr:
 	all := strings.Join(errs, "\n")
 	if !strings.Contains(all, "packed enum constructor \"Expr.Int\" must be allocated with new[Expr.Store]") {
 		t.Fatalf("expected packed constructor diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsBarePackedAllocOutsideInStoreScope(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+def bad() -> Expr:
+	return new Expr.Int(value: 1)
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_alloc_without_scope_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "packed enum constructor \"Expr.Int\" requires an active in Expr.Store: scope or explicit new[Expr.Store]") {
+		t.Fatalf("expected in-store allocation diagnostic, got:\n%s", all)
 	}
 }
 

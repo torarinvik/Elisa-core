@@ -123,6 +123,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.applyPostIfFallthroughRefinement(n)
 	case *ast.MatchStmt:
 		a.analyzeMatchStmt(n)
+	case *ast.InStoreStmt:
+		a.analyzeInStoreStmt(n)
 	case *ast.WhileStmt:
 		condType := a.analyzeCondExpr(n.Cond)
 		if !IsBoolType(condType) {
@@ -156,6 +158,24 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 	case *ast.DiscardStmt:
 		a.analyzeExpr(n.Value)
 	}
+}
+
+func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
+	storeType := a.analyzeExpr(stmt.Store)
+	packedStore, ok := storeType.(*PackedEnumStoreType)
+	if !ok {
+		a.errorf(stmt.Store.Pos(), "in-store block requires a packed enum store, got %s", storeType.String())
+		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
+		return
+	}
+	savedPackedStores := a.currentPackedStores
+	a.currentPackedStores = a.clonePackedStores()
+	if a.currentPackedStores == nil {
+		a.currentPackedStores = map[string]*PackedEnumStoreType{}
+	}
+	a.currentPackedStores[packedStore.Enum.Name] = packedStore
+	a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
+	a.currentPackedStores = savedPackedStores
 }
 
 func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
@@ -238,6 +258,9 @@ func (a *Analyzer) validateMatchStore(pos lexer.Pos, enumType *EnumType, storeEx
 		return
 	}
 	if storeExpr == nil {
+		if _, ok := a.lookupPackedStore(enumType); ok {
+			return
+		}
 		a.errorf(pos, "packed enum match over %q requires an in %s clause", enumType.Name, packedEnumStoreTypeName(enumType.Name))
 		return
 	}
@@ -372,11 +395,14 @@ func matchPatternSummary(pattern ast.MatchPattern) string {
 func (a *Analyzer) analyzeMatchExprArmBody(body []ast.Stmt, scope *Scope) Type {
 	savedScope := a.currentScope
 	savedRegions := a.currentRegions
+	savedPackedStores := a.currentPackedStores
 	a.currentScope = scope
 	a.currentRegions = a.cloneRegionStates()
+	a.currentPackedStores = a.clonePackedStores()
 	defer func() {
 		a.currentScope = savedScope
 		a.currentRegions = savedRegions
+		a.currentPackedStores = savedPackedStores
 	}()
 	if len(body) == 0 {
 		return invalidType
@@ -586,9 +612,12 @@ func (a *Analyzer) analyzeBlockInScope(stmts []ast.Stmt, scope *Scope) {
 
 func (a *Analyzer) analyzeBlockWithRegionClone(stmts []ast.Stmt, scope *Scope) {
 	savedRegions := a.currentRegions
+	savedPackedStores := a.currentPackedStores
 	a.currentRegions = a.cloneRegionStates()
+	a.currentPackedStores = a.clonePackedStores()
 	a.analyzeBlockInScope(stmts, scope)
 	a.currentRegions = savedRegions
+	a.currentPackedStores = savedPackedStores
 }
 
 func (a *Analyzer) cloneRegionStates() map[*Symbol]regionState {
@@ -600,6 +629,28 @@ func (a *Analyzer) cloneRegionStates() map[*Symbol]regionState {
 		cloned[sym] = state
 	}
 	return cloned
+}
+
+func (a *Analyzer) clonePackedStores() map[string]*PackedEnumStoreType {
+	if a.currentPackedStores == nil {
+		return nil
+	}
+	cloned := make(map[string]*PackedEnumStoreType, len(a.currentPackedStores))
+	for name, store := range a.currentPackedStores {
+		cloned[name] = store
+	}
+	return cloned
+}
+
+func (a *Analyzer) lookupPackedStore(enumType *EnumType) (*PackedEnumStoreType, bool) {
+	if a.currentPackedStores == nil || enumType == nil {
+		return nil, false
+	}
+	store, ok := a.currentPackedStores[enumType.Name]
+	if !ok || store == nil {
+		return nil, false
+	}
+	return store, true
 }
 
 func (a *Analyzer) lookupRegionState(name string) (*Symbol, regionState) {

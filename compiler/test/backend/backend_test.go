@@ -1164,6 +1164,50 @@ def fold() -> int:
 	}
 }
 
+func TestGenerateLLVMIRLowersPackedInStoreBlockSugar(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Lit(value: int)
+	Add(left: Expr, right: Expr)
+
+def fold() -> int:
+	region scratch(1024u)
+	store: Expr.Store = Expr.Store(scratch)
+	in store:
+		left: Expr = new Expr.Lit(span: 1, value: 3)
+		right: Expr = new Expr.Lit(span: 2, value: 4)
+		node: Expr = new Expr.Add(span: 3, left: left, right: right)
+		return match node:
+			Expr.Lit(value: value):
+				value + node.span
+			Expr.Add(left: lhs, right: rhs):
+				node.span + lhs.span + rhs.span
+`
+	result := parseAndAnalyze(t, "backend_packed_in_store_block.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%Expr = type { i32, i64, [2 x i64] }",
+		"define i64 @fold()",
+		"call ptr @new_region(i64 1024)",
+		"call ptr @arena_alloc(ptr",
+		"store i64 3, ptr %packed.enum.common.ptr",
+		"load i32, ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "unknown enum constructor") {
+		t.Fatalf("expected in-store packed sugar to lower successfully, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersPayloadlessPackedEnumsAsHandles(t *testing.T) {
 	src := `packed enum Token:
 	Ident

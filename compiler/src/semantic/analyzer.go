@@ -75,6 +75,7 @@ type Analyzer struct {
 	currentScope           *Scope
 	currentReturn          Type
 	currentRegions         map[*Symbol]regionState
+	currentPackedStores    map[string]*PackedEnumStoreType
 }
 
 type regionState struct {
@@ -555,8 +556,10 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	savedReturn := a.currentReturn
 	savedReturnFreshStatus := a.returnFreshShapeStatus
 	savedRegions := a.currentRegions
+	savedPackedStores := a.currentPackedStores
 	a.currentScope = NewScope(a.globalScope)
 	a.currentRegions = map[*Symbol]regionState{}
+	a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	if fnType != nil {
 		a.currentReturn = fnType.Return
 		a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)
@@ -582,4 +585,5 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentReturn = savedReturn
 	a.returnFreshShapeStatus = savedReturnFreshStatus
 	a.currentRegions = savedRegions
+	a.currentPackedStores = savedPackedStores
 }

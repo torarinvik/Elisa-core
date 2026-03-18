@@ -29,21 +29,27 @@ type codegenScope struct {
 }
 
 type functionState struct {
-	g          *llvmGenerator
-	decl       *ast.FuncDecl
-	fnValue    C.LLVMValueRef
-	fnType     *semantic.FuncType
-	builder    C.LLVMBuilderRef
-	scope      *codegenScope
-	typeMap    map[string]semantic.Type
-	resultSlot C.LLVMValueRef
-	regions    []regionBinding
+	g            *llvmGenerator
+	decl         *ast.FuncDecl
+	fnValue      C.LLVMValueRef
+	fnType       *semantic.FuncType
+	builder      C.LLVMBuilderRef
+	scope        *codegenScope
+	typeMap      map[string]semantic.Type
+	resultSlot   C.LLVMValueRef
+	regions      []regionBinding
+	packedStores map[string]packedStoreBinding
 }
 
 type regionBinding struct {
 	name string
 	ptr  C.LLVMValueRef
 	typ  semantic.Type
+}
+
+type packedStoreBinding struct {
+	value C.LLVMValueRef
+	typ   *semantic.PackedEnumStoreType
 }
 
 func (g *llvmGenerator) defineFunctionBody(decl *ast.FuncDecl, fnType *semantic.FuncType, fnValue C.LLVMValueRef) error {
@@ -67,13 +73,14 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	C.LLVMPositionBuilderAtEnd(builder, entry)
 
 	state := &functionState{
-		g:       g,
-		decl:    decl,
-		fnValue: fnValue,
-		fnType:  fnType,
-		builder: builder,
-		scope:   &codegenScope{bindings: map[string]valueBinding{}},
-		typeMap: typeBindings,
+		g:            g,
+		decl:         decl,
+		fnValue:      fnValue,
+		fnType:       fnType,
+		builder:      builder,
+		scope:        &codegenScope{bindings: map[string]valueBinding{}},
+		typeMap:      typeBindings,
+		packedStores: map[string]packedStoreBinding{},
 	}
 
 	paramOffset := 0
@@ -297,6 +304,8 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		return s.emitIf(n)
 	case *ast.MatchStmt:
 		return s.emitMatch(n)
+	case *ast.InStoreStmt:
+		return s.emitInStore(n)
 	case *ast.WhileStmt:
 		return s.emitWhile(n)
 	case *ast.PassStmt:
@@ -331,6 +340,27 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 	default:
 		return fmt.Errorf("unsupported statement %T", stmt)
 	}
+}
+
+func (s *functionState) emitInStore(stmt *ast.InStoreStmt) error {
+	storeValue, actualType, err := s.emitExpr(stmt.Store, nil)
+	if err != nil {
+		return err
+	}
+	storeType, ok := actualType.(*semantic.PackedEnumStoreType)
+	if !ok {
+		return fmt.Errorf("in-store block requires a packed enum store, got %s", actualType.String())
+	}
+	savedStores := s.packedStores
+	s.packedStores = s.clonePackedStores()
+	if s.packedStores == nil {
+		s.packedStores = map[string]packedStoreBinding{}
+	}
+	s.packedStores[storeType.Enum.Name] = packedStoreBinding{value: storeValue, typ: storeType}
+	defer func() {
+		s.packedStores = savedStores
+	}()
+	return s.emitBlock(stmt.Body, true)
 }
 
 func (s *functionState) emitRegionInit(arenaPtr C.LLVMValueRef, arenaType semantic.Type, capacityExpr ast.Expr) error {
@@ -485,6 +515,10 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 		if _, _, err := s.emitExpr(stmt.Store, nil); err != nil {
 			return err
 		}
+	} else if enumType.Packed {
+		if _, ok := s.lookupPackedStore(enumType); !ok {
+			return fmt.Errorf("missing active packed enum store for %s", enumType.Name)
+		}
 	}
 	enumValue, _, err := s.emitExpr(stmt.Value, enumType)
 	if err != nil {
@@ -546,6 +580,10 @@ func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, sema
 	if expr.Store != nil {
 		if _, _, err := s.emitExpr(expr.Store, nil); err != nil {
 			return nil, nil, err
+		}
+	} else if enumType.Packed {
+		if _, ok := s.lookupPackedStore(enumType); !ok {
+			return nil, nil, fmt.Errorf("missing active packed enum store for %s", enumType.Name)
 		}
 	}
 	enumValue, _, err := s.emitExpr(expr.Value, enumType)

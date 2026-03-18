@@ -218,6 +218,19 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"call i64 @eval(ptr",
 			},
 		},
+		{
+			name: "packed_enum_common",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "packed_enum_common.llcontext"),
+			checks: []string{
+				"%Expr = type { i32, i64, [2 x i64] }",
+				"%Token = type { i32, i64 }",
+				"define ptr @build_expr(%Arena",
+				"define i64 @eval(ptr",
+				"define i64 @packed_demo()",
+				"call ptr @arena_alloc(ptr",
+				"load i64, ptr",
+			},
+		},
 	}
 
 	for _, fixture := range fixtures {

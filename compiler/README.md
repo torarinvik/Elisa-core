@@ -25,6 +25,69 @@ When propagating fallible results, a function may return a broader error set tha
 
 Current lowering in the backend uses integer error codes at runtime; `void | ErrorSet` lowers directly to an error code, while value-carrying fallible functions now return that code plus a hidden payload out-parameter. Inside expressions and locals, the backend still materializes compact `{err, value}` LLVM structs when it needs a first-class error-union value.
 
+## Packed enums
+
+The frontend also supports explicit-store packed enums for arena-backed ADTs:
+
+```text
+packed enum Expr:
+  common:
+    span: int
+  Int(value: int)
+  Add(left: Expr, right: Expr)
+
+def build(owner: Arena) -> Expr:
+  store: Expr.Store = Expr.Store(owner)
+  left: Expr = new[store] Expr.Int(span: 1, value: 3)
+  right: Expr = new[store] Expr.Int(span: 2, value: 4)
+  return new[store] Expr.Add(span: 3, left: left, right: right)
+
+def eval(node: Expr, store: Expr.Store) -> int:
+  return match node in store:
+    Expr.Int(value: value):
+      value + node.span
+    Expr.Add(left: left, right: right):
+      node.span + eval(left, store) + eval(right, store)
+```
+
+Current packed-enum rules:
+
+- packed values are handle-backed and must be created with `new[store] Enum.Variant(...)`
+- `Enum.Store` is the explicit per-enum store constructor surface
+- `match` over packed enums requires `match value in store:`
+- packed `common:` fields are readable on the packed handle (`node.span`)
+- packed `common:` fields can be initialized by name during allocation; omitted common fields remain zero-initialized
+
+For a compile-checked end-to-end example, see `../Code/test_programs/packed_enum_common.llcontext`.
+
+The frontend also now supports `in store:` block sugar over that explicit core:
+
+```text
+def build(owner: Arena) -> Expr:
+  store: Expr.Store = Expr.Store(owner)
+  in store:
+    left: Expr = new Expr.Int(span: 1, value: 3)
+    right: Expr = new Expr.Int(span: 2, value: 4)
+    return new Expr.Add(span: 3, left: left, right: right)
+```
+
+Inside an active `in store:` block, packed allocations can omit `[store]` and packed matches can omit `in store`; both forms still lower to the same explicit-store representation.
+
+## Benchmark scaffolding
+
+There is now a synthetic JSON benchmark scaffold under `test/benchmarks/json_bench_test.go`.
+
+- it generates deterministic nested JSON corpora of several sizes
+- it validates the generated corpora with a normal `go test` unit test
+- it benchmarks Go's `encoding/json` as a baseline for future parser comparisons
+
+Run it with:
+
+```text
+go test ./test/benchmarks -run '^TestSyntheticJSONCorpusIsValid$'
+go test ./test/benchmarks -run '^$' -bench '^BenchmarkEncodingJSONParseSyntheticCorpus$' -benchmem
+```
+
 ## Layout
 
 - `src/` — active compiler source code

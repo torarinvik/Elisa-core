@@ -455,6 +455,12 @@ type MatchStmt struct {
 	Arms     []MatchArm
 }
 
+type InStoreStmt struct {
+	Position lexer.Pos
+	Store    Expr
+	Body     []Stmt
+}
+
 type MatchArm struct {
 	Position lexer.Pos
 	Pattern  MatchPattern
@@ -581,6 +587,7 @@ func (n *ReturnStmt) Pos() lexer.Pos          { return n.Position }
 func (n *IfStmt) Pos() lexer.Pos              { return n.Position }
 func (n *WhileStmt) Pos() lexer.Pos           { return n.Position }
 func (n *MatchStmt) Pos() lexer.Pos           { return n.Position }
+func (n *InStoreStmt) Pos() lexer.Pos         { return n.Position }
 func (n *PassStmt) Pos() lexer.Pos            { return n.Position }
 func (n *PanicStmt) Pos() lexer.Pos           { return n.Position }
 func (n *ExprStmt) Pos() lexer.Pos            { return n.Position }
@@ -647,6 +654,7 @@ func (*ReturnStmt) nodeTag()           {}
 func (*IfStmt) nodeTag()               {}
 func (*WhileStmt) nodeTag()            {}
 func (*MatchStmt) nodeTag()            {}
+func (*InStoreStmt) nodeTag()          {}
 func (*PassStmt) nodeTag()             {}
 func (*PanicStmt) nodeTag()            {}
 func (*ExprStmt) nodeTag()             {}
@@ -717,6 +725,7 @@ func (*VarDeclStmt) stmtTag()     {}
 func (*ReturnStmt) stmtTag()      {}
 func (*IfStmt) stmtTag()          {}
 func (*WhileStmt) stmtTag()       {}
+func (*InStoreStmt) stmtTag()     {}
 func (*PassStmt) stmtTag()        {}
 func (*PanicStmt) stmtTag()       {}
 func (*ExprStmt) stmtTag()        {}

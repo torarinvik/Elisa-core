@@ -1,0 +1,34 @@
+packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+packed enum Token:
+	common:
+		span: int
+	Region
+
+def build_expr(owner: Arena) -> Expr:
+	store: Expr.Store = Expr.Store(owner)
+	in store:
+		left: Expr = new Expr.Int(span: 1, value: 3)
+		right: Expr = new Expr.Int(span: 2, value: 4)
+		return new Expr.Add(span: 3, left: left, right: right)
+
+def eval(node: Expr, store: Expr.Store) -> int:
+	in store:
+		return match node:
+			Expr.Int(value: value):
+				value + node.span
+			Expr.Add(left: left, right: right):
+				node.span + eval(left, store) + eval(right, store)
+
+def packed_demo() -> int:
+	region scratch(1024u)
+	store: Expr.Store = Expr.Store(scratch)
+	token_store: Token.Store = Token.Store(scratch)
+	root: Expr = build_expr(scratch)
+	in token_store:
+		marker: Token = new Token.Region(span: 10)
+		return eval(root, store) + marker.span

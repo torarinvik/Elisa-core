@@ -1072,6 +1072,9 @@ func (s *functionState) emitUnaryExpr(expr *ast.UnaryExpr) (C.LLVMValueRef, sema
 }
 
 func (s *functionState) emitAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if expr.Owner == nil {
+		return s.emitScopedPackedAllocExpr(expr)
+	}
 	if _, ok := s.exprType(expr.Owner).(*semantic.PackedEnumStoreType); ok {
 		return s.emitPackedAllocExpr(expr)
 	}
@@ -1115,6 +1118,33 @@ func (s *functionState) emitAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, sema
 	allocPtr := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{binding.ptr, sizeValue}, "region.alloc")
 	C.LLVMBuildStore(s.builder, value, allocPtr)
 	return allocPtr, s.exprType(expr), nil
+}
+
+func (s *functionState) emitScopedPackedAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, semantic.Type, error) {
+	switch n := expr.Value.(type) {
+	case *ast.FieldExpr:
+		enumType, variant, ok := s.enumConstructorInfoFromField(n)
+		if !ok || enumType == nil || variant == nil || !enumType.Packed {
+			return nil, nil, fmt.Errorf("new without [...] expects a packed enum constructor inside an in-store block")
+		}
+		store, ok := s.lookupPackedStore(enumType)
+		if !ok {
+			return nil, nil, fmt.Errorf("missing active packed enum store for %s", enumType.Name)
+		}
+		return s.emitPackedEnumConstructorAlloc(store.value, enumType, variant, nil, nil)
+	case *ast.CallExpr:
+		enumType, variant, ok := s.enumConstructorInfo(n)
+		if !ok || enumType == nil || variant == nil || !enumType.Packed {
+			return nil, nil, fmt.Errorf("new without [...] expects a packed enum constructor inside an in-store block")
+		}
+		store, ok := s.lookupPackedStore(enumType)
+		if !ok {
+			return nil, nil, fmt.Errorf("missing active packed enum store for %s", enumType.Name)
+		}
+		return s.emitPackedEnumConstructorAlloc(store.value, enumType, variant, n.Args, n.ArgNames)
+	default:
+		return nil, nil, fmt.Errorf("new without [...] expects a packed enum constructor inside an in-store block")
+	}
 }
 
 func (s *functionState) emitPackedAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, semantic.Type, error) {

@@ -240,6 +240,9 @@ func (a *Analyzer) analyzeAllocExpr(expr *ast.AllocExpr) Type {
 	if expr == nil {
 		return invalidType
 	}
+	if expr.Owner == nil {
+		return a.analyzeScopedPackedAllocExpr(expr)
+	}
 	ownerType := a.analyzeExpr(expr.Owner)
 	if storeType, ok := ownerType.(*PackedEnumStoreType); ok {
 		return a.analyzePackedAllocExpr(expr, storeType)
@@ -268,6 +271,24 @@ func (a *Analyzer) analyzeAllocExpr(expr *ast.AllocExpr) Type {
 	return &RefType{Elem: valueType, State: RefStateNonNull, Storage: RefStorageAny, ExplicitStorage: true}
 }
 
+func (a *Analyzer) analyzeScopedPackedAllocExpr(expr *ast.AllocExpr) Type {
+	enumType, variant, ok := a.packedAllocConstructorInfo(expr.Value)
+	if !ok || enumType == nil || variant == nil || !enumType.Packed {
+		valueType := a.analyzeExpr(expr.Value)
+		a.errorf(expr.Pos(), "new without [...] expects a packed enum constructor inside an in-store block, got %s", valueType.String())
+		return invalidType
+	}
+	storeType, ok := a.lookupPackedStore(enumType)
+	if !ok {
+		a.errorf(expr.Pos(), "packed enum constructor %q requires an active in %s: scope or explicit new[%s]", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name), packedEnumStoreTypeName(enumType.Name))
+		if enumType.StoreType != nil {
+			return a.analyzePackedAllocExpr(expr, enumType.StoreType)
+		}
+		return enumType
+	}
+	return a.analyzePackedAllocExpr(expr, storeType)
+}
+
 func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *PackedEnumStoreType) Type {
 	if fieldExpr, ok := expr.Value.(*ast.FieldExpr); ok {
 		ident, ok := fieldExpr.Object.(*ast.Ident)
@@ -279,7 +300,7 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 					variant, ok := enumType.Variant(fieldExpr.Field)
 					if ok && enumType.Packed && len(variant.Payload) == 0 {
 						if storeType.Enum != enumType {
-							a.errorf(expr.Owner.Pos(), "packed enum constructor %q requires store %q, got %q", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name), storeType.String())
+							a.errorf(allocOwnerPos(expr), "packed enum constructor %q requires store %q, got %q", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name), storeType.String())
 						}
 						return enumType
 					}
@@ -300,7 +321,7 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 		return invalidType
 	}
 	if storeType.Enum != enumType {
-		a.errorf(expr.Owner.Pos(), "packed enum constructor %q requires store %q, got %q", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name), storeType.String())
+		a.errorf(allocOwnerPos(expr), "packed enum constructor %q requires store %q, got %q", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name), storeType.String())
 	}
 	orderedArgs, commonArgs, ok := a.resolvePackedEnumConstructorArgs(callExpr, enumType, variant)
 	if !ok {
@@ -344,6 +365,16 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 		}
 	}
 	return enumType
+}
+
+func allocOwnerPos(expr *ast.AllocExpr) lexer.Pos {
+	if expr != nil && expr.Owner != nil {
+		return expr.Owner.Pos()
+	}
+	if expr != nil {
+		return expr.Pos()
+	}
+	return lexer.Pos{}
 }
 
 func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *StructType, bindings map[string]Type) {
@@ -506,7 +537,19 @@ func (a *Analyzer) enumConstructorCall(expr *ast.CallExpr) (*EnumType, *EnumVari
 	if !ok {
 		return nil, nil, false
 	}
-	ident, ok := fieldExpr.Object.(*ast.Ident)
+	enumType, variant, ok := a.enumConstructorInfoFromFieldExpr(fieldExpr)
+	if !ok {
+		return nil, nil, false
+	}
+	if variant == nil {
+		a.errorf(fieldExpr.Pos(), "enum %q has no variant %q", enumType.Name, fieldExpr.Field)
+		return enumType, nil, true
+	}
+	return enumType, variant, true
+}
+
+func (a *Analyzer) enumConstructorInfoFromFieldExpr(expr *ast.FieldExpr) (*EnumType, *EnumVariant, bool) {
+	ident, ok := expr.Object.(*ast.Ident)
 	if !ok {
 		return nil, nil, false
 	}
@@ -518,12 +561,22 @@ func (a *Analyzer) enumConstructorCall(expr *ast.CallExpr) (*EnumType, *EnumVari
 	if !ok {
 		return nil, nil, false
 	}
-	variant, ok := enumType.Variant(fieldExpr.Field)
+	variant, ok := enumType.Variant(expr.Field)
 	if !ok {
-		a.errorf(fieldExpr.Pos(), "enum %q has no variant %q", enumType.Name, fieldExpr.Field)
 		return enumType, nil, true
 	}
 	return enumType, variant, true
+}
+
+func (a *Analyzer) packedAllocConstructorInfo(expr ast.Expr) (*EnumType, *EnumVariant, bool) {
+	switch n := expr.(type) {
+	case *ast.FieldExpr:
+		return a.enumConstructorInfoFromFieldExpr(n)
+	case *ast.CallExpr:
+		return a.enumConstructorCall(n)
+	default:
+		return nil, nil, false
+	}
 }
 
 func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {

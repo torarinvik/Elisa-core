@@ -390,7 +390,7 @@ func (p *Parser) parseMulDiv() ast.Expr {
 }
 
 func (p *Parser) parseUnary() ast.Expr {
-	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "new" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACKET {
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "new" {
 		return p.parseAllocExpr()
 	}
 	if p.peek() == lexer.TOKEN_MINUS {
@@ -417,9 +417,11 @@ func (p *Parser) parseUnary() ast.Expr {
 func (p *Parser) parseAllocExpr() ast.Expr {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_IDENT)
-	p.expect(lexer.TOKEN_LBRACKET)
-	owner := p.parseExpr()
-	p.expect(lexer.TOKEN_RBRACKET)
+	var owner ast.Expr
+	if p.match(lexer.TOKEN_LBRACKET) {
+		owner = p.parseExpr()
+		p.expect(lexer.TOKEN_RBRACKET)
+	}
 	value := p.parseExpr()
 	return &ast.AllocExpr{Position: pos, Owner: owner, Value: value}
 }
