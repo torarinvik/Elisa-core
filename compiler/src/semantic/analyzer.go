@@ -129,6 +129,8 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 		{name: "count", typ: namedTypeExpr("usize", false), mutable: true},
 		{name: "capacity", typ: namedTypeExpr("usize", false), mutable: true},
 		{name: "owner_tag", typ: namedTypeExpr("uintptr", false), mutable: true},
+		{name: "owner_next", typ: refTypeExpr("Region", true), mutable: true},
+		{name: "global_index", typ: namedTypeExpr("usize", false), mutable: true},
 		{name: "data", typ: namedTypeExpr("uintptr", false), isTail: true},
 	})
 	a.registerBuiltinStructType("Arena", nil, []builtinFieldSpec{

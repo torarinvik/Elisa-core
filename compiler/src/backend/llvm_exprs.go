@@ -608,14 +608,21 @@ func (s *functionState) encodePackedEnumHandleWithStore(rowPtr C.LLVMValueRef, e
 		if storeType == nil {
 			return nil, fmt.Errorf("packed enum %s is missing store metadata", enumType.Name)
 		}
+		if storeValue == nil {
+			return nil, fmt.Errorf("packed enum %s word-handle encode requires store context", enumType.Name)
+		}
 		arenaValue, err := s.emitPackedStoreArenaValueNamed(storeValue, storeType, "packed.encode.store.arena")
+		if err != nil {
+			return nil, err
+		}
+		stateValue, err := s.emitPackedStoreStateValueNamed(storeValue, storeType, "packed.encode.store.state")
 		if err != nil {
 			return nil, err
 		}
 		arenaType := s.g.result.NamedTypes["Arena"]
 		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 		voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-		helperType := &semantic.FuncType{Name: "ctx_packed_store_encode", Params: []semantic.Type{arenaRefType, voidRefType}, Return: s.g.result.NamedTypes["uintptr"]}
+		helperType := &semantic.FuncType{Name: "ctx_packed_store_encode", Params: []semantic.Type{arenaRefType, voidRefType, voidRefType}, Return: s.g.result.NamedTypes["uintptr"]}
 		callee, err := s.g.ensureFunctionDeclared("ctx_packed_store_encode", helperType)
 		if err != nil {
 			return nil, err
@@ -624,7 +631,7 @@ func (s *functionState) encodePackedEnumHandleWithStore(rowPtr C.LLVMValueRef, e
 		if err != nil {
 			return nil, err
 		}
-		encoded := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, rowPtr}, "packed.handle.encode")
+		encoded := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, rowPtr, stateValue}, "packed.handle.encode")
 		return s.coerceValue(encoded, s.g.result.NamedTypes["uintptr"], enumType)
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedEnumABI)

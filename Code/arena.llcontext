@@ -31,6 +31,8 @@ repr(c) struct Region:
     count: mutable usize
     capacity: mutable usize
     owner_tag: mutable uintptr
+    owner_next: mutable any Region&?
+    global_index: mutable usize
     data: tail uintptr
 
 repr(c) struct Arena:
@@ -43,10 +45,12 @@ repr(c) struct ArenaMark:
     count: usize
 
 repr(c) struct PackedStoreState:
+    head_region: mutable any Region&?
     alloc_region: mutable any Region&?
     alloc_region_index: mutable usize
     decode_region: mutable any Region&?
     decode_region_index: mutable usize
+    tail_region: mutable any Region&?
     row_words: mutable usize
     preferred_region_capacity: mutable usize
 
@@ -211,6 +215,8 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> any Region&:
     r.count <- 0
     r.capacity <- capacity
     r.owner_tag <- owner_tag
+    r.owner_next <- null
+    r.global_index <- 0
     return r
 
 def new_region(capacity: usize) -> any Region&:
@@ -254,6 +260,7 @@ def arena_alloc(a: any Arena&, size_bytes: usize) -> any void&:
         a.end as & <- new_region(capacity)
         a.begin <- a.end
         a.end_index <- 0
+        a.end.global_index <- 0
 
     assert a.end != null
 
@@ -271,6 +278,7 @@ def arena_alloc(a: any Arena&, size_bytes: usize) -> any void&:
         a.end.next as & <- new_region(capacity)
         a.end <- a.end.next
         a.end_index <- a.end_index + 1
+        a.end.global_index <- a.end_index
 
     data_base: any u8& = (a.end.cast[any u8&]() + sizeof(Region)).cast[any u8&]()
     offset_bytes: usize = a.end.count * sizeof(uintptr)
@@ -350,10 +358,12 @@ def ctx_packed_store_state_new(a: any Arena&, row_bytes: usize) -> any void&:
     if preferred_region_capacity < row_words:
         preferred_region_capacity <- row_words
 
+    state.head_region <- null
     state.alloc_region <- null
     state.alloc_region_index <- 0
     state.decode_region <- null
     state.decode_region_index <- 0
+    state.tail_region <- null
     state.row_words <- row_words
     state.preferred_region_capacity <- preferred_region_capacity
     return state.cast[any void&]()
@@ -384,30 +394,33 @@ def ctx_packed_store_alloc(a: any Arena&, size_bytes: usize, state_bits: any voi
             a.end as & <- new_region_with_owner(capacity, owner_tag)
             a.begin <- a.end
             a.end_index <- 0
+            a.end.global_index <- 0
         else:
             a.end.next as & <- new_region_with_owner(capacity, owner_tag)
             a.end <- a.end.next
             a.end_index <- a.end_index + 1
+            a.end.global_index <- a.end_index
 
+        state.head_region <- a.end
         state.alloc_region <- a.end
         state.alloc_region_index <- a.end_index
+        state.tail_region <- a.end
 
     assert state.alloc_region != null
+    assert state.tail_region != null
 
     if state.alloc_region.count + size > state.alloc_region.capacity:
-        cursor: mutable any Region&? = state.alloc_region.next
-        cursor_index: mutable usize = state.alloc_region_index + 1
+        cursor: mutable any Region&? = state.alloc_region.owner_next
         found_region: mutable any Region&? = null
         found_region_index: mutable usize = 0
 
         while cursor != null:
-            if cursor.owner_tag == owner_tag and cursor.count + size <= cursor.capacity:
+            if cursor.count + size <= cursor.capacity:
                 found_region <- cursor
-                found_region_index <- cursor_index
+                found_region_index <- cursor.global_index
                 cursor <- null
             else:
-                cursor <- cursor.next
-                cursor_index <- cursor_index + 1
+                cursor <- cursor.owner_next
 
         if found_region != null:
             state.alloc_region <- found_region
@@ -424,6 +437,9 @@ def ctx_packed_store_alloc(a: any Arena&, size_bytes: usize, state_bits: any voi
             a.end.next as & <- new_region_with_owner(capacity, owner_tag)
             a.end <- a.end.next
             a.end_index <- a.end_index + 1
+            a.end.global_index <- a.end_index
+            state.tail_region.owner_next as & <- a.end
+            state.tail_region <- a.end
             state.alloc_region <- a.end
             state.alloc_region_index <- a.end_index
 
@@ -441,8 +457,44 @@ def ctx_packed_store_alloc(a: any Arena&, size_bytes: usize, state_bits: any voi
     offset_words: uintptr = offset_bytes / sizeof(uintptr).uintptr()
     return (state.alloc_region_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
 
-def ctx_packed_store_encode(a: any Arena&, ptr: any void&) -> uintptr:
+def ctx_packed_store_encode(a: any Arena&, ptr: any void&, state_bits: any void&) -> uintptr:
     raw: uintptr = ptr.cast[any u8&]().uintptr()
+
+    if state_bits != null:
+        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+
+        if state.alloc_region != null:
+            alloc_data_base: any u8& = packed_store_region_data(state.alloc_region)
+            alloc_data_begin: uintptr = alloc_data_base.uintptr()
+            alloc_data_end: uintptr = alloc_data_begin + (state.alloc_region.capacity * sizeof(uintptr)).uintptr()
+
+            if raw >= alloc_data_begin and raw < alloc_data_end:
+                alloc_offset_bytes: uintptr = raw - alloc_data_begin
+                alloc_offset_words: uintptr = alloc_offset_bytes / sizeof(uintptr).uintptr()
+                return (state.alloc_region_index.uintptr() << 32u64.uintptr()) | (alloc_offset_words + 1u64.uintptr())
+
+        if state.decode_region != null:
+            decode_data_base: any u8& = packed_store_region_data(state.decode_region)
+            decode_data_begin: uintptr = decode_data_base.uintptr()
+            decode_data_end: uintptr = decode_data_begin + (state.decode_region.capacity * sizeof(uintptr)).uintptr()
+
+            if raw >= decode_data_begin and raw < decode_data_end:
+                decode_offset_bytes: uintptr = raw - decode_data_begin
+                decode_offset_words: uintptr = decode_offset_bytes / sizeof(uintptr).uintptr()
+                return (state.decode_region_index.uintptr() << 32u64.uintptr()) | (decode_offset_words + 1u64.uintptr())
+
+        owner_cursor: mutable any Region&? = state.head_region
+        while owner_cursor != null:
+            owner_data_base: any u8& = packed_store_region_data(owner_cursor)
+            owner_data_begin: uintptr = owner_data_base.uintptr()
+            owner_data_end: uintptr = owner_data_begin + (owner_cursor.capacity * sizeof(uintptr)).uintptr()
+
+            if raw >= owner_data_begin and raw < owner_data_end:
+                owner_offset_bytes: uintptr = raw - owner_data_begin
+                owner_offset_words: uintptr = owner_offset_bytes / sizeof(uintptr).uintptr()
+                return (owner_cursor.global_index.uintptr() << 32u64.uintptr()) | (owner_offset_words + 1u64.uintptr())
+
+            owner_cursor <- owner_cursor.owner_next
 
     if a.end != null:
         end_data_base: any u8& = packed_store_region_data(a.end)
@@ -454,7 +506,6 @@ def ctx_packed_store_encode(a: any Arena&, ptr: any void&) -> uintptr:
             end_offset_words: uintptr = end_offset_bytes / sizeof(uintptr).uintptr()
             return (a.end_index.uintptr() << 32u64.uintptr()) | (end_offset_words + 1u64.uintptr())
 
-    region_index: mutable usize = 0
     r: mutable any Region&? = a.begin
 
     while r != null:
@@ -465,9 +516,8 @@ def ctx_packed_store_encode(a: any Arena&, ptr: any void&) -> uintptr:
         if raw >= data_begin and raw < data_end:
             offset_bytes: uintptr = raw - data_begin
             offset_words: uintptr = offset_bytes / sizeof(uintptr).uintptr()
-            return (region_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
+            return (r.global_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
 
-        region_index <- region_index + 1
         r <- r.next
 
     panic("packed store encode pointer outside arena")
@@ -500,14 +550,44 @@ def ctx_packed_store_decode(a: any Arena&, handle: uintptr, state_bits: any void
 
     if state_bits != null:
         state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
-        if state.alloc_region != null and state.alloc_region_index < region_index:
-            r <- state.alloc_region
-            i <- state.alloc_region_index
+        owner_cursor: mutable any Region&? = null
+        owner_cursor_index: mutable usize = 0
 
-        if state.decode_region != null and state.decode_region_index < region_index:
+        if state.head_region != null and state.head_region.global_index <= region_index:
+            owner_cursor <- state.head_region
+            owner_cursor_index <- state.head_region.global_index
+            r <- state.head_region
+            i <- state.head_region.global_index
+
+        if state.alloc_region != null and state.alloc_region_index <= region_index:
+            if owner_cursor == null or state.alloc_region_index > owner_cursor_index:
+                owner_cursor <- state.alloc_region
+                owner_cursor_index <- state.alloc_region_index
+            if r == null or state.alloc_region_index > i:
+                r <- state.alloc_region
+                i <- state.alloc_region_index
+
+        if state.decode_region != null and state.decode_region_index <= region_index:
+            if owner_cursor == null or state.decode_region_index > owner_cursor_index:
+                owner_cursor <- state.decode_region
+                owner_cursor_index <- state.decode_region_index
             if r == null or state.decode_region_index > i:
                 r <- state.decode_region
                 i <- state.decode_region_index
+
+        if owner_cursor != null:
+            while owner_cursor != null and owner_cursor.global_index < region_index:
+                owner_cursor <- owner_cursor.owner_next
+
+            if owner_cursor != null and owner_cursor.global_index == region_index:
+                offset_words: usize = offset_words_plus_one - 1
+                assert offset_words < owner_cursor.capacity
+
+                state.decode_region <- owner_cursor
+                state.decode_region_index <- region_index
+
+                data_base: any u8& = packed_store_region_data(owner_cursor)
+                return (data_base + offset_words * sizeof(uintptr)).cast[any void&]()
 
     while i < region_index and r != null:
         r <- r.next
