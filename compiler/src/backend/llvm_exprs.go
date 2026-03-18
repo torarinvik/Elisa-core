@@ -1521,6 +1521,9 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, sema
 	if fieldType, ok := dstrSyntheticFieldType(s.exprType(expr.Object), expr.Field); ok {
 		return s.emitRuntimeStringLenExpr(expr.Object, fieldType)
 	}
+	if value, fieldType, handled, err := s.emitPackedCommonFieldExpr(expr); handled {
+		return value, fieldType, err
+	}
 	ptr, fieldType, addressErr := s.emitFieldAddress(expr)
 	if addressErr == nil {
 		value, loadErr := s.loadValue(ptr, fieldType, expr.Field)
@@ -1539,6 +1542,146 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, sema
 	}
 	value := C.LLVMBuildExtractValue(s.builder, objValue, C.unsigned(index), cStringFree(expr.Field))
 	return value, fieldType, nil
+}
+
+func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if s.g.packedEnumABI != packedEnumABIWordHandle {
+		return nil, nil, false, nil
+	}
+	objectType := s.exprType(expr.Object)
+	if objectType == nil {
+		return nil, nil, false, nil
+	}
+	fieldType, fieldIndex, containerType, _, err := s.g.fieldInfo(objectType, expr.Field)
+	if err != nil {
+		return nil, nil, false, nil
+	}
+	enumType, ok := containerType.(*semantic.EnumType)
+	if !ok || enumType == nil || !enumType.Packed {
+		return nil, nil, false, nil
+	}
+	if ident, ok := expr.Object.(*ast.Ident); ok {
+		if _, ok := s.lookupPackedEnumStorage(ident.Name, enumType); ok {
+			return nil, nil, false, nil
+		}
+	}
+	store, ok := s.lookupPackedStore(enumType)
+	if !ok {
+		return nil, nil, false, nil
+	}
+	fieldWordOffset, ok, err := s.packedEnumDirectWordFieldOffset(enumType, fieldIndex, fieldType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if !ok {
+		return nil, nil, false, nil
+	}
+	handleValue, err := s.packedEnumFieldHandleValue(expr.Object, objectType, enumType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	wordValue, err := s.readPackedEnumWordWithStore(handleValue, enumType, &store, fieldWordOffset)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	coerced, err := s.coerceValue(wordValue, s.g.result.NamedTypes["uintptr"], fieldType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	return coerced, fieldType, true, nil
+}
+
+func (s *functionState) packedEnumFieldHandleValue(expr ast.Expr, objectType semantic.Type, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
+	if refType, ok := objectType.(*semantic.RefType); ok {
+		if refEnum, ok := refType.Elem.(*semantic.EnumType); ok && refEnum == enumType {
+			refValue, _, err := s.emitExpr(expr, objectType)
+			if err != nil {
+				return nil, err
+			}
+			return s.loadValue(refValue, enumType, "packed.common.handle")
+		}
+	}
+	handleValue, _, err := s.emitExpr(expr, objectType)
+	if err != nil {
+		return nil, err
+	}
+	return handleValue, nil
+}
+
+func (s *functionState) packedEnumDirectWordFieldOffset(enumType *semantic.EnumType, fieldIndex int, fieldType semantic.Type) (C.LLVMValueRef, bool, error) {
+	if enumType == nil || !enumType.Packed || fieldIndex <= 0 {
+		return nil, false, nil
+	}
+	payloadIndex, err := s.g.packedEnumPayloadFieldIndex(enumType)
+	if err != nil {
+		return nil, false, err
+	}
+	if fieldIndex >= payloadIndex {
+		return nil, false, nil
+	}
+	if !isNumericType(fieldType) {
+		return nil, false, nil
+	}
+	wordBytes := uint64(s.g.wordBits / 8)
+	fieldSizeBytes, err := s.g.abiSizeOfType(fieldType)
+	if err != nil {
+		return nil, false, err
+	}
+	if fieldSizeBytes != wordBytes {
+		return nil, false, nil
+	}
+	rowType, err := s.g.ensurePackedEnumStorageType(enumType)
+	if err != nil {
+		return nil, false, err
+	}
+	usizeType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return nil, false, err
+	}
+	zeroIndex := C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), 0, 0)
+	fieldIndexValue := C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), C.ulonglong(fieldIndex), 0)
+	nullPtr := C.LLVMConstNull(C.LLVMPointerTypeInContext(s.g.context, 0))
+	indices := []C.LLVMValueRef{zeroIndex, fieldIndexValue}
+	fieldPtr := C.LLVMBuildGEP2(s.builder, rowType, nullPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("packed.common.word.ptr"))
+	offsetBytes := C.LLVMBuildPtrToInt(s.builder, fieldPtr, usizeType, cStringFree("packed.common.word.bytes"))
+	wordBytesValue := C.LLVMConstInt(usizeType, C.ulonglong(wordBytes), 0)
+	return C.LLVMBuildUDiv(s.builder, offsetBytes, wordBytesValue, cStringFree("packed.common.word.offset")), true, nil
+}
+
+func (s *functionState) readPackedEnumWordWithStore(handleValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding, wordOffset C.LLVMValueRef) (C.LLVMValueRef, error) {
+	if enumType == nil || !enumType.Packed {
+		return nil, fmt.Errorf("missing packed enum common-field metadata")
+	}
+	if store == nil || store.typ == nil {
+		return nil, fmt.Errorf("packed enum %s word-handle common-field read requires store context", enumType.Name)
+	}
+	arenaValue, err := s.emitPackedStoreArenaValueNamed(store.value, store.typ, "packed.common.store.arena")
+	if err != nil {
+		return nil, err
+	}
+	stateValue, err := s.emitPackedStoreStateValueNamed(store.value, store.typ, "packed.common.store.state")
+	if err != nil {
+		return nil, err
+	}
+	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	uintptrType := s.g.result.NamedTypes["uintptr"]
+	usizeType := s.g.result.NamedTypes["usize"]
+	helperType := &semantic.FuncType{Name: "ctx_packed_store_read_word", Params: []semantic.Type{arenaRefType, uintptrType, voidRefType, usizeType}, Return: uintptrType}
+	callee, err := s.g.ensureFunctionDeclared("ctx_packed_store_read_word", helperType)
+	if err != nil {
+		return nil, err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, err
+	}
+	coercedHandle, err := s.coerceValue(handleValue, enumType, uintptrType)
+	if err != nil {
+		return nil, err
+	}
+	return s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, coercedHandle, stateValue, wordOffset}, "packed.handle.common"), nil
 }
 
 func (s *functionState) packedStoreConstructorInfoFromField(expr *ast.FieldExpr) (*semantic.PackedEnumStoreType, bool) {

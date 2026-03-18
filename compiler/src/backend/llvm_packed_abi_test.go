@@ -92,6 +92,9 @@ def fold() -> int:
 	if decodeCalls != 2 {
 		t.Fatalf("expected constructor lowering plus one reused packed-match decode, got %d decode calls:\n%s", decodeCalls, output)
 	}
+	if strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
+		t.Fatalf("expected mixed packed match with matched-value field access to reuse a full decode instead of tag-read helper, got:\n%s", output)
+	}
 	for _, bad := range []string{"define i1 @differs(ptr", "icmp ne ptr", "call i64 @ctx_packed_store_encode(", "call ptr @arena_alloc(", "ptrtoint ptr %packed.alloc to i64", "inttoptr i64"} {
 		if strings.Contains(output, bad) {
 			t.Fatalf("expected alternate packed ABI to lower values as integer handles and avoid %q, got:\n%s", bad, output)
@@ -99,7 +102,38 @@ def fold() -> int:
 	}
 }
 
-func TestGenerateLLVMIRReusesLazyPackedFieldDecodeForRepeatedCommonFieldReads(t *testing.T) {
+func TestGenerateLLVMIRUsesTagReadHelperForMixedPackedMatchWithoutMatchedValueBodyAccess(t *testing.T) {
+	src := `packed enum Expr:
+	Lit(value: int)
+	End
+
+def fold() -> int:
+	region scratch(256u)
+	store: Expr.Store = Expr.Store(scratch)
+	in store:
+		node: Expr = new Expr.Lit(value: 5)
+		return match node:
+			Expr.Lit(value):
+				value
+			Expr.End:
+				0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_tag_read_mixed.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	if !strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
+		t.Fatalf("expected mixed packed match without matched-value field access to use ctx_packed_store_read_tag, got:\n%s", output)
+	}
+	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
+	if decodeCalls != 2 {
+		t.Fatalf("expected constructor lowering plus one matched payload decode, got %d decode calls:\n%s", decodeCalls, output)
+	}
+}
+
+func TestGenerateLLVMIRUsesWordReadHelperForRepeatedCommonFieldReads(t *testing.T) {
 	src := `packed enum Expr:
 	common:
 		span: int
@@ -118,13 +152,48 @@ def fold_common() -> int:
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
 	}
 
-	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
-	if decodeCalls != 2 {
-		t.Fatalf("expected constructor lowering plus one lazy packed field decode, got %d decode calls:\n%s", decodeCalls, output)
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_word(")
+	if readCalls != 2 {
+		t.Fatalf("expected repeated packed common-field reads to lower through ctx_packed_store_read_word twice, got %d helper calls:\n%s", readCalls, output)
 	}
-	for _, check := range []string{"packed.decode.store.arena", "packed.decode.store.state"} {
+	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
+	if decodeCalls != 1 {
+		t.Fatalf("expected only constructor-time full decode for repeated packed common-field reads, got %d decode calls:\n%s", decodeCalls, output)
+	}
+	for _, check := range []string{"packed.common.store.arena", "packed.common.store.state"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
+	}
+}
+
+func TestGenerateLLVMIRUsesTagReadHelperForPayloadlessPackedMatch(t *testing.T) {
+	src := `packed enum Flag:
+	Yes
+	No
+
+def choose() -> int:
+	region scratch(256u)
+	store: Flag.Store = Flag.Store(scratch)
+	in store:
+		node: Flag = new Flag.Yes
+		return match node:
+			Flag.Yes:
+				1
+			Flag.No:
+				0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_tag_read.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	if !strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
+		t.Fatalf("expected payloadless packed match to read tag through ctx_packed_store_read_tag, got:\n%s", output)
+	}
+	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
+	if decodeCalls != 1 {
+		t.Fatalf("expected only constructor-time full decode for payloadless packed match, got %d decode calls:\n%s", decodeCalls, output)
 	}
 }

@@ -237,13 +237,14 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			checks: []string{
 				"%JsonCursor = type { ptr, i64, i64 }",
 				"%JsonNode = type { i32, i64, [3 x i64] }",
+				"%JsonParseNodeResult = type { ptr, i64 }",
 				"define i64 @json_parse_string(ptr",
 				"define i64 @json_parse_number(ptr",
 				"define i64 @json_parse_array(ptr",
 				"define i64 @json_parse_object(ptr",
-				"define ptr @json_parse_value_node(ptr",
-				"define ptr @json_parse_array_node(ptr",
-				"define ptr @json_parse_object_node(ptr",
+				"define %JsonParseNodeResult @json_parse_value_node(ptr",
+				"define %JsonParseNodeResult @json_parse_array_node(ptr",
+				"define %JsonParseNodeResult @json_parse_object_node(ptr",
 				"define i64 @json_parser_parity_suite()",
 				"define i64 @json_parser_checksum(ptr",
 				"define i64 @json_parser_ast_checksum(ptr",
@@ -449,10 +450,12 @@ func TestRunCLICompilesJSONParserWithPackedWordHandleABI(t *testing.T) {
 	output := stdout.String()
 	checks := []string{
 		"%JsonNode__Store = type { ptr, i64, ptr }",
-		"define i64 @json_parse_value_node(ptr",
-		"define i64 @json_parse_array_node(ptr",
-		"define i64 @json_parse_object_node(ptr",
+		"%JsonParseNodeResult = type { i64, i64 }",
+		"define %JsonParseNodeResult @json_parse_value_node(ptr",
+		"define %JsonParseNodeResult @json_parse_array_node(ptr",
+		"define %JsonParseNodeResult @json_parse_object_node(ptr",
 		"call i64 @ctx_packed_store_alloc(ptr %packed.alloc.store.arena, i64 %packed.alloc.store.row_bytes, ptr %packed.alloc.store.state)",
+		"call i64 @ctx_packed_store_read_word(",
 		"call ptr @ctx_packed_store_decode(ptr %packed.decode.store.arena, i64",
 	}
 	for _, check := range checks {

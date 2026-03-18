@@ -606,6 +606,182 @@ def ctx_packed_store_decode(a: any Arena&, handle: uintptr, state_bits: any void
     data_base: any u8& = packed_store_region_data(r)
     return (data_base + offset_words * sizeof(uintptr)).cast[any void&]()
 
+def ctx_packed_store_read_tag(a: any Arena&, handle: uintptr, state_bits: any void&) -> u32:
+    assert handle != 0u64.uintptr()
+
+    region_index: usize = (handle >> 32u64.uintptr()).usize()
+    offset_words_plus_one: usize = (handle & 0xffffffffu64.uintptr()).usize()
+    assert offset_words_plus_one > 0
+
+    if state_bits != null:
+        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+        if state.alloc_region != null and state.alloc_region_index == region_index:
+            offset_words: usize = offset_words_plus_one - 1
+            assert offset_words < state.alloc_region.capacity
+
+            data_base: any u8& = packed_store_region_data(state.alloc_region)
+            row_tag: any u32& = (data_base + offset_words * sizeof(uintptr)).cast[any u32&]()
+            return row_tag[0]
+
+        if state.decode_region != null and state.decode_region_index == region_index:
+            offset_words: usize = offset_words_plus_one - 1
+            assert offset_words < state.decode_region.capacity
+
+            data_base: any u8& = packed_store_region_data(state.decode_region)
+            row_tag: any u32& = (data_base + offset_words * sizeof(uintptr)).cast[any u32&]()
+            return row_tag[0]
+
+    r: mutable any Region&? = a.begin
+    i: mutable usize = 0
+
+    if state_bits != null:
+        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+        owner_cursor: mutable any Region&? = null
+        owner_cursor_index: mutable usize = 0
+
+        if state.head_region != null and state.head_region.global_index <= region_index:
+            owner_cursor <- state.head_region
+            owner_cursor_index <- state.head_region.global_index
+            r <- state.head_region
+            i <- state.head_region.global_index
+
+        if state.alloc_region != null and state.alloc_region_index <= region_index:
+            if owner_cursor == null or state.alloc_region_index > owner_cursor_index:
+                owner_cursor <- state.alloc_region
+                owner_cursor_index <- state.alloc_region_index
+            if r == null or state.alloc_region_index > i:
+                r <- state.alloc_region
+                i <- state.alloc_region_index
+
+        if state.decode_region != null and state.decode_region_index <= region_index:
+            if owner_cursor == null or state.decode_region_index > owner_cursor_index:
+                owner_cursor <- state.decode_region
+                owner_cursor_index <- state.decode_region_index
+            if r == null or state.decode_region_index > i:
+                r <- state.decode_region
+                i <- state.decode_region_index
+
+        if owner_cursor != null:
+            while owner_cursor != null and owner_cursor.global_index < region_index:
+                owner_cursor <- owner_cursor.owner_next
+
+            if owner_cursor != null and owner_cursor.global_index == region_index:
+                offset_words: usize = offset_words_plus_one - 1
+                assert offset_words < owner_cursor.capacity
+
+                state.decode_region <- owner_cursor
+                state.decode_region_index <- region_index
+
+                data_base: any u8& = packed_store_region_data(owner_cursor)
+                row_tag: any u32& = (data_base + offset_words * sizeof(uintptr)).cast[any u32&]()
+                return row_tag[0]
+
+    while i < region_index and r != null:
+        r <- r.next
+        i <- i + 1
+
+    assert r != null
+
+    offset_words: usize = offset_words_plus_one - 1
+    assert offset_words < r.capacity
+
+    if state_bits != null:
+        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+        state.decode_region <- r
+        state.decode_region_index <- region_index
+
+    data_base: any u8& = packed_store_region_data(r)
+    row_tag: any u32& = (data_base + offset_words * sizeof(uintptr)).cast[any u32&]()
+    return row_tag[0]
+
+def ctx_packed_store_read_word(a: any Arena&, handle: uintptr, state_bits: any void&, word_offset: usize) -> uintptr:
+    assert handle != 0u64.uintptr()
+
+    region_index: usize = (handle >> 32u64.uintptr()).usize()
+    offset_words_plus_one: usize = (handle & 0xffffffffu64.uintptr()).usize()
+    assert offset_words_plus_one > 0
+
+    if state_bits != null:
+        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+        if state.alloc_region != null and state.alloc_region_index == region_index:
+            offset_words: usize = offset_words_plus_one - 1
+            assert offset_words + word_offset < state.alloc_region.capacity
+
+            data_base: any u8& = packed_store_region_data(state.alloc_region)
+            row_words: any uintptr& = (data_base + offset_words * sizeof(uintptr)).cast[any uintptr&]()
+            return row_words[word_offset]
+
+        if state.decode_region != null and state.decode_region_index == region_index:
+            offset_words: usize = offset_words_plus_one - 1
+            assert offset_words + word_offset < state.decode_region.capacity
+
+            data_base: any u8& = packed_store_region_data(state.decode_region)
+            row_words: any uintptr& = (data_base + offset_words * sizeof(uintptr)).cast[any uintptr&]()
+            return row_words[word_offset]
+
+    r: mutable any Region&? = a.begin
+    i: mutable usize = 0
+
+    if state_bits != null:
+        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+        owner_cursor: mutable any Region&? = null
+        owner_cursor_index: mutable usize = 0
+
+        if state.head_region != null and state.head_region.global_index <= region_index:
+            owner_cursor <- state.head_region
+            owner_cursor_index <- state.head_region.global_index
+            r <- state.head_region
+            i <- state.head_region.global_index
+
+        if state.alloc_region != null and state.alloc_region_index <= region_index:
+            if owner_cursor == null or state.alloc_region_index > owner_cursor_index:
+                owner_cursor <- state.alloc_region
+                owner_cursor_index <- state.alloc_region_index
+            if r == null or state.alloc_region_index > i:
+                r <- state.alloc_region
+                i <- state.alloc_region_index
+
+        if state.decode_region != null and state.decode_region_index <= region_index:
+            if owner_cursor == null or state.decode_region_index > owner_cursor_index:
+                owner_cursor <- state.decode_region
+                owner_cursor_index <- state.decode_region_index
+            if r == null or state.decode_region_index > i:
+                r <- state.decode_region
+                i <- state.decode_region_index
+
+        if owner_cursor != null:
+            while owner_cursor != null and owner_cursor.global_index < region_index:
+                owner_cursor <- owner_cursor.owner_next
+
+            if owner_cursor != null and owner_cursor.global_index == region_index:
+                offset_words: usize = offset_words_plus_one - 1
+                assert offset_words + word_offset < owner_cursor.capacity
+
+                state.decode_region <- owner_cursor
+                state.decode_region_index <- region_index
+
+                data_base: any u8& = packed_store_region_data(owner_cursor)
+                row_words: any uintptr& = (data_base + offset_words * sizeof(uintptr)).cast[any uintptr&]()
+                return row_words[word_offset]
+
+    while i < region_index and r != null:
+        r <- r.next
+        i <- i + 1
+
+    assert r != null
+
+    offset_words: usize = offset_words_plus_one - 1
+    assert offset_words + word_offset < r.capacity
+
+    if state_bits != null:
+        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+        state.decode_region <- r
+        state.decode_region_index <- region_index
+
+    data_base: any u8& = packed_store_region_data(r)
+    row_words: any uintptr& = (data_base + offset_words * sizeof(uintptr)).cast[any uintptr&]()
+    return row_words[word_offset]
+
 # ------------------------------------------------------------
 # Snapshot / rewind / reset / free / trim
 # ------------------------------------------------------------

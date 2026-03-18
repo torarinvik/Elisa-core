@@ -541,7 +541,7 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 		return err
 	}
 	var decodedMatchValue C.LLVMValueRef
-	if enumType.Packed {
+	if enumType.Packed && packedMatchShouldEagerDecode(stmt.Value, stmt.Arms) {
 		decodedMatchValue, err = s.decodePackedEnumHandleWithStore(enumValue, enumType, storeBinding)
 		if err != nil {
 			return err
@@ -559,14 +559,15 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 		} else {
 			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.next"))
 		}
-		if err := s.emitMatchPatternTest(arm.Pattern, enumValue, decodedMatchValue, enumType, storeBinding, bodyBB, nextBB); err != nil {
+		armDecodedValue, err := s.emitMatchPatternTest(arm.Pattern, enumValue, decodedMatchValue, enumType, storeBinding, bodyBB, nextBB)
+		if err != nil {
 			return err
 		}
 
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
-		if ident, ok := stmt.Value.(*ast.Ident); ok && enumType.Packed && decodedMatchValue != nil {
-			s.bindPackedEnumStorage(ident.Name, enumType, decodedMatchValue)
+		if ident, ok := stmt.Value.(*ast.Ident); ok && enumType.Packed && armDecodedValue != nil {
+			s.bindPackedEnumStorage(ident.Name, enumType, armDecodedValue)
 		}
 		if err := s.emitBlock(arm.Body, false); err != nil {
 			s.popScope()
@@ -612,7 +613,7 @@ func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, sema
 		return nil, nil, err
 	}
 	var decodedMatchValue C.LLVMValueRef
-	if enumType.Packed {
+	if enumType.Packed && packedMatchShouldEagerDecode(expr.Value, expr.Arms) {
 		decodedMatchValue, err = s.decodePackedEnumHandleWithStore(enumValue, enumType, storeBinding)
 		if err != nil {
 			return nil, nil, err
@@ -630,14 +631,15 @@ func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, sema
 		} else {
 			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.next"))
 		}
-		if err := s.emitMatchPatternTest(arm.Pattern, enumValue, decodedMatchValue, enumType, storeBinding, bodyBB, nextBB); err != nil {
+		armDecodedValue, err := s.emitMatchPatternTest(arm.Pattern, enumValue, decodedMatchValue, enumType, storeBinding, bodyBB, nextBB)
+		if err != nil {
 			return nil, nil, err
 		}
 
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
-		if ident, ok := expr.Value.(*ast.Ident); ok && enumType.Packed && decodedMatchValue != nil {
-			s.bindPackedEnumStorage(ident.Name, enumType, decodedMatchValue)
+		if ident, ok := expr.Value.(*ast.Ident); ok && enumType.Packed && armDecodedValue != nil {
+			s.bindPackedEnumStorage(ident.Name, enumType, armDecodedValue)
 		}
 		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, resultType)
 		if err != nil {
@@ -722,15 +724,15 @@ func (s *functionState) emitMatchExprArmBody(body []ast.Stmt, resultType semanti
 	return nil, false, fmt.Errorf("match expression arm must end with an expression")
 }
 
-func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualValue C.LLVMValueRef, decodedActualValue C.LLVMValueRef, actualType semantic.Type, store *packedStoreBinding, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) error {
+func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualValue C.LLVMValueRef, decodedActualValue C.LLVMValueRef, actualType semantic.Type, store *packedStoreBinding, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) (C.LLVMValueRef, error) {
 	switch p := pattern.(type) {
 	case *ast.MatchWildcardPattern:
 		C.LLVMBuildBr(s.builder, successBB)
-		return nil
+		return decodedActualValue, nil
 	case *ast.MatchBindPattern:
 		alloca, err := s.createEntryAlloca(p.Name, actualType)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		C.LLVMBuildStore(s.builder, actualValue, alloca)
 		s.defineBinding(p.Name, valueBinding{ptr: alloca, typ: actualType})
@@ -738,23 +740,23 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 			s.bindPackedEnumStorage(p.Name, enumType, decodedActualValue)
 		}
 		C.LLVMBuildBr(s.builder, successBB)
-		return nil
+		return decodedActualValue, nil
 	case *ast.MatchVariantPattern:
 		enumType, ok := actualType.(*semantic.EnumType)
 		if !ok {
-			return fmt.Errorf("variant pattern %s.%s requires enum type, got %s", p.EnumName, p.Variant, actualType.String())
+			return nil, fmt.Errorf("variant pattern %s.%s requires enum type, got %s", p.EnumName, p.Variant, actualType.String())
 		}
 		variant, ok := enumType.Variant(p.Variant)
 		if !ok {
-			return fmt.Errorf("enum %s has no variant %s", enumType.Name, p.Variant)
+			return nil, fmt.Errorf("enum %s has no variant %s", enumType.Name, p.Variant)
 		}
 		tagValue, err := s.extractEnumTagValue(actualValue, decodedActualValue, enumType, store)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		tagConst, err := s.enumTagConstant(variant.Tag)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		matchedBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.pattern.ok"))
 		pred := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), tagValue, tagConst, cStringFree("match.tag"))
@@ -763,15 +765,22 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		C.LLVMPositionBuilderAtEnd(s.builder, matchedBB)
 		orderedArgs, err := s.resolveMatchPatternArgs(p, variant)
 		if err != nil {
-			return err
+			return nil, err
 		}
+		matchedDecodedValue := decodedActualValue
 		if len(orderedArgs) == 0 {
 			C.LLVMBuildBr(s.builder, successBB)
-			return nil
+			return matchedDecodedValue, nil
 		}
-		payloadValues, err := s.extractEnumVariantPayloadValues(actualValue, decodedActualValue, enumType, variant, store)
+		if enumType.Packed && matchedDecodedValue == nil {
+			matchedDecodedValue, err = s.decodePackedEnumHandleWithStore(actualValue, enumType, store)
+			if err != nil {
+				return nil, err
+			}
+		}
+		payloadValues, err := s.extractEnumVariantPayloadValues(actualValue, matchedDecodedValue, enumType, variant, store)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		for i := range orderedArgs {
 			if orderedArgs[i] == nil {
@@ -781,16 +790,16 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 			if i != len(orderedArgs)-1 {
 				nextSuccess = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.pattern.next"))
 			}
-			if err := s.emitMatchPatternTest(orderedArgs[i].Pattern, payloadValues[i], nil, variant.Payload[i], store, nextSuccess, failureBB); err != nil {
-				return err
+			if _, err := s.emitMatchPatternTest(orderedArgs[i].Pattern, payloadValues[i], nil, variant.Payload[i], store, nextSuccess, failureBB); err != nil {
+				return nil, err
 			}
 			if i != len(orderedArgs)-1 {
 				C.LLVMPositionBuilderAtEnd(s.builder, nextSuccess)
 			}
 		}
-		return nil
+		return matchedDecodedValue, nil
 	default:
-		return fmt.Errorf("unsupported match pattern %T", pattern)
+		return nil, fmt.Errorf("unsupported match pattern %T", pattern)
 	}
 }
 
@@ -897,6 +906,8 @@ func (s *functionState) loadEnumTag(decodedEnumPtr C.LLVMValueRef, enumPtr C.LLV
 	if enumType != nil && enumType.Packed {
 		if decodedEnumPtr != nil {
 			enumPtr = decodedEnumPtr
+		} else if s.g.packedEnumABI == packedEnumABIWordHandle {
+			return s.readPackedEnumTagWithStore(enumPtr, enumType, store)
 		} else {
 			var err error
 			enumPtr, err = s.decodePackedEnumHandleWithStore(enumPtr, enumType, store)
@@ -950,6 +961,227 @@ func (s *functionState) loadEnumVariantPayload(decodedEnumPtr C.LLVMValueRef, en
 		values = append(values, C.LLVMBuildExtractValue(s.builder, aggregate, C.unsigned(i), cStringFree("match.payload.field")))
 	}
 	return values, nil
+}
+
+func (s *functionState) readPackedEnumTagWithStore(handleValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding) (C.LLVMValueRef, error) {
+	if enumType == nil || !enumType.Packed {
+		return nil, fmt.Errorf("missing packed enum tag metadata")
+	}
+	if store == nil || store.typ == nil {
+		return nil, fmt.Errorf("packed enum %s word-handle tag read requires store context", enumType.Name)
+	}
+	arenaValue, err := s.emitPackedStoreArenaValueNamed(store.value, store.typ, "packed.tag.store.arena")
+	if err != nil {
+		return nil, err
+	}
+	stateValue, err := s.emitPackedStoreStateValueNamed(store.value, store.typ, "packed.tag.store.state")
+	if err != nil {
+		return nil, err
+	}
+	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	tagType := s.g.result.NamedTypes["u32"]
+	helperType := &semantic.FuncType{Name: "ctx_packed_store_read_tag", Params: []semantic.Type{arenaRefType, s.g.result.NamedTypes["uintptr"], voidRefType}, Return: tagType}
+	callee, err := s.g.ensureFunctionDeclared("ctx_packed_store_read_tag", helperType)
+	if err != nil {
+		return nil, err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, err
+	}
+	coercedHandle, err := s.coerceValue(handleValue, enumType, s.g.result.NamedTypes["uintptr"])
+	if err != nil {
+		return nil, err
+	}
+	return s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, coercedHandle, stateValue}, "packed.handle.tag"), nil
+}
+
+func packedMatchNeedsEagerDecode(arms []ast.MatchArm) bool {
+	for _, arm := range arms {
+		if matchPatternNeedsPayloadDecode(arm.Pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func packedMatchShouldEagerDecode(matchValue ast.Expr, arms []ast.MatchArm) bool {
+	if !packedMatchNeedsEagerDecode(arms) {
+		return false
+	}
+	ident, ok := matchValue.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	return matchArmsReadMatchedValueField(ident.Name, arms)
+}
+
+func matchArmsReadMatchedValueField(name string, arms []ast.MatchArm) bool {
+	for _, arm := range arms {
+		if stmtsReadMatchedValueField(name, arm.Body) {
+			return true
+		}
+	}
+	return false
+}
+
+func stmtsReadMatchedValueField(name string, stmts []ast.Stmt) bool {
+	for _, stmt := range stmts {
+		if stmtReadsMatchedValueField(name, stmt) {
+			return true
+		}
+	}
+	return false
+}
+
+func stmtReadsMatchedValueField(name string, stmt ast.Stmt) bool {
+	switch n := stmt.(type) {
+	case *ast.AssignStmt:
+		return exprReadsMatchedValueField(name, n.Target) || exprReadsMatchedValueField(name, n.Value)
+	case *ast.AugAssignStmt:
+		return exprReadsMatchedValueField(name, n.Target) || exprReadsMatchedValueField(name, n.Value)
+	case *ast.AsRefAssignStmt:
+		return exprReadsMatchedValueField(name, n.Target) || exprReadsMatchedValueField(name, n.Value)
+	case *ast.VarDeclStmt:
+		return exprReadsMatchedValueField(name, n.Value)
+	case *ast.ReturnStmt:
+		return exprReadsMatchedValueField(name, n.Value)
+	case *ast.IfStmt:
+		return exprReadsMatchedValueField(name, n.Cond) || stmtsReadMatchedValueField(name, n.Then) || stmtsReadMatchedValueField(name, n.Else) || elifsReadMatchedValueField(name, n.Elifs)
+	case *ast.WhileStmt:
+		return exprReadsMatchedValueField(name, n.Cond) || stmtsReadMatchedValueField(name, n.Body)
+	case *ast.MatchStmt:
+		return exprReadsMatchedValueField(name, n.Value) || exprReadsMatchedValueField(name, n.Store) || matchArmsReadMatchedValueField(name, n.Arms)
+	case *ast.InStoreStmt:
+		return exprReadsMatchedValueField(name, n.Store) || stmtsReadMatchedValueField(name, n.Body)
+	case *ast.PanicStmt:
+		return exprReadsMatchedValueField(name, n.Message)
+	case *ast.ExprStmt:
+		return exprReadsMatchedValueField(name, n.Expr)
+	case *ast.StaticIfStmt:
+		return exprReadsMatchedValueField(name, n.Cond) || stmtsReadMatchedValueField(name, n.Then) || stmtsReadMatchedValueField(name, n.Else) || staticElifsReadMatchedValueField(name, n.Elifs)
+	case *ast.StaticErrorStmt:
+		return exprReadsMatchedValueField(name, n.Message)
+	case *ast.DiscardStmt:
+		return exprReadsMatchedValueField(name, n.Value)
+	default:
+		return false
+	}
+}
+
+func elifsReadMatchedValueField(name string, elifs []ast.ElifClause) bool {
+	for _, elif := range elifs {
+		if exprReadsMatchedValueField(name, elif.Cond) || stmtsReadMatchedValueField(name, elif.Body) {
+			return true
+		}
+	}
+	return false
+}
+
+func staticElifsReadMatchedValueField(name string, elifs []ast.StaticElifClause) bool {
+	for _, elif := range elifs {
+		if exprReadsMatchedValueField(name, elif.Cond) || stmtsReadMatchedValueField(name, elif.Body) {
+			return true
+		}
+	}
+	return false
+}
+
+func exprReadsMatchedValueField(name string, expr ast.Expr) bool {
+	if expr == nil {
+		return false
+	}
+	switch n := expr.(type) {
+	case *ast.BinaryExpr:
+		return exprReadsMatchedValueField(name, n.Left) || exprReadsMatchedValueField(name, n.Right)
+	case *ast.UnaryExpr:
+		return exprReadsMatchedValueField(name, n.Operand)
+	case *ast.CallExpr:
+		if exprReadsMatchedValueField(name, n.Func) {
+			return true
+		}
+		for _, arg := range n.Args {
+			if exprReadsMatchedValueField(name, arg) {
+				return true
+			}
+		}
+		return false
+	case *ast.FieldExpr:
+		if rootName, ok := fieldRootIdentName(n.Object); ok && rootName == name {
+			return true
+		}
+		return exprReadsMatchedValueField(name, n.Object)
+	case *ast.IndexExpr:
+		return exprReadsMatchedValueField(name, n.Object) || exprReadsMatchedValueField(name, n.Index)
+	case *ast.SliceExpr:
+		return exprReadsMatchedValueField(name, n.Object) || exprReadsMatchedValueField(name, n.Start) || exprReadsMatchedValueField(name, n.End)
+	case *ast.ListLitExpr:
+		for _, elem := range n.Elems {
+			if exprReadsMatchedValueField(name, elem) {
+				return true
+			}
+		}
+		return false
+	case *ast.CastExpr:
+		return exprReadsMatchedValueField(name, n.Operand)
+	case *ast.TernaryExpr:
+		return exprReadsMatchedValueField(name, n.Value) || exprReadsMatchedValueField(name, n.Cond) || exprReadsMatchedValueField(name, n.Alt)
+	case *ast.AddrOfExpr:
+		return exprReadsMatchedValueField(name, n.Operand)
+	case *ast.StructLitExpr:
+		for _, arg := range n.Args {
+			if exprReadsMatchedValueField(name, arg) {
+				return true
+			}
+		}
+		return false
+	case *ast.ParenExpr:
+		return exprReadsMatchedValueField(name, n.Inner)
+	case *ast.RaiseExpr:
+		return exprReadsMatchedValueField(name, n.Error)
+	case *ast.TryExpr:
+		return exprReadsMatchedValueField(name, n.Value) || exprReadsMatchedValueField(name, n.Fallback)
+	case *ast.UnwrapElseExpr:
+		return exprReadsMatchedValueField(name, n.Value) || exprReadsMatchedValueField(name, n.Fallback)
+	case *ast.AllocExpr:
+		return exprReadsMatchedValueField(name, n.Owner) || exprReadsMatchedValueField(name, n.Value)
+	case *ast.MatchExpr:
+		return exprReadsMatchedValueField(name, n.Value) || exprReadsMatchedValueField(name, n.Store) || matchArmsReadMatchedValueField(name, n.Arms)
+	default:
+		return false
+	}
+}
+
+func fieldRootIdentName(expr ast.Expr) (string, bool) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return n.Name, true
+	case *ast.FieldExpr:
+		return fieldRootIdentName(n.Object)
+	case *ast.ParenExpr:
+		return fieldRootIdentName(n.Inner)
+	case *ast.CastExpr:
+		return fieldRootIdentName(n.Operand)
+	default:
+		return "", false
+	}
+}
+
+func matchPatternNeedsPayloadDecode(pattern ast.MatchPattern) bool {
+	switch p := pattern.(type) {
+	case *ast.MatchVariantPattern:
+		if len(p.Args) > 0 {
+			return true
+		}
+		for _, arg := range p.Args {
+			if matchPatternNeedsPayloadDecode(arg.Pattern) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *functionState) enumPayloadPtr(enumPtr C.LLVMValueRef, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
