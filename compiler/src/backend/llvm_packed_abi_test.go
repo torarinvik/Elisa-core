@@ -71,7 +71,7 @@ def fold() -> int:
 	}
 
 	checks := []string{
-		"%Expr__Store = type { ptr }",
+		"%Expr__Store = type { ptr, i64 }",
 		"define i1 @differs(i64",
 		"icmp ne i64",
 		"call i64 @ctx_packed_store_alloc(ptr %packed.alloc.store.arena, i64",
