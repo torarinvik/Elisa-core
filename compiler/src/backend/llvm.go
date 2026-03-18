@@ -72,6 +72,7 @@ type llvmGenerator struct {
 	targetTriple         *C.char
 	optimizedForCodegen  bool
 	preferPrivateLinkage bool
+	packedEnumABI        packedEnumABIMode
 	symbolsByNode        map[ast.Node]*semantic.Symbol
 	structTypes          map[string]C.LLVMTypeRef
 	structBodies         map[string]bool
@@ -94,6 +95,7 @@ func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
 		result:             result,
 		context:            ctx,
 		module:             mod,
+		packedEnumABI:      packedEnumABIRowHandle,
 		symbolsByNode:      map[ast.Node]*semantic.Symbol{},
 		structTypes:        map[string]C.LLVMTypeRef{},
 		structBodies:       map[string]bool{},
@@ -176,7 +178,7 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 			return fmt.Errorf("declaration %s does not resolve to enum type", n.Name)
 		}
 		if enumType.Packed {
-			_, err := g.ensurePackedEnumRowType(n.Name, enumType)
+			_, err := g.ensurePackedEnumStorageType(enumType)
 			return err
 		}
 		_, err := g.ensureEnumBody(n.Name, enumType)
@@ -245,7 +247,7 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 			return fmt.Errorf("declaration %s does not resolve to enum type", n.Name)
 		}
 		if enumType.Packed {
-			_, err := g.ensurePackedEnumRowType(n.Name, enumType)
+			_, err := g.ensurePackedEnumStorageType(enumType)
 			return err
 		}
 		_, err := g.ensureEnumBody(n.Name, enumType)

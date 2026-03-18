@@ -26,6 +26,12 @@ import (
 	"llcontext/src/semantic"
 )
 
+type packedEnumABIMode int
+
+const (
+	packedEnumABIRowHandle packedEnumABIMode = iota
+)
+
 func isVoidRefLikeType(t semantic.Type) bool {
 	ref, ok := t.(*semantic.RefType)
 	if !ok {
@@ -58,7 +64,7 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 	case *semantic.InvalidType, *semantic.NeverType, *semantic.NullType, *semantic.BuiltinType, *semantic.TypeParamType, *semantic.DStrType, *semantic.ErrorSetType:
 		err = nil
 	case *semantic.PackedEnumStoreType:
-		err = nil
+		_, err = g.lowerPackedEnumStoreType(tt)
 	case *semantic.ErrorUnionType:
 		if err = g.noteType(tt.Value); err != nil {
 			break
@@ -120,7 +126,7 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 		}
 		if err == nil {
 			if tt.Packed {
-				_, err = g.ensurePackedEnumRowType(tt.Name, tt)
+				_, err = g.ensurePackedEnumStorageType(tt)
 			} else {
 				_, err = g.ensureEnumBody(tt.Name, tt)
 			}
@@ -341,7 +347,7 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 	case *semantic.RefType:
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	case *semantic.PackedEnumStoreType:
-		return C.LLVMPointerTypeInContext(g.context, 0), nil
+		return g.lowerPackedEnumStoreType(tt)
 	case *semantic.ArrayType:
 		elemType, err := g.lowerType(tt.Elem)
 		if err != nil {
@@ -373,7 +379,7 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		return g.ensureStructBody(st.Name, st)
 	case *semantic.EnumType:
 		if tt.Packed {
-			return C.LLVMPointerTypeInContext(g.context, 0), nil
+			return g.lowerPackedEnumType(tt)
 		}
 		return g.ensureEnumBody(tt.Name, tt)
 	case *semantic.StructType:
@@ -389,6 +395,58 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	default:
 		return nil, fmt.Errorf("unsupported semantic type %T", t)
+	}
+}
+
+func (g *llvmGenerator) lowerPackedEnumType(enumType *semantic.EnumType) (C.LLVMTypeRef, error) {
+	if enumType == nil || !enumType.Packed {
+		return nil, fmt.Errorf("missing packed enum type")
+	}
+	switch g.packedEnumABI {
+	case packedEnumABIRowHandle:
+		return C.LLVMPointerTypeInContext(g.context, 0), nil
+	default:
+		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedEnumABI)
+	}
+}
+
+func (g *llvmGenerator) lowerPackedEnumStoreType(storeType *semantic.PackedEnumStoreType) (C.LLVMTypeRef, error) {
+	if storeType == nil {
+		return nil, fmt.Errorf("missing packed enum store type")
+	}
+	switch g.packedEnumABI {
+	case packedEnumABIRowHandle:
+		return C.LLVMPointerTypeInContext(g.context, 0), nil
+	default:
+		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedEnumABI)
+	}
+}
+
+func (g *llvmGenerator) ensurePackedEnumStorageType(enumType *semantic.EnumType) (C.LLVMTypeRef, error) {
+	if enumType == nil || !enumType.Packed {
+		return nil, fmt.Errorf("missing packed enum storage type")
+	}
+	switch g.packedEnumABI {
+	case packedEnumABIRowHandle:
+		return g.ensurePackedEnumRowType(enumType.Name, enumType)
+	default:
+		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedEnumABI)
+	}
+}
+
+func (g *llvmGenerator) packedEnumPayloadFieldIndex(enumType *semantic.EnumType) (int, error) {
+	if enumType == nil || !enumType.Packed {
+		return 0, fmt.Errorf("missing packed enum payload metadata")
+	}
+	switch g.packedEnumABI {
+	case packedEnumABIRowHandle:
+		payloadIndex := 1
+		if enumType.Decl != nil {
+			payloadIndex += len(enumType.Decl.Common)
+		}
+		return payloadIndex, nil
+	default:
+		return 0, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedEnumABI)
 	}
 }
 

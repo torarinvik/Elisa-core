@@ -905,8 +905,11 @@ func (s *functionState) enumPayloadPtr(enumPtr C.LLVMValueRef, enumType *semanti
 		return nil, err
 	}
 	payloadIndex := 1
-	if enumType != nil && enumType.Packed && enumType.Decl != nil {
-		payloadIndex += len(enumType.Decl.Common)
+	if enumType != nil && enumType.Packed {
+		payloadIndex, err = s.g.packedEnumPayloadFieldIndex(enumType)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return C.LLVMBuildStructGEP2(s.builder, enumLLVMType, enumPtr, C.unsigned(payloadIndex), cStringFree("enum.payload.ptr")), nil
 }

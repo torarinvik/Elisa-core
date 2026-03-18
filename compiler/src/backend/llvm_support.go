@@ -194,7 +194,7 @@ func (s *functionState) loweredEnumStorageType(enumType *semantic.EnumType) (C.L
 		return nil, fmt.Errorf("missing enum type")
 	}
 	if enumType.Packed {
-		return s.g.ensurePackedEnumRowType(enumType.Name, enumType)
+		return s.g.ensurePackedEnumStorageType(enumType)
 	}
 	return s.g.lowerType(enumType)
 }
