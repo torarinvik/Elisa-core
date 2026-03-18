@@ -30,6 +30,7 @@ repr(c) struct Region:
     next: mutable any Region&?
     count: mutable usize
     capacity: mutable usize
+    owner_tag: mutable uintptr
     data: tail uintptr
 
 repr(c) struct Arena:
@@ -158,7 +159,7 @@ def sfree[T](ptr: any T&) -> any T!:
 # Region allocation / freeing
 # ------------------------------------------------------------
 
-def new_region(capacity: usize) -> any Region&:
+def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> any Region&:
     size_bytes: usize = sizeof(Region) + sizeof(uintptr) * capacity
 
     static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
@@ -209,7 +210,11 @@ def new_region(capacity: usize) -> any Region&:
     r.next <- null
     r.count <- 0
     r.capacity <- capacity
+    r.owner_tag <- owner_tag
     return r
+
+def new_region(capacity: usize) -> any Region&:
+    return new_region_with_owner(capacity, 0u64.uintptr())
 
 def free_region(r: any Region&):
     static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
@@ -252,11 +257,11 @@ def arena_alloc(a: any Arena&, size_bytes: usize) -> any void&:
 
     assert a.end != null
 
-    while a.end.count + size > a.end.capacity and a.end.next != null:
+    while (a.end.owner_tag != 0u64.uintptr() or a.end.count + size > a.end.capacity) and a.end.next != null:
         a.end <- a.end.next
         a.end_index <- a.end_index + 1
 
-    if a.end.count + size > a.end.capacity:
+    if a.end.owner_tag != 0u64.uintptr() or a.end.count + size > a.end.capacity:
         assert a.end.next == null
 
         capacity:mutable usize = ARENA_REGION_DEFAULT_CAPACITY
@@ -345,10 +350,10 @@ def ctx_packed_store_state_new(a: any Arena&, row_bytes: usize) -> any void&:
     if preferred_region_capacity < row_words:
         preferred_region_capacity <- row_words
 
-    state.alloc_region <- a.end
-    state.alloc_region_index <- a.end_index
-    state.decode_region <- a.end
-    state.decode_region_index <- a.end_index
+    state.alloc_region <- null
+    state.alloc_region_index <- 0
+    state.decode_region <- null
+    state.decode_region_index <- 0
     state.row_words <- row_words
     state.preferred_region_capacity <- preferred_region_capacity
     return state.cast[any void&]()
@@ -357,6 +362,7 @@ def ctx_packed_store_alloc(a: any Arena&, size_bytes: usize, state_bits: any voi
     assert state_bits != null
 
     state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    owner_tag: uintptr = state_bits.cast[any u8&]().uintptr()
     size: usize = (size_bytes + sizeof(uintptr) - 1) / sizeof(uintptr)
 
     if state.row_words < size:
@@ -369,41 +375,57 @@ def ctx_packed_store_alloc(a: any Arena&, size_bytes: usize, state_bits: any voi
         state.preferred_region_capacity <- state.row_words
 
     if state.alloc_region == null:
+        capacity: mutable usize = state.preferred_region_capacity
+        if capacity < size:
+            capacity <- size
+
         if a.end == null:
             assert a.begin == null
-
-            capacity: mutable usize = state.preferred_region_capacity
-            if capacity < size:
-                capacity <- size
-
-            a.end as & <- new_region(capacity)
+            a.end as & <- new_region_with_owner(capacity, owner_tag)
             a.begin <- a.end
             a.end_index <- 0
+        else:
+            a.end.next as & <- new_region_with_owner(capacity, owner_tag)
+            a.end <- a.end.next
+            a.end_index <- a.end_index + 1
 
         state.alloc_region <- a.end
         state.alloc_region_index <- a.end_index
 
     assert state.alloc_region != null
 
-    while state.alloc_region.count + size > state.alloc_region.capacity and state.alloc_region.next != null:
-        state.alloc_region <- state.alloc_region.next
-        state.alloc_region_index <- state.alloc_region_index + 1
-
     if state.alloc_region.count + size > state.alloc_region.capacity:
-        assert state.alloc_region.next == null
+        cursor: mutable any Region&? = state.alloc_region.next
+        cursor_index: mutable usize = state.alloc_region_index + 1
+        found_region: mutable any Region&? = null
+        found_region_index: mutable usize = 0
 
-        capacity: mutable usize = state.preferred_region_capacity
-        grown_capacity: usize = state.alloc_region.capacity * 2
-        if capacity < grown_capacity:
-            capacity <- grown_capacity
-        if capacity < size:
-            capacity <- size
+        while cursor != null:
+            if cursor.owner_tag == owner_tag and cursor.count + size <= cursor.capacity:
+                found_region <- cursor
+                found_region_index <- cursor_index
+                cursor <- null
+            else:
+                cursor <- cursor.next
+                cursor_index <- cursor_index + 1
 
-        state.alloc_region.next as & <- new_region(capacity)
-        state.alloc_region <- state.alloc_region.next
-        state.alloc_region_index <- state.alloc_region_index + 1
-        a.end as & <- state.alloc_region
-        a.end_index <- state.alloc_region_index
+        if found_region != null:
+            state.alloc_region <- found_region
+            state.alloc_region_index <- found_region_index
+        else:
+            capacity: mutable usize = state.preferred_region_capacity
+            grown_capacity: usize = state.alloc_region.capacity * 2
+            if capacity < grown_capacity:
+                capacity <- grown_capacity
+            if capacity < size:
+                capacity <- size
+
+            assert a.end != null
+            a.end.next as & <- new_region_with_owner(capacity, owner_tag)
+            a.end <- a.end.next
+            a.end_index <- a.end_index + 1
+            state.alloc_region <- a.end
+            state.alloc_region_index <- a.end_index
 
     data_base: any u8& = packed_store_region_data(state.alloc_region)
     offset_bytes: uintptr = (state.alloc_region.count * sizeof(uintptr)).uintptr()
