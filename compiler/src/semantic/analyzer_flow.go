@@ -109,6 +109,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "unexpected return value")
 			return
 		}
+		if refState, ok := a.regionRefStateForExpr(n.Value); ok && refState.Valid && refState.Region != nil {
+			a.errorf(n.Pos(), "cannot return reference allocated from local region %q", refState.Region.Name)
+		}
 		a.recordFreshReturnBindings(valueType)
 		expectedReturn := a.matchReturnType(valueType)
 		if !AssignableTo(expectedReturn, valueType) {

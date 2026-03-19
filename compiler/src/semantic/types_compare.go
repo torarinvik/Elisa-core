@@ -31,7 +31,7 @@ func SameType(a, b Type) bool {
 		return ok && SameType(ta.Value, tb.Value) && SameType(ta.Errors, tb.Errors)
 	case *RefType:
 		tb, ok := b.(*RefType)
-		return ok && ta.State == tb.State && ta.Storage == tb.Storage && SameType(ta.Elem, tb.Elem)
+		return ok && ta.State == tb.State && ta.Storage == tb.Storage && ta.Region == tb.Region && SameType(ta.Elem, tb.Elem)
 	case *ArrayType:
 		tb, ok := b.(*ArrayType)
 		return ok && arraySizesEqual(ta, tb) && SameType(ta.Elem, tb.Elem)
@@ -163,7 +163,7 @@ func AssignableTo(dst, src Type) bool {
 			if !SameType(dr.Elem, sr.Elem) {
 				return false
 			}
-			return refStateAssignable(dr.State, sr.State) && refStorageAssignable(dr.Storage, sr.Storage, dr.ExplicitStorage, sr.ExplicitStorage)
+			return refStateAssignable(dr.State, sr.State) && refStorageAssignable(dr.Storage, sr.Storage, dr.ExplicitStorage, sr.ExplicitStorage) && refRegionAssignable(dr.Region, sr.Region)
 		}
 	}
 	return false
@@ -209,6 +209,9 @@ func matchTypePattern(pattern, actual Type) bool {
 			return false
 		}
 		if !refStorageAssignable(p.Storage, a.Storage, p.ExplicitStorage, a.ExplicitStorage) {
+			return false
+		}
+		if !refRegionAssignable(p.Region, a.Region) {
 			return false
 		}
 		return matchTypePattern(p.Elem, a.Elem)
@@ -310,8 +313,12 @@ func MergeTypes(a, b Type) Type {
 			if !okStorage {
 				return invalidType
 			}
+			region, okRegion := mergeRefRegions(ar.Region, br.Region)
+			if !okRegion {
+				return invalidType
+			}
 			if state, ok := mergeRefStates(ar.State, br.State); ok {
-				return &RefType{Elem: ar.Elem, State: state, Storage: storage, ExplicitStorage: explicit}
+				return &RefType{Elem: ar.Elem, State: state, Storage: storage, Region: region, ExplicitStorage: explicit}
 			}
 		}
 	}

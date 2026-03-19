@@ -182,6 +182,7 @@ type RefType struct {
 	Elem     TypeExpr
 	State    RefState
 	Storage  RefStorage
+	Region   string
 	Explicit bool
 }
 

@@ -528,7 +528,9 @@ func typeStr(t ast.TypeExpr) string {
 	case *ast.RefType:
 		s := typeStr(n.Elem)
 		prefix := ""
-		if n.Explicit || n.Storage != ast.RefStorageAny {
+		if n.Region != "" {
+			prefix = n.Region + " "
+		} else if n.Explicit || n.Storage != ast.RefStorageAny {
 			switch n.Storage {
 			case ast.RefStorageHeap:
 				prefix = "heap "

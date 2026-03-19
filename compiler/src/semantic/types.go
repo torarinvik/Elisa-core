@@ -79,6 +79,7 @@ type RefType struct {
 	Elem            Type
 	State           RefState
 	Storage         RefStorage
+	Region          string
 	ExplicitStorage bool
 }
 
@@ -374,7 +375,9 @@ func RefStorageName(storage RefStorage) string {
 
 func (t *RefType) String() string {
 	s := t.Elem.String()
-	if t.ExplicitStorage || t.Storage != RefStorageAny {
+	if t.Region != "" {
+		s = t.Region + " " + s
+	} else if t.ExplicitStorage || t.Storage != RefStorageAny {
 		s = RefStorageName(t.Storage) + " " + s
 	}
 	switch t.State {
@@ -611,7 +614,7 @@ func cloneRefTypeWithState(ref *RefType, state RefState) *RefType {
 	if ref == nil {
 		return nil
 	}
-	return &RefType{Elem: ref.Elem, State: state, Storage: ref.Storage, ExplicitStorage: ref.ExplicitStorage}
+	return &RefType{Elem: ref.Elem, State: state, Storage: ref.Storage, Region: ref.Region, ExplicitStorage: ref.ExplicitStorage}
 }
 
 func cloneRefType(ref *RefType) *RefType {
@@ -639,6 +642,23 @@ func refStorageAssignable(dstStorage, srcStorage RefStorage, dstExplicit, srcExp
 		return true
 	}
 	return dstStorage == srcStorage
+}
+
+func refRegionAssignable(dstRegion, srcRegion string) bool {
+	if dstRegion == "" {
+		return true
+	}
+	return dstRegion == srcRegion
+}
+
+func mergeRefRegions(a, b string) (string, bool) {
+	if a == b {
+		return a, true
+	}
+	if a == "" || b == "" {
+		return "", true
+	}
+	return "", false
 }
 
 func mergeRefStorages(aStorage, bStorage RefStorage, aExplicit, bExplicit bool) (RefStorage, bool, bool) {

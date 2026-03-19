@@ -282,7 +282,7 @@ func (a *Analyzer) analyzeAllocExpr(expr *ast.AllocExpr) Type {
 		return invalidType
 	}
 	valueType := a.analyzeExpr(expr.Value)
-	return &RefType{Elem: valueType, State: RefStateNonNull, Storage: RefStorageAny, ExplicitStorage: true}
+	return &RefType{Elem: valueType, State: RefStateNonNull, Storage: RefStorageAny, Region: ident.Name, ExplicitStorage: true}
 }
 
 func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {

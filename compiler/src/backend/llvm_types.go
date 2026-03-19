@@ -889,7 +889,7 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type) semantic.Ty
 	case *semantic.ErrorUnionType:
 		return &semantic.ErrorUnionType{Value: substituteType(tt.Value, subst), Errors: tt.Errors}
 	case *semantic.RefType:
-		return &semantic.RefType{Elem: substituteType(tt.Elem, subst), State: tt.State, Storage: tt.Storage, ExplicitStorage: tt.ExplicitStorage}
+		return &semantic.RefType{Elem: substituteType(tt.Elem, subst), State: tt.State, Storage: tt.Storage, Region: tt.Region, ExplicitStorage: tt.ExplicitStorage}
 	case *semantic.ArrayType:
 		return &semantic.ArrayType{Elem: substituteType(tt.Elem, subst), Size: tt.Size, HasConstSize: tt.HasConstSize, ConstSize: tt.ConstSize, SurfaceName: tt.SurfaceName}
 	case *semantic.DArrayType:

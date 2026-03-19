@@ -681,6 +681,77 @@ func TestAnalyzeAcceptsManualRegions(t *testing.T) {
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsExplicitRegionQualifiedRefs(t *testing.T) {
+	src := `def sum_region(seed: i32) -> i32:
+	region scratch(1024u)
+	value: scratch i32& = new[scratch] seed + 1
+	alias: scratch i32& = value
+	return value[0u] + alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_explicit_ref_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsMismatchedRegionQualifiedRefs(t *testing.T) {
+	src := `def bad() -> i32:
+	region left(1024u)
+	region right(1024u)
+	value: left i32& = new[left] 1
+	other: right i32& = value
+	return other[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_mismatched_ref_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "variable \"other\" expects right i32&, got left i32&") {
+		t.Fatalf("expected region-qualified mismatch diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsUnknownRegionQualifiedRef(t *testing.T) {
+	src := `def bad() -> void:
+	value: scratch i32&? = null
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_unknown_ref_qualifier_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "unknown region qualifier \"scratch\"") {
+		t.Fatalf("expected unknown-region qualifier diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsReturningReferenceAllocatedFromLocalRegion(t *testing.T) {
+	src := `def bad() -> any i32&:
+	region scratch(1024u)
+	value: any i32& = new[scratch] 1
+	return value
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_return_ref_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot return reference allocated from local region \"scratch\"") {
+		t.Fatalf("expected region-escape return diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsReturningCastedReferenceAllocatedFromLocalRegion(t *testing.T) {
+	src := `def bad() -> any i32&:
+	region scratch(1024u)
+	value: any i32& = new[scratch] 1
+	return value.cast[any i32&]()
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_return_cast_ref_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot return reference allocated from local region \"scratch\"") {
+		t.Fatalf("expected region-escape return diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeAcceptsRegionCheckpoints(t *testing.T) {
 	src := `def sum_region(seed: i32) -> i32:
 	region scratch(1024u)

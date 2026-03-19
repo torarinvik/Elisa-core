@@ -86,7 +86,14 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		}
 		return &ErrorUnionType{Value: valueType, Errors: errSet}
 	case *ast.RefType:
-		return &RefType{Elem: a.resolveType(n.Elem), State: RefState(n.State), Storage: RefStorage(n.Storage), ExplicitStorage: n.Explicit}
+		if n.Region != "" {
+			if a.currentScope == nil {
+				a.errorf(n.Pos(), "unknown region qualifier %q", n.Region)
+			} else if sym, ok := a.currentScope.Lookup(n.Region); !ok || sym.Kind != SymbolRegion {
+				a.errorf(n.Pos(), "unknown region qualifier %q", n.Region)
+			}
+		}
+		return &RefType{Elem: a.resolveType(n.Elem), State: RefState(n.State), Storage: RefStorage(n.Storage), Region: n.Region, ExplicitStorage: n.Explicit}
 	case *ast.ArrayType:
 		return a.resolveArrayType(n)
 	case *ast.BuiltinTypeExpr:
@@ -500,7 +507,7 @@ func (a *Analyzer) validCast(src, dst Type) bool {
 	}
 	if srcRef, ok := src.(*RefType); ok {
 		if dstRef, ok := dst.(*RefType); ok {
-			return refStateAssignable(dstRef.State, srcRef.State)
+			return refStateAssignable(dstRef.State, srcRef.State) && refRegionAssignable(dstRef.Region, srcRef.Region)
 		}
 	}
 	return false
@@ -565,7 +572,7 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 	case *ErrorUnionType:
 		return &ErrorUnionType{Value: a.substituteType(n.Value, bindings, shapeBindings), Errors: n.Errors}
 	case *RefType:
-		return &RefType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), State: n.State, Storage: n.Storage, ExplicitStorage: n.ExplicitStorage}
+		return &RefType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), State: n.State, Storage: n.Storage, Region: n.Region, ExplicitStorage: n.ExplicitStorage}
 	case *ArrayType:
 		return &ArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Size: n.Size, HasConstSize: n.HasConstSize, ConstSize: n.ConstSize, SurfaceName: n.SurfaceName}
 	case *DArrayType:

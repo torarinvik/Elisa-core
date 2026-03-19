@@ -16,8 +16,8 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 		elem := p.parseTypeExpr()
 		return &ast.TailType{Position: elem.Pos(), Elem: elem}
 	}
-	storage, explicit, label := p.parseRefStorageQualifier()
-	typ := p.parseBaseType(storage, explicit, label)
+	storage, explicit, label, region := p.parseRefStorageQualifier()
+	typ := p.parseBaseType(storage, explicit, label, region)
 	if p.match(lexer.TOKEN_PIPE) {
 		errType := p.parseTypeExpr()
 		p.errorf("legacy fallible return syntax `T | ErrorSet` is no longer supported; use `T error[SomeSet]` instead")
@@ -71,26 +71,30 @@ func (p *Parser) parseErrorSetItem() ast.ErrorTagExpr {
 	return ast.ErrorTagExpr{Position: pos, SetName: setName, Tag: tag}
 }
 
-func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string) {
+func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string, string) {
 	switch p.peek() {
 	case lexer.TOKEN_ANY:
 		tok := p.advance()
-		return ast.RefStorageAny, true, tok.Text
+		return ast.RefStorageAny, true, tok.Text, ""
 	case lexer.TOKEN_HEAP:
 		tok := p.advance()
-		return ast.RefStorageHeap, true, tok.Text
+		return ast.RefStorageHeap, true, tok.Text, ""
 	case lexer.TOKEN_STACK:
 		tok := p.advance()
-		return ast.RefStorageStack, true, tok.Text
+		return ast.RefStorageStack, true, tok.Text, ""
 	case lexer.TOKEN_STATIC:
 		tok := p.advance()
-		return ast.RefStorageStatic, true, tok.Text
+		return ast.RefStorageStatic, true, tok.Text, ""
 	default:
-		return ast.RefStorageAny, false, ""
+		if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+			region := p.advance().Text
+			return ast.RefStorageAny, true, region, region
+		}
+		return ast.RefStorageAny, false, "", ""
 	}
 }
 
-func (p *Parser) parseRefTypeSuffixes(base ast.TypeExpr, pos lexer.Pos, storage ast.RefStorage, explicit bool) (ast.TypeExpr, int) {
+func (p *Parser) parseRefTypeSuffixes(base ast.TypeExpr, pos lexer.Pos, storage ast.RefStorage, explicit bool, region string) (ast.TypeExpr, int) {
 	typ := base
 	count := 0
 	for {
@@ -101,11 +105,11 @@ func (p *Parser) parseRefTypeSuffixes(base ast.TypeExpr, pos lexer.Pos, storage 
 			if p.match(lexer.TOKEN_QUESTION) {
 				state = ast.RefStateNullable
 			}
-			typ = &ast.RefType{Position: pos, Elem: typ, State: state, Storage: storage, Explicit: explicit}
+			typ = &ast.RefType{Position: pos, Elem: typ, State: state, Storage: storage, Region: region, Explicit: explicit}
 			count++
 		case lexer.TOKEN_BANG:
 			p.advance()
-			typ = &ast.RefType{Position: pos, Elem: typ, State: ast.RefStateNull, Storage: storage, Explicit: explicit}
+			typ = &ast.RefType{Position: pos, Elem: typ, State: ast.RefStateNull, Storage: storage, Region: region, Explicit: explicit}
 			count++
 		default:
 			return typ, count
@@ -113,7 +117,7 @@ func (p *Parser) parseRefTypeSuffixes(base ast.TypeExpr, pos lexer.Pos, storage 
 	}
 }
 
-func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label string) ast.TypeExpr {
+func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label string, region string) ast.TypeExpr {
 	pos := p.cur().Pos
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	for p.match(lexer.TOKEN_DOT) {
@@ -158,12 +162,16 @@ func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label stri
 	}
 
 	refCount := 0
-	typ, refCount = p.parseRefTypeSuffixes(typ, pos, storage, explicit)
+	typ, refCount = p.parseRefTypeSuffixes(typ, pos, storage, explicit, region)
 	if !explicit && refCount > 0 {
 		p.errorf("reference types require an explicit storage qualifier like \"any\", \"heap\", \"stack\", or \"static\"")
 	}
 	if explicit && refCount == 0 {
-		p.errorf("storage qualifier %q requires a pointer type", label)
+		if region != "" {
+			p.errorf("region qualifier %q requires a pointer type", label)
+		} else {
+			p.errorf("storage qualifier %q requires a pointer type", label)
+		}
 	}
 
 	if p.peek() == lexer.TOKEN_LBRACKET {
@@ -492,7 +500,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 				castPos := pos
 				savedCastPos := p.pos
 				var target ast.TypeExpr = &ast.NamedType{Position: castPos, Name: field}
-				target, _ = p.parseRefTypeSuffixes(target, castPos, ast.RefStorageAny, false)
+				target, _ = p.parseRefTypeSuffixes(target, castPos, ast.RefStorageAny, false, "")
 				if p.peek() == lexer.TOKEN_LPAREN {
 					p.errorf("legacy reference cast syntax is no longer supported; use .cast[any T&]() with an explicit target type instead")
 					p.advance()
