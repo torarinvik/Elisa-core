@@ -176,25 +176,25 @@ func (a *Analyzer) registerBuiltinPermission(name string, members []string) {
 
 func (a *Analyzer) registerBuiltinRuntimeStructs() {
 	a.registerBuiltinStructType("Region", nil, []builtinFieldSpec{
-		{name: "next", typ: refTypeExpr("Region", true), mutable: true},
+		{name: "next", typ: heapRefTypeExpr("Region", true), mutable: true},
 		{name: "count", typ: namedTypeExpr("usize", false), mutable: true},
 		{name: "capacity", typ: namedTypeExpr("usize", false), mutable: true},
 		{name: "owner_tag", typ: namedTypeExpr("uintptr", false), mutable: true},
-		{name: "owner_next", typ: refTypeExpr("Region", true), mutable: true},
+		{name: "owner_next", typ: heapRefTypeExpr("Region", true), mutable: true},
 		{name: "global_index", typ: namedTypeExpr("usize", false), mutable: true},
 		{name: "data", typ: namedTypeExpr("uintptr", false), isTail: true},
 	})
 	a.registerBuiltinStructType("Arena", nil, []builtinFieldSpec{
-		{name: "begin", typ: refTypeExpr("Region", true), mutable: true},
-		{name: "end", typ: refTypeExpr("Region", true), mutable: true},
+		{name: "begin", typ: heapRefTypeExpr("Region", true), mutable: true},
+		{name: "end", typ: heapRefTypeExpr("Region", true), mutable: true},
 		{name: "end_index", typ: namedTypeExpr("usize", false), mutable: true},
 	})
 	a.registerBuiltinStructType("ArenaMark", nil, []builtinFieldSpec{
-		{name: "region", typ: refTypeExpr("Region", true), mutable: true},
+		{name: "region", typ: heapRefTypeExpr("Region", true), mutable: true},
 		{name: "count", typ: namedTypeExpr("usize", false), mutable: true},
 	})
 	a.registerBuiltinStructType("PackedStoreAllocResult", nil, []builtinFieldSpec{
-		{name: "row", typ: refTypeExpr("void", true), mutable: true},
+		{name: "row", typ: heapRefTypeExpr("void", true), mutable: true},
 		{name: "handle", typ: namedTypeExpr("uintptr", false), mutable: true},
 	})
 	a.registerBuiltinStructType("StringView", nil, []builtinFieldSpec{
@@ -273,16 +273,24 @@ func genericTypeExpr(name string, args ...ast.TypeExpr) ast.TypeExpr {
 	return &ast.GenericType{Position: lexer.Pos{}, Name: name, Args: args}
 }
 
-func refToTypeExpr(elem ast.TypeExpr, nullable bool) ast.TypeExpr {
+func refToTypeExprWithStorage(elem ast.TypeExpr, nullable bool, storage ast.RefStorage) ast.TypeExpr {
 	state := ast.RefStateNonNull
 	if nullable {
 		state = ast.RefStateNullable
 	}
-	return &ast.RefType{Position: lexer.Pos{}, Elem: elem, State: state, Storage: ast.RefStorageAny}
+	return &ast.RefType{Position: lexer.Pos{}, Elem: elem, State: state, Storage: storage}
+}
+
+func refToTypeExpr(elem ast.TypeExpr, nullable bool) ast.TypeExpr {
+	return refToTypeExprWithStorage(elem, nullable, ast.RefStorageAny)
 }
 
 func refTypeExpr(name string, nullable bool) ast.TypeExpr {
 	return refToTypeExpr(&ast.NamedType{Position: lexer.Pos{}, Name: name}, nullable)
+}
+
+func heapRefTypeExpr(name string, nullable bool) ast.TypeExpr {
+	return refToTypeExprWithStorage(&ast.NamedType{Position: lexer.Pos{}, Name: name}, nullable, ast.RefStorageHeap)
 }
 
 func refTypeParamExpr(name string, nullable bool) ast.TypeExpr {

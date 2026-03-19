@@ -39,19 +39,19 @@ global mutable ctx_stage0_scratch_arena: Arena = Arena(null, null, 0)
 # ------------------------------------------------------------
 
 repr(c) struct SmallStringCacheEntry:
-	next: mutable any SmallStringCacheEntry&?
+	next: mutable heap SmallStringCacheEntry&?
 	len: mutable usize
 	text: tail u8
 
 repr(c) struct StringLenCacheEntry:
-	next: mutable any StringLenCacheEntry&?
+	next: mutable heap StringLenCacheEntry&?
 	ptr: mutable any u8&
 	len: mutable usize
 
 repr(c) struct StringBuilder:
 	len: mutable i64
 	cap: mutable i64
-	data: mutable any u8&?
+	data: mutable heap u8&?
 
 repr(c) struct StringView:
 	data: mutable any u8&
@@ -61,18 +61,18 @@ repr(c) struct StringView:
 # Global caches (zero-initialized)
 # ------------------------------------------------------------
 
-global mutable ctx_stage0_small_string_cache: any SmallStringCacheEntry&?[CTX_SMALL_STRING_CACHE_BUCKETS] = zeroed
-global mutable ctx_stage0_string_len_cache: any StringLenCacheEntry&?[CTX_STRING_LEN_CACHE_BUCKETS] = zeroed
+global mutable ctx_stage0_small_string_cache: heap SmallStringCacheEntry&?[CTX_SMALL_STRING_CACHE_BUCKETS] = zeroed
+global mutable ctx_stage0_string_len_cache: heap StringLenCacheEntry&?[CTX_STRING_LEN_CACHE_BUCKETS] = zeroed
 
 # ------------------------------------------------------------
 # Permanent / scratch arena allocation
 # ------------------------------------------------------------
 
-def ctx_stage0_alloc_perm(size: i64) -> any void& can[Memory.Allocate, Abort.Panic]:
+def ctx_stage0_alloc_perm(size: i64) -> heap void& can[Memory.Allocate, Abort.Panic]:
 	resolved: usize = size.usize() if size > 0 else 1
 	return arena_alloc((&ctx_stage0_perm_arena).cast[any Arena&](), resolved)
 
-def ctx_stage0_alloc_scratch(size: i64) -> any void& can[Memory.Allocate, Abort.Panic]:
+def ctx_stage0_alloc_scratch(size: i64) -> heap void& can[Memory.Allocate, Abort.Panic]:
 	resolved: usize = size.usize() if size > 0 else 1
 	return arena_alloc((&ctx_stage0_scratch_arena).cast[any Arena&](), resolved)
 
@@ -96,14 +96,14 @@ def ctx_stage0_register_perm_string_len(ptr: any u8&?, len: usize) can[Memory.Al
 
 	bucket: usize = ctx_stage0_string_len_bucket(ptr.cast[any u8&]())
 
-	entry: mutable any StringLenCacheEntry&? = ctx_stage0_string_len_cache[bucket]
+	entry: mutable heap StringLenCacheEntry&? = ctx_stage0_string_len_cache[bucket]
 	while entry != null:
 		if entry.ptr == ptr.cast[any u8&]():
 			entry.len <- len
 			return
 		entry <- entry.next
 
-	new_entry: any StringLenCacheEntry& = ctx_stage0_alloc_perm(sizeof(StringLenCacheEntry).i64()).cast[any StringLenCacheEntry&]()
+	new_entry: heap StringLenCacheEntry& = ctx_stage0_alloc_perm(sizeof(StringLenCacheEntry).i64()).cast[heap StringLenCacheEntry&]()
 	new_entry.next <- ctx_stage0_string_len_cache[bucket]
 	new_entry.ptr <- ptr.cast[any u8&]()
 	new_entry.len <- len
@@ -115,8 +115,8 @@ def ctx_stage0_lookup_cached_string_len(ptr: any u8&?, len_out: any usize&) -> i
 
 	bucket: usize = ctx_stage0_string_len_bucket(ptr.cast[any u8&]())
 
-	prev: mutable any StringLenCacheEntry&? = null
-	entry: mutable any StringLenCacheEntry&? = ctx_stage0_string_len_cache[bucket]
+	prev: mutable heap StringLenCacheEntry&? = null
+	entry: mutable heap StringLenCacheEntry&? = ctx_stage0_string_len_cache[bucket]
 
 	while entry != null:
 		if entry.ptr == ptr.cast[any u8&]():
@@ -166,15 +166,15 @@ def ctx_stage0_intern_small_string(src: any u8&, len: usize) -> any u8& can[Memo
 
 	bucket: usize = (hash & (CTX_SMALL_STRING_CACHE_BUCKETS - 1).u64()).usize()
 
-	entry: mutable any SmallStringCacheEntry&? = ctx_stage0_small_string_cache[bucket]
+	entry: mutable heap SmallStringCacheEntry&? = ctx_stage0_small_string_cache[bucket]
 	while entry != null:
 		if entry.len == len and memcmp((&entry.text[0]).cast[any void&](), src.cast[any void&](), len) == 0:
 			return (&entry.text[0]).cast[any u8&]()
 		entry <- entry.next
 
-	new_entry: any SmallStringCacheEntry& = ctx_stage0_alloc_perm(
+	new_entry: heap SmallStringCacheEntry& = ctx_stage0_alloc_perm(
 		(sizeof(SmallStringCacheEntry) + len + 1).i64()
-	).cast[any SmallStringCacheEntry&]()
+	).cast[heap SmallStringCacheEntry&]()
 
 	new_entry.next <- ctx_stage0_small_string_cache[bucket]
 	new_entry.len <- len
@@ -190,19 +190,19 @@ def ctx_stage0_intern_small_string(src: any u8&, len: usize) -> any u8& can[Memo
 # Integer / bool / char to string conversion
 # ------------------------------------------------------------
 
-def ctx_stage0_int_to_string_into(arena: any Arena&, value: i64) -> any u8& can[Memory.Allocate, Console.Format, Abort.Panic]:
+def ctx_stage0_int_to_string_into(arena: any Arena&, value: i64) -> heap u8& can[Memory.Allocate, Console.Format, Abort.Panic]:
 	len: int = snprintf(null, 0, "%lld".cast[any u8&](), value)
 
 	if len > 0 and len <= 8:
 		text: u8[9]
 		snprintf((&text[0]).cast[any u8&](), len.usize() + 1, "%lld".cast[any u8&](), value)
-		return ctx_stage0_intern_small_string((&text[0]).cast[any u8&](), len.usize())
+		return ctx_stage0_intern_small_string((&text[0]).cast[any u8&](), len.usize()).cast[heap u8&]()
 
-	out: any u8& = arena_alloc(arena, len.usize() + 1).cast[any u8&]()
-	snprintf(out, len.usize() + 1, "%lld".cast[any u8&](), value)
+	out: heap u8& = arena_alloc(arena, len.usize() + 1).cast[heap u8&]()
+	snprintf(out.cast[any u8&?](), len.usize() + 1, "%lld".cast[any u8&](), value)
 
 	if arena == (&ctx_stage0_perm_arena).cast[any Arena&]():
-		ctx_stage0_register_perm_string_len(out, len.usize())
+		ctx_stage0_register_perm_string_len(out.cast[any u8&](), len.usize())
 
 	return out
 
@@ -210,12 +210,12 @@ def ctx_stage0_bool_to_string_into(arena: any Arena&, value: int) -> any u8&:
 	_ = arena
 	return "True".cast[any u8&]() if value != 0 else "False".cast[any u8&]()
 
-def ctx_stage0_char_to_string_into(arena: any Arena&, value: i64) -> any u8& can[Memory.Allocate, Abort.Panic]:
+def ctx_stage0_char_to_string_into(arena: any Arena&, value: i64) -> heap u8& can[Memory.Allocate, Abort.Panic]:
 	_ = arena
 	text: u8[2]
 	text[0] <- value.u8()
 	text[1] <- 0
-	return ctx_stage0_intern_small_string((&text[0]).cast[any u8&](), 1)
+	return ctx_stage0_intern_small_string((&text[0]).cast[any u8&](), 1).cast[heap u8&]()
 
 # ------------------------------------------------------------
 # String builder
@@ -227,14 +227,14 @@ def ctx_stage0_string_builder_next_cap(min_cap: i64) -> i64:
 		cap *= 2
 	return cap
 
-def ctx_stage0_string_builder_new(initial: any u8&?) -> any StringBuilder& can[Memory.Allocate, Abort.Panic]:
+def ctx_stage0_string_builder_new(initial: any u8&?) -> heap StringBuilder& can[Memory.Allocate, Abort.Panic]:
 	src: any u8& = initial if initial != null else "".cast[any u8&]()
 	len: usize = ctx_stage0_runtime_strlen(src)
 
-	builder: any StringBuilder& = ctx_stage0_alloc_perm(sizeof(StringBuilder).i64()).cast[any StringBuilder&]()
+	builder: heap StringBuilder& = ctx_stage0_alloc_perm(sizeof(StringBuilder).i64()).cast[heap StringBuilder&]()
 	builder.len <- len.i64()
 	builder.cap <- ctx_stage0_string_builder_next_cap(len.i64() + 1)
-	builder.data <- ctx_stage0_alloc_perm(builder.cap).cast[any u8&]()
+	builder.data <- ctx_stage0_alloc_perm(builder.cap).cast[heap u8&]()
 
 	if len > 0:
 		memcpy(builder.data.cast[any void&](), src.cast[any void&](), len)
@@ -242,7 +242,7 @@ def ctx_stage0_string_builder_new(initial: any u8&?) -> any StringBuilder& can[M
 	builder.data[len] <- 0
 	return builder
 
-def ctx_stage0_string_builder_append(builder: any StringBuilder&?, suffix: any u8&?) -> any StringBuilder& can[Memory.Allocate, Abort.Panic]:
+def ctx_stage0_string_builder_append(builder: heap StringBuilder&?, suffix: any u8&?) -> heap StringBuilder& can[Memory.Allocate, Abort.Panic]:
 	src: any u8& = suffix if suffix != null else "".cast[any u8&]()
 	suffix_len: usize = ctx_stage0_runtime_strlen(src)
 
@@ -252,12 +252,12 @@ def ctx_stage0_string_builder_append(builder: any StringBuilder&?, suffix: any u
 	if suffix_len == 0:
 		return builder
 
-	b: any StringBuilder& = builder
+	b: heap StringBuilder& = builder
 	needed: i64 = b.len + suffix_len.i64() + 1
 
 	if needed > b.cap:
 		new_cap: i64 = ctx_stage0_string_builder_next_cap(needed)
-		new_data: any u8& = ctx_stage0_alloc_perm(new_cap).cast[any u8&]()
+		new_data: heap u8& = ctx_stage0_alloc_perm(new_cap).cast[heap u8&]()
 		if b.len > 0:
 			assert b.data != null
 			memcpy(new_data.cast[any void&](), b.data.cast[any void&](), b.len.usize())
@@ -270,18 +270,18 @@ def ctx_stage0_string_builder_append(builder: any StringBuilder&?, suffix: any u
 	b.data[b.len.usize()] <- 0
 	return b
 
-def ctx_stage0_string_builder_finish(builder: any StringBuilder&?) -> any u8& can[Memory.Allocate, Abort.Panic]:
+def ctx_stage0_string_builder_finish(builder: heap StringBuilder&?) -> any u8& can[Memory.Allocate, Abort.Panic]:
 	if builder == null:
 		return "".cast[any u8&]()
 
-	b: any StringBuilder& = builder
+	b: heap StringBuilder& = builder
 	if b.len <= 0:
 		return "".cast[any u8&]()
 
 	assert b.data != null
 
 	if b.len <= 8:
-		return ctx_stage0_intern_small_string(b.data, b.len.usize())
+		return ctx_stage0_intern_small_string(b.data.cast[any u8&](), b.len.usize())
 
-	ctx_stage0_register_perm_string_len(b.data, b.len.usize())
-	return b.data
+	ctx_stage0_register_perm_string_len(b.data.cast[any u8&](), b.len.usize())
+	return b.data.cast[any u8&]()

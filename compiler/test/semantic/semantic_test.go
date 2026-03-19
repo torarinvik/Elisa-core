@@ -65,6 +65,21 @@ func requireDeclaredFunctionPermissionRefs(t *testing.T, result *semantic.Result
 	}
 }
 
+func requireFunctionReturnTypeString(t *testing.T, result *semantic.Result, name string, expected string) {
+	t.Helper()
+	sym, ok := result.GlobalScope.Lookup(name)
+	if !ok {
+		t.Fatalf("expected %s symbol", name)
+	}
+	fn, ok := sym.Type.(*semantic.FuncType)
+	if !ok {
+		t.Fatalf("expected %s to be a function, got %T", name, sym.Type)
+	}
+	if got := fn.Return.String(); got != expected {
+		t.Fatalf("expected %s return type %q, got %q", name, expected, got)
+	}
+}
+
 func repoRootFromTestFile(t *testing.T) string {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
@@ -2056,6 +2071,25 @@ func TestAnalyzePinsArenaBuiltinPermissionContracts(t *testing.T) {
 	requireDeclaredFunctionPermissionRefs(t, result, "arena_vsprintf", "Memory.Allocate", "Console.Format", "Abort.Panic")
 }
 
+func TestAnalyzePinsArenaHeapPointerContracts(t *testing.T) {
+	repoRoot := repoRootFromTestFile(t)
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "arena.llcontext"), map[string]bool{})
+	result, errs := parseAndAnalyze(t, "arena.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "malloc", "heap void&?")
+	requireFunctionReturnTypeString(t, result, "sfree", "heap T!")
+	requireFunctionReturnTypeString(t, result, "new_region_with_owner", "heap Region&")
+	requireFunctionReturnTypeString(t, result, "new_region", "heap Region&")
+	requireFunctionReturnTypeString(t, result, "arena_alloc", "heap void&")
+	requireFunctionReturnTypeString(t, result, "arena_realloc", "heap void&")
+	requireFunctionReturnTypeString(t, result, "arena_strdup", "heap u8&")
+	requireFunctionReturnTypeString(t, result, "arena_memdup", "heap void&")
+	requireFunctionReturnTypeString(t, result, "ctx_packed_store_state_new", "heap void&")
+	requireFunctionReturnTypeString(t, result, "arena_dict_copy_key", "heap u8&")
+	requireFunctionReturnTypeString(t, result, "arena_vsprintf", "heap u8&")
+}
+
 func TestAnalyzePinsRuntimePreludeBuiltinExternPermissionContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
 	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "runtime_llcontext", "contextlang_runtime_prelude.llcontext"), map[string]bool{})
@@ -2066,6 +2100,45 @@ func TestAnalyzePinsRuntimePreludeBuiltinExternPermissionContracts(t *testing.T)
 	requireDeclaredFunctionPermissionRefs(t, result, "puts", "Console.Write")
 	requireDeclaredFunctionPermissionRefs(t, result, "fprintf", "Console")
 	requireDeclaredFunctionPermissionRefs(t, result, "exit", "Abort.Exit")
+}
+
+func TestAnalyzePinsRuntimePreludeHeapPointerContracts(t *testing.T) {
+	repoRoot := repoRootFromTestFile(t)
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "runtime_llcontext", "contextlang_runtime_prelude.llcontext"), map[string]bool{})
+	result, errs := parseAndAnalyze(t, "contextlang_runtime_prelude.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ctx_stage0_alloc_perm", "heap void&")
+	requireFunctionReturnTypeString(t, result, "ctx_stage0_alloc_scratch", "heap void&")
+	requireFunctionReturnTypeString(t, result, "ctx_stage0_int_to_string_into", "heap u8&")
+	requireFunctionReturnTypeString(t, result, "ctx_stage0_char_to_string_into", "heap u8&")
+	requireFunctionReturnTypeString(t, result, "ctx_stage0_string_builder_new", "heap StringBuilder&")
+	requireFunctionReturnTypeString(t, result, "ctx_stage0_string_builder_append", "heap StringBuilder&")
+}
+
+func TestAnalyzePinsRuntimeStage1BuiltinPermissionContracts(t *testing.T) {
+	repoRoot := repoRootFromTestFile(t)
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "contextlang_runtime.llcontext"), map[string]bool{})
+	result, errs := parseAndAnalyze(t, "contextlang_runtime.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireDeclaredFunctionPermissionRefs(t, result, "ctx_stage0_int_to_string", "Memory.Allocate", "Console.Format", "Abort.Panic")
+	requireDeclaredFunctionPermissionRefs(t, result, "ctx_stage0_int_to_string_scratch", "Memory.Allocate", "Console.Format", "Abort.Panic")
+	requireDeclaredFunctionPermissionRefs(t, result, "ctx_stage0_char_to_string", "Memory.Allocate", "Abort.Panic")
+	requireDeclaredFunctionPermissionRefs(t, result, "ctx_stage0_char_to_string_scratch", "Memory.Allocate", "Abort.Panic")
+	requireDeclaredFunctionPermissionRefs(t, result, "ctx_stage1rt_concat2", "Memory.Allocate", "Abort.Panic")
+	requireDeclaredFunctionPermissionRefs(t, result, "ctx_stage1rt_string_builder_new", "Memory.Allocate", "Abort.Panic")
+	requireDeclaredFunctionPermissionRefs(t, result, "ctx_stage1rt_string_builder_append", "Memory.Allocate", "Abort.Panic")
+	requireDeclaredFunctionPermissionRefs(t, result, "ctx_stage1rt_string_builder_finish", "Memory.Allocate", "Abort.Panic")
+	requireDeclaredFunctionPermissionRefs(t, result, "ctx_stage1rt_int_to_string", "Memory.Allocate", "Console.Format", "Abort.Panic")
+	requireDeclaredFunctionPermissionRefs(t, result, "ctx_stage1rt_char_to_string", "Memory.Allocate", "Abort.Panic")
+	requireDeclaredFunctionPermissionRefs(t, result, "ctx_stage1rt_puts", "Console.Write")
+	requireFunctionReturnTypeString(t, result, "ctx_stage0_int_to_string", "heap u8&")
+	requireFunctionReturnTypeString(t, result, "ctx_stage0_int_to_string_scratch", "heap u8&")
+	requireFunctionReturnTypeString(t, result, "ctx_stage0_char_to_string", "heap u8&")
+	requireFunctionReturnTypeString(t, result, "ctx_stage0_char_to_string_scratch", "heap u8&")
+	requireFunctionReturnTypeString(t, result, "ctx_stage1rt_string_builder_new", "heap StringBuilder&")
+	requireFunctionReturnTypeString(t, result, "ctx_stage1rt_string_builder_append", "heap StringBuilder&")
 }
 
 func TestAnalyzeAcceptsTypedFixedArrayLiteralInitialization(t *testing.T) {

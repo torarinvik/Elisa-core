@@ -6,10 +6,10 @@
 # Type-to-string public API
 # ------------------------------------------------------------
 
-def ctx_stage0_int_to_string(value: i64) -> any u8& can[Memory.Allocate, Console.Format, Abort.Panic]:
+def ctx_stage0_int_to_string(value: i64) -> heap u8& can[Memory.Allocate, Console.Format, Abort.Panic]:
     return ctx_stage0_int_to_string_into((&ctx_stage0_perm_arena).cast[any Arena&](), value)
 
-def ctx_stage0_int_to_string_scratch(value: i64) -> any u8& can[Memory.Allocate, Console.Format, Abort.Panic]:
+def ctx_stage0_int_to_string_scratch(value: i64) -> heap u8& can[Memory.Allocate, Console.Format, Abort.Panic]:
     return ctx_stage0_int_to_string_into((&ctx_stage0_scratch_arena).cast[any Arena&](), value)
 
 def ctx_stage0_bool_to_string(value: int) -> any u8&:
@@ -18,10 +18,10 @@ def ctx_stage0_bool_to_string(value: int) -> any u8&:
 def ctx_stage0_bool_to_string_scratch(value: int) -> any u8&:
     return ctx_stage0_bool_to_string_into((&ctx_stage0_scratch_arena).cast[any Arena&](), value)
 
-def ctx_stage0_char_to_string(value: i64) -> any u8& can[Memory.Allocate, Abort.Panic]:
+def ctx_stage0_char_to_string(value: i64) -> heap u8& can[Memory.Allocate, Abort.Panic]:
     return ctx_stage0_char_to_string_into((&ctx_stage0_perm_arena).cast[any Arena&](), value)
 
-def ctx_stage0_char_to_string_scratch(value: i64) -> any u8& can[Memory.Allocate, Abort.Panic]:
+def ctx_stage0_char_to_string_scratch(value: i64) -> heap u8& can[Memory.Allocate, Abort.Panic]:
     return ctx_stage0_char_to_string_into((&ctx_stage0_scratch_arena).cast[any Arena&](), value)
 
 # ------------------------------------------------------------
@@ -50,13 +50,13 @@ def ctx_stage1rt_concat2(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[
 def ctx_stage1rt_concat2_scratch(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[shape_result] can[Memory.Allocate, Abort.Panic]:
     return ctx_stage0_concat2_scratch(lhs, rhs)
 
-def ctx_stage1rt_string_builder_new(initial: any u8&?) -> any StringBuilder& can[Memory.Allocate, Abort.Panic]:
+def ctx_stage1rt_string_builder_new(initial: any u8&?) -> heap StringBuilder& can[Memory.Allocate, Abort.Panic]:
     return ctx_stage0_string_builder_new(initial)
 
-def ctx_stage1rt_string_builder_append(builder: any StringBuilder&?, suffix: any u8&?) -> any StringBuilder& can[Memory.Allocate, Abort.Panic]:
+def ctx_stage1rt_string_builder_append(builder: heap StringBuilder&?, suffix: any u8&?) -> heap StringBuilder& can[Memory.Allocate, Abort.Panic]:
     return ctx_stage0_string_builder_append(builder, suffix)
 
-def ctx_stage1rt_string_builder_finish(builder: any StringBuilder&?) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
+def ctx_stage1rt_string_builder_finish(builder: heap StringBuilder&?) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
     return ctx_stage0_string_builder_finish(builder)
 
 def ctx_stage1rt_int_to_string(value: i64) -> dstr[shape_out] can[Memory.Allocate, Console.Format, Abort.Panic]:
