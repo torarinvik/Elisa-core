@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 
@@ -32,6 +33,35 @@ func requireNoErrors(t *testing.T, errs []string) {
 	t.Helper()
 	if len(errs) != 0 {
 		t.Fatalf("expected no errors, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func requireNoWarnings(t *testing.T, result *semantic.Result) {
+	t.Helper()
+	if warns := result.Warnings(); len(warns) != 0 {
+		t.Fatalf("expected no warnings, got:\n%s", strings.Join(warns, "\n"))
+	}
+}
+
+func requireDeclaredFunctionPermissionRefs(t *testing.T, result *semantic.Result, name string, expected ...string) {
+	t.Helper()
+	sym, ok := result.GlobalScope.Lookup(name)
+	if !ok {
+		t.Fatalf("expected %s symbol", name)
+	}
+	fn, ok := sym.Type.(*semantic.FuncType)
+	if !ok {
+		t.Fatalf("expected %s to be a function, got %T", name, sym.Type)
+	}
+	got := make([]string, 0, len(fn.DeclaredPermissionRefs))
+	for _, ref := range fn.DeclaredPermissionRefs {
+		got = append(got, semantic.PermissionRefString(ref))
+	}
+	want := append([]string(nil), expected...)
+	sort.Strings(got)
+	sort.Strings(want)
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("expected %s declared permissions %v, got %v", name, expected, got)
 	}
 }
 
@@ -2004,6 +2034,29 @@ func TestAnalyzeAcceptsAllocatorOwnershipFixturePatterns(t *testing.T) {
 	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "test_programs", "allocator_ownership.llcontext"), map[string]bool{})
 	_, errs := parseAndAnalyze(t, "allocator_ownership.llcontext", src)
 	requireNoErrors(t, errs)
+}
+
+func TestAnalyzePinsArenaBuiltinPermissionContracts(t *testing.T) {
+	repoRoot := repoRootFromTestFile(t)
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "arena.llcontext"), map[string]bool{})
+	result, errs := parseAndAnalyze(t, "arena.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireDeclaredFunctionPermissionRefs(t, result, "assert", "Abort.Panic")
+	requireDeclaredFunctionPermissionRefs(t, result, "sfree", "Memory.Release")
+	requireDeclaredFunctionPermissionRefs(t, result, "arena_vsprintf", "Memory.Allocate", "Console.Format", "Abort.Panic")
+}
+
+func TestAnalyzePinsRuntimePreludeBuiltinExternPermissionContracts(t *testing.T) {
+	repoRoot := repoRootFromTestFile(t)
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "runtime_llcontext", "contextlang_runtime_prelude.llcontext"), map[string]bool{})
+	result, errs := parseAndAnalyze(t, "contextlang_runtime_prelude.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireDeclaredFunctionPermissionRefs(t, result, "snprintf", "Console.Format")
+	requireDeclaredFunctionPermissionRefs(t, result, "puts", "Console.Write")
+	requireDeclaredFunctionPermissionRefs(t, result, "fprintf", "Console")
+	requireDeclaredFunctionPermissionRefs(t, result, "exit", "Abort.Exit")
 }
 
 func TestAnalyzeAcceptsTypedFixedArrayLiteralInitialization(t *testing.T) {

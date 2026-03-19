@@ -46,9 +46,9 @@ func generateTestRunnerSource(inputFile string, result *semantic.Result, filter 
 	}
 	out.WriteByte('\n')
 	if !strings.Contains(string(source), "extern puts(") {
-		out.WriteString("extern puts(text: any u8&) -> int\n\n")
+		out.WriteString("extern puts(text: any u8&) -> int can[Console.Write]\n\n")
 	}
-	out.WriteString("def ctx_test_main() -> int:\n")
+	out.WriteString("def ctx_test_main() -> int can[Console.Write]:\n")
 
 	if len(tests) == 0 {
 		message := llcontextStringLiteral(fmt.Sprintf("[ NO TESTS ] no @test functions matched filter %q", strings.TrimSpace(filter)))

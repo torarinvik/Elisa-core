@@ -887,7 +887,7 @@ func TestRunCLIGeneratesTestRunnerSource(t *testing.T) {
 	output := stdout.String()
 	for _, check := range []string{
 		"@test",
-		"def ctx_test_main() -> int:",
+		"def ctx_test_main() -> int can[Console.Write]:",
 		"alpha_case()",
 		"beta_case()",
 		"export func main() -> int = ctx_test_main",
