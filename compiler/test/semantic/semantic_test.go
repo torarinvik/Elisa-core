@@ -212,6 +212,27 @@ def run() -> int can[Console.Write]:
 	requireFunctionReturnTypeString(t, result, "invoke_writer", "int")
 }
 
+func TestAnalyzeAcceptsFunctionValueErasureCasts(t *testing.T) {
+	src := `def inc(value: i64) -> i64:
+    return value + 1
+
+def call_erased(raw: any void&, value: i64) -> i64:
+    fn: func(i64) -> i64 = raw.cast[func(i64) -> i64]()
+    return fn(value)
+
+def run() -> i64:
+    raw: any void& = inc.cast[any void&]()
+    bits: uintptr = raw.cast[uintptr]()
+    fn: func(i64) -> i64 = bits.cast[func(i64) -> i64]()
+    return call_erased(fn.cast[any void&](), 40)
+`
+	result, errs := parseAndAnalyze(t, "function_value_erasure_casts.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "call_erased", "i64")
+	requireFunctionReturnTypeString(t, result, "run", "i64")
+}
+
 func TestAnalyzeTypeMismatchAssignment(t *testing.T) {
 	src := `def mismatch() -> int:
     value: mutable int = true

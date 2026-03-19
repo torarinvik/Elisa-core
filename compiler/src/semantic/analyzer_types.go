@@ -527,18 +527,30 @@ func (a *Analyzer) validCast(src, dst Type) bool {
 			return ref.State != RefStateNonNull
 		}
 	}
-	if isRefLike(src) && IsNumericType(dst) {
-		return true
-	}
-	if IsNumericType(src) && isRefLike(dst) {
-		return true
-	}
 	if srcRef, ok := src.(*RefType); ok {
 		if dstRef, ok := dst.(*RefType); ok {
 			return refStateAssignable(dstRef.State, srcRef.State) && refRegionAssignable(dstRef.Region, srcRef.Region)
 		}
 	}
+	if isPointerLikeCastType(src) && isPointerLikeCastType(dst) {
+		return true
+	}
+	if isPointerLikeCastType(src) && IsNumericType(dst) {
+		return true
+	}
+	if IsNumericType(src) && isPointerLikeCastType(dst) {
+		return true
+	}
 	return false
+}
+
+func isPointerLikeCastType(t Type) bool {
+	switch t.(type) {
+	case *RefType, *DStrType, *FuncType:
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *Analyzer) regionQualifierDefined(name string) bool {

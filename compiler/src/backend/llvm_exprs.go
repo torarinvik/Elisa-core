@@ -2125,9 +2125,9 @@ func classifyRuntimeStringCompareKind(t semantic.Type) runtimeStringCompareKind 
 }
 
 func (s *functionState) emitCastExpr(expr *ast.CastExpr) (C.LLVMValueRef, semantic.Type, error) {
-	targetType, err := s.resolveTypeExpr(expr.Target)
-	if err != nil {
-		return nil, nil, err
+	targetType := s.exprType(expr)
+	if targetType == nil {
+		return nil, nil, fmt.Errorf("missing semantic type for cast target")
 	}
 	value, actualType, err := s.emitExpr(expr.Operand, nil)
 	if err != nil {

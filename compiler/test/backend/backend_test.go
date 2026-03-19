@@ -212,6 +212,38 @@ def run() -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersFunctionValueErasureCasts(t *testing.T) {
+	src := `def inc(value: i64) -> i64:
+    return value + 1
+
+def call_bits(bits: uintptr, value: i64) -> i64:
+    fn: func(i64) -> i64 = bits.cast[func(i64) -> i64]()
+    return fn(value)
+
+def run() -> i64:
+    bits: uintptr = inc.cast[uintptr]()
+    return call_bits(bits, 41)
+`
+	result := parseAndAnalyze(t, "backend_function_value_erasure_casts.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"define i64 @call_bits(i64",
+		"inttoptr i64",
+		"call i64 %",
+		"ptrtoint (ptr @inc to i64)",
+		"call i64 @call_bits(i64",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersPanicViaTrapCall(t *testing.T) {
 	src := `def fail() -> void:
 	panic("boom")

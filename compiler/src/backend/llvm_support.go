@@ -738,6 +738,31 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			return nil, err
 		}
 		return &semantic.RefType{Elem: elem, State: semantic.RefState(n.State), Storage: semantic.RefStorage(n.Storage), ExplicitStorage: n.Explicit}, nil
+	case *ast.FuncTypeExpr:
+		params := make([]semantic.Type, 0, len(n.Params))
+		for _, param := range n.Params {
+			resolved, err := s.resolveTypeExpr(param)
+			if err != nil {
+				return nil, err
+			}
+			params = append(params, resolved)
+		}
+		ret := s.g.result.NamedTypes["void"]
+		if n.Return != nil {
+			resolved, err := s.resolveTypeExpr(n.Return)
+			if err != nil {
+				return nil, err
+			}
+			ret = resolved
+		}
+		refs := append([]ast.PermissionRef(nil), n.Permissions...)
+		return &semantic.FuncType{
+			Params:         params,
+			Return:         ret,
+			PermissionRefs: refs,
+			Permissions:    permissionFamiliesFromTypeExprRefs(refs),
+			Variadic:       n.Variadic,
+		}, nil
 	case *ast.ArrayType:
 		elem, err := s.resolveTypeExpr(n.Elem)
 		if err != nil {
@@ -778,6 +803,22 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 	default:
 		return nil, fmt.Errorf("unsupported type expression %T", expr)
 	}
+}
+
+func permissionFamiliesFromTypeExprRefs(refs []ast.PermissionRef) []string {
+	if len(refs) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(refs))
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if ref.Name == "" || seen[ref.Name] {
+			continue
+		}
+		seen[ref.Name] = true
+		out = append(out, ref.Name)
+	}
+	return out
 }
 
 func (s *functionState) resolveErrorSetExpr(expr *ast.ErrorSetExpr) (semantic.Type, error) {
