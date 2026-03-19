@@ -219,6 +219,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		inner := a.analyzeExpr(n.Operand)
 		result = &RefType{Elem: inner, State: RefStateNonNull, Storage: a.inferAddrOfStorage(n.Operand), ExplicitStorage: true}
 		return
+	case *ast.SpecializeExpr:
+		result = a.analyzeSpecializeExpr(n)
+		return
 	case *ast.StructLitExpr:
 		if t, ok := a.namedTypes[n.Name]; ok {
 			switch tt := t.(type) {
@@ -251,6 +254,64 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = invalidType
 		return
 	}
+}
+
+func (a *Analyzer) analyzeSpecializeExpr(expr *ast.SpecializeExpr) Type {
+	if expr == nil || expr.Operand == nil {
+		return invalidType
+	}
+	ident, ok := expr.Operand.(*ast.Ident)
+	if !ok {
+		a.errorf(expr.Pos(), "specialize expects a named generic function")
+		a.analyzeExpr(expr.Operand)
+		for _, arg := range expr.TypeArgs {
+			a.resolveType(arg)
+		}
+		return invalidType
+	}
+	sym, ok := a.globalScope.Lookup(ident.Name)
+	if !ok {
+		a.errorf(expr.Pos(), "undefined generic function %q", ident.Name)
+		for _, arg := range expr.TypeArgs {
+			a.resolveType(arg)
+		}
+		return invalidType
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		a.errorf(expr.Pos(), "specialize expects a function, got %s", sym.Type.String())
+		for _, arg := range expr.TypeArgs {
+			a.resolveType(arg)
+		}
+		return invalidType
+	}
+	if len(fnType.TypeParams) == 0 {
+		a.errorf(expr.Pos(), "function %q is not generic", ident.Name)
+		for _, arg := range expr.TypeArgs {
+			a.resolveType(arg)
+		}
+		return invalidType
+	}
+	if len(expr.TypeArgs) != len(fnType.TypeParams) {
+		a.errorf(expr.Pos(), "function %q expects %d type arguments, got %d", ident.Name, len(fnType.TypeParams), len(expr.TypeArgs))
+	}
+	bindings := make(map[string]Type, len(fnType.TypeParams))
+	limit := len(expr.TypeArgs)
+	if len(fnType.TypeParams) < limit {
+		limit = len(fnType.TypeParams)
+	}
+	for i := 0; i < limit; i++ {
+		bindings[fnType.TypeParams[i]] = a.resolveType(expr.TypeArgs[i])
+	}
+	for i := limit; i < len(expr.TypeArgs); i++ {
+		a.resolveType(expr.TypeArgs[i])
+	}
+	specialized, _ := a.substituteType(fnType, bindings, nil, nil).(*FuncType)
+	if specialized == nil {
+		return invalidType
+	}
+	specialized.TypeParams = nil
+	return specialized
 }
 
 func (a *Analyzer) analyzeCanExpr(expr *ast.CanExpr) Type {

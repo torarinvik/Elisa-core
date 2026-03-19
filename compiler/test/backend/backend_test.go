@@ -244,6 +244,36 @@ def run() -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersExplicitGenericFunctionSpecializationValues(t *testing.T) {
+	src := `def id[T](value: T) -> T:
+    return value
+
+def apply_i64(fn: func(i64) -> i64, value: i64) -> i64:
+    return fn(value)
+
+def run() -> i64:
+    fn: func(i64) -> i64 = id.specialize[i64]()
+    return apply_i64(fn, 7)
+`
+	result := parseAndAnalyze(t, "backend_explicit_generic_function_specialization.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"define i64 @id__i64(i64",
+		"define i64 @apply_i64(ptr",
+		"store ptr @id__i64",
+		"call i64 @apply_i64(ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersPanicViaTrapCall(t *testing.T) {
 	src := `def fail() -> void:
 	panic("boom")

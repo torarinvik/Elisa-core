@@ -682,6 +682,12 @@ func exprStr(e ast.Expr) string {
 		return fmt.Sprintf("(%s if %s else %s)", exprStr(n.Value), exprStr(n.Cond), exprStr(n.Alt))
 	case *ast.AddrOfExpr:
 		return fmt.Sprintf("&%s", exprStr(n.Operand))
+	case *ast.SpecializeExpr:
+		typeArgs := make([]string, 0, len(n.TypeArgs))
+		for _, arg := range n.TypeArgs {
+			typeArgs = append(typeArgs, typeStr(arg))
+		}
+		return fmt.Sprintf("%s.specialize[%s]()", exprStr(n.Operand), strings.Join(typeArgs, ", "))
 	case *ast.StructLitExpr:
 		var args []string
 		for _, a := range n.Args {

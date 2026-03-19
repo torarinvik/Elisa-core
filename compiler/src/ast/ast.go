@@ -359,6 +359,12 @@ type AddrOfExpr struct {
 	Operand  Expr
 }
 
+type SpecializeExpr struct {
+	Position lexer.Pos
+	Operand  Expr
+	TypeArgs []TypeExpr
+}
+
 type StructLitExpr struct {
 	Position lexer.Pos
 	Name     string
@@ -629,6 +635,7 @@ func (n *CastExpr) Pos() lexer.Pos       { return n.Position }
 func (n *SizeofExpr) Pos() lexer.Pos     { return n.Position }
 func (n *TernaryExpr) Pos() lexer.Pos    { return n.Position }
 func (n *AddrOfExpr) Pos() lexer.Pos     { return n.Position }
+func (n *SpecializeExpr) Pos() lexer.Pos { return n.Position }
 func (n *StructLitExpr) Pos() lexer.Pos  { return n.Position }
 func (n *ParenExpr) Pos() lexer.Pos      { return n.Position }
 func (n *RaiseExpr) Pos() lexer.Pos      { return n.Position }
@@ -705,6 +712,7 @@ func (*CastExpr) nodeTag()             {}
 func (*SizeofExpr) nodeTag()           {}
 func (*TernaryExpr) nodeTag()          {}
 func (*AddrOfExpr) nodeTag()           {}
+func (*SpecializeExpr) nodeTag()       {}
 func (*StructLitExpr) nodeTag()        {}
 func (*ParenExpr) nodeTag()            {}
 func (*RaiseExpr) nodeTag()            {}
@@ -785,6 +793,7 @@ func (*CastExpr) exprTag()                     {}
 func (*SizeofExpr) exprTag()                   {}
 func (*TernaryExpr) exprTag()                  {}
 func (*AddrOfExpr) exprTag()                   {}
+func (*SpecializeExpr) exprTag()               {}
 func (*StructLitExpr) exprTag()                {}
 func (*ParenExpr) exprTag()                    {}
 func (*RaiseExpr) exprTag()                    {}

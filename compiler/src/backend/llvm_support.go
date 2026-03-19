@@ -1091,6 +1091,8 @@ func (s *functionState) exprType(expr ast.Expr) semantic.Type {
 			if innerType != nil {
 				t = &semantic.RefType{Elem: innerType, State: semantic.RefStateNonNull}
 			}
+		case *ast.SpecializeExpr:
+			t = s.g.exprType(n)
 		case *ast.ParenExpr:
 			return s.exprType(n.Inner)
 		}

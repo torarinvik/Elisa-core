@@ -508,6 +508,8 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.Alt)
 	case *ast.AddrOfExpr:
 		c.collectExpr(n.Operand)
+	case *ast.SpecializeExpr:
+		c.collectExpr(n.Operand)
 	case *ast.StructLitExpr:
 		for _, arg := range n.Args {
 			c.collectExpr(arg)
@@ -660,6 +662,8 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		a.validatePermissionExpr(n.Cond, granted)
 		a.validatePermissionExpr(n.Alt, granted)
 	case *ast.AddrOfExpr:
+		a.validatePermissionExpr(n.Operand, granted)
+	case *ast.SpecializeExpr:
 		a.validatePermissionExpr(n.Operand, granted)
 	case *ast.StructLitExpr:
 		for _, arg := range n.Args {

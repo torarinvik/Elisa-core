@@ -233,6 +233,41 @@ def run() -> i64:
 	requireFunctionReturnTypeString(t, result, "run", "i64")
 }
 
+func TestAnalyzeAcceptsExplicitGenericFunctionSpecializationValues(t *testing.T) {
+	src := `def id[T](value: T) -> T:
+    return value
+
+def apply_i64(fn: func(i64) -> i64, value: i64) -> i64:
+    return fn(value)
+
+def run() -> i64:
+    fn: func(i64) -> i64 = id.specialize[i64]()
+    return apply_i64(fn, 7)
+`
+	result, errs := parseAndAnalyze(t, "explicit_generic_function_specialization.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "apply_i64", "i64")
+	requireFunctionReturnTypeString(t, result, "run", "i64")
+}
+
+func TestAnalyzeRejectsSpecializationOfNonGenericFunction(t *testing.T) {
+	src := `def id(value: i64) -> i64:
+    return value
+
+def run() -> i64:
+    fn: func(i64) -> i64 = id.specialize[i64]()
+    return fn(7)
+`
+	_, errs := parseAndAnalyze(t, "specialize_non_generic_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "function \"id\" is not generic") {
+		t.Fatalf("expected non-generic specialization diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeTypeMismatchAssignment(t *testing.T) {
 	src := `def mismatch() -> int:
     value: mutable int = true

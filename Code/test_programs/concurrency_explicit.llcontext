@@ -23,3 +23,16 @@ def concurrency_handles(thread: Thread[i64], task: Task[i64], pool: ThreadPool, 
 		guard.handle == null and
 		cv.handle == null
 	)
+
+def thread_worker(value: i64) -> i64:
+	return value + 1
+
+def typed_thread_spawn(value: i64) -> Thread[i64] can[Thread.Spawn, Memory.Allocate, Abort.Panic]:
+	return spawn1(thread_worker, value)
+
+def typed_thread_join(thread: Thread[i64]) -> i64 can[Thread.Join, Memory.Release, Abort.Panic]:
+	return join(thread)
+
+def typed_pool_roundtrip(pool: any ThreadPool&, value: i64) -> i64 can[Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic]:
+	task: Task[i64] = pool_submit1(pool, thread_worker, value)
+	return pool_await(task)

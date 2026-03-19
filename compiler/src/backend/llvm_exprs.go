@@ -85,6 +85,8 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, actualType, err = s.emitTernaryExpr(n)
 	case *ast.AddrOfExpr:
 		value, actualType, err = s.emitAddrOfExpr(n)
+	case *ast.SpecializeExpr:
+		value, actualType, err = s.emitSpecializeExpr(n)
 	case *ast.StructLitExpr:
 		value, actualType, err = s.emitStructLitExpr(n)
 	case *ast.ParenExpr:
@@ -2207,6 +2209,45 @@ func (s *functionState) emitAddrOfExpr(expr *ast.AddrOfExpr) (C.LLVMValueRef, se
 		return nil, nil, err
 	}
 	return ptr, &semantic.RefType{Elem: operandType, State: semantic.RefStateNonNull}, nil
+}
+
+func (s *functionState) emitSpecializeExpr(expr *ast.SpecializeExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if expr == nil || expr.Operand == nil {
+		return nil, nil, fmt.Errorf("missing specialization operand")
+	}
+	ident, ok := expr.Operand.(*ast.Ident)
+	if !ok {
+		return nil, nil, fmt.Errorf("specialize expects a named generic function")
+	}
+	sym, ok := s.g.result.GlobalScope.Lookup(ident.Name)
+	if !ok {
+		return nil, nil, fmt.Errorf("unknown generic function %q during LLVM lowering", ident.Name)
+	}
+	baseType, ok := sym.Type.(*semantic.FuncType)
+	if !ok {
+		return nil, nil, fmt.Errorf("specialize expects a function, got %s", sym.Type.String())
+	}
+	if len(baseType.TypeParams) == 0 {
+		return nil, nil, fmt.Errorf("function %q is not generic", ident.Name)
+	}
+	if len(expr.TypeArgs) != len(baseType.TypeParams) {
+		return nil, nil, fmt.Errorf("function %q expects %d type arguments, got %d", ident.Name, len(baseType.TypeParams), len(expr.TypeArgs))
+	}
+	bindings := make(map[string]semantic.Type, len(baseType.TypeParams))
+	for i, arg := range expr.TypeArgs {
+		resolved, err := s.resolveTypeExpr(arg)
+		if err != nil {
+			return nil, nil, err
+		}
+		bindings[baseType.TypeParams[i]] = resolved
+	}
+	specialized := specializeFuncType(baseType, bindings)
+	if decl, ok := sym.Node.(*ast.FuncDecl); ok {
+		value, lowered, err := s.g.ensureSpecializedFunction(decl, baseType, bindings)
+		return value, lowered, err
+	}
+	value, err := s.g.ensureFunctionDeclared(ident.Name, specialized)
+	return value, specialized, err
 }
 
 func (s *functionState) emitStructLitExpr(expr *ast.StructLitExpr) (C.LLVMValueRef, semantic.Type, error) {

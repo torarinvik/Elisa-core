@@ -537,6 +537,24 @@ func (p *Parser) parsePostfix() ast.Expr {
 				continue
 			}
 
+			if field == "specialize" && p.peek() == lexer.TOKEN_LBRACKET {
+				p.advance()
+				typeArgs := make([]ast.TypeExpr, 0)
+				if p.peek() != lexer.TOKEN_RBRACKET {
+					for {
+						typeArgs = append(typeArgs, p.parseTypeExpr())
+						if !p.match(lexer.TOKEN_COMMA) {
+							break
+						}
+					}
+				}
+				p.expect(lexer.TOKEN_RBRACKET)
+				p.expect(lexer.TOKEN_LPAREN)
+				p.expect(lexer.TOKEN_RPAREN)
+				expr = &ast.SpecializeExpr{Position: pos, Operand: expr, TypeArgs: typeArgs}
+				continue
+			}
+
 			if p.peek() == lexer.TOKEN_AMPERSAND || p.peek() == lexer.TOKEN_BANG {
 				castPos := pos
 				savedCastPos := p.pos

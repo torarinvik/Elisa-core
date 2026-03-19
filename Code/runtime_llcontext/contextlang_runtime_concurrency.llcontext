@@ -31,6 +31,14 @@ repr(c) struct CondVar:
 repr(c) struct atomic[T]:
 	value: mutable T
 
+repr(c) struct ConcurrencyBox[T]:
+	value: mutable T
+
+repr(c) struct ConcurrencyWorkStart1:
+	fn_bits: mutable uintptr
+	arg_bits: mutable any void&
+	result_bits: mutable any void&
+
 enum MemoryOrder:
 	Relaxed
 	Acquire
@@ -74,6 +82,107 @@ extern mutex_unlock(g: MutexGuard) -> void can[Sync.Unlock]
 extern cond_wait(cv: any CondVar&, g: MutexGuard) -> MutexGuard can[Sync.Wait]
 extern notify_one(cv: any CondVar&) -> void can[Sync.Notify]
 extern notify_all(cv: any CondVar&) -> void can[Sync.Notify]
+
+# ------------------------------------------------------------
+# Typed wrapper helpers
+# Current limitation: worker function permissions are not yet polymorphic,
+# so these wrappers currently accept permissionless worker functions only.
+# ------------------------------------------------------------
+
+def ctx_concurrency_alloc(size: usize) -> heap void& can[Memory.Allocate, Abort.Panic]:
+	raw: heap void&? = malloc(size) can Memory.Allocate
+	if raw == null:
+		panic("concurrency allocation failed")
+	ptr: heap void& = raw.cast[heap void&]()
+	return ptr
+
+def ctx_concurrency_box_new[T](value: T) -> heap ConcurrencyBox[T]& can[Memory.Allocate, Abort.Panic]:
+	raw: heap void& = ctx_concurrency_alloc(sizeof(ConcurrencyBox[T]))
+	box: heap ConcurrencyBox[T]& = raw.cast[heap ConcurrencyBox[T]&]()
+	box.value <- value
+	return box
+
+def ctx_concurrency_work1_new[A, R](fn: func(A) -> R, arg: A) -> heap ConcurrencyWorkStart1& can[Memory.Allocate, Abort.Panic]:
+	arg_box: heap ConcurrencyBox[A]& = ctx_concurrency_box_new(arg)
+	result_seed: R = zeroed
+	result_box: heap ConcurrencyBox[R]& = ctx_concurrency_box_new(result_seed)
+	raw: heap void& = ctx_concurrency_alloc(sizeof(ConcurrencyWorkStart1))
+	state: heap ConcurrencyWorkStart1& = raw.cast[heap ConcurrencyWorkStart1&]()
+	state.fn_bits <- fn.cast[uintptr]()
+	state.arg_bits <- arg_box.cast[any void&]()
+	state.result_bits <- result_box.cast[any void&]()
+	return state
+
+def ctx_concurrency_work1_entry[A, R](state_bits: any void&) -> any void&:
+	state: heap ConcurrencyWorkStart1& = state_bits.cast[heap ConcurrencyWorkStart1&]()
+	fn: func(A) -> R = state.fn_bits.cast[func(A) -> R]()
+	arg_box: heap ConcurrencyBox[A]& = state.arg_bits.cast[heap ConcurrencyBox[A]&]()
+	result_box: heap ConcurrencyBox[R]& = state.result_bits.cast[heap ConcurrencyBox[R]&]()
+	result_box.value <- fn(arg_box.value)
+	return state.cast[any void&]()
+
+def ctx_concurrency_work1_take_result[R](state_bits: any void&?) -> R can[Memory.Release, Abort.Panic]:
+	if state_bits == null:
+		panic("concurrency work returned no state")
+	live_bits: any void& = state_bits.cast[any void&]()
+	state: heap ConcurrencyWorkStart1& = live_bits.cast[heap ConcurrencyWorkStart1&]()
+	result_box: heap ConcurrencyBox[R]& = state.result_bits.cast[heap ConcurrencyBox[R]&]()
+	result: R = result_box.value
+	free(state.arg_bits.cast[heap void&]()) can Memory.Release
+	free(result_box.cast[heap void&]()) can Memory.Release
+	free(state.cast[heap void&]()) can Memory.Release
+	return result
+
+def ctx_thread_from_raw[R](raw: Thread[any void&?]) -> Thread[R]:
+	out: Thread[R] = zeroed
+	out.handle <- raw.handle
+	return out
+
+def ctx_thread_to_raw[R](thread: Thread[R]) -> Thread[any void&?]:
+	out: Thread[any void&?] = zeroed
+	out.handle <- thread.handle
+	return out
+
+def ctx_task_from_raw[R](raw: Task[any void&?]) -> Task[R]:
+	out: Task[R] = zeroed
+	out.handle <- raw.handle
+	return out
+
+def ctx_task_to_raw[R](task: Task[R]) -> Task[any void&?]:
+	out: Task[any void&?] = zeroed
+	out.handle <- task.handle
+	return out
+
+def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R] can[Thread.Spawn, Memory.Allocate, Abort.Panic]:
+	from_raw: func(Thread[any void&?]) -> Thread[R] = ctx_thread_from_raw.specialize[R]()
+	state: heap ConcurrencyWorkStart1& = ctx_concurrency_work1_new(fn, arg)
+	raw: Thread[any void&?] = spawn_raw(
+		ctx_concurrency_work1_entry.specialize[A, R]().cast[any void&](),
+		state.cast[any void&]()
+	) can Thread.Spawn
+	return from_raw(raw)
+
+def join[R](thread: Thread[R]) -> R can[Thread.Join, Memory.Release, Abort.Panic]:
+	take_result: func(any void&?) -> R can[Memory.Release, Abort.Panic] = ctx_concurrency_work1_take_result.specialize[R]()
+	raw: Thread[any void&?] = ctx_thread_to_raw(thread)
+	state_bits: any void&? = join_raw(raw) can Thread.Join
+	return take_result(state_bits)
+
+def pool_submit1[A, R](pool: any ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R] can[Pool.Submit, Memory.Allocate, Abort.Panic]:
+	from_raw: func(Task[any void&?]) -> Task[R] = ctx_task_from_raw.specialize[R]()
+	state: heap ConcurrencyWorkStart1& = ctx_concurrency_work1_new(fn, arg)
+	raw: Task[any void&?] = pool_submit_raw(
+		pool,
+		ctx_concurrency_work1_entry.specialize[A, R]().cast[any void&](),
+		state.cast[any void&]()
+	) can Pool.Submit
+	return from_raw(raw)
+
+def pool_await[R](task: Task[R]) -> R can[Pool.Await, Memory.Release, Abort.Panic]:
+	take_result: func(any void&?) -> R can[Memory.Release, Abort.Panic] = ctx_concurrency_work1_take_result.specialize[R]()
+	raw: Task[any void&?] = ctx_task_to_raw(task)
+	state_bits: any void&? = pool_await_raw(raw) can Pool.Await
+	return take_result(state_bits)
 
 # ------------------------------------------------------------
 # Generic atomic helpers
