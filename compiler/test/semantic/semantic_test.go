@@ -721,11 +721,7 @@ def use(seed: i32) -> i32:
 }
 
 func TestAnalyzeAcceptsExplicitAndInferredPermissions(t *testing.T) {
-	src := `permission Console:
-	Write
-	Flush
-
-extern emit(value: int) -> void can[Console.Write]
+	src := `extern emit(value: int) -> void can[Console.Write]
 
 def explicit() -> void can[Console]:
 	emit(1) can Console.Write
@@ -762,10 +758,7 @@ def scoped() -> void:
 }
 
 func TestAnalyzeWarnsOnMissingPermissionGrant(t *testing.T) {
-	src := `permission Console:
-	Write
-
-extern emit(value: int) -> void can[Console.Write]
+	src := `extern emit(value: int) -> void can[Console.Write]
 
 def bad() -> void:
 	emit(1)
@@ -782,10 +775,7 @@ def bad() -> void:
 }
 
 func TestAnalyzePropagatesForwardReferencedInferredPermissionCalls(t *testing.T) {
-	src := `permission Console:
-	Write
-
-extern emit(value: int) -> void can[Console.Write]
+	src := `extern emit(value: int) -> void can[Console.Write]
 
 def caller() -> void:
 	callee()
@@ -812,10 +802,7 @@ def callee() -> void:
 }
 
 func TestAnalyzeRejectsUnknownPermissionMember(t *testing.T) {
-	src := `permission Console:
-	Write
-
-extern emit(value: int) -> void can[Console]
+	src := `extern emit(value: int) -> void can[Console]
 
 def bad() -> void:
 	emit(1) can Console.Read
@@ -826,6 +813,29 @@ def bad() -> void:
 	}
 	if !strings.Contains(strings.Join(errs, "\n"), "permission \"Console\" has no member \"Read\"") {
 		t.Fatalf("expected unknown-member diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeInfersBuiltinAbortPermissionFromPanic(t *testing.T) {
+	src := `def fail_fast() -> void:
+	panic("boom")
+`
+	result, errs := parseAndAnalyze(t, "builtin_abort_from_panic.llcontext", src)
+	requireNoErrors(t, errs)
+	sym, ok := result.GlobalScope.Lookup("fail_fast")
+	if !ok {
+		t.Fatal("expected fail_fast symbol")
+	}
+	fn, ok := sym.Type.(*semantic.FuncType)
+	if !ok {
+		t.Fatalf("expected fail_fast function type, got %T", sym.Type)
+	}
+	if len(fn.Permissions) != 1 || fn.Permissions[0] != "Abort" {
+		t.Fatalf("expected fail_fast to infer can[Abort], got %#v", fn.Permissions)
+	}
+	warns := strings.Join(result.Warnings(), "\n")
+	if !strings.Contains(warns, "function \"fail_fast\" infers can[Abort]") || !strings.Contains(warns, "can[Abort.Panic]") {
+		t.Fatalf("expected implicit-abort warning, got:\n%s", warns)
 	}
 }
 

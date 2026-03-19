@@ -13,10 +13,6 @@ func (a *Analyzer) collectPermissionDecls(decls []ast.Decl) {
 		if !ok {
 			continue
 		}
-		if _, exists := a.permissions[permissionDecl.Name]; exists {
-			a.errorf(permissionDecl.Pos(), "duplicate permission %q", permissionDecl.Name)
-			continue
-		}
 		members := make([]string, 0, len(permissionDecl.Members))
 		memberSet := make(map[string]bool, len(permissionDecl.Members))
 		for _, member := range permissionDecl.Members {
@@ -27,8 +23,34 @@ func (a *Analyzer) collectPermissionDecls(decls []ast.Decl) {
 			memberSet[member] = true
 			members = append(members, member)
 		}
+		if existing, exists := a.permissions[permissionDecl.Name]; exists {
+			if existing.Builtin && permissionMembersMatch(existing, members) {
+				continue
+			}
+			if existing.Builtin {
+				a.errorf(permissionDecl.Pos(), "permission %q conflicts with the builtin members %q", permissionDecl.Name, existing.Members)
+				continue
+			}
+			a.errorf(permissionDecl.Pos(), "duplicate permission %q", permissionDecl.Name)
+			continue
+		}
 		a.permissions[permissionDecl.Name] = &PermissionSet{Name: permissionDecl.Name, Members: members, MemberSet: memberSet, Decl: permissionDecl}
 	}
+}
+
+func permissionMembersMatch(existing *PermissionSet, members []string) bool {
+	if existing == nil {
+		return false
+	}
+	if len(existing.MemberSet) != len(members) {
+		return false
+	}
+	for _, member := range members {
+		if !existing.MemberSet[member] {
+			return false
+		}
+	}
+	return true
 }
 
 func permissionRefKey(ref ast.PermissionRef) string {
@@ -432,6 +454,7 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		c.collectExpr(n.Cond)
 		c.collectStmts(n.Body)
 	case *ast.PanicStmt:
+		c.addRefs([]ast.PermissionRef{{Position: n.Position, Name: "Abort", Member: "Panic"}})
 		c.collectExpr(n.Message)
 	case *ast.ExprStmt:
 		c.collectExpr(n.Expr)
@@ -525,7 +548,15 @@ func (a *Analyzer) validatePermissionUsage(decls []ast.Decl) {
 }
 
 func (a *Analyzer) validateFunctionPermissionUsage(fn *ast.FuncDecl) {
-	a.validatePermissionStmts(fn.Body, map[string]bool{})
+	granted := map[string]bool{}
+	if sym, ok := a.globalScope.Lookup(fn.Name); ok {
+		if fnType, ok := sym.Type.(*FuncType); ok && fnType != nil {
+			for _, family := range fnType.DeclaredPermissions {
+				granted[family] = true
+			}
+		}
+	}
+	a.validatePermissionStmts(fn.Body, granted)
 }
 
 func (a *Analyzer) validatePermissionStmts(stmts []ast.Stmt, granted map[string]bool) {

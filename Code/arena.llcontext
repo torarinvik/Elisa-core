@@ -146,7 +146,7 @@ static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
 # Small utilities
 # ------------------------------------------------------------
 
-def assert(condition: bool):
+def assert(condition: bool) can[Abort.Panic]:
     if not condition:
         panic("assert failed")
 
@@ -160,7 +160,7 @@ def inv_handle(ptr: any void&?) -> bool:
 # Pointer-state helpers
 # ------------------------------------------------------------
 
-def sfree[T](ptr: any T&) -> any T!:
+def sfree[T](ptr: any T&) -> any T! can[Memory.Release]:
     free(ptr.cast[any void&]())
     return null
 
@@ -575,7 +575,7 @@ def ctx_packed_store_alloc(a: any Arena&, size_bytes: usize, state_bits: any voi
     result: PackedStoreAllocResult = ctx_packed_store_alloc_result(a, size_bytes, state_bits)
     return result.handle
 
-def ctx_packed_store_encode(a: any Arena&, ptr: any void&, state_bits: any void&) -> uintptr:
+def ctx_packed_store_encode(a: any Arena&, ptr: any void&, state_bits: any void&) -> uintptr can[Abort.Panic]:
     raw: uintptr = ptr.cast[any u8&]().uintptr()
 
     if state_bits != null:
@@ -1536,7 +1536,7 @@ extern vsnprintf(
     args: va_list
 ) -> int
 
-def arena_vsprintf(a: any Arena&, format: any u8&, args: va_list) -> any u8&:
+def arena_vsprintf(a: any Arena&, format: any u8&, args: va_list) -> any u8& can[Memory.Allocate, Console.Format, Abort.Panic]:
     args_copy: va_list = va_copy(args)
     n: int = vsnprintf(null, 0, format, args_copy)
     va_end(args_copy)

@@ -18,6 +18,7 @@ type PermissionSet struct {
 	Members   []string
 	MemberSet map[string]bool
 	Decl      *ast.PermissionDecl
+	Builtin   bool
 }
 
 type Shape interface {

@@ -146,7 +146,32 @@ func (a *Analyzer) registerBuiltins() {
 	for _, name := range []string{"void", "bool", "char", "int", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize", "uintptr"} {
 		a.namedTypes[name] = &BuiltinType{Name: name}
 	}
+	a.registerBuiltinPermissions()
 	a.registerBuiltinRuntimeStructs()
+}
+
+func (a *Analyzer) registerBuiltinPermissions() {
+	a.registerBuiltinPermission("Memory", []string{"Allocate", "Release"})
+	a.registerBuiltinPermission("Console", []string{"Format", "Write"})
+	a.registerBuiltinPermission("Abort", []string{"Exit", "Panic"})
+}
+
+func (a *Analyzer) registerBuiltinPermission(name string, members []string) {
+	memberSet := make(map[string]bool, len(members))
+	canonicalMembers := make([]string, 0, len(members))
+	for _, member := range members {
+		if memberSet[member] {
+			continue
+		}
+		memberSet[member] = true
+		canonicalMembers = append(canonicalMembers, member)
+	}
+	a.permissions[name] = &PermissionSet{
+		Name:      name,
+		Members:   canonicalMembers,
+		MemberSet: memberSet,
+		Builtin:   true,
+	}
 }
 
 func (a *Analyzer) registerBuiltinRuntimeStructs() {
