@@ -44,6 +44,10 @@ repr(c) struct ArenaMark:
     region: any Region&?
     count: usize
 
+repr(c) struct PackedStoreAllocResult:
+    row: mutable any void&?
+    handle: mutable uintptr
+
 repr(c) struct PackedStoreState:
     head_region: mutable any Region&?
     alloc_region: mutable any Region&?
@@ -368,7 +372,7 @@ def ctx_packed_store_state_new(a: any Arena&, row_bytes: usize) -> any void&:
     state.preferred_region_capacity <- preferred_region_capacity
     return state.cast[any void&]()
 
-def ctx_packed_store_alloc(a: any Arena&, size_bytes: usize, state_bits: any void&) -> uintptr:
+def ctx_packed_store_alloc_result(a: any Arena&, size_bytes: usize, state_bits: any void&) -> PackedStoreAllocResult:
     assert state_bits != null
 
     state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
@@ -455,7 +459,12 @@ def ctx_packed_store_alloc(a: any Arena&, size_bytes: usize, state_bits: any voi
         a.end_index <- state.alloc_region_index
 
     offset_words: uintptr = offset_bytes / sizeof(uintptr).uintptr()
-    return (state.alloc_region_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
+    handle: uintptr = (state.alloc_region_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
+    return PackedStoreAllocResult(ptr, handle)
+
+def ctx_packed_store_alloc(a: any Arena&, size_bytes: usize, state_bits: any void&) -> uintptr:
+    result: PackedStoreAllocResult = ctx_packed_store_alloc_result(a, size_bytes, state_bits)
+    return result.handle
 
 def ctx_packed_store_encode(a: any Arena&, ptr: any void&, state_bits: any void&) -> uintptr:
     raw: uintptr = ptr.cast[any u8&]().uintptr()

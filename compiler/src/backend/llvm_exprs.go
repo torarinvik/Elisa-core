@@ -2470,8 +2470,12 @@ func (s *functionState) emitPackedEnumStorageAlloc(storeValue C.LLVMValueRef, en
 		if err != nil {
 			return nil, nil, err
 		}
-		allocHelperType := &semantic.FuncType{Name: "ctx_packed_store_alloc", Params: []semantic.Type{arenaRefType, usizeType, voidRefType}, Return: uintptrType}
-		allocCallee, err := s.g.ensureFunctionDeclared("ctx_packed_store_alloc", allocHelperType)
+		allocResultType := s.g.result.NamedTypes["PackedStoreAllocResult"]
+		if allocResultType == nil {
+			return nil, nil, fmt.Errorf("missing builtin PackedStoreAllocResult type for packed enum allocation")
+		}
+		allocHelperType := &semantic.FuncType{Name: "ctx_packed_store_alloc_result", Params: []semantic.Type{arenaRefType, usizeType, voidRefType}, Return: allocResultType}
+		allocCallee, err := s.g.ensureFunctionDeclared("ctx_packed_store_alloc_result", allocHelperType)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -2479,11 +2483,9 @@ func (s *functionState) emitPackedEnumStorageAlloc(storeValue C.LLVMValueRef, en
 		if err != nil {
 			return nil, nil, err
 		}
-		handleValue := s.buildCall(allocLLVMFnType, allocCallee, []C.LLVMValueRef{arenaValue, rowSizeValue, stateValue}, "packed.handle.alloc")
-		allocPtr, err := s.decodePackedEnumHandleWithStore(handleValue, enumType, &packedStoreBinding{typ: storeType, value: storeValue})
-		if err != nil {
-			return nil, nil, err
-		}
+		allocResult := s.buildCall(allocLLVMFnType, allocCallee, []C.LLVMValueRef{arenaValue, rowSizeValue, stateValue}, "packed.handle.alloc")
+		allocPtr := C.LLVMBuildExtractValue(s.builder, allocResult, 0, cStringFree("packed.alloc.ptr"))
+		handleValue := C.LLVMBuildExtractValue(s.builder, allocResult, 1, cStringFree("packed.alloc.handle"))
 		coercedHandle, err := s.coerceValue(handleValue, uintptrType, enumType)
 		if err != nil {
 			return nil, nil, err

@@ -452,11 +452,12 @@ func TestRunCLICompilesJSONParserWithPackedWordHandleABI(t *testing.T) {
 	output := stdout.String()
 	checks := []string{
 		"%JsonNode__Store = type { ptr, i64, ptr }",
+		"%PackedStoreAllocResult = type { ptr, i64 }",
 		"%JsonParseNodeResult = type { i64, i64 }",
 		"define %JsonParseNodeResult @json_parse_value_node(ptr",
 		"define %JsonParseNodeResult @json_parse_array_node(ptr",
 		"define %JsonParseNodeResult @json_parse_object_node(ptr",
-		"call i64 @ctx_packed_store_alloc(ptr %packed.alloc.store.arena, i64 %packed.alloc.store.row_bytes, ptr %packed.alloc.store.state)",
+		"call %PackedStoreAllocResult @ctx_packed_store_alloc_result(ptr %packed.alloc.store.arena, i64 %packed.alloc.store.row_bytes, ptr %packed.alloc.store.state)",
 		"call i64 @ctx_packed_store_read_word(",
 		"call ptr @ctx_packed_store_decode(ptr %packed.decode.store.arena, i64",
 	}

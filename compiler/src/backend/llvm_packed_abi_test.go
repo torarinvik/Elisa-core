@@ -72,14 +72,16 @@ def fold() -> int:
 
 	checks := []string{
 		"%Expr__Store = type { ptr, i64, ptr }",
+		"%PackedStoreAllocResult = type { ptr, i64 }",
 		"define i1 @differs(i64",
 		"icmp ne i64",
 		"declare ptr @ctx_packed_store_state_new(ptr, i64)",
 		"call ptr @ctx_packed_store_state_new(ptr",
-		"call i64 @ctx_packed_store_alloc(ptr %packed.alloc.store.arena, i64 %packed.alloc.store.row_bytes, ptr %packed.alloc.store.state)",
+		"call %PackedStoreAllocResult @ctx_packed_store_alloc_result(ptr %packed.alloc.store.arena, i64 %packed.alloc.store.row_bytes, ptr %packed.alloc.store.state)",
 		"call ptr @ctx_packed_store_decode(ptr %packed.decode.store.arena, i64",
 		"ptr %packed.decode.store.state)",
 		"extractvalue %Expr__Store",
+		"extractvalue %PackedStoreAllocResult",
 		"packed.decode.store.arena",
 		"packed.decode.store.state",
 	}
@@ -89,13 +91,13 @@ def fold() -> int:
 		}
 	}
 	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
-	if decodeCalls != 2 {
-		t.Fatalf("expected constructor lowering plus one reused packed-match decode, got %d decode calls:\n%s", decodeCalls, output)
+	if decodeCalls != 1 {
+		t.Fatalf("expected only one reused packed-match decode after constructor alloc returns a writable row directly, got %d decode calls:\n%s", decodeCalls, output)
 	}
 	if strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
 		t.Fatalf("expected mixed packed match with matched-value field access to reuse a full decode instead of tag-read helper, got:\n%s", output)
 	}
-	for _, bad := range []string{"define i1 @differs(ptr", "icmp ne ptr", "call i64 @ctx_packed_store_encode(", "call ptr @arena_alloc(", "ptrtoint ptr %packed.alloc to i64", "inttoptr i64"} {
+	for _, bad := range []string{"define i1 @differs(ptr", "icmp ne ptr", "call i64 @ctx_packed_store_alloc(", "call ptr @arena_alloc(", "ptrtoint ptr %packed.alloc to i64", "inttoptr i64"} {
 		if strings.Contains(output, bad) {
 			t.Fatalf("expected alternate packed ABI to lower values as integer handles and avoid %q, got:\n%s", bad, output)
 		}
@@ -131,8 +133,8 @@ def fold() -> int:
 		t.Fatalf("expected one-word packed payload match to read payload through ctx_packed_store_read_word, got:\n%s", output)
 	}
 	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
-	if decodeCalls != 1 {
-		t.Fatalf("expected only constructor-time decode when one-word packed payloads can be read directly, got %d decode calls:\n%s", decodeCalls, output)
+	if decodeCalls != 0 {
+		t.Fatalf("expected no full decode when constructor allocation and one-word packed payload reads both stay on fast paths, got %d decode calls:\n%s", decodeCalls, output)
 	}
 }
 
@@ -166,8 +168,8 @@ def sum_pair() -> int:
 		t.Fatalf("expected two direct payload word reads for Pair.Both payload, got %d helper calls:\n%s", readWordCalls, output)
 	}
 	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
-	if decodeCalls != 1 {
-		t.Fatalf("expected only constructor-time decode for direct multi-field payload reads, got %d decode calls:\n%s", decodeCalls, output)
+	if decodeCalls != 0 {
+		t.Fatalf("expected no full decode for direct multi-field payload reads after constructor alloc returns a writable row directly, got %d decode calls:\n%s", decodeCalls, output)
 	}
 }
 
@@ -195,8 +197,8 @@ def fold_common() -> int:
 		t.Fatalf("expected repeated packed common-field reads to lower through ctx_packed_store_read_word twice, got %d helper calls:\n%s", readCalls, output)
 	}
 	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
-	if decodeCalls != 1 {
-		t.Fatalf("expected only constructor-time full decode for repeated packed common-field reads, got %d decode calls:\n%s", decodeCalls, output)
+	if decodeCalls != 0 {
+		t.Fatalf("expected no full decode for repeated packed common-field reads after constructor alloc returns a writable row directly, got %d decode calls:\n%s", decodeCalls, output)
 	}
 	for _, check := range []string{"packed.common.store.arena", "packed.common.store.state"} {
 		if !strings.Contains(output, check) {
@@ -231,7 +233,7 @@ def choose() -> int:
 		t.Fatalf("expected payloadless packed match to read tag through ctx_packed_store_read_tag, got:\n%s", output)
 	}
 	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
-	if decodeCalls != 1 {
-		t.Fatalf("expected only constructor-time full decode for payloadless packed match, got %d decode calls:\n%s", decodeCalls, output)
+	if decodeCalls != 0 {
+		t.Fatalf("expected no full decode for payloadless packed match after constructor alloc returns a writable row directly, got %d decode calls:\n%s", decodeCalls, output)
 	}
 }
