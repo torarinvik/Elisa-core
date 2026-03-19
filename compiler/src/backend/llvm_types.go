@@ -6,8 +6,8 @@ package backend
 #include <stdlib.h>
 #include <llvm-c/Core.h>
 
-static void llcontextAddAlwaysInlineAttr(LLVMContextRef Ctx, LLVMValueRef Fn) {
-	unsigned Kind = LLVMGetEnumAttributeKindForName("alwaysinline", 12);
+static void llcontextAddAlwaysInlineAttr(LLVMContextRef Ctx, LLVMValueRef Fn, const char* Name, size_t NameLen) {
+	unsigned Kind = LLVMGetEnumAttributeKindForName(Name, NameLen);
 	if (Kind == 0) {
 		return;
 	}
@@ -270,7 +270,11 @@ func (g *llvmGenerator) setDefinedFunctionLinkage(name string, value C.LLVMValue
 	}
 	C.LLVMSetLinkage(value, linkage)
 	if linkage == C.LLVMLinkage(C.LLVMPrivateLinkage) {
-		g.addAlwaysInlineAttribute(value)
+		if g.shouldNeverInlineDefinedFunction(name) {
+			g.addNoInlineAttribute(value)
+		} else {
+			g.addAlwaysInlineAttribute(value)
+		}
 	}
 }
 
@@ -278,7 +282,32 @@ func (g *llvmGenerator) addAlwaysInlineAttribute(fn C.LLVMValueRef) {
 	if g == nil || g.context == nil || fn == nil {
 		return
 	}
-	C.llcontextAddAlwaysInlineAttr(g.context, fn)
+	g.addFunctionEnumAttribute(fn, "alwaysinline")
+}
+
+func (g *llvmGenerator) addNoInlineAttribute(fn C.LLVMValueRef) {
+	if g == nil || g.context == nil || fn == nil {
+		return
+	}
+	g.addFunctionEnumAttribute(fn, "noinline")
+}
+
+func (g *llvmGenerator) addFunctionEnumAttribute(fn C.LLVMValueRef, name string) {
+	if g == nil || g.context == nil || fn == nil || name == "" {
+		return
+	}
+	nameC := cString(name)
+	defer C.free(unsafe.Pointer(nameC))
+	C.llcontextAddAlwaysInlineAttr(g.context, fn, nameC, C.size_t(len(name)))
+}
+
+func (g *llvmGenerator) shouldNeverInlineDefinedFunction(name string) bool {
+	switch name {
+	case "ctx_packed_store_alloc_result":
+		return true
+	default:
+		return false
+	}
 }
 
 func (g *llvmGenerator) lookupIntrinsic(name string, fn *semantic.FuncType) (C.uint, []C.LLVMTypeRef, bool, error) {

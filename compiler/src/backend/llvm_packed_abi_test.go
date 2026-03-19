@@ -252,3 +252,34 @@ def choose() -> int:
 		t.Fatalf("expected no full decode for payloadless packed match after constructor alloc returns a writable row directly, got %d decode calls:\n%s", decodeCalls, output)
 	}
 }
+
+func TestGenerateOptimizedLLVMIRKeepsPackedAllocResultOutOfLineForWordHandle(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Lit(value: int)
+
+def fold() -> int:
+	region scratch(256u)
+	store: Expr.Store = Expr.Store(scratch)
+	in store:
+		node: Expr = new Expr.Lit(span: 7, value: 5)
+		return match node:
+			Expr.Lit(value):
+				value + node.span
+
+export func fold_export() -> int = fold
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_word_handle_opt.llcontext", src)
+	output, err := GenerateLLVMIRWithOptAndPackedABI(result, OptimizationLevel3, PackedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOptAndPackedABI returned error: %v", err)
+	}
+
+	if !strings.Contains(output, "call %PackedStoreAllocResult @ctx_packed_store_alloc_result(") {
+		t.Fatalf("expected optimized word-handle IR to keep ctx_packed_store_alloc_result as an out-of-line helper call, got:\n%s", output)
+	}
+	if strings.Contains(output, "ctx_packed_store_alloc_result.exit") {
+		t.Fatalf("expected optimized word-handle IR to avoid inlining ctx_packed_store_alloc_result slow-path labels into callers, got:\n%s", output)
+	}
+}
