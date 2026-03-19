@@ -105,6 +105,27 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		return a.resolveArrayType(n)
 	case *ast.BuiltinTypeExpr:
 		return a.resolveBuiltinSurfaceType(n)
+	case *ast.FuncTypeExpr:
+		ptypes := make([]Type, 0, len(n.Params))
+		for _, param := range n.Params {
+			ptypes = append(ptypes, a.resolveType(param))
+		}
+		retType := a.namedTypes["void"]
+		if n.Return != nil {
+			retType = a.resolveType(n.Return)
+		}
+		resolvedPermissionRefs := a.resolvePermissionRefs(n.Permissions, true)
+		permissions := a.resolvePermissionFamilies(n.Permissions, true)
+		return &FuncType{
+			Name:                   "func",
+			DeclaredPermissionRefs: append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
+			DeclaredPermissions:    append([]string(nil), permissions...),
+			PermissionRefs:         append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
+			Permissions:            permissions,
+			Params:                 ptypes,
+			Return:                 retType,
+			Variadic:               n.Variadic,
+		}
 	case *ast.MutableType:
 		return a.resolveType(n.Elem)
 	case *ast.TailType:

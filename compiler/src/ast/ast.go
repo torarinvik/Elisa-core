@@ -231,6 +231,14 @@ type BuiltinTypeExpr struct {
 	ValueArgs []Expr
 }
 
+type FuncTypeExpr struct {
+	Position    lexer.Pos
+	Params      []TypeExpr
+	Return      TypeExpr
+	Permissions []PermissionRef
+	Variadic    bool
+}
+
 type ErrorTagExpr struct {
 	Position lexer.Pos
 	SetName  string
@@ -599,6 +607,7 @@ func (n *MutableType) Pos() lexer.Pos     { return n.Position }
 func (n *TailType) Pos() lexer.Pos        { return n.Position }
 func (n *ArrayType) Pos() lexer.Pos       { return n.Position }
 func (n *BuiltinTypeExpr) Pos() lexer.Pos { return n.Position }
+func (n *FuncTypeExpr) Pos() lexer.Pos    { return n.Position }
 func (n *ErrorSetExpr) Pos() lexer.Pos    { return n.Position }
 func (n *ErrorUnionTypeExpr) Pos() lexer.Pos {
 	return n.Position
@@ -676,6 +685,7 @@ func (*MutableType) nodeTag()          {}
 func (*TailType) nodeTag()             {}
 func (*ArrayType) nodeTag()            {}
 func (*BuiltinTypeExpr) nodeTag()      {}
+func (*FuncTypeExpr) nodeTag()         {}
 func (*ErrorSetExpr) nodeTag()         {}
 func (*ErrorUnionTypeExpr) nodeTag()   {}
 func (*Ident) nodeTag()                {}
@@ -750,6 +760,7 @@ func (*MutableType) typeExprTag()        {}
 func (*TailType) typeExprTag()           {}
 func (*ArrayType) typeExprTag()          {}
 func (*BuiltinTypeExpr) typeExprTag()    {}
+func (*FuncTypeExpr) typeExprTag()       {}
 func (*ErrorSetExpr) typeExprTag()       {}
 func (*ErrorUnionTypeExpr) typeExprTag() {}
 

@@ -176,6 +176,42 @@ def call_touch(value: i32) -> i32:
 	}
 }
 
+func TestGenerateLLVMIRLowersHigherOrderFunctionCalls(t *testing.T) {
+	src := `def apply_twice(fn: func(i64) -> i64, value: i64) -> i64:
+    return fn(fn(value))
+
+def inc(value: i64) -> i64:
+    return value + 1
+
+def run() -> i64:
+    return apply_twice(inc, 40)
+`
+	result := parseAndAnalyze(t, "backend_higher_order_call.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"define i64 @apply_twice(ptr",
+		"call i64 %",
+		"define i64 @inc(i64",
+		"define i64 @run()",
+		"call i64 @apply_twice(ptr @inc, i64 40)",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "cannot call non-function") {
+		t.Fatalf("expected function-typed parameter lowering, got:\n%s", output)
+	}
+	if count := strings.Count(output, "call i64 %"); count < 2 {
+		t.Fatalf("expected at least two indirect calls through the function parameter, got %d:\n%s", count, output)
+	}
+}
+
 func TestGenerateLLVMIRLowersPanicViaTrapCall(t *testing.T) {
 	src := `def fail() -> void:
 	panic("boom")

@@ -603,6 +603,17 @@ func typeStr(t ast.TypeExpr) string {
 			parts = append(parts, exprStr(arg))
 		}
 		return n.Name + "[" + strings.Join(parts, ", ") + "]"
+	case *ast.FuncTypeExpr:
+		parts := make([]string, 0, len(n.Params))
+		for _, param := range n.Params {
+			parts = append(parts, typeStr(param))
+		}
+		ret := ""
+		if n.Return != nil {
+			ret = " -> " + typeStr(n.Return)
+		}
+		can := formatPermissionRefs(n.Permissions)
+		return "func(" + strings.Join(parts, ", ") + ")" + ret + can
 	default:
 		return "<type>"
 	}

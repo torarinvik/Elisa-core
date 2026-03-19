@@ -16,6 +16,9 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 		elem := p.parseTypeExpr()
 		return &ast.TailType{Position: elem.Pos(), Elem: elem}
 	}
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "func" {
+		return p.parseFuncTypeExpr()
+	}
 	storage, explicit, label, region := p.parseRefStorageQualifier()
 	typ := p.parseBaseType(storage, explicit, label, region)
 	if p.match(lexer.TOKEN_PIPE) {
@@ -28,6 +31,40 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 		return &ast.ErrorUnionTypeExpr{Position: typ.Pos(), Value: typ, Errors: errType}
 	}
 	return typ
+}
+
+func (p *Parser) parseFuncTypeExpr() ast.TypeExpr {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_IDENT)
+	p.expect(lexer.TOKEN_LPAREN)
+	params := make([]ast.TypeExpr, 0)
+	variadic := false
+	if p.peek() != lexer.TOKEN_RPAREN {
+		for {
+			if p.peek() == lexer.TOKEN_ELLIPSIS {
+				p.advance()
+				variadic = true
+				break
+			}
+			params = append(params, p.parseTypeExpr())
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+
+	var retType ast.TypeExpr
+	if p.match(lexer.TOKEN_ARROW) {
+		retType = p.parseTypeExpr()
+	}
+
+	var permissions []ast.PermissionRef
+	if p.matchIdentText("can") {
+		permissions = p.parsePermissionRefs(true)
+	}
+
+	return &ast.FuncTypeExpr{Position: pos, Params: params, Return: retType, Permissions: permissions, Variadic: variadic}
 }
 
 func (p *Parser) parseErrorSetExpr() *ast.ErrorSetExpr {

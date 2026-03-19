@@ -181,6 +181,37 @@ def use_alloc() -> int:
 	}
 }
 
+func TestAnalyzeAcceptsFunctionTypeParametersAndHigherOrderCalls(t *testing.T) {
+	src := `def apply_identity[T](fn: func(T) -> T, value: T) -> T:
+    return fn(value)
+
+def bump(value: int) -> int:
+    return value + 1
+
+def run() -> int:
+	return apply_identity(bump, 41)
+`
+	result, errs := parseAndAnalyze(t, "higher_order_function_types.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "apply_identity", "T")
+	requireFunctionReturnTypeString(t, result, "run", "int")
+}
+
+func TestAnalyzeFunctionTypePermissionsParticipateInMatching(t *testing.T) {
+	src := `extern puts(text: any u8&) -> int can[Console.Write]
+
+def invoke_writer(fn: func(any u8&) -> int can[Console.Write], text: any u8&) -> int can[Console.Write]:
+    return fn(text)
+
+def run() -> int can[Console.Write]:
+    return invoke_writer(puts, "hello".cast[any u8&]())
+`
+	result, errs := parseAndAnalyze(t, "function_type_permissions.llcontext", src)
+	requireNoErrors(t, errs)
+	requireFunctionReturnTypeString(t, result, "invoke_writer", "int")
+}
+
 func TestAnalyzeTypeMismatchAssignment(t *testing.T) {
 	src := `def mismatch() -> int:
     value: mutable int = true
