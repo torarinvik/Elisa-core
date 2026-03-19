@@ -395,21 +395,72 @@ def ctx_packed_store_state_new(a: any Arena&, row_bytes: usize) -> any void&:
     state.preferred_region_capacity <- preferred_region_capacity
     return state.cast[any void&]()
 
-def ctx_packed_store_alloc_result(a: any Arena&, size_bytes: usize, state_bits: any void&) -> PackedStoreAllocResult:
-    assert state_bits != null
+def ctx_packed_store_alloc_result_slow(a: any Arena&, size: usize, owner_tag: uintptr, state: any PackedStoreState&):
+    if state.alloc_region == null:
+        capacity: mutable usize = state.preferred_region_capacity
+        if capacity < size:
+            capacity <- size
 
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
-    owner_tag: uintptr = state_bits.cast[any u8&]().uintptr()
-    size: usize = (size_bytes + sizeof(uintptr) - 1) / sizeof(uintptr)
+        if a.end == null:
+            assert a.begin == null
+            a.end as & <- new_region_with_owner(capacity, owner_tag)
+            a.begin <- a.end
+            a.end_index <- 0
+            a.end.global_index <- 0
+        else:
+            a.end.next as & <- new_region_with_owner(capacity, owner_tag)
+            a.end <- a.end.next
+            a.end_index <- a.end_index + 1
+            a.end.global_index <- a.end_index
 
-    if state.row_words < size:
-        state.row_words <- size
+        state.head_region <- a.end
+        state.alloc_region <- a.end
+        state.alloc_region_index <- a.end_index
+        state.tail_region <- a.end
+        packed_store_register_region(a, state, a.end, a.end_index)
+        return
 
-    hinted_capacity: usize = state.row_words * PACKED_STORE_MIN_ROWS_PER_REGION
-    if state.preferred_region_capacity < hinted_capacity:
-        state.preferred_region_capacity <- hinted_capacity
-    if state.preferred_region_capacity < state.row_words:
-        state.preferred_region_capacity <- state.row_words
+    assert state.alloc_region != null
+    assert state.tail_region != null
+
+    cursor: mutable any Region&? = state.alloc_region.owner_next
+    found_region: mutable any Region&? = null
+    found_region_index: mutable usize = 0
+
+    while cursor != null:
+        if cursor.count + size <= cursor.capacity:
+            found_region <- cursor
+            found_region_index <- cursor.global_index
+            cursor <- null
+        else:
+            cursor <- cursor.owner_next
+
+    if found_region != null:
+        state.alloc_region <- found_region
+        state.alloc_region_index <- found_region_index
+        return
+
+    capacity: mutable usize = state.preferred_region_capacity
+    grown_capacity: usize = state.alloc_region.capacity * 2
+    if capacity < grown_capacity:
+        capacity <- grown_capacity
+    if capacity < size:
+        capacity <- size
+
+    assert a.end != null
+    a.end.next as & <- new_region_with_owner(capacity, owner_tag)
+    a.end <- a.end.next
+    a.end_index <- a.end_index + 1
+    a.end.global_index <- a.end_index
+    state.tail_region.owner_next as & <- a.end
+    state.tail_region <- a.end
+    state.alloc_region <- a.end
+    state.alloc_region_index <- a.end_index
+    packed_store_register_region(a, state, a.end, a.end_index)
+
+def ctx_packed_store_alloc_fixed_result_slow(a: any Arena&, owner_tag: uintptr, state: any PackedStoreState&):
+    size: usize = state.row_words
+    assert size > 0
 
     if state.alloc_region == null:
         capacity: mutable usize = state.preferred_region_capacity
@@ -433,44 +484,77 @@ def ctx_packed_store_alloc_result(a: any Arena&, size_bytes: usize, state_bits: 
         state.alloc_region_index <- a.end_index
         state.tail_region <- a.end
         packed_store_register_region(a, state, a.end, a.end_index)
+        return
 
     assert state.alloc_region != null
     assert state.tail_region != null
 
-    if state.alloc_region.count + size > state.alloc_region.capacity:
-        cursor: mutable any Region&? = state.alloc_region.owner_next
-        found_region: mutable any Region&? = null
-        found_region_index: mutable usize = 0
+    capacity: mutable usize = state.preferred_region_capacity
+    grown_capacity: usize = state.alloc_region.capacity * 2
+    if capacity < grown_capacity:
+        capacity <- grown_capacity
+    if capacity < size:
+        capacity <- size
 
-        while cursor != null:
-            if cursor.count + size <= cursor.capacity:
-                found_region <- cursor
-                found_region_index <- cursor.global_index
-                cursor <- null
-            else:
-                cursor <- cursor.owner_next
+    assert a.end != null
+    a.end.next as & <- new_region_with_owner(capacity, owner_tag)
+    a.end <- a.end.next
+    a.end_index <- a.end_index + 1
+    a.end.global_index <- a.end_index
+    state.tail_region.owner_next as & <- a.end
+    state.tail_region <- a.end
+    state.alloc_region <- a.end
+    state.alloc_region_index <- a.end_index
+    packed_store_register_region(a, state, a.end, a.end_index)
 
-        if found_region != null:
-            state.alloc_region <- found_region
-            state.alloc_region_index <- found_region_index
-        else:
-            capacity: mutable usize = state.preferred_region_capacity
-            grown_capacity: usize = state.alloc_region.capacity * 2
-            if capacity < grown_capacity:
-                capacity <- grown_capacity
-            if capacity < size:
-                capacity <- size
+def ctx_packed_store_alloc_fixed_result(a: any Arena&, state_bits: any void&) -> PackedStoreAllocResult:
+    assert state_bits != null
 
-            assert a.end != null
-            a.end.next as & <- new_region_with_owner(capacity, owner_tag)
-            a.end <- a.end.next
-            a.end_index <- a.end_index + 1
-            a.end.global_index <- a.end_index
-            state.tail_region.owner_next as & <- a.end
-            state.tail_region <- a.end
-            state.alloc_region <- a.end
-            state.alloc_region_index <- a.end_index
-            packed_store_register_region(a, state, a.end, a.end_index)
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    owner_tag: uintptr = state_bits.cast[any u8&]().uintptr()
+    size: usize = state.row_words
+    assert size > 0
+
+    if state.alloc_region == null or state.alloc_region.count + size > state.alloc_region.capacity:
+        ctx_packed_store_alloc_fixed_result_slow(a, owner_tag, state)
+
+    assert state.alloc_region != null
+
+    data_base: any u8& = packed_store_region_data(state.alloc_region)
+    offset_bytes: uintptr = (state.alloc_region.count * sizeof(uintptr)).uintptr()
+    ptr: any void& = (data_base + state.alloc_region.count * sizeof(uintptr)).cast[any void&]()
+    state.alloc_region.count <- state.alloc_region.count + size
+    state.decode_region <- state.alloc_region
+    state.decode_region_index <- state.alloc_region_index
+
+    if a.end == null:
+        a.end as & <- state.alloc_region
+        a.end_index <- state.alloc_region_index
+
+    offset_words: uintptr = offset_bytes / sizeof(uintptr).uintptr()
+    handle: uintptr = (state.alloc_region_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
+    return PackedStoreAllocResult(ptr, handle)
+
+def ctx_packed_store_alloc_result(a: any Arena&, size_bytes: usize, state_bits: any void&) -> PackedStoreAllocResult:
+    assert state_bits != null
+
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    owner_tag: uintptr = state_bits.cast[any u8&]().uintptr()
+    size: usize = (size_bytes + sizeof(uintptr) - 1) / sizeof(uintptr)
+
+    if size > state.row_words:
+        state.row_words <- size
+
+        hinted_capacity: usize = state.row_words * PACKED_STORE_MIN_ROWS_PER_REGION
+        if state.preferred_region_capacity < hinted_capacity:
+            state.preferred_region_capacity <- hinted_capacity
+        if state.preferred_region_capacity < state.row_words:
+            state.preferred_region_capacity <- state.row_words
+
+    if state.alloc_region == null or state.alloc_region.count + size > state.alloc_region.capacity:
+        ctx_packed_store_alloc_result_slow(a, size, owner_tag, state)
+
+    assert state.alloc_region != null
 
     data_base: any u8& = packed_store_region_data(state.alloc_region)
     offset_bytes: uintptr = (state.alloc_region.count * sizeof(uintptr)).uintptr()

@@ -77,7 +77,7 @@ def fold() -> int:
 		"icmp ne i64",
 		"declare ptr @ctx_packed_store_state_new(ptr, i64)",
 		"call ptr @ctx_packed_store_state_new(ptr",
-		"call %PackedStoreAllocResult @ctx_packed_store_alloc_result(ptr %packed.alloc.store.arena, i64 %packed.alloc.store.row_bytes, ptr %packed.alloc.store.state)",
+		"call %PackedStoreAllocResult @ctx_packed_store_alloc_fixed_result(ptr %packed.alloc.store.arena, ptr %packed.alloc.store.state)",
 		"call ptr @ctx_packed_store_decode(ptr %packed.decode.store.arena, i64",
 		"ptr %packed.decode.store.state)",
 		"extractvalue %Expr__Store",
@@ -99,7 +99,7 @@ def fold() -> int:
 	if strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
 		t.Fatalf("expected mixed packed match with matched-value field access to reuse a full decode instead of tag-read helper, got:\n%s", output)
 	}
-	for _, bad := range []string{"define i1 @differs(ptr", "icmp ne ptr", "call i64 @ctx_packed_store_alloc(", "call ptr @arena_alloc(", "ptrtoint ptr %packed.alloc to i64", "inttoptr i64"} {
+	for _, bad := range []string{"define i1 @differs(ptr", "icmp ne ptr", "call i64 @ctx_packed_store_alloc(", "call ptr @arena_alloc(", "ptrtoint ptr %packed.alloc to i64", "inttoptr i64", "call %PackedStoreAllocResult @ctx_packed_store_alloc_result("} {
 		if strings.Contains(output, bad) {
 			t.Fatalf("expected alternate packed ABI to lower values as integer handles and avoid %q, got:\n%s", bad, output)
 		}
@@ -276,10 +276,10 @@ export func fold_export() -> int = fold
 		t.Fatalf("GenerateLLVMIRWithOptAndPackedABI returned error: %v", err)
 	}
 
-	if !strings.Contains(output, "call %PackedStoreAllocResult @ctx_packed_store_alloc_result(") {
-		t.Fatalf("expected optimized word-handle IR to keep ctx_packed_store_alloc_result as an out-of-line helper call, got:\n%s", output)
+	if !strings.Contains(output, "call %PackedStoreAllocResult @ctx_packed_store_alloc_fixed_result(") {
+		t.Fatalf("expected optimized word-handle IR to keep ctx_packed_store_alloc_fixed_result as an out-of-line helper call, got:\n%s", output)
 	}
-	if strings.Contains(output, "ctx_packed_store_alloc_result.exit") {
-		t.Fatalf("expected optimized word-handle IR to avoid inlining ctx_packed_store_alloc_result slow-path labels into callers, got:\n%s", output)
+	if strings.Contains(output, "ctx_packed_store_alloc_fixed_result.exit") {
+		t.Fatalf("expected optimized word-handle IR to avoid inlining ctx_packed_store_alloc_fixed_result slow-path labels into callers, got:\n%s", output)
 	}
 }

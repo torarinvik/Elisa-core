@@ -303,7 +303,7 @@ func (g *llvmGenerator) addFunctionEnumAttribute(fn C.LLVMValueRef, name string)
 
 func (g *llvmGenerator) shouldNeverInlineDefinedFunction(name string) bool {
 	switch name {
-	case "ctx_packed_store_alloc_result":
+	case "ctx_packed_store_alloc_result", "ctx_packed_store_alloc_fixed_result":
 		return true
 	default:
 		return false

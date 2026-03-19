@@ -2441,14 +2441,9 @@ func (s *functionState) emitPackedEnumStorageAlloc(storeValue C.LLVMValueRef, en
 		if err != nil {
 			return nil, nil, err
 		}
-		rowSizeValue, err := s.emitPackedStoreRowBytesValueNamed(storeValue, storeType, "packed.alloc.store.row_bytes")
-		if err != nil {
-			return nil, nil, err
-		}
 		arenaType := s.g.result.NamedTypes["Arena"]
 		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 		uintptrType := s.g.result.NamedTypes["uintptr"]
-		usizeType := s.g.result.NamedTypes["usize"]
 		voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 		stateValue, err := s.emitPackedStoreStateValueNamed(storeValue, storeType, "packed.alloc.store.state")
 		if err != nil {
@@ -2458,8 +2453,8 @@ func (s *functionState) emitPackedEnumStorageAlloc(storeValue C.LLVMValueRef, en
 		if allocResultType == nil {
 			return nil, nil, fmt.Errorf("missing builtin PackedStoreAllocResult type for packed enum allocation")
 		}
-		allocHelperType := &semantic.FuncType{Name: "ctx_packed_store_alloc_result", Params: []semantic.Type{arenaRefType, usizeType, voidRefType}, Return: allocResultType}
-		allocCallee, err := s.g.ensureFunctionDeclared("ctx_packed_store_alloc_result", allocHelperType)
+		allocHelperType := &semantic.FuncType{Name: "ctx_packed_store_alloc_fixed_result", Params: []semantic.Type{arenaRefType, voidRefType}, Return: allocResultType}
+		allocCallee, err := s.g.ensureFunctionDeclared("ctx_packed_store_alloc_fixed_result", allocHelperType)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -2467,7 +2462,7 @@ func (s *functionState) emitPackedEnumStorageAlloc(storeValue C.LLVMValueRef, en
 		if err != nil {
 			return nil, nil, err
 		}
-		allocResult := s.buildCall(allocLLVMFnType, allocCallee, []C.LLVMValueRef{arenaValue, rowSizeValue, stateValue}, "packed.handle.alloc")
+		allocResult := s.buildCall(allocLLVMFnType, allocCallee, []C.LLVMValueRef{arenaValue, stateValue}, "packed.handle.alloc")
 		allocPtr := C.LLVMBuildExtractValue(s.builder, allocResult, 0, cStringFree("packed.alloc.ptr"))
 		handleValue := C.LLVMBuildExtractValue(s.builder, allocResult, 1, cStringFree("packed.alloc.handle"))
 		coercedHandle, err := s.coerceValue(handleValue, uintptrType, enumType)
