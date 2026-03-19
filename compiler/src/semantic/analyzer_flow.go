@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"fmt"
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
 	"sort"
@@ -26,7 +27,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "variable %q requires a type or initializer", n.Name)
 			declType = invalidType
 		}
-		a.defineLocal(&Symbol{Name: n.Name, Kind: SymbolLocal, Type: declType, Node: n, Mutable: n.Mutable}, n.Pos())
+		sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: declType, Node: n, Mutable: n.Mutable}
+		a.defineLocal(sym, n.Pos())
+		a.recordRegionRefBinding(sym, n.Value)
 	case *ast.RegionStmt:
 		if n.Capacity != nil {
 			capacityType := a.analyzeExpr(n.Capacity)
@@ -44,6 +47,12 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if a.currentRegions != nil {
 			a.currentRegions[sym] = regionState{}
 		}
+	case *ast.MarkStmt:
+		a.analyzeMarkStmt(n)
+	case *ast.RestoreStmt:
+		a.analyzeRestoreStmt(n)
+	case *ast.ResetStmt:
+		a.analyzeResetStmt(n)
 	case *ast.DestroyStmt:
 		sym, state := a.lookupRegionState(n.Name)
 		if sym == nil {
@@ -56,6 +65,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		state.Destroyed = true
 		a.currentRegions[sym] = state
+		a.invalidateRegionRefs(sym, func(regionRefState) bool { return true }, fmt.Sprintf("destroy of region %q", n.Name))
+		a.invalidateRegionMarks(sym, func(regionMarkState) bool { return true }, fmt.Sprintf("destroy of region %q", n.Name))
 	case *ast.AssignStmt:
 		targetType := a.assignmentTargetType(n.Target)
 		valueType := a.analyzeValueExpr(n.Value, targetType)
@@ -64,6 +75,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.reportShapeMismatchNotes(n.Pos(), targetType, valueType)
 		}
 		a.recordAssignmentRefinement(n.Target, targetType, valueType)
+		a.recordRegionRefAssignment(n.Target, n.Value)
 	case *ast.AugAssignStmt:
 		targetType := a.assignmentTargetType(n.Target)
 		valueType := a.analyzeExpr(n.Value)
@@ -78,6 +90,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.reportShapeMismatchNotes(n.Pos(), targetType, valueType)
 		}
 		a.recordAssignmentRefinement(n.Target, targetType, targetType)
+		a.recordRegionRefAssignment(n.Target, n.Value)
 	case *ast.ReturnStmt:
 		if n.Value == nil {
 			if currentUnion, ok := a.currentReturn.(*ErrorUnionType); ok {
@@ -176,6 +189,87 @@ func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
 	a.currentPackedStores[packedStore.Enum.Name] = packedStore
 	a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
 	a.currentPackedStores = savedPackedStores
+}
+
+func (a *Analyzer) analyzeMarkStmt(stmt *ast.MarkStmt) {
+	regionSym, state := a.lookupRegionState(stmt.RegionName)
+	if regionSym == nil {
+		a.errorf(stmt.Pos(), "undefined region %q", stmt.RegionName)
+		return
+	}
+	if state.Destroyed {
+		a.errorf(stmt.Pos(), "region %q has already been destroyed", stmt.RegionName)
+		return
+	}
+	markType, ok := a.namedTypes["ArenaMark"]
+	if !ok {
+		a.errorf(stmt.Pos(), "missing builtin ArenaMark type for region checkpoints")
+		markType = invalidType
+	}
+	markSym := &Symbol{Name: stmt.Name, Kind: SymbolRegionMark, Type: markType, Node: stmt, Mutable: false}
+	a.defineLocal(markSym, stmt.Pos())
+	state.Generation++
+	a.currentRegions[regionSym] = state
+	if a.currentRegionMarks == nil {
+		a.currentRegionMarks = map[*Symbol]regionMarkState{}
+	}
+	a.currentRegionMarks[markSym] = regionMarkState{Region: regionSym, Generation: state.Generation, Valid: true}
+}
+
+func (a *Analyzer) analyzeRestoreStmt(stmt *ast.RestoreStmt) {
+	regionSym, state := a.lookupRegionState(stmt.RegionName)
+	if regionSym == nil {
+		a.errorf(stmt.Pos(), "undefined region %q", stmt.RegionName)
+		return
+	}
+	if state.Destroyed {
+		a.errorf(stmt.Pos(), "region %q has already been destroyed", stmt.RegionName)
+		return
+	}
+	markSym, markState := a.lookupRegionMark(stmt.MarkName)
+	if markSym == nil {
+		a.errorf(stmt.Pos(), "undefined checkpoint %q", stmt.MarkName)
+		return
+	}
+	if markState.Region != regionSym {
+		a.errorf(stmt.Pos(), "checkpoint %q belongs to region %q, not %q", stmt.MarkName, markState.Region.Name, stmt.RegionName)
+		return
+	}
+	if !markState.Valid {
+		a.errorf(stmt.Pos(), "checkpoint %q is invalid after %s", stmt.MarkName, markState.InvalidatedBy)
+		return
+	}
+	reason := fmt.Sprintf("restore of region %q from checkpoint %q", stmt.RegionName, stmt.MarkName)
+	a.invalidateRegionRefs(regionSym, func(refState regionRefState) bool {
+		return refState.Generation >= markState.Generation
+	}, reason)
+	a.invalidateRegionMarks(regionSym, func(other regionMarkState) bool {
+		return other.Generation > markState.Generation
+	}, reason)
+	state.Generation = markState.Generation
+	a.currentRegions[regionSym] = state
+	if saved, ok := a.currentRegionMarks[markSym]; ok {
+		saved.Valid = true
+		saved.InvalidatedBy = ""
+		a.currentRegionMarks[markSym] = saved
+	}
+}
+
+func (a *Analyzer) analyzeResetStmt(stmt *ast.ResetStmt) {
+	regionSym, state := a.lookupRegionState(stmt.Name)
+	if regionSym == nil {
+		a.errorf(stmt.Pos(), "undefined region %q", stmt.Name)
+		return
+	}
+	if state.Destroyed {
+		a.errorf(stmt.Pos(), "region %q has already been destroyed", stmt.Name)
+		return
+	}
+	reason := fmt.Sprintf("reset of region %q", stmt.Name)
+	a.invalidateRegionRefs(regionSym, func(regionRefState) bool { return true }, reason)
+	a.invalidateRegionMarks(regionSym, func(regionMarkState) bool { return true }, reason)
+	state.Generation = 0
+	a.currentRegions[regionSym] = state
 }
 
 func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
@@ -612,11 +706,17 @@ func (a *Analyzer) analyzeBlockInScope(stmts []ast.Stmt, scope *Scope) {
 
 func (a *Analyzer) analyzeBlockWithRegionClone(stmts []ast.Stmt, scope *Scope) {
 	savedRegions := a.currentRegions
+	savedRegionMarks := a.currentRegionMarks
+	savedRegionRefs := a.currentRegionRefs
 	savedPackedStores := a.currentPackedStores
 	a.currentRegions = a.cloneRegionStates()
+	a.currentRegionMarks = a.cloneRegionMarkStates()
+	a.currentRegionRefs = a.cloneRegionRefStates()
 	a.currentPackedStores = a.clonePackedStores()
 	a.analyzeBlockInScope(stmts, scope)
 	a.currentRegions = savedRegions
+	a.currentRegionMarks = savedRegionMarks
+	a.currentRegionRefs = savedRegionRefs
 	a.currentPackedStores = savedPackedStores
 }
 
@@ -626,6 +726,28 @@ func (a *Analyzer) cloneRegionStates() map[*Symbol]regionState {
 	}
 	cloned := make(map[*Symbol]regionState, len(a.currentRegions))
 	for sym, state := range a.currentRegions {
+		cloned[sym] = state
+	}
+	return cloned
+}
+
+func (a *Analyzer) cloneRegionMarkStates() map[*Symbol]regionMarkState {
+	if a.currentRegionMarks == nil {
+		return nil
+	}
+	cloned := make(map[*Symbol]regionMarkState, len(a.currentRegionMarks))
+	for sym, state := range a.currentRegionMarks {
+		cloned[sym] = state
+	}
+	return cloned
+}
+
+func (a *Analyzer) cloneRegionRefStates() map[*Symbol]regionRefState {
+	if a.currentRegionRefs == nil {
+		return nil
+	}
+	cloned := make(map[*Symbol]regionRefState, len(a.currentRegionRefs))
+	for sym, state := range a.currentRegionRefs {
 		cloned[sym] = state
 	}
 	return cloned
@@ -653,6 +775,21 @@ func (a *Analyzer) lookupPackedStore(enumType *EnumType) (*PackedEnumStoreType, 
 	return store, true
 }
 
+func (a *Analyzer) lookupRegionMark(name string) (*Symbol, regionMarkState) {
+	if a.currentScope == nil {
+		return nil, regionMarkState{}
+	}
+	sym, ok := a.currentScope.Lookup(name)
+	if !ok || sym.Kind != SymbolRegionMark {
+		return nil, regionMarkState{}
+	}
+	state, ok := a.currentRegionMarks[sym]
+	if !ok {
+		return nil, regionMarkState{}
+	}
+	return sym, state
+}
+
 func (a *Analyzer) lookupRegionState(name string) (*Symbol, regionState) {
 	if a.currentScope == nil {
 		return nil, regionState{}
@@ -666,6 +803,63 @@ func (a *Analyzer) lookupRegionState(name string) (*Symbol, regionState) {
 		return nil, regionState{}
 	}
 	return sym, state
+}
+
+func (a *Analyzer) recordRegionRefBinding(sym *Symbol, value ast.Expr) {
+	if a.currentRegionRefs == nil || sym == nil {
+		return
+	}
+	if state, ok := a.regionRefStateForExpr(value); ok {
+		a.currentRegionRefs[sym] = state
+		return
+	}
+	delete(a.currentRegionRefs, sym)
+}
+
+func (a *Analyzer) recordRegionRefAssignment(target ast.Expr, value ast.Expr) {
+	ident, ok := target.(*ast.Ident)
+	if !ok || a.currentScope == nil {
+		return
+	}
+	sym, ok := a.currentScope.Lookup(ident.Name)
+	if !ok {
+		return
+	}
+	a.recordRegionRefBinding(sym, value)
+}
+
+func (a *Analyzer) invalidateRegionRefs(region *Symbol, predicate func(regionRefState) bool, reason string) {
+	if a.currentRegionRefs == nil || region == nil {
+		return
+	}
+	for sym, state := range a.currentRegionRefs {
+		if state.Region != region || !state.Valid {
+			continue
+		}
+		if predicate != nil && !predicate(state) {
+			continue
+		}
+		state.Valid = false
+		state.InvalidatedBy = reason
+		a.currentRegionRefs[sym] = state
+	}
+}
+
+func (a *Analyzer) invalidateRegionMarks(region *Symbol, predicate func(regionMarkState) bool, reason string) {
+	if a.currentRegionMarks == nil || region == nil {
+		return
+	}
+	for sym, state := range a.currentRegionMarks {
+		if state.Region != region || !state.Valid {
+			continue
+		}
+		if predicate != nil && !predicate(state) {
+			continue
+		}
+		state.Valid = false
+		state.InvalidatedBy = reason
+		a.currentRegionMarks[sym] = state
+	}
 }
 
 func (a *Analyzer) refinedScopeForCondition(parent *Scope, cond ast.Expr, truthy bool) *Scope {

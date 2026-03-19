@@ -681,6 +681,41 @@ func TestAnalyzeAcceptsManualRegions(t *testing.T) {
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsRegionCheckpoints(t *testing.T) {
+	src := `def sum_region(seed: i32) -> i32:
+	region scratch(1024u)
+	mark scratch as cp
+	temp: any i32& = new[scratch] seed + 1
+	restore scratch from cp
+	reused: any i32& = new[scratch] seed + 2
+	value: i32 = reused[0u]
+	reset scratch
+	final: any i32& = new[scratch] seed + 3
+	return value + final[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_checkpoints_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsNestedRegionCheckpoints(t *testing.T) {
+	src := `def sum_region(seed: i32) -> i32:
+	region scratch(1024u)
+	base: any i32& = new[scratch] seed
+	baseline: i32 = base[0u]
+	mark scratch as outer
+	stable: any i32& = new[scratch] seed + 1
+	mark scratch as inner
+	temp: any i32& = new[scratch] seed + 2
+	restore scratch from inner
+	kept: i32 = stable[0u]
+	restore scratch from outer
+	final: any i32& = new[scratch] seed + 3
+	return baseline + kept + final[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_nested_checkpoints_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeAcceptsEnumConstructorsAndMatch(t *testing.T) {
 	src := `enum MaybeInt:
 	None
@@ -1127,6 +1162,88 @@ func TestAnalyzeRejectsAllocatingFromDestroyedRegion(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(errs, "\n"), "cannot allocate from destroyed region \"scratch\"") {
 		t.Fatalf("expected destroyed-region diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsUsingReferenceInvalidatedByRestore(t *testing.T) {
+	src := `def bad() -> i32:
+	region scratch
+	mark scratch as cp
+	value: any i32& = new[scratch] 1
+	restore scratch from cp
+	return value[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_ref.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"value\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+		t.Fatalf("expected restore invalidation diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsRestoringCheckpointFromWrongRegion(t *testing.T) {
+	src := `def bad() -> void:
+	region left
+	region right
+	mark left as cp
+	restore right from cp
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_wrong_region.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "checkpoint \"cp\" belongs to region \"left\", not \"right\"") {
+		t.Fatalf("expected wrong-region checkpoint diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsRestoringResetCheckpoint(t *testing.T) {
+	src := `def bad() -> void:
+	region scratch
+	mark scratch as cp
+	reset scratch
+	restore scratch from cp
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_reset_checkpoint.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "checkpoint \"cp\" is invalid after reset of region \"scratch\"") {
+		t.Fatalf("expected invalid-checkpoint diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsUsingReferenceInvalidatedByReset(t *testing.T) {
+	src := `def bad() -> i32:
+	region scratch
+	value: any i32& = new[scratch] 1
+	reset scratch
+	return value[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_reset_invalid_ref.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"value\" is invalid after reset of region \"scratch\"") {
+		t.Fatalf("expected reset invalidation diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsRestoringCheckpointInvalidatedByEarlierRestore(t *testing.T) {
+	src := `def bad() -> void:
+	region scratch
+	mark scratch as outer
+	mark scratch as inner
+	restore scratch from outer
+	restore scratch from inner
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalidated_checkpoint.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "checkpoint \"inner\" is invalid after restore of region \"scratch\" from checkpoint \"outer\"") {
+		t.Fatalf("expected nested-checkpoint invalidation diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
 

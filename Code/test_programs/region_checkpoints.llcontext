@@ -1,0 +1,26 @@
+def region_checkpoint_demo(seed: i32) -> i32:
+    region scratch(1024u)
+    mark scratch as cp
+    temp: any i32& = new[scratch] seed + 1
+    restore scratch from cp
+    reused: any i32& = new[scratch] seed + 2
+    carried: i32 = reused[0u]
+    reset scratch
+    final: any i32& = new[scratch] seed + 3
+    return carried + final[0u]
+
+
+def region_checkpoint_nested_demo(seed: i32) -> i32:
+    region scratch(1024u)
+    base: any i32& = new[scratch] seed
+    baseline: i32 = base[0u]
+    mark scratch as outer
+    stable: any i32& = new[scratch] seed + 1
+    mark scratch as inner
+    temp: any i32& = new[scratch] seed + 2
+    restore scratch from inner
+    kept: i32 = stable[0u]
+    restore scratch from outer
+    reset scratch
+    final: any i32& = new[scratch] seed + 3
+    return baseline + kept + final[0u]

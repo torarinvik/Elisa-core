@@ -83,6 +83,7 @@ const (
 	SymbolParam      SymbolKind = "param"
 	SymbolLocal      SymbolKind = "local"
 	SymbolRegion     SymbolKind = "region"
+	SymbolRegionMark SymbolKind = "region-mark"
 )
 
 type Symbol struct {

@@ -256,6 +256,46 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		s.defineBinding(n.Name, valueBinding{ptr: alloca, typ: arenaType})
 		s.regions = append(s.regions, regionBinding{name: n.Name, ptr: alloca, typ: arenaType})
 		return s.emitRegionInit(alloca, arenaType, n.Capacity)
+	case *ast.MarkStmt:
+		regionBinding, ok := s.lookupBinding(n.RegionName)
+		if !ok {
+			return fmt.Errorf("unknown region %q during LLVM lowering", n.RegionName)
+		}
+		markType := s.g.result.NamedTypes["ArenaMark"]
+		if markType == nil {
+			return fmt.Errorf("missing builtin ArenaMark type for region checkpoints")
+		}
+		alloca, err := s.createEntryAlloca(n.Name, markType)
+		if err != nil {
+			return err
+		}
+		markValue, err := s.emitArenaSnapshot(regionBinding.ptr, regionBinding.typ)
+		if err != nil {
+			return err
+		}
+		C.LLVMBuildStore(s.builder, markValue, alloca)
+		s.defineBinding(n.Name, valueBinding{ptr: alloca, typ: markType})
+		return nil
+	case *ast.RestoreStmt:
+		regionBinding, ok := s.lookupBinding(n.RegionName)
+		if !ok {
+			return fmt.Errorf("unknown region %q during LLVM lowering", n.RegionName)
+		}
+		markBinding, ok := s.lookupBinding(n.MarkName)
+		if !ok {
+			return fmt.Errorf("unknown checkpoint %q during LLVM lowering", n.MarkName)
+		}
+		markValue, err := s.loadValue(markBinding.ptr, markBinding.typ, n.MarkName)
+		if err != nil {
+			return err
+		}
+		return s.emitArenaRewind(regionBinding.ptr, regionBinding.typ, markValue, markBinding.typ)
+	case *ast.ResetStmt:
+		regionBinding, ok := s.lookupBinding(n.Name)
+		if !ok {
+			return fmt.Errorf("unknown region %q during LLVM lowering", n.Name)
+		}
+		return s.emitArenaReset(regionBinding.ptr, regionBinding.typ)
 	case *ast.DestroyStmt:
 		binding, ok := s.lookupBinding(n.Name)
 		if !ok {
@@ -438,6 +478,54 @@ func (s *functionState) emitArenaFree(arenaPtr C.LLVMValueRef, arenaType semanti
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	helperType := &semantic.FuncType{Name: "arena_free", Params: []semantic.Type{arenaRefType}, Return: s.g.result.NamedTypes["void"]}
 	callee, err := s.g.ensureFunctionDeclared("arena_free", helperType)
+	if err != nil {
+		return err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return err
+	}
+	s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaPtr}, "")
+	return nil
+}
+
+func (s *functionState) emitArenaSnapshot(arenaPtr C.LLVMValueRef, arenaType semantic.Type) (C.LLVMValueRef, error) {
+	markType := s.g.result.NamedTypes["ArenaMark"]
+	if markType == nil {
+		return nil, fmt.Errorf("missing builtin ArenaMark type for region checkpoints")
+	}
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	helperType := &semantic.FuncType{Name: "arena_snapshot", Params: []semantic.Type{arenaRefType}, Return: markType}
+	callee, err := s.g.ensureFunctionDeclared("arena_snapshot", helperType)
+	if err != nil {
+		return nil, err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, err
+	}
+	return s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaPtr}, "region.mark"), nil
+}
+
+func (s *functionState) emitArenaRewind(arenaPtr C.LLVMValueRef, arenaType semantic.Type, markValue C.LLVMValueRef, markType semantic.Type) error {
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	helperType := &semantic.FuncType{Name: "arena_rewind", Params: []semantic.Type{arenaRefType, markType}, Return: s.g.result.NamedTypes["void"]}
+	callee, err := s.g.ensureFunctionDeclared("arena_rewind", helperType)
+	if err != nil {
+		return err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return err
+	}
+	s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaPtr, markValue}, "")
+	return nil
+}
+
+func (s *functionState) emitArenaReset(arenaPtr C.LLVMValueRef, arenaType semantic.Type) error {
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	helperType := &semantic.FuncType{Name: "arena_reset", Params: []semantic.Type{arenaRefType}, Return: s.g.result.NamedTypes["void"]}
+	callee, err := s.g.ensureFunctionDeclared("arena_reset", helperType)
 	if err != nil {
 		return err
 	}

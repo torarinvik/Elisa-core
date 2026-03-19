@@ -516,6 +516,23 @@ type DestroyStmt struct {
 	Name     string
 }
 
+type MarkStmt struct {
+	Position   lexer.Pos
+	RegionName string
+	Name       string
+}
+
+type RestoreStmt struct {
+	Position   lexer.Pos
+	RegionName string
+	MarkName   string
+}
+
+type ResetStmt struct {
+	Position lexer.Pos
+	Name     string
+}
+
 type ElifClause struct {
 	Position lexer.Pos
 	Cond     Expr
@@ -602,6 +619,9 @@ func (n *StaticErrorStmt) Pos() lexer.Pos     { return n.Position }
 func (n *DiscardStmt) Pos() lexer.Pos         { return n.Position }
 func (n *RegionStmt) Pos() lexer.Pos          { return n.Position }
 func (n *DestroyStmt) Pos() lexer.Pos         { return n.Position }
+func (n *MarkStmt) Pos() lexer.Pos            { return n.Position }
+func (n *RestoreStmt) Pos() lexer.Pos         { return n.Position }
+func (n *ResetStmt) Pos() lexer.Pos           { return n.Position }
 
 func (*ConstDecl) nodeTag()            {}
 func (*ErrorDecl) nodeTag()            {}
@@ -669,6 +689,9 @@ func (*StaticErrorStmt) nodeTag()      {}
 func (*DiscardStmt) nodeTag()          {}
 func (*RegionStmt) nodeTag()           {}
 func (*DestroyStmt) nodeTag()          {}
+func (*MarkStmt) nodeTag()             {}
+func (*RestoreStmt) nodeTag()          {}
+func (*ResetStmt) nodeTag()            {}
 
 func (*ConstDecl) declTag()        {}
 func (*ErrorDecl) declTag()        {}
@@ -740,6 +763,9 @@ func (*StaticErrorStmt) stmtTag() {}
 func (*DiscardStmt) stmtTag()     {}
 func (*RegionStmt) stmtTag()      {}
 func (*DestroyStmt) stmtTag()     {}
+func (*MarkStmt) stmtTag()        {}
+func (*RestoreStmt) stmtTag()     {}
+func (*ResetStmt) stmtTag()       {}
 
 func (n *CallExpr) ArgName(index int) string {
 	if n == nil || index < 0 || index >= len(n.ArgNames) {

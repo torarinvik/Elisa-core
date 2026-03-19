@@ -35,6 +35,18 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
 				return p.parseDestroy()
 			}
+		case "mark":
+			if p.pos+3 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_AS && p.tokens[p.pos+3].Kind == lexer.TOKEN_IDENT {
+				return p.parseMark()
+			}
+		case "restore":
+			if p.pos+3 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Text == "from" && p.tokens[p.pos+3].Kind == lexer.TOKEN_IDENT {
+				return p.parseRestore()
+			}
+		case "reset":
+			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+				return p.parseReset()
+			}
 		}
 	}
 	switch p.peek() {
@@ -175,6 +187,34 @@ func (p *Parser) parseDestroy() *ast.DestroyStmt {
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expectNewline()
 	return &ast.DestroyStmt{Position: pos, Name: name}
+}
+
+func (p *Parser) parseMark() *ast.MarkStmt {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_IDENT)
+	regionName := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_AS)
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expectNewline()
+	return &ast.MarkStmt{Position: pos, RegionName: regionName, Name: name}
+}
+
+func (p *Parser) parseRestore() *ast.RestoreStmt {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_IDENT)
+	regionName := p.expect(lexer.TOKEN_IDENT).Text
+	p.expectIdentText("from")
+	markName := p.expect(lexer.TOKEN_IDENT).Text
+	p.expectNewline()
+	return &ast.RestoreStmt{Position: pos, RegionName: regionName, MarkName: markName}
+}
+
+func (p *Parser) parseReset() *ast.ResetStmt {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_IDENT)
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expectNewline()
+	return &ast.ResetStmt{Position: pos, Name: name}
 }
 
 func (p *Parser) parseReturn() *ast.ReturnStmt {

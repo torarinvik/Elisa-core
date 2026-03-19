@@ -452,20 +452,40 @@ def json_parse_null_node(cursor: any JsonCursor&, store: JsonNode.Store, invalid
 def json_parse_value_node_after_ws(cursor: any JsonCursor&, store: JsonNode.Store, end_node: JsonNode, invalid_node: JsonNode) -> JsonParseNodeResult:
     ch: i64 = json_cur_char(cursor)
     if ch == JSON_CH_DQUOTE:
-        return json_parse_string_node(cursor, store, invalid_node)
+        checksum: i64 = json_parse_string(cursor)
+        if checksum < 0:
+            return JsonParseNodeResult(invalid_node, -1)
+        in store:
+            return JsonParseNodeResult(new JsonNode.String(checksum: checksum), checksum)
     if ch == JSON_CH_LBRACE:
         return json_parse_object_node(cursor, store, end_node, invalid_node)
     if ch == JSON_CH_LBRACKET:
         return json_parse_array_node(cursor, store, end_node, invalid_node)
     if ch == JSON_CH_t:
-        return json_parse_true_node(cursor, store, invalid_node)
+        checksum: i64 = json_parse_true(cursor)
+        if checksum < 0:
+            return JsonParseNodeResult(invalid_node, -1)
+        in store:
+            return JsonParseNodeResult(new JsonNode.Bool(checksum: checksum, value: true), checksum)
     if ch == JSON_CH_f:
-        return json_parse_false_node(cursor, store, invalid_node)
+        checksum: i64 = json_parse_false(cursor)
+        if checksum < 0:
+            return JsonParseNodeResult(invalid_node, -1)
+        in store:
+            return JsonParseNodeResult(new JsonNode.Bool(checksum: checksum, value: false), checksum)
     if ch == JSON_CH_n:
-        return json_parse_null_node(cursor, store, invalid_node)
+        checksum: i64 = json_parse_null(cursor)
+        if checksum < 0:
+            return JsonParseNodeResult(invalid_node, -1)
+        in store:
+            return JsonParseNodeResult(new JsonNode.Null(checksum: checksum), checksum)
     if ch == JSON_CH_MINUS or json_is_digit(ch):
-        return json_parse_number_node(cursor, store, invalid_node)
-    return json_parse_node_result(invalid_node, -1)
+        checksum: i64 = json_parse_number(cursor)
+        if checksum < 0:
+            return JsonParseNodeResult(invalid_node, -1)
+        in store:
+            return JsonParseNodeResult(new JsonNode.Number(checksum: checksum), checksum)
+    return JsonParseNodeResult(invalid_node, -1)
 
 
 def json_parse_array_items_node(cursor: any JsonCursor&, store: JsonNode.Store, end_node: JsonNode, invalid_node: JsonNode) -> JsonParseNodeResult:
@@ -516,14 +536,17 @@ def json_parse_array_node(cursor: any JsonCursor&, store: JsonNode.Store, end_no
 
 
 def json_parse_object_fields_node(cursor: any JsonCursor&, store: JsonNode.Store, end_node: JsonNode, invalid_node: JsonNode) -> JsonParseNodeResult:
-    key_result: JsonParseNodeResult = json_parse_string_node(cursor, store, invalid_node)
-    key_checksum: i64 = key_result.checksum
+    key_checksum: i64 = json_parse_string(cursor)
     if key_checksum < 0:
-        return key_result
+        return JsonParseNodeResult(invalid_node, -1)
+
+    key_node: mutable JsonNode = invalid_node
+    in store:
+        key_node <- new JsonNode.String(checksum: key_checksum)
 
     json_skip_ws(cursor)
     if json_advance_char(cursor) != JSON_CH_COLON:
-        return json_parse_node_result(invalid_node, -1)
+        return JsonParseNodeResult(invalid_node, -1)
     json_skip_ws(cursor)
 
     value_result: JsonParseNodeResult = json_parse_value_node_after_ws(cursor, store, end_node, invalid_node)
@@ -546,11 +569,11 @@ def json_parse_object_fields_node(cursor: any JsonCursor&, store: JsonNode.Store
     elif ch == JSON_CH_RBRACE:
         _ = json_advance_char(cursor)
     else:
-        return json_parse_node_result(invalid_node, -1)
+        return JsonParseNodeResult(invalid_node, -1)
 
     field_checksum: i64 = key_checksum + value_checksum + next_checksum
     in store:
-        return json_parse_node_result(new JsonNode.Field(checksum: field_checksum, key: key_result.node, value: value_result.node, next: next_node), field_checksum)
+        return JsonParseNodeResult(new JsonNode.Field(checksum: field_checksum, key: key_node, value: value_result.node, next: next_node), field_checksum)
 
 
 def json_parse_object_node(cursor: any JsonCursor&, store: JsonNode.Store, end_node: JsonNode, invalid_node: JsonNode) -> JsonParseNodeResult:

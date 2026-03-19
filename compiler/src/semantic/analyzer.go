@@ -76,11 +76,28 @@ type Analyzer struct {
 	currentScope           *Scope
 	currentReturn          Type
 	currentRegions         map[*Symbol]regionState
+	currentRegionMarks     map[*Symbol]regionMarkState
+	currentRegionRefs      map[*Symbol]regionRefState
 	currentPackedStores    map[string]*PackedEnumStoreType
 }
 
 type regionState struct {
-	Destroyed bool
+	Destroyed  bool
+	Generation int
+}
+
+type regionMarkState struct {
+	Region        *Symbol
+	Generation    int
+	Valid         bool
+	InvalidatedBy string
+}
+
+type regionRefState struct {
+	Region        *Symbol
+	Generation    int
+	Valid         bool
+	InvalidatedBy string
 }
 
 func Analyze(file *ast.File) *Result {
@@ -137,6 +154,10 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 		{name: "begin", typ: refTypeExpr("Region", true), mutable: true},
 		{name: "end", typ: refTypeExpr("Region", true), mutable: true},
 		{name: "end_index", typ: namedTypeExpr("usize", false), mutable: true},
+	})
+	a.registerBuiltinStructType("ArenaMark", nil, []builtinFieldSpec{
+		{name: "region", typ: refTypeExpr("Region", true), mutable: true},
+		{name: "count", typ: namedTypeExpr("usize", false), mutable: true},
 	})
 	a.registerBuiltinStructType("PackedStoreAllocResult", nil, []builtinFieldSpec{
 		{name: "row", typ: refTypeExpr("void", true), mutable: true},
@@ -249,7 +270,7 @@ func nestedRefTypeExpr(name string, innerNonNull bool, outerNullable bool) ast.T
 
 func isBuiltinRuntimeStructName(name string) bool {
 	switch name {
-	case "Region", "Arena", "StringView", "DynArray", "DynArrayView", "DictBucket", "DynDict":
+	case "Region", "Arena", "ArenaMark", "StringView", "DynArray", "DynArrayView", "DictBucket", "DynDict":
 		return true
 	case "PackedStoreAllocResult":
 		return true
@@ -655,9 +676,13 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	savedReturn := a.currentReturn
 	savedReturnFreshStatus := a.returnFreshShapeStatus
 	savedRegions := a.currentRegions
+	savedRegionMarks := a.currentRegionMarks
+	savedRegionRefs := a.currentRegionRefs
 	savedPackedStores := a.currentPackedStores
 	a.currentScope = NewScope(a.globalScope)
 	a.currentRegions = map[*Symbol]regionState{}
+	a.currentRegionMarks = map[*Symbol]regionMarkState{}
+	a.currentRegionRefs = map[*Symbol]regionRefState{}
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	if fnType != nil {
 		a.currentReturn = fnType.Return
@@ -684,5 +709,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentReturn = savedReturn
 	a.returnFreshShapeStatus = savedReturnFreshStatus
 	a.currentRegions = savedRegions
+	a.currentRegionMarks = savedRegionMarks
+	a.currentRegionRefs = savedRegionRefs
 	a.currentPackedStores = savedPackedStores
 }

@@ -53,6 +53,22 @@ func (p *Parser) match(kind lexer.TokenKind) bool {
 	return false
 }
 
+func (p *Parser) matchIdentText(text string) bool {
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == text {
+		p.advance()
+		return true
+	}
+	return false
+}
+
+func (p *Parser) expectIdentText(text string) lexer.Token {
+	tok := p.expect(lexer.TOKEN_IDENT)
+	if tok.Text != text {
+		p.errorf("expected %q, got %q", text, tok.Text)
+	}
+	return tok
+}
+
 func (p *Parser) errorf(format string, args ...interface{}) {
 	pos := p.cur().Pos
 	msg := fmt.Sprintf("%s:%d:%d: %s", pos.File, pos.Line, pos.Col, fmt.Sprintf(format, args...))

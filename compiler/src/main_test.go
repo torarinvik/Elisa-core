@@ -221,6 +221,20 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			},
 		},
 		{
+			name: "region_checkpoints",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "region_checkpoints.llcontext"),
+			checks: []string{
+				"%Arena = type { ptr, ptr, i64 }",
+				"%ArenaMark = type { ptr, i64 }",
+				"declare %ArenaMark @arena_snapshot(ptr)",
+				"declare void @arena_rewind(ptr, %ArenaMark)",
+				"declare void @arena_reset(ptr)",
+				"call %ArenaMark @arena_snapshot(ptr",
+				"call void @arena_rewind(ptr",
+				"call void @arena_reset(ptr",
+			},
+		},
+		{
 			name: "packed_enum_common",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "packed_enum_common.llcontext"),
 			checks: []string{

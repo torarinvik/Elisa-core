@@ -15,15 +15,29 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	}()
 	switch n := expr.(type) {
 	case *ast.Ident:
-		if t, ok := a.lookupRefinedExprType(n); ok {
-			result = t
-			return
-		}
 		if a.currentScope != nil {
 			if sym, ok := a.currentScope.Lookup(n.Name); ok {
+				if sym.Kind == SymbolRegionMark {
+					a.errorf(n.Pos(), "checkpoint %q can only be used in restore <region> from %q", n.Name, n.Name)
+					result = sym.Type
+					return
+				}
+				if refState, ok := a.currentRegionRefs[sym]; ok && !refState.Valid {
+					a.errorf(n.Pos(), "reference %q is invalid after %s", n.Name, refState.InvalidatedBy)
+					result = sym.Type
+					return
+				}
+				if t, ok := a.lookupRefinedExprType(n); ok {
+					result = t
+					return
+				}
 				result = sym.Type
 				return
 			}
+		}
+		if t, ok := a.lookupRefinedExprType(n); ok {
+			result = t
+			return
 		}
 		if sym, ok := a.globalScope.Lookup(n.Name); ok {
 			result = sym.Type
@@ -269,6 +283,43 @@ func (a *Analyzer) analyzeAllocExpr(expr *ast.AllocExpr) Type {
 	}
 	valueType := a.analyzeExpr(expr.Value)
 	return &RefType{Elem: valueType, State: RefStateNonNull, Storage: RefStorageAny, ExplicitStorage: true}
+}
+
+func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
+	if expr == nil {
+		return regionRefState{}, false
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return a.regionRefStateForExpr(n.Inner)
+	case *ast.CastExpr:
+		return a.regionRefStateForExpr(n.Operand)
+	case *ast.Ident:
+		if a.currentScope == nil {
+			return regionRefState{}, false
+		}
+		sym, ok := a.currentScope.Lookup(n.Name)
+		if !ok {
+			return regionRefState{}, false
+		}
+		state, ok := a.currentRegionRefs[sym]
+		if !ok {
+			return regionRefState{}, false
+		}
+		return state, true
+	case *ast.AllocExpr:
+		ident, ok := n.Owner.(*ast.Ident)
+		if !ok {
+			return regionRefState{}, false
+		}
+		sym, state := a.lookupRegionState(ident.Name)
+		if sym == nil || state.Destroyed {
+			return regionRefState{}, false
+		}
+		return regionRefState{Region: sym, Generation: state.Generation, Valid: true}, true
+	default:
+		return regionRefState{}, false
+	}
 }
 
 func (a *Analyzer) analyzeScopedPackedAllocExpr(expr *ast.AllocExpr) Type {

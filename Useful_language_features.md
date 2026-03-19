@@ -11,6 +11,7 @@ This document is now a landing page for the split design notes in `docs/useful_l
 5. [`05-array-string-shape-mini-spec.md`](docs/useful_language_features/05-array-string-shape-mini-spec.md) — mini-spec for shape-typed arrays and strings.
 6. [`06-compiler-implementation-plan.md`](docs/useful_language_features/06-compiler-implementation-plan.md) — staged compiler roadmap for shape-typed arrays and strings.
 7. [`07-export-and-c-abi.md`](docs/useful_language_features/07-export-and-c-abi.md) — mini-spec for explicit export declarations, stable C ABI names, and header/object-file interop.
+8. [`08-region-checkpoints.md`](docs/useful_language_features/08-region-checkpoints.md) — implemented `mark` / `restore` / `reset` syntax, examples, and conservative invalidation rules.
 
 ## Notes
 
