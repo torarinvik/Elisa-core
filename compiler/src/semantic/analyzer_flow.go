@@ -30,6 +30,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: declType, Node: n, Mutable: n.Mutable}
 		a.defineLocal(sym, n.Pos())
 		a.recordRegionRefBinding(sym, n.Value)
+		a.consumeAffineValueExpr(n.Value, declType, "move into local "+strconvQuote(n.Name))
 	case *ast.RegionStmt:
 		if n.Capacity != nil {
 			capacityType := a.analyzeExpr(n.Capacity)
@@ -76,6 +77,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		a.recordAssignmentRefinement(n.Target, targetType, valueType)
 		a.recordRegionRefAssignment(n.Target, n.Value)
+		a.clearAffineValueTarget(n.Target)
+		a.consumeAffineValueExpr(n.Value, targetType, "assignment")
 	case *ast.AugAssignStmt:
 		targetType := a.assignmentTargetType(n.Target)
 		valueType := a.analyzeExpr(n.Value)
@@ -91,6 +94,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		a.recordAssignmentRefinement(n.Target, targetType, targetType)
 		a.recordRegionRefAssignment(n.Target, n.Value)
+		a.clearAffineValueTarget(n.Target)
+		a.consumeAffineValueExpr(n.Value, targetType, "assignment")
 	case *ast.ReturnStmt:
 		if n.Value == nil {
 			if currentUnion, ok := a.currentReturn.(*ErrorUnionType); ok {
@@ -118,24 +123,39 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "return type expects %s, got %s", expectedReturn.String(), valueType.String())
 			a.reportShapeMismatchNotes(n.Pos(), expectedReturn, valueType)
 		}
+		a.consumeAffineValueExpr(n.Value, expectedReturn, "return")
 	case *ast.IfStmt:
 		condType := a.analyzeCondExpr(n.Cond)
 		if !IsBoolType(condType) {
 			a.errorf(n.Pos(), "if condition must be bool, got %s", condType.String())
 		}
-		a.analyzeBlockWithRegionClone(n.Then, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
+		mergedAffine := a.cloneAffineValueStates()
+		thenAffine := a.analyzeBlockWithAffineClone(n.Then, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
+		if !blockDefinitelyExits(n.Then) {
+			mergedAffine = mergeAffineValueStates(mergedAffine, thenAffine)
+		}
 		for _, elif := range n.Elifs {
 			elifType := a.analyzeExpr(elif.Cond)
 			if !IsBoolType(elifType) {
 				a.errorf(elif.Position, "elif condition must be bool, got %s", elifType.String())
 			}
-			a.analyzeBlockWithRegionClone(elif.Body, a.refinedScopeForCondition(a.currentScope, elif.Cond, true))
+			elifAffine := a.analyzeBlockWithAffineClone(elif.Body, a.refinedScopeForCondition(a.currentScope, elif.Cond, true))
+			if !blockDefinitelyExits(elif.Body) {
+				mergedAffine = mergeAffineValueStates(mergedAffine, elifAffine)
+			}
 		}
 		if len(n.Elifs) == 0 {
-			a.analyzeBlockWithRegionClone(n.Else, a.refinedScopeForCondition(a.currentScope, n.Cond, false))
+			elseAffine := a.analyzeBlockWithAffineClone(n.Else, a.refinedScopeForCondition(a.currentScope, n.Cond, false))
+			if !blockDefinitelyExits(n.Else) {
+				mergedAffine = mergeAffineValueStates(mergedAffine, elseAffine)
+			}
 		} else {
-			a.analyzeBlockWithRegionClone(n.Else, NewScope(a.currentScope))
+			elseAffine := a.analyzeBlockWithAffineClone(n.Else, NewScope(a.currentScope))
+			if !blockDefinitelyExits(n.Else) {
+				mergedAffine = mergeAffineValueStates(mergedAffine, elseAffine)
+			}
 		}
+		a.currentAffineValues = mergedAffine
 		a.applyPostIfFallthroughRefinement(n)
 	case *ast.MatchStmt:
 		a.analyzeMatchStmt(n)
@@ -148,7 +168,12 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if !IsBoolType(condType) {
 			a.errorf(n.Pos(), "while condition must be bool, got %s", condType.String())
 		}
-		a.analyzeBlockWithRegionClone(n.Body, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
+		mergedAffine := a.cloneAffineValueStates()
+		bodyAffine := a.analyzeBlockWithAffineClone(n.Body, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
+		if !blockDefinitelyExits(n.Body) {
+			mergedAffine = mergeAffineValueStates(mergedAffine, bodyAffine)
+		}
+		a.currentAffineValues = mergedAffine
 	case *ast.PassStmt:
 		return
 	case *ast.PanicStmt:
@@ -174,7 +199,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "static error triggered")
 		}
 	case *ast.DiscardStmt:
-		a.analyzeExpr(n.Value)
+		valueType := a.analyzeExpr(n.Value)
+		a.consumeAffineValueExpr(n.Value, valueType, "discard")
 	}
 }
 
@@ -294,6 +320,7 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 		return
 	}
 	a.validateMatchStore(stmt.Pos(), enumType, stmt.Store)
+	mergedAffine := a.cloneAffineValueStates()
 	priorPatterns := make([]ast.MatchPattern, 0, len(stmt.Arms))
 	for i, arm := range stmt.Arms {
 		if a.matchPatternShadowedByPrevious(arm.Pattern, enumType, priorPatterns) {
@@ -301,9 +328,13 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 		}
 		scope := NewScope(a.currentScope)
 		a.analyzeTopLevelMatchPattern(arm.Pattern, enumType, scope, i, len(stmt.Arms), nil)
-		a.analyzeBlockWithRegionClone(arm.Body, scope)
+		armAffine := a.analyzeBlockWithAffineClone(arm.Body, scope)
+		if !blockDefinitelyExits(arm.Body) {
+			mergedAffine = mergeAffineValueStates(mergedAffine, armAffine)
+		}
 		priorPatterns = append(priorPatterns, arm.Pattern)
 	}
+	a.currentAffineValues = mergedAffine
 }
 
 func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
@@ -320,6 +351,7 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 	covered := map[string]bool{}
 	hasWildcard := false
 	resultType := Type(nil)
+	mergedAffine := a.cloneAffineValueStates()
 	priorPatterns := make([]ast.MatchPattern, 0, len(expr.Arms))
 	for i, arm := range expr.Arms {
 		if a.matchPatternShadowedByPrevious(arm.Pattern, enumType, priorPatterns) {
@@ -329,7 +361,10 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 		if a.analyzeTopLevelMatchPattern(arm.Pattern, enumType, scope, i, len(expr.Arms), covered) {
 			hasWildcard = true
 		}
-		armType := a.analyzeMatchExprArmBody(arm.Body, scope)
+		armType, armAffine := a.analyzeMatchExprArmBodyWithAffineSnapshot(arm.Body, scope)
+		if !blockDefinitelyExits(arm.Body) {
+			mergedAffine = mergeAffineValueStates(mergedAffine, armAffine)
+		}
 		if resultType == nil {
 			resultType = armType
 			priorPatterns = append(priorPatterns, arm.Pattern)
@@ -345,6 +380,7 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 		resultType = merged
 		priorPatterns = append(priorPatterns, arm.Pattern)
 	}
+	a.currentAffineValues = mergedAffine
 	a.reportNonExhaustiveMatch(expr.Pos(), enumType, covered, hasWildcard)
 	if resultType == nil {
 		return neverType
@@ -731,6 +767,15 @@ func (a *Analyzer) analyzeBlockWithRegionClone(stmts []ast.Stmt, scope *Scope) {
 	a.currentPackedStores = savedPackedStores
 }
 
+func (a *Analyzer) analyzeBlockWithAffineClone(stmts []ast.Stmt, scope *Scope) map[affineValueKey]affineValueState {
+	savedAffine := a.currentAffineValues
+	a.currentAffineValues = a.cloneAffineValueStates()
+	a.analyzeBlockWithRegionClone(stmts, scope)
+	snapshot := a.cloneAffineValueStates()
+	a.currentAffineValues = savedAffine
+	return snapshot
+}
+
 func (a *Analyzer) cloneRegionStates() map[*Symbol]regionState {
 	if a.currentRegions == nil {
 		return nil
@@ -762,6 +807,30 @@ func (a *Analyzer) cloneRegionRefStates() map[*Symbol]regionRefState {
 		cloned[sym] = state
 	}
 	return cloned
+}
+
+func (a *Analyzer) cloneAffineValueStates() map[affineValueKey]affineValueState {
+	if a.currentAffineValues == nil {
+		return nil
+	}
+	cloned := make(map[affineValueKey]affineValueState, len(a.currentAffineValues))
+	for key, state := range a.currentAffineValues {
+		cloned[key] = state
+	}
+	return cloned
+}
+
+func mergeAffineValueStates(dst map[affineValueKey]affineValueState, src map[affineValueKey]affineValueState) map[affineValueKey]affineValueState {
+	if dst == nil && src == nil {
+		return nil
+	}
+	if dst == nil {
+		dst = map[affineValueKey]affineValueState{}
+	}
+	for key, state := range src {
+		dst[key] = state
+	}
+	return dst
 }
 
 func (a *Analyzer) clonePackedStores() map[string]*PackedEnumStoreType {
@@ -1109,6 +1178,164 @@ func (a *Analyzer) analyzeExprInScope(expr ast.Expr, scope *Scope) Type {
 	result := a.analyzeExpr(expr)
 	a.currentScope = saved
 	return result
+}
+
+func (a *Analyzer) analyzeExprInAffineScope(expr ast.Expr, scope *Scope) (Type, map[affineValueKey]affineValueState) {
+	savedAffine := a.currentAffineValues
+	a.currentAffineValues = a.cloneAffineValueStates()
+	result := a.analyzeExprInScope(expr, scope)
+	snapshot := a.cloneAffineValueStates()
+	a.currentAffineValues = savedAffine
+	return result, snapshot
+}
+
+func (a *Analyzer) analyzeMatchExprArmBodyWithAffineSnapshot(body []ast.Stmt, scope *Scope) (Type, map[affineValueKey]affineValueState) {
+	savedAffine := a.currentAffineValues
+	a.currentAffineValues = a.cloneAffineValueStates()
+	result := a.analyzeMatchExprArmBody(body, scope)
+	snapshot := a.cloneAffineValueStates()
+	a.currentAffineValues = savedAffine
+	return result, snapshot
+}
+
+func isAffineHandleType(t Type) bool {
+	switch tt := t.(type) {
+	case *GenericInstanceType:
+		base, ok := tt.Base.(*StructType)
+		if !ok {
+			return false
+		}
+		return base.Name == "Thread" || base.Name == "Task"
+	case *StructType:
+		return tt.Name == "Thread" || tt.Name == "Task"
+	default:
+		return false
+	}
+}
+
+func affineHandleKind(t Type) string {
+	switch tt := t.(type) {
+	case *GenericInstanceType:
+		if base, ok := tt.Base.(*StructType); ok {
+			switch base.Name {
+			case "Thread":
+				return "thread handle"
+			case "Task":
+				return "task handle"
+			}
+		}
+	case *StructType:
+		switch tt.Name {
+		case "Thread":
+			return "thread handle"
+		case "Task":
+			return "task handle"
+		}
+	}
+	return "affine value"
+}
+
+func (a *Analyzer) consumeAffineValueExpr(expr ast.Expr, expected Type, reason string) {
+	if expr == nil || !isAffineHandleType(expected) {
+		return
+	}
+	key, ok := a.lookupAffineValueKey(expr)
+	if !ok {
+		return
+	}
+	if a.currentAffineValues == nil {
+		a.currentAffineValues = map[affineValueKey]affineValueState{}
+	}
+	a.currentAffineValues[key] = affineValueState{ConsumedBy: reason}
+}
+
+func (a *Analyzer) clearAffineValueTarget(expr ast.Expr) {
+	key, ok := a.lookupAffineValueKey(expr)
+	if !ok || a.currentAffineValues == nil {
+		return
+	}
+	for existing := range a.currentAffineValues {
+		if existing.Root != key.Root {
+			continue
+		}
+		if key.Path == "" {
+			delete(a.currentAffineValues, existing)
+			continue
+		}
+		if existing.Path == key.Path || strings.HasPrefix(existing.Path, key.Path+".") {
+			delete(a.currentAffineValues, existing)
+		}
+	}
+}
+
+func (a *Analyzer) lookupAffineValueState(expr ast.Expr) (affineValueState, bool) {
+	key, ok := a.lookupAffineValueKey(expr)
+	if !ok || a.currentAffineValues == nil {
+		return affineValueState{}, false
+	}
+	state, ok := a.currentAffineValues[key]
+	return state, ok
+}
+
+func (a *Analyzer) lookupAffineValueKey(expr ast.Expr) (affineValueKey, bool) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return a.lookupAffineValueKey(n.Inner)
+	case *ast.CastExpr:
+		return a.lookupAffineValueKey(n.Operand)
+	case *ast.Ident:
+		if a.currentScope == nil {
+			return affineValueKey{}, false
+		}
+		sym, ok := a.currentScope.Lookup(n.Name)
+		if !ok {
+			return affineValueKey{}, false
+		}
+		if sym.Kind != SymbolLocal && sym.Kind != SymbolParam {
+			return affineValueKey{}, false
+		}
+		return affineValueKey{Root: sym}, true
+	case *ast.FieldExpr:
+		base, ok := a.lookupAffineValueKey(n.Object)
+		if !ok {
+			return affineValueKey{}, false
+		}
+		objType := a.exprTypes[n.Object]
+		if objType == nil {
+			objType = a.analyzeExpr(n.Object)
+		}
+		field, ok := a.lookupField(objType, n.Field, n.Pos())
+		if !ok || !isAffineHandleType(field.Type) {
+			return affineValueKey{}, false
+		}
+		if base.Path == "" {
+			base.Path = n.Field
+		} else {
+			base.Path = base.Path + "." + n.Field
+		}
+		return base, true
+	default:
+		return affineValueKey{}, false
+	}
+}
+
+func affineValueDisplayName(expr ast.Expr) string {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return affineValueDisplayName(n.Inner)
+	case *ast.CastExpr:
+		return affineValueDisplayName(n.Operand)
+	case *ast.Ident:
+		return n.Name
+	case *ast.FieldExpr:
+		base := affineValueDisplayName(n.Object)
+		if base == "" {
+			return n.Field
+		}
+		return base + "." + n.Field
+	default:
+		return "<value>"
+	}
 }
 
 func (a *Analyzer) analyzeCondExpr(expr ast.Expr) Type {

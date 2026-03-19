@@ -27,6 +27,11 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 					result = sym.Type
 					return
 				}
+				if state, ok := a.lookupAffineValueState(n); ok && isAffineHandleType(sym.Type) {
+					a.errorf(n.Pos(), "%s %q cannot be used after %s", affineHandleKind(sym.Type), n.Name, state.ConsumedBy)
+					result = sym.Type
+					return
+				}
 				if t, ok := a.lookupRefinedExprType(n); ok {
 					result = t
 					return
@@ -207,8 +212,12 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		if !IsBoolType(condType) {
 			a.errorf(n.Pos(), "ternary condition must be bool, got %s", condType.String())
 		}
-		left := a.analyzeExprInScope(n.Value, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
-		right := a.analyzeExprInScope(n.Alt, a.refinedScopeForCondition(a.currentScope, n.Cond, false))
+		mergedAffine := a.cloneAffineValueStates()
+		left, leftAffine := a.analyzeExprInAffineScope(n.Value, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
+		right, rightAffine := a.analyzeExprInAffineScope(n.Alt, a.refinedScopeForCondition(a.currentScope, n.Cond, false))
+		mergedAffine = mergeAffineValueStates(mergedAffine, leftAffine)
+		mergedAffine = mergeAffineValueStates(mergedAffine, rightAffine)
+		a.currentAffineValues = mergedAffine
 		merged := MergeTypes(left, right)
 		if IsInvalidType(merged) {
 			a.errorf(n.Pos(), "ternary branches are incompatible: %s and %s", left.String(), right.String())
@@ -217,6 +226,11 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		return
 	case *ast.AddrOfExpr:
 		inner := a.analyzeExpr(n.Operand)
+		if isAffineHandleType(inner) {
+			if _, ok := a.lookupAffineValueKey(n.Operand); ok {
+				a.errorf(n.Pos(), "cannot take address of affine %s", affineHandleKind(inner))
+			}
+		}
 		result = &RefType{Elem: inner, State: RefStateNonNull, Storage: a.inferAddrOfStorage(n.Operand), ExplicitStorage: true}
 		return
 	case *ast.SpecializeExpr:
@@ -857,6 +871,7 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 				a.errorf(expr.Args[i].Pos(), "argument %d to %q expects %s, got %s", i+1, ft.Name, expectedType.String(), argType.String())
 				a.reportShapeMismatchNotes(expr.Args[i].Pos(), expectedType, argType)
 			}
+			a.consumeAffineValueExpr(expr.Args[i], expectedType, "argument to call "+strconv.Quote(ft.Name))
 		} else {
 			argType = a.analyzeExpr(expr.Args[i])
 		}
@@ -1191,11 +1206,17 @@ func (a *Analyzer) bindFreshShape(shape Shape, origin string, bindings map[strin
 
 func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 	if field, ok := dstrSyntheticField(a.analyzeExpr(expr.Object), expr.Field); ok {
+		if state, ok := a.lookupAffineValueState(expr); ok && isAffineHandleType(field.Type) {
+			a.errorf(expr.Pos(), "%s %q cannot be used after %s", affineHandleKind(field.Type), affineValueDisplayName(expr), state.ConsumedBy)
+		}
 		return field.Type
 	}
 	field, ok := a.lookupField(a.analyzeExpr(expr.Object), expr.Field, expr.Pos())
 	if !ok {
 		return invalidType
+	}
+	if state, ok := a.lookupAffineValueState(expr); ok && isAffineHandleType(field.Type) {
+		a.errorf(expr.Pos(), "%s %q cannot be used after %s", affineHandleKind(field.Type), affineValueDisplayName(expr), state.ConsumedBy)
 	}
 	return field.Type
 }

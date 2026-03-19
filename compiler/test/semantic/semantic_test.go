@@ -296,6 +296,98 @@ def run() -> i64:
 	}
 }
 
+func TestAnalyzeRejectsReusingConsumedThreadHandle(t *testing.T) {
+	src := `extern join(thread: Thread[i64]) -> i64
+extern detach(thread: Thread[i64]) -> void
+
+def bad(thread: Thread[i64]) -> void:
+    value: i64 = join(thread)
+    discard value
+    detach(thread)
+`
+	_, errs := parseAndAnalyze(t, "consumed_thread_handle_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "thread handle \"thread\" cannot be used after argument to call \"join\"") {
+		t.Fatalf("expected consumed-thread diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeAcceptsAffineThreadMovesAcrossBranches(t *testing.T) {
+	src := `extern join(thread: Thread[i64]) -> i64
+
+def move_then_join(thread: Thread[i64]) -> i64:
+    moved: Thread[i64] = thread
+    return join(moved)
+
+def branch_join(cond: bool, thread: Thread[i64]) -> i64:
+    if cond:
+        return join(thread)
+    return join(thread)
+`
+	result, errs := parseAndAnalyze(t, "affine_thread_moves.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "move_then_join", "i64")
+	requireFunctionReturnTypeString(t, result, "branch_join", "i64")
+}
+
+func TestAnalyzeRejectsAwaitAfterTaskGroupTransfer(t *testing.T) {
+	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64]) -> void
+extern pool_await(task: Task[i64]) -> i64
+
+def bad(group: mutable TaskGroup, task: Task[i64]) -> i64:
+    task_group_add((&group).cast[any TaskGroup&](), task)
+    return pool_await(task)
+`
+	_, errs := parseAndAnalyze(t, "consumed_task_handle_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "task handle \"task\" cannot be used after argument to call \"task_group_add\"") {
+		t.Fatalf("expected consumed-task diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsReusingConsumedThreadField(t *testing.T) {
+	src := `extern join(thread: Thread[i64]) -> i64
+extern detach(thread: Thread[i64]) -> void
+
+repr(c) struct Holder:
+    thread: mutable Thread[i64]
+
+def bad(holder: mutable Holder) -> void:
+    value: i64 = join(holder.thread)
+    discard value
+    detach(holder.thread)
+`
+	_, errs := parseAndAnalyze(t, "consumed_thread_field_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "thread handle \"holder.thread\" cannot be used after argument to call \"join\"") {
+		t.Fatalf("expected consumed-thread-field diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsAddressOfAffineHandleField(t *testing.T) {
+	src := `repr(c) struct Holder:
+    thread: mutable Thread[i64]
+
+def bad(holder: mutable Holder) -> void:
+    borrow: stack Thread[i64]& = &holder.thread
+    _ = borrow
+`
+	_, errs := parseAndAnalyze(t, "affine_handle_addr_of_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot take address of affine thread handle") {
+		t.Fatalf("expected affine-address diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeTypeMismatchAssignment(t *testing.T) {
 	src := `def mismatch() -> int:
     value: mutable int = true

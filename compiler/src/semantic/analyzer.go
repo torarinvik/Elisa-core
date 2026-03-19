@@ -81,6 +81,7 @@ type Analyzer struct {
 	currentRegions                    map[*Symbol]regionState
 	currentRegionMarks                map[*Symbol]regionMarkState
 	currentRegionRefs                 map[*Symbol]regionRefState
+	currentAffineValues               map[affineValueKey]affineValueState
 	currentPackedStores               map[string]*PackedEnumStoreType
 	currentFunctionUsedPermissions    map[string]bool
 	currentFunctionUsedPermissionRefs []ast.PermissionRef
@@ -103,6 +104,15 @@ type regionRefState struct {
 	Generation    int
 	Valid         bool
 	InvalidatedBy string
+}
+
+type affineValueState struct {
+	ConsumedBy string
+}
+
+type affineValueKey struct {
+	Root *Symbol
+	Path string
 }
 
 func Analyze(file *ast.File) *Result {
@@ -762,6 +772,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	savedRegions := a.currentRegions
 	savedRegionMarks := a.currentRegionMarks
 	savedRegionRefs := a.currentRegionRefs
+	savedAffineValues := a.currentAffineValues
 	savedPackedStores := a.currentPackedStores
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
@@ -769,6 +780,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentRegions = map[*Symbol]regionState{}
 	a.currentRegionMarks = map[*Symbol]regionMarkState{}
 	a.currentRegionRefs = map[*Symbol]regionRefState{}
+	a.currentAffineValues = map[affineValueKey]affineValueState{}
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
@@ -807,6 +819,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentRegions = savedRegions
 	a.currentRegionMarks = savedRegionMarks
 	a.currentRegionRefs = savedRegionRefs
+	a.currentAffineValues = savedAffineValues
 	a.currentPackedStores = savedPackedStores
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs

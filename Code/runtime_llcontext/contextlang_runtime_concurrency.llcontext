@@ -222,14 +222,16 @@ def spawn1[A, R, permission P](fn: func(A) -> R can[P], arg: A) -> Thread[R] can
 
 def join[R](thread: Thread[R]) -> R can[Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
 	take_result: func(any void&?) -> R can[Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange] = ctx_concurrency_work1_take_result.specialize[R]()
+	state_bits: any void&? = thread.state
 	raw: Thread[any void&?] = ctx_thread_to_raw(thread)
 	_ = join_raw(raw) can Thread.Join
-	return take_result(thread.state)
+	return take_result(state_bits)
 
 def detach[R](thread: Thread[R]) can[Thread.Detach, Memory.Release, Atomics.Load, Atomics.CompareExchange]:
+	state_bits: any void&? = thread.state
 	raw: Thread[any void&?] = ctx_thread_to_raw(thread)
 	detach_raw(raw) can Thread.Detach
-	ctx_concurrency_work1_release(thread.state)
+	ctx_concurrency_work1_release(state_bits)
 
 def pool_submit1[A, R, permission P](pool: any ThreadPool&, fn: func(A) -> R can[P], arg: A) -> Task[R] can[Pool.Submit, Memory.Allocate, Abort.Panic]:
 	from_raw: func(Task[any void&?]) -> Task[R] = ctx_task_from_raw.specialize[R]()
@@ -244,14 +246,16 @@ def pool_submit1[A, R, permission P](pool: any ThreadPool&, fn: func(A) -> R can
 
 def pool_await[R](task: Task[R]) -> R can[Pool.Await, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
 	take_result: func(any void&?) -> R can[Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange] = ctx_concurrency_work1_take_result.specialize[R]()
+	state_bits: any void&? = task.state
 	raw: Task[any void&?] = ctx_task_to_raw(task)
 	_ = pool_await_raw(raw) can Pool.Await
-	return take_result(task.state)
+	return take_result(state_bits)
 
 def task_group_add[R](group: any TaskGroup&, task: Task[R]) can[Memory.Allocate, Abort.Panic]:
+	state_bits: any void&? = task.state
 	raw: Task[any void&?] = ctx_task_to_raw(task)
 	task_group_add_raw(group, raw)
-	ctx_task_group_push_state(group, task.state)
+	ctx_task_group_push_state(group, state_bits)
 
 def task_group_wait_all(group: any TaskGroup&) can[Pool.WaitAll, Memory.Release, Atomics.Load, Atomics.CompareExchange]:
 	task_group_wait_all_raw(group) can Pool.WaitAll
