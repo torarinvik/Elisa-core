@@ -28,23 +28,26 @@ func (a *Analyzer) defineLocal(sym *Symbol, pos lexer.Pos) {
 	}
 }
 
-func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
+func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, regionParams []string, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
 	ptypes := make([]Type, 0, len(params))
 	retType := a.namedTypes["void"]
 	shapeParams := a.collectImplicitShapeParams(params, ret)
 	a.withTypeParams(typeParams, nil, func() {
-		a.withShapeParams(shapeParams, func() {
-			for _, p := range params {
-				ptypes = append(ptypes, a.resolveType(p.Type))
-			}
-			if ret != nil {
-				retType = a.resolveType(ret)
-			}
+		a.withRegionParams(regionParams, func() {
+			a.withShapeParams(shapeParams, func() {
+				for _, p := range params {
+					ptypes = append(ptypes, a.resolveType(p.Type))
+				}
+				if ret != nil {
+					retType = a.resolveType(ret)
+				}
+			})
 		})
 	})
 	return &FuncType{
 		Name:                   name,
 		TypeParams:             append([]string(nil), typeParams...),
+		RegionParams:           append([]string(nil), regionParams...),
 		ShapeParams:            shapeParams,
 		FreshReturnShapeParams: knownFreshReturnShapeParams(name, retType),
 		Params:                 ptypes,
@@ -87,9 +90,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		return &ErrorUnionType{Value: valueType, Errors: errSet}
 	case *ast.RefType:
 		if n.Region != "" {
-			if a.currentScope == nil {
-				a.errorf(n.Pos(), "unknown region qualifier %q", n.Region)
-			} else if sym, ok := a.currentScope.Lookup(n.Region); !ok || sym.Kind != SymbolRegion {
+			if !a.regionQualifierDefined(n.Region) {
 				a.errorf(n.Pos(), "unknown region qualifier %q", n.Region)
 			}
 		}
@@ -513,6 +514,18 @@ func (a *Analyzer) validCast(src, dst Type) bool {
 	return false
 }
 
+func (a *Analyzer) regionQualifierDefined(name string) bool {
+	if name == "" {
+		return false
+	}
+	if a.currentScope != nil {
+		if sym, ok := a.currentScope.Lookup(name); ok && sym.Kind == SymbolRegion {
+			return true
+		}
+	}
+	return a.lookupRegionParam(name)
+}
+
 func (a *Analyzer) exprSummary(expr ast.Expr) string {
 	switch n := expr.(type) {
 	case *ast.IntLit:
@@ -562,7 +575,30 @@ func (a *Analyzer) lookupShapeParam(name string) (Shape, bool) {
 	return nil, false
 }
 
-func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBindings map[string]Shape) Type {
+func (a *Analyzer) withRegionParams(names []string, fn func()) {
+	if len(names) == 0 {
+		fn()
+		return
+	}
+	bindings := make(map[string]bool, len(names))
+	for _, name := range names {
+		bindings[name] = true
+	}
+	a.regionParamScopes = append(a.regionParamScopes, bindings)
+	fn()
+	a.regionParamScopes = a.regionParamScopes[:len(a.regionParamScopes)-1]
+}
+
+func (a *Analyzer) lookupRegionParam(name string) bool {
+	for i := len(a.regionParamScopes) - 1; i >= 0; i-- {
+		if a.regionParamScopes[i][name] {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBindings map[string]Shape, regionBindings map[string]string) Type {
 	switch n := t.(type) {
 	case *TypeParamType:
 		if resolved, ok := bindings[n.Name]; ok {
@@ -570,35 +606,39 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 		}
 		return n
 	case *ErrorUnionType:
-		return &ErrorUnionType{Value: a.substituteType(n.Value, bindings, shapeBindings), Errors: n.Errors}
+		return &ErrorUnionType{Value: a.substituteType(n.Value, bindings, shapeBindings, regionBindings), Errors: n.Errors}
 	case *RefType:
-		return &RefType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), State: n.State, Storage: n.Storage, Region: n.Region, ExplicitStorage: n.ExplicitStorage}
+		region := n.Region
+		if bound, ok := regionBindings[n.Region]; ok {
+			region = bound
+		}
+		return &RefType{Elem: a.substituteType(n.Elem, bindings, shapeBindings, regionBindings), State: n.State, Storage: n.Storage, Region: region, ExplicitStorage: n.ExplicitStorage}
 	case *ArrayType:
-		return &ArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Size: n.Size, HasConstSize: n.HasConstSize, ConstSize: n.ConstSize, SurfaceName: n.SurfaceName}
+		return &ArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings, regionBindings), Size: n.Size, HasConstSize: n.HasConstSize, ConstSize: n.ConstSize, SurfaceName: n.SurfaceName}
 	case *DArrayType:
-		return &DArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Shape: a.substituteShape(n.Shape, shapeBindings), SurfaceName: n.SurfaceName}
+		return &DArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings, regionBindings), Shape: a.substituteShape(n.Shape, shapeBindings), SurfaceName: n.SurfaceName}
 	case *ViewType:
-		return &ViewType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Begin: n.Begin, End: n.End}
+		return &ViewType{Elem: a.substituteType(n.Elem, bindings, shapeBindings, regionBindings), Begin: n.Begin, End: n.End}
 	case *DArrayViewType:
-		return &DArrayViewType{Elem: a.substituteType(n.Elem, bindings, shapeBindings), Begin: n.Begin, End: n.End, SurfaceName: n.SurfaceName}
+		return &DArrayViewType{Elem: a.substituteType(n.Elem, bindings, shapeBindings, regionBindings), Begin: n.Begin, End: n.End, SurfaceName: n.SurfaceName}
 	case *DStrType:
 		return &DStrType{Shape: a.substituteShape(n.Shape, shapeBindings), SurfaceName: n.SurfaceName}
 	case *DictType:
-		return &DictType{Key: a.substituteType(n.Key, bindings, shapeBindings), Value: a.substituteType(n.Value, bindings, shapeBindings), SurfaceName: n.SurfaceName}
+		return &DictType{Key: a.substituteType(n.Key, bindings, shapeBindings, regionBindings), Value: a.substituteType(n.Value, bindings, shapeBindings, regionBindings), SurfaceName: n.SurfaceName}
 	case *SViewType:
 		return &SViewType{Begin: n.Begin, End: n.End}
 	case *GenericInstanceType:
 		args := make([]Type, 0, len(n.Args))
 		for _, arg := range n.Args {
-			args = append(args, a.substituteType(arg, bindings, shapeBindings))
+			args = append(args, a.substituteType(arg, bindings, shapeBindings, regionBindings))
 		}
 		return &GenericInstanceType{Name: n.Name, Base: n.Base, Args: args}
 	case *FuncType:
 		params := make([]Type, 0, len(n.Params))
 		for _, param := range n.Params {
-			params = append(params, a.substituteType(param, bindings, shapeBindings))
+			params = append(params, a.substituteType(param, bindings, shapeBindings, regionBindings))
 		}
-		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), ShapeParams: append([]string(nil), n.ShapeParams...), FreshReturnShapeParams: append([]string(nil), n.FreshReturnShapeParams...), Params: params, Return: a.substituteType(n.Return, bindings, shapeBindings), Variadic: n.Variadic}
+		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), RegionParams: append([]string(nil), n.RegionParams...), ShapeParams: append([]string(nil), n.ShapeParams...), FreshReturnShapeParams: append([]string(nil), n.FreshReturnShapeParams...), Params: params, Return: a.substituteType(n.Return, bindings, shapeBindings, regionBindings), Variadic: n.Variadic}
 	default:
 		return t
 	}

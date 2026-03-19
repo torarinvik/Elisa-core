@@ -356,21 +356,51 @@ func (p *Parser) parseFuncDecl() *ast.FuncDecl {
 	return p.parseFuncDeclWithAnnotations(nil)
 }
 
+func (p *Parser) parseFuncGenericParams() ([]string, []string) {
+	if !p.match(lexer.TOKEN_LBRACKET) {
+		return nil, nil
+	}
+	typeParams := make([]string, 0)
+	regionParams := make([]string, 0)
+	seenType := map[string]bool{}
+	seenRegion := map[string]bool{}
+	for {
+		isRegionParam := p.match(lexer.TOKEN_REGION)
+		if !isRegionParam && p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "region" {
+			p.advance()
+			isRegionParam = true
+		}
+		if isRegionParam {
+			name := p.expect(lexer.TOKEN_IDENT).Text
+			if seenRegion[name] || seenType[name] {
+				p.errorf("duplicate function generic parameter %q", name)
+			} else {
+				seenRegion[name] = true
+				regionParams = append(regionParams, name)
+			}
+		} else {
+			name := p.expect(lexer.TOKEN_IDENT).Text
+			if seenType[name] || seenRegion[name] {
+				p.errorf("duplicate function generic parameter %q", name)
+			} else {
+				seenType[name] = true
+				typeParams = append(typeParams, name)
+			}
+		}
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	p.expect(lexer.TOKEN_RBRACKET)
+	return typeParams, regionParams
+}
+
 func (p *Parser) parseFuncDeclWithAnnotations(annotations []ast.Annotation) *ast.FuncDecl {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_DEF)
 	name := p.expect(lexer.TOKEN_IDENT).Text
 
-	var typeParams []string
-	if p.match(lexer.TOKEN_LBRACKET) {
-		for {
-			typeParams = append(typeParams, p.expect(lexer.TOKEN_IDENT).Text)
-			if !p.match(lexer.TOKEN_COMMA) {
-				break
-			}
-		}
-		p.expect(lexer.TOKEN_RBRACKET)
-	}
+	typeParams, regionParams := p.parseFuncGenericParams()
 
 	p.expect(lexer.TOKEN_LPAREN)
 	params := p.parseParamList()
@@ -385,7 +415,7 @@ func (p *Parser) parseFuncDeclWithAnnotations(annotations []ast.Annotation) *ast
 	p.expectNewline()
 
 	body := p.parseBlock()
-	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, Params: params, ReturnType: retType, Body: body}
+	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RegionParams: regionParams, Params: params, ReturnType: retType, Body: body}
 }
 
 func (p *Parser) parseParamList() []ast.ParamDecl {
@@ -433,6 +463,11 @@ func (p *Parser) parseExternDecl() ast.Decl {
 		return &ast.ExternVarDecl{Position: pos, Name: name, Type: typ}
 	}
 
+	typeParams, regionParams := p.parseFuncGenericParams()
+	if len(typeParams) > 0 {
+		p.errorf("extern functions do not support type parameters yet")
+	}
+
 	// extern name(params...) [-> RetType]  (function)
 	p.expect(lexer.TOKEN_LPAREN)
 	var params []ast.ParamDecl
@@ -458,7 +493,7 @@ func (p *Parser) parseExternDecl() ast.Decl {
 	}
 	p.expectNewline()
 
-	return &ast.ExternFuncDecl{Position: pos, Name: name, Params: params, ReturnType: retType, Variadic: variadic}
+	return &ast.ExternFuncDecl{Position: pos, Name: name, RegionParams: regionParams, Params: params, ReturnType: retType, Variadic: variadic}
 }
 
 func (p *Parser) parseExportDecl() ast.Decl {

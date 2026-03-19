@@ -451,7 +451,7 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 		}
 		expected := field.Type
 		if len(bindings) > 0 {
-			expected = a.substituteType(expected, bindings, nil)
+			expected = a.substituteType(expected, bindings, nil, nil)
 		}
 		actual := a.analyzeValueExpr(expr.Args[i], expected)
 		if !AssignableTo(expected, actual) {
@@ -766,6 +766,8 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	}
 	bindings := map[string]Type{}
 	shapeBindings := map[string]Shape{}
+	regionBindings := map[string]string{}
+	regionParams := regionParamSet(ft.RegionParams)
 	limit := len(ft.Params)
 	if len(expr.Args) < limit {
 		limit = len(expr.Args)
@@ -773,10 +775,10 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	for i := 0; i < len(expr.Args); i++ {
 		var argType Type
 		if i < limit {
-			expectedType := a.substituteType(ft.Params[i], bindings, shapeBindings)
+			expectedType := a.substituteType(ft.Params[i], bindings, shapeBindings, regionBindings)
 			argType = a.analyzeValueExpr(expr.Args[i], expectedType)
-			a.collectTypeBindings(ft.Params[i], argType, bindings, shapeBindings)
-			expectedType = a.substituteType(ft.Params[i], bindings, shapeBindings)
+			a.collectTypeBindings(ft.Params[i], argType, bindings, shapeBindings, regionBindings, regionParams)
+			expectedType = a.substituteType(ft.Params[i], bindings, shapeBindings, regionBindings)
 			if !AssignableTo(expectedType, argType) {
 				a.errorf(expr.Args[i].Pos(), "argument %d to %q expects %s, got %s", i+1, ft.Name, expectedType.String(), argType.String())
 				a.reportShapeMismatchNotes(expr.Args[i].Pos(), expectedType, argType)
@@ -785,11 +787,16 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 			argType = a.analyzeExpr(expr.Args[i])
 		}
 	}
+	for _, name := range ft.RegionParams {
+		if _, ok := regionBindings[name]; !ok {
+			a.errorf(expr.Pos(), "cannot infer region parameter %q for call to %q", name, ft.Name)
+		}
+	}
 	if ft.Return == nil {
 		return a.namedTypes["void"]
 	}
 	a.bindFreshReturnShapes(ft, shapeBindings)
-	return a.substituteType(ft.Return, bindings, shapeBindings)
+	return a.substituteType(ft.Return, bindings, shapeBindings, regionBindings)
 }
 
 func (a *Analyzer) resolveEnumConstructorArgs(expr *ast.CallExpr, enumType *EnumType, variant *EnumVariant) ([]ast.Expr, bool) {
@@ -918,7 +925,7 @@ func (a *Analyzer) resolvePackedEnumConstructorArgs(expr *ast.CallExpr, enumType
 	return ordered, commonArgs, true
 }
 
-func (a *Analyzer) collectRuntimeBridgeBindings(pattern, actual Type, bindings map[string]Type, shapeBindings map[string]Shape) bool {
+func (a *Analyzer) collectRuntimeBridgeBindings(pattern, actual Type, bindings map[string]Type, shapeBindings map[string]Shape, regionBindings map[string]string, regionParams map[string]bool) bool {
 	bridge, ok := classifyRuntimeBridge(pattern, actual)
 	if !ok {
 		return false
@@ -926,21 +933,21 @@ func (a *Analyzer) collectRuntimeBridgeBindings(pattern, actual Type, bindings m
 	switch bridge.Kind {
 	case runtimeBridgeDArrayDynArray:
 		if patternDArray, ok := pattern.(*DArrayType); ok {
-			a.collectTypeBindings(patternDArray.Elem, bridge.DynArray.Args[0], bindings, shapeBindings)
+			a.collectTypeBindings(patternDArray.Elem, bridge.DynArray.Args[0], bindings, shapeBindings, regionBindings, regionParams)
 			return true
 		}
 		if patternDynArray, ok := dynArrayRuntimeInstance(pattern); ok {
-			a.collectTypeBindings(patternDynArray.Args[0], bridge.DArray.Elem, bindings, shapeBindings)
+			a.collectTypeBindings(patternDynArray.Args[0], bridge.DArray.Elem, bindings, shapeBindings, regionBindings, regionParams)
 			return true
 		}
 		return true
 	case runtimeBridgeDictDynDict:
 		if patternDict, ok := pattern.(*DictType); ok {
-			a.collectTypeBindings(patternDict.Value, bridge.DynDict.Args[0], bindings, shapeBindings)
+			a.collectTypeBindings(patternDict.Value, bridge.DynDict.Args[0], bindings, shapeBindings, regionBindings, regionParams)
 			return true
 		}
 		if patternDynDict, ok := dynDictRuntimeInstance(pattern); ok {
-			a.collectTypeBindings(patternDynDict.Args[0], bridge.Dict.Value, bindings, shapeBindings)
+			a.collectTypeBindings(patternDynDict.Args[0], bridge.Dict.Value, bindings, shapeBindings, regionBindings, regionParams)
 			return true
 		}
 		return true
@@ -951,11 +958,31 @@ func (a *Analyzer) collectRuntimeBridgeBindings(pattern, actual Type, bindings m
 	}
 }
 
-func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string]Type, shapeBindings map[string]Shape) {
+func regionParamSet(names []string) map[string]bool {
+	if len(names) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(names))
+	for _, name := range names {
+		out[name] = true
+	}
+	return out
+}
+
+func (a *Analyzer) collectRegionBinding(patternRegion, actualRegion string, bindings map[string]string, regionParams map[string]bool) {
+	if patternRegion == "" || actualRegion == "" || bindings == nil || regionParams == nil || !regionParams[patternRegion] {
+		return
+	}
+	if _, exists := bindings[patternRegion]; !exists {
+		bindings[patternRegion] = actualRegion
+	}
+}
+
+func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string]Type, shapeBindings map[string]Shape, regionBindings map[string]string, regionParams map[string]bool) {
 	if pattern == nil || actual == nil {
 		return
 	}
-	if a.collectRuntimeBridgeBindings(pattern, actual, bindings, shapeBindings) {
+	if a.collectRuntimeBridgeBindings(pattern, actual, bindings, shapeBindings, regionBindings, regionParams) {
 		return
 	}
 	switch p := pattern.(type) {
@@ -965,26 +992,27 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		}
 	case *ErrorUnionType:
 		if act, ok := actual.(*ErrorUnionType); ok {
-			a.collectTypeBindings(p.Value, act.Value, bindings, shapeBindings)
+			a.collectTypeBindings(p.Value, act.Value, bindings, shapeBindings, regionBindings, regionParams)
 			return
 		}
-		a.collectTypeBindings(p.Value, actual, bindings, shapeBindings)
+		a.collectTypeBindings(p.Value, actual, bindings, shapeBindings, regionBindings, regionParams)
 	case *RefType:
 		if act, ok := actual.(*RefType); ok {
-			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings)
+			a.collectRegionBinding(p.Region, act.Region, regionBindings, regionParams)
+			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings, regionBindings, regionParams)
 		}
 	case *ArrayType:
 		if act, ok := actual.(*ArrayType); ok {
-			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings)
+			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings, regionBindings, regionParams)
 		}
 	case *DArrayType:
 		if act, ok := actual.(*DArrayType); ok {
-			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings)
+			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings, regionBindings, regionParams)
 			a.collectShapeBinding(p.Shape, act.Shape, shapeBindings)
 		}
 	case *DArrayViewType:
 		if act, ok := actual.(*DArrayViewType); ok {
-			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings)
+			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings, regionBindings, regionParams)
 		}
 	case *DStrType:
 		if act, ok := actual.(*DStrType); ok {
@@ -992,8 +1020,8 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		}
 	case *DictType:
 		if act, ok := actual.(*DictType); ok {
-			a.collectTypeBindings(p.Key, act.Key, bindings, shapeBindings)
-			a.collectTypeBindings(p.Value, act.Value, bindings, shapeBindings)
+			a.collectTypeBindings(p.Key, act.Key, bindings, shapeBindings, regionBindings, regionParams)
+			a.collectTypeBindings(p.Value, act.Value, bindings, shapeBindings, regionBindings, regionParams)
 		}
 	case *SViewType:
 		_, _ = actual.(*SViewType)
@@ -1002,7 +1030,7 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 	case *GenericInstanceType:
 		if act, ok := actual.(*GenericInstanceType); ok && p.Name == act.Name && len(p.Args) == len(act.Args) {
 			for i := range p.Args {
-				a.collectTypeBindings(p.Args[i], act.Args[i], bindings, shapeBindings)
+				a.collectTypeBindings(p.Args[i], act.Args[i], bindings, shapeBindings, regionBindings, regionParams)
 			}
 		}
 	case *FuncType:
@@ -1012,9 +1040,9 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 				limit = len(act.Params)
 			}
 			for i := 0; i < limit; i++ {
-				a.collectTypeBindings(p.Params[i], act.Params[i], bindings, shapeBindings)
+				a.collectTypeBindings(p.Params[i], act.Params[i], bindings, shapeBindings, regionBindings, regionParams)
 			}
-			a.collectTypeBindings(p.Return, act.Return, bindings, shapeBindings)
+			a.collectTypeBindings(p.Return, act.Return, bindings, shapeBindings, regionBindings, regionParams)
 		}
 	}
 }
@@ -1035,8 +1063,8 @@ func (a *Analyzer) matchReturnType(actual Type) Type {
 	}
 	bindings := map[string]Type{}
 	shapeBindings := map[string]Shape{}
-	a.collectTypeBindings(a.currentReturn, actual, bindings, shapeBindings)
-	return a.substituteType(a.currentReturn, bindings, shapeBindings)
+	a.collectTypeBindings(a.currentReturn, actual, bindings, shapeBindings, nil, nil)
+	return a.substituteType(a.currentReturn, bindings, shapeBindings, nil)
 }
 
 func (a *Analyzer) bindFreshReturnShapes(fn *FuncType, bindings map[string]Shape) {
@@ -1510,7 +1538,7 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 				bindings[name] = t.Args[i]
 			}
 		}
-		field.Type = a.substituteType(field.Type, bindings, nil)
+		field.Type = a.substituteType(field.Type, bindings, nil, nil)
 		return field, true
 	default:
 		a.errorf(pos, "field access requires struct type, got %s", objType.String())

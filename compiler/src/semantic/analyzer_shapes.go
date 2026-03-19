@@ -113,7 +113,7 @@ func (a *Analyzer) recordFreshReturnBindings(actual Type) {
 		return
 	}
 	shapeBindings := map[string]Shape{}
-	a.collectTypeBindings(a.currentReturn, actual, map[string]Type{}, shapeBindings)
+	a.collectTypeBindings(a.currentReturn, actual, map[string]Type{}, shapeBindings, nil, nil)
 	for name, current := range a.returnFreshShapeStatus {
 		shape, ok := shapeBindings[name]
 		if !ok {

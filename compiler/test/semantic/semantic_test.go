@@ -692,6 +692,50 @@ func TestAnalyzeAcceptsExplicitRegionQualifiedRefs(t *testing.T) {
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsExplicitRegionParamsOnFunctions(t *testing.T) {
+	src := `def id[T, region r](value: r T&) -> r T&:
+	alias: r T& = value
+	return alias
+
+def use(seed: i32) -> i32:
+	region scratch(1024u)
+	value: scratch i32& = new[scratch] seed + 1
+	alias: scratch i32& = id(value)
+	return alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "function_region_params_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsExplicitRegionParamsOnExternFunctions(t *testing.T) {
+	src := `extern borrow[region r](value: r i32&) -> r i32&
+
+def use(seed: i32) -> i32:
+	region scratch(1024u)
+	value: scratch i32& = new[scratch] seed + 1
+	alias: scratch i32& = borrow(value)
+	return alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "extern_function_region_params_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsCallsWhenRegionParamCannotBeInferred(t *testing.T) {
+	src := `def id[region r](value: r i32&) -> r i32&:
+	return value
+
+def use(value: any i32&) -> any i32&:
+	return id(value)
+`
+	_, errs := parseAndAnalyze(t, "function_region_params_inference_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot infer region parameter \"r\" for call to \"id\"") {
+		t.Fatalf("expected region inference diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeRejectsMismatchedRegionQualifiedRefs(t *testing.T) {
 	src := `def bad() -> i32:
 	region left(1024u)

@@ -178,6 +178,7 @@ type GenericInstanceType struct {
 type FuncType struct {
 	Name                   string
 	TypeParams             []string
+	RegionParams           []string
 	ShapeParams            []string
 	FreshReturnShapeParams []string
 	Params                 []Type
@@ -450,13 +451,24 @@ func (t *FuncType) String() string {
 	for _, p := range t.Params {
 		parts = append(parts, p.String())
 	}
+	generics := make([]string, 0, len(t.TypeParams)+len(t.RegionParams))
+	for _, param := range t.TypeParams {
+		generics = append(generics, param)
+	}
+	for _, param := range t.RegionParams {
+		generics = append(generics, "region "+param)
+	}
+	prefix := ""
+	if len(generics) > 0 {
+		prefix = "[" + strings.Join(generics, ", ") + "]"
+	}
 	if t.Variadic {
 		parts = append(parts, "...")
 	}
 	if t.Return == nil {
-		return fmt.Sprintf("func(%s)", strings.Join(parts, ", "))
+		return fmt.Sprintf("func%s(%s)", prefix, strings.Join(parts, ", "))
 	}
-	return fmt.Sprintf("func(%s) -> %s", strings.Join(parts, ", "), t.Return.String())
+	return fmt.Sprintf("func%s(%s) -> %s", prefix, strings.Join(parts, ", "), t.Return.String())
 }
 
 var (

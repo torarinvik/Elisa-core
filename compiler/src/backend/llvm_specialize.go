@@ -55,6 +55,7 @@ func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semanti
 	return &semantic.FuncType{
 		Name:                   base.Name,
 		TypeParams:             nil,
+		RegionParams:           append([]string(nil), base.RegionParams...),
 		ShapeParams:            append([]string(nil), base.ShapeParams...),
 		FreshReturnShapeParams: append([]string(nil), base.FreshReturnShapeParams...),
 		Params:                 params,

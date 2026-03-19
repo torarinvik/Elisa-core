@@ -67,6 +67,7 @@ type Analyzer struct {
 	exprTypes              map[ast.Expr]Type
 	typeParamScopes        []map[string]Type
 	shapeParamScopes       []map[string]Shape
+	regionParamScopes      []map[string]bool
 	freshShapeCounter      int
 	returnFreshShapeStatus map[string]freshReturnStatus
 	annotatedFuncs         []*AnnotatedFunc
@@ -531,11 +532,11 @@ func (a *Analyzer) collectValueSymbols(decls []ast.Decl) {
 			declType := a.resolveType(n.Type)
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolGlobal, Type: declType, Node: n, Mutable: n.Mutable}, n.Pos())
 		case *ast.FuncDecl:
-			fnType := a.funcTypeFromDecl(n.Name, n.TypeParams, n.Params, n.ReturnType, false)
+			fnType := a.funcTypeFromDecl(n.Name, n.TypeParams, n.RegionParams, n.Params, n.ReturnType, false)
 			a.functionTypes[n.Name] = fnType
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolFunc, Type: fnType, Node: n, Mutable: false}, n.Pos())
 		case *ast.ExternFuncDecl:
-			fnType := a.funcTypeFromDecl(n.Name, nil, n.Params, n.ReturnType, n.Variadic)
+			fnType := a.funcTypeFromDecl(n.Name, nil, n.RegionParams, n.Params, n.ReturnType, n.Variadic)
 			a.functionTypes[n.Name] = fnType
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolExternFunc, Type: fnType, Node: n, Mutable: false}, n.Pos())
 		case *ast.ExternVarDecl:
@@ -633,7 +634,7 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 		a.errorf(annotation.Position, "cannot resolve signature for @%s function %q", annotation.Name, fn.Name)
 		return false
 	}
-	if len(signature.TypeParams) > 0 || len(signature.ShapeParams) > 0 {
+	if len(signature.TypeParams) > 0 || len(signature.RegionParams) > 0 || len(signature.ShapeParams) > 0 {
 		a.errorf(annotation.Position, "@%s function %q must not have type or shape parameters; got %s", annotation.Name, fn.Name, signature.String())
 		return false
 	}
@@ -689,17 +690,19 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 		a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)
 	}
 	a.withTypeParams(fn.TypeParams, nil, func() {
-		a.withShapeParams(fnType.ShapeParams, func() {
-			for i, param := range fn.Params {
-				var ptype Type = invalidType
-				if fnType != nil && i < len(fnType.Params) {
-					ptype = fnType.Params[i]
+		a.withRegionParams(fn.RegionParams, func() {
+			a.withShapeParams(fnType.ShapeParams, func() {
+				for i, param := range fn.Params {
+					var ptype Type = invalidType
+					if fnType != nil && i < len(fnType.Params) {
+						ptype = fnType.Params[i]
+					}
+					a.defineLocal(&Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, Mutable: a.paramIsMutable(param)}, param.Position)
 				}
-				a.defineLocal(&Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, Mutable: a.paramIsMutable(param)}, param.Position)
-			}
-			for _, stmt := range fn.Body {
-				a.analyzeStmt(stmt)
-			}
+				for _, stmt := range fn.Body {
+					a.analyzeStmt(stmt)
+				}
+			})
 		})
 	})
 	if fnType != nil {

@@ -448,6 +448,18 @@ func ind(level int) string {
 	return strings.Repeat("  ", level)
 }
 
+func formatFuncGenericParams(typeParams []string, regionParams []string) string {
+	parts := make([]string, 0, len(typeParams)+len(regionParams))
+	parts = append(parts, typeParams...)
+	for _, name := range regionParams {
+		parts = append(parts, "region "+name)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
 func printDecl(w io.Writer, d ast.Decl, level int) {
 	prefix := ind(level)
 	switch n := d.(type) {
@@ -473,21 +485,19 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		for _, annotation := range n.Annotations {
 			fmt.Fprintf(w, "%s@%s\n", prefix, annotation.Name)
 		}
-		tparams := ""
-		if len(n.TypeParams) > 0 {
-			tparams = "[" + strings.Join(n.TypeParams, ", ") + "]"
-		}
+		tparams := formatFuncGenericParams(n.TypeParams, n.RegionParams)
 		ret := ""
 		if n.ReturnType != nil {
 			ret = " -> " + typeStr(n.ReturnType)
 		}
 		fmt.Fprintf(w, "%sdef %s%s(%d params)%s (%d stmts)\n", prefix, n.Name, tparams, len(n.Params), ret, len(n.Body))
 	case *ast.ExternFuncDecl:
+		tparams := formatFuncGenericParams(nil, n.RegionParams)
 		ret := ""
 		if n.ReturnType != nil {
 			ret = " -> " + typeStr(n.ReturnType)
 		}
-		fmt.Fprintf(w, "%sextern %s(%d params)%s\n", prefix, n.Name, len(n.Params), ret)
+		fmt.Fprintf(w, "%sextern %s%s(%d params)%s\n", prefix, n.Name, tparams, len(n.Params), ret)
 	case *ast.ExternVarDecl:
 		fmt.Fprintf(w, "%sextern %s: %s\n", prefix, n.Name, typeStr(n.Type))
 	case *ast.ExternTypeDecl:

@@ -916,6 +916,7 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type) semantic.Ty
 		return &semantic.FuncType{
 			Name:                   tt.Name,
 			TypeParams:             append([]string(nil), tt.TypeParams...),
+			RegionParams:           append([]string(nil), tt.RegionParams...),
 			ShapeParams:            append([]string(nil), tt.ShapeParams...),
 			FreshReturnShapeParams: append([]string(nil), tt.FreshReturnShapeParams...),
 			Params:                 params,
