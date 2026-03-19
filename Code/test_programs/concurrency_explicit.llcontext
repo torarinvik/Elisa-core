@@ -1,0 +1,25 @@
+# include "../contextlang_runtime.llcontext"
+
+def atomic_roundtrip() -> i64 can[Atomics.Load, Atomics.Store, Atomics.Exchange, Atomics.CompareExchange, Atomics.Fence]:
+	slot: atomic[i64] = zeroed
+	slot_ref: any atomic[i64]& = (&slot).cast[any atomic[i64]&]()
+
+	store(slot_ref, 41, MemoryOrder.Release)
+	updated: bool = compare_exchange(slot_ref, 41, 42, MemoryOrder.AcqRel, MemoryOrder.Acquire)
+	if updated:
+		fence(MemoryOrder.SeqCst)
+
+	previous: i64 = exchange(slot_ref, 7, MemoryOrder.SeqCst)
+	current: i64 = load(slot_ref, MemoryOrder.SeqCst)
+	return previous + current
+
+def concurrency_handles(thread: Thread[i64], task: Task[i64], pool: ThreadPool, group: TaskGroup, mu: Mutex, guard: MutexGuard, cv: CondVar) -> bool:
+	return (
+		thread.handle == 0 and
+		task.handle == 0 and
+		pool.handle == null and
+		group.handle == null and
+		mu.handle == null and
+		guard.handle == null and
+		cv.handle == null
+	)

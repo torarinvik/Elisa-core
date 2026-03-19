@@ -154,6 +154,10 @@ func (a *Analyzer) registerBuiltinPermissions() {
 	a.registerBuiltinPermission("Memory", []string{"Allocate", "Release"})
 	a.registerBuiltinPermission("Console", []string{"Format", "Write"})
 	a.registerBuiltinPermission("Abort", []string{"Exit", "Panic"})
+	a.registerBuiltinPermission("Thread", []string{"Spawn", "Join", "Detach"})
+	a.registerBuiltinPermission("Pool", []string{"Create", "Submit", "Await", "WaitAll", "Shutdown"})
+	a.registerBuiltinPermission("Sync", []string{"Lock", "Unlock", "Wait", "Notify"})
+	a.registerBuiltinPermission("Atomics", []string{"Load", "Store", "Exchange", "CompareExchange", "Rmw", "Fence"})
 }
 
 func (a *Analyzer) registerBuiltinPermission(name string, members []string) {
@@ -175,6 +179,30 @@ func (a *Analyzer) registerBuiltinPermission(name string, members []string) {
 }
 
 func (a *Analyzer) registerBuiltinRuntimeStructs() {
+	a.registerBuiltinStructType("Thread", []string{"T"}, []builtinFieldSpec{
+		{name: "handle", typ: namedTypeExpr("uintptr", false), mutable: true},
+	})
+	a.registerBuiltinStructType("Task", []string{"T"}, []builtinFieldSpec{
+		{name: "handle", typ: namedTypeExpr("uintptr", false), mutable: true},
+	})
+	a.registerBuiltinStructType("ThreadPool", nil, []builtinFieldSpec{
+		{name: "handle", typ: refTypeExpr("void", true), mutable: true},
+	})
+	a.registerBuiltinStructType("TaskGroup", nil, []builtinFieldSpec{
+		{name: "handle", typ: refTypeExpr("void", true), mutable: true},
+	})
+	a.registerBuiltinStructType("Mutex", nil, []builtinFieldSpec{
+		{name: "handle", typ: refTypeExpr("void", true), mutable: true},
+	})
+	a.registerBuiltinStructType("MutexGuard", nil, []builtinFieldSpec{
+		{name: "handle", typ: refTypeExpr("void", true), mutable: true},
+	})
+	a.registerBuiltinStructType("CondVar", nil, []builtinFieldSpec{
+		{name: "handle", typ: refTypeExpr("void", true), mutable: true},
+	})
+	a.registerBuiltinStructType("atomic", []string{"T"}, []builtinFieldSpec{
+		{name: "value", typ: namedTypeExpr("T", false), mutable: true},
+	})
 	a.registerBuiltinStructType("Region", nil, []builtinFieldSpec{
 		{name: "next", typ: heapRefTypeExpr("Region", true), mutable: true},
 		{name: "count", typ: namedTypeExpr("usize", false), mutable: true},
@@ -312,6 +340,8 @@ func nestedRefTypeExpr(name string, innerNonNull bool, outerNullable bool) ast.T
 
 func isBuiltinRuntimeStructName(name string) bool {
 	switch name {
+	case "Thread", "Task", "ThreadPool", "TaskGroup", "Mutex", "MutexGuard", "CondVar", "atomic":
+		return true
 	case "Region", "Arena", "ArenaMark", "StringView", "DynArray", "DynArrayView", "DictBucket", "DynDict":
 		return true
 	case "PackedStoreAllocResult":

@@ -285,6 +285,27 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"define ptr @unicode_text()",
 			},
 		},
+		{
+			name: "concurrency_explicit",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "concurrency_explicit.llcontext"),
+			checks: []string{
+				"%Thread__i64 = type { i64 }",
+				"%Task__i64 = type { i64 }",
+				"%ThreadPool = type { ptr }",
+				"%TaskGroup = type { ptr }",
+				"%Mutex = type { ptr }",
+				"%MutexGuard = type { ptr }",
+				"%CondVar = type { ptr }",
+				"%atomic__i64 = type { i64 }",
+				"define i64 @atomic_roundtrip()",
+				"define i1 @concurrency_handles(",
+				"call void @store__i64(",
+				"call i1 @compare_exchange__i64(",
+				"call i64 @exchange__i64(",
+				"call i64 @load__i64(",
+				"call void @fence(i32",
+			},
+		},
 	}
 
 	for _, fixture := range fixtures {

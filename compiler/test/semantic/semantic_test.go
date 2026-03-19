@@ -802,6 +802,52 @@ def scoped() -> void:
 	}
 }
 
+func TestAnalyzeAcceptsBuiltinConcurrencyPermissionFamilies(t *testing.T) {
+	src := `def use() -> void can[Thread.Spawn, Thread.Join, Thread.Detach, Pool.Create, Pool.Submit, Pool.Await, Pool.WaitAll, Pool.Shutdown, Sync.Lock, Sync.Unlock, Sync.Wait, Sync.Notify, Atomics.Load, Atomics.Store, Atomics.Exchange, Atomics.CompareExchange, Atomics.Rmw, Atomics.Fence]:
+	pass
+`
+	result, errs := parseAndAnalyze(t, "builtin_concurrency_permissions_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireDeclaredFunctionPermissionRefs(t, result, "use",
+		"Atomics.CompareExchange",
+		"Atomics.Exchange",
+		"Atomics.Fence",
+		"Atomics.Load",
+		"Atomics.Rmw",
+		"Atomics.Store",
+		"Pool.Await",
+		"Pool.Create",
+		"Pool.Shutdown",
+		"Pool.Submit",
+		"Pool.WaitAll",
+		"Sync.Lock",
+		"Sync.Notify",
+		"Sync.Unlock",
+		"Sync.Wait",
+		"Thread.Detach",
+		"Thread.Join",
+		"Thread.Spawn",
+	)
+}
+
+func TestAnalyzeAcceptsBuiltinConcurrencyCarrierTypes(t *testing.T) {
+	src := `def touch(thread: Thread[i64], task: Task[i64], pool: ThreadPool, group: TaskGroup, mu: Mutex, guard: MutexGuard, cv: CondVar, slot: atomic[i64]) -> void:
+	_ = thread
+	_ = task
+	_ = pool
+	_ = group
+	_ = mu
+	_ = guard
+	_ = cv
+	copy: atomic[i64] = slot
+	_ = copy
+`
+	result, errs := parseAndAnalyze(t, "builtin_concurrency_carriers_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
+
 func TestAnalyzeWarnsOnMissingPermissionGrant(t *testing.T) {
 	src := `extern emit(value: int) -> void can[Console.Write]
 

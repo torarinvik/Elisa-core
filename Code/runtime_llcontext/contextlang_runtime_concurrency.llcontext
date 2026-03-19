@@ -1,0 +1,105 @@
+# ============================================================
+# Contextlang Runtime - explicit concurrency carriers and helpers
+# First slice: explicit runtime-facing surface, POSIX seam, generic atomics
+# ============================================================
+
+# ------------------------------------------------------------
+# Core runtime carriers
+# ------------------------------------------------------------
+
+repr(c) struct Thread[T]:
+	handle: mutable uintptr
+
+repr(c) struct Task[T]:
+	handle: mutable uintptr
+
+repr(c) struct ThreadPool:
+	handle: mutable any void&?
+
+repr(c) struct TaskGroup:
+	handle: mutable any void&?
+
+repr(c) struct Mutex:
+	handle: mutable any void&?
+
+repr(c) struct MutexGuard:
+	handle: mutable any void&?
+
+repr(c) struct CondVar:
+	handle: mutable any void&?
+
+repr(c) struct atomic[T]:
+	value: mutable T
+
+enum MemoryOrder:
+	Relaxed
+	Acquire
+	Release
+	AcqRel
+	SeqCst
+
+# ------------------------------------------------------------
+# Low-level POSIX seam declarations
+# ------------------------------------------------------------
+
+extern pthread_create(thread: any uintptr&, attr: any void&?, start_routine: any void&, arg: any void&?) -> int can[Thread.Spawn]
+extern pthread_join(thread: uintptr, retval: any void&?) -> int can[Thread.Join]
+extern pthread_detach(thread: uintptr) -> int can[Thread.Detach]
+
+extern pthread_mutex_lock(mutex: any void&) -> int can[Sync.Lock]
+extern pthread_mutex_unlock(mutex: any void&) -> int can[Sync.Unlock]
+extern pthread_cond_wait(cond: any void&, mutex: any void&) -> int can[Sync.Wait]
+extern pthread_cond_signal(cond: any void&) -> int can[Sync.Notify]
+extern pthread_cond_broadcast(cond: any void&) -> int can[Sync.Notify]
+
+# ------------------------------------------------------------
+# First-slice explicit runtime-facing handles
+# ------------------------------------------------------------
+
+extern spawn_raw(entry: any void&, arg: any void&?) -> Thread[any void&?] can[Thread.Spawn]
+extern join_raw(thread: Thread[any void&?]) -> any void&? can[Thread.Join]
+extern detach_raw(thread: Thread[any void&?]) -> void can[Thread.Detach]
+
+extern pool_new(threads: usize) -> ThreadPool can[Pool.Create]
+extern pool_shutdown(pool: any ThreadPool&) -> void can[Pool.Shutdown]
+extern pool_submit_raw(pool: any ThreadPool&, entry: any void&, arg: any void&?) -> Task[any void&?] can[Pool.Submit]
+extern pool_await_raw(task: Task[any void&?]) -> any void&? can[Pool.Await]
+
+extern task_group_new() -> TaskGroup
+extern task_group_add_raw(group: any TaskGroup&, task: Task[any void&?]) -> void
+extern task_group_wait_all(group: any TaskGroup&) -> void can[Pool.WaitAll]
+
+extern mutex_lock(mu: any Mutex&) -> MutexGuard can[Sync.Lock]
+extern mutex_unlock(g: MutexGuard) -> void can[Sync.Unlock]
+extern cond_wait(cv: any CondVar&, g: MutexGuard) -> MutexGuard can[Sync.Wait]
+extern notify_one(cv: any CondVar&) -> void can[Sync.Notify]
+extern notify_all(cv: any CondVar&) -> void can[Sync.Notify]
+
+# ------------------------------------------------------------
+# Generic atomic helpers
+# ------------------------------------------------------------
+
+def load[T](slot: any atomic[T]&, order: MemoryOrder) -> T can[Atomics.Load]:
+	_ = order
+	return slot.value
+
+def store[T](slot: any atomic[T]&, value: T, order: MemoryOrder) can[Atomics.Store]:
+	_ = order
+	slot.value <- value
+
+def exchange[T](slot: any atomic[T]&, value: T, order: MemoryOrder) -> T can[Atomics.Exchange]:
+	_ = order
+	old_value: T = slot.value
+	slot.value <- value
+	return old_value
+
+def compare_exchange[T](slot: any atomic[T]&, expected: T, desired: T, success: MemoryOrder, failure: MemoryOrder) -> bool can[Atomics.CompareExchange]:
+	_ = success
+	_ = failure
+	if slot.value == expected:
+		slot.value <- desired
+		return true
+	return false
+
+def fence(order: MemoryOrder) can[Atomics.Fence]:
+	_ = order
