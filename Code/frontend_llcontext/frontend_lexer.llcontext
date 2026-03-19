@@ -291,12 +291,6 @@ def frontend_lookup_keyword(text: StringView) -> FrontendTokenKind:
         return FrontendTokenKind.Try
     if frontend_sv_eq_literal(text, "raise"):
         return FrontendTokenKind.Raise
-    if frontend_sv_eq_literal(text, "region"):
-        return FrontendTokenKind.Region
-    if frontend_sv_eq_literal(text, "destroy"):
-        return FrontendTokenKind.Destroy
-    if frontend_sv_eq_literal(text, "new"):
-        return FrontendTokenKind.New
     if frontend_sv_eq_literal(text, "as"):
         return FrontendTokenKind.As
     if frontend_sv_eq_literal(text, "in"):
