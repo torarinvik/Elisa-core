@@ -141,6 +141,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.analyzeMatchStmt(n)
 	case *ast.InStoreStmt:
 		a.analyzeInStoreStmt(n)
+	case *ast.CanStmt:
+		a.analyzeCanStmt(n)
 	case *ast.WhileStmt:
 		condType := a.analyzeCondExpr(n.Cond)
 		if !IsBoolType(condType) {
@@ -174,6 +176,12 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 	case *ast.DiscardStmt:
 		a.analyzeExpr(n.Value)
 	}
+}
+
+func (a *Analyzer) analyzeCanStmt(stmt *ast.CanStmt) {
+	families := a.resolvePermissionFamilies(stmt.Permissions, true)
+	a.recordFunctionPermissionFamilies(families)
+	a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
 }
 
 func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {

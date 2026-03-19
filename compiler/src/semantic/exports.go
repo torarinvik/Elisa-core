@@ -56,7 +56,7 @@ func (a *Analyzer) analyzeExportFunc(decl *ast.ExportFuncDecl, seenPublicNames m
 		return
 	}
 
-	signature := a.funcTypeFromDecl(decl.Name, nil, nil, decl.Params, decl.ReturnType, false)
+	signature := a.funcTypeFromDecl(decl.Name, nil, nil, nil, decl.Params, decl.ReturnType, false)
 	if !isCABICompatibleFuncType(signature) {
 		a.errorf(decl.Pos(), "export func %q is not C-ABI-compatible", decl.Name)
 		return
@@ -173,6 +173,7 @@ func specializeExportFuncType(a *Analyzer, base *FuncType, bindings map[string]T
 		Name:                   specialized.Name,
 		TypeParams:             nil,
 		RegionParams:           append([]string(nil), specialized.RegionParams...),
+		Permissions:            append([]string(nil), specialized.Permissions...),
 		ShapeParams:            append([]string(nil), specialized.ShapeParams...),
 		FreshReturnShapeParams: append([]string(nil), specialized.FreshReturnShapeParams...),
 		Params:                 append([]Type(nil), specialized.Params...),
@@ -209,7 +210,7 @@ func exportedNamedTypeAllowed(t Type) bool {
 }
 
 func isCABICompatibleFuncType(fn *FuncType) bool {
-	if fn == nil || fn.Variadic || len(fn.TypeParams) > 0 || len(fn.RegionParams) > 0 {
+	if fn == nil || fn.Variadic || len(fn.TypeParams) > 0 || len(fn.RegionParams) > 0 || len(fn.Permissions) > 0 {
 		return false
 	}
 	for _, param := range fn.Params {

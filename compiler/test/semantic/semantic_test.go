@@ -720,6 +720,98 @@ def use(seed: i32) -> i32:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsExplicitAndInferredPermissions(t *testing.T) {
+	src := `permission Console:
+	Write
+	Flush
+
+extern emit(value: int) -> void can[Console]
+
+def explicit() -> void can[Console]:
+	emit(1) can Console.Write
+
+def inferred() -> void:
+	emit(2) can Console.Write
+
+def scoped() -> void:
+	can Console.Write:
+		emit(3)
+`
+	result, errs := parseAndAnalyze(t, "permissions_explicit_and_inferred_ok.llcontext", src)
+	requireNoErrors(t, errs)
+
+	for _, name := range []string{"explicit", "inferred", "scoped"} {
+		sym, ok := result.GlobalScope.Lookup(name)
+		if !ok {
+			t.Fatalf("expected %s symbol", name)
+		}
+		fn, ok := sym.Type.(*semantic.FuncType)
+		if !ok {
+			t.Fatalf("expected %s to have function type, got %T", name, sym.Type)
+		}
+		if len(fn.Permissions) != 1 || fn.Permissions[0] != "Console" {
+			t.Fatalf("expected %s to infer can[Console], got %#v", name, fn.Permissions)
+		}
+	}
+}
+
+func TestAnalyzeRejectsMissingPermissionGrant(t *testing.T) {
+	src := `permission Console:
+	Write
+
+extern emit(value: int) -> void can[Console]
+
+def bad() -> void:
+	emit(1)
+`
+	_, errs := parseAndAnalyze(t, "permissions_missing_grant_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "call to \"emit\" requires can[Console]") {
+		t.Fatalf("expected missing-permission diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsForwardReferencedInferredPermissionCallWithoutGrant(t *testing.T) {
+	src := `permission Console:
+	Write
+
+extern emit(value: int) -> void can[Console]
+
+def caller() -> void:
+	callee()
+
+def callee() -> void:
+	emit(1) can Console.Write
+`
+	_, errs := parseAndAnalyze(t, "permissions_forward_reference_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "call to \"callee\" requires can[Console]") {
+		t.Fatalf("expected forward-reference permission diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsUnknownPermissionMember(t *testing.T) {
+	src := `permission Console:
+	Write
+
+extern emit(value: int) -> void can[Console]
+
+def bad() -> void:
+	emit(1) can Console.Read
+`
+	_, errs := parseAndAnalyze(t, "permissions_unknown_member_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "permission \"Console\" has no member \"Read\"") {
+		t.Fatalf("expected unknown-member diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeRejectsCallsWhenRegionParamCannotBeInferred(t *testing.T) {
 	src := `def id[region r](value: r i32&) -> r i32&:
 	return value

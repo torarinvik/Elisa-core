@@ -78,7 +78,7 @@ func SameType(a, b Type) bool {
 		return SameType(ta.Base, tb.Base)
 	case *FuncType:
 		tb, ok := b.(*FuncType)
-		if !ok || ta.Variadic != tb.Variadic || len(ta.TypeParams) != len(tb.TypeParams) || len(ta.RegionParams) != len(tb.RegionParams) || len(ta.ShapeParams) != len(tb.ShapeParams) || len(ta.FreshReturnShapeParams) != len(tb.FreshReturnShapeParams) || len(ta.Params) != len(tb.Params) || !SameType(ta.Return, tb.Return) {
+		if !ok || ta.Variadic != tb.Variadic || len(ta.TypeParams) != len(tb.TypeParams) || len(ta.RegionParams) != len(tb.RegionParams) || len(ta.Permissions) != len(tb.Permissions) || len(ta.ShapeParams) != len(tb.ShapeParams) || len(ta.FreshReturnShapeParams) != len(tb.FreshReturnShapeParams) || len(ta.Params) != len(tb.Params) || !SameType(ta.Return, tb.Return) {
 			return false
 		}
 		for i := range ta.TypeParams {
@@ -88,6 +88,11 @@ func SameType(a, b Type) bool {
 		}
 		for i := range ta.RegionParams {
 			if ta.RegionParams[i] != tb.RegionParams[i] {
+				return false
+			}
+		}
+		for i := range ta.Permissions {
+			if ta.Permissions[i] != tb.Permissions[i] {
 				return false
 			}
 		}
@@ -266,11 +271,16 @@ func matchTypePattern(pattern, actual Type) bool {
 		return matchTypePattern(p.Base, a.Base)
 	case *FuncType:
 		a, ok := actual.(*FuncType)
-		if !ok || p.Variadic != a.Variadic || len(p.RegionParams) != len(a.RegionParams) || len(p.ShapeParams) != len(a.ShapeParams) || len(p.FreshReturnShapeParams) != len(a.FreshReturnShapeParams) || len(p.Params) != len(a.Params) {
+		if !ok || p.Variadic != a.Variadic || len(p.RegionParams) != len(a.RegionParams) || len(p.Permissions) != len(a.Permissions) || len(p.ShapeParams) != len(a.ShapeParams) || len(p.FreshReturnShapeParams) != len(a.FreshReturnShapeParams) || len(p.Params) != len(a.Params) {
 			return false
 		}
 		for i := range p.RegionParams {
 			if p.RegionParams[i] != a.RegionParams[i] {
+				return false
+			}
+		}
+		for i := range p.Permissions {
+			if p.Permissions[i] != a.Permissions[i] {
 				return false
 			}
 		}

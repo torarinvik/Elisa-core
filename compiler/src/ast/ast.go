@@ -30,6 +30,12 @@ type ErrorDecl struct {
 	Tags     []string
 }
 
+type PermissionDecl struct {
+	Position lexer.Pos
+	Name     string
+	Members  []string
+}
+
 type EnumDecl struct {
 	Position lexer.Pos
 	Name     string
@@ -79,12 +85,19 @@ type Annotation struct {
 	Name     string
 }
 
+type PermissionRef struct {
+	Position lexer.Pos
+	Name     string
+	Member   string
+}
+
 type FuncDecl struct {
 	Position     lexer.Pos
 	Annotations  []Annotation
 	Name         string
 	TypeParams   []string
 	RegionParams []string
+	Permissions  []PermissionRef
 	Params       []ParamDecl
 	ReturnType   TypeExpr
 	Body         []Stmt
@@ -101,6 +114,7 @@ type ExternFuncDecl struct {
 	Position     lexer.Pos
 	Name         string
 	RegionParams []string
+	Permissions  []PermissionRef
 	Params       []ParamDecl
 	ReturnType   TypeExpr
 	Variadic     bool
@@ -371,6 +385,12 @@ type AllocExpr struct {
 	Value    Expr
 }
 
+type CanExpr struct {
+	Position    lexer.Pos
+	Expr        Expr
+	Permissions []PermissionRef
+}
+
 type MatchExpr struct {
 	Position lexer.Pos
 	Value    Expr
@@ -470,6 +490,12 @@ type InStoreStmt struct {
 	Body     []Stmt
 }
 
+type CanStmt struct {
+	Position    lexer.Pos
+	Permissions []PermissionRef
+	Body        []Stmt
+}
+
 type MatchArm struct {
 	Position lexer.Pos
 	Pattern  MatchPattern
@@ -552,6 +578,7 @@ type StaticElifClause struct {
 
 func (n *ConstDecl) Pos() lexer.Pos      { return n.Position }
 func (n *ErrorDecl) Pos() lexer.Pos      { return n.Position }
+func (n *PermissionDecl) Pos() lexer.Pos { return n.Position }
 func (n *EnumDecl) Pos() lexer.Pos       { return n.Position }
 func (n *GlobalDecl) Pos() lexer.Pos     { return n.Position }
 func (n *StructDecl) Pos() lexer.Pos     { return n.Position }
@@ -599,6 +626,7 @@ func (n *RaiseExpr) Pos() lexer.Pos      { return n.Position }
 func (n *TryExpr) Pos() lexer.Pos        { return n.Position }
 func (n *UnwrapElseExpr) Pos() lexer.Pos { return n.Position }
 func (n *AllocExpr) Pos() lexer.Pos      { return n.Position }
+func (n *CanExpr) Pos() lexer.Pos        { return n.Position }
 func (n *MatchExpr) Pos() lexer.Pos      { return n.Position }
 func (n *MatchWildcardPattern) Pos() lexer.Pos {
 	return n.Position
@@ -614,6 +642,7 @@ func (n *IfStmt) Pos() lexer.Pos              { return n.Position }
 func (n *WhileStmt) Pos() lexer.Pos           { return n.Position }
 func (n *MatchStmt) Pos() lexer.Pos           { return n.Position }
 func (n *InStoreStmt) Pos() lexer.Pos         { return n.Position }
+func (n *CanStmt) Pos() lexer.Pos             { return n.Position }
 func (n *PassStmt) Pos() lexer.Pos            { return n.Position }
 func (n *PanicStmt) Pos() lexer.Pos           { return n.Position }
 func (n *ExprStmt) Pos() lexer.Pos            { return n.Position }
@@ -628,6 +657,7 @@ func (n *ResetStmt) Pos() lexer.Pos           { return n.Position }
 
 func (*ConstDecl) nodeTag()            {}
 func (*ErrorDecl) nodeTag()            {}
+func (*PermissionDecl) nodeTag()       {}
 func (*EnumDecl) nodeTag()             {}
 func (*GlobalDecl) nodeTag()           {}
 func (*StructDecl) nodeTag()           {}
@@ -671,6 +701,7 @@ func (*RaiseExpr) nodeTag()            {}
 func (*TryExpr) nodeTag()              {}
 func (*UnwrapElseExpr) nodeTag()       {}
 func (*AllocExpr) nodeTag()            {}
+func (*CanExpr) nodeTag()              {}
 func (*MatchExpr) nodeTag()            {}
 func (*MatchWildcardPattern) nodeTag() {}
 func (*MatchBindPattern) nodeTag()     {}
@@ -684,6 +715,7 @@ func (*IfStmt) nodeTag()               {}
 func (*WhileStmt) nodeTag()            {}
 func (*MatchStmt) nodeTag()            {}
 func (*InStoreStmt) nodeTag()          {}
+func (*CanStmt) nodeTag()              {}
 func (*PassStmt) nodeTag()             {}
 func (*PanicStmt) nodeTag()            {}
 func (*ExprStmt) nodeTag()             {}
@@ -698,6 +730,7 @@ func (*ResetStmt) nodeTag()            {}
 
 func (*ConstDecl) declTag()        {}
 func (*ErrorDecl) declTag()        {}
+func (*PermissionDecl) declTag()   {}
 func (*EnumDecl) declTag()         {}
 func (*GlobalDecl) declTag()       {}
 func (*StructDecl) declTag()       {}
@@ -749,6 +782,7 @@ func (*MatchStmt) stmtTag()                    {}
 func (*TryExpr) exprTag()                      {}
 func (*UnwrapElseExpr) exprTag()               {}
 func (*AllocExpr) exprTag()                    {}
+func (*CanExpr) exprTag()                      {}
 
 func (*AssignStmt) stmtTag()      {}
 func (*AugAssignStmt) stmtTag()   {}
@@ -758,6 +792,7 @@ func (*ReturnStmt) stmtTag()      {}
 func (*IfStmt) stmtTag()          {}
 func (*WhileStmt) stmtTag()       {}
 func (*InStoreStmt) stmtTag()     {}
+func (*CanStmt) stmtTag()         {}
 func (*PassStmt) stmtTag()        {}
 func (*PanicStmt) stmtTag()       {}
 func (*ExprStmt) stmtTag()        {}

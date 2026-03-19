@@ -13,6 +13,13 @@ type Type interface {
 	isType()
 }
 
+type PermissionSet struct {
+	Name      string
+	Members   []string
+	MemberSet map[string]bool
+	Decl      *ast.PermissionDecl
+}
+
 type Shape interface {
 	String() string
 	isShape()
@@ -179,6 +186,7 @@ type FuncType struct {
 	Name                   string
 	TypeParams             []string
 	RegionParams           []string
+	Permissions            []string
 	ShapeParams            []string
 	FreshReturnShapeParams []string
 	Params                 []Type
@@ -466,9 +474,16 @@ func (t *FuncType) String() string {
 		parts = append(parts, "...")
 	}
 	if t.Return == nil {
-		return fmt.Sprintf("func%s(%s)", prefix, strings.Join(parts, ", "))
+		return fmt.Sprintf("func%s(%s)%s", prefix, strings.Join(parts, ", "), permissionFamiliesString(t.Permissions))
 	}
-	return fmt.Sprintf("func%s(%s) -> %s", prefix, strings.Join(parts, ", "), t.Return.String())
+	return fmt.Sprintf("func%s(%s) -> %s%s", prefix, strings.Join(parts, ", "), t.Return.String(), permissionFamiliesString(t.Permissions))
+}
+
+func permissionFamiliesString(families []string) string {
+	if len(families) == 0 {
+		return ""
+	}
+	return " can[" + strings.Join(families, ", ") + "]"
 }
 
 var (

@@ -460,9 +460,26 @@ func formatFuncGenericParams(typeParams []string, regionParams []string) string 
 	return "[" + strings.Join(parts, ", ") + "]"
 }
 
+func formatPermissionRefs(refs []ast.PermissionRef) string {
+	if len(refs) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if ref.Member != "" {
+			parts = append(parts, ref.Name+"."+ref.Member)
+			continue
+		}
+		parts = append(parts, ref.Name)
+	}
+	return " can[" + strings.Join(parts, ", ") + "]"
+}
+
 func printDecl(w io.Writer, d ast.Decl, level int) {
 	prefix := ind(level)
 	switch n := d.(type) {
+	case *ast.PermissionDecl:
+		fmt.Fprintf(w, "%spermission %s: (%d members)\n", prefix, n.Name, len(n.Members))
 	case *ast.ConstDecl:
 		fmt.Fprintf(w, "%sconst %s = %s\n", prefix, n.Name, exprStr(n.Value))
 	case *ast.GlobalDecl:
@@ -490,14 +507,14 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		if n.ReturnType != nil {
 			ret = " -> " + typeStr(n.ReturnType)
 		}
-		fmt.Fprintf(w, "%sdef %s%s(%d params)%s (%d stmts)\n", prefix, n.Name, tparams, len(n.Params), ret, len(n.Body))
+		fmt.Fprintf(w, "%sdef %s%s(%d params)%s%s (%d stmts)\n", prefix, n.Name, tparams, len(n.Params), ret, formatPermissionRefs(n.Permissions), len(n.Body))
 	case *ast.ExternFuncDecl:
 		tparams := formatFuncGenericParams(nil, n.RegionParams)
 		ret := ""
 		if n.ReturnType != nil {
 			ret = " -> " + typeStr(n.ReturnType)
 		}
-		fmt.Fprintf(w, "%sextern %s%s(%d params)%s\n", prefix, n.Name, tparams, len(n.Params), ret)
+		fmt.Fprintf(w, "%sextern %s%s(%d params)%s%s\n", prefix, n.Name, tparams, len(n.Params), ret, formatPermissionRefs(n.Permissions))
 	case *ast.ExternVarDecl:
 		fmt.Fprintf(w, "%sextern %s: %s\n", prefix, n.Name, typeStr(n.Type))
 	case *ast.ExternTypeDecl:
@@ -631,6 +648,9 @@ func exprStr(e ast.Expr) string {
 		}
 		return fmt.Sprintf("%s(%s)", exprStr(n.Func), strings.Join(args, ", "))
 	case *ast.AllocExpr:
+		if n.Owner == nil {
+			return fmt.Sprintf("new %s", exprStr(n.Value))
+		}
 		return fmt.Sprintf("new[%s] %s", exprStr(n.Owner), exprStr(n.Value))
 	case *ast.FieldExpr:
 		return fmt.Sprintf("%s.%s", exprStr(n.Object), n.Field)
@@ -654,6 +674,8 @@ func exprStr(e ast.Expr) string {
 		return fmt.Sprintf("%s(%s)", n.Name, strings.Join(args, ", "))
 	case *ast.ParenExpr:
 		return fmt.Sprintf("(%s)", exprStr(n.Inner))
+	case *ast.CanExpr:
+		return exprStr(n.Expr) + formatPermissionRefs(n.Permissions)
 	default:
 		return "<expr>"
 	}

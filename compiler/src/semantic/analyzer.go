@@ -58,28 +58,30 @@ const (
 )
 
 type Analyzer struct {
-	file                   *ast.File
-	diagnostics            []Diagnostic
-	namedTypes             map[string]Type
-	globalScope            *Scope
-	functionTypes          map[string]*FuncType
-	constValues            map[string]ConstValue
-	exprTypes              map[ast.Expr]Type
-	typeParamScopes        []map[string]Type
-	shapeParamScopes       []map[string]Shape
-	regionParamScopes      []map[string]bool
-	freshShapeCounter      int
-	returnFreshShapeStatus map[string]freshReturnStatus
-	annotatedFuncs         []*AnnotatedFunc
-	exportedTypes          []*ExportedType
-	exportedFuncs          []*ExportedFunc
-	exportedGlobals        []*ExportedGlobal
-	currentScope           *Scope
-	currentReturn          Type
-	currentRegions         map[*Symbol]regionState
-	currentRegionMarks     map[*Symbol]regionMarkState
-	currentRegionRefs      map[*Symbol]regionRefState
-	currentPackedStores    map[string]*PackedEnumStoreType
+	file                           *ast.File
+	diagnostics                    []Diagnostic
+	namedTypes                     map[string]Type
+	permissions                    map[string]*PermissionSet
+	globalScope                    *Scope
+	functionTypes                  map[string]*FuncType
+	constValues                    map[string]ConstValue
+	exprTypes                      map[ast.Expr]Type
+	typeParamScopes                []map[string]Type
+	shapeParamScopes               []map[string]Shape
+	regionParamScopes              []map[string]bool
+	freshShapeCounter              int
+	returnFreshShapeStatus         map[string]freshReturnStatus
+	annotatedFuncs                 []*AnnotatedFunc
+	exportedTypes                  []*ExportedType
+	exportedFuncs                  []*ExportedFunc
+	exportedGlobals                []*ExportedGlobal
+	currentScope                   *Scope
+	currentReturn                  Type
+	currentRegions                 map[*Symbol]regionState
+	currentRegionMarks             map[*Symbol]regionMarkState
+	currentRegionRefs              map[*Symbol]regionRefState
+	currentPackedStores            map[string]*PackedEnumStoreType
+	currentFunctionUsedPermissions map[string]bool
 }
 
 type regionState struct {
@@ -105,6 +107,7 @@ func Analyze(file *ast.File) *Result {
 	a := &Analyzer{
 		file:          file,
 		namedTypes:    map[string]Type{},
+		permissions:   map[string]*PermissionSet{},
 		globalScope:   NewScope(nil),
 		functionTypes: map[string]*FuncType{},
 		constValues:   map[string]ConstValue{},
@@ -113,12 +116,14 @@ func Analyze(file *ast.File) *Result {
 	a.registerBuiltins()
 	a.collectConstValues(file.Decls)
 	activeDecls := a.expandActiveDecls(file.Decls)
+	a.collectPermissionDecls(activeDecls)
 	a.collectNamedTypes(activeDecls)
 	a.populateStructFields(activeDecls)
 	a.populateEnumVariants(activeDecls)
 	a.collectExportTypeAliases(activeDecls)
 	a.collectValueSymbols(activeDecls)
 	a.analyzeDecls(activeDecls)
+	a.validatePermissionUsage(activeDecls)
 	a.analyzeExports(activeDecls)
 	return &Result{
 		File:            file,
@@ -407,6 +412,8 @@ func (a *Analyzer) collectNamedTypes(decls []ast.Decl) {
 				resolvedTags = append(resolvedTags, QualifyErrorTag(n.Name, tag))
 			}
 			a.namedTypes[n.Name] = &ErrorSetType{Name: n.Name, Tags: resolvedTags}
+		case *ast.PermissionDecl:
+			continue
 		case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			continue
 		}
@@ -532,11 +539,11 @@ func (a *Analyzer) collectValueSymbols(decls []ast.Decl) {
 			declType := a.resolveType(n.Type)
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolGlobal, Type: declType, Node: n, Mutable: n.Mutable}, n.Pos())
 		case *ast.FuncDecl:
-			fnType := a.funcTypeFromDecl(n.Name, n.TypeParams, n.RegionParams, n.Params, n.ReturnType, false)
+			fnType := a.funcTypeFromDecl(n.Name, n.TypeParams, n.RegionParams, n.Permissions, n.Params, n.ReturnType, false)
 			a.functionTypes[n.Name] = fnType
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolFunc, Type: fnType, Node: n, Mutable: false}, n.Pos())
 		case *ast.ExternFuncDecl:
-			fnType := a.funcTypeFromDecl(n.Name, nil, n.RegionParams, n.Params, n.ReturnType, n.Variadic)
+			fnType := a.funcTypeFromDecl(n.Name, nil, n.RegionParams, n.Permissions, n.Params, n.ReturnType, n.Variadic)
 			a.functionTypes[n.Name] = fnType
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolExternFunc, Type: fnType, Node: n, Mutable: false}, n.Pos())
 		case *ast.ExternVarDecl:
@@ -545,6 +552,7 @@ func (a *Analyzer) collectValueSymbols(decls []ast.Decl) {
 		case *ast.EnumDecl:
 			continue
 		case *ast.ErrorDecl:
+		case *ast.PermissionDecl:
 			continue
 		case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			continue
@@ -577,6 +585,7 @@ func (a *Analyzer) analyzeDecls(decls []ast.Decl) {
 		case *ast.EnumDecl:
 			continue
 		case *ast.ErrorDecl:
+		case *ast.PermissionDecl:
 			continue
 		case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			continue
@@ -638,6 +647,10 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 		a.errorf(annotation.Position, "@%s function %q must not have type or shape parameters; got %s", annotation.Name, fn.Name, signature.String())
 		return false
 	}
+	if len(signature.Permissions) > 0 {
+		a.errorf(annotation.Position, "@%s function %q must not require permissions; got %s", annotation.Name, fn.Name, signature.String())
+		return false
+	}
 	if signature.Variadic {
 		a.errorf(annotation.Position, "@%s function %q must not be variadic", annotation.Name, fn.Name)
 		return false
@@ -680,11 +693,13 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	savedRegionMarks := a.currentRegionMarks
 	savedRegionRefs := a.currentRegionRefs
 	savedPackedStores := a.currentPackedStores
+	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	a.currentScope = NewScope(a.globalScope)
 	a.currentRegions = map[*Symbol]regionState{}
 	a.currentRegionMarks = map[*Symbol]regionMarkState{}
 	a.currentRegionRefs = map[*Symbol]regionRefState{}
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
+	a.currentFunctionUsedPermissions = map[string]bool{}
 	if fnType != nil {
 		a.currentReturn = fnType.Return
 		a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)
@@ -707,6 +722,12 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	})
 	if fnType != nil {
 		fnType.FreshReturnShapeParams = mergeShapeParamNames(fnType.FreshReturnShapeParams, inferredFreshReturnShapeParams(a.returnFreshShapeStatus))
+		inferredPermissions := sortedPermissionFamilies(a.currentFunctionUsedPermissions)
+		if len(fn.Permissions) == 0 {
+			fnType.Permissions = inferredPermissions
+		} else if missing := missingPermissionFamilies(fnType.Permissions, inferredPermissions); len(missing) > 0 {
+			a.errorf(fn.Pos(), "function %q declares%s but body uses%s", fn.Name, permissionFamiliesString(fnType.Permissions), permissionFamiliesString(missing))
+		}
 	}
 	a.currentScope = savedScope
 	a.currentReturn = savedReturn
@@ -715,4 +736,5 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentRegionMarks = savedRegionMarks
 	a.currentRegionRefs = savedRegionRefs
 	a.currentPackedStores = savedPackedStores
+	a.currentFunctionUsedPermissions = savedFunctionPermissions
 }

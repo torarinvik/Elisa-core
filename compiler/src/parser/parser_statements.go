@@ -27,6 +27,10 @@ func (p *Parser) parseBlock() []ast.Stmt {
 func (p *Parser) parseStmt() ast.Stmt {
 	if p.peek() == lexer.TOKEN_IDENT {
 		switch p.cur().Text {
+		case "can":
+			if p.pos+1 < len(p.tokens) && (p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT || p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACKET) {
+				return p.parseCanStmt()
+			}
 		case "region":
 			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
 				return p.parseRegion()
@@ -91,6 +95,16 @@ func (p *Parser) parseInStore() *ast.InStoreStmt {
 	p.expectNewline()
 	body := p.parseBlock()
 	return &ast.InStoreStmt{Position: pos, Store: store, Body: body}
+}
+
+func (p *Parser) parseCanStmt() *ast.CanStmt {
+	pos := p.cur().Pos
+	p.expectIdentText("can")
+	permissions := p.parsePermissionRefs(false)
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	body := p.parseBlock()
+	return &ast.CanStmt{Position: pos, Permissions: permissions, Body: body}
 }
 
 func (p *Parser) parseMatchArms() []ast.MatchArm {

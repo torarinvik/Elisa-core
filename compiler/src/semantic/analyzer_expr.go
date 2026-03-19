@@ -178,6 +178,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	case *ast.AllocExpr:
 		result = a.analyzeAllocExpr(n)
 		return
+	case *ast.CanExpr:
+		result = a.analyzeCanExpr(n)
+		return
 	case *ast.MatchExpr:
 		result = a.analyzeMatchExpr(n)
 		return
@@ -248,6 +251,15 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = invalidType
 		return
 	}
+}
+
+func (a *Analyzer) analyzeCanExpr(expr *ast.CanExpr) Type {
+	if expr == nil {
+		return invalidType
+	}
+	families := a.resolvePermissionFamilies(expr.Permissions, true)
+	a.recordFunctionPermissionFamilies(families)
+	return a.analyzeExpr(expr.Expr)
 }
 
 func (a *Analyzer) analyzeAllocExpr(expr *ast.AllocExpr) Type {

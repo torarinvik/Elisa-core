@@ -28,10 +28,11 @@ func (a *Analyzer) defineLocal(sym *Symbol, pos lexer.Pos) {
 	}
 }
 
-func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, regionParams []string, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
+func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, regionParams []string, permissionRefs []ast.PermissionRef, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
 	ptypes := make([]Type, 0, len(params))
 	retType := a.namedTypes["void"]
 	shapeParams := a.collectImplicitShapeParams(params, ret)
+	permissions := a.resolvePermissionFamilies(permissionRefs, true)
 	a.withTypeParams(typeParams, nil, func() {
 		a.withRegionParams(regionParams, func() {
 			a.withShapeParams(shapeParams, func() {
@@ -48,6 +49,7 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, regionPara
 		Name:                   name,
 		TypeParams:             append([]string(nil), typeParams...),
 		RegionParams:           append([]string(nil), regionParams...),
+		Permissions:            permissions,
 		ShapeParams:            shapeParams,
 		FreshReturnShapeParams: knownFreshReturnShapeParams(name, retType),
 		Params:                 ptypes,
@@ -638,7 +640,7 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 		for _, param := range n.Params {
 			params = append(params, a.substituteType(param, bindings, shapeBindings, regionBindings))
 		}
-		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), RegionParams: append([]string(nil), n.RegionParams...), ShapeParams: append([]string(nil), n.ShapeParams...), FreshReturnShapeParams: append([]string(nil), n.FreshReturnShapeParams...), Params: params, Return: a.substituteType(n.Return, bindings, shapeBindings, regionBindings), Variadic: n.Variadic}
+		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), RegionParams: append([]string(nil), n.RegionParams...), Permissions: append([]string(nil), n.Permissions...), ShapeParams: append([]string(nil), n.ShapeParams...), FreshReturnShapeParams: append([]string(nil), n.FreshReturnShapeParams...), Params: params, Return: a.substituteType(n.Return, bindings, shapeBindings, regionBindings), Variadic: n.Variadic}
 	default:
 		return t
 	}

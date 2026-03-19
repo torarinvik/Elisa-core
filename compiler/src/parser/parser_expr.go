@@ -86,7 +86,7 @@ func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string, strin
 		tok := p.advance()
 		return ast.RefStorageStatic, true, tok.Text, ""
 	default:
-		if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+		if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text != "can" {
 			region := p.advance().Text
 			return ast.RefStorageAny, true, region, region
 		}
@@ -281,6 +281,10 @@ func (p *Parser) parseExpr() ast.Expr {
 			return tryExpr
 		}
 		return &ast.UnwrapElseExpr{Position: pos, Value: expr, Fallback: alt}
+	}
+	if p.matchIdentText("can") {
+		permissions := p.parsePermissionRefs(false)
+		return &ast.CanExpr{Position: expr.Pos(), Expr: expr, Permissions: permissions}
 	}
 
 	return expr

@@ -53,6 +53,10 @@ func (p *Parser) match(kind lexer.TokenKind) bool {
 	return false
 }
 
+func (p *Parser) peekIdentText(text string) bool {
+	return p.peek() == lexer.TOKEN_IDENT && p.cur().Text == text
+}
+
 func (p *Parser) matchIdentText(text string) bool {
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == text {
 		p.advance()
@@ -97,6 +101,9 @@ func (p *Parser) ParseFile(filename string) *ast.File {
 }
 
 func (p *Parser) parseDecl() ast.Decl {
+	if p.peekIdentText("permission") {
+		return p.parsePermissionDecl()
+	}
 	if p.peek() == lexer.TOKEN_AT {
 		annotations := p.parseFuncAnnotations()
 		if p.peek() != lexer.TOKEN_DEF {
@@ -175,6 +182,28 @@ func (p *Parser) parseErrorDecl() *ast.ErrorDecl {
 	p.expect(lexer.TOKEN_DEDENT)
 
 	return &ast.ErrorDecl{Position: pos, Name: name, Tags: tags}
+}
+
+func (p *Parser) parsePermissionDecl() *ast.PermissionDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("permission")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+
+	members := make([]string, 0)
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		members = append(members, p.expect(lexer.TOKEN_IDENT).Text)
+		p.expectNewline()
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+
+	return &ast.PermissionDecl{Position: pos, Name: name, Members: members}
 }
 
 func (p *Parser) parseEnumDecl() *ast.EnumDecl {
@@ -395,6 +424,35 @@ func (p *Parser) parseFuncGenericParams() ([]string, []string) {
 	return typeParams, regionParams
 }
 
+func (p *Parser) parsePermissionRef() ast.PermissionRef {
+	pos := p.cur().Pos
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	member := ""
+	if p.match(lexer.TOKEN_DOT) {
+		member = p.expect(lexer.TOKEN_IDENT).Text
+	}
+	return ast.PermissionRef{Position: pos, Name: name, Member: member}
+}
+
+func (p *Parser) parsePermissionRefs(bracketed bool) []ast.PermissionRef {
+	if bracketed {
+		p.expect(lexer.TOKEN_LBRACKET)
+	} else if p.match(lexer.TOKEN_LBRACKET) {
+		bracketed = true
+	}
+	refs := make([]ast.PermissionRef, 0)
+	for {
+		refs = append(refs, p.parsePermissionRef())
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	if bracketed {
+		p.expect(lexer.TOKEN_RBRACKET)
+	}
+	return refs
+}
+
 func (p *Parser) parseFuncDeclWithAnnotations(annotations []ast.Annotation) *ast.FuncDecl {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_DEF)
@@ -411,11 +469,16 @@ func (p *Parser) parseFuncDeclWithAnnotations(annotations []ast.Annotation) *ast
 		retType = p.parseTypeExpr()
 	}
 
+	var permissions []ast.PermissionRef
+	if p.matchIdentText("can") {
+		permissions = p.parsePermissionRefs(true)
+	}
+
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 
 	body := p.parseBlock()
-	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RegionParams: regionParams, Params: params, ReturnType: retType, Body: body}
+	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RegionParams: regionParams, Permissions: permissions, Params: params, ReturnType: retType, Body: body}
 }
 
 func (p *Parser) parseParamList() []ast.ParamDecl {
@@ -491,9 +554,13 @@ func (p *Parser) parseExternDecl() ast.Decl {
 	if p.match(lexer.TOKEN_ARROW) {
 		retType = p.parseTypeExpr()
 	}
+	var permissions []ast.PermissionRef
+	if p.matchIdentText("can") {
+		permissions = p.parsePermissionRefs(true)
+	}
 	p.expectNewline()
 
-	return &ast.ExternFuncDecl{Position: pos, Name: name, RegionParams: regionParams, Params: params, ReturnType: retType, Variadic: variadic}
+	return &ast.ExternFuncDecl{Position: pos, Name: name, RegionParams: regionParams, Permissions: permissions, Params: params, ReturnType: retType, Variadic: variadic}
 }
 
 func (p *Parser) parseExportDecl() ast.Decl {
