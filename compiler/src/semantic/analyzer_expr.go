@@ -257,8 +257,8 @@ func (a *Analyzer) analyzeCanExpr(expr *ast.CanExpr) Type {
 	if expr == nil {
 		return invalidType
 	}
-	families := a.resolvePermissionFamilies(expr.Permissions, true)
-	a.recordFunctionPermissionFamilies(families)
+	refs := a.resolvePermissionRefs(expr.Permissions, true)
+	a.recordFunctionPermissionRefs(refs)
 	return a.analyzeExpr(expr.Expr)
 }
 
@@ -804,6 +804,7 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 			a.errorf(expr.Pos(), "cannot infer region parameter %q for call to %q", name, ft.Name)
 		}
 	}
+	a.recordFunctionPermissionRefs(functionPermissionRefs(ft))
 	if ft.Return == nil {
 		return a.namedTypes["void"]
 	}

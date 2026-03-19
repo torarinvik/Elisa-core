@@ -8,12 +8,23 @@ import (
 )
 
 type Diagnostic struct {
-	Pos     lexer.Pos
-	Message string
+	Pos      lexer.Pos
+	Severity DiagnosticSeverity
+	Message  string
 }
 
+type DiagnosticSeverity string
+
+const (
+	DiagnosticSeverityError   DiagnosticSeverity = "error"
+	DiagnosticSeverityWarning DiagnosticSeverity = "warning"
+)
+
 func (d Diagnostic) String() string {
-	return fmt.Sprintf("%s:%d:%d: %s", d.Pos.File, d.Pos.Line, d.Pos.Col, d.Message)
+	if d.Severity == "" || d.Severity == DiagnosticSeverityError {
+		return fmt.Sprintf("%s:%d:%d: %s", d.Pos.File, d.Pos.Line, d.Pos.Col, d.Message)
+	}
+	return fmt.Sprintf("%s:%d:%d: %s: %s", d.Pos.File, d.Pos.Line, d.Pos.Col, d.Severity, d.Message)
 }
 
 type Result struct {
@@ -65,6 +76,20 @@ type ExportedGlobal struct {
 func (r *Result) Errors() []string {
 	out := make([]string, 0, len(r.Diagnostics))
 	for _, d := range r.Diagnostics {
+		if d.Severity != "" && d.Severity != DiagnosticSeverityError {
+			continue
+		}
+		out = append(out, d.String())
+	}
+	return out
+}
+
+func (r *Result) Warnings() []string {
+	out := make([]string, 0, len(r.Diagnostics))
+	for _, d := range r.Diagnostics {
+		if d.Severity != DiagnosticSeverityWarning {
+			continue
+		}
 		out = append(out, d.String())
 	}
 	return out

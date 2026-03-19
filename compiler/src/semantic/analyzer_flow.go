@@ -179,8 +179,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 }
 
 func (a *Analyzer) analyzeCanStmt(stmt *ast.CanStmt) {
-	families := a.resolvePermissionFamilies(stmt.Permissions, true)
-	a.recordFunctionPermissionFamilies(families)
+	refs := a.resolvePermissionRefs(stmt.Permissions, true)
+	a.recordFunctionPermissionRefs(refs)
 	a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
 }
 

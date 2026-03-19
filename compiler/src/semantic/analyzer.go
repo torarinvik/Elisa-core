@@ -58,30 +58,31 @@ const (
 )
 
 type Analyzer struct {
-	file                           *ast.File
-	diagnostics                    []Diagnostic
-	namedTypes                     map[string]Type
-	permissions                    map[string]*PermissionSet
-	globalScope                    *Scope
-	functionTypes                  map[string]*FuncType
-	constValues                    map[string]ConstValue
-	exprTypes                      map[ast.Expr]Type
-	typeParamScopes                []map[string]Type
-	shapeParamScopes               []map[string]Shape
-	regionParamScopes              []map[string]bool
-	freshShapeCounter              int
-	returnFreshShapeStatus         map[string]freshReturnStatus
-	annotatedFuncs                 []*AnnotatedFunc
-	exportedTypes                  []*ExportedType
-	exportedFuncs                  []*ExportedFunc
-	exportedGlobals                []*ExportedGlobal
-	currentScope                   *Scope
-	currentReturn                  Type
-	currentRegions                 map[*Symbol]regionState
-	currentRegionMarks             map[*Symbol]regionMarkState
-	currentRegionRefs              map[*Symbol]regionRefState
-	currentPackedStores            map[string]*PackedEnumStoreType
-	currentFunctionUsedPermissions map[string]bool
+	file                              *ast.File
+	diagnostics                       []Diagnostic
+	namedTypes                        map[string]Type
+	permissions                       map[string]*PermissionSet
+	globalScope                       *Scope
+	functionTypes                     map[string]*FuncType
+	constValues                       map[string]ConstValue
+	exprTypes                         map[ast.Expr]Type
+	typeParamScopes                   []map[string]Type
+	shapeParamScopes                  []map[string]Shape
+	regionParamScopes                 []map[string]bool
+	freshShapeCounter                 int
+	returnFreshShapeStatus            map[string]freshReturnStatus
+	annotatedFuncs                    []*AnnotatedFunc
+	exportedTypes                     []*ExportedType
+	exportedFuncs                     []*ExportedFunc
+	exportedGlobals                   []*ExportedGlobal
+	currentScope                      *Scope
+	currentReturn                     Type
+	currentRegions                    map[*Symbol]regionState
+	currentRegionMarks                map[*Symbol]regionMarkState
+	currentRegionRefs                 map[*Symbol]regionRefState
+	currentPackedStores               map[string]*PackedEnumStoreType
+	currentFunctionUsedPermissions    map[string]bool
+	currentFunctionUsedPermissionRefs []ast.PermissionRef
 }
 
 type regionState struct {
@@ -123,6 +124,8 @@ func Analyze(file *ast.File) *Result {
 	a.collectExportTypeAliases(activeDecls)
 	a.collectValueSymbols(activeDecls)
 	a.analyzeDecls(activeDecls)
+	a.inferFunctionPermissionEffects(activeDecls)
+	a.warnOnImplicitFunctionPermissions(activeDecls)
 	a.validatePermissionUsage(activeDecls)
 	a.analyzeExports(activeDecls)
 	return &Result{
@@ -694,12 +697,14 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	savedRegionRefs := a.currentRegionRefs
 	savedPackedStores := a.currentPackedStores
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
+	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
 	a.currentScope = NewScope(a.globalScope)
 	a.currentRegions = map[*Symbol]regionState{}
 	a.currentRegionMarks = map[*Symbol]regionMarkState{}
 	a.currentRegionRefs = map[*Symbol]regionRefState{}
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	a.currentFunctionUsedPermissions = map[string]bool{}
+	a.currentFunctionUsedPermissionRefs = nil
 	if fnType != nil {
 		a.currentReturn = fnType.Return
 		a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)
@@ -722,12 +727,10 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	})
 	if fnType != nil {
 		fnType.FreshReturnShapeParams = mergeShapeParamNames(fnType.FreshReturnShapeParams, inferredFreshReturnShapeParams(a.returnFreshShapeStatus))
-		inferredPermissions := sortedPermissionFamilies(a.currentFunctionUsedPermissions)
-		if len(fn.Permissions) == 0 {
-			fnType.Permissions = inferredPermissions
-		} else if missing := missingPermissionFamilies(fnType.Permissions, inferredPermissions); len(missing) > 0 {
-			a.errorf(fn.Pos(), "function %q declares%s but body uses%s", fn.Name, permissionFamiliesString(fnType.Permissions), permissionFamiliesString(missing))
-		}
+		inferredRefs := canonicalizePermissionRefs(a.currentFunctionUsedPermissionRefs)
+		inferredPermissions := permissionFamiliesFromRefs(inferredRefs)
+		fnType.PermissionRefs = mergePermissionRefs(fnType.DeclaredPermissionRefs, inferredRefs)
+		fnType.Permissions = mergePermissionFamilies(fnType.DeclaredPermissions, inferredPermissions)
 	}
 	a.currentScope = savedScope
 	a.currentReturn = savedReturn
@@ -737,4 +740,5 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentRegionRefs = savedRegionRefs
 	a.currentPackedStores = savedPackedStores
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
+	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
 }

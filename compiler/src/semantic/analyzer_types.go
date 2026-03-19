@@ -32,6 +32,7 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, regionPara
 	ptypes := make([]Type, 0, len(params))
 	retType := a.namedTypes["void"]
 	shapeParams := a.collectImplicitShapeParams(params, ret)
+	resolvedPermissionRefs := a.resolvePermissionRefs(permissionRefs, true)
 	permissions := a.resolvePermissionFamilies(permissionRefs, true)
 	a.withTypeParams(typeParams, nil, func() {
 		a.withRegionParams(regionParams, func() {
@@ -49,6 +50,9 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, regionPara
 		Name:                   name,
 		TypeParams:             append([]string(nil), typeParams...),
 		RegionParams:           append([]string(nil), regionParams...),
+		DeclaredPermissionRefs: append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
+		DeclaredPermissions:    append([]string(nil), permissions...),
+		PermissionRefs:         append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
 		Permissions:            permissions,
 		ShapeParams:            shapeParams,
 		FreshReturnShapeParams: knownFreshReturnShapeParams(name, retType),
@@ -640,7 +644,7 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 		for _, param := range n.Params {
 			params = append(params, a.substituteType(param, bindings, shapeBindings, regionBindings))
 		}
-		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), RegionParams: append([]string(nil), n.RegionParams...), Permissions: append([]string(nil), n.Permissions...), ShapeParams: append([]string(nil), n.ShapeParams...), FreshReturnShapeParams: append([]string(nil), n.FreshReturnShapeParams...), Params: params, Return: a.substituteType(n.Return, bindings, shapeBindings, regionBindings), Variadic: n.Variadic}
+		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), RegionParams: append([]string(nil), n.RegionParams...), DeclaredPermissionRefs: append([]ast.PermissionRef(nil), n.DeclaredPermissionRefs...), DeclaredPermissions: append([]string(nil), n.DeclaredPermissions...), PermissionRefs: append([]ast.PermissionRef(nil), n.PermissionRefs...), Permissions: append([]string(nil), n.Permissions...), ShapeParams: append([]string(nil), n.ShapeParams...), FreshReturnShapeParams: append([]string(nil), n.FreshReturnShapeParams...), Params: params, Return: a.substituteType(n.Return, bindings, shapeBindings, regionBindings), Variadic: n.Variadic}
 	default:
 		return t
 	}

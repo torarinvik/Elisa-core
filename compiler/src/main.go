@@ -149,6 +149,11 @@ func analyzeProgram(filename string, src []byte, stderr io.Writer) (*ast.File, *
 	}
 
 	result := semantic.Analyze(file)
+	if warns := result.Warnings(); len(warns) > 0 {
+		for _, w := range warns {
+			fmt.Fprintf(stderr, "%s\n", w)
+		}
+	}
 	if errs := result.Errors(); len(errs) > 0 {
 		for _, e := range errs {
 			fmt.Fprintf(stderr, "%s\n", e)

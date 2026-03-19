@@ -32,13 +32,13 @@ extern sfree_bytes(ptr: heap u8&) -> heap u8! can[Memory]
 extern snprintf(buffer: any u8&?, buffer_size: usize, format: static u8&, ...) -> int
 
 
-def require_heap_pair_node() -> heap HeapPairNode& error[MemoryError]:
+def require_heap_pair_node() -> heap HeapPairNode& error[MemoryError] can[Memory]:
     raw: heap HeapPairNode&? = alloc_heap_pair_node() can Memory.Allocate
     node: heap HeapPairNode& = raw else raise MemoryError.OutOfMemory
     return node
 
 
-def release_heap_pair_node(node: mutable heap HeapPairNode&?):
+def release_heap_pair_node(node: mutable heap HeapPairNode&?) can[Memory]:
     if node != null:
         can Memory.Release:
             node as ! <- sfree_heap_pair_node(node)
@@ -60,7 +60,7 @@ def recursive_pair_node_sum(node: heap HeapPairNode&) -> int error[LogicError, D
     return value + (try recursive_pair_node_sum(next))
 
 
-def recursive_free_pair_chain(node: mutable heap HeapPairNode&?) -> void error[LogicError]:
+def recursive_free_pair_chain(node: mutable heap HeapPairNode&?) -> void error[LogicError] can[Memory]:
     if node == null:
         return
     live: heap HeapPairNode& = node
@@ -70,7 +70,7 @@ def recursive_free_pair_chain(node: mutable heap HeapPairNode&?) -> void error[L
         try recursive_free_pair_chain(next_node)
 
 
-def build_pair_chain_sum() -> int error[MemoryError, LogicError, DiskError, NetError]:
+def build_pair_chain_sum() -> int error[MemoryError, LogicError, DiskError, NetError] can[Memory]:
     can Memory.Allocate:
         first_live: heap HeapPairNode& = try require_heap_pair_node()
         second_live: heap HeapPairNode& = try require_heap_pair_node()
@@ -83,7 +83,7 @@ def build_pair_chain_sum() -> int error[MemoryError, LogicError, DiskError, NetE
         return total
 
 
-def borrow_then_release_single_pair() -> int error[MemoryError, DiskError, NetError]:
+def borrow_then_release_single_pair() -> int error[MemoryError, DiskError, NetError] can[Memory]:
     can Memory.Allocate:
         live: heap HeapPairNode& = try require_heap_pair_node()
         live.pair <- FuzzPair(11, 12)
@@ -107,7 +107,7 @@ def checked_write_into_stack(buffer: stack u8&, size: usize, format: static u8&)
     return written
 
 
-def alloc_and_format_heap_buffer() -> int error[MemoryError, FormatError]:
+def alloc_and_format_heap_buffer() -> int error[MemoryError, FormatError] can[Memory]:
     can Memory.Allocate:
         raw: heap u8&? = alloc_bytes(32u)
         buffer_live: heap u8& = raw else raise MemoryError.OutOfMemory
@@ -123,14 +123,14 @@ def stack_buffer_format() -> int error[FormatError]:
     return try checked_write_into_stack(&buffer[0u], 32u, "stack=%d")
 
 
-def recursive_format_or_fallback(depth: int) -> int:
+def recursive_format_or_fallback(depth: int) -> int can[Memory]:
     can Memory.Allocate:
         if depth <= 0:
             return try alloc_and_format_heap_buffer() else -1
         return (try alloc_and_format_heap_buffer() else -1) + recursive_format_or_fallback(depth - 1)
 
 
-def allocator_ownership_combo(depth: int) -> int:
+def allocator_ownership_combo(depth: int) -> int can[Memory]:
     can Memory.Allocate:
         total: mutable int = try build_pair_chain_sum() else -1000
         total <- total + (try borrow_then_release_single_pair() else -1001)

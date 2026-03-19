@@ -725,7 +725,7 @@ func TestAnalyzeAcceptsExplicitAndInferredPermissions(t *testing.T) {
 	Write
 	Flush
 
-extern emit(value: int) -> void can[Console]
+extern emit(value: int) -> void can[Console.Write]
 
 def explicit() -> void can[Console]:
 	emit(1) can Console.Write
@@ -752,32 +752,40 @@ def scoped() -> void:
 		if len(fn.Permissions) != 1 || fn.Permissions[0] != "Console" {
 			t.Fatalf("expected %s to infer can[Console], got %#v", name, fn.Permissions)
 		}
+		if len(fn.PermissionRefs) == 0 {
+			t.Fatalf("expected %s to preserve permission refs, got none", name)
+		}
+	}
+	if warns := result.Warnings(); len(warns) == 0 {
+		t.Fatal("expected inferred-permission warnings, got none")
 	}
 }
 
-func TestAnalyzeRejectsMissingPermissionGrant(t *testing.T) {
+func TestAnalyzeWarnsOnMissingPermissionGrant(t *testing.T) {
 	src := `permission Console:
 	Write
 
-extern emit(value: int) -> void can[Console]
+extern emit(value: int) -> void can[Console.Write]
 
 def bad() -> void:
 	emit(1)
 `
-	_, errs := parseAndAnalyze(t, "permissions_missing_grant_reject.llcontext", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
+	result, errs := parseAndAnalyze(t, "permissions_missing_grant_warn.llcontext", src)
+	requireNoErrors(t, errs)
+	warns := strings.Join(result.Warnings(), "\n")
+	if warns == "" {
+		t.Fatal("expected semantic warning, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "call to \"emit\" requires can[Console]") {
-		t.Fatalf("expected missing-permission diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	if !strings.Contains(warns, "call to \"emit\" requires can[Console]") {
+		t.Fatalf("expected missing-permission warning, got:\n%s", warns)
 	}
 }
 
-func TestAnalyzeRejectsForwardReferencedInferredPermissionCallWithoutGrant(t *testing.T) {
+func TestAnalyzePropagatesForwardReferencedInferredPermissionCalls(t *testing.T) {
 	src := `permission Console:
 	Write
 
-extern emit(value: int) -> void can[Console]
+extern emit(value: int) -> void can[Console.Write]
 
 def caller() -> void:
 	callee()
@@ -785,12 +793,21 @@ def caller() -> void:
 def callee() -> void:
 	emit(1) can Console.Write
 `
-	_, errs := parseAndAnalyze(t, "permissions_forward_reference_reject.llcontext", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
+	result, errs := parseAndAnalyze(t, "permissions_forward_reference_propagates.llcontext", src)
+	requireNoErrors(t, errs)
+	sym, ok := result.GlobalScope.Lookup("caller")
+	if !ok {
+		t.Fatal("expected caller symbol")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "call to \"callee\" requires can[Console]") {
-		t.Fatalf("expected forward-reference permission diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	fn, ok := sym.Type.(*semantic.FuncType)
+	if !ok {
+		t.Fatalf("expected caller function type, got %T", sym.Type)
+	}
+	if len(fn.Permissions) != 1 || fn.Permissions[0] != "Console" {
+		t.Fatalf("expected caller to infer can[Console], got %#v", fn.Permissions)
+	}
+	if !strings.Contains(strings.Join(result.Warnings(), "\n"), "call to \"callee\" requires can[Console]") {
+		t.Fatalf("expected forward-reference permission warning, got:\n%s", strings.Join(result.Warnings(), "\n"))
 	}
 }
 

@@ -31,12 +31,163 @@ func (a *Analyzer) collectPermissionDecls(decls []ast.Decl) {
 	}
 }
 
-func (a *Analyzer) resolvePermissionFamilies(refs []ast.PermissionRef, report bool) []string {
+func permissionRefKey(ref ast.PermissionRef) string {
+	if ref.Member != "" {
+		return ref.Name + "." + ref.Member
+	}
+	return ref.Name
+}
+
+func canonicalizePermissionRefs(refs []ast.PermissionRef) []ast.PermissionRef {
+	if len(refs) == 0 {
+		return nil
+	}
+	familyRefs := make(map[string]ast.PermissionRef)
+	memberRefs := make(map[string]ast.PermissionRef)
+	for _, ref := range refs {
+		if ref.Name == "" {
+			continue
+		}
+		if ref.Member == "" {
+			familyRefs[ref.Name] = ast.PermissionRef{Position: ref.Position, Name: ref.Name}
+			for key, existing := range memberRefs {
+				if existing.Name == ref.Name {
+					delete(memberRefs, key)
+				}
+			}
+			continue
+		}
+		if _, ok := familyRefs[ref.Name]; ok {
+			continue
+		}
+		memberRefs[permissionRefKey(ref)] = ast.PermissionRef{Position: ref.Position, Name: ref.Name, Member: ref.Member}
+	}
+	out := make([]ast.PermissionRef, 0, len(familyRefs)+len(memberRefs))
+	for _, ref := range familyRefs {
+		out = append(out, ref)
+	}
+	for _, ref := range memberRefs {
+		out = append(out, ref)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].Member < out[j].Member
+	})
+	return out
+}
+
+func permissionFamiliesFromRefs(refs []ast.PermissionRef) []string {
 	if len(refs) == 0 {
 		return nil
 	}
 	seen := make(map[string]bool, len(refs))
-	families := make([]string, 0, len(refs))
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if ref.Name == "" || seen[ref.Name] {
+			continue
+		}
+		seen[ref.Name] = true
+		out = append(out, ref.Name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func mergePermissionFamilies(left []string, right []string) []string {
+	if len(left) == 0 && len(right) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(left)+len(right))
+	for _, family := range left {
+		if seen[family] {
+			continue
+		}
+		seen[family] = true
+		out = append(out, family)
+	}
+	for _, family := range right {
+		if seen[family] {
+			continue
+		}
+		seen[family] = true
+		out = append(out, family)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func mergePermissionRefs(left []ast.PermissionRef, right []ast.PermissionRef) []ast.PermissionRef {
+	merged := make([]ast.PermissionRef, 0, len(left)+len(right))
+	merged = append(merged, left...)
+	merged = append(merged, right...)
+	return canonicalizePermissionRefs(merged)
+}
+
+func functionPermissionRefs(fnType *FuncType) []ast.PermissionRef {
+	if fnType == nil {
+		return nil
+	}
+	if len(fnType.PermissionRefs) != 0 {
+		return fnType.PermissionRefs
+	}
+	refs := make([]ast.PermissionRef, 0, len(fnType.Permissions))
+	for _, family := range fnType.Permissions {
+		refs = append(refs, ast.PermissionRef{Name: family})
+	}
+	return refs
+}
+
+func filterPermissionRefsByFamilies(refs []ast.PermissionRef, families []string) []ast.PermissionRef {
+	if len(refs) == 0 || len(families) == 0 {
+		return nil
+	}
+	allowed := make(map[string]bool, len(families))
+	for _, family := range families {
+		allowed[family] = true
+	}
+	out := make([]ast.PermissionRef, 0, len(refs))
+	for _, ref := range refs {
+		if allowed[ref.Name] {
+			out = append(out, ref)
+		}
+	}
+	return canonicalizePermissionRefs(out)
+}
+
+func permissionDeclHint(refs []ast.PermissionRef, families []string) string {
+	refs = filterPermissionRefsByFamilies(refs, families)
+	if hint := PermissionRefsString(refs); hint != "" {
+		return hint
+	}
+	return permissionFamiliesString(families)
+}
+
+func permissionGrantHint(refs []ast.PermissionRef, families []string) string {
+	refs = filterPermissionRefsByFamilies(refs, families)
+	if len(refs) == 0 {
+		for _, family := range families {
+			refs = append(refs, ast.PermissionRef{Name: family})
+		}
+	}
+	refs = canonicalizePermissionRefs(refs)
+	if len(refs) == 1 && refs[0].Member != "" {
+		return "can " + PermissionRefString(refs[0])
+	}
+	return PermissionRefsString(refs)
+}
+
+func (a *Analyzer) resolvePermissionFamilies(refs []ast.PermissionRef, report bool) []string {
+	return permissionFamiliesFromRefs(a.resolvePermissionRefs(refs, report))
+}
+
+func (a *Analyzer) resolvePermissionRefs(refs []ast.PermissionRef, report bool) []ast.PermissionRef {
+	if len(refs) == 0 {
+		return nil
+	}
+	valid := make([]ast.PermissionRef, 0, len(refs))
 	for _, ref := range refs {
 		permission, ok := a.permissions[ref.Name]
 		if !ok {
@@ -51,12 +202,9 @@ func (a *Analyzer) resolvePermissionFamilies(refs []ast.PermissionRef, report bo
 			}
 			continue
 		}
-		if !seen[ref.Name] {
-			seen[ref.Name] = true
-			families = append(families, ref.Name)
-		}
+		valid = append(valid, ref)
 	}
-	return families
+	return canonicalizePermissionRefs(valid)
 }
 
 func (a *Analyzer) recordFunctionPermissionFamilies(families []string) {
@@ -66,6 +214,15 @@ func (a *Analyzer) recordFunctionPermissionFamilies(families []string) {
 	for _, family := range families {
 		a.currentFunctionUsedPermissions[family] = true
 	}
+}
+
+func (a *Analyzer) recordFunctionPermissionRefs(refs []ast.PermissionRef) {
+	refs = canonicalizePermissionRefs(refs)
+	if len(refs) == 0 {
+		return
+	}
+	a.currentFunctionUsedPermissionRefs = append(a.currentFunctionUsedPermissionRefs, refs...)
+	a.recordFunctionPermissionFamilies(permissionFamiliesFromRefs(refs))
 }
 
 func sortedPermissionFamilies(families map[string]bool) []string {
@@ -114,6 +271,247 @@ func extendGrantedPermissionFamilies(granted map[string]bool, families []string)
 		next[family] = true
 	}
 	return next
+}
+
+func samePermissionRefs(left []ast.PermissionRef, right []ast.PermissionRef) bool {
+	left = canonicalizePermissionRefs(left)
+	right = canonicalizePermissionRefs(right)
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i].Name != right[i].Name || left[i].Member != right[i].Member {
+			return false
+		}
+	}
+	return true
+}
+
+func sameStringSlice(left []string, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *Analyzer) inferFunctionPermissionEffects(decls []ast.Decl) {
+	for iter := 0; iter < len(decls)+4; iter++ {
+		changed := false
+		for _, decl := range decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			sym, ok := a.globalScope.Lookup(fn.Name)
+			if !ok {
+				continue
+			}
+			fnType, ok := sym.Type.(*FuncType)
+			if !ok || fnType == nil {
+				continue
+			}
+			usedRefs := a.collectFunctionPermissionRefs(fn)
+			mergedRefs := mergePermissionRefs(fnType.DeclaredPermissionRefs, usedRefs)
+			mergedFamilies := mergePermissionFamilies(fnType.DeclaredPermissions, permissionFamiliesFromRefs(mergedRefs))
+			if !samePermissionRefs(fnType.PermissionRefs, mergedRefs) {
+				fnType.PermissionRefs = mergedRefs
+				changed = true
+			}
+			if !sameStringSlice(fnType.Permissions, mergedFamilies) {
+				fnType.Permissions = mergedFamilies
+				changed = true
+			}
+		}
+		if !changed {
+			return
+		}
+	}
+}
+
+func (a *Analyzer) warnOnImplicitFunctionPermissions(decls []ast.Decl) {
+	for _, decl := range decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		sym, ok := a.globalScope.Lookup(fn.Name)
+		if !ok {
+			continue
+		}
+		fnType, ok := sym.Type.(*FuncType)
+		if !ok || fnType == nil {
+			continue
+		}
+		missing := missingPermissionFamilies(fnType.DeclaredPermissions, fnType.Permissions)
+		if len(missing) == 0 {
+			continue
+		}
+		hint := permissionDeclHint(functionPermissionRefs(fnType), missing)
+		if len(fnType.DeclaredPermissions) == 0 {
+			a.warnf(fn.Pos(), "function %q infers%s from its body; add explicit%s to make the effect contract visible", fn.Name, permissionFamiliesString(missing), hint)
+			continue
+		}
+		a.warnf(fn.Pos(), "function %q declares%s but body also uses%s; add explicit%s to silence this warning", fn.Name, permissionFamiliesString(fnType.DeclaredPermissions), permissionFamiliesString(missing), hint)
+	}
+}
+
+func (a *Analyzer) collectFunctionPermissionRefs(fn *ast.FuncDecl) []ast.PermissionRef {
+	if fn == nil {
+		return nil
+	}
+	collector := permissionEffectCollector{analyzer: a}
+	collector.collectStmts(fn.Body)
+	return collector.refs()
+}
+
+type permissionEffectCollector struct {
+	analyzer *Analyzer
+	seen     []ast.PermissionRef
+}
+
+func (c *permissionEffectCollector) refs() []ast.PermissionRef {
+	return canonicalizePermissionRefs(c.seen)
+}
+
+func (c *permissionEffectCollector) addRefs(refs []ast.PermissionRef) {
+	if len(refs) == 0 {
+		return
+	}
+	c.seen = append(c.seen, refs...)
+}
+
+func (c *permissionEffectCollector) collectStmts(stmts []ast.Stmt) {
+	for _, stmt := range stmts {
+		c.collectStmt(stmt)
+	}
+}
+
+func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
+	switch n := stmt.(type) {
+	case *ast.VarDeclStmt:
+		if n.Value != nil {
+			c.collectExpr(n.Value)
+		}
+	case *ast.AssignStmt:
+		c.collectExpr(n.Target)
+		c.collectExpr(n.Value)
+	case *ast.AugAssignStmt:
+		c.collectExpr(n.Target)
+		c.collectExpr(n.Value)
+	case *ast.AsRefAssignStmt:
+		c.collectExpr(n.Target)
+		c.collectExpr(n.Value)
+	case *ast.ReturnStmt:
+		c.collectExpr(n.Value)
+	case *ast.IfStmt:
+		c.collectExpr(n.Cond)
+		c.collectStmts(n.Then)
+		for _, elif := range n.Elifs {
+			c.collectExpr(elif.Cond)
+			c.collectStmts(elif.Body)
+		}
+		c.collectStmts(n.Else)
+	case *ast.MatchStmt:
+		c.collectExpr(n.Value)
+		c.collectExpr(n.Store)
+		for _, arm := range n.Arms {
+			c.collectStmts(arm.Body)
+		}
+	case *ast.InStoreStmt:
+		c.collectExpr(n.Store)
+		c.collectStmts(n.Body)
+	case *ast.CanStmt:
+		c.addRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false))
+		c.collectStmts(n.Body)
+	case *ast.WhileStmt:
+		c.collectExpr(n.Cond)
+		c.collectStmts(n.Body)
+	case *ast.PanicStmt:
+		c.collectExpr(n.Message)
+	case *ast.ExprStmt:
+		c.collectExpr(n.Expr)
+	case *ast.StaticIfStmt:
+		for _, active := range c.analyzer.activeStmtBranch(n) {
+			c.collectStmt(active)
+		}
+	case *ast.StaticErrorStmt:
+		c.collectExpr(n.Message)
+	case *ast.DiscardStmt:
+		c.collectExpr(n.Value)
+	}
+}
+
+func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
+	if expr == nil {
+		return
+	}
+	switch n := expr.(type) {
+	case *ast.BinaryExpr:
+		c.collectExpr(n.Left)
+		c.collectExpr(n.Right)
+	case *ast.UnaryExpr:
+		c.collectExpr(n.Operand)
+	case *ast.CallExpr:
+		c.collectExpr(n.Func)
+		for _, arg := range n.Args {
+			c.collectExpr(arg)
+		}
+		if fnType, ok := c.analyzer.exprTypes[n.Func].(*FuncType); ok {
+			c.addRefs(functionPermissionRefs(fnType))
+		}
+	case *ast.FieldExpr:
+		c.collectExpr(n.Object)
+	case *ast.IndexExpr:
+		c.collectExpr(n.Object)
+		c.collectExpr(n.Index)
+	case *ast.SliceExpr:
+		c.collectExpr(n.Object)
+		c.collectExpr(n.Start)
+		c.collectExpr(n.End)
+	case *ast.ListLitExpr:
+		for _, elem := range n.Elems {
+			c.collectExpr(elem)
+		}
+	case *ast.CastExpr:
+		c.collectExpr(n.Operand)
+	case *ast.TernaryExpr:
+		c.collectExpr(n.Value)
+		c.collectExpr(n.Cond)
+		c.collectExpr(n.Alt)
+	case *ast.AddrOfExpr:
+		c.collectExpr(n.Operand)
+	case *ast.StructLitExpr:
+		for _, arg := range n.Args {
+			c.collectExpr(arg)
+		}
+	case *ast.ParenExpr:
+		c.collectExpr(n.Inner)
+	case *ast.RaiseExpr:
+		c.collectExpr(n.Error)
+	case *ast.TryExpr:
+		c.collectExpr(n.Value)
+		c.collectExpr(n.Fallback)
+	case *ast.UnwrapElseExpr:
+		c.collectExpr(n.Value)
+		c.collectExpr(n.Fallback)
+	case *ast.AllocExpr:
+		c.collectExpr(n.Owner)
+		c.collectExpr(n.Value)
+	case *ast.CanExpr:
+		c.addRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false))
+		c.collectExpr(n.Expr)
+	case *ast.MatchExpr:
+		c.collectExpr(n.Value)
+		c.collectExpr(n.Store)
+		for _, arm := range n.Arms {
+			c.collectStmts(arm.Body)
+		}
+	}
 }
 
 func (a *Analyzer) validatePermissionUsage(decls []ast.Decl) {
@@ -185,8 +583,8 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 	case *ast.ExprStmt:
 		a.validatePermissionExpr(n.Expr, granted)
 	case *ast.StaticIfStmt:
-		for _, stmt := range a.activeStmtBranch(n) {
-			a.validatePermissionStmt(stmt, granted)
+		for _, active := range a.activeStmtBranch(n) {
+			a.validatePermissionStmt(active, granted)
 		}
 	case *ast.StaticErrorStmt:
 		a.validatePermissionExpr(n.Message, granted)
@@ -281,5 +679,5 @@ func (a *Analyzer) validateCallPermissions(pos lexer.Pos, fnExpr ast.Expr, grant
 	if len(missing) == 0 {
 		return
 	}
-	a.errorf(pos, "call to %q requires%s; wrap it in a can[...] annotation or can ...: block", fnType.Name, permissionFamiliesString(missing))
+	a.warnf(pos, "call to %q requires%s and has no explicit local effect grant; add %s or a surrounding can ...: block", fnType.Name, permissionFamiliesString(missing), permissionGrantHint(functionPermissionRefs(fnType), missing))
 }

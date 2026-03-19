@@ -186,6 +186,9 @@ type FuncType struct {
 	Name                   string
 	TypeParams             []string
 	RegionParams           []string
+	DeclaredPermissionRefs []ast.PermissionRef
+	DeclaredPermissions    []string
+	PermissionRefs         []ast.PermissionRef
 	Permissions            []string
 	ShapeParams            []string
 	FreshReturnShapeParams []string
@@ -484,6 +487,24 @@ func permissionFamiliesString(families []string) string {
 		return ""
 	}
 	return " can[" + strings.Join(families, ", ") + "]"
+}
+
+func PermissionRefString(ref ast.PermissionRef) string {
+	if ref.Member != "" {
+		return ref.Name + "." + ref.Member
+	}
+	return ref.Name
+}
+
+func PermissionRefsString(refs []ast.PermissionRef) string {
+	if len(refs) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		parts = append(parts, PermissionRefString(ref))
+	}
+	return " can[" + strings.Join(parts, ", ") + "]"
 }
 
 var (
