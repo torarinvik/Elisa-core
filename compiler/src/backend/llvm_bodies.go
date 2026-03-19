@@ -375,6 +375,8 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		return s.emitMatch(n)
 	case *ast.InStoreStmt:
 		return s.emitInStore(n)
+	case *ast.CanStmt:
+		return s.emitBlock(n.Body, true)
 	case *ast.WhileStmt:
 		return s.emitWhile(n)
 	case *ast.PassStmt:

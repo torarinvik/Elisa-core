@@ -89,25 +89,25 @@ def frontend_scope_stress(tokens: view[Token], local_name: dstr) -> bool error[R
     region parse(4096u)
     parse_arena: any Arena& = (&parse).cast[any Arena&]()
 
-    root: any Scope& = new[parse] Scope(null, arena_dict_new__Symbol(parse_arena, 8u), 0)
-    child: any Scope& = new[parse] Scope(root.cast[any Scope&?](), arena_dict_new__Symbol(parse_arena, 8u), root.depth + 1)
-    parser: any ParserState& = new[parse] ParserState(tokens, 0u, child.cast[any Scope&?]())
+    root: parse Scope& = new[parse] Scope(null, arena_dict_new__Symbol(parse_arena, 8u), 0)
+    child: parse Scope& = new[parse] Scope(root.cast[any Scope&?](), arena_dict_new__Symbol(parse_arena, 8u), root.depth + 1)
+    parser: parse ParserState& = new[parse] ParserState(tokens, 0u, child.cast[any Scope&?]())
 
-    match parser_peek(parser):
+    match parser_peek(parser.cast[any ParserState&]()):
         TokenKind.Eof:
             return false
 
-    first_kind: TokenKind = parser_advance(parser)
+    first_kind: TokenKind = parser_advance(parser.cast[any ParserState&]())
     try arena_dict_reserve__Symbol(parse_arena, (&root.symbols).cast[any dict[dstr, Symbol]&](), 16u)
 
-    global_ok: bool = try scope_define(parse_arena, root, "parse_file", SymbolKind.Func, TokenKind.Def)
-    local_ok: bool = try scope_define(parse_arena, child, local_name, SymbolKind.Local, first_kind)
+    global_ok: bool = try scope_define(parse_arena, root.cast[any Scope&](), "parse_file", SymbolKind.Func, TokenKind.Def)
+    local_ok: bool = try scope_define(parse_arena, child.cast[any Scope&](), local_name, SymbolKind.Local, first_kind)
 
-    return global_ok and local_ok and scope_contains(child, "parse_file") and scope_contains(child, local_name)
+    return global_ok and local_ok and scope_contains(child.cast[any Scope&](), "parse_file") and scope_contains(child.cast[any Scope&](), local_name)
 
 def frontend_region_token(line: int, column: int) -> int:
     region scratch(2048u)
-    token: any Token& = new[scratch] Token(TokenKind.Ident, SourceSpan(line, column), "token")
+    token: scratch Token& = new[scratch] Token(TokenKind.Ident, SourceSpan(line, column), "token")
     return token.span.column
 
 def frontend_smoke(name: dstr) -> bool error[RuntimeError]:

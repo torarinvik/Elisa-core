@@ -8,7 +8,7 @@ The language now supports statement-form region checkpoints on top of the existi
 region scratch(1024u)
 
 mark scratch as cp
-temp: any i32& = new[scratch] 1
+temp: scratch i32& = new[scratch] 1
 restore scratch from cp
 
 reset scratch
@@ -57,7 +57,7 @@ That means code like this is rejected:
 def bad() -> i32:
     region scratch
     mark scratch as cp
-    value: any i32& = new[scratch] 1
+    value: scratch i32& = new[scratch] 1
     restore scratch from cp
     return value[0u]
 ```
@@ -79,21 +79,21 @@ Nested checkpoints are allowed.
 ```context
 def nested(seed: i32) -> i32:
     region scratch(1024u)
-    base: any i32& = new[scratch] seed
+    base: scratch i32& = new[scratch] seed
     baseline: i32 = base[0u]
 
     mark scratch as outer
-    stable: any i32& = new[scratch] seed + 1
+    stable: scratch i32& = new[scratch] seed + 1
 
     mark scratch as inner
-    temp: any i32& = new[scratch] seed + 2
+    temp: scratch i32& = new[scratch] seed + 2
     restore scratch from inner
 
     kept: i32 = stable[0u]
     restore scratch from outer
 
     reset scratch
-    final: any i32& = new[scratch] seed + 3
+    final: scratch i32& = new[scratch] seed + 3
     return baseline + kept + final[0u]
 ```
 

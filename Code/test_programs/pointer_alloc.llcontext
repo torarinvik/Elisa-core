@@ -2,25 +2,33 @@ repr(c) struct Node:
     value: mutable int
     next: mutable heap Node&?
 
+permission Memory:
+    Allocate
+    Release
+
 error MemoryError:
     OutOfMemory
 
-extern alloc_node() -> heap Node&?
-extern sfree_node(node: heap Node&) -> heap Node!
+extern alloc_node() -> heap Node&? can[Memory]
+extern sfree_node(node: heap Node&) -> heap Node! can[Memory]
 
 def require_node() -> heap Node& error[MemoryError]:
-    node: heap Node& = alloc_node() else raise MemoryError.OutOfMemory
+    raw: heap Node&? = alloc_node() can Memory.Allocate
+    node: heap Node& = raw else raise MemoryError.OutOfMemory
     return node
 
 def make_node_value() -> int error[MemoryError]:
-    node: heap Node& = try require_node()
-    node.value <- 42
-    return node.value
+    can Memory.Allocate:
+        node: heap Node& = try require_node()
+        node.value <- 42
+        return node.value
 
 def make_node_value_or_zero() -> int:
-    value: int = try make_node_value() else 0
-    return value
+    can Memory.Allocate:
+        value: int = try make_node_value() else 0
+        return value
 
 def release_node(node: mutable heap Node&?):
     if node != null:
-        node as ! <- sfree_node(node)
+        can Memory.Release:
+            node as ! <- sfree_node(node)

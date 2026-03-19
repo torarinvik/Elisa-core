@@ -222,21 +222,33 @@ node as ! <- sfree_node(node)
 
 ## Safe free pattern
 
-The canonical safe-free API shape is:
+The canonical safe-free API shape should keep both **storage** and **permission** information visible at the FFI edge:
 
 ```context
-def sfree[T](ptr: T&) -> T!:
-    free(ptr.void&())
+permission Memory:
+    Allocate
+    Release
+
+extern malloc(bytes: usize) -> heap void&? can[Memory]
+extern free(ptr: heap void&) -> void can[Memory]
+
+def sfree_node(node: heap Node&) -> heap Node! can[Memory]:
+    free(node.cast[heap void&]()) can Memory.Release
     return null
 ```
 
-This forces the caller to prove the pointer is non-null before free, and returns a value proven null afterward.
+This keeps the low-level boundary honest:
+
+- allocation returns a nullable **heap** pointer
+- freeing requires a proven non-null **heap** pointer
+- both operations explicitly advertise that they require `Memory`
+- the wrapper still returns a value proven null afterward
 
 Example usage:
 
 ```context
 if node != null:
-    node as ! <- sfree_node(node)
+    node as ! <- sfree_node(node) can Memory.Release
 ```
 
 This is nice because it matches the real machine-level story:
@@ -257,22 +269,29 @@ Using the current explicit storage qualifiers, a practical wrapper looks like th
 error MemoryError:
     OutOfMemory
 
-extern alloc_node() -> heap Node&?
+permission Memory:
+    Allocate
+    Release
 
-def require_node() -> heap Node& error[MemoryError]:
-    node: heap Node& = alloc_node() else raise MemoryError.OutOfMemory
+extern alloc_node() -> heap Node&? can[Memory]
+
+def require_node() -> heap Node& error[MemoryError] can[Memory]:
+    raw: heap Node&? = alloc_node() can Memory.Allocate
+    node: heap Node& = raw else raise MemoryError.OutOfMemory
     return node
 
-def make_node_value() -> int error[MemoryError]:
+def make_node_value() -> int error[MemoryError] can[Memory]:
     node: heap Node& = try require_node()
     node.value <- 42
     return node.value
 
-def make_node_value_or_zero() -> int:
+def make_node_value_or_zero() -> int can[Memory]:
     return try make_node_value() else 0
 ```
 
 That keeps the low-level boundary honest (`alloc_node` may return null), preserves the fact that the pointer is heap-backed once it succeeds, and lets the rest of the example work with a proven non-null pointer plus explicit propagation and recovery.
+
+In other words: keep `any` for real provenance-erasing boundaries such as generic FFI shims, but prefer `heap`, `stack`, `static`, or a named region like `scratch` when the storage class is actually known.
 
 ## Stack-qualified refs are for single-slot borrows
 
