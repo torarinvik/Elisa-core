@@ -187,6 +187,8 @@ type FuncType struct {
 	Name                   string
 	TypeParams             []string
 	RegionParams           []string
+	PermissionParams       []string
+	UsedPermissionParams   []string
 	DeclaredPermissionRefs []ast.PermissionRef
 	DeclaredPermissions    []string
 	PermissionRefs         []ast.PermissionRef
@@ -463,12 +465,15 @@ func (t *FuncType) String() string {
 	for _, p := range t.Params {
 		parts = append(parts, p.String())
 	}
-	generics := make([]string, 0, len(t.TypeParams)+len(t.RegionParams))
+	generics := make([]string, 0, len(t.TypeParams)+len(t.RegionParams)+len(t.PermissionParams))
 	for _, param := range t.TypeParams {
 		generics = append(generics, param)
 	}
 	for _, param := range t.RegionParams {
 		generics = append(generics, "region "+param)
+	}
+	for _, param := range t.PermissionParams {
+		generics = append(generics, "permission "+param)
 	}
 	prefix := ""
 	if len(generics) > 0 {

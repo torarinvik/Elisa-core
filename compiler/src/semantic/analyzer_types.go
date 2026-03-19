@@ -28,21 +28,25 @@ func (a *Analyzer) defineLocal(sym *Symbol, pos lexer.Pos) {
 	}
 }
 
-func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, regionParams []string, permissionRefs []ast.PermissionRef, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
+func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
 	ptypes := make([]Type, 0, len(params))
 	retType := a.namedTypes["void"]
 	shapeParams := a.collectImplicitShapeParams(params, ret)
-	resolvedPermissionRefs := a.resolvePermissionRefs(permissionRefs, true)
-	permissions := a.resolvePermissionFamilies(permissionRefs, true)
+	var resolvedPermissionRefs []ast.PermissionRef
+	var permissions []string
 	a.withTypeParams(typeParams, nil, func() {
 		a.withRegionParams(regionParams, func() {
-			a.withShapeParams(shapeParams, func() {
-				for _, p := range params {
-					ptypes = append(ptypes, a.resolveType(p.Type))
-				}
-				if ret != nil {
-					retType = a.resolveType(ret)
-				}
+			a.withPermissionParams(permissionParams, func() {
+				resolvedPermissionRefs = a.resolvePermissionRefs(permissionRefs, true)
+				permissions = a.resolvePermissionFamilies(permissionRefs, true)
+				a.withShapeParams(shapeParams, func() {
+					for _, p := range params {
+						ptypes = append(ptypes, a.resolveType(p.Type))
+					}
+					if ret != nil {
+						retType = a.resolveType(ret)
+					}
+				})
 			})
 		})
 	})
@@ -50,6 +54,8 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, regionPara
 		Name:                   name,
 		TypeParams:             append([]string(nil), typeParams...),
 		RegionParams:           append([]string(nil), regionParams...),
+		PermissionParams:       append([]string(nil), permissionParams...),
+		UsedPermissionParams:   append([]string(nil), a.permissionParamsInRefs(permissionRefs)...),
 		DeclaredPermissionRefs: append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
 		DeclaredPermissions:    append([]string(nil), permissions...),
 		PermissionRefs:         append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
@@ -118,6 +124,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		permissions := a.resolvePermissionFamilies(n.Permissions, true)
 		return &FuncType{
 			Name:                   "func",
+			UsedPermissionParams:   append([]string(nil), a.permissionParamsInRefs(n.Permissions)...),
 			DeclaredPermissionRefs: append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
 			DeclaredPermissions:    append([]string(nil), permissions...),
 			PermissionRefs:         append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
@@ -614,6 +621,45 @@ func (a *Analyzer) lookupShapeParam(name string) (Shape, bool) {
 	return nil, false
 }
 
+func (a *Analyzer) withPermissionParams(names []string, fn func()) {
+	if len(names) == 0 {
+		fn()
+		return
+	}
+	bindings := make(map[string]bool, len(names))
+	for _, name := range names {
+		bindings[name] = true
+	}
+	a.permissionParamScopes = append(a.permissionParamScopes, bindings)
+	fn()
+	a.permissionParamScopes = a.permissionParamScopes[:len(a.permissionParamScopes)-1]
+}
+
+func (a *Analyzer) lookupPermissionParam(name string) bool {
+	for i := len(a.permissionParamScopes) - 1; i >= 0; i-- {
+		if a.permissionParamScopes[i][name] {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Analyzer) permissionParamsInRefs(refs []ast.PermissionRef) []string {
+	if len(refs) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if ref.Member != "" || !a.lookupPermissionParam(ref.Name) || seen[ref.Name] {
+			continue
+		}
+		seen[ref.Name] = true
+		out = append(out, ref.Name)
+	}
+	return out
+}
+
 func (a *Analyzer) withRegionParams(names []string, fn func()) {
 	if len(names) == 0 {
 		fn()
@@ -637,7 +683,7 @@ func (a *Analyzer) lookupRegionParam(name string) bool {
 	return false
 }
 
-func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBindings map[string]Shape, regionBindings map[string]string) Type {
+func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBindings map[string]Shape, regionBindings map[string]string, permissionBindings map[string][]ast.PermissionRef) Type {
 	switch n := t.(type) {
 	case *TypeParamType:
 		if resolved, ok := bindings[n.Name]; ok {
@@ -645,42 +691,72 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 		}
 		return n
 	case *ErrorUnionType:
-		return &ErrorUnionType{Value: a.substituteType(n.Value, bindings, shapeBindings, regionBindings), Errors: n.Errors}
+		return &ErrorUnionType{Value: a.substituteType(n.Value, bindings, shapeBindings, regionBindings, permissionBindings), Errors: n.Errors}
 	case *RefType:
 		region := n.Region
 		if bound, ok := regionBindings[n.Region]; ok {
 			region = bound
 		}
-		return &RefType{Elem: a.substituteType(n.Elem, bindings, shapeBindings, regionBindings), State: n.State, Storage: n.Storage, Region: region, ExplicitStorage: n.ExplicitStorage}
+		return &RefType{Elem: a.substituteType(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings), State: n.State, Storage: n.Storage, Region: region, ExplicitStorage: n.ExplicitStorage}
 	case *ArrayType:
-		return &ArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings, regionBindings), Size: n.Size, HasConstSize: n.HasConstSize, ConstSize: n.ConstSize, SurfaceName: n.SurfaceName}
+		return &ArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings), Size: n.Size, HasConstSize: n.HasConstSize, ConstSize: n.ConstSize, SurfaceName: n.SurfaceName}
 	case *DArrayType:
-		return &DArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings, regionBindings), Shape: a.substituteShape(n.Shape, shapeBindings), SurfaceName: n.SurfaceName}
+		return &DArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings), Shape: a.substituteShape(n.Shape, shapeBindings), SurfaceName: n.SurfaceName}
 	case *ViewType:
-		return &ViewType{Elem: a.substituteType(n.Elem, bindings, shapeBindings, regionBindings), Begin: n.Begin, End: n.End}
+		return &ViewType{Elem: a.substituteType(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings), Begin: n.Begin, End: n.End}
 	case *DArrayViewType:
-		return &DArrayViewType{Elem: a.substituteType(n.Elem, bindings, shapeBindings, regionBindings), Begin: n.Begin, End: n.End, SurfaceName: n.SurfaceName}
+		return &DArrayViewType{Elem: a.substituteType(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings), Begin: n.Begin, End: n.End, SurfaceName: n.SurfaceName}
 	case *DStrType:
 		return &DStrType{Shape: a.substituteShape(n.Shape, shapeBindings), SurfaceName: n.SurfaceName}
 	case *DictType:
-		return &DictType{Key: a.substituteType(n.Key, bindings, shapeBindings, regionBindings), Value: a.substituteType(n.Value, bindings, shapeBindings, regionBindings), SurfaceName: n.SurfaceName}
+		return &DictType{Key: a.substituteType(n.Key, bindings, shapeBindings, regionBindings, permissionBindings), Value: a.substituteType(n.Value, bindings, shapeBindings, regionBindings, permissionBindings), SurfaceName: n.SurfaceName}
 	case *SViewType:
 		return &SViewType{Begin: n.Begin, End: n.End}
 	case *GenericInstanceType:
 		args := make([]Type, 0, len(n.Args))
 		for _, arg := range n.Args {
-			args = append(args, a.substituteType(arg, bindings, shapeBindings, regionBindings))
+			args = append(args, a.substituteType(arg, bindings, shapeBindings, regionBindings, permissionBindings))
 		}
 		return &GenericInstanceType{Name: n.Name, Base: n.Base, Args: args}
 	case *FuncType:
 		params := make([]Type, 0, len(n.Params))
 		for _, param := range n.Params {
-			params = append(params, a.substituteType(param, bindings, shapeBindings, regionBindings))
+			params = append(params, a.substituteType(param, bindings, shapeBindings, regionBindings, permissionBindings))
 		}
-		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), RegionParams: append([]string(nil), n.RegionParams...), DeclaredPermissionRefs: append([]ast.PermissionRef(nil), n.DeclaredPermissionRefs...), DeclaredPermissions: append([]string(nil), n.DeclaredPermissions...), PermissionRefs: append([]ast.PermissionRef(nil), n.PermissionRefs...), Permissions: append([]string(nil), n.Permissions...), ShapeParams: append([]string(nil), n.ShapeParams...), FreshReturnShapeParams: append([]string(nil), n.FreshReturnShapeParams...), Params: params, Return: a.substituteType(n.Return, bindings, shapeBindings, regionBindings), Variadic: n.Variadic}
+		declaredRefs, refs, usedPermissionParams := substitutePermissionRefs(n.DeclaredPermissionRefs, n.PermissionRefs, n.UsedPermissionParams, permissionBindings)
+		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), RegionParams: append([]string(nil), n.RegionParams...), PermissionParams: append([]string(nil), n.PermissionParams...), UsedPermissionParams: usedPermissionParams, DeclaredPermissionRefs: declaredRefs, DeclaredPermissions: permissionFamiliesFromRefs(declaredRefs), PermissionRefs: refs, Permissions: permissionFamiliesFromRefs(refs), ShapeParams: append([]string(nil), n.ShapeParams...), FreshReturnShapeParams: append([]string(nil), n.FreshReturnShapeParams...), Params: params, Return: a.substituteType(n.Return, bindings, shapeBindings, regionBindings, permissionBindings), Variadic: n.Variadic}
 	default:
 		return t
 	}
+}
+
+func substitutePermissionRefs(declared []ast.PermissionRef, refs []ast.PermissionRef, permissionParams []string, bindings map[string][]ast.PermissionRef) ([]ast.PermissionRef, []ast.PermissionRef, []string) {
+	if len(bindings) == 0 {
+		return append([]ast.PermissionRef(nil), declared...), append([]ast.PermissionRef(nil), refs...), append([]string(nil), permissionParams...)
+	}
+	substitute := func(items []ast.PermissionRef) []ast.PermissionRef {
+		if len(items) == 0 {
+			return nil
+		}
+		out := make([]ast.PermissionRef, 0, len(items))
+		for _, ref := range items {
+			if ref.Member == "" {
+				if bound, ok := bindings[ref.Name]; ok {
+					out = append(out, bound...)
+					continue
+				}
+			}
+			out = append(out, ref)
+		}
+		return canonicalizePermissionRefs(out)
+	}
+	remaining := make([]string, 0, len(permissionParams))
+	for _, name := range permissionParams {
+		if _, ok := bindings[name]; !ok {
+			remaining = append(remaining, name)
+		}
+	}
+	return substitute(declared), substitute(refs), remaining
 }
 
 func (a *Analyzer) substituteShape(shape Shape, bindings map[string]Shape) Shape {

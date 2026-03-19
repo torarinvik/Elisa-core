@@ -212,6 +212,34 @@ def run() -> int can[Console.Write]:
 	requireFunctionReturnTypeString(t, result, "invoke_writer", "int")
 }
 
+func TestAnalyzeAcceptsPermissionPolymorphicFunctionWrappers(t *testing.T) {
+	src := `extern puts(text: any u8&) -> int can[Console.Write]
+
+def invoke_writer[permission P](fn: func(any u8&) -> int can[P], text: any u8&) -> int can[P]:
+    return fn(text)
+
+def run() -> int can[Console.Write]:
+    return invoke_writer(puts, "hello".cast[any u8&]())
+`
+	result, errs := parseAndAnalyze(t, "permission_polymorphic_function_wrapper.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "invoke_writer", "int")
+}
+
+func TestAnalyzeRejectsPermissionParamMemberAccess(t *testing.T) {
+	src := `def bad[permission P](fn: func() -> void can[P.Write]) -> void:
+    fn()
+`
+	_, errs := parseAndAnalyze(t, "permission_param_member_access_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "permission parameter \"P\" does not support member access") {
+		t.Fatalf("expected permission-parameter member-access diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeAcceptsFunctionValueErasureCasts(t *testing.T) {
 	src := `def inc(value: i64) -> i64:
     return value + 1

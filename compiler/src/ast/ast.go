@@ -92,15 +92,16 @@ type PermissionRef struct {
 }
 
 type FuncDecl struct {
-	Position     lexer.Pos
-	Annotations  []Annotation
-	Name         string
-	TypeParams   []string
-	RegionParams []string
-	Permissions  []PermissionRef
-	Params       []ParamDecl
-	ReturnType   TypeExpr
-	Body         []Stmt
+	Position         lexer.Pos
+	Annotations      []Annotation
+	Name             string
+	TypeParams       []string
+	RegionParams     []string
+	PermissionParams []string
+	Permissions      []PermissionRef
+	Params           []ParamDecl
+	ReturnType       TypeExpr
+	Body             []Stmt
 }
 
 type ParamDecl struct {

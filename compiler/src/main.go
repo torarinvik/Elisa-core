@@ -453,11 +453,14 @@ func ind(level int) string {
 	return strings.Repeat("  ", level)
 }
 
-func formatFuncGenericParams(typeParams []string, regionParams []string) string {
-	parts := make([]string, 0, len(typeParams)+len(regionParams))
+func formatFuncGenericParams(typeParams []string, regionParams []string, permissionParams []string) string {
+	parts := make([]string, 0, len(typeParams)+len(regionParams)+len(permissionParams))
 	parts = append(parts, typeParams...)
 	for _, name := range regionParams {
 		parts = append(parts, "region "+name)
+	}
+	for _, name := range permissionParams {
+		parts = append(parts, "permission "+name)
 	}
 	if len(parts) == 0 {
 		return ""
@@ -507,14 +510,14 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		for _, annotation := range n.Annotations {
 			fmt.Fprintf(w, "%s@%s\n", prefix, annotation.Name)
 		}
-		tparams := formatFuncGenericParams(n.TypeParams, n.RegionParams)
+		tparams := formatFuncGenericParams(n.TypeParams, n.RegionParams, n.PermissionParams)
 		ret := ""
 		if n.ReturnType != nil {
 			ret = " -> " + typeStr(n.ReturnType)
 		}
 		fmt.Fprintf(w, "%sdef %s%s(%d params)%s%s (%d stmts)\n", prefix, n.Name, tparams, len(n.Params), ret, formatPermissionRefs(n.Permissions), len(n.Body))
 	case *ast.ExternFuncDecl:
-		tparams := formatFuncGenericParams(nil, n.RegionParams)
+		tparams := formatFuncGenericParams(nil, n.RegionParams, nil)
 		ret := ""
 		if n.ReturnType != nil {
 			ret = " -> " + typeStr(n.ReturnType)

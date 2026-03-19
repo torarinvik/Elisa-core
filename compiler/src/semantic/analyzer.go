@@ -69,6 +69,7 @@ type Analyzer struct {
 	typeParamScopes                   []map[string]Type
 	shapeParamScopes                  []map[string]Shape
 	regionParamScopes                 []map[string]bool
+	permissionParamScopes             []map[string]bool
 	freshShapeCounter                 int
 	returnFreshShapeStatus            map[string]freshReturnStatus
 	annotatedFuncs                    []*AnnotatedFunc
@@ -181,15 +182,18 @@ func (a *Analyzer) registerBuiltinPermission(name string, members []string) {
 func (a *Analyzer) registerBuiltinRuntimeStructs() {
 	a.registerBuiltinStructType("Thread", []string{"T"}, []builtinFieldSpec{
 		{name: "handle", typ: namedTypeExpr("uintptr", false), mutable: true},
+		{name: "state", typ: refTypeExpr("void", true), mutable: true},
 	})
 	a.registerBuiltinStructType("Task", []string{"T"}, []builtinFieldSpec{
 		{name: "handle", typ: namedTypeExpr("uintptr", false), mutable: true},
+		{name: "state", typ: refTypeExpr("void", true), mutable: true},
 	})
 	a.registerBuiltinStructType("ThreadPool", nil, []builtinFieldSpec{
 		{name: "handle", typ: refTypeExpr("void", true), mutable: true},
 	})
 	a.registerBuiltinStructType("TaskGroup", nil, []builtinFieldSpec{
 		{name: "handle", typ: refTypeExpr("void", true), mutable: true},
+		{name: "cleanup", typ: refTypeExpr("void", true), mutable: true},
 	})
 	a.registerBuiltinStructType("Mutex", nil, []builtinFieldSpec{
 		{name: "handle", typ: refTypeExpr("void", true), mutable: true},
@@ -605,11 +609,11 @@ func (a *Analyzer) collectValueSymbols(decls []ast.Decl) {
 			declType := a.resolveType(n.Type)
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolGlobal, Type: declType, Node: n, Mutable: n.Mutable}, n.Pos())
 		case *ast.FuncDecl:
-			fnType := a.funcTypeFromDecl(n.Name, n.TypeParams, n.RegionParams, n.Permissions, n.Params, n.ReturnType, false)
+			fnType := a.funcTypeFromDecl(n.Name, n.TypeParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Params, n.ReturnType, false)
 			a.functionTypes[n.Name] = fnType
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolFunc, Type: fnType, Node: n, Mutable: false}, n.Pos())
 		case *ast.ExternFuncDecl:
-			fnType := a.funcTypeFromDecl(n.Name, nil, n.RegionParams, n.Permissions, n.Params, n.ReturnType, n.Variadic)
+			fnType := a.funcTypeFromDecl(n.Name, nil, n.RegionParams, nil, n.Permissions, n.Params, n.ReturnType, n.Variadic)
 			a.functionTypes[n.Name] = fnType
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolExternFunc, Type: fnType, Node: n, Mutable: false}, n.Pos())
 		case *ast.ExternVarDecl:
@@ -774,17 +778,19 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	}
 	a.withTypeParams(fn.TypeParams, nil, func() {
 		a.withRegionParams(fn.RegionParams, func() {
-			a.withShapeParams(fnType.ShapeParams, func() {
-				for i, param := range fn.Params {
-					var ptype Type = invalidType
-					if fnType != nil && i < len(fnType.Params) {
-						ptype = fnType.Params[i]
+			a.withPermissionParams(fn.PermissionParams, func() {
+				a.withShapeParams(fnType.ShapeParams, func() {
+					for i, param := range fn.Params {
+						var ptype Type = invalidType
+						if fnType != nil && i < len(fnType.Params) {
+							ptype = fnType.Params[i]
+						}
+						a.defineLocal(&Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, Mutable: a.paramIsMutable(param)}, param.Position)
 					}
-					a.defineLocal(&Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, Mutable: a.paramIsMutable(param)}, param.Position)
-				}
-				for _, stmt := range fn.Body {
-					a.analyzeStmt(stmt)
-				}
+					for _, stmt := range fn.Body {
+						a.analyzeStmt(stmt)
+					}
+				})
 			})
 		})
 	})

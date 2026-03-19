@@ -1,5 +1,16 @@
 package semantic
 
+func funcTypeHasSinglePermissionRowParam(fn *FuncType) (string, bool) {
+	if fn == nil || len(fn.UsedPermissionParams) != 1 || len(fn.PermissionRefs) != 1 {
+		return "", false
+	}
+	ref := fn.PermissionRefs[0]
+	if ref.Member != "" || ref.Name != fn.UsedPermissionParams[0] {
+		return "", false
+	}
+	return ref.Name, true
+}
+
 func SameType(a, b Type) bool {
 	if a == nil || b == nil {
 		return a == b
@@ -78,7 +89,7 @@ func SameType(a, b Type) bool {
 		return SameType(ta.Base, tb.Base)
 	case *FuncType:
 		tb, ok := b.(*FuncType)
-		if !ok || ta.Variadic != tb.Variadic || len(ta.TypeParams) != len(tb.TypeParams) || len(ta.RegionParams) != len(tb.RegionParams) || len(ta.Permissions) != len(tb.Permissions) || len(ta.ShapeParams) != len(tb.ShapeParams) || len(ta.FreshReturnShapeParams) != len(tb.FreshReturnShapeParams) || len(ta.Params) != len(tb.Params) || !SameType(ta.Return, tb.Return) {
+		if !ok || ta.Variadic != tb.Variadic || len(ta.TypeParams) != len(tb.TypeParams) || len(ta.RegionParams) != len(tb.RegionParams) || len(ta.PermissionParams) != len(tb.PermissionParams) || len(ta.UsedPermissionParams) != len(tb.UsedPermissionParams) || len(ta.Permissions) != len(tb.Permissions) || len(ta.ShapeParams) != len(tb.ShapeParams) || len(ta.FreshReturnShapeParams) != len(tb.FreshReturnShapeParams) || len(ta.Params) != len(tb.Params) || !SameType(ta.Return, tb.Return) {
 			return false
 		}
 		for i := range ta.TypeParams {
@@ -88,6 +99,16 @@ func SameType(a, b Type) bool {
 		}
 		for i := range ta.RegionParams {
 			if ta.RegionParams[i] != tb.RegionParams[i] {
+				return false
+			}
+		}
+		for i := range ta.PermissionParams {
+			if ta.PermissionParams[i] != tb.PermissionParams[i] {
+				return false
+			}
+		}
+		for i := range ta.UsedPermissionParams {
+			if ta.UsedPermissionParams[i] != tb.UsedPermissionParams[i] {
 				return false
 			}
 		}
@@ -271,7 +292,7 @@ func matchTypePattern(pattern, actual Type) bool {
 		return matchTypePattern(p.Base, a.Base)
 	case *FuncType:
 		a, ok := actual.(*FuncType)
-		if !ok || p.Variadic != a.Variadic || len(p.RegionParams) != len(a.RegionParams) || len(p.Permissions) != len(a.Permissions) || len(p.ShapeParams) != len(a.ShapeParams) || len(p.FreshReturnShapeParams) != len(a.FreshReturnShapeParams) || len(p.Params) != len(a.Params) {
+		if !ok || p.Variadic != a.Variadic || len(p.RegionParams) != len(a.RegionParams) || len(p.ShapeParams) != len(a.ShapeParams) || len(p.FreshReturnShapeParams) != len(a.FreshReturnShapeParams) || len(p.Params) != len(a.Params) {
 			return false
 		}
 		for i := range p.RegionParams {
@@ -279,9 +300,14 @@ func matchTypePattern(pattern, actual Type) bool {
 				return false
 			}
 		}
-		for i := range p.Permissions {
-			if p.Permissions[i] != a.Permissions[i] {
+		if _, ok := funcTypeHasSinglePermissionRowParam(p); !ok {
+			if len(p.Permissions) != len(a.Permissions) {
 				return false
+			}
+			for i := range p.Permissions {
+				if p.Permissions[i] != a.Permissions[i] {
+					return false
+				}
 			}
 		}
 		for i := range p.FreshReturnShapeParams {

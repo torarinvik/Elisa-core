@@ -211,6 +211,16 @@ func (a *Analyzer) resolvePermissionRefs(refs []ast.PermissionRef, report bool) 
 	}
 	valid := make([]ast.PermissionRef, 0, len(refs))
 	for _, ref := range refs {
+		if a.lookupPermissionParam(ref.Name) {
+			if ref.Member != "" {
+				if report {
+					a.errorf(ref.Position, "permission parameter %q does not support member access", ref.Name)
+				}
+				continue
+			}
+			valid = append(valid, ast.PermissionRef{Position: ref.Position, Name: ref.Name})
+			continue
+		}
 		permission, ok := a.permissions[ref.Name]
 		if !ok {
 			if report {
