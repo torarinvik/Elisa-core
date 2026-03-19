@@ -127,9 +127,47 @@ def fold() -> int:
 	if !strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
 		t.Fatalf("expected mixed packed match without matched-value field access to use ctx_packed_store_read_tag, got:\n%s", output)
 	}
+	if !strings.Contains(output, "call i64 @ctx_packed_store_read_word(") {
+		t.Fatalf("expected one-word packed payload match to read payload through ctx_packed_store_read_word, got:\n%s", output)
+	}
 	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
-	if decodeCalls != 2 {
-		t.Fatalf("expected constructor lowering plus one matched payload decode, got %d decode calls:\n%s", decodeCalls, output)
+	if decodeCalls != 1 {
+		t.Fatalf("expected only constructor-time decode when one-word packed payloads can be read directly, got %d decode calls:\n%s", decodeCalls, output)
+	}
+}
+
+func TestGenerateLLVMIRUsesWordReadHelperForMultiFieldPackedPayloadMatch(t *testing.T) {
+	src := `packed enum Pair:
+	Both(left: int, right: int)
+	End
+
+def sum_pair() -> int:
+	region scratch(256u)
+	store: Pair.Store = Pair.Store(scratch)
+	in store:
+		node: Pair = new Pair.Both(left: 2, right: 3)
+		return match node:
+			Pair.Both(left: left, right: right):
+				left + right
+			Pair.End:
+				0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_payload_words.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	if !strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
+		t.Fatalf("expected mixed packed payload match to use ctx_packed_store_read_tag for dispatch, got:\n%s", output)
+	}
+	readWordCalls := strings.Count(output, "call i64 @ctx_packed_store_read_word(")
+	if readWordCalls != 2 {
+		t.Fatalf("expected two direct payload word reads for Pair.Both payload, got %d helper calls:\n%s", readWordCalls, output)
+	}
+	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
+	if decodeCalls != 1 {
+		t.Fatalf("expected only constructor-time decode for direct multi-field payload reads, got %d decode calls:\n%s", decodeCalls, output)
 	}
 }
 

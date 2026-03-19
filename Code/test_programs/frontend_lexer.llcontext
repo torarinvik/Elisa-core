@@ -3,6 +3,9 @@
 
 global mutable frontend_lexer_bench_arena: Arena = zeroed
 
+const FRONTEND_TOKEN_HASH_OFFSET = 1469598103934665603u64
+const FRONTEND_TOKEN_HASH_PRIME = 1099511628211u64
+
 
 def frontend_expect_token_count(tokens: darray[FrontendToken], expected: usize) -> bool:
     return tokens.count == expected
@@ -143,6 +146,208 @@ def frontend_expect_suffix(tokens: darray[FrontendToken], index: usize, expected
     return ctx_stage0_string_view_eq(tokens[index].suffix, expected.cast[any u8&]()) != 0
 
 
+def frontend_token_kind_code(kind: FrontendTokenKind) -> u64:
+    match kind:
+        FrontendTokenKind.Eof:
+            return 1u64
+        FrontendTokenKind.Newline:
+            return 2u64
+        FrontendTokenKind.Indent:
+            return 3u64
+        FrontendTokenKind.Dedent:
+            return 4u64
+        FrontendTokenKind.Ident:
+            return 5u64
+        FrontendTokenKind.IntLit:
+            return 6u64
+        FrontendTokenKind.HexLit:
+            return 7u64
+        FrontendTokenKind.StringLit:
+            return 8u64
+        FrontendTokenKind.Def:
+            return 9u64
+        FrontendTokenKind.Error:
+            return 10u64
+        FrontendTokenKind.Enum:
+            return 11u64
+        FrontendTokenKind.Struct:
+            return 12u64
+        FrontendTokenKind.Const:
+            return 13u64
+        FrontendTokenKind.Global:
+            return 14u64
+        FrontendTokenKind.Extern:
+            return 15u64
+        FrontendTokenKind.Export:
+            return 16u64
+        FrontendTokenKind.If:
+            return 17u64
+        FrontendTokenKind.Match:
+            return 18u64
+        FrontendTokenKind.Elif:
+            return 19u64
+        FrontendTokenKind.Else:
+            return 20u64
+        FrontendTokenKind.While:
+            return 21u64
+        FrontendTokenKind.Return:
+            return 22u64
+        FrontendTokenKind.Any:
+            return 23u64
+        FrontendTokenKind.Heap:
+            return 24u64
+        FrontendTokenKind.Stack:
+            return 25u64
+        FrontendTokenKind.Static:
+            return 26u64
+        FrontendTokenKind.Mutable:
+            return 27u64
+        FrontendTokenKind.Repr:
+            return 28u64
+        FrontendTokenKind.Packed:
+            return 29u64
+        FrontendTokenKind.Aligned:
+            return 30u64
+        FrontendTokenKind.Pass:
+            return 31u64
+        FrontendTokenKind.Panic:
+            return 32u64
+        FrontendTokenKind.Not:
+            return 33u64
+        FrontendTokenKind.And:
+            return 34u64
+        FrontendTokenKind.Or:
+            return 35u64
+        FrontendTokenKind.Null:
+            return 36u64
+        FrontendTokenKind.True:
+            return 37u64
+        FrontendTokenKind.False:
+            return 38u64
+        FrontendTokenKind.Zeroed:
+            return 39u64
+        FrontendTokenKind.Sizeof:
+            return 40u64
+        FrontendTokenKind.Tail:
+            return 41u64
+        FrontendTokenKind.Try:
+            return 42u64
+        FrontendTokenKind.Raise:
+            return 43u64
+        FrontendTokenKind.Region:
+            return 44u64
+        FrontendTokenKind.Destroy:
+            return 45u64
+        FrontendTokenKind.New:
+            return 46u64
+        FrontendTokenKind.As:
+            return 47u64
+        FrontendTokenKind.In:
+            return 48u64
+        FrontendTokenKind.Colon:
+            return 49u64
+        FrontendTokenKind.Arrow:
+            return 50u64
+        FrontendTokenKind.Dot:
+            return 51u64
+        FrontendTokenKind.Comma:
+            return 52u64
+        FrontendTokenKind.LParen:
+            return 53u64
+        FrontendTokenKind.RParen:
+            return 54u64
+        FrontendTokenKind.LBracket:
+            return 55u64
+        FrontendTokenKind.RBracket:
+            return 56u64
+        FrontendTokenKind.Hash:
+            return 57u64
+        FrontendTokenKind.Ampersand:
+            return 58u64
+        FrontendTokenKind.Question:
+            return 59u64
+        FrontendTokenKind.Bang:
+            return 60u64
+        FrontendTokenKind.At:
+            return 61u64
+        FrontendTokenKind.Ellipsis:
+            return 62u64
+        FrontendTokenKind.LArrow:
+            return 63u64
+        FrontendTokenKind.PlusEq:
+            return 64u64
+        FrontendTokenKind.MinusEq:
+            return 65u64
+        FrontendTokenKind.StarEq:
+            return 66u64
+        FrontendTokenKind.SlashEq:
+            return 67u64
+        FrontendTokenKind.PercentEq:
+            return 68u64
+        FrontendTokenKind.CaretEq:
+            return 69u64
+        FrontendTokenKind.PipeEq:
+            return 70u64
+        FrontendTokenKind.AmpEq:
+            return 71u64
+        FrontendTokenKind.LShiftEq:
+            return 72u64
+        FrontendTokenKind.RShiftEq:
+            return 73u64
+        FrontendTokenKind.Assign:
+            return 74u64
+        FrontendTokenKind.EqEq:
+            return 75u64
+        FrontendTokenKind.BangEq:
+            return 76u64
+        FrontendTokenKind.Lt:
+            return 77u64
+        FrontendTokenKind.Gt:
+            return 78u64
+        FrontendTokenKind.LtEq:
+            return 79u64
+        FrontendTokenKind.GtEq:
+            return 80u64
+        FrontendTokenKind.Plus:
+            return 81u64
+        FrontendTokenKind.Minus:
+            return 82u64
+        FrontendTokenKind.Star:
+            return 83u64
+        FrontendTokenKind.Slash:
+            return 84u64
+        FrontendTokenKind.Percent:
+            return 85u64
+        FrontendTokenKind.Pipe:
+            return 86u64
+        FrontendTokenKind.Caret:
+            return 87u64
+        FrontendTokenKind.LShift:
+            return 88u64
+        FrontendTokenKind.RShift:
+            return 89u64
+        FrontendTokenKind.Tilde:
+            return 90u64
+    return 0u64
+
+
+def frontend_token_hash_mix(hash: u64, value: u64) -> u64:
+    return (hash ^ value) * FRONTEND_TOKEN_HASH_PRIME
+
+
+def frontend_hash_token(hash: u64, token: FrontendToken) -> u64:
+    return frontend_token_hash_mix(hash, frontend_token_kind_code(token.kind))
+
+
+def frontend_token_checksum(tokens: darray[FrontendToken]) -> u64:
+    hash: mutable u64 = frontend_token_hash_mix(FRONTEND_TOKEN_HASH_OFFSET, tokens.count.u64())
+    i: mutable usize = 0u
+    while i < tokens.count:
+        hash <- frontend_hash_token(hash, tokens[i])
+        i <- i + 1u
+    return hash
+
+
 def frontend_tokenize_test_source(a: any Arena&, source: any u8&) -> darray[FrontendToken]:
     return frontend_tokenize(a, "frontend_lexer_test.llcontext".cast[any u8&](), source)
 
@@ -248,7 +453,7 @@ def frontend_case_region_alloc_syntax() -> bool:
     a: any Arena& = (&scratch).cast[any Arena&]()
     bytes: u8[59] = [114u8, 101u8, 103u8, 105u8, 111u8, 110u8, 32u8, 112u8, 97u8, 114u8, 115u8, 101u8, 10u8, 118u8, 97u8, 108u8, 117u8, 101u8, 58u8, 32u8, 97u8, 110u8, 121u8, 32u8, 105u8, 51u8, 50u8, 38u8, 32u8, 61u8, 32u8, 110u8, 101u8, 119u8, 91u8, 112u8, 97u8, 114u8, 115u8, 101u8, 93u8, 32u8, 49u8, 10u8, 100u8, 101u8, 115u8, 116u8, 114u8, 111u8, 121u8, 32u8, 112u8, 97u8, 114u8, 115u8, 101u8, 10u8, 0u8]
     tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, (&bytes[0u]).cast[any u8&]())
-    ok: bool = frontend_expect_token_count(tokens, 19u) and frontend_expect_kind(tokens, 0u, FrontendTokenKind.Region) and frontend_expect_kind(tokens, 1u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 2u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 3u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 4u, FrontendTokenKind.Colon) and frontend_expect_kind(tokens, 5u, FrontendTokenKind.Any) and frontend_expect_kind(tokens, 6u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 7u, FrontendTokenKind.Ampersand) and frontend_expect_kind(tokens, 8u, FrontendTokenKind.Assign) and frontend_expect_kind(tokens, 9u, FrontendTokenKind.New) and frontend_expect_kind(tokens, 10u, FrontendTokenKind.LBracket) and frontend_expect_kind(tokens, 11u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 12u, FrontendTokenKind.RBracket) and frontend_expect_kind(tokens, 13u, FrontendTokenKind.IntLit) and frontend_expect_kind(tokens, 14u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 15u, FrontendTokenKind.Destroy) and frontend_expect_kind(tokens, 16u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 17u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 18u, FrontendTokenKind.Eof)
+    ok: bool = frontend_expect_token_count(tokens, 19u) and frontend_expect_kind(tokens, 0u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 1u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 2u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 3u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 4u, FrontendTokenKind.Colon) and frontend_expect_kind(tokens, 5u, FrontendTokenKind.Any) and frontend_expect_kind(tokens, 6u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 7u, FrontendTokenKind.Ampersand) and frontend_expect_kind(tokens, 8u, FrontendTokenKind.Assign) and frontend_expect_kind(tokens, 9u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 10u, FrontendTokenKind.LBracket) and frontend_expect_kind(tokens, 11u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 12u, FrontendTokenKind.RBracket) and frontend_expect_kind(tokens, 13u, FrontendTokenKind.IntLit) and frontend_expect_kind(tokens, 14u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 15u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 16u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 17u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 18u, FrontendTokenKind.Eof)
     destroy scratch
     return ok
 
@@ -265,11 +470,11 @@ def frontend_case_kind_only_keyword_path() -> bool:
         return false
     if not frontend_kind_eq(frontend_next_token_kind((&lexer).cast[any FrontendLexer&]()), FrontendTokenKind.Zeroed):
         return false
-    if not frontend_kind_eq(frontend_next_token_kind((&lexer).cast[any FrontendLexer&]()), FrontendTokenKind.Region):
+    if not frontend_kind_eq(frontend_next_token_kind((&lexer).cast[any FrontendLexer&]()), FrontendTokenKind.Ident):
         return false
-    if not frontend_kind_eq(frontend_next_token_kind((&lexer).cast[any FrontendLexer&]()), FrontendTokenKind.New):
+    if not frontend_kind_eq(frontend_next_token_kind((&lexer).cast[any FrontendLexer&]()), FrontendTokenKind.Ident):
         return false
-    if not frontend_kind_eq(frontend_next_token_kind((&lexer).cast[any FrontendLexer&]()), FrontendTokenKind.Destroy):
+    if not frontend_kind_eq(frontend_next_token_kind((&lexer).cast[any FrontendLexer&]()), FrontendTokenKind.Ident):
         return false
     if not frontend_kind_eq(frontend_next_token_kind((&lexer).cast[any FrontendLexer&]()), FrontendTokenKind.IntLit):
         return false
@@ -321,5 +526,23 @@ def frontend_lexer_token_count_impl(source: any u8&) -> i64:
     arena_reset(arena)
     return frontend_count_tokens(arena, "frontend_lexer_bench.llcontext".cast[any u8&](), source).i64()
 
+
+def frontend_lexer_token_checksum_impl(source: any u8&) -> u64:
+    arena: any Arena& = (&frontend_lexer_bench_arena).cast[any Arena&]()
+    arena_reset(arena)
+    tokens: darray[FrontendToken] = frontend_tokenize(arena, "frontend_lexer_bench.llcontext".cast[any u8&](), source)
+    return frontend_token_checksum(tokens)
+
+
+def frontend_lexer_token_kind_at_impl(source: any u8&, index: usize) -> u64:
+    arena: any Arena& = (&frontend_lexer_bench_arena).cast[any Arena&]()
+    arena_reset(arena)
+    tokens: darray[FrontendToken] = frontend_tokenize(arena, "frontend_lexer_bench.llcontext".cast[any u8&](), source)
+    if index >= tokens.count:
+        return 0u64
+    return frontend_token_kind_code(tokens[index].kind)
+
 export func frontend_lexer_parity_suite() -> int = frontend_lexer_parity_suite_impl
 export func frontend_lexer_token_count(source: any u8&) -> i64 = frontend_lexer_token_count_impl
+export func frontend_lexer_token_checksum(source: any u8&) -> u64 = frontend_lexer_token_checksum_impl
+export func frontend_lexer_token_kind_at(source: any u8&, index: usize) -> u64 = frontend_lexer_token_kind_at_impl
