@@ -2110,10 +2110,12 @@ func TestAnalyzePinsRuntimePreludeHeapPointerContracts(t *testing.T) {
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ctx_stage0_alloc_perm", "heap void&")
 	requireFunctionReturnTypeString(t, result, "ctx_stage0_alloc_scratch", "heap void&")
+	requireFunctionReturnTypeString(t, result, "ctx_stage0_intern_small_string", "heap u8&")
 	requireFunctionReturnTypeString(t, result, "ctx_stage0_int_to_string_into", "heap u8&")
 	requireFunctionReturnTypeString(t, result, "ctx_stage0_char_to_string_into", "heap u8&")
 	requireFunctionReturnTypeString(t, result, "ctx_stage0_string_builder_new", "heap StringBuilder&")
 	requireFunctionReturnTypeString(t, result, "ctx_stage0_string_builder_append", "heap StringBuilder&")
+	requireFunctionReturnTypeString(t, result, "ctx_stage0_string_builder_finish", "heap u8&")
 }
 
 func TestAnalyzePinsRuntimeStage1BuiltinPermissionContracts(t *testing.T) {
@@ -2139,6 +2141,7 @@ func TestAnalyzePinsRuntimeStage1BuiltinPermissionContracts(t *testing.T) {
 	requireFunctionReturnTypeString(t, result, "ctx_stage0_char_to_string_scratch", "heap u8&")
 	requireFunctionReturnTypeString(t, result, "ctx_stage1rt_string_builder_new", "heap StringBuilder&")
 	requireFunctionReturnTypeString(t, result, "ctx_stage1rt_string_builder_append", "heap StringBuilder&")
+	requireFunctionReturnTypeString(t, result, "ctx_stage0_string_view_copy", "heap u8&")
 }
 
 func TestAnalyzeAcceptsTypedFixedArrayLiteralInitialization(t *testing.T) {

@@ -24,7 +24,7 @@ def ctx_stage0_concat2(lhs: any u8&?, rhs: any u8&?) -> any u8& can[Memory.Alloc
         memcpy((&text[0]).cast[any void&](), left.cast[any void&](), left_len)
         memcpy((&text[0] + left_len).cast[any void&](), right.cast[any void&](), right_len)
         text[left_len + right_len] <- 0
-        return ctx_stage0_intern_small_string((&text[0]).cast[any u8&](), left_len + right_len)
+        return ctx_stage0_intern_small_string((&text[0]).cast[any u8&](), left_len + right_len).cast[any u8&]()
 
     out: any u8& = ctx_stage0_alloc_perm((left_len + right_len + 1).i64()).cast[any u8&]()
     memcpy(out.cast[any void&](), left.cast[any void&](), left_len)
@@ -51,7 +51,7 @@ def ctx_stage0_concat2_scratch(lhs: any u8&?, rhs: any u8&?) -> any u8& can[Memo
         memcpy((&text[0]).cast[any void&](), left.cast[any void&](), left_len)
         memcpy((&text[0] + left_len).cast[any void&](), right.cast[any void&](), right_len)
         text[left_len + right_len] <- 0
-        return ctx_stage0_intern_small_string((&text[0]).cast[any u8&](), left_len + right_len)
+        return ctx_stage0_intern_small_string((&text[0]).cast[any u8&](), left_len + right_len).cast[any u8&]()
 
     out: any u8& = ctx_stage0_alloc_scratch((left_len + right_len + 1).i64()).cast[any u8&]()
     memcpy(out.cast[any void&](), left.cast[any void&](), left_len)
@@ -187,7 +187,7 @@ def ctx_stage0_string_slice(value: any u8&?, start: i64, end: i64) -> any u8& ca
         return "".cast[any u8&]()
 
     if out_len <= 8:
-        return ctx_stage0_intern_small_string(src + lo, out_len)
+        return ctx_stage0_intern_small_string(src + lo, out_len).cast[any u8&]()
 
     out: any u8& = ctx_stage0_alloc_perm((out_len + 1).i64()).cast[any u8&]()
     memcpy(out.cast[any void&](), (src + lo).cast[any void&](), out_len)
@@ -262,15 +262,15 @@ def ctx_stage0_string_views_eq(lhs: StringView, rhs: StringView) -> int:
 
     return 1 if memcmp(lhs.data.cast[any void&](), rhs.data.cast[any void&](), lhs.len.usize()) == 0 else 0
 
-def ctx_stage0_string_view_copy(view: StringView) -> any u8& can[Memory.Allocate, Abort.Panic]:
+def ctx_stage0_string_view_copy(view: StringView) -> heap u8& can[Memory.Allocate, Abort.Panic]:
     if view.len <= 0:
-        return "".cast[any u8&]()
+        return ctx_stage0_intern_small_string("".cast[any u8&](), 0)
 
     if view.len <= 8:
         return ctx_stage0_intern_small_string(view.data, view.len.usize())
 
-    out: any u8& = ctx_stage0_alloc_perm((view.len + 1).usize()).cast[any u8&]()
+    out: heap u8& = ctx_stage0_alloc_perm((view.len + 1).usize()).cast[heap u8&]()
     memcpy(out.cast[any void&](), view.data.cast[any void&](), view.len.usize())
     out[view.len.usize()] <- 0
-    ctx_stage0_register_perm_string_len(out, view.len.usize())
+    ctx_stage0_register_perm_string_len(out.cast[any u8&](), view.len.usize())
     return out

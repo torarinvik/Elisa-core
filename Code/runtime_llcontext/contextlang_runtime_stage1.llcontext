@@ -57,7 +57,7 @@ def ctx_stage1rt_string_builder_append(builder: heap StringBuilder&?, suffix: an
     return ctx_stage0_string_builder_append(builder, suffix)
 
 def ctx_stage1rt_string_builder_finish(builder: heap StringBuilder&?) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
-    return ctx_stage0_string_builder_finish(builder)
+    return ctx_stage0_string_builder_finish(builder).cast[any u8&]()
 
 def ctx_stage1rt_int_to_string(value: i64) -> dstr[shape_out] can[Memory.Allocate, Console.Format, Abort.Panic]:
     return ctx_stage0_int_to_string(value)
@@ -114,7 +114,7 @@ def ctx_stage1rt_string_views_eq(lhs: StringView, rhs: StringView) -> int:
     return ctx_stage0_string_views_eq(lhs, rhs)
 
 def ctx_stage1rt_string_from_view(view: StringView) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
-    return ctx_stage0_string_view_copy(view)
+    return ctx_stage0_string_view_copy(view).cast[any u8&]()
 
 def ctx_stage1rt_reset_scratch():
     ctx_stage0_reset_scratch()

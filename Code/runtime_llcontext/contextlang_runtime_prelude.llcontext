@@ -152,9 +152,11 @@ def ctx_stage0_runtime_strlen(value: any u8&?) -> usize:
 # Small string interning
 # ------------------------------------------------------------
 
-def ctx_stage0_intern_small_string(src: any u8&, len: usize) -> any u8& can[Memory.Allocate, Abort.Panic]:
+def ctx_stage0_intern_small_string(src: any u8&, len: usize) -> heap u8& can[Memory.Allocate, Abort.Panic]:
 	if len == 0:
-		return "".cast[any u8&]()
+		empty: heap u8& = ctx_stage0_alloc_perm(1).cast[heap u8&]()
+		empty[0] <- 0
+		return empty
 
 	# FNV-1a hash
 	hash: mutable u64 = 1469598103934665603u64
@@ -169,7 +171,7 @@ def ctx_stage0_intern_small_string(src: any u8&, len: usize) -> any u8& can[Memo
 	entry: mutable heap SmallStringCacheEntry&? = ctx_stage0_small_string_cache[bucket]
 	while entry != null:
 		if entry.len == len and memcmp((&entry.text[0]).cast[any void&](), src.cast[any void&](), len) == 0:
-			return (&entry.text[0]).cast[any u8&]()
+			return (&entry.text[0]).cast[heap u8&]()
 		entry <- entry.next
 
 	new_entry: heap SmallStringCacheEntry& = ctx_stage0_alloc_perm(
@@ -184,7 +186,7 @@ def ctx_stage0_intern_small_string(src: any u8&, len: usize) -> any u8& can[Memo
 
 	ctx_stage0_register_perm_string_len((&new_entry.text[0]).cast[any u8&](), len)
 
-	return (&new_entry.text[0]).cast[any u8&]()
+	return (&new_entry.text[0]).cast[heap u8&]()
 
 # ------------------------------------------------------------
 # Integer / bool / char to string conversion
@@ -196,7 +198,7 @@ def ctx_stage0_int_to_string_into(arena: any Arena&, value: i64) -> heap u8& can
 	if len > 0 and len <= 8:
 		text: u8[9]
 		snprintf((&text[0]).cast[any u8&](), len.usize() + 1, "%lld".cast[any u8&](), value)
-		return ctx_stage0_intern_small_string((&text[0]).cast[any u8&](), len.usize()).cast[heap u8&]()
+		return ctx_stage0_intern_small_string((&text[0]).cast[any u8&](), len.usize())
 
 	out: heap u8& = arena_alloc(arena, len.usize() + 1).cast[heap u8&]()
 	snprintf(out.cast[any u8&?](), len.usize() + 1, "%lld".cast[any u8&](), value)
@@ -215,7 +217,7 @@ def ctx_stage0_char_to_string_into(arena: any Arena&, value: i64) -> heap u8& ca
 	text: u8[2]
 	text[0] <- value.u8()
 	text[1] <- 0
-	return ctx_stage0_intern_small_string((&text[0]).cast[any u8&](), 1).cast[heap u8&]()
+	return ctx_stage0_intern_small_string((&text[0]).cast[any u8&](), 1)
 
 # ------------------------------------------------------------
 # String builder
@@ -270,13 +272,13 @@ def ctx_stage0_string_builder_append(builder: heap StringBuilder&?, suffix: any 
 	b.data[b.len.usize()] <- 0
 	return b
 
-def ctx_stage0_string_builder_finish(builder: heap StringBuilder&?) -> any u8& can[Memory.Allocate, Abort.Panic]:
+def ctx_stage0_string_builder_finish(builder: heap StringBuilder&?) -> heap u8& can[Memory.Allocate, Abort.Panic]:
 	if builder == null:
-		return "".cast[any u8&]()
+		return ctx_stage0_intern_small_string("".cast[any u8&](), 0)
 
 	b: heap StringBuilder& = builder
 	if b.len <= 0:
-		return "".cast[any u8&]()
+		return ctx_stage0_intern_small_string("".cast[any u8&](), 0)
 
 	assert b.data != null
 
@@ -284,4 +286,4 @@ def ctx_stage0_string_builder_finish(builder: heap StringBuilder&?) -> any u8& c
 		return ctx_stage0_intern_small_string(b.data.cast[any u8&](), b.len.usize())
 
 	ctx_stage0_register_perm_string_len(b.data.cast[any u8&](), b.len.usize())
-	return b.data.cast[any u8&]()
+	return b.data
