@@ -2042,8 +2042,17 @@ func TestAnalyzePinsArenaBuiltinPermissionContracts(t *testing.T) {
 	result, errs := parseAndAnalyze(t, "arena.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
+	requireDeclaredFunctionPermissionRefs(t, result, "malloc", "Memory.Allocate")
+	requireDeclaredFunctionPermissionRefs(t, result, "free", "Memory.Release")
 	requireDeclaredFunctionPermissionRefs(t, result, "assert", "Abort.Panic")
 	requireDeclaredFunctionPermissionRefs(t, result, "sfree", "Memory.Release")
+	requireDeclaredFunctionPermissionRefs(t, result, "new_region_with_owner", "Memory.Allocate", "Abort.Panic")
+	requireDeclaredFunctionPermissionRefs(t, result, "new_region", "Memory.Allocate", "Abort.Panic")
+	requireDeclaredFunctionPermissionRefs(t, result, "free_region", "Memory.Release", "Abort.Panic")
+	requireDeclaredFunctionPermissionRefs(t, result, "arena_alloc", "Memory.Allocate", "Abort.Panic")
+	requireDeclaredFunctionPermissionRefs(t, result, "arena_realloc", "Memory.Allocate", "Abort.Panic")
+	requireDeclaredFunctionPermissionRefs(t, result, "arena_free", "Memory.Release", "Abort.Panic")
+	requireDeclaredFunctionPermissionRefs(t, result, "arena_trim", "Memory.Release", "Abort.Panic")
 	requireDeclaredFunctionPermissionRefs(t, result, "arena_vsprintf", "Memory.Allocate", "Console.Format", "Abort.Panic")
 }
 

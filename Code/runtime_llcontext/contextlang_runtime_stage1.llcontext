@@ -6,10 +6,10 @@
 # Type-to-string public API
 # ------------------------------------------------------------
 
-def ctx_stage0_int_to_string(value: i64) -> any u8& can[Memory.Allocate, Console.Format]:
+def ctx_stage0_int_to_string(value: i64) -> any u8& can[Memory.Allocate, Console.Format, Abort.Panic]:
     return ctx_stage0_int_to_string_into((&ctx_stage0_perm_arena).cast[any Arena&](), value)
 
-def ctx_stage0_int_to_string_scratch(value: i64) -> any u8& can[Memory.Allocate, Console.Format]:
+def ctx_stage0_int_to_string_scratch(value: i64) -> any u8& can[Memory.Allocate, Console.Format, Abort.Panic]:
     return ctx_stage0_int_to_string_into((&ctx_stage0_scratch_arena).cast[any Arena&](), value)
 
 def ctx_stage0_bool_to_string(value: int) -> any u8&:
@@ -18,10 +18,10 @@ def ctx_stage0_bool_to_string(value: int) -> any u8&:
 def ctx_stage0_bool_to_string_scratch(value: int) -> any u8&:
     return ctx_stage0_bool_to_string_into((&ctx_stage0_scratch_arena).cast[any Arena&](), value)
 
-def ctx_stage0_char_to_string(value: i64) -> any u8& can[Memory.Allocate]:
+def ctx_stage0_char_to_string(value: i64) -> any u8& can[Memory.Allocate, Abort.Panic]:
     return ctx_stage0_char_to_string_into((&ctx_stage0_perm_arena).cast[any Arena&](), value)
 
-def ctx_stage0_char_to_string_scratch(value: i64) -> any u8& can[Memory.Allocate]:
+def ctx_stage0_char_to_string_scratch(value: i64) -> any u8& can[Memory.Allocate, Abort.Panic]:
     return ctx_stage0_char_to_string_into((&ctx_stage0_scratch_arena).cast[any Arena&](), value)
 
 # ------------------------------------------------------------
@@ -44,25 +44,25 @@ def ctx_stage0_streq(lhs: any u8&?, rhs: any u8&?) -> int:
 # Stage 1 runtime forwarding wrappers
 # ============================================================
 
-def ctx_stage1rt_concat2(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[shape_result] can[Memory.Allocate]:
+def ctx_stage1rt_concat2(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[shape_result] can[Memory.Allocate, Abort.Panic]:
     return ctx_stage0_concat2(lhs, rhs)
 
-def ctx_stage1rt_concat2_scratch(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[shape_result] can[Memory.Allocate]:
+def ctx_stage1rt_concat2_scratch(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[shape_result] can[Memory.Allocate, Abort.Panic]:
     return ctx_stage0_concat2_scratch(lhs, rhs)
 
-def ctx_stage1rt_string_builder_new(initial: any u8&?) -> any StringBuilder& can[Memory.Allocate]:
+def ctx_stage1rt_string_builder_new(initial: any u8&?) -> any StringBuilder& can[Memory.Allocate, Abort.Panic]:
     return ctx_stage0_string_builder_new(initial)
 
-def ctx_stage1rt_string_builder_append(builder: any StringBuilder&?, suffix: any u8&?) -> any StringBuilder& can[Memory.Allocate]:
+def ctx_stage1rt_string_builder_append(builder: any StringBuilder&?, suffix: any u8&?) -> any StringBuilder& can[Memory.Allocate, Abort.Panic]:
     return ctx_stage0_string_builder_append(builder, suffix)
 
-def ctx_stage1rt_string_builder_finish(builder: any StringBuilder&?) -> dstr[shape_out] can[Memory.Allocate]:
+def ctx_stage1rt_string_builder_finish(builder: any StringBuilder&?) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
     return ctx_stage0_string_builder_finish(builder)
 
-def ctx_stage1rt_int_to_string(value: i64) -> dstr[shape_out] can[Memory.Allocate, Console.Format]:
+def ctx_stage1rt_int_to_string(value: i64) -> dstr[shape_out] can[Memory.Allocate, Console.Format, Abort.Panic]:
     return ctx_stage0_int_to_string(value)
 
-def ctx_stage1rt_int_to_string_scratch(value: i64) -> dstr[shape_out] can[Memory.Allocate, Console.Format]:
+def ctx_stage1rt_int_to_string_scratch(value: i64) -> dstr[shape_out] can[Memory.Allocate, Console.Format, Abort.Panic]:
     return ctx_stage0_int_to_string_scratch(value)
 
 def ctx_stage1rt_bool_to_string(value: int) -> dstr[shape_out]:
@@ -71,10 +71,10 @@ def ctx_stage1rt_bool_to_string(value: int) -> dstr[shape_out]:
 def ctx_stage1rt_bool_to_string_scratch(value: int) -> dstr[shape_out]:
     return ctx_stage0_bool_to_string_scratch(value)
 
-def ctx_stage1rt_char_to_string(value: i64) -> dstr[shape_out] can[Memory.Allocate]:
+def ctx_stage1rt_char_to_string(value: i64) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
     return ctx_stage0_char_to_string(value)
 
-def ctx_stage1rt_char_to_string_scratch(value: i64) -> dstr[shape_out] can[Memory.Allocate]:
+def ctx_stage1rt_char_to_string_scratch(value: i64) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
     return ctx_stage0_char_to_string_scratch(value)
 
 def ctx_stage1rt_strlen(value: dstr[shape_in]) -> i64:
@@ -92,7 +92,7 @@ def ctx_stage1rt_string_slices_eq(lhs: dstr[shape_left], lhs_start: i64, lhs_end
 def ctx_stage1rt_string_index(value: dstr[shape_in], index: i64) -> i64:
     return ctx_stage0_string_index(value, index)
 
-def ctx_stage1rt_string_slice(value: dstr[shape_in], start: i64, end: i64) -> dstr[shape_out] can[Memory.Allocate]:
+def ctx_stage1rt_string_slice(value: dstr[shape_in], start: i64, end: i64) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
     return ctx_stage0_string_slice(value, start, end)
 
 def ctx_stage1rt_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
@@ -113,7 +113,7 @@ def ctx_stage1rt_string_view_eq(view: StringView, other: dstr[shape_other]) -> i
 def ctx_stage1rt_string_views_eq(lhs: StringView, rhs: StringView) -> int:
     return ctx_stage0_string_views_eq(lhs, rhs)
 
-def ctx_stage1rt_string_from_view(view: StringView) -> dstr[shape_out] can[Memory.Allocate]:
+def ctx_stage1rt_string_from_view(view: StringView) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
     return ctx_stage0_string_view_copy(view)
 
 def ctx_stage1rt_reset_scratch():

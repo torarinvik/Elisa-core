@@ -6,7 +6,7 @@
 # String concatenation
 # ------------------------------------------------------------
 
-def ctx_stage0_concat2(lhs: any u8&?, rhs: any u8&?) -> any u8& can[Memory.Allocate]:
+def ctx_stage0_concat2(lhs: any u8&?, rhs: any u8&?) -> any u8& can[Memory.Allocate, Abort.Panic]:
     left: any u8& = lhs.cast[any u8&]() if lhs != null else "".cast[any u8&]()
     right: any u8& = rhs.cast[any u8&]() if rhs != null else "".cast[any u8&]()
 
@@ -33,7 +33,7 @@ def ctx_stage0_concat2(lhs: any u8&?, rhs: any u8&?) -> any u8& can[Memory.Alloc
     ctx_stage0_register_perm_string_len(out, left_len + right_len)
     return out
 
-def ctx_stage0_concat2_scratch(lhs: any u8&?, rhs: any u8&?) -> any u8& can[Memory.Allocate]:
+def ctx_stage0_concat2_scratch(lhs: any u8&?, rhs: any u8&?) -> any u8& can[Memory.Allocate, Abort.Panic]:
     left: any u8& = lhs.cast[any u8&]() if lhs != null else "".cast[any u8&]()
     right: any u8& = rhs.cast[any u8&]() if rhs != null else "".cast[any u8&]()
 
@@ -158,7 +158,7 @@ def ctx_stage0_string_slices_eq(lhs: any u8&?, lhs_start: i64, lhs_end: i64, rhs
 
     return 1 if memcmp((left + left_lo).cast[any void&](), (right + right_lo).cast[any void&](), left_slice_len) == 0 else 0
 
-def ctx_stage0_string_slice(value: any u8&?, start: i64, end: i64) -> any u8& can[Memory.Allocate]:
+def ctx_stage0_string_slice(value: any u8&?, start: i64, end: i64) -> any u8& can[Memory.Allocate, Abort.Panic]:
     src: any u8& = value if value != null else "".cast[any u8&]()
     len: usize = ctx_stage0_runtime_strlen(src)
 
@@ -262,7 +262,7 @@ def ctx_stage0_string_views_eq(lhs: StringView, rhs: StringView) -> int:
 
     return 1 if memcmp(lhs.data.cast[any void&](), rhs.data.cast[any void&](), lhs.len.usize()) == 0 else 0
 
-def ctx_stage0_string_view_copy(view: StringView) -> any u8& can[Memory.Allocate]:
+def ctx_stage0_string_view_copy(view: StringView) -> any u8& can[Memory.Allocate, Abort.Panic]:
     if view.len <= 0:
         return "".cast[any u8&]()
 

@@ -92,8 +92,8 @@ repr(c) struct DictProbeResult:
 # ------------------------------------------------------------
 
 static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
-    extern malloc(size: usize) -> any void&?
-    extern free(ptr: any void&)
+    extern malloc(size: usize) -> any void&? can[Memory.Allocate]
+    extern free(ptr: any void&) can[Memory.Release]
 
 static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
     const PROT_READ = 0x1
@@ -168,7 +168,7 @@ def sfree[T](ptr: any T&) -> any T! can[Memory.Release]:
 # Region allocation / freeing
 # ------------------------------------------------------------
 
-def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> any Region&:
+def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> any Region& can[Memory.Allocate, Abort.Panic]:
     size_bytes: usize = sizeof(Region) + sizeof(uintptr) * capacity
 
     static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
@@ -224,10 +224,10 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> any Region&:
     r.global_index <- 0
     return r
 
-def new_region(capacity: usize) -> any Region&:
+def new_region(capacity: usize) -> any Region& can[Memory.Allocate, Abort.Panic]:
     return new_region_with_owner(capacity, 0u64.uintptr())
 
-def free_region(r: any Region&):
+def free_region(r: any Region&) can[Memory.Release, Abort.Panic]:
     static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
         free(r.cast[any void&]())
 
@@ -252,7 +252,7 @@ def free_region(r: any Region&):
 # Core arena allocation
 # ------------------------------------------------------------
 
-def arena_alloc(a: any Arena&, size_bytes: usize) -> any void&:
+def arena_alloc(a: any Arena&, size_bytes: usize) -> any void& can[Memory.Allocate, Abort.Panic]:
     size: usize = (size_bytes + sizeof(uintptr) - 1) / sizeof(uintptr)
 
     if a.end == null:
@@ -291,7 +291,7 @@ def arena_alloc(a: any Arena&, size_bytes: usize) -> any void&:
     a.end.count <- a.end.count + size
     return result
 
-def arena_realloc(a: any Arena&, oldptr: any void&, oldsz: usize, newsz: usize) -> any void&:
+def arena_realloc(a: any Arena&, oldptr: any void&, oldsz: usize, newsz: usize) -> any void& can[Memory.Allocate, Abort.Panic]:
     if newsz <= oldsz:
         return oldptr
 
@@ -339,14 +339,14 @@ def arena_memeq(lhs: any void&, rhs: any void&, n: usize) -> bool:
 
     return true
 
-def arena_strdup(a: any Arena&, cstr: any u8&) -> any u8&:
+def arena_strdup(a: any Arena&, cstr: any u8&) -> any u8& can[Memory.Allocate, Abort.Panic]:
     n: usize = arena_strlen(cstr)
     dup: any u8& = arena_alloc(a, n + 1).cast[any u8&]()
     arena_memcpy(dup.cast[any void&](), cstr.cast[any void&](), n)
     dup[n] <- 0
     return dup
 
-def arena_memdup(a: any Arena&, data: any void&, size: usize) -> any void&:
+def arena_memdup(a: any Arena&, data: any void&, size: usize) -> any void& can[Memory.Allocate, Abort.Panic]:
     return arena_memcpy(arena_alloc(a, size), data, size)
 
 def packed_store_region_data(r: any Region&) -> any u8&:
@@ -355,7 +355,7 @@ def packed_store_region_data(r: any Region&) -> any u8&:
 def packed_store_region_table(state: any PackedStoreState&) -> any darray[any Region&?]&:
     return (&state.regions).cast[any darray[any Region&?]&]()
 
-def packed_store_register_region(a: any Arena&, state: any PackedStoreState&, r: any Region&?, global_index: usize):
+def packed_store_register_region(a: any Arena&, state: any PackedStoreState&, r: any Region&?, global_index: usize) can[Memory.Allocate, Abort.Panic]:
     assert r != null
 
     regions: any darray[any Region&?]& = packed_store_region_table(state)
@@ -373,7 +373,7 @@ def packed_store_lookup_region(state: any PackedStoreState&, global_index: usize
         return null
     return state.regions.items[global_index]
 
-def ctx_packed_store_state_new(a: any Arena&, row_bytes: usize) -> any void&:
+def ctx_packed_store_state_new(a: any Arena&, row_bytes: usize) -> any void& can[Memory.Allocate, Abort.Panic]:
     state: any PackedStoreState& = arena_alloc(a, sizeof(PackedStoreState)).cast[any PackedStoreState&]()
     row_words: usize = (row_bytes + sizeof(uintptr) - 1) / sizeof(uintptr)
     preferred_region_capacity: mutable usize = ARENA_REGION_DEFAULT_CAPACITY
@@ -395,7 +395,7 @@ def ctx_packed_store_state_new(a: any Arena&, row_bytes: usize) -> any void&:
     state.preferred_region_capacity <- preferred_region_capacity
     return state.cast[any void&]()
 
-def ctx_packed_store_alloc_result_slow(a: any Arena&, size: usize, owner_tag: uintptr, state: any PackedStoreState&):
+def ctx_packed_store_alloc_result_slow(a: any Arena&, size: usize, owner_tag: uintptr, state: any PackedStoreState&) can[Memory.Allocate, Abort.Panic]:
     if state.alloc_region == null:
         capacity: mutable usize = state.preferred_region_capacity
         if capacity < size:
@@ -458,7 +458,7 @@ def ctx_packed_store_alloc_result_slow(a: any Arena&, size: usize, owner_tag: ui
     state.alloc_region_index <- a.end_index
     packed_store_register_region(a, state, a.end, a.end_index)
 
-def ctx_packed_store_alloc_fixed_result_slow(a: any Arena&, owner_tag: uintptr, state: any PackedStoreState&):
+def ctx_packed_store_alloc_fixed_result_slow(a: any Arena&, owner_tag: uintptr, state: any PackedStoreState&) can[Memory.Allocate, Abort.Panic]:
     size: usize = state.row_words
     assert size > 0
 
@@ -507,7 +507,7 @@ def ctx_packed_store_alloc_fixed_result_slow(a: any Arena&, owner_tag: uintptr, 
     state.alloc_region_index <- a.end_index
     packed_store_register_region(a, state, a.end, a.end_index)
 
-def ctx_packed_store_alloc_fixed_result(a: any Arena&, state_bits: any void&) -> PackedStoreAllocResult:
+def ctx_packed_store_alloc_fixed_result(a: any Arena&, state_bits: any void&) -> PackedStoreAllocResult can[Memory.Allocate, Abort.Panic]:
     assert state_bits != null
 
     state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
@@ -535,7 +535,7 @@ def ctx_packed_store_alloc_fixed_result(a: any Arena&, state_bits: any void&) ->
     handle: uintptr = (state.alloc_region_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
     return PackedStoreAllocResult(ptr, handle)
 
-def ctx_packed_store_alloc_result(a: any Arena&, size_bytes: usize, state_bits: any void&) -> PackedStoreAllocResult:
+def ctx_packed_store_alloc_result(a: any Arena&, size_bytes: usize, state_bits: any void&) -> PackedStoreAllocResult can[Memory.Allocate, Abort.Panic]:
     assert state_bits != null
 
     state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
@@ -571,7 +571,7 @@ def ctx_packed_store_alloc_result(a: any Arena&, size_bytes: usize, state_bits: 
     handle: uintptr = (state.alloc_region_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
     return PackedStoreAllocResult(ptr, handle)
 
-def ctx_packed_store_alloc(a: any Arena&, size_bytes: usize, state_bits: any void&) -> uintptr:
+def ctx_packed_store_alloc(a: any Arena&, size_bytes: usize, state_bits: any void&) -> uintptr can[Memory.Allocate, Abort.Panic]:
     result: PackedStoreAllocResult = ctx_packed_store_alloc_result(a, size_bytes, state_bits)
     return result.handle
 
@@ -979,7 +979,7 @@ def arena_rewind(a: any Arena&, m: ArenaMark):
     assert current != null
     a.end_index <- region_index
 
-def arena_free(a: any Arena&):
+def arena_free(a: any Arena&) can[Memory.Release, Abort.Panic]:
     r: mutable any Region&? = a.begin
 
     while r != null:
@@ -991,7 +991,7 @@ def arena_free(a: any Arena&):
     a.end as ! <- null
     a.end_index <- 0
 
-def arena_trim(a: any Arena&):
+def arena_trim(a: any Arena&) can[Memory.Release, Abort.Panic]:
     if a.end == null:
         return
 
@@ -1088,7 +1088,7 @@ def arena_dict_zero_buckets[T](items: any DictBucket[T]&, capacity: usize):
         items[i] <- zeroed
         i <- i + 1
 
-def arena_dict_copy_key(a: any Arena&, key: dstr[key_shape]) -> any u8&:
+def arena_dict_copy_key(a: any Arena&, key: dstr[key_shape]) -> any u8& can[Memory.Allocate, Abort.Panic]:
     key_len: usize = arena_strlen(key)
     key_bytes: any u8& = key
 
@@ -1128,7 +1128,7 @@ def arena_dict_should_rehash[T](m: any dict[dstr[key_shape], T]&, extra_live: us
 
     return false
 
-def arena_dict_new[T](a: any Arena&, initial_capacity: usize) -> dict[dstr[key_shape], T]:
+def arena_dict_new[T](a: any Arena&, initial_capacity: usize) -> dict[dstr[key_shape], T] can[Memory.Allocate, Abort.Panic]:
     out: mutable dict[dstr[key_shape], T] = zeroed
     out.arena as & <- a
 
@@ -1143,7 +1143,7 @@ def arena_dict_new[T](a: any Arena&, initial_capacity: usize) -> dict[dstr[key_s
     out.capacity <- capacity
     return out
 
-def arena_dict_reserve[T](a: any Arena&, m: any dict[dstr[key_shape], T]&, min_capacity: usize) -> void error[RuntimeError]:
+def arena_dict_reserve[T](a: any Arena&, m: any dict[dstr[key_shape], T]&, min_capacity: usize) -> void error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
     target_capacity: usize = arena_dict_next_capacity(min_capacity)
     if target_capacity == 0:
         return
@@ -1189,7 +1189,7 @@ def arena_dict_get[T](m: any dict[dstr[key_shape], T]&, key: dstr[key_shape]) ->
     items: any DictBucket[T]& = m.items
     return &items[probe.index].value
 
-def arena_dict_put[T](a: any Arena&, m: any dict[dstr[key_shape], T]&, key: dstr[key_shape], value: T) -> any T&? error[RuntimeError]:
+def arena_dict_put[T](a: any Arena&, m: any dict[dstr[key_shape], T]&, key: dstr[key_shape], value: T) -> any T&? error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
     owner: any Arena& = m.arena if m.arena != null else a
     if m.arena == null:
         m.arena as & <- owner
@@ -1261,7 +1261,7 @@ def arena_dict_clear[T](m: any dict[dstr[key_shape], T]&):
     m.count <- 0
     m.used <- 0
 
-def arena_dict_new__i64(a: any Arena&, initial_capacity: usize) -> DynDict[i64]:
+def arena_dict_new__i64(a: any Arena&, initial_capacity: usize) -> DynDict[i64] can[Memory.Allocate, Abort.Panic]:
     out: mutable DynDict[i64] = zeroed
     out.arena as & <- a
 
@@ -1276,7 +1276,7 @@ def arena_dict_new__i64(a: any Arena&, initial_capacity: usize) -> DynDict[i64]:
     out.capacity <- capacity
     return out
 
-def arena_dict_reserve__i64(a: any Arena&, m: any DynDict[i64]&, min_capacity: usize) -> void error[RuntimeError]:
+def arena_dict_reserve__i64(a: any Arena&, m: any DynDict[i64]&, min_capacity: usize) -> void error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
     target_capacity: usize = arena_dict_next_capacity(min_capacity)
     if target_capacity == 0:
         return
@@ -1322,7 +1322,7 @@ def arena_dict_get__i64(m: any DynDict[i64]&, key: any u8&) -> any i64&?:
     items: any DictBucket[i64]& = m.items
     return &items[probe.index].value
 
-def arena_dict_put__i64(a: any Arena&, m: any DynDict[i64]&, key: any u8&, value: i64) -> any i64&? error[RuntimeError]:
+def arena_dict_put__i64(a: any Arena&, m: any DynDict[i64]&, key: any u8&, value: i64) -> any i64&? error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
     owner: any Arena& = m.arena if m.arena != null else a
     if m.arena == null:
         m.arena as & <- owner
@@ -1435,7 +1435,7 @@ def arena_da_view_get[T](view: dview[T], index: usize) -> T:
     base: any T& = (view.data.cast[any u8&]() + offset).cast[any T&]()
     return base[0]
 
-def arena_da_from_view[T](a: any Arena&, view: dview[T]) -> darray[T, shape_out]:
+def arena_da_from_view[T](a: any Arena&, view: dview[T]) -> darray[T, shape_out] can[Memory.Allocate, Abort.Panic]:
     if view.len == 0:
         return zeroed
 
@@ -1449,7 +1449,7 @@ def arena_da_from_view[T](a: any Arena&, view: dview[T]) -> darray[T, shape_out]
     out.capacity <- view.len
     return out
 
-def arena_da_append[T](a: any Arena&, da: any darray[T, shape_in]&, item: T) -> any darray[T, shape_out]&:
+def arena_da_append[T](a: any Arena&, da: any darray[T, shape_in]&, item: T) -> any darray[T, shape_out]& can[Memory.Allocate, Abort.Panic]:
     if da.count >= da.capacity:
         new_capacity: usize = ARENA_DA_INIT_CAP if da.capacity == 0 else da.capacity * 2
 
@@ -1474,7 +1474,7 @@ def arena_da_append[T](a: any Arena&, da: any darray[T, shape_in]&, item: T) -> 
     da.count <- da.count + 1
     return da
 
-def arena_da_append_many[T](a: any Arena&, da: any darray[T, shape_in]&, new_items: any T&, new_items_count: usize) -> any darray[T, shape_out]&:
+def arena_da_append_many[T](a: any Arena&, da: any darray[T, shape_in]&, new_items: any T&, new_items_count: usize) -> any darray[T, shape_out]& can[Memory.Allocate, Abort.Panic]:
     needed: usize = da.count + new_items_count
 
     if needed > da.capacity:
@@ -1511,14 +1511,14 @@ def arena_da_append_many[T](a: any Arena&, da: any darray[T, shape_in]&, new_ite
     da.count <- da.count + new_items_count
     return da
 
-def arena_sb_append_buf(a: any Arena&, sb: any darray[u8, shape_in]&, buf: any u8&, n: usize) -> any darray[u8, shape_out]&:
+def arena_sb_append_buf(a: any Arena&, sb: any darray[u8, shape_in]&, buf: any u8&, n: usize) -> any darray[u8, shape_out]& can[Memory.Allocate, Abort.Panic]:
     return arena_da_append_many(a, sb, buf, n)
 
-def arena_sb_append_cstr(a: any Arena&, sb: any darray[u8, shape_in]&, cstr: any u8&) -> any darray[u8, shape_out]&:
+def arena_sb_append_cstr(a: any Arena&, sb: any darray[u8, shape_in]&, cstr: any u8&) -> any darray[u8, shape_out]& can[Memory.Allocate, Abort.Panic]:
     n: usize = arena_strlen(cstr)
     return arena_da_append_many(a, sb, cstr, n)
 
-def arena_sb_append_null(a: any Arena&, sb: any darray[u8, shape_in]&) -> any darray[u8, shape_out]&:
+def arena_sb_append_null(a: any Arena&, sb: any darray[u8, shape_in]&) -> any darray[u8, shape_out]& can[Memory.Allocate, Abort.Panic]:
     return arena_da_append(a, sb, 0u8)
 
 # ------------------------------------------------------------

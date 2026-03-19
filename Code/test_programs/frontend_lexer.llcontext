@@ -348,11 +348,11 @@ def frontend_token_checksum(tokens: darray[FrontendToken]) -> u64:
     return hash
 
 
-def frontend_tokenize_test_source(a: any Arena&, source: any u8&) -> darray[FrontendToken]:
+def frontend_tokenize_test_source(a: any Arena&, source: any u8&) -> darray[FrontendToken] can[Memory.Allocate, Abort.Panic]:
     return frontend_tokenize(a, "frontend_lexer_test.llcontext".cast[any u8&](), source)
 
 
-def frontend_case_simple_ident() -> bool:
+def frontend_case_simple_ident() -> bool can[Memory.Allocate, Abort.Panic]:
     region scratch(4096u)
     a: any Arena& = (&scratch).cast[any Arena&]()
     bytes: u8[7] = [104u8, 101u8, 108u8, 108u8, 111u8, 10u8, 0u8]
@@ -370,7 +370,7 @@ def frontend_case_simple_ident() -> bool:
     return frontend_sv_eq_literal(tokens[0u].text, "hello")
 
 
-def frontend_case_arrow_ops() -> bool:
+def frontend_case_arrow_ops() -> bool can[Memory.Allocate, Abort.Panic]:
     region scratch(4096u)
     a: any Arena& = (&scratch).cast[any Arena&]()
     bytes: u8[14] = [120u8, 32u8, 60u8, 45u8, 32u8, 121u8, 32u8, 45u8, 62u8, 32u8, 122u8, 10u8, 0u8, 0u8]
@@ -380,7 +380,7 @@ def frontend_case_arrow_ops() -> bool:
     return frontend_expect_kind(tokens, 0u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 1u, FrontendTokenKind.LArrow) and frontend_expect_kind(tokens, 2u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 3u, FrontendTokenKind.Arrow) and frontend_expect_kind(tokens, 4u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 5u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 6u, FrontendTokenKind.Eof)
 
 
-def frontend_case_number_literals() -> bool:
+def frontend_case_number_literals() -> bool can[Memory.Allocate, Abort.Panic]:
     region scratch(4096u)
     a: any Arena& = (&scratch).cast[any Arena&]()
     bytes: u8[25] = [52u8, 50u8, 32u8, 48u8, 120u8, 102u8, 102u8, 32u8, 49u8, 50u8, 51u8, 117u8, 54u8, 52u8, 32u8, 48u8, 120u8, 65u8, 66u8, 105u8, 51u8, 50u8, 10u8, 0u8, 0u8]
@@ -408,7 +408,7 @@ def frontend_case_number_literals() -> bool:
     return frontend_sv_eq_literal(tokens[3u].suffix, "i32")
 
 
-def frontend_case_indent_dedent() -> bool:
+def frontend_case_indent_dedent() -> bool can[Memory.Allocate, Abort.Panic]:
     region scratch(4096u)
     a: any Arena& = (&scratch).cast[any Arena&]()
     bytes: u8[39] = [100u8, 101u8, 102u8, 32u8, 102u8, 111u8, 111u8, 58u8, 10u8, 32u8, 32u8, 32u8, 32u8, 120u8, 32u8, 60u8, 45u8, 32u8, 49u8, 10u8, 32u8, 32u8, 32u8, 32u8, 121u8, 32u8, 60u8, 45u8, 32u8, 50u8, 10u8, 122u8, 32u8, 60u8, 45u8, 32u8, 51u8, 10u8, 0u8]
@@ -418,7 +418,7 @@ def frontend_case_indent_dedent() -> bool:
     return frontend_expect_kind(tokens, 0u, FrontendTokenKind.Def) and frontend_expect_kind(tokens, 1u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 2u, FrontendTokenKind.Colon) and frontend_expect_kind(tokens, 3u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 4u, FrontendTokenKind.Indent) and frontend_expect_kind(tokens, 9u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 13u, FrontendTokenKind.Dedent) and frontend_expect_kind(tokens, 18u, FrontendTokenKind.Eof)
 
 
-def frontend_case_comment_and_ellipsis() -> bool:
+def frontend_case_comment_and_ellipsis() -> bool can[Memory.Allocate, Abort.Panic]:
     region scratch(4096u)
     a: any Arena& = (&scratch).cast[any Arena&]()
     bytes: u8[9] = [35u8, 120u8, 10u8, 46u8, 46u8, 46u8, 10u8, 0u8, 0u8]
@@ -428,7 +428,7 @@ def frontend_case_comment_and_ellipsis() -> bool:
     return frontend_expect_kind(tokens, 0u, FrontendTokenKind.Ellipsis) and frontend_expect_kind(tokens, 1u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 2u, FrontendTokenKind.Eof)
 
 
-def frontend_case_shift_ops() -> bool:
+def frontend_case_shift_ops() -> bool can[Memory.Allocate, Abort.Panic]:
     region scratch(4096u)
     a: any Arena& = (&scratch).cast[any Arena&]()
     bytes: u8[13] = [120u8, 32u8, 60u8, 60u8, 32u8, 51u8, 32u8, 62u8, 62u8, 32u8, 50u8, 10u8, 0u8]
@@ -438,7 +438,7 @@ def frontend_case_shift_ops() -> bool:
     return frontend_expect_kind(tokens, 0u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 1u, FrontendTokenKind.LShift) and frontend_expect_kind(tokens, 2u, FrontendTokenKind.IntLit) and frontend_expect_kind(tokens, 3u, FrontendTokenKind.RShift) and frontend_expect_kind(tokens, 4u, FrontendTokenKind.IntLit) and frontend_expect_kind(tokens, 5u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 6u, FrontendTokenKind.Eof)
 
 
-def frontend_case_paren_suppresses_newline() -> bool:
+def frontend_case_paren_suppresses_newline() -> bool can[Memory.Allocate, Abort.Panic]:
     region scratch(4096u)
     a: any Arena& = (&scratch).cast[any Arena&]()
     bytes: u8[15] = [102u8, 111u8, 111u8, 40u8, 97u8, 44u8, 10u8, 32u8, 32u8, 32u8, 32u8, 98u8, 41u8, 10u8, 0u8]
@@ -448,7 +448,7 @@ def frontend_case_paren_suppresses_newline() -> bool:
     return frontend_expect_kind(tokens, 0u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 1u, FrontendTokenKind.LParen) and frontend_expect_kind(tokens, 2u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 3u, FrontendTokenKind.Comma) and frontend_expect_kind(tokens, 4u, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 5u, FrontendTokenKind.RParen) and frontend_expect_kind(tokens, 6u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 7u, FrontendTokenKind.Eof)
 
 
-def frontend_case_region_alloc_syntax() -> bool:
+def frontend_case_region_alloc_syntax() -> bool can[Memory.Allocate, Abort.Panic]:
     region scratch(4096u)
     a: any Arena& = (&scratch).cast[any Arena&]()
     bytes: u8[59] = [114u8, 101u8, 103u8, 105u8, 111u8, 110u8, 32u8, 112u8, 97u8, 114u8, 115u8, 101u8, 10u8, 118u8, 97u8, 108u8, 117u8, 101u8, 58u8, 32u8, 97u8, 110u8, 121u8, 32u8, 105u8, 51u8, 50u8, 38u8, 32u8, 61u8, 32u8, 110u8, 101u8, 119u8, 91u8, 112u8, 97u8, 114u8, 115u8, 101u8, 93u8, 32u8, 49u8, 10u8, 100u8, 101u8, 115u8, 116u8, 114u8, 111u8, 121u8, 32u8, 112u8, 97u8, 114u8, 115u8, 101u8, 10u8, 0u8]
@@ -458,7 +458,7 @@ def frontend_case_region_alloc_syntax() -> bool:
     return ok
 
 
-def frontend_case_kind_only_keyword_path() -> bool:
+def frontend_case_kind_only_keyword_path() -> bool can[Memory.Allocate, Abort.Panic]:
     region scratch(4096u)
     a: any Arena& = (&scratch).cast[any Arena&]()
     bytes: u8[53] = [102u8, 97u8, 108u8, 115u8, 101u8, 32u8, 116u8, 114u8, 117u8, 101u8, 32u8, 122u8, 101u8, 114u8, 111u8, 101u8, 100u8, 32u8, 114u8, 101u8, 103u8, 105u8, 111u8, 110u8, 32u8, 110u8, 101u8, 119u8, 32u8, 100u8, 101u8, 115u8, 116u8, 114u8, 111u8, 121u8, 32u8, 49u8, 50u8, 51u8, 117u8, 54u8, 52u8, 32u8, 48u8, 120u8, 65u8, 66u8, 105u8, 51u8, 50u8, 10u8, 0u8]
@@ -485,7 +485,7 @@ def frontend_case_kind_only_keyword_path() -> bool:
     return frontend_kind_eq(frontend_next_token_kind((&lexer).cast[any FrontendLexer&]()), FrontendTokenKind.Eof)
 
 
-def frontend_lexer_parity_suite_impl() -> int:
+def frontend_lexer_parity_suite_impl() -> int can[Memory.Allocate, Abort.Panic]:
     if not frontend_case_simple_ident():
         return 0
     if not frontend_case_arrow_ops():
@@ -507,7 +507,7 @@ def frontend_lexer_parity_suite_impl() -> int:
     return 1
 
 
-def frontend_count_tokens(a: any Arena&, filename: any u8&, source: any u8&) -> usize:
+def frontend_count_tokens(a: any Arena&, filename: any u8&, source: any u8&) -> usize can[Memory.Allocate, Abort.Panic]:
     lexer: mutable FrontendLexer = frontend_new_lexer(a, filename, source)
     count: mutable usize = 0u
 
@@ -521,20 +521,20 @@ def frontend_count_tokens(a: any Arena&, filename: any u8&, source: any u8&) -> 
     return count
 
 
-def frontend_lexer_token_count_impl(source: any u8&) -> i64:
+def frontend_lexer_token_count_impl(source: any u8&) -> i64 can[Memory.Allocate, Abort.Panic]:
     arena: any Arena& = (&frontend_lexer_bench_arena).cast[any Arena&]()
     arena_reset(arena)
     return frontend_count_tokens(arena, "frontend_lexer_bench.llcontext".cast[any u8&](), source).i64()
 
 
-def frontend_lexer_token_checksum_impl(source: any u8&) -> u64:
+def frontend_lexer_token_checksum_impl(source: any u8&) -> u64 can[Memory.Allocate, Abort.Panic]:
     arena: any Arena& = (&frontend_lexer_bench_arena).cast[any Arena&]()
     arena_reset(arena)
     tokens: darray[FrontendToken] = frontend_tokenize(arena, "frontend_lexer_bench.llcontext".cast[any u8&](), source)
     return frontend_token_checksum(tokens)
 
 
-def frontend_lexer_token_kind_at_impl(source: any u8&, index: usize) -> u64:
+def frontend_lexer_token_kind_at_impl(source: any u8&, index: usize) -> u64 can[Memory.Allocate, Abort.Panic]:
     arena: any Arena& = (&frontend_lexer_bench_arena).cast[any Arena&]()
     arena_reset(arena)
     tokens: darray[FrontendToken] = frontend_tokenize(arena, "frontend_lexer_bench.llcontext".cast[any u8&](), source)

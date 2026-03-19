@@ -68,11 +68,11 @@ global mutable ctx_stage0_string_len_cache: any StringLenCacheEntry&?[CTX_STRING
 # Permanent / scratch arena allocation
 # ------------------------------------------------------------
 
-def ctx_stage0_alloc_perm(size: i64) -> any void& can[Memory.Allocate]:
+def ctx_stage0_alloc_perm(size: i64) -> any void& can[Memory.Allocate, Abort.Panic]:
 	resolved: usize = size.usize() if size > 0 else 1
 	return arena_alloc((&ctx_stage0_perm_arena).cast[any Arena&](), resolved)
 
-def ctx_stage0_alloc_scratch(size: i64) -> any void& can[Memory.Allocate]:
+def ctx_stage0_alloc_scratch(size: i64) -> any void& can[Memory.Allocate, Abort.Panic]:
 	resolved: usize = size.usize() if size > 0 else 1
 	return arena_alloc((&ctx_stage0_scratch_arena).cast[any Arena&](), resolved)
 
@@ -90,7 +90,7 @@ def ctx_stage0_string_len_bucket(ptr: any u8&) -> usize:
 	bits ^= (bits >> 33)
 	return (bits & (CTX_STRING_LEN_CACHE_BUCKETS - 1).uintptr()).usize()
 
-def ctx_stage0_register_perm_string_len(ptr: any u8&?, len: usize) can[Memory.Allocate]:
+def ctx_stage0_register_perm_string_len(ptr: any u8&?, len: usize) can[Memory.Allocate, Abort.Panic]:
 	if ptr == null or len == 0:
 		return
 
@@ -152,7 +152,7 @@ def ctx_stage0_runtime_strlen(value: any u8&?) -> usize:
 # Small string interning
 # ------------------------------------------------------------
 
-def ctx_stage0_intern_small_string(src: any u8&, len: usize) -> any u8& can[Memory.Allocate]:
+def ctx_stage0_intern_small_string(src: any u8&, len: usize) -> any u8& can[Memory.Allocate, Abort.Panic]:
 	if len == 0:
 		return "".cast[any u8&]()
 
@@ -190,7 +190,7 @@ def ctx_stage0_intern_small_string(src: any u8&, len: usize) -> any u8& can[Memo
 # Integer / bool / char to string conversion
 # ------------------------------------------------------------
 
-def ctx_stage0_int_to_string_into(arena: any Arena&, value: i64) -> any u8& can[Memory.Allocate, Console.Format]:
+def ctx_stage0_int_to_string_into(arena: any Arena&, value: i64) -> any u8& can[Memory.Allocate, Console.Format, Abort.Panic]:
 	len: int = snprintf(null, 0, "%lld".cast[any u8&](), value)
 
 	if len > 0 and len <= 8:
@@ -210,7 +210,7 @@ def ctx_stage0_bool_to_string_into(arena: any Arena&, value: int) -> any u8&:
 	_ = arena
 	return "True".cast[any u8&]() if value != 0 else "False".cast[any u8&]()
 
-def ctx_stage0_char_to_string_into(arena: any Arena&, value: i64) -> any u8& can[Memory.Allocate]:
+def ctx_stage0_char_to_string_into(arena: any Arena&, value: i64) -> any u8& can[Memory.Allocate, Abort.Panic]:
 	_ = arena
 	text: u8[2]
 	text[0] <- value.u8()
@@ -227,7 +227,7 @@ def ctx_stage0_string_builder_next_cap(min_cap: i64) -> i64:
 		cap *= 2
 	return cap
 
-def ctx_stage0_string_builder_new(initial: any u8&?) -> any StringBuilder& can[Memory.Allocate]:
+def ctx_stage0_string_builder_new(initial: any u8&?) -> any StringBuilder& can[Memory.Allocate, Abort.Panic]:
 	src: any u8& = initial if initial != null else "".cast[any u8&]()
 	len: usize = ctx_stage0_runtime_strlen(src)
 
@@ -242,7 +242,7 @@ def ctx_stage0_string_builder_new(initial: any u8&?) -> any StringBuilder& can[M
 	builder.data[len] <- 0
 	return builder
 
-def ctx_stage0_string_builder_append(builder: any StringBuilder&?, suffix: any u8&?) -> any StringBuilder& can[Memory.Allocate]:
+def ctx_stage0_string_builder_append(builder: any StringBuilder&?, suffix: any u8&?) -> any StringBuilder& can[Memory.Allocate, Abort.Panic]:
 	src: any u8& = suffix if suffix != null else "".cast[any u8&]()
 	suffix_len: usize = ctx_stage0_runtime_strlen(src)
 
@@ -270,7 +270,7 @@ def ctx_stage0_string_builder_append(builder: any StringBuilder&?, suffix: any u
 	b.data[b.len.usize()] <- 0
 	return b
 
-def ctx_stage0_string_builder_finish(builder: any StringBuilder&?) -> any u8& can[Memory.Allocate]:
+def ctx_stage0_string_builder_finish(builder: any StringBuilder&?) -> any u8& can[Memory.Allocate, Abort.Panic]:
 	if builder == null:
 		return "".cast[any u8&]()
 
