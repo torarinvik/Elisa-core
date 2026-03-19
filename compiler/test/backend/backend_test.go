@@ -1231,7 +1231,7 @@ def fold() -> int:
 		"define i64 @fold()",
 		"call ptr @new_region(i64 1024)",
 		"call ptr @arena_alloc(ptr",
-		"store i64 3, ptr %packed.enum.common.ptr",
+		"store %Expr { i32 1, i64 3, [2 x i64] zeroinitializer }, ptr %packed.alloc4",
 		"load i32, ptr",
 	}
 	for _, check := range checks {
@@ -1326,7 +1326,7 @@ def build() -> Expr:
 	checks := []string{
 		"%Expr = type { i32, i64, [1 x i64] }",
 		"define ptr @build()",
-		"store i64 9, ptr %packed.enum.common.ptr",
+		"store %Expr { i32 0, i64 9, [1 x i64] zeroinitializer }, ptr %packed.alloc",
 		"store i64 5, ptr %enum.payload.ptr",
 	}
 	for _, check := range checks {
@@ -1359,7 +1359,7 @@ def build() -> Token:
 	checks := []string{
 		"%Token = type { i32, i64 }",
 		"define ptr @build()",
-		"store i64 4, ptr %packed.enum.common.ptr",
+		"store %Token { i32 0, i64 4 }, ptr %packed.alloc",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -1389,7 +1389,7 @@ def build() -> Token:
 		"define ptr @build()",
 		"call ptr @new_region(i64 256)",
 		"call ptr @arena_alloc(ptr",
-		"store i32 1, ptr",
+		"store %Token { i32 1 }, ptr %packed.alloc",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {

@@ -30,16 +30,17 @@ type codegenScope struct {
 }
 
 type functionState struct {
-	g            *llvmGenerator
-	decl         *ast.FuncDecl
-	fnValue      C.LLVMValueRef
-	fnType       *semantic.FuncType
-	builder      C.LLVMBuilderRef
-	scope        *codegenScope
-	typeMap      map[string]semantic.Type
-	resultSlot   C.LLVMValueRef
-	regions      []regionBinding
-	packedStores map[string]packedStoreBinding
+	g                 *llvmGenerator
+	decl              *ast.FuncDecl
+	fnValue           C.LLVMValueRef
+	fnType            *semantic.FuncType
+	builder           C.LLVMBuilderRef
+	scope             *codegenScope
+	typeMap           map[string]semantic.Type
+	resultSlot        C.LLVMValueRef
+	regions           []regionBinding
+	packedStores      map[string]packedStoreBinding
+	packedStoreValues map[packedStoreExtractCacheKey]C.LLVMValueRef
 }
 
 type regionBinding struct {
@@ -51,6 +52,12 @@ type regionBinding struct {
 type packedStoreBinding struct {
 	value C.LLVMValueRef
 	typ   *semantic.PackedEnumStoreType
+}
+
+type packedStoreExtractCacheKey struct {
+	block C.LLVMBasicBlockRef
+	store C.LLVMValueRef
+	name  string
 }
 
 type packedEnumStorageBinding struct {
@@ -79,14 +86,15 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	C.LLVMPositionBuilderAtEnd(builder, entry)
 
 	state := &functionState{
-		g:            g,
-		decl:         decl,
-		fnValue:      fnValue,
-		fnType:       fnType,
-		builder:      builder,
-		scope:        &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}},
-		typeMap:      typeBindings,
-		packedStores: map[string]packedStoreBinding{},
+		g:                 g,
+		decl:              decl,
+		fnValue:           fnValue,
+		fnType:            fnType,
+		builder:           builder,
+		scope:             &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}},
+		typeMap:           typeBindings,
+		packedStores:      map[string]packedStoreBinding{},
+		packedStoreValues: map[packedStoreExtractCacheKey]C.LLVMValueRef{},
 	}
 
 	paramOffset := 0

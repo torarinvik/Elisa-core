@@ -1423,7 +1423,7 @@ func (s *functionState) emitPackedStoreArenaValue(storeValue C.LLVMValueRef, sto
 	return s.emitPackedStoreArenaValueNamed(storeValue, storeType, "packed.store.arena.value")
 }
 
-func (s *functionState) emitPackedStoreArenaValueNamed(storeValue C.LLVMValueRef, storeType *semantic.PackedEnumStoreType, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitPackedStoreFieldValueNamed(storeValue C.LLVMValueRef, storeType *semantic.PackedEnumStoreType, index C.unsigned, name string) (C.LLVMValueRef, error) {
 	if storeType == nil {
 		return nil, fmt.Errorf("missing packed enum store type")
 	}
@@ -1435,10 +1435,23 @@ func (s *functionState) emitPackedStoreArenaValueNamed(storeValue C.LLVMValueRef
 		if err != nil {
 			return nil, err
 		}
-		return C.LLVMBuildExtractValue(s.builder, storeValue, 0, cStringFree(name)), nil
+		if block := C.LLVMGetInsertBlock(s.builder); block != nil && s.packedStoreValues != nil && storeValue != nil {
+			key := packedStoreExtractCacheKey{block: block, store: storeValue, name: name}
+			if cached, ok := s.packedStoreValues[key]; ok && cached != nil {
+				return cached, nil
+			}
+			value := C.LLVMBuildExtractValue(s.builder, storeValue, index, cStringFree(name))
+			s.packedStoreValues[key] = value
+			return value, nil
+		}
+		return C.LLVMBuildExtractValue(s.builder, storeValue, index, cStringFree(name)), nil
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedEnumABI)
 	}
+}
+
+func (s *functionState) emitPackedStoreArenaValueNamed(storeValue C.LLVMValueRef, storeType *semantic.PackedEnumStoreType, name string) (C.LLVMValueRef, error) {
+	return s.emitPackedStoreFieldValueNamed(storeValue, storeType, 0, name)
 }
 
 func (s *functionState) emitPackedStoreRowBytesValue(storeValue C.LLVMValueRef, storeType *semantic.PackedEnumStoreType) (C.LLVMValueRef, error) {
@@ -1446,39 +1459,11 @@ func (s *functionState) emitPackedStoreRowBytesValue(storeValue C.LLVMValueRef, 
 }
 
 func (s *functionState) emitPackedStoreRowBytesValueNamed(storeValue C.LLVMValueRef, storeType *semantic.PackedEnumStoreType, name string) (C.LLVMValueRef, error) {
-	if storeType == nil {
-		return nil, fmt.Errorf("missing packed enum store type")
-	}
-	switch s.g.packedEnumABI {
-	case packedEnumABIRowHandle:
-		fallthrough
-	case packedEnumABIWordHandle:
-		_, err := s.g.lowerPackedEnumStoreType(storeType)
-		if err != nil {
-			return nil, err
-		}
-		return C.LLVMBuildExtractValue(s.builder, storeValue, 1, cStringFree(name)), nil
-	default:
-		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedEnumABI)
-	}
+	return s.emitPackedStoreFieldValueNamed(storeValue, storeType, 1, name)
 }
 
 func (s *functionState) emitPackedStoreStateValueNamed(storeValue C.LLVMValueRef, storeType *semantic.PackedEnumStoreType, name string) (C.LLVMValueRef, error) {
-	if storeType == nil {
-		return nil, fmt.Errorf("missing packed enum store type")
-	}
-	switch s.g.packedEnumABI {
-	case packedEnumABIRowHandle:
-		fallthrough
-	case packedEnumABIWordHandle:
-		_, err := s.g.lowerPackedEnumStoreType(storeType)
-		if err != nil {
-			return nil, err
-		}
-		return C.LLVMBuildExtractValue(s.builder, storeValue, 2, cStringFree(name)), nil
-	default:
-		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedEnumABI)
-	}
+	return s.emitPackedStoreFieldValueNamed(storeValue, storeType, 2, name)
 }
 
 func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *semantic.FuncType, error) {
@@ -2362,13 +2347,12 @@ func (s *functionState) emitPackedEnumConstructorAlloc(storeValue C.LLVMValueRef
 	if err != nil {
 		return nil, nil, err
 	}
-	C.LLVMBuildStore(s.builder, C.LLVMConstNull(rowType), allocPtr)
 	tagValue, err := s.enumTagConstant(variant.Tag)
 	if err != nil {
 		return nil, nil, err
 	}
-	tagPtr := C.LLVMBuildStructGEP2(s.builder, rowType, allocPtr, 0, cStringFree("packed.enum.tag.ptr"))
-	C.LLVMBuildStore(s.builder, tagValue, tagPtr)
+	rowValue := C.LLVMConstNull(rowType)
+	rowValue = C.LLVMBuildInsertValue(s.builder, rowValue, tagValue, 0, cStringFree("packed.enum.tag.ins"))
 	for i, commonDecl := range enumType.Decl.Common {
 		arg, ok := commonArgs[commonDecl.Name]
 		if !ok {
@@ -2382,9 +2366,9 @@ func (s *functionState) emitPackedEnumConstructorAlloc(storeValue C.LLVMValueRef
 		if err != nil {
 			return nil, nil, err
 		}
-		fieldPtr := C.LLVMBuildStructGEP2(s.builder, rowType, allocPtr, C.unsigned(1+i), cStringFree("packed.enum.common.ptr"))
-		C.LLVMBuildStore(s.builder, fieldValue, fieldPtr)
+		rowValue = C.LLVMBuildInsertValue(s.builder, rowValue, fieldValue, C.unsigned(1+i), cStringFree("packed.enum.common.ins"))
 	}
+	C.LLVMBuildStore(s.builder, rowValue, allocPtr)
 	if len(variant.Payload) > 0 {
 		payloadPtr, err := s.enumPayloadPtr(allocPtr, enumType)
 		if err != nil {

@@ -84,6 +84,8 @@ def fold() -> int:
 		"extractvalue %PackedStoreAllocResult",
 		"packed.decode.store.arena",
 		"packed.decode.store.state",
+		"store %Expr { i32 0, i64 7, [1 x i64] zeroinitializer }, ptr %packed.alloc.ptr",
+		"store i64 5, ptr %enum.payload.ptr",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -100,6 +102,11 @@ def fold() -> int:
 	for _, bad := range []string{"define i1 @differs(ptr", "icmp ne ptr", "call i64 @ctx_packed_store_alloc(", "call ptr @arena_alloc(", "ptrtoint ptr %packed.alloc to i64", "inttoptr i64"} {
 		if strings.Contains(output, bad) {
 			t.Fatalf("expected alternate packed ABI to lower values as integer handles and avoid %q, got:\n%s", bad, output)
+		}
+	}
+	for _, bad := range []string{"packed.enum.tag.ptr", "packed.enum.common.ptr"} {
+		if strings.Contains(output, bad) {
+			t.Fatalf("expected packed constructor lowering to aggregate-store the row prefix instead of using %q field stores, got:\n%s", bad, output)
 		}
 	}
 }
@@ -204,6 +211,14 @@ def fold_common() -> int:
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
+	}
+	arenaExtracts := strings.Count(output, "packed.common.store.arena = extractvalue %Expr__Store")
+	if arenaExtracts != 1 {
+		t.Fatalf("expected repeated packed common-field reads in one block to reuse a single arena extractvalue, got %d extracts:\n%s", arenaExtracts, output)
+	}
+	stateExtracts := strings.Count(output, "packed.common.store.state = extractvalue %Expr__Store")
+	if stateExtracts != 1 {
+		t.Fatalf("expected repeated packed common-field reads in one block to reuse a single state extractvalue, got %d extracts:\n%s", stateExtracts, output)
 	}
 }
 
