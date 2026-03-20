@@ -59,7 +59,8 @@ def typed_group_waitall(pool: any ThreadPool&, value: i64) can[Pool.Submit, Pool
 
 def typed_pool_scope(value: i64) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
 	pool workers(2u):
-		return typed_pool_roundtrip((&workers).cast[any ThreadPool&](), value)
+		task: Task[i64, Pending] = submit thread_worker(value)
+		return await task
 
 def typed_lock_scope(mu: mutable Mutex, cv: mutable CondVar, ready: bool) -> bool can[Sync.Lock, Sync.Unlock, Sync.Wait]:
 	lock mu as g:

@@ -442,6 +442,44 @@ func (p *Parser) parseUnary() ast.Expr {
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "new" {
 		return p.parseAllocExpr()
 	}
+	if p.matchIdentText("submit") {
+		pos := p.tokens[p.pos-1].Pos
+		callExpr := p.parseUnary()
+		activePool := p.activePoolName()
+		if activePool == "" {
+			p.errorf("submit requires an active pool scope like \"pool workers(...):\"")
+			return callExpr
+		}
+		call, ok := callExpr.(*ast.CallExpr)
+		if !ok {
+			p.errorf("submit expects a call like submit work(arg)")
+			return callExpr
+		}
+		if len(call.Args) != 1 || call.NamedArgCount() != 0 {
+			p.errorf("submit currently expects exactly one positional argument")
+			return callExpr
+		}
+		poolPos := call.Func.Pos()
+		return &ast.CallExpr{
+			Position: pos,
+			Func:     &ast.Ident{Position: pos, Name: "pool_submit1"},
+			Args: []ast.Expr{
+				&ast.CastExpr{
+					Position: poolPos,
+					Operand:  &ast.AddrOfExpr{Position: poolPos, Operand: &ast.Ident{Position: poolPos, Name: activePool}},
+					Target: &ast.RefType{
+						Position: poolPos,
+						Elem:     &ast.NamedType{Position: poolPos, Name: "ThreadPool"},
+						State:    ast.RefStateNonNull,
+						Storage:  ast.RefStorageAny,
+						Explicit: true,
+					},
+				},
+				call.Func,
+				call.Args[0],
+			},
+		}
+	}
 	if p.matchIdentText("await") {
 		pos := p.tokens[p.pos-1].Pos
 		operand := p.parseUnary()

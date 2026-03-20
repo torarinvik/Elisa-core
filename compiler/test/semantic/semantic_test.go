@@ -469,6 +469,45 @@ def ok() -> bool can[Pool.Create, Pool.Shutdown]:
 	requireFunctionReturnTypeString(t, result, "ok", "bool")
 }
 
+func TestAnalyzeAcceptsSubmitSyntaxInsidePoolScope(t *testing.T) {
+	src := `extern pool_new(workers: usize) -> ThreadPool
+extern pool_shutdown(pool: any ThreadPool&) -> void
+extern pool_await(task: Task[i64, Pending]) -> i64
+
+def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return task
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def ok() -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.Await]:
+	pool workers(2u):
+		task: Task[i64, Pending] = submit work(7)
+		return await task
+`
+	result, errs := parseAndAnalyze(t, "submit_syntax_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "i64")
+}
+
+func TestParseRejectsSubmitOutsidePoolScope(t *testing.T) {
+	src := `def work(value: i64) -> i64:
+	return value + 1
+
+def bad() -> void:
+	_ = submit work(7)
+`
+	_, errs := parseAndAnalyze(t, "submit_outside_pool_parse_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected parse error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "submit requires an active pool scope") {
+		t.Fatalf("expected active-pool submit parse diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeRejectsReusingConsumedThreadField(t *testing.T) {
 	src := `extern join(thread: Thread[i64, Joinable]) -> i64
 extern detach(thread: Thread[i64, Joinable]) -> void

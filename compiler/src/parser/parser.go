@@ -2,15 +2,16 @@ package parser
 
 import (
 	"fmt"
-	"strings"
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
+	"strings"
 )
 
 type Parser struct {
-	tokens []lexer.Token
-	pos    int
-	errors []string
+	tokens     []lexer.Token
+	pos        int
+	errors     []string
+	poolScopes []string
 }
 
 func New(tokens []lexer.Token) *Parser {
@@ -18,6 +19,13 @@ func New(tokens []lexer.Token) *Parser {
 }
 
 func (p *Parser) Errors() []string { return p.errors }
+
+func (p *Parser) activePoolName() string {
+	if len(p.poolScopes) == 0 {
+		return ""
+	}
+	return p.poolScopes[len(p.poolScopes)-1]
+}
 
 func (p *Parser) cur() lexer.Token {
 	if p.pos >= len(p.tokens) {

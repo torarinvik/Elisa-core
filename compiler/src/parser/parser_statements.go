@@ -144,7 +144,9 @@ func (p *Parser) parsePoolStmt() *ast.PoolStmt {
 	p.expect(lexer.TOKEN_RPAREN)
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
+	p.poolScopes = append(p.poolScopes, name)
 	body := p.parseBlock()
+	p.poolScopes = p.poolScopes[:len(p.poolScopes)-1]
 	return &ast.PoolStmt{Position: pos, Name: name, Workers: workers, Body: body}
 }
 func (p *Parser) parseWaitAllStmt() ast.Stmt {

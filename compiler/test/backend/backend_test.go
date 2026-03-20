@@ -326,6 +326,50 @@ def pool_then_fallthrough(mu: mutable Mutex) -> void:
 	}
 }
 
+func TestGenerateLLVMIRLowersSubmitSyntaxInsidePoolScope(t *testing.T) {
+	src := `extern pool_new(workers: usize) -> ThreadPool
+extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return task
+
+def pool_await(task: Task[i64, Pending]) -> i64:
+	return 0
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def submit_then_await() -> i64:
+	pool workers(2u):
+		task: Task[i64, Pending] = submit work(7)
+		return await task
+`
+	result := parseAndAnalyze(t, "backend_submit_syntax.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"declare %ThreadPool @pool_new(",
+		"declare void @pool_shutdown(ptr)",
+		"define i64 @submit_then_await()",
+		"call %Task__i64__Pending @pool_submit1__i64__i64(ptr",
+		"call i64 @pool_await(%Task__i64__Pending",
+		"call void @pool_shutdown(ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	body := functionIR(output, "submit_then_await")
+	if submitIdx := strings.Index(body, "call %Task__i64__Pending @pool_submit1__i64__i64(ptr"); submitIdx < 0 {
+		t.Fatalf("expected submit_then_await to lower submit syntax through pool_submit1, got:\n%s", body)
+	}
+}
+
 func TestGenerateLLVMIRLowersVoidReturnCalls(t *testing.T) {
 	src := `extern touch(value: i32)
 
