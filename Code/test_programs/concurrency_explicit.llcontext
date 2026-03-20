@@ -18,7 +18,7 @@ def atomic_roundtrip() -> i64 can[Atomics.Load, Atomics.Store, Atomics.Exchange,
 	current: i64 = load(slot_ref, MemoryOrder.SeqCst)
 	return prior_add + prior_xor + prior_or + prior_and + prior_sub + previous + current
 
-def concurrency_handles(thread: Thread[i64, Joinable], task: Task[i64, Pending], pool: ThreadPool, group: TaskGroup, mu: Mutex, guard: MutexGuard[Held], cv: CondVar) -> bool can[Thread.Detach, Abort.Panic, Atomics.CompareExchange, Atomics.Load, Memory.Allocate, Memory.Release]:
+def concurrency_handles(thread: Thread[i64, Joinable], task: Task[i64, Pending], pool: ThreadPool, group: TaskGroup, mu: Mutex, guard: MutexGuard[Held], cv: CondVar) -> bool can[Thread.Detach, Sync.Unlock, Abort.Panic, Atomics.CompareExchange, Atomics.Load, Memory.Allocate, Memory.Release]:
 	result: bool = (
 		thread.handle == 0 and
 		thread.state == null and
@@ -32,6 +32,7 @@ def concurrency_handles(thread: Thread[i64, Joinable], task: Task[i64, Pending],
 		cv.handle == null
 	)
 	detach(move thread)
+	mutex_unlock(move guard)
 	task_group_add((&group).cast[any TaskGroup&](), move task)
 	return result
 

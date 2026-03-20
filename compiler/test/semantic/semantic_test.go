@@ -455,6 +455,20 @@ func TestAnalyzeRejectsDroppedPendingTaskAtScopeExit(t *testing.T) {
 	}
 }
 
+func TestAnalyzeRejectsDroppedHeldMutexGuardAtScopeExit(t *testing.T) {
+	src := `def bad(guard: MutexGuard[Held]) -> void:
+    pass
+`
+	_, errs := parseAndAnalyze(t, "drop_held_mutex_guard_scope_exit_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "held mutex guard \"guard\" must be consumed before scope exit") {
+		t.Fatalf("expected unconsumed held-guard diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsDroppedJoinableThreadInsideAggregateAtScopeExit(t *testing.T) {
 	src := `repr(c) struct Holder:
     thread: mutable Thread[i64, Joinable]
@@ -469,6 +483,23 @@ def bad(holder: Holder) -> void:
 	all := strings.Join(errs, "\n")
 	if !strings.Contains(all, "joinable thread handle \"holder.thread\" must be consumed before scope exit") {
 		t.Fatalf("expected unconsumed aggregate-thread diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsDroppedHeldMutexGuardInsideAggregateAtScopeExit(t *testing.T) {
+	src := `repr(c) struct Holder:
+    guard: mutable MutexGuard[Held]
+
+def bad(holder: Holder) -> void:
+    pass
+`
+	_, errs := parseAndAnalyze(t, "drop_held_mutex_guard_holder_scope_exit_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "held mutex guard \"holder.guard\" must be consumed before scope exit") {
+		t.Fatalf("expected unconsumed aggregate-guard diagnostic, got:\n%s", all)
 	}
 }
 
@@ -1579,6 +1610,7 @@ func TestAnalyzeAcceptsBuiltinConcurrencyPermissionFamilies(t *testing.T) {
 
 func TestAnalyzeAcceptsBuiltinConcurrencyCarrierTypes(t *testing.T) {
 	src := `extern detach(thread: Thread[i64, Joinable]) -> void
+extern mutex_unlock(g: MutexGuard[Held]) -> void
 extern pool_await(task: Task[i64, Pending]) -> i64
 
 def touch(thread: Thread[i64, Joinable], task: Task[i64, Pending], pool: ThreadPool, group: TaskGroup, mu: Mutex, guard: MutexGuard[Held], cv: CondVar, slot: atomic[i64]) -> void:
@@ -1592,6 +1624,7 @@ def touch(thread: Thread[i64, Joinable], task: Task[i64, Pending], pool: ThreadP
 	copy: atomic[i64] = slot
 	_ = copy
 	detach(move thread)
+	mutex_unlock(move guard)
 	_ = pool_await(move task)
 `
 	result, errs := parseAndAnalyze(t, "builtin_concurrency_carriers_ok.llcontext", src)

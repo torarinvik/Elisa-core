@@ -1645,36 +1645,54 @@ func joinAffinePath(base, suffix string) string {
 
 func directProtocolLeakKind(t Type) string {
 	instance, ok := t.(*GenericInstanceType)
-	if !ok || len(instance.Args) < 2 {
+	if !ok {
 		return ""
 	}
-	stateName := instance.Args[1].String()
 	switch instance.Name {
 	case "Thread":
-		if stateName == "Joinable" {
+		if len(instance.Args) >= 2 && instance.Args[1].String() == "Joinable" {
 			return "joinable thread handle"
 		}
 	case "Task":
-		if stateName == "Pending" {
+		if len(instance.Args) >= 2 && instance.Args[1].String() == "Pending" {
 			return "pending task handle"
+		}
+	case "MutexGuard":
+		if len(instance.Args) >= 1 && instance.Args[0].String() == "Held" {
+			return "held mutex guard"
 		}
 	}
 	return ""
 }
 
-func (a *Analyzer) protocolKindsInType(t Type, seen map[string]bool) (bool, bool) {
+func joinProtocolLeakKinds(parts []string) string {
+	switch len(parts) {
+	case 0:
+		return ""
+	case 1:
+		return parts[0]
+	case 2:
+		return parts[0] + " or " + parts[1]
+	default:
+		return strings.Join(parts[:len(parts)-1], ", ") + ", or " + parts[len(parts)-1]
+	}
+}
+
+func (a *Analyzer) protocolKindsInType(t Type, seen map[string]bool) (bool, bool, bool) {
 	if t == nil {
-		return false, false
+		return false, false, false
 	}
 	switch directProtocolLeakKind(t) {
 	case "joinable thread handle":
-		return true, false
+		return true, false, false
 	case "pending task handle":
-		return false, true
+		return false, true, false
+	case "held mutex guard":
+		return false, false, true
 	}
 	key := t.String()
 	if seen[key] {
-		return false, false
+		return false, false, false
 	}
 	seen[key] = true
 	switch tt := t.(type) {
@@ -1687,27 +1705,29 @@ func (a *Analyzer) protocolKindsInType(t Type, seen map[string]bool) (bool, bool
 	case *DArrayViewType:
 		return a.protocolKindsInType(tt.Elem, seen)
 	case *DictType:
-		leftThread, leftTask := a.protocolKindsInType(tt.Key, seen)
-		rightThread, rightTask := a.protocolKindsInType(tt.Value, seen)
-		return leftThread || rightThread, leftTask || rightTask
+		leftThread, leftTask, leftGuard := a.protocolKindsInType(tt.Key, seen)
+		rightThread, rightTask, rightGuard := a.protocolKindsInType(tt.Value, seen)
+		return leftThread || rightThread, leftTask || rightTask, leftGuard || rightGuard
 	case *StructType:
-		var hasThread, hasTask bool
+		var hasThread, hasTask, hasGuard bool
 		for _, field := range tt.Fields {
-			fieldThread, fieldTask := a.protocolKindsInType(field.Type, seen)
+			fieldThread, fieldTask, fieldGuard := a.protocolKindsInType(field.Type, seen)
 			hasThread = hasThread || fieldThread
 			hasTask = hasTask || fieldTask
+			hasGuard = hasGuard || fieldGuard
 		}
-		return hasThread, hasTask
+		return hasThread, hasTask, hasGuard
 	case *EnumType:
-		var hasThread, hasTask bool
+		var hasThread, hasTask, hasGuard bool
 		for _, variant := range tt.Variants {
 			for _, payload := range variant.Payload {
-				payloadThread, payloadTask := a.protocolKindsInType(payload, seen)
+				payloadThread, payloadTask, payloadGuard := a.protocolKindsInType(payload, seen)
 				hasThread = hasThread || payloadThread
 				hasTask = hasTask || payloadTask
+				hasGuard = hasGuard || payloadGuard
 			}
 		}
-		return hasThread, hasTask
+		return hasThread, hasTask, hasGuard
 	case *GenericInstanceType:
 		if base, ok := tt.Base.(*StructType); ok {
 			bindings := map[string]Type{}
@@ -1716,51 +1736,57 @@ func (a *Analyzer) protocolKindsInType(t Type, seen map[string]bool) (bool, bool
 					bindings[name] = tt.Args[i]
 				}
 			}
-			var hasThread, hasTask bool
+			var hasThread, hasTask, hasGuard bool
 			for _, field := range base.Fields {
 				fieldType := field.Type
 				if len(bindings) != 0 {
 					fieldType = a.substituteType(fieldType, bindings, nil, nil, nil)
 				}
-				fieldThread, fieldTask := a.protocolKindsInType(fieldType, seen)
+				fieldThread, fieldTask, fieldGuard := a.protocolKindsInType(fieldType, seen)
 				hasThread = hasThread || fieldThread
 				hasTask = hasTask || fieldTask
+				hasGuard = hasGuard || fieldGuard
 			}
-			return hasThread, hasTask
+			return hasThread, hasTask, hasGuard
 		}
-		var hasThread, hasTask bool
+		var hasThread, hasTask, hasGuard bool
 		for _, arg := range tt.Args {
-			argThread, argTask := a.protocolKindsInType(arg, seen)
+			argThread, argTask, argGuard := a.protocolKindsInType(arg, seen)
 			hasThread = hasThread || argThread
 			hasTask = hasTask || argTask
+			hasGuard = hasGuard || argGuard
 		}
-		baseThread, baseTask := a.protocolKindsInType(tt.Base, seen)
-		return hasThread || baseThread, hasTask || baseTask
+		baseThread, baseTask, baseGuard := a.protocolKindsInType(tt.Base, seen)
+		return hasThread || baseThread, hasTask || baseTask, hasGuard || baseGuard
 	default:
-		return false, false
+		return false, false, false
 	}
 }
 
 func (a *Analyzer) containsProtocolLeakValues(t Type) bool {
-	hasThread, hasTask := a.protocolKindsInType(t, map[string]bool{})
-	return hasThread || hasTask
+	hasThread, hasTask, hasGuard := a.protocolKindsInType(t, map[string]bool{})
+	return hasThread || hasTask || hasGuard
 }
 
 func (a *Analyzer) protocolLeakDescription(t Type) string {
 	if kind := directProtocolLeakKind(t); kind != "" {
 		return kind
 	}
-	hasThread, hasTask := a.protocolKindsInType(t, map[string]bool{})
-	switch {
-	case hasThread && hasTask:
-		return "value containing joinable thread or pending task handles"
-	case hasThread:
-		return "value containing joinable thread handles"
-	case hasTask:
-		return "value containing pending task handles"
-	default:
+	hasThread, hasTask, hasGuard := a.protocolKindsInType(t, map[string]bool{})
+	parts := make([]string, 0, 3)
+	if hasThread {
+		parts = append(parts, "joinable thread handles")
+	}
+	if hasTask {
+		parts = append(parts, "pending task handles")
+	}
+	if hasGuard {
+		parts = append(parts, "held mutex guards")
+	}
+	if len(parts) == 0 {
 		return "affine value"
 	}
+	return "value containing " + joinProtocolLeakKinds(parts)
 }
 
 func (a *Analyzer) protocolLiveLeafPaths(t Type, prefix string, seen map[string]bool) map[string]Type {
@@ -1782,7 +1808,7 @@ func (a *Analyzer) protocolLiveLeafPaths(t Type, prefix string, seen map[string]
 			if !a.containsProtocolLeakValues(field.Type) {
 				continue
 			}
-			for childPath, liveType := range a.protocolLiveLeafPaths(field.Type, field.Name, seen) {
+			for childPath, liveType := range a.protocolLiveLeafPaths(field.Type, field.Name, mapsCloneBool(seen)) {
 				paths[joinAffinePath(prefix, childPath)] = liveType
 			}
 		}
@@ -1804,7 +1830,7 @@ func (a *Analyzer) protocolLiveLeafPaths(t Type, prefix string, seen map[string]
 				if !a.containsProtocolLeakValues(fieldType) {
 					continue
 				}
-				for childPath, liveType := range a.protocolLiveLeafPaths(fieldType, field.Name, seen) {
+				for childPath, liveType := range a.protocolLiveLeafPaths(fieldType, field.Name, mapsCloneBool(seen)) {
 					paths[joinAffinePath(prefix, childPath)] = liveType
 				}
 			}
@@ -1815,6 +1841,17 @@ func (a *Analyzer) protocolLiveLeafPaths(t Type, prefix string, seen map[string]
 		return map[string]Type{prefix: t}
 	}
 	return nil
+}
+
+func mapsCloneBool(src map[string]bool) map[string]bool {
+	if src == nil {
+		return nil
+	}
+	cloned := make(map[string]bool, len(src))
+	for key, value := range src {
+		cloned[key] = value
+	}
+	return cloned
 }
 
 func (a *Analyzer) reportUnconsumedProtocolValues() {
