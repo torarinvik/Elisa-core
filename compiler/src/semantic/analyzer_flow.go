@@ -1214,6 +1214,9 @@ func isAffineHandleType(t Type) bool {
 }
 
 func affineHandleKind(t Type) string {
+	if !isAffineHandleType(t) {
+		return "value containing affine handles"
+	}
 	switch tt := t.(type) {
 	case *GenericInstanceType:
 		if base, ok := tt.Base.(*StructType); ok {
@@ -1236,7 +1239,7 @@ func affineHandleKind(t Type) string {
 }
 
 func (a *Analyzer) consumeAffineValueExpr(expr ast.Expr, expected Type, reason string) {
-	if expr == nil || !isAffineHandleType(expected) {
+	if expr == nil || !a.containsAffineHandleValues(expected, map[string]bool{}) {
 		return
 	}
 	key, ok := a.lookupAffineValueKey(expr)
@@ -1274,7 +1277,18 @@ func (a *Analyzer) lookupAffineValueState(expr ast.Expr) (affineValueState, bool
 		return affineValueState{}, false
 	}
 	state, ok := a.currentAffineValues[key]
-	return state, ok
+	if ok {
+		return state, true
+	}
+	for existing, existingState := range a.currentAffineValues {
+		if existing.Root != key.Root {
+			continue
+		}
+		if affinePathContains(existing.Path, key.Path) || affinePathContains(key.Path, existing.Path) {
+			return existingState, true
+		}
+	}
+	return affineValueState{}, false
 }
 
 func (a *Analyzer) lookupAffineValueKey(expr ast.Expr) (affineValueKey, bool) {
@@ -1305,7 +1319,7 @@ func (a *Analyzer) lookupAffineValueKey(expr ast.Expr) (affineValueKey, bool) {
 			objType = a.analyzeExpr(n.Object)
 		}
 		field, ok := a.lookupField(objType, n.Field, n.Pos())
-		if !ok || !isAffineHandleType(field.Type) {
+		if !ok || !a.containsAffineHandleValues(field.Type, map[string]bool{}) {
 			return affineValueKey{}, false
 		}
 		if base.Path == "" {
@@ -1314,8 +1328,54 @@ func (a *Analyzer) lookupAffineValueKey(expr ast.Expr) (affineValueKey, bool) {
 			base.Path = base.Path + "." + n.Field
 		}
 		return base, true
+	case *ast.IndexExpr:
+		base, ok := a.lookupAffineValueKey(n.Object)
+		if !ok {
+			return affineValueKey{}, false
+		}
+		objType := a.exprTypes[n.Object]
+		if objType == nil {
+			objType = a.analyzeExpr(n.Object)
+		}
+		if elemType, ok := affineIndexedElemType(objType); ok && a.containsAffineHandleValues(elemType, map[string]bool{}) {
+			return base, true
+		}
+		return affineValueKey{}, false
 	default:
 		return affineValueKey{}, false
+	}
+}
+
+func affinePathContains(ancestor, descendant string) bool {
+	if ancestor == "" {
+		return true
+	}
+	if descendant == ancestor {
+		return true
+	}
+	if strings.HasPrefix(descendant, ancestor+".") {
+		return true
+	}
+	if strings.HasPrefix(descendant, ancestor+"[") {
+		return true
+	}
+	return false
+}
+
+func affineIndexedElemType(t Type) (Type, bool) {
+	switch tt := t.(type) {
+	case *ArrayType:
+		return tt.Elem, true
+	case *DArrayType:
+		return tt.Elem, true
+	case *ViewType:
+		return tt.Elem, true
+	case *DArrayViewType:
+		return tt.Elem, true
+	case *RefType:
+		return affineIndexedElemType(tt.Elem)
+	default:
+		return nil, false
 	}
 }
 

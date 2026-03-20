@@ -27,7 +27,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 					result = sym.Type
 					return
 				}
-				if state, ok := a.lookupAffineValueState(n); ok && isAffineHandleType(sym.Type) {
+				if state, ok := a.lookupAffineValueState(n); ok && a.containsAffineHandleValues(sym.Type, map[string]bool{}) {
 					a.errorf(n.Pos(), "%s %q cannot be used after %s", affineHandleKind(sym.Type), n.Name, state.ConsumedBy)
 					result = sym.Type
 					return
@@ -487,6 +487,7 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 					a.errorf(orderedArgs[i].Pos(), "enum constructor argument %d to %q expects %s, got %s", i+1, enumType.Name+"."+variant.Name, variant.Payload[i].String(), actual.String())
 				}
 			}
+			a.consumeAffineValueExpr(orderedArgs[i], variant.Payload[i], a.enumConstructorMoveReason(enumType.Name, variant, i))
 		} else {
 			a.analyzeExpr(orderedArgs[i])
 		}
@@ -505,6 +506,7 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 		if !AssignableTo(field.Type, actual) {
 			a.errorf(arg.Pos(), "packed enum common field %q for %q expects %s, got %s", commonDecl.Name, enumType.Name+"."+variant.Name, field.Type.String(), actual.String())
 		}
+		a.consumeAffineValueExpr(arg, field.Type, "move into enum common field "+strconv.Quote(commonDecl.Name))
 	}
 	return enumType
 }
@@ -548,6 +550,7 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 		if !AssignableTo(expected, actual) {
 			a.errorf(expr.Args[i].Pos(), "struct literal field %q expects %s, got %s", fieldDecl.Name, expected.String(), actual.String())
 		}
+		a.consumeAffineValueExpr(expr.Args[i], expected, "move into struct literal field "+strconv.Quote(fieldDecl.Name))
 	}
 	for i := limit; i < len(expr.Args); i++ {
 		a.analyzeExpr(expr.Args[i])
@@ -831,6 +834,7 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 						a.errorf(orderedArgs[i].Pos(), "enum constructor argument %d to %q expects %s, got %s", i+1, enumType.Name+"."+variant.Name, variant.Payload[i].String(), actual.String())
 					}
 				}
+				a.consumeAffineValueExpr(orderedArgs[i], variant.Payload[i], a.enumConstructorMoveReason(enumType.Name, variant, i))
 			} else {
 				a.analyzeExpr(orderedArgs[i])
 			}
@@ -1210,7 +1214,7 @@ func (a *Analyzer) bindFreshShape(shape Shape, origin string, bindings map[strin
 
 func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 	if field, ok := dstrSyntheticField(a.analyzeExpr(expr.Object), expr.Field); ok {
-		if state, ok := a.lookupAffineValueState(expr); ok && isAffineHandleType(field.Type) {
+		if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(field.Type, map[string]bool{}) {
 			a.errorf(expr.Pos(), "%s %q cannot be used after %s", affineHandleKind(field.Type), affineValueDisplayName(expr), state.ConsumedBy)
 		}
 		return field.Type
@@ -1219,7 +1223,7 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 	if !ok {
 		return invalidType
 	}
-	if state, ok := a.lookupAffineValueState(expr); ok && isAffineHandleType(field.Type) {
+	if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(field.Type, map[string]bool{}) {
 		a.errorf(expr.Pos(), "%s %q cannot be used after %s", affineHandleKind(field.Type), affineValueDisplayName(expr), state.ConsumedBy)
 	}
 	return field.Type
@@ -1388,8 +1392,10 @@ func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expecte
 			if !AssignableTo(expectedArray.Elem, itemType) {
 				a.errorf(elem.Pos(), "array literal element expects %s, got %s", expectedArray.Elem.String(), itemType.String())
 			}
+			a.consumeAffineValueExpr(elem, expectedArray.Elem, "move into array literal element")
 			continue
 		}
+		a.consumeAffineValueExpr(elem, itemType, "move into array literal element")
 		if elemType == nil {
 			elemType = itemType
 			continue
@@ -1422,6 +1428,16 @@ func contextualArrayLiteralType(expected Type) (*ArrayType, bool) {
 		return nil, false
 	}
 	return arrayType, true
+}
+
+func (a *Analyzer) enumConstructorMoveReason(enumName string, variant *EnumVariant, index int) string {
+	if variant == nil {
+		return "move into enum constructor payload"
+	}
+	if label := variant.PayloadLabel(index); label != "" {
+		return "move into enum payload " + strconv.Quote(enumName+"."+variant.Name+"."+label)
+	}
+	return "move into enum payload " + strconv.Quote(enumName+"."+variant.Name) + " argument " + strconv.Itoa(index+1)
 }
 
 func containsTypeParam(t Type) bool {

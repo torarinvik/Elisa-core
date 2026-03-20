@@ -302,7 +302,7 @@ extern detach(thread: Thread[i64]) -> void
 
 def bad(thread: Thread[i64]) -> void:
     value: i64 = join(thread)
-    discard value
+    _ = value
     detach(thread)
 `
 	_, errs := parseAndAnalyze(t, "consumed_thread_handle_reject.llcontext", src)
@@ -359,7 +359,7 @@ repr(c) struct Holder:
 
 def bad(holder: mutable Holder) -> void:
     value: i64 = join(holder.thread)
-    discard value
+    _ = value
     detach(holder.thread)
 `
 	_, errs := parseAndAnalyze(t, "consumed_thread_field_reject.llcontext", src)
@@ -433,6 +433,148 @@ def bad_local(holder: Holder) -> void:
 	}
 	if !strings.Contains(all, "cannot take address of value containing affine handles") {
 		t.Fatalf("expected affine-address-of-container diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsCopyingAggregateAfterAffineFieldConsume(t *testing.T) {
+	src := `extern join(thread: Thread[i64]) -> i64
+
+repr(c) struct Holder:
+    thread: mutable Thread[i64]
+    count: mutable i64
+
+def bad(holder: Holder) -> void:
+    value: i64 = join(holder.thread)
+    _ = value
+    copy: Holder = holder
+    _ = copy
+`
+	_, errs := parseAndAnalyze(t, "affine_container_copy_after_field_move_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic errors, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "value containing affine handles \"holder\" cannot be used after argument to call \"join\"") {
+		t.Fatalf("expected aggregate-after-field-move diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsReusingMovedAffineContainingAggregate(t *testing.T) {
+	src := `repr(c) struct Holder:
+    thread: mutable Thread[i64]
+
+def bad(holder: Holder) -> void:
+    copy: Holder = holder
+    _ = copy
+    _ = holder
+`
+	_, errs := parseAndAnalyze(t, "affine_container_move_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic errors, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "value containing affine handles \"holder\" cannot be used after move into local \"copy\"") {
+		t.Fatalf("expected moved-aggregate diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsReusingAffineHandleAfterStructLiteralMove(t *testing.T) {
+	src := `extern join(thread: Thread[i64]) -> i64
+
+repr(c) struct Holder:
+    thread: mutable Thread[i64]
+    count: mutable i64
+
+def bad(thread: Thread[i64]) -> i64:
+    holder: Holder = Holder(thread, 1)
+    _ = holder
+    return join(thread)
+`
+	_, errs := parseAndAnalyze(t, "affine_struct_literal_move_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic errors, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread handle \"thread\" cannot be used after move into struct literal field \"thread\"") {
+		t.Fatalf("expected struct-literal move diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsReusingAffineHandleAfterArrayLiteralMove(t *testing.T) {
+	src := `extern join(thread: Thread[i64]) -> i64
+
+def bad(thread: Thread[i64]) -> i64:
+    items: array[Thread[i64], 1] = [thread]
+    _ = items
+    return join(thread)
+`
+	_, errs := parseAndAnalyze(t, "affine_array_literal_move_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic errors, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread handle \"thread\" cannot be used after move into array literal element") {
+		t.Fatalf("expected array-literal move diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsReusingAffineHandleAfterEnumConstructorMove(t *testing.T) {
+	src := `extern join(thread: Thread[i64]) -> i64
+
+enum Job:
+    Run(thread: Thread[i64])
+
+def bad(thread: Thread[i64]) -> i64:
+    job: Job = Job.Run(thread: thread)
+    _ = job
+    return join(thread)
+`
+	_, errs := parseAndAnalyze(t, "affine_enum_constructor_move_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic errors, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread handle \"thread\" cannot be used after move into enum payload \"Job.Run.thread\"") {
+		t.Fatalf("expected enum-constructor move diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsUsingAffineFieldAfterParentMove(t *testing.T) {
+	src := `extern join(thread: Thread[i64]) -> i64
+
+repr(c) struct Holder:
+    thread: mutable Thread[i64]
+
+def bad(holder: Holder) -> i64:
+    copy: Holder = holder
+    _ = copy
+    return join(holder.thread)
+`
+	_, errs := parseAndAnalyze(t, "affine_parent_move_field_use_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic errors, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread handle \"holder.thread\" cannot be used after move into local \"copy\"") {
+		t.Fatalf("expected parent-move child-use diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsReusingIndexedAffineValue(t *testing.T) {
+	src := `extern join(thread: Thread[i64]) -> i64
+
+def bad(items: array[Thread[i64], 1]) -> i64:
+    first: i64 = join(items[0])
+    _ = first
+    return join(items[0])
+`
+	_, errs := parseAndAnalyze(t, "affine_index_move_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic errors, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "value containing affine handles \"items\" cannot be used after argument to call \"join\"") {
+		t.Fatalf("expected indexed-affine diagnostic, got:\n%s", all)
 	}
 }
 
