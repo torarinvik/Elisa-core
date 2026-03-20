@@ -455,6 +455,35 @@ def ok(cv: mutable CondVar, broadcast: bool) -> void:
 	requireFunctionReturnTypeString(t, result, "ok", "void")
 }
 
+func TestAnalyzeAcceptsAtomicRmwBuiltins(t *testing.T) {
+	src := `enum MemoryOrder:
+	Relaxed
+	Acquire
+	Release
+	AcqRel
+	SeqCst
+
+extern fetch_add(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
+extern fetch_sub(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
+extern fetch_or(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
+extern fetch_and(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
+extern fetch_xor(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
+
+def ok(slot: mutable atomic[i64]) -> i64 can[Atomics.Rmw]:
+	slot_ref: any atomic[i64]& = (&slot).cast[any atomic[i64]&]()
+	add: i64 = fetch_add(slot_ref, 1, MemoryOrder.AcqRel)
+	sub: i64 = fetch_sub(slot_ref, 2, MemoryOrder.AcqRel)
+	or_bits: i64 = fetch_or(slot_ref, 4, MemoryOrder.AcqRel)
+	and_bits: i64 = fetch_and(slot_ref, 8, MemoryOrder.AcqRel)
+	xor_bits: i64 = fetch_xor(slot_ref, 16, MemoryOrder.AcqRel)
+	return add + sub + or_bits + and_bits + xor_bits
+`
+	result, errs := parseAndAnalyze(t, "atomic_rmw_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "i64")
+}
+
 func TestAnalyzeAcceptsLockSyntax(t *testing.T) {
 	src := `extern mutex_lock(mu: any Mutex&) -> MutexGuard[Held]
 extern mutex_unlock(g: MutexGuard[Held]) -> void

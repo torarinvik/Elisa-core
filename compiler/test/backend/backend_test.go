@@ -356,6 +356,55 @@ def wake(cv: mutable CondVar, broadcast: bool) -> void:
 	}
 }
 
+func TestGenerateLLVMIRLowersAtomicRmwCalls(t *testing.T) {
+	src := `enum MemoryOrder:
+	Relaxed
+	Acquire
+	Release
+	AcqRel
+	SeqCst
+
+extern fetch_add(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
+extern fetch_sub(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
+extern fetch_or(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
+extern fetch_and(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
+extern fetch_xor(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
+
+def bump(slot: mutable atomic[i64]) -> i64 can[Atomics.Rmw]:
+	slot_ref: any atomic[i64]& = (&slot).cast[any atomic[i64]&]()
+	add: i64 = fetch_add(slot_ref, 1, MemoryOrder.AcqRel)
+	sub: i64 = fetch_sub(slot_ref, 2, MemoryOrder.AcqRel)
+	or_bits: i64 = fetch_or(slot_ref, 4, MemoryOrder.AcqRel)
+	and_bits: i64 = fetch_and(slot_ref, 8, MemoryOrder.AcqRel)
+	xor_bits: i64 = fetch_xor(slot_ref, 16, MemoryOrder.AcqRel)
+	return add + sub + or_bits + and_bits + xor_bits
+`
+	result := parseAndAnalyze(t, "backend_atomic_rmw.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"declare i64 @fetch_add(ptr, i64, i32)",
+		"declare i64 @fetch_sub(ptr, i64, i32)",
+		"declare i64 @fetch_or(ptr, i64, i32)",
+		"declare i64 @fetch_and(ptr, i64, i32)",
+		"declare i64 @fetch_xor(ptr, i64, i32)",
+		"define i64 @bump(%atomic__i64",
+		"call i64 @fetch_add(ptr",
+		"call i64 @fetch_sub(ptr",
+		"call i64 @fetch_or(ptr",
+		"call i64 @fetch_and(ptr",
+		"call i64 @fetch_xor(ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersSubmitSyntaxInsidePoolScope(t *testing.T) {
 	src := `extern pool_new(workers: usize) -> ThreadPool
 extern pool_shutdown(pool: any ThreadPool&) -> void

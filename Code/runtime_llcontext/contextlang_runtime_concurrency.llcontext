@@ -287,5 +287,35 @@ def compare_exchange[T](slot: any atomic[T]&, expected: T, desired: T, success: 
 		return true
 	return false
 
+def fetch_add(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]:
+	_ = order
+	old_value: i64 = slot.value
+	slot.value <- old_value + value
+	return old_value
+
+def fetch_sub(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]:
+	_ = order
+	old_value: i64 = slot.value
+	slot.value <- old_value - value
+	return old_value
+
+def fetch_or(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]:
+	_ = order
+	old_value: i64 = slot.value
+	slot.value <- old_value | value
+	return old_value
+
+def fetch_and(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]:
+	_ = order
+	old_value: i64 = slot.value
+	slot.value <- old_value & value
+	return old_value
+
+def fetch_xor(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]:
+	_ = order
+	old_value: i64 = slot.value
+	slot.value <- old_value ^ value
+	return old_value
+
 def fence(order: MemoryOrder) can[Atomics.Fence]:
 	_ = order

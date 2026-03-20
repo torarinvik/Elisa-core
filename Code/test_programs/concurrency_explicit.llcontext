@@ -1,17 +1,22 @@
 # include "../contextlang_runtime.llcontext"
 
-def atomic_roundtrip() -> i64 can[Atomics.Load, Atomics.Store, Atomics.Exchange, Atomics.CompareExchange, Atomics.Fence]:
+def atomic_roundtrip() -> i64 can[Atomics.Load, Atomics.Store, Atomics.Exchange, Atomics.CompareExchange, Atomics.Rmw, Atomics.Fence]:
 	slot: atomic[i64] = zeroed
 	slot_ref: any atomic[i64]& = (&slot).cast[any atomic[i64]&]()
 
 	store(slot_ref, 41, MemoryOrder.Release)
-	updated: bool = compare_exchange(slot_ref, 41, 42, MemoryOrder.AcqRel, MemoryOrder.Acquire)
+	prior_add: i64 = fetch_add(slot_ref, 1, MemoryOrder.AcqRel)
+	updated: bool = compare_exchange(slot_ref, 42, 43, MemoryOrder.AcqRel, MemoryOrder.Acquire)
 	if updated:
 		fence(MemoryOrder.SeqCst)
 
+	prior_xor: i64 = fetch_xor(slot_ref, 1, MemoryOrder.AcqRel)
+	prior_or: i64 = fetch_or(slot_ref, 4, MemoryOrder.AcqRel)
+	prior_and: i64 = fetch_and(slot_ref, 15, MemoryOrder.AcqRel)
+	prior_sub: i64 = fetch_sub(slot_ref, 7, MemoryOrder.AcqRel)
 	previous: i64 = exchange(slot_ref, 7, MemoryOrder.SeqCst)
 	current: i64 = load(slot_ref, MemoryOrder.SeqCst)
-	return previous + current
+	return prior_add + prior_xor + prior_or + prior_and + prior_sub + previous + current
 
 def concurrency_handles(thread: Thread[i64, Joinable], task: Task[i64, Pending], pool: ThreadPool, group: TaskGroup, mu: Mutex, guard: MutexGuard[Held], cv: CondVar) -> bool:
 	return (
