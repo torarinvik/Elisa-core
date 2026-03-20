@@ -2500,6 +2500,84 @@ def fill_split(values: any darray[i32, 4]&) -> void:
 	}
 }
 
+func TestGenerateLLVMIRSpecializesArenaDViewEqExact(t *testing.T) {
+	src := `repr(c) struct DynArray[T]:
+	items: mutable any T&?
+	count: mutable usize
+	capacity: mutable usize
+
+repr(c) struct DynArrayView:
+	data: mutable any void&?
+	len: mutable usize
+	elem_size: mutable usize
+
+def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+	_ = start
+	_ = end
+	if values.items != null:
+		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+	return DynArrayView(null, 0u, sizeof(T))
+
+def arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool:
+	_ = left
+	_ = right
+	return false
+
+def eq_split(values: any darray[i32, 4]&) -> bool:
+	base: dview[i32] = arena_da_view(values, 0u, 4u)
+	left: dview[i32] = base[0u:2u]
+	right: dview[i32] = base[2u:4u]
+	return arena_da_eq_exact(left, right)
+
+def eq_overlap(values: any darray[i32, 4]&) -> bool:
+	base: dview[i32] = arena_da_view(values, 0u, 4u)
+	left: dview[i32] = base[0u:3u]
+	right: dview[i32] = base[1u:4u]
+	return arena_da_eq_exact(left, right)
+
+def eq_diff_extent(values: any darray[i32, 4]&) -> bool:
+	base: dview[i32] = arena_da_view(values, 0u, 4u)
+	left: dview[i32] = base[0u:1u]
+	right: dview[i32] = base[2u:4u]
+	return arena_da_eq_exact(left, right)
+`
+	result := parseAndAnalyze(t, "backend_dview_eq_exact.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	eqSplitBody := functionIR(output, "eq_split")
+	if eqSplitBody == "" {
+		t.Fatalf("expected to find eq_split body, got:\n%s", output)
+	}
+	if !strings.Contains(eqSplitBody, "call i64 @memcmp(ptr noalias") {
+		t.Fatalf("expected eq_split to lower through direct noalias memcmp, got:\n%s", eqSplitBody)
+	}
+	if strings.Contains(eqSplitBody, "call i1 @arena_da_eq_exact") {
+		t.Fatalf("expected eq_split to avoid helper fallback, got:\n%s", eqSplitBody)
+	}
+
+	eqOverlapBody := functionIR(output, "eq_overlap")
+	if eqOverlapBody == "" {
+		t.Fatalf("expected to find eq_overlap body, got:\n%s", output)
+	}
+	if !strings.Contains(eqOverlapBody, "call i1 @arena_da_eq_exact") {
+		t.Fatalf("expected eq_overlap to keep helper fallback, got:\n%s", eqOverlapBody)
+	}
+
+	eqDiffExtentBody := functionIR(output, "eq_diff_extent")
+	if eqDiffExtentBody == "" {
+		t.Fatalf("expected to find eq_diff_extent body, got:\n%s", output)
+	}
+	if !strings.Contains(eqDiffExtentBody, "call i1 @arena_da_eq_exact") {
+		t.Fatalf("expected eq_diff_extent to keep helper fallback, got:\n%s", eqDiffExtentBody)
+	}
+	if strings.Contains(eqDiffExtentBody, "call i64 @memcmp(ptr noalias") {
+		t.Fatalf("expected eq_diff_extent to avoid direct memcmp specialization, got:\n%s", eqDiffExtentBody)
+	}
+}
+
 func TestGenerateLLVMIRSpecializesStringViewLiteralWrapperCalls(t *testing.T) {
 	src := `extern string_view_eq(view: StringView, other: any u8&?) -> int
 

@@ -1470,6 +1470,18 @@ def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
         out[i] <- src_items[i]
         i <- i + 1u
 
+def arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool:
+    assert left.len == right.len
+    assert left.elem_size == right.elem_size
+    if left.len == 0:
+        return true
+
+    assert left.data != null
+    assert right.data != null
+
+    byte_count: usize = left.len * left.elem_size
+    return arena_memeq(left.data.cast[any void&](), right.data.cast[any void&](), byte_count)
+
 def arena_da_from_view[T](a: any Arena&, view: dview[T]) -> darray[T, shape_out] can[Memory.Allocate, Abort.Panic]:
     if view.len == 0:
         return zeroed

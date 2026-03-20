@@ -1381,6 +1381,73 @@ func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.
 	return nil, funcType.Return, true, nil
 }
 
+func (s *functionState) emitSpecializedArenaViewEqCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	ident, ok := expr.Func.(*ast.Ident)
+	if !ok || ident.Name != "arena_da_eq_exact" {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 2 || s == nil || s.g == nil || s.g.result == nil {
+		return nil, nil, false, nil
+	}
+	leftExpr := expr.Args[0]
+	rightExpr := expr.Args[1]
+	leftType := s.exprType(leftExpr)
+	rightType := s.exprType(rightExpr)
+	resultType := s.exprType(expr)
+	if resultType == nil {
+		resultType = s.g.result.NamedTypes["bool"]
+	}
+	if !isDynArrayViewCarrierType(leftType) || !isDynArrayViewCarrierType(rightType) {
+		return nil, nil, false, nil
+	}
+	if !s.g.result.ExprsAreDisjoint(leftExpr, rightExpr) || !s.g.result.ExprsHaveEqualExtentSize(leftExpr, rightExpr) {
+		return nil, nil, false, nil
+	}
+
+	leftValue, _, err := s.emitExpr(leftExpr, leftType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	rightValue, _, err := s.emitExpr(rightExpr, rightType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	leftData := C.LLVMBuildExtractValue(s.builder, leftValue, 0, cStringFree("dview.eq.left.data"))
+	leftLen := C.LLVMBuildExtractValue(s.builder, leftValue, 1, cStringFree("dview.eq.left.len"))
+	leftElemSize := C.LLVMBuildExtractValue(s.builder, leftValue, 2, cStringFree("dview.eq.left.elem_size"))
+	rightData := C.LLVMBuildExtractValue(s.builder, rightValue, 0, cStringFree("dview.eq.right.data"))
+	_ = C.LLVMBuildExtractValue(s.builder, rightValue, 1, cStringFree("dview.eq.right.len"))
+	_ = C.LLVMBuildExtractValue(s.builder, rightValue, 2, cStringFree("dview.eq.right.elem_size"))
+	byteCount := C.LLVMBuildMul(s.builder, leftLen, leftElemSize, cStringFree("dview.eq.bytes"))
+	usizeType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	zeroBytes := C.LLVMConstInt(usizeType, 0, 0)
+	zeroCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), byteCount, zeroBytes, cStringFree("dview.eq.bytes.zero"))
+	entryBlock := C.LLVMGetInsertBlock(s.builder)
+	memcmpBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dview.eq.memcmp"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dview.eq.merge"))
+	C.LLVMBuildCondBr(s.builder, zeroCond, mergeBB, memcmpBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, memcmpBB)
+	cmp, err := s.emitMemcmpEqualValue(leftData, rightData, byteCount, "dview.eq.memcmp", true)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	memcmpEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	boolType := C.LLVMInt1TypeInContext(s.g.context)
+	phi := C.LLVMBuildPhi(s.builder, boolType, cStringFree("dview.eq.result"))
+	trueValue := C.LLVMConstInt(boolType, 1, 0)
+	values := []C.LLVMValueRef{trueValue, cmp}
+	blocks := []C.LLVMBasicBlockRef{entryBlock, memcmpEnd}
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	return phi, resultType, true, nil
+}
+
 func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	ident, ok := expr.Func.(*ast.Ident)
 	if !ok || ident.Name != "arena_da_fill" {
@@ -1742,6 +1809,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 		return value, actualType, err
 	}
 	if value, actualType, handled, err := s.emitSpecializedArenaViewCopyCall(expr); handled {
+		return value, actualType, err
+	}
+	if value, actualType, handled, err := s.emitSpecializedArenaViewEqCall(expr); handled {
 		return value, actualType, err
 	}
 	if value, actualType, handled, err := s.emitSpecializedArenaViewFillCall(expr); handled {
