@@ -332,7 +332,7 @@ extern pool_shutdown(pool: any ThreadPool&) -> void
 
 def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
-	return task
+	return move task
 
 def pool_await(task: Task[i64, Pending]) -> i64:
 	return 0
@@ -355,7 +355,7 @@ def submit_then_await() -> i64:
 		"declare %ThreadPool @pool_new(",
 		"declare void @pool_shutdown(ptr)",
 		"define i64 @submit_then_await()",
-		"call %Task__i64__Pending @pool_submit1__i64__i64(ptr",
+		"call %Task__i64__Pending @pool_submit1(ptr",
 		"call i64 @pool_await(%Task__i64__Pending",
 		"call void @pool_shutdown(ptr",
 	}
@@ -365,8 +365,45 @@ def submit_then_await() -> i64:
 		}
 	}
 	body := functionIR(output, "submit_then_await")
-	if submitIdx := strings.Index(body, "call %Task__i64__Pending @pool_submit1__i64__i64(ptr"); submitIdx < 0 {
+	if submitIdx := strings.Index(body, "call %Task__i64__Pending @pool_submit1(ptr"); submitIdx < 0 {
 		t.Fatalf("expected submit_then_await to lower submit syntax through pool_submit1, got:\n%s", body)
+	}
+}
+
+func TestGenerateLLVMIRLowersExplicitSubmitSyntax(t *testing.T) {
+	src := `def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return move task
+
+def pool_await(task: Task[i64, Pending]) -> i64:
+	return 0
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def submit_then_await(pool: any ThreadPool&) -> i64:
+	task: Task[i64, Pending] = submit[pool] work(7)
+	return await task
+`
+	result := parseAndAnalyze(t, "backend_submit_explicit_pool_syntax.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"define i64 @submit_then_await(ptr",
+		"call %Task__i64__Pending @pool_submit1(ptr",
+		"call i64 @pool_await(%Task__i64__Pending",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	body := functionIR(output, "submit_then_await")
+	if submitIdx := strings.Index(body, "call %Task__i64__Pending @pool_submit1(ptr"); submitIdx < 0 {
+		t.Fatalf("expected submit_then_await to lower explicit submit syntax through pool_submit1, got:\n%s", body)
 	}
 }
 

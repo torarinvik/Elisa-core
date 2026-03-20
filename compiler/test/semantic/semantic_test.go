@@ -476,7 +476,7 @@ extern pool_await(task: Task[i64, Pending]) -> i64
 
 def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
-	return task
+	return move task
 
 def work(value: i64) -> i64:
 	return value + 1
@@ -487,6 +487,26 @@ def ok() -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.Await]:
 		return await task
 `
 	result, errs := parseAndAnalyze(t, "submit_syntax_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "i64")
+}
+
+func TestAnalyzeAcceptsExplicitSubmitSyntaxOutsidePoolScope(t *testing.T) {
+	src := `extern pool_await(task: Task[i64, Pending]) -> i64
+
+def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return move task
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def ok(pool: any ThreadPool&) -> i64 can[Pool.Submit, Pool.Await]:
+	task: Task[i64, Pending] = submit[pool] work(7)
+	return await task
+`
+	result, errs := parseAndAnalyze(t, "submit_explicit_pool_ok.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "i64")
