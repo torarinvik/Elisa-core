@@ -89,12 +89,12 @@ The language should instead make this flow explicit:
 
 ```context
 region parse_arena(1_000_000u)
-store: Expr.Store = Expr.Store(parse_arena)
+store: Expr.Store[Local] = Expr.Store(parse_arena)
 
 in store:
 	root: Expr = parse_module(tokens)
 
-frozen: Expr.Store[Frozen] = freeze store
+frozen: Expr.Store[Frozen] = freeze(move store)
 left: Thread[Stats, Joinable] = spawn1(analyze_stats, root)
 right: Thread[Code, Joinable] = spawn1(lower_module, root)
 ```
@@ -116,6 +116,8 @@ These forms all follow the same design direction:
 - `lock mu as g:`
 - `move value as alias`
 - `move holder as Holder(thread, count)`
+- `move job as Job.Run(thread, priority)`
+- `move node in store as Expr.Add(left, right)`
 
 They are all statement-oriented capability binders.
 
@@ -157,10 +159,10 @@ or an equivalent capability split.
 
 ### Packed destructuring must lower through existing packed machinery
 
-If the language later supports:
+Implemented packed destructuring uses:
 
 ```context
-move expr as Expr.Add(left, right)
+move expr in store as Expr.Add(left, right)
 ```
 
 that must lower through the same tag-read and payload decode path already used
@@ -187,7 +189,7 @@ Do not mix those in the first slice.
 So:
 
 - packed enums may contain copyable payloads
-- packed enums should not yet contain `Thread[...]`, `Task[...]`, `MutexGuard[...]`, or aggregates containing them
+- packed enums should not contain `Thread[...]`, `Task[...]`, `MutexGuard[...]`, user-declared `affine struct` values, or aggregates containing them
 
 That avoids needing packed-pattern partial-move rules before the ordinary affine
 system is fully settled.
@@ -260,8 +262,10 @@ Here:
 
 That is the correct target model.
 
-Until structural field provenance is implemented, the language should stay
-conservative rather than pretending to prove more than it does.
+The implemented compiler now tracks direct and simple structural provenance
+through aggregate construction and `move ... as ...` destructuring, but it
+should still stay conservative rather than pretending to prove more than it
+does through arbitrary aliasing.
 
 ### Region refs are not ownership
 
@@ -298,6 +302,7 @@ Examples:
 ```context
 result: i64 = join(move worker)
 move job as Job(thread, priority)
+move node in store as Expr.Add(left, right)
 detach(move thread)
 ```
 
@@ -363,15 +368,13 @@ This should reject:
 
 ### Freeze / publish boundary
 
-For compiler workloads, the missing bridge is explicit readonly publication.
+For compiler workloads, the implemented publication bridge is:
 
-That boundary can be spelled in a few ways:
+```context
+frozen: Expr.Store[Frozen] = freeze(move store)
+```
 
-- `freeze store`
-- `seal arena`
-- `publish value`
-
-The important semantic effect is:
+The semantic effect is:
 
 - mutable local construction capability becomes immutable published capability
 - packed handles derived from that capability become `shareable`
@@ -385,8 +388,9 @@ restrictions.
 ### Allowed
 
 - affine `Thread`, `Task`, and `MutexGuard`
+- user-declared `affine struct`
 - explicit `move`
-- `move ... as ...` for whole-value rebinding and simple struct destructure
+- `move ... as ...` for whole-value rebinding, simple struct destructure, ordinary enum variant destructure, and packed enum variant destructure with explicit `in store`
 - packed enums with copyable payloads
 - region checkpoints with conservative invalidation
 
@@ -449,10 +453,20 @@ The current implementation is partway to this model:
 
 - affine thread/task/guard-style usage exists
 - explicit `move` and `move ... as ...` exist
-- region checkpoint invalidation exists for direct region-backed refs and simple
-  rebinding
+- protocol-state handles exist as `Thread[T, Joinable]`, `Task[T, Pending]`,
+  and `MutexGuard[Held]`
+- visible `affine struct` declarations exist
+- stateful packed stores exist as `Store[Local]` and `Store[Frozen]`
+- `freeze(move store)` exists and is the publication boundary for packed stores
+- compiler-internal send/share checks are enforced at transfer seams such as
+  `spawn1` and `pool_submit1`
+- region checkpoint invalidation exists for direct and simple structural
+  region/provenance dependencies
 - packed enums already use explicit store-aware lowering
 
-The main remaining semantic gap is structural region dependency tracking through
-aggregates and destructuring. That is the piece that should eventually make
-regions compose as cleanly with `move ... as ...` as affine handles already do.
+The main remaining semantic gaps are the more precise ones:
+
+- fuller structural provenance through more container and alias shapes
+- deciding whether `sendable/shareable` should remain internal or later become
+  source-visible generic constraints
+- validating the model against a realistic packed-enum compiler pipeline fixture

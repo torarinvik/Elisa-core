@@ -191,6 +191,25 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			},
 		},
 		{
+			name: "compiler_parallel_fixture",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "compiler_parallel_fixture.llcontext"),
+			checks: []string{
+				"%Expr = type { i32, i64, [2 x i64] }",
+				"%FrozenExprGraph = type { %Expr__Store, ptr }",
+				"%Thread__i64__Joinable = type { i64, ptr }",
+				"%Task__i64__Pending = type { i64, ptr }",
+				"define %FrozenExprGraph @build_frozen_expr_graph(",
+				"define i64 @expr_sum(%FrozenExprGraph",
+				"define i64 @expr_depth(%FrozenExprGraph",
+				"define i64 @compiler_parallel_fixture(ptr",
+				"define %Thread__i64__Joinable @spawn1__FrozenExprGraph__i64(",
+				"define %Task__i64__Pending @pool_submit1__FrozenExprGraph__i64(",
+				"define void @task_group_add__i64(",
+				"call i64 @join__i64(",
+				"call i64 @pool_await__i64(",
+			},
+		},
+		{
 			name: "frontend_stress",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "frontend_stress.llcontext"),
 			checks: []string{

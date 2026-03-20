@@ -120,7 +120,9 @@ Compiler-internal predicates still matter:
 - `atomic_safe(T)`
 - `atomic_numeric(T)`
 
-But they now sit beside a real affine type system, not in place of one.
+These are currently derived compiler judgments, not source-visible qualifiers or
+user-authored traits. They now sit beside a real affine type system, not in
+place of one.
 
 ### 6. Structural Sugar
 
@@ -187,14 +189,22 @@ For copyable values, `move` is allowed but semantically inert.
 
 To extract affine fields, the whole aggregate must be consumed explicitly.
 
-Preferred spelling:
+Implemented spellings:
 
 ```context
 move holder as Holder(thread, count)
 return join(move thread)
 ```
 
-The semantic rule should be:
+```context
+move job as Job.Run(thread, priority)
+```
+
+```context
+move node in store as Expr.Add(left, right)
+```
+
+The semantic rule is:
 
 > partial by-value field extraction from an affine-containing aggregate is not
 > allowed in the first slice.
@@ -277,9 +287,17 @@ consuming the containing root `items`, not one independently tracked slot.
 This avoids fake precision before the language has a real container ownership
 story.
 
+### 5. Packed enums do not carry affine payloads in phase 1
+
+Packed enums currently reject:
+
+- affine common fields
+- affine payloads
+- aggregates containing affine values
+
 ## Protocol State Types
 
-Recommended marker types:
+Implemented marker types:
 
 ```context
 type Joinable
@@ -305,12 +323,19 @@ repr(c) struct CondVar
 repr(c) struct atomic[T]
 ```
 
+User-defined affine structs are also supported:
+
+```context
+affine repr(c) struct WorkerLease:
+    raw: mutable uintptr
+```
+
 ## Core Operations
 
 ### Threads
 
 ```context
-extern spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable] can[Thread.Spawn]
+extern spawn1[A, R, permission P](fn: func(A) -> R can[P], arg: A) -> Thread[R, Joinable] can[Thread.Spawn]
 extern join[R](t: move Thread[R, Joinable]) -> R can[Thread.Join]
 extern detach[R](t: move Thread[R, Joinable]) -> void can[Thread.Detach]
 ```
@@ -321,7 +346,7 @@ extern detach[R](t: move Thread[R, Joinable]) -> void can[Thread.Detach]
 extern pool_new(threads: usize) -> ThreadPool can[Pool.Create]
 extern pool_shutdown(pool: ThreadPool&) -> void can[Pool.Shutdown]
 
-extern pool_submit1[A, R](pool: ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending] can[Pool.Submit]
+extern pool_submit1[A, R, permission P](pool: ThreadPool&, fn: func(A) -> R can[P], arg: A) -> Task[R, Pending] can[Pool.Submit]
 extern pool_await[R](task: move Task[R, Pending]) -> R can[Pool.Await]
 
 extern task_group_new() -> TaskGroup
@@ -461,6 +486,10 @@ sendable(R)
 
 This keeps transfer rules orthogonal to move rules.
 
+In the current implementation, `sendable/shareable` remain internal predicates
+checked at transfer seams such as `spawn1(...)` and `pool_submit1(...)`. They
+are not yet source-visible generic constraints.
+
 ## `sendable(T)` in the First Slice
 
 ### Allowed by Default
@@ -470,6 +499,7 @@ This keeps transfer rules orthogonal to move rules.
 - structs whose fields are all sendable
 - enums whose payloads are all sendable
 - `static T&` and `static T&?`
+- values depending only on frozen packed stores
 - explicit runtime carriers the compiler blesses as thread-safe to transfer
 - `atomic[T]` where `atomic_safe(T)` holds
 
@@ -479,10 +509,36 @@ This keeps transfer rules orthogonal to move rules.
 - named-region refs
 - plain `any T&`, `any T&?`
 - mutable `heap T&`, `heap T&?`
+- values depending on `Store[Local]`
 - `MutexGuard[Held]`
 
 The affine system handles one-shot protocol values; `sendable(T)` still decides
 which data may cross thread boundaries at all.
+
+## Publication And Packed Stores
+
+Packed stores are stateful capabilities:
+
+```context
+Expr.Store[Local]
+Expr.Store[Frozen]
+```
+
+Constructor and publication surface:
+
+```context
+store: Expr.Store[Local] = Expr.Store(owner)
+frozen: Expr.Store[Frozen] = freeze(move store)
+```
+
+Rules:
+
+- `Expr.Store(owner)` returns `Expr.Store[Local]`
+- `new[store] Expr.Variant(...)` requires `store : Expr.Store[Local]`
+- `match node in store:` accepts either `Expr.Store[Local]` or `Expr.Store[Frozen]`
+- values depending on `Expr.Store[Local]` are not sendable/shareable
+- values depending only on `Expr.Store[Frozen]` may be shared if their payload
+  shape is otherwise shareable
 
 ## Atomics
 
