@@ -56,7 +56,8 @@ func buildFrontendLexerChecksumHarness(t *testing.T) string {
 
 	for _, args := range [][]string{
 		{"-emit", "header", "-o", headerPath, fixturePath},
-		{"-emit", "obj", "-O3", "-o", objectPath, fixturePath},
+		// This test validates exported lexer correctness and ABI wiring, not optimized code quality.
+		{"-emit", "obj", "-O0", "-o", objectPath, fixturePath},
 	} {
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
@@ -113,7 +114,7 @@ static uint8_t *read_file_cstr(const char *path) {
 
 int main(int argc, char **argv) {
 	if (argc < 3) {
-		fprintf(stderr, "usage: %s <count|checksum|kind> <source-file> [index]\n", argv[0]);
+		fprintf(stderr, "usage: %s <count|checksum|kinds> <source-file>\n", argv[0]);
         return 2;
     }
 	uint8_t *source = read_file_cstr(argv[2]);
@@ -125,18 +126,30 @@ int main(int argc, char **argv) {
 		printf("%lld\n", (long long)frontend_lexer_token_count(source));
 	} else if (strcmp(argv[1], "checksum") == 0) {
 		printf("%llu\n", (unsigned long long)frontend_lexer_token_checksum(source));
-	} else if (strcmp(argv[1], "kind") == 0) {
-		if (argc != 4) {
-			fprintf(stderr, "kind mode requires an index\n");
+	} else if (strcmp(argv[1], "kinds") == 0) {
+		uintptr_t count = (uintptr_t)frontend_lexer_token_count(source);
+		uintptr_t alloc_count = count == 0 ? 1u : count;
+		uint64_t *kinds = (uint64_t *)malloc(sizeof(uint64_t) * (size_t)alloc_count);
+		if (kinds == NULL) {
+			fprintf(stderr, "failed to allocate %llu token kinds\n", (unsigned long long)count);
 			free(source);
 			return 4;
 		}
-		unsigned long long index = strtoull(argv[3], NULL, 10);
-		printf("%llu\n", (unsigned long long)frontend_lexer_token_kind_at(source, (uintptr_t)index));
+		uintptr_t written = frontend_lexer_copy_token_kinds(source, kinds, count);
+		if (written != count) {
+			fprintf(stderr, "frontend_lexer_copy_token_kinds returned %llu, expected %llu\n", (unsigned long long)written, (unsigned long long)count);
+			free(kinds);
+			free(source);
+			return 5;
+		}
+		for (uintptr_t i = 0; i < count; i++) {
+			printf("%llu\n", (unsigned long long)kinds[i]);
+		}
+		free(kinds);
 	} else {
 		fprintf(stderr, "unknown mode %s\n", argv[1]);
 		free(source);
-		return 5;
+		return 6;
 	}
     free(source);
     return 0;
@@ -146,7 +159,8 @@ int main(int argc, char **argv) {
 		t.Fatalf("failed to write checksum harness: %v", err)
 	}
 
-	compileArgs := []string{"-O3", "-I", outputDir, harnessPath, shimPath, objectPath, "-o", exePath}
+	// Keep this harness on O0: optimized object generation is covered elsewhere.
+	compileArgs := []string{"-O0", "-I", outputDir, harnessPath, shimPath, objectPath, "-o", exePath}
 	if strings.Contains(strings.ToLower(runtime.GOOS), "darwin") {
 		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
 	}
@@ -206,16 +220,19 @@ func TestRunCLIFrontendLexerChecksumMatchesGoLexer(t *testing.T) {
 				t.Fatalf("frontend lexer token count mismatch for %s: got %d want %d", tc.path, actualCount, len(goTokens))
 			}
 
+			kindsCmd := exec.Command(harnessExe, "kinds", tc.path)
+			kindsOutput, err := kindsCmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("kinds harness failed: %v\n%s", err, string(kindsOutput))
+			}
+			kindLines := strings.Fields(strings.TrimSpace(string(kindsOutput)))
+			if len(kindLines) != len(goTokens) {
+				t.Fatalf("frontend lexer token kind count mismatch for %s: got %d want %d", tc.path, len(kindLines), len(goTokens))
+			}
 			for i, tok := range goTokens {
-				kindCmd := exec.Command(harnessExe, "kind", tc.path, strconv.Itoa(i))
-				kindOutput, err := kindCmd.CombinedOutput()
+				actualKind, err := strconv.ParseUint(kindLines[i], 10, 64)
 				if err != nil {
-					t.Fatalf("kind harness failed at token %d: %v\n%s", i, err, string(kindOutput))
-				}
-				kindText := strings.TrimSpace(string(kindOutput))
-				actualKind, err := strconv.ParseUint(kindText, 10, 64)
-				if err != nil {
-					t.Fatalf("failed to parse kind %q at token %d: %v", kindText, i, err)
+					t.Fatalf("failed to parse kind %q at token %d: %v", kindLines[i], i, err)
 				}
 				expectedKind := uint64(tok.Kind) + 1
 				if actualKind != expectedKind {

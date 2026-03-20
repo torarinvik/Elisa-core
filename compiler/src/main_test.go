@@ -187,6 +187,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"define i64 @frontend_lexer_token_count(ptr ",
 				"define i64 @frontend_lexer_token_checksum(ptr ",
 				"define i64 @frontend_lexer_token_kind_at(ptr ",
+				"define i64 @frontend_lexer_copy_token_kinds(ptr ",
 			},
 		},
 		{
