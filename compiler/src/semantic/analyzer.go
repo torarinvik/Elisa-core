@@ -1,10 +1,10 @@
 package semantic
 
 import (
-	"strconv"
-	"strings"
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
+	"strconv"
+	"strings"
 )
 
 type ConstValueKind int
@@ -68,6 +68,7 @@ type Analyzer struct {
 	functionTypes                     map[string]*FuncType
 	constValues                       map[string]ConstValue
 	exprTypes                         map[ast.Expr]Type
+	exprFacts                         map[ast.Expr]OptimizationFacts
 	typeParamScopes                   []map[string]Type
 	shapeParamScopes                  []map[string]Shape
 	regionParamScopes                 []map[string]bool
@@ -132,13 +133,14 @@ type affineValueKey struct {
 
 func Analyze(file *ast.File) *Result {
 	a := &Analyzer{
-		file:          file,
-		namedTypes:    map[string]Type{},
-		permissions:   map[string]*PermissionSet{},
-		globalScope:   NewScope(nil),
-		functionTypes: map[string]*FuncType{},
-		constValues:   map[string]ConstValue{},
-		exprTypes:     map[ast.Expr]Type{},
+		file:                       file,
+		namedTypes:                 map[string]Type{},
+		permissions:                map[string]*PermissionSet{},
+		globalScope:                NewScope(nil),
+		functionTypes:              map[string]*FuncType{},
+		constValues:                map[string]ConstValue{},
+		exprTypes:                  map[ast.Expr]Type{},
+		exprFacts:                  map[ast.Expr]OptimizationFacts{},
 		returnProvenanceInProgress: map[string]bool{},
 	}
 	a.registerBuiltins()
@@ -161,6 +163,7 @@ func Analyze(file *ast.File) *Result {
 		NamedTypes:      a.namedTypes,
 		ConstValues:     a.constValues,
 		ExprTypes:       a.exprTypes,
+		ExprFacts:       a.exprFacts,
 		AnnotatedFuncs:  a.annotatedFuncs,
 		ExportedTypes:   a.exportedTypes,
 		ExportedFuncs:   a.exportedFuncs,

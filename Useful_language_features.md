@@ -13,6 +13,8 @@ This document is now a landing page for the split design notes in `docs/useful_l
 7. [`07-export-and-c-abi.md`](docs/useful_language_features/07-export-and-c-abi.md) — mini-spec for explicit export declarations, stable C ABI names, and header/object-file interop.
 8. [`08-region-checkpoints.md`](docs/useful_language_features/08-region-checkpoints.md) — implemented `mark` / `restore` / `reset` syntax, examples, and conservative invalidation rules.
 9. [`09-concurrency-mini-spec.md`](docs/useful_language_features/09-concurrency-mini-spec.md) — proposed thread/lock/atomic concurrency surface aligned with existing proofs, effects, and storage qualifiers.
+10. [`10-orthogonality-packed-enums-regions-and-affine-concurrency.md`](docs/useful_language_features/10-orthogonality-packed-enums-regions-and-affine-concurrency.md) — design note on keeping layout, provenance, regions, and affine concurrency orthogonal.
+11. [`11-proof-carrying-views-and-optimization-legality.md`](docs/useful_language_features/11-proof-carrying-views-and-optimization-legality.md) — mini-spec for compiler-internal optimization legality facts derived from views, provenance, shapes, and effects.
 
 ## Notes
 

@@ -11,6 +11,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	defer func() {
 		if expr != nil {
 			a.exprTypes[expr] = result
+			a.exprFacts[expr] = a.inferExprOptimizationFacts(expr, result)
 		}
 	}()
 	switch n := expr.(type) {

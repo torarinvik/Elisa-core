@@ -33,6 +33,7 @@ type Result struct {
 	NamedTypes      map[string]Type
 	ConstValues     map[string]ConstValue
 	ExprTypes       map[ast.Expr]Type
+	ExprFacts       map[ast.Expr]OptimizationFacts
 	AnnotatedFuncs  []*AnnotatedFunc
 	ExportedTypes   []*ExportedType
 	ExportedFuncs   []*ExportedFunc
