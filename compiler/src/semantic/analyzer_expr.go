@@ -1201,6 +1201,27 @@ func threadTransferResultPayloadType(callName string, returnType Type) (Type, bo
 	return instance.Args[0], true
 }
 
+func atomicRmwPayloadType(argType Type) (Type, bool) {
+	refType, ok := argType.(*RefType)
+	if !ok {
+		return nil, false
+	}
+	instance, ok := refType.Elem.(*GenericInstanceType)
+	if !ok || instance.Name != "atomic" || len(instance.Args) != 1 {
+		return nil, false
+	}
+	return instance.Args[0], true
+}
+
+func isAtomicRmwCallName(name string) bool {
+	switch name {
+	case "fetch_add", "fetch_sub", "fetch_or", "fetch_and", "fetch_xor":
+		return true
+	default:
+		return false
+	}
+}
+
 func (a *Analyzer) validateThreadTransferArg(callName string, arg ast.Expr, argType Type) {
 	if !a.typeStructurallyThreadShareable(argType, map[string]bool{}) {
 		a.errorf(arg.Pos(), "argument to %q is not structurally shareable across threads: %s", callName, argType.String())
@@ -1229,6 +1250,16 @@ func (a *Analyzer) validateThreadTransferArg(callName string, arg ast.Expr, argT
 func (a *Analyzer) validateThreadTransferResultType(callName string, pos lexer.Pos, resultType Type) {
 	if !a.typeStructurallyThreadShareable(resultType, map[string]bool{}) {
 		a.errorf(pos, "result of %q is not structurally shareable across threads: %s", callName, resultType.String())
+	}
+}
+
+func (a *Analyzer) validateAtomicRmwArg(callName string, arg ast.Expr, argType Type) {
+	payloadType, ok := atomicRmwPayloadType(argType)
+	if !ok {
+		return
+	}
+	if !IsNumericType(payloadType) {
+		a.errorf(arg.Pos(), "argument to %q requires atomic_numeric(T), got atomic[%s]", callName, payloadType.String())
 	}
 }
 
@@ -1326,6 +1357,9 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 		}
 		if (ft.Name == "spawn1" && i == 1) || (ft.Name == "pool_submit1" && i == 2) {
 			a.validateThreadTransferArg(ft.Name, expr.Args[i], argType)
+		}
+		if isAtomicRmwCallName(ft.Name) && i == 0 {
+			a.validateAtomicRmwArg(ft.Name, expr.Args[i], argType)
 		}
 	}
 	for _, name := range ft.RegionParams {

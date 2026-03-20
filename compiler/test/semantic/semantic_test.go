@@ -427,6 +427,51 @@ def ok(task: Task[i64, Pending]) -> i64:
 	requireFunctionReturnTypeString(t, result, "ok", "i64")
 }
 
+func TestAnalyzeRejectsDroppedJoinableThreadAtScopeExit(t *testing.T) {
+	src := `def bad(thread: Thread[i64, Joinable]) -> void:
+    pass
+`
+	_, errs := parseAndAnalyze(t, "drop_joinable_thread_scope_exit_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "joinable thread handle \"thread\" must be consumed before scope exit") {
+		t.Fatalf("expected unconsumed thread diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsDroppedPendingTaskAtScopeExit(t *testing.T) {
+	src := `def bad(task: Task[i64, Pending]) -> void:
+    pass
+`
+	_, errs := parseAndAnalyze(t, "drop_pending_task_scope_exit_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "pending task handle \"task\" must be consumed before scope exit") {
+		t.Fatalf("expected unconsumed task diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsDroppedJoinableThreadInsideAggregateAtScopeExit(t *testing.T) {
+	src := `repr(c) struct Holder:
+    thread: mutable Thread[i64, Joinable]
+
+def bad(holder: Holder) -> void:
+    pass
+`
+	_, errs := parseAndAnalyze(t, "drop_joinable_holder_scope_exit_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "joinable thread handle \"holder.thread\" must be consumed before scope exit") {
+		t.Fatalf("expected unconsumed aggregate-thread diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeAcceptsWaitAllSyntax(t *testing.T) {
 	src := `extern task_group_wait_all(group: any TaskGroup&) -> void
 
@@ -482,6 +527,54 @@ def ok(slot: mutable atomic[i64]) -> i64 can[Atomics.Rmw]:
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "i64")
+}
+
+func TestAnalyzeRejectsAtomicRmwOnBoolPayload(t *testing.T) {
+	src := `enum MemoryOrder:
+	Relaxed
+	Acquire
+	Release
+	AcqRel
+	SeqCst
+
+extern fetch_or(slot: any atomic[bool]&, value: bool, order: MemoryOrder) -> bool can[Atomics.Rmw]
+
+def bad(slot: mutable atomic[bool]) -> bool can[Atomics.Rmw]:
+	slot_ref: any atomic[bool]& = (&slot).cast[any atomic[bool]&]()
+	return fetch_or(slot_ref, true, MemoryOrder.AcqRel)
+`
+	_, errs := parseAndAnalyze(t, "atomic_rmw_bool_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "argument to \"fetch_or\" requires atomic_numeric(T), got atomic[bool]") {
+		t.Fatalf("expected atomic_numeric bool diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsAtomicRmwOnPointerPayload(t *testing.T) {
+	src := `enum MemoryOrder:
+	Relaxed
+	Acquire
+	Release
+	AcqRel
+	SeqCst
+
+extern fetch_xor(slot: any atomic[any u8&]&, value: any u8&, order: MemoryOrder) -> any u8& can[Atomics.Rmw]
+
+def bad(slot: mutable atomic[any u8&], value: any u8&) -> any u8& can[Atomics.Rmw]:
+	slot_ref: any atomic[any u8&]& = (&slot).cast[any atomic[any u8&]&]()
+	return fetch_xor(slot_ref, value, MemoryOrder.AcqRel)
+`
+	_, errs := parseAndAnalyze(t, "atomic_rmw_pointer_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "argument to \"fetch_xor\" requires atomic_numeric(T), got atomic[any u8&]") {
+		t.Fatalf("expected atomic_numeric pointer diagnostic, got:\n%s", all)
+	}
 }
 
 func TestAnalyzeAcceptsLockSyntax(t *testing.T) {
@@ -1485,7 +1578,10 @@ func TestAnalyzeAcceptsBuiltinConcurrencyPermissionFamilies(t *testing.T) {
 }
 
 func TestAnalyzeAcceptsBuiltinConcurrencyCarrierTypes(t *testing.T) {
-	src := `def touch(thread: Thread[i64, Joinable], task: Task[i64, Pending], pool: ThreadPool, group: TaskGroup, mu: Mutex, guard: MutexGuard[Held], cv: CondVar, slot: atomic[i64]) -> void:
+	src := `extern detach(thread: Thread[i64, Joinable]) -> void
+extern pool_await(task: Task[i64, Pending]) -> i64
+
+def touch(thread: Thread[i64, Joinable], task: Task[i64, Pending], pool: ThreadPool, group: TaskGroup, mu: Mutex, guard: MutexGuard[Held], cv: CondVar, slot: atomic[i64]) -> void:
 	_ = thread.handle
 	_ = task.handle
 	_ = pool.handle
@@ -1495,10 +1591,55 @@ func TestAnalyzeAcceptsBuiltinConcurrencyCarrierTypes(t *testing.T) {
 	_ = cv.handle
 	copy: atomic[i64] = slot
 	_ = copy
+	detach(move thread)
+	_ = pool_await(move task)
 `
 	result, errs := parseAndAnalyze(t, "builtin_concurrency_carriers_ok.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
+}
+
+func TestAnalyzeAcceptsAtomicSafePayloadTypes(t *testing.T) {
+	src := `def touch(counter: atomic[i64], ready: atomic[bool], ptrs: atomic[any u8&]) -> void:
+	_ = counter.value
+	_ = ready.value
+	_ = ptrs.value
+`
+	result, errs := parseAndAnalyze(t, "atomic_safe_payloads_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
+
+func TestAnalyzeRejectsAtomicPayloadOfAggregateStruct(t *testing.T) {
+	src := `repr(c) struct Pair:
+	left: i64
+	right: i64
+
+def bad(slot: atomic[Pair]) -> void:
+	pass
+`
+	_, errs := parseAndAnalyze(t, "atomic_aggregate_payload_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "atomic payload type must satisfy atomic_safe(T), got Pair") {
+		t.Fatalf("expected atomic_safe aggregate diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsAtomicPayloadOfAffineHandle(t *testing.T) {
+	src := `def bad(slot: atomic[Thread[i64, Joinable]]) -> void:
+	pass
+`
+	_, errs := parseAndAnalyze(t, "atomic_affine_payload_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "atomic payload type must satisfy atomic_safe(T), got Thread[i64, Joinable]") {
+		t.Fatalf("expected atomic_safe affine diagnostic, got:\n%s", all)
+	}
 }
 
 func TestAnalyzeRejectsMissingProtocolStateTypeArguments(t *testing.T) {
@@ -2255,7 +2396,10 @@ def bad(owner: Arena) -> Thread[i64, Joinable]:
 }
 
 func TestAnalyzeAcceptsSpawnAndPoolTransferOfValueDependingOnlyOnFrozenStore(t *testing.T) {
-	src := `packed enum Expr:
+	src := `extern join(thread: Thread[i64, Joinable]) -> i64
+extern pool_await(task: Task[i64, Pending]) -> i64
+
+packed enum Expr:
 	Int(value: int)
 
 def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
@@ -2273,6 +2417,8 @@ def ok(owner: Arena, pool: any ThreadPool&) -> i64:
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	thread: Thread[i64, Joinable] = spawn1(worker, node)
 	task: Task[i64, Pending] = pool_submit1(pool, worker, node)
+	_ = join(move thread)
+	_ = pool_await(move task)
 	_ = frozen
 	return 0
 `

@@ -91,6 +91,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			}
 		}
 		a.clearAffineValueTarget(n.Target)
+		a.trackAffineValueTarget(n.Target, targetType)
 		a.consumeAffineValueExpr(n.Value, targetType, "assignment")
 	case *ast.AugAssignStmt:
 		targetType := a.assignmentTargetType(n.Target)
@@ -108,6 +109,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.recordAssignmentRefinement(n.Target, targetType, targetType)
 		a.recordRegionRefAssignment(n.Target, n.Value)
 		a.clearAffineValueTarget(n.Target)
+		a.trackAffineValueTarget(n.Target, targetType)
 		a.consumeAffineValueExpr(n.Value, targetType, "assignment")
 	case *ast.ReturnStmt:
 		if n.Value == nil {
@@ -1577,9 +1579,268 @@ func mergeAffineValueStates(dst map[affineValueKey]affineValueState, src map[aff
 		dst = map[affineValueKey]affineValueState{}
 	}
 	for key, state := range src {
-		dst[key] = state
+		existing, ok := dst[key]
+		if !ok {
+			dst[key] = state
+			continue
+		}
+		if existing.ConsumedBy == "" && state.ConsumedBy != "" {
+			existing.ConsumedBy = state.ConsumedBy
+		}
+		if existing.LiveProtocolType == nil && state.LiveProtocolType != nil {
+			existing.LiveProtocolType = state.LiveProtocolType
+		}
+		dst[key] = existing
 	}
 	return dst
+}
+
+func (a *Analyzer) trackAffineValueSymbol(sym *Symbol) {
+	if sym == nil || !a.containsAffineHandleValues(sym.Type, map[string]bool{}) {
+		return
+	}
+	a.registerLiveProtocolValuePaths(affineValueKey{Root: sym}, sym.Type)
+}
+
+func (a *Analyzer) trackAffineValueTarget(expr ast.Expr, expected Type) {
+	if expr == nil || !a.containsAffineHandleValues(expected, map[string]bool{}) {
+		return
+	}
+	key, ok := a.lookupAffineValueKey(expr)
+	if !ok {
+		return
+	}
+	a.registerLiveProtocolValuePaths(key, expected)
+}
+
+func (a *Analyzer) registerLiveProtocolValuePaths(baseKey affineValueKey, t Type) {
+	if baseKey.Root == nil {
+		return
+	}
+	paths := a.protocolLiveLeafPaths(t, "", map[string]bool{})
+	if len(paths) == 0 {
+		return
+	}
+	if a.currentAffineValues == nil {
+		a.currentAffineValues = map[affineValueKey]affineValueState{}
+	}
+	for path, liveType := range paths {
+		key := affineValueKey{Root: baseKey.Root, Path: joinAffinePath(baseKey.Path, path)}
+		state := a.currentAffineValues[key]
+		state.LiveProtocolType = liveType
+		state.ConsumedBy = ""
+		a.currentAffineValues[key] = state
+	}
+}
+
+func joinAffinePath(base, suffix string) string {
+	if base == "" {
+		return suffix
+	}
+	if suffix == "" {
+		return base
+	}
+	return base + "." + suffix
+}
+
+func directProtocolLeakKind(t Type) string {
+	instance, ok := t.(*GenericInstanceType)
+	if !ok || len(instance.Args) < 2 {
+		return ""
+	}
+	stateName := instance.Args[1].String()
+	switch instance.Name {
+	case "Thread":
+		if stateName == "Joinable" {
+			return "joinable thread handle"
+		}
+	case "Task":
+		if stateName == "Pending" {
+			return "pending task handle"
+		}
+	}
+	return ""
+}
+
+func (a *Analyzer) protocolKindsInType(t Type, seen map[string]bool) (bool, bool) {
+	if t == nil {
+		return false, false
+	}
+	switch directProtocolLeakKind(t) {
+	case "joinable thread handle":
+		return true, false
+	case "pending task handle":
+		return false, true
+	}
+	key := t.String()
+	if seen[key] {
+		return false, false
+	}
+	seen[key] = true
+	switch tt := t.(type) {
+	case *ArrayType:
+		return a.protocolKindsInType(tt.Elem, seen)
+	case *DArrayType:
+		return a.protocolKindsInType(tt.Elem, seen)
+	case *ViewType:
+		return a.protocolKindsInType(tt.Elem, seen)
+	case *DArrayViewType:
+		return a.protocolKindsInType(tt.Elem, seen)
+	case *DictType:
+		leftThread, leftTask := a.protocolKindsInType(tt.Key, seen)
+		rightThread, rightTask := a.protocolKindsInType(tt.Value, seen)
+		return leftThread || rightThread, leftTask || rightTask
+	case *StructType:
+		var hasThread, hasTask bool
+		for _, field := range tt.Fields {
+			fieldThread, fieldTask := a.protocolKindsInType(field.Type, seen)
+			hasThread = hasThread || fieldThread
+			hasTask = hasTask || fieldTask
+		}
+		return hasThread, hasTask
+	case *EnumType:
+		var hasThread, hasTask bool
+		for _, variant := range tt.Variants {
+			for _, payload := range variant.Payload {
+				payloadThread, payloadTask := a.protocolKindsInType(payload, seen)
+				hasThread = hasThread || payloadThread
+				hasTask = hasTask || payloadTask
+			}
+		}
+		return hasThread, hasTask
+	case *GenericInstanceType:
+		if base, ok := tt.Base.(*StructType); ok {
+			bindings := map[string]Type{}
+			for i, name := range base.TypeParams {
+				if i < len(tt.Args) {
+					bindings[name] = tt.Args[i]
+				}
+			}
+			var hasThread, hasTask bool
+			for _, field := range base.Fields {
+				fieldType := field.Type
+				if len(bindings) != 0 {
+					fieldType = a.substituteType(fieldType, bindings, nil, nil, nil)
+				}
+				fieldThread, fieldTask := a.protocolKindsInType(fieldType, seen)
+				hasThread = hasThread || fieldThread
+				hasTask = hasTask || fieldTask
+			}
+			return hasThread, hasTask
+		}
+		var hasThread, hasTask bool
+		for _, arg := range tt.Args {
+			argThread, argTask := a.protocolKindsInType(arg, seen)
+			hasThread = hasThread || argThread
+			hasTask = hasTask || argTask
+		}
+		baseThread, baseTask := a.protocolKindsInType(tt.Base, seen)
+		return hasThread || baseThread, hasTask || baseTask
+	default:
+		return false, false
+	}
+}
+
+func (a *Analyzer) containsProtocolLeakValues(t Type) bool {
+	hasThread, hasTask := a.protocolKindsInType(t, map[string]bool{})
+	return hasThread || hasTask
+}
+
+func (a *Analyzer) protocolLeakDescription(t Type) string {
+	if kind := directProtocolLeakKind(t); kind != "" {
+		return kind
+	}
+	hasThread, hasTask := a.protocolKindsInType(t, map[string]bool{})
+	switch {
+	case hasThread && hasTask:
+		return "value containing joinable thread or pending task handles"
+	case hasThread:
+		return "value containing joinable thread handles"
+	case hasTask:
+		return "value containing pending task handles"
+	default:
+		return "affine value"
+	}
+}
+
+func (a *Analyzer) protocolLiveLeafPaths(t Type, prefix string, seen map[string]bool) map[string]Type {
+	if t == nil {
+		return nil
+	}
+	if kind := directProtocolLeakKind(t); kind != "" {
+		return map[string]Type{prefix: t}
+	}
+	key := t.String()
+	if seen[key] {
+		return nil
+	}
+	seen[key] = true
+	switch tt := t.(type) {
+	case *StructType:
+		paths := map[string]Type{}
+		for _, field := range tt.Fields {
+			if !a.containsProtocolLeakValues(field.Type) {
+				continue
+			}
+			for childPath, liveType := range a.protocolLiveLeafPaths(field.Type, field.Name, seen) {
+				paths[joinAffinePath(prefix, childPath)] = liveType
+			}
+		}
+		return paths
+	case *GenericInstanceType:
+		if base, ok := tt.Base.(*StructType); ok {
+			bindings := map[string]Type{}
+			for i, name := range base.TypeParams {
+				if i < len(tt.Args) {
+					bindings[name] = tt.Args[i]
+				}
+			}
+			paths := map[string]Type{}
+			for _, field := range base.Fields {
+				fieldType := field.Type
+				if len(bindings) != 0 {
+					fieldType = a.substituteType(fieldType, bindings, nil, nil, nil)
+				}
+				if !a.containsProtocolLeakValues(fieldType) {
+					continue
+				}
+				for childPath, liveType := range a.protocolLiveLeafPaths(fieldType, field.Name, seen) {
+					paths[joinAffinePath(prefix, childPath)] = liveType
+				}
+			}
+			return paths
+		}
+	}
+	if a.containsProtocolLeakValues(t) {
+		return map[string]Type{prefix: t}
+	}
+	return nil
+}
+
+func (a *Analyzer) reportUnconsumedProtocolValues() {
+	if a.currentAffineValues == nil {
+		return
+	}
+	for key, state := range a.currentAffineValues {
+		if key.Root == nil || state.LiveProtocolType == nil {
+			continue
+		}
+		pos := lexer.Pos{}
+		if key.Root.Node != nil {
+			pos = key.Root.Node.Pos()
+		}
+		a.errorf(pos, "%s %q must be consumed before scope exit", a.protocolLeakDescription(state.LiveProtocolType), affineValueDisplayNameFromKey(key))
+	}
+}
+
+func affineValueDisplayNameFromKey(key affineValueKey) string {
+	if key.Root == nil {
+		return "<value>"
+	}
+	if key.Path == "" {
+		return key.Root.Name
+	}
+	return key.Root.Name + "." + key.Path
 }
 
 func (a *Analyzer) clonePackedStores() map[string]*PackedEnumStoreType {
@@ -2086,7 +2347,7 @@ func (a *Analyzer) consumeAffineValueExpr(expr ast.Expr, expected Type, reason s
 		if a.currentAffineValues == nil {
 			a.currentAffineValues = map[affineValueKey]affineValueState{}
 		}
-		a.currentAffineValues[key] = affineValueState{ConsumedBy: reason}
+		a.recordAffineConsumption(key, reason)
 		return
 	}
 	if _, ok := a.lookupAffineValueKey(expr); ok {
@@ -2095,6 +2356,31 @@ func (a *Analyzer) consumeAffineValueExpr(expr ast.Expr, expected Type, reason s
 			affineType = actual
 		}
 		a.errorf(expr.Pos(), "%s %q must be moved explicitly before %s", affineHandleKind(affineType), affineValueDisplayName(expr), reason)
+	}
+}
+
+func (a *Analyzer) recordAffineConsumption(key affineValueKey, reason string) {
+	if a.currentAffineValues == nil {
+		a.currentAffineValues = map[affineValueKey]affineValueState{}
+	}
+	state := a.currentAffineValues[key]
+	if state.ConsumedBy == "" {
+		state.ConsumedBy = reason
+	}
+	state.LiveProtocolType = nil
+	a.currentAffineValues[key] = state
+	for existingKey, existingState := range a.currentAffineValues {
+		if existingKey == key || existingKey.Root != key.Root {
+			continue
+		}
+		if key.Path != "" && !affinePathContains(key.Path, existingKey.Path) {
+			continue
+		}
+		existingState.LiveProtocolType = nil
+		if existingState.ConsumedBy == "" {
+			existingState.ConsumedBy = reason
+		}
+		a.currentAffineValues[existingKey] = existingState
 	}
 }
 
@@ -2123,14 +2409,14 @@ func (a *Analyzer) lookupAffineValueState(expr ast.Expr) (affineValueState, bool
 		return affineValueState{}, false
 	}
 	state, ok := a.currentAffineValues[key]
-	if ok {
+	if ok && state.ConsumedBy != "" {
 		return state, true
 	}
 	for existing, existingState := range a.currentAffineValues {
 		if existing.Root != key.Root {
 			continue
 		}
-		if affinePathContains(existing.Path, key.Path) || affinePathContains(key.Path, existing.Path) {
+		if existingState.ConsumedBy != "" && (affinePathContains(existing.Path, key.Path) || affinePathContains(key.Path, existing.Path)) {
 			return existingState, true
 		}
 	}

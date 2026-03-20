@@ -124,7 +124,8 @@ type regionRefState struct {
 }
 
 type affineValueState struct {
-	ConsumedBy string
+	ConsumedBy       string
+	LiveProtocolType Type
 }
 
 type affineValueKey struct {
@@ -1097,6 +1098,37 @@ func (a *Analyzer) containsAffineHandleValues(t Type, seen map[string]bool) bool
 	}
 }
 
+func (a *Analyzer) typeStructurallyAtomicSafe(t Type, seen map[string]bool) bool {
+	if t == nil {
+		return false
+	}
+	if IsNumericType(t) || IsBoolType(t) {
+		return true
+	}
+	if _, ok := t.(*TypeParamType); ok {
+		return true
+	}
+	if isPointerLikeCastType(t) {
+		return true
+	}
+	key := t.String()
+	if seen[key] {
+		return true
+	}
+	seen[key] = true
+	switch tt := t.(type) {
+	case *GenericInstanceType:
+		for _, arg := range tt.Args {
+			if !a.typeStructurallyAtomicSafe(arg, seen) {
+				return false
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
 func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 	if t == nil {
 		return false
@@ -1481,6 +1513,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 		fnType.PermissionRefs = mergePermissionRefs(fnType.DeclaredPermissionRefs, inferredRefs)
 		fnType.Permissions = mergePermissionFamilies(fnType.DeclaredPermissions, inferredPermissions)
 	}
+	a.reportUnconsumedProtocolValues()
 	a.currentScope = savedScope
 	a.currentReturn = savedReturn
 	a.returnFreshShapeStatus = savedReturnFreshStatus

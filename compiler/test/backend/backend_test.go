@@ -413,8 +413,7 @@ def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[
 	task: Task[i64, Pending] = zeroed
 	return move task
 
-def pool_await(task: Task[i64, Pending]) -> i64:
-	return 0
+extern pool_await(task: Task[i64, Pending]) -> i64
 
 def work(value: i64) -> i64:
 	return value + 1
@@ -454,8 +453,7 @@ func TestGenerateLLVMIRLowersExplicitSubmitSyntax(t *testing.T) {
 	task: Task[i64, Pending] = zeroed
 	return move task
 
-def pool_await(task: Task[i64, Pending]) -> i64:
-	return 0
+extern pool_await(task: Task[i64, Pending]) -> i64
 
 def work(value: i64) -> i64:
 	return value + 1

@@ -25,7 +25,9 @@ func (a *Analyzer) defineLocal(sym *Symbol, pos lexer.Pos) {
 	}
 	if existing, ok := a.currentScope.Define(sym); !ok {
 		a.errorf(pos, "duplicate local %q (already defined as %s)", existing.Name, existing.Kind)
+		return
 	}
+	a.trackAffineValueSymbol(sym)
 }
 
 func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
@@ -161,18 +163,23 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			a.errorf(n.Pos(), "unknown type %q", n.Name)
 			return invalidType
 		}
-		switch base.(type) {
+		switch base := base.(type) {
 		case *PackedEnumStoreType:
 			if len(args) != 1 {
 				a.errorf(n.Pos(), "packed enum store type %q expects 1 state argument, got %d", n.Name, len(args))
 				return invalidType
 			}
-			return PackedEnumStoreWithState(base.(*PackedEnumStoreType), args[0])
+			return PackedEnumStoreWithState(base, args[0])
 		case *StructType:
-			structType := base.(*StructType)
-			if len(args) != len(structType.TypeParams) {
-				a.errorf(n.Pos(), "type %q expects %d type arguments, got %d", n.Name, len(structType.TypeParams), len(args))
+			if len(args) != len(base.TypeParams) {
+				a.errorf(n.Pos(), "type %q expects %d type arguments, got %d", n.Name, len(base.TypeParams), len(args))
 				return invalidType
+			}
+			if base.Builtin && base.Name == "atomic" && len(args) == 1 {
+				if !a.typeStructurallyAtomicSafe(args[0], map[string]bool{}) {
+					a.errorf(n.Pos(), "atomic payload type must satisfy atomic_safe(T), got %s", args[0].String())
+					return invalidType
+				}
 			}
 			return &GenericInstanceType{Name: n.Name, Base: base, Args: args}
 		case *OpaqueType:
