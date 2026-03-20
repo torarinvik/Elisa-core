@@ -277,22 +277,18 @@ func isStaticallyZeroFillExpr(s *functionState, expr ast.Expr) bool {
 	}
 }
 
-func staticRepeatedByteFillValue(s *functionState, expr ast.Expr) (uint8, bool) {
+func staticRepeatedByteFillValueForType(s *functionState, expr ast.Expr, fillType semantic.Type) (uint8, bool) {
 	if isZeroedExpr(expr) {
 		return 0, true
 	}
-	if s == nil {
+	if s == nil || fillType == nil {
 		return 0, false
 	}
 	value, ok := s.evalConstExpr(expr)
 	if !ok {
 		return 0, false
 	}
-	exprType := s.exprType(expr)
-	if exprType == nil {
-		return 0, false
-	}
-	sizeBytes, err := s.sizeOfType(exprType)
+	sizeBytes, err := s.sizeOfType(fillType)
 	if err != nil || sizeBytes == 0 || sizeBytes > 8 {
 		return 0, false
 	}
@@ -306,7 +302,7 @@ func staticRepeatedByteFillValue(s *functionState, expr ast.Expr) (uint8, bool) 
 		}
 		return 0, true
 	case semantic.ConstInt:
-		if !semantic.IsNumericType(exprType) {
+		if !semantic.IsNumericType(fillType) {
 			return 0, false
 		}
 		raw := uint64(value.Int)

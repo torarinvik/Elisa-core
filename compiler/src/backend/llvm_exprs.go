@@ -1460,8 +1460,15 @@ func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.
 	dstType := s.exprType(dstExpr)
 	resultType := s.exprType(expr)
 	fillExpr := expr.Args[1]
-	fillType := s.exprType(fillExpr)
-	fillByte, constByte := staticRepeatedByteFillValue(s, fillExpr)
+	_, funcType, err := s.resolveCallTarget(expr)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if funcType == nil || len(funcType.Params) != 2 {
+		return nil, nil, true, fmt.Errorf("arena_da_fill target does not have the expected function type")
+	}
+	fillType := funcType.Params[1]
+	fillByte, constByte := staticRepeatedByteFillValueForType(s, fillExpr, fillType)
 	dynamicByte := !constByte && isSingleByteScalarFillType(s, fillType)
 	if !isDynArrayViewCarrierType(dstType) || !s.g.result.ExprSupportsDenseWrite(dstExpr) || (!constByte && !dynamicByte) {
 		return nil, nil, false, nil

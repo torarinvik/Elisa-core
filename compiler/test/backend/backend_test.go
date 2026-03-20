@@ -2641,6 +2641,67 @@ def fill_runtime_wide(values: any darray[i32, 4]&, value: i32) -> void:
 	}
 }
 
+func TestGenerateLLVMIRSpecializesArenaDViewCoercedByteFill(t *testing.T) {
+	src := `repr(c) struct DynArray[T]:
+	items: mutable any T&?
+	count: mutable usize
+	capacity: mutable usize
+
+repr(c) struct DynArrayView:
+	data: mutable any void&?
+	len: mutable usize
+	elem_size: mutable usize
+
+def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+	_ = start
+	_ = end
+	if values.items != null:
+		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+	return DynArrayView(null, 0u, sizeof(T))
+
+def arena_da_fill[T](dst: dview[T], value: T):
+	_ = dst
+	_ = value
+
+def fill_literal_int_to_bytes(values: any darray[u8, 4]&) -> void:
+	base: dview[u8] = arena_da_view(values, 0u, 4u)
+	left: dview[u8] = base[0u:2u]
+	arena_da_fill(left, 7)
+
+def fill_runtime_int_to_bytes(values: any darray[u8, 4]&, value: int) -> void:
+	base: dview[u8] = arena_da_view(values, 0u, 4u)
+	left: dview[u8] = base[0u:2u]
+	arena_da_fill(left, value)
+`
+	result := parseAndAnalyze(t, "backend_dview_fill_coerced_byte.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	literalBody := functionIR(output, "fill_literal_int_to_bytes")
+	if literalBody == "" {
+		t.Fatalf("expected to find fill_literal_int_to_bytes body, got:\n%s", output)
+	}
+	if !strings.Contains(literalBody, "call ptr @memset(ptr") {
+		t.Fatalf("expected fill_literal_int_to_bytes to lower through memset, got:\n%s", literalBody)
+	}
+	if strings.Contains(literalBody, "call void @arena_da_fill") {
+		t.Fatalf("expected fill_literal_int_to_bytes to avoid generic helper fallback, got:\n%s", literalBody)
+	}
+
+	runtimeBody := functionIR(output, "fill_runtime_int_to_bytes")
+	if runtimeBody == "" {
+		t.Fatalf("expected to find fill_runtime_int_to_bytes body, got:\n%s", output)
+	}
+	if !strings.Contains(runtimeBody, "call ptr @memset(ptr") {
+		t.Fatalf("expected fill_runtime_int_to_bytes to lower through memset, got:\n%s", runtimeBody)
+	}
+	if strings.Contains(runtimeBody, "call void @arena_da_fill") {
+		t.Fatalf("expected fill_runtime_int_to_bytes to avoid generic helper fallback, got:\n%s", runtimeBody)
+	}
+}
+
 func TestGenerateLLVMIRSpecializesArenaDViewEqExact(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
 	items: mutable any T&?
