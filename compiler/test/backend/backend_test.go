@@ -2339,6 +2339,42 @@ def same_long(view: StringView) -> bool:
 	}
 }
 
+func TestGenerateLLVMIRMarksDisjointDViewMemcpyCallsNoAlias(t *testing.T) {
+	src := `repr(c) struct DynArrayView:
+	data: mutable any void&?
+	len: mutable usize
+	elem_size: mutable usize
+
+extern arena_memcpy(dest: any void&?, src: any void&?, n: usize) -> any void&?
+
+def arena_da_view_prefix[T](view: dview[T], end: usize) -> dview[T]:
+	_ = end
+	return view
+
+def arena_da_view_suffix[T](view: dview[T], start: usize) -> dview[T]:
+	_ = start
+	return view
+
+def split_copy(view: dview[i32]) -> any void&?:
+	prefix: dview[i32] = arena_da_view_prefix(view, 2u)
+	suffix: dview[i32] = arena_da_view_suffix(view, 2u)
+	return arena_memcpy(prefix.data, suffix.data, prefix.len * prefix.elem_size)
+`
+	result := parseAndAnalyze(t, "backend_dview_split_memcpy.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	body := functionIR(output, "split_copy")
+	if body == "" {
+		t.Fatalf("expected to find split_copy body, got:\n%s", output)
+	}
+	if !strings.Contains(body, "call ptr @arena_memcpy(ptr noalias") {
+		t.Fatalf("expected split_copy to mark arena_memcpy operands noalias, got:\n%s", body)
+	}
+}
+
 func TestGenerateLLVMIRSpecializesStringViewLiteralWrapperCalls(t *testing.T) {
 	src := `extern string_view_eq(view: StringView, other: any u8&?) -> int
 

@@ -1165,6 +1165,106 @@ func exprIsParamOrCastOfParam(expr ast.Expr, paramName string) bool {
 	}
 }
 
+func stripMemcpyOperandExpr(expr ast.Expr) ast.Expr {
+	for expr != nil {
+		switch n := expr.(type) {
+		case *ast.ParenExpr:
+			expr = n.Inner
+		case *ast.CastExpr:
+			expr = n.Operand
+		case *ast.CanExpr:
+			expr = n.Expr
+		default:
+			return expr
+		}
+	}
+	return nil
+}
+
+func isMemcpyViewCarrierType(t semantic.Type) bool {
+	switch tt := t.(type) {
+	case *semantic.ViewType, *semantic.DArrayViewType, *semantic.SViewType:
+		return true
+	case *semantic.StructType:
+		return tt != nil && (tt.Name == "DynArrayView" || tt.Name == "StringView")
+	default:
+		return false
+	}
+}
+
+func (s *functionState) memcpyDisjointCarrierExpr(expr ast.Expr) ast.Expr {
+	stripped := stripMemcpyOperandExpr(expr)
+	fieldExpr, ok := stripped.(*ast.FieldExpr)
+	if !ok || fieldExpr.Field != "data" {
+		return nil
+	}
+	if !isMemcpyViewCarrierType(s.exprType(fieldExpr.Object)) {
+		return nil
+	}
+	return fieldExpr.Object
+}
+
+func (s *functionState) memcpyOperandsAreDisjoint(destExpr ast.Expr, srcExpr ast.Expr) bool {
+	if s == nil || s.g == nil || s.g.result == nil {
+		return false
+	}
+	if s.g.result.ExprsAreDisjoint(destExpr, srcExpr) {
+		return true
+	}
+	destCarrier := s.memcpyDisjointCarrierExpr(destExpr)
+	srcCarrier := s.memcpyDisjointCarrierExpr(srcExpr)
+	if destCarrier == nil || srcCarrier == nil {
+		return false
+	}
+	return s.g.result.ExprsAreDisjoint(destCarrier, srcCarrier)
+}
+
+func (s *functionState) emitSpecializedMemcpyCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	ident, ok := expr.Func.(*ast.Ident)
+	if !ok {
+		return nil, nil, false, nil
+	}
+	if ident.Name != "memcpy" && ident.Name != "arena_memcpy" {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 3 {
+		return nil, nil, false, nil
+	}
+	callee, funcType, err := s.resolveCallTarget(expr)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if funcType == nil {
+		return nil, nil, true, fmt.Errorf("copy helper target does not have a function type")
+	}
+	llvmFnType, err := s.g.lowerFunctionType(funcType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	args := make([]C.LLVMValueRef, 0, len(expr.Args))
+	for i, arg := range expr.Args {
+		var expected semantic.Type
+		if i < len(funcType.Params) {
+			expected = funcType.Params[i]
+		}
+		value, _, err := s.emitExpr(arg, expected)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		args = append(args, value)
+	}
+	callName := "calltmp"
+	if isVoidType(funcType.Return) {
+		callName = ""
+	}
+	call := s.buildCall(llvmFnType, callee, args, callName)
+	if s.memcpyOperandsAreDisjoint(expr.Args[0], expr.Args[1]) {
+		s.addCallSiteEnumAttribute(call, C.uint(1), "noalias")
+		s.addCallSiteEnumAttribute(call, C.uint(2), "noalias")
+	}
+	return call, funcType.Return, true, nil
+}
+
 func (s *functionState) emitStringViewStaticLiteralEqual(viewExpr ast.Expr, viewType semantic.Type, literalExpr ast.Expr, literalText string) (C.LLVMValueRef, error) {
 	viewValue, _, err := s.emitExpr(viewExpr, viewType)
 	if err != nil {
@@ -1471,6 +1571,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 		return s.emitEnumConstructorValue(enumType, variant, expr.Args, expr.ArgNames)
 	}
 	if value, actualType, handled, err := s.emitSpecializedRuntimeCall(expr); handled {
+		return value, actualType, err
+	}
+	if value, actualType, handled, err := s.emitSpecializedMemcpyCall(expr); handled {
 		return value, actualType, err
 	}
 	callee, funcType, err := s.resolveCallTarget(expr)
