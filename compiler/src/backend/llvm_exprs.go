@@ -1291,9 +1291,6 @@ func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.
 	if !isDynArrayViewCarrierType(dstType) || !isDynArrayViewCarrierType(srcType) {
 		return nil, nil, false, nil
 	}
-	if !s.g.result.ExprsAreDisjoint(dstExpr, srcExpr) {
-		return nil, nil, false, nil
-	}
 	callee, funcType, err := s.resolveCallTarget(expr)
 	if err != nil {
 		return nil, nil, true, err
@@ -1301,15 +1298,64 @@ func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.
 	if funcType == nil {
 		return nil, nil, true, fmt.Errorf("arena_da_copy_exact target does not have a function type")
 	}
-	llvmFnType, err := s.g.lowerFunctionType(funcType)
-	if err != nil {
-		return nil, nil, true, err
+	exactCopyCount := uint64(0)
+	hasSmallExactCopyCount := false
+	if dstFacts, ok := s.g.result.ExprOptimizationFacts(dstExpr); ok {
+		if dstCount, ok := constOptimizationExtentSize(dstFacts.Extent); ok && dstCount <= smallExactArenaCopyUnrollLimit {
+			if srcFacts, ok := s.g.result.ExprOptimizationFacts(srcExpr); ok {
+				if srcCount, ok := constOptimizationExtentSize(srcFacts.Extent); ok && srcCount == dstCount {
+					exactCopyCount = dstCount
+					hasSmallExactCopyCount = true
+				}
+			}
+		}
+	}
+	disjoint := s.g.result.ExprsAreDisjoint(dstExpr, srcExpr)
+	if !hasSmallExactCopyCount && !disjoint {
+		return nil, nil, false, nil
 	}
 	dstValue, _, err := s.emitExpr(dstExpr, dstType)
 	if err != nil {
 		return nil, nil, true, err
 	}
 	srcValue, _, err := s.emitExpr(srcExpr, srcType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if hasSmallExactCopyCount && !disjoint {
+		if exactCopyCount == 0 {
+			return nil, funcType.Return, true, nil
+		}
+		var elemType semantic.Type
+		switch viewType := funcType.Params[0].(type) {
+		case *semantic.ViewType:
+			elemType = viewType.Elem
+		case *semantic.DArrayViewType:
+			elemType = viewType.Elem
+		default:
+			return nil, nil, true, fmt.Errorf("arena_da_copy_exact specialization expected dview parameter, got %T", funcType.Params[0])
+		}
+		elemLLVMType, err := s.g.lowerType(elemType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		usizeType, err := s.g.lowerBuiltin("usize")
+		if err != nil {
+			return nil, nil, true, err
+		}
+		dstData := C.LLVMBuildExtractValue(s.builder, dstValue, 0, cStringFree("dview.copy.dst.data"))
+		srcData := C.LLVMBuildExtractValue(s.builder, srcValue, 0, cStringFree("dview.copy.src.data"))
+		for i := uint64(0); i < exactCopyCount; i++ {
+			indexValue := C.LLVMConstInt(usizeType, C.ulonglong(i), 0)
+			indices := []C.LLVMValueRef{indexValue}
+			srcPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, srcData, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("dview.copy.src.elem.ptr"))
+			elemValue := C.LLVMBuildLoad2(s.builder, elemLLVMType, srcPtr, cStringFree("dview.copy.elem"))
+			dstPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, dstData, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("dview.copy.dst.elem.ptr"))
+			C.LLVMBuildStore(s.builder, elemValue, dstPtr)
+		}
+		return nil, funcType.Return, true, nil
+	}
+	llvmFnType, err := s.g.lowerFunctionType(funcType)
 	if err != nil {
 		return nil, nil, true, err
 	}

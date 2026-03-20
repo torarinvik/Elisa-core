@@ -2412,6 +2412,18 @@ def copy_overlap(values: any darray[i32, 4]&) -> void:
 	left: dview[i32] = base[0u:3u]
 	right: dview[i32] = base[1u:4u]
 	arena_da_copy_exact(left, right)
+
+def copy_overlap_backward(values: any darray[i32, 4]&) -> void:
+	base: dview[i32] = arena_da_view(values, 0u, 4u)
+	left: dview[i32] = base[1u:4u]
+	right: dview[i32] = base[0u:3u]
+	arena_da_copy_exact(left, right)
+
+def copy_overlap_unknown(values: any darray[i32, shape_in]&) -> void:
+	base: dview[i32] = arena_da_view(values, 0u, values.count)
+	left: dview[i32] = base[0u:values.count - 1u]
+	right: dview[i32] = base[1u:values.count]
+	arena_da_copy_exact(left, right)
 `
 	result := parseAndAnalyze(t, "backend_dview_copy_exact.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -2434,8 +2446,36 @@ def copy_overlap(values: any darray[i32, 4]&) -> void:
 	if copyOverlapBody == "" {
 		t.Fatalf("expected to find copy_overlap body, got:\n%s", output)
 	}
-	if !strings.Contains(copyOverlapBody, "call void @arena_da_copy_exact") {
-		t.Fatalf("expected copy_overlap to keep helper fallback, got:\n%s", copyOverlapBody)
+	if strings.Contains(copyOverlapBody, "call void @arena_da_copy_exact") {
+		t.Fatalf("expected copy_overlap to avoid helper fallback, got:\n%s", copyOverlapBody)
+	}
+	if strings.Contains(copyOverlapBody, "call ptr @arena_memcpy") {
+		t.Fatalf("expected copy_overlap to preserve overlap semantics instead of arena_memcpy, got:\n%s", copyOverlapBody)
+	}
+	if !strings.Contains(copyOverlapBody, "load i32, ptr") || !strings.Contains(copyOverlapBody, "store i32") {
+		t.Fatalf("expected copy_overlap to lower through direct element loads/stores, got:\n%s", copyOverlapBody)
+	}
+
+	copyOverlapBackwardBody := functionIR(output, "copy_overlap_backward")
+	if copyOverlapBackwardBody == "" {
+		t.Fatalf("expected to find copy_overlap_backward body, got:\n%s", output)
+	}
+	if strings.Contains(copyOverlapBackwardBody, "call void @arena_da_copy_exact") {
+		t.Fatalf("expected copy_overlap_backward to avoid helper fallback, got:\n%s", copyOverlapBackwardBody)
+	}
+	if strings.Contains(copyOverlapBackwardBody, "call ptr @arena_memcpy") {
+		t.Fatalf("expected copy_overlap_backward to preserve overlap semantics instead of arena_memcpy, got:\n%s", copyOverlapBackwardBody)
+	}
+	if !strings.Contains(copyOverlapBackwardBody, "load i32, ptr") || !strings.Contains(copyOverlapBackwardBody, "store i32") {
+		t.Fatalf("expected copy_overlap_backward to lower through direct element loads/stores, got:\n%s", copyOverlapBackwardBody)
+	}
+
+	copyOverlapUnknownBody := functionIR(output, "copy_overlap_unknown")
+	if copyOverlapUnknownBody == "" {
+		t.Fatalf("expected to find copy_overlap_unknown body, got:\n%s", output)
+	}
+	if !strings.Contains(copyOverlapUnknownBody, "call void @arena_da_copy_exact") {
+		t.Fatalf("expected copy_overlap_unknown to keep helper fallback when extent is not exact, got:\n%s", copyOverlapUnknownBody)
 	}
 }
 

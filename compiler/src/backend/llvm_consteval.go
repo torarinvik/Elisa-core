@@ -19,6 +19,7 @@ import (
 )
 
 const smallExactArenaFillUnrollLimit = 4
+const smallExactArenaCopyUnrollLimit = 4
 
 func (s *functionState) sizeOfType(t semantic.Type) (uint64, error) {
 	return s.g.abiSizeOfType(t)
