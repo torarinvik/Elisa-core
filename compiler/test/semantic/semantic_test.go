@@ -503,6 +503,55 @@ def bad(holder: Holder) -> void:
 	}
 }
 
+func TestAnalyzeRejectsDroppedTaskGroupWithPendingTasksAtScopeExit(t *testing.T) {
+	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
+
+def bad(group: mutable TaskGroup, task: Task[i64, Pending]) -> void:
+    task_group_add((&group).cast[any TaskGroup&](), move task)
+`
+	_, errs := parseAndAnalyze(t, "drop_task_group_with_pending_tasks_scope_exit_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "task group with pending tasks \"group\" must be consumed before scope exit") {
+		t.Fatalf("expected unconsumed task-group diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsDroppedTaskGroupInsideAggregateWithPendingTasksAtScopeExit(t *testing.T) {
+	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
+
+repr(c) struct Holder:
+    group: mutable TaskGroup
+
+def bad(holder: mutable Holder, task: Task[i64, Pending]) -> void:
+    task_group_add((&holder.group).cast[any TaskGroup&](), move task)
+`
+	_, errs := parseAndAnalyze(t, "drop_task_group_holder_with_pending_tasks_scope_exit_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "task group with pending tasks \"holder.group\" must be consumed before scope exit") {
+		t.Fatalf("expected unconsumed aggregate-task-group diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsWaitAllAfterTaskGroupAdd(t *testing.T) {
+	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: any TaskGroup&) -> void
+
+def ok(group: mutable TaskGroup, task: Task[i64, Pending]) -> void:
+    task_group_add((&group).cast[any TaskGroup&](), move task)
+    wait all group
+`
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "void")
+}
+
 func TestAnalyzeAcceptsWaitAllSyntax(t *testing.T) {
 	src := `extern task_group_wait_all(group: any TaskGroup&) -> void
 

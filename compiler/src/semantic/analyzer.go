@@ -124,8 +124,9 @@ type regionRefState struct {
 }
 
 type affineValueState struct {
-	ConsumedBy       string
-	LiveProtocolType Type
+	ConsumedBy              string
+	LiveProtocolType        Type
+	LiveProtocolDescription string
 }
 
 type affineValueKey struct {

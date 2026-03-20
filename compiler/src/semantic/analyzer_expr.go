@@ -1382,6 +1382,20 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	if resultPayload, ok := threadTransferResultPayloadType(ft.Name, appliedType.Return); ok {
 		a.validateThreadTransferResultType(ft.Name, expr.Pos(), resultPayload)
 	}
+	switch ft.Name {
+	case "task_group_add":
+		if len(expr.Args) >= 1 {
+			if key, ok := lookupProtocolRefTargetKey(expr.Args[0], a.lookupAffineValueKey); ok {
+				a.markLiveProtocolDescription(key, "task group with pending tasks")
+			}
+		}
+	case "task_group_wait_all":
+		if len(expr.Args) >= 1 {
+			if key, ok := lookupProtocolRefTargetKey(expr.Args[0], a.lookupAffineValueKey); ok {
+				a.clearLiveProtocolTracking(key)
+			}
+		}
+	}
 	a.recordFunctionPermissionRefs(functionPermissionRefs(appliedType))
 	if ft.Return == nil {
 		return a.namedTypes["void"]
