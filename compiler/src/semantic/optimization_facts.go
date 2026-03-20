@@ -250,7 +250,11 @@ func optimizationFactsForType(t Type) OptimizationFacts {
 		}
 		return facts
 	case *DArrayViewType:
-		return OptimizationFacts{Contiguous: true, UnitStride: true}
+		facts := OptimizationFacts{Contiguous: true, UnitStride: true}
+		if tt.Begin != "" || tt.End != "" {
+			facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: tt.Begin, End: tt.End}
+		}
+		return facts
 	case *DStrType:
 		facts := OptimizationFacts{ReadOnly: true, Contiguous: true, UnitStride: true}
 		if !isWildcardShape(tt.Shape) {
@@ -309,8 +313,45 @@ func (a *Analyzer) inferExprOptimizationFacts(expr ast.Expr, t Type) Optimizatio
 		if facts.base == "" {
 			facts.base = a.optimizationBaseForExpr(n.Object)
 		}
+		if objectFacts, ok := a.exprFacts[n.Object]; ok && objectFacts.HasExactExtent() && isZeroOptimizationExpr(n.Start) {
+			if field := a.sliceFullSpanField(n.Object); field != "" && optimizationFieldMatches(n.End, n.Object, field) {
+				facts.Extent = cloneOptimizationExtent(objectFacts.Extent)
+			}
+		}
 	}
 	return facts
+}
+
+func (a *Analyzer) sliceFullSpanField(expr ast.Expr) string {
+	if a == nil || expr == nil {
+		return ""
+	}
+	t := a.exprTypes[expr]
+	for {
+		ref, ok := t.(*RefType)
+		if !ok {
+			break
+		}
+		t = ref.Elem
+	}
+	switch tt := t.(type) {
+	case *DArrayType:
+		return "count"
+	case *DArrayViewType:
+		return "len"
+	case *DStrType, *SViewType:
+		return "len"
+	case *StructType:
+		if tt != nil {
+			if _, ok := dynArrayViewRuntimeType(tt); ok {
+				return "len"
+			}
+			if _, ok := stringViewRuntimeType(tt); ok {
+				return "len"
+			}
+		}
+	}
+	return ""
 }
 
 func (a *Analyzer) recordImmutableSymbolOptimizationFacts(sym *Symbol, expr ast.Expr) {

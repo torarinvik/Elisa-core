@@ -454,3 +454,56 @@ def inspect(values: any darray[i32, 4]&) -> int:
 		t.Fatalf("expected left/right split dviews to retain distinct exact bounds")
 	}
 }
+
+func TestAnalyzeInfersFactsForDirectDViewSliceSyntax(t *testing.T) {
+	src := `repr(c) struct DynArray[T]:
+	items: mutable any T&?
+	count: mutable usize
+	capacity: mutable usize
+
+repr(c) struct DynArrayView:
+	data: mutable any void&?
+	len: mutable usize
+	elem_size: mutable usize
+
+def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+	_ = start
+	_ = end
+	if values.items != null:
+		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+	return DynArrayView(null, 0u, sizeof(T))
+
+def inspect(values: any darray[i32, 4]&) -> int:
+	base: dview[i32] = arena_da_view(values, 0u, 4u)
+	left: dview[i32] = base[0u:2u]
+	right: dview[i32] = base[2u:4u]
+	full: dview[i32] = base[0u:base.len]
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_direct_dview_slice_syntax.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	baseExpr := requireOptimizationFactsVarInitExpr(t, fn, "base")
+	leftExpr := requireOptimizationFactsVarInitExpr(t, fn, "left")
+	rightExpr := requireOptimizationFactsVarInitExpr(t, fn, "right")
+	fullExpr := requireOptimizationFactsVarInitExpr(t, fn, "full")
+
+	leftFacts := requireExprOptimizationFacts(t, result, leftExpr)
+	if !leftFacts.HasExactExtent() {
+		t.Fatalf("expected direct dview slice syntax to preserve exact extent, got %#v", leftFacts)
+	}
+	if !result.ExprsAreDisjoint(leftExpr, rightExpr) {
+		t.Fatalf("expected adjacent direct dview slices to be disjoint")
+	}
+	if !result.ExprsHaveEqualExtentSize(leftExpr, rightExpr) {
+		t.Fatalf("expected adjacent direct dview slices to have equal extent size")
+	}
+	if result.ExprsHaveSameExtent(leftExpr, rightExpr) {
+		t.Fatalf("expected adjacent direct dview slices to retain distinct exact bounds")
+	}
+	if !result.ExprsHaveSameExtent(baseExpr, fullExpr) {
+		t.Fatalf("expected full-span direct dview slice syntax to preserve input extent")
+	}
+}

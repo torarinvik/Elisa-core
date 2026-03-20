@@ -2395,11 +2395,6 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
 	return DynArrayView(null, 0u, sizeof(T))
 
-def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
-	_ = start
-	_ = end
-	return view
-
 def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
 	if dst.len != src.len:
 		return
@@ -2408,14 +2403,14 @@ def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
 
 def copy_split(values: any darray[i32, 4]&) -> void:
 	base: dview[i32] = arena_da_view(values, 0u, 4u)
-	left: dview[i32] = arena_da_view_slice(base, 0u, 2u)
-	right: dview[i32] = arena_da_view_slice(base, 2u, 4u)
+	left: dview[i32] = base[0u:2u]
+	right: dview[i32] = base[2u:4u]
 	arena_da_copy_exact(left, right)
 
 def copy_overlap(values: any darray[i32, 4]&) -> void:
 	base: dview[i32] = arena_da_view(values, 0u, 4u)
-	left: dview[i32] = arena_da_view_slice(base, 0u, 3u)
-	right: dview[i32] = arena_da_view_slice(base, 1u, 4u)
+	left: dview[i32] = base[0u:3u]
+	right: dview[i32] = base[1u:4u]
 	arena_da_copy_exact(left, right)
 `
 	result := parseAndAnalyze(t, "backend_dview_copy_exact.llcontext", src)
