@@ -1446,9 +1446,10 @@ func (s *functionState) emitSpecializedArenaViewEqCall(expr *ast.CallExpr) (C.LL
 	if !isDynArrayViewCarrierType(leftType) || !isDynArrayViewCarrierType(rightType) {
 		return nil, nil, false, nil
 	}
-	if !s.g.result.ExprsAreDisjoint(leftExpr, rightExpr) || !s.g.result.ExprsHaveEqualExtentSize(leftExpr, rightExpr) {
+	if !s.g.result.ExprsHaveEqualExtentSize(leftExpr, rightExpr) {
 		return nil, nil, false, nil
 	}
+	disjoint := s.g.result.ExprsAreDisjoint(leftExpr, rightExpr)
 
 	leftValue, _, err := s.emitExpr(leftExpr, leftType)
 	if err != nil {
@@ -1477,7 +1478,7 @@ func (s *functionState) emitSpecializedArenaViewEqCall(expr *ast.CallExpr) (C.LL
 	C.LLVMBuildCondBr(s.builder, zeroCond, mergeBB, memcmpBB)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, memcmpBB)
-	cmp, err := s.emitMemcmpEqualValue(leftData, rightData, byteCount, "dview.eq.memcmp", true)
+	cmp, err := s.emitMemcmpEqualValue(leftData, rightData, byteCount, "dview.eq.memcmp", disjoint)
 	if err != nil {
 		return nil, nil, true, err
 	}

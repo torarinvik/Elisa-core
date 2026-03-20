@@ -2816,6 +2816,10 @@ def eq_overlap(values: any darray[i32, 4]&) -> bool:
 	right: dview[i32] = base[1u:4u]
 	return arena_da_eq_exact(left, right)
 
+def eq_same(values: any darray[i32, 4]&) -> bool:
+	base: dview[i32] = arena_da_view(values, 0u, 4u)
+	return arena_da_eq_exact(base, base)
+
 def eq_diff_extent(values: any darray[i32, 4]&) -> bool:
 	base: dview[i32] = arena_da_view(values, 0u, 4u)
 	left: dview[i32] = base[0u:1u]
@@ -2843,8 +2847,28 @@ def eq_diff_extent(values: any darray[i32, 4]&) -> bool:
 	if eqOverlapBody == "" {
 		t.Fatalf("expected to find eq_overlap body, got:\n%s", output)
 	}
-	if !strings.Contains(eqOverlapBody, "call i1 @arena_da_eq_exact") {
-		t.Fatalf("expected eq_overlap to keep helper fallback, got:\n%s", eqOverlapBody)
+	if !strings.Contains(eqOverlapBody, "call i64 @memcmp(ptr ") {
+		t.Fatalf("expected eq_overlap to lower through direct memcmp, got:\n%s", eqOverlapBody)
+	}
+	if strings.Contains(eqOverlapBody, "call i64 @memcmp(ptr noalias") {
+		t.Fatalf("expected eq_overlap to avoid noalias memcmp on overlapping views, got:\n%s", eqOverlapBody)
+	}
+	if strings.Contains(eqOverlapBody, "call i1 @arena_da_eq_exact") {
+		t.Fatalf("expected eq_overlap to avoid helper fallback, got:\n%s", eqOverlapBody)
+	}
+
+	eqSameBody := functionIR(output, "eq_same")
+	if eqSameBody == "" {
+		t.Fatalf("expected to find eq_same body, got:\n%s", output)
+	}
+	if !strings.Contains(eqSameBody, "call i64 @memcmp(ptr ") {
+		t.Fatalf("expected eq_same to lower through direct memcmp, got:\n%s", eqSameBody)
+	}
+	if strings.Contains(eqSameBody, "call i64 @memcmp(ptr noalias") {
+		t.Fatalf("expected eq_same to avoid noalias memcmp on aliased views, got:\n%s", eqSameBody)
+	}
+	if strings.Contains(eqSameBody, "call i1 @arena_da_eq_exact") {
+		t.Fatalf("expected eq_same to avoid helper fallback, got:\n%s", eqSameBody)
 	}
 
 	eqDiffExtentBody := functionIR(output, "eq_diff_extent")
