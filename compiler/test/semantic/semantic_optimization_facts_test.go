@@ -271,13 +271,24 @@ def string_view(value: any u8&?, start: i64, end: i64) -> StringView:
 def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
 	return string_view(value, start, end)
 
+def ctx_string_view_prefix(view: StringView, end: i64) -> StringView:
+	return string_view(view.data, 0, end)
+
+def ctx_string_view_suffix(view: StringView, start: i64) -> StringView:
+	return string_view(view.data, start, view.len)
+
 def inspect(text: dstr[row], buf: array[i32, 8]) -> int:
 	left: view[i32, 0u, 2u] = buf[0u:2u]
 	right: view[i32, 2u, 4u] = buf[2u:4u]
 	overlap: view[i32, 1u, 3u] = buf[1u:3u]
+	base: StringView = ctx_string_view(text, 0, 4)
 	first: StringView = ctx_string_view(text, 0, 2)
 	second: StringView = ctx_string_view(text, 2, 4)
 	middle: StringView = ctx_string_view(text, 1, 3)
+	prefix: StringView = ctx_string_view_prefix(base, 2)
+	suffix: StringView = ctx_string_view_suffix(base, 2)
+	full_prefix: StringView = ctx_string_view_prefix(base, base.len)
+	full_suffix: StringView = ctx_string_view_suffix(base, 0)
 	region scratch(1024u)
 	fresh_view_a: StringView = string_view(new[scratch] 3u8, 0, 1)
 	fresh_view_b: StringView = string_view(new[scratch] 4u8, 0, 1)
@@ -294,9 +305,14 @@ def inspect(text: dstr[row], buf: array[i32, 8]) -> int:
 	leftExpr := requireOptimizationFactsVarInitExpr(t, fn, "left")
 	rightExpr := requireOptimizationFactsVarInitExpr(t, fn, "right")
 	overlapExpr := requireOptimizationFactsVarInitExpr(t, fn, "overlap")
+	baseExpr := requireOptimizationFactsVarInitExpr(t, fn, "base")
 	firstExpr := requireOptimizationFactsVarInitExpr(t, fn, "first")
 	secondExpr := requireOptimizationFactsVarInitExpr(t, fn, "second")
 	middleExpr := requireOptimizationFactsVarInitExpr(t, fn, "middle")
+	prefixExpr := requireOptimizationFactsVarInitExpr(t, fn, "prefix")
+	suffixExpr := requireOptimizationFactsVarInitExpr(t, fn, "suffix")
+	fullPrefixExpr := requireOptimizationFactsVarInitExpr(t, fn, "full_prefix")
+	fullSuffixExpr := requireOptimizationFactsVarInitExpr(t, fn, "full_suffix")
 	freshViewAExpr := requireOptimizationFactsVarInitExpr(t, fn, "fresh_view_a")
 	freshViewBExpr := requireOptimizationFactsVarInitExpr(t, fn, "fresh_view_b")
 	allocAExpr := requireOptimizationFactsVarInitExpr(t, fn, "alloc_a")
@@ -314,6 +330,15 @@ def inspect(text: dstr[row], buf: array[i32, 8]) -> int:
 	}
 	if result.ExprsAreDisjoint(firstExpr, middleExpr) {
 		t.Fatalf("expected overlapping string views to remain potentially aliased")
+	}
+	if !result.ExprsAreDisjoint(prefixExpr, suffixExpr) {
+		t.Fatalf("expected split prefix/suffix string views to be disjoint")
+	}
+	if !result.ExprsHaveSameExtent(baseExpr, fullPrefixExpr) {
+		t.Fatalf("expected full-span string_view_prefix to preserve exact extent")
+	}
+	if !result.ExprsHaveSameExtent(baseExpr, fullSuffixExpr) {
+		t.Fatalf("expected zero-offset string_view_suffix to preserve exact extent")
 	}
 	if !result.ExprsAreDisjoint(freshViewAExpr, freshViewBExpr) {
 		t.Fatalf("expected fresh-allocation string views to be disjoint")

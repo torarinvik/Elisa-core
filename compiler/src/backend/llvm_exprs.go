@@ -819,6 +819,12 @@ func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helpe
 		}
 		return cmp, s.g.result.NamedTypes["bool"], nil
 	}
+	if cmp, ok, err := s.emitDisjointRuntimeStringCompareExpr(expr.Op, firstExpr, firstType, secondExpr, secondType); ok {
+		if err != nil {
+			return nil, nil, err
+		}
+		return cmp, s.g.result.NamedTypes["bool"], nil
+	}
 	firstValue, _, err := s.emitExpr(firstExpr, firstType)
 	if err != nil {
 		return nil, nil, err
@@ -894,6 +900,64 @@ func (s *functionState) emitSameExtentRuntimeStringCompareExpr(op lexer.TokenKin
 		cmp = C.LLVMBuildNot(s.builder, cmp, cStringFree("streq.memcmp.not"))
 	}
 	return cmp, true, nil
+}
+
+func (s *functionState) emitDisjointRuntimeStringCompareExpr(op lexer.TokenKind, firstExpr ast.Expr, firstType semantic.Type, secondExpr ast.Expr, secondType semantic.Type) (C.LLVMValueRef, bool, error) {
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.result.ExprsAreDisjoint(firstExpr, secondExpr) {
+		return nil, false, nil
+	}
+	firstData, firstLen, firstLenType, firstKind, err := s.emitRuntimeStringCompareOperand(firstExpr, firstType)
+	if err != nil {
+		return nil, true, err
+	}
+	secondData, secondLen, secondLenType, secondKind, err := s.emitRuntimeStringCompareOperand(secondExpr, secondType)
+	if err != nil {
+		return nil, true, err
+	}
+	if firstKind == runtimeStringCompareNone || secondKind == runtimeStringCompareNone {
+		return nil, false, nil
+	}
+	if firstLen == nil || firstLenType == nil || secondLen == nil || secondLenType == nil {
+		return nil, false, nil
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	firstCoercedLen, err := s.coerceValue(firstLen, firstLenType, usizeType)
+	if err != nil {
+		return nil, true, err
+	}
+	secondCoercedLen, err := s.coerceValue(secondLen, secondLenType, usizeType)
+	if err != nil {
+		return nil, true, err
+	}
+	lenEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), firstCoercedLen, secondCoercedLen, cStringFree("streq.disjoint.len.eq"))
+	entryBlock := C.LLVMGetInsertBlock(s.builder)
+	memcmpBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("streq.disjoint.memcmp"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("streq.disjoint.merge"))
+	C.LLVMBuildCondBr(s.builder, lenEqual, memcmpBB, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, memcmpBB)
+	cmp, err := s.emitMemcmpEqualValue(firstData, secondData, firstCoercedLen, "streq.disjoint.memcmp", true)
+	if err != nil {
+		return nil, true, err
+	}
+	if op == lexer.TOKEN_BANGEQ {
+		cmp = C.LLVMBuildNot(s.builder, cmp, cStringFree("streq.disjoint.memcmp.not"))
+	}
+	memcmpEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	boolType := C.LLVMInt1TypeInContext(s.g.context)
+	phi := C.LLVMBuildPhi(s.builder, boolType, cStringFree("streq.disjoint.result"))
+	fallbackRaw := C.ulonglong(0)
+	if op == lexer.TOKEN_BANGEQ {
+		fallbackRaw = 1
+	}
+	fallback := C.LLVMConstInt(boolType, fallbackRaw, 0)
+	values := []C.LLVMValueRef{fallback, cmp}
+	blocks := []C.LLVMBasicBlockRef{entryBlock, memcmpEnd}
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	return phi, true, nil
 }
 
 func (s *functionState) emitRuntimeStringCompareOperand(expr ast.Expr, exprType semantic.Type) (C.LLVMValueRef, C.LLVMValueRef, semantic.Type, runtimeStringCompareKind, error) {

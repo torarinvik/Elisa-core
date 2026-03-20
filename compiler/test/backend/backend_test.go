@@ -2178,6 +2178,12 @@ def string_view(value: any u8&?, start: i64, end: i64) -> StringView:
 def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
 	return string_view(value, start, end)
 
+def ctx_string_view_prefix(view: StringView, end: i64) -> StringView:
+	return string_view(view.data, 0, end)
+
+def ctx_string_view_suffix(view: StringView, start: i64) -> StringView:
+	return string_view(view.data, start, view.len)
+
 def same_shape_text(left: dstr[row], right: dstr[row]) -> bool:
 	return left == right
 
@@ -2189,6 +2195,10 @@ def same_bounds_view(left: dstr[row], right: dstr[col]) -> bool:
 def fresh_disjoint_raw_views() -> bool:
 	region scratch(1024u)
 	return string_view(new[scratch] 1u8, 0, 1) == string_view(new[scratch] 2u8, 0, 1)
+
+def split_disjoint_views(text: dstr[row]) -> bool:
+	base: StringView = ctx_string_view(text, 0, 4)
+	return ctx_string_view_prefix(base, 2) == ctx_string_view_suffix(base, 2)
 
 def different_bounds_view(left: dstr[row], right: dstr[col]) -> bool:
 	left_view: StringView = ctx_string_view(left, 0, 2)
@@ -2241,6 +2251,17 @@ def different_bounds_view(left: dstr[row], right: dstr[col]) -> bool:
 	}
 	if !strings.Contains(disjointBoundsBody, "call i64 @memcmp(ptr noalias") {
 		t.Fatalf("expected fresh_disjoint_raw_views to mark memcmp operands noalias, got:\n%s", disjointBoundsBody)
+	}
+
+	splitBoundsBody := functionIR(output, "split_disjoint_views")
+	if splitBoundsBody == "" {
+		t.Fatalf("expected to find split_disjoint_views body, got:\n%s", output)
+	}
+	if !strings.Contains(splitBoundsBody, "call i64 @memcmp(ptr noalias") {
+		t.Fatalf("expected split_disjoint_views to use disjoint memcmp fast path, got:\n%s", splitBoundsBody)
+	}
+	if strings.Contains(splitBoundsBody, "call i64 @ctx_string_views_eq") {
+		t.Fatalf("expected split_disjoint_views to avoid ctx_string_views_eq helper, got:\n%s", splitBoundsBody)
 	}
 
 	differentBoundsBody := functionIR(output, "different_bounds_view")

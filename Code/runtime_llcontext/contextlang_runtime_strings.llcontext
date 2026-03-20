@@ -233,6 +233,12 @@ def string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
 
     return StringView(view.data + lo.usize(), hi - lo)
 
+def string_view_prefix(view: StringView, end: i64) -> StringView:
+    return string_view_slice(view, 0, end)
+
+def string_view_suffix(view: StringView, start: i64) -> StringView:
+    return string_view_slice(view, start, view.len)
+
 def string_view_index(view: StringView, index: i64) -> i64:
     if index < 0 or index >= view.len:
         return -1
