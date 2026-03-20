@@ -85,6 +85,9 @@ type Analyzer struct {
 	currentPackedStores               map[string]*PackedEnumStoreType
 	currentFunctionUsedPermissions    map[string]bool
 	currentFunctionUsedPermissionRefs []ast.PermissionRef
+	currentReturnProvenance           regionRefState
+	suppressDiagnostics               bool
+	returnProvenanceInProgress        map[string]bool
 }
 
 type regionState struct {
@@ -112,6 +115,7 @@ type packedStoreDependencyState struct {
 type regionRefState struct {
 	Deps      map[*Symbol]regionDependencyState
 	StoreDeps map[*Symbol]packedStoreDependencyState
+	ParamDeps map[int]bool
 	Fields    map[string]regionRefState
 }
 
@@ -133,6 +137,7 @@ func Analyze(file *ast.File) *Result {
 		functionTypes: map[string]*FuncType{},
 		constValues:   map[string]ConstValue{},
 		exprTypes:     map[ast.Expr]Type{},
+		returnProvenanceInProgress: map[string]bool{},
 	}
 	a.registerBuiltins()
 	a.collectConstValues(file.Decls)
@@ -806,6 +811,112 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 	}
 }
 
+func (a *Analyzer) abstractParamRegionRefState(t Type, paramIndex int, seen map[string]bool) (regionRefState, bool) {
+	if t == nil || !a.typeCanContainRegionRefs(t, map[string]bool{}) {
+		return regionRefState{}, false
+	}
+	key := t.String()
+	if seen[key] {
+		return regionRefStateFromParamDependency(paramIndex), true
+	}
+	seen[key] = true
+	state := regionRefStateFromParamDependency(paramIndex)
+	switch tt := t.(type) {
+	case *StructType:
+		for _, field := range tt.Fields {
+			fieldState, ok := a.abstractParamRegionRefState(field.Type, paramIndex, seen)
+			if !ok {
+				continue
+			}
+			if state.Fields == nil {
+				state.Fields = map[string]regionRefState{}
+			}
+			state.Fields[field.Name] = fieldState
+		}
+	case *GenericInstanceType:
+		if base, ok := tt.Base.(*StructType); ok {
+			bindings := map[string]Type{}
+			for i, name := range base.TypeParams {
+				if i < len(tt.Args) {
+					bindings[name] = tt.Args[i]
+				}
+			}
+			for _, field := range base.Fields {
+				fieldType := field.Type
+				if len(bindings) != 0 {
+					fieldType = a.substituteType(fieldType, bindings, nil, nil, nil)
+				}
+				fieldState, ok := a.abstractParamRegionRefState(fieldType, paramIndex, seen)
+				if !ok {
+					continue
+				}
+				if state.Fields == nil {
+					state.Fields = map[string]regionRefState{}
+				}
+				state.Fields[field.Name] = fieldState
+			}
+			return state, true
+		}
+		if base, ok := tt.Base.(*EnumType); ok {
+			for _, variant := range base.Variants {
+				for i, payload := range variant.Payload {
+					fieldType := a.substituteType(payload, map[string]Type{}, nil, nil, nil)
+					fieldState, ok := a.abstractParamRegionRefState(fieldType, paramIndex, seen)
+					if !ok {
+						continue
+					}
+					if state.Fields == nil {
+						state.Fields = map[string]regionRefState{}
+					}
+					state.Fields[moveBindVariantFieldKey(variant, i)] = fieldState
+				}
+			}
+			return state, true
+		}
+	case *EnumType:
+		if tt.Packed {
+			return state, true
+		}
+		for _, variant := range tt.Variants {
+			for i, payload := range variant.Payload {
+				fieldState, ok := a.abstractParamRegionRefState(payload, paramIndex, seen)
+				if !ok {
+					continue
+				}
+				if state.Fields == nil {
+					state.Fields = map[string]regionRefState{}
+				}
+				state.Fields[moveBindVariantFieldKey(variant, i)] = fieldState
+			}
+		}
+	case *ArrayType:
+		if elemState, ok := a.abstractParamRegionRefState(tt.Elem, paramIndex, seen); ok {
+			state.Fields = map[string]regionRefState{
+				regionAnyIndexFieldKey(): elemState,
+			}
+		}
+	case *DArrayType:
+		if elemState, ok := a.abstractParamRegionRefState(tt.Elem, paramIndex, seen); ok {
+			state.Fields = map[string]regionRefState{
+				regionAnyIndexFieldKey(): elemState,
+			}
+		}
+	case *ViewType:
+		if elemState, ok := a.abstractParamRegionRefState(tt.Elem, paramIndex, seen); ok {
+			state.Fields = map[string]regionRefState{
+				regionAnyIndexFieldKey(): elemState,
+			}
+		}
+	case *DArrayViewType:
+		if elemState, ok := a.abstractParamRegionRefState(tt.Elem, paramIndex, seen); ok {
+			state.Fields = map[string]regionRefState{
+				regionAnyIndexFieldKey(): elemState,
+			}
+		}
+	}
+	return state, true
+}
+
 func (a *Analyzer) analyzeDecls(decls []ast.Decl) {
 	for _, decl := range decls {
 		switch n := decl.(type) {
@@ -942,6 +1053,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	savedPackedStores := a.currentPackedStores
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
+	savedReturnProvenance := a.currentReturnProvenance
 	a.currentScope = NewScope(a.globalScope)
 	a.currentRegions = map[*Symbol]regionState{}
 	a.currentRegionMarks = map[*Symbol]regionMarkState{}
@@ -950,6 +1062,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
+	a.currentReturnProvenance = regionRefState{}
 	if fnType != nil {
 		a.currentReturn = fnType.Return
 		a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)
@@ -963,7 +1076,11 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 						if fnType != nil && i < len(fnType.Params) {
 							ptype = fnType.Params[i]
 						}
-						a.defineLocal(&Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, Mutable: a.paramIsMutable(param)}, param.Position)
+						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, Mutable: a.paramIsMutable(param)}
+						a.defineLocal(sym, param.Position)
+						if state, ok := a.abstractParamRegionRefState(ptype, i, map[string]bool{}); ok {
+							a.recordResolvedRegionRefBinding(sym, state)
+						}
 					}
 					for _, stmt := range fn.Body {
 						a.analyzeStmt(stmt)
@@ -973,6 +1090,12 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 		})
 	})
 	if fnType != nil {
+		if summary, ok := abstractParamOnlyRegionRefState(a.currentReturnProvenance); ok {
+			fnType.ReturnProvenance = summary
+		} else {
+			fnType.ReturnProvenance = regionRefState{}
+		}
+		fnType.ReturnProvenanceKnown = true
 		fnType.FreshReturnShapeParams = mergeShapeParamNames(fnType.FreshReturnShapeParams, inferredFreshReturnShapeParams(a.returnFreshShapeStatus))
 		inferredRefs := canonicalizePermissionRefs(a.currentFunctionUsedPermissionRefs)
 		inferredPermissions := permissionFamiliesFromRefs(inferredRefs)
@@ -989,4 +1112,85 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentPackedStores = savedPackedStores
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
+	a.currentReturnProvenance = savedReturnProvenance
+}
+
+func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType) {
+	if fn == nil || fnType == nil || fnType.ReturnProvenanceKnown {
+		return
+	}
+	if a.returnProvenanceInProgress[fn.Name] {
+		return
+	}
+	a.returnProvenanceInProgress[fn.Name] = true
+	defer delete(a.returnProvenanceInProgress, fn.Name)
+
+	savedScope := a.currentScope
+	savedReturn := a.currentReturn
+	savedReturnFreshStatus := a.returnFreshShapeStatus
+	savedRegions := a.currentRegions
+	savedRegionMarks := a.currentRegionMarks
+	savedRegionRefs := a.currentRegionRefs
+	savedAffineValues := a.currentAffineValues
+	savedPackedStores := a.currentPackedStores
+	savedFunctionPermissions := a.currentFunctionUsedPermissions
+	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
+	savedReturnProvenance := a.currentReturnProvenance
+	savedSuppressDiagnostics := a.suppressDiagnostics
+
+	a.currentScope = NewScope(a.globalScope)
+	a.currentReturn = fnType.Return
+	a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)
+	a.currentRegions = map[*Symbol]regionState{}
+	a.currentRegionMarks = map[*Symbol]regionMarkState{}
+	a.currentRegionRefs = map[*Symbol]regionRefState{}
+	a.currentAffineValues = map[affineValueKey]affineValueState{}
+	a.currentPackedStores = map[string]*PackedEnumStoreType{}
+	a.currentFunctionUsedPermissions = map[string]bool{}
+	a.currentFunctionUsedPermissionRefs = nil
+	a.currentReturnProvenance = regionRefState{}
+	a.suppressDiagnostics = true
+
+	a.withTypeParams(fn.TypeParams, nil, func() {
+		a.withRegionParams(fn.RegionParams, func() {
+			a.withPermissionParams(fn.PermissionParams, func() {
+				a.withShapeParams(fnType.ShapeParams, func() {
+					for i, param := range fn.Params {
+						var ptype Type = invalidType
+						if i < len(fnType.Params) {
+							ptype = fnType.Params[i]
+						}
+						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, Mutable: a.paramIsMutable(param)}
+						a.defineLocal(sym, param.Position)
+						if state, ok := a.abstractParamRegionRefState(ptype, i, map[string]bool{}); ok {
+							a.recordResolvedRegionRefBinding(sym, state)
+						}
+					}
+					for _, stmt := range fn.Body {
+						a.analyzeStmt(stmt)
+					}
+				})
+			})
+		})
+	})
+
+	if summary, ok := abstractParamOnlyRegionRefState(a.currentReturnProvenance); ok {
+		fnType.ReturnProvenance = summary
+	} else {
+		fnType.ReturnProvenance = regionRefState{}
+	}
+	fnType.ReturnProvenanceKnown = true
+
+	a.currentScope = savedScope
+	a.currentReturn = savedReturn
+	a.returnFreshShapeStatus = savedReturnFreshStatus
+	a.currentRegions = savedRegions
+	a.currentRegionMarks = savedRegionMarks
+	a.currentRegionRefs = savedRegionRefs
+	a.currentAffineValues = savedAffineValues
+	a.currentPackedStores = savedPackedStores
+	a.currentFunctionUsedPermissions = savedFunctionPermissions
+	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
+	a.currentReturnProvenance = savedReturnProvenance
+	a.suppressDiagnostics = savedSuppressDiagnostics
 }

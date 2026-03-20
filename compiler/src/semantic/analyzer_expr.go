@@ -438,7 +438,7 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 					states := []regionRefState{ownerState}
 					for i := 0; i < len(orderedArgs) && i < len(variant.Payload); i++ {
 						fieldState, ok := a.regionRefStateForExpr(orderedArgs[i])
-						if !ok || !hasRegionDependencies(fieldState) {
+						if !ok || !hasRegionProvenance(fieldState) {
 							continue
 						}
 						key := moveBindVariantFieldKey(variant, i)
@@ -488,7 +488,7 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 				break
 			}
 			fieldState, ok := a.regionRefStateForExpr(n.Args[i])
-			if !ok || !hasRegionDependencies(fieldState) {
+			if !ok || !hasRegionProvenance(fieldState) {
 				continue
 			}
 			fieldStates[field.Name] = fieldState
@@ -506,7 +506,7 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		elemStates := make([]regionRefState, 0, len(n.Elems))
 		fieldStates := map[string]regionRefState{}
 		for i, elem := range n.Elems {
-			if state, ok := a.regionRefStateForExpr(elem); ok && hasRegionDependencies(state) {
+			if state, ok := a.regionRefStateForExpr(elem); ok && hasRegionProvenance(state) {
 				elemStates = append(elemStates, state)
 				fieldStates[regionIndexFieldKey(int64(i))] = state
 			}
@@ -550,7 +550,7 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 			return regionRefState{}, false
 		}
 		state, ok := a.regionRefStateForExpr(n.Object)
-		if !ok || (!hasRegionDependencies(state) && len(state.Fields) == 0) {
+		if !ok || !hasRegionProvenance(state) {
 			return regionRefState{}, false
 		}
 		return summarizeRegionIndexStates(state)
@@ -582,12 +582,12 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 			states := make([]regionRefState, 0, len(orderedArgs))
 			fieldStates := map[string]regionRefState{}
 			for _, arg := range orderedArgs {
-				if state, ok := a.regionRefStateForExpr(arg); ok && hasRegionDependencies(state) {
+				if state, ok := a.regionRefStateForExpr(arg); ok && hasRegionProvenance(state) {
 					states = append(states, state)
 				}
 			}
 			for i := 0; i < len(orderedArgs) && i < len(variant.Payload); i++ {
-				if state, ok := a.regionRefStateForExpr(orderedArgs[i]); ok && hasRegionDependencies(state) {
+				if state, ok := a.regionRefStateForExpr(orderedArgs[i]); ok && hasRegionProvenance(state) {
 					fieldStates[moveBindVariantFieldKey(variant, i)] = state
 				}
 			}
@@ -605,9 +605,46 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 			}
 			return merged, true
 		}
+		fnType, _ := a.exprTypes[n.Func].(*FuncType)
+		if fnType == nil {
+			if analyzed := a.analyzeExpr(n.Func); analyzed != nil {
+				fnType, _ = analyzed.(*FuncType)
+			}
+		}
+		if fnType != nil {
+			if !fnType.ReturnProvenanceKnown {
+				a.inferFuncReturnProvenanceForExpr(n.Func, fnType)
+			}
+			if fnType.ReturnProvenanceKnown {
+				return a.instantiateReturnProvenance(fnType.ReturnProvenance, n.Args)
+			}
+		}
 		return regionRefState{}, false
 	default:
 		return regionRefState{}, false
+	}
+}
+
+func (a *Analyzer) inferFuncReturnProvenanceForExpr(expr ast.Expr, fnType *FuncType) {
+	if fnType == nil || fnType.ReturnProvenanceKnown || expr == nil {
+		return
+	}
+	switch n := expr.(type) {
+	case *ast.Ident:
+		if a.globalScope == nil {
+			return
+		}
+		sym, ok := a.globalScope.Lookup(n.Name)
+		if !ok {
+			return
+		}
+		fnDecl, _ := sym.Node.(*ast.FuncDecl)
+		if fnDecl == nil {
+			return
+		}
+		a.inferFuncReturnProvenance(fnDecl, fnType)
+	case *ast.SpecializeExpr:
+		a.inferFuncReturnProvenanceForExpr(n.Operand, fnType)
 	}
 }
 

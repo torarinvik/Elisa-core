@@ -2329,6 +2329,101 @@ def ok() -> i32:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeRejectsUsingHelperReturnedReferenceInvalidatedByRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+def borrow_value(holder: Holder) -> any i32&:
+	return holder.value
+
+def bad() -> i32:
+	region scratch
+	mark scratch as cp
+	holder: Holder = Holder(new[scratch] 1i32, 7i32)
+	alias: any i32& = borrow_value(holder)
+	restore scratch from cp
+	return alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_helper_returned_ref_invalid.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+		t.Fatalf("expected restore invalidation diagnostic for helper-returned reference, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeAcceptsHelperReturnedScalarAfterRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+def borrow_count(holder: Holder) -> i32:
+	return holder.count
+
+def ok() -> i32:
+	region scratch
+	mark scratch as cp
+	holder: Holder = Holder(new[scratch] 1i32, 7i32)
+	count: i32 = borrow_count(holder)
+	restore scratch from cp
+	return count
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_helper_returned_scalar_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsUsingHelperReturnedNestedViewAliasInvalidatedByRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+repr(c) struct Window:
+	items: view[Holder]
+
+def keep_window(window: Window) -> Window:
+	return window
+
+def bad() -> i32:
+	region scratch
+	mark scratch as cp
+	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	window: Window = keep_window(Window(items[0u:2u]))
+	which: usize = 1u
+	alias: any i32& = window.items[which].value
+	restore scratch from cp
+	return alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_helper_nested_view_alias_invalid.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+		t.Fatalf("expected restore invalidation diagnostic for helper-returned nested view alias, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeAcceptsFreshHelperReturnAfterRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&?
+	count: i32
+
+def copy_count(holder: Holder) -> Holder:
+	return Holder(null, holder.count)
+
+def ok() -> i32:
+	region scratch
+	mark scratch as cp
+	holder: Holder = Holder(new[scratch] 1i32, 7i32)
+	copy: Holder = copy_count(holder)
+	restore scratch from cp
+	return copy.count
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_fresh_helper_return_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeRejectsUsingMoveAsPackedVariantBoundReferenceInvalidatedByRestore(t *testing.T) {
 	src := `packed enum Expr:
 	Hold(value: any i32&, count: i32)
@@ -2445,6 +2540,104 @@ def ok() -> i32:
 	return count
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_sliced_view_scalar_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsUsingNestedStructViewAliasInvalidatedByRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+repr(c) struct Window:
+	items: view[Holder]
+
+def bad() -> i32:
+	region scratch
+	mark scratch as cp
+	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	window: Window = Window(items[0u:2u])
+	which: usize = 1u
+	alias: any i32& = window.items[which].value
+	restore scratch from cp
+	return alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_nested_struct_view_alias.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+		t.Fatalf("expected restore invalidation diagnostic for nested struct view alias, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeAcceptsNestedStructViewScalarAfterRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+repr(c) struct Window:
+	items: view[Holder]
+
+def ok() -> i32:
+	region scratch
+	mark scratch as cp
+	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	window: Window = Window(items[0u:2u])
+	which: usize = 1u
+	count: i32 = window.items[which].count
+	restore scratch from cp
+	return count
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_nested_struct_view_scalar_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsUsingMoveAsEnumBoundIndexedAliasInvalidatedByRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+enum Bucket:
+	Keep(items: array[Holder, 2])
+
+def bad() -> i32:
+	region scratch
+	mark scratch as cp
+	value: Bucket = Bucket.Keep([Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)])
+	move value as Bucket.Keep(items)
+	which: usize = 1u
+	alias: any i32& = items[which].value
+	restore scratch from cp
+	return alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_enum_indexed_alias.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+		t.Fatalf("expected restore invalidation diagnostic for move-as enum indexed alias, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeAcceptsMoveAsEnumBoundIndexedScalarAfterRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+enum Bucket:
+	Keep(items: array[Holder, 2])
+
+def ok() -> i32:
+	region scratch
+	mark scratch as cp
+	value: Bucket = Bucket.Keep([Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)])
+	move value as Bucket.Keep(items)
+	which: usize = 1u
+	count: i32 = items[which].count
+	restore scratch from cp
+	return count
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_move_enum_indexed_scalar_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 

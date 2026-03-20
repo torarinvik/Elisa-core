@@ -200,6 +200,8 @@ type FuncType struct {
 	Params                 []Type
 	Return                 Type
 	Variadic               bool
+	ReturnProvenance       regionRefState
+	ReturnProvenanceKnown  bool
 }
 
 func (*InvalidType) isType()         {}

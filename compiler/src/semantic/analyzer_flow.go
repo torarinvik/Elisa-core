@@ -134,6 +134,13 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 					a.errorf(n.Pos(), "cannot return value depending on local region %q", region.Name)
 				}
 			}
+			if summary, ok := abstractParamOnlyRegionRefState(refState); ok {
+				if merged, ok := mergeRegionRefStates(a.currentReturnProvenance, summary); ok {
+					a.currentReturnProvenance = merged
+				} else if !hasRegionProvenance(a.currentReturnProvenance) {
+					a.currentReturnProvenance = summary
+				}
+			}
 		}
 		a.recordFreshReturnBindings(valueType)
 		expectedReturn := a.matchReturnType(valueType)
@@ -1118,6 +1125,12 @@ func cloneRegionRefState(state regionRefState) regionRefState {
 			cloned.StoreDeps[store] = dep
 		}
 	}
+	if len(state.ParamDeps) != 0 {
+		cloned.ParamDeps = make(map[int]bool, len(state.ParamDeps))
+		for index, dep := range state.ParamDeps {
+			cloned.ParamDeps[index] = dep
+		}
+	}
 	if len(state.Fields) != 0 {
 		cloned.Fields = make(map[string]regionRefState, len(state.Fields))
 		for name, fieldState := range state.Fields {
@@ -1129,6 +1142,10 @@ func cloneRegionRefState(state regionRefState) regionRefState {
 
 func hasRegionDependencies(state regionRefState) bool {
 	return len(state.Deps) != 0 || len(state.StoreDeps) != 0
+}
+
+func hasRegionProvenance(state regionRefState) bool {
+	return hasRegionDependencies(state) || len(state.ParamDeps) != 0 || len(state.Fields) != 0
 }
 
 func regionRefStateFromDependency(region *Symbol, generation int) regionRefState {
@@ -1156,10 +1173,21 @@ func regionRefStateFromPackedStoreDependency(store *Symbol, storeType *PackedEnu
 	}
 }
 
+func regionRefStateFromParamDependency(index int) regionRefState {
+	if index < 0 {
+		return regionRefState{}
+	}
+	return regionRefState{
+		ParamDeps: map[int]bool{
+			index: true,
+		},
+	}
+}
+
 func mergeRegionRefStates(states ...regionRefState) (regionRefState, bool) {
 	merged := regionRefState{}
 	for _, state := range states {
-		if !hasRegionDependencies(state) && len(state.Fields) == 0 {
+		if !hasRegionProvenance(state) {
 			continue
 		}
 		if len(state.Deps) != 0 {
@@ -1195,6 +1223,14 @@ func mergeRegionRefStates(states ...regionRefState) (regionRefState, bool) {
 				merged.StoreDeps[store] = dep
 			}
 		}
+		if len(state.ParamDeps) != 0 {
+			if merged.ParamDeps == nil {
+				merged.ParamDeps = map[int]bool{}
+			}
+			for index, dep := range state.ParamDeps {
+				merged.ParamDeps[index] = dep
+			}
+		}
 		if len(state.Fields) != 0 {
 			if merged.Fields == nil {
 				merged.Fields = map[string]regionRefState{}
@@ -1212,7 +1248,7 @@ func mergeRegionRefStates(states ...regionRefState) (regionRefState, bool) {
 			}
 		}
 	}
-	if !hasRegionDependencies(merged) && len(merged.Fields) == 0 {
+	if !hasRegionProvenance(merged) {
 		return regionRefState{}, false
 	}
 	return merged, true
@@ -1235,7 +1271,7 @@ func projectRegionFieldState(state regionRefState, field string) (regionRefState
 		return regionRefState{}, false
 	}
 	fieldState, ok := state.Fields[field]
-	if !ok || !hasRegionDependencies(fieldState) {
+	if !ok || !hasRegionProvenance(fieldState) {
 		return regionRefState{}, false
 	}
 	return cloneRegionRefState(fieldState), true
@@ -1247,19 +1283,19 @@ func projectRegionIndexState(state regionRefState, index ast.Expr, evalConst fun
 	}
 	if evalConst != nil {
 		if value, ok := evalConst(index); ok && value.Kind == ConstInt {
-			if fieldState, ok := state.Fields[regionIndexFieldKey(value.Int)]; ok && (hasRegionDependencies(fieldState) || len(fieldState.Fields) != 0) {
+			if fieldState, ok := state.Fields[regionIndexFieldKey(value.Int)]; ok && hasRegionProvenance(fieldState) {
 				return cloneRegionRefState(fieldState), true
 			}
 		}
 	}
-	if fieldState, ok := state.Fields[regionAnyIndexFieldKey()]; ok && (hasRegionDependencies(fieldState) || len(fieldState.Fields) != 0) {
+	if fieldState, ok := state.Fields[regionAnyIndexFieldKey()]; ok && hasRegionProvenance(fieldState) {
 		return cloneRegionRefState(fieldState), true
 	}
 	return regionRefState{}, false
 }
 
 func summarizeRegionIndexStates(state regionRefState) (regionRefState, bool) {
-	if !hasRegionDependencies(state) && len(state.Fields) == 0 {
+	if !hasRegionProvenance(state) {
 		return regionRefState{}, false
 	}
 	summary := cloneRegionRefState(state)
@@ -1271,7 +1307,7 @@ func summarizeRegionIndexStates(state regionRefState) (regionRefState, bool) {
 		if !isRegionIndexFieldKey(name) {
 			continue
 		}
-		if !hasRegionDependencies(fieldState) && len(fieldState.Fields) == 0 {
+		if !hasRegionProvenance(fieldState) {
 			continue
 		}
 		indexStates = append(indexStates, fieldState)
@@ -1298,6 +1334,72 @@ func firstInvalidRegionDependency(state regionRefState) (*Symbol, regionDependen
 		}
 	}
 	return nil, regionDependencyState{}, false
+}
+
+func abstractParamOnlyRegionRefState(state regionRefState) (regionRefState, bool) {
+	if !hasRegionProvenance(state) {
+		return regionRefState{}, false
+	}
+	out := regionRefState{}
+	if len(state.ParamDeps) != 0 {
+		out.ParamDeps = make(map[int]bool, len(state.ParamDeps))
+		for index, dep := range state.ParamDeps {
+			out.ParamDeps[index] = dep
+		}
+	}
+	if len(state.Fields) != 0 {
+		for name, fieldState := range state.Fields {
+			filtered, ok := abstractParamOnlyRegionRefState(fieldState)
+			if !ok {
+				continue
+			}
+			if out.Fields == nil {
+				out.Fields = map[string]regionRefState{}
+			}
+			out.Fields[name] = filtered
+		}
+	}
+	if !hasRegionProvenance(out) {
+		return regionRefState{}, false
+	}
+	return out, true
+}
+
+func (a *Analyzer) instantiateReturnProvenance(state regionRefState, args []ast.Expr) (regionRefState, bool) {
+	if !hasRegionProvenance(state) {
+		return regionRefState{}, false
+	}
+	instantiated := regionRefState{}
+	argStates := make([]regionRefState, 0, len(state.ParamDeps))
+	for index := range state.ParamDeps {
+		if index < 0 || index >= len(args) {
+			continue
+		}
+		argState, ok := a.regionRefStateForExpr(args[index])
+		if !ok {
+			continue
+		}
+		argStates = append(argStates, argState)
+	}
+	if mergedArgs, ok := mergeRegionRefStates(argStates...); ok {
+		instantiated = mergedArgs
+	}
+	if len(state.Fields) != 0 {
+		for name, fieldState := range state.Fields {
+			instField, ok := a.instantiateReturnProvenance(fieldState, args)
+			if !ok {
+				continue
+			}
+			if instantiated.Fields == nil {
+				instantiated.Fields = map[string]regionRefState{}
+			}
+			instantiated.Fields[name] = instField
+		}
+	}
+	if !hasRegionProvenance(instantiated) {
+		return regionRefState{}, false
+	}
+	return instantiated, true
 }
 
 func firstLiveRegionDependency(state regionRefState) (*Symbol, regionDependencyState, bool) {
@@ -1445,7 +1547,7 @@ func (a *Analyzer) recordResolvedRegionRefBinding(sym *Symbol, state regionRefSt
 	if a.currentRegionRefs == nil || sym == nil {
 		return
 	}
-	if !hasRegionDependencies(state) {
+	if !hasRegionProvenance(state) {
 		delete(a.currentRegionRefs, sym)
 		return
 	}
