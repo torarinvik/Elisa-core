@@ -2942,6 +2942,159 @@ extern bad(source: any i32&) -> any i32&
 	}
 }
 
+func TestAnalyzeRejectsUsingExternNestedFieldBorrowReturnedAliasInvalidatedByRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+repr(c) struct Meta:
+	items: view[Holder]
+	total: i32
+
+repr(c) struct Wrapper:
+	meta: Meta
+	tag: i32
+
+@borrows_return_field(meta.items, src)
+extern wrap_meta(src: view[Holder], total: i32, tag: i32) -> Wrapper
+
+def bad() -> i32:
+	region scratch
+	mark scratch as cp
+	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	view: view[Holder] = items[0u:2u]
+	wrapped: Wrapper = wrap_meta(view, 9i32, 5i32)
+	alias: any i32& = wrapped.meta.items[0u].value
+	restore scratch from cp
+	return alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_nested_field_invalid.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+		t.Fatalf("expected nested field-path invalidation diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeAcceptsExternNestedFieldBorrowReturnedSiblingScalarAfterRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+repr(c) struct Meta:
+	items: view[Holder]
+	total: i32
+
+repr(c) struct Wrapper:
+	meta: Meta
+	tag: i32
+
+@borrows_return_field(meta.items, src)
+extern wrap_meta(src: view[Holder], total: i32, tag: i32) -> Wrapper
+
+def ok() -> i32:
+	region scratch
+	mark scratch as cp
+	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	view: view[Holder] = items[0u:2u]
+	wrapped: Wrapper = wrap_meta(view, 9i32, 5i32)
+	restore scratch from cp
+	return wrapped.meta.total + wrapped.tag
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_nested_field_scalar_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsUsingExternNestedFieldRebasedBorrowReturnedAliasInvalidatedByRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+repr(c) struct Meta:
+	items: view[Holder]
+	total: i32
+
+repr(c) struct Wrapper:
+	meta: Meta
+	tag: i32
+
+@borrows_return_field_rebased(meta.items, src)
+extern wrap_submeta(src: view[Holder], start: usize, end: usize, total: i32, tag: i32) -> Wrapper
+
+def bad() -> i32:
+	region scratch
+	mark scratch as cp
+	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	view: view[Holder] = items[0u:2u]
+	wrapped: Wrapper = wrap_submeta(view, 1u, 2u, 9i32, 5i32)
+	alias: any i32& = wrapped.meta.items[0u].value
+	restore scratch from cp
+	return alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_nested_field_rebased_invalid.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+		t.Fatalf("expected nested field-path rebased invalidation diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeAcceptsExternNestedFieldRebasedSiblingScalarAfterRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+repr(c) struct Meta:
+	items: view[Holder]
+	total: i32
+
+repr(c) struct Wrapper:
+	meta: Meta
+	tag: i32
+
+@borrows_return_field_rebased(meta.items, src)
+extern wrap_submeta(src: view[Holder], start: usize, end: usize, total: i32, tag: i32) -> Wrapper
+
+def ok() -> i32:
+	region scratch
+	mark scratch as cp
+	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	view: view[Holder] = items[0u:2u]
+	wrapped: Wrapper = wrap_submeta(view, 1u, 2u, 9i32, 5i32)
+	restore scratch from cp
+	return wrapped.meta.total + wrapped.tag
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_nested_field_rebased_scalar_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsExternBorrowsReturnFieldOnUnknownNestedReturnPath(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+repr(c) struct Meta:
+	items: view[Holder]
+	total: i32
+
+repr(c) struct Wrapper:
+	meta: Meta
+	tag: i32
+
+@borrows_return_field(meta.missing, src)
+extern wrap_meta(src: view[Holder]) -> Wrapper
+`
+	_, errs := parseAndAnalyze(t, "extern_function_nested_field_path_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "@borrows_return_field on extern function \"wrap_meta\" references unknown return field path \"meta.missing\" in Wrapper") {
+		t.Fatalf("expected nested return-field-path diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeRejectsUsingMoveAsPackedVariantBoundReferenceInvalidatedByRestore(t *testing.T) {
 	src := `packed enum Expr:
 	Hold(value: any i32&, count: i32)

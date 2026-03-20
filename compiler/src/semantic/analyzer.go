@@ -736,30 +736,22 @@ func (a *Analyzer) applyExternBorrowsReturnFieldAnnotation(fn *ast.ExternFuncDec
 		a.errorf(annotation.Position, "@borrows_return_field on extern function %q expects field/path pairs", fn.Name)
 		return
 	}
-	fields, ok := a.resolvedStructFields(fnType.Return)
-	if !ok {
+	if _, ok := a.resolvedStructFields(fnType.Return); !ok {
 		a.errorf(annotation.Position, "@borrows_return_field on extern function %q requires a concrete struct return type, got %s", fn.Name, fnType.Return.String())
 		return
 	}
-	fieldSet := make(map[string]bool, len(fields))
-	for _, field := range fields {
-		fieldSet[field.Name] = true
-	}
-	if fnType.ReturnProvenance.Fields == nil {
-		fnType.ReturnProvenance.Fields = map[string]regionRefState{}
-	}
 	for i := 0; i < len(annotation.Args); i += 2 {
-		returnField := annotation.Args[i]
+		returnFieldPath := annotation.Args[i]
 		pathText := annotation.Args[i+1]
-		if !fieldSet[returnField] {
-			a.errorf(annotation.Position, "@borrows_return_field on extern function %q references unknown return field %q", fn.Name, returnField)
-			continue
-		}
-		state, ok := a.resolveExternBorrowAnnotationPath(fn, fnType, annotation, pathText, false, returnField)
+		returnSteps, ok := a.resolveExternReturnTargetPath(fn, fnType, annotation, returnFieldPath)
 		if !ok {
 			continue
 		}
-		fnType.ReturnProvenance.Fields[returnField] = state
+		state, ok := a.resolveExternBorrowAnnotationPath(fn, fnType, annotation, pathText, false, returnFieldPath)
+		if !ok {
+			continue
+		}
+		fnType.ReturnProvenance = assignRegionRefStateAtPath(fnType.ReturnProvenance, returnSteps, state)
 	}
 	if !hasRegionProvenance(fnType.ReturnProvenance) {
 		fnType.ReturnProvenance = regionRefState{}
@@ -791,30 +783,22 @@ func (a *Analyzer) applyExternBorrowsReturnFieldRebasedAnnotation(fn *ast.Extern
 		a.errorf(annotation.Position, "@borrows_return_field_rebased on extern function %q expects field/path pairs", fn.Name)
 		return
 	}
-	fields, ok := a.resolvedStructFields(fnType.Return)
-	if !ok {
+	if _, ok := a.resolvedStructFields(fnType.Return); !ok {
 		a.errorf(annotation.Position, "@borrows_return_field_rebased on extern function %q requires a concrete struct return type, got %s", fn.Name, fnType.Return.String())
 		return
 	}
-	fieldSet := make(map[string]bool, len(fields))
-	for _, field := range fields {
-		fieldSet[field.Name] = true
-	}
-	if fnType.ReturnProvenance.Fields == nil {
-		fnType.ReturnProvenance.Fields = map[string]regionRefState{}
-	}
 	for i := 0; i < len(annotation.Args); i += 2 {
-		returnField := annotation.Args[i]
+		returnFieldPath := annotation.Args[i]
 		pathText := annotation.Args[i+1]
-		if !fieldSet[returnField] {
-			a.errorf(annotation.Position, "@borrows_return_field_rebased on extern function %q references unknown return field %q", fn.Name, returnField)
-			continue
-		}
-		state, ok := a.resolveExternBorrowAnnotationPath(fn, fnType, annotation, pathText, true, returnField)
+		returnSteps, ok := a.resolveExternReturnTargetPath(fn, fnType, annotation, returnFieldPath)
 		if !ok {
 			continue
 		}
-		fnType.ReturnProvenance.Fields[returnField] = state
+		state, ok := a.resolveExternBorrowAnnotationPath(fn, fnType, annotation, pathText, true, returnFieldPath)
+		if !ok {
+			continue
+		}
+		fnType.ReturnProvenance = assignRegionRefStateAtPath(fnType.ReturnProvenance, returnSteps, state)
 	}
 	if !hasRegionProvenance(fnType.ReturnProvenance) {
 		fnType.ReturnProvenance = regionRefState{}
@@ -901,6 +885,95 @@ func projectBorrowReturnAnnotationState(state regionRefState, steps []borrowRetu
 		}
 	}
 	return current, true
+}
+
+func parseExternReturnTargetPath(text string) ([]borrowReturnAnnotationStep, bool) {
+	if text == "" {
+		return nil, false
+	}
+	_, steps, ok := parseBorrowReturnAnnotationPath("ret." + text)
+	if !ok || len(steps) == 0 {
+		return nil, false
+	}
+	return steps, true
+}
+
+func assignRegionRefStateAtPath(dst regionRefState, steps []borrowReturnAnnotationStep, value regionRefState) regionRefState {
+	if len(steps) == 0 {
+		if merged, ok := mergeRegionRefStates(dst, value); ok {
+			return merged
+		}
+		return value
+	}
+	if dst.Fields == nil {
+		dst.Fields = map[string]regionRefState{}
+	}
+	key := regionFieldKeyForBorrowStep(steps[0])
+	child := dst.Fields[key]
+	dst.Fields[key] = assignRegionRefStateAtPath(child, steps[1:], value)
+	return dst
+}
+
+func regionFieldKeyForBorrowStep(step borrowReturnAnnotationStep) string {
+	switch {
+	case step.Field != "":
+		return step.Field
+	case step.Wildcard:
+		return regionAnyIndexFieldKey()
+	case step.Index != nil:
+		return regionIndexFieldKey(*step.Index)
+	default:
+		return ""
+	}
+}
+
+func (a *Analyzer) resolveExternReturnTargetPath(fn *ast.ExternFuncDecl, fnType *FuncType, annotation ast.Annotation, pathText string) ([]borrowReturnAnnotationStep, bool) {
+	steps, ok := parseExternReturnTargetPath(pathText)
+	if !ok {
+		a.errorExternBorrowAnnotationPathError(fn, annotation, pathText, pathText, "has invalid return field path %q", pathText)
+		return nil, false
+	}
+	current := fnType.Return
+	for _, step := range steps {
+		next, ok := a.projectExternReturnTargetType(current, step)
+		if !ok {
+			a.errorExternBorrowAnnotationPathError(fn, annotation, pathText, pathText, "references unknown return field path %q in %s", pathText, fnType.Return.String())
+			return nil, false
+		}
+		current = next
+	}
+	return steps, true
+}
+
+func (a *Analyzer) projectExternReturnTargetType(current Type, step borrowReturnAnnotationStep) (Type, bool) {
+	switch {
+	case step.Field != "":
+		fields, ok := a.resolvedStructFields(current)
+		if !ok {
+			return nil, false
+		}
+		for _, field := range fields {
+			if field.Name == step.Field {
+				return field.Type, true
+			}
+		}
+		return nil, false
+	case step.Wildcard || step.Index != nil:
+		switch tt := current.(type) {
+		case *ArrayType:
+			return tt.Elem, true
+		case *DArrayType:
+			return tt.Elem, true
+		case *ViewType:
+			return tt.Elem, true
+		case *DArrayViewType:
+			return tt.Elem, true
+		default:
+			return nil, false
+		}
+	default:
+		return nil, false
+	}
 }
 
 func (a *Analyzer) resolveExternBorrowAnnotationPath(fn *ast.ExternFuncDecl, fnType *FuncType, annotation ast.Annotation, pathText string, rebased bool, returnField string) (regionRefState, bool) {

@@ -397,10 +397,11 @@ implemented extern contract family is:
 These mean:
 
 - exact borrow from a source path
-- exact borrow into a named struct return field
+- exact borrow into a struct return field path such as `meta.items`
 - rebased borrow that preserves provenance but widens indexed element state to
   wildcard element state
-- the same rebased rule, attached to a named struct return field
+- the same rebased rule, attached to a struct return field path such as
+  `meta.items`
 
 The rebased forms are deliberately provenance-only. They do not prove exact
 slice offsets, lengths, or index arithmetic.

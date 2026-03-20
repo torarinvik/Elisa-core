@@ -558,12 +558,12 @@ Extern helpers can carry provenance through explicit contracts:
 Meaning:
 
 - `@borrows_return(path)` preserves exact provenance from the source path
-- `@borrows_return_field(...)` attaches exact provenance to named struct return
-  fields
+- `@borrows_return_field(...)` attaches exact provenance to struct return field
+  paths such as `meta.items`
 - `@borrows_return_rebased(path)` preserves provenance but collapses indexed
   element state to wildcard element state
-- `@borrows_return_field_rebased(...)` does the same for named struct return
-  fields
+- `@borrows_return_field_rebased(...)` does the same for struct return field
+  paths such as `meta.items`
 
 The rebased forms are provenance contracts, not slice-offset or length proofs.
 
