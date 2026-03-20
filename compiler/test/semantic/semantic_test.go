@@ -2236,6 +2236,78 @@ def ok(owner: Arena, pool: any ThreadPool&) -> i64:
 	requireNoWarnings(t, result)
 }
 
+func TestAnalyzeAcceptsThreadTransferOfBlessedRuntimeCarriers(t *testing.T) {
+	src := `repr(c) struct SharedGate:
+	pool: ThreadPool
+	mu: Mutex
+	cv: CondVar
+
+def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+	return zeroed
+
+def pool_submit1[A, R](pool: any ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+	return zeroed
+
+def worker(gate: SharedGate) -> i64:
+	if gate.pool.handle == null:
+		return 0
+	return 1
+
+def ok(pool_ref: any ThreadPool&, pool_value: ThreadPool, mu: Mutex, cv: CondVar) -> i64:
+	_ = spawn1(worker, SharedGate(pool_value, mu, cv))
+	_ = pool_submit1(pool_ref, worker, SharedGate(pool_value, mu, cv))
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "thread_transfer_runtime_carriers_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
+
+func TestAnalyzeAcceptsSpawnTransferOfStaticRef(t *testing.T) {
+	src := `extern shared_cell() -> static i32&
+
+def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+	return zeroed
+
+def worker(cell: static i32&) -> i64:
+	return cell[0u].i64()
+
+def ok() -> Thread[i64, Joinable]:
+	return spawn1(worker, shared_cell())
+`
+	result, errs := parseAndAnalyze(t, "spawn1_static_ref_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
+
+func TestAnalyzeRejectsThreadTransferOfNonStaticRef(t *testing.T) {
+	src := `def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+	return zeroed
+
+def pool_submit1[A, R](pool: any ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+	return zeroed
+
+def worker(cell: any i32&) -> i64:
+	return cell[0u].i64()
+
+def bad(pool: any ThreadPool&, cell: any i32&) -> i64:
+	_ = spawn1(worker, cell)
+	_ = pool_submit1(pool, worker, cell)
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "thread_transfer_non_static_ref_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic errors, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "argument to \"spawn1\" is not structurally shareable across threads: any i32&") {
+		t.Fatalf("expected non-static-ref spawn diagnostic, got:\n%s", all)
+	}
+	if !strings.Contains(all, "argument to \"pool_submit1\" is not structurally shareable across threads: any i32&") {
+		t.Fatalf("expected non-static-ref pool diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsSpawnOfNestedValueDependingOnUnpublishedPackedStore(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)

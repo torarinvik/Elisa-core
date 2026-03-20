@@ -1097,6 +1097,9 @@ func (a *Analyzer) typeStructurallyThreadShareable(t Type, seen map[string]bool)
 	if a.containsAffineHandleValues(t, map[string]bool{}) {
 		return false
 	}
+	if isBlessedThreadTransferCarrierType(t) {
+		return true
+	}
 	key := t.String()
 	if seen[key] {
 		return true
@@ -1163,6 +1166,18 @@ func (a *Analyzer) typeStructurallyThreadShareable(t Type, seen map[string]bool)
 		return IsFrozenPackedEnumStoreType(tt)
 	default:
 		return true
+	}
+}
+
+func isBlessedThreadTransferCarrierType(t Type) bool {
+	switch tt := t.(type) {
+	case *StructType:
+		return tt.Builtin && (tt.Name == "ThreadPool" || tt.Name == "Mutex" || tt.Name == "CondVar")
+	case *GenericInstanceType:
+		base, ok := tt.Base.(*StructType)
+		return ok && base.Builtin && (base.Name == "ThreadPool" || base.Name == "Mutex" || base.Name == "CondVar")
+	default:
+		return false
 	}
 }
 

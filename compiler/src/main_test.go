@@ -329,6 +329,8 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"define i64 @typed_pool_roundtrip(ptr",
 				"define void @typed_group_waitall(ptr",
 				"define i64 @typed_pool_scope(i64",
+				"define i64 @runtime_carrier_worker(%SharedGate",
+				"define i64 @typed_runtime_carrier_transfer(%ThreadPool",
 				"define i64 @permissioned_thread_worker(i64",
 				"define %Thread__i64__Joinable @spawn1__i64__i64(",
 				"define i64 @join__i64(",
