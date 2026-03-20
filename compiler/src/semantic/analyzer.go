@@ -69,6 +69,7 @@ type Analyzer struct {
 	constValues                       map[string]ConstValue
 	exprTypes                         map[ast.Expr]Type
 	exprFacts                         map[ast.Expr]OptimizationFacts
+	symbolFacts                       map[*Symbol]OptimizationFacts
 	typeParamScopes                   []map[string]Type
 	shapeParamScopes                  []map[string]Shape
 	regionParamScopes                 []map[string]bool
@@ -141,6 +142,7 @@ func Analyze(file *ast.File) *Result {
 		constValues:                map[string]ConstValue{},
 		exprTypes:                  map[ast.Expr]Type{},
 		exprFacts:                  map[ast.Expr]OptimizationFacts{},
+		symbolFacts:                map[*Symbol]OptimizationFacts{},
 		returnProvenanceInProgress: map[string]bool{},
 	}
 	a.registerBuiltins()

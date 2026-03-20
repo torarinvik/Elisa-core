@@ -29,6 +29,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: declType, Node: n, Mutable: n.Mutable}
 		a.defineLocal(sym, n.Pos())
+		a.recordImmutableSymbolOptimizationFacts(sym, n.Value)
 		a.recordRegionRefBinding(sym, n.Value)
 		if from, fromType, ok := a.freezeMovedPackedStoreSource(n.Value); ok {
 			a.remapPackedStoreDependencies(from, sym, PackedEnumStoreWithState(fromType, a.namedTypes["Frozen"]))

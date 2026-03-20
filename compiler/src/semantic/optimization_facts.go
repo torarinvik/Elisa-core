@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"llcontext/src/ast"
+	"llcontext/src/lexer"
 )
 
 type OptimizationExtentKind int
@@ -85,6 +86,14 @@ func SameOptimizationExtent(a, b *OptimizationExtent) bool {
 	}
 }
 
+func cloneOptimizationExtent(extent *OptimizationExtent) *OptimizationExtent {
+	if extent == nil {
+		return nil
+	}
+	cloned := *extent
+	return &cloned
+}
+
 func optimizationFactsForType(t Type) OptimizationFacts {
 	if t == nil {
 		return OptimizationFacts{}
@@ -158,7 +167,13 @@ func (a *Analyzer) inferExprOptimizationFacts(expr ast.Expr, t Type) Optimizatio
 	if expr == nil {
 		return facts
 	}
-	switch expr.(type) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		if identFacts, ok := a.lookupIdentOptimizationFacts(n); ok {
+			facts = identFacts
+		}
+	case *ast.CallExpr:
+		facts = a.inferCallOptimizationFacts(n, facts)
 	case *ast.AllocExpr:
 		if _, ok := t.(*RefType); ok {
 			facts.Exclusive = true
@@ -171,10 +186,261 @@ func (a *Analyzer) inferExprOptimizationFacts(expr ast.Expr, t Type) Optimizatio
 	return facts
 }
 
+func (a *Analyzer) recordImmutableSymbolOptimizationFacts(sym *Symbol, expr ast.Expr) {
+	if a == nil || sym == nil || expr == nil || sym.Mutable || a.symbolFacts == nil {
+		return
+	}
+	facts, ok := a.exprFacts[expr]
+	if !ok {
+		return
+	}
+	facts.Exclusive = false
+	a.symbolFacts[sym] = facts
+}
+
+func (a *Analyzer) lookupIdentOptimizationFacts(ident *ast.Ident) (OptimizationFacts, bool) {
+	if a == nil || ident == nil || a.symbolFacts == nil {
+		return OptimizationFacts{}, false
+	}
+	if a.currentScope != nil {
+		if sym, ok := a.currentScope.Lookup(ident.Name); ok {
+			if facts, ok := a.symbolFacts[sym]; ok {
+				return facts, true
+			}
+		}
+	}
+	if a.globalScope != nil {
+		if sym, ok := a.globalScope.Lookup(ident.Name); ok {
+			if facts, ok := a.symbolFacts[sym]; ok {
+				return facts, true
+			}
+		}
+	}
+	return OptimizationFacts{}, false
+}
+
+func (a *Analyzer) inferCallOptimizationFacts(call *ast.CallExpr, facts OptimizationFacts) OptimizationFacts {
+	if call == nil {
+		return facts
+	}
+	switch optimizationHelperName(call.Func) {
+	case "arena_da_view", "ctx_stage1rt_string_view", "ctx_stage0_string_view":
+		if extent := a.inferViewHelperExtent(call, 0, 1, 2, "count"); extent != nil {
+			facts.Extent = extent
+		}
+	case "arena_da_view_slice", "ctx_stage1rt_string_view_slice", "ctx_stage0_string_view_slice":
+		if extent := a.inferViewHelperExtent(call, 0, 1, 2, "len"); extent != nil {
+			facts.Extent = extent
+		}
+	case "arena_da_from_view":
+		if viewFacts, ok := a.exprFactsForCallArg(call, 1); ok && viewFacts.HasExactExtent() {
+			facts.Extent = cloneOptimizationExtent(viewFacts.Extent)
+		}
+	case "ctx_stage1rt_string_from_view":
+		if viewFacts, ok := a.exprFactsForCallArg(call, 0); ok && viewFacts.HasExactExtent() {
+			facts.Extent = cloneOptimizationExtent(viewFacts.Extent)
+		}
+	case "ctx_stage0_string_view_copy":
+		if viewFacts, ok := a.exprFactsForCallArg(call, 0); ok && viewFacts.HasExactExtent() {
+			facts.Extent = cloneOptimizationExtent(viewFacts.Extent)
+		}
+	}
+	return facts
+}
+
+func (a *Analyzer) inferViewHelperExtent(call *ast.CallExpr, baseIndex, startIndex, endIndex int, fullSpanField string) *OptimizationExtent {
+	baseExpr, ok := optimizationCallArg(call, baseIndex)
+	if !ok {
+		return nil
+	}
+	baseFacts, ok := a.exprFacts[baseExpr]
+	if ok && baseFacts.HasExactExtent() {
+		startExpr, hasStart := optimizationCallArg(call, startIndex)
+		endExpr, hasEnd := optimizationCallArg(call, endIndex)
+		if hasStart && hasEnd && isZeroOptimizationExpr(startExpr) && optimizationFieldMatches(endExpr, baseExpr, fullSpanField) {
+			return cloneOptimizationExtent(baseFacts.Extent)
+		}
+	}
+	startExpr, hasStart := optimizationCallArg(call, startIndex)
+	endExpr, hasEnd := optimizationCallArg(call, endIndex)
+	if !hasStart || !hasEnd {
+		return nil
+	}
+	begin := optimizationExprString(startExpr)
+	end := optimizationExprString(endExpr)
+	if begin == "" || end == "" {
+		return nil
+	}
+	return &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: begin, End: end}
+}
+
+func optimizationHelperName(expr ast.Expr) string {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return n.Name
+	case *ast.ParenExpr:
+		return optimizationHelperName(n.Inner)
+	case *ast.SpecializeExpr:
+		return optimizationHelperName(n.Operand)
+	default:
+		return ""
+	}
+}
+
+func (a *Analyzer) exprFactsForCallArg(call *ast.CallExpr, index int) (OptimizationFacts, bool) {
+	expr, ok := optimizationCallArg(call, index)
+	if !ok {
+		return OptimizationFacts{}, false
+	}
+	facts, ok := a.exprFacts[expr]
+	return facts, ok
+}
+
+func optimizationCallArg(call *ast.CallExpr, index int) (ast.Expr, bool) {
+	if call == nil || index < 0 || index >= len(call.Args) {
+		return nil, false
+	}
+	return call.Args[index], true
+}
+
+func optimizationFieldMatches(expr ast.Expr, object ast.Expr, field string) bool {
+	fieldExpr, ok := stripOptimizationParens(expr).(*ast.FieldExpr)
+	if !ok || fieldExpr.Field != field {
+		return false
+	}
+	return optimizationExprString(fieldExpr.Object) == optimizationExprString(object)
+}
+
+func isZeroOptimizationExpr(expr ast.Expr) bool {
+	intLit, ok := stripOptimizationParens(expr).(*ast.IntLit)
+	if !ok {
+		return false
+	}
+	return intLit.Value == "0"
+}
+
+func stripOptimizationParens(expr ast.Expr) ast.Expr {
+	for {
+		paren, ok := expr.(*ast.ParenExpr)
+		if !ok {
+			return expr
+		}
+		expr = paren.Inner
+	}
+}
+
+func optimizationExprString(expr ast.Expr) string {
+	if expr == nil {
+		return ""
+	}
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return n.Name
+	case *ast.IntLit:
+		value := n.Value
+		if n.Suffix != "" {
+			value += n.Suffix
+		}
+		return value
+	case *ast.StringLit:
+		return fmt.Sprintf("%q", n.Value)
+	case *ast.BoolLit:
+		if n.Value {
+			return "true"
+		}
+		return "false"
+	case *ast.NullLit:
+		return "null"
+	case *ast.ZeroedLit:
+		return "zeroed"
+	case *ast.BinaryExpr:
+		return fmt.Sprintf("(%s %s %s)", optimizationExprString(n.Left), lexer.TokenName(n.Op), optimizationExprString(n.Right))
+	case *ast.UnaryExpr:
+		return fmt.Sprintf("(%s %s)", lexer.TokenName(n.Op), optimizationExprString(n.Operand))
+	case *ast.MoveExpr:
+		return fmt.Sprintf("move %s", optimizationExprString(n.Operand))
+	case *ast.CallExpr:
+		args := make([]string, 0, len(n.Args))
+		for i, arg := range n.Args {
+			if name := n.ArgName(i); name != "" {
+				args = append(args, name+": "+optimizationExprString(arg))
+				continue
+			}
+			args = append(args, optimizationExprString(arg))
+		}
+		return fmt.Sprintf("%s(%s)", optimizationExprString(n.Func), joinOptimizationStrings(args))
+	case *ast.FieldExpr:
+		return fmt.Sprintf("%s.%s", optimizationExprString(n.Object), n.Field)
+	case *ast.IndexExpr:
+		return fmt.Sprintf("%s[%s]", optimizationExprString(n.Object), optimizationExprString(n.Index))
+	case *ast.SliceExpr:
+		return fmt.Sprintf("%s[%s:%s]", optimizationExprString(n.Object), optimizationExprString(n.Start), optimizationExprString(n.End))
+	case *ast.ListLitExpr:
+		parts := make([]string, 0, len(n.Elems))
+		for _, elem := range n.Elems {
+			parts = append(parts, optimizationExprString(elem))
+		}
+		return fmt.Sprintf("[%s]", joinOptimizationStrings(parts))
+	case *ast.CastExpr:
+		return fmt.Sprintf("%s.cast", optimizationExprString(n.Operand))
+	case *ast.SizeofExpr:
+		return "sizeof(...)"
+	case *ast.TernaryExpr:
+		return fmt.Sprintf("(%s if %s else %s)", optimizationExprString(n.Value), optimizationExprString(n.Cond), optimizationExprString(n.Alt))
+	case *ast.AddrOfExpr:
+		return fmt.Sprintf("&%s", optimizationExprString(n.Operand))
+	case *ast.SpecializeExpr:
+		return optimizationExprString(n.Operand) + ".specialize"
+	case *ast.StructLitExpr:
+		parts := make([]string, 0, len(n.Args))
+		for _, arg := range n.Args {
+			parts = append(parts, optimizationExprString(arg))
+		}
+		return fmt.Sprintf("%s(%s)", n.Name, joinOptimizationStrings(parts))
+	case *ast.ParenExpr:
+		return fmt.Sprintf("(%s)", optimizationExprString(n.Inner))
+	case *ast.AllocExpr:
+		if n.Owner == nil {
+			return fmt.Sprintf("new %s", optimizationExprString(n.Value))
+		}
+		return fmt.Sprintf("new[%s] %s", optimizationExprString(n.Owner), optimizationExprString(n.Value))
+	case *ast.CanExpr:
+		return optimizationExprString(n.Expr)
+	default:
+		return ""
+	}
+}
+
+func joinOptimizationStrings(parts []string) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	result := parts[0]
+	for i := 1; i < len(parts); i++ {
+		result += ", " + parts[i]
+	}
+	return result
+}
+
 func (r *Result) ExprOptimizationFacts(expr ast.Expr) (OptimizationFacts, bool) {
 	if r == nil || expr == nil || r.ExprFacts == nil {
 		return OptimizationFacts{}, false
 	}
 	facts, ok := r.ExprFacts[expr]
 	return facts, ok
+}
+
+func (r *Result) ExprsHaveSameExtent(left, right ast.Expr) bool {
+	if r == nil {
+		return false
+	}
+	leftFacts, ok := r.ExprOptimizationFacts(left)
+	if !ok {
+		return false
+	}
+	rightFacts, ok := r.ExprOptimizationFacts(right)
+	if !ok {
+		return false
+	}
+	return leftFacts.SameExtent(rightFacts)
 }
