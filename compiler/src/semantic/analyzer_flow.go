@@ -214,7 +214,9 @@ func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {
 	switch p := stmt.Pattern.(type) {
 	case *ast.MoveBindNamePattern:
 		if p.Name != "_" {
-			a.defineLocal(&Symbol{Name: p.Name, Kind: SymbolLocal, Type: valueType, Node: p, Mutable: false}, p.Pos())
+			sym := &Symbol{Name: p.Name, Kind: SymbolLocal, Type: valueType, Node: p, Mutable: false}
+			a.defineLocal(sym, p.Pos())
+			a.recordRegionRefBinding(sym, stmt.Value)
 		}
 	case *ast.MoveBindStructPattern:
 		fields, ok := a.resolveMoveBindStructPattern(p, valueType)

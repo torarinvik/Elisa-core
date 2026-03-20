@@ -1948,6 +1948,24 @@ func TestAnalyzeRejectsUsingReferenceInvalidatedByRestore(t *testing.T) {
 	}
 }
 
+func TestAnalyzeRejectsUsingMoveBoundReferenceInvalidatedByRestore(t *testing.T) {
+	src := `def bad() -> i32:
+	region scratch
+	mark scratch as cp
+	value: any i32& = new[scratch] 1i32
+	move value as alias
+	restore scratch from cp
+	return alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_alias.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+		t.Fatalf("expected restore invalidation diagnostic for move-bound alias, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeRejectsRestoringCheckpointFromWrongRegion(t *testing.T) {
 	src := `def bad() -> void:
 	region left

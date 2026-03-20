@@ -388,6 +388,8 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		return a.regionRefStateForExpr(n.Inner)
 	case *ast.CastExpr:
 		return a.regionRefStateForExpr(n.Operand)
+	case *ast.MoveExpr:
+		return a.regionRefStateForExpr(n.Operand)
 	case *ast.Ident:
 		if a.currentScope == nil {
 			return regionRefState{}, false
