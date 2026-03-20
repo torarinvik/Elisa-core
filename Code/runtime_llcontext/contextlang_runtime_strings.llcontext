@@ -6,12 +6,12 @@
 # String concatenation
 # ------------------------------------------------------------
 
-def ctx_stage0_concat2(lhs: any u8&?, rhs: any u8&?) -> any u8& can[Memory.Allocate, Abort.Panic]:
+def concat2(lhs: any u8&?, rhs: any u8&?) -> any u8& can[Memory.Allocate, Abort.Panic]:
     left: any u8& = lhs.cast[any u8&]() if lhs != null else "".cast[any u8&]()
     right: any u8& = rhs.cast[any u8&]() if rhs != null else "".cast[any u8&]()
 
-    left_len: usize = ctx_stage0_runtime_strlen(left)
-    right_len: usize = ctx_stage0_runtime_strlen(right)
+    left_len: usize = runtime_strlen(left)
+    right_len: usize = runtime_strlen(right)
 
     if left_len == 0:
         return right
@@ -24,21 +24,21 @@ def ctx_stage0_concat2(lhs: any u8&?, rhs: any u8&?) -> any u8& can[Memory.Alloc
         memcpy((&text[0]).cast[any void&](), left.cast[any void&](), left_len)
         memcpy((&text[0] + left_len).cast[any void&](), right.cast[any void&](), right_len)
         text[left_len + right_len] <- 0
-        return ctx_stage0_intern_small_string((&text[0]).cast[any u8&](), left_len + right_len).cast[any u8&]()
+        return intern_small_string((&text[0]).cast[any u8&](), left_len + right_len).cast[any u8&]()
 
-    out: any u8& = ctx_stage0_alloc_perm((left_len + right_len + 1).i64()).cast[any u8&]()
+    out: any u8& = alloc_perm((left_len + right_len + 1).i64()).cast[any u8&]()
     memcpy(out.cast[any void&](), left.cast[any void&](), left_len)
     memcpy((out + left_len).cast[any void&](), right.cast[any void&](), right_len)
     out[left_len + right_len] <- 0
-    ctx_stage0_register_perm_string_len(out, left_len + right_len)
+    register_perm_string_len(out, left_len + right_len)
     return out
 
-def ctx_stage0_concat2_scratch(lhs: any u8&?, rhs: any u8&?) -> any u8& can[Memory.Allocate, Abort.Panic]:
+def concat2_scratch(lhs: any u8&?, rhs: any u8&?) -> any u8& can[Memory.Allocate, Abort.Panic]:
     left: any u8& = lhs.cast[any u8&]() if lhs != null else "".cast[any u8&]()
     right: any u8& = rhs.cast[any u8&]() if rhs != null else "".cast[any u8&]()
 
-    left_len: usize = ctx_stage0_runtime_strlen(left)
-    right_len: usize = ctx_stage0_runtime_strlen(right)
+    left_len: usize = runtime_strlen(left)
+    right_len: usize = runtime_strlen(right)
 
     if left_len == 0:
         return right
@@ -51,9 +51,9 @@ def ctx_stage0_concat2_scratch(lhs: any u8&?, rhs: any u8&?) -> any u8& can[Memo
         memcpy((&text[0]).cast[any void&](), left.cast[any void&](), left_len)
         memcpy((&text[0] + left_len).cast[any void&](), right.cast[any void&](), right_len)
         text[left_len + right_len] <- 0
-        return ctx_stage0_intern_small_string((&text[0]).cast[any u8&](), left_len + right_len).cast[any u8&]()
+        return intern_small_string((&text[0]).cast[any u8&](), left_len + right_len).cast[any u8&]()
 
-    out: any u8& = ctx_stage0_alloc_scratch((left_len + right_len + 1).i64()).cast[any u8&]()
+    out: any u8& = alloc_scratch((left_len + right_len + 1).i64()).cast[any u8&]()
     memcpy(out.cast[any void&](), left.cast[any void&](), left_len)
     memcpy((out + left_len).cast[any void&](), right.cast[any void&](), right_len)
     out[left_len + right_len] <- 0
@@ -63,19 +63,19 @@ def ctx_stage0_concat2_scratch(lhs: any u8&?, rhs: any u8&?) -> any u8& can[Memo
 # String operations
 # ------------------------------------------------------------
 
-def ctx_stage0_string_index(value: any u8&?, index: i64) -> i64:
+def string_index(value: any u8&?, index: i64) -> i64:
     src: any u8& = value if value != null else "".cast[any u8&]()
-    len: usize = ctx_stage0_runtime_strlen(src)
+    len: usize = runtime_strlen(src)
 
     if index < 0 or index.usize() >= len:
         return -1
 
     return src[index.usize()].i64()
 
-def ctx_stage0_string_slice_eq(value: any u8&?, start: i64, end: i64, other: any u8&?) -> int:
+def string_slice_eq(value: any u8&?, start: i64, end: i64, other: any u8&?) -> int:
     src: any u8& = value if value != null else "".cast[any u8&]()
     rhs: any u8& = other if other != null else "".cast[any u8&]()
-    len: usize = ctx_stage0_runtime_strlen(src)
+    len: usize = runtime_strlen(src)
 
     lo: mutable usize = 0
     hi: mutable usize = len
@@ -94,7 +94,7 @@ def ctx_stage0_string_slice_eq(value: any u8&?, start: i64, end: i64, other: any
         hi <- lo
 
     slice_len: usize = hi - lo
-    rhs_len: usize = ctx_stage0_runtime_strlen(rhs)
+    rhs_len: usize = runtime_strlen(rhs)
 
     if slice_len != rhs_len:
         return 0
@@ -107,11 +107,11 @@ def ctx_stage0_string_slice_eq(value: any u8&?, start: i64, end: i64, other: any
 
     return 1 if memcmp((src + lo).cast[any void&](), rhs.cast[any void&](), slice_len) == 0 else 0
 
-def ctx_stage0_string_slices_eq(lhs: any u8&?, lhs_start: i64, lhs_end: i64, rhs: any u8&?, rhs_start: i64, rhs_end: i64) -> int:
+def string_slices_eq(lhs: any u8&?, lhs_start: i64, lhs_end: i64, rhs: any u8&?, rhs_start: i64, rhs_end: i64) -> int:
     left: any u8& = lhs if lhs != null else "".cast[any u8&]()
     right: any u8& = rhs if rhs != null else "".cast[any u8&]()
-    left_len: usize = ctx_stage0_runtime_strlen(left)
-    right_len: usize = ctx_stage0_runtime_strlen(right)
+    left_len: usize = runtime_strlen(left)
+    right_len: usize = runtime_strlen(right)
 
     left_lo: mutable usize = 0
     left_hi: mutable usize = left_len
@@ -158,9 +158,9 @@ def ctx_stage0_string_slices_eq(lhs: any u8&?, lhs_start: i64, lhs_end: i64, rhs
 
     return 1 if memcmp((left + left_lo).cast[any void&](), (right + right_lo).cast[any void&](), left_slice_len) == 0 else 0
 
-def ctx_stage0_string_slice(value: any u8&?, start: i64, end: i64) -> any u8& can[Memory.Allocate, Abort.Panic]:
+def string_slice(value: any u8&?, start: i64, end: i64) -> any u8& can[Memory.Allocate, Abort.Panic]:
     src: any u8& = value if value != null else "".cast[any u8&]()
-    len: usize = ctx_stage0_runtime_strlen(src)
+    len: usize = runtime_strlen(src)
 
     lo: mutable usize = 0
     hi: mutable usize = len
@@ -187,17 +187,17 @@ def ctx_stage0_string_slice(value: any u8&?, start: i64, end: i64) -> any u8& ca
         return "".cast[any u8&]()
 
     if out_len <= 8:
-        return ctx_stage0_intern_small_string(src + lo, out_len).cast[any u8&]()
+        return intern_small_string(src + lo, out_len).cast[any u8&]()
 
-    out: any u8& = ctx_stage0_alloc_perm((out_len + 1).i64()).cast[any u8&]()
+    out: any u8& = alloc_perm((out_len + 1).i64()).cast[any u8&]()
     memcpy(out.cast[any void&](), (src + lo).cast[any void&](), out_len)
     out[out_len] <- 0
-    ctx_stage0_register_perm_string_len(out, out_len)
+    register_perm_string_len(out, out_len)
     return out
 
-def ctx_stage0_string_view(value: any u8&?, start: i64, end: i64) -> StringView:
+def string_view(value: any u8&?, start: i64, end: i64) -> StringView:
     src: any u8& = value if value != null else "".cast[any u8&]()
-    len: usize = ctx_stage0_runtime_strlen(src)
+    len: usize = runtime_strlen(src)
 
     lo: mutable usize = 0
     hi: mutable usize = len
@@ -217,10 +217,10 @@ def ctx_stage0_string_view(value: any u8&?, start: i64, end: i64) -> StringView:
 
     return StringView(src + lo, (hi - lo).i64())
 
-def ctx_stage0_string_view_len(view: StringView) -> i64:
+def string_view_len(view: StringView) -> i64:
     return view.len
 
-def ctx_stage0_string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
+def string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
     lo: mutable i64 = start if start > 0 else 0
     hi: mutable i64 = end if end >= 0 else view.len
 
@@ -233,15 +233,15 @@ def ctx_stage0_string_view_slice(view: StringView, start: i64, end: i64) -> Stri
 
     return StringView(view.data + lo.usize(), hi - lo)
 
-def ctx_stage0_string_view_index(view: StringView, index: i64) -> i64:
+def string_view_index(view: StringView, index: i64) -> i64:
     if index < 0 or index >= view.len:
         return -1
 
     return view.data[index.usize()].i64()
 
-def ctx_stage0_string_view_eq(view: StringView, other: any u8&?) -> int:
+def string_view_eq(view: StringView, other: any u8&?) -> int:
     rhs: any u8& = other if other != null else "".cast[any u8&]()
-    rhs_len: usize = ctx_stage0_runtime_strlen(rhs)
+    rhs_len: usize = runtime_strlen(rhs)
 
     if view.len < 0 or view.len.usize() != rhs_len:
         return 0
@@ -252,7 +252,7 @@ def ctx_stage0_string_view_eq(view: StringView, other: any u8&?) -> int:
 
     return 1 if memcmp(view.data.cast[any void&](), rhs.cast[any void&](), view.len.usize()) == 0 else 0
 
-def ctx_stage0_string_views_eq(lhs: StringView, rhs: StringView) -> int:
+def string_views_eq(lhs: StringView, rhs: StringView) -> int:
     if lhs.len != rhs.len:
         return 0
     if lhs.len == 0:
@@ -262,15 +262,15 @@ def ctx_stage0_string_views_eq(lhs: StringView, rhs: StringView) -> int:
 
     return 1 if memcmp(lhs.data.cast[any void&](), rhs.data.cast[any void&](), lhs.len.usize()) == 0 else 0
 
-def ctx_stage0_string_view_copy(view: StringView) -> heap u8& can[Memory.Allocate, Abort.Panic]:
+def string_view_copy(view: StringView) -> heap u8& can[Memory.Allocate, Abort.Panic]:
     if view.len <= 0:
-        return ctx_stage0_intern_small_string("".cast[any u8&](), 0)
+        return intern_small_string("".cast[any u8&](), 0)
 
     if view.len <= 8:
-        return ctx_stage0_intern_small_string(view.data, view.len.usize())
+        return intern_small_string(view.data, view.len.usize())
 
-    out: heap u8& = ctx_stage0_alloc_perm((view.len + 1).usize()).cast[heap u8&]()
+    out: heap u8& = alloc_perm((view.len + 1).usize()).cast[heap u8&]()
     memcpy(out.cast[any void&](), view.data.cast[any void&](), view.len.usize())
     out[view.len.usize()] <- 0
-    ctx_stage0_register_perm_string_len(out.cast[any u8&](), view.len.usize())
+    register_perm_string_len(out.cast[any u8&](), view.len.usize())
     return out

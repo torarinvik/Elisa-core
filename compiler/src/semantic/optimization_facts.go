@@ -224,11 +224,11 @@ func (a *Analyzer) inferCallOptimizationFacts(call *ast.CallExpr, facts Optimiza
 		return facts
 	}
 	switch optimizationHelperName(call.Func) {
-	case "arena_da_view", "ctx_string_view", "ctx_stage0_string_view":
+	case "arena_da_view", "ctx_string_view", "string_view":
 		if extent := a.inferViewHelperExtent(call, 0, 1, 2, "count"); extent != nil {
 			facts.Extent = extent
 		}
-	case "arena_da_view_slice", "ctx_string_view_slice", "ctx_stage0_string_view_slice":
+	case "arena_da_view_slice", "ctx_string_view_slice", "string_view_slice":
 		if extent := a.inferViewHelperExtent(call, 0, 1, 2, "len"); extent != nil {
 			facts.Extent = extent
 		}
@@ -240,7 +240,7 @@ func (a *Analyzer) inferCallOptimizationFacts(call *ast.CallExpr, facts Optimiza
 		if viewFacts, ok := a.exprFactsForCallArg(call, 0); ok && viewFacts.HasExactExtent() {
 			facts.Extent = cloneOptimizationExtent(viewFacts.Extent)
 		}
-	case "ctx_stage0_string_view_copy":
+	case "string_view_copy":
 		if viewFacts, ok := a.exprFactsForCallArg(call, 0); ok && viewFacts.HasExactExtent() {
 			facts.Extent = cloneOptimizationExtent(viewFacts.Extent)
 		}

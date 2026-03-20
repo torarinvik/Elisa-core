@@ -938,7 +938,7 @@ func (s *functionState) emitSpecializedRuntimeCall(expr *ast.CallExpr) (C.LLVMVa
 	if !ok {
 		return nil, nil, false, nil
 	}
-	if ident.Name != "ctx_stage0_string_view_eq" && ident.Name != "ctx_string_view_eq" {
+	if ident.Name != "string_view_eq" && ident.Name != "ctx_string_view_eq" {
 		return nil, nil, false, nil
 	}
 	if len(expr.Args) != 2 {
@@ -1000,7 +1000,7 @@ func (s *functionState) emitSpecializedStringViewLiteralCall(expr *ast.CallExpr)
 }
 
 func (s *functionState) specializedStringViewLiteralCallShape(funcName string) (int, int, bool, bool) {
-	if funcName == "ctx_stage0_string_view_eq" || funcName == "ctx_string_view_eq" {
+	if funcName == "string_view_eq" || funcName == "ctx_string_view_eq" {
 		return 0, 1, true, true
 	}
 	sym, ok := s.g.result.GlobalScope.Lookup(funcName)
@@ -1023,7 +1023,7 @@ func (s *functionState) specializedStringViewLiteralCallShape(funcName string) (
 	if !ok {
 		return 0, 0, false, false
 	}
-	if callee.Name != "ctx_stage0_string_view_eq" && callee.Name != "ctx_string_view_eq" {
+	if callee.Name != "string_view_eq" && callee.Name != "ctx_string_view_eq" {
 		return 0, 0, false, false
 	}
 	return 0, 1, false, true

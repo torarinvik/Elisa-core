@@ -776,9 +776,9 @@ func TestRunCLICompilesStage1RuntimeToLLVM(t *testing.T) {
 	}
 	output := stdout.String()
 	checks := []string{
-		"define ptr @ctx_stage0_int_to_string(i64",
-		"define ptr @ctx_stage1rt_concat2(ptr",
-		"define ptr @ctx_stage1rt_string_builder_new(ptr",
+		"define ptr @int_to_string(i64",
+		"define ptr @rt_concat2(ptr",
+		"define ptr @rt_string_builder_new(ptr",
 		"%StringView = type { ptr, i64 }",
 		"define i64 @ctx_string_view_len(%StringView",
 		"define %PackedStoreAllocResult @ctx_packed_store_alloc_result(ptr",
@@ -800,10 +800,10 @@ func TestRunCLICompilesStage1RuntimeToLLVM(t *testing.T) {
 		}
 	}
 	for _, check := range []string{
-		"@ctx_stage1rt_string_view_len = alias ",
-		"@ctx_stage1rt_string_from_view = alias ",
-		"define i64 @ctx_stage1rt_string_view_len(",
-		"define ptr @ctx_stage1rt_string_from_view(",
+		"@rt_string_view_len = alias ",
+		"@rt_string_from_view = alias ",
+		"define i64 @rt_string_view_len(",
+		"define ptr @rt_string_from_view(",
 	} {
 		if strings.Contains(output, check) {
 			t.Fatalf("expected output to omit legacy string helper symbol %q, got:\n%s", check, output)

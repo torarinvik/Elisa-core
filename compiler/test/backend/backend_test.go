@@ -2170,13 +2170,13 @@ func TestGenerateLLVMIRSpecializesSameExtentRuntimeStringEquality(t *testing.T) 
 	data: mutable any u8&
 	len: mutable i64
 
-def ctx_stage0_string_view(value: any u8&?, start: i64, end: i64) -> StringView:
+def string_view(value: any u8&?, start: i64, end: i64) -> StringView:
 	_ = value
 	_ = start
 	return StringView("".cast[any u8&](), end - start)
 
 def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
-	return ctx_stage0_string_view(value, start, end)
+	return string_view(value, start, end)
 
 def same_shape_text(left: dstr[row], right: dstr[row]) -> bool:
 	return left == right
@@ -2278,10 +2278,10 @@ def differs_short(view: StringView) -> bool:
 }
 
 func TestGenerateLLVMIRSpecializesLongStringViewLiteralHelperCalls(t *testing.T) {
-	src := `extern ctx_stage0_string_view_eq(view: StringView, other: any u8&?) -> int
+	src := `extern string_view_eq(view: StringView, other: any u8&?) -> int
 
 def same_long(view: StringView) -> bool:
-	return ctx_stage0_string_view_eq(view, "destroy_region".cast[any u8&]()) != 0
+	return string_view_eq(view, "destroy_region".cast[any u8&]()) != 0
 `
 	result := parseAndAnalyze(t, "backend_runtime_string_literal_eq_long.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -2301,16 +2301,16 @@ def same_long(view: StringView) -> bool:
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
-	if strings.Contains(output, "call i64 @ctx_stage0_string_view_eq") {
-		t.Fatalf("expected literal helper call lowering to avoid calling ctx_stage0_string_view_eq, got:\n%s", output)
+	if strings.Contains(output, "call i64 @string_view_eq") {
+		t.Fatalf("expected literal helper call lowering to avoid calling string_view_eq, got:\n%s", output)
 	}
 }
 
 func TestGenerateLLVMIRSpecializesStringViewLiteralWrapperCalls(t *testing.T) {
-	src := `extern ctx_stage0_string_view_eq(view: StringView, other: any u8&?) -> int
+	src := `extern string_view_eq(view: StringView, other: any u8&?) -> int
 
 def frontend_sv_eq_literal(view: StringView, literal: static u8&) -> bool:
-	return ctx_stage0_string_view_eq(view, literal.cast[any u8&]()) != 0
+	return string_view_eq(view, literal.cast[any u8&]()) != 0
 
 def same_short(view: StringView) -> bool:
 	return frontend_sv_eq_literal(view, "def")
@@ -2537,7 +2537,7 @@ func TestGenerateLLVMIRLowersArrayLiteralAndInferredLocalViaFixedArrayLowering(t
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
-	if strings.Contains(output, "@ctx_stage1rt_tlist_new") || strings.Contains(output, "@ctx_stage1rt_tlist_push") {
+	if strings.Contains(output, "@rt_tlist_new") || strings.Contains(output, "@rt_tlist_push") {
 		t.Fatalf("expected fixed array literals not to lower through typed-list runtime helpers, got:\n%s", output)
 	}
 }

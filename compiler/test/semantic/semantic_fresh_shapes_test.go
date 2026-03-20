@@ -236,21 +236,21 @@ def bad(a: any Arena&, da: any darray[i32, row]&) -> any darray[i32, row]&:
 }
 
 func TestAnalyzeStage1StringConcatWrapperReturnsFreshShape(t *testing.T) {
-	src := `def ctx_stage0_concat2(lhs: any u8&?, rhs: any u8&?) -> any u8&:
+	src := `def concat2(lhs: any u8&?, rhs: any u8&?) -> any u8&:
 	return lhs if lhs != null else rhs.cast[any u8&]()
 
-def ctx_stage1rt_concat2(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[shape_result]:
-	return ctx_stage0_concat2(lhs, rhs)
+def rt_concat2(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[shape_result]:
+	return concat2(lhs, rhs)
 
 def bad(left: dstr[row], right: dstr[col]) -> dstr[row]:
-	return ctx_stage1rt_concat2(left, right)
+	return rt_concat2(left, right)
 `
 	_, errs := parseAndAnalyze(t, "stage1_string_concat_wrapper.llcontext", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "return type expects dstr[row], got dstr[shape_result#") || !strings.Contains(all, "note: ctx_stage1rt_concat2 returns a fresh logical shape for shape_result") {
+	if !strings.Contains(all, "return type expects dstr[row], got dstr[shape_result#") || !strings.Contains(all, "note: rt_concat2 returns a fresh logical shape for shape_result") {
 		t.Fatalf("expected fresh stage1 string concat diagnostic, got:\n%s", all)
 	}
 }

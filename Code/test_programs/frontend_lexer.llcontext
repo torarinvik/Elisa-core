@@ -137,13 +137,13 @@ def frontend_expect_kind(tokens: darray[FrontendToken], index: usize, expected: 
 def frontend_expect_text(tokens: darray[FrontendToken], index: usize, expected: static u8&) -> bool:
     if index >= tokens.count:
         return false
-    return ctx_stage0_string_view_eq(tokens[index].text, expected.cast[any u8&]()) != 0
+    return string_view_eq(tokens[index].text, expected.cast[any u8&]()) != 0
 
 
 def frontend_expect_suffix(tokens: darray[FrontendToken], index: usize, expected: static u8&) -> bool:
     if index >= tokens.count:
         return false
-    return ctx_stage0_string_view_eq(tokens[index].suffix, expected.cast[any u8&]()) != 0
+    return string_view_eq(tokens[index].suffix, expected.cast[any u8&]()) != 0
 
 
 def frontend_token_kind_code(kind: FrontendTokenKind) -> u64:

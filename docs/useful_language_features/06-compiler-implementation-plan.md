@@ -446,7 +446,7 @@ The codebase is already following this staged approach:
 
 - low-level stage 0 runtime code still uses representation-first types such as `DynArray[T]`, `StringBuilder`, `StringView`, and raw `u8&` string values
 - `arena.llcontext` now exposes shape-typed append helpers such as `arena_da_append` and `arena_da_append_many`
-- `contextlang_runtime.llcontext` stage 1 wrappers now expose typed logical APIs such as `ctx_stage1rt_concat2`, `ctx_string_slice`, and the `ctx_string_view*` helpers for string subviews
+- `contextlang_runtime.llcontext` stage 1 wrappers now expose typed logical APIs such as `rt_concat2`, `ctx_string_slice`, and the `ctx_string_view*` helpers for string subviews
 - `arena.llcontext` now also exposes typed non-owning `dview[T]` helpers such as `arena_da_view`, `arena_da_view_slice`, and `arena_da_view_get`
 - the semantic layer bridges these wrappers back onto the underlying runtime representations rather than forcing an immediate full runtime rewrite
 
@@ -456,15 +456,15 @@ For example, the stage 1 wrappers now look like this:
 error RuntimeError:
     AllocationFailed
 
-def ctx_stage1rt_concat2(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[shape_result] error[RuntimeError]:
-    text: dstr[shape_result] = ctx_stage0_concat2(lhs, rhs) else raise RuntimeError.AllocationFailed
+def rt_concat2(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[shape_result] error[RuntimeError]:
+    text: dstr[shape_result] = concat2(lhs, rhs) else raise RuntimeError.AllocationFailed
     return text
 
 def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
-    return ctx_stage0_string_view(value, start, end)
+    return string_view(value, start, end)
 
 def ctx_string_from_view(view: StringView) -> dstr[shape_out]:
-    return ctx_stage0_string_view_copy(view)
+    return string_view_copy(view)
 ```
 
 And the arena-backed container helpers now look like this:
@@ -732,7 +732,7 @@ The MVP should not attempt arbitrary user-defined hash/equality derivation yet.
 
 ### Recommended helper surface
 
-To match the current `arena_da_*` / `ctx_stage1rt_*` naming style, the first dict helpers should be arena-oriented.
+To match the current `arena_da_*` / `rt_*` naming style, the first dict helpers should be arena-oriented.
 
 Recommended helper family:
 

@@ -12,29 +12,29 @@ func TestAnalyzeStage1StringViewWrappersSupportBoundedViews(t *testing.T) {
 	data: mutable any u8&
 	len: mutable i64
 
-def ctx_stage0_string_view(value: any u8&?, start: i64, end: i64) -> StringView:
+def string_view(value: any u8&?, start: i64, end: i64) -> StringView:
 	return StringView("", 0)
 
-def ctx_stage0_string_view_len(view: StringView) -> i64:
+def string_view_len(view: StringView) -> i64:
 	return view.len
 
-def ctx_stage0_string_view_index(view: StringView, index: i64) -> i64:
+def string_view_index(view: StringView, index: i64) -> i64:
 	return -1
 
-def ctx_stage0_string_view_copy(view: StringView) -> any u8&:
+def string_view_copy(view: StringView) -> any u8&:
 	return view.data
 
 def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
-	return ctx_stage0_string_view(value, start, end)
+	return string_view(value, start, end)
 
 def ctx_string_view_len(view: StringView) -> i64:
-	return ctx_stage0_string_view_len(view)
+	return string_view_len(view)
 
 def ctx_string_view_index(view: StringView, index: i64) -> i64:
-	return ctx_stage0_string_view_index(view, index)
+	return string_view_index(view, index)
 
 def ctx_string_from_view(view: StringView) -> dstr[shape_out]:
-	return ctx_stage0_string_view_copy(view)
+	return string_view_copy(view)
 
 def probe(text: dstr[row]) -> i64:
 	view: StringView = ctx_string_view(text, 0, 2)
@@ -60,35 +60,35 @@ func TestAnalyzeStage1StringViewHelpersAcceptSubviewAndEquality(t *testing.T) {
 	data: mutable any u8&
 	len: mutable i64
 
-def ctx_stage0_string_view(value: any u8&?, start: i64, end: i64) -> StringView:
+def string_view(value: any u8&?, start: i64, end: i64) -> StringView:
 	return StringView("", 0)
 
-def ctx_stage0_string_view_len(view: StringView) -> i64:
+def string_view_len(view: StringView) -> i64:
 	return view.len
 
-def ctx_stage0_string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
+def string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
 	return view
 
-def ctx_stage0_string_view_eq(view: StringView, other: any u8&?) -> int:
+def string_view_eq(view: StringView, other: any u8&?) -> int:
 	return 1
 
-def ctx_stage0_string_views_eq(lhs: StringView, rhs: StringView) -> int:
+def string_views_eq(lhs: StringView, rhs: StringView) -> int:
 	return 1
 
 def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
-	return ctx_stage0_string_view(value, start, end)
+	return string_view(value, start, end)
 
 def ctx_string_view_len(view: StringView) -> i64:
-	return ctx_stage0_string_view_len(view)
+	return string_view_len(view)
 
 def ctx_string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
-	return ctx_stage0_string_view_slice(view, start, end)
+	return string_view_slice(view, start, end)
 
 def ctx_string_view_eq(view: StringView, other: dstr[shape_other]) -> int:
-	return ctx_stage0_string_view_eq(view, other)
+	return string_view_eq(view, other)
 
 def ctx_string_views_eq(lhs: StringView, rhs: StringView) -> int:
-	return ctx_stage0_string_views_eq(lhs, rhs)
+	return string_views_eq(lhs, rhs)
 
 def probe(text: dstr[row], other: dstr[col]) -> int:
 	view: StringView = ctx_string_view(text, 0, 4)

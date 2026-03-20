@@ -170,28 +170,28 @@ def arena_da_from_view[T](a: any Arena&, view: dview[T]) -> darray[T, shape_out]
 	_ = view
 	return zeroed
 
-def ctx_stage0_string_view(value: any u8&?, start: i64, end: i64) -> StringView:
+def string_view(value: any u8&?, start: i64, end: i64) -> StringView:
 	_ = value
 	_ = start
 	_ = end
 	return StringView("", 0)
 
-def ctx_stage0_string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
+def string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
 	_ = start
 	_ = end
 	return view
 
-def ctx_stage0_string_view_copy(view: StringView) -> any u8&:
+def string_view_copy(view: StringView) -> any u8&:
 	return view.data
 
 def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
-	return ctx_stage0_string_view(value, start, end)
+	return string_view(value, start, end)
 
 def ctx_string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
-	return ctx_stage0_string_view_slice(view, start, end)
+	return string_view_slice(view, start, end)
 
 def ctx_string_from_view(view: StringView) -> dstr[shape_out]:
-	return ctx_stage0_string_view_copy(view)
+	return string_view_copy(view)
 
 def inspect(a: any Arena&, values: any darray[i32, row]&, other: any darray[i32, row]&, text: dstr[row]) -> int:
 	whole_a: dview[i32] = arena_da_view(values, 0u, values.count)

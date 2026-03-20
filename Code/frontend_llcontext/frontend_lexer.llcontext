@@ -13,7 +13,7 @@ def frontend_new_lexer(a: any Arena&, filename: any u8&, source: any u8&) -> Fro
     out.arena as & <- a
     out.filename <- filename
     out.source <- source
-    out.source_len <- ctx_stage0_runtime_strlen(source)
+    out.source_len <- runtime_strlen(source)
     out.pos <- 0u
     out.line <- 1
     out.col <- 1
@@ -49,7 +49,7 @@ def frontend_peek_char_at(lexer: any FrontendLexer&, offset: usize) -> i64:
 def frontend_make_source_view(source: any u8&, start: usize, end: usize) -> StringView:
     if end <= start:
         return frontend_empty_view()
-    return ctx_stage0_string_view(source, start.i64(), end.i64())
+    return string_view(source, start.i64(), end.i64())
 
 
 def frontend_make_lexer_view(lexer: any FrontendLexer&, start: usize, end: usize) -> StringView:

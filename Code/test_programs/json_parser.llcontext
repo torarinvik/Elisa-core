@@ -63,7 +63,7 @@ def json_new_cursor_with_len(source: any u8&, source_len: usize) -> JsonCursor:
 
 
 def json_new_cursor(source: any u8&) -> JsonCursor:
-    return json_new_cursor_with_len(source, ctx_stage0_runtime_strlen(source))
+    return json_new_cursor_with_len(source, runtime_strlen(source))
 
 
 def json_char_at(source: any u8&, source_len: usize, index: usize) -> i64:
@@ -120,7 +120,7 @@ def json_expect_literal_with_len(cursor: any JsonCursor&, literal: any u8&, lite
 
 
 def json_expect_literal(cursor: any JsonCursor&, literal: any u8&) -> bool:
-    return json_expect_literal_with_len(cursor, literal, ctx_stage0_runtime_strlen(literal))
+    return json_expect_literal_with_len(cursor, literal, runtime_strlen(literal))
 
 
 def json_parse_string(cursor: any JsonCursor&) -> i64:
@@ -630,7 +630,7 @@ def json_parse_document_node_with_len(source: any u8&, source_len: usize, store:
 
 
 def json_parse_document_node(source: any u8&, store: JsonNode.Store[Local]) -> JsonParseNodeResult:
-    return json_parse_document_node_with_len(source, ctx_stage0_runtime_strlen(source), store)
+    return json_parse_document_node_with_len(source, runtime_strlen(source), store)
 
 
 def json_ast_scratch_capacity(source_len: usize) -> usize:
@@ -640,7 +640,7 @@ def json_ast_scratch_capacity(source_len: usize) -> usize:
 
 
 def json_parser_ast_checksum_impl(source: any u8&) -> i64:
-    source_len: usize = ctx_stage0_runtime_strlen(source)
+    source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, store)
@@ -653,7 +653,7 @@ def json_parser_ast_checksum_impl(source: any u8&) -> i64:
 
 
 def json_parser_ast_cached_checksum_impl(source: any u8&) -> i64:
-    source_len: usize = ctx_stage0_runtime_strlen(source)
+    source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, store)
@@ -666,7 +666,7 @@ def json_parser_ast_cached_checksum_impl(source: any u8&) -> i64:
 
 
 def json_parser_ast_node_count_impl(source: any u8&) -> i64:
-    source_len: usize = ctx_stage0_runtime_strlen(source)
+    source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, store)

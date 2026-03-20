@@ -173,4 +173,4 @@ def frontend_make_token(kind: FrontendTokenKind, pos: FrontendPos, text: StringV
 
 
 def frontend_sv_eq_literal(view: StringView, literal: static u8&) -> bool:
-    return ctx_stage0_string_view_eq(view, literal.cast[any u8&]()) != 0
+    return string_view_eq(view, literal.cast[any u8&]()) != 0
