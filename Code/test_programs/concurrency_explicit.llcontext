@@ -87,3 +87,9 @@ def typed_lock_scope(mu: mutable Mutex, cv: mutable CondVar, ready: bool) -> boo
 		while not ready:
 			g <- cond_wait((&cv).cast[any CondVar&](), move g)
 		return g.handle != null
+
+def typed_notify_scope(cv: mutable CondVar, broadcast: bool) can[Sync.Notify]:
+	if broadcast:
+		notify all cv
+	else:
+		notify one cv

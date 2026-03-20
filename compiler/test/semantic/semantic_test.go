@@ -439,6 +439,22 @@ def ok(group: mutable TaskGroup) -> void:
 	requireFunctionReturnTypeString(t, result, "ok", "void")
 }
 
+func TestAnalyzeAcceptsNotifySyntax(t *testing.T) {
+	src := `extern notify_one(cv: any CondVar&) -> void
+extern notify_all(cv: any CondVar&) -> void
+
+def ok(cv: mutable CondVar, broadcast: bool) -> void:
+    if broadcast:
+        notify all cv
+    else:
+        notify one cv
+`
+	result, errs := parseAndAnalyze(t, "notify_syntax_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "void")
+}
+
 func TestAnalyzeAcceptsLockSyntax(t *testing.T) {
 	src := `extern mutex_lock(mu: any Mutex&) -> MutexGuard[Held]
 extern mutex_unlock(g: MutexGuard[Held]) -> void
@@ -2305,6 +2321,86 @@ def bad(pool: any ThreadPool&, cell: any i32&) -> i64:
 	}
 	if !strings.Contains(all, "argument to \"pool_submit1\" is not structurally shareable across threads: any i32&") {
 		t.Fatalf("expected non-static-ref pool diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsThreadTransferOfBlessedRuntimeCarrierResults(t *testing.T) {
+	src := `repr(c) struct SharedGate:
+	pool: ThreadPool
+	mu: Mutex
+	cv: CondVar
+
+def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+	return zeroed
+
+def pool_submit1[A, R](pool: any ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+	return zeroed
+
+def echo(gate: SharedGate) -> SharedGate:
+	return gate
+
+def ok(pool_ref: any ThreadPool&, pool_value: ThreadPool, mu: Mutex, cv: CondVar) -> i64:
+	gate: SharedGate = SharedGate(pool_value, mu, cv)
+	_ = spawn1(echo, gate)
+	_ = pool_submit1(pool_ref, echo, gate)
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "thread_transfer_runtime_carrier_result_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
+
+func TestAnalyzeAcceptsThreadTransferOfStaticRefResult(t *testing.T) {
+	src := `extern shared_cell() -> static i32&
+
+def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+	return zeroed
+
+def pool_submit1[A, R](pool: any ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+	return zeroed
+
+def worker(value: i64) -> static i32&:
+	_ = value
+	return shared_cell()
+
+def ok(pool: any ThreadPool&) -> i64:
+	_ = spawn1(worker, 0)
+	_ = pool_submit1(pool, worker, 0)
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "thread_transfer_static_ref_result_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
+
+func TestAnalyzeRejectsThreadTransferOfNonStaticRefResult(t *testing.T) {
+	src := `extern borrowed_cell() -> any i32&
+
+def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+	return zeroed
+
+def pool_submit1[A, R](pool: any ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+	return zeroed
+
+def worker(value: i64) -> any i32&:
+	_ = value
+	return borrowed_cell()
+
+def bad(pool: any ThreadPool&) -> i64:
+	_ = spawn1(worker, 0)
+	_ = pool_submit1(pool, worker, 0)
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "thread_transfer_non_static_ref_result_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic errors, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "result of \"spawn1\" is not structurally shareable across threads: any i32&") {
+		t.Fatalf("expected non-static-ref spawn-result diagnostic, got:\n%s", all)
+	}
+	if !strings.Contains(all, "result of \"pool_submit1\" is not structurally shareable across threads: any i32&") {
+		t.Fatalf("expected non-static-ref pool-result diagnostic, got:\n%s", all)
 	}
 }
 

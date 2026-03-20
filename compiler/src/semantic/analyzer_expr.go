@@ -1181,6 +1181,26 @@ func isBlessedThreadTransferCarrierType(t Type) bool {
 	}
 }
 
+func threadTransferResultPayloadType(callName string, returnType Type) (Type, bool) {
+	instance, ok := returnType.(*GenericInstanceType)
+	if !ok || len(instance.Args) == 0 {
+		return nil, false
+	}
+	switch callName {
+	case "spawn1":
+		if instance.Name != "Thread" {
+			return nil, false
+		}
+	case "pool_submit1":
+		if instance.Name != "Task" {
+			return nil, false
+		}
+	default:
+		return nil, false
+	}
+	return instance.Args[0], true
+}
+
 func (a *Analyzer) validateThreadTransferArg(callName string, arg ast.Expr, argType Type) {
 	if !a.typeStructurallyThreadShareable(argType, map[string]bool{}) {
 		a.errorf(arg.Pos(), "argument to %q is not structurally shareable across threads: %s", callName, argType.String())
@@ -1203,6 +1223,12 @@ func (a *Analyzer) validateThreadTransferArg(callName string, arg ast.Expr, argT
 			label = dep.Type.String()
 		}
 		a.errorf(arg.Pos(), "argument to %q cannot depend on unpublished packed store %q", callName, label)
+	}
+}
+
+func (a *Analyzer) validateThreadTransferResultType(callName string, pos lexer.Pos, resultType Type) {
+	if !a.typeStructurallyThreadShareable(resultType, map[string]bool{}) {
+		a.errorf(pos, "result of %q is not structurally shareable across threads: %s", callName, resultType.String())
 	}
 }
 
@@ -1318,6 +1344,9 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	}
 	if len(bindings) != 0 || len(shapeBindings) != 0 || len(regionBindings) != 0 || len(permissionBindings) != 0 {
 		a.exprTypes[expr.Func] = appliedType
+	}
+	if resultPayload, ok := threadTransferResultPayloadType(ft.Name, appliedType.Return); ok {
+		a.validateThreadTransferResultType(ft.Name, expr.Pos(), resultPayload)
 	}
 	a.recordFunctionPermissionRefs(functionPermissionRefs(appliedType))
 	if ft.Return == nil {

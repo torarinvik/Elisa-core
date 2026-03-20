@@ -35,6 +35,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "all" {
 				return p.parseWaitAllStmt()
 			}
+		case "notify":
+			if p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && (p.tokens[p.pos+1].Text == "one" || p.tokens[p.pos+1].Text == "all") {
+				return p.parseNotifyStmt()
+			}
 		case "pool":
 			if p.looksLikePoolStmt() {
 				return p.parsePoolStmt()
@@ -166,6 +170,36 @@ func (p *Parser) parseWaitAllStmt() ast.Stmt {
 				Target: &ast.RefType{
 					Position: pos,
 					Elem:     &ast.NamedType{Position: pos, Name: "TaskGroup"},
+					State:    ast.RefStateNonNull,
+					Storage:  ast.RefStorageAny,
+					Explicit: true,
+				},
+			}},
+		},
+	}
+}
+
+func (p *Parser) parseNotifyStmt() ast.Stmt {
+	pos := p.cur().Pos
+	p.expectIdentText("notify")
+	kind := p.expect(lexer.TOKEN_IDENT)
+	target := p.parseExpr()
+	p.expectNewline()
+	callee := "notify_one"
+	if kind.Text == "all" {
+		callee = "notify_all"
+	}
+	return &ast.ExprStmt{
+		Position: pos,
+		Expr: &ast.CallExpr{
+			Position: pos,
+			Func:     &ast.Ident{Position: pos, Name: callee},
+			Args: []ast.Expr{&ast.CastExpr{
+				Position: pos,
+				Operand:  &ast.AddrOfExpr{Position: pos, Operand: target},
+				Target: &ast.RefType{
+					Position: pos,
+					Elem:     &ast.NamedType{Position: pos, Name: "CondVar"},
 					State:    ast.RefStateNonNull,
 					Storage:  ast.RefStorageAny,
 					Explicit: true,

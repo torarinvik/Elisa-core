@@ -326,6 +326,36 @@ def pool_then_fallthrough(mu: mutable Mutex) -> void:
 	}
 }
 
+func TestGenerateLLVMIRLowersNotifySyntax(t *testing.T) {
+	src := `extern notify_one(cv: any CondVar&) -> void
+extern notify_all(cv: any CondVar&) -> void
+
+def wake(cv: mutable CondVar, broadcast: bool) -> void:
+	if broadcast:
+		notify all cv
+	else:
+		notify one cv
+`
+	result := parseAndAnalyze(t, "backend_notify_syntax.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"declare void @notify_one(ptr)",
+		"declare void @notify_all(ptr)",
+		"define void @wake(%CondVar",
+		"call void @notify_one(ptr",
+		"call void @notify_all(ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersSubmitSyntaxInsidePoolScope(t *testing.T) {
 	src := `extern pool_new(workers: usize) -> ThreadPool
 extern pool_shutdown(pool: any ThreadPool&) -> void
