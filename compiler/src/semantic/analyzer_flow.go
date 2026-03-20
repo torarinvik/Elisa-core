@@ -30,6 +30,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: declType, Node: n, Mutable: n.Mutable}
 		a.defineLocal(sym, n.Pos())
 		a.recordRegionRefBinding(sym, n.Value)
+		if from, fromType, ok := a.freezeMovedPackedStoreSource(n.Value); ok {
+			a.remapPackedStoreDependencies(from, sym, PackedEnumStoreWithState(fromType, a.namedTypes["Frozen"]))
+		}
 		a.consumeAffineValueExpr(n.Value, declType, "move into local "+strconvQuote(n.Name))
 	case *ast.MoveBindStmt:
 		a.analyzeMoveBindStmt(n)
@@ -79,6 +82,13 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		a.recordAssignmentRefinement(n.Target, targetType, valueType)
 		a.recordRegionRefAssignment(n.Target, n.Value)
+		if ident, ok := n.Target.(*ast.Ident); ok && a.currentScope != nil {
+			if targetSym, ok := a.currentScope.Lookup(ident.Name); ok {
+				if from, fromType, ok := a.freezeMovedPackedStoreSource(n.Value); ok {
+					a.remapPackedStoreDependencies(from, targetSym, PackedEnumStoreWithState(fromType, a.namedTypes["Frozen"]))
+				}
+			}
+		}
 		a.clearAffineValueTarget(n.Target)
 		a.consumeAffineValueExpr(n.Value, targetType, "assignment")
 	case *ast.AugAssignStmt:
@@ -247,6 +257,35 @@ func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {
 				a.recordResolvedRegionRefBinding(sym, fieldState)
 			}
 		}
+	case *ast.MoveBindVariantPattern:
+		payloads, enumType, packedStoreState, ok := a.resolveMoveBindVariantPattern(stmt, p, valueType)
+		if !ok {
+			return
+		}
+		_ = enumType
+		for _, payload := range payloads {
+			if payload.BindName == "" || payload.BindName == "_" {
+				continue
+			}
+			sym := &Symbol{Name: payload.BindName, Kind: SymbolLocal, Type: payload.Type, Node: p, Mutable: false}
+			a.defineLocal(sym, p.Position)
+			if !hasValueState && packedStoreState == nil {
+				continue
+			}
+			if hasValueState {
+				if fieldState, ok := projectRegionFieldState(valueState, payload.Key); ok {
+					a.recordResolvedRegionRefBinding(sym, fieldState)
+					continue
+				}
+				if a.typeCanContainRegionRefs(payload.Type, map[string]bool{}) {
+					a.recordResolvedRegionRefBinding(sym, valueState)
+					continue
+				}
+			}
+			if packedStoreState != nil && a.typeCanContainRegionRefs(payload.Type, map[string]bool{}) {
+				a.recordResolvedRegionRefBinding(sym, *packedStoreState)
+			}
+		}
 	default:
 		a.errorf(stmt.Pos(), "unsupported move-as pattern %T", stmt.Pattern)
 		return
@@ -257,6 +296,12 @@ func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {
 type moveBindResolvedField struct {
 	Name string
 	Type Type
+}
+
+type moveBindResolvedVariantField struct {
+	Key      string
+	Type     Type
+	BindName string
 }
 
 func (a *Analyzer) resolvedStructFields(actual Type) ([]moveBindResolvedField, bool) {
@@ -346,6 +391,112 @@ func (a *Analyzer) resolveMoveBindStructPattern(pattern *ast.MoveBindStructPatte
 		limit = len(fields)
 	}
 	return fields[:limit], true
+}
+
+func moveBindVariantAsMatchPattern(pattern *ast.MoveBindVariantPattern) *ast.MatchVariantPattern {
+	if pattern == nil {
+		return nil
+	}
+	return &ast.MatchVariantPattern{Position: pattern.Position, EnumName: pattern.EnumName, Variant: pattern.Variant, Args: append([]ast.MatchPatternArg(nil), pattern.Args...)}
+}
+
+func moveBindVariantArgBindingName(pattern ast.MatchPattern) string {
+	switch p := pattern.(type) {
+	case *ast.MatchBindPattern:
+		return p.Name
+	case *ast.MatchWildcardPattern:
+		return "_"
+	default:
+		return ""
+	}
+}
+
+func moveBindVariantFieldKey(variant *EnumVariant, index int) string {
+	if variant == nil {
+		return ""
+	}
+	if label := variant.PayloadLabel(index); label != "" {
+		return label
+	}
+	return fmt.Sprintf("#%d", index)
+}
+
+func (a *Analyzer) resolveMoveBindVariantPattern(stmt *ast.MoveBindStmt, pattern *ast.MoveBindVariantPattern, actual Type) ([]moveBindResolvedVariantField, *EnumType, *regionRefState, bool) {
+	if pattern == nil {
+		return nil, nil, nil, false
+	}
+	enumType, ok := actual.(*EnumType)
+	if !ok {
+		a.errorf(pattern.Pos(), "move-as variant pattern %q.%q requires an enum value, got %s", pattern.EnumName, pattern.Variant, actual.String())
+		return nil, nil, nil, false
+	}
+	if enumType.Name != pattern.EnumName {
+		a.errorf(pattern.Pos(), "move-as pattern expects enum %q, got %q", pattern.EnumName, enumType.Name)
+		return nil, nil, nil, false
+	}
+	var storeState *regionRefState
+	if enumType.Packed {
+		if stmt.Store == nil {
+			a.errorf(pattern.Pos(), "packed move-as pattern %q.%q requires an in-store clause", pattern.EnumName, pattern.Variant)
+			return nil, nil, nil, false
+		}
+		a.validateMoveBindStore(pattern.Pos(), enumType, stmt.Store)
+		if state, ok := a.regionRefStateForExpr(stmt.Store); ok {
+			cloned := cloneRegionRefState(state)
+			storeState = &cloned
+		}
+	} else if stmt.Store != nil {
+		a.errorf(stmt.Store.Pos(), "ordinary enum move-as over %q does not take an in-store clause", enumType.Name)
+		return nil, nil, nil, false
+	}
+	variant, ok := enumType.Variant(pattern.Variant)
+	if !ok {
+		a.errorf(pattern.Pos(), "enum %q has no variant %q", enumType.Name, pattern.Variant)
+		return nil, nil, nil, false
+	}
+	orderedArgs := a.resolveMatchPatternArgs(moveBindVariantAsMatchPattern(pattern), variant, enumType.Name+"."+variant.Name, false)
+	fields := make([]moveBindResolvedVariantField, len(orderedArgs))
+	for i, arg := range orderedArgs {
+		if arg == nil {
+			continue
+		}
+		switch arg.Pattern.(type) {
+		case *ast.MatchBindPattern, *ast.MatchWildcardPattern:
+		default:
+			a.errorf(arg.Position, "move-as variant patterns only support bind names and _")
+			return nil, nil, nil, false
+		}
+		fields[i] = moveBindResolvedVariantField{Key: moveBindVariantFieldKey(variant, i), Type: variant.Payload[i], BindName: moveBindVariantArgBindingName(arg.Pattern)}
+	}
+	return fields, enumType, storeState, true
+}
+
+func (a *Analyzer) validateMoveBindStore(pos lexer.Pos, enumType *EnumType, storeExpr ast.Expr) {
+	if enumType == nil {
+		return
+	}
+	if !enumType.Packed {
+		if storeExpr != nil {
+			a.errorf(storeExpr.Pos(), "ordinary enum move-as over %q does not take an in-store clause", enumType.Name)
+		}
+		return
+	}
+	if storeExpr == nil {
+		if _, ok := a.lookupPackedStore(enumType); ok {
+			return
+		}
+		a.errorf(pos, "packed enum move-as over %q requires an in %s clause", enumType.Name, packedEnumStoreTypeName(enumType.Name))
+		return
+	}
+	storeType := a.analyzeExpr(storeExpr)
+	packedStore, ok := storeType.(*PackedEnumStoreType)
+	if !ok {
+		a.errorf(storeExpr.Pos(), "packed enum move-as over %q requires store type %q, got %s", enumType.Name, packedEnumStoreTypeName(enumType.Name), storeType.String())
+		return
+	}
+	if packedStore.Enum != enumType {
+		a.errorf(storeExpr.Pos(), "packed enum move-as over %q requires store type %q, got %s", enumType.Name, packedEnumStoreTypeName(enumType.Name), storeType.String())
+	}
 }
 
 func (a *Analyzer) analyzeCanStmt(stmt *ast.CanStmt) {
@@ -961,6 +1112,12 @@ func cloneRegionRefState(state regionRefState) regionRefState {
 			cloned.Deps[region] = dep
 		}
 	}
+	if len(state.StoreDeps) != 0 {
+		cloned.StoreDeps = make(map[*Symbol]packedStoreDependencyState, len(state.StoreDeps))
+		for store, dep := range state.StoreDeps {
+			cloned.StoreDeps[store] = dep
+		}
+	}
 	if len(state.Fields) != 0 {
 		cloned.Fields = make(map[string]regionRefState, len(state.Fields))
 		for name, fieldState := range state.Fields {
@@ -971,7 +1128,7 @@ func cloneRegionRefState(state regionRefState) regionRefState {
 }
 
 func hasRegionDependencies(state regionRefState) bool {
-	return len(state.Deps) != 0
+	return len(state.Deps) != 0 || len(state.StoreDeps) != 0
 }
 
 func regionRefStateFromDependency(region *Symbol, generation int) regionRefState {
@@ -984,6 +1141,17 @@ func regionRefStateFromDependency(region *Symbol, generation int) regionRefState
 				Generation: generation,
 				Valid:      true,
 			},
+		},
+	}
+}
+
+func regionRefStateFromPackedStoreDependency(store *Symbol, storeType *PackedEnumStoreType) regionRefState {
+	if store == nil || storeType == nil {
+		return regionRefState{}
+	}
+	return regionRefState{
+		StoreDeps: map[*Symbol]packedStoreDependencyState{
+			store: {Type: storeType},
 		},
 	}
 }
@@ -1017,6 +1185,14 @@ func mergeRegionRefStates(states ...regionRefState) (regionRefState, bool) {
 				if dep.Generation > existing.Generation {
 					merged.Deps[region] = dep
 				}
+			}
+		}
+		if len(state.StoreDeps) != 0 {
+			if merged.StoreDeps == nil {
+				merged.StoreDeps = map[*Symbol]packedStoreDependencyState{}
+			}
+			for store, dep := range state.StoreDeps {
+				merged.StoreDeps[store] = dep
 			}
 		}
 		if len(state.Fields) != 0 {
@@ -1069,6 +1245,15 @@ func firstLiveRegionDependency(state regionRefState) (*Symbol, regionDependencyS
 		}
 	}
 	return nil, regionDependencyState{}, false
+}
+
+func firstNonShareablePackedStoreDependency(state regionRefState) (*Symbol, packedStoreDependencyState, bool) {
+	for store, dep := range state.StoreDeps {
+		if dep.Type == nil || !IsFrozenPackedEnumStoreType(dep.Type) {
+			return store, dep, true
+		}
+	}
+	return nil, packedStoreDependencyState{}, false
 }
 
 func (a *Analyzer) cloneAffineValueStates() map[affineValueKey]affineValueState {
@@ -1151,11 +1336,47 @@ func (a *Analyzer) recordRegionRefBinding(sym *Symbol, value ast.Expr) {
 	if a.currentRegionRefs == nil || sym == nil {
 		return
 	}
+	if storeType, ok := sym.Type.(*PackedEnumStoreType); ok {
+		if state, ok := a.regionRefStateForExpr(value); ok && len(state.StoreDeps) != 0 {
+			a.recordResolvedRegionRefBinding(sym, state)
+			return
+		}
+		a.recordResolvedRegionRefBinding(sym, regionRefStateFromPackedStoreDependency(sym, storeType))
+		return
+	}
 	if state, ok := a.regionRefStateForExpr(value); ok {
 		a.recordResolvedRegionRefBinding(sym, state)
 		return
 	}
 	delete(a.currentRegionRefs, sym)
+}
+
+func (a *Analyzer) freezeMovedPackedStoreSource(expr ast.Expr) (*Symbol, *PackedEnumStoreType, bool) {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return nil, nil, false
+	}
+	arg, ok := a.freezeStoreArg(call)
+	if !ok {
+		return nil, nil, false
+	}
+	moved, ok := explicitMoveOperand(arg)
+	if !ok {
+		return nil, nil, false
+	}
+	ident, ok := moved.(*ast.Ident)
+	if !ok || a.currentScope == nil {
+		return nil, nil, false
+	}
+	sym, ok := a.currentScope.Lookup(ident.Name)
+	if !ok {
+		return nil, nil, false
+	}
+	storeType, ok := sym.Type.(*PackedEnumStoreType)
+	if !ok {
+		return nil, nil, false
+	}
+	return sym, storeType, true
 }
 
 func (a *Analyzer) recordResolvedRegionRefBinding(sym *Symbol, state regionRefState) {
@@ -1179,6 +1400,25 @@ func (a *Analyzer) recordRegionRefAssignment(target ast.Expr, value ast.Expr) {
 		return
 	}
 	a.recordRegionRefBinding(sym, value)
+}
+
+func (a *Analyzer) remapPackedStoreDependencies(from *Symbol, to *Symbol, nextType *PackedEnumStoreType) {
+	if a.currentRegionRefs == nil || from == nil || to == nil || nextType == nil {
+		return
+	}
+	for sym, state := range a.currentRegionRefs {
+		dep, ok := state.StoreDeps[from]
+		if !ok {
+			continue
+		}
+		if state.StoreDeps == nil {
+			state.StoreDeps = map[*Symbol]packedStoreDependencyState{}
+		}
+		delete(state.StoreDeps, from)
+		dep.Type = nextType
+		state.StoreDeps[to] = dep
+		a.currentRegionRefs[sym] = state
+	}
 }
 
 func (a *Analyzer) invalidateRegionRefs(region *Symbol, predicate func(regionDependencyState) bool, reason string) {
@@ -1483,9 +1723,9 @@ func isAffineHandleType(t Type) bool {
 		if !ok {
 			return false
 		}
-		return base.Name == "Thread" || base.Name == "Task"
+		return base.Affine
 	case *StructType:
-		return tt.Name == "Thread" || tt.Name == "Task"
+		return tt.Affine
 	default:
 		return false
 	}
@@ -1503,6 +1743,8 @@ func affineHandleKind(t Type) string {
 				return "thread handle"
 			case "Task":
 				return "task handle"
+			case "MutexGuard":
+				return "mutex guard"
 			}
 		}
 	case *StructType:
@@ -1511,6 +1753,8 @@ func affineHandleKind(t Type) string {
 			return "thread handle"
 		case "Task":
 			return "task handle"
+		case "MutexGuard":
+			return "mutex guard"
 		}
 	}
 	return "affine value"

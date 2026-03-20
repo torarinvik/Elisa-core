@@ -349,6 +349,22 @@ func (p *Parser) parseStaticStmt() ast.Stmt {
 func (p *Parser) parseMoveBindPattern() ast.MoveBindPattern {
 	pos := p.cur().Pos
 	name := p.expect(lexer.TOKEN_IDENT).Text
+	if p.match(lexer.TOKEN_DOT) {
+		variant := p.expect(lexer.TOKEN_IDENT).Text
+		args := make([]ast.MatchPatternArg, 0)
+		if p.match(lexer.TOKEN_LPAREN) {
+			if p.peek() != lexer.TOKEN_RPAREN {
+				for {
+					args = append(args, p.parseMoveBindVariantArg())
+					if !p.match(lexer.TOKEN_COMMA) {
+						break
+					}
+				}
+			}
+			p.expect(lexer.TOKEN_RPAREN)
+		}
+		return &ast.MoveBindVariantPattern{Position: pos, EnumName: name, Variant: variant, Args: args}
+	}
 	if !p.match(lexer.TOKEN_LPAREN) {
 		return &ast.MoveBindNamePattern{Position: pos, Name: name}
 	}
@@ -365,6 +381,28 @@ func (p *Parser) parseMoveBindPattern() ast.MoveBindPattern {
 	}
 	p.expect(lexer.TOKEN_RPAREN)
 	return &ast.MoveBindStructPattern{Position: pos, TypeName: name, Args: args}
+}
+
+func (p *Parser) parseMoveBindVariantArg() ast.MatchPatternArg {
+	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
+		pos := p.cur().Pos
+		name := p.expect(lexer.TOKEN_IDENT).Text
+		p.expect(lexer.TOKEN_COLON)
+		pattern := p.parseMoveBindVariantBindingPattern()
+		return ast.MatchPatternArg{Position: pos, Name: name, Pattern: pattern}
+	}
+	pattern := p.parseMoveBindVariantBindingPattern()
+	return ast.MatchPatternArg{Position: pattern.Pos(), Pattern: pattern}
+}
+
+func (p *Parser) parseMoveBindVariantBindingPattern() ast.MatchPattern {
+	pos := p.cur().Pos
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_" {
+		p.advance()
+		return &ast.MatchWildcardPattern{Position: pos}
+	}
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	return &ast.MatchBindPattern{Position: pos, Name: name}
 }
 
 // parseExprOrAssignStmt: handles expressions, assignments, var decls, discards
@@ -421,11 +459,23 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 
 	expr := p.parseExpr()
 
-	if _, ok := expr.(*ast.MoveExpr); ok && p.peek() == lexer.TOKEN_AS {
-		p.advance()
-		pattern := p.parseMoveBindPattern()
-		p.expectNewline()
-		return &ast.MoveBindStmt{Position: pos, Value: expr, Pattern: pattern}
+	if _, ok := expr.(*ast.MoveExpr); ok {
+		var store ast.Expr
+		if p.peek() == lexer.TOKEN_IN {
+			p.advance()
+			store = p.parseExpr()
+		}
+		if p.peek() == lexer.TOKEN_AS {
+			p.advance()
+			pattern := p.parseMoveBindPattern()
+			p.expectNewline()
+			return &ast.MoveBindStmt{Position: pos, Value: expr, Store: store, Pattern: pattern}
+		}
+		if store != nil {
+			p.errorf("move binding with in-store requires an as pattern")
+			p.expectNewline()
+			return &ast.ExprStmt{Position: pos, Expr: expr}
+		}
 	}
 
 	switch p.peek() {

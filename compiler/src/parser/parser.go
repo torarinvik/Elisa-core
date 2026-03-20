@@ -104,6 +104,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("permission") {
 		return p.parsePermissionDecl()
 	}
+	if p.peekIdentText("affine") {
+		return p.parseStructDecl()
+	}
 	if p.peek() == lexer.TOKEN_AT {
 		annotations := p.parseFuncAnnotations()
 		if p.peek() != lexer.TOKEN_DEF {
@@ -321,6 +324,7 @@ func (p *Parser) parseGlobalDecl() *ast.GlobalDecl {
 
 func (p *Parser) parseStructDecl() *ast.StructDecl {
 	pos := p.cur().Pos
+	affine := p.matchIdentText("affine")
 	reprC := false
 	if p.peek() == lexer.TOKEN_REPR {
 		p.advance()
@@ -357,7 +361,7 @@ func (p *Parser) parseStructDecl() *ast.StructDecl {
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.StructDecl{Position: pos, Name: name, TypeParams: typeParams, ReprC: reprC, Fields: fields}
+	return &ast.StructDecl{Position: pos, Name: name, TypeParams: typeParams, Affine: affine, ReprC: reprC, Fields: fields}
 }
 
 func (p *Parser) parseFieldDecl() ast.FieldDecl {

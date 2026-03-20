@@ -105,9 +105,14 @@ type regionDependencyState struct {
 	InvalidatedBy string
 }
 
+type packedStoreDependencyState struct {
+	Type *PackedEnumStoreType
+}
+
 type regionRefState struct {
-	Deps   map[*Symbol]regionDependencyState
-	Fields map[string]regionRefState
+	Deps      map[*Symbol]regionDependencyState
+	StoreDeps map[*Symbol]packedStoreDependencyState
+	Fields    map[string]regionRefState
 }
 
 type affineValueState struct {
@@ -158,7 +163,7 @@ func Analyze(file *ast.File) *Result {
 }
 
 func (a *Analyzer) registerBuiltins() {
-	for _, name := range []string{"void", "bool", "char", "int", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize", "uintptr"} {
+	for _, name := range []string{"void", "bool", "char", "int", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize", "uintptr", "Local", "Frozen", "Joinable", "Pending", "Held"} {
 		a.namedTypes[name] = &BuiltinType{Name: name}
 	}
 	a.registerBuiltinPermissions()
@@ -194,34 +199,34 @@ func (a *Analyzer) registerBuiltinPermission(name string, members []string) {
 }
 
 func (a *Analyzer) registerBuiltinRuntimeStructs() {
-	a.registerBuiltinStructType("Thread", []string{"T"}, []builtinFieldSpec{
+	a.registerBuiltinStructType("Thread", []string{"T", "S"}, true, []builtinFieldSpec{
 		{name: "handle", typ: namedTypeExpr("uintptr", false), mutable: true},
 		{name: "state", typ: refTypeExpr("void", true), mutable: true},
 	})
-	a.registerBuiltinStructType("Task", []string{"T"}, []builtinFieldSpec{
+	a.registerBuiltinStructType("Task", []string{"T", "S"}, true, []builtinFieldSpec{
 		{name: "handle", typ: namedTypeExpr("uintptr", false), mutable: true},
 		{name: "state", typ: refTypeExpr("void", true), mutable: true},
 	})
-	a.registerBuiltinStructType("ThreadPool", nil, []builtinFieldSpec{
+	a.registerBuiltinStructType("ThreadPool", nil, false, []builtinFieldSpec{
 		{name: "handle", typ: refTypeExpr("void", true), mutable: true},
 	})
-	a.registerBuiltinStructType("TaskGroup", nil, []builtinFieldSpec{
+	a.registerBuiltinStructType("TaskGroup", nil, false, []builtinFieldSpec{
 		{name: "handle", typ: refTypeExpr("void", true), mutable: true},
 		{name: "cleanup", typ: refTypeExpr("void", true), mutable: true},
 	})
-	a.registerBuiltinStructType("Mutex", nil, []builtinFieldSpec{
+	a.registerBuiltinStructType("Mutex", nil, false, []builtinFieldSpec{
 		{name: "handle", typ: refTypeExpr("void", true), mutable: true},
 	})
-	a.registerBuiltinStructType("MutexGuard", nil, []builtinFieldSpec{
+	a.registerBuiltinStructType("MutexGuard", []string{"S"}, true, []builtinFieldSpec{
 		{name: "handle", typ: refTypeExpr("void", true), mutable: true},
 	})
-	a.registerBuiltinStructType("CondVar", nil, []builtinFieldSpec{
+	a.registerBuiltinStructType("CondVar", nil, false, []builtinFieldSpec{
 		{name: "handle", typ: refTypeExpr("void", true), mutable: true},
 	})
-	a.registerBuiltinStructType("atomic", []string{"T"}, []builtinFieldSpec{
+	a.registerBuiltinStructType("atomic", []string{"T"}, false, []builtinFieldSpec{
 		{name: "value", typ: namedTypeExpr("T", false), mutable: true},
 	})
-	a.registerBuiltinStructType("Region", nil, []builtinFieldSpec{
+	a.registerBuiltinStructType("Region", nil, false, []builtinFieldSpec{
 		{name: "next", typ: heapRefTypeExpr("Region", true), mutable: true},
 		{name: "count", typ: namedTypeExpr("usize", false), mutable: true},
 		{name: "capacity", typ: namedTypeExpr("usize", false), mutable: true},
@@ -230,41 +235,41 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 		{name: "global_index", typ: namedTypeExpr("usize", false), mutable: true},
 		{name: "data", typ: namedTypeExpr("uintptr", false), isTail: true},
 	})
-	a.registerBuiltinStructType("Arena", nil, []builtinFieldSpec{
+	a.registerBuiltinStructType("Arena", nil, false, []builtinFieldSpec{
 		{name: "begin", typ: heapRefTypeExpr("Region", true), mutable: true},
 		{name: "end", typ: heapRefTypeExpr("Region", true), mutable: true},
 		{name: "end_index", typ: namedTypeExpr("usize", false), mutable: true},
 	})
-	a.registerBuiltinStructType("ArenaMark", nil, []builtinFieldSpec{
+	a.registerBuiltinStructType("ArenaMark", nil, false, []builtinFieldSpec{
 		{name: "region", typ: heapRefTypeExpr("Region", true), mutable: true},
 		{name: "count", typ: namedTypeExpr("usize", false), mutable: true},
 	})
-	a.registerBuiltinStructType("PackedStoreAllocResult", nil, []builtinFieldSpec{
+	a.registerBuiltinStructType("PackedStoreAllocResult", nil, false, []builtinFieldSpec{
 		{name: "row", typ: heapRefTypeExpr("void", true), mutable: true},
 		{name: "handle", typ: namedTypeExpr("uintptr", false), mutable: true},
 	})
-	a.registerBuiltinStructType("StringView", nil, []builtinFieldSpec{
+	a.registerBuiltinStructType("StringView", nil, false, []builtinFieldSpec{
 		{name: "data", typ: refTypeExpr("u8", false), mutable: true},
 		{name: "len", typ: namedTypeExpr("i64", false), mutable: true},
 	})
-	a.registerBuiltinStructType("DynArray", []string{"T"}, []builtinFieldSpec{
+	a.registerBuiltinStructType("DynArray", []string{"T"}, false, []builtinFieldSpec{
 		{name: "items", typ: refTypeParamExpr("T", true), mutable: true},
 		{name: "count", typ: namedTypeExpr("usize", false), mutable: true},
 		{name: "capacity", typ: namedTypeExpr("usize", false), mutable: true},
 	})
-	a.registerBuiltinStructType("DynArrayView", nil, []builtinFieldSpec{
+	a.registerBuiltinStructType("DynArrayView", nil, false, []builtinFieldSpec{
 		{name: "data", typ: refTypeExpr("void", true), mutable: true},
 		{name: "len", typ: namedTypeExpr("usize", false), mutable: true},
 		{name: "elem_size", typ: namedTypeExpr("usize", false), mutable: true},
 	})
-	a.registerBuiltinStructType("DictBucket", []string{"T"}, []builtinFieldSpec{
+	a.registerBuiltinStructType("DictBucket", []string{"T"}, false, []builtinFieldSpec{
 		{name: "state", typ: namedTypeExpr("u8", false), mutable: true},
 		{name: "hash", typ: namedTypeExpr("u64", false), mutable: true},
 		{name: "key_data", typ: refTypeExpr("u8", true), mutable: true},
 		{name: "key_len", typ: namedTypeExpr("i64", false), mutable: true},
 		{name: "value", typ: namedTypeExpr("T", false), mutable: true},
 	})
-	a.registerBuiltinStructType("DynDict", []string{"T"}, []builtinFieldSpec{
+	a.registerBuiltinStructType("DynDict", []string{"T"}, false, []builtinFieldSpec{
 		{name: "items", typ: refToTypeExpr(genericTypeExpr("DictBucket", namedTypeExpr("T", false)), true), mutable: true},
 		{name: "count", typ: namedTypeExpr("usize", false), mutable: true},
 		{name: "used", typ: namedTypeExpr("usize", false), mutable: true},
@@ -280,14 +285,15 @@ type builtinFieldSpec struct {
 	isTail  bool
 }
 
-func (a *Analyzer) registerBuiltinStructType(name string, typeParams []string, fields []builtinFieldSpec) {
+func (a *Analyzer) registerBuiltinStructType(name string, typeParams []string, affine bool, fields []builtinFieldSpec) {
 	declFields := make([]ast.FieldDecl, 0, len(fields))
 	semanticFields := make(map[string]Field, len(fields))
-	decl := &ast.StructDecl{Position: lexer.Pos{}, Name: name, TypeParams: append([]string(nil), typeParams...), ReprC: true}
+	decl := &ast.StructDecl{Position: lexer.Pos{}, Name: name, TypeParams: append([]string(nil), typeParams...), ReprC: true, Affine: affine}
 	st := &StructType{
 		Name:       name,
 		TypeParams: append([]string(nil), typeParams...),
 		Fields:     semanticFields,
+		Affine:     affine,
 		ReprC:      true,
 		Decl:       decl,
 		Builtin:    true,
@@ -453,6 +459,7 @@ func (a *Analyzer) collectNamedTypes(decls []ast.Decl) {
 				Name:       n.Name,
 				TypeParams: append([]string(nil), n.TypeParams...),
 				Fields:     map[string]Field{},
+				Affine:     n.Affine,
 				ReprC:      n.ReprC,
 				Decl:       n,
 			}
@@ -532,7 +539,11 @@ func (a *Analyzer) populateEnumVariants(decls []ast.Decl) {
 				a.errorf(commonDecl.Position, "duplicate common field %q in enum %q", commonDecl.Name, enumDecl.Name)
 				continue
 			}
-			enumType.Common[commonDecl.Name] = Field{Name: commonDecl.Name, Type: a.resolveType(commonDecl.Type), Mutable: false}
+			commonType := a.resolveType(commonDecl.Type)
+			if enumDecl.Packed && a.containsAffineHandleValues(commonType, map[string]bool{}) {
+				a.errorf(commonDecl.Position, "packed enum %q common field %q cannot contain affine payload type %s", enumDecl.Name, commonDecl.Name, commonType.String())
+			}
+			enumType.Common[commonDecl.Name] = Field{Name: commonDecl.Name, Type: commonType, Mutable: false}
 		}
 		variants := make([]*EnumVariant, 0, len(enumDecl.Variants))
 		for i := range enumDecl.Variants {
@@ -559,6 +570,9 @@ func (a *Analyzer) populateEnumVariants(decls []ast.Decl) {
 				payloadType := a.resolveType(payloadDecl.Type)
 				if !enumDecl.Packed && SameType(payloadType, enumType) {
 					a.errorf(payloadDecl.Type.Pos(), "enum %q variant %q cannot contain %q by value; use a reference type instead", enumDecl.Name, variantDecl.Name, enumDecl.Name)
+				}
+				if enumDecl.Packed && a.containsAffineHandleValues(payloadType, map[string]bool{}) {
+					a.errorf(payloadDecl.Type.Pos(), "packed enum %q variant %q cannot contain affine payload type %s", enumDecl.Name, variantDecl.Name, payloadType.String())
 				}
 				payload = append(payload, payloadType)
 				payloadNames = append(payloadNames, payloadDecl.Name)
@@ -713,6 +727,9 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 	if _, ok := t.(*RefType); ok {
 		return true
 	}
+	if _, ok := t.(*PackedEnumStoreType); ok {
+		return true
+	}
 	key := t.String()
 	if seen[key] {
 		return false
@@ -737,6 +754,9 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 		}
 		return false
 	case *EnumType:
+		if tt.Packed {
+			return true
+		}
 		for _, variant := range tt.Variants {
 			for _, payload := range variant.Payload {
 				if a.typeCanContainRegionRefs(payload, seen) {

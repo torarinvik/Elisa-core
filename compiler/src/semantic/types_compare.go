@@ -66,7 +66,7 @@ func SameType(a, b Type) bool {
 		return ok
 	case *PackedEnumStoreType:
 		tb, ok := b.(*PackedEnumStoreType)
-		return ok && ta.Name == tb.Name
+		return ok && ta.Name == tb.Name && SameType(ta.State, tb.State)
 	case *EnumType:
 		tb, ok := b.(*EnumType)
 		return ok && ta.Name == tb.Name
@@ -269,7 +269,7 @@ func matchTypePattern(pattern, actual Type) bool {
 		return ok
 	case *PackedEnumStoreType:
 		a, ok := actual.(*PackedEnumStoreType)
-		return ok && p.Name == a.Name
+		return ok && p.Name == a.Name && matchTypePattern(p.State, a.State)
 	case *EnumType:
 		a, ok := actual.(*EnumType)
 		return ok && p.Name == a.Name

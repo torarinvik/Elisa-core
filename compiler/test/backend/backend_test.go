@@ -144,6 +144,39 @@ def sum(pair: Pair) -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersPackedMoveAsVariantDestructure(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def left(node: Expr, store: Expr.Store[Local]) -> Expr:
+	move node in store as Expr.Add(lhs, rhs)
+	_ = rhs
+	return lhs
+`
+	result := parseAndAnalyze(t, "backend_move_as_packed_variant.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%Expr__Store = type { ptr, i64, ptr }",
+		"%Expr = type { i32, [2 x i64] }",
+		"define ptr @left(ptr",
+		"load i32, ptr",
+		"call void @llvm.trap()",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "extractvalue %Expr,") {
+		t.Fatalf("expected packed move-as destructure to decode through store-backed loads, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersLocalsCallsAndControlFlow(t *testing.T) {
 	src := `extern add_one(value: i32) -> i32
 
@@ -1357,7 +1390,7 @@ func TestGenerateLLVMIRLowersPackedEnumStoresAllocationsAndMatches(t *testing.T)
 
 def fold() -> int:
 	region scratch(1024u)
-	store: Expr.Store = Expr.Store(scratch)
+	store: Expr.Store[Local] = Expr.Store(scratch)
 	left: Expr = new[store] Expr.Lit(3)
 	right: Expr = new[store] Expr.Lit(4)
 	node: Expr = new[store] Expr.Add(left, right)
@@ -1402,7 +1435,7 @@ func TestGenerateLLVMIRLowersPackedInStoreBlockSugar(t *testing.T) {
 
 def fold() -> int:
 	region scratch(1024u)
-	store: Expr.Store = Expr.Store(scratch)
+	store: Expr.Store[Local] = Expr.Store(scratch)
 	in store:
 		left: Expr = new Expr.Lit(span: 1, value: 3)
 		right: Expr = new Expr.Lit(span: 2, value: 4)
@@ -1507,7 +1540,7 @@ func TestGenerateLLVMIRLowersPackedCommonFieldInitialization(t *testing.T) {
 
 def build() -> Expr:
 	region scratch(256u)
-	store: Expr.Store = Expr.Store(scratch)
+	store: Expr.Store[Local] = Expr.Store(scratch)
 	return new[store] Expr.Int(span: 9, value: 5)
 `
 	result := parseAndAnalyze(t, "backend_packed_common_field_init.llcontext", src)
@@ -1540,7 +1573,7 @@ func TestGenerateLLVMIRLowersPayloadlessPackedCommonFieldInitialization(t *testi
 
 def build() -> Token:
 	region scratch(256u)
-	store: Token.Store = Token.Store(scratch)
+	store: Token.Store[Local] = Token.Store(scratch)
 	return new[store] Token.Region(span: 4)
 `
 	result := parseAndAnalyze(t, "backend_payloadless_packed_common_init.llcontext", src)
@@ -1568,7 +1601,7 @@ func TestGenerateLLVMIRLowersPayloadlessPackedAllocationFromQualifiedConstructor
 
 def build() -> Token:
 	region scratch(256u)
-	store: Token.Store = Token.Store(scratch)
+	store: Token.Store[Local] = Token.Store(scratch)
 	return new[store] Token.Region
 `
 	result := parseAndAnalyze(t, "backend_payloadless_packed_alloc.llcontext", src)

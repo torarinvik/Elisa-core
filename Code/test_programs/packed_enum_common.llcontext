@@ -10,13 +10,13 @@ packed enum Token:
 	Region
 
 def build_expr(owner: Arena) -> Expr:
-	store: Expr.Store = Expr.Store(owner)
+	store: Expr.Store[Local] = Expr.Store(owner)
 	in store:
 		left: Expr = new Expr.Int(span: 1, value: 3)
 		right: Expr = new Expr.Int(span: 2, value: 4)
 		return new Expr.Add(span: 3, left: left, right: right)
 
-def eval(node: Expr, store: Expr.Store) -> int:
+def eval(node: Expr, store: Expr.Store[Local]) -> int:
 	in store:
 		return match node:
 			Expr.Int(value: value):
@@ -26,8 +26,8 @@ def eval(node: Expr, store: Expr.Store) -> int:
 
 def packed_demo() -> int:
 	region scratch(1024u)
-	store: Expr.Store = Expr.Store(scratch)
-	token_store: Token.Store = Token.Store(scratch)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	token_store: Token.Store[Local] = Token.Store(scratch)
 	root: Expr = build_expr(scratch)
 	in token_store:
 		marker: Token = new Token.Region(span: 10)

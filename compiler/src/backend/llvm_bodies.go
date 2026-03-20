@@ -442,6 +442,39 @@ func (s *functionState) emitMoveBindStmt(stmt *ast.MoveBindStmt) error {
 			}
 		}
 		return nil
+	case *ast.MoveBindVariantPattern:
+		enumType, ok := valueType.(*semantic.EnumType)
+		if !ok {
+			return fmt.Errorf("move-as variant pattern requires an enum value, got %s", valueType.String())
+		}
+		storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, stmt.Store)
+		if err != nil {
+			return err
+		}
+		successBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("move.as.variant.ok"))
+		failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("move.as.variant.fail"))
+		contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("move.as.variant.cont"))
+		matchPattern := &ast.MatchVariantPattern{Position: p.Position, EnumName: p.EnumName, Variant: p.Variant, Args: append([]ast.MatchPatternArg(nil), p.Args...)}
+		if _, err := s.emitMatchPatternTest(matchPattern, value, nil, enumType, storeBinding, successBB, failBB); err != nil {
+			return err
+		}
+		C.LLVMPositionBuilderAtEnd(s.builder, successBB)
+		if !s.currentBlockTerminated() {
+			C.LLVMBuildBr(s.builder, contBB)
+		}
+		C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+		trapFn, err := s.ensureTrapFunction()
+		if err != nil {
+			return err
+		}
+		trapType, err := s.g.lowerFunctionType(&semantic.FuncType{Name: "llvm.trap", Return: s.g.result.NamedTypes["void"]})
+		if err != nil {
+			return err
+		}
+		s.buildCall(trapType, trapFn, nil, "")
+		C.LLVMBuildUnreachable(s.builder)
+		C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+		return nil
 	default:
 		return fmt.Errorf("unsupported move-as pattern %T", stmt.Pattern)
 	}
@@ -1290,7 +1323,7 @@ func stmtReadsMatchedValueField(name string, stmt ast.Stmt) bool {
 	case *ast.VarDeclStmt:
 		return exprReadsMatchedValueField(name, n.Value)
 	case *ast.MoveBindStmt:
-		return exprReadsMatchedValueField(name, n.Value)
+		return exprReadsMatchedValueField(name, n.Value) || exprReadsMatchedValueField(name, n.Store)
 	case *ast.ReturnStmt:
 		return exprReadsMatchedValueField(name, n.Value)
 	case *ast.IfStmt:

@@ -162,7 +162,24 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			return invalidType
 		}
 		switch base.(type) {
-		case *StructType, *OpaqueType:
+		case *PackedEnumStoreType:
+			if len(args) != 1 {
+				a.errorf(n.Pos(), "packed enum store type %q expects 1 state argument, got %d", n.Name, len(args))
+				return invalidType
+			}
+			return PackedEnumStoreWithState(base.(*PackedEnumStoreType), args[0])
+		case *StructType:
+			structType := base.(*StructType)
+			if len(args) != len(structType.TypeParams) {
+				a.errorf(n.Pos(), "type %q expects %d type arguments, got %d", n.Name, len(structType.TypeParams), len(args))
+				return invalidType
+			}
+			return &GenericInstanceType{Name: n.Name, Base: base, Args: args}
+		case *OpaqueType:
+			if len(args) != 0 {
+				a.errorf(n.Pos(), "type %q expects 0 type arguments, got %d", n.Name, len(args))
+				return invalidType
+			}
 			return &GenericInstanceType{Name: n.Name, Base: base, Args: args}
 		default:
 			a.errorf(n.Pos(), "type %q cannot be used with generic arguments", n.Name)
@@ -487,7 +504,7 @@ func (a *Analyzer) genericTypeAsArrayType(expr *ast.GenericType) (*ast.ArrayType
 		return nil, false
 	}
 	switch base.(type) {
-	case *StructType, *OpaqueType:
+	case *StructType, *OpaqueType, *PackedEnumStoreType:
 		return nil, false
 	}
 	sizeTypeExpr, ok := expr.Args[0].(*ast.NamedType)
@@ -726,6 +743,8 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 			args = append(args, a.substituteType(arg, bindings, shapeBindings, regionBindings, permissionBindings))
 		}
 		return &GenericInstanceType{Name: n.Name, Base: n.Base, Args: args}
+	case *PackedEnumStoreType:
+		return PackedEnumStoreWithState(n, a.substituteType(n.State, bindings, shapeBindings, regionBindings, permissionBindings))
 	case *FuncType:
 		params := make([]Type, 0, len(n.Params))
 		for _, param := range n.Params {

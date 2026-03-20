@@ -297,10 +297,10 @@ def run() -> i64:
 }
 
 func TestAnalyzeRejectsReusingConsumedThreadHandle(t *testing.T) {
-	src := `extern join(thread: Thread[i64]) -> i64
-extern detach(thread: Thread[i64]) -> void
+	src := `extern join(thread: Thread[i64, Joinable]) -> i64
+extern detach(thread: Thread[i64, Joinable]) -> void
 
-def bad(thread: Thread[i64]) -> void:
+def bad(thread: Thread[i64, Joinable]) -> void:
     value: i64 = join(thread)
     _ = value
     detach(thread)
@@ -316,13 +316,13 @@ def bad(thread: Thread[i64]) -> void:
 }
 
 func TestAnalyzeAcceptsAffineThreadMovesAcrossBranches(t *testing.T) {
-	src := `extern join(thread: Thread[i64]) -> i64
+	src := `extern join(thread: Thread[i64, Joinable]) -> i64
 
-def move_then_join(thread: Thread[i64]) -> i64:
-    moved: Thread[i64] = move thread
+def move_then_join(thread: Thread[i64, Joinable]) -> i64:
+    moved: Thread[i64, Joinable] = move thread
     return join(move moved)
 
-def branch_join(cond: bool, thread: Thread[i64]) -> i64:
+def branch_join(cond: bool, thread: Thread[i64, Joinable]) -> i64:
     if cond:
         return join(move thread)
     return join(move thread)
@@ -335,10 +335,10 @@ def branch_join(cond: bool, thread: Thread[i64]) -> i64:
 }
 
 func TestAnalyzeAcceptsMoveAsStructDestructure(t *testing.T) {
-	src := `extern join(thread: Thread[i64]) -> i64
+	src := `extern join(thread: Thread[i64, Joinable]) -> i64
 
 repr(c) struct Holder:
-    thread: mutable Thread[i64]
+    thread: mutable Thread[i64, Joinable]
     count: mutable i64
 
 def run(holder: Holder) -> i64:
@@ -353,9 +353,9 @@ def run(holder: Holder) -> i64:
 }
 
 func TestAnalyzeAcceptsMoveAsRebind(t *testing.T) {
-	src := `extern join(thread: Thread[i64]) -> i64
+	src := `extern join(thread: Thread[i64, Joinable]) -> i64
 
-def run(thread: Thread[i64]) -> i64:
+def run(thread: Thread[i64, Joinable]) -> i64:
     move thread as worker
     return join(move worker)
 `
@@ -383,11 +383,26 @@ def bad(pair: Pair) -> void:
 	}
 }
 
-func TestAnalyzeRejectsAwaitAfterTaskGroupTransfer(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64]) -> void
-extern pool_await(task: Task[i64]) -> i64
+func TestAnalyzeAcceptsMoveAsEnumVariantDestructure(t *testing.T) {
+	src := `enum MaybeInt:
+	None
+	Pair(left: int, right: int)
 
-def bad(group: mutable TaskGroup, task: Task[i64]) -> i64:
+def sum(value: MaybeInt) -> int:
+	move value as MaybeInt.Pair(left, right)
+	return left + right
+`
+	result, errs := parseAndAnalyze(t, "move_as_enum_variant_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "sum", "int")
+}
+
+func TestAnalyzeRejectsAwaitAfterTaskGroupTransfer(t *testing.T) {
+	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
+extern pool_await(task: Task[i64, Pending]) -> i64
+
+def bad(group: mutable TaskGroup, task: Task[i64, Pending]) -> i64:
     task_group_add((&group).cast[any TaskGroup&](), move task)
     return pool_await(move task)
 `
@@ -401,11 +416,11 @@ def bad(group: mutable TaskGroup, task: Task[i64]) -> i64:
 }
 
 func TestAnalyzeRejectsReusingConsumedThreadField(t *testing.T) {
-	src := `extern join(thread: Thread[i64]) -> i64
-extern detach(thread: Thread[i64]) -> void
+	src := `extern join(thread: Thread[i64, Joinable]) -> i64
+extern detach(thread: Thread[i64, Joinable]) -> void
 
 repr(c) struct Holder:
-    thread: mutable Thread[i64]
+    thread: mutable Thread[i64, Joinable]
 
 def bad(holder: mutable Holder) -> void:
     value: i64 = join(move holder.thread)
@@ -423,48 +438,48 @@ def bad(holder: mutable Holder) -> void:
 
 func TestAnalyzeRejectsAddressOfAffineHandleField(t *testing.T) {
 	src := `repr(c) struct Holder:
-    thread: mutable Thread[i64]
+    thread: mutable Thread[i64, Joinable]
 
 def bad(holder: mutable Holder) -> void:
-    borrow: stack Thread[i64]& = &holder.thread
+    borrow: stack Thread[i64, Joinable]& = &holder.thread
     _ = borrow
 `
 	_, errs := parseAndAnalyze(t, "affine_handle_addr_of_reject.llcontext", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "cannot take address of affine thread handle") {
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot take address of thread handle") {
 		t.Fatalf("expected affine-address diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
 
 func TestAnalyzeRejectsAffineHandleGlobals(t *testing.T) {
 	src := `repr(c) struct Holder:
-    thread: mutable Thread[i64]
+    thread: mutable Thread[i64, Joinable]
 
-global current_thread: Thread[i64] = zeroed
+global current_thread: Thread[i64, Joinable] = zeroed
 global current_holder: Holder = zeroed
-extern foreign_task: Task[i64]
+extern foreign_task: Task[i64, Pending]
 `
 	_, errs := parseAndAnalyze(t, "affine_handle_globals_reject.llcontext", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "global \"current_thread\" cannot store affine handle values of type Thread[i64]") {
+	if !strings.Contains(all, "global \"current_thread\" cannot store affine handle values of type Thread[i64, Joinable]") {
 		t.Fatalf("expected direct affine-global diagnostic, got:\n%s", all)
 	}
 	if !strings.Contains(all, "global \"current_holder\" cannot store affine handle values of type Holder") {
 		t.Fatalf("expected structural affine-global diagnostic, got:\n%s", all)
 	}
-	if !strings.Contains(all, "extern var \"foreign_task\" cannot store affine handle values of type Task[i64]") {
+	if !strings.Contains(all, "extern var \"foreign_task\" cannot store affine handle values of type Task[i64, Pending]") {
 		t.Fatalf("expected affine extern-global diagnostic, got:\n%s", all)
 	}
 }
 
 func TestAnalyzeRejectsReferencesToAffineContainingValues(t *testing.T) {
 	src := `repr(c) struct Holder:
-    thread: mutable Thread[i64]
+    thread: mutable Thread[i64, Joinable]
 
 def bad_param(holder: any Holder&) -> void:
     pass
@@ -487,10 +502,10 @@ def bad_local(holder: Holder) -> void:
 }
 
 func TestAnalyzeRejectsCopyingAggregateAfterAffineFieldConsume(t *testing.T) {
-	src := `extern join(thread: Thread[i64]) -> i64
+	src := `extern join(thread: Thread[i64, Joinable]) -> i64
 
 repr(c) struct Holder:
-    thread: mutable Thread[i64]
+    thread: mutable Thread[i64, Joinable]
     count: mutable i64
 
 def bad(holder: Holder) -> void:
@@ -510,7 +525,7 @@ def bad(holder: Holder) -> void:
 
 func TestAnalyzeRejectsReusingMovedAffineContainingAggregate(t *testing.T) {
 	src := `repr(c) struct Holder:
-    thread: mutable Thread[i64]
+    thread: mutable Thread[i64, Joinable]
 
 def bad(holder: Holder) -> void:
     copy: Holder = move holder
@@ -527,13 +542,13 @@ def bad(holder: Holder) -> void:
 }
 
 func TestAnalyzeRejectsReusingAffineHandleAfterStructLiteralMove(t *testing.T) {
-	src := `extern join(thread: Thread[i64]) -> i64
+	src := `extern join(thread: Thread[i64, Joinable]) -> i64
 
 repr(c) struct Holder:
-    thread: mutable Thread[i64]
+    thread: mutable Thread[i64, Joinable]
     count: mutable i64
 
-def bad(thread: Thread[i64]) -> i64:
+def bad(thread: Thread[i64, Joinable]) -> i64:
     holder: Holder = Holder(move thread, 1)
     return join(move thread)
 `
@@ -548,10 +563,10 @@ def bad(thread: Thread[i64]) -> i64:
 }
 
 func TestAnalyzeRejectsReusingAffineHandleAfterArrayLiteralMove(t *testing.T) {
-	src := `extern join(thread: Thread[i64]) -> i64
+	src := `extern join(thread: Thread[i64, Joinable]) -> i64
 
-def bad(thread: Thread[i64]) -> i64:
-    items: array[Thread[i64], 1] = [move thread]
+def bad(thread: Thread[i64, Joinable]) -> i64:
+    items: array[Thread[i64, Joinable], 1] = [move thread]
     return join(move thread)
 `
 	_, errs := parseAndAnalyze(t, "affine_array_literal_move_reject.llcontext", src)
@@ -565,12 +580,12 @@ def bad(thread: Thread[i64]) -> i64:
 }
 
 func TestAnalyzeRejectsReusingAffineHandleAfterEnumConstructorMove(t *testing.T) {
-	src := `extern join(thread: Thread[i64]) -> i64
+	src := `extern join(thread: Thread[i64, Joinable]) -> i64
 
 enum Job:
-    Run(thread: Thread[i64])
+    Run(thread: Thread[i64, Joinable])
 
-def bad(thread: Thread[i64]) -> i64:
+def bad(thread: Thread[i64, Joinable]) -> i64:
     job: Job = Job.Run(thread: move thread)
     return join(move thread)
 `
@@ -585,10 +600,10 @@ def bad(thread: Thread[i64]) -> i64:
 }
 
 func TestAnalyzeRejectsUsingAffineFieldAfterParentMove(t *testing.T) {
-	src := `extern join(thread: Thread[i64]) -> i64
+	src := `extern join(thread: Thread[i64, Joinable]) -> i64
 
 repr(c) struct Holder:
-    thread: mutable Thread[i64]
+    thread: mutable Thread[i64, Joinable]
 
 def bad(holder: Holder) -> i64:
     copy: Holder = move holder
@@ -605,9 +620,9 @@ def bad(holder: Holder) -> i64:
 }
 
 func TestAnalyzeRejectsReusingIndexedAffineValue(t *testing.T) {
-	src := `extern join(thread: Thread[i64]) -> i64
+	src := `extern join(thread: Thread[i64, Joinable]) -> i64
 
-def bad(items: array[Thread[i64], 1]) -> i64:
+def bad(items: array[Thread[i64, Joinable], 1]) -> i64:
     first: i64 = join(move items[0])
     _ = first
     return join(move items[0])
@@ -1273,7 +1288,7 @@ func TestAnalyzeAcceptsBuiltinConcurrencyPermissionFamilies(t *testing.T) {
 }
 
 func TestAnalyzeAcceptsBuiltinConcurrencyCarrierTypes(t *testing.T) {
-	src := `def touch(thread: Thread[i64], task: Task[i64], pool: ThreadPool, group: TaskGroup, mu: Mutex, guard: MutexGuard, cv: CondVar, slot: atomic[i64]) -> void:
+	src := `def touch(thread: Thread[i64, Joinable], task: Task[i64, Pending], pool: ThreadPool, group: TaskGroup, mu: Mutex, guard: MutexGuard[Held], cv: CondVar, slot: atomic[i64]) -> void:
 	_ = thread.handle
 	_ = task.handle
 	_ = pool.handle
@@ -1287,6 +1302,70 @@ func TestAnalyzeAcceptsBuiltinConcurrencyCarrierTypes(t *testing.T) {
 	result, errs := parseAndAnalyze(t, "builtin_concurrency_carriers_ok.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
+}
+
+func TestAnalyzeRejectsMissingProtocolStateTypeArguments(t *testing.T) {
+	src := `def bad(thread: Thread[i64]) -> void:
+	pass
+`
+	_, errs := parseAndAnalyze(t, "concurrency_protocol_arity_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "type \"Thread\" expects 2 type arguments, got 1") {
+		t.Fatalf("expected protocol-state arity diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsProtocolStateMismatchAtCallSite(t *testing.T) {
+	src := `extern join(thread: Thread[i64, Joinable]) -> i64
+
+def bad(thread: Thread[i64, Pending]) -> i64:
+	return join(move thread)
+`
+	_, errs := parseAndAnalyze(t, "concurrency_protocol_state_mismatch_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "argument 1 to \"join\" expects Thread[i64, Joinable], got Thread[i64, Pending]") {
+		t.Fatalf("expected protocol-state mismatch diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsReferencesToUserDeclaredAffineStruct(t *testing.T) {
+	src := `affine repr(c) struct Handle:
+	raw: mutable uintptr
+
+def bad(handle: Handle) -> void:
+	borrow: any Handle& = &handle
+	_ = borrow
+`
+	_, errs := parseAndAnalyze(t, "user_affine_ref_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "cannot take address of affine value") {
+		t.Fatalf("expected user-affine address diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsGlobalUserDeclaredAffineStruct(t *testing.T) {
+	src := `affine repr(c) struct Handle:
+	raw: mutable uintptr
+
+global current: Handle = zeroed
+`
+	_, errs := parseAndAnalyze(t, "user_affine_global_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "global \"current\" cannot store affine handle values of type Handle") {
+		t.Fatalf("expected user-affine global diagnostic, got:\n%s", all)
+	}
 }
 
 func TestAnalyzeWarnsOnMissingPermissionGrant(t *testing.T) {
@@ -1714,12 +1793,12 @@ func TestAnalyzeAcceptsPackedEnumsWithExplicitStoreCore(t *testing.T) {
 	Add(left: Expr, right: Expr)
 
 def build(store_owner: Arena) -> Expr:
-	store: Expr.Store = Expr.Store(store_owner)
+	store: Expr.Store[Local] = Expr.Store(store_owner)
 	one: Expr = new[store] Expr.Int(value: 1)
 	two: Expr = new[store] Expr.Int(value: 2)
 	return new[store] Expr.Add(left: one, right: two)
 
-def eval(node: Expr, store: Expr.Store) -> int:
+def eval(node: Expr, store: Expr.Store[Local]) -> int:
 	return match node in store:
 		Expr.Int(value: value):
 			value
@@ -1738,13 +1817,13 @@ func TestAnalyzeAcceptsPackedEnumsWithinInStoreBlocks(t *testing.T) {
 	Add(left: Expr, right: Expr)
 
 def build(store_owner: Arena) -> Expr:
-	store: Expr.Store = Expr.Store(store_owner)
+	store: Expr.Store[Local] = Expr.Store(store_owner)
 	in store:
 		left: Expr = new Expr.Int(span: 1, value: 1)
 		right: Expr = new Expr.Int(span: 2, value: 2)
 		return new Expr.Add(span: 3, left: left, right: right)
 
-def eval(node: Expr, store: Expr.Store) -> int:
+def eval(node: Expr, store: Expr.Store[Local]) -> int:
 	in store:
 		return match node:
 			Expr.Int(value: value):
@@ -1753,6 +1832,52 @@ def eval(node: Expr, store: Expr.Store) -> int:
 				node.span + eval(left, store) + eval(right, store)
 `
 	_, errs := parseAndAnalyze(t, "packed_enum_in_store_block_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsFreezeOfLocalPackedStore(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+def freeze_store(owner: Arena) -> Expr.Store[Frozen]:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	return freeze(move store)
+`
+	result, errs := parseAndAnalyze(t, "packed_enum_store_freeze_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "freeze_store", "Expr.Store[Frozen]")
+}
+
+func TestAnalyzeRejectsAllocatingPackedEnumIntoFrozenStore(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+def bad(owner: Arena) -> Expr:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	return new[frozen] Expr.Int(value: 1)
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_frozen_alloc_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "packed enum allocation requires local store type \"Expr.Store[Local]\", got Expr.Store[Frozen]") {
+		t.Fatalf("expected frozen-store allocation diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsPackedMatchWithFrozenStore(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+def read(node: Expr, store: Expr.Store[Frozen]) -> int:
+	return match node in store:
+		Expr.Int(value: value):
+			value
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_match_frozen_store_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
@@ -1816,7 +1941,7 @@ func TestAnalyzeRejectsOrdinaryEnumMatchWithStoreClause(t *testing.T) {
 packed enum PackedExpr:
 	Int(value: int)
 
-def bad(node: Expr, store: PackedExpr.Store) -> int:
+def bad(node: Expr, store: PackedExpr.Store[Local]) -> int:
 	return match node in store:
 		Expr.Int(value: value):
 			value
@@ -1851,7 +1976,7 @@ func TestAnalyzeAcceptsPackedCommonFieldInitializationWithNamedArgs(t *testing.T
 	Int(value: int)
 
 def build(store_owner: Arena) -> Expr:
-	store: Expr.Store = Expr.Store(store_owner)
+	store: Expr.Store[Local] = Expr.Store(store_owner)
 	return new[store] Expr.Int(span: 7, value: 1)
 `
 	_, errs := parseAndAnalyze(t, "packed_enum_common_field_init_ok.llcontext", src)
@@ -1865,7 +1990,7 @@ func TestAnalyzeAcceptsPayloadlessPackedCommonFieldInitialization(t *testing.T) 
 	Region
 
 def build(store_owner: Arena) -> Token:
-	store: Token.Store = Token.Store(store_owner)
+	store: Token.Store[Local] = Token.Store(store_owner)
 	return new[store] Token.Region(span: 4)
 `
 	_, errs := parseAndAnalyze(t, "packed_enum_payloadless_common_field_init_ok.llcontext", src)
@@ -1878,11 +2003,114 @@ func TestAnalyzeAcceptsPayloadlessPackedConstructorInAlloc(t *testing.T) {
 	Region
 
 def build(store_owner: Arena) -> Token:
-	store: Token.Store = Token.Store(store_owner)
+	store: Token.Store[Local] = Token.Store(store_owner)
 	return new[store] Token.Region
 `
 	_, errs := parseAndAnalyze(t, "packed_enum_payloadless_alloc_ok.llcontext", src)
 	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsAffinePayloadsInPackedEnums(t *testing.T) {
+	src := `affine repr(c) struct Handle:
+	raw: mutable uintptr
+
+packed enum Expr:
+	common:
+		handle: Handle
+	Run(value: Thread[i64, Joinable])
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_affine_payload_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "packed enum \"Expr\" common field \"handle\" cannot contain affine payload type Handle") {
+		t.Fatalf("expected packed common-field affine diagnostic, got:\n%s", all)
+	}
+	if !strings.Contains(all, "packed enum \"Expr\" variant \"Run\" cannot contain affine payload type Thread[i64, Joinable]") {
+		t.Fatalf("expected packed payload affine diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsSpawnOfValueDependingOnUnpublishedPackedStore(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+	return zeroed
+
+def worker(node: Expr) -> i64:
+	return 0
+
+def bad(owner: Arena) -> Thread[i64, Joinable]:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	node: Expr = new[store] Expr.Int(value: 1)
+	return spawn1(worker, node)
+`
+	_, errs := parseAndAnalyze(t, "spawn1_unpublished_store_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "argument to \"spawn1\" cannot depend on unpublished packed store \"Expr.Store[Local]\"") {
+		t.Fatalf("expected unpublished-store spawn diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsSpawnAndPoolTransferOfValueDependingOnlyOnFrozenStore(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+	return zeroed
+
+def pool_submit1[A, R](pool: any ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+	return zeroed
+
+def worker(node: Expr) -> i64:
+	return 0
+
+def ok(owner: Arena, pool: any ThreadPool&) -> i64:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	node: Expr = new[store] Expr.Int(value: 1)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	thread: Thread[i64, Joinable] = spawn1(worker, node)
+	task: Task[i64, Pending] = pool_submit1(pool, worker, node)
+	_ = frozen
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "thread_transfer_frozen_store_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
+
+func TestAnalyzeRejectsPoolTransferOfValueDependingOnLocalRegion(t *testing.T) {
+	src := `packed enum Expr:
+	Hold(value: any i32&)
+
+def pool_submit1[A, R](pool: any ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+	return zeroed
+
+def worker(node: Expr) -> i64:
+	return 0
+
+def bad(owner: Arena, pool: any ThreadPool&) -> Task[i64, Pending]:
+	region scratch
+	store: Expr.Store[Local] = Expr.Store(owner)
+	cell: any i32& = new[scratch] 1
+	node: Expr = new[store] Expr.Hold(value: cell)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	_ = frozen
+	return pool_submit1(pool, worker, node)
+`
+	_, errs := parseAndAnalyze(t, "pool_submit_local_region_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "argument to \"pool_submit1\" cannot depend on local region \"scratch\"") {
+		t.Fatalf("expected local-region pool diagnostic, got:\n%s", all)
+	}
 }
 
 func TestAnalyzeAcceptsDictSurfaceTypesAndRuntimeBridge(t *testing.T) {
@@ -2024,6 +2252,119 @@ def ok() -> i32:
 	return count
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_move_struct_scalar_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsMoveAsPackedVariantDestructure(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def left(node: Expr, store: Expr.Store[Frozen]) -> Expr:
+	move node in store as Expr.Add(lhs, rhs)
+	_ = rhs
+	return lhs
+`
+	result, errs := parseAndAnalyze(t, "move_as_packed_variant_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "left", "Expr")
+}
+
+func TestAnalyzeRejectsPackedMoveAsWithWrongStore(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+packed enum Token:
+	Ident
+
+def bad(node: Expr, store: Token.Store[Local]) -> int:
+	move node in store as Expr.Int(value)
+	return value
+`
+	_, errs := parseAndAnalyze(t, "move_as_packed_wrong_store_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "packed enum move-as over \"Expr\" requires store type \"Expr.Store\", got Token.Store[Local]") {
+		t.Fatalf("expected packed move-as wrong-store diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsUsingMoveAsEnumBoundReferenceInvalidatedByRestore(t *testing.T) {
+	src := `enum Holder:
+	Keep(value: any i32&, count: i32)
+
+def bad() -> i32:
+	region scratch
+	mark scratch as cp
+	value: Holder = Holder.Keep(new[scratch] 1i32, 7i32)
+	move value as Holder.Keep(alias, count)
+	restore scratch from cp
+	return alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_enum_alias.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+		t.Fatalf("expected restore invalidation diagnostic for enum move-as alias, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeAcceptsMoveAsEnumScalarAfterRestore(t *testing.T) {
+	src := `enum Holder:
+	Keep(value: any i32&, count: i32)
+
+def ok() -> i32:
+	region scratch
+	mark scratch as cp
+	value: Holder = Holder.Keep(new[scratch] 1i32, 7i32)
+	move value as Holder.Keep(alias, count)
+	restore scratch from cp
+	return count
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_move_enum_scalar_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsUsingMoveAsPackedVariantBoundReferenceInvalidatedByRestore(t *testing.T) {
+	src := `packed enum Expr:
+	Hold(value: any i32&, count: i32)
+
+def bad(owner: Arena) -> i32:
+	region scratch
+	mark scratch as cp
+	store: Expr.Store[Local] = Expr.Store(owner)
+	node: Expr = new[store] Expr.Hold(value: new[scratch] 1i32, count: 7i32)
+	move node in store as Expr.Hold(alias, count)
+	restore scratch from cp
+	return alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_packed_alias.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+		t.Fatalf("expected restore invalidation diagnostic for packed move-as alias, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeAcceptsMoveAsPackedVariantScalarAfterRestore(t *testing.T) {
+	src := `packed enum Expr:
+	Hold(value: any i32&, count: i32)
+
+def ok(owner: Arena) -> i32:
+	region scratch
+	mark scratch as cp
+	store: Expr.Store[Local] = Expr.Store(owner)
+	node: Expr = new[store] Expr.Hold(value: new[scratch] 1i32, count: 7i32)
+	move node in store as Expr.Hold(alias, count)
+	restore scratch from cp
+	return count
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_move_packed_scalar_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 

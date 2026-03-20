@@ -18,6 +18,17 @@ import (
 	"llcontext/src/semantic"
 )
 
+func callIdentName(expr *ast.CallExpr) string {
+	if expr == nil {
+		return ""
+	}
+	ident, ok := expr.Func.(*ast.Ident)
+	if !ok {
+		return ""
+	}
+	return ident.Name
+}
+
 func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
 	if expr == nil {
 		return nil, nil, fmt.Errorf("cannot emit nil expression")
@@ -1270,6 +1281,13 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if storeType, ok := s.packedStoreConstructorCall(expr); ok {
 		return s.emitPackedStoreConstructorValue(expr, storeType)
 	}
+	if callIdentName(expr) == "freeze" {
+		if len(expr.Args) != 1 {
+			return nil, nil, fmt.Errorf("freeze expects 1 argument, got %d", len(expr.Args))
+		}
+		frozenType := s.exprType(expr)
+		return s.emitExpr(expr.Args[0], frozenType)
+	}
 	if enumType, variant, ok := s.enumConstructorInfo(expr); ok {
 		if variant == nil {
 			return nil, nil, fmt.Errorf("unknown enum constructor")
@@ -1688,7 +1706,7 @@ func (s *functionState) packedStoreConstructorInfoFromField(expr *ast.FieldExpr)
 	if !ok || !enumType.Packed || expr.Field != "Store" || enumType.StoreType == nil {
 		return nil, false
 	}
-	return enumType.StoreType, true
+	return semantic.PackedEnumStoreWithState(enumType.StoreType, s.g.result.NamedTypes["Local"]), true
 }
 
 func (s *functionState) packedStoreConstructorCall(expr *ast.CallExpr) (*semantic.PackedEnumStoreType, bool) {

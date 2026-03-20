@@ -498,6 +498,10 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		fmt.Fprintf(w, "%sglobal %s%s: %s\n", prefix, mut, n.Name, typeStr(n.Type))
 	case *ast.StructDecl:
 		repr := ""
+		affine := ""
+		if n.Affine {
+			affine = "affine "
+		}
 		if n.ReprC {
 			repr = "repr(c) "
 		}
@@ -505,7 +509,7 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		if len(n.TypeParams) > 0 {
 			tparams = "[" + strings.Join(n.TypeParams, ", ") + "]"
 		}
-		fmt.Fprintf(w, "%s%sstruct %s%s (%d fields)\n", prefix, repr, n.Name, tparams, len(n.Fields))
+		fmt.Fprintf(w, "%s%s%sstruct %s%s (%d fields)\n", prefix, affine, repr, n.Name, tparams, len(n.Fields))
 	case *ast.FuncDecl:
 		for _, annotation := range n.Annotations {
 			fmt.Fprintf(w, "%s@%s\n", prefix, annotation.Name)

@@ -143,8 +143,9 @@ type EnumVariant struct {
 }
 
 type PackedEnumStoreType struct {
-	Name string
-	Enum *EnumType
+	Name  string
+	Enum  *EnumType
+	State Type
 }
 
 type EnumType struct {
@@ -168,6 +169,7 @@ type StructType struct {
 	Name       string
 	TypeParams []string
 	Fields     map[string]Field
+	Affine     bool
 	ReprC      bool
 	Decl       *ast.StructDecl
 	Builtin    bool
@@ -448,6 +450,9 @@ func (t *PackedEnumStoreType) String() string {
 	if t == nil {
 		return "<invalid-packed-store>"
 	}
+	if t.State != nil {
+		return fmt.Sprintf("%s[%s]", t.Name, t.State.String())
+	}
 	return t.Name
 }
 func (t *EnumType) String() string   { return t.Name }
@@ -493,6 +498,60 @@ func permissionFamiliesString(families []string) string {
 		return ""
 	}
 	return " can[" + strings.Join(families, ", ") + "]"
+}
+
+func BasePackedEnumStoreType(t Type) (*PackedEnumStoreType, bool) {
+	storeType, ok := t.(*PackedEnumStoreType)
+	if !ok || storeType == nil {
+		return nil, false
+	}
+	if storeType.Enum != nil && storeType.Enum.StoreType != nil {
+		return storeType.Enum.StoreType, true
+	}
+	base := *storeType
+	base.State = nil
+	return &base, true
+}
+
+func PackedEnumStoreWithState(storeType *PackedEnumStoreType, state Type) *PackedEnumStoreType {
+	if base, ok := BasePackedEnumStoreType(storeType); ok && base != nil {
+		next := *base
+		next.State = state
+		return &next
+	}
+	if storeType == nil {
+		return nil
+	}
+	next := *storeType
+	next.State = state
+	return &next
+}
+
+func PackedEnumStoreState(t Type) Type {
+	storeType, ok := t.(*PackedEnumStoreType)
+	if !ok || storeType == nil {
+		return nil
+	}
+	return storeType.State
+}
+
+func PackedEnumStoreStateName(t Type) string {
+	state := PackedEnumStoreState(t)
+	if state == nil {
+		return ""
+	}
+	if builtin, ok := state.(*BuiltinType); ok {
+		return builtin.Name
+	}
+	return state.String()
+}
+
+func IsLocalPackedEnumStoreType(t Type) bool {
+	return PackedEnumStoreStateName(t) == "Local"
+}
+
+func IsFrozenPackedEnumStoreType(t Type) bool {
+	return PackedEnumStoreStateName(t) == "Frozen"
 }
 
 func PermissionRefString(ref ast.PermissionRef) string {

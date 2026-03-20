@@ -57,7 +57,7 @@ def differs(left: Expr, right: Expr) -> bool:
 
 def fold() -> int:
 	region scratch(256u)
-	store: Expr.Store = Expr.Store(scratch)
+	store: Expr.Store[Local] = Expr.Store(scratch)
 	in store:
 		node: Expr = new Expr.Lit(span: 7, value: 5)
 		return match node:
@@ -118,7 +118,7 @@ func TestGenerateLLVMIRUsesTagReadHelperForMixedPackedMatchWithoutMatchedValueBo
 
 def fold() -> int:
 	region scratch(256u)
-	store: Expr.Store = Expr.Store(scratch)
+	store: Expr.Store[Local] = Expr.Store(scratch)
 	in store:
 		node: Expr = new Expr.Lit(value: 5)
 		return match node:
@@ -152,7 +152,7 @@ func TestGenerateLLVMIRUsesWordReadHelperForMultiFieldPackedPayloadMatch(t *test
 
 def sum_pair() -> int:
 	region scratch(256u)
-	store: Pair.Store = Pair.Store(scratch)
+	store: Pair.Store[Local] = Pair.Store(scratch)
 	in store:
 		node: Pair = new Pair.Both(left: 2, right: 3)
 		return match node:
@@ -188,7 +188,7 @@ func TestGenerateLLVMIRUsesWordReadHelperForRepeatedCommonFieldReads(t *testing.
 
 def fold_common() -> int:
 	region scratch(256u)
-	store: Expr.Store = Expr.Store(scratch)
+	store: Expr.Store[Local] = Expr.Store(scratch)
 	in store:
 		node: Expr = new Expr.Lit(span: 7, value: 5)
 		return node.span + node.span
@@ -229,7 +229,7 @@ func TestGenerateLLVMIRUsesTagReadHelperForPayloadlessPackedMatch(t *testing.T) 
 
 def choose() -> int:
 	region scratch(256u)
-	store: Flag.Store = Flag.Store(scratch)
+	store: Flag.Store[Local] = Flag.Store(scratch)
 	in store:
 		node: Flag = new Flag.Yes
 		return match node:
@@ -261,7 +261,7 @@ func TestGenerateOptimizedLLVMIRKeepsPackedAllocResultOutOfLineForWordHandle(t *
 
 def fold() -> int:
 	region scratch(256u)
-	store: Expr.Store = Expr.Store(scratch)
+	store: Expr.Store[Local] = Expr.Store(scratch)
 	in store:
 		node: Expr = new Expr.Lit(span: 7, value: 5)
 		return match node:

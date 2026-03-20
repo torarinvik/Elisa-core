@@ -238,7 +238,12 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		if a.containsAffineHandleValues(inner, map[string]bool{}) {
 			if _, ok := a.lookupAffineValueKey(n.Operand); ok {
 				if isAffineHandleType(inner) {
-					a.errorf(n.Pos(), "cannot take address of affine %s", affineHandleKind(inner))
+					kind := affineHandleKind(inner)
+					if kind == "affine value" {
+						a.errorf(n.Pos(), "cannot take address of affine value")
+					} else {
+						a.errorf(n.Pos(), "cannot take address of %s", kind)
+					}
 				} else {
 					a.errorf(n.Pos(), "cannot take address of value containing affine handles")
 				}
@@ -410,6 +415,57 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		}
 		return state, true
 	case *ast.AllocExpr:
+		if n.Owner != nil {
+			if ownerType := a.exprTypes[n.Owner]; ownerType != nil {
+				if _, ok := ownerType.(*PackedEnumStoreType); ok {
+					ownerState, ownerOK := a.regionRefStateForExpr(n.Owner)
+					if !ownerOK {
+						return regionRefState{}, false
+					}
+					callExpr, ok := n.Value.(*ast.CallExpr)
+					if !ok {
+						return ownerState, true
+					}
+					enumType, variant, ok := a.enumConstructorCall(callExpr)
+					if !ok || enumType == nil || variant == nil {
+						return ownerState, true
+					}
+					orderedArgs, _, ok := a.resolvePackedEnumConstructorArgs(callExpr, enumType, variant)
+					if !ok {
+						return ownerState, true
+					}
+					fieldStates := map[string]regionRefState{}
+					states := []regionRefState{ownerState}
+					for i := 0; i < len(orderedArgs) && i < len(variant.Payload); i++ {
+						fieldState, ok := a.regionRefStateForExpr(orderedArgs[i])
+						if !ok || !hasRegionDependencies(fieldState) {
+							continue
+						}
+						key := moveBindVariantFieldKey(variant, i)
+						fieldStates[key] = fieldState
+						states = append(states, fieldState)
+					}
+					merged, ok := mergeRegionRefStates(states...)
+					if !ok {
+						return regionRefState{}, false
+					}
+					if len(fieldStates) != 0 {
+						if merged.Fields == nil {
+							merged.Fields = map[string]regionRefState{}
+						}
+						for key, fieldState := range fieldStates {
+							merged.Fields[key] = fieldState
+						}
+					}
+					return merged, true
+				}
+			}
+			if ownerType := a.analyzeExpr(n.Owner); ownerType != nil {
+				if _, ok := ownerType.(*PackedEnumStoreType); ok {
+					return a.regionRefStateForExpr(n.Owner)
+				}
+			}
+		}
 		ident, ok := n.Owner.(*ast.Ident)
 		if !ok {
 			return regionRefState{}, false
@@ -483,6 +539,45 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 			return cloneRegionRefState(left), true
 		}
 		return cloneRegionRefState(right), true
+	case *ast.CallExpr:
+		if freezeStoreArg, ok := a.freezeStoreArg(n); ok {
+			return a.regionRefStateForExpr(freezeStoreArg)
+		}
+		if _, ok := a.packedStoreConstructorCall(n); ok {
+			return regionRefState{}, false
+		}
+		if enumType, variant, ok := a.enumConstructorCall(n); ok && enumType != nil && variant != nil {
+			orderedArgs, ok := a.resolveEnumConstructorArgs(n, enumType, variant)
+			if !ok {
+				return regionRefState{}, false
+			}
+			states := make([]regionRefState, 0, len(orderedArgs))
+			fieldStates := map[string]regionRefState{}
+			for _, arg := range orderedArgs {
+				if state, ok := a.regionRefStateForExpr(arg); ok && hasRegionDependencies(state) {
+					states = append(states, state)
+				}
+			}
+			for i := 0; i < len(orderedArgs) && i < len(variant.Payload); i++ {
+				if state, ok := a.regionRefStateForExpr(orderedArgs[i]); ok && hasRegionDependencies(state) {
+					fieldStates[moveBindVariantFieldKey(variant, i)] = state
+				}
+			}
+			merged, ok := mergeRegionRefStates(states...)
+			if !ok {
+				return regionRefState{}, false
+			}
+			if len(fieldStates) != 0 {
+				if merged.Fields == nil {
+					merged.Fields = map[string]regionRefState{}
+				}
+				for key, state := range fieldStates {
+					merged.Fields[key] = state
+				}
+			}
+			return merged, true
+		}
+		return regionRefState{}, false
 	default:
 		return regionRefState{}, false
 	}
@@ -499,7 +594,7 @@ func (a *Analyzer) analyzeScopedPackedAllocExpr(expr *ast.AllocExpr) Type {
 	if !ok {
 		a.errorf(expr.Pos(), "packed enum constructor %q requires an active in %s: scope or explicit new[%s]", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name), packedEnumStoreTypeName(enumType.Name))
 		if enumType.StoreType != nil {
-			return a.analyzePackedAllocExpr(expr, enumType.StoreType)
+			return a.analyzePackedAllocExpr(expr, PackedEnumStoreWithState(enumType.StoreType, a.namedTypes["Local"]))
 		}
 		return enumType
 	}
@@ -507,6 +602,13 @@ func (a *Analyzer) analyzeScopedPackedAllocExpr(expr *ast.AllocExpr) Type {
 }
 
 func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *PackedEnumStoreType) Type {
+	if storeType == nil {
+		a.errorf(expr.Pos(), "missing packed enum store type")
+		return invalidType
+	}
+	if !IsLocalPackedEnumStoreType(storeType) {
+		a.errorf(allocOwnerPos(expr), "packed enum allocation requires local store type %q, got %s", PackedEnumStoreWithState(storeType, a.namedTypes["Local"]).String(), storeType.String())
+	}
 	if fieldExpr, ok := expr.Value.(*ast.FieldExpr); ok {
 		ident, ok := fieldExpr.Object.(*ast.Ident)
 		if ok {
@@ -722,7 +824,8 @@ func (a *Analyzer) packedStoreExprType(expr *ast.FieldExpr) (*PackedEnumStoreTyp
 	if !ok {
 		return enumType.StoreType, invalidType, true
 	}
-	return enumType.StoreType, &FuncType{Name: enumType.StoreType.Name, Params: []Type{arenaType}, Return: enumType.StoreType}, true
+	localStore := PackedEnumStoreWithState(enumType.StoreType, a.namedTypes["Local"])
+	return enumType.StoreType, &FuncType{Name: enumType.StoreType.Name, Params: []Type{arenaType}, Return: localStore}, true
 }
 
 func (a *Analyzer) packedStoreConstructorCall(expr *ast.CallExpr) (*PackedEnumStoreType, bool) {
@@ -739,7 +842,7 @@ func (a *Analyzer) packedStoreConstructorCall(expr *ast.CallExpr) (*PackedEnumSt
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)
 		}
-		return storeType, true
+		return PackedEnumStoreWithState(storeType, a.namedTypes["Local"]), true
 	}
 	if arenaType, ok := a.namedTypes["Arena"]; ok {
 		actual := a.analyzeValueExpr(expr.Args[0], arenaType)
@@ -749,7 +852,7 @@ func (a *Analyzer) packedStoreConstructorCall(expr *ast.CallExpr) (*PackedEnumSt
 	} else {
 		a.analyzeExpr(expr.Args[0])
 	}
-	return storeType, true
+	return PackedEnumStoreWithState(storeType, a.namedTypes["Local"]), true
 }
 
 func (a *Analyzer) enumConstructorCall(expr *ast.CallExpr) (*EnumType, *EnumVariant, bool) {
@@ -876,9 +979,156 @@ func (a *Analyzer) analyzeMoveExpr(expr *ast.MoveExpr) Type {
 	return a.analyzeExpr(expr.Operand)
 }
 
+func callIdentName(expr *ast.CallExpr) string {
+	if expr == nil {
+		return ""
+	}
+	ident, ok := expr.Func.(*ast.Ident)
+	if !ok {
+		return ""
+	}
+	return ident.Name
+}
+
+func (a *Analyzer) freezeStoreArg(expr *ast.CallExpr) (ast.Expr, bool) {
+	if callIdentName(expr) != "freeze" || len(expr.Args) != 1 {
+		return nil, false
+	}
+	return expr.Args[0], true
+}
+
+func (a *Analyzer) analyzeFreezeCallExpr(expr *ast.CallExpr) Type {
+	if len(expr.Args) != 1 {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "freeze expects 1 argument, got %d", len(expr.Args))
+		return invalidType
+	}
+	storeType := a.analyzeExpr(expr.Args[0])
+	packedStore, ok := storeType.(*PackedEnumStoreType)
+	if !ok {
+		a.errorf(expr.Args[0].Pos(), "freeze expects a packed enum store, got %s", storeType.String())
+		return invalidType
+	}
+	if !IsLocalPackedEnumStoreType(packedStore) {
+		a.errorf(expr.Args[0].Pos(), "freeze expects local store type %q, got %s", PackedEnumStoreWithState(packedStore, a.namedTypes["Local"]).String(), packedStore.String())
+		return invalidType
+	}
+	if _, ok := explicitMoveOperand(expr.Args[0]); !ok {
+		a.errorf(expr.Args[0].Pos(), "local packed enum store %q must be moved explicitly before freeze", affineValueDisplayName(expr.Args[0]))
+		return invalidType
+	}
+	return PackedEnumStoreWithState(packedStore, a.namedTypes["Frozen"])
+}
+
+func (a *Analyzer) typeStructurallyThreadShareable(t Type, seen map[string]bool) bool {
+	if t == nil {
+		return true
+	}
+	if a.containsAffineHandleValues(t, map[string]bool{}) {
+		return false
+	}
+	key := t.String()
+	if seen[key] {
+		return true
+	}
+	seen[key] = true
+	switch tt := t.(type) {
+	case *RefType:
+		return tt.Storage == RefStorageStatic
+	case *ArrayType:
+		return a.typeStructurallyThreadShareable(tt.Elem, seen)
+	case *DArrayType:
+		return a.typeStructurallyThreadShareable(tt.Elem, seen)
+	case *ViewType:
+		return a.typeStructurallyThreadShareable(tt.Elem, seen)
+	case *DArrayViewType:
+		return a.typeStructurallyThreadShareable(tt.Elem, seen)
+	case *DictType:
+		return a.typeStructurallyThreadShareable(tt.Key, seen) && a.typeStructurallyThreadShareable(tt.Value, seen)
+	case *EnumType:
+		if tt.Packed {
+			return true
+		}
+		for _, variant := range tt.Variants {
+			for _, payload := range variant.Payload {
+				if !a.typeStructurallyThreadShareable(payload, seen) {
+					return false
+				}
+			}
+		}
+		return true
+	case *StructType:
+		for _, field := range tt.Fields {
+			if !a.typeStructurallyThreadShareable(field.Type, seen) {
+				return false
+			}
+		}
+		return true
+	case *GenericInstanceType:
+		if base, ok := tt.Base.(*StructType); ok {
+			bindings := map[string]Type{}
+			for i, name := range base.TypeParams {
+				if i < len(tt.Args) {
+					bindings[name] = tt.Args[i]
+				}
+			}
+			for _, field := range base.Fields {
+				fieldType := field.Type
+				if len(bindings) != 0 {
+					fieldType = a.substituteType(fieldType, bindings, nil, nil, nil)
+				}
+				if !a.typeStructurallyThreadShareable(fieldType, seen) {
+					return false
+				}
+			}
+			return true
+		}
+		for _, arg := range tt.Args {
+			if !a.typeStructurallyThreadShareable(arg, seen) {
+				return false
+			}
+		}
+		return a.typeStructurallyThreadShareable(tt.Base, seen)
+	case *PackedEnumStoreType:
+		return IsFrozenPackedEnumStoreType(tt)
+	default:
+		return true
+	}
+}
+
+func (a *Analyzer) validateThreadTransferArg(callName string, arg ast.Expr, argType Type) {
+	if !a.typeStructurallyThreadShareable(argType, map[string]bool{}) {
+		a.errorf(arg.Pos(), "argument to %q is not structurally shareable across threads: %s", callName, argType.String())
+		return
+	}
+	state, ok := a.regionRefStateForExpr(arg)
+	if !ok {
+		return
+	}
+	if region, _, ok := firstLiveRegionDependency(state); ok && region != nil {
+		a.errorf(arg.Pos(), "argument to %q cannot depend on local region %q", callName, region.Name)
+		return
+	}
+	if store, dep, ok := firstNonShareablePackedStoreDependency(state); ok {
+		label := "<packed store>"
+		if store != nil {
+			label = store.Name
+		}
+		if dep.Type != nil {
+			label = dep.Type.String()
+		}
+		a.errorf(arg.Pos(), "argument to %q cannot depend on unpublished packed store %q", callName, label)
+	}
+}
+
 func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	if storeType, ok := a.packedStoreConstructorCall(expr); ok {
 		return storeType
+	}
+	if callIdentName(expr) == "freeze" {
+		return a.analyzeFreezeCallExpr(expr)
 	}
 	if enumType, variant, ok := a.enumConstructorCall(expr); ok {
 		if variant == nil {
@@ -964,6 +1214,9 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 			a.consumeAffineValueExpr(expr.Args[i], expectedType, "argument to call "+strconv.Quote(ft.Name))
 		} else {
 			argType = a.analyzeExpr(expr.Args[i])
+		}
+		if (ft.Name == "spawn1" && i == 1) || (ft.Name == "pool_submit1" && i == 2) {
+			a.validateThreadTransferArg(ft.Name, expr.Args[i], argType)
 		}
 	}
 	for _, name := range ft.RegionParams {

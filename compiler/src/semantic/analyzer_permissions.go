@@ -431,6 +431,9 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		}
 	case *ast.MoveBindStmt:
 		c.collectExpr(n.Value)
+		if n.Store != nil {
+			c.collectExpr(n.Store)
+		}
 	case *ast.AssignStmt:
 		c.collectExpr(n.Target)
 		c.collectExpr(n.Value)
@@ -589,6 +592,9 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		}
 	case *ast.MoveBindStmt:
 		a.validatePermissionExpr(n.Value, granted)
+		if n.Store != nil {
+			a.validatePermissionExpr(n.Store, granted)
+		}
 	case *ast.AssignStmt:
 		a.validatePermissionExpr(n.Target, granted)
 		a.validatePermissionExpr(n.Value, granted)

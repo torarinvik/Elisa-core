@@ -13,7 +13,7 @@ def atomic_roundtrip() -> i64 can[Atomics.Load, Atomics.Store, Atomics.Exchange,
 	current: i64 = load(slot_ref, MemoryOrder.SeqCst)
 	return previous + current
 
-def concurrency_handles(thread: Thread[i64], task: Task[i64], pool: ThreadPool, group: TaskGroup, mu: Mutex, guard: MutexGuard, cv: CondVar) -> bool:
+def concurrency_handles(thread: Thread[i64, Joinable], task: Task[i64, Pending], pool: ThreadPool, group: TaskGroup, mu: Mutex, guard: MutexGuard[Held], cv: CondVar) -> bool:
 	return (
 		thread.handle == 0 and
 		thread.state == null and
@@ -34,25 +34,25 @@ def permissioned_thread_worker(value: i64) -> i64 can[Console.Write]:
 	puts("worker".cast[any u8&]()) can Console.Write
 	return value + 2
 
-def typed_thread_spawn(value: i64) -> Thread[i64] can[Thread.Spawn, Memory.Allocate, Abort.Panic]:
+def typed_thread_spawn(value: i64) -> Thread[i64, Joinable] can[Thread.Spawn, Memory.Allocate, Abort.Panic]:
 	return spawn1(thread_worker, value)
 
-def typed_thread_spawn_permissioned(value: i64) -> Thread[i64] can[Thread.Spawn, Memory.Allocate, Abort.Panic]:
+def typed_thread_spawn_permissioned(value: i64) -> Thread[i64, Joinable] can[Thread.Spawn, Memory.Allocate, Abort.Panic]:
 	return spawn1(permissioned_thread_worker, value)
 
-def typed_thread_join(thread: Thread[i64]) -> i64 can[Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+def typed_thread_join(thread: Thread[i64, Joinable]) -> i64 can[Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
 	return join(move thread)
 
 def typed_thread_detach_permissioned(value: i64) can[Thread.Spawn, Thread.Detach, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
-	thread: Thread[i64] = spawn1(permissioned_thread_worker, value)
+	thread: Thread[i64, Joinable] = spawn1(permissioned_thread_worker, value)
 	detach(move thread)
 
 def typed_pool_roundtrip(pool: any ThreadPool&, value: i64) -> i64 can[Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
-	task: Task[i64] = pool_submit1(pool, thread_worker, value)
+	task: Task[i64, Pending] = pool_submit1(pool, thread_worker, value)
 	return pool_await(move task)
 
 def typed_group_waitall(pool: any ThreadPool&, value: i64) can[Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
 	group: TaskGroup = task_group_new()
-	task: Task[i64] = pool_submit1(pool, thread_worker, value)
+	task: Task[i64, Pending] = pool_submit1(pool, thread_worker, value)
 	task_group_add((&group).cast[any TaskGroup&](), move task)
 	task_group_wait_all((&group).cast[any TaskGroup&]())

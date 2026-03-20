@@ -799,6 +799,20 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			}
 			args = append(args, resolved)
 		}
+		if storeType, ok := base.(*semantic.PackedEnumStoreType); ok {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("packed enum store type %q expects 1 state argument, got %d", n.Name, len(args))
+			}
+			return semantic.PackedEnumStoreWithState(storeType, args[0]), nil
+		}
+		if structType, ok := base.(*semantic.StructType); ok {
+			if len(args) != len(structType.TypeParams) {
+				return nil, fmt.Errorf("type %q expects %d type arguments, got %d", n.Name, len(structType.TypeParams), len(args))
+			}
+		}
+		if _, ok := base.(*semantic.OpaqueType); ok && len(args) != 0 {
+			return nil, fmt.Errorf("type %q expects 0 type arguments, got %d", n.Name, len(args))
+		}
 		return &semantic.GenericInstanceType{Name: n.Name, Base: base, Args: args}, nil
 	default:
 		return nil, fmt.Errorf("unsupported type expression %T", expr)
