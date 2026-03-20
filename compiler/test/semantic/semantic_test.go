@@ -2123,6 +2123,132 @@ def ok(owner: Arena, pool: any ThreadPool&) -> i64:
 	requireNoWarnings(t, result)
 }
 
+func TestAnalyzeRejectsSpawnOfNestedValueDependingOnUnpublishedPackedStore(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+repr(c) struct Box:
+	node: Expr
+
+@borrows_return_field(node, node)
+extern wrap_node(node: Expr) -> Box
+
+def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+	return zeroed
+
+def worker(box: Box) -> i64:
+	_ = box
+	return 0
+
+def bad(owner: Arena) -> Thread[i64, Joinable]:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	node: Expr = new[store] Expr.Int(value: 1)
+	box: Box = wrap_node(node)
+	return spawn1(worker, box)
+`
+	_, errs := parseAndAnalyze(t, "spawn1_nested_unpublished_store_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "argument to \"spawn1\" cannot depend on unpublished packed store \"Expr.Store[Local]\"") {
+		t.Fatalf("expected nested unpublished-store spawn diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsSpawnOfNestedValueAfterFreezeRemapsPackedStoreRecursively(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+repr(c) struct Box:
+	node: Expr
+
+@borrows_return_field(node, node)
+extern wrap_node(node: Expr) -> Box
+
+def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+	return zeroed
+
+def worker(box: Box) -> i64:
+	_ = box
+	return 0
+
+def ok(owner: Arena) -> Thread[i64, Joinable]:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	node: Expr = new[store] Expr.Int(value: 1)
+	box: Box = wrap_node(node)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	_ = frozen
+	return spawn1(worker, box)
+`
+	result, errs := parseAndAnalyze(t, "spawn1_nested_frozen_store_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
+
+func TestAnalyzeRejectsSpawnOfNestedViewDependingOnUnpublishedPackedStore(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+repr(c) struct Box:
+	node: Expr
+
+@borrows_return_field(node, node)
+extern wrap_node(node: Expr) -> Box
+
+def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+	return zeroed
+
+def worker(items: view[Box]) -> i64:
+	_ = items
+	return 0
+
+def bad(owner: Arena) -> Thread[i64, Joinable]:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	node: Expr = new[store] Expr.Int(value: 1)
+	items: array[Box, 1] = [wrap_node(node)]
+	return spawn1(worker, items[0u:1u])
+`
+	_, errs := parseAndAnalyze(t, "spawn1_nested_view_unpublished_store_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "argument to \"spawn1\" cannot depend on unpublished packed store \"Expr.Store[Local]\"") {
+		t.Fatalf("expected nested view unpublished-store spawn diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsSpawnOfNestedViewAfterFreezeRemapsPackedStoreRecursively(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+repr(c) struct Box:
+	node: Expr
+
+@borrows_return_field(node, node)
+extern wrap_node(node: Expr) -> Box
+
+def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+	return zeroed
+
+def worker(items: view[Box]) -> i64:
+	_ = items
+	return 0
+
+def ok(owner: Arena) -> Thread[i64, Joinable]:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	node: Expr = new[store] Expr.Int(value: 1)
+	items: array[Box, 1] = [wrap_node(node)]
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	_ = frozen
+	return spawn1(worker, items[0u:1u])
+`
+	result, errs := parseAndAnalyze(t, "spawn1_nested_view_frozen_store_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
+
 func TestAnalyzeRejectsPoolTransferOfValueDependingOnLocalRegion(t *testing.T) {
 	src := `packed enum Expr:
 	Hold(value: any i32&)
@@ -2696,6 +2822,124 @@ def ok() -> i32:
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_field_borrow_right_ok.llcontext", src)
 	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsUsingExternRebasedBorrowReturnedSubviewAliasInvalidatedByRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+@borrows_return_rebased(items)
+extern sub_items(items: view[Holder], start: usize, end: usize) -> view[Holder]
+
+def bad() -> i32:
+	region scratch
+	mark scratch as cp
+	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	view: view[Holder] = items[0u:2u]
+	sub: view[Holder] = sub_items(view, 1u, 2u)
+	alias: any i32& = sub[0u].value
+	restore scratch from cp
+	return alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_rebased_subview_invalid.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+		t.Fatalf("expected rebased subview invalidation diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeAcceptsExternRebasedBorrowReturnedSubviewScalarAfterRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+@borrows_return_rebased(items)
+extern sub_items(items: view[Holder], start: usize, end: usize) -> view[Holder]
+
+def ok() -> i32:
+	region scratch
+	mark scratch as cp
+	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	view: view[Holder] = items[0u:2u]
+	sub: view[Holder] = sub_items(view, 1u, 2u)
+	count: i32 = sub[0u].count
+	restore scratch from cp
+	return count
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_rebased_subview_scalar_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsUsingExternFieldRebasedBorrowReturnedStructFieldInvalidatedByRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+repr(c) struct SlicePair:
+	items: view[Holder]
+	total: i32
+
+@borrows_return_field_rebased(items, src)
+extern slice_pair(src: view[Holder], start: usize, end: usize, total: i32) -> SlicePair
+
+def bad() -> i32:
+	region scratch
+	mark scratch as cp
+	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	view: view[Holder] = items[0u:2u]
+	pair: SlicePair = slice_pair(view, 1u, 2u, 9i32)
+	alias: any i32& = pair.items[0u].value
+	restore scratch from cp
+	return alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_field_rebased_invalid.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+		t.Fatalf("expected field-rebased invalidation diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeAcceptsExternFieldRebasedSiblingScalarAfterRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+repr(c) struct SlicePair:
+	items: view[Holder]
+	total: i32
+
+@borrows_return_field_rebased(items, src)
+extern slice_pair(src: view[Holder], start: usize, end: usize, total: i32) -> SlicePair
+
+def ok() -> i32:
+	region scratch
+	mark scratch as cp
+	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	view: view[Holder] = items[0u:2u]
+	pair: SlicePair = slice_pair(view, 1u, 2u, 9i32)
+	restore scratch from cp
+	return pair.total
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_field_rebased_scalar_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsExternBorrowsReturnFieldRebasedOnNonStructReturn(t *testing.T) {
+	src := `@borrows_return_field_rebased(items, source)
+extern bad(source: any i32&) -> any i32&
+`
+	_, errs := parseAndAnalyze(t, "extern_function_field_rebased_non_struct_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "@borrows_return_field_rebased on extern function \"bad\" requires a concrete struct return type, got any i32&") {
+		t.Fatalf("expected field-rebased non-struct diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
 }
 
 func TestAnalyzeRejectsUsingMoveAsPackedVariantBoundReferenceInvalidatedByRestore(t *testing.T) {

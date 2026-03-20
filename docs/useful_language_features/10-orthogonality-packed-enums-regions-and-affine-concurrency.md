@@ -378,7 +378,32 @@ The semantic effect is:
 
 - mutable local construction capability becomes immutable published capability
 - packed handles derived from that capability become `shareable`
+- the remap is structural and recursive through aggregates, arrays, views,
+  helper returns, and destructuring binders
 - mutable region/store operations stop being legal through the published handle
+
+### Opaque helper provenance contracts
+
+Opaque helpers sometimes preserve provenance without exposing their body. The
+implemented extern contract family is:
+
+```context
+@borrows_return(path)
+@borrows_return_field(field, path, ...)
+@borrows_return_rebased(path)
+@borrows_return_field_rebased(field, path, ...)
+```
+
+These mean:
+
+- exact borrow from a source path
+- exact borrow into a named struct return field
+- rebased borrow that preserves provenance but widens indexed element state to
+  wildcard element state
+- the same rebased rule, attached to a named struct return field
+
+The rebased forms are deliberately provenance-only. They do not prove exact
+slice offsets, lengths, or index arithmetic.
 
 ## Sound Phase-1 Restrictions
 
@@ -460,13 +485,17 @@ The current implementation is partway to this model:
 - `freeze(move store)` exists and is the publication boundary for packed stores
 - compiler-internal send/share checks are enforced at transfer seams such as
   `spawn1` and `pool_submit1`
-- region checkpoint invalidation exists for direct and simple structural
-  region/provenance dependencies
+- `sendable/shareable` currently remain compiler-internal derived judgments
+- region and packed-store provenance tracking is structural through aggregates,
+  arrays, views, helper returns, and destructuring binders
+- `freeze(move store)` remaps packed-store provenance structurally, not only at
+  root bindings
+- extern provenance contracts exist in exact and rebased forms
 - packed enums already use explicit store-aware lowering
 
 The main remaining semantic gaps are the more precise ones:
 
-- fuller structural provenance through more container and alias shapes
-- deciding whether `sendable/shareable` should remain internal or later become
-  source-visible generic constraints
-- validating the model against a realistic packed-enum compiler pipeline fixture
+- richer opaque transform contracts beyond exact or rebased provenance
+- more precise alias reasoning for patterns that still fall back to
+  conservative rejection
+- continued validation against larger compiler-shaped parallel fixtures

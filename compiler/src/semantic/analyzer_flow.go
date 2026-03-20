@@ -1456,7 +1456,24 @@ func firstNonShareablePackedStoreDependency(state regionRefState) (*Symbol, pack
 			return store, dep, true
 		}
 	}
+	for _, fieldState := range state.Fields {
+		if store, dep, ok := firstNonShareablePackedStoreDependency(fieldState); ok {
+			return store, dep, true
+		}
+	}
 	return nil, packedStoreDependencyState{}, false
+}
+
+func hasPackedStoreDependencies(state regionRefState) bool {
+	if len(state.StoreDeps) != 0 {
+		return true
+	}
+	for _, fieldState := range state.Fields {
+		if hasPackedStoreDependencies(fieldState) {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Analyzer) cloneAffineValueStates() map[affineValueKey]affineValueState {
@@ -1540,7 +1557,7 @@ func (a *Analyzer) recordRegionRefBinding(sym *Symbol, value ast.Expr) {
 		return
 	}
 	if storeType, ok := sym.Type.(*PackedEnumStoreType); ok {
-		if state, ok := a.regionRefStateForExpr(value); ok && len(state.StoreDeps) != 0 {
+		if state, ok := a.regionRefStateForExpr(value); ok && hasPackedStoreDependencies(state) {
 			a.recordResolvedRegionRefBinding(sym, state)
 			return
 		}
@@ -1610,18 +1627,36 @@ func (a *Analyzer) remapPackedStoreDependencies(from *Symbol, to *Symbol, nextTy
 		return
 	}
 	for sym, state := range a.currentRegionRefs {
-		dep, ok := state.StoreDeps[from]
-		if !ok {
-			continue
+		nextState, changed := remapPackedStoreDependencyInState(state, from, to, nextType)
+		if changed {
+			a.currentRegionRefs[sym] = nextState
 		}
+	}
+}
+
+func remapPackedStoreDependencyInState(state regionRefState, from *Symbol, to *Symbol, nextType *PackedEnumStoreType) (regionRefState, bool) {
+	changed := false
+	if dep, ok := state.StoreDeps[from]; ok {
 		if state.StoreDeps == nil {
 			state.StoreDeps = map[*Symbol]packedStoreDependencyState{}
 		}
 		delete(state.StoreDeps, from)
 		dep.Type = nextType
 		state.StoreDeps[to] = dep
-		a.currentRegionRefs[sym] = state
+		changed = true
 	}
+	for name, fieldState := range state.Fields {
+		nextField, fieldChanged := remapPackedStoreDependencyInState(fieldState, from, to, nextType)
+		if !fieldChanged {
+			continue
+		}
+		if state.Fields == nil {
+			state.Fields = map[string]regionRefState{}
+		}
+		state.Fields[name] = nextField
+		changed = true
+	}
+	return state, changed
 }
 
 func (a *Analyzer) invalidateRegionRefs(region *Symbol, predicate func(regionDependencyState) bool, reason string) {

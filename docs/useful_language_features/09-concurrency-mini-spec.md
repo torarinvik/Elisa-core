@@ -536,9 +536,36 @@ Rules:
 - `Expr.Store(owner)` returns `Expr.Store[Local]`
 - `new[store] Expr.Variant(...)` requires `store : Expr.Store[Local]`
 - `match node in store:` accepts either `Expr.Store[Local]` or `Expr.Store[Frozen]`
+- packed-store provenance is structural and recursive through aggregates,
+  arrays, views, helper returns, and destructuring binders
+- `freeze(move store)` remaps nested dependencies structurally from
+  `Expr.Store[Local]` to `Expr.Store[Frozen]`
 - values depending on `Expr.Store[Local]` are not sendable/shareable
 - values depending only on `Expr.Store[Frozen]` may be shared if their payload
   shape is otherwise shareable
+
+### Opaque Borrow Contracts
+
+Extern helpers can carry provenance through explicit contracts:
+
+```context
+@borrows_return(path)
+@borrows_return_field(field, path, ...)
+@borrows_return_rebased(path)
+@borrows_return_field_rebased(field, path, ...)
+```
+
+Meaning:
+
+- `@borrows_return(path)` preserves exact provenance from the source path
+- `@borrows_return_field(...)` attaches exact provenance to named struct return
+  fields
+- `@borrows_return_rebased(path)` preserves provenance but collapses indexed
+  element state to wildcard element state
+- `@borrows_return_field_rebased(...)` does the same for named struct return
+  fields
+
+The rebased forms are provenance contracts, not slice-offset or length proofs.
 
 ## Atomics
 
