@@ -53,4 +53,4 @@ def compiler_parallel_fixture(pool: any ThreadPool&) -> i64 can[Thread.Spawn, Th
 	task_group_add((&group).cast[any TaskGroup&](), move grouped)
 	task_group_wait_all((&group).cast[any TaskGroup&]())
 
-	return join(move thread) + pool_await(move awaited)
+	return join(move thread) + await awaited

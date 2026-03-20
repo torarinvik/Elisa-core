@@ -442,6 +442,15 @@ func (p *Parser) parseUnary() ast.Expr {
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "new" {
 		return p.parseAllocExpr()
 	}
+	if p.matchIdentText("await") {
+		pos := p.tokens[p.pos-1].Pos
+		operand := p.parseUnary()
+		return &ast.CallExpr{
+			Position: pos,
+			Func:     &ast.Ident{Position: pos, Name: "pool_await"},
+			Args:     []ast.Expr{&ast.MoveExpr{Position: pos, Operand: operand}},
+		}
+	}
 	if p.matchIdentText("move") {
 		pos := p.tokens[p.pos-1].Pos
 		operand := p.parseUnary()

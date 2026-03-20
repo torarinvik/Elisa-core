@@ -49,7 +49,7 @@ def typed_thread_detach_permissioned(value: i64) can[Thread.Spawn, Thread.Detach
 
 def typed_pool_roundtrip(pool: any ThreadPool&, value: i64) -> i64 can[Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
 	task: Task[i64, Pending] = pool_submit1(pool, thread_worker, value)
-	return pool_await(move task)
+	return await task
 
 def typed_group_waitall(pool: any ThreadPool&, value: i64) can[Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
 	group: TaskGroup = task_group_new()

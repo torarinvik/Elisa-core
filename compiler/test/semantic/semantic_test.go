@@ -404,7 +404,7 @@ extern pool_await(task: Task[i64, Pending]) -> i64
 
 def bad(group: mutable TaskGroup, task: Task[i64, Pending]) -> i64:
     task_group_add((&group).cast[any TaskGroup&](), move task)
-    return pool_await(move task)
+    return await task
 `
 	_, errs := parseAndAnalyze(t, "consumed_task_handle_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -413,6 +413,18 @@ def bad(group: mutable TaskGroup, task: Task[i64, Pending]) -> i64:
 	if !strings.Contains(strings.Join(errs, "\n"), "task handle \"task\" cannot be used after argument to call \"task_group_add\"") {
 		t.Fatalf("expected consumed-task diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
+}
+
+func TestAnalyzeAcceptsAwaitSyntax(t *testing.T) {
+	src := `extern pool_await(task: Task[i64, Pending]) -> i64
+
+def ok(task: Task[i64, Pending]) -> i64:
+    return await task
+`
+	result, errs := parseAndAnalyze(t, "await_task_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "i64")
 }
 
 func TestAnalyzeRejectsReusingConsumedThreadField(t *testing.T) {
