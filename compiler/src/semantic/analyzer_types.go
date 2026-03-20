@@ -106,7 +106,11 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 				a.errorf(n.Pos(), "unknown region qualifier %q", n.Region)
 			}
 		}
-		return &RefType{Elem: a.resolveType(n.Elem), State: RefState(n.State), Storage: RefStorage(n.Storage), Region: n.Region, ExplicitStorage: n.Explicit}
+		elemType := a.resolveType(n.Elem)
+		if a.containsAffineHandleValues(elemType, map[string]bool{}) {
+			a.errorf(n.Pos(), "references to values containing affine handles are not supported; got %s&", elemType.String())
+		}
+		return &RefType{Elem: elemType, State: RefState(n.State), Storage: RefStorage(n.Storage), Region: n.Region, ExplicitStorage: n.Explicit}
 	case *ast.ArrayType:
 		return a.resolveArrayType(n)
 	case *ast.BuiltinTypeExpr:
@@ -136,7 +140,11 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 	case *ast.MutableType:
 		return a.resolveType(n.Elem)
 	case *ast.TailType:
-		return &RefType{Elem: a.resolveType(n.Elem), State: RefStateNonNull, Storage: RefStorageAny}
+		elemType := a.resolveType(n.Elem)
+		if a.containsAffineHandleValues(elemType, map[string]bool{}) {
+			a.errorf(n.Pos(), "references to values containing affine handles are not supported; got %s&", elemType.String())
+		}
+		return &RefType{Elem: elemType, State: RefStateNonNull, Storage: RefStorageAny}
 	case *ast.GenericType:
 		if shaped, ok := a.resolveDynamicShapeType(n); ok {
 			return shaped

@@ -617,6 +617,9 @@ func (a *Analyzer) collectValueSymbols(decls []ast.Decl) {
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolConst, Type: declType, Node: n, Mutable: false}, n.Pos())
 		case *ast.GlobalDecl:
 			declType := a.resolveType(n.Type)
+			if a.containsAffineHandleValues(declType, map[string]bool{}) {
+				a.errorf(n.Pos(), "global %q cannot store affine handle values of type %s", n.Name, declType.String())
+			}
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolGlobal, Type: declType, Node: n, Mutable: n.Mutable}, n.Pos())
 		case *ast.FuncDecl:
 			fnType := a.funcTypeFromDecl(n.Name, n.TypeParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Params, n.ReturnType, false)
@@ -628,6 +631,9 @@ func (a *Analyzer) collectValueSymbols(decls []ast.Decl) {
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolExternFunc, Type: fnType, Node: n, Mutable: false}, n.Pos())
 		case *ast.ExternVarDecl:
 			declType := a.resolveType(n.Type)
+			if a.containsAffineHandleValues(declType, map[string]bool{}) {
+				a.errorf(n.Pos(), "extern var %q cannot store affine handle values of type %s", n.Name, declType.String())
+			}
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolExternVar, Type: declType, Node: n, Mutable: true}, n.Pos())
 		case *ast.EnumDecl:
 			continue
@@ -637,6 +643,62 @@ func (a *Analyzer) collectValueSymbols(decls []ast.Decl) {
 		case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			continue
 		}
+	}
+}
+
+func (a *Analyzer) containsAffineHandleValues(t Type, seen map[string]bool) bool {
+	if t == nil {
+		return false
+	}
+	if isAffineHandleType(t) {
+		return true
+	}
+	key := t.String()
+	if seen[key] {
+		return false
+	}
+	seen[key] = true
+	switch tt := t.(type) {
+	case *ArrayType:
+		return a.containsAffineHandleValues(tt.Elem, seen)
+	case *DArrayType:
+		return a.containsAffineHandleValues(tt.Elem, seen)
+	case *DictType:
+		return a.containsAffineHandleValues(tt.Key, seen) || a.containsAffineHandleValues(tt.Value, seen)
+	case *GenericInstanceType:
+		if base, ok := tt.Base.(*StructType); ok {
+			bindings := map[string]Type{}
+			for i, name := range base.TypeParams {
+				if i < len(tt.Args) {
+					bindings[name] = tt.Args[i]
+				}
+			}
+			for _, field := range base.Fields {
+				fieldType := field.Type
+				if len(bindings) != 0 {
+					fieldType = a.substituteType(fieldType, bindings, nil, nil, nil)
+				}
+				if a.containsAffineHandleValues(fieldType, seen) {
+					return true
+				}
+			}
+			return false
+		}
+		for _, arg := range tt.Args {
+			if a.containsAffineHandleValues(arg, seen) {
+				return true
+			}
+		}
+		return a.containsAffineHandleValues(tt.Base, seen)
+	case *StructType:
+		for _, field := range tt.Fields {
+			if a.containsAffineHandleValues(field.Type, seen) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
 	}
 }
 

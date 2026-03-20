@@ -388,6 +388,54 @@ def bad(holder: mutable Holder) -> void:
 	}
 }
 
+func TestAnalyzeRejectsAffineHandleGlobals(t *testing.T) {
+	src := `repr(c) struct Holder:
+    thread: mutable Thread[i64]
+
+global current_thread: Thread[i64] = zeroed
+global current_holder: Holder = zeroed
+extern foreign_task: Task[i64]
+`
+	_, errs := parseAndAnalyze(t, "affine_handle_globals_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic errors, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "global \"current_thread\" cannot store affine handle values of type Thread[i64]") {
+		t.Fatalf("expected direct affine-global diagnostic, got:\n%s", all)
+	}
+	if !strings.Contains(all, "global \"current_holder\" cannot store affine handle values of type Holder") {
+		t.Fatalf("expected structural affine-global diagnostic, got:\n%s", all)
+	}
+	if !strings.Contains(all, "extern var \"foreign_task\" cannot store affine handle values of type Task[i64]") {
+		t.Fatalf("expected affine extern-global diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsReferencesToAffineContainingValues(t *testing.T) {
+	src := `repr(c) struct Holder:
+    thread: mutable Thread[i64]
+
+def bad_param(holder: any Holder&) -> void:
+    pass
+
+def bad_local(holder: Holder) -> void:
+    alias: any Holder& = &holder
+    _ = alias
+`
+	_, errs := parseAndAnalyze(t, "affine_handle_refs_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic errors, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "references to values containing affine handles are not supported; got Holder&") {
+		t.Fatalf("expected affine-reference diagnostic, got:\n%s", all)
+	}
+	if !strings.Contains(all, "cannot take address of value containing affine handles") {
+		t.Fatalf("expected affine-address-of-container diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeTypeMismatchAssignment(t *testing.T) {
 	src := `def mismatch() -> int:
     value: mutable int = true

@@ -226,9 +226,13 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		return
 	case *ast.AddrOfExpr:
 		inner := a.analyzeExpr(n.Operand)
-		if isAffineHandleType(inner) {
+		if a.containsAffineHandleValues(inner, map[string]bool{}) {
 			if _, ok := a.lookupAffineValueKey(n.Operand); ok {
-				a.errorf(n.Pos(), "cannot take address of affine %s", affineHandleKind(inner))
+				if isAffineHandleType(inner) {
+					a.errorf(n.Pos(), "cannot take address of affine %s", affineHandleKind(inner))
+				} else {
+					a.errorf(n.Pos(), "cannot take address of value containing affine handles")
+				}
 			}
 		}
 		result = &RefType{Elem: inner, State: RefStateNonNull, Storage: a.inferAddrOfStorage(n.Operand), ExplicitStorage: true}
