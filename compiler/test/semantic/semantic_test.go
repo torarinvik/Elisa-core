@@ -1966,6 +1966,67 @@ func TestAnalyzeRejectsUsingMoveBoundReferenceInvalidatedByRestore(t *testing.T)
 	}
 }
 
+func TestAnalyzeRejectsUsingStructFieldAliasInvalidatedByRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+def bad() -> i32:
+	region scratch
+	mark scratch as cp
+	holder: Holder = Holder(new[scratch] 1i32, 7i32)
+	alias: any i32& = holder.value
+	restore scratch from cp
+	return alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_struct_field_alias.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+		t.Fatalf("expected restore invalidation diagnostic for struct field alias, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsUsingMoveAsStructBoundReferenceInvalidatedByRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+def bad() -> i32:
+	region scratch
+	mark scratch as cp
+	holder: Holder = Holder(new[scratch] 1i32, 7i32)
+	move holder as Holder(alias, count)
+	restore scratch from cp
+	return alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_struct_alias.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+		t.Fatalf("expected restore invalidation diagnostic for move-as struct alias, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeAcceptsMoveAsStructScalarAfterRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+def ok() -> i32:
+	region scratch
+	mark scratch as cp
+	holder: Holder = Holder(new[scratch] 1i32, 7i32)
+	move holder as Holder(alias, count)
+	restore scratch from cp
+	return count
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_move_struct_scalar_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeRejectsRestoringCheckpointFromWrongRegion(t *testing.T) {
 	src := `def bad() -> void:
 	region left

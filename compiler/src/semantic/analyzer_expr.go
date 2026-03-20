@@ -22,10 +22,16 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 					result = sym.Type
 					return
 				}
-				if refState, ok := a.currentRegionRefs[sym]; ok && !refState.Valid {
-					a.errorf(n.Pos(), "reference %q is invalid after %s", n.Name, refState.InvalidatedBy)
-					result = sym.Type
-					return
+				if refState, ok := a.currentRegionRefs[sym]; ok {
+					if _, dep, invalid := firstInvalidRegionDependency(refState); invalid {
+						label := "value"
+						if _, isRef := sym.Type.(*RefType); isRef {
+							label = "reference"
+						}
+						a.errorf(n.Pos(), "%s %q is invalid after %s", label, n.Name, dep.InvalidatedBy)
+						result = sym.Type
+						return
+					}
 				}
 				if state, ok := a.lookupAffineValueState(n); ok && a.containsAffineHandleValues(sym.Type, map[string]bool{}) {
 					a.errorf(n.Pos(), "%s %q cannot be used after %s", affineHandleKind(sym.Type), n.Name, state.ConsumedBy)
@@ -412,7 +418,71 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		if sym == nil || state.Destroyed {
 			return regionRefState{}, false
 		}
-		return regionRefState{Region: sym, Generation: state.Generation, Valid: true}, true
+		return regionRefStateFromDependency(sym, state.Generation), true
+	case *ast.StructLitExpr:
+		actual := a.exprTypes[n]
+		fields, ok := a.resolvedStructFields(actual)
+		if !ok {
+			return regionRefState{}, false
+		}
+		fieldStates := map[string]regionRefState{}
+		unionStates := make([]regionRefState, 0, len(fields))
+		for i, field := range fields {
+			if i >= len(n.Args) {
+				break
+			}
+			fieldState, ok := a.regionRefStateForExpr(n.Args[i])
+			if !ok || !hasRegionDependencies(fieldState) {
+				continue
+			}
+			fieldStates[field.Name] = fieldState
+			unionStates = append(unionStates, fieldState)
+		}
+		if len(unionStates) == 0 {
+			return regionRefState{}, false
+		}
+		merged, _ := mergeRegionRefStates(unionStates...)
+		if len(fieldStates) != 0 {
+			merged.Fields = fieldStates
+		}
+		return merged, true
+	case *ast.ListLitExpr:
+		elemStates := make([]regionRefState, 0, len(n.Elems))
+		for _, elem := range n.Elems {
+			if state, ok := a.regionRefStateForExpr(elem); ok && hasRegionDependencies(state) {
+				elemStates = append(elemStates, state)
+			}
+		}
+		return mergeRegionRefStates(elemStates...)
+	case *ast.FieldExpr:
+		state, ok := a.regionRefStateForExpr(n.Object)
+		if !ok {
+			return regionRefState{}, false
+		}
+		return projectRegionFieldState(state, n.Field)
+	case *ast.IndexExpr:
+		resultType := a.exprTypes[n]
+		if resultType == nil || !a.typeCanContainRegionRefs(resultType, map[string]bool{}) {
+			return regionRefState{}, false
+		}
+		state, ok := a.regionRefStateForExpr(n.Object)
+		if !ok || !hasRegionDependencies(state) {
+			return regionRefState{}, false
+		}
+		return cloneRegionRefState(state), true
+	case *ast.TernaryExpr:
+		left, leftOK := a.regionRefStateForExpr(n.Value)
+		right, rightOK := a.regionRefStateForExpr(n.Alt)
+		if !leftOK && !rightOK {
+			return regionRefState{}, false
+		}
+		if leftOK && rightOK {
+			return mergeRegionRefStates(left, right)
+		}
+		if leftOK {
+			return cloneRegionRefState(left), true
+		}
+		return cloneRegionRefState(right), true
 	default:
 		return regionRefState{}, false
 	}

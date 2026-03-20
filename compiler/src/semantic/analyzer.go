@@ -99,11 +99,15 @@ type regionMarkState struct {
 	InvalidatedBy string
 }
 
-type regionRefState struct {
-	Region        *Symbol
+type regionDependencyState struct {
 	Generation    int
 	Valid         bool
 	InvalidatedBy string
+}
+
+type regionRefState struct {
+	Deps   map[*Symbol]regionDependencyState
+	Fields map[string]regionRefState
 }
 
 type affineValueState struct {
@@ -697,6 +701,86 @@ func (a *Analyzer) containsAffineHandleValues(t Type, seen map[string]bool) bool
 			}
 		}
 		return false
+	default:
+		return false
+	}
+}
+
+func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
+	if t == nil {
+		return false
+	}
+	if _, ok := t.(*RefType); ok {
+		return true
+	}
+	key := t.String()
+	if seen[key] {
+		return false
+	}
+	seen[key] = true
+	switch tt := t.(type) {
+	case *ArrayType:
+		return a.typeCanContainRegionRefs(tt.Elem, seen)
+	case *DArrayType:
+		return a.typeCanContainRegionRefs(tt.Elem, seen)
+	case *ViewType:
+		return a.typeCanContainRegionRefs(tt.Elem, seen)
+	case *DArrayViewType:
+		return a.typeCanContainRegionRefs(tt.Elem, seen)
+	case *DictType:
+		return a.typeCanContainRegionRefs(tt.Key, seen) || a.typeCanContainRegionRefs(tt.Value, seen)
+	case *StructType:
+		for _, field := range tt.Fields {
+			if a.typeCanContainRegionRefs(field.Type, seen) {
+				return true
+			}
+		}
+		return false
+	case *EnumType:
+		for _, variant := range tt.Variants {
+			for _, payload := range variant.Payload {
+				if a.typeCanContainRegionRefs(payload, seen) {
+					return true
+				}
+			}
+		}
+		return false
+	case *GenericInstanceType:
+		if base, ok := tt.Base.(*StructType); ok {
+			bindings := map[string]Type{}
+			for i, name := range base.TypeParams {
+				if i < len(tt.Args) {
+					bindings[name] = tt.Args[i]
+				}
+			}
+			for _, field := range base.Fields {
+				fieldType := field.Type
+				if len(bindings) != 0 {
+					fieldType = a.substituteType(fieldType, bindings, nil, nil, nil)
+				}
+				if a.typeCanContainRegionRefs(fieldType, seen) {
+					return true
+				}
+			}
+			return false
+		}
+		if base, ok := tt.Base.(*EnumType); ok {
+			for _, variant := range base.Variants {
+				for _, payload := range variant.Payload {
+					payloadType := a.substituteType(payload, nil, nil, nil, nil)
+					if a.typeCanContainRegionRefs(payloadType, seen) {
+						return true
+					}
+				}
+			}
+			return false
+		}
+		for _, arg := range tt.Args {
+			if a.typeCanContainRegionRefs(arg, seen) {
+				return true
+			}
+		}
+		return a.typeCanContainRegionRefs(tt.Base, seen)
 	default:
 		return false
 	}

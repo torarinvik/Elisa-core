@@ -68,7 +68,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		state.Destroyed = true
 		a.currentRegions[sym] = state
-		a.invalidateRegionRefs(sym, func(regionRefState) bool { return true }, fmt.Sprintf("destroy of region %q", n.Name))
+		a.invalidateRegionRefs(sym, func(regionDependencyState) bool { return true }, fmt.Sprintf("destroy of region %q", n.Name))
 		a.invalidateRegionMarks(sym, func(regionMarkState) bool { return true }, fmt.Sprintf("destroy of region %q", n.Name))
 	case *ast.AssignStmt:
 		targetType := a.assignmentTargetType(n.Target)
@@ -116,8 +116,14 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "unexpected return value")
 			return
 		}
-		if refState, ok := a.regionRefStateForExpr(n.Value); ok && refState.Valid && refState.Region != nil {
-			a.errorf(n.Pos(), "cannot return reference allocated from local region %q", refState.Region.Name)
+		if refState, ok := a.regionRefStateForExpr(n.Value); ok {
+			if region, _, ok := firstLiveRegionDependency(refState); ok && region != nil {
+				if _, isRef := valueType.(*RefType); isRef {
+					a.errorf(n.Pos(), "cannot return reference allocated from local region %q", region.Name)
+				} else {
+					a.errorf(n.Pos(), "cannot return value depending on local region %q", region.Name)
+				}
+			}
 		}
 		a.recordFreshReturnBindings(valueType)
 		expectedReturn := a.matchReturnType(valueType)
@@ -211,12 +217,17 @@ func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {
 		return
 	}
 	valueType := a.analyzeExpr(stmt.Value)
+	valueState, hasValueState := a.regionRefStateForExpr(stmt.Value)
 	switch p := stmt.Pattern.(type) {
 	case *ast.MoveBindNamePattern:
 		if p.Name != "_" {
 			sym := &Symbol{Name: p.Name, Kind: SymbolLocal, Type: valueType, Node: p, Mutable: false}
 			a.defineLocal(sym, p.Pos())
-			a.recordRegionRefBinding(sym, stmt.Value)
+			if hasValueState {
+				a.recordResolvedRegionRefBinding(sym, valueState)
+			} else {
+				a.recordRegionRefBinding(sym, stmt.Value)
+			}
 		}
 	case *ast.MoveBindStructPattern:
 		fields, ok := a.resolveMoveBindStructPattern(p, valueType)
@@ -227,7 +238,14 @@ func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {
 			if i >= len(fields) || arg.Name == "_" {
 				continue
 			}
-			a.defineLocal(&Symbol{Name: arg.Name, Kind: SymbolLocal, Type: fields[i].Type, Node: p, Mutable: false}, arg.Position)
+			sym := &Symbol{Name: arg.Name, Kind: SymbolLocal, Type: fields[i].Type, Node: p, Mutable: false}
+			a.defineLocal(sym, arg.Position)
+			if !hasValueState {
+				continue
+			}
+			if fieldState, ok := projectRegionFieldState(valueState, fields[i].Name); ok {
+				a.recordResolvedRegionRefBinding(sym, fieldState)
+			}
 		}
 	default:
 		a.errorf(stmt.Pos(), "unsupported move-as pattern %T", stmt.Pattern)
@@ -241,10 +259,7 @@ type moveBindResolvedField struct {
 	Type Type
 }
 
-func (a *Analyzer) resolveMoveBindStructPattern(pattern *ast.MoveBindStructPattern, actual Type) ([]moveBindResolvedField, bool) {
-	if pattern == nil {
-		return nil, false
-	}
+func (a *Analyzer) resolvedStructFields(actual Type) ([]moveBindResolvedField, bool) {
 	var (
 		base     *StructType
 		bindings map[string]Type
@@ -255,7 +270,6 @@ func (a *Analyzer) resolveMoveBindStructPattern(pattern *ast.MoveBindStructPatte
 	case *GenericInstanceType:
 		structBase, ok := tt.Base.(*StructType)
 		if !ok {
-			a.errorf(pattern.Pos(), "move-as pattern %q requires a concrete struct value, got %s", pattern.TypeName, actual.String())
 			return nil, false
 		}
 		base = structBase
@@ -266,34 +280,19 @@ func (a *Analyzer) resolveMoveBindStructPattern(pattern *ast.MoveBindStructPatte
 			}
 		}
 	default:
-		a.errorf(pattern.Pos(), "move-as pattern %q requires a concrete struct value, got %s", pattern.TypeName, actual.String())
 		return nil, false
 	}
 	if base == nil {
-		a.errorf(pattern.Pos(), "move-as pattern %q requires a concrete struct value, got %s", pattern.TypeName, actual.String())
-		return nil, false
-	}
-	if base.Name != pattern.TypeName {
-		a.errorf(pattern.Pos(), "move-as pattern expects struct %q, got %q", pattern.TypeName, base.Name)
 		return nil, false
 	}
 	if base.Decl == nil {
-		a.errorf(pattern.Pos(), "move-as destructuring is not supported for builtin struct %q", base.Name)
 		return nil, false
 	}
-	if len(pattern.Args) != len(base.Decl.Fields) {
-		a.errorf(pattern.Pos(), "move-as pattern %q expects %d bindings, got %d", pattern.TypeName, len(base.Decl.Fields), len(pattern.Args))
-	}
-	limit := len(pattern.Args)
-	if len(base.Decl.Fields) < limit {
-		limit = len(base.Decl.Fields)
-	}
-	fields := make([]moveBindResolvedField, 0, limit)
-	for i := 0; i < limit; i++ {
+	fields := make([]moveBindResolvedField, 0, len(base.Decl.Fields))
+	for i := 0; i < len(base.Decl.Fields); i++ {
 		fieldDecl := base.Decl.Fields[i]
 		field, ok := base.Fields[fieldDecl.Name]
 		if !ok {
-			a.errorf(pattern.Pos(), "missing semantic field %q on struct %q", fieldDecl.Name, base.Name)
 			continue
 		}
 		fieldType := field.Type
@@ -303,6 +302,50 @@ func (a *Analyzer) resolveMoveBindStructPattern(pattern *ast.MoveBindStructPatte
 		fields = append(fields, moveBindResolvedField{Name: fieldDecl.Name, Type: fieldType})
 	}
 	return fields, true
+}
+
+func (a *Analyzer) resolveMoveBindStructPattern(pattern *ast.MoveBindStructPattern, actual Type) ([]moveBindResolvedField, bool) {
+	if pattern == nil {
+		return nil, false
+	}
+	fields, ok := a.resolvedStructFields(actual)
+	if !ok {
+		a.errorf(pattern.Pos(), "move-as pattern %q requires a concrete struct value, got %s", pattern.TypeName, actual.String())
+		return nil, false
+	}
+	switch tt := actual.(type) {
+	case *StructType:
+		if tt.Name != pattern.TypeName {
+			a.errorf(pattern.Pos(), "move-as pattern expects struct %q, got %q", pattern.TypeName, tt.Name)
+			return nil, false
+		}
+		if tt.Decl == nil {
+			a.errorf(pattern.Pos(), "move-as destructuring is not supported for builtin struct %q", tt.Name)
+			return nil, false
+		}
+	case *GenericInstanceType:
+		base, _ := tt.Base.(*StructType)
+		if base == nil || base.Name != pattern.TypeName {
+			got := actual.String()
+			if base != nil {
+				got = base.Name
+			}
+			a.errorf(pattern.Pos(), "move-as pattern expects struct %q, got %q", pattern.TypeName, got)
+			return nil, false
+		}
+		if base.Decl == nil {
+			a.errorf(pattern.Pos(), "move-as destructuring is not supported for builtin struct %q", base.Name)
+			return nil, false
+		}
+	}
+	if len(pattern.Args) != len(fields) {
+		a.errorf(pattern.Pos(), "move-as pattern %q expects %d bindings, got %d", pattern.TypeName, len(fields), len(pattern.Args))
+	}
+	limit := len(pattern.Args)
+	if len(fields) < limit {
+		limit = len(fields)
+	}
+	return fields[:limit], true
 }
 
 func (a *Analyzer) analyzeCanStmt(stmt *ast.CanStmt) {
@@ -378,8 +421,8 @@ func (a *Analyzer) analyzeRestoreStmt(stmt *ast.RestoreStmt) {
 		return
 	}
 	reason := fmt.Sprintf("restore of region %q from checkpoint %q", stmt.RegionName, stmt.MarkName)
-	a.invalidateRegionRefs(regionSym, func(refState regionRefState) bool {
-		return refState.Generation >= markState.Generation
+	a.invalidateRegionRefs(regionSym, func(dep regionDependencyState) bool {
+		return dep.Generation >= markState.Generation
 	}, reason)
 	a.invalidateRegionMarks(regionSym, func(other regionMarkState) bool {
 		return other.Generation > markState.Generation
@@ -404,7 +447,7 @@ func (a *Analyzer) analyzeResetStmt(stmt *ast.ResetStmt) {
 		return
 	}
 	reason := fmt.Sprintf("reset of region %q", stmt.Name)
-	a.invalidateRegionRefs(regionSym, func(regionRefState) bool { return true }, reason)
+	a.invalidateRegionRefs(regionSym, func(regionDependencyState) bool { return true }, reason)
 	a.invalidateRegionMarks(regionSym, func(regionMarkState) bool { return true }, reason)
 	state.Generation = 0
 	a.currentRegions[regionSym] = state
@@ -905,9 +948,127 @@ func (a *Analyzer) cloneRegionRefStates() map[*Symbol]regionRefState {
 	}
 	cloned := make(map[*Symbol]regionRefState, len(a.currentRegionRefs))
 	for sym, state := range a.currentRegionRefs {
-		cloned[sym] = state
+		cloned[sym] = cloneRegionRefState(state)
 	}
 	return cloned
+}
+
+func cloneRegionRefState(state regionRefState) regionRefState {
+	cloned := regionRefState{}
+	if len(state.Deps) != 0 {
+		cloned.Deps = make(map[*Symbol]regionDependencyState, len(state.Deps))
+		for region, dep := range state.Deps {
+			cloned.Deps[region] = dep
+		}
+	}
+	if len(state.Fields) != 0 {
+		cloned.Fields = make(map[string]regionRefState, len(state.Fields))
+		for name, fieldState := range state.Fields {
+			cloned.Fields[name] = cloneRegionRefState(fieldState)
+		}
+	}
+	return cloned
+}
+
+func hasRegionDependencies(state regionRefState) bool {
+	return len(state.Deps) != 0
+}
+
+func regionRefStateFromDependency(region *Symbol, generation int) regionRefState {
+	if region == nil {
+		return regionRefState{}
+	}
+	return regionRefState{
+		Deps: map[*Symbol]regionDependencyState{
+			region: {
+				Generation: generation,
+				Valid:      true,
+			},
+		},
+	}
+}
+
+func mergeRegionRefStates(states ...regionRefState) (regionRefState, bool) {
+	merged := regionRefState{}
+	for _, state := range states {
+		if !hasRegionDependencies(state) && len(state.Fields) == 0 {
+			continue
+		}
+		if len(state.Deps) != 0 {
+			if merged.Deps == nil {
+				merged.Deps = map[*Symbol]regionDependencyState{}
+			}
+			for region, dep := range state.Deps {
+				existing, ok := merged.Deps[region]
+				if !ok {
+					merged.Deps[region] = dep
+					continue
+				}
+				if !existing.Valid {
+					if !dep.Valid && dep.Generation > existing.Generation {
+						merged.Deps[region] = dep
+					}
+					continue
+				}
+				if !dep.Valid {
+					merged.Deps[region] = dep
+					continue
+				}
+				if dep.Generation > existing.Generation {
+					merged.Deps[region] = dep
+				}
+			}
+		}
+		if len(state.Fields) != 0 {
+			if merged.Fields == nil {
+				merged.Fields = map[string]regionRefState{}
+			}
+			for name, fieldState := range state.Fields {
+				if existing, ok := merged.Fields[name]; ok {
+					if next, ok := mergeRegionRefStates(existing, fieldState); ok {
+						merged.Fields[name] = next
+					} else {
+						delete(merged.Fields, name)
+					}
+				} else {
+					merged.Fields[name] = cloneRegionRefState(fieldState)
+				}
+			}
+		}
+	}
+	if !hasRegionDependencies(merged) && len(merged.Fields) == 0 {
+		return regionRefState{}, false
+	}
+	return merged, true
+}
+
+func projectRegionFieldState(state regionRefState, field string) (regionRefState, bool) {
+	if len(state.Fields) == 0 {
+		return regionRefState{}, false
+	}
+	fieldState, ok := state.Fields[field]
+	if !ok || !hasRegionDependencies(fieldState) {
+		return regionRefState{}, false
+	}
+	return cloneRegionRefState(fieldState), true
+}
+
+func firstInvalidRegionDependency(state regionRefState) (*Symbol, regionDependencyState, bool) {
+	for region, dep := range state.Deps {
+		if !dep.Valid {
+			return region, dep, true
+		}
+	}
+	return nil, regionDependencyState{}, false
+}
+
+func firstLiveRegionDependency(state regionRefState) (*Symbol, regionDependencyState, bool) {
+	for region, dep := range state.Deps {
+		if dep.Valid {
+			return region, dep, true
+		}
+	}
+	return nil, regionDependencyState{}, false
 }
 
 func (a *Analyzer) cloneAffineValueStates() map[affineValueKey]affineValueState {
@@ -991,10 +1152,21 @@ func (a *Analyzer) recordRegionRefBinding(sym *Symbol, value ast.Expr) {
 		return
 	}
 	if state, ok := a.regionRefStateForExpr(value); ok {
-		a.currentRegionRefs[sym] = state
+		a.recordResolvedRegionRefBinding(sym, state)
 		return
 	}
 	delete(a.currentRegionRefs, sym)
+}
+
+func (a *Analyzer) recordResolvedRegionRefBinding(sym *Symbol, state regionRefState) {
+	if a.currentRegionRefs == nil || sym == nil {
+		return
+	}
+	if !hasRegionDependencies(state) {
+		delete(a.currentRegionRefs, sym)
+		return
+	}
+	a.currentRegionRefs[sym] = cloneRegionRefState(state)
 }
 
 func (a *Analyzer) recordRegionRefAssignment(target ast.Expr, value ast.Expr) {
@@ -1009,19 +1181,24 @@ func (a *Analyzer) recordRegionRefAssignment(target ast.Expr, value ast.Expr) {
 	a.recordRegionRefBinding(sym, value)
 }
 
-func (a *Analyzer) invalidateRegionRefs(region *Symbol, predicate func(regionRefState) bool, reason string) {
+func (a *Analyzer) invalidateRegionRefs(region *Symbol, predicate func(regionDependencyState) bool, reason string) {
 	if a.currentRegionRefs == nil || region == nil {
 		return
 	}
 	for sym, state := range a.currentRegionRefs {
-		if state.Region != region || !state.Valid {
+		dep, ok := state.Deps[region]
+		if !ok || !dep.Valid {
 			continue
 		}
-		if predicate != nil && !predicate(state) {
+		if predicate != nil && !predicate(dep) {
 			continue
 		}
-		state.Valid = false
-		state.InvalidatedBy = reason
+		dep.Valid = false
+		dep.InvalidatedBy = reason
+		if state.Deps == nil {
+			state.Deps = map[*Symbol]regionDependencyState{}
+		}
+		state.Deps[region] = dep
 		a.currentRegionRefs[sym] = state
 	}
 }
