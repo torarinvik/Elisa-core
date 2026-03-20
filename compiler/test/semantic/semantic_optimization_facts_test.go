@@ -256,3 +256,65 @@ def inspect(a: any Arena&, values: any darray[i32, row]&, other: any darray[i32,
 		t.Fatalf("expected ctx_string_from_view to preserve exact extent from its input view")
 	}
 }
+
+func TestAnalyzeInfersDisjointnessForNonOverlappingViewsAndFreshAllocations(t *testing.T) {
+	src := `repr(c) struct StringView:
+	data: mutable any u8&
+	len: mutable i64
+
+def string_view(value: any u8&?, start: i64, end: i64) -> StringView:
+	_ = value
+	_ = start
+	_ = end
+	return StringView("", 0)
+
+def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
+	return string_view(value, start, end)
+
+def inspect(text: dstr[row], buf: array[i32, 8]) -> int:
+	left: view[i32, 0u, 2u] = buf[0u:2u]
+	right: view[i32, 2u, 4u] = buf[2u:4u]
+	overlap: view[i32, 1u, 3u] = buf[1u:3u]
+	first: StringView = ctx_string_view(text, 0, 2)
+	second: StringView = ctx_string_view(text, 2, 4)
+	middle: StringView = ctx_string_view(text, 1, 3)
+	region scratch(1024u)
+	alloc_a: scratch i32& = new[scratch] 1i32
+	alloc_b: scratch i32& = new[scratch] 2i32
+	alloc_alias: scratch i32& = alloc_a
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_disjoint_views.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	leftExpr := requireOptimizationFactsVarInitExpr(t, fn, "left")
+	rightExpr := requireOptimizationFactsVarInitExpr(t, fn, "right")
+	overlapExpr := requireOptimizationFactsVarInitExpr(t, fn, "overlap")
+	firstExpr := requireOptimizationFactsVarInitExpr(t, fn, "first")
+	secondExpr := requireOptimizationFactsVarInitExpr(t, fn, "second")
+	middleExpr := requireOptimizationFactsVarInitExpr(t, fn, "middle")
+	allocAExpr := requireOptimizationFactsVarInitExpr(t, fn, "alloc_a")
+	allocBExpr := requireOptimizationFactsVarInitExpr(t, fn, "alloc_b")
+	allocAliasExpr := requireOptimizationFactsVarInitExpr(t, fn, "alloc_alias")
+
+	if !result.ExprsAreDisjoint(leftExpr, rightExpr) {
+		t.Fatalf("expected adjacent fixed-array slices to be disjoint")
+	}
+	if result.ExprsAreDisjoint(leftExpr, overlapExpr) {
+		t.Fatalf("expected overlapping fixed-array slices to remain potentially aliased")
+	}
+	if !result.ExprsAreDisjoint(firstExpr, secondExpr) {
+		t.Fatalf("expected adjacent string views over the same base to be disjoint")
+	}
+	if result.ExprsAreDisjoint(firstExpr, middleExpr) {
+		t.Fatalf("expected overlapping string views to remain potentially aliased")
+	}
+	if !result.ExprsAreDisjoint(allocAExpr, allocBExpr) {
+		t.Fatalf("expected distinct fresh allocations to be disjoint")
+	}
+	if result.ExprsAreDisjoint(allocAExpr, allocAliasExpr) {
+		t.Fatalf("expected an alias of a fresh allocation to remain non-disjoint from the source")
+	}
+}

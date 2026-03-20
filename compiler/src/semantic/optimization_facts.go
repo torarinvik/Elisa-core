@@ -32,6 +32,7 @@ type OptimizationFacts struct {
 	Contiguous bool
 	UnitStride bool
 	Extent     *OptimizationExtent
+	base       string
 }
 
 func (e *OptimizationExtent) String() string {
@@ -64,6 +65,20 @@ func (f OptimizationFacts) SameExtent(other OptimizationFacts) bool {
 	return SameOptimizationExtent(f.Extent, other.Extent)
 }
 
+func (f OptimizationFacts) Disjoint(other OptimizationFacts) bool {
+	return OptimizationFactsDisjoint(f, other)
+}
+
+func OptimizationFactsDisjoint(a, b OptimizationFacts) bool {
+	if a.base == "" || b.base == "" {
+		return false
+	}
+	if a.base != b.base {
+		return a.Exclusive && b.Exclusive
+	}
+	return optimizationExtentsDisjoint(a.Extent, b.Extent)
+}
+
 func SameOptimizationExtent(a, b *OptimizationExtent) bool {
 	if a == nil || b == nil {
 		return false
@@ -92,6 +107,79 @@ func cloneOptimizationExtent(extent *OptimizationExtent) *OptimizationExtent {
 	}
 	cloned := *extent
 	return &cloned
+}
+
+func optimizationExtentsDisjoint(a, b *OptimizationExtent) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	if a.Kind != OptimizationExtentViewBounds || b.Kind != OptimizationExtentViewBounds {
+		return false
+	}
+	if a.End != "" && a.End == b.Begin {
+		return true
+	}
+	if b.End != "" && b.End == a.Begin {
+		return true
+	}
+	aBegin, aBeginOK := optimizationConstInt(a.Begin)
+	aEnd, aEndOK := optimizationConstInt(a.End)
+	bBegin, bBeginOK := optimizationConstInt(b.Begin)
+	bEnd, bEndOK := optimizationConstInt(b.End)
+	if aEndOK && bBeginOK && aEnd <= bBegin {
+		return true
+	}
+	if bEndOK && aBeginOK && bEnd <= aBegin {
+		return true
+	}
+	return false
+}
+
+func optimizationConstInt(value string) (int64, bool) {
+	if value == "" {
+		return 0, false
+	}
+	trimmed := value
+	for len(trimmed) >= 2 && trimmed[0] == '(' && trimmed[len(trimmed)-1] == ')' {
+		trimmed = trimmed[1 : len(trimmed)-1]
+	}
+	if trimmed == "" {
+		return 0, false
+	}
+	if last := trimmed[len(trimmed)-1]; last == 'u' || last == 'i' {
+		trimmed = trimmed[:len(trimmed)-1]
+	}
+	if trimmed == "" {
+		return 0, false
+	}
+	value64, err := parseOptimizationInt(trimmed)
+	if err != nil {
+		return 0, false
+	}
+	return value64, true
+}
+
+func parseOptimizationInt(value string) (int64, error) {
+	negative := false
+	if value != "" && value[0] == '-' {
+		negative = true
+		value = value[1:]
+	}
+	if value == "" {
+		return 0, fmt.Errorf("empty int")
+	}
+	var out int64
+	for i := 0; i < len(value); i++ {
+		ch := value[i]
+		if ch < '0' || ch > '9' {
+			return 0, fmt.Errorf("non-decimal int %q", value)
+		}
+		out = out*10 + int64(ch-'0')
+	}
+	if negative {
+		out = -out
+	}
+	return out, nil
 }
 
 func optimizationFactsForType(t Type) OptimizationFacts {
@@ -172,16 +260,24 @@ func (a *Analyzer) inferExprOptimizationFacts(expr ast.Expr, t Type) Optimizatio
 		if identFacts, ok := a.lookupIdentOptimizationFacts(n); ok {
 			facts = identFacts
 		}
+		if facts.base == "" {
+			facts.base = a.optimizationBaseForExpr(n)
+		}
 	case *ast.CallExpr:
 		facts = a.inferCallOptimizationFacts(n, facts)
 	case *ast.AllocExpr:
 		if _, ok := t.(*RefType); ok {
 			facts.Exclusive = true
+			facts.base = optimizationExprIdentity(expr)
 		}
 	case *ast.StringLit:
 		facts.ReadOnly = true
 		facts.Contiguous = true
 		facts.UnitStride = true
+	case *ast.SliceExpr:
+		if facts.base == "" {
+			facts.base = a.optimizationBaseForExpr(n.Object)
+		}
 	}
 	return facts
 }
@@ -225,10 +321,16 @@ func (a *Analyzer) inferCallOptimizationFacts(call *ast.CallExpr, facts Optimiza
 	}
 	switch optimizationHelperName(call.Func) {
 	case "arena_da_view", "ctx_string_view", "string_view":
+		if baseExpr, ok := optimizationCallArg(call, 0); ok {
+			facts.base = a.optimizationBaseForExpr(baseExpr)
+		}
 		if extent := a.inferViewHelperExtent(call, 0, 1, 2, "count"); extent != nil {
 			facts.Extent = extent
 		}
 	case "arena_da_view_slice", "ctx_string_view_slice", "string_view_slice":
+		if viewExpr, ok := optimizationCallArg(call, 0); ok {
+			facts.base = a.optimizationBaseForExpr(viewExpr)
+		}
 		if extent := a.inferViewHelperExtent(call, 0, 1, 2, "len"); extent != nil {
 			facts.Extent = extent
 		}
@@ -246,6 +348,65 @@ func (a *Analyzer) inferCallOptimizationFacts(call *ast.CallExpr, facts Optimiza
 		}
 	}
 	return facts
+}
+
+func (a *Analyzer) optimizationBaseForExpr(expr ast.Expr) string {
+	if expr == nil {
+		return ""
+	}
+	stripped := stripOptimizationParens(expr)
+	switch n := stripped.(type) {
+	case *ast.Ident:
+		if sym := a.lookupOptimizationSymbol(n); sym != nil {
+			if a != nil && a.symbolFacts != nil {
+				if facts, ok := a.symbolFacts[sym]; ok && facts.base != "" {
+					return facts.base
+				}
+			}
+			return optimizationSymbolIdentity(sym)
+		}
+	case *ast.MoveExpr:
+		return a.optimizationBaseForExpr(n.Operand)
+	case *ast.CanExpr:
+		return a.optimizationBaseForExpr(n.Expr)
+	}
+	if a != nil && a.exprFacts != nil {
+		if facts, ok := a.exprFacts[stripped]; ok && facts.base != "" {
+			return facts.base
+		}
+	}
+	return ""
+}
+
+func (a *Analyzer) lookupOptimizationSymbol(ident *ast.Ident) *Symbol {
+	if a == nil || ident == nil {
+		return nil
+	}
+	if a.currentScope != nil {
+		if sym, ok := a.currentScope.Lookup(ident.Name); ok {
+			return sym
+		}
+	}
+	if a.globalScope != nil {
+		if sym, ok := a.globalScope.Lookup(ident.Name); ok {
+			return sym
+		}
+	}
+	return nil
+}
+
+func optimizationSymbolIdentity(sym *Symbol) string {
+	if sym == nil {
+		return ""
+	}
+	return fmt.Sprintf("symbol@%p", sym)
+}
+
+func optimizationExprIdentity(expr ast.Expr) string {
+	if expr == nil {
+		return ""
+	}
+	return fmt.Sprintf("expr@%p", expr)
 }
 
 func (a *Analyzer) inferViewHelperExtent(call *ast.CallExpr, baseIndex, startIndex, endIndex int, fullSpanField string) *OptimizationExtent {
@@ -443,4 +604,19 @@ func (r *Result) ExprsHaveSameExtent(left, right ast.Expr) bool {
 		return false
 	}
 	return leftFacts.SameExtent(rightFacts)
+}
+
+func (r *Result) ExprsAreDisjoint(left, right ast.Expr) bool {
+	if r == nil {
+		return false
+	}
+	leftFacts, ok := r.ExprOptimizationFacts(left)
+	if !ok {
+		return false
+	}
+	rightFacts, ok := r.ExprOptimizationFacts(right)
+	if !ok {
+		return false
+	}
+	return leftFacts.Disjoint(rightFacts)
 }
