@@ -184,13 +184,13 @@ def ctx_stage0_string_view_slice(view: StringView, start: i64, end: i64) -> Stri
 def ctx_stage0_string_view_copy(view: StringView) -> any u8&:
 	return view.data
 
-def ctx_stage1rt_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
+def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
 	return ctx_stage0_string_view(value, start, end)
 
-def ctx_stage1rt_string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
+def ctx_string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
 	return ctx_stage0_string_view_slice(view, start, end)
 
-def ctx_stage1rt_string_from_view(view: StringView) -> dstr[shape_out]:
+def ctx_string_from_view(view: StringView) -> dstr[shape_out]:
 	return ctx_stage0_string_view_copy(view)
 
 def inspect(a: any Arena&, values: any darray[i32, row]&, other: any darray[i32, row]&, text: dstr[row]) -> int:
@@ -199,9 +199,9 @@ def inspect(a: any Arena&, values: any darray[i32, row]&, other: any darray[i32,
 	sub_a: dview[i32] = arena_da_view_slice(whole_a, 1u, 3u)
 	sub_b: dview[i32] = arena_da_view_slice(whole_b, 1u, 3u)
 	copied: darray[i32] = arena_da_from_view(a, sub_a)
-	text_view: StringView = ctx_stage1rt_string_view(text, 0, 2)
-	text_sub: StringView = ctx_stage1rt_string_view_slice(text_view, 0, text_view.len)
-	text_copy: dstr = ctx_stage1rt_string_from_view(text_sub)
+	text_view: StringView = ctx_string_view(text, 0, 2)
+	text_sub: StringView = ctx_string_view_slice(text_view, 0, text_view.len)
+	text_copy: dstr = ctx_string_from_view(text_sub)
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_runtime_view_helpers.llcontext", src)
@@ -244,15 +244,15 @@ def inspect(a: any Arena&, values: any darray[i32, row]&, other: any darray[i32,
 	}
 
 	if !textViewFacts.HasExactExtent() {
-		t.Fatalf("expected ctx_stage1rt_string_view to preserve bounded extent, got %#v", textViewFacts)
+		t.Fatalf("expected ctx_string_view to preserve bounded extent, got %#v", textViewFacts)
 	}
 	if !result.ExprsHaveSameExtent(textViewExpr, textSubExpr) {
-		t.Fatalf("expected full-span ctx_stage1rt_string_view_slice to preserve input extent")
+		t.Fatalf("expected full-span ctx_string_view_slice to preserve input extent")
 	}
 	if !textCopyFacts.ReadOnly || !textCopyFacts.HasExactExtent() {
-		t.Fatalf("expected ctx_stage1rt_string_from_view to preserve readonly exact extent facts, got %#v", textCopyFacts)
+		t.Fatalf("expected ctx_string_from_view to preserve readonly exact extent facts, got %#v", textCopyFacts)
 	}
 	if !result.ExprsHaveSameExtent(textSubExpr, textCopyExpr) {
-		t.Fatalf("expected ctx_stage1rt_string_from_view to preserve exact extent from its input view")
+		t.Fatalf("expected ctx_string_from_view to preserve exact extent from its input view")
 	}
 }

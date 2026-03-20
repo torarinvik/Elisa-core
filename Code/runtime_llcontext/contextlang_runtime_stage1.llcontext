@@ -77,43 +77,43 @@ def ctx_stage1rt_char_to_string(value: i64) -> dstr[shape_out] can[Memory.Alloca
 def ctx_stage1rt_char_to_string_scratch(value: i64) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
     return ctx_stage0_char_to_string_scratch(value)
 
-def ctx_stage1rt_strlen(value: dstr[shape_in]) -> i64:
+def ctx_strlen(value: dstr[shape_in]) -> i64:
     return ctx_stage0_strlen(value)
 
-def ctx_stage1rt_streq(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> int:
+def ctx_streq(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> int:
     return ctx_stage0_streq(lhs, rhs)
 
-def ctx_stage1rt_string_slice_eq(value: dstr[shape_in], start: i64, end: i64, other: dstr[shape_other]) -> int:
+def ctx_string_slice_eq(value: dstr[shape_in], start: i64, end: i64, other: dstr[shape_other]) -> int:
     return ctx_stage0_string_slice_eq(value, start, end, other)
 
-def ctx_stage1rt_string_slices_eq(lhs: dstr[shape_left], lhs_start: i64, lhs_end: i64, rhs: dstr[shape_right], rhs_start: i64, rhs_end: i64) -> int:
+def ctx_string_slices_eq(lhs: dstr[shape_left], lhs_start: i64, lhs_end: i64, rhs: dstr[shape_right], rhs_start: i64, rhs_end: i64) -> int:
     return ctx_stage0_string_slices_eq(lhs, lhs_start, lhs_end, rhs, rhs_start, rhs_end)
 
-def ctx_stage1rt_string_index(value: dstr[shape_in], index: i64) -> i64:
+def ctx_string_index(value: dstr[shape_in], index: i64) -> i64:
     return ctx_stage0_string_index(value, index)
 
-def ctx_stage1rt_string_slice(value: dstr[shape_in], start: i64, end: i64) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
+def ctx_string_slice(value: dstr[shape_in], start: i64, end: i64) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
     return ctx_stage0_string_slice(value, start, end)
 
-def ctx_stage1rt_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
+def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
     return ctx_stage0_string_view(value, start, end)
 
-def ctx_stage1rt_string_view_len(view: StringView) -> i64:
+def ctx_string_view_len(view: StringView) -> i64:
     return ctx_stage0_string_view_len(view)
 
-def ctx_stage1rt_string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
+def ctx_string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
     return ctx_stage0_string_view_slice(view, start, end)
 
-def ctx_stage1rt_string_view_index(view: StringView, index: i64) -> i64:
+def ctx_string_view_index(view: StringView, index: i64) -> i64:
     return ctx_stage0_string_view_index(view, index)
 
-def ctx_stage1rt_string_view_eq(view: StringView, other: dstr[shape_other]) -> int:
+def ctx_string_view_eq(view: StringView, other: dstr[shape_other]) -> int:
     return ctx_stage0_string_view_eq(view, other)
 
-def ctx_stage1rt_string_views_eq(lhs: StringView, rhs: StringView) -> int:
+def ctx_string_views_eq(lhs: StringView, rhs: StringView) -> int:
     return ctx_stage0_string_views_eq(lhs, rhs)
 
-def ctx_stage1rt_string_from_view(view: StringView) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
+def ctx_string_from_view(view: StringView) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
     return ctx_stage0_string_view_copy(view).cast[any u8&]()
 
 def ctx_stage1rt_reset_scratch():

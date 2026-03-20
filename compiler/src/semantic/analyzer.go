@@ -46,8 +46,8 @@ var shapeTransformTable = map[string]ShapeTransformSpec{
 	"ctx_stage1rt_bool_to_string_scratch": {FreshReturnShapeParams: []string{"shape_out"}},
 	"ctx_stage1rt_char_to_string":         {FreshReturnShapeParams: []string{"shape_out"}},
 	"ctx_stage1rt_char_to_string_scratch": {FreshReturnShapeParams: []string{"shape_out"}},
-	"ctx_stage1rt_string_slice":           {FreshReturnShapeParams: []string{"shape_out"}},
-	"ctx_stage1rt_string_from_view":       {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_string_slice":                    {FreshReturnShapeParams: []string{"shape_out"}},
+	"ctx_string_from_view":                {FreshReturnShapeParams: []string{"shape_out"}},
 	"arena_da_from_view":                  {FreshReturnShapeParams: []string{"shape_out"}},
 }
 

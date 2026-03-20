@@ -790,7 +790,7 @@ func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helpe
 	if swap {
 		firstExpr, secondExpr = secondExpr, firstExpr
 	}
-	if helperName == "ctx_stage1rt_string_view_eq" {
+	if helperName == "ctx_string_view_eq" {
 		if literalText, ok := s.staticCStringLiteral(secondExpr); ok {
 			cmp, err := s.emitStringViewStaticLiteralEqual(firstExpr, firstType, secondExpr, literalText)
 			if err != nil {
@@ -915,11 +915,11 @@ func (s *functionState) emitRuntimeStringCompareOperand(expr ast.Expr, exprType 
 
 func (s *functionState) emitRuntimeStringLengthValue(stringValue C.LLVMValueRef, stringType semantic.Type, resultType semantic.Type, name string) (C.LLVMValueRef, error) {
 	helperType := &semantic.FuncType{
-		Name:   "ctx_stage1rt_strlen",
+		Name:   "ctx_strlen",
 		Params: []semantic.Type{stringType},
 		Return: resultType,
 	}
-	callee, err := s.g.ensureFunctionDeclared("ctx_stage1rt_strlen", helperType)
+	callee, err := s.g.ensureFunctionDeclared("ctx_strlen", helperType)
 	if err != nil {
 		return nil, err
 	}
@@ -938,7 +938,7 @@ func (s *functionState) emitSpecializedRuntimeCall(expr *ast.CallExpr) (C.LLVMVa
 	if !ok {
 		return nil, nil, false, nil
 	}
-	if ident.Name != "ctx_stage0_string_view_eq" && ident.Name != "ctx_stage1rt_string_view_eq" {
+	if ident.Name != "ctx_stage0_string_view_eq" && ident.Name != "ctx_string_view_eq" {
 		return nil, nil, false, nil
 	}
 	if len(expr.Args) != 2 {
@@ -1000,7 +1000,7 @@ func (s *functionState) emitSpecializedStringViewLiteralCall(expr *ast.CallExpr)
 }
 
 func (s *functionState) specializedStringViewLiteralCallShape(funcName string) (int, int, bool, bool) {
-	if funcName == "ctx_stage0_string_view_eq" || funcName == "ctx_stage1rt_string_view_eq" {
+	if funcName == "ctx_stage0_string_view_eq" || funcName == "ctx_string_view_eq" {
 		return 0, 1, true, true
 	}
 	sym, ok := s.g.result.GlobalScope.Lookup(funcName)
@@ -1023,7 +1023,7 @@ func (s *functionState) specializedStringViewLiteralCallShape(funcName string) (
 	if !ok {
 		return 0, 0, false, false
 	}
-	if callee.Name != "ctx_stage0_string_view_eq" && callee.Name != "ctx_stage1rt_string_view_eq" {
+	if callee.Name != "ctx_stage0_string_view_eq" && callee.Name != "ctx_string_view_eq" {
 		return 0, 0, false, false
 	}
 	return 0, 1, false, true
@@ -1961,11 +1961,11 @@ func (s *functionState) emitRuntimeStringLenExpr(object ast.Expr, fieldType sema
 		return nil, nil, err
 	}
 	helperType := &semantic.FuncType{
-		Name:   "ctx_stage1rt_strlen",
+		Name:   "ctx_strlen",
 		Params: []semantic.Type{stringType},
 		Return: fieldType,
 	}
-	callee, err := s.g.ensureFunctionDeclared("ctx_stage1rt_strlen", helperType)
+	callee, err := s.g.ensureFunctionDeclared("ctx_strlen", helperType)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -2060,13 +2060,13 @@ func (s *functionState) emitStaticStringIndexExpr(expr *ast.IndexExpr) (C.LLVMVa
 
 func runtimeStringIndexedOperand(t semantic.Type) (string, semantic.Type, bool) {
 	if _, ok := t.(*semantic.DStrType); ok {
-		return "ctx_stage1rt_string_index", t, true
+		return "ctx_string_index", t, true
 	}
 	if _, ok := t.(*semantic.SViewType); ok {
-		return "ctx_stage1rt_string_view_index", t, true
+		return "ctx_string_view_index", t, true
 	}
 	if st, ok := t.(*semantic.StructType); ok && st.Name == "StringView" {
-		return "ctx_stage1rt_string_view_index", t, true
+		return "ctx_string_view_index", t, true
 	}
 	ref, ok := t.(*semantic.RefType)
 	if !ok {
@@ -2076,13 +2076,13 @@ func runtimeStringIndexedOperand(t semantic.Type) (string, semantic.Type, bool) 
 		return "", nil, false
 	}
 	if _, ok := ref.Elem.(*semantic.DStrType); ok {
-		return "ctx_stage1rt_string_index", ref.Elem, true
+		return "ctx_string_index", ref.Elem, true
 	}
 	if _, ok := ref.Elem.(*semantic.SViewType); ok {
-		return "ctx_stage1rt_string_view_index", ref.Elem, true
+		return "ctx_string_view_index", ref.Elem, true
 	}
 	if st, ok := ref.Elem.(*semantic.StructType); ok && st.Name == "StringView" {
-		return "ctx_stage1rt_string_view_index", ref.Elem, true
+		return "ctx_string_view_index", ref.Elem, true
 	}
 	return "", nil, false
 }
@@ -2151,13 +2151,13 @@ func runtimeSliceOperandInfo(objectType semantic.Type, resultType semantic.Type)
 		}, true
 	}
 	if _, ok := objectType.(*semantic.DStrType); ok {
-		return runtimeSliceInfo{helperName: "ctx_stage1rt_string_view", operandType: objectType, resultType: resultType, indexType: i64Type}, true
+		return runtimeSliceInfo{helperName: "ctx_string_view", operandType: objectType, resultType: resultType, indexType: i64Type}, true
 	}
 	if _, ok := objectType.(*semantic.SViewType); ok {
-		return runtimeSliceInfo{helperName: "ctx_stage1rt_string_view_slice", operandType: objectType, resultType: resultType, indexType: i64Type}, true
+		return runtimeSliceInfo{helperName: "ctx_string_view_slice", operandType: objectType, resultType: resultType, indexType: i64Type}, true
 	}
 	if st, ok := objectType.(*semantic.StructType); ok && st.Name == "StringView" {
-		return runtimeSliceInfo{helperName: "ctx_stage1rt_string_view_slice", operandType: objectType, resultType: resultType, indexType: i64Type}, true
+		return runtimeSliceInfo{helperName: "ctx_string_view_slice", operandType: objectType, resultType: resultType, indexType: i64Type}, true
 	}
 	ref, ok := objectType.(*semantic.RefType)
 	if !ok || ref.State != semantic.RefStateNonNull {
@@ -2175,13 +2175,13 @@ func runtimeSliceOperandInfo(objectType semantic.Type, resultType semantic.Type)
 		return runtimeSliceInfo{helperName: "arena_da_view_slice", operandType: ref.Elem, resultType: &semantic.ViewType{Elem: view.Elem}, indexType: usizeType}, true
 	}
 	if _, ok := ref.Elem.(*semantic.DStrType); ok {
-		return runtimeSliceInfo{helperName: "ctx_stage1rt_string_view", operandType: ref.Elem, resultType: resultType, indexType: i64Type}, true
+		return runtimeSliceInfo{helperName: "ctx_string_view", operandType: ref.Elem, resultType: resultType, indexType: i64Type}, true
 	}
 	if _, ok := ref.Elem.(*semantic.SViewType); ok {
-		return runtimeSliceInfo{helperName: "ctx_stage1rt_string_view_slice", operandType: ref.Elem, resultType: resultType, indexType: i64Type}, true
+		return runtimeSliceInfo{helperName: "ctx_string_view_slice", operandType: ref.Elem, resultType: resultType, indexType: i64Type}, true
 	}
 	if st, ok := ref.Elem.(*semantic.StructType); ok && st.Name == "StringView" {
-		return runtimeSliceInfo{helperName: "ctx_stage1rt_string_view_slice", operandType: ref.Elem, resultType: resultType, indexType: i64Type}, true
+		return runtimeSliceInfo{helperName: "ctx_string_view_slice", operandType: ref.Elem, resultType: resultType, indexType: i64Type}, true
 	}
 	return runtimeSliceInfo{}, false
 }
@@ -2196,15 +2196,15 @@ func runtimeStringCompareInfo(leftType semantic.Type, rightType semantic.Type) (
 		return "", nil, nil, false, false
 	}
 	if leftKind == runtimeStringCompareView && rightKind == runtimeStringCompareView {
-		return "ctx_stage1rt_string_views_eq", leftType, rightType, false, true
+		return "ctx_string_views_eq", leftType, rightType, false, true
 	}
 	if leftKind == runtimeStringCompareView {
-		return "ctx_stage1rt_string_view_eq", leftType, rightType, false, true
+		return "ctx_string_view_eq", leftType, rightType, false, true
 	}
 	if rightKind == runtimeStringCompareView {
-		return "ctx_stage1rt_string_view_eq", rightType, leftType, true, true
+		return "ctx_string_view_eq", rightType, leftType, true, true
 	}
-	return "ctx_stage1rt_streq", leftType, rightType, false, true
+	return "ctx_streq", leftType, rightType, false, true
 }
 
 type runtimeStringCompareKind int

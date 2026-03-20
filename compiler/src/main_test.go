@@ -138,12 +138,12 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			path: filepath.Join(repoRoot, "Code", "test_programs", "string_view_ops.llcontext"),
 			checks: []string{
 				"%StringView = type { ptr, i64 }",
-				"declare %StringView @ctx_stage1rt_string_view(ptr, i64, i64)",
-				"call %StringView @ctx_stage1rt_string_view(ptr",
-				"declare i64 @ctx_stage1rt_string_view_index(%StringView, i64)",
-				"declare i64 @ctx_stage1rt_strlen(ptr)",
-				"declare i64 @ctx_stage1rt_string_view_eq(%StringView, ptr)",
-				"declare i64 @ctx_stage1rt_string_views_eq(%StringView, %StringView)",
+				"declare %StringView @ctx_string_view(ptr, i64, i64)",
+				"call %StringView @ctx_string_view(ptr",
+				"declare i64 @ctx_string_view_index(%StringView, i64)",
+				"declare i64 @ctx_strlen(ptr)",
+				"declare i64 @ctx_string_view_eq(%StringView, ptr)",
+				"declare i64 @ctx_string_views_eq(%StringView, %StringView)",
 			},
 		},
 		{
@@ -780,7 +780,7 @@ func TestRunCLICompilesStage1RuntimeToLLVM(t *testing.T) {
 		"define ptr @ctx_stage1rt_concat2(ptr",
 		"define ptr @ctx_stage1rt_string_builder_new(ptr",
 		"%StringView = type { ptr, i64 }",
-		"define i64 @ctx_stage1rt_string_view_len(%StringView",
+		"define i64 @ctx_string_view_len(%StringView",
 		"define %PackedStoreAllocResult @ctx_packed_store_alloc_result(ptr",
 		"define void @ctx_packed_store_alloc_result_slow(ptr",
 		"define %PackedStoreAllocResult @ctx_packed_store_alloc_fixed_result(ptr",
@@ -797,6 +797,16 @@ func TestRunCLICompilesStage1RuntimeToLLVM(t *testing.T) {
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	for _, check := range []string{
+		"@ctx_stage1rt_string_view_len = alias ",
+		"@ctx_stage1rt_string_from_view = alias ",
+		"define i64 @ctx_stage1rt_string_view_len(",
+		"define ptr @ctx_stage1rt_string_from_view(",
+	} {
+		if strings.Contains(output, check) {
+			t.Fatalf("expected output to omit legacy string helper symbol %q, got:\n%s", check, output)
 		}
 	}
 }

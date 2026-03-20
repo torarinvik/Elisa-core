@@ -405,14 +405,14 @@ def view_char(text: sview[0, 4]) -> char:
 		"define %StringView @slice_text([4 x i8]",
 		"insertvalue %StringView",
 		"define i64 @view_char(%StringView",
-		"declare i64 @ctx_stage1rt_string_view_index(%StringView, i64)",
+		"declare i64 @ctx_string_view_index(%StringView, i64)",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
-	if strings.Contains(output, "@ctx_stage1rt_string_view(ptr") {
+	if strings.Contains(output, "@ctx_string_view(ptr") {
 		t.Fatalf("expected fixed string slice lowering to avoid runtime string view helper, got:\n%s", output)
 	}
 }
@@ -2072,8 +2072,8 @@ func TestGenerateLLVMIRIndexesDStrViaRuntimeHelper(t *testing.T) {
 
 	checks := []string{
 		"define i64 @read_codepoint(ptr",
-		"declare i64 @ctx_stage1rt_string_index(ptr, i64)",
-		"call i64 @ctx_stage1rt_string_index(ptr",
+		"declare i64 @ctx_string_index(ptr, i64)",
+		"call i64 @ctx_string_index(ptr",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -2119,8 +2119,8 @@ func TestGenerateLLVMIRIndexesStringViewViaRuntimeHelper(t *testing.T) {
 	checks := []string{
 		"%StringView = type { ptr, i64 }",
 		"define i64 @read_view(%StringView",
-		"declare i64 @ctx_stage1rt_string_view_index(%StringView, i64)",
-		"call i64 @ctx_stage1rt_string_view_index(%StringView",
+		"declare i64 @ctx_string_view_index(%StringView, i64)",
+		"call i64 @ctx_string_view_index(%StringView",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -2149,12 +2149,12 @@ def different_views(left: StringView, right: StringView) -> bool:
 	}
 
 	checks := []string{
-		"declare i64 @ctx_stage1rt_streq(ptr, ptr)",
-		"declare i64 @ctx_stage1rt_string_view_eq(%StringView, ptr)",
-		"declare i64 @ctx_stage1rt_string_views_eq(%StringView, %StringView)",
-		"call i64 @ctx_stage1rt_streq(ptr",
-		"call i64 @ctx_stage1rt_string_view_eq(%StringView",
-		"call i64 @ctx_stage1rt_string_views_eq(%StringView",
+		"declare i64 @ctx_streq(ptr, ptr)",
+		"declare i64 @ctx_string_view_eq(%StringView, ptr)",
+		"declare i64 @ctx_string_views_eq(%StringView, %StringView)",
+		"call i64 @ctx_streq(ptr",
+		"call i64 @ctx_string_view_eq(%StringView",
+		"call i64 @ctx_string_views_eq(%StringView",
 		"icmp ne i64",
 		"icmp eq i64",
 	}
@@ -2175,20 +2175,20 @@ def ctx_stage0_string_view(value: any u8&?, start: i64, end: i64) -> StringView:
 	_ = start
 	return StringView("".cast[any u8&](), end - start)
 
-def ctx_stage1rt_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
+def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
 	return ctx_stage0_string_view(value, start, end)
 
 def same_shape_text(left: dstr[row], right: dstr[row]) -> bool:
 	return left == right
 
 def same_bounds_view(left: dstr[row], right: dstr[col]) -> bool:
-	left_view: StringView = ctx_stage1rt_string_view(left, 0, 2)
-	right_view: StringView = ctx_stage1rt_string_view(right, 0, 2)
+	left_view: StringView = ctx_string_view(left, 0, 2)
+	right_view: StringView = ctx_string_view(right, 0, 2)
 	return left_view == right_view
 
 def different_bounds_view(left: dstr[row], right: dstr[col]) -> bool:
-	left_view: StringView = ctx_stage1rt_string_view(left, 0, 2)
-	right_view: StringView = ctx_stage1rt_string_view(right, 0, 3)
+	left_view: StringView = ctx_string_view(left, 0, 2)
+	right_view: StringView = ctx_string_view(right, 0, 3)
 	return left_view == right_view
 `
 	result := parseAndAnalyze(t, "backend_runtime_string_same_extent.llcontext", src)
@@ -2199,7 +2199,7 @@ def different_bounds_view(left: dstr[row], right: dstr[col]) -> bool:
 
 	checks := []string{
 		"declare i64 @memcmp(ptr, ptr, i64)",
-		"declare i64 @ctx_stage1rt_strlen(ptr)",
+		"declare i64 @ctx_strlen(ptr)",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -2211,13 +2211,13 @@ def different_bounds_view(left: dstr[row], right: dstr[col]) -> bool:
 	if sameShapeBody == "" {
 		t.Fatalf("expected to find same_shape_text body, got:\n%s", output)
 	}
-	for _, want := range []string{"call i64 @ctx_stage1rt_strlen(ptr", "call i64 @memcmp(ptr"} {
+	for _, want := range []string{"call i64 @ctx_strlen(ptr", "call i64 @memcmp(ptr"} {
 		if !strings.Contains(sameShapeBody, want) {
 			t.Fatalf("expected same_shape_text to contain %q, got:\n%s", want, sameShapeBody)
 		}
 	}
-	if strings.Contains(sameShapeBody, "call i64 @ctx_stage1rt_streq") {
-		t.Fatalf("expected same_shape_text to avoid ctx_stage1rt_streq helper, got:\n%s", sameShapeBody)
+	if strings.Contains(sameShapeBody, "call i64 @ctx_streq") {
+		t.Fatalf("expected same_shape_text to avoid ctx_streq helper, got:\n%s", sameShapeBody)
 	}
 
 	sameBoundsBody := functionIR(output, "same_bounds_view")
@@ -2227,15 +2227,15 @@ def different_bounds_view(left: dstr[row], right: dstr[col]) -> bool:
 	if !strings.Contains(sameBoundsBody, "call i64 @memcmp(ptr") {
 		t.Fatalf("expected same_bounds_view to use memcmp fast path, got:\n%s", sameBoundsBody)
 	}
-	if strings.Contains(sameBoundsBody, "call i64 @ctx_stage1rt_string_views_eq") {
-		t.Fatalf("expected same_bounds_view to avoid ctx_stage1rt_string_views_eq helper, got:\n%s", sameBoundsBody)
+	if strings.Contains(sameBoundsBody, "call i64 @ctx_string_views_eq") {
+		t.Fatalf("expected same_bounds_view to avoid ctx_string_views_eq helper, got:\n%s", sameBoundsBody)
 	}
 
 	differentBoundsBody := functionIR(output, "different_bounds_view")
 	if differentBoundsBody == "" {
 		t.Fatalf("expected to find different_bounds_view body, got:\n%s", output)
 	}
-	if !strings.Contains(differentBoundsBody, "call i64 @ctx_stage1rt_string_views_eq") {
+	if !strings.Contains(differentBoundsBody, "call i64 @ctx_string_views_eq") {
 		t.Fatalf("expected different_bounds_view to keep helper fallback, got:\n%s", differentBoundsBody)
 	}
 }
@@ -2270,7 +2270,7 @@ def differs_short(view: StringView) -> bool:
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
-	for _, bad := range []string{"ctx_stage1rt_string_view_eq", "@memcmp("} {
+	for _, bad := range []string{"ctx_string_view_eq", "@memcmp("} {
 		if strings.Contains(output, bad) {
 			t.Fatalf("expected tiny StringView literal equality to avoid %q, got:\n%s", bad, output)
 		}
@@ -2353,8 +2353,8 @@ func TestGenerateLLVMIRLowersDStrLenFieldViaRuntimeHelper(t *testing.T) {
 
 	checks := []string{
 		"define i64 @text_len(ptr",
-		"declare i64 @ctx_stage1rt_strlen(ptr)",
-		"call i64 @ctx_stage1rt_strlen(ptr",
+		"declare i64 @ctx_strlen(ptr)",
+		"call i64 @ctx_strlen(ptr",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -2559,9 +2559,9 @@ def head_codepoint(text: dstr[row]) -> char:
 
 	checks := []string{
 		"%StringView = type { ptr, i64 }",
-		"declare %StringView @ctx_stage1rt_string_view(ptr, i64, i64)",
-		"call %StringView @ctx_stage1rt_string_view(ptr",
-		"call i64 @ctx_stage1rt_string_view_index(%StringView",
+		"declare %StringView @ctx_string_view(ptr, i64, i64)",
+		"call %StringView @ctx_string_view(ptr",
+		"call i64 @ctx_string_view_index(%StringView",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
