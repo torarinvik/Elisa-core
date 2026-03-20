@@ -70,6 +70,8 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 		return value, ok
 	case *ast.ParenExpr:
 		return a.evalConstExpr(n.Inner)
+	case *ast.MoveExpr:
+		return a.evalConstExpr(n.Operand)
 	case *ast.UnaryExpr:
 		operand, ok := a.evalConstExpr(n.Operand)
 		if !ok {

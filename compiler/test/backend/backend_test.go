@@ -114,6 +114,36 @@ def make_holder() -> ScratchHolder:
 	}
 }
 
+func TestGenerateLLVMIRLowersMoveAsStructDestructure(t *testing.T) {
+	src := `repr(c) struct Pair:
+    left: mutable i64
+    right: mutable i64
+
+def sum(pair: Pair) -> i64:
+    move pair as Pair(left, right)
+    return left + right
+`
+	result := parseAndAnalyze(t, "backend_move_as_struct.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%Pair = type { i64, i64 }",
+		"define i64 @sum(%Pair",
+		"extractvalue %Pair",
+		"store i64",
+		"load i64",
+		"add i64",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersLocalsCallsAndControlFlow(t *testing.T) {
 	src := `extern add_one(value: i32) -> i32
 

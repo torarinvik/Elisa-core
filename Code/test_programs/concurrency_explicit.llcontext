@@ -41,18 +41,18 @@ def typed_thread_spawn_permissioned(value: i64) -> Thread[i64] can[Thread.Spawn,
 	return spawn1(permissioned_thread_worker, value)
 
 def typed_thread_join(thread: Thread[i64]) -> i64 can[Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
-	return join(thread)
+	return join(move thread)
 
 def typed_thread_detach_permissioned(value: i64) can[Thread.Spawn, Thread.Detach, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
 	thread: Thread[i64] = spawn1(permissioned_thread_worker, value)
-	detach(thread)
+	detach(move thread)
 
 def typed_pool_roundtrip(pool: any ThreadPool&, value: i64) -> i64 can[Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
 	task: Task[i64] = pool_submit1(pool, thread_worker, value)
-	return pool_await(task)
+	return pool_await(move task)
 
 def typed_group_waitall(pool: any ThreadPool&, value: i64) can[Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
 	group: TaskGroup = task_group_new()
 	task: Task[i64] = pool_submit1(pool, thread_worker, value)
-	task_group_add((&group).cast[any TaskGroup&](), task)
+	task_group_add((&group).cast[any TaskGroup&](), move task)
 	task_group_wait_all((&group).cast[any TaskGroup&]())

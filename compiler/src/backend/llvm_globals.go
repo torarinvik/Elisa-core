@@ -159,6 +159,8 @@ func (g *llvmGenerator) constExprValue(expr ast.Expr, expected semantic.Type) (C
 		return inner, nil
 	case *ast.ParenExpr:
 		return g.constExprValue(n.Inner, expected)
+	case *ast.MoveExpr:
+		return g.constExprValue(n.Operand, expected)
 	default:
 		if value, ok := g.evalConstExpr(expr); ok {
 			coercedType := expected
@@ -185,6 +187,15 @@ func (g *llvmGenerator) resolveConstAggregateExpr(expr ast.Expr) (ast.Expr, sema
 			return resolved, resolvedType, true, nil
 		}
 		return n.Inner, g.exprType(n.Inner), true, nil
+	case *ast.MoveExpr:
+		resolved, resolvedType, changed, err := g.resolveConstAggregateExpr(n.Operand)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		if changed {
+			return resolved, resolvedType, true, nil
+		}
+		return n.Operand, g.exprType(n.Operand), true, nil
 	case *ast.Ident:
 		decl, declType, ok := g.lookupGlobalConstDecl(n.Name)
 		if !ok || decl.Value == nil {

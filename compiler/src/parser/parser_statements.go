@@ -346,6 +346,27 @@ func (p *Parser) parseStaticStmt() ast.Stmt {
 	return &ast.StaticIfStmt{Position: pos, Cond: cond, Then: thenBlock, Elifs: elifs, Else: elseBlock}
 }
 
+func (p *Parser) parseMoveBindPattern() ast.MoveBindPattern {
+	pos := p.cur().Pos
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	if !p.match(lexer.TOKEN_LPAREN) {
+		return &ast.MoveBindNamePattern{Position: pos, Name: name}
+	}
+	args := make([]ast.MoveBindArg, 0)
+	if p.peek() != lexer.TOKEN_RPAREN {
+		for {
+			argPos := p.cur().Pos
+			argName := p.expect(lexer.TOKEN_IDENT).Text
+			args = append(args, ast.MoveBindArg{Position: argPos, Name: argName})
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+	return &ast.MoveBindStructPattern{Position: pos, TypeName: name, Args: args}
+}
+
 // parseExprOrAssignStmt: handles expressions, assignments, var decls, discards
 func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 	pos := p.cur().Pos
@@ -399,6 +420,13 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 	}
 
 	expr := p.parseExpr()
+
+	if _, ok := expr.(*ast.MoveExpr); ok && p.peek() == lexer.TOKEN_AS {
+		p.advance()
+		pattern := p.parseMoveBindPattern()
+		p.expectNewline()
+		return &ast.MoveBindStmt{Position: pos, Value: expr, Pattern: pattern}
+	}
 
 	switch p.peek() {
 	case lexer.TOKEN_LARROW:

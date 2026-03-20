@@ -239,6 +239,8 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			s.bindPackedStoreValue(declType, value)
 		}
 		return nil
+	case *ast.MoveBindStmt:
+		return s.emitMoveBindStmt(n)
 	case *ast.RegionStmt:
 		arenaType := s.g.result.NamedTypes["Arena"]
 		if arenaType == nil {
@@ -411,6 +413,52 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 	default:
 		return fmt.Errorf("unsupported statement %T", stmt)
 	}
+}
+
+func (s *functionState) emitMoveBindStmt(stmt *ast.MoveBindStmt) error {
+	if stmt == nil {
+		return nil
+	}
+	value, valueType, err := s.emitExpr(stmt.Value, nil)
+	if err != nil {
+		return err
+	}
+	switch p := stmt.Pattern.(type) {
+	case *ast.MoveBindNamePattern:
+		return s.emitMoveBindLocal(p.Name, valueType, value)
+	case *ast.MoveBindStructPattern:
+		fields, err := s.g.structLiteralFields(valueType)
+		if err != nil {
+			return err
+		}
+		limit := len(p.Args)
+		if len(fields) < limit {
+			limit = len(fields)
+		}
+		for i := 0; i < limit; i++ {
+			fieldValue := C.LLVMBuildExtractValue(s.builder, value, C.unsigned(i), cStringFree("move.as.field"))
+			if err := s.emitMoveBindLocal(p.Args[i].Name, fields[i].Type, fieldValue); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported move-as pattern %T", stmt.Pattern)
+	}
+}
+
+func (s *functionState) emitMoveBindLocal(name string, typ semantic.Type, value C.LLVMValueRef) error {
+	if name == "_" {
+		return nil
+	}
+	alloca, err := s.createEntryAlloca(name, typ)
+	if err != nil {
+		return err
+	}
+	s.defineBinding(name, valueBinding{ptr: alloca, typ: typ})
+	C.LLVMBuildStore(s.builder, value, alloca)
+	s.bindPackedStoreValue(typ, value)
+	return nil
 }
 
 func (s *functionState) emitInStore(stmt *ast.InStoreStmt) error {
@@ -1241,6 +1289,8 @@ func stmtReadsMatchedValueField(name string, stmt ast.Stmt) bool {
 		return exprReadsMatchedValueField(name, n.Target) || exprReadsMatchedValueField(name, n.Value)
 	case *ast.VarDeclStmt:
 		return exprReadsMatchedValueField(name, n.Value)
+	case *ast.MoveBindStmt:
+		return exprReadsMatchedValueField(name, n.Value)
 	case *ast.ReturnStmt:
 		return exprReadsMatchedValueField(name, n.Value)
 	case *ast.IfStmt:
@@ -1324,6 +1374,8 @@ func exprReadsMatchedValueField(name string, expr ast.Expr) bool {
 	case *ast.TernaryExpr:
 		return exprReadsMatchedValueField(name, n.Value) || exprReadsMatchedValueField(name, n.Cond) || exprReadsMatchedValueField(name, n.Alt)
 	case *ast.AddrOfExpr:
+		return exprReadsMatchedValueField(name, n.Operand)
+	case *ast.MoveExpr:
 		return exprReadsMatchedValueField(name, n.Operand)
 	case *ast.StructLitExpr:
 		for _, arg := range n.Args {

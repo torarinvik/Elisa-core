@@ -309,8 +309,9 @@ def bad(thread: Thread[i64]) -> void:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "thread handle \"thread\" cannot be used after argument to call \"join\"") {
-		t.Fatalf("expected consumed-thread diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread handle \"thread\" must be moved explicitly before argument to call \"join\"") {
+		t.Fatalf("expected explicit-move diagnostic, got:\n%s", all)
 	}
 }
 
@@ -318,13 +319,13 @@ func TestAnalyzeAcceptsAffineThreadMovesAcrossBranches(t *testing.T) {
 	src := `extern join(thread: Thread[i64]) -> i64
 
 def move_then_join(thread: Thread[i64]) -> i64:
-    moved: Thread[i64] = thread
-    return join(moved)
+    moved: Thread[i64] = move thread
+    return join(move moved)
 
 def branch_join(cond: bool, thread: Thread[i64]) -> i64:
     if cond:
-        return join(thread)
-    return join(thread)
+        return join(move thread)
+    return join(move thread)
 `
 	result, errs := parseAndAnalyze(t, "affine_thread_moves.llcontext", src)
 	requireNoErrors(t, errs)
@@ -333,13 +334,62 @@ def branch_join(cond: bool, thread: Thread[i64]) -> i64:
 	requireFunctionReturnTypeString(t, result, "branch_join", "i64")
 }
 
+func TestAnalyzeAcceptsMoveAsStructDestructure(t *testing.T) {
+	src := `extern join(thread: Thread[i64]) -> i64
+
+repr(c) struct Holder:
+    thread: mutable Thread[i64]
+    count: mutable i64
+
+def run(holder: Holder) -> i64:
+    move holder as Holder(thread, count)
+    _ = count
+    return join(move thread)
+`
+	result, errs := parseAndAnalyze(t, "move_as_struct_destructure.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "run", "i64")
+}
+
+func TestAnalyzeAcceptsMoveAsRebind(t *testing.T) {
+	src := `extern join(thread: Thread[i64]) -> i64
+
+def run(thread: Thread[i64]) -> i64:
+    move thread as worker
+    return join(move worker)
+`
+	result, errs := parseAndAnalyze(t, "move_as_rebind.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "run", "i64")
+}
+
+func TestAnalyzeRejectsMoveAsStructPatternArityMismatch(t *testing.T) {
+	src := `repr(c) struct Pair:
+    left: mutable i64
+    right: mutable i64
+
+def bad(pair: Pair) -> void:
+    move pair as Pair(left)
+`
+	_, errs := parseAndAnalyze(t, "move_as_arity_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic errors, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "move-as pattern \"Pair\" expects 2 bindings, got 1") {
+		t.Fatalf("expected move-as arity diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsAwaitAfterTaskGroupTransfer(t *testing.T) {
 	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64]) -> void
 extern pool_await(task: Task[i64]) -> i64
 
 def bad(group: mutable TaskGroup, task: Task[i64]) -> i64:
-    task_group_add((&group).cast[any TaskGroup&](), task)
-    return pool_await(task)
+    task_group_add((&group).cast[any TaskGroup&](), move task)
+    return pool_await(move task)
 `
 	_, errs := parseAndAnalyze(t, "consumed_task_handle_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -358,9 +408,9 @@ repr(c) struct Holder:
     thread: mutable Thread[i64]
 
 def bad(holder: mutable Holder) -> void:
-    value: i64 = join(holder.thread)
+    value: i64 = join(move holder.thread)
     _ = value
-    detach(holder.thread)
+    detach(move holder.thread)
 `
 	_, errs := parseAndAnalyze(t, "consumed_thread_field_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -444,10 +494,9 @@ repr(c) struct Holder:
     count: mutable i64
 
 def bad(holder: Holder) -> void:
-    value: i64 = join(holder.thread)
+    value: i64 = join(move holder.thread)
     _ = value
     copy: Holder = holder
-    _ = copy
 `
 	_, errs := parseAndAnalyze(t, "affine_container_copy_after_field_move_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -464,9 +513,8 @@ func TestAnalyzeRejectsReusingMovedAffineContainingAggregate(t *testing.T) {
     thread: mutable Thread[i64]
 
 def bad(holder: Holder) -> void:
-    copy: Holder = holder
-    _ = copy
-    _ = holder
+    copy: Holder = move holder
+    _ = move holder
 `
 	_, errs := parseAndAnalyze(t, "affine_container_move_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -486,9 +534,8 @@ repr(c) struct Holder:
     count: mutable i64
 
 def bad(thread: Thread[i64]) -> i64:
-    holder: Holder = Holder(thread, 1)
-    _ = holder
-    return join(thread)
+    holder: Holder = Holder(move thread, 1)
+    return join(move thread)
 `
 	_, errs := parseAndAnalyze(t, "affine_struct_literal_move_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -504,9 +551,8 @@ func TestAnalyzeRejectsReusingAffineHandleAfterArrayLiteralMove(t *testing.T) {
 	src := `extern join(thread: Thread[i64]) -> i64
 
 def bad(thread: Thread[i64]) -> i64:
-    items: array[Thread[i64], 1] = [thread]
-    _ = items
-    return join(thread)
+    items: array[Thread[i64], 1] = [move thread]
+    return join(move thread)
 `
 	_, errs := parseAndAnalyze(t, "affine_array_literal_move_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -525,9 +571,8 @@ enum Job:
     Run(thread: Thread[i64])
 
 def bad(thread: Thread[i64]) -> i64:
-    job: Job = Job.Run(thread: thread)
-    _ = job
-    return join(thread)
+    job: Job = Job.Run(thread: move thread)
+    return join(move thread)
 `
 	_, errs := parseAndAnalyze(t, "affine_enum_constructor_move_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -546,9 +591,8 @@ repr(c) struct Holder:
     thread: mutable Thread[i64]
 
 def bad(holder: Holder) -> i64:
-    copy: Holder = holder
-    _ = copy
-    return join(holder.thread)
+    copy: Holder = move holder
+    return join(move holder.thread)
 `
 	_, errs := parseAndAnalyze(t, "affine_parent_move_field_use_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -564,9 +608,9 @@ func TestAnalyzeRejectsReusingIndexedAffineValue(t *testing.T) {
 	src := `extern join(thread: Thread[i64]) -> i64
 
 def bad(items: array[Thread[i64], 1]) -> i64:
-    first: i64 = join(items[0])
+    first: i64 = join(move items[0])
     _ = first
-    return join(items[0])
+    return join(move items[0])
 `
 	_, errs := parseAndAnalyze(t, "affine_index_move_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -1230,13 +1274,13 @@ func TestAnalyzeAcceptsBuiltinConcurrencyPermissionFamilies(t *testing.T) {
 
 func TestAnalyzeAcceptsBuiltinConcurrencyCarrierTypes(t *testing.T) {
 	src := `def touch(thread: Thread[i64], task: Task[i64], pool: ThreadPool, group: TaskGroup, mu: Mutex, guard: MutexGuard, cv: CondVar, slot: atomic[i64]) -> void:
-	_ = thread
-	_ = task
-	_ = pool
-	_ = group
-	_ = mu
-	_ = guard
-	_ = cv
+	_ = thread.handle
+	_ = task.handle
+	_ = pool.handle
+	_ = group.handle
+	_ = mu.handle
+	_ = guard.handle
+	_ = cv.handle
 	copy: atomic[i64] = slot
 	_ = copy
 `

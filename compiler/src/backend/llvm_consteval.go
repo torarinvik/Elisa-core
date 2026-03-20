@@ -96,6 +96,8 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 		return semantic.ConstValue{}, false
 	case *ast.ParenExpr:
 		return evalConstExprWithLookup(n.Inner, lookup)
+	case *ast.MoveExpr:
+		return evalConstExprWithLookup(n.Operand, lookup)
 	case *ast.UnaryExpr:
 		operand, ok := evalConstExprWithLookup(n.Operand, lookup)
 		if !ok {

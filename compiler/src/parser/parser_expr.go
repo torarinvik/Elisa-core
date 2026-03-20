@@ -442,6 +442,11 @@ func (p *Parser) parseUnary() ast.Expr {
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "new" {
 		return p.parseAllocExpr()
 	}
+	if p.matchIdentText("move") {
+		pos := p.tokens[p.pos-1].Pos
+		operand := p.parseUnary()
+		return &ast.MoveExpr{Position: pos, Operand: operand}
+	}
 	if p.peek() == lexer.TOKEN_MINUS {
 		pos := p.cur().Pos
 		p.advance()

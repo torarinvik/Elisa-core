@@ -429,6 +429,8 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		if n.Value != nil {
 			c.collectExpr(n.Value)
 		}
+	case *ast.MoveBindStmt:
+		c.collectExpr(n.Value)
 	case *ast.AssignStmt:
 		c.collectExpr(n.Target)
 		c.collectExpr(n.Value)
@@ -518,6 +520,8 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.Alt)
 	case *ast.AddrOfExpr:
 		c.collectExpr(n.Operand)
+	case *ast.MoveExpr:
+		c.collectExpr(n.Operand)
 	case *ast.SpecializeExpr:
 		c.collectExpr(n.Operand)
 	case *ast.StructLitExpr:
@@ -583,6 +587,8 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		if n.Value != nil {
 			a.validatePermissionExpr(n.Value, granted)
 		}
+	case *ast.MoveBindStmt:
+		a.validatePermissionExpr(n.Value, granted)
 	case *ast.AssignStmt:
 		a.validatePermissionExpr(n.Target, granted)
 		a.validatePermissionExpr(n.Value, granted)
@@ -672,6 +678,8 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		a.validatePermissionExpr(n.Cond, granted)
 		a.validatePermissionExpr(n.Alt, granted)
 	case *ast.AddrOfExpr:
+		a.validatePermissionExpr(n.Operand, granted)
+	case *ast.MoveExpr:
 		a.validatePermissionExpr(n.Operand, granted)
 	case *ast.SpecializeExpr:
 		a.validatePermissionExpr(n.Operand, granted)

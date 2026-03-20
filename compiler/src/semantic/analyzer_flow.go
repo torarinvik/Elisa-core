@@ -31,6 +31,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.defineLocal(sym, n.Pos())
 		a.recordRegionRefBinding(sym, n.Value)
 		a.consumeAffineValueExpr(n.Value, declType, "move into local "+strconvQuote(n.Name))
+	case *ast.MoveBindStmt:
+		a.analyzeMoveBindStmt(n)
 	case *ast.RegionStmt:
 		if n.Capacity != nil {
 			capacityType := a.analyzeExpr(n.Capacity)
@@ -202,6 +204,103 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		valueType := a.analyzeExpr(n.Value)
 		a.consumeAffineValueExpr(n.Value, valueType, "discard")
 	}
+}
+
+func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {
+	if stmt == nil {
+		return
+	}
+	valueType := a.analyzeExpr(stmt.Value)
+	switch p := stmt.Pattern.(type) {
+	case *ast.MoveBindNamePattern:
+		if p.Name != "_" {
+			a.defineLocal(&Symbol{Name: p.Name, Kind: SymbolLocal, Type: valueType, Node: p, Mutable: false}, p.Pos())
+		}
+	case *ast.MoveBindStructPattern:
+		fields, ok := a.resolveMoveBindStructPattern(p, valueType)
+		if !ok {
+			return
+		}
+		for i, arg := range p.Args {
+			if i >= len(fields) || arg.Name == "_" {
+				continue
+			}
+			a.defineLocal(&Symbol{Name: arg.Name, Kind: SymbolLocal, Type: fields[i].Type, Node: p, Mutable: false}, arg.Position)
+		}
+	default:
+		a.errorf(stmt.Pos(), "unsupported move-as pattern %T", stmt.Pattern)
+		return
+	}
+	a.consumeAffineValueExpr(stmt.Value, valueType, "move-as destructure")
+}
+
+type moveBindResolvedField struct {
+	Name string
+	Type Type
+}
+
+func (a *Analyzer) resolveMoveBindStructPattern(pattern *ast.MoveBindStructPattern, actual Type) ([]moveBindResolvedField, bool) {
+	if pattern == nil {
+		return nil, false
+	}
+	var (
+		base     *StructType
+		bindings map[string]Type
+	)
+	switch tt := actual.(type) {
+	case *StructType:
+		base = tt
+	case *GenericInstanceType:
+		structBase, ok := tt.Base.(*StructType)
+		if !ok {
+			a.errorf(pattern.Pos(), "move-as pattern %q requires a concrete struct value, got %s", pattern.TypeName, actual.String())
+			return nil, false
+		}
+		base = structBase
+		if len(base.TypeParams) == len(tt.Args) {
+			bindings = make(map[string]Type, len(base.TypeParams))
+			for i, name := range base.TypeParams {
+				bindings[name] = tt.Args[i]
+			}
+		}
+	default:
+		a.errorf(pattern.Pos(), "move-as pattern %q requires a concrete struct value, got %s", pattern.TypeName, actual.String())
+		return nil, false
+	}
+	if base == nil {
+		a.errorf(pattern.Pos(), "move-as pattern %q requires a concrete struct value, got %s", pattern.TypeName, actual.String())
+		return nil, false
+	}
+	if base.Name != pattern.TypeName {
+		a.errorf(pattern.Pos(), "move-as pattern expects struct %q, got %q", pattern.TypeName, base.Name)
+		return nil, false
+	}
+	if base.Decl == nil {
+		a.errorf(pattern.Pos(), "move-as destructuring is not supported for builtin struct %q", base.Name)
+		return nil, false
+	}
+	if len(pattern.Args) != len(base.Decl.Fields) {
+		a.errorf(pattern.Pos(), "move-as pattern %q expects %d bindings, got %d", pattern.TypeName, len(base.Decl.Fields), len(pattern.Args))
+	}
+	limit := len(pattern.Args)
+	if len(base.Decl.Fields) < limit {
+		limit = len(base.Decl.Fields)
+	}
+	fields := make([]moveBindResolvedField, 0, limit)
+	for i := 0; i < limit; i++ {
+		fieldDecl := base.Decl.Fields[i]
+		field, ok := base.Fields[fieldDecl.Name]
+		if !ok {
+			a.errorf(pattern.Pos(), "missing semantic field %q on struct %q", fieldDecl.Name, base.Name)
+			continue
+		}
+		fieldType := field.Type
+		if len(bindings) != 0 {
+			fieldType = a.substituteType(fieldType, bindings, nil, nil, nil)
+		}
+		fields = append(fields, moveBindResolvedField{Name: fieldDecl.Name, Type: fieldType})
+	}
+	return fields, true
 }
 
 func (a *Analyzer) analyzeCanStmt(stmt *ast.CanStmt) {
@@ -1242,14 +1341,24 @@ func (a *Analyzer) consumeAffineValueExpr(expr ast.Expr, expected Type, reason s
 	if expr == nil || !a.containsAffineHandleValues(expected, map[string]bool{}) {
 		return
 	}
-	key, ok := a.lookupAffineValueKey(expr)
-	if !ok {
+	if moved, ok := explicitMoveOperand(expr); ok {
+		key, ok := a.lookupAffineValueKey(moved)
+		if !ok {
+			return
+		}
+		if a.currentAffineValues == nil {
+			a.currentAffineValues = map[affineValueKey]affineValueState{}
+		}
+		a.currentAffineValues[key] = affineValueState{ConsumedBy: reason}
 		return
 	}
-	if a.currentAffineValues == nil {
-		a.currentAffineValues = map[affineValueKey]affineValueState{}
+	if _, ok := a.lookupAffineValueKey(expr); ok {
+		affineType := expected
+		if actual := a.exprTypes[expr]; actual != nil && a.containsAffineHandleValues(actual, map[string]bool{}) {
+			affineType = actual
+		}
+		a.errorf(expr.Pos(), "%s %q must be moved explicitly before %s", affineHandleKind(affineType), affineValueDisplayName(expr), reason)
 	}
-	a.currentAffineValues[key] = affineValueState{ConsumedBy: reason}
 }
 
 func (a *Analyzer) clearAffineValueTarget(expr ast.Expr) {
@@ -1295,6 +1404,8 @@ func (a *Analyzer) lookupAffineValueKey(expr ast.Expr) (affineValueKey, bool) {
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
 		return a.lookupAffineValueKey(n.Inner)
+	case *ast.MoveExpr:
+		return a.lookupAffineValueKey(n.Operand)
 	case *ast.CastExpr:
 		return a.lookupAffineValueKey(n.Operand)
 	case *ast.Ident:
@@ -1383,6 +1494,8 @@ func affineValueDisplayName(expr ast.Expr) string {
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
 		return affineValueDisplayName(n.Inner)
+	case *ast.MoveExpr:
+		return affineValueDisplayName(n.Operand)
 	case *ast.CastExpr:
 		return affineValueDisplayName(n.Operand)
 	case *ast.Ident:
@@ -1395,6 +1508,17 @@ func affineValueDisplayName(expr ast.Expr) string {
 		return base + "." + n.Field
 	default:
 		return "<value>"
+	}
+}
+
+func explicitMoveOperand(expr ast.Expr) (ast.Expr, bool) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return explicitMoveOperand(n.Inner)
+	case *ast.MoveExpr:
+		return n.Operand, true
+	default:
+		return nil, false
 	}
 }
 

@@ -306,6 +306,11 @@ type UnaryExpr struct {
 	Operand  Expr
 }
 
+type MoveExpr struct {
+	Position lexer.Pos
+	Operand  Expr
+}
+
 type CallExpr struct {
 	Position lexer.Pos
 	Func     Expr
@@ -440,6 +445,27 @@ type MatchPatternArg struct {
 	Pattern  MatchPattern
 }
 
+type MoveBindPattern interface {
+	Node
+	moveBindPatternTag()
+}
+
+type MoveBindNamePattern struct {
+	Position lexer.Pos
+	Name     string
+}
+
+type MoveBindStructPattern struct {
+	Position lexer.Pos
+	TypeName string
+	Args     []MoveBindArg
+}
+
+type MoveBindArg struct {
+	Position lexer.Pos
+	Name     string
+}
+
 type Stmt interface {
 	Node
 	stmtTag()
@@ -471,6 +497,12 @@ type VarDeclStmt struct {
 	Mutable  bool
 	Type     TypeExpr
 	Value    Expr
+}
+
+type MoveBindStmt struct {
+	Position lexer.Pos
+	Value    Expr
+	Pattern  MoveBindPattern
 }
 
 type ReturnStmt struct {
@@ -627,6 +659,7 @@ func (n *NullLit) Pos() lexer.Pos        { return n.Position }
 func (n *ZeroedLit) Pos() lexer.Pos      { return n.Position }
 func (n *BinaryExpr) Pos() lexer.Pos     { return n.Position }
 func (n *UnaryExpr) Pos() lexer.Pos      { return n.Position }
+func (n *MoveExpr) Pos() lexer.Pos       { return n.Position }
 func (n *CallExpr) Pos() lexer.Pos       { return n.Position }
 func (n *FieldExpr) Pos() lexer.Pos      { return n.Position }
 func (n *IndexExpr) Pos() lexer.Pos      { return n.Position }
@@ -650,10 +683,15 @@ func (n *MatchWildcardPattern) Pos() lexer.Pos {
 }
 func (n *MatchBindPattern) Pos() lexer.Pos    { return n.Position }
 func (n *MatchVariantPattern) Pos() lexer.Pos { return n.Position }
+func (n *MoveBindNamePattern) Pos() lexer.Pos { return n.Position }
+func (n *MoveBindStructPattern) Pos() lexer.Pos {
+	return n.Position
+}
 func (n *AssignStmt) Pos() lexer.Pos          { return n.Position }
 func (n *AugAssignStmt) Pos() lexer.Pos       { return n.Position }
 func (n *AsRefAssignStmt) Pos() lexer.Pos     { return n.Position }
 func (n *VarDeclStmt) Pos() lexer.Pos         { return n.Position }
+func (n *MoveBindStmt) Pos() lexer.Pos        { return n.Position }
 func (n *ReturnStmt) Pos() lexer.Pos          { return n.Position }
 func (n *IfStmt) Pos() lexer.Pos              { return n.Position }
 func (n *WhileStmt) Pos() lexer.Pos           { return n.Position }
@@ -704,6 +742,7 @@ func (*NullLit) nodeTag()              {}
 func (*ZeroedLit) nodeTag()            {}
 func (*BinaryExpr) nodeTag()           {}
 func (*UnaryExpr) nodeTag()            {}
+func (*MoveExpr) nodeTag()             {}
 func (*CallExpr) nodeTag()             {}
 func (*FieldExpr) nodeTag()            {}
 func (*IndexExpr) nodeTag()            {}
@@ -725,10 +764,13 @@ func (*MatchExpr) nodeTag()            {}
 func (*MatchWildcardPattern) nodeTag() {}
 func (*MatchBindPattern) nodeTag()     {}
 func (*MatchVariantPattern) nodeTag()  {}
+func (*MoveBindNamePattern) nodeTag()  {}
+func (*MoveBindStructPattern) nodeTag() {}
 func (*AssignStmt) nodeTag()           {}
 func (*AugAssignStmt) nodeTag()        {}
 func (*AsRefAssignStmt) nodeTag()      {}
 func (*VarDeclStmt) nodeTag()          {}
+func (*MoveBindStmt) nodeTag()         {}
 func (*ReturnStmt) nodeTag()           {}
 func (*IfStmt) nodeTag()               {}
 func (*WhileStmt) nodeTag()            {}
@@ -781,6 +823,7 @@ func (*NullLit) exprTag()    {}
 func (*ZeroedLit) exprTag()  {}
 func (*BinaryExpr) exprTag() {}
 func (*UnaryExpr) exprTag()  {}
+func (*MoveExpr) exprTag()   {}
 func (*CallExpr) exprTag()   {}
 func (*FieldExpr) exprTag()  {}
 func (*IndexExpr) exprTag()  {}
@@ -789,6 +832,8 @@ func (*SliceExpr) exprTag()  {}
 func (*MatchWildcardPattern) matchPatternTag() {}
 func (*MatchBindPattern) matchPatternTag()     {}
 func (*MatchVariantPattern) matchPatternTag()  {}
+func (*MoveBindNamePattern) moveBindPatternTag() {}
+func (*MoveBindStructPattern) moveBindPatternTag() {}
 func (*ListLitExpr) exprTag()                  {}
 func (*CastExpr) exprTag()                     {}
 func (*SizeofExpr) exprTag()                   {}
@@ -809,6 +854,7 @@ func (*AssignStmt) stmtTag()      {}
 func (*AugAssignStmt) stmtTag()   {}
 func (*AsRefAssignStmt) stmtTag() {}
 func (*VarDeclStmt) stmtTag()     {}
+func (*MoveBindStmt) stmtTag()    {}
 func (*ReturnStmt) stmtTag()      {}
 func (*IfStmt) stmtTag()          {}
 func (*WhileStmt) stmtTag()       {}

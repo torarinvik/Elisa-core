@@ -685,6 +685,8 @@ func exprStr(e ast.Expr) string {
 		return fmt.Sprintf("(%s if %s else %s)", exprStr(n.Value), exprStr(n.Cond), exprStr(n.Alt))
 	case *ast.AddrOfExpr:
 		return fmt.Sprintf("&%s", exprStr(n.Operand))
+	case *ast.MoveExpr:
+		return fmt.Sprintf("move %s", exprStr(n.Operand))
 	case *ast.SpecializeExpr:
 		typeArgs := make([]string, 0, len(n.TypeArgs))
 		for _, arg := range n.TypeArgs {

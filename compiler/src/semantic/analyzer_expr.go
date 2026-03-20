@@ -89,6 +89,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	case *ast.UnaryExpr:
 		result = a.analyzeUnaryExpr(n)
 		return
+	case *ast.MoveExpr:
+		result = a.analyzeMoveExpr(n)
+		return
 	case *ast.CallExpr:
 		result = a.analyzeCallExpr(n)
 		return
@@ -792,6 +795,13 @@ func (a *Analyzer) analyzeUnaryExpr(expr *ast.UnaryExpr) Type {
 	default:
 		return invalidType
 	}
+}
+
+func (a *Analyzer) analyzeMoveExpr(expr *ast.MoveExpr) Type {
+	if expr == nil {
+		return invalidType
+	}
+	return a.analyzeExpr(expr.Operand)
 }
 
 func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {

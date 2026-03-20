@@ -85,6 +85,8 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, actualType, err = s.emitTernaryExpr(n)
 	case *ast.AddrOfExpr:
 		value, actualType, err = s.emitAddrOfExpr(n)
+	case *ast.MoveExpr:
+		value, actualType, err = s.emitExpr(n.Operand, expected)
 	case *ast.SpecializeExpr:
 		value, actualType, err = s.emitSpecializeExpr(n)
 	case *ast.StructLitExpr:
