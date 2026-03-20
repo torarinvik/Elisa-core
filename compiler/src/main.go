@@ -483,6 +483,13 @@ func formatPermissionRefs(refs []ast.PermissionRef) string {
 	return " can[" + strings.Join(parts, ", ") + "]"
 }
 
+func formatAnnotation(annotation ast.Annotation) string {
+	if len(annotation.Args) == 0 {
+		return "@" + annotation.Name
+	}
+	return "@" + annotation.Name + "(" + strings.Join(annotation.Args, ", ") + ")"
+}
+
 func printDecl(w io.Writer, d ast.Decl, level int) {
 	prefix := ind(level)
 	switch n := d.(type) {
@@ -512,7 +519,7 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		fmt.Fprintf(w, "%s%s%sstruct %s%s (%d fields)\n", prefix, affine, repr, n.Name, tparams, len(n.Fields))
 	case *ast.FuncDecl:
 		for _, annotation := range n.Annotations {
-			fmt.Fprintf(w, "%s@%s\n", prefix, annotation.Name)
+			fmt.Fprintf(w, "%s%s\n", prefix, formatAnnotation(annotation))
 		}
 		tparams := formatFuncGenericParams(n.TypeParams, n.RegionParams, n.PermissionParams)
 		ret := ""
@@ -521,6 +528,9 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		}
 		fmt.Fprintf(w, "%sdef %s%s(%d params)%s%s (%d stmts)\n", prefix, n.Name, tparams, len(n.Params), ret, formatPermissionRefs(n.Permissions), len(n.Body))
 	case *ast.ExternFuncDecl:
+		for _, annotation := range n.Annotations {
+			fmt.Fprintf(w, "%s%s\n", prefix, formatAnnotation(annotation))
+		}
 		tparams := formatFuncGenericParams(nil, n.RegionParams, nil)
 		ret := ""
 		if n.ReturnType != nil {

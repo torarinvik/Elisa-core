@@ -84,6 +84,7 @@ type FieldDecl struct {
 type Annotation struct {
 	Position lexer.Pos
 	Name     string
+	Args     []string
 }
 
 type PermissionRef struct {
@@ -114,6 +115,7 @@ type ParamDecl struct {
 
 type ExternFuncDecl struct {
 	Position     lexer.Pos
+	Annotations  []Annotation
 	Name         string
 	RegionParams []string
 	Permissions  []PermissionRef

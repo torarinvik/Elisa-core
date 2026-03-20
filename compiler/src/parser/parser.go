@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"strings"
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
 )
@@ -109,11 +110,15 @@ func (p *Parser) parseDecl() ast.Decl {
 	}
 	if p.peek() == lexer.TOKEN_AT {
 		annotations := p.parseFuncAnnotations()
-		if p.peek() != lexer.TOKEN_DEF {
-			p.errorf("function annotations must be followed by def, got %s", p.cur())
+		switch p.peek() {
+		case lexer.TOKEN_DEF:
+			return p.parseFuncDeclWithAnnotations(annotations)
+		case lexer.TOKEN_EXTERN:
+			return p.parseExternDeclWithAnnotations(annotations)
+		default:
+			p.errorf("function annotations must be followed by def or extern, got %s", p.cur())
 			return nil
 		}
-		return p.parseFuncDeclWithAnnotations(annotations)
 	}
 	if p.peek() == lexer.TOKEN_PACKED && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ENUM {
 		return p.parsePackedEnumDecl()
@@ -152,10 +157,52 @@ func (p *Parser) parseFuncAnnotations() []ast.Annotation {
 		pos := p.cur().Pos
 		p.advance()
 		name := p.expect(lexer.TOKEN_IDENT).Text
-		annotations = append(annotations, ast.Annotation{Position: pos, Name: name})
+		var args []string
+		if p.match(lexer.TOKEN_LPAREN) {
+			if p.peek() != lexer.TOKEN_RPAREN {
+				for {
+					args = append(args, p.parseAnnotationArg())
+					if !p.match(lexer.TOKEN_COMMA) {
+						break
+					}
+				}
+			}
+			p.expect(lexer.TOKEN_RPAREN)
+		}
+		annotations = append(annotations, ast.Annotation{Position: pos, Name: name, Args: args})
 		p.skipNewlines()
 	}
 	return annotations
+}
+
+func (p *Parser) parseAnnotationArg() string {
+	root := p.expect(lexer.TOKEN_IDENT).Text
+	var b strings.Builder
+	b.WriteString(root)
+	for {
+		switch p.peek() {
+		case lexer.TOKEN_DOT:
+			p.advance()
+			b.WriteByte('.')
+			b.WriteString(p.expect(lexer.TOKEN_IDENT).Text)
+		case lexer.TOKEN_LBRACKET:
+			p.advance()
+			b.WriteByte('[')
+			switch p.peek() {
+			case lexer.TOKEN_STAR:
+				p.advance()
+				b.WriteByte('*')
+			case lexer.TOKEN_INT_LIT:
+				b.WriteString(p.advance().Text)
+			default:
+				p.errorf("expected * or integer index in annotation path, got %s", p.cur())
+			}
+			p.expect(lexer.TOKEN_RBRACKET)
+			b.WriteByte(']')
+		default:
+			return b.String()
+		}
+	}
 }
 
 func (p *Parser) parsePackedEnumDecl() *ast.EnumDecl {
@@ -526,18 +573,28 @@ func (p *Parser) parseParam() ast.ParamDecl {
 }
 
 func (p *Parser) parseExternDecl() ast.Decl {
+	return p.parseExternDeclWithAnnotations(nil)
+}
+
+func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) ast.Decl {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_EXTERN)
 	name := p.expect(lexer.TOKEN_IDENT).Text
 
 	// extern TypeName  (opaque type - no parens, no colon)
 	if p.peek() == lexer.TOKEN_NEWLINE || p.peek() == lexer.TOKEN_EOF {
+		if len(annotations) != 0 {
+			p.errorf("function annotations on extern declarations require an extern function, got extern type %q", name)
+		}
 		p.expectNewline()
 		return &ast.ExternTypeDecl{Position: pos, Name: name}
 	}
 
 	// extern name: Type  (variable)
 	if p.peek() == lexer.TOKEN_COLON {
+		if len(annotations) != 0 {
+			p.errorf("function annotations on extern declarations require an extern function, got extern var %q", name)
+		}
 		p.advance()
 		typ := p.parseTypeExpr()
 		p.expectNewline()
@@ -581,7 +638,7 @@ func (p *Parser) parseExternDecl() ast.Decl {
 	}
 	p.expectNewline()
 
-	return &ast.ExternFuncDecl{Position: pos, Name: name, RegionParams: regionParams, Permissions: permissions, Params: params, ReturnType: retType, Variadic: variadic}
+	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, RegionParams: regionParams, Permissions: permissions, Params: params, ReturnType: retType, Variadic: variadic}
 }
 
 func (p *Parser) parseExportDecl() ast.Decl {

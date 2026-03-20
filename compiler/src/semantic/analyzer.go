@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"strconv"
+	"strings"
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
 )
@@ -650,6 +652,10 @@ func (a *Analyzer) collectValueSymbols(decls []ast.Decl) {
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolFunc, Type: fnType, Node: n, Mutable: false}, n.Pos())
 		case *ast.ExternFuncDecl:
 			fnType := a.funcTypeFromDecl(n.Name, nil, n.RegionParams, nil, n.Permissions, n.Params, n.ReturnType, n.Variadic)
+			a.applyExternFuncAnnotations(n, fnType)
+			if !fnType.ReturnProvenanceKnown {
+				fnType.ReturnProvenanceKnown = true
+			}
 			a.functionTypes[n.Name] = fnType
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolExternFunc, Type: fnType, Node: n, Mutable: false}, n.Pos())
 		case *ast.ExternVarDecl:
@@ -667,6 +673,229 @@ func (a *Analyzer) collectValueSymbols(decls []ast.Decl) {
 			continue
 		}
 	}
+}
+
+func isSupportedExternFunctionAnnotation(name string) bool {
+	switch name {
+	case "borrows_return", "borrows_return_field":
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *FuncType) {
+	if fn == nil || fnType == nil || len(fn.Annotations) == 0 {
+		return
+	}
+	seen := make(map[string]lexer.Pos, len(fn.Annotations))
+	for _, annotation := range fn.Annotations {
+		if prev, exists := seen[annotation.Name]; exists {
+			a.errorf(annotation.Position, "duplicate @%s annotation on extern function %q (first seen at %s:%d:%d)", annotation.Name, fn.Name, prev.File, prev.Line, prev.Col)
+			continue
+		}
+		seen[annotation.Name] = annotation.Position
+		if !isSupportedExternFunctionAnnotation(annotation.Name) {
+			a.errorf(annotation.Position, "unknown extern function annotation @%s on %q", annotation.Name, fn.Name)
+			continue
+		}
+		switch annotation.Name {
+		case "borrows_return":
+			a.applyExternBorrowsReturnAnnotation(fn, fnType, annotation)
+		case "borrows_return_field":
+			a.applyExternBorrowsReturnFieldAnnotation(fn, fnType, annotation)
+		}
+	}
+}
+
+func (a *Analyzer) applyExternBorrowsReturnAnnotation(fn *ast.ExternFuncDecl, fnType *FuncType, annotation ast.Annotation) {
+	if len(annotation.Args) == 0 {
+		a.errorf(annotation.Position, "@borrows_return on extern function %q expects at least one parameter name", fn.Name)
+		return
+	}
+	var states []regionRefState
+	for _, pathText := range annotation.Args {
+		name, steps, ok := parseBorrowReturnAnnotationPath(pathText)
+		if !ok {
+			a.errorf(annotation.Position, "@borrows_return on extern function %q has invalid path %q", fn.Name, pathText)
+			continue
+		}
+		index := -1
+		for i, param := range fn.Params {
+			if param.Name == name {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			a.errorf(annotation.Position, "@borrows_return on extern function %q references unknown parameter %q", fn.Name, name)
+			continue
+		}
+		if index >= len(fnType.Params) {
+			continue
+		}
+		state, ok := a.abstractParamRegionRefState(fnType.Params[index], index, map[string]bool{})
+		if !ok {
+			a.errorf(annotation.Position, "@borrows_return on extern function %q cannot borrow from parameter %q of type %s", fn.Name, name, fnType.Params[index].String())
+			continue
+		}
+		if len(steps) != 0 {
+			state, ok = projectBorrowReturnAnnotationState(state, steps)
+			if !ok {
+				a.errorf(annotation.Position, "@borrows_return on extern function %q cannot project path %q from parameter %q of type %s", fn.Name, pathText, name, fnType.Params[index].String())
+				continue
+			}
+		}
+		states = append(states, state)
+	}
+	if merged, ok := mergeRegionRefStates(states...); ok {
+		fnType.ReturnProvenance = merged
+	}
+	fnType.ReturnProvenanceKnown = true
+}
+
+func (a *Analyzer) applyExternBorrowsReturnFieldAnnotation(fn *ast.ExternFuncDecl, fnType *FuncType, annotation ast.Annotation) {
+	if len(annotation.Args) == 0 || len(annotation.Args)%2 != 0 {
+		a.errorf(annotation.Position, "@borrows_return_field on extern function %q expects field/path pairs", fn.Name)
+		return
+	}
+	fields, ok := a.resolvedStructFields(fnType.Return)
+	if !ok {
+		a.errorf(annotation.Position, "@borrows_return_field on extern function %q requires a concrete struct return type, got %s", fn.Name, fnType.Return.String())
+		return
+	}
+	fieldSet := make(map[string]bool, len(fields))
+	for _, field := range fields {
+		fieldSet[field.Name] = true
+	}
+	if fnType.ReturnProvenance.Fields == nil {
+		fnType.ReturnProvenance.Fields = map[string]regionRefState{}
+	}
+	for i := 0; i < len(annotation.Args); i += 2 {
+		returnField := annotation.Args[i]
+		pathText := annotation.Args[i+1]
+		if !fieldSet[returnField] {
+			a.errorf(annotation.Position, "@borrows_return_field on extern function %q references unknown return field %q", fn.Name, returnField)
+			continue
+		}
+		name, steps, ok := parseBorrowReturnAnnotationPath(pathText)
+		if !ok {
+			a.errorf(annotation.Position, "@borrows_return_field on extern function %q has invalid path %q", fn.Name, pathText)
+			continue
+		}
+		index := -1
+		for j, param := range fn.Params {
+			if param.Name == name {
+				index = j
+				break
+			}
+		}
+		if index < 0 {
+			a.errorf(annotation.Position, "@borrows_return_field on extern function %q references unknown parameter %q", fn.Name, name)
+			continue
+		}
+		if index >= len(fnType.Params) {
+			continue
+		}
+		state, ok := a.abstractParamRegionRefState(fnType.Params[index], index, map[string]bool{})
+		if !ok {
+			a.errorf(annotation.Position, "@borrows_return_field on extern function %q cannot borrow field %q from parameter %q of type %s", fn.Name, returnField, name, fnType.Params[index].String())
+			continue
+		}
+		if len(steps) != 0 {
+			state, ok = projectBorrowReturnAnnotationState(state, steps)
+			if !ok {
+				a.errorf(annotation.Position, "@borrows_return_field on extern function %q cannot project path %q from parameter %q of type %s", fn.Name, pathText, name, fnType.Params[index].String())
+				continue
+			}
+		}
+		fnType.ReturnProvenance.Fields[returnField] = state
+	}
+	if !hasRegionProvenance(fnType.ReturnProvenance) {
+		fnType.ReturnProvenance = regionRefState{}
+	}
+	fnType.ReturnProvenanceKnown = true
+}
+
+type borrowReturnAnnotationStep struct {
+	Field    string
+	Index    *int64
+	Wildcard bool
+}
+
+func parseBorrowReturnAnnotationPath(text string) (string, []borrowReturnAnnotationStep, bool) {
+	if text == "" {
+		return "", nil, false
+	}
+	rootEnd := strings.IndexAny(text, ".[")
+	if rootEnd < 0 {
+		return text, nil, true
+	}
+	root := text[:rootEnd]
+	if root == "" {
+		return "", nil, false
+	}
+	rest := text[rootEnd:]
+	steps := make([]borrowReturnAnnotationStep, 0, 2)
+	for len(rest) != 0 {
+		switch rest[0] {
+		case '.':
+			rest = rest[1:]
+			next := strings.IndexAny(rest, ".[")
+			field := rest
+			if next >= 0 {
+				field = rest[:next]
+				rest = rest[next:]
+			} else {
+				rest = ""
+			}
+			if field == "" {
+				return "", nil, false
+			}
+			steps = append(steps, borrowReturnAnnotationStep{Field: field})
+		case '[':
+			end := strings.IndexByte(rest, ']')
+			if end <= 1 {
+				return "", nil, false
+			}
+			token := rest[1:end]
+			rest = rest[end+1:]
+			if token == "*" {
+				steps = append(steps, borrowReturnAnnotationStep{Wildcard: true})
+				continue
+			}
+			value, err := strconv.ParseInt(token, 10, 64)
+			if err != nil {
+				return "", nil, false
+			}
+			valueCopy := value
+			steps = append(steps, borrowReturnAnnotationStep{Index: &valueCopy})
+		default:
+			return "", nil, false
+		}
+	}
+	return root, steps, true
+}
+
+func projectBorrowReturnAnnotationState(state regionRefState, steps []borrowReturnAnnotationStep) (regionRefState, bool) {
+	current := state
+	ok := true
+	for _, step := range steps {
+		switch {
+		case step.Field != "":
+			current, ok = projectRegionFieldState(current, step.Field)
+		case step.Wildcard:
+			current, ok = projectRegionIndexKeyState(current, regionAnyIndexFieldKey())
+		case step.Index != nil:
+			current, ok = projectRegionIndexKeyState(current, regionIndexFieldKey(*step.Index))
+		default:
+			return regionRefState{}, false
+		}
+		if !ok {
+			return regionRefState{}, false
+		}
+	}
+	return current, true
 }
 
 func (a *Analyzer) containsAffineHandleValues(t Type, seen map[string]bool) bool {
@@ -822,6 +1051,13 @@ func (a *Analyzer) abstractParamRegionRefState(t Type, paramIndex int, seen map[
 	seen[key] = true
 	state := regionRefStateFromParamDependency(paramIndex)
 	switch tt := t.(type) {
+	case *RefType:
+		if elemState, ok := a.abstractParamRegionRefState(tt.Elem, paramIndex, seen); ok {
+			if len(elemState.Fields) != 0 {
+				state.Fields = cloneRegionRefState(elemState).Fields
+			}
+		}
+		return state, true
 	case *StructType:
 		for _, field := range tt.Fields {
 			fieldState, ok := a.abstractParamRegionRefState(field.Type, paramIndex, seen)

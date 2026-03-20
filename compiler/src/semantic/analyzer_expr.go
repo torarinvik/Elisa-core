@@ -401,6 +401,8 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		return a.regionRefStateForExpr(n.Operand)
 	case *ast.MoveExpr:
 		return a.regionRefStateForExpr(n.Operand)
+	case *ast.AddrOfExpr:
+		return a.regionRefStateForExpr(n.Operand)
 	case *ast.Ident:
 		if a.currentScope == nil {
 			return regionRefState{}, false
@@ -1614,6 +1616,7 @@ func (a *Analyzer) bindFreshShape(shape Shape, origin string, bindings map[strin
 
 func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 	if field, ok := dstrSyntheticField(a.analyzeExpr(expr.Object), expr.Field); ok {
+		a.reportInvalidRegionUse(expr, field.Type)
 		if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(field.Type, map[string]bool{}) {
 			a.errorf(expr.Pos(), "%s %q cannot be used after %s", affineHandleKind(field.Type), affineValueDisplayName(expr), state.ConsumedBy)
 		}
@@ -1623,6 +1626,7 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 	if !ok {
 		return invalidType
 	}
+	a.reportInvalidRegionUse(expr, field.Type)
 	if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(field.Type, map[string]bool{}) {
 		a.errorf(expr.Pos(), "%s %q cannot be used after %s", affineHandleKind(field.Type), affineValueDisplayName(expr), state.ConsumedBy)
 	}
@@ -1638,24 +1642,34 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	if arr, ok := objType.(*ArrayType); ok {
 		a.checkConstantArrayIndexBounds(arr, expr.Index)
 		if isStringArrayType(arr) {
-			return a.namedTypes["char"]
+			result := a.namedTypes["char"]
+			a.reportInvalidRegionUse(expr, result)
+			return result
 		}
+		a.reportInvalidRegionUse(expr, arr.Elem)
 		return arr.Elem
 	}
 	if darray, ok := objType.(*DArrayType); ok {
+		a.reportInvalidRegionUse(expr, darray.Elem)
 		return darray.Elem
 	}
 	if view, ok := objType.(*ViewType); ok {
+		a.reportInvalidRegionUse(expr, view.Elem)
 		return view.Elem
 	}
 	if view, ok := objType.(*DArrayViewType); ok {
+		a.reportInvalidRegionUse(expr, view.Elem)
 		return view.Elem
 	}
 	if _, ok := objType.(*DStrType); ok {
-		return a.namedTypes["char"]
+		result := a.namedTypes["char"]
+		a.reportInvalidRegionUse(expr, result)
+		return result
 	}
 	if isStringViewType(objType) {
-		return a.namedTypes["char"]
+		result := a.namedTypes["char"]
+		a.reportInvalidRegionUse(expr, result)
+		return result
 	}
 	if ref, ok := objType.(*RefType); ok {
 		if ref.State != RefStateNonNull {
@@ -1665,29 +1679,57 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		if arr, ok := ref.Elem.(*ArrayType); ok {
 			a.checkConstantArrayIndexBounds(arr, expr.Index)
 			if isStringArrayType(arr) {
-				return a.namedTypes["char"]
+				result := a.namedTypes["char"]
+				a.reportInvalidRegionUse(expr, result)
+				return result
 			}
+			a.reportInvalidRegionUse(expr, arr.Elem)
 			return arr.Elem
 		}
 		if darray, ok := ref.Elem.(*DArrayType); ok {
+			a.reportInvalidRegionUse(expr, darray.Elem)
 			return darray.Elem
 		}
 		if view, ok := ref.Elem.(*ViewType); ok {
+			a.reportInvalidRegionUse(expr, view.Elem)
 			return view.Elem
 		}
 		if view, ok := ref.Elem.(*DArrayViewType); ok {
+			a.reportInvalidRegionUse(expr, view.Elem)
 			return view.Elem
 		}
 		if _, ok := ref.Elem.(*DStrType); ok {
-			return a.namedTypes["char"]
+			result := a.namedTypes["char"]
+			a.reportInvalidRegionUse(expr, result)
+			return result
 		}
 		if isStringViewType(ref.Elem) {
-			return a.namedTypes["char"]
+			result := a.namedTypes["char"]
+			a.reportInvalidRegionUse(expr, result)
+			return result
 		}
+		a.reportInvalidRegionUse(expr, ref.Elem)
 		return ref.Elem
 	}
 	a.errorf(expr.Pos(), "indexing requires string, array, view, or reference type, got %s", objType.String())
 	return invalidType
+}
+
+func (a *Analyzer) reportInvalidRegionUse(expr ast.Expr, valueType Type) {
+	if expr == nil || valueType == nil {
+		return
+	}
+	refState, ok := a.regionRefStateForExpr(expr)
+	if !ok {
+		return
+	}
+	if _, dep, invalid := firstInvalidRegionDependency(refState); invalid {
+		label := "value"
+		if _, isRef := valueType.(*RefType); isRef {
+			label = "reference"
+		}
+		a.errorf(expr.Pos(), "%s %q is invalid after %s", label, affineValueDisplayName(expr), dep.InvalidatedBy)
+	}
 }
 
 func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {

@@ -881,6 +881,45 @@ def sample_case() -> int:
 	}
 }
 
+func TestAnalyzeRejectsUnknownExternFunctionAnnotation(t *testing.T) {
+	src := `@smoke
+extern borrow_value(holder: any i32&) -> any i32&
+`
+	_, errs := parseAndAnalyze(t, "extern_function_annotations_unknown.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "unknown extern function annotation @smoke on \"borrow_value\"") {
+		t.Fatalf("expected unknown-extern-annotation diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsExternBorrowsReturnUnknownParam(t *testing.T) {
+	src := `@borrows_return(missing)
+extern borrow_value(holder: any i32&) -> any i32&
+`
+	_, errs := parseAndAnalyze(t, "extern_function_annotations_unknown_param.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "@borrows_return on extern function \"borrow_value\" references unknown parameter \"missing\"") {
+		t.Fatalf("expected borrows_return unknown-param diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsExternBorrowsReturnOnNonProvenanceParam(t *testing.T) {
+	src := `@borrows_return(count)
+extern borrow_value(count: i32) -> any i32&
+`
+	_, errs := parseAndAnalyze(t, "extern_function_annotations_bad_param.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "@borrows_return on extern function \"borrow_value\" cannot borrow from parameter \"count\" of type i32") {
+		t.Fatalf("expected borrows_return bad-param diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeRejectsDuplicateFunctionAnnotation(t *testing.T) {
 	src := `@test
 @test
@@ -2421,6 +2460,241 @@ def ok() -> i32:
 	return copy.count
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_fresh_helper_return_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsUsingExternBorrowReturnedReferenceInvalidatedByRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+@borrows_return(holder)
+extern borrow_value(holder: Holder) -> any i32&
+
+def bad() -> i32:
+	region scratch
+	mark scratch as cp
+	holder: Holder = Holder(new[scratch] 1i32, 7i32)
+	alias: any i32& = borrow_value(holder)
+	restore scratch from cp
+	return alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_borrowed_ref_invalid.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+		t.Fatalf("expected restore invalidation diagnostic for extern borrowed reference, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsUsingExternBorrowReturnedNestedViewAliasInvalidatedByRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+repr(c) struct Window:
+	items: view[Holder]
+
+@borrows_return(window)
+extern keep_window(window: Window) -> Window
+
+def bad() -> i32:
+	region scratch
+	mark scratch as cp
+	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	window: Window = keep_window(Window(items[0u:2u]))
+	which: usize = 1u
+	alias: any i32& = window.items[which].value
+	restore scratch from cp
+	return alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_borrowed_nested_view_invalid.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+		t.Fatalf("expected restore invalidation diagnostic for extern borrowed nested view alias, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsUsingExternPathBorrowReturnedViewAliasInvalidatedByRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+repr(c) struct Window:
+	items: view[Holder]
+	id: i32
+
+@borrows_return(window.items)
+extern get_items(window: Window) -> view[Holder]
+
+def bad() -> i32:
+	region scratch
+	mark scratch as cp
+	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	window: Window = Window(items[0u:2u], 9i32)
+	selected: view[Holder] = get_items(window)
+	which: usize = 1u
+	alias: any i32& = selected[which].value
+	restore scratch from cp
+	return alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_path_borrowed_view_invalid.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+		t.Fatalf("expected restore invalidation diagnostic for extern path-borrowed view alias, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeAcceptsExternPathBorrowReturnedViewScalarAfterRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+repr(c) struct Window:
+	items: view[Holder]
+	id: i32
+
+@borrows_return(window.items)
+extern get_items(window: Window) -> view[Holder]
+
+def ok() -> i32:
+	region scratch
+	mark scratch as cp
+	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	window: Window = Window(items[0u:2u], 9i32)
+	selected: view[Holder] = get_items(window)
+	which: usize = 1u
+	count: i32 = selected[which].count
+	restore scratch from cp
+	return count
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_path_borrowed_view_scalar_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsUsingExternRefParamBorrowReturnedViewAliasInvalidatedByRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+repr(c) struct Window:
+	items: view[Holder]
+	id: i32
+
+@borrows_return(window.items)
+extern get_items(window: any Window&) -> view[Holder]
+
+def bad() -> i32:
+	region scratch
+	mark scratch as cp
+	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	window: Window = Window(items[0u:2u], 9i32)
+	selected: view[Holder] = get_items((&window).cast[any Window&]())
+	which: usize = 1u
+	alias: any i32& = selected[which].value
+	restore scratch from cp
+	return alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_ref_param_view_invalid.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+		t.Fatalf("expected restore invalidation diagnostic for extern ref-param borrowed view alias, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsUsingExternRefParamBorrowReturnedElementAliasInvalidatedByRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+repr(c) struct Window:
+	items: view[Holder]
+	id: i32
+
+@borrows_return(window.items[*])
+extern get_item(window: any Window&, which: usize) -> Holder
+
+def bad() -> i32:
+	region scratch
+	mark scratch as cp
+	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	window: Window = Window(items[0u:2u], 9i32)
+	which: usize = 1u
+	item: Holder = get_item((&window).cast[any Window&](), which)
+	alias: any i32& = item.value
+	restore scratch from cp
+	return alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_ref_param_elem_invalid.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+		t.Fatalf("expected restore invalidation diagnostic for extern ref-param borrowed element alias, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeRejectsUsingExternFieldBorrowReturnedStructFieldInvalidatedByRestore(t *testing.T) {
+	src := `repr(c) struct Box:
+	value: any i32&
+
+repr(c) struct Pair:
+	left: any i32&
+	right: any i32&
+
+@borrows_return_field(left, left_src.value, right, right_src.value)
+extern pair_refs(left_src: Box, right_src: Box) -> Pair
+
+def bad() -> i32:
+	region left_r
+	region right_r
+	mark left_r as left_cp
+	mark right_r as right_cp
+	left_box: Box = Box(new[left_r] 1i32)
+	right_box: Box = Box(new[right_r] 2i32)
+	pair: Pair = pair_refs(left_box, right_box)
+	restore left_r from left_cp
+	return pair.left[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_field_borrow_left_invalid.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"pair.left\" is invalid after restore of region \"left_r\" from checkpoint \"left_cp\"") {
+		t.Fatalf("expected restore invalidation diagnostic for extern field-borrowed left field, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeAcceptsUsingExternFieldBorrowReturnedSiblingFieldAfterUnrelatedRestore(t *testing.T) {
+	src := `repr(c) struct Box:
+	value: any i32&
+
+repr(c) struct Pair:
+	left: any i32&
+	right: any i32&
+
+@borrows_return_field(left, left_src.value, right, right_src.value)
+extern pair_refs(left_src: Box, right_src: Box) -> Pair
+
+def ok() -> i32:
+	region left_r
+	region right_r
+	mark left_r as left_cp
+	mark right_r as right_cp
+	left_box: Box = Box(new[left_r] 1i32)
+	right_box: Box = Box(new[right_r] 2i32)
+	pair: Pair = pair_refs(left_box, right_box)
+	restore left_r from left_cp
+	return pair.right[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_field_borrow_right_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 

@@ -1283,15 +1283,23 @@ func projectRegionIndexState(state regionRefState, index ast.Expr, evalConst fun
 	}
 	if evalConst != nil {
 		if value, ok := evalConst(index); ok && value.Kind == ConstInt {
-			if fieldState, ok := state.Fields[regionIndexFieldKey(value.Int)]; ok && hasRegionProvenance(fieldState) {
-				return cloneRegionRefState(fieldState), true
+			if fieldState, ok := projectRegionIndexKeyState(state, regionIndexFieldKey(value.Int)); ok {
+				return fieldState, true
 			}
 		}
 	}
-	if fieldState, ok := state.Fields[regionAnyIndexFieldKey()]; ok && hasRegionProvenance(fieldState) {
-		return cloneRegionRefState(fieldState), true
+	return projectRegionIndexKeyState(state, regionAnyIndexFieldKey())
+}
+
+func projectRegionIndexKeyState(state regionRefState, key string) (regionRefState, bool) {
+	if len(state.Fields) == 0 {
+		return regionRefState{}, false
 	}
-	return regionRefState{}, false
+	fieldState, ok := state.Fields[key]
+	if !ok || !hasRegionProvenance(fieldState) {
+		return regionRefState{}, false
+	}
+	return cloneRegionRefState(fieldState), true
 }
 
 func summarizeRegionIndexStates(state regionRefState) (regionRefState, bool) {
@@ -1409,6 +1417,37 @@ func firstLiveRegionDependency(state regionRefState) (*Symbol, regionDependencyS
 		}
 	}
 	return nil, regionDependencyState{}, false
+}
+
+func invalidateRegionDependencyInState(state regionRefState, region *Symbol, predicate func(regionDependencyState) bool, reason string) (regionRefState, bool) {
+	changed := false
+	if region != nil {
+		if dep, ok := state.Deps[region]; ok && dep.Valid {
+			if predicate == nil || predicate(dep) {
+				if state.Deps == nil {
+					state.Deps = map[*Symbol]regionDependencyState{}
+				}
+				dep.Valid = false
+				dep.InvalidatedBy = reason
+				state.Deps[region] = dep
+				changed = true
+			}
+		}
+	}
+	if len(state.Fields) != 0 {
+		for name, fieldState := range state.Fields {
+			nextField, fieldChanged := invalidateRegionDependencyInState(fieldState, region, predicate, reason)
+			if !fieldChanged {
+				continue
+			}
+			if state.Fields == nil {
+				state.Fields = map[string]regionRefState{}
+			}
+			state.Fields[name] = nextField
+			changed = true
+		}
+	}
+	return state, changed
 }
 
 func firstNonShareablePackedStoreDependency(state regionRefState) (*Symbol, packedStoreDependencyState, bool) {
@@ -1590,20 +1629,10 @@ func (a *Analyzer) invalidateRegionRefs(region *Symbol, predicate func(regionDep
 		return
 	}
 	for sym, state := range a.currentRegionRefs {
-		dep, ok := state.Deps[region]
-		if !ok || !dep.Valid {
-			continue
+		nextState, changed := invalidateRegionDependencyInState(state, region, predicate, reason)
+		if changed {
+			a.currentRegionRefs[sym] = nextState
 		}
-		if predicate != nil && !predicate(dep) {
-			continue
-		}
-		dep.Valid = false
-		dep.InvalidatedBy = reason
-		if state.Deps == nil {
-			state.Deps = map[*Symbol]regionDependencyState{}
-		}
-		state.Deps[region] = dep
-		a.currentRegionRefs[sym] = state
 	}
 }
 

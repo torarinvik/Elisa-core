@@ -844,6 +844,31 @@ func TestRunCLIPrintsAnnotatedFunctionsInAST(t *testing.T) {
 	}
 }
 
+func TestRunCLIPrintsAnnotatedExternFunctionsInAST(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "annotated_extern.llcontext")
+	src := "repr(c) struct Holder:\n    value: any i32&\n\nrepr(c) struct Window:\n    items: view[Holder]\n\n@borrows_return(window.items[*])\nextern borrow_value(window: Window) -> view[Holder]\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write annotated extern fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "ast", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{"@borrows_return(window.items[*])", "extern borrow_value(1 params) -> view[Holder]"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected AST output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunCLIListsAnnotatedFunctionsByKind(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "annotated_lists.llcontext")
