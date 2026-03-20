@@ -2368,6 +2368,86 @@ def ok(owner: Arena) -> i32:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeRejectsUsingIndexedStructFieldAliasInvalidatedByRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+def bad() -> i32:
+	region scratch
+	mark scratch as cp
+	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	alias: any i32& = items[0u].value
+	restore scratch from cp
+	return alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_indexed_struct_alias.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+		t.Fatalf("expected restore invalidation diagnostic for indexed struct alias, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeAcceptsIndexedStructScalarAfterRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+def ok() -> i32:
+	region scratch
+	mark scratch as cp
+	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	count: i32 = items[0u].count
+	restore scratch from cp
+	return count
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_indexed_struct_scalar_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsUsingSlicedViewAliasInvalidatedByRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+def bad() -> i32:
+	region scratch
+	mark scratch as cp
+	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	window: view[Holder] = items[0u:2u]
+	alias: any i32& = window[0u].value
+	restore scratch from cp
+	return alias[0u]
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_sliced_view_alias.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" is invalid after restore of region \"scratch\" from checkpoint \"cp\"") {
+		t.Fatalf("expected restore invalidation diagnostic for sliced-view alias, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeAcceptsSlicedViewScalarAfterRestore(t *testing.T) {
+	src := `repr(c) struct Holder:
+	value: any i32&
+	count: i32
+
+def ok() -> i32:
+	region scratch
+	mark scratch as cp
+	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	window: view[Holder] = items[0u:2u]
+	count: i32 = window[0u].count
+	restore scratch from cp
+	return count
+`
+	_, errs := parseAndAnalyze(t, "manual_regions_restore_sliced_view_scalar_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeRejectsRestoringCheckpointFromWrongRegion(t *testing.T) {
 	src := `def bad() -> void:
 	region left

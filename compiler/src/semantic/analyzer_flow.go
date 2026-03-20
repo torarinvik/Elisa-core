@@ -1218,6 +1218,18 @@ func mergeRegionRefStates(states ...regionRefState) (regionRefState, bool) {
 	return merged, true
 }
 
+func regionIndexFieldKey(index int64) string {
+	return fmt.Sprintf("[%d]", index)
+}
+
+func regionAnyIndexFieldKey() string {
+	return "[*]"
+}
+
+func isRegionIndexFieldKey(name string) bool {
+	return strings.HasPrefix(name, "[") && strings.HasSuffix(name, "]")
+}
+
 func projectRegionFieldState(state regionRefState, field string) (regionRefState, bool) {
 	if len(state.Fields) == 0 {
 		return regionRefState{}, false
@@ -1227,6 +1239,56 @@ func projectRegionFieldState(state regionRefState, field string) (regionRefState
 		return regionRefState{}, false
 	}
 	return cloneRegionRefState(fieldState), true
+}
+
+func projectRegionIndexState(state regionRefState, index ast.Expr, evalConst func(ast.Expr) (ConstValue, bool)) (regionRefState, bool) {
+	if len(state.Fields) == 0 {
+		return regionRefState{}, false
+	}
+	if evalConst != nil {
+		if value, ok := evalConst(index); ok && value.Kind == ConstInt {
+			if fieldState, ok := state.Fields[regionIndexFieldKey(value.Int)]; ok && (hasRegionDependencies(fieldState) || len(fieldState.Fields) != 0) {
+				return cloneRegionRefState(fieldState), true
+			}
+		}
+	}
+	if fieldState, ok := state.Fields[regionAnyIndexFieldKey()]; ok && (hasRegionDependencies(fieldState) || len(fieldState.Fields) != 0) {
+		return cloneRegionRefState(fieldState), true
+	}
+	return regionRefState{}, false
+}
+
+func summarizeRegionIndexStates(state regionRefState) (regionRefState, bool) {
+	if !hasRegionDependencies(state) && len(state.Fields) == 0 {
+		return regionRefState{}, false
+	}
+	summary := cloneRegionRefState(state)
+	if len(state.Fields) == 0 {
+		return summary, true
+	}
+	indexStates := make([]regionRefState, 0, len(state.Fields))
+	for name, fieldState := range state.Fields {
+		if !isRegionIndexFieldKey(name) {
+			continue
+		}
+		if !hasRegionDependencies(fieldState) && len(fieldState.Fields) == 0 {
+			continue
+		}
+		indexStates = append(indexStates, fieldState)
+	}
+	if len(indexStates) == 0 {
+		summary.Fields = nil
+		return summary, true
+	}
+	merged, ok := mergeRegionRefStates(indexStates...)
+	if !ok {
+		summary.Fields = nil
+		return summary, true
+	}
+	summary.Fields = map[string]regionRefState{
+		regionAnyIndexFieldKey(): merged,
+	}
+	return summary, true
 }
 
 func firstInvalidRegionDependency(state regionRefState) (*Symbol, regionDependencyState, bool) {

@@ -504,12 +504,25 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		return merged, true
 	case *ast.ListLitExpr:
 		elemStates := make([]regionRefState, 0, len(n.Elems))
-		for _, elem := range n.Elems {
+		fieldStates := map[string]regionRefState{}
+		for i, elem := range n.Elems {
 			if state, ok := a.regionRefStateForExpr(elem); ok && hasRegionDependencies(state) {
 				elemStates = append(elemStates, state)
+				fieldStates[regionIndexFieldKey(int64(i))] = state
 			}
 		}
-		return mergeRegionRefStates(elemStates...)
+		merged, ok := mergeRegionRefStates(elemStates...)
+		if !ok {
+			return regionRefState{}, false
+		}
+		if len(fieldStates) != 0 {
+			wildcard, ok := mergeRegionRefStates(elemStates...)
+			if ok {
+				fieldStates[regionAnyIndexFieldKey()] = wildcard
+			}
+			merged.Fields = fieldStates
+		}
+		return merged, true
 	case *ast.FieldExpr:
 		state, ok := a.regionRefStateForExpr(n.Object)
 		if !ok {
@@ -523,9 +536,24 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		}
 		state, ok := a.regionRefStateForExpr(n.Object)
 		if !ok || !hasRegionDependencies(state) {
-			return regionRefState{}, false
+			if !ok || len(state.Fields) == 0 {
+				return regionRefState{}, false
+			}
+		}
+		if fieldState, ok := projectRegionIndexState(state, n.Index, a.evalConstExpr); ok {
+			return fieldState, true
 		}
 		return cloneRegionRefState(state), true
+	case *ast.SliceExpr:
+		resultType := a.exprTypes[n]
+		if resultType == nil || !a.typeCanContainRegionRefs(resultType, map[string]bool{}) {
+			return regionRefState{}, false
+		}
+		state, ok := a.regionRefStateForExpr(n.Object)
+		if !ok || (!hasRegionDependencies(state) && len(state.Fields) == 0) {
+			return regionRefState{}, false
+		}
+		return summarizeRegionIndexStates(state)
 	case *ast.TernaryExpr:
 		left, leftOK := a.regionRefStateForExpr(n.Value)
 		right, rightOK := a.regionRefStateForExpr(n.Alt)
