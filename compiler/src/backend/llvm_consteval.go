@@ -277,6 +277,69 @@ func isStaticallyZeroFillExpr(s *functionState, expr ast.Expr) bool {
 	}
 }
 
+func staticRepeatedByteFillValue(s *functionState, expr ast.Expr) (uint8, bool) {
+	if isZeroedExpr(expr) {
+		return 0, true
+	}
+	if s == nil {
+		return 0, false
+	}
+	value, ok := s.evalConstExpr(expr)
+	if !ok {
+		return 0, false
+	}
+	exprType := s.exprType(expr)
+	if exprType == nil {
+		return 0, false
+	}
+	sizeBytes, err := s.sizeOfType(exprType)
+	if err != nil || sizeBytes == 0 || sizeBytes > 8 {
+		return 0, false
+	}
+	switch value.Kind {
+	case semantic.ConstBool:
+		if sizeBytes != 1 {
+			return 0, false
+		}
+		if value.Bool {
+			return 1, true
+		}
+		return 0, true
+	case semantic.ConstInt:
+		if !semantic.IsNumericType(exprType) {
+			return 0, false
+		}
+		raw := uint64(value.Int)
+		bitWidth := sizeBytes * 8
+		if bitWidth < 64 {
+			raw &= (uint64(1) << bitWidth) - 1
+		}
+		fillByte := uint8(raw & 0xff)
+		for i := uint64(1); i < sizeBytes; i++ {
+			if uint8((raw>>(8*i))&0xff) != fillByte {
+				return 0, false
+			}
+		}
+		return fillByte, true
+	default:
+		return 0, false
+	}
+}
+
+func isSingleByteScalarFillType(s *functionState, t semantic.Type) bool {
+	if s == nil || t == nil {
+		return false
+	}
+	if !semantic.IsNumericType(t) && !semantic.IsBoolType(t) {
+		return false
+	}
+	sizeBytes, err := s.sizeOfType(t)
+	if err != nil {
+		return false
+	}
+	return sizeBytes == 1
+}
+
 func isVoidType(t semantic.Type) bool {
 	b, ok := t.(*semantic.BuiltinType)
 	return ok && b.Name == "void"

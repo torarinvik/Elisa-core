@@ -1459,12 +1459,29 @@ func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.
 	dstExpr := expr.Args[0]
 	dstType := s.exprType(dstExpr)
 	resultType := s.exprType(expr)
-	if !isDynArrayViewCarrierType(dstType) || !s.g.result.ExprSupportsDenseWrite(dstExpr) || !isStaticallyZeroFillExpr(s, expr.Args[1]) {
+	fillExpr := expr.Args[1]
+	fillType := s.exprType(fillExpr)
+	fillByte, constByte := staticRepeatedByteFillValue(s, fillExpr)
+	dynamicByte := !constByte && isSingleByteScalarFillType(s, fillType)
+	if !isDynArrayViewCarrierType(dstType) || !s.g.result.ExprSupportsDenseWrite(dstExpr) || (!constByte && !dynamicByte) {
 		return nil, nil, false, nil
 	}
 	dstValue, _, err := s.emitExpr(dstExpr, dstType)
 	if err != nil {
 		return nil, nil, true, err
+	}
+	var fillValue C.LLVMValueRef
+	if constByte {
+		fillValue = C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), C.ulonglong(fillByte), 0)
+	} else {
+		fillRawValue, actualFillType, err := s.emitExpr(fillExpr, fillType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		fillValue, err = s.coerceValue(fillRawValue, actualFillType, s.g.result.NamedTypes["i32"])
+		if err != nil {
+			return nil, nil, true, err
+		}
 	}
 	dstData := C.LLVMBuildExtractValue(s.builder, dstValue, 0, cStringFree("dview.fill.dst.data"))
 	dstLen := C.LLVMBuildExtractValue(s.builder, dstValue, 1, cStringFree("dview.fill.dst.len"))
@@ -1492,8 +1509,7 @@ func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.
 	if err != nil {
 		return nil, nil, true, err
 	}
-	zeroValue := C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), 0, 0)
-	_ = s.buildCall(memsetLLVMType, memsetCallee, []C.LLVMValueRef{dstData, zeroValue, dstBytes}, "dview.fill.memset")
+	_ = s.buildCall(memsetLLVMType, memsetCallee, []C.LLVMValueRef{dstData, fillValue, dstBytes}, "dview.fill.memset")
 	C.LLVMBuildBr(s.builder, mergeBB)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)

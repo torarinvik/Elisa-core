@@ -2500,6 +2500,147 @@ def fill_split(values: any darray[i32, 4]&) -> void:
 	}
 }
 
+func TestGenerateLLVMIRSpecializesArenaDViewRepeatedByteFill(t *testing.T) {
+	src := `repr(c) struct DynArray[T]:
+	items: mutable any T&?
+	count: mutable usize
+	capacity: mutable usize
+
+repr(c) struct DynArrayView:
+	data: mutable any void&?
+	len: mutable usize
+	elem_size: mutable usize
+
+def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+	_ = start
+	_ = end
+	if values.items != null:
+		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+	return DynArrayView(null, 0u, sizeof(T))
+
+def arena_da_fill[T](dst: dview[T], value: T):
+	_ = dst
+	_ = value
+
+def fill_bytes(values: any darray[u8, 4]&) -> void:
+	base: dview[u8] = arena_da_view(values, 0u, 4u)
+	left: dview[u8] = base[0u:2u]
+	arena_da_fill(left, 7u8)
+
+def fill_all_ones(values: any darray[i32, 4]&) -> void:
+	base: dview[i32] = arena_da_view(values, 0u, 4u)
+	left: dview[i32] = base[0u:2u]
+	arena_da_fill(left, -1)
+
+def fill_nonuniform(values: any darray[i32, 4]&) -> void:
+	base: dview[i32] = arena_da_view(values, 0u, 4u)
+	left: dview[i32] = base[0u:2u]
+	arena_da_fill(left, 7)
+`
+	result := parseAndAnalyze(t, "backend_dview_fill_repeated_byte.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	byteBody := functionIR(output, "fill_bytes")
+	if byteBody == "" {
+		t.Fatalf("expected to find fill_bytes body, got:\n%s", output)
+	}
+	if !strings.Contains(byteBody, "call ptr @memset(ptr") {
+		t.Fatalf("expected fill_bytes to lower through memset, got:\n%s", byteBody)
+	}
+	if strings.Contains(byteBody, "call void @arena_da_fill") {
+		t.Fatalf("expected fill_bytes to avoid generic helper fallback, got:\n%s", byteBody)
+	}
+
+	onesBody := functionIR(output, "fill_all_ones")
+	if onesBody == "" {
+		t.Fatalf("expected to find fill_all_ones body, got:\n%s", output)
+	}
+	if !strings.Contains(onesBody, "call ptr @memset(ptr") {
+		t.Fatalf("expected fill_all_ones to lower through memset, got:\n%s", onesBody)
+	}
+	if strings.Contains(onesBody, "call void @arena_da_fill") {
+		t.Fatalf("expected fill_all_ones to avoid generic helper fallback, got:\n%s", onesBody)
+	}
+
+	nonUniformBody := functionIR(output, "fill_nonuniform")
+	if nonUniformBody == "" {
+		t.Fatalf("expected to find fill_nonuniform body, got:\n%s", output)
+	}
+	if !strings.Contains(nonUniformBody, "call void @arena_da_fill") {
+		t.Fatalf("expected fill_nonuniform to keep helper fallback, got:\n%s", nonUniformBody)
+	}
+	if strings.Contains(nonUniformBody, "call ptr @memset(ptr") {
+		t.Fatalf("expected fill_nonuniform to avoid memset specialization, got:\n%s", nonUniformBody)
+	}
+}
+
+func TestGenerateLLVMIRSpecializesArenaDViewDynamicByteFill(t *testing.T) {
+	src := `repr(c) struct DynArray[T]:
+	items: mutable any T&?
+	count: mutable usize
+	capacity: mutable usize
+
+repr(c) struct DynArrayView:
+	data: mutable any void&?
+	len: mutable usize
+	elem_size: mutable usize
+
+def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+	_ = start
+	_ = end
+	if values.items != null:
+		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+	return DynArrayView(null, 0u, sizeof(T))
+
+def arena_da_fill[T](dst: dview[T], value: T):
+	_ = dst
+	_ = value
+
+def fill_runtime_byte(values: any darray[u8, 4]&, value: u8) -> void:
+	base: dview[u8] = arena_da_view(values, 0u, 4u)
+	left: dview[u8] = base[0u:2u]
+	arena_da_fill(left, value)
+
+def fill_runtime_wide(values: any darray[i32, 4]&, value: i32) -> void:
+	base: dview[i32] = arena_da_view(values, 0u, 4u)
+	left: dview[i32] = base[0u:2u]
+	arena_da_fill(left, value)
+`
+	result := parseAndAnalyze(t, "backend_dview_fill_dynamic_byte.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	runtimeByteBody := functionIR(output, "fill_runtime_byte")
+	if runtimeByteBody == "" {
+		t.Fatalf("expected to find fill_runtime_byte body, got:\n%s", output)
+	}
+	if !strings.Contains(runtimeByteBody, "call ptr @memset(ptr") {
+		t.Fatalf("expected fill_runtime_byte to lower through memset, got:\n%s", runtimeByteBody)
+	}
+	if strings.Contains(runtimeByteBody, "call void @arena_da_fill") {
+		t.Fatalf("expected fill_runtime_byte to avoid generic helper fallback, got:\n%s", runtimeByteBody)
+	}
+
+	runtimeWideBody := functionIR(output, "fill_runtime_wide")
+	if runtimeWideBody == "" {
+		t.Fatalf("expected to find fill_runtime_wide body, got:\n%s", output)
+	}
+	if !strings.Contains(runtimeWideBody, "call void @arena_da_fill") {
+		t.Fatalf("expected fill_runtime_wide to keep helper fallback, got:\n%s", runtimeWideBody)
+	}
+	if strings.Contains(runtimeWideBody, "call ptr @memset(ptr") {
+		t.Fatalf("expected fill_runtime_wide to avoid memset specialization, got:\n%s", runtimeWideBody)
+	}
+	if strings.Contains(runtimeWideBody, "call ptr @memset(ptr, i32 %") {
+		t.Fatalf("expected fill_runtime_wide not to form a dynamic memset byte path, got:\n%s", runtimeWideBody)
+	}
+}
+
 func TestGenerateLLVMIRSpecializesArenaDViewEqExact(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
 	items: mutable any T&?
