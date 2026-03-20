@@ -350,3 +350,59 @@ def inspect(text: dstr[row], buf: array[i32, 8]) -> int:
 		t.Fatalf("expected an alias of a fresh allocation to remain non-disjoint from the source")
 	}
 }
+
+func TestAnalyzeInfersDisjointnessForDViewSplitHelpers(t *testing.T) {
+	src := `repr(c) struct DynArray[T]:
+	items: mutable any T&?
+	count: mutable usize
+	capacity: mutable usize
+
+repr(c) struct DynArrayView:
+	data: mutable any void&?
+	len: mutable usize
+	elem_size: mutable usize
+
+def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+	_ = start
+	_ = end
+	if values.items != null:
+		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+	return DynArrayView(null, 0u, sizeof(T))
+
+def arena_da_view_prefix[T](view: dview[T], end: usize) -> dview[T]:
+	_ = end
+	return view
+
+def arena_da_view_suffix[T](view: dview[T], start: usize) -> dview[T]:
+	_ = start
+	return view
+
+def inspect(values: any darray[i32, row]&) -> int:
+	base: dview[i32] = arena_da_view(values, 0u, values.count)
+	prefix: dview[i32] = arena_da_view_prefix(base, 2u)
+	suffix: dview[i32] = arena_da_view_suffix(base, 2u)
+	full_prefix: dview[i32] = arena_da_view_prefix(base, base.len)
+	full_suffix: dview[i32] = arena_da_view_suffix(base, 0u)
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_dview_split_helpers.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	baseExpr := requireOptimizationFactsVarInitExpr(t, fn, "base")
+	prefixExpr := requireOptimizationFactsVarInitExpr(t, fn, "prefix")
+	suffixExpr := requireOptimizationFactsVarInitExpr(t, fn, "suffix")
+	fullPrefixExpr := requireOptimizationFactsVarInitExpr(t, fn, "full_prefix")
+	fullSuffixExpr := requireOptimizationFactsVarInitExpr(t, fn, "full_suffix")
+
+	if !result.ExprsAreDisjoint(prefixExpr, suffixExpr) {
+		t.Fatalf("expected dview prefix/suffix helpers to produce disjoint views")
+	}
+	if !result.ExprsHaveSameExtent(baseExpr, fullPrefixExpr) {
+		t.Fatalf("expected full-span arena_da_view_prefix to preserve exact extent")
+	}
+	if !result.ExprsHaveSameExtent(baseExpr, fullSuffixExpr) {
+		t.Fatalf("expected zero-offset arena_da_view_suffix to preserve exact extent")
+	}
+}

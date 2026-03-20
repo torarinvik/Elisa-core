@@ -330,6 +330,48 @@ func (a *Analyzer) inferCallOptimizationFacts(call *ast.CallExpr, facts Optimiza
 		if extent := a.inferViewHelperExtent(call, 0, 1, 2, "count"); extent != nil {
 			facts.Extent = extent
 		}
+	case "arena_da_view_prefix":
+		if viewExpr, ok := optimizationCallArg(call, 0); ok {
+			facts.base = a.optimizationBaseForExpr(viewExpr)
+			if viewFacts, ok := a.exprFacts[viewExpr]; ok {
+				if viewFacts.Exclusive {
+					facts.Exclusive = true
+				}
+				if endExpr, ok := optimizationCallArg(call, 1); ok && optimizationFieldMatches(endExpr, viewExpr, "len") && viewFacts.HasExactExtent() {
+					facts.Extent = cloneOptimizationExtent(viewFacts.Extent)
+				}
+			}
+		}
+		if facts.Extent == nil {
+			if endExpr, ok := optimizationCallArg(call, 1); ok {
+				if end := optimizationExprString(endExpr); end != "" {
+					facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: "0", End: end}
+				}
+			}
+		}
+	case "arena_da_view_suffix":
+		if viewExpr, ok := optimizationCallArg(call, 0); ok {
+			facts.base = a.optimizationBaseForExpr(viewExpr)
+			if viewFacts, ok := a.exprFacts[viewExpr]; ok {
+				if viewFacts.Exclusive {
+					facts.Exclusive = true
+				}
+				if startExpr, ok := optimizationCallArg(call, 1); ok && isZeroOptimizationExpr(startExpr) && viewFacts.HasExactExtent() {
+					facts.Extent = cloneOptimizationExtent(viewFacts.Extent)
+				}
+			}
+		}
+		if facts.Extent == nil {
+			if viewExpr, ok := optimizationCallArg(call, 0); ok {
+				if startExpr, ok := optimizationCallArg(call, 1); ok {
+					begin := optimizationExprString(startExpr)
+					viewName := optimizationExprString(viewExpr)
+					if begin != "" && viewName != "" {
+						facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: begin, End: viewName + ".len"}
+					}
+				}
+			}
+		}
 	case "string_view_prefix", "ctx_string_view_prefix":
 		if viewExpr, ok := optimizationCallArg(call, 0); ok {
 			facts.base = a.optimizationBaseForExpr(viewExpr)

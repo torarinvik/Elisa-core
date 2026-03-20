@@ -1431,6 +1431,12 @@ def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]
     offset: usize = lo * view.elem_size
     return DynArrayView((view.data.cast[any u8&]() + offset).cast[any void&](), hi - lo, view.elem_size)
 
+def arena_da_view_prefix[T](view: dview[T], end: usize) -> dview[T]:
+    return arena_da_view_slice(view, 0u, end)
+
+def arena_da_view_suffix[T](view: dview[T], start: usize) -> dview[T]:
+    return arena_da_view_slice(view, start, view.len)
+
 def arena_da_view_get[T](view: dview[T], index: usize) -> T:
     assert index < view.len
     assert view.data != null
