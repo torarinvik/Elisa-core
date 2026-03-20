@@ -802,6 +802,12 @@ func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helpe
 			return cmp, s.g.result.NamedTypes["bool"], nil
 		}
 	}
+	if cmp, ok, err := s.emitSameExtentRuntimeStringCompareExpr(expr.Op, firstExpr, firstType, secondExpr, secondType); ok {
+		if err != nil {
+			return nil, nil, err
+		}
+		return cmp, s.g.result.NamedTypes["bool"], nil
+	}
 	firstValue, _, err := s.emitExpr(firstExpr, firstType)
 	if err != nil {
 		return nil, nil, err
@@ -837,6 +843,91 @@ func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helpe
 	}
 	cmp := C.LLVMBuildICmp(s.builder, pred, call, zero, cStringFree("strcmp"))
 	return cmp, s.g.result.NamedTypes["bool"], nil
+}
+
+func (s *functionState) emitSameExtentRuntimeStringCompareExpr(op lexer.TokenKind, firstExpr ast.Expr, firstType semantic.Type, secondExpr ast.Expr, secondType semantic.Type) (C.LLVMValueRef, bool, error) {
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.result.ExprsHaveSameExtent(firstExpr, secondExpr) {
+		return nil, false, nil
+	}
+	firstData, firstLen, firstLenType, firstKind, err := s.emitRuntimeStringCompareOperand(firstExpr, firstType)
+	if err != nil {
+		return nil, true, err
+	}
+	secondData, secondLen, secondLenType, secondKind, err := s.emitRuntimeStringCompareOperand(secondExpr, secondType)
+	if err != nil {
+		return nil, true, err
+	}
+	if firstKind == runtimeStringCompareNone || secondKind == runtimeStringCompareNone {
+		return nil, false, nil
+	}
+	lenValue := firstLen
+	lenType := firstLenType
+	if lenValue == nil {
+		lenValue = secondLen
+		lenType = secondLenType
+	}
+	if lenValue == nil || lenType == nil {
+		return nil, false, nil
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	coercedLen, err := s.coerceValue(lenValue, lenType, usizeType)
+	if err != nil {
+		return nil, true, err
+	}
+	cmp, err := s.emitMemcmpEqualValue(firstData, secondData, coercedLen, "streq.memcmp")
+	if err != nil {
+		return nil, true, err
+	}
+	if op == lexer.TOKEN_BANGEQ {
+		cmp = C.LLVMBuildNot(s.builder, cmp, cStringFree("streq.memcmp.not"))
+	}
+	return cmp, true, nil
+}
+
+func (s *functionState) emitRuntimeStringCompareOperand(expr ast.Expr, exprType semantic.Type) (C.LLVMValueRef, C.LLVMValueRef, semantic.Type, runtimeStringCompareKind, error) {
+	kind := classifyRuntimeStringCompareKind(exprType)
+	if kind == runtimeStringCompareNone {
+		return nil, nil, nil, kind, nil
+	}
+	value, _, err := s.emitExpr(expr, exprType)
+	if err != nil {
+		return nil, nil, nil, kind, err
+	}
+	switch kind {
+	case runtimeStringCompareView:
+		lenType := s.g.result.NamedTypes["i64"]
+		data := C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("streq.view.data"))
+		length := C.LLVMBuildExtractValue(s.builder, value, 1, cStringFree("streq.view.len"))
+		return data, length, lenType, kind, nil
+	case runtimeStringCompareDStr:
+		lenType := s.g.result.NamedTypes["i64"]
+		length, err := s.emitRuntimeStringLengthValue(value, exprType, lenType, "streq.len")
+		if err != nil {
+			return nil, nil, nil, kind, err
+		}
+		return value, length, lenType, kind, nil
+	case runtimeStringCompareRaw:
+		return value, nil, nil, kind, nil
+	default:
+		return nil, nil, nil, kind, nil
+	}
+}
+
+func (s *functionState) emitRuntimeStringLengthValue(stringValue C.LLVMValueRef, stringType semantic.Type, resultType semantic.Type, name string) (C.LLVMValueRef, error) {
+	helperType := &semantic.FuncType{
+		Name:   "ctx_stage1rt_strlen",
+		Params: []semantic.Type{stringType},
+		Return: resultType,
+	}
+	callee, err := s.g.ensureFunctionDeclared("ctx_stage1rt_strlen", helperType)
+	if err != nil {
+		return nil, err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, err
+	}
+	return s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stringValue}, name), nil
 }
 
 func (s *functionState) emitSpecializedRuntimeCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
@@ -1069,6 +1160,16 @@ func (s *functionState) emitStringViewLiteralBytesEqual(viewData C.LLVMValueRef,
 }
 
 func (s *functionState) emitMemcmpEqual(left C.LLVMValueRef, right C.LLVMValueRef, length int) (C.LLVMValueRef, error) {
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, err
+	}
+	lengthValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(length), 0)
+	return s.emitMemcmpEqualValue(left, right, lengthValue, "svlit.memcmp")
+}
+
+func (s *functionState) emitMemcmpEqualValue(left C.LLVMValueRef, right C.LLVMValueRef, lengthValue C.LLVMValueRef, callName string) (C.LLVMValueRef, error) {
 	voidType := s.g.result.NamedTypes["void"]
 	usizeType := s.g.result.NamedTypes["usize"]
 	intType := s.g.result.NamedTypes["int"]
@@ -1086,18 +1187,13 @@ func (s *functionState) emitMemcmpEqual(left C.LLVMValueRef, right C.LLVMValueRe
 	if err != nil {
 		return nil, err
 	}
-	usizeLLVMType, err := s.g.lowerType(usizeType)
-	if err != nil {
-		return nil, err
-	}
-	lengthValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(length), 0)
-	call := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{left, right, lengthValue}, "svlit.memcmp")
+	call := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{left, right, lengthValue}, callName)
 	intLLVMType, err := s.g.lowerType(intType)
 	if err != nil {
 		return nil, err
 	}
 	zero := C.LLVMConstInt(intLLVMType, 0, 0)
-	return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), call, zero, cStringFree("svlit.memcmp.eq")), nil
+	return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), call, zero, cStringFree(callName+".eq")), nil
 }
 
 func (s *functionState) staticCStringLiteral(expr ast.Expr) (string, bool) {
