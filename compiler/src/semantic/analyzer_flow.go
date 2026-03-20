@@ -5,6 +5,7 @@ import (
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -29,6 +30,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: declType, Node: n, Mutable: n.Mutable}
 		a.defineLocal(sym, n.Pos())
+		a.markCreatedProtocolSymbol(sym, n.Value)
+		a.recordBorrowedOwnerRefBinding(sym, n.Value)
 		a.recordImmutableSymbolOptimizationFacts(sym, n.Value)
 		a.recordRegionRefBinding(sym, n.Value)
 		if from, fromType, ok := a.freezeMovedPackedStoreSource(n.Value); ok {
@@ -92,6 +95,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		a.clearAffineValueTarget(n.Target)
 		a.trackAffineValueTarget(n.Target, targetType)
+		a.markCreatedProtocolTarget(n.Target, n.Value, targetType)
+		a.recordBorrowedOwnerRefTarget(n.Target, targetType, n.Value)
 		a.consumeAffineValueExpr(n.Value, targetType, "assignment")
 	case *ast.AugAssignStmt:
 		targetType := a.assignmentTargetType(n.Target)
@@ -110,6 +115,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.recordRegionRefAssignment(n.Target, n.Value)
 		a.clearAffineValueTarget(n.Target)
 		a.trackAffineValueTarget(n.Target, targetType)
+		a.markCreatedProtocolTarget(n.Target, n.Value, targetType)
+		a.recordBorrowedOwnerRefTarget(n.Target, targetType, n.Value)
 		a.consumeAffineValueExpr(n.Value, targetType, "assignment")
 	case *ast.ReturnStmt:
 		if n.Value == nil {
@@ -145,6 +152,15 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				}
 			}
 		}
+		if ownerState, ok := a.borrowedOwnerRefStateForExpr(n.Value); ok {
+			if summary, ok := abstractParamOnlyBorrowedOwnerRefSummary(ownerState); ok {
+				if merged, ok := mergeBorrowedOwnerRefSummary(a.currentReturnBorrowedOwnerRefs, summary); ok {
+					a.currentReturnBorrowedOwnerRefs = merged
+				} else if !hasBorrowedOwnerRefSummary(a.currentReturnBorrowedOwnerRefs) {
+					a.currentReturnBorrowedOwnerRefs = summary
+				}
+			}
+		}
 		a.recordFreshReturnBindings(valueType)
 		expectedReturn := a.matchReturnType(valueType)
 		if !AssignableTo(expectedReturn, valueType) {
@@ -158,32 +174,38 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "if condition must be bool, got %s", condType.String())
 		}
 		mergedAffine := a.cloneAffineValueStates()
-		thenAffine := a.analyzeBlockWithAffineClone(n.Then, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
+		mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
+		thenSnapshot := a.analyzeBlockWithAffineClone(n.Then, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
 		if !blockDefinitelyExits(n.Then) {
-			mergedAffine = mergeAffineValueStates(mergedAffine, thenAffine)
+			mergedAffine = mergeAffineValueStates(mergedAffine, thenSnapshot.Affine)
+			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, thenSnapshot.BorrowedOwnerRefs)
 		}
 		for _, elif := range n.Elifs {
 			elifType := a.analyzeExpr(elif.Cond)
 			if !IsBoolType(elifType) {
 				a.errorf(elif.Position, "elif condition must be bool, got %s", elifType.String())
 			}
-			elifAffine := a.analyzeBlockWithAffineClone(elif.Body, a.refinedScopeForCondition(a.currentScope, elif.Cond, true))
+			elifSnapshot := a.analyzeBlockWithAffineClone(elif.Body, a.refinedScopeForCondition(a.currentScope, elif.Cond, true))
 			if !blockDefinitelyExits(elif.Body) {
-				mergedAffine = mergeAffineValueStates(mergedAffine, elifAffine)
+				mergedAffine = mergeAffineValueStates(mergedAffine, elifSnapshot.Affine)
+				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elifSnapshot.BorrowedOwnerRefs)
 			}
 		}
 		if len(n.Elifs) == 0 {
-			elseAffine := a.analyzeBlockWithAffineClone(n.Else, a.refinedScopeForCondition(a.currentScope, n.Cond, false))
+			elseSnapshot := a.analyzeBlockWithAffineClone(n.Else, a.refinedScopeForCondition(a.currentScope, n.Cond, false))
 			if !blockDefinitelyExits(n.Else) {
-				mergedAffine = mergeAffineValueStates(mergedAffine, elseAffine)
+				mergedAffine = mergeAffineValueStates(mergedAffine, elseSnapshot.Affine)
+				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elseSnapshot.BorrowedOwnerRefs)
 			}
 		} else {
-			elseAffine := a.analyzeBlockWithAffineClone(n.Else, NewScope(a.currentScope))
+			elseSnapshot := a.analyzeBlockWithAffineClone(n.Else, NewScope(a.currentScope))
 			if !blockDefinitelyExits(n.Else) {
-				mergedAffine = mergeAffineValueStates(mergedAffine, elseAffine)
+				mergedAffine = mergeAffineValueStates(mergedAffine, elseSnapshot.Affine)
+				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elseSnapshot.BorrowedOwnerRefs)
 			}
 		}
 		a.currentAffineValues = mergedAffine
+		a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 		a.applyPostIfFallthroughRefinement(n)
 	case *ast.MatchStmt:
 		a.analyzeMatchStmt(n)
@@ -201,11 +223,14 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "while condition must be bool, got %s", condType.String())
 		}
 		mergedAffine := a.cloneAffineValueStates()
-		bodyAffine := a.analyzeBlockWithAffineClone(n.Body, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
+		mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
+		bodySnapshot := a.analyzeBlockWithAffineClone(n.Body, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
 		if !blockDefinitelyExits(n.Body) {
-			mergedAffine = mergeAffineValueStates(mergedAffine, bodyAffine)
+			mergedAffine = mergeAffineValueStates(mergedAffine, bodySnapshot.Affine)
+			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, bodySnapshot.BorrowedOwnerRefs)
 		}
 		a.currentAffineValues = mergedAffine
+		a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 	case *ast.PassStmt:
 		return
 	case *ast.PanicStmt:
@@ -242,11 +267,15 @@ func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {
 	}
 	valueType := a.analyzeExpr(stmt.Value)
 	valueState, hasValueState := a.regionRefStateForExpr(stmt.Value)
+	borrowedOwnerState, hasBorrowedOwnerState := a.borrowedOwnerRefStateForExpr(stmt.Value)
 	switch p := stmt.Pattern.(type) {
 	case *ast.MoveBindNamePattern:
 		if p.Name != "_" {
 			sym := &Symbol{Name: p.Name, Kind: SymbolLocal, Type: valueType, Node: p, Mutable: false}
 			a.defineLocal(sym, p.Pos())
+			if hasBorrowedOwnerState {
+				a.currentBorrowedOwnerRefs[sym] = borrowedOwnerState
+			}
 			if hasValueState {
 				a.recordResolvedRegionRefBinding(sym, valueState)
 			} else {
@@ -264,6 +293,11 @@ func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {
 			}
 			sym := &Symbol{Name: arg.Name, Kind: SymbolLocal, Type: fields[i].Type, Node: p, Mutable: false}
 			a.defineLocal(sym, arg.Position)
+			if hasBorrowedOwnerState {
+				if fieldState, ok := projectBorrowedOwnerRefFieldState(borrowedOwnerState, fields[i].Name); ok {
+					a.currentBorrowedOwnerRefs[sym] = fieldState
+				}
+			}
 			if !hasValueState {
 				continue
 			}
@@ -283,6 +317,11 @@ func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {
 			}
 			sym := &Symbol{Name: payload.BindName, Kind: SymbolLocal, Type: payload.Type, Node: p, Mutable: false}
 			a.defineLocal(sym, p.Position)
+			if hasBorrowedOwnerState {
+				if fieldState, ok := projectBorrowedOwnerRefFieldState(borrowedOwnerState, payload.Key); ok {
+					a.currentBorrowedOwnerRefs[sym] = fieldState
+				}
+			}
 			if !hasValueState && packedStoreState == nil {
 				continue
 			}
@@ -707,6 +746,7 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 	}
 	a.validateMatchStore(stmt.Pos(), enumType, stmt.Store)
 	mergedAffine := a.cloneAffineValueStates()
+	mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
 	priorPatterns := make([]ast.MatchPattern, 0, len(stmt.Arms))
 	for i, arm := range stmt.Arms {
 		if a.matchPatternShadowedByPrevious(arm.Pattern, enumType, priorPatterns) {
@@ -714,13 +754,15 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 		}
 		scope := NewScope(a.currentScope)
 		a.analyzeTopLevelMatchPattern(arm.Pattern, enumType, scope, i, len(stmt.Arms), nil)
-		armAffine := a.analyzeBlockWithAffineClone(arm.Body, scope)
+		armSnapshot := a.analyzeBlockWithAffineClone(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
-			mergedAffine = mergeAffineValueStates(mergedAffine, armAffine)
+			mergedAffine = mergeAffineValueStates(mergedAffine, armSnapshot.Affine)
+			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, armSnapshot.BorrowedOwnerRefs)
 		}
 		priorPatterns = append(priorPatterns, arm.Pattern)
 	}
 	a.currentAffineValues = mergedAffine
+	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 }
 
 func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
@@ -738,6 +780,7 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 	hasWildcard := false
 	resultType := Type(nil)
 	mergedAffine := a.cloneAffineValueStates()
+	mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
 	priorPatterns := make([]ast.MatchPattern, 0, len(expr.Arms))
 	for i, arm := range expr.Arms {
 		if a.matchPatternShadowedByPrevious(arm.Pattern, enumType, priorPatterns) {
@@ -747,9 +790,10 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 		if a.analyzeTopLevelMatchPattern(arm.Pattern, enumType, scope, i, len(expr.Arms), covered) {
 			hasWildcard = true
 		}
-		armType, armAffine := a.analyzeMatchExprArmBodyWithAffineSnapshot(arm.Body, scope)
+		armType, armSnapshot := a.analyzeMatchExprArmBodyWithAffineSnapshot(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
-			mergedAffine = mergeAffineValueStates(mergedAffine, armAffine)
+			mergedAffine = mergeAffineValueStates(mergedAffine, armSnapshot.Affine)
+			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, armSnapshot.BorrowedOwnerRefs)
 		}
 		if resultType == nil {
 			resultType = armType
@@ -767,6 +811,7 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 		priorPatterns = append(priorPatterns, arm.Pattern)
 	}
 	a.currentAffineValues = mergedAffine
+	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 	a.reportNonExhaustiveMatch(expr.Pos(), enumType, covered, hasWildcard)
 	if resultType == nil {
 		return neverType
@@ -1153,12 +1198,31 @@ func (a *Analyzer) analyzeBlockWithRegionClone(stmts []ast.Stmt, scope *Scope) {
 	a.currentPackedStores = savedPackedStores
 }
 
-func (a *Analyzer) analyzeBlockWithAffineClone(stmts []ast.Stmt, scope *Scope) map[affineValueKey]affineValueState {
+type affineFlowSnapshot struct {
+	Affine            map[affineValueKey]affineValueState
+	BorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
+}
+
+type borrowedOwnerRefSummaryTarget struct {
+	ParamIndex int
+	Path       []borrowReturnAnnotationStep
+}
+
+type borrowedOwnerRefSummary struct {
+	HasDirect bool
+	Direct    borrowedOwnerRefSummaryTarget
+	Fields    map[string]borrowedOwnerRefSummary
+}
+
+func (a *Analyzer) analyzeBlockWithAffineClone(stmts []ast.Stmt, scope *Scope) affineFlowSnapshot {
 	savedAffine := a.currentAffineValues
+	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
 	a.currentAffineValues = a.cloneAffineValueStates()
+	a.currentBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
 	a.analyzeBlockWithRegionClone(stmts, scope)
-	snapshot := a.cloneAffineValueStates()
+	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings()}
 	a.currentAffineValues = savedAffine
+	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	return snapshot
 }
 
@@ -1571,6 +1635,297 @@ func (a *Analyzer) cloneAffineValueStates() map[affineValueKey]affineValueState 
 	return cloned
 }
 
+func cloneBorrowedOwnerRefState(state borrowedOwnerRefState) borrowedOwnerRefState {
+	cloned := borrowedOwnerRefState{HasDirect: state.HasDirect, Direct: state.Direct}
+	if len(state.Fields) != 0 {
+		cloned.Fields = make(map[string]borrowedOwnerRefState, len(state.Fields))
+		for key, child := range state.Fields {
+			cloned.Fields[key] = cloneBorrowedOwnerRefState(child)
+		}
+	}
+	return cloned
+}
+
+func cloneBorrowedOwnerRefSummaryTarget(target borrowedOwnerRefSummaryTarget) borrowedOwnerRefSummaryTarget {
+	cloned := borrowedOwnerRefSummaryTarget{ParamIndex: target.ParamIndex}
+	if len(target.Path) != 0 {
+		cloned.Path = append([]borrowReturnAnnotationStep(nil), target.Path...)
+	}
+	return cloned
+}
+
+func cloneBorrowedOwnerRefSummary(summary borrowedOwnerRefSummary) borrowedOwnerRefSummary {
+	cloned := borrowedOwnerRefSummary{HasDirect: summary.HasDirect}
+	if summary.HasDirect {
+		cloned.Direct = cloneBorrowedOwnerRefSummaryTarget(summary.Direct)
+	}
+	if len(summary.Fields) != 0 {
+		cloned.Fields = make(map[string]borrowedOwnerRefSummary, len(summary.Fields))
+		for key, child := range summary.Fields {
+			cloned.Fields[key] = cloneBorrowedOwnerRefSummary(child)
+		}
+	}
+	return cloned
+}
+
+func borrowedOwnerRefSummaryTargetEqual(left borrowedOwnerRefSummaryTarget, right borrowedOwnerRefSummaryTarget) bool {
+	if left.ParamIndex != right.ParamIndex || len(left.Path) != len(right.Path) {
+		return false
+	}
+	for i := range left.Path {
+		leftStep := left.Path[i]
+		rightStep := right.Path[i]
+		if leftStep.Field != rightStep.Field || leftStep.Wildcard != rightStep.Wildcard {
+			return false
+		}
+		if (leftStep.Index == nil) != (rightStep.Index == nil) {
+			return false
+		}
+		if leftStep.Index != nil && rightStep.Index != nil && *leftStep.Index != *rightStep.Index {
+			return false
+		}
+	}
+	return true
+}
+
+func hasBorrowedOwnerRefSummary(summary borrowedOwnerRefSummary) bool {
+	return summary.HasDirect || len(summary.Fields) != 0
+}
+
+func mergeBorrowedOwnerRefSummary(dst borrowedOwnerRefSummary, src borrowedOwnerRefSummary) (borrowedOwnerRefSummary, bool) {
+	merged := borrowedOwnerRefSummary{}
+	if dst.HasDirect && src.HasDirect && borrowedOwnerRefSummaryTargetEqual(dst.Direct, src.Direct) {
+		merged.HasDirect = true
+		merged.Direct = cloneBorrowedOwnerRefSummaryTarget(dst.Direct)
+	}
+	if len(dst.Fields) != 0 && len(src.Fields) != 0 {
+		for key, child := range dst.Fields {
+			srcChild, ok := src.Fields[key]
+			if !ok {
+				continue
+			}
+			mergedChild, ok := mergeBorrowedOwnerRefSummary(child, srcChild)
+			if !ok {
+				continue
+			}
+			if merged.Fields == nil {
+				merged.Fields = map[string]borrowedOwnerRefSummary{}
+			}
+			merged.Fields[key] = mergedChild
+		}
+	}
+	if !hasBorrowedOwnerRefSummary(merged) {
+		return borrowedOwnerRefSummary{}, false
+	}
+	return merged, true
+}
+
+func parseAffineValueKeyPath(path string) ([]borrowReturnAnnotationStep, bool) {
+	if path == "" {
+		return nil, true
+	}
+	parts := strings.Split(path, ".")
+	steps := make([]borrowReturnAnnotationStep, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			return nil, false
+		}
+		if strings.HasPrefix(part, "[") && strings.HasSuffix(part, "]") {
+			token := part[1 : len(part)-1]
+			if token == "*" {
+				steps = append(steps, borrowReturnAnnotationStep{Wildcard: true})
+				continue
+			}
+			value, err := strconv.ParseInt(token, 10, 64)
+			if err != nil {
+				return nil, false
+			}
+			valueCopy := value
+			steps = append(steps, borrowReturnAnnotationStep{Index: &valueCopy})
+			continue
+		}
+		steps = append(steps, borrowReturnAnnotationStep{Field: part})
+	}
+	return steps, true
+}
+
+func borrowedOwnerRefSummaryFromAffineValueKey(key affineValueKey) (borrowedOwnerRefSummaryTarget, bool) {
+	if key.Root == nil || key.Root.Kind != SymbolParam {
+		return borrowedOwnerRefSummaryTarget{}, false
+	}
+	steps, ok := parseAffineValueKeyPath(key.Path)
+	if !ok {
+		return borrowedOwnerRefSummaryTarget{}, false
+	}
+	return borrowedOwnerRefSummaryTarget{ParamIndex: key.Root.ParamIndex, Path: steps}, true
+}
+
+func abstractParamOnlyBorrowedOwnerRefSummary(state borrowedOwnerRefState) (borrowedOwnerRefSummary, bool) {
+	if !hasBorrowedOwnerRefState(state) {
+		return borrowedOwnerRefSummary{}, false
+	}
+	out := borrowedOwnerRefSummary{}
+	if state.HasDirect {
+		target, ok := borrowedOwnerRefSummaryFromAffineValueKey(state.Direct)
+		if ok {
+			out.HasDirect = true
+			out.Direct = target
+		}
+	}
+	if len(state.Fields) != 0 {
+		for key, child := range state.Fields {
+			filtered, ok := abstractParamOnlyBorrowedOwnerRefSummary(child)
+			if !ok {
+				continue
+			}
+			if out.Fields == nil {
+				out.Fields = map[string]borrowedOwnerRefSummary{}
+			}
+			out.Fields[key] = filtered
+		}
+	}
+	if !hasBorrowedOwnerRefSummary(out) {
+		return borrowedOwnerRefSummary{}, false
+	}
+	return out, true
+}
+
+func projectBorrowedOwnerRefStateAtSteps(state borrowedOwnerRefState, steps []borrowReturnAnnotationStep) (borrowedOwnerRefState, bool) {
+	current := state
+	for _, step := range steps {
+		var ok bool
+		switch {
+		case step.Field != "":
+			current, ok = projectBorrowedOwnerRefFieldState(current, step.Field)
+		case step.Wildcard:
+			current, ok = projectBorrowedOwnerRefIndexKeyState(current, regionAnyIndexFieldKey())
+		case step.Index != nil:
+			current, ok = projectBorrowedOwnerRefIndexKeyState(current, regionIndexFieldKey(*step.Index))
+		default:
+			return borrowedOwnerRefState{}, false
+		}
+		if !ok {
+			return borrowedOwnerRefState{}, false
+		}
+	}
+	return current, true
+}
+
+func (a *Analyzer) instantiateBorrowedOwnerRefSummary(summary borrowedOwnerRefSummary, args []ast.Expr) (borrowedOwnerRefState, bool) {
+	if !hasBorrowedOwnerRefSummary(summary) {
+		return borrowedOwnerRefState{}, false
+	}
+	instantiated := borrowedOwnerRefState{}
+	if summary.HasDirect {
+		index := summary.Direct.ParamIndex
+		if index >= 0 && index < len(args) {
+			if argState, ok := a.borrowedOwnerRefStateForExpr(args[index]); ok {
+				if len(summary.Direct.Path) == 0 {
+					instantiated = cloneBorrowedOwnerRefState(argState)
+				} else if projected, ok := projectBorrowedOwnerRefStateAtSteps(argState, summary.Direct.Path); ok {
+					instantiated = cloneBorrowedOwnerRefState(projected)
+				}
+			}
+		}
+	}
+	if len(summary.Fields) != 0 {
+		for key, child := range summary.Fields {
+			instChild, ok := a.instantiateBorrowedOwnerRefSummary(child, args)
+			if !ok {
+				continue
+			}
+			if instantiated.Fields == nil {
+				instantiated.Fields = map[string]borrowedOwnerRefState{}
+			}
+			instantiated.Fields[key] = instChild
+		}
+	}
+	if !hasBorrowedOwnerRefState(instantiated) {
+		return borrowedOwnerRefState{}, false
+	}
+	return instantiated, true
+}
+
+func hasBorrowedOwnerRefState(state borrowedOwnerRefState) bool {
+	return state.HasDirect || len(state.Fields) != 0
+}
+
+func mergeBorrowedOwnerRefState(dst borrowedOwnerRefState, src borrowedOwnerRefState) (borrowedOwnerRefState, bool) {
+	merged := borrowedOwnerRefState{}
+	if dst.HasDirect && src.HasDirect && dst.Direct == src.Direct {
+		merged.HasDirect = true
+		merged.Direct = dst.Direct
+	}
+	if len(dst.Fields) != 0 && len(src.Fields) != 0 {
+		for key, child := range dst.Fields {
+			srcChild, ok := src.Fields[key]
+			if !ok {
+				continue
+			}
+			mergedChild, ok := mergeBorrowedOwnerRefState(child, srcChild)
+			if !ok {
+				continue
+			}
+			if merged.Fields == nil {
+				merged.Fields = map[string]borrowedOwnerRefState{}
+			}
+			merged.Fields[key] = mergedChild
+		}
+	}
+	if !hasBorrowedOwnerRefState(merged) {
+		return borrowedOwnerRefState{}, false
+	}
+	return merged, true
+}
+
+func assignBorrowedOwnerRefStateAtPath(dst borrowedOwnerRefState, steps []borrowReturnAnnotationStep, value borrowedOwnerRefState) borrowedOwnerRefState {
+	if len(steps) == 0 {
+		return cloneBorrowedOwnerRefState(value)
+	}
+	if dst.Fields == nil {
+		dst.Fields = map[string]borrowedOwnerRefState{}
+	}
+	key := regionFieldKeyForBorrowStep(steps[0])
+	child := dst.Fields[key]
+	dst.Fields[key] = assignBorrowedOwnerRefStateAtPath(child, steps[1:], value)
+	return dst
+}
+
+func clearBorrowedOwnerRefStateAtPath(dst borrowedOwnerRefState, steps []borrowReturnAnnotationStep) borrowedOwnerRefState {
+	if len(steps) == 0 {
+		return borrowedOwnerRefState{}
+	}
+	if len(dst.Fields) == 0 {
+		return dst
+	}
+	key := regionFieldKeyForBorrowStep(steps[0])
+	child, ok := dst.Fields[key]
+	if !ok {
+		return dst
+	}
+	child = clearBorrowedOwnerRefStateAtPath(child, steps[1:])
+	if !hasBorrowedOwnerRefState(child) {
+		delete(dst.Fields, key)
+	} else {
+		dst.Fields[key] = child
+	}
+	if len(dst.Fields) == 0 {
+		dst.Fields = nil
+	}
+	return dst
+}
+
+func (a *Analyzer) cloneBorrowedOwnerRefBindings() map[*Symbol]borrowedOwnerRefState {
+	if a.currentBorrowedOwnerRefs == nil {
+		return nil
+	}
+	cloned := make(map[*Symbol]borrowedOwnerRefState, len(a.currentBorrowedOwnerRefs))
+	for sym, state := range a.currentBorrowedOwnerRefs {
+		cloned[sym] = cloneBorrowedOwnerRefState(state)
+	}
+	return cloned
+}
+
 func mergeAffineValueStates(dst map[affineValueKey]affineValueState, src map[affineValueKey]affineValueState) map[affineValueKey]affineValueState {
 	if dst == nil && src == nil {
 		return nil
@@ -1598,11 +1953,372 @@ func mergeAffineValueStates(dst map[affineValueKey]affineValueState, src map[aff
 	return dst
 }
 
+func mergeBorrowedOwnerRefBindings(dst map[*Symbol]borrowedOwnerRefState, src map[*Symbol]borrowedOwnerRefState) map[*Symbol]borrowedOwnerRefState {
+	if dst == nil || src == nil {
+		return nil
+	}
+	merged := make(map[*Symbol]borrowedOwnerRefState, len(dst))
+	for sym, state := range dst {
+		srcState, ok := src[sym]
+		if !ok {
+			continue
+		}
+		mergedState, ok := mergeBorrowedOwnerRefState(state, srcState)
+		if ok {
+			merged[sym] = mergedState
+		}
+	}
+	return merged
+}
+
 func (a *Analyzer) trackAffineValueSymbol(sym *Symbol) {
 	if sym == nil || !a.containsAffineHandleValues(sym.Type, map[string]bool{}) {
 		return
 	}
 	a.registerLiveProtocolValuePaths(affineValueKey{Root: sym}, sym.Type)
+}
+
+func borrowableOwnerRefElemType(t Type) (Type, bool) {
+	ref, ok := t.(*RefType)
+	if !ok || !isBorrowableAffineOwnerType(ref.Elem) {
+		return nil, false
+	}
+	return ref.Elem, true
+}
+
+func (a *Analyzer) containsBorrowedOwnerRefValues(t Type, seen map[string]bool) bool {
+	if t == nil {
+		return false
+	}
+	if _, ok := borrowableOwnerRefElemType(t); ok {
+		return true
+	}
+	key := t.String()
+	if seen[key] {
+		return false
+	}
+	seen[key] = true
+	switch tt := t.(type) {
+	case *ArrayType:
+		return a.containsBorrowedOwnerRefValues(tt.Elem, seen)
+	case *DArrayType:
+		return a.containsBorrowedOwnerRefValues(tt.Elem, seen)
+	case *ViewType:
+		return a.containsBorrowedOwnerRefValues(tt.Elem, seen)
+	case *DArrayViewType:
+		return a.containsBorrowedOwnerRefValues(tt.Elem, seen)
+	case *DictType:
+		return a.containsBorrowedOwnerRefValues(tt.Key, seen) || a.containsBorrowedOwnerRefValues(tt.Value, seen)
+	case *StructType:
+		for _, field := range tt.Fields {
+			if a.containsBorrowedOwnerRefValues(field.Type, seen) {
+				return true
+			}
+		}
+		return false
+	case *GenericInstanceType:
+		if base, ok := tt.Base.(*StructType); ok {
+			bindings := map[string]Type{}
+			for i, name := range base.TypeParams {
+				if i < len(tt.Args) {
+					bindings[name] = tt.Args[i]
+				}
+			}
+			for _, field := range base.Fields {
+				fieldType := field.Type
+				if len(bindings) != 0 {
+					fieldType = a.substituteType(fieldType, bindings, nil, nil, nil)
+				}
+				if a.containsBorrowedOwnerRefValues(fieldType, seen) {
+					return true
+				}
+			}
+			return false
+		}
+		for _, arg := range tt.Args {
+			if a.containsBorrowedOwnerRefValues(arg, seen) {
+				return true
+			}
+		}
+		return a.containsBorrowedOwnerRefValues(tt.Base, seen)
+	default:
+		return false
+	}
+}
+
+func (a *Analyzer) recordBorrowedOwnerRefParam(sym *Symbol) {
+	if a.currentBorrowedOwnerRefs == nil || sym == nil {
+		return
+	}
+	state, ok := a.abstractParamBorrowedOwnerRefState(sym.Type, affineValueKey{Root: sym}, map[string]bool{})
+	if !ok {
+		delete(a.currentBorrowedOwnerRefs, sym)
+		return
+	}
+	a.currentBorrowedOwnerRefs[sym] = state
+}
+
+func (a *Analyzer) recordBorrowedOwnerRefBinding(sym *Symbol, value ast.Expr) {
+	if a.currentBorrowedOwnerRefs == nil || sym == nil {
+		return
+	}
+	if !a.containsBorrowedOwnerRefValues(sym.Type, map[string]bool{}) {
+		delete(a.currentBorrowedOwnerRefs, sym)
+		return
+	}
+	if state, ok := a.borrowedOwnerRefStateForExpr(value); ok {
+		a.currentBorrowedOwnerRefs[sym] = state
+		return
+	}
+	if _, ok := borrowableOwnerRefElemType(sym.Type); ok {
+		a.currentBorrowedOwnerRefs[sym] = borrowedOwnerRefState{HasDirect: true, Direct: affineValueKey{Root: sym}}
+		return
+	}
+	delete(a.currentBorrowedOwnerRefs, sym)
+}
+
+func (a *Analyzer) recordBorrowedOwnerRefTarget(target ast.Expr, expected Type, value ast.Expr) {
+	if a.currentBorrowedOwnerRefs == nil {
+		return
+	}
+	root, steps, ok := a.lookupBorrowedOwnerRefTargetPath(target)
+	if !ok || root == nil {
+		return
+	}
+	if len(steps) == 0 {
+		a.recordBorrowedOwnerRefBinding(root, value)
+		return
+	}
+	if !a.containsBorrowedOwnerRefValues(root.Type, map[string]bool{}) {
+		delete(a.currentBorrowedOwnerRefs, root)
+		return
+	}
+	current := a.currentBorrowedOwnerRefs[root]
+	if a.containsBorrowedOwnerRefValues(expected, map[string]bool{}) {
+		if state, ok := a.borrowedOwnerRefStateForExpr(value); ok {
+			current = assignBorrowedOwnerRefStateAtPath(current, steps, state)
+		} else {
+			current = clearBorrowedOwnerRefStateAtPath(current, steps)
+		}
+	} else {
+		current = clearBorrowedOwnerRefStateAtPath(current, steps)
+	}
+	if hasBorrowedOwnerRefState(current) {
+		a.currentBorrowedOwnerRefs[root] = current
+	} else {
+		delete(a.currentBorrowedOwnerRefs, root)
+	}
+}
+
+func projectBorrowedOwnerRefFieldState(state borrowedOwnerRefState, field string) (borrowedOwnerRefState, bool) {
+	if len(state.Fields) == 0 {
+		return borrowedOwnerRefState{}, false
+	}
+	child, ok := state.Fields[field]
+	if !ok || !hasBorrowedOwnerRefState(child) {
+		return borrowedOwnerRefState{}, false
+	}
+	return cloneBorrowedOwnerRefState(child), true
+}
+
+func projectBorrowedOwnerRefIndexKeyState(state borrowedOwnerRefState, key string) (borrowedOwnerRefState, bool) {
+	if len(state.Fields) == 0 {
+		return borrowedOwnerRefState{}, false
+	}
+	child, ok := state.Fields[key]
+	if !ok || !hasBorrowedOwnerRefState(child) {
+		return borrowedOwnerRefState{}, false
+	}
+	return cloneBorrowedOwnerRefState(child), true
+}
+
+func projectBorrowedOwnerRefIndexState(state borrowedOwnerRefState, index ast.Expr, evalConst func(ast.Expr) (ConstValue, bool)) (borrowedOwnerRefState, bool) {
+	if len(state.Fields) == 0 {
+		return borrowedOwnerRefState{}, false
+	}
+	if evalConst != nil {
+		if value, ok := evalConst(index); ok && value.Kind == ConstInt {
+			if child, ok := projectBorrowedOwnerRefIndexKeyState(state, regionIndexFieldKey(value.Int)); ok {
+				return child, true
+			}
+		}
+	}
+	return projectBorrowedOwnerRefIndexKeyState(state, regionAnyIndexFieldKey())
+}
+
+func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRefState, bool) {
+	if expr == nil {
+		return borrowedOwnerRefState{}, false
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return a.borrowedOwnerRefStateForExpr(n.Inner)
+	case *ast.CastExpr:
+		return a.borrowedOwnerRefStateForExpr(n.Operand)
+	case *ast.MoveExpr:
+		return a.borrowedOwnerRefStateForExpr(n.Operand)
+	case *ast.AddrOfExpr:
+		operandType := a.exprTypes[n.Operand]
+		if operandType == nil {
+			operandType = a.analyzeExpr(n.Operand)
+		}
+		if !isBorrowableAffineOwnerType(operandType) {
+			return borrowedOwnerRefState{}, false
+		}
+		key, ok := a.lookupAffineValueKey(n.Operand)
+		if !ok {
+			return borrowedOwnerRefState{}, false
+		}
+		return borrowedOwnerRefState{HasDirect: true, Direct: key}, true
+	case *ast.Ident:
+		if a.currentScope == nil {
+			return borrowedOwnerRefState{}, false
+		}
+		sym, ok := a.currentScope.Lookup(n.Name)
+		if !ok {
+			return borrowedOwnerRefState{}, false
+		}
+		if state, ok := a.currentBorrowedOwnerRefs[sym]; ok && hasBorrowedOwnerRefState(state) {
+			return cloneBorrowedOwnerRefState(state), true
+		}
+		if _, ok := borrowableOwnerRefElemType(sym.Type); ok {
+			return borrowedOwnerRefState{HasDirect: true, Direct: affineValueKey{Root: sym}}, true
+		}
+		return borrowedOwnerRefState{}, false
+	case *ast.StructLitExpr:
+		actual := a.exprTypes[n]
+		fields, ok := a.resolvedStructFields(actual)
+		if !ok {
+			return borrowedOwnerRefState{}, false
+		}
+		state := borrowedOwnerRefState{}
+		for i, field := range fields {
+			if i >= len(n.Args) {
+				break
+			}
+			fieldState, ok := a.borrowedOwnerRefStateForExpr(n.Args[i])
+			if !ok || !hasBorrowedOwnerRefState(fieldState) {
+				continue
+			}
+			if state.Fields == nil {
+				state.Fields = map[string]borrowedOwnerRefState{}
+			}
+			state.Fields[field.Name] = fieldState
+		}
+		if !hasBorrowedOwnerRefState(state) {
+			return borrowedOwnerRefState{}, false
+		}
+		return state, true
+	case *ast.ListLitExpr:
+		state := borrowedOwnerRefState{}
+		for i, elem := range n.Elems {
+			elemState, ok := a.borrowedOwnerRefStateForExpr(elem)
+			if !ok || !hasBorrowedOwnerRefState(elemState) {
+				continue
+			}
+			if state.Fields == nil {
+				state.Fields = map[string]borrowedOwnerRefState{}
+			}
+			key := regionIndexFieldKey(int64(i))
+			state.Fields[key] = elemState
+			if anyState, ok := state.Fields[regionAnyIndexFieldKey()]; ok {
+				if merged, ok := mergeBorrowedOwnerRefState(anyState, elemState); ok {
+					state.Fields[regionAnyIndexFieldKey()] = merged
+				} else {
+					delete(state.Fields, regionAnyIndexFieldKey())
+				}
+			} else {
+				state.Fields[regionAnyIndexFieldKey()] = cloneBorrowedOwnerRefState(elemState)
+			}
+		}
+		if !hasBorrowedOwnerRefState(state) {
+			return borrowedOwnerRefState{}, false
+		}
+		return state, true
+	case *ast.FieldExpr:
+		state, ok := a.borrowedOwnerRefStateForExpr(n.Object)
+		if !ok {
+			return borrowedOwnerRefState{}, false
+		}
+		return projectBorrowedOwnerRefFieldState(state, n.Field)
+	case *ast.IndexExpr:
+		state, ok := a.borrowedOwnerRefStateForExpr(n.Object)
+		if !ok {
+			return borrowedOwnerRefState{}, false
+		}
+		return projectBorrowedOwnerRefIndexState(state, n.Index, a.evalConstExpr)
+	case *ast.CallExpr:
+		if _, ok := a.freezeStoreArg(n); ok {
+			return borrowedOwnerRefState{}, false
+		}
+		fnType, _ := a.exprTypes[n.Func].(*FuncType)
+		if fnType == nil {
+			if analyzed := a.analyzeExpr(n.Func); analyzed != nil {
+				fnType, _ = analyzed.(*FuncType)
+			}
+		}
+		if fnType != nil {
+			if !fnType.ReturnBorrowedOwnerRefsKnown {
+				a.inferFuncReturnBorrowedOwnerRefsForExpr(n.Func, fnType)
+			}
+			if fnType.ReturnBorrowedOwnerRefsKnown {
+				return a.instantiateBorrowedOwnerRefSummary(fnType.ReturnBorrowedOwnerRefs, n.Args)
+			}
+		}
+		return borrowedOwnerRefState{}, false
+	case *ast.TernaryExpr:
+		left, leftOK := a.borrowedOwnerRefStateForExpr(n.Value)
+		right, rightOK := a.borrowedOwnerRefStateForExpr(n.Alt)
+		if !leftOK || !rightOK {
+			return borrowedOwnerRefState{}, false
+		}
+		return mergeBorrowedOwnerRefState(left, right)
+	default:
+		return borrowedOwnerRefState{}, false
+	}
+}
+
+func (a *Analyzer) lookupBorrowedOwnerRefTargetPath(expr ast.Expr) (*Symbol, []borrowReturnAnnotationStep, bool) {
+	if expr == nil {
+		return nil, nil, false
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return a.lookupBorrowedOwnerRefTargetPath(n.Inner)
+	case *ast.Ident:
+		if a.currentScope == nil {
+			return nil, nil, false
+		}
+		sym, ok := a.currentScope.Lookup(n.Name)
+		return sym, nil, ok
+	case *ast.FieldExpr:
+		root, steps, ok := a.lookupBorrowedOwnerRefTargetPath(n.Object)
+		if !ok {
+			return nil, nil, false
+		}
+		return root, append(steps, borrowReturnAnnotationStep{Field: n.Field}), true
+	case *ast.IndexExpr:
+		root, steps, ok := a.lookupBorrowedOwnerRefTargetPath(n.Object)
+		if !ok {
+			return nil, nil, false
+		}
+		step := borrowReturnAnnotationStep{Wildcard: true}
+		if value, ok := a.evalConstExpr(n.Index); ok && value.Kind == ConstInt {
+			valueCopy := value.Int
+			step = borrowReturnAnnotationStep{Index: &valueCopy}
+		}
+		return root, append(steps, step), true
+	default:
+		return nil, nil, false
+	}
+}
+
+func (a *Analyzer) lookupBorrowedOwnerRefKey(expr ast.Expr) (affineValueKey, bool) {
+	state, ok := a.borrowedOwnerRefStateForExpr(expr)
+	if !ok || !state.HasDirect {
+		return affineValueKey{}, false
+	}
+	return state.Direct, true
 }
 
 func (a *Analyzer) trackAffineValueTarget(expr ast.Expr, expected Type) {
@@ -1648,6 +2364,52 @@ func (a *Analyzer) markLiveProtocolDescription(key affineValueKey, description s
 	state.LiveProtocolType = nil
 	state.LiveProtocolDescription = description
 	a.currentAffineValues[key] = state
+}
+
+func (a *Analyzer) markCreatedProtocolSymbol(sym *Symbol, value ast.Expr) {
+	if sym == nil {
+		return
+	}
+	description := protocolCreationDescription(value, sym.Type)
+	if description == "" {
+		return
+	}
+	a.markLiveProtocolDescription(affineValueKey{Root: sym}, description)
+}
+
+func (a *Analyzer) markCreatedProtocolTarget(target ast.Expr, value ast.Expr, expected Type) {
+	description := protocolCreationDescription(value, expected)
+	if description == "" {
+		return
+	}
+	key, ok := a.lookupAffineValueKey(target)
+	if !ok {
+		return
+	}
+	a.markLiveProtocolDescription(key, description)
+}
+
+func protocolCreationDescription(value ast.Expr, expected Type) string {
+	if !isBuiltinProtocolOwnerType(expected, "ThreadPool") {
+		return ""
+	}
+	if !callExprHasName(value, "pool_new") {
+		return ""
+	}
+	return "thread pool requiring shutdown"
+}
+
+func callExprHasName(expr ast.Expr, name string) bool {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return callExprHasName(n.Inner, name)
+	case *ast.CastExpr:
+		return callExprHasName(n.Operand, name)
+	case *ast.CallExpr:
+		return callIdentName(n) == name
+	default:
+		return false
+	}
 }
 
 func (a *Analyzer) clearLiveProtocolTracking(key affineValueKey) {
@@ -1700,14 +2462,18 @@ func directProtocolLeakKind(t Type) string {
 }
 
 func directProtocolCarrierType(t Type) bool {
+	return directProtocolLeakKind(t) != "" || isBuiltinProtocolOwnerType(t, "TaskGroup") || isBuiltinProtocolOwnerType(t, "ThreadPool")
+}
+
+func isBuiltinProtocolOwnerType(t Type, name string) bool {
 	switch tt := t.(type) {
 	case *StructType:
-		return tt.Builtin && tt.Name == "TaskGroup"
+		return tt.Builtin && tt.Name == name
 	case *GenericInstanceType:
 		base, ok := tt.Base.(*StructType)
-		return ok && base.Builtin && base.Name == "TaskGroup"
+		return ok && base.Builtin && base.Name == name
 	default:
-		return directProtocolLeakKind(t) != ""
+		return false
 	}
 }
 
@@ -2420,21 +3186,27 @@ func (a *Analyzer) analyzeExprInScope(expr ast.Expr, scope *Scope) Type {
 	return result
 }
 
-func (a *Analyzer) analyzeExprInAffineScope(expr ast.Expr, scope *Scope) (Type, map[affineValueKey]affineValueState) {
+func (a *Analyzer) analyzeExprInAffineScope(expr ast.Expr, scope *Scope) (Type, affineFlowSnapshot) {
 	savedAffine := a.currentAffineValues
+	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
 	a.currentAffineValues = a.cloneAffineValueStates()
+	a.currentBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
 	result := a.analyzeExprInScope(expr, scope)
-	snapshot := a.cloneAffineValueStates()
+	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings()}
 	a.currentAffineValues = savedAffine
+	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	return result, snapshot
 }
 
-func (a *Analyzer) analyzeMatchExprArmBodyWithAffineSnapshot(body []ast.Stmt, scope *Scope) (Type, map[affineValueKey]affineValueState) {
+func (a *Analyzer) analyzeMatchExprArmBodyWithAffineSnapshot(body []ast.Stmt, scope *Scope) (Type, affineFlowSnapshot) {
 	savedAffine := a.currentAffineValues
+	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
 	a.currentAffineValues = a.cloneAffineValueStates()
+	a.currentBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
 	result := a.analyzeMatchExprArmBody(body, scope)
-	snapshot := a.cloneAffineValueStates()
+	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings()}
 	a.currentAffineValues = savedAffine
+	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	return result, snapshot
 }
 
@@ -2453,6 +3225,10 @@ func isAffineHandleType(t Type) bool {
 	}
 }
 
+func isBorrowableAffineOwnerType(t Type) bool {
+	return isBuiltinProtocolOwnerType(t, "ThreadPool") || isBuiltinProtocolOwnerType(t, "TaskGroup")
+}
+
 func affineHandleKind(t Type) string {
 	if !isAffineHandleType(t) {
 		return "value containing affine handles"
@@ -2467,6 +3243,10 @@ func affineHandleKind(t Type) string {
 				return "task handle"
 			case "MutexGuard":
 				return "mutex guard"
+			case "ThreadPool":
+				return "thread pool owner"
+			case "TaskGroup":
+				return "task group owner"
 			}
 		}
 	case *StructType:
@@ -2477,6 +3257,10 @@ func affineHandleKind(t Type) string {
 			return "task handle"
 		case "MutexGuard":
 			return "mutex guard"
+		case "ThreadPool":
+			return "thread pool owner"
+		case "TaskGroup":
+			return "task group owner"
 		}
 	}
 	return "affine value"
@@ -2533,18 +3317,24 @@ func (a *Analyzer) recordAffineConsumption(key affineValueKey, reason string) {
 	}
 }
 
-func lookupProtocolRefTargetKey(expr ast.Expr, lookup func(ast.Expr) (affineValueKey, bool)) (affineValueKey, bool) {
+func (a *Analyzer) lookupProtocolTargetKey(expr ast.Expr) (affineValueKey, bool) {
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
-		return lookupProtocolRefTargetKey(n.Inner, lookup)
+		return a.lookupProtocolTargetKey(n.Inner)
 	case *ast.MoveExpr:
-		return lookupProtocolRefTargetKey(n.Operand, lookup)
+		return a.lookupProtocolTargetKey(n.Operand)
 	case *ast.CastExpr:
-		return lookupProtocolRefTargetKey(n.Operand, lookup)
+		return a.lookupProtocolTargetKey(n.Operand)
 	case *ast.AddrOfExpr:
-		return lookup(n.Operand)
+		if key, ok := a.lookupAffineValueKey(n.Operand); ok {
+			return key, true
+		}
+		return a.lookupBorrowedOwnerRefKey(n.Operand)
 	default:
-		return lookup(expr)
+		if key, ok := a.lookupBorrowedOwnerRefKey(expr); ok {
+			return key, true
+		}
+		return a.lookupAffineValueKey(expr)
 	}
 }
 
@@ -2569,7 +3359,14 @@ func (a *Analyzer) clearAffineValueTarget(expr ast.Expr) {
 
 func (a *Analyzer) lookupAffineValueState(expr ast.Expr) (affineValueState, bool) {
 	key, ok := a.lookupAffineValueKey(expr)
-	if !ok || a.currentAffineValues == nil {
+	if !ok {
+		return affineValueState{}, false
+	}
+	return a.lookupAffineValueStateForKey(key)
+}
+
+func (a *Analyzer) lookupAffineValueStateForKey(key affineValueKey) (affineValueState, bool) {
+	if a.currentAffineValues == nil {
 		return affineValueState{}, false
 	}
 	state, ok := a.currentAffineValues[key]

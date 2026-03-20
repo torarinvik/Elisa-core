@@ -39,6 +39,15 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 					result = sym.Type
 					return
 				}
+				if ownerType, ok := borrowableOwnerRefElemType(sym.Type); ok {
+					if key, ok := a.lookupBorrowedOwnerRefKey(n); ok {
+						if state, ok := a.lookupAffineValueStateForKey(key); ok && state.ConsumedBy != "" {
+							a.errorf(n.Pos(), "%s %q cannot be used after %s", affineHandleKind(ownerType), n.Name, state.ConsumedBy)
+							result = sym.Type
+							return
+						}
+					}
+				}
 				if t, ok := a.lookupRefinedExprType(n); ok {
 					result = t
 					return
@@ -223,11 +232,15 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			a.errorf(n.Pos(), "ternary condition must be bool, got %s", condType.String())
 		}
 		mergedAffine := a.cloneAffineValueStates()
-		left, leftAffine := a.analyzeExprInAffineScope(n.Value, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
-		right, rightAffine := a.analyzeExprInAffineScope(n.Alt, a.refinedScopeForCondition(a.currentScope, n.Cond, false))
-		mergedAffine = mergeAffineValueStates(mergedAffine, leftAffine)
-		mergedAffine = mergeAffineValueStates(mergedAffine, rightAffine)
+		mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
+		left, leftSnapshot := a.analyzeExprInAffineScope(n.Value, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
+		right, rightSnapshot := a.analyzeExprInAffineScope(n.Alt, a.refinedScopeForCondition(a.currentScope, n.Cond, false))
+		mergedAffine = mergeAffineValueStates(mergedAffine, leftSnapshot.Affine)
+		mergedAffine = mergeAffineValueStates(mergedAffine, rightSnapshot.Affine)
+		mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, leftSnapshot.BorrowedOwnerRefs)
+		mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, rightSnapshot.BorrowedOwnerRefs)
 		a.currentAffineValues = mergedAffine
+		a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 		merged := MergeTypes(left, right)
 		if IsInvalidType(merged) {
 			a.errorf(n.Pos(), "ternary branches are incompatible: %s and %s", left.String(), right.String())
@@ -236,7 +249,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		return
 	case *ast.AddrOfExpr:
 		inner := a.analyzeExpr(n.Operand)
-		if a.containsAffineHandleValues(inner, map[string]bool{}) {
+		if a.containsAffineHandleValues(inner, map[string]bool{}) && !isBorrowableAffineOwnerType(inner) {
 			if _, ok := a.lookupAffineValueKey(n.Operand); ok {
 				if isAffineHandleType(inner) {
 					kind := affineHandleKind(inner)
@@ -648,6 +661,29 @@ func (a *Analyzer) inferFuncReturnProvenanceForExpr(expr ast.Expr, fnType *FuncT
 		a.inferFuncReturnProvenance(fnDecl, fnType)
 	case *ast.SpecializeExpr:
 		a.inferFuncReturnProvenanceForExpr(n.Operand, fnType)
+	}
+}
+
+func (a *Analyzer) inferFuncReturnBorrowedOwnerRefsForExpr(expr ast.Expr, fnType *FuncType) {
+	if fnType == nil || fnType.ReturnBorrowedOwnerRefsKnown || expr == nil {
+		return
+	}
+	switch n := expr.(type) {
+	case *ast.Ident:
+		if a.globalScope == nil {
+			return
+		}
+		sym, ok := a.globalScope.Lookup(n.Name)
+		if !ok {
+			return
+		}
+		fnDecl, _ := sym.Node.(*ast.FuncDecl)
+		if fnDecl == nil {
+			return
+		}
+		a.inferFuncReturnBorrowedOwnerRefs(fnDecl, fnType)
+	case *ast.SpecializeExpr:
+		a.inferFuncReturnBorrowedOwnerRefsForExpr(n.Operand, fnType)
 	}
 }
 
@@ -1172,10 +1208,10 @@ func (a *Analyzer) typeStructurallyThreadShareable(t Type, seen map[string]bool)
 func isBlessedThreadTransferCarrierType(t Type) bool {
 	switch tt := t.(type) {
 	case *StructType:
-		return tt.Builtin && (tt.Name == "ThreadPool" || tt.Name == "Mutex" || tt.Name == "CondVar")
+		return tt.Builtin && (tt.Name == "Mutex" || tt.Name == "CondVar")
 	case *GenericInstanceType:
 		base, ok := tt.Base.(*StructType)
-		return ok && base.Builtin && (base.Name == "ThreadPool" || base.Name == "Mutex" || base.Name == "CondVar")
+		return ok && base.Builtin && (base.Name == "Mutex" || base.Name == "CondVar")
 	default:
 		return false
 	}
@@ -1383,15 +1419,21 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 		a.validateThreadTransferResultType(ft.Name, expr.Pos(), resultPayload)
 	}
 	switch ft.Name {
+	case "pool_shutdown":
+		if len(expr.Args) >= 1 {
+			if key, ok := a.lookupProtocolTargetKey(expr.Args[0]); ok {
+				a.recordAffineConsumption(key, "argument to call \"pool_shutdown\"")
+			}
+		}
 	case "task_group_add":
 		if len(expr.Args) >= 1 {
-			if key, ok := lookupProtocolRefTargetKey(expr.Args[0], a.lookupAffineValueKey); ok {
+			if key, ok := a.lookupProtocolTargetKey(expr.Args[0]); ok {
 				a.markLiveProtocolDescription(key, "task group with pending tasks")
 			}
 		}
 	case "task_group_wait_all":
 		if len(expr.Args) >= 1 {
-			if key, ok := lookupProtocolRefTargetKey(expr.Args[0], a.lookupAffineValueKey); ok {
+			if key, ok := a.lookupProtocolTargetKey(expr.Args[0]); ok {
 				a.clearLiveProtocolTracking(key)
 			}
 		}
@@ -1713,6 +1755,7 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 		if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(field.Type, map[string]bool{}) {
 			a.errorf(expr.Pos(), "%s %q cannot be used after %s", affineHandleKind(field.Type), affineValueDisplayName(expr), state.ConsumedBy)
 		}
+		a.reportBorrowedOwnerRefUseAfterConsume(expr, field.Type)
 		return field.Type
 	}
 	field, ok := a.lookupField(a.analyzeExpr(expr.Object), expr.Field, expr.Pos())
@@ -1723,6 +1766,7 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 	if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(field.Type, map[string]bool{}) {
 		a.errorf(expr.Pos(), "%s %q cannot be used after %s", affineHandleKind(field.Type), affineValueDisplayName(expr), state.ConsumedBy)
 	}
+	a.reportBorrowedOwnerRefUseAfterConsume(expr, field.Type)
 	return field.Type
 }
 
@@ -1737,31 +1781,38 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		if isStringArrayType(arr) {
 			result := a.namedTypes["char"]
 			a.reportInvalidRegionUse(expr, result)
+			a.reportBorrowedOwnerRefUseAfterConsume(expr, result)
 			return result
 		}
 		a.reportInvalidRegionUse(expr, arr.Elem)
+		a.reportBorrowedOwnerRefUseAfterConsume(expr, arr.Elem)
 		return arr.Elem
 	}
 	if darray, ok := objType.(*DArrayType); ok {
 		a.reportInvalidRegionUse(expr, darray.Elem)
+		a.reportBorrowedOwnerRefUseAfterConsume(expr, darray.Elem)
 		return darray.Elem
 	}
 	if view, ok := objType.(*ViewType); ok {
 		a.reportInvalidRegionUse(expr, view.Elem)
+		a.reportBorrowedOwnerRefUseAfterConsume(expr, view.Elem)
 		return view.Elem
 	}
 	if view, ok := objType.(*DArrayViewType); ok {
 		a.reportInvalidRegionUse(expr, view.Elem)
+		a.reportBorrowedOwnerRefUseAfterConsume(expr, view.Elem)
 		return view.Elem
 	}
 	if _, ok := objType.(*DStrType); ok {
 		result := a.namedTypes["char"]
 		a.reportInvalidRegionUse(expr, result)
+		a.reportBorrowedOwnerRefUseAfterConsume(expr, result)
 		return result
 	}
 	if isStringViewType(objType) {
 		result := a.namedTypes["char"]
 		a.reportInvalidRegionUse(expr, result)
+		a.reportBorrowedOwnerRefUseAfterConsume(expr, result)
 		return result
 	}
 	if ref, ok := objType.(*RefType); ok {
@@ -1774,34 +1825,42 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 			if isStringArrayType(arr) {
 				result := a.namedTypes["char"]
 				a.reportInvalidRegionUse(expr, result)
+				a.reportBorrowedOwnerRefUseAfterConsume(expr, result)
 				return result
 			}
 			a.reportInvalidRegionUse(expr, arr.Elem)
+			a.reportBorrowedOwnerRefUseAfterConsume(expr, arr.Elem)
 			return arr.Elem
 		}
 		if darray, ok := ref.Elem.(*DArrayType); ok {
 			a.reportInvalidRegionUse(expr, darray.Elem)
+			a.reportBorrowedOwnerRefUseAfterConsume(expr, darray.Elem)
 			return darray.Elem
 		}
 		if view, ok := ref.Elem.(*ViewType); ok {
 			a.reportInvalidRegionUse(expr, view.Elem)
+			a.reportBorrowedOwnerRefUseAfterConsume(expr, view.Elem)
 			return view.Elem
 		}
 		if view, ok := ref.Elem.(*DArrayViewType); ok {
 			a.reportInvalidRegionUse(expr, view.Elem)
+			a.reportBorrowedOwnerRefUseAfterConsume(expr, view.Elem)
 			return view.Elem
 		}
 		if _, ok := ref.Elem.(*DStrType); ok {
 			result := a.namedTypes["char"]
 			a.reportInvalidRegionUse(expr, result)
+			a.reportBorrowedOwnerRefUseAfterConsume(expr, result)
 			return result
 		}
 		if isStringViewType(ref.Elem) {
 			result := a.namedTypes["char"]
 			a.reportInvalidRegionUse(expr, result)
+			a.reportBorrowedOwnerRefUseAfterConsume(expr, result)
 			return result
 		}
 		a.reportInvalidRegionUse(expr, ref.Elem)
+		a.reportBorrowedOwnerRefUseAfterConsume(expr, ref.Elem)
 		return ref.Elem
 	}
 	a.errorf(expr.Pos(), "indexing requires string, array, view, or reference type, got %s", objType.String())
@@ -1823,6 +1882,22 @@ func (a *Analyzer) reportInvalidRegionUse(expr ast.Expr, valueType Type) {
 		}
 		a.errorf(expr.Pos(), "%s %q is invalid after %s", label, affineValueDisplayName(expr), dep.InvalidatedBy)
 	}
+}
+
+func (a *Analyzer) reportBorrowedOwnerRefUseAfterConsume(expr ast.Expr, valueType Type) {
+	ownerType, ok := borrowableOwnerRefElemType(valueType)
+	if !ok {
+		return
+	}
+	key, ok := a.lookupBorrowedOwnerRefKey(expr)
+	if !ok {
+		return
+	}
+	state, ok := a.lookupAffineValueStateForKey(key)
+	if !ok || state.ConsumedBy == "" {
+		return
+	}
+	a.errorf(expr.Pos(), "%s %q cannot be used after %s", affineHandleKind(ownerType), affineValueDisplayName(expr), state.ConsumedBy)
 }
 
 func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {

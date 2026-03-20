@@ -202,6 +202,8 @@ type FuncType struct {
 	Variadic               bool
 	ReturnProvenance       regionRefState
 	ReturnProvenanceKnown  bool
+	ReturnBorrowedOwnerRefs      borrowedOwnerRefSummary
+	ReturnBorrowedOwnerRefsKnown bool
 }
 
 func (*InvalidType) isType()         {}

@@ -117,6 +117,7 @@ type Symbol struct {
 	Kind    SymbolKind
 	Type    Type
 	Node    ast.Node
+	ParamIndex int
 	Mutable bool
 }
 

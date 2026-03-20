@@ -552,6 +552,444 @@ def ok(group: mutable TaskGroup, task: Task[i64, Pending]) -> void:
 	requireFunctionReturnTypeString(t, result, "ok", "void")
 }
 
+func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaBorrowedAlias(t *testing.T) {
+	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: any TaskGroup&) -> void
+
+def ok(group: mutable TaskGroup, task: Task[i64, Pending]) -> void:
+	group_ref: any TaskGroup& = (&group).cast[any TaskGroup&]()
+	task_group_add(group_ref, move task)
+	wait all group
+`
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_alias_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "void")
+}
+
+func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaProjectedBorrowedAlias(t *testing.T) {
+	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: any TaskGroup&) -> void
+
+repr(c) struct GroupHolder:
+	group_ref: any TaskGroup&
+
+def ok(group: mutable TaskGroup, task: Task[i64, Pending]) -> void:
+	holder: GroupHolder = GroupHolder((&group).cast[any TaskGroup&]())
+	task_group_add(holder.group_ref, move task)
+	wait all group
+`
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_projected_alias_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "void")
+}
+
+func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaAggregateParamAlias(t *testing.T) {
+	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: any TaskGroup&) -> void
+
+repr(c) struct GroupHolder:
+	group_ref: any TaskGroup&
+
+def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
+	task_group_add(holder.group_ref, move task)
+	wait all holder.group_ref
+`
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_aggregate_param_alias_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "void")
+}
+
+func TestAnalyzeRejectsDroppedThreadPoolRequiringShutdownAtScopeExit(t *testing.T) {
+	src := `extern pool_new(workers: usize) -> ThreadPool
+
+def bad() -> void:
+	pool: ThreadPool = pool_new(2u)
+`
+	_, errs := parseAndAnalyze(t, "drop_thread_pool_scope_exit_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool requiring shutdown \"pool\" must be consumed before scope exit") {
+		t.Fatalf("expected unconsumed thread-pool diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsDroppedThreadPoolInsideAggregateAtScopeExit(t *testing.T) {
+	src := `extern pool_new(workers: usize) -> ThreadPool
+
+repr(c) struct Holder:
+	pool: mutable ThreadPool
+
+def bad(holder: mutable Holder) -> void:
+	holder.pool <- pool_new(2u)
+`
+	_, errs := parseAndAnalyze(t, "drop_thread_pool_holder_scope_exit_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool requiring shutdown \"holder.pool\" must be consumed before scope exit") {
+		t.Fatalf("expected unconsumed aggregate-thread-pool diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsPoolShutdownAfterPoolNew(t *testing.T) {
+	src := `extern pool_new(workers: usize) -> ThreadPool
+extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def ok() -> void:
+	pool: ThreadPool = pool_new(2u)
+	pool_shutdown((&pool).cast[any ThreadPool&]())
+`
+	result, errs := parseAndAnalyze(t, "pool_shutdown_after_pool_new_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "void")
+}
+
+func TestAnalyzeRejectsSubmittingToThreadPoolAfterShutdown(t *testing.T) {
+	src := `extern pool_new(workers: usize) -> ThreadPool
+extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return move task
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def bad() -> void:
+	pool: ThreadPool = pool_new(2u)
+	pool_shutdown((&pool).cast[any ThreadPool&]())
+	_ = pool_submit1((&pool).cast[any ThreadPool&](), work, 1)
+`
+	_, errs := parseAndAnalyze(t, "thread_pool_submit_after_shutdown_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool owner \"pool\" cannot be used after argument to call \"pool_shutdown\"") {
+		t.Fatalf("expected closed-thread-pool submit diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsSubmittingToThreadPoolAfterShutdownViaBorrowedAlias(t *testing.T) {
+	src := `extern pool_new(workers: usize) -> ThreadPool
+extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return move task
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def bad() -> void:
+	pool: ThreadPool = pool_new(2u)
+	pool_ref: any ThreadPool& = (&pool).cast[any ThreadPool&]()
+	pool_shutdown(pool_ref)
+	_ = pool_submit1((&pool).cast[any ThreadPool&](), work, 1)
+`
+	_, errs := parseAndAnalyze(t, "thread_pool_submit_after_alias_shutdown_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool owner \"pool\" cannot be used after argument to call \"pool_shutdown\"") {
+		t.Fatalf("expected underlying-owner shutdown diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsReusingBorrowedThreadPoolParamAfterShutdown(t *testing.T) {
+	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return move task
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def bad(pool: any ThreadPool&) -> void:
+	pool_shutdown(pool)
+	_ = pool_submit1(pool, work, 1)
+`
+	_, errs := parseAndAnalyze(t, "thread_pool_ref_param_reuse_after_shutdown_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool owner \"pool\" cannot be used after argument to call \"pool_shutdown\"") {
+		t.Fatalf("expected borrowed-param shutdown diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsSubmittingToThreadPoolAfterShutdownViaProjectedBorrowedAlias(t *testing.T) {
+	src := `extern pool_new(workers: usize) -> ThreadPool
+extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return move task
+
+repr(c) struct PoolHolder:
+	pool_ref: mutable any ThreadPool&
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def bad() -> void:
+	pool: ThreadPool = pool_new(2u)
+	holder: PoolHolder = PoolHolder((&pool).cast[any ThreadPool&]())
+	pool_shutdown(holder.pool_ref)
+	_ = pool_submit1((&pool).cast[any ThreadPool&](), work, 1)
+`
+	_, errs := parseAndAnalyze(t, "thread_pool_submit_after_projected_alias_shutdown_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool owner \"pool\" cannot be used after argument to call \"pool_shutdown\"") {
+		t.Fatalf("expected projected-alias shutdown diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsReusingReassignedProjectedBorrowedThreadPoolAliasAfterShutdown(t *testing.T) {
+	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return move task
+
+repr(c) struct PoolHolder:
+	pool_ref: mutable any ThreadPool&
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def bad(left: any ThreadPool&, right: any ThreadPool&) -> void:
+	holder: mutable PoolHolder = PoolHolder(left)
+	holder.pool_ref <- right
+	_ = pool_submit1(left, work, 1)
+	pool_shutdown(holder.pool_ref)
+	_ = pool_submit1(right, work, 1)
+`
+	_, errs := parseAndAnalyze(t, "thread_pool_reassigned_projected_alias_shutdown_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool owner \"right\" cannot be used after argument to call \"pool_shutdown\"") {
+		t.Fatalf("expected reassigned projected-alias shutdown diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsReusingAggregateThreadPoolParamFieldAfterShutdown(t *testing.T) {
+	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return move task
+
+repr(c) struct PoolHolder:
+	pool_ref: any ThreadPool&
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def bad(holder: PoolHolder) -> void:
+	pool_shutdown(holder.pool_ref)
+	_ = pool_submit1(holder.pool_ref, work, 1)
+`
+	_, errs := parseAndAnalyze(t, "thread_pool_aggregate_param_alias_shutdown_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+		t.Fatalf("expected aggregate-param alias shutdown diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsReusingMoveBoundBorrowedThreadPoolAliasAfterShutdown(t *testing.T) {
+	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return move task
+
+repr(c) struct PoolHolder:
+	pool_ref: any ThreadPool&
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def bad(holder: PoolHolder) -> void:
+	move holder as PoolHolder(pool_ref)
+	pool_shutdown(pool_ref)
+	_ = pool_submit1(pool_ref, work, 1)
+`
+	_, errs := parseAndAnalyze(t, "thread_pool_movebind_alias_shutdown_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool owner \"pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+		t.Fatalf("expected move-bind alias shutdown diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsReusingHelperReturnedBorrowedThreadPoolAliasAfterShutdown(t *testing.T) {
+	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return move task
+
+repr(c) struct PoolHolder:
+	pool_ref: any ThreadPool&
+
+def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+	return holder.pool_ref
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def bad(holder: PoolHolder) -> void:
+	pool_ref: any ThreadPool& = get_pool_ref(holder)
+	pool_shutdown(pool_ref)
+	_ = pool_submit1(holder.pool_ref, work, 1)
+`
+	_, errs := parseAndAnalyze(t, "thread_pool_helper_return_alias_shutdown_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+		t.Fatalf("expected helper-returned alias shutdown diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsReusingHelperReturnedAggregateBorrowedThreadPoolAliasAfterShutdown(t *testing.T) {
+	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return move task
+
+repr(c) struct PoolHolder:
+	pool_ref: any ThreadPool&
+
+def keep_holder(holder: PoolHolder) -> PoolHolder:
+	return holder
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def bad(holder: PoolHolder) -> void:
+	alias_holder: PoolHolder = keep_holder(holder)
+	pool_shutdown(alias_holder.pool_ref)
+	_ = pool_submit1(holder.pool_ref, work, 1)
+`
+	_, errs := parseAndAnalyze(t, "thread_pool_helper_return_aggregate_alias_shutdown_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+		t.Fatalf("expected aggregate helper-returned alias shutdown diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaHelperReturnedAggregateAlias(t *testing.T) {
+	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: any TaskGroup&) -> void
+
+repr(c) struct GroupHolder:
+	group_ref: any TaskGroup&
+
+def keep_holder(holder: GroupHolder) -> GroupHolder:
+	return holder
+
+def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
+	alias_holder: GroupHolder = keep_holder(holder)
+	task_group_add(alias_holder.group_ref, move task)
+	wait all holder.group_ref
+`
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_helper_returned_aggregate_alias_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "void")
+}
+
+func TestAnalyzeRejectsDoubleThreadPoolShutdown(t *testing.T) {
+	src := `extern pool_new(workers: usize) -> ThreadPool
+extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def bad() -> void:
+	pool: ThreadPool = pool_new(2u)
+	pool_shutdown((&pool).cast[any ThreadPool&]())
+	pool_shutdown((&pool).cast[any ThreadPool&]())
+`
+	_, errs := parseAndAnalyze(t, "thread_pool_double_shutdown_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool owner \"pool\" cannot be used after argument to call \"pool_shutdown\"") {
+		t.Fatalf("expected double-shutdown diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsReinitializingThreadPoolAfterShutdown(t *testing.T) {
+	src := `extern pool_new(workers: usize) -> ThreadPool
+extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def ok() -> void:
+	pool: mutable ThreadPool = pool_new(2u)
+	pool_shutdown((&pool).cast[any ThreadPool&]())
+	pool <- pool_new(1u)
+	pool_shutdown((&pool).cast[any ThreadPool&]())
+`
+	result, errs := parseAndAnalyze(t, "thread_pool_reinitialize_after_shutdown_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "void")
+}
+
+func TestAnalyzeRejectsCopyingThreadPoolOwnerWithoutMove(t *testing.T) {
+	src := `def bad(pool: ThreadPool) -> void:
+	copy: ThreadPool = pool
+`
+	_, errs := parseAndAnalyze(t, "thread_pool_owner_copy_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool owner \"pool\" must be moved explicitly before move into local \"copy\"") {
+		t.Fatalf("expected thread-pool owner move diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsReusingMovedTaskGroupOwner(t *testing.T) {
+	src := `def bad(group: TaskGroup) -> void:
+	moved: TaskGroup = move group
+	_ = move group
+`
+	_, errs := parseAndAnalyze(t, "task_group_owner_reuse_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "task group owner \"group\" cannot be used after move into local \"moved\"") {
+		t.Fatalf("expected task-group owner reuse diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeAcceptsWaitAllSyntax(t *testing.T) {
 	src := `extern task_group_wait_all(group: any TaskGroup&) -> void
 
@@ -2511,7 +2949,6 @@ def ok(owner: Arena, pool: any ThreadPool&) -> i64:
 
 func TestAnalyzeAcceptsThreadTransferOfBlessedRuntimeCarriers(t *testing.T) {
 	src := `repr(c) struct SharedGate:
-	pool: ThreadPool
 	mu: Mutex
 	cv: CondVar
 
@@ -2522,13 +2959,11 @@ def pool_submit1[A, R](pool: any ThreadPool&, fn: func(A) -> R, arg: A) -> Task[
 	return zeroed
 
 def worker(gate: SharedGate) -> i64:
-	if gate.pool.handle == null:
-		return 0
 	return 1
 
-def ok(pool_ref: any ThreadPool&, pool_value: ThreadPool, mu: Mutex, cv: CondVar) -> i64:
-	_ = spawn1(worker, SharedGate(pool_value, mu, cv))
-	_ = pool_submit1(pool_ref, worker, SharedGate(pool_value, mu, cv))
+def ok(pool_ref: any ThreadPool&, mu: Mutex, cv: CondVar) -> i64:
+	_ = spawn1(worker, SharedGate(mu, cv))
+	_ = pool_submit1(pool_ref, worker, SharedGate(mu, cv))
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "thread_transfer_runtime_carriers_ok.llcontext", src)
@@ -2583,7 +3018,6 @@ def bad(pool: any ThreadPool&, cell: any i32&) -> i64:
 
 func TestAnalyzeAcceptsThreadTransferOfBlessedRuntimeCarrierResults(t *testing.T) {
 	src := `repr(c) struct SharedGate:
-	pool: ThreadPool
 	mu: Mutex
 	cv: CondVar
 
@@ -2596,8 +3030,8 @@ def pool_submit1[A, R](pool: any ThreadPool&, fn: func(A) -> R, arg: A) -> Task[
 def echo(gate: SharedGate) -> SharedGate:
 	return gate
 
-def ok(pool_ref: any ThreadPool&, pool_value: ThreadPool, mu: Mutex, cv: CondVar) -> i64:
-	gate: SharedGate = SharedGate(pool_value, mu, cv)
+def ok(pool_ref: any ThreadPool&, mu: Mutex, cv: CondVar) -> i64:
+	gate: SharedGate = SharedGate(mu, cv)
 	_ = spawn1(echo, gate)
 	_ = pool_submit1(pool_ref, echo, gate)
 	return 0

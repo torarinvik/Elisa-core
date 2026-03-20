@@ -109,7 +109,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			}
 		}
 		elemType := a.resolveType(n.Elem)
-		if a.containsAffineHandleValues(elemType, map[string]bool{}) {
+		if a.containsAffineHandleValues(elemType, map[string]bool{}) && !isBorrowableAffineOwnerType(elemType) {
 			a.errorf(n.Pos(), "references to values containing affine handles are not supported; got %s&", elemType.String())
 		}
 		return &RefType{Elem: elemType, State: RefState(n.State), Storage: RefStorage(n.Storage), Region: n.Region, ExplicitStorage: n.Explicit}
@@ -143,7 +143,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		return a.resolveType(n.Elem)
 	case *ast.TailType:
 		elemType := a.resolveType(n.Elem)
-		if a.containsAffineHandleValues(elemType, map[string]bool{}) {
+		if a.containsAffineHandleValues(elemType, map[string]bool{}) && !isBorrowableAffineOwnerType(elemType) {
 			a.errorf(n.Pos(), "references to values containing affine handles are not supported; got %s&", elemType.String())
 		}
 		return &RefType{Elem: elemType, State: RefStateNonNull, Storage: RefStorageAny}
@@ -758,7 +758,7 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 			params = append(params, a.substituteType(param, bindings, shapeBindings, regionBindings, permissionBindings))
 		}
 		declaredRefs, refs, usedPermissionParams := substitutePermissionRefs(n.DeclaredPermissionRefs, n.PermissionRefs, n.UsedPermissionParams, permissionBindings)
-		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), RegionParams: append([]string(nil), n.RegionParams...), PermissionParams: append([]string(nil), n.PermissionParams...), UsedPermissionParams: usedPermissionParams, DeclaredPermissionRefs: declaredRefs, DeclaredPermissions: permissionFamiliesFromRefs(declaredRefs), PermissionRefs: refs, Permissions: permissionFamiliesFromRefs(refs), ShapeParams: append([]string(nil), n.ShapeParams...), FreshReturnShapeParams: append([]string(nil), n.FreshReturnShapeParams...), Params: params, Return: a.substituteType(n.Return, bindings, shapeBindings, regionBindings, permissionBindings), Variadic: n.Variadic, ReturnProvenance: cloneRegionRefState(n.ReturnProvenance), ReturnProvenanceKnown: n.ReturnProvenanceKnown}
+		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), RegionParams: append([]string(nil), n.RegionParams...), PermissionParams: append([]string(nil), n.PermissionParams...), UsedPermissionParams: usedPermissionParams, DeclaredPermissionRefs: declaredRefs, DeclaredPermissions: permissionFamiliesFromRefs(declaredRefs), PermissionRefs: refs, Permissions: permissionFamiliesFromRefs(refs), ShapeParams: append([]string(nil), n.ShapeParams...), FreshReturnShapeParams: append([]string(nil), n.FreshReturnShapeParams...), Params: params, Return: a.substituteType(n.Return, bindings, shapeBindings, regionBindings, permissionBindings), Variadic: n.Variadic, ReturnProvenance: cloneRegionRefState(n.ReturnProvenance), ReturnProvenanceKnown: n.ReturnProvenanceKnown, ReturnBorrowedOwnerRefs: cloneBorrowedOwnerRefSummary(n.ReturnBorrowedOwnerRefs), ReturnBorrowedOwnerRefsKnown: n.ReturnBorrowedOwnerRefsKnown}
 	default:
 		return t
 	}

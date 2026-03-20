@@ -185,7 +185,7 @@ def ctx_task_to_raw[R, S](task: Task[R, S]) -> Task[any void&?, S]:
 def task_group_new() -> TaskGroup:
 	group: TaskGroup = task_group_new_raw()
 	group.cleanup <- null
-	return group
+	return move group
 
 def ctx_task_group_push_state(group: any TaskGroup&, state_bits: any void&?) can[Memory.Allocate, Abort.Panic]:
 	if state_bits == null:

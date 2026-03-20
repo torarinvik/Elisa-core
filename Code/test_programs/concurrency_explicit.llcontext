@@ -45,13 +45,10 @@ def permissioned_thread_worker(value: i64) -> i64 can[Console.Write]:
 	return value + 2
 
 repr(c) struct SharedGate:
-	pool: ThreadPool
 	mu: Mutex
 	cv: CondVar
 
 def runtime_carrier_worker(gate: SharedGate) -> i64:
-	if gate.pool.handle == null:
-		return 0
 	if gate.mu.handle == null:
 		return 0
 	if gate.cv.handle == null:
@@ -86,10 +83,10 @@ def typed_pool_scope(value: i64) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Sub
 		task: Task[i64, Pending] = submit thread_worker(value)
 		return await task
 
-def typed_runtime_carrier_transfer(pool: ThreadPool, mu: Mutex, cv: CondVar) -> i64 can[Thread.Spawn, Thread.Join, Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
-	gate: SharedGate = SharedGate(pool, mu, cv)
+def typed_runtime_carrier_transfer(pool: any ThreadPool&, mu: Mutex, cv: CondVar) -> i64 can[Thread.Spawn, Thread.Join, Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+	gate: SharedGate = SharedGate(mu, cv)
 	thread: Thread[i64, Joinable] = spawn1(runtime_carrier_worker, gate)
-	task: Task[i64, Pending] = pool_submit1((&pool).cast[any ThreadPool&](), runtime_carrier_worker, gate)
+	task: Task[i64, Pending] = pool_submit1(pool, runtime_carrier_worker, gate)
 	return join(move thread) + await task
 
 def typed_lock_scope(mu: mutable Mutex, cv: mutable CondVar, ready: bool) -> bool can[Sync.Lock, Sync.Unlock, Sync.Wait]:

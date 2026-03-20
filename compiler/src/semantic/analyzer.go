@@ -86,12 +86,15 @@ type Analyzer struct {
 	currentRegionMarks                map[*Symbol]regionMarkState
 	currentRegionRefs                 map[*Symbol]regionRefState
 	currentAffineValues               map[affineValueKey]affineValueState
+	currentBorrowedOwnerRefs          map[*Symbol]borrowedOwnerRefState
 	currentPackedStores               map[string]*PackedEnumStoreType
 	currentFunctionUsedPermissions    map[string]bool
 	currentFunctionUsedPermissionRefs []ast.PermissionRef
 	currentReturnProvenance           regionRefState
+	currentReturnBorrowedOwnerRefs    borrowedOwnerRefSummary
 	suppressDiagnostics               bool
 	returnProvenanceInProgress        map[string]bool
+	returnBorrowedOwnerRefInProgress  map[string]bool
 }
 
 type regionState struct {
@@ -123,6 +126,12 @@ type regionRefState struct {
 	Fields    map[string]regionRefState
 }
 
+type borrowedOwnerRefState struct {
+	HasDirect bool
+	Direct    affineValueKey
+	Fields    map[string]borrowedOwnerRefState
+}
+
 type affineValueState struct {
 	ConsumedBy              string
 	LiveProtocolType        Type
@@ -146,6 +155,7 @@ func Analyze(file *ast.File) *Result {
 		exprFacts:                  map[ast.Expr]OptimizationFacts{},
 		symbolFacts:                map[*Symbol]OptimizationFacts{},
 		returnProvenanceInProgress: map[string]bool{},
+		returnBorrowedOwnerRefInProgress: map[string]bool{},
 	}
 	a.registerBuiltins()
 	a.collectConstValues(file.Decls)
@@ -221,10 +231,10 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 		{name: "handle", typ: namedTypeExpr("uintptr", false), mutable: true},
 		{name: "state", typ: refTypeExpr("void", true), mutable: true},
 	})
-	a.registerBuiltinStructType("ThreadPool", nil, false, []builtinFieldSpec{
+	a.registerBuiltinStructType("ThreadPool", nil, true, []builtinFieldSpec{
 		{name: "handle", typ: refTypeExpr("void", true), mutable: true},
 	})
-	a.registerBuiltinStructType("TaskGroup", nil, false, []builtinFieldSpec{
+	a.registerBuiltinStructType("TaskGroup", nil, true, []builtinFieldSpec{
 		{name: "handle", typ: refTypeExpr("void", true), mutable: true},
 		{name: "cleanup", typ: refTypeExpr("void", true), mutable: true},
 	})
@@ -662,6 +672,9 @@ func (a *Analyzer) collectValueSymbols(decls []ast.Decl) {
 			a.applyExternFuncAnnotations(n, fnType)
 			if !fnType.ReturnProvenanceKnown {
 				fnType.ReturnProvenanceKnown = true
+			}
+			if !fnType.ReturnBorrowedOwnerRefsKnown {
+				fnType.ReturnBorrowedOwnerRefsKnown = true
 			}
 			a.functionTypes[n.Name] = fnType
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolExternFunc, Type: fnType, Node: n, Mutable: false}, n.Pos())
@@ -1216,6 +1229,86 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 	}
 }
 
+func (a *Analyzer) abstractParamBorrowedOwnerRefState(t Type, baseKey affineValueKey, seen map[string]bool) (borrowedOwnerRefState, bool) {
+	if t == nil || !a.containsBorrowedOwnerRefValues(t, map[string]bool{}) {
+		return borrowedOwnerRefState{}, false
+	}
+	if _, ok := borrowableOwnerRefElemType(t); ok {
+		return borrowedOwnerRefState{HasDirect: true, Direct: baseKey}, true
+	}
+	key := t.String()
+	if seen[key] {
+		return borrowedOwnerRefState{}, false
+	}
+	seen[key] = true
+	state := borrowedOwnerRefState{}
+	switch tt := t.(type) {
+	case *RefType:
+		if elemState, ok := a.abstractParamBorrowedOwnerRefState(tt.Elem, baseKey, seen); ok {
+			if elemState.HasDirect {
+				state.HasDirect = true
+				state.Direct = elemState.Direct
+			}
+			if len(elemState.Fields) != 0 {
+				state.Fields = cloneBorrowedOwnerRefState(elemState).Fields
+			}
+		}
+		return state, hasBorrowedOwnerRefState(state)
+	case *StructType:
+		for _, field := range tt.Fields {
+			fieldState, ok := a.abstractParamBorrowedOwnerRefState(field.Type, affineValueKey{Root: baseKey.Root, Path: joinAffinePath(baseKey.Path, field.Name)}, seen)
+			if !ok {
+				continue
+			}
+			if state.Fields == nil {
+				state.Fields = map[string]borrowedOwnerRefState{}
+			}
+			state.Fields[field.Name] = fieldState
+		}
+	case *GenericInstanceType:
+		if base, ok := tt.Base.(*StructType); ok {
+			bindings := map[string]Type{}
+			for i, name := range base.TypeParams {
+				if i < len(tt.Args) {
+					bindings[name] = tt.Args[i]
+				}
+			}
+			for _, field := range base.Fields {
+				fieldType := field.Type
+				if len(bindings) != 0 {
+					fieldType = a.substituteType(fieldType, bindings, nil, nil, nil)
+				}
+				fieldState, ok := a.abstractParamBorrowedOwnerRefState(fieldType, affineValueKey{Root: baseKey.Root, Path: joinAffinePath(baseKey.Path, field.Name)}, seen)
+				if !ok {
+					continue
+				}
+				if state.Fields == nil {
+					state.Fields = map[string]borrowedOwnerRefState{}
+				}
+				state.Fields[field.Name] = fieldState
+			}
+			return state, hasBorrowedOwnerRefState(state)
+		}
+	case *ArrayType:
+		if elemState, ok := a.abstractParamBorrowedOwnerRefState(tt.Elem, affineValueKey{Root: baseKey.Root, Path: joinAffinePath(baseKey.Path, regionAnyIndexFieldKey())}, seen); ok {
+			state.Fields = map[string]borrowedOwnerRefState{regionAnyIndexFieldKey(): elemState}
+		}
+	case *DArrayType:
+		if elemState, ok := a.abstractParamBorrowedOwnerRefState(tt.Elem, affineValueKey{Root: baseKey.Root, Path: joinAffinePath(baseKey.Path, regionAnyIndexFieldKey())}, seen); ok {
+			state.Fields = map[string]borrowedOwnerRefState{regionAnyIndexFieldKey(): elemState}
+		}
+	case *ViewType:
+		if elemState, ok := a.abstractParamBorrowedOwnerRefState(tt.Elem, affineValueKey{Root: baseKey.Root, Path: joinAffinePath(baseKey.Path, regionAnyIndexFieldKey())}, seen); ok {
+			state.Fields = map[string]borrowedOwnerRefState{regionAnyIndexFieldKey(): elemState}
+		}
+	case *DArrayViewType:
+		if elemState, ok := a.abstractParamBorrowedOwnerRefState(tt.Elem, affineValueKey{Root: baseKey.Root, Path: joinAffinePath(baseKey.Path, regionAnyIndexFieldKey())}, seen); ok {
+			state.Fields = map[string]borrowedOwnerRefState{regionAnyIndexFieldKey(): elemState}
+		}
+	}
+	return state, hasBorrowedOwnerRefState(state)
+}
+
 func (a *Analyzer) abstractParamRegionRefState(t Type, paramIndex int, seen map[string]bool) (regionRefState, bool) {
 	if t == nil || !a.typeCanContainRegionRefs(t, map[string]bool{}) {
 		return regionRefState{}, false
@@ -1462,19 +1555,23 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	savedRegionMarks := a.currentRegionMarks
 	savedRegionRefs := a.currentRegionRefs
 	savedAffineValues := a.currentAffineValues
+	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
 	savedPackedStores := a.currentPackedStores
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
 	savedReturnProvenance := a.currentReturnProvenance
+	savedReturnBorrowedOwnerRefs := a.currentReturnBorrowedOwnerRefs
 	a.currentScope = NewScope(a.globalScope)
 	a.currentRegions = map[*Symbol]regionState{}
 	a.currentRegionMarks = map[*Symbol]regionMarkState{}
 	a.currentRegionRefs = map[*Symbol]regionRefState{}
 	a.currentAffineValues = map[affineValueKey]affineValueState{}
+	a.currentBorrowedOwnerRefs = map[*Symbol]borrowedOwnerRefState{}
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
 	a.currentReturnProvenance = regionRefState{}
+	a.currentReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
 	if fnType != nil {
 		a.currentReturn = fnType.Return
 		a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)
@@ -1488,8 +1585,9 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 						if fnType != nil && i < len(fnType.Params) {
 							ptype = fnType.Params[i]
 						}
-						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, Mutable: a.paramIsMutable(param)}
+						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, ParamIndex: i, Mutable: a.paramIsMutable(param)}
 						a.defineLocal(sym, param.Position)
+						a.recordBorrowedOwnerRefParam(sym)
 						if state, ok := a.abstractParamRegionRefState(ptype, i, map[string]bool{}); ok {
 							a.recordResolvedRegionRefBinding(sym, state)
 						}
@@ -1508,6 +1606,12 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 			fnType.ReturnProvenance = regionRefState{}
 		}
 		fnType.ReturnProvenanceKnown = true
+		if hasBorrowedOwnerRefSummary(a.currentReturnBorrowedOwnerRefs) {
+			fnType.ReturnBorrowedOwnerRefs = cloneBorrowedOwnerRefSummary(a.currentReturnBorrowedOwnerRefs)
+		} else {
+			fnType.ReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
+		}
+		fnType.ReturnBorrowedOwnerRefsKnown = true
 		fnType.FreshReturnShapeParams = mergeShapeParamNames(fnType.FreshReturnShapeParams, inferredFreshReturnShapeParams(a.returnFreshShapeStatus))
 		inferredRefs := canonicalizePermissionRefs(a.currentFunctionUsedPermissionRefs)
 		inferredPermissions := permissionFamiliesFromRefs(inferredRefs)
@@ -1522,10 +1626,12 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentRegionMarks = savedRegionMarks
 	a.currentRegionRefs = savedRegionRefs
 	a.currentAffineValues = savedAffineValues
+	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentPackedStores = savedPackedStores
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
 	a.currentReturnProvenance = savedReturnProvenance
+	a.currentReturnBorrowedOwnerRefs = savedReturnBorrowedOwnerRefs
 }
 
 func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType) {
@@ -1545,10 +1651,12 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	savedRegionMarks := a.currentRegionMarks
 	savedRegionRefs := a.currentRegionRefs
 	savedAffineValues := a.currentAffineValues
+	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
 	savedPackedStores := a.currentPackedStores
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
 	savedReturnProvenance := a.currentReturnProvenance
+	savedReturnBorrowedOwnerRefs := a.currentReturnBorrowedOwnerRefs
 	savedSuppressDiagnostics := a.suppressDiagnostics
 
 	a.currentScope = NewScope(a.globalScope)
@@ -1558,10 +1666,12 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentRegionMarks = map[*Symbol]regionMarkState{}
 	a.currentRegionRefs = map[*Symbol]regionRefState{}
 	a.currentAffineValues = map[affineValueKey]affineValueState{}
+	a.currentBorrowedOwnerRefs = map[*Symbol]borrowedOwnerRefState{}
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
 	a.currentReturnProvenance = regionRefState{}
+	a.currentReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
 	a.suppressDiagnostics = true
 
 	a.withTypeParams(fn.TypeParams, nil, func() {
@@ -1573,8 +1683,9 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 						if i < len(fnType.Params) {
 							ptype = fnType.Params[i]
 						}
-						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, Mutable: a.paramIsMutable(param)}
+						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, ParamIndex: i, Mutable: a.paramIsMutable(param)}
 						a.defineLocal(sym, param.Position)
+						a.recordBorrowedOwnerRefParam(sym)
 						if state, ok := a.abstractParamRegionRefState(ptype, i, map[string]bool{}); ok {
 							a.recordResolvedRegionRefBinding(sym, state)
 						}
@@ -1593,6 +1704,12 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 		fnType.ReturnProvenance = regionRefState{}
 	}
 	fnType.ReturnProvenanceKnown = true
+	if hasBorrowedOwnerRefSummary(a.currentReturnBorrowedOwnerRefs) {
+		fnType.ReturnBorrowedOwnerRefs = cloneBorrowedOwnerRefSummary(a.currentReturnBorrowedOwnerRefs)
+	} else {
+		fnType.ReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
+	}
+	fnType.ReturnBorrowedOwnerRefsKnown = true
 
 	a.currentScope = savedScope
 	a.currentReturn = savedReturn
@@ -1601,9 +1718,98 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentRegionMarks = savedRegionMarks
 	a.currentRegionRefs = savedRegionRefs
 	a.currentAffineValues = savedAffineValues
+	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentPackedStores = savedPackedStores
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
 	a.currentReturnProvenance = savedReturnProvenance
+	a.currentReturnBorrowedOwnerRefs = savedReturnBorrowedOwnerRefs
+	a.suppressDiagnostics = savedSuppressDiagnostics
+}
+
+func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *FuncType) {
+	if fn == nil || fnType == nil || fnType.ReturnBorrowedOwnerRefsKnown {
+		return
+	}
+	if a.returnBorrowedOwnerRefInProgress[fn.Name] {
+		return
+	}
+	a.returnBorrowedOwnerRefInProgress[fn.Name] = true
+	defer delete(a.returnBorrowedOwnerRefInProgress, fn.Name)
+
+	savedScope := a.currentScope
+	savedReturn := a.currentReturn
+	savedReturnFreshStatus := a.returnFreshShapeStatus
+	savedRegions := a.currentRegions
+	savedRegionMarks := a.currentRegionMarks
+	savedRegionRefs := a.currentRegionRefs
+	savedAffineValues := a.currentAffineValues
+	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
+	savedPackedStores := a.currentPackedStores
+	savedFunctionPermissions := a.currentFunctionUsedPermissions
+	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
+	savedReturnProvenance := a.currentReturnProvenance
+	savedReturnBorrowedOwnerRefs := a.currentReturnBorrowedOwnerRefs
+	savedSuppressDiagnostics := a.suppressDiagnostics
+
+	a.currentScope = NewScope(a.globalScope)
+	a.currentReturn = fnType.Return
+	a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)
+	a.currentRegions = map[*Symbol]regionState{}
+	a.currentRegionMarks = map[*Symbol]regionMarkState{}
+	a.currentRegionRefs = map[*Symbol]regionRefState{}
+	a.currentAffineValues = map[affineValueKey]affineValueState{}
+	a.currentBorrowedOwnerRefs = map[*Symbol]borrowedOwnerRefState{}
+	a.currentPackedStores = map[string]*PackedEnumStoreType{}
+	a.currentFunctionUsedPermissions = map[string]bool{}
+	a.currentFunctionUsedPermissionRefs = nil
+	a.currentReturnProvenance = regionRefState{}
+	a.currentReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
+	a.suppressDiagnostics = true
+
+	a.withTypeParams(fn.TypeParams, nil, func() {
+		a.withRegionParams(fn.RegionParams, func() {
+			a.withPermissionParams(fn.PermissionParams, func() {
+				a.withShapeParams(fnType.ShapeParams, func() {
+					for i, param := range fn.Params {
+						var ptype Type = invalidType
+						if i < len(fnType.Params) {
+							ptype = fnType.Params[i]
+						}
+						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, ParamIndex: i, Mutable: a.paramIsMutable(param)}
+						a.defineLocal(sym, param.Position)
+						a.recordBorrowedOwnerRefParam(sym)
+						if state, ok := a.abstractParamRegionRefState(ptype, i, map[string]bool{}); ok {
+							a.recordResolvedRegionRefBinding(sym, state)
+						}
+					}
+					for _, stmt := range fn.Body {
+						a.analyzeStmt(stmt)
+					}
+				})
+			})
+		})
+	})
+
+	if hasBorrowedOwnerRefSummary(a.currentReturnBorrowedOwnerRefs) {
+		fnType.ReturnBorrowedOwnerRefs = cloneBorrowedOwnerRefSummary(a.currentReturnBorrowedOwnerRefs)
+	} else {
+		fnType.ReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
+	}
+	fnType.ReturnBorrowedOwnerRefsKnown = true
+
+	a.currentScope = savedScope
+	a.currentReturn = savedReturn
+	a.returnFreshShapeStatus = savedReturnFreshStatus
+	a.currentRegions = savedRegions
+	a.currentRegionMarks = savedRegionMarks
+	a.currentRegionRefs = savedRegionRefs
+	a.currentAffineValues = savedAffineValues
+	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
+	a.currentPackedStores = savedPackedStores
+	a.currentFunctionUsedPermissions = savedFunctionPermissions
+	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
+	a.currentReturnProvenance = savedReturnProvenance
+	a.currentReturnBorrowedOwnerRefs = savedReturnBorrowedOwnerRefs
 	a.suppressDiagnostics = savedSuppressDiagnostics
 }
