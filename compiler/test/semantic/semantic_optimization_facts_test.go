@@ -67,6 +67,9 @@ func TestAnalyzeCollectsOptimizationFactsForShapeBackedCollections(t *testing.T)
 	if !sameAFacts.Contiguous || !sameAFacts.UnitStride {
 		t.Fatalf("expected same_a facts to mark contiguous unit-stride access, got %#v", sameAFacts)
 	}
+	if !result.ExprSupportsDenseWrite(requireOptimizationFactsVarInitExpr(t, fn, "same_a")) {
+		t.Fatalf("expected same_a to support dense write helpers")
+	}
 	if sameAFacts.ReadOnly {
 		t.Fatalf("expected same_a facts to stay writable, got %#v", sameAFacts)
 	}
@@ -79,6 +82,9 @@ func TestAnalyzeCollectsOptimizationFactsForShapeBackedCollections(t *testing.T)
 
 	if !textFacts.ReadOnly || !textFacts.Contiguous || !textFacts.UnitStride {
 		t.Fatalf("expected dstr facts to be readonly contiguous unit-stride, got %#v", textFacts)
+	}
+	if result.ExprSupportsDenseWrite(requireOptimizationFactsVarInitExpr(t, fn, "text_copy")) {
+		t.Fatalf("expected readonly dstr value to reject dense write helpers")
 	}
 	if !textFacts.HasExactExtent() {
 		t.Fatalf("expected dstr facts to preserve exact shape extent, got %#v", textFacts)
@@ -96,6 +102,9 @@ func TestAnalyzeCollectsOptimizationFactsForShapeBackedCollections(t *testing.T)
 
 	if !sliceFacts.Contiguous || !sliceFacts.UnitStride {
 		t.Fatalf("expected fixed-array slice facts to mark contiguous unit-stride access, got %#v", sliceFacts)
+	}
+	if !result.ExprSupportsDenseWrite(requireOptimizationFactsVarInitExpr(t, fn, "slice")) {
+		t.Fatalf("expected numeric fixed-array slice to support dense write helpers")
 	}
 	if !sliceFacts.HasExactExtent() {
 		t.Fatalf("expected bounded slice facts to preserve exact view bounds, got %#v", sliceFacts)

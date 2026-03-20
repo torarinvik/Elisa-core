@@ -1085,10 +1085,8 @@ def arena_dict_probe_slot[T](m: any dict[dstr[key_shape], T]&, key: dstr[key_sha
     return DictProbeResult(0, false)
 
 def arena_dict_zero_buckets[T](items: any DictBucket[T]&, capacity: usize):
-    i: mutable usize = 0
-    while i < capacity:
-        items[i] <- zeroed
-        i <- i + 1
+    view: dview[DictBucket[T]] = DynArrayView(items.cast[any void&](), capacity, sizeof(DictBucket[T]))
+    arena_da_fill(view, zeroed)
 
 def arena_dict_copy_key(a: any Arena&, key: dstr[key_shape]) -> heap u8& can[Memory.Allocate, Abort.Panic]:
     key_len: usize = arena_strlen(key)
@@ -1444,6 +1442,18 @@ def arena_da_view_get[T](view: dview[T], index: usize) -> T:
     offset: usize = index * view.elem_size
     base: any T& = (view.data.cast[any u8&]() + offset).cast[any T&]()
     return base[0]
+
+def arena_da_fill[T](dst: dview[T], value: T):
+	if dst.len == 0:
+		return
+
+	assert dst.data != null
+
+	out: any T& = dst.data.cast[any T&]()
+	i: mutable usize = 0u
+	while i < dst.len:
+		out[i] <- value
+		i <- i + 1u
 
 def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
     assert dst.len == src.len

@@ -256,6 +256,27 @@ func isZeroedExpr(expr ast.Expr) bool {
 	return ok
 }
 
+func isStaticallyZeroFillExpr(s *functionState, expr ast.Expr) bool {
+	if isZeroedExpr(expr) {
+		return true
+	}
+	if s == nil {
+		return false
+	}
+	value, ok := s.evalConstExpr(expr)
+	if !ok {
+		return false
+	}
+	switch value.Kind {
+	case semantic.ConstInt:
+		return value.Int == 0
+	case semantic.ConstBool:
+		return !value.Bool
+	default:
+		return false
+	}
+}
+
 func isVoidType(t semantic.Type) bool {
 	b, ok := t.(*semantic.BuiltinType)
 	return ok && b.Name == "void"

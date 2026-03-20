@@ -2439,6 +2439,67 @@ def copy_overlap(values: any darray[i32, 4]&) -> void:
 	}
 }
 
+func TestGenerateLLVMIRSpecializesArenaDViewZeroFill(t *testing.T) {
+	src := `repr(c) struct DynArray[T]:
+	items: mutable any T&?
+	count: mutable usize
+	capacity: mutable usize
+
+repr(c) struct DynArrayView:
+	data: mutable any void&?
+	len: mutable usize
+	elem_size: mutable usize
+
+def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+	_ = start
+	_ = end
+	if values.items != null:
+		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+	return DynArrayView(null, 0u, sizeof(T))
+
+def arena_da_fill[T](dst: dview[T], value: T):
+	_ = dst
+	_ = value
+
+def zero_split(values: any darray[i32, 4]&) -> void:
+	base: dview[i32] = arena_da_view(values, 0u, 4u)
+	left: dview[i32] = base[0u:2u]
+	arena_da_fill(left, 0)
+
+def fill_split(values: any darray[i32, 4]&) -> void:
+	base: dview[i32] = arena_da_view(values, 0u, 4u)
+	left: dview[i32] = base[0u:2u]
+	arena_da_fill(left, 7)
+`
+	result := parseAndAnalyze(t, "backend_dview_fill_zero.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	zeroBody := functionIR(output, "zero_split")
+	if zeroBody == "" {
+		t.Fatalf("expected to find zero_split body, got:\n%s", output)
+	}
+	if !strings.Contains(zeroBody, "call ptr @memset(ptr") {
+		t.Fatalf("expected zero_split to lower through memset, got:\n%s", zeroBody)
+	}
+	if strings.Contains(zeroBody, "call void @arena_da_fill") {
+		t.Fatalf("expected zero_split to avoid generic helper fallback, got:\n%s", zeroBody)
+	}
+
+	fillBody := functionIR(output, "fill_split")
+	if fillBody == "" {
+		t.Fatalf("expected to find fill_split body, got:\n%s", output)
+	}
+	if !strings.Contains(fillBody, "call void @arena_da_fill") {
+		t.Fatalf("expected non-zero fill to keep helper fallback, got:\n%s", fillBody)
+	}
+	if strings.Contains(fillBody, "call ptr @memset(ptr") {
+		t.Fatalf("expected non-zero fill to avoid memset specialization, got:\n%s", fillBody)
+	}
+}
+
 func TestGenerateLLVMIRSpecializesStringViewLiteralWrapperCalls(t *testing.T) {
 	src := `extern string_view_eq(view: StringView, other: any u8&?) -> int
 

@@ -1381,6 +1381,58 @@ func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.
 	return nil, funcType.Return, true, nil
 }
 
+func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	ident, ok := expr.Func.(*ast.Ident)
+	if !ok || ident.Name != "arena_da_fill" {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 2 || s == nil || s.g == nil || s.g.result == nil {
+		return nil, nil, false, nil
+	}
+	dstExpr := expr.Args[0]
+	dstType := s.exprType(dstExpr)
+	resultType := s.exprType(expr)
+	if !isDynArrayViewCarrierType(dstType) || !s.g.result.ExprSupportsDenseWrite(dstExpr) || !isStaticallyZeroFillExpr(s, expr.Args[1]) {
+		return nil, nil, false, nil
+	}
+	dstValue, _, err := s.emitExpr(dstExpr, dstType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	dstData := C.LLVMBuildExtractValue(s.builder, dstValue, 0, cStringFree("dview.fill.dst.data"))
+	dstLen := C.LLVMBuildExtractValue(s.builder, dstValue, 1, cStringFree("dview.fill.dst.len"))
+	dstElemSize := C.LLVMBuildExtractValue(s.builder, dstValue, 2, cStringFree("dview.fill.dst.elem_size"))
+	dstBytes := C.LLVMBuildMul(s.builder, dstLen, dstElemSize, cStringFree("dview.fill.dst.bytes"))
+	usizeType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	zeroBytes := C.LLVMConstInt(usizeType, 0, 0)
+	zeroCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), dstBytes, zeroBytes, cStringFree("dview.fill.bytes.zero"))
+	fillBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dview.fill.fast"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dview.fill.merge"))
+	C.LLVMBuildCondBr(s.builder, zeroCond, mergeBB, fillBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, fillBB)
+	voidType := s.g.result.NamedTypes["void"]
+	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	memsetType := &semantic.FuncType{Name: "memset", Params: []semantic.Type{voidRefType, s.g.result.NamedTypes["i32"], s.g.result.NamedTypes["usize"]}, Return: voidRefType}
+	memsetCallee, err := s.g.ensureFunctionDeclared("memset", memsetType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	memsetLLVMType, err := s.g.lowerFunctionType(memsetType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	zeroValue := C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), 0, 0)
+	_ = s.buildCall(memsetLLVMType, memsetCallee, []C.LLVMValueRef{dstData, zeroValue, dstBytes}, "dview.fill.memset")
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	return nil, resultType, true, nil
+}
+
 func (s *functionState) emitStringViewStaticLiteralEqual(viewExpr ast.Expr, viewType semantic.Type, literalExpr ast.Expr, literalText string) (C.LLVMValueRef, error) {
 	viewValue, _, err := s.emitExpr(viewExpr, viewType)
 	if err != nil {
@@ -1690,6 +1742,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 		return value, actualType, err
 	}
 	if value, actualType, handled, err := s.emitSpecializedArenaViewCopyCall(expr); handled {
+		return value, actualType, err
+	}
+	if value, actualType, handled, err := s.emitSpecializedArenaViewFillCall(expr); handled {
 		return value, actualType, err
 	}
 	if value, actualType, handled, err := s.emitSpecializedMemcpyCall(expr); handled {

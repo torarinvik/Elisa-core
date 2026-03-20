@@ -799,3 +799,14 @@ func (r *Result) ExprsAreDisjoint(left, right ast.Expr) bool {
 	}
 	return leftFacts.Disjoint(rightFacts)
 }
+
+func (r *Result) ExprSupportsDenseWrite(expr ast.Expr) bool {
+	if r == nil {
+		return false
+	}
+	facts, ok := r.ExprOptimizationFacts(expr)
+	if !ok {
+		return false
+	}
+	return facts.Contiguous && facts.UnitStride && !facts.ReadOnly
+}
