@@ -1470,8 +1470,21 @@ func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.
 	fillType := funcType.Params[1]
 	fillByte, constByte := staticRepeatedByteFillValueForType(s, fillExpr, fillType)
 	dynamicByte := !constByte && isSingleByteScalarFillType(s, fillType)
-	if !isDynArrayViewCarrierType(dstType) || !s.g.result.ExprSupportsDenseWrite(dstExpr) || (!constByte && !dynamicByte) {
+	if !isDynArrayViewCarrierType(dstType) || !s.g.result.ExprSupportsDenseWrite(dstExpr) {
 		return nil, nil, false, nil
+	}
+	exactFillCount := uint64(0)
+	hasSmallExactFillCount := false
+	if !constByte && !dynamicByte {
+		if facts, ok := s.g.result.ExprOptimizationFacts(dstExpr); ok {
+			if count, ok := constOptimizationExtentSize(facts.Extent); ok && count <= smallExactArenaFillUnrollLimit {
+				exactFillCount = count
+				hasSmallExactFillCount = true
+			}
+		}
+		if !hasSmallExactFillCount {
+			return nil, nil, false, nil
+		}
 	}
 	dstValue, _, err := s.emitExpr(dstExpr, dstType)
 	if err != nil {
@@ -1491,6 +1504,26 @@ func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.
 		}
 	}
 	dstData := C.LLVMBuildExtractValue(s.builder, dstValue, 0, cStringFree("dview.fill.dst.data"))
+	if !(constByte || dynamicByte) {
+		if exactFillCount == 0 {
+			return nil, resultType, true, nil
+		}
+		elemLLVMType, err := s.g.lowerType(fillType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		usizeType, err := s.g.lowerBuiltin("usize")
+		if err != nil {
+			return nil, nil, true, err
+		}
+		for i := uint64(0); i < exactFillCount; i++ {
+			indexValue := C.LLVMConstInt(usizeType, C.ulonglong(i), 0)
+			indices := []C.LLVMValueRef{indexValue}
+			elemPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, dstData, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("dview.fill.elem.ptr"))
+			C.LLVMBuildStore(s.builder, fillValue, elemPtr)
+		}
+		return nil, resultType, true, nil
+	}
 	dstLen := C.LLVMBuildExtractValue(s.builder, dstValue, 1, cStringFree("dview.fill.dst.len"))
 	dstElemSize := C.LLVMBuildExtractValue(s.builder, dstValue, 2, cStringFree("dview.fill.dst.elem_size"))
 	dstBytes := C.LLVMBuildMul(s.builder, dstLen, dstElemSize, cStringFree("dview.fill.dst.bytes"))

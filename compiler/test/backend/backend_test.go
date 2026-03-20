@@ -2470,6 +2470,9 @@ def fill_split(values: any darray[i32, 4]&) -> void:
 	base: dview[i32] = arena_da_view(values, 0u, 4u)
 	left: dview[i32] = base[0u:2u]
 	arena_da_fill(left, 7)
+
+def fill_unknown(view: dview[i32]) -> void:
+	arena_da_fill(view, 7)
 `
 	result := parseAndAnalyze(t, "backend_dview_fill_zero.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -2492,11 +2495,22 @@ def fill_split(values: any darray[i32, 4]&) -> void:
 	if fillBody == "" {
 		t.Fatalf("expected to find fill_split body, got:\n%s", output)
 	}
-	if !strings.Contains(fillBody, "call void @arena_da_fill") {
-		t.Fatalf("expected non-zero fill to keep helper fallback, got:\n%s", fillBody)
+	if strings.Contains(fillBody, "call void @arena_da_fill") {
+		t.Fatalf("expected fill_split to avoid helper fallback for small exact extents, got:\n%s", fillBody)
 	}
 	if strings.Contains(fillBody, "call ptr @memset(ptr") {
-		t.Fatalf("expected non-zero fill to avoid memset specialization, got:\n%s", fillBody)
+		t.Fatalf("expected fill_split to avoid memset specialization, got:\n%s", fillBody)
+	}
+	if !strings.Contains(fillBody, "store i32 7") {
+		t.Fatalf("expected fill_split to lower through direct stores, got:\n%s", fillBody)
+	}
+
+	fillUnknownBody := functionIR(output, "fill_unknown")
+	if fillUnknownBody == "" {
+		t.Fatalf("expected to find fill_unknown body, got:\n%s", output)
+	}
+	if !strings.Contains(fillUnknownBody, "call void @arena_da_fill") {
+		t.Fatalf("expected fill_unknown to keep helper fallback, got:\n%s", fillUnknownBody)
 	}
 }
 
@@ -2536,6 +2550,9 @@ def fill_nonuniform(values: any darray[i32, 4]&) -> void:
 	base: dview[i32] = arena_da_view(values, 0u, 4u)
 	left: dview[i32] = base[0u:2u]
 	arena_da_fill(left, 7)
+
+def fill_nonuniform_unknown(view: dview[i32]) -> void:
+	arena_da_fill(view, 7)
 `
 	result := parseAndAnalyze(t, "backend_dview_fill_repeated_byte.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -2569,11 +2586,22 @@ def fill_nonuniform(values: any darray[i32, 4]&) -> void:
 	if nonUniformBody == "" {
 		t.Fatalf("expected to find fill_nonuniform body, got:\n%s", output)
 	}
-	if !strings.Contains(nonUniformBody, "call void @arena_da_fill") {
-		t.Fatalf("expected fill_nonuniform to keep helper fallback, got:\n%s", nonUniformBody)
+	if strings.Contains(nonUniformBody, "call void @arena_da_fill") {
+		t.Fatalf("expected fill_nonuniform to avoid generic helper fallback, got:\n%s", nonUniformBody)
 	}
 	if strings.Contains(nonUniformBody, "call ptr @memset(ptr") {
 		t.Fatalf("expected fill_nonuniform to avoid memset specialization, got:\n%s", nonUniformBody)
+	}
+	if !strings.Contains(nonUniformBody, "store i32 7") {
+		t.Fatalf("expected fill_nonuniform to lower through direct stores, got:\n%s", nonUniformBody)
+	}
+
+	nonUniformUnknownBody := functionIR(output, "fill_nonuniform_unknown")
+	if nonUniformUnknownBody == "" {
+		t.Fatalf("expected to find fill_nonuniform_unknown body, got:\n%s", output)
+	}
+	if !strings.Contains(nonUniformUnknownBody, "call void @arena_da_fill") {
+		t.Fatalf("expected fill_nonuniform_unknown to keep helper fallback, got:\n%s", nonUniformUnknownBody)
 	}
 }
 
@@ -2608,6 +2636,9 @@ def fill_runtime_wide(values: any darray[i32, 4]&, value: i32) -> void:
 	base: dview[i32] = arena_da_view(values, 0u, 4u)
 	left: dview[i32] = base[0u:2u]
 	arena_da_fill(left, value)
+
+def fill_runtime_wide_unknown(view: dview[i32], value: i32) -> void:
+	arena_da_fill(view, value)
 `
 	result := parseAndAnalyze(t, "backend_dview_fill_dynamic_byte.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -2630,14 +2661,22 @@ def fill_runtime_wide(values: any darray[i32, 4]&, value: i32) -> void:
 	if runtimeWideBody == "" {
 		t.Fatalf("expected to find fill_runtime_wide body, got:\n%s", output)
 	}
-	if !strings.Contains(runtimeWideBody, "call void @arena_da_fill") {
-		t.Fatalf("expected fill_runtime_wide to keep helper fallback, got:\n%s", runtimeWideBody)
+	if strings.Contains(runtimeWideBody, "call void @arena_da_fill") {
+		t.Fatalf("expected fill_runtime_wide to avoid helper fallback for small exact extents, got:\n%s", runtimeWideBody)
 	}
 	if strings.Contains(runtimeWideBody, "call ptr @memset(ptr") {
 		t.Fatalf("expected fill_runtime_wide to avoid memset specialization, got:\n%s", runtimeWideBody)
 	}
-	if strings.Contains(runtimeWideBody, "call ptr @memset(ptr, i32 %") {
-		t.Fatalf("expected fill_runtime_wide not to form a dynamic memset byte path, got:\n%s", runtimeWideBody)
+	if !strings.Contains(runtimeWideBody, "store i32 %1") && !strings.Contains(runtimeWideBody, "store i32 %0") {
+		t.Fatalf("expected fill_runtime_wide to lower through direct runtime-value stores, got:\n%s", runtimeWideBody)
+	}
+
+	runtimeWideUnknownBody := functionIR(output, "fill_runtime_wide_unknown")
+	if runtimeWideUnknownBody == "" {
+		t.Fatalf("expected to find fill_runtime_wide_unknown body, got:\n%s", output)
+	}
+	if !strings.Contains(runtimeWideUnknownBody, "call void @arena_da_fill") {
+		t.Fatalf("expected fill_runtime_wide_unknown to keep helper fallback, got:\n%s", runtimeWideUnknownBody)
 	}
 }
 

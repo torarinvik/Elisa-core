@@ -11,11 +11,14 @@ import "C"
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
 	"llcontext/src/semantic"
 )
+
+const smallExactArenaFillUnrollLimit = 4
 
 func (s *functionState) sizeOfType(t semantic.Type) (uint64, error) {
 	return s.g.abiSizeOfType(t)
@@ -334,6 +337,52 @@ func isSingleByteScalarFillType(s *functionState, t semantic.Type) bool {
 		return false
 	}
 	return sizeBytes == 1
+}
+
+func constOptimizationExtentSize(extent *semantic.OptimizationExtent) (uint64, bool) {
+	if extent == nil {
+		return 0, false
+	}
+	switch extent.Kind {
+	case semantic.OptimizationExtentArraySize:
+		if extent.HasConstSize && extent.ConstSize >= 0 {
+			return uint64(extent.ConstSize), true
+		}
+		return 0, false
+	case semantic.OptimizationExtentViewBounds:
+		begin, ok := parseOptimizationExtentConstInt(extent.Begin)
+		if !ok {
+			return 0, false
+		}
+		end, ok := parseOptimizationExtentConstInt(extent.End)
+		if !ok || end < begin {
+			return 0, false
+		}
+		return uint64(end - begin), true
+	default:
+		return 0, false
+	}
+}
+
+func parseOptimizationExtentConstInt(value string) (int64, bool) {
+	trimmed := strings.TrimSpace(value)
+	for len(trimmed) >= 2 && trimmed[0] == '(' && trimmed[len(trimmed)-1] == ')' {
+		trimmed = strings.TrimSpace(trimmed[1 : len(trimmed)-1])
+	}
+	if trimmed == "" {
+		return 0, false
+	}
+	if last := trimmed[len(trimmed)-1]; last == 'u' || last == 'i' {
+		trimmed = trimmed[:len(trimmed)-1]
+	}
+	if trimmed == "" {
+		return 0, false
+	}
+	parsed, err := strconv.ParseInt(trimmed, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return parsed, true
 }
 
 func isVoidType(t semantic.Type) bool {
