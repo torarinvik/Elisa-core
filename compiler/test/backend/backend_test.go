@@ -2186,6 +2186,10 @@ def same_bounds_view(left: dstr[row], right: dstr[col]) -> bool:
 	right_view: StringView = ctx_string_view(right, 0, 2)
 	return left_view == right_view
 
+def fresh_disjoint_raw_views() -> bool:
+	region scratch(1024u)
+	return string_view(new[scratch] 1u8, 0, 1) == string_view(new[scratch] 2u8, 0, 1)
+
 def different_bounds_view(left: dstr[row], right: dstr[col]) -> bool:
 	left_view: StringView = ctx_string_view(left, 0, 2)
 	right_view: StringView = ctx_string_view(right, 0, 3)
@@ -2229,6 +2233,14 @@ def different_bounds_view(left: dstr[row], right: dstr[col]) -> bool:
 	}
 	if strings.Contains(sameBoundsBody, "call i64 @ctx_string_views_eq") {
 		t.Fatalf("expected same_bounds_view to avoid ctx_string_views_eq helper, got:\n%s", sameBoundsBody)
+	}
+
+	disjointBoundsBody := functionIR(output, "fresh_disjoint_raw_views")
+	if disjointBoundsBody == "" {
+		t.Fatalf("expected to find fresh_disjoint_raw_views body, got:\n%s", output)
+	}
+	if !strings.Contains(disjointBoundsBody, "call i64 @memcmp(ptr noalias") {
+		t.Fatalf("expected fresh_disjoint_raw_views to mark memcmp operands noalias, got:\n%s", disjointBoundsBody)
 	}
 
 	differentBoundsBody := functionIR(output, "different_bounds_view")

@@ -323,6 +323,9 @@ func (a *Analyzer) inferCallOptimizationFacts(call *ast.CallExpr, facts Optimiza
 	case "arena_da_view", "ctx_string_view", "string_view":
 		if baseExpr, ok := optimizationCallArg(call, 0); ok {
 			facts.base = a.optimizationBaseForExpr(baseExpr)
+			if baseFacts, ok := a.exprFacts[baseExpr]; ok && baseFacts.Exclusive {
+				facts.Exclusive = true
+			}
 		}
 		if extent := a.inferViewHelperExtent(call, 0, 1, 2, "count"); extent != nil {
 			facts.Extent = extent
@@ -330,6 +333,9 @@ func (a *Analyzer) inferCallOptimizationFacts(call *ast.CallExpr, facts Optimiza
 	case "arena_da_view_slice", "ctx_string_view_slice", "string_view_slice":
 		if viewExpr, ok := optimizationCallArg(call, 0); ok {
 			facts.base = a.optimizationBaseForExpr(viewExpr)
+			if viewFacts, ok := a.exprFacts[viewExpr]; ok && viewFacts.Exclusive {
+				facts.Exclusive = true
+			}
 		}
 		if extent := a.inferViewHelperExtent(call, 0, 1, 2, "len"); extent != nil {
 			facts.Extent = extent
@@ -365,6 +371,8 @@ func (a *Analyzer) optimizationBaseForExpr(expr ast.Expr) string {
 			}
 			return optimizationSymbolIdentity(sym)
 		}
+	case *ast.AllocExpr:
+		return optimizationExprIdentity(n)
 	case *ast.MoveExpr:
 		return a.optimizationBaseForExpr(n.Operand)
 	case *ast.CanExpr:

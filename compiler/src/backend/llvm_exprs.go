@@ -18,6 +18,17 @@ import (
 	"llcontext/src/semantic"
 )
 
+func (s *functionState) addCallSiteEnumAttribute(call C.LLVMValueRef, index C.uint, name string) {
+	nameC := cString(name)
+	defer C.free(unsafe.Pointer(nameC))
+	kind := C.LLVMGetEnumAttributeKindForName(nameC, C.size_t(len(name)))
+	if kind == 0 {
+		return
+	}
+	attr := C.LLVMCreateEnumAttribute(s.g.context, kind, 0)
+	C.LLVMAddCallSiteAttribute(call, index, attr)
+}
+
 func callIdentName(expr *ast.CallExpr) string {
 	if expr == nil {
 		return ""
@@ -874,7 +885,8 @@ func (s *functionState) emitSameExtentRuntimeStringCompareExpr(op lexer.TokenKin
 	if err != nil {
 		return nil, true, err
 	}
-	cmp, err := s.emitMemcmpEqualValue(firstData, secondData, coercedLen, "streq.memcmp")
+	disjoint := s.g.result.ExprsAreDisjoint(firstExpr, secondExpr)
+	cmp, err := s.emitMemcmpEqualValue(firstData, secondData, coercedLen, "streq.memcmp", disjoint)
 	if err != nil {
 		return nil, true, err
 	}
@@ -1166,10 +1178,10 @@ func (s *functionState) emitMemcmpEqual(left C.LLVMValueRef, right C.LLVMValueRe
 		return nil, err
 	}
 	lengthValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(length), 0)
-	return s.emitMemcmpEqualValue(left, right, lengthValue, "svlit.memcmp")
+	return s.emitMemcmpEqualValue(left, right, lengthValue, "svlit.memcmp", false)
 }
 
-func (s *functionState) emitMemcmpEqualValue(left C.LLVMValueRef, right C.LLVMValueRef, lengthValue C.LLVMValueRef, callName string) (C.LLVMValueRef, error) {
+func (s *functionState) emitMemcmpEqualValue(left C.LLVMValueRef, right C.LLVMValueRef, lengthValue C.LLVMValueRef, callName string, noAliasArgs bool) (C.LLVMValueRef, error) {
 	voidType := s.g.result.NamedTypes["void"]
 	usizeType := s.g.result.NamedTypes["usize"]
 	intType := s.g.result.NamedTypes["int"]
@@ -1188,6 +1200,10 @@ func (s *functionState) emitMemcmpEqualValue(left C.LLVMValueRef, right C.LLVMVa
 		return nil, err
 	}
 	call := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{left, right, lengthValue}, callName)
+	if noAliasArgs {
+		s.addCallSiteEnumAttribute(call, C.uint(1), "noalias")
+		s.addCallSiteEnumAttribute(call, C.uint(2), "noalias")
+	}
 	intLLVMType, err := s.g.lowerType(intType)
 	if err != nil {
 		return nil, err

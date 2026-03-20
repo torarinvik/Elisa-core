@@ -279,6 +279,8 @@ def inspect(text: dstr[row], buf: array[i32, 8]) -> int:
 	second: StringView = ctx_string_view(text, 2, 4)
 	middle: StringView = ctx_string_view(text, 1, 3)
 	region scratch(1024u)
+	fresh_view_a: StringView = string_view(new[scratch] 3u8, 0, 1)
+	fresh_view_b: StringView = string_view(new[scratch] 4u8, 0, 1)
 	alloc_a: scratch i32& = new[scratch] 1i32
 	alloc_b: scratch i32& = new[scratch] 2i32
 	alloc_alias: scratch i32& = alloc_a
@@ -295,6 +297,8 @@ def inspect(text: dstr[row], buf: array[i32, 8]) -> int:
 	firstExpr := requireOptimizationFactsVarInitExpr(t, fn, "first")
 	secondExpr := requireOptimizationFactsVarInitExpr(t, fn, "second")
 	middleExpr := requireOptimizationFactsVarInitExpr(t, fn, "middle")
+	freshViewAExpr := requireOptimizationFactsVarInitExpr(t, fn, "fresh_view_a")
+	freshViewBExpr := requireOptimizationFactsVarInitExpr(t, fn, "fresh_view_b")
 	allocAExpr := requireOptimizationFactsVarInitExpr(t, fn, "alloc_a")
 	allocBExpr := requireOptimizationFactsVarInitExpr(t, fn, "alloc_b")
 	allocAliasExpr := requireOptimizationFactsVarInitExpr(t, fn, "alloc_alias")
@@ -310,6 +314,9 @@ def inspect(text: dstr[row], buf: array[i32, 8]) -> int:
 	}
 	if result.ExprsAreDisjoint(firstExpr, middleExpr) {
 		t.Fatalf("expected overlapping string views to remain potentially aliased")
+	}
+	if !result.ExprsAreDisjoint(freshViewAExpr, freshViewBExpr) {
+		t.Fatalf("expected fresh-allocation string views to be disjoint")
 	}
 	if !result.ExprsAreDisjoint(allocAExpr, allocBExpr) {
 		t.Fatalf("expected distinct fresh allocations to be disjoint")
