@@ -108,7 +108,7 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 	case *ast.AddrOfExpr:
 		value, actualType, err = s.emitAddrOfExpr(n)
 	case *ast.MoveExpr:
-		value, actualType, err = s.emitExpr(n.Operand, expected)
+		value, actualType, err = s.emitMoveExpr(n, expected)
 	case *ast.SpecializeExpr:
 		value, actualType, err = s.emitSpecializeExpr(n)
 	case *ast.StructLitExpr:
@@ -131,6 +131,40 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		return coerced, expected, nil
 	}
 	return value, actualType, nil
+}
+
+func (s *functionState) emitMoveExpr(expr *ast.MoveExpr, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+	if binding, ok := s.lookupScopedMoveBinding(expr.Operand); ok {
+		value, err := s.loadValue(binding.ptr, binding.typ, binding.name)
+		if err != nil {
+			return nil, nil, err
+		}
+		zero, err := s.zeroValue(binding.typ)
+		if err != nil {
+			return nil, nil, err
+		}
+		C.LLVMBuildStore(s.builder, zero, binding.ptr)
+		return value, binding.typ, nil
+	}
+	return s.emitExpr(expr.Operand, expected)
+}
+
+func (s *functionState) lookupScopedMoveBinding(expr ast.Expr) (scopedCleanupBinding, bool) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return s.lookupScopedMoveBinding(n.Inner)
+	case *ast.Ident:
+		binding, ok := s.lookupBinding(n.Name)
+		if !ok {
+			return scopedCleanupBinding{}, false
+		}
+		for i := len(s.scopedCleanups) - 1; i >= 0; i-- {
+			if s.scopedCleanups[i].ptr == binding.ptr {
+				return s.scopedCleanups[i], true
+			}
+		}
+	}
+	return scopedCleanupBinding{}, false
 }
 
 func (s *functionState) buildCall(llvmFnType C.LLVMTypeRef, callee C.LLVMValueRef, args []C.LLVMValueRef, name string) C.LLVMValueRef {

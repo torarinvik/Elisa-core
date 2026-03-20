@@ -51,6 +51,10 @@ def compiler_parallel_fixture(pool: any ThreadPool&) -> i64 can[Thread.Spawn, Th
 	group: TaskGroup = task_group_new()
 	grouped: Task[i64, Pending] = pool_submit1(pool, expr_sum, graph)
 	task_group_add((&group).cast[any TaskGroup&](), move grouped)
-	task_group_wait_all((&group).cast[any TaskGroup&]())
+	wait all group
 
 	return join(move thread) + await awaited
+
+def compiler_lock_probe(mu: mutable Mutex) -> i64 can[Sync.Lock, Sync.Unlock]:
+	lock mu as g:
+		return 1

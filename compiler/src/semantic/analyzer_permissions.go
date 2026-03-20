@@ -465,6 +465,14 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 	case *ast.CanStmt:
 		c.addRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false))
 		c.collectStmts(n.Body)
+	case *ast.PoolStmt:
+		c.collectExpr(n.Workers)
+		c.addRefs([]ast.PermissionRef{{Position: n.Position, Name: "Pool", Member: "Create"}, {Position: n.Position, Name: "Pool", Member: "Shutdown"}})
+		c.collectStmts(n.Body)
+	case *ast.LockStmt:
+		c.collectExpr(n.Mutex)
+		c.addRefs([]ast.PermissionRef{{Position: n.Position, Name: "Sync", Member: "Lock"}, {Position: n.Position, Name: "Sync", Member: "Unlock"}})
+		c.collectStmts(n.Body)
 	case *ast.WhileStmt:
 		c.collectExpr(n.Cond)
 		c.collectStmts(n.Body)
@@ -630,6 +638,20 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 	case *ast.CanStmt:
 		families := a.resolvePermissionFamilies(n.Permissions, false)
 		a.validatePermissionStmts(n.Body, extendGrantedPermissionFamilies(granted, families))
+	case *ast.PoolStmt:
+		a.validatePermissionExpr(n.Workers, granted)
+		if !granted["Pool"] {
+			refs := []ast.PermissionRef{{Position: n.Position, Name: "Pool", Member: "Create"}, {Position: n.Position, Name: "Pool", Member: "Shutdown"}}
+			a.warnf(n.Pos(), "pool scope requires%s and has no explicit local effect grant; add %s or a surrounding can ...: block", permissionFamiliesString([]string{"Pool"}), permissionGrantHint(refs, []string{"Pool"}))
+		}
+		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
+	case *ast.LockStmt:
+		a.validatePermissionExpr(n.Mutex, granted)
+		if !granted["Sync"] {
+			refs := []ast.PermissionRef{{Position: n.Position, Name: "Sync", Member: "Lock"}, {Position: n.Position, Name: "Sync", Member: "Unlock"}}
+			a.warnf(n.Pos(), "lock scope requires%s and has no explicit local effect grant; add %s or a surrounding can ...: block", permissionFamiliesString([]string{"Sync"}), permissionGrantHint(refs, []string{"Sync"}))
+		}
+		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.WhileStmt:
 		a.validatePermissionExpr(n.Cond, granted)
 		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))

@@ -189,6 +189,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.analyzeInStoreStmt(n)
 	case *ast.CanStmt:
 		a.analyzeCanStmt(n)
+	case *ast.PoolStmt:
+		a.analyzePoolStmt(n)
+	case *ast.LockStmt:
+		a.analyzeLockStmt(n)
 	case *ast.WhileStmt:
 		condType := a.analyzeCondExpr(n.Cond)
 		if !IsBoolType(condType) {
@@ -511,6 +515,83 @@ func (a *Analyzer) analyzeCanStmt(stmt *ast.CanStmt) {
 	refs := a.resolvePermissionRefs(stmt.Permissions, true)
 	a.recordFunctionPermissionRefs(refs)
 	a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
+}
+
+func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
+	poolCall := &ast.CallExpr{
+		Position: stmt.Position,
+		Func:     &ast.Ident{Position: stmt.Position, Name: "pool_new"},
+		Args:     []ast.Expr{stmt.Workers},
+	}
+	poolType := a.analyzeExpr(poolCall)
+	savedScope := a.currentScope
+	savedRegions := a.currentRegions
+	savedRegionMarks := a.currentRegionMarks
+	savedRegionRefs := a.currentRegionRefs
+	savedPackedStores := a.currentPackedStores
+	a.currentScope = NewScope(savedScope)
+	a.currentRegions = a.cloneRegionStates()
+	a.currentRegionMarks = a.cloneRegionMarkStates()
+	a.currentRegionRefs = a.cloneRegionRefStates()
+	a.currentPackedStores = a.clonePackedStores()
+	a.defineLocal(&Symbol{Name: stmt.Name, Kind: SymbolLocal, Type: poolType, Node: stmt, Mutable: false}, stmt.Pos())
+	for _, inner := range stmt.Body {
+		a.analyzeStmt(inner)
+	}
+	a.currentScope = savedScope
+	a.currentRegions = savedRegions
+	a.currentRegionMarks = savedRegionMarks
+	a.currentRegionRefs = savedRegionRefs
+	a.currentPackedStores = savedPackedStores
+}
+
+func (a *Analyzer) analyzeLockStmt(stmt *ast.LockStmt) {
+	lockCall := &ast.CallExpr{
+		Position: stmt.Position,
+		Func:     &ast.Ident{Position: stmt.Position, Name: "mutex_lock"},
+		Args: []ast.Expr{&ast.CastExpr{
+			Position: stmt.Mutex.Pos(),
+			Operand: &ast.AddrOfExpr{
+				Position: stmt.Mutex.Pos(),
+				Operand:  stmt.Mutex,
+			},
+			Target: &ast.RefType{
+				Position: stmt.Mutex.Pos(),
+				Elem:     &ast.NamedType{Position: stmt.Mutex.Pos(), Name: "Mutex"},
+				State:    ast.RefStateNonNull,
+				Storage:  ast.RefStorageAny,
+				Explicit: true,
+			},
+		}},
+	}
+	guardType := a.analyzeExpr(lockCall)
+	savedScope := a.currentScope
+	savedRegions := a.currentRegions
+	savedRegionMarks := a.currentRegionMarks
+	savedRegionRefs := a.currentRegionRefs
+	savedPackedStores := a.currentPackedStores
+	guardSym := &Symbol{Name: stmt.GuardName, Kind: SymbolLocal, Type: guardType, Node: stmt, Mutable: true}
+	a.currentScope = NewScope(savedScope)
+	a.currentRegions = a.cloneRegionStates()
+	a.currentRegionMarks = a.cloneRegionMarkStates()
+	a.currentRegionRefs = a.cloneRegionRefStates()
+	a.currentPackedStores = a.clonePackedStores()
+	a.defineLocal(guardSym, stmt.Pos())
+	for _, inner := range stmt.Body {
+		a.analyzeStmt(inner)
+	}
+	if a.currentAffineValues != nil {
+		for key := range a.currentAffineValues {
+			if key.Root == guardSym {
+				delete(a.currentAffineValues, key)
+			}
+		}
+	}
+	a.currentScope = savedScope
+	a.currentRegions = savedRegions
+	a.currentRegionMarks = savedRegionMarks
+	a.currentRegionRefs = savedRegionRefs
+	a.currentPackedStores = savedPackedStores
 }
 
 func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
@@ -1872,6 +1953,10 @@ func stmtDefinitelyExits(stmt ast.Stmt) bool {
 			}
 		}
 		return len(n.Else) > 0 && blockDefinitelyExits(n.Else)
+	case *ast.PoolStmt:
+		return blockDefinitelyExits(n.Body)
+	case *ast.LockStmt:
+		return blockDefinitelyExits(n.Body)
 	default:
 		return false
 	}

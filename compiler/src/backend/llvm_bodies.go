@@ -41,6 +41,21 @@ type functionState struct {
 	regions           []regionBinding
 	packedStores      map[string]packedStoreBinding
 	packedStoreValues map[packedStoreExtractCacheKey]C.LLVMValueRef
+	scopedCleanups    []scopedCleanupBinding
+}
+
+type scopedCleanupKind int
+
+const (
+	scopedCleanupLockGuard scopedCleanupKind = iota
+	scopedCleanupThreadPool
+)
+
+type scopedCleanupBinding struct {
+	kind scopedCleanupKind
+	name string
+	ptr  C.LLVMValueRef
+	typ  semantic.Type
 }
 
 type regionBinding struct {
@@ -122,6 +137,9 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	}
 
 	if !state.currentBlockTerminated() {
+		if err := state.emitActiveScopedCleanup(); err != nil {
+			return err
+		}
 		if err := state.emitRegionCleanup(); err != nil {
 			return err
 		}
@@ -142,6 +160,9 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 }
 
 func (s *functionState) emitFunctionReturn(value C.LLVMValueRef, actual semantic.Type) error {
+	if err := s.emitActiveScopedCleanup(); err != nil {
+		return err
+	}
 	if err := s.emitRegionCleanup(); err != nil {
 		return err
 	}
@@ -184,6 +205,26 @@ func (s *functionState) emitRegionCleanup() error {
 		}
 	}
 	return nil
+}
+
+func (s *functionState) emitActiveScopedCleanup() error {
+	for i := len(s.scopedCleanups) - 1; i >= 0; i-- {
+		if err := s.emitScopedCleanup(s.scopedCleanups[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *functionState) emitScopedCleanup(binding scopedCleanupBinding) error {
+	switch binding.kind {
+	case scopedCleanupLockGuard:
+		return s.emitConditionalMutexUnlock(binding)
+	case scopedCleanupThreadPool:
+		return s.emitConditionalPoolShutdown(binding)
+	default:
+		return fmt.Errorf("unsupported scoped cleanup kind %d", binding.kind)
+	}
 }
 
 func (s *functionState) emitBlock(stmts []ast.Stmt, scoped bool) error {
@@ -355,6 +396,12 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		return nil
 	case *ast.ReturnStmt:
 		if n.Value == nil {
+			if err := s.emitActiveScopedCleanup(); err != nil {
+				return err
+			}
+			if err := s.emitRegionCleanup(); err != nil {
+				return err
+			}
 			if retUnion, ok := s.fnType.Return.(*semantic.ErrorUnionType); ok && isVoidType(retUnion.Value) {
 				zeroCode, err := s.errorCodeConstant(0)
 				if err != nil {
@@ -379,6 +426,10 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		return s.emitInStore(n)
 	case *ast.CanStmt:
 		return s.emitBlock(n.Body, true)
+	case *ast.PoolStmt:
+		return s.emitPoolStmt(n)
+	case *ast.LockStmt:
+		return s.emitLockStmt(n)
 	case *ast.WhileStmt:
 		return s.emitWhile(n)
 	case *ast.PassStmt:
@@ -513,6 +564,167 @@ func (s *functionState) emitInStore(stmt *ast.InStoreStmt) error {
 		s.packedStores = savedStores
 	}()
 	return s.emitBlock(stmt.Body, true)
+}
+
+func (s *functionState) emitPoolStmt(stmt *ast.PoolStmt) error {
+	poolCall := &ast.CallExpr{
+		Position: stmt.Position,
+		Func:     &ast.Ident{Position: stmt.Position, Name: "pool_new"},
+		Args:     []ast.Expr{stmt.Workers},
+	}
+	poolValue, poolType, err := s.emitExpr(poolCall, nil)
+	if err != nil {
+		return err
+	}
+	poolAlloca, err := s.createEntryAlloca(stmt.Name, poolType)
+	if err != nil {
+		return err
+	}
+	s.pushScope()
+	defer s.popScope()
+	s.defineBinding(stmt.Name, valueBinding{ptr: poolAlloca, typ: poolType})
+	C.LLVMBuildStore(s.builder, poolValue, poolAlloca)
+	pool := scopedCleanupBinding{kind: scopedCleanupThreadPool, name: stmt.Name, ptr: poolAlloca, typ: poolType}
+	s.scopedCleanups = append(s.scopedCleanups, pool)
+	defer func() {
+		s.scopedCleanups = s.scopedCleanups[:len(s.scopedCleanups)-1]
+	}()
+	if err := s.emitBlock(stmt.Body, false); err != nil {
+		return err
+	}
+	if s.currentBlockTerminated() {
+		return nil
+	}
+	return s.emitConditionalPoolShutdown(pool)
+}
+
+func (s *functionState) emitLockStmt(stmt *ast.LockStmt) error {
+	lockCall := &ast.CallExpr{
+		Position: stmt.Position,
+		Func:     &ast.Ident{Position: stmt.Position, Name: "mutex_lock"},
+		Args: []ast.Expr{&ast.CastExpr{
+			Position: stmt.Mutex.Pos(),
+			Operand: &ast.AddrOfExpr{
+				Position: stmt.Mutex.Pos(),
+				Operand:  stmt.Mutex,
+			},
+			Target: &ast.RefType{
+				Position: stmt.Mutex.Pos(),
+				Elem:     &ast.NamedType{Position: stmt.Mutex.Pos(), Name: "Mutex"},
+				State:    ast.RefStateNonNull,
+				Storage:  ast.RefStorageAny,
+				Explicit: true,
+			},
+		}},
+	}
+	guardValue, guardType, err := s.emitExpr(lockCall, nil)
+	if err != nil {
+		return err
+	}
+	guardAlloca, err := s.createEntryAlloca(stmt.GuardName, guardType)
+	if err != nil {
+		return err
+	}
+	s.pushScope()
+	defer s.popScope()
+	s.defineBinding(stmt.GuardName, valueBinding{ptr: guardAlloca, typ: guardType})
+	C.LLVMBuildStore(s.builder, guardValue, guardAlloca)
+	guard := scopedCleanupBinding{kind: scopedCleanupLockGuard, name: stmt.GuardName, ptr: guardAlloca, typ: guardType}
+	s.scopedCleanups = append(s.scopedCleanups, guard)
+	defer func() {
+		s.scopedCleanups = s.scopedCleanups[:len(s.scopedCleanups)-1]
+	}()
+	if err := s.emitBlock(stmt.Body, false); err != nil {
+		return err
+	}
+	if s.currentBlockTerminated() {
+		return nil
+	}
+	return s.emitConditionalMutexUnlock(guard)
+}
+
+func (s *functionState) emitConditionalMutexUnlock(guard scopedCleanupBinding) error {
+	if s.currentBlockTerminated() {
+		return nil
+	}
+	guardValue, err := s.loadValue(guard.ptr, guard.typ, guard.name)
+	if err != nil {
+		return err
+	}
+	handleValue := C.LLVMBuildExtractValue(s.builder, guardValue, 0, cStringFree("lock.guard.handle"))
+	nullHandleType, err := s.g.lowerType(&semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNullable, Storage: semantic.RefStorageAny, ExplicitStorage: true})
+	if err != nil {
+		return err
+	}
+	isNull := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), handleValue, C.LLVMConstNull(nullHandleType), cStringFree("lock.guard.null"))
+	unlockBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("lock.unlock"))
+	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("lock.after"))
+	C.LLVMBuildCondBr(s.builder, isNull, contBB, unlockBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, unlockBB)
+	unlockCall := &ast.CallExpr{
+		Func: &ast.Ident{Name: "mutex_unlock"},
+		Args: []ast.Expr{&ast.MoveExpr{Operand: &ast.Ident{Name: guard.name}}},
+	}
+	if _, _, err := s.emitExpr(unlockCall, nil); err != nil {
+		return err
+	}
+	if !s.currentBlockTerminated() {
+		C.LLVMBuildBr(s.builder, contBB)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+	return nil
+}
+
+func (s *functionState) emitConditionalPoolShutdown(pool scopedCleanupBinding) error {
+	if s.currentBlockTerminated() {
+		return nil
+	}
+	poolValue, err := s.loadValue(pool.ptr, pool.typ, pool.name)
+	if err != nil {
+		return err
+	}
+	handleValue := C.LLVMBuildExtractValue(s.builder, poolValue, 0, cStringFree("pool.handle"))
+	nullHandleType, err := s.g.lowerType(&semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNullable, Storage: semantic.RefStorageAny, ExplicitStorage: true})
+	if err != nil {
+		return err
+	}
+	isNull := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), handleValue, C.LLVMConstNull(nullHandleType), cStringFree("pool.handle.null"))
+	shutdownBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("pool.shutdown"))
+	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("pool.after"))
+	C.LLVMBuildCondBr(s.builder, isNull, contBB, shutdownBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, shutdownBB)
+	if err := s.emitPoolShutdown(pool.ptr, pool.typ); err != nil {
+		return err
+	}
+	zero, err := s.zeroValue(pool.typ)
+	if err != nil {
+		return err
+	}
+	C.LLVMBuildStore(s.builder, zero, pool.ptr)
+	if !s.currentBlockTerminated() {
+		C.LLVMBuildBr(s.builder, contBB)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+	return nil
+}
+
+func (s *functionState) emitPoolShutdown(poolPtr C.LLVMValueRef, poolType semantic.Type) error {
+	poolRefType := &semantic.RefType{Elem: poolType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	helperType := &semantic.FuncType{Name: "pool_shutdown", Params: []semantic.Type{poolRefType}, Return: s.g.result.NamedTypes["void"]}
+	callee, err := s.g.ensureFunctionDeclared("pool_shutdown", helperType)
+	if err != nil {
+		return err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return err
+	}
+	s.buildCall(llvmFnType, callee, []C.LLVMValueRef{poolPtr}, "")
+	return nil
 }
 
 func (s *functionState) emitRegionInit(arenaPtr C.LLVMValueRef, arenaType semantic.Type, capacityExpr ast.Expr) error {

@@ -427,6 +427,48 @@ def ok(task: Task[i64, Pending]) -> i64:
 	requireFunctionReturnTypeString(t, result, "ok", "i64")
 }
 
+func TestAnalyzeAcceptsWaitAllSyntax(t *testing.T) {
+	src := `extern task_group_wait_all(group: any TaskGroup&) -> void
+
+def ok(group: mutable TaskGroup) -> void:
+    wait all group
+`
+	result, errs := parseAndAnalyze(t, "wait_all_group_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "void")
+}
+
+func TestAnalyzeAcceptsLockSyntax(t *testing.T) {
+	src := `extern mutex_lock(mu: any Mutex&) -> MutexGuard[Held]
+extern mutex_unlock(g: MutexGuard[Held]) -> void
+extern cond_wait(cv: any CondVar&, g: MutexGuard[Held]) -> MutexGuard[Held]
+
+def ok(mu: mutable Mutex, cv: mutable CondVar, ready: bool) -> void can[Sync.Lock, Sync.Unlock, Sync.Wait]:
+    lock mu as g:
+        while not ready:
+			g <- cond_wait((&cv).cast[any CondVar&](), move g)
+`
+	result, errs := parseAndAnalyze(t, "lock_scope_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "void")
+}
+
+func TestAnalyzeAcceptsPoolScopeSyntax(t *testing.T) {
+	src := `extern pool_new(workers: usize) -> ThreadPool
+extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def ok() -> bool can[Pool.Create, Pool.Shutdown]:
+	pool workers(2u):
+		return workers.handle != null
+`
+	result, errs := parseAndAnalyze(t, "pool_scope_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "bool")
+}
+
 func TestAnalyzeRejectsReusingConsumedThreadField(t *testing.T) {
 	src := `extern join(thread: Thread[i64, Joinable]) -> i64
 extern detach(thread: Thread[i64, Joinable]) -> void

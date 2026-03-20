@@ -231,6 +231,101 @@ def countdown(start: i32) -> i32:
 	}
 }
 
+func TestGenerateLLVMIRLowersLockScopeCleanupOnReturnAndFallthrough(t *testing.T) {
+	src := `extern mutex_lock(mu: any Mutex&) -> MutexGuard[Held]
+extern mutex_unlock(g: MutexGuard[Held]) -> void
+
+def lock_then_return(mu: mutable Mutex) -> i64:
+    lock mu as g:
+        return 7
+
+def lock_then_fallthrough(mu: mutable Mutex) -> void:
+    lock mu as g:
+        pass
+`
+	result := parseAndAnalyze(t, "backend_lock_scope.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"declare %MutexGuard__Held @mutex_lock(ptr)",
+		"declare void @mutex_unlock(%MutexGuard__Held)",
+		"define i64 @lock_then_return(%Mutex",
+		"define void @lock_then_fallthrough(%Mutex",
+		"call %MutexGuard__Held @mutex_lock(ptr",
+		"call void @mutex_unlock(%MutexGuard__Held",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	returnIR := functionIR(output, "lock_then_return")
+	if unlockIdx := strings.Index(returnIR, "call void @mutex_unlock(%MutexGuard__Held"); unlockIdx < 0 || unlockIdx > strings.Index(returnIR, "ret i64 7") {
+		t.Fatalf("expected lock_then_return to unlock before returning, got:\n%s", returnIR)
+	}
+	fallthroughIR := functionIR(output, "lock_then_fallthrough")
+	if unlockIdx := strings.Index(fallthroughIR, "call void @mutex_unlock(%MutexGuard__Held"); unlockIdx < 0 || unlockIdx > strings.LastIndex(fallthroughIR, "ret void") {
+		t.Fatalf("expected lock_then_fallthrough to unlock before fallthrough return, got:\n%s", fallthroughIR)
+	}
+}
+
+func TestGenerateLLVMIRLowersPoolScopeCleanupInReverseNestingOrder(t *testing.T) {
+	src := `extern pool_new(workers: usize) -> ThreadPool
+extern pool_shutdown(pool: any ThreadPool&) -> void
+extern mutex_lock(mu: any Mutex&) -> MutexGuard[Held]
+extern mutex_unlock(g: MutexGuard[Held]) -> void
+
+def pool_then_return(mu: mutable Mutex) -> i64:
+	pool workers(4u):
+		lock mu as g:
+			return 7
+
+def pool_then_fallthrough(mu: mutable Mutex) -> void:
+	pool workers(2u):
+		lock mu as g:
+			pass
+`
+	result := parseAndAnalyze(t, "backend_pool_scope.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"declare %ThreadPool @pool_new(",
+		"declare void @pool_shutdown(ptr)",
+		"declare %MutexGuard__Held @mutex_lock(ptr)",
+		"declare void @mutex_unlock(%MutexGuard__Held)",
+		"define i64 @pool_then_return(%Mutex",
+		"define void @pool_then_fallthrough(%Mutex",
+		"call %ThreadPool @pool_new(",
+		"call void @pool_shutdown(ptr",
+		"call void @mutex_unlock(%MutexGuard__Held",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	returnIR := functionIR(output, "pool_then_return")
+	unlockIdx := strings.Index(returnIR, "call void @mutex_unlock(%MutexGuard__Held")
+	shutdownIdx := strings.Index(returnIR, "call void @pool_shutdown(ptr")
+	retIdx := strings.Index(returnIR, "ret i64 7")
+	if unlockIdx < 0 || shutdownIdx < 0 || retIdx < 0 || unlockIdx > shutdownIdx || shutdownIdx > retIdx {
+		t.Fatalf("expected pool_then_return to unlock, then shutdown the pool, then return, got:\n%s", returnIR)
+	}
+	fallthroughIR := functionIR(output, "pool_then_fallthrough")
+	unlockIdx = strings.Index(fallthroughIR, "call void @mutex_unlock(%MutexGuard__Held")
+	shutdownIdx = strings.Index(fallthroughIR, "call void @pool_shutdown(ptr")
+	retIdx = strings.LastIndex(fallthroughIR, "ret void")
+	if unlockIdx < 0 || shutdownIdx < 0 || retIdx < 0 || unlockIdx > shutdownIdx || shutdownIdx > retIdx {
+		t.Fatalf("expected pool_then_fallthrough to unlock, then shutdown the pool, then return, got:\n%s", fallthroughIR)
+	}
+}
+
 func TestGenerateLLVMIRLowersVoidReturnCalls(t *testing.T) {
 	src := `extern touch(value: i32)
 

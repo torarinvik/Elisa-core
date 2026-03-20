@@ -55,4 +55,14 @@ def typed_group_waitall(pool: any ThreadPool&, value: i64) can[Pool.Submit, Pool
 	group: TaskGroup = task_group_new()
 	task: Task[i64, Pending] = pool_submit1(pool, thread_worker, value)
 	task_group_add((&group).cast[any TaskGroup&](), move task)
-	task_group_wait_all((&group).cast[any TaskGroup&]())
+	wait all group
+
+def typed_pool_scope(value: i64) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+	pool workers(2u):
+		return typed_pool_roundtrip((&workers).cast[any ThreadPool&](), value)
+
+def typed_lock_scope(mu: mutable Mutex, cv: mutable CondVar, ready: bool) -> bool can[Sync.Lock, Sync.Unlock, Sync.Wait]:
+	lock mu as g:
+		while not ready:
+			g <- cond_wait((&cv).cast[any CondVar&](), move g)
+		return g.handle != null

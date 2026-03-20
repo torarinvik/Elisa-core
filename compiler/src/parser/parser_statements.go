@@ -31,6 +31,18 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.pos+1 < len(p.tokens) && (p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT || p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACKET) {
 				return p.parseCanStmt()
 			}
+		case "wait":
+			if p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "all" {
+				return p.parseWaitAllStmt()
+			}
+		case "pool":
+			if p.looksLikePoolStmt() {
+				return p.parsePoolStmt()
+			}
+		case "lock":
+			if p.looksLikeLockStmt() {
+				return p.parseLockStmt()
+			}
 		case "region":
 			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
 				return p.parseRegion()
@@ -73,6 +85,104 @@ func (p *Parser) parseStmt() ast.Stmt {
 	default:
 		return p.parseExprOrAssignStmt()
 	}
+}
+
+func (p *Parser) looksLikePoolStmt() bool {
+	if p.pos+2 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT || p.tokens[p.pos+2].Kind != lexer.TOKEN_LPAREN {
+		return false
+	}
+	depth := 0
+	for i := p.pos + 2; i < len(p.tokens); i++ {
+		tok := p.tokens[i]
+		switch tok.Kind {
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
+			depth++
+		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET:
+			if depth > 0 {
+				depth--
+			}
+		case lexer.TOKEN_COLON:
+			return depth == 0
+		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
+			return false
+		}
+	}
+	return false
+}
+
+func (p *Parser) looksLikeLockStmt() bool {
+	depth := 0
+	seenAs := false
+	for i := p.pos + 1; i < len(p.tokens); i++ {
+		tok := p.tokens[i]
+		switch tok.Kind {
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
+			depth++
+		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET:
+			if depth > 0 {
+				depth--
+			}
+		case lexer.TOKEN_AS:
+			if depth == 0 && i+1 < len(p.tokens) && p.tokens[i+1].Kind == lexer.TOKEN_IDENT {
+				seenAs = true
+			}
+		case lexer.TOKEN_COLON:
+			return depth == 0 && seenAs
+		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
+			return false
+		}
+	}
+	return false
+}
+
+func (p *Parser) parsePoolStmt() *ast.PoolStmt {
+	pos := p.cur().Pos
+	p.expectIdentText("pool")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_LPAREN)
+	workers := p.parseExpr()
+	p.expect(lexer.TOKEN_RPAREN)
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	body := p.parseBlock()
+	return &ast.PoolStmt{Position: pos, Name: name, Workers: workers, Body: body}
+}
+func (p *Parser) parseWaitAllStmt() ast.Stmt {
+	pos := p.cur().Pos
+	p.expectIdentText("wait")
+	p.expectIdentText("all")
+	target := p.parseExpr()
+	p.expectNewline()
+	return &ast.ExprStmt{
+		Position: pos,
+		Expr: &ast.CallExpr{
+			Position: pos,
+			Func:     &ast.Ident{Position: pos, Name: "task_group_wait_all"},
+			Args: []ast.Expr{&ast.CastExpr{
+				Position: pos,
+				Operand:  &ast.AddrOfExpr{Position: pos, Operand: target},
+				Target: &ast.RefType{
+					Position: pos,
+					Elem:     &ast.NamedType{Position: pos, Name: "TaskGroup"},
+					State:    ast.RefStateNonNull,
+					Storage:  ast.RefStorageAny,
+					Explicit: true,
+				},
+			}},
+		},
+	}
+}
+
+func (p *Parser) parseLockStmt() *ast.LockStmt {
+	pos := p.cur().Pos
+	p.expectIdentText("lock")
+	mutex := p.parseExpr()
+	p.expect(lexer.TOKEN_AS)
+	guardName := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	body := p.parseBlock()
+	return &ast.LockStmt{Position: pos, Mutex: mutex, GuardName: guardName, Body: body}
 }
 
 func (p *Parser) parseMatch() *ast.MatchStmt {
