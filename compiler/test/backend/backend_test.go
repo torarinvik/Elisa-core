@@ -2375,6 +2375,75 @@ def split_copy(view: dview[i32]) -> any void&?:
 	}
 }
 
+func TestGenerateLLVMIRSpecializesArenaDViewCopyExact(t *testing.T) {
+	src := `repr(c) struct DynArray[T]:
+	items: mutable any T&?
+	count: mutable usize
+	capacity: mutable usize
+
+repr(c) struct DynArrayView:
+	data: mutable any void&?
+	len: mutable usize
+	elem_size: mutable usize
+
+extern arena_memcpy(dest: any void&?, src: any void&?, n: usize) -> any void&?
+
+def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+	_ = start
+	_ = end
+	if values.items != null:
+		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+	return DynArrayView(null, 0u, sizeof(T))
+
+def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
+	_ = start
+	_ = end
+	return view
+
+def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
+	if dst.len != src.len:
+		return
+	_ = dst
+	_ = src
+
+def copy_split(values: any darray[i32, 4]&) -> void:
+	base: dview[i32] = arena_da_view(values, 0u, 4u)
+	left: dview[i32] = arena_da_view_slice(base, 0u, 2u)
+	right: dview[i32] = arena_da_view_slice(base, 2u, 4u)
+	arena_da_copy_exact(left, right)
+
+def copy_overlap(values: any darray[i32, 4]&) -> void:
+	base: dview[i32] = arena_da_view(values, 0u, 4u)
+	left: dview[i32] = arena_da_view_slice(base, 0u, 3u)
+	right: dview[i32] = arena_da_view_slice(base, 1u, 4u)
+	arena_da_copy_exact(left, right)
+`
+	result := parseAndAnalyze(t, "backend_dview_copy_exact.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	copySplitBody := functionIR(output, "copy_split")
+	if copySplitBody == "" {
+		t.Fatalf("expected to find copy_split body, got:\n%s", output)
+	}
+	if !strings.Contains(copySplitBody, "call ptr @arena_memcpy(ptr noalias") {
+		t.Fatalf("expected copy_split to lower through direct noalias arena_memcpy, got:\n%s", copySplitBody)
+	}
+	if strings.Contains(copySplitBody, "call void @arena_da_copy_exact") {
+		t.Fatalf("expected copy_split to avoid helper fallback, got:\n%s", copySplitBody)
+	}
+
+	copyOverlapBody := functionIR(output, "copy_overlap")
+	if copyOverlapBody == "" {
+		t.Fatalf("expected to find copy_overlap body, got:\n%s", output)
+	}
+	if !strings.Contains(copyOverlapBody, "call void @arena_da_copy_exact") {
+		t.Fatalf("expected copy_overlap to keep helper fallback, got:\n%s", copyOverlapBody)
+	}
+}
+
 func TestGenerateLLVMIRSpecializesStringViewLiteralWrapperCalls(t *testing.T) {
 	src := `extern string_view_eq(view: StringView, other: any u8&?) -> int
 

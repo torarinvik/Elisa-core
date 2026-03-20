@@ -1192,6 +1192,17 @@ func isMemcpyViewCarrierType(t semantic.Type) bool {
 	}
 }
 
+func isDynArrayViewCarrierType(t semantic.Type) bool {
+	switch tt := t.(type) {
+	case *semantic.ViewType, *semantic.DArrayViewType:
+		return true
+	case *semantic.StructType:
+		return tt != nil && tt.Name == "DynArrayView"
+	default:
+		return false
+	}
+}
+
 func (s *functionState) memcpyDisjointCarrierExpr(expr ast.Expr) ast.Expr {
 	stripped := stripMemcpyOperandExpr(expr)
 	fieldExpr, ok := stripped.(*ast.FieldExpr)
@@ -1263,6 +1274,111 @@ func (s *functionState) emitSpecializedMemcpyCall(expr *ast.CallExpr) (C.LLVMVal
 		s.addCallSiteEnumAttribute(call, C.uint(2), "noalias")
 	}
 	return call, funcType.Return, true, nil
+}
+
+func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	ident, ok := expr.Func.(*ast.Ident)
+	if !ok || ident.Name != "arena_da_copy_exact" {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 2 || s == nil || s.g == nil || s.g.result == nil {
+		return nil, nil, false, nil
+	}
+	dstExpr := expr.Args[0]
+	srcExpr := expr.Args[1]
+	dstType := s.exprType(dstExpr)
+	srcType := s.exprType(srcExpr)
+	if !isDynArrayViewCarrierType(dstType) || !isDynArrayViewCarrierType(srcType) {
+		return nil, nil, false, nil
+	}
+	if !s.g.result.ExprsAreDisjoint(dstExpr, srcExpr) {
+		return nil, nil, false, nil
+	}
+	callee, funcType, err := s.resolveCallTarget(expr)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if funcType == nil {
+		return nil, nil, true, fmt.Errorf("arena_da_copy_exact target does not have a function type")
+	}
+	llvmFnType, err := s.g.lowerFunctionType(funcType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	dstValue, _, err := s.emitExpr(dstExpr, dstType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	srcValue, _, err := s.emitExpr(srcExpr, srcType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	dstData := C.LLVMBuildExtractValue(s.builder, dstValue, 0, cStringFree("dview.copy.dst.data"))
+	dstLen := C.LLVMBuildExtractValue(s.builder, dstValue, 1, cStringFree("dview.copy.dst.len"))
+	dstElemSize := C.LLVMBuildExtractValue(s.builder, dstValue, 2, cStringFree("dview.copy.dst.elem_size"))
+	srcData := C.LLVMBuildExtractValue(s.builder, srcValue, 0, cStringFree("dview.copy.src.data"))
+	srcLen := C.LLVMBuildExtractValue(s.builder, srcValue, 1, cStringFree("dview.copy.src.len"))
+	srcElemSize := C.LLVMBuildExtractValue(s.builder, srcValue, 2, cStringFree("dview.copy.src.elem_size"))
+	dstBytes := C.LLVMBuildMul(s.builder, dstLen, dstElemSize, cStringFree("dview.copy.dst.bytes"))
+	srcBytes := C.LLVMBuildMul(s.builder, srcLen, srcElemSize, cStringFree("dview.copy.src.bytes"))
+	usizeType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	zeroBytes := C.LLVMConstInt(usizeType, 0, 0)
+	voidType := s.g.result.NamedTypes["void"]
+	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	memcpyType := &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, s.g.result.NamedTypes["usize"]}, Return: voidRefType}
+	memcpyCallee, err := s.g.ensureFunctionDeclared("arena_memcpy", memcpyType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	memcpyLLVMType, err := s.g.lowerFunctionType(memcpyType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	buildMemcpyNoAlias := func(byteCount C.LLVMValueRef) {
+		memcpyCall := s.buildCall(memcpyLLVMType, memcpyCallee, []C.LLVMValueRef{dstData, srcData, byteCount}, "dview.copy.memcpy")
+		s.addCallSiteEnumAttribute(memcpyCall, C.uint(1), "noalias")
+		s.addCallSiteEnumAttribute(memcpyCall, C.uint(2), "noalias")
+	}
+
+	if s.g.result.ExprsHaveEqualExtentSize(dstExpr, srcExpr) {
+		zeroCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), dstBytes, zeroBytes, cStringFree("dview.copy.bytes.zero"))
+		copyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dview.copy.exact.fast"))
+		mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dview.copy.exact.merge"))
+		C.LLVMBuildCondBr(s.builder, zeroCond, mergeBB, copyBB)
+
+		C.LLVMPositionBuilderAtEnd(s.builder, copyBB)
+		buildMemcpyNoAlias(dstBytes)
+		C.LLVMBuildBr(s.builder, mergeBB)
+
+		C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+		return nil, funcType.Return, true, nil
+	}
+
+	lenEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), dstBytes, srcBytes, cStringFree("dview.copy.bytes.eq"))
+	copyCheckBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dview.copy.fast.check"))
+	fallbackBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dview.copy.fallback"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dview.copy.merge"))
+	C.LLVMBuildCondBr(s.builder, lenEqual, copyCheckBB, fallbackBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, copyCheckBB)
+	zeroCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), dstBytes, zeroBytes, cStringFree("dview.copy.bytes.zero"))
+	copyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dview.copy.fast"))
+	C.LLVMBuildCondBr(s.builder, zeroCond, mergeBB, copyBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, copyBB)
+	buildMemcpyNoAlias(dstBytes)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, fallbackBB)
+	fallbackCall := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{dstValue, srcValue}, "")
+	_ = fallbackCall
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	return nil, funcType.Return, true, nil
 }
 
 func (s *functionState) emitStringViewStaticLiteralEqual(viewExpr ast.Expr, viewType semantic.Type, literalExpr ast.Expr, literalText string) (C.LLVMValueRef, error) {
@@ -1571,6 +1687,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 		return s.emitEnumConstructorValue(enumType, variant, expr.Args, expr.ArgNames)
 	}
 	if value, actualType, handled, err := s.emitSpecializedRuntimeCall(expr); handled {
+		return value, actualType, err
+	}
+	if value, actualType, handled, err := s.emitSpecializedArenaViewCopyCall(expr); handled {
 		return value, actualType, err
 	}
 	if value, actualType, handled, err := s.emitSpecializedMemcpyCall(expr); handled {

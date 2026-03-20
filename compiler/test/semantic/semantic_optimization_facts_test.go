@@ -406,3 +406,51 @@ def inspect(values: any darray[i32, row]&) -> int:
 		t.Fatalf("expected zero-offset arena_da_view_suffix to preserve exact extent")
 	}
 }
+
+func TestAnalyzeInfersEqualExtentSizeForSplitDViews(t *testing.T) {
+	src := `repr(c) struct DynArray[T]:
+	items: mutable any T&?
+	count: mutable usize
+	capacity: mutable usize
+
+repr(c) struct DynArrayView:
+	data: mutable any void&?
+	len: mutable usize
+	elem_size: mutable usize
+
+def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+	_ = start
+	_ = end
+	if values.items != null:
+		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+	return DynArrayView(null, 0u, sizeof(T))
+
+def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
+	_ = start
+	_ = end
+	return view
+
+def inspect(values: any darray[i32, 4]&) -> int:
+	base: dview[i32] = arena_da_view(values, 0u, 4u)
+	left: dview[i32] = arena_da_view_slice(base, 0u, 2u)
+	right: dview[i32] = arena_da_view_slice(base, 2u, 4u)
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_equal_extent_size.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	leftExpr := requireOptimizationFactsVarInitExpr(t, fn, "left")
+	rightExpr := requireOptimizationFactsVarInitExpr(t, fn, "right")
+
+	if !result.ExprsAreDisjoint(leftExpr, rightExpr) {
+		t.Fatalf("expected left/right split dviews to be disjoint")
+	}
+	if !result.ExprsHaveEqualExtentSize(leftExpr, rightExpr) {
+		t.Fatalf("expected left/right split dviews to have equal extent size")
+	}
+	if result.ExprsHaveSameExtent(leftExpr, rightExpr) {
+		t.Fatalf("expected left/right split dviews to retain distinct exact bounds")
+	}
+}

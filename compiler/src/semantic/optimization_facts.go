@@ -65,6 +65,10 @@ func (f OptimizationFacts) SameExtent(other OptimizationFacts) bool {
 	return SameOptimizationExtent(f.Extent, other.Extent)
 }
 
+func (f OptimizationFacts) SameExtentSize(other OptimizationFacts) bool {
+	return SameOptimizationExtentSize(f.Extent, other.Extent)
+}
+
 func (f OptimizationFacts) Disjoint(other OptimizationFacts) bool {
 	return OptimizationFactsDisjoint(f, other)
 }
@@ -99,6 +103,33 @@ func SameOptimizationExtent(a, b *OptimizationExtent) bool {
 	default:
 		return false
 	}
+}
+
+func SameOptimizationExtentSize(a, b *OptimizationExtent) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	if SameOptimizationExtent(a, b) {
+		return true
+	}
+	switch {
+	case a.Kind == OptimizationExtentShape && b.Kind == OptimizationExtentShape:
+		return SameShape(a.Shape, b.Shape)
+	case a.Kind == OptimizationExtentArraySize && b.Kind == OptimizationExtentArraySize:
+		if a.HasConstSize && b.HasConstSize {
+			return a.ConstSize == b.ConstSize
+		}
+		return a.Size != "" && a.Size == b.Size
+	case a.Kind == OptimizationExtentViewBounds && b.Kind == OptimizationExtentViewBounds:
+		aBegin, aBeginOK := optimizationConstInt(a.Begin)
+		aEnd, aEndOK := optimizationConstInt(a.End)
+		bBegin, bBeginOK := optimizationConstInt(b.Begin)
+		bEnd, bEndOK := optimizationConstInt(b.End)
+		if aBeginOK && aEndOK && bBeginOK && bEndOK {
+			return (aEnd - aBegin) == (bEnd - bBegin)
+		}
+	}
+	return false
 }
 
 func cloneOptimizationExtent(extent *OptimizationExtent) *OptimizationExtent {
@@ -696,6 +727,21 @@ func (r *Result) ExprsHaveSameExtent(left, right ast.Expr) bool {
 		return false
 	}
 	return leftFacts.SameExtent(rightFacts)
+}
+
+func (r *Result) ExprsHaveEqualExtentSize(left, right ast.Expr) bool {
+	if r == nil {
+		return false
+	}
+	leftFacts, ok := r.ExprOptimizationFacts(left)
+	if !ok {
+		return false
+	}
+	rightFacts, ok := r.ExprOptimizationFacts(right)
+	if !ok {
+		return false
+	}
+	return leftFacts.SameExtentSize(rightFacts)
 }
 
 func (r *Result) ExprsAreDisjoint(left, right ast.Expr) bool {

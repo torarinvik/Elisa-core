@@ -1445,6 +1445,21 @@ def arena_da_view_get[T](view: dview[T], index: usize) -> T:
     base: any T& = (view.data.cast[any u8&]() + offset).cast[any T&]()
     return base[0]
 
+def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
+    assert dst.len == src.len
+    if dst.len == 0:
+        return
+
+    assert dst.data != null
+    assert src.data != null
+
+    out: any T& = dst.data.cast[any T&]()
+    src_items: any T& = src.data.cast[any T&]()
+    i: mutable usize = 0u
+    while i < dst.len:
+        out[i] <- src_items[i]
+        i <- i + 1u
+
 def arena_da_from_view[T](a: any Arena&, view: dview[T]) -> darray[T, shape_out] can[Memory.Allocate, Abort.Panic]:
     if view.len == 0:
         return zeroed
