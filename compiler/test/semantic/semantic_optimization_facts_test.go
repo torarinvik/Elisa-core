@@ -907,3 +907,64 @@ def inspect(buf: array[i32, 4]) -> int:
 		t.Fatalf("expected helper-returned wrapper field projections to retain distinct exact bounds")
 	}
 }
+
+func TestAnalyzePreservesOptimizationFactsThroughNestedFieldProjectionExpressions(t *testing.T) {
+	src := `repr(c) struct Views:
+	left: view[i32]
+	right: view[i32]
+
+repr(c) struct NestedViews:
+	inner: Views
+
+@borrows_return_field(inner.left, left, inner.right, right)
+extern wrap_nested_views(left: view[i32], right: view[i32]) -> NestedViews
+
+def inspect(buf: array[i32, 4]) -> int:
+	direct: NestedViews = NestedViews(Views(buf[0u:2u], buf[2u:4u]))
+	wrapped: NestedViews = wrap_nested_views(buf[0u:2u], buf[2u:4u])
+	left_direct: view[i32] = direct.inner.left
+	right_direct: view[i32] = direct.inner.right
+	left_wrapped: view[i32] = wrapped.inner.left
+	right_wrapped: view[i32] = wrapped.inner.right
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_nested_field_projection.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	leftDirectExpr := requireOptimizationFactsVarInitExpr(t, fn, "left_direct")
+	rightDirectExpr := requireOptimizationFactsVarInitExpr(t, fn, "right_direct")
+	leftWrappedExpr := requireOptimizationFactsVarInitExpr(t, fn, "left_wrapped")
+	rightWrappedExpr := requireOptimizationFactsVarInitExpr(t, fn, "right_wrapped")
+
+	leftDirectFacts := requireExprOptimizationFacts(t, result, leftDirectExpr)
+	rightDirectFacts := requireExprOptimizationFacts(t, result, rightDirectExpr)
+	leftWrappedFacts := requireExprOptimizationFacts(t, result, leftWrappedExpr)
+	rightWrappedFacts := requireExprOptimizationFacts(t, result, rightWrappedExpr)
+
+	if !leftDirectFacts.HasExactExtent() || !rightDirectFacts.HasExactExtent() {
+		t.Fatalf("expected nested direct wrapper field projections to preserve exact extents, got %#v and %#v", leftDirectFacts, rightDirectFacts)
+	}
+	if !leftWrappedFacts.HasExactExtent() || !rightWrappedFacts.HasExactExtent() {
+		t.Fatalf("expected nested helper-returned wrapper field projections to preserve exact extents, got %#v and %#v", leftWrappedFacts, rightWrappedFacts)
+	}
+	if !result.ExprsAreDisjoint(leftDirectExpr, rightDirectExpr) {
+		t.Fatalf("expected nested direct wrapper field projections to stay disjoint")
+	}
+	if !result.ExprsHaveEqualExtentSize(leftDirectExpr, rightDirectExpr) {
+		t.Fatalf("expected nested direct wrapper field projections to retain equal extent size")
+	}
+	if result.ExprsHaveSameExtent(leftDirectExpr, rightDirectExpr) {
+		t.Fatalf("expected nested direct wrapper field projections to retain distinct exact bounds")
+	}
+	if !result.ExprsAreDisjoint(leftWrappedExpr, rightWrappedExpr) {
+		t.Fatalf("expected nested helper-returned wrapper field projections to stay disjoint")
+	}
+	if !result.ExprsHaveEqualExtentSize(leftWrappedExpr, rightWrappedExpr) {
+		t.Fatalf("expected nested helper-returned wrapper field projections to retain equal extent size")
+	}
+	if result.ExprsHaveSameExtent(leftWrappedExpr, rightWrappedExpr) {
+		t.Fatalf("expected nested helper-returned wrapper field projections to retain distinct exact bounds")
+	}
+}

@@ -2152,16 +2152,23 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 }
 
 func (a *Analyzer) resolveProjectedFieldValueExpr(objectExpr ast.Expr, field string) (ast.Expr, bool) {
+	return a.resolveProjectedFieldValueExprAtPath(objectExpr, []borrowReturnAnnotationStep{{Field: field}})
+}
+
+func (a *Analyzer) resolveProjectedFieldValueExprAtPath(objectExpr ast.Expr, path []borrowReturnAnnotationStep) (ast.Expr, bool) {
 	if objectExpr == nil {
 		return nil, false
 	}
+	if len(path) == 0 {
+		return objectExpr, true
+	}
 	switch n := objectExpr.(type) {
 	case *ast.ParenExpr:
-		return a.resolveProjectedFieldValueExpr(n.Inner, field)
+		return a.resolveProjectedFieldValueExprAtPath(n.Inner, path)
 	case *ast.CastExpr:
-		return a.resolveProjectedFieldValueExpr(n.Operand, field)
+		return a.resolveProjectedFieldValueExprAtPath(n.Operand, path)
 	case *ast.MoveExpr:
-		return a.resolveProjectedFieldValueExpr(n.Operand, field)
+		return a.resolveProjectedFieldValueExprAtPath(n.Operand, path)
 	case *ast.Ident:
 		if a.currentScope == nil {
 			return nil, false
@@ -2172,7 +2179,7 @@ func (a *Analyzer) resolveProjectedFieldValueExpr(objectExpr ast.Expr, field str
 		}
 		if a.currentValueBindings != nil {
 			if valueExpr, ok := a.currentValueBindings[sym]; ok && valueExpr != nil {
-				return a.resolveProjectedFieldValueExpr(valueExpr, field)
+				return a.resolveProjectedFieldValueExprAtPath(valueExpr, path)
 			}
 		}
 		if sym.Kind != SymbolLocal {
@@ -2182,7 +2189,7 @@ func (a *Analyzer) resolveProjectedFieldValueExpr(objectExpr ast.Expr, field str
 		if !ok || decl.Value == nil {
 			return nil, false
 		}
-		return a.resolveProjectedFieldValueExpr(decl.Value, field)
+		return a.resolveProjectedFieldValueExprAtPath(decl.Value, path)
 	case *ast.StructLitExpr:
 		actual := a.exprTypes[n]
 		if actual == nil {
@@ -2192,31 +2199,34 @@ func (a *Analyzer) resolveProjectedFieldValueExpr(objectExpr ast.Expr, field str
 		if !ok {
 			return nil, false
 		}
+		step := path[0]
+		if step.Field == "" {
+			return nil, false
+		}
 		for i, resolved := range fields {
-			if resolved.Name != field {
+			if resolved.Name != step.Field {
 				continue
 			}
 			if i >= len(n.Args) {
 				return nil, false
 			}
-			return n.Args[i], true
+			return a.resolveProjectedFieldValueExprAtPath(n.Args[i], path[1:])
 		}
 		return nil, false
 	case *ast.CallExpr:
-		return a.resolveProjectedFieldValueFromCallExpr(n, field)
+		return a.resolveProjectedFieldValueFromCallExpr(n, path)
 	case *ast.FieldExpr:
-		resolved, ok := a.resolveProjectedFieldValueExpr(n.Object, n.Field)
-		if !ok {
-			return nil, false
-		}
-		return a.resolveProjectedFieldValueExpr(resolved, field)
+		combinedPath := make([]borrowReturnAnnotationStep, 0, len(path)+1)
+		combinedPath = append(combinedPath, borrowReturnAnnotationStep{Field: n.Field})
+		combinedPath = append(combinedPath, path...)
+		return a.resolveProjectedFieldValueExprAtPath(n.Object, combinedPath)
 	default:
 		return nil, false
 	}
 }
 
-func (a *Analyzer) resolveProjectedFieldValueFromCallExpr(call *ast.CallExpr, field string) (ast.Expr, bool) {
-	if call == nil || field == "" {
+func (a *Analyzer) resolveProjectedFieldValueFromCallExpr(call *ast.CallExpr, path []borrowReturnAnnotationStep) (ast.Expr, bool) {
+	if call == nil || len(path) == 0 {
 		return nil, false
 	}
 	decl, ok := a.resolveProjectedFieldExternFuncDecl(call.Func)
@@ -2232,15 +2242,40 @@ func (a *Analyzer) resolveProjectedFieldValueFromCallExpr(call *ast.CallExpr, fi
 		}
 		for i := 0; i < len(annotation.Args); i += 2 {
 			returnSteps, ok := parseExternReturnTargetPath(annotation.Args[i])
-			if !ok || len(returnSteps) != 1 || returnSteps[0].Field != field {
+			if !ok || len(returnSteps) > len(path) || !borrowReturnAnnotationStepsHavePrefix(path, returnSteps) {
 				continue
 			}
 			if expr, ok := a.resolveProjectedFieldBorrowSourceExprFromCall(call, decl, annotation.Args[i+1]); ok {
-				return expr, true
+				return a.resolveProjectedFieldValueExprAtPath(expr, path[len(returnSteps):])
 			}
 		}
 	}
 	return nil, false
+}
+
+func borrowReturnAnnotationStepsHavePrefix(path []borrowReturnAnnotationStep, prefix []borrowReturnAnnotationStep) bool {
+	if len(prefix) > len(path) {
+		return false
+	}
+	for i := range prefix {
+		if !borrowReturnAnnotationStepsEqual(path[i], prefix[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func borrowReturnAnnotationStepsEqual(left, right borrowReturnAnnotationStep) bool {
+	switch {
+	case left.Field != "" || right.Field != "":
+		return left.Field != "" && right.Field != "" && left.Field == right.Field
+	case left.Wildcard || right.Wildcard:
+		return left.Wildcard && right.Wildcard
+	case left.Index != nil || right.Index != nil:
+		return left.Index != nil && right.Index != nil && *left.Index == *right.Index
+	default:
+		return false
+	}
 }
 
 func (a *Analyzer) resolveProjectedFieldExternFuncDecl(fnExpr ast.Expr) (*ast.ExternFuncDecl, bool) {

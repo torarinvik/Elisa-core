@@ -3121,6 +3121,58 @@ def copy_helper(values: array[i32, 4]) -> void:
 
 }
 
+func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughNestedFieldProjection(t *testing.T) {
+	src := `repr(c) struct Views:
+	left: view[i32]
+	right: view[i32]
+
+repr(c) struct NestedViews:
+	inner: Views
+
+@borrows_return_field(inner.left, left, inner.right, right)
+extern wrap_nested_views(left: view[i32], right: view[i32]) -> NestedViews
+
+def arena_da_copy_exact[T](dst: view[T], src: view[T]):
+	_ = dst
+	_ = src
+
+def copy_nested_struct(values: array[i32, 4]) -> void:
+	boxed: NestedViews = NestedViews(Views(values[0u:2u], values[2u:4u]))
+	arena_da_copy_exact(boxed.inner.left, boxed.inner.right)
+
+def copy_nested_helper(values: array[i32, 4]) -> void:
+	boxed: NestedViews = wrap_nested_views(values[0u:2u], values[2u:4u])
+	arena_da_copy_exact(boxed.inner.left, boxed.inner.right)
+	`
+	result := parseAndAnalyze(t, "backend_dview_copy_exact_nested_field_projection.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	copyStructBody := functionIR(output, "copy_nested_struct")
+	if copyStructBody == "" {
+		t.Fatalf("expected to find copy_nested_struct body, got:\n%s", output)
+	}
+	if !strings.Contains(copyStructBody, "call ptr @arena_memcpy(ptr noalias") {
+		t.Fatalf("expected copy_nested_struct to lower through direct noalias arena_memcpy via nested field projections, got:\n%s", copyStructBody)
+	}
+	if strings.Contains(copyStructBody, "call void @arena_da_copy_exact") {
+		t.Fatalf("expected copy_nested_struct to avoid helper fallback, got:\n%s", copyStructBody)
+	}
+
+	copyHelperBody := functionIR(output, "copy_nested_helper")
+	if copyHelperBody == "" {
+		t.Fatalf("expected to find copy_nested_helper body, got:\n%s", output)
+	}
+	if !strings.Contains(copyHelperBody, "call ptr @arena_memcpy(ptr noalias") {
+		t.Fatalf("expected copy_nested_helper to lower through direct noalias arena_memcpy via nested helper-returned field projections, got:\n%s", copyHelperBody)
+	}
+	if strings.Contains(copyHelperBody, "call void @arena_da_copy_exact") {
+		t.Fatalf("expected copy_nested_helper to avoid helper fallback, got:\n%s", copyHelperBody)
+	}
+}
+
 func TestGenerateLLVMIRSpecializesArenaDViewZeroFill(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
 	items: mutable any T&?
@@ -3574,6 +3626,59 @@ def eq_helper(values: array[i32, 4]) -> bool:
 		t.Fatalf("expected eq_helper to avoid helper fallback, got:\n%s", eqHelperBody)
 	}
 
+}
+
+func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughNestedFieldProjection(t *testing.T) {
+	src := `repr(c) struct Views:
+	left: view[i32]
+	right: view[i32]
+
+repr(c) struct NestedViews:
+	inner: Views
+
+@borrows_return_field(inner.left, left, inner.right, right)
+extern wrap_nested_views(left: view[i32], right: view[i32]) -> NestedViews
+
+def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
+	_ = left
+	_ = right
+	return false
+
+def eq_nested_struct(values: array[i32, 4]) -> bool:
+	boxed: NestedViews = NestedViews(Views(values[0u:2u], values[2u:4u]))
+	return arena_da_eq_exact(boxed.inner.left, boxed.inner.right)
+
+def eq_nested_helper(values: array[i32, 4]) -> bool:
+	boxed: NestedViews = wrap_nested_views(values[0u:2u], values[2u:4u])
+	return arena_da_eq_exact(boxed.inner.left, boxed.inner.right)
+	`
+	result := parseAndAnalyze(t, "backend_dview_eq_exact_nested_field_projection.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	eqStructBody := functionIR(output, "eq_nested_struct")
+	if eqStructBody == "" {
+		t.Fatalf("expected to find eq_nested_struct body, got:\n%s", output)
+	}
+	if !strings.Contains(eqStructBody, "call i64 @memcmp(ptr noalias") {
+		t.Fatalf("expected eq_nested_struct to lower through direct noalias memcmp via nested field projections, got:\n%s", eqStructBody)
+	}
+	if strings.Contains(eqStructBody, "call i1 @arena_da_eq_exact") {
+		t.Fatalf("expected eq_nested_struct to avoid helper fallback, got:\n%s", eqStructBody)
+	}
+
+	eqHelperBody := functionIR(output, "eq_nested_helper")
+	if eqHelperBody == "" {
+		t.Fatalf("expected to find eq_nested_helper body, got:\n%s", output)
+	}
+	if !strings.Contains(eqHelperBody, "call i64 @memcmp(ptr noalias") {
+		t.Fatalf("expected eq_nested_helper to lower through direct noalias memcmp via nested helper-returned field projections, got:\n%s", eqHelperBody)
+	}
+	if strings.Contains(eqHelperBody, "call i1 @arena_da_eq_exact") {
+		t.Fatalf("expected eq_nested_helper to avoid helper fallback, got:\n%s", eqHelperBody)
+	}
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewMaterialize(t *testing.T) {
