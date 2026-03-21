@@ -1,4 +1,4 @@
-repr(c) struct RegionNode:
+struct RegionNode:
     next: any RegionNode&?
     value: i32
 

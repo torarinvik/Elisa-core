@@ -30,18 +30,18 @@ const JSON_CH_u = 117
 const JSON_CH_LBRACE = 123
 const JSON_CH_RBRACE = 125
 
-repr(c) struct JsonCursor:
+struct JsonCursor:
     source: mutable any u8&
     source_len: mutable usize
     pos: mutable usize
 
 
-repr(c) struct JsonParseNodeResult:
+struct JsonParseNodeResult:
     node: mutable JsonNode
     checksum: mutable i64
 
 
-repr(c) struct JsonLexemeResult:
+struct JsonLexemeResult:
     checksum: mutable i64
     source_offset: mutable usize
     source_len: mutable usize
@@ -84,18 +84,18 @@ const enum JsonNumberKind of i8:
     OUT_OF_RANGE = 3
 
 
-repr(c) struct JsonNumberValue:
+struct JsonNumberValue:
     kind: mutable JsonNumberKind
     unsigned_value: mutable u64
     signed_value: mutable i64
 
 
-repr(c) struct JsonUnsignedResult:
+struct JsonUnsignedResult:
     ok: mutable bool
     value: mutable u64
 
 
-repr(c) struct JsonSignedResult:
+struct JsonSignedResult:
     ok: mutable bool
     value: mutable i64
 
@@ -1455,7 +1455,7 @@ const JSON_PARALLEL_MODE_AST = 1
 const JSON_PARALLEL_MODE_AST_CACHED = 2
 const JSON_PARALLEL_MAX_WORKERS = 128u
 
-repr(c) struct JsonParallelJob:
+struct JsonParallelJob:
     source_bits: uintptr
     repeats: usize
     result_bits: uintptr

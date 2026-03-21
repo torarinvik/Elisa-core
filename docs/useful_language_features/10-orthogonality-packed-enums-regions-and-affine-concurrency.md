@@ -29,7 +29,7 @@ This answers:
 
 Examples:
 
-- `repr(c) struct`
+- `struct`
 - packed enums
 - fixed arrays
 - runtime carrier structs

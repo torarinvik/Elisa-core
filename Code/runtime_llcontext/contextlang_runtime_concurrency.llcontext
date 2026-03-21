@@ -7,43 +7,43 @@
 # Core runtime carriers
 # ------------------------------------------------------------
 
-repr(c) struct Thread[T, S]:
+struct Thread[T, S]:
 	handle: mutable uintptr
 	state: mutable any void&?
 
-repr(c) struct Task[T, S]:
+struct Task[T, S]:
 	handle: mutable uintptr
 	state: mutable any void&?
 
-repr(c) struct ThreadPool:
+struct ThreadPool:
 	handle: mutable any void&?
 
-repr(c) struct TaskGroup:
+struct TaskGroup:
 	handle: mutable any void&?
 	cleanup: mutable any void&?
 
-repr(c) struct Mutex:
+struct Mutex:
 	handle: mutable any void&?
 
-repr(c) struct MutexGuard[S]:
+struct MutexGuard[S]:
 	handle: mutable any void&?
 
-repr(c) struct CondVar:
+struct CondVar:
 	handle: mutable any void&?
 
-repr(c) struct atomic[T]:
+struct atomic[T]:
 	value: mutable T
 
-repr(c) struct ConcurrencyBox[T]:
+struct ConcurrencyBox[T]:
 	value: mutable T
 
-repr(c) struct ConcurrencyWorkStart1:
+struct ConcurrencyWorkStart1:
 	fn_bits: mutable uintptr
 	arg_bits: mutable any void&
 	result_bits: mutable any void&
 	refs: mutable atomic[i64]
 
-repr(c) struct ConcurrencyTaskGroupNode:
+struct ConcurrencyTaskGroupNode:
 	next: mutable heap ConcurrencyTaskGroupNode&?
 	state_bits: mutable any void&
 

@@ -1,8 +1,8 @@
-repr(c) struct FuzzPair:
+struct FuzzPair:
     left: mutable int
     right: mutable int
 
-repr(c) struct HeapPairNode:
+struct HeapPairNode:
     pair: mutable FuzzPair
     next: mutable heap HeapPairNode&?
 

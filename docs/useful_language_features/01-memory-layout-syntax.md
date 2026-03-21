@@ -34,17 +34,18 @@ Requests that the struct use packed layout with minimal padding.
 
 ---
 
-## 3. `repr(c) struct`
+## 3. `struct`
 
 ```context
-repr(c) struct Foo:
+struct Foo:
     a: u8
     b: i32
     c: u8
 ```
 
 **Syntax meaning:**
-Requests that field order and layout follow C-compatible rules.
+Uses the default field order and layout, which currently follows C-compatible rules.
+The old `repr(c) struct` spelling remains accepted as a compatibility alias.
 
 ---
 
@@ -235,7 +236,7 @@ If you want the cleanest climb up the mountain:
 
 1. `aligned(N) struct`
 2. `packed struct`
-3. `repr(c) struct`
+3. `struct` (default C layout)
 4. `reorderable struct`
 5. `cacheline struct`
 6. `isolate_cacheline`
@@ -251,7 +252,7 @@ If you want the cleanest climb up the mountain:
 My blunt recommendation: the highest ROI starting subset is:
 
 ```context
-repr(c) struct ...
+struct ...
 packed struct ...
 aligned(N) struct ...
 reorderable struct ...

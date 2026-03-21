@@ -1,4 +1,4 @@
-repr(c) struct Box:
+struct Box:
 	value: int
 
 

@@ -166,9 +166,9 @@ This is the important shift:
 Suggested surface spelling:
 
 ```context
-affine repr(c) struct Thread[T, S]
-affine repr(c) struct Task[T, S]
-affine repr(c) struct MutexGuard[S]
+affine struct Thread[T, S]
+affine struct Task[T, S]
+affine struct MutexGuard[S]
 ```
 
 Exact token order can still be tuned, but the language needs a visible affine
@@ -226,7 +226,7 @@ And the following become `affine` structurally:
 So if:
 
 ```context
-repr(c) struct Holder:
+struct Holder:
     thread: Thread[i64, Joinable]
     count: i64
 ```
@@ -311,22 +311,22 @@ first slice because the consuming operations simply destroy the capability.
 ## Runtime Carriers
 
 ```context
-affine repr(c) struct Thread[T, S]
-affine repr(c) struct Task[T, S]
-repr(c) struct ThreadPool
-repr(c) struct TaskGroup
+affine struct Thread[T, S]
+affine struct Task[T, S]
+struct ThreadPool
+struct TaskGroup
 
-repr(c) struct Mutex
-affine repr(c) struct MutexGuard[S]
-repr(c) struct CondVar
+struct Mutex
+affine struct MutexGuard[S]
+struct CondVar
 
-repr(c) struct atomic[T]
+struct atomic[T]
 ```
 
 User-defined affine structs are also supported:
 
 ```context
-affine repr(c) struct WorkerLease:
+affine struct WorkerLease:
     raw: mutable uintptr
 ```
 
@@ -684,7 +684,7 @@ def run_one() -> i64 can[Thread.Spawn, Thread.Join]:
 ### 2. Whole-Value Destructuring of an Affine Aggregate
 
 ```context
-repr(c) struct Holder:
+struct Holder:
     thread: Thread[i64, Joinable]
     count: i64
 
@@ -731,7 +731,7 @@ def build_index(paths: static PathJob&, count: usize) -> void can[Pool.Submit, P
 ### 5. Rejected Affine-Containing Ref
 
 ```context
-repr(c) struct Holder:
+struct Holder:
     thread: Thread[i64, Joinable]
 
 def bad(arg: any Holder&) -> void:
@@ -743,7 +743,7 @@ Rejected because refs to affine-containing values are not supported in phase 1.
 ### 6. Rejected Stack Submission
 
 ```context
-repr(c) struct BadJob:
+struct BadJob:
     ptr: stack i64&
 
 def bad() -> i64 can[Pool.Submit, Pool.Await]:

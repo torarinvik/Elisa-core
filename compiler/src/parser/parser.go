@@ -418,7 +418,7 @@ func (p *Parser) parseGlobalDecl() *ast.GlobalDecl {
 func (p *Parser) parseStructDecl() *ast.StructDecl {
 	pos := p.cur().Pos
 	affine := p.matchIdentText("affine")
-	reprC := false
+	reprC := true
 	if p.peek() == lexer.TOKEN_REPR {
 		p.advance()
 		p.expect(lexer.TOKEN_LPAREN)

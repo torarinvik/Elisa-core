@@ -44,7 +44,7 @@ def permissioned_thread_worker(value: i64) -> i64 can[Console.Write]:
 	puts("worker".cast[any u8&]()) can Console.Write
 	return value + 2
 
-repr(c) struct SharedGate:
+struct SharedGate:
 	mu: Mutex
 	cv: CondVar
 

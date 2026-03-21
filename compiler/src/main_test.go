@@ -985,6 +985,14 @@ func TestRunCLIPrintsAnnotatedExternFunctionsInAST(t *testing.T) {
 			t.Fatalf("expected AST output to contain %q, got:\n%s", check, output)
 		}
 	}
+	for _, check := range []string{"struct Holder (1 fields)", "struct Window (1 fields)"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected AST output to normalize repr(c) syntax as %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "repr(c)") {
+		t.Fatalf("expected AST output to omit redundant repr(c) spelling, got:\n%s", output)
+	}
 }
 
 func TestRunCLIPrintsConstEnumInAST(t *testing.T) {

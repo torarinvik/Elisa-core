@@ -94,18 +94,18 @@ enum FrontendTokenKind:
     RShift
     Tilde
 
-repr(c) struct FrontendPos:
+struct FrontendPos:
     line: mutable int
     col: mutable int
     offset: mutable usize
 
-repr(c) struct FrontendToken:
+struct FrontendToken:
     kind: mutable FrontendTokenKind
     pos: mutable FrontendPos
     text: mutable StringView
     suffix: mutable StringView
 
-repr(c) struct FrontendLexer:
+struct FrontendLexer:
     arena: mutable any Arena&?
     filename: mutable any u8&
     source: mutable any u8&

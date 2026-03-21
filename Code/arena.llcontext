@@ -26,7 +26,7 @@ error RuntimeError:
 # Basic low-level types
 # ------------------------------------------------------------
 
-repr(c) struct Region:
+struct Region:
     next: mutable heap Region&?
     count: mutable usize
     capacity: mutable usize
@@ -35,20 +35,20 @@ repr(c) struct Region:
     global_index: mutable usize
     data: tail uintptr
 
-repr(c) struct Arena:
+struct Arena:
     begin:mutable heap Region&?
     end:mutable heap Region&?
     end_index: mutable usize
 
-repr(c) struct ArenaMark:
+struct ArenaMark:
     region: heap Region&?
     count: usize
 
-repr(c) struct PackedStoreAllocResult:
+struct PackedStoreAllocResult:
     row: mutable heap void&?
     handle: mutable uintptr
 
-repr(c) struct PackedStoreState:
+struct PackedStoreState:
     head_region: mutable heap Region&?
     alloc_region: mutable heap Region&?
     alloc_region_index: mutable usize
@@ -59,31 +59,31 @@ repr(c) struct PackedStoreState:
     row_words: mutable usize
     preferred_region_capacity: mutable usize
 
-repr(c) struct DynArray[T]:
+struct DynArray[T]:
     items: mutable any T&?
     count: mutable usize
     capacity: mutable usize
 
-repr(c) struct DynArrayView:
+struct DynArrayView:
     data: mutable any void&?
     len: mutable usize
     elem_size: mutable usize
 
-repr(c) struct DictBucket[T]:
+struct DictBucket[T]:
     state: mutable u8
     hash: mutable u64
     key_data: mutable any u8&?
     key_len: mutable i64
     value: mutable T
 
-repr(c) struct DynDict[T]:
+struct DynDict[T]:
     items: mutable any DictBucket[T]&?
     count: mutable usize
     used: mutable usize
     capacity: mutable usize
     arena: mutable any Arena&?
 
-repr(c) struct DictProbeResult:
+struct DictProbeResult:
     index: mutable usize
     found: mutable bool
 

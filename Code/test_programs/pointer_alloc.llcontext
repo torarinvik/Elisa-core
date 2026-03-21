@@ -1,4 +1,4 @@
-repr(c) struct Node:
+struct Node:
     value: mutable int
     next: mutable heap Node&?
 

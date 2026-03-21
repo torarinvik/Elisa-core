@@ -2630,7 +2630,7 @@ def bump(ch: char) -> i64:
 }
 
 func TestAnalyzeAcceptsExportedConcreteWrappers(t *testing.T) {
-	src := `repr(c) struct Vec[T]:
+	src := `struct Vec[T]:
 	x: mutable T
 	y: mutable T
 

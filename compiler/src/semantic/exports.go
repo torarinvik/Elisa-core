@@ -17,7 +17,7 @@ func (a *Analyzer) collectExportTypeAliases(decls []ast.Decl) {
 			continue
 		}
 		if !exportedNamedTypeAllowed(resolved) {
-			a.errorf(exportDecl.Pos(), "export type %q must name a concrete repr(c) struct or concrete instantiation", exportDecl.Alias)
+			a.errorf(exportDecl.Pos(), "export type %q must name a concrete C-ABI-compatible struct or concrete instantiation", exportDecl.Alias)
 			continue
 		}
 		if !isCABICompatibleType(resolved) {

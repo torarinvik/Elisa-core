@@ -300,7 +300,7 @@ In other words: keep `any` for real provenance-erasing boundaries such as generi
 For example, a fallible helper that reads one caller-owned scratch cell can say so directly:
 
 ```context
-repr(c) struct ScratchSlot:
+struct ScratchSlot:
     value: mutable int
 
 error StackError:

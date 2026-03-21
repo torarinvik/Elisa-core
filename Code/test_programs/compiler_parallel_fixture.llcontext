@@ -6,7 +6,7 @@ packed enum Expr:
 	Int(value: int)
 	Add(left: Expr, right: Expr)
 
-repr(c) struct FrozenExprGraph:
+struct FrozenExprGraph:
 	store: Expr.Store[Frozen]
 	root: Expr
 

@@ -14,27 +14,27 @@ enum SymbolKind:
     Param
     Func
 
-repr(c) struct SourceSpan:
+struct SourceSpan:
     line: mutable int
     column: mutable int
 
-repr(c) struct Token:
+struct Token:
     kind: mutable TokenKind
     span: mutable SourceSpan
     text: mutable dstr
 
-repr(c) struct Symbol:
+struct Symbol:
     name: mutable dstr
     kind: mutable SymbolKind
     depth: mutable int
     first_kind: mutable TokenKind
 
-repr(c) struct Scope:
+struct Scope:
     parent: mutable any Scope&?
     symbols: mutable dict[dstr, Symbol]
     depth: mutable int
 
-repr(c) struct ParserState:
+struct ParserState:
     tokens: mutable view[Token]
     cursor: mutable usize
     current_scope: mutable any Scope&?

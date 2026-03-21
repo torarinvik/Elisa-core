@@ -1,4 +1,4 @@
-repr(c) struct ScratchSlot:
+struct ScratchSlot:
     value: mutable int
 
 error StackError:

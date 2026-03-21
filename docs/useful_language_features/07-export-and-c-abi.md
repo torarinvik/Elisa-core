@@ -1,6 +1,6 @@
 # Export and C ABI Mini-Spec
 
-This document proposes an explicit `export` feature for Contextlang so concrete functions and `repr(c)` layouts can be exposed to C with stable names and predictable calling conventions.
+This document proposes an explicit `export` feature for Contextlang so concrete functions and C-compatible struct layouts can be exposed to C with stable names and predictable calling conventions.
 
 The main goal is:
 
@@ -78,7 +78,7 @@ and still provide a clean public symbol such as `vec2i_add`.
 ### Exporting a concrete type instantiation
 
 ```context
-repr(c) struct Vec[T]:
+struct Vec[T]:
     x: T
     y: T
 
@@ -148,7 +148,7 @@ This should only be allowed for concrete C-ABI-compatible types.
 ## Concrete example
 
 ```context
-repr(c) struct Vec[T]:
+struct Vec[T]:
     x: T
     y: T
 
@@ -193,13 +193,13 @@ These are good MVP candidates:
 - fixed-width integers: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`
 - `char` (current byte/code-unit scalar)
 - pointers / references lowered as raw pointers when the lifetime/ownership contract is intentionally C-facing rather than a Contextlang-only proof such as `stack T&`
-- `repr(c)` structs whose fields are all themselves C-ABI-compatible
+- structs whose fields are all themselves C-ABI-compatible
 - opaque handle-like pointers once explicit opaque/exported types exist
 
 For exported **function boundaries**, be stricter than the general field rule:
 
 - top-level fixed arrays should be rejected as parameters and returns
-- if array-shaped data must cross the ABI, wrap it in an explicit `repr(c)` struct
+- if array-shaped data must cross the ABI, wrap it in an explicit C-facing struct
 
 ### Allow later or with caution
 
@@ -221,10 +221,10 @@ Reason:
 
 These are language-level logical/container abstractions, not simple C ABI contracts.
 
-If code needs to cross the ABI boundary with container-like data, it should do so through explicit C-facing `repr(c)` bridge types such as:
+If code needs to cross the ABI boundary with container-like data, it should do so through explicit C-facing bridge types such as:
 
 ```context
-repr(c) struct BytesView:
+struct BytesView:
     data: u8&
     len: usize
 ```
@@ -280,7 +280,7 @@ llcontext -emit header -o math2d.h math2d.llcontext
 
 The generated header should include:
 
-- typedefs for exported concrete `repr(c)` types
+- typedefs for exported concrete struct types
 - prototypes for exported functions
 - declarations for exported globals
 - standard integer includes when needed (for example `<stdint.h>`)
@@ -293,13 +293,13 @@ If an exported function returns pointers or accepts pointer-owning contracts, th
 
 Practical recommendation for MVP:
 
-- prefer exported values and POD-style `repr(c)` structs
+- prefer exported values and POD-style structs
 - avoid exposing arena-backed, `stack T&`-style borrowed, scratch-backed, or otherwise lifetime-sensitive pointer returns directly
 - push richer ownership semantics to a later phase once the ABI annotations story exists
 
 ## Validation rule for exported types
 
-For an exported concrete `repr(c)` type, the compiler should validate at least:
+For an exported concrete struct type, the compiler should validate at least:
 
 - field order is fixed and known
 - field alignments are known and consistent with chosen ABI rules
@@ -309,7 +309,7 @@ For an exported concrete `repr(c)` type, the compiler should validate at least:
 For example:
 
 ```context
-repr(c) struct Pair[T]:
+struct Pair[T]:
     left: T
     right: T
 
@@ -321,7 +321,7 @@ should succeed.
 But this should fail:
 
 ```context
-repr(c) struct Bad:
+struct Bad:
     text: dstr[row]
 
 export type Bad as Bad
@@ -366,7 +366,7 @@ The feature should be considered real only when the repository can do the follow
 Contextlang module:
 
 ```context
-repr(c) struct Vec[T]:
+struct Vec[T]:
     x: T
     y: T
 
@@ -398,7 +398,7 @@ That is the right first test because it exercises:
 
 - concrete generic type export
 - concrete generic function export
-- by-value `repr(c)` struct ABI
+- by-value struct ABI
 - symbol naming
 - actual linking from C
 

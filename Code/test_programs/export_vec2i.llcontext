@@ -1,4 +1,4 @@
-repr(c) struct Vec[T]:
+struct Vec[T]:
 	x: mutable T
 	y: mutable T
 
