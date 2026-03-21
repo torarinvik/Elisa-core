@@ -2266,6 +2266,11 @@ func (a *Analyzer) cloneTrackedValueTypeWithSeen(t Type, seen map[Type]Type) Typ
 		seen[t] = &cloned
 		cloned.Elem = a.cloneTrackedValueTypeWithSeen(tt.Elem, seen)
 		return &cloned
+	case *OptionalType:
+		cloned := *tt
+		seen[t] = &cloned
+		cloned.Value = a.cloneTrackedValueTypeWithSeen(tt.Value, seen)
+		return &cloned
 	case *ViewType:
 		cloned := *tt
 		seen[t] = &cloned
@@ -2546,6 +2551,18 @@ func (a *Analyzer) mergeSpecializedValueTypes(dst Type, src Type) (Type, bool) {
 		cloned := *tt
 		cloned.Elem = mergedElem
 		return &cloned, true
+	case *OptionalType:
+		srcOpt, ok := src.(*OptionalType)
+		if !ok {
+			return nil, false
+		}
+		mergedValue, ok := a.mergeSpecializedValueTypes(tt.Value, srcOpt.Value)
+		if !ok {
+			return nil, false
+		}
+		cloned := *tt
+		cloned.Value = mergedValue
+		return &cloned, true
 	case *ViewType:
 		srcView, ok := src.(*ViewType)
 		if !ok {
@@ -2701,6 +2718,8 @@ func (a *Analyzer) containsBorrowedOwnerRefValues(t Type, seen map[string]bool) 
 		return a.containsBorrowedOwnerRefValues(tt.Elem, seen)
 	case *DArrayType:
 		return a.containsBorrowedOwnerRefValues(tt.Elem, seen)
+	case *OptionalType:
+		return a.containsBorrowedOwnerRefValues(tt.Value, seen)
 	case *ViewType:
 		return a.containsBorrowedOwnerRefValues(tt.Elem, seen)
 	case *DArrayViewType:

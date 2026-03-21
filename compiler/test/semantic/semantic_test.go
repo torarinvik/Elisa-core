@@ -6057,6 +6057,43 @@ func TestAnalyzePinsRuntimeStage1BuiltinPermissionContracts(t *testing.T) {
 	requireFunctionReturnTypeString(t, result, "string_view_copy", "heap u8&")
 }
 
+func TestAnalyzeAcceptsValueOptionalsAndTryElse(t *testing.T) {
+	src := `def maybe_value(flag: bool) -> int?:
+	if flag:
+		return 7
+	return null
+
+
+def fallback_value(flag: bool) -> int:
+	value: int? = maybe_value(flag)
+	return try value else 11
+`
+	result, errs := parseAndAnalyze(t, "value_optionals_try_else.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "maybe_value", "int?")
+	requireFunctionReturnTypeString(t, result, "fallback_value", "int")
+}
+
+func TestAnalyzeRejectsTryOptionalWithoutElse(t *testing.T) {
+	src := `def maybe_value(flag: bool) -> int?:
+	if flag:
+		return 7
+	return null
+
+
+def bad(flag: bool) -> int:
+	return try maybe_value(flag)
+`
+	_, errs := parseAndAnalyze(t, "value_optionals_try_without_else.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "try without else requires an error union") {
+		t.Fatalf("expected optional try-without-else diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeAcceptsTypedFixedArrayLiteralInitialization(t *testing.T) {
 	src := `def first() -> i32:
 	values: i32[3] = [1, 2, 3]

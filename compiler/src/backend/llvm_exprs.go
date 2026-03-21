@@ -317,53 +317,123 @@ func (s *functionState) emitRaiseExpr(expr *ast.RaiseExpr) (C.LLVMValueRef, sema
 }
 
 func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic.Type, error) {
-	unionType, ok := s.exprType(expr.Value).(*semantic.ErrorUnionType)
-	if !ok {
-		return nil, nil, fmt.Errorf("try requires a lowered error-union operand")
-	}
 	resultType := s.exprType(expr)
+	if unionType, ok := s.exprType(expr.Value).(*semantic.ErrorUnionType); ok {
+		fallibleValue, _, err := s.emitExpr(expr.Value, nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		errorCode, err := s.extractErrorUnionCode(fallibleValue, unionType)
+		if err != nil {
+			return nil, nil, err
+		}
+		zeroCode, err := s.errorCodeConstant(0)
+		if err != nil {
+			return nil, nil, err
+		}
+		successCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), errorCode, zeroCode, cStringFree("try.ok"))
+
+		if expr.Fallback == nil {
+			okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.ok"))
+			errBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.err"))
+			C.LLVMBuildCondBr(s.builder, successCond, okBB, errBB)
+
+			C.LLVMPositionBuilderAtEnd(s.builder, errBB)
+			if _, ok := s.fnType.Return.(*semantic.ErrorUnionType); !ok {
+				return nil, nil, fmt.Errorf("try propagation requires an error-union function return")
+			}
+			if err := s.emitFunctionReturn(errorCode, unionType.Errors); err != nil {
+				return nil, nil, err
+			}
+
+			C.LLVMPositionBuilderAtEnd(s.builder, okBB)
+			if isVoidType(resultType) {
+				return nil, resultType, nil
+			}
+			payload, err := s.extractErrorUnionPayload(fallibleValue, unionType)
+			if err != nil {
+				return nil, nil, err
+			}
+			return payload, resultType, nil
+		}
+
+		okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.value"))
+		fallbackBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.fallback"))
+		mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.merge"))
+		C.LLVMBuildCondBr(s.builder, successCond, okBB, fallbackBB)
+
+		incomingValues := make([]C.LLVMValueRef, 0, 2)
+		incomingBlocks := make([]C.LLVMBasicBlockRef, 0, 2)
+
+		C.LLVMPositionBuilderAtEnd(s.builder, okBB)
+		var okValue C.LLVMValueRef
+		if !isVoidType(resultType) {
+			okValue, err = s.extractErrorUnionPayload(fallibleValue, unionType)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		if !s.currentBlockTerminated() {
+			okEnd := C.LLVMGetInsertBlock(s.builder)
+			C.LLVMBuildBr(s.builder, mergeBB)
+			if !isVoidType(resultType) {
+				incomingValues = append(incomingValues, okValue)
+				incomingBlocks = append(incomingBlocks, okEnd)
+			}
+		}
+
+		C.LLVMPositionBuilderAtEnd(s.builder, fallbackBB)
+		fallbackValue, _, err := s.emitExpr(expr.Fallback, resultType)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !s.currentBlockTerminated() {
+			fallbackEnd := C.LLVMGetInsertBlock(s.builder)
+			C.LLVMBuildBr(s.builder, mergeBB)
+			if !isVoidType(resultType) {
+				incomingValues = append(incomingValues, fallbackValue)
+				incomingBlocks = append(incomingBlocks, fallbackEnd)
+			}
+		}
+
+		C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+		if len(incomingBlocks) == 0 {
+			C.LLVMBuildUnreachable(s.builder)
+			return nil, resultType, nil
+		}
+		if isVoidType(resultType) {
+			return nil, resultType, nil
+		}
+		if len(incomingValues) == 1 {
+			return incomingValues[0], resultType, nil
+		}
+		phiType, err := s.g.lowerType(resultType)
+		if err != nil {
+			return nil, nil, err
+		}
+		phi := C.LLVMBuildPhi(s.builder, phiType, cStringFree("tryphi"))
+		C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+		return phi, resultType, nil
+	}
+	optionalType, ok := s.exprType(expr.Value).(*semantic.OptionalType)
+	if !ok {
+		return nil, nil, fmt.Errorf("try requires a lowered fallible operand")
+	}
+	if expr.Fallback == nil {
+		return nil, nil, fmt.Errorf("try without else is only supported for error unions")
+	}
 	fallibleValue, _, err := s.emitExpr(expr.Value, nil)
 	if err != nil {
 		return nil, nil, err
 	}
-	errorCode, err := s.extractErrorUnionCode(fallibleValue, unionType)
+	presentValue, err := s.extractOptionalPresent(fallibleValue, optionalType)
 	if err != nil {
 		return nil, nil, err
 	}
-	zeroCode, err := s.errorCodeConstant(0)
-	if err != nil {
-		return nil, nil, err
-	}
-	successCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), errorCode, zeroCode, cStringFree("try.ok"))
-
-	if expr.Fallback == nil {
-		okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.ok"))
-		errBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.err"))
-		C.LLVMBuildCondBr(s.builder, successCond, okBB, errBB)
-
-		C.LLVMPositionBuilderAtEnd(s.builder, errBB)
-		if _, ok := s.fnType.Return.(*semantic.ErrorUnionType); !ok {
-			return nil, nil, fmt.Errorf("try propagation requires an error-union function return")
-		}
-		if err := s.emitFunctionReturn(errorCode, unionType.Errors); err != nil {
-			return nil, nil, err
-		}
-
-		C.LLVMPositionBuilderAtEnd(s.builder, okBB)
-		if isVoidType(resultType) {
-			return nil, resultType, nil
-		}
-		payload, err := s.extractErrorUnionPayload(fallibleValue, unionType)
-		if err != nil {
-			return nil, nil, err
-		}
-		return payload, resultType, nil
-	}
-
 	okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.value"))
 	fallbackBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.fallback"))
 	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("try.merge"))
-	C.LLVMBuildCondBr(s.builder, successCond, okBB, fallbackBB)
+	C.LLVMBuildCondBr(s.builder, presentValue, okBB, fallbackBB)
 
 	incomingValues := make([]C.LLVMValueRef, 0, 2)
 	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, 2)
@@ -371,7 +441,7 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 	C.LLVMPositionBuilderAtEnd(s.builder, okBB)
 	var okValue C.LLVMValueRef
 	if !isVoidType(resultType) {
-		okValue, err = s.extractErrorUnionPayload(fallibleValue, unionType)
+		okValue, err = s.extractOptionalPayload(fallibleValue, optionalType)
 		if err != nil {
 			return nil, nil, err
 		}

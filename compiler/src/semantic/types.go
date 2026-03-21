@@ -50,6 +50,10 @@ type ErrorUnionType struct {
 	Errors *ErrorSetType
 }
 
+type OptionalType struct {
+	Value Type
+}
+
 type ConstEnumMember struct {
 	Name  string
 	Value int64
@@ -227,6 +231,7 @@ func (*BuiltinType) isType()         {}
 func (*TypeParamType) isType()       {}
 func (*ErrorSetType) isType()        {}
 func (*ErrorUnionType) isType()      {}
+func (*OptionalType) isType()        {}
 func (*ConstEnumType) isType()       {}
 func (*RefType) isType()             {}
 func (*ArrayType) isType()           {}
@@ -261,6 +266,12 @@ func (t *ErrorUnionType) String() string {
 		return "<invalid-error-union>"
 	}
 	return fmt.Sprintf("%s | %s", t.Value.String(), t.Errors.String())
+}
+func (t *OptionalType) String() string {
+	if t == nil || t.Value == nil {
+		return "<invalid-optional>"
+	}
+	return t.Value.String() + "?"
 }
 func (t *ConstEnumType) String() string {
 	if t == nil {
@@ -623,6 +634,11 @@ func IsNeverType(t Type) bool {
 func IsNullType(t Type) bool {
 	_, ok := t.(*NullType)
 	return ok
+}
+
+func IsOptionalType(t Type) (*OptionalType, bool) {
+	opt, ok := t.(*OptionalType)
+	return opt, ok
 }
 
 func (t *ErrorSetType) HasTag(name string) bool {

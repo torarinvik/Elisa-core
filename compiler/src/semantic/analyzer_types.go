@@ -102,6 +102,17 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			return invalidType
 		}
 		return &ErrorUnionType{Value: valueType, Errors: errSet}
+	case *ast.OptionalTypeExpr:
+		valueType := a.resolveType(n.Value)
+		if isVoidType(valueType) {
+			a.errorf(n.Pos(), "value optionals cannot wrap void")
+			return invalidType
+		}
+		if _, ok := valueType.(*RefType); ok {
+			a.errorf(n.Pos(), "value optionals cannot wrap references; use &? instead of %s?", valueType.String())
+			return invalidType
+		}
+		return &OptionalType{Value: valueType}
 	case *ast.RefType:
 		if n.Region != "" {
 			if !a.regionQualifierDefined(n.Region) {
@@ -571,6 +582,9 @@ func (a *Analyzer) validCast(src, dst Type) bool {
 		if ref, ok := dst.(*RefType); ok {
 			return ref.State != RefStateNonNull
 		}
+		if _, ok := dst.(*OptionalType); ok {
+			return true
+		}
 	}
 	if srcRef, ok := src.(*RefType); ok {
 		if dstRef, ok := dst.(*RefType); ok {
@@ -730,6 +744,8 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 		return n
 	case *ErrorUnionType:
 		return &ErrorUnionType{Value: a.substituteType(n.Value, bindings, shapeBindings, regionBindings, permissionBindings), Errors: n.Errors}
+	case *OptionalType:
+		return &OptionalType{Value: a.substituteType(n.Value, bindings, shapeBindings, regionBindings, permissionBindings)}
 	case *RefType:
 		region := n.Region
 		if bound, ok := regionBindings[n.Region]; ok {

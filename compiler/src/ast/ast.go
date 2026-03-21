@@ -274,6 +274,11 @@ type ErrorUnionTypeExpr struct {
 	Errors   TypeExpr
 }
 
+type OptionalTypeExpr struct {
+	Position lexer.Pos
+	Value    TypeExpr
+}
+
 type Expr interface {
 	Node
 	exprTag()
@@ -693,6 +698,7 @@ func (n *ErrorSetExpr) Pos() lexer.Pos    { return n.Position }
 func (n *ErrorUnionTypeExpr) Pos() lexer.Pos {
 	return n.Position
 }
+func (n *OptionalTypeExpr) Pos() lexer.Pos { return n.Position }
 func (n *Ident) Pos() lexer.Pos          { return n.Position }
 func (n *IntLit) Pos() lexer.Pos         { return n.Position }
 func (n *StringLit) Pos() lexer.Pos      { return n.Position }
@@ -781,6 +787,7 @@ func (*BuiltinTypeExpr) nodeTag()        {}
 func (*FuncTypeExpr) nodeTag()           {}
 func (*ErrorSetExpr) nodeTag()           {}
 func (*ErrorUnionTypeExpr) nodeTag()     {}
+func (*OptionalTypeExpr) nodeTag()       {}
 func (*Ident) nodeTag()                  {}
 func (*IntLit) nodeTag()                 {}
 func (*StringLit) nodeTag()              {}
@@ -865,6 +872,7 @@ func (*BuiltinTypeExpr) typeExprTag()    {}
 func (*FuncTypeExpr) typeExprTag()       {}
 func (*ErrorSetExpr) typeExprTag()       {}
 func (*ErrorUnionTypeExpr) typeExprTag() {}
+func (*OptionalTypeExpr) typeExprTag()   {}
 
 func (*Ident) exprTag()      {}
 func (*IntLit) exprTag()     {}

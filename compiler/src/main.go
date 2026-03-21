@@ -633,6 +633,8 @@ func typeStr(t ast.TypeExpr) string {
 		}
 		can := formatPermissionRefs(n.Permissions)
 		return "func(" + strings.Join(parts, ", ") + ")" + ret + can
+	case *ast.OptionalTypeExpr:
+		return typeStr(n.Value) + "?"
 	default:
 		return "<type>"
 	}

@@ -1236,6 +1236,8 @@ func (a *Analyzer) containsAffineHandleValues(t Type, seen map[string]bool) bool
 		return a.containsAffineHandleValues(tt.Elem, seen)
 	case *DArrayType:
 		return a.containsAffineHandleValues(tt.Elem, seen)
+	case *OptionalType:
+		return a.containsAffineHandleValues(tt.Value, seen)
 	case *DictType:
 		return a.containsAffineHandleValues(tt.Key, seen) || a.containsAffineHandleValues(tt.Value, seen)
 	case *GenericInstanceType:
@@ -1326,6 +1328,8 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 		return a.typeCanContainRegionRefs(tt.Elem, seen)
 	case *DArrayType:
 		return a.typeCanContainRegionRefs(tt.Elem, seen)
+	case *OptionalType:
+		return a.typeCanContainRegionRefs(tt.Value, seen)
 	case *ViewType:
 		return a.typeCanContainRegionRefs(tt.Elem, seen)
 	case *DArrayViewType:
@@ -1406,6 +1410,8 @@ func (a *Analyzer) abstractParamBorrowedOwnerRefState(t Type, baseKey affineValu
 	seen[key] = true
 	state := borrowedOwnerRefState{}
 	switch tt := t.(type) {
+	case *OptionalType:
+		return a.abstractParamBorrowedOwnerRefState(tt.Value, baseKey, seen)
 	case *RefType:
 		if elemState, ok := a.abstractParamBorrowedOwnerRefState(tt.Elem, baseKey, seen); ok {
 			if elemState.HasDirect {
@@ -1483,6 +1489,8 @@ func (a *Analyzer) abstractParamRegionRefState(t Type, paramIndex int, seen map[
 	seen[key] = true
 	state := regionRefStateFromParamDependency(paramIndex)
 	switch tt := t.(type) {
+	case *OptionalType:
+		return a.abstractParamRegionRefState(tt.Value, paramIndex, seen)
 	case *RefType:
 		if elemState, ok := a.abstractParamRegionRefState(tt.Elem, paramIndex, seen); ok {
 			if len(elemState.Fields) != 0 {

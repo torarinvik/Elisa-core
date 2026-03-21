@@ -40,6 +40,9 @@ func SameType(a, b Type) bool {
 	case *ErrorUnionType:
 		tb, ok := b.(*ErrorUnionType)
 		return ok && SameType(ta.Value, tb.Value) && SameType(ta.Errors, tb.Errors)
+	case *OptionalType:
+		tb, ok := b.(*OptionalType)
+		return ok && SameType(ta.Value, tb.Value)
 	case *ConstEnumType:
 		tb, ok := b.(*ConstEnumType)
 		return ok && ta.Name == tb.Name
@@ -183,12 +186,24 @@ func AssignableTo(dst, src Type) bool {
 		}
 		return false
 	}
+	if dstOpt, ok := dst.(*OptionalType); ok {
+		if srcOpt, ok := src.(*OptionalType); ok {
+			return AssignableTo(dstOpt.Value, srcOpt.Value)
+		}
+		if IsNullType(src) {
+			return true
+		}
+		return AssignableTo(dstOpt.Value, src)
+	}
 	if IsNumericType(dst) && IsNumericType(src) {
 		return true
 	}
 	if IsNullType(src) {
 		if r, ok := dst.(*RefType); ok {
 			return r.State != RefStateNonNull
+		}
+		if _, ok := dst.(*OptionalType); ok {
+			return true
 		}
 		return false
 	}
@@ -234,6 +249,9 @@ func matchTypePattern(pattern, actual Type) bool {
 			return matchTypePattern(p.Value, a.Value) && matchTypePattern(p.Errors, a.Errors)
 		}
 		return matchTypePattern(p.Value, actual)
+	case *OptionalType:
+		a, ok := actual.(*OptionalType)
+		return ok && matchTypePattern(p.Value, a.Value)
 	case *ConstEnumType:
 		a, ok := actual.(*ConstEnumType)
 		return ok && p.Name == a.Name
@@ -356,6 +374,27 @@ func MergeTypes(a, b Type) Type {
 			}
 		}
 	}
+	if ao, ok := a.(*OptionalType); ok {
+		if bo, ok := b.(*OptionalType); ok {
+			merged := MergeTypes(ao.Value, bo.Value)
+			if IsInvalidType(merged) {
+				return invalidType
+			}
+			return &OptionalType{Value: merged}
+		}
+		merged := MergeTypes(ao.Value, b)
+		if IsInvalidType(merged) {
+			return invalidType
+		}
+		return &OptionalType{Value: merged}
+	}
+	if bo, ok := b.(*OptionalType); ok {
+		merged := MergeTypes(a, bo.Value)
+		if IsInvalidType(merged) {
+			return invalidType
+		}
+		return &OptionalType{Value: merged}
+	}
 	if IsNumericType(a) && IsNumericType(b) {
 		return CommonNumericType(a, b)
 	}
@@ -383,6 +422,9 @@ func MergeTypes(a, b Type) Type {
 		}
 	}
 	if IsNullType(a) {
+		if opt, ok := b.(*OptionalType); ok {
+			return opt
+		}
 		if r, ok := b.(*RefType); ok {
 			switch r.State {
 			case RefStateNull, RefStateNullable:

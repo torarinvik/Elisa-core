@@ -217,6 +217,9 @@ func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label stri
 		p.expect(lexer.TOKEN_RBRACKET)
 		typ = &ast.ArrayType{Position: pos, Elem: typ, Size: size}
 	}
+	if p.match(lexer.TOKEN_QUESTION) {
+		typ = &ast.OptionalTypeExpr{Position: pos, Value: typ}
+	}
 
 	return typ
 }

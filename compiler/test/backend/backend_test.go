@@ -2275,6 +2275,36 @@ def load_text(path: any u8&) -> dstr[file_text] error[IoError, ...]:
 	}
 }
 
+func TestGenerateLLVMIRLowersValueOptionalsAndTryElse(t *testing.T) {
+	src := `def maybe_value(flag: bool) -> int?:
+	if flag:
+		return 7
+	return null
+
+
+def fallback_value(flag: bool) -> int:
+	return try maybe_value(flag) else 11
+`
+	result := parseAndAnalyze(t, "backend_value_optionals.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%Optional__int = type { i1, i64 }",
+		"define %Optional__int @maybe_value(i1",
+		"define i64 @fallback_value(i1",
+		"extractvalue %Optional__int",
+		"phi i64",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRIndexesRuntimeBackedArraysAndViews(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
 	items: mutable any T&?

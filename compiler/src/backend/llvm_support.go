@@ -302,6 +302,31 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 		}
 		return s.buildErrorUnionSuccess(expectedUnion, payloadValue)
 	}
+	if expectedOptional, ok := expected.(*semantic.OptionalType); ok {
+		if actualOptional, ok := actual.(*semantic.OptionalType); ok {
+			presentValue, err := s.extractOptionalPresent(value, actualOptional)
+			if err != nil {
+				return nil, err
+			}
+			payloadValue, err := s.extractOptionalPayload(value, actualOptional)
+			if err != nil {
+				return nil, err
+			}
+			payloadValue, err = s.coerceValue(payloadValue, actualOptional.Value, expectedOptional.Value)
+			if err != nil {
+				return nil, err
+			}
+			return s.buildOptionalValue(expectedOptional, presentValue, payloadValue)
+		}
+		if semantic.IsNullType(actual) {
+			return s.buildOptionalNone(expectedOptional)
+		}
+		payloadValue, err := s.coerceValue(value, actual, expectedOptional.Value)
+		if err != nil {
+			return nil, err
+		}
+		return s.buildOptionalSome(expectedOptional, payloadValue)
+	}
 	actualLLVM, err := s.g.lowerType(actual)
 	if err != nil {
 		return nil, err
@@ -389,6 +414,45 @@ func (s *functionState) buildErrorUnionSuccess(unionType *semantic.ErrorUnionTyp
 	return s.buildErrorUnionValue(unionType, zeroCode, payload)
 }
 
+func (s *functionState) buildOptionalSome(optionalType *semantic.OptionalType, payload C.LLVMValueRef) (C.LLVMValueRef, error) {
+	presentType, err := s.g.lowerBuiltin("bool")
+	if err != nil {
+		return nil, err
+	}
+	present := C.LLVMConstInt(presentType, 1, 0)
+	return s.buildOptionalValue(optionalType, present, payload)
+}
+
+func (s *functionState) buildOptionalNone(optionalType *semantic.OptionalType) (C.LLVMValueRef, error) {
+	if optionalType == nil {
+		return nil, fmt.Errorf("missing optional type")
+	}
+	payload, err := s.zeroValue(optionalType.Value)
+	if err != nil {
+		return nil, err
+	}
+	presentType, err := s.g.lowerBuiltin("bool")
+	if err != nil {
+		return nil, err
+	}
+	present := C.LLVMConstInt(presentType, 0, 0)
+	return s.buildOptionalValue(optionalType, present, payload)
+}
+
+func (s *functionState) buildOptionalValue(optionalType *semantic.OptionalType, present C.LLVMValueRef, payload C.LLVMValueRef) (C.LLVMValueRef, error) {
+	if optionalType == nil {
+		return nil, fmt.Errorf("missing optional type")
+	}
+	llvmType, err := s.g.lowerType(optionalType)
+	if err != nil {
+		return nil, err
+	}
+	value := C.LLVMGetUndef(llvmType)
+	value = C.LLVMBuildInsertValue(s.builder, value, present, 0, cStringFree("optional.present"))
+	value = C.LLVMBuildInsertValue(s.builder, value, payload, 1, cStringFree("optional.value"))
+	return value, nil
+}
+
 func (s *functionState) buildErrorUnionFailure(unionType *semantic.ErrorUnionType, errorCode C.LLVMValueRef) (C.LLVMValueRef, error) {
 	if unionType == nil {
 		return nil, fmt.Errorf("missing error union type")
@@ -435,6 +499,20 @@ func (s *functionState) extractErrorUnionPayload(value C.LLVMValueRef, unionType
 		return nil, fmt.Errorf("error union has no payload")
 	}
 	return C.LLVMBuildExtractValue(s.builder, value, 1, cStringFree("errunion.payload")), nil
+}
+
+func (s *functionState) extractOptionalPresent(value C.LLVMValueRef, optionalType *semantic.OptionalType) (C.LLVMValueRef, error) {
+	if optionalType == nil {
+		return nil, fmt.Errorf("missing optional type")
+	}
+	return C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("optional.present")), nil
+}
+
+func (s *functionState) extractOptionalPayload(value C.LLVMValueRef, optionalType *semantic.OptionalType) (C.LLVMValueRef, error) {
+	if optionalType == nil || optionalType.Value == nil {
+		return nil, fmt.Errorf("optional has no payload")
+	}
+	return C.LLVMBuildExtractValue(s.builder, value, 1, cStringFree("optional.payload")), nil
 }
 
 func (s *functionState) errorCodeConstant(code uint32) (C.LLVMValueRef, error) {
@@ -740,6 +818,18 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			return nil, fmt.Errorf("error union expects an error set on the right-hand side")
 		}
 		return &semantic.ErrorUnionType{Value: valueType, Errors: errSet}, nil
+	case *ast.OptionalTypeExpr:
+		valueType, err := s.resolveTypeExpr(n.Value)
+		if err != nil {
+			return nil, err
+		}
+		if isVoidType(valueType) {
+			return nil, fmt.Errorf("value optionals cannot wrap void")
+		}
+		if _, ok := valueType.(*semantic.RefType); ok {
+			return nil, fmt.Errorf("value optionals cannot wrap references; use &? instead of %s?", valueType.String())
+		}
+		return &semantic.OptionalType{Value: valueType}, nil
 	case *ast.RefType:
 		elem, err := s.resolveTypeExpr(n.Elem)
 		if err != nil {

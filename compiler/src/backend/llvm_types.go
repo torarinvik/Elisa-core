@@ -106,6 +106,8 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 			break
 		}
 		err = g.noteType(tt.Errors)
+	case *semantic.OptionalType:
+		err = g.noteType(tt.Value)
 	case *semantic.SViewType:
 		if st, ok := g.lookupStructType("StringView"); ok {
 			_, err = g.ensureStructBody(st.Name, st)
@@ -409,6 +411,11 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 			return errType, nil
 		}
 		return g.ensureErrorUnionType(tt)
+	case *semantic.OptionalType:
+		if isVoidType(tt.Value) {
+			return nil, fmt.Errorf("optional type %s cannot wrap void", tt.String())
+		}
+		return g.ensureOptionalType(tt)
 	case *semantic.TypeParamType:
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	case *semantic.RefType:
@@ -835,6 +842,32 @@ func (g *llvmGenerator) ensureErrorUnionType(unionType *semantic.ErrorUnionType)
 		return nil, err
 	}
 	fields := []C.LLVMTypeRef{errType, valueType}
+	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	g.structBodies[name] = true
+	return ty, nil
+}
+
+func (g *llvmGenerator) ensureOptionalType(optionalType *semantic.OptionalType) (C.LLVMTypeRef, error) {
+	if optionalType == nil || optionalType.Value == nil {
+		return nil, fmt.Errorf("missing optional metadata")
+	}
+	name := "Optional__" + sanitizeIdentifier(optionalType.Value.String())
+	ty, err := g.ensureNamedStructType(name)
+	if err != nil {
+		return nil, err
+	}
+	if g.structBodies[name] {
+		return ty, nil
+	}
+	tagType, err := g.lowerBuiltin("bool")
+	if err != nil {
+		return nil, err
+	}
+	valueType, err := g.lowerType(optionalType.Value)
+	if err != nil {
+		return nil, err
+	}
+	fields := []C.LLVMTypeRef{tagType, valueType}
 	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
 	g.structBodies[name] = true
 	return ty, nil
