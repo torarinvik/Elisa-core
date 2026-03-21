@@ -18,45 +18,48 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	case *ast.Ident:
 		if a.currentScope != nil {
 			if sym, ok := a.currentScope.Lookup(n.Name); ok {
+				result = sym.Type
 				if sym.Kind == SymbolRegionMark {
 					a.errorf(n.Pos(), "checkpoint %q can only be used in restore <region> from %q", n.Name, n.Name)
-					result = sym.Type
 					return
 				}
 				if refState, ok := a.currentRegionRefs[sym]; ok {
 					if _, dep, invalid := firstInvalidRegionDependency(refState); invalid {
 						label := "value"
-						if _, isRef := sym.Type.(*RefType); isRef {
+						if _, isRef := result.(*RefType); isRef {
 							label = "reference"
 						}
 						a.errorf(n.Pos(), "%s %q is invalid after %s", label, n.Name, dep.InvalidatedBy)
-						result = sym.Type
 						return
 					}
 				}
-				if state, ok := a.lookupAffineValueState(n); ok && a.containsAffineHandleValues(sym.Type, map[string]bool{}) {
+				if state, ok := a.lookupAffineValueState(n); ok && a.containsAffineHandleValues(result, map[string]bool{}) {
 					a.errorf(n.Pos(), "%s %q cannot be used after %s", affineHandleKind(sym.Type), n.Name, state.ConsumedBy)
-					result = sym.Type
 					return
 				}
-				if ownerType, ok := borrowableOwnerRefElemType(sym.Type); ok {
+				if ownerType, ok := borrowableOwnerRefElemType(result); ok {
 					if key, ok := a.lookupBorrowedOwnerRefKey(n); ok {
 						if state, ok := a.lookupAffineValueStateForKey(key); ok && state.ConsumedBy != "" {
 							a.errorf(n.Pos(), "%s %q cannot be used after %s", affineHandleKind(ownerType), n.Name, state.ConsumedBy)
-							result = sym.Type
 							return
 						}
 					}
-				}
-				if t, ok := a.lookupRefinedExprType(n); ok {
-					result = t
-					return
 				}
 				if fnType, ok := a.lookupCurrentFunctionValueType(sym); ok {
 					result = fnType
 					return
 				}
-				result = sym.Type
+				if specializedType, ok := a.lookupCurrentSpecializedValueType(sym); ok {
+					result = specializedType
+				}
+				if t, ok := a.lookupRefinedExprType(n); ok {
+					if specializedType, ok := a.specializeCallbackCarryingType(t, result); ok {
+						result = specializedType
+					} else {
+						result = t
+					}
+					return
+				}
 				return
 			}
 		}
@@ -1443,9 +1446,97 @@ func cloneStructFields(fields map[string]Field) map[string]Field {
 	return cloned
 }
 
+func (a *Analyzer) lookupResolvedFieldType(actual Type, name string) (Type, bool) {
+	fields, ok := a.resolvedStructFields(actual)
+	if !ok {
+		return nil, false
+	}
+	for _, field := range fields {
+		if field.Name == name {
+			return field.Type, true
+		}
+	}
+	return nil, false
+}
+
+func (a *Analyzer) specializeCallbackCarryingType(expected Type, actual Type) (Type, bool) {
+	if expected == nil || actual == nil {
+		return expected, false
+	}
+	if specialized, ok := a.specializeFunctionValueType(expected, actual); ok {
+		return specialized, true
+	}
+	switch tt := expected.(type) {
+	case *StructType:
+		changed := false
+		fields := cloneStructFields(tt.Fields)
+		for name, field := range tt.Fields {
+			actualFieldType, ok := a.lookupResolvedFieldType(actual, name)
+			if !ok {
+				continue
+			}
+			nextType, fieldChanged := a.specializeCallbackCarryingType(field.Type, actualFieldType)
+			if !fieldChanged {
+				continue
+			}
+			field.Type = nextType
+			fields[name] = field
+			changed = true
+		}
+		if !changed {
+			return expected, false
+		}
+		return cloneStructTypeWithFields(tt, fields), true
+	case *GenericInstanceType:
+		baseStruct, ok := tt.Base.(*StructType)
+		if !ok {
+			return expected, false
+		}
+		bindings := map[string]Type{}
+		for i, name := range baseStruct.TypeParams {
+			if i < len(tt.Args) {
+				bindings[name] = tt.Args[i]
+			}
+		}
+		changed := false
+		fields := cloneStructFields(baseStruct.Fields)
+		for name, field := range baseStruct.Fields {
+			expectedFieldType := field.Type
+			if len(bindings) != 0 {
+				expectedFieldType = a.substituteType(expectedFieldType, bindings, nil, nil, nil)
+			}
+			actualFieldType, ok := a.lookupResolvedFieldType(actual, name)
+			if !ok {
+				continue
+			}
+			nextType, fieldChanged := a.specializeCallbackCarryingType(expectedFieldType, actualFieldType)
+			if !fieldChanged {
+				continue
+			}
+			field.Type = nextType
+			fields[name] = field
+			changed = true
+		}
+		if !changed {
+			return expected, false
+		}
+		clonedBase := cloneStructTypeWithFields(baseStruct, fields)
+		cloned := *tt
+		cloned.Base = clonedBase
+		return &cloned, true
+	default:
+		return expected, false
+	}
+}
+
 func (a *Analyzer) specializeCallbackCarryingTypeFromExpr(expected Type, actualExpr ast.Expr) (Type, bool) {
 	if expected == nil || actualExpr == nil {
 		return expected, false
+	}
+	if actualType := a.exprTypes[actualExpr]; actualType != nil {
+		if specialized, ok := a.specializeCallbackCarryingType(expected, actualType); ok {
+			return specialized, true
+		}
 	}
 	if specialized, ok := a.functionValueTypeForExpr(actualExpr); ok {
 		if next, changed := a.specializeFunctionValueType(expected, specialized); changed {

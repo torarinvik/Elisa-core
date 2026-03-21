@@ -1568,6 +1568,148 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 	requireFunctionReturnTypeString(t, result, "ok", "void")
 }
 
+func TestAnalyzeRejectsReusingHigherOrderHelperReturnedBorrowedThreadPoolAliasAfterAggregateCallbackParamLocalAliasProjection(t *testing.T) {
+	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return move task
+
+repr(c) struct PoolHolder:
+	pool_ref: any ThreadPool&
+
+repr(c) struct PoolGetter:
+	fn: func(PoolHolder) -> any ThreadPool&
+
+def apply_getter(wrapper: PoolGetter, holder: PoolHolder) -> any ThreadPool&:
+	local_wrapper: PoolGetter = wrapper
+	alias_wrapper: PoolGetter = local_wrapper
+	return alias_wrapper.fn(holder)
+
+def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+	return holder.pool_ref
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def bad(holder: PoolHolder) -> void:
+	pool_ref: any ThreadPool& = apply_getter(PoolGetter(get_pool_ref), holder)
+	pool_shutdown(pool_ref)
+	_ = pool_submit1(holder.pool_ref, work, 1)
+`
+	_, errs := parseAndAnalyze(t, "thread_pool_higher_order_helper_aggregate_callback_param_local_alias_projection_shutdown_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+		t.Fatalf("expected aggregate callback param local alias projection shutdown diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaAggregateCallbackParamLocalAliasProjection(t *testing.T) {
+	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: any TaskGroup&) -> void
+
+repr(c) struct GroupHolder:
+	group_ref: any TaskGroup&
+
+repr(c) struct GroupKeeper:
+	fn: func(GroupHolder) -> GroupHolder
+
+def apply_keeper(wrapper: GroupKeeper, holder: GroupHolder) -> GroupHolder:
+	local_wrapper: GroupKeeper = wrapper
+	alias_wrapper: GroupKeeper = local_wrapper
+	return alias_wrapper.fn(holder)
+
+def keep_holder(holder: GroupHolder) -> GroupHolder:
+	return holder
+
+def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
+	alias_holder: GroupHolder = apply_keeper(GroupKeeper(keep_holder), holder)
+	task_group_add(alias_holder.group_ref, move task)
+	wait all holder.group_ref
+`
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_aggregate_callback_param_local_alias_projection_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "void")
+}
+
+func TestAnalyzeRejectsReusingHigherOrderHelperReturnedBorrowedThreadPoolAliasAfterMutableAggregateCallbackWrapperRebinding(t *testing.T) {
+	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return move task
+
+repr(c) struct PoolHolder:
+	pool_ref: any ThreadPool&
+
+repr(c) struct PoolGetter:
+	fn: func(PoolHolder) -> any ThreadPool&
+
+def apply_getter(primary: PoolGetter, fallback: PoolGetter, holder: PoolHolder) -> any ThreadPool&:
+	local_wrapper: mutable PoolGetter = fallback
+	local_wrapper <- primary
+	return local_wrapper.fn(holder)
+
+def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+	return holder.pool_ref
+
+def fallback_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+	return holder.pool_ref
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def bad(holder: PoolHolder) -> void:
+	pool_ref: any ThreadPool& = apply_getter(PoolGetter(get_pool_ref), PoolGetter(fallback_pool_ref), holder)
+	pool_shutdown(pool_ref)
+	_ = pool_submit1(holder.pool_ref, work, 1)
+`
+	_, errs := parseAndAnalyze(t, "thread_pool_higher_order_helper_mutable_aggregate_callback_wrapper_rebinding_shutdown_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+		t.Fatalf("expected mutable aggregate callback wrapper rebinding shutdown diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaMutableAggregateCallbackWrapperRebinding(t *testing.T) {
+	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: any TaskGroup&) -> void
+
+repr(c) struct GroupHolder:
+	group_ref: any TaskGroup&
+
+repr(c) struct GroupKeeper:
+	fn: func(GroupHolder) -> GroupHolder
+
+def apply_keeper(primary: GroupKeeper, fallback: GroupKeeper, holder: GroupHolder) -> GroupHolder:
+	local_wrapper: mutable GroupKeeper = fallback
+	local_wrapper <- primary
+	return local_wrapper.fn(holder)
+
+def keep_holder(holder: GroupHolder) -> GroupHolder:
+	return holder
+
+def fallback_holder(holder: GroupHolder) -> GroupHolder:
+	return holder
+
+def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
+	alias_holder: GroupHolder = apply_keeper(GroupKeeper(keep_holder), GroupKeeper(fallback_holder), holder)
+	task_group_add(alias_holder.group_ref, move task)
+	wait all holder.group_ref
+`
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_mutable_aggregate_callback_wrapper_rebinding_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "void")
+}
+
 func TestAnalyzeRejectsReusingHigherOrderHelperReturnedBorrowedThreadPoolAliasAfterMutableCallbackRebinding(t *testing.T) {
 	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
 

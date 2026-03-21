@@ -13,11 +13,12 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 	switch n := stmt.(type) {
 	case *ast.VarDeclStmt:
 		var declType Type
+		var valueType Type
 		if n.Type != nil {
 			declType = a.resolveType(n.Type)
 		}
 		if n.Value != nil {
-			valueType := a.analyzeValueExpr(n.Value, declType)
+			valueType = a.analyzeValueExpr(n.Value, declType)
 			if declType == nil {
 				declType = valueType
 			} else if !AssignableTo(declType, valueType) {
@@ -28,8 +29,15 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "variable %q requires a type or initializer", n.Name)
 			declType = invalidType
 		}
-		sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: declType, Node: n, Mutable: n.Mutable}
+		bindingType := declType
+		if !n.Mutable {
+			if specializedType, ok := a.specializeCallbackCarryingType(bindingType, valueType); ok {
+				bindingType = specializedType
+			}
+		}
+		sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: bindingType, Node: n, Mutable: n.Mutable}
 		a.defineLocal(sym, n.Pos())
+		a.recordSpecializedValueTypeBinding(sym, valueType)
 		a.recordValueBinding(sym, n.Value)
 		a.markCreatedProtocolSymbol(sym, n.Value)
 		a.recordBorrowedOwnerRefBinding(sym, n.Value)
@@ -39,7 +47,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if from, fromType, ok := a.freezeMovedPackedStoreSource(n.Value); ok {
 			a.remapPackedStoreDependencies(from, sym, PackedEnumStoreWithState(fromType, a.namedTypes["Frozen"]))
 		}
-		a.consumeAffineValueExpr(n.Value, declType, "move into local "+strconvQuote(n.Name))
+		a.consumeAffineValueExpr(n.Value, bindingType, "move into local "+strconvQuote(n.Name))
 	case *ast.MoveBindStmt:
 		a.analyzeMoveBindStmt(n)
 	case *ast.RegionStmt:
@@ -95,6 +103,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				}
 			}
 		}
+		a.recordSpecializedValueTypeTarget(n.Target, valueType)
 		a.clearAffineValueTarget(n.Target)
 		a.trackAffineValueTarget(n.Target, targetType)
 		a.markCreatedProtocolTarget(n.Target, n.Value, targetType)
@@ -116,6 +125,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		a.recordAssignmentRefinement(n.Target, targetType, targetType)
 		a.recordRegionRefAssignment(n.Target, n.Value)
+		a.recordSpecializedValueTypeTarget(n.Target, valueType)
 		a.clearAffineValueTarget(n.Target)
 		a.trackAffineValueTarget(n.Target, targetType)
 		a.markCreatedProtocolTarget(n.Target, n.Value, targetType)
@@ -180,11 +190,13 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		mergedAffine := a.cloneAffineValueStates()
 		mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
 		functionValueBranches := make([]map[*Symbol]*FuncType, 0, len(n.Elifs)+2)
+		specializedValueTypeBranches := make([]map[*Symbol]Type, 0, len(n.Elifs)+2)
 		thenSnapshot := a.analyzeBlockWithAffineClone(n.Then, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
 		if !blockDefinitelyExits(n.Then) {
 			mergedAffine = mergeAffineValueStates(mergedAffine, thenSnapshot.Affine)
 			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, thenSnapshot.BorrowedOwnerRefs)
 			functionValueBranches = append(functionValueBranches, thenSnapshot.FunctionValues)
+			specializedValueTypeBranches = append(specializedValueTypeBranches, thenSnapshot.SpecializedValueTypes)
 		}
 		for _, elif := range n.Elifs {
 			elifType := a.analyzeExpr(elif.Cond)
@@ -196,6 +208,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				mergedAffine = mergeAffineValueStates(mergedAffine, elifSnapshot.Affine)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elifSnapshot.BorrowedOwnerRefs)
 				functionValueBranches = append(functionValueBranches, elifSnapshot.FunctionValues)
+				specializedValueTypeBranches = append(specializedValueTypeBranches, elifSnapshot.SpecializedValueTypes)
 			}
 		}
 		if len(n.Elifs) == 0 {
@@ -204,6 +217,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				mergedAffine = mergeAffineValueStates(mergedAffine, elseSnapshot.Affine)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elseSnapshot.BorrowedOwnerRefs)
 				functionValueBranches = append(functionValueBranches, elseSnapshot.FunctionValues)
+				specializedValueTypeBranches = append(specializedValueTypeBranches, elseSnapshot.SpecializedValueTypes)
 			}
 		} else {
 			elseSnapshot := a.analyzeBlockWithAffineClone(n.Else, NewScope(a.currentScope))
@@ -211,15 +225,20 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				mergedAffine = mergeAffineValueStates(mergedAffine, elseSnapshot.Affine)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elseSnapshot.BorrowedOwnerRefs)
 				functionValueBranches = append(functionValueBranches, elseSnapshot.FunctionValues)
+				specializedValueTypeBranches = append(specializedValueTypeBranches, elseSnapshot.SpecializedValueTypes)
 			}
 		}
 		if len(n.Else) == 0 {
 			functionValueBranches = append(functionValueBranches, a.currentFunctionValues)
+			specializedValueTypeBranches = append(specializedValueTypeBranches, a.currentSpecializedValueTypes)
 		}
 		a.currentAffineValues = mergedAffine
 		a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 		if mergedFunctionValues, ok := a.intersectFunctionValueFlows(functionValueBranches...); ok {
 			a.currentFunctionValues = mergedFunctionValues
+		}
+		if mergedSpecializedValueTypes, ok := a.intersectSpecializedValueTypeFlows(specializedValueTypeBranches...); ok {
+			a.currentSpecializedValueTypes = mergedSpecializedValueTypes
 		}
 		a.applyPostIfFallthroughRefinement(n)
 	case *ast.MatchStmt:
@@ -240,15 +259,18 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		mergedAffine := a.cloneAffineValueStates()
 		mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
 		mergedFunctionValues := a.cloneFunctionValueBindings()
+		mergedSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
 		bodySnapshot := a.analyzeBlockWithAffineClone(n.Body, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
 		if !blockDefinitelyExits(n.Body) {
 			mergedAffine = mergeAffineValueStates(mergedAffine, bodySnapshot.Affine)
 			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, bodySnapshot.BorrowedOwnerRefs)
 			mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, bodySnapshot.FunctionValues)
+			mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, bodySnapshot.SpecializedValueTypes)
 		}
 		a.currentAffineValues = mergedAffine
 		a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 		a.currentFunctionValues = mergedFunctionValues
+		a.currentSpecializedValueTypes = mergedSpecializedValueTypes
 	case *ast.PassStmt:
 		return
 	case *ast.PanicStmt:
@@ -844,9 +866,11 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 	baselineAffine := a.cloneAffineValueStates()
 	baselineBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
 	baselineFunctionValues := a.cloneFunctionValueBindings()
+	baselineSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
 	var mergedAffine map[affineValueKey]affineValueState
 	var mergedBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
 	var mergedFunctionValues map[*Symbol]*FuncType
+	var mergedSpecializedValueTypes map[*Symbol]Type
 	hasFallthrough := false
 	priorPatterns := make([]ast.MatchPattern, 0, len(stmt.Arms))
 	covered := map[string]bool{}
@@ -865,11 +889,13 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 				mergedAffine = armSnapshot.Affine
 				mergedBorrowedOwnerRefs = armSnapshot.BorrowedOwnerRefs
 				mergedFunctionValues = armSnapshot.FunctionValues
+				mergedSpecializedValueTypes = armSnapshot.SpecializedValueTypes
 				hasFallthrough = true
 			} else {
 				mergedAffine = mergeAffineValueStates(mergedAffine, armSnapshot.Affine)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, armSnapshot.BorrowedOwnerRefs)
 				mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, armSnapshot.FunctionValues)
+				mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, armSnapshot.SpecializedValueTypes)
 			}
 		}
 		priorPatterns = append(priorPatterns, arm.Pattern)
@@ -879,15 +905,18 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 			mergedAffine = baselineAffine
 			mergedBorrowedOwnerRefs = baselineBorrowedOwnerRefs
 			mergedFunctionValues = baselineFunctionValues
+			mergedSpecializedValueTypes = baselineSpecializedValueTypes
 		} else {
 			mergedAffine = mergeAffineValueStates(mergedAffine, baselineAffine)
 			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, baselineBorrowedOwnerRefs)
 			mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, baselineFunctionValues)
+			mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, baselineSpecializedValueTypes)
 		}
 	}
 	a.currentAffineValues = mergedAffine
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 	a.currentFunctionValues = mergedFunctionValues
+	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
 }
 
 func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
@@ -907,9 +936,11 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 	baselineAffine := a.cloneAffineValueStates()
 	baselineBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
 	baselineFunctionValues := a.cloneFunctionValueBindings()
+	baselineSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
 	var mergedAffine map[affineValueKey]affineValueState
 	var mergedBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
 	var mergedFunctionValues map[*Symbol]*FuncType
+	var mergedSpecializedValueTypes map[*Symbol]Type
 	hasFallthrough := false
 	priorPatterns := make([]ast.MatchPattern, 0, len(expr.Arms))
 	for i, arm := range expr.Arms {
@@ -926,11 +957,13 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 				mergedAffine = armSnapshot.Affine
 				mergedBorrowedOwnerRefs = armSnapshot.BorrowedOwnerRefs
 				mergedFunctionValues = armSnapshot.FunctionValues
+				mergedSpecializedValueTypes = armSnapshot.SpecializedValueTypes
 				hasFallthrough = true
 			} else {
 				mergedAffine = mergeAffineValueStates(mergedAffine, armSnapshot.Affine)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, armSnapshot.BorrowedOwnerRefs)
 				mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, armSnapshot.FunctionValues)
+				mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, armSnapshot.SpecializedValueTypes)
 			}
 		}
 		if resultType == nil {
@@ -953,15 +986,18 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 			mergedAffine = baselineAffine
 			mergedBorrowedOwnerRefs = baselineBorrowedOwnerRefs
 			mergedFunctionValues = baselineFunctionValues
+			mergedSpecializedValueTypes = baselineSpecializedValueTypes
 		} else {
 			mergedAffine = mergeAffineValueStates(mergedAffine, baselineAffine)
 			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, baselineBorrowedOwnerRefs)
 			mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, baselineFunctionValues)
+			mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, baselineSpecializedValueTypes)
 		}
 	}
 	a.currentAffineValues = mergedAffine
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 	a.currentFunctionValues = mergedFunctionValues
+	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
 	a.reportNonExhaustiveMatch(expr.Pos(), enumType, covered, hasWildcard)
 	if resultType == nil {
 		return neverType
@@ -1369,10 +1405,11 @@ func (a *Analyzer) analyzeBlockWithRegionClone(stmts []ast.Stmt, scope *Scope) {
 }
 
 type affineFlowSnapshot struct {
-	Affine            map[affineValueKey]affineValueState
-	BorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
-	FunctionValues    map[*Symbol]*FuncType
-	ValueBindings     map[*Symbol]ast.Expr
+	Affine                map[affineValueKey]affineValueState
+	BorrowedOwnerRefs     map[*Symbol]borrowedOwnerRefState
+	FunctionValues        map[*Symbol]*FuncType
+	SpecializedValueTypes map[*Symbol]Type
+	ValueBindings         map[*Symbol]ast.Expr
 }
 
 type borrowedOwnerRefSummaryTarget struct {
@@ -1390,16 +1427,19 @@ func (a *Analyzer) analyzeBlockWithAffineClone(stmts []ast.Stmt, scope *Scope) a
 	savedAffine := a.currentAffineValues
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
 	savedFunctionValues := a.currentFunctionValues
+	savedSpecializedValueTypes := a.currentSpecializedValueTypes
 	savedValueBindings := a.currentValueBindings
 	a.currentAffineValues = a.cloneAffineValueStates()
 	a.currentBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
 	a.currentFunctionValues = a.cloneFunctionValueBindings()
+	a.currentSpecializedValueTypes = a.cloneSpecializedValueTypeBindings()
 	a.currentValueBindings = a.cloneValueBindings()
 	a.analyzeBlockWithRegionClone(stmts, scope)
-	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), ValueBindings: a.cloneValueBindings()}
+	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), ValueBindings: a.cloneValueBindings()}
 	a.currentAffineValues = savedAffine
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentFunctionValues = savedFunctionValues
+	a.currentSpecializedValueTypes = savedSpecializedValueTypes
 	a.currentValueBindings = savedValueBindings
 	return snapshot
 }
@@ -2180,6 +2220,114 @@ func (a *Analyzer) cloneFunctionValueBindings() map[*Symbol]*FuncType {
 	return cloned
 }
 
+func (a *Analyzer) cloneTrackedValueType(t Type) Type {
+	return a.cloneTrackedValueTypeWithSeen(t, map[Type]Type{})
+}
+
+func (a *Analyzer) cloneTrackedValueTypeWithSeen(t Type, seen map[Type]Type) Type {
+	if t == nil {
+		return nil
+	}
+	if cloned, ok := seen[t]; ok {
+		return cloned
+	}
+	switch tt := t.(type) {
+	case *StructType:
+		cloned := *tt
+		cloned.Fields = map[string]Field{}
+		clonedPtr := &cloned
+		seen[t] = clonedPtr
+		for name, field := range tt.Fields {
+			field.Type = a.cloneTrackedValueTypeWithSeen(field.Type, seen)
+			cloned.Fields[name] = field
+		}
+		return clonedPtr
+	case *GenericInstanceType:
+		cloned := *tt
+		cloned.Args = make([]Type, len(tt.Args))
+		seen[t] = &cloned
+		for i, arg := range tt.Args {
+			cloned.Args[i] = a.cloneTrackedValueTypeWithSeen(arg, seen)
+		}
+		cloned.Base = a.cloneTrackedValueTypeWithSeen(tt.Base, seen)
+		return &cloned
+	case *RefType:
+		cloned := *tt
+		seen[t] = &cloned
+		cloned.Elem = a.cloneTrackedValueTypeWithSeen(tt.Elem, seen)
+		return &cloned
+	case *ArrayType:
+		cloned := *tt
+		seen[t] = &cloned
+		cloned.Elem = a.cloneTrackedValueTypeWithSeen(tt.Elem, seen)
+		return &cloned
+	case *DArrayType:
+		cloned := *tt
+		seen[t] = &cloned
+		cloned.Elem = a.cloneTrackedValueTypeWithSeen(tt.Elem, seen)
+		return &cloned
+	case *ViewType:
+		cloned := *tt
+		seen[t] = &cloned
+		cloned.Elem = a.cloneTrackedValueTypeWithSeen(tt.Elem, seen)
+		return &cloned
+	case *DArrayViewType:
+		cloned := *tt
+		seen[t] = &cloned
+		cloned.Elem = a.cloneTrackedValueTypeWithSeen(tt.Elem, seen)
+		return &cloned
+	case *DictType:
+		cloned := *tt
+		seen[t] = &cloned
+		cloned.Key = a.cloneTrackedValueTypeWithSeen(tt.Key, seen)
+		cloned.Value = a.cloneTrackedValueTypeWithSeen(tt.Value, seen)
+		return &cloned
+	case *FuncType:
+		cloned, _ := a.substituteType(tt, nil, nil, nil, nil).(*FuncType)
+		if cloned == nil {
+			return nil
+		}
+		seen[t] = cloned
+		return cloned
+	case *ErrorUnionType:
+		cloned := *tt
+		seen[t] = &cloned
+		cloned.Value = a.cloneTrackedValueTypeWithSeen(tt.Value, seen)
+		return &cloned
+	case *PackedEnumStoreType:
+		cloned := *tt
+		seen[t] = &cloned
+		cloned.State = a.cloneTrackedValueTypeWithSeen(tt.State, seen)
+		return &cloned
+	case *DStrType:
+		cloned := *tt
+		seen[t] = &cloned
+		return &cloned
+	case *SViewType:
+		cloned := *tt
+		seen[t] = &cloned
+		return &cloned
+	case *BuiltinType, *TypeParamType, *NeverType, *NullType, *InvalidType, *ErrorSetType, *EnumType, *OpaqueType:
+		seen[t] = t
+		return t
+	default:
+		cloned := a.substituteType(t, nil, nil, nil, nil)
+		seen[t] = cloned
+		return cloned
+	}
+}
+
+func (a *Analyzer) cloneSpecializedValueTypeBindings() map[*Symbol]Type {
+	if a.currentSpecializedValueTypes == nil {
+		return nil
+	}
+	cloned := make(map[*Symbol]Type, len(a.currentSpecializedValueTypes))
+	for sym, typ := range a.currentSpecializedValueTypes {
+		cloned[sym] = a.cloneTrackedValueType(typ)
+	}
+	return cloned
+}
+
 func (a *Analyzer) cloneValueBindings() map[*Symbol]ast.Expr {
 	if a.currentValueBindings == nil {
 		return nil
@@ -2312,6 +2460,185 @@ func (a *Analyzer) mergeFunctionValueBindings(dst map[*Symbol]*FuncType, src map
 		}
 	}
 	return merged
+}
+
+func (a *Analyzer) mergeSpecializedValueTypes(dst Type, src Type) (Type, bool) {
+	if dst == nil || src == nil || !SameType(dst, src) {
+		return nil, false
+	}
+	if dstFunc, ok := dst.(*FuncType); ok {
+		srcFunc, ok := src.(*FuncType)
+		if !ok {
+			return nil, false
+		}
+		return a.mergeFunctionValueTypes(dstFunc, srcFunc)
+	}
+	switch tt := dst.(type) {
+	case *StructType:
+		srcStruct, ok := src.(*StructType)
+		if !ok {
+			return nil, false
+		}
+		fields := cloneStructFields(tt.Fields)
+		for name, field := range tt.Fields {
+			srcField, ok := srcStruct.Fields[name]
+			if !ok {
+				continue
+			}
+			mergedFieldType, ok := a.mergeSpecializedValueTypes(field.Type, srcField.Type)
+			if !ok {
+				continue
+			}
+			field.Type = mergedFieldType
+			fields[name] = field
+		}
+		return cloneStructTypeWithFields(tt, fields), true
+	case *GenericInstanceType:
+		srcInstance, ok := src.(*GenericInstanceType)
+		if !ok {
+			return nil, false
+		}
+		mergedBase, ok := a.mergeSpecializedValueTypes(tt.Base, srcInstance.Base)
+		if !ok {
+			return nil, false
+		}
+		args := make([]Type, 0, len(tt.Args))
+		for _, arg := range tt.Args {
+			args = append(args, a.cloneTrackedValueType(arg))
+		}
+		cloned := *tt
+		cloned.Args = args
+		cloned.Base = mergedBase
+		return &cloned, true
+	case *RefType:
+		srcRef, ok := src.(*RefType)
+		if !ok {
+			return nil, false
+		}
+		mergedElem, ok := a.mergeSpecializedValueTypes(tt.Elem, srcRef.Elem)
+		if !ok {
+			return nil, false
+		}
+		cloned := *tt
+		cloned.Elem = mergedElem
+		return &cloned, true
+	case *ArrayType:
+		srcArray, ok := src.(*ArrayType)
+		if !ok {
+			return nil, false
+		}
+		mergedElem, ok := a.mergeSpecializedValueTypes(tt.Elem, srcArray.Elem)
+		if !ok {
+			return nil, false
+		}
+		cloned := *tt
+		cloned.Elem = mergedElem
+		return &cloned, true
+	case *DArrayType:
+		srcArray, ok := src.(*DArrayType)
+		if !ok {
+			return nil, false
+		}
+		mergedElem, ok := a.mergeSpecializedValueTypes(tt.Elem, srcArray.Elem)
+		if !ok {
+			return nil, false
+		}
+		cloned := *tt
+		cloned.Elem = mergedElem
+		return &cloned, true
+	case *ViewType:
+		srcView, ok := src.(*ViewType)
+		if !ok {
+			return nil, false
+		}
+		mergedElem, ok := a.mergeSpecializedValueTypes(tt.Elem, srcView.Elem)
+		if !ok {
+			return nil, false
+		}
+		cloned := *tt
+		cloned.Elem = mergedElem
+		return &cloned, true
+	case *DArrayViewType:
+		srcView, ok := src.(*DArrayViewType)
+		if !ok {
+			return nil, false
+		}
+		mergedElem, ok := a.mergeSpecializedValueTypes(tt.Elem, srcView.Elem)
+		if !ok {
+			return nil, false
+		}
+		cloned := *tt
+		cloned.Elem = mergedElem
+		return &cloned, true
+	case *DictType:
+		srcDict, ok := src.(*DictType)
+		if !ok {
+			return nil, false
+		}
+		mergedKey, ok := a.mergeSpecializedValueTypes(tt.Key, srcDict.Key)
+		if !ok {
+			return nil, false
+		}
+		mergedValue, ok := a.mergeSpecializedValueTypes(tt.Value, srcDict.Value)
+		if !ok {
+			return nil, false
+		}
+		cloned := *tt
+		cloned.Key = mergedKey
+		cloned.Value = mergedValue
+		return &cloned, true
+	default:
+		return a.cloneTrackedValueType(dst), true
+	}
+}
+
+func (a *Analyzer) mergeSpecializedValueTypeBindings(dst map[*Symbol]Type, src map[*Symbol]Type) map[*Symbol]Type {
+	if dst == nil || src == nil {
+		return nil
+	}
+	merged := make(map[*Symbol]Type, len(dst))
+	for sym, typ := range dst {
+		srcType, ok := src[sym]
+		if !ok {
+			continue
+		}
+		mergedType, ok := a.mergeSpecializedValueTypes(typ, srcType)
+		if !ok {
+			continue
+		}
+		if normalized, ok := a.specializeCallbackCarryingType(sym.Type, mergedType); ok {
+			merged[sym] = normalized
+		}
+	}
+	return merged
+}
+
+func (a *Analyzer) cloneSpecializedValueTypeMap(src map[*Symbol]Type) map[*Symbol]Type {
+	if src == nil {
+		return nil
+	}
+	cloned := make(map[*Symbol]Type, len(src))
+	for sym, typ := range src {
+		cloned[sym] = a.cloneTrackedValueType(typ)
+	}
+	return cloned
+}
+
+func (a *Analyzer) intersectSpecializedValueTypeFlows(flows ...map[*Symbol]Type) (map[*Symbol]Type, bool) {
+	var merged map[*Symbol]Type
+	mergedAny := false
+	for _, flow := range flows {
+		if !mergedAny {
+			merged = a.cloneSpecializedValueTypeMap(flow)
+			mergedAny = true
+			continue
+		}
+		merged = a.mergeSpecializedValueTypeBindings(merged, flow)
+	}
+	if !mergedAny {
+		return nil, false
+	}
+	return merged, true
 }
 
 func (a *Analyzer) cloneFunctionValueMap(src map[*Symbol]*FuncType) map[*Symbol]*FuncType {
@@ -2495,6 +2822,20 @@ func (a *Analyzer) recordValueBinding(sym *Symbol, value ast.Expr) {
 	a.currentValueBindings[sym] = value
 }
 
+func (a *Analyzer) recordSpecializedValueTypeBinding(sym *Symbol, valueType Type) {
+	if a.currentSpecializedValueTypes == nil || sym == nil {
+		return
+	}
+	if sym.Kind != SymbolLocal && sym.Kind != SymbolParam {
+		return
+	}
+	if specializedType, ok := a.specializeCallbackCarryingType(sym.Type, valueType); ok {
+		a.currentSpecializedValueTypes[sym] = a.cloneTrackedValueType(specializedType)
+		return
+	}
+	delete(a.currentSpecializedValueTypes, sym)
+}
+
 func (a *Analyzer) recordFunctionValueBinding(sym *Symbol, value ast.Expr) {
 	if a.currentFunctionValues == nil || sym == nil {
 		return
@@ -2508,6 +2849,126 @@ func (a *Analyzer) recordFunctionValueBinding(sym *Symbol, value ast.Expr) {
 		return
 	}
 	a.currentFunctionValues[sym] = fnType
+}
+
+func (a *Analyzer) updateSpecializedValueTypeAtPath(declared Type, current Type, steps []borrowReturnAnnotationStep, actual Type) (Type, bool) {
+	if declared == nil {
+		return nil, false
+	}
+	if current == nil {
+		current = declared
+	}
+	if len(steps) == 0 {
+		if specialized, ok := a.specializeCallbackCarryingType(declared, actual); ok {
+			return specialized, true
+		}
+		return a.cloneTrackedValueType(declared), true
+	}
+	step := steps[0]
+	if step.Field == "" {
+		return nil, false
+	}
+	switch declaredType := declared.(type) {
+	case *RefType:
+		currentType, _ := current.(*RefType)
+		if currentType == nil {
+			currentType = declaredType
+		}
+		nextElem, ok := a.updateSpecializedValueTypeAtPath(declaredType.Elem, currentType.Elem, steps, actual)
+		if !ok {
+			return nil, false
+		}
+		cloned := *currentType
+		cloned.Elem = nextElem
+		return &cloned, true
+	case *StructType:
+		currentType, _ := current.(*StructType)
+		if currentType == nil {
+			currentType = declaredType
+		}
+		declaredFieldType, ok := a.lookupResolvedFieldType(declaredType, step.Field)
+		if !ok {
+			return nil, false
+		}
+		currentFieldType, ok := a.lookupResolvedFieldType(currentType, step.Field)
+		if !ok {
+			currentFieldType = declaredFieldType
+		}
+		nextFieldType, ok := a.updateSpecializedValueTypeAtPath(declaredFieldType, currentFieldType, steps[1:], actual)
+		if !ok {
+			return nil, false
+		}
+		fields := cloneStructFields(currentType.Fields)
+		field, ok := fields[step.Field]
+		if !ok {
+			return nil, false
+		}
+		field.Type = nextFieldType
+		fields[step.Field] = field
+		return cloneStructTypeWithFields(currentType, fields), true
+	case *GenericInstanceType:
+		currentType, _ := current.(*GenericInstanceType)
+		if currentType == nil {
+			currentType = declaredType
+		}
+		declaredFieldType, ok := a.lookupResolvedFieldType(declaredType, step.Field)
+		if !ok {
+			return nil, false
+		}
+		currentFieldType, ok := a.lookupResolvedFieldType(currentType, step.Field)
+		if !ok {
+			currentFieldType = declaredFieldType
+		}
+		nextFieldType, ok := a.updateSpecializedValueTypeAtPath(declaredFieldType, currentFieldType, steps[1:], actual)
+		if !ok {
+			return nil, false
+		}
+		baseStruct, ok := currentType.Base.(*StructType)
+		if !ok || baseStruct == nil {
+			return nil, false
+		}
+		fields := cloneStructFields(baseStruct.Fields)
+		field, ok := fields[step.Field]
+		if !ok {
+			return nil, false
+		}
+		field.Type = nextFieldType
+		fields[step.Field] = field
+		clonedBase := cloneStructTypeWithFields(baseStruct, fields)
+		cloned := *currentType
+		cloned.Base = clonedBase
+		return &cloned, true
+	default:
+		return nil, false
+	}
+}
+
+func (a *Analyzer) recordSpecializedValueTypeTarget(target ast.Expr, valueType Type) {
+	if a.currentSpecializedValueTypes == nil {
+		return
+	}
+	root, steps, ok := a.lookupBorrowedOwnerRefTargetPath(target)
+	if !ok || root == nil {
+		return
+	}
+	if len(steps) == 0 {
+		a.recordSpecializedValueTypeBinding(root, valueType)
+		return
+	}
+	current := root.Type
+	if currentType, ok := a.lookupCurrentSpecializedValueType(root); ok {
+		current = currentType
+	}
+	updatedType, ok := a.updateSpecializedValueTypeAtPath(root.Type, current, steps, valueType)
+	if !ok {
+		delete(a.currentSpecializedValueTypes, root)
+		return
+	}
+	if specializedType, ok := a.specializeCallbackCarryingType(root.Type, updatedType); ok {
+		a.currentSpecializedValueTypes[root] = a.cloneTrackedValueType(specializedType)
+		return
+	}
+	delete(a.currentSpecializedValueTypes, root)
 }
 
 func (a *Analyzer) recordFunctionValueTarget(target ast.Expr, value ast.Expr) {
@@ -2556,6 +3017,17 @@ func (a *Analyzer) lookupCurrentFunctionValueType(sym *Symbol) (*FuncType, bool)
 		return nil, false
 	}
 	return a.cloneFunctionValueType(fnType), true
+}
+
+func (a *Analyzer) lookupCurrentSpecializedValueType(sym *Symbol) (Type, bool) {
+	if a.currentSpecializedValueTypes == nil || sym == nil {
+		return nil, false
+	}
+	valueType, ok := a.currentSpecializedValueTypes[sym]
+	if !ok || valueType == nil {
+		return nil, false
+	}
+	return a.cloneTrackedValueType(valueType), true
 }
 
 func projectBorrowedOwnerRefFieldState(state borrowedOwnerRefState, field string) (borrowedOwnerRefState, bool) {
@@ -3638,16 +4110,19 @@ func (a *Analyzer) analyzeExprInAffineScope(expr ast.Expr, scope *Scope) (Type, 
 	savedAffine := a.currentAffineValues
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
 	savedFunctionValues := a.currentFunctionValues
+	savedSpecializedValueTypes := a.currentSpecializedValueTypes
 	savedValueBindings := a.currentValueBindings
 	a.currentAffineValues = a.cloneAffineValueStates()
 	a.currentBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
 	a.currentFunctionValues = a.cloneFunctionValueBindings()
+	a.currentSpecializedValueTypes = a.cloneSpecializedValueTypeBindings()
 	a.currentValueBindings = a.cloneValueBindings()
 	result := a.analyzeExprInScope(expr, scope)
-	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), ValueBindings: a.cloneValueBindings()}
+	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), ValueBindings: a.cloneValueBindings()}
 	a.currentAffineValues = savedAffine
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentFunctionValues = savedFunctionValues
+	a.currentSpecializedValueTypes = savedSpecializedValueTypes
 	a.currentValueBindings = savedValueBindings
 	return result, snapshot
 }
@@ -3656,16 +4131,19 @@ func (a *Analyzer) analyzeMatchExprArmBodyWithAffineSnapshot(body []ast.Stmt, sc
 	savedAffine := a.currentAffineValues
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
 	savedFunctionValues := a.currentFunctionValues
+	savedSpecializedValueTypes := a.currentSpecializedValueTypes
 	savedValueBindings := a.currentValueBindings
 	a.currentAffineValues = a.cloneAffineValueStates()
 	a.currentBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
 	a.currentFunctionValues = a.cloneFunctionValueBindings()
+	a.currentSpecializedValueTypes = a.cloneSpecializedValueTypeBindings()
 	a.currentValueBindings = a.cloneValueBindings()
 	result := a.analyzeMatchExprArmBody(body, scope)
-	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), ValueBindings: a.cloneValueBindings()}
+	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), ValueBindings: a.cloneValueBindings()}
 	a.currentAffineValues = savedAffine
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentFunctionValues = savedFunctionValues
+	a.currentSpecializedValueTypes = savedSpecializedValueTypes
 	a.currentValueBindings = savedValueBindings
 	return result, snapshot
 }
