@@ -2593,6 +2593,112 @@ def different_bounds_view(left: dstr[row], right: dstr[col]) -> bool:
 	}
 }
 
+func TestGenerateLLVMIRSpecializesConstantStringSliceEquality(t *testing.T) {
+	src := `extern ctx_string_slice_eq(value: dstr[row], start: i64, end: i64, other: dstr[col]) -> int
+
+def slice_eq_const(text: dstr[row], other: dstr[col]) -> bool:
+	return ctx_string_slice_eq(text, 1, 3, other) != 0
+
+def slice_eq_empty(text: dstr[row], other: dstr[col]) -> bool:
+	return ctx_string_slice_eq(text, 2, 2, other) != 0
+
+def slice_eq_unknown(text: dstr[row], start: i64, end: i64, other: dstr[col]) -> bool:
+	return ctx_string_slice_eq(text, start, end, other) != 0
+`
+	result := parseAndAnalyze(t, "backend_runtime_string_slice_eq.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	sliceEqConstBody := functionIR(output, "slice_eq_const")
+	if sliceEqConstBody == "" {
+		t.Fatalf("expected to find slice_eq_const body, got:\n%s", output)
+	}
+	for _, want := range []string{"call i64 @ctx_strlen(ptr", "call i64 @memcmp(ptr"} {
+		if !strings.Contains(sliceEqConstBody, want) {
+			t.Fatalf("expected slice_eq_const to contain %q, got:\n%s", want, sliceEqConstBody)
+		}
+	}
+	if strings.Contains(sliceEqConstBody, "call i64 @ctx_string_slice_eq") {
+		t.Fatalf("expected slice_eq_const to avoid ctx_string_slice_eq helper fallback, got:\n%s", sliceEqConstBody)
+	}
+
+	sliceEqEmptyBody := functionIR(output, "slice_eq_empty")
+	if sliceEqEmptyBody == "" {
+		t.Fatalf("expected to find slice_eq_empty body, got:\n%s", output)
+	}
+	if !strings.Contains(sliceEqEmptyBody, "call i64 @ctx_strlen(ptr") {
+		t.Fatalf("expected slice_eq_empty to contain ctx_strlen length check, got:\n%s", sliceEqEmptyBody)
+	}
+	for _, bad := range []string{"call i64 @ctx_string_slice_eq"} {
+		if strings.Contains(sliceEqEmptyBody, bad) {
+			t.Fatalf("expected slice_eq_empty to avoid %q, got:\n%s", bad, sliceEqEmptyBody)
+		}
+	}
+
+	sliceEqUnknownBody := functionIR(output, "slice_eq_unknown")
+	if sliceEqUnknownBody == "" {
+		t.Fatalf("expected to find slice_eq_unknown body, got:\n%s", output)
+	}
+	if !strings.Contains(sliceEqUnknownBody, "call i64 @ctx_string_slice_eq(ptr") {
+		t.Fatalf("expected slice_eq_unknown to keep helper fallback when bounds are not constant, got:\n%s", sliceEqUnknownBody)
+	}
+}
+
+func TestGenerateLLVMIRSpecializesConstantStringSlicesEquality(t *testing.T) {
+	src := `extern ctx_string_slices_eq(lhs: dstr[row], lhs_start: i64, lhs_end: i64, rhs: dstr[col], rhs_start: i64, rhs_end: i64) -> int
+
+def slices_eq_const(left: dstr[row], right: dstr[col]) -> bool:
+	return ctx_string_slices_eq(left, 1, 4, right, 2, 5) != 0
+
+def slices_eq_empty(left: dstr[row], right: dstr[col]) -> bool:
+	return ctx_string_slices_eq(left, 3, 3, right, 7, 7) != 0
+
+def slices_eq_unknown(left: dstr[row], left_start: i64, left_end: i64, right: dstr[col], right_start: i64, right_end: i64) -> bool:
+	return ctx_string_slices_eq(left, left_start, left_end, right, right_start, right_end) != 0
+`
+	result := parseAndAnalyze(t, "backend_runtime_string_slices_eq.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	slicesEqConstBody := functionIR(output, "slices_eq_const")
+	if slicesEqConstBody == "" {
+		t.Fatalf("expected to find slices_eq_const body, got:\n%s", output)
+	}
+	for _, want := range []string{"call i64 @ctx_strlen(ptr", "call i64 @memcmp(ptr"} {
+		if !strings.Contains(slicesEqConstBody, want) {
+			t.Fatalf("expected slices_eq_const to contain %q, got:\n%s", want, slicesEqConstBody)
+		}
+	}
+	if strings.Contains(slicesEqConstBody, "call i64 @ctx_string_slices_eq") {
+		t.Fatalf("expected slices_eq_const to avoid ctx_string_slices_eq helper fallback, got:\n%s", slicesEqConstBody)
+	}
+
+	slicesEqEmptyBody := functionIR(output, "slices_eq_empty")
+	if slicesEqEmptyBody == "" {
+		t.Fatalf("expected to find slices_eq_empty body, got:\n%s", output)
+	}
+	if !strings.Contains(slicesEqEmptyBody, "call i64 @ctx_strlen(ptr") {
+		t.Fatalf("expected slices_eq_empty to contain ctx_strlen length checks, got:\n%s", slicesEqEmptyBody)
+	}
+	for _, bad := range []string{"call i64 @ctx_string_slices_eq"} {
+		if strings.Contains(slicesEqEmptyBody, bad) {
+			t.Fatalf("expected slices_eq_empty to avoid %q, got:\n%s", bad, slicesEqEmptyBody)
+		}
+	}
+
+	slicesEqUnknownBody := functionIR(output, "slices_eq_unknown")
+	if slicesEqUnknownBody == "" {
+		t.Fatalf("expected to find slices_eq_unknown body, got:\n%s", output)
+	}
+	if !strings.Contains(slicesEqUnknownBody, "call i64 @ctx_string_slices_eq(ptr") {
+		t.Fatalf("expected slices_eq_unknown to keep helper fallback when bounds are not constant, got:\n%s", slicesEqUnknownBody)
+	}
+}
+
 func TestGenerateLLVMIRSpecializesTinyStringViewLiteralEquality(t *testing.T) {
 	src := `def same_empty(view: StringView) -> bool:
 	return view == ""
@@ -3676,8 +3782,13 @@ def copy_unknown(text: dstr[row], start: i64, end: i64) -> dstr:
 	if copyFullBody == "" {
 		t.Fatalf("expected to find copy_full body, got:\n%s", output)
 	}
-	if !strings.Contains(copyFullBody, "call ptr @ctx_string_slice(ptr") {
-		t.Fatalf("expected copy_full to keep helper fallback for full-span semantics, got:\n%s", copyFullBody)
+	for _, bad := range []string{"call ptr @ctx_string_slice", "call ptr @alloc_perm", "call ptr @intern_small_string", "call ptr @memcpy"} {
+		if strings.Contains(copyFullBody, bad) {
+			t.Fatalf("expected copy_full to lower as a direct return without %q, got:\n%s", bad, copyFullBody)
+		}
+	}
+	if strings.Contains(copyFullBody, "call ") {
+		t.Fatalf("expected copy_full to avoid all helper calls on the full-span fast path, got:\n%s", copyFullBody)
 	}
 
 	copyUnknownBody := functionIR(output, "copy_unknown")

@@ -1195,6 +1195,12 @@ func (s *functionState) emitSpecializedRuntimeCall(expr *ast.CallExpr) (C.LLVMVa
 	if value, actualType, handled, err := s.emitSpecializedStringViewLiteralCall(expr); handled {
 		return value, actualType, true, err
 	}
+	if value, actualType, handled, err := s.emitSpecializedStringSliceEqCall(expr); handled {
+		return value, actualType, true, err
+	}
+	if value, actualType, handled, err := s.emitSpecializedStringSlicesEqCall(expr); handled {
+		return value, actualType, true, err
+	}
 	ident, ok := expr.Func.(*ast.Ident)
 	if !ok {
 		return nil, nil, false, nil
@@ -1223,6 +1229,276 @@ func (s *functionState) emitSpecializedRuntimeCall(expr *ast.CallExpr) (C.LLVMVa
 		return nil, nil, true, err
 	}
 	return C.LLVMBuildZExt(s.builder, cmp, intLLVMType, cStringFree("svlit.eq.int")), intType, true, nil
+}
+
+func (s *functionState) staticIntLiteral(expr ast.Expr) (int64, bool) {
+	switch n := expr.(type) {
+	case *ast.IntLit:
+		value := n.Value
+		if n.Suffix != "" {
+			value += n.Suffix
+		}
+		return parseOptimizationExtentConstInt(value)
+	case *ast.ParenExpr:
+		return s.staticIntLiteral(n.Inner)
+	case *ast.CastExpr:
+		return s.staticIntLiteral(n.Operand)
+	case *ast.CanExpr:
+		return s.staticIntLiteral(n.Expr)
+	default:
+		return 0, false
+	}
+}
+
+func (s *functionState) emitMinInt64Value(left C.LLVMValueRef, right C.LLVMValueRef, namePrefix string) C.LLVMValueRef {
+	chooseLeft := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntSLE), left, right, cStringFree(namePrefix+".chooseleft"))
+	leftBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(namePrefix+".left"))
+	rightBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(namePrefix+".right"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(namePrefix+".merge"))
+	C.LLVMBuildCondBr(s.builder, chooseLeft, leftBB, rightBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, leftBB)
+	leftEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, rightBB)
+	rightEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	phi := C.LLVMBuildPhi(s.builder, C.LLVMInt64TypeInContext(s.g.context), cStringFree(namePrefix))
+	values := []C.LLVMValueRef{left, right}
+	blocks := []C.LLVMBasicBlockRef{leftEnd, rightEnd}
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	return phi
+}
+
+func (s *functionState) emitConstantClampedStringSliceOperand(expr ast.Expr, exprType semantic.Type, start int64, end int64, namePrefix string) (C.LLVMValueRef, C.LLVMValueRef, error) {
+	if classifyRuntimeStringCompareKind(exprType) != runtimeStringCompareDStr {
+		return nil, nil, fmt.Errorf("constant string slice specialization requires dstr operand")
+	}
+	stringValue, _, err := s.emitExpr(expr, exprType)
+	if err != nil {
+		return nil, nil, err
+	}
+	i64Type := s.g.result.NamedTypes["i64"]
+	stringLen, err := s.emitRuntimeStringLengthValue(stringValue, exprType, i64Type, namePrefix+".len")
+	if err != nil {
+		return nil, nil, err
+	}
+	i64LLVMType := C.LLVMInt64TypeInContext(s.g.context)
+	zeroI64 := C.LLVMConstInt(i64LLVMType, 0, 0)
+	clampedStart := zeroI64
+	if start > 0 {
+		startValue := C.LLVMConstInt(i64LLVMType, C.ulonglong(start), 0)
+		clampedStart = s.emitMinInt64Value(startValue, stringLen, namePrefix+".start")
+	}
+	clampedEnd := stringLen
+	if end >= 0 {
+		endValue := C.LLVMConstInt(i64LLVMType, C.ulonglong(end), 0)
+		clampedEnd = s.emitMinInt64Value(endValue, stringLen, namePrefix+".end")
+	}
+	sliceLen := C.LLVMBuildSub(s.builder, clampedEnd, clampedStart, cStringFree(namePrefix+".slice.len"))
+	sliceData := stringValue
+	if start > 0 {
+		usizeType := s.g.result.NamedTypes["usize"]
+		clampedStartUsize, err := s.coerceValue(clampedStart, i64Type, usizeType)
+		if err != nil {
+			return nil, nil, err
+		}
+		i8LLVMType, err := s.g.lowerBuiltin("u8")
+		if err != nil {
+			return nil, nil, err
+		}
+		indices := []C.LLVMValueRef{clampedStartUsize}
+		sliceData = C.LLVMBuildGEP2(s.builder, i8LLVMType, stringValue, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree(namePrefix+".data"))
+	}
+	return sliceData, sliceLen, nil
+}
+
+func (s *functionState) emitSpecializedStringSliceEqCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	ident, ok := expr.Func.(*ast.Ident)
+	if !ok || ident.Name != "ctx_string_slice_eq" {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 4 || s == nil || s.g == nil || s.g.result == nil {
+		return nil, nil, false, nil
+	}
+	textExpr := expr.Args[0]
+	startExpr := expr.Args[1]
+	endExpr := expr.Args[2]
+	otherExpr := expr.Args[3]
+	textType := s.exprType(textExpr)
+	otherType := s.exprType(otherExpr)
+	if classifyRuntimeStringCompareKind(textType) != runtimeStringCompareDStr || classifyRuntimeStringCompareKind(otherType) != runtimeStringCompareDStr {
+		return nil, nil, false, nil
+	}
+	start, ok := s.staticIntLiteral(startExpr)
+	if !ok || start < 0 {
+		return nil, nil, false, nil
+	}
+	end, ok := s.staticIntLiteral(endExpr)
+	if !ok || end < start {
+		return nil, nil, false, nil
+	}
+	intType := s.g.result.NamedTypes["int"]
+	intLLVMType, err := s.g.lowerType(intType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	sliceData, sliceLen, err := s.emitConstantClampedStringSliceOperand(textExpr, textType, start, end, "strsliceeq")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	otherValue, _, err := s.emitExpr(otherExpr, otherType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	i64Type := s.g.result.NamedTypes["i64"]
+	rhsLen, err := s.emitRuntimeStringLengthValue(otherValue, otherType, i64Type, "strsliceeq.rhs.len")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	lenEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), rhsLen, sliceLen, cStringFree("strsliceeq.len.eq"))
+	sliceZero := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), sliceLen, C.LLVMConstInt(C.LLVMInt64TypeInContext(s.g.context), 0, 0), cStringFree("strsliceeq.len.zero"))
+	dataEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), sliceData, otherValue, cStringFree("strsliceeq.data.eq"))
+	usizeType := s.g.result.NamedTypes["usize"]
+	lenValue, err := s.coerceValue(sliceLen, i64Type, usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	entryBlock := C.LLVMGetInsertBlock(s.builder)
+	zeroBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceeq.zero"))
+	nonZeroBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceeq.nonzero"))
+	sameBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceeq.same"))
+	memcmpBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceeq.memcmp"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceeq.merge"))
+	C.LLVMBuildCondBr(s.builder, lenEqual, zeroBB, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, zeroBB)
+	zeroEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildCondBr(s.builder, sliceZero, mergeBB, nonZeroBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, nonZeroBB)
+	C.LLVMBuildCondBr(s.builder, dataEqual, sameBB, memcmpBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, sameBB)
+	sameEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, memcmpBB)
+	disjoint := s.g.result.ExprsAreDisjoint(textExpr, otherExpr)
+	cmp, err := s.emitMemcmpEqualValue(sliceData, otherValue, lenValue, "strsliceeq.memcmp", disjoint)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	memcmpEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	boolType := C.LLVMInt1TypeInContext(s.g.context)
+	phi := C.LLVMBuildPhi(s.builder, boolType, cStringFree("strsliceeq.result"))
+	falseValue := C.LLVMConstInt(boolType, 0, 0)
+	trueValue := C.LLVMConstInt(boolType, 1, 0)
+	values := []C.LLVMValueRef{falseValue, trueValue, trueValue, cmp}
+	blocks := []C.LLVMBasicBlockRef{entryBlock, zeroEnd, sameEnd, memcmpEnd}
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	return C.LLVMBuildZExt(s.builder, phi, intLLVMType, cStringFree("strsliceeq.int")), intType, true, nil
+}
+
+func (s *functionState) emitSpecializedStringSlicesEqCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	ident, ok := expr.Func.(*ast.Ident)
+	if !ok || ident.Name != "ctx_string_slices_eq" {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 6 || s == nil || s.g == nil || s.g.result == nil {
+		return nil, nil, false, nil
+	}
+	leftExpr := expr.Args[0]
+	leftStartExpr := expr.Args[1]
+	leftEndExpr := expr.Args[2]
+	rightExpr := expr.Args[3]
+	rightStartExpr := expr.Args[4]
+	rightEndExpr := expr.Args[5]
+	leftType := s.exprType(leftExpr)
+	rightType := s.exprType(rightExpr)
+	if classifyRuntimeStringCompareKind(leftType) != runtimeStringCompareDStr || classifyRuntimeStringCompareKind(rightType) != runtimeStringCompareDStr {
+		return nil, nil, false, nil
+	}
+	leftStart, ok := s.staticIntLiteral(leftStartExpr)
+	if !ok || leftStart < 0 {
+		return nil, nil, false, nil
+	}
+	leftEnd, ok := s.staticIntLiteral(leftEndExpr)
+	if !ok || leftEnd < leftStart {
+		return nil, nil, false, nil
+	}
+	rightStart, ok := s.staticIntLiteral(rightStartExpr)
+	if !ok || rightStart < 0 {
+		return nil, nil, false, nil
+	}
+	rightEnd, ok := s.staticIntLiteral(rightEndExpr)
+	if !ok || rightEnd < rightStart {
+		return nil, nil, false, nil
+	}
+	intType := s.g.result.NamedTypes["int"]
+	intLLVMType, err := s.g.lowerType(intType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	leftData, leftSliceLen, err := s.emitConstantClampedStringSliceOperand(leftExpr, leftType, leftStart, leftEnd, "strsliceseq.left")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	rightData, rightSliceLen, err := s.emitConstantClampedStringSliceOperand(rightExpr, rightType, rightStart, rightEnd, "strsliceseq.right")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	lenEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), leftSliceLen, rightSliceLen, cStringFree("strsliceseq.len.eq"))
+	sliceZero := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), leftSliceLen, C.LLVMConstInt(C.LLVMInt64TypeInContext(s.g.context), 0, 0), cStringFree("strsliceseq.len.zero"))
+	dataEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), leftData, rightData, cStringFree("strsliceseq.data.eq"))
+	usizeType := s.g.result.NamedTypes["usize"]
+	lenValue, err := s.coerceValue(leftSliceLen, s.g.result.NamedTypes["i64"], usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	entryBlock := C.LLVMGetInsertBlock(s.builder)
+	zeroBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceseq.zero"))
+	nonZeroBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceseq.nonzero"))
+	sameBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceseq.same"))
+	memcmpBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceseq.memcmp"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("strsliceseq.merge"))
+	C.LLVMBuildCondBr(s.builder, lenEqual, zeroBB, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, zeroBB)
+	zeroEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildCondBr(s.builder, sliceZero, mergeBB, nonZeroBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, nonZeroBB)
+	C.LLVMBuildCondBr(s.builder, dataEqual, sameBB, memcmpBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, sameBB)
+	sameEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, memcmpBB)
+	disjoint := s.g.result.ExprsAreDisjoint(leftExpr, rightExpr)
+	cmp, err := s.emitMemcmpEqualValue(leftData, rightData, lenValue, "strsliceseq.memcmp", disjoint)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	memcmpEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	boolType := C.LLVMInt1TypeInContext(s.g.context)
+	phi := C.LLVMBuildPhi(s.builder, boolType, cStringFree("strsliceseq.result"))
+	falseValue := C.LLVMConstInt(boolType, 0, 0)
+	trueValue := C.LLVMConstInt(boolType, 1, 0)
+	values := []C.LLVMValueRef{falseValue, trueValue, trueValue, cmp}
+	blocks := []C.LLVMBasicBlockRef{entryBlock, zeroEnd, sameEnd, memcmpEnd}
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	return C.LLVMBuildZExt(s.builder, phi, intLLVMType, cStringFree("strsliceseq.int")), intType, true, nil
 }
 
 func isStringViewCarrierType(t semantic.Type) bool {
@@ -1326,7 +1602,8 @@ func (s *functionState) emitSpecializedStringSliceCall(expr *ast.CallExpr) (C.LL
 		return nil, nil, false, nil
 	}
 	if s.g.result.ExprsHaveSameExtent(expr, inputExpr) {
-		return nil, nil, false, nil
+		value, _, err := s.emitExpr(inputExpr, inputType)
+		return value, resultType, true, err
 	}
 	sliceFacts, ok := s.g.result.ExprOptimizationFacts(expr)
 	if !ok || !sliceFacts.HasExactExtent() {
