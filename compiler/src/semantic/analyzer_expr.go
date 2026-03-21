@@ -52,6 +52,10 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 					result = t
 					return
 				}
+				if fnType, ok := a.lookupCurrentFunctionValueType(sym); ok {
+					result = fnType
+					return
+				}
 				result = sym.Type
 				return
 			}
@@ -241,6 +245,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, rightSnapshot.BorrowedOwnerRefs)
 		a.currentAffineValues = mergedAffine
 		a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
+		if mergedFunctionValues, ok := a.intersectFunctionValueFlows(leftSnapshot.FunctionValues, rightSnapshot.FunctionValues); ok {
+			a.currentFunctionValues = mergedFunctionValues
+		}
 		merged := MergeTypes(left, right)
 		if IsInvalidType(merged) {
 			a.errorf(n.Pos(), "ternary branches are incompatible: %s and %s", left.String(), right.String())
@@ -646,7 +653,16 @@ func (a *Analyzer) inferFuncReturnProvenanceForExpr(expr ast.Expr, fnType *FuncT
 		return
 	}
 	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		a.inferFuncReturnProvenanceForExpr(n.Inner, fnType)
+	case *ast.FieldExpr:
+		if fieldExpr, ok := a.resolveProjectedFieldValueExpr(n.Object, n.Field); ok {
+			a.inferFuncReturnProvenanceForExpr(fieldExpr, fnType)
+		}
 	case *ast.Ident:
+		if a.inferFuncReturnProvenanceForLocalIdent(n, fnType) {
+			return
+		}
 		if a.globalScope == nil {
 			return
 		}
@@ -664,12 +680,50 @@ func (a *Analyzer) inferFuncReturnProvenanceForExpr(expr ast.Expr, fnType *FuncT
 	}
 }
 
+func (a *Analyzer) inferFuncReturnProvenanceForLocalIdent(ident *ast.Ident, fnType *FuncType) bool {
+	if ident == nil || fnType == nil || a.currentScope == nil {
+		return false
+	}
+	sym, ok := a.currentScope.Lookup(ident.Name)
+	if !ok {
+		return false
+	}
+	if sourceType, ok := a.lookupCurrentFunctionValueType(sym); ok && sourceType != fnType && hasRegionProvenance(sourceType.ReturnProvenance) {
+		fnType.ReturnProvenance = cloneRegionRefState(sourceType.ReturnProvenance)
+		fnType.ReturnProvenanceKnown = true
+		return true
+	}
+	if sourceType, ok := sym.Type.(*FuncType); ok && sourceType != fnType && hasRegionProvenance(sourceType.ReturnProvenance) {
+		fnType.ReturnProvenance = cloneRegionRefState(sourceType.ReturnProvenance)
+		fnType.ReturnProvenanceKnown = true
+		return true
+	}
+	if sym.Kind != SymbolLocal || sym.Mutable {
+		return false
+	}
+	decl, ok := sym.Node.(*ast.VarDeclStmt)
+	if !ok || decl.Value == nil {
+		return false
+	}
+	a.inferFuncReturnProvenanceForExpr(decl.Value, fnType)
+	return fnType.ReturnProvenanceKnown
+}
+
 func (a *Analyzer) inferFuncReturnBorrowedOwnerRefsForExpr(expr ast.Expr, fnType *FuncType) {
 	if fnType == nil || fnType.ReturnBorrowedOwnerRefsKnown || expr == nil {
 		return
 	}
 	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		a.inferFuncReturnBorrowedOwnerRefsForExpr(n.Inner, fnType)
+	case *ast.FieldExpr:
+		if fieldExpr, ok := a.resolveProjectedFieldValueExpr(n.Object, n.Field); ok {
+			a.inferFuncReturnBorrowedOwnerRefsForExpr(fieldExpr, fnType)
+		}
 	case *ast.Ident:
+		if a.inferFuncReturnBorrowedOwnerRefsForLocalIdent(n, fnType) {
+			return
+		}
 		if a.globalScope == nil {
 			return
 		}
@@ -685,6 +739,35 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefsForExpr(expr ast.Expr, fnType
 	case *ast.SpecializeExpr:
 		a.inferFuncReturnBorrowedOwnerRefsForExpr(n.Operand, fnType)
 	}
+}
+
+func (a *Analyzer) inferFuncReturnBorrowedOwnerRefsForLocalIdent(ident *ast.Ident, fnType *FuncType) bool {
+	if ident == nil || fnType == nil || a.currentScope == nil {
+		return false
+	}
+	sym, ok := a.currentScope.Lookup(ident.Name)
+	if !ok {
+		return false
+	}
+	if sourceType, ok := a.lookupCurrentFunctionValueType(sym); ok && sourceType != fnType && hasBorrowedOwnerRefSummary(sourceType.ReturnBorrowedOwnerRefs) {
+		fnType.ReturnBorrowedOwnerRefs = cloneBorrowedOwnerRefSummary(sourceType.ReturnBorrowedOwnerRefs)
+		fnType.ReturnBorrowedOwnerRefsKnown = true
+		return true
+	}
+	if sourceType, ok := sym.Type.(*FuncType); ok && sourceType != fnType && hasBorrowedOwnerRefSummary(sourceType.ReturnBorrowedOwnerRefs) {
+		fnType.ReturnBorrowedOwnerRefs = cloneBorrowedOwnerRefSummary(sourceType.ReturnBorrowedOwnerRefs)
+		fnType.ReturnBorrowedOwnerRefsKnown = true
+		return true
+	}
+	if sym.Kind != SymbolLocal || sym.Mutable {
+		return false
+	}
+	decl, ok := sym.Node.(*ast.VarDeclStmt)
+	if !ok || decl.Value == nil {
+		return false
+	}
+	a.inferFuncReturnBorrowedOwnerRefsForExpr(decl.Value, fnType)
+	return fnType.ReturnBorrowedOwnerRefsKnown
 }
 
 func (a *Analyzer) analyzeScopedPackedAllocExpr(expr *ast.AllocExpr) Type {
@@ -1819,6 +1902,7 @@ func (a *Analyzer) bindFreshShape(shape Shape, origin string, bindings map[strin
 
 func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 	if field, ok := dstrSyntheticField(a.analyzeExpr(expr.Object), expr.Field); ok {
+		field.Type = a.specializeProjectedFunctionFieldType(expr, field.Type)
 		a.reportInvalidRegionUse(expr, field.Type)
 		if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(field.Type, map[string]bool{}) {
 			a.errorf(expr.Pos(), "%s %q cannot be used after %s", affineHandleKind(field.Type), affineValueDisplayName(expr), state.ConsumedBy)
@@ -1830,12 +1914,95 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 	if !ok {
 		return invalidType
 	}
+	field.Type = a.specializeProjectedFunctionFieldType(expr, field.Type)
 	a.reportInvalidRegionUse(expr, field.Type)
 	if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(field.Type, map[string]bool{}) {
 		a.errorf(expr.Pos(), "%s %q cannot be used after %s", affineHandleKind(field.Type), affineValueDisplayName(expr), state.ConsumedBy)
 	}
 	a.reportBorrowedOwnerRefUseAfterConsume(expr, field.Type)
 	return field.Type
+}
+
+func (a *Analyzer) resolveProjectedFieldValueExpr(objectExpr ast.Expr, field string) (ast.Expr, bool) {
+	if objectExpr == nil {
+		return nil, false
+	}
+	switch n := objectExpr.(type) {
+	case *ast.ParenExpr:
+		return a.resolveProjectedFieldValueExpr(n.Inner, field)
+	case *ast.CastExpr:
+		return a.resolveProjectedFieldValueExpr(n.Operand, field)
+	case *ast.MoveExpr:
+		return a.resolveProjectedFieldValueExpr(n.Operand, field)
+	case *ast.Ident:
+		if a.currentScope == nil {
+			return nil, false
+		}
+		sym, ok := a.currentScope.Lookup(n.Name)
+		if !ok || sym.Kind != SymbolLocal || sym.Mutable {
+			return nil, false
+		}
+		decl, ok := sym.Node.(*ast.VarDeclStmt)
+		if !ok || decl.Value == nil {
+			return nil, false
+		}
+		return a.resolveProjectedFieldValueExpr(decl.Value, field)
+	case *ast.StructLitExpr:
+		actual := a.exprTypes[n]
+		if actual == nil {
+			actual = a.analyzeExpr(n)
+		}
+		fields, ok := a.resolvedStructFields(actual)
+		if !ok {
+			return nil, false
+		}
+		for i, resolved := range fields {
+			if resolved.Name != field {
+				continue
+			}
+			if i >= len(n.Args) {
+				return nil, false
+			}
+			return n.Args[i], true
+		}
+		return nil, false
+	case *ast.FieldExpr:
+		resolved, ok := a.resolveProjectedFieldValueExpr(n.Object, n.Field)
+		if !ok {
+			return nil, false
+		}
+		return a.resolveProjectedFieldValueExpr(resolved, field)
+	default:
+		return nil, false
+	}
+}
+
+func (a *Analyzer) specializeProjectedFunctionFieldType(expr *ast.FieldExpr, declared Type) Type {
+	if expr == nil || declared == nil {
+		return declared
+	}
+	if _, ok := declared.(*FuncType); !ok {
+		return declared
+	}
+	fieldExpr, ok := a.resolveProjectedFieldValueExpr(expr.Object, expr.Field)
+	if !ok || fieldExpr == nil {
+		return declared
+	}
+	actualType := a.analyzeExpr(fieldExpr)
+	actualFunc, ok := actualType.(*FuncType)
+	if !ok {
+		return declared
+	}
+	if !actualFunc.ReturnProvenanceKnown {
+		a.inferFuncReturnProvenanceForExpr(fieldExpr, actualFunc)
+	}
+	if !actualFunc.ReturnBorrowedOwnerRefsKnown {
+		a.inferFuncReturnBorrowedOwnerRefsForExpr(fieldExpr, actualFunc)
+	}
+	if specialized, ok := a.specializeFunctionValueType(declared, actualFunc); ok {
+		return specialized
+	}
+	return declared
 }
 
 func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {

@@ -32,6 +32,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.defineLocal(sym, n.Pos())
 		a.markCreatedProtocolSymbol(sym, n.Value)
 		a.recordBorrowedOwnerRefBinding(sym, n.Value)
+		a.recordFunctionValueBinding(sym, n.Value)
 		a.recordImmutableSymbolOptimizationFacts(sym, n.Value)
 		a.recordRegionRefBinding(sym, n.Value)
 		if from, fromType, ok := a.freezeMovedPackedStoreSource(n.Value); ok {
@@ -97,6 +98,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.trackAffineValueTarget(n.Target, targetType)
 		a.markCreatedProtocolTarget(n.Target, n.Value, targetType)
 		a.recordBorrowedOwnerRefTarget(n.Target, targetType, n.Value)
+		a.recordFunctionValueTarget(n.Target, n.Value)
 		a.consumeAffineValueExpr(n.Value, targetType, "assignment")
 	case *ast.AugAssignStmt:
 		targetType := a.assignmentTargetType(n.Target)
@@ -117,6 +119,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.trackAffineValueTarget(n.Target, targetType)
 		a.markCreatedProtocolTarget(n.Target, n.Value, targetType)
 		a.recordBorrowedOwnerRefTarget(n.Target, targetType, n.Value)
+		a.recordFunctionValueTarget(n.Target, n.Value)
 		a.consumeAffineValueExpr(n.Value, targetType, "assignment")
 	case *ast.ReturnStmt:
 		if n.Value == nil {
@@ -175,10 +178,12 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		mergedAffine := a.cloneAffineValueStates()
 		mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
+		functionValueBranches := make([]map[*Symbol]*FuncType, 0, len(n.Elifs)+2)
 		thenSnapshot := a.analyzeBlockWithAffineClone(n.Then, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
 		if !blockDefinitelyExits(n.Then) {
 			mergedAffine = mergeAffineValueStates(mergedAffine, thenSnapshot.Affine)
 			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, thenSnapshot.BorrowedOwnerRefs)
+			functionValueBranches = append(functionValueBranches, thenSnapshot.FunctionValues)
 		}
 		for _, elif := range n.Elifs {
 			elifType := a.analyzeExpr(elif.Cond)
@@ -189,6 +194,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			if !blockDefinitelyExits(elif.Body) {
 				mergedAffine = mergeAffineValueStates(mergedAffine, elifSnapshot.Affine)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elifSnapshot.BorrowedOwnerRefs)
+				functionValueBranches = append(functionValueBranches, elifSnapshot.FunctionValues)
 			}
 		}
 		if len(n.Elifs) == 0 {
@@ -196,16 +202,24 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			if !blockDefinitelyExits(n.Else) {
 				mergedAffine = mergeAffineValueStates(mergedAffine, elseSnapshot.Affine)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elseSnapshot.BorrowedOwnerRefs)
+				functionValueBranches = append(functionValueBranches, elseSnapshot.FunctionValues)
 			}
 		} else {
 			elseSnapshot := a.analyzeBlockWithAffineClone(n.Else, NewScope(a.currentScope))
 			if !blockDefinitelyExits(n.Else) {
 				mergedAffine = mergeAffineValueStates(mergedAffine, elseSnapshot.Affine)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elseSnapshot.BorrowedOwnerRefs)
+				functionValueBranches = append(functionValueBranches, elseSnapshot.FunctionValues)
 			}
+		}
+		if len(n.Else) == 0 {
+			functionValueBranches = append(functionValueBranches, a.currentFunctionValues)
 		}
 		a.currentAffineValues = mergedAffine
 		a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
+		if mergedFunctionValues, ok := a.intersectFunctionValueFlows(functionValueBranches...); ok {
+			a.currentFunctionValues = mergedFunctionValues
+		}
 		a.applyPostIfFallthroughRefinement(n)
 	case *ast.MatchStmt:
 		a.analyzeMatchStmt(n)
@@ -224,13 +238,16 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		mergedAffine := a.cloneAffineValueStates()
 		mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
+		mergedFunctionValues := a.cloneFunctionValueBindings()
 		bodySnapshot := a.analyzeBlockWithAffineClone(n.Body, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
 		if !blockDefinitelyExits(n.Body) {
 			mergedAffine = mergeAffineValueStates(mergedAffine, bodySnapshot.Affine)
 			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, bodySnapshot.BorrowedOwnerRefs)
+			mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, bodySnapshot.FunctionValues)
 		}
 		a.currentAffineValues = mergedAffine
 		a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
+		a.currentFunctionValues = mergedFunctionValues
 	case *ast.PassStmt:
 		return
 	case *ast.PanicStmt:
@@ -747,6 +764,7 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 	a.validateMatchStore(stmt.Pos(), enumType, stmt.Store)
 	mergedAffine := a.cloneAffineValueStates()
 	mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
+	mergedFunctionValues := a.cloneFunctionValueBindings()
 	priorPatterns := make([]ast.MatchPattern, 0, len(stmt.Arms))
 	for i, arm := range stmt.Arms {
 		if a.matchPatternShadowedByPrevious(arm.Pattern, enumType, priorPatterns) {
@@ -758,11 +776,13 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 		if !blockDefinitelyExits(arm.Body) {
 			mergedAffine = mergeAffineValueStates(mergedAffine, armSnapshot.Affine)
 			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, armSnapshot.BorrowedOwnerRefs)
+			mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, armSnapshot.FunctionValues)
 		}
 		priorPatterns = append(priorPatterns, arm.Pattern)
 	}
 	a.currentAffineValues = mergedAffine
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
+	a.currentFunctionValues = mergedFunctionValues
 }
 
 func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
@@ -781,6 +801,7 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 	resultType := Type(nil)
 	mergedAffine := a.cloneAffineValueStates()
 	mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
+	mergedFunctionValues := a.cloneFunctionValueBindings()
 	priorPatterns := make([]ast.MatchPattern, 0, len(expr.Arms))
 	for i, arm := range expr.Arms {
 		if a.matchPatternShadowedByPrevious(arm.Pattern, enumType, priorPatterns) {
@@ -794,6 +815,7 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 		if !blockDefinitelyExits(arm.Body) {
 			mergedAffine = mergeAffineValueStates(mergedAffine, armSnapshot.Affine)
 			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, armSnapshot.BorrowedOwnerRefs)
+			mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, armSnapshot.FunctionValues)
 		}
 		if resultType == nil {
 			resultType = armType
@@ -812,6 +834,7 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 	}
 	a.currentAffineValues = mergedAffine
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
+	a.currentFunctionValues = mergedFunctionValues
 	a.reportNonExhaustiveMatch(expr.Pos(), enumType, covered, hasWildcard)
 	if resultType == nil {
 		return neverType
@@ -1201,6 +1224,7 @@ func (a *Analyzer) analyzeBlockWithRegionClone(stmts []ast.Stmt, scope *Scope) {
 type affineFlowSnapshot struct {
 	Affine            map[affineValueKey]affineValueState
 	BorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
+	FunctionValues    map[*Symbol]*FuncType
 }
 
 type borrowedOwnerRefSummaryTarget struct {
@@ -1217,12 +1241,15 @@ type borrowedOwnerRefSummary struct {
 func (a *Analyzer) analyzeBlockWithAffineClone(stmts []ast.Stmt, scope *Scope) affineFlowSnapshot {
 	savedAffine := a.currentAffineValues
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
+	savedFunctionValues := a.currentFunctionValues
 	a.currentAffineValues = a.cloneAffineValueStates()
 	a.currentBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
+	a.currentFunctionValues = a.cloneFunctionValueBindings()
 	a.analyzeBlockWithRegionClone(stmts, scope)
-	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings()}
+	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings()}
 	a.currentAffineValues = savedAffine
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
+	a.currentFunctionValues = savedFunctionValues
 	return snapshot
 }
 
@@ -1983,6 +2010,25 @@ func (a *Analyzer) cloneBorrowedOwnerRefBindings() map[*Symbol]borrowedOwnerRefS
 	return cloned
 }
 
+func (a *Analyzer) cloneFunctionValueType(fn *FuncType) *FuncType {
+	if fn == nil {
+		return nil
+	}
+	cloned, _ := a.substituteType(fn, nil, nil, nil, nil).(*FuncType)
+	return cloned
+}
+
+func (a *Analyzer) cloneFunctionValueBindings() map[*Symbol]*FuncType {
+	if a.currentFunctionValues == nil {
+		return nil
+	}
+	cloned := make(map[*Symbol]*FuncType, len(a.currentFunctionValues))
+	for sym, fn := range a.currentFunctionValues {
+		cloned[sym] = a.cloneFunctionValueType(fn)
+	}
+	return cloned
+}
+
 func mergeAffineValueStates(dst map[affineValueKey]affineValueState, src map[affineValueKey]affineValueState) map[affineValueKey]affineValueState {
 	if dst == nil && src == nil {
 		return nil
@@ -2026,6 +2072,112 @@ func mergeBorrowedOwnerRefBindings(dst map[*Symbol]borrowedOwnerRefState, src ma
 		}
 	}
 	return merged
+}
+
+func intersectRegionRefSummary(dst regionRefState, src regionRefState) (regionRefState, bool) {
+	merged := regionRefState{}
+	if len(dst.ParamDeps) != 0 && len(src.ParamDeps) != 0 {
+		for index := range dst.ParamDeps {
+			if !src.ParamDeps[index] {
+				continue
+			}
+			if merged.ParamDeps == nil {
+				merged.ParamDeps = map[int]bool{}
+			}
+			merged.ParamDeps[index] = true
+		}
+	}
+	if len(dst.Fields) != 0 && len(src.Fields) != 0 {
+		for key, child := range dst.Fields {
+			srcChild, ok := src.Fields[key]
+			if !ok {
+				continue
+			}
+			mergedChild, ok := intersectRegionRefSummary(child, srcChild)
+			if !ok {
+				continue
+			}
+			if merged.Fields == nil {
+				merged.Fields = map[string]regionRefState{}
+			}
+			merged.Fields[key] = mergedChild
+		}
+	}
+	if !hasRegionProvenance(merged) {
+		return regionRefState{}, false
+	}
+	return merged, true
+}
+
+func (a *Analyzer) mergeFunctionValueTypes(dst *FuncType, src *FuncType) (*FuncType, bool) {
+	if dst == nil || src == nil || !SameType(dst, src) {
+		return nil, false
+	}
+	merged := a.cloneFunctionValueType(dst)
+	if merged == nil {
+		return nil, false
+	}
+	merged.ReturnProvenance = regionRefState{}
+	merged.ReturnProvenanceKnown = dst.ReturnProvenanceKnown && src.ReturnProvenanceKnown
+	if merged.ReturnProvenanceKnown {
+		if state, ok := intersectRegionRefSummary(dst.ReturnProvenance, src.ReturnProvenance); ok {
+			merged.ReturnProvenance = state
+		}
+	}
+	merged.ReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
+	merged.ReturnBorrowedOwnerRefsKnown = dst.ReturnBorrowedOwnerRefsKnown && src.ReturnBorrowedOwnerRefsKnown
+	if merged.ReturnBorrowedOwnerRefsKnown {
+		if summary, ok := mergeBorrowedOwnerRefSummary(dst.ReturnBorrowedOwnerRefs, src.ReturnBorrowedOwnerRefs); ok {
+			merged.ReturnBorrowedOwnerRefs = summary
+		}
+	}
+	return merged, true
+}
+
+func (a *Analyzer) mergeFunctionValueBindings(dst map[*Symbol]*FuncType, src map[*Symbol]*FuncType) map[*Symbol]*FuncType {
+	if dst == nil || src == nil {
+		return nil
+	}
+	merged := make(map[*Symbol]*FuncType, len(dst))
+	for sym, fn := range dst {
+		srcFn, ok := src[sym]
+		if !ok {
+			continue
+		}
+		mergedFn, ok := a.mergeFunctionValueTypes(fn, srcFn)
+		if ok {
+			merged[sym] = mergedFn
+		}
+	}
+	return merged
+}
+
+func (a *Analyzer) cloneFunctionValueMap(src map[*Symbol]*FuncType) map[*Symbol]*FuncType {
+	if src == nil {
+		return nil
+	}
+	cloned := make(map[*Symbol]*FuncType, len(src))
+	for sym, fn := range src {
+		cloned[sym] = a.cloneFunctionValueType(fn)
+	}
+	return cloned
+}
+
+func (a *Analyzer) intersectFunctionValueFlows(flows ...map[*Symbol]*FuncType) (map[*Symbol]*FuncType, bool) {
+	var merged map[*Symbol]*FuncType
+	mergedAny := false
+	for _, flow := range flows {
+		if !mergedAny {
+			merged = a.cloneFunctionValueMap(flow)
+			mergedAny = true
+			continue
+		}
+		merged = a.mergeFunctionValueBindings(merged, flow)
+	}
+	if !mergedAny {
+		return nil, false
+	}
+	return merged, true
 }
 
 func (a *Analyzer) trackAffineValueSymbol(sym *Symbol) {
@@ -2165,6 +2317,69 @@ func (a *Analyzer) recordBorrowedOwnerRefTarget(target ast.Expr, expected Type, 
 	} else {
 		delete(a.currentBorrowedOwnerRefs, root)
 	}
+}
+
+func (a *Analyzer) recordFunctionValueBinding(sym *Symbol, value ast.Expr) {
+	if a.currentFunctionValues == nil || sym == nil {
+		return
+	}
+	if sym.Kind != SymbolLocal && sym.Kind != SymbolParam {
+		return
+	}
+	fnType, ok := a.functionValueTypeForExpr(value)
+	if !ok {
+		delete(a.currentFunctionValues, sym)
+		return
+	}
+	a.currentFunctionValues[sym] = fnType
+}
+
+func (a *Analyzer) recordFunctionValueTarget(target ast.Expr, value ast.Expr) {
+	ident, ok := target.(*ast.Ident)
+	if !ok || a.currentScope == nil {
+		return
+	}
+	sym, ok := a.currentScope.Lookup(ident.Name)
+	if !ok {
+		return
+	}
+	a.recordFunctionValueBinding(sym, value)
+}
+
+func (a *Analyzer) functionValueTypeForExpr(expr ast.Expr) (*FuncType, bool) {
+	if expr == nil {
+		return nil, false
+	}
+	valueType := a.exprTypes[expr]
+	if valueType == nil {
+		valueType = a.analyzeExpr(expr)
+	}
+	fnType, ok := valueType.(*FuncType)
+	if !ok {
+		return nil, false
+	}
+	cloned := a.cloneFunctionValueType(fnType)
+	if cloned == nil {
+		return nil, false
+	}
+	if !cloned.ReturnProvenanceKnown {
+		a.inferFuncReturnProvenanceForExpr(expr, cloned)
+	}
+	if !cloned.ReturnBorrowedOwnerRefsKnown {
+		a.inferFuncReturnBorrowedOwnerRefsForExpr(expr, cloned)
+	}
+	return cloned, true
+}
+
+func (a *Analyzer) lookupCurrentFunctionValueType(sym *Symbol) (*FuncType, bool) {
+	if a.currentFunctionValues == nil || sym == nil {
+		return nil, false
+	}
+	fnType, ok := a.currentFunctionValues[sym]
+	if !ok || fnType == nil {
+		return nil, false
+	}
+	return a.cloneFunctionValueType(fnType), true
 }
 
 func projectBorrowedOwnerRefFieldState(state borrowedOwnerRefState, field string) (borrowedOwnerRefState, bool) {
@@ -3246,24 +3461,30 @@ func (a *Analyzer) analyzeExprInScope(expr ast.Expr, scope *Scope) Type {
 func (a *Analyzer) analyzeExprInAffineScope(expr ast.Expr, scope *Scope) (Type, affineFlowSnapshot) {
 	savedAffine := a.currentAffineValues
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
+	savedFunctionValues := a.currentFunctionValues
 	a.currentAffineValues = a.cloneAffineValueStates()
 	a.currentBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
+	a.currentFunctionValues = a.cloneFunctionValueBindings()
 	result := a.analyzeExprInScope(expr, scope)
-	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings()}
+	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings()}
 	a.currentAffineValues = savedAffine
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
+	a.currentFunctionValues = savedFunctionValues
 	return result, snapshot
 }
 
 func (a *Analyzer) analyzeMatchExprArmBodyWithAffineSnapshot(body []ast.Stmt, scope *Scope) (Type, affineFlowSnapshot) {
 	savedAffine := a.currentAffineValues
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
+	savedFunctionValues := a.currentFunctionValues
 	a.currentAffineValues = a.cloneAffineValueStates()
 	a.currentBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
+	a.currentFunctionValues = a.cloneFunctionValueBindings()
 	result := a.analyzeMatchExprArmBody(body, scope)
-	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings()}
+	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings()}
 	a.currentAffineValues = savedAffine
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
+	a.currentFunctionValues = savedFunctionValues
 	return result, snapshot
 }
 

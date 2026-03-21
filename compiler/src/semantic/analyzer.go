@@ -87,6 +87,7 @@ type Analyzer struct {
 	currentRegionRefs                 map[*Symbol]regionRefState
 	currentAffineValues               map[affineValueKey]affineValueState
 	currentBorrowedOwnerRefs          map[*Symbol]borrowedOwnerRefState
+	currentFunctionValues             map[*Symbol]*FuncType
 	currentPackedStores               map[string]*PackedEnumStoreType
 	currentFunctionUsedPermissions    map[string]bool
 	currentFunctionUsedPermissionRefs []ast.PermissionRef
@@ -1630,6 +1631,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	savedRegionRefs := a.currentRegionRefs
 	savedAffineValues := a.currentAffineValues
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
+	savedFunctionValues := a.currentFunctionValues
 	savedPackedStores := a.currentPackedStores
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
@@ -1641,6 +1643,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentRegionRefs = map[*Symbol]regionRefState{}
 	a.currentAffineValues = map[affineValueKey]affineValueState{}
 	a.currentBorrowedOwnerRefs = map[*Symbol]borrowedOwnerRefState{}
+	a.currentFunctionValues = map[*Symbol]*FuncType{}
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
@@ -1701,6 +1704,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentRegionRefs = savedRegionRefs
 	a.currentAffineValues = savedAffineValues
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
+	a.currentFunctionValues = savedFunctionValues
 	a.currentPackedStores = savedPackedStores
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
@@ -1726,6 +1730,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	savedRegionRefs := a.currentRegionRefs
 	savedAffineValues := a.currentAffineValues
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
+	savedFunctionValues := a.currentFunctionValues
 	savedPackedStores := a.currentPackedStores
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
@@ -1741,6 +1746,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentRegionRefs = map[*Symbol]regionRefState{}
 	a.currentAffineValues = map[affineValueKey]affineValueState{}
 	a.currentBorrowedOwnerRefs = map[*Symbol]borrowedOwnerRefState{}
+	a.currentFunctionValues = map[*Symbol]*FuncType{}
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
@@ -1793,6 +1799,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentRegionRefs = savedRegionRefs
 	a.currentAffineValues = savedAffineValues
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
+	a.currentFunctionValues = savedFunctionValues
 	a.currentPackedStores = savedPackedStores
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
@@ -1819,6 +1826,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	savedRegionRefs := a.currentRegionRefs
 	savedAffineValues := a.currentAffineValues
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
+	savedFunctionValues := a.currentFunctionValues
 	savedPackedStores := a.currentPackedStores
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
@@ -1834,6 +1842,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentRegionRefs = map[*Symbol]regionRefState{}
 	a.currentAffineValues = map[affineValueKey]affineValueState{}
 	a.currentBorrowedOwnerRefs = map[*Symbol]borrowedOwnerRefState{}
+	a.currentFunctionValues = map[*Symbol]*FuncType{}
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
@@ -1880,6 +1889,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentRegionRefs = savedRegionRefs
 	a.currentAffineValues = savedAffineValues
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
+	a.currentFunctionValues = savedFunctionValues
 	a.currentPackedStores = savedPackedStores
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
