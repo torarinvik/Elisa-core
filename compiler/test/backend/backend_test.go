@@ -3071,6 +3071,38 @@ def copy_overlap_unknown(values: any darray[i32, shape_in]&) -> void:
 	}
 }
 
+func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughFieldProjection(t *testing.T) {
+	src := `repr(c) struct Views:
+	left: view[i32]
+	right: view[i32]
+
+def arena_da_copy_exact[T](dst: view[T], src: view[T]):
+	_ = dst
+	_ = src
+
+def copy_struct(values: array[i32, 4]) -> void:
+	boxed: Views = Views(values[0u:2u], values[2u:4u])
+	arena_da_copy_exact(boxed.left, boxed.right)
+	`
+	result := parseAndAnalyze(t, "backend_dview_copy_exact_field_projection.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	copyStructBody := functionIR(output, "copy_struct")
+	if copyStructBody == "" {
+		t.Fatalf("expected to find copy_struct body, got:\n%s", output)
+	}
+	if !strings.Contains(copyStructBody, "call ptr @arena_memcpy(ptr noalias") {
+		t.Fatalf("expected copy_struct to lower through direct noalias arena_memcpy via field projections, got:\n%s", copyStructBody)
+	}
+	if strings.Contains(copyStructBody, "call void @arena_da_copy_exact") {
+		t.Fatalf("expected copy_struct to avoid helper fallback, got:\n%s", copyStructBody)
+	}
+
+}
+
 func TestGenerateLLVMIRSpecializesArenaDViewZeroFill(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
 	items: mutable any T&?
@@ -3473,6 +3505,39 @@ def eq_diff_extent(values: any darray[i32, 4]&) -> bool:
 	if strings.Contains(eqDiffExtentBody, "call i64 @memcmp(ptr noalias") {
 		t.Fatalf("expected eq_diff_extent to avoid direct memcmp specialization, got:\n%s", eqDiffExtentBody)
 	}
+}
+
+func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughFieldProjection(t *testing.T) {
+	src := `repr(c) struct Views:
+	left: view[i32]
+	right: view[i32]
+
+def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
+	_ = left
+	_ = right
+	return false
+
+def eq_struct(values: array[i32, 4]) -> bool:
+	boxed: Views = Views(values[0u:2u], values[2u:4u])
+	return arena_da_eq_exact(boxed.left, boxed.right)
+	`
+	result := parseAndAnalyze(t, "backend_dview_eq_exact_field_projection.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	eqStructBody := functionIR(output, "eq_struct")
+	if eqStructBody == "" {
+		t.Fatalf("expected to find eq_struct body, got:\n%s", output)
+	}
+	if !strings.Contains(eqStructBody, "call i64 @memcmp(ptr noalias") {
+		t.Fatalf("expected eq_struct to lower through direct noalias memcmp via field projections, got:\n%s", eqStructBody)
+	}
+	if strings.Contains(eqStructBody, "call i1 @arena_da_eq_exact") {
+		t.Fatalf("expected eq_struct to avoid helper fallback, got:\n%s", eqStructBody)
+	}
+
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewMaterialize(t *testing.T) {
