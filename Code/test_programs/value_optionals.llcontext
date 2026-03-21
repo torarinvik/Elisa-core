@@ -1,0 +1,25 @@
+repr(c) struct Box:
+	value: int
+
+
+def maybe_value(flag: bool) -> int?:
+	if flag:
+		return 7
+	return null
+
+
+def fallback_value(flag: bool) -> int:
+	return try maybe_value(flag) else 11
+
+
+def maybe_box(flag: bool) -> Box?:
+	if flag:
+		return Box(7)
+	return null
+
+
+def unwrap_or(flag: bool) -> int:
+	value: Box? = maybe_box(flag)
+	if value == null:
+		return 11
+	return value.value

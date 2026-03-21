@@ -318,6 +318,22 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			},
 		},
 		{
+			name: "value_optionals",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "value_optionals.llcontext"),
+			checks: []string{
+				"%Box = type { i64 }",
+				"%Optional__int = type { i1, i64 }",
+				"%Optional__Box = type { i1, %Box }",
+				"define %Optional__int @maybe_value(i1",
+				"define i64 @fallback_value(i1",
+				"extractvalue %Optional__int",
+				"define %Optional__Box @maybe_box(i1",
+				"define i64 @unwrap_or(i1",
+				"getelementptr inbounds nuw %Optional__Box",
+				"getelementptr inbounds nuw %Box",
+			},
+		},
+		{
 			name: "concurrency_explicit",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "concurrency_explicit.llcontext"),
 			checks: []string{
