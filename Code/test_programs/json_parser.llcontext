@@ -1188,6 +1188,35 @@ def json_ast_array_nth(node: JsonNode, index: usize, store: JsonNode.Store[Local
     return invalid_node
 
 
+def json_ast_array_iter_first(node: JsonNode, store: JsonNode.Store[Local]) -> JsonNode:
+    invalid_node: JsonNode = json_node_invalid(store)
+    in store:
+        match node:
+            JsonNode.Array(items: items):
+                if json_ast_kind(items, store) == JsonNodeKind.ARRAY_ITEM:
+                    return items
+    return invalid_node
+
+
+def json_ast_array_iter_value(node: JsonNode, store: JsonNode.Store[Local]) -> JsonNode:
+    invalid_node: JsonNode = json_node_invalid(store)
+    in store:
+        match node:
+            JsonNode.ArrayItem(value: value, next: next):
+                return value
+    return invalid_node
+
+
+def json_ast_array_iter_next(node: JsonNode, store: JsonNode.Store[Local]) -> JsonNode:
+    invalid_node: JsonNode = json_node_invalid(store)
+    in store:
+        match node:
+            JsonNode.ArrayItem(value: value, next: next):
+                if json_ast_kind(next, store) == JsonNodeKind.ARRAY_ITEM:
+                    return next
+    return invalid_node
+
+
 def json_ast_object_fields_get(node: JsonNode, source: any u8&, key: any u8&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonNode:
     in store:
         match node:
@@ -1207,6 +1236,62 @@ def json_ast_object_get(node: JsonNode, source: any u8&, key: any u8&, store: Js
             JsonNode.Object(fields: fields):
                 return json_ast_object_fields_get(fields, source, key, store, invalid_node)
     return invalid_node
+
+
+def json_ast_object_iter_first(node: JsonNode, store: JsonNode.Store[Local]) -> JsonNode:
+    invalid_node: JsonNode = json_node_invalid(store)
+    in store:
+        match node:
+            JsonNode.Object(fields: fields):
+                if json_ast_kind(fields, store) == JsonNodeKind.FIELD:
+                    return fields
+    return invalid_node
+
+
+def json_ast_object_iter_key(node: JsonNode, store: JsonNode.Store[Local]) -> JsonNode:
+    invalid_node: JsonNode = json_node_invalid(store)
+    in store:
+        match node:
+            JsonNode.Field(key: key, value: value, next: next):
+                return key
+    return invalid_node
+
+
+def json_ast_object_iter_value(node: JsonNode, store: JsonNode.Store[Local]) -> JsonNode:
+    invalid_node: JsonNode = json_node_invalid(store)
+    in store:
+        match node:
+            JsonNode.Field(key: key, value: value, next: next):
+                return value
+    return invalid_node
+
+
+def json_ast_object_iter_next(node: JsonNode, store: JsonNode.Store[Local]) -> JsonNode:
+    invalid_node: JsonNode = json_node_invalid(store)
+    in store:
+        match node:
+            JsonNode.Field(key: key, value: value, next: next):
+                if json_ast_kind(next, store) == JsonNodeKind.FIELD:
+                    return next
+    return invalid_node
+
+
+def json_ast_array_iter_nth(node: JsonNode, index: usize, store: JsonNode.Store[Local]) -> JsonNode:
+    current: mutable JsonNode = json_ast_array_iter_first(node, store)
+    remaining: mutable usize = index
+    while remaining > 0u and not json_node_is_invalid(current, store):
+        current <- json_ast_array_iter_next(current, store)
+        remaining <- remaining - 1u
+    return current
+
+
+def json_ast_object_iter_nth(node: JsonNode, index: usize, store: JsonNode.Store[Local]) -> JsonNode:
+    current: mutable JsonNode = json_ast_object_iter_first(node, store)
+    remaining: mutable usize = index
+    while remaining > 0u and not json_node_is_invalid(current, store):
+        current <- json_ast_object_iter_next(current, store)
+        remaining <- remaining - 1u
+    return current
 
 
 def json_parser_checksum_impl(source: any u8&) -> i64:
@@ -1422,6 +1507,65 @@ def json_parser_ast_array_field_i64_at_impl(source: any u8&, key: any u8&, index
         destroy scratch
         return 0
     signed_value: JsonSignedResult = json_ast_number_i64_value(source, item_node, store)
+    if not signed_value.ok:
+        destroy scratch
+        return 0
+    out[0u] <- signed_value.value
+    destroy scratch
+    return 1
+
+
+def json_parser_ast_object_key_eq_at_impl(source: any u8&, index: usize, literal: any u8&) -> i64:
+    source_len: usize = runtime_strlen(source)
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, store)
+    if result.checksum < 0:
+        destroy scratch
+        return -1
+    field_node: JsonNode = json_ast_object_iter_nth(result.node, index, store)
+    if json_node_is_invalid(field_node, store):
+        destroy scratch
+        return -1
+    out: i64 = 1 if json_ast_string_eq_literal(source, json_ast_object_iter_key(field_node, store), literal, store) else 0
+    destroy scratch
+    return out
+
+
+def json_parser_ast_object_field_i64_at_impl(source: any u8&, index: usize, out: any i64&) -> i64:
+    source_len: usize = runtime_strlen(source)
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, store)
+    if result.checksum < 0:
+        destroy scratch
+        return 0
+    field_node: JsonNode = json_ast_object_iter_nth(result.node, index, store)
+    if json_node_is_invalid(field_node, store):
+        destroy scratch
+        return 0
+    signed_value: JsonSignedResult = json_ast_number_i64_value(source, json_ast_object_iter_value(field_node, store), store)
+    if not signed_value.ok:
+        destroy scratch
+        return 0
+    out[0u] <- signed_value.value
+    destroy scratch
+    return 1
+
+
+def json_parser_ast_array_i64_at_impl(source: any u8&, index: usize, out: any i64&) -> i64:
+    source_len: usize = runtime_strlen(source)
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, store)
+    if result.checksum < 0:
+        destroy scratch
+        return 0
+    item_node: JsonNode = json_ast_array_iter_nth(result.node, index, store)
+    if json_node_is_invalid(item_node, store):
+        destroy scratch
+        return 0
+    signed_value: JsonSignedResult = json_ast_number_i64_value(source, json_ast_array_iter_value(item_node, store), store)
     if not signed_value.ok:
         destroy scratch
         return 0
@@ -1704,6 +1848,9 @@ export func json_parser_ast_array_field_len(source: any u8&, key: any u8&) -> i6
 export func json_parser_ast_field_i64(source: any u8&, key: any u8&, out: any i64&) -> i64 = json_parser_ast_field_i64_impl
 export func json_parser_ast_field_u64(source: any u8&, key: any u8&, out: any u64&) -> i64 = json_parser_ast_field_u64_impl
 export func json_parser_ast_array_field_i64_at(source: any u8&, key: any u8&, index: usize, out: any i64&) -> i64 = json_parser_ast_array_field_i64_at_impl
+export func json_parser_ast_object_key_eq_at(source: any u8&, index: usize, literal: any u8&) -> i64 = json_parser_ast_object_key_eq_at_impl
+export func json_parser_ast_object_field_i64_at(source: any u8&, index: usize, out: any i64&) -> i64 = json_parser_ast_object_field_i64_at_impl
+export func json_parser_ast_array_i64_at(source: any u8&, index: usize, out: any i64&) -> i64 = json_parser_ast_array_i64_at_impl
 export func json_parser_parallel_max_workers() -> i64 = json_parser_parallel_max_workers_impl
 export func json_parser_parallel_checksum(source: any u8&, worker_count: usize, iterations: usize) -> i64 = json_parser_parallel_checksum_impl
 export func json_parser_parallel_ast_checksum(source: any u8&, worker_count: usize, iterations: usize) -> i64 = json_parser_parallel_ast_checksum_impl

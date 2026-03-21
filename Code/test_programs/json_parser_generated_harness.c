@@ -36,15 +36,25 @@ int main(void) {
 
     int64_t first_num = 0;
     int64_t second_num = 0;
+    int64_t object_second = 0;
+    int64_t array_root_second = 0;
     int64_t missing_num = 99;
     uint64_t big_num = 0;
     assert(json_parser_ast_array_field_i64_at((uint8_t*)dom_doc, (uint8_t*)"nums", 0u, &first_num) == 1);
     assert(json_parser_ast_array_field_i64_at((uint8_t*)dom_doc, (uint8_t*)"nums", 1u, &second_num) == 1);
     assert(json_parser_ast_array_field_i64_at((uint8_t*)dom_doc, (uint8_t*)"nums", 2u, &missing_num) == 0);
+    assert(json_parser_ast_object_key_eq_at((uint8_t*)"{\"first\":1,\"second\":2,\"third\":3}", 0u, (uint8_t*)"first") == 1);
+    assert(json_parser_ast_object_key_eq_at((uint8_t*)"{\"first\":1,\"second\":2,\"third\":3}", 1u, (uint8_t*)"second") == 1);
+    assert(json_parser_ast_object_key_eq_at((uint8_t*)"{\"first\":1,\"second\":2,\"third\":3}", 3u, (uint8_t*)"missing") < 0);
+    assert(json_parser_ast_object_field_i64_at((uint8_t*)"{\"first\":1,\"second\":2,\"third\":3}", 1u, &object_second) == 1);
+    assert(json_parser_ast_array_i64_at((uint8_t*)"[4,5,6]", 1u, &array_root_second) == 1);
+    assert(json_parser_ast_array_i64_at((uint8_t*)"[4,5,6]", 3u, &missing_num) == 0);
     assert(json_parser_ast_field_u64((uint8_t*)dom_doc, (uint8_t*)"big", &big_num) == 1);
     assert(json_parser_ast_field_i64((uint8_t*)dom_doc, (uint8_t*)"missing", &first_num) == 0);
     assert(first_num == 123);
     assert(second_num == -2);
+    assert(object_second == 2);
+    assert(array_root_second == 5);
     assert(missing_num == 99);
     assert(big_num == UINT64_C(18446744073709551615));
 

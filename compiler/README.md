@@ -2,6 +2,14 @@
 
 This directory contains the Go-based frontend for `.llcontext` source files.
 
+## Changelog and recent highlight
+
+Repository-level release notes now live in `../CHANGELOG.md`.
+
+The current unreleased highlight is first-class `refstorage` / `refstate` generics for pointer storage and proof-state abstraction across structs, functions, exports, specialization, LLVM lowering, and generated C headers.
+
+For a compile-checked end-to-end example, see `../Code/test_programs/ref_qualifier_generics.llcontext`.
+
 ## Error handling syntax
 
 The frontend now supports lightweight typed error handling with compile-time error sets and explicit propagation/recovery syntax:

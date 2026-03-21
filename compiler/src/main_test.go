@@ -278,6 +278,18 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			},
 		},
 		{
+			name: "ref_qualifier_generics",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "ref_qualifier_generics.llcontext"),
+			checks: []string{
+				"%Handle__heap__anon = type { ptr }",
+				"define %Handle__heap__anon @keep_handle__heap__anon(%Handle__heap__anon",
+				"define i32 @peek_value(%Handle__heap__anon",
+				"define i64 @keep_heap_handle(i64",
+				"call %Handle__heap__anon @keep_handle__heap__anon(%Handle__heap__anon",
+				"define i32 @peek_heap_value(i64",
+			},
+		},
+		{
 			name: "json_parser",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "json_parser.llcontext"),
 			checks: []string{
@@ -295,6 +307,8 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"define %JsonParseNodeResult @json_parse_array_node(ptr",
 				"define %JsonParseNodeResult @json_parse_object_node(ptr",
 				"define i8 @json_ast_kind(ptr %0, %JsonNode__Store %1)",
+				"define ptr @json_ast_array_iter_first(ptr %0, %JsonNode__Store %1)",
+				"define ptr @json_ast_object_iter_first(ptr %0, %JsonNode__Store %1)",
 				"define ptr @json_ast_array_nth(ptr %0, i64 %1, %JsonNode__Store %2)",
 				"define ptr @json_ast_object_get(ptr %0, ptr %1, ptr %2, %JsonNode__Store %3)",
 				"define i64 @json_parser_parity_suite()",
@@ -305,6 +319,9 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"define i64 @json_parser_ast_field_i64(ptr",
 				"define i64 @json_parser_ast_field_u64(ptr",
 				"define i64 @json_parser_ast_array_field_i64_at(ptr",
+				"define i64 @json_parser_ast_object_key_eq_at(ptr",
+				"define i64 @json_parser_ast_object_field_i64_at(ptr",
+				"define i64 @json_parser_ast_array_i64_at(ptr",
 				"define i64 @json_parallel_worker(%JsonParallelJob",
 				"define i64 @json_parser_parallel_max_workers()",
 				"define i64 @json_parser_parallel_checksum(",
@@ -866,7 +883,8 @@ func TestRunCLIExecutesJSONParserSelfHostedTests(t *testing.T) {
 		"[ RUN      ] ast_raw_dom_helpers_expose_source_spans_and_structure",
 		"[ RUN      ] ast_string_helpers_decode_escapes_and_match_unescaped_keys",
 		"[ RUN      ] ast_number_helpers_materialize_integral_values_and_classify_edges",
-		"[ SUMMARY  ] 7 test(s) selected",
+		"[ RUN      ] ast_iterator_helpers_walk_object_fields_and_array_items",
+		"[ SUMMARY  ] 8 test(s) selected",
 	} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected json parser self-hosted test output to contain %q, got:\n%s", check, output)

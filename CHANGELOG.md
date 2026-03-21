@@ -4,6 +4,12 @@ All notable changes to this repository should be documented in this file.
 
 ## Unreleased
 
+### Highlights
+
+- First-class `refstorage` / `refstate` generics now work end to end across parsing, semantic analysis, specialization, exports, LLVM lowering, and C header generation.
+- Concrete export wrappers such as `keep_handle[heap, &]` now parse and lower correctly, including stable public header emission for concrete qualifier-specialized exports.
+- A compile-checked showcase for the feature now lives at `Code/test_programs/ref_qualifier_generics.llcontext`.
+
 ### Added
 
 - First-class generic parameter kinds for pointer storage and pointer proof state:
@@ -52,6 +58,8 @@ All notable changes to this repository should be documented in this file.
   - `docs/useful_language_features/02-pointer-typestate-practical.md`
   - `docs/useful_language_features/03-pointer-typestate-formal.md`
   - `docs/useful_language_features/07-export-and-c-abi.md`
+- Added a compile-checked end-to-end feature example at:
+  - `Code/test_programs/ref_qualifier_generics.llcontext`
 
 ### Verification
 
