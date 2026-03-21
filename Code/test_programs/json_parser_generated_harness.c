@@ -2,6 +2,7 @@
 
 #include <assert.h>
 #include <stdint.h>
+#include <string.h>
 
 int main(void) {
     const uint8_t *dom_doc = (uint8_t*)"{\"na\\u006de\":\"line\\nbreak\",\"quote\":\"\\\"\",\"nums\":[123,-2],\"ok\":true,\"none\":null,\"big\":18446744073709551615}";
@@ -43,6 +44,15 @@ int main(void) {
     assert(json_parser_ast_field_string_len((uint8_t*)dom_doc, (uint8_t*)"name") == 10);
     assert(json_parser_ast_field_string_len((uint8_t*)dom_doc, (uint8_t*)"quote") == 1);
     assert(json_parser_ast_field_string_len((uint8_t*)dom_doc, (uint8_t*)"nums") < 0);
+    uint8_t field_name_buf[32] = {0};
+    uint8_t field_quote_buf[8] = {0};
+    uint8_t field_small_buf[4] = {0};
+    assert(json_parser_ast_field_string_copy((uint8_t*)dom_doc, (uint8_t*)"name", field_name_buf, sizeof(field_name_buf)) == 10);
+    assert(strcmp((char*)field_name_buf, "line\nbreak") == 0);
+    assert(json_parser_ast_field_string_copy((uint8_t*)dom_doc, (uint8_t*)"quote", field_quote_buf, sizeof(field_quote_buf)) == 1);
+    assert(strcmp((char*)field_quote_buf, "\"") == 0);
+    assert(json_parser_ast_field_string_copy((uint8_t*)dom_doc, (uint8_t*)"name", field_small_buf, sizeof(field_small_buf)) == 10);
+    assert(json_parser_ast_field_string_copy((uint8_t*)dom_doc, (uint8_t*)"nums", field_name_buf, sizeof(field_name_buf)) < 0);
     assert(json_parser_ast_array_field_len((uint8_t*)dom_doc, (uint8_t*)"nums") == 2);
     assert(json_parser_ast_object_field_len((uint8_t*)"{\"meta\":{\"ok\":true,\"none\":null},\"nums\":[1,2]}", (uint8_t*)"meta") == 2);
     assert(json_parser_ast_object_field_len((uint8_t*)"{\"meta\":{\"ok\":true,\"none\":null},\"nums\":[1,2]}", (uint8_t*)"nums") < 0);
@@ -74,6 +84,14 @@ int main(void) {
     assert(json_parser_ast_array_field_string_len_at((uint8_t*)"{\"items\":[\"Ada\",\"\u263A\"]}", (uint8_t*)"items", 0u) == 3);
     assert(json_parser_ast_array_field_string_len_at((uint8_t*)"{\"items\":[\"Ada\",\"\u263A\"]}", (uint8_t*)"items", 1u) == 3);
     assert(json_parser_ast_array_field_string_len_at((uint8_t*)"{\"items\":[\"Ada\",\"\u263A\"]}", (uint8_t*)"items", 2u) < 0);
+    uint8_t array_field_buf[16] = {0};
+    uint8_t array_field_small_buf[3] = {0};
+    assert(json_parser_ast_array_field_string_copy_at((uint8_t*)"{\"items\":[\"Ada\",\"\u263A\"]}", (uint8_t*)"items", 0u, array_field_buf, sizeof(array_field_buf)) == 3);
+    assert(strcmp((char*)array_field_buf, "Ada") == 0);
+    assert(json_parser_ast_array_field_string_copy_at((uint8_t*)"{\"items\":[\"Ada\",\"\u263A\"]}", (uint8_t*)"items", 1u, array_field_buf, sizeof(array_field_buf)) == 3);
+    assert(strcmp((char*)array_field_buf, "\xE2\x98\xBA") == 0);
+    assert(json_parser_ast_array_field_string_copy_at((uint8_t*)"{\"items\":[\"Ada\",\"\u263A\"]}", (uint8_t*)"items", 1u, array_field_small_buf, sizeof(array_field_small_buf)) == 3);
+    assert(json_parser_ast_array_field_string_copy_at((uint8_t*)"{\"items\":[\"Ada\",\"\u263A\"]}", (uint8_t*)"items", 2u, array_field_buf, sizeof(array_field_buf)) < 0);
     assert(json_parser_ast_array_field_string_eq_at((uint8_t*)"{\"items\":[\"Ada\",true,null,[1,2],{\"ok\":true}]}", (uint8_t*)"items", 0u, (uint8_t*)"Ada") == 1);
     assert(json_parser_ast_array_field_bool_at((uint8_t*)"{\"items\":[\"Ada\",true,null,[1,2],{\"ok\":true}]}", (uint8_t*)"items", 1u) == 1);
     assert(json_parser_ast_array_field_is_null_at((uint8_t*)"{\"items\":[\"Ada\",true,null,[1,2],{\"ok\":true}]}", (uint8_t*)"items", 2u) == 1);
@@ -86,6 +104,15 @@ int main(void) {
     assert(json_parser_ast_object_key_eq_at((uint8_t*)"{\"first\":1,\"second\":2,\"third\":3}", 0u, (uint8_t*)"first") == 1);
     assert(json_parser_ast_object_key_eq_at((uint8_t*)"{\"first\":1,\"second\":2,\"third\":3}", 1u, (uint8_t*)"second") == 1);
     assert(json_parser_ast_object_key_eq_at((uint8_t*)"{\"first\":1,\"second\":2,\"third\":3}", 3u, (uint8_t*)"missing") < 0);
+    uint8_t object_key_buf[16] = {0};
+    uint8_t object_key_small_buf[4] = {0};
+    assert(json_parser_ast_object_key_len_at((uint8_t*)"{\"first\":1,\"second\":2,\"third\":3}", 0u) == 5);
+    assert(json_parser_ast_object_key_len_at((uint8_t*)"{\"first\":1,\"second\":2,\"third\":3}", 1u) == 6);
+    assert(json_parser_ast_object_key_len_at((uint8_t*)"{\"first\":1,\"second\":2,\"third\":3}", 3u) < 0);
+    assert(json_parser_ast_object_key_copy_at((uint8_t*)"{\"first\":1,\"second\":2,\"third\":3}", 1u, object_key_buf, sizeof(object_key_buf)) == 6);
+    assert(strcmp((char*)object_key_buf, "second") == 0);
+    assert(json_parser_ast_object_key_copy_at((uint8_t*)"{\"first\":1,\"second\":2,\"third\":3}", 1u, object_key_small_buf, sizeof(object_key_small_buf)) == 6);
+    assert(json_parser_ast_object_key_copy_at((uint8_t*)"{\"first\":1,\"second\":2,\"third\":3}", 3u, object_key_buf, sizeof(object_key_buf)) < 0);
     assert(json_parser_ast_object_field_i64_at((uint8_t*)"{\"first\":1,\"second\":2,\"third\":3}", 1u, &object_second) == 1);
     assert(json_parser_ast_object_value_string_eq_at((uint8_t*)"{\"name\":\"Ada\",\"ok\":true,\"none\":null}", 0u, (uint8_t*)"Ada") == 1);
     assert(json_parser_ast_object_field_bool_at((uint8_t*)"{\"name\":\"Ada\",\"ok\":true,\"none\":null}", 1u) == 1);
@@ -103,6 +130,14 @@ int main(void) {
     assert(json_parser_ast_object_value_string_len_at((uint8_t*)"{\"name\":\"Ada\",\"smile\":\"\u263A\",\"ok\":true}", 0u) == 3);
     assert(json_parser_ast_object_value_string_len_at((uint8_t*)"{\"name\":\"Ada\",\"smile\":\"\u263A\",\"ok\":true}", 1u) == 3);
     assert(json_parser_ast_object_value_string_len_at((uint8_t*)"{\"name\":\"Ada\",\"smile\":\"\u263A\",\"ok\":true}", 2u) < 0);
+    uint8_t object_value_buf[16] = {0};
+    uint8_t object_value_small_buf[3] = {0};
+    assert(json_parser_ast_object_value_string_copy_at((uint8_t*)"{\"name\":\"Ada\",\"smile\":\"\u263A\",\"ok\":true}", 0u, object_value_buf, sizeof(object_value_buf)) == 3);
+    assert(strcmp((char*)object_value_buf, "Ada") == 0);
+    assert(json_parser_ast_object_value_string_copy_at((uint8_t*)"{\"name\":\"Ada\",\"smile\":\"\u263A\",\"ok\":true}", 1u, object_value_buf, sizeof(object_value_buf)) == 3);
+    assert(strcmp((char*)object_value_buf, "\xE2\x98\xBA") == 0);
+    assert(json_parser_ast_object_value_string_copy_at((uint8_t*)"{\"name\":\"Ada\",\"smile\":\"\u263A\",\"ok\":true}", 1u, object_value_small_buf, sizeof(object_value_small_buf)) == 3);
+    assert(json_parser_ast_object_value_string_copy_at((uint8_t*)"{\"name\":\"Ada\",\"smile\":\"\u263A\",\"ok\":true}", 2u, object_value_buf, sizeof(object_value_buf)) < 0);
     assert(json_parser_ast_array_i64_at((uint8_t*)"[4,5,6]", 1u, &array_root_second) == 1);
     assert(json_parser_ast_array_kind_at((uint8_t*)"[1,\"Ada\",false,null,[2],{\"ok\":true}]", 1u) == 3);
     assert(json_parser_ast_array_kind_at((uint8_t*)"[1,\"Ada\",false,null,[2],{\"ok\":true}]", 4u) == 4);
@@ -115,6 +150,14 @@ int main(void) {
     assert(json_parser_ast_array_string_len_at((uint8_t*)"[\"Ada\",\"\u263A\",true]", 0u) == 3);
     assert(json_parser_ast_array_string_len_at((uint8_t*)"[\"Ada\",\"\u263A\",true]", 1u) == 3);
     assert(json_parser_ast_array_string_len_at((uint8_t*)"[\"Ada\",\"\u263A\",true]", 2u) < 0);
+    uint8_t array_value_buf[16] = {0};
+    uint8_t array_value_small_buf[3] = {0};
+    assert(json_parser_ast_array_string_copy_at((uint8_t*)"[\"Ada\",\"\u263A\",true]", 0u, array_value_buf, sizeof(array_value_buf)) == 3);
+    assert(strcmp((char*)array_value_buf, "Ada") == 0);
+    assert(json_parser_ast_array_string_copy_at((uint8_t*)"[\"Ada\",\"\u263A\",true]", 1u, array_value_buf, sizeof(array_value_buf)) == 3);
+    assert(strcmp((char*)array_value_buf, "\xE2\x98\xBA") == 0);
+    assert(json_parser_ast_array_string_copy_at((uint8_t*)"[\"Ada\",\"\u263A\",true]", 1u, array_value_small_buf, sizeof(array_value_small_buf)) == 3);
+    assert(json_parser_ast_array_string_copy_at((uint8_t*)"[\"Ada\",\"\u263A\",true]", 2u, array_value_buf, sizeof(array_value_buf)) < 0);
     assert(json_parser_ast_array_array_len_at((uint8_t*)"[1,\"Ada\",false,null,[2,3],{\"ok\":true,\"n\":1}]", 4u) == 2);
     assert(json_parser_ast_array_object_len_at((uint8_t*)"[1,\"Ada\",false,null,[2,3],{\"ok\":true,\"n\":1}]", 5u) == 2);
     assert(json_parser_ast_array_object_len_at((uint8_t*)"[1,\"Ada\",false,null,[2,3],{\"ok\":true,\"n\":1}]", 1u) < 0);
@@ -150,6 +193,59 @@ int main(void) {
     assert(array_null == 1);
     assert(missing_num == 99);
     assert(big_num == UINT64_C(18446744073709551615));
+
+    uint8_t owned_doc_src[] = "{\"name\":\"Ada\",\"nums\":[4,5],\"ok\":true,\"meta\":{\"note\":\"hi\"},\"quote\":\"\\\"\"}";
+    JsonParserDocument owned_doc = {0};
+    uint8_t doc_name_buf[16] = {0};
+    uint8_t doc_quote_buf[8] = {0};
+    uint8_t doc_key_buf[16] = {0};
+    uint8_t doc_value_buf[16] = {0};
+    int64_t doc_num = 0;
+    uint64_t doc_big = 0;
+    assert(json_parser_document_parse(owned_doc_src, &owned_doc) == 1);
+    assert(json_parser_document_checksum(&owned_doc) == json_parser_ast_checksum((uint8_t*)owned_doc_src));
+    assert(json_parser_document_node_count(&owned_doc) > 0);
+    assert(json_parser_document_root_kind(&owned_doc) == 5);
+    assert(json_parser_document_object_len(&owned_doc) == 5);
+    assert(json_parser_document_array_len(&owned_doc) < 0);
+    owned_doc_src[2] = 'X';
+    assert(json_parser_document_field_kind(&owned_doc, (uint8_t*)"name") == 3);
+    assert(json_parser_document_field_bool(&owned_doc, (uint8_t*)"ok") == 1);
+    assert(json_parser_document_field_is_null(&owned_doc, (uint8_t*)"missing") < 0);
+    assert(json_parser_document_field_string_len(&owned_doc, (uint8_t*)"name") == 3);
+    assert(json_parser_document_field_string_copy(&owned_doc, (uint8_t*)"name", doc_name_buf, sizeof(doc_name_buf)) == 3);
+    assert(strcmp((char*)doc_name_buf, "Ada") == 0);
+    assert(json_parser_document_field_string_copy(&owned_doc, (uint8_t*)"quote", doc_quote_buf, sizeof(doc_quote_buf)) == 1);
+    assert(strcmp((char*)doc_quote_buf, "\"") == 0);
+    assert(json_parser_document_array_field_len(&owned_doc, (uint8_t*)"nums") == 2);
+    assert(json_parser_document_object_field_len(&owned_doc, (uint8_t*)"meta") == 1);
+    assert(json_parser_document_array_field_i64_at(&owned_doc, (uint8_t*)"nums", 1u, &doc_num) == 1);
+    assert(doc_num == 5);
+    assert(json_parser_document_array_field_kind_at(&owned_doc, (uint8_t*)"nums", 0u) == 2);
+    assert(json_parser_document_object_key_len_at(&owned_doc, 0u) == 4);
+    assert(json_parser_document_object_key_copy_at(&owned_doc, 3u, doc_key_buf, sizeof(doc_key_buf)) == 4);
+    assert(strcmp((char*)doc_key_buf, "meta") == 0);
+    assert(json_parser_document_object_value_kind_at(&owned_doc, 3u) == 5);
+    assert(json_parser_document_object_value_string_copy_at(&owned_doc, 4u, doc_value_buf, sizeof(doc_value_buf)) == 1);
+    assert(strcmp((char*)doc_value_buf, "\"") == 0);
+    assert(json_parser_document_field_u64(&owned_doc, (uint8_t*)"big", &doc_big) == 0);
+    assert(json_parser_document_destroy(owned_doc.impl_bits) == 1);
+    owned_doc.impl_bits = 0;
+    assert(json_parser_document_destroy(owned_doc.impl_bits) == 0);
+
+    JsonParserDocument array_doc = {0};
+    uint8_t array_doc_buf[16] = {0};
+    assert(json_parser_document_parse((uint8_t*)"[4,\"Ada\",[1,2],{\"ok\":true}]", &array_doc) == 1);
+    assert(json_parser_document_root_kind(&array_doc) == 4);
+    assert(json_parser_document_array_len(&array_doc) == 4);
+    assert(json_parser_document_object_len(&array_doc) < 0);
+    assert(json_parser_document_array_i64_at(&array_doc, 0u, &doc_num) == 1);
+    assert(doc_num == 4);
+    assert(json_parser_document_array_kind_at(&array_doc, 1u) == 3);
+    assert(json_parser_document_array_string_copy_at(&array_doc, 1u, array_doc_buf, sizeof(array_doc_buf)) == 3);
+    assert(strcmp((char*)array_doc_buf, "Ada") == 0);
+    assert(json_parser_document_destroy(array_doc.impl_bits) == 1);
+    array_doc.impl_bits = 0;
 
     assert(json_parser_parallel_max_workers() >= 1);
     assert(json_parser_parallel_checksum((uint8_t*)"[1,2,3]", 1u, 3u) == 345);
