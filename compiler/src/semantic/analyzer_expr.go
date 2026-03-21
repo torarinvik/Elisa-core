@@ -2202,6 +2202,8 @@ func (a *Analyzer) resolveProjectedFieldValueExpr(objectExpr ast.Expr, field str
 			return n.Args[i], true
 		}
 		return nil, false
+	case *ast.CallExpr:
+		return a.resolveProjectedFieldValueFromCallExpr(n, field)
 	case *ast.FieldExpr:
 		resolved, ok := a.resolveProjectedFieldValueExpr(n.Object, n.Field)
 		if !ok {
@@ -2211,6 +2213,99 @@ func (a *Analyzer) resolveProjectedFieldValueExpr(objectExpr ast.Expr, field str
 	default:
 		return nil, false
 	}
+}
+
+func (a *Analyzer) resolveProjectedFieldValueFromCallExpr(call *ast.CallExpr, field string) (ast.Expr, bool) {
+	if call == nil || field == "" {
+		return nil, false
+	}
+	decl, ok := a.resolveProjectedFieldExternFuncDecl(call.Func)
+	if !ok || decl == nil {
+		return nil, false
+	}
+	for _, annotation := range decl.Annotations {
+		if annotation.Name != "borrows_return_field" && annotation.Name != "borrows_return_field_rebased" {
+			continue
+		}
+		if len(annotation.Args) == 0 || len(annotation.Args)%2 != 0 {
+			continue
+		}
+		for i := 0; i < len(annotation.Args); i += 2 {
+			returnSteps, ok := parseExternReturnTargetPath(annotation.Args[i])
+			if !ok || len(returnSteps) != 1 || returnSteps[0].Field != field {
+				continue
+			}
+			if expr, ok := a.resolveProjectedFieldBorrowSourceExprFromCall(call, decl, annotation.Args[i+1]); ok {
+				return expr, true
+			}
+		}
+	}
+	return nil, false
+}
+
+func (a *Analyzer) resolveProjectedFieldExternFuncDecl(fnExpr ast.Expr) (*ast.ExternFuncDecl, bool) {
+	if fnExpr == nil {
+		return nil, false
+	}
+	switch n := fnExpr.(type) {
+	case *ast.ParenExpr:
+		return a.resolveProjectedFieldExternFuncDecl(n.Inner)
+	case *ast.SpecializeExpr:
+		return a.resolveProjectedFieldExternFuncDecl(n.Operand)
+	case *ast.Ident:
+		if a.globalScope == nil {
+			return nil, false
+		}
+		sym, ok := a.globalScope.Lookup(n.Name)
+		if !ok {
+			return nil, false
+		}
+		decl, ok := sym.Node.(*ast.ExternFuncDecl)
+		return decl, ok
+	default:
+		return nil, false
+	}
+}
+
+func (a *Analyzer) resolveProjectedFieldBorrowSourceExprFromCall(call *ast.CallExpr, decl *ast.ExternFuncDecl, pathText string) (ast.Expr, bool) {
+	if call == nil || decl == nil {
+		return nil, false
+	}
+	paramName, steps, ok := parseBorrowReturnAnnotationPath(pathText)
+	if !ok || paramName == "" {
+		return nil, false
+	}
+	current, ok := resolveProjectedFieldCallArgByParamName(call, decl, paramName)
+	if !ok || current == nil {
+		return nil, false
+	}
+	for _, step := range steps {
+		switch {
+		case step.Field != "":
+			current = &ast.FieldExpr{Position: call.Position, Object: current, Field: step.Field}
+		case step.Index != nil:
+			current = &ast.IndexExpr{Position: call.Position, Object: current, Index: &ast.IntLit{Position: call.Position, Value: strconv.FormatInt(*step.Index, 10), Suffix: "u"}}
+		default:
+			return nil, false
+		}
+	}
+	return current, true
+}
+
+func resolveProjectedFieldCallArgByParamName(call *ast.CallExpr, decl *ast.ExternFuncDecl, paramName string) (ast.Expr, bool) {
+	if call == nil || decl == nil || paramName == "" {
+		return nil, false
+	}
+	for i, param := range decl.Params {
+		if param.Name != paramName {
+			continue
+		}
+		if i < len(call.Args) {
+			return call.Args[i], true
+		}
+		return nil, false
+	}
+	return nil, false
 }
 
 func (a *Analyzer) specializeProjectedFunctionFieldType(expr *ast.FieldExpr, declared Type) Type {

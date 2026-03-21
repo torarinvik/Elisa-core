@@ -299,6 +299,16 @@ func (a *Analyzer) inferExprOptimizationFacts(expr ast.Expr, t Type) Optimizatio
 		if facts.base == "" {
 			facts.base = a.optimizationBaseForExpr(n)
 		}
+	case *ast.FieldExpr:
+		if resolved, ok := a.resolveProjectedFieldValueExpr(n.Object, n.Field); ok {
+			if resolvedFacts, ok := a.exprFacts[resolved]; ok {
+				facts = resolvedFacts
+				facts.Exclusive = false
+			}
+		}
+		if facts.base == "" {
+			facts.base = a.optimizationBaseForExpr(n.Object)
+		}
 	case *ast.CallExpr:
 		facts = a.inferCallOptimizationFacts(n, facts)
 	case *ast.AllocExpr:

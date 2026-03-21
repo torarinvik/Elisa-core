@@ -784,3 +784,126 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 		t.Fatalf("expected result query to report frozen-store-only provenance for packed child payload recovered through wrapped match")
 	}
 }
+
+func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedHelperFieldMatchBinders(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+	HoldViews(left: view[i32], right: view[i32], child: Expr)
+
+repr(c) struct Box:
+	node: Expr
+
+@borrows_return_field(node, node)
+extern wrap_node(node: Expr) -> Box
+
+def inspect(owner: Arena, buf: array[i32, 4]) -> int:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	child: Expr = new[store] Expr.Int(value: 1)
+	node: Expr = new[store] Expr.HoldViews(left: buf[0u:2u], right: buf[2u:4u], child: child)
+	boxed: Box = wrap_node(node)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	match boxed.node in frozen:
+		Expr.HoldViews(left: left, right: right, child: child_alias):
+			left_copy: view[i32] = left
+			right_copy: view[i32] = right
+			child_copy: Expr = child_alias
+			_ = boxed
+			_ = frozen
+			_ = child_copy
+			return 0
+		Expr.Int(value: _):
+			return 1
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_helper_field_match.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	leftExpr := requireOptimizationFactsVarInitExpr(t, fn, "left_copy")
+	rightExpr := requireOptimizationFactsVarInitExpr(t, fn, "right_copy")
+	childExpr := requireOptimizationFactsVarInitExpr(t, fn, "child_copy")
+
+	leftFacts := requireExprOptimizationFacts(t, result, leftExpr)
+	rightFacts := requireExprOptimizationFacts(t, result, rightExpr)
+	childFacts := requireExprOptimizationFacts(t, result, childExpr)
+
+	if !leftFacts.HasExactExtent() {
+		t.Fatalf("expected left helper-wrapped packed match payload to preserve exact extent facts, got %#v", leftFacts)
+	}
+	if !rightFacts.HasExactExtent() {
+		t.Fatalf("expected right helper-wrapped packed match payload to preserve exact extent facts, got %#v", rightFacts)
+	}
+	if !result.ExprsAreDisjoint(leftExpr, rightExpr) {
+		t.Fatalf("expected split view payloads recovered through helper-wrapped packed match to stay disjoint")
+	}
+	if !result.ExprsHaveEqualExtentSize(leftExpr, rightExpr) {
+		t.Fatalf("expected split view payloads recovered through helper-wrapped packed match to retain equal extent size")
+	}
+	if result.ExprsHaveSameExtent(leftExpr, rightExpr) {
+		t.Fatalf("expected split view payloads recovered through helper-wrapped packed match to retain distinct exact bounds")
+	}
+	if !childFacts.FrozenPackedStoreOnly {
+		t.Fatalf("expected packed child payload recovered through helper-wrapped frozen match to stay frozen-store-only, got %#v", childFacts)
+	}
+	if !result.ExprDependsOnlyOnFrozenPackedStores(childExpr) {
+		t.Fatalf("expected result query to report frozen-store-only provenance for packed child payload recovered through helper-wrapped match")
+	}
+}
+
+func TestAnalyzePreservesOptimizationFactsThroughDirectFieldProjectionExpressions(t *testing.T) {
+	src := `repr(c) struct Views:
+	left: view[i32]
+	right: view[i32]
+
+@borrows_return_field(left, left, right, right)
+extern wrap_views(left: view[i32], right: view[i32]) -> Views
+
+def inspect(buf: array[i32, 4]) -> int:
+	boxed: Views = Views(buf[0u:2u], buf[2u:4u])
+	wrapped: Views = wrap_views(buf[0u:2u], buf[2u:4u])
+	left_direct: view[i32] = boxed.left
+	right_direct: view[i32] = boxed.right
+	left_wrapped: view[i32] = wrapped.left
+	right_wrapped: view[i32] = wrapped.right
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_direct_field_projection.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	leftDirectExpr := requireOptimizationFactsVarInitExpr(t, fn, "left_direct")
+	rightDirectExpr := requireOptimizationFactsVarInitExpr(t, fn, "right_direct")
+	leftWrappedExpr := requireOptimizationFactsVarInitExpr(t, fn, "left_wrapped")
+	rightWrappedExpr := requireOptimizationFactsVarInitExpr(t, fn, "right_wrapped")
+
+	leftDirectFacts := requireExprOptimizationFacts(t, result, leftDirectExpr)
+	rightDirectFacts := requireExprOptimizationFacts(t, result, rightDirectExpr)
+	leftWrappedFacts := requireExprOptimizationFacts(t, result, leftWrappedExpr)
+	rightWrappedFacts := requireExprOptimizationFacts(t, result, rightWrappedExpr)
+
+	if !leftDirectFacts.HasExactExtent() || !rightDirectFacts.HasExactExtent() {
+		t.Fatalf("expected direct wrapper field projections to preserve exact extents, got %#v and %#v", leftDirectFacts, rightDirectFacts)
+	}
+	if !leftWrappedFacts.HasExactExtent() || !rightWrappedFacts.HasExactExtent() {
+		t.Fatalf("expected helper-returned wrapper field projections to preserve exact extents, got %#v and %#v", leftWrappedFacts, rightWrappedFacts)
+	}
+	if !result.ExprsAreDisjoint(leftDirectExpr, rightDirectExpr) {
+		t.Fatalf("expected direct wrapper field projections to stay disjoint")
+	}
+	if !result.ExprsHaveEqualExtentSize(leftDirectExpr, rightDirectExpr) {
+		t.Fatalf("expected direct wrapper field projections to retain equal extent size")
+	}
+	if result.ExprsHaveSameExtent(leftDirectExpr, rightDirectExpr) {
+		t.Fatalf("expected direct wrapper field projections to retain distinct exact bounds")
+	}
+	if !result.ExprsAreDisjoint(leftWrappedExpr, rightWrappedExpr) {
+		t.Fatalf("expected helper-returned wrapper field projections to stay disjoint")
+	}
+	if !result.ExprsHaveEqualExtentSize(leftWrappedExpr, rightWrappedExpr) {
+		t.Fatalf("expected helper-returned wrapper field projections to retain equal extent size")
+	}
+	if result.ExprsHaveSameExtent(leftWrappedExpr, rightWrappedExpr) {
+		t.Fatalf("expected helper-returned wrapper field projections to retain distinct exact bounds")
+	}
+}
