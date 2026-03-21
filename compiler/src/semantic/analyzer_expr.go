@@ -2028,6 +2028,14 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		if _, exists := bindings[p.Name]; !exists {
 			bindings[p.Name] = actual
 		}
+	case *RefStorageParamType:
+		if _, exists := bindings[p.Name]; !exists {
+			bindings[p.Name] = actual
+		}
+	case *RefStateParamType:
+		if _, exists := bindings[p.Name]; !exists {
+			bindings[p.Name] = actual
+		}
 	case *ErrorUnionType:
 		if act, ok := actual.(*ErrorUnionType); ok {
 			a.collectTypeBindings(p.Value, act.Value, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)

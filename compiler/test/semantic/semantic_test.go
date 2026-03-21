@@ -345,6 +345,27 @@ def run() -> i64:
 	requireFunctionReturnTypeString(t, result, "run", "i64")
 }
 
+func TestAnalyzeAcceptsRefQualifierGenericFunctionInference(t *testing.T) {
+	src := `repr(c) struct Node:
+	value: mutable i32
+
+struct Handle[refstorage Store, refstate State]:
+	ptr: Store Node&[State]
+
+def keep_handle[refstorage Store, refstate State](value: Handle[Store, State]) -> Handle[Store, State]:
+	return value
+
+def unwrap_handle(value: Handle[heap, &]) -> heap Node&:
+	kept: Handle[heap, &] = keep_handle(value)
+	return kept.ptr
+`
+	result, errs := parseAndAnalyze(t, "ref_qualifier_generic_inference.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "keep_handle", "Handle[Store, State]")
+	requireFunctionReturnTypeString(t, result, "unwrap_handle", "heap Node&")
+}
+
 func TestAnalyzeRejectsSpecializationOfNonGenericFunction(t *testing.T) {
 	src := `def id(value: i64) -> i64:
     return value
@@ -2742,6 +2763,72 @@ export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[
 	}
 	if result.ExportedFuncs[0].Signature.Return.String() != "Vec[i32]" {
 		t.Fatalf("expected exported wrapper return to resolve concretely, got %s", result.ExportedFuncs[0].Signature.Return.String())
+	}
+}
+
+func TestAnalyzeAcceptsConcreteRefQualifierExports(t *testing.T) {
+	src := `repr(c) struct Node:
+	value: mutable i32
+
+repr(c) struct Handle[refstorage Store, refstate State]:
+	ptr: Store Node&[State]
+
+export type Node as CtxNode
+export type Handle[heap, &] as HeapHandle
+
+def keep_handle[refstorage Store, refstate State](value: Handle[Store, State]) -> Handle[Store, State]:
+	return value
+
+export func keep_heap_handle(value: HeapHandle) -> HeapHandle = keep_handle[heap, &]
+`
+	result, errs := parseAndAnalyze(t, "export_ref_qualifier_wrappers.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	if len(result.ExportedTypes) != 2 {
+		t.Fatalf("expected 2 exported types, got %d", len(result.ExportedTypes))
+	}
+	if len(result.ExportedFuncs) != 1 {
+		t.Fatalf("expected 1 exported func, got %d", len(result.ExportedFuncs))
+	}
+	if got := result.ExportedTypes[1].Type.String(); got != "Handle[heap, &]" {
+		t.Fatalf("expected concrete exported handle type, got %s", got)
+	}
+	bindings := result.ExportedFuncs[0].TargetBindings
+	storageBinding, ok := bindings["Store"].(*semantic.RefStorageValueType)
+	if !ok {
+		t.Fatalf("expected concrete refstorage binding, got %#v", bindings["Store"])
+	}
+	if storageBinding.Storage != semantic.RefStorageHeap {
+		t.Fatalf("expected heap refstorage binding, got %v", storageBinding.Storage)
+	}
+	stateBinding, ok := bindings["State"].(*semantic.RefStateValueType)
+	if !ok {
+		t.Fatalf("expected concrete refstate binding, got %#v", bindings["State"])
+	}
+	if stateBinding.State != semantic.RefStateNonNull {
+		t.Fatalf("expected non-null refstate binding, got %v", stateBinding.State)
+	}
+	if got := result.ExportedFuncs[0].Signature.Return.String(); got != "Handle[heap, &]" {
+		t.Fatalf("expected concrete exported handle return type, got %s", got)
+	}
+}
+
+func TestAnalyzeRejectsInvalidRefQualifierExportTypeArgs(t *testing.T) {
+	src := `repr(c) struct Node:
+	value: mutable i32
+
+repr(c) struct Handle[refstorage Store, refstate State]:
+	ptr: Store Node&[State]
+
+export type Handle[i32, &] as BadHandle
+`
+	_, errs := parseAndAnalyze(t, "export_ref_qualifier_non_concrete_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "generic argument \"i32\" for refstorage parameter \"Store\" must be a refstorage literal or parameter") {
+		t.Fatalf("expected refstorage export-type argument diagnostic, got:\n%s", all)
 	}
 }
 

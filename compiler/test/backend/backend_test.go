@@ -948,6 +948,39 @@ def use_identity(value: i32) -> i32:
 	}
 }
 
+func TestGenerateLLVMIRSpecializesRefQualifierGenericFunctions(t *testing.T) {
+	src := `repr(c) struct Node:
+	value: mutable i32
+
+struct Handle[refstorage Store, refstate State]:
+	ptr: Store Node&[State]
+
+def id_handle[refstorage Store, refstate State](value: Handle[Store, State]) -> Handle[Store, State]:
+	return value
+
+def use_handle(value: Handle[heap, &]) -> heap Node&:
+	kept: Handle[heap, &] = id_handle(value)
+	return kept.ptr
+`
+	result := parseAndAnalyze(t, "backend_ref_qualifier_specialization.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%Handle__heap__anon = type { ptr }",
+		"define %Handle__heap__anon @id_handle__heap__anon(%Handle__heap__anon",
+		"define ptr @use_handle(%Handle__heap__anon",
+		"call %Handle__heap__anon @id_handle__heap__anon(%Handle__heap__anon",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersExportWrappers(t *testing.T) {
 	src := `struct Vec[T]:
 	x: mutable T
@@ -1039,6 +1072,44 @@ export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[
 	}
 	if strings.Contains(header, "Vec__i32 vec2i_add") {
 		t.Fatalf("expected public header not to leak backend mangled aggregate names, got:\n%s", header)
+	}
+}
+
+func TestGenerateCHeaderForConcreteRefQualifierExports(t *testing.T) {
+	src := `repr(c) struct Node:
+	value: mutable i32
+
+repr(c) struct Handle[refstorage Store, refstate State]:
+	ptr: Store Node&[State]
+
+export type Node as CtxNode
+export type Handle[heap, &] as HeapHandle
+
+def keep_handle[refstorage Store, refstate State](value: Handle[Store, State]) -> Handle[Store, State]:
+	return value
+
+export func keep_heap_handle(value: HeapHandle) -> HeapHandle = keep_handle[heap, &]
+`
+	result := parseAndAnalyze(t, "backend_ref_qualifier_export_header.llcontext", src)
+	header, err := backend.GenerateCHeader(result)
+	if err != nil {
+		t.Fatalf("GenerateCHeader returned error: %v", err)
+	}
+	checks := []string{
+		"typedef struct CtxNode CtxNode;",
+		"typedef struct HeapHandle HeapHandle;",
+		"struct CtxNode {",
+		"struct HeapHandle {",
+		"CtxNode *ptr;",
+		"HeapHandle keep_heap_handle(HeapHandle arg0);",
+	}
+	for _, check := range checks {
+		if !strings.Contains(header, check) {
+			t.Fatalf("expected header to contain %q, got:\n%s", check, header)
+		}
+	}
+	if strings.Contains(header, "Handle__heap__anon") {
+		t.Fatalf("expected public header not to leak qualifier-specialized backend names, got:\n%s", header)
 	}
 }
 

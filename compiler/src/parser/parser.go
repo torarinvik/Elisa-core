@@ -800,7 +800,7 @@ func (p *Parser) parseExportDecl() ast.Decl {
 		var targetTypeArgs []ast.TypeExpr
 		if p.match(lexer.TOKEN_LBRACKET) {
 			for {
-				targetTypeArgs = append(targetTypeArgs, p.parseTypeExpr())
+				targetTypeArgs = append(targetTypeArgs, p.parseGenericTypeArgExpr())
 				if !p.match(lexer.TOKEN_COMMA) {
 					break
 				}

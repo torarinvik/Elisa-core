@@ -202,16 +202,16 @@ type Field struct {
 }
 
 type StructType struct {
-	Name       string
-	TypeParams []string
+	Name             string
+	TypeParams       []string
 	RefStorageParams []string
 	RefStateParams   []string
 	GenericParams    []ast.GenericParam
-	Fields     map[string]Field
-	Affine     bool
-	ReprC      bool
-	Decl       *ast.StructDecl
-	Builtin    bool
+	Fields           map[string]Field
+	Affine           bool
+	ReprC            bool
+	Decl             *ast.StructDecl
+	Builtin          bool
 }
 
 type OpaqueType struct {
@@ -313,7 +313,7 @@ func (t *RefStateValueType) String() string {
 	}
 	return ast.RefStateMarker(ast.RefState(t.State))
 }
-func (t *ErrorSetType) String() string  { return t.Name }
+func (t *ErrorSetType) String() string { return t.Name }
 func (t *ErrorUnionType) String() string {
 	if t == nil || t.Value == nil || t.Errors == nil {
 		return "<invalid-error-union>"

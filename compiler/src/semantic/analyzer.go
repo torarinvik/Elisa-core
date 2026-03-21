@@ -320,14 +320,14 @@ func (a *Analyzer) registerBuiltinStructType(name string, typeParams []string, a
 	semanticFields := make(map[string]Field, len(fields))
 	decl := &ast.StructDecl{Position: lexer.Pos{}, Name: name, TypeParams: append([]string(nil), typeParams...), GenericParams: astTypeGenericParams(typeParams), ReprC: true, Affine: affine}
 	st := &StructType{
-		Name:       name,
-		TypeParams: append([]string(nil), typeParams...),
+		Name:          name,
+		TypeParams:    append([]string(nil), typeParams...),
 		GenericParams: astTypeGenericParams(typeParams),
-		Fields:     semanticFields,
-		Affine:     affine,
-		ReprC:      true,
-		Decl:       decl,
-		Builtin:    true,
+		Fields:        semanticFields,
+		Affine:        affine,
+		ReprC:         true,
+		Decl:          decl,
+		Builtin:       true,
 	}
 	a.namedTypes[name] = st
 	a.withTypeParams(typeParams, nil, func() {
@@ -519,15 +519,15 @@ func (a *Analyzer) collectNamedTypes(decls []ast.Decl) {
 				continue
 			}
 			st := &StructType{
-				Name:       n.Name,
-				TypeParams: append([]string(nil), n.TypeParams...),
+				Name:             n.Name,
+				TypeParams:       append([]string(nil), n.TypeParams...),
 				RefStorageParams: append([]string(nil), n.RefStorageParams...),
-				RefStateParams: append([]string(nil), n.RefStateParams...),
-				GenericParams: append([]ast.GenericParam(nil), n.GenericParams...),
-				Fields:     map[string]Field{},
-				Affine:     n.Affine,
-				ReprC:      n.ReprC,
-				Decl:       n,
+				RefStateParams:   append([]string(nil), n.RefStateParams...),
+				GenericParams:    append([]ast.GenericParam(nil), n.GenericParams...),
+				Fields:           map[string]Field{},
+				Affine:           n.Affine,
+				ReprC:            n.ReprC,
+				Decl:             n,
 			}
 			a.namedTypes[n.Name] = st
 		case *ast.ConstEnumDecl:
