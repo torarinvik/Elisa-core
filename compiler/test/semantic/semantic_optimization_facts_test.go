@@ -22,17 +22,30 @@ func requireOptimizationFactsFunctionDecl(t *testing.T, result *semantic.Result,
 
 func requireOptimizationFactsVarInitExpr(t *testing.T, fn *ast.FuncDecl, name string) ast.Expr {
 	t.Helper()
-	for _, stmt := range fn.Body {
-		decl, ok := stmt.(*ast.VarDeclStmt)
-		if !ok {
-			continue
-		}
-		if decl.Name == name {
-			return decl.Value
-		}
+	expr, ok := findOptimizationFactsVarInitExpr(fn.Body, name)
+	if ok {
+		return expr
 	}
 	t.Fatalf("expected var decl %q in function %q", name, fn.Name)
 	return nil
+}
+
+func findOptimizationFactsVarInitExpr(stmts []ast.Stmt, name string) (ast.Expr, bool) {
+	for _, stmt := range stmts {
+		switch s := stmt.(type) {
+		case *ast.VarDeclStmt:
+			if s.Name == name {
+				return s.Value, true
+			}
+		case *ast.MatchStmt:
+			for _, arm := range s.Arms {
+				if expr, ok := findOptimizationFactsVarInitExpr(arm.Body, name); ok {
+					return expr, true
+				}
+			}
+		}
+	}
+	return nil, false
 }
 
 func requireExprOptimizationFacts(t *testing.T, result *semantic.Result, expr ast.Expr) semantic.OptimizationFacts {
@@ -652,5 +665,62 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	}
 	if !result.ExprDependsOnlyOnFrozenPackedStores(childExpr) {
 		t.Fatalf("expected result query to report frozen-store-only provenance for packed child payload recovered through move-as")
+	}
+}
+
+func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedMatchBinders(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+	HoldViews(left: view[i32], right: view[i32], child: Expr)
+
+def inspect(owner: Arena, buf: array[i32, 4]) -> int:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	child: Expr = new[store] Expr.Int(value: 1)
+	node: Expr = new[store] Expr.HoldViews(left: buf[0u:2u], right: buf[2u:4u], child: child)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	match node in frozen:
+		Expr.HoldViews(left: left, right: right, child: child_alias):
+			left_copy: view[i32] = left
+			right_copy: view[i32] = right
+			child_copy: Expr = child_alias
+			_ = frozen
+			_ = child_copy
+			return 0
+		Expr.Int(value: _):
+			return 1
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_match.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	leftExpr := requireOptimizationFactsVarInitExpr(t, fn, "left_copy")
+	rightExpr := requireOptimizationFactsVarInitExpr(t, fn, "right_copy")
+	childExpr := requireOptimizationFactsVarInitExpr(t, fn, "child_copy")
+
+	leftFacts := requireExprOptimizationFacts(t, result, leftExpr)
+	rightFacts := requireExprOptimizationFacts(t, result, rightExpr)
+	childFacts := requireExprOptimizationFacts(t, result, childExpr)
+
+	if !leftFacts.HasExactExtent() {
+		t.Fatalf("expected left packed match payload to preserve exact extent facts, got %#v", leftFacts)
+	}
+	if !rightFacts.HasExactExtent() {
+		t.Fatalf("expected right packed match payload to preserve exact extent facts, got %#v", rightFacts)
+	}
+	if !result.ExprsAreDisjoint(leftExpr, rightExpr) {
+		t.Fatalf("expected split view payloads recovered through packed match to stay disjoint")
+	}
+	if !result.ExprsHaveEqualExtentSize(leftExpr, rightExpr) {
+		t.Fatalf("expected split view payloads recovered through packed match to retain equal extent size")
+	}
+	if result.ExprsHaveSameExtent(leftExpr, rightExpr) {
+		t.Fatalf("expected split view payloads recovered through packed match to retain distinct exact bounds")
+	}
+	if !childFacts.FrozenPackedStoreOnly {
+		t.Fatalf("expected packed child payload recovered through frozen match to stay frozen-store-only, got %#v", childFacts)
+	}
+	if !result.ExprDependsOnlyOnFrozenPackedStores(childExpr) {
+		t.Fatalf("expected result query to report frozen-store-only provenance for packed child payload recovered through match")
 	}
 }

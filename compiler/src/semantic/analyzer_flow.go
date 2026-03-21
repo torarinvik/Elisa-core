@@ -1244,8 +1244,10 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 		sym := &Symbol{Name: p.Name, Kind: SymbolLocal, Type: expected, Node: p, Mutable: false}
 		a.defineLocal(sym, p.Pos())
 		a.recordValueBinding(sym, valueExpr)
+		a.recordBorrowedOwnerRefBinding(sym, valueExpr)
 		a.recordFunctionValueBinding(sym, valueExpr)
 		a.recordImmutableSymbolOptimizationFacts(sym, valueExpr)
+		a.recordRegionRefBinding(sym, valueExpr)
 	case *ast.MatchVariantPattern:
 		enumType, ok := expected.(*EnumType)
 		if !ok {
