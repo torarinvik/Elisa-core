@@ -315,6 +315,7 @@ func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {
 			a.defineLocal(sym, p.Pos())
 			a.recordValueBinding(sym, stmt.Value)
 			a.recordFunctionValueBinding(sym, stmt.Value)
+			a.recordImmutableSymbolOptimizationFacts(sym, stmt.Value)
 			if hasBorrowedOwnerState {
 				a.currentBorrowedOwnerRefs[sym] = borrowedOwnerState
 			}
@@ -335,8 +336,10 @@ func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {
 			}
 			sym := &Symbol{Name: arg.Name, Kind: SymbolLocal, Type: fields[i].Type, Node: p, Mutable: false}
 			a.defineLocal(sym, arg.Position)
-			a.recordValueBinding(sym, &ast.FieldExpr{Position: arg.Position, Object: stmt.Value, Field: fields[i].Name})
-			a.recordFunctionValueBinding(sym, &ast.FieldExpr{Position: arg.Position, Object: stmt.Value, Field: fields[i].Name})
+			fieldExpr := &ast.FieldExpr{Position: arg.Position, Object: stmt.Value, Field: fields[i].Name}
+			a.recordValueBinding(sym, fieldExpr)
+			a.recordFunctionValueBinding(sym, fieldExpr)
+			a.recordImmutableSymbolOptimizationFacts(sym, fieldExpr)
 			if hasBorrowedOwnerState {
 				if fieldState, ok := projectBorrowedOwnerRefFieldState(borrowedOwnerState, fields[i].Name); ok {
 					a.currentBorrowedOwnerRefs[sym] = fieldState
@@ -364,6 +367,7 @@ func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {
 			if valueExpr, ok := a.resolveMoveBindVariantPayloadValueExpr(stmt.Value, p, payload.Key); ok {
 				a.recordValueBinding(sym, valueExpr)
 				a.recordFunctionValueBinding(sym, valueExpr)
+				a.recordImmutableSymbolOptimizationFacts(sym, valueExpr)
 			}
 			if hasBorrowedOwnerState {
 				if fieldState, ok := projectBorrowedOwnerRefFieldState(borrowedOwnerState, payload.Key); ok {
@@ -1241,6 +1245,7 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 		a.defineLocal(sym, p.Pos())
 		a.recordValueBinding(sym, valueExpr)
 		a.recordFunctionValueBinding(sym, valueExpr)
+		a.recordImmutableSymbolOptimizationFacts(sym, valueExpr)
 	case *ast.MatchVariantPattern:
 		enumType, ok := expected.(*EnumType)
 		if !ok {

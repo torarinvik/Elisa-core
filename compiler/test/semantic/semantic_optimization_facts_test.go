@@ -601,3 +601,56 @@ def inspect(owner: Arena) -> int:
 		t.Fatalf("expected result query to reject mixed local-region and frozen-store provenance")
 	}
 }
+
+func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedMoveAsDestructure(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+	HoldViews(left: view[i32], right: view[i32], child: Expr)
+
+def inspect(owner: Arena, buf: array[i32, 4]) -> int:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	child: Expr = new[store] Expr.Int(value: 1)
+	node: Expr = new[store] Expr.HoldViews(left: buf[0u:2u], right: buf[2u:4u], child: child)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	move node in frozen as Expr.HoldViews(left, right, child_alias)
+	left_copy: view[i32] = left
+	right_copy: view[i32] = right
+	child_copy: Expr = child_alias
+	_ = frozen
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_move_as.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	leftExpr := requireOptimizationFactsVarInitExpr(t, fn, "left_copy")
+	rightExpr := requireOptimizationFactsVarInitExpr(t, fn, "right_copy")
+	childExpr := requireOptimizationFactsVarInitExpr(t, fn, "child_copy")
+
+	leftFacts := requireExprOptimizationFacts(t, result, leftExpr)
+	rightFacts := requireExprOptimizationFacts(t, result, rightExpr)
+	childFacts := requireExprOptimizationFacts(t, result, childExpr)
+
+	if !leftFacts.HasExactExtent() {
+		t.Fatalf("expected left packed move-as payload to preserve exact extent facts, got %#v", leftFacts)
+	}
+	if !rightFacts.HasExactExtent() {
+		t.Fatalf("expected right packed move-as payload to preserve exact extent facts, got %#v", rightFacts)
+	}
+	if !result.ExprsAreDisjoint(leftExpr, rightExpr) {
+		t.Fatalf("expected split view payloads recovered through packed move-as to stay disjoint")
+	}
+	if !result.ExprsHaveEqualExtentSize(leftExpr, rightExpr) {
+		t.Fatalf("expected split view payloads recovered through packed move-as to retain equal extent size")
+	}
+	if result.ExprsHaveSameExtent(leftExpr, rightExpr) {
+		t.Fatalf("expected split view payloads recovered through packed move-as to retain distinct exact bounds")
+	}
+	if !childFacts.FrozenPackedStoreOnly {
+		t.Fatalf("expected packed child payload recovered through frozen move-as to stay frozen-store-only, got %#v", childFacts)
+	}
+	if !result.ExprDependsOnlyOnFrozenPackedStores(childExpr) {
+		t.Fatalf("expected result query to report frozen-store-only provenance for packed child payload recovered through move-as")
+	}
+}
