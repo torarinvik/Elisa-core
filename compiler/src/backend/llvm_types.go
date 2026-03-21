@@ -175,6 +175,8 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 			break
 		}
 		_, err = g.ensureNamedStructType(tt.Name)
+	case *semantic.AggregateStateType:
+		err = g.noteType(tt.Base)
 	case *semantic.OpaqueType:
 		_, err = g.ensureNamedStructType(tt.Name)
 	case *semantic.GenericInstanceType:
@@ -461,6 +463,8 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 			return g.ensureStructBody(tt.Name, tt)
 		}
 		return nil, fmt.Errorf("cannot lower generic struct %s without concrete type arguments", tt.Name)
+	case *semantic.AggregateStateType:
+		return g.lowerType(tt.Base)
 	case *semantic.OpaqueType:
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	case *semantic.GenericInstanceType:
@@ -945,6 +949,8 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type) semantic.Ty
 			args = append(args, substituteType(arg, subst))
 		}
 		return &semantic.GenericInstanceType{Name: tt.Name, Base: substituteType(tt.Base, subst), Args: args}
+	case *semantic.AggregateStateType:
+		return &semantic.AggregateStateType{Base: substituteType(tt.Base, subst), State: tt.State}
 	case *semantic.FuncType:
 		params := make([]semantic.Type, 0, len(tt.Params))
 		for _, param := range tt.Params {

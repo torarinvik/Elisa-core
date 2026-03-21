@@ -300,7 +300,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			switch tt := t.(type) {
 			case *StructType:
 				a.analyzeStructLiteralArgs(n, tt, nil)
-				result = tt
+				result = DefaultAggregateStateType(tt)
 				return
 			case *GenericInstanceType:
 				if _, ok := tt.Base.(*StructType); ok {
@@ -312,7 +312,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 						}
 					}
 					a.analyzeStructLiteralArgs(n, base, bindings)
-					result = tt
+					result = DefaultAggregateStateType(tt)
 					return
 				}
 			}
@@ -2857,6 +2857,7 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 		}
 		objType = ref.Elem
 	}
+	objType = StripAggregateStateType(objType)
 	if enumType, ok := objType.(*EnumType); ok && enumType.Packed {
 		field, ok := enumType.Common[fieldName]
 		if !ok {

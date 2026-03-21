@@ -514,6 +514,9 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		if len(n.TypeParams) > 0 {
 			tparams = "[" + strings.Join(n.TypeParams, ", ") + "]"
 		}
+		if n.HasStateParam {
+			tparams += "[?]"
+		}
 		fmt.Fprintf(w, "%s%sstruct %s%s (%d fields)\n", prefix, affine, n.Name, tparams, len(n.Fields))
 	case *ast.FuncDecl:
 		for _, annotation := range n.Annotations {
@@ -603,6 +606,8 @@ func typeStr(t ast.TypeExpr) string {
 			args = append(args, typeStr(a))
 		}
 		return n.Name + "[" + strings.Join(args, ", ") + "]"
+	case *ast.AggregateStateTypeExpr:
+		return typeStr(n.Base) + "[" + ast.RefStateMarker(n.State) + "]"
 	case *ast.MutableType:
 		return "mutable " + typeStr(n.Elem)
 	case *ast.TailType:

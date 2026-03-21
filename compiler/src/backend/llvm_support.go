@@ -903,9 +903,19 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			return bound, nil
 		}
 		if t, ok := s.g.result.NamedTypes[n.Name]; ok {
-			return t, nil
+			return semantic.DefaultAggregateStateType(t), nil
 		}
 		return nil, fmt.Errorf("unknown type %q", n.Name)
+	case *ast.AggregateStateTypeExpr:
+		baseType, err := s.resolveTypeExpr(n.Base)
+		if err != nil {
+			return nil, err
+		}
+		baseType = semantic.StripAggregateStateType(baseType)
+		if !semantic.SupportsAggregateStateType(baseType) {
+			return nil, fmt.Errorf("type %q does not declare an aggregate state parameter", baseType.String())
+		}
+		return &semantic.AggregateStateType{Base: baseType, State: semantic.RefState(n.State)}, nil
 	case *ast.ErrorSetExpr:
 		return s.resolveErrorSetExpr(n)
 	case *ast.ErrorUnionTypeExpr:
@@ -1015,7 +1025,7 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 		if _, ok := base.(*semantic.OpaqueType); ok && len(args) != 0 {
 			return nil, fmt.Errorf("type %q expects 0 type arguments, got %d", n.Name, len(args))
 		}
-		return &semantic.GenericInstanceType{Name: n.Name, Base: base, Args: args}, nil
+		return semantic.DefaultAggregateStateType(&semantic.GenericInstanceType{Name: n.Name, Base: base, Args: args}), nil
 	default:
 		return nil, fmt.Errorf("unsupported type expression %T", expr)
 	}
@@ -1365,6 +1375,7 @@ func (g *llvmGenerator) fieldInfo(objType semantic.Type, fieldName string) (sema
 		pointerLike = true
 		objType = ref.Elem
 	}
+	objType = semantic.StripAggregateStateType(objType)
 	if enumType, ok := objType.(*semantic.EnumType); ok && enumType.Packed {
 		if enumType.Decl == nil {
 			return nil, 0, nil, false, fmt.Errorf("packed enum %s is missing declaration metadata", enumType.Name)

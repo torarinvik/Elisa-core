@@ -132,6 +132,36 @@ def make_holder() -> ScratchHolder:
 	}
 }
 
+func TestGenerateLLVMIRErasesAggregateStateStructTypes(t *testing.T) {
+	src := `struct Holder[?]:
+    value: i32
+
+def read(value: Holder[&]) -> i32:
+    return value.value
+`
+	result := parseAndAnalyze(t, "backend_aggregate_state_struct.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%Holder = type { i32 }",
+		"define i32 @read(%Holder",
+		"getelementptr inbounds nuw %Holder",
+		"load i32, ptr",
+		"ret i32",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "Holder____") {
+		t.Fatalf("expected aggregate state wrapper to erase in LLVM lowering, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersMoveAsStructDestructure(t *testing.T) {
 	src := `repr(c) struct Pair:
     left: mutable i64

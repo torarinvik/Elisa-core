@@ -93,6 +93,9 @@ func SameType(a, b Type) bool {
 			}
 		}
 		return SameType(ta.Base, tb.Base)
+	case *AggregateStateType:
+		tb, ok := b.(*AggregateStateType)
+		return ok && ta.State == tb.State && SameType(ta.Base, tb.Base)
 	case *FuncType:
 		tb, ok := b.(*FuncType)
 		if !ok || ta.Variadic != tb.Variadic || len(ta.TypeParams) != len(tb.TypeParams) || len(ta.RegionParams) != len(tb.RegionParams) || len(ta.PermissionParams) != len(tb.PermissionParams) || len(ta.UsedPermissionParams) != len(tb.UsedPermissionParams) || len(ta.Permissions) != len(tb.Permissions) || len(ta.ShapeParams) != len(tb.ShapeParams) || len(ta.FreshReturnShapeParams) != len(tb.FreshReturnShapeParams) || len(ta.Params) != len(tb.Params) || !SameType(ta.Return, tb.Return) {
@@ -194,6 +197,13 @@ func AssignableTo(dst, src Type) bool {
 			return true
 		}
 		return AssignableTo(dstOpt.Value, src)
+	}
+	if dstAgg, ok := dst.(*AggregateStateType); ok {
+		srcAgg, ok := src.(*AggregateStateType)
+		if !ok {
+			return false
+		}
+		return SameType(dstAgg.Base, srcAgg.Base) && refStateAssignable(dstAgg.State, srcAgg.State)
 	}
 	if IsNumericType(dst) && IsNumericType(src) {
 		return true
@@ -314,6 +324,15 @@ func matchTypePattern(pattern, actual Type) bool {
 			}
 		}
 		return matchTypePattern(p.Base, a.Base)
+	case *AggregateStateType:
+		a, ok := actual.(*AggregateStateType)
+		if !ok {
+			return false
+		}
+		if !refStateAssignable(p.State, a.State) {
+			return false
+		}
+		return matchTypePattern(p.Base, a.Base)
 	case *FuncType:
 		a, ok := actual.(*FuncType)
 		if !ok || p.Variadic != a.Variadic || len(p.RegionParams) != len(a.RegionParams) || len(p.ShapeParams) != len(a.ShapeParams) || len(p.FreshReturnShapeParams) != len(a.FreshReturnShapeParams) || len(p.Params) != len(a.Params) {
@@ -394,6 +413,13 @@ func MergeTypes(a, b Type) Type {
 			return invalidType
 		}
 		return &OptionalType{Value: merged}
+	}
+	if aa, ok := a.(*AggregateStateType); ok {
+		if ba, ok := b.(*AggregateStateType); ok && SameType(aa.Base, ba.Base) {
+			if state, ok := mergeRefStates(aa.State, ba.State); ok {
+				return &AggregateStateType{Base: aa.Base, State: state}
+			}
+		}
 	}
 	if IsNumericType(a) && IsNumericType(b) {
 		return CommonNumericType(a, b)

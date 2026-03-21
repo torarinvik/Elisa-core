@@ -78,12 +78,13 @@ type GlobalDecl struct {
 }
 
 type StructDecl struct {
-	Position   lexer.Pos
-	Name       string
-	TypeParams []string
-	Affine     bool
-	ReprC      bool
-	Fields     []FieldDecl
+	Position      lexer.Pos
+	Name          string
+	TypeParams    []string
+	HasStateParam bool
+	Affine        bool
+	ReprC         bool
+	Fields        []FieldDecl
 }
 
 type FieldDecl struct {
@@ -225,6 +226,12 @@ type GenericType struct {
 	Args     []TypeExpr
 }
 
+type AggregateStateTypeExpr struct {
+	Position lexer.Pos
+	Base     TypeExpr
+	State    RefState
+}
+
 type MutableType struct {
 	Position lexer.Pos
 	Elem     TypeExpr
@@ -277,6 +284,17 @@ type ErrorUnionTypeExpr struct {
 type OptionalTypeExpr struct {
 	Position lexer.Pos
 	Value    TypeExpr
+}
+
+func RefStateMarker(state RefState) string {
+	switch state {
+	case RefStateNullable:
+		return "?"
+	case RefStateNull:
+		return "!"
+	default:
+		return "&"
+	}
 }
 
 type Expr interface {
@@ -685,10 +703,13 @@ func (n *ExportFuncDecl) Pos() lexer.Pos { return n.Position }
 func (n *ExportGlobalDecl) Pos() lexer.Pos {
 	return n.Position
 }
-func (n *StaticIfDecl) Pos() lexer.Pos    { return n.Position }
-func (n *NamedType) Pos() lexer.Pos       { return n.Position }
-func (n *RefType) Pos() lexer.Pos         { return n.Position }
-func (n *GenericType) Pos() lexer.Pos     { return n.Position }
+func (n *StaticIfDecl) Pos() lexer.Pos { return n.Position }
+func (n *NamedType) Pos() lexer.Pos    { return n.Position }
+func (n *RefType) Pos() lexer.Pos      { return n.Position }
+func (n *GenericType) Pos() lexer.Pos  { return n.Position }
+func (n *AggregateStateTypeExpr) Pos() lexer.Pos {
+	return n.Position
+}
 func (n *MutableType) Pos() lexer.Pos     { return n.Position }
 func (n *TailType) Pos() lexer.Pos        { return n.Position }
 func (n *ArrayType) Pos() lexer.Pos       { return n.Position }
@@ -780,6 +801,7 @@ func (*StaticIfDecl) nodeTag()           {}
 func (*NamedType) nodeTag()              {}
 func (*RefType) nodeTag()                {}
 func (*GenericType) nodeTag()            {}
+func (*AggregateStateTypeExpr) nodeTag() {}
 func (*MutableType) nodeTag()            {}
 func (*TailType) nodeTag()               {}
 func (*ArrayType) nodeTag()              {}
@@ -862,17 +884,18 @@ func (*ExportFuncDecl) declTag()   {}
 func (*ExportGlobalDecl) declTag() {}
 func (*StaticIfDecl) declTag()     {}
 
-func (*NamedType) typeExprTag()          {}
-func (*RefType) typeExprTag()            {}
-func (*GenericType) typeExprTag()        {}
-func (*MutableType) typeExprTag()        {}
-func (*TailType) typeExprTag()           {}
-func (*ArrayType) typeExprTag()          {}
-func (*BuiltinTypeExpr) typeExprTag()    {}
-func (*FuncTypeExpr) typeExprTag()       {}
-func (*ErrorSetExpr) typeExprTag()       {}
-func (*ErrorUnionTypeExpr) typeExprTag() {}
-func (*OptionalTypeExpr) typeExprTag()   {}
+func (*NamedType) typeExprTag()              {}
+func (*RefType) typeExprTag()                {}
+func (*GenericType) typeExprTag()            {}
+func (*AggregateStateTypeExpr) typeExprTag() {}
+func (*MutableType) typeExprTag()            {}
+func (*TailType) typeExprTag()               {}
+func (*ArrayType) typeExprTag()              {}
+func (*BuiltinTypeExpr) typeExprTag()        {}
+func (*FuncTypeExpr) typeExprTag()           {}
+func (*ErrorSetExpr) typeExprTag()           {}
+func (*ErrorUnionTypeExpr) typeExprTag()     {}
+func (*OptionalTypeExpr) typeExprTag()       {}
 
 func (*Ident) exprTag()      {}
 func (*IntLit) exprTag()     {}

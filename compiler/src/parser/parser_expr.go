@@ -154,6 +154,55 @@ func (p *Parser) parseRefTypeSuffixes(base ast.TypeExpr, pos lexer.Pos, storage 
 	}
 }
 
+func (p *Parser) peekAggregateStateBracket() (ast.RefState, bool) {
+	if p.peek() != lexer.TOKEN_LBRACKET || p.pos+2 >= len(p.tokens) {
+		return ast.RefStateNullable, false
+	}
+	if p.tokens[p.pos+2].Kind != lexer.TOKEN_RBRACKET {
+		return ast.RefStateNullable, false
+	}
+	switch p.tokens[p.pos+1].Kind {
+	case lexer.TOKEN_AMPERSAND:
+		return ast.RefStateNonNull, true
+	case lexer.TOKEN_QUESTION:
+		return ast.RefStateNullable, true
+	case lexer.TOKEN_BANG:
+		return ast.RefStateNull, true
+	default:
+		return ast.RefStateNullable, false
+	}
+}
+
+func (p *Parser) parseAggregateStateBracket() ast.RefState {
+	p.expect(lexer.TOKEN_LBRACKET)
+	var state ast.RefState
+	switch p.peek() {
+	case lexer.TOKEN_AMPERSAND:
+		p.advance()
+		state = ast.RefStateNonNull
+	case lexer.TOKEN_QUESTION:
+		p.advance()
+		state = ast.RefStateNullable
+	case lexer.TOKEN_BANG:
+		p.advance()
+		state = ast.RefStateNull
+	default:
+		p.errorf("expected aggregate state marker &, ?, or !, got %s", p.cur())
+		state = ast.RefStateNullable
+	}
+	p.expect(lexer.TOKEN_RBRACKET)
+	return state
+}
+
+func canApplyAggregateState(typ ast.TypeExpr) bool {
+	switch typ.(type) {
+	case *ast.NamedType, *ast.GenericType:
+		return true
+	default:
+		return false
+	}
+}
+
 func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label string, region string) ast.TypeExpr {
 	pos := p.cur().Pos
 	name := p.expect(lexer.TOKEN_IDENT).Text
@@ -161,6 +210,12 @@ func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label stri
 		name += "." + p.expect(lexer.TOKEN_IDENT).Text
 	}
 	var typ ast.TypeExpr = &ast.NamedType{Position: pos, Name: name}
+
+	if canApplyAggregateState(typ) {
+		if _, ok := p.peekAggregateStateBracket(); ok {
+			typ = &ast.AggregateStateTypeExpr{Position: pos, Base: typ, State: p.parseAggregateStateBracket()}
+		}
+	}
 
 	if p.peek() == lexer.TOKEN_LBRACKET {
 		if builtin := p.parseBuiltinTypeExpr(pos, name); builtin != nil {
@@ -195,6 +250,12 @@ func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label stri
 				p.expect(lexer.TOKEN_RBRACKET)
 				typ = &ast.GenericType{Position: pos, Name: name, Args: args}
 			}
+		}
+	}
+
+	if canApplyAggregateState(typ) {
+		if _, ok := p.peekAggregateStateBracket(); ok {
+			typ = &ast.AggregateStateTypeExpr{Position: pos, Base: typ, State: p.parseAggregateStateBracket()}
 		}
 	}
 

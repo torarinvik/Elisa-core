@@ -198,6 +198,39 @@ def run() -> int:
 	requireFunctionReturnTypeString(t, result, "run", "int")
 }
 
+func TestAnalyzeAcceptsAggregateStateStructTypes(t *testing.T) {
+	src := `struct Holder[?]:
+    value: i32
+
+def widen(value: Holder[&]) -> Holder:
+    return value
+
+def read(value: Holder[&]) -> i32:
+    return value.value
+`
+	result, errs := parseAndAnalyze(t, "aggregate_state_structs.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "widen", "Holder[?]")
+	requireFunctionReturnTypeString(t, result, "read", "i32")
+}
+
+func TestAnalyzeRejectsAggregateStateOnPlainStruct(t *testing.T) {
+	src := `struct Plain:
+    value: i32
+
+def bad(value: Plain[&]) -> Plain[&]:
+    return value
+`
+	_, errs := parseAndAnalyze(t, "aggregate_state_plain_struct_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "does not declare an aggregate state parameter") {
+		t.Fatalf("expected aggregate state diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeFunctionTypePermissionsParticipateInMatching(t *testing.T) {
 	src := `extern puts(text: any u8&) -> int can[Console.Write]
 

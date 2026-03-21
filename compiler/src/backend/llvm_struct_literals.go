@@ -16,6 +16,7 @@ type structLiteralField struct {
 }
 
 func (g *llvmGenerator) structLiteralFields(t semantic.Type) ([]structLiteralField, error) {
+	t = semantic.StripAggregateStateType(t)
 	switch tt := t.(type) {
 	case *semantic.StructType:
 		if tt.Decl == nil {

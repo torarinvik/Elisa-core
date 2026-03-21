@@ -430,7 +430,14 @@ func (p *Parser) parseStructDecl() *ast.StructDecl {
 	name := p.expect(lexer.TOKEN_IDENT).Text
 
 	var typeParams []string
-	if p.match(lexer.TOKEN_LBRACKET) {
+	hasStateParam := false
+	if _, ok := p.peekAggregateStateBracket(); ok {
+		state := p.parseAggregateStateBracket()
+		if state != ast.RefStateNullable {
+			p.errorf("struct state parameter declaration must use [?], got [%s]", ast.RefStateMarker(state))
+		}
+		hasStateParam = true
+	} else if p.match(lexer.TOKEN_LBRACKET) {
 		for {
 			typeParams = append(typeParams, p.expect(lexer.TOKEN_IDENT).Text)
 			if !p.match(lexer.TOKEN_COMMA) {
@@ -438,6 +445,13 @@ func (p *Parser) parseStructDecl() *ast.StructDecl {
 			}
 		}
 		p.expect(lexer.TOKEN_RBRACKET)
+		if _, ok := p.peekAggregateStateBracket(); ok {
+			state := p.parseAggregateStateBracket()
+			if state != ast.RefStateNullable {
+				p.errorf("struct state parameter declaration must use [?], got [%s]", ast.RefStateMarker(state))
+			}
+			hasStateParam = true
+		}
 	}
 
 	p.expect(lexer.TOKEN_COLON)
@@ -454,7 +468,7 @@ func (p *Parser) parseStructDecl() *ast.StructDecl {
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.StructDecl{Position: pos, Name: name, TypeParams: typeParams, Affine: affine, ReprC: reprC, Fields: fields}
+	return &ast.StructDecl{Position: pos, Name: name, TypeParams: typeParams, HasStateParam: hasStateParam, Affine: affine, ReprC: reprC, Fields: fields}
 }
 
 func (p *Parser) parseFieldDecl() ast.FieldDecl {

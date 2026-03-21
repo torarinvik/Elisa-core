@@ -203,6 +203,11 @@ type GenericInstanceType struct {
 	Args []Type
 }
 
+type AggregateStateType struct {
+	Base  Type
+	State RefState
+}
+
 type FuncType struct {
 	Name                         string
 	TypeParams                   []string
@@ -246,6 +251,7 @@ func (*EnumType) isType()            {}
 func (*StructType) isType()          {}
 func (*OpaqueType) isType()          {}
 func (*GenericInstanceType) isType() {}
+func (*AggregateStateType) isType()  {}
 func (*FuncType) isType()            {}
 
 func (*ShapeParam) isShape()    {}
@@ -508,6 +514,12 @@ func (t *GenericInstanceType) String() string {
 	}
 	return fmt.Sprintf("%s[%s]", t.Name, strings.Join(parts, ", "))
 }
+func (t *AggregateStateType) String() string {
+	if t == nil || t.Base == nil {
+		return "<invalid-aggregate-state>"
+	}
+	return fmt.Sprintf("%s[%s]", t.Base.String(), ast.RefStateMarker(ast.RefState(t.State)))
+}
 func (t *FuncType) String() string {
 	parts := make([]string, 0, len(t.Params))
 	for _, p := range t.Params {
@@ -752,6 +764,39 @@ func IsTypeParamType(t Type) (*TypeParamType, bool) {
 func IsRefType(t Type) (*RefType, bool) {
 	r, ok := t.(*RefType)
 	return r, ok
+}
+
+func StripAggregateStateType(t Type) Type {
+	agg, ok := t.(*AggregateStateType)
+	if !ok || agg == nil {
+		return t
+	}
+	return agg.Base
+}
+
+func SupportsAggregateStateType(t Type) bool {
+	switch tt := StripAggregateStateType(t).(type) {
+	case *StructType:
+		return tt != nil && tt.Decl != nil && tt.Decl.HasStateParam
+	case *GenericInstanceType:
+		base, ok := tt.Base.(*StructType)
+		return ok && base != nil && base.Decl != nil && base.Decl.HasStateParam
+	default:
+		return false
+	}
+}
+
+func DefaultAggregateStateType(t Type) Type {
+	if t == nil {
+		return nil
+	}
+	if _, ok := t.(*AggregateStateType); ok {
+		return t
+	}
+	if !SupportsAggregateStateType(t) {
+		return t
+	}
+	return &AggregateStateType{Base: StripAggregateStateType(t), State: RefStateNullable}
 }
 
 func (t *EnumType) Variant(name string) (*EnumVariant, bool) {

@@ -414,6 +414,7 @@ func (a *Analyzer) resolvedStructFields(actual Type) ([]moveBindResolvedField, b
 		base     *StructType
 		bindings map[string]Type
 	)
+	actual = StripAggregateStateType(actual)
 	switch tt := actual.(type) {
 	case *StructType:
 		base = tt
@@ -458,6 +459,7 @@ func (a *Analyzer) resolveMoveBindStructPattern(pattern *ast.MoveBindStructPatte
 	if pattern == nil {
 		return nil, false
 	}
+	actual = StripAggregateStateType(actual)
 	fields, ok := a.resolvedStructFields(actual)
 	if !ok {
 		a.errorf(pattern.Pos(), "move-as pattern %q requires a concrete struct value, got %s", pattern.TypeName, actual.String())

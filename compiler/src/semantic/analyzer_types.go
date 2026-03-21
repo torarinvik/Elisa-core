@@ -87,10 +87,17 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			return t
 		}
 		if t, ok := a.namedTypes[n.Name]; ok {
-			return t
+			return DefaultAggregateStateType(t)
 		}
 		a.errorf(n.Pos(), "unknown type %q", n.Name)
 		return invalidType
+	case *ast.AggregateStateTypeExpr:
+		baseType := StripAggregateStateType(a.resolveType(n.Base))
+		if !SupportsAggregateStateType(baseType) {
+			a.errorf(n.Pos(), "type %q does not declare an aggregate state parameter", baseType.String())
+			return invalidType
+		}
+		return &AggregateStateType{Base: baseType, State: RefState(n.State)}
 	case *ast.ErrorSetExpr:
 		return a.resolveErrorSetExpr(n)
 	case *ast.ErrorUnionTypeExpr:
@@ -192,7 +199,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 					return invalidType
 				}
 			}
-			return &GenericInstanceType{Name: n.Name, Base: base, Args: args}
+			return DefaultAggregateStateType(&GenericInstanceType{Name: n.Name, Base: base, Args: args})
 		case *OpaqueType:
 			if len(args) != 0 {
 				a.errorf(n.Pos(), "type %q expects 0 type arguments, got %d", n.Name, len(args))
@@ -772,6 +779,8 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 			args = append(args, a.substituteType(arg, bindings, shapeBindings, regionBindings, permissionBindings))
 		}
 		return &GenericInstanceType{Name: n.Name, Base: n.Base, Args: args}
+	case *AggregateStateType:
+		return &AggregateStateType{Base: a.substituteType(n.Base, bindings, shapeBindings, regionBindings, permissionBindings), State: n.State}
 	case *PackedEnumStoreType:
 		return PackedEnumStoreWithState(n, a.substituteType(n.State, bindings, shapeBindings, regionBindings, permissionBindings))
 	case *FuncType:
