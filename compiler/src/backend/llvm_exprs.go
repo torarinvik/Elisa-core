@@ -80,6 +80,8 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 	case *ast.FieldExpr:
 		if errorType, _, ok := s.errorTagInfo(n); ok {
 			value, actualType, err = s.emitErrorTagExpr(n, errorType)
+		} else if constEnumType, member, ok := s.constEnumMemberInfo(n); ok {
+			value, actualType, err = s.emitConstEnumMemberExpr(constEnumType, member)
 		} else if enumType, variant, ok := s.enumConstructorInfoFromField(n); ok && variant != nil && len(variant.Payload) == 0 {
 			value, actualType, err = s.emitEnumConstructorValue(enumType, variant, nil, nil)
 		} else {
@@ -180,10 +182,6 @@ func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Typ
 		value, err := s.loadValue(binding.ptr, binding.typ, expr.Name)
 		return value, binding.typ, err
 	}
-	if value, ok := s.g.constValue(expr.Name); ok {
-		llvmValue, llvmType, err := s.emitConstValue(value)
-		return llvmValue, llvmType, err
-	}
 	if sym, ok := s.g.result.GlobalScope.Lookup(expr.Name); ok {
 		switch sym.Kind {
 		case semantic.SymbolFunc, semantic.SymbolExternFunc:
@@ -202,10 +200,14 @@ func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Typ
 			return value, sym.Type, err
 		case semantic.SymbolConst:
 			if value, ok := s.g.constValue(expr.Name); ok {
-				llvmValue, llvmType, err := s.emitConstValue(value)
+				llvmValue, llvmType, err := s.emitConstValueWithType(value, sym.Type)
 				return llvmValue, llvmType, err
 			}
 		}
+	}
+	if value, ok := s.g.constValue(expr.Name); ok {
+		llvmValue, llvmType, err := s.emitConstValue(value)
+		return llvmValue, llvmType, err
 	}
 	return nil, nil, fmt.Errorf("unknown identifier %q during LLVM lowering", expr.Name)
 }
@@ -224,6 +226,37 @@ func (s *functionState) errorTagInfo(expr *ast.FieldExpr) (*semantic.ErrorSetTyp
 		return nil, "", false
 	}
 	return errSet, semantic.QualifyErrorTag(ident.Name, expr.Field), true
+}
+
+func (s *functionState) constEnumMemberInfo(expr *ast.FieldExpr) (*semantic.ConstEnumType, *semantic.ConstEnumMember, bool) {
+	ident, ok := expr.Object.(*ast.Ident)
+	if !ok {
+		return nil, nil, false
+	}
+	base, ok := s.g.result.NamedTypes[ident.Name]
+	if !ok {
+		return nil, nil, false
+	}
+	constEnumType, ok := base.(*semantic.ConstEnumType)
+	if !ok {
+		return nil, nil, false
+	}
+	member, ok := constEnumType.Member(expr.Field)
+	if !ok {
+		return constEnumType, nil, false
+	}
+	return constEnumType, member, true
+}
+
+func (s *functionState) emitConstEnumMemberExpr(constEnumType *semantic.ConstEnumType, member *semantic.ConstEnumMember) (C.LLVMValueRef, semantic.Type, error) {
+	if constEnumType == nil || member == nil {
+		return nil, nil, fmt.Errorf("missing const enum member metadata")
+	}
+	llvmType, err := s.g.lowerType(constEnumType)
+	if err != nil {
+		return nil, nil, err
+	}
+	return C.LLVMConstInt(llvmType, C.ulonglong(member.Value), boolToLLVMBool(member.Value < 0)), constEnumType, nil
 }
 
 func (s *functionState) emitErrorTagExpr(expr *ast.FieldExpr, errorType *semantic.ErrorSetType) (C.LLVMValueRef, semantic.Type, error) {

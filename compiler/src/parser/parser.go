@@ -133,6 +133,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	}
 	switch p.peek() {
 	case lexer.TOKEN_CONST:
+		if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ENUM {
+			return p.parseConstEnumDecl()
+		}
 		return p.parseConstDecl()
 	case lexer.TOKEN_ERROR:
 		return p.parseErrorDecl()
@@ -358,6 +361,41 @@ func (p *Parser) parseConstDecl() *ast.ConstDecl {
 	p.expectNewline()
 
 	return &ast.ConstDecl{Position: pos, Name: name, Type: typ, Value: value}
+}
+
+func (p *Parser) parseConstEnumDecl() *ast.ConstEnumDecl {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_CONST)
+	p.expect(lexer.TOKEN_ENUM)
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expectIdentText("of")
+	storage := p.parseTypeExpr()
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+
+	members := make([]ast.ConstEnumMemberDecl, 0)
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		members = append(members, p.parseConstEnumMemberDecl())
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+
+	return &ast.ConstEnumDecl{Position: pos, Name: name, Storage: storage, Members: members}
+}
+
+func (p *Parser) parseConstEnumMemberDecl() ast.ConstEnumMemberDecl {
+	pos := p.cur().Pos
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	var value ast.Expr
+	if p.match(lexer.TOKEN_ASSIGN) {
+		value = p.parseExpr()
+	}
+	p.expectNewline()
+	return ast.ConstEnumMemberDecl{Position: pos, Name: name, Value: value}
 }
 
 func (p *Parser) parseGlobalDecl() *ast.GlobalDecl {

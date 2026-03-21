@@ -24,6 +24,19 @@ type ConstDecl struct {
 	Value    Expr
 }
 
+type ConstEnumDecl struct {
+	Position lexer.Pos
+	Name     string
+	Storage  TypeExpr
+	Members  []ConstEnumMemberDecl
+}
+
+type ConstEnumMemberDecl struct {
+	Position lexer.Pos
+	Name     string
+	Value    Expr
+}
+
 type ErrorDecl struct {
 	Position lexer.Pos
 	Name     string
@@ -649,6 +662,10 @@ type StaticElifClause struct {
 // ---------- Tag implementations ----------
 
 func (n *ConstDecl) Pos() lexer.Pos      { return n.Position }
+func (n *ConstEnumDecl) Pos() lexer.Pos  { return n.Position }
+func (n *ConstEnumMemberDecl) Pos() lexer.Pos {
+	return n.Position
+}
 func (n *ErrorDecl) Pos() lexer.Pos      { return n.Position }
 func (n *PermissionDecl) Pos() lexer.Pos { return n.Position }
 func (n *EnumDecl) Pos() lexer.Pos       { return n.Position }
@@ -739,6 +756,8 @@ func (n *RestoreStmt) Pos() lexer.Pos            { return n.Position }
 func (n *ResetStmt) Pos() lexer.Pos              { return n.Position }
 
 func (*ConstDecl) nodeTag()              {}
+func (*ConstEnumDecl) nodeTag()          {}
+func (*ConstEnumMemberDecl) nodeTag()    {}
 func (*ErrorDecl) nodeTag()              {}
 func (*PermissionDecl) nodeTag()         {}
 func (*EnumDecl) nodeTag()               {}
@@ -821,6 +840,7 @@ func (*RestoreStmt) nodeTag()            {}
 func (*ResetStmt) nodeTag()              {}
 
 func (*ConstDecl) declTag()        {}
+func (*ConstEnumDecl) declTag()    {}
 func (*ErrorDecl) declTag()        {}
 func (*PermissionDecl) declTag()   {}
 func (*EnumDecl) declTag()         {}

@@ -223,7 +223,7 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 		}
 		_, err := g.ensureGlobalDeclared(sym.Name, sym.Type, declIsExternVar(decl))
 		return err
-	case *ast.ConstDecl, *ast.StaticIfDecl:
+	case *ast.ConstDecl, *ast.ConstEnumDecl, *ast.StaticIfDecl:
 		return nil
 	case *ast.PermissionDecl:
 		return nil
@@ -240,6 +240,8 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 	switch n := decl.(type) {
 	case *ast.ConstDecl:
+		return nil
+	case *ast.ConstEnumDecl:
 		return nil
 	case *ast.StructDecl:
 		if len(n.TypeParams) == 0 {

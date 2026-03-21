@@ -50,6 +50,12 @@ type ErrorUnionType struct {
 	Errors *ErrorSetType
 }
 
+type ConstEnumMember struct {
+	Name  string
+	Value int64
+	Decl  *ast.ConstEnumMemberDecl
+}
+
 type ShapeParam struct {
 	Name string
 }
@@ -158,6 +164,14 @@ type EnumType struct {
 	Decl       *ast.EnumDecl
 }
 
+type ConstEnumType struct {
+	Name      string
+	Storage   Type
+	Members   []*ConstEnumMember
+	MemberMap map[string]*ConstEnumMember
+	Decl      *ast.ConstEnumDecl
+}
+
 type Field struct {
 	Name    string
 	Type    Type
@@ -213,6 +227,7 @@ func (*BuiltinType) isType()         {}
 func (*TypeParamType) isType()       {}
 func (*ErrorSetType) isType()        {}
 func (*ErrorUnionType) isType()      {}
+func (*ConstEnumType) isType()       {}
 func (*RefType) isType()             {}
 func (*ArrayType) isType()           {}
 func (*DArrayType) isType()          {}
@@ -246,6 +261,12 @@ func (t *ErrorUnionType) String() string {
 		return "<invalid-error-union>"
 	}
 	return fmt.Sprintf("%s | %s", t.Value.String(), t.Errors.String())
+}
+func (t *ConstEnumType) String() string {
+	if t == nil {
+		return "<invalid-const-enum>"
+	}
+	return t.Name
 }
 
 func QualifyErrorTag(setName string, tagName string) string {
@@ -459,6 +480,13 @@ func (t *PackedEnumStoreType) String() string {
 	}
 	return t.Name
 }
+func (t *ConstEnumType) Member(name string) (*ConstEnumMember, bool) {
+	if t == nil || t.MemberMap == nil {
+		return nil, false
+	}
+	member, ok := t.MemberMap[name]
+	return member, ok
+}
 func (t *EnumType) String() string   { return t.Name }
 func (t *StructType) String() string { return t.Name }
 func (t *OpaqueType) String() string { return t.Name }
@@ -670,6 +698,19 @@ func IsBoolType(t Type) bool {
 	return ok && b.Name == "bool"
 }
 
+func IsConstEnumType(t Type) (*ConstEnumType, bool) {
+	ce, ok := t.(*ConstEnumType)
+	return ce, ok
+}
+
+func ConstEnumStorageType(t Type) (Type, bool) {
+	ce, ok := t.(*ConstEnumType)
+	if !ok || ce == nil || ce.Storage == nil {
+		return nil, false
+	}
+	return ce.Storage, true
+}
+
 func IsNumericType(t Type) bool {
 	b, ok := t.(*BuiltinType)
 	if !ok {
@@ -681,6 +722,10 @@ func IsNumericType(t Type) bool {
 	default:
 		return false
 	}
+}
+
+func IsIntegralStorageType(t Type) bool {
+	return IsNumericType(t)
 }
 
 func IsTypeParamType(t Type) (*TypeParamType, bool) {

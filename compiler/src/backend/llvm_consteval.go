@@ -98,8 +98,16 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 			}
 		}
 		return semantic.ConstValue{}, false
+	case *ast.FieldExpr:
+		ident, ok := n.Object.(*ast.Ident)
+		if !ok || lookup == nil {
+			return semantic.ConstValue{}, false
+		}
+		return lookup(ident.Name + "." + n.Field)
 	case *ast.ParenExpr:
 		return evalConstExprWithLookup(n.Inner, lookup)
+	case *ast.CastExpr:
+		return evalConstExprWithLookup(n.Operand, lookup)
 	case *ast.MoveExpr:
 		return evalConstExprWithLookup(n.Operand, lookup)
 	case *ast.UnaryExpr:
@@ -395,6 +403,17 @@ func isNumericType(t semantic.Type) bool {
 	return semantic.IsNumericType(t)
 }
 
+func numericCastType(t semantic.Type) semantic.Type {
+	if storage, ok := semantic.ConstEnumStorageType(t); ok {
+		return storage
+	}
+	return t
+}
+
+func isNumericCastType(t semantic.Type) bool {
+	return semantic.IsNumericType(numericCastType(t))
+}
+
 func isPointerLikeType(t semantic.Type) bool {
 	switch t.(type) {
 	case *semantic.RefType, *semantic.NullType, *semantic.DStrType, *semantic.FuncType:
@@ -405,6 +424,7 @@ func isPointerLikeType(t semantic.Type) bool {
 }
 
 func isSignedIntegerType(t semantic.Type) bool {
+	t = numericCastType(t)
 	b, ok := t.(*semantic.BuiltinType)
 	if !ok {
 		if _, ok := t.(*semantic.NullType); ok {
@@ -421,6 +441,7 @@ func isSignedIntegerType(t semantic.Type) bool {
 }
 
 func integerBitWidth(t semantic.Type, wordBits int) int {
+	t = numericCastType(t)
 	b, ok := t.(*semantic.BuiltinType)
 	if !ok {
 		if isPointerLikeType(t) {

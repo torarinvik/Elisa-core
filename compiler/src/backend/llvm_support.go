@@ -319,13 +319,13 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 	if semantic.IsNullType(actual) && isPointerLikeType(expected) {
 		return C.LLVMConstNull(expectedLLVM), nil
 	}
-	if isNumericType(actual) && isNumericType(expected) {
+	if isNumericCastType(actual) && isNumericCastType(expected) {
 		return s.coerceNumericValue(value, actual, expected)
 	}
-	if isPointerLikeType(actual) && isNumericType(expected) {
+	if isPointerLikeType(actual) && isNumericCastType(expected) {
 		return C.LLVMBuildPtrToInt(s.builder, value, expectedLLVM, cStringFree("ptrtoint")), nil
 	}
-	if isNumericType(actual) && isPointerLikeType(expected) {
+	if isNumericCastType(actual) && isPointerLikeType(expected) {
 		return C.LLVMBuildIntToPtr(s.builder, value, expectedLLVM, cStringFree("inttoptr")), nil
 	}
 	return value, nil
@@ -653,13 +653,21 @@ func (s *functionState) invalidatePackedEnumStorage(name string) {
 }
 
 func (s *functionState) emitConstValue(value semantic.ConstValue) (C.LLVMValueRef, semantic.Type, error) {
+	return s.emitConstValueWithType(value, nil)
+}
+
+func (s *functionState) emitConstValueWithType(value semantic.ConstValue, actual semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
 	switch value.Kind {
 	case semantic.ConstInt:
-		llvmType, err := s.g.lowerBuiltin("int")
+		resultType := actual
+		if resultType == nil || semantic.IsInvalidType(resultType) {
+			resultType = s.g.result.NamedTypes["int"]
+		}
+		llvmType, err := s.g.lowerType(resultType)
 		if err != nil {
 			return nil, nil, err
 		}
-		return C.LLVMConstInt(llvmType, C.ulonglong(value.Int), 1), s.g.result.NamedTypes["int"], nil
+		return C.LLVMConstInt(llvmType, C.ulonglong(value.Int), boolToLLVMBool(value.Int < 0)), resultType, nil
 	case semantic.ConstBool:
 		llvmType, err := s.g.lowerBuiltin("bool")
 		if err != nil {

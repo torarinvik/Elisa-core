@@ -123,6 +123,10 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			result = errorType
 			return
 		}
+		if constEnumType, ok := a.constEnumMemberExprType(n); ok {
+			result = constEnumType
+			return
+		}
 		if storeType, ctorType, ok := a.packedStoreExprType(n); ok {
 			if ctorType != nil {
 				result = ctorType
@@ -962,6 +966,26 @@ func (a *Analyzer) errorTagType(expr *ast.FieldExpr) (Type, bool) {
 		return invalidType, true
 	}
 	return errSet, true
+}
+
+func (a *Analyzer) constEnumMemberExprType(expr *ast.FieldExpr) (Type, bool) {
+	ident, ok := expr.Object.(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+	base, ok := a.namedTypes[ident.Name]
+	if !ok {
+		return nil, false
+	}
+	constEnumType, ok := base.(*ConstEnumType)
+	if !ok {
+		return nil, false
+	}
+	if _, ok := constEnumType.Member(expr.Field); !ok {
+		a.errorf(expr.Pos(), "const enum %q has no member %q", constEnumType.Name, expr.Field)
+		return invalidType, true
+	}
+	return constEnumType, true
 }
 
 func (a *Analyzer) enumVariantExprType(expr *ast.FieldExpr) (*EnumType, Type, bool) {

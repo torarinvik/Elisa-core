@@ -165,6 +165,7 @@ func Analyze(file *ast.File) *Result {
 	activeDecls := a.expandActiveDecls(file.Decls)
 	a.collectPermissionDecls(activeDecls)
 	a.collectNamedTypes(activeDecls)
+	a.populateConstEnumMembers(activeDecls)
 	a.populateStructFields(activeDecls)
 	a.populateEnumVariants(activeDecls)
 	a.collectExportTypeAliases(activeDecls)
@@ -409,6 +410,27 @@ func (a *Analyzer) collectConstValues(decls []ast.Decl) {
 			if value, ok := a.evalConstExpr(n.Value); ok {
 				a.constValues[n.Name] = value
 			}
+		case *ast.ConstEnumDecl:
+			nextValue := int64(0)
+			hasValue := false
+			for i := range n.Members {
+				member := &n.Members[i]
+				value := nextValue
+				if member.Value != nil {
+					resolved, ok := a.evalConstExpr(member.Value)
+					if !ok || resolved.Kind != ConstInt {
+						continue
+					}
+					value = resolved.Int
+				}
+				qualifiedName := n.Name + "." + member.Name
+				a.constValues[qualifiedName] = ConstValue{Kind: ConstInt, Int: value}
+				nextValue = value + 1
+				hasValue = true
+			}
+			if !hasValue {
+				nextValue = 0
+			}
 		case *ast.StaticIfDecl:
 			a.collectConstValues(a.activeDeclBranch(n))
 		}
@@ -491,6 +513,12 @@ func (a *Analyzer) collectNamedTypes(decls []ast.Decl) {
 				Decl:       n,
 			}
 			a.namedTypes[n.Name] = st
+		case *ast.ConstEnumDecl:
+			if _, exists := a.namedTypes[n.Name]; exists {
+				a.errorf(n.Pos(), "duplicate type %q", n.Name)
+				continue
+			}
+			a.namedTypes[n.Name] = &ConstEnumType{Name: n.Name, MemberMap: map[string]*ConstEnumMember{}, Decl: n}
 		case *ast.EnumDecl:
 			if _, exists := a.namedTypes[n.Name]; exists {
 				a.errorf(n.Pos(), "duplicate type %q", n.Name)
@@ -535,6 +563,47 @@ func (a *Analyzer) collectNamedTypes(decls []ast.Decl) {
 		case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			continue
 		}
+	}
+}
+
+func (a *Analyzer) populateConstEnumMembers(decls []ast.Decl) {
+	for _, decl := range decls {
+		constEnumDecl, ok := decl.(*ast.ConstEnumDecl)
+		if !ok {
+			continue
+		}
+		constEnumType, _ := a.namedTypes[constEnumDecl.Name].(*ConstEnumType)
+		if constEnumType == nil {
+			continue
+		}
+		storageType := a.resolveType(constEnumDecl.Storage)
+		constEnumType.Storage = storageType
+		if !IsIntegralStorageType(storageType) {
+			a.errorf(constEnumDecl.Storage.Pos(), "const enum %q storage type must be an explicit integer type, got %s", constEnumDecl.Name, storageType.String())
+		}
+		members := make([]*ConstEnumMember, 0, len(constEnumDecl.Members))
+		nextValue := int64(0)
+		for i := range constEnumDecl.Members {
+			memberDecl := &constEnumDecl.Members[i]
+			if _, exists := constEnumType.MemberMap[memberDecl.Name]; exists {
+				a.errorf(memberDecl.Pos(), "duplicate const enum member %q in %q", memberDecl.Name, constEnumDecl.Name)
+				continue
+			}
+			value := nextValue
+			if memberDecl.Value != nil {
+				resolved, ok := a.evalConstExpr(memberDecl.Value)
+				if !ok || resolved.Kind != ConstInt {
+					a.errorf(memberDecl.Value.Pos(), "const enum member %q.%q requires a compile-time integer value", constEnumDecl.Name, memberDecl.Name)
+					continue
+				}
+				value = resolved.Int
+			}
+			member := &ConstEnumMember{Name: memberDecl.Name, Value: value, Decl: memberDecl}
+			constEnumType.MemberMap[member.Name] = member
+			members = append(members, member)
+			nextValue = value + 1
+		}
+		constEnumType.Members = members
 	}
 }
 
@@ -657,9 +726,26 @@ func (a *Analyzer) collectValueSymbols(decls []ast.Decl) {
 			if n.Type != nil {
 				declType = a.resolveType(n.Type)
 			} else {
-				declType = a.inferLiteralType(n.Value)
+				declType = a.analyzeExprInScope(n.Value, a.globalScope)
+				if IsInvalidType(declType) {
+					if value, ok := a.evalConstExpr(n.Value); ok {
+						switch value.Kind {
+						case ConstInt:
+							declType = a.namedTypes["int"]
+						case ConstBool:
+							declType = a.namedTypes["bool"]
+						case ConstString:
+							declType = &RefType{Elem: a.namedTypes["u8"], State: RefStateNonNull, Storage: RefStorageStatic, ExplicitStorage: true}
+						}
+					}
+				}
+				if IsInvalidType(declType) {
+					declType = a.inferLiteralType(n.Value)
+				}
 			}
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolConst, Type: declType, Node: n, Mutable: false}, n.Pos())
+		case *ast.ConstEnumDecl:
+			continue
 		case *ast.GlobalDecl:
 			declType := a.resolveType(n.Type)
 			if a.containsAffineHandleValues(declType, map[string]bool{}) {
@@ -1521,6 +1607,8 @@ func (a *Analyzer) analyzeDecls(decls []ast.Decl) {
 		case *ast.FuncDecl:
 			a.analyzeFunctionAnnotations(n)
 			a.analyzeFunc(n)
+		case *ast.ConstEnumDecl:
+			continue
 		case *ast.EnumDecl:
 			continue
 		case *ast.ErrorDecl:

@@ -552,6 +552,12 @@ func (a *Analyzer) validCast(src, dst Type) bool {
 	if SameType(src, dst) || IsInvalidType(src) || IsInvalidType(dst) {
 		return true
 	}
+	if _, ok := src.(*ConstEnumType); ok {
+		return SameType(src, dst) || IsNumericType(dst)
+	}
+	if _, ok := dst.(*ConstEnumType); ok {
+		return IsNumericType(src)
+	}
 	if _, ok := src.(*TypeParamType); ok {
 		return true
 	}

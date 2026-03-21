@@ -97,6 +97,8 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 	switch tt := t.(type) {
 	case *semantic.InvalidType, *semantic.NeverType, *semantic.NullType, *semantic.BuiltinType, *semantic.TypeParamType, *semantic.DStrType, *semantic.ErrorSetType:
 		err = nil
+	case *semantic.ConstEnumType:
+		err = g.noteType(tt.Storage)
 	case *semantic.PackedEnumStoreType:
 		_, err = g.lowerPackedEnumStoreType(tt)
 	case *semantic.ErrorUnionType:
@@ -394,6 +396,8 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	case *semantic.BuiltinType:
 		return g.lowerBuiltin(tt.Name)
+	case *semantic.ConstEnumType:
+		return g.lowerType(tt.Storage)
 	case *semantic.ErrorSetType:
 		return g.lowerBuiltin("u32")
 	case *semantic.ErrorUnionType:

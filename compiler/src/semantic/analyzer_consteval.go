@@ -68,8 +68,17 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 	case *ast.Ident:
 		value, ok := a.constValues[n.Name]
 		return value, ok
+	case *ast.FieldExpr:
+		ident, ok := n.Object.(*ast.Ident)
+		if !ok {
+			return ConstValue{}, false
+		}
+		value, ok := a.constValues[ident.Name+"."+n.Field]
+		return value, ok
 	case *ast.ParenExpr:
 		return a.evalConstExpr(n.Inner)
+	case *ast.CastExpr:
+		return a.evalConstExpr(n.Operand)
 	case *ast.MoveExpr:
 		return a.evalConstExpr(n.Operand)
 	case *ast.UnaryExpr:

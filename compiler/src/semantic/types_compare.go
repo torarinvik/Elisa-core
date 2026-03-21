@@ -40,6 +40,9 @@ func SameType(a, b Type) bool {
 	case *ErrorUnionType:
 		tb, ok := b.(*ErrorUnionType)
 		return ok && SameType(ta.Value, tb.Value) && SameType(ta.Errors, tb.Errors)
+	case *ConstEnumType:
+		tb, ok := b.(*ConstEnumType)
+		return ok && ta.Name == tb.Name
 	case *RefType:
 		tb, ok := b.(*RefType)
 		return ok && ta.State == tb.State && ta.Storage == tb.Storage && ta.Region == tb.Region && SameType(ta.Elem, tb.Elem)
@@ -231,6 +234,9 @@ func matchTypePattern(pattern, actual Type) bool {
 			return matchTypePattern(p.Value, a.Value) && matchTypePattern(p.Errors, a.Errors)
 		}
 		return matchTypePattern(p.Value, actual)
+	case *ConstEnumType:
+		a, ok := actual.(*ConstEnumType)
+		return ok && p.Name == a.Name
 	case *RefType:
 		a, ok := actual.(*RefType)
 		if !ok {

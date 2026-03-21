@@ -497,6 +497,8 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		fmt.Fprintf(w, "%spermission %s: (%d members)\n", prefix, n.Name, len(n.Members))
 	case *ast.ConstDecl:
 		fmt.Fprintf(w, "%sconst %s = %s\n", prefix, n.Name, exprStr(n.Value))
+	case *ast.ConstEnumDecl:
+		fmt.Fprintf(w, "%sconst enum %s of %s: (%d members)\n", prefix, n.Name, typeStr(n.Storage), len(n.Members))
 	case *ast.GlobalDecl:
 		mut := ""
 		if n.Mutable {

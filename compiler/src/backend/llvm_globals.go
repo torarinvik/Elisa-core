@@ -85,6 +85,11 @@ func (g *llvmGenerator) constExprValue(expr ast.Expr, expected semantic.Type) (C
 	case *ast.Ident:
 		if value, ok := g.constValue(n.Name); ok {
 			coercedType := expected
+			if coercedType == nil && g.result != nil && g.result.GlobalScope != nil {
+				if sym, ok := g.result.GlobalScope.Lookup(n.Name); ok && sym.Kind == semantic.SymbolConst {
+					coercedType = sym.Type
+				}
+			}
 			if coercedType == nil {
 				coercedType = constValueType(g.result, value)
 			}
@@ -142,6 +147,13 @@ func (g *llvmGenerator) constExprValue(expr ast.Expr, expected semantic.Type) (C
 		}
 		return C.LLVMConstArray2(elemLLVMType, llvmValueSlicePtr(values), C.ulonglong(len(values))), nil
 	case *ast.CastExpr:
+		if value, ok := g.evalConstExpr(expr); ok {
+			coercedType := expected
+			if coercedType == nil {
+				coercedType = g.exprType(expr)
+			}
+			return g.constValueAsLLVM(value, coercedType)
+		}
 		targetType, err := g.lowerType(expected)
 		if err != nil {
 			return nil, err
@@ -150,10 +162,10 @@ func (g *llvmGenerator) constExprValue(expr ast.Expr, expected semantic.Type) (C
 		if err != nil {
 			return nil, err
 		}
-		if semantic.IsNumericType(g.exprType(n.Operand)) && isPointerLikeType(expected) {
+		if isNumericCastType(g.exprType(n.Operand)) && isPointerLikeType(expected) {
 			return C.LLVMConstIntToPtr(inner, targetType), nil
 		}
-		if isPointerLikeType(g.exprType(n.Operand)) && semantic.IsNumericType(expected) {
+		if isPointerLikeType(g.exprType(n.Operand)) && isNumericCastType(expected) {
 			return C.LLVMConstPtrToInt(inner, targetType), nil
 		}
 		return inner, nil

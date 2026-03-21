@@ -294,7 +294,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"define %JsonParseNodeResult @json_parse_value_node(ptr",
 				"define %JsonParseNodeResult @json_parse_array_node(ptr",
 				"define %JsonParseNodeResult @json_parse_object_node(ptr",
-				"define i64 @json_ast_kind(ptr %0, %JsonNode__Store %1)",
+				"define i8 @json_ast_kind(ptr %0, %JsonNode__Store %1)",
 				"define ptr @json_ast_array_nth(ptr %0, i64 %1, %JsonNode__Store %2)",
 				"define ptr @json_ast_object_get(ptr %0, ptr %1, ptr %2, %JsonNode__Store %3)",
 				"define i64 @json_parser_parity_suite()",
@@ -966,6 +966,75 @@ func TestRunCLIPrintsAnnotatedExternFunctionsInAST(t *testing.T) {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected AST output to contain %q, got:\n%s", check, output)
 		}
+	}
+}
+
+func TestRunCLIPrintsConstEnumInAST(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "const_enum_ast.llcontext")
+	src := "const enum JsonNodeKind of i8:\n    Invalid = -1\n    Null\n    Bool = 1\n    String\n\ndef current_kind() -> JsonNodeKind:\n    return JsonNodeKind.String\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write const enum AST fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "ast", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{"const enum JsonNodeKind of i8: (4 members)", "def current_kind(0 params) -> JsonNodeKind (1 stmts)"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected AST output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestRunCLICompilesConstEnumSourceToLLVM(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "const_enum_llvm.llcontext")
+	src := "const enum JsonNodeKind of i8:\n    Invalid = -1\n    Null\n    Bool = 1\n    String\n\nconst DEFAULT_KIND: JsonNodeKind = JsonNodeKind.String\n\ndef kind_raw(kind: JsonNodeKind) -> i8:\n    return kind.i8()\n\ndef is_string(kind: JsonNodeKind) -> bool:\n    return kind == JsonNodeKind.String\n\ndef default_kind() -> JsonNodeKind:\n    return DEFAULT_KIND\n\ndef make_kind() -> JsonNodeKind:\n    return 1i8.cast[JsonNodeKind]()\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write const enum LLVM fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{"define i8 @kind_raw(i8", "define i1 @is_string(i8", "define i8 @default_kind()", "define i8 @make_kind()", "ret i8 1"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected LLVM output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestRunCLIRejectsImplicitIntReturnToConstEnum(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "const_enum_reject.llcontext")
+	src := "const enum Kind of i8:\n    A\n\ndef bad() -> Kind:\n    return 0\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write const enum rejection fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", fixturePath}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected runCLI to fail, got stdout:\n%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "expects Kind, got int") {
+		t.Fatalf("expected const enum type mismatch diagnostic, got:\n%s", stderr.String())
 	}
 }
 
