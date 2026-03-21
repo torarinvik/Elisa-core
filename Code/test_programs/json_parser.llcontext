@@ -76,6 +76,30 @@ const enum JsonNodeKind of i8:
     END = 8
 
 
+const enum JsonNumberKind of i8:
+    INVALID = -1
+    UNSIGNED = 0
+    SIGNED = 1
+    NON_INTEGRAL = 2
+    OUT_OF_RANGE = 3
+
+
+repr(c) struct JsonNumberValue:
+    kind: mutable JsonNumberKind
+    unsigned_value: mutable u64
+    signed_value: mutable i64
+
+
+repr(c) struct JsonUnsignedResult:
+    ok: mutable bool
+    value: mutable u64
+
+
+repr(c) struct JsonSignedResult:
+    ok: mutable bool
+    value: mutable i64
+
+
 def json_new_cursor_with_len(source: any u8&, source_len: usize) -> JsonCursor:
     out: mutable JsonCursor = zeroed
     out.source <- source
@@ -888,6 +912,18 @@ def json_empty_view() -> StringView:
     return StringView("".cast[any u8&](), 0)
 
 
+def json_invalid_number_value() -> JsonNumberValue:
+    return JsonNumberValue(JsonNumberKind.INVALID, 0u64, 0)
+
+
+def json_invalid_unsigned_result() -> JsonUnsignedResult:
+    return JsonUnsignedResult(false, 0u64)
+
+
+def json_invalid_signed_result() -> JsonSignedResult:
+    return JsonSignedResult(false, 0)
+
+
 def json_ast_kind(node: JsonNode, store: JsonNode.Store[Local]) -> JsonNodeKind:
     in store:
         match node:
@@ -936,6 +972,107 @@ def json_ast_number_view(source: any u8&, node: JsonNode, store: JsonNode.Store[
             JsonNode.Number:
                 return StringView(source + node.source_offset, node.source_len.i64())
     return json_empty_view()
+
+
+def json_number_has_fraction_or_exponent(source: any u8&, source_offset: usize, source_len: usize) -> bool:
+    pos: mutable usize = source_offset
+    end: usize = source_offset + source_len
+    while pos < end:
+        ch: i64 = source[pos].i64()
+        if ch == JSON_CH_DOT or ch == JSON_CH_E or ch == JSON_CH_e:
+            return true
+        pos <- pos + 1u
+    return false
+
+
+def json_parse_u64_digits(source: any u8&, source_offset: usize, source_end: usize) -> JsonUnsignedResult:
+    if source_offset >= source_end:
+        return json_invalid_unsigned_result()
+
+    max_div10: u64 = 1844674407370955161u64
+    max_mod10: u64 = 5u64
+    value: mutable u64 = 0u64
+    pos: mutable usize = source_offset
+    while pos < source_end:
+        ch: i64 = source[pos].i64()
+        if not json_is_digit(ch):
+            return json_invalid_unsigned_result()
+
+        digit: u64 = (ch - JSON_CH_0).u64()
+        if value > max_div10 or (value == max_div10 and digit > max_mod10):
+            return json_invalid_unsigned_result()
+
+        value <- value * 10u64 + digit
+        pos <- pos + 1u
+
+    return JsonUnsignedResult(true, value)
+
+
+def json_parse_number_value(source: any u8&, source_offset: usize, source_len: usize) -> JsonNumberValue:
+    if source_len == 0u:
+        return json_invalid_number_value()
+
+    i64_max_u64: u64 = 9223372036854775807u64
+    i64_min_abs_u64: u64 = 9223372036854775808u64
+    if json_number_has_fraction_or_exponent(source, source_offset, source_len):
+        return JsonNumberValue(JsonNumberKind.NON_INTEGRAL, 0u64, 0)
+
+    negative: bool = source[source_offset].i64() == JSON_CH_MINUS
+    digits_offset: mutable usize = source_offset
+    if negative:
+        digits_offset <- digits_offset + 1u
+
+    parsed: JsonUnsignedResult = json_parse_u64_digits(source, digits_offset, source_offset + source_len)
+    if not parsed.ok:
+        return JsonNumberValue(JsonNumberKind.OUT_OF_RANGE, 0u64, 0)
+
+    magnitude: u64 = parsed.value
+    if negative:
+        if magnitude > i64_min_abs_u64:
+            return JsonNumberValue(JsonNumberKind.OUT_OF_RANGE, 0u64, 0)
+        if magnitude == i64_min_abs_u64:
+            min_value: i64 = -9223372036854775807 - 1
+            return JsonNumberValue(JsonNumberKind.SIGNED, 0u64, min_value)
+        return JsonNumberValue(JsonNumberKind.SIGNED, 0u64, -magnitude.i64())
+
+    signed_value: mutable i64 = 0
+    if magnitude <= i64_max_u64:
+        signed_value <- magnitude.i64()
+    return JsonNumberValue(JsonNumberKind.UNSIGNED, magnitude, signed_value)
+
+
+def json_ast_number_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> JsonNumberValue:
+    in store:
+        match node:
+            JsonNode.Number:
+                return json_parse_number_value(source, node.source_offset, node.source_len)
+    return json_invalid_number_value()
+
+
+def json_ast_number_kind(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> JsonNumberKind:
+    return json_ast_number_value(source, node, store).kind
+
+
+def json_ast_number_is_integral(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> bool:
+    kind: JsonNumberKind = json_ast_number_kind(source, node, store)
+    return kind == JsonNumberKind.UNSIGNED or kind == JsonNumberKind.SIGNED
+
+
+def json_ast_number_u64_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> JsonUnsignedResult:
+    value: JsonNumberValue = json_ast_number_value(source, node, store)
+    if value.kind == JsonNumberKind.UNSIGNED:
+        return JsonUnsignedResult(true, value.unsigned_value)
+    return json_invalid_unsigned_result()
+
+
+def json_ast_number_i64_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> JsonSignedResult:
+    value: JsonNumberValue = json_ast_number_value(source, node, store)
+    i64_max_u64: u64 = 9223372036854775807u64
+    if value.kind == JsonNumberKind.SIGNED:
+        return JsonSignedResult(true, value.signed_value)
+    if value.kind == JsonNumberKind.UNSIGNED and value.unsigned_value <= i64_max_u64:
+        return JsonSignedResult(true, value.unsigned_value.i64())
+    return json_invalid_signed_result()
 
 
 def json_ast_string_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> heap u8& can[Memory.Allocate, Abort.Panic]:
@@ -1234,6 +1371,81 @@ def json_parser_parity_suite_impl() -> int:
         destroy scratch
         return 0
     destroy scratch
+
+    numbers_source: static u8& = "{\"small\":123,\"big\":18446744073709551615,\"neg\":-9223372036854775808,\"frac\":1.5,\"exp\":1e3,\"huge\":18446744073709551616,\"tiny\":-9223372036854775809}"
+    numbers_any: any u8& = numbers_source.cast[any u8&]()
+    numbers_len: usize = runtime_strlen(numbers_any)
+    region numbers_scratch(json_ast_scratch_capacity(numbers_len))
+    numbers_store: JsonNode.Store[Local] = JsonNode.Store(numbers_scratch)
+    numbers_result: JsonParseNodeResult = json_parse_document_node_with_len(numbers_any, numbers_len, numbers_store)
+    if numbers_result.checksum < 0:
+        destroy numbers_scratch
+        return 0
+
+    small_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "small".cast[any u8&](), numbers_store)
+    big_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "big".cast[any u8&](), numbers_store)
+    neg_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "neg".cast[any u8&](), numbers_store)
+    frac_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "frac".cast[any u8&](), numbers_store)
+    exp_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "exp".cast[any u8&](), numbers_store)
+    huge_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "huge".cast[any u8&](), numbers_store)
+    tiny_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "tiny".cast[any u8&](), numbers_store)
+
+    small_u64: JsonUnsignedResult = json_ast_number_u64_value(numbers_any, small_node, numbers_store)
+    small_i64: JsonSignedResult = json_ast_number_i64_value(numbers_any, small_node, numbers_store)
+    big_u64: JsonUnsignedResult = json_ast_number_u64_value(numbers_any, big_node, numbers_store)
+    big_i64: JsonSignedResult = json_ast_number_i64_value(numbers_any, big_node, numbers_store)
+    neg_u64: JsonUnsignedResult = json_ast_number_u64_value(numbers_any, neg_node, numbers_store)
+    neg_i64: JsonSignedResult = json_ast_number_i64_value(numbers_any, neg_node, numbers_store)
+    frac_value: JsonNumberValue = json_ast_number_value(numbers_any, frac_node, numbers_store)
+    exp_value: JsonNumberValue = json_ast_number_value(numbers_any, exp_node, numbers_store)
+    huge_value: JsonNumberValue = json_ast_number_value(numbers_any, huge_node, numbers_store)
+    tiny_value: JsonNumberValue = json_ast_number_value(numbers_any, tiny_node, numbers_store)
+
+    if not small_u64.ok or small_u64.value != 123u64:
+        destroy numbers_scratch
+        return 0
+    if not small_i64.ok or small_i64.value != 123:
+        destroy numbers_scratch
+        return 0
+    if json_ast_number_kind(numbers_any, small_node, numbers_store) != JsonNumberKind.UNSIGNED:
+        destroy numbers_scratch
+        return 0
+    if not big_u64.ok or big_u64.value != 18446744073709551615u64:
+        destroy numbers_scratch
+        return 0
+    if big_i64.ok:
+        destroy numbers_scratch
+        return 0
+    if json_ast_number_kind(numbers_any, big_node, numbers_store) != JsonNumberKind.UNSIGNED:
+        destroy numbers_scratch
+        return 0
+    if neg_u64.ok:
+        destroy numbers_scratch
+        return 0
+    if not neg_i64.ok:
+        destroy numbers_scratch
+        return 0
+    min_i64: i64 = -9223372036854775807 - 1
+    if neg_i64.value != min_i64:
+        destroy numbers_scratch
+        return 0
+    if json_ast_number_kind(numbers_any, neg_node, numbers_store) != JsonNumberKind.SIGNED:
+        destroy numbers_scratch
+        return 0
+    if frac_value.kind != JsonNumberKind.NON_INTEGRAL or json_ast_number_is_integral(numbers_any, frac_node, numbers_store):
+        destroy numbers_scratch
+        return 0
+    if exp_value.kind != JsonNumberKind.NON_INTEGRAL or json_ast_number_is_integral(numbers_any, exp_node, numbers_store):
+        destroy numbers_scratch
+        return 0
+    if huge_value.kind != JsonNumberKind.OUT_OF_RANGE or json_ast_number_is_integral(numbers_any, huge_node, numbers_store):
+        destroy numbers_scratch
+        return 0
+    if tiny_value.kind != JsonNumberKind.OUT_OF_RANGE or json_ast_number_is_integral(numbers_any, tiny_node, numbers_store):
+        destroy numbers_scratch
+        return 0
+
+    destroy numbers_scratch
 
     return 1
 

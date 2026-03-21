@@ -120,3 +120,76 @@ def ast_string_helpers_decode_escapes_and_match_unescaped_keys() -> void:
     assert(streq(json_ast_string_value(source_any, grin_node, store), "\uD83D\uDE00".cast[any u8&]()) != 0)
 
     destroy scratch
+
+
+@test
+def ast_number_helpers_materialize_integral_values_and_classify_edges() -> void:
+    source: static u8& = "{\"small\":123,\"big\":18446744073709551615,\"neg\":-9223372036854775808,\"frac\":1.5,\"exp\":1e3,\"huge\":18446744073709551616,\"tiny\":-9223372036854775809}"
+    source_any: any u8& = source.cast[any u8&]()
+    source_len: usize = runtime_strlen(source_any)
+
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source_any, source_len, store)
+
+    assert(result.checksum > 0)
+
+    small_node: JsonNode = json_ast_object_get(result.node, source_any, "small".cast[any u8&](), store)
+    big_node: JsonNode = json_ast_object_get(result.node, source_any, "big".cast[any u8&](), store)
+    neg_node: JsonNode = json_ast_object_get(result.node, source_any, "neg".cast[any u8&](), store)
+    frac_node: JsonNode = json_ast_object_get(result.node, source_any, "frac".cast[any u8&](), store)
+    exp_node: JsonNode = json_ast_object_get(result.node, source_any, "exp".cast[any u8&](), store)
+    huge_node: JsonNode = json_ast_object_get(result.node, source_any, "huge".cast[any u8&](), store)
+    tiny_node: JsonNode = json_ast_object_get(result.node, source_any, "tiny".cast[any u8&](), store)
+
+    assert(not json_node_is_invalid(small_node, store))
+    assert(not json_node_is_invalid(big_node, store))
+    assert(not json_node_is_invalid(neg_node, store))
+    assert(not json_node_is_invalid(frac_node, store))
+    assert(not json_node_is_invalid(exp_node, store))
+    assert(not json_node_is_invalid(huge_node, store))
+    assert(not json_node_is_invalid(tiny_node, store))
+
+    small_u64: JsonUnsignedResult = json_ast_number_u64_value(source_any, small_node, store)
+    small_i64: JsonSignedResult = json_ast_number_i64_value(source_any, small_node, store)
+    big_u64: JsonUnsignedResult = json_ast_number_u64_value(source_any, big_node, store)
+    big_i64: JsonSignedResult = json_ast_number_i64_value(source_any, big_node, store)
+    neg_u64: JsonUnsignedResult = json_ast_number_u64_value(source_any, neg_node, store)
+    neg_i64: JsonSignedResult = json_ast_number_i64_value(source_any, neg_node, store)
+    frac_value: JsonNumberValue = json_ast_number_value(source_any, frac_node, store)
+    exp_value: JsonNumberValue = json_ast_number_value(source_any, exp_node, store)
+    huge_value: JsonNumberValue = json_ast_number_value(source_any, huge_node, store)
+    tiny_value: JsonNumberValue = json_ast_number_value(source_any, tiny_node, store)
+
+    assert(json_ast_number_kind(source_any, small_node, store) == JsonNumberKind.UNSIGNED)
+    assert(small_u64.ok)
+    assert(small_u64.value == 123u64)
+    assert(small_i64.ok)
+    assert(small_i64.value == 123)
+    assert(json_ast_number_is_integral(source_any, small_node, store))
+
+    assert(json_ast_number_kind(source_any, big_node, store) == JsonNumberKind.UNSIGNED)
+    assert(big_u64.ok)
+    assert(big_u64.value == 18446744073709551615u64)
+    assert(not big_i64.ok)
+    assert(json_ast_number_is_integral(source_any, big_node, store))
+
+    assert(json_ast_number_kind(source_any, neg_node, store) == JsonNumberKind.SIGNED)
+    assert(not neg_u64.ok)
+    assert(neg_i64.ok)
+    min_i64: i64 = -9223372036854775807 - 1
+    assert(neg_i64.value == min_i64)
+    assert(json_ast_number_is_integral(source_any, neg_node, store))
+
+    assert(frac_value.kind == JsonNumberKind.NON_INTEGRAL)
+    assert(exp_value.kind == JsonNumberKind.NON_INTEGRAL)
+    assert(huge_value.kind == JsonNumberKind.OUT_OF_RANGE)
+    assert(tiny_value.kind == JsonNumberKind.OUT_OF_RANGE)
+    assert(not json_ast_number_is_integral(source_any, frac_node, store))
+    assert(not json_ast_number_is_integral(source_any, exp_node, store))
+    assert(not json_ast_number_is_integral(source_any, huge_node, store))
+    assert(not json_ast_number_is_integral(source_any, tiny_node, store))
+    assert(not json_ast_number_u64_value(source_any, frac_node, store).ok)
+    assert(not json_ast_number_i64_value(source_any, exp_node, store).ok)
+
+    destroy scratch
