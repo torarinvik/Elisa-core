@@ -45,6 +45,58 @@ func (s *functionState) emitAddress(expr ast.Expr) (C.LLVMValueRef, semantic.Typ
 	}
 }
 
+func (s *functionState) emitValueAddress(expr ast.Expr) (C.LLVMValueRef, semantic.Type, error) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return s.emitIdentValueAddress(n)
+	case *ast.FieldExpr:
+		return s.emitReadableFieldAddress(n)
+	case *ast.ParenExpr:
+		return s.emitValueAddress(n.Inner)
+	default:
+		return s.emitAddress(expr)
+	}
+}
+
+func (s *functionState) emitIdentValueAddress(expr *ast.Ident) (C.LLVMValueRef, semantic.Type, error) {
+	valueType := s.exprType(expr)
+	if semantic.IsNullType(valueType) {
+		return nil, nil, fmt.Errorf("identifier %s is known null and has no readable address", expr.Name)
+	}
+	if binding, ok := s.lookupBinding(expr.Name); ok {
+		return s.refinedOptionalPayloadAddress(binding.ptr, binding.typ, valueType, expr.Name)
+	}
+	if sym, ok := s.g.result.GlobalScope.Lookup(expr.Name); ok {
+		if sym.Kind == semantic.SymbolGlobal || sym.Kind == semantic.SymbolExternVar {
+			global, err := s.g.ensureGlobalDeclared(expr.Name, sym.Type, sym.Kind == semantic.SymbolExternVar)
+			if err != nil {
+				return nil, nil, err
+			}
+			return s.refinedOptionalPayloadAddress(global, sym.Type, valueType, expr.Name)
+		}
+	}
+	return nil, nil, fmt.Errorf("identifier %s is not addressable", expr.Name)
+}
+
+func (s *functionState) refinedOptionalPayloadAddress(ptr C.LLVMValueRef, storedType semantic.Type, valueType semantic.Type, name string) (C.LLVMValueRef, semantic.Type, error) {
+	optionalType, ok := storedType.(*semantic.OptionalType)
+	if !ok || valueType == nil || semantic.SameType(storedType, valueType) {
+		return ptr, storedType, nil
+	}
+	if semantic.IsNullType(valueType) {
+		return nil, nil, fmt.Errorf("known-null optional has no payload address")
+	}
+	if optionalType.Value == nil || !semantic.SameType(optionalType.Value, valueType) {
+		return ptr, storedType, nil
+	}
+	llvmOptionalType, err := s.g.lowerType(optionalType)
+	if err != nil {
+		return nil, nil, err
+	}
+	payloadPtr := C.LLVMBuildStructGEP2(s.builder, llvmOptionalType, ptr, 1, cStringFree(name+".payload"))
+	return payloadPtr, valueType, nil
+}
+
 func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, error) {
 	objType := s.exprType(expr.Object)
 	if objType == nil {
@@ -95,6 +147,58 @@ func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, s
 	}
 	fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, objPtr, C.unsigned(index), cStringFree(expr.Field))
 	return fieldPtr, fieldType, nil
+}
+
+func (s *functionState) emitReadableFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, error) {
+	objType := s.exprType(expr.Object)
+	if objType == nil {
+		return nil, nil, fmt.Errorf("missing semantic type for field base when lowering .%s", expr.Field)
+	}
+	fieldType, index, containerType, pointerLike, err := s.g.fieldInfo(objType, expr.Field)
+	if err != nil {
+		return nil, nil, err
+	}
+	var containerLLVMType C.LLVMTypeRef
+	if enumType, ok := containerType.(*semantic.EnumType); ok && enumType.Packed {
+		containerLLVMType, err = s.loweredEnumStorageType(enumType)
+	} else {
+		containerLLVMType, err = s.g.lowerType(containerType)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	if enumType, ok := containerType.(*semantic.EnumType); ok && enumType.Packed {
+		if ident, ok := expr.Object.(*ast.Ident); ok {
+			if cachedPtr, ok := s.lookupPackedEnumStorage(ident.Name, enumType); ok {
+				fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, cachedPtr, C.unsigned(index), cStringFree(expr.Field))
+				return s.refinedOptionalPayloadAddress(fieldPtr, fieldType, s.exprType(expr), expr.Field)
+			}
+		}
+	}
+	var objPtr C.LLVMValueRef
+	if pointerLike {
+		objPtr, _, err = s.emitExpr(expr.Object, nil)
+	} else {
+		objPtr, _, err = s.emitValueAddress(expr.Object)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	if enumType, ok := containerType.(*semantic.EnumType); ok && enumType.Packed {
+		var activeStore *packedStoreBinding
+		if binding, ok := s.lookupPackedStore(enumType); ok {
+			activeStore = &binding
+		}
+		objPtr, err = s.packedEnumStoragePtrFromExprValue(objPtr, objType, enumType, activeStore)
+		if err != nil {
+			return nil, nil, err
+		}
+		if ident, ok := expr.Object.(*ast.Ident); ok {
+			s.bindPackedEnumStorage(ident.Name, enumType, objPtr)
+		}
+	}
+	fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, objPtr, C.unsigned(index), cStringFree(expr.Field))
+	return s.refinedOptionalPayloadAddress(fieldPtr, fieldType, s.exprType(expr), expr.Field)
 }
 
 func (s *functionState) packedEnumStoragePtrFromExprValue(value C.LLVMValueRef, exprType semantic.Type, enumType *semantic.EnumType, store *packedStoreBinding) (C.LLVMValueRef, error) {

@@ -699,33 +699,33 @@ func (n *ErrorUnionTypeExpr) Pos() lexer.Pos {
 	return n.Position
 }
 func (n *OptionalTypeExpr) Pos() lexer.Pos { return n.Position }
-func (n *Ident) Pos() lexer.Pos          { return n.Position }
-func (n *IntLit) Pos() lexer.Pos         { return n.Position }
-func (n *StringLit) Pos() lexer.Pos      { return n.Position }
-func (n *BoolLit) Pos() lexer.Pos        { return n.Position }
-func (n *NullLit) Pos() lexer.Pos        { return n.Position }
-func (n *ZeroedLit) Pos() lexer.Pos      { return n.Position }
-func (n *BinaryExpr) Pos() lexer.Pos     { return n.Position }
-func (n *UnaryExpr) Pos() lexer.Pos      { return n.Position }
-func (n *MoveExpr) Pos() lexer.Pos       { return n.Position }
-func (n *CallExpr) Pos() lexer.Pos       { return n.Position }
-func (n *FieldExpr) Pos() lexer.Pos      { return n.Position }
-func (n *IndexExpr) Pos() lexer.Pos      { return n.Position }
-func (n *SliceExpr) Pos() lexer.Pos      { return n.Position }
-func (n *ListLitExpr) Pos() lexer.Pos    { return n.Position }
-func (n *CastExpr) Pos() lexer.Pos       { return n.Position }
-func (n *SizeofExpr) Pos() lexer.Pos     { return n.Position }
-func (n *TernaryExpr) Pos() lexer.Pos    { return n.Position }
-func (n *AddrOfExpr) Pos() lexer.Pos     { return n.Position }
-func (n *SpecializeExpr) Pos() lexer.Pos { return n.Position }
-func (n *StructLitExpr) Pos() lexer.Pos  { return n.Position }
-func (n *ParenExpr) Pos() lexer.Pos      { return n.Position }
-func (n *RaiseExpr) Pos() lexer.Pos      { return n.Position }
-func (n *TryExpr) Pos() lexer.Pos        { return n.Position }
-func (n *UnwrapElseExpr) Pos() lexer.Pos { return n.Position }
-func (n *AllocExpr) Pos() lexer.Pos      { return n.Position }
-func (n *CanExpr) Pos() lexer.Pos        { return n.Position }
-func (n *MatchExpr) Pos() lexer.Pos      { return n.Position }
+func (n *Ident) Pos() lexer.Pos            { return n.Position }
+func (n *IntLit) Pos() lexer.Pos           { return n.Position }
+func (n *StringLit) Pos() lexer.Pos        { return n.Position }
+func (n *BoolLit) Pos() lexer.Pos          { return n.Position }
+func (n *NullLit) Pos() lexer.Pos          { return n.Position }
+func (n *ZeroedLit) Pos() lexer.Pos        { return n.Position }
+func (n *BinaryExpr) Pos() lexer.Pos       { return n.Position }
+func (n *UnaryExpr) Pos() lexer.Pos        { return n.Position }
+func (n *MoveExpr) Pos() lexer.Pos         { return n.Position }
+func (n *CallExpr) Pos() lexer.Pos         { return n.Position }
+func (n *FieldExpr) Pos() lexer.Pos        { return n.Position }
+func (n *IndexExpr) Pos() lexer.Pos        { return n.Position }
+func (n *SliceExpr) Pos() lexer.Pos        { return n.Position }
+func (n *ListLitExpr) Pos() lexer.Pos      { return n.Position }
+func (n *CastExpr) Pos() lexer.Pos         { return n.Position }
+func (n *SizeofExpr) Pos() lexer.Pos       { return n.Position }
+func (n *TernaryExpr) Pos() lexer.Pos      { return n.Position }
+func (n *AddrOfExpr) Pos() lexer.Pos       { return n.Position }
+func (n *SpecializeExpr) Pos() lexer.Pos   { return n.Position }
+func (n *StructLitExpr) Pos() lexer.Pos    { return n.Position }
+func (n *ParenExpr) Pos() lexer.Pos        { return n.Position }
+func (n *RaiseExpr) Pos() lexer.Pos        { return n.Position }
+func (n *TryExpr) Pos() lexer.Pos          { return n.Position }
+func (n *UnwrapElseExpr) Pos() lexer.Pos   { return n.Position }
+func (n *AllocExpr) Pos() lexer.Pos        { return n.Position }
+func (n *CanExpr) Pos() lexer.Pos          { return n.Position }
+func (n *MatchExpr) Pos() lexer.Pos        { return n.Position }
 func (n *MatchWildcardPattern) Pos() lexer.Pos {
 	return n.Position
 }

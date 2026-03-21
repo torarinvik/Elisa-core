@@ -2305,6 +2305,43 @@ def fallback_value(flag: bool) -> int:
 	}
 }
 
+func TestGenerateLLVMIRLowersOptionalNullChecksAndSmartCastUse(t *testing.T) {
+	src := `repr(c) struct Box:
+	value: i32
+
+
+def maybe_box(flag: bool) -> Box?:
+	if flag:
+		return Box(7)
+	return null
+
+
+def unwrap_or(flag: bool) -> i32:
+	value: Box? = maybe_box(flag)
+	if value == null:
+		return 11
+	return value.value
+`
+	result := parseAndAnalyze(t, "backend_value_optionals_smart_cast.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%Optional__Box = type { i1, %Box }",
+		"define i32 @unwrap_or(i1",
+		"extractvalue %Optional__Box",
+		"getelementptr inbounds nuw %Optional__Box",
+		"getelementptr inbounds nuw %Box",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRIndexesRuntimeBackedArraysAndViews(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
 	items: mutable any T&?

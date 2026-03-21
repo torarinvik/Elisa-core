@@ -3904,9 +3904,9 @@ func (a *Analyzer) applyConditionRefinements(scope *Scope, expr ast.Expr, truthy
 				a.applyConditionRefinements(scope, n.Right, false)
 			}
 		case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
-			targetExpr, state, ok := refinedExprNullState(n, truthy)
+			targetExpr, nonNull, ok := refinedExprNullState(n, truthy)
 			if ok {
-				a.shadowRefinedExpr(scope, targetExpr, state)
+				a.shadowRefinedExpr(scope, targetExpr, nonNull)
 			}
 		}
 	case *ast.UnaryExpr:
@@ -3918,7 +3918,7 @@ func (a *Analyzer) applyConditionRefinements(scope *Scope, expr ast.Expr, truthy
 	}
 }
 
-func refinedExprNullState(expr *ast.BinaryExpr, truthy bool) (ast.Expr, RefState, bool) {
+func refinedExprNullState(expr *ast.BinaryExpr, truthy bool) (ast.Expr, bool, bool) {
 	_, leftNull := expr.Left.(*ast.NullLit)
 	_, rightNull := expr.Right.(*ast.NullLit)
 
@@ -3929,26 +3929,20 @@ func refinedExprNullState(expr *ast.BinaryExpr, truthy bool) (ast.Expr, RefState
 	case leftNull:
 		targetExpr = expr.Right
 	default:
-		return nil, RefStateNullable, false
+		return nil, false, false
 	}
 
 	if _, ok := exprRefinementKey(targetExpr); !ok {
-		return nil, RefStateNullable, false
+		return nil, false, false
 	}
 
 	if expr.Op == lexer.TOKEN_EQEQ {
-		if truthy {
-			return targetExpr, RefStateNull, true
-		}
-		return targetExpr, RefStateNonNull, true
+		return targetExpr, !truthy, true
 	}
-	if truthy {
-		return targetExpr, RefStateNonNull, true
-	}
-	return targetExpr, RefStateNull, true
+	return targetExpr, truthy, true
 }
 
-func (a *Analyzer) shadowRefinedExpr(scope *Scope, expr ast.Expr, state RefState) {
+func (a *Analyzer) shadowRefinedExpr(scope *Scope, expr ast.Expr, nonNull bool) {
 	if scope == nil {
 		return
 	}
@@ -3957,14 +3951,37 @@ func (a *Analyzer) shadowRefinedExpr(scope *Scope, expr ast.Expr, state RefState
 		return
 	}
 	baseType := a.analyzeExprInScope(expr, scope)
-	ref, ok := baseType.(*RefType)
+	refined, ok := refinedNullComparableType(baseType, nonNull)
 	if !ok {
 		return
 	}
-	if !refinementCompatible(ref.State, state) {
-		return
+	scope.Refinements[key] = refined
+}
+
+func refinedNullComparableType(baseType Type, nonNull bool) (Type, bool) {
+	switch t := baseType.(type) {
+	case *RefType:
+		desired := RefStateNull
+		if nonNull {
+			desired = RefStateNonNull
+		}
+		if !refinementCompatible(t.State, desired) {
+			return nil, false
+		}
+		return cloneRefTypeWithState(t, desired), true
+	case *OptionalType:
+		if nonNull {
+			return t.Value, true
+		}
+		return nullType, true
+	case *NullType:
+		if nonNull {
+			return nil, false
+		}
+		return t, true
+	default:
+		return nil, false
 	}
-	scope.Refinements[key] = cloneRefTypeWithState(ref, state)
 }
 
 func refinementCompatible(current, desired RefState) bool {
@@ -4093,16 +4110,29 @@ func (a *Analyzer) recordAssignmentRefinement(target ast.Expr, targetType Type, 
 
 func assignedRefinementType(targetType Type, valueType Type) Type {
 	targetRef, ok := targetType.(*RefType)
+	if ok {
+		if IsNullType(valueType) {
+			return cloneRefTypeWithState(targetRef, RefStateNull)
+		}
+		if valueRef, ok := valueType.(*RefType); ok {
+			return cloneRefType(valueRef)
+		}
+		return targetRef
+	}
+	targetOptional, ok := targetType.(*OptionalType)
 	if !ok {
 		return nil
 	}
 	if IsNullType(valueType) {
-		return cloneRefTypeWithState(targetRef, RefStateNull)
+		return nullType
 	}
-	if valueRef, ok := valueType.(*RefType); ok {
-		return cloneRefType(valueRef)
+	if _, ok := valueType.(*OptionalType); ok {
+		return targetOptional
 	}
-	return targetRef
+	if AssignableTo(targetOptional.Value, valueType) {
+		return targetOptional.Value
+	}
+	return targetOptional
 }
 
 func assertedCondition(expr ast.Expr) (ast.Expr, bool) {

@@ -6094,6 +6094,29 @@ def bad(flag: bool) -> int:
 	}
 }
 
+func TestAnalyzeAcceptsOptionalNullChecksAndSmartCastUse(t *testing.T) {
+	src := `repr(c) struct Box:
+	value: int
+
+
+def maybe_box(flag: bool) -> Box?:
+	if flag:
+		return Box(7)
+	return null
+
+
+def unwrap_or(flag: bool) -> int:
+	value: Box? = maybe_box(flag)
+	if value == null:
+		return 11
+	return value.value
+`
+	result, errs := parseAndAnalyze(t, "value_optionals_smart_cast.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "unwrap_or", "int")
+}
+
 func TestAnalyzeAcceptsTypedFixedArrayLiteralInitialization(t *testing.T) {
 	src := `def first() -> i32:
 	values: i32[3] = [1, 2, 3]

@@ -178,6 +178,13 @@ func (s *functionState) buildCall(llvmFnType C.LLVMTypeRef, callee C.LLVMValueRe
 }
 
 func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Type, error) {
+	if actualType := s.exprType(expr); semantic.IsNullType(actualType) {
+		return s.emitNullLiteral()
+	}
+	if ptr, valueType, err := s.emitIdentValueAddress(expr); err == nil {
+		value, loadErr := s.loadValue(ptr, valueType, expr.Name)
+		return value, valueType, loadErr
+	}
 	if binding, ok := s.lookupBinding(expr.Name); ok {
 		value, err := s.loadValue(binding.ptr, binding.typ, expr.Name)
 		return value, binding.typ, err
@@ -653,6 +660,9 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 	leftType := s.exprType(expr.Left)
 	rightType := s.exprType(expr.Right)
 	resultType := s.exprType(expr)
+	if value, actualType, handled, err := s.emitOptionalCompareExpr(expr, leftType, rightType, resultType); handled {
+		return value, actualType, err
+	}
 	if value, actualType, handled, err := s.emitPointerCompareExpr(expr, leftType, rightType, resultType); handled {
 		return value, actualType, err
 	}
@@ -889,6 +899,44 @@ func (s *functionState) emitPointerCompareExpr(expr *ast.BinaryExpr, leftType se
 	}
 	cmp := C.LLVMBuildICmp(s.builder, pred, left, right, cStringFree("ptrcmptmp"))
 	return cmp, resultType, true, nil
+}
+
+func (s *functionState) emitOptionalCompareExpr(expr *ast.BinaryExpr, leftType semantic.Type, rightType semantic.Type, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if expr.Op != lexer.TOKEN_EQEQ && expr.Op != lexer.TOKEN_BANGEQ {
+		return nil, nil, false, nil
+	}
+	var (
+		optionalExpr ast.Expr
+		optionalType *semantic.OptionalType
+	)
+	switch leftOptional := leftType.(type) {
+	case *semantic.OptionalType:
+		if semantic.IsNullType(rightType) {
+			optionalExpr = expr.Left
+			optionalType = leftOptional
+		}
+	}
+	if optionalType == nil {
+		if rightOptional, ok := rightType.(*semantic.OptionalType); ok && semantic.IsNullType(leftType) {
+			optionalExpr = expr.Right
+			optionalType = rightOptional
+		}
+	}
+	if optionalType == nil {
+		return nil, nil, false, nil
+	}
+	optionalValue, _, err := s.emitExpr(optionalExpr, optionalType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	presentValue, err := s.extractOptionalPresent(optionalValue, optionalType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if expr.Op == lexer.TOKEN_EQEQ {
+		return C.LLVMBuildNot(s.builder, presentValue, cStringFree("optionalisnull")), resultType, true, nil
+	}
+	return presentValue, resultType, true, nil
 }
 
 func (s *functionState) emitPointerArithmeticExpr(expr *ast.BinaryExpr, leftType semantic.Type, rightType semantic.Type, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, bool, error) {
@@ -2296,7 +2344,7 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, sema
 	if value, fieldType, handled, err := s.emitPackedCommonFieldExpr(expr); handled {
 		return value, fieldType, err
 	}
-	ptr, fieldType, addressErr := s.emitFieldAddress(expr)
+	ptr, fieldType, addressErr := s.emitReadableFieldAddress(expr)
 	if addressErr == nil {
 		value, loadErr := s.loadValue(ptr, fieldType, expr.Field)
 		return value, fieldType, loadErr
