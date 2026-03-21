@@ -843,7 +843,9 @@ func TestRunCLIExecutesJSONParserSelfHostedTests(t *testing.T) {
 		"[ RUN      ] ast_and_checksum_paths_agree_on_nested_inputs",
 		"[ RUN      ] invalid_inputs_are_rejected",
 		"[ RUN      ] ast_raw_dom_helpers_expose_source_spans_and_structure",
-		"[ SUMMARY  ] 5 test(s) selected",
+		"[ RUN      ] ast_string_helpers_decode_escapes_and_match_unescaped_keys",
+		"[ RUN      ] ast_number_helpers_materialize_integral_values_and_classify_edges",
+		"[ SUMMARY  ] 7 test(s) selected",
 	} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected json parser self-hosted test output to contain %q, got:\n%s", check, output)

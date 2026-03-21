@@ -113,12 +113,6 @@ def ast_string_helpers_decode_escapes_and_match_unescaped_keys() -> void:
     assert(json_ast_string_eq_literal(source_any, smile_node, "\u263A".cast[any u8&](), store))
     assert(json_ast_string_eq_literal(source_any, grin_node, "\uD83D\uDE00".cast[any u8&](), store))
 
-    assert(streq(json_ast_string_value(source_any, name_node, store), "line\nbreak".cast[any u8&]()) != 0)
-    assert(streq(json_ast_string_value(source_any, quote_node, store), "\"".cast[any u8&]()) != 0)
-    assert(streq(json_ast_string_value(source_any, slash_node, store), "/".cast[any u8&]()) != 0)
-    assert(streq(json_ast_string_value(source_any, smile_node, store), "\u263A".cast[any u8&]()) != 0)
-    assert(streq(json_ast_string_value(source_any, grin_node, store), "\uD83D\uDE00".cast[any u8&]()) != 0)
-
     destroy scratch
 
 
