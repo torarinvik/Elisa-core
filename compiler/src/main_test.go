@@ -294,6 +294,12 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"define i64 @json_parser_parity_suite()",
 				"define i64 @json_parser_checksum(ptr",
 				"define i64 @json_parser_ast_checksum(ptr",
+				"define i64 @json_parallel_worker(%JsonParallelJob",
+				"define i64 @json_parser_parallel_max_workers()",
+				"define i64 @json_parser_parallel_checksum(",
+				"define i64 @json_parser_parallel_ast_checksum(",
+				"call %ThreadPool @pool_new(",
+				"call void @task_group_wait_all_raw(ptr",
 			},
 		},
 		{
@@ -703,6 +709,7 @@ func TestRunCLIJSONParserGeneratedHeaderInteropHarness(t *testing.T) {
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.llcontext")
 	harnessPath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser_generated_harness.c")
 	shimPath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c")
+	runtimePath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_concurrency_runtime.c")
 	outputDir := t.TempDir()
 	headerPath := filepath.Join(outputDir, "json_parser.h")
 	objectPath := filepath.Join(outputDir, "json_parser.o")
@@ -726,7 +733,7 @@ func TestRunCLIJSONParserGeneratedHeaderInteropHarness(t *testing.T) {
 		}
 	}
 
-	compileArgs := []string{"-I", outputDir, harnessPath, shimPath, objectPath, "-o", exePath}
+	compileArgs := []string{"-pthread", "-I", outputDir, harnessPath, shimPath, runtimePath, objectPath, "-o", exePath}
 	if runtime.GOOS == "darwin" {
 		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
 	}
@@ -739,6 +746,70 @@ func TestRunCLIJSONParserGeneratedHeaderInteropHarness(t *testing.T) {
 	runOutput, err := runCmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("json-parser generated-header interop harness failed: %v\n%s", err, string(runOutput))
+	}
+}
+
+func TestRunCLIJSONParserParallelBenchSmoke(t *testing.T) {
+	clangPath, err := exec.LookPath("clang")
+	if err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.llcontext")
+	benchPath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_parallel_bench.c")
+	shimPath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c")
+	runtimePath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_concurrency_runtime.c")
+	outputDir := t.TempDir()
+	headerPath := filepath.Join(outputDir, "json_parser.h")
+	objectPath := filepath.Join(outputDir, "json_parser.o")
+	exePath := filepath.Join(outputDir, "json_parser_parallel_bench")
+	jsonPath := filepath.Join(outputDir, "sample.json")
+
+	for _, args := range [][]string{
+		{"-emit", "header", "-o", headerPath, fixturePath},
+		{"-emit", "obj", "-o", objectPath, fixturePath},
+	} {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		exitCode := runCLI(args, &stdout, &stderr)
+		if exitCode != 0 {
+			t.Fatalf("runCLI(%v) returned %d\nstderr:\n%s", args, exitCode, stderr.String())
+		}
+		if stdout.Len() != 0 {
+			t.Fatalf("expected no stdout for %v, got:\n%s", args, stdout.String())
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("expected no stderr for %v, got:\n%s", args, stderr.String())
+		}
+	}
+
+	compileArgs := []string{"-pthread", "-I", outputDir, benchPath, shimPath, runtimePath, objectPath, "-o", exePath}
+	if runtime.GOOS == "darwin" {
+		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
+	}
+	compileCmd := exec.Command(clangPath, compileArgs...)
+	compileOutput, err := compileCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clang failed: %v\n%s", err, string(compileOutput))
+	}
+
+	if err := os.WriteFile(jsonPath, []byte("{\"items\":[1,2,3],\"ok\":true}\n"), 0o644); err != nil {
+		t.Fatalf("failed to write sample json: %v", err)
+	}
+
+	for _, mode := range []string{"checksum", "ast-cached"} {
+		runCmd := exec.Command(exePath, jsonPath, "4", "2", mode)
+		runOutput, err := runCmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("parallel json benchmark failed for mode %s: %v\n%s", mode, err, string(runOutput))
+		}
+		output := string(runOutput)
+		for _, check := range []string{"mode=" + mode, "workers=2", "iterations=4", "MiB/s="} {
+			if !strings.Contains(output, check) {
+				t.Fatalf("expected parallel benchmark output to contain %q, got:\n%s", check, output)
+			}
+		}
 	}
 }
 

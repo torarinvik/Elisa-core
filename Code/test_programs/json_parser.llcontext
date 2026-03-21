@@ -726,8 +726,105 @@ def json_parser_parity_suite_impl() -> int:
     return 1
 
 
+const JSON_PARALLEL_MODE_CHECKSUM = 0
+const JSON_PARALLEL_MODE_AST = 1
+const JSON_PARALLEL_MODE_AST_CACHED = 2
+const JSON_PARALLEL_MAX_WORKERS = 128u
+
+repr(c) struct JsonParallelJob:
+    source_bits: uintptr
+    repeats: usize
+    result_bits: uintptr
+    mode: i64
+
+
+def json_parallel_parse_once(source: any u8&, mode: i64) -> i64:
+    if mode == JSON_PARALLEL_MODE_CHECKSUM:
+        return json_parser_checksum_impl(source)
+    if mode == JSON_PARALLEL_MODE_AST:
+        return json_parser_ast_checksum_impl(source)
+    if mode == JSON_PARALLEL_MODE_AST_CACHED:
+        return json_parser_ast_cached_checksum_impl(source)
+    return -1
+
+
+def json_parallel_worker(job: JsonParallelJob) -> i64:
+    source: any u8& = job.source_bits.cast[any u8&]()
+    result_slot: any i64& = job.result_bits.cast[any i64&]()
+    remaining: mutable usize = job.repeats
+    total: mutable i64 = 0
+    while remaining > 0u:
+        value: i64 = json_parallel_parse_once(source, job.mode)
+        if value < 0:
+            result_slot[0u] <- -1
+            return -1
+        total <- total + value
+        remaining <- remaining - 1u
+    result_slot[0u] <- total
+    return total
+
+
+def json_parser_parallel_max_workers_impl() -> i64:
+    return JSON_PARALLEL_MAX_WORKERS.i64()
+
+
+def json_parallel_checksum_impl(source: any u8&, worker_count: usize, iterations: usize, mode: i64) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+    if worker_count == 0u or iterations == 0u or worker_count > JSON_PARALLEL_MAX_WORKERS:
+        return -1
+
+    worker_total: mutable usize = worker_count
+    if worker_total > iterations:
+        worker_total <- iterations
+
+    partials: i64[128] = zeroed
+    source_bits: uintptr = source.uintptr()
+    base_repeats: usize = iterations / worker_total
+    extra_repeats: usize = iterations % worker_total
+
+    pool workers(worker_total):
+        group: TaskGroup = task_group_new()
+        slot: mutable usize = 0u
+        while slot < worker_total:
+            repeats: mutable usize = base_repeats
+            if slot < extra_repeats:
+                repeats <- repeats + 1u
+
+            result_bits: uintptr = (&partials[slot]).cast[any i64&]().uintptr()
+            job: JsonParallelJob = JsonParallelJob(source_bits, repeats, result_bits, mode)
+            task: Task[i64, Pending] = submit json_parallel_worker(job)
+            task_group_add((&group).cast[any TaskGroup&](), move task)
+            slot <- slot + 1u
+
+        wait all group
+
+    total: mutable i64 = 0
+    slot: mutable usize = 0u
+    while slot < worker_total:
+        if partials[slot] < 0:
+            return -1
+        total <- total + partials[slot]
+        slot <- slot + 1u
+    return total
+
+
+def json_parser_parallel_checksum_impl(source: any u8&, worker_count: usize, iterations: usize) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+    return json_parallel_checksum_impl(source, worker_count, iterations, JSON_PARALLEL_MODE_CHECKSUM)
+
+
+def json_parser_parallel_ast_checksum_impl(source: any u8&, worker_count: usize, iterations: usize) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+    return json_parallel_checksum_impl(source, worker_count, iterations, JSON_PARALLEL_MODE_AST)
+
+
+def json_parser_parallel_ast_cached_checksum_impl(source: any u8&, worker_count: usize, iterations: usize) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+    return json_parallel_checksum_impl(source, worker_count, iterations, JSON_PARALLEL_MODE_AST_CACHED)
+
+
 export func json_parser_parity_suite() -> int = json_parser_parity_suite_impl
 export func json_parser_checksum(source: any u8&) -> i64 = json_parser_checksum_impl
 export func json_parser_ast_checksum(source: any u8&) -> i64 = json_parser_ast_checksum_impl
 export func json_parser_ast_cached_checksum(source: any u8&) -> i64 = json_parser_ast_cached_checksum_impl
 export func json_parser_ast_node_count(source: any u8&) -> i64 = json_parser_ast_node_count_impl
+export func json_parser_parallel_max_workers() -> i64 = json_parser_parallel_max_workers_impl
+export func json_parser_parallel_checksum(source: any u8&, worker_count: usize, iterations: usize) -> i64 = json_parser_parallel_checksum_impl
+export func json_parser_parallel_ast_checksum(source: any u8&, worker_count: usize, iterations: usize) -> i64 = json_parser_parallel_ast_checksum_impl
+export func json_parser_parallel_ast_cached_checksum(source: any u8&, worker_count: usize, iterations: usize) -> i64 = json_parser_parallel_ast_cached_checksum_impl
