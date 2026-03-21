@@ -1327,13 +1327,17 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 	case *ArrayType:
 		return a.typeCanContainRegionRefs(tt.Elem, seen)
 	case *DArrayType:
-		return a.typeCanContainRegionRefs(tt.Elem, seen)
+		return true
 	case *OptionalType:
 		return a.typeCanContainRegionRefs(tt.Value, seen)
 	case *ViewType:
-		return a.typeCanContainRegionRefs(tt.Elem, seen)
+		return true
 	case *DArrayViewType:
-		return a.typeCanContainRegionRefs(tt.Elem, seen)
+		return true
+	case *DStrType:
+		return true
+	case *SViewType:
+		return true
 	case *DictType:
 		return a.typeCanContainRegionRefs(tt.Key, seen) || a.typeCanContainRegionRefs(tt.Value, seen)
 	case *StructType:

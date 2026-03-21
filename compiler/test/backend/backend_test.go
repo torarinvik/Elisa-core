@@ -3076,12 +3076,19 @@ func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughFieldProjection(t *t
 	left: view[i32]
 	right: view[i32]
 
+@borrows_return_field(left, left, right, right)
+extern wrap_views(left: view[i32], right: view[i32]) -> Views
+
 def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = dst
 	_ = src
 
 def copy_struct(values: array[i32, 4]) -> void:
 	boxed: Views = Views(values[0u:2u], values[2u:4u])
+	arena_da_copy_exact(boxed.left, boxed.right)
+
+def copy_helper(values: array[i32, 4]) -> void:
+	boxed: Views = wrap_views(values[0u:2u], values[2u:4u])
 	arena_da_copy_exact(boxed.left, boxed.right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_copy_exact_field_projection.llcontext", src)
@@ -3099,6 +3106,17 @@ def copy_struct(values: array[i32, 4]) -> void:
 	}
 	if strings.Contains(copyStructBody, "call void @arena_da_copy_exact") {
 		t.Fatalf("expected copy_struct to avoid helper fallback, got:\n%s", copyStructBody)
+	}
+
+	copyHelperBody := functionIR(output, "copy_helper")
+	if copyHelperBody == "" {
+		t.Fatalf("expected to find copy_helper body, got:\n%s", output)
+	}
+	if !strings.Contains(copyHelperBody, "call ptr @arena_memcpy(ptr noalias") {
+		t.Fatalf("expected copy_helper to lower through direct noalias arena_memcpy via helper-returned field projections, got:\n%s", copyHelperBody)
+	}
+	if strings.Contains(copyHelperBody, "call void @arena_da_copy_exact") {
+		t.Fatalf("expected copy_helper to avoid helper fallback, got:\n%s", copyHelperBody)
 	}
 
 }
@@ -3512,6 +3530,9 @@ func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughFieldProjection(t *tes
 	left: view[i32]
 	right: view[i32]
 
+@borrows_return_field(left, left, right, right)
+extern wrap_views(left: view[i32], right: view[i32]) -> Views
+
 def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	_ = left
 	_ = right
@@ -3519,6 +3540,10 @@ def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 
 def eq_struct(values: array[i32, 4]) -> bool:
 	boxed: Views = Views(values[0u:2u], values[2u:4u])
+	return arena_da_eq_exact(boxed.left, boxed.right)
+
+def eq_helper(values: array[i32, 4]) -> bool:
+	boxed: Views = wrap_views(values[0u:2u], values[2u:4u])
 	return arena_da_eq_exact(boxed.left, boxed.right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_eq_exact_field_projection.llcontext", src)
@@ -3536,6 +3561,17 @@ def eq_struct(values: array[i32, 4]) -> bool:
 	}
 	if strings.Contains(eqStructBody, "call i1 @arena_da_eq_exact") {
 		t.Fatalf("expected eq_struct to avoid helper fallback, got:\n%s", eqStructBody)
+	}
+
+	eqHelperBody := functionIR(output, "eq_helper")
+	if eqHelperBody == "" {
+		t.Fatalf("expected to find eq_helper body, got:\n%s", output)
+	}
+	if !strings.Contains(eqHelperBody, "call i64 @memcmp(ptr noalias") {
+		t.Fatalf("expected eq_helper to lower through direct noalias memcmp via helper-returned field projections, got:\n%s", eqHelperBody)
+	}
+	if strings.Contains(eqHelperBody, "call i1 @arena_da_eq_exact") {
+		t.Fatalf("expected eq_helper to avoid helper fallback, got:\n%s", eqHelperBody)
 	}
 
 }
