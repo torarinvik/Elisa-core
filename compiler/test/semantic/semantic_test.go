@@ -1228,6 +1228,346 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 	requireFunctionReturnTypeString(t, result, "ok", "void")
 }
 
+func TestAnalyzeRejectsReusingBorrowedThreadPoolAliasReturnedViaEnumMatchBoundCallbackAfterShutdown(t *testing.T) {
+	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return move task
+
+repr(c) struct PoolHolder:
+	pool_ref: any ThreadPool&
+
+enum PoolGetter:
+	Wrap(fn: func(PoolHolder) -> any ThreadPool&)
+
+def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+	return holder.pool_ref
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def bad(holder: PoolHolder) -> void:
+	getter: PoolGetter = PoolGetter.Wrap(get_pool_ref)
+	match getter:
+		PoolGetter.Wrap(callback_fn):
+			pool_ref: any ThreadPool& = callback_fn(holder)
+			pool_shutdown(pool_ref)
+			_ = pool_submit1(holder.pool_ref, work, 1)
+`
+	_, errs := parseAndAnalyze(t, "thread_pool_enum_match_bound_callback_shutdown_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+		t.Fatalf("expected enum match bound callback shutdown diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaEnumMatchBoundCallback(t *testing.T) {
+	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: any TaskGroup&) -> void
+
+repr(c) struct GroupHolder:
+	group_ref: any TaskGroup&
+
+enum GroupKeeper:
+	Wrap(fn: func(GroupHolder) -> GroupHolder)
+
+def keep_holder(holder: GroupHolder) -> GroupHolder:
+	return holder
+
+def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
+	keeper: GroupKeeper = GroupKeeper.Wrap(keep_holder)
+	match keeper:
+		GroupKeeper.Wrap(callback_fn):
+			alias_holder: GroupHolder = callback_fn(holder)
+			task_group_add(alias_holder.group_ref, move task)
+			wait all holder.group_ref
+`
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_enum_match_bound_callback_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "void")
+}
+
+func TestAnalyzeRejectsReusingBorrowedThreadPoolAliasReturnedViaPackedEnumMatchBoundCallbackAfterShutdown(t *testing.T) {
+	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return move task
+
+repr(c) struct PoolHolder:
+	pool_ref: any ThreadPool&
+
+packed enum PoolGetter:
+	Wrap(fn: func(PoolHolder) -> any ThreadPool&)
+
+def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+	return holder.pool_ref
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def bad(holder: PoolHolder) -> void:
+	region store_owner
+	store: PoolGetter.Store[Local] = PoolGetter.Store(store_owner)
+	getter: PoolGetter = new[store] PoolGetter.Wrap(fn: get_pool_ref)
+	match getter in store:
+		PoolGetter.Wrap(callback_fn):
+			pool_ref: any ThreadPool& = callback_fn(holder)
+			pool_shutdown(pool_ref)
+			_ = pool_submit1(holder.pool_ref, work, 1)
+`
+	_, errs := parseAndAnalyze(t, "thread_pool_packed_enum_match_bound_callback_shutdown_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+		t.Fatalf("expected packed enum match bound callback shutdown diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaPackedEnumMatchBoundCallback(t *testing.T) {
+	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: any TaskGroup&) -> void
+
+repr(c) struct GroupHolder:
+	group_ref: any TaskGroup&
+
+packed enum GroupKeeper:
+	Wrap(fn: func(GroupHolder) -> GroupHolder)
+
+def keep_holder(holder: GroupHolder) -> GroupHolder:
+	return holder
+
+def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
+	region store_owner
+	store: GroupKeeper.Store[Local] = GroupKeeper.Store(store_owner)
+	keeper: GroupKeeper = new[store] GroupKeeper.Wrap(fn: keep_holder)
+	match keeper in store:
+		GroupKeeper.Wrap(callback_fn):
+			alias_holder: GroupHolder = callback_fn(holder)
+			task_group_add(alias_holder.group_ref, move task)
+			wait all holder.group_ref
+`
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_packed_enum_match_bound_callback_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "void")
+}
+
+func TestAnalyzeRejectsReusingBorrowedThreadPoolAliasReturnedViaEnumMatchBoundAggregateProjectedCallbackAfterShutdown(t *testing.T) {
+	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return move task
+
+repr(c) struct PoolHolder:
+	pool_ref: any ThreadPool&
+
+repr(c) struct PoolGetter:
+	fn: func(PoolHolder) -> any ThreadPool&
+
+enum GetterBox:
+	Wrap(getter: PoolGetter)
+
+def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+	return holder.pool_ref
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def bad(holder: PoolHolder) -> void:
+	boxed: GetterBox = GetterBox.Wrap(getter: PoolGetter(get_pool_ref))
+	match boxed:
+		GetterBox.Wrap(wrapper):
+			pool_ref: any ThreadPool& = wrapper.fn(holder)
+			pool_shutdown(pool_ref)
+			_ = pool_submit1(holder.pool_ref, work, 1)
+`
+	_, errs := parseAndAnalyze(t, "thread_pool_enum_match_bound_aggregate_projected_callback_shutdown_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+		t.Fatalf("expected enum match bound aggregate projected callback shutdown diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaEnumMatchBoundAggregateProjectedCallback(t *testing.T) {
+	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: any TaskGroup&) -> void
+
+repr(c) struct GroupHolder:
+	group_ref: any TaskGroup&
+
+repr(c) struct GroupKeeper:
+	fn: func(GroupHolder) -> GroupHolder
+
+enum KeeperBox:
+	Wrap(keeper: GroupKeeper)
+
+def keep_holder(holder: GroupHolder) -> GroupHolder:
+	return holder
+
+def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
+	boxed: KeeperBox = KeeperBox.Wrap(keeper: GroupKeeper(keep_holder))
+	match boxed:
+		KeeperBox.Wrap(wrapper):
+			alias_holder: GroupHolder = wrapper.fn(holder)
+			task_group_add(alias_holder.group_ref, move task)
+			wait all holder.group_ref
+`
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_enum_match_bound_aggregate_projected_callback_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "void")
+}
+
+func TestAnalyzeRejectsReusingBorrowedThreadPoolAliasReturnedViaPackedEnumMatchBoundAggregateProjectedCallbackAfterShutdown(t *testing.T) {
+	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return move task
+
+repr(c) struct PoolHolder:
+	pool_ref: any ThreadPool&
+
+repr(c) struct PoolGetter:
+	fn: func(PoolHolder) -> any ThreadPool&
+
+packed enum GetterBox:
+	Wrap(getter: PoolGetter)
+
+def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+	return holder.pool_ref
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def bad(holder: PoolHolder) -> void:
+	region store_owner
+	store: GetterBox.Store[Local] = GetterBox.Store(store_owner)
+	boxed: GetterBox = new[store] GetterBox.Wrap(getter: PoolGetter(get_pool_ref))
+	match boxed in store:
+		GetterBox.Wrap(wrapper):
+			pool_ref: any ThreadPool& = wrapper.fn(holder)
+			pool_shutdown(pool_ref)
+			_ = pool_submit1(holder.pool_ref, work, 1)
+`
+	_, errs := parseAndAnalyze(t, "thread_pool_packed_enum_match_bound_aggregate_projected_callback_shutdown_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+		t.Fatalf("expected packed enum match bound aggregate projected callback shutdown diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaPackedEnumMatchBoundAggregateProjectedCallback(t *testing.T) {
+	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: any TaskGroup&) -> void
+
+repr(c) struct GroupHolder:
+	group_ref: any TaskGroup&
+
+repr(c) struct GroupKeeper:
+	fn: func(GroupHolder) -> GroupHolder
+
+packed enum KeeperBox:
+	Wrap(keeper: GroupKeeper)
+
+def keep_holder(holder: GroupHolder) -> GroupHolder:
+	return holder
+
+def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
+	region store_owner
+	store: KeeperBox.Store[Local] = KeeperBox.Store(store_owner)
+	boxed: KeeperBox = new[store] KeeperBox.Wrap(keeper: GroupKeeper(keep_holder))
+	match boxed in store:
+		KeeperBox.Wrap(wrapper):
+			alias_holder: GroupHolder = wrapper.fn(holder)
+			task_group_add(alias_holder.group_ref, move task)
+			wait all holder.group_ref
+`
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_packed_enum_match_bound_aggregate_projected_callback_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "void")
+}
+
+func TestAnalyzeRejectsReusingHigherOrderHelperReturnedBorrowedThreadPoolAliasAfterAggregateCallbackParamProjection(t *testing.T) {
+	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return move task
+
+repr(c) struct PoolHolder:
+	pool_ref: any ThreadPool&
+
+repr(c) struct PoolGetter:
+	fn: func(PoolHolder) -> any ThreadPool&
+
+def apply_getter(wrapper: PoolGetter, holder: PoolHolder) -> any ThreadPool&:
+	return wrapper.fn(holder)
+
+def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+	return holder.pool_ref
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def bad(holder: PoolHolder) -> void:
+	pool_ref: any ThreadPool& = apply_getter(PoolGetter(get_pool_ref), holder)
+	pool_shutdown(pool_ref)
+	_ = pool_submit1(holder.pool_ref, work, 1)
+`
+	_, errs := parseAndAnalyze(t, "thread_pool_higher_order_helper_aggregate_callback_param_projection_shutdown_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+		t.Fatalf("expected aggregate callback param projection shutdown diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaAggregateCallbackParamProjection(t *testing.T) {
+	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: any TaskGroup&) -> void
+
+repr(c) struct GroupHolder:
+	group_ref: any TaskGroup&
+
+repr(c) struct GroupKeeper:
+	fn: func(GroupHolder) -> GroupHolder
+
+def apply_keeper(wrapper: GroupKeeper, holder: GroupHolder) -> GroupHolder:
+	return wrapper.fn(holder)
+
+def keep_holder(holder: GroupHolder) -> GroupHolder:
+	return holder
+
+def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
+	alias_holder: GroupHolder = apply_keeper(GroupKeeper(keep_holder), holder)
+	task_group_add(alias_holder.group_ref, move task)
+	wait all holder.group_ref
+`
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_aggregate_callback_param_projection_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "void")
+}
+
 func TestAnalyzeRejectsReusingHigherOrderHelperReturnedBorrowedThreadPoolAliasAfterMutableCallbackRebinding(t *testing.T) {
 	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
 

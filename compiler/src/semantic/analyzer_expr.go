@@ -1423,6 +1423,98 @@ func (a *Analyzer) specializeFunctionValueType(expected Type, actual Type) (Type
 	return specialized, changed
 }
 
+func cloneStructTypeWithFields(base *StructType, fields map[string]Field) *StructType {
+	if base == nil {
+		return nil
+	}
+	cloned := *base
+	cloned.Fields = fields
+	return &cloned
+}
+
+func cloneStructFields(fields map[string]Field) map[string]Field {
+	if len(fields) == 0 {
+		return map[string]Field{}
+	}
+	cloned := make(map[string]Field, len(fields))
+	for name, field := range fields {
+		cloned[name] = field
+	}
+	return cloned
+}
+
+func (a *Analyzer) specializeCallbackCarryingTypeFromExpr(expected Type, actualExpr ast.Expr) (Type, bool) {
+	if expected == nil || actualExpr == nil {
+		return expected, false
+	}
+	if specialized, ok := a.functionValueTypeForExpr(actualExpr); ok {
+		if next, changed := a.specializeFunctionValueType(expected, specialized); changed {
+			return next, true
+		}
+	}
+	switch tt := expected.(type) {
+	case *StructType:
+		changed := false
+		fields := cloneStructFields(tt.Fields)
+		for name, field := range tt.Fields {
+			fieldExpr, ok := a.resolveProjectedFieldValueExpr(actualExpr, name)
+			if !ok || fieldExpr == nil {
+				continue
+			}
+			nextType, fieldChanged := a.specializeCallbackCarryingTypeFromExpr(field.Type, fieldExpr)
+			if !fieldChanged {
+				continue
+			}
+			field.Type = nextType
+			fields[name] = field
+			changed = true
+		}
+		if !changed {
+			return expected, false
+		}
+		return cloneStructTypeWithFields(tt, fields), true
+	case *GenericInstanceType:
+		baseStruct, ok := tt.Base.(*StructType)
+		if !ok {
+			return expected, false
+		}
+		bindings := map[string]Type{}
+		for i, name := range baseStruct.TypeParams {
+			if i < len(tt.Args) {
+				bindings[name] = tt.Args[i]
+			}
+		}
+		changed := false
+		fields := cloneStructFields(baseStruct.Fields)
+		for name, field := range baseStruct.Fields {
+			fieldExpr, ok := a.resolveProjectedFieldValueExpr(actualExpr, name)
+			if !ok || fieldExpr == nil {
+				continue
+			}
+			expectedFieldType := field.Type
+			if len(bindings) != 0 {
+				expectedFieldType = a.substituteType(expectedFieldType, bindings, nil, nil, nil)
+			}
+			nextType, fieldChanged := a.specializeCallbackCarryingTypeFromExpr(expectedFieldType, fieldExpr)
+			if !fieldChanged {
+				continue
+			}
+			field.Type = nextType
+			fields[name] = field
+			changed = true
+		}
+		if !changed {
+			return expected, false
+		}
+		clonedBase := cloneStructTypeWithFields(baseStruct, fields)
+		cloned := *tt
+		cloned.Base = clonedBase
+		return &cloned, true
+	default:
+		return expected, false
+	}
+}
+
 func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	if storeType, ok := a.packedStoreConstructorCall(expr); ok {
 		return storeType
@@ -1517,6 +1609,10 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 			a.collectTypeBindings(ft.Params[i], argType, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
 			expectedType = a.substituteType(ft.Params[i], bindings, shapeBindings, regionBindings, permissionBindings)
 			if specializedType, ok := a.specializeFunctionValueType(expectedType, argType); ok {
+				expectedType = specializedType
+				specializedParamTypes[i] = specializedType
+			}
+			if specializedType, ok := a.specializeCallbackCarryingTypeFromExpr(expectedType, expr.Args[i]); ok {
 				expectedType = specializedType
 				specializedParamTypes[i] = specializedType
 			}
@@ -1939,7 +2035,15 @@ func (a *Analyzer) resolveProjectedFieldValueExpr(objectExpr ast.Expr, field str
 			return nil, false
 		}
 		sym, ok := a.currentScope.Lookup(n.Name)
-		if !ok || sym.Kind != SymbolLocal || sym.Mutable {
+		if !ok || sym.Mutable {
+			return nil, false
+		}
+		if a.currentValueBindings != nil {
+			if valueExpr, ok := a.currentValueBindings[sym]; ok && valueExpr != nil {
+				return a.resolveProjectedFieldValueExpr(valueExpr, field)
+			}
+		}
+		if sym.Kind != SymbolLocal {
 			return nil, false
 		}
 		decl, ok := sym.Node.(*ast.VarDeclStmt)

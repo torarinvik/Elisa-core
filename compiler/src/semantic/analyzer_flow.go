@@ -30,6 +30,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: declType, Node: n, Mutable: n.Mutable}
 		a.defineLocal(sym, n.Pos())
+		a.recordValueBinding(sym, n.Value)
 		a.markCreatedProtocolSymbol(sym, n.Value)
 		a.recordBorrowedOwnerRefBinding(sym, n.Value)
 		a.recordFunctionValueBinding(sym, n.Value)
@@ -290,6 +291,7 @@ func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {
 		if p.Name != "_" {
 			sym := &Symbol{Name: p.Name, Kind: SymbolLocal, Type: valueType, Node: p, Mutable: false}
 			a.defineLocal(sym, p.Pos())
+			a.recordValueBinding(sym, stmt.Value)
 			a.recordFunctionValueBinding(sym, stmt.Value)
 			if hasBorrowedOwnerState {
 				a.currentBorrowedOwnerRefs[sym] = borrowedOwnerState
@@ -311,6 +313,7 @@ func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {
 			}
 			sym := &Symbol{Name: arg.Name, Kind: SymbolLocal, Type: fields[i].Type, Node: p, Mutable: false}
 			a.defineLocal(sym, arg.Position)
+			a.recordValueBinding(sym, &ast.FieldExpr{Position: arg.Position, Object: stmt.Value, Field: fields[i].Name})
 			a.recordFunctionValueBinding(sym, &ast.FieldExpr{Position: arg.Position, Object: stmt.Value, Field: fields[i].Name})
 			if hasBorrowedOwnerState {
 				if fieldState, ok := projectBorrowedOwnerRefFieldState(borrowedOwnerState, fields[i].Name); ok {
@@ -337,6 +340,7 @@ func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {
 			sym := &Symbol{Name: payload.BindName, Kind: SymbolLocal, Type: payload.Type, Node: p, Mutable: false}
 			a.defineLocal(sym, p.Position)
 			if valueExpr, ok := a.resolveMoveBindVariantPayloadValueExpr(stmt.Value, p, payload.Key); ok {
+				a.recordValueBinding(sym, valueExpr)
 				a.recordFunctionValueBinding(sym, valueExpr)
 			}
 			if hasBorrowedOwnerState {
@@ -546,19 +550,19 @@ func (a *Analyzer) resolveMoveBindVariantPattern(stmt *ast.MoveBindStmt, pattern
 	return fields, enumType, storeState, true
 }
 
-func (a *Analyzer) resolveMoveBindVariantPayloadValueExpr(value ast.Expr, pattern *ast.MoveBindVariantPattern, key string) (ast.Expr, bool) {
-	if value == nil || pattern == nil || key == "" {
+func (a *Analyzer) resolveVariantPayloadValueExpr(value ast.Expr, enumName string, variantName string, key string) (ast.Expr, bool) {
+	if value == nil || enumName == "" || variantName == "" || key == "" {
 		return nil, false
 	}
 	switch n := value.(type) {
 	case *ast.ParenExpr:
-		return a.resolveMoveBindVariantPayloadValueExpr(n.Inner, pattern, key)
+		return a.resolveVariantPayloadValueExpr(n.Inner, enumName, variantName, key)
 	case *ast.CastExpr:
-		return a.resolveMoveBindVariantPayloadValueExpr(n.Operand, pattern, key)
+		return a.resolveVariantPayloadValueExpr(n.Operand, enumName, variantName, key)
 	case *ast.MoveExpr:
-		return a.resolveMoveBindVariantPayloadValueExpr(n.Operand, pattern, key)
+		return a.resolveVariantPayloadValueExpr(n.Operand, enumName, variantName, key)
 	case *ast.AllocExpr:
-		return a.resolveMoveBindVariantPayloadValueExpr(n.Value, pattern, key)
+		return a.resolveVariantPayloadValueExpr(n.Value, enumName, variantName, key)
 	case *ast.Ident:
 		if a.currentScope == nil {
 			return nil, false
@@ -571,13 +575,13 @@ func (a *Analyzer) resolveMoveBindVariantPayloadValueExpr(value ast.Expr, patter
 		if !ok || decl.Value == nil {
 			return nil, false
 		}
-		return a.resolveMoveBindVariantPayloadValueExpr(decl.Value, pattern, key)
+		return a.resolveVariantPayloadValueExpr(decl.Value, enumName, variantName, key)
 	case *ast.CallExpr:
 		enumType, variant, ok := a.enumConstructorCall(n)
 		if !ok || enumType == nil || variant == nil {
 			return nil, false
 		}
-		if enumType.Name != pattern.EnumName || variant.Name != pattern.Variant {
+		if enumType.Name != enumName || variant.Name != variantName {
 			return nil, false
 		}
 		var orderedArgs []ast.Expr
@@ -600,6 +604,20 @@ func (a *Analyzer) resolveMoveBindVariantPayloadValueExpr(value ast.Expr, patter
 	default:
 		return nil, false
 	}
+}
+
+func (a *Analyzer) resolveMoveBindVariantPayloadValueExpr(value ast.Expr, pattern *ast.MoveBindVariantPattern, key string) (ast.Expr, bool) {
+	if pattern == nil {
+		return nil, false
+	}
+	return a.resolveVariantPayloadValueExpr(value, pattern.EnumName, pattern.Variant, key)
+}
+
+func (a *Analyzer) resolveMatchVariantPayloadValueExpr(value ast.Expr, pattern *ast.MatchVariantPattern, key string) (ast.Expr, bool) {
+	if pattern == nil {
+		return nil, false
+	}
+	return a.resolveVariantPayloadValueExpr(value, pattern.EnumName, pattern.Variant, key)
 }
 
 func (a *Analyzer) validateMoveBindStore(pos lexer.Pos, enumType *EnumType, storeExpr ast.Expr) {
@@ -823,23 +841,49 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 		return
 	}
 	a.validateMatchStore(stmt.Pos(), enumType, stmt.Store)
-	mergedAffine := a.cloneAffineValueStates()
-	mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
-	mergedFunctionValues := a.cloneFunctionValueBindings()
+	baselineAffine := a.cloneAffineValueStates()
+	baselineBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
+	baselineFunctionValues := a.cloneFunctionValueBindings()
+	var mergedAffine map[affineValueKey]affineValueState
+	var mergedBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
+	var mergedFunctionValues map[*Symbol]*FuncType
+	hasFallthrough := false
 	priorPatterns := make([]ast.MatchPattern, 0, len(stmt.Arms))
+	covered := map[string]bool{}
+	hasWildcard := false
 	for i, arm := range stmt.Arms {
 		if a.matchPatternShadowedByPrevious(arm.Pattern, enumType, priorPatterns) {
 			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
 		}
 		scope := NewScope(a.currentScope)
-		a.analyzeTopLevelMatchPattern(arm.Pattern, enumType, scope, i, len(stmt.Arms), nil)
+		if a.analyzeTopLevelMatchPattern(arm.Pattern, enumType, stmt.Value, scope, i, len(stmt.Arms), covered) {
+			hasWildcard = true
+		}
 		armSnapshot := a.analyzeBlockWithAffineClone(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
-			mergedAffine = mergeAffineValueStates(mergedAffine, armSnapshot.Affine)
-			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, armSnapshot.BorrowedOwnerRefs)
-			mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, armSnapshot.FunctionValues)
+			if !hasFallthrough {
+				mergedAffine = armSnapshot.Affine
+				mergedBorrowedOwnerRefs = armSnapshot.BorrowedOwnerRefs
+				mergedFunctionValues = armSnapshot.FunctionValues
+				hasFallthrough = true
+			} else {
+				mergedAffine = mergeAffineValueStates(mergedAffine, armSnapshot.Affine)
+				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, armSnapshot.BorrowedOwnerRefs)
+				mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, armSnapshot.FunctionValues)
+			}
 		}
 		priorPatterns = append(priorPatterns, arm.Pattern)
+	}
+	if !a.matchCoversAllVariants(enumType, covered, hasWildcard) {
+		if !hasFallthrough {
+			mergedAffine = baselineAffine
+			mergedBorrowedOwnerRefs = baselineBorrowedOwnerRefs
+			mergedFunctionValues = baselineFunctionValues
+		} else {
+			mergedAffine = mergeAffineValueStates(mergedAffine, baselineAffine)
+			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, baselineBorrowedOwnerRefs)
+			mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, baselineFunctionValues)
+		}
 	}
 	a.currentAffineValues = mergedAffine
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
@@ -860,23 +904,34 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 	covered := map[string]bool{}
 	hasWildcard := false
 	resultType := Type(nil)
-	mergedAffine := a.cloneAffineValueStates()
-	mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
-	mergedFunctionValues := a.cloneFunctionValueBindings()
+	baselineAffine := a.cloneAffineValueStates()
+	baselineBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
+	baselineFunctionValues := a.cloneFunctionValueBindings()
+	var mergedAffine map[affineValueKey]affineValueState
+	var mergedBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
+	var mergedFunctionValues map[*Symbol]*FuncType
+	hasFallthrough := false
 	priorPatterns := make([]ast.MatchPattern, 0, len(expr.Arms))
 	for i, arm := range expr.Arms {
 		if a.matchPatternShadowedByPrevious(arm.Pattern, enumType, priorPatterns) {
 			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
 		}
 		scope := NewScope(a.currentScope)
-		if a.analyzeTopLevelMatchPattern(arm.Pattern, enumType, scope, i, len(expr.Arms), covered) {
+		if a.analyzeTopLevelMatchPattern(arm.Pattern, enumType, expr.Value, scope, i, len(expr.Arms), covered) {
 			hasWildcard = true
 		}
 		armType, armSnapshot := a.analyzeMatchExprArmBodyWithAffineSnapshot(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
-			mergedAffine = mergeAffineValueStates(mergedAffine, armSnapshot.Affine)
-			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, armSnapshot.BorrowedOwnerRefs)
-			mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, armSnapshot.FunctionValues)
+			if !hasFallthrough {
+				mergedAffine = armSnapshot.Affine
+				mergedBorrowedOwnerRefs = armSnapshot.BorrowedOwnerRefs
+				mergedFunctionValues = armSnapshot.FunctionValues
+				hasFallthrough = true
+			} else {
+				mergedAffine = mergeAffineValueStates(mergedAffine, armSnapshot.Affine)
+				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, armSnapshot.BorrowedOwnerRefs)
+				mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, armSnapshot.FunctionValues)
+			}
 		}
 		if resultType == nil {
 			resultType = armType
@@ -892,6 +947,17 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 		}
 		resultType = merged
 		priorPatterns = append(priorPatterns, arm.Pattern)
+	}
+	if !a.matchCoversAllVariants(enumType, covered, hasWildcard) {
+		if !hasFallthrough {
+			mergedAffine = baselineAffine
+			mergedBorrowedOwnerRefs = baselineBorrowedOwnerRefs
+			mergedFunctionValues = baselineFunctionValues
+		} else {
+			mergedAffine = mergeAffineValueStates(mergedAffine, baselineAffine)
+			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, baselineBorrowedOwnerRefs)
+			mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, baselineFunctionValues)
+		}
 	}
 	a.currentAffineValues = mergedAffine
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
@@ -1085,7 +1151,7 @@ func (a *Analyzer) analyzeMatchExprArmBody(body []ast.Stmt, scope *Scope) Type {
 	return invalidType
 }
 
-func (a *Analyzer) analyzeTopLevelMatchPattern(pattern ast.MatchPattern, enumType *EnumType, scope *Scope, index int, armCount int, covered map[string]bool) bool {
+func (a *Analyzer) analyzeTopLevelMatchPattern(pattern ast.MatchPattern, enumType *EnumType, valueExpr ast.Expr, scope *Scope, index int, armCount int, covered map[string]bool) bool {
 	savedScope := a.currentScope
 	a.currentScope = scope
 	defer func() { a.currentScope = savedScope }()
@@ -1114,7 +1180,8 @@ func (a *Analyzer) analyzeTopLevelMatchPattern(pattern ast.MatchPattern, enumTyp
 			if arg == nil {
 				continue
 			}
-			a.analyzeNestedMatchPattern(arg.Pattern, variant.Payload[i], scope)
+			payloadExpr, _ := a.resolveMatchVariantPayloadValueExpr(valueExpr, p, moveBindVariantFieldKey(variant, i))
+			a.analyzeNestedMatchPattern(arg.Pattern, variant.Payload[i], payloadExpr, scope)
 		}
 		return false
 	case *ast.MatchBindPattern:
@@ -1126,7 +1193,7 @@ func (a *Analyzer) analyzeTopLevelMatchPattern(pattern ast.MatchPattern, enumTyp
 	}
 }
 
-func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected Type, scope *Scope) {
+func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected Type, valueExpr ast.Expr, scope *Scope) {
 	savedScope := a.currentScope
 	a.currentScope = scope
 	defer func() { a.currentScope = savedScope }()
@@ -1134,7 +1201,10 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 	case *ast.MatchWildcardPattern:
 		return
 	case *ast.MatchBindPattern:
-		a.defineLocal(&Symbol{Name: p.Name, Kind: SymbolLocal, Type: expected, Node: p, Mutable: false}, p.Pos())
+		sym := &Symbol{Name: p.Name, Kind: SymbolLocal, Type: expected, Node: p, Mutable: false}
+		a.defineLocal(sym, p.Pos())
+		a.recordValueBinding(sym, valueExpr)
+		a.recordFunctionValueBinding(sym, valueExpr)
 	case *ast.MatchVariantPattern:
 		enumType, ok := expected.(*EnumType)
 		if !ok {
@@ -1155,7 +1225,8 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 			if arg == nil {
 				continue
 			}
-			a.analyzeNestedMatchPattern(arg.Pattern, variant.Payload[i], scope)
+			payloadExpr, _ := a.resolveMatchVariantPayloadValueExpr(valueExpr, p, moveBindVariantFieldKey(variant, i))
+			a.analyzeNestedMatchPattern(arg.Pattern, variant.Payload[i], payloadExpr, scope)
 		}
 	default:
 		a.errorf(pattern.Pos(), "unsupported nested match pattern %T", pattern)
@@ -1228,6 +1299,21 @@ func matchPatternContext(qualified string, nested bool) string {
 	return "match arm " + strconvQuote(qualified)
 }
 
+func (a *Analyzer) matchCoversAllVariants(enumType *EnumType, covered map[string]bool, hasWildcard bool) bool {
+	if enumType == nil {
+		return false
+	}
+	if hasWildcard {
+		return true
+	}
+	for _, variant := range enumType.Variants {
+		if !covered[variant.Name] {
+			return false
+		}
+	}
+	return true
+}
+
 func strconvQuote(s string) string {
 	return "\"" + s + "\""
 }
@@ -1286,6 +1372,7 @@ type affineFlowSnapshot struct {
 	Affine            map[affineValueKey]affineValueState
 	BorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
 	FunctionValues    map[*Symbol]*FuncType
+	ValueBindings     map[*Symbol]ast.Expr
 }
 
 type borrowedOwnerRefSummaryTarget struct {
@@ -1303,14 +1390,17 @@ func (a *Analyzer) analyzeBlockWithAffineClone(stmts []ast.Stmt, scope *Scope) a
 	savedAffine := a.currentAffineValues
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
 	savedFunctionValues := a.currentFunctionValues
+	savedValueBindings := a.currentValueBindings
 	a.currentAffineValues = a.cloneAffineValueStates()
 	a.currentBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
 	a.currentFunctionValues = a.cloneFunctionValueBindings()
+	a.currentValueBindings = a.cloneValueBindings()
 	a.analyzeBlockWithRegionClone(stmts, scope)
-	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings()}
+	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), ValueBindings: a.cloneValueBindings()}
 	a.currentAffineValues = savedAffine
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentFunctionValues = savedFunctionValues
+	a.currentValueBindings = savedValueBindings
 	return snapshot
 }
 
@@ -2090,6 +2180,17 @@ func (a *Analyzer) cloneFunctionValueBindings() map[*Symbol]*FuncType {
 	return cloned
 }
 
+func (a *Analyzer) cloneValueBindings() map[*Symbol]ast.Expr {
+	if a.currentValueBindings == nil {
+		return nil
+	}
+	cloned := make(map[*Symbol]ast.Expr, len(a.currentValueBindings))
+	for sym, expr := range a.currentValueBindings {
+		cloned[sym] = expr
+	}
+	return cloned
+}
+
 func mergeAffineValueStates(dst map[affineValueKey]affineValueState, src map[affineValueKey]affineValueState) map[affineValueKey]affineValueState {
 	if dst == nil && src == nil {
 		return nil
@@ -2378,6 +2479,20 @@ func (a *Analyzer) recordBorrowedOwnerRefTarget(target ast.Expr, expected Type, 
 	} else {
 		delete(a.currentBorrowedOwnerRefs, root)
 	}
+}
+
+func (a *Analyzer) recordValueBinding(sym *Symbol, value ast.Expr) {
+	if a.currentValueBindings == nil || sym == nil {
+		return
+	}
+	if sym.Kind != SymbolLocal && sym.Kind != SymbolParam {
+		return
+	}
+	if sym.Mutable || value == nil {
+		delete(a.currentValueBindings, sym)
+		return
+	}
+	a.currentValueBindings[sym] = value
 }
 
 func (a *Analyzer) recordFunctionValueBinding(sym *Symbol, value ast.Expr) {
@@ -3523,14 +3638,17 @@ func (a *Analyzer) analyzeExprInAffineScope(expr ast.Expr, scope *Scope) (Type, 
 	savedAffine := a.currentAffineValues
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
 	savedFunctionValues := a.currentFunctionValues
+	savedValueBindings := a.currentValueBindings
 	a.currentAffineValues = a.cloneAffineValueStates()
 	a.currentBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
 	a.currentFunctionValues = a.cloneFunctionValueBindings()
+	a.currentValueBindings = a.cloneValueBindings()
 	result := a.analyzeExprInScope(expr, scope)
-	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings()}
+	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), ValueBindings: a.cloneValueBindings()}
 	a.currentAffineValues = savedAffine
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentFunctionValues = savedFunctionValues
+	a.currentValueBindings = savedValueBindings
 	return result, snapshot
 }
 
@@ -3538,14 +3656,17 @@ func (a *Analyzer) analyzeMatchExprArmBodyWithAffineSnapshot(body []ast.Stmt, sc
 	savedAffine := a.currentAffineValues
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
 	savedFunctionValues := a.currentFunctionValues
+	savedValueBindings := a.currentValueBindings
 	a.currentAffineValues = a.cloneAffineValueStates()
 	a.currentBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
 	a.currentFunctionValues = a.cloneFunctionValueBindings()
+	a.currentValueBindings = a.cloneValueBindings()
 	result := a.analyzeMatchExprArmBody(body, scope)
-	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings()}
+	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), ValueBindings: a.cloneValueBindings()}
 	a.currentAffineValues = savedAffine
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentFunctionValues = savedFunctionValues
+	a.currentValueBindings = savedValueBindings
 	return result, snapshot
 }
 

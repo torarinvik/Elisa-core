@@ -88,6 +88,7 @@ type Analyzer struct {
 	currentAffineValues               map[affineValueKey]affineValueState
 	currentBorrowedOwnerRefs          map[*Symbol]borrowedOwnerRefState
 	currentFunctionValues             map[*Symbol]*FuncType
+	currentValueBindings              map[*Symbol]ast.Expr
 	currentPackedStores               map[string]*PackedEnumStoreType
 	currentFunctionUsedPermissions    map[string]bool
 	currentFunctionUsedPermissionRefs []ast.PermissionRef
@@ -1632,6 +1633,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	savedAffineValues := a.currentAffineValues
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
 	savedFunctionValues := a.currentFunctionValues
+	savedValueBindings := a.currentValueBindings
 	savedPackedStores := a.currentPackedStores
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
@@ -1644,6 +1646,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentAffineValues = map[affineValueKey]affineValueState{}
 	a.currentBorrowedOwnerRefs = map[*Symbol]borrowedOwnerRefState{}
 	a.currentFunctionValues = map[*Symbol]*FuncType{}
+	a.currentValueBindings = map[*Symbol]ast.Expr{}
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
@@ -1664,6 +1667,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 						}
 						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, ParamIndex: i, Mutable: a.paramIsMutable(param)}
 						a.defineLocal(sym, param.Position)
+						a.recordValueBinding(sym, nil)
 						a.recordBorrowedOwnerRefParam(sym)
 						if state, ok := a.abstractParamRegionRefState(ptype, i, map[string]bool{}); ok {
 							a.recordResolvedRegionRefBinding(sym, state)
@@ -1705,6 +1709,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentAffineValues = savedAffineValues
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentFunctionValues = savedFunctionValues
+	a.currentValueBindings = savedValueBindings
 	a.currentPackedStores = savedPackedStores
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
@@ -1731,6 +1736,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	savedAffineValues := a.currentAffineValues
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
 	savedFunctionValues := a.currentFunctionValues
+	savedValueBindings := a.currentValueBindings
 	savedPackedStores := a.currentPackedStores
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
@@ -1747,6 +1753,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentAffineValues = map[affineValueKey]affineValueState{}
 	a.currentBorrowedOwnerRefs = map[*Symbol]borrowedOwnerRefState{}
 	a.currentFunctionValues = map[*Symbol]*FuncType{}
+	a.currentValueBindings = map[*Symbol]ast.Expr{}
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
@@ -1765,6 +1772,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 						}
 						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, ParamIndex: i, Mutable: a.paramIsMutable(param)}
 						a.defineLocal(sym, param.Position)
+						a.recordValueBinding(sym, nil)
 						a.recordBorrowedOwnerRefParam(sym)
 						if state, ok := a.abstractParamRegionRefState(ptype, i, map[string]bool{}); ok {
 							a.recordResolvedRegionRefBinding(sym, state)
@@ -1800,6 +1808,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentAffineValues = savedAffineValues
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentFunctionValues = savedFunctionValues
+	a.currentValueBindings = savedValueBindings
 	a.currentPackedStores = savedPackedStores
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
@@ -1827,6 +1836,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	savedAffineValues := a.currentAffineValues
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
 	savedFunctionValues := a.currentFunctionValues
+	savedValueBindings := a.currentValueBindings
 	savedPackedStores := a.currentPackedStores
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
@@ -1843,6 +1853,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentAffineValues = map[affineValueKey]affineValueState{}
 	a.currentBorrowedOwnerRefs = map[*Symbol]borrowedOwnerRefState{}
 	a.currentFunctionValues = map[*Symbol]*FuncType{}
+	a.currentValueBindings = map[*Symbol]ast.Expr{}
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
@@ -1861,6 +1872,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 						}
 						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, ParamIndex: i, Mutable: a.paramIsMutable(param)}
 						a.defineLocal(sym, param.Position)
+						a.recordValueBinding(sym, nil)
 						a.recordBorrowedOwnerRefParam(sym)
 						if state, ok := a.abstractParamRegionRefState(ptype, i, map[string]bool{}); ok {
 							a.recordResolvedRegionRefBinding(sym, state)
@@ -1890,6 +1902,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentAffineValues = savedAffineValues
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentFunctionValues = savedFunctionValues
+	a.currentValueBindings = savedValueBindings
 	a.currentPackedStores = savedPackedStores
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
