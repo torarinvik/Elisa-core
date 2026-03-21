@@ -587,8 +587,16 @@ func (a *Analyzer) resolveVariantPayloadValueExpr(value ast.Expr, enumName strin
 		return a.resolveVariantPayloadValueExpr(n.Operand, enumName, variantName, key)
 	case *ast.MoveExpr:
 		return a.resolveVariantPayloadValueExpr(n.Operand, enumName, variantName, key)
+	case *ast.CanExpr:
+		return a.resolveVariantPayloadValueExpr(n.Expr, enumName, variantName, key)
 	case *ast.AllocExpr:
 		return a.resolveVariantPayloadValueExpr(n.Value, enumName, variantName, key)
+	case *ast.FieldExpr:
+		resolved, ok := a.resolveProjectedFieldValueExpr(n.Object, n.Field)
+		if !ok {
+			return nil, false
+		}
+		return a.resolveVariantPayloadValueExpr(resolved, enumName, variantName, key)
 	case *ast.Ident:
 		if a.currentScope == nil {
 			return nil, false
