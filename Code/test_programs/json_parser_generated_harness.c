@@ -32,7 +32,12 @@ int main(void) {
 
     assert(json_parser_ast_field_bool((uint8_t*)dom_doc, (uint8_t*)"ok") == 1);
     assert(json_parser_ast_field_is_null((uint8_t*)dom_doc, (uint8_t*)"none") == 1);
+    assert(json_parser_ast_field_kind((uint8_t*)dom_doc, (uint8_t*)"name") == 3);
+    assert(json_parser_ast_field_kind((uint8_t*)dom_doc, (uint8_t*)"nums") == 4);
+    assert(json_parser_ast_field_kind((uint8_t*)dom_doc, (uint8_t*)"missing") < 0);
     assert(json_parser_ast_array_field_len((uint8_t*)dom_doc, (uint8_t*)"nums") == 2);
+    assert(json_parser_ast_object_field_len((uint8_t*)"{\"meta\":{\"ok\":true,\"none\":null},\"nums\":[1,2]}", (uint8_t*)"meta") == 2);
+    assert(json_parser_ast_object_field_len((uint8_t*)"{\"meta\":{\"ok\":true,\"none\":null},\"nums\":[1,2]}", (uint8_t*)"nums") < 0);
 
     int64_t first_num = 0;
     int64_t second_num = 0;
@@ -52,6 +57,16 @@ int main(void) {
     assert(json_parser_ast_array_field_i64_at((uint8_t*)dom_doc, (uint8_t*)"nums", 0u, &first_num) == 1);
     assert(json_parser_ast_array_field_i64_at((uint8_t*)dom_doc, (uint8_t*)"nums", 1u, &second_num) == 1);
     assert(json_parser_ast_array_field_i64_at((uint8_t*)dom_doc, (uint8_t*)"nums", 2u, &missing_num) == 0);
+    assert(json_parser_ast_array_field_kind_at((uint8_t*)"{\"items\":[\"Ada\",true,null,[1,2],{\"ok\":true}]}", (uint8_t*)"items", 0u) == 3);
+    assert(json_parser_ast_array_field_string_eq_at((uint8_t*)"{\"items\":[\"Ada\",true,null,[1,2],{\"ok\":true}]}", (uint8_t*)"items", 0u, (uint8_t*)"Ada") == 1);
+    assert(json_parser_ast_array_field_bool_at((uint8_t*)"{\"items\":[\"Ada\",true,null,[1,2],{\"ok\":true}]}", (uint8_t*)"items", 1u) == 1);
+    assert(json_parser_ast_array_field_is_null_at((uint8_t*)"{\"items\":[\"Ada\",true,null,[1,2],{\"ok\":true}]}", (uint8_t*)"items", 2u) == 1);
+    assert(json_parser_ast_array_field_array_len_at((uint8_t*)"{\"items\":[\"Ada\",true,null,[1,2],{\"ok\":true}]}", (uint8_t*)"items", 3u) == 2);
+    assert(json_parser_ast_array_field_object_len_at((uint8_t*)"{\"items\":[\"Ada\",true,null,[1,2],{\"ok\":true}]}", (uint8_t*)"items", 4u) == 1);
+    assert(json_parser_ast_array_field_string_eq_at((uint8_t*)"{\"items\":[\"Ada\",true,null,[1,2],{\"ok\":true}]}", (uint8_t*)"items", 1u, (uint8_t*)"Ada") == 0);
+    assert(json_parser_ast_array_field_bool_at((uint8_t*)"{\"items\":[\"Ada\",true,null,[1,2],{\"ok\":true}]}", (uint8_t*)"items", 0u) < 0);
+    assert(json_parser_ast_array_field_kind_at((uint8_t*)"{\"items\":[\"Ada\",true,null,[1,2],{\"ok\":true}]}", (uint8_t*)"items", 5u) < 0);
+    assert(json_parser_ast_array_field_object_len_at((uint8_t*)"{\"items\":[\"Ada\",true,null,[1,2],{\"ok\":true}]}", (uint8_t*)"items", 3u) < 0);
     assert(json_parser_ast_object_key_eq_at((uint8_t*)"{\"first\":1,\"second\":2,\"third\":3}", 0u, (uint8_t*)"first") == 1);
     assert(json_parser_ast_object_key_eq_at((uint8_t*)"{\"first\":1,\"second\":2,\"third\":3}", 1u, (uint8_t*)"second") == 1);
     assert(json_parser_ast_object_key_eq_at((uint8_t*)"{\"first\":1,\"second\":2,\"third\":3}", 3u, (uint8_t*)"missing") < 0);

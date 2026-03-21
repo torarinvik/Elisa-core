@@ -1453,6 +1453,23 @@ def json_parser_ast_field_is_null_impl(source: any u8&, key: any u8&) -> i64:
     return out
 
 
+def json_parser_ast_field_kind_impl(source: any u8&, key: any u8&) -> i64:
+    source_len: usize = runtime_strlen(source)
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, store)
+    if result.checksum < 0:
+        destroy scratch
+        return -1
+    field_node: JsonNode = json_ast_object_get(result.node, source, key, store)
+    if json_node_is_invalid(field_node, store):
+        destroy scratch
+        return -1
+    out: i64 = json_ast_kind_code(json_ast_kind(field_node, store))
+    destroy scratch
+    return out
+
+
 def json_parser_ast_array_field_len_impl(source: any u8&, key: any u8&) -> i64:
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
@@ -1466,6 +1483,23 @@ def json_parser_ast_array_field_len_impl(source: any u8&, key: any u8&) -> i64:
         destroy scratch
         return -1
     length: i64 = json_ast_array_len(field_node, store)
+    destroy scratch
+    return length
+
+
+def json_parser_ast_object_field_len_impl(source: any u8&, key: any u8&) -> i64:
+    source_len: usize = runtime_strlen(source)
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, store)
+    if result.checksum < 0:
+        destroy scratch
+        return -1
+    field_node: JsonNode = json_ast_object_get(result.node, source, key, store)
+    if json_node_is_invalid(field_node, store):
+        destroy scratch
+        return -1
+    length: i64 = json_ast_object_len(field_node, store)
     destroy scratch
     return length
 
@@ -1535,6 +1569,132 @@ def json_parser_ast_array_field_i64_at_impl(source: any u8&, key: any u8&, index
     out[0u] <- signed_value.value
     destroy scratch
     return 1
+
+
+def json_parser_ast_array_field_kind_at_impl(source: any u8&, key: any u8&, index: usize) -> i64:
+    source_len: usize = runtime_strlen(source)
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, store)
+    if result.checksum < 0:
+        destroy scratch
+        return -1
+    array_node: JsonNode = json_ast_object_get(result.node, source, key, store)
+    if json_node_is_invalid(array_node, store):
+        destroy scratch
+        return -1
+    item_node: JsonNode = json_ast_array_nth(array_node, index, store)
+    if json_node_is_invalid(item_node, store):
+        destroy scratch
+        return -1
+    out: i64 = json_ast_kind_code(json_ast_kind(item_node, store))
+    destroy scratch
+    return out
+
+
+def json_parser_ast_array_field_string_eq_at_impl(source: any u8&, key: any u8&, index: usize, literal: any u8&) -> i64:
+    source_len: usize = runtime_strlen(source)
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, store)
+    if result.checksum < 0:
+        destroy scratch
+        return -1
+    array_node: JsonNode = json_ast_object_get(result.node, source, key, store)
+    if json_node_is_invalid(array_node, store):
+        destroy scratch
+        return -1
+    item_node: JsonNode = json_ast_array_nth(array_node, index, store)
+    if json_node_is_invalid(item_node, store):
+        destroy scratch
+        return -1
+    out: i64 = 1 if json_ast_string_eq_literal(source, item_node, literal, store) else 0
+    destroy scratch
+    return out
+
+
+def json_parser_ast_array_field_bool_at_impl(source: any u8&, key: any u8&, index: usize) -> i64:
+    source_len: usize = runtime_strlen(source)
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, store)
+    if result.checksum < 0:
+        destroy scratch
+        return -1
+    array_node: JsonNode = json_ast_object_get(result.node, source, key, store)
+    if json_node_is_invalid(array_node, store):
+        destroy scratch
+        return -1
+    item_node: JsonNode = json_ast_array_nth(array_node, index, store)
+    if json_node_is_invalid(item_node, store):
+        destroy scratch
+        return -1
+    out: i64 = json_ast_bool_value(item_node, store)
+    destroy scratch
+    return out
+
+
+def json_parser_ast_array_field_is_null_at_impl(source: any u8&, key: any u8&, index: usize) -> i64:
+    source_len: usize = runtime_strlen(source)
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, store)
+    if result.checksum < 0:
+        destroy scratch
+        return -1
+    array_node: JsonNode = json_ast_object_get(result.node, source, key, store)
+    if json_node_is_invalid(array_node, store):
+        destroy scratch
+        return -1
+    item_node: JsonNode = json_ast_array_nth(array_node, index, store)
+    if json_node_is_invalid(item_node, store):
+        destroy scratch
+        return -1
+    out: i64 = 1 if json_ast_is_null(item_node, store) else 0
+    destroy scratch
+    return out
+
+
+def json_parser_ast_array_field_array_len_at_impl(source: any u8&, key: any u8&, index: usize) -> i64:
+    source_len: usize = runtime_strlen(source)
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, store)
+    if result.checksum < 0:
+        destroy scratch
+        return -1
+    array_node: JsonNode = json_ast_object_get(result.node, source, key, store)
+    if json_node_is_invalid(array_node, store):
+        destroy scratch
+        return -1
+    item_node: JsonNode = json_ast_array_nth(array_node, index, store)
+    if json_node_is_invalid(item_node, store):
+        destroy scratch
+        return -1
+    out: i64 = json_ast_array_len(item_node, store)
+    destroy scratch
+    return out
+
+
+def json_parser_ast_array_field_object_len_at_impl(source: any u8&, key: any u8&, index: usize) -> i64:
+    source_len: usize = runtime_strlen(source)
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, store)
+    if result.checksum < 0:
+        destroy scratch
+        return -1
+    array_node: JsonNode = json_ast_object_get(result.node, source, key, store)
+    if json_node_is_invalid(array_node, store):
+        destroy scratch
+        return -1
+    item_node: JsonNode = json_ast_array_nth(array_node, index, store)
+    if json_node_is_invalid(item_node, store):
+        destroy scratch
+        return -1
+    out: i64 = json_ast_object_len(item_node, store)
+    destroy scratch
+    return out
 
 
 def json_parser_ast_object_key_eq_at_impl(source: any u8&, index: usize, literal: any u8&) -> i64:
@@ -2070,10 +2230,18 @@ export func json_parser_ast_object_len(source: any u8&) -> i64 = json_parser_ast
 export func json_parser_ast_field_string_eq(source: any u8&, key: any u8&, literal: any u8&) -> i64 = json_parser_ast_field_string_eq_impl
 export func json_parser_ast_field_bool(source: any u8&, key: any u8&) -> i64 = json_parser_ast_field_bool_impl
 export func json_parser_ast_field_is_null(source: any u8&, key: any u8&) -> i64 = json_parser_ast_field_is_null_impl
+export func json_parser_ast_field_kind(source: any u8&, key: any u8&) -> i64 = json_parser_ast_field_kind_impl
 export func json_parser_ast_array_field_len(source: any u8&, key: any u8&) -> i64 = json_parser_ast_array_field_len_impl
+export func json_parser_ast_object_field_len(source: any u8&, key: any u8&) -> i64 = json_parser_ast_object_field_len_impl
 export func json_parser_ast_field_i64(source: any u8&, key: any u8&, out: any i64&) -> i64 = json_parser_ast_field_i64_impl
 export func json_parser_ast_field_u64(source: any u8&, key: any u8&, out: any u64&) -> i64 = json_parser_ast_field_u64_impl
 export func json_parser_ast_array_field_i64_at(source: any u8&, key: any u8&, index: usize, out: any i64&) -> i64 = json_parser_ast_array_field_i64_at_impl
+export func json_parser_ast_array_field_kind_at(source: any u8&, key: any u8&, index: usize) -> i64 = json_parser_ast_array_field_kind_at_impl
+export func json_parser_ast_array_field_string_eq_at(source: any u8&, key: any u8&, index: usize, literal: any u8&) -> i64 = json_parser_ast_array_field_string_eq_at_impl
+export func json_parser_ast_array_field_bool_at(source: any u8&, key: any u8&, index: usize) -> i64 = json_parser_ast_array_field_bool_at_impl
+export func json_parser_ast_array_field_is_null_at(source: any u8&, key: any u8&, index: usize) -> i64 = json_parser_ast_array_field_is_null_at_impl
+export func json_parser_ast_array_field_array_len_at(source: any u8&, key: any u8&, index: usize) -> i64 = json_parser_ast_array_field_array_len_at_impl
+export func json_parser_ast_array_field_object_len_at(source: any u8&, key: any u8&, index: usize) -> i64 = json_parser_ast_array_field_object_len_at_impl
 export func json_parser_ast_object_key_eq_at(source: any u8&, index: usize, literal: any u8&) -> i64 = json_parser_ast_object_key_eq_at_impl
 export func json_parser_ast_object_field_i64_at(source: any u8&, index: usize, out: any i64&) -> i64 = json_parser_ast_object_field_i64_at_impl
 export func json_parser_ast_object_value_string_eq_at(source: any u8&, index: usize, literal: any u8&) -> i64 = json_parser_ast_object_value_string_eq_at_impl
