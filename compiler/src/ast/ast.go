@@ -661,8 +661,8 @@ type StaticElifClause struct {
 
 // ---------- Tag implementations ----------
 
-func (n *ConstDecl) Pos() lexer.Pos      { return n.Position }
-func (n *ConstEnumDecl) Pos() lexer.Pos  { return n.Position }
+func (n *ConstDecl) Pos() lexer.Pos     { return n.Position }
+func (n *ConstEnumDecl) Pos() lexer.Pos { return n.Position }
 func (n *ConstEnumMemberDecl) Pos() lexer.Pos {
 	return n.Position
 }

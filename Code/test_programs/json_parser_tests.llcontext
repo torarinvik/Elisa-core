@@ -29,6 +29,14 @@ def invalid_inputs_are_rejected() -> void:
     assert(json_expect_invalid_ast("{\"a\":[1,2}"))
     assert(json_expect_invalid("[1,,2]"))
     assert(json_expect_invalid_ast("[1,,2]"))
+    assert(json_expect_invalid("\"\\q\""))
+    assert(json_expect_invalid_ast("\"\\q\""))
+    assert(json_expect_invalid("\"\\uD83D\""))
+    assert(json_expect_invalid_ast("\"\\uD83D\""))
+    assert(json_expect_invalid("\"\\uDE00\""))
+    assert(json_expect_invalid_ast("\"\\uDE00\""))
+    assert(json_expect_invalid("\"\\uD83D\\u0041\""))
+    assert(json_expect_invalid_ast("\"\\uD83D\\u0041\""))
 
 
 @test
@@ -71,5 +79,44 @@ def ast_raw_dom_helpers_expose_source_spans_and_structure() -> void:
     assert(json_ast_bool_value(ok_node, store) == 1)
     assert(json_ast_is_null(none_node, store))
     assert(json_node_is_invalid(missing_field, store))
+
+    destroy scratch
+
+
+@test
+def ast_string_helpers_decode_escapes_and_match_unescaped_keys() -> void:
+    source: static u8& = "{\"na\\u006de\":\"line\\nbreak\",\"quote\":\"\\\"\",\"slash\":\"\\/\",\"smile\":\"\\u263A\",\"grin\":\"\\uD83D\\uDE00\"}"
+    source_any: any u8& = source.cast[any u8&]()
+    source_len: usize = runtime_strlen(source_any)
+
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source_any, source_len, store)
+
+    assert(result.checksum > 0)
+
+    name_node: JsonNode = json_ast_object_get(result.node, source_any, "name".cast[any u8&](), store)
+    quote_node: JsonNode = json_ast_object_get(result.node, source_any, "quote".cast[any u8&](), store)
+    slash_node: JsonNode = json_ast_object_get(result.node, source_any, "slash".cast[any u8&](), store)
+    smile_node: JsonNode = json_ast_object_get(result.node, source_any, "smile".cast[any u8&](), store)
+    grin_node: JsonNode = json_ast_object_get(result.node, source_any, "grin".cast[any u8&](), store)
+
+    assert(not json_node_is_invalid(name_node, store))
+    assert(not json_node_is_invalid(quote_node, store))
+    assert(not json_node_is_invalid(slash_node, store))
+    assert(not json_node_is_invalid(smile_node, store))
+    assert(not json_node_is_invalid(grin_node, store))
+
+    assert(json_ast_string_eq_literal(source_any, name_node, "line\nbreak".cast[any u8&](), store))
+    assert(json_ast_string_eq_literal(source_any, quote_node, "\"".cast[any u8&](), store))
+    assert(json_ast_string_eq_literal(source_any, slash_node, "/".cast[any u8&](), store))
+    assert(json_ast_string_eq_literal(source_any, smile_node, "\u263A".cast[any u8&](), store))
+    assert(json_ast_string_eq_literal(source_any, grin_node, "\uD83D\uDE00".cast[any u8&](), store))
+
+    assert(streq(json_ast_string_value(source_any, name_node, store), "line\nbreak".cast[any u8&]()) != 0)
+    assert(streq(json_ast_string_value(source_any, quote_node, store), "\"".cast[any u8&]()) != 0)
+    assert(streq(json_ast_string_value(source_any, slash_node, store), "/".cast[any u8&]()) != 0)
+    assert(streq(json_ast_string_value(source_any, smile_node, store), "\u263A".cast[any u8&]()) != 0)
+    assert(streq(json_ast_string_value(source_any, grin_node, store), "\uD83D\uDE00".cast[any u8&]()) != 0)
 
     destroy scratch
