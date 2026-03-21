@@ -186,22 +186,22 @@ type GenericInstanceType struct {
 }
 
 type FuncType struct {
-	Name                   string
-	TypeParams             []string
-	RegionParams           []string
-	PermissionParams       []string
-	UsedPermissionParams   []string
-	DeclaredPermissionRefs []ast.PermissionRef
-	DeclaredPermissions    []string
-	PermissionRefs         []ast.PermissionRef
-	Permissions            []string
-	ShapeParams            []string
-	FreshReturnShapeParams []string
-	Params                 []Type
-	Return                 Type
-	Variadic               bool
-	ReturnProvenance       regionRefState
-	ReturnProvenanceKnown  bool
+	Name                         string
+	TypeParams                   []string
+	RegionParams                 []string
+	PermissionParams             []string
+	UsedPermissionParams         []string
+	DeclaredPermissionRefs       []ast.PermissionRef
+	DeclaredPermissions          []string
+	PermissionRefs               []ast.PermissionRef
+	Permissions                  []string
+	ShapeParams                  []string
+	FreshReturnShapeParams       []string
+	Params                       []Type
+	Return                       Type
+	Variadic                     bool
+	ReturnProvenance             regionRefState
+	ReturnProvenanceKnown        bool
 	ReturnBorrowedOwnerRefs      borrowedOwnerRefSummary
 	ReturnBorrowedOwnerRefsKnown bool
 }

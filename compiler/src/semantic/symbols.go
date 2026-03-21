@@ -113,12 +113,12 @@ const (
 )
 
 type Symbol struct {
-	Name    string
-	Kind    SymbolKind
-	Type    Type
-	Node    ast.Node
+	Name       string
+	Kind       SymbolKind
+	Type       Type
+	Node       ast.Node
 	ParamIndex int
-	Mutable bool
+	Mutable    bool
 }
 
 type Scope struct {

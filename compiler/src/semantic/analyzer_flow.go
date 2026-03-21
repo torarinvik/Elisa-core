@@ -1720,6 +1720,22 @@ func mergeBorrowedOwnerRefSummary(dst borrowedOwnerRefSummary, src borrowedOwner
 	return merged, true
 }
 
+func assignBorrowedOwnerRefSummaryAtPath(dst borrowedOwnerRefSummary, steps []borrowReturnAnnotationStep, value borrowedOwnerRefSummary) borrowedOwnerRefSummary {
+	if len(steps) == 0 {
+		if merged, ok := mergeBorrowedOwnerRefSummary(dst, value); ok {
+			return merged
+		}
+		return cloneBorrowedOwnerRefSummary(value)
+	}
+	if dst.Fields == nil {
+		dst.Fields = map[string]borrowedOwnerRefSummary{}
+	}
+	key := regionFieldKeyForBorrowStep(steps[0])
+	child := dst.Fields[key]
+	dst.Fields[key] = assignBorrowedOwnerRefSummaryAtPath(child, steps[1:], value)
+	return dst
+}
+
 func parseAffineValueKeyPath(path string) ([]borrowReturnAnnotationStep, bool) {
 	if path == "" {
 		return nil, true
@@ -1809,6 +1825,47 @@ func projectBorrowedOwnerRefStateAtSteps(state borrowedOwnerRefState, steps []bo
 		}
 	}
 	return current, true
+}
+
+func summarizeBorrowedOwnerRefIndexStates(state borrowedOwnerRefState) (borrowedOwnerRefState, bool) {
+	if !hasBorrowedOwnerRefState(state) {
+		return borrowedOwnerRefState{}, false
+	}
+	summary := cloneBorrowedOwnerRefState(state)
+	if len(state.Fields) == 0 {
+		return summary, true
+	}
+	indexStates := make([]borrowedOwnerRefState, 0, len(state.Fields))
+	for name, fieldState := range state.Fields {
+		if !isRegionIndexFieldKey(name) {
+			continue
+		}
+		if !hasBorrowedOwnerRefState(fieldState) {
+			continue
+		}
+		indexStates = append(indexStates, fieldState)
+	}
+	if len(indexStates) == 0 {
+		summary.Fields = nil
+		return summary, true
+	}
+	merged := cloneBorrowedOwnerRefState(indexStates[0])
+	for i := 1; i < len(indexStates); i++ {
+		next, ok := mergeBorrowedOwnerRefState(merged, indexStates[i])
+		if !ok {
+			summary.Fields = nil
+			return summary, true
+		}
+		merged = next
+	}
+	if !hasBorrowedOwnerRefState(merged) {
+		summary.Fields = nil
+		return summary, true
+	}
+	summary.Fields = map[string]borrowedOwnerRefState{
+		regionAnyIndexFieldKey(): merged,
+	}
+	return summary, true
 }
 
 func (a *Analyzer) instantiateBorrowedOwnerRefSummary(summary borrowedOwnerRefSummary, args []ast.Expr) (borrowedOwnerRefState, bool) {

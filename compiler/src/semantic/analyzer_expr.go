@@ -1299,6 +1299,47 @@ func (a *Analyzer) validateAtomicRmwArg(callName string, arg ast.Expr, argType T
 	}
 }
 
+func (a *Analyzer) specializeFunctionValueType(expected Type, actual Type) (Type, bool) {
+	expectedFunc, ok := expected.(*FuncType)
+	if !ok {
+		return expected, false
+	}
+	actualFunc, ok := actual.(*FuncType)
+	if !ok {
+		return expected, false
+	}
+	specialized, _ := a.substituteType(expectedFunc, nil, nil, nil, nil).(*FuncType)
+	if specialized == nil {
+		return expected, false
+	}
+	changed := false
+	limit := len(specialized.Params)
+	if len(actualFunc.Params) < limit {
+		limit = len(actualFunc.Params)
+	}
+	for i := 0; i < limit; i++ {
+		if paramType, ok := a.specializeFunctionValueType(specialized.Params[i], actualFunc.Params[i]); ok {
+			specialized.Params[i] = paramType
+			changed = true
+		}
+	}
+	if returnType, ok := a.specializeFunctionValueType(specialized.Return, actualFunc.Return); ok {
+		specialized.Return = returnType
+		changed = true
+	}
+	if hasRegionProvenance(actualFunc.ReturnProvenance) {
+		specialized.ReturnProvenance = cloneRegionRefState(actualFunc.ReturnProvenance)
+		specialized.ReturnProvenanceKnown = true
+		changed = true
+	}
+	if hasBorrowedOwnerRefSummary(actualFunc.ReturnBorrowedOwnerRefs) {
+		specialized.ReturnBorrowedOwnerRefs = cloneBorrowedOwnerRefSummary(actualFunc.ReturnBorrowedOwnerRefs)
+		specialized.ReturnBorrowedOwnerRefsKnown = true
+		changed = true
+	}
+	return specialized, changed
+}
+
 func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	if storeType, ok := a.packedStoreConstructorCall(expr); ok {
 		return storeType
@@ -1371,6 +1412,7 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	shapeBindings := map[string]Shape{}
 	regionBindings := map[string]string{}
 	permissionBindings := map[string][]ast.PermissionRef{}
+	specializedParamTypes := map[int]Type{}
 	regionParams := regionParamSet(ft.RegionParams)
 	limit := len(ft.Params)
 	if len(expr.Args) < limit {
@@ -1381,8 +1423,20 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 		if i < limit {
 			expectedType := a.substituteType(ft.Params[i], bindings, shapeBindings, regionBindings, permissionBindings)
 			argType = a.analyzeValueExpr(expr.Args[i], expectedType)
+			if actualFuncType, ok := argType.(*FuncType); ok {
+				if !actualFuncType.ReturnProvenanceKnown {
+					a.inferFuncReturnProvenanceForExpr(expr.Args[i], actualFuncType)
+				}
+				if !actualFuncType.ReturnBorrowedOwnerRefsKnown {
+					a.inferFuncReturnBorrowedOwnerRefsForExpr(expr.Args[i], actualFuncType)
+				}
+			}
 			a.collectTypeBindings(ft.Params[i], argType, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
 			expectedType = a.substituteType(ft.Params[i], bindings, shapeBindings, regionBindings, permissionBindings)
+			if specializedType, ok := a.specializeFunctionValueType(expectedType, argType); ok {
+				expectedType = specializedType
+				specializedParamTypes[i] = specializedType
+			}
 			if !AssignableTo(expectedType, argType) {
 				a.errorf(expr.Args[i].Pos(), "argument %d to %q expects %s, got %s", i+1, ft.Name, expectedType.String(), argType.String())
 				a.reportShapeMismatchNotes(expr.Args[i].Pos(), expectedType, argType)
@@ -1412,7 +1466,21 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	if appliedType == nil {
 		appliedType = ft
 	}
-	if len(bindings) != 0 || len(shapeBindings) != 0 || len(regionBindings) != 0 || len(permissionBindings) != 0 {
+	if len(specializedParamTypes) != 0 {
+		if clonedApplied, ok := a.substituteType(appliedType, nil, nil, nil, nil).(*FuncType); ok && clonedApplied != nil {
+			appliedType = clonedApplied
+		}
+		for i, specializedType := range specializedParamTypes {
+			if i < len(appliedType.Params) {
+				appliedType.Params[i] = specializedType
+			}
+		}
+		appliedType.ReturnProvenance = regionRefState{}
+		appliedType.ReturnProvenanceKnown = false
+		appliedType.ReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
+		appliedType.ReturnBorrowedOwnerRefsKnown = false
+	}
+	if len(bindings) != 0 || len(shapeBindings) != 0 || len(regionBindings) != 0 || len(permissionBindings) != 0 || len(specializedParamTypes) != 0 {
 		a.exprTypes[expr.Func] = appliedType
 	}
 	if resultPayload, ok := threadTransferResultPayloadType(ft.Name, appliedType.Return); ok {

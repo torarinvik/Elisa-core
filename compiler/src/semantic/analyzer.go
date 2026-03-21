@@ -145,16 +145,16 @@ type affineValueKey struct {
 
 func Analyze(file *ast.File) *Result {
 	a := &Analyzer{
-		file:                       file,
-		namedTypes:                 map[string]Type{},
-		permissions:                map[string]*PermissionSet{},
-		globalScope:                NewScope(nil),
-		functionTypes:              map[string]*FuncType{},
-		constValues:                map[string]ConstValue{},
-		exprTypes:                  map[ast.Expr]Type{},
-		exprFacts:                  map[ast.Expr]OptimizationFacts{},
-		symbolFacts:                map[*Symbol]OptimizationFacts{},
-		returnProvenanceInProgress: map[string]bool{},
+		file:                             file,
+		namedTypes:                       map[string]Type{},
+		permissions:                      map[string]*PermissionSet{},
+		globalScope:                      NewScope(nil),
+		functionTypes:                    map[string]*FuncType{},
+		constValues:                      map[string]ConstValue{},
+		exprTypes:                        map[ast.Expr]Type{},
+		exprFacts:                        map[ast.Expr]OptimizationFacts{},
+		symbolFacts:                      map[*Symbol]OptimizationFacts{},
+		returnProvenanceInProgress:       map[string]bool{},
 		returnBorrowedOwnerRefInProgress: map[string]bool{},
 	}
 	a.registerBuiltins()
@@ -738,17 +738,33 @@ func (a *Analyzer) applyExternBorrowsReturnAnnotation(fn *ast.ExternFuncDecl, fn
 		return
 	}
 	var states []regionRefState
+	var ownerSummaries []borrowedOwnerRefSummary
 	for _, pathText := range annotation.Args {
-		state, ok := a.resolveExternBorrowAnnotationPath(fn, fnType, annotation, pathText, false, "")
+		state, ownerSummary, ok := a.resolveExternBorrowAnnotationPath(fn, fnType, annotation, pathText, false, "")
 		if !ok {
 			continue
 		}
-		states = append(states, state)
+		if hasRegionProvenance(state) {
+			states = append(states, state)
+		}
+		if hasBorrowedOwnerRefSummary(ownerSummary) {
+			ownerSummaries = append(ownerSummaries, ownerSummary)
+		}
 	}
 	if merged, ok := mergeRegionRefStates(states...); ok {
 		fnType.ReturnProvenance = merged
 	}
+	if len(ownerSummaries) != 0 {
+		mergedOwner := cloneBorrowedOwnerRefSummary(ownerSummaries[0])
+		for i := 1; i < len(ownerSummaries); i++ {
+			if next, ok := mergeBorrowedOwnerRefSummary(mergedOwner, ownerSummaries[i]); ok {
+				mergedOwner = next
+			}
+		}
+		fnType.ReturnBorrowedOwnerRefs = mergedOwner
+	}
 	fnType.ReturnProvenanceKnown = true
+	fnType.ReturnBorrowedOwnerRefsKnown = true
 }
 
 func (a *Analyzer) applyExternBorrowsReturnFieldAnnotation(fn *ast.ExternFuncDecl, fnType *FuncType, annotation ast.Annotation) {
@@ -767,16 +783,25 @@ func (a *Analyzer) applyExternBorrowsReturnFieldAnnotation(fn *ast.ExternFuncDec
 		if !ok {
 			continue
 		}
-		state, ok := a.resolveExternBorrowAnnotationPath(fn, fnType, annotation, pathText, false, returnFieldPath)
+		state, ownerSummary, ok := a.resolveExternBorrowAnnotationPath(fn, fnType, annotation, pathText, false, returnFieldPath)
 		if !ok {
 			continue
 		}
-		fnType.ReturnProvenance = assignRegionRefStateAtPath(fnType.ReturnProvenance, returnSteps, state)
+		if hasRegionProvenance(state) {
+			fnType.ReturnProvenance = assignRegionRefStateAtPath(fnType.ReturnProvenance, returnSteps, state)
+		}
+		if hasBorrowedOwnerRefSummary(ownerSummary) {
+			fnType.ReturnBorrowedOwnerRefs = assignBorrowedOwnerRefSummaryAtPath(fnType.ReturnBorrowedOwnerRefs, returnSteps, ownerSummary)
+		}
 	}
 	if !hasRegionProvenance(fnType.ReturnProvenance) {
 		fnType.ReturnProvenance = regionRefState{}
 	}
+	if !hasBorrowedOwnerRefSummary(fnType.ReturnBorrowedOwnerRefs) {
+		fnType.ReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
+	}
 	fnType.ReturnProvenanceKnown = true
+	fnType.ReturnBorrowedOwnerRefsKnown = true
 }
 
 func (a *Analyzer) applyExternBorrowsReturnRebasedAnnotation(fn *ast.ExternFuncDecl, fnType *FuncType, annotation ast.Annotation) {
@@ -785,17 +810,33 @@ func (a *Analyzer) applyExternBorrowsReturnRebasedAnnotation(fn *ast.ExternFuncD
 		return
 	}
 	var states []regionRefState
+	var ownerSummaries []borrowedOwnerRefSummary
 	for _, pathText := range annotation.Args {
-		state, ok := a.resolveExternBorrowAnnotationPath(fn, fnType, annotation, pathText, true, "")
+		state, ownerSummary, ok := a.resolveExternBorrowAnnotationPath(fn, fnType, annotation, pathText, true, "")
 		if !ok {
 			continue
 		}
-		states = append(states, state)
+		if hasRegionProvenance(state) {
+			states = append(states, state)
+		}
+		if hasBorrowedOwnerRefSummary(ownerSummary) {
+			ownerSummaries = append(ownerSummaries, ownerSummary)
+		}
 	}
 	if merged, ok := mergeRegionRefStates(states...); ok {
 		fnType.ReturnProvenance = merged
 	}
+	if len(ownerSummaries) != 0 {
+		mergedOwner := cloneBorrowedOwnerRefSummary(ownerSummaries[0])
+		for i := 1; i < len(ownerSummaries); i++ {
+			if next, ok := mergeBorrowedOwnerRefSummary(mergedOwner, ownerSummaries[i]); ok {
+				mergedOwner = next
+			}
+		}
+		fnType.ReturnBorrowedOwnerRefs = mergedOwner
+	}
 	fnType.ReturnProvenanceKnown = true
+	fnType.ReturnBorrowedOwnerRefsKnown = true
 }
 
 func (a *Analyzer) applyExternBorrowsReturnFieldRebasedAnnotation(fn *ast.ExternFuncDecl, fnType *FuncType, annotation ast.Annotation) {
@@ -814,16 +855,25 @@ func (a *Analyzer) applyExternBorrowsReturnFieldRebasedAnnotation(fn *ast.Extern
 		if !ok {
 			continue
 		}
-		state, ok := a.resolveExternBorrowAnnotationPath(fn, fnType, annotation, pathText, true, returnFieldPath)
+		state, ownerSummary, ok := a.resolveExternBorrowAnnotationPath(fn, fnType, annotation, pathText, true, returnFieldPath)
 		if !ok {
 			continue
 		}
-		fnType.ReturnProvenance = assignRegionRefStateAtPath(fnType.ReturnProvenance, returnSteps, state)
+		if hasRegionProvenance(state) {
+			fnType.ReturnProvenance = assignRegionRefStateAtPath(fnType.ReturnProvenance, returnSteps, state)
+		}
+		if hasBorrowedOwnerRefSummary(ownerSummary) {
+			fnType.ReturnBorrowedOwnerRefs = assignBorrowedOwnerRefSummaryAtPath(fnType.ReturnBorrowedOwnerRefs, returnSteps, ownerSummary)
+		}
 	}
 	if !hasRegionProvenance(fnType.ReturnProvenance) {
 		fnType.ReturnProvenance = regionRefState{}
 	}
+	if !hasBorrowedOwnerRefSummary(fnType.ReturnBorrowedOwnerRefs) {
+		fnType.ReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
+	}
 	fnType.ReturnProvenanceKnown = true
+	fnType.ReturnBorrowedOwnerRefsKnown = true
 }
 
 type borrowReturnAnnotationStep struct {
@@ -996,11 +1046,11 @@ func (a *Analyzer) projectExternReturnTargetType(current Type, step borrowReturn
 	}
 }
 
-func (a *Analyzer) resolveExternBorrowAnnotationPath(fn *ast.ExternFuncDecl, fnType *FuncType, annotation ast.Annotation, pathText string, rebased bool, returnField string) (regionRefState, bool) {
+func (a *Analyzer) resolveExternBorrowAnnotationPath(fn *ast.ExternFuncDecl, fnType *FuncType, annotation ast.Annotation, pathText string, rebased bool, returnField string) (regionRefState, borrowedOwnerRefSummary, bool) {
 	name, steps, ok := parseBorrowReturnAnnotationPath(pathText)
 	if !ok {
 		a.errorExternBorrowAnnotationPathError(fn, annotation, pathText, returnField, "has invalid path %q", pathText)
-		return regionRefState{}, false
+		return regionRefState{}, borrowedOwnerRefSummary{}, false
 	}
 	index := -1
 	for i, param := range fn.Params {
@@ -1011,34 +1061,58 @@ func (a *Analyzer) resolveExternBorrowAnnotationPath(fn *ast.ExternFuncDecl, fnT
 	}
 	if index < 0 {
 		a.errorExternBorrowAnnotationPathError(fn, annotation, pathText, returnField, "references unknown parameter %q", name)
-		return regionRefState{}, false
+		return regionRefState{}, borrowedOwnerRefSummary{}, false
 	}
 	if index >= len(fnType.Params) {
-		return regionRefState{}, false
+		return regionRefState{}, borrowedOwnerRefSummary{}, false
 	}
-	state, ok := a.abstractParamRegionRefState(fnType.Params[index], index, map[string]bool{})
-	if !ok {
+	paramType := fnType.Params[index]
+	regionState, regionOK := a.abstractParamRegionRefState(paramType, index, map[string]bool{})
+	ownerParam := &Symbol{Name: name, Kind: SymbolParam, Type: paramType, ParamIndex: index, Mutable: false}
+	ownerState, ownerStateOK := a.abstractParamBorrowedOwnerRefState(paramType, affineValueKey{Root: ownerParam}, map[string]bool{})
+	if !regionOK && !ownerStateOK {
 		if returnField == "" {
-			a.errorExternBorrowAnnotationPathError(fn, annotation, pathText, returnField, "cannot borrow from parameter %q of type %s", name, fnType.Params[index].String())
+			a.errorExternBorrowAnnotationPathError(fn, annotation, pathText, returnField, "cannot borrow from parameter %q of type %s", name, paramType.String())
 		} else {
-			a.errorExternBorrowAnnotationPathError(fn, annotation, pathText, returnField, "cannot borrow field %q from parameter %q of type %s", returnField, name, fnType.Params[index].String())
+			a.errorExternBorrowAnnotationPathError(fn, annotation, pathText, returnField, "cannot borrow field %q from parameter %q of type %s", returnField, name, paramType.String())
 		}
-		return regionRefState{}, false
+		return regionRefState{}, borrowedOwnerRefSummary{}, false
 	}
 	if len(steps) != 0 {
-		state, ok = projectBorrowReturnAnnotationState(state, steps)
-		if !ok {
+		if regionOK {
+			regionState, regionOK = projectBorrowReturnAnnotationState(regionState, steps)
+		}
+		if ownerStateOK {
+			ownerState, ownerStateOK = projectBorrowedOwnerRefStateAtSteps(ownerState, steps)
+		}
+		if !regionOK && !ownerStateOK {
 			a.errorExternBorrowAnnotationPathError(fn, annotation, pathText, returnField, "cannot project path %q from parameter %q of type %s", pathText, name, fnType.Params[index].String())
-			return regionRefState{}, false
+			return regionRefState{}, borrowedOwnerRefSummary{}, false
 		}
 	}
 	if rebased {
-		state, ok = summarizeRegionIndexStates(state)
-		if !ok {
-			return regionRefState{}, false
+		if regionOK {
+			regionState, regionOK = summarizeRegionIndexStates(regionState)
+		}
+		if ownerStateOK {
+			ownerState, ownerStateOK = summarizeBorrowedOwnerRefIndexStates(ownerState)
 		}
 	}
-	return state, true
+	ownerSummary := borrowedOwnerRefSummary{}
+	ownerOK := false
+	if ownerStateOK {
+		ownerSummary, ownerOK = abstractParamOnlyBorrowedOwnerRefSummary(ownerState)
+	}
+	if !regionOK && !ownerOK {
+		return regionRefState{}, borrowedOwnerRefSummary{}, false
+	}
+	if !regionOK {
+		regionState = regionRefState{}
+	}
+	if !ownerOK {
+		ownerSummary = borrowedOwnerRefSummary{}
+	}
+	return regionState, ownerSummary, true
 }
 
 func (a *Analyzer) errorExternBorrowAnnotationPathError(fn *ast.ExternFuncDecl, annotation ast.Annotation, pathText string, returnField string, format string, args ...interface{}) {
