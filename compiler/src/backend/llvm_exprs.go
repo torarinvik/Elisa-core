@@ -1201,6 +1201,9 @@ func (s *functionState) emitSpecializedRuntimeCall(expr *ast.CallExpr) (C.LLVMVa
 	if value, actualType, handled, err := s.emitSpecializedStringSlicesEqCall(expr); handled {
 		return value, actualType, true, err
 	}
+	if value, actualType, handled, err := s.emitSpecializedRuntimeStringCompareCall(expr); handled {
+		return value, actualType, true, err
+	}
 	ident, ok := expr.Func.(*ast.Ident)
 	if !ok {
 		return nil, nil, false, nil
@@ -1499,6 +1502,44 @@ func (s *functionState) emitSpecializedStringSlicesEqCall(expr *ast.CallExpr) (C
 	blocks := []C.LLVMBasicBlockRef{entryBlock, zeroEnd, sameEnd, memcmpEnd}
 	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
 	return C.LLVMBuildZExt(s.builder, phi, intLLVMType, cStringFree("strsliceseq.int")), intType, true, nil
+}
+
+func (s *functionState) emitSpecializedRuntimeStringCompareCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	ident, ok := expr.Func.(*ast.Ident)
+	if !ok {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 2 || s == nil || s.g == nil || s.g.result == nil {
+		return nil, nil, false, nil
+	}
+	switch ident.Name {
+	case "ctx_streq", "ctx_string_view_eq", "string_view_eq", "ctx_string_views_eq", "string_views_eq":
+	default:
+		return nil, nil, false, nil
+	}
+	leftExpr := expr.Args[0]
+	rightExpr := expr.Args[1]
+	leftType := s.exprType(leftExpr)
+	rightType := s.exprType(rightExpr)
+	cmp, ok, err := s.emitSameExtentRuntimeStringCompareExpr(lexer.TOKEN_EQEQ, leftExpr, leftType, rightExpr, rightType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if !ok {
+		cmp, ok, err = s.emitDisjointRuntimeStringCompareExpr(lexer.TOKEN_EQEQ, leftExpr, leftType, rightExpr, rightType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		if !ok {
+			return nil, nil, false, nil
+		}
+	}
+	intType := s.g.result.NamedTypes["int"]
+	intLLVMType, err := s.g.lowerType(intType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	return C.LLVMBuildZExt(s.builder, cmp, intLLVMType, cStringFree("streq.direct.int")), intType, true, nil
 }
 
 func isStringViewCarrierType(t semantic.Type) bool {

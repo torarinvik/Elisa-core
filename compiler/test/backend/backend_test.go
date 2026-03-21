@@ -2593,6 +2593,85 @@ def different_bounds_view(left: dstr[row], right: dstr[col]) -> bool:
 	}
 }
 
+func TestGenerateLLVMIRSpecializesDirectRuntimeStringEqualityHelpers(t *testing.T) {
+	src := `repr(c) struct StringView:
+	data: mutable any u8&
+	len: mutable i64
+
+extern ctx_string_view(value: dstr[row], start: i64, end: i64) -> StringView
+extern ctx_string_view_prefix(view: StringView, end: i64) -> StringView
+extern ctx_string_view_suffix(view: StringView, start: i64) -> StringView
+extern ctx_string_slice(value: dstr[row], start: i64, end: i64) -> dstr[shape_out]
+extern ctx_streq(left: dstr[row], right: dstr[row]) -> int
+extern ctx_string_view_eq(view: StringView, text: dstr[shape_other]) -> int
+extern ctx_string_views_eq(left: StringView, right: StringView) -> int
+
+def direct_same_shape_text(left: dstr[row], right: dstr[row]) -> bool:
+	return ctx_streq(left, right) != 0
+
+def direct_same_bounds_view_text(left: dstr[row], right: dstr[row]) -> bool:
+	view: StringView = ctx_string_view(left, 0, 4)
+	return ctx_string_view_eq(view, ctx_string_slice(right, 0, 4)) != 0
+
+def direct_split_disjoint_views(text: dstr[row]) -> bool:
+	base: StringView = ctx_string_view(text, 0, 4)
+	return ctx_string_views_eq(ctx_string_view_prefix(base, 2), ctx_string_view_suffix(base, 2)) != 0
+
+def direct_different_bounds_view(left: dstr[row], right: dstr[row]) -> bool:
+	left_view: StringView = ctx_string_view(left, 0, 2)
+	right_view: StringView = ctx_string_view(right, 0, 3)
+	return ctx_string_views_eq(left_view, right_view) != 0
+`
+	result := parseAndAnalyze(t, "backend_runtime_string_direct_helper_eq.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	directTextBody := functionIR(output, "direct_same_shape_text")
+	if directTextBody == "" {
+		t.Fatalf("expected to find direct_same_shape_text body, got:\n%s", output)
+	}
+	for _, want := range []string{"call i64 @ctx_strlen(ptr", "call i64 @memcmp(ptr"} {
+		if !strings.Contains(directTextBody, want) {
+			t.Fatalf("expected direct_same_shape_text to contain %q, got:\n%s", want, directTextBody)
+		}
+	}
+	if strings.Contains(directTextBody, "call i64 @ctx_streq") {
+		t.Fatalf("expected direct_same_shape_text to avoid ctx_streq helper fallback, got:\n%s", directTextBody)
+	}
+
+	directViewTextBody := functionIR(output, "direct_same_bounds_view_text")
+	if directViewTextBody == "" {
+		t.Fatalf("expected to find direct_same_bounds_view_text body, got:\n%s", output)
+	}
+	if !strings.Contains(directViewTextBody, "call i64 @memcmp(ptr") {
+		t.Fatalf("expected direct_same_bounds_view_text to use memcmp fast path, got:\n%s", directViewTextBody)
+	}
+	if strings.Contains(directViewTextBody, "call i64 @ctx_string_view_eq") {
+		t.Fatalf("expected direct_same_bounds_view_text to avoid ctx_string_view_eq helper fallback, got:\n%s", directViewTextBody)
+	}
+
+	directSplitViewsBody := functionIR(output, "direct_split_disjoint_views")
+	if directSplitViewsBody == "" {
+		t.Fatalf("expected to find direct_split_disjoint_views body, got:\n%s", output)
+	}
+	if !strings.Contains(directSplitViewsBody, "call i64 @memcmp(ptr noalias") {
+		t.Fatalf("expected direct_split_disjoint_views to use disjoint memcmp fast path, got:\n%s", directSplitViewsBody)
+	}
+	if strings.Contains(directSplitViewsBody, "call i64 @ctx_string_views_eq") {
+		t.Fatalf("expected direct_split_disjoint_views to avoid ctx_string_views_eq helper fallback, got:\n%s", directSplitViewsBody)
+	}
+
+	differentBoundsBody := functionIR(output, "direct_different_bounds_view")
+	if differentBoundsBody == "" {
+		t.Fatalf("expected to find direct_different_bounds_view body, got:\n%s", output)
+	}
+	if !strings.Contains(differentBoundsBody, "call i64 @ctx_string_views_eq") {
+		t.Fatalf("expected direct_different_bounds_view to keep helper fallback, got:\n%s", differentBoundsBody)
+	}
+}
+
 func TestGenerateLLVMIRSpecializesConstantStringSliceEquality(t *testing.T) {
 	src := `extern ctx_string_slice_eq(value: dstr[row], start: i64, end: i64, other: dstr[col]) -> int
 
