@@ -290,6 +290,7 @@ func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {
 		if p.Name != "_" {
 			sym := &Symbol{Name: p.Name, Kind: SymbolLocal, Type: valueType, Node: p, Mutable: false}
 			a.defineLocal(sym, p.Pos())
+			a.recordFunctionValueBinding(sym, stmt.Value)
 			if hasBorrowedOwnerState {
 				a.currentBorrowedOwnerRefs[sym] = borrowedOwnerState
 			}
@@ -310,6 +311,7 @@ func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {
 			}
 			sym := &Symbol{Name: arg.Name, Kind: SymbolLocal, Type: fields[i].Type, Node: p, Mutable: false}
 			a.defineLocal(sym, arg.Position)
+			a.recordFunctionValueBinding(sym, &ast.FieldExpr{Position: arg.Position, Object: stmt.Value, Field: fields[i].Name})
 			if hasBorrowedOwnerState {
 				if fieldState, ok := projectBorrowedOwnerRefFieldState(borrowedOwnerState, fields[i].Name); ok {
 					a.currentBorrowedOwnerRefs[sym] = fieldState
@@ -334,6 +336,9 @@ func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {
 			}
 			sym := &Symbol{Name: payload.BindName, Kind: SymbolLocal, Type: payload.Type, Node: p, Mutable: false}
 			a.defineLocal(sym, p.Position)
+			if valueExpr, ok := a.resolveMoveBindVariantPayloadValueExpr(stmt.Value, p, payload.Key); ok {
+				a.recordFunctionValueBinding(sym, valueExpr)
+			}
 			if hasBorrowedOwnerState {
 				if fieldState, ok := projectBorrowedOwnerRefFieldState(borrowedOwnerState, payload.Key); ok {
 					a.currentBorrowedOwnerRefs[sym] = fieldState
@@ -539,6 +544,62 @@ func (a *Analyzer) resolveMoveBindVariantPattern(stmt *ast.MoveBindStmt, pattern
 		fields[i] = moveBindResolvedVariantField{Key: moveBindVariantFieldKey(variant, i), Type: variant.Payload[i], BindName: moveBindVariantArgBindingName(arg.Pattern)}
 	}
 	return fields, enumType, storeState, true
+}
+
+func (a *Analyzer) resolveMoveBindVariantPayloadValueExpr(value ast.Expr, pattern *ast.MoveBindVariantPattern, key string) (ast.Expr, bool) {
+	if value == nil || pattern == nil || key == "" {
+		return nil, false
+	}
+	switch n := value.(type) {
+	case *ast.ParenExpr:
+		return a.resolveMoveBindVariantPayloadValueExpr(n.Inner, pattern, key)
+	case *ast.CastExpr:
+		return a.resolveMoveBindVariantPayloadValueExpr(n.Operand, pattern, key)
+	case *ast.MoveExpr:
+		return a.resolveMoveBindVariantPayloadValueExpr(n.Operand, pattern, key)
+	case *ast.AllocExpr:
+		return a.resolveMoveBindVariantPayloadValueExpr(n.Value, pattern, key)
+	case *ast.Ident:
+		if a.currentScope == nil {
+			return nil, false
+		}
+		sym, ok := a.currentScope.Lookup(n.Name)
+		if !ok || sym.Kind != SymbolLocal || sym.Mutable {
+			return nil, false
+		}
+		decl, ok := sym.Node.(*ast.VarDeclStmt)
+		if !ok || decl.Value == nil {
+			return nil, false
+		}
+		return a.resolveMoveBindVariantPayloadValueExpr(decl.Value, pattern, key)
+	case *ast.CallExpr:
+		enumType, variant, ok := a.enumConstructorCall(n)
+		if !ok || enumType == nil || variant == nil {
+			return nil, false
+		}
+		if enumType.Name != pattern.EnumName || variant.Name != pattern.Variant {
+			return nil, false
+		}
+		var orderedArgs []ast.Expr
+		if enumType.Packed {
+			var commonArgs map[string]ast.Expr
+			orderedArgs, commonArgs, ok = a.resolvePackedEnumConstructorArgs(n, enumType, variant)
+			_ = commonArgs
+		} else {
+			orderedArgs, ok = a.resolveEnumConstructorArgs(n, enumType, variant)
+		}
+		if !ok {
+			return nil, false
+		}
+		for i, arg := range orderedArgs {
+			if moveBindVariantFieldKey(variant, i) == key {
+				return arg, true
+			}
+		}
+		return nil, false
+	default:
+		return nil, false
+	}
 }
 
 func (a *Analyzer) validateMoveBindStore(pos lexer.Pos, enumType *EnumType, storeExpr ast.Expr) {

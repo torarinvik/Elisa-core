@@ -1104,6 +1104,130 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 	requireFunctionReturnTypeString(t, result, "ok", "void")
 }
 
+func TestAnalyzeRejectsReusingBorrowedThreadPoolAliasReturnedViaMoveAsDestructuredCallbackAfterShutdown(t *testing.T) {
+	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return move task
+
+repr(c) struct PoolHolder:
+	pool_ref: any ThreadPool&
+
+repr(c) struct PoolGetter:
+	fn: func(PoolHolder) -> any ThreadPool&
+
+def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+	return holder.pool_ref
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def bad(holder: PoolHolder) -> void:
+	getter: PoolGetter = PoolGetter(get_pool_ref)
+	move getter as PoolGetter(callback_fn)
+	pool_ref: any ThreadPool& = callback_fn(holder)
+	pool_shutdown(pool_ref)
+	_ = pool_submit1(holder.pool_ref, work, 1)
+`
+	_, errs := parseAndAnalyze(t, "thread_pool_move_as_destructured_callback_return_alias_shutdown_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+		t.Fatalf("expected move-as destructured callback shutdown diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaMoveAsDestructuredCallback(t *testing.T) {
+	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: any TaskGroup&) -> void
+
+repr(c) struct GroupHolder:
+	group_ref: any TaskGroup&
+
+repr(c) struct GroupKeeper:
+	fn: func(GroupHolder) -> GroupHolder
+
+def keep_holder(holder: GroupHolder) -> GroupHolder:
+	return holder
+
+def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
+	keeper: GroupKeeper = GroupKeeper(keep_holder)
+	move keeper as GroupKeeper(callback_fn)
+	alias_holder: GroupHolder = callback_fn(holder)
+	task_group_add(alias_holder.group_ref, move task)
+	wait all holder.group_ref
+`
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_move_as_destructured_callback_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "void")
+}
+
+func TestAnalyzeRejectsReusingBorrowedThreadPoolAliasReturnedViaMoveAsVariantDestructuredCallbackAfterShutdown(t *testing.T) {
+	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return move task
+
+repr(c) struct PoolHolder:
+	pool_ref: any ThreadPool&
+
+enum PoolGetter:
+	Wrap(fn: func(PoolHolder) -> any ThreadPool&)
+
+def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+	return holder.pool_ref
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def bad(holder: PoolHolder) -> void:
+	getter: PoolGetter = PoolGetter.Wrap(get_pool_ref)
+	move getter as PoolGetter.Wrap(callback_fn)
+	pool_ref: any ThreadPool& = callback_fn(holder)
+	pool_shutdown(pool_ref)
+	_ = pool_submit1(holder.pool_ref, work, 1)
+`
+	_, errs := parseAndAnalyze(t, "thread_pool_move_as_variant_destructured_callback_return_alias_shutdown_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+		t.Fatalf("expected move-as variant destructured callback shutdown diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaMoveAsVariantDestructuredCallback(t *testing.T) {
+	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: any TaskGroup&) -> void
+
+repr(c) struct GroupHolder:
+	group_ref: any TaskGroup&
+
+enum GroupKeeper:
+	Wrap(fn: func(GroupHolder) -> GroupHolder)
+
+def keep_holder(holder: GroupHolder) -> GroupHolder:
+	return holder
+
+def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
+	keeper: GroupKeeper = GroupKeeper.Wrap(keep_holder)
+	move keeper as GroupKeeper.Wrap(callback_fn)
+	alias_holder: GroupHolder = callback_fn(holder)
+	task_group_add(alias_holder.group_ref, move task)
+	wait all holder.group_ref
+`
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_move_as_variant_destructured_callback_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "void")
+}
+
 func TestAnalyzeRejectsReusingHigherOrderHelperReturnedBorrowedThreadPoolAliasAfterMutableCallbackRebinding(t *testing.T) {
 	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
 
