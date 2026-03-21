@@ -504,6 +504,10 @@ func (a *Analyzer) inferCallOptimizationFacts(call *ast.CallExpr, facts Optimiza
 		if viewFacts, ok := a.exprFactsForCallArg(call, 0); ok && viewFacts.HasExactExtent() {
 			facts.Extent = cloneOptimizationExtent(viewFacts.Extent)
 		}
+	case "ctx_string_slice":
+		if extent := a.inferViewHelperExtent(call, 0, 1, 2, "len"); extent != nil {
+			facts.Extent = extent
+		}
 	case "string_view_copy":
 		if viewFacts, ok := a.exprFactsForCallArg(call, 0); ok && viewFacts.HasExactExtent() {
 			facts.Extent = cloneOptimizationExtent(viewFacts.Extent)

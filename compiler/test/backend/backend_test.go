@@ -3622,6 +3622,73 @@ def head_codepoint(text: dstr[row]) -> char:
 	}
 }
 
+func TestGenerateLLVMIRSpecializesExactStringSliceMaterialize(t *testing.T) {
+	src := `extern memcpy(dest: any void&?, src: any void&?, n: usize) -> any void&?
+extern alloc_perm(size: i64) -> heap void&
+extern register_perm_string_len(ptr: any u8&?, len: usize)
+extern intern_small_string(src: any u8&, len: usize) -> heap u8&
+extern ctx_strlen(value: dstr[shape_in]) -> i64
+extern ctx_string_slice(value: dstr[shape_in], start: i64, end: i64) -> dstr[shape_out]
+
+def copy_small(text: dstr[row]) -> dstr:
+	return ctx_string_slice(text, 1, 3)
+
+def copy_large(text: dstr[row]) -> dstr:
+	return ctx_string_slice(text, 1, 13)
+
+def copy_full(text: dstr[row]) -> dstr:
+	return ctx_string_slice(text, 0, text.len)
+
+def copy_unknown(text: dstr[row], start: i64, end: i64) -> dstr:
+	return ctx_string_slice(text, start, end)
+`
+	result := parseAndAnalyze(t, "backend_exact_string_slice_materialize.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	copySmallBody := functionIR(output, "copy_small")
+	if copySmallBody == "" {
+		t.Fatalf("expected to find copy_small body, got:\n%s", output)
+	}
+	if strings.Contains(copySmallBody, "call ptr @ctx_string_slice") {
+		t.Fatalf("expected copy_small to avoid ctx_string_slice helper fallback, got:\n%s", copySmallBody)
+	}
+	if !strings.Contains(copySmallBody, "call ptr @intern_small_string(ptr") {
+		t.Fatalf("expected copy_small to lower through intern_small_string, got:\n%s", copySmallBody)
+	}
+
+	copyLargeBody := functionIR(output, "copy_large")
+	if copyLargeBody == "" {
+		t.Fatalf("expected to find copy_large body, got:\n%s", output)
+	}
+	for _, check := range []string{"call ptr @alloc_perm(i64 13)", "call ptr @memcpy(ptr", "call void @register_perm_string_len(ptr"} {
+		if !strings.Contains(copyLargeBody, check) {
+			t.Fatalf("expected copy_large to contain %q, got:\n%s", check, copyLargeBody)
+		}
+	}
+	if strings.Contains(copyLargeBody, "call ptr @ctx_string_slice") {
+		t.Fatalf("expected copy_large to avoid ctx_string_slice helper fallback, got:\n%s", copyLargeBody)
+	}
+
+	copyFullBody := functionIR(output, "copy_full")
+	if copyFullBody == "" {
+		t.Fatalf("expected to find copy_full body, got:\n%s", output)
+	}
+	if !strings.Contains(copyFullBody, "call ptr @ctx_string_slice(ptr") {
+		t.Fatalf("expected copy_full to keep helper fallback for full-span semantics, got:\n%s", copyFullBody)
+	}
+
+	copyUnknownBody := functionIR(output, "copy_unknown")
+	if copyUnknownBody == "" {
+		t.Fatalf("expected to find copy_unknown body, got:\n%s", output)
+	}
+	if !strings.Contains(copyUnknownBody, "call ptr @ctx_string_slice(ptr") {
+		t.Fatalf("expected copy_unknown to keep helper fallback when extent is not exact, got:\n%s", copyUnknownBody)
+	}
+}
+
 func TestGenerateLLVMIRLowersStaticIfInFunctionBodies(t *testing.T) {
 	src := `const ENABLE_FAST = 2 > 1
 

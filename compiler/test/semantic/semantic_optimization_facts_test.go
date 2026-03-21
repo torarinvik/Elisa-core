@@ -202,15 +202,21 @@ def ctx_string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
 def ctx_string_from_view(view: StringView) -> dstr[shape_out]:
 	return string_view_copy(view)
 
+def ctx_string_slice(value: dstr[shape_in], start: i64, end: i64) -> dstr[shape_out]:
+	_ = start
+	_ = end
+	return value
+
 def inspect(a: any Arena&, values: any darray[i32, row]&, other: any darray[i32, row]&, text: dstr[row]) -> int:
 	whole_a: dview[i32] = arena_da_view(values, 0u, values.count)
 	whole_b: dview[i32] = arena_da_view(other, 0u, other.count)
 	sub_a: dview[i32] = arena_da_view_slice(whole_a, 1u, 3u)
 	sub_b: dview[i32] = arena_da_view_slice(whole_b, 1u, 3u)
 	copied: darray[i32] = arena_da_from_view(a, sub_a)
-	text_view: StringView = ctx_string_view(text, 0, 2)
+	text_view: StringView = ctx_string_view(text, 1, 3)
 	text_sub: StringView = ctx_string_view_slice(text_view, 0, text_view.len)
 	text_copy: dstr = ctx_string_from_view(text_sub)
+	text_slice: dstr = ctx_string_slice(text, 1, 3)
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_runtime_view_helpers.llcontext", src)
@@ -226,11 +232,13 @@ def inspect(a: any Arena&, values: any darray[i32, row]&, other: any darray[i32,
 	textViewExpr := requireOptimizationFactsVarInitExpr(t, fn, "text_view")
 	textSubExpr := requireOptimizationFactsVarInitExpr(t, fn, "text_sub")
 	textCopyExpr := requireOptimizationFactsVarInitExpr(t, fn, "text_copy")
+	textSliceExpr := requireOptimizationFactsVarInitExpr(t, fn, "text_slice")
 
 	wholeAFacts := requireExprOptimizationFacts(t, result, wholeAExpr)
 	subAFacts := requireExprOptimizationFacts(t, result, subAExpr)
 	textViewFacts := requireExprOptimizationFacts(t, result, textViewExpr)
 	textCopyFacts := requireExprOptimizationFacts(t, result, textCopyExpr)
+	textSliceFacts := requireExprOptimizationFacts(t, result, textSliceExpr)
 
 	if !wholeAFacts.HasExactExtent() {
 		t.Fatalf("expected full-span arena_da_view to preserve exact source extent, got %#v", wholeAFacts)
@@ -263,6 +271,12 @@ def inspect(a: any Arena&, values: any darray[i32, row]&, other: any darray[i32,
 	}
 	if !result.ExprsHaveSameExtent(textSubExpr, textCopyExpr) {
 		t.Fatalf("expected ctx_string_from_view to preserve exact extent from its input view")
+	}
+	if !textSliceFacts.ReadOnly || !textSliceFacts.HasExactExtent() {
+		t.Fatalf("expected ctx_string_slice to preserve readonly exact extent facts, got %#v", textSliceFacts)
+	}
+	if !result.ExprsHaveSameExtent(textViewExpr, textSliceExpr) {
+		t.Fatalf("expected ctx_string_slice to preserve exact extent matching an equivalent ctx_string_view")
 	}
 }
 

@@ -1311,6 +1311,69 @@ func (s *functionState) emitDirectStringViewCopyLarge(viewData C.LLVMValueRef, v
 	return allocPtr, nil
 }
 
+func (s *functionState) emitSpecializedStringSliceCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	ident, ok := expr.Func.(*ast.Ident)
+	if !ok || ident.Name != "ctx_string_slice" {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 3 || s == nil || s.g == nil || s.g.result == nil {
+		return nil, nil, false, nil
+	}
+	resultType := s.exprType(expr)
+	inputExpr := expr.Args[0]
+	inputType := s.exprType(inputExpr)
+	if _, ok := inputType.(*semantic.DStrType); !ok {
+		return nil, nil, false, nil
+	}
+	if s.g.result.ExprsHaveSameExtent(expr, inputExpr) {
+		return nil, nil, false, nil
+	}
+	sliceFacts, ok := s.g.result.ExprOptimizationFacts(expr)
+	if !ok || !sliceFacts.HasExactExtent() {
+		return nil, nil, false, nil
+	}
+	exactLen, ok := constOptimizationExtentSize(sliceFacts.Extent)
+	if !ok {
+		return nil, nil, false, nil
+	}
+	begin, ok := parseOptimizationExtentConstInt(sliceFacts.Extent.Begin)
+	if !ok || begin < 0 {
+		return nil, nil, false, nil
+	}
+	inputValue, _, err := s.emitExpr(inputExpr, inputType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	beginValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(begin), 0)
+	sliceData := inputValue
+	if begin != 0 {
+		i8LLVMType, err := s.g.lowerBuiltin("u8")
+		if err != nil {
+			return nil, nil, true, err
+		}
+		indices := []C.LLVMValueRef{beginValue}
+		sliceData = C.LLVMBuildGEP2(s.builder, i8LLVMType, inputValue, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("strslice.data"))
+	}
+	lenValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(exactLen), 0)
+	if exactLen == 0 {
+		emptyPtr := s.emitGlobalCStringLiteral("", "strslice.empty")
+		value, err := s.emitInternSmallStringCall(emptyPtr, lenValue, "strslice.zero.small")
+		return value, resultType, true, err
+	}
+	if exactLen <= 8 {
+		value, err := s.emitInternSmallStringCall(sliceData, lenValue, "strslice.small")
+		return value, resultType, true, err
+	}
+	largeLen := C.LLVMConstInt(C.LLVMInt64TypeInContext(s.g.context), C.ulonglong(exactLen), 0)
+	value, err := s.emitDirectStringViewCopyLarge(sliceData, largeLen)
+	return value, resultType, true, err
+}
+
 func (s *functionState) emitSpecializedStringViewCopyCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	ident, ok := expr.Func.(*ast.Ident)
 	if !ok || (ident.Name != "string_view_copy" && ident.Name != "ctx_string_from_view") {
@@ -2385,6 +2448,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 		return s.emitEnumConstructorValue(enumType, variant, expr.Args, expr.ArgNames)
 	}
 	if value, actualType, handled, err := s.emitSpecializedRuntimeCall(expr); handled {
+		return value, actualType, err
+	}
+	if value, actualType, handled, err := s.emitSpecializedStringSliceCall(expr); handled {
 		return value, actualType, err
 	}
 	if value, actualType, handled, err := s.emitSpecializedStringViewCopyCall(expr); handled {
