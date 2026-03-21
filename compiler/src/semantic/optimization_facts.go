@@ -27,12 +27,13 @@ type OptimizationExtent struct {
 }
 
 type OptimizationFacts struct {
-	Exclusive  bool
-	ReadOnly   bool
-	Contiguous bool
-	UnitStride bool
-	Extent     *OptimizationExtent
-	base       string
+	Exclusive             bool
+	ReadOnly              bool
+	Contiguous            bool
+	UnitStride            bool
+	FrozenPackedStoreOnly bool
+	Extent                *OptimizationExtent
+	base                  string
 }
 
 func (e *OptimizationExtent) String() string {
@@ -319,7 +320,43 @@ func (a *Analyzer) inferExprOptimizationFacts(expr ast.Expr, t Type) Optimizatio
 			}
 		}
 	}
+	if a.exprDependsOnlyOnFrozenPackedStores(expr) {
+		facts.FrozenPackedStoreOnly = true
+	}
 	return facts
+}
+
+func (a *Analyzer) exprDependsOnlyOnFrozenPackedStores(expr ast.Expr) bool {
+	if a == nil || expr == nil {
+		return false
+	}
+	state, ok := a.regionRefStateForExpr(expr)
+	if !ok {
+		return false
+	}
+	onlyFrozen, hasFrozen := regionRefStateDependsOnlyOnFrozenPackedStores(state)
+	return onlyFrozen && hasFrozen
+}
+
+func regionRefStateDependsOnlyOnFrozenPackedStores(state regionRefState) (bool, bool) {
+	if len(state.Deps) != 0 || len(state.ParamDeps) != 0 {
+		return false, false
+	}
+	hasFrozen := false
+	for _, dep := range state.StoreDeps {
+		if dep.Type == nil || !IsFrozenPackedEnumStoreType(dep.Type) {
+			return false, false
+		}
+		hasFrozen = true
+	}
+	for _, fieldState := range state.Fields {
+		fieldOnlyFrozen, fieldHasFrozen := regionRefStateDependsOnlyOnFrozenPackedStores(fieldState)
+		if !fieldOnlyFrozen {
+			return false, false
+		}
+		hasFrozen = hasFrozen || fieldHasFrozen
+	}
+	return true, hasFrozen
 }
 
 func (a *Analyzer) sliceFullSpanField(expr ast.Expr) string {
@@ -813,4 +850,15 @@ func (r *Result) ExprSupportsDenseWrite(expr ast.Expr) bool {
 		return false
 	}
 	return facts.Contiguous && facts.UnitStride && !facts.ReadOnly
+}
+
+func (r *Result) ExprDependsOnlyOnFrozenPackedStores(expr ast.Expr) bool {
+	if r == nil {
+		return false
+	}
+	facts, ok := r.ExprOptimizationFacts(expr)
+	if !ok {
+		return false
+	}
+	return facts.FrozenPackedStoreOnly
 }

@@ -530,3 +530,74 @@ def inspect(values: any darray[i32, 4]&) -> int:
 		t.Fatalf("expected full-span direct dview slice syntax to preserve input extent")
 	}
 }
+
+func TestAnalyzeMarksValuesDependingOnlyOnFrozenPackedStores(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+	Hold(value: any i32&)
+
+repr(c) struct Box:
+	node: Expr
+
+@borrows_return_field(node, node)
+extern wrap_node(node: Expr) -> Box
+
+def inspect(owner: Arena) -> int:
+	region scratch(1024u)
+	store: Expr.Store[Local] = Expr.Store(owner)
+	node: Expr = new[store] Expr.Int(value: 1)
+	box: Box = wrap_node(node)
+	items: array[Box, 1] = [box]
+	before_freeze: Expr = node
+	local_ref: scratch i32& = new[scratch] 7i32
+	held: Expr = new[store] Expr.Hold(value: local_ref)
+	held_before_freeze: Expr = held
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	after_freeze: Expr = node
+	wrapped_after_freeze: Box = wrap_node(node)
+	view_after_freeze: view[Box, 0u, 1u] = items[0u:1u]
+	held_after_freeze: Expr = held
+	_ = box
+	_ = held_before_freeze
+	_ = frozen
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_store_only.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	beforeFreezeExpr := requireOptimizationFactsVarInitExpr(t, fn, "before_freeze")
+	afterFreezeExpr := requireOptimizationFactsVarInitExpr(t, fn, "after_freeze")
+	wrappedAfterFreezeExpr := requireOptimizationFactsVarInitExpr(t, fn, "wrapped_after_freeze")
+	viewAfterFreezeExpr := requireOptimizationFactsVarInitExpr(t, fn, "view_after_freeze")
+	heldAfterFreezeExpr := requireOptimizationFactsVarInitExpr(t, fn, "held_after_freeze")
+
+	beforeFreezeFacts := requireExprOptimizationFacts(t, result, beforeFreezeExpr)
+	afterFreezeFacts := requireExprOptimizationFacts(t, result, afterFreezeExpr)
+	wrappedAfterFreezeFacts := requireExprOptimizationFacts(t, result, wrappedAfterFreezeExpr)
+	viewAfterFreezeFacts := requireExprOptimizationFacts(t, result, viewAfterFreezeExpr)
+	heldAfterFreezeFacts := requireExprOptimizationFacts(t, result, heldAfterFreezeExpr)
+
+	if beforeFreezeFacts.FrozenPackedStoreOnly {
+		t.Fatalf("expected value depending on a local packed store to stay unpublished before freeze, got %#v", beforeFreezeFacts)
+	}
+	if !afterFreezeFacts.FrozenPackedStoreOnly {
+		t.Fatalf("expected freeze to remap packed-store provenance for direct values, got %#v", afterFreezeFacts)
+	}
+	if !result.ExprDependsOnlyOnFrozenPackedStores(afterFreezeExpr) {
+		t.Fatalf("expected result query to report frozen-store-only provenance for direct values")
+	}
+	if !wrappedAfterFreezeFacts.FrozenPackedStoreOnly {
+		t.Fatalf("expected helper-return aggregate to inherit frozen-store-only provenance, got %#v", wrappedAfterFreezeFacts)
+	}
+	if !viewAfterFreezeFacts.FrozenPackedStoreOnly {
+		t.Fatalf("expected sliced aggregate view to retain frozen-store-only provenance, got %#v", viewAfterFreezeFacts)
+	}
+	if heldAfterFreezeFacts.FrozenPackedStoreOnly {
+		t.Fatalf("expected value with local-region provenance to avoid frozen-store-only classification, got %#v", heldAfterFreezeFacts)
+	}
+	if result.ExprDependsOnlyOnFrozenPackedStores(heldAfterFreezeExpr) {
+		t.Fatalf("expected result query to reject mixed local-region and frozen-store provenance")
+	}
+}
