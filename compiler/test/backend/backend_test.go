@@ -2672,6 +2672,93 @@ def direct_different_bounds_view(left: dstr[row], right: dstr[row]) -> bool:
 	}
 }
 
+func TestGenerateLLVMIRSpecializesDStrLiteralEquality(t *testing.T) {
+	src := `extern ctx_streq(left: dstr[row], right: dstr[shape_other]) -> int
+
+def literal_right(text: dstr[row]) -> bool:
+	return text == "alphabet soup"
+
+def literal_left(text: dstr[row]) -> bool:
+	return "alphabet soup" == text
+
+def direct_literal_right(text: dstr[row]) -> bool:
+	return ctx_streq(text, "alphabet soup") != 0
+
+def direct_literal_left(text: dstr[row]) -> bool:
+	return ctx_streq("alphabet soup", text) != 0
+
+def direct_empty_literal(text: dstr[row]) -> bool:
+	return ctx_streq(text, "") != 0
+`
+	result := parseAndAnalyze(t, "backend_runtime_dstr_literal_eq.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	for _, name := range []string{"literal_right", "literal_left", "direct_literal_right", "direct_literal_left"} {
+		body := functionIR(output, name)
+		if body == "" {
+			t.Fatalf("expected to find %s body, got:\n%s", name, output)
+		}
+		for _, want := range []string{"call i64 @ctx_strlen(ptr", "call i64 @memcmp(ptr"} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("expected %s to contain %q, got:\n%s", name, want, body)
+			}
+		}
+		if strings.Contains(body, "call i64 @ctx_streq") {
+			t.Fatalf("expected %s to avoid ctx_streq helper fallback, got:\n%s", name, body)
+		}
+	}
+
+	emptyBody := functionIR(output, "direct_empty_literal")
+	if emptyBody == "" {
+		t.Fatalf("expected to find direct_empty_literal body, got:\n%s", output)
+	}
+	if !strings.Contains(emptyBody, "call i64 @ctx_strlen(ptr") {
+		t.Fatalf("expected direct_empty_literal to contain ctx_strlen length check, got:\n%s", emptyBody)
+	}
+	for _, bad := range []string{"call i64 @ctx_streq", "call i64 @memcmp("} {
+		if strings.Contains(emptyBody, bad) {
+			t.Fatalf("expected direct_empty_literal to avoid %q, got:\n%s", bad, emptyBody)
+		}
+	}
+}
+
+func TestGenerateLLVMIRSpecializesConstantStringSliceLiteralEquality(t *testing.T) {
+	src := `extern ctx_string_slice(value: dstr[row], start: i64, end: i64) -> dstr[shape_out]
+extern ctx_streq(left: dstr[shape_left], right: dstr[shape_right]) -> int
+
+def slice_literal(text: dstr[row]) -> bool:
+	return ctx_string_slice(text, 1, 10) == "lphabet s"
+
+def direct_slice_literal(text: dstr[row]) -> bool:
+	return ctx_streq(ctx_string_slice(text, 1, 10), "lphabet s") != 0
+`
+	result := parseAndAnalyze(t, "backend_runtime_string_slice_literal_eq.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	for _, name := range []string{"slice_literal", "direct_slice_literal"} {
+		body := functionIR(output, name)
+		if body == "" {
+			t.Fatalf("expected to find %s body, got:\n%s", name, output)
+		}
+		for _, want := range []string{"call i64 @ctx_strlen(ptr", "call i64 @memcmp(ptr"} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("expected %s to contain %q, got:\n%s", name, want, body)
+			}
+		}
+		for _, bad := range []string{"call ptr @intern_small_string", "call ptr @alloc_perm", "call i64 @ctx_streq"} {
+			if strings.Contains(body, bad) {
+				t.Fatalf("expected %s to avoid %q, got:\n%s", name, bad, body)
+			}
+		}
+	}
+}
+
 func TestGenerateLLVMIRSpecializesConstantStringSliceEquality(t *testing.T) {
 	src := `extern ctx_string_slice_eq(value: dstr[row], start: i64, end: i64, other: dstr[col]) -> int
 

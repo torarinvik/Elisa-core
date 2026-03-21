@@ -986,6 +986,28 @@ func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helpe
 	if swap {
 		firstExpr, secondExpr = secondExpr, firstExpr
 	}
+	if helperName == "ctx_streq" {
+		if literalText, ok := s.staticCStringLiteral(secondExpr); ok {
+			cmp, err := s.emitDStrStaticLiteralEqual(firstExpr, firstType, secondExpr, literalText)
+			if err != nil {
+				return nil, nil, err
+			}
+			if expr.Op == lexer.TOKEN_BANGEQ {
+				cmp = C.LLVMBuildNot(s.builder, cmp, cStringFree("dstrlit.eq.not"))
+			}
+			return cmp, s.g.result.NamedTypes["bool"], nil
+		}
+		if literalText, ok := s.staticCStringLiteral(firstExpr); ok {
+			cmp, err := s.emitDStrStaticLiteralEqual(secondExpr, secondType, firstExpr, literalText)
+			if err != nil {
+				return nil, nil, err
+			}
+			if expr.Op == lexer.TOKEN_BANGEQ {
+				cmp = C.LLVMBuildNot(s.builder, cmp, cStringFree("dstrlit.eq.not"))
+			}
+			return cmp, s.g.result.NamedTypes["bool"], nil
+		}
+	}
 	if helperName == "ctx_string_view_eq" {
 		if literalText, ok := s.staticCStringLiteral(secondExpr); ok {
 			cmp, err := s.emitStringViewStaticLiteralEqual(firstExpr, firstType, secondExpr, literalText)
@@ -1319,6 +1341,38 @@ func (s *functionState) emitConstantClampedStringSliceOperand(expr ast.Expr, exp
 	return sliceData, sliceLen, nil
 }
 
+func (s *functionState) constantDStrSliceCall(expr ast.Expr) (ast.Expr, semantic.Type, int64, int64, bool) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return s.constantDStrSliceCall(n.Inner)
+	case *ast.CastExpr:
+		return s.constantDStrSliceCall(n.Operand)
+	case *ast.CanExpr:
+		return s.constantDStrSliceCall(n.Expr)
+	case *ast.CallExpr:
+		ident, ok := n.Func.(*ast.Ident)
+		if !ok || ident.Name != "ctx_string_slice" || len(n.Args) != 3 {
+			return nil, nil, 0, 0, false
+		}
+		baseExpr := n.Args[0]
+		baseType := s.exprType(baseExpr)
+		if classifyRuntimeStringCompareKind(baseType) != runtimeStringCompareDStr {
+			return nil, nil, 0, 0, false
+		}
+		start, ok := s.staticIntLiteral(n.Args[1])
+		if !ok || start < 0 {
+			return nil, nil, 0, 0, false
+		}
+		end, ok := s.staticIntLiteral(n.Args[2])
+		if !ok || end < start {
+			return nil, nil, 0, 0, false
+		}
+		return baseExpr, baseType, start, end, true
+	default:
+		return nil, nil, 0, 0, false
+	}
+}
+
 func (s *functionState) emitSpecializedStringSliceEqCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	ident, ok := expr.Func.(*ast.Ident)
 	if !ok || ident.Name != "ctx_string_slice_eq" {
@@ -1521,6 +1575,32 @@ func (s *functionState) emitSpecializedRuntimeStringCompareCall(expr *ast.CallEx
 	rightExpr := expr.Args[1]
 	leftType := s.exprType(leftExpr)
 	rightType := s.exprType(rightExpr)
+	if ident.Name == "ctx_streq" {
+		if literalText, ok := s.staticCStringLiteral(rightExpr); ok {
+			cmp, err := s.emitDStrStaticLiteralEqual(leftExpr, leftType, rightExpr, literalText)
+			if err != nil {
+				return nil, nil, true, err
+			}
+			intType := s.g.result.NamedTypes["int"]
+			intLLVMType, err := s.g.lowerType(intType)
+			if err != nil {
+				return nil, nil, true, err
+			}
+			return C.LLVMBuildZExt(s.builder, cmp, intLLVMType, cStringFree("dstrlit.direct.int")), intType, true, nil
+		}
+		if literalText, ok := s.staticCStringLiteral(leftExpr); ok {
+			cmp, err := s.emitDStrStaticLiteralEqual(rightExpr, rightType, leftExpr, literalText)
+			if err != nil {
+				return nil, nil, true, err
+			}
+			intType := s.g.result.NamedTypes["int"]
+			intLLVMType, err := s.g.lowerType(intType)
+			if err != nil {
+				return nil, nil, true, err
+			}
+			return C.LLVMBuildZExt(s.builder, cmp, intLLVMType, cStringFree("dstrlit.direct.int")), intType, true, nil
+		}
+	}
 	cmp, ok, err := s.emitSameExtentRuntimeStringCompareExpr(lexer.TOKEN_EQEQ, leftExpr, leftType, rightExpr, rightType)
 	if err != nil {
 		return nil, nil, true, err
@@ -2503,6 +2583,75 @@ func (s *functionState) emitStringViewStaticLiteralEqual(viewExpr ast.Expr, view
 	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
 	boolType := C.LLVMInt1TypeInContext(s.g.context)
 	phi := C.LLVMBuildPhi(s.builder, boolType, cStringFree("svlit.eq"))
+	falseValue := C.LLVMConstInt(boolType, 0, 0)
+	values := []C.LLVMValueRef{falseValue, compareValue}
+	blocks := []C.LLVMBasicBlockRef{entryBlock, compareEnd}
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	return phi, nil
+}
+
+func (s *functionState) emitDStrStaticLiteralEqual(textExpr ast.Expr, textType semantic.Type, literalExpr ast.Expr, literalText string) (C.LLVMValueRef, error) {
+	if classifyRuntimeStringCompareKind(textType) != runtimeStringCompareDStr {
+		return nil, fmt.Errorf("dstr literal specialization requires dstr operand")
+	}
+	lenType := s.g.result.NamedTypes["i64"]
+	var (
+		textData C.LLVMValueRef
+		textLen  C.LLVMValueRef
+		err      error
+	)
+	if baseExpr, baseType, start, end, ok := s.constantDStrSliceCall(textExpr); ok {
+		textData, textLen, err = s.emitConstantClampedStringSliceOperand(baseExpr, baseType, start, end, "dstrlit.slice")
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		textValue, _, err := s.emitExpr(textExpr, textType)
+		if err != nil {
+			return nil, err
+		}
+		textData = textValue
+		textLen, err = s.emitRuntimeStringLengthValue(textValue, textType, lenType, "dstrlit.len")
+		if err != nil {
+			return nil, err
+		}
+	}
+	literalLen := len([]byte(literalText))
+	lenLLVMType, err := s.g.lowerBuiltin("i64")
+	if err != nil {
+		return nil, err
+	}
+	lenValue := C.LLVMConstInt(lenLLVMType, C.ulonglong(literalLen), 0)
+	lenEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), textLen, lenValue, cStringFree("dstrlit.len.eq"))
+	if literalLen == 0 {
+		return lenEqual, nil
+	}
+
+	entryBlock := C.LLVMGetInsertBlock(s.builder)
+	compareBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dstrlit.compare"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dstrlit.merge"))
+	C.LLVMBuildCondBr(s.builder, lenEqual, compareBB, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, compareBB)
+	var compareValue C.LLVMValueRef
+	if literalLen <= 8 {
+		compareValue, err = s.emitStringViewLiteralBytesEqual(textData, literalText)
+	} else {
+		literalValue, _, emitErr := s.emitExpr(literalExpr, nil)
+		if emitErr != nil {
+			return nil, emitErr
+		}
+		compareValue, err = s.emitMemcmpEqual(textData, literalValue, literalLen)
+	}
+	if err != nil {
+		return nil, err
+	}
+	compareEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	boolType := C.LLVMInt1TypeInContext(s.g.context)
+	phi := C.LLVMBuildPhi(s.builder, boolType, cStringFree("dstrlit.eq"))
 	falseValue := C.LLVMConstInt(boolType, 0, 0)
 	values := []C.LLVMValueRef{falseValue, compareValue}
 	blocks := []C.LLVMBasicBlockRef{entryBlock, compareEnd}
