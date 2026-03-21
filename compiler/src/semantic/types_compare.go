@@ -11,6 +11,45 @@ func funcTypeHasSinglePermissionRowParam(fn *FuncType) (string, bool) {
 	return ref.Name, true
 }
 
+func sameAggregateStateLists(a []RefState, b []RefState) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func aggregateStateListAssignable(dst []RefState, src []RefState) bool {
+	if len(dst) != len(src) {
+		return false
+	}
+	for i := range dst {
+		if !refStateAssignable(dst[i], src[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func mergeAggregateStateLists(a []RefState, b []RefState) ([]RefState, bool) {
+	if len(a) != len(b) {
+		return nil, false
+	}
+	merged := make([]RefState, len(a))
+	for i := range a {
+		state, ok := mergeRefStates(a[i], b[i])
+		if !ok {
+			return nil, false
+		}
+		merged[i] = state
+	}
+	return merged, true
+}
+
 func SameType(a, b Type) bool {
 	if a == nil || b == nil {
 		return a == b
@@ -34,6 +73,18 @@ func SameType(a, b Type) bool {
 	case *TypeParamType:
 		tb, ok := b.(*TypeParamType)
 		return ok && ta.Name == tb.Name
+	case *RefStorageParamType:
+		tb, ok := b.(*RefStorageParamType)
+		return ok && ta.Name == tb.Name
+	case *RefStorageValueType:
+		tb, ok := b.(*RefStorageValueType)
+		return ok && ta.Storage == tb.Storage
+	case *RefStateParamType:
+		tb, ok := b.(*RefStateParamType)
+		return ok && ta.Name == tb.Name
+	case *RefStateValueType:
+		tb, ok := b.(*RefStateValueType)
+		return ok && ta.State == tb.State
 	case *ErrorSetType:
 		tb, ok := b.(*ErrorSetType)
 		return ok && ErrorSetTagsEqual(ta, tb)
@@ -48,7 +99,7 @@ func SameType(a, b Type) bool {
 		return ok && ta.Name == tb.Name
 	case *RefType:
 		tb, ok := b.(*RefType)
-		return ok && ta.State == tb.State && ta.Storage == tb.Storage && ta.Region == tb.Region && SameType(ta.Elem, tb.Elem)
+		return ok && ta.State == tb.State && ta.StateParam == tb.StateParam && ta.Storage == tb.Storage && ta.StorageParam == tb.StorageParam && ta.Region == tb.Region && SameType(ta.Elem, tb.Elem)
 	case *ArrayType:
 		tb, ok := b.(*ArrayType)
 		return ok && arraySizesEqual(ta, tb) && SameType(ta.Elem, tb.Elem)
@@ -95,14 +146,29 @@ func SameType(a, b Type) bool {
 		return SameType(ta.Base, tb.Base)
 	case *AggregateStateType:
 		tb, ok := b.(*AggregateStateType)
-		return ok && ta.State == tb.State && SameType(ta.Base, tb.Base)
+		return ok && sameAggregateStateLists(aggregateStateStates(ta), aggregateStateStates(tb)) && SameType(ta.Base, tb.Base)
 	case *FuncType:
 		tb, ok := b.(*FuncType)
-		if !ok || ta.Variadic != tb.Variadic || len(ta.TypeParams) != len(tb.TypeParams) || len(ta.RegionParams) != len(tb.RegionParams) || len(ta.PermissionParams) != len(tb.PermissionParams) || len(ta.UsedPermissionParams) != len(tb.UsedPermissionParams) || len(ta.Permissions) != len(tb.Permissions) || len(ta.ShapeParams) != len(tb.ShapeParams) || len(ta.FreshReturnShapeParams) != len(tb.FreshReturnShapeParams) || len(ta.Params) != len(tb.Params) || !SameType(ta.Return, tb.Return) {
+		if !ok || ta.Variadic != tb.Variadic || len(ta.GenericParams) != len(tb.GenericParams) || len(ta.TypeParams) != len(tb.TypeParams) || len(ta.RefStorageParams) != len(tb.RefStorageParams) || len(ta.RefStateParams) != len(tb.RefStateParams) || len(ta.RegionParams) != len(tb.RegionParams) || len(ta.PermissionParams) != len(tb.PermissionParams) || len(ta.UsedPermissionParams) != len(tb.UsedPermissionParams) || len(ta.Permissions) != len(tb.Permissions) || len(ta.ShapeParams) != len(tb.ShapeParams) || len(ta.FreshReturnShapeParams) != len(tb.FreshReturnShapeParams) || len(ta.Params) != len(tb.Params) || !SameType(ta.Return, tb.Return) {
 			return false
+		}
+		for i := range ta.GenericParams {
+			if ta.GenericParams[i] != tb.GenericParams[i] {
+				return false
+			}
 		}
 		for i := range ta.TypeParams {
 			if ta.TypeParams[i] != tb.TypeParams[i] {
+				return false
+			}
+		}
+		for i := range ta.RefStorageParams {
+			if ta.RefStorageParams[i] != tb.RefStorageParams[i] {
+				return false
+			}
+		}
+		for i := range ta.RefStateParams {
+			if ta.RefStateParams[i] != tb.RefStateParams[i] {
 				return false
 			}
 		}
@@ -169,6 +235,26 @@ func AssignableTo(dst, src Type) bool {
 	if _, ok := src.(*TypeParamType); ok {
 		return true
 	}
+	if _, ok := dst.(*RefStorageParamType); ok {
+		_, ok = src.(*RefStorageValueType)
+		return ok
+	}
+	if _, ok := src.(*RefStorageParamType); ok {
+		return true
+	}
+	if _, ok := dst.(*RefStateParamType); ok {
+		_, ok = src.(*RefStateValueType)
+		return ok
+	}
+	if _, ok := src.(*RefStateParamType); ok {
+		return true
+	}
+	if _, ok := dst.(*RefStorageValueType); ok {
+		return SameType(dst, src)
+	}
+	if _, ok := dst.(*RefStateValueType); ok {
+		return SameType(dst, src)
+	}
 	if SameType(dst, src) {
 		return true
 	}
@@ -203,7 +289,7 @@ func AssignableTo(dst, src Type) bool {
 		if !ok {
 			return false
 		}
-		return SameType(dstAgg.Base, srcAgg.Base) && refStateAssignable(dstAgg.State, srcAgg.State)
+		return SameType(dstAgg.Base, srcAgg.Base) && aggregateStateListAssignable(aggregateStateStates(dstAgg), aggregateStateStates(srcAgg))
 	}
 	if IsNumericType(dst) && IsNumericType(src) {
 		return true
@@ -221,6 +307,12 @@ func AssignableTo(dst, src Type) bool {
 		if sr, ok := src.(*RefType); ok {
 			if !SameType(dr.Elem, sr.Elem) {
 				return false
+			}
+			if dr.StateParam != "" || sr.StateParam != "" {
+				return dr.StateParam == sr.StateParam && dr.StorageParam == sr.StorageParam && refRegionAssignable(dr.Region, sr.Region)
+			}
+			if dr.StorageParam != "" || sr.StorageParam != "" {
+				return dr.StateParam == sr.StateParam && dr.StorageParam == sr.StorageParam && refStateAssignable(dr.State, sr.State) && refRegionAssignable(dr.Region, sr.Region)
 			}
 			return refStateAssignable(dr.State, sr.State) && refStorageAssignable(dr.Storage, sr.Storage, dr.ExplicitStorage, sr.ExplicitStorage) && refRegionAssignable(dr.Region, sr.Region)
 		}
@@ -240,6 +332,14 @@ func matchTypePattern(pattern, actual Type) bool {
 	}
 	if _, ok := pattern.(*TypeParamType); ok {
 		return true
+	}
+	if _, ok := pattern.(*RefStorageParamType); ok {
+		_, ok = actual.(*RefStorageValueType)
+		return ok
+	}
+	if _, ok := pattern.(*RefStateParamType); ok {
+		_, ok = actual.(*RefStateValueType)
+		return ok
 	}
 	switch p := pattern.(type) {
 	case *NeverType:
@@ -270,10 +370,18 @@ func matchTypePattern(pattern, actual Type) bool {
 		if !ok {
 			return false
 		}
-		if !refStateAssignable(p.State, a.State) {
+		if p.StateParam != "" || a.StateParam != "" {
+			if p.StateParam != a.StateParam {
+				return false
+			}
+		} else if !refStateAssignable(p.State, a.State) {
 			return false
 		}
-		if !refStorageAssignable(p.Storage, a.Storage, p.ExplicitStorage, a.ExplicitStorage) {
+		if p.StorageParam != "" || a.StorageParam != "" {
+			if p.StorageParam != a.StorageParam {
+				return false
+			}
+		} else if !refStorageAssignable(p.Storage, a.Storage, p.ExplicitStorage, a.ExplicitStorage) {
 			return false
 		}
 		if !refRegionAssignable(p.Region, a.Region) {
@@ -329,7 +437,7 @@ func matchTypePattern(pattern, actual Type) bool {
 		if !ok {
 			return false
 		}
-		if !refStateAssignable(p.State, a.State) {
+		if !aggregateStateListAssignable(aggregateStateStates(p), aggregateStateStates(a)) {
 			return false
 		}
 		return matchTypePattern(p.Base, a.Base)
@@ -416,8 +524,8 @@ func MergeTypes(a, b Type) Type {
 	}
 	if aa, ok := a.(*AggregateStateType); ok {
 		if ba, ok := b.(*AggregateStateType); ok && SameType(aa.Base, ba.Base) {
-			if state, ok := mergeRefStates(aa.State, ba.State); ok {
-				return &AggregateStateType{Base: aa.Base, State: state}
+			if states, ok := mergeAggregateStateLists(aggregateStateStates(aa), aggregateStateStates(ba)); ok {
+				return cloneAggregateStateWithBase(aa.Base, states)
 			}
 		}
 	}
@@ -426,6 +534,9 @@ func MergeTypes(a, b Type) Type {
 	}
 	if ar, ok := a.(*RefType); ok {
 		if br, ok := b.(*RefType); ok && SameType(ar.Elem, br.Elem) {
+			if ar.StateParam != br.StateParam || ar.StorageParam != br.StorageParam {
+				return invalidType
+			}
 			storage, explicit, okStorage := mergeRefStorages(ar.Storage, br.Storage, ar.ExplicitStorage, br.ExplicitStorage)
 			if !okStorage {
 				return invalidType
@@ -435,7 +546,7 @@ func MergeTypes(a, b Type) Type {
 				return invalidType
 			}
 			if state, ok := mergeRefStates(ar.State, br.State); ok {
-				return &RefType{Elem: ar.Elem, State: state, Storage: storage, Region: region, ExplicitStorage: explicit}
+				return &RefType{Elem: ar.Elem, State: state, StateParam: ar.StateParam, Storage: storage, StorageParam: ar.StorageParam, Region: region, ExplicitStorage: explicit}
 			}
 		}
 	}

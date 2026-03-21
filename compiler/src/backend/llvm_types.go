@@ -170,7 +170,7 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 			}
 		}
 	case *semantic.StructType:
-		if len(tt.TypeParams) == 0 {
+		if len(structGenericParams(tt)) == 0 {
 			_, err = g.ensureStructBody(tt.Name, tt)
 			break
 		}
@@ -459,7 +459,7 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		}
 		return g.ensureEnumBody(tt.Name, tt)
 	case *semantic.StructType:
-		if len(tt.TypeParams) == 0 {
+		if len(structGenericParams(tt)) == 0 {
 			return g.ensureStructBody(tt.Name, tt)
 		}
 		return nil, fmt.Errorf("cannot lower generic struct %s without concrete type arguments", tt.Name)
@@ -890,13 +890,11 @@ func (g *llvmGenerator) ensureGenericInstanceStruct(inst *semantic.GenericInstan
 	if !ok {
 		return nil, fmt.Errorf("generic instance %s does not resolve to a struct base", inst.Name)
 	}
-	if len(base.TypeParams) != len(inst.Args) {
-		return nil, fmt.Errorf("generic instance %s has %d args, expected %d", inst.Name, len(inst.Args), len(base.TypeParams))
+	params := structGenericParams(base)
+	if len(params) != len(inst.Args) {
+		return nil, fmt.Errorf("generic instance %s has %d args, expected %d", inst.Name, len(inst.Args), len(params))
 	}
-	subst := make(map[string]semantic.Type, len(base.TypeParams))
-	for i, param := range base.TypeParams {
-		subst[param] = inst.Args[i]
-	}
+	subst := genericBindingsForArgs(params, inst.Args)
 	if base.Decl == nil {
 		return nil, fmt.Errorf("generic struct %s is missing declaration metadata", base.Name)
 	}
@@ -927,10 +925,46 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type) semantic.Ty
 			return mapped
 		}
 		return t
+	case *semantic.RefStorageParamType:
+		if mapped, ok := subst[tt.Name]; ok {
+			return mapped
+		}
+		return t
+	case *semantic.RefStateParamType:
+		if mapped, ok := subst[tt.Name]; ok {
+			return mapped
+		}
+		return t
 	case *semantic.ErrorUnionType:
 		return &semantic.ErrorUnionType{Value: substituteType(tt.Value, subst), Errors: tt.Errors}
 	case *semantic.RefType:
-		return &semantic.RefType{Elem: substituteType(tt.Elem, subst), State: tt.State, Storage: tt.Storage, Region: tt.Region, ExplicitStorage: tt.ExplicitStorage}
+		state := tt.State
+		stateParam := tt.StateParam
+		if stateParam != "" {
+			if mapped, ok := subst[stateParam]; ok {
+				switch mapped := mapped.(type) {
+				case *semantic.RefStateValueType:
+					state = mapped.State
+					stateParam = ""
+				case *semantic.RefStateParamType:
+					stateParam = mapped.Name
+				}
+			}
+		}
+		storage := tt.Storage
+		storageParam := tt.StorageParam
+		if storageParam != "" {
+			if mapped, ok := subst[storageParam]; ok {
+				switch mapped := mapped.(type) {
+				case *semantic.RefStorageValueType:
+					storage = mapped.Storage
+					storageParam = ""
+				case *semantic.RefStorageParamType:
+					storageParam = mapped.Name
+				}
+			}
+		}
+		return &semantic.RefType{Elem: substituteType(tt.Elem, subst), State: state, StateParam: stateParam, Storage: storage, StorageParam: storageParam, Region: tt.Region, ExplicitStorage: tt.ExplicitStorage}
 	case *semantic.ArrayType:
 		return &semantic.ArrayType{Elem: substituteType(tt.Elem, subst), Size: tt.Size, HasConstSize: tt.HasConstSize, ConstSize: tt.ConstSize, SurfaceName: tt.SurfaceName}
 	case *semantic.DArrayType:
@@ -950,7 +984,7 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type) semantic.Ty
 		}
 		return &semantic.GenericInstanceType{Name: tt.Name, Base: substituteType(tt.Base, subst), Args: args}
 	case *semantic.AggregateStateType:
-		return &semantic.AggregateStateType{Base: substituteType(tt.Base, subst), State: tt.State}
+		return &semantic.AggregateStateType{Base: substituteType(tt.Base, subst), State: tt.State, States: append([]semantic.RefState(nil), tt.States...)}
 	case *semantic.FuncType:
 		params := make([]semantic.Type, 0, len(tt.Params))
 		for _, param := range tt.Params {
@@ -959,7 +993,10 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type) semantic.Ty
 		return &semantic.FuncType{
 			Name:                   tt.Name,
 			TypeParams:             append([]string(nil), tt.TypeParams...),
+			RefStorageParams:       append([]string(nil), tt.RefStorageParams...),
+			RefStateParams:         append([]string(nil), tt.RefStateParams...),
 			RegionParams:           append([]string(nil), tt.RegionParams...),
+			GenericParams:          append([]ast.GenericParam(nil), tt.GenericParams...),
 			ShapeParams:            append([]string(nil), tt.ShapeParams...),
 			FreshReturnShapeParams: append([]string(nil), tt.FreshReturnShapeParams...),
 			Params:                 params,
@@ -973,6 +1010,51 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type) semantic.Ty
 
 func runtimeDynArrayName(elem semantic.Type) string {
 	return mangleGenericType("DynArray", []semantic.Type{elem})
+}
+
+func structGenericParams(base *semantic.StructType) []ast.GenericParam {
+	if base == nil {
+		return nil
+	}
+	if len(base.GenericParams) != 0 {
+		return base.GenericParams
+	}
+	params := make([]ast.GenericParam, 0, len(base.TypeParams))
+	for _, name := range base.TypeParams {
+		params = append(params, ast.GenericParam{Kind: ast.GenericParamType, Name: name})
+	}
+	return params
+}
+
+func funcGenericParams(base *semantic.FuncType) []ast.GenericParam {
+	if base == nil {
+		return nil
+	}
+	if len(base.GenericParams) != 0 {
+		return base.GenericParams
+	}
+	params := make([]ast.GenericParam, 0, len(base.TypeParams))
+	for _, name := range base.TypeParams {
+		params = append(params, ast.GenericParam{Kind: ast.GenericParamType, Name: name})
+	}
+	return params
+}
+
+func genericBindingsForArgs(params []ast.GenericParam, args []semantic.Type) map[string]semantic.Type {
+	if len(params) == 0 || len(args) == 0 {
+		return nil
+	}
+	bindings := make(map[string]semantic.Type, len(params))
+	for i, param := range params {
+		if i >= len(args) || args[i] == nil {
+			continue
+		}
+		bindings[param.Name] = args[i]
+	}
+	if len(bindings) == 0 {
+		return nil
+	}
+	return bindings
 }
 
 func mangleGenericType(base string, args []semantic.Type) string {

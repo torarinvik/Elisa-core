@@ -71,6 +71,8 @@ type Analyzer struct {
 	exprFacts                         map[ast.Expr]OptimizationFacts
 	symbolFacts                       map[*Symbol]OptimizationFacts
 	typeParamScopes                   []map[string]Type
+	refStorageParamScopes             []map[string]Type
+	refStateParamScopes               []map[string]Type
 	shapeParamScopes                  []map[string]Shape
 	regionParamScopes                 []map[string]bool
 	permissionParamScopes             []map[string]bool
@@ -316,10 +318,11 @@ type builtinFieldSpec struct {
 func (a *Analyzer) registerBuiltinStructType(name string, typeParams []string, affine bool, fields []builtinFieldSpec) {
 	declFields := make([]ast.FieldDecl, 0, len(fields))
 	semanticFields := make(map[string]Field, len(fields))
-	decl := &ast.StructDecl{Position: lexer.Pos{}, Name: name, TypeParams: append([]string(nil), typeParams...), ReprC: true, Affine: affine}
+	decl := &ast.StructDecl{Position: lexer.Pos{}, Name: name, TypeParams: append([]string(nil), typeParams...), GenericParams: astTypeGenericParams(typeParams), ReprC: true, Affine: affine}
 	st := &StructType{
 		Name:       name,
 		TypeParams: append([]string(nil), typeParams...),
+		GenericParams: astTypeGenericParams(typeParams),
 		Fields:     semanticFields,
 		Affine:     affine,
 		ReprC:      true,
@@ -388,6 +391,17 @@ func nestedRefTypeExpr(name string, innerNonNull bool, outerNullable bool) ast.T
 	}
 	inner := &ast.RefType{Position: lexer.Pos{}, Elem: &ast.NamedType{Position: lexer.Pos{}, Name: name}, State: innerState, Storage: ast.RefStorageAny}
 	return &ast.RefType{Position: lexer.Pos{}, Elem: inner, State: outerState, Storage: ast.RefStorageAny}
+}
+
+func astTypeGenericParams(typeParams []string) []ast.GenericParam {
+	if len(typeParams) == 0 {
+		return nil
+	}
+	params := make([]ast.GenericParam, 0, len(typeParams))
+	for _, name := range typeParams {
+		params = append(params, ast.GenericParam{Position: lexer.Pos{}, Kind: ast.GenericParamType, Name: name})
+	}
+	return params
 }
 
 func isBuiltinRuntimeStructName(name string) bool {
@@ -507,6 +521,9 @@ func (a *Analyzer) collectNamedTypes(decls []ast.Decl) {
 			st := &StructType{
 				Name:       n.Name,
 				TypeParams: append([]string(nil), n.TypeParams...),
+				RefStorageParams: append([]string(nil), n.RefStorageParams...),
+				RefStateParams: append([]string(nil), n.RefStateParams...),
+				GenericParams: append([]ast.GenericParam(nil), n.GenericParams...),
 				Fields:     map[string]Field{},
 				Affine:     n.Affine,
 				ReprC:      n.ReprC,
@@ -697,7 +714,7 @@ func (a *Analyzer) populateStructFields(decls []ast.Decl) {
 		if st.Builtin && isBuiltinRuntimeStructName(stDecl.Name) {
 			continue
 		}
-		a.withTypeParams(stDecl.TypeParams, nil, func() {
+		a.withGenericParams(stDecl.GenericParams, nil, func() {
 			for _, field := range stDecl.Fields {
 				if _, exists := st.Fields[field.Name]; exists {
 					a.errorf(field.Position, "duplicate field %q in struct %q", field.Name, stDecl.Name)
@@ -753,11 +770,11 @@ func (a *Analyzer) collectValueSymbols(decls []ast.Decl) {
 			}
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolGlobal, Type: declType, Node: n, Mutable: n.Mutable}, n.Pos())
 		case *ast.FuncDecl:
-			fnType := a.funcTypeFromDecl(n.Name, n.TypeParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Params, n.ReturnType, false)
+			fnType := a.funcTypeFromDecl(n.Name, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Params, n.ReturnType, false)
 			a.functionTypes[n.Name] = fnType
 			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolFunc, Type: fnType, Node: n, Mutable: false}, n.Pos())
 		case *ast.ExternFuncDecl:
-			fnType := a.funcTypeFromDecl(n.Name, nil, n.RegionParams, nil, n.Permissions, n.Params, n.ReturnType, n.Variadic)
+			fnType := a.funcTypeFromDecl(n.Name, nil, nil, nil, nil, n.RegionParams, nil, n.Permissions, n.Params, n.ReturnType, n.Variadic)
 			a.applyExternFuncAnnotations(n, fnType)
 			if !fnType.ReturnProvenanceKnown {
 				fnType.ReturnProvenanceKnown = true
@@ -1759,7 +1776,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 		a.currentReturn = fnType.Return
 		a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)
 	}
-	a.withTypeParams(fn.TypeParams, nil, func() {
+	a.withGenericParams(fn.GenericParams, nil, func() {
 		a.withRegionParams(fn.RegionParams, func() {
 			a.withPermissionParams(fn.PermissionParams, func() {
 				a.withShapeParams(fnType.ShapeParams, func() {
@@ -1867,7 +1884,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
 	a.suppressDiagnostics = true
 
-	a.withTypeParams(fn.TypeParams, nil, func() {
+	a.withGenericParams(fn.GenericParams, nil, func() {
 		a.withRegionParams(fn.RegionParams, func() {
 			a.withPermissionParams(fn.PermissionParams, func() {
 				a.withShapeParams(fnType.ShapeParams, func() {
@@ -1970,7 +1987,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
 	a.suppressDiagnostics = true
 
-	a.withTypeParams(fn.TypeParams, nil, func() {
+	a.withGenericParams(fn.GenericParams, nil, func() {
 		a.withRegionParams(fn.RegionParams, func() {
 			a.withPermissionParams(fn.PermissionParams, func() {
 				a.withShapeParams(fnType.ShapeParams, func() {

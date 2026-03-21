@@ -453,9 +453,28 @@ func ind(level int) string {
 	return strings.Repeat("  ", level)
 }
 
-func formatFuncGenericParams(typeParams []string, regionParams []string, permissionParams []string) string {
-	parts := make([]string, 0, len(typeParams)+len(regionParams)+len(permissionParams))
-	parts = append(parts, typeParams...)
+func formatFuncGenericParams(genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string) string {
+	parts := make([]string, 0, len(genericParams)+len(typeParams)+len(refStorageParams)+len(refStateParams)+len(regionParams)+len(permissionParams))
+	if len(genericParams) != 0 {
+		for _, param := range genericParams {
+			switch param.Kind {
+			case ast.GenericParamRefStorage:
+				parts = append(parts, "refstorage "+param.Name)
+			case ast.GenericParamRefState:
+				parts = append(parts, "refstate "+param.Name)
+			default:
+				parts = append(parts, param.Name)
+			}
+		}
+	} else {
+		parts = append(parts, typeParams...)
+		for _, name := range refStorageParams {
+			parts = append(parts, "refstorage "+name)
+		}
+		for _, name := range refStateParams {
+			parts = append(parts, "refstate "+name)
+		}
+	}
 	for _, name := range regionParams {
 		parts = append(parts, "region "+name)
 	}
@@ -490,6 +509,41 @@ func formatAnnotation(annotation ast.Annotation) string {
 	return "@" + annotation.Name + "(" + strings.Join(annotation.Args, ", ") + ")"
 }
 
+func aggregateStatePlaceholders(count int) string {
+	if count <= 0 {
+		return ""
+	}
+	parts := make([]string, count)
+	for i := range parts {
+		parts[i] = "?"
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+func aggregateStateExprMarkers(states []ast.RefState, fallback ast.RefState) string {
+	if len(states) == 0 {
+		return "[" + ast.RefStateMarker(fallback) + "]"
+	}
+	parts := make([]string, 0, len(states))
+	for _, state := range states {
+		parts = append(parts, ast.RefStateMarker(state))
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+func refStorageStr(storage ast.RefStorage) string {
+	switch storage {
+	case ast.RefStorageHeap:
+		return "heap"
+	case ast.RefStorageStack:
+		return "stack"
+	case ast.RefStorageStatic:
+		return "static"
+	default:
+		return "any"
+	}
+}
+
 func printDecl(w io.Writer, d ast.Decl, level int) {
 	prefix := ind(level)
 	switch n := d.(type) {
@@ -510,19 +564,20 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		if n.Affine {
 			affine = "affine "
 		}
-		tparams := ""
-		if len(n.TypeParams) > 0 {
-			tparams = "[" + strings.Join(n.TypeParams, ", ") + "]"
+		tparams := formatFuncGenericParams(n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, nil, nil)
+		stateParamCount := n.StateParamCount
+		if stateParamCount == 0 && n.HasStateParam {
+			stateParamCount = 1
 		}
-		if n.HasStateParam {
-			tparams += "[?]"
+		if stateParamCount > 0 {
+			tparams += aggregateStatePlaceholders(stateParamCount)
 		}
 		fmt.Fprintf(w, "%s%sstruct %s%s (%d fields)\n", prefix, affine, n.Name, tparams, len(n.Fields))
 	case *ast.FuncDecl:
 		for _, annotation := range n.Annotations {
 			fmt.Fprintf(w, "%s%s\n", prefix, formatAnnotation(annotation))
 		}
-		tparams := formatFuncGenericParams(n.TypeParams, n.RegionParams, n.PermissionParams)
+		tparams := formatFuncGenericParams(n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams)
 		ret := ""
 		if n.ReturnType != nil {
 			ret = " -> " + typeStr(n.ReturnType)
@@ -532,7 +587,7 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		for _, annotation := range n.Annotations {
 			fmt.Fprintf(w, "%s%s\n", prefix, formatAnnotation(annotation))
 		}
-		tparams := formatFuncGenericParams(nil, n.RegionParams, nil)
+		tparams := formatFuncGenericParams(nil, nil, nil, nil, n.RegionParams, nil)
 		ret := ""
 		if n.ReturnType != nil {
 			ret = " -> " + typeStr(n.ReturnType)
@@ -578,7 +633,9 @@ func typeStr(t ast.TypeExpr) string {
 	case *ast.RefType:
 		s := typeStr(n.Elem)
 		prefix := ""
-		if n.Region != "" {
+		if n.StorageParam != "" {
+			prefix = n.StorageParam + " "
+		} else if n.Region != "" {
 			prefix = n.Region + " "
 		} else if n.Explicit || n.Storage != ast.RefStorageAny {
 			switch n.Storage {
@@ -598,6 +655,9 @@ func typeStr(t ast.TypeExpr) string {
 		case ast.RefStateNull:
 			return prefix + s + "!"
 		default:
+			if n.StateParam != "" {
+				return prefix + s + "&[" + n.StateParam + "]"
+			}
 			return prefix + s + "&"
 		}
 	case *ast.GenericType:
@@ -607,7 +667,11 @@ func typeStr(t ast.TypeExpr) string {
 		}
 		return n.Name + "[" + strings.Join(args, ", ") + "]"
 	case *ast.AggregateStateTypeExpr:
-		return typeStr(n.Base) + "[" + ast.RefStateMarker(n.State) + "]"
+		return typeStr(n.Base) + aggregateStateExprMarkers(n.States, n.State)
+	case *ast.RefStateLiteralTypeExpr:
+		return ast.RefStateMarker(n.State)
+	case *ast.RefStorageLiteralTypeExpr:
+		return refStorageStr(n.Storage)
 	case *ast.MutableType:
 		return "mutable " + typeStr(n.Elem)
 	case *ast.TailType:

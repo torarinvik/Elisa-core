@@ -215,6 +215,39 @@ def read(value: Holder[&]) -> i32:
 	requireFunctionReturnTypeString(t, result, "read", "i32")
 }
 
+func TestAnalyzeAcceptsMultiAggregateStateStructTypes(t *testing.T) {
+	src := `struct Holder[?, ?]:
+    value: i32
+
+def widen(value: Holder[&, !]) -> Holder:
+    return value
+
+def read(value: Holder[&, ?]) -> i32:
+    return value.value
+`
+	result, errs := parseAndAnalyze(t, "aggregate_state_structs_multi.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "widen", "Holder[?, ?]")
+	requireFunctionReturnTypeString(t, result, "read", "i32")
+}
+
+func TestAnalyzeRejectsAggregateStateArityMismatch(t *testing.T) {
+	src := `struct Pair[?, ?]:
+    value: i32
+
+def bad(value: Pair[&]) -> Pair[&]:
+    return value
+`
+	_, errs := parseAndAnalyze(t, "aggregate_state_arity_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "expects 2 aggregate state arguments, got 1") {
+		t.Fatalf("expected aggregate state arity diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeRejectsAggregateStateOnPlainStruct(t *testing.T) {
 	src := `struct Plain:
     value: i32

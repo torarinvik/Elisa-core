@@ -430,27 +430,34 @@ func (p *Parser) parseStructDecl() *ast.StructDecl {
 	name := p.expect(lexer.TOKEN_IDENT).Text
 
 	var typeParams []string
+	var refStorageParams []string
+	var refStateParams []string
+	var genericParams []ast.GenericParam
 	hasStateParam := false
-	if _, ok := p.peekAggregateStateBracket(); ok {
-		state := p.parseAggregateStateBracket()
-		if state != ast.RefStateNullable {
-			p.errorf("struct state parameter declaration must use [?], got [%s]", ast.RefStateMarker(state))
-		}
-		hasStateParam = true
-	} else if p.match(lexer.TOKEN_LBRACKET) {
-		for {
-			typeParams = append(typeParams, p.expect(lexer.TOKEN_IDENT).Text)
-			if !p.match(lexer.TOKEN_COMMA) {
+	stateParamCount := 0
+	if states, ok := p.peekAggregateStateBracketList(); ok {
+		states = p.parseAggregateStateBracketList()
+		for _, state := range states {
+			if state != ast.RefStateNullable {
+				p.errorf("struct state parameter declaration must use only [?] placeholders, got [%s]", joinAggregateStateMarkers(states))
 				break
 			}
 		}
+		hasStateParam = len(states) > 0
+		stateParamCount = len(states)
+	} else if p.match(lexer.TOKEN_LBRACKET) {
+		typeParams, refStorageParams, refStateParams, _, _, genericParams = p.parseGenericParamListAfterLBracket(false, false)
 		p.expect(lexer.TOKEN_RBRACKET)
-		if _, ok := p.peekAggregateStateBracket(); ok {
-			state := p.parseAggregateStateBracket()
-			if state != ast.RefStateNullable {
-				p.errorf("struct state parameter declaration must use [?], got [%s]", ast.RefStateMarker(state))
+		if states, ok := p.peekAggregateStateBracketList(); ok {
+			states = p.parseAggregateStateBracketList()
+			for _, state := range states {
+				if state != ast.RefStateNullable {
+					p.errorf("struct state parameter declaration must use only [?] placeholders, got [%s]", joinAggregateStateMarkers(states))
+					break
+				}
 			}
-			hasStateParam = true
+			hasStateParam = len(states) > 0
+			stateParamCount = len(states)
 		}
 	}
 
@@ -468,7 +475,18 @@ func (p *Parser) parseStructDecl() *ast.StructDecl {
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.StructDecl{Position: pos, Name: name, TypeParams: typeParams, HasStateParam: hasStateParam, Affine: affine, ReprC: reprC, Fields: fields}
+	return &ast.StructDecl{Position: pos, Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, GenericParams: genericParams, HasStateParam: hasStateParam, StateParamCount: stateParamCount, Affine: affine, ReprC: reprC, Fields: fields}
+}
+
+func joinAggregateStateMarkers(states []ast.RefState) string {
+	if len(states) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(states))
+	for _, state := range states {
+		parts = append(parts, ast.RefStateMarker(state))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (p *Parser) parseFieldDecl() ast.FieldDecl {
@@ -496,37 +514,80 @@ func (p *Parser) parseFuncDecl() *ast.FuncDecl {
 	return p.parseFuncDeclWithAnnotations(nil)
 }
 
-func (p *Parser) parseFuncGenericParams() ([]string, []string, []string) {
+func (p *Parser) parseFuncGenericParams() ([]string, []string, []string, []string, []string, []ast.GenericParam) {
 	if !p.match(lexer.TOKEN_LBRACKET) {
-		return nil, nil, nil
+		return nil, nil, nil, nil, nil, nil
 	}
+	typeParams, refStorageParams, refStateParams, regionParams, permissionParams, genericParams := p.parseGenericParamListAfterLBracket(true, true)
+	p.expect(lexer.TOKEN_RBRACKET)
+	return typeParams, refStorageParams, refStateParams, regionParams, permissionParams, genericParams
+}
+
+func (p *Parser) parseGenericParamListAfterLBracket(allowRegion bool, allowPermission bool) ([]string, []string, []string, []string, []string, []ast.GenericParam) {
 	typeParams := make([]string, 0)
+	refStorageParams := make([]string, 0)
+	refStateParams := make([]string, 0)
 	regionParams := make([]string, 0)
 	permissionParams := make([]string, 0)
+	genericParams := make([]ast.GenericParam, 0)
 	seenType := map[string]bool{}
+	seenRefStorage := map[string]bool{}
+	seenRefState := map[string]bool{}
 	seenRegion := map[string]bool{}
 	seenPermission := map[string]bool{}
 	for {
-		isRegionParam := p.match(lexer.TOKEN_REGION)
-		if !isRegionParam && p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "region" {
+		paramPos := p.cur().Pos
+		kind := ast.GenericParamType
+		isRegionParam := allowRegion && p.match(lexer.TOKEN_REGION)
+		if !isRegionParam && allowRegion && p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "region" {
 			p.advance()
 			isRegionParam = true
 		}
 		isPermissionParam := false
-		if !isRegionParam && p.matchIdentText("permission") {
+		if !isRegionParam && allowPermission && p.matchIdentText("permission") {
 			isPermissionParam = true
 		}
+		isRefStorageParam := false
+		if !isRegionParam && !isPermissionParam && p.matchIdentText("refstorage") {
+			isRefStorageParam = true
+		}
+		isRefStateParam := false
+		if !isRegionParam && !isPermissionParam && !isRefStorageParam && p.matchIdentText("refstate") {
+			isRefStateParam = true
+		}
 		if isRegionParam {
+			kind = ast.GenericParamRegion
 			name := p.expect(lexer.TOKEN_IDENT).Text
-			if seenRegion[name] || seenType[name] || seenPermission[name] {
+			if seenRegion[name] || seenType[name] || seenPermission[name] || seenRefStorage[name] || seenRefState[name] {
 				p.errorf("duplicate function generic parameter %q", name)
 			} else {
 				seenRegion[name] = true
 				regionParams = append(regionParams, name)
 			}
-		} else if isPermissionParam {
+		} else if isRefStorageParam {
+			kind = ast.GenericParamRefStorage
 			name := p.expect(lexer.TOKEN_IDENT).Text
-			if seenRegion[name] || seenType[name] || seenPermission[name] {
+			if seenRegion[name] || seenType[name] || seenPermission[name] || seenRefStorage[name] || seenRefState[name] {
+				p.errorf("duplicate function generic parameter %q", name)
+			} else {
+				seenRefStorage[name] = true
+				refStorageParams = append(refStorageParams, name)
+				genericParams = append(genericParams, ast.GenericParam{Position: paramPos, Kind: kind, Name: name})
+			}
+		} else if isRefStateParam {
+			kind = ast.GenericParamRefState
+			name := p.expect(lexer.TOKEN_IDENT).Text
+			if seenRegion[name] || seenType[name] || seenPermission[name] || seenRefStorage[name] || seenRefState[name] {
+				p.errorf("duplicate function generic parameter %q", name)
+			} else {
+				seenRefState[name] = true
+				refStateParams = append(refStateParams, name)
+				genericParams = append(genericParams, ast.GenericParam{Position: paramPos, Kind: kind, Name: name})
+			}
+		} else if isPermissionParam {
+			kind = ast.GenericParamPermission
+			name := p.expect(lexer.TOKEN_IDENT).Text
+			if seenRegion[name] || seenType[name] || seenPermission[name] || seenRefStorage[name] || seenRefState[name] {
 				p.errorf("duplicate function generic parameter %q", name)
 			} else {
 				seenPermission[name] = true
@@ -534,19 +595,19 @@ func (p *Parser) parseFuncGenericParams() ([]string, []string, []string) {
 			}
 		} else {
 			name := p.expect(lexer.TOKEN_IDENT).Text
-			if seenType[name] || seenRegion[name] || seenPermission[name] {
+			if seenType[name] || seenRegion[name] || seenPermission[name] || seenRefStorage[name] || seenRefState[name] {
 				p.errorf("duplicate function generic parameter %q", name)
 			} else {
 				seenType[name] = true
 				typeParams = append(typeParams, name)
+				genericParams = append(genericParams, ast.GenericParam{Position: paramPos, Kind: kind, Name: name})
 			}
 		}
 		if !p.match(lexer.TOKEN_COMMA) {
 			break
 		}
 	}
-	p.expect(lexer.TOKEN_RBRACKET)
-	return typeParams, regionParams, permissionParams
+	return typeParams, refStorageParams, refStateParams, regionParams, permissionParams, genericParams
 }
 
 func (p *Parser) parsePermissionRef() ast.PermissionRef {
@@ -583,7 +644,7 @@ func (p *Parser) parseFuncDeclWithAnnotations(annotations []ast.Annotation) *ast
 	p.expect(lexer.TOKEN_DEF)
 	name := p.expect(lexer.TOKEN_IDENT).Text
 
-	typeParams, regionParams, permissionParams := p.parseFuncGenericParams()
+	typeParams, refStorageParams, refStateParams, regionParams, permissionParams, genericParams := p.parseFuncGenericParams()
 
 	p.expect(lexer.TOKEN_LPAREN)
 	params := p.parseParamList()
@@ -603,7 +664,7 @@ func (p *Parser) parseFuncDeclWithAnnotations(annotations []ast.Annotation) *ast
 	p.expectNewline()
 
 	body := p.parseBlock()
-	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, Permissions: permissions, Params: params, ReturnType: retType, Body: body}
+	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Params: params, ReturnType: retType, Body: body}
 }
 
 func (p *Parser) parseParamList() []ast.ParamDecl {
@@ -661,7 +722,7 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 		return &ast.ExternVarDecl{Position: pos, Name: name, Type: typ}
 	}
 
-	typeParams, regionParams, permissionParams := p.parseFuncGenericParams()
+	typeParams, _, _, regionParams, permissionParams, _ := p.parseFuncGenericParams()
 	if len(typeParams) > 0 {
 		p.errorf("extern functions do not support type parameters yet")
 	}

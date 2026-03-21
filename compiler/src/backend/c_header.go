@@ -302,13 +302,11 @@ func exportedStructFields(t semantic.Type) ([]semantic.Field, error) {
 		if !ok || base.Decl == nil {
 			return nil, fmt.Errorf("generic instance %s is not struct-backed", tt.String())
 		}
-		if len(base.TypeParams) != len(tt.Args) {
-			return nil, fmt.Errorf("generic instance %s has %d args, expected %d", tt.Name, len(tt.Args), len(base.TypeParams))
+		params := structGenericParams(base)
+		if len(params) != len(tt.Args) {
+			return nil, fmt.Errorf("generic instance %s has %d args, expected %d", tt.Name, len(tt.Args), len(params))
 		}
-		bindings := make(map[string]semantic.Type, len(base.TypeParams))
-		for i, param := range base.TypeParams {
-			bindings[param] = tt.Args[i]
-		}
+		bindings := genericBindingsForArgs(params, tt.Args)
 		fields := make([]semantic.Field, 0, len(base.Decl.Fields))
 		for _, fieldDecl := range base.Decl.Fields {
 			field, ok := base.Fields[fieldDecl.Name]
@@ -333,8 +331,44 @@ func substituteHeaderType(t semantic.Type, bindings map[string]semantic.Type) se
 			return bound
 		}
 		return tt
+	case *semantic.RefStorageParamType:
+		if bound, ok := bindings[tt.Name]; ok {
+			return bound
+		}
+		return tt
+	case *semantic.RefStateParamType:
+		if bound, ok := bindings[tt.Name]; ok {
+			return bound
+		}
+		return tt
 	case *semantic.RefType:
-		return &semantic.RefType{Elem: substituteHeaderType(tt.Elem, bindings), State: tt.State, Storage: tt.Storage, Region: tt.Region, ExplicitStorage: tt.ExplicitStorage}
+		state := tt.State
+		stateParam := tt.StateParam
+		if stateParam != "" {
+			if bound, ok := bindings[stateParam]; ok {
+				switch bound := bound.(type) {
+				case *semantic.RefStateValueType:
+					state = bound.State
+					stateParam = ""
+				case *semantic.RefStateParamType:
+					stateParam = bound.Name
+				}
+			}
+		}
+		storage := tt.Storage
+		storageParam := tt.StorageParam
+		if storageParam != "" {
+			if bound, ok := bindings[storageParam]; ok {
+				switch bound := bound.(type) {
+				case *semantic.RefStorageValueType:
+					storage = bound.Storage
+					storageParam = ""
+				case *semantic.RefStorageParamType:
+					storageParam = bound.Name
+				}
+			}
+		}
+		return &semantic.RefType{Elem: substituteHeaderType(tt.Elem, bindings), State: state, StateParam: stateParam, Storage: storage, StorageParam: storageParam, Region: tt.Region, ExplicitStorage: tt.ExplicitStorage}
 	case *semantic.ArrayType:
 		return &semantic.ArrayType{Elem: substituteHeaderType(tt.Elem, bindings), Size: tt.Size, HasConstSize: tt.HasConstSize, ConstSize: tt.ConstSize, SurfaceName: tt.SurfaceName}
 	case *semantic.GenericInstanceType:

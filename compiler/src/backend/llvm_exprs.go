@@ -3138,7 +3138,7 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 			if !ok {
 				return nil, nil, fmt.Errorf("call target %s does not resolve to a function type", ident.Name)
 			}
-			if decl, ok := sym.Node.(*ast.FuncDecl); ok && len(decl.TypeParams) > 0 {
+			if decl, ok := sym.Node.(*ast.FuncDecl); ok && len(decl.GenericParams) > 0 {
 				argTypes := make([]semantic.Type, 0, len(expr.Args))
 				for _, arg := range expr.Args {
 					argTypes = append(argTypes, s.exprType(arg))
@@ -3888,19 +3888,20 @@ func (s *functionState) emitSpecializeExpr(expr *ast.SpecializeExpr) (C.LLVMValu
 	if !ok {
 		return nil, nil, fmt.Errorf("specialize expects a function, got %s", sym.Type.String())
 	}
-	if len(baseType.TypeParams) == 0 {
+	params := funcGenericParams(baseType)
+	if len(params) == 0 {
 		return nil, nil, fmt.Errorf("function %q is not generic", ident.Name)
 	}
-	if len(expr.TypeArgs) != len(baseType.TypeParams) {
-		return nil, nil, fmt.Errorf("function %q expects %d type arguments, got %d", ident.Name, len(baseType.TypeParams), len(expr.TypeArgs))
+	if len(expr.TypeArgs) != len(params) {
+		return nil, nil, fmt.Errorf("function %q expects %d arguments, got %d", ident.Name, len(params), len(expr.TypeArgs))
 	}
-	bindings := make(map[string]semantic.Type, len(baseType.TypeParams))
+	bindings := make(map[string]semantic.Type, len(params))
 	for i, arg := range expr.TypeArgs {
 		resolved, err := s.resolveTypeExpr(arg)
 		if err != nil {
 			return nil, nil, err
 		}
-		bindings[baseType.TypeParams[i]] = resolved
+		bindings[params[i].Name] = resolved
 	}
 	specialized := specializeFuncType(baseType, bindings)
 	if decl, ok := sym.Node.(*ast.FuncDecl); ok {

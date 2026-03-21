@@ -305,12 +305,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			case *GenericInstanceType:
 				if _, ok := tt.Base.(*StructType); ok {
 					base := tt.Base.(*StructType)
-					bindings := map[string]Type{}
-					for i, name := range base.TypeParams {
-						if i < len(tt.Args) {
-							bindings[name] = tt.Args[i]
-						}
-					}
+					bindings := genericBindingsForStructInstance(base, tt.Args)
 					a.analyzeStructLiteralArgs(n, base, bindings)
 					result = DefaultAggregateStateType(tt)
 					return
@@ -358,23 +353,24 @@ func (a *Analyzer) analyzeSpecializeExpr(expr *ast.SpecializeExpr) Type {
 		}
 		return invalidType
 	}
-	if len(fnType.TypeParams) == 0 {
+	params := genericParamsForFuncType(fnType)
+	if len(params) == 0 {
 		a.errorf(expr.Pos(), "function %q is not generic", ident.Name)
 		for _, arg := range expr.TypeArgs {
 			a.resolveType(arg)
 		}
 		return invalidType
 	}
-	if len(expr.TypeArgs) != len(fnType.TypeParams) {
-		a.errorf(expr.Pos(), "function %q expects %d type arguments, got %d", ident.Name, len(fnType.TypeParams), len(expr.TypeArgs))
+	if len(expr.TypeArgs) != len(params) {
+		a.errorf(expr.Pos(), "function %q expects %d %s, got %d", ident.Name, len(params), genericArgLabel(params), len(expr.TypeArgs))
 	}
-	bindings := make(map[string]Type, len(fnType.TypeParams))
+	bindings := make(map[string]Type, len(params))
 	limit := len(expr.TypeArgs)
-	if len(fnType.TypeParams) < limit {
-		limit = len(fnType.TypeParams)
+	if len(params) < limit {
+		limit = len(params)
 	}
 	for i := 0; i < limit; i++ {
-		bindings[fnType.TypeParams[i]] = a.resolveType(expr.TypeArgs[i])
+		bindings[params[i].Name] = a.resolveGenericArgForParam(expr.TypeArgs[i], params[i])
 	}
 	for i := limit; i < len(expr.TypeArgs); i++ {
 		a.resolveType(expr.TypeArgs[i])
@@ -384,6 +380,9 @@ func (a *Analyzer) analyzeSpecializeExpr(expr *ast.SpecializeExpr) Type {
 		return invalidType
 	}
 	specialized.TypeParams = nil
+	specialized.RefStorageParams = nil
+	specialized.RefStateParams = nil
+	specialized.GenericParams = nil
 	return specialized
 }
 
@@ -1298,12 +1297,7 @@ func (a *Analyzer) typeStructurallyThreadShareable(t Type, seen map[string]bool)
 		return true
 	case *GenericInstanceType:
 		if base, ok := tt.Base.(*StructType); ok {
-			bindings := map[string]Type{}
-			for i, name := range base.TypeParams {
-				if i < len(tt.Args) {
-					bindings[name] = tt.Args[i]
-				}
-			}
+			bindings := genericBindingsForStructInstance(base, tt.Args)
 			for _, field := range base.Fields {
 				fieldType := field.Type
 				if len(bindings) != 0 {
@@ -1504,6 +1498,12 @@ func (a *Analyzer) specializeCallbackCarryingType(expected Type, actual Type) (T
 		return specialized, true
 	}
 	switch tt := expected.(type) {
+	case *AggregateStateType:
+		nextBase, changed := a.specializeCallbackCarryingType(tt.Base, StripAggregateStateType(actual))
+		if !changed {
+			return expected, false
+		}
+		return cloneAggregateStateWithBase(nextBase, aggregateStateStates(tt)), true
 	case *StructType:
 		changed := false
 		fields := cloneStructFields(tt.Fields)
@@ -1529,12 +1529,7 @@ func (a *Analyzer) specializeCallbackCarryingType(expected Type, actual Type) (T
 		if !ok {
 			return expected, false
 		}
-		bindings := map[string]Type{}
-		for i, name := range baseStruct.TypeParams {
-			if i < len(tt.Args) {
-				bindings[name] = tt.Args[i]
-			}
-		}
+		bindings := genericBindingsForStructInstance(baseStruct, tt.Args)
 		changed := false
 		fields := cloneStructFields(baseStruct.Fields)
 		for name, field := range baseStruct.Fields {
@@ -1581,6 +1576,12 @@ func (a *Analyzer) specializeCallbackCarryingTypeFromExpr(expected Type, actualE
 		}
 	}
 	switch tt := expected.(type) {
+	case *AggregateStateType:
+		nextBase, changed := a.specializeCallbackCarryingTypeFromExpr(tt.Base, actualExpr)
+		if !changed {
+			return expected, false
+		}
+		return cloneAggregateStateWithBase(nextBase, aggregateStateStates(tt)), true
 	case *StructType:
 		changed := false
 		fields := cloneStructFields(tt.Fields)
@@ -1606,12 +1607,7 @@ func (a *Analyzer) specializeCallbackCarryingTypeFromExpr(expected Type, actualE
 		if !ok {
 			return expected, false
 		}
-		bindings := map[string]Type{}
-		for i, name := range baseStruct.TypeParams {
-			if i < len(tt.Args) {
-				bindings[name] = tt.Args[i]
-			}
-		}
+		bindings := genericBindingsForStructInstance(baseStruct, tt.Args)
 		changed := false
 		fields := cloneStructFields(baseStruct.Fields)
 		for name, field := range baseStruct.Fields {
@@ -1762,6 +1758,16 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	for _, name := range ft.RegionParams {
 		if _, ok := regionBindings[name]; !ok {
 			a.errorf(expr.Pos(), "cannot infer region parameter %q for call to %q", name, ft.Name)
+		}
+	}
+	for _, name := range ft.RefStorageParams {
+		if _, ok := bindings[name]; !ok {
+			a.errorf(expr.Pos(), "cannot infer refstorage parameter %q for call to %q", name, ft.Name)
+		}
+	}
+	for _, name := range ft.RefStateParams {
+		if _, ok := bindings[name]; !ok {
+			a.errorf(expr.Pos(), "cannot infer refstate parameter %q for call to %q", name, ft.Name)
 		}
 	}
 	for _, name := range ft.PermissionParams {
@@ -2034,6 +2040,16 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		}
 	case *RefType:
 		if act, ok := actual.(*RefType); ok {
+			if p.StateParam != "" {
+				if _, exists := bindings[p.StateParam]; !exists {
+					bindings[p.StateParam] = &RefStateValueType{State: act.State}
+				}
+			}
+			if p.StorageParam != "" {
+				if _, exists := bindings[p.StorageParam]; !exists {
+					bindings[p.StorageParam] = &RefStorageValueType{Storage: act.Storage}
+				}
+			}
 			a.collectRegionBinding(p.Region, act.Region, regionBindings, regionParams)
 			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
 		}
@@ -2068,6 +2084,10 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 			for i := range p.Args {
 				a.collectTypeBindings(p.Args[i], act.Args[i], bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
 			}
+		}
+	case *AggregateStateType:
+		if act, ok := actual.(*AggregateStateType); ok {
+			a.collectTypeBindings(p.Base, act.Base, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
 		}
 	case *FuncType:
 		if act, ok := actual.(*FuncType); ok {
@@ -2657,12 +2677,14 @@ func containsTypeParam(t Type) bool {
 		return false
 	case *TypeParamType:
 		return true
+	case *RefStorageParamType, *RefStateParamType:
+		return true
 	case *ErrorUnionType:
 		return containsTypeParam(n.Value)
 	case *OptionalType:
 		return containsTypeParam(n.Value)
 	case *RefType:
-		return containsTypeParam(n.Elem)
+		return n.StateParam != "" || n.StorageParam != "" || containsTypeParam(n.Elem)
 	case *ArrayType:
 		return containsTypeParam(n.Elem)
 	case *DArrayType:
@@ -2678,7 +2700,12 @@ func containsTypeParam(t Type) bool {
 			}
 		}
 		return containsTypeParam(n.Base)
+	case *AggregateStateType:
+		return containsTypeParam(n.Base)
 	case *FuncType:
+		if len(n.RefStorageParams) != 0 || len(n.RefStateParams) != 0 || len(n.GenericParams) != 0 {
+			return true
+		}
 		for _, param := range n.Params {
 			if containsTypeParam(param) {
 				return true
@@ -2888,12 +2915,7 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 			a.errorf(pos, "struct %q has no field %q", baseStruct.Name, fieldName)
 			return Field{}, false
 		}
-		bindings := map[string]Type{}
-		for i, name := range baseStruct.TypeParams {
-			if i < len(t.Args) {
-				bindings[name] = t.Args[i]
-			}
-		}
+		bindings := genericBindingsForStructInstance(baseStruct, t.Args)
 		field.Type = a.substituteType(field.Type, bindings, nil, nil, nil)
 		return field, true
 	default:

@@ -36,13 +36,11 @@ func (g *llvmGenerator) structLiteralFields(t semantic.Type) ([]structLiteralFie
 		if !ok || base.Decl == nil {
 			return nil, fmt.Errorf("generic struct literal requires a struct-backed concrete type")
 		}
-		if len(base.TypeParams) != len(tt.Args) {
-			return nil, fmt.Errorf("generic struct %s has %d args, expected %d", base.Name, len(tt.Args), len(base.TypeParams))
+		params := structGenericParams(base)
+		if len(params) != len(tt.Args) {
+			return nil, fmt.Errorf("generic struct %s has %d args, expected %d", base.Name, len(tt.Args), len(params))
 		}
-		subst := make(map[string]semantic.Type, len(base.TypeParams))
-		for i, name := range base.TypeParams {
-			subst[name] = tt.Args[i]
-		}
+		subst := genericBindingsForArgs(params, tt.Args)
 		fields := make([]structLiteralField, 0, len(base.Decl.Fields))
 		for i, fieldDecl := range base.Decl.Fields {
 			field, ok := base.Fields[fieldDecl.Name]

@@ -249,6 +249,25 @@ export func vec_add[T] as vec_add
 
 because C has no type-parameterized ABI surface.
 
+The same rule now applies to pointer-qualifier generics.
+
+This is fine:
+
+```context
+struct Handle[refstorage store, refstate state]:
+    ptr: store u8&[state]
+
+export type Handle[heap, &] as HeapHandle
+```
+
+But exporting an unresolved qualifier parameter is still invalid:
+
+```context
+export type Handle[store, state] as HandleGeneric   # reject
+```
+
+because the C ABI surface must see a fully concrete pointer representation, not an abstract storage/state family.
+
 ## ABI wrapper model
 
 The compiler’s internal implementation may still use mangled names such as:
@@ -305,6 +324,8 @@ For an exported concrete struct type, the compiler should validate at least:
 - field alignments are known and consistent with chosen ABI rules
 - field types are recursively C-ABI-compatible
 - generic parameters are fully substituted before export
+
+That includes fully substituting any `refstorage` and `refstate` parameters that appear inside field types such as `store T&[state]`.
 
 For example:
 

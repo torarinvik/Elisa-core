@@ -40,6 +40,22 @@ type TypeParamType struct {
 	Name string
 }
 
+type RefStorageParamType struct {
+	Name string
+}
+
+type RefStorageValueType struct {
+	Storage RefStorage
+}
+
+type RefStateParamType struct {
+	Name string
+}
+
+type RefStateValueType struct {
+	State RefState
+}
+
 type ErrorSetType struct {
 	Name string
 	Tags []string
@@ -96,7 +112,9 @@ const (
 type RefType struct {
 	Elem            Type
 	State           RefState
+	StateParam      string
 	Storage         RefStorage
+	StorageParam    string
 	Region          string
 	ExplicitStorage bool
 }
@@ -186,6 +204,9 @@ type Field struct {
 type StructType struct {
 	Name       string
 	TypeParams []string
+	RefStorageParams []string
+	RefStateParams   []string
+	GenericParams    []ast.GenericParam
 	Fields     map[string]Field
 	Affine     bool
 	ReprC      bool
@@ -204,15 +225,19 @@ type GenericInstanceType struct {
 }
 
 type AggregateStateType struct {
-	Base  Type
-	State RefState
+	Base   Type
+	State  RefState
+	States []RefState
 }
 
 type FuncType struct {
 	Name                         string
 	TypeParams                   []string
+	RefStorageParams             []string
+	RefStateParams               []string
 	RegionParams                 []string
 	PermissionParams             []string
+	GenericParams                []ast.GenericParam
 	UsedPermissionParams         []string
 	DeclaredPermissionRefs       []ast.PermissionRef
 	DeclaredPermissions          []string
@@ -234,6 +259,10 @@ func (*NeverType) isType()           {}
 func (*NullType) isType()            {}
 func (*BuiltinType) isType()         {}
 func (*TypeParamType) isType()       {}
+func (*RefStorageParamType) isType() {}
+func (*RefStorageValueType) isType() {}
+func (*RefStateParamType) isType()   {}
+func (*RefStateValueType) isType()   {}
 func (*ErrorSetType) isType()        {}
 func (*ErrorUnionType) isType()      {}
 func (*OptionalType) isType()        {}
@@ -266,6 +295,24 @@ func (t *BuiltinType) String() string {
 	return t.Name
 }
 func (t *TypeParamType) String() string { return t.Name }
+func (t *RefStorageParamType) String() string {
+	return t.Name
+}
+func (t *RefStorageValueType) String() string {
+	if t == nil {
+		return "<invalid-refstorage>"
+	}
+	return RefStorageName(t.Storage)
+}
+func (t *RefStateParamType) String() string {
+	return t.Name
+}
+func (t *RefStateValueType) String() string {
+	if t == nil {
+		return "<invalid-refstate>"
+	}
+	return ast.RefStateMarker(ast.RefState(t.State))
+}
 func (t *ErrorSetType) String() string  { return t.Name }
 func (t *ErrorUnionType) String() string {
 	if t == nil || t.Value == nil || t.Errors == nil {
@@ -434,10 +481,15 @@ func RefStorageName(storage RefStorage) string {
 
 func (t *RefType) String() string {
 	s := t.Elem.String()
-	if t.Region != "" {
+	if t.StorageParam != "" {
+		s = t.StorageParam + " " + s
+	} else if t.Region != "" {
 		s = t.Region + " " + s
 	} else if t.ExplicitStorage || t.Storage != RefStorageAny {
 		s = RefStorageName(t.Storage) + " " + s
+	}
+	if t.StateParam != "" {
+		return s + "&[" + t.StateParam + "]"
 	}
 	switch t.State {
 	case RefStateNullable:
@@ -518,7 +570,12 @@ func (t *AggregateStateType) String() string {
 	if t == nil || t.Base == nil {
 		return "<invalid-aggregate-state>"
 	}
-	return fmt.Sprintf("%s[%s]", t.Base.String(), ast.RefStateMarker(ast.RefState(t.State)))
+	states := aggregateStateStates(t)
+	parts := make([]string, 0, len(states))
+	for _, state := range states {
+		parts = append(parts, ast.RefStateMarker(ast.RefState(state)))
+	}
+	return fmt.Sprintf("%s[%s]", t.Base.String(), strings.Join(parts, ", "))
 }
 func (t *FuncType) String() string {
 	parts := make([]string, 0, len(t.Params))
@@ -528,6 +585,12 @@ func (t *FuncType) String() string {
 	generics := make([]string, 0, len(t.TypeParams)+len(t.RegionParams)+len(t.PermissionParams))
 	for _, param := range t.TypeParams {
 		generics = append(generics, param)
+	}
+	for _, param := range t.RefStorageParams {
+		generics = append(generics, "refstorage "+param)
+	}
+	for _, param := range t.RefStateParams {
+		generics = append(generics, "refstate "+param)
 	}
 	for _, param := range t.RegionParams {
 		generics = append(generics, "region "+param)
@@ -766,6 +829,27 @@ func IsRefType(t Type) (*RefType, bool) {
 	return r, ok
 }
 
+func aggregateStateStates(t *AggregateStateType) []RefState {
+	if t == nil {
+		return nil
+	}
+	if len(t.States) != 0 {
+		states := make([]RefState, len(t.States))
+		copy(states, t.States)
+		return states
+	}
+	return []RefState{t.State}
+}
+
+func cloneAggregateStateWithBase(base Type, states []RefState) *AggregateStateType {
+	cloned := &AggregateStateType{Base: base}
+	if len(states) > 0 {
+		cloned.State = states[0]
+		cloned.States = append([]RefState(nil), states...)
+	}
+	return cloned
+}
+
 func StripAggregateStateType(t Type) Type {
 	agg, ok := t.(*AggregateStateType)
 	if !ok || agg == nil {
@@ -774,29 +858,59 @@ func StripAggregateStateType(t Type) Type {
 	return agg.Base
 }
 
-func SupportsAggregateStateType(t Type) bool {
+func AggregateStateParamCount(t Type) int {
 	switch tt := StripAggregateStateType(t).(type) {
 	case *StructType:
-		return tt != nil && tt.Decl != nil && tt.Decl.HasStateParam
+		if tt == nil || tt.Decl == nil {
+			return 0
+		}
+		if tt.Decl.StateParamCount > 0 {
+			return tt.Decl.StateParamCount
+		}
+		if tt.Decl.HasStateParam {
+			return 1
+		}
+		return 0
 	case *GenericInstanceType:
 		base, ok := tt.Base.(*StructType)
-		return ok && base != nil && base.Decl != nil && base.Decl.HasStateParam
+		if !ok || base == nil || base.Decl == nil {
+			return 0
+		}
+		if base.Decl.StateParamCount > 0 {
+			return base.Decl.StateParamCount
+		}
+		if base.Decl.HasStateParam {
+			return 1
+		}
+		return 0
 	default:
-		return false
+		return 0
 	}
+}
+
+func SupportsAggregateStateType(t Type) bool {
+	return AggregateStateParamCount(t) > 0
 }
 
 func DefaultAggregateStateType(t Type) Type {
 	if t == nil {
 		return nil
 	}
-	if _, ok := t.(*AggregateStateType); ok {
+	if agg, ok := t.(*AggregateStateType); ok {
+		if len(aggregateStateStates(agg)) == AggregateStateParamCount(agg.Base) {
+			return t
+		}
 		return t
 	}
-	if !SupportsAggregateStateType(t) {
+	count := AggregateStateParamCount(t)
+	if count == 0 {
 		return t
 	}
-	return &AggregateStateType{Base: StripAggregateStateType(t), State: RefStateNullable}
+	states := make([]RefState, count)
+	for i := range states {
+		states[i] = RefStateNullable
+	}
+	return cloneAggregateStateWithBase(StripAggregateStateType(t), states)
 }
 
 func (t *EnumType) Variant(name string) (*EnumVariant, bool) {

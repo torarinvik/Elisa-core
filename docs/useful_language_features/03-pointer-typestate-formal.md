@@ -43,6 +43,87 @@ Ref(σ, T, may)   written σ T&?
 Ref(σ, T, null)  written σ T!
 ```
 
+### Named generic pointer qualifiers
+
+The reference storage/state axes can also be abstracted by generic parameters.
+
+Declaration forms:
+
+```text
+refstorage r
+refstate s
+```
+
+Example:
+
+```text
+struct Foo[refstorage r, refstate s]
+```
+
+Reference syntax then permits symbolic qualifiers:
+
+```text
+r T&[s]
+```
+
+which should be read as:
+
+```text
+Ref(r, T, s)
+```
+
+where `r` ranges over the built-in storage qualifiers
+
+```text
+{ any, heap, stack, static }
+```
+
+and `s` ranges over the pointer proof states
+
+```text
+{ nn, may, null }
+```
+
+### Mixed generic argument order
+
+When ordinary type parameters and pointer qualifiers are mixed, instantiation order is the declaration order.
+
+So:
+
+```text
+Foo[T, refstorage r, refstate s]
+```
+
+is instantiated as:
+
+```text
+Foo(U, heap, nn)
+```
+
+not by grouping all ordinary types first and all pointer qualifiers later.
+
+### Nearest-reference attachment
+
+For nested references, a symbolic state suffix attaches to the nearest preceding `&`.
+
+So:
+
+```text
+T&&[s]
+```
+
+parses as:
+
+```text
+Ref(any, Ref(any, T, nn), s)
+```
+
+not as:
+
+```text
+Ref(any, Ref(any, T, s), nn)
+```
+
 Intended meaning:
 
 - `any` means storage/provenance is intentionally erased or unspecified at the type level

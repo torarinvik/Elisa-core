@@ -56,7 +56,7 @@ func (a *Analyzer) analyzeExportFunc(decl *ast.ExportFuncDecl, seenPublicNames m
 		return
 	}
 
-	signature := a.funcTypeFromDecl(decl.Name, nil, nil, nil, nil, decl.Params, decl.ReturnType, false)
+	signature := a.funcTypeFromDecl(decl.Name, nil, nil, nil, nil, nil, nil, nil, decl.Params, decl.ReturnType, false)
 	if !isCABICompatibleFuncType(signature) {
 		a.errorf(decl.Pos(), "export func %q is not C-ABI-compatible", decl.Name)
 		return
@@ -76,17 +76,18 @@ func (a *Analyzer) analyzeExportFunc(decl *ast.ExportFuncDecl, seenPublicNames m
 	bindings := map[string]Type{}
 	targetSpecialized := targetBase
 	targetGenericDecl, _ := targetSym.Node.(*ast.FuncDecl)
-	if len(targetBase.TypeParams) > 0 {
+	params := genericParamsForFuncType(targetBase)
+	if len(params) > 0 {
 		if targetGenericDecl == nil {
 			a.errorf(decl.Pos(), "export target %q does not support generic specialization", decl.TargetName)
 			return
 		}
-		if len(decl.TargetTypeArgs) != len(targetBase.TypeParams) {
-			a.errorf(decl.Pos(), "export target %q expects %d type arguments, got %d", decl.TargetName, len(targetBase.TypeParams), len(decl.TargetTypeArgs))
+		if len(decl.TargetTypeArgs) != len(params) {
+			a.errorf(decl.Pos(), "export target %q expects %d %s, got %d", decl.TargetName, len(params), genericArgLabel(params), len(decl.TargetTypeArgs))
 			return
 		}
 		for i, arg := range decl.TargetTypeArgs {
-			resolved := a.resolveType(arg)
+			resolved := a.resolveGenericArgForParam(arg, params[i])
 			if IsInvalidType(resolved) {
 				return
 			}
@@ -94,7 +95,7 @@ func (a *Analyzer) analyzeExportFunc(decl *ast.ExportFuncDecl, seenPublicNames m
 				a.errorf(arg.Pos(), "export target specialization arguments must be concrete")
 				return
 			}
-			bindings[targetBase.TypeParams[i]] = resolved
+			bindings[params[i].Name] = resolved
 		}
 		targetSpecialized = specializeExportFuncType(a, targetBase, bindings)
 	} else if len(decl.TargetTypeArgs) > 0 {
@@ -172,7 +173,10 @@ func specializeExportFuncType(a *Analyzer, base *FuncType, bindings map[string]T
 	return &FuncType{
 		Name:                   specialized.Name,
 		TypeParams:             nil,
+		RefStorageParams:       nil,
+		RefStateParams:         nil,
 		RegionParams:           append([]string(nil), specialized.RegionParams...),
+		GenericParams:          nil,
 		Permissions:            append([]string(nil), specialized.Permissions...),
 		ShapeParams:            append([]string(nil), specialized.ShapeParams...),
 		FreshReturnShapeParams: append([]string(nil), specialized.FreshReturnShapeParams...),
@@ -200,17 +204,17 @@ func sameExportSignature(left *FuncType, right *FuncType) bool {
 func exportedNamedTypeAllowed(t Type) bool {
 	switch tt := t.(type) {
 	case *StructType:
-		return tt.ReprC && len(tt.TypeParams) == 0
+		return tt.ReprC && len(genericParamsForStructType(tt)) == 0
 	case *GenericInstanceType:
 		base, ok := tt.Base.(*StructType)
-		return ok && base.ReprC && len(base.TypeParams) == len(tt.Args)
+		return ok && base.ReprC && len(genericParamsForStructType(base)) == len(tt.Args)
 	default:
 		return false
 	}
 }
 
 func isCABICompatibleFuncType(fn *FuncType) bool {
-	if fn == nil || fn.Variadic || len(fn.TypeParams) > 0 || len(fn.RegionParams) > 0 || len(fn.Permissions) > 0 {
+	if fn == nil || fn.Variadic || len(genericParamsForFuncType(fn)) > 0 || len(fn.RegionParams) > 0 || len(fn.Permissions) > 0 {
 		return false
 	}
 	for _, param := range fn.Params {
@@ -244,7 +248,7 @@ func isCABICompatibleType(t Type) bool {
 	case *ArrayType:
 		return tt.HasConstSize && isCABICompatibleType(tt.Elem)
 	case *StructType:
-		if !tt.ReprC || len(tt.TypeParams) > 0 || tt.Decl == nil {
+		if !tt.ReprC || len(genericParamsForStructType(tt)) > 0 || tt.Decl == nil {
 			return false
 		}
 		for _, fieldDecl := range tt.Decl.Fields {
@@ -256,13 +260,11 @@ func isCABICompatibleType(t Type) bool {
 		return true
 	case *GenericInstanceType:
 		base, ok := tt.Base.(*StructType)
-		if !ok || !base.ReprC || base.Decl == nil || len(base.TypeParams) != len(tt.Args) {
+		params := genericParamsForStructType(base)
+		if !ok || !base.ReprC || base.Decl == nil || len(params) != len(tt.Args) {
 			return false
 		}
-		bindings := make(map[string]Type, len(base.TypeParams))
-		for i, name := range base.TypeParams {
-			bindings[name] = tt.Args[i]
-		}
+		bindings := genericBindingsForParams(params, tt.Args)
 		for _, fieldDecl := range base.Decl.Fields {
 			field, ok := base.Fields[fieldDecl.Name]
 			if !ok || !isCABICompatibleType(substituteExportType(field.Type, bindings)) {
@@ -285,8 +287,44 @@ func substituteExportType(t Type, bindings map[string]Type) Type {
 			return resolved
 		}
 		return tt
+	case *RefStorageParamType:
+		if resolved, ok := bindings[tt.Name]; ok {
+			return resolved
+		}
+		return tt
+	case *RefStateParamType:
+		if resolved, ok := bindings[tt.Name]; ok {
+			return resolved
+		}
+		return tt
 	case *RefType:
-		return &RefType{Elem: substituteExportType(tt.Elem, bindings), State: tt.State, Storage: tt.Storage, Region: tt.Region, ExplicitStorage: tt.ExplicitStorage}
+		state := tt.State
+		stateParam := tt.StateParam
+		if stateParam != "" {
+			if resolved, ok := bindings[stateParam]; ok {
+				switch resolved := resolved.(type) {
+				case *RefStateValueType:
+					state = resolved.State
+					stateParam = ""
+				case *RefStateParamType:
+					stateParam = resolved.Name
+				}
+			}
+		}
+		storage := tt.Storage
+		storageParam := tt.StorageParam
+		if storageParam != "" {
+			if resolved, ok := bindings[storageParam]; ok {
+				switch resolved := resolved.(type) {
+				case *RefStorageValueType:
+					storage = resolved.Storage
+					storageParam = ""
+				case *RefStorageParamType:
+					storageParam = resolved.Name
+				}
+			}
+		}
+		return &RefType{Elem: substituteExportType(tt.Elem, bindings), State: state, StateParam: stateParam, Storage: storage, StorageParam: storageParam, Region: tt.Region, ExplicitStorage: tt.ExplicitStorage}
 	case *ArrayType:
 		return &ArrayType{Elem: substituteExportType(tt.Elem, bindings), Size: tt.Size, HasConstSize: tt.HasConstSize, ConstSize: tt.ConstSize, SurfaceName: tt.SurfaceName}
 	case *GenericInstanceType:

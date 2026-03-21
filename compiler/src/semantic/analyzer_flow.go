@@ -424,12 +424,7 @@ func (a *Analyzer) resolvedStructFields(actual Type) ([]moveBindResolvedField, b
 			return nil, false
 		}
 		base = structBase
-		if len(base.TypeParams) == len(tt.Args) {
-			bindings = make(map[string]Type, len(base.TypeParams))
-			for i, name := range base.TypeParams {
-				bindings[name] = tt.Args[i]
-			}
-		}
+		bindings = genericBindingsForStructInstance(base, tt.Args)
 	default:
 		return nil, false
 	}

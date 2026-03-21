@@ -172,7 +172,7 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 		if _, err := g.ensureNamedStructType(n.Name); err != nil {
 			return err
 		}
-		if len(n.TypeParams) == 0 {
+		if len(n.GenericParams) == 0 {
 			if st, ok := g.lookupStructType(n.Name); ok {
 				_, err := g.ensureStructBody(n.Name, st)
 				return err
@@ -204,7 +204,7 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 		if err := g.noteType(sym.Type); err != nil {
 			return err
 		}
-		if fnDecl, ok := decl.(*ast.FuncDecl); ok && len(fnDecl.TypeParams) > 0 {
+		if fnDecl, ok := decl.(*ast.FuncDecl); ok && len(fnDecl.GenericParams) > 0 {
 			return nil
 		}
 		fn, ok := sym.Type.(*semantic.FuncType)
@@ -244,7 +244,7 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 	case *ast.ConstEnumDecl:
 		return nil
 	case *ast.StructDecl:
-		if len(n.TypeParams) == 0 {
+		if len(n.GenericParams) == 0 {
 			if st, ok := g.lookupStructType(n.Name); ok {
 				_, err := g.ensureStructBody(n.Name, st)
 				return err
@@ -267,7 +267,7 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 		_, err := g.ensureEnumBody(n.Name, enumType)
 		return err
 	case *ast.FuncDecl:
-		if len(n.TypeParams) > 0 {
+		if len(n.GenericParams) > 0 {
 			return nil
 		}
 		sym, ok := g.symbolsByNode[decl]

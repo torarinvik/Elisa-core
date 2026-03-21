@@ -18,8 +18,10 @@ func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *sema
 	if decl == nil || base == nil {
 		return nil, nil, fmt.Errorf("generic specialization requires a function declaration and type")
 	}
-	orderedArgs := make([]semantic.Type, 0, len(decl.TypeParams))
-	for _, name := range decl.TypeParams {
+	params := funcGenericParams(base)
+	orderedArgs := make([]semantic.Type, 0, len(params))
+	for _, param := range params {
+		name := param.Name
 		bound, ok := typeBindings[name]
 		if !ok {
 			return nil, nil, fmt.Errorf("missing specialization binding for type parameter %s in %s", name, decl.Name)
@@ -55,7 +57,10 @@ func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semanti
 	return &semantic.FuncType{
 		Name:                   base.Name,
 		TypeParams:             nil,
+		RefStorageParams:       nil,
+		RefStateParams:         nil,
 		RegionParams:           append([]string(nil), base.RegionParams...),
+		GenericParams:          nil,
 		ShapeParams:            append([]string(nil), base.ShapeParams...),
 		FreshReturnShapeParams: append([]string(nil), base.FreshReturnShapeParams...),
 		Params:                 params,
@@ -109,8 +114,26 @@ func collectSpecializationBindings(pattern semantic.Type, actual semantic.Type, 
 		if _, ok := bindings[p.Name]; !ok {
 			bindings[p.Name] = actual
 		}
+	case *semantic.RefStorageParamType:
+		if _, ok := bindings[p.Name]; !ok {
+			bindings[p.Name] = actual
+		}
+	case *semantic.RefStateParamType:
+		if _, ok := bindings[p.Name]; !ok {
+			bindings[p.Name] = actual
+		}
 	case *semantic.RefType:
 		if a, ok := actual.(*semantic.RefType); ok {
+			if p.StateParam != "" {
+				if _, ok := bindings[p.StateParam]; !ok {
+					bindings[p.StateParam] = &semantic.RefStateValueType{State: a.State}
+				}
+			}
+			if p.StorageParam != "" {
+				if _, ok := bindings[p.StorageParam]; !ok {
+					bindings[p.StorageParam] = &semantic.RefStorageValueType{Storage: a.Storage}
+				}
+			}
 			collectSpecializationBindings(p.Elem, a.Elem, bindings)
 		}
 	case *semantic.ArrayType:

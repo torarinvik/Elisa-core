@@ -888,6 +888,20 @@ func (s *functionState) ensureTrapFunction() (C.LLVMValueRef, error) {
 	return s.g.ensureFunctionDeclared("llvm.trap", trapType)
 }
 
+func backendAggregateStates(expr *ast.AggregateStateTypeExpr) []semantic.RefState {
+	if expr == nil {
+		return nil
+	}
+	if len(expr.States) != 0 {
+		states := make([]semantic.RefState, len(expr.States))
+		for i, state := range expr.States {
+			states[i] = semantic.RefState(state)
+		}
+		return states
+	}
+	return []semantic.RefState{semantic.RefState(expr.State)}
+}
+
 func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error) {
 	switch n := expr.(type) {
 	case *ast.NamedType:
@@ -912,10 +926,19 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			return nil, err
 		}
 		baseType = semantic.StripAggregateStateType(baseType)
-		if !semantic.SupportsAggregateStateType(baseType) {
+		count := semantic.AggregateStateParamCount(baseType)
+		if count == 0 {
 			return nil, fmt.Errorf("type %q does not declare an aggregate state parameter", baseType.String())
 		}
-		return &semantic.AggregateStateType{Base: baseType, State: semantic.RefState(n.State)}, nil
+		states := backendAggregateStates(n)
+		if len(states) != count {
+			return nil, fmt.Errorf("type %q expects %d aggregate state arguments, got %d", baseType.String(), count, len(states))
+		}
+		return &semantic.AggregateStateType{Base: baseType, State: states[0], States: states}, nil
+	case *ast.RefStateLiteralTypeExpr:
+		return &semantic.RefStateValueType{State: semantic.RefState(n.State)}, nil
+	case *ast.RefStorageLiteralTypeExpr:
+		return &semantic.RefStorageValueType{Storage: semantic.RefStorage(n.Storage)}, nil
 	case *ast.ErrorSetExpr:
 		return s.resolveErrorSetExpr(n)
 	case *ast.ErrorUnionTypeExpr:
@@ -949,7 +972,7 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 		if err != nil {
 			return nil, err
 		}
-		return &semantic.RefType{Elem: elem, State: semantic.RefState(n.State), Storage: semantic.RefStorage(n.Storage), ExplicitStorage: n.Explicit}, nil
+		return &semantic.RefType{Elem: elem, State: semantic.RefState(n.State), StateParam: n.StateParam, Storage: semantic.RefStorage(n.Storage), StorageParam: n.StorageParam, Region: n.Region, ExplicitStorage: n.Explicit}, nil
 	case *ast.FuncTypeExpr:
 		params := make([]semantic.Type, 0, len(n.Params))
 		for _, param := range n.Params {
@@ -1018,8 +1041,9 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			return semantic.PackedEnumStoreWithState(storeType, args[0]), nil
 		}
 		if structType, ok := base.(*semantic.StructType); ok {
-			if len(args) != len(structType.TypeParams) {
-				return nil, fmt.Errorf("type %q expects %d type arguments, got %d", n.Name, len(structType.TypeParams), len(args))
+			params := structGenericParams(structType)
+			if len(args) != len(params) {
+				return nil, fmt.Errorf("type %q expects %d arguments, got %d", n.Name, len(params), len(args))
 			}
 		}
 		if _, ok := base.(*semantic.OpaqueType); ok && len(args) != 0 {
@@ -1408,12 +1432,7 @@ func (g *llvmGenerator) fieldInfo(objType semantic.Type, fieldName string) (sema
 		if err != nil {
 			return nil, 0, nil, false, err
 		}
-		subst := make(map[string]semantic.Type, len(base.TypeParams))
-		for i, param := range base.TypeParams {
-			if i < len(t.Args) {
-				subst[param] = t.Args[i]
-			}
-		}
+		subst := genericBindingsForArgs(structGenericParams(base), t.Args)
 		return substituteType(field.Type, subst), index, t, pointerLike, nil
 	default:
 		return nil, 0, nil, false, fmt.Errorf("field access requires a struct type, got %s", objType.String())

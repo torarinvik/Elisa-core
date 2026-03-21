@@ -9,6 +9,20 @@ import (
 	"llcontext/src/lexer"
 )
 
+func astAggregateStates(expr *ast.AggregateStateTypeExpr) []RefState {
+	if expr == nil {
+		return nil
+	}
+	if len(expr.States) != 0 {
+		states := make([]RefState, len(expr.States))
+		for i, state := range expr.States {
+			states[i] = RefState(state)
+		}
+		return states
+	}
+	return []RefState{RefState(expr.State)}
+}
+
 func (a *Analyzer) errorLegacyBuiltinReplacement(pos lexer.Pos, oldName, replacement string) {
 	a.errorf(pos, "legacy built-in %q has been replaced; use %q instead", oldName, replacement)
 }
@@ -30,13 +44,13 @@ func (a *Analyzer) defineLocal(sym *Symbol, pos lexer.Pos) {
 	a.trackAffineValueSymbol(sym)
 }
 
-func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
+func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorageParams []string, refStateParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
 	ptypes := make([]Type, 0, len(params))
 	retType := a.namedTypes["void"]
 	shapeParams := a.collectImplicitShapeParams(params, ret)
 	var resolvedPermissionRefs []ast.PermissionRef
 	var permissions []string
-	a.withTypeParams(typeParams, nil, func() {
+	a.withGenericParams(genericParams, nil, func() {
 		a.withRegionParams(regionParams, func() {
 			a.withPermissionParams(permissionParams, func() {
 				resolvedPermissionRefs = a.resolvePermissionRefs(permissionRefs, true)
@@ -55,8 +69,11 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, regionPara
 	return &FuncType{
 		Name:                   name,
 		TypeParams:             append([]string(nil), typeParams...),
+		RefStorageParams:       append([]string(nil), refStorageParams...),
+		RefStateParams:         append([]string(nil), refStateParams...),
 		RegionParams:           append([]string(nil), regionParams...),
 		PermissionParams:       append([]string(nil), permissionParams...),
+		GenericParams:          append([]ast.GenericParam(nil), genericParams...),
 		UsedPermissionParams:   append([]string(nil), a.permissionParamsInRefs(permissionRefs)...),
 		DeclaredPermissionRefs: append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
 		DeclaredPermissions:    append([]string(nil), permissions...),
@@ -93,11 +110,21 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		return invalidType
 	case *ast.AggregateStateTypeExpr:
 		baseType := StripAggregateStateType(a.resolveType(n.Base))
-		if !SupportsAggregateStateType(baseType) {
+		count := AggregateStateParamCount(baseType)
+		if count == 0 {
 			a.errorf(n.Pos(), "type %q does not declare an aggregate state parameter", baseType.String())
 			return invalidType
 		}
-		return &AggregateStateType{Base: baseType, State: RefState(n.State)}
+		states := astAggregateStates(n)
+		if len(states) != count {
+			a.errorf(n.Pos(), "type %q expects %d aggregate state arguments, got %d", baseType.String(), count, len(states))
+			return invalidType
+		}
+		return cloneAggregateStateWithBase(baseType, states)
+	case *ast.RefStateLiteralTypeExpr:
+		return &RefStateValueType{State: RefState(n.State)}
+	case *ast.RefStorageLiteralTypeExpr:
+		return &RefStorageValueType{Storage: RefStorage(n.Storage)}
 	case *ast.ErrorSetExpr:
 		return a.resolveErrorSetExpr(n)
 	case *ast.ErrorUnionTypeExpr:
@@ -121,16 +148,32 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		}
 		return &OptionalType{Value: valueType}
 	case *ast.RefType:
-		if n.Region != "" {
-			if !a.regionQualifierDefined(n.Region) {
-				a.errorf(n.Pos(), "unknown region qualifier %q", n.Region)
+		region := n.Region
+		storageParam := n.StorageParam
+		if storageParam != "" {
+			if _, ok := a.lookupRefStorageParam(storageParam); ok {
+				region = ""
+			} else if a.regionQualifierDefined(storageParam) {
+				region = storageParam
+				storageParam = ""
+			} else {
+				a.errorf(n.Pos(), "unknown region qualifier %q", storageParam)
 			}
+		}
+		stateParam := n.StateParam
+		if stateParam != "" {
+			if _, ok := a.lookupRefStateParam(stateParam); !ok {
+				a.errorf(n.Pos(), "unknown refstate parameter %q", stateParam)
+			}
+		}
+		if region != "" && !a.regionQualifierDefined(region) {
+			a.errorf(n.Pos(), "unknown region qualifier %q", region)
 		}
 		elemType := a.resolveType(n.Elem)
 		if a.containsAffineHandleValues(elemType, map[string]bool{}) && !isBorrowableAffineOwnerType(elemType) {
 			a.errorf(n.Pos(), "references to values containing affine handles are not supported; got %s&", elemType.String())
 		}
-		return &RefType{Elem: elemType, State: RefState(n.State), Storage: RefStorage(n.Storage), Region: n.Region, ExplicitStorage: n.Explicit}
+		return &RefType{Elem: elemType, State: RefState(n.State), StateParam: stateParam, Storage: RefStorage(n.Storage), StorageParam: storageParam, Region: region, ExplicitStorage: n.Explicit}
 	case *ast.ArrayType:
 		return a.resolveArrayType(n)
 	case *ast.BuiltinTypeExpr:
@@ -148,6 +191,8 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		permissions := a.resolvePermissionFamilies(n.Permissions, true)
 		return &FuncType{
 			Name:                   "func",
+			RefStorageParams:       nil,
+			RefStateParams:         nil,
 			UsedPermissionParams:   append([]string(nil), a.permissionParamsInRefs(n.Permissions)...),
 			DeclaredPermissionRefs: append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
 			DeclaredPermissions:    append([]string(nil), permissions...),
@@ -173,9 +218,6 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			return a.resolveArrayType(arrayExpr)
 		}
 		args := make([]Type, 0, len(n.Args))
-		for _, arg := range n.Args {
-			args = append(args, a.resolveType(arg))
-		}
 		base, ok := a.namedTypes[n.Name]
 		if !ok {
 			a.errorf(n.Pos(), "unknown type %q", n.Name)
@@ -183,15 +225,20 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		}
 		switch base := base.(type) {
 		case *PackedEnumStoreType:
-			if len(args) != 1 {
+			if len(n.Args) != 1 {
 				a.errorf(n.Pos(), "packed enum store type %q expects 1 state argument, got %d", n.Name, len(args))
 				return invalidType
 			}
+			args = append(args, a.resolveType(n.Args[0]))
 			return PackedEnumStoreWithState(base, args[0])
 		case *StructType:
-			if len(args) != len(base.TypeParams) {
-				a.errorf(n.Pos(), "type %q expects %d type arguments, got %d", n.Name, len(base.TypeParams), len(args))
+			params := genericParamsForStructType(base)
+			if len(n.Args) != len(params) {
+				a.errorf(n.Pos(), "type %q expects %d %s, got %d", n.Name, len(params), genericArgLabel(params), len(n.Args))
 				return invalidType
+			}
+			for i, arg := range n.Args {
+				args = append(args, a.resolveGenericArgForParam(arg, params[i]))
 			}
 			if base.Builtin && base.Name == "atomic" && len(args) == 1 {
 				if !a.typeStructurallyAtomicSafe(args[0], map[string]bool{}) {
@@ -201,8 +248,8 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			}
 			return DefaultAggregateStateType(&GenericInstanceType{Name: n.Name, Base: base, Args: args})
 		case *OpaqueType:
-			if len(args) != 0 {
-				a.errorf(n.Pos(), "type %q expects 0 type arguments, got %d", n.Name, len(args))
+			if len(n.Args) != 0 {
+				a.errorf(n.Pos(), "type %q expects 0 type arguments, got %d", n.Name, len(n.Args))
 				return invalidType
 			}
 			return &GenericInstanceType{Name: n.Name, Base: base, Args: args}
@@ -543,6 +590,117 @@ func (a *Analyzer) genericTypeAsArrayType(expr *ast.GenericType) (*ast.ArrayType
 	}, true
 }
 
+func genericParamsForStructType(base *StructType) []ast.GenericParam {
+	if len(base.GenericParams) != 0 {
+		return base.GenericParams
+	}
+	params := make([]ast.GenericParam, 0, len(base.TypeParams))
+	for _, name := range base.TypeParams {
+		params = append(params, ast.GenericParam{Kind: ast.GenericParamType, Name: name})
+	}
+	return params
+}
+
+func genericParamsForFuncType(base *FuncType) []ast.GenericParam {
+	if len(base.GenericParams) != 0 {
+		return base.GenericParams
+	}
+	params := make([]ast.GenericParam, 0, len(base.TypeParams))
+	for _, name := range base.TypeParams {
+		params = append(params, ast.GenericParam{Kind: ast.GenericParamType, Name: name})
+	}
+	return params
+}
+
+func genericArgLabel(params []ast.GenericParam) string {
+	if len(params) == 0 {
+		return "generic arguments"
+	}
+	for _, param := range params {
+		if param.Kind != ast.GenericParamType {
+			return "generic arguments"
+		}
+	}
+	return "type arguments"
+}
+
+func genericBindingsForParams(params []ast.GenericParam, args []Type) map[string]Type {
+	if len(params) == 0 || len(args) == 0 {
+		return nil
+	}
+	bindings := make(map[string]Type, len(params))
+	for i, param := range params {
+		if i >= len(args) || args[i] == nil {
+			continue
+		}
+		bindings[param.Name] = args[i]
+	}
+	if len(bindings) == 0 {
+		return nil
+	}
+	return bindings
+}
+
+func genericBindingsForStructInstance(base *StructType, args []Type) map[string]Type {
+	return genericBindingsForParams(genericParamsForStructType(base), args)
+}
+
+func (a *Analyzer) resolveGenericArgForParam(expr ast.TypeExpr, param ast.GenericParam) Type {
+	switch param.Kind {
+	case ast.GenericParamRefStorage:
+		switch n := expr.(type) {
+		case *ast.NamedType:
+			if t, ok := a.lookupRefStorageParam(n.Name); ok {
+				return t
+			}
+		}
+		resolved := a.resolveType(expr)
+		if _, ok := resolved.(*RefStorageParamType); ok {
+			return resolved
+		}
+		if _, ok := resolved.(*RefStorageValueType); ok {
+			return resolved
+		}
+		a.errorf(expr.Pos(), "generic argument %q for refstorage parameter %q must be a refstorage literal or parameter", resolved.String(), param.Name)
+		return invalidType
+	case ast.GenericParamRefState:
+		switch n := expr.(type) {
+		case *ast.NamedType:
+			if t, ok := a.lookupRefStateParam(n.Name); ok {
+				return t
+			}
+		}
+		resolved := a.resolveType(expr)
+		if _, ok := resolved.(*RefStateParamType); ok {
+			return resolved
+		}
+		if _, ok := resolved.(*RefStateValueType); ok {
+			return resolved
+		}
+		a.errorf(expr.Pos(), "generic argument %q for refstate parameter %q must be a refstate literal or parameter", resolved.String(), param.Name)
+		return invalidType
+	default:
+		resolved := a.resolveType(expr)
+		if _, ok := resolved.(*RefStorageParamType); ok {
+			a.errorf(expr.Pos(), "refstorage parameter %q cannot be used as a type argument", resolved.String())
+			return invalidType
+		}
+		if _, ok := resolved.(*RefStorageValueType); ok {
+			a.errorf(expr.Pos(), "refstorage literal %q cannot be used as a type argument", resolved.String())
+			return invalidType
+		}
+		if _, ok := resolved.(*RefStateParamType); ok {
+			a.errorf(expr.Pos(), "refstate parameter %q cannot be used as a type argument", resolved.String())
+			return invalidType
+		}
+		if _, ok := resolved.(*RefStateValueType); ok {
+			a.errorf(expr.Pos(), "refstate literal %q cannot be used as a type argument", resolved.String())
+			return invalidType
+		}
+		return resolved
+	}
+}
+
 func (a *Analyzer) inferLiteralType(expr ast.Expr) Type {
 	switch n := expr.(type) {
 	case *ast.IntLit:
@@ -662,9 +820,98 @@ func (a *Analyzer) withTypeParams(names []string, args []Type, fn func()) {
 	a.typeParamScopes = a.typeParamScopes[:len(a.typeParamScopes)-1]
 }
 
+func (a *Analyzer) withRefStorageParams(names []string, args []Type, fn func()) {
+	if len(names) == 0 {
+		fn()
+		return
+	}
+	bindings := make(map[string]Type, len(names))
+	for i, name := range names {
+		if i < len(args) && args[i] != nil {
+			bindings[name] = args[i]
+		} else {
+			bindings[name] = &RefStorageParamType{Name: name}
+		}
+	}
+	a.refStorageParamScopes = append(a.refStorageParamScopes, bindings)
+	fn()
+	a.refStorageParamScopes = a.refStorageParamScopes[:len(a.refStorageParamScopes)-1]
+}
+
+func (a *Analyzer) withRefStateParams(names []string, args []Type, fn func()) {
+	if len(names) == 0 {
+		fn()
+		return
+	}
+	bindings := make(map[string]Type, len(names))
+	for i, name := range names {
+		if i < len(args) && args[i] != nil {
+			bindings[name] = args[i]
+		} else {
+			bindings[name] = &RefStateParamType{Name: name}
+		}
+	}
+	a.refStateParamScopes = append(a.refStateParamScopes, bindings)
+	fn()
+	a.refStateParamScopes = a.refStateParamScopes[:len(a.refStateParamScopes)-1]
+}
+
+func (a *Analyzer) withGenericParams(params []ast.GenericParam, args []Type, fn func()) {
+	if len(params) == 0 {
+		fn()
+		return
+	}
+	typeNames := make([]string, 0)
+	typeArgs := make([]Type, 0)
+	refStorageNames := make([]string, 0)
+	refStorageArgs := make([]Type, 0)
+	refStateNames := make([]string, 0)
+	refStateArgs := make([]Type, 0)
+	for i, param := range params {
+		var arg Type
+		if i < len(args) {
+			arg = args[i]
+		}
+		switch param.Kind {
+		case ast.GenericParamType:
+			typeNames = append(typeNames, param.Name)
+			typeArgs = append(typeArgs, arg)
+		case ast.GenericParamRefStorage:
+			refStorageNames = append(refStorageNames, param.Name)
+			refStorageArgs = append(refStorageArgs, arg)
+		case ast.GenericParamRefState:
+			refStateNames = append(refStateNames, param.Name)
+			refStateArgs = append(refStateArgs, arg)
+		}
+	}
+	a.withTypeParams(typeNames, typeArgs, func() {
+		a.withRefStorageParams(refStorageNames, refStorageArgs, func() {
+			a.withRefStateParams(refStateNames, refStateArgs, fn)
+		})
+	})
+}
+
 func (a *Analyzer) lookupTypeParam(name string) (Type, bool) {
 	for i := len(a.typeParamScopes) - 1; i >= 0; i-- {
 		if t, ok := a.typeParamScopes[i][name]; ok {
+			return t, true
+		}
+	}
+	return nil, false
+}
+
+func (a *Analyzer) lookupRefStorageParam(name string) (Type, bool) {
+	for i := len(a.refStorageParamScopes) - 1; i >= 0; i-- {
+		if t, ok := a.refStorageParamScopes[i][name]; ok {
+			return t, true
+		}
+	}
+	return nil, false
+}
+
+func (a *Analyzer) lookupRefStateParam(name string) (Type, bool) {
+	for i := len(a.refStateParamScopes) - 1; i >= 0; i-- {
+		if t, ok := a.refStateParamScopes[i][name]; ok {
 			return t, true
 		}
 	}
@@ -749,6 +996,16 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 			return resolved
 		}
 		return n
+	case *RefStorageParamType:
+		if resolved, ok := bindings[n.Name]; ok {
+			return resolved
+		}
+		return n
+	case *RefStateParamType:
+		if resolved, ok := bindings[n.Name]; ok {
+			return resolved
+		}
+		return n
 	case *ErrorUnionType:
 		return &ErrorUnionType{Value: a.substituteType(n.Value, bindings, shapeBindings, regionBindings, permissionBindings), Errors: n.Errors}
 	case *OptionalType:
@@ -758,7 +1015,33 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 		if bound, ok := regionBindings[n.Region]; ok {
 			region = bound
 		}
-		return &RefType{Elem: a.substituteType(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings), State: n.State, Storage: n.Storage, Region: region, ExplicitStorage: n.ExplicitStorage}
+		state := n.State
+		stateParam := n.StateParam
+		if stateParam != "" {
+			if resolved, ok := bindings[stateParam]; ok {
+				switch resolved := resolved.(type) {
+				case *RefStateValueType:
+					state = resolved.State
+					stateParam = ""
+				case *RefStateParamType:
+					stateParam = resolved.Name
+				}
+			}
+		}
+		storage := n.Storage
+		storageParam := n.StorageParam
+		if storageParam != "" {
+			if resolved, ok := bindings[storageParam]; ok {
+				switch resolved := resolved.(type) {
+				case *RefStorageValueType:
+					storage = resolved.Storage
+					storageParam = ""
+				case *RefStorageParamType:
+					storageParam = resolved.Name
+				}
+			}
+		}
+		return &RefType{Elem: a.substituteType(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings), State: state, StateParam: stateParam, Storage: storage, StorageParam: storageParam, Region: region, ExplicitStorage: n.ExplicitStorage}
 	case *ArrayType:
 		return &ArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings), Size: n.Size, HasConstSize: n.HasConstSize, ConstSize: n.ConstSize, SurfaceName: n.SurfaceName}
 	case *DArrayType:
@@ -780,7 +1063,7 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 		}
 		return &GenericInstanceType{Name: n.Name, Base: n.Base, Args: args}
 	case *AggregateStateType:
-		return &AggregateStateType{Base: a.substituteType(n.Base, bindings, shapeBindings, regionBindings, permissionBindings), State: n.State}
+		return cloneAggregateStateWithBase(a.substituteType(n.Base, bindings, shapeBindings, regionBindings, permissionBindings), aggregateStateStates(n))
 	case *PackedEnumStoreType:
 		return PackedEnumStoreWithState(n, a.substituteType(n.State, bindings, shapeBindings, regionBindings, permissionBindings))
 	case *FuncType:
@@ -789,7 +1072,7 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 			params = append(params, a.substituteType(param, bindings, shapeBindings, regionBindings, permissionBindings))
 		}
 		declaredRefs, refs, usedPermissionParams := substitutePermissionRefs(n.DeclaredPermissionRefs, n.PermissionRefs, n.UsedPermissionParams, permissionBindings)
-		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), RegionParams: append([]string(nil), n.RegionParams...), PermissionParams: append([]string(nil), n.PermissionParams...), UsedPermissionParams: usedPermissionParams, DeclaredPermissionRefs: declaredRefs, DeclaredPermissions: permissionFamiliesFromRefs(declaredRefs), PermissionRefs: refs, Permissions: permissionFamiliesFromRefs(refs), ShapeParams: append([]string(nil), n.ShapeParams...), FreshReturnShapeParams: append([]string(nil), n.FreshReturnShapeParams...), Params: params, Return: a.substituteType(n.Return, bindings, shapeBindings, regionBindings, permissionBindings), Variadic: n.Variadic, ReturnProvenance: cloneRegionRefState(n.ReturnProvenance), ReturnProvenanceKnown: n.ReturnProvenanceKnown, ReturnBorrowedOwnerRefs: cloneBorrowedOwnerRefSummary(n.ReturnBorrowedOwnerRefs), ReturnBorrowedOwnerRefsKnown: n.ReturnBorrowedOwnerRefsKnown}
+		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), RefStorageParams: append([]string(nil), n.RefStorageParams...), RefStateParams: append([]string(nil), n.RefStateParams...), RegionParams: append([]string(nil), n.RegionParams...), PermissionParams: append([]string(nil), n.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), n.GenericParams...), UsedPermissionParams: usedPermissionParams, DeclaredPermissionRefs: declaredRefs, DeclaredPermissions: permissionFamiliesFromRefs(declaredRefs), PermissionRefs: refs, Permissions: permissionFamiliesFromRefs(refs), ShapeParams: append([]string(nil), n.ShapeParams...), FreshReturnShapeParams: append([]string(nil), n.FreshReturnShapeParams...), Params: params, Return: a.substituteType(n.Return, bindings, shapeBindings, regionBindings, permissionBindings), Variadic: n.Variadic, ReturnProvenance: cloneRegionRefState(n.ReturnProvenance), ReturnProvenanceKnown: n.ReturnProvenanceKnown, ReturnBorrowedOwnerRefs: cloneBorrowedOwnerRefSummary(n.ReturnBorrowedOwnerRefs), ReturnBorrowedOwnerRefsKnown: n.ReturnBorrowedOwnerRefsKnown}
 	default:
 		return t
 	}

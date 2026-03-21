@@ -293,6 +293,66 @@ That keeps the low-level boundary honest (`alloc_node` may return null), preserv
 
 In other words: keep `any` for real provenance-erasing boundaries such as generic FFI shims, but prefer `heap`, `stack`, `static`, or a named region like `scratch` when the storage class is actually known.
 
+## Named refstate and refstorage generics
+
+Pointer state and pointer storage can now be abstracted explicitly in generic declarations.
+
+Example:
+
+```context
+struct Cursor[refstorage store, refstate state]:
+    ptr: store u8&[state]
+    end: store u8&
+```
+
+This is the intended reading:
+
+- `refstorage store` abstracts the storage qualifier (`any`, `heap`, `stack`, `static`)
+- `refstate state` abstracts the reference proof state (`&`, `?`, `!`)
+- `store u8&[state]` means “a reference whose storage comes from `store` and whose proof state comes from `state`”
+
+### Instantiation order
+
+Mixed generic arguments bind in declaration order.
+
+So:
+
+```context
+struct Cursor[T, refstorage store, refstate state]:
+    ptr: store T&[state]
+```
+
+is instantiated in exactly that order:
+
+```context
+Cursor[u8, heap, &]
+Cursor[u8, any, ?]
+```
+
+### Nearest-`&` rule
+
+`[state]` attaches to the nearest preceding `&`.
+
+```context
+any u8&&[state]
+```
+
+means “pointer to pointer”, where the **outer** reference carries `state`.
+
+### Compatibility with the older anonymous syntax
+
+The older anonymous aggregate-state syntax still exists:
+
+```context
+struct Holder[?, ?]:
+    ...
+
+Holder[!, &]
+```
+
+Use the named form when you want state/storage to be reusable and self-documenting inside a generic API.
+Keep the anonymous form when you only want positional aggregate-state placeholders.
+
 ## Stack-qualified refs are for single-slot borrows
 
 `stack` is a good fit when the pointer really is “borrowed from one local slot in the caller's frame” rather than heap-owned or globally static.

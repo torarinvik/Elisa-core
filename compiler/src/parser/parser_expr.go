@@ -19,8 +19,8 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "func" {
 		return p.parseFuncTypeExpr()
 	}
-	storage, explicit, label, region := p.parseRefStorageQualifier()
-	typ := p.parseBaseType(storage, explicit, label, region)
+	storage, explicit, label, region, storageParam := p.parseRefStorageQualifier()
+	typ := p.parseBaseType(storage, explicit, label, region, storageParam)
 	if p.match(lexer.TOKEN_PIPE) {
 		errType := p.parseTypeExpr()
 		p.errorf("legacy fallible return syntax `T | ErrorSet` is no longer supported; use `T error[SomeSet]` instead")
@@ -108,30 +108,47 @@ func (p *Parser) parseErrorSetItem() ast.ErrorTagExpr {
 	return ast.ErrorTagExpr{Position: pos, SetName: setName, Tag: tag}
 }
 
-func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string, string) {
+func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string, string, string) {
 	switch p.peek() {
 	case lexer.TOKEN_ANY:
 		tok := p.advance()
-		return ast.RefStorageAny, true, tok.Text, ""
+		return ast.RefStorageAny, true, tok.Text, "", ""
 	case lexer.TOKEN_HEAP:
 		tok := p.advance()
-		return ast.RefStorageHeap, true, tok.Text, ""
+		return ast.RefStorageHeap, true, tok.Text, "", ""
 	case lexer.TOKEN_STACK:
 		tok := p.advance()
-		return ast.RefStorageStack, true, tok.Text, ""
+		return ast.RefStorageStack, true, tok.Text, "", ""
 	case lexer.TOKEN_STATIC:
 		tok := p.advance()
-		return ast.RefStorageStatic, true, tok.Text, ""
+		return ast.RefStorageStatic, true, tok.Text, "", ""
 	default:
 		if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text != "can" {
-			region := p.advance().Text
-			return ast.RefStorageAny, true, region, region
+			name := p.advance().Text
+			return ast.RefStorageAny, true, name, "", name
 		}
-		return ast.RefStorageAny, false, "", ""
+		return ast.RefStorageAny, false, "", "", ""
 	}
 }
 
-func (p *Parser) parseRefTypeSuffixes(base ast.TypeExpr, pos lexer.Pos, storage ast.RefStorage, explicit bool, region string) (ast.TypeExpr, int) {
+func (p *Parser) peekRefStateParamBracket() (string, bool) {
+	if p.peek() != lexer.TOKEN_LBRACKET || p.pos+2 >= len(p.tokens) {
+		return "", false
+	}
+	if p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT || p.tokens[p.pos+2].Kind != lexer.TOKEN_RBRACKET {
+		return "", false
+	}
+	return p.tokens[p.pos+1].Text, true
+}
+
+func (p *Parser) parseRefStateParamBracket() string {
+	p.expect(lexer.TOKEN_LBRACKET)
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_RBRACKET)
+	return name
+}
+
+func (p *Parser) parseRefTypeSuffixes(base ast.TypeExpr, pos lexer.Pos, storage ast.RefStorage, explicit bool, region string, storageParam string) (ast.TypeExpr, int) {
 	typ := base
 	count := 0
 	for {
@@ -139,14 +156,22 @@ func (p *Parser) parseRefTypeSuffixes(base ast.TypeExpr, pos lexer.Pos, storage 
 		case lexer.TOKEN_AMPERSAND:
 			p.advance()
 			state := ast.RefStateNonNull
+			allowStateParam := true
 			if p.match(lexer.TOKEN_QUESTION) {
 				state = ast.RefStateNullable
+				allowStateParam = false
 			}
-			typ = &ast.RefType{Position: pos, Elem: typ, State: state, Storage: storage, Region: region, Explicit: explicit}
+			stateParam := ""
+			if allowStateParam {
+				if _, ok := p.peekRefStateParamBracket(); ok {
+					stateParam = p.parseRefStateParamBracket()
+				}
+			}
+			typ = &ast.RefType{Position: pos, Elem: typ, State: state, Storage: storage, StateParam: stateParam, StorageParam: storageParam, Region: region, Explicit: explicit}
 			count++
 		case lexer.TOKEN_BANG:
 			p.advance()
-			typ = &ast.RefType{Position: pos, Elem: typ, State: ast.RefStateNull, Storage: storage, Region: region, Explicit: explicit}
+			typ = &ast.RefType{Position: pos, Elem: typ, State: ast.RefStateNull, Storage: storage, StorageParam: storageParam, Region: region, Explicit: explicit}
 			count++
 		default:
 			return typ, count
@@ -154,44 +179,110 @@ func (p *Parser) parseRefTypeSuffixes(base ast.TypeExpr, pos lexer.Pos, storage 
 	}
 }
 
-func (p *Parser) peekAggregateStateBracket() (ast.RefState, bool) {
-	if p.peek() != lexer.TOKEN_LBRACKET || p.pos+2 >= len(p.tokens) {
-		return ast.RefStateNullable, false
-	}
-	if p.tokens[p.pos+2].Kind != lexer.TOKEN_RBRACKET {
-		return ast.RefStateNullable, false
-	}
-	switch p.tokens[p.pos+1].Kind {
-	case lexer.TOKEN_AMPERSAND:
-		return ast.RefStateNonNull, true
-	case lexer.TOKEN_QUESTION:
-		return ast.RefStateNullable, true
-	case lexer.TOKEN_BANG:
-		return ast.RefStateNull, true
-	default:
-		return ast.RefStateNullable, false
-	}
-}
-
-func (p *Parser) parseAggregateStateBracket() ast.RefState {
-	p.expect(lexer.TOKEN_LBRACKET)
-	var state ast.RefState
+func (p *Parser) parseGenericTypeArgExpr() ast.TypeExpr {
 	switch p.peek() {
 	case lexer.TOKEN_AMPERSAND:
+		pos := p.cur().Pos
 		p.advance()
-		state = ast.RefStateNonNull
+		return &ast.RefStateLiteralTypeExpr{Position: pos, State: ast.RefStateNonNull}
 	case lexer.TOKEN_QUESTION:
+		pos := p.cur().Pos
 		p.advance()
-		state = ast.RefStateNullable
+		return &ast.RefStateLiteralTypeExpr{Position: pos, State: ast.RefStateNullable}
 	case lexer.TOKEN_BANG:
+		pos := p.cur().Pos
 		p.advance()
-		state = ast.RefStateNull
-	default:
-		p.errorf("expected aggregate state marker &, ?, or !, got %s", p.cur())
-		state = ast.RefStateNullable
+		return &ast.RefStateLiteralTypeExpr{Position: pos, State: ast.RefStateNull}
+	case lexer.TOKEN_ANY, lexer.TOKEN_HEAP, lexer.TOKEN_STACK, lexer.TOKEN_STATIC:
+		if p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT {
+			pos := p.cur().Pos
+			switch p.advance().Kind {
+			case lexer.TOKEN_HEAP:
+				return &ast.RefStorageLiteralTypeExpr{Position: pos, Storage: ast.RefStorageHeap}
+			case lexer.TOKEN_STACK:
+				return &ast.RefStorageLiteralTypeExpr{Position: pos, Storage: ast.RefStorageStack}
+			case lexer.TOKEN_STATIC:
+				return &ast.RefStorageLiteralTypeExpr{Position: pos, Storage: ast.RefStorageStatic}
+			default:
+				return &ast.RefStorageLiteralTypeExpr{Position: pos, Storage: ast.RefStorageAny}
+			}
+		}
+	}
+	return p.parseTypeExpr()
+}
+
+func (p *Parser) peekAggregateStateBracketList() ([]ast.RefState, bool) {
+	if p.peek() != lexer.TOKEN_LBRACKET {
+		return nil, false
+	}
+	states := make([]ast.RefState, 0, 1)
+	i := p.pos + 1
+	expectState := true
+	for i < len(p.tokens) {
+		tok := p.tokens[i]
+		if expectState {
+			switch tok.Kind {
+			case lexer.TOKEN_AMPERSAND:
+				states = append(states, ast.RefStateNonNull)
+			case lexer.TOKEN_QUESTION:
+				states = append(states, ast.RefStateNullable)
+			case lexer.TOKEN_BANG:
+				states = append(states, ast.RefStateNull)
+			default:
+				return nil, false
+			}
+			i++
+			expectState = false
+			continue
+		}
+		if tok.Kind == lexer.TOKEN_RBRACKET {
+			if len(states) == 0 {
+				return nil, false
+			}
+			return states, true
+		}
+		if tok.Kind != lexer.TOKEN_COMMA {
+			return nil, false
+		}
+		i++
+		expectState = true
+	}
+	return nil, false
+}
+
+func (p *Parser) parseAggregateStateBracketList() []ast.RefState {
+	p.expect(lexer.TOKEN_LBRACKET)
+	states := make([]ast.RefState, 0, 1)
+	for {
+		switch p.peek() {
+		case lexer.TOKEN_AMPERSAND:
+			p.advance()
+			states = append(states, ast.RefStateNonNull)
+		case lexer.TOKEN_QUESTION:
+			p.advance()
+			states = append(states, ast.RefStateNullable)
+		case lexer.TOKEN_BANG:
+			p.advance()
+			states = append(states, ast.RefStateNull)
+		default:
+			p.errorf("expected aggregate state marker &, ?, or !, got %s", p.cur())
+			states = append(states, ast.RefStateNullable)
+		}
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
 	}
 	p.expect(lexer.TOKEN_RBRACKET)
-	return state
+	return states
+}
+
+func newAggregateStateTypeExpr(pos lexer.Pos, base ast.TypeExpr, states []ast.RefState) *ast.AggregateStateTypeExpr {
+	expr := &ast.AggregateStateTypeExpr{Position: pos, Base: base}
+	if len(states) > 0 {
+		expr.State = states[0]
+		expr.States = append([]ast.RefState(nil), states...)
+	}
+	return expr
 }
 
 func canApplyAggregateState(typ ast.TypeExpr) bool {
@@ -203,7 +294,7 @@ func canApplyAggregateState(typ ast.TypeExpr) bool {
 	}
 }
 
-func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label string, region string) ast.TypeExpr {
+func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label string, region string, storageParam string) ast.TypeExpr {
 	pos := p.cur().Pos
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	for p.match(lexer.TOKEN_DOT) {
@@ -212,8 +303,9 @@ func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label stri
 	var typ ast.TypeExpr = &ast.NamedType{Position: pos, Name: name}
 
 	if canApplyAggregateState(typ) {
-		if _, ok := p.peekAggregateStateBracket(); ok {
-			typ = &ast.AggregateStateTypeExpr{Position: pos, Base: typ, State: p.parseAggregateStateBracket()}
+		if states, ok := p.peekAggregateStateBracketList(); ok {
+			typ = newAggregateStateTypeExpr(pos, typ, states)
+			p.parseAggregateStateBracketList()
 		}
 	}
 
@@ -242,7 +334,7 @@ func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label stri
 				p.advance()
 				var args []ast.TypeExpr
 				for {
-					args = append(args, p.parseTypeExpr())
+					args = append(args, p.parseGenericTypeArgExpr())
 					if !p.match(lexer.TOKEN_COMMA) {
 						break
 					}
@@ -254,19 +346,22 @@ func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label stri
 	}
 
 	if canApplyAggregateState(typ) {
-		if _, ok := p.peekAggregateStateBracket(); ok {
-			typ = &ast.AggregateStateTypeExpr{Position: pos, Base: typ, State: p.parseAggregateStateBracket()}
+		if states, ok := p.peekAggregateStateBracketList(); ok {
+			typ = newAggregateStateTypeExpr(pos, typ, states)
+			p.parseAggregateStateBracketList()
 		}
 	}
 
 	refCount := 0
-	typ, refCount = p.parseRefTypeSuffixes(typ, pos, storage, explicit, region)
+	typ, refCount = p.parseRefTypeSuffixes(typ, pos, storage, explicit, region, storageParam)
 	if !explicit && refCount > 0 {
 		p.errorf("reference types require an explicit storage qualifier like \"any\", \"heap\", \"stack\", or \"static\"")
 	}
 	if explicit && refCount == 0 {
 		if region != "" {
 			p.errorf("region qualifier %q requires a pointer type", label)
+		} else if storageParam != "" {
+			p.errorf("refstorage qualifier %q requires a pointer type", label)
 		} else {
 			p.errorf("storage qualifier %q requires a pointer type", label)
 		}
@@ -686,7 +781,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 				castPos := pos
 				savedCastPos := p.pos
 				var target ast.TypeExpr = &ast.NamedType{Position: castPos, Name: field}
-				target, _ = p.parseRefTypeSuffixes(target, castPos, ast.RefStorageAny, false, "")
+				target, _ = p.parseRefTypeSuffixes(target, castPos, ast.RefStorageAny, false, "", "")
 				if p.peek() == lexer.TOKEN_LPAREN {
 					p.errorf("legacy reference cast syntax is no longer supported; use .cast[any T&]() with an explicit target type instead")
 					p.advance()

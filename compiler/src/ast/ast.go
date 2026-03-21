@@ -78,13 +78,33 @@ type GlobalDecl struct {
 }
 
 type StructDecl struct {
-	Position      lexer.Pos
-	Name          string
-	TypeParams    []string
-	HasStateParam bool
-	Affine        bool
-	ReprC         bool
-	Fields        []FieldDecl
+	Position        lexer.Pos
+	Name            string
+	TypeParams      []string
+	RefStorageParams []string
+	RefStateParams   []string
+	GenericParams    []GenericParam
+	HasStateParam   bool
+	StateParamCount int
+	Affine          bool
+	ReprC           bool
+	Fields          []FieldDecl
+}
+
+type GenericParamKind int
+
+const (
+	GenericParamType GenericParamKind = iota
+	GenericParamRefStorage
+	GenericParamRefState
+	GenericParamRegion
+	GenericParamPermission
+)
+
+type GenericParam struct {
+	Position lexer.Pos
+	Kind     GenericParamKind
+	Name     string
 }
 
 type FieldDecl struct {
@@ -112,8 +132,11 @@ type FuncDecl struct {
 	Annotations      []Annotation
 	Name             string
 	TypeParams       []string
+	RefStorageParams []string
+	RefStateParams   []string
 	RegionParams     []string
 	PermissionParams []string
+	GenericParams    []GenericParam
 	Permissions      []PermissionRef
 	Params           []ParamDecl
 	ReturnType       TypeExpr
@@ -216,8 +239,20 @@ type RefType struct {
 	Elem     TypeExpr
 	State    RefState
 	Storage  RefStorage
+	StateParam   string
+	StorageParam string
 	Region   string
 	Explicit bool
+}
+
+type RefStateLiteralTypeExpr struct {
+	Position lexer.Pos
+	State    RefState
+}
+
+type RefStorageLiteralTypeExpr struct {
+	Position lexer.Pos
+	Storage  RefStorage
 }
 
 type GenericType struct {
@@ -230,6 +265,7 @@ type AggregateStateTypeExpr struct {
 	Position lexer.Pos
 	Base     TypeExpr
 	State    RefState
+	States   []RefState
 }
 
 type MutableType struct {
@@ -706,6 +742,12 @@ func (n *ExportGlobalDecl) Pos() lexer.Pos {
 func (n *StaticIfDecl) Pos() lexer.Pos { return n.Position }
 func (n *NamedType) Pos() lexer.Pos    { return n.Position }
 func (n *RefType) Pos() lexer.Pos      { return n.Position }
+func (n *RefStateLiteralTypeExpr) Pos() lexer.Pos {
+	return n.Position
+}
+func (n *RefStorageLiteralTypeExpr) Pos() lexer.Pos {
+	return n.Position
+}
 func (n *GenericType) Pos() lexer.Pos  { return n.Position }
 func (n *AggregateStateTypeExpr) Pos() lexer.Pos {
 	return n.Position
@@ -800,6 +842,8 @@ func (*ExportGlobalDecl) nodeTag()       {}
 func (*StaticIfDecl) nodeTag()           {}
 func (*NamedType) nodeTag()              {}
 func (*RefType) nodeTag()                {}
+func (*RefStateLiteralTypeExpr) nodeTag()  {}
+func (*RefStorageLiteralTypeExpr) nodeTag() {}
 func (*GenericType) nodeTag()            {}
 func (*AggregateStateTypeExpr) nodeTag() {}
 func (*MutableType) nodeTag()            {}
@@ -886,6 +930,8 @@ func (*StaticIfDecl) declTag()     {}
 
 func (*NamedType) typeExprTag()              {}
 func (*RefType) typeExprTag()                {}
+func (*RefStateLiteralTypeExpr) typeExprTag()  {}
+func (*RefStorageLiteralTypeExpr) typeExprTag() {}
 func (*GenericType) typeExprTag()            {}
 func (*AggregateStateTypeExpr) typeExprTag() {}
 func (*MutableType) typeExprTag()            {}
