@@ -29,3 +29,47 @@ def invalid_inputs_are_rejected() -> void:
     assert(json_expect_invalid_ast("{\"a\":[1,2}"))
     assert(json_expect_invalid("[1,,2]"))
     assert(json_expect_invalid_ast("[1,,2]"))
+
+
+@test
+def ast_raw_dom_helpers_expose_source_spans_and_structure() -> void:
+    source: static u8& = "{\"name\":\"Ada\",\"nums\":[1,-2,3.5],\"ok\":true,\"none\":null}"
+    source_any: any u8& = source.cast[any u8&]()
+    source_len: usize = runtime_strlen(source_any)
+
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source_any, source_len, store)
+
+    assert(result.checksum > 0)
+    assert(json_ast_kind(result.node, store) == JSON_NODE_KIND_OBJECT)
+    assert(json_ast_object_len(result.node, store) == 4)
+
+    name_node: JsonNode = json_ast_object_get(result.node, source_any, "name".cast[any u8&](), store)
+    assert(not json_node_is_invalid(name_node, store))
+    assert(json_ast_kind(name_node, store) == JSON_NODE_KIND_STRING)
+    assert(string_view_eq(json_ast_source_view(source_any, name_node, store), "\"Ada\"".cast[any u8&]()) != 0)
+    assert(string_view_eq(json_ast_string_view(source_any, name_node, store), "Ada".cast[any u8&]()) != 0)
+
+    nums_node: JsonNode = json_ast_object_get(result.node, source_any, "nums".cast[any u8&](), store)
+    assert(not json_node_is_invalid(nums_node, store))
+    assert(json_ast_kind(nums_node, store) == JSON_NODE_KIND_ARRAY)
+    assert(json_ast_array_len(nums_node, store) == 3)
+
+    first_num: JsonNode = json_ast_array_nth(nums_node, 0u, store)
+    second_num: JsonNode = json_ast_array_nth(nums_node, 1u, store)
+    third_num: JsonNode = json_ast_array_nth(nums_node, 2u, store)
+    missing_num: JsonNode = json_ast_array_nth(nums_node, 3u, store)
+    assert(string_view_eq(json_ast_number_view(source_any, first_num, store), "1".cast[any u8&]()) != 0)
+    assert(string_view_eq(json_ast_number_view(source_any, second_num, store), "-2".cast[any u8&]()) != 0)
+    assert(string_view_eq(json_ast_number_view(source_any, third_num, store), "3.5".cast[any u8&]()) != 0)
+    assert(json_node_is_invalid(missing_num, store))
+
+    ok_node: JsonNode = json_ast_object_get(result.node, source_any, "ok".cast[any u8&](), store)
+    none_node: JsonNode = json_ast_object_get(result.node, source_any, "none".cast[any u8&](), store)
+    missing_field: JsonNode = json_ast_object_get(result.node, source_any, "missing".cast[any u8&](), store)
+    assert(json_ast_bool_value(ok_node, store) == 1)
+    assert(json_ast_is_null(none_node, store))
+    assert(json_node_is_invalid(missing_field, store))
+
+    destroy scratch

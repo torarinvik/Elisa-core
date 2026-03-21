@@ -282,8 +282,11 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			path: filepath.Join(repoRoot, "Code", "test_programs", "json_parser.llcontext"),
 			checks: []string{
 				"%JsonCursor = type { ptr, i64, i64 }",
-				"%JsonNode = type { i32, i64, [3 x i64] }",
+				"%JsonLexemeResult = type { i64, i64, i64 }",
+				"%JsonNode = type { i32, i64, i64, i64, [3 x i64] }",
 				"%JsonParseNodeResult = type { ptr, i64 }",
+				"define %JsonLexemeResult @json_parse_string_lexeme(ptr",
+				"define %JsonLexemeResult @json_parse_number_lexeme(ptr",
 				"define i64 @json_parse_string(ptr",
 				"define i64 @json_parse_number(ptr",
 				"define i64 @json_parse_array(ptr",
@@ -291,6 +294,9 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"define %JsonParseNodeResult @json_parse_value_node(ptr",
 				"define %JsonParseNodeResult @json_parse_array_node(ptr",
 				"define %JsonParseNodeResult @json_parse_object_node(ptr",
+				"define i64 @json_ast_kind(ptr %0, %JsonNode__Store %1)",
+				"define ptr @json_ast_array_nth(ptr %0, i64 %1, %JsonNode__Store %2)",
+				"define ptr @json_ast_object_get(ptr %0, ptr %1, ptr %2, %JsonNode__Store %3)",
 				"define i64 @json_parser_parity_suite()",
 				"define i64 @json_parser_checksum(ptr",
 				"define i64 @json_parser_ast_checksum(ptr",
@@ -836,7 +842,8 @@ func TestRunCLIExecutesJSONParserSelfHostedTests(t *testing.T) {
 		"[ RUN      ] ast_checksum_matches_expected_values",
 		"[ RUN      ] ast_and_checksum_paths_agree_on_nested_inputs",
 		"[ RUN      ] invalid_inputs_are_rejected",
-		"[ SUMMARY  ] 4 test(s) selected",
+		"[ RUN      ] ast_raw_dom_helpers_expose_source_spans_and_structure",
+		"[ SUMMARY  ] 5 test(s) selected",
 	} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected json parser self-hosted test output to contain %q, got:\n%s", check, output)
