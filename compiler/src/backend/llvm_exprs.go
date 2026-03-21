@@ -1225,6 +1225,194 @@ func (s *functionState) emitSpecializedRuntimeCall(expr *ast.CallExpr) (C.LLVMVa
 	return C.LLVMBuildZExt(s.builder, cmp, intLLVMType, cStringFree("svlit.eq.int")), intType, true, nil
 }
 
+func isStringViewCarrierType(t semantic.Type) bool {
+	return classifyRuntimeStringCompareKind(t) == runtimeStringCompareView
+}
+
+func (s *functionState) emitGlobalCStringLiteral(text string, name string) C.LLVMValueRef {
+	nameC := cString(name)
+	defer C.free(unsafe.Pointer(nameC))
+	textC := cString(text)
+	defer C.free(unsafe.Pointer(textC))
+	return C.LLVMBuildGlobalStringPtr(s.builder, textC, nameC)
+}
+
+func (s *functionState) emitInternSmallStringCall(data C.LLVMValueRef, lenValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	u8Type := s.g.result.NamedTypes["u8"]
+	usizeType := s.g.result.NamedTypes["usize"]
+	srcType := &semantic.RefType{Elem: u8Type, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	retType := &semantic.RefType{Elem: u8Type, State: semantic.RefStateNonNull, Storage: semantic.RefStorageHeap, ExplicitStorage: true}
+	helperType := &semantic.FuncType{Name: "intern_small_string", Params: []semantic.Type{srcType, usizeType}, Return: retType}
+	callee, err := s.g.ensureFunctionDeclared("intern_small_string", helperType)
+	if err != nil {
+		return nil, err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, err
+	}
+	return s.buildCall(llvmFnType, callee, []C.LLVMValueRef{data, lenValue}, name), nil
+}
+
+func (s *functionState) emitDirectStringViewCopyLarge(viewData C.LLVMValueRef, viewLen C.LLVMValueRef) (C.LLVMValueRef, error) {
+	i64Type := s.g.result.NamedTypes["i64"]
+	usizeType := s.g.result.NamedTypes["usize"]
+	voidType := s.g.result.NamedTypes["void"]
+	u8Type := s.g.result.NamedTypes["u8"]
+	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	nullableU8RefType := &semantic.RefType{Elem: u8Type, State: semantic.RefStateNullable, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	heapVoidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageHeap, ExplicitStorage: true}
+	allocType := &semantic.FuncType{Name: "alloc_perm", Params: []semantic.Type{i64Type}, Return: heapVoidRefType}
+	allocCallee, err := s.g.ensureFunctionDeclared("alloc_perm", allocType)
+	if err != nil {
+		return nil, err
+	}
+	allocLLVMType, err := s.g.lowerFunctionType(allocType)
+	if err != nil {
+		return nil, err
+	}
+	oneValue := C.LLVMConstInt(C.LLVMInt64TypeInContext(s.g.context), 1, 0)
+	allocSize := C.LLVMBuildAdd(s.builder, viewLen, oneValue, cStringFree("svcopy.alloc.size"))
+	allocPtr := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{allocSize}, "svcopy.alloc")
+
+	lenUsize, err := s.coerceValue(viewLen, i64Type, usizeType)
+	if err != nil {
+		return nil, err
+	}
+	memcpyType := &semantic.FuncType{Name: "memcpy", Params: []semantic.Type{voidRefType, voidRefType, usizeType}, Return: voidRefType}
+	memcpyCallee, err := s.g.ensureFunctionDeclared("memcpy", memcpyType)
+	if err != nil {
+		return nil, err
+	}
+	memcpyLLVMType, err := s.g.lowerFunctionType(memcpyType)
+	if err != nil {
+		return nil, err
+	}
+	_ = s.buildCall(memcpyLLVMType, memcpyCallee, []C.LLVMValueRef{allocPtr, viewData, lenUsize}, "svcopy.memcpy")
+
+	i8LLVMType, err := s.g.lowerBuiltin("u8")
+	if err != nil {
+		return nil, err
+	}
+	bytePtr := C.LLVMBuildGEP2(s.builder, i8LLVMType, allocPtr, llvmValueSlicePtr([]C.LLVMValueRef{lenUsize}), 1, cStringFree("svcopy.term.ptr"))
+	zeroByte := C.LLVMConstInt(i8LLVMType, 0, 0)
+	C.LLVMBuildStore(s.builder, zeroByte, bytePtr)
+
+	registerType := &semantic.FuncType{Name: "register_perm_string_len", Params: []semantic.Type{nullableU8RefType, usizeType}, Return: voidType}
+	registerCallee, err := s.g.ensureFunctionDeclared("register_perm_string_len", registerType)
+	if err != nil {
+		return nil, err
+	}
+	registerLLVMType, err := s.g.lowerFunctionType(registerType)
+	if err != nil {
+		return nil, err
+	}
+	_ = s.buildCall(registerLLVMType, registerCallee, []C.LLVMValueRef{allocPtr, lenUsize}, "")
+	return allocPtr, nil
+}
+
+func (s *functionState) emitSpecializedStringViewCopyCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	ident, ok := expr.Func.(*ast.Ident)
+	if !ok || (ident.Name != "string_view_copy" && ident.Name != "ctx_string_from_view") {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 1 || s == nil || s.g == nil || s.g.result == nil {
+		return nil, nil, false, nil
+	}
+	viewExpr := expr.Args[0]
+	viewType := s.exprType(viewExpr)
+	resultType := s.exprType(expr)
+	if !isStringViewCarrierType(viewType) {
+		return nil, nil, false, nil
+	}
+	viewFacts, ok := s.g.result.ExprOptimizationFacts(viewExpr)
+	if !ok || !viewFacts.HasExactExtent() {
+		return nil, nil, false, nil
+	}
+	viewValue, _, err := s.emitExpr(viewExpr, viewType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	viewData := C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree("svcopy.data"))
+	viewLen := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree("svcopy.len"))
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if exactLen, ok := constOptimizationExtentSize(viewFacts.Extent); ok {
+		lenValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(exactLen), 0)
+		if exactLen <= 8 {
+			dataValue := viewData
+			if exactLen == 0 {
+				dataValue = s.emitGlobalCStringLiteral("", "svcopy.empty")
+			}
+			value, err := s.emitInternSmallStringCall(dataValue, lenValue, "svcopy.small")
+			return value, resultType, true, err
+		}
+		largeLen := C.LLVMConstInt(C.LLVMInt64TypeInContext(s.g.context), C.ulonglong(exactLen), 0)
+		value, err := s.emitDirectStringViewCopyLarge(viewData, largeLen)
+		return value, resultType, true, err
+	}
+
+	i64LLVMType := C.LLVMInt64TypeInContext(s.g.context)
+	zeroLen := C.LLVMConstInt(i64LLVMType, 0, 0)
+	eightLen := C.LLVMConstInt(i64LLVMType, 8, 0)
+	zeroCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntSLE), viewLen, zeroLen, cStringFree("svcopy.len.zero"))
+	positiveBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("svcopy.positive"))
+	zeroBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("svcopy.zero"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("svcopy.merge"))
+	entryBlock := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildCondBr(s.builder, zeroCond, zeroBB, positiveBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, zeroBB)
+	emptyPtr := s.emitGlobalCStringLiteral("", "svcopy.empty")
+	zeroSmall, err := s.emitInternSmallStringCall(emptyPtr, C.LLVMConstInt(usizeLLVMType, 0, 0), "svcopy.zero.small")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	zeroEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, positiveBB)
+	smallCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntSLE), viewLen, eightLen, cStringFree("svcopy.len.small"))
+	smallBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("svcopy.small"))
+	largeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("svcopy.large"))
+	C.LLVMBuildCondBr(s.builder, smallCond, smallBB, largeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, smallBB)
+	viewLenUsize, err := s.coerceValue(viewLen, s.g.result.NamedTypes["i64"], usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	smallValue, err := s.emitInternSmallStringCall(viewData, viewLenUsize, "svcopy.small")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	smallEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, largeBB)
+	largeValue, err := s.emitDirectStringViewCopyLarge(viewData, viewLen)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	largeEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	llvmResultType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	phi := C.LLVMBuildPhi(s.builder, llvmResultType, cStringFree("svcopy.result"))
+	values := []C.LLVMValueRef{zeroSmall, smallValue, largeValue}
+	blocks := []C.LLVMBasicBlockRef{zeroEnd, smallEnd, largeEnd}
+	_ = entryBlock
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	return phi, resultType, true, nil
+}
+
 func (s *functionState) emitSpecializedStringViewLiteralCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	ident, ok := expr.Func.(*ast.Ident)
 	if !ok {
@@ -1383,6 +1571,15 @@ func isDynArrayViewCarrierType(t semantic.Type) bool {
 		return true
 	case *semantic.StructType:
 		return tt != nil && tt.Name == "DynArrayView"
+	default:
+		return false
+	}
+}
+
+func isDynArrayCarrierType(t semantic.Type) bool {
+	switch t.(type) {
+	case *semantic.DArrayType:
+		return true
 	default:
 		return false
 	}
@@ -1676,6 +1873,100 @@ func (s *functionState) emitSpecializedArenaViewEqCall(expr *ast.CallExpr) (C.LL
 	trueValue := C.LLVMConstInt(boolType, 1, 0)
 	values := []C.LLVMValueRef{trueValue, cmp}
 	blocks := []C.LLVMBasicBlockRef{entryBlock, memcmpEnd}
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	return phi, resultType, true, nil
+}
+
+func (s *functionState) emitSpecializedArenaFromViewCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	ident, ok := expr.Func.(*ast.Ident)
+	if !ok || ident.Name != "arena_da_from_view" {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 2 || s == nil || s.g == nil || s.g.result == nil {
+		return nil, nil, false, nil
+	}
+	arenaExpr := expr.Args[0]
+	viewExpr := expr.Args[1]
+	arenaType := s.exprType(arenaExpr)
+	viewType := s.exprType(viewExpr)
+	resultType := s.exprType(expr)
+	if !isDynArrayViewCarrierType(viewType) || !isDynArrayCarrierType(resultType) {
+		return nil, nil, false, nil
+	}
+	viewFacts, ok := s.g.result.ExprOptimizationFacts(viewExpr)
+	if !ok || !viewFacts.HasExactExtent() {
+		return nil, nil, false, nil
+	}
+	arenaValue, _, err := s.emitExpr(arenaExpr, arenaType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	viewValue, _, err := s.emitExpr(viewExpr, viewType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	llvmResultType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	zeroResult, err := s.zeroValue(resultType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	viewData := C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree("dview.materialize.src.data"))
+	viewLen := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree("dview.materialize.src.len"))
+	viewElemSize := C.LLVMBuildExtractValue(s.builder, viewValue, 2, cStringFree("dview.materialize.src.elem_size"))
+	byteCount := C.LLVMBuildMul(s.builder, viewLen, viewElemSize, cStringFree("dview.materialize.bytes"))
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	zeroBytes := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	zeroCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), byteCount, zeroBytes, cStringFree("dview.materialize.bytes.zero"))
+	entryBlock := C.LLVMGetInsertBlock(s.builder)
+	allocBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dview.materialize.alloc"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dview.materialize.merge"))
+	C.LLVMBuildCondBr(s.builder, zeroCond, mergeBB, allocBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, allocBB)
+	voidType := s.g.result.NamedTypes["void"]
+	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	helpAllocType := &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaType, usizeType}, Return: voidRefType}
+	allocCallee, err := s.g.ensureFunctionDeclared("arena_alloc", helpAllocType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	allocLLVMType, err := s.g.lowerFunctionType(helpAllocType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	allocPtr := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{arenaValue, byteCount}, "dview.materialize.alloc")
+
+	memcpyType := &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, usizeType}, Return: voidRefType}
+	memcpyCallee, err := s.g.ensureFunctionDeclared("arena_memcpy", memcpyType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	memcpyLLVMType, err := s.g.lowerFunctionType(memcpyType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	memcpyCall := s.buildCall(memcpyLLVMType, memcpyCallee, []C.LLVMValueRef{allocPtr, viewData, byteCount}, "dview.materialize.memcpy")
+	s.addCallSiteEnumAttribute(memcpyCall, C.uint(1), "noalias")
+	s.addCallSiteEnumAttribute(memcpyCall, C.uint(2), "noalias")
+
+	materialized := C.LLVMGetUndef(llvmResultType)
+	materialized = C.LLVMBuildInsertValue(s.builder, materialized, allocPtr, 0, cStringFree("dview.materialize.items"))
+	materialized = C.LLVMBuildInsertValue(s.builder, materialized, viewLen, 1, cStringFree("dview.materialize.count"))
+	materialized = C.LLVMBuildInsertValue(s.builder, materialized, viewLen, 2, cStringFree("dview.materialize.capacity"))
+	allocEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	phi := C.LLVMBuildPhi(s.builder, llvmResultType, cStringFree("dview.materialize.result"))
+	values := []C.LLVMValueRef{zeroResult, materialized}
+	blocks := []C.LLVMBasicBlockRef{entryBlock, allocEnd}
 	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
 	return phi, resultType, true, nil
 }
@@ -2096,10 +2387,16 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if value, actualType, handled, err := s.emitSpecializedRuntimeCall(expr); handled {
 		return value, actualType, err
 	}
+	if value, actualType, handled, err := s.emitSpecializedStringViewCopyCall(expr); handled {
+		return value, actualType, err
+	}
 	if value, actualType, handled, err := s.emitSpecializedArenaViewCopyCall(expr); handled {
 		return value, actualType, err
 	}
 	if value, actualType, handled, err := s.emitSpecializedArenaViewEqCall(expr); handled {
+		return value, actualType, err
+	}
+	if value, actualType, handled, err := s.emitSpecializedArenaFromViewCall(expr); handled {
 		return value, actualType, err
 	}
 	if value, actualType, handled, err := s.emitSpecializedArenaViewFillCall(expr); handled {

@@ -3203,6 +3203,161 @@ def eq_diff_extent(values: any darray[i32, 4]&) -> bool:
 	}
 }
 
+func TestGenerateLLVMIRSpecializesArenaDViewMaterialize(t *testing.T) {
+	src := `repr(c) struct Arena:
+	begin: mutable heap void&?
+	end: mutable heap void&?
+	end_index: mutable usize
+
+repr(c) struct DynArray[T]:
+	items: mutable any T&?
+	count: mutable usize
+	capacity: mutable usize
+
+repr(c) struct DynArrayView:
+	data: mutable any void&?
+	len: mutable usize
+	elem_size: mutable usize
+
+def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+	_ = start
+	_ = end
+	if values.items != null:
+		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+	return DynArrayView(null, 0u, sizeof(T))
+
+def arena_da_from_view[T](a: any Arena&, view: dview[T]) -> darray[T, shape_out]:
+	_ = a
+	_ = view
+	out: darray[T, shape_out] = zeroed
+	return out
+
+def materialize_split(a: any Arena&, values: any darray[i32, 4]&) -> darray[i32]:
+	base: dview[i32] = arena_da_view(values, 0u, 4u)
+	left: dview[i32] = base[0u:2u]
+	return arena_da_from_view(a, left)
+
+def materialize_unknown(a: any Arena&, view: dview[i32]) -> darray[i32]:
+	return arena_da_from_view(a, view)
+`
+	result := parseAndAnalyze(t, "backend_dview_materialize.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	materializeSplitBody := functionIR(output, "materialize_split")
+	if materializeSplitBody == "" {
+		t.Fatalf("expected to find materialize_split body, got:\n%s", output)
+	}
+	if strings.Contains(materializeSplitBody, "call %DynArray__i32 @arena_da_from_view") {
+		t.Fatalf("expected materialize_split to avoid helper fallback, got:\n%s", materializeSplitBody)
+	}
+	for _, check := range []string{"call ptr @arena_alloc(", "call ptr @arena_memcpy(ptr noalias"} {
+		if !strings.Contains(materializeSplitBody, check) {
+			t.Fatalf("expected materialize_split to contain %q, got:\n%s", check, materializeSplitBody)
+		}
+	}
+
+	materializeUnknownBody := functionIR(output, "materialize_unknown")
+	if materializeUnknownBody == "" {
+		t.Fatalf("expected to find materialize_unknown body, got:\n%s", output)
+	}
+	if !strings.Contains(materializeUnknownBody, "call %DynArray__i32 @arena_da_from_view") {
+		t.Fatalf("expected materialize_unknown to keep helper fallback when extent is not exact, got:\n%s", materializeUnknownBody)
+	}
+}
+
+func TestGenerateLLVMIRSpecializesStringViewMaterialize(t *testing.T) {
+	src := `repr(c) struct StringView:
+	data: mutable any u8&
+	len: mutable i64
+
+extern memcpy(dest: any void&?, src: any void&?, n: usize) -> any void&?
+extern alloc_perm(size: i64) -> heap void&
+extern register_perm_string_len(ptr: any u8&?, len: usize)
+extern intern_small_string(src: any u8&, len: usize) -> heap u8&
+
+def string_view(value: any u8&?, start: i64, end: i64) -> StringView:
+	src: any u8& = value if value != null else "".cast[any u8&]()
+	_ = start
+	return StringView(src, end)
+
+def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
+	return string_view(value, start, end)
+
+def string_view_copy(view: StringView) -> heap u8&:
+	_ = view
+	return intern_small_string("".cast[any u8&](), 0u)
+
+def ctx_string_from_view(view: StringView) -> dstr[shape_out]:
+	return string_view_copy(view)
+
+def copy_small(text: dstr[row]) -> dstr:
+	view: StringView = ctx_string_view(text, 0, 2)
+	return ctx_string_from_view(view)
+
+def copy_large(text: dstr[row]) -> dstr:
+	view: StringView = ctx_string_view(text, 0, 12)
+	return ctx_string_from_view(view)
+
+def copy_unknown(view: StringView) -> dstr:
+	return ctx_string_from_view(view)
+
+def copy_small_raw(text: dstr[row]) -> heap u8&:
+	view: StringView = ctx_string_view(text, 0, 2)
+	return string_view_copy(view)
+`
+	result := parseAndAnalyze(t, "backend_string_view_materialize.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	copySmallBody := functionIR(output, "copy_small")
+	if copySmallBody == "" {
+		t.Fatalf("expected to find copy_small body, got:\n%s", output)
+	}
+	if strings.Contains(copySmallBody, "call ptr @ctx_string_from_view") {
+		t.Fatalf("expected copy_small to avoid ctx_string_from_view helper fallback, got:\n%s", copySmallBody)
+	}
+	if !strings.Contains(copySmallBody, "call ptr @intern_small_string(ptr") {
+		t.Fatalf("expected copy_small to lower through intern_small_string, got:\n%s", copySmallBody)
+	}
+
+	copyLargeBody := functionIR(output, "copy_large")
+	if copyLargeBody == "" {
+		t.Fatalf("expected to find copy_large body, got:\n%s", output)
+	}
+	for _, check := range []string{"call ptr @alloc_perm(i64 13)", "call ptr @memcpy(ptr", "call void @register_perm_string_len(ptr"} {
+		if !strings.Contains(copyLargeBody, check) {
+			t.Fatalf("expected copy_large to contain %q, got:\n%s", check, copyLargeBody)
+		}
+	}
+	if strings.Contains(copyLargeBody, "call ptr @ctx_string_from_view") {
+		t.Fatalf("expected copy_large to avoid ctx_string_from_view helper fallback, got:\n%s", copyLargeBody)
+	}
+
+	copyUnknownBody := functionIR(output, "copy_unknown")
+	if copyUnknownBody == "" {
+		t.Fatalf("expected to find copy_unknown body, got:\n%s", output)
+	}
+	if !strings.Contains(copyUnknownBody, "call ptr @ctx_string_from_view") {
+		t.Fatalf("expected copy_unknown to keep helper fallback when extent is not exact, got:\n%s", copyUnknownBody)
+	}
+
+	copySmallRawBody := functionIR(output, "copy_small_raw")
+	if copySmallRawBody == "" {
+		t.Fatalf("expected to find copy_small_raw body, got:\n%s", output)
+	}
+	if strings.Contains(copySmallRawBody, "call ptr @string_view_copy") {
+		t.Fatalf("expected copy_small_raw to avoid string_view_copy helper fallback, got:\n%s", copySmallRawBody)
+	}
+	if !strings.Contains(copySmallRawBody, "call ptr @intern_small_string(ptr") {
+		t.Fatalf("expected copy_small_raw to lower through intern_small_string, got:\n%s", copySmallRawBody)
+	}
+}
+
 func TestGenerateLLVMIRSpecializesStringViewLiteralWrapperCalls(t *testing.T) {
 	src := `extern string_view_eq(view: StringView, other: any u8&?) -> int
 
