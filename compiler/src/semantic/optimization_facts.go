@@ -331,6 +331,16 @@ func (a *Analyzer) inferExprOptimizationFacts(expr ast.Expr, t Type) Optimizatio
 		if facts.base == "" {
 			facts.base = a.optimizationBaseForExpr(n)
 		}
+	case *ast.IndexExpr:
+		if resolved, ok := a.resolveIndexedValueExpr(n.Object, n.Index); ok {
+			if resolvedFacts, ok := a.exprFacts[resolved]; ok {
+				facts = resolvedFacts
+				facts.Exclusive = false
+			}
+			if facts.base == "" {
+				facts.base = a.optimizationBaseForExpr(resolved)
+			}
+		}
 	case *ast.FieldExpr:
 		if resolved, ok := a.resolveProjectedFieldValueExpr(n.Object, n.Field); ok {
 			if resolvedFacts, ok := a.exprFacts[resolved]; ok {
@@ -720,6 +730,10 @@ func (a *Analyzer) optimizationBaseForExpr(expr ast.Expr) string {
 		}
 	case *ast.AllocExpr:
 		return optimizationExprIdentity(n)
+	case *ast.IndexExpr:
+		if resolved, ok := a.resolveIndexedValueExpr(n.Object, n.Index); ok {
+			return a.optimizationBaseForExpr(resolved)
+		}
 	case *ast.MoveExpr:
 		return a.optimizationBaseForExpr(n.Operand)
 	case *ast.CanExpr:

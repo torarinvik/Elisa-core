@@ -2236,6 +2236,14 @@ func (a *Analyzer) resolveProjectedFieldValueExpr(objectExpr ast.Expr, field str
 	return a.resolveProjectedFieldValueExprAtPath(objectExpr, []borrowReturnAnnotationStep{{Field: field}})
 }
 
+func (a *Analyzer) resolveIndexedValueExpr(objectExpr ast.Expr, indexExpr ast.Expr) (ast.Expr, bool) {
+	step, ok := a.resolveProjectedFieldIndexStep(indexExpr)
+	if !ok {
+		return nil, false
+	}
+	return a.resolveProjectedFieldValueExprAtPath(objectExpr, []borrowReturnAnnotationStep{step})
+}
+
 func (a *Analyzer) resolveProjectedFieldValueExprAtPath(objectExpr ast.Expr, path []borrowReturnAnnotationStep) (ast.Expr, bool) {
 	if objectExpr == nil {
 		return nil, false

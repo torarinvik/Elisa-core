@@ -1567,6 +1567,111 @@ def inspect(buf: array[i32, 4]) -> int:
 	}
 }
 
+func TestAnalyzePreservesOptimizationFactsThroughDirectIndexedExpressions(t *testing.T) {
+	src := `def inspect(buf: array[i32, 4]) -> int:
+	items: array[view[i32], 2] = [buf[0u:2u], buf[2u:4u]]
+	left_indexed: view[i32] = items[0u]
+	right_indexed: view[i32] = items[1u]
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_direct_indexed_values.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	leftExpr := requireOptimizationFactsVarInitExpr(t, fn, "left_indexed")
+	rightExpr := requireOptimizationFactsVarInitExpr(t, fn, "right_indexed")
+
+	leftFacts := requireExprOptimizationFacts(t, result, leftExpr)
+	rightFacts := requireExprOptimizationFacts(t, result, rightExpr)
+
+	if !leftFacts.HasExactExtent() || !rightFacts.HasExactExtent() {
+		t.Fatalf("expected direct indexed values to preserve exact extents, got %#v and %#v", leftFacts, rightFacts)
+	}
+	if !result.ExprsAreDisjoint(leftExpr, rightExpr) {
+		t.Fatalf("expected direct indexed values to stay disjoint")
+	}
+	if !result.ExprsHaveEqualExtentSize(leftExpr, rightExpr) {
+		t.Fatalf("expected direct indexed values to retain equal extent size")
+	}
+	if result.ExprsHaveSameExtent(leftExpr, rightExpr) {
+		t.Fatalf("expected direct indexed values to retain distinct exact bounds")
+	}
+}
+
+func TestAnalyzePreservesFrozenPackedStoreProvenanceThroughDirectIndexedExpressions(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+	Hold(value: any i32&)
+
+def inspect(owner: Arena) -> int:
+	region scratch(1024u)
+	store: Expr.Store[Local] = Expr.Store(owner)
+	node: Expr = new[store] Expr.Int(value: 1)
+	local_ref: scratch i32& = new[scratch] 7i32
+	held: Expr = new[store] Expr.Hold(value: local_ref)
+	items: array[Expr, 2] = [node, held]
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	pure_indexed: Expr = items[0u]
+	mixed_indexed: Expr = items[1u]
+	_ = frozen
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_direct_indexed_frozen_packed_provenance.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	pureExpr := requireOptimizationFactsVarInitExpr(t, fn, "pure_indexed")
+	mixedExpr := requireOptimizationFactsVarInitExpr(t, fn, "mixed_indexed")
+
+	pureFacts := requireExprOptimizationFacts(t, result, pureExpr)
+	mixedFacts := requireExprOptimizationFacts(t, result, mixedExpr)
+	pureProvenance := requireExprPackedStoreProvenance(t, result, pureExpr)
+	mixedProvenance := requireExprPackedStoreProvenance(t, result, mixedExpr)
+
+	if !pureFacts.FrozenPackedStoreOnly {
+		t.Fatalf("expected direct indexed frozen packed value to stay frozen-store-only, got %#v", pureFacts)
+	}
+	if !pureProvenance.DependsOnlyOnFrozenPackedStores() || pureProvenance.HasMixedProvenance() {
+		t.Fatalf("expected direct indexed frozen packed value to expose pure frozen packed-store provenance, got %#v", pureProvenance)
+	}
+	if !result.ExprHasPackedStoreProvenance(pureExpr) || !result.ExprDependsOnFrozenPackedStores(pureExpr) || result.ExprDependsOnNonFrozenPackedStores(pureExpr) || result.ExprHasMixedPackedStoreProvenance(pureExpr) {
+		t.Fatalf("expected direct indexed frozen packed value to expose frozen-only packed-store helper results")
+	}
+	if !result.ExprDependsOnlyOnFrozenPackedStores(pureExpr) {
+		t.Fatalf("expected direct indexed frozen packed value to report frozen-store-only provenance")
+	}
+
+	if mixedFacts.FrozenPackedStoreOnly {
+		t.Fatalf("expected direct indexed mixed packed value to retain mixed provenance, got %#v", mixedFacts)
+	}
+	if !mixedProvenance.HasPackedStoreDeps || !mixedProvenance.HasFrozenPackedStoreDeps || mixedProvenance.HasNonFrozenPackedStoreDeps {
+		t.Fatalf("expected direct indexed mixed packed value to keep only frozen packed-store deps, got %#v", mixedProvenance)
+	}
+	if !mixedProvenance.HasMixedProvenance() {
+		t.Fatalf("expected direct indexed mixed packed value to report mixed non-store provenance, got %#v", mixedProvenance)
+	}
+	if !mixedProvenance.HasOnlyFrozenPackedStoreDeps() {
+		t.Fatalf("expected direct indexed mixed packed value to keep frozen-only packed-store deps despite mixed provenance, got %#v", mixedProvenance)
+	}
+	if mixedProvenance.DependsOnlyOnFrozenPackedStores() {
+		t.Fatalf("expected direct indexed mixed packed value to reject strict frozen-only provenance, got %#v", mixedProvenance)
+	}
+	if !result.ExprHasPackedStoreProvenance(mixedExpr) || !result.ExprDependsOnFrozenPackedStores(mixedExpr) || result.ExprDependsOnNonFrozenPackedStores(mixedExpr) {
+		t.Fatalf("expected direct indexed mixed packed value to expose frozen-only packed-store helper results")
+	}
+	if !result.ExprHasMixedPackedStoreProvenance(mixedExpr) {
+		t.Fatalf("expected direct indexed mixed packed value to report mixed packed-store provenance")
+	}
+	if !result.ExprHasOnlyFrozenPackedStoreDeps(mixedExpr) {
+		t.Fatalf("expected direct indexed mixed packed value to report frozen-only packed-store deps")
+	}
+	if result.ExprDependsOnlyOnFrozenPackedStores(mixedExpr) {
+		t.Fatalf("expected direct indexed mixed packed value to reject strict frozen-only provenance query")
+	}
+}
+
 func TestAnalyzePreservesOptimizationFactsThroughHelperReturnedIndexedFieldProjectionExpressions(t *testing.T) {
 	src := `repr(c) struct Views:
 	left: view[i32]
