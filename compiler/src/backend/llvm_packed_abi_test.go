@@ -772,6 +772,116 @@ def fold_helper_indexed_child_common_frozen_mixed() -> int:
 	}
 }
 
+func TestGenerateLLVMIRUsesSingleDecodeForNestedRebasedHelperIndexedFrozenMatchedPayloadRepeatedCommonFieldReads(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Hold(value: any i32&)
+	Wrap(child: Expr)
+
+repr(c) struct Box:
+	node: Expr
+
+repr(c) struct Meta:
+	items: view[Box]
+
+repr(c) struct Wrapper:
+	meta: Meta
+
+@borrows_return_field_rebased(meta.items, src)
+extern wrap_submeta(src: view[Box], start: usize, end: usize) -> Wrapper
+
+def fold_nested_helper_indexed_child_common_frozen_mixed() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	local_ref: scratch i32& = new[scratch] 7i32
+	held: Expr = new[store] Expr.Hold(span: 5, value: local_ref)
+	items: array[Box, 2] = [Box(new[store] Expr.Int(span: 2, value: 1)), Box(new[store] Expr.Wrap(span: 9, child: held))]
+	wrapped: Wrapper = wrap_submeta(items[1u:2u], 0u, 1u)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	return match wrapped.meta.items[0u].node in frozen:
+		Expr.Wrap(child: child_alias):
+			child_alias.span + child_alias.span
+		Expr.Int(value: _):
+			0
+		Expr.Hold(value: _):
+			1
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_rebased_helper_indexed_matched_payload_field_cache.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
+	if decodeCalls != 2 {
+		t.Fatalf("expected nested rebased helper-indexed frozen outer match plus repeated mixed child common-field reads to use exactly two decodes, got %d decode calls:\n%s", decodeCalls, output)
+	}
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_word(")
+	if readCalls != 0 {
+		t.Fatalf("expected nested rebased helper-indexed repeated mixed child common-field reads recovered through frozen match to avoid ctx_packed_store_read_word after decode, got %d helper calls:\n%s", readCalls, output)
+	}
+	if strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
+		t.Fatalf("expected nested rebased helper-indexed frozen outer match plus mixed child common-field reads to avoid ctx_packed_store_read_tag after eager decode, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRUsesSingleDecodeForNestedWildcardRebasedHelperIndexedFrozenMatchedPayloadRepeatedCommonFieldReads(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Hold(value: any i32&)
+	Wrap(child: Expr)
+
+repr(c) struct Box:
+	node: Expr
+
+repr(c) struct Meta:
+	items: view[Box]
+
+repr(c) struct Wrapper:
+	meta: Meta
+
+@borrows_return_field_rebased(meta.items[*].node, src[*].node)
+extern wrap_submeta_nodes_wild(src: view[Box], start: usize, end: usize) -> Wrapper
+
+def fold_nested_wild_helper_indexed_child_common_frozen_mixed() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	local_ref: scratch i32& = new[scratch] 7i32
+	held: Expr = new[store] Expr.Hold(span: 5, value: local_ref)
+	items: array[Box, 2] = [Box(new[store] Expr.Int(span: 2, value: 1)), Box(new[store] Expr.Wrap(span: 9, child: held))]
+	wrapped: Wrapper = wrap_submeta_nodes_wild(items[1u:2u], 0u, 1u)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	return match wrapped.meta.items[0u].node in frozen:
+		Expr.Wrap(child: child_alias):
+			child_alias.span + child_alias.span
+		Expr.Int(value: _):
+			0
+		Expr.Hold(value: _):
+			1
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_wildcard_rebased_helper_indexed_matched_payload_field_cache.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
+	if decodeCalls != 2 {
+		t.Fatalf("expected nested wildcard rebased helper-indexed frozen outer match plus repeated mixed child common-field reads to use exactly two decodes, got %d decode calls:\n%s", decodeCalls, output)
+	}
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_word(")
+	if readCalls != 0 {
+		t.Fatalf("expected nested wildcard rebased helper-indexed repeated mixed child common-field reads recovered through frozen match to avoid ctx_packed_store_read_word after decode, got %d helper calls:\n%s", readCalls, output)
+	}
+	if strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
+		t.Fatalf("expected nested wildcard rebased helper-indexed frozen outer match plus mixed child common-field reads to avoid ctx_packed_store_read_tag after eager decode, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRUsesSingleDecodeForFrozenPayloadlessPackedMatchWithMatchedValueFieldReads(t *testing.T) {
 	src := `packed enum Flag:
 	common:
