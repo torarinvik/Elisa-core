@@ -12,6 +12,7 @@ const JSON_CH_MINUS = 45
 const JSON_CH_DOT = 46
 const JSON_CH_SLASH = 47
 const JSON_CH_0 = 48
+const JSON_CH_1 = 49
 const JSON_CH_9 = 57
 const JSON_CH_COLON = 58
 const JSON_CH_E = 69
@@ -98,6 +99,19 @@ struct JsonUnsignedResult:
 struct JsonSignedResult:
     ok: mutable bool
     value: mutable i64
+
+
+struct JsonFloat32Result:
+    ok: mutable bool
+    value: mutable f32
+
+
+struct JsonFloat64Result:
+    ok: mutable bool
+    value: mutable f64
+
+
+extern strtod(nptr: any u8&, endptr: any u8&?) -> f64
 
 
 struct JsonParserDocumentInternal:
@@ -963,6 +977,46 @@ def json_invalid_signed_result() -> JsonSignedResult:
     return JsonSignedResult(false, 0)
 
 
+def json_invalid_float32_result() -> JsonFloat32Result:
+    return JsonFloat32Result(false, 0.0)
+
+
+def json_invalid_float64_result() -> JsonFloat64Result:
+    return JsonFloat64Result(false, 0.0)
+
+
+def json_abs_f64(value: f64) -> f64:
+    return -value if value < 0.0 else value
+
+
+def json_number_has_nonzero_digit(source: any u8&, source_offset: usize, source_len: usize) -> bool:
+    pos: mutable usize = source_offset
+    end: usize = source_offset + source_len
+    while pos < end:
+        ch: i64 = source[pos].i64()
+        if ch >= JSON_CH_1 and ch <= JSON_CH_9:
+            return true
+        pos <- pos + 1u
+    return false
+
+
+def json_parse_number_f64_value(source: any u8&, source_offset: usize, source_len: usize) -> JsonFloat64Result:
+    if source_len == 0u:
+        return json_invalid_float64_result()
+
+    parsed: f64 = strtod(source + source_offset, null)
+    return JsonFloat64Result(true, parsed)
+
+
+def json_parse_number_f32_value(source: any u8&, source_offset: usize, source_len: usize) -> JsonFloat32Result:
+    parsed: JsonFloat64Result = json_parse_number_f64_value(source, source_offset, source_len)
+    if not parsed.ok:
+        return json_invalid_float32_result()
+
+    narrowed: f32 = parsed.value.f32()
+    return JsonFloat32Result(true, narrowed)
+
+
 def json_ast_kind(node: JsonNode, store: JsonNode.Store[Local]) -> JsonNodeKind:
     in store:
         match node:
@@ -1175,6 +1229,22 @@ def json_ast_number_i64_value(source: any u8&, node: JsonNode, store: JsonNode.S
     if value.kind == JsonNumberKind.UNSIGNED and value.unsigned_value <= i64_max_u64:
         return JsonSignedResult(true, value.unsigned_value.i64())
     return json_invalid_signed_result()
+
+
+def json_ast_number_f64_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> JsonFloat64Result:
+    in store:
+        match node:
+            JsonNode.Number:
+                return json_parse_number_f64_value(source, node.source_offset, node.source_len)
+    return json_invalid_float64_result()
+
+
+def json_ast_number_f32_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> JsonFloat32Result:
+    in store:
+        match node:
+            JsonNode.Number:
+                return json_parse_number_f32_value(source, node.source_offset, node.source_len)
+    return json_invalid_float32_result()
 
 
 def json_ast_string_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> heap u8& can[Memory.Allocate, Abort.Panic]:
@@ -1747,6 +1817,36 @@ def json_parser_document_field_u64_impl(doc: any JsonParserDocument&, key: any u
     return 1
 
 
+def json_parser_document_field_f64_impl(doc: any JsonParserDocument&, key: any u8&, out: any f64&) -> i64:
+    if doc[0u].impl_bits == 0u64.uintptr():
+        return 0
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    field_node: JsonNode = json_parser_document_field_node(impl, key, store)
+    if json_node_is_invalid(field_node, store):
+        return 0
+    float_value: JsonFloat64Result = json_ast_number_f64_value(json_parser_document_source(impl), field_node, store)
+    if not float_value.ok:
+        return 0
+    out[0u] <- float_value.value
+    return 1
+
+
+def json_parser_document_field_f32_impl(doc: any JsonParserDocument&, key: any u8&, out: any f32&) -> i64:
+    if doc[0u].impl_bits == 0u64.uintptr():
+        return 0
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    field_node: JsonNode = json_parser_document_field_node(impl, key, store)
+    if json_node_is_invalid(field_node, store):
+        return 0
+    float_value: JsonFloat32Result = json_ast_number_f32_value(json_parser_document_source(impl), field_node, store)
+    if not float_value.ok:
+        return 0
+    out[0u] <- float_value.value
+    return 1
+
+
 def json_parser_document_array_field_len_impl(doc: any JsonParserDocument&, key: any u8&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
@@ -1781,6 +1881,36 @@ def json_parser_document_array_field_i64_at_impl(doc: any JsonParserDocument&, k
     if not signed_value.ok:
         return 0
     out[0u] <- signed_value.value
+    return 1
+
+
+def json_parser_document_array_field_f64_at_impl(doc: any JsonParserDocument&, key: any u8&, index: usize, out: any f64&) -> i64:
+    if doc[0u].impl_bits == 0u64.uintptr():
+        return 0
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    item_node: JsonNode = json_parser_document_array_field_item_node(impl, key, index, store)
+    if json_node_is_invalid(item_node, store):
+        return 0
+    float_value: JsonFloat64Result = json_ast_number_f64_value(json_parser_document_source(impl), item_node, store)
+    if not float_value.ok:
+        return 0
+    out[0u] <- float_value.value
+    return 1
+
+
+def json_parser_document_array_field_f32_at_impl(doc: any JsonParserDocument&, key: any u8&, index: usize, out: any f32&) -> i64:
+    if doc[0u].impl_bits == 0u64.uintptr():
+        return 0
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    item_node: JsonNode = json_parser_document_array_field_item_node(impl, key, index, store)
+    if json_node_is_invalid(item_node, store):
+        return 0
+    float_value: JsonFloat32Result = json_ast_number_f32_value(json_parser_document_source(impl), item_node, store)
+    if not float_value.ok:
+        return 0
+    out[0u] <- float_value.value
     return 1
 
 
@@ -1865,6 +1995,36 @@ def json_parser_document_object_field_i64_at_impl(doc: any JsonParserDocument&, 
     return 1
 
 
+def json_parser_document_object_field_f64_at_impl(doc: any JsonParserDocument&, index: usize, out: any f64&) -> i64:
+    if doc[0u].impl_bits == 0u64.uintptr():
+        return 0
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    value_node: JsonNode = json_parser_document_object_value_node_at(impl, index, store)
+    if json_node_is_invalid(value_node, store):
+        return 0
+    float_value: JsonFloat64Result = json_ast_number_f64_value(json_parser_document_source(impl), value_node, store)
+    if not float_value.ok:
+        return 0
+    out[0u] <- float_value.value
+    return 1
+
+
+def json_parser_document_object_field_f32_at_impl(doc: any JsonParserDocument&, index: usize, out: any f32&) -> i64:
+    if doc[0u].impl_bits == 0u64.uintptr():
+        return 0
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    value_node: JsonNode = json_parser_document_object_value_node_at(impl, index, store)
+    if json_node_is_invalid(value_node, store):
+        return 0
+    float_value: JsonFloat32Result = json_ast_number_f32_value(json_parser_document_source(impl), value_node, store)
+    if not float_value.ok:
+        return 0
+    out[0u] <- float_value.value
+    return 1
+
+
 def json_parser_document_array_i64_at_impl(doc: any JsonParserDocument&, index: usize, out: any i64&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return 0
@@ -1877,6 +2037,36 @@ def json_parser_document_array_i64_at_impl(doc: any JsonParserDocument&, index: 
     if not signed_value.ok:
         return 0
     out[0u] <- signed_value.value
+    return 1
+
+
+def json_parser_document_array_f64_at_impl(doc: any JsonParserDocument&, index: usize, out: any f64&) -> i64:
+    if doc[0u].impl_bits == 0u64.uintptr():
+        return 0
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    item_node: JsonNode = json_parser_document_array_item_node_at(impl, index, store)
+    if json_node_is_invalid(item_node, store):
+        return 0
+    float_value: JsonFloat64Result = json_ast_number_f64_value(json_parser_document_source(impl), item_node, store)
+    if not float_value.ok:
+        return 0
+    out[0u] <- float_value.value
+    return 1
+
+
+def json_parser_document_array_f32_at_impl(doc: any JsonParserDocument&, index: usize, out: any f32&) -> i64:
+    if doc[0u].impl_bits == 0u64.uintptr():
+        return 0
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    item_node: JsonNode = json_parser_document_array_item_node_at(impl, index, store)
+    if json_node_is_invalid(item_node, store):
+        return 0
+    float_value: JsonFloat32Result = json_ast_number_f32_value(json_parser_document_source(impl), item_node, store)
+    if not float_value.ok:
+        return 0
+    out[0u] <- float_value.value
     return 1
 
 
@@ -2050,6 +2240,30 @@ def json_parser_value_u64_impl(value: any JsonParserValue&, out: any u64&) -> i6
     if not unsigned_value.ok:
         return 0
     out[0u] <- unsigned_value.value
+    return 1
+
+
+def json_parser_value_f64_impl(value: any JsonParserValue&, out: any f64&) -> i64:
+    if not json_parser_value_is_live(value):
+        return 0
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    float_value: JsonFloat64Result = json_ast_number_f64_value(json_parser_document_source(impl), json_parser_value_node(value), store)
+    if not float_value.ok:
+        return 0
+    out[0u] <- float_value.value
+    return 1
+
+
+def json_parser_value_f32_impl(value: any JsonParserValue&, out: any f32&) -> i64:
+    if not json_parser_value_is_live(value):
+        return 0
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    float_value: JsonFloat32Result = json_ast_number_f32_value(json_parser_document_source(impl), json_parser_value_node(value), store)
+    if not float_value.ok:
+        return 0
+    out[0u] <- float_value.value
     return 1
 
 
@@ -2385,6 +2599,48 @@ def json_parser_ast_field_u64_impl(source: any u8&, key: any u8&, out: any u64&)
     return 1
 
 
+def json_parser_ast_field_f64_impl(source: any u8&, key: any u8&, out: any f64&) -> i64:
+    source_len: usize = runtime_strlen(source)
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, store)
+    if result.checksum < 0:
+        destroy scratch
+        return 0
+    field_node: JsonNode = json_ast_object_get(result.node, source, key, store)
+    if json_node_is_invalid(field_node, store):
+        destroy scratch
+        return 0
+    float_value: JsonFloat64Result = json_ast_number_f64_value(source, field_node, store)
+    if not float_value.ok:
+        destroy scratch
+        return 0
+    out[0u] <- float_value.value
+    destroy scratch
+    return 1
+
+
+def json_parser_ast_field_f32_impl(source: any u8&, key: any u8&, out: any f32&) -> i64:
+    source_len: usize = runtime_strlen(source)
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, store)
+    if result.checksum < 0:
+        destroy scratch
+        return 0
+    field_node: JsonNode = json_ast_object_get(result.node, source, key, store)
+    if json_node_is_invalid(field_node, store):
+        destroy scratch
+        return 0
+    float_value: JsonFloat32Result = json_ast_number_f32_value(source, field_node, store)
+    if not float_value.ok:
+        destroy scratch
+        return 0
+    out[0u] <- float_value.value
+    destroy scratch
+    return 1
+
+
 def json_parser_ast_array_field_i64_at_impl(source: any u8&, key: any u8&, index: usize, out: any i64&) -> i64:
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
@@ -2406,6 +2662,56 @@ def json_parser_ast_array_field_i64_at_impl(source: any u8&, key: any u8&, index
         destroy scratch
         return 0
     out[0u] <- signed_value.value
+    destroy scratch
+    return 1
+
+
+def json_parser_ast_array_field_f64_at_impl(source: any u8&, key: any u8&, index: usize, out: any f64&) -> i64:
+    source_len: usize = runtime_strlen(source)
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, store)
+    if result.checksum < 0:
+        destroy scratch
+        return 0
+    array_node: JsonNode = json_ast_object_get(result.node, source, key, store)
+    if json_node_is_invalid(array_node, store):
+        destroy scratch
+        return 0
+    item_node: JsonNode = json_ast_array_nth(array_node, index, store)
+    if json_node_is_invalid(item_node, store):
+        destroy scratch
+        return 0
+    float_value: JsonFloat64Result = json_ast_number_f64_value(source, item_node, store)
+    if not float_value.ok:
+        destroy scratch
+        return 0
+    out[0u] <- float_value.value
+    destroy scratch
+    return 1
+
+
+def json_parser_ast_array_field_f32_at_impl(source: any u8&, key: any u8&, index: usize, out: any f32&) -> i64:
+    source_len: usize = runtime_strlen(source)
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, store)
+    if result.checksum < 0:
+        destroy scratch
+        return 0
+    array_node: JsonNode = json_ast_object_get(result.node, source, key, store)
+    if json_node_is_invalid(array_node, store):
+        destroy scratch
+        return 0
+    item_node: JsonNode = json_ast_array_nth(array_node, index, store)
+    if json_node_is_invalid(item_node, store):
+        destroy scratch
+        return 0
+    float_value: JsonFloat32Result = json_ast_number_f32_value(source, item_node, store)
+    if not float_value.ok:
+        destroy scratch
+        return 0
+    out[0u] <- float_value.value
     destroy scratch
     return 1
 
@@ -2671,6 +2977,48 @@ def json_parser_ast_object_field_i64_at_impl(source: any u8&, index: usize, out:
     return 1
 
 
+def json_parser_ast_object_field_f64_at_impl(source: any u8&, index: usize, out: any f64&) -> i64:
+    source_len: usize = runtime_strlen(source)
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, store)
+    if result.checksum < 0:
+        destroy scratch
+        return 0
+    field_node: JsonNode = json_ast_object_iter_nth(result.node, index, store)
+    if json_node_is_invalid(field_node, store):
+        destroy scratch
+        return 0
+    float_value: JsonFloat64Result = json_ast_number_f64_value(source, json_ast_object_iter_value(field_node, store), store)
+    if not float_value.ok:
+        destroy scratch
+        return 0
+    out[0u] <- float_value.value
+    destroy scratch
+    return 1
+
+
+def json_parser_ast_object_field_f32_at_impl(source: any u8&, index: usize, out: any f32&) -> i64:
+    source_len: usize = runtime_strlen(source)
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, store)
+    if result.checksum < 0:
+        destroy scratch
+        return 0
+    field_node: JsonNode = json_ast_object_iter_nth(result.node, index, store)
+    if json_node_is_invalid(field_node, store):
+        destroy scratch
+        return 0
+    float_value: JsonFloat32Result = json_ast_number_f32_value(source, json_ast_object_iter_value(field_node, store), store)
+    if not float_value.ok:
+        destroy scratch
+        return 0
+    out[0u] <- float_value.value
+    destroy scratch
+    return 1
+
+
 def json_parser_ast_object_value_string_eq_at_impl(source: any u8&, index: usize, literal: any u8&) -> i64:
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
@@ -2841,6 +3189,48 @@ def json_parser_ast_array_i64_at_impl(source: any u8&, index: usize, out: any i6
         destroy scratch
         return 0
     out[0u] <- signed_value.value
+    destroy scratch
+    return 1
+
+
+def json_parser_ast_array_f64_at_impl(source: any u8&, index: usize, out: any f64&) -> i64:
+    source_len: usize = runtime_strlen(source)
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, store)
+    if result.checksum < 0:
+        destroy scratch
+        return 0
+    item_node: JsonNode = json_ast_array_iter_nth(result.node, index, store)
+    if json_node_is_invalid(item_node, store):
+        destroy scratch
+        return 0
+    float_value: JsonFloat64Result = json_ast_number_f64_value(source, json_ast_array_iter_value(item_node, store), store)
+    if not float_value.ok:
+        destroy scratch
+        return 0
+    out[0u] <- float_value.value
+    destroy scratch
+    return 1
+
+
+def json_parser_ast_array_f32_at_impl(source: any u8&, index: usize, out: any f32&) -> i64:
+    source_len: usize = runtime_strlen(source)
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, store)
+    if result.checksum < 0:
+        destroy scratch
+        return 0
+    item_node: JsonNode = json_ast_array_iter_nth(result.node, index, store)
+    if json_node_is_invalid(item_node, store):
+        destroy scratch
+        return 0
+    float_value: JsonFloat32Result = json_ast_number_f32_value(source, json_ast_array_iter_value(item_node, store), store)
+    if not float_value.ok:
+        destroy scratch
+        return 0
+    out[0u] <- float_value.value
     destroy scratch
     return 1
 
@@ -3276,7 +3666,11 @@ export func json_parser_ast_field_string_len(source: any u8&, key: any u8&) -> i
 export func json_parser_ast_field_string_copy(source: any u8&, key: any u8&, out: any u8&, capacity: usize) -> i64 = json_parser_ast_field_string_copy_impl
 export func json_parser_ast_field_i64(source: any u8&, key: any u8&, out: any i64&) -> i64 = json_parser_ast_field_i64_impl
 export func json_parser_ast_field_u64(source: any u8&, key: any u8&, out: any u64&) -> i64 = json_parser_ast_field_u64_impl
+export func json_parser_ast_field_f64(source: any u8&, key: any u8&, out: any f64&) -> i64 = json_parser_ast_field_f64_impl
+export func json_parser_ast_field_f32(source: any u8&, key: any u8&, out: any f32&) -> i64 = json_parser_ast_field_f32_impl
 export func json_parser_ast_array_field_i64_at(source: any u8&, key: any u8&, index: usize, out: any i64&) -> i64 = json_parser_ast_array_field_i64_at_impl
+export func json_parser_ast_array_field_f64_at(source: any u8&, key: any u8&, index: usize, out: any f64&) -> i64 = json_parser_ast_array_field_f64_at_impl
+export func json_parser_ast_array_field_f32_at(source: any u8&, key: any u8&, index: usize, out: any f32&) -> i64 = json_parser_ast_array_field_f32_at_impl
 export func json_parser_ast_array_field_kind_at(source: any u8&, key: any u8&, index: usize) -> i64 = json_parser_ast_array_field_kind_at_impl
 export func json_parser_ast_array_field_number_kind_at(source: any u8&, key: any u8&, index: usize) -> i64 = json_parser_ast_array_field_number_kind_at_impl
 export func json_parser_ast_array_field_string_len_at(source: any u8&, key: any u8&, index: usize) -> i64 = json_parser_ast_array_field_string_len_at_impl
@@ -3290,6 +3684,8 @@ export func json_parser_ast_object_key_eq_at(source: any u8&, index: usize, lite
 export func json_parser_ast_object_key_len_at(source: any u8&, index: usize) -> i64 = json_parser_ast_object_key_len_at_impl
 export func json_parser_ast_object_key_copy_at(source: any u8&, index: usize, out: any u8&, capacity: usize) -> i64 = json_parser_ast_object_key_copy_at_impl
 export func json_parser_ast_object_field_i64_at(source: any u8&, index: usize, out: any i64&) -> i64 = json_parser_ast_object_field_i64_at_impl
+export func json_parser_ast_object_field_f64_at(source: any u8&, index: usize, out: any f64&) -> i64 = json_parser_ast_object_field_f64_at_impl
+export func json_parser_ast_object_field_f32_at(source: any u8&, index: usize, out: any f32&) -> i64 = json_parser_ast_object_field_f32_at_impl
 export func json_parser_ast_object_value_string_eq_at(source: any u8&, index: usize, literal: any u8&) -> i64 = json_parser_ast_object_value_string_eq_at_impl
 export func json_parser_ast_object_field_bool_at(source: any u8&, index: usize) -> i64 = json_parser_ast_object_field_bool_at_impl
 export func json_parser_ast_object_field_is_null_at(source: any u8&, index: usize) -> i64 = json_parser_ast_object_field_is_null_at_impl
@@ -3300,6 +3696,8 @@ export func json_parser_ast_object_value_number_kind_at(source: any u8&, index: 
 export func json_parser_ast_object_value_string_len_at(source: any u8&, index: usize) -> i64 = json_parser_ast_object_value_string_len_at_impl
 export func json_parser_ast_object_value_string_copy_at(source: any u8&, index: usize, out: any u8&, capacity: usize) -> i64 = json_parser_ast_object_value_string_copy_at_impl
 export func json_parser_ast_array_i64_at(source: any u8&, index: usize, out: any i64&) -> i64 = json_parser_ast_array_i64_at_impl
+export func json_parser_ast_array_f64_at(source: any u8&, index: usize, out: any f64&) -> i64 = json_parser_ast_array_f64_at_impl
+export func json_parser_ast_array_f32_at(source: any u8&, index: usize, out: any f32&) -> i64 = json_parser_ast_array_f32_at_impl
 export func json_parser_ast_array_kind_at(source: any u8&, index: usize) -> i64 = json_parser_ast_array_kind_at_impl
 export func json_parser_ast_array_array_len_at(source: any u8&, index: usize) -> i64 = json_parser_ast_array_array_len_at_impl
 export func json_parser_ast_array_object_len_at(source: any u8&, index: usize) -> i64 = json_parser_ast_array_object_len_at_impl
@@ -3324,9 +3722,13 @@ export func json_parser_document_field_string_len(doc: any JsonParserDocument&, 
 export func json_parser_document_field_string_copy(doc: any JsonParserDocument&, key: any u8&, out: any u8&, capacity: usize) -> i64 = json_parser_document_field_string_copy_impl
 export func json_parser_document_field_i64(doc: any JsonParserDocument&, key: any u8&, out: any i64&) -> i64 = json_parser_document_field_i64_impl
 export func json_parser_document_field_u64(doc: any JsonParserDocument&, key: any u8&, out: any u64&) -> i64 = json_parser_document_field_u64_impl
+export func json_parser_document_field_f64(doc: any JsonParserDocument&, key: any u8&, out: any f64&) -> i64 = json_parser_document_field_f64_impl
+export func json_parser_document_field_f32(doc: any JsonParserDocument&, key: any u8&, out: any f32&) -> i64 = json_parser_document_field_f32_impl
 export func json_parser_document_array_field_len(doc: any JsonParserDocument&, key: any u8&) -> i64 = json_parser_document_array_field_len_impl
 export func json_parser_document_object_field_len(doc: any JsonParserDocument&, key: any u8&) -> i64 = json_parser_document_object_field_len_impl
 export func json_parser_document_array_field_i64_at(doc: any JsonParserDocument&, key: any u8&, index: usize, out: any i64&) -> i64 = json_parser_document_array_field_i64_at_impl
+export func json_parser_document_array_field_f64_at(doc: any JsonParserDocument&, key: any u8&, index: usize, out: any f64&) -> i64 = json_parser_document_array_field_f64_at_impl
+export func json_parser_document_array_field_f32_at(doc: any JsonParserDocument&, key: any u8&, index: usize, out: any f32&) -> i64 = json_parser_document_array_field_f32_at_impl
 export func json_parser_document_array_field_kind_at(doc: any JsonParserDocument&, key: any u8&, index: usize) -> i64 = json_parser_document_array_field_kind_at_impl
 export func json_parser_document_array_field_string_copy_at(doc: any JsonParserDocument&, key: any u8&, index: usize, out: any u8&, capacity: usize) -> i64 = json_parser_document_array_field_string_copy_at_impl
 export func json_parser_document_object_key_len_at(doc: any JsonParserDocument&, index: usize) -> i64 = json_parser_document_object_key_len_at_impl
@@ -3334,7 +3736,11 @@ export func json_parser_document_object_key_copy_at(doc: any JsonParserDocument&
 export func json_parser_document_object_value_kind_at(doc: any JsonParserDocument&, index: usize) -> i64 = json_parser_document_object_value_kind_at_impl
 export func json_parser_document_object_value_string_copy_at(doc: any JsonParserDocument&, index: usize, out: any u8&, capacity: usize) -> i64 = json_parser_document_object_value_string_copy_at_impl
 export func json_parser_document_object_field_i64_at(doc: any JsonParserDocument&, index: usize, out: any i64&) -> i64 = json_parser_document_object_field_i64_at_impl
+export func json_parser_document_object_field_f64_at(doc: any JsonParserDocument&, index: usize, out: any f64&) -> i64 = json_parser_document_object_field_f64_at_impl
+export func json_parser_document_object_field_f32_at(doc: any JsonParserDocument&, index: usize, out: any f32&) -> i64 = json_parser_document_object_field_f32_at_impl
 export func json_parser_document_array_i64_at(doc: any JsonParserDocument&, index: usize, out: any i64&) -> i64 = json_parser_document_array_i64_at_impl
+export func json_parser_document_array_f64_at(doc: any JsonParserDocument&, index: usize, out: any f64&) -> i64 = json_parser_document_array_f64_at_impl
+export func json_parser_document_array_f32_at(doc: any JsonParserDocument&, index: usize, out: any f32&) -> i64 = json_parser_document_array_f32_at_impl
 export func json_parser_document_array_kind_at(doc: any JsonParserDocument&, index: usize) -> i64 = json_parser_document_array_kind_at_impl
 export func json_parser_document_array_string_copy_at(doc: any JsonParserDocument&, index: usize, out: any u8&, capacity: usize) -> i64 = json_parser_document_array_string_copy_at_impl
 export func json_parser_document_root_value(doc: any JsonParserDocument&, out: any JsonParserValue&) -> i64 = json_parser_document_root_value_impl
@@ -3353,6 +3759,8 @@ export func json_parser_value_string_len(value: any JsonParserValue&) -> i64 = j
 export func json_parser_value_string_copy(value: any JsonParserValue&, out: any u8&, capacity: usize) -> i64 = json_parser_value_string_copy_impl
 export func json_parser_value_i64(value: any JsonParserValue&, out: any i64&) -> i64 = json_parser_value_i64_impl
 export func json_parser_value_u64(value: any JsonParserValue&, out: any u64&) -> i64 = json_parser_value_u64_impl
+export func json_parser_value_f64(value: any JsonParserValue&, out: any f64&) -> i64 = json_parser_value_f64_impl
+export func json_parser_value_f32(value: any JsonParserValue&, out: any f32&) -> i64 = json_parser_value_f32_impl
 export func json_parser_value_array_iter(value: any JsonParserValue&, out: any JsonParserArrayIter&) -> i64 = json_parser_value_array_iter_impl
 export func json_parser_value_object_iter(value: any JsonParserValue&, out: any JsonParserObjectIter&) -> i64 = json_parser_value_object_iter_impl
 export func json_parser_array_iter_is_valid(iter: any JsonParserArrayIter&) -> i64 = json_parser_array_iter_is_valid_impl

@@ -190,6 +190,48 @@ def ast_number_helpers_materialize_integral_values_and_classify_edges() -> void:
 
 
 @test
+def ast_number_helpers_materialize_float_values_across_fractional_and_large_inputs() -> void:
+    source: static u8& = "{\"frac\":1.5,\"exp\":1e3,\"huge\":18446744073709551616}"
+    source_any: any u8& = source.cast[any u8&]()
+    source_len: usize = runtime_strlen(source_any)
+
+    region scratch(json_ast_scratch_capacity(source_len))
+    store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source_any, source_len, store)
+
+    assert(result.checksum > 0)
+
+    frac_node: JsonNode = json_ast_object_get(result.node, source_any, "frac".cast[any u8&](), store)
+    exp_node: JsonNode = json_ast_object_get(result.node, source_any, "exp".cast[any u8&](), store)
+    huge_node: JsonNode = json_ast_object_get(result.node, source_any, "huge".cast[any u8&](), store)
+
+    frac_f64: JsonFloat64Result = json_ast_number_f64_value(source_any, frac_node, store)
+    frac_f32: JsonFloat32Result = json_ast_number_f32_value(source_any, frac_node, store)
+    exp_f64: JsonFloat64Result = json_ast_number_f64_value(source_any, exp_node, store)
+    exp_f32: JsonFloat32Result = json_ast_number_f32_value(source_any, exp_node, store)
+    huge_f64: JsonFloat64Result = json_ast_number_f64_value(source_any, huge_node, store)
+    huge_f32: JsonFloat32Result = json_ast_number_f32_value(source_any, huge_node, store)
+
+    assert(frac_f64.ok)
+    assert(frac_f64.value == 1.5)
+    assert(frac_f32.ok)
+    assert(frac_f32.value == 1.5)
+
+    assert(exp_f64.ok)
+    assert(exp_f64.value == 1000.0)
+    assert(exp_f32.ok)
+    assert(exp_f32.value == 1000.0)
+
+    assert(json_ast_number_kind(source_any, huge_node, store) == JsonNumberKind.OUT_OF_RANGE)
+    assert(huge_f64.ok)
+    assert(huge_f64.value == 18446744073709551616.0)
+    assert(huge_f32.ok)
+    assert(huge_f32.value > 1.0e19)
+
+    destroy scratch
+
+
+@test
 def ast_iterator_helpers_walk_object_fields_and_array_items() -> void:
     source: static u8& = "{\"first\":1,\"second\":2,\"third\":3,\"items\":[4,5,6]}"
     source_any: any u8& = source.cast[any u8&]()

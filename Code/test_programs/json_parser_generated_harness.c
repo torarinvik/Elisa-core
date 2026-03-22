@@ -6,6 +6,7 @@
 
 int main(void) {
     const uint8_t *dom_doc = (uint8_t*)"{\"na\\u006de\":\"line\\nbreak\",\"quote\":\"\\\"\",\"nums\":[123,-2],\"ok\":true,\"none\":null,\"big\":18446744073709551615}";
+    const uint8_t *float_doc = (uint8_t*)"{\"frac\":1.5,\"exp\":1e3,\"huge\":18446744073709551616,\"items\":[-2.25,1000.0]}";
 
     assert(json_parser_parity_suite() == 1);
 
@@ -72,9 +73,23 @@ int main(void) {
     int64_t array_null = -1;
     int64_t missing_num = 99;
     uint64_t big_num = 0;
+    double field_f64 = 0.0;
+    float field_f32 = 0.0f;
     assert(json_parser_ast_array_field_i64_at((uint8_t*)dom_doc, (uint8_t*)"nums", 0u, &first_num) == 1);
     assert(json_parser_ast_array_field_i64_at((uint8_t*)dom_doc, (uint8_t*)"nums", 1u, &second_num) == 1);
     assert(json_parser_ast_array_field_i64_at((uint8_t*)dom_doc, (uint8_t*)"nums", 2u, &missing_num) == 0);
+    assert(json_parser_ast_field_f64((uint8_t*)float_doc, (uint8_t*)"frac", &field_f64) == 1);
+    assert(field_f64 == 1.5);
+    assert(json_parser_ast_field_f32((uint8_t*)float_doc, (uint8_t*)"frac", &field_f32) == 1);
+    assert(field_f32 == 1.5f);
+    assert(json_parser_ast_field_f64((uint8_t*)float_doc, (uint8_t*)"huge", &field_f64) == 1);
+    assert(field_f64 == 18446744073709551616.0);
+    assert(json_parser_ast_field_f32((uint8_t*)float_doc, (uint8_t*)"huge", &field_f32) == 1);
+    assert(field_f32 > 1.0e19f);
+    assert(json_parser_ast_array_field_f64_at((uint8_t*)float_doc, (uint8_t*)"items", 0u, &field_f64) == 1);
+    assert(field_f64 == -2.25);
+    assert(json_parser_ast_array_field_f32_at((uint8_t*)float_doc, (uint8_t*)"items", 1u, &field_f32) == 1);
+    assert(field_f32 == 1000.0f);
     assert(json_parser_ast_array_field_kind_at((uint8_t*)"{\"items\":[\"Ada\",true,null,[1,2],{\"ok\":true}]}", (uint8_t*)"items", 0u) == 3);
     assert(json_parser_ast_array_field_number_kind_at((uint8_t*)"{\"nums\":[123,-2,1.5,18446744073709551616]}", (uint8_t*)"nums", 0u) == 0);
     assert(json_parser_ast_array_field_number_kind_at((uint8_t*)"{\"nums\":[123,-2,1.5,18446744073709551616]}", (uint8_t*)"nums", 1u) == 1);
@@ -114,6 +129,10 @@ int main(void) {
     assert(json_parser_ast_object_key_copy_at((uint8_t*)"{\"first\":1,\"second\":2,\"third\":3}", 1u, object_key_small_buf, sizeof(object_key_small_buf)) == 6);
     assert(json_parser_ast_object_key_copy_at((uint8_t*)"{\"first\":1,\"second\":2,\"third\":3}", 3u, object_key_buf, sizeof(object_key_buf)) < 0);
     assert(json_parser_ast_object_field_i64_at((uint8_t*)"{\"first\":1,\"second\":2,\"third\":3}", 1u, &object_second) == 1);
+    assert(json_parser_ast_object_field_f64_at((uint8_t*)float_doc, 2u, &field_f64) == 1);
+    assert(field_f64 == 18446744073709551616.0);
+    assert(json_parser_ast_object_field_f32_at((uint8_t*)float_doc, 1u, &field_f32) == 1);
+    assert(field_f32 == 1000.0f);
     assert(json_parser_ast_object_value_string_eq_at((uint8_t*)"{\"name\":\"Ada\",\"ok\":true,\"none\":null}", 0u, (uint8_t*)"Ada") == 1);
     assert(json_parser_ast_object_field_bool_at((uint8_t*)"{\"name\":\"Ada\",\"ok\":true,\"none\":null}", 1u) == 1);
     assert(json_parser_ast_object_field_is_null_at((uint8_t*)"{\"name\":\"Ada\",\"ok\":true,\"none\":null}", 2u) == 1);
@@ -164,6 +183,10 @@ int main(void) {
     assert(json_parser_ast_array_string_eq_at((uint8_t*)"[\"Ada\",\"Bob\"]", 1u, (uint8_t*)"Bob") == 1);
     assert(json_parser_ast_array_bool_at((uint8_t*)"[false,true]", 1u) == 1);
     assert(json_parser_ast_array_is_null_at((uint8_t*)"[1,null,3]", 1u) == 1);
+    assert(json_parser_ast_array_f64_at((uint8_t*)"[1.5,-2.25,1000.0]", 1u, &field_f64) == 1);
+    assert(field_f64 == -2.25);
+    assert(json_parser_ast_array_f32_at((uint8_t*)"[1.5,-2.25,1000.0]", 2u, &field_f32) == 1);
+    assert(field_f32 == 1000.0f);
     assert(json_parser_ast_array_i64_at((uint8_t*)"[4,5,6]", 3u, &missing_num) == 0);
     assert(json_parser_ast_object_value_kind_at((uint8_t*)"{\"name\":\"Ada\",\"items\":[4,5],\"meta\":{\"ok\":true}}", 3u) < 0);
     assert(json_parser_ast_array_kind_at((uint8_t*)"[1,\"Ada\",false,null,[2],{\"ok\":true}]", 6u) < 0);
@@ -215,6 +238,13 @@ int main(void) {
     uint8_t value_buf[16] = {0};
     int64_t doc_num = 0;
     uint64_t doc_big = 0;
+    JsonParserDocument float_handle = {0};
+    JsonParserDocument float_array_doc = {0};
+    JsonParserValue float_root_value = {0};
+    JsonParserValue float_frac_value = {0};
+    JsonParserValue float_huge_value = {0};
+    JsonParserValue float_items_value = {0};
+    JsonParserValue float_item_value = {0};
     assert(json_parser_document_parse(owned_doc_src, &owned_doc) == 1);
     assert(json_parser_document_checksum(&owned_doc) == json_parser_ast_checksum((uint8_t*)owned_doc_src));
     assert(json_parser_document_node_count(&owned_doc) > 0);
@@ -283,6 +313,43 @@ int main(void) {
     assert(json_parser_document_destroy(owned_doc.impl_bits) == 1);
     owned_doc.impl_bits = 0;
     assert(json_parser_document_destroy(owned_doc.impl_bits) == 0);
+
+    assert(json_parser_document_parse((uint8_t*)float_doc, &float_handle) == 1);
+    assert(json_parser_document_field_f64(&float_handle, (uint8_t*)"frac", &field_f64) == 1);
+    assert(field_f64 == 1.5);
+    assert(json_parser_document_field_f32(&float_handle, (uint8_t*)"exp", &field_f32) == 1);
+    assert(field_f32 == 1000.0f);
+    assert(json_parser_document_array_field_f64_at(&float_handle, (uint8_t*)"items", 0u, &field_f64) == 1);
+    assert(field_f64 == -2.25);
+    assert(json_parser_document_array_field_f32_at(&float_handle, (uint8_t*)"items", 1u, &field_f32) == 1);
+    assert(field_f32 == 1000.0f);
+    assert(json_parser_document_object_field_f64_at(&float_handle, 2u, &field_f64) == 1);
+    assert(field_f64 == 18446744073709551616.0);
+    assert(json_parser_document_object_field_f32_at(&float_handle, 1u, &field_f32) == 1);
+    assert(field_f32 == 1000.0f);
+    assert(json_parser_document_root_value(&float_handle, &float_root_value) == 1);
+    assert(json_parser_value_field(&float_root_value, (uint8_t*)"frac", &float_frac_value) == 1);
+    assert(json_parser_value_f64(&float_frac_value, &field_f64) == 1);
+    assert(field_f64 == 1.5);
+    assert(json_parser_value_field(&float_root_value, (uint8_t*)"huge", &float_huge_value) == 1);
+    assert(json_parser_value_f32(&float_huge_value, &field_f32) == 1);
+    assert(field_f32 > 1.0e19f);
+    assert(json_parser_value_field(&float_root_value, (uint8_t*)"items", &float_items_value) == 1);
+    assert(json_parser_value_index(&float_items_value, 0u, &float_item_value) == 1);
+    assert(json_parser_value_f64(&float_item_value, &field_f64) == 1);
+    assert(field_f64 == -2.25);
+    assert(json_parser_value_index(&float_items_value, 1u, &float_item_value) == 1);
+    assert(json_parser_value_f32(&float_item_value, &field_f32) == 1);
+    assert(field_f32 == 1000.0f);
+    assert(json_parser_document_parse((uint8_t*)"[1.5,-2.25,1000.0]", &float_array_doc) == 1);
+    assert(json_parser_document_array_f64_at(&float_array_doc, 1u, &field_f64) == 1);
+    assert(field_f64 == -2.25);
+    assert(json_parser_document_array_f32_at(&float_array_doc, 2u, &field_f32) == 1);
+    assert(field_f32 == 1000.0f);
+    assert(json_parser_document_destroy(float_array_doc.impl_bits) == 1);
+    float_array_doc.impl_bits = 0;
+    assert(json_parser_document_destroy(float_handle.impl_bits) == 1);
+    float_handle.impl_bits = 0;
 
     JsonParserDocument array_doc = {0};
     JsonParserValue array_root_value = {0};
