@@ -2214,6 +2214,10 @@ func (a *Analyzer) resolveProjectedFieldValueExprAtPath(objectExpr ast.Expr, pat
 		return a.resolveProjectedFieldValueExprAtPath(n.Operand, path)
 	case *ast.MoveExpr:
 		return a.resolveProjectedFieldValueExprAtPath(n.Operand, path)
+	case *ast.AllocExpr:
+		return a.resolveProjectedFieldValueExprAtPath(n.Value, path)
+	case *ast.CanExpr:
+		return a.resolveProjectedFieldValueExprAtPath(n.Expr, path)
 	case *ast.Ident:
 		if a.currentScope == nil {
 			return nil, false
