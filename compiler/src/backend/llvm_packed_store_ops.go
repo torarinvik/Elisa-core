@@ -261,6 +261,55 @@ func (ops *packedStoreOps) loadPayloadWord(handleValue C.LLVMValueRef, enumType 
 	return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, coercedHandle, stateValue, wordOffset}, name), nil
 }
 
+func (ops *packedStoreOps) canDirectWordRead() bool {
+	return ops != nil && ops.s != nil && ops.s.g != nil && ops.s.g.packedEnumABI == packedEnumABIWordHandle
+}
+
+func (ops *packedStoreOps) canDirectTagRead() bool {
+	return ops.canDirectWordRead()
+}
+
+func (ops *packedStoreOps) loadPayloadWordsAsTypes(handleValue C.LLVMValueRef, enumType *semantic.EnumType, wordOffsets []C.LLVMValueRef, types []semantic.Type, namePrefix string) ([]C.LLVMValueRef, bool, error) {
+	if !ops.canDirectWordRead() || enumType == nil || !enumType.Packed {
+		return nil, false, nil
+	}
+	if len(wordOffsets) != len(types) {
+		return nil, false, fmt.Errorf("packed payload word/type arity mismatch")
+	}
+	values := make([]C.LLVMValueRef, 0, len(types))
+	uintptrType := ops.s.g.result.NamedTypes["uintptr"]
+	for i, payloadType := range types {
+		wordValue, err := ops.loadPayloadWord(handleValue, enumType, wordOffsets[i], namePrefix)
+		if err != nil {
+			return nil, false, err
+		}
+		coerced, err := ops.s.coerceValue(wordValue, uintptrType, payloadType)
+		if err != nil {
+			return nil, false, err
+		}
+		values = append(values, coerced)
+	}
+	return values, true, nil
+}
+
+func (ops *packedStoreOps) loadTailView(handleValue C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, payloadIndex int, name string) (C.LLVMValueRef, bool, error) {
+	if ops == nil || enumType == nil || !enumType.Packed || variant == nil {
+		return nil, false, nil
+	}
+	if !ops.canDirectWordRead() {
+		return nil, false, nil
+	}
+	tailIndex, ok := variant.TailPayloadIndex()
+	if !ok || tailIndex != payloadIndex {
+		return nil, false, nil
+	}
+	// Current backends still recover tail views through full decode.
+	// This method exists as the stable insertion point for future SOA lowering.
+	_ = handleValue
+	_ = name
+	return nil, false, nil
+}
+
 func (ops *packedStoreOps) storeSlice(startValue C.LLVMValueRef, endValue C.LLVMValueRef, resultType semantic.Type, name string) (C.LLVMValueRef, semantic.Type, error) {
 	stateValue, err := ops.stateValue(name + ".state")
 	if err != nil {

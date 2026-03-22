@@ -64,6 +64,17 @@ func generateLLVMIRWithPackedABIForTest(result *semantic.Result, abi packedEnumA
 	return g.printModule(), nil
 }
 
+func packedABITestName(abi packedEnumABIMode) string {
+	switch abi {
+	case packedEnumABIRowHandle:
+		return "row_handle"
+	case packedEnumABIWordHandle:
+		return "word_handle"
+	default:
+		return "packed_abi_unknown"
+	}
+}
+
 func TestGenerateLLVMIRLowersPackedEnumsAsWordHandlesInAlternateABI(t *testing.T) {
 	src := `packed enum Expr:
 	common:
@@ -1550,6 +1561,60 @@ def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
+	}
+}
+
+func TestGenerateLLVMIRLowersParallelForOverPackedTagViewAcrossPackedABIs(t *testing.T) {
+	src := parallelForConcurrencyPrelude + `
+packed enum Expr:
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		left: Expr = new Expr.Int(value: 1)
+		right: Expr = new Expr.Int(value: 2)
+		_ = new Expr.Add(left: left, right: right)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	tags: dview[Expr.Tag] = frozen.tags
+	pool workers(2u):
+		parallel for tag at i in tags:
+			if tag == Expr.Tag.Add:
+				_ = i
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_parallel_for_tags_parity.llcontext", src)
+	cases := []struct {
+		abi         packedEnumABIMode
+		mustContain []string
+	}{
+		{
+			abi:         packedEnumABIWordHandle,
+			mustContain: []string{"ctx_packed_store_tags_view", "@__parallel_for_0_worker", "@pool_submit1__", "@task_group_wait_all("},
+		},
+		{
+			abi:         packedEnumABIRowHandle,
+			mustContain: []string{"ctx_packed_store_tags_view", "@__parallel_for_0_worker", "@pool_submit1__", "@task_group_wait_all(", "call void @ctx_packed_store_record_row_ptr("},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(packedABITestName(tc.abi), func(t *testing.T) {
+			output, err := generateLLVMIRWithPackedABIForTest(result, tc.abi)
+			if err != nil {
+				t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+			}
+			for _, check := range tc.mustContain {
+				if !strings.Contains(output, check) {
+					t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+				}
+			}
+			for _, bad := range []string{"call ptr @ctx_packed_store_decode(", "call i32 @ctx_packed_store_read_tag("} {
+				if strings.Contains(output, bad) {
+					t.Fatalf("expected packed tag-view parallel-for lowering to avoid %q, got:\n%s", bad, output)
+				}
+			}
+		})
 	}
 }
 

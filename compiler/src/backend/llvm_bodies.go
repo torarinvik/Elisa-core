@@ -1933,9 +1933,10 @@ func (s *functionState) loadEnumTag(decodedEnumPtr C.LLVMValueRef, enumPtr C.LLV
 	if enumType != nil && enumType.Packed {
 		if decodedEnumPtr != nil {
 			enumPtr = decodedEnumPtr
-		} else if s.g.packedEnumABI == packedEnumABIWordHandle {
-			return s.readPackedEnumTagWithStore(enumPtr, enumType, store)
 		} else {
+			if ops, ok := s.packedStoreOpsFromBinding(store); ok && ops.canDirectTagRead() {
+				return ops.storeTagAt(enumPtr, enumType, "packed.tag.store")
+			}
 			var err error
 			enumPtr, err = s.decodePackedEnumHandleWithStore(enumPtr, enumType, store)
 			if err != nil {
@@ -1962,7 +1963,7 @@ func (s *functionState) loadEnumVariantPayload(decodedEnumPtr C.LLVMValueRef, en
 	if enumType != nil && enumType.Packed {
 		if decodedEnumPtr != nil {
 			enumPtr = decodedEnumPtr
-		} else if s.g.packedEnumABI == packedEnumABIWordHandle {
+		} else {
 			values, ok, readErr := s.readPackedEnumVariantPayloadWithStore(enumPtr, enumType, variant, store)
 			if readErr != nil {
 				return nil, readErr
@@ -1970,12 +1971,6 @@ func (s *functionState) loadEnumVariantPayload(decodedEnumPtr C.LLVMValueRef, en
 			if ok {
 				return values, nil
 			}
-			var decodeErr error
-			enumPtr, decodeErr = s.decodePackedEnumHandleWithStore(enumPtr, enumType, store)
-			if decodeErr != nil {
-				return nil, decodeErr
-			}
-		} else {
 			var decodeErr error
 			enumPtr, decodeErr = s.decodePackedEnumHandleWithStore(enumPtr, enumType, store)
 			if decodeErr != nil {
@@ -2007,23 +2002,39 @@ func (s *functionState) readPackedEnumVariantPayloadWithStore(handleValue C.LLVM
 	if enumType == nil || !enumType.Packed || variant == nil || len(variant.Payload) == 0 {
 		return nil, false, nil
 	}
-	if s.g.packedEnumABI != packedEnumABIWordHandle {
-		return nil, false, nil
-	}
-	if store == nil || store.typ == nil {
-		return nil, false, nil
-	}
-	wordOffsets, ok, err := s.packedEnumVariantDirectPayloadWordOffsets(enumType, variant)
-	if err != nil {
-		return nil, false, err
-	}
+	ops, ok := s.packedStoreOpsFromBinding(store)
 	if !ok {
+		return nil, false, nil
+	}
+	tailIndex, hasTail := variant.TailPayloadIndex()
+	var tailValue C.LLVMValueRef
+	if hasTail {
+		var err error
+		tailValue, ok, err = ops.loadTailView(handleValue, enumType, variant, tailIndex, "packed.payload.tail")
+		if err != nil {
+			return nil, false, err
+		}
+		if !ok {
+			return nil, false, nil
+		}
+	} else if !ops.canDirectWordRead() {
 		return nil, false, nil
 	}
 	values := make([]C.LLVMValueRef, 0, len(variant.Payload))
 	uintptrType := s.g.result.NamedTypes["uintptr"]
-	for i, payloadType := range variant.Payload {
-		wordValue, err := s.readPackedEnumWordWithStore(handleValue, enumType, store, wordOffsets[i])
+	for payloadIndex, payloadType := range variant.Payload {
+		if hasTail && payloadIndex == tailIndex {
+			values = append(values, tailValue)
+			continue
+		}
+		wordOffset, ok, err := s.packedEnumVariantPayloadWordOffset(enumType, variant, payloadIndex)
+		if err != nil {
+			return nil, false, err
+		}
+		if !ok {
+			return nil, false, nil
+		}
+		wordValue, err := ops.loadPayloadWord(handleValue, enumType, wordOffset, "packed.payload.word")
 		if err != nil {
 			return nil, false, err
 		}
@@ -2036,22 +2047,21 @@ func (s *functionState) readPackedEnumVariantPayloadWithStore(handleValue C.LLVM
 	return values, true, nil
 }
 
-func (s *functionState) packedEnumVariantDirectPayloadWordOffsets(enumType *semantic.EnumType, variant *semantic.EnumVariant) ([]C.LLVMValueRef, bool, error) {
-	if enumType == nil || !enumType.Packed || variant == nil || len(variant.Payload) == 0 {
+func (s *functionState) packedEnumVariantPayloadWordOffset(enumType *semantic.EnumType, variant *semantic.EnumVariant, payloadIndex int) (C.LLVMValueRef, bool, error) {
+	if enumType == nil || !enumType.Packed || variant == nil || payloadIndex < 0 || payloadIndex >= len(variant.Payload) {
 		return nil, false, nil
 	}
 	wordBytes := uint64(s.g.wordBits / 8)
 	if wordBytes == 0 {
 		wordBytes = 8
 	}
-	for _, payloadType := range variant.Payload {
-		sizeBytes, err := s.g.abiSizeOfType(payloadType)
-		if err != nil {
-			return nil, false, err
-		}
-		if sizeBytes != wordBytes {
-			return nil, false, nil
-		}
+	payloadElemType := variant.Payload[payloadIndex]
+	sizeBytes, err := s.g.abiSizeOfType(payloadElemType)
+	if err != nil {
+		return nil, false, err
+	}
+	if sizeBytes != wordBytes {
+		return nil, false, nil
 	}
 	payloadFieldIndex, err := s.g.packedEnumPayloadFieldIndex(enumType)
 	if err != nil {
@@ -2075,22 +2085,18 @@ func (s *functionState) packedEnumVariantDirectPayloadWordOffsets(enumType *sema
 	wordBytesValue := C.LLVMConstInt(usizeType, C.ulonglong(wordBytes), 0)
 	baseWordOffset := C.LLVMBuildUDiv(s.builder, payloadOffsetBytes, wordBytesValue, cStringFree("packed.payload.word.offset"))
 	if len(variant.Payload) == 1 {
-		return []C.LLVMValueRef{baseWordOffset}, true, nil
+		return baseWordOffset, true, nil
 	}
 	payloadType, err := s.g.lowerEnumVariantPayloadType(variant)
 	if err != nil {
 		return nil, false, err
 	}
-	offsets := make([]C.LLVMValueRef, 0, len(variant.Payload))
-	for i := range variant.Payload {
-		fieldIndexValue := C.LLVMConstInt(i32Type, C.ulonglong(i), 0)
-		fieldIndices := []C.LLVMValueRef{zeroIndex, fieldIndexValue}
-		fieldPtr := C.LLVMBuildGEP2(s.builder, payloadType, nullPtr, llvmValueSlicePtr(fieldIndices), C.unsigned(len(fieldIndices)), cStringFree("packed.payload.field.word.ptr"))
-		fieldOffsetBytes := C.LLVMBuildPtrToInt(s.builder, fieldPtr, usizeType, cStringFree("packed.payload.field.word.bytes"))
-		fieldWordOffset := C.LLVMBuildUDiv(s.builder, fieldOffsetBytes, wordBytesValue, cStringFree("packed.payload.field.word.offset"))
-		offsets = append(offsets, C.LLVMBuildAdd(s.builder, baseWordOffset, fieldWordOffset, cStringFree("packed.payload.word.total")))
-	}
-	return offsets, true, nil
+	fieldIndexValue := C.LLVMConstInt(i32Type, C.ulonglong(payloadIndex), 0)
+	fieldIndices := []C.LLVMValueRef{zeroIndex, fieldIndexValue}
+	fieldPtr := C.LLVMBuildGEP2(s.builder, payloadType, nullPtr, llvmValueSlicePtr(fieldIndices), C.unsigned(len(fieldIndices)), cStringFree("packed.payload.field.word.ptr"))
+	fieldOffsetBytes := C.LLVMBuildPtrToInt(s.builder, fieldPtr, usizeType, cStringFree("packed.payload.field.word.bytes"))
+	fieldWordOffset := C.LLVMBuildUDiv(s.builder, fieldOffsetBytes, wordBytesValue, cStringFree("packed.payload.field.word.offset"))
+	return C.LLVMBuildAdd(s.builder, baseWordOffset, fieldWordOffset, cStringFree("packed.payload.word.total")), true, nil
 }
 
 func (s *functionState) readPackedEnumTagWithStore(handleValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding) (C.LLVMValueRef, error) {

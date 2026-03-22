@@ -3072,27 +3072,20 @@ func (s *functionState) emitPackedStoreFieldValueNamed(storeValue C.LLVMValueRef
 	if storeType == nil {
 		return nil, fmt.Errorf("missing packed enum store type")
 	}
-	switch s.g.packedEnumABI {
-	case packedEnumABIRowHandle:
-		fallthrough
-	case packedEnumABIWordHandle:
-		_, err := s.g.lowerPackedEnumStoreType(storeType)
-		if err != nil {
-			return nil, err
-		}
-		if block := C.LLVMGetInsertBlock(s.builder); block != nil && s.packedStoreValues != nil && storeValue != nil {
-			key := packedStoreExtractCacheKey{block: block, store: storeValue, name: name}
-			if cached, ok := s.packedStoreValues[key]; ok && cached != nil {
-				return cached, nil
-			}
-			value := C.LLVMBuildExtractValue(s.builder, storeValue, index, cStringFree(name))
-			s.packedStoreValues[key] = value
-			return value, nil
-		}
-		return C.LLVMBuildExtractValue(s.builder, storeValue, index, cStringFree(name)), nil
-	default:
-		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedEnumABI)
+	_, err := s.g.lowerPackedEnumStoreType(storeType)
+	if err != nil {
+		return nil, err
 	}
+	if block := C.LLVMGetInsertBlock(s.builder); block != nil && s.packedStoreValues != nil && storeValue != nil {
+		key := packedStoreExtractCacheKey{block: block, store: storeValue, name: name}
+		if cached, ok := s.packedStoreValues[key]; ok && cached != nil {
+			return cached, nil
+		}
+		value := C.LLVMBuildExtractValue(s.builder, storeValue, index, cStringFree(name))
+		s.packedStoreValues[key] = value
+		return value, nil
+	}
+	return C.LLVMBuildExtractValue(s.builder, storeValue, index, cStringFree(name)), nil
 }
 
 func (s *functionState) emitPackedStoreArenaValueNamed(storeValue C.LLVMValueRef, storeType *semantic.PackedEnumStoreType, name string) (C.LLVMValueRef, error) {
@@ -3327,9 +3320,6 @@ func packedVariantViewName(expr ast.Expr) (string, bool) {
 }
 
 func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
-	if s.g.packedEnumABI != packedEnumABIWordHandle {
-		return nil, nil, false, nil
-	}
 	objectType := s.exprType(expr.Object)
 	if objectType == nil {
 		return nil, nil, false, nil
@@ -3351,6 +3341,10 @@ func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMVa
 	if !ok {
 		return nil, nil, false, nil
 	}
+	ops, ok := s.packedStoreOpsFromBinding(&store)
+	if !ok || !ops.canDirectWordRead() {
+		return nil, nil, false, nil
+	}
 	if s.g != nil && s.g.result != nil && s.g.result.ExprHasOnlyFrozenPackedStoreDeps(expr.Object) {
 		return nil, nil, false, nil
 	}
@@ -3364,10 +3358,6 @@ func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMVa
 	handleValue, err := s.packedEnumFieldHandleValue(expr.Object, objectType, enumType)
 	if err != nil {
 		return nil, nil, true, err
-	}
-	ops, ok := s.packedStoreOpsFromBinding(&store)
-	if !ok {
-		return nil, nil, true, fmt.Errorf("packed enum %s word-handle common-field read requires store context", enumType.Name)
 	}
 	wordValue, err := ops.loadPayloadWord(handleValue, enumType, fieldWordOffset, "packed.common.store")
 	if err != nil {
