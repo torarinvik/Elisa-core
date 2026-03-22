@@ -180,6 +180,45 @@ def sum_pair() -> int:
 	}
 }
 
+func TestGenerateLLVMIRUsesSingleDecodeForFrozenPackedPayloadMatch(t *testing.T) {
+	src := `packed enum Expr:
+	Lit(value: int)
+	End
+
+def fold_frozen() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	node: Expr = new[store] Expr.Lit(value: 5)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	return match node in frozen:
+		Expr.Lit(value):
+			value
+		Expr.End:
+			0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_payload_decode.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
+	if decodeCalls != 1 {
+		t.Fatalf("expected frozen packed payload match to use a single eager decode, got %d decode calls:\n%s", decodeCalls, output)
+	}
+	if strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
+		t.Fatalf("expected frozen packed payload match to avoid ctx_packed_store_read_tag after eager decode, got:\n%s", output)
+	}
+	if strings.Contains(output, "call i64 @ctx_packed_store_read_word(") {
+		t.Fatalf("expected frozen packed payload match to avoid ctx_packed_store_read_word after eager decode, got:\n%s", output)
+	}
+	for _, check := range []string{"packed.decode.store.arena", "packed.decode.store.state"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected frozen packed payload eager decode to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRUsesWordReadHelperForRepeatedCommonFieldReads(t *testing.T) {
 	src := `packed enum Expr:
 	common:

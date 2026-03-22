@@ -932,7 +932,7 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 		return err
 	}
 	var decodedMatchValue C.LLVMValueRef
-	if enumType.Packed && packedMatchShouldEagerDecode(stmt.Value, stmt.Arms) {
+	if enumType.Packed && packedMatchShouldEagerDecode(s.g.result, stmt.Value, stmt.Arms) {
 		decodedMatchValue, err = s.decodePackedEnumHandleWithStore(enumValue, enumType, storeBinding)
 		if err != nil {
 			return err
@@ -1004,7 +1004,7 @@ func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, sema
 		return nil, nil, err
 	}
 	var decodedMatchValue C.LLVMValueRef
-	if enumType.Packed && packedMatchShouldEagerDecode(expr.Value, expr.Arms) {
+	if enumType.Packed && packedMatchShouldEagerDecode(s.g.result, expr.Value, expr.Arms) {
 		decodedMatchValue, err = s.decodePackedEnumHandleWithStore(enumValue, enumType, storeBinding)
 		if err != nil {
 			return nil, nil, err
@@ -1495,9 +1495,12 @@ func packedMatchNeedsEagerDecode(arms []ast.MatchArm) bool {
 	return false
 }
 
-func packedMatchShouldEagerDecode(matchValue ast.Expr, arms []ast.MatchArm) bool {
+func packedMatchShouldEagerDecode(result *semantic.Result, matchValue ast.Expr, arms []ast.MatchArm) bool {
 	if !packedMatchNeedsEagerDecode(arms) {
 		return false
+	}
+	if result != nil && result.ExprDependsOnlyOnFrozenPackedStores(matchValue) {
+		return true
 	}
 	ident, ok := matchValue.(*ast.Ident)
 	if !ok {
