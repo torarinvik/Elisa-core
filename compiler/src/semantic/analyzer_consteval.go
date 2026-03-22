@@ -359,6 +359,15 @@ func castConstNumericToInt64(value ConstValue, dst Type) (int64, bool) {
 		return 0, false
 	}
 	if isSignedConstCastBuiltin(name) {
+		if usesInt64ConstRange(name) {
+			// float64(math.MaxInt64) rounds up to 2^63, so compare against the exact
+			// exclusive upper bound instead of float64(maxValue) to avoid accepting
+			// out-of-range values like 9223372036854775808.0.
+			if truncated < float64(math.MinInt64) || truncated >= math.Exp2(63) {
+				return 0, false
+			}
+			return int64(truncated), true
+		}
 		minValue, maxValue, ok := signedConstCastRange(name)
 		if !ok || truncated < float64(minValue) || truncated > float64(maxValue) {
 			return 0, false
@@ -367,6 +376,15 @@ func castConstNumericToInt64(value ConstValue, dst Type) (int64, bool) {
 	}
 	if truncated < 0 {
 		return 0, false
+	}
+	if usesInt64BackedUnsignedConstRange(name) {
+		// The current ConstValue representation stores integers as int64, so
+		// compile-time unsigned constants must stay below 2^63 to remain
+		// representable without wrapping.
+		if truncated >= math.Exp2(63) {
+			return 0, false
+		}
+		return int64(truncated), true
 	}
 	maxValue, ok := unsignedConstCastMax(name)
 	if !ok || truncated > float64(maxValue) {
@@ -386,6 +404,15 @@ func builtinNumericTypeName(t Type) (string, bool) {
 func isSignedConstCastBuiltin(name string) bool {
 	switch name {
 	case "char", "int", "isize", "i8", "i16", "i32", "i64":
+		return true
+	default:
+		return false
+	}
+}
+
+func usesInt64ConstRange(name string) bool {
+	switch name {
+	case "char", "int", "isize", "i64":
 		return true
 	default:
 		return false
@@ -419,6 +446,15 @@ func unsignedConstCastMax(name string) (uint64, bool) {
 		return math.MaxInt64, true
 	default:
 		return 0, false
+	}
+}
+
+func usesInt64BackedUnsignedConstRange(name string) bool {
+	switch name {
+	case "u64", "usize", "uintptr":
+		return true
+	default:
+		return false
 	}
 }
 

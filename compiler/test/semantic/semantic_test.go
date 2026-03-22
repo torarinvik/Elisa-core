@@ -2793,6 +2793,8 @@ def total() -> f64:
 func TestAnalyzeRejectsConstFloatCastEdgeCases(t *testing.T) {
 	src := `const NEG_TO_U32: u32 = (-1.0).u32()
 const BIG_TO_I8: i8 = 200.0.i8()
+const BIG_TO_I64: i64 = 9223372036854775808.0.i64()
+const BIG_TO_U64: u64 = 9223372036854775808.0.u64()
 `
 	_, errs := parseAndAnalyze(t, "const_float_cast_edge_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -2804,6 +2806,12 @@ const BIG_TO_I8: i8 = 200.0.i8()
 	}
 	if !strings.Contains(all, "const \"BIG_TO_I8\" initializer must be a compile-time i8 value") {
 		t.Fatalf("expected narrowing const-cast rejection, got:\n%s", all)
+	}
+	if !strings.Contains(all, "const \"BIG_TO_I64\" initializer must be a compile-time i64 value") {
+		t.Fatalf("expected signed overflow const-cast rejection, got:\n%s", all)
+	}
+	if !strings.Contains(all, "const \"BIG_TO_U64\" initializer must be a compile-time u64 value") {
+		t.Fatalf("expected unsigned overflow const-cast rejection, got:\n%s", all)
 	}
 }
 

@@ -309,7 +309,7 @@ func (l *Lexer) readNumber() Token {
 		l.advance()
 	}
 	isFloat := false
-	if l.peek() == '.' && isDigit(l.peekAt(1)) {
+	if l.shouldReadFloatFraction() {
 		isFloat = true
 		l.advance()
 		for l.pos < len(l.src) && isDigit(l.peek()) {
@@ -341,6 +341,37 @@ func (l *Lexer) readNumber() Token {
 		return Token{Kind: TOKEN_FLOAT_LIT, Text: text, Pos: p, Suffix: suffix}
 	}
 	return Token{Kind: TOKEN_INT_LIT, Text: text, Pos: p, Suffix: suffix}
+}
+
+func (l *Lexer) shouldReadFloatFraction() bool {
+	if l.peek() != '.' || l.peekAt(1) == '.' {
+		return false
+	}
+	next := l.peekAt(1)
+	if isDigit(next) || next == 0 {
+		return true
+	}
+	if next == 'e' || next == 'E' {
+		offset := 2
+		if sign := l.peekAt(offset); sign == '+' || sign == '-' {
+			offset++
+		}
+		return isDigit(l.peekAt(offset))
+	}
+	if l.hasFloatSuffixAt(1) {
+		return true
+	}
+	return !isIdentChar(next)
+}
+
+func (l *Lexer) hasFloatSuffixAt(offset int) bool {
+	if l.peekAt(offset) != 'f' {
+		return false
+	}
+	if l.peekAt(offset+1) != '3' {
+		return l.peekAt(offset+1) == '6' && l.peekAt(offset+2) == '4' && !isIdentChar(l.peekAt(offset+3))
+	}
+	return l.peekAt(offset+2) == '2' && !isIdentChar(l.peekAt(offset+3))
 }
 
 func (l *Lexer) readTypeSuffix() string {
@@ -459,7 +490,7 @@ func (l *Lexer) NextToken() Token {
 	}
 
 	// Numbers
-	if isDigit(ch) {
+	if isDigit(ch) || (ch == '.' && isDigit(l.peekAt(1))) {
 		return l.readNumber()
 	}
 
