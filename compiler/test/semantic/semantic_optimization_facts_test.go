@@ -1160,6 +1160,83 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	}
 }
 
+func TestAnalyzePreservesMixedFrozenPackedStoreDepsThroughHelperIndexedFieldMatchBinders(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Hold(value: any i32&)
+	Wrap(child: Expr)
+
+
+repr(c) struct Box:
+	node: Expr
+
+repr(c) struct BoxHolder:
+	items: array[Box, 1]
+
+@borrows_return_field(items[0].node, node)
+extern wrap_indexed_node(node: Expr) -> BoxHolder
+
+def inspect(owner: Arena) -> int:
+	region scratch(1024u)
+	store: Expr.Store[Local] = Expr.Store(owner)
+	local_ref: scratch i32& = new[scratch] 7i32
+	held: Expr = new[store] Expr.Hold(span: 5, value: local_ref)
+	node: Expr = new[store] Expr.Wrap(span: 9, child: held)
+	wrapped: BoxHolder = wrap_indexed_node(node)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	match wrapped.items[0u].node in frozen:
+		Expr.Wrap(child: child_alias):
+			child_copy: Expr = child_alias
+			_ = wrapped
+			_ = frozen
+			_ = child_copy
+			return child_copy.span
+		Expr.Int(value: _):
+			return 0
+		Expr.Hold(value: _):
+			return 1
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_helper_indexed_field_match_mixed_child.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	childExpr := requireOptimizationFactsVarInitExpr(t, fn, "child_copy")
+
+	childFacts := requireExprOptimizationFacts(t, result, childExpr)
+	childProvenance := requireExprPackedStoreProvenance(t, result, childExpr)
+
+	if childFacts.FrozenPackedStoreOnly {
+		t.Fatalf("expected helper-indexed packed child payload recovered through frozen match to retain mixed non-store provenance, got %#v", childFacts)
+	}
+	if !childProvenance.HasPackedStoreDeps || !childProvenance.HasFrozenPackedStoreDeps || childProvenance.HasNonFrozenPackedStoreDeps {
+		t.Fatalf("expected helper-indexed packed child payload recovered through frozen match to keep only frozen packed-store deps, got %#v", childProvenance)
+	}
+	if !childProvenance.HasMixedProvenance() {
+		t.Fatalf("expected helper-indexed packed child payload recovered through frozen match to keep mixed non-store provenance, got %#v", childProvenance)
+	}
+	if !childProvenance.HasOnlyFrozenPackedStoreDeps() {
+		t.Fatalf("expected helper-indexed packed child payload recovered through frozen match to keep frozen-only packed-store deps despite mixed provenance, got %#v", childProvenance)
+	}
+	if childProvenance.DependsOnlyOnFrozenPackedStores() {
+		t.Fatalf("expected helper-indexed packed child payload recovered through frozen match to reject pure frozen-only provenance, got %#v", childProvenance)
+	}
+	if !result.ExprHasPackedStoreProvenance(childExpr) || !result.ExprDependsOnFrozenPackedStores(childExpr) || result.ExprDependsOnNonFrozenPackedStores(childExpr) {
+		t.Fatalf("expected helper-indexed packed child payload recovered through frozen match to expose frozen-only packed-store helper results")
+	}
+	if !result.ExprHasMixedPackedStoreProvenance(childExpr) {
+		t.Fatalf("expected helper-indexed packed child payload recovered through frozen match to report mixed packed-store provenance")
+	}
+	if !result.ExprHasOnlyFrozenPackedStoreDeps(childExpr) {
+		t.Fatalf("expected helper-indexed packed child payload recovered through frozen match to report frozen-only packed-store deps")
+	}
+	if result.ExprDependsOnlyOnFrozenPackedStores(childExpr) {
+		t.Fatalf("expected helper-indexed packed child payload recovered through frozen match to reject strict frozen-only provenance query")
+	}
+}
+
 func TestAnalyzePreservesOptimizationFactsThroughAllocatedFieldProjectionExpressions(t *testing.T) {
 	src := `repr(c) struct Views:
 	left: view[i32]

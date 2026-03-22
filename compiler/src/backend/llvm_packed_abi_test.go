@@ -522,6 +522,58 @@ def fold_child_common_frozen_mixed() -> int:
 	}
 }
 
+func TestGenerateLLVMIRUsesSingleDecodeForHelperIndexedFrozenMatchedPayloadRepeatedCommonFieldReads(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Hold(value: any i32&)
+	Wrap(child: Expr)
+
+repr(c) struct Box:
+	node: Expr
+
+repr(c) struct BoxHolder:
+	items: array[Box, 1]
+
+@borrows_return_field(items[0].node, node)
+extern wrap_indexed_node(node: Expr) -> BoxHolder
+
+def fold_helper_indexed_child_common_frozen_mixed() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	local_ref: scratch i32& = new[scratch] 7i32
+	held: Expr = new[store] Expr.Hold(span: 5, value: local_ref)
+	node: Expr = new[store] Expr.Wrap(span: 9, child: held)
+	wrapped: BoxHolder = wrap_indexed_node(node)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	return match wrapped.items[0u].node in frozen:
+		Expr.Wrap(child: child_alias):
+			child_alias.span + child_alias.span
+		Expr.Int(value: _):
+			0
+		Expr.Hold(value: _):
+			1
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_helper_indexed_matched_payload_field_cache.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
+	if decodeCalls != 2 {
+		t.Fatalf("expected helper-indexed frozen outer match plus repeated mixed child common-field reads to use exactly two decodes, got %d decode calls:\n%s", decodeCalls, output)
+	}
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_word(")
+	if readCalls != 0 {
+		t.Fatalf("expected helper-indexed repeated mixed child common-field reads recovered through frozen match to avoid ctx_packed_store_read_word after decode, got %d helper calls:\n%s", readCalls, output)
+	}
+	if strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
+		t.Fatalf("expected helper-indexed frozen outer match plus mixed child common-field reads to avoid ctx_packed_store_read_tag after eager decode, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRUsesSingleDecodeForFrozenPayloadlessPackedMatchWithMatchedValueFieldReads(t *testing.T) {
 	src := `packed enum Flag:
 	common:
