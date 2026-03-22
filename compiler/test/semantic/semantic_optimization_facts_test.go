@@ -616,8 +616,14 @@ def inspect(owner: Arena) -> int:
 	if !result.ExprHasPackedStoreProvenance(beforeFreezeExpr) || result.ExprDependsOnFrozenPackedStores(beforeFreezeExpr) || !result.ExprDependsOnNonFrozenPackedStores(beforeFreezeExpr) || result.ExprHasMixedPackedStoreProvenance(beforeFreezeExpr) {
 		t.Fatalf("expected pre-freeze value to expose non-frozen-only packed-store helper results")
 	}
+	if result.ExprHasOnlyFrozenPackedStoreDeps(beforeFreezeExpr) {
+		t.Fatalf("expected pre-freeze value to reject frozen-store-only dependency classification")
+	}
 	if beforeFreezeProvenance.DependsOnlyOnFrozenPackedStores() {
 		t.Fatalf("expected pre-freeze value to reject frozen-only classification, got %#v", beforeFreezeProvenance)
+	}
+	if beforeFreezeProvenance.HasOnlyFrozenPackedStoreDeps() {
+		t.Fatalf("expected pre-freeze value to reject frozen-store-only dependency classification, got %#v", beforeFreezeProvenance)
 	}
 	if !afterFreezeFacts.FrozenPackedStoreOnly {
 		t.Fatalf("expected freeze to remap packed-store provenance for direct values, got %#v", afterFreezeFacts)
@@ -628,8 +634,14 @@ def inspect(owner: Arena) -> int:
 	if !result.ExprHasPackedStoreProvenance(afterFreezeExpr) || !result.ExprDependsOnFrozenPackedStores(afterFreezeExpr) || result.ExprDependsOnNonFrozenPackedStores(afterFreezeExpr) || result.ExprHasMixedPackedStoreProvenance(afterFreezeExpr) {
 		t.Fatalf("expected post-freeze value to expose frozen-only packed-store helper results")
 	}
+	if !result.ExprHasOnlyFrozenPackedStoreDeps(afterFreezeExpr) {
+		t.Fatalf("expected post-freeze value to report frozen-store-only packed-store deps")
+	}
 	if !result.ExprDependsOnlyOnFrozenPackedStores(afterFreezeExpr) {
 		t.Fatalf("expected result query to report frozen-store-only provenance for direct values")
+	}
+	if !afterFreezeProvenance.HasOnlyFrozenPackedStoreDeps() {
+		t.Fatalf("expected post-freeze direct value to report frozen-store-only packed-store deps, got %#v", afterFreezeProvenance)
 	}
 	if !wrappedAfterFreezeFacts.FrozenPackedStoreOnly {
 		t.Fatalf("expected helper-return aggregate to inherit frozen-store-only provenance, got %#v", wrappedAfterFreezeFacts)
@@ -658,8 +670,14 @@ def inspect(owner: Arena) -> int:
 	if !result.ExprHasPackedStoreProvenance(heldAfterFreezeExpr) || !result.ExprDependsOnFrozenPackedStores(heldAfterFreezeExpr) || result.ExprDependsOnNonFrozenPackedStores(heldAfterFreezeExpr) || !result.ExprHasMixedPackedStoreProvenance(heldAfterFreezeExpr) {
 		t.Fatalf("expected held value to expose mixed packed-store helper results")
 	}
+	if !result.ExprHasOnlyFrozenPackedStoreDeps(heldAfterFreezeExpr) {
+		t.Fatalf("expected held value to report frozen-only packed-store deps even with mixed non-store provenance")
+	}
 	if result.ExprDependsOnlyOnFrozenPackedStores(heldAfterFreezeExpr) {
 		t.Fatalf("expected result query to reject mixed local-region and frozen-store provenance")
+	}
+	if !heldAfterFreezeProvenance.HasOnlyFrozenPackedStoreDeps() {
+		t.Fatalf("expected held value to report frozen-only packed-store deps even with mixed non-store provenance, got %#v", heldAfterFreezeProvenance)
 	}
 	if result.ExprHasPackedStoreProvenance(localRefExpr) {
 		t.Fatalf("expected local region reference without packed-store deps to be excluded from packed-store provenance query")
@@ -783,6 +801,71 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	}
 	if !result.ExprDependsOnlyOnFrozenPackedStores(childExpr) {
 		t.Fatalf("expected result query to report frozen-store-only provenance for packed child payload recovered through match")
+	}
+}
+
+func TestAnalyzePreservesMixedFrozenPackedStoreDepsThroughPackedMatchBinders(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Hold(value: any i32&)
+	Wrap(child: Expr)
+
+def inspect(owner: Arena) -> int:
+	region scratch(1024u)
+	store: Expr.Store[Local] = Expr.Store(owner)
+	local_ref: scratch i32& = new[scratch] 7i32
+	held: Expr = new[store] Expr.Hold(span: 5, value: local_ref)
+	node: Expr = new[store] Expr.Wrap(span: 9, child: held)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	match node in frozen:
+		Expr.Wrap(child: child_alias):
+			child_copy: Expr = child_alias
+			_ = frozen
+			_ = child_copy
+			return child_copy.span
+		Expr.Int(value: _):
+			return 0
+		Expr.Hold(value: _):
+			return 1
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_match_mixed_child.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	childExpr := requireOptimizationFactsVarInitExpr(t, fn, "child_copy")
+
+	childFacts := requireExprOptimizationFacts(t, result, childExpr)
+	childProvenance := requireExprPackedStoreProvenance(t, result, childExpr)
+
+	if childFacts.FrozenPackedStoreOnly {
+		t.Fatalf("expected packed child payload recovered through frozen match to retain mixed non-store provenance, got %#v", childFacts)
+	}
+	if !childProvenance.HasPackedStoreDeps || !childProvenance.HasFrozenPackedStoreDeps || childProvenance.HasNonFrozenPackedStoreDeps {
+		t.Fatalf("expected packed child payload recovered through frozen match to keep only frozen packed-store deps, got %#v", childProvenance)
+	}
+	if !childProvenance.HasMixedProvenance() {
+		t.Fatalf("expected packed child payload recovered through frozen match to keep mixed non-store provenance, got %#v", childProvenance)
+	}
+	if !childProvenance.HasOnlyFrozenPackedStoreDeps() {
+		t.Fatalf("expected packed child payload recovered through frozen match to keep frozen-only packed-store deps despite mixed provenance, got %#v", childProvenance)
+	}
+	if childProvenance.DependsOnlyOnFrozenPackedStores() {
+		t.Fatalf("expected packed child payload recovered through frozen match to reject pure frozen-only provenance, got %#v", childProvenance)
+	}
+	if !result.ExprHasPackedStoreProvenance(childExpr) || !result.ExprDependsOnFrozenPackedStores(childExpr) || result.ExprDependsOnNonFrozenPackedStores(childExpr) {
+		t.Fatalf("expected packed child payload recovered through frozen match to expose frozen-only packed-store helper results")
+	}
+	if !result.ExprHasMixedPackedStoreProvenance(childExpr) {
+		t.Fatalf("expected packed child payload recovered through frozen match to report mixed packed-store provenance")
+	}
+	if !result.ExprHasOnlyFrozenPackedStoreDeps(childExpr) {
+		t.Fatalf("expected packed child payload recovered through frozen match to report frozen-only packed-store deps")
+	}
+	if result.ExprDependsOnlyOnFrozenPackedStores(childExpr) {
+		t.Fatalf("expected packed child payload recovered through frozen match to reject strict frozen-only provenance query")
 	}
 }
 

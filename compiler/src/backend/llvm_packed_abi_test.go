@@ -219,6 +219,46 @@ def fold_frozen() -> int:
 	}
 }
 
+func TestGenerateLLVMIRUsesSingleDecodeForMixedFrozenPackedPayloadMatch(t *testing.T) {
+	src := `packed enum Expr:
+	Hold(value: any i32&)
+	End
+
+def fold_frozen_mixed() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	local_ref: scratch i32& = new[scratch] 7i32
+	node: Expr = new[store] Expr.Hold(value: local_ref)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	return match node in frozen:
+		Expr.Hold(value):
+			1
+		Expr.End:
+			0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_mixed_payload_decode.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
+	if decodeCalls != 1 {
+		t.Fatalf("expected mixed frozen packed payload match to use a single eager decode, got %d decode calls:\n%s", decodeCalls, output)
+	}
+	if strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
+		t.Fatalf("expected mixed frozen packed payload match to avoid ctx_packed_store_read_tag after eager decode, got:\n%s", output)
+	}
+	if strings.Contains(output, "call i64 @ctx_packed_store_read_word(") {
+		t.Fatalf("expected mixed frozen packed payload match to avoid ctx_packed_store_read_word after eager decode, got:\n%s", output)
+	}
+	for _, check := range []string{"packed.decode.store.arena", "packed.decode.store.state"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected mixed frozen packed payload eager decode to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRUsesWordReadHelperForRepeatedCommonFieldReads(t *testing.T) {
 	src := `packed enum Expr:
 	common:
@@ -301,6 +341,176 @@ def fold_common_frozen() -> int:
 	stateExtracts := strings.Count(output, "packed.decode.store.state = extractvalue %Expr__Store")
 	if stateExtracts != 1 {
 		t.Fatalf("expected repeated frozen packed common-field reads in one block to reuse a single decode state extractvalue, got %d extracts:\n%s", stateExtracts, output)
+	}
+}
+
+func TestGenerateLLVMIRUsesSingleDecodeForFrozenRepeatedCommonFieldReadsOutsideCheckpoint(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Lit(value: int)
+
+def fold_common_frozen_direct() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	return node.span + node.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_field_cache_direct.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
+	if decodeCalls != 1 {
+		t.Fatalf("expected direct repeated frozen packed common-field reads outside an explicit frozen checkpoint to decode once, got %d decode calls:\n%s", decodeCalls, output)
+	}
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_word(")
+	if readCalls != 0 {
+		t.Fatalf("expected direct repeated frozen packed common-field reads outside an explicit frozen checkpoint to avoid ctx_packed_store_read_word after decode, got %d helper calls:\n%s", readCalls, output)
+	}
+	for _, check := range []string{"packed.decode.store.arena", "packed.decode.store.state"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	arenaExtracts := strings.Count(output, "packed.decode.store.arena = extractvalue %Expr__Store")
+	if arenaExtracts != 1 {
+		t.Fatalf("expected direct repeated frozen packed common-field reads outside an explicit frozen checkpoint to reuse a single decode arena extractvalue, got %d extracts:\n%s", arenaExtracts, output)
+	}
+	stateExtracts := strings.Count(output, "packed.decode.store.state = extractvalue %Expr__Store")
+	if stateExtracts != 1 {
+		t.Fatalf("expected direct repeated frozen packed common-field reads outside an explicit frozen checkpoint to reuse a single decode state extractvalue, got %d extracts:\n%s", stateExtracts, output)
+	}
+}
+
+func TestGenerateLLVMIRUsesSingleDecodeForMixedFrozenRepeatedCommonFieldReads(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Hold(value: any i32&)
+	End
+
+def fold_common_frozen_mixed() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	local_ref: scratch i32& = new[scratch] 7i32
+	node: Expr = new[store] Expr.Hold(span: 7, value: local_ref)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	in frozen:
+		return node.span + node.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_mixed_field_cache.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
+	if decodeCalls != 1 {
+		t.Fatalf("expected repeated mixed frozen packed common-field reads to decode once, got %d decode calls:\n%s", decodeCalls, output)
+	}
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_word(")
+	if readCalls != 0 {
+		t.Fatalf("expected repeated mixed frozen packed common-field reads to avoid ctx_packed_store_read_word after decode, got %d helper calls:\n%s", readCalls, output)
+	}
+	for _, check := range []string{"packed.decode.store.arena", "packed.decode.store.state"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	arenaExtracts := strings.Count(output, "packed.decode.store.arena = extractvalue %Expr__Store")
+	if arenaExtracts != 1 {
+		t.Fatalf("expected repeated mixed frozen packed common-field reads in one block to reuse a single decode arena extractvalue, got %d extracts:\n%s", arenaExtracts, output)
+	}
+	stateExtracts := strings.Count(output, "packed.decode.store.state = extractvalue %Expr__Store")
+	if stateExtracts != 1 {
+		t.Fatalf("expected repeated mixed frozen packed common-field reads in one block to reuse a single decode state extractvalue, got %d extracts:\n%s", stateExtracts, output)
+	}
+}
+
+func TestGenerateLLVMIRUsesSingleDecodeForMixedFrozenMatchedPayloadRepeatedCommonFieldReads(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Hold(value: any i32&)
+	Wrap(child: Expr)
+
+def fold_child_common_frozen_mixed() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	local_ref: scratch i32& = new[scratch] 7i32
+	held: Expr = new[store] Expr.Hold(span: 5, value: local_ref)
+	node: Expr = new[store] Expr.Wrap(span: 9, child: held)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	return match node in frozen:
+		Expr.Wrap(child: child_alias):
+			child_alias.span + child_alias.span
+		Expr.Int(value: _):
+			0
+		Expr.Hold(value: _):
+			1
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_mixed_matched_payload_field_cache.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
+	if decodeCalls != 2 {
+		t.Fatalf("expected frozen outer match plus repeated mixed child common-field reads to use exactly two decodes, got %d decode calls:\n%s", decodeCalls, output)
+	}
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_word(")
+	if readCalls != 0 {
+		t.Fatalf("expected repeated mixed child common-field reads recovered through frozen match to avoid ctx_packed_store_read_word after decode, got %d helper calls:\n%s", readCalls, output)
+	}
+	if strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
+		t.Fatalf("expected frozen outer match plus mixed child common-field reads to avoid ctx_packed_store_read_tag after eager decode, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRUsesSingleDecodeForFrozenPayloadlessPackedMatchWithMatchedValueFieldReads(t *testing.T) {
+	src := `packed enum Flag:
+	common:
+		span: int
+	Yes
+	No
+
+def choose() -> int:
+	region scratch(256u)
+	store: Flag.Store[Local] = Flag.Store(scratch)
+	node: Flag = new[store] Flag.Yes(span: 7)
+	frozen: Flag.Store[Frozen] = freeze(move store)
+	return match node in frozen:
+		Flag.Yes:
+			node.span + node.span
+		Flag.No:
+			0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_payloadless_match_fields.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
+	if decodeCalls != 1 {
+		t.Fatalf("expected frozen payloadless packed match with matched-value field reads to use a single decode, got %d decode calls:\n%s", decodeCalls, output)
+	}
+	if strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
+		t.Fatalf("expected frozen payloadless packed match with matched-value field reads to avoid ctx_packed_store_read_tag after eager decode, got:\n%s", output)
+	}
+	if strings.Contains(output, "call i64 @ctx_packed_store_read_word(") {
+		t.Fatalf("expected frozen payloadless packed match with matched-value field reads to avoid ctx_packed_store_read_word after eager decode, got:\n%s", output)
+	}
+	for _, check := range []string{"packed.decode.store.arena", "packed.decode.store.state"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
 	}
 }
 

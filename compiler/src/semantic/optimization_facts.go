@@ -56,6 +56,10 @@ func (p PackedStoreProvenance) DependsOnNonFrozenPackedStores() bool {
 	return p.HasNonFrozenPackedStoreDeps
 }
 
+func (p PackedStoreProvenance) HasOnlyFrozenPackedStoreDeps() bool {
+	return p.HasPackedStoreDeps && p.HasFrozenPackedStoreDeps && !p.HasNonFrozenPackedStoreDeps
+}
+
 func (p PackedStoreProvenance) DependsOnlyOnFrozenPackedStores() bool {
 	return p.HasPackedStoreDeps && p.HasFrozenPackedStoreDeps && !p.HasNonFrozenPackedStoreDeps && !p.HasNonStoreProvenance
 }
@@ -969,6 +973,17 @@ func (r *Result) ExprDependsOnNonFrozenPackedStores(expr ast.Expr) bool {
 		return false
 	}
 	return provenance.DependsOnNonFrozenPackedStores()
+}
+
+func (r *Result) ExprHasOnlyFrozenPackedStoreDeps(expr ast.Expr) bool {
+	if r == nil {
+		return false
+	}
+	provenance, ok := r.ExprPackedStoreProvenance(expr)
+	if !ok {
+		return false
+	}
+	return provenance.HasOnlyFrozenPackedStoreDeps()
 }
 
 func (r *Result) ExprHasMixedPackedStoreProvenance(expr ast.Expr) bool {

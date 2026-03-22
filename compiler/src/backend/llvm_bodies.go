@@ -1496,17 +1496,22 @@ func packedMatchNeedsEagerDecode(arms []ast.MatchArm) bool {
 }
 
 func packedMatchShouldEagerDecode(result *semantic.Result, matchValue ast.Expr, arms []ast.MatchArm) bool {
-	if !packedMatchNeedsEagerDecode(arms) {
+	needsPayloadDecode := packedMatchNeedsEagerDecode(arms)
+	ident, ok := matchValue.(*ast.Ident)
+	readsMatchedValueField := ok && matchArmsReadMatchedValueField(ident.Name, arms)
+	if !needsPayloadDecode && !readsMatchedValueField {
 		return false
 	}
-	if result != nil && result.ExprDependsOnlyOnFrozenPackedStores(matchValue) {
+	if result != nil && result.ExprHasOnlyFrozenPackedStoreDeps(matchValue) {
 		return true
 	}
-	ident, ok := matchValue.(*ast.Ident)
+	if !needsPayloadDecode {
+		return false
+	}
 	if !ok {
 		return false
 	}
-	return matchArmsReadMatchedValueField(ident.Name, arms)
+	return readsMatchedValueField
 }
 
 func matchArmsReadMatchedValueField(name string, arms []ast.MatchArm) bool {
