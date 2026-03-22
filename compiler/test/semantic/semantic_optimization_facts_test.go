@@ -877,6 +877,114 @@ def inspect(owner: Arena) -> int error[ProbeError]:
 	}
 }
 
+func TestAnalyzePreservesFrozenPackedStoreProvenanceThroughTernaryExpressions(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+	Hold(value: any i32&)
+
+def inspect(owner: Arena, pick_left: bool) -> int:
+	region scratch(1024u)
+	store: Expr.Store[Local] = Expr.Store(owner)
+	left_node: Expr = new[store] Expr.Int(value: 1)
+	right_node: Expr = new[store] Expr.Int(value: 2)
+	local_ref: scratch i32& = new[scratch] 7i32
+	held: Expr = new[store] Expr.Hold(value: local_ref)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	left_after_freeze: Expr = left_node
+	right_after_freeze: Expr = right_node
+	held_after_freeze: Expr = held
+	pure_choice: Expr = left_after_freeze if pick_left else right_after_freeze
+	mixed_choice: Expr = left_after_freeze if pick_left else held_after_freeze
+	_ = frozen
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_ternary_frozen_packed_provenance.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	pureChoiceExpr := requireOptimizationFactsVarInitExpr(t, fn, "pure_choice")
+	mixedChoiceExpr := requireOptimizationFactsVarInitExpr(t, fn, "mixed_choice")
+
+	pureChoiceFacts := requireExprOptimizationFacts(t, result, pureChoiceExpr)
+	mixedChoiceFacts := requireExprOptimizationFacts(t, result, mixedChoiceExpr)
+	pureChoiceProvenance := requireExprPackedStoreProvenance(t, result, pureChoiceExpr)
+	mixedChoiceProvenance := requireExprPackedStoreProvenance(t, result, mixedChoiceExpr)
+
+	if !pureChoiceFacts.FrozenPackedStoreOnly {
+		t.Fatalf("expected ternary over frozen-only packed values to stay frozen-store-only, got %#v", pureChoiceFacts)
+	}
+	if !pureChoiceProvenance.DependsOnlyOnFrozenPackedStores() || pureChoiceProvenance.HasMixedProvenance() {
+		t.Fatalf("expected ternary over frozen-only packed values to expose pure frozen packed-store provenance, got %#v", pureChoiceProvenance)
+	}
+	if !result.ExprHasPackedStoreProvenance(pureChoiceExpr) || !result.ExprDependsOnFrozenPackedStores(pureChoiceExpr) || result.ExprDependsOnNonFrozenPackedStores(pureChoiceExpr) || result.ExprHasMixedPackedStoreProvenance(pureChoiceExpr) {
+		t.Fatalf("expected ternary over frozen-only packed values to expose frozen-only packed-store helper results")
+	}
+	if !result.ExprDependsOnlyOnFrozenPackedStores(pureChoiceExpr) {
+		t.Fatalf("expected ternary over frozen-only packed values to report frozen-store-only provenance")
+	}
+
+	if mixedChoiceFacts.FrozenPackedStoreOnly {
+		t.Fatalf("expected ternary with mixed fallback to retain mixed provenance, got %#v", mixedChoiceFacts)
+	}
+	if !mixedChoiceProvenance.HasPackedStoreDeps || !mixedChoiceProvenance.HasFrozenPackedStoreDeps || mixedChoiceProvenance.HasNonFrozenPackedStoreDeps {
+		t.Fatalf("expected ternary with mixed fallback to keep only frozen packed-store deps, got %#v", mixedChoiceProvenance)
+	}
+	if !mixedChoiceProvenance.HasMixedProvenance() {
+		t.Fatalf("expected ternary with mixed fallback to report mixed non-store provenance, got %#v", mixedChoiceProvenance)
+	}
+	if !mixedChoiceProvenance.HasOnlyFrozenPackedStoreDeps() {
+		t.Fatalf("expected ternary with mixed fallback to keep frozen-only packed-store deps despite mixed provenance, got %#v", mixedChoiceProvenance)
+	}
+	if mixedChoiceProvenance.DependsOnlyOnFrozenPackedStores() {
+		t.Fatalf("expected ternary with mixed fallback to reject strict frozen-only provenance, got %#v", mixedChoiceProvenance)
+	}
+	if !result.ExprHasPackedStoreProvenance(mixedChoiceExpr) || !result.ExprDependsOnFrozenPackedStores(mixedChoiceExpr) || result.ExprDependsOnNonFrozenPackedStores(mixedChoiceExpr) {
+		t.Fatalf("expected ternary with mixed fallback to expose frozen-only packed-store helper results")
+	}
+	if !result.ExprHasMixedPackedStoreProvenance(mixedChoiceExpr) {
+		t.Fatalf("expected ternary with mixed fallback to report mixed packed-store provenance")
+	}
+	if !result.ExprHasOnlyFrozenPackedStoreDeps(mixedChoiceExpr) {
+		t.Fatalf("expected ternary with mixed fallback to report frozen-only packed-store deps")
+	}
+	if result.ExprDependsOnlyOnFrozenPackedStores(mixedChoiceExpr) {
+		t.Fatalf("expected ternary with mixed fallback to reject strict frozen-only provenance query")
+	}
+}
+
+func TestAnalyzePreservesShapeExtentFactsThroughTernaryExpressions(t *testing.T) {
+	src := `def inspect(left: darray[i32, row], right: darray[i32, row], pick_left: bool) -> int:
+	left_copy: darray[i32, row] = left
+	right_copy: darray[i32, row] = right
+	choice: darray[i32, row] = left if pick_left else right
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_ternary_shape_extent.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	leftExpr := requireOptimizationFactsVarInitExpr(t, fn, "left_copy")
+	rightExpr := requireOptimizationFactsVarInitExpr(t, fn, "right_copy")
+	choiceExpr := requireOptimizationFactsVarInitExpr(t, fn, "choice")
+
+	choiceFacts := requireExprOptimizationFacts(t, result, choiceExpr)
+
+	if !choiceFacts.Contiguous || !choiceFacts.UnitStride {
+		t.Fatalf("expected ternary over row-shaped darray values to retain contiguous unit-stride facts, got %#v", choiceFacts)
+	}
+	if !choiceFacts.HasExactExtent() {
+		t.Fatalf("expected ternary over row-shaped darray values to retain exact shape extent, got %#v", choiceFacts)
+	}
+	if !result.ExprSupportsDenseWrite(choiceExpr) {
+		t.Fatalf("expected ternary over writable row-shaped darray values to support dense write helpers")
+	}
+	if !result.ExprsHaveSameExtent(choiceExpr, leftExpr) || !result.ExprsHaveSameExtent(choiceExpr, rightExpr) {
+		t.Fatalf("expected ternary over same-shape darray values to preserve exact extent identity")
+	}
+}
+
 func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedMoveAsDestructure(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)

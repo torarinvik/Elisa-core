@@ -361,6 +361,8 @@ func (a *Analyzer) inferExprOptimizationFacts(expr ast.Expr, t Type) Optimizatio
 				facts.Extent = cloneOptimizationExtent(objectFacts.Extent)
 			}
 		}
+	case *ast.TernaryExpr:
+		facts = a.inferRecoveredExprOptimizationFacts(n.Value, n.Alt, facts)
 	case *ast.TryExpr:
 		facts = a.inferRecoveredExprOptimizationFacts(n.Value, n.Fallback, facts)
 	case *ast.UnwrapElseExpr:
@@ -722,6 +724,8 @@ func (a *Analyzer) optimizationBaseForExpr(expr ast.Expr) string {
 		return a.optimizationBaseForExpr(n.Operand)
 	case *ast.CanExpr:
 		return a.optimizationBaseForExpr(n.Expr)
+	case *ast.TernaryExpr:
+		return a.sharedOptimizationBaseForExprs(n.Value, n.Alt)
 	case *ast.TryExpr:
 		if n.Fallback == nil || a.exprDefinitelyNever(n.Fallback) {
 			return a.optimizationBaseForExpr(n.Value)
