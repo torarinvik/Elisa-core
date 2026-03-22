@@ -405,34 +405,81 @@ func (p *Parser) parsePanic() *ast.PanicStmt {
 	return &ast.PanicStmt{Position: pos, Message: msg}
 }
 
-func (p *Parser) parseIf() *ast.IfStmt {
-	pos := p.cur().Pos
-	p.expect(lexer.TOKEN_IF)
-	cond := p.parseExpr()
-	p.expect(lexer.TOKEN_COLON)
-	p.expectNewline()
-	thenBlock := p.parseBlock()
+type ifClause struct {
+	Position lexer.Pos
+	Cond     ast.Expr
+	Value    ast.Expr
+	Store    ast.Expr
+	Pattern  ast.MatchPattern
+	Body     []ast.Stmt
+}
 
-	var elifs []ast.ElifClause
-	var elseBlock []ast.Stmt
+func (p *Parser) parseIf() ast.Stmt {
+	p.expect(lexer.TOKEN_IF)
+	first := p.parseIfClause(false)
+	clauses := []ifClause{first}
 
 	for p.peek() == lexer.TOKEN_ELIF {
-		elifPos := p.cur().Pos
 		p.advance()
-		elifCond := p.parseExpr()
-		p.expect(lexer.TOKEN_COLON)
-		p.expectNewline()
-		elifBody := p.parseBlock()
-		elifs = append(elifs, ast.ElifClause{Position: elifPos, Cond: elifCond, Body: elifBody})
+		clauses = append(clauses, p.parseIfClause(true))
 	}
 
+	var elseBlock []ast.Stmt
 	if p.match(lexer.TOKEN_ELSE) {
 		p.expect(lexer.TOKEN_COLON)
 		p.expectNewline()
 		elseBlock = p.parseBlock()
 	}
 
-	return &ast.IfStmt{Position: pos, Cond: cond, Then: thenBlock, Elifs: elifs, Else: elseBlock}
+	return lowerIfClauses(clauses, elseBlock)
+}
+
+func (p *Parser) parseIfClause(isElif bool) ifClause {
+	pos := p.cur().Pos
+	head := p.parseExpr()
+	if p.match(lexer.TOKEN_IN) {
+		store := p.parseExpr()
+		if p.match(lexer.TOKEN_AS) {
+			pattern := p.parseMatchPattern()
+			p.expect(lexer.TOKEN_COLON)
+			p.expectNewline()
+			body := p.parseBlock()
+			return ifClause{Position: pos, Value: head, Store: store, Pattern: pattern, Body: body}
+		}
+		if isElif {
+			p.errorf("elif pattern binder requires `as Enum.Variant(...)` after store expression")
+		} else {
+			p.errorf("if pattern binder requires `as Enum.Variant(...)` after store expression")
+		}
+	}
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	body := p.parseBlock()
+	return ifClause{Position: pos, Cond: head, Body: body}
+}
+
+func lowerIfClauses(clauses []ifClause, elseBlock []ast.Stmt) ast.Stmt {
+	tail := elseBlock
+	for i := len(clauses) - 1; i >= 0; i-- {
+		clause := clauses[i]
+		if clause.Pattern != nil {
+			tail = []ast.Stmt{&ast.MatchStmt{
+				Position: clause.Position,
+				Value:    clause.Value,
+				Store:    clause.Store,
+				Arms: []ast.MatchArm{
+					{Position: clause.Pattern.Pos(), Pattern: clause.Pattern, Body: clause.Body},
+					{Position: clause.Position, Pattern: &ast.MatchWildcardPattern{Position: clause.Position}, Body: tail},
+				},
+			}}
+			continue
+		}
+		tail = []ast.Stmt{&ast.IfStmt{Position: clause.Position, Cond: clause.Cond, Then: clause.Body, Else: tail}}
+	}
+	if len(tail) == 0 {
+		return &ast.PassStmt{}
+	}
+	return tail[0]
 }
 
 func (p *Parser) parseWhile() *ast.WhileStmt {

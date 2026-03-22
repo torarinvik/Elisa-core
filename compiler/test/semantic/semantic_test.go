@@ -4689,6 +4689,63 @@ def build(store_owner: Arena) -> Expr:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsPackedEnumIfPatternBinder(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def fold(node: Expr, store: Expr.Store[Local]) -> int:
+	if node in store as Expr.Int(value: value):
+		return value + node.span
+	else:
+		return 0
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_binder_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsPackedEnumIfPatternBinderWithElif(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def classify(flag: bool, node: Expr, store: Expr.Store[Local]) -> int:
+	if node in store as Expr.Int(value: value):
+		return value + node.span
+	elif flag:
+		return 7
+	else:
+		return 9
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_binder_elif_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsPackedEnumIfPatternBinderWithoutAs(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+def bad(flag: bool, node: Expr, store: Expr.Store[Local]) -> int:
+	if node in store:
+		return 1
+	elif flag:
+		return 2
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_binder_missing_as_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatalf("expected missing `as` parse diagnostic")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "if pattern binder requires `as Enum.Variant(...)` after store expression") {
+		t.Fatalf("expected missing `as` diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeAcceptsPayloadlessPackedCommonFieldInitialization(t *testing.T) {
 	src := `packed enum Token:
 	common:
