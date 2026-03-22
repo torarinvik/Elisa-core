@@ -3259,6 +3259,9 @@ func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMVa
 	if !ok {
 		return nil, nil, false, nil
 	}
+	if s.g != nil && s.g.result != nil && s.g.result.ExprDependsOnlyOnFrozenPackedStores(expr.Object) {
+		return nil, nil, false, nil
+	}
 	fieldWordOffset, ok, err := s.packedEnumDirectWordFieldOffset(enumType, fieldIndex, fieldType)
 	if err != nil {
 		return nil, nil, true, err
