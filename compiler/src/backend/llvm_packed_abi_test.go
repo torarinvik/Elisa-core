@@ -1276,3 +1276,68 @@ def fold_view() -> int:
 		}
 	}
 }
+
+func TestGenerateLLVMIRLowersPackedStoreCountAndIndexForWordHandle(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def walk(owner: Arena) -> int:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		left: Expr = new Expr.Int(span: 1, value: 3)
+		right: Expr = new Expr.Int(span: 2, value: 4)
+		_ = new Expr.Add(span: 3, left: left, right: right)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	total: mutable int = 0
+	index: mutable usize = 0u
+	while index < frozen.count:
+		node: Expr = frozen[index]
+		if node in frozen as Expr.Int(value: value):
+			total <- total + value + node.span
+		index <- index + 1u
+	return total
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_store_count_index_word.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	for _, check := range []string{"call i64 @ctx_packed_store_count(", "call i64 @ctx_packed_store_word_handle_at(", "packed.store.count.state", "packed.store.index.state"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersPackedStoreCountAndIndexForRowHandle(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+def first(owner: Arena) -> int:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		_ = new Expr.Int(value: 7)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	node: Expr = frozen[0u]
+	match node in frozen:
+		Expr.Int(value: value):
+			if frozen.count > 0u:
+				return value
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_store_count_index_row.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIRowHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	for _, check := range []string{"call void @ctx_packed_store_record_row_ptr(", "call i64 @ctx_packed_store_count(", "call ptr @ctx_packed_store_row_ptr_at("} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}

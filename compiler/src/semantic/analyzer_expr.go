@@ -2783,6 +2783,11 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		a.reportBorrowedOwnerRefUseAfterConsume(expr, view.Elem)
 		return view.Elem
 	}
+	if storeType, ok := objType.(*PackedEnumStoreType); ok && storeType.Enum != nil {
+		a.reportInvalidRegionUse(expr, storeType.Enum)
+		a.reportBorrowedOwnerRefUseAfterConsume(expr, storeType.Enum)
+		return storeType.Enum
+	}
 	if _, ok := objType.(*DStrType); ok {
 		result := a.namedTypes["char"]
 		a.reportInvalidRegionUse(expr, result)
@@ -2827,6 +2832,11 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 			a.reportBorrowedOwnerRefUseAfterConsume(expr, view.Elem)
 			return view.Elem
 		}
+		if storeType, ok := ref.Elem.(*PackedEnumStoreType); ok && storeType.Enum != nil {
+			a.reportInvalidRegionUse(expr, storeType.Enum)
+			a.reportBorrowedOwnerRefUseAfterConsume(expr, storeType.Enum)
+			return storeType.Enum
+		}
 		if _, ok := ref.Elem.(*DStrType); ok {
 			result := a.namedTypes["char"]
 			a.reportInvalidRegionUse(expr, result)
@@ -2843,7 +2853,7 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		a.reportBorrowedOwnerRefUseAfterConsume(expr, ref.Elem)
 		return ref.Elem
 	}
-	a.errorf(expr.Pos(), "indexing requires string, array, view, or reference type, got %s", objType.String())
+	a.errorf(expr.Pos(), "indexing requires string, array, view, packed store, or reference type, got %s", objType.String())
 	return invalidType
 }
 
@@ -3393,6 +3403,9 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 		objType = ref.Elem
 	}
 	objType = StripAggregateStateType(objType)
+	if field, ok := packedStoreSyntheticField(objType, fieldName); ok {
+		return field, true
+	}
 	if viewType, ok := objType.(*PackedVariantViewType); ok {
 		field, ok := viewType.Field(fieldName)
 		if !ok {
@@ -3475,6 +3488,9 @@ func (a *Analyzer) runtimeBackedStructType(t Type) Type {
 }
 
 func valueOnlyIndexKind(t Type) (string, bool) {
+	if _, ok := t.(*PackedEnumStoreType); ok {
+		return "packed store index result", true
+	}
 	if _, ok := t.(*DStrType); ok {
 		return "string index", true
 	}
@@ -3487,6 +3503,9 @@ func valueOnlyIndexKind(t Type) (string, bool) {
 	ref, ok := t.(*RefType)
 	if !ok {
 		return "", false
+	}
+	if _, ok := ref.Elem.(*PackedEnumStoreType); ok {
+		return "packed store index result", true
 	}
 	if _, ok := ref.Elem.(*DStrType); ok {
 		return "string index", true
@@ -3533,8 +3552,22 @@ func dstrSyntheticField(t Type, fieldName string) (Field, bool) {
 	return Field{}, false
 }
 
+func packedStoreSyntheticField(t Type, fieldName string) (Field, bool) {
+	if fieldName != "count" {
+		return Field{}, false
+	}
+	if _, ok := t.(*PackedEnumStoreType); ok {
+		return Field{Name: "count", Type: builtinUsizeType(), Mutable: false}, true
+	}
+	return Field{}, false
+}
+
 func builtinI64Type() Type {
 	return &BuiltinType{Name: "i64"}
+}
+
+func builtinUsizeType() Type {
+	return &BuiltinType{Name: "usize"}
 }
 
 type runtimeStringKind int

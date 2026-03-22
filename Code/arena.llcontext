@@ -56,6 +56,7 @@ struct PackedStoreState:
     decode_region_index: mutable usize
     tail_region: mutable heap Region&?
     regions: mutable darray[heap Region&?]
+    handles: mutable darray[uintptr]
     row_words: mutable usize
     preferred_region_capacity: mutable usize
 
@@ -357,6 +358,13 @@ def packed_store_region_data(r: heap Region&) -> heap u8&:
 def packed_store_region_table(state: any PackedStoreState&) -> any darray[heap Region&?]&:
     return (&state.regions).cast[any darray[heap Region&?]&]()
 
+def packed_store_handle_table(state: any PackedStoreState&) -> any darray[uintptr]&:
+    return (&state.handles).cast[any darray[uintptr]&]()
+
+def packed_store_append_handle(a: any Arena&, state: any PackedStoreState&, handle: uintptr) can[Memory.Allocate, Abort.Panic]:
+    handles: any darray[uintptr]& = packed_store_handle_table(state)
+    _ = arena_da_append(a, handles, handle)
+
 def packed_store_register_region(a: any Arena&, state: any PackedStoreState&, r: heap Region&?, global_index: usize) can[Memory.Allocate, Abort.Panic]:
     assert r != null
 
@@ -393,6 +401,7 @@ def ctx_packed_store_state_new(a: any Arena&, row_bytes: usize) -> heap void& ca
     state.decode_region_index <- 0
     state.tail_region <- null
     state.regions <- zeroed
+    state.handles <- zeroed
     state.row_words <- row_words
     state.preferred_region_capacity <- preferred_region_capacity
     return state.cast[heap void&]()
@@ -535,6 +544,7 @@ def ctx_packed_store_alloc_fixed_result(a: any Arena&, state_bits: any void&) ->
 
     offset_words: uintptr = offset_bytes / sizeof(uintptr).uintptr()
     handle: uintptr = (state.alloc_region_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
+    packed_store_append_handle(a, state, handle)
     return PackedStoreAllocResult(ptr, handle)
 
 def ctx_packed_store_alloc_result(a: any Arena&, size_bytes: usize, state_bits: any void&) -> PackedStoreAllocResult can[Memory.Allocate, Abort.Panic]:
@@ -571,7 +581,29 @@ def ctx_packed_store_alloc_result(a: any Arena&, size_bytes: usize, state_bits: 
 
     offset_words: uintptr = offset_bytes / sizeof(uintptr).uintptr()
     handle: uintptr = (state.alloc_region_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
+    packed_store_append_handle(a, state, handle)
     return PackedStoreAllocResult(ptr, handle)
+
+def ctx_packed_store_count(state_bits: any void&) -> usize:
+    assert state_bits != null
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    return state.handles.count
+
+def ctx_packed_store_word_handle_at(state_bits: any void&, index: usize) -> uintptr:
+    assert state_bits != null
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    assert state.handles.items != null
+    assert index < state.handles.count
+    return state.handles.items[index]
+
+def ctx_packed_store_row_ptr_at(state_bits: any void&, index: usize) -> any void&:
+    handle: uintptr = ctx_packed_store_word_handle_at(state_bits, index)
+    assert handle != 0u64.uintptr()
+    return handle.cast[any u8&]().cast[any void&]()
+
+def ctx_packed_store_record_row_ptr(a: any Arena&, row: any void&, state_bits: any void&) can[Memory.Allocate, Abort.Panic]:
+    assert state_bits != null
+    packed_store_append_handle(a, state_bits.cast[any PackedStoreState&](), row.cast[any u8&]().uintptr())
 
 def ctx_packed_store_alloc(a: any Arena&, size_bytes: usize, state_bits: any void&) -> uintptr can[Memory.Allocate, Abort.Panic]:
     result: PackedStoreAllocResult = ctx_packed_store_alloc_result(a, size_bytes, state_bits)

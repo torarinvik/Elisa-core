@@ -2216,8 +2216,10 @@ def fold() -> int:
 		"%Expr = type { i32, i64, [2 x i64] }",
 		"define i64 @fold()",
 		"call ptr @new_region(i64 1024)",
+		"call ptr @ctx_packed_store_state_new(ptr",
 		"call ptr @arena_alloc(ptr",
-		"store %Expr { i32 1, i64 3, [2 x i64] zeroinitializer }, ptr %packed.alloc4",
+		"call void @ctx_packed_store_record_row_ptr(ptr",
+		"store %Expr { i32 1, i64 3, [2 x i64] zeroinitializer }, ptr %packed.alloc",
 		"load i32, ptr",
 	}
 	for _, check := range checks {

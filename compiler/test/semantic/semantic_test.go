@@ -4746,6 +4746,53 @@ def bad(flag: bool, node: Expr, store: Expr.Store[Local]) -> int:
 	}
 }
 
+func TestAnalyzeAcceptsPackedStoreCountAndIndexTraversal(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def walk(owner: Arena) -> int:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		left: Expr = new Expr.Int(span: 1, value: 3)
+		right: Expr = new Expr.Int(span: 2, value: 4)
+		_ = new Expr.Add(span: 3, left: left, right: right)
+
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	total: mutable int = 0
+	index: mutable usize = 0u
+	while index < frozen.count:
+		node: Expr = frozen[index]
+		if node in frozen as Expr.Int(value: value):
+			total <- total + value + node.span
+		index <- index + 1u
+	return total
+`
+	result, errs := parseAndAnalyze(t, "packed_store_count_and_index_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "walk", "int")
+}
+
+func TestAnalyzeRejectsAssigningPackedStoreIndexResult(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+def bad(store: Expr.Store[Frozen], node: Expr) -> void:
+	store[0u] <- node
+`
+	_, errs := parseAndAnalyze(t, "packed_store_index_assign_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "cannot assign to packed store index result") {
+		t.Fatalf("expected packed store index assignment diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeAcceptsPayloadlessPackedCommonFieldInitialization(t *testing.T) {
 	src := `packed enum Token:
 	common:
