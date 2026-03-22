@@ -32,8 +32,24 @@ type OptimizationFacts struct {
 	Contiguous            bool
 	UnitStride            bool
 	FrozenPackedStoreOnly bool
+	PackedStoreProvenance PackedStoreProvenance
 	Extent                *OptimizationExtent
 	base                  string
+}
+
+type PackedStoreProvenance struct {
+	HasPackedStoreDeps          bool
+	HasFrozenPackedStoreDeps    bool
+	HasNonFrozenPackedStoreDeps bool
+	HasNonStoreProvenance       bool
+}
+
+func (p PackedStoreProvenance) DependsOnlyOnFrozenPackedStores() bool {
+	return p.HasPackedStoreDeps && p.HasFrozenPackedStoreDeps && !p.HasNonFrozenPackedStoreDeps && !p.HasNonStoreProvenance
+}
+
+func (p PackedStoreProvenance) HasMixedProvenance() bool {
+	return p.HasNonStoreProvenance || (p.HasFrozenPackedStoreDeps && p.HasNonFrozenPackedStoreDeps)
 }
 
 func (e *OptimizationExtent) String() string {
@@ -330,22 +346,56 @@ func (a *Analyzer) inferExprOptimizationFacts(expr ast.Expr, t Type) Optimizatio
 			}
 		}
 	}
-	if a.exprDependsOnlyOnFrozenPackedStores(expr) {
-		facts.FrozenPackedStoreOnly = true
+	if provenance, ok := a.exprPackedStoreProvenance(expr); ok {
+		facts.PackedStoreProvenance = provenance
+		facts.FrozenPackedStoreOnly = provenance.DependsOnlyOnFrozenPackedStores()
 	}
 	return facts
 }
 
-func (a *Analyzer) exprDependsOnlyOnFrozenPackedStores(expr ast.Expr) bool {
+func summarizePackedStoreProvenance(state regionRefState) PackedStoreProvenance {
+	var out PackedStoreProvenance
+	summarizePackedStoreProvenanceInto(&out, state)
+	return out
+}
+
+func summarizePackedStoreProvenanceInto(out *PackedStoreProvenance, state regionRefState) {
+	if out == nil {
+		return
+	}
+	if len(state.Deps) != 0 || len(state.ParamDeps) != 0 {
+		out.HasNonStoreProvenance = true
+	}
+	for _, dep := range state.StoreDeps {
+		out.HasPackedStoreDeps = true
+		if dep.Type != nil && IsFrozenPackedEnumStoreType(dep.Type) {
+			out.HasFrozenPackedStoreDeps = true
+			continue
+		}
+		out.HasNonFrozenPackedStoreDeps = true
+	}
+	for _, fieldState := range state.Fields {
+		summarizePackedStoreProvenanceInto(out, fieldState)
+	}
+}
+
+func (a *Analyzer) exprPackedStoreProvenance(expr ast.Expr) (PackedStoreProvenance, bool) {
 	if a == nil || expr == nil {
-		return false
+		return PackedStoreProvenance{}, false
 	}
 	state, ok := a.regionRefStateForExpr(expr)
 	if !ok {
+		return PackedStoreProvenance{}, false
+	}
+	return summarizePackedStoreProvenance(state), true
+}
+
+func (a *Analyzer) exprDependsOnlyOnFrozenPackedStores(expr ast.Expr) bool {
+	provenance, ok := a.exprPackedStoreProvenance(expr)
+	if !ok {
 		return false
 	}
-	onlyFrozen, hasFrozen := regionRefStateDependsOnlyOnFrozenPackedStores(state)
-	return onlyFrozen && hasFrozen
+	return provenance.DependsOnlyOnFrozenPackedStores()
 }
 
 func regionRefStateDependsOnlyOnFrozenPackedStores(state regionRefState) (bool, bool) {
@@ -862,13 +912,35 @@ func (r *Result) ExprSupportsDenseWrite(expr ast.Expr) bool {
 	return facts.Contiguous && facts.UnitStride && !facts.ReadOnly
 }
 
+func (r *Result) ExprPackedStoreProvenance(expr ast.Expr) (PackedStoreProvenance, bool) {
+	if r == nil {
+		return PackedStoreProvenance{}, false
+	}
+	facts, ok := r.ExprOptimizationFacts(expr)
+	if !ok {
+		return PackedStoreProvenance{}, false
+	}
+	return facts.PackedStoreProvenance, true
+}
+
+func (r *Result) ExprHasPackedStoreProvenance(expr ast.Expr) bool {
+	if r == nil {
+		return false
+	}
+	provenance, ok := r.ExprPackedStoreProvenance(expr)
+	if !ok {
+		return false
+	}
+	return provenance.HasPackedStoreDeps
+}
+
 func (r *Result) ExprDependsOnlyOnFrozenPackedStores(expr ast.Expr) bool {
 	if r == nil {
 		return false
 	}
-	facts, ok := r.ExprOptimizationFacts(expr)
+	provenance, ok := r.ExprPackedStoreProvenance(expr)
 	if !ok {
 		return false
 	}
-	return facts.FrozenPackedStoreOnly
+	return provenance.DependsOnlyOnFrozenPackedStores()
 }

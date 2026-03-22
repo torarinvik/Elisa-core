@@ -3559,6 +3559,91 @@ def copy_nested_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> void:
 	}
 }
 
+func TestGenerateLLVMIRKeepsCopyOverlapGuardrailsThroughWildcardRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
+	src := `repr(c) struct Views:
+	left: view[i32]
+	right: view[i32]
+
+repr(c) struct ViewWindow:
+	items: view[Views]
+
+@borrows_return_field_rebased(items[*].left, src[*].left, items[*].right, src[*].right)
+extern wrap_sub_wild(src: view[Views], start: usize, end: usize) -> ViewWindow
+
+def arena_da_copy_exact[T](dst: view[T], src: view[T]):
+	_ = dst
+	_ = src
+
+def copy_wildcard_rebased_overlap(values: array[i32, 8]) -> void:
+	items: array[Views, 2] = [Views(values[0u:3u], values[1u:4u]), Views(values[4u:7u], values[5u:8u])]
+	wrapped: ViewWindow = wrap_sub_wild(items[0u:1u], 0u, 1u)
+	arena_da_copy_exact(wrapped.items[0u].left, wrapped.items[0u].right)
+	`
+	result := parseAndAnalyze(t, "backend_dview_copy_exact_wildcard_rebased_helper_indexed_overlap_guardrails.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	copyWildcardRebasedOverlapBody := functionIR(output, "copy_wildcard_rebased_overlap")
+	if copyWildcardRebasedOverlapBody == "" {
+		t.Fatalf("expected to find copy_wildcard_rebased_overlap body, got:\n%s", output)
+	}
+	if strings.Contains(copyWildcardRebasedOverlapBody, "call void @arena_da_copy_exact") {
+		t.Fatalf("expected copy_wildcard_rebased_overlap to avoid helper fallback, got:\n%s", copyWildcardRebasedOverlapBody)
+	}
+	if strings.Contains(copyWildcardRebasedOverlapBody, "call ptr @arena_memcpy") {
+		t.Fatalf("expected copy_wildcard_rebased_overlap to preserve overlap semantics instead of arena_memcpy, got:\n%s", copyWildcardRebasedOverlapBody)
+	}
+	if !strings.Contains(copyWildcardRebasedOverlapBody, "load i32, ptr") || !strings.Contains(copyWildcardRebasedOverlapBody, "store i32") {
+		t.Fatalf("expected copy_wildcard_rebased_overlap to lower through direct element loads/stores, got:\n%s", copyWildcardRebasedOverlapBody)
+	}
+}
+
+func TestGenerateLLVMIRKeepsCopyOverlapGuardrailsThroughNestedWildcardRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
+	src := `repr(c) struct Views:
+	left: view[i32]
+	right: view[i32]
+
+repr(c) struct Meta:
+	items: view[Views]
+
+repr(c) struct Wrapper:
+	meta: Meta
+
+@borrows_return_field_rebased(meta.items[*].left, src[*].left, meta.items[*].right, src[*].right)
+extern wrap_submeta_wild(src: view[Views], start: usize, end: usize) -> Wrapper
+
+def arena_da_copy_exact[T](dst: view[T], src: view[T]):
+	_ = dst
+	_ = src
+
+def copy_nested_wildcard_rebased_overlap(values: array[i32, 8]) -> void:
+	items: array[Views, 2] = [Views(values[0u:3u], values[1u:4u]), Views(values[4u:7u], values[5u:8u])]
+	wrapped: Wrapper = wrap_submeta_wild(items[0u:1u], 0u, 1u)
+	arena_da_copy_exact(wrapped.meta.items[0u].left, wrapped.meta.items[0u].right)
+	`
+	result := parseAndAnalyze(t, "backend_dview_copy_exact_nested_wildcard_rebased_helper_indexed_overlap_guardrails.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	copyNestedWildcardRebasedOverlapBody := functionIR(output, "copy_nested_wildcard_rebased_overlap")
+	if copyNestedWildcardRebasedOverlapBody == "" {
+		t.Fatalf("expected to find copy_nested_wildcard_rebased_overlap body, got:\n%s", output)
+	}
+	if strings.Contains(copyNestedWildcardRebasedOverlapBody, "call void @arena_da_copy_exact") {
+		t.Fatalf("expected copy_nested_wildcard_rebased_overlap to avoid helper fallback, got:\n%s", copyNestedWildcardRebasedOverlapBody)
+	}
+	if strings.Contains(copyNestedWildcardRebasedOverlapBody, "call ptr @arena_memcpy") {
+		t.Fatalf("expected copy_nested_wildcard_rebased_overlap to preserve overlap semantics instead of arena_memcpy, got:\n%s", copyNestedWildcardRebasedOverlapBody)
+	}
+	if !strings.Contains(copyNestedWildcardRebasedOverlapBody, "load i32, ptr") || !strings.Contains(copyNestedWildcardRebasedOverlapBody, "store i32") {
+		t.Fatalf("expected copy_nested_wildcard_rebased_overlap to lower through direct element loads/stores, got:\n%s", copyNestedWildcardRebasedOverlapBody)
+	}
+}
+
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughNestedRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
 	src := `repr(c) struct Views:
 	left: view[i32]

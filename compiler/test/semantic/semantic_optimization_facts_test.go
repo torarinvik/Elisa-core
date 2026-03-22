@@ -57,6 +57,15 @@ func requireExprOptimizationFacts(t *testing.T, result *semantic.Result, expr as
 	return facts
 }
 
+func requireExprPackedStoreProvenance(t *testing.T, result *semantic.Result, expr ast.Expr) semantic.PackedStoreProvenance {
+	t.Helper()
+	provenance, ok := result.ExprPackedStoreProvenance(expr)
+	if !ok {
+		t.Fatalf("expected packed-store provenance for %T", expr)
+	}
+	return provenance
+}
+
 func TestAnalyzeCollectsOptimizationFactsForShapeBackedCollections(t *testing.T) {
 	src := `def inspect(values: darray[i32, row], other: darray[i32, row], text: dstr[row], any_values: darray[i32], buf: array[i32, 4]) -> int:
 	same_a: darray[i32, row] = values
@@ -591,12 +600,26 @@ def inspect(owner: Arena) -> int:
 	wrappedAfterFreezeFacts := requireExprOptimizationFacts(t, result, wrappedAfterFreezeExpr)
 	viewAfterFreezeFacts := requireExprOptimizationFacts(t, result, viewAfterFreezeExpr)
 	heldAfterFreezeFacts := requireExprOptimizationFacts(t, result, heldAfterFreezeExpr)
+	beforeFreezeProvenance := requireExprPackedStoreProvenance(t, result, beforeFreezeExpr)
+	afterFreezeProvenance := requireExprPackedStoreProvenance(t, result, afterFreezeExpr)
+	wrappedAfterFreezeProvenance := requireExprPackedStoreProvenance(t, result, wrappedAfterFreezeExpr)
+	viewAfterFreezeProvenance := requireExprPackedStoreProvenance(t, result, viewAfterFreezeExpr)
+	heldAfterFreezeProvenance := requireExprPackedStoreProvenance(t, result, heldAfterFreezeExpr)
 
 	if beforeFreezeFacts.FrozenPackedStoreOnly {
 		t.Fatalf("expected value depending on a local packed store to stay unpublished before freeze, got %#v", beforeFreezeFacts)
 	}
+	if !beforeFreezeProvenance.HasPackedStoreDeps || !beforeFreezeProvenance.HasNonFrozenPackedStoreDeps || beforeFreezeProvenance.HasFrozenPackedStoreDeps {
+		t.Fatalf("expected pre-freeze value to report non-frozen packed-store provenance, got %#v", beforeFreezeProvenance)
+	}
+	if beforeFreezeProvenance.DependsOnlyOnFrozenPackedStores() {
+		t.Fatalf("expected pre-freeze value to reject frozen-only classification, got %#v", beforeFreezeProvenance)
+	}
 	if !afterFreezeFacts.FrozenPackedStoreOnly {
 		t.Fatalf("expected freeze to remap packed-store provenance for direct values, got %#v", afterFreezeFacts)
+	}
+	if !afterFreezeProvenance.HasPackedStoreDeps || !afterFreezeProvenance.HasFrozenPackedStoreDeps || afterFreezeProvenance.HasNonFrozenPackedStoreDeps || afterFreezeProvenance.HasMixedProvenance() {
+		t.Fatalf("expected post-freeze direct value to report pure frozen packed-store provenance, got %#v", afterFreezeProvenance)
 	}
 	if !result.ExprDependsOnlyOnFrozenPackedStores(afterFreezeExpr) {
 		t.Fatalf("expected result query to report frozen-store-only provenance for direct values")
@@ -604,11 +627,20 @@ def inspect(owner: Arena) -> int:
 	if !wrappedAfterFreezeFacts.FrozenPackedStoreOnly {
 		t.Fatalf("expected helper-return aggregate to inherit frozen-store-only provenance, got %#v", wrappedAfterFreezeFacts)
 	}
+	if !wrappedAfterFreezeProvenance.DependsOnlyOnFrozenPackedStores() {
+		t.Fatalf("expected helper-return aggregate to expose frozen-only packed-store provenance, got %#v", wrappedAfterFreezeProvenance)
+	}
 	if !viewAfterFreezeFacts.FrozenPackedStoreOnly {
 		t.Fatalf("expected sliced aggregate view to retain frozen-store-only provenance, got %#v", viewAfterFreezeFacts)
 	}
+	if !viewAfterFreezeProvenance.DependsOnlyOnFrozenPackedStores() {
+		t.Fatalf("expected sliced aggregate view to expose frozen-only packed-store provenance, got %#v", viewAfterFreezeProvenance)
+	}
 	if heldAfterFreezeFacts.FrozenPackedStoreOnly {
 		t.Fatalf("expected value with local-region provenance to avoid frozen-store-only classification, got %#v", heldAfterFreezeFacts)
+	}
+	if !heldAfterFreezeProvenance.HasPackedStoreDeps || !heldAfterFreezeProvenance.HasFrozenPackedStoreDeps || !heldAfterFreezeProvenance.HasMixedProvenance() {
+		t.Fatalf("expected held value to report mixed frozen-store and non-store provenance, got %#v", heldAfterFreezeProvenance)
 	}
 	if result.ExprDependsOnlyOnFrozenPackedStores(heldAfterFreezeExpr) {
 		t.Fatalf("expected result query to reject mixed local-region and frozen-store provenance")
@@ -644,6 +676,7 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	leftFacts := requireExprOptimizationFacts(t, result, leftExpr)
 	rightFacts := requireExprOptimizationFacts(t, result, rightExpr)
 	childFacts := requireExprOptimizationFacts(t, result, childExpr)
+	childProvenance := requireExprPackedStoreProvenance(t, result, childExpr)
 
 	if !leftFacts.HasExactExtent() {
 		t.Fatalf("expected left packed move-as payload to preserve exact extent facts, got %#v", leftFacts)
@@ -662,6 +695,9 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	}
 	if !childFacts.FrozenPackedStoreOnly {
 		t.Fatalf("expected packed child payload recovered through frozen move-as to stay frozen-store-only, got %#v", childFacts)
+	}
+	if !childProvenance.DependsOnlyOnFrozenPackedStores() || childProvenance.HasMixedProvenance() {
+		t.Fatalf("expected packed child payload recovered through frozen move-as to expose pure frozen packed-store provenance, got %#v", childProvenance)
 	}
 	if !result.ExprDependsOnlyOnFrozenPackedStores(childExpr) {
 		t.Fatalf("expected result query to report frozen-store-only provenance for packed child payload recovered through move-as")
