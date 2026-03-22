@@ -3334,6 +3334,37 @@ def copy_helper(values: array[i32, 4]) -> void:
 
 }
 
+func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughIndexedFieldProjection(t *testing.T) {
+	src := `repr(c) struct Views:
+	left: view[i32]
+	right: view[i32]
+
+def arena_da_copy_exact[T](dst: view[T], src: view[T]):
+	_ = dst
+	_ = src
+
+def copy_indexed(values: array[i32, 4]) -> void:
+	items: array[Views, 1] = [Views(values[0u:2u], values[2u:4u])]
+	arena_da_copy_exact(items[0u].left, items[0u].right)
+	`
+	result := parseAndAnalyze(t, "backend_dview_copy_exact_indexed_field_projection.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	copyIndexedBody := functionIR(output, "copy_indexed")
+	if copyIndexedBody == "" {
+		t.Fatalf("expected to find copy_indexed body, got:\n%s", output)
+	}
+	if !strings.Contains(copyIndexedBody, "call ptr @arena_memcpy(ptr noalias") {
+		t.Fatalf("expected copy_indexed to lower through direct noalias arena_memcpy via indexed field projections, got:\n%s", copyIndexedBody)
+	}
+	if strings.Contains(copyIndexedBody, "call void @arena_da_copy_exact") {
+		t.Fatalf("expected copy_indexed to avoid helper fallback, got:\n%s", copyIndexedBody)
+	}
+}
+
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughNestedFieldProjection(t *testing.T) {
 	src := `repr(c) struct Views:
 	left: view[i32]
@@ -3839,6 +3870,38 @@ def eq_helper(values: array[i32, 4]) -> bool:
 		t.Fatalf("expected eq_helper to avoid helper fallback, got:\n%s", eqHelperBody)
 	}
 
+}
+
+func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughIndexedFieldProjection(t *testing.T) {
+	src := `repr(c) struct Views:
+	left: view[i32]
+	right: view[i32]
+
+def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
+	_ = left
+	_ = right
+	return false
+
+def eq_indexed(values: array[i32, 4]) -> bool:
+	items: array[Views, 1] = [Views(values[0u:2u], values[2u:4u])]
+	return arena_da_eq_exact(items[0u].left, items[0u].right)
+	`
+	result := parseAndAnalyze(t, "backend_dview_eq_exact_indexed_field_projection.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	eqIndexedBody := functionIR(output, "eq_indexed")
+	if eqIndexedBody == "" {
+		t.Fatalf("expected to find eq_indexed body, got:\n%s", output)
+	}
+	if !strings.Contains(eqIndexedBody, "call i64 @memcmp(ptr noalias") {
+		t.Fatalf("expected eq_indexed to lower through direct noalias memcmp via indexed field projections, got:\n%s", eqIndexedBody)
+	}
+	if strings.Contains(eqIndexedBody, "call i1 @arena_da_eq_exact") {
+		t.Fatalf("expected eq_indexed to avoid helper fallback, got:\n%s", eqIndexedBody)
+	}
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughNestedFieldProjection(t *testing.T) {

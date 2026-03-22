@@ -2218,6 +2218,15 @@ func (a *Analyzer) resolveProjectedFieldValueExprAtPath(objectExpr ast.Expr, pat
 		return a.resolveProjectedFieldValueExprAtPath(n.Value, path)
 	case *ast.CanExpr:
 		return a.resolveProjectedFieldValueExprAtPath(n.Expr, path)
+	case *ast.IndexExpr:
+		step, ok := a.resolveProjectedFieldIndexStep(n.Index)
+		if !ok {
+			return nil, false
+		}
+		combinedPath := make([]borrowReturnAnnotationStep, 0, len(path)+1)
+		combinedPath = append(combinedPath, step)
+		combinedPath = append(combinedPath, path...)
+		return a.resolveProjectedFieldValueExprAtPath(n.Object, combinedPath)
 	case *ast.Ident:
 		if a.currentScope == nil {
 			return nil, false
@@ -2239,6 +2248,16 @@ func (a *Analyzer) resolveProjectedFieldValueExprAtPath(objectExpr ast.Expr, pat
 			return nil, false
 		}
 		return a.resolveProjectedFieldValueExprAtPath(decl.Value, path)
+	case *ast.ListLitExpr:
+		step := path[0]
+		if step.Index == nil || step.Field != "" || step.Wildcard {
+			return nil, false
+		}
+		index := int(*step.Index)
+		if index < 0 || index >= len(n.Elems) {
+			return nil, false
+		}
+		return a.resolveProjectedFieldValueExprAtPath(n.Elems[index], path[1:])
 	case *ast.StructLitExpr:
 		actual := a.exprTypes[n]
 		if actual == nil {
@@ -2272,6 +2291,18 @@ func (a *Analyzer) resolveProjectedFieldValueExprAtPath(objectExpr ast.Expr, pat
 	default:
 		return nil, false
 	}
+}
+
+func (a *Analyzer) resolveProjectedFieldIndexStep(indexExpr ast.Expr) (borrowReturnAnnotationStep, bool) {
+	if a == nil || indexExpr == nil {
+		return borrowReturnAnnotationStep{}, false
+	}
+	value, ok := a.evalConstExpr(indexExpr)
+	if !ok || value.Kind != ConstInt || value.Int < 0 {
+		return borrowReturnAnnotationStep{}, false
+	}
+	index := value.Int
+	return borrowReturnAnnotationStep{Index: &index}, true
 }
 
 func (a *Analyzer) resolveProjectedFieldValueFromCallExpr(call *ast.CallExpr, path []borrowReturnAnnotationStep) (ast.Expr, bool) {
