@@ -5448,6 +5448,47 @@ def choose() -> i32:
 	}
 }
 
+func TestGenerateLLVMIRLowersForLoopRanges(t *testing.T) {
+	src := `def sum(limit: int) -> int:
+	total: mutable int = 0
+	for i in 0..<limit:
+		total <- total + i
+	for j in limit..>0:
+		total <- total + j
+	for k in 0..4..2:
+		total <- total + k
+	return total
+`
+	result := parseAndAnalyze(t, "backend_for_loop_ranges.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	ir := functionIR(output, "sum")
+	if ir == "" {
+		t.Fatalf("expected to find LLVM IR for sum, got:\n%s", output)
+	}
+	for _, check := range []string{
+		"define i64 @sum(i64",
+		"for.cond",
+		"for.body",
+		"for.end",
+		"for.next.asc",
+		"for.next.desc",
+		"select i1",
+		"icmp slt",
+		"icmp sgt",
+		"icmp sle",
+		"add i64",
+		"sub i64",
+	} {
+		if !strings.Contains(ir, check) {
+			t.Fatalf("expected sum IR to contain %q, got:\n%s", check, ir)
+		}
+	}
+}
+
 func looksLikeObjectFile(data []byte) bool {
 	if len(data) < 4 {
 		return false

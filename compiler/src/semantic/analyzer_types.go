@@ -44,6 +44,17 @@ func (a *Analyzer) defineLocal(sym *Symbol, pos lexer.Pos) {
 	a.trackAffineValueSymbol(sym)
 }
 
+func (a *Analyzer) defineLocalInScope(scope *Scope, sym *Symbol, pos lexer.Pos) {
+	if scope == nil {
+		return
+	}
+	if existing, ok := scope.Define(sym); !ok {
+		a.errorf(pos, "duplicate local %q (already defined as %s)", existing.Name, existing.Kind)
+		return
+	}
+	a.trackAffineValueSymbol(sym)
+}
+
 func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorageParams []string, refStateParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
 	ptypes := make([]Type, 0, len(params))
 	retType := a.namedTypes["void"]

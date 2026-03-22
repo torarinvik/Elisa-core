@@ -447,6 +447,8 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		return s.emitLockStmt(n)
 	case *ast.WhileStmt:
 		return s.emitWhile(n)
+	case *ast.ForStmt:
+		return s.emitForStmt(n)
 	case *ast.ParallelForStmt:
 		return s.emitParallelForStmt(n)
 	case *ast.PassStmt:
@@ -1380,6 +1382,168 @@ func (s *functionState) emitWhile(stmt *ast.WhileStmt) error {
 	return nil
 }
 
+func (s *functionState) emitForStmt(stmt *ast.ForStmt) error {
+	loopType := s.forLoopValueType(stmt)
+	if loopType == nil {
+		return fmt.Errorf("missing semantic type for for-loop")
+	}
+	startValue, _, err := s.emitExpr(stmt.Start, loopType)
+	if err != nil {
+		return err
+	}
+	endValue, _, err := s.emitExpr(stmt.End, loopType)
+	if err != nil {
+		return err
+	}
+	stepValue, err := s.emitForLoopStepMagnitude(stmt, loopType)
+	if err != nil {
+		return err
+	}
+	loopLLVMType, err := s.g.lowerType(loopType)
+	if err != nil {
+		return err
+	}
+	boolType := C.LLVMInt1TypeInContext(s.g.context)
+	zeroValue := C.LLVMConstInt(loopLLVMType, 0, 0)
+
+	var ascendingValue C.LLVMValueRef
+	switch stmt.Op {
+	case lexer.TOKEN_RANGE:
+		pred := C.LLVMIntPredicate(C.LLVMIntULE)
+		if isSignedIntegerType(loopType) {
+			pred = C.LLVMIntPredicate(C.LLVMIntSLE)
+		}
+		ascendingValue = C.LLVMBuildICmp(s.builder, pred, startValue, endValue, cStringFree("for.asc"))
+	case lexer.TOKEN_RANGE_LT:
+		ascendingValue = C.LLVMConstInt(boolType, 1, 0)
+	case lexer.TOKEN_RANGE_GT:
+		ascendingValue = C.LLVMConstInt(boolType, 0, 0)
+	default:
+		return fmt.Errorf("unsupported for-loop range operator %s", lexer.TokenName(stmt.Op))
+	}
+	hasStep := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), stepValue, zeroValue, cStringFree("for.step.nonzero"))
+
+	currentAlloca, err := s.createEntryAlloca(stmt.Name+".for.cur", loopType)
+	if err != nil {
+		return err
+	}
+	C.LLVMBuildStore(s.builder, startValue, currentAlloca)
+	loopVarAlloca, err := s.createEntryAlloca(stmt.Name, loopType)
+	if err != nil {
+		return err
+	}
+
+	condBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("for.cond"))
+	bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("for.body"))
+	exitBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("for.end"))
+
+	C.LLVMBuildCondBr(s.builder, hasStep, condBB, exitBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, condBB)
+	currentValue, err := s.loadValue(currentAlloca, loopType, stmt.Name+".for.cur")
+	if err != nil {
+		return err
+	}
+	ascendingCond, err := s.emitForLoopContinueCmp(stmt.Op, loopType, currentValue, endValue, true)
+	if err != nil {
+		return err
+	}
+	descendingCond, err := s.emitForLoopContinueCmp(stmt.Op, loopType, currentValue, endValue, false)
+	if err != nil {
+		return err
+	}
+	condValue := C.LLVMBuildSelect(s.builder, ascendingValue, ascendingCond, descendingCond, cStringFree("for.cond.select"))
+	C.LLVMBuildCondBr(s.builder, condValue, bodyBB, exitBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+	s.pushScope()
+	s.defineBinding(stmt.Name, valueBinding{ptr: loopVarAlloca, typ: loopType})
+	C.LLVMBuildStore(s.builder, currentValue, loopVarAlloca)
+	if err := s.emitBlock(stmt.Body, true); err != nil {
+		s.popScope()
+		return err
+	}
+	s.popScope()
+	if !s.currentBlockTerminated() {
+		nextAscending := C.LLVMBuildAdd(s.builder, currentValue, stepValue, cStringFree("for.next.asc"))
+		nextDescending := C.LLVMBuildSub(s.builder, currentValue, stepValue, cStringFree("for.next.desc"))
+		nextValue := C.LLVMBuildSelect(s.builder, ascendingValue, nextAscending, nextDescending, cStringFree("for.next"))
+		C.LLVMBuildStore(s.builder, nextValue, currentAlloca)
+		C.LLVMBuildBr(s.builder, condBB)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, exitBB)
+	return nil
+}
+
+func (s *functionState) forLoopValueType(stmt *ast.ForStmt) semantic.Type {
+	if stmt == nil {
+		return nil
+	}
+	loopType := semantic.CommonNumericType(s.exprType(stmt.Start), s.exprType(stmt.End))
+	if stmt.Step != nil {
+		loopType = semantic.CommonNumericType(loopType, s.exprType(stmt.Step))
+	}
+	return loopType
+}
+
+func (s *functionState) emitForLoopStepMagnitude(stmt *ast.ForStmt, loopType semantic.Type) (C.LLVMValueRef, error) {
+	loopLLVMType, err := s.g.lowerType(loopType)
+	if err != nil {
+		return nil, err
+	}
+	if stmt.Step == nil {
+		return C.LLVMConstInt(loopLLVMType, 1, 0), nil
+	}
+	rawStep, _, err := s.emitExpr(stmt.Step, loopType)
+	if err != nil {
+		return nil, err
+	}
+	if !isSignedIntegerType(loopType) {
+		return rawStep, nil
+	}
+	zeroValue := C.LLVMConstInt(loopLLVMType, 0, 0)
+	isNegative := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntSLT), rawStep, zeroValue, cStringFree("for.step.neg"))
+	negated := C.LLVMBuildNeg(s.builder, rawStep, cStringFree("for.step.abs.neg"))
+	return C.LLVMBuildSelect(s.builder, isNegative, negated, rawStep, cStringFree("for.step.abs")), nil
+}
+
+func (s *functionState) emitForLoopContinueCmp(op lexer.TokenKind, loopType semantic.Type, currentValue, endValue C.LLVMValueRef, ascending bool) (C.LLVMValueRef, error) {
+	var pred C.LLVMIntPredicate
+	signed := isSignedIntegerType(loopType)
+	switch op {
+	case lexer.TOKEN_RANGE:
+		if ascending {
+			if signed {
+				pred = C.LLVMIntPredicate(C.LLVMIntSLE)
+			} else {
+				pred = C.LLVMIntPredicate(C.LLVMIntULE)
+			}
+		} else {
+			if signed {
+				pred = C.LLVMIntPredicate(C.LLVMIntSGE)
+			} else {
+				pred = C.LLVMIntPredicate(C.LLVMIntUGE)
+			}
+		}
+	case lexer.TOKEN_RANGE_LT:
+		if signed {
+			pred = C.LLVMIntPredicate(C.LLVMIntSLT)
+		} else {
+			pred = C.LLVMIntPredicate(C.LLVMIntULT)
+		}
+	case lexer.TOKEN_RANGE_GT:
+		if signed {
+			pred = C.LLVMIntPredicate(C.LLVMIntSGT)
+		} else {
+			pred = C.LLVMIntPredicate(C.LLVMIntUGT)
+		}
+	default:
+		return nil, fmt.Errorf("unsupported for-loop range operator %s", lexer.TokenName(op))
+	}
+	return C.LLVMBuildICmp(s.builder, pred, currentValue, endValue, cStringFree("for.cmp")), nil
+}
+
 func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 	enumType, ok := s.exprType(stmt.Value).(*semantic.EnumType)
 	if !ok {
@@ -2023,6 +2187,8 @@ func stmtReadsMatchedValueField(name string, stmt ast.Stmt) bool {
 		return exprReadsMatchedValueField(name, n.Cond) || stmtsReadMatchedValueField(name, n.Then) || stmtsReadMatchedValueField(name, n.Else) || elifsReadMatchedValueField(name, n.Elifs)
 	case *ast.WhileStmt:
 		return exprReadsMatchedValueField(name, n.Cond) || stmtsReadMatchedValueField(name, n.Body)
+	case *ast.ForStmt:
+		return exprReadsMatchedValueField(name, n.Start) || exprReadsMatchedValueField(name, n.End) || exprReadsMatchedValueField(name, n.Step) || stmtsReadMatchedValueField(name, n.Body)
 	case *ast.ParallelForStmt:
 		return exprReadsMatchedValueField(name, n.Source) || stmtsReadMatchedValueField(name, n.Body)
 	case *ast.MatchStmt:

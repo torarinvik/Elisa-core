@@ -4842,6 +4842,55 @@ def walk(owner: Arena) -> int:
 	requireFunctionReturnTypeString(t, result, "walk", "int")
 }
 
+func TestAnalyzeAcceptsForLoopRangeForms(t *testing.T) {
+	src := `def walk(limit: int) -> int:
+	total: mutable int = 0
+	for i in 0..<limit:
+		total <- total + i
+	for j in limit..>0:
+		total <- total + j
+	for k in 0..3:
+		total <- total + k
+	for m in 0..10..2:
+		total <- total + m
+	return total
+`
+	result, errs := parseAndAnalyze(t, "for_loop_ranges_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "walk", "int")
+}
+
+func TestAnalyzeRejectsForLoopZeroStep(t *testing.T) {
+	src := `def bad() -> void:
+	for i in 0..10..0:
+		pass
+`
+	_, errs := parseAndAnalyze(t, "for_loop_zero_step_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "for loop range step cannot be zero") {
+		t.Fatalf("expected zero-step diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsForLoopNonIntegralBounds(t *testing.T) {
+	src := `def bad() -> void:
+	for value in 0.0..1.0:
+		pass
+`
+	_, errs := parseAndAnalyze(t, "for_loop_non_integral_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "for loop range requires integral bounds") {
+		t.Fatalf("expected non-integral-bounds diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeAcceptsParallelForOverFrozenPackedStore(t *testing.T) {
 	src := parallelForConcurrencyPrelude + `
 packed enum Expr:

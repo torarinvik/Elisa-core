@@ -278,6 +278,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 		a.currentFunctionValues = mergedFunctionValues
 		a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+	case *ast.ForStmt:
+		a.analyzeForStmt(n)
 	case *ast.ParallelForStmt:
 		a.analyzeParallelForStmt(n)
 	case *ast.PassStmt:
@@ -852,6 +854,50 @@ func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
 	a.currentRegionRefs = savedRegionRefs
 	a.currentPackedStores = savedPackedStores
 	a.currentPoolScopes = savedPools
+}
+
+func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
+	startType := a.analyzeExpr(stmt.Start)
+	endType := a.analyzeExpr(stmt.End)
+	loopType := CommonNumericType(startType, endType)
+	if !IsIntegralType(loopType) {
+		a.errorf(stmt.Pos(), "for loop range requires integral bounds, got %s and %s", startType.String(), endType.String())
+		loopType = invalidType
+	}
+	if stmt.Step != nil {
+		stepType := a.analyzeExpr(stmt.Step)
+		loopType = CommonNumericType(loopType, stepType)
+		if !IsIntegralType(stepType) || !IsIntegralType(loopType) {
+			a.errorf(stmt.Step.Pos(), "for loop range step must be integral, got %s", stepType.String())
+			loopType = invalidType
+		}
+		if value, ok := a.evalConstExpr(stmt.Step); ok && value.Kind == ConstInt && value.Int == 0 {
+			a.errorf(stmt.Step.Pos(), "for loop range step cannot be zero")
+		}
+	}
+	if stmt.Op != lexer.TOKEN_RANGE && stmt.Op != lexer.TOKEN_RANGE_LT && stmt.Op != lexer.TOKEN_RANGE_GT {
+		a.errorf(stmt.Pos(), "for loop uses unsupported range operator %s", lexer.TokenName(stmt.Op))
+	}
+
+	loopScope := NewScope(a.currentScope)
+	loopSym := &Symbol{Name: stmt.Name, Kind: SymbolLocal, Type: loopType, Node: stmt, Mutable: false}
+	a.defineLocalInScope(loopScope, loopSym, stmt.Pos())
+
+	mergedAffine := a.cloneAffineValueStates()
+	mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
+	mergedFunctionValues := a.cloneFunctionValueBindings()
+	mergedSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
+	bodySnapshot := a.analyzeBlockWithAffineClone(stmt.Body, loopScope)
+	if !blockDefinitelyExits(stmt.Body) {
+		mergedAffine = mergeAffineValueStates(mergedAffine, bodySnapshot.Affine)
+		mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, bodySnapshot.BorrowedOwnerRefs)
+		mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, bodySnapshot.FunctionValues)
+		mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, bodySnapshot.SpecializedValueTypes)
+	}
+	a.currentAffineValues = mergedAffine
+	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
+	a.currentFunctionValues = mergedFunctionValues
+	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
 }
 
 func (a *Analyzer) analyzeParallelForStmt(stmt *ast.ParallelForStmt) {

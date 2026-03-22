@@ -380,3 +380,44 @@ func TestParseParallelRemainsContextualIdentifier(t *testing.T) {
 		t.Fatalf("expected call callee parallel, got %T %#v", call.Func, call.Func)
 	}
 }
+
+func TestParseForStatementRangeForms(t *testing.T) {
+	file, errs := parseSourceFile(t, "def walk() -> void:\n    for i in 0..<10..2:\n        pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	forStmt, ok := decl.Body[0].(*ast.ForStmt)
+	if !ok {
+		t.Fatalf("expected for stmt, got %T", decl.Body[0])
+	}
+	if forStmt.Name != "i" {
+		t.Fatalf("expected loop binder i, got %q", forStmt.Name)
+	}
+	if forStmt.Op != lexer.TOKEN_RANGE_LT {
+		t.Fatalf("expected exclusive ascending range op, got %v", forStmt.Op)
+	}
+	if forStmt.Step == nil {
+		t.Fatal("expected explicit range step")
+	}
+}
+
+func TestParseForRemainsContextualIdentifier(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep() -> int:\n    for_value: int = 1\n    for(for_value)\n    return for_value\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	exprStmt, ok := decl.Body[1].(*ast.ExprStmt)
+	if !ok {
+		t.Fatalf("expected expr stmt, got %T", decl.Body[1])
+	}
+	call, ok := exprStmt.Expr.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected call, got %T", exprStmt.Expr)
+	}
+	callee, ok := call.Func.(*ast.Ident)
+	if !ok || callee.Name != "for" {
+		t.Fatalf("expected call callee for, got %T %#v", call.Func, call.Func)
+	}
+}

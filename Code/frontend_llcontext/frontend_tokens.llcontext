@@ -55,6 +55,9 @@ enum FrontendTokenKind:
     Colon
     Arrow
     Dot
+    Range
+    RangeLt
+    RangeGt
     Comma
     LParen
     RParen

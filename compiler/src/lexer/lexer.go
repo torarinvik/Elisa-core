@@ -607,10 +607,20 @@ func (l *Lexer) NextToken() Token {
 
 	case '.':
 		l.advance()
-		if l.peek() == '.' && l.peekAt(1) == '.' {
+		if l.peek() == '.' {
+			if l.peekAt(1) == '.' {
+				l.advance()
+				l.advance()
+				return Token{Kind: TOKEN_ELLIPSIS, Text: "...", Pos: p}
+			}
 			l.advance()
-			l.advance()
-			return Token{Kind: TOKEN_ELLIPSIS, Text: "...", Pos: p}
+			if l.match('<') {
+				return Token{Kind: TOKEN_RANGE_LT, Text: "..<", Pos: p}
+			}
+			if l.match('>') {
+				return Token{Kind: TOKEN_RANGE_GT, Text: "..>", Pos: p}
+			}
+			return Token{Kind: TOKEN_RANGE, Text: "..", Pos: p}
 		}
 		return Token{Kind: TOKEN_DOT, Text: ".", Pos: p}
 

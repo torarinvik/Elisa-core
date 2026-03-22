@@ -43,6 +43,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikePoolStmt() {
 				return p.parsePoolStmt()
 			}
+		case "for":
+			if p.looksLikeForStmt() {
+				return p.parseForStmt()
+			}
 		case "parallel":
 			if p.looksLikeParallelForStmt() {
 				return p.parseParallelForStmt()
@@ -158,6 +162,40 @@ func (p *Parser) looksLikeParallelForStmt() bool {
 	return false
 }
 
+func (p *Parser) looksLikeForStmt() bool {
+	if p.pos+4 >= len(p.tokens) {
+		return false
+	}
+	if p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT {
+		return false
+	}
+	if p.tokens[p.pos+2].Kind != lexer.TOKEN_IN {
+		return false
+	}
+	depth := 0
+	seenRange := false
+	for i := p.pos + 3; i < len(p.tokens); i++ {
+		tok := p.tokens[i]
+		switch tok.Kind {
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
+			depth++
+		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET:
+			if depth > 0 {
+				depth--
+			}
+		case lexer.TOKEN_RANGE, lexer.TOKEN_RANGE_LT, lexer.TOKEN_RANGE_GT:
+			if depth == 0 {
+				seenRange = true
+			}
+		case lexer.TOKEN_COLON:
+			return depth == 0 && seenRange
+		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
+			return false
+		}
+	}
+	return false
+}
+
 func (p *Parser) looksLikeLockStmt() bool {
 	depth := 0
 	seenAs := false
@@ -236,6 +274,27 @@ func (p *Parser) parseParallelForStmt() *ast.ParallelForStmt {
 	p.expectNewline()
 	body := p.parseBlock()
 	return &ast.ParallelForStmt{Position: pos, Name: name, Source: source, Body: body}
+}
+
+func (p *Parser) parseForStmt() *ast.ForStmt {
+	pos := p.cur().Pos
+	p.expectIdentText("for")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_IN)
+	start := p.parseExpr()
+	op := p.advance()
+	if op.Kind != lexer.TOKEN_RANGE && op.Kind != lexer.TOKEN_RANGE_LT && op.Kind != lexer.TOKEN_RANGE_GT {
+		p.errorf("for loop requires a range operator (`..`, `..<`, or `..>`) after the start expression")
+	}
+	end := p.parseExpr()
+	var step ast.Expr
+	if p.match(lexer.TOKEN_RANGE) {
+		step = p.parseExpr()
+	}
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	body := p.parseBlock()
+	return &ast.ForStmt{Position: pos, Name: name, Start: start, End: end, Step: step, Op: op.Kind, Body: body}
 }
 
 func (p *Parser) parseWaitAllStmt() ast.Stmt {

@@ -64,6 +64,9 @@ const (
 	TOKEN_COLON     // :
 	TOKEN_ARROW     // ->
 	TOKEN_DOT       // .
+	TOKEN_RANGE     // ..
+	TOKEN_RANGE_LT  // ..<
+	TOKEN_RANGE_GT  // ..>
 	TOKEN_COMMA     // ,
 	TOKEN_LPAREN    // (
 	TOKEN_RPAREN    // )
@@ -169,6 +172,9 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_COLON:     ":",
 	TOKEN_ARROW:     "->",
 	TOKEN_DOT:       ".",
+	TOKEN_RANGE:     "..",
+	TOKEN_RANGE_LT:  "..<",
+	TOKEN_RANGE_GT:  "..>",
 	TOKEN_COMMA:     ",",
 	TOKEN_LPAREN:    "(",
 	TOKEN_RPAREN:    ")",

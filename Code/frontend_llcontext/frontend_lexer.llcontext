@@ -574,10 +574,17 @@ def frontend_next_token_kind(lexer: any FrontendLexer&) -> FrontendTokenKind can
 
     if ch == FRONTEND_CH_DOT:
         _ = frontend_advance_char(lexer)
-        if frontend_cur_char(lexer) == FRONTEND_CH_DOT and frontend_peek_char_at(lexer, 1u) == FRONTEND_CH_DOT:
+        if frontend_cur_char(lexer) == FRONTEND_CH_DOT:
+            if frontend_peek_char_at(lexer, 1u) == FRONTEND_CH_DOT:
+                _ = frontend_advance_char(lexer)
+                _ = frontend_advance_char(lexer)
+                return FrontendTokenKind.Ellipsis
             _ = frontend_advance_char(lexer)
-            _ = frontend_advance_char(lexer)
-            return FrontendTokenKind.Ellipsis
+            if frontend_match_char(lexer, FRONTEND_CH_LT):
+                return FrontendTokenKind.RangeLt
+            if frontend_match_char(lexer, FRONTEND_CH_GT):
+                return FrontendTokenKind.RangeGt
+            return FrontendTokenKind.Range
         return FrontendTokenKind.Dot
 
     if ch == FRONTEND_CH_COLON:
@@ -758,10 +765,17 @@ def frontend_next_token(lexer: any FrontendLexer&) -> FrontendToken can[Memory.A
 
     if ch == FRONTEND_CH_DOT:
         _ = frontend_advance_char(lexer)
-        if frontend_cur_char(lexer) == FRONTEND_CH_DOT and frontend_peek_char_at(lexer, 1u) == FRONTEND_CH_DOT:
+        if frontend_cur_char(lexer) == FRONTEND_CH_DOT:
+            if frontend_peek_char_at(lexer, 1u) == FRONTEND_CH_DOT:
+                _ = frontend_advance_char(lexer)
+                _ = frontend_advance_char(lexer)
+                return frontend_make_token(FrontendTokenKind.Ellipsis, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
             _ = frontend_advance_char(lexer)
-            _ = frontend_advance_char(lexer)
-            return frontend_make_token(FrontendTokenKind.Ellipsis, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+            if frontend_match_char(lexer, FRONTEND_CH_LT):
+                return frontend_make_token(FrontendTokenKind.RangeLt, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+            if frontend_match_char(lexer, FRONTEND_CH_GT):
+                return frontend_make_token(FrontendTokenKind.RangeGt, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+            return frontend_make_token(FrontendTokenKind.Range, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
         return frontend_make_token(FrontendTokenKind.Dot, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
 
     if ch == FRONTEND_CH_COLON:
