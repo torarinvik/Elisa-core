@@ -2094,38 +2094,11 @@ func (s *functionState) packedEnumVariantDirectPayloadWordOffsets(enumType *sema
 }
 
 func (s *functionState) readPackedEnumTagWithStore(handleValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding) (C.LLVMValueRef, error) {
-	if enumType == nil || !enumType.Packed {
-		return nil, fmt.Errorf("missing packed enum tag metadata")
-	}
-	if store == nil || store.typ == nil {
+	ops, ok := s.packedStoreOpsFromBinding(store)
+	if !ok {
 		return nil, fmt.Errorf("packed enum %s word-handle tag read requires store context", enumType.Name)
 	}
-	arenaValue, err := s.emitPackedStoreArenaValueNamed(store.value, store.typ, "packed.tag.store.arena")
-	if err != nil {
-		return nil, err
-	}
-	stateValue, err := s.emitPackedStoreStateValueNamed(store.value, store.typ, "packed.tag.store.state")
-	if err != nil {
-		return nil, err
-	}
-	arenaType := s.g.result.NamedTypes["Arena"]
-	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	tagType := s.g.result.NamedTypes["u32"]
-	helperType := &semantic.FuncType{Name: "ctx_packed_store_read_tag", Params: []semantic.Type{arenaRefType, s.g.result.NamedTypes["uintptr"], voidRefType}, Return: tagType}
-	callee, err := s.g.ensureFunctionDeclared("ctx_packed_store_read_tag", helperType)
-	if err != nil {
-		return nil, err
-	}
-	llvmFnType, err := s.g.lowerFunctionType(helperType)
-	if err != nil {
-		return nil, err
-	}
-	coercedHandle, err := s.coerceValue(handleValue, enumType, s.g.result.NamedTypes["uintptr"])
-	if err != nil {
-		return nil, err
-	}
-	return s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, coercedHandle, stateValue}, "packed.handle.tag"), nil
+	return ops.storeTagAt(handleValue, enumType, "packed.tag.store")
 }
 
 func packedMatchNeedsEagerDecode(arms []ast.MatchArm) bool {

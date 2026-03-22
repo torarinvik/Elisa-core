@@ -840,42 +840,17 @@ func (s *functionState) encodePackedEnumHandleWithStore(rowPtr C.LLVMValueRef, e
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum handle metadata")
 	}
-	switch s.g.packedEnumABI {
-	case packedEnumABIRowHandle:
+	if s.g.packedEnumABI == packedEnumABIRowHandle {
 		return rowPtr, nil
-	case packedEnumABIWordHandle:
-		storeType := enumType.StoreType
-		if storeType == nil {
-			return nil, fmt.Errorf("packed enum %s is missing store metadata", enumType.Name)
-		}
-		if storeValue == nil {
-			return nil, fmt.Errorf("packed enum %s word-handle encode requires store context", enumType.Name)
-		}
-		arenaValue, err := s.emitPackedStoreArenaValueNamed(storeValue, storeType, "packed.encode.store.arena")
-		if err != nil {
-			return nil, err
-		}
-		stateValue, err := s.emitPackedStoreStateValueNamed(storeValue, storeType, "packed.encode.store.state")
-		if err != nil {
-			return nil, err
-		}
-		arenaType := s.g.result.NamedTypes["Arena"]
-		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-		voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-		helperType := &semantic.FuncType{Name: "ctx_packed_store_encode", Params: []semantic.Type{arenaRefType, voidRefType, voidRefType}, Return: s.g.result.NamedTypes["uintptr"]}
-		callee, err := s.g.ensureFunctionDeclared("ctx_packed_store_encode", helperType)
-		if err != nil {
-			return nil, err
-		}
-		llvmFnType, err := s.g.lowerFunctionType(helperType)
-		if err != nil {
-			return nil, err
-		}
-		encoded := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, rowPtr, stateValue}, "packed.handle.encode")
-		return s.coerceValue(encoded, s.g.result.NamedTypes["uintptr"], enumType)
-	default:
-		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedEnumABI)
 	}
+	storeType := enumType.StoreType
+	if storeType == nil {
+		return nil, fmt.Errorf("packed enum %s is missing store metadata", enumType.Name)
+	}
+	if storeValue == nil {
+		return nil, fmt.Errorf("packed enum %s word-handle encode requires store context", enumType.Name)
+	}
+	return (&packedStoreOps{s: s, storeValue: storeValue, storeType: storeType}).encodeHandle(rowPtr, enumType, "packed.encode.store")
 }
 
 func (s *functionState) decodePackedEnumHandle(handleValue C.LLVMValueRef, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
@@ -886,41 +861,14 @@ func (s *functionState) decodePackedEnumHandleWithStore(handleValue C.LLVMValueR
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum handle metadata")
 	}
-	switch s.g.packedEnumABI {
-	case packedEnumABIRowHandle:
+	if s.g.packedEnumABI == packedEnumABIRowHandle {
 		return handleValue, nil
-	case packedEnumABIWordHandle:
-		if store == nil || store.typ == nil {
-			return nil, fmt.Errorf("packed enum %s word-handle decode requires store context", enumType.Name)
-		}
-		arenaValue, err := s.emitPackedStoreArenaValueNamed(store.value, store.typ, "packed.decode.store.arena")
-		if err != nil {
-			return nil, err
-		}
-		stateValue, err := s.emitPackedStoreStateValueNamed(store.value, store.typ, "packed.decode.store.state")
-		if err != nil {
-			return nil, err
-		}
-		arenaType := s.g.result.NamedTypes["Arena"]
-		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-		voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-		helperType := &semantic.FuncType{Name: "ctx_packed_store_decode", Params: []semantic.Type{arenaRefType, s.g.result.NamedTypes["uintptr"], voidRefType}, Return: voidRefType}
-		callee, err := s.g.ensureFunctionDeclared("ctx_packed_store_decode", helperType)
-		if err != nil {
-			return nil, err
-		}
-		llvmFnType, err := s.g.lowerFunctionType(helperType)
-		if err != nil {
-			return nil, err
-		}
-		coercedHandle, err := s.coerceValue(handleValue, enumType, s.g.result.NamedTypes["uintptr"])
-		if err != nil {
-			return nil, err
-		}
-		return s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, coercedHandle, stateValue}, "packed.handle.decode"), nil
-	default:
-		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedEnumABI)
 	}
+	ops, ok := s.packedStoreOpsFromBinding(store)
+	if !ok {
+		return nil, fmt.Errorf("packed enum %s word-handle decode requires store context", enumType.Name)
+	}
+	return ops.decodeHandle(handleValue, enumType, "packed.decode.store")
 }
 
 func (s *functionState) enumPayloadWordCount(enumType *semantic.EnumType) (uint64, error) {
@@ -3071,98 +3019,49 @@ func (s *functionState) emitPackedStoreValue(arenaExpr ast.Expr, storeType *sema
 	if storeType == nil {
 		return nil, fmt.Errorf("missing packed enum store type")
 	}
-	switch s.g.packedEnumABI {
-	case packedEnumABIRowHandle:
-		arenaPtr, _, err := s.emitAddressOrTemp(arenaExpr)
-		if err != nil {
-			return nil, err
-		}
-		if storeType.Enum == nil {
-			return nil, fmt.Errorf("packed enum store %s is missing enum metadata", storeType.Name)
-		}
-		rowType, err := s.g.ensurePackedEnumStorageType(storeType.Enum)
-		if err != nil {
-			return nil, err
-		}
-		rowSizeBytes, err := s.g.abiSizeOfLLVMType(rowType)
-		if err != nil {
-			return nil, err
-		}
-		usizeType := s.g.result.NamedTypes["usize"]
-		usizeLLVMType, err := s.g.lowerType(usizeType)
-		if err != nil {
-			return nil, err
-		}
-		rowSizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(rowSizeBytes), 0)
-		arenaType := s.g.result.NamedTypes["Arena"]
-		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-		voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-		stateHelperType := &semantic.FuncType{Name: "ctx_packed_store_state_new", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
-		stateCallee, err := s.g.ensureFunctionDeclared("ctx_packed_store_state_new", stateHelperType)
-		if err != nil {
-			return nil, err
-		}
-		stateLLVMFnType, err := s.g.lowerFunctionType(stateHelperType)
-		if err != nil {
-			return nil, err
-		}
-		stateValue := s.buildCall(stateLLVMFnType, stateCallee, []C.LLVMValueRef{arenaPtr, rowSizeValue}, "packed.store.state")
-		storeLLVMType, err := s.g.lowerPackedEnumStoreType(storeType)
-		if err != nil {
-			return nil, err
-		}
-		storeValue := C.LLVMGetUndef(storeLLVMType)
-		storeValue = C.LLVMBuildInsertValue(s.builder, storeValue, arenaPtr, 0, cStringFree("packed.store.arena"))
-		storeValue = C.LLVMBuildInsertValue(s.builder, storeValue, rowSizeValue, 1, cStringFree("packed.store.row_bytes"))
-		storeValue = C.LLVMBuildInsertValue(s.builder, storeValue, stateValue, 2, cStringFree("packed.store.state"))
-		return storeValue, nil
-	case packedEnumABIWordHandle:
-		arenaPtr, _, err := s.emitAddressOrTemp(arenaExpr)
-		if err != nil {
-			return nil, err
-		}
-		if storeType.Enum == nil {
-			return nil, fmt.Errorf("packed enum store %s is missing enum metadata", storeType.Name)
-		}
-		rowType, err := s.g.ensurePackedEnumStorageType(storeType.Enum)
-		if err != nil {
-			return nil, err
-		}
-		rowSizeBytes, err := s.g.abiSizeOfLLVMType(rowType)
-		if err != nil {
-			return nil, err
-		}
-		usizeType := s.g.result.NamedTypes["usize"]
-		usizeLLVMType, err := s.g.lowerType(usizeType)
-		if err != nil {
-			return nil, err
-		}
-		rowSizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(rowSizeBytes), 0)
-		storeLLVMType, err := s.g.lowerPackedEnumStoreType(storeType)
-		if err != nil {
-			return nil, err
-		}
-		arenaType := s.g.result.NamedTypes["Arena"]
-		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-		voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-		stateHelperType := &semantic.FuncType{Name: "ctx_packed_store_state_new", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
-		stateCallee, err := s.g.ensureFunctionDeclared("ctx_packed_store_state_new", stateHelperType)
-		if err != nil {
-			return nil, err
-		}
-		stateLLVMFnType, err := s.g.lowerFunctionType(stateHelperType)
-		if err != nil {
-			return nil, err
-		}
-		stateValue := s.buildCall(stateLLVMFnType, stateCallee, []C.LLVMValueRef{arenaPtr, rowSizeValue}, "packed.store.state")
-		storeValue := C.LLVMGetUndef(storeLLVMType)
-		storeValue = C.LLVMBuildInsertValue(s.builder, storeValue, arenaPtr, 0, cStringFree("packed.store.arena"))
-		storeValue = C.LLVMBuildInsertValue(s.builder, storeValue, rowSizeValue, 1, cStringFree("packed.store.row_bytes"))
-		storeValue = C.LLVMBuildInsertValue(s.builder, storeValue, stateValue, 2, cStringFree("packed.store.state"))
-		return storeValue, nil
-	default:
-		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedEnumABI)
+	arenaPtr, _, err := s.emitAddressOrTemp(arenaExpr)
+	if err != nil {
+		return nil, err
 	}
+	if storeType.Enum == nil {
+		return nil, fmt.Errorf("packed enum store %s is missing enum metadata", storeType.Name)
+	}
+	rowType, err := s.g.ensurePackedEnumStorageType(storeType.Enum)
+	if err != nil {
+		return nil, err
+	}
+	rowSizeBytes, err := s.g.abiSizeOfLLVMType(rowType)
+	if err != nil {
+		return nil, err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, err
+	}
+	rowSizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(rowSizeBytes), 0)
+	storeLLVMType, err := s.g.lowerPackedEnumStoreType(storeType)
+	if err != nil {
+		return nil, err
+	}
+	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	stateHelperType := &semantic.FuncType{Name: "ctx_packed_store_state_new", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
+	stateCallee, err := s.g.ensureFunctionDeclared("ctx_packed_store_state_new", stateHelperType)
+	if err != nil {
+		return nil, err
+	}
+	stateLLVMFnType, err := s.g.lowerFunctionType(stateHelperType)
+	if err != nil {
+		return nil, err
+	}
+	stateValue := s.buildCall(stateLLVMFnType, stateCallee, []C.LLVMValueRef{arenaPtr, rowSizeValue}, "packed.store.state")
+	storeValue := C.LLVMGetUndef(storeLLVMType)
+	storeValue = C.LLVMBuildInsertValue(s.builder, storeValue, arenaPtr, 0, cStringFree("packed.store.arena"))
+	storeValue = C.LLVMBuildInsertValue(s.builder, storeValue, rowSizeValue, 1, cStringFree("packed.store.row_bytes"))
+	storeValue = C.LLVMBuildInsertValue(s.builder, storeValue, stateValue, 2, cStringFree("packed.store.state"))
+	return storeValue, nil
 }
 
 func (s *functionState) emitPackedStoreArenaValue(storeValue C.LLVMValueRef, storeType *semantic.PackedEnumStoreType) (C.LLVMValueRef, error) {
@@ -3466,7 +3365,11 @@ func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMVa
 	if err != nil {
 		return nil, nil, true, err
 	}
-	wordValue, err := s.readPackedEnumWordWithStore(handleValue, enumType, &store, fieldWordOffset)
+	ops, ok := s.packedStoreOpsFromBinding(&store)
+	if !ok {
+		return nil, nil, true, fmt.Errorf("packed enum %s word-handle common-field read requires store context", enumType.Name)
+	}
+	wordValue, err := ops.loadPayloadWord(handleValue, enumType, fieldWordOffset, "packed.common.store")
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -3578,39 +3481,11 @@ func (s *functionState) packedEnumDirectWordFieldOffset(enumType *semantic.EnumT
 }
 
 func (s *functionState) readPackedEnumWordWithStore(handleValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding, wordOffset C.LLVMValueRef) (C.LLVMValueRef, error) {
-	if enumType == nil || !enumType.Packed {
-		return nil, fmt.Errorf("missing packed enum common-field metadata")
-	}
-	if store == nil || store.typ == nil {
+	ops, ok := s.packedStoreOpsFromBinding(store)
+	if !ok {
 		return nil, fmt.Errorf("packed enum %s word-handle common-field read requires store context", enumType.Name)
 	}
-	arenaValue, err := s.emitPackedStoreArenaValueNamed(store.value, store.typ, "packed.common.store.arena")
-	if err != nil {
-		return nil, err
-	}
-	stateValue, err := s.emitPackedStoreStateValueNamed(store.value, store.typ, "packed.common.store.state")
-	if err != nil {
-		return nil, err
-	}
-	arenaType := s.g.result.NamedTypes["Arena"]
-	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	uintptrType := s.g.result.NamedTypes["uintptr"]
-	usizeType := s.g.result.NamedTypes["usize"]
-	helperType := &semantic.FuncType{Name: "ctx_packed_store_read_word", Params: []semantic.Type{arenaRefType, uintptrType, voidRefType, usizeType}, Return: uintptrType}
-	callee, err := s.g.ensureFunctionDeclared("ctx_packed_store_read_word", helperType)
-	if err != nil {
-		return nil, err
-	}
-	llvmFnType, err := s.g.lowerFunctionType(helperType)
-	if err != nil {
-		return nil, err
-	}
-	coercedHandle, err := s.coerceValue(handleValue, enumType, uintptrType)
-	if err != nil {
-		return nil, err
-	}
-	return s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, coercedHandle, stateValue, wordOffset}, "packed.handle.common"), nil
+	return ops.loadPayloadWord(handleValue, enumType, wordOffset, "packed.common.store")
 }
 
 func (s *functionState) packedStoreConstructorInfoFromField(expr *ast.FieldExpr) (*semantic.PackedEnumStoreType, bool) {
@@ -4408,29 +4283,8 @@ func (s *functionState) emitPackedStoreRecordTag(storeValue C.LLVMValueRef, stor
 	if storeType == nil {
 		return fmt.Errorf("missing packed store type for tag record")
 	}
-	arenaValue, err := s.emitPackedStoreArenaValueNamed(storeValue, storeType, "packed.tag.record.arena")
-	if err != nil {
-		return err
-	}
-	stateValue, err := s.emitPackedStoreStateValueNamed(storeValue, storeType, "packed.tag.record.state")
-	if err != nil {
-		return err
-	}
-	arenaType := s.g.result.NamedTypes["Arena"]
-	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	tagType := s.g.result.NamedTypes["u32"]
-	recordType := &semantic.FuncType{Name: "ctx_packed_store_record_tag", Params: []semantic.Type{arenaRefType, tagType, voidRefType}, Return: s.g.result.NamedTypes["void"]}
-	recordCallee, err := s.g.ensureFunctionDeclared("ctx_packed_store_record_tag", recordType)
-	if err != nil {
-		return err
-	}
-	recordLLVMType, err := s.g.lowerFunctionType(recordType)
-	if err != nil {
-		return err
-	}
-	s.buildCall(recordLLVMType, recordCallee, []C.LLVMValueRef{arenaValue, tagValue, stateValue}, "")
-	return nil
+	ops := &packedStoreOps{s: s, storeValue: storeValue, storeType: storeType}
+	return ops.recordTag(tagValue, "packed.tag.record")
 }
 
 type packedEnumTailPayloadPlan struct {
@@ -4577,7 +4431,8 @@ func (s *functionState) emitPackedEnumStorageAlloc(storeValue C.LLVMValueRef, en
 	if storeType == nil {
 		return nil, nil, nil, fmt.Errorf("packed enum %s is missing store metadata", enumType.Name)
 	}
-	rowSizeValue, err := s.emitPackedStoreRowBytesValue(storeValue, storeType)
+	ops := &packedStoreOps{s: s, storeValue: storeValue, storeType: storeType}
+	rowSizeValue, err := ops.rowBytesValue("packed.alloc.store")
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -4585,86 +4440,7 @@ func (s *functionState) emitPackedEnumStorageAlloc(storeValue C.LLVMValueRef, en
 	if tailPlan != nil {
 		totalSizeValue = C.LLVMBuildAdd(s.builder, rowSizeValue, tailPlan.byteCount, cStringFree("packed.alloc.bytes"))
 	}
-	switch s.g.packedEnumABI {
-	case packedEnumABIRowHandle:
-		arenaValue, err := s.emitPackedStoreArenaValue(storeValue, storeType)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		arenaType := s.g.result.NamedTypes["Arena"]
-		usizeType := s.g.result.NamedTypes["usize"]
-		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-		voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-		helperType := &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
-		callee, err := s.g.ensureFunctionDeclared("arena_alloc", helperType)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		llvmFnType, err := s.g.lowerFunctionType(helperType)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		allocPtr := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, totalSizeValue}, "packed.alloc")
-		stateValue, err := s.emitPackedStoreStateValueNamed(storeValue, storeType, "packed.alloc.store.state")
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		recordType := &semantic.FuncType{Name: "ctx_packed_store_record_row_ptr", Params: []semantic.Type{arenaRefType, voidRefType, voidRefType}, Return: s.g.result.NamedTypes["void"]}
-		recordCallee, err := s.g.ensureFunctionDeclared("ctx_packed_store_record_row_ptr", recordType)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		recordLLVMType, err := s.g.lowerFunctionType(recordType)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		s.buildCall(recordLLVMType, recordCallee, []C.LLVMValueRef{arenaValue, allocPtr, stateValue}, "")
-		return allocPtr, allocPtr, rowSizeValue, nil
-	case packedEnumABIWordHandle:
-		arenaValue, err := s.emitPackedStoreArenaValueNamed(storeValue, storeType, "packed.alloc.store.arena")
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		arenaType := s.g.result.NamedTypes["Arena"]
-		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-		uintptrType := s.g.result.NamedTypes["uintptr"]
-		voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-		stateValue, err := s.emitPackedStoreStateValueNamed(storeValue, storeType, "packed.alloc.store.state")
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		allocResultType := s.g.result.NamedTypes["PackedStoreAllocResult"]
-		if allocResultType == nil {
-			return nil, nil, nil, fmt.Errorf("missing builtin PackedStoreAllocResult type for packed enum allocation")
-		}
-		allocHelperName := "ctx_packed_store_alloc_fixed_result"
-		allocHelperParams := []semantic.Type{arenaRefType, voidRefType}
-		allocArgs := []C.LLVMValueRef{arenaValue, stateValue}
-		if tailPlan != nil {
-			allocHelperName = "ctx_packed_store_alloc_result"
-			allocHelperParams = []semantic.Type{arenaRefType, s.g.result.NamedTypes["usize"], voidRefType}
-			allocArgs = []C.LLVMValueRef{arenaValue, totalSizeValue, stateValue}
-		}
-		allocHelperType := &semantic.FuncType{Name: allocHelperName, Params: allocHelperParams, Return: allocResultType}
-		allocCallee, err := s.g.ensureFunctionDeclared(allocHelperName, allocHelperType)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		allocLLVMFnType, err := s.g.lowerFunctionType(allocHelperType)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		allocResult := s.buildCall(allocLLVMFnType, allocCallee, allocArgs, "packed.handle.alloc")
-		allocPtr := C.LLVMBuildExtractValue(s.builder, allocResult, 0, cStringFree("packed.alloc.ptr"))
-		handleValue := C.LLVMBuildExtractValue(s.builder, allocResult, 1, cStringFree("packed.alloc.handle"))
-		coercedHandle, err := s.coerceValue(handleValue, uintptrType, enumType)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		return allocPtr, coercedHandle, rowSizeValue, nil
-	default:
-		return nil, nil, nil, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedEnumABI)
-	}
+	return ops.allocateStorage(enumType, totalSizeValue, tailPlan != nil, "packed.alloc.store")
 }
 
 func (s *functionState) resolveEnumConstructorArgs(enumType *semantic.EnumType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string) ([]ast.Expr, error) {
