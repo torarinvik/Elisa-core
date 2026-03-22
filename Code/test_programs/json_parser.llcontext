@@ -2153,6 +2153,21 @@ def json_parser_value_index_impl(value: any JsonParserValue&, index: usize, out:
     return 1 if out[0u].impl_bits != 0u64.uintptr() else 0
 
 
+def json_parser_value_field_node(value: any JsonParserValue&, key: any u8&, store: JsonNode.Store[Local]) -> JsonNode:
+    invalid_node: JsonNode = json_node_invalid(store)
+    if not json_parser_value_is_live(value):
+        return invalid_node
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    return json_ast_object_get(json_parser_value_node(value), json_parser_document_source(impl), key, store)
+
+
+def json_parser_value_index_node(value: any JsonParserValue&, index: usize, store: JsonNode.Store[Local]) -> JsonNode:
+    invalid_node: JsonNode = json_node_invalid(store)
+    if not json_parser_value_is_live(value):
+        return invalid_node
+    return json_ast_array_nth(json_parser_value_node(value), index, store)
+
+
 def json_parser_value_object_key_at_impl(value: any JsonParserValue&, index: usize, out: any JsonParserValue&) -> i64 can[Memory.Allocate, Abort.Panic]:
     out[0u] <- json_parser_value_null()
     if not json_parser_value_is_live(value):
@@ -2201,6 +2216,14 @@ def json_parser_value_number_kind_impl(value: any JsonParserValue&) -> i64:
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     return json_ast_number_kind_code(json_ast_number_kind(json_parser_document_source(impl), json_parser_value_node(value), store))
+
+
+def json_parser_value_string_eq_impl(value: any JsonParserValue&, literal: any u8&) -> i64:
+    if not json_parser_value_is_live(value):
+        return -1
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    return 1 if json_ast_string_eq_literal(json_parser_document_source(impl), json_parser_value_node(value), literal, store) else 0
 
 
 def json_parser_value_string_len_impl(value: any JsonParserValue&) -> i64:
@@ -2265,6 +2288,324 @@ def json_parser_value_f32_impl(value: any JsonParserValue&, out: any f32&) -> i6
     float_value: f32 = try json_ast_number_f32_value(json_parser_document_source(impl), json_parser_value_node(value), store) else 0.0
     out[0u] <- float_value
     return 1
+
+
+def json_parser_value_field_kind_impl(value: any JsonParserValue&, key: any u8&) -> i64:
+    if not json_parser_value_is_live(value):
+        return -1
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_field_node(value, key, store)
+    if json_node_is_invalid(child_node, store):
+        return -1
+    return json_ast_kind_code(json_ast_kind(child_node, store))
+
+
+def json_parser_value_field_bool_impl(value: any JsonParserValue&, key: any u8&) -> i64:
+    if not json_parser_value_is_live(value):
+        return -1
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_field_node(value, key, store)
+    if json_node_is_invalid(child_node, store):
+        return -1
+    return json_ast_bool_value(child_node, store)
+
+
+def json_parser_value_field_is_null_impl(value: any JsonParserValue&, key: any u8&) -> i64:
+    if not json_parser_value_is_live(value):
+        return -1
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_field_node(value, key, store)
+    if json_node_is_invalid(child_node, store):
+        return -1
+    return 1 if json_ast_is_null(child_node, store) else 0
+
+
+def json_parser_value_field_number_kind_impl(value: any JsonParserValue&, key: any u8&) -> i64:
+    if not json_parser_value_is_live(value):
+        return -1
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_field_node(value, key, store)
+    if json_node_is_invalid(child_node, store):
+        return -1
+    return json_ast_number_kind_code(json_ast_number_kind(json_parser_document_source(impl), child_node, store))
+
+
+def json_parser_value_field_string_len_impl(value: any JsonParserValue&, key: any u8&) -> i64:
+    if not json_parser_value_is_live(value):
+        return -1
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_field_node(value, key, store)
+    if json_node_is_invalid(child_node, store):
+        return -1
+    return json_ast_string_len(json_parser_document_source(impl), child_node, store)
+
+
+def json_parser_value_field_string_copy_impl(value: any JsonParserValue&, key: any u8&, out: any u8&, capacity: usize) -> i64:
+    if not json_parser_value_is_live(value):
+        return -1
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_field_node(value, key, store)
+    if json_node_is_invalid(child_node, store):
+        return -1
+    return json_ast_string_copy(json_parser_document_source(impl), child_node, out, capacity, store)
+
+
+def json_parser_value_field_string_eq_impl(value: any JsonParserValue&, key: any u8&, literal: any u8&) -> i64:
+    if not json_parser_value_is_live(value):
+        return -1
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_field_node(value, key, store)
+    if json_node_is_invalid(child_node, store):
+        return -1
+    return 1 if json_ast_string_eq_literal(json_parser_document_source(impl), child_node, literal, store) else 0
+
+
+def json_parser_value_field_i64_impl(value: any JsonParserValue&, key: any u8&, out: any i64&) -> i64:
+    if not json_parser_value_is_live(value):
+        return 0
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_field_node(value, key, store)
+    if json_node_is_invalid(child_node, store):
+        return 0
+    number_value: JsonNumberValue = json_ast_number_value(json_parser_document_source(impl), child_node, store)
+    if not json_number_value_can_materialize_i64(number_value):
+        return 0
+    out[0u] <- number_value.signed_value if number_value.kind == JsonNumberKind.SIGNED else number_value.unsigned_value.i64()
+    return 1
+
+
+def json_parser_value_field_u64_impl(value: any JsonParserValue&, key: any u8&, out: any u64&) -> i64:
+    if not json_parser_value_is_live(value):
+        return 0
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_field_node(value, key, store)
+    if json_node_is_invalid(child_node, store):
+        return 0
+    number_value: JsonNumberValue = json_ast_number_value(json_parser_document_source(impl), child_node, store)
+    if not json_number_value_can_materialize_u64(number_value):
+        return 0
+    out[0u] <- number_value.unsigned_value
+    return 1
+
+
+def json_parser_value_field_f64_impl(value: any JsonParserValue&, key: any u8&, out: any f64&) -> i64:
+    if not json_parser_value_is_live(value):
+        return 0
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_field_node(value, key, store)
+    if json_node_is_invalid(child_node, store):
+        return 0
+    if not json_node_can_materialize_float(child_node, store):
+        return 0
+    float_value: f64 = try json_ast_number_f64_value(json_parser_document_source(impl), child_node, store) else 0.0
+    out[0u] <- float_value
+    return 1
+
+
+def json_parser_value_field_f32_impl(value: any JsonParserValue&, key: any u8&, out: any f32&) -> i64:
+    if not json_parser_value_is_live(value):
+        return 0
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_field_node(value, key, store)
+    if json_node_is_invalid(child_node, store):
+        return 0
+    if not json_node_can_materialize_float(child_node, store):
+        return 0
+    float_value: f32 = try json_ast_number_f32_value(json_parser_document_source(impl), child_node, store) else 0.0
+    out[0u] <- float_value
+    return 1
+
+
+def json_parser_value_field_array_len_impl(value: any JsonParserValue&, key: any u8&) -> i64:
+    if not json_parser_value_is_live(value):
+        return -1
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_field_node(value, key, store)
+    if json_node_is_invalid(child_node, store):
+        return -1
+    return json_ast_array_len(child_node, store)
+
+
+def json_parser_value_field_object_len_impl(value: any JsonParserValue&, key: any u8&) -> i64:
+    if not json_parser_value_is_live(value):
+        return -1
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_field_node(value, key, store)
+    if json_node_is_invalid(child_node, store):
+        return -1
+    return json_ast_object_len(child_node, store)
+
+
+def json_parser_value_index_kind_impl(value: any JsonParserValue&, index: usize) -> i64:
+    if not json_parser_value_is_live(value):
+        return -1
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_index_node(value, index, store)
+    if json_node_is_invalid(child_node, store):
+        return -1
+    return json_ast_kind_code(json_ast_kind(child_node, store))
+
+
+def json_parser_value_index_bool_impl(value: any JsonParserValue&, index: usize) -> i64:
+    if not json_parser_value_is_live(value):
+        return -1
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_index_node(value, index, store)
+    if json_node_is_invalid(child_node, store):
+        return -1
+    return json_ast_bool_value(child_node, store)
+
+
+def json_parser_value_index_is_null_impl(value: any JsonParserValue&, index: usize) -> i64:
+    if not json_parser_value_is_live(value):
+        return -1
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_index_node(value, index, store)
+    if json_node_is_invalid(child_node, store):
+        return -1
+    return 1 if json_ast_is_null(child_node, store) else 0
+
+
+def json_parser_value_index_number_kind_impl(value: any JsonParserValue&, index: usize) -> i64:
+    if not json_parser_value_is_live(value):
+        return -1
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_index_node(value, index, store)
+    if json_node_is_invalid(child_node, store):
+        return -1
+    return json_ast_number_kind_code(json_ast_number_kind(json_parser_document_source(impl), child_node, store))
+
+
+def json_parser_value_index_string_len_impl(value: any JsonParserValue&, index: usize) -> i64:
+    if not json_parser_value_is_live(value):
+        return -1
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_index_node(value, index, store)
+    if json_node_is_invalid(child_node, store):
+        return -1
+    return json_ast_string_len(json_parser_document_source(impl), child_node, store)
+
+
+def json_parser_value_index_string_copy_impl(value: any JsonParserValue&, index: usize, out: any u8&, capacity: usize) -> i64:
+    if not json_parser_value_is_live(value):
+        return -1
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_index_node(value, index, store)
+    if json_node_is_invalid(child_node, store):
+        return -1
+    return json_ast_string_copy(json_parser_document_source(impl), child_node, out, capacity, store)
+
+
+def json_parser_value_index_string_eq_impl(value: any JsonParserValue&, index: usize, literal: any u8&) -> i64:
+    if not json_parser_value_is_live(value):
+        return -1
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_index_node(value, index, store)
+    if json_node_is_invalid(child_node, store):
+        return -1
+    return 1 if json_ast_string_eq_literal(json_parser_document_source(impl), child_node, literal, store) else 0
+
+
+def json_parser_value_index_i64_impl(value: any JsonParserValue&, index: usize, out: any i64&) -> i64:
+    if not json_parser_value_is_live(value):
+        return 0
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_index_node(value, index, store)
+    if json_node_is_invalid(child_node, store):
+        return 0
+    number_value: JsonNumberValue = json_ast_number_value(json_parser_document_source(impl), child_node, store)
+    if not json_number_value_can_materialize_i64(number_value):
+        return 0
+    out[0u] <- number_value.signed_value if number_value.kind == JsonNumberKind.SIGNED else number_value.unsigned_value.i64()
+    return 1
+
+
+def json_parser_value_index_u64_impl(value: any JsonParserValue&, index: usize, out: any u64&) -> i64:
+    if not json_parser_value_is_live(value):
+        return 0
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_index_node(value, index, store)
+    if json_node_is_invalid(child_node, store):
+        return 0
+    number_value: JsonNumberValue = json_ast_number_value(json_parser_document_source(impl), child_node, store)
+    if not json_number_value_can_materialize_u64(number_value):
+        return 0
+    out[0u] <- number_value.unsigned_value
+    return 1
+
+
+def json_parser_value_index_f64_impl(value: any JsonParserValue&, index: usize, out: any f64&) -> i64:
+    if not json_parser_value_is_live(value):
+        return 0
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_index_node(value, index, store)
+    if json_node_is_invalid(child_node, store):
+        return 0
+    if not json_node_can_materialize_float(child_node, store):
+        return 0
+    float_value: f64 = try json_ast_number_f64_value(json_parser_document_source(impl), child_node, store) else 0.0
+    out[0u] <- float_value
+    return 1
+
+
+def json_parser_value_index_f32_impl(value: any JsonParserValue&, index: usize, out: any f32&) -> i64:
+    if not json_parser_value_is_live(value):
+        return 0
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_index_node(value, index, store)
+    if json_node_is_invalid(child_node, store):
+        return 0
+    if not json_node_can_materialize_float(child_node, store):
+        return 0
+    float_value: f32 = try json_ast_number_f32_value(json_parser_document_source(impl), child_node, store) else 0.0
+    out[0u] <- float_value
+    return 1
+
+
+def json_parser_value_index_array_len_impl(value: any JsonParserValue&, index: usize) -> i64:
+    if not json_parser_value_is_live(value):
+        return -1
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_index_node(value, index, store)
+    if json_node_is_invalid(child_node, store):
+        return -1
+    return json_ast_array_len(child_node, store)
+
+
+def json_parser_value_index_object_len_impl(value: any JsonParserValue&, index: usize) -> i64:
+    if not json_parser_value_is_live(value):
+        return -1
+    impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
+    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    child_node: JsonNode = json_parser_value_index_node(value, index, store)
+    if json_node_is_invalid(child_node, store):
+        return -1
+    return json_ast_object_len(child_node, store)
 
 
 def json_parser_value_array_iter_impl(value: any JsonParserValue&, out: any JsonParserArrayIter&) -> i64 can[Memory.Allocate, Abort.Panic]:
@@ -3758,12 +4099,39 @@ export func json_parser_value_object_value_at(value: any JsonParserValue&, index
 export func json_parser_value_bool(value: any JsonParserValue&) -> i64 = json_parser_value_bool_impl
 export func json_parser_value_is_null(value: any JsonParserValue&) -> i64 = json_parser_value_is_null_impl
 export func json_parser_value_number_kind(value: any JsonParserValue&) -> i64 = json_parser_value_number_kind_impl
+export func json_parser_value_string_eq(value: any JsonParserValue&, literal: any u8&) -> i64 = json_parser_value_string_eq_impl
 export func json_parser_value_string_len(value: any JsonParserValue&) -> i64 = json_parser_value_string_len_impl
 export func json_parser_value_string_copy(value: any JsonParserValue&, out: any u8&, capacity: usize) -> i64 = json_parser_value_string_copy_impl
 export func json_parser_value_i64(value: any JsonParserValue&, out: any i64&) -> i64 = json_parser_value_i64_impl
 export func json_parser_value_u64(value: any JsonParserValue&, out: any u64&) -> i64 = json_parser_value_u64_impl
 export func json_parser_value_f64(value: any JsonParserValue&, out: any f64&) -> i64 = json_parser_value_f64_impl
 export func json_parser_value_f32(value: any JsonParserValue&, out: any f32&) -> i64 = json_parser_value_f32_impl
+export func json_parser_value_field_kind(value: any JsonParserValue&, key: any u8&) -> i64 = json_parser_value_field_kind_impl
+export func json_parser_value_field_bool(value: any JsonParserValue&, key: any u8&) -> i64 = json_parser_value_field_bool_impl
+export func json_parser_value_field_is_null(value: any JsonParserValue&, key: any u8&) -> i64 = json_parser_value_field_is_null_impl
+export func json_parser_value_field_number_kind(value: any JsonParserValue&, key: any u8&) -> i64 = json_parser_value_field_number_kind_impl
+export func json_parser_value_field_string_len(value: any JsonParserValue&, key: any u8&) -> i64 = json_parser_value_field_string_len_impl
+export func json_parser_value_field_string_copy(value: any JsonParserValue&, key: any u8&, out: any u8&, capacity: usize) -> i64 = json_parser_value_field_string_copy_impl
+export func json_parser_value_field_string_eq(value: any JsonParserValue&, key: any u8&, literal: any u8&) -> i64 = json_parser_value_field_string_eq_impl
+export func json_parser_value_field_i64(value: any JsonParserValue&, key: any u8&, out: any i64&) -> i64 = json_parser_value_field_i64_impl
+export func json_parser_value_field_u64(value: any JsonParserValue&, key: any u8&, out: any u64&) -> i64 = json_parser_value_field_u64_impl
+export func json_parser_value_field_f64(value: any JsonParserValue&, key: any u8&, out: any f64&) -> i64 = json_parser_value_field_f64_impl
+export func json_parser_value_field_f32(value: any JsonParserValue&, key: any u8&, out: any f32&) -> i64 = json_parser_value_field_f32_impl
+export func json_parser_value_field_array_len(value: any JsonParserValue&, key: any u8&) -> i64 = json_parser_value_field_array_len_impl
+export func json_parser_value_field_object_len(value: any JsonParserValue&, key: any u8&) -> i64 = json_parser_value_field_object_len_impl
+export func json_parser_value_index_kind(value: any JsonParserValue&, index: usize) -> i64 = json_parser_value_index_kind_impl
+export func json_parser_value_index_bool(value: any JsonParserValue&, index: usize) -> i64 = json_parser_value_index_bool_impl
+export func json_parser_value_index_is_null(value: any JsonParserValue&, index: usize) -> i64 = json_parser_value_index_is_null_impl
+export func json_parser_value_index_number_kind(value: any JsonParserValue&, index: usize) -> i64 = json_parser_value_index_number_kind_impl
+export func json_parser_value_index_string_len(value: any JsonParserValue&, index: usize) -> i64 = json_parser_value_index_string_len_impl
+export func json_parser_value_index_string_copy(value: any JsonParserValue&, index: usize, out: any u8&, capacity: usize) -> i64 = json_parser_value_index_string_copy_impl
+export func json_parser_value_index_string_eq(value: any JsonParserValue&, index: usize, literal: any u8&) -> i64 = json_parser_value_index_string_eq_impl
+export func json_parser_value_index_i64(value: any JsonParserValue&, index: usize, out: any i64&) -> i64 = json_parser_value_index_i64_impl
+export func json_parser_value_index_u64(value: any JsonParserValue&, index: usize, out: any u64&) -> i64 = json_parser_value_index_u64_impl
+export func json_parser_value_index_f64(value: any JsonParserValue&, index: usize, out: any f64&) -> i64 = json_parser_value_index_f64_impl
+export func json_parser_value_index_f32(value: any JsonParserValue&, index: usize, out: any f32&) -> i64 = json_parser_value_index_f32_impl
+export func json_parser_value_index_array_len(value: any JsonParserValue&, index: usize) -> i64 = json_parser_value_index_array_len_impl
+export func json_parser_value_index_object_len(value: any JsonParserValue&, index: usize) -> i64 = json_parser_value_index_object_len_impl
 export func json_parser_value_array_iter(value: any JsonParserValue&, out: any JsonParserArrayIter&) -> i64 = json_parser_value_array_iter_impl
 export func json_parser_value_object_iter(value: any JsonParserValue&, out: any JsonParserObjectIter&) -> i64 = json_parser_value_object_iter_impl
 export func json_parser_array_iter_is_valid(iter: any JsonParserArrayIter&) -> i64 = json_parser_array_iter_is_valid_impl
