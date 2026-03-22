@@ -350,9 +350,7 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		if err != nil {
 			return err
 		}
-		if ident, ok := n.Target.(*ast.Ident); ok {
-			s.invalidatePackedEnumStorage(ident.Name)
-		}
+		s.invalidatePackedEnumStorageExpr(n.Target)
 		value, _, err := s.emitExpr(n.Value, targetType)
 		if err != nil {
 			return err
@@ -365,9 +363,7 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		if err != nil {
 			return err
 		}
-		if ident, ok := n.Target.(*ast.Ident); ok {
-			s.invalidatePackedEnumStorage(ident.Name)
-		}
+		s.invalidatePackedEnumStorageExpr(n.Target)
 		value, _, err := s.emitExpr(n.Value, targetType)
 		if err != nil {
 			return err

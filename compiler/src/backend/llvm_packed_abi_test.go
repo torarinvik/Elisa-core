@@ -393,7 +393,7 @@ func TestGenerateLLVMIRUsesSingleDecodeForFrozenHelperWrappedRepeatedCommonField
 	Lit(value: int)
 
 repr(c) struct Box:
-	node: Expr
+	node: mutable Expr
 
 @borrows_return_field(node, node)
 extern wrap_node(node: Expr) -> Box
@@ -432,6 +432,53 @@ def fold_common_frozen_wrapped_direct() -> int:
 	stateExtracts := strings.Count(output, "packed.decode.store.state = extractvalue %Expr__Store")
 	if stateExtracts != 1 {
 		t.Fatalf("expected helper-wrapped repeated frozen packed common-field reads outside an explicit frozen checkpoint to reuse a single decode state extractvalue, got %d extracts:\n%s", stateExtracts, output)
+	}
+}
+
+func TestGenerateLLVMIRInvalidatesFrozenHelperWrappedDecodeCacheAfterFieldAssignment(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Lit(value: int)
+
+repr(c) struct Box:
+	node: mutable Expr
+
+def fold_common_frozen_wrapped_reassign() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	boxed: Box = Box(new[store] Expr.Lit(span: 7, value: 5))
+	other: Expr = new[store] Expr.Lit(span: 11, value: 9)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	first: int = boxed.node.span
+	boxed.node <- other
+	_ = frozen
+	return first + boxed.node.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_wrapped_field_cache_reassign.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
+	if decodeCalls != 2 {
+		t.Fatalf("expected helper-wrapped frozen packed common-field reads separated by field reassignment to decode twice, got %d decode calls:\n%s", decodeCalls, output)
+	}
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_word(")
+	if readCalls != 0 {
+		t.Fatalf("expected helper-wrapped frozen packed common-field reads after reassignment to avoid ctx_packed_store_read_word, got %d helper calls:\n%s", readCalls, output)
+	}
+	if strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
+		t.Fatalf("expected helper-wrapped frozen packed common-field reads after reassignment to avoid ctx_packed_store_read_tag after eager decode, got:\n%s", output)
+	}
+	arenaExtracts := strings.Count(output, "packed.decode.store.arena = extractvalue %Expr__Store")
+	if arenaExtracts != 1 {
+		t.Fatalf("expected helper-wrapped frozen packed common-field reads after reassignment to keep reusing one decoded-store arena extractvalue, got %d extracts:\n%s", arenaExtracts, output)
+	}
+	stateExtracts := strings.Count(output, "packed.decode.store.state = extractvalue %Expr__Store")
+	if stateExtracts != 1 {
+		t.Fatalf("expected helper-wrapped frozen packed common-field reads after reassignment to keep reusing one decoded-store state extractvalue, got %d extracts:\n%s", stateExtracts, output)
 	}
 }
 

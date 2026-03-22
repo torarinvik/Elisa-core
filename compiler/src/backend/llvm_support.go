@@ -892,6 +892,12 @@ func (s *functionState) invalidatePackedEnumStorage(name string) {
 	}
 }
 
+func (s *functionState) invalidatePackedEnumStorageExpr(expr ast.Expr) {
+	if path, ok := s.packedEnumStoragePath(expr); ok {
+		s.invalidatePackedEnumStorage(path)
+	}
+}
+
 func (s *functionState) emitConstValue(value semantic.ConstValue) (C.LLVMValueRef, semantic.Type, error) {
 	return s.emitConstValueWithType(value, nil)
 }
