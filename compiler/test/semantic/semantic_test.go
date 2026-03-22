@@ -2640,6 +2640,24 @@ func TestAnalyzeRejectsFloatArrayIndex(t *testing.T) {
 	}
 }
 
+func TestAnalyzeAcceptsConstFloatCastsInCompileTimeIntegerContexts(t *testing.T) {
+	src := `const COUNT: i32 = 3.75.i32()
+
+def sized() -> i32[COUNT]:
+    return [1, 2, 3]
+`
+	result, errs := parseAndAnalyze(t, "const_float_cast_compile_time_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	count, ok := result.ConstValues["COUNT"]
+	if !ok {
+		t.Fatal("expected COUNT const value to be recorded")
+	}
+	if count.Kind != semantic.ConstInt || count.Int != 3 {
+		t.Fatalf("expected COUNT const value to be int 3, got %#v", count)
+	}
+}
+
 func TestAnalyzeRejectsNullIntoNonNullRef(t *testing.T) {
 	src := `repr(c) struct Box:
     value: int

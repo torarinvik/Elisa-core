@@ -85,7 +85,11 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 	case *ast.ParenExpr:
 		return a.evalConstExpr(n.Inner)
 	case *ast.CastExpr:
-		return a.evalConstExpr(n.Operand)
+		operand, ok := a.evalConstExpr(n.Operand)
+		if !ok {
+			return ConstValue{}, false
+		}
+		return CastConstValue(operand, a.resolveType(n.Target))
 	case *ast.MoveExpr:
 		return a.evalConstExpr(n.Operand)
 	case *ast.UnaryExpr:
@@ -318,4 +322,128 @@ func ParseFloatLiteral(expr *ast.FloatLit) (float64, bool) {
 		return 0, false
 	}
 	return v, true
+}
+
+func CastConstValue(value ConstValue, dst Type) (ConstValue, bool) {
+	if storage, ok := ConstEnumStorageType(dst); ok {
+		dst = storage
+	}
+	if !IsNumericType(dst) || !isConstNumeric(value) {
+		return ConstValue{}, false
+	}
+	if IsFloatType(dst) {
+		floatValue := constNumericAsFloat64(value)
+		if math.IsNaN(floatValue) || math.IsInf(floatValue, 0) {
+			return ConstValue{}, false
+		}
+		if builtin, ok := dst.(*BuiltinType); ok && builtin.Name == "f32" {
+			return ConstValue{Kind: ConstFloat, Float: float64(float32(floatValue))}, true
+		}
+		return ConstValue{Kind: ConstFloat, Float: floatValue}, true
+	}
+	intValue, ok := castConstNumericToInt64(value, dst)
+	if !ok {
+		return ConstValue{}, false
+	}
+	return ConstValue{Kind: ConstInt, Int: intValue}, true
+}
+
+func castConstNumericToInt64(value ConstValue, dst Type) (int64, bool) {
+	floatValue := constNumericAsFloat64(value)
+	if math.IsNaN(floatValue) || math.IsInf(floatValue, 0) {
+		return 0, false
+	}
+	truncated := math.Trunc(floatValue)
+	name, ok := builtinNumericTypeName(dst)
+	if !ok {
+		return 0, false
+	}
+	if isSignedConstCastBuiltin(name) {
+		minValue, maxValue, ok := signedConstCastRange(name)
+		if !ok || truncated < float64(minValue) || truncated > float64(maxValue) {
+			return 0, false
+		}
+		return narrowSignedConstCast(int64(truncated), name), true
+	}
+	if truncated < 0 {
+		return 0, false
+	}
+	maxValue, ok := unsignedConstCastMax(name)
+	if !ok || truncated > float64(maxValue) {
+		return 0, false
+	}
+	return int64(narrowUnsignedConstCast(uint64(truncated), name)), true
+}
+
+func builtinNumericTypeName(t Type) (string, bool) {
+	builtin, ok := t.(*BuiltinType)
+	if !ok {
+		return "", false
+	}
+	return builtin.Name, true
+}
+
+func isSignedConstCastBuiltin(name string) bool {
+	switch name {
+	case "char", "int", "isize", "i8", "i16", "i32", "i64":
+		return true
+	default:
+		return false
+	}
+}
+
+func signedConstCastRange(name string) (int64, int64, bool) {
+	switch name {
+	case "i8":
+		return math.MinInt8, math.MaxInt8, true
+	case "i16":
+		return math.MinInt16, math.MaxInt16, true
+	case "i32":
+		return math.MinInt32, math.MaxInt32, true
+	case "char", "int", "isize", "i64":
+		return math.MinInt64, math.MaxInt64, true
+	default:
+		return 0, 0, false
+	}
+}
+
+func unsignedConstCastMax(name string) (uint64, bool) {
+	switch name {
+	case "u8":
+		return math.MaxUint8, true
+	case "u16":
+		return math.MaxUint16, true
+	case "u32":
+		return math.MaxUint32, true
+	case "u64", "usize", "uintptr":
+		return math.MaxInt64, true
+	default:
+		return 0, false
+	}
+}
+
+func narrowSignedConstCast(value int64, name string) int64 {
+	switch name {
+	case "i8":
+		return int64(int8(value))
+	case "i16":
+		return int64(int16(value))
+	case "i32":
+		return int64(int32(value))
+	default:
+		return value
+	}
+}
+
+func narrowUnsignedConstCast(value uint64, name string) uint64 {
+	switch name {
+	case "u8":
+		return uint64(uint8(value))
+	case "u16":
+		return uint64(uint16(value))
+	case "u32":
+		return uint64(uint32(value))
+	default:
+		return value
+	}
 }

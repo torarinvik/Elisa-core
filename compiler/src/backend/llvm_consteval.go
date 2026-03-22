@@ -73,10 +73,32 @@ func (s *functionState) evalConstBoolExpr(expr ast.Expr) (bool, bool) {
 }
 
 func (s *functionState) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool) {
+	if castExpr, ok := expr.(*ast.CastExpr); ok {
+		operand, ok := s.evalConstExpr(castExpr.Operand)
+		if !ok {
+			return semantic.ConstValue{}, false
+		}
+		targetType := s.exprType(castExpr)
+		if targetType == nil {
+			return semantic.ConstValue{}, false
+		}
+		return semantic.CastConstValue(operand, targetType)
+	}
 	return evalConstExprWithLookup(expr, s.g.constValue)
 }
 
 func (g *llvmGenerator) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool) {
+	if castExpr, ok := expr.(*ast.CastExpr); ok {
+		operand, ok := g.evalConstExpr(castExpr.Operand)
+		if !ok {
+			return semantic.ConstValue{}, false
+		}
+		targetType := g.exprType(castExpr)
+		if targetType == nil {
+			return semantic.ConstValue{}, false
+		}
+		return semantic.CastConstValue(operand, targetType)
+	}
 	return evalConstExprWithLookup(expr, g.constValue)
 }
 

@@ -1195,6 +1195,41 @@ export func scale_sum(left: f32, right: f64) -> f64 = scale_sum_impl
 	}
 }
 
+func TestGenerateLLVMIRLowersConstFloatCastsForGlobals(t *testing.T) {
+	src := `const SMALL: i32 = 3.75.i32()
+const RATIO32: f32 = 1.5.f32()
+const WIDE64: f64 = 7.i32().f64()
+
+global g_small: i32 = SMALL
+global g_ratio32: f32 = RATIO32
+global g_wide64: f64 = WIDE64
+`
+	result := parseAndAnalyze(t, "backend_const_float_cast_globals.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"@g_small = global i32 3",
+		"@g_ratio32 = global float",
+		"@g_wide64 = global double 7.000000e+00",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	for _, bad := range []string{
+		"@g_small = global i32 3.750000e+00",
+		"@g_wide64 = global double 3.750000e+00",
+	} {
+		if strings.Contains(output, bad) {
+			t.Fatalf("expected output to avoid %q, got:\n%s", bad, output)
+		}
+	}
+}
+
 func TestGenerateCHeaderOrdersAggregateDefinitionsByValueDependencies(t *testing.T) {
 	src := `repr(c) struct Node:
 	value: mutable i32
