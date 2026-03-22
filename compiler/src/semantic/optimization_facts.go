@@ -361,12 +361,84 @@ func (a *Analyzer) inferExprOptimizationFacts(expr ast.Expr, t Type) Optimizatio
 				facts.Extent = cloneOptimizationExtent(objectFacts.Extent)
 			}
 		}
+	case *ast.TryExpr:
+		facts = a.inferRecoveredExprOptimizationFacts(n.Value, n.Fallback, facts)
+	case *ast.UnwrapElseExpr:
+		facts = a.inferRecoveredExprOptimizationFacts(n.Value, n.Fallback, facts)
 	}
 	if provenance, ok := a.exprPackedStoreProvenance(expr); ok {
 		facts.PackedStoreProvenance = provenance
 		facts.FrozenPackedStoreOnly = provenance.DependsOnlyOnFrozenPackedStores()
 	}
 	return facts
+}
+
+func (a *Analyzer) inferRecoveredExprOptimizationFacts(value ast.Expr, fallback ast.Expr, facts OptimizationFacts) OptimizationFacts {
+	if a == nil {
+		return facts
+	}
+	if fallback == nil || a.exprDefinitelyNever(fallback) {
+		if valueFacts, ok := a.exprFacts[value]; ok {
+			facts = overlayOptimizationFacts(facts, valueFacts)
+		}
+		if facts.base == "" {
+			facts.base = a.optimizationBaseForExpr(value)
+		}
+		return facts
+	}
+	valueFacts, valueOK := a.exprFacts[value]
+	fallbackFacts, fallbackOK := a.exprFacts[fallback]
+	if valueOK && fallbackOK {
+		if merged, ok := mergeAlternativeOptimizationFacts(valueFacts, fallbackFacts); ok {
+			facts = overlayOptimizationFacts(facts, merged)
+		}
+	}
+	if facts.base == "" {
+		facts.base = a.sharedOptimizationBaseForExprs(value, fallback)
+	}
+	return facts
+}
+
+func overlayOptimizationFacts(dst OptimizationFacts, src OptimizationFacts) OptimizationFacts {
+	if src.Exclusive {
+		dst.Exclusive = true
+	}
+	if src.ReadOnly {
+		dst.ReadOnly = true
+	}
+	if src.Contiguous {
+		dst.Contiguous = true
+	}
+	if src.UnitStride {
+		dst.UnitStride = true
+	}
+	if src.Extent != nil {
+		dst.Extent = cloneOptimizationExtent(src.Extent)
+	}
+	if src.base != "" {
+		dst.base = src.base
+	}
+	return dst
+}
+
+func mergeAlternativeOptimizationFacts(left OptimizationFacts, right OptimizationFacts) (OptimizationFacts, bool) {
+	merged := OptimizationFacts{}
+	if left.base != "" && left.base == right.base {
+		merged.base = left.base
+	}
+	merged.ReadOnly = left.ReadOnly || right.ReadOnly
+	merged.Contiguous = left.Contiguous && right.Contiguous
+	merged.UnitStride = left.UnitStride && right.UnitStride
+	if SameOptimizationExtent(left.Extent, right.Extent) {
+		merged.Extent = cloneOptimizationExtent(left.Extent)
+		if merged.base != "" && left.Exclusive && right.Exclusive {
+			merged.Exclusive = true
+		}
+	}
+	if !merged.Exclusive && !merged.ReadOnly && !merged.Contiguous && !merged.UnitStride && merged.Extent == nil && merged.base == "" {
+		return OptimizationFacts{}, false
+	}
+	return merged, true
 }
 
 func summarizePackedStoreProvenance(state regionRefState) PackedStoreProvenance {
@@ -650,11 +722,33 @@ func (a *Analyzer) optimizationBaseForExpr(expr ast.Expr) string {
 		return a.optimizationBaseForExpr(n.Operand)
 	case *ast.CanExpr:
 		return a.optimizationBaseForExpr(n.Expr)
+	case *ast.TryExpr:
+		if n.Fallback == nil || a.exprDefinitelyNever(n.Fallback) {
+			return a.optimizationBaseForExpr(n.Value)
+		}
+		return a.sharedOptimizationBaseForExprs(n.Value, n.Fallback)
+	case *ast.UnwrapElseExpr:
+		if a.exprDefinitelyNever(n.Fallback) {
+			return a.optimizationBaseForExpr(n.Value)
+		}
+		return a.sharedOptimizationBaseForExprs(n.Value, n.Fallback)
 	}
 	if a != nil && a.exprFacts != nil {
 		if facts, ok := a.exprFacts[stripped]; ok && facts.base != "" {
 			return facts.base
 		}
+	}
+	return ""
+}
+
+func (a *Analyzer) sharedOptimizationBaseForExprs(left ast.Expr, right ast.Expr) string {
+	leftBase := a.optimizationBaseForExpr(left)
+	if leftBase == "" || right == nil {
+		return leftBase
+	}
+	rightBase := a.optimizationBaseForExpr(right)
+	if leftBase == rightBase {
+		return leftBase
 	}
 	return ""
 }
@@ -848,6 +942,13 @@ func optimizationExprString(expr ast.Expr) string {
 		return fmt.Sprintf("new[%s] %s", optimizationExprString(n.Owner), optimizationExprString(n.Value))
 	case *ast.CanExpr:
 		return optimizationExprString(n.Expr)
+	case *ast.TryExpr:
+		if n.Fallback == nil {
+			return fmt.Sprintf("try %s", optimizationExprString(n.Value))
+		}
+		return fmt.Sprintf("(try %s else %s)", optimizationExprString(n.Value), optimizationExprString(n.Fallback))
+	case *ast.UnwrapElseExpr:
+		return fmt.Sprintf("(%s else %s)", optimizationExprString(n.Value), optimizationExprString(n.Fallback))
 	default:
 		return ""
 	}

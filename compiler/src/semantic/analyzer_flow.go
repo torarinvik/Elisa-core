@@ -3217,6 +3217,10 @@ func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRef
 			}
 		}
 		return borrowedOwnerRefState{}, false
+	case *ast.TryExpr:
+		return a.borrowedOwnerRefStateForRecoveredExpr(n.Value, n.Fallback)
+	case *ast.UnwrapElseExpr:
+		return a.borrowedOwnerRefStateForRecoveredExpr(n.Value, n.Fallback)
 	case *ast.TernaryExpr:
 		left, leftOK := a.borrowedOwnerRefStateForExpr(n.Value)
 		right, rightOK := a.borrowedOwnerRefStateForExpr(n.Alt)
@@ -3227,6 +3231,21 @@ func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRef
 	default:
 		return borrowedOwnerRefState{}, false
 	}
+}
+
+func (a *Analyzer) borrowedOwnerRefStateForRecoveredExpr(value ast.Expr, fallback ast.Expr) (borrowedOwnerRefState, bool) {
+	valueState, valueOK := a.borrowedOwnerRefStateForExpr(value)
+	if fallback == nil || a.exprDefinitelyNever(fallback) {
+		if !valueOK {
+			return borrowedOwnerRefState{}, false
+		}
+		return cloneBorrowedOwnerRefState(valueState), true
+	}
+	fallbackState, fallbackOK := a.borrowedOwnerRefStateForExpr(fallback)
+	if !valueOK || !fallbackOK {
+		return borrowedOwnerRefState{}, false
+	}
+	return mergeBorrowedOwnerRefState(valueState, fallbackState)
 }
 
 func (a *Analyzer) lookupBorrowedOwnerRefTargetPath(expr ast.Expr) (*Symbol, []borrowReturnAnnotationStep, bool) {

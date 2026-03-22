@@ -605,6 +605,10 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 			return regionRefState{}, false
 		}
 		return summarizeRegionIndexStates(state)
+	case *ast.TryExpr:
+		return a.regionRefStateForRecoveredExpr(n.Value, n.Fallback)
+	case *ast.UnwrapElseExpr:
+		return a.regionRefStateForRecoveredExpr(n.Value, n.Fallback)
 	case *ast.TernaryExpr:
 		left, leftOK := a.regionRefStateForExpr(n.Value)
 		right, rightOK := a.regionRefStateForExpr(n.Alt)
@@ -674,6 +678,38 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 	default:
 		return regionRefState{}, false
 	}
+}
+
+func (a *Analyzer) regionRefStateForRecoveredExpr(value ast.Expr, fallback ast.Expr) (regionRefState, bool) {
+	valueState, valueOK := a.regionRefStateForExpr(value)
+	if fallback == nil || a.exprDefinitelyNever(fallback) {
+		if !valueOK {
+			return regionRefState{}, false
+		}
+		return cloneRegionRefState(valueState), true
+	}
+	fallbackState, fallbackOK := a.regionRefStateForExpr(fallback)
+	if !valueOK && !fallbackOK {
+		return regionRefState{}, false
+	}
+	if valueOK && fallbackOK {
+		return mergeRegionRefStates(valueState, fallbackState)
+	}
+	if valueOK {
+		return cloneRegionRefState(valueState), true
+	}
+	return cloneRegionRefState(fallbackState), true
+}
+
+func (a *Analyzer) exprDefinitelyNever(expr ast.Expr) bool {
+	if a == nil || expr == nil {
+		return false
+	}
+	t := a.exprTypes[expr]
+	if t == nil {
+		return false
+	}
+	return IsNeverType(t)
 }
 
 func (a *Analyzer) inferFuncReturnProvenanceForExpr(expr ast.Expr, fnType *FuncType) {
