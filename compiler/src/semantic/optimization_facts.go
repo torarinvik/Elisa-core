@@ -44,6 +44,18 @@ type PackedStoreProvenance struct {
 	HasNonStoreProvenance       bool
 }
 
+func (p PackedStoreProvenance) HasAnyPackedStoreProvenance() bool {
+	return p.HasPackedStoreDeps
+}
+
+func (p PackedStoreProvenance) DependsOnFrozenPackedStores() bool {
+	return p.HasFrozenPackedStoreDeps
+}
+
+func (p PackedStoreProvenance) DependsOnNonFrozenPackedStores() bool {
+	return p.HasNonFrozenPackedStoreDeps
+}
+
 func (p PackedStoreProvenance) DependsOnlyOnFrozenPackedStores() bool {
 	return p.HasPackedStoreDeps && p.HasFrozenPackedStoreDeps && !p.HasNonFrozenPackedStoreDeps && !p.HasNonStoreProvenance
 }
@@ -920,6 +932,9 @@ func (r *Result) ExprPackedStoreProvenance(expr ast.Expr) (PackedStoreProvenance
 	if !ok {
 		return PackedStoreProvenance{}, false
 	}
+	if !facts.PackedStoreProvenance.HasAnyPackedStoreProvenance() {
+		return PackedStoreProvenance{}, false
+	}
 	return facts.PackedStoreProvenance, true
 }
 
@@ -931,7 +946,40 @@ func (r *Result) ExprHasPackedStoreProvenance(expr ast.Expr) bool {
 	if !ok {
 		return false
 	}
-	return provenance.HasPackedStoreDeps
+	return provenance.HasAnyPackedStoreProvenance()
+}
+
+func (r *Result) ExprDependsOnFrozenPackedStores(expr ast.Expr) bool {
+	if r == nil {
+		return false
+	}
+	provenance, ok := r.ExprPackedStoreProvenance(expr)
+	if !ok {
+		return false
+	}
+	return provenance.DependsOnFrozenPackedStores()
+}
+
+func (r *Result) ExprDependsOnNonFrozenPackedStores(expr ast.Expr) bool {
+	if r == nil {
+		return false
+	}
+	provenance, ok := r.ExprPackedStoreProvenance(expr)
+	if !ok {
+		return false
+	}
+	return provenance.DependsOnNonFrozenPackedStores()
+}
+
+func (r *Result) ExprHasMixedPackedStoreProvenance(expr ast.Expr) bool {
+	if r == nil {
+		return false
+	}
+	provenance, ok := r.ExprPackedStoreProvenance(expr)
+	if !ok {
+		return false
+	}
+	return provenance.HasMixedProvenance()
 }
 
 func (r *Result) ExprDependsOnlyOnFrozenPackedStores(expr ast.Expr) bool {
