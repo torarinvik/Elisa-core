@@ -877,6 +877,86 @@ def inspect(owner: Arena) -> int error[ProbeError]:
 	}
 }
 
+func TestAnalyzePreservesFrozenPackedStoreProvenanceThroughUnwrapElseExpressions(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+	Hold(value: any i32&)
+
+def inspect(owner: Arena) -> int:
+	region scratch(1024u)
+	store: Expr.Store[Local] = Expr.Store(owner)
+	node: Expr = new[store] Expr.Int(value: 1)
+	other: Expr = new[store] Expr.Int(value: 2)
+	local_ref: scratch i32& = new[scratch] 7i32
+	held: Expr = new[store] Expr.Hold(value: local_ref)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	node_after_freeze: Expr = node
+	other_after_freeze: Expr = other
+	held_after_freeze: Expr = held
+	node_ref: stack Expr& = &node_after_freeze
+	other_ref: stack Expr& = &other_after_freeze
+	held_ref: stack Expr& = &held_after_freeze
+	node_ptr: stack Expr&? = node_ref
+	pure_recovered: stack Expr& = node_ptr else other_ref
+	mixed_recovered: stack Expr& = node_ptr else held_ref
+	_ = frozen
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_unwrap_else_frozen_packed_provenance.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	pureRecoveredExpr := requireOptimizationFactsVarInitExpr(t, fn, "pure_recovered")
+	mixedRecoveredExpr := requireOptimizationFactsVarInitExpr(t, fn, "mixed_recovered")
+
+	pureRecoveredFacts := requireExprOptimizationFacts(t, result, pureRecoveredExpr)
+	mixedRecoveredFacts := requireExprOptimizationFacts(t, result, mixedRecoveredExpr)
+	pureRecoveredProvenance := requireExprPackedStoreProvenance(t, result, pureRecoveredExpr)
+	mixedRecoveredProvenance := requireExprPackedStoreProvenance(t, result, mixedRecoveredExpr)
+
+	if !pureRecoveredFacts.FrozenPackedStoreOnly {
+		t.Fatalf("expected else recovery over frozen-only packed refs to stay frozen-store-only, got %#v", pureRecoveredFacts)
+	}
+	if !pureRecoveredProvenance.DependsOnlyOnFrozenPackedStores() || pureRecoveredProvenance.HasMixedProvenance() {
+		t.Fatalf("expected else recovery over frozen-only packed refs to expose pure frozen packed-store provenance, got %#v", pureRecoveredProvenance)
+	}
+	if !result.ExprHasPackedStoreProvenance(pureRecoveredExpr) || !result.ExprDependsOnFrozenPackedStores(pureRecoveredExpr) || result.ExprDependsOnNonFrozenPackedStores(pureRecoveredExpr) || result.ExprHasMixedPackedStoreProvenance(pureRecoveredExpr) {
+		t.Fatalf("expected else recovery over frozen-only packed refs to expose frozen-only packed-store helper results")
+	}
+	if !result.ExprDependsOnlyOnFrozenPackedStores(pureRecoveredExpr) {
+		t.Fatalf("expected else recovery over frozen-only packed refs to report frozen-store-only provenance")
+	}
+
+	if mixedRecoveredFacts.FrozenPackedStoreOnly {
+		t.Fatalf("expected else recovery with mixed packed fallback to retain mixed provenance, got %#v", mixedRecoveredFacts)
+	}
+	if !mixedRecoveredProvenance.HasPackedStoreDeps || !mixedRecoveredProvenance.HasFrozenPackedStoreDeps || mixedRecoveredProvenance.HasNonFrozenPackedStoreDeps {
+		t.Fatalf("expected else recovery with mixed packed fallback to keep only frozen packed-store deps, got %#v", mixedRecoveredProvenance)
+	}
+	if !mixedRecoveredProvenance.HasMixedProvenance() {
+		t.Fatalf("expected else recovery with mixed packed fallback to report mixed non-store provenance, got %#v", mixedRecoveredProvenance)
+	}
+	if !mixedRecoveredProvenance.HasOnlyFrozenPackedStoreDeps() {
+		t.Fatalf("expected else recovery with mixed packed fallback to keep frozen-only packed-store deps despite mixed provenance, got %#v", mixedRecoveredProvenance)
+	}
+	if mixedRecoveredProvenance.DependsOnlyOnFrozenPackedStores() {
+		t.Fatalf("expected else recovery with mixed packed fallback to reject strict frozen-only provenance, got %#v", mixedRecoveredProvenance)
+	}
+	if !result.ExprHasPackedStoreProvenance(mixedRecoveredExpr) || !result.ExprDependsOnFrozenPackedStores(mixedRecoveredExpr) || result.ExprDependsOnNonFrozenPackedStores(mixedRecoveredExpr) {
+		t.Fatalf("expected else recovery with mixed packed fallback to expose frozen-only packed-store helper results")
+	}
+	if !result.ExprHasMixedPackedStoreProvenance(mixedRecoveredExpr) {
+		t.Fatalf("expected else recovery with mixed packed fallback to report mixed packed-store provenance")
+	}
+	if !result.ExprHasOnlyFrozenPackedStoreDeps(mixedRecoveredExpr) {
+		t.Fatalf("expected else recovery with mixed packed fallback to report frozen-only packed-store deps")
+	}
+	if result.ExprDependsOnlyOnFrozenPackedStores(mixedRecoveredExpr) {
+		t.Fatalf("expected else recovery with mixed packed fallback to reject strict frozen-only provenance query")
+	}
+}
+
 func TestAnalyzePreservesFrozenPackedStoreProvenanceThroughTernaryExpressions(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)

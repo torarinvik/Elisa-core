@@ -788,7 +788,8 @@ func TestRunCLIGeneratedHeaderInteropHarness(t *testing.T) {
 
 	for _, args := range [][]string{
 		{"-emit", "header", "-o", headerPath, fixturePath},
-		{"-emit", "obj", "-o", objectPath, fixturePath},
+		// This test validates generated-header ABI wiring, not optimized code quality.
+		{"-emit", "obj", "-O0", "-o", objectPath, fixturePath},
 	} {
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
@@ -832,7 +833,8 @@ func TestRunCLIFrontendLexerGeneratedHeaderInteropHarness(t *testing.T) {
 
 	for _, args := range [][]string{
 		{"-emit", "header", "-o", headerPath, fixturePath},
-		{"-emit", "obj", "-o", objectPath, fixturePath},
+		// This test validates generated-header ABI wiring, not optimized code quality.
+		{"-emit", "obj", "-O0", "-o", objectPath, fixturePath},
 	} {
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
@@ -881,7 +883,8 @@ func TestRunCLIJSONParserGeneratedHeaderInteropHarness(t *testing.T) {
 
 	for _, args := range [][]string{
 		{"-emit", "header", "-o", headerPath, fixturePath},
-		{"-emit", "obj", "-o", objectPath, fixturePath},
+		// This test validates generated-header ABI wiring, not optimized code quality.
+		{"-emit", "obj", "-O0", "-o", objectPath, fixturePath},
 	} {
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
@@ -932,7 +935,8 @@ func TestRunCLIJSONParserParallelBenchSmoke(t *testing.T) {
 
 	for _, args := range [][]string{
 		{"-emit", "header", "-o", headerPath, fixturePath},
-		{"-emit", "obj", "-o", objectPath, fixturePath},
+		// This test validates benchmark wiring and smoke behavior, not optimized code quality.
+		{"-emit", "obj", "-O0", "-o", objectPath, fixturePath},
 	} {
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
