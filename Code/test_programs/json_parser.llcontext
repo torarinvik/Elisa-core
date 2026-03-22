@@ -1016,49 +1016,49 @@ def json_ast_source_view(source: any u8&, node: JsonNode, store: JsonNode.Store[
 
 
 def json_ast_string_view(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> StringView:
-    in store:
-        match node:
-            JsonNode.String:
-                if node.source_len < 2u:
-                    return json_empty_view()
-                return StringView(source + node.source_offset + 1u, (node.source_len - 2u).i64())
+    if json_ast_kind(node, store) != JsonNodeKind.STRING:
+        return json_empty_view()
+    view node in store as JsonNode.String(text):
+        if text.source_len < 2u:
+            return json_empty_view()
+        return StringView(source + text.source_offset + 1u, (text.source_len - 2u).i64())
     return json_empty_view()
 
 
 def json_ast_string_len(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> i64:
-    in store:
-        match node:
-            JsonNode.String:
-                return json_decoded_string_len(source, node.source_offset, node.source_len)
+    if json_ast_kind(node, store) != JsonNodeKind.STRING:
+        return -1
+    view node in store as JsonNode.String(text):
+        return json_decoded_string_len(source, text.source_offset, text.source_len)
     return -1
 
 
 def json_ast_string_copy(source: any u8&, node: JsonNode, out: any u8&, capacity: usize, store: JsonNode.Store[Local]) -> i64:
-    in store:
-        match node:
-            JsonNode.String:
-                decoded_len: i64 = json_decoded_string_len(source, node.source_offset, node.source_len)
-                if decoded_len < 0:
-                    return -1
+    if json_ast_kind(node, store) != JsonNodeKind.STRING:
+        return -1
+    view node in store as JsonNode.String(text):
+        decoded_len: i64 = json_decoded_string_len(source, text.source_offset, text.source_len)
+        if decoded_len < 0:
+            return -1
 
-                required_capacity: usize = decoded_len.usize() + 1u
-                if capacity < required_capacity:
-                    return decoded_len
+        required_capacity: usize = decoded_len.usize() + 1u
+        if capacity < required_capacity:
+            return decoded_len
 
-                written: i64 = json_decode_string_into(source, node.source_offset, node.source_len, out)
-                if written < 0:
-                    return -1
+        written: i64 = json_decode_string_into(source, text.source_offset, text.source_len, out)
+        if written < 0:
+            return -1
 
-                out[written.usize()] <- 0
-                return written
+        out[written.usize()] <- 0
+        return written
     return -1
 
 
 def json_ast_number_view(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> StringView:
-    in store:
-        match node:
-            JsonNode.Number:
-                return StringView(source + node.source_offset, node.source_len.i64())
+    if json_ast_kind(node, store) != JsonNodeKind.NUMBER:
+        return json_empty_view()
+    view node in store as JsonNode.Number(number):
+        return StringView(source + number.source_offset, number.source_len.i64())
     return json_empty_view()
 
 
@@ -1154,10 +1154,10 @@ def json_parse_number_value(source: any u8&, source_offset: usize, source_len: u
 
 
 def json_ast_number_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> JsonNumberValue:
-    in store:
-        match node:
-            JsonNode.Number:
-                return json_parse_number_value(source, node.source_offset, node.source_len)
+    if json_ast_kind(node, store) != JsonNodeKind.NUMBER:
+        return json_invalid_number_value()
+    view node in store as JsonNode.Number(number):
+        return json_parse_number_value(source, number.source_offset, number.source_len)
     return json_invalid_number_value()
 
 
@@ -1188,18 +1188,18 @@ def json_ast_number_i64_value(source: any u8&, node: JsonNode, store: JsonNode.S
 
 
 def json_ast_number_f64_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> f64 error[JsonNumberAccessError]:
-    in store:
-        match node:
-            JsonNode.Number:
-                return try json_parse_number_f64_value(source, node.source_offset, node.source_len)
+    if json_ast_kind(node, store) != JsonNodeKind.NUMBER:
+        raise JsonNumberAccessError.Invalid
+    open node in store as JsonNode.Number:
+        return try json_parse_number_f64_value(source, node.source_offset, node.source_len)
     raise JsonNumberAccessError.Invalid
 
 
 def json_ast_number_f32_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> f32 error[JsonNumberAccessError]:
-    in store:
-        match node:
-            JsonNode.Number:
-                return try json_parse_number_f32_value(source, node.source_offset, node.source_len)
+    if json_ast_kind(node, store) != JsonNodeKind.NUMBER:
+        raise JsonNumberAccessError.Invalid
+    open node in store as JsonNode.Number:
+        return try json_parse_number_f32_value(source, node.source_offset, node.source_len)
     raise JsonNumberAccessError.Invalid
 
 
@@ -1217,44 +1217,44 @@ def json_node_can_materialize_float(node: JsonNode, store: JsonNode.Store[Local]
 
 
 def json_ast_string_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> heap u8& can[Memory.Allocate, Abort.Panic]:
-    in store:
-        match node:
-            JsonNode.String:
-                decoded_len: i64 = json_decoded_string_len(source, node.source_offset, node.source_len)
-                if decoded_len < 0:
-                    return intern_small_string("".cast[any u8&](), 0)
+    if json_ast_kind(node, store) != JsonNodeKind.STRING:
+        return intern_small_string("".cast[any u8&](), 0)
+    view node in store as JsonNode.String(text_node):
+        decoded_len: i64 = json_decoded_string_len(source, text_node.source_offset, text_node.source_len)
+        if decoded_len < 0:
+            return intern_small_string("".cast[any u8&](), 0)
 
-                if decoded_len <= 8:
-                    text: u8[9] = zeroed
-                    written: i64 = json_decode_string_into(source, node.source_offset, node.source_len, (&text[0]).cast[any u8&]())
-                    if written < 0:
-                        return intern_small_string("".cast[any u8&](), 0)
-                    text[written.usize()] <- 0
-                    return intern_small_string((&text[0]).cast[any u8&](), written.usize())
+        if decoded_len <= 8:
+            text: u8[9] = zeroed
+            written: i64 = json_decode_string_into(source, text_node.source_offset, text_node.source_len, (&text[0]).cast[any u8&]())
+            if written < 0:
+                return intern_small_string("".cast[any u8&](), 0)
+            text[written.usize()] <- 0
+            return intern_small_string((&text[0]).cast[any u8&](), written.usize())
 
-                out: heap u8& = alloc_perm((decoded_len + 1).i64()).cast[heap u8&]()
-                written: i64 = json_decode_string_into(source, node.source_offset, node.source_len, out.cast[any u8&]())
-                if written < 0:
-                    return intern_small_string("".cast[any u8&](), 0)
-                out[written.usize()] <- 0
-                register_perm_string_len(out.cast[any u8&](), written.usize())
-                return out
+        out: heap u8& = alloc_perm((decoded_len + 1).i64()).cast[heap u8&]()
+        written: i64 = json_decode_string_into(source, text_node.source_offset, text_node.source_len, out.cast[any u8&]())
+        if written < 0:
+            return intern_small_string("".cast[any u8&](), 0)
+        out[written.usize()] <- 0
+        register_perm_string_len(out.cast[any u8&](), written.usize())
+        return out
     return intern_small_string("".cast[any u8&](), 0)
 
 
 def json_ast_string_eq_literal(source: any u8&, node: JsonNode, literal: any u8&, store: JsonNode.Store[Local]) -> bool:
-    in store:
-        match node:
-            JsonNode.String:
-                return json_string_matches_literal(source, node.source_offset, node.source_len, literal)
+    if json_ast_kind(node, store) != JsonNodeKind.STRING:
+        return false
+    view node in store as JsonNode.String(text):
+        return json_string_matches_literal(source, text.source_offset, text.source_len, literal)
     return false
 
 
 def json_ast_bool_value(node: JsonNode, store: JsonNode.Store[Local]) -> i64:
-    in store:
-        match node:
-            JsonNode.Bool(value: value):
-                return 1 if value else 0
+    if json_ast_kind(node, store) != JsonNodeKind.BOOL:
+        return -1
+    open node in store as JsonNode.Bool(value):
+        return 1 if value else 0
     return -1
 
 
@@ -1263,37 +1263,37 @@ def json_ast_is_null(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
 
 
 def json_ast_array_len(node: JsonNode, store: JsonNode.Store[Local]) -> i64:
-    in store:
-        match node:
-            JsonNode.Array(items: items):
-                return items.len.i64()
+    if json_ast_kind(node, store) != JsonNodeKind.ARRAY:
+        return -1
+    view node in store as JsonNode.Array(array):
+        return array.items.len.i64()
     return -1
 
 
 def json_ast_object_len(node: JsonNode, store: JsonNode.Store[Local]) -> i64:
-    in store:
-        match node:
-            JsonNode.Object(fields: fields):
-                return fields.len.i64()
+    if json_ast_kind(node, store) != JsonNodeKind.OBJECT:
+        return -1
+    view node in store as JsonNode.Object(object):
+        return object.fields.len.i64()
     return -1
 
 
 def json_ast_array_nth(node: JsonNode, index: usize, store: JsonNode.Store[Local]) -> JsonNode:
     invalid_node: JsonNode = json_node_invalid(store)
-    in store:
-        match node:
-            JsonNode.Array(items: items):
-                if index < items.len:
-                    return arena_da_view_get(items, index)
+    if json_ast_kind(node, store) != JsonNodeKind.ARRAY:
+        return invalid_node
+    view node in store as JsonNode.Array(array):
+        if index < array.items.len:
+            return arena_da_view_get(array.items, index)
     return invalid_node
 
 
 def json_ast_array_iter_first(node: JsonNode, store: JsonNode.Store[Local]) -> JsonAstArrayIterCursor:
-    in store:
-        match node:
-            JsonNode.Array(items: items):
-                if items.len > 0u:
-                    return JsonAstArrayIterCursor(items, 0u)
+    if json_ast_kind(node, store) != JsonNodeKind.ARRAY:
+        return json_invalid_array_iter_cursor()
+    view node in store as JsonNode.Array(array):
+        if array.items.len > 0u:
+            return JsonAstArrayIterCursor(array.items, 0u)
     return json_invalid_array_iter_cursor()
 
 
@@ -1313,24 +1313,24 @@ def json_ast_array_iter_next(cursor: JsonAstArrayIterCursor, store: JsonNode.Sto
 
 def json_ast_object_get(node: JsonNode, source: any u8&, key: any u8&, store: JsonNode.Store[Local]) -> JsonNode:
     invalid_node: JsonNode = json_node_invalid(store)
-    in store:
-        match node:
-            JsonNode.Object(fields: fields):
-                index: mutable usize = 0u
-                while index < fields.len:
-                    field: JsonField = arena_da_view_get(fields, index)
-                    if json_ast_string_eq_literal(source, field.key, key, store):
-                        return field.value
-                    index <- index + 1u
+    if json_ast_kind(node, store) != JsonNodeKind.OBJECT:
+        return invalid_node
+    view node in store as JsonNode.Object(object):
+        index: mutable usize = 0u
+        while index < object.fields.len:
+            field: JsonField = arena_da_view_get(object.fields, index)
+            if json_ast_string_eq_literal(source, field.key, key, store):
+                return field.value
+            index <- index + 1u
     return invalid_node
 
 
 def json_ast_object_iter_first(node: JsonNode, store: JsonNode.Store[Local]) -> JsonAstObjectIterCursor:
-    in store:
-        match node:
-            JsonNode.Object(fields: fields):
-                if fields.len > 0u:
-                    return JsonAstObjectIterCursor(fields, 0u)
+    if json_ast_kind(node, store) != JsonNodeKind.OBJECT:
+        return json_invalid_object_iter_cursor()
+    view node in store as JsonNode.Object(object):
+        if object.fields.len > 0u:
+            return JsonAstObjectIterCursor(object.fields, 0u)
     return json_invalid_object_iter_cursor()
 
 
@@ -1357,20 +1357,20 @@ def json_ast_object_iter_next(cursor: JsonAstObjectIterCursor, store: JsonNode.S
 
 
 def json_ast_array_iter_nth(node: JsonNode, index: usize, store: JsonNode.Store[Local]) -> JsonAstArrayIterCursor:
-    in store:
-        match node:
-            JsonNode.Array(items: items):
-                if index < items.len:
-                    return JsonAstArrayIterCursor(items, index)
+    if json_ast_kind(node, store) != JsonNodeKind.ARRAY:
+        return json_invalid_array_iter_cursor()
+    view node in store as JsonNode.Array(array):
+        if index < array.items.len:
+            return JsonAstArrayIterCursor(array.items, index)
     return json_invalid_array_iter_cursor()
 
 
 def json_ast_object_iter_nth(node: JsonNode, index: usize, store: JsonNode.Store[Local]) -> JsonAstObjectIterCursor:
-    in store:
-        match node:
-            JsonNode.Object(fields: fields):
-                if index < fields.len:
-                    return JsonAstObjectIterCursor(fields, index)
+    if json_ast_kind(node, store) != JsonNodeKind.OBJECT:
+        return json_invalid_object_iter_cursor()
+    view node in store as JsonNode.Object(object):
+        if index < object.fields.len:
+            return JsonAstObjectIterCursor(object.fields, index)
     return json_invalid_object_iter_cursor()
 
 

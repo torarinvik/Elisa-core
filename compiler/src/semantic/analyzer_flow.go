@@ -50,6 +50,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.consumeAffineValueExpr(n.Value, bindingType, "move into local "+strconvQuote(n.Name))
 	case *ast.MoveBindStmt:
 		a.analyzeMoveBindStmt(n)
+	case *ast.OpenStmt:
+		a.analyzeOpenStmt(n)
+	case *ast.ViewStmt:
+		a.analyzeViewStmt(n)
 	case *ast.RegionStmt:
 		if n.Capacity != nil {
 			capacityType := a.analyzeExpr(n.Capacity)
@@ -396,6 +400,120 @@ func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {
 		return
 	}
 	a.consumeAffineValueExpr(stmt.Value, valueType, "move-as destructure")
+}
+
+func (a *Analyzer) analyzeOpenStmt(stmt *ast.OpenStmt) {
+	if stmt == nil || stmt.Pattern == nil {
+		return
+	}
+	valueType := a.analyzeExpr(stmt.Value)
+	enumType, ok := valueType.(*EnumType)
+	if !ok {
+		a.errorf(stmt.Pos(), "open requires a packed enum value, got %s", valueType.String())
+		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
+		return
+	}
+	if !enumType.Packed {
+		a.errorf(stmt.Pos(), "open requires a packed enum value, got ordinary enum %q", enumType.Name)
+		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
+		return
+	}
+	resolvedStmt := &ast.MoveBindStmt{Position: stmt.Position, Value: stmt.Value, Store: stmt.Store, Pattern: stmt.Pattern}
+	payloads, _, packedStoreState, ok := a.resolveMoveBindVariantPattern(resolvedStmt, stmt.Pattern, valueType)
+	valueState, hasValueState := a.regionRefStateForExpr(stmt.Value)
+	borrowedOwnerState, hasBorrowedOwnerState := a.borrowedOwnerRefStateForExpr(stmt.Value)
+	scope := NewScope(a.currentScope)
+	savedScope := a.currentScope
+	a.currentScope = scope
+	for _, payload := range payloads {
+		if payload.BindName == "" || payload.BindName == "_" {
+			continue
+		}
+		sym := &Symbol{Name: payload.BindName, Kind: SymbolLocal, Type: payload.Type, Node: stmt.Pattern, Mutable: false}
+		a.defineLocal(sym, stmt.Pattern.Position)
+		if valueExpr, ok := a.resolveMoveBindVariantPayloadValueExpr(stmt.Value, stmt.Pattern, payload.Key); ok {
+			a.recordValueBinding(sym, valueExpr)
+			a.recordFunctionValueBinding(sym, valueExpr)
+			a.recordImmutableSymbolOptimizationFacts(sym, valueExpr)
+		}
+		if hasBorrowedOwnerState {
+			if fieldState, ok := projectBorrowedOwnerRefFieldState(borrowedOwnerState, payload.Key); ok {
+				a.currentBorrowedOwnerRefs[sym] = fieldState
+			}
+		}
+		if hasValueState {
+			if fieldState, ok := projectRegionFieldState(valueState, payload.Key); ok {
+				a.recordResolvedRegionRefBinding(sym, fieldState)
+				continue
+			}
+			if a.typeCanContainRegionRefs(payload.Type, map[string]bool{}) {
+				a.recordResolvedRegionRefBinding(sym, valueState)
+				continue
+			}
+		}
+		if packedStoreState != nil && a.typeCanContainRegionRefs(payload.Type, map[string]bool{}) {
+			a.recordResolvedRegionRefBinding(sym, *packedStoreState)
+		}
+	}
+	a.currentScope = savedScope
+	if !ok {
+		a.analyzeBlockWithRegionClone(stmt.Body, scope)
+		return
+	}
+	a.analyzeBlockWithRegionClone(stmt.Body, scope)
+}
+
+func (a *Analyzer) analyzeViewStmt(stmt *ast.ViewStmt) {
+	if stmt == nil || stmt.Pattern == nil {
+		return
+	}
+	valueType := a.analyzeExpr(stmt.Value)
+	viewType, ok := a.resolveViewBindType(stmt, valueType)
+	scope := NewScope(a.currentScope)
+	if ok && stmt.Pattern.Name != "_" {
+		savedScope := a.currentScope
+		a.currentScope = scope
+		sym := &Symbol{Name: stmt.Pattern.Name, Kind: SymbolLocal, Type: viewType, Node: stmt.Pattern, Mutable: false}
+		a.defineLocal(sym, stmt.Pattern.Pos())
+		a.recordValueBinding(sym, stmt.Value)
+		a.recordBorrowedOwnerRefBinding(sym, stmt.Value)
+		a.recordFunctionValueBinding(sym, stmt.Value)
+		a.recordImmutableSymbolOptimizationFacts(sym, stmt.Value)
+		a.recordRegionRefBinding(sym, stmt.Value)
+		a.currentScope = savedScope
+	}
+	a.analyzeBlockWithRegionClone(stmt.Body, scope)
+}
+
+func (a *Analyzer) resolveViewBindType(stmt *ast.ViewStmt, actual Type) (*PackedVariantViewType, bool) {
+	if stmt == nil || stmt.Pattern == nil {
+		return nil, false
+	}
+	enumType, ok := actual.(*EnumType)
+	if !ok {
+		a.errorf(stmt.Pos(), "view requires a packed enum value, got %s", actual.String())
+		return nil, false
+	}
+	if !enumType.Packed {
+		a.errorf(stmt.Pos(), "view requires a packed enum value, got ordinary enum %q", enumType.Name)
+		return nil, false
+	}
+	a.validateMatchStore(stmt.Pos(), enumType, stmt.Store)
+	if stmt.Pattern.EnumName != enumType.Name {
+		a.errorf(stmt.Pattern.Pos(), "view pattern expects enum %q, got %q", enumType.Name, stmt.Pattern.EnumName)
+		return nil, false
+	}
+	variant, ok := enumType.Variant(stmt.Pattern.Variant)
+	if !ok {
+		a.errorf(stmt.Pattern.Pos(), "enum %q has no variant %q", enumType.Name, stmt.Pattern.Variant)
+		return nil, false
+	}
+	viewType := &PackedVariantViewType{Enum: enumType, Variant: variant}
+	if !viewType.HasNamedPayloadFields() {
+		a.errorf(stmt.Pattern.Pos(), "view %q.%q requires named payload fields in v1", enumType.Name, variant.Name)
+		return nil, false
+	}
+	return viewType, true
 }
 
 type moveBindResolvedField struct {
@@ -2738,6 +2856,18 @@ func (a *Analyzer) containsBorrowedOwnerRefValues(t Type, seen map[string]bool) 
 		return a.containsBorrowedOwnerRefValues(tt.Elem, seen)
 	case *DictType:
 		return a.containsBorrowedOwnerRefValues(tt.Key, seen) || a.containsBorrowedOwnerRefValues(tt.Value, seen)
+	case *PackedVariantViewType:
+		for _, field := range tt.Enum.Common {
+			if a.containsBorrowedOwnerRefValues(field.Type, seen) {
+				return true
+			}
+		}
+		for _, payloadType := range tt.Variant.Payload {
+			if a.containsBorrowedOwnerRefValues(payloadType, seen) {
+				return true
+			}
+		}
+		return false
 	case *StructType:
 		for _, field := range tt.Fields {
 			if a.containsBorrowedOwnerRefValues(field.Type, seen) {

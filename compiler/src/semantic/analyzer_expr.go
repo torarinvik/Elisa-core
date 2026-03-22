@@ -3393,6 +3393,14 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 		objType = ref.Elem
 	}
 	objType = StripAggregateStateType(objType)
+	if viewType, ok := objType.(*PackedVariantViewType); ok {
+		field, ok := viewType.Field(fieldName)
+		if !ok {
+			a.errorf(pos, "%s has no field %q", viewType.String(), fieldName)
+			return Field{}, false
+		}
+		return field, true
+	}
 	if enumType, ok := objType.(*EnumType); ok && enumType.Packed {
 		field, ok := enumType.Common[fieldName]
 		if !ok {

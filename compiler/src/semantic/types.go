@@ -177,6 +177,11 @@ type PackedEnumStoreType struct {
 	State Type
 }
 
+type PackedVariantViewType struct {
+	Enum    *EnumType
+	Variant *EnumVariant
+}
+
 type EnumType struct {
 	Name       string
 	Packed     bool
@@ -277,6 +282,7 @@ func (*DStrType) isType()            {}
 func (*DictType) isType()            {}
 func (*SViewType) isType()           {}
 func (*PackedEnumStoreType) isType() {}
+func (*PackedVariantViewType) isType() {}
 func (*EnumType) isType()            {}
 func (*StructType) isType()          {}
 func (*OpaqueType) isType()          {}
@@ -549,6 +555,12 @@ func (t *PackedEnumStoreType) String() string {
 		return fmt.Sprintf("%s[%s]", t.Name, t.State.String())
 	}
 	return t.Name
+}
+func (t *PackedVariantViewType) String() string {
+	if t == nil || t.Enum == nil || t.Variant == nil {
+		return "<invalid-packed-view>"
+	}
+	return fmt.Sprintf("view[%s.%s]", t.Enum.Name, t.Variant.Name)
 }
 func (t *ConstEnumType) Member(name string) (*ConstEnumMember, bool) {
 	if t == nil || t.MemberMap == nil {
@@ -972,6 +984,35 @@ func (v *EnumVariant) PayloadLabel(index int) string {
 		return ""
 	}
 	return v.PayloadNames[index]
+}
+
+func (t *PackedVariantViewType) Field(name string) (Field, bool) {
+	if t == nil || t.Enum == nil || t.Variant == nil {
+		return Field{}, false
+	}
+	if field, ok := t.Enum.Common[name]; ok {
+		return field, true
+	}
+	index, ok := t.Variant.PayloadIndex(name)
+	if !ok || index < 0 || index >= len(t.Variant.Payload) {
+		return Field{}, false
+	}
+	return Field{Name: name, Type: t.Variant.Payload[index], Mutable: false}, true
+}
+
+func (t *PackedVariantViewType) HasNamedPayloadFields() bool {
+	if t == nil || t.Variant == nil || len(t.Variant.Payload) == 0 {
+		return true
+	}
+	if len(t.Variant.PayloadNames) != len(t.Variant.Payload) {
+		return false
+	}
+	for i := range t.Variant.Payload {
+		if t.Variant.PayloadLabel(i) == "" {
+			return false
+		}
+	}
+	return true
 }
 
 func (v *EnumVariant) HasTailPayload() bool {

@@ -774,7 +774,7 @@ func (s *functionState) currentBlockTerminated() bool {
 }
 
 func (s *functionState) pushScope() {
-	s.scope = &codegenScope{parent: s.scope, bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}}
+	s.scope = &codegenScope{parent: s.scope, bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}, packedViewPtrs: map[string]packedVariantViewBinding{}}
 }
 
 func (s *functionState) popScope() {
@@ -818,9 +818,10 @@ func (s *functionState) bindPackedStoreValue(t semantic.Type, value C.LLVMValueR
 
 func (s *functionState) defineBinding(name string, binding valueBinding) {
 	if s.scope == nil {
-		s.scope = &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}}
+		s.scope = &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}, packedViewPtrs: map[string]packedVariantViewBinding{}}
 	}
 	s.invalidatePackedEnumStorage(name)
+	s.invalidatePackedVariantView(name)
 	s.scope.bindings[name] = binding
 }
 
@@ -879,12 +880,47 @@ func (s *functionState) bindPackedEnumStorage(name string, enumType *semantic.En
 		return
 	}
 	if s.scope == nil {
-		s.scope = &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}}
+		s.scope = &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}, packedViewPtrs: map[string]packedVariantViewBinding{}}
 	}
 	if s.scope.packedEnumPtrs == nil {
 		s.scope.packedEnumPtrs = map[string]packedEnumStorageBinding{}
 	}
 	s.scope.packedEnumPtrs[name] = packedEnumStorageBinding{ptr: ptr, typ: enumType}
+}
+
+func (s *functionState) bindPackedVariantView(name string, viewType *semantic.PackedVariantViewType, ptr C.LLVMValueRef) {
+	if name == "" || viewType == nil || ptr == nil {
+		return
+	}
+	if s.scope == nil {
+		s.scope = &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}, packedViewPtrs: map[string]packedVariantViewBinding{}}
+	}
+	if s.scope.packedViewPtrs == nil {
+		s.scope.packedViewPtrs = map[string]packedVariantViewBinding{}
+	}
+	s.scope.packedViewPtrs[name] = packedVariantViewBinding{ptr: ptr, typ: viewType}
+}
+
+func (s *functionState) lookupPackedVariantView(name string) (packedVariantViewBinding, bool) {
+	if name == "" {
+		return packedVariantViewBinding{}, false
+	}
+	for scope := s.scope; scope != nil; scope = scope.parent {
+		binding, ok := scope.packedViewPtrs[name]
+		if ok && binding.ptr != nil && binding.typ != nil {
+			return binding, true
+		}
+	}
+	return packedVariantViewBinding{}, false
+}
+
+func (s *functionState) invalidatePackedVariantView(name string) {
+	if name == "" {
+		return
+	}
+	for scope := s.scope; scope != nil; scope = scope.parent {
+		delete(scope.packedViewPtrs, name)
+	}
 }
 
 func (s *functionState) lookupPackedEnumStorage(name string, enumType *semantic.EnumType) (C.LLVMValueRef, bool) {

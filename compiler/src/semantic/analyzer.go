@@ -1281,6 +1281,18 @@ func (a *Analyzer) containsAffineHandleValues(t Type, seen map[string]bool) bool
 		return a.containsAffineHandleValues(tt.Value, seen)
 	case *DictType:
 		return a.containsAffineHandleValues(tt.Key, seen) || a.containsAffineHandleValues(tt.Value, seen)
+	case *PackedVariantViewType:
+		for _, field := range tt.Enum.Common {
+			if a.containsAffineHandleValues(field.Type, seen) {
+				return true
+			}
+		}
+		for _, payloadType := range tt.Variant.Payload {
+			if a.containsAffineHandleValues(payloadType, seen) {
+				return true
+			}
+		}
+		return false
 	case *GenericInstanceType:
 		if base, ok := tt.Base.(*StructType); ok {
 			bindings := map[string]Type{}
@@ -1381,6 +1393,18 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 		return true
 	case *DictType:
 		return a.typeCanContainRegionRefs(tt.Key, seen) || a.typeCanContainRegionRefs(tt.Value, seen)
+	case *PackedVariantViewType:
+		for _, field := range tt.Enum.Common {
+			if a.typeCanContainRegionRefs(field.Type, seen) {
+				return true
+			}
+		}
+		for _, payloadType := range tt.Variant.Payload {
+			if a.typeCanContainRegionRefs(payloadType, seen) {
+				return true
+			}
+		}
+		return false
 	case *StructType:
 		for _, field := range tt.Fields {
 			if a.typeCanContainRegionRefs(field.Type, seen) {

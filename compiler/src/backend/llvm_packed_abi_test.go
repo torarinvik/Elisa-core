@@ -1198,3 +1198,81 @@ export func fold_export() -> int = fold
 		t.Fatalf("expected optimized word-handle IR to avoid inlining ctx_packed_store_alloc_fixed_result slow-path labels into callers, got:\n%s", output)
 	}
 }
+
+func TestGenerateLLVMIRUsesSingleDecodeForFrozenPackedOpenStmt(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Lit(value: int)
+	End
+
+def fold_open() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	open node in frozen as Expr.Lit(value: value):
+		return value + node.span
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_open_stmt.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
+	if decodeCalls != 1 {
+		t.Fatalf("expected frozen packed open stmt to use a single eager decode, got %d decode calls:\n%s", decodeCalls, output)
+	}
+	if !strings.Contains(output, "declare void @llvm.trap()") || !strings.Contains(output, "call void @llvm.trap()") {
+		t.Fatalf("expected packed open stmt to lower mismatch handling through llvm.trap, got:\n%s", output)
+	}
+	if !strings.Contains(output, "unreachable") {
+		t.Fatalf("expected packed open stmt mismatch block to end in unreachable, got:\n%s", output)
+	}
+	for _, check := range []string{"packed.decode.store.arena", "packed.decode.store.state"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRUsesSingleDecodeForFrozenPackedViewStmt(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Lit(value: int)
+	End
+
+def fold_view() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	view node in frozen as Expr.Lit(lit):
+		return lit.value + lit.span + lit.value
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_view_stmt.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
+	if decodeCalls != 1 {
+		t.Fatalf("expected frozen packed view stmt to use a single eager decode, got %d decode calls:\n%s", decodeCalls, output)
+	}
+	if strings.Contains(output, "call i64 @ctx_packed_store_read_word(") {
+		t.Fatalf("expected frozen packed view stmt field reads to reuse the decoded row instead of ctx_packed_store_read_word, got:\n%s", output)
+	}
+	if !strings.Contains(output, "declare void @llvm.trap()") || !strings.Contains(output, "call void @llvm.trap()") {
+		t.Fatalf("expected packed view stmt to lower mismatch handling through llvm.trap, got:\n%s", output)
+	}
+	for _, check := range []string{"packed.decode.store.arena", "packed.decode.store.state"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}

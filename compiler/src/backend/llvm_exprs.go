@@ -3211,6 +3211,9 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, sema
 	if fieldType, ok := dstrSyntheticFieldType(s.exprType(expr.Object), expr.Field); ok {
 		return s.emitRuntimeStringLenExpr(expr.Object, fieldType)
 	}
+	if value, fieldType, handled, err := s.emitPackedVariantViewFieldExpr(expr); handled {
+		return value, fieldType, err
+	}
 	if value, fieldType, handled, err := s.emitPackedCommonFieldExpr(expr); handled {
 		return value, fieldType, err
 	}
@@ -3232,6 +3235,53 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, sema
 	}
 	value := C.LLVMBuildExtractValue(s.builder, objValue, C.unsigned(index), cStringFree(expr.Field))
 	return value, fieldType, nil
+}
+
+func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	name, ok := packedVariantViewName(expr.Object)
+	if !ok {
+		return nil, nil, false, nil
+	}
+	binding, ok := s.lookupPackedVariantView(name)
+	if !ok || binding.typ == nil || binding.ptr == nil {
+		return nil, nil, false, nil
+	}
+	field, ok := binding.typ.Field(expr.Field)
+	if !ok {
+		return nil, nil, true, fmt.Errorf("%s has no field %s", binding.typ.String(), expr.Field)
+	}
+	containerType, err := s.loweredEnumStorageType(binding.typ.Enum)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	for i, fieldDecl := range binding.typ.Enum.Decl.Common {
+		if fieldDecl.Name != expr.Field {
+			continue
+		}
+		fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerType, binding.ptr, C.unsigned(1+i), cStringFree("view.common.field"))
+		value, err := s.loadValue(fieldPtr, field.Type, expr.Field)
+		return value, field.Type, true, err
+	}
+	payloadValues, err := s.loadEnumVariantPayload(binding.ptr, nil, binding.typ.Enum, binding.typ.Variant, nil)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	index, ok := binding.typ.Variant.PayloadIndex(expr.Field)
+	if !ok || index < 0 || index >= len(payloadValues) {
+		return nil, nil, true, fmt.Errorf("%s has no field %s", binding.typ.String(), expr.Field)
+	}
+	return payloadValues[index], field.Type, true, nil
+}
+
+func packedVariantViewName(expr ast.Expr) (string, bool) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return n.Name, true
+	case *ast.ParenExpr:
+		return packedVariantViewName(n.Inner)
+	default:
+		return "", false
+	}
 }
 
 func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {

@@ -27,6 +27,7 @@ type codegenScope struct {
 	parent         *codegenScope
 	bindings       map[string]valueBinding
 	packedEnumPtrs map[string]packedEnumStorageBinding
+	packedViewPtrs  map[string]packedVariantViewBinding
 }
 
 type functionState struct {
@@ -80,6 +81,11 @@ type packedEnumStorageBinding struct {
 	typ *semantic.EnumType
 }
 
+type packedVariantViewBinding struct {
+	ptr C.LLVMValueRef
+	typ *semantic.PackedVariantViewType
+}
+
 func (g *llvmGenerator) defineFunctionBody(decl *ast.FuncDecl, fnType *semantic.FuncType, fnValue C.LLVMValueRef) error {
 	return g.defineFunctionBodyWithBindings(decl, fnType, fnValue, nil)
 }
@@ -106,7 +112,7 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		fnValue:           fnValue,
 		fnType:            fnType,
 		builder:           builder,
-		scope:             &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}},
+		scope:             &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}, packedViewPtrs: map[string]packedVariantViewBinding{}},
 		typeMap:           typeBindings,
 		packedStores:      map[string]packedStoreBinding{},
 		packedStoreValues: map[packedStoreExtractCacheKey]C.LLVMValueRef{},
@@ -282,6 +288,10 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		return nil
 	case *ast.MoveBindStmt:
 		return s.emitMoveBindStmt(n)
+	case *ast.OpenStmt:
+		return s.emitOpenStmt(n)
+	case *ast.ViewStmt:
+		return s.emitViewStmt(n)
 	case *ast.RegionStmt:
 		arenaType := s.g.result.NamedTypes["Arena"]
 		if arenaType == nil {
@@ -525,6 +535,132 @@ func (s *functionState) emitMoveBindStmt(stmt *ast.MoveBindStmt) error {
 	default:
 		return fmt.Errorf("unsupported move-as pattern %T", stmt.Pattern)
 	}
+}
+
+func (s *functionState) emitOpenStmt(stmt *ast.OpenStmt) error {
+	if stmt == nil || stmt.Pattern == nil {
+		return nil
+	}
+	enumType, ok := s.exprType(stmt.Value).(*semantic.EnumType)
+	if !ok {
+		return fmt.Errorf("open requires a packed enum value")
+	}
+	storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, stmt.Store)
+	if err != nil {
+		return err
+	}
+	enumValue, _, err := s.emitExpr(stmt.Value, enumType)
+	if err != nil {
+		return err
+	}
+	successBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("open.ok"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("open.fail"))
+	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("open.cont"))
+	matchPattern := &ast.MatchVariantPattern{Position: stmt.Pattern.Position, EnumName: stmt.Pattern.EnumName, Variant: stmt.Pattern.Variant, Args: append([]ast.MatchPatternArg(nil), stmt.Pattern.Args...)}
+	s.pushScope()
+	matchedDecodedValue, err := s.emitMatchPatternTest(matchPattern, enumValue, nil, enumType, storeBinding, successBB, failBB)
+	if err != nil {
+		s.popScope()
+		return err
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, successBB)
+	if ident, ok := stmt.Value.(*ast.Ident); ok && matchedDecodedValue != nil {
+		s.bindPackedEnumStorage(ident.Name, enumType, matchedDecodedValue)
+	}
+	if err := s.emitBlock(stmt.Body, false); err != nil {
+		s.popScope()
+		return err
+	}
+	if !s.currentBlockTerminated() {
+		C.LLVMBuildBr(s.builder, contBB)
+	}
+	s.popScope()
+
+	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	trFn, err := s.ensureTrapFunction()
+	if err != nil {
+		return err
+	}
+	trType, err := s.g.lowerFunctionType(&semantic.FuncType{Name: "llvm.trap", Return: s.g.result.NamedTypes["void"]})
+	if err != nil {
+		return err
+	}
+	s.buildCall(trType, trFn, nil, "")
+	C.LLVMBuildUnreachable(s.builder)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+	return nil
+}
+
+func (s *functionState) emitViewStmt(stmt *ast.ViewStmt) error {
+	if stmt == nil || stmt.Pattern == nil {
+		return nil
+	}
+	enumType, ok := s.exprType(stmt.Value).(*semantic.EnumType)
+	if !ok {
+		return fmt.Errorf("view requires a packed enum value")
+	}
+	variant, ok := enumType.Variant(stmt.Pattern.Variant)
+	if !ok {
+		return fmt.Errorf("enum %s has no variant %s", enumType.Name, stmt.Pattern.Variant)
+	}
+	resolvedViewType := &semantic.PackedVariantViewType{Enum: enumType, Variant: variant}
+	storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, stmt.Store)
+	if err != nil {
+		return err
+	}
+	enumValue, _, err := s.emitExpr(stmt.Value, enumType)
+	if err != nil {
+		return err
+	}
+	successBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.ok"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.fail"))
+	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.cont"))
+	matchPattern := &ast.MatchVariantPattern{Position: stmt.Pattern.Position, EnumName: stmt.Pattern.EnumName, Variant: stmt.Pattern.Variant}
+	s.pushScope()
+	matchedDecodedValue, err := s.emitMatchPatternTest(matchPattern, enumValue, nil, enumType, storeBinding, successBB, failBB)
+	if err != nil {
+		s.popScope()
+		return err
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, successBB)
+	viewDecodedValue := matchedDecodedValue
+	if viewDecodedValue == nil {
+		viewDecodedValue, err = s.decodePackedEnumHandleWithStore(enumValue, enumType, storeBinding)
+		if err != nil {
+			s.popScope()
+			return err
+		}
+	}
+	if ident, ok := stmt.Value.(*ast.Ident); ok && viewDecodedValue != nil {
+		s.bindPackedEnumStorage(ident.Name, enumType, viewDecodedValue)
+	}
+	if stmt.Pattern.Name != "_" && viewDecodedValue != nil {
+		s.bindPackedVariantView(stmt.Pattern.Name, resolvedViewType, viewDecodedValue)
+	}
+	if err := s.emitBlock(stmt.Body, false); err != nil {
+		s.popScope()
+		return err
+	}
+	if !s.currentBlockTerminated() {
+		C.LLVMBuildBr(s.builder, contBB)
+	}
+	s.popScope()
+
+	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	trFn, err := s.ensureTrapFunction()
+	if err != nil {
+		return err
+	}
+	trType, err := s.g.lowerFunctionType(&semantic.FuncType{Name: "llvm.trap", Return: s.g.result.NamedTypes["void"]})
+	if err != nil {
+		return err
+	}
+	s.buildCall(trType, trFn, nil, "")
+	C.LLVMBuildUnreachable(s.builder)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+	return nil
 }
 
 func (s *functionState) emitMoveBindLocal(name string, typ semantic.Type, value C.LLVMValueRef) error {
@@ -1156,6 +1292,17 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		}
 		matchedDecodedValue := decodedActualValue
 		if len(orderedArgs) == 0 {
+			C.LLVMBuildBr(s.builder, successBB)
+			return matchedDecodedValue, nil
+		}
+		hasNestedPattern := false
+		for i := range orderedArgs {
+			if orderedArgs[i] != nil {
+				hasNestedPattern = true
+				break
+			}
+		}
+		if !hasNestedPattern {
 			C.LLVMBuildBr(s.builder, successBB)
 			return matchedDecodedValue, nil
 		}

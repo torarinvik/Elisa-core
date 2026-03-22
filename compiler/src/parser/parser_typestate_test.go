@@ -261,3 +261,70 @@ func TestParseLegacyNullableRefArraySuffixStillWorks(t *testing.T) {
 		t.Fatalf("expected no named refstate param, got %q", refType.StateParam)
 	}
 }
+
+func TestParsePackedOpenAndViewStatements(t *testing.T) {
+	file, errs := parseSourceFile(t, "packed enum Expr:\n    common:\n        span: int\n    Lit(value: int)\n\ndef fold(node: Expr, store: Expr.Store[Local]) -> int:\n    open node in store as Expr.Lit(value: value):\n        view node in store as Expr.Lit(lit):\n            return value + lit.span\n    return 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[1])
+	}
+	openStmt, ok := decl.Body[0].(*ast.OpenStmt)
+	if !ok {
+		t.Fatalf("expected open stmt, got %T", decl.Body[0])
+	}
+	if openStmt.Pattern == nil {
+		t.Fatal("expected open stmt to record a variant pattern")
+	}
+	if openStmt.Pattern.EnumName != "Expr" || openStmt.Pattern.Variant != "Lit" {
+		t.Fatalf("expected Expr.Lit open pattern, got %#v", openStmt.Pattern)
+	}
+	if len(openStmt.Pattern.Args) != 1 {
+		t.Fatalf("expected one open binding arg, got %d", len(openStmt.Pattern.Args))
+	}
+	bindPattern, ok := openStmt.Pattern.Args[0].Pattern.(*ast.MatchBindPattern)
+	if !ok || bindPattern.Name != "value" {
+		t.Fatalf("expected value payload binding, got %T %#v", openStmt.Pattern.Args[0].Pattern, openStmt.Pattern.Args[0].Pattern)
+	}
+	viewStmt, ok := openStmt.Body[0].(*ast.ViewStmt)
+	if !ok {
+		t.Fatalf("expected view stmt, got %T", openStmt.Body[0])
+	}
+	if viewStmt.Pattern == nil {
+		t.Fatal("expected view stmt to record a view pattern")
+	}
+	if viewStmt.Pattern.EnumName != "Expr" || viewStmt.Pattern.Variant != "Lit" || viewStmt.Pattern.Name != "lit" {
+		t.Fatalf("expected Expr.Lit(lit) view pattern, got %#v", viewStmt.Pattern)
+	}
+}
+
+func TestParseOpenAndViewRemainContextualIdentifiers(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep() -> int:\n    open: int = 1\n    view: int = open\n    open(view)\n    return view\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[0])
+	}
+	if _, ok := decl.Body[0].(*ast.VarDeclStmt); !ok {
+		t.Fatalf("expected first stmt to stay a var decl, got %T", decl.Body[0])
+	}
+	if _, ok := decl.Body[1].(*ast.VarDeclStmt); !ok {
+		t.Fatalf("expected second stmt to stay a var decl, got %T", decl.Body[1])
+	}
+	exprStmt, ok := decl.Body[2].(*ast.ExprStmt)
+	if !ok {
+		t.Fatalf("expected third stmt to stay an expr stmt, got %T", decl.Body[2])
+	}
+	call, ok := exprStmt.Expr.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected open(view) to parse as a call, got %T", exprStmt.Expr)
+	}
+	callee, ok := call.Func.(*ast.Ident)
+	if !ok || callee.Name != "open" {
+		t.Fatalf("expected call callee open, got %T %#v", call.Func, call.Func)
+	}
+}

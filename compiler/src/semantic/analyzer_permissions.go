@@ -434,6 +434,18 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		if n.Store != nil {
 			c.collectExpr(n.Store)
 		}
+	case *ast.OpenStmt:
+		c.collectExpr(n.Value)
+		if n.Store != nil {
+			c.collectExpr(n.Store)
+		}
+		c.collectStmts(n.Body)
+	case *ast.ViewStmt:
+		c.collectExpr(n.Value)
+		if n.Store != nil {
+			c.collectExpr(n.Store)
+		}
+		c.collectStmts(n.Body)
 	case *ast.AssignStmt:
 		c.collectExpr(n.Target)
 		c.collectExpr(n.Value)
@@ -603,6 +615,18 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		if n.Store != nil {
 			a.validatePermissionExpr(n.Store, granted)
 		}
+	case *ast.OpenStmt:
+		a.validatePermissionExpr(n.Value, granted)
+		if n.Store != nil {
+			a.validatePermissionExpr(n.Store, granted)
+		}
+		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
+	case *ast.ViewStmt:
+		a.validatePermissionExpr(n.Value, granted)
+		if n.Store != nil {
+			a.validatePermissionExpr(n.Store, granted)
+		}
+		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.AssignStmt:
 		a.validatePermissionExpr(n.Target, granted)
 		a.validatePermissionExpr(n.Value, granted)
