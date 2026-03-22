@@ -27,7 +27,7 @@ type codegenScope struct {
 	parent         *codegenScope
 	bindings       map[string]valueBinding
 	packedEnumPtrs map[string]packedEnumStorageBinding
-	packedViewPtrs  map[string]packedVariantViewBinding
+	packedViewPtrs map[string]packedVariantViewBinding
 }
 
 type functionState struct {
