@@ -94,6 +94,32 @@ func requireFuncDecl(t *testing.T, result *semantic.Result, name string) *ast.Fu
 	return decl
 }
 
+func requireConstDecl(t *testing.T, result *semantic.Result, name string) *ast.ConstDecl {
+	t.Helper()
+	sym, ok := result.GlobalScope.Lookup(name)
+	if !ok {
+		t.Fatalf("expected %s symbol", name)
+	}
+	decl, ok := sym.Node.(*ast.ConstDecl)
+	if !ok {
+		t.Fatalf("expected %s to resolve to a const declaration, got %T", name, sym.Node)
+	}
+	return decl
+}
+
+func requireGlobalDecl(t *testing.T, result *semantic.Result, name string) *ast.GlobalDecl {
+	t.Helper()
+	sym, ok := result.GlobalScope.Lookup(name)
+	if !ok {
+		t.Fatalf("expected %s symbol", name)
+	}
+	decl, ok := sym.Node.(*ast.GlobalDecl)
+	if !ok {
+		t.Fatalf("expected %s to resolve to a global declaration, got %T", name, sym.Node)
+	}
+	return decl
+}
+
 func requireExprTypeString(t *testing.T, result *semantic.Result, expr ast.Expr, expected string) {
 	t.Helper()
 	typ, ok := result.ExprTypes[expr]
@@ -2993,6 +3019,104 @@ def contextual_array() -> f32[2]:
 		binary, ok := elem.(*ast.BinaryExpr)
 		if !ok {
 			t.Fatalf("expected contextual_array element to be a binary expression, got %T", elem)
+		}
+		requireExprTypeString(t, result, binary, "f32")
+		requireExprTypeString(t, result, binary.Left, "f32")
+		requireExprTypeString(t, result, binary.Right, "f32")
+	}
+}
+
+func TestAnalyzeContextualFloatLiteralArithmeticTopLevelSites(t *testing.T) {
+	src := `repr(c) struct FloatPair:
+	left: f32
+	right: f32
+
+const F32_TOTAL: f32 = 1.25 + 2.25
+const F64_TOTAL: f64 = 3.25 + 4.25
+
+global g_f32: f32 = 5.25 + 6.25
+global g_f64: f64 = 7.25 + 8.25
+global g_pair: FloatPair = FloatPair(9.25 + 10.25, 11.25 + 12.25)
+global g_values: f32[2] = [13.25 + 14.25, 15.25 + 16.25]
+`
+	result, errs := parseAndAnalyze(t, "contextual_float_literal_arithmetic_toplevel_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	checks := map[string]semantic.ConstValue{
+		"F32_TOTAL": {Kind: semantic.ConstFloat, Float: 3.5},
+		"F64_TOTAL": {Kind: semantic.ConstFloat, Float: 7.5},
+	}
+	for name, want := range checks {
+		got, ok := result.ConstValues[name]
+		if !ok {
+			t.Fatalf("expected %s const value to be recorded", name)
+		}
+		if got.Kind != want.Kind || got.Float != want.Float {
+			t.Fatalf("expected %s const value %#v, got %#v", name, want, got)
+		}
+	}
+
+	constF32 := requireConstDecl(t, result, "F32_TOTAL")
+	constF32Binary, ok := constF32.Value.(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected F32_TOTAL initializer to be a binary expression, got %T", constF32.Value)
+	}
+	requireExprTypeString(t, result, constF32Binary, "f32")
+	requireExprTypeString(t, result, constF32Binary.Left, "f32")
+	requireExprTypeString(t, result, constF32Binary.Right, "f32")
+
+	constF64 := requireConstDecl(t, result, "F64_TOTAL")
+	constF64Binary, ok := constF64.Value.(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected F64_TOTAL initializer to be a binary expression, got %T", constF64.Value)
+	}
+	requireExprTypeString(t, result, constF64Binary, "f64")
+	requireExprTypeString(t, result, constF64Binary.Left, "f64")
+	requireExprTypeString(t, result, constF64Binary.Right, "f64")
+
+	globalF32 := requireGlobalDecl(t, result, "g_f32")
+	globalF32Binary, ok := globalF32.Value.(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected g_f32 initializer to be a binary expression, got %T", globalF32.Value)
+	}
+	requireExprTypeString(t, result, globalF32Binary, "f32")
+	requireExprTypeString(t, result, globalF32Binary.Left, "f32")
+	requireExprTypeString(t, result, globalF32Binary.Right, "f32")
+
+	globalF64 := requireGlobalDecl(t, result, "g_f64")
+	globalF64Binary, ok := globalF64.Value.(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected g_f64 initializer to be a binary expression, got %T", globalF64.Value)
+	}
+	requireExprTypeString(t, result, globalF64Binary, "f64")
+	requireExprTypeString(t, result, globalF64Binary.Left, "f64")
+	requireExprTypeString(t, result, globalF64Binary.Right, "f64")
+
+	globalPair := requireGlobalDecl(t, result, "g_pair")
+	pairLit, ok := globalPair.Value.(*ast.StructLitExpr)
+	if !ok {
+		t.Fatalf("expected g_pair initializer to be a struct literal, got %T", globalPair.Value)
+	}
+	for _, arg := range pairLit.Args {
+		binary, ok := arg.(*ast.BinaryExpr)
+		if !ok {
+			t.Fatalf("expected g_pair field to be a binary expression, got %T", arg)
+		}
+		requireExprTypeString(t, result, binary, "f32")
+		requireExprTypeString(t, result, binary.Left, "f32")
+		requireExprTypeString(t, result, binary.Right, "f32")
+	}
+
+	globalValues := requireGlobalDecl(t, result, "g_values")
+	listLit, ok := globalValues.Value.(*ast.ListLitExpr)
+	if !ok {
+		t.Fatalf("expected g_values initializer to be a list literal, got %T", globalValues.Value)
+	}
+	for _, elem := range listLit.Elems {
+		binary, ok := elem.(*ast.BinaryExpr)
+		if !ok {
+			t.Fatalf("expected g_values element to be a binary expression, got %T", elem)
 		}
 		requireExprTypeString(t, result, binary, "f32")
 		requireExprTypeString(t, result, binary.Left, "f32")

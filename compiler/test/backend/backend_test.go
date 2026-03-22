@@ -1425,6 +1425,52 @@ def local_and_call() -> f32:
 	}
 }
 
+func TestGenerateLLVMIRLowersContextualFloatLiteralArithmeticTopLevelSites(t *testing.T) {
+	src := `repr(c) struct FloatPair:
+	left: f32
+	right: f32
+
+const F32_TOTAL: f32 = 1.25 + 2.25
+const F64_TOTAL: f64 = 3.25 + 4.25
+
+global g_f32: f32 = 5.25 + 6.25
+global g_f64: f64 = 7.25 + 8.25
+global g_pair: FloatPair = FloatPair(9.25 + 10.25, 11.25 + 12.25)
+global g_values: f32[2] = [13.25 + 14.25, 15.25 + 16.25]
+
+def total() -> f64:
+	return F32_TOTAL.f64() + F64_TOTAL + g_f32.f64() + g_f64
+`
+	result := parseAndAnalyze(t, "backend_contextual_float_literal_arithmetic_toplevel.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%FloatPair = type { float, float }",
+		"@g_f32 = global float 1.150000e+01",
+		"@g_f64 = global double 1.550000e+01",
+		"@g_pair = global %FloatPair { float 1.950000e+01, float 2.350000e+01 }",
+		"@g_values = global [2 x float] [float 2.750000e+01, float 3.150000e+01]",
+		"define double @total()",
+		"fadd double",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+
+	totalBody := functionIR(output, "total")
+	if totalBody == "" {
+		t.Fatalf("expected to find total body, got:\n%s", output)
+	}
+	if strings.Contains(totalBody, "fptrunc double") {
+		t.Fatalf("expected total to avoid redundant double-to-float truncation, got:\n%s", totalBody)
+	}
+}
+
 func TestGenerateCHeaderOrdersAggregateDefinitionsByValueDependencies(t *testing.T) {
 	src := `repr(c) struct Node:
 	value: mutable i32

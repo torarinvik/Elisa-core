@@ -938,6 +938,16 @@ func (s *functionState) emitConstValueWithType(value semantic.ConstValue, actual
 			return nil, nil, err
 		}
 		return C.LLVMConstInt(llvmType, C.ulonglong(value.Int), boolToLLVMBool(value.Int < 0)), resultType, nil
+	case semantic.ConstFloat:
+		resultType := actual
+		if resultType == nil || semantic.IsInvalidType(resultType) {
+			resultType = s.g.result.NamedTypes["f64"]
+		}
+		llvmType, err := s.g.lowerType(resultType)
+		if err != nil {
+			return nil, nil, err
+		}
+		return C.LLVMConstReal(llvmType, C.double(value.Float)), resultType, nil
 	case semantic.ConstBool:
 		llvmType, err := s.g.lowerBuiltin("bool")
 		if err != nil {
