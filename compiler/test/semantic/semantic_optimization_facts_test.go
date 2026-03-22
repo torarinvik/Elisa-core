@@ -1067,6 +1067,49 @@ def inspect(buf: array[i32, 4]) -> int:
 	}
 }
 
+func TestAnalyzePreservesOptimizationFactsThroughRebasedHelperReturnedIndexedFieldProjectionExpressions(t *testing.T) {
+	src := `repr(c) struct Views:
+	left: view[i32]
+	right: view[i32]
+
+repr(c) struct ViewWindow:
+	items: view[Views]
+
+@borrows_return_field_rebased(items, src)
+extern wrap_sub(src: view[Views], start: usize, end: usize) -> ViewWindow
+
+def inspect(values: array[i32, 4]) -> int:
+	items: array[Views, 2] = [Views(values[0u:1u], values[1u:2u]), Views(values[2u:3u], values[3u:4u])]
+	wrapped: ViewWindow = wrap_sub(items[1u:2u], 0u, 1u)
+	left_indexed: view[i32] = wrapped.items[0u].left
+	right_indexed: view[i32] = wrapped.items[0u].right
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_rebased_helper_indexed_field_projection.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	leftExpr := requireOptimizationFactsVarInitExpr(t, fn, "left_indexed")
+	rightExpr := requireOptimizationFactsVarInitExpr(t, fn, "right_indexed")
+
+	leftFacts := requireExprOptimizationFacts(t, result, leftExpr)
+	rightFacts := requireExprOptimizationFacts(t, result, rightExpr)
+
+	if !leftFacts.HasExactExtent() || !rightFacts.HasExactExtent() {
+		t.Fatalf("expected rebased helper-returned indexed wrapper field projections through sliced sources to preserve exact extents, got %#v and %#v", leftFacts, rightFacts)
+	}
+	if !result.ExprsAreDisjoint(leftExpr, rightExpr) {
+		t.Fatalf("expected rebased helper-returned indexed wrapper field projections through sliced sources to stay disjoint")
+	}
+	if !result.ExprsHaveEqualExtentSize(leftExpr, rightExpr) {
+		t.Fatalf("expected rebased helper-returned indexed wrapper field projections through sliced sources to retain equal extent size")
+	}
+	if result.ExprsHaveSameExtent(leftExpr, rightExpr) {
+		t.Fatalf("expected rebased helper-returned indexed wrapper field projections through sliced sources to retain distinct exact bounds")
+	}
+}
+
 func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedIndexedFieldMoveAs(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)
