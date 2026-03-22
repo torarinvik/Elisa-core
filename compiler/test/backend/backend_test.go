@@ -1324,6 +1324,64 @@ global g_f32: f32 = F32_FROM_U64
 	}
 }
 
+func TestGenerateLLVMIRLowersContextualFloatLiteralSitesAndGlobals(t *testing.T) {
+	src := `extern passthrough(value: f32) -> f32
+
+repr(c) struct FloatPair:
+	left: f32
+	right: f32
+
+global g_ratio: f32 = 1.25
+global g_pair: FloatPair = FloatPair(2.5, 3.5)
+global g_values: f32[2] = [4.5, 5.5]
+
+def choose(flag: bool) -> f32:
+	return (6.5 if flag else 7.5)
+
+def local_and_call() -> f32:
+	local: f32 = 8.5
+	return passthrough(local) + passthrough(9.5)
+`
+	result := parseAndAnalyze(t, "backend_contextual_float_literals.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%FloatPair = type { float, float }",
+		"@g_ratio = global float",
+		"@g_pair = global %FloatPair",
+		"@g_values = global [2 x float]",
+		"declare float @passthrough(float)",
+		"define float @choose(i1",
+		"define float @local_and_call()",
+		"call float @passthrough(float",
+		"fadd float",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+
+	chooseBody := functionIR(output, "choose")
+	if chooseBody == "" {
+		t.Fatalf("expected to find choose body, got:\n%s", output)
+	}
+	if strings.Contains(chooseBody, "fptrunc double") {
+		t.Fatalf("expected choose to avoid redundant double-to-float truncation, got:\n%s", chooseBody)
+	}
+
+	localBody := functionIR(output, "local_and_call")
+	if localBody == "" {
+		t.Fatalf("expected to find local_and_call body, got:\n%s", output)
+	}
+	if strings.Contains(localBody, "fptrunc double") {
+		t.Fatalf("expected local_and_call to avoid redundant double-to-float truncation, got:\n%s", localBody)
+	}
+}
+
 func TestGenerateCHeaderOrdersAggregateDefinitionsByValueDependencies(t *testing.T) {
 	src := `repr(c) struct Node:
 	value: mutable i32

@@ -1623,7 +1623,7 @@ func (a *Analyzer) analyzeDecls(decls []ast.Decl) {
 		switch n := decl.(type) {
 		case *ast.ConstDecl:
 			if sym, ok := a.globalScope.Lookup(n.Name); ok {
-				valueType := a.analyzeExprInScope(n.Value, a.globalScope)
+				valueType := a.analyzeValueExprInScope(n.Value, sym.Type, a.globalScope)
 				if !AssignableTo(sym.Type, valueType) {
 					a.errorf(n.Pos(), "const %q expects %s, got %s", n.Name, sym.Type.String(), valueType.String())
 				}
@@ -1636,7 +1636,7 @@ func (a *Analyzer) analyzeDecls(decls []ast.Decl) {
 		case *ast.GlobalDecl:
 			if n.Value != nil {
 				if sym, ok := a.globalScope.Lookup(n.Name); ok {
-					valueType := a.analyzeExprInScope(n.Value, a.globalScope)
+					valueType := a.analyzeValueExprInScope(n.Value, sym.Type, a.globalScope)
 					if !AssignableTo(sym.Type, valueType) {
 						a.errorf(n.Pos(), "global %q expects %s, got %s", n.Name, sym.Type.String(), valueType.String())
 					}

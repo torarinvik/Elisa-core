@@ -2899,7 +2899,122 @@ func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 	if list, ok := expr.(*ast.ListLitExpr); ok {
 		return a.analyzeListLitExprWithExpected(list, expected)
 	}
+	if contextualExpected, ok := contextualFloatLiteralType(expected); ok {
+		if contextualType, ok := a.analyzeContextualFloatValueExpr(expr, contextualExpected); ok {
+			return contextualType
+		}
+	}
 	return a.analyzeExpr(expr)
+}
+
+func (a *Analyzer) recordAnalyzedExprType(expr ast.Expr, result Type) {
+	if expr == nil {
+		return
+	}
+	a.exprTypes[expr] = result
+	a.exprFacts[expr] = a.inferExprOptimizationFacts(expr, result)
+}
+
+func contextualFloatLiteralType(expected Type) (Type, bool) {
+	if expected == nil || !IsFloatType(expected) {
+		return nil, false
+	}
+	return expected, true
+}
+
+func (a *Analyzer) analyzeContextualFloatValueExpr(expr ast.Expr, expected Type) (Type, bool) {
+	switch n := expr.(type) {
+	case *ast.FloatLit:
+		if n.Suffix != "" {
+			return nil, false
+		}
+		a.recordAnalyzedExprType(n, expected)
+		return expected, true
+	case *ast.ParenExpr:
+		innerType, ok := a.analyzeContextualFloatValueExpr(n.Inner, expected)
+		if !ok {
+			return nil, false
+		}
+		a.recordAnalyzedExprType(n, innerType)
+		return innerType, true
+	case *ast.UnaryExpr:
+		if n.Op != lexer.TOKEN_MINUS {
+			return nil, false
+		}
+		operandType, ok := a.analyzeContextualFloatValueExpr(n.Operand, expected)
+		if !ok {
+			return nil, false
+		}
+		if !IsNumericType(operandType) {
+			a.errorf(n.Pos(), "unary operator requires numeric operand")
+			a.recordAnalyzedExprType(n, invalidType)
+			return invalidType, true
+		}
+		a.recordAnalyzedExprType(n, operandType)
+		return operandType, true
+	case *ast.TernaryExpr:
+		return a.analyzeContextualFloatTernaryExpr(n, expected), true
+	default:
+		return nil, false
+	}
+}
+
+func (a *Analyzer) analyzeValueExprInScope(expr ast.Expr, expected Type, scope *Scope) Type {
+	saved := a.currentScope
+	a.currentScope = scope
+	result := a.analyzeValueExpr(expr, expected)
+	a.currentScope = saved
+	return result
+}
+
+func (a *Analyzer) analyzeValueExprInAffineScope(expr ast.Expr, expected Type, scope *Scope) (Type, affineFlowSnapshot) {
+	savedAffine := a.currentAffineValues
+	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
+	savedFunctionValues := a.currentFunctionValues
+	savedSpecializedValueTypes := a.currentSpecializedValueTypes
+	savedValueBindings := a.currentValueBindings
+	a.currentAffineValues = a.cloneAffineValueStates()
+	a.currentBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
+	a.currentFunctionValues = a.cloneFunctionValueBindings()
+	a.currentSpecializedValueTypes = a.cloneSpecializedValueTypeBindings()
+	a.currentValueBindings = a.cloneValueBindings()
+	result := a.analyzeValueExprInScope(expr, expected, scope)
+	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), ValueBindings: a.cloneValueBindings()}
+	a.currentAffineValues = savedAffine
+	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
+	a.currentFunctionValues = savedFunctionValues
+	a.currentSpecializedValueTypes = savedSpecializedValueTypes
+	a.currentValueBindings = savedValueBindings
+	return result, snapshot
+}
+
+func (a *Analyzer) analyzeContextualFloatTernaryExpr(expr *ast.TernaryExpr, expected Type) Type {
+	if expr == nil {
+		return invalidType
+	}
+	condType := a.analyzeCondExpr(expr.Cond)
+	if !IsBoolType(condType) {
+		a.errorf(expr.Pos(), "ternary condition must be bool, got %s", condType.String())
+	}
+	mergedAffine := a.cloneAffineValueStates()
+	mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
+	left, leftSnapshot := a.analyzeValueExprInAffineScope(expr.Value, expected, a.refinedScopeForCondition(a.currentScope, expr.Cond, true))
+	right, rightSnapshot := a.analyzeValueExprInAffineScope(expr.Alt, expected, a.refinedScopeForCondition(a.currentScope, expr.Cond, false))
+	mergedAffine = mergeAffineValueStates(mergedAffine, leftSnapshot.Affine)
+	mergedAffine = mergeAffineValueStates(mergedAffine, rightSnapshot.Affine)
+	mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, leftSnapshot.BorrowedOwnerRefs)
+	mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, rightSnapshot.BorrowedOwnerRefs)
+	a.currentAffineValues = mergedAffine
+	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
+	if mergedFunctionValues, ok := a.intersectFunctionValueFlows(leftSnapshot.FunctionValues, rightSnapshot.FunctionValues); ok {
+		a.currentFunctionValues = mergedFunctionValues
+	}
+	merged := MergeTypes(left, right)
+	if IsInvalidType(merged) {
+		a.errorf(expr.Pos(), "ternary branches are incompatible: %s and %s", left.String(), right.String())
+	}
+	a.recordAnalyzedExprType(expr, merged)
+	return merged
 }
 
 func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expected Type) Type {
