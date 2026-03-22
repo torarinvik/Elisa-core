@@ -48,6 +48,10 @@ struct PackedStoreAllocResult:
     row: mutable heap void&?
     handle: mutable uintptr
 
+struct PackedStoreIndexAllocResult:
+    row: mutable heap void&?
+    index: mutable u32
+
 struct PackedStoreState:
     head_region: mutable heap Region&?
     alloc_region: mutable heap Region&?
@@ -57,6 +61,7 @@ struct PackedStoreState:
     tail_region: mutable heap Region&?
     regions: mutable darray[heap Region&?]
     handles: mutable darray[uintptr]
+    indices: mutable darray[u32]
     tags: mutable darray[u32]
     row_words: mutable usize
     preferred_region_capacity: mutable usize
@@ -362,12 +367,19 @@ def packed_store_region_table(state: any PackedStoreState&) -> any darray[heap R
 def packed_store_handle_table(state: any PackedStoreState&) -> any darray[uintptr]&:
     return (&state.handles).cast[any darray[uintptr]&]()
 
+def packed_store_index_table(state: any PackedStoreState&) -> any darray[u32]&:
+    return (&state.indices).cast[any darray[u32]&]()
+
 def packed_store_tag_table(state: any PackedStoreState&) -> any darray[u32]&:
     return (&state.tags).cast[any darray[u32]&]()
 
 def packed_store_append_handle(a: any Arena&, state: any PackedStoreState&, handle: uintptr) can[Memory.Allocate, Abort.Panic]:
     handles: any darray[uintptr]& = packed_store_handle_table(state)
     _ = arena_da_append(a, handles, handle)
+
+def packed_store_append_index(a: any Arena&, state: any PackedStoreState&, index: u32) can[Memory.Allocate, Abort.Panic]:
+    indices: any darray[u32]& = packed_store_index_table(state)
+    _ = arena_da_append(a, indices, index)
 
 def packed_store_append_tag(a: any Arena&, state: any PackedStoreState&, tag: u32) can[Memory.Allocate, Abort.Panic]:
     tags: any darray[u32]& = packed_store_tag_table(state)
@@ -410,6 +422,7 @@ def ctx_packed_store_state_new(a: any Arena&, row_bytes: usize) -> heap void& ca
     state.tail_region <- null
     state.regions <- zeroed
     state.handles <- zeroed
+    state.indices <- zeroed
     state.tags <- zeroed
     state.row_words <- row_words
     state.preferred_region_capacity <- preferred_region_capacity
@@ -554,6 +567,7 @@ def ctx_packed_store_alloc_fixed_result(a: any Arena&, state_bits: any void&) ->
     offset_words: uintptr = offset_bytes / sizeof(uintptr).uintptr()
     handle: uintptr = (state.alloc_region_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
     packed_store_append_handle(a, state, handle)
+    packed_store_append_index(a, state, (state.handles.count - 1u).u32())
     return PackedStoreAllocResult(ptr, handle)
 
 def ctx_packed_store_alloc_result(a: any Arena&, size_bytes: usize, state_bits: any void&) -> PackedStoreAllocResult can[Memory.Allocate, Abort.Panic]:
@@ -591,7 +605,24 @@ def ctx_packed_store_alloc_result(a: any Arena&, size_bytes: usize, state_bits: 
     offset_words: uintptr = offset_bytes / sizeof(uintptr).uintptr()
     handle: uintptr = (state.alloc_region_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
     packed_store_append_handle(a, state, handle)
+    packed_store_append_index(a, state, (state.handles.count - 1u).u32())
     return PackedStoreAllocResult(ptr, handle)
+
+def ctx_packed_store_alloc_fixed_index_result(a: any Arena&, state_bits: any void&) -> PackedStoreIndexAllocResult can[Memory.Allocate, Abort.Panic]:
+    result: PackedStoreAllocResult = ctx_packed_store_alloc_fixed_result(a, state_bits)
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    assert state.indices.items != null
+    assert state.indices.count > 0u
+    indices: any u32& = state.indices.items
+    return PackedStoreIndexAllocResult(result.row, indices[state.indices.count - 1u])
+
+def ctx_packed_store_alloc_index_result(a: any Arena&, size_bytes: usize, state_bits: any void&) -> PackedStoreIndexAllocResult can[Memory.Allocate, Abort.Panic]:
+    result: PackedStoreAllocResult = ctx_packed_store_alloc_result(a, size_bytes, state_bits)
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    assert state.indices.items != null
+    assert state.indices.count > 0u
+    indices: any u32& = state.indices.items
+    return PackedStoreIndexAllocResult(result.row, indices[state.indices.count - 1u])
 
 def ctx_packed_store_count(state_bits: any void&) -> usize:
     assert state_bits != null
@@ -603,18 +634,33 @@ def ctx_packed_store_word_handle_at(state_bits: any void&, index: usize) -> uint
     state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
     assert state.handles.items != null
     assert index < state.handles.count
-    return state.handles.items[index]
+    handles: any uintptr& = state.handles.items
+    return handles[index]
 
 def ctx_packed_store_row_ptr_at(state_bits: any void&, index: usize) -> any void&:
     handle: uintptr = ctx_packed_store_word_handle_at(state_bits, index)
     assert handle != 0u64.uintptr()
     return handle.cast[any u8&]().cast[any void&]()
 
+def ctx_packed_store_index_at(state_bits: any void&, index: usize) -> u32:
+    assert state_bits != null
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    assert state.indices.items != null
+    assert index < state.indices.count
+    indices: any u32& = state.indices.items
+    return indices[index]
+
 def ctx_packed_store_view(state_bits: any void&, start: usize, end: usize) -> dview[uintptr]:
     assert state_bits != null
     state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
     handles: any darray[uintptr]& = packed_store_handle_table(state)
     return arena_da_view(handles, start, end)
+
+def ctx_packed_store_indices_view[T](state_bits: any void&, start: usize, end: usize) -> dview[T]:
+    assert state_bits != null
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    indices: any darray[u32]& = packed_store_index_table(state)
+    return arena_da_view(indices.cast[any darray[T]&](), start, end)
 
 def ctx_packed_store_tags_view[T](state_bits: any void&, start: usize, end: usize) -> dview[T]:
     assert state_bits != null
@@ -894,6 +940,37 @@ def ctx_packed_store_read_tag(a: any Arena&, handle: uintptr, state_bits: any vo
     row_tag: any u32& = (data_base + offset_words * sizeof(uintptr)).cast[any u32&]()
     return row_tag[0]
 
+def ctx_packed_store_encode_index(a: any Arena&, ptr: any void&, state_bits: any void&) -> u32 can[Abort.Panic]:
+    assert state_bits != null
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    encoded: uintptr = ctx_packed_store_encode(a, ptr, state_bits)
+    i: mutable usize = 0u
+    assert state.handles.items != null
+    handles: any uintptr& = state.handles.items
+    while i < state.handles.count:
+        if handles[i] == encoded:
+            return i.u32()
+        i <- i + 1u
+    panic("packed store encode index missing handle")
+
+def ctx_packed_store_decode_index(a: any Arena&, index: u32, state_bits: any void&) -> any void&:
+    assert state_bits != null
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    index_usize: usize = index.usize()
+    assert index_usize < state.handles.count
+    assert state.handles.items != null
+    handles: any uintptr& = state.handles.items
+    return ctx_packed_store_decode(a, handles[index_usize], state_bits)
+
+def ctx_packed_store_read_index_tag(state_bits: any void&, index: u32) -> u32:
+    assert state_bits != null
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    index_usize: usize = index.usize()
+    assert index_usize < state.tags.count
+    assert state.tags.items != null
+    tags: any u32& = state.tags.items
+    return tags[index_usize]
+
 def ctx_packed_store_read_word(a: any Arena&, handle: uintptr, state_bits: any void&, word_offset: usize) -> uintptr:
     assert handle != 0u64.uintptr()
 
@@ -993,6 +1070,15 @@ def ctx_packed_store_read_word(a: any Arena&, handle: uintptr, state_bits: any v
     data_base: heap u8& = packed_store_region_data(r)
     row_words: any uintptr& = (data_base + offset_words * sizeof(uintptr)).cast[any uintptr&]()
     return row_words[word_offset]
+
+def ctx_packed_store_read_index_word(a: any Arena&, index: u32, state_bits: any void&, word_offset: usize) -> uintptr:
+    assert state_bits != null
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    index_usize: usize = index.usize()
+    assert index_usize < state.handles.count
+    assert state.handles.items != null
+    handles: any uintptr& = state.handles.items
+    return ctx_packed_store_read_word(a, handles[index_usize], state_bits, word_offset)
 
 # ------------------------------------------------------------
 # Snapshot / rewind / reset / free / trim

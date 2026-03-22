@@ -288,6 +288,10 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 		{name: "row", typ: heapRefTypeExpr("void", true), mutable: true},
 		{name: "handle", typ: namedTypeExpr("uintptr", false), mutable: true},
 	})
+	a.registerBuiltinStructType("PackedStoreIndexAllocResult", nil, false, []builtinFieldSpec{
+		{name: "row", typ: heapRefTypeExpr("void", true), mutable: true},
+		{name: "index", typ: namedTypeExpr("u32", false), mutable: true},
+	})
 	a.registerBuiltinStructType("StringView", nil, false, []builtinFieldSpec{
 		{name: "data", typ: refTypeExpr("u8", false), mutable: true},
 		{name: "len", typ: namedTypeExpr("i64", false), mutable: true},
@@ -420,7 +424,7 @@ func isBuiltinRuntimeStructName(name string) bool {
 		return true
 	case "Region", "Arena", "ArenaMark", "StringView", "DynArray", "DynArrayView", "DictBucket", "DynDict":
 		return true
-	case "PackedStoreAllocResult":
+	case "PackedStoreAllocResult", "PackedStoreIndexAllocResult":
 		return true
 	default:
 		return false

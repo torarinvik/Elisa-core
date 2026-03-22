@@ -70,6 +70,8 @@ func packedABITestName(abi packedEnumABIMode) string {
 		return "row_handle"
 	case packedEnumABIWordHandle:
 		return "word_handle"
+	case packedEnumABIIndexSOA:
+		return "index_soa"
 	default:
 		return "packed_abi_unknown"
 	}
@@ -1371,6 +1373,42 @@ def first(owner: Arena) -> int:
 	}
 }
 
+func TestGenerateLLVMIRLowersPackedStoreCountAndIndexForIndexSOA(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def walk(owner: Arena) -> int:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		left: Expr = new Expr.Int(span: 1, value: 3)
+		right: Expr = new Expr.Int(span: 2, value: 4)
+		_ = new Expr.Add(span: 3, left: left, right: right)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	total: mutable int = 0
+	index: mutable usize = 0u
+	while index < frozen.count:
+		node: Expr = frozen[index]
+		if node in frozen as Expr.Int(value: value):
+			total <- total + value + node.span
+		index <- index + 1u
+	return total
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_store_count_index_index_soa.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	for _, check := range []string{"%PackedStoreIndexAllocResult = type { ptr, i32 }", "call %PackedStoreIndexAllocResult @ctx_packed_store_alloc_fixed_index_result(", "call i64 @ctx_packed_store_count(", "call i32 @ctx_packed_store_index_at(", "call ptr @ctx_packed_store_decode_index("} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersPackedStoreSliceForWordHandle(t *testing.T) {
 	src := `packed enum Expr:
 	common:
@@ -1435,6 +1473,72 @@ def first(owner: Arena) -> int:
 	}
 }
 
+func TestGenerateLLVMIRLowersPackedStoreSliceForIndexSOA(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def walk(owner: Arena) -> int:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		left: Expr = new Expr.Int(span: 1, value: 3)
+		right: Expr = new Expr.Int(span: 2, value: 4)
+		_ = new Expr.Add(span: 3, left: left, right: right)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	chunk: dview[Expr] = frozen[1u:frozen.count]
+	if chunk.len > 0u:
+		node: Expr = chunk[0u]
+		if node in frozen as Expr.Int(value: value):
+			return value + node.span
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_store_slice_index_soa.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	for _, check := range []string{"call %DynArrayView @ctx_packed_store_indices_view(", "call i64 @ctx_packed_store_count(", "call ptr @ctx_packed_store_decode_index("} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRUsesIndexReadHelpersForMixedPackedMatchInIndexSOA(t *testing.T) {
+	src := `packed enum Expr:
+	Lit(value: int)
+	End
+
+def fold() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	in store:
+		node: Expr = new Expr.Lit(value: 5)
+		return match node:
+			Expr.Lit(value):
+				value
+			Expr.End:
+				0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_index_soa_tag_read_mixed.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	for _, check := range []string{"call i32 @ctx_packed_store_read_index_tag(", "call i64 @ctx_packed_store_read_index_word("} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
+		t.Fatalf("expected mixed packed match in index-soa mode to avoid eager decode on the fast path, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersPackedStoreTagsViewForWordHandle(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)
@@ -1482,6 +1586,39 @@ def first_tag(owner: Arena) -> Expr.Tag:
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_store_tags_row.llcontext", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIRowHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	for _, check := range []string{"ctx_packed_store_tags_view", "call i64 @ctx_packed_store_count("} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	for _, bad := range []string{"call ptr @ctx_packed_store_decode(", "call i32 @ctx_packed_store_read_tag("} {
+		if strings.Contains(output, bad) {
+			t.Fatalf("expected packed store tag view lowering to avoid %q, got:\n%s", bad, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersPackedStoreTagsViewForIndexSOA(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def first_tag(owner: Arena) -> Expr.Tag:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		left: Expr = new Expr.Int(value: 1)
+		right: Expr = new Expr.Int(value: 2)
+		_ = new Expr.Add(left: left, right: right)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	tags: dview[Expr.Tag] = frozen.tags
+	return tags[0u]
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_store_tags_index_soa.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
 	}
@@ -1591,6 +1728,10 @@ def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool
 	}{
 		{
 			abi:         packedEnumABIWordHandle,
+			mustContain: []string{"ctx_packed_store_tags_view", "@__parallel_for_0_worker", "@pool_submit1__", "@task_group_wait_all("},
+		},
+		{
+			abi:         packedEnumABIIndexSOA,
 			mustContain: []string{"ctx_packed_store_tags_view", "@__parallel_for_0_worker", "@pool_submit1__", "@task_group_wait_all("},
 		},
 		{

@@ -31,6 +31,7 @@ type packedEnumABIMode int
 const (
 	packedEnumABIRowHandle packedEnumABIMode = iota
 	packedEnumABIWordHandle
+	packedEnumABIIndexSOA
 )
 
 type PackedEnumABI string
@@ -38,6 +39,7 @@ type PackedEnumABI string
 const (
 	PackedEnumABIRowHandle  PackedEnumABI = "row-handle"
 	PackedEnumABIWordHandle PackedEnumABI = "word-handle"
+	PackedEnumABIIndexSOA   PackedEnumABI = "index-soa"
 )
 
 func ParsePackedEnumABI(value string) (PackedEnumABI, error) {
@@ -46,8 +48,10 @@ func ParsePackedEnumABI(value string) (PackedEnumABI, error) {
 		return PackedEnumABIRowHandle, nil
 	case string(PackedEnumABIWordHandle), "word", "wordhandle":
 		return PackedEnumABIWordHandle, nil
+	case string(PackedEnumABIIndexSOA), "index", "soa", "indexsoa":
+		return PackedEnumABIIndexSOA, nil
 	default:
-		return "", fmt.Errorf("unsupported packed enum ABI %q (expected %q or %q)", value, PackedEnumABIRowHandle, PackedEnumABIWordHandle)
+		return "", fmt.Errorf("unsupported packed enum ABI %q (expected %q, %q, or %q)", value, PackedEnumABIRowHandle, PackedEnumABIWordHandle, PackedEnumABIIndexSOA)
 	}
 }
 
@@ -61,6 +65,8 @@ func (abi PackedEnumABI) mode() (packedEnumABIMode, error) {
 		return packedEnumABIRowHandle, nil
 	case PackedEnumABIWordHandle:
 		return packedEnumABIWordHandle, nil
+	case PackedEnumABIIndexSOA:
+		return packedEnumABIIndexSOA, nil
 	default:
 		return packedEnumABIRowHandle, fmt.Errorf("unsupported packed enum ABI %q", abi)
 	}
@@ -309,7 +315,7 @@ func (g *llvmGenerator) addFunctionEnumAttribute(fn C.LLVMValueRef, name string)
 
 func (g *llvmGenerator) shouldNeverInlineDefinedFunction(name string) bool {
 	switch name {
-	case "ctx_packed_store_alloc_result", "ctx_packed_store_alloc_fixed_result":
+	case "ctx_packed_store_alloc_result", "ctx_packed_store_alloc_fixed_result", "ctx_packed_store_alloc_index_result", "ctx_packed_store_alloc_fixed_index_result":
 		return true
 	default:
 		return false
@@ -485,6 +491,8 @@ func (g *llvmGenerator) lowerPackedEnumType(enumType *semantic.EnumType) (C.LLVM
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	case packedEnumABIWordHandle:
 		return g.lowerBuiltin("uintptr")
+	case packedEnumABIIndexSOA:
+		return g.lowerBuiltin("u32")
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedEnumABI)
 	}
@@ -498,6 +506,8 @@ func (g *llvmGenerator) lowerPackedEnumStoreType(storeType *semantic.PackedEnumS
 	case packedEnumABIRowHandle:
 		fallthrough
 	case packedEnumABIWordHandle:
+		fallthrough
+	case packedEnumABIIndexSOA:
 		return g.ensurePackedEnumStoreCarrierType(storeType)
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedEnumABI)
@@ -512,6 +522,8 @@ func (g *llvmGenerator) ensurePackedEnumStorageType(enumType *semantic.EnumType)
 	case packedEnumABIRowHandle:
 		fallthrough
 	case packedEnumABIWordHandle:
+		fallthrough
+	case packedEnumABIIndexSOA:
 		return g.ensurePackedEnumRowType(enumType.Name, enumType)
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedEnumABI)
@@ -526,6 +538,8 @@ func (g *llvmGenerator) packedEnumPayloadFieldIndex(enumType *semantic.EnumType)
 	case packedEnumABIRowHandle:
 		fallthrough
 	case packedEnumABIWordHandle:
+		fallthrough
+	case packedEnumABIIndexSOA:
 		payloadIndex := 1
 		if enumType.Decl != nil {
 			payloadIndex += len(enumType.Decl.Common)
