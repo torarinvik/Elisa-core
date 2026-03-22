@@ -3250,8 +3250,8 @@ func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMVa
 	if !ok || enumType == nil || !enumType.Packed {
 		return nil, nil, false, nil
 	}
-	if ident, ok := expr.Object.(*ast.Ident); ok {
-		if _, ok := s.lookupPackedEnumStorage(ident.Name, enumType); ok {
+	if key, ok := s.packedEnumStoragePath(expr.Object); ok {
+		if _, ok := s.lookupPackedEnumStorage(key, enumType); ok {
 			return nil, nil, false, nil
 		}
 	}

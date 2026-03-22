@@ -10,6 +10,7 @@ import "C"
 
 import (
 	"fmt"
+	"strings"
 	"unsafe"
 
 	"llcontext/src/ast"
@@ -116,8 +117,8 @@ func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, s
 		return nil, nil, err
 	}
 	if enumType, ok := containerType.(*semantic.EnumType); ok && enumType.Packed {
-		if ident, ok := expr.Object.(*ast.Ident); ok {
-			if cachedPtr, ok := s.lookupPackedEnumStorage(ident.Name, enumType); ok {
+		if key, ok := s.packedEnumStoragePath(expr.Object); ok {
+			if cachedPtr, ok := s.lookupPackedEnumStorage(key, enumType); ok {
 				fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, cachedPtr, C.unsigned(index), cStringFree(expr.Field))
 				return fieldPtr, fieldType, nil
 			}
@@ -141,8 +142,8 @@ func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, s
 		if err != nil {
 			return nil, nil, err
 		}
-		if ident, ok := expr.Object.(*ast.Ident); ok {
-			s.bindPackedEnumStorage(ident.Name, enumType, objPtr)
+		if key, ok := s.packedEnumStoragePath(expr.Object); ok {
+			s.bindPackedEnumStorage(key, enumType, objPtr)
 		}
 	}
 	fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, objPtr, C.unsigned(index), cStringFree(expr.Field))
@@ -168,8 +169,8 @@ func (s *functionState) emitReadableFieldAddress(expr *ast.FieldExpr) (C.LLVMVal
 		return nil, nil, err
 	}
 	if enumType, ok := containerType.(*semantic.EnumType); ok && enumType.Packed {
-		if ident, ok := expr.Object.(*ast.Ident); ok {
-			if cachedPtr, ok := s.lookupPackedEnumStorage(ident.Name, enumType); ok {
+		if key, ok := s.packedEnumStoragePath(expr.Object); ok {
+			if cachedPtr, ok := s.lookupPackedEnumStorage(key, enumType); ok {
 				fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, cachedPtr, C.unsigned(index), cStringFree(expr.Field))
 				return s.refinedOptionalPayloadAddress(fieldPtr, fieldType, s.exprType(expr), expr.Field)
 			}
@@ -193,8 +194,8 @@ func (s *functionState) emitReadableFieldAddress(expr *ast.FieldExpr) (C.LLVMVal
 		if err != nil {
 			return nil, nil, err
 		}
-		if ident, ok := expr.Object.(*ast.Ident); ok {
-			s.bindPackedEnumStorage(ident.Name, enumType, objPtr)
+		if key, ok := s.packedEnumStoragePath(expr.Object); ok {
+			s.bindPackedEnumStorage(key, enumType, objPtr)
 		}
 	}
 	fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, objPtr, C.unsigned(index), cStringFree(expr.Field))
@@ -832,6 +833,23 @@ func (s *functionState) lookupBinding(name string) (valueBinding, bool) {
 	return valueBinding{}, false
 }
 
+func (s *functionState) packedEnumStoragePath(expr ast.Expr) (string, bool) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return n.Name, true
+	case *ast.FieldExpr:
+		base, ok := s.packedEnumStoragePath(n.Object)
+		if !ok || base == "" {
+			return "", false
+		}
+		return base + "." + n.Field, true
+	case *ast.ParenExpr:
+		return s.packedEnumStoragePath(n.Inner)
+	default:
+		return "", false
+	}
+}
+
 func (s *functionState) bindPackedEnumStorage(name string, enumType *semantic.EnumType, ptr C.LLVMValueRef) {
 	if name == "" || enumType == nil || !enumType.Packed || ptr == nil {
 		return
@@ -866,7 +884,11 @@ func (s *functionState) invalidatePackedEnumStorage(name string) {
 		return
 	}
 	for scope := s.scope; scope != nil; scope = scope.parent {
-		delete(scope.packedEnumPtrs, name)
+		for key := range scope.packedEnumPtrs {
+			if key == name || strings.HasPrefix(key, name+".") {
+				delete(scope.packedEnumPtrs, key)
+			}
+		}
 	}
 }
 
