@@ -3480,6 +3480,44 @@ def copy_rebased_helper_indexed(values: array[i32, 4]) -> void:
 	}
 }
 
+func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughWildcardRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
+	src := `repr(c) struct Views:
+	left: view[i32]
+	right: view[i32]
+
+repr(c) struct ViewWindow:
+	items: view[Views]
+
+@borrows_return_field_rebased(items[*].left, src[*].left, items[*].right, src[*].right)
+extern wrap_sub_wild(src: view[Views], start: usize, end: usize) -> ViewWindow
+
+def arena_da_copy_exact[T](dst: view[T], src: view[T]):
+	_ = dst
+	_ = src
+
+def copy_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> void:
+	items: array[Views, 4] = [Views(values[0u:1u], values[1u:2u]), Views(values[2u:3u], values[3u:4u]), Views(values[4u:5u], values[5u:6u]), Views(values[6u:7u], values[7u:8u])]
+	wrapped: ViewWindow = wrap_sub_wild(items[1u:3u], 0u, 2u)
+	arena_da_copy_exact(wrapped.items[0u].left, wrapped.items[0u].right)
+	`
+	result := parseAndAnalyze(t, "backend_dview_copy_exact_wildcard_rebased_helper_indexed_field_projection.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	copyWildcardRebasedHelperIndexedBody := functionIR(output, "copy_wildcard_rebased_helper_indexed")
+	if copyWildcardRebasedHelperIndexedBody == "" {
+		t.Fatalf("expected to find copy_wildcard_rebased_helper_indexed body, got:\n%s", output)
+	}
+	if !strings.Contains(copyWildcardRebasedHelperIndexedBody, "call ptr @arena_memcpy(ptr noalias") {
+		t.Fatalf("expected copy_wildcard_rebased_helper_indexed to lower through direct noalias arena_memcpy via wildcard rebased helper-returned indexed field projections, got:\n%s", copyWildcardRebasedHelperIndexedBody)
+	}
+	if strings.Contains(copyWildcardRebasedHelperIndexedBody, "call void @arena_da_copy_exact") {
+		t.Fatalf("expected copy_wildcard_rebased_helper_indexed to avoid helper fallback, got:\n%s", copyWildcardRebasedHelperIndexedBody)
+	}
+}
+
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughNestedRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
 	src := `repr(c) struct Views:
 	left: view[i32]
@@ -4175,6 +4213,87 @@ def eq_rebased_helper_indexed(values: array[i32, 4]) -> bool:
 	}
 	if strings.Contains(eqRebasedHelperIndexedBody, "call i1 @arena_da_eq_exact") {
 		t.Fatalf("expected eq_rebased_helper_indexed to avoid helper fallback, got:\n%s", eqRebasedHelperIndexedBody)
+	}
+}
+
+func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughWildcardRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
+	src := `repr(c) struct Views:
+	left: view[i32]
+	right: view[i32]
+
+repr(c) struct ViewWindow:
+	items: view[Views]
+
+@borrows_return_field_rebased(items[*].left, src[*].left, items[*].right, src[*].right)
+extern wrap_sub_wild(src: view[Views], start: usize, end: usize) -> ViewWindow
+
+def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
+	_ = left
+	_ = right
+	return false
+
+def eq_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> bool:
+	items: array[Views, 4] = [Views(values[0u:1u], values[1u:2u]), Views(values[2u:3u], values[3u:4u]), Views(values[4u:5u], values[5u:6u]), Views(values[6u:7u], values[7u:8u])]
+	wrapped: ViewWindow = wrap_sub_wild(items[1u:3u], 0u, 2u)
+	return arena_da_eq_exact(wrapped.items[0u].left, wrapped.items[0u].right)
+	`
+	result := parseAndAnalyze(t, "backend_dview_eq_exact_wildcard_rebased_helper_indexed_field_projection.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	eqWildcardRebasedHelperIndexedBody := functionIR(output, "eq_wildcard_rebased_helper_indexed")
+	if eqWildcardRebasedHelperIndexedBody == "" {
+		t.Fatalf("expected to find eq_wildcard_rebased_helper_indexed body, got:\n%s", output)
+	}
+	if !strings.Contains(eqWildcardRebasedHelperIndexedBody, "call i64 @memcmp(ptr noalias") {
+		t.Fatalf("expected eq_wildcard_rebased_helper_indexed to lower through direct noalias memcmp via wildcard rebased helper-returned indexed field projections, got:\n%s", eqWildcardRebasedHelperIndexedBody)
+	}
+	if strings.Contains(eqWildcardRebasedHelperIndexedBody, "call i1 @arena_da_eq_exact") {
+		t.Fatalf("expected eq_wildcard_rebased_helper_indexed to avoid helper fallback, got:\n%s", eqWildcardRebasedHelperIndexedBody)
+	}
+}
+
+func TestGenerateLLVMIRKeepsOverlapGuardrailsThroughWildcardRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
+	src := `repr(c) struct Views:
+	left: view[i32]
+	right: view[i32]
+
+repr(c) struct ViewWindow:
+	items: view[Views]
+
+@borrows_return_field_rebased(items[*].left, src[*].left, items[*].right, src[*].right)
+extern wrap_sub_wild(src: view[Views], start: usize, end: usize) -> ViewWindow
+
+def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
+	_ = left
+	_ = right
+	return false
+
+def eq_wildcard_rebased_overlap(values: array[i32, 8]) -> bool:
+	items: array[Views, 2] = [Views(values[0u:3u], values[1u:4u]), Views(values[4u:7u], values[5u:8u])]
+	wrapped: ViewWindow = wrap_sub_wild(items[0u:1u], 0u, 1u)
+	return arena_da_eq_exact(wrapped.items[0u].left, wrapped.items[0u].right)
+	`
+	result := parseAndAnalyze(t, "backend_dview_eq_exact_wildcard_rebased_helper_indexed_overlap_guardrails.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	eqWildcardRebasedOverlapBody := functionIR(output, "eq_wildcard_rebased_overlap")
+	if eqWildcardRebasedOverlapBody == "" {
+		t.Fatalf("expected to find eq_wildcard_rebased_overlap body, got:\n%s", output)
+	}
+	if !strings.Contains(eqWildcardRebasedOverlapBody, "call i64 @memcmp(ptr ") {
+		t.Fatalf("expected eq_wildcard_rebased_overlap to lower through direct memcmp, got:\n%s", eqWildcardRebasedOverlapBody)
+	}
+	if strings.Contains(eqWildcardRebasedOverlapBody, "call i64 @memcmp(ptr noalias") {
+		t.Fatalf("expected eq_wildcard_rebased_overlap to avoid noalias memcmp on overlapping wildcard rebased helper projections, got:\n%s", eqWildcardRebasedOverlapBody)
+	}
+	if strings.Contains(eqWildcardRebasedOverlapBody, "call i1 @arena_da_eq_exact") {
+		t.Fatalf("expected eq_wildcard_rebased_overlap to avoid helper fallback, got:\n%s", eqWildcardRebasedOverlapBody)
 	}
 }
 

@@ -2353,10 +2353,11 @@ func (a *Analyzer) resolveProjectedFieldValueFromCallExpr(call *ast.CallExpr, pa
 		}
 		for i := 0; i < len(annotation.Args); i += 2 {
 			returnSteps, ok := parseExternReturnTargetPath(annotation.Args[i])
-			if !ok || len(returnSteps) > len(path) || !borrowReturnAnnotationStepsHavePrefix(path, returnSteps) {
+			wildcardCaptures, matched := borrowReturnAnnotationStepsMatchPrefix(path, returnSteps)
+			if !ok || len(returnSteps) > len(path) || !matched {
 				continue
 			}
-			if expr, ok := a.resolveProjectedFieldBorrowSourceExprFromCall(call, decl, annotation.Args[i+1]); ok {
+			if expr, ok := a.resolveProjectedFieldBorrowSourceExprFromCall(call, decl, annotation.Args[i+1], wildcardCaptures); ok {
 				return a.resolveProjectedFieldValueExprAtPath(expr, path[len(returnSteps):])
 			}
 		}
@@ -2364,16 +2365,21 @@ func (a *Analyzer) resolveProjectedFieldValueFromCallExpr(call *ast.CallExpr, pa
 	return nil, false
 }
 
-func borrowReturnAnnotationStepsHavePrefix(path []borrowReturnAnnotationStep, prefix []borrowReturnAnnotationStep) bool {
+func borrowReturnAnnotationStepsMatchPrefix(path []borrowReturnAnnotationStep, prefix []borrowReturnAnnotationStep) ([]borrowReturnAnnotationStep, bool) {
 	if len(prefix) > len(path) {
-		return false
+		return nil, false
 	}
+	wildcardCaptures := make([]borrowReturnAnnotationStep, 0, len(prefix))
 	for i := range prefix {
-		if !borrowReturnAnnotationStepsEqual(path[i], prefix[i]) {
-			return false
+		capture, captured, ok := borrowReturnAnnotationStepMatches(path[i], prefix[i])
+		if !ok {
+			return nil, false
+		}
+		if captured {
+			wildcardCaptures = append(wildcardCaptures, capture)
 		}
 	}
-	return true
+	return wildcardCaptures, true
 }
 
 func borrowReturnAnnotationStepsEqual(left, right borrowReturnAnnotationStep) bool {
@@ -2387,6 +2393,50 @@ func borrowReturnAnnotationStepsEqual(left, right borrowReturnAnnotationStep) bo
 	default:
 		return false
 	}
+}
+
+func borrowReturnAnnotationStepMatches(actual, pattern borrowReturnAnnotationStep) (borrowReturnAnnotationStep, bool, bool) {
+	switch {
+	case pattern.Wildcard:
+		if actual.Wildcard {
+			return cloneBorrowReturnAnnotationStep(actual), true, true
+		}
+		if actual.Index != nil {
+			return cloneBorrowReturnAnnotationStep(actual), true, true
+		}
+		return borrowReturnAnnotationStep{}, false, false
+	default:
+		return borrowReturnAnnotationStep{}, false, borrowReturnAnnotationStepsEqual(actual, pattern)
+	}
+}
+
+func cloneBorrowReturnAnnotationStep(step borrowReturnAnnotationStep) borrowReturnAnnotationStep {
+	clone := step
+	if step.Index != nil {
+		index := *step.Index
+		clone.Index = &index
+	}
+	return clone
+}
+
+func substituteBorrowReturnWildcardSteps(steps []borrowReturnAnnotationStep, wildcardCaptures []borrowReturnAnnotationStep) ([]borrowReturnAnnotationStep, bool) {
+	if len(steps) == 0 {
+		return nil, true
+	}
+	out := make([]borrowReturnAnnotationStep, 0, len(steps))
+	captureIndex := 0
+	for _, step := range steps {
+		if !step.Wildcard {
+			out = append(out, cloneBorrowReturnAnnotationStep(step))
+			continue
+		}
+		if captureIndex >= len(wildcardCaptures) {
+			return nil, false
+		}
+		out = append(out, cloneBorrowReturnAnnotationStep(wildcardCaptures[captureIndex]))
+		captureIndex++
+	}
+	return out, true
 }
 
 func (a *Analyzer) resolveProjectedFieldExternFuncDecl(fnExpr ast.Expr) (*ast.ExternFuncDecl, bool) {
@@ -2413,12 +2463,16 @@ func (a *Analyzer) resolveProjectedFieldExternFuncDecl(fnExpr ast.Expr) (*ast.Ex
 	}
 }
 
-func (a *Analyzer) resolveProjectedFieldBorrowSourceExprFromCall(call *ast.CallExpr, decl *ast.ExternFuncDecl, pathText string) (ast.Expr, bool) {
+func (a *Analyzer) resolveProjectedFieldBorrowSourceExprFromCall(call *ast.CallExpr, decl *ast.ExternFuncDecl, pathText string, wildcardCaptures []borrowReturnAnnotationStep) (ast.Expr, bool) {
 	if call == nil || decl == nil {
 		return nil, false
 	}
 	paramName, steps, ok := parseBorrowReturnAnnotationPath(pathText)
 	if !ok || paramName == "" {
+		return nil, false
+	}
+	steps, ok = substituteBorrowReturnWildcardSteps(steps, wildcardCaptures)
+	if !ok {
 		return nil, false
 	}
 	current, ok := resolveProjectedFieldCallArgByParamName(call, decl, paramName)
@@ -2435,7 +2489,63 @@ func (a *Analyzer) resolveProjectedFieldBorrowSourceExprFromCall(call *ast.CallE
 			return nil, false
 		}
 	}
+	if normalized, ok := a.normalizeProjectedBorrowSourceExpr(current); ok {
+		return normalized, true
+	}
 	return current, true
+}
+
+func (a *Analyzer) normalizeProjectedBorrowSourceExpr(expr ast.Expr) (ast.Expr, bool) {
+	if expr == nil {
+		return nil, false
+	}
+	root, path, ok := a.extractProjectedBorrowSourcePath(expr)
+	if !ok || len(path) == 0 {
+		return expr, true
+	}
+	resolved, ok := a.resolveProjectedFieldValueExprAtPath(root, path)
+	if !ok || resolved == nil {
+		return expr, true
+	}
+	return resolved, true
+}
+
+func (a *Analyzer) extractProjectedBorrowSourcePath(expr ast.Expr) (ast.Expr, []borrowReturnAnnotationStep, bool) {
+	if expr == nil {
+		return nil, nil, false
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return a.extractProjectedBorrowSourcePath(n.Inner)
+	case *ast.CastExpr:
+		return a.extractProjectedBorrowSourcePath(n.Operand)
+	case *ast.MoveExpr:
+		return a.extractProjectedBorrowSourcePath(n.Operand)
+	case *ast.CanExpr:
+		return a.extractProjectedBorrowSourcePath(n.Expr)
+	case *ast.AllocExpr:
+		return a.extractProjectedBorrowSourcePath(n.Value)
+	case *ast.FieldExpr:
+		root, path, ok := a.extractProjectedBorrowSourcePath(n.Object)
+		if !ok {
+			return nil, nil, false
+		}
+		path = append(path, borrowReturnAnnotationStep{Field: n.Field})
+		return root, path, true
+	case *ast.IndexExpr:
+		step, ok := a.resolveProjectedFieldIndexStep(n.Index)
+		if !ok {
+			return nil, nil, false
+		}
+		root, path, ok := a.extractProjectedBorrowSourcePath(n.Object)
+		if !ok {
+			return nil, nil, false
+		}
+		path = append(path, step)
+		return root, path, true
+	default:
+		return expr, nil, true
+	}
 }
 
 func resolveProjectedFieldCallArgByParamName(call *ast.CallExpr, decl *ast.ExternFuncDecl, paramName string) (ast.Expr, bool) {
