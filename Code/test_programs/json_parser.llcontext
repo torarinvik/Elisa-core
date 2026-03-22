@@ -91,24 +91,8 @@ struct JsonNumberValue:
     signed_value: mutable i64
 
 
-struct JsonUnsignedResult:
-    ok: mutable bool
-    value: mutable u64
-
-
-struct JsonSignedResult:
-    ok: mutable bool
-    value: mutable i64
-
-
-struct JsonFloat32Result:
-    ok: mutable bool
-    value: mutable f32
-
-
-struct JsonFloat64Result:
-    ok: mutable bool
-    value: mutable f64
+error JsonNumberAccessError:
+    Invalid
 
 
 extern strtod(nptr: any u8&, endptr: any u8&?) -> f64
@@ -969,22 +953,6 @@ def json_invalid_number_value() -> JsonNumberValue:
     return JsonNumberValue(JsonNumberKind.INVALID, 0u64, 0)
 
 
-def json_invalid_unsigned_result() -> JsonUnsignedResult:
-    return JsonUnsignedResult(false, 0u64)
-
-
-def json_invalid_signed_result() -> JsonSignedResult:
-    return JsonSignedResult(false, 0)
-
-
-def json_invalid_float32_result() -> JsonFloat32Result:
-    return JsonFloat32Result(false, 0.0)
-
-
-def json_invalid_float64_result() -> JsonFloat64Result:
-    return JsonFloat64Result(false, 0.0)
-
-
 def json_abs_f64(value: f64) -> f64:
     return -value if value < 0.0 else value
 
@@ -1000,21 +968,16 @@ def json_number_has_nonzero_digit(source: any u8&, source_offset: usize, source_
     return false
 
 
-def json_parse_number_f64_value(source: any u8&, source_offset: usize, source_len: usize) -> JsonFloat64Result:
+def json_parse_number_f64_value(source: any u8&, source_offset: usize, source_len: usize) -> f64 error[JsonNumberAccessError]:
     if source_len == 0u:
-        return json_invalid_float64_result()
+        raise JsonNumberAccessError.Invalid
 
-    parsed: f64 = strtod(source + source_offset, null)
-    return JsonFloat64Result(true, parsed)
+    return strtod(source + source_offset, null)
 
 
-def json_parse_number_f32_value(source: any u8&, source_offset: usize, source_len: usize) -> JsonFloat32Result:
-    parsed: JsonFloat64Result = json_parse_number_f64_value(source, source_offset, source_len)
-    if not parsed.ok:
-        return json_invalid_float32_result()
-
-    narrowed: f32 = parsed.value.f32()
-    return JsonFloat32Result(true, narrowed)
+def json_parse_number_f32_value(source: any u8&, source_offset: usize, source_len: usize) -> f32 error[JsonNumberAccessError]:
+    parsed: f64 = try json_parse_number_f64_value(source, source_offset, source_len)
+    return parsed.f32()
 
 
 def json_ast_kind(node: JsonNode, store: JsonNode.Store[Local]) -> JsonNodeKind:
@@ -1141,9 +1104,9 @@ def json_number_has_fraction_or_exponent(source: any u8&, source_offset: usize, 
     return false
 
 
-def json_parse_u64_digits(source: any u8&, source_offset: usize, source_end: usize) -> JsonUnsignedResult:
+def json_parse_u64_digits(source: any u8&, source_offset: usize, source_end: usize) -> u64 error[JsonNumberAccessError]:
     if source_offset >= source_end:
-        return json_invalid_unsigned_result()
+        raise JsonNumberAccessError.Invalid
 
     max_div10: u64 = 1844674407370955161u64
     max_mod10: u64 = 5u64
@@ -1152,16 +1115,38 @@ def json_parse_u64_digits(source: any u8&, source_offset: usize, source_end: usi
     while pos < source_end:
         ch: i64 = source[pos].i64()
         if not json_is_digit(ch):
-            return json_invalid_unsigned_result()
+            raise JsonNumberAccessError.Invalid
 
         digit: u64 = (ch - JSON_CH_0).u64()
         if value > max_div10 or (value == max_div10 and digit > max_mod10):
-            return json_invalid_unsigned_result()
+            raise JsonNumberAccessError.Invalid
 
         value <- value * 10u64 + digit
         pos <- pos + 1u
 
-    return JsonUnsignedResult(true, value)
+    return value
+
+
+def json_u64_digits_exceed_max(source: any u8&, source_offset: usize, source_end: usize) -> bool:
+    digit_count: usize = source_end - source_offset
+    if digit_count < 20u:
+        return false
+    if digit_count > 20u:
+        return true
+
+    max_digits: any u8& = "18446744073709551615".cast[any u8&]()
+    pos: mutable usize = source_offset
+    max_pos: mutable usize = 0u
+    while pos < source_end:
+        digit: i64 = source[pos].i64()
+        max_digit: i64 = max_digits[max_pos].i64()
+        if digit < max_digit:
+            return false
+        if digit > max_digit:
+            return true
+        pos <- pos + 1u
+        max_pos <- max_pos + 1u
+    return false
 
 
 def json_parse_number_value(source: any u8&, source_offset: usize, source_len: usize) -> JsonNumberValue:
@@ -1178,11 +1163,13 @@ def json_parse_number_value(source: any u8&, source_offset: usize, source_len: u
     if negative:
         digits_offset <- digits_offset + 1u
 
-    parsed: JsonUnsignedResult = json_parse_u64_digits(source, digits_offset, source_offset + source_len)
-    if not parsed.ok:
+    digits_end: usize = source_offset + source_len
+    if json_u64_digits_exceed_max(source, digits_offset, digits_end):
         return JsonNumberValue(JsonNumberKind.OUT_OF_RANGE, 0u64, 0)
 
-    magnitude: u64 = parsed.value
+    parsed: u64 = try json_parse_u64_digits(source, digits_offset, digits_end) else 0u64
+
+    magnitude: u64 = parsed
     if negative:
         if magnitude > i64_min_abs_u64:
             return JsonNumberValue(JsonNumberKind.OUT_OF_RANGE, 0u64, 0)
@@ -1214,37 +1201,50 @@ def json_ast_number_is_integral(source: any u8&, node: JsonNode, store: JsonNode
     return kind == JsonNumberKind.UNSIGNED or kind == JsonNumberKind.SIGNED
 
 
-def json_ast_number_u64_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> JsonUnsignedResult:
+def json_ast_number_u64_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> u64 error[JsonNumberAccessError]:
     value: JsonNumberValue = json_ast_number_value(source, node, store)
     if value.kind == JsonNumberKind.UNSIGNED:
-        return JsonUnsignedResult(true, value.unsigned_value)
-    return json_invalid_unsigned_result()
+        return value.unsigned_value
+    raise JsonNumberAccessError.Invalid
 
 
-def json_ast_number_i64_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> JsonSignedResult:
+def json_ast_number_i64_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> i64 error[JsonNumberAccessError]:
     value: JsonNumberValue = json_ast_number_value(source, node, store)
     i64_max_u64: u64 = 9223372036854775807u64
     if value.kind == JsonNumberKind.SIGNED:
-        return JsonSignedResult(true, value.signed_value)
+        return value.signed_value
     if value.kind == JsonNumberKind.UNSIGNED and value.unsigned_value <= i64_max_u64:
-        return JsonSignedResult(true, value.unsigned_value.i64())
-    return json_invalid_signed_result()
+        return value.unsigned_value.i64()
+    raise JsonNumberAccessError.Invalid
 
 
-def json_ast_number_f64_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> JsonFloat64Result:
+def json_ast_number_f64_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> f64 error[JsonNumberAccessError]:
     in store:
         match node:
             JsonNode.Number:
-                return json_parse_number_f64_value(source, node.source_offset, node.source_len)
-    return json_invalid_float64_result()
+                return try json_parse_number_f64_value(source, node.source_offset, node.source_len)
+    raise JsonNumberAccessError.Invalid
 
 
-def json_ast_number_f32_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> JsonFloat32Result:
+def json_ast_number_f32_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> f32 error[JsonNumberAccessError]:
     in store:
         match node:
             JsonNode.Number:
-                return json_parse_number_f32_value(source, node.source_offset, node.source_len)
-    return json_invalid_float32_result()
+                return try json_parse_number_f32_value(source, node.source_offset, node.source_len)
+    raise JsonNumberAccessError.Invalid
+
+
+def json_number_value_can_materialize_u64(value: JsonNumberValue) -> bool:
+    return value.kind == JsonNumberKind.UNSIGNED
+
+
+def json_number_value_can_materialize_i64(value: JsonNumberValue) -> bool:
+    i64_max_u64: u64 = 9223372036854775807u64
+    return value.kind == JsonNumberKind.SIGNED or (value.kind == JsonNumberKind.UNSIGNED and value.unsigned_value <= i64_max_u64)
+
+
+def json_node_can_materialize_float(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
+    return json_ast_kind(node, store) == JsonNodeKind.NUMBER
 
 
 def json_ast_string_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> heap u8& can[Memory.Allocate, Abort.Panic]:
@@ -1795,10 +1795,10 @@ def json_parser_document_field_i64_impl(doc: any JsonParserDocument&, key: any u
     field_node: JsonNode = json_parser_document_field_node(impl, key, store)
     if json_node_is_invalid(field_node, store):
         return 0
-    signed_value: JsonSignedResult = json_ast_number_i64_value(json_parser_document_source(impl), field_node, store)
-    if not signed_value.ok:
+    number_value: JsonNumberValue = json_ast_number_value(json_parser_document_source(impl), field_node, store)
+    if not json_number_value_can_materialize_i64(number_value):
         return 0
-    out[0u] <- signed_value.value
+    out[0u] <- number_value.signed_value if number_value.kind == JsonNumberKind.SIGNED else number_value.unsigned_value.i64()
     return 1
 
 
@@ -1810,10 +1810,10 @@ def json_parser_document_field_u64_impl(doc: any JsonParserDocument&, key: any u
     field_node: JsonNode = json_parser_document_field_node(impl, key, store)
     if json_node_is_invalid(field_node, store):
         return 0
-    unsigned_value: JsonUnsignedResult = json_ast_number_u64_value(json_parser_document_source(impl), field_node, store)
-    if not unsigned_value.ok:
+    number_value: JsonNumberValue = json_ast_number_value(json_parser_document_source(impl), field_node, store)
+    if not json_number_value_can_materialize_u64(number_value):
         return 0
-    out[0u] <- unsigned_value.value
+    out[0u] <- number_value.unsigned_value
     return 1
 
 
@@ -1825,10 +1825,10 @@ def json_parser_document_field_f64_impl(doc: any JsonParserDocument&, key: any u
     field_node: JsonNode = json_parser_document_field_node(impl, key, store)
     if json_node_is_invalid(field_node, store):
         return 0
-    float_value: JsonFloat64Result = json_ast_number_f64_value(json_parser_document_source(impl), field_node, store)
-    if not float_value.ok:
+    if not json_node_can_materialize_float(field_node, store):
         return 0
-    out[0u] <- float_value.value
+    float_value: f64 = try json_ast_number_f64_value(json_parser_document_source(impl), field_node, store) else 0.0
+    out[0u] <- float_value
     return 1
 
 
@@ -1840,10 +1840,10 @@ def json_parser_document_field_f32_impl(doc: any JsonParserDocument&, key: any u
     field_node: JsonNode = json_parser_document_field_node(impl, key, store)
     if json_node_is_invalid(field_node, store):
         return 0
-    float_value: JsonFloat32Result = json_ast_number_f32_value(json_parser_document_source(impl), field_node, store)
-    if not float_value.ok:
+    if not json_node_can_materialize_float(field_node, store):
         return 0
-    out[0u] <- float_value.value
+    float_value: f32 = try json_ast_number_f32_value(json_parser_document_source(impl), field_node, store) else 0.0
+    out[0u] <- float_value
     return 1
 
 
@@ -1877,10 +1877,10 @@ def json_parser_document_array_field_i64_at_impl(doc: any JsonParserDocument&, k
     item_node: JsonNode = json_parser_document_array_field_item_node(impl, key, index, store)
     if json_node_is_invalid(item_node, store):
         return 0
-    signed_value: JsonSignedResult = json_ast_number_i64_value(json_parser_document_source(impl), item_node, store)
-    if not signed_value.ok:
+    number_value: JsonNumberValue = json_ast_number_value(json_parser_document_source(impl), item_node, store)
+    if not json_number_value_can_materialize_i64(number_value):
         return 0
-    out[0u] <- signed_value.value
+    out[0u] <- number_value.signed_value if number_value.kind == JsonNumberKind.SIGNED else number_value.unsigned_value.i64()
     return 1
 
 
@@ -1892,10 +1892,10 @@ def json_parser_document_array_field_f64_at_impl(doc: any JsonParserDocument&, k
     item_node: JsonNode = json_parser_document_array_field_item_node(impl, key, index, store)
     if json_node_is_invalid(item_node, store):
         return 0
-    float_value: JsonFloat64Result = json_ast_number_f64_value(json_parser_document_source(impl), item_node, store)
-    if not float_value.ok:
+    if not json_node_can_materialize_float(item_node, store):
         return 0
-    out[0u] <- float_value.value
+    float_value: f64 = try json_ast_number_f64_value(json_parser_document_source(impl), item_node, store) else 0.0
+    out[0u] <- float_value
     return 1
 
 
@@ -1907,10 +1907,10 @@ def json_parser_document_array_field_f32_at_impl(doc: any JsonParserDocument&, k
     item_node: JsonNode = json_parser_document_array_field_item_node(impl, key, index, store)
     if json_node_is_invalid(item_node, store):
         return 0
-    float_value: JsonFloat32Result = json_ast_number_f32_value(json_parser_document_source(impl), item_node, store)
-    if not float_value.ok:
+    if not json_node_can_materialize_float(item_node, store):
         return 0
-    out[0u] <- float_value.value
+    float_value: f32 = try json_ast_number_f32_value(json_parser_document_source(impl), item_node, store) else 0.0
+    out[0u] <- float_value
     return 1
 
 
@@ -1988,10 +1988,10 @@ def json_parser_document_object_field_i64_at_impl(doc: any JsonParserDocument&, 
     value_node: JsonNode = json_parser_document_object_value_node_at(impl, index, store)
     if json_node_is_invalid(value_node, store):
         return 0
-    signed_value: JsonSignedResult = json_ast_number_i64_value(json_parser_document_source(impl), value_node, store)
-    if not signed_value.ok:
+    number_value: JsonNumberValue = json_ast_number_value(json_parser_document_source(impl), value_node, store)
+    if not json_number_value_can_materialize_i64(number_value):
         return 0
-    out[0u] <- signed_value.value
+    out[0u] <- number_value.signed_value if number_value.kind == JsonNumberKind.SIGNED else number_value.unsigned_value.i64()
     return 1
 
 
@@ -2003,10 +2003,10 @@ def json_parser_document_object_field_f64_at_impl(doc: any JsonParserDocument&, 
     value_node: JsonNode = json_parser_document_object_value_node_at(impl, index, store)
     if json_node_is_invalid(value_node, store):
         return 0
-    float_value: JsonFloat64Result = json_ast_number_f64_value(json_parser_document_source(impl), value_node, store)
-    if not float_value.ok:
+    if not json_node_can_materialize_float(value_node, store):
         return 0
-    out[0u] <- float_value.value
+    float_value: f64 = try json_ast_number_f64_value(json_parser_document_source(impl), value_node, store) else 0.0
+    out[0u] <- float_value
     return 1
 
 
@@ -2018,10 +2018,10 @@ def json_parser_document_object_field_f32_at_impl(doc: any JsonParserDocument&, 
     value_node: JsonNode = json_parser_document_object_value_node_at(impl, index, store)
     if json_node_is_invalid(value_node, store):
         return 0
-    float_value: JsonFloat32Result = json_ast_number_f32_value(json_parser_document_source(impl), value_node, store)
-    if not float_value.ok:
+    if not json_node_can_materialize_float(value_node, store):
         return 0
-    out[0u] <- float_value.value
+    float_value: f32 = try json_ast_number_f32_value(json_parser_document_source(impl), value_node, store) else 0.0
+    out[0u] <- float_value
     return 1
 
 
@@ -2033,10 +2033,10 @@ def json_parser_document_array_i64_at_impl(doc: any JsonParserDocument&, index: 
     item_node: JsonNode = json_parser_document_array_item_node_at(impl, index, store)
     if json_node_is_invalid(item_node, store):
         return 0
-    signed_value: JsonSignedResult = json_ast_number_i64_value(json_parser_document_source(impl), item_node, store)
-    if not signed_value.ok:
+    number_value: JsonNumberValue = json_ast_number_value(json_parser_document_source(impl), item_node, store)
+    if not json_number_value_can_materialize_i64(number_value):
         return 0
-    out[0u] <- signed_value.value
+    out[0u] <- number_value.signed_value if number_value.kind == JsonNumberKind.SIGNED else number_value.unsigned_value.i64()
     return 1
 
 
@@ -2048,10 +2048,10 @@ def json_parser_document_array_f64_at_impl(doc: any JsonParserDocument&, index: 
     item_node: JsonNode = json_parser_document_array_item_node_at(impl, index, store)
     if json_node_is_invalid(item_node, store):
         return 0
-    float_value: JsonFloat64Result = json_ast_number_f64_value(json_parser_document_source(impl), item_node, store)
-    if not float_value.ok:
+    if not json_node_can_materialize_float(item_node, store):
         return 0
-    out[0u] <- float_value.value
+    float_value: f64 = try json_ast_number_f64_value(json_parser_document_source(impl), item_node, store) else 0.0
+    out[0u] <- float_value
     return 1
 
 
@@ -2063,10 +2063,10 @@ def json_parser_document_array_f32_at_impl(doc: any JsonParserDocument&, index: 
     item_node: JsonNode = json_parser_document_array_item_node_at(impl, index, store)
     if json_node_is_invalid(item_node, store):
         return 0
-    float_value: JsonFloat32Result = json_ast_number_f32_value(json_parser_document_source(impl), item_node, store)
-    if not float_value.ok:
+    if not json_node_can_materialize_float(item_node, store):
         return 0
-    out[0u] <- float_value.value
+    float_value: f32 = try json_ast_number_f32_value(json_parser_document_source(impl), item_node, store) else 0.0
+    out[0u] <- float_value
     return 1
 
 
@@ -2224,10 +2224,10 @@ def json_parser_value_i64_impl(value: any JsonParserValue&, out: any i64&) -> i6
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
-    signed_value: JsonSignedResult = json_ast_number_i64_value(json_parser_document_source(impl), json_parser_value_node(value), store)
-    if not signed_value.ok:
+    number_value: JsonNumberValue = json_ast_number_value(json_parser_document_source(impl), json_parser_value_node(value), store)
+    if not json_number_value_can_materialize_i64(number_value):
         return 0
-    out[0u] <- signed_value.value
+    out[0u] <- number_value.signed_value if number_value.kind == JsonNumberKind.SIGNED else number_value.unsigned_value.i64()
     return 1
 
 
@@ -2236,10 +2236,10 @@ def json_parser_value_u64_impl(value: any JsonParserValue&, out: any u64&) -> i6
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
-    unsigned_value: JsonUnsignedResult = json_ast_number_u64_value(json_parser_document_source(impl), json_parser_value_node(value), store)
-    if not unsigned_value.ok:
+    number_value: JsonNumberValue = json_ast_number_value(json_parser_document_source(impl), json_parser_value_node(value), store)
+    if not json_number_value_can_materialize_u64(number_value):
         return 0
-    out[0u] <- unsigned_value.value
+    out[0u] <- number_value.unsigned_value
     return 1
 
 
@@ -2248,10 +2248,10 @@ def json_parser_value_f64_impl(value: any JsonParserValue&, out: any f64&) -> i6
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
-    float_value: JsonFloat64Result = json_ast_number_f64_value(json_parser_document_source(impl), json_parser_value_node(value), store)
-    if not float_value.ok:
+    if not json_node_can_materialize_float(json_parser_value_node(value), store):
         return 0
-    out[0u] <- float_value.value
+    float_value: f64 = try json_ast_number_f64_value(json_parser_document_source(impl), json_parser_value_node(value), store) else 0.0
+    out[0u] <- float_value
     return 1
 
 
@@ -2260,10 +2260,10 @@ def json_parser_value_f32_impl(value: any JsonParserValue&, out: any f32&) -> i6
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
-    float_value: JsonFloat32Result = json_ast_number_f32_value(json_parser_document_source(impl), json_parser_value_node(value), store)
-    if not float_value.ok:
+    if not json_node_can_materialize_float(json_parser_value_node(value), store):
         return 0
-    out[0u] <- float_value.value
+    float_value: f32 = try json_ast_number_f32_value(json_parser_document_source(impl), json_parser_value_node(value), store) else 0.0
+    out[0u] <- float_value
     return 1
 
 
@@ -2569,11 +2569,11 @@ def json_parser_ast_field_i64_impl(source: any u8&, key: any u8&, out: any i64&)
     if json_node_is_invalid(field_node, store):
         destroy scratch
         return 0
-    signed_value: JsonSignedResult = json_ast_number_i64_value(source, field_node, store)
-    if not signed_value.ok:
+    number_value: JsonNumberValue = json_ast_number_value(source, field_node, store)
+    if not json_number_value_can_materialize_i64(number_value):
         destroy scratch
         return 0
-    out[0u] <- signed_value.value
+    out[0u] <- number_value.signed_value if number_value.kind == JsonNumberKind.SIGNED else number_value.unsigned_value.i64()
     destroy scratch
     return 1
 
@@ -2590,11 +2590,11 @@ def json_parser_ast_field_u64_impl(source: any u8&, key: any u8&, out: any u64&)
     if json_node_is_invalid(field_node, store):
         destroy scratch
         return 0
-    unsigned_value: JsonUnsignedResult = json_ast_number_u64_value(source, field_node, store)
-    if not unsigned_value.ok:
+    number_value: JsonNumberValue = json_ast_number_value(source, field_node, store)
+    if not json_number_value_can_materialize_u64(number_value):
         destroy scratch
         return 0
-    out[0u] <- unsigned_value.value
+    out[0u] <- number_value.unsigned_value
     destroy scratch
     return 1
 
@@ -2611,11 +2611,11 @@ def json_parser_ast_field_f64_impl(source: any u8&, key: any u8&, out: any f64&)
     if json_node_is_invalid(field_node, store):
         destroy scratch
         return 0
-    float_value: JsonFloat64Result = json_ast_number_f64_value(source, field_node, store)
-    if not float_value.ok:
+    if not json_node_can_materialize_float(field_node, store):
         destroy scratch
         return 0
-    out[0u] <- float_value.value
+    float_value: f64 = try json_ast_number_f64_value(source, field_node, store) else 0.0
+    out[0u] <- float_value
     destroy scratch
     return 1
 
@@ -2632,11 +2632,11 @@ def json_parser_ast_field_f32_impl(source: any u8&, key: any u8&, out: any f32&)
     if json_node_is_invalid(field_node, store):
         destroy scratch
         return 0
-    float_value: JsonFloat32Result = json_ast_number_f32_value(source, field_node, store)
-    if not float_value.ok:
+    if not json_node_can_materialize_float(field_node, store):
         destroy scratch
         return 0
-    out[0u] <- float_value.value
+    float_value: f32 = try json_ast_number_f32_value(source, field_node, store) else 0.0
+    out[0u] <- float_value
     destroy scratch
     return 1
 
@@ -2657,11 +2657,11 @@ def json_parser_ast_array_field_i64_at_impl(source: any u8&, key: any u8&, index
     if json_node_is_invalid(item_node, store):
         destroy scratch
         return 0
-    signed_value: JsonSignedResult = json_ast_number_i64_value(source, item_node, store)
-    if not signed_value.ok:
+    number_value: JsonNumberValue = json_ast_number_value(source, item_node, store)
+    if not json_number_value_can_materialize_i64(number_value):
         destroy scratch
         return 0
-    out[0u] <- signed_value.value
+    out[0u] <- number_value.signed_value if number_value.kind == JsonNumberKind.SIGNED else number_value.unsigned_value.i64()
     destroy scratch
     return 1
 
@@ -2682,11 +2682,11 @@ def json_parser_ast_array_field_f64_at_impl(source: any u8&, key: any u8&, index
     if json_node_is_invalid(item_node, store):
         destroy scratch
         return 0
-    float_value: JsonFloat64Result = json_ast_number_f64_value(source, item_node, store)
-    if not float_value.ok:
+    if not json_node_can_materialize_float(item_node, store):
         destroy scratch
         return 0
-    out[0u] <- float_value.value
+    float_value: f64 = try json_ast_number_f64_value(source, item_node, store) else 0.0
+    out[0u] <- float_value
     destroy scratch
     return 1
 
@@ -2707,11 +2707,11 @@ def json_parser_ast_array_field_f32_at_impl(source: any u8&, key: any u8&, index
     if json_node_is_invalid(item_node, store):
         destroy scratch
         return 0
-    float_value: JsonFloat32Result = json_ast_number_f32_value(source, item_node, store)
-    if not float_value.ok:
+    if not json_node_can_materialize_float(item_node, store):
         destroy scratch
         return 0
-    out[0u] <- float_value.value
+    float_value: f32 = try json_ast_number_f32_value(source, item_node, store) else 0.0
+    out[0u] <- float_value
     destroy scratch
     return 1
 
@@ -2968,11 +2968,12 @@ def json_parser_ast_object_field_i64_at_impl(source: any u8&, index: usize, out:
     if json_node_is_invalid(field_node, store):
         destroy scratch
         return 0
-    signed_value: JsonSignedResult = json_ast_number_i64_value(source, json_ast_object_iter_value(field_node, store), store)
-    if not signed_value.ok:
+    value_node: JsonNode = json_ast_object_iter_value(field_node, store)
+    number_value: JsonNumberValue = json_ast_number_value(source, value_node, store)
+    if not json_number_value_can_materialize_i64(number_value):
         destroy scratch
         return 0
-    out[0u] <- signed_value.value
+    out[0u] <- number_value.signed_value if number_value.kind == JsonNumberKind.SIGNED else number_value.unsigned_value.i64()
     destroy scratch
     return 1
 
@@ -2989,11 +2990,12 @@ def json_parser_ast_object_field_f64_at_impl(source: any u8&, index: usize, out:
     if json_node_is_invalid(field_node, store):
         destroy scratch
         return 0
-    float_value: JsonFloat64Result = json_ast_number_f64_value(source, json_ast_object_iter_value(field_node, store), store)
-    if not float_value.ok:
+    value_node: JsonNode = json_ast_object_iter_value(field_node, store)
+    if not json_node_can_materialize_float(value_node, store):
         destroy scratch
         return 0
-    out[0u] <- float_value.value
+    float_value: f64 = try json_ast_number_f64_value(source, value_node, store) else 0.0
+    out[0u] <- float_value
     destroy scratch
     return 1
 
@@ -3010,11 +3012,12 @@ def json_parser_ast_object_field_f32_at_impl(source: any u8&, index: usize, out:
     if json_node_is_invalid(field_node, store):
         destroy scratch
         return 0
-    float_value: JsonFloat32Result = json_ast_number_f32_value(source, json_ast_object_iter_value(field_node, store), store)
-    if not float_value.ok:
+    value_node: JsonNode = json_ast_object_iter_value(field_node, store)
+    if not json_node_can_materialize_float(value_node, store):
         destroy scratch
         return 0
-    out[0u] <- float_value.value
+    float_value: f32 = try json_ast_number_f32_value(source, value_node, store) else 0.0
+    out[0u] <- float_value
     destroy scratch
     return 1
 
@@ -3184,11 +3187,12 @@ def json_parser_ast_array_i64_at_impl(source: any u8&, index: usize, out: any i6
     if json_node_is_invalid(item_node, store):
         destroy scratch
         return 0
-    signed_value: JsonSignedResult = json_ast_number_i64_value(source, json_ast_array_iter_value(item_node, store), store)
-    if not signed_value.ok:
+    value_node: JsonNode = json_ast_array_iter_value(item_node, store)
+    number_value: JsonNumberValue = json_ast_number_value(source, value_node, store)
+    if not json_number_value_can_materialize_i64(number_value):
         destroy scratch
         return 0
-    out[0u] <- signed_value.value
+    out[0u] <- number_value.signed_value if number_value.kind == JsonNumberKind.SIGNED else number_value.unsigned_value.i64()
     destroy scratch
     return 1
 
@@ -3205,11 +3209,12 @@ def json_parser_ast_array_f64_at_impl(source: any u8&, index: usize, out: any f6
     if json_node_is_invalid(item_node, store):
         destroy scratch
         return 0
-    float_value: JsonFloat64Result = json_ast_number_f64_value(source, json_ast_array_iter_value(item_node, store), store)
-    if not float_value.ok:
+    value_node: JsonNode = json_ast_array_iter_value(item_node, store)
+    if not json_node_can_materialize_float(value_node, store):
         destroy scratch
         return 0
-    out[0u] <- float_value.value
+    float_value: f64 = try json_ast_number_f64_value(source, value_node, store) else 0.0
+    out[0u] <- float_value
     destroy scratch
     return 1
 
@@ -3226,11 +3231,12 @@ def json_parser_ast_array_f32_at_impl(source: any u8&, index: usize, out: any f3
     if json_node_is_invalid(item_node, store):
         destroy scratch
         return 0
-    float_value: JsonFloat32Result = json_ast_number_f32_value(source, json_ast_array_iter_value(item_node, store), store)
-    if not float_value.ok:
+    value_node: JsonNode = json_ast_array_iter_value(item_node, store)
+    if not json_node_can_materialize_float(value_node, store):
         destroy scratch
         return 0
-    out[0u] <- float_value.value
+    float_value: f32 = try json_ast_number_f32_value(source, value_node, store) else 0.0
+    out[0u] <- float_value
     destroy scratch
     return 1
 
@@ -3496,43 +3502,40 @@ def json_parser_parity_suite_impl() -> int:
     huge_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "huge".cast[any u8&](), numbers_store)
     tiny_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "tiny".cast[any u8&](), numbers_store)
 
-    small_u64: JsonUnsignedResult = json_ast_number_u64_value(numbers_any, small_node, numbers_store)
-    small_i64: JsonSignedResult = json_ast_number_i64_value(numbers_any, small_node, numbers_store)
-    big_u64: JsonUnsignedResult = json_ast_number_u64_value(numbers_any, big_node, numbers_store)
-    big_i64: JsonSignedResult = json_ast_number_i64_value(numbers_any, big_node, numbers_store)
-    neg_u64: JsonUnsignedResult = json_ast_number_u64_value(numbers_any, neg_node, numbers_store)
-    neg_i64: JsonSignedResult = json_ast_number_i64_value(numbers_any, neg_node, numbers_store)
+    small_u64: u64 = try json_ast_number_u64_value(numbers_any, small_node, numbers_store) else 0u64
+    small_i64: i64 = try json_ast_number_i64_value(numbers_any, small_node, numbers_store) else -1
+    big_u64: u64 = try json_ast_number_u64_value(numbers_any, big_node, numbers_store) else 0u64
+    big_i64: i64 = try json_ast_number_i64_value(numbers_any, big_node, numbers_store) else -7
+    neg_u64: u64 = try json_ast_number_u64_value(numbers_any, neg_node, numbers_store) else 7u64
+    neg_i64: i64 = try json_ast_number_i64_value(numbers_any, neg_node, numbers_store) else 0
     frac_value: JsonNumberValue = json_ast_number_value(numbers_any, frac_node, numbers_store)
     exp_value: JsonNumberValue = json_ast_number_value(numbers_any, exp_node, numbers_store)
     huge_value: JsonNumberValue = json_ast_number_value(numbers_any, huge_node, numbers_store)
     tiny_value: JsonNumberValue = json_ast_number_value(numbers_any, tiny_node, numbers_store)
 
-    if not small_u64.ok or small_u64.value != 123u64:
+    if small_u64 != 123u64:
         destroy numbers_scratch
         return 0
-    if not small_i64.ok or small_i64.value != 123:
+    if small_i64 != 123:
         destroy numbers_scratch
         return 0
     if json_ast_number_kind(numbers_any, small_node, numbers_store) != JsonNumberKind.UNSIGNED:
         destroy numbers_scratch
         return 0
-    if not big_u64.ok or big_u64.value != 18446744073709551615u64:
+    if big_u64 != 18446744073709551615u64:
         destroy numbers_scratch
         return 0
-    if big_i64.ok:
+    if big_i64 != -7:
         destroy numbers_scratch
         return 0
     if json_ast_number_kind(numbers_any, big_node, numbers_store) != JsonNumberKind.UNSIGNED:
         destroy numbers_scratch
         return 0
-    if neg_u64.ok:
-        destroy numbers_scratch
-        return 0
-    if not neg_i64.ok:
+    if neg_u64 != 7u64:
         destroy numbers_scratch
         return 0
     min_i64: i64 = -9223372036854775807 - 1
-    if neg_i64.value != min_i64:
+    if neg_i64 != min_i64:
         destroy numbers_scratch
         return 0
     if json_ast_number_kind(numbers_any, neg_node, numbers_store) != JsonNumberKind.SIGNED:
