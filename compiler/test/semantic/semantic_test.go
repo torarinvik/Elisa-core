@@ -4917,6 +4917,33 @@ def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool
 	requireFunctionReturnTypeString(t, result, "visit", "int")
 }
 
+func TestAnalyzeAcceptsPackedStoreTagsViewAndParallelForIndexBinder(t *testing.T) {
+	src := parallelForConcurrencyPrelude + `
+packed enum Expr:
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		left: Expr = new Expr.Int(value: 1)
+		right: Expr = new Expr.Int(value: 2)
+		_ = new Expr.Add(left: left, right: right)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	tags: dview[Expr.Tag] = frozen.tags
+	pool workers(2u):
+		parallel for tag at i in tags:
+			_ = i
+			if tag == Expr.Tag.Add:
+				_ = i
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "parallel_for_packed_tags_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "visit", "int")
+}
+
 func TestAnalyzeRejectsParallelForOutsidePool(t *testing.T) {
 	src := parallelForConcurrencyPrelude + `
 packed enum Expr:
@@ -4972,6 +4999,24 @@ def bad(store: Expr.Store[Frozen], node: Expr) -> void:
 	all := strings.Join(errs, "\n")
 	if !strings.Contains(all, "cannot assign to packed store view index result") {
 		t.Fatalf("expected packed store slice assignment diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsAssigningPackedStoreTagViewIndexResult(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+def bad(store: Expr.Store[Frozen]) -> void:
+	tags: dview[Expr.Tag] = store.tags
+	tags[0u] <- Expr.Tag.Int
+`
+	_, errs := parseAndAnalyze(t, "packed_store_tag_view_index_assign_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "cannot assign to packed store tag view index result") {
+		t.Fatalf("expected packed store tag view assignment diagnostic, got:\n%s", all)
 	}
 }
 

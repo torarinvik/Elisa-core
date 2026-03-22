@@ -57,6 +57,7 @@ struct PackedStoreState:
     tail_region: mutable heap Region&?
     regions: mutable darray[heap Region&?]
     handles: mutable darray[uintptr]
+    tags: mutable darray[u32]
     row_words: mutable usize
     preferred_region_capacity: mutable usize
 
@@ -361,9 +362,16 @@ def packed_store_region_table(state: any PackedStoreState&) -> any darray[heap R
 def packed_store_handle_table(state: any PackedStoreState&) -> any darray[uintptr]&:
     return (&state.handles).cast[any darray[uintptr]&]()
 
+def packed_store_tag_table(state: any PackedStoreState&) -> any darray[u32]&:
+    return (&state.tags).cast[any darray[u32]&]()
+
 def packed_store_append_handle(a: any Arena&, state: any PackedStoreState&, handle: uintptr) can[Memory.Allocate, Abort.Panic]:
     handles: any darray[uintptr]& = packed_store_handle_table(state)
     _ = arena_da_append(a, handles, handle)
+
+def packed_store_append_tag(a: any Arena&, state: any PackedStoreState&, tag: u32) can[Memory.Allocate, Abort.Panic]:
+    tags: any darray[u32]& = packed_store_tag_table(state)
+    _ = arena_da_append(a, tags, tag)
 
 def packed_store_register_region(a: any Arena&, state: any PackedStoreState&, r: heap Region&?, global_index: usize) can[Memory.Allocate, Abort.Panic]:
     assert r != null
@@ -402,6 +410,7 @@ def ctx_packed_store_state_new(a: any Arena&, row_bytes: usize) -> heap void& ca
     state.tail_region <- null
     state.regions <- zeroed
     state.handles <- zeroed
+    state.tags <- zeroed
     state.row_words <- row_words
     state.preferred_region_capacity <- preferred_region_capacity
     return state.cast[heap void&]()
@@ -607,9 +616,19 @@ def ctx_packed_store_view(state_bits: any void&, start: usize, end: usize) -> dv
     handles: any darray[uintptr]& = packed_store_handle_table(state)
     return arena_da_view(handles, start, end)
 
+def ctx_packed_store_tags_view[T](state_bits: any void&, start: usize, end: usize) -> dview[T]:
+    assert state_bits != null
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    tags: any darray[u32]& = packed_store_tag_table(state)
+    return arena_da_view(tags.cast[any darray[T]&](), start, end)
+
 def ctx_packed_store_record_row_ptr(a: any Arena&, row: any void&, state_bits: any void&) can[Memory.Allocate, Abort.Panic]:
     assert state_bits != null
     packed_store_append_handle(a, state_bits.cast[any PackedStoreState&](), row.cast[any u8&]().uintptr())
+
+def ctx_packed_store_record_tag(a: any Arena&, tag: u32, state_bits: any void&) can[Memory.Allocate, Abort.Panic]:
+    assert state_bits != null
+    packed_store_append_tag(a, state_bits.cast[any PackedStoreState&](), tag)
 
 def ctx_packed_store_alloc(a: any Arena&, size_bytes: usize, state_bits: any void&) -> uintptr can[Memory.Allocate, Abort.Panic]:
     result: PackedStoreAllocResult = ctx_packed_store_alloc_result(a, size_bytes, state_bits)

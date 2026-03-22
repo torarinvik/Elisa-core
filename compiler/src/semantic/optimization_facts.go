@@ -284,7 +284,7 @@ func optimizationFactsForType(t Type) OptimizationFacts {
 		return facts
 	case *DArrayViewType:
 		facts := OptimizationFacts{Contiguous: true, UnitStride: true}
-		if tt.SurfaceName == "packedview" {
+		if tt.SurfaceName == "packedview" || tt.SurfaceName == "packedtags" {
 			facts.ReadOnly = true
 		}
 		if tt.Begin != "" || tt.End != "" {
@@ -351,6 +351,19 @@ func (a *Analyzer) inferExprOptimizationFacts(expr ast.Expr, t Type) Optimizatio
 				facts.Exclusive = false
 			}
 		}
+		if n.Field == "tags" {
+			if storeType, ok := a.exprTypes[n.Object].(*PackedEnumStoreType); ok && IsFrozenPackedEnumStoreType(storeType) {
+				facts.ReadOnly = true
+				facts.Contiguous = true
+				facts.UnitStride = true
+				facts.base = optimizationExprString(expr)
+				facts.Extent = &OptimizationExtent{
+					Kind:  OptimizationExtentViewBounds,
+					Begin: "0",
+					End:   optimizationExprString(&ast.FieldExpr{Position: n.Position, Object: n.Object, Field: "count"}),
+				}
+			}
+		}
 		if facts.base == "" {
 			facts.base = a.optimizationBaseForExpr(n.Object)
 		}
@@ -371,6 +384,8 @@ func (a *Analyzer) inferExprOptimizationFacts(expr ast.Expr, t Type) Optimizatio
 		}
 		if objectFacts, ok := a.exprFacts[n.Object]; ok && objectFacts.HasExactExtent() && isZeroOptimizationExpr(n.Start) {
 			if field := a.sliceFullSpanField(n.Object); field != "" && optimizationFieldMatches(n.End, n.Object, field) {
+				facts.Extent = cloneOptimizationExtent(objectFacts.Extent)
+			} else if fieldExpr, ok := stripOptimizationParens(n.Object).(*ast.FieldExpr); ok && fieldExpr.Field == "tags" && optimizationFieldMatches(n.End, fieldExpr.Object, "count") {
 				facts.Extent = cloneOptimizationExtent(objectFacts.Extent)
 			}
 		}

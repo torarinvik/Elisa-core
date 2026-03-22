@@ -904,8 +904,20 @@ func (a *Analyzer) analyzeParallelForStmt(stmt *ast.ParallelForStmt) {
 	sourceType := a.analyzeExpr(stmt.Source)
 	itemType, ok := parallelForItemType(sourceType)
 	if !ok {
-		a.errorf(stmt.Source.Pos(), "parallel for requires a frozen packed store or packed-store slice, got %s", sourceType.String())
+		a.errorf(stmt.Source.Pos(), "parallel for requires a frozen packed store or readonly dense view, got %s", sourceType.String())
 		itemType = invalidType
+	}
+	if ok {
+		if storeType, isStore := sourceType.(*PackedEnumStoreType); isStore {
+			if !IsFrozenPackedEnumStoreType(storeType) {
+				a.errorf(stmt.Source.Pos(), "parallel for requires a frozen packed store or readonly dense view, got %s", sourceType.String())
+			}
+		} else {
+			facts, hasFacts := a.exprFacts[stmt.Source]
+			if !hasFacts || !facts.ReadOnly || !facts.Contiguous || !facts.UnitStride || !facts.HasExactExtent() {
+				a.errorf(stmt.Source.Pos(), "parallel for requires a readonly contiguous exact-extent view, got %s", sourceType.String())
+			}
+		}
 	}
 	if len(a.currentPoolScopes) == 0 {
 		a.errorf(stmt.Pos(), "parallel for requires an enclosing pool scope")
@@ -917,10 +929,18 @@ func (a *Analyzer) analyzeParallelForStmt(stmt *ast.ParallelForStmt) {
 	savedScope := a.currentScope
 	a.currentScope = loopScope
 	a.defineLocal(loopSym, stmt.Pos())
+	if stmt.IndexName != "" {
+		indexSym := &Symbol{Name: stmt.IndexName, Kind: SymbolLocal, Type: a.namedTypes["usize"], Node: stmt, Mutable: false}
+		a.defineLocal(indexSym, stmt.Pos())
+	}
 	a.currentScope = savedScope
 	a.analyzeBlockWithAffineClone(stmt.Body, loopScope)
 
-	captureCollector := newParallelForCaptureCollector(a, a.currentScope, stmt.Name)
+	rootLocals := []string{stmt.Name}
+	if stmt.IndexName != "" {
+		rootLocals = append(rootLocals, stmt.IndexName)
+	}
+	captureCollector := newParallelForCaptureCollector(a, a.currentScope, rootLocals...)
 	captureCollector.collectStmts(stmt.Body)
 	for _, name := range captureCollector.captureOrder {
 		sym, ok := a.currentScope.Lookup(name)
@@ -957,9 +977,9 @@ func parallelForItemType(t Type) (Type, bool) {
 			return tt.Enum, true
 		}
 	case *DArrayViewType:
-		if tt.SurfaceName == "packedview" {
-			return tt.Elem, true
-		}
+		return tt.Elem, true
+	case *SViewType, *DStrType:
+		return builtinCharType(), true
 	}
 	return nil, false
 }
@@ -1051,11 +1071,17 @@ type parallelForCaptureCollector struct {
 	errors       []string
 }
 
-func newParallelForCaptureCollector(analyzer *Analyzer, outerScope *Scope, loopName string) *parallelForCaptureCollector {
+func newParallelForCaptureCollector(analyzer *Analyzer, outerScope *Scope, loopNames ...string) *parallelForCaptureCollector {
+	rootLocals := map[string]bool{}
+	for _, name := range loopNames {
+		if name != "" {
+			rootLocals[name] = true
+		}
+	}
 	return &parallelForCaptureCollector{
 		analyzer:    analyzer,
 		outerScope:  outerScope,
-		rootLocals:  map[string]bool{loopName: true},
+		rootLocals:  rootLocals,
 		captureSeen: map[string]bool{},
 	}
 }

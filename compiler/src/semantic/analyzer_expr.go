@@ -132,6 +132,10 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			result = errorType
 			return
 		}
+		if tagType, ok := a.packedEnumTagExprType(n); ok {
+			result = tagType
+			return
+		}
 		if constEnumType, ok := a.constEnumMemberExprType(n); ok {
 			result = constEnumType
 			return
@@ -575,12 +579,20 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		}
 		return merged, true
 	case *ast.FieldExpr:
+		if n.Field == "tags" {
+			if storeType, ok := a.exprTypes[n.Object].(*PackedEnumStoreType); ok && IsFrozenPackedEnumStoreType(storeType) {
+				return a.regionRefStateForExpr(n.Object)
+			}
+		}
 		state, ok := a.regionRefStateForExpr(n.Object)
 		if !ok {
 			return regionRefState{}, false
 		}
 		return projectRegionFieldState(state, n.Field)
 	case *ast.IndexExpr:
+		if viewType, ok := a.exprTypes[n.Object].(*DArrayViewType); ok && viewType.SurfaceName == "packedtags" {
+			return a.regionRefStateForExpr(n.Object)
+		}
 		resultType := a.exprTypes[n]
 		if resultType == nil || !a.typeCanContainRegionRefs(resultType, map[string]bool{}) {
 			return regionRefState{}, false
@@ -596,6 +608,9 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		}
 		return cloneRegionRefState(state), true
 	case *ast.SliceExpr:
+		if viewType, ok := a.exprTypes[n.Object].(*DArrayViewType); ok && viewType.SurfaceName == "packedtags" {
+			return a.regionRefStateForExpr(n.Object)
+		}
 		resultType := a.exprTypes[n]
 		if resultType == nil || !a.typeCanContainRegionRefs(resultType, map[string]bool{}) {
 			return regionRefState{}, false
@@ -1077,7 +1092,7 @@ func (a *Analyzer) errorTagType(expr *ast.FieldExpr) (Type, bool) {
 	return errSet, true
 }
 
-func (a *Analyzer) constEnumMemberExprType(expr *ast.FieldExpr) (Type, bool) {
+func (a *Analyzer) packedEnumTagExprType(expr *ast.FieldExpr) (Type, bool) {
 	ident, ok := expr.Object.(*ast.Ident)
 	if !ok {
 		return nil, false
@@ -1086,7 +1101,42 @@ func (a *Analyzer) constEnumMemberExprType(expr *ast.FieldExpr) (Type, bool) {
 	if !ok {
 		return nil, false
 	}
-	constEnumType, ok := base.(*ConstEnumType)
+	enumType, ok := base.(*EnumType)
+	if !ok || expr.Field != "Tag" {
+		return nil, false
+	}
+	if !enumType.Packed || enumType.TagType == nil {
+		a.errorf(expr.Pos(), "enum %q has no nested tag type", enumType.Name)
+		return invalidType, true
+	}
+	return enumType.TagType, true
+}
+
+func (a *Analyzer) constEnumTypeForExpr(expr ast.Expr) (*ConstEnumType, bool) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		base, ok := a.namedTypes[n.Name]
+		if !ok {
+			return nil, false
+		}
+		constEnumType, ok := base.(*ConstEnumType)
+		return constEnumType, ok
+	case *ast.FieldExpr:
+		tagType, ok := a.packedEnumTagExprType(n)
+		if !ok {
+			return nil, false
+		}
+		constEnumType, ok := tagType.(*ConstEnumType)
+		return constEnumType, ok
+	case *ast.ParenExpr:
+		return a.constEnumTypeForExpr(n.Inner)
+	default:
+		return nil, false
+	}
+}
+
+func (a *Analyzer) constEnumMemberExprType(expr *ast.FieldExpr) (Type, bool) {
+	constEnumType, ok := a.constEnumTypeForExpr(expr.Object)
 	if !ok {
 		return nil, false
 	}
@@ -3497,8 +3547,13 @@ func valueOnlyIndexKind(t Type) (string, bool) {
 	if _, ok := t.(*PackedEnumStoreType); ok {
 		return "packed store index result", true
 	}
-	if view, ok := t.(*DArrayViewType); ok && view.SurfaceName == "packedview" {
-		return "packed store view index result", true
+	if view, ok := t.(*DArrayViewType); ok {
+		if view.SurfaceName == "packedview" {
+			return "packed store view index result", true
+		}
+		if view.SurfaceName == "packedtags" {
+			return "packed store tag view index result", true
+		}
 	}
 	if _, ok := t.(*DStrType); ok {
 		return "string index", true
@@ -3516,8 +3571,13 @@ func valueOnlyIndexKind(t Type) (string, bool) {
 	if _, ok := ref.Elem.(*PackedEnumStoreType); ok {
 		return "packed store index result", true
 	}
-	if view, ok := ref.Elem.(*DArrayViewType); ok && view.SurfaceName == "packedview" {
-		return "packed store view index result", true
+	if view, ok := ref.Elem.(*DArrayViewType); ok {
+		if view.SurfaceName == "packedview" {
+			return "packed store view index result", true
+		}
+		if view.SurfaceName == "packedtags" {
+			return "packed store tag view index result", true
+		}
 	}
 	if _, ok := ref.Elem.(*DStrType); ok {
 		return "string index", true
@@ -3565,11 +3625,18 @@ func dstrSyntheticField(t Type, fieldName string) (Field, bool) {
 }
 
 func packedStoreSyntheticField(t Type, fieldName string) (Field, bool) {
-	if fieldName != "count" {
+	storeType, ok := t.(*PackedEnumStoreType)
+	if !ok {
 		return Field{}, false
 	}
-	if _, ok := t.(*PackedEnumStoreType); ok {
+	switch fieldName {
+	case "count":
 		return Field{Name: "count", Type: builtinUsizeType(), Mutable: false}, true
+	case "tags":
+		if !IsFrozenPackedEnumStoreType(storeType) || storeType.Enum == nil || storeType.Enum.TagType == nil {
+			return Field{}, false
+		}
+		return Field{Name: "tags", Type: &DArrayViewType{Elem: storeType.Enum.TagType, SurfaceName: "packedtags"}, Mutable: false}, true
 	}
 	return Field{}, false
 }
@@ -3580,6 +3647,10 @@ func builtinI64Type() Type {
 
 func builtinUsizeType() Type {
 	return &BuiltinType{Name: "usize"}
+}
+
+func builtinCharType() Type {
+	return &BuiltinType{Name: "char"}
 }
 
 type runtimeStringKind int

@@ -785,6 +785,54 @@ def inspect(owner: Arena) -> int:
 	}
 }
 
+func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedTagViews(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def inspect(owner: Arena) -> int:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		left: Expr = new Expr.Int(value: 1)
+		right: Expr = new Expr.Int(value: 2)
+		_ = new Expr.Add(left: left, right: right)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	tags_view: dview[Expr.Tag] = frozen.tags
+	full_span: dview[Expr.Tag] = frozen.tags[0u:frozen.count]
+	prefix: dview[Expr.Tag] = frozen.tags[0u:1u]
+	suffix: dview[Expr.Tag] = frozen.tags[1u:frozen.count]
+	_ = tags_view
+	_ = full_span
+	_ = prefix
+	_ = suffix
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_tag_view.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	tagsExpr := requireOptimizationFactsVarInitExpr(t, fn, "tags_view")
+	fullExpr := requireOptimizationFactsVarInitExpr(t, fn, "full_span")
+	prefixExpr := requireOptimizationFactsVarInitExpr(t, fn, "prefix")
+	suffixExpr := requireOptimizationFactsVarInitExpr(t, fn, "suffix")
+
+	tagsFacts := requireExprOptimizationFacts(t, result, tagsExpr)
+	tagsProvenance := requireExprPackedStoreProvenance(t, result, tagsExpr)
+	if !tagsFacts.ReadOnly || !tagsFacts.Contiguous || !tagsFacts.UnitStride || !tagsFacts.HasExactExtent() {
+		t.Fatalf("expected frozen packed tag view to expose readonly dense exact facts, got %#v", tagsFacts)
+	}
+	if !tagsFacts.FrozenPackedStoreOnly || !tagsProvenance.DependsOnlyOnFrozenPackedStores() {
+		t.Fatalf("expected frozen packed tag view to expose frozen-only packed-store provenance, got facts=%#v provenance=%#v", tagsFacts, tagsProvenance)
+	}
+	if !result.ExprsHaveSameExtent(tagsExpr, fullExpr) {
+		t.Fatalf("expected frozen packed tag full-span slice to preserve exact extent")
+	}
+	if !result.ExprsAreDisjoint(prefixExpr, suffixExpr) {
+		t.Fatalf("expected disjoint frozen packed tag slices")
+	}
+}
+
 func TestAnalyzePreservesFrozenPackedStoreProvenanceThroughTryExpressions(t *testing.T) {
 	src := `error ProbeError:
 	Fail

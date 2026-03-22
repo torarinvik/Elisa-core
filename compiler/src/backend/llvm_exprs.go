@@ -238,15 +238,7 @@ func (s *functionState) errorTagInfo(expr *ast.FieldExpr) (*semantic.ErrorSetTyp
 }
 
 func (s *functionState) constEnumMemberInfo(expr *ast.FieldExpr) (*semantic.ConstEnumType, *semantic.ConstEnumMember, bool) {
-	ident, ok := expr.Object.(*ast.Ident)
-	if !ok {
-		return nil, nil, false
-	}
-	base, ok := s.g.result.NamedTypes[ident.Name]
-	if !ok {
-		return nil, nil, false
-	}
-	constEnumType, ok := base.(*semantic.ConstEnumType)
+	constEnumType, ok := s.constEnumTypeForExpr(expr.Object)
 	if !ok {
 		return nil, nil, false
 	}
@@ -255,6 +247,42 @@ func (s *functionState) constEnumMemberInfo(expr *ast.FieldExpr) (*semantic.Cons
 		return constEnumType, nil, false
 	}
 	return constEnumType, member, true
+}
+
+func (s *functionState) constEnumTypeForExpr(expr ast.Expr) (*semantic.ConstEnumType, bool) {
+	if expr == nil {
+		return nil, false
+	}
+	if constEnumType, ok := s.exprType(expr).(*semantic.ConstEnumType); ok {
+		return constEnumType, true
+	}
+	switch n := expr.(type) {
+	case *ast.Ident:
+		base, ok := s.g.result.NamedTypes[n.Name]
+		if !ok {
+			return nil, false
+		}
+		constEnumType, ok := base.(*semantic.ConstEnumType)
+		return constEnumType, ok
+	case *ast.FieldExpr:
+		ident, ok := n.Object.(*ast.Ident)
+		if !ok || n.Field != "Tag" {
+			return nil, false
+		}
+		base, ok := s.g.result.NamedTypes[ident.Name]
+		if !ok {
+			return nil, false
+		}
+		enumType, ok := base.(*semantic.EnumType)
+		if !ok || !enumType.Packed || enumType.TagType == nil {
+			return nil, false
+		}
+		return enumType.TagType, true
+	case *ast.ParenExpr:
+		return s.constEnumTypeForExpr(n.Inner)
+	default:
+		return nil, false
+	}
 }
 
 func (s *functionState) emitConstEnumMemberExpr(constEnumType *semantic.ConstEnumType, member *semantic.ConstEnumMember) (C.LLVMValueRef, semantic.Type, error) {
@@ -3273,6 +3301,9 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, sema
 	if value, fieldType, handled, err := s.emitPackedStoreCountExpr(expr); handled {
 		return value, fieldType, err
 	}
+	if value, fieldType, handled, err := s.emitPackedStoreTagsExpr(expr); handled {
+		return value, fieldType, err
+	}
 	if value, fieldType, handled, err := s.emitPackedVariantViewFieldExpr(expr); handled {
 		return value, fieldType, err
 	}
@@ -3303,33 +3334,50 @@ func (s *functionState) emitPackedStoreCountExpr(expr *ast.FieldExpr) (C.LLVMVal
 	if expr == nil || expr.Field != "count" {
 		return nil, nil, false, nil
 	}
-	if _, ok := packedStoreOperandType(s.exprType(expr.Object)); !ok {
+	ops, ok, err := s.packedStoreOpsFromExpr(expr.Object)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if !ok {
 		return nil, nil, false, nil
 	}
-	storeValue, storeType, err := s.emitPackedStoreValueFromExpr(expr.Object)
+	value, err := ops.storeCount("packed.store.count")
 	if err != nil {
 		return nil, nil, true, err
 	}
-	if storeType == nil {
+	return value, s.g.result.NamedTypes["usize"], true, nil
+}
+
+func (s *functionState) emitPackedStoreCountValue(storeValue C.LLVMValueRef, storeType *semantic.PackedEnumStoreType, name string) (C.LLVMValueRef, error) {
+	return (&packedStoreOps{s: s, storeValue: storeValue, storeType: storeType}).storeCount(name)
+}
+
+func (s *functionState) emitPackedStoreTagsExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if expr == nil || expr.Field != "tags" {
 		return nil, nil, false, nil
 	}
-	stateValue, err := s.emitPackedStoreStateValueNamed(storeValue, storeType, "packed.store.count.state")
+	ops, ok, err := s.packedStoreOpsFromExpr(expr.Object)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	usizeType := s.g.result.NamedTypes["usize"]
-	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	helperType := &semantic.FuncType{Name: "ctx_packed_store_count", Params: []semantic.Type{voidRefType}, Return: usizeType}
-	callee, err := s.g.ensureFunctionDeclared("ctx_packed_store_count", helperType)
+	if !ok || ops.storeType == nil || ops.storeType.Enum == nil || !semantic.IsFrozenPackedEnumStoreType(ops.storeType) {
+		return nil, nil, false, nil
+	}
+	resultType, ok := s.exprType(expr).(*semantic.DArrayViewType)
+	if !ok || resultType == nil {
+		return nil, nil, true, fmt.Errorf("packed store tags requires dview result type")
+	}
+	totalValue, err := ops.storeCount("packed.store.tags.count")
 	if err != nil {
 		return nil, nil, true, err
 	}
-	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	zeroType, err := s.g.lowerType(s.g.result.NamedTypes["usize"])
 	if err != nil {
 		return nil, nil, true, err
 	}
-	value := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue}, "packed.store.count")
-	return value, usizeType, true, nil
+	zeroValue := C.LLVMConstInt(zeroType, 0, 0)
+	value, actualType, err := ops.storeTagsView(zeroValue, totalValue, resultType, "packed.store.tags")
+	return value, actualType, true, err
 }
 
 func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
@@ -3433,77 +3481,30 @@ func (s *functionState) emitPackedStoreIndexExpr(expr *ast.IndexExpr) (C.LLVMVal
 	if expr == nil {
 		return nil, nil, false, nil
 	}
-	if _, ok := packedStoreOperandType(s.exprType(expr.Object)); !ok {
-		return nil, nil, false, nil
-	}
-	storeValue, storeType, err := s.emitPackedStoreValueFromExpr(expr.Object)
+	ops, ok, err := s.packedStoreOpsFromExpr(expr.Object)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	if storeType == nil || storeType.Enum == nil {
+	if !ok {
 		return nil, nil, false, nil
 	}
 	indexValue, _, err := s.emitExpr(expr.Index, s.g.result.NamedTypes["usize"])
 	if err != nil {
 		return nil, nil, true, err
 	}
-	stateValue, err := s.emitPackedStoreStateValueNamed(storeValue, storeType, "packed.store.index.state")
-	if err != nil {
-		return nil, nil, true, err
-	}
-	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	usizeType := s.g.result.NamedTypes["usize"]
-	switch s.g.packedEnumABI {
-	case packedEnumABIRowHandle:
-		helperType := &semantic.FuncType{Name: "ctx_packed_store_row_ptr_at", Params: []semantic.Type{voidRefType, usizeType}, Return: voidRefType}
-		callee, err := s.g.ensureFunctionDeclared("ctx_packed_store_row_ptr_at", helperType)
-		if err != nil {
-			return nil, nil, true, err
-		}
-		llvmFnType, err := s.g.lowerFunctionType(helperType)
-		if err != nil {
-			return nil, nil, true, err
-		}
-		value := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, indexValue}, "packed.store.index")
-		coerced, err := s.coerceValue(value, voidRefType, storeType.Enum)
-		if err != nil {
-			return nil, nil, true, err
-		}
-		return coerced, storeType.Enum, true, nil
-	case packedEnumABIWordHandle:
-		uintptrType := s.g.result.NamedTypes["uintptr"]
-		helperType := &semantic.FuncType{Name: "ctx_packed_store_word_handle_at", Params: []semantic.Type{voidRefType, usizeType}, Return: uintptrType}
-		callee, err := s.g.ensureFunctionDeclared("ctx_packed_store_word_handle_at", helperType)
-		if err != nil {
-			return nil, nil, true, err
-		}
-		llvmFnType, err := s.g.lowerFunctionType(helperType)
-		if err != nil {
-			return nil, nil, true, err
-		}
-		value := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, indexValue}, "packed.store.index")
-		coerced, err := s.coerceValue(value, uintptrType, storeType.Enum)
-		if err != nil {
-			return nil, nil, true, err
-		}
-		return coerced, storeType.Enum, true, nil
-	default:
-		return nil, nil, true, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedEnumABI)
-	}
+	value, actualType, err := ops.storeValueAt(indexValue, "packed.store.index")
+	return value, actualType, true, err
 }
 
 func (s *functionState) emitPackedStoreSliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	if expr == nil {
 		return nil, nil, false, nil
 	}
-	if _, ok := packedStoreOperandType(s.exprType(expr.Object)); !ok {
-		return nil, nil, false, nil
-	}
-	storeValue, storeType, err := s.emitPackedStoreValueFromExpr(expr.Object)
+	ops, ok, err := s.packedStoreOpsFromExpr(expr.Object)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	if storeType == nil || storeType.Enum == nil {
+	if !ok {
 		return nil, nil, false, nil
 	}
 	startValue, _, err := s.emitExpr(expr.Start, s.g.result.NamedTypes["usize"])
@@ -3514,23 +3515,9 @@ func (s *functionState) emitPackedStoreSliceExpr(expr *ast.SliceExpr) (C.LLVMVal
 	if err != nil {
 		return nil, nil, true, err
 	}
-	stateValue, err := s.emitPackedStoreStateValueNamed(storeValue, storeType, "packed.store.view.state")
-	if err != nil {
-		return nil, nil, true, err
-	}
 	resultType := s.exprType(expr)
-	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	helperType := &semantic.FuncType{Name: "ctx_packed_store_view", Params: []semantic.Type{voidRefType, s.g.result.NamedTypes["usize"], s.g.result.NamedTypes["usize"]}, Return: resultType}
-	callee, err := s.g.ensureFunctionDeclared("ctx_packed_store_view", helperType)
-	if err != nil {
-		return nil, nil, true, err
-	}
-	llvmFnType, err := s.g.lowerFunctionType(helperType)
-	if err != nil {
-		return nil, nil, true, err
-	}
-	value := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, startValue, endValue}, "packed.store.view")
-	return value, resultType, true, nil
+	value, actualType, err := ops.storeSlice(startValue, endValue, resultType, "packed.store.view")
+	return value, actualType, true, err
 }
 
 func (s *functionState) packedEnumFieldHandleValue(expr ast.Expr, objectType semantic.Type, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
@@ -4411,7 +4398,39 @@ func (s *functionState) emitPackedEnumConstructorAlloc(storeValue C.LLVMValueRef
 			C.LLVMBuildStore(s.builder, aggregate, payloadPtr)
 		}
 	}
+	if err := s.emitPackedStoreRecordTag(storeValue, enumType.StoreType, tagValue); err != nil {
+		return nil, nil, err
+	}
 	return enumValue, enumType, nil
+}
+
+func (s *functionState) emitPackedStoreRecordTag(storeValue C.LLVMValueRef, storeType *semantic.PackedEnumStoreType, tagValue C.LLVMValueRef) error {
+	if storeType == nil {
+		return fmt.Errorf("missing packed store type for tag record")
+	}
+	arenaValue, err := s.emitPackedStoreArenaValueNamed(storeValue, storeType, "packed.tag.record.arena")
+	if err != nil {
+		return err
+	}
+	stateValue, err := s.emitPackedStoreStateValueNamed(storeValue, storeType, "packed.tag.record.state")
+	if err != nil {
+		return err
+	}
+	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	tagType := s.g.result.NamedTypes["u32"]
+	recordType := &semantic.FuncType{Name: "ctx_packed_store_record_tag", Params: []semantic.Type{arenaRefType, tagType, voidRefType}, Return: s.g.result.NamedTypes["void"]}
+	recordCallee, err := s.g.ensureFunctionDeclared("ctx_packed_store_record_tag", recordType)
+	if err != nil {
+		return err
+	}
+	recordLLVMType, err := s.g.lowerFunctionType(recordType)
+	if err != nil {
+		return err
+	}
+	s.buildCall(recordLLVMType, recordCallee, []C.LLVMValueRef{arenaValue, tagValue, stateValue}, "")
+	return nil
 }
 
 type packedEnumTailPayloadPlan struct {

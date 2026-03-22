@@ -140,11 +140,23 @@ func (p *Parser) looksLikeParallelForStmt() bool {
 	if p.tokens[p.pos+2].Kind != lexer.TOKEN_IDENT {
 		return false
 	}
-	if p.tokens[p.pos+3].Kind != lexer.TOKEN_IN {
+	sourcePos := p.pos + 3
+	if p.tokens[sourcePos].Kind == lexer.TOKEN_IDENT && p.tokens[sourcePos].Text == "at" {
+		if p.pos+6 >= len(p.tokens) {
+			return false
+		}
+		if p.tokens[p.pos+4].Kind != lexer.TOKEN_IDENT {
+			return false
+		}
+		if p.tokens[p.pos+5].Kind != lexer.TOKEN_IN {
+			return false
+		}
+		sourcePos = p.pos + 6
+	} else if p.tokens[sourcePos].Kind != lexer.TOKEN_IN {
 		return false
 	}
 	depth := 0
-	for i := p.pos + 4; i < len(p.tokens); i++ {
+	for i := sourcePos + 1; i < len(p.tokens); i++ {
 		tok := p.tokens[i]
 		switch tok.Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
@@ -268,12 +280,17 @@ func (p *Parser) parseParallelForStmt() *ast.ParallelForStmt {
 	p.expectIdentText("parallel")
 	p.expectIdentText("for")
 	name := p.expect(lexer.TOKEN_IDENT).Text
+	indexName := ""
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "at" {
+		p.advance()
+		indexName = p.expect(lexer.TOKEN_IDENT).Text
+	}
 	p.expect(lexer.TOKEN_IN)
 	source := p.parseExpr()
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	body := p.parseBlock()
-	return &ast.ParallelForStmt{Position: pos, Name: name, Source: source, Body: body}
+	return &ast.ParallelForStmt{Position: pos, Name: name, IndexName: indexName, Source: source, Body: body}
 }
 
 func (p *Parser) parseForStmt() *ast.ForStmt {

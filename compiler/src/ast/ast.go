@@ -649,6 +649,7 @@ type ForStmt struct {
 type ParallelForStmt struct {
 	Position lexer.Pos
 	Name     string
+	IndexName string
 	Source   Expr
 	Body     []Stmt
 }

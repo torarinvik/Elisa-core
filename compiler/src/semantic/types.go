@@ -187,6 +187,7 @@ type EnumType struct {
 	Packed     bool
 	Common     map[string]Field
 	StoreType  *PackedEnumStoreType
+	TagType    *ConstEnumType
 	Variants   []*EnumVariant
 	VariantMap map[string]*EnumVariant
 	Decl       *ast.EnumDecl

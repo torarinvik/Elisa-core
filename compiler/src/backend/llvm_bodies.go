@@ -898,10 +898,6 @@ func (s *functionState) emitParallelForStmt(stmt *ast.ParallelForStmt) error {
 }
 
 func (s *functionState) emitParallelForWorkerFunction(stmt *ast.ParallelForStmt, info *semantic.ParallelForInfo, prefix string) (C.LLVMValueRef, *semantic.FuncType, *semantic.StructType, error) {
-	enumType, ok := info.ItemType.(*semantic.EnumType)
-	if !ok {
-		return nil, nil, nil, fmt.Errorf("parallel for worker requires packed-enum item type, got %s", info.ItemType.String())
-	}
 	chunkType, err := s.buildParallelForChunkType(info, prefix)
 	if err != nil {
 		return nil, nil, nil, err
@@ -960,14 +956,23 @@ func (s *functionState) emitParallelForWorkerFunction(stmt *ast.ParallelForStmt,
 	nodeDecl := &ast.VarDeclStmt{
 		Position: stmt.Position,
 		Name:     stmt.Name,
-		Type:     &ast.NamedType{Position: stmt.Position, Name: enumType.Name},
+		Type:     &ast.NamedType{Position: stmt.Position, Name: info.ItemType.String()},
 		Value: &ast.IndexExpr{
 			Position: stmt.Position,
 			Object:   &ast.Ident{Position: stmt.Position, Name: sourceLocalName},
 			Index:    &ast.Ident{Position: stmt.Position, Name: indexLocalName},
 		},
 	}
-	loopBody := []ast.Stmt{nodeDecl}
+	loopBody := make([]ast.Stmt, 0, 2+len(stmt.Body))
+	if stmt.IndexName != "" {
+		loopBody = append(loopBody, &ast.VarDeclStmt{
+			Position: stmt.Position,
+			Name:     stmt.IndexName,
+			Type:     &ast.NamedType{Position: stmt.Position, Name: "usize"},
+			Value:    &ast.Ident{Position: stmt.Position, Name: indexLocalName},
+		})
+	}
+	loopBody = append(loopBody, nodeDecl)
 	loopBody = append(loopBody, stmt.Body...)
 	loopBody = append(loopBody, &ast.AugAssignStmt{
 		Position: stmt.Position,

@@ -349,9 +349,31 @@ func TestParseParallelForStatement(t *testing.T) {
 	if parallelStmt.Name != "node" {
 		t.Fatalf("expected loop binder node, got %q", parallelStmt.Name)
 	}
+	if parallelStmt.IndexName != "" {
+		t.Fatalf("expected no index binder, got %q", parallelStmt.IndexName)
+	}
 	source, ok := parallelStmt.Source.(*ast.Ident)
 	if !ok || source.Name != "frozen" {
 		t.Fatalf("expected loop source frozen, got %T %#v", parallelStmt.Source, parallelStmt.Source)
+	}
+}
+
+func TestParseParallelForStatementWithIndexBinder(t *testing.T) {
+	file, errs := parseSourceFile(t, "packed enum Expr:\n    Int(value: int)\n\ndef walk(frozen: Expr.Store[Frozen]) -> void:\n    pool workers(4u):\n        parallel for tag at i in frozen.tags:\n            pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	poolStmt := decl.Body[0].(*ast.PoolStmt)
+	parallelStmt, ok := poolStmt.Body[0].(*ast.ParallelForStmt)
+	if !ok {
+		t.Fatalf("expected parallel-for stmt, got %T", poolStmt.Body[0])
+	}
+	if parallelStmt.Name != "tag" {
+		t.Fatalf("expected loop binder tag, got %q", parallelStmt.Name)
+	}
+	if parallelStmt.IndexName != "i" {
+		t.Fatalf("expected index binder i, got %q", parallelStmt.IndexName)
 	}
 }
 

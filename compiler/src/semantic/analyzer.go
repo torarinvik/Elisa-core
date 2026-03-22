@@ -554,6 +554,14 @@ func (a *Analyzer) collectNamedTypes(decls []ast.Decl) {
 			enumType := &EnumType{Name: n.Name, Packed: n.Packed, Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: n}
 			a.namedTypes[n.Name] = enumType
 			if n.Packed {
+				tagName := packedEnumTagTypeName(n.Name)
+				if _, exists := a.namedTypes[tagName]; exists {
+					a.errorf(n.Pos(), "duplicate type %q", tagName)
+					continue
+				}
+				tagType := &ConstEnumType{Name: tagName, Storage: a.namedTypes["u32"], MemberMap: map[string]*ConstEnumMember{}}
+				enumType.TagType = tagType
+				a.namedTypes[tagName] = tagType
 				storeName := packedEnumStoreTypeName(n.Name)
 				if _, exists := a.namedTypes[storeName]; exists {
 					a.errorf(n.Pos(), "duplicate type %q", storeName)
@@ -636,6 +644,10 @@ func (a *Analyzer) populateConstEnumMembers(decls []ast.Decl) {
 
 func packedEnumStoreTypeName(enumName string) string {
 	return enumName + ".Store"
+}
+
+func packedEnumTagTypeName(enumName string) string {
+	return enumName + ".Tag"
 }
 
 func (a *Analyzer) populateEnumVariants(decls []ast.Decl) {
@@ -722,6 +734,12 @@ func (a *Analyzer) populateEnumVariants(decls []ast.Decl) {
 			variant := &EnumVariant{Name: variantDecl.Name, Tag: uint32(i), Payload: payload, PayloadNames: payloadNames, TailIndex: tailIndex, Decl: variantDecl}
 			enumType.VariantMap[variant.Name] = variant
 			variants = append(variants, variant)
+			if enumType.Packed && enumType.TagType != nil {
+				member := &ConstEnumMember{Name: variant.Name, Value: int64(variant.Tag)}
+				enumType.TagType.Members = append(enumType.TagType.Members, member)
+				enumType.TagType.MemberMap[member.Name] = member
+				a.constValues[enumType.TagType.Name+"."+member.Name] = ConstValue{Kind: ConstInt, Int: member.Value}
+			}
 		}
 		enumType.Variants = variants
 	}
