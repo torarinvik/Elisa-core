@@ -3480,6 +3480,47 @@ def copy_rebased_helper_indexed(values: array[i32, 4]) -> void:
 	}
 }
 
+func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughNestedRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
+	src := `repr(c) struct Views:
+	left: view[i32]
+	right: view[i32]
+
+repr(c) struct Meta:
+	items: view[Views]
+
+repr(c) struct Wrapper:
+	meta: Meta
+
+@borrows_return_field_rebased(meta.items, src)
+extern wrap_submeta(src: view[Views], start: usize, end: usize) -> Wrapper
+
+def arena_da_copy_exact[T](dst: view[T], src: view[T]):
+	_ = dst
+	_ = src
+
+def copy_nested_rebased_helper_indexed(values: array[i32, 4]) -> void:
+	items: array[Views, 2] = [Views(values[0u:1u], values[1u:2u]), Views(values[2u:3u], values[3u:4u])]
+	wrapped: Wrapper = wrap_submeta(items[1u:2u], 0u, 1u)
+	arena_da_copy_exact(wrapped.meta.items[0u].left, wrapped.meta.items[0u].right)
+	`
+	result := parseAndAnalyze(t, "backend_dview_copy_exact_nested_rebased_helper_indexed_field_projection.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	copyNestedRebasedHelperIndexedBody := functionIR(output, "copy_nested_rebased_helper_indexed")
+	if copyNestedRebasedHelperIndexedBody == "" {
+		t.Fatalf("expected to find copy_nested_rebased_helper_indexed body, got:\n%s", output)
+	}
+	if !strings.Contains(copyNestedRebasedHelperIndexedBody, "call ptr @arena_memcpy(ptr noalias") {
+		t.Fatalf("expected copy_nested_rebased_helper_indexed to lower through direct noalias arena_memcpy via nested rebased helper-returned indexed field projections, got:\n%s", copyNestedRebasedHelperIndexedBody)
+	}
+	if strings.Contains(copyNestedRebasedHelperIndexedBody, "call void @arena_da_copy_exact") {
+		t.Fatalf("expected copy_nested_rebased_helper_indexed to avoid helper fallback, got:\n%s", copyNestedRebasedHelperIndexedBody)
+	}
+}
+
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughNestedFieldProjection(t *testing.T) {
 	src := `repr(c) struct Views:
 	left: view[i32]
@@ -4134,6 +4175,48 @@ def eq_rebased_helper_indexed(values: array[i32, 4]) -> bool:
 	}
 	if strings.Contains(eqRebasedHelperIndexedBody, "call i1 @arena_da_eq_exact") {
 		t.Fatalf("expected eq_rebased_helper_indexed to avoid helper fallback, got:\n%s", eqRebasedHelperIndexedBody)
+	}
+}
+
+func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughNestedRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
+	src := `repr(c) struct Views:
+	left: view[i32]
+	right: view[i32]
+
+repr(c) struct Meta:
+	items: view[Views]
+
+repr(c) struct Wrapper:
+	meta: Meta
+
+@borrows_return_field_rebased(meta.items, src)
+extern wrap_submeta(src: view[Views], start: usize, end: usize) -> Wrapper
+
+def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
+	_ = left
+	_ = right
+	return false
+
+def eq_nested_rebased_helper_indexed(values: array[i32, 4]) -> bool:
+	items: array[Views, 2] = [Views(values[0u:1u], values[1u:2u]), Views(values[2u:3u], values[3u:4u])]
+	wrapped: Wrapper = wrap_submeta(items[1u:2u], 0u, 1u)
+	return arena_da_eq_exact(wrapped.meta.items[0u].left, wrapped.meta.items[0u].right)
+	`
+	result := parseAndAnalyze(t, "backend_dview_eq_exact_nested_rebased_helper_indexed_field_projection.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	eqNestedRebasedHelperIndexedBody := functionIR(output, "eq_nested_rebased_helper_indexed")
+	if eqNestedRebasedHelperIndexedBody == "" {
+		t.Fatalf("expected to find eq_nested_rebased_helper_indexed body, got:\n%s", output)
+	}
+	if !strings.Contains(eqNestedRebasedHelperIndexedBody, "call i64 @memcmp(ptr noalias") {
+		t.Fatalf("expected eq_nested_rebased_helper_indexed to lower through direct noalias memcmp via nested rebased helper-returned indexed field projections, got:\n%s", eqNestedRebasedHelperIndexedBody)
+	}
+	if strings.Contains(eqNestedRebasedHelperIndexedBody, "call i1 @arena_da_eq_exact") {
+		t.Fatalf("expected eq_nested_rebased_helper_indexed to avoid helper fallback, got:\n%s", eqNestedRebasedHelperIndexedBody)
 	}
 }
 

@@ -850,6 +850,74 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	}
 }
 
+func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedHelperIndexedFieldMatchBinders(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+	HoldViews(left: view[i32], right: view[i32], child: Expr)
+
+repr(c) struct Box:
+	node: Expr
+
+repr(c) struct BoxHolder:
+	items: array[Box, 1]
+
+@borrows_return_field(items[0].node, node)
+extern wrap_indexed_node(node: Expr) -> BoxHolder
+
+def inspect(owner: Arena, buf: array[i32, 4]) -> int:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	child: Expr = new[store] Expr.Int(value: 1)
+	node: Expr = new[store] Expr.HoldViews(left: buf[0u:2u], right: buf[2u:4u], child: child)
+	wrapped: BoxHolder = wrap_indexed_node(node)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	match wrapped.items[0u].node in frozen:
+		Expr.HoldViews(left: left, right: right, child: child_alias):
+			left_copy: view[i32] = left
+			right_copy: view[i32] = right
+			child_copy: Expr = child_alias
+			_ = wrapped
+			_ = frozen
+			_ = child_copy
+			return 0
+		Expr.Int(value: _):
+			return 1
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_helper_indexed_field_match.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	leftExpr := requireOptimizationFactsVarInitExpr(t, fn, "left_copy")
+	rightExpr := requireOptimizationFactsVarInitExpr(t, fn, "right_copy")
+	childExpr := requireOptimizationFactsVarInitExpr(t, fn, "child_copy")
+
+	leftFacts := requireExprOptimizationFacts(t, result, leftExpr)
+	rightFacts := requireExprOptimizationFacts(t, result, rightExpr)
+	childFacts := requireExprOptimizationFacts(t, result, childExpr)
+
+	if !leftFacts.HasExactExtent() {
+		t.Fatalf("expected left helper-indexed packed match payload to preserve exact extent facts, got %#v", leftFacts)
+	}
+	if !rightFacts.HasExactExtent() {
+		t.Fatalf("expected right helper-indexed packed match payload to preserve exact extent facts, got %#v", rightFacts)
+	}
+	if !result.ExprsAreDisjoint(leftExpr, rightExpr) {
+		t.Fatalf("expected split view payloads recovered through helper-indexed packed match to stay disjoint")
+	}
+	if !result.ExprsHaveEqualExtentSize(leftExpr, rightExpr) {
+		t.Fatalf("expected split view payloads recovered through helper-indexed packed match to retain equal extent size")
+	}
+	if result.ExprsHaveSameExtent(leftExpr, rightExpr) {
+		t.Fatalf("expected split view payloads recovered through helper-indexed packed match to retain distinct exact bounds")
+	}
+	if !childFacts.FrozenPackedStoreOnly {
+		t.Fatalf("expected packed child payload recovered through helper-indexed frozen match to stay frozen-store-only, got %#v", childFacts)
+	}
+	if !result.ExprDependsOnlyOnFrozenPackedStores(childExpr) {
+		t.Fatalf("expected result query to report frozen-store-only provenance for packed child payload recovered through helper-indexed match")
+	}
+}
+
 func TestAnalyzePreservesOptimizationFactsThroughAllocatedFieldProjectionExpressions(t *testing.T) {
 	src := `repr(c) struct Views:
 	left: view[i32]
@@ -1107,6 +1175,189 @@ def inspect(values: array[i32, 4]) -> int:
 	}
 	if result.ExprsHaveSameExtent(leftExpr, rightExpr) {
 		t.Fatalf("expected rebased helper-returned indexed wrapper field projections through sliced sources to retain distinct exact bounds")
+	}
+}
+
+func TestAnalyzePreservesOptimizationFactsThroughNestedRebasedHelperReturnedIndexedFieldProjectionExpressions(t *testing.T) {
+	src := `repr(c) struct Views:
+	left: view[i32]
+	right: view[i32]
+
+repr(c) struct Meta:
+	items: view[Views]
+
+repr(c) struct Wrapper:
+	meta: Meta
+
+@borrows_return_field_rebased(meta.items, src)
+extern wrap_submeta(src: view[Views], start: usize, end: usize) -> Wrapper
+
+def inspect(values: array[i32, 4]) -> int:
+	items: array[Views, 2] = [Views(values[0u:1u], values[1u:2u]), Views(values[2u:3u], values[3u:4u])]
+	wrapped: Wrapper = wrap_submeta(items[1u:2u], 0u, 1u)
+	left_indexed: view[i32] = wrapped.meta.items[0u].left
+	right_indexed: view[i32] = wrapped.meta.items[0u].right
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_nested_rebased_helper_indexed_field_projection.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	leftExpr := requireOptimizationFactsVarInitExpr(t, fn, "left_indexed")
+	rightExpr := requireOptimizationFactsVarInitExpr(t, fn, "right_indexed")
+
+	leftFacts := requireExprOptimizationFacts(t, result, leftExpr)
+	rightFacts := requireExprOptimizationFacts(t, result, rightExpr)
+
+	if !leftFacts.HasExactExtent() || !rightFacts.HasExactExtent() {
+		t.Fatalf("expected nested rebased helper-returned indexed wrapper field projections through sliced sources to preserve exact extents, got %#v and %#v", leftFacts, rightFacts)
+	}
+	if !result.ExprsAreDisjoint(leftExpr, rightExpr) {
+		t.Fatalf("expected nested rebased helper-returned indexed wrapper field projections through sliced sources to stay disjoint")
+	}
+	if !result.ExprsHaveEqualExtentSize(leftExpr, rightExpr) {
+		t.Fatalf("expected nested rebased helper-returned indexed wrapper field projections through sliced sources to retain equal extent size")
+	}
+	if result.ExprsHaveSameExtent(leftExpr, rightExpr) {
+		t.Fatalf("expected nested rebased helper-returned indexed wrapper field projections through sliced sources to retain distinct exact bounds")
+	}
+}
+
+func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedNestedRebasedHelperIndexedFieldMoveAs(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+	HoldViews(left: view[i32], right: view[i32], child: Expr)
+
+repr(c) struct Box:
+	node: Expr
+
+repr(c) struct Meta:
+	items: view[Box]
+
+repr(c) struct Wrapper:
+	meta: Meta
+
+@borrows_return_field_rebased(meta.items, src)
+extern wrap_submeta(src: view[Box], start: usize, end: usize) -> Wrapper
+
+def inspect(owner: Arena, buf: array[i32, 4]) -> int:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	child: Expr = new[store] Expr.Int(value: 1)
+	items: array[Box, 2] = [Box(new[store] Expr.Int(value: 2)), Box(new[store] Expr.HoldViews(left: buf[0u:2u], right: buf[2u:4u], child: child))]
+	wrapped: Wrapper = wrap_submeta(items[1u:2u], 0u, 1u)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	move wrapped.meta.items[0u].node in frozen as Expr.HoldViews(left, right, child_alias)
+	left_copy: view[i32] = left
+	right_copy: view[i32] = right
+	child_copy: Expr = child_alias
+	_ = frozen
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_nested_rebased_helper_indexed_field_move_as.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	leftExpr := requireOptimizationFactsVarInitExpr(t, fn, "left_copy")
+	rightExpr := requireOptimizationFactsVarInitExpr(t, fn, "right_copy")
+	childExpr := requireOptimizationFactsVarInitExpr(t, fn, "child_copy")
+
+	leftFacts := requireExprOptimizationFacts(t, result, leftExpr)
+	rightFacts := requireExprOptimizationFacts(t, result, rightExpr)
+	childFacts := requireExprOptimizationFacts(t, result, childExpr)
+
+	if !leftFacts.HasExactExtent() {
+		t.Fatalf("expected left nested rebased helper-indexed packed move-as payload to preserve exact extent facts, got %#v", leftFacts)
+	}
+	if !rightFacts.HasExactExtent() {
+		t.Fatalf("expected right nested rebased helper-indexed packed move-as payload to preserve exact extent facts, got %#v", rightFacts)
+	}
+	if !result.ExprsAreDisjoint(leftExpr, rightExpr) {
+		t.Fatalf("expected split view payloads recovered through nested rebased helper-indexed packed move-as to stay disjoint")
+	}
+	if !result.ExprsHaveEqualExtentSize(leftExpr, rightExpr) {
+		t.Fatalf("expected split view payloads recovered through nested rebased helper-indexed packed move-as to retain equal extent size")
+	}
+	if result.ExprsHaveSameExtent(leftExpr, rightExpr) {
+		t.Fatalf("expected split view payloads recovered through nested rebased helper-indexed packed move-as to retain distinct exact bounds")
+	}
+	if !childFacts.FrozenPackedStoreOnly {
+		t.Fatalf("expected packed child payload recovered through nested rebased helper-indexed frozen move-as to stay frozen-store-only, got %#v", childFacts)
+	}
+	if !result.ExprDependsOnlyOnFrozenPackedStores(childExpr) {
+		t.Fatalf("expected result query to report frozen-store-only provenance for packed child payload recovered through nested rebased helper-indexed move-as")
+	}
+}
+
+func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedNestedRebasedHelperIndexedFieldMatchBinders(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+	HoldViews(left: view[i32], right: view[i32], child: Expr)
+
+repr(c) struct Box:
+	node: Expr
+
+repr(c) struct Meta:
+	items: view[Box]
+
+repr(c) struct Wrapper:
+	meta: Meta
+
+@borrows_return_field_rebased(meta.items, src)
+extern wrap_submeta(src: view[Box], start: usize, end: usize) -> Wrapper
+
+def inspect(owner: Arena, buf: array[i32, 4]) -> int:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	child: Expr = new[store] Expr.Int(value: 1)
+	items: array[Box, 2] = [Box(new[store] Expr.Int(value: 2)), Box(new[store] Expr.HoldViews(left: buf[0u:2u], right: buf[2u:4u], child: child))]
+	wrapped: Wrapper = wrap_submeta(items[1u:2u], 0u, 1u)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	match wrapped.meta.items[0u].node in frozen:
+		Expr.HoldViews(left: left, right: right, child: child_alias):
+			left_copy: view[i32] = left
+			right_copy: view[i32] = right
+			child_copy: Expr = child_alias
+			_ = wrapped
+			_ = frozen
+			_ = child_copy
+			return 0
+		Expr.Int(value: _):
+			return 1
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_frozen_packed_nested_rebased_helper_indexed_field_match.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	leftExpr := requireOptimizationFactsVarInitExpr(t, fn, "left_copy")
+	rightExpr := requireOptimizationFactsVarInitExpr(t, fn, "right_copy")
+	childExpr := requireOptimizationFactsVarInitExpr(t, fn, "child_copy")
+
+	leftFacts := requireExprOptimizationFacts(t, result, leftExpr)
+	rightFacts := requireExprOptimizationFacts(t, result, rightExpr)
+	childFacts := requireExprOptimizationFacts(t, result, childExpr)
+
+	if !leftFacts.HasExactExtent() {
+		t.Fatalf("expected left nested rebased helper-indexed packed match payload to preserve exact extent facts, got %#v", leftFacts)
+	}
+	if !rightFacts.HasExactExtent() {
+		t.Fatalf("expected right nested rebased helper-indexed packed match payload to preserve exact extent facts, got %#v", rightFacts)
+	}
+	if !result.ExprsAreDisjoint(leftExpr, rightExpr) {
+		t.Fatalf("expected split view payloads recovered through nested rebased helper-indexed packed match to stay disjoint")
+	}
+	if !result.ExprsHaveEqualExtentSize(leftExpr, rightExpr) {
+		t.Fatalf("expected split view payloads recovered through nested rebased helper-indexed packed match to retain equal extent size")
+	}
+	if result.ExprsHaveSameExtent(leftExpr, rightExpr) {
+		t.Fatalf("expected split view payloads recovered through nested rebased helper-indexed packed match to retain distinct exact bounds")
+	}
+	if !childFacts.FrozenPackedStoreOnly {
+		t.Fatalf("expected packed child payload recovered through nested rebased helper-indexed frozen match to stay frozen-store-only, got %#v", childFacts)
+	}
+	if !result.ExprDependsOnlyOnFrozenPackedStores(childExpr) {
+		t.Fatalf("expected result query to report frozen-store-only provenance for packed child payload recovered through nested rebased helper-indexed match")
 	}
 }
 
