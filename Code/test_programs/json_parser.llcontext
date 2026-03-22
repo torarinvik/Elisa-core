@@ -828,6 +828,8 @@ def json_parse_array_node(cursor: any JsonCursor&, arena: any Arena&, store: Jso
         return json_parse_node_result(invalid_node, -1)
 
     json_skip_ws(cursor)
+    region items_scratch(1024u)
+    items_arena: any Arena& = (&items_scratch).cast[any Arena&]()
     items: mutable darray[JsonNode] = zeroed
     items_checksum: mutable i64 = 0
     if json_cur_char(cursor) == JSON_CH_RBRACKET:
@@ -841,7 +843,7 @@ def json_parse_array_node(cursor: any JsonCursor&, arena: any Arena&, store: Jso
         if value_result.checksum < 0:
             return value_result
 
-        _ = arena_da_append(arena, (&items).cast[any darray[JsonNode]&](), value_result.node)
+        _ = arena_da_append(items_arena, (&items).cast[any darray[JsonNode]&](), value_result.node)
         items_checksum <- items_checksum + value_result.checksum
 
         json_skip_ws(cursor)
@@ -866,6 +868,8 @@ def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: Js
         return json_parse_node_result(invalid_node, -1)
 
     json_skip_ws(cursor)
+    region fields_scratch(1024u)
+    fields_arena: any Arena& = (&fields_scratch).cast[any Arena&]()
     fields: mutable darray[JsonField] = zeroed
     fields_checksum: mutable i64 = 0
     if json_cur_char(cursor) == JSON_CH_RBRACE:
@@ -893,7 +897,7 @@ def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: Js
         if value_result.checksum < 0:
             return value_result
 
-        _ = arena_da_append(arena, (&fields).cast[any darray[JsonField]&](), JsonField(key_node, value_result.node))
+        _ = arena_da_append(fields_arena, (&fields).cast[any darray[JsonField]&](), JsonField(key_node, value_result.node))
         fields_checksum <- fields_checksum + key_checksum + value_result.checksum
 
         json_skip_ws(cursor)
