@@ -204,6 +204,10 @@ int main(void) {
     JsonParserValue meta_value = {0};
     JsonParserValue note_value = {0};
     JsonParserValue missing_value = {0};
+    JsonParserValue iter_key_value = {0};
+    JsonParserValue iter_value_value = {0};
+    JsonParserObjectIter root_object_iter = {0};
+    JsonParserObjectIter next_object_iter = {0};
     uint8_t doc_name_buf[16] = {0};
     uint8_t doc_quote_buf[8] = {0};
     uint8_t doc_key_buf[16] = {0};
@@ -262,6 +266,18 @@ int main(void) {
     assert(json_parser_value_field(&meta_value, (uint8_t*)"note", &note_value) == 1);
     assert(json_parser_value_string_copy(&note_value, value_buf, sizeof(value_buf)) == 2);
     assert(strcmp((char*)value_buf, "hi") == 0);
+    assert(json_parser_value_object_iter(&root_value, &root_object_iter) == 1);
+    assert(json_parser_object_iter_is_valid(&root_object_iter) == 1);
+    assert(json_parser_object_iter_key(&root_object_iter, &iter_key_value) == 1);
+    assert(json_parser_value_string_copy(&iter_key_value, value_buf, sizeof(value_buf)) == 4);
+    assert(strcmp((char*)value_buf, "name") == 0);
+    assert(json_parser_object_iter_value(&root_object_iter, &iter_value_value) == 1);
+    assert(json_parser_value_string_copy(&iter_value_value, value_buf, sizeof(value_buf)) == 3);
+    assert(strcmp((char*)value_buf, "Ada") == 0);
+    assert(json_parser_object_iter_next(&root_object_iter, &next_object_iter) == 1);
+    assert(json_parser_object_iter_key(&next_object_iter, &iter_key_value) == 1);
+    assert(json_parser_value_string_copy(&iter_key_value, value_buf, sizeof(value_buf)) == 4);
+    assert(strcmp((char*)value_buf, "nums") == 0);
     assert(json_parser_value_field(&root_value, (uint8_t*)"missing", &missing_value) == 0);
     assert(json_parser_value_is_valid(&missing_value) == 0);
     assert(json_parser_document_destroy(owned_doc.impl_bits) == 1);
@@ -274,6 +290,9 @@ int main(void) {
     JsonParserValue nested_array_value = {0};
     JsonParserValue nested_object_value = {0};
     JsonParserValue nested_ok_value = {0};
+    JsonParserValue array_iter_value = {0};
+    JsonParserArrayIter array_iter = {0};
+    JsonParserArrayIter next_array_iter = {0};
     uint8_t array_doc_buf[16] = {0};
     assert(json_parser_document_parse((uint8_t*)"[4,\"Ada\",[1,2],{\"ok\":true}]", &array_doc) == 1);
     assert(json_parser_document_root_kind(&array_doc) == 4);
@@ -295,6 +314,15 @@ int main(void) {
     assert(json_parser_value_object_len(&nested_object_value) == 1);
     assert(json_parser_value_field(&nested_object_value, (uint8_t*)"ok", &nested_ok_value) == 1);
     assert(json_parser_value_bool(&nested_ok_value) == 1);
+    assert(json_parser_value_array_iter(&array_root_value, &array_iter) == 1);
+    assert(json_parser_array_iter_is_valid(&array_iter) == 1);
+    assert(json_parser_array_iter_value(&array_iter, &array_iter_value) == 1);
+    assert(json_parser_value_i64(&array_iter_value, &doc_num) == 1);
+    assert(doc_num == 4);
+    assert(json_parser_array_iter_next(&array_iter, &next_array_iter) == 1);
+    assert(json_parser_array_iter_value(&next_array_iter, &array_iter_value) == 1);
+    assert(json_parser_value_string_copy(&array_iter_value, value_buf, sizeof(value_buf)) == 3);
+    assert(strcmp((char*)value_buf, "Ada") == 0);
     assert(json_parser_document_destroy(array_doc.impl_bits) == 1);
     array_doc.impl_bits = 0;
 
