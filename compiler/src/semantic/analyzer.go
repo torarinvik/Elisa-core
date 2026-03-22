@@ -1627,6 +1627,11 @@ func (a *Analyzer) analyzeDecls(decls []ast.Decl) {
 				if !AssignableTo(sym.Type, valueType) {
 					a.errorf(n.Pos(), "const %q expects %s, got %s", n.Name, sym.Type.String(), valueType.String())
 				}
+				if value, ok := a.evalConstExpr(n.Value); ok {
+					a.constValues[n.Name] = value
+				} else {
+					a.errorf(n.Value.Pos(), "const %q initializer must be a compile-time %s value", n.Name, sym.Type.String())
+				}
 			}
 		case *ast.GlobalDecl:
 			if n.Value != nil {

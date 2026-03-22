@@ -2658,6 +2658,104 @@ def sized() -> i32[COUNT]:
 	}
 }
 
+func TestAnalyzeAcceptsExtendedFloatCastMatrix(t *testing.T) {
+	src := `def f64_to_i64(value: f64) -> i64:
+	return value.i64()
+
+def f64_to_u32(value: f64) -> u32:
+	return value.u32()
+
+def f64_to_u64(value: f64) -> u64:
+	return value.u64()
+
+def f32_to_f64(value: f32) -> f64:
+	return value.f64()
+
+def i64_to_f64(value: i64) -> f64:
+	return value.f64()
+
+def u32_to_f32(value: u32) -> f32:
+	return value.f32()
+
+def u64_to_f64(value: u64) -> f64:
+	return value.f64()
+
+def usize_to_f64(value: usize) -> f64:
+	return value.f64()
+`
+	result, errs := parseAndAnalyze(t, "float_cast_matrix_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "f64_to_i64", "i64")
+	requireFunctionReturnTypeString(t, result, "f64_to_u32", "u32")
+	requireFunctionReturnTypeString(t, result, "f64_to_u64", "u64")
+	requireFunctionReturnTypeString(t, result, "f32_to_f64", "f64")
+	requireFunctionReturnTypeString(t, result, "i64_to_f64", "f64")
+	requireFunctionReturnTypeString(t, result, "u32_to_f32", "f32")
+	requireFunctionReturnTypeString(t, result, "u64_to_f64", "f64")
+	requireFunctionReturnTypeString(t, result, "usize_to_f64", "f64")
+}
+
+func TestAnalyzeAcceptsConstExtendedFloatCastMatrix(t *testing.T) {
+	src := `const I64_FROM_F64: i64 = 8.75.i64()
+const U32_FROM_F64: u32 = 5.5.u32()
+const U64_FROM_F64: u64 = 6.5.u64()
+const F64_FROM_U32: f64 = 7.i32().u32().f64()
+const F32_FROM_U64: f32 = 9.i32().u64().f32()
+
+def total() -> f64:
+	return I64_FROM_F64.f64() + U32_FROM_F64.f64() + U64_FROM_F64.f64() + F64_FROM_U32 + F32_FROM_U64.f64()
+`
+	result, errs := parseAndAnalyze(t, "const_float_cast_matrix_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	checks := map[string]semantic.ConstValue{
+		"I64_FROM_F64": {Kind: semantic.ConstInt, Int: 8},
+		"U32_FROM_F64": {Kind: semantic.ConstInt, Int: 5},
+		"U64_FROM_F64": {Kind: semantic.ConstInt, Int: 6},
+		"F64_FROM_U32": {Kind: semantic.ConstFloat, Float: 7},
+		"F32_FROM_U64": {Kind: semantic.ConstFloat, Float: 9},
+	}
+	for name, want := range checks {
+		got, ok := result.ConstValues[name]
+		if !ok {
+			t.Fatalf("expected %s const value to be recorded", name)
+		}
+		if got.Kind != want.Kind {
+			t.Fatalf("expected %s const kind %v, got %#v", name, want.Kind, got)
+		}
+		switch want.Kind {
+		case semantic.ConstInt:
+			if got.Int != want.Int {
+				t.Fatalf("expected %s const int %d, got %#v", name, want.Int, got)
+			}
+		case semantic.ConstFloat:
+			if got.Float != want.Float {
+				t.Fatalf("expected %s const float %v, got %#v", name, want.Float, got)
+			}
+		default:
+			t.Fatalf("unexpected expected const kind for %s: %#v", name, want)
+		}
+	}
+}
+
+func TestAnalyzeRejectsConstFloatCastEdgeCases(t *testing.T) {
+	src := `const NEG_TO_U32: u32 = (-1.0).u32()
+const BIG_TO_I8: i8 = 200.0.i8()
+`
+	_, errs := parseAndAnalyze(t, "const_float_cast_edge_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic errors, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "const \"NEG_TO_U32\" initializer must be a compile-time u32 value") {
+		t.Fatalf("expected unsigned const-cast rejection, got:\n%s", all)
+	}
+	if !strings.Contains(all, "const \"BIG_TO_I8\" initializer must be a compile-time i8 value") {
+		t.Fatalf("expected narrowing const-cast rejection, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsNullIntoNonNullRef(t *testing.T) {
 	src := `repr(c) struct Box:
     value: int

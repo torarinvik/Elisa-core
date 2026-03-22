@@ -1230,6 +1230,100 @@ global g_wide64: f64 = WIDE64
 	}
 }
 
+func TestGenerateLLVMIRLowersExtendedFloatCastMatrix(t *testing.T) {
+	src := `def f64_to_i64(value: f64) -> i64:
+	return value.i64()
+
+def f64_to_u32(value: f64) -> u32:
+	return value.u32()
+
+def f64_to_u64(value: f64) -> u64:
+	return value.u64()
+
+def f32_to_f64(value: f32) -> f64:
+	return value.f64()
+
+def i64_to_f64(value: i64) -> f64:
+	return value.f64()
+
+def u32_to_f32(value: u32) -> f32:
+	return value.f32()
+
+def u64_to_f64(value: u64) -> f64:
+	return value.f64()
+`
+	result := parseAndAnalyze(t, "backend_float_cast_matrix.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"define i64 @f64_to_i64(double",
+		"fptosi double",
+		"define i32 @f64_to_u32(double",
+		"fptoui double",
+		"define i64 @f64_to_u64(double",
+		"define double @f32_to_f64(float",
+		"fpext float",
+		"define double @i64_to_f64(i64",
+		"sitofp i64",
+		"define float @u32_to_f32(i32",
+		"uitofp i32",
+		"define double @u64_to_f64(i64",
+		"uitofp i64",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if got := strings.Count(output, "fptoui double"); got < 2 {
+		t.Fatalf("expected at least two unsigned float-to-int casts, got %d:\n%s", got, output)
+	}
+}
+
+func TestGenerateLLVMIRLowersExtendedConstFloatCastMatrixForGlobals(t *testing.T) {
+	src := `const I64_FROM_F64: i64 = 8.75.i64()
+const U32_FROM_F64: u32 = 5.5.u32()
+const U64_FROM_F64: u64 = 6.5.u64()
+const F64_FROM_U32: f64 = 7.i32().u32().f64()
+const F32_FROM_U64: f32 = 9.i32().u64().f32()
+
+global g_i64: i64 = I64_FROM_F64
+global g_u32: u32 = U32_FROM_F64
+global g_u64: u64 = U64_FROM_F64
+global g_f64: f64 = F64_FROM_U32
+global g_f32: f32 = F32_FROM_U64
+`
+	result := parseAndAnalyze(t, "backend_const_float_cast_matrix_globals.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"@g_i64 = global i64 8",
+		"@g_u32 = global i32 5",
+		"@g_u64 = global i64 6",
+		"@g_f64 = global double 7.000000e+00",
+		"@g_f32 = global float 9.000000e+00",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	for _, bad := range []string{
+		"@g_u32 = global i32 5.500000e+00",
+		"@g_u64 = global i64 6.500000e+00",
+	} {
+		if strings.Contains(output, bad) {
+			t.Fatalf("expected output to avoid %q, got:\n%s", bad, output)
+		}
+	}
+}
+
 func TestGenerateCHeaderOrdersAggregateDefinitionsByValueDependencies(t *testing.T) {
 	src := `repr(c) struct Node:
 	value: mutable i32
