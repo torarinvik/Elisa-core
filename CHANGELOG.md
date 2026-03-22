@@ -9,6 +9,7 @@ All notable changes to this repository should be documented in this file.
 - First-class `refstorage` / `refstate` generics now work end to end across parsing, semantic analysis, specialization, exports, LLVM lowering, and C header generation.
 - Concrete export wrappers such as `keep_handle[heap, &]` now parse and lower correctly, including stable public header emission for concrete qualifier-specialized exports.
 - A compile-checked showcase for the feature now lives at `Code/test_programs/ref_qualifier_generics.llcontext`.
+- Frozen-store projection APIs are now effectively complete across the current semantic and packed-ABI backend matrix, including wrapper continuity, decode-once reuse for projected frozen common-field reads, and correct decode-cache invalidation after projected mutation.
 
 ### Added
 
@@ -45,6 +46,7 @@ All notable changes to this repository should be documented in this file.
 - Export specialization parsing now accepts generic literal args like `keep_handle[heap, &]`.
 - Call inference now binds `refstorage` and `refstate` parameters from concrete argument types.
 - Export type validation now rejects unresolved qualifier-parameter types at the C ABI boundary.
+- Frozen packed projections now have explicit regression coverage across direct, helper-wrapped, helper-indexed, nested rebased helper-indexed, and nested wildcard rebased helper-indexed carriers. The validated matrix now covers repeated direct common-field reads, projected reassignment invalidation, and repeated matched-child common-field reuse under `in frozen:` lowering.
 
 ### Compatibility
 
@@ -60,6 +62,7 @@ All notable changes to this repository should be documented in this file.
   - `docs/useful_language_features/07-export-and-c-abi.md`
 - Added a compile-checked end-to-end feature example at:
   - `Code/test_programs/ref_qualifier_generics.llcontext`
+- Added a human-readable frozen packed-projection completeness note to `compiler/README.md`.
 
 ### Verification
 

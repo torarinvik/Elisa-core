@@ -81,6 +81,18 @@ def build(owner: Arena) -> Expr:
 
 Inside an active `in store:` block, packed allocations can omit `[store]` and packed matches can omit `in store`; both forms still lower to the same explicit-store representation.
 
+## Frozen packed projections
+
+The frozen packed-projection lane is now covered end to end across the current semantic and backend matrix.
+
+- Semantic optimization facts preserve frozen packed-store provenance through the wrapper forms exercised so far, including `try`, `unwrap else`, ternary expressions, and direct constant indexing.
+- Projected frozen packed reads in the word-handle ABI now reuse decoded rows for repeated common-field access instead of re-decoding on every read.
+- That decode-row reuse is validated not just for direct values, but also for helper-wrapped, helper-indexed, nested rebased helper-indexed, and nested wildcard rebased helper-indexed carriers.
+- Projected field reassignment correctly invalidates cached decoded rows so post-mutation reads re-decode instead of reusing stale data.
+- Frozen `match` lowering over projected packed values keeps repeated matched-child common-field reads on the eager-decode path, avoiding tag/word helper fallback in the validated cases.
+
+In short: the current frozen-store projection surface is no longer just “works in the happy path”; it has explicit regression coverage for the carrier shapes and decode-cache coherence rules the compiler relies on. Tiny compiler dragon, now with a seatbelt.
+
 ## Benchmark scaffolding
 
 There is now a synthetic JSON benchmark scaffold under `test/benchmarks/json_bench_test.go`.
