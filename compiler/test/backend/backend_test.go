@@ -3365,6 +3365,48 @@ def copy_indexed(values: array[i32, 4]) -> void:
 	}
 }
 
+func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughStandardViewSliceHelperFieldProjection(t *testing.T) {
+	src := `repr(c) struct DynArrayView:
+	data: mutable any void&?
+	len: mutable usize
+	elem_size: mutable usize
+
+repr(c) struct Views:
+	left: view[i32]
+	right: view[i32]
+
+def arena_da_view_slice(input: view[Views], start: usize, end: usize) -> view[Views]:
+	_ = start
+	_ = end
+	return input
+
+def arena_da_copy_exact[T](dst: view[T], src: view[T]):
+	_ = dst
+	_ = src
+
+def copy_helper_view_slice(values: array[i32, 8]) -> void:
+	items: array[Views, 2] = [Views(values[0u:2u], values[2u:4u]), Views(values[4u:6u], values[6u:8u])]
+	window: view[Views] = arena_da_view_slice(items[1u:2u], 0u, 1u)
+	arena_da_copy_exact(window[0u].left, window[0u].right)
+	`
+	result := parseAndAnalyze(t, "backend_dview_copy_exact_standard_view_slice_helper_field_projection.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	body := functionIR(output, "copy_helper_view_slice")
+	if body == "" {
+		t.Fatalf("expected to find copy_helper_view_slice body, got:\n%s", output)
+	}
+	if !strings.Contains(body, "call ptr @arena_memcpy(ptr noalias") {
+		t.Fatalf("expected copy_helper_view_slice to lower through direct noalias arena_memcpy via standard view-slice helper projections, got:\n%s", body)
+	}
+	if strings.Contains(body, "call void @arena_da_copy_exact") {
+		t.Fatalf("expected copy_helper_view_slice to avoid helper fallback, got:\n%s", body)
+	}
+}
+
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughHelperReturnedIndexedFieldProjection(t *testing.T) {
 	src := `repr(c) struct Views:
 	left: view[i32]

@@ -2336,9 +2336,69 @@ func (a *Analyzer) resolveProjectedFieldConstIntExpr(expr ast.Expr) (int64, bool
 	return value.Int, true
 }
 
+func (a *Analyzer) resolveProjectedFieldValueThroughIndexOffset(base ast.Expr, offset int64, path []borrowReturnAnnotationStep) (ast.Expr, bool) {
+	if a == nil || base == nil || len(path) == 0 {
+		return nil, false
+	}
+	step := path[0]
+	if step.Index == nil || step.Field != "" || step.Wildcard {
+		return nil, false
+	}
+	index := offset + *step.Index
+	if index < 0 {
+		return nil, false
+	}
+	indexCopy := index
+	combinedPath := make([]borrowReturnAnnotationStep, 0, len(path))
+	combinedPath = append(combinedPath, borrowReturnAnnotationStep{Index: &indexCopy})
+	combinedPath = append(combinedPath, path[1:]...)
+	return a.resolveProjectedFieldValueExprAtPath(base, combinedPath)
+}
+
+func (a *Analyzer) resolveProjectedFieldValueFromBuiltinViewHelperCall(call *ast.CallExpr, path []borrowReturnAnnotationStep) (ast.Expr, bool) {
+	if call == nil || len(path) == 0 {
+		return nil, false
+	}
+	switch optimizationHelperName(call.Func) {
+	case "arena_da_from_view":
+		if len(call.Args) < 2 {
+			return nil, false
+		}
+		return a.resolveProjectedFieldValueThroughIndexOffset(call.Args[1], 0, path)
+	case "arena_da_view", "arena_da_view_slice":
+		if len(call.Args) < 3 {
+			return nil, false
+		}
+		offset, ok := a.resolveProjectedFieldConstIntExpr(call.Args[1])
+		if !ok {
+			return nil, false
+		}
+		return a.resolveProjectedFieldValueThroughIndexOffset(call.Args[0], offset, path)
+	case "arena_da_view_prefix":
+		if len(call.Args) < 2 {
+			return nil, false
+		}
+		return a.resolveProjectedFieldValueThroughIndexOffset(call.Args[0], 0, path)
+	case "arena_da_view_suffix":
+		if len(call.Args) < 2 {
+			return nil, false
+		}
+		offset, ok := a.resolveProjectedFieldConstIntExpr(call.Args[1])
+		if !ok {
+			return nil, false
+		}
+		return a.resolveProjectedFieldValueThroughIndexOffset(call.Args[0], offset, path)
+	default:
+		return nil, false
+	}
+}
+
 func (a *Analyzer) resolveProjectedFieldValueFromCallExpr(call *ast.CallExpr, path []borrowReturnAnnotationStep) (ast.Expr, bool) {
 	if call == nil || len(path) == 0 {
 		return nil, false
+	}
+	if expr, ok := a.resolveProjectedFieldValueFromBuiltinViewHelperCall(call, path); ok {
+		return expr, true
 	}
 	decl, ok := a.resolveProjectedFieldExternFuncDecl(call.Func)
 	if !ok || decl == nil {

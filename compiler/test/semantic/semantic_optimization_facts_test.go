@@ -553,6 +553,104 @@ def inspect(values: any darray[i32, 4]&) -> int:
 	}
 }
 
+func TestAnalyzePreservesOptimizationFactsThroughStandardViewSliceHelperFieldProjectionExpressions(t *testing.T) {
+	src := `repr(c) struct DynArrayView:
+	data: mutable any void&?
+	len: mutable usize
+	elem_size: mutable usize
+
+repr(c) struct Views:
+	left: view[i32]
+	right: view[i32]
+
+def arena_da_view_slice(input: view[Views], start: usize, end: usize) -> view[Views]:
+	_ = start
+	_ = end
+	return input
+
+def inspect(values: array[i32, 8]) -> int:
+	items: array[Views, 2] = [Views(values[0u:2u], values[2u:4u]), Views(values[4u:6u], values[6u:8u])]
+	window: view[Views] = arena_da_view_slice(items[1u:2u], 0u, 1u)
+	left_projected: view[i32] = window[0u].left
+	right_projected: view[i32] = window[0u].right
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_standard_view_slice_helper_field_projection.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	leftExpr := requireOptimizationFactsVarInitExpr(t, fn, "left_projected")
+	rightExpr := requireOptimizationFactsVarInitExpr(t, fn, "right_projected")
+
+	leftFacts := requireExprOptimizationFacts(t, result, leftExpr)
+	rightFacts := requireExprOptimizationFacts(t, result, rightExpr)
+
+	if !leftFacts.HasExactExtent() || !rightFacts.HasExactExtent() {
+		t.Fatalf("expected standard view-slice helper field projections to preserve exact extents, got %#v and %#v", leftFacts, rightFacts)
+	}
+	if !result.ExprsAreDisjoint(leftExpr, rightExpr) {
+		t.Fatalf("expected standard view-slice helper field projections to stay disjoint")
+	}
+	if !result.ExprsHaveEqualExtentSize(leftExpr, rightExpr) {
+		t.Fatalf("expected standard view-slice helper field projections to retain equal extent size")
+	}
+	if result.ExprsHaveSameExtent(leftExpr, rightExpr) {
+		t.Fatalf("expected standard view-slice helper field projections to retain distinct exact bounds")
+	}
+}
+
+func TestAnalyzePreservesFrozenPackedStoreProvenanceThroughStandardViewSliceHelperFieldProjectionExpressions(t *testing.T) {
+	src := `repr(c) struct DynArrayView:
+	data: mutable any void&?
+	len: mutable usize
+	elem_size: mutable usize
+
+packed enum Expr:
+	Int(value: int)
+
+repr(c) struct Box:
+	node: Expr
+
+def arena_da_view_slice(input: view[Box], start: usize, end: usize) -> view[Box]:
+	_ = start
+	_ = end
+	return input
+
+def inspect(owner: Arena) -> int:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	node0: Expr = new[store] Expr.Int(value: 0)
+	node1: Expr = new[store] Expr.Int(value: 1)
+	items: array[Box, 2] = [Box(node0), Box(node1)]
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	window: view[Box] = arena_da_view_slice(items[1u:2u], 0u, 1u)
+	projected: Expr = window[0u].node
+	_ = frozen
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_standard_view_slice_helper_frozen_field_projection.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	projectedExpr := requireOptimizationFactsVarInitExpr(t, fn, "projected")
+	projectedFacts := requireExprOptimizationFacts(t, result, projectedExpr)
+	projectedProvenance := requireExprPackedStoreProvenance(t, result, projectedExpr)
+
+	if !projectedFacts.FrozenPackedStoreOnly {
+		t.Fatalf("expected standard view-slice helper packed field projection to stay frozen-store-only, got %#v", projectedFacts)
+	}
+	if !projectedProvenance.DependsOnlyOnFrozenPackedStores() || projectedProvenance.HasMixedProvenance() {
+		t.Fatalf("expected standard view-slice helper packed field projection to expose pure frozen packed-store provenance, got %#v", projectedProvenance)
+	}
+	if !result.ExprHasPackedStoreProvenance(projectedExpr) || !result.ExprDependsOnFrozenPackedStores(projectedExpr) || result.ExprDependsOnNonFrozenPackedStores(projectedExpr) || result.ExprHasMixedPackedStoreProvenance(projectedExpr) {
+		t.Fatalf("expected standard view-slice helper packed field projection to expose frozen-only packed-store helper results")
+	}
+	if !result.ExprDependsOnlyOnFrozenPackedStores(projectedExpr) {
+		t.Fatalf("expected result query to report frozen-store-only provenance for standard view-slice helper packed field projection")
+	}
+}
+
 func TestAnalyzeMarksValuesDependingOnlyOnFrozenPackedStores(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)
