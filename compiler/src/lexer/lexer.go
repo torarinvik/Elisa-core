@@ -308,18 +308,48 @@ func (l *Lexer) readNumber() Token {
 	for l.pos < len(l.src) && isDigit(l.peek()) {
 		l.advance()
 	}
+	isFloat := false
+	if l.peek() == '.' && isDigit(l.peekAt(1)) {
+		isFloat = true
+		l.advance()
+		for l.pos < len(l.src) && isDigit(l.peek()) {
+			l.advance()
+		}
+	}
+	if l.peek() == 'e' || l.peek() == 'E' {
+		offset := 1
+		if next := l.peekAt(offset); next == '+' || next == '-' {
+			offset++
+		}
+		if isDigit(l.peekAt(offset)) {
+			isFloat = true
+			l.advance()
+			if l.peek() == '+' || l.peek() == '-' {
+				l.advance()
+			}
+			for l.pos < len(l.src) && isDigit(l.peek()) {
+				l.advance()
+			}
+		}
+	}
 	text := string(l.src[start:l.pos])
 	suffix := l.readTypeSuffix()
+	if suffix == "f32" || suffix == "f64" {
+		isFloat = true
+	}
+	if isFloat {
+		return Token{Kind: TOKEN_FLOAT_LIT, Text: text, Pos: p, Suffix: suffix}
+	}
 	return Token{Kind: TOKEN_INT_LIT, Text: text, Pos: p, Suffix: suffix}
 }
 
 func (l *Lexer) readTypeSuffix() string {
-	// Read optional type suffix: u8, u16, u32, u64, i8, i16, i32, i64, usize, isize, u, i
+	// Read optional type suffix: u8, u16, u32, u64, i8, i16, i32, i64, usize, isize, u, i, f32, f64
 	if l.pos >= len(l.src) {
 		return ""
 	}
 	ch := l.peek()
-	if ch != 'u' && ch != 'i' {
+	if ch != 'u' && ch != 'i' && ch != 'f' {
 		return ""
 	}
 	// Check that this looks like a suffix not an identifier continuation preceded by whitespace
@@ -337,7 +367,8 @@ func (l *Lexer) readTypeSuffix() string {
 	switch suffix {
 	case "u8", "u16", "u32", "u64", "u",
 		"i8", "i16", "i32", "i64",
-		"usize", "isize":
+		"usize", "isize",
+		"f32", "f64":
 		return suffix
 	default:
 		// Not a valid suffix, rewind

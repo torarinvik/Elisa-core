@@ -9,6 +9,7 @@ enum FrontendTokenKind:
     Dedent
     Ident
     IntLit
+    FloatLit
     HexLit
     StringLit
     Def
@@ -139,6 +140,7 @@ const FRONTEND_CH_SLASH = 47
 const FRONTEND_CH_COLON = 58
 const FRONTEND_CH_LT = 60
 const FRONTEND_CH_ASSIGN = 61
+const FRONTEND_CH_E = 69
 const FRONTEND_CH_GT = 62
 const FRONTEND_CH_QUESTION = 63
 const FRONTEND_CH_AT = 64
@@ -148,6 +150,7 @@ const FRONTEND_CH_RBRACKET = 93
 const FRONTEND_CH_CARET = 94
 const FRONTEND_CH_UNDERSCORE = 95
 const FRONTEND_CH_a = 97
+const FRONTEND_CH_e = 101
 const FRONTEND_CH_f = 102
 const FRONTEND_CH_i = 105
 const FRONTEND_CH_u = 117

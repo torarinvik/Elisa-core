@@ -10,6 +10,7 @@ import "C"
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -87,6 +88,12 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 			return semantic.ConstValue{}, false
 		}
 		return semantic.ConstValue{Kind: semantic.ConstInt, Int: value}, true
+	case *ast.FloatLit:
+		value, err := strconv.ParseFloat(n.Value, 64)
+		if err != nil {
+			return semantic.ConstValue{}, false
+		}
+		return semantic.ConstValue{Kind: semantic.ConstFloat, Float: value}, true
 	case *ast.BoolLit:
 		return semantic.ConstValue{Kind: semantic.ConstBool, Bool: n.Value}, true
 	case *ast.StringLit:
@@ -122,10 +129,14 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 			}
 			return semantic.ConstValue{Kind: semantic.ConstBool, Bool: !operand.Bool}, true
 		case lexer.TOKEN_MINUS:
-			if operand.Kind != semantic.ConstInt {
+			switch operand.Kind {
+			case semantic.ConstInt:
+				return semantic.ConstValue{Kind: semantic.ConstInt, Int: -operand.Int}, true
+			case semantic.ConstFloat:
+				return semantic.ConstValue{Kind: semantic.ConstFloat, Float: -operand.Float}, true
+			default:
 				return semantic.ConstValue{}, false
 			}
-			return semantic.ConstValue{Kind: semantic.ConstInt, Int: -operand.Int}, true
 		case lexer.TOKEN_TILDE:
 			if operand.Kind != semantic.ConstInt {
 				return semantic.ConstValue{}, false
@@ -158,51 +169,17 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 			return evalConstEquality(left, right, true)
 		case lexer.TOKEN_BANGEQ:
 			return evalConstEquality(left, right, false)
-		case lexer.TOKEN_PLUS:
-			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt {
-				return semantic.ConstValue{}, false
+		case lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR, lexer.TOKEN_SLASH,
+			lexer.TOKEN_LT, lexer.TOKEN_GT, lexer.TOKEN_LTEQ, lexer.TOKEN_GTEQ:
+			if result, ok := evalBackendConstNumericBinary(n.Op, left, right); ok {
+				return result, true
 			}
-			return semantic.ConstValue{Kind: semantic.ConstInt, Int: left.Int + right.Int}, true
-		case lexer.TOKEN_MINUS:
-			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt {
-				return semantic.ConstValue{}, false
-			}
-			return semantic.ConstValue{Kind: semantic.ConstInt, Int: left.Int - right.Int}, true
-		case lexer.TOKEN_STAR:
-			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt {
-				return semantic.ConstValue{}, false
-			}
-			return semantic.ConstValue{Kind: semantic.ConstInt, Int: left.Int * right.Int}, true
-		case lexer.TOKEN_SLASH:
-			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt || right.Int == 0 {
-				return semantic.ConstValue{}, false
-			}
-			return semantic.ConstValue{Kind: semantic.ConstInt, Int: left.Int / right.Int}, true
+			return semantic.ConstValue{}, false
 		case lexer.TOKEN_PERCENT:
 			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt || right.Int == 0 {
 				return semantic.ConstValue{}, false
 			}
 			return semantic.ConstValue{Kind: semantic.ConstInt, Int: left.Int % right.Int}, true
-		case lexer.TOKEN_LT:
-			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt {
-				return semantic.ConstValue{}, false
-			}
-			return semantic.ConstValue{Kind: semantic.ConstBool, Bool: left.Int < right.Int}, true
-		case lexer.TOKEN_GT:
-			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt {
-				return semantic.ConstValue{}, false
-			}
-			return semantic.ConstValue{Kind: semantic.ConstBool, Bool: left.Int > right.Int}, true
-		case lexer.TOKEN_LTEQ:
-			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt {
-				return semantic.ConstValue{}, false
-			}
-			return semantic.ConstValue{Kind: semantic.ConstBool, Bool: left.Int <= right.Int}, true
-		case lexer.TOKEN_GTEQ:
-			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt {
-				return semantic.ConstValue{}, false
-			}
-			return semantic.ConstValue{Kind: semantic.ConstBool, Bool: left.Int >= right.Int}, true
 		case lexer.TOKEN_LSHIFT:
 			if left.Kind != semantic.ConstInt || right.Kind != semantic.ConstInt {
 				return semantic.ConstValue{}, false
@@ -250,6 +227,8 @@ func evalConstEquality(left, right semantic.ConstValue, equal bool) (semantic.Co
 	switch {
 	case left.Kind == semantic.ConstInt && right.Kind == semantic.ConstInt:
 		matched = left.Int == right.Int
+	case (left.Kind == semantic.ConstInt || left.Kind == semantic.ConstFloat) && (right.Kind == semantic.ConstInt || right.Kind == semantic.ConstFloat):
+		matched = math.Float64bits(backendConstNumericAsFloat64(left)) == math.Float64bits(backendConstNumericAsFloat64(right))
 	case left.Kind == semantic.ConstBool && right.Kind == semantic.ConstBool:
 		matched = left.Bool == right.Bool
 	case left.Kind == semantic.ConstString && right.Kind == semantic.ConstString:
@@ -261,6 +240,73 @@ func evalConstEquality(left, right semantic.ConstValue, equal bool) (semantic.Co
 		matched = !matched
 	}
 	return semantic.ConstValue{Kind: semantic.ConstBool, Bool: matched}, true
+}
+
+func evalBackendConstNumericBinary(op lexer.TokenKind, left, right semantic.ConstValue) (semantic.ConstValue, bool) {
+	if left.Kind == semantic.ConstInt && right.Kind == semantic.ConstInt {
+		switch op {
+		case lexer.TOKEN_LT:
+			return semantic.ConstValue{Kind: semantic.ConstBool, Bool: left.Int < right.Int}, true
+		case lexer.TOKEN_GT:
+			return semantic.ConstValue{Kind: semantic.ConstBool, Bool: left.Int > right.Int}, true
+		case lexer.TOKEN_LTEQ:
+			return semantic.ConstValue{Kind: semantic.ConstBool, Bool: left.Int <= right.Int}, true
+		case lexer.TOKEN_GTEQ:
+			return semantic.ConstValue{Kind: semantic.ConstBool, Bool: left.Int >= right.Int}, true
+		case lexer.TOKEN_PLUS:
+			return semantic.ConstValue{Kind: semantic.ConstInt, Int: left.Int + right.Int}, true
+		case lexer.TOKEN_MINUS:
+			return semantic.ConstValue{Kind: semantic.ConstInt, Int: left.Int - right.Int}, true
+		case lexer.TOKEN_STAR:
+			return semantic.ConstValue{Kind: semantic.ConstInt, Int: left.Int * right.Int}, true
+		case lexer.TOKEN_SLASH:
+			if right.Int == 0 {
+				return semantic.ConstValue{}, false
+			}
+			return semantic.ConstValue{Kind: semantic.ConstInt, Int: left.Int / right.Int}, true
+		default:
+			return semantic.ConstValue{}, false
+		}
+	}
+	if !backendIsConstNumeric(left) || !backendIsConstNumeric(right) {
+		return semantic.ConstValue{}, false
+	}
+	leftFloat := backendConstNumericAsFloat64(left)
+	rightFloat := backendConstNumericAsFloat64(right)
+	switch op {
+	case lexer.TOKEN_LT:
+		return semantic.ConstValue{Kind: semantic.ConstBool, Bool: leftFloat < rightFloat}, true
+	case lexer.TOKEN_GT:
+		return semantic.ConstValue{Kind: semantic.ConstBool, Bool: leftFloat > rightFloat}, true
+	case lexer.TOKEN_LTEQ:
+		return semantic.ConstValue{Kind: semantic.ConstBool, Bool: leftFloat <= rightFloat}, true
+	case lexer.TOKEN_GTEQ:
+		return semantic.ConstValue{Kind: semantic.ConstBool, Bool: leftFloat >= rightFloat}, true
+	case lexer.TOKEN_PLUS:
+		return semantic.ConstValue{Kind: semantic.ConstFloat, Float: leftFloat + rightFloat}, true
+	case lexer.TOKEN_MINUS:
+		return semantic.ConstValue{Kind: semantic.ConstFloat, Float: leftFloat - rightFloat}, true
+	case lexer.TOKEN_STAR:
+		return semantic.ConstValue{Kind: semantic.ConstFloat, Float: leftFloat * rightFloat}, true
+	case lexer.TOKEN_SLASH:
+		if rightFloat == 0 {
+			return semantic.ConstValue{}, false
+		}
+		return semantic.ConstValue{Kind: semantic.ConstFloat, Float: leftFloat / rightFloat}, true
+	default:
+		return semantic.ConstValue{}, false
+	}
+}
+
+func backendIsConstNumeric(value semantic.ConstValue) bool {
+	return value.Kind == semantic.ConstInt || value.Kind == semantic.ConstFloat
+}
+
+func backendConstNumericAsFloat64(value semantic.ConstValue) float64 {
+	if value.Kind == semantic.ConstFloat {
+		return value.Float
+	}
+	return float64(value.Int)
 }
 
 func isZeroedExpr(expr ast.Expr) bool {
@@ -440,6 +486,11 @@ func isSignedIntegerType(t semantic.Type) bool {
 	}
 }
 
+func isFloatType(t semantic.Type) bool {
+	t = numericCastType(t)
+	return semantic.IsFloatType(t)
+}
+
 func integerBitWidth(t semantic.Type, wordBits int) int {
 	t = numericCastType(t)
 	b, ok := t.(*semantic.BuiltinType)
@@ -458,7 +509,11 @@ func integerBitWidth(t semantic.Type, wordBits int) int {
 		return 16
 	case "i32", "u32":
 		return 32
+	case "f32":
+		return 32
 	case "char", "i64", "u64":
+		return 64
+	case "f64":
 		return 64
 	case "int", "isize", "usize", "uintptr":
 		return wordBits
@@ -494,6 +549,25 @@ func llvmIntPredicate(op lexer.TokenKind, operandType semantic.Type) (C.LLVMIntP
 			return C.LLVMIntSGE, nil
 		}
 		return C.LLVMIntUGE, nil
+	default:
+		return 0, fmt.Errorf("unsupported comparison operator %s", lexer.TokenName(op))
+	}
+}
+
+func llvmFloatPredicate(op lexer.TokenKind) (C.LLVMRealPredicate, error) {
+	switch op {
+	case lexer.TOKEN_EQEQ:
+		return C.LLVMRealOEQ, nil
+	case lexer.TOKEN_BANGEQ:
+		return C.LLVMRealONE, nil
+	case lexer.TOKEN_LT:
+		return C.LLVMRealOLT, nil
+	case lexer.TOKEN_GT:
+		return C.LLVMRealOGT, nil
+	case lexer.TOKEN_LTEQ:
+		return C.LLVMRealOLE, nil
+	case lexer.TOKEN_GTEQ:
+		return C.LLVMRealOGE, nil
 	default:
 		return 0, fmt.Errorf("unsupported comparison operator %s", lexer.TokenName(op))
 	}

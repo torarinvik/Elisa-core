@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 
 	"llcontext/src/ast"
@@ -61,6 +62,12 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 			return ConstValue{}, false
 		}
 		return ConstValue{Kind: ConstInt, Int: value}, true
+	case *ast.FloatLit:
+		value, ok := ParseFloatLiteral(n)
+		if !ok {
+			return ConstValue{}, false
+		}
+		return ConstValue{Kind: ConstFloat, Float: value}, true
 	case *ast.BoolLit:
 		return ConstValue{Kind: ConstBool, Bool: n.Value}, true
 	case *ast.StringLit:
@@ -93,10 +100,14 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 			}
 			return ConstValue{Kind: ConstBool, Bool: !operand.Bool}, true
 		case lexer.TOKEN_MINUS:
-			if operand.Kind != ConstInt {
+			switch operand.Kind {
+			case ConstInt:
+				return ConstValue{Kind: ConstInt, Int: -operand.Int}, true
+			case ConstFloat:
+				return ConstValue{Kind: ConstFloat, Float: -operand.Float}, true
+			default:
 				return ConstValue{}, false
 			}
-			return ConstValue{Kind: ConstInt, Int: -operand.Int}, true
 		case lexer.TOKEN_TILDE:
 			if operand.Kind != ConstInt {
 				return ConstValue{}, false
@@ -133,10 +144,10 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 			lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR, lexer.TOKEN_SLASH, lexer.TOKEN_PERCENT,
 			lexer.TOKEN_CARET, lexer.TOKEN_PIPE, lexer.TOKEN_AMPERSAND,
 			lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
-			if left.Kind != ConstInt || right.Kind != ConstInt {
-				return ConstValue{}, false
+			if result, ok := evalConstNumericBinary(n.Op, left, right); ok {
+				return result, true
 			}
-			return evalConstIntBinary(n.Op, left.Int, right.Int)
+			return ConstValue{}, false
 		default:
 			return ConstValue{}, false
 		}
@@ -159,6 +170,8 @@ func (a *Analyzer) evalConstEquality(left, right ConstValue, equal bool) (ConstV
 	switch {
 	case left.Kind == ConstInt && right.Kind == ConstInt:
 		matched = left.Int == right.Int
+	case isConstNumeric(left) && isConstNumeric(right):
+		matched = constNumericEqual(left, right)
 	case left.Kind == ConstBool && right.Kind == ConstBool:
 		matched = left.Bool == right.Bool
 	case left.Kind == ConstString && right.Kind == ConstString:
@@ -170,6 +183,55 @@ func (a *Analyzer) evalConstEquality(left, right ConstValue, equal bool) (ConstV
 		matched = !matched
 	}
 	return ConstValue{Kind: ConstBool, Bool: matched}, true
+}
+
+func evalConstNumericBinary(op lexer.TokenKind, left, right ConstValue) (ConstValue, bool) {
+	if left.Kind == ConstInt && right.Kind == ConstInt {
+		return evalConstIntBinary(op, left.Int, right.Int)
+	}
+	if !isConstNumeric(left) || !isConstNumeric(right) {
+		return ConstValue{}, false
+	}
+	leftFloat := constNumericAsFloat64(left)
+	rightFloat := constNumericAsFloat64(right)
+	switch op {
+	case lexer.TOKEN_LT:
+		return ConstValue{Kind: ConstBool, Bool: leftFloat < rightFloat}, true
+	case lexer.TOKEN_GT:
+		return ConstValue{Kind: ConstBool, Bool: leftFloat > rightFloat}, true
+	case lexer.TOKEN_LTEQ:
+		return ConstValue{Kind: ConstBool, Bool: leftFloat <= rightFloat}, true
+	case lexer.TOKEN_GTEQ:
+		return ConstValue{Kind: ConstBool, Bool: leftFloat >= rightFloat}, true
+	case lexer.TOKEN_PLUS:
+		return ConstValue{Kind: ConstFloat, Float: leftFloat + rightFloat}, true
+	case lexer.TOKEN_MINUS:
+		return ConstValue{Kind: ConstFloat, Float: leftFloat - rightFloat}, true
+	case lexer.TOKEN_STAR:
+		return ConstValue{Kind: ConstFloat, Float: leftFloat * rightFloat}, true
+	case lexer.TOKEN_SLASH:
+		if rightFloat == 0 {
+			return ConstValue{}, false
+		}
+		return ConstValue{Kind: ConstFloat, Float: leftFloat / rightFloat}, true
+	default:
+		return ConstValue{}, false
+	}
+}
+
+func isConstNumeric(value ConstValue) bool {
+	return value.Kind == ConstInt || value.Kind == ConstFloat
+}
+
+func constNumericAsFloat64(value ConstValue) float64 {
+	if value.Kind == ConstFloat {
+		return value.Float
+	}
+	return float64(value.Int)
+}
+
+func constNumericEqual(left, right ConstValue) bool {
+	return math.Float64bits(constNumericAsFloat64(left)) == math.Float64bits(constNumericAsFloat64(right))
 }
 
 func evalConstIntBinary(op lexer.TokenKind, left, right int64) (ConstValue, bool) {
@@ -244,6 +306,14 @@ func ParseIntLiteral(expr *ast.IntLit) (int64, bool) {
 		base = 0
 	}
 	v, err := strconv.ParseInt(text, base, 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
+func ParseFloatLiteral(expr *ast.FloatLit) (float64, bool) {
+	v, err := strconv.ParseFloat(expr.Value, 64)
 	if err != nil {
 		return 0, false
 	}

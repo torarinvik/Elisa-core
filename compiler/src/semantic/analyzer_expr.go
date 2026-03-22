@@ -91,6 +91,15 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		}
 		result = a.namedTypes["int"]
 		return
+	case *ast.FloatLit:
+		if n.Suffix != "" {
+			if t, ok := a.namedTypes[n.Suffix]; ok {
+				result = t
+				return
+			}
+		}
+		result = a.namedTypes["f64"]
+		return
 	case *ast.StringLit:
 		result = &RefType{Elem: a.namedTypes["u8"], State: RefStateNonNull, Storage: RefStorageStatic, ExplicitStorage: true}
 		return
@@ -1154,11 +1163,11 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 		}
 		return a.namedTypes["bool"]
 	case lexer.TOKEN_PLUS, lexer.TOKEN_MINUS:
-		if lref, ok := left.(*RefType); ok && IsNumericType(right) {
+		if lref, ok := left.(*RefType); ok && IsIntegralStorageType(right) {
 			return lref
 		}
 		if expr.Op == lexer.TOKEN_PLUS {
-			if rref, ok := right.(*RefType); ok && IsNumericType(left) {
+			if rref, ok := right.(*RefType); ok && IsIntegralStorageType(left) {
 				return rref
 			}
 		}
@@ -1170,8 +1179,13 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 	case lexer.TOKEN_STAR, lexer.TOKEN_SLASH, lexer.TOKEN_PERCENT,
 		lexer.TOKEN_CARET, lexer.TOKEN_PIPE, lexer.TOKEN_AMPERSAND,
 		lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
+		requiresIntegral := expr.Op == lexer.TOKEN_PERCENT || expr.Op == lexer.TOKEN_CARET || expr.Op == lexer.TOKEN_PIPE || expr.Op == lexer.TOKEN_AMPERSAND || expr.Op == lexer.TOKEN_LSHIFT || expr.Op == lexer.TOKEN_RSHIFT
 		if !IsNumericType(left) || !IsNumericType(right) {
 			a.errorf(expr.Pos(), "operator requires numeric operands")
+			return invalidType
+		}
+		if requiresIntegral && (!IsIntegralStorageType(left) || !IsIntegralStorageType(right)) {
+			a.errorf(expr.Pos(), "operator requires integral operands")
 			return invalidType
 		}
 		return CommonNumericType(left, right)
@@ -1191,6 +1205,9 @@ func (a *Analyzer) analyzeUnaryExpr(expr *ast.UnaryExpr) Type {
 	case lexer.TOKEN_MINUS, lexer.TOKEN_TILDE:
 		if !IsNumericType(operand) {
 			a.errorf(expr.Pos(), "unary operator requires numeric operand")
+		}
+		if expr.Op == lexer.TOKEN_TILDE && !IsIntegralStorageType(operand) {
+			a.errorf(expr.Pos(), "unary operator requires integral operand")
 		}
 		return operand
 	default:
@@ -2404,6 +2421,8 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	indexType := a.analyzeExpr(expr.Index)
 	if !IsNumericType(indexType) {
 		a.errorf(expr.Index.Pos(), "index must be numeric, got %s", indexType.String())
+	} else if !IsIntegralStorageType(indexType) {
+		a.errorf(expr.Index.Pos(), "index must be integral, got %s", indexType.String())
 	}
 	if arr, ok := objType.(*ArrayType); ok {
 		a.checkConstantArrayIndexBounds(arr, expr.Index)
@@ -2535,9 +2554,13 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 	endType := a.analyzeExpr(expr.End)
 	if !IsNumericType(startType) {
 		a.errorf(expr.Start.Pos(), "slice start must be numeric, got %s", startType.String())
+	} else if !IsIntegralStorageType(startType) {
+		a.errorf(expr.Start.Pos(), "slice start must be integral, got %s", startType.String())
 	}
 	if !IsNumericType(endType) {
 		a.errorf(expr.End.Pos(), "slice end must be numeric, got %s", endType.String())
+	} else if !IsIntegralStorageType(endType) {
+		a.errorf(expr.End.Pos(), "slice end must be integral, got %s", endType.String())
 	}
 	if array, ok := objType.(*ArrayType); ok {
 		if isStringArrayType(array) {

@@ -14,6 +14,7 @@ const (
 	// Literals
 	TOKEN_IDENT
 	TOKEN_INT_LIT    // 123
+	TOKEN_FLOAT_LIT  // 1.5, 1e3, 2.0f32
 	TOKEN_HEX_LIT    // 0xff
 	TOKEN_STRING_LIT // "hello"
 
@@ -120,6 +121,7 @@ var tokenNames = map[TokenKind]string{
 
 	TOKEN_IDENT:      "IDENT",
 	TOKEN_INT_LIT:    "INT",
+	TOKEN_FLOAT_LIT:  "FLOAT",
 	TOKEN_HEX_LIT:    "HEX",
 	TOKEN_STRING_LIT: "STRING",
 

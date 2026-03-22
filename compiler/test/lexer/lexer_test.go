@@ -104,6 +104,28 @@ func TestNumberLiterals(t *testing.T) {
 	}
 }
 
+func TestFloatLiteralsAndDotCastBoundary(t *testing.T) {
+	tokens := collectTokens("1.5 2e3 4.25f32 6f64 0.char()\n")
+	expect := []lexer.TokenKind{
+		lexer.TOKEN_FLOAT_LIT, lexer.TOKEN_FLOAT_LIT, lexer.TOKEN_FLOAT_LIT, lexer.TOKEN_FLOAT_LIT,
+		lexer.TOKEN_INT_LIT, lexer.TOKEN_DOT, lexer.TOKEN_IDENT, lexer.TOKEN_LPAREN, lexer.TOKEN_RPAREN,
+		lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF,
+	}
+	assertKinds(t, tokens, expect)
+	if tokens[0].Text != "1.5" {
+		t.Fatalf("expected first float text %q, got %q", "1.5", tokens[0].Text)
+	}
+	if tokens[1].Text != "2e3" {
+		t.Fatalf("expected exponent float text %q, got %q", "2e3", tokens[1].Text)
+	}
+	if tokens[2].Suffix != "f32" {
+		t.Fatalf("expected suffix %q, got %q", "f32", tokens[2].Suffix)
+	}
+	if tokens[3].Suffix != "f64" {
+		t.Fatalf("expected suffix %q, got %q", "f64", tokens[3].Suffix)
+	}
+}
+
 func TestStringLiteral(t *testing.T) {
 	tokens := collectTokens("\"hello world\"\n")
 	expect := []lexer.TokenKind{lexer.TOKEN_STRING_LIT, lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF}

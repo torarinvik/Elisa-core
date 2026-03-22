@@ -1113,6 +1113,88 @@ export func keep_heap_handle(value: HeapHandle) -> HeapHandle = keep_handle[heap
 	}
 }
 
+func TestGenerateLLVMIRLowersFloatArithmeticComparisonsAndCasts(t *testing.T) {
+	src := `global tau: f64 = 6.25
+
+def mix(left: f32, right: f64) -> f64:
+	total: f64 = left.f64() + right
+	return total * tau
+
+def negate(value: f64) -> f64:
+	return -value
+
+def same(left: f64, right: f64) -> bool:
+	return left == right
+
+def widen_bits(value: i32) -> f64:
+	return value.f64()
+
+def narrow(value: f64) -> f32:
+	return value.f32()
+`
+	result := parseAndAnalyze(t, "backend_float_ops.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"@tau = global double",
+		"define double @mix(float",
+		"fpext float",
+		"fadd double",
+		"fmul double",
+		"define double @negate(double",
+		"fneg double",
+		"define i1 @same(double",
+		"fcmp oeq double",
+		"define double @widen_bits(i32",
+		"sitofp i32",
+		"define float @narrow(double",
+		"fptrunc double",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateCHeaderUsesFloatBuiltinMappings(t *testing.T) {
+	src := `repr(c) struct Metrics:
+	ratio: f32
+	total: f64
+
+export type Metrics as MetricsFFI
+
+global tau: f64 = 6.25
+export global tau as ctx_tau
+
+def scale_sum_impl(left: f32, right: f64) -> f64:
+	return left.f64() + right
+
+export func scale_sum(left: f32, right: f64) -> f64 = scale_sum_impl
+`
+	result := parseAndAnalyze(t, "backend_float_header.llcontext", src)
+	header, err := backend.GenerateCHeader(result)
+	if err != nil {
+		t.Fatalf("GenerateCHeader returned error: %v", err)
+	}
+	checks := []string{
+		"typedef struct MetricsFFI MetricsFFI;",
+		"struct MetricsFFI {",
+		"float ratio;",
+		"double total;",
+		"extern double ctx_tau;",
+		"double scale_sum(float arg0, double arg1);",
+	}
+	for _, check := range checks {
+		if !strings.Contains(header, check) {
+			t.Fatalf("expected header to contain %q, got:\n%s", check, header)
+		}
+	}
+}
+
 func TestGenerateCHeaderOrdersAggregateDefinitionsByValueDependencies(t *testing.T) {
 	src := `repr(c) struct Node:
 	value: mutable i32

@@ -61,6 +61,8 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, actualType, err = s.emitIdent(n)
 	case *ast.IntLit:
 		value, actualType, err = s.emitIntLiteral(n)
+	case *ast.FloatLit:
+		value, actualType, err = s.emitFloatLiteral(n)
 	case *ast.StringLit:
 		value, actualType, err = s.emitStringLiteral(n)
 	case *ast.BoolLit:
@@ -573,6 +575,22 @@ func (s *functionState) emitIntLiteral(expr *ast.IntLit) (C.LLVMValueRef, semant
 	return C.LLVMConstInt(llvmType, C.ulonglong(parsed), 0), t, nil
 }
 
+func (s *functionState) emitFloatLiteral(expr *ast.FloatLit) (C.LLVMValueRef, semantic.Type, error) {
+	t := s.exprType(expr)
+	if t == nil {
+		t = s.g.result.NamedTypes["f64"]
+	}
+	llvmType, err := s.g.lowerType(t)
+	if err != nil {
+		return nil, nil, err
+	}
+	parsed, err := strconv.ParseFloat(expr.Value, 64)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to parse float literal %q: %w", expr.Value, err)
+	}
+	return C.LLVMConstReal(llvmType, C.double(parsed)), t, nil
+}
+
 func (s *functionState) emitStringLiteral(expr *ast.StringLit) (C.LLVMValueRef, semantic.Type, error) {
 	name := cString("str")
 	defer C.free(unsafe.Pointer(name))
@@ -685,12 +703,24 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 
 	switch expr.Op {
 	case lexer.TOKEN_PLUS:
+		if isFloatType(operandType) {
+			return C.LLVMBuildFAdd(s.builder, left, right, cStringFree("addtmp")), resultType, nil
+		}
 		return C.LLVMBuildAdd(s.builder, left, right, cStringFree("addtmp")), resultType, nil
 	case lexer.TOKEN_MINUS:
+		if isFloatType(operandType) {
+			return C.LLVMBuildFSub(s.builder, left, right, cStringFree("subtmp")), resultType, nil
+		}
 		return C.LLVMBuildSub(s.builder, left, right, cStringFree("subtmp")), resultType, nil
 	case lexer.TOKEN_STAR:
+		if isFloatType(operandType) {
+			return C.LLVMBuildFMul(s.builder, left, right, cStringFree("multmp")), resultType, nil
+		}
 		return C.LLVMBuildMul(s.builder, left, right, cStringFree("multmp")), resultType, nil
 	case lexer.TOKEN_SLASH:
+		if isFloatType(operandType) {
+			return C.LLVMBuildFDiv(s.builder, left, right, cStringFree("divtmp")), resultType, nil
+		}
 		if isSignedIntegerType(operandType) {
 			return C.LLVMBuildSDiv(s.builder, left, right, cStringFree("divtmp")), resultType, nil
 		}
@@ -714,6 +744,13 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 		}
 		return C.LLVMBuildLShr(s.builder, left, right, cStringFree("shrtmp")), resultType, nil
 	case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ, lexer.TOKEN_LT, lexer.TOKEN_GT, lexer.TOKEN_LTEQ, lexer.TOKEN_GTEQ:
+		if isFloatType(operandType) {
+			pred, err := llvmFloatPredicate(expr.Op)
+			if err != nil {
+				return nil, nil, err
+			}
+			return C.LLVMBuildFCmp(s.builder, pred, left, right, cStringFree("cmptmp")), resultType, nil
+		}
 		pred, err := llvmIntPredicate(expr.Op, operandType)
 		if err != nil {
 			return nil, nil, err
@@ -2791,6 +2828,9 @@ func (s *functionState) emitUnaryExpr(expr *ast.UnaryExpr) (C.LLVMValueRef, sema
 	case lexer.TOKEN_NOT:
 		return C.LLVMBuildNot(s.builder, value, cStringFree("nottmp")), resultType, nil
 	case lexer.TOKEN_MINUS:
+		if isFloatType(operandType) {
+			return C.LLVMBuildFNeg(s.builder, value, cStringFree("negtmp")), resultType, nil
+		}
 		return C.LLVMBuildNeg(s.builder, value, cStringFree("negtmp")), resultType, nil
 	case lexer.TOKEN_TILDE:
 		return C.LLVMBuildNot(s.builder, value, cStringFree("invt")), resultType, nil

@@ -242,7 +242,7 @@ func isCABICompatibleType(t Type) bool {
 		return true
 	case *BuiltinType:
 		switch tt.Name {
-		case "void", "char", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "int", "isize", "usize", "uintptr":
+		case "void", "char", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "int", "isize", "usize", "uintptr":
 			return true
 		default:
 			return false

@@ -842,6 +842,9 @@ func (p *Parser) parsePrimary() ast.Expr {
 	case lexer.TOKEN_INT_LIT:
 		tok := p.advance()
 		return &ast.IntLit{Position: tok.Pos, Value: tok.Text, Suffix: tok.Suffix, IsHex: false}
+	case lexer.TOKEN_FLOAT_LIT:
+		tok := p.advance()
+		return &ast.FloatLit{Position: tok.Pos, Value: tok.Text, Suffix: tok.Suffix}
 	case lexer.TOKEN_HEX_LIT:
 		tok := p.advance()
 		return &ast.IntLit{Position: tok.Pos, Value: tok.Text, Suffix: tok.Suffix, IsHex: true}

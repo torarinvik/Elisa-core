@@ -62,6 +62,16 @@ func (g *llvmGenerator) constExprValue(expr ast.Expr, expected semantic.Type) (C
 			return nil, err
 		}
 		return C.LLVMConstInt(llvmType, C.ulonglong(value), boolToLLVMBool(value < 0)), nil
+	case *ast.FloatLit:
+		llvmType, err := g.lowerType(actual)
+		if err != nil {
+			return nil, err
+		}
+		value, err := strconv.ParseFloat(n.Value, 64)
+		if err != nil {
+			return nil, err
+		}
+		return C.LLVMConstReal(llvmType, C.double(value)), nil
 	case *ast.BoolLit:
 		llvmType, err := g.lowerBuiltin("bool")
 		if err != nil {
@@ -353,6 +363,12 @@ func (g *llvmGenerator) constValueAsLLVM(value semantic.ConstValue, expected sem
 			return nil, err
 		}
 		return C.LLVMConstInt(llvmType, C.ulonglong(value.Int), boolToLLVMBool(value.Int < 0)), nil
+	case semantic.ConstFloat:
+		llvmType, err := g.lowerType(expected)
+		if err != nil {
+			return nil, err
+		}
+		return C.LLVMConstReal(llvmType, C.double(value.Float)), nil
 	case semantic.ConstBool:
 		llvmType, err := g.lowerBuiltin("bool")
 		if err != nil {
@@ -377,6 +393,8 @@ func constValueType(result *semantic.Result, value semantic.ConstValue) semantic
 	switch value.Kind {
 	case semantic.ConstInt:
 		return result.NamedTypes["int"]
+	case semantic.ConstFloat:
+		return result.NamedTypes["f64"]
 	case semantic.ConstBool:
 		return result.NamedTypes["bool"]
 	case semantic.ConstString:

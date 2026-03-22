@@ -350,6 +350,12 @@ type IntLit struct {
 	IsHex    bool
 }
 
+type FloatLit struct {
+	Position lexer.Pos
+	Value    string
+	Suffix   string
+}
+
 type StringLit struct {
 	Position lexer.Pos
 	Value    string
@@ -764,6 +770,7 @@ func (n *ErrorUnionTypeExpr) Pos() lexer.Pos {
 func (n *OptionalTypeExpr) Pos() lexer.Pos { return n.Position }
 func (n *Ident) Pos() lexer.Pos            { return n.Position }
 func (n *IntLit) Pos() lexer.Pos           { return n.Position }
+func (n *FloatLit) Pos() lexer.Pos         { return n.Position }
 func (n *StringLit) Pos() lexer.Pos        { return n.Position }
 func (n *BoolLit) Pos() lexer.Pos          { return n.Position }
 func (n *NullLit) Pos() lexer.Pos          { return n.Position }
@@ -856,6 +863,7 @@ func (*ErrorUnionTypeExpr) nodeTag()        {}
 func (*OptionalTypeExpr) nodeTag()          {}
 func (*Ident) nodeTag()                     {}
 func (*IntLit) nodeTag()                    {}
+func (*FloatLit) nodeTag()                  {}
 func (*StringLit) nodeTag()                 {}
 func (*BoolLit) nodeTag()                   {}
 func (*NullLit) nodeTag()                   {}
@@ -945,6 +953,7 @@ func (*OptionalTypeExpr) typeExprTag()          {}
 
 func (*Ident) exprTag()      {}
 func (*IntLit) exprTag()     {}
+func (*FloatLit) exprTag()   {}
 func (*StringLit) exprTag()  {}
 func (*BoolLit) exprTag()    {}
 func (*NullLit) exprTag()    {}

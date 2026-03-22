@@ -2597,6 +2597,49 @@ func TestAnalyzeTypeMismatchAssignment(t *testing.T) {
 	}
 }
 
+func TestAnalyzeAcceptsFloatArithmeticAndCastShorthand(t *testing.T) {
+	src := `def combine(left: f32, right: f64) -> f64:
+    total: f64 = left.f64() + right
+    return total / 2.0
+
+def narrow(value: f64) -> f32:
+    return value.f32()
+`
+	result, errs := parseAndAnalyze(t, "float_arithmetic_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "combine", "f64")
+	requireFunctionReturnTypeString(t, result, "narrow", "f32")
+}
+
+func TestAnalyzeRejectsFloatModulo(t *testing.T) {
+	src := `def bad(value: f64) -> f64:
+    return value % 2.0
+`
+	_, errs := parseAndAnalyze(t, "float_modulo_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "operator requires integral operands") {
+		t.Fatalf("expected integral-operand diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsFloatArrayIndex(t *testing.T) {
+	src := `def bad(values: i32[4], idx: f64) -> i32:
+    return values[idx]
+`
+	_, errs := parseAndAnalyze(t, "float_index_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "index must be integral, got f64") {
+		t.Fatalf("expected integral-index diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsNullIntoNonNullRef(t *testing.T) {
 	src := `repr(c) struct Box:
     value: int

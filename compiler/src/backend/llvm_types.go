@@ -584,6 +584,10 @@ func (g *llvmGenerator) lowerBuiltin(name string) (C.LLVMTypeRef, error) {
 		return C.LLVMInt32TypeInContext(g.context), nil
 	case "i64", "u64":
 		return C.LLVMInt64TypeInContext(g.context), nil
+	case "f32":
+		return C.LLVMFloatTypeInContext(g.context), nil
+	case "f64":
+		return C.LLVMDoubleTypeInContext(g.context), nil
 	case "int", "isize", "usize", "uintptr":
 		if g.wordBits == 32 {
 			return C.LLVMInt32TypeInContext(g.context), nil

@@ -12,6 +12,7 @@ type ConstValueKind int
 const (
 	ConstUnknown ConstValueKind = iota
 	ConstInt
+	ConstFloat
 	ConstBool
 	ConstString
 )
@@ -19,6 +20,7 @@ const (
 type ConstValue struct {
 	Kind   ConstValueKind
 	Int    int64
+	Float  float64
 	Bool   bool
 	String string
 }
@@ -193,7 +195,7 @@ func Analyze(file *ast.File) *Result {
 }
 
 func (a *Analyzer) registerBuiltins() {
-	for _, name := range []string{"void", "bool", "char", "int", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize", "uintptr", "Local", "Frozen", "Joinable", "Pending", "Held"} {
+	for _, name := range []string{"void", "bool", "char", "int", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize", "uintptr", "f32", "f64", "Local", "Frozen", "Joinable", "Pending", "Held"} {
 		a.namedTypes[name] = &BuiltinType{Name: name}
 	}
 	a.registerBuiltinPermissions()
@@ -749,6 +751,8 @@ func (a *Analyzer) collectValueSymbols(decls []ast.Decl) {
 						switch value.Kind {
 						case ConstInt:
 							declType = a.namedTypes["int"]
+						case ConstFloat:
+							declType = a.namedTypes["f64"]
 						case ConstBool:
 							declType = a.namedTypes["bool"]
 						case ConstString:

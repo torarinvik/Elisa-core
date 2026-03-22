@@ -475,6 +475,10 @@ func cBuiltinTypeName(name string) (string, error) {
 		return "int64_t", nil
 	case "u64":
 		return "uint64_t", nil
+	case "f32":
+		return "float", nil
+	case "f64":
+		return "double", nil
 	case "int", "isize":
 		return "intptr_t", nil
 	case "usize", "uintptr":

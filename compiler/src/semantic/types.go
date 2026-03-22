@@ -808,6 +808,32 @@ func IsNumericType(t Type) bool {
 		return false
 	}
 	switch b.Name {
+	case "char", "int", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize", "uintptr", "f32", "f64":
+		return true
+	default:
+		return false
+	}
+}
+
+func IsFloatType(t Type) bool {
+	b, ok := t.(*BuiltinType)
+	if !ok {
+		return false
+	}
+	switch b.Name {
+	case "f32", "f64":
+		return true
+	default:
+		return false
+	}
+}
+
+func IsIntegralType(t Type) bool {
+	b, ok := t.(*BuiltinType)
+	if !ok {
+		return false
+	}
+	switch b.Name {
 	case "char", "int", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize", "uintptr":
 		return true
 	default:
@@ -816,7 +842,7 @@ func IsNumericType(t Type) bool {
 }
 
 func IsIntegralStorageType(t Type) bool {
-	return IsNumericType(t)
+	return IsIntegralType(t)
 }
 
 func IsTypeParamType(t Type) (*TypeParamType, bool) {
@@ -1027,6 +1053,20 @@ func CommonNumericType(a, b Type) Type {
 	}
 	if SameType(a, b) {
 		return a
+	}
+	if IsFloatType(a) || IsFloatType(b) {
+		if ta, ok := a.(*BuiltinType); ok && ta.Name == "f64" {
+			return a
+		}
+		if tb, ok := b.(*BuiltinType); ok && tb.Name == "f64" {
+			return b
+		}
+		if ta, ok := a.(*BuiltinType); ok && ta.Name == "f32" {
+			return a
+		}
+		if tb, ok := b.(*BuiltinType); ok && tb.Name == "f32" {
+			return b
+		}
 	}
 	if ta, ok := a.(*BuiltinType); ok && ta.Name == "char" {
 		return b

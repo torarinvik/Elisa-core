@@ -713,6 +713,13 @@ func (a *Analyzer) inferLiteralType(expr ast.Expr) Type {
 			}
 		}
 		return a.namedTypes["int"]
+	case *ast.FloatLit:
+		if n.Suffix != "" {
+			if t, ok := a.namedTypes[n.Suffix]; ok {
+				return t
+			}
+		}
+		return a.namedTypes["f64"]
 	case *ast.StringLit:
 		return &RefType{Elem: a.namedTypes["u8"], State: RefStateNonNull, Storage: RefStorageStatic, ExplicitStorage: true}
 	case *ast.BoolLit:

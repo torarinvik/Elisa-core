@@ -628,11 +628,35 @@ func (s *functionState) errorCodeConstant(code uint32) (C.LLVMValueRef, error) {
 }
 
 func (s *functionState) coerceNumericValue(value C.LLVMValueRef, actual semantic.Type, expected semantic.Type) (C.LLVMValueRef, error) {
+	actual = numericCastType(actual)
+	expected = numericCastType(expected)
 	actualBits := integerBitWidth(actual, s.g.wordBits)
 	expectedBits := integerBitWidth(expected, s.g.wordBits)
 	expectedLLVM, err := s.g.lowerType(expected)
 	if err != nil {
 		return nil, err
+	}
+	if isFloatType(actual) {
+		if isFloatType(expected) {
+			switch {
+			case actualBits == expectedBits:
+				return value, nil
+			case actualBits < expectedBits:
+				return C.LLVMBuildFPExt(s.builder, value, expectedLLVM, cStringFree("fpext")), nil
+			default:
+				return C.LLVMBuildFPTrunc(s.builder, value, expectedLLVM, cStringFree("fptrunc")), nil
+			}
+		}
+		if isSignedIntegerType(expected) {
+			return C.LLVMBuildFPToSI(s.builder, value, expectedLLVM, cStringFree("fptosi")), nil
+		}
+		return C.LLVMBuildFPToUI(s.builder, value, expectedLLVM, cStringFree("fptoui")), nil
+	}
+	if isFloatType(expected) {
+		if isSignedIntegerType(actual) {
+			return C.LLVMBuildSIToFP(s.builder, value, expectedLLVM, cStringFree("sitofp")), nil
+		}
+		return C.LLVMBuildUIToFP(s.builder, value, expectedLLVM, cStringFree("uitofp")), nil
 	}
 	switch {
 	case actualBits == expectedBits:
@@ -676,12 +700,24 @@ func (s *functionState) binaryOperandType(op lexer.TokenKind, left semantic.Type
 func (s *functionState) emitAugmentedValue(op lexer.TokenKind, left C.LLVMValueRef, right C.LLVMValueRef, t semantic.Type) (C.LLVMValueRef, error) {
 	switch op {
 	case lexer.TOKEN_PLUSEQ:
+		if isFloatType(t) {
+			return C.LLVMBuildFAdd(s.builder, left, right, cStringFree("pluseq")), nil
+		}
 		return C.LLVMBuildAdd(s.builder, left, right, cStringFree("pluseq")), nil
 	case lexer.TOKEN_MINUSEQ:
+		if isFloatType(t) {
+			return C.LLVMBuildFSub(s.builder, left, right, cStringFree("minuseq")), nil
+		}
 		return C.LLVMBuildSub(s.builder, left, right, cStringFree("minuseq")), nil
 	case lexer.TOKEN_STAREQ:
+		if isFloatType(t) {
+			return C.LLVMBuildFMul(s.builder, left, right, cStringFree("stareq")), nil
+		}
 		return C.LLVMBuildMul(s.builder, left, right, cStringFree("stareq")), nil
 	case lexer.TOKEN_SLASHEQ:
+		if isFloatType(t) {
+			return C.LLVMBuildFDiv(s.builder, left, right, cStringFree("slasheq")), nil
+		}
 		if isSignedIntegerType(t) {
 			return C.LLVMBuildSDiv(s.builder, left, right, cStringFree("slasheq")), nil
 		}

@@ -198,13 +198,13 @@ def frontend_sv_first_char(view: StringView) -> i64:
 
 
 def frontend_valid_suffix(view: StringView) -> bool:
-    return frontend_sv_eq_literal(view, "u8") or frontend_sv_eq_literal(view, "u16") or frontend_sv_eq_literal(view, "u32") or frontend_sv_eq_literal(view, "u64") or frontend_sv_eq_literal(view, "u") or frontend_sv_eq_literal(view, "i8") or frontend_sv_eq_literal(view, "i16") or frontend_sv_eq_literal(view, "i32") or frontend_sv_eq_literal(view, "i64") or frontend_sv_eq_literal(view, "usize") or frontend_sv_eq_literal(view, "isize")
+    return frontend_sv_eq_literal(view, "u8") or frontend_sv_eq_literal(view, "u16") or frontend_sv_eq_literal(view, "u32") or frontend_sv_eq_literal(view, "u64") or frontend_sv_eq_literal(view, "u") or frontend_sv_eq_literal(view, "i8") or frontend_sv_eq_literal(view, "i16") or frontend_sv_eq_literal(view, "i32") or frontend_sv_eq_literal(view, "i64") or frontend_sv_eq_literal(view, "usize") or frontend_sv_eq_literal(view, "isize") or frontend_sv_eq_literal(view, "f32") or frontend_sv_eq_literal(view, "f64")
 
 
 def frontend_try_read_type_suffix(lexer: any FrontendLexer&) -> StringView:
     start: usize = lexer.pos
     first: i64 = frontend_cur_char(lexer)
-    if first != FRONTEND_CH_u and first != FRONTEND_CH_i:
+    if first != FRONTEND_CH_u and first != FRONTEND_CH_i and first != FRONTEND_CH_f:
         return frontend_empty_view()
 
     probe: mutable usize = start + 1u
@@ -338,8 +338,30 @@ def frontend_read_number(lexer: any FrontendLexer&) -> FrontendToken:
     while not frontend_is_eof(lexer) and frontend_is_digit(frontend_cur_char(lexer)):
         _ = frontend_advance_char(lexer)
 
+    is_float: mutable bool = false
+    if not frontend_is_eof(lexer) and frontend_cur_char(lexer) == FRONTEND_CH_DOT and frontend_is_digit(frontend_peek_char_at(lexer, 1u)):
+        is_float <- true
+        _ = frontend_advance_char(lexer)
+        while not frontend_is_eof(lexer) and frontend_is_digit(frontend_cur_char(lexer)):
+            _ = frontend_advance_char(lexer)
+
+    if not frontend_is_eof(lexer) and (frontend_cur_char(lexer) == FRONTEND_CH_e or frontend_cur_char(lexer) == FRONTEND_CH_E):
+        exp_next: i64 = frontend_peek_char_at(lexer, 1u)
+        exp_valid: mutable bool = frontend_is_digit(exp_next)
+        if exp_next == FRONTEND_CH_PLUS or exp_next == FRONTEND_CH_MINUS:
+            exp_valid <- frontend_is_digit(frontend_peek_char_at(lexer, 2u))
+        if exp_valid:
+            is_float <- true
+            _ = frontend_advance_char(lexer)
+            if not frontend_is_eof(lexer) and (frontend_cur_char(lexer) == FRONTEND_CH_PLUS or frontend_cur_char(lexer) == FRONTEND_CH_MINUS):
+                _ = frontend_advance_char(lexer)
+            while not frontend_is_eof(lexer) and frontend_is_digit(frontend_cur_char(lexer)):
+                _ = frontend_advance_char(lexer)
+
     text: StringView = frontend_make_lexer_view(lexer, start, lexer.pos)
     suffix: StringView = frontend_try_read_type_suffix(lexer)
+    if is_float or frontend_sv_eq_literal(suffix, "f32") or frontend_sv_eq_literal(suffix, "f64"):
+        return frontend_make_token(FrontendTokenKind.FloatLit, pos, text, suffix)
     return frontend_make_token(FrontendTokenKind.IntLit, pos, text, suffix)
 
 
@@ -385,7 +407,29 @@ def frontend_read_number_kind(lexer: any FrontendLexer&) -> FrontendTokenKind:
     while not frontend_is_eof(lexer) and frontend_is_digit(frontend_cur_char(lexer)):
         _ = frontend_advance_char(lexer)
 
-    _ = frontend_try_read_type_suffix(lexer)
+    is_float: mutable bool = false
+    if not frontend_is_eof(lexer) and frontend_cur_char(lexer) == FRONTEND_CH_DOT and frontend_is_digit(frontend_peek_char_at(lexer, 1u)):
+        is_float <- true
+        _ = frontend_advance_char(lexer)
+        while not frontend_is_eof(lexer) and frontend_is_digit(frontend_cur_char(lexer)):
+            _ = frontend_advance_char(lexer)
+
+    if not frontend_is_eof(lexer) and (frontend_cur_char(lexer) == FRONTEND_CH_e or frontend_cur_char(lexer) == FRONTEND_CH_E):
+        exp_next: i64 = frontend_peek_char_at(lexer, 1u)
+        exp_valid: mutable bool = frontend_is_digit(exp_next)
+        if exp_next == FRONTEND_CH_PLUS or exp_next == FRONTEND_CH_MINUS:
+            exp_valid <- frontend_is_digit(frontend_peek_char_at(lexer, 2u))
+        if exp_valid:
+            is_float <- true
+            _ = frontend_advance_char(lexer)
+            if not frontend_is_eof(lexer) and (frontend_cur_char(lexer) == FRONTEND_CH_PLUS or frontend_cur_char(lexer) == FRONTEND_CH_MINUS):
+                _ = frontend_advance_char(lexer)
+            while not frontend_is_eof(lexer) and frontend_is_digit(frontend_cur_char(lexer)):
+                _ = frontend_advance_char(lexer)
+
+    suffix: StringView = frontend_try_read_type_suffix(lexer)
+    if is_float or frontend_sv_eq_literal(suffix, "f32") or frontend_sv_eq_literal(suffix, "f64"):
+        return FrontendTokenKind.FloatLit
     return FrontendTokenKind.IntLit
 
 
@@ -483,12 +527,6 @@ def frontend_next_token_kind(lexer: any FrontendLexer&) -> FrontendTokenKind can
         if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
             return FrontendTokenKind.BangEq
         return FrontendTokenKind.Bang
-
-    if ch == FRONTEND_CH_PLUS:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return FrontendTokenKind.PlusEq
-        return FrontendTokenKind.Plus
 
     if ch == FRONTEND_CH_MINUS:
         _ = frontend_advance_char(lexer)
