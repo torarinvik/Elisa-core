@@ -14,6 +14,24 @@ import (
 	"llcontext/src/semantic"
 )
 
+const parallelForConcurrencyPrelude = `extern pool_new(workers: usize) -> ThreadPool can[Pool.Create]
+extern pool_shutdown(pool: any ThreadPool&) -> void can[Pool.Shutdown]
+
+def pool_submit1[A, R](pool: any ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending] can[Pool.Submit, Memory.Allocate, Abort.Panic]:
+	task: Task[R, Pending] = zeroed
+	return move task
+
+def task_group_new() -> TaskGroup:
+	group: TaskGroup = zeroed
+	return move group
+
+def task_group_add[R](group: any TaskGroup&, task: Task[R, Pending]) -> void can[Memory.Allocate, Abort.Panic]:
+	_ = move task
+
+def task_group_wait_all(group: any TaskGroup&) -> void can[Pool.WaitAll]:
+	pass
+`
+
 func parseAndAnalyze(t *testing.T, filename string, src string) (*semantic.Result, []string) {
 	t.Helper()
 	l := lexer.New(filename, []byte(src))
@@ -4790,6 +4808,121 @@ def bad(store: Expr.Store[Frozen], node: Expr) -> void:
 	all := strings.Join(errs, "\n")
 	if !strings.Contains(all, "cannot assign to packed store index result") {
 		t.Fatalf("expected packed store index assignment diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsPackedStoreSliceTraversal(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def walk(owner: Arena) -> int:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		left: Expr = new Expr.Int(span: 1, value: 3)
+		right: Expr = new Expr.Int(span: 2, value: 4)
+		_ = new Expr.Add(span: 3, left: left, right: right)
+
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	chunk: dview[Expr] = frozen[1u:frozen.count]
+	total: mutable int = 0
+	index: mutable usize = 0u
+	while index < chunk.len:
+		node: Expr = chunk[index]
+		if node in frozen as Expr.Int(value: value):
+			total <- total + value + node.span
+		index <- index + 1u
+	return total
+`
+	result, errs := parseAndAnalyze(t, "packed_store_slice_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "walk", "int")
+}
+
+func TestAnalyzeAcceptsParallelForOverFrozenPackedStore(t *testing.T) {
+	src := parallelForConcurrencyPrelude + `
+packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		_ = new Expr.Int(span: 1, value: 3)
+		_ = new Expr.Int(span: 2, value: 4)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	pool workers(2u):
+		parallel for node in frozen:
+			if node in frozen as Expr.Int(value: value):
+				_ = value + node.span
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "parallel_for_frozen_store_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "visit", "int")
+}
+
+func TestAnalyzeRejectsParallelForOutsidePool(t *testing.T) {
+	src := parallelForConcurrencyPrelude + `
+packed enum Expr:
+	Int(value: int)
+
+def bad(store: Expr.Store[Frozen]) -> void:
+	parallel for node in store:
+		pass
+`
+	_, errs := parseAndAnalyze(t, "parallel_for_outside_pool_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "parallel for requires an enclosing pool scope") {
+		t.Fatalf("expected missing-pool diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsParallelForMutatingOuterBinding(t *testing.T) {
+	src := parallelForConcurrencyPrelude + `
+packed enum Expr:
+	Int(value: int)
+
+def bad(store: Expr.Store[Frozen]) -> void can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+	total: mutable int = 0
+	pool workers(2u):
+		parallel for node in store:
+			total <- total + 1
+`
+	_, errs := parseAndAnalyze(t, "parallel_for_outer_mutation_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "parallel for body cannot mutate outer binding \"total\"") {
+		t.Fatalf("expected outer-mutation diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsAssigningPackedStoreSliceIndexResult(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+def bad(store: Expr.Store[Frozen], node: Expr) -> void:
+	chunk: dview[Expr] = store[0u:store.count]
+	chunk[0u] <- node
+`
+	_, errs := parseAndAnalyze(t, "packed_store_slice_index_assign_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "cannot assign to packed store view index result") {
+		t.Fatalf("expected packed store slice assignment diagnostic, got:\n%s", all)
 	}
 }
 

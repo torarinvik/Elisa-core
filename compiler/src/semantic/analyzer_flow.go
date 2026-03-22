@@ -30,6 +30,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			declType = invalidType
 		}
 		bindingType := declType
+		if specializedViewType, ok := concreteDArrayViewBindingType(bindingType, valueType); ok {
+			bindingType = specializedViewType
+		}
 		if !n.Mutable {
 			if specializedType, ok := a.specializeCallbackCarryingType(bindingType, valueType); ok {
 				bindingType = specializedType
@@ -275,6 +278,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 		a.currentFunctionValues = mergedFunctionValues
 		a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+	case *ast.ParallelForStmt:
+		a.analyzeParallelForStmt(n)
 	case *ast.PassStmt:
 		return
 	case *ast.PanicStmt:
@@ -303,6 +308,21 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		valueType := a.analyzeExpr(n.Value)
 		a.consumeAffineValueExpr(n.Value, valueType, "discard")
 	}
+}
+
+func concreteDArrayViewBindingType(declared Type, actual Type) (Type, bool) {
+	declaredView, ok := declared.(*DArrayViewType)
+	if !ok {
+		return nil, false
+	}
+	actualView, ok := actual.(*DArrayViewType)
+	if !ok {
+		return nil, false
+	}
+	if !SameType(declaredView.Elem, actualView.Elem) {
+		return nil, false
+	}
+	return actualView, true
 }
 
 func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {
@@ -815,11 +835,13 @@ func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
 	savedRegionMarks := a.currentRegionMarks
 	savedRegionRefs := a.currentRegionRefs
 	savedPackedStores := a.currentPackedStores
+	savedPools := a.currentPoolScopes
 	a.currentScope = NewScope(savedScope)
 	a.currentRegions = a.cloneRegionStates()
 	a.currentRegionMarks = a.cloneRegionMarkStates()
 	a.currentRegionRefs = a.cloneRegionRefStates()
 	a.currentPackedStores = a.clonePackedStores()
+	a.currentPoolScopes = append(append([]poolScopeState(nil), savedPools...), poolScopeState{Name: stmt.Name})
 	a.defineLocal(&Symbol{Name: stmt.Name, Kind: SymbolLocal, Type: poolType, Node: stmt, Mutable: false}, stmt.Pos())
 	for _, inner := range stmt.Body {
 		a.analyzeStmt(inner)
@@ -829,6 +851,502 @@ func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
 	a.currentRegionMarks = savedRegionMarks
 	a.currentRegionRefs = savedRegionRefs
 	a.currentPackedStores = savedPackedStores
+	a.currentPoolScopes = savedPools
+}
+
+func (a *Analyzer) analyzeParallelForStmt(stmt *ast.ParallelForStmt) {
+	sourceType := a.analyzeExpr(stmt.Source)
+	itemType, ok := parallelForItemType(sourceType)
+	if !ok {
+		a.errorf(stmt.Source.Pos(), "parallel for requires a frozen packed store or packed-store slice, got %s", sourceType.String())
+		itemType = invalidType
+	}
+	if len(a.currentPoolScopes) == 0 {
+		a.errorf(stmt.Pos(), "parallel for requires an enclosing pool scope")
+	}
+	a.validateThreadTransferArg("parallel for", stmt.Source, sourceType)
+
+	loopScope := NewScope(a.currentScope)
+	loopSym := &Symbol{Name: stmt.Name, Kind: SymbolLocal, Type: itemType, Node: stmt, Mutable: false}
+	savedScope := a.currentScope
+	a.currentScope = loopScope
+	a.defineLocal(loopSym, stmt.Pos())
+	a.currentScope = savedScope
+	a.analyzeBlockWithAffineClone(stmt.Body, loopScope)
+
+	captureCollector := newParallelForCaptureCollector(a, a.currentScope, stmt.Name)
+	captureCollector.collectStmts(stmt.Body)
+	for _, name := range captureCollector.captureOrder {
+		sym, ok := a.currentScope.Lookup(name)
+		if !ok || !parallelForCapturableSymbolKind(sym.Kind) {
+			continue
+		}
+		if !a.parallelForCaptureTypeAllowed(sym.Type, map[string]bool{}) {
+			a.errorf(stmt.Pos(), "parallel for capture %q has unsupported shared type %s", name, sym.Type.String())
+			continue
+		}
+		if bindingExpr, ok := a.currentValueBindings[sym]; ok && bindingExpr != nil {
+			a.validateThreadTransferArg("parallel for", bindingExpr, sym.Type)
+		} else {
+			a.validateThreadTransferArg("parallel for", &ast.Ident{Position: stmt.Position, Name: name}, sym.Type)
+		}
+	}
+	for _, msg := range captureCollector.errors {
+		a.errorf(stmt.Pos(), msg)
+	}
+	if a.parallelForInfo == nil {
+		a.parallelForInfo = map[*ast.ParallelForStmt]*ParallelForInfo{}
+	}
+	a.parallelForInfo[stmt] = &ParallelForInfo{
+		SourceType: sourceType,
+		ItemType:   itemType,
+		Captures:   append([]string(nil), captureCollector.captureOrder...),
+	}
+}
+
+func parallelForItemType(t Type) (Type, bool) {
+	switch tt := t.(type) {
+	case *PackedEnumStoreType:
+		if IsFrozenPackedEnumStoreType(tt) {
+			return tt.Enum, true
+		}
+	case *DArrayViewType:
+		if tt.SurfaceName == "packedview" {
+			return tt.Elem, true
+		}
+	}
+	return nil, false
+}
+
+func parallelForCapturableSymbolKind(kind SymbolKind) bool {
+	switch kind {
+	case SymbolParam, SymbolLocal, SymbolRegion, SymbolRegionMark:
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *Analyzer) parallelForCaptureTypeAllowed(t Type, seen map[string]bool) bool {
+	if t == nil {
+		return false
+	}
+	key := fmt.Sprintf("%T:%s", t, t.String())
+	if seen[key] {
+		return true
+	}
+	seen[key] = true
+	switch tt := t.(type) {
+	case *BuiltinType, *NullType, *NeverType, *TypeParamType, *FuncType, *ErrorSetType:
+		return true
+	case *ConstEnumType:
+		return a.parallelForCaptureTypeAllowed(tt.Storage, seen)
+	case *OptionalType:
+		return a.parallelForCaptureTypeAllowed(tt.Value, seen)
+	case *ErrorUnionType:
+		return a.parallelForCaptureTypeAllowed(tt.Value, seen)
+	case *ArrayType:
+		return a.parallelForCaptureTypeAllowed(tt.Elem, seen)
+	case *EnumType:
+		if tt.Packed {
+			return true
+		}
+		for _, variant := range tt.Variants {
+			for _, payload := range variant.Payload {
+				if !a.parallelForCaptureTypeAllowed(payload, seen) {
+					return false
+				}
+			}
+		}
+		for _, field := range tt.Common {
+			if !a.parallelForCaptureTypeAllowed(field.Type, seen) {
+				return false
+			}
+		}
+		return true
+	case *StructType:
+		for _, field := range tt.Fields {
+			if !a.parallelForCaptureTypeAllowed(field.Type, seen) {
+				return false
+			}
+		}
+		return true
+	case *GenericInstanceType:
+		base, ok := tt.Base.(*StructType)
+		if !ok {
+			return false
+		}
+		bindings := genericBindingsForStructInstance(base, tt.Args)
+		for _, field := range base.Fields {
+			fieldType := field.Type
+			if len(bindings) != 0 {
+				fieldType = a.substituteType(fieldType, bindings, nil, nil, nil)
+			}
+			if !a.parallelForCaptureTypeAllowed(fieldType, seen) {
+				return false
+			}
+		}
+		return true
+	case *PackedEnumStoreType:
+		return IsFrozenPackedEnumStoreType(tt)
+	case *DArrayViewType:
+		return tt.SurfaceName == "packedview" && a.parallelForCaptureTypeAllowed(tt.Elem, seen)
+	default:
+		return false
+	}
+}
+
+type parallelForCaptureCollector struct {
+	analyzer     *Analyzer
+	outerScope   *Scope
+	rootLocals   map[string]bool
+	captureOrder []string
+	captureSeen  map[string]bool
+	errors       []string
+}
+
+func newParallelForCaptureCollector(analyzer *Analyzer, outerScope *Scope, loopName string) *parallelForCaptureCollector {
+	return &parallelForCaptureCollector{
+		analyzer:    analyzer,
+		outerScope:  outerScope,
+		rootLocals:  map[string]bool{loopName: true},
+		captureSeen: map[string]bool{},
+	}
+}
+
+func cloneParallelForLocals(locals map[string]bool) map[string]bool {
+	cloned := make(map[string]bool, len(locals))
+	for name, ok := range locals {
+		cloned[name] = ok
+	}
+	return cloned
+}
+
+func (c *parallelForCaptureCollector) addError(msg string) {
+	for _, existing := range c.errors {
+		if existing == msg {
+			return
+		}
+	}
+	c.errors = append(c.errors, msg)
+}
+
+func (c *parallelForCaptureCollector) noteCapture(name string) {
+	if c.captureSeen[name] {
+		return
+	}
+	c.captureSeen[name] = true
+	c.captureOrder = append(c.captureOrder, name)
+}
+
+func (c *parallelForCaptureCollector) collectStmts(stmts []ast.Stmt) {
+	locals := cloneParallelForLocals(c.rootLocals)
+	for _, stmt := range stmts {
+		c.collectStmt(stmt, locals)
+	}
+}
+
+func (c *parallelForCaptureCollector) collectStmt(stmt ast.Stmt, locals map[string]bool) {
+	switch n := stmt.(type) {
+	case *ast.VarDeclStmt:
+		if n.Value != nil {
+			c.collectExpr(n.Value, locals)
+		}
+		locals[n.Name] = true
+	case *ast.MoveBindStmt:
+		c.collectExpr(n.Value, locals)
+		if n.Store != nil {
+			c.collectExpr(n.Store, locals)
+		}
+		for _, name := range parallelForMoveBindNames(n.Pattern) {
+			locals[name] = true
+		}
+	case *ast.OpenStmt:
+		c.collectExpr(n.Value, locals)
+		if n.Store != nil {
+			c.collectExpr(n.Store, locals)
+		}
+		inner := cloneParallelForLocals(locals)
+		for _, name := range parallelForMatchPatternNames(n.Pattern.Args) {
+			inner[name] = true
+		}
+		for _, innerStmt := range n.Body {
+			c.collectStmt(innerStmt, inner)
+		}
+	case *ast.ViewStmt:
+		c.collectExpr(n.Value, locals)
+		if n.Store != nil {
+			c.collectExpr(n.Store, locals)
+		}
+		inner := cloneParallelForLocals(locals)
+		if n.Pattern != nil && n.Pattern.Name != "" {
+			inner[n.Pattern.Name] = true
+		}
+		for _, innerStmt := range n.Body {
+			c.collectStmt(innerStmt, inner)
+		}
+	case *ast.AssignStmt:
+		c.collectAssignmentTarget(n.Target, locals)
+		c.collectExpr(n.Value, locals)
+	case *ast.AugAssignStmt:
+		c.collectAssignmentTarget(n.Target, locals)
+		c.collectExpr(n.Value, locals)
+	case *ast.AsRefAssignStmt:
+		c.collectAssignmentTarget(n.Target, locals)
+		c.collectExpr(n.Value, locals)
+	case *ast.ReturnStmt:
+		c.addError("parallel for body cannot return from the enclosing function")
+		if n.Value != nil {
+			c.collectExpr(n.Value, locals)
+		}
+	case *ast.IfStmt:
+		c.collectExpr(n.Cond, locals)
+		thenLocals := cloneParallelForLocals(locals)
+		for _, innerStmt := range n.Then {
+			c.collectStmt(innerStmt, thenLocals)
+		}
+		for _, elif := range n.Elifs {
+			c.collectExpr(elif.Cond, locals)
+			elifLocals := cloneParallelForLocals(locals)
+			for _, innerStmt := range elif.Body {
+				c.collectStmt(innerStmt, elifLocals)
+			}
+		}
+		elseLocals := cloneParallelForLocals(locals)
+		for _, innerStmt := range n.Else {
+			c.collectStmt(innerStmt, elseLocals)
+		}
+	case *ast.WhileStmt:
+		c.collectExpr(n.Cond, locals)
+		bodyLocals := cloneParallelForLocals(locals)
+		for _, innerStmt := range n.Body {
+			c.collectStmt(innerStmt, bodyLocals)
+		}
+	case *ast.ParallelForStmt:
+		c.addError("parallel for body cannot nest another parallel for")
+	case *ast.MatchStmt:
+		c.collectExpr(n.Value, locals)
+		if n.Store != nil {
+			c.collectExpr(n.Store, locals)
+		}
+		for _, arm := range n.Arms {
+			armLocals := cloneParallelForLocals(locals)
+			for _, name := range parallelForMatchArmPatternNames(arm.Pattern) {
+				armLocals[name] = true
+			}
+			for _, innerStmt := range arm.Body {
+				c.collectStmt(innerStmt, armLocals)
+			}
+		}
+	case *ast.InStoreStmt:
+		c.collectExpr(n.Store, locals)
+		bodyLocals := cloneParallelForLocals(locals)
+		for _, innerStmt := range n.Body {
+			c.collectStmt(innerStmt, bodyLocals)
+		}
+	case *ast.CanStmt:
+		bodyLocals := cloneParallelForLocals(locals)
+		for _, innerStmt := range n.Body {
+			c.collectStmt(innerStmt, bodyLocals)
+		}
+	case *ast.PoolStmt:
+		c.collectExpr(n.Workers, locals)
+		bodyLocals := cloneParallelForLocals(locals)
+		bodyLocals[n.Name] = true
+		for _, innerStmt := range n.Body {
+			c.collectStmt(innerStmt, bodyLocals)
+		}
+	case *ast.LockStmt:
+		c.collectExpr(n.Mutex, locals)
+		bodyLocals := cloneParallelForLocals(locals)
+		bodyLocals[n.GuardName] = true
+		for _, innerStmt := range n.Body {
+			c.collectStmt(innerStmt, bodyLocals)
+		}
+	case *ast.PanicStmt:
+		if n.Message != nil {
+			c.collectExpr(n.Message, locals)
+		}
+	case *ast.ExprStmt:
+		c.collectExpr(n.Expr, locals)
+	case *ast.StaticIfStmt:
+		for _, active := range c.analyzer.activeStmtBranch(n) {
+			c.collectStmt(active, cloneParallelForLocals(locals))
+		}
+	case *ast.StaticErrorStmt:
+		c.collectExpr(n.Message, locals)
+	case *ast.DiscardStmt:
+		c.collectExpr(n.Value, locals)
+	case *ast.RegionStmt:
+		if n.Capacity != nil {
+			c.collectExpr(n.Capacity, locals)
+		}
+		locals[n.Name] = true
+	case *ast.DestroyStmt:
+		if !locals[n.Name] {
+			c.addError(fmt.Sprintf("parallel for body cannot destroy outer region %q", n.Name))
+		}
+	case *ast.MarkStmt:
+		if !locals[n.RegionName] {
+			c.addError(fmt.Sprintf("parallel for body cannot mark outer region %q", n.RegionName))
+		}
+		locals[n.Name] = true
+	case *ast.RestoreStmt:
+		if !locals[n.RegionName] {
+			c.addError(fmt.Sprintf("parallel for body cannot restore outer region %q", n.RegionName))
+		}
+		if !locals[n.MarkName] {
+			c.addError(fmt.Sprintf("parallel for body cannot restore from outer checkpoint %q", n.MarkName))
+		}
+	case *ast.ResetStmt:
+		if !locals[n.Name] {
+			c.addError(fmt.Sprintf("parallel for body cannot reset outer region %q", n.Name))
+		}
+	}
+}
+
+func (c *parallelForCaptureCollector) collectAssignmentTarget(expr ast.Expr, locals map[string]bool) {
+	c.collectExpr(expr, locals)
+	if root, ok := parallelForAssignmentRoot(expr); ok && !locals[root] {
+		c.addError(fmt.Sprintf("parallel for body cannot mutate outer binding %q", root))
+	}
+}
+
+func (c *parallelForCaptureCollector) collectExpr(expr ast.Expr, locals map[string]bool) {
+	if expr == nil {
+		return
+	}
+	switch n := expr.(type) {
+	case *ast.Ident:
+		if locals[n.Name] {
+			return
+		}
+		sym, ok := c.outerScope.Lookup(n.Name)
+		if ok && parallelForCapturableSymbolKind(sym.Kind) {
+			c.noteCapture(n.Name)
+		}
+	case *ast.BinaryExpr:
+		c.collectExpr(n.Left, locals)
+		c.collectExpr(n.Right, locals)
+	case *ast.UnaryExpr:
+		c.collectExpr(n.Operand, locals)
+	case *ast.CallExpr:
+		c.collectExpr(n.Func, locals)
+		for _, arg := range n.Args {
+			c.collectExpr(arg, locals)
+		}
+	case *ast.FieldExpr:
+		c.collectExpr(n.Object, locals)
+	case *ast.IndexExpr:
+		c.collectExpr(n.Object, locals)
+		c.collectExpr(n.Index, locals)
+	case *ast.SliceExpr:
+		c.collectExpr(n.Object, locals)
+		c.collectExpr(n.Start, locals)
+		c.collectExpr(n.End, locals)
+	case *ast.ListLitExpr:
+		for _, elem := range n.Elems {
+			c.collectExpr(elem, locals)
+		}
+	case *ast.CastExpr:
+		c.collectExpr(n.Operand, locals)
+	case *ast.TernaryExpr:
+		c.collectExpr(n.Value, locals)
+		c.collectExpr(n.Cond, locals)
+		c.collectExpr(n.Alt, locals)
+	case *ast.AddrOfExpr:
+		c.collectExpr(n.Operand, locals)
+	case *ast.MoveExpr:
+		c.collectExpr(n.Operand, locals)
+	case *ast.SpecializeExpr:
+		c.collectExpr(n.Operand, locals)
+	case *ast.StructLitExpr:
+		for _, arg := range n.Args {
+			c.collectExpr(arg, locals)
+		}
+	case *ast.ParenExpr:
+		c.collectExpr(n.Inner, locals)
+	case *ast.RaiseExpr:
+		c.collectExpr(n.Error, locals)
+	case *ast.TryExpr:
+		c.collectExpr(n.Value, locals)
+		c.collectExpr(n.Fallback, locals)
+	case *ast.UnwrapElseExpr:
+		c.collectExpr(n.Value, locals)
+		c.collectExpr(n.Fallback, locals)
+	case *ast.AllocExpr:
+		c.collectExpr(n.Owner, locals)
+		c.collectExpr(n.Value, locals)
+	case *ast.CanExpr:
+		c.collectExpr(n.Expr, locals)
+	case *ast.MatchExpr:
+		c.collectExpr(n.Value, locals)
+		c.collectExpr(n.Store, locals)
+		for _, arm := range n.Arms {
+			armLocals := cloneParallelForLocals(locals)
+			for _, name := range parallelForMatchArmPatternNames(arm.Pattern) {
+				armLocals[name] = true
+			}
+			for _, innerStmt := range arm.Body {
+				c.collectStmt(innerStmt, armLocals)
+			}
+		}
+	}
+}
+
+func parallelForMatchPatternNames(args []ast.MatchPatternArg) []string {
+	var out []string
+	for _, arg := range args {
+		out = append(out, parallelForMatchArmPatternNames(arg.Pattern)...)
+	}
+	return out
+}
+
+func parallelForMatchArmPatternNames(pattern ast.MatchPattern) []string {
+	switch p := pattern.(type) {
+	case *ast.MatchBindPattern:
+		return []string{p.Name}
+	case *ast.MatchVariantPattern:
+		return parallelForMatchPatternNames(p.Args)
+	default:
+		return nil
+	}
+}
+
+func parallelForMoveBindNames(pattern ast.MoveBindPattern) []string {
+	switch p := pattern.(type) {
+	case *ast.MoveBindNamePattern:
+		return []string{p.Name}
+	case *ast.MoveBindStructPattern:
+		var out []string
+		for _, arg := range p.Args {
+			if arg.Name != "" {
+				out = append(out, arg.Name)
+			}
+		}
+		return out
+	case *ast.MoveBindVariantPattern:
+		return parallelForMatchPatternNames(p.Args)
+	default:
+		return nil
+	}
+}
+
+func parallelForAssignmentRoot(expr ast.Expr) (string, bool) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return n.Name, true
+	case *ast.FieldExpr:
+		return parallelForAssignmentRoot(n.Object)
+	case *ast.IndexExpr:
+		return parallelForAssignmentRoot(n.Object)
+	case *ast.ParenExpr:
+		return parallelForAssignmentRoot(n.Inner)
+	case *ast.CastExpr:
+		return parallelForAssignmentRoot(n.Operand)
+	default:
+		return "", false
+	}
 }
 
 func (a *Analyzer) analyzeLockStmt(stmt *ast.LockStmt) {

@@ -284,6 +284,9 @@ func optimizationFactsForType(t Type) OptimizationFacts {
 		return facts
 	case *DArrayViewType:
 		facts := OptimizationFacts{Contiguous: true, UnitStride: true}
+		if tt.SurfaceName == "packedview" {
+			facts.ReadOnly = true
+		}
 		if tt.Begin != "" || tt.End != "" {
 			facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: tt.Begin, End: tt.End}
 		}

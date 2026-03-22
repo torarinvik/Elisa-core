@@ -43,6 +43,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikePoolStmt() {
 				return p.parsePoolStmt()
 			}
+		case "parallel":
+			if p.looksLikeParallelForStmt() {
+				return p.parseParallelForStmt()
+			}
 		case "open":
 			if p.looksLikeOpenOrViewStmt() {
 				return p.parseOpenStmt()
@@ -105,6 +109,38 @@ func (p *Parser) looksLikePoolStmt() bool {
 	}
 	depth := 0
 	for i := p.pos + 2; i < len(p.tokens); i++ {
+		tok := p.tokens[i]
+		switch tok.Kind {
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
+			depth++
+		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET:
+			if depth > 0 {
+				depth--
+			}
+		case lexer.TOKEN_COLON:
+			return depth == 0
+		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
+			return false
+		}
+	}
+	return false
+}
+
+func (p *Parser) looksLikeParallelForStmt() bool {
+	if p.pos+4 >= len(p.tokens) {
+		return false
+	}
+	if p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT || p.tokens[p.pos+1].Text != "for" {
+		return false
+	}
+	if p.tokens[p.pos+2].Kind != lexer.TOKEN_IDENT {
+		return false
+	}
+	if p.tokens[p.pos+3].Kind != lexer.TOKEN_IN {
+		return false
+	}
+	depth := 0
+	for i := p.pos + 4; i < len(p.tokens); i++ {
 		tok := p.tokens[i]
 		switch tok.Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
@@ -188,6 +224,20 @@ func (p *Parser) parsePoolStmt() *ast.PoolStmt {
 	p.poolScopes = p.poolScopes[:len(p.poolScopes)-1]
 	return &ast.PoolStmt{Position: pos, Name: name, Workers: workers, Body: body}
 }
+
+func (p *Parser) parseParallelForStmt() *ast.ParallelForStmt {
+	pos := p.cur().Pos
+	p.expectIdentText("parallel")
+	p.expectIdentText("for")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_IN)
+	source := p.parseExpr()
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	body := p.parseBlock()
+	return &ast.ParallelForStmt{Position: pos, Name: name, Source: source, Body: body}
+}
+
 func (p *Parser) parseWaitAllStmt() ast.Stmt {
 	pos := p.cur().Pos
 	p.expectIdentText("wait")

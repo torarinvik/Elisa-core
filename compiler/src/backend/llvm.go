@@ -90,6 +90,7 @@ type llvmGenerator struct {
 	globals              map[string]C.LLVMValueRef
 	noteTypeInProgress   map[string]bool
 	noteTypeDone         map[string]bool
+	syntheticCounter     int
 	wordBits             int
 }
 
@@ -122,6 +123,12 @@ func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
 		g.symbolsByNode[sym.Node] = sym
 	}
 	return g, nil
+}
+
+func (g *llvmGenerator) nextSyntheticName(prefix string) string {
+	name := fmt.Sprintf("%s%d", prefix, g.syntheticCounter)
+	g.syntheticCounter++
+	return name
 }
 
 func (g *llvmGenerator) dispose() {

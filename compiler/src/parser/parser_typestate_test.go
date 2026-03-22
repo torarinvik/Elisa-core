@@ -328,3 +328,55 @@ func TestParseOpenAndViewRemainContextualIdentifiers(t *testing.T) {
 		t.Fatalf("expected call callee open, got %T %#v", call.Func, call.Func)
 	}
 }
+
+func TestParseParallelForStatement(t *testing.T) {
+	file, errs := parseSourceFile(t, "packed enum Expr:\n    Int(value: int)\n\ndef walk(frozen: Expr.Store[Frozen]) -> void:\n    pool workers(4u):\n        parallel for node in frozen:\n            pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[1])
+	}
+	poolStmt, ok := decl.Body[0].(*ast.PoolStmt)
+	if !ok {
+		t.Fatalf("expected pool stmt, got %T", decl.Body[0])
+	}
+	parallelStmt, ok := poolStmt.Body[0].(*ast.ParallelForStmt)
+	if !ok {
+		t.Fatalf("expected parallel-for stmt, got %T", poolStmt.Body[0])
+	}
+	if parallelStmt.Name != "node" {
+		t.Fatalf("expected loop binder node, got %q", parallelStmt.Name)
+	}
+	source, ok := parallelStmt.Source.(*ast.Ident)
+	if !ok || source.Name != "frozen" {
+		t.Fatalf("expected loop source frozen, got %T %#v", parallelStmt.Source, parallelStmt.Source)
+	}
+}
+
+func TestParseParallelRemainsContextualIdentifier(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep() -> int:\n    parallel: int = 1\n    for_value: int = parallel\n    parallel(for_value)\n    return for_value\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[0])
+	}
+	if _, ok := decl.Body[0].(*ast.VarDeclStmt); !ok {
+		t.Fatalf("expected first stmt to stay a var decl, got %T", decl.Body[0])
+	}
+	exprStmt, ok := decl.Body[2].(*ast.ExprStmt)
+	if !ok {
+		t.Fatalf("expected third stmt to stay an expr stmt, got %T", decl.Body[2])
+	}
+	call, ok := exprStmt.Expr.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected parallel(for_value) to parse as a call, got %T", exprStmt.Expr)
+	}
+	callee, ok := call.Func.(*ast.Ident)
+	if !ok || callee.Name != "parallel" {
+		t.Fatalf("expected call callee parallel, got %T %#v", call.Func, call.Func)
+	}
+}

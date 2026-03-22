@@ -601,6 +601,12 @@ def ctx_packed_store_row_ptr_at(state_bits: any void&, index: usize) -> any void
     assert handle != 0u64.uintptr()
     return handle.cast[any u8&]().cast[any void&]()
 
+def ctx_packed_store_view(state_bits: any void&, start: usize, end: usize) -> dview[uintptr]:
+    assert state_bits != null
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    handles: any darray[uintptr]& = packed_store_handle_table(state)
+    return arena_da_view(handles, start, end)
+
 def ctx_packed_store_record_row_ptr(a: any Arena&, row: any void&, state_bits: any void&) can[Memory.Allocate, Abort.Panic]:
     assert state_bits != null
     packed_store_append_handle(a, state_bits.cast[any PackedStoreState&](), row.cast[any u8&]().uintptr())

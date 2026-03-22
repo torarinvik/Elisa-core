@@ -3492,6 +3492,47 @@ func (s *functionState) emitPackedStoreIndexExpr(expr *ast.IndexExpr) (C.LLVMVal
 	}
 }
 
+func (s *functionState) emitPackedStoreSliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if expr == nil {
+		return nil, nil, false, nil
+	}
+	if _, ok := packedStoreOperandType(s.exprType(expr.Object)); !ok {
+		return nil, nil, false, nil
+	}
+	storeValue, storeType, err := s.emitPackedStoreValueFromExpr(expr.Object)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if storeType == nil || storeType.Enum == nil {
+		return nil, nil, false, nil
+	}
+	startValue, _, err := s.emitExpr(expr.Start, s.g.result.NamedTypes["usize"])
+	if err != nil {
+		return nil, nil, true, err
+	}
+	endValue, _, err := s.emitExpr(expr.End, s.g.result.NamedTypes["usize"])
+	if err != nil {
+		return nil, nil, true, err
+	}
+	stateValue, err := s.emitPackedStoreStateValueNamed(storeValue, storeType, "packed.store.view.state")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	resultType := s.exprType(expr)
+	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	helperType := &semantic.FuncType{Name: "ctx_packed_store_view", Params: []semantic.Type{voidRefType, s.g.result.NamedTypes["usize"], s.g.result.NamedTypes["usize"]}, Return: resultType}
+	callee, err := s.g.ensureFunctionDeclared("ctx_packed_store_view", helperType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	value := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, startValue, endValue}, "packed.store.view")
+	return value, resultType, true, nil
+}
+
 func (s *functionState) packedEnumFieldHandleValue(expr ast.Expr, objectType semantic.Type, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
 	if refType, ok := objectType.(*semantic.RefType); ok {
 		if refEnum, ok := refType.Elem.(*semantic.EnumType); ok && refEnum == enumType {
@@ -3610,6 +3651,9 @@ func (s *functionState) packedStoreConstructorCall(expr *ast.CallExpr) (*semanti
 }
 
 func (s *functionState) emitSliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if value, resultType, handled, err := s.emitPackedStoreSliceExpr(expr); handled {
+		return value, resultType, err
+	}
 	if value, resultType, handled, err := s.emitFixedArraySliceExpr(expr); handled {
 		return value, resultType, err
 	}

@@ -11,6 +11,24 @@ import (
 	"llcontext/src/semantic"
 )
 
+const parallelForConcurrencyPrelude = `extern pool_new(workers: usize) -> ThreadPool can[Pool.Create]
+extern pool_shutdown(pool: any ThreadPool&) -> void can[Pool.Shutdown]
+
+def pool_submit1[A, R](pool: any ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending] can[Pool.Submit, Memory.Allocate, Abort.Panic]:
+	task: Task[R, Pending] = zeroed
+	return move task
+
+def task_group_new() -> TaskGroup:
+	group: TaskGroup = zeroed
+	return move group
+
+def task_group_add[R](group: any TaskGroup&, task: Task[R, Pending]) -> void can[Memory.Allocate, Abort.Panic]:
+	_ = move task
+
+def task_group_wait_all(group: any TaskGroup&) -> void can[Pool.WaitAll]:
+	pass
+`
+
 func parseAndAnalyzeBackendTest(t *testing.T, filename string, src string) *semantic.Result {
 	t.Helper()
 	l := lexer.New(filename, []byte(src))
@@ -1336,6 +1354,131 @@ def first(owner: Arena) -> int:
 	}
 
 	for _, check := range []string{"call void @ctx_packed_store_record_row_ptr(", "call i64 @ctx_packed_store_count(", "call ptr @ctx_packed_store_row_ptr_at("} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersPackedStoreSliceForWordHandle(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def walk(owner: Arena) -> int:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		left: Expr = new Expr.Int(span: 1, value: 3)
+		right: Expr = new Expr.Int(span: 2, value: 4)
+		_ = new Expr.Add(span: 3, left: left, right: right)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	chunk: dview[Expr] = frozen[1u:frozen.count]
+	if chunk.len > 0u:
+		node: Expr = chunk[0u]
+		if node in frozen as Expr.Int(value: value):
+			return value + node.span
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_store_slice_word.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	for _, check := range []string{"call %DynArrayView @ctx_packed_store_view(", "packed.store.view.state", "call i64 @ctx_packed_store_count("} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersPackedStoreSliceForRowHandle(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+def first(owner: Arena) -> int:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		_ = new Expr.Int(value: 7)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	chunk: dview[Expr] = frozen[0u:frozen.count]
+	if chunk.len > 0u:
+		node: Expr = chunk[0u]
+		match node in frozen:
+			Expr.Int(value: value):
+				return value
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_store_slice_row.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIRowHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	for _, check := range []string{"call %DynArrayView @ctx_packed_store_view(", "call void @ctx_packed_store_record_row_ptr("} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersParallelForOverFrozenPackedStoreForWordHandle(t *testing.T) {
+	src := parallelForConcurrencyPrelude + `
+packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		_ = new Expr.Int(span: 1, value: 3)
+		_ = new Expr.Int(span: 2, value: 4)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	pool workers(2u):
+		parallel for node in frozen:
+			if node in frozen as Expr.Int(value: value):
+				_ = value + node.span
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_parallel_for_word.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	for _, check := range []string{"@__parallel_for_0_worker", "@pool_submit1__", "@task_group_add__", "@task_group_wait_all(", "call i64 @ctx_packed_store_count("} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersParallelForOverFrozenPackedStoreForRowHandle(t *testing.T) {
+	src := parallelForConcurrencyPrelude + `
+packed enum Expr:
+	Int(value: int)
+
+def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		_ = new Expr.Int(value: 3)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	pool workers(2u):
+		parallel for node in frozen:
+			pass
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_parallel_for_row.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIRowHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	for _, check := range []string{"@__parallel_for_0_worker", "@pool_submit1__", "@task_group_wait_all(", "call void @ctx_packed_store_record_row_ptr(", "call i64 @ctx_packed_store_count("} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}

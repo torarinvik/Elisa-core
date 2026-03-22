@@ -2919,6 +2919,9 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 	if view, ok := objType.(*DArrayViewType); ok {
 		return &DArrayViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: view.SurfaceName}
 	}
+	if storeType, ok := objType.(*PackedEnumStoreType); ok && storeType.Enum != nil {
+		return &DArrayViewType{Elem: storeType.Enum, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "packedview"}
+	}
 	if dstr, ok := objType.(*DStrType); ok {
 		_ = dstr
 		return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
@@ -2946,6 +2949,9 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 		if view, ok := ref.Elem.(*DArrayViewType); ok {
 			return &DArrayViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: view.SurfaceName}
 		}
+		if storeType, ok := ref.Elem.(*PackedEnumStoreType); ok && storeType.Enum != nil {
+			return &DArrayViewType{Elem: storeType.Enum, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "packedview"}
+		}
 		if _, ok := ref.Elem.(*DStrType); ok {
 			return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
 		}
@@ -2953,7 +2959,7 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 			return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
 		}
 	}
-	a.errorf(expr.Pos(), "slicing requires string, array, or view type, got %s", objType.String())
+	a.errorf(expr.Pos(), "slicing requires string, array, view, or packed store type, got %s", objType.String())
 	return invalidType
 }
 
@@ -3491,6 +3497,9 @@ func valueOnlyIndexKind(t Type) (string, bool) {
 	if _, ok := t.(*PackedEnumStoreType); ok {
 		return "packed store index result", true
 	}
+	if view, ok := t.(*DArrayViewType); ok && view.SurfaceName == "packedview" {
+		return "packed store view index result", true
+	}
 	if _, ok := t.(*DStrType); ok {
 		return "string index", true
 	}
@@ -3506,6 +3515,9 @@ func valueOnlyIndexKind(t Type) (string, bool) {
 	}
 	if _, ok := ref.Elem.(*PackedEnumStoreType); ok {
 		return "packed store index result", true
+	}
+	if view, ok := ref.Elem.(*DArrayViewType); ok && view.SurfaceName == "packedview" {
+		return "packed store view index result", true
 	}
 	if _, ok := ref.Elem.(*DStrType); ok {
 		return "string index", true

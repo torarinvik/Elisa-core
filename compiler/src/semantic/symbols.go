@@ -34,11 +34,18 @@ type Result struct {
 	ConstValues     map[string]ConstValue
 	ExprTypes       map[ast.Expr]Type
 	ExprFacts       map[ast.Expr]OptimizationFacts
+	ParallelFor     map[*ast.ParallelForStmt]*ParallelForInfo
 	AnnotatedFuncs  []*AnnotatedFunc
 	ExportedTypes   []*ExportedType
 	ExportedFuncs   []*ExportedFunc
 	ExportedGlobals []*ExportedGlobal
 	Diagnostics     []Diagnostic
+}
+
+type ParallelForInfo struct {
+	SourceType Type
+	ItemType   Type
+	Captures   []string
 }
 
 type AnnotatedFunc struct {

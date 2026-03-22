@@ -488,6 +488,18 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 	case *ast.WhileStmt:
 		c.collectExpr(n.Cond)
 		c.collectStmts(n.Body)
+	case *ast.ParallelForStmt:
+		c.collectExpr(n.Source)
+		c.addRefs([]ast.PermissionRef{
+			{Position: n.Position, Name: "Pool", Member: "Submit"},
+			{Position: n.Position, Name: "Pool", Member: "WaitAll"},
+			{Position: n.Position, Name: "Memory", Member: "Allocate"},
+			{Position: n.Position, Name: "Memory", Member: "Release"},
+			{Position: n.Position, Name: "Abort", Member: "Panic"},
+			{Position: n.Position, Name: "Atomics", Member: "Load"},
+			{Position: n.Position, Name: "Atomics", Member: "CompareExchange"},
+		})
+		c.collectStmts(n.Body)
 	case *ast.PanicStmt:
 		c.addRefs([]ast.PermissionRef{{Position: n.Position, Name: "Abort", Member: "Panic"}})
 		c.collectExpr(n.Message)
@@ -678,6 +690,13 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.WhileStmt:
 		a.validatePermissionExpr(n.Cond, granted)
+		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
+	case *ast.ParallelForStmt:
+		a.validatePermissionExpr(n.Source, granted)
+		if !granted["Pool"] {
+			refs := []ast.PermissionRef{{Position: n.Position, Name: "Pool", Member: "Submit"}, {Position: n.Position, Name: "Pool", Member: "WaitAll"}}
+			a.warnf(n.Pos(), "parallel for requires%s and has no explicit local effect grant; add %s or a surrounding can ...: block", permissionFamiliesString([]string{"Pool"}), permissionGrantHint(refs, []string{"Pool"}))
+		}
 		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.PanicStmt:
 		a.validatePermissionExpr(n.Message, granted)

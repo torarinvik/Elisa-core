@@ -95,6 +95,7 @@ type Analyzer struct {
 	currentSpecializedValueTypes      map[*Symbol]Type
 	currentValueBindings              map[*Symbol]ast.Expr
 	currentPackedStores               map[string]*PackedEnumStoreType
+	currentPoolScopes                 []poolScopeState
 	currentFunctionUsedPermissions    map[string]bool
 	currentFunctionUsedPermissionRefs []ast.PermissionRef
 	currentReturnProvenance           regionRefState
@@ -102,6 +103,7 @@ type Analyzer struct {
 	suppressDiagnostics               bool
 	returnProvenanceInProgress        map[string]bool
 	returnBorrowedOwnerRefInProgress  map[string]bool
+	parallelForInfo                   map[*ast.ParallelForStmt]*ParallelForInfo
 }
 
 type regionState struct {
@@ -150,6 +152,10 @@ type affineValueKey struct {
 	Path string
 }
 
+type poolScopeState struct {
+	Name string
+}
+
 func Analyze(file *ast.File) *Result {
 	a := &Analyzer{
 		file:                             file,
@@ -160,6 +166,7 @@ func Analyze(file *ast.File) *Result {
 		constValues:                      map[string]ConstValue{},
 		exprTypes:                        map[ast.Expr]Type{},
 		exprFacts:                        map[ast.Expr]OptimizationFacts{},
+		parallelForInfo:                  map[*ast.ParallelForStmt]*ParallelForInfo{},
 		symbolFacts:                      map[*Symbol]OptimizationFacts{},
 		returnProvenanceInProgress:       map[string]bool{},
 		returnBorrowedOwnerRefInProgress: map[string]bool{},
@@ -186,6 +193,7 @@ func Analyze(file *ast.File) *Result {
 		ConstValues:     a.constValues,
 		ExprTypes:       a.exprTypes,
 		ExprFacts:       a.exprFacts,
+		ParallelFor:     a.parallelForInfo,
 		AnnotatedFuncs:  a.annotatedFuncs,
 		ExportedTypes:   a.exportedTypes,
 		ExportedFuncs:   a.exportedFuncs,

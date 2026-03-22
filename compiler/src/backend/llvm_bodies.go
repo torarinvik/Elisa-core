@@ -15,6 +15,7 @@ import (
 	"unsafe"
 
 	"llcontext/src/ast"
+	"llcontext/src/lexer"
 	"llcontext/src/semantic"
 )
 
@@ -43,6 +44,7 @@ type functionState struct {
 	packedStores      map[string]packedStoreBinding
 	packedStoreValues map[packedStoreExtractCacheKey]C.LLVMValueRef
 	scopedCleanups    []scopedCleanupBinding
+	poolScopes        []activePoolBinding
 }
 
 type scopedCleanupKind int
@@ -84,6 +86,13 @@ type packedEnumStorageBinding struct {
 type packedVariantViewBinding struct {
 	ptr C.LLVMValueRef
 	typ *semantic.PackedVariantViewType
+}
+
+type activePoolBinding struct {
+	name    string
+	ptr     C.LLVMValueRef
+	typ     semantic.Type
+	workers C.LLVMValueRef
 }
 
 func (g *llvmGenerator) defineFunctionBody(decl *ast.FuncDecl, fnType *semantic.FuncType, fnValue C.LLVMValueRef) error {
@@ -438,6 +447,8 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		return s.emitLockStmt(n)
 	case *ast.WhileStmt:
 		return s.emitWhile(n)
+	case *ast.ParallelForStmt:
+		return s.emitParallelForStmt(n)
 	case *ast.PassStmt:
 		return nil
 	case *ast.PanicStmt:
@@ -699,15 +710,22 @@ func (s *functionState) emitInStore(stmt *ast.InStoreStmt) error {
 }
 
 func (s *functionState) emitPoolStmt(stmt *ast.PoolStmt) error {
-	poolCall := &ast.CallExpr{
-		Position: stmt.Position,
-		Func:     &ast.Ident{Position: stmt.Position, Name: "pool_new"},
-		Args:     []ast.Expr{stmt.Workers},
-	}
-	poolValue, poolType, err := s.emitExpr(poolCall, nil)
+	poolType := s.g.result.NamedTypes["ThreadPool"]
+	usizeType := s.g.result.NamedTypes["usize"]
+	workersValue, _, err := s.emitExpr(stmt.Workers, usizeType)
 	if err != nil {
 		return err
 	}
+	poolNewType := &semantic.FuncType{Name: "pool_new", Params: []semantic.Type{usizeType}, Return: poolType}
+	poolNew, err := s.g.ensureFunctionDeclared("pool_new", poolNewType)
+	if err != nil {
+		return err
+	}
+	poolNewLLVMType, err := s.g.lowerFunctionType(poolNewType)
+	if err != nil {
+		return err
+	}
+	poolValue := s.buildCall(poolNewLLVMType, poolNew, []C.LLVMValueRef{workersValue}, "pool.new")
 	poolAlloca, err := s.createEntryAlloca(stmt.Name, poolType)
 	if err != nil {
 		return err
@@ -718,8 +736,10 @@ func (s *functionState) emitPoolStmt(stmt *ast.PoolStmt) error {
 	C.LLVMBuildStore(s.builder, poolValue, poolAlloca)
 	pool := scopedCleanupBinding{kind: scopedCleanupThreadPool, name: stmt.Name, ptr: poolAlloca, typ: poolType}
 	s.scopedCleanups = append(s.scopedCleanups, pool)
+	s.poolScopes = append(s.poolScopes, activePoolBinding{name: stmt.Name, ptr: poolAlloca, typ: poolType, workers: workersValue})
 	defer func() {
 		s.scopedCleanups = s.scopedCleanups[:len(s.scopedCleanups)-1]
+		s.poolScopes = s.poolScopes[:len(s.poolScopes)-1]
 	}()
 	if err := s.emitBlock(stmt.Body, false); err != nil {
 		return err
@@ -728,6 +748,316 @@ func (s *functionState) emitPoolStmt(stmt *ast.PoolStmt) error {
 		return nil
 	}
 	return s.emitConditionalPoolShutdown(pool)
+}
+
+func (s *functionState) emitParallelForStmt(stmt *ast.ParallelForStmt) error {
+	info, ok := s.g.result.ParallelFor[stmt]
+	if !ok || info == nil {
+		return fmt.Errorf("missing semantic parallel-for info")
+	}
+	pool, ok := s.currentActivePool()
+	if !ok {
+		return fmt.Errorf("parallel for requires an active pool scope during LLVM lowering")
+	}
+	sourceValue, _, err := s.emitExpr(stmt.Source, info.SourceType)
+	if err != nil {
+		return err
+	}
+
+	prefix := s.g.nextSyntheticName("__parallel_for_")
+	sourceName := prefix + "_source"
+	groupName := prefix + "_group"
+
+	s.pushScope()
+	defer s.popScope()
+
+	sourceAlloca, err := s.createEntryAlloca(sourceName, info.SourceType)
+	if err != nil {
+		return err
+	}
+	C.LLVMBuildStore(s.builder, sourceValue, sourceAlloca)
+	s.defineBinding(sourceName, valueBinding{ptr: sourceAlloca, typ: info.SourceType})
+
+	sourceIdent := &ast.Ident{Position: stmt.Position, Name: sourceName}
+	lengthField := "len"
+	if _, ok := info.SourceType.(*semantic.PackedEnumStoreType); ok {
+		lengthField = "count"
+	}
+	totalExpr := &ast.FieldExpr{Position: stmt.Position, Object: sourceIdent, Field: lengthField}
+	usizeType := s.g.result.NamedTypes["usize"]
+	totalValue, _, err := s.emitExpr(totalExpr, usizeType)
+	if err != nil {
+		return err
+	}
+
+	groupType := s.g.result.NamedTypes["TaskGroup"]
+	groupAlloca, err := s.createEntryAlloca(groupName, groupType)
+	if err != nil {
+		return err
+	}
+	taskGroupNew, taskGroupNewType, err := s.ensureRuntimeFunction("task_group_new", nil)
+	if err != nil {
+		return err
+	}
+	taskGroupNewLLVMType, err := s.g.lowerFunctionType(taskGroupNewType)
+	if err != nil {
+		return err
+	}
+	groupValue := s.buildCall(taskGroupNewLLVMType, taskGroupNew, nil, "task.group.new")
+	C.LLVMBuildStore(s.builder, groupValue, groupAlloca)
+	s.defineBinding(groupName, valueBinding{ptr: groupAlloca, typ: groupType})
+
+	workerFn, workerFnType, chunkType, err := s.emitParallelForWorkerFunction(stmt, info, prefix)
+	if err != nil {
+		return err
+	}
+	poolSubmit, poolSubmitType, err := s.ensureRuntimeFunction("pool_submit1", map[string]semantic.Type{"A": chunkType, "R": s.g.result.NamedTypes["void"]})
+	if err != nil {
+		return err
+	}
+	poolSubmitLLVMType, err := s.g.lowerFunctionType(poolSubmitType)
+	if err != nil {
+		return err
+	}
+	taskGroupAdd, taskGroupAddType, err := s.ensureRuntimeFunction("task_group_add", map[string]semantic.Type{"R": s.g.result.NamedTypes["void"]})
+	if err != nil {
+		return err
+	}
+	taskGroupAddLLVMType, err := s.g.lowerFunctionType(taskGroupAddType)
+	if err != nil {
+		return err
+	}
+	taskGroupWait, taskGroupWaitType, err := s.ensureRuntimeFunction("task_group_wait_all", nil)
+	if err != nil {
+		return err
+	}
+	taskGroupWaitLLVMType, err := s.g.lowerFunctionType(taskGroupWaitType)
+	if err != nil {
+		return err
+	}
+
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return err
+	}
+	zero := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	one := C.LLVMConstInt(usizeLLVMType, 1, 0)
+
+	startAlloca, err := s.createEntryAlloca(prefix+"_start", usizeType)
+	if err != nil {
+		return err
+	}
+	C.LLVMBuildStore(s.builder, zero, startAlloca)
+
+	hasWorkers := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), pool.workers, zero, cStringFree("parallel.workers.nonzero"))
+	hasItems := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), totalValue, zero, cStringFree("parallel.total.nonzero"))
+	shouldRun := C.LLVMBuildAnd(s.builder, hasWorkers, hasItems, cStringFree("parallel.should.run"))
+
+	runBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("parallel.run"))
+	loopCondBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("parallel.cond"))
+	loopBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("parallel.body"))
+	waitBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("parallel.wait"))
+	exitBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("parallel.end"))
+
+	C.LLVMBuildCondBr(s.builder, shouldRun, runBB, exitBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, runBB)
+	adjustedTotal := C.LLVMBuildAdd(s.builder, totalValue, C.LLVMBuildSub(s.builder, pool.workers, one, cStringFree("parallel.workers.minus.one")), cStringFree("parallel.total.adjusted"))
+	chunkSize := C.LLVMBuildUDiv(s.builder, adjustedTotal, pool.workers, cStringFree("parallel.chunk.size"))
+	C.LLVMBuildBr(s.builder, loopCondBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, loopCondBB)
+	startValue, err := s.loadValue(startAlloca, usizeType, prefix+".start")
+	if err != nil {
+		return err
+	}
+	hasMore := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), startValue, totalValue, cStringFree("parallel.has.more"))
+	C.LLVMBuildCondBr(s.builder, hasMore, loopBodyBB, waitBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, loopBodyBB)
+	endCandidate := C.LLVMBuildAdd(s.builder, startValue, chunkSize, cStringFree("parallel.end.candidate"))
+	endValue := s.emitUnsignedMin(endCandidate, totalValue, usizeLLVMType, "parallel.end")
+	chunkValue, err := s.buildParallelForChunkValue(info, chunkType, sourceValue, startValue, endValue)
+	if err != nil {
+		return err
+	}
+	taskValue := s.buildCall(poolSubmitLLVMType, poolSubmit, []C.LLVMValueRef{pool.ptr, workerFn, chunkValue}, "parallel.submit")
+	s.buildCall(taskGroupAddLLVMType, taskGroupAdd, []C.LLVMValueRef{groupAlloca, taskValue}, "")
+	C.LLVMBuildStore(s.builder, endValue, startAlloca)
+	C.LLVMBuildBr(s.builder, loopCondBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, waitBB)
+	s.buildCall(taskGroupWaitLLVMType, taskGroupWait, []C.LLVMValueRef{groupAlloca}, "")
+	C.LLVMBuildBr(s.builder, exitBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, exitBB)
+	_ = workerFnType
+	return nil
+}
+
+func (s *functionState) emitParallelForWorkerFunction(stmt *ast.ParallelForStmt, info *semantic.ParallelForInfo, prefix string) (C.LLVMValueRef, *semantic.FuncType, *semantic.StructType, error) {
+	enumType, ok := info.ItemType.(*semantic.EnumType)
+	if !ok {
+		return nil, nil, nil, fmt.Errorf("parallel for worker requires packed-enum item type, got %s", info.ItemType.String())
+	}
+	chunkType, err := s.buildParallelForChunkType(info, prefix)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	workerName := prefix + "_worker"
+	voidType := s.g.result.NamedTypes["void"]
+	workerType := &semantic.FuncType{Name: workerName, Params: []semantic.Type{chunkType}, Return: voidType}
+	workerFn, err := s.g.addFunction(workerName, workerType)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	s.g.functions[workerName] = workerFn
+	s.g.setDefinedFunctionLinkage(workerName, workerFn)
+
+	chunkParamName := prefix + "_chunk"
+	sourceLocalName := prefix + "_source"
+	indexLocalName := prefix + "_index"
+	limitLocalName := prefix + "_limit"
+
+	chunkIdent := &ast.Ident{Position: stmt.Position, Name: chunkParamName}
+	sourceDecl := &ast.VarDeclStmt{
+		Position: stmt.Position,
+		Name:     sourceLocalName,
+		Value:    &ast.FieldExpr{Position: stmt.Position, Object: chunkIdent, Field: "source"},
+	}
+	limitDecl := &ast.VarDeclStmt{
+		Position: stmt.Position,
+		Name:     limitLocalName,
+		Value:    &ast.FieldExpr{Position: stmt.Position, Object: chunkIdent, Field: "end"},
+	}
+	indexDecl := &ast.VarDeclStmt{
+		Position: stmt.Position,
+		Name:     indexLocalName,
+		Mutable:  true,
+		Type:     &ast.NamedType{Position: stmt.Position, Name: "usize"},
+		Value:    &ast.FieldExpr{Position: stmt.Position, Object: chunkIdent, Field: "start"},
+	}
+
+	var body []ast.Stmt
+	body = append(body, sourceDecl)
+	for i, name := range info.Captures {
+		body = append(body, &ast.VarDeclStmt{
+			Position: stmt.Position,
+			Name:     name,
+			Value:    &ast.FieldExpr{Position: stmt.Position, Object: chunkIdent, Field: fmt.Sprintf("capture_%d", i)},
+		})
+	}
+	body = append(body, limitDecl, indexDecl)
+
+	condExpr := &ast.BinaryExpr{
+		Position: stmt.Position,
+		Op:       lexer.TOKEN_LT,
+		Left:     &ast.Ident{Position: stmt.Position, Name: indexLocalName},
+		Right:    &ast.Ident{Position: stmt.Position, Name: limitLocalName},
+	}
+	nodeDecl := &ast.VarDeclStmt{
+		Position: stmt.Position,
+		Name:     stmt.Name,
+		Type:     &ast.NamedType{Position: stmt.Position, Name: enumType.Name},
+		Value: &ast.IndexExpr{
+			Position: stmt.Position,
+			Object:   &ast.Ident{Position: stmt.Position, Name: sourceLocalName},
+			Index:    &ast.Ident{Position: stmt.Position, Name: indexLocalName},
+		},
+	}
+	loopBody := []ast.Stmt{nodeDecl}
+	loopBody = append(loopBody, stmt.Body...)
+	loopBody = append(loopBody, &ast.AugAssignStmt{
+		Position: stmt.Position,
+		Op:       lexer.TOKEN_PLUSEQ,
+		Target:   &ast.Ident{Position: stmt.Position, Name: indexLocalName},
+		Value:    &ast.IntLit{Position: stmt.Position, Value: "1", Suffix: "u"},
+	})
+	body = append(body, &ast.WhileStmt{Position: stmt.Position, Cond: condExpr, Body: loopBody})
+
+	s.g.result.ExprTypes[condExpr] = s.g.result.NamedTypes["bool"]
+
+	workerDecl := &ast.FuncDecl{
+		Position:   stmt.Position,
+		Name:       workerName,
+		Params:     []ast.ParamDecl{{Position: stmt.Position, Name: chunkParamName}},
+		ReturnType: &ast.NamedType{Position: stmt.Position, Name: "void"},
+		Body:       body,
+	}
+	if err := s.g.defineFunctionBody(workerDecl, workerType, workerFn); err != nil {
+		return nil, nil, nil, err
+	}
+	return workerFn, workerType, chunkType, nil
+}
+
+func (s *functionState) buildParallelForChunkType(info *semantic.ParallelForInfo, prefix string) (*semantic.StructType, error) {
+	fields := map[string]semantic.Field{
+		"source": {Name: "source", Type: info.SourceType},
+		"start":  {Name: "start", Type: s.g.result.NamedTypes["usize"]},
+		"end":    {Name: "end", Type: s.g.result.NamedTypes["usize"]},
+	}
+	declFields := []ast.FieldDecl{
+		{Position: lexer.Pos{}, Name: "source"},
+		{Position: lexer.Pos{}, Name: "start"},
+		{Position: lexer.Pos{}, Name: "end"},
+	}
+	for i, name := range info.Captures {
+		binding, ok := s.lookupBinding(name)
+		if !ok {
+			return nil, fmt.Errorf("missing parallel-for capture binding %q during chunk type lowering", name)
+		}
+		fieldName := fmt.Sprintf("capture_%d", i)
+		fields[fieldName] = semantic.Field{Name: fieldName, Type: binding.typ}
+		declFields = append(declFields, ast.FieldDecl{Position: lexer.Pos{}, Name: fieldName})
+	}
+	decl := &ast.StructDecl{Position: lexer.Pos{}, Name: prefix + "_chunk", Fields: declFields, ReprC: true}
+	return &semantic.StructType{
+		Name:   decl.Name,
+		Fields: fields,
+		ReprC:  true,
+		Decl:   decl,
+	}, nil
+}
+
+func (s *functionState) buildParallelForChunkValue(info *semantic.ParallelForInfo, chunkType *semantic.StructType, sourceValue, startValue, endValue C.LLVMValueRef) (C.LLVMValueRef, error) {
+	chunkLLVMType, err := s.g.lowerType(chunkType)
+	if err != nil {
+		return nil, err
+	}
+	chunkValue := C.LLVMGetUndef(chunkLLVMType)
+	chunkValue = C.LLVMBuildInsertValue(s.builder, chunkValue, sourceValue, 0, cStringFree("parallel.chunk.source"))
+	chunkValue = C.LLVMBuildInsertValue(s.builder, chunkValue, startValue, 1, cStringFree("parallel.chunk.start"))
+	chunkValue = C.LLVMBuildInsertValue(s.builder, chunkValue, endValue, 2, cStringFree("parallel.chunk.end"))
+	for i, name := range info.Captures {
+		binding, ok := s.lookupBinding(name)
+		if !ok {
+			return nil, fmt.Errorf("missing capture binding %q during parallel-for lowering", name)
+		}
+		value, err := s.loadValue(binding.ptr, binding.typ, name)
+		if err != nil {
+			return nil, err
+		}
+		chunkValue = C.LLVMBuildInsertValue(s.builder, chunkValue, value, C.unsigned(3+i), cStringFree("parallel.chunk.capture"))
+	}
+	return chunkValue, nil
+}
+
+func (s *functionState) ensureRuntimeFunction(name string, bindings map[string]semantic.Type) (C.LLVMValueRef, *semantic.FuncType, error) {
+	sym, ok := s.g.result.GlobalScope.Lookup(name)
+	if !ok {
+		return nil, nil, fmt.Errorf("missing runtime function %q", name)
+	}
+	fnType, ok := sym.Type.(*semantic.FuncType)
+	if !ok {
+		return nil, nil, fmt.Errorf("runtime symbol %q is not a function", name)
+	}
+	if decl, ok := sym.Node.(*ast.FuncDecl); ok && len(funcGenericParams(fnType)) != 0 {
+		value, lowered, err := s.g.ensureSpecializedFunction(decl, fnType, bindings)
+		return value, lowered, err
+	}
+	lowered := specializeFuncType(fnType, bindings)
+	value, err := s.g.ensureFunctionDeclared(name, lowered)
+	return value, lowered, err
 }
 
 func (s *functionState) emitLockStmt(stmt *ast.LockStmt) error {
@@ -1693,6 +2023,8 @@ func stmtReadsMatchedValueField(name string, stmt ast.Stmt) bool {
 		return exprReadsMatchedValueField(name, n.Cond) || stmtsReadMatchedValueField(name, n.Then) || stmtsReadMatchedValueField(name, n.Else) || elifsReadMatchedValueField(name, n.Elifs)
 	case *ast.WhileStmt:
 		return exprReadsMatchedValueField(name, n.Cond) || stmtsReadMatchedValueField(name, n.Body)
+	case *ast.ParallelForStmt:
+		return exprReadsMatchedValueField(name, n.Source) || stmtsReadMatchedValueField(name, n.Body)
 	case *ast.MatchStmt:
 		return exprReadsMatchedValueField(name, n.Value) || exprReadsMatchedValueField(name, n.Store) || matchArmsReadMatchedValueField(name, n.Arms)
 	case *ast.InStoreStmt:

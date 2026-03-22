@@ -636,6 +636,13 @@ type WhileStmt struct {
 	Body     []Stmt
 }
 
+type ParallelForStmt struct {
+	Position lexer.Pos
+	Name     string
+	Source   Expr
+	Body     []Stmt
+}
+
 type MatchStmt struct {
 	Position lexer.Pos
 	Value    Expr
@@ -840,6 +847,7 @@ func (n *ViewStmt) Pos() lexer.Pos               { return n.Position }
 func (n *ReturnStmt) Pos() lexer.Pos             { return n.Position }
 func (n *IfStmt) Pos() lexer.Pos                 { return n.Position }
 func (n *WhileStmt) Pos() lexer.Pos              { return n.Position }
+func (n *ParallelForStmt) Pos() lexer.Pos        { return n.Position }
 func (n *MatchStmt) Pos() lexer.Pos              { return n.Position }
 func (n *InStoreStmt) Pos() lexer.Pos            { return n.Position }
 func (n *CanStmt) Pos() lexer.Pos                { return n.Position }
@@ -932,6 +940,7 @@ func (*ViewStmt) nodeTag()                  {}
 func (*ReturnStmt) nodeTag()                {}
 func (*IfStmt) nodeTag()                    {}
 func (*WhileStmt) nodeTag()                 {}
+func (*ParallelForStmt) nodeTag()           {}
 func (*MatchStmt) nodeTag()                 {}
 func (*InStoreStmt) nodeTag()               {}
 func (*CanStmt) nodeTag()                   {}
@@ -1027,6 +1036,7 @@ func (*ViewStmt) stmtTag()        {}
 func (*ReturnStmt) stmtTag()      {}
 func (*IfStmt) stmtTag()          {}
 func (*WhileStmt) stmtTag()       {}
+func (*ParallelForStmt) stmtTag() {}
 func (*InStoreStmt) stmtTag()     {}
 func (*CanStmt) stmtTag()         {}
 func (*PoolStmt) stmtTag()        {}

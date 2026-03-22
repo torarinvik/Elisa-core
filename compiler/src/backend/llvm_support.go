@@ -783,6 +783,13 @@ func (s *functionState) popScope() {
 	}
 }
 
+func (s *functionState) currentActivePool() (activePoolBinding, bool) {
+	if len(s.poolScopes) == 0 {
+		return activePoolBinding{}, false
+	}
+	return s.poolScopes[len(s.poolScopes)-1], true
+}
+
 func (s *functionState) clonePackedStores() map[string]packedStoreBinding {
 	if s.packedStores == nil {
 		return nil
