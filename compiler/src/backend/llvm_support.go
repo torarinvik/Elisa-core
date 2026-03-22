@@ -843,8 +843,32 @@ func (s *functionState) packedEnumStoragePath(expr ast.Expr) (string, bool) {
 			return "", false
 		}
 		return base + "." + n.Field, true
+	case *ast.IndexExpr:
+		base, ok := s.packedEnumStoragePath(n.Object)
+		if !ok || base == "" {
+			return "", false
+		}
+		indexKey, ok := packedEnumStorageIndexKey(n.Index)
+		if !ok {
+			return "", false
+		}
+		return base + "[" + indexKey + "]", true
 	case *ast.ParenExpr:
 		return s.packedEnumStoragePath(n.Inner)
+	default:
+		return "", false
+	}
+}
+
+func packedEnumStorageIndexKey(expr ast.Expr) (string, bool) {
+	switch n := expr.(type) {
+	case *ast.IntLit:
+		if n == nil || n.Value == "" {
+			return "", false
+		}
+		return n.Value, true
+	case *ast.ParenExpr:
+		return packedEnumStorageIndexKey(n.Inner)
 	default:
 		return "", false
 	}
