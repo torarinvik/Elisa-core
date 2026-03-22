@@ -2952,10 +2952,40 @@ func (a *Analyzer) analyzeContextualFloatValueExpr(expr ast.Expr, expected Type)
 		}
 		a.recordAnalyzedExprType(n, operandType)
 		return operandType, true
+	case *ast.BinaryExpr:
+		return a.analyzeContextualFloatBinaryExpr(n, expected), true
 	case *ast.TernaryExpr:
 		return a.analyzeContextualFloatTernaryExpr(n, expected), true
 	default:
 		return nil, false
+	}
+}
+
+func (a *Analyzer) analyzeContextualFloatBinaryExpr(expr *ast.BinaryExpr, expected Type) Type {
+	if expr == nil {
+		return invalidType
+	}
+	if !isContextualFloatArithmeticOp(expr.Op) {
+		return a.analyzeBinaryExpr(expr)
+	}
+	left := a.analyzeValueExpr(expr.Left, expected)
+	right := a.analyzeValueExpr(expr.Right, expected)
+	if !IsNumericType(left) || !IsNumericType(right) {
+		a.errorf(expr.Pos(), "operator requires numeric operands")
+		a.recordAnalyzedExprType(expr, invalidType)
+		return invalidType
+	}
+	result := CommonNumericType(left, right)
+	a.recordAnalyzedExprType(expr, result)
+	return result
+}
+
+func isContextualFloatArithmeticOp(op lexer.TokenKind) bool {
+	switch op {
+	case lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR, lexer.TOKEN_SLASH:
+		return true
+	default:
+		return false
 	}
 }
 

@@ -1382,6 +1382,49 @@ def local_and_call() -> f32:
 	}
 }
 
+func TestGenerateLLVMIRLowersContextualFloatLiteralArithmeticSites(t *testing.T) {
+	src := `extern passthrough(value: f32) -> f32
+
+def choose(flag: bool) -> f32:
+	return ((1.25 + 2.25) if flag else (3.25 + 4.25))
+
+def local_and_call() -> f32:
+	local: f32 = 5.25 + 6.25
+	return passthrough(local) + passthrough(7.25 + 8.25)
+`
+	result := parseAndAnalyze(t, "backend_contextual_float_literal_arithmetic.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"declare float @passthrough(float)",
+		"define float @choose(i1",
+		"define float @local_and_call()",
+		"fadd float",
+		"call float @passthrough(float",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+
+	for _, name := range []string{"choose", "local_and_call"} {
+		body := functionIR(output, name)
+		if body == "" {
+			t.Fatalf("expected to find %s body, got:\n%s", name, output)
+		}
+		if strings.Contains(body, "fptrunc double") {
+			t.Fatalf("expected %s to avoid redundant double-to-float truncation, got:\n%s", name, body)
+		}
+		if strings.Contains(body, "fadd double") {
+			t.Fatalf("expected %s to stay in float arithmetic, got:\n%s", name, body)
+		}
+	}
+}
+
 func TestGenerateCHeaderOrdersAggregateDefinitionsByValueDependencies(t *testing.T) {
 	src := `repr(c) struct Node:
 	value: mutable i32

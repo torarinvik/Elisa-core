@@ -2870,6 +2870,136 @@ def contextual_array() -> f32[2]:
 	}
 }
 
+func TestAnalyzeContextualFloatLiteralArithmeticSites(t *testing.T) {
+	src := `extern passthrough(value: f32) -> f32
+
+repr(c) struct FloatPair:
+	left: f32
+	right: f32
+
+def contextual_local() -> f32:
+	local: f32 = 1.25 + 2.25
+	return local
+
+def contextual_return(flag: bool) -> f32:
+	return ((3.25 + 4.25) if flag else (5.25 + 6.25))
+
+def contextual_call() -> f32:
+	return passthrough(7.25 + 8.25)
+
+def contextual_struct() -> FloatPair:
+	return FloatPair(9.25 + 10.25, 11.25 + 12.25)
+
+def contextual_array() -> f32[2]:
+	return [13.25 + 14.25, 15.25 + 16.25]
+`
+	result, errs := parseAndAnalyze(t, "contextual_float_literal_arithmetic_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	localDecl := requireFuncDecl(t, result, "contextual_local")
+	localInit, ok := localDecl.Body[0].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected contextual_local to start with a local declaration, got %T", localDecl.Body[0])
+	}
+	localBinary, ok := localInit.Value.(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected contextual_local initializer to be a binary expression, got %T", localInit.Value)
+	}
+	requireExprTypeString(t, result, localBinary, "f32")
+	requireExprTypeString(t, result, localBinary.Left, "f32")
+	requireExprTypeString(t, result, localBinary.Right, "f32")
+
+	returnDecl := requireFuncDecl(t, result, "contextual_return")
+	returnStmt, ok := returnDecl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected contextual_return to contain a return statement, got %T", returnDecl.Body[0])
+	}
+	parenExpr, ok := returnStmt.Value.(*ast.ParenExpr)
+	if !ok {
+		t.Fatalf("expected contextual_return to return a parenthesized ternary, got %T", returnStmt.Value)
+	}
+	ternaryExpr, ok := parenExpr.Inner.(*ast.TernaryExpr)
+	if !ok {
+		t.Fatalf("expected contextual_return to return a ternary, got %T", parenExpr.Inner)
+	}
+	thenParen, ok := ternaryExpr.Value.(*ast.ParenExpr)
+	if !ok {
+		t.Fatalf("expected contextual_return true branch to be parenthesized, got %T", ternaryExpr.Value)
+	}
+	thenBinary, ok := thenParen.Inner.(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected contextual_return true branch to be a binary expression, got %T", thenParen.Inner)
+	}
+	elseParen, ok := ternaryExpr.Alt.(*ast.ParenExpr)
+	if !ok {
+		t.Fatalf("expected contextual_return false branch to be parenthesized, got %T", ternaryExpr.Alt)
+	}
+	elseBinary, ok := elseParen.Inner.(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected contextual_return false branch to be a binary expression, got %T", elseParen.Inner)
+	}
+	requireExprTypeString(t, result, ternaryExpr, "f32")
+	for _, expr := range []ast.Expr{thenBinary, thenBinary.Left, thenBinary.Right, elseBinary, elseBinary.Left, elseBinary.Right} {
+		requireExprTypeString(t, result, expr, "f32")
+	}
+
+	callDecl := requireFuncDecl(t, result, "contextual_call")
+	callReturn, ok := callDecl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected contextual_call to contain a return statement, got %T", callDecl.Body[0])
+	}
+	callExpr, ok := callReturn.Value.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected contextual_call to return a function call, got %T", callReturn.Value)
+	}
+	callBinary, ok := callExpr.Args[0].(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected contextual_call argument to be a binary expression, got %T", callExpr.Args[0])
+	}
+	requireExprTypeString(t, result, callBinary, "f32")
+	requireExprTypeString(t, result, callBinary.Left, "f32")
+	requireExprTypeString(t, result, callBinary.Right, "f32")
+
+	structDecl := requireFuncDecl(t, result, "contextual_struct")
+	structReturn, ok := structDecl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected contextual_struct to contain a return statement, got %T", structDecl.Body[0])
+	}
+	structLit, ok := structReturn.Value.(*ast.StructLitExpr)
+	if !ok {
+		t.Fatalf("expected contextual_struct to return a struct literal, got %T", structReturn.Value)
+	}
+	for _, arg := range structLit.Args {
+		binary, ok := arg.(*ast.BinaryExpr)
+		if !ok {
+			t.Fatalf("expected contextual_struct field to be a binary expression, got %T", arg)
+		}
+		requireExprTypeString(t, result, binary, "f32")
+		requireExprTypeString(t, result, binary.Left, "f32")
+		requireExprTypeString(t, result, binary.Right, "f32")
+	}
+
+	arrayDecl := requireFuncDecl(t, result, "contextual_array")
+	arrayReturn, ok := arrayDecl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected contextual_array to contain a return statement, got %T", arrayDecl.Body[0])
+	}
+	arrayLit, ok := arrayReturn.Value.(*ast.ListLitExpr)
+	if !ok {
+		t.Fatalf("expected contextual_array to return an array literal, got %T", arrayReturn.Value)
+	}
+	for _, elem := range arrayLit.Elems {
+		binary, ok := elem.(*ast.BinaryExpr)
+		if !ok {
+			t.Fatalf("expected contextual_array element to be a binary expression, got %T", elem)
+		}
+		requireExprTypeString(t, result, binary, "f32")
+		requireExprTypeString(t, result, binary.Left, "f32")
+		requireExprTypeString(t, result, binary.Right, "f32")
+	}
+}
+
 func TestAnalyzeRejectsNullIntoNonNullRef(t *testing.T) {
 	src := `repr(c) struct Box:
     value: int
