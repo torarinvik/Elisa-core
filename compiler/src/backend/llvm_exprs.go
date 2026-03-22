@@ -4091,7 +4091,11 @@ func (s *functionState) emitPackedEnumConstructorAlloc(storeValue C.LLVMValueRef
 	if err != nil {
 		return nil, nil, err
 	}
-	allocPtr, enumValue, err := s.emitPackedEnumStorageAlloc(storeValue, enumType)
+	tailPlan, err := s.preparePackedEnumTailPayloadPlan(variant, orderedArgs)
+	if err != nil {
+		return nil, nil, err
+	}
+	allocPtr, enumValue, rowSizeValue, err := s.emitPackedEnumStorageAlloc(storeValue, enumType, tailPlan)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -4122,8 +4126,15 @@ func (s *functionState) emitPackedEnumConstructorAlloc(storeValue C.LLVMValueRef
 		if err != nil {
 			return nil, nil, err
 		}
+		var tailDataPtr C.LLVMValueRef
+		if tailPlan != nil {
+			tailDataPtr, err = s.emitPackedEnumTailDataPtr(allocPtr, rowSizeValue)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
 		if len(variant.Payload) == 1 {
-			argValue, _, err := s.emitExpr(orderedArgs[0], variant.Payload[0])
+			argValue, err := s.emitPackedEnumConstructorPayloadValue(variant, 0, orderedArgs[0], tailPlan, tailDataPtr)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -4135,7 +4146,8 @@ func (s *functionState) emitPackedEnumConstructorAlloc(storeValue C.LLVMValueRef
 			}
 			aggregate := C.LLVMGetUndef(payloadType)
 			for i, payload := range variant.Payload {
-				argValue, _, err := s.emitExpr(orderedArgs[i], payload)
+				_ = payload
+				argValue, err := s.emitPackedEnumConstructorPayloadValue(variant, i, orderedArgs[i], tailPlan, tailDataPtr)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -4147,23 +4159,163 @@ func (s *functionState) emitPackedEnumConstructorAlloc(storeValue C.LLVMValueRef
 	return enumValue, enumType, nil
 }
 
-func (s *functionState) emitPackedEnumStorageAlloc(storeValue C.LLVMValueRef, enumType *semantic.EnumType) (C.LLVMValueRef, C.LLVMValueRef, error) {
+type packedEnumTailPayloadPlan struct {
+	index         int
+	viewType      *semantic.DArrayViewType
+	elemSizeValue C.LLVMValueRef
+	lenValue      C.LLVMValueRef
+	byteCount     C.LLVMValueRef
+	sourceData    C.LLVMValueRef
+	literal       *ast.ListLitExpr
+}
+
+func (s *functionState) preparePackedEnumTailPayloadPlan(variant *semantic.EnumVariant, orderedArgs []ast.Expr) (*packedEnumTailPayloadPlan, error) {
+	if variant == nil {
+		return nil, nil
+	}
+	tailIndex, ok := variant.TailPayloadIndex()
+	if !ok {
+		return nil, nil
+	}
+	viewType, ok := variant.TailPayloadViewType()
+	if !ok || viewType == nil {
+		return nil, fmt.Errorf("packed enum %s tail payload metadata is inconsistent", variant.Name)
+	}
+	if tailIndex >= len(orderedArgs) {
+		return nil, fmt.Errorf("packed enum %s tail payload argument is missing", variant.Name)
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, err
+	}
+	elemSize, err := s.sizeOfType(viewType.Elem)
+	if err != nil {
+		return nil, err
+	}
+	elemSizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(elemSize), 0)
+	arg := orderedArgs[tailIndex]
+	if literal, ok := arg.(*ast.ListLitExpr); ok {
+		lenValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(len(literal.Elems)), 0)
+		byteCount := C.LLVMConstInt(usizeLLVMType, C.ulonglong(uint64(len(literal.Elems))*elemSize), 0)
+		return &packedEnumTailPayloadPlan{index: tailIndex, viewType: viewType, elemSizeValue: elemSizeValue, lenValue: lenValue, byteCount: byteCount, literal: literal}, nil
+	}
+	sourceType := s.exprType(arg)
+	if _, ok := sourceType.(*semantic.DArrayViewType); !ok {
+		if _, ok := sourceType.(*semantic.ViewType); !ok {
+			return nil, fmt.Errorf("packed enum %s tail payload expects a list literal or view-compatible source, got %s", variant.Name, sourceType.String())
+		}
+	}
+	viewValue, _, err := s.emitExpr(arg, sourceType)
+	if err != nil {
+		return nil, err
+	}
+	lenValue := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree("packed.tail.src.len"))
+	sourceData := C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree("packed.tail.src.data"))
+	byteCount := C.LLVMBuildMul(s.builder, lenValue, elemSizeValue, cStringFree("packed.tail.bytes"))
+	return &packedEnumTailPayloadPlan{index: tailIndex, viewType: viewType, elemSizeValue: elemSizeValue, lenValue: lenValue, byteCount: byteCount, sourceData: sourceData}, nil
+}
+
+func (s *functionState) emitPackedEnumTailDataPtr(allocPtr C.LLVMValueRef, rowSizeValue C.LLVMValueRef) (C.LLVMValueRef, error) {
+	i8Type, err := s.g.lowerBuiltin("u8")
+	if err != nil {
+		return nil, err
+	}
+	indices := []C.LLVMValueRef{rowSizeValue}
+	return C.LLVMBuildGEP2(s.builder, i8Type, allocPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("packed.tail.data")), nil
+}
+
+func (s *functionState) emitPackedEnumConstructorPayloadValue(variant *semantic.EnumVariant, index int, arg ast.Expr, tailPlan *packedEnumTailPayloadPlan, tailDataPtr C.LLVMValueRef) (C.LLVMValueRef, error) {
+	if tailPlan != nil && index == tailPlan.index {
+		return s.emitPackedEnumTailPayloadValue(tailPlan, tailDataPtr)
+	}
+	argValue, _, err := s.emitExpr(arg, variant.Payload[index])
+	if err != nil {
+		return nil, err
+	}
+	return argValue, nil
+}
+
+func (s *functionState) emitPackedEnumTailPayloadValue(plan *packedEnumTailPayloadPlan, tailDataPtr C.LLVMValueRef) (C.LLVMValueRef, error) {
+	if plan == nil || plan.viewType == nil {
+		return nil, fmt.Errorf("missing packed enum tail payload plan")
+	}
+	viewLLVMType, err := s.g.lowerType(plan.viewType)
+	if err != nil {
+		return nil, err
+	}
+	if plan.literal != nil {
+		elemLLVMType, err := s.g.lowerType(plan.viewType.Elem)
+		if err != nil {
+			return nil, err
+		}
+		usizeType := s.g.result.NamedTypes["usize"]
+		usizeLLVMType, err := s.g.lowerType(usizeType)
+		if err != nil {
+			return nil, err
+		}
+		for i, elem := range plan.literal.Elems {
+			elemValue, _, err := s.emitExpr(elem, plan.viewType.Elem)
+			if err != nil {
+				return nil, err
+			}
+			indexValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(i), 0)
+			indices := []C.LLVMValueRef{indexValue}
+			elemPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, tailDataPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("packed.tail.elem.ptr"))
+			C.LLVMBuildStore(s.builder, elemValue, elemPtr)
+		}
+	} else {
+		if err := s.emitPackedEnumTailMemcpy(tailDataPtr, plan.sourceData, plan.byteCount); err != nil {
+			return nil, err
+		}
+	}
+	viewValue := C.LLVMGetUndef(viewLLVMType)
+	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, tailDataPtr, 0, cStringFree("packed.tail.view.data"))
+	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, plan.lenValue, 1, cStringFree("packed.tail.view.len"))
+	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, plan.elemSizeValue, 2, cStringFree("packed.tail.view.elem_size"))
+	return viewValue, nil
+}
+
+func (s *functionState) emitPackedEnumTailMemcpy(dstData C.LLVMValueRef, srcData C.LLVMValueRef, byteCount C.LLVMValueRef) error {
+	voidType := s.g.result.NamedTypes["void"]
+	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	usizeType := s.g.result.NamedTypes["usize"]
+	memcpyType := &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, usizeType}, Return: voidRefType}
+	memcpyCallee, err := s.g.ensureFunctionDeclared("arena_memcpy", memcpyType)
+	if err != nil {
+		return err
+	}
+	memcpyLLVMType, err := s.g.lowerFunctionType(memcpyType)
+	if err != nil {
+		return err
+	}
+	memcpyCall := s.buildCall(memcpyLLVMType, memcpyCallee, []C.LLVMValueRef{dstData, srcData, byteCount}, "packed.tail.memcpy")
+	s.addCallSiteEnumAttribute(memcpyCall, C.uint(1), "noalias")
+	s.addCallSiteEnumAttribute(memcpyCall, C.uint(2), "noalias")
+	return nil
+}
+
+func (s *functionState) emitPackedEnumStorageAlloc(storeValue C.LLVMValueRef, enumType *semantic.EnumType, tailPlan *packedEnumTailPayloadPlan) (C.LLVMValueRef, C.LLVMValueRef, C.LLVMValueRef, error) {
 	if enumType == nil || !enumType.Packed {
-		return nil, nil, fmt.Errorf("missing packed enum storage metadata")
+		return nil, nil, nil, fmt.Errorf("missing packed enum storage metadata")
+	}
+	storeType := enumType.StoreType
+	if storeType == nil {
+		return nil, nil, nil, fmt.Errorf("packed enum %s is missing store metadata", enumType.Name)
+	}
+	rowSizeValue, err := s.emitPackedStoreRowBytesValue(storeValue, storeType)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	totalSizeValue := rowSizeValue
+	if tailPlan != nil {
+		totalSizeValue = C.LLVMBuildAdd(s.builder, rowSizeValue, tailPlan.byteCount, cStringFree("packed.alloc.bytes"))
 	}
 	switch s.g.packedEnumABI {
 	case packedEnumABIRowHandle:
-		storeType := enumType.StoreType
-		if storeType == nil {
-			return nil, nil, fmt.Errorf("packed enum %s is missing store metadata", enumType.Name)
-		}
 		arenaValue, err := s.emitPackedStoreArenaValue(storeValue, storeType)
 		if err != nil {
-			return nil, nil, err
-		}
-		rowSizeValue, err := s.emitPackedStoreRowBytesValue(storeValue, storeType)
-		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		arenaType := s.g.result.NamedTypes["Arena"]
 		usizeType := s.g.result.NamedTypes["usize"]
@@ -4172,22 +4324,18 @@ func (s *functionState) emitPackedEnumStorageAlloc(storeValue C.LLVMValueRef, en
 		helperType := &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
 		callee, err := s.g.ensureFunctionDeclared("arena_alloc", helperType)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		llvmFnType, err := s.g.lowerFunctionType(helperType)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
-		allocPtr := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, rowSizeValue}, "packed.alloc")
-		return allocPtr, allocPtr, nil
+		allocPtr := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, totalSizeValue}, "packed.alloc")
+		return allocPtr, allocPtr, rowSizeValue, nil
 	case packedEnumABIWordHandle:
-		storeType := enumType.StoreType
-		if storeType == nil {
-			return nil, nil, fmt.Errorf("packed enum %s is missing store metadata", enumType.Name)
-		}
 		arenaValue, err := s.emitPackedStoreArenaValueNamed(storeValue, storeType, "packed.alloc.store.arena")
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		arenaType := s.g.result.NamedTypes["Arena"]
 		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
@@ -4195,31 +4343,39 @@ func (s *functionState) emitPackedEnumStorageAlloc(storeValue C.LLVMValueRef, en
 		voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 		stateValue, err := s.emitPackedStoreStateValueNamed(storeValue, storeType, "packed.alloc.store.state")
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		allocResultType := s.g.result.NamedTypes["PackedStoreAllocResult"]
 		if allocResultType == nil {
-			return nil, nil, fmt.Errorf("missing builtin PackedStoreAllocResult type for packed enum allocation")
+			return nil, nil, nil, fmt.Errorf("missing builtin PackedStoreAllocResult type for packed enum allocation")
 		}
-		allocHelperType := &semantic.FuncType{Name: "ctx_packed_store_alloc_fixed_result", Params: []semantic.Type{arenaRefType, voidRefType}, Return: allocResultType}
-		allocCallee, err := s.g.ensureFunctionDeclared("ctx_packed_store_alloc_fixed_result", allocHelperType)
+		allocHelperName := "ctx_packed_store_alloc_fixed_result"
+		allocHelperParams := []semantic.Type{arenaRefType, voidRefType}
+		allocArgs := []C.LLVMValueRef{arenaValue, stateValue}
+		if tailPlan != nil {
+			allocHelperName = "ctx_packed_store_alloc_result"
+			allocHelperParams = []semantic.Type{arenaRefType, s.g.result.NamedTypes["usize"], voidRefType}
+			allocArgs = []C.LLVMValueRef{arenaValue, totalSizeValue, stateValue}
+		}
+		allocHelperType := &semantic.FuncType{Name: allocHelperName, Params: allocHelperParams, Return: allocResultType}
+		allocCallee, err := s.g.ensureFunctionDeclared(allocHelperName, allocHelperType)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		allocLLVMFnType, err := s.g.lowerFunctionType(allocHelperType)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
-		allocResult := s.buildCall(allocLLVMFnType, allocCallee, []C.LLVMValueRef{arenaValue, stateValue}, "packed.handle.alloc")
+		allocResult := s.buildCall(allocLLVMFnType, allocCallee, allocArgs, "packed.handle.alloc")
 		allocPtr := C.LLVMBuildExtractValue(s.builder, allocResult, 0, cStringFree("packed.alloc.ptr"))
 		handleValue := C.LLVMBuildExtractValue(s.builder, allocResult, 1, cStringFree("packed.alloc.handle"))
 		coercedHandle, err := s.coerceValue(handleValue, uintptrType, enumType)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
-		return allocPtr, coercedHandle, nil
+		return allocPtr, coercedHandle, rowSizeValue, nil
 	default:
-		return nil, nil, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedEnumABI)
+		return nil, nil, nil, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedEnumABI)
 	}
 }
 

@@ -669,10 +669,11 @@ func (a *Analyzer) populateEnumVariants(decls []ast.Decl) {
 			}
 			payload := make([]Type, 0, len(variantDecl.Payload))
 			payloadNames := make([]string, 0, len(variantDecl.Payload))
+			tailIndex := -1
 			seenPayloadNames := map[string]bool{}
 			hasNamedPayloads := false
 			hasUnnamedPayloads := false
-			for _, payloadDecl := range variantDecl.Payload {
+			for payloadIndex, payloadDecl := range variantDecl.Payload {
 				if payloadDecl.Name != "" {
 					hasNamedPayloads = true
 					if seenPayloadNames[payloadDecl.Name] {
@@ -683,6 +684,21 @@ func (a *Analyzer) populateEnumVariants(decls []ast.Decl) {
 					hasUnnamedPayloads = true
 				}
 				payloadType := a.resolveType(payloadDecl.Type)
+				if tailExpr, ok := payloadDecl.Type.(*ast.TailType); ok {
+					if !enumDecl.Packed {
+						a.errorf(payloadDecl.Type.Pos(), "enum %q variant %q tail payloads are only supported for packed enums", enumDecl.Name, variantDecl.Name)
+					} else {
+						if tailIndex >= 0 {
+							a.errorf(payloadDecl.Type.Pos(), "packed enum %q variant %q can only declare one tail payload", enumDecl.Name, variantDecl.Name)
+						}
+						if payloadIndex != len(variantDecl.Payload)-1 {
+							a.errorf(payloadDecl.Type.Pos(), "packed enum %q variant %q tail payload %q must be the final payload field", enumDecl.Name, variantDecl.Name, payloadDecl.Name)
+						}
+						tailElemType := a.resolveType(tailExpr.Elem)
+						payloadType = &DArrayViewType{Elem: tailElemType, SurfaceName: "dview"}
+						tailIndex = payloadIndex
+					}
+				}
 				if !enumDecl.Packed && SameType(payloadType, enumType) {
 					a.errorf(payloadDecl.Type.Pos(), "enum %q variant %q cannot contain %q by value; use a reference type instead", enumDecl.Name, variantDecl.Name, enumDecl.Name)
 				}
@@ -695,7 +711,7 @@ func (a *Analyzer) populateEnumVariants(decls []ast.Decl) {
 			if hasNamedPayloads && hasUnnamedPayloads {
 				a.errorf(variantDecl.Position, "enum variant %q.%q must name either all payload fields or none", enumDecl.Name, variantDecl.Name)
 			}
-			variant := &EnumVariant{Name: variantDecl.Name, Tag: uint32(i), Payload: payload, PayloadNames: payloadNames, Decl: variantDecl}
+			variant := &EnumVariant{Name: variantDecl.Name, Tag: uint32(i), Payload: payload, PayloadNames: payloadNames, TailIndex: tailIndex, Decl: variantDecl}
 			enumType.VariantMap[variant.Name] = variant
 			variants = append(variants, variant)
 		}
@@ -1256,6 +1272,10 @@ func (a *Analyzer) containsAffineHandleValues(t Type, seen map[string]bool) bool
 	case *ArrayType:
 		return a.containsAffineHandleValues(tt.Elem, seen)
 	case *DArrayType:
+		return a.containsAffineHandleValues(tt.Elem, seen)
+	case *ViewType:
+		return a.containsAffineHandleValues(tt.Elem, seen)
+	case *DArrayViewType:
 		return a.containsAffineHandleValues(tt.Elem, seen)
 	case *OptionalType:
 		return a.containsAffineHandleValues(tt.Value, seen)

@@ -167,6 +167,7 @@ type EnumVariant struct {
 	Tag          uint32
 	Payload      []Type
 	PayloadNames []string
+	TailIndex    int
 	Decl         *ast.EnumVariantDecl
 }
 
@@ -971,6 +972,40 @@ func (v *EnumVariant) PayloadLabel(index int) string {
 		return ""
 	}
 	return v.PayloadNames[index]
+}
+
+func (v *EnumVariant) HasTailPayload() bool {
+	if v == nil {
+		return false
+	}
+	return v.TailIndex >= 0 && v.TailIndex < len(v.Payload)
+}
+
+func (v *EnumVariant) TailPayloadIndex() (int, bool) {
+	if !v.HasTailPayload() {
+		return 0, false
+	}
+	return v.TailIndex, true
+}
+
+func (v *EnumVariant) TailPayloadViewType() (*DArrayViewType, bool) {
+	index, ok := v.TailPayloadIndex()
+	if !ok {
+		return nil, false
+	}
+	viewType, ok := v.Payload[index].(*DArrayViewType)
+	if !ok {
+		return nil, false
+	}
+	return viewType, true
+}
+
+func (v *EnumVariant) TailPayloadElemType() (Type, bool) {
+	viewType, ok := v.TailPayloadViewType()
+	if !ok || viewType == nil {
+		return nil, false
+	}
+	return viewType.Elem, true
 }
 
 func cloneRefTypeWithState(ref *RefType, state RefState) *RefType {

@@ -906,8 +906,8 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 	}
 	for i := 0; i < len(orderedArgs); i++ {
 		if i < limit {
-			actual := a.analyzeValueExpr(orderedArgs[i], variant.Payload[i])
-			if !AssignableTo(variant.Payload[i], actual) {
+			actual, ok := a.analyzePackedEnumConstructorArg(orderedArgs[i], variant, i, enumType.Name)
+			if !ok {
 				label := variant.PayloadLabel(i)
 				if label != "" {
 					a.errorf(orderedArgs[i].Pos(), "enum constructor argument %d (%s) to %q expects %s, got %s", i+1, label, enumType.Name+"."+variant.Name, variant.Payload[i].String(), actual.String())
@@ -915,7 +915,6 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 					a.errorf(orderedArgs[i].Pos(), "enum constructor argument %d to %q expects %s, got %s", i+1, enumType.Name+"."+variant.Name, variant.Payload[i].String(), actual.String())
 				}
 			}
-			a.consumeAffineValueExpr(orderedArgs[i], variant.Payload[i], a.enumConstructorMoveReason(enumType.Name, variant, i))
 		} else {
 			a.analyzeExpr(orderedArgs[i])
 		}
@@ -937,6 +936,59 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 		a.consumeAffineValueExpr(arg, field.Type, "move into enum common field "+strconv.Quote(commonDecl.Name))
 	}
 	return enumType
+}
+
+func (a *Analyzer) analyzePackedEnumConstructorArg(expr ast.Expr, variant *EnumVariant, index int, enumName string) (Type, bool) {
+	if variant == nil || index < 0 || index >= len(variant.Payload) {
+		actual := a.analyzeExpr(expr)
+		return actual, false
+	}
+	expected := variant.Payload[index]
+	if tailIndex, ok := variant.TailPayloadIndex(); ok && tailIndex == index {
+		if expectedView, ok := expected.(*DArrayViewType); ok {
+			return a.analyzePackedEnumTailPayloadArg(expr, expectedView, a.enumConstructorMoveReason(enumName, variant, index))
+		}
+	}
+	actual := a.analyzeValueExpr(expr, expected)
+	ok := AssignableTo(expected, actual)
+	a.consumeAffineValueExpr(expr, expected, a.enumConstructorMoveReason(enumName, variant, index))
+	return actual, ok
+}
+
+func (a *Analyzer) analyzePackedEnumTailPayloadArg(expr ast.Expr, expected *DArrayViewType, moveReason string) (Type, bool) {
+	if expected == nil {
+		actual := a.analyzeExpr(expr)
+		return actual, false
+	}
+	if list, ok := expr.(*ast.ListLitExpr); ok {
+		for _, elem := range list.Elems {
+			actualElem := a.analyzeValueExpr(elem, expected.Elem)
+			if !AssignableTo(expected.Elem, actualElem) {
+				a.errorf(elem.Pos(), "tail payload element expects %s, got %s", expected.Elem.String(), actualElem.String())
+			}
+			a.consumeAffineValueExpr(elem, expected.Elem, moveReason)
+		}
+		arrayType := &ArrayType{Elem: expected.Elem, Size: strconv.Itoa(len(list.Elems)), HasConstSize: true, ConstSize: int64(len(list.Elems))}
+		a.exprTypes[list] = arrayType
+		return arrayType, true
+	}
+	actual := a.analyzeValueExpr(expr, expected)
+	ok := AssignableTo(expected, actual) || packedEnumTailPayloadSourceCompatible(expected, actual)
+	a.consumeAffineValueExpr(expr, expected, moveReason)
+	return actual, ok
+}
+
+func packedEnumTailPayloadSourceCompatible(expected *DArrayViewType, actual Type) bool {
+	if expected == nil || actual == nil {
+		return false
+	}
+	if actualView, ok := actual.(*DArrayViewType); ok {
+		return SameType(expected.Elem, actualView.Elem)
+	}
+	if actualView, ok := actual.(*ViewType); ok {
+		return SameType(expected.Elem, actualView.Elem)
+	}
+	return false
 }
 
 func allocOwnerPos(expr *ast.AllocExpr) lexer.Pos {

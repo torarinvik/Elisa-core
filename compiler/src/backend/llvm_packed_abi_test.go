@@ -111,6 +111,48 @@ def fold() -> int:
 	}
 }
 
+func TestGenerateLLVMIRLowersPackedTailPayloadsWithVariableAllocInWordHandleABI(t *testing.T) {
+	src := `packed enum Expr:
+	Block(count: usize, items: tail int)
+
+def fold() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	in store:
+		source_items: array[int, 3] = [1, 2, 3]
+		node: Expr = new Expr.Block(count: 3u, items: source_items[0u:3u])
+		return match node:
+			Expr.Block(count: _, items: items):
+				items[0u] + items[2u]
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_tail_payload_word_handle.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	checks := []string{
+		"call %PackedStoreAllocResult @ctx_packed_store_alloc_result(",
+		"call ptr @arena_memcpy(",
+		"packed.tail.view.len",
+		"packed.tail.view.elem_size",
+		"call ptr @ctx_packed_store_decode(",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	for _, bad := range []string{
+		"call %PackedStoreAllocResult @ctx_packed_store_alloc_fixed_result(",
+		"call i64 @ctx_packed_store_read_word(",
+	} {
+		if strings.Contains(output, bad) {
+			t.Fatalf("expected packed tail payload lowering to avoid %q, got:\n%s", bad, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRUsesTagReadHelperForMixedPackedMatchWithoutMatchedValueBodyAccess(t *testing.T) {
 	src := `packed enum Expr:
 	Lit(value: int)
