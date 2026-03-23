@@ -1574,7 +1574,7 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 		return err
 	}
 	var decodedMatchValue C.LLVMValueRef
-	if enumType.Packed && packedMatchShouldEagerDecode(s.g.result, s.g.packedEnumABI, stmt.Value, stmt.Arms) {
+	if enumType.Packed && packedMatchShouldEagerDecode(s.g.result, s.g.packedEnumABI, stmt.Value, storeBinding, stmt.Arms) {
 		decodedMatchValue, err = s.decodePackedEnumHandleWithStore(enumValue, enumType, storeBinding)
 		if err != nil {
 			return err
@@ -1646,7 +1646,7 @@ func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, sema
 		return nil, nil, err
 	}
 	var decodedMatchValue C.LLVMValueRef
-	if enumType.Packed && packedMatchShouldEagerDecode(s.g.result, s.g.packedEnumABI, expr.Value, expr.Arms) {
+	if enumType.Packed && packedMatchShouldEagerDecode(s.g.result, s.g.packedEnumABI, expr.Value, storeBinding, expr.Arms) {
 		decodedMatchValue, err = s.decodePackedEnumHandleWithStore(enumValue, enumType, storeBinding)
 		if err != nil {
 			return nil, nil, err
@@ -2127,14 +2127,21 @@ func packedMatchNeedsEagerDecode(arms []ast.MatchArm) bool {
 	return false
 }
 
-func packedMatchShouldEagerDecode(result *semantic.Result, abi packedEnumABIMode, matchValue ast.Expr, arms []ast.MatchArm) bool {
+func packedMatchShouldEagerDecode(result *semantic.Result, abi packedEnumABIMode, matchValue ast.Expr, store *packedStoreBinding, arms []ast.MatchArm) bool {
 	needsPayloadDecode := packedMatchNeedsEagerDecode(arms)
 	ident, ok := matchValue.(*ast.Ident)
 	readsMatchedValueField := ok && matchArmsReadMatchedValueField(ident.Name, arms)
 	if !needsPayloadDecode && !readsMatchedValueField {
 		return false
 	}
+	hasFrozenPackedStoreDeps := false
 	if result != nil && result.ExprHasOnlyFrozenPackedStoreDeps(matchValue) {
+		hasFrozenPackedStoreDeps = true
+	}
+	if !hasFrozenPackedStoreDeps && store != nil && store.typ != nil && semantic.IsFrozenPackedEnumStoreType(store.typ) {
+		hasFrozenPackedStoreDeps = true
+	}
+	if hasFrozenPackedStoreDeps {
 		if abi == packedEnumABIIndexSOA {
 			return false
 		}
