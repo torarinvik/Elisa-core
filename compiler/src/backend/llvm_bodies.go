@@ -517,7 +517,7 @@ func (s *functionState) emitMoveBindStmt(stmt *ast.MoveBindStmt) error {
 		}
 		return nil
 	case *ast.MoveBindVariantPattern:
-		enumType, ok := valueType.(*semantic.EnumType)
+		enumType, ok := resolveMatchableEnumType(valueType)
 		if !ok {
 			return fmt.Errorf("move-as variant pattern requires an enum value, got %s", valueType.String())
 		}
@@ -558,7 +558,7 @@ func (s *functionState) emitOpenStmt(stmt *ast.OpenStmt) error {
 	if stmt == nil || stmt.Pattern == nil {
 		return nil
 	}
-	enumType, ok := s.exprType(stmt.Value).(*semantic.EnumType)
+	enumType, ok := resolveMatchableEnumType(s.exprType(stmt.Value))
 	if !ok {
 		return fmt.Errorf("open requires a packed enum value")
 	}
@@ -613,7 +613,7 @@ func (s *functionState) emitViewStmt(stmt *ast.ViewStmt) error {
 	if stmt == nil || stmt.Pattern == nil {
 		return nil
 	}
-	enumType, ok := s.exprType(stmt.Value).(*semantic.EnumType)
+	enumType, ok := resolveMatchableEnumType(s.exprType(stmt.Value))
 	if !ok {
 		return fmt.Errorf("view requires a packed enum value")
 	}
@@ -1609,8 +1609,22 @@ func (s *functionState) bindMatchedPackedVariantView(valueExpr ast.Expr, pattern
 	}
 }
 
+func resolveMatchableEnumType(actual semantic.Type) (*semantic.EnumType, bool) {
+	switch tt := actual.(type) {
+	case *semantic.EnumType:
+		return tt, tt != nil
+	case *semantic.PackedVariantViewType:
+		if tt == nil || tt.Enum == nil {
+			return nil, false
+		}
+		return tt.Enum, true
+	default:
+		return nil, false
+	}
+}
+
 func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
-	enumType, ok := s.exprType(stmt.Value).(*semantic.EnumType)
+	enumType, ok := resolveMatchableEnumType(s.exprType(stmt.Value))
 	if !ok {
 		return fmt.Errorf("match requires an enum value")
 	}
@@ -1683,7 +1697,7 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 
 func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, semantic.Type, error) {
 	resultType := s.exprType(expr)
-	enumType, ok := s.exprType(expr.Value).(*semantic.EnumType)
+	enumType, ok := resolveMatchableEnumType(s.exprType(expr.Value))
 	if !ok {
 		return nil, nil, fmt.Errorf("match requires an enum value")
 	}

@@ -431,7 +431,7 @@ func (a *Analyzer) analyzeOpenStmt(stmt *ast.OpenStmt) {
 		return
 	}
 	valueType := a.analyzeExpr(stmt.Value)
-	enumType, ok := valueType.(*EnumType)
+	enumType, _, ok := resolveMatchableEnumType(valueType)
 	if !ok {
 		a.errorf(stmt.Pos(), "open requires a packed enum value, got %s", valueType.String())
 		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
@@ -513,7 +513,7 @@ func (a *Analyzer) resolveViewBindType(stmt *ast.ViewStmt, actual Type) (*Packed
 	if stmt == nil || stmt.Pattern == nil {
 		return nil, false
 	}
-	enumType, ok := actual.(*EnumType)
+	enumType, _, ok := resolveMatchableEnumType(actual)
 	if !ok {
 		a.errorf(stmt.Pos(), "view requires a packed enum value, got %s", actual.String())
 		return nil, false
@@ -773,7 +773,7 @@ func (a *Analyzer) resolveMoveBindVariantPattern(stmt *ast.MoveBindStmt, pattern
 	if pattern == nil {
 		return nil, nil, nil, false
 	}
-	enumType, ok := actual.(*EnumType)
+	enumType, _, ok := resolveMatchableEnumType(actual)
 	if !ok {
 		a.errorf(pattern.Pos(), "move-as variant pattern %q.%q requires an enum value, got %s", pattern.EnumName, pattern.Variant, actual.String())
 		return nil, nil, nil, false
@@ -1689,7 +1689,7 @@ func (a *Analyzer) analyzeResetStmt(stmt *ast.ResetStmt) {
 
 func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 	valueType := a.analyzeExpr(stmt.Value)
-	enumType, ok := valueType.(*EnumType)
+	enumType, _, ok := resolveMatchableEnumType(valueType)
 	if !ok {
 		a.errorf(stmt.Pos(), "match requires an enum value, got %s", valueType.String())
 		for _, arm := range stmt.Arms {
@@ -1757,7 +1757,7 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 
 func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 	valueType := a.analyzeExpr(expr.Value)
-	enumType, ok := valueType.(*EnumType)
+	enumType, _, ok := resolveMatchableEnumType(valueType)
 	if !ok {
 		a.errorf(expr.Pos(), "match requires an enum value, got %s", valueType.String())
 		for _, arm := range expr.Arms {
@@ -1840,6 +1840,23 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 		return neverType
 	}
 	return resultType
+}
+
+func resolveMatchableEnumType(actual Type) (*EnumType, *PackedVariantViewType, bool) {
+	switch tt := actual.(type) {
+	case *EnumType:
+		if tt == nil {
+			return nil, nil, false
+		}
+		return tt, nil, true
+	case *PackedVariantViewType:
+		if tt == nil || tt.Enum == nil {
+			return nil, nil, false
+		}
+		return tt.Enum, tt, true
+	default:
+		return nil, nil, false
+	}
 }
 
 func (a *Analyzer) validateMatchStore(pos lexer.Pos, enumType *EnumType, storeExpr ast.Expr) {

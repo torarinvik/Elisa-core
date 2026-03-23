@@ -4783,6 +4783,26 @@ def fold(node: Expr, store: Expr.Store[Local]) -> int:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsMatchOnRefinedPackedViewScrutinee(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def fold(node: Expr, store: Expr.Store[Local]) -> int:
+	if node in store as Expr.Int(value: value):
+		return match node in store:
+			Expr.Int(value: inner):
+				inner + value + node.span
+			Expr.Add(left: left, right: right):
+				left.span + right.span
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_match_on_refined_view_scrutinee_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeRejectsPackedEnumIfPatternBinderWithoutAs(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)

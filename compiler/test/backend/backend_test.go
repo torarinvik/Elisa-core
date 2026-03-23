@@ -2186,6 +2186,34 @@ def fold() -> int:
 	}
 }
 
+func TestGenerateLLVMIRLowersMatchOnRefinedPackedViewScrutinee(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def fold(node: Expr, store: Expr.Store[Local]) -> int:
+	if node in store as Expr.Int(value: value):
+		return match node in store:
+			Expr.Int(value: inner):
+				inner + value + node.span
+			Expr.Add(left: left, right: right):
+				left.span + right.span
+	return 0
+`
+	result := parseAndAnalyze(t, "backend_packed_match_refined_view_scrutinee.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+	for _, check := range []string{"define i64 @fold(", "%PackedView__Expr__Int = type { ptr, %Expr__Store }", "load i32, ptr"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersPackedInStoreBlockSugar(t *testing.T) {
 	src := `packed enum Expr:
 	common:

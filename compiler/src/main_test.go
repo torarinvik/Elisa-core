@@ -295,7 +295,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			checks: []string{
 				"%JsonCursor = type { ptr, i64, i64 }",
 				"%JsonLexemeResult = type { i64, i64, i64 }",
-				"%JsonNode = type { i32, i64, i64, i64, [3 x i64] }",
+				"%JsonNode = type { i32, i64, i64, [3 x i64] }",
 				"%JsonParseNodeResult = type { ptr, i64 }",
 				"define %JsonLexemeResult @json_parse_string_lexeme(ptr",
 				"define %JsonLexemeResult @json_parse_number_lexeme(ptr",
