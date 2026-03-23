@@ -515,7 +515,7 @@ func (ops *packedStoreOps) storeSlice(startValue C.LLVMValueRef, endValue C.LLVM
 	return value, resultType, nil
 }
 
-func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSizeValue C.LLVMValueRef, hasTail bool, name string) (C.LLVMValueRef, C.LLVMValueRef, C.LLVMValueRef, error) {
+func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSizeValue C.LLVMValueRef, hasTail bool, fixedTagValue C.LLVMValueRef, name string) (C.LLVMValueRef, C.LLVMValueRef, C.LLVMValueRef, error) {
 	if enumType == nil || !enumType.Packed {
 		return nil, nil, nil, fmt.Errorf("missing packed enum storage metadata")
 	}
@@ -571,9 +571,9 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 		if allocResultType == nil {
 			return nil, nil, nil, fmt.Errorf("missing builtin PackedStoreAllocResult type for packed enum allocation")
 		}
-		allocHelperName := "ctx_packed_store_alloc_fixed_result"
-		allocHelperParams := []semantic.Type{arenaRefType, ops.voidRefType()}
-		allocArgs := []C.LLVMValueRef{arenaValue, stateValue}
+		allocHelperName := "ctx_packed_store_alloc_fixed_tagged_result"
+		allocHelperParams := []semantic.Type{arenaRefType, ops.voidRefType(), ops.s.g.result.NamedTypes["u32"]}
+		allocArgs := []C.LLVMValueRef{arenaValue, stateValue, fixedTagValue}
 		if hasTail {
 			allocHelperName = "ctx_packed_store_alloc_result"
 			allocHelperParams = []semantic.Type{arenaRefType, ops.s.g.result.NamedTypes["usize"], ops.voidRefType()}
@@ -611,9 +611,9 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 		if allocResultType == nil {
 			return nil, nil, nil, fmt.Errorf("missing builtin PackedStoreIndexAllocResult type for packed enum allocation")
 		}
-		allocHelperName := "ctx_packed_store_alloc_fixed_index_result"
-		allocHelperParams := []semantic.Type{arenaRefType, ops.voidRefType()}
-		allocArgs := []C.LLVMValueRef{arenaValue, stateValue}
+		allocHelperName := "ctx_packed_store_alloc_fixed_tagged_index_result"
+		allocHelperParams := []semantic.Type{arenaRefType, ops.voidRefType(), ops.s.g.result.NamedTypes["u32"]}
+		allocArgs := []C.LLVMValueRef{arenaValue, stateValue, fixedTagValue}
 		if hasTail {
 			allocHelperName = "ctx_packed_store_alloc_index_result"
 			allocHelperParams = []semantic.Type{arenaRefType, ops.s.g.result.NamedTypes["usize"], ops.voidRefType()}

@@ -317,6 +317,8 @@ func (g *llvmGenerator) shouldNeverInlineDefinedFunction(name string) bool {
 	switch name {
 	case "ctx_packed_store_alloc_result", "ctx_packed_store_alloc_fixed_result", "ctx_packed_store_alloc_index_result", "ctx_packed_store_alloc_fixed_index_result":
 		return true
+	case "ctx_packed_store_alloc_fixed_tagged_result", "ctx_packed_store_alloc_fixed_tagged_index_result":
+		return true
 	default:
 		return false
 	}

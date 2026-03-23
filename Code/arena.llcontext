@@ -676,6 +676,20 @@ def ctx_packed_store_alloc_fixed_result(a: any Arena&, state_bits: any void&) ->
     state.indices.count <- state.indices.count + 1u
     return PackedStoreAllocResult(ptr, handle)
 
+def ctx_packed_store_alloc_fixed_tagged_result(a: any Arena&, state_bits: any void&, tag: u32) -> PackedStoreAllocResult can[Memory.Allocate, Abort.Panic]:
+    result: PackedStoreAllocResult = ctx_packed_store_alloc_fixed_result(a, state_bits)
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+
+    needed_rows: mutable usize = state.tags.count + 1u
+    if needed_rows < state.handles.count:
+        needed_rows <- state.handles.count
+
+    packed_store_ensure_metadata_capacity(a, state, needed_rows)
+    assert state.tags.items != null
+    state.tags.items[state.tags.count] <- tag
+    state.tags.count <- state.tags.count + 1u
+    return result
+
 def ctx_packed_store_alloc_result(a: any Arena&, size_bytes: usize, state_bits: any void&) -> PackedStoreAllocResult can[Memory.Allocate, Abort.Panic]:
     assert state_bits != null
 
@@ -724,6 +738,14 @@ def ctx_packed_store_alloc_result(a: any Arena&, size_bytes: usize, state_bits: 
 
 def ctx_packed_store_alloc_fixed_index_result(a: any Arena&, state_bits: any void&) -> PackedStoreIndexAllocResult can[Memory.Allocate, Abort.Panic]:
     result: PackedStoreAllocResult = ctx_packed_store_alloc_fixed_result(a, state_bits)
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    assert state.indices.items != null
+    assert state.indices.count > 0u
+    indices: any u32& = state.indices.items
+    return PackedStoreIndexAllocResult(result.row, indices[state.indices.count - 1u])
+
+def ctx_packed_store_alloc_fixed_tagged_index_result(a: any Arena&, state_bits: any void&, tag: u32) -> PackedStoreIndexAllocResult can[Memory.Allocate, Abort.Panic]:
+    result: PackedStoreAllocResult = ctx_packed_store_alloc_fixed_tagged_result(a, state_bits, tag)
     state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
     assert state.indices.items != null
     assert state.indices.count > 0u

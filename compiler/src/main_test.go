@@ -724,7 +724,7 @@ func TestRunCLICompilesJSONParserWithPackedWordHandleABI(t *testing.T) {
 		"define %JsonParseNodeResult @json_parse_value_node(ptr",
 		"define %JsonParseNodeResult @json_parse_array_node(ptr",
 		"define %JsonParseNodeResult @json_parse_object_node(ptr",
-		"call %PackedStoreAllocResult @ctx_packed_store_alloc_fixed_result(ptr %packed.alloc.store.arena, ptr %packed.alloc.store.state)",
+		"call %PackedStoreAllocResult @ctx_packed_store_alloc_fixed_tagged_result(ptr %packed.alloc.store.arena, ptr %packed.alloc.store.state, i32 ",
 		"call i64 @ctx_packed_store_read_word(",
 		"call ptr @ctx_packed_store_decode(ptr %packed.decode.store.arena, i64",
 	}
@@ -738,7 +738,7 @@ func TestRunCLICompilesJSONParserWithPackedWordHandleABI(t *testing.T) {
 			t.Fatalf("expected packed word-handle CLI path to avoid %q, got:\n%s", bad, output)
 		}
 	}
-	for _, bad := range []string{"call %PackedStoreAllocResult @ctx_packed_store_alloc_result(ptr %packed.alloc.store.arena, i64 %packed.alloc.store.row_bytes, ptr %packed.alloc.store.state)"} {
+	for _, bad := range []string{"call %PackedStoreAllocResult @ctx_packed_store_alloc_result(ptr %packed.alloc.store.arena, i64 %packed.alloc.store.row_bytes, ptr %packed.alloc.store.state)", "call %PackedStoreAllocResult @ctx_packed_store_alloc_fixed_result(ptr %packed.alloc.store.arena, ptr %packed.alloc.store.state)"} {
 		if strings.Contains(output, bad) {
 			t.Fatalf("expected packed word-handle CLI path to use the fixed-row constructor helper and avoid %q, got:\n%s", bad, output)
 		}
@@ -1040,7 +1040,9 @@ func TestRunCLICompilesStage1RuntimeToLLVM(t *testing.T) {
 		"define %PackedStoreAllocResult @ctx_packed_store_alloc_result(ptr",
 		"define void @ctx_packed_store_alloc_result_slow(ptr",
 		"define %PackedStoreAllocResult @ctx_packed_store_alloc_fixed_result(ptr",
+		"define %PackedStoreAllocResult @ctx_packed_store_alloc_fixed_tagged_result(ptr",
 		"define void @ctx_packed_store_alloc_fixed_result_slow(ptr",
+		"define %PackedStoreIndexAllocResult @ctx_packed_store_alloc_fixed_tagged_index_result(ptr",
 		"%DynDict__i64 = type { ptr, i64, i64, i64, ptr }",
 		"define %DynDict__i64 @arena_dict_new__i64(",
 		"define i32 @arena_dict_reserve__i64(",

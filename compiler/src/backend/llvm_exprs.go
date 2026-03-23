@@ -4252,11 +4252,11 @@ func (s *functionState) emitPackedEnumConstructorAlloc(storeValue C.LLVMValueRef
 	if err != nil {
 		return nil, nil, err
 	}
-	allocPtr, enumValue, rowSizeValue, err := s.emitPackedEnumStorageAlloc(storeValue, enumType, tailPlan)
+	tagValue, err := s.enumTagConstant(variant.Tag)
 	if err != nil {
 		return nil, nil, err
 	}
-	tagValue, err := s.enumTagConstant(variant.Tag)
+	allocPtr, enumValue, rowSizeValue, err := s.emitPackedEnumStorageAlloc(storeValue, enumType, tailPlan, tagValue)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -4317,8 +4317,10 @@ func (s *functionState) emitPackedEnumConstructorAlloc(storeValue C.LLVMValueRef
 	if err := ops.recordPrefixWords(allocPtr, "packed.prefix.record"); err != nil {
 		return nil, nil, err
 	}
-	if err := s.emitPackedStoreRecordTag(storeValue, enumType.StoreType, tagValue); err != nil {
-		return nil, nil, err
+	if tailPlan != nil || (s.g.packedEnumABI != packedEnumABIWordHandle && s.g.packedEnumABI != packedEnumABIIndexSOA) {
+		if err := s.emitPackedStoreRecordTag(storeValue, enumType.StoreType, tagValue); err != nil {
+			return nil, nil, err
+		}
 	}
 	return enumValue, enumType, nil
 }
@@ -4467,7 +4469,7 @@ func (s *functionState) emitPackedEnumTailMemcpy(dstData C.LLVMValueRef, srcData
 	return nil
 }
 
-func (s *functionState) emitPackedEnumStorageAlloc(storeValue C.LLVMValueRef, enumType *semantic.EnumType, tailPlan *packedEnumTailPayloadPlan) (C.LLVMValueRef, C.LLVMValueRef, C.LLVMValueRef, error) {
+func (s *functionState) emitPackedEnumStorageAlloc(storeValue C.LLVMValueRef, enumType *semantic.EnumType, tailPlan *packedEnumTailPayloadPlan, fixedTagValue C.LLVMValueRef) (C.LLVMValueRef, C.LLVMValueRef, C.LLVMValueRef, error) {
 	if enumType == nil || !enumType.Packed {
 		return nil, nil, nil, fmt.Errorf("missing packed enum storage metadata")
 	}
@@ -4484,7 +4486,7 @@ func (s *functionState) emitPackedEnumStorageAlloc(storeValue C.LLVMValueRef, en
 	if tailPlan != nil {
 		totalSizeValue = C.LLVMBuildAdd(s.builder, rowSizeValue, tailPlan.byteCount, cStringFree("packed.alloc.bytes"))
 	}
-	return ops.allocateStorage(enumType, totalSizeValue, tailPlan != nil, "packed.alloc.store")
+	return ops.allocateStorage(enumType, totalSizeValue, tailPlan != nil, fixedTagValue, "packed.alloc.store")
 }
 
 func (s *functionState) resolveEnumConstructorArgs(enumType *semantic.EnumType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string) ([]ast.Expr, error) {
