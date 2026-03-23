@@ -2952,6 +2952,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 		}
 		return s.emitEnumConstructorValue(enumType, variant, expr.Args, expr.ArgNames)
 	}
+	if value, actualType, handled, err := s.emitProofCarryingViewHelperCall(expr); handled {
+		return value, actualType, err
+	}
 	if value, actualType, handled, err := s.emitSpecializedRuntimeCall(expr); handled {
 		return value, actualType, err
 	}
@@ -3024,6 +3027,294 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	}
 	call := s.buildCall(llvmFnType, callee, args, callName)
 	return call, funcType.Return, nil
+}
+
+func (s *functionState) emitProofCarryingViewHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	switch callIdentName(expr) {
+	case "readonly":
+		return s.emitReadonlyHelperCall(expr)
+	case "split_at":
+		return s.emitSplitAtHelperCall(expr)
+	case "chunks_exact":
+		return s.emitChunksExactHelperCall(expr)
+	case "zip_map":
+		return s.emitZipMapHelperCall(expr)
+	default:
+		return nil, nil, false, nil
+	}
+}
+
+func (s *functionState) emitReadonlyHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if len(expr.Args) != 1 {
+		return nil, nil, true, fmt.Errorf("readonly expects 1 argument, got %d", len(expr.Args))
+	}
+	value, actualType, err := s.emitExpr(expr.Args[0], s.exprType(expr.Args[0]))
+	if err != nil {
+		return nil, nil, true, err
+	}
+	return value, actualType, true, nil
+}
+
+func (s *functionState) emitSplitAtHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if len(expr.Args) != 2 {
+		return nil, nil, true, fmt.Errorf("split_at expects 2 arguments, got %d", len(expr.Args))
+	}
+	viewType, ok := s.exprType(expr.Args[0]).(*semantic.DArrayViewType)
+	if !ok || viewType == nil {
+		return nil, nil, true, fmt.Errorf("split_at expects a dview source")
+	}
+	resultType := s.exprType(expr)
+	viewValue, _, err := s.emitExpr(expr.Args[0], viewType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	indexValue, _, err := s.emitExpr(expr.Args[1], usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	viewLen := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree("split.view.len"))
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	zero := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	leftValue, err := s.emitArenaViewSliceValue(viewValue, viewType, zero, indexValue, "split.left")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	rightValue, err := s.emitArenaViewSliceValue(viewValue, viewType, indexValue, viewLen, "split.right")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	resultLLVMType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	resultValue := C.LLVMGetUndef(resultLLVMType)
+	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, leftValue, 0, cStringFree("split.left.insert"))
+	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, rightValue, 1, cStringFree("split.right.insert"))
+	return resultValue, resultType, true, nil
+}
+
+func (s *functionState) emitChunksExactHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if len(expr.Args) != 2 {
+		return nil, nil, true, fmt.Errorf("chunks_exact expects 2 arguments, got %d", len(expr.Args))
+	}
+	viewType, ok := s.exprType(expr.Args[0]).(*semantic.DArrayViewType)
+	if !ok || viewType == nil {
+		return nil, nil, true, fmt.Errorf("chunks_exact expects a dview source")
+	}
+	resultType := s.exprType(expr)
+	viewValue, _, err := s.emitExpr(expr.Args[0], viewType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	chunkSizeValue, _, err := s.emitExpr(expr.Args[1], usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	viewLen := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree("chunks.view.len"))
+	if err := s.emitChunksExactValidation(chunkSizeValue, viewLen, "chunks_exact"); err != nil {
+		return nil, nil, true, err
+	}
+	chunksLen := C.LLVMBuildUDiv(s.builder, viewLen, chunkSizeValue, cStringFree("chunks.len"))
+	resultLLVMType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	resultValue := C.LLVMGetUndef(resultLLVMType)
+	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, viewValue, 0, cStringFree("chunks.source.insert"))
+	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, chunkSizeValue, 1, cStringFree("chunks.chunk_size.insert"))
+	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, chunksLen, 2, cStringFree("chunks.len.insert"))
+	return resultValue, resultType, true, nil
+}
+
+func (s *functionState) emitZipMapHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if len(expr.Args) != 4 {
+		return nil, nil, true, fmt.Errorf("zip_map expects 4 arguments, got %d", len(expr.Args))
+	}
+	dstType, dstElemType, ok := zipMapViewInfo(s.exprType(expr.Args[0]))
+	if !ok {
+		return nil, nil, true, fmt.Errorf("zip_map destination expects a dense view")
+	}
+	src1Type, src1ElemType, ok := zipMapViewInfo(s.exprType(expr.Args[1]))
+	if !ok {
+		return nil, nil, true, fmt.Errorf("zip_map source 1 expects a dense view")
+	}
+	src2Type, src2ElemType, ok := zipMapViewInfo(s.exprType(expr.Args[2]))
+	if !ok {
+		return nil, nil, true, fmt.Errorf("zip_map source 2 expects a dense view")
+	}
+	callbackType, ok := s.exprType(expr.Args[3]).(*semantic.FuncType)
+	if !ok || callbackType == nil {
+		return nil, nil, true, fmt.Errorf("zip_map callback expects a function value")
+	}
+	dstValue, _, err := s.emitExpr(expr.Args[0], dstType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	src1Value, _, err := s.emitExpr(expr.Args[1], src1Type)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	src2Value, _, err := s.emitExpr(expr.Args[2], src2Type)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	callbackValue, _, err := s.emitExpr(expr.Args[3], callbackType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	dstPtr, err := s.emitStackTempValue(dstValue, dstType, "zip_map.dst")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	src1Ptr, err := s.emitStackTempValue(src1Value, src1Type, "zip_map.src1")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	src2Ptr, err := s.emitStackTempValue(src2Value, src2Type, "zip_map.src2")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	totalValue := C.LLVMBuildExtractValue(s.builder, dstValue, 1, cStringFree("zip_map.total"))
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	zero := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	one := C.LLVMConstInt(usizeLLVMType, 1, 0)
+	indexAlloca, err := s.createEntryAlloca("zip_map.index", usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	C.LLVMBuildStore(s.builder, zero, indexAlloca)
+
+	loopCondBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("zip_map.cond"))
+	loopBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("zip_map.body"))
+	loopEndBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("zip_map.end"))
+	C.LLVMBuildBr(s.builder, loopCondBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, loopCondBB)
+	indexValue, err := s.loadValue(indexAlloca, usizeType, "zip_map.index")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	hasMore := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, totalValue, cStringFree("zip_map.has_more"))
+	C.LLVMBuildCondBr(s.builder, hasMore, loopBodyBB, loopEndBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, loopBodyBB)
+	dstElemPtr, _, err := s.emitRuntimeIndexedAddress(dstPtr, dstType, dstElemType, indexValue)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	src1ElemPtr, _, err := s.emitRuntimeIndexedAddress(src1Ptr, src1Type, src1ElemType, indexValue)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	src2ElemPtr, _, err := s.emitRuntimeIndexedAddress(src2Ptr, src2Type, src2ElemType, indexValue)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	src1Elem, err := s.loadValue(src1ElemPtr, src1ElemType, "zip_map.src1.elem")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	src2Elem, err := s.loadValue(src2ElemPtr, src2ElemType, "zip_map.src2.elem")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	callbackLLVMType, err := s.g.lowerFunctionType(callbackType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	resultValue := s.buildCall(callbackLLVMType, callbackValue, []C.LLVMValueRef{src1Elem, src2Elem}, "zip_map.call")
+	coerced, err := s.coerceValue(resultValue, callbackType.Return, dstElemType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	C.LLVMBuildStore(s.builder, coerced, dstElemPtr)
+	nextIndex := C.LLVMBuildAdd(s.builder, indexValue, one, cStringFree("zip_map.index.next"))
+	C.LLVMBuildStore(s.builder, nextIndex, indexAlloca)
+	C.LLVMBuildBr(s.builder, loopCondBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, loopEndBB)
+	return nil, s.g.result.NamedTypes["void"], true, nil
+}
+
+func zipMapViewInfo(t semantic.Type) (semantic.Type, semantic.Type, bool) {
+	switch tt := t.(type) {
+	case *semantic.ViewType:
+		if tt == nil {
+			return nil, nil, false
+		}
+		return tt, tt.Elem, true
+	case *semantic.DArrayViewType:
+		if tt == nil || tt.SurfaceName == "packedtags" {
+			return nil, nil, false
+		}
+		return tt, tt.Elem, true
+	default:
+		return nil, nil, false
+	}
+}
+
+func (s *functionState) emitArenaViewSliceValue(viewValue C.LLVMValueRef, viewType *semantic.DArrayViewType, startValue C.LLVMValueRef, endValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	if viewType == nil {
+		return nil, fmt.Errorf("missing dview type for slice helper lowering")
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	helperType := &semantic.FuncType{
+		Name:   "arena_da_view_slice",
+		Params: []semantic.Type{viewType, usizeType, usizeType},
+		Return: viewType,
+	}
+	callee, err := s.g.ensureFunctionDeclared("arena_da_view_slice", helperType)
+	if err != nil {
+		return nil, err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, err
+	}
+	return s.buildCall(llvmFnType, callee, []C.LLVMValueRef{viewValue, startValue, endValue}, name), nil
+}
+
+func (s *functionState) emitChunksExactValidation(chunkSizeValue C.LLVMValueRef, totalValue C.LLVMValueRef, prefix string) error {
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return err
+	}
+	zero := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	nonZeroBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(prefix+".nonzero"))
+	okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(prefix+".ok"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(prefix+".fail"))
+	isNonZero := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), chunkSizeValue, zero, cStringFree(prefix+".chunk.nonzero"))
+	C.LLVMBuildCondBr(s.builder, isNonZero, nonZeroBB, failBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	trapFn, err := s.ensureTrapFunction()
+	if err != nil {
+		return err
+	}
+	trapType, err := s.g.lowerFunctionType(&semantic.FuncType{Name: "llvm.trap", Return: s.g.result.NamedTypes["void"]})
+	if err != nil {
+		return err
+	}
+	s.buildCall(trapType, trapFn, nil, "")
+	C.LLVMBuildUnreachable(s.builder)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, nonZeroBB)
+	remainder := C.LLVMBuildURem(s.builder, totalValue, chunkSizeValue, cStringFree(prefix+".remainder"))
+	isExact := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), remainder, zero, cStringFree(prefix+".exact"))
+	C.LLVMBuildCondBr(s.builder, isExact, okBB, failBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, okBB)
+	return nil
 }
 
 func (s *functionState) emitPackedStoreConstructorValue(expr *ast.CallExpr, storeType *semantic.PackedEnumStoreType) (C.LLVMValueRef, semantic.Type, error) {
@@ -3790,6 +4081,9 @@ func (s *functionState) emitIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, sema
 	if value, actualType, handled, err := s.emitPackedStoreIndexExpr(expr); handled {
 		return value, actualType, err
 	}
+	if value, actualType, handled, err := s.emitChunksExactIndexExpr(expr); handled {
+		return value, actualType, err
+	}
 	if _, ok := semanticStringArrayType(s.exprType(expr.Object)); ok {
 		return s.emitStaticStringIndexExpr(expr)
 	}
@@ -3802,6 +4096,35 @@ func (s *functionState) emitIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, sema
 	}
 	value, err := s.loadValue(ptr, elemType, "idx")
 	return value, elemType, err
+}
+
+func (s *functionState) emitChunksExactIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	chunkType, ok := semantic.ChunksExactViewItemType(s.exprType(expr.Object))
+	if !ok || chunkType == nil {
+		return nil, nil, false, nil
+	}
+	objectType, ok := s.exprType(expr.Object).(*semantic.GenericInstanceType)
+	if !ok || objectType == nil {
+		return nil, nil, true, fmt.Errorf("chunks_exact index expects a carrier value")
+	}
+	objectValue, _, err := s.emitExpr(expr.Object, objectType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	indexValue, _, err := s.emitExpr(expr.Index, usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	sourceValue := C.LLVMBuildExtractValue(s.builder, objectValue, 0, cStringFree("chunks.source"))
+	chunkSizeValue := C.LLVMBuildExtractValue(s.builder, objectValue, 1, cStringFree("chunks.chunk_size"))
+	startValue := C.LLVMBuildMul(s.builder, indexValue, chunkSizeValue, cStringFree("chunks.start"))
+	endValue := C.LLVMBuildAdd(s.builder, startValue, chunkSizeValue, cStringFree("chunks.end"))
+	value, err := s.emitArenaViewSliceValue(sourceValue, chunkType, startValue, endValue, "chunks.item")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	return value, chunkType, true, nil
 }
 
 func (s *functionState) emitRuntimeStringIndexExpr(expr *ast.IndexExpr, helperName string, operandType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {

@@ -1228,3 +1228,27 @@ func isDictRuntimeKeyType(t Type) bool {
 	_, ok := t.(*DStrType)
 	return ok
 }
+
+func SplitViewInstance(t Type) (*GenericInstanceType, bool) {
+	gi, ok := t.(*GenericInstanceType)
+	if !ok || gi == nil || gi.Name != "SplitView" || len(gi.Args) != 1 {
+		return nil, false
+	}
+	return gi, true
+}
+
+func ChunksExactViewInstance(t Type) (*GenericInstanceType, bool) {
+	gi, ok := t.(*GenericInstanceType)
+	if !ok || gi == nil || gi.Name != "ChunksExactView" || len(gi.Args) != 1 {
+		return nil, false
+	}
+	return gi, true
+}
+
+func ChunksExactViewItemType(t Type) (*DArrayViewType, bool) {
+	gi, ok := ChunksExactViewInstance(t)
+	if !ok {
+		return nil, false
+	}
+	return &DArrayViewType{Elem: gi.Args[0], SurfaceName: "dview"}, true
+}

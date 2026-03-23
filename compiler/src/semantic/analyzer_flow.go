@@ -1087,6 +1087,10 @@ func parallelForItemType(t Type) (Type, bool) {
 		}
 	case *DArrayViewType:
 		return tt.Elem, true
+	case *GenericInstanceType:
+		if itemType, ok := ChunksExactViewItemType(tt); ok {
+			return itemType, true
+		}
 	case *SViewType, *DStrType:
 		return builtinCharType(), true
 	}
@@ -4336,6 +4340,9 @@ func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRef
 		}
 		return projectBorrowedOwnerRefIndexState(state, n.Index, a.evalConstExpr)
 	case *ast.CallExpr:
+		if state, ok := a.borrowedOwnerRefStateForProofCarryingViewCall(n); ok {
+			return state, true
+		}
 		if _, ok := a.freezeStoreArg(n); ok {
 			return borrowedOwnerRefState{}, false
 		}
@@ -4365,6 +4372,39 @@ func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRef
 			return borrowedOwnerRefState{}, false
 		}
 		return mergeBorrowedOwnerRefState(left, right)
+	default:
+		return borrowedOwnerRefState{}, false
+	}
+}
+
+func (a *Analyzer) borrowedOwnerRefStateForProofCarryingViewCall(call *ast.CallExpr) (borrowedOwnerRefState, bool) {
+	if a == nil || call == nil || len(call.Args) == 0 {
+		return borrowedOwnerRefState{}, false
+	}
+	sourceState, ok := a.borrowedOwnerRefStateForExpr(call.Args[0])
+	if !ok || !hasBorrowedOwnerRefState(sourceState) {
+		return borrowedOwnerRefState{}, false
+	}
+	summarized, summaryOK := summarizeBorrowedOwnerRefIndexStates(sourceState)
+	if !summaryOK {
+		summarized = cloneBorrowedOwnerRefState(sourceState)
+	}
+	switch callIdentName(call) {
+	case "readonly":
+		return cloneBorrowedOwnerRefState(sourceState), true
+	case "split_at":
+		state := cloneBorrowedOwnerRefState(summarized)
+		state.Fields = map[string]borrowedOwnerRefState{
+			"left":  cloneBorrowedOwnerRefState(summarized),
+			"right": cloneBorrowedOwnerRefState(summarized),
+		}
+		return state, true
+	case "chunks_exact":
+		state := cloneBorrowedOwnerRefState(summarized)
+		state.Fields = map[string]borrowedOwnerRefState{
+			"source": cloneBorrowedOwnerRefState(summarized),
+		}
+		return state, true
 	default:
 		return borrowedOwnerRefState{}, false
 	}

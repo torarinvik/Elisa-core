@@ -307,6 +307,9 @@ func optimizationFactsForType(t Type) OptimizationFacts {
 		if _, ok := dynArrayRuntimeInstance(tt); ok {
 			return OptimizationFacts{Contiguous: true, UnitStride: true}
 		}
+		if _, ok := ChunksExactViewInstance(tt); ok {
+			return OptimizationFacts{Contiguous: true, UnitStride: true}
+		}
 		return OptimizationFacts{}
 	case *StructType:
 		if dynArrayView, ok := dynArrayViewRuntimeType(tt); ok && dynArrayView != nil {
@@ -344,12 +347,18 @@ func (a *Analyzer) inferExprOptimizationFacts(expr ast.Expr, t Type) Optimizatio
 				facts.base = a.optimizationBaseForExpr(resolved)
 			}
 		}
+		if chunkFacts, ok := a.inferChunksExactItemOptimizationFacts(n); ok {
+			facts = overlayOptimizationFacts(facts, chunkFacts)
+		}
 	case *ast.FieldExpr:
 		if resolved, ok := a.resolveProjectedFieldValueExpr(n.Object, n.Field); ok {
 			if resolvedFacts, ok := a.exprFacts[resolved]; ok {
 				facts = resolvedFacts
 				facts.Exclusive = false
 			}
+		}
+		if splitFacts, ok := a.inferSplitViewFieldOptimizationFacts(n); ok {
+			facts = overlayOptimizationFacts(facts, splitFacts)
 		}
 		if n.Field == "tags" {
 			if storeType, ok := a.exprTypes[n.Object].(*PackedEnumStoreType); ok && IsFrozenPackedEnumStoreType(storeType) {
@@ -612,6 +621,31 @@ func (a *Analyzer) inferCallOptimizationFacts(call *ast.CallExpr, facts Optimiza
 		return facts
 	}
 	switch optimizationHelperName(call.Func) {
+	case "readonly":
+		if sourceFacts, ok := a.exprFactsForCallArg(call, 0); ok {
+			facts = overlayOptimizationFacts(facts, sourceFacts)
+		}
+		facts.ReadOnly = true
+		facts.Exclusive = false
+	case "split_at":
+		if sourceFacts, ok := a.exprFactsForCallArg(call, 0); ok {
+			facts.base = sourceFacts.base
+			facts.ReadOnly = sourceFacts.ReadOnly
+			facts.Contiguous = sourceFacts.Contiguous
+			facts.UnitStride = sourceFacts.UnitStride
+			facts.Exclusive = false
+		}
+	case "chunks_exact":
+		if sourceFacts, ok := a.exprFactsForCallArg(call, 0); ok {
+			facts.base = sourceFacts.base
+			facts.ReadOnly = sourceFacts.ReadOnly
+			facts.Contiguous = sourceFacts.Contiguous
+			facts.UnitStride = sourceFacts.UnitStride
+		}
+		if callName := optimizationExprString(call); callName != "" {
+			facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: "0", End: callName + ".len"}
+		}
+		facts.Exclusive = false
 	case "arena_da_view", "ctx_string_view", "string_view":
 		if baseExpr, ok := optimizationCallArg(call, 0); ok {
 			facts.base = a.optimizationBaseForExpr(baseExpr)
@@ -871,6 +905,113 @@ func (a *Analyzer) exprFactsForCallArg(call *ast.CallExpr, index int) (Optimizat
 	}
 	facts, ok := a.exprFacts[expr]
 	return facts, ok
+}
+
+func (a *Analyzer) boundCallExpr(expr ast.Expr) (*ast.CallExpr, bool) {
+	if expr == nil {
+		return nil, false
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return a.boundCallExpr(n.Inner)
+	case *ast.CastExpr:
+		return a.boundCallExpr(n.Operand)
+	case *ast.MoveExpr:
+		return a.boundCallExpr(n.Operand)
+	case *ast.Ident:
+		if a.currentScope == nil {
+			return nil, false
+		}
+		sym, ok := a.currentScope.Lookup(n.Name)
+		if !ok || sym.Mutable {
+			return nil, false
+		}
+		if a.currentValueBindings != nil {
+			if valueExpr, ok := a.currentValueBindings[sym]; ok && valueExpr != nil {
+				return a.boundCallExpr(valueExpr)
+			}
+		}
+		decl, ok := sym.Node.(*ast.VarDeclStmt)
+		if !ok || decl.Value == nil {
+			return nil, false
+		}
+		return a.boundCallExpr(decl.Value)
+	case *ast.CallExpr:
+		return n, true
+	default:
+		return nil, false
+	}
+}
+
+func (a *Analyzer) inferSplitViewFieldOptimizationFacts(expr *ast.FieldExpr) (OptimizationFacts, bool) {
+	if a == nil || expr == nil || expr.Field == "" {
+		return OptimizationFacts{}, false
+	}
+	call, ok := a.boundCallExpr(expr.Object)
+	if !ok || callIdentName(call) != "split_at" || len(call.Args) < 2 {
+		return OptimizationFacts{}, false
+	}
+	if expr.Field != "left" && expr.Field != "right" {
+		return OptimizationFacts{}, false
+	}
+	baseFacts, ok := a.exprFacts[call.Args[0]]
+	if !ok {
+		return OptimizationFacts{}, false
+	}
+	facts := baseFacts
+	if facts.base == "" {
+		facts.base = a.optimizationBaseForExpr(call.Args[0])
+	}
+	if facts.Extent != nil {
+		index := optimizationExprString(call.Args[1])
+		if index != "" {
+			end := index
+			if expr.Field == "right" {
+				begin := index
+				end = optimizationExprString(&ast.FieldExpr{Position: call.Position, Object: call.Args[0], Field: "len"})
+				facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: begin, End: end}
+			} else {
+				facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: "0", End: end}
+			}
+			if expr.Field == "left" && optimizationFieldMatches(call.Args[1], call.Args[0], "len") {
+				facts.Extent = cloneOptimizationExtent(baseFacts.Extent)
+			}
+			if expr.Field == "right" && isZeroOptimizationExpr(call.Args[1]) {
+				facts.Extent = cloneOptimizationExtent(baseFacts.Extent)
+			}
+		}
+	}
+	return facts, true
+}
+
+func (a *Analyzer) inferChunksExactItemOptimizationFacts(expr *ast.IndexExpr) (OptimizationFacts, bool) {
+	if a == nil || expr == nil {
+		return OptimizationFacts{}, false
+	}
+	objectType := a.exprTypes[expr.Object]
+	if _, ok := ChunksExactViewItemType(objectType); !ok {
+		return OptimizationFacts{}, false
+	}
+	objectFacts, ok := a.exprFacts[expr.Object]
+	if !ok {
+		return OptimizationFacts{}, false
+	}
+	facts := objectFacts
+	facts.Exclusive = false
+	if facts.base == "" {
+		facts.base = a.optimizationBaseForExpr(expr.Object)
+	}
+	chunkSize := ""
+	if call, ok := a.boundCallExpr(expr.Object); ok && callIdentName(call) == "chunks_exact" && len(call.Args) >= 2 {
+		chunkSize = optimizationExprString(call.Args[1])
+	}
+	if chunkSize == "" {
+		chunkSize = optimizationExprString(&ast.FieldExpr{Position: expr.Position, Object: expr.Object, Field: "chunk_size"})
+	}
+	if chunkSize != "" {
+		facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: "0", End: chunkSize}
+	}
+	return facts, true
 }
 
 func optimizationCallArg(call *ast.CallExpr, index int) (ast.Expr, bool) {

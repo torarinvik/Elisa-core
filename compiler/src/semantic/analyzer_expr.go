@@ -644,6 +644,9 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		}
 		return cloneRegionRefState(right), true
 	case *ast.CallExpr:
+		if state, ok := a.regionRefStateForProofCarryingViewCall(n); ok {
+			return state, true
+		}
 		if freezeStoreArg, ok := a.freezeStoreArg(n); ok {
 			return a.regionRefStateForExpr(freezeStoreArg)
 		}
@@ -696,6 +699,39 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 			}
 		}
 		return regionRefState{}, false
+	default:
+		return regionRefState{}, false
+	}
+}
+
+func (a *Analyzer) regionRefStateForProofCarryingViewCall(call *ast.CallExpr) (regionRefState, bool) {
+	if a == nil || call == nil || len(call.Args) == 0 {
+		return regionRefState{}, false
+	}
+	sourceState, ok := a.regionRefStateForExpr(call.Args[0])
+	if !ok || !hasRegionProvenance(sourceState) {
+		return regionRefState{}, false
+	}
+	summarized, summaryOK := summarizeRegionIndexStates(sourceState)
+	if !summaryOK {
+		summarized = cloneRegionRefState(sourceState)
+	}
+	switch callIdentName(call) {
+	case "readonly":
+		return cloneRegionRefState(sourceState), true
+	case "split_at":
+		state := cloneRegionRefState(summarized)
+		state.Fields = map[string]regionRefState{
+			"left":  cloneRegionRefState(summarized),
+			"right": cloneRegionRefState(summarized),
+		}
+		return state, true
+	case "chunks_exact":
+		state := cloneRegionRefState(summarized)
+		state.Fields = map[string]regionRefState{
+			"source": cloneRegionRefState(summarized),
+		}
+		return state, true
 	default:
 		return regionRefState{}, false
 	}
@@ -1807,6 +1843,9 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	if callIdentName(expr) == "freeze" {
 		return a.analyzeFreezeCallExpr(expr)
 	}
+	if helperType, ok := a.analyzeProofCarryingViewHelperCall(expr); ok {
+		return helperType
+	}
 	if enumType, variant, ok := a.enumConstructorCall(expr); ok {
 		if variant == nil {
 			for _, arg := range expr.Args {
@@ -1986,6 +2025,282 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	}
 	a.bindFreshReturnShapes(appliedType, shapeBindings)
 	return a.substituteType(appliedType.Return, bindings, shapeBindings, regionBindings, permissionBindings)
+}
+
+func (a *Analyzer) analyzeProofCarryingViewHelperCall(expr *ast.CallExpr) (Type, bool) {
+	switch callIdentName(expr) {
+	case "readonly":
+		return a.analyzeReadonlyHelperCall(expr), true
+	case "split_at":
+		return a.analyzeSplitAtHelperCall(expr), true
+	case "chunks_exact":
+		return a.analyzeChunksExactHelperCall(expr), true
+	case "zip_map":
+		return a.analyzeZipMapHelperCall(expr), true
+	default:
+		return nil, false
+	}
+}
+
+func proofCarryingViewType(t Type) bool {
+	switch t.(type) {
+	case *ViewType, *DArrayViewType, *DStrType, *SViewType:
+		return true
+	default:
+		return false
+	}
+}
+
+func denseDViewType(t Type) (*DArrayViewType, bool) {
+	view, ok := t.(*DArrayViewType)
+	if !ok || view == nil {
+		return nil, false
+	}
+	if view.SurfaceName == "packedtags" {
+		return nil, false
+	}
+	return view, true
+}
+
+func zipMapDenseViewType(t Type) (Type, Type, bool) {
+	switch tt := t.(type) {
+	case *ViewType:
+		if tt == nil {
+			return nil, nil, false
+		}
+		return tt, tt.Elem, true
+	case *DArrayViewType:
+		if tt == nil || tt.SurfaceName == "packedtags" {
+			return nil, nil, false
+		}
+		return tt, tt.Elem, true
+	default:
+		return nil, nil, false
+	}
+}
+
+func (a *Analyzer) analyzeReadonlyHelperCall(expr *ast.CallExpr) Type {
+	if len(expr.Args) != 1 {
+		a.errorf(expr.Pos(), "readonly expects 1 argument, got %d", len(expr.Args))
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return invalidType
+	}
+	argType := a.analyzeExpr(expr.Args[0])
+	if !proofCarryingViewType(argType) {
+		a.errorf(expr.Args[0].Pos(), "readonly expects a view-like argument, got %s", argType.String())
+		return invalidType
+	}
+	return argType
+}
+
+func (a *Analyzer) analyzeSplitAtHelperCall(expr *ast.CallExpr) Type {
+	if len(expr.Args) != 2 {
+		a.errorf(expr.Pos(), "split_at expects 2 arguments, got %d", len(expr.Args))
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return invalidType
+	}
+	viewType, ok := denseDViewType(a.analyzeExpr(expr.Args[0]))
+	if !ok {
+		actual := a.exprTypes[expr.Args[0]]
+		if actual == nil {
+			actual = invalidType
+		}
+		a.errorf(expr.Args[0].Pos(), "split_at expects a dense dview[T], got %s", actual.String())
+		return invalidType
+	}
+	indexType := a.analyzeValueExpr(expr.Args[1], a.namedTypes["usize"])
+	if !IsNumericType(indexType) {
+		a.errorf(expr.Args[1].Pos(), "split_at index must be numeric, got %s", indexType.String())
+	} else if !IsIntegralStorageType(indexType) {
+		a.errorf(expr.Args[1].Pos(), "split_at index must be integral, got %s", indexType.String())
+	}
+	base, ok := a.namedTypes["SplitView"].(*StructType)
+	if !ok || base == nil {
+		a.errorf(expr.Pos(), "missing builtin SplitView carrier type")
+		return invalidType
+	}
+	return &GenericInstanceType{Name: "SplitView", Base: base, Args: []Type{viewType.Elem}}
+}
+
+func (a *Analyzer) analyzeChunksExactHelperCall(expr *ast.CallExpr) Type {
+	if len(expr.Args) != 2 {
+		a.errorf(expr.Pos(), "chunks_exact expects 2 arguments, got %d", len(expr.Args))
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return invalidType
+	}
+	viewType, ok := denseDViewType(a.analyzeExpr(expr.Args[0]))
+	if !ok {
+		actual := a.exprTypes[expr.Args[0]]
+		if actual == nil {
+			actual = invalidType
+		}
+		a.errorf(expr.Args[0].Pos(), "chunks_exact expects a dense dview[T], got %s", actual.String())
+		return invalidType
+	}
+	chunkSizeType := a.analyzeValueExpr(expr.Args[1], a.namedTypes["usize"])
+	if !IsNumericType(chunkSizeType) {
+		a.errorf(expr.Args[1].Pos(), "chunks_exact chunk size must be numeric, got %s", chunkSizeType.String())
+	} else if !IsIntegralStorageType(chunkSizeType) {
+		a.errorf(expr.Args[1].Pos(), "chunks_exact chunk size must be integral, got %s", chunkSizeType.String())
+	}
+	if value, ok := a.evalConstExpr(expr.Args[1]); ok && value.Kind == ConstInt && value.Int == 0 {
+		a.errorf(expr.Args[1].Pos(), "chunks_exact chunk size cannot be zero")
+	}
+	base, ok := a.namedTypes["ChunksExactView"].(*StructType)
+	if !ok || base == nil {
+		a.errorf(expr.Pos(), "missing builtin ChunksExactView carrier type")
+		return invalidType
+	}
+	return &GenericInstanceType{Name: "ChunksExactView", Base: base, Args: []Type{viewType.Elem}}
+}
+
+func (a *Analyzer) analyzeZipMapHelperCall(expr *ast.CallExpr) Type {
+	if len(expr.Args) != 4 {
+		a.errorf(expr.Pos(), "zip_map expects 4 arguments, got %d", len(expr.Args))
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return invalidType
+	}
+	dstViewType, dstElemType, dstOK := zipMapDenseViewType(a.analyzeExpr(expr.Args[0]))
+	src1ViewType, src1ElemType, src1OK := zipMapDenseViewType(a.analyzeExpr(expr.Args[1]))
+	src2ViewType, src2ElemType, src2OK := zipMapDenseViewType(a.analyzeExpr(expr.Args[2]))
+	callbackType := a.analyzeExpr(expr.Args[3])
+
+	if !dstOK {
+		actual := a.exprTypes[expr.Args[0]]
+		if actual == nil {
+			actual = invalidType
+		}
+		a.errorf(expr.Args[0].Pos(), "zip_map destination expects a dense view[T], got %s", actual.String())
+	}
+	if !src1OK {
+		actual := a.exprTypes[expr.Args[1]]
+		if actual == nil {
+			actual = invalidType
+		}
+		a.errorf(expr.Args[1].Pos(), "zip_map source 1 expects a dense view[T], got %s", actual.String())
+	}
+	if !src2OK {
+		actual := a.exprTypes[expr.Args[2]]
+		if actual == nil {
+			actual = invalidType
+		}
+		a.errorf(expr.Args[2].Pos(), "zip_map source 2 expects a dense view[T], got %s", actual.String())
+	}
+	if !dstOK || !src1OK || !src2OK {
+		return a.namedTypes["void"]
+	}
+
+	if !a.exprSupportsDenseWrite(expr.Args[0]) {
+		a.errorf(expr.Args[0].Pos(), "zip_map requires a writable dense destination view, got %s", dstViewType.String())
+	}
+	if !a.exprSupportsReadonlyDenseView(expr.Args[1]) {
+		a.errorf(expr.Args[1].Pos(), "zip_map requires source 1 to be a readonly contiguous exact-extent view, got %s", src1ViewType.String())
+	}
+	if !a.exprSupportsReadonlyDenseView(expr.Args[2]) {
+		a.errorf(expr.Args[2].Pos(), "zip_map requires source 2 to be a readonly contiguous exact-extent view, got %s", src2ViewType.String())
+	}
+	if !a.exprsHaveEqualExtentSize(expr.Args[0], expr.Args[1]) {
+		a.errorf(expr.Pos(), "zip_map requires destination and source 1 to have equal extents")
+	}
+	if !a.exprsHaveEqualExtentSize(expr.Args[0], expr.Args[2]) {
+		a.errorf(expr.Pos(), "zip_map requires destination and source 2 to have equal extents")
+	}
+	if !a.exprsAreDisjoint(expr.Args[0], expr.Args[1]) {
+		a.errorf(expr.Pos(), "zip_map requires destination and source 1 to be provably disjoint")
+	}
+	if !a.exprsAreDisjoint(expr.Args[0], expr.Args[2]) {
+		a.errorf(expr.Pos(), "zip_map requires destination and source 2 to be provably disjoint")
+	}
+
+	callbackFn, ok := callbackType.(*FuncType)
+	if !ok {
+		a.errorf(expr.Args[3].Pos(), "zip_map callback expects a function value, got %s", callbackType.String())
+		return a.namedTypes["void"]
+	}
+	if callbackFn.Variadic || len(callbackFn.Params) != 2 {
+		a.errorf(expr.Args[3].Pos(), "zip_map callback must have type func(A, B) -> R")
+		return a.namedTypes["void"]
+	}
+	if len(callbackFn.Permissions) != 0 {
+		a.errorf(expr.Args[3].Pos(), "zip_map callback must not declare effect permissions")
+	}
+	if callbackFn.Return == nil || isVoidType(callbackFn.Return) {
+		a.errorf(expr.Args[3].Pos(), "zip_map callback must return a value assignable to %s", dstElemType.String())
+		return a.namedTypes["void"]
+	}
+	if _, ok := callbackFn.Return.(*ErrorUnionType); ok {
+		a.errorf(expr.Args[3].Pos(), "zip_map callback must not return an error union")
+	}
+	if !AssignableTo(callbackFn.Params[0], src1ElemType) {
+		a.errorf(expr.Args[3].Pos(), "zip_map callback first parameter expects %s, got %s", callbackFn.Params[0].String(), src1ElemType.String())
+	}
+	if !AssignableTo(callbackFn.Params[1], src2ElemType) {
+		a.errorf(expr.Args[3].Pos(), "zip_map callback second parameter expects %s, got %s", callbackFn.Params[1].String(), src2ElemType.String())
+	}
+	if !AssignableTo(dstElemType, callbackFn.Return) {
+		a.errorf(expr.Args[3].Pos(), "zip_map callback result expects %s, got %s", dstElemType.String(), callbackFn.Return.String())
+	}
+	return a.namedTypes["void"]
+}
+
+func (a *Analyzer) exprSupportsDenseWrite(expr ast.Expr) bool {
+	if a == nil || expr == nil {
+		return false
+	}
+	facts, ok := a.exprFacts[expr]
+	if !ok {
+		return false
+	}
+	return facts.Contiguous && facts.UnitStride && !facts.ReadOnly
+}
+
+func (a *Analyzer) exprSupportsReadonlyDenseView(expr ast.Expr) bool {
+	if a == nil || expr == nil {
+		return false
+	}
+	facts, ok := a.exprFacts[expr]
+	if !ok {
+		return false
+	}
+	return facts.ReadOnly && facts.Contiguous && facts.UnitStride && facts.HasExactExtent()
+}
+
+func (a *Analyzer) exprsHaveEqualExtentSize(left ast.Expr, right ast.Expr) bool {
+	if a == nil {
+		return false
+	}
+	leftFacts, ok := a.exprFacts[left]
+	if !ok {
+		return false
+	}
+	rightFacts, ok := a.exprFacts[right]
+	if !ok {
+		return false
+	}
+	return leftFacts.SameExtentSize(rightFacts)
+}
+
+func (a *Analyzer) exprsAreDisjoint(left ast.Expr, right ast.Expr) bool {
+	if a == nil {
+		return false
+	}
+	leftFacts, ok := a.exprFacts[left]
+	if !ok {
+		return false
+	}
+	rightFacts, ok := a.exprFacts[right]
+	if !ok {
+		return false
+	}
+	return leftFacts.Disjoint(rightFacts)
 }
 
 func (a *Analyzer) resolveEnumConstructorArgs(expr *ast.CallExpr, enumType *EnumType, variant *EnumVariant) ([]ast.Expr, bool) {
@@ -2560,6 +2875,26 @@ func (a *Analyzer) resolveProjectedFieldValueFromBuiltinViewHelperCall(call *ast
 			return nil, false
 		}
 		return a.resolveProjectedFieldValueThroughIndexOffset(call.Args[0], offset, path)
+	case "split_at":
+		if len(call.Args) < 2 || len(path) < 2 {
+			return nil, false
+		}
+		fieldStep := path[0]
+		if fieldStep.Index != nil || fieldStep.Wildcard || fieldStep.Field == "" {
+			return nil, false
+		}
+		switch fieldStep.Field {
+		case "left":
+			return a.resolveProjectedFieldValueThroughIndexOffset(call.Args[0], 0, path[1:])
+		case "right":
+			offset, ok := a.resolveProjectedFieldConstIntExpr(call.Args[1])
+			if !ok {
+				return nil, false
+			}
+			return a.resolveProjectedFieldValueThroughIndexOffset(call.Args[0], offset, path[1:])
+		default:
+			return nil, false
+		}
 	default:
 		return nil, false
 	}
@@ -2859,6 +3194,11 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		a.reportBorrowedOwnerRefUseAfterConsume(expr, view.Elem)
 		return view.Elem
 	}
+	if itemType, ok := ChunksExactViewItemType(objType); ok {
+		a.reportInvalidRegionUse(expr, itemType)
+		a.reportBorrowedOwnerRefUseAfterConsume(expr, itemType)
+		return itemType
+	}
 	if storeType, ok := objType.(*PackedEnumStoreType); ok && storeType.Enum != nil {
 		a.reportInvalidRegionUse(expr, storeType.Enum)
 		a.reportBorrowedOwnerRefUseAfterConsume(expr, storeType.Enum)
@@ -2907,6 +3247,11 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 			a.reportInvalidRegionUse(expr, view.Elem)
 			a.reportBorrowedOwnerRefUseAfterConsume(expr, view.Elem)
 			return view.Elem
+		}
+		if itemType, ok := ChunksExactViewItemType(ref.Elem); ok {
+			a.reportInvalidRegionUse(expr, itemType)
+			a.reportBorrowedOwnerRefUseAfterConsume(expr, itemType)
+			return itemType
 		}
 		if storeType, ok := ref.Elem.(*PackedEnumStoreType); ok && storeType.Enum != nil {
 			a.reportInvalidRegionUse(expr, storeType.Enum)
@@ -3372,6 +3717,10 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 			a.errorf(n.Pos(), "cannot assign to %s", kind)
 			return invalidType
 		}
+		if facts, ok := a.exprFacts[n.Object]; ok && facts.ReadOnly {
+			a.errorf(n.Pos(), "cannot assign to readonly view index result")
+			return invalidType
+		}
 		return targetType
 	default:
 		a.errorf(expr.Pos(), "invalid assignment target")
@@ -3412,6 +3761,10 @@ func (a *Analyzer) asRefTargetType(expr ast.Expr, asKind string) Type {
 		targetType := a.analyzeIndexExpr(n)
 		if kind, ok := valueOnlyIndexKind(a.exprTypes[n.Object]); ok {
 			a.errorf(n.Pos(), "cannot take a reference to %s", kind)
+			return invalidType
+		}
+		if facts, ok := a.exprFacts[n.Object]; ok && facts.ReadOnly {
+			a.errorf(n.Pos(), "cannot take a reference to readonly view index result")
 			return invalidType
 		}
 		return a.refTypeWithAsKind(targetType, asKind)
@@ -3590,6 +3943,9 @@ func valueOnlyIndexKind(t Type) (string, bool) {
 	if isStringViewType(t) {
 		return "string view index", true
 	}
+	if _, ok := ChunksExactViewItemType(t); ok {
+		return "chunked view index result", true
+	}
 	ref, ok := t.(*RefType)
 	if !ok {
 		return "", false
@@ -3613,6 +3969,9 @@ func valueOnlyIndexKind(t Type) (string, bool) {
 	}
 	if isStringViewType(ref.Elem) {
 		return "string view index", true
+	}
+	if _, ok := ChunksExactViewItemType(ref.Elem); ok {
+		return "chunked view index result", true
 	}
 	return "", false
 }

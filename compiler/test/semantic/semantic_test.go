@@ -5024,6 +5024,59 @@ def bad(store: Expr.Store[Frozen]) -> void can[Pool.Create, Pool.Shutdown, Pool.
 	}
 }
 
+func TestAnalyzeAcceptsParallelForOverReadonlyChunksExactView(t *testing.T) {
+	src := parallelForConcurrencyPrelude + `
+def visit(values: darray[i32, 4]) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+	full: dview[i32] = values[0u:4u]
+	chunks: ChunksExactView[i32] = chunks_exact(readonly(full), 2u)
+	pool workers(2u):
+		parallel for chunk in chunks:
+			_ = chunk[0u] + chunk[1u]
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "parallel_for_chunks_exact_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "visit", "int")
+}
+
+func TestAnalyzeRejectsAssigningReadonlyViewIndexResult(t *testing.T) {
+	src := `def bad() -> void:
+	buf: mutable array[i32, 4] = [1, 2, 3, 4]
+	ro: view[i32, 0u, 2u] = readonly(buf[0u:2u])
+	ro[0u] <- 7
+`
+	_, errs := parseAndAnalyze(t, "readonly_index_assign_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "cannot assign to readonly view index result") {
+		t.Fatalf("expected readonly-view assignment diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsZipMapWithoutReadonlySources(t *testing.T) {
+	src := `def add_pair(left: i32, right: i32) -> i32:
+	return left + right
+
+def bad() -> void:
+	buf: mutable array[i32, 6] = [0, 0, 1, 2, 3, 4]
+	dst: view[i32, 0u, 2u] = buf[0u:2u]
+	src1: view[i32, 2u, 4u] = buf[2u:4u]
+	src2: view[i32, 4u, 6u] = buf[4u:6u]
+	zip_map(dst, src1, src2, add_pair)
+`
+	_, errs := parseAndAnalyze(t, "zip_map_requires_readonly_sources_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "zip_map requires source 1 to be a readonly contiguous exact-extent view") {
+		t.Fatalf("expected zip_map readonly-source diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsAssigningPackedStoreSliceIndexResult(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)

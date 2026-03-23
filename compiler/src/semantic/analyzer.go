@@ -307,6 +307,15 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 		{name: "len", typ: namedTypeExpr("usize", false), mutable: true},
 		{name: "elem_size", typ: namedTypeExpr("usize", false), mutable: true},
 	})
+	a.registerBuiltinStructType("SplitView", []string{"T"}, false, []builtinFieldSpec{
+		{name: "left", typ: genericTypeExpr("dview", namedTypeExpr("T", false)), mutable: false},
+		{name: "right", typ: genericTypeExpr("dview", namedTypeExpr("T", false)), mutable: false},
+	})
+	a.registerBuiltinStructType("ChunksExactView", []string{"T"}, false, []builtinFieldSpec{
+		{name: "source", typ: genericTypeExpr("dview", namedTypeExpr("T", false)), mutable: false},
+		{name: "chunk_size", typ: namedTypeExpr("usize", false), mutable: false},
+		{name: "len", typ: namedTypeExpr("usize", false), mutable: false},
+	})
 	a.registerBuiltinStructType("DictBucket", []string{"T"}, false, []builtinFieldSpec{
 		{name: "state", typ: namedTypeExpr("u8", false), mutable: true},
 		{name: "hash", typ: namedTypeExpr("u64", false), mutable: true},
@@ -424,6 +433,8 @@ func isBuiltinRuntimeStructName(name string) bool {
 	case "Thread", "Task", "ThreadPool", "TaskGroup", "Mutex", "MutexGuard", "CondVar", "atomic":
 		return true
 	case "Region", "Arena", "ArenaMark", "StringView", "DynArray", "DynArrayView", "DictBucket", "DynDict":
+		return true
+	case "SplitView", "ChunksExactView":
 		return true
 	case "PackedStoreAllocResult", "PackedStoreIndexAllocResult":
 		return true

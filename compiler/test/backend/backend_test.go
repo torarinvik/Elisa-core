@@ -5489,6 +5489,37 @@ func TestGenerateLLVMIRLowersForLoopRanges(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRLowersProofCarryingViewHelpers(t *testing.T) {
+	src := `def run(values: darray[i32, 4]) -> void:
+	base: dview[i32] = values[0u:4u]
+	halves: SplitView[i32] = split_at(base, 2u)
+	left: dview[i32] = halves.left
+	chunks: ChunksExactView[i32] = chunks_exact(readonly(base), 2u)
+	first: dview[i32] = chunks[0u]
+	_ = left
+	_ = first
+`
+	result := parseAndAnalyze(t, "backend_proof_carrying_view_helpers.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%SplitView__i32 = type { %DynArrayView, %DynArrayView }",
+		"%ChunksExactView__i32 = type { %DynArrayView, i64, i64 }",
+		"define void @run(%DynArray__i32",
+		"call %DynArrayView @arena_da_view_slice(%DynArrayView",
+		"urem i64",
+		"call void @llvm.trap()",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func looksLikeObjectFile(data []byte) bool {
 	if len(data) < 4 {
 		return false

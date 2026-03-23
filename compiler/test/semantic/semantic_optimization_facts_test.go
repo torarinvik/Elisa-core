@@ -2349,6 +2349,63 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	}
 }
 
+func TestAnalyzeCollectsOptimizationFactsForProofCarryingViewHelpers(t *testing.T) {
+	src := `def inspect(values: darray[i32, 4]) -> int:
+	whole: dview[i32] = values[0u:4u]
+	readonly_whole: dview[i32] = readonly(whole)
+	halves: SplitView[i32] = split_at(whole, 2u)
+	left: dview[i32] = halves.left
+	right: dview[i32] = halves.right
+	chunks: ChunksExactView[i32] = chunks_exact(readonly_whole, 2u)
+	first_chunk: dview[i32] = chunks[0u]
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_proof_carrying_view_helpers.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	wholeExpr := requireOptimizationFactsVarInitExpr(t, fn, "whole")
+	readonlyExpr := requireOptimizationFactsVarInitExpr(t, fn, "readonly_whole")
+	leftExpr := requireOptimizationFactsVarInitExpr(t, fn, "left")
+	rightExpr := requireOptimizationFactsVarInitExpr(t, fn, "right")
+	firstChunkExpr := requireOptimizationFactsVarInitExpr(t, fn, "first_chunk")
+
+	wholeFacts := requireExprOptimizationFacts(t, result, wholeExpr)
+	readonlyFacts := requireExprOptimizationFacts(t, result, readonlyExpr)
+	leftFacts := requireExprOptimizationFacts(t, result, leftExpr)
+	rightFacts := requireExprOptimizationFacts(t, result, rightExpr)
+	firstChunkFacts := requireExprOptimizationFacts(t, result, firstChunkExpr)
+
+	if !wholeFacts.HasExactExtent() || !wholeFacts.Contiguous || !wholeFacts.UnitStride {
+		t.Fatalf("expected full dview slice to expose dense exact facts, got %#v", wholeFacts)
+	}
+	if !readonlyFacts.ReadOnly || !readonlyFacts.HasExactExtent() {
+		t.Fatalf("expected readonly helper to preserve exact extent and mark readonly, got %#v", readonlyFacts)
+	}
+	if result.ExprSupportsDenseWrite(readonlyExpr) {
+		t.Fatalf("expected readonly helper result to reject dense writes")
+	}
+	if !leftFacts.HasExactExtent() || !rightFacts.HasExactExtent() {
+		t.Fatalf("expected split_at halves to preserve exact extents, got %#v and %#v", leftFacts, rightFacts)
+	}
+	if !result.ExprsAreDisjoint(leftExpr, rightExpr) {
+		t.Fatalf("expected split_at halves to be disjoint")
+	}
+	if result.ExprsHaveSameExtent(leftExpr, rightExpr) {
+		t.Fatalf("expected split_at halves to retain distinct exact bounds")
+	}
+	if !firstChunkFacts.ReadOnly || !firstChunkFacts.HasExactExtent() {
+		t.Fatalf("expected chunks_exact item to preserve readonly exact facts, got %#v", firstChunkFacts)
+	}
+	if result.ExprSupportsDenseWrite(firstChunkExpr) {
+		t.Fatalf("expected chunks_exact item to reject dense writes after readonly")
+	}
+	if !result.ExprsHaveSameExtent(leftExpr, firstChunkExpr) {
+		t.Fatalf("expected first chunks_exact item to match split_at left half extent")
+	}
+}
+
 func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedNestedRebasedHelperIndexedFieldMatchBinders(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)
