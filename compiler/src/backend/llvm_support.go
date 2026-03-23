@@ -233,7 +233,63 @@ func (s *functionState) emitAddressOrTemp(expr ast.Expr) (C.LLVMValueRef, semant
 	return ptr, typ, nil
 }
 
+func (s *functionState) emitNodeTableIndexAddress(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if expr == nil {
+		return nil, nil, false, nil
+	}
+	keyIndex, keyEnum, handled, err := s.emitNodeKeyIndexValue(expr.Index)
+	if !handled {
+		return nil, nil, false, nil
+	}
+	if err != nil {
+		return nil, nil, true, err
+	}
+	objType := s.exprType(expr.Object)
+	containerType := objType
+	pointerLike := false
+	if refType, ok := objType.(*semantic.RefType); ok && refType != nil && refType.State == semantic.RefStateNonNull {
+		containerType = refType.Elem
+		pointerLike = true
+	}
+	containerType = semantic.StripAggregateStateType(containerType)
+	enumType, elemType, ok := semantic.NodeTableParts(containerType)
+	if !ok || enumType == nil {
+		return nil, nil, false, nil
+	}
+	if keyEnum != nil && keyEnum != enumType {
+		return nil, nil, true, fmt.Errorf("node key enum %s does not match node table %s", keyEnum.Name, enumType.Name)
+	}
+	var tablePtr C.LLVMValueRef
+	if pointerLike {
+		tablePtr, _, err = s.emitExpr(expr.Object, objType)
+	} else {
+		tablePtr, _, err = s.emitAddressOrTemp(expr.Object)
+	}
+	if err != nil {
+		return nil, nil, true, err
+	}
+	containerLLVMType, err := s.g.lowerType(containerType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	valuesPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, tablePtr, 0, cStringFree("node.table.values.ptr"))
+	viewType := &semantic.DArrayViewType{Elem: elemType, SurfaceName: "dview"}
+	viewLLVMType, err := s.g.lowerType(viewType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	indexValue, err := s.coerceValue(keyIndex, s.g.result.NamedTypes["u32"], s.g.result.NamedTypes["usize"])
+	if err != nil {
+		return nil, nil, true, err
+	}
+	ptr, elemType, err := s.emitRuntimePointerIndexedAddressWithType(valuesPtr, viewLLVMType, elemType, indexValue)
+	return ptr, elemType, true, err
+}
+
 func (s *functionState) emitIndexAddress(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if ptr, elemType, handled, err := s.emitNodeTableIndexAddress(expr); handled {
+		return ptr, elemType, err
+	}
 	objType := s.exprType(expr.Object)
 	indexValue, _, err := s.emitExpr(expr.Index, s.g.result.NamedTypes["usize"])
 	if err != nil {

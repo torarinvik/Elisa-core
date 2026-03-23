@@ -83,6 +83,54 @@ func (ops *packedStoreOps) storeCount(name string) (C.LLVMValueRef, error) {
 	return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue}, name), nil
 }
 
+func (ops *packedStoreOps) encodeDenseIndex(rowPtr C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	arenaValue, err := ops.arenaValue(name + ".arena")
+	if err != nil {
+		return nil, err
+	}
+	stateValue, err := ops.stateValue(name + ".state")
+	if err != nil {
+		return nil, err
+	}
+	u32Type := ops.s.g.result.NamedTypes["u32"]
+	arenaType := ops.s.g.result.NamedTypes["Arena"]
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	helperType := &semantic.FuncType{Name: "ctx_packed_store_encode_index", Params: []semantic.Type{arenaRefType, ops.voidRefType(), ops.voidRefType()}, Return: u32Type}
+	callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_encode_index", helperType)
+	if err != nil {
+		return nil, err
+	}
+	llvmFnType, err := ops.s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, err
+	}
+	return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, rowPtr, stateValue}, name), nil
+}
+
+func (ops *packedStoreOps) decodeDenseIndex(indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	arenaValue, err := ops.arenaValue(name + ".arena")
+	if err != nil {
+		return nil, err
+	}
+	stateValue, err := ops.stateValue(name + ".state")
+	if err != nil {
+		return nil, err
+	}
+	u32Type := ops.s.g.result.NamedTypes["u32"]
+	arenaType := ops.s.g.result.NamedTypes["Arena"]
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	helperType := &semantic.FuncType{Name: "ctx_packed_store_decode_index", Params: []semantic.Type{arenaRefType, u32Type, ops.voidRefType()}, Return: ops.voidRefType()}
+	callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_decode_index", helperType)
+	if err != nil {
+		return nil, err
+	}
+	llvmFnType, err := ops.s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, err
+	}
+	return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, indexValue, stateValue}, name), nil
+}
+
 func (ops *packedStoreOps) encodeHandle(rowPtr C.LLVMValueRef, enumType *semantic.EnumType, name string) (C.LLVMValueRef, error) {
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum handle metadata")

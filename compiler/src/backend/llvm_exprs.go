@@ -40,6 +40,45 @@ func callIdentName(expr *ast.CallExpr) string {
 	return ident.Name
 }
 
+func callSpecializedIdent(expr ast.Expr) (*ast.Ident, *ast.SpecializeExpr, bool) {
+	if expr == nil {
+		return nil, nil, false
+	}
+	specialize, ok := expr.(*ast.SpecializeExpr)
+	if !ok || specialize == nil {
+		return nil, nil, false
+	}
+	ident, ok := specialize.Operand.(*ast.Ident)
+	if !ok || ident == nil {
+		return nil, nil, false
+	}
+	return ident, specialize, true
+}
+
+func callSpecializedIdentName(expr *ast.CallExpr) string {
+	if expr == nil {
+		return ""
+	}
+	if ident, _, ok := callSpecializedIdent(expr.Func); ok {
+		return ident.Name
+	}
+	return ""
+}
+
+func denseKeySourceEnumType(t semantic.Type) (*semantic.EnumType, bool) {
+	if t == nil {
+		return nil, false
+	}
+	t = semantic.StripAggregateStateType(t)
+	if enumType, ok := t.(*semantic.EnumType); ok && enumType != nil && enumType.Packed {
+		return enumType, true
+	}
+	if viewType, ok := t.(*semantic.PackedVariantViewType); ok && viewType != nil && viewType.Enum != nil {
+		return viewType.Enum, true
+	}
+	return nil, false
+}
+
 func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
 	if expr == nil {
 		return nil, nil, fmt.Errorf("cannot emit nil expression")
@@ -2935,6 +2974,235 @@ func (s *functionState) emitPackedAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef
 	return s.emitPackedEnumConstructorAlloc(storeValue, enumType, variant, callExpr.Args, callExpr.ArgNames)
 }
 
+func (s *functionState) nodeTableFillTypeArgs(expr *ast.CallExpr) (*semantic.EnumType, semantic.Type, error) {
+	if expr == nil || callSpecializedIdentName(expr) != "node_table_fill" {
+		return nil, nil, fmt.Errorf("node_table_fill expects explicit specialization")
+	}
+	_, specialize, ok := callSpecializedIdent(expr.Func)
+	if !ok || specialize == nil || len(specialize.TypeArgs) != 2 {
+		return nil, nil, fmt.Errorf("node_table_fill expects exactly 2 type arguments")
+	}
+	enumArg, err := s.resolveTypeExpr(specialize.TypeArgs[0])
+	if err != nil {
+		return nil, nil, err
+	}
+	enumType, ok := semantic.StripAggregateStateType(enumArg).(*semantic.EnumType)
+	if !ok || enumType == nil || !enumType.Packed {
+		return nil, nil, fmt.Errorf("node_table_fill expects a packed enum type argument")
+	}
+	elemType, err := s.resolveTypeExpr(specialize.TypeArgs[1])
+	if err != nil {
+		return nil, nil, err
+	}
+	return enumType, elemType, nil
+}
+
+func (s *functionState) emitNodeKeyIndexValue(expr ast.Expr) (C.LLVMValueRef, *semantic.EnumType, bool, error) {
+	if expr == nil {
+		return nil, nil, false, nil
+	}
+	keyType := s.exprType(expr)
+	enumType, ok := semantic.NodeKeyEnumType(keyType)
+	if !ok || enumType == nil {
+		return nil, nil, false, nil
+	}
+	value, actualType, err := s.emitExpr(expr, keyType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if refType, ok := actualType.(*semantic.RefType); ok && refType != nil && refType.State == semantic.RefStateNonNull {
+		loaded, loadErr := s.loadValue(value, refType.Elem, "nodekey.load")
+		if loadErr != nil {
+			return nil, nil, true, loadErr
+		}
+		value = loaded
+	}
+	return C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("nodekey.index")), enumType, true, nil
+}
+
+func (s *functionState) emitDenseKeyHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if callIdentName(expr) != "dense_key" {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 2 {
+		return nil, nil, true, fmt.Errorf("dense_key expects 2 arguments, got %d", len(expr.Args))
+	}
+	resultType := s.exprType(expr)
+	resultLLVMType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	storeValue, storeType, err := s.emitPackedStoreValueFromExpr(expr.Args[1])
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if storeType == nil || storeType.Enum == nil {
+		return nil, nil, true, fmt.Errorf("dense_key requires frozen packed-store metadata")
+	}
+	var handleValue C.LLVMValueRef
+	actualNodeType := s.exprType(expr.Args[0])
+	sourceEnum, ok := denseKeySourceEnumType(actualNodeType)
+	if !ok || sourceEnum == nil {
+		return nil, nil, true, fmt.Errorf("dense_key expects a packed enum value or packedview")
+	}
+	if viewType, ok := actualNodeType.(*semantic.PackedVariantViewType); ok && viewType != nil {
+		viewValue, _, err := s.emitExpr(expr.Args[0], actualNodeType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		handleValue = C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree("nodekey.view.handle"))
+	} else {
+		var actualType semantic.Type
+		handleValue, actualType, err = s.emitExpr(expr.Args[0], actualNodeType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		if refType, ok := actualType.(*semantic.RefType); ok && refType != nil && refType.State == semantic.RefStateNonNull {
+			handleValue, err = s.loadValue(handleValue, refType.Elem, "nodekey.handle")
+			if err != nil {
+				return nil, nil, true, err
+			}
+		}
+	}
+	ops := &packedStoreOps{s: s, storeValue: storeValue, storeType: storeType}
+	var indexValue C.LLVMValueRef
+	switch s.g.packedModeForEnum(sourceEnum) {
+	case packedEnumABIIndexSOA:
+		indexValue, err = s.coerceValue(handleValue, sourceEnum, s.g.result.NamedTypes["u32"])
+		if err != nil {
+			return nil, nil, true, err
+		}
+	case packedEnumABIRowHandle:
+		rowPtr, err := s.coerceValue(handleValue, sourceEnum, ops.voidRefType())
+		if err != nil {
+			return nil, nil, true, err
+		}
+		indexValue, err = ops.encodeDenseIndex(rowPtr, "nodekey.encode_index")
+		if err != nil {
+			return nil, nil, true, err
+		}
+	case packedEnumABIWordHandle:
+		rowPtr, err := ops.decodeHandle(handleValue, sourceEnum, "nodekey.decode")
+		if err != nil {
+			return nil, nil, true, err
+		}
+		indexValue, err = ops.encodeDenseIndex(rowPtr, "nodekey.encode_index")
+		if err != nil {
+			return nil, nil, true, err
+		}
+	default:
+		return nil, nil, true, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedModeForEnum(sourceEnum))
+	}
+	resultValue := C.LLVMGetUndef(resultLLVMType)
+	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, indexValue, 0, cStringFree("nodekey.index.insert"))
+	return resultValue, resultType, true, nil
+}
+
+func (s *functionState) emitNodeTableFillHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if callSpecializedIdentName(expr) != "node_table_fill" {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 3 {
+		return nil, nil, true, fmt.Errorf("node_table_fill expects 3 arguments, got %d", len(expr.Args))
+	}
+	resultType := s.exprType(expr)
+	resultLLVMType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	_, elemType, err := s.nodeTableFillTypeArgs(expr)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	storeValue, storeType, err := s.emitPackedStoreValueFromExpr(expr.Args[1])
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if storeType == nil || storeType.Enum == nil {
+		return nil, nil, true, fmt.Errorf("node_table_fill requires frozen packed-store metadata")
+	}
+	countValue, err := s.emitPackedStoreCountValue(storeValue, storeType, "node.table.count")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	zeroCount := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	entryBlock := C.LLVMGetInsertBlock(s.builder)
+	allocBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("node.table.alloc"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("node.table.merge"))
+	isZero := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), countValue, zeroCount, cStringFree("node.table.count.zero"))
+	C.LLVMBuildCondBr(s.builder, isZero, mergeBB, allocBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, allocBB)
+	arenaPtr, _, err := s.emitAddressOrTemp(expr.Args[0])
+	if err != nil {
+		return nil, nil, true, err
+	}
+	elemSize, err := s.sizeOfType(elemType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	elemSizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(elemSize), 0)
+	byteCount := C.LLVMBuildMul(s.builder, countValue, elemSizeValue, cStringFree("node.table.bytes"))
+	voidType := s.g.result.NamedTypes["void"]
+	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	allocType := &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
+	allocCallee, err := s.g.ensureFunctionDeclared("arena_alloc", allocType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	allocLLVMType, err := s.g.lowerFunctionType(allocType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	allocPtr := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{arenaPtr, byteCount}, "node.table.alloc.ptr")
+	viewType := &semantic.DArrayViewType{Elem: elemType, SurfaceName: "dview"}
+	viewLLVMType, err := s.g.lowerType(viewType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	viewValue := C.LLVMGetUndef(viewLLVMType)
+	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, allocPtr, 0, cStringFree("node.table.view.data"))
+	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, countValue, 1, cStringFree("node.table.view.len"))
+	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, elemSizeValue, 2, cStringFree("node.table.view.elem_size"))
+	initValue, actualInitType, err := s.emitExpr(expr.Args[2], elemType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	initValue, err = s.coerceValue(initValue, actualInitType, elemType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	fillType := &semantic.FuncType{Name: "arena_da_fill", Params: []semantic.Type{viewType, elemType}, Return: s.g.result.NamedTypes["void"]}
+	fillCallee, err := s.g.ensureFunctionDeclared("arena_da_fill", fillType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	fillLLVMType, err := s.g.lowerFunctionType(fillType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	_ = s.buildCall(fillLLVMType, fillCallee, []C.LLVMValueRef{viewValue, initValue}, "")
+	materialized := C.LLVMGetUndef(resultLLVMType)
+	materialized = C.LLVMBuildInsertValue(s.builder, materialized, viewValue, 0, cStringFree("node.table.values.insert"))
+	allocEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	zeroResult := C.LLVMConstNull(resultLLVMType)
+	phi := C.LLVMBuildPhi(s.builder, resultLLVMType, cStringFree("node.table.result"))
+	values := []C.LLVMValueRef{zeroResult, materialized}
+	blocks := []C.LLVMBasicBlockRef{entryBlock, allocEnd}
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	return phi, resultType, true, nil
+}
+
 func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, error) {
 	if storeType, ok := s.packedStoreConstructorCall(expr); ok {
 		return s.emitPackedStoreConstructorValue(expr, storeType)
@@ -2945,6 +3213,12 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 		}
 		frozenType := s.exprType(expr)
 		return s.emitExpr(expr.Args[0], frozenType)
+	}
+	if value, actualType, handled, err := s.emitDenseKeyHelperCall(expr); handled {
+		return value, actualType, err
+	}
+	if value, actualType, handled, err := s.emitNodeTableFillHelperCall(expr); handled {
+		return value, actualType, err
 	}
 	if enumType, variant, ok := s.enumConstructorInfo(expr); ok {
 		if variant == nil {
@@ -3894,6 +4168,32 @@ func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMVa
 	return coerced, fieldType, true, nil
 }
 
+func (s *functionState) emitPackedStoreValueAtDenseKey(ops *packedStoreOps, keyIndex C.LLVMValueRef, name string) (C.LLVMValueRef, semantic.Type, error) {
+	if ops == nil || ops.storeType == nil || ops.storeType.Enum == nil {
+		return nil, nil, fmt.Errorf("dense-key packed store read requires store metadata")
+	}
+	switch s.g.packedModeForEnum(ops.storeType.Enum) {
+	case packedEnumABIIndexSOA:
+		coerced, err := s.coerceValue(keyIndex, s.g.result.NamedTypes["u32"], ops.storeType.Enum)
+		if err != nil {
+			return nil, nil, err
+		}
+		return coerced, ops.storeType.Enum, nil
+	case packedEnumABIRowHandle, packedEnumABIWordHandle:
+		rowPtr, err := ops.decodeDenseIndex(keyIndex, name+".decode")
+		if err != nil {
+			return nil, nil, err
+		}
+		handleValue, err := ops.encodeHandle(rowPtr, ops.storeType.Enum, name+".encode")
+		if err != nil {
+			return nil, nil, err
+		}
+		return handleValue, ops.storeType.Enum, nil
+	default:
+		return nil, nil, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedModeForEnum(ops.storeType.Enum))
+	}
+}
+
 func (s *functionState) emitPackedStoreIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	if expr == nil {
 		return nil, nil, false, nil
@@ -3904,6 +4204,13 @@ func (s *functionState) emitPackedStoreIndexExpr(expr *ast.IndexExpr) (C.LLVMVal
 	}
 	if !ok {
 		return nil, nil, false, nil
+	}
+	if keyIndex, _, handled, err := s.emitNodeKeyIndexValue(expr.Index); handled {
+		if err != nil {
+			return nil, nil, true, err
+		}
+		value, actualType, err := s.emitPackedStoreValueAtDenseKey(ops, keyIndex, "packed.store.key")
+		return value, actualType, true, err
 	}
 	indexValue, _, err := s.emitExpr(expr.Index, s.g.result.NamedTypes["usize"])
 	if err != nil {

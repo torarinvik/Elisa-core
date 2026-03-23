@@ -34,6 +34,8 @@ type Result struct {
 	ConstValues     map[string]ConstValue
 	ExprTypes       map[ast.Expr]Type
 	ExprFacts       map[ast.Expr]OptimizationFacts
+	DenseNodeKeys   map[ast.Expr]DenseNodeKeyInfo
+	NodeTables      map[ast.Expr]NodeTableInfo
 	PackedLowering  PackedLoweringMetadata
 	ParallelFor     map[*ast.ParallelForStmt]*ParallelForInfo
 	AnnotatedFuncs  []*AnnotatedFunc
@@ -47,6 +49,18 @@ type ParallelForInfo struct {
 	SourceType Type
 	ItemType   Type
 	Captures   []string
+}
+
+type DenseNodeKeyInfo struct {
+	Enum      *EnumType
+	StoreRoot *Symbol
+}
+
+type NodeTableInfo struct {
+	Enum      *EnumType
+	Elem      Type
+	StoreRoot *Symbol
+	CountExpr string
 }
 
 type PackedLoweringMetadata struct {

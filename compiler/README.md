@@ -93,6 +93,34 @@ The frozen packed-projection lane is now covered end to end across the current s
 
 In short: the current frozen-store projection surface is no longer just “works in the happy path”; it has explicit regression coverage for the carrier shapes and decode-cache coherence rules the compiler relies on. Tiny compiler dragon, now with a seatbelt.
 
+The same frozen-store lane now also exposes dense node-key helpers for fixed-size side tables over packed enums:
+
+```text
+def annotate(owner: Arena) -> i32:
+  store: Expr.Store[Local] = Expr.Store(owner)
+  in store:
+    left: Expr = new Expr.Lit(span: 1, value: 3)
+    right: Expr = new Expr.Lit(span: 2, value: 4)
+    _ = new Expr.Add(span: 5, left: left, right: right)
+
+  frozen: Expr.Store[Frozen] = freeze(move store)
+  node: Expr = frozen[2u]
+  key: NodeKey[Expr] = dense_key(node, frozen)
+  depths: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, frozen, -1i32)
+  depths[key] <- 0i32
+  again: Expr = frozen[key]
+  all_depths: dview[i32] = depths.values
+  return again.span
+```
+
+Current dense frozen-node-table rules:
+
+- `dense_key(node, frozen)` is only valid for packed-enum values or packed views proven to come from the exact same frozen store root.
+- `NodeKey[Enum]` is a compact carrier for the dense frozen index; `frozen[key]` rehydrates the packed handle from that key.
+- `node_table_fill.specialize[Enum, T]()(arena, frozen, init)` allocates a fixed-size `NodeTable[Enum, T]` with one slot per frozen packed-store row and initializes it eagerly.
+- `table[key]` is writable, while `table.values` is a dense `dview[T]` with frozen packed-store provenance and exact extent tracking.
+- Canonical packed lowering keeps the key path zero-cost under `index-soa`, while legacy row/word-handle overrides lower through the existing dense-index encode/decode helpers.
+
 ## Benchmark scaffolding
 
 There is now a synthetic JSON benchmark scaffold under `test/benchmarks/json_bench_test.go`.

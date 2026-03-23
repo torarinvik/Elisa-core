@@ -71,6 +71,8 @@ type Analyzer struct {
 	constValues                       map[string]ConstValue
 	exprTypes                         map[ast.Expr]Type
 	exprFacts                         map[ast.Expr]OptimizationFacts
+	exprDenseNodeKeys                 map[ast.Expr]DenseNodeKeyInfo
+	exprNodeTables                    map[ast.Expr]NodeTableInfo
 	symbolFacts                       map[*Symbol]OptimizationFacts
 	typeParamScopes                   []map[string]Type
 	refStorageParamScopes             []map[string]Type
@@ -167,6 +169,8 @@ func Analyze(file *ast.File) *Result {
 		constValues:                      map[string]ConstValue{},
 		exprTypes:                        map[ast.Expr]Type{},
 		exprFacts:                        map[ast.Expr]OptimizationFacts{},
+		exprDenseNodeKeys:                map[ast.Expr]DenseNodeKeyInfo{},
+		exprNodeTables:                   map[ast.Expr]NodeTableInfo{},
 		parallelForInfo:                  map[*ast.ParallelForStmt]*ParallelForInfo{},
 		symbolFacts:                      map[*Symbol]OptimizationFacts{},
 		returnProvenanceInProgress:       map[string]bool{},
@@ -194,6 +198,8 @@ func Analyze(file *ast.File) *Result {
 		ConstValues:     a.constValues,
 		ExprTypes:       a.exprTypes,
 		ExprFacts:       a.exprFacts,
+		DenseNodeKeys:   a.exprDenseNodeKeys,
+		NodeTables:      a.exprNodeTables,
 		ParallelFor:     a.parallelForInfo,
 		AnnotatedFuncs:  a.annotatedFuncs,
 		ExportedTypes:   a.exportedTypes,
@@ -316,6 +322,12 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 		{name: "chunk_size", typ: namedTypeExpr("usize", false), mutable: false},
 		{name: "len", typ: namedTypeExpr("usize", false), mutable: false},
 	})
+	a.registerBuiltinStructType("NodeKey", []string{"T"}, false, []builtinFieldSpec{
+		{name: "index", typ: namedTypeExpr("u32", false), mutable: false},
+	})
+	a.registerBuiltinStructType("NodeTable", []string{"N", "T"}, false, []builtinFieldSpec{
+		{name: "values", typ: genericTypeExpr("dview", namedTypeExpr("T", false)), mutable: false},
+	})
 	a.registerBuiltinStructType("DictBucket", []string{"T"}, false, []builtinFieldSpec{
 		{name: "state", typ: namedTypeExpr("u8", false), mutable: true},
 		{name: "hash", typ: namedTypeExpr("u64", false), mutable: true},
@@ -435,6 +447,8 @@ func isBuiltinRuntimeStructName(name string) bool {
 	case "Region", "Arena", "ArenaMark", "StringView", "DynArray", "DynArrayView", "DictBucket", "DynDict":
 		return true
 	case "SplitView", "ChunksExactView":
+		return true
+	case "NodeKey", "NodeTable":
 		return true
 	case "PackedStoreAllocResult", "PackedStoreIndexAllocResult":
 		return true

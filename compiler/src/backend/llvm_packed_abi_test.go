@@ -1545,6 +1545,66 @@ def fold_common_frozen_nested_helper_indexed_reassign() -> int:
 	}
 }
 
+func TestGenerateLLVMIRLowersDenseNodeKeysAcrossPackedABIs(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Lit(value: int)
+	Add(left: Expr, right: Expr)
+
+def read(owner: Arena) -> int:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		left: Expr = new Expr.Lit(span: 1, value: 3)
+		right: Expr = new Expr.Lit(span: 2, value: 4)
+		_ = new Expr.Add(span: 5, left: left, right: right)
+
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	node: Expr = frozen[2u]
+	key: NodeKey[Expr] = dense_key(node, frozen)
+	again: Expr = frozen[key]
+	return again.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_dense_node_key_abi.llcontext", src)
+
+	for _, abi := range []packedEnumABIMode{packedEnumABIRowHandle, packedEnumABIWordHandle, packedEnumABIIndexSOA} {
+		t.Run(packedABITestName(abi), func(t *testing.T) {
+			output, err := generateLLVMIRWithPackedABIForTest(result, abi)
+			if err != nil {
+				t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+			}
+
+			switch abi {
+			case packedEnumABIIndexSOA:
+				indexCalls := strings.Count(output, "call i32 @ctx_packed_store_index_at(")
+				if indexCalls != 1 {
+					t.Fatalf("expected canonical dense-key lowering to reuse the original numeric frozen lookup and avoid an extra index_at for frozen[key], got %d calls:\n%s", indexCalls, output)
+				}
+				for _, bad := range []string{"call i32 @ctx_packed_store_encode_index(", "call ptr @ctx_packed_store_decode_index(", "call i64 @ctx_packed_store_encode(", "call ptr @ctx_packed_store_decode("} {
+					if strings.Contains(output, bad) {
+						t.Fatalf("expected canonical dense-key lowering to avoid %q, got:\n%s", bad, output)
+					}
+				}
+			case packedEnumABIRowHandle:
+				for _, check := range []string{"call i32 @ctx_packed_store_encode_index(", "call ptr @ctx_packed_store_decode_index("} {
+					if !strings.Contains(output, check) {
+						t.Fatalf("expected row-handle dense-key lowering to contain %q, got:\n%s", check, output)
+					}
+				}
+				if strings.Contains(output, "call ptr @ctx_packed_store_decode(") {
+					t.Fatalf("expected row-handle dense-key lowering to avoid full word-handle decode helper, got:\n%s", output)
+				}
+			case packedEnumABIWordHandle:
+				for _, check := range []string{"call i32 @ctx_packed_store_encode_index(", "call ptr @ctx_packed_store_decode_index(", "call i64 @ctx_packed_store_encode(", "call ptr @ctx_packed_store_decode("} {
+					if !strings.Contains(output, check) {
+						t.Fatalf("expected word-handle dense-key lowering to contain %q, got:\n%s", check, output)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestGenerateLLVMIRUsesSingleDecodeForMixedFrozenRepeatedCommonFieldReads(t *testing.T) {
 	src := `packed enum Expr:
 	common:

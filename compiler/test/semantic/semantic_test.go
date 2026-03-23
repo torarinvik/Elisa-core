@@ -4854,6 +4854,105 @@ def walk(owner: Arena) -> int:
 	requireFunctionReturnTypeString(t, result, "walk", "int")
 }
 
+func TestAnalyzeAcceptsDenseNodeKeysAndNodeTablesForFrozenPackedStores(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: i32
+	Lit(value: i32)
+	Add(left: Expr, right: Expr)
+
+def inspect(owner: Arena) -> i32:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		left: Expr = new Expr.Lit(span: 1i32, value: 3i32)
+		right: Expr = new Expr.Lit(span: 2i32, value: 4i32)
+		_ = new Expr.Add(span: 5i32, left: left, right: right)
+
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	node: Expr = frozen[2u]
+	key: NodeKey[Expr] = dense_key(node, frozen)
+	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, frozen, -1i32)
+	table[key] <- 0i32
+	again: Expr = frozen[key]
+	values: dview[i32] = table.values
+	if values.len == frozen.count:
+		return again.span
+	return 0i32
+`
+	result, errs := parseAndAnalyze(t, "packed_store_dense_node_key_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "inspect", "i32")
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	keyExpr := requireOptimizationFactsVarInitExpr(t, fn, "key")
+	tableExpr := requireOptimizationFactsVarInitExpr(t, fn, "table")
+	againExpr := requireOptimizationFactsVarInitExpr(t, fn, "again")
+	valuesExpr := requireOptimizationFactsVarInitExpr(t, fn, "values")
+
+	requireExprTypeString(t, result, keyExpr, "NodeKey[Expr]")
+	requireExprTypeString(t, result, tableExpr, "NodeTable[Expr, i32]")
+	requireExprTypeString(t, result, againExpr, "Expr")
+	requireExprTypeString(t, result, valuesExpr, "dview[i32]")
+
+	keyInfo, ok := result.DenseNodeKeys[keyExpr]
+	if !ok {
+		t.Fatal("expected dense_key expression provenance to be recorded")
+	}
+	if keyInfo.Enum == nil || keyInfo.Enum.Name != "Expr" {
+		t.Fatalf("expected dense_key enum provenance for Expr, got %#v", keyInfo)
+	}
+	if keyInfo.StoreRoot == nil {
+		t.Fatalf("expected dense_key exact frozen store root provenance, got %#v", keyInfo)
+	}
+
+	tableInfo, ok := result.NodeTables[tableExpr]
+	if !ok {
+		t.Fatal("expected node_table_fill expression metadata to be recorded")
+	}
+	if tableInfo.Enum == nil || tableInfo.Enum.Name != "Expr" {
+		t.Fatalf("expected node table enum provenance for Expr, got %#v", tableInfo)
+	}
+	if tableInfo.Elem == nil || tableInfo.Elem.String() != "i32" {
+		t.Fatalf("expected node table element type i32, got %#v", tableInfo)
+	}
+	if tableInfo.StoreRoot == nil {
+		t.Fatalf("expected node table exact frozen store root provenance, got %#v", tableInfo)
+	}
+	if tableInfo.CountExpr == "" {
+		t.Fatalf("expected node table count expression metadata, got %#v", tableInfo)
+	}
+}
+
+func TestAnalyzeRejectsDenseNodeKeyIndexingAcrossDifferentFrozenStoreRoots(t *testing.T) {
+	src := `packed enum Expr:
+	Lit(value: int)
+
+def bad(owner: Arena) -> Expr:
+	left_store: Expr.Store[Local] = Expr.Store(owner)
+	in left_store:
+		_ = new Expr.Lit(value: 1)
+	left_frozen: Expr.Store[Frozen] = freeze(move left_store)
+
+	right_store: Expr.Store[Local] = Expr.Store(owner)
+	in right_store:
+		_ = new Expr.Lit(value: 2)
+	right_frozen: Expr.Store[Frozen] = freeze(move right_store)
+
+	node: Expr = left_frozen[0u]
+	key: NodeKey[Expr] = dense_key(node, left_frozen)
+	return right_frozen[key]
+`
+	_, errs := parseAndAnalyze(t, "packed_store_dense_node_key_cross_root_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "node key and frozen store must share the same exact frozen store root") {
+		t.Fatalf("expected cross-store dense node key diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsAssigningPackedStoreIndexResult(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)

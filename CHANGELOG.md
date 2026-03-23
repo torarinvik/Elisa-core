@@ -10,6 +10,7 @@ All notable changes to this repository should be documented in this file.
 - Concrete export wrappers such as `keep_handle[heap, &]` now parse and lower correctly, including stable public header emission for concrete qualifier-specialized exports.
 - A compile-checked showcase for the feature now lives at `Code/test_programs/ref_qualifier_generics.llcontext`.
 - Frozen-store projection APIs are now effectively complete across the current semantic and packed-ABI backend matrix, including wrapper continuity, decode-once reuse for projected frozen common-field reads, and correct decode-cache invalidation after projected mutation.
+- Frozen packed enums now support dense node-key side tables through `NodeKey[Enum]`, `NodeTable[Enum, T]`, `dense_key(...)`, `node_table_fill.specialize[...]()`, `frozen[key]`, `table[key]`, and `table.values`.
 
 ### Added
 
@@ -36,6 +37,12 @@ All notable changes to this repository should be documented in this file.
   - qualifier-generic call inference
   - qualifier-specialized LLVM lowering
   - concrete export/header behavior
+- Frozen packed dense-node-table helpers for:
+  - exact frozen-store-root key provenance
+  - `NodeKey` / `NodeTable` builtin carrier typing
+  - direct backend lowering of `node_table_fill`
+  - canonical + legacy packed-ABI dense-key indexing
+  - `table.values` optimization facts
 
 ### Changed
 
@@ -47,6 +54,7 @@ All notable changes to this repository should be documented in this file.
 - Call inference now binds `refstorage` and `refstate` parameters from concrete argument types.
 - Export type validation now rejects unresolved qualifier-parameter types at the C ABI boundary.
 - Frozen packed projections now have explicit regression coverage across direct, helper-wrapped, helper-indexed, nested rebased helper-indexed, and nested wildcard rebased helper-indexed carriers. The validated matrix now covers repeated direct common-field reads, projected reassignment invalidation, and repeated matched-child common-field reuse under `in frozen:` lowering.
+- Frozen packed helper analysis now tracks exact-store provenance for dense node keys and fixed-size side tables, and the backend lowers `node_table_fill` directly through `arena_alloc` + `arena_da_fill` instead of a user-visible wrapper.
 
 ### Compatibility
 
@@ -63,6 +71,7 @@ All notable changes to this repository should be documented in this file.
 - Added a compile-checked end-to-end feature example at:
   - `Code/test_programs/ref_qualifier_generics.llcontext`
 - Added a human-readable frozen packed-projection completeness note to `compiler/README.md`.
+- Documented the dense frozen packed node-table helper surface in `compiler/README.md`.
 
 ### Verification
 

@@ -360,6 +360,33 @@ func (a *Analyzer) inferExprOptimizationFacts(expr ast.Expr, t Type) Optimizatio
 		if splitFacts, ok := a.inferSplitViewFieldOptimizationFacts(n); ok {
 			facts = overlayOptimizationFacts(facts, splitFacts)
 		}
+		if n.Field == "values" {
+			if tableInfo, ok := a.nodeTableInfoForExpr(n.Object); ok && tableInfo.Enum != nil {
+				if objectFacts, ok := a.exprFacts[n.Object]; ok && objectFacts.Exclusive {
+					facts.Exclusive = true
+				}
+				facts.ReadOnly = false
+				facts.Contiguous = true
+				facts.UnitStride = true
+				if base := a.optimizationBaseForExpr(n.Object); base != "" {
+					facts.base = base + ".values"
+				} else {
+					facts.base = optimizationExprString(expr)
+				}
+				if tableInfo.CountExpr != "" {
+					facts.Extent = &OptimizationExtent{
+						Kind:  OptimizationExtentViewBounds,
+						Begin: "0",
+						End:   tableInfo.CountExpr,
+					}
+				}
+				facts.PackedStoreProvenance = PackedStoreProvenance{
+					HasPackedStoreDeps:       true,
+					HasFrozenPackedStoreDeps: true,
+				}
+				facts.FrozenPackedStoreOnly = true
+			}
+		}
 		if n.Field == "tags" {
 			if storeType, ok := a.exprTypes[n.Object].(*PackedEnumStoreType); ok && IsFrozenPackedEnumStoreType(storeType) {
 				facts.ReadOnly = true

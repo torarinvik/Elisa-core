@@ -1303,3 +1303,43 @@ func ChunksExactViewItemType(t Type) (*DArrayViewType, bool) {
 	}
 	return &DArrayViewType{Elem: gi.Args[0], SurfaceName: "dview"}, true
 }
+
+func NodeKeyInstance(t Type) (*GenericInstanceType, bool) {
+	gi, ok := t.(*GenericInstanceType)
+	if !ok || gi == nil || gi.Name != "NodeKey" || len(gi.Args) != 1 {
+		return nil, false
+	}
+	return gi, true
+}
+
+func NodeKeyEnumType(t Type) (*EnumType, bool) {
+	gi, ok := NodeKeyInstance(t)
+	if !ok {
+		return nil, false
+	}
+	enumType, ok := StripAggregateStateType(gi.Args[0]).(*EnumType)
+	if !ok || enumType == nil || !enumType.Packed {
+		return nil, false
+	}
+	return enumType, true
+}
+
+func NodeTableInstance(t Type) (*GenericInstanceType, bool) {
+	gi, ok := t.(*GenericInstanceType)
+	if !ok || gi == nil || gi.Name != "NodeTable" || len(gi.Args) != 2 {
+		return nil, false
+	}
+	return gi, true
+}
+
+func NodeTableParts(t Type) (*EnumType, Type, bool) {
+	gi, ok := NodeTableInstance(t)
+	if !ok {
+		return nil, nil, false
+	}
+	enumType, ok := StripAggregateStateType(gi.Args[0]).(*EnumType)
+	if !ok || enumType == nil || !enumType.Packed {
+		return nil, nil, false
+	}
+	return enumType, gi.Args[1], true
+}

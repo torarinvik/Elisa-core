@@ -302,6 +302,65 @@ def inspect(a: any Arena&, values: any darray[i32, row]&, other: any darray[i32,
 	}
 }
 
+func TestAnalyzeInfersDenseWritableFactsForNodeTableValues(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: i32
+	Lit(value: i32)
+	Add(left: Expr, right: Expr)
+
+def inspect(owner: Arena) -> i32:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		left: Expr = new Expr.Lit(span: 1i32, value: 3i32)
+		right: Expr = new Expr.Lit(span: 2i32, value: 4i32)
+		_ = new Expr.Add(span: 5i32, left: left, right: right)
+
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	node: Expr = frozen[2u]
+	key: NodeKey[Expr] = dense_key(node, frozen)
+	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, frozen, -1i32)
+	table[key] <- 0i32
+	values: dview[i32] = table.values
+	nodes: dview[Expr] = frozen[0u:frozen.count]
+	if values.len == nodes.len:
+		return values[0u]
+	return -1i32
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_node_table_values.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	valuesExpr := requireOptimizationFactsVarInitExpr(t, fn, "values")
+	nodesExpr := requireOptimizationFactsVarInitExpr(t, fn, "nodes")
+	valuesFacts := requireExprOptimizationFacts(t, result, valuesExpr)
+	nodesFacts := requireExprOptimizationFacts(t, result, nodesExpr)
+	valuesProvenance := requireExprPackedStoreProvenance(t, result, valuesExpr)
+
+	if valuesFacts.ReadOnly {
+		t.Fatalf("expected node-table values view to stay writable, got %#v", valuesFacts)
+	}
+	if !valuesFacts.Contiguous || !valuesFacts.UnitStride {
+		t.Fatalf("expected node-table values view to be contiguous unit-stride, got %#v", valuesFacts)
+	}
+	if !valuesFacts.FrozenPackedStoreOnly {
+		t.Fatalf("expected node-table values view to be marked frozen-packed-store-only, got %#v", valuesFacts)
+	}
+	if !valuesFacts.HasExactExtent() {
+		t.Fatalf("expected node-table values view to preserve exact frozen-store extent, got %#v", valuesFacts)
+	}
+	if !result.ExprSupportsDenseWrite(valuesExpr) {
+		t.Fatalf("expected node-table values view to support dense writes")
+	}
+	if !valuesProvenance.DependsOnlyOnFrozenPackedStores() {
+		t.Fatalf("expected node-table values view provenance to depend only on frozen packed stores, got %#v", valuesProvenance)
+	}
+	if !nodesFacts.HasExactExtent() {
+		t.Fatalf("expected full frozen-store slice to preserve an exact extent, got %#v", nodesFacts)
+	}
+}
+
 func TestAnalyzeInfersDisjointnessForNonOverlappingViewsAndFreshAllocations(t *testing.T) {
 	src := `repr(c) struct StringView:
 	data: mutable any u8&

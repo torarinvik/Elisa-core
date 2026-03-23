@@ -2189,6 +2189,62 @@ def fold() -> int:
 	}
 }
 
+func TestGenerateLLVMIRLowersDenseNodeTablesDirectly(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: i32
+	Lit(value: i32)
+	Add(left: Expr, right: Expr)
+
+def inspect(owner: Arena) -> i32:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		left: Expr = new Expr.Lit(span: 1i32, value: 3i32)
+		right: Expr = new Expr.Lit(span: 2i32, value: 4i32)
+		_ = new Expr.Add(span: 5i32, left: left, right: right)
+
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	node: Expr = frozen[2u]
+	key: NodeKey[Expr] = dense_key(node, frozen)
+	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, frozen, -1i32)
+	table[key] <- 0i32
+	values: dview[i32] = table.values
+	if values.len == frozen.count:
+		return frozen[key].span
+	return 0i32
+`
+	result := parseAndAnalyze(t, "backend_dense_node_table.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	for _, check := range []string{
+		"%NodeKey__Expr = type { i32 }",
+		"%NodeTable__Expr__i32 = type { %DynArrayView }",
+		"call ptr @arena_alloc(",
+		"call void @arena_da_fill(",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "@node_table_fill(") {
+		t.Fatalf("expected node_table_fill to lower directly in the backend without a runtime wrapper, got:\n%s", output)
+	}
+
+	body := functionIR(output, "inspect")
+	if body == "" {
+		t.Fatalf("expected to find inspect body, got:\n%s", output)
+	}
+	if !strings.Contains(body, "getelementptr inbounds nuw %NodeTable__Expr__i32") {
+		t.Fatalf("expected inspect to address through the NodeTable carrier struct, got:\n%s", body)
+	}
+	if !strings.Contains(body, "extractvalue %NodeKey__Expr") {
+		t.Fatalf("expected inspect to read the dense node key carrier index field, got:\n%s", body)
+	}
+}
+
 func TestGenerateLLVMIRLowersMatchOnRefinedPackedViewScrutinee(t *testing.T) {
 	src := `packed enum Expr:
 	common:
