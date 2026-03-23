@@ -4,6 +4,7 @@ package backend
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -47,6 +48,12 @@ func parseAndAnalyzeBackendTest(t *testing.T, filename string, src string) *sema
 		t.Fatalf("semantic errors:\n%s", strings.Join(errs, "\n"))
 	}
 	return result
+}
+
+func countStoreFieldExtracts(output string, storeType string, fieldIndex int) int {
+	pattern := fmt.Sprintf(`extractvalue %%%s %%[^,]+, %d`, storeType, fieldIndex)
+	re := regexp.MustCompile(pattern)
+	return len(re.FindAllStringIndex(output, -1))
 }
 
 func generateLLVMIRWithPackedABIForTest(result *semantic.Result, abi packedEnumABIMode) (string, error) {
@@ -190,12 +197,10 @@ def fold() -> int:
 		"declare ptr @ctx_packed_store_state_new(ptr, i64)",
 		"call ptr @ctx_packed_store_state_new(ptr",
 		"call %PackedStoreAllocResult @ctx_packed_store_alloc_fixed_tagged_result(ptr %packed.alloc.store.arena, ptr %packed.alloc.store.state, i32 ",
-		"call ptr @ctx_packed_store_decode(ptr %packed.decode.store.arena, i64",
-		"ptr %packed.decode.store.state)",
+		"call ptr @ctx_packed_store_decode(ptr %packed.alloc.store.arena, i64",
+		"ptr %packed.alloc.store.state)",
 		"extractvalue %Expr__Store",
 		"extractvalue %PackedStoreAllocResult",
-		"packed.decode.store.arena",
-		"packed.decode.store.state",
 		"store %Expr { i32 0, i64 7, [1 x i64] zeroinitializer }, ptr %packed.alloc.ptr",
 		"store i64 5, ptr %enum.payload.ptr",
 	}
@@ -624,16 +629,11 @@ def fold_common() -> int:
 	if decodeCalls != 0 {
 		t.Fatalf("expected no full decode for repeated packed common-field reads after constructor alloc returns a writable row directly, got %d decode calls:\n%s", decodeCalls, output)
 	}
-	for _, check := range []string{"packed.common.store.arena", "packed.common.store.state"} {
-		if !strings.Contains(output, check) {
-			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
-		}
-	}
-	arenaExtracts := strings.Count(output, "packed.common.store.arena = extractvalue %Expr__Store")
+	arenaExtracts := countStoreFieldExtracts(output, "Expr__Store", 0)
 	if arenaExtracts != 1 {
 		t.Fatalf("expected repeated packed common-field reads in one block to reuse a single arena extractvalue, got %d extracts:\n%s", arenaExtracts, output)
 	}
-	stateExtracts := strings.Count(output, "packed.common.store.state = extractvalue %Expr__Store")
+	stateExtracts := countStoreFieldExtracts(output, "Expr__Store", 2)
 	if stateExtracts != 1 {
 		t.Fatalf("expected repeated packed common-field reads in one block to reuse a single state extractvalue, got %d extracts:\n%s", stateExtracts, output)
 	}

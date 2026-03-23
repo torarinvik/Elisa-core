@@ -75,7 +75,7 @@ type packedStoreBinding struct {
 type packedStoreExtractCacheKey struct {
 	block C.LLVMBasicBlockRef
 	store C.LLVMValueRef
-	name  string
+	index C.unsigned
 }
 
 type packedEnumStorageBinding struct {

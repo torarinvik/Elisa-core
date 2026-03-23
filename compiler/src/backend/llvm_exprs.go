@@ -3785,7 +3785,7 @@ func (s *functionState) emitPackedStoreFieldValueNamed(storeValue C.LLVMValueRef
 		return nil, err
 	}
 	if block := C.LLVMGetInsertBlock(s.builder); block != nil && s.packedStoreValues != nil && storeValue != nil {
-		key := packedStoreExtractCacheKey{block: block, store: storeValue, name: name}
+		key := packedStoreExtractCacheKey{block: block, store: storeValue, index: index}
 		if cached, ok := s.packedStoreValues[key]; ok && cached != nil {
 			return cached, nil
 		}

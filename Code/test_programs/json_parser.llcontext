@@ -140,14 +140,21 @@ struct JsonParserDocument:
 
 struct JsonParserValue:
     impl_bits: mutable uintptr
+    node_words: mutable uintptr[3]
 
 
 struct JsonParserArrayIter:
     impl_bits: mutable uintptr
+    items_ptr: mutable any void&?
+    item_count: mutable usize
+    index: mutable usize
 
 
 struct JsonParserObjectIter:
     impl_bits: mutable uintptr
+    fields_ptr: mutable any void&?
+    field_count: mutable usize
+    index: mutable usize
 
 
 def json_new_cursor_with_len(source: any u8&, source_len: usize) -> JsonCursor:
@@ -1613,71 +1620,65 @@ def json_parser_document_null() -> JsonParserDocument:
 
 
 def json_parser_value_null() -> JsonParserValue:
-    return JsonParserValue(0u64.uintptr())
+    out: mutable JsonParserValue = zeroed
+    return move out
 
 
 def json_parser_array_iter_null() -> JsonParserArrayIter:
-    return JsonParserArrayIter(0u64.uintptr())
+    out: mutable JsonParserArrayIter = zeroed
+    return move out
 
 
 def json_parser_object_iter_null() -> JsonParserObjectIter:
-    return JsonParserObjectIter(0u64.uintptr())
+    out: mutable JsonParserObjectIter = zeroed
+    return move out
 
 
 def json_parser_value_is_live(value: any JsonParserValue&) -> bool:
     return value[0u].impl_bits != 0u64.uintptr()
 
 
-def json_parser_value_impl(value: any JsonParserValue&) -> any JsonParserValueInternal&:
-    return value[0u].impl_bits.cast[any JsonParserValueInternal&]()
-
-
 def json_parser_array_iter_is_live(iter: any JsonParserArrayIter&) -> bool:
     return iter[0u].impl_bits != 0u64.uintptr()
 
 
-def json_parser_array_iter_impl(iter: any JsonParserArrayIter&) -> any JsonParserArrayIterInternal&:
-    return iter[0u].impl_bits.cast[any JsonParserArrayIterInternal&]()
-
-
 def json_parser_array_iter_doc_impl(iter: any JsonParserArrayIter&) -> heap JsonParserDocumentInternal&:
-    return json_parser_array_iter_impl(iter).doc_bits.cast[heap JsonParserDocumentInternal&]()
+    return iter[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
 
 
 def json_parser_array_iter_cursor(iter: any JsonParserArrayIter&) -> JsonAstArrayIterCursor:
-    impl_ref: any JsonParserArrayIterInternal& = json_parser_array_iter_impl(iter)
-    out: mutable JsonAstArrayIterCursor = zeroed
-    arena_memcpy((&out).cast[any void&](), (impl_ref.cast[any u8&]() + sizeof(uintptr)).cast[any void&](), sizeof(JsonAstArrayIterCursor))
-    return move out
+    if not json_parser_array_iter_is_live(iter):
+        return json_invalid_array_iter_cursor()
+    items: dview[JsonNode] = json_node_items_view(iter[0u].items_ptr.cast[any JsonNode&?](), iter[0u].item_count.u32())
+    if iter[0u].index < items.len:
+        return JsonAstArrayIterCursor(items, iter[0u].index)
+    return json_invalid_array_iter_cursor()
 
 
 def json_parser_object_iter_is_live(iter: any JsonParserObjectIter&) -> bool:
     return iter[0u].impl_bits != 0u64.uintptr()
 
 
-def json_parser_object_iter_impl(iter: any JsonParserObjectIter&) -> any JsonParserObjectIterInternal&:
-    return iter[0u].impl_bits.cast[any JsonParserObjectIterInternal&]()
-
-
 def json_parser_object_iter_doc_impl(iter: any JsonParserObjectIter&) -> heap JsonParserDocumentInternal&:
-    return json_parser_object_iter_impl(iter).doc_bits.cast[heap JsonParserDocumentInternal&]()
+    return iter[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
 
 
 def json_parser_object_iter_cursor(iter: any JsonParserObjectIter&) -> JsonAstObjectIterCursor:
-    impl_ref: any JsonParserObjectIterInternal& = json_parser_object_iter_impl(iter)
-    out: mutable JsonAstObjectIterCursor = zeroed
-    arena_memcpy((&out).cast[any void&](), (impl_ref.cast[any u8&]() + sizeof(uintptr)).cast[any void&](), sizeof(JsonAstObjectIterCursor))
-    return move out
+    if not json_parser_object_iter_is_live(iter):
+        return json_invalid_object_iter_cursor()
+    fields: dview[JsonField] = json_field_items_view(iter[0u].fields_ptr.cast[any JsonField&?](), iter[0u].field_count.u32())
+    if iter[0u].index < fields.len:
+        return JsonAstObjectIterCursor(fields, iter[0u].index)
+    return json_invalid_object_iter_cursor()
 
 
 def json_parser_value_doc_impl(value: any JsonParserValue&) -> heap JsonParserDocumentInternal&:
-    return json_parser_value_impl(value).doc_bits.cast[heap JsonParserDocumentInternal&]()
+    return value[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
 
 
 def json_parser_value_node(value: any JsonParserValue&) -> JsonNode:
-    impl_ref: any JsonParserValueInternal& = json_parser_value_impl(value)
     out: mutable JsonNode = zeroed
-    arena_memcpy((&out).cast[any void&](), (impl_ref.cast[any u8&]() + sizeof(uintptr)).cast[any void&](), sizeof(JsonNode))
+    arena_memcpy((&out).cast[any void&](), (&value[0u].node_words).cast[any void&](), sizeof(JsonNode))
     return move out
 
 
@@ -1685,30 +1686,34 @@ def json_parser_value_from_node(impl: heap JsonParserDocumentInternal&, node: Js
     if json_node_is_invalid(node, store):
         return json_parser_value_null()
 
-    value_impl: any JsonParserValueInternal& = arena_alloc((&impl.arena).cast[any Arena&](), sizeof(JsonParserValueInternal)).cast[any JsonParserValueInternal&]()
-    value_impl.doc_bits <- impl.uintptr()
-    value_impl.node <- node
-    return JsonParserValue(value_impl.cast[any u8&]().uintptr())
+    out: mutable JsonParserValue = zeroed
+    out.impl_bits <- impl.uintptr()
+    arena_memcpy((&out.node_words).cast[any void&](), (&node).cast[any void&](), sizeof(JsonNode))
+    return move out
 
 
 def json_parser_array_iter_from_cursor(impl: heap JsonParserDocumentInternal&, cursor: JsonAstArrayIterCursor, store: JsonNode.Store[Local]) -> JsonParserArrayIter can[Memory.Allocate, Abort.Panic]:
     if not json_ast_array_iter_is_valid(cursor):
         return json_parser_array_iter_null()
 
-    iter_impl: any JsonParserArrayIterInternal& = arena_alloc((&impl.arena).cast[any Arena&](), sizeof(JsonParserArrayIterInternal)).cast[any JsonParserArrayIterInternal&]()
-    iter_impl.doc_bits <- impl.uintptr()
-    iter_impl.cursor <- cursor
-    return JsonParserArrayIter(iter_impl.cast[any u8&]().uintptr())
+    out: mutable JsonParserArrayIter = zeroed
+    out.impl_bits <- impl.uintptr()
+    out.items_ptr <- cursor.items.data
+    out.item_count <- cursor.items.len
+    out.index <- cursor.index
+    return move out
 
 
 def json_parser_object_iter_from_cursor(impl: heap JsonParserDocumentInternal&, cursor: JsonAstObjectIterCursor, store: JsonNode.Store[Local]) -> JsonParserObjectIter can[Memory.Allocate, Abort.Panic]:
     if not json_ast_object_iter_is_valid(cursor):
         return json_parser_object_iter_null()
 
-    iter_impl: any JsonParserObjectIterInternal& = arena_alloc((&impl.arena).cast[any Arena&](), sizeof(JsonParserObjectIterInternal)).cast[any JsonParserObjectIterInternal&]()
-    iter_impl.doc_bits <- impl.uintptr()
-    iter_impl.cursor <- cursor
-    return JsonParserObjectIter(iter_impl.cast[any u8&]().uintptr())
+    out: mutable JsonParserObjectIter = zeroed
+    out.impl_bits <- impl.uintptr()
+    out.fields_ptr <- cursor.fields.data
+    out.field_count <- cursor.fields.len
+    out.index <- cursor.index
+    return move out
 
 
 def json_parser_document_source(impl: heap JsonParserDocumentInternal&) -> any u8&:
