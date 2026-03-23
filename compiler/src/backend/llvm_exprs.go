@@ -3278,24 +3278,71 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 		return nil, nil, false, nil
 	}
 	binding, ok := s.lookupPackedVariantView(name)
-	if !ok || binding.typ == nil || binding.ptr == nil {
+	if !ok || binding.typ == nil || (binding.ptr == nil && binding.handle == nil) {
 		return nil, nil, false, nil
 	}
 	field, ok := binding.typ.Field(expr.Field)
 	if !ok {
 		return nil, nil, true, fmt.Errorf("%s has no field %s", binding.typ.String(), expr.Field)
 	}
-	containerType, err := s.loweredEnumStorageType(binding.typ.Enum)
-	if err != nil {
-		return nil, nil, true, err
-	}
-	for i, fieldDecl := range binding.typ.Enum.Decl.Common {
-		if fieldDecl.Name != expr.Field {
-			continue
+	if _, isCommonField := binding.typ.Enum.Common[expr.Field]; isCommonField {
+		fieldType, fieldIndex, _, _, err := s.g.fieldInfo(binding.typ.Enum, expr.Field)
+		if err != nil {
+			return nil, nil, true, err
 		}
-		fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerType, binding.ptr, C.unsigned(1+i), cStringFree("view.common.field"))
-		value, err := s.loadValue(fieldPtr, field.Type, expr.Field)
-		return value, field.Type, true, err
+		if binding.ptr == nil && binding.handle != nil && binding.store.typ != nil {
+			ops, ok := s.packedStoreOpsFromBinding(&binding.store)
+			if ok && ops.canDirectWordRead() {
+				fieldWordOffset, ok, err := s.packedEnumDirectWordFieldOffset(binding.typ.Enum, fieldIndex, fieldType)
+				if err != nil {
+					return nil, nil, true, err
+				}
+				if ok {
+					wordValue, err := ops.loadPayloadWord(binding.handle, binding.typ.Enum, fieldWordOffset, "packed.view.common")
+					if err != nil {
+						return nil, nil, true, err
+					}
+					coerced, err := s.coerceValue(wordValue, s.g.result.NamedTypes["uintptr"], fieldType)
+					if err != nil {
+						return nil, nil, true, err
+					}
+					return coerced, fieldType, true, nil
+				}
+			}
+			decodedPtr, err := s.decodePackedEnumHandleWithStore(binding.handle, binding.typ.Enum, &binding.store)
+			if err != nil {
+				return nil, nil, true, err
+			}
+			binding.ptr = decodedPtr
+		}
+		containerType, err := s.loweredEnumStorageType(binding.typ.Enum)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerType, binding.ptr, C.unsigned(fieldIndex), cStringFree("view.common.field"))
+		value, err := s.loadValue(fieldPtr, fieldType, expr.Field)
+		return value, fieldType, true, err
+	}
+	if binding.ptr == nil && binding.handle != nil && binding.store.typ != nil {
+		ops, ok := s.packedStoreOpsFromBinding(&binding.store)
+		if ok && ops.canDirectWordRead() {
+			payloadValues, ok, err := s.readPackedEnumVariantPayloadWithStore(binding.handle, binding.typ.Enum, binding.typ.Variant, &binding.store)
+			if err != nil {
+				return nil, nil, true, err
+			}
+			if ok {
+				index, ok := binding.typ.Variant.PayloadIndex(expr.Field)
+				if !ok || index < 0 || index >= len(payloadValues) {
+					return nil, nil, true, fmt.Errorf("%s has no field %s", binding.typ.String(), expr.Field)
+				}
+				return payloadValues[index], field.Type, true, nil
+			}
+		}
+		decodedPtr, err := s.decodePackedEnumHandleWithStore(binding.handle, binding.typ.Enum, &binding.store)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		binding.ptr = decodedPtr
 	}
 	payloadValues, err := s.loadEnumVariantPayload(binding.ptr, nil, binding.typ.Enum, binding.typ.Variant, nil)
 	if err != nil {
@@ -3346,7 +3393,9 @@ func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMVa
 		return nil, nil, false, nil
 	}
 	if s.g != nil && s.g.result != nil && s.g.result.ExprHasOnlyFrozenPackedStoreDeps(expr.Object) {
-		return nil, nil, false, nil
+		if s.g.packedEnumABI != packedEnumABIIndexSOA {
+			return nil, nil, false, nil
+		}
 	}
 	fieldWordOffset, ok, err := s.packedEnumDirectWordFieldOffset(enumType, fieldIndex, fieldType)
 	if err != nil {

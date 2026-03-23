@@ -449,6 +449,36 @@ def fold_common_frozen() -> int:
 	}
 }
 
+func TestGenerateLLVMIRUsesIndexWordReadForFrozenRepeatedCommonFieldReads(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Lit(value: int)
+
+def fold_common_frozen() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	in frozen:
+		return node.span + node.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_field_cache_frozen_index_soa.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_index_word(")
+	if readCalls != 2 {
+		t.Fatalf("expected repeated frozen packed common-field reads in index-soa mode to use ctx_packed_store_read_index_word twice, got %d helper calls:\n%s", readCalls, output)
+	}
+	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode_index(")
+	if decodeCalls != 0 {
+		t.Fatalf("expected repeated frozen packed common-field reads in index-soa mode to avoid eager decode, got %d decode calls:\n%s", decodeCalls, output)
+	}
+}
+
 func TestGenerateLLVMIRUsesSingleDecodeForFrozenRepeatedCommonFieldReadsOutsideCheckpoint(t *testing.T) {
 	src := `packed enum Expr:
 	common:
@@ -1301,6 +1331,41 @@ def fold_open() -> int:
 	}
 }
 
+func TestGenerateLLVMIRAvoidsEagerDecodeForFrozenMixedPackedMatchInIndexSOA(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Lit(value: int)
+	End
+
+def fold() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	return match node in frozen:
+		Expr.Lit(value):
+			value + node.span
+		Expr.End:
+			0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_mixed_index_soa.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	if !strings.Contains(output, "call i32 @ctx_packed_store_read_index_tag(") {
+		t.Fatalf("expected frozen mixed packed match in index-soa mode to use direct tag reads, got:\n%s", output)
+	}
+	if !strings.Contains(output, "call i64 @ctx_packed_store_read_index_word(") {
+		t.Fatalf("expected frozen mixed packed match in index-soa mode to use direct prefix word reads, got:\n%s", output)
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
+		t.Fatalf("expected frozen mixed packed match in index-soa mode to avoid eager decode, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRUsesSingleDecodeForFrozenPackedViewStmt(t *testing.T) {
 	src := `packed enum Expr:
 	common:
@@ -1337,6 +1402,75 @@ def fold_view() -> int:
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
+	}
+}
+
+func TestGenerateLLVMIRUsesIndexReadHelpersForFrozenPackedViewStmtInIndexSOA(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Lit(value: int)
+	End
+
+def fold_view() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	view node in frozen as Expr.Lit(lit):
+		return lit.value + lit.span + lit.value
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_view_stmt_index_soa.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_index_word(")
+	if readCalls != 3 {
+		t.Fatalf("expected frozen packed view stmt in index-soa mode to use three direct index word reads, got %d helper calls:\n%s", readCalls, output)
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
+		t.Fatalf("expected frozen packed view stmt in index-soa mode to avoid eager decode, got:\n%s", output)
+	}
+	if !strings.Contains(output, "declare void @llvm.trap()") || !strings.Contains(output, "call void @llvm.trap()") {
+		t.Fatalf("expected packed view stmt mismatch handling to remain trap-based, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRUsesIndexTailViewFastPathForFrozenPackedViewStmtInIndexSOA(t *testing.T) {
+	src := `packed enum Expr:
+	Block(count: usize, items: tail int)
+
+def fold_view() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	source_items: array[int, 3] = [1, 2, 3]
+	node: Expr = new[store] Expr.Block(count: 3u, items: source_items[0u:3u])
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	view node in frozen as Expr.Block(block):
+		return block.items[0u] + block.items[2u]
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_view_stmt_tail_index_soa.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	for _, check := range []string{
+		"call i64 @ctx_packed_store_read_index_word(",
+		"packed.payload.tail.data",
+		"packed.payload.tail.len",
+		"packed.payload.tail.elem_size",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected frozen packed tail view stmt in index-soa mode to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
+		t.Fatalf("expected frozen packed tail view stmt in index-soa mode to avoid eager decode, got:\n%s", output)
 	}
 }
 
@@ -1434,10 +1568,20 @@ def walk(owner: Arena) -> int:
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
 	}
 
-	for _, check := range []string{"%PackedStoreIndexAllocResult = type { ptr, i32 }", "call %PackedStoreIndexAllocResult @ctx_packed_store_alloc_fixed_index_result(", "call i64 @ctx_packed_store_count(", "call i32 @ctx_packed_store_index_at(", "call ptr @ctx_packed_store_decode_index("} {
+	for _, check := range []string{
+		"%PackedStoreIndexAllocResult = type { ptr, i32 }",
+		"call %PackedStoreIndexAllocResult @ctx_packed_store_alloc_fixed_index_result(",
+		"call i64 @ctx_packed_store_count(",
+		"call i32 @ctx_packed_store_index_at(",
+		"call i32 @ctx_packed_store_read_index_tag(",
+		"call i64 @ctx_packed_store_read_index_word(",
+	} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
+		t.Fatalf("expected output to avoid decode_index on the index-SOA fast path, got:\n%s", output)
 	}
 }
 
@@ -1532,10 +1676,18 @@ def walk(owner: Arena) -> int:
 		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
 	}
 
-	for _, check := range []string{"call %DynArrayView @ctx_packed_store_indices_view(", "call i64 @ctx_packed_store_count(", "call ptr @ctx_packed_store_decode_index("} {
+	for _, check := range []string{
+		"call %DynArrayView @ctx_packed_store_indices_view(",
+		"call i64 @ctx_packed_store_count(",
+		"call i32 @ctx_packed_store_read_index_tag(",
+		"call i64 @ctx_packed_store_read_index_word(",
+	} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
+		t.Fatalf("expected output to avoid decode_index for sliced index-SOA reads, got:\n%s", output)
 	}
 }
 

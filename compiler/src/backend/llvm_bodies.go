@@ -84,8 +84,10 @@ type packedEnumStorageBinding struct {
 }
 
 type packedVariantViewBinding struct {
-	ptr C.LLVMValueRef
-	typ *semantic.PackedVariantViewType
+	ptr    C.LLVMValueRef
+	handle C.LLVMValueRef
+	store  packedStoreBinding
+	typ    *semantic.PackedVariantViewType
 }
 
 type activePoolBinding struct {
@@ -638,7 +640,11 @@ func (s *functionState) emitViewStmt(stmt *ast.ViewStmt) error {
 	}
 	C.LLVMPositionBuilderAtEnd(s.builder, successBB)
 	viewDecodedValue := matchedDecodedValue
-	if viewDecodedValue == nil {
+	needsDecodedView := true
+	if s.g.packedEnumABI == packedEnumABIIndexSOA && storeBinding != nil {
+		needsDecodedView = false
+	}
+	if viewDecodedValue == nil && needsDecodedView {
 		viewDecodedValue, err = s.decodePackedEnumHandleWithStore(enumValue, enumType, storeBinding)
 		if err != nil {
 			s.popScope()
@@ -648,8 +654,13 @@ func (s *functionState) emitViewStmt(stmt *ast.ViewStmt) error {
 	if ident, ok := stmt.Value.(*ast.Ident); ok && viewDecodedValue != nil {
 		s.bindPackedEnumStorage(ident.Name, enumType, viewDecodedValue)
 	}
-	if stmt.Pattern.Name != "_" && viewDecodedValue != nil {
-		s.bindPackedVariantView(stmt.Pattern.Name, resolvedViewType, viewDecodedValue)
+	if stmt.Pattern.Name != "_" {
+		if viewDecodedValue != nil {
+			s.bindPackedVariantView(stmt.Pattern.Name, resolvedViewType, viewDecodedValue, nil, nil)
+		} else if s.g.packedEnumABI == packedEnumABIIndexSOA && storeBinding != nil {
+			storeCopy := *storeBinding
+			s.bindPackedVariantView(stmt.Pattern.Name, resolvedViewType, nil, enumValue, &storeCopy)
+		}
 	}
 	if err := s.emitBlock(stmt.Body, false); err != nil {
 		s.popScope()
@@ -1563,7 +1574,7 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 		return err
 	}
 	var decodedMatchValue C.LLVMValueRef
-	if enumType.Packed && packedMatchShouldEagerDecode(s.g.result, stmt.Value, stmt.Arms) {
+	if enumType.Packed && packedMatchShouldEagerDecode(s.g.result, s.g.packedEnumABI, stmt.Value, stmt.Arms) {
 		decodedMatchValue, err = s.decodePackedEnumHandleWithStore(enumValue, enumType, storeBinding)
 		if err != nil {
 			return err
@@ -1635,7 +1646,7 @@ func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, sema
 		return nil, nil, err
 	}
 	var decodedMatchValue C.LLVMValueRef
-	if enumType.Packed && packedMatchShouldEagerDecode(s.g.result, expr.Value, expr.Arms) {
+	if enumType.Packed && packedMatchShouldEagerDecode(s.g.result, s.g.packedEnumABI, expr.Value, expr.Arms) {
 		decodedMatchValue, err = s.decodePackedEnumHandleWithStore(enumValue, enumType, storeBinding)
 		if err != nil {
 			return nil, nil, err
@@ -2116,7 +2127,7 @@ func packedMatchNeedsEagerDecode(arms []ast.MatchArm) bool {
 	return false
 }
 
-func packedMatchShouldEagerDecode(result *semantic.Result, matchValue ast.Expr, arms []ast.MatchArm) bool {
+func packedMatchShouldEagerDecode(result *semantic.Result, abi packedEnumABIMode, matchValue ast.Expr, arms []ast.MatchArm) bool {
 	needsPayloadDecode := packedMatchNeedsEagerDecode(arms)
 	ident, ok := matchValue.(*ast.Ident)
 	readsMatchedValueField := ok && matchArmsReadMatchedValueField(ident.Name, arms)
@@ -2124,6 +2135,9 @@ func packedMatchShouldEagerDecode(result *semantic.Result, matchValue ast.Expr, 
 		return false
 	}
 	if result != nil && result.ExprHasOnlyFrozenPackedStoreDeps(matchValue) {
+		if abi == packedEnumABIIndexSOA {
+			return false
+		}
 		return true
 	}
 	if !needsPayloadDecode {

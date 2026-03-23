@@ -895,8 +895,8 @@ func (s *functionState) bindPackedEnumStorage(name string, enumType *semantic.En
 	s.scope.packedEnumPtrs[name] = packedEnumStorageBinding{ptr: ptr, typ: enumType}
 }
 
-func (s *functionState) bindPackedVariantView(name string, viewType *semantic.PackedVariantViewType, ptr C.LLVMValueRef) {
-	if name == "" || viewType == nil || ptr == nil {
+func (s *functionState) bindPackedVariantView(name string, viewType *semantic.PackedVariantViewType, ptr C.LLVMValueRef, handle C.LLVMValueRef, store *packedStoreBinding) {
+	if name == "" || viewType == nil || (ptr == nil && handle == nil) {
 		return
 	}
 	if s.scope == nil {
@@ -905,7 +905,11 @@ func (s *functionState) bindPackedVariantView(name string, viewType *semantic.Pa
 	if s.scope.packedViewPtrs == nil {
 		s.scope.packedViewPtrs = map[string]packedVariantViewBinding{}
 	}
-	s.scope.packedViewPtrs[name] = packedVariantViewBinding{ptr: ptr, typ: viewType}
+	binding := packedVariantViewBinding{ptr: ptr, handle: handle, typ: viewType}
+	if store != nil {
+		binding.store = *store
+	}
+	s.scope.packedViewPtrs[name] = binding
 }
 
 func (s *functionState) lookupPackedVariantView(name string) (packedVariantViewBinding, bool) {
@@ -914,7 +918,7 @@ func (s *functionState) lookupPackedVariantView(name string) (packedVariantViewB
 	}
 	for scope := s.scope; scope != nil; scope = scope.parent {
 		binding, ok := scope.packedViewPtrs[name]
-		if ok && binding.ptr != nil && binding.typ != nil {
+		if ok && binding.typ != nil && (binding.ptr != nil || binding.handle != nil) {
 			return binding, true
 		}
 	}
