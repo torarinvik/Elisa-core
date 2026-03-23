@@ -1256,8 +1256,7 @@ def json_ast_array_len(node: JsonNode, store: JsonNode.Store[Local]) -> i64:
     if json_ast_kind(node, store) != JsonNodeKind.ARRAY:
         return -1
     if node in store as JsonNode.Array:
-        view node in store as JsonNode.Array(array_view):
-            return json_ast_array_view_len(array_view)
+        return json_ast_array_view_len(node)
     return -1
 
 
@@ -1265,8 +1264,7 @@ def json_ast_object_len(node: JsonNode, store: JsonNode.Store[Local]) -> i64:
     if json_ast_kind(node, store) != JsonNodeKind.OBJECT:
         return -1
     if node in store as JsonNode.Object:
-        view node in store as JsonNode.Object(object_view):
-            return json_ast_object_view_len(object_view)
+        return json_ast_object_view_len(node)
     return -1
 
 

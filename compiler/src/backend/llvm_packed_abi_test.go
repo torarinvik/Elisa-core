@@ -2276,6 +2276,51 @@ def fold_view_value() -> int:
 	}
 }
 
+func TestGenerateLLVMIRLowersImplicitPackedViewScrutineeRefinementInWordHandleABI(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Lit(value: int)
+
+def echo(view_value: packedview[Expr.Lit]) -> packedview[Expr.Lit]:
+	return view_value
+
+def score(view_value: packedview[Expr.Lit]) -> int:
+	return view_value.value + view_value.span
+
+def fold_view_value() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	in store:
+		node: Expr = new Expr.Lit(span: 7, value: 5)
+		if node in store as Expr.Lit(value: value):
+			kept: packedview[Expr.Lit] = echo(node)
+			return score(kept) + echo(node).value + value
+		return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_implicit_packedview_scrutinee_refinement_word_handle.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	for _, check := range []string{
+		"%PackedView__Expr__Lit = type { i64, %Expr__Store }",
+		"define %PackedView__Expr__Lit @echo(%PackedView__Expr__Lit",
+		"define i64 @score(%PackedView__Expr__Lit",
+		"extractvalue %PackedView__Expr__Lit",
+		"call i64 @ctx_packed_store_read_word(",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
+	if decodeCalls != 0 {
+		t.Fatalf("expected implicit packedview scrutinee refinement to reuse packedview carriers without eager decode, got %d decode calls:\n%s", decodeCalls, output)
+	}
+}
+
 func TestGenerateLLVMIRUsesIndexTailViewFastPathForFrozenPackedIfVariantViewInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	Block(count: usize, items: tail int)

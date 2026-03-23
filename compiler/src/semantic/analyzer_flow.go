@@ -564,10 +564,22 @@ func unwrapPackedVariantViewExpr(expr ast.Expr) ast.Expr {
 	}
 }
 
+func (a *Analyzer) bindRefinedExprType(scope *Scope, expr ast.Expr, refined Type) {
+	if scope == nil || refined == nil {
+		return
+	}
+	key, ok := exprRefinementKey(unwrapPackedVariantViewExpr(expr))
+	if !ok {
+		return
+	}
+	scope.Refinements[key] = refined
+}
+
 func (a *Analyzer) bindMatchedPackedVariantView(expr ast.Expr, viewType *PackedVariantViewType) {
 	if viewType == nil || a.currentScope == nil {
 		return
 	}
+	a.bindRefinedExprType(a.currentScope, expr, viewType)
 	ident, ok := unwrapPackedVariantViewExpr(expr).(*ast.Ident)
 	if !ok {
 		return
@@ -605,7 +617,20 @@ func (a *Analyzer) lookupRefinedPackedVariantView(expr ast.Expr) (*PackedVariant
 }
 
 func (a *Analyzer) clearPackedVariantViewExpr(expr ast.Expr) {
-	if a.currentPackedVariantViews == nil || a.currentScope == nil {
+	if a.currentScope == nil {
+		return
+	}
+	if key, ok := exprRefinementKey(unwrapPackedVariantViewExpr(expr)); ok {
+		for scope := a.currentScope; scope != nil; scope = scope.Parent {
+			if refined, exists := scope.Refinements[key]; exists {
+				if _, isPackedView := refined.(*PackedVariantViewType); isPackedView {
+					delete(scope.Refinements, key)
+				}
+				break
+			}
+		}
+	}
+	if a.currentPackedVariantViews == nil {
 		return
 	}
 	ident, ok := unwrapPackedVariantViewExpr(expr).(*ast.Ident)
@@ -1042,7 +1067,7 @@ func (a *Analyzer) analyzeParallelForStmt(stmt *ast.ParallelForStmt) {
 		}
 	}
 	for _, msg := range captureCollector.errors {
-		a.errorf(stmt.Pos(), msg)
+		a.errorf(stmt.Pos(), "%s", msg)
 	}
 	if a.parallelForInfo == nil {
 		a.parallelForInfo = map[*ast.ParallelForStmt]*ParallelForInfo{}
@@ -5161,9 +5186,18 @@ func (a *Analyzer) lookupRefinedExprType(expr ast.Expr) (Type, bool) {
 	}
 	key, ok := exprRefinementKey(expr)
 	if !ok {
+		if viewType, ok := a.lookupRefinedPackedVariantView(expr); ok {
+			return viewType, true
+		}
 		return nil, false
 	}
-	return a.currentScope.LookupRefinement(key)
+	if refined, ok := a.currentScope.LookupRefinement(key); ok {
+		return refined, true
+	}
+	if viewType, ok := a.lookupRefinedPackedVariantView(expr); ok {
+		return viewType, true
+	}
+	return nil, false
 }
 
 func (a *Analyzer) applyPostIfFallthroughRefinement(stmt *ast.IfStmt) {

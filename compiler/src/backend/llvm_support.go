@@ -443,6 +443,15 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 		}
 		return s.buildOptionalSome(expectedOptional, payloadValue)
 	}
+	if expectedView, ok := expected.(*semantic.PackedVariantViewType); ok {
+		if actualEnum, ok := actual.(*semantic.EnumType); ok && actualEnum == expectedView.Enum && actualEnum.Packed {
+			store, ok := s.lookupPackedStore(actualEnum)
+			if !ok {
+				return nil, fmt.Errorf("packedview %s requires store context for materialization", expectedView.String())
+			}
+			return s.buildPackedVariantViewValue(expectedView, value, &store)
+		}
+	}
 	actualLLVM, err := s.g.lowerType(actual)
 	if err != nil {
 		return nil, err

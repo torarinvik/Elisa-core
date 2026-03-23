@@ -1571,8 +1571,8 @@ func (s *functionState) bindMatchedPackedVariantView(valueExpr ast.Expr, pattern
 	if enumType == nil || !enumType.Packed {
 		return
 	}
-	ident, ok := valueExpr.(*ast.Ident)
-	if !ok || ident.Name == "" {
+	name, ok := s.packedEnumStoragePath(valueExpr)
+	if !ok || name == "" {
 		return
 	}
 	variantPattern, ok := pattern.(*ast.MatchVariantPattern)
@@ -1590,12 +1590,12 @@ func (s *functionState) bindMatchedPackedVariantView(valueExpr ast.Expr, pattern
 			copied := *store
 			storeCopy = &copied
 		}
-		s.bindPackedVariantView(ident.Name, viewType, decodedValue, enumValue, storeCopy)
+		s.bindPackedVariantView(name, viewType, decodedValue, enumValue, storeCopy)
 		return
 	}
 	if store != nil {
 		storeCopy := *store
-		s.bindPackedVariantView(ident.Name, viewType, nil, enumValue, &storeCopy)
+		s.bindPackedVariantView(name, viewType, nil, enumValue, &storeCopy)
 	}
 }
 
@@ -1638,8 +1638,8 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
-		if ident, ok := stmt.Value.(*ast.Ident); ok && enumType.Packed && armDecodedValue != nil {
-			s.bindPackedEnumStorage(ident.Name, enumType, armDecodedValue)
+		if key, ok := s.packedEnumStoragePath(stmt.Value); ok && enumType.Packed && armDecodedValue != nil {
+			s.bindPackedEnumStorage(key, enumType, armDecodedValue)
 		}
 		s.bindMatchedPackedVariantView(stmt.Value, arm.Pattern, enumValue, armDecodedValue, enumType, storeBinding)
 		if err := s.emitBlock(arm.Body, false); err != nil {

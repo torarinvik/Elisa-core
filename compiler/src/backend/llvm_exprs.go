@@ -182,9 +182,27 @@ func (s *functionState) buildCall(llvmFnType C.LLVMTypeRef, callee C.LLVMValueRe
 func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Type, error) {
 	if actualType := s.exprType(expr); semantic.IsNullType(actualType) {
 		return s.emitNullLiteral()
-	} else if _, ok := actualType.(*semantic.PackedVariantViewType); ok {
+	} else if viewType, ok := actualType.(*semantic.PackedVariantViewType); ok {
 		if binding, ok := s.lookupPackedVariantView(expr.Name); ok {
 			return s.materializePackedVariantViewValue(binding)
+		}
+		if ptr, valueType, err := s.emitIdentValueAddress(expr); err == nil {
+			if enumType, ok := valueType.(*semantic.EnumType); ok && enumType == viewType.Enum && enumType.Packed {
+				handle, err := s.loadValue(ptr, valueType, expr.Name)
+				if err != nil {
+					return nil, nil, err
+				}
+				store, ok := s.lookupPackedStore(enumType)
+				if !ok {
+					return nil, nil, fmt.Errorf("packedview %s requires store context for %q", viewType.String(), expr.Name)
+				}
+				value, err := s.buildPackedVariantViewValue(viewType, handle, &store)
+				if err != nil {
+					return nil, nil, err
+				}
+				s.bindPackedVariantView(expr.Name, viewType, nil, handle, &store)
+				return value, viewType, nil
+			}
 		}
 	}
 	if ptr, valueType, err := s.emitIdentValueAddress(expr); err == nil {
@@ -3388,6 +3406,26 @@ func packedVariantViewName(expr ast.Expr) (string, bool) {
 	switch n := expr.(type) {
 	case *ast.Ident:
 		return n.Name, true
+	case *ast.FieldExpr:
+		base, ok := packedVariantViewName(n.Object)
+		if !ok || base == "" {
+			return "", false
+		}
+		return base + "." + n.Field, true
+	case *ast.IndexExpr:
+		base, ok := packedVariantViewName(n.Object)
+		if !ok || base == "" {
+			return "", false
+		}
+		indexKey, ok := packedEnumStorageIndexKey(n.Index)
+		if !ok {
+			return "", false
+		}
+		return base + "[" + indexKey + "]", true
+	case *ast.CastExpr:
+		return packedVariantViewName(n.Operand)
+	case *ast.CanExpr:
+		return packedVariantViewName(n.Expr)
 	case *ast.ParenExpr:
 		return packedVariantViewName(n.Inner)
 	default:

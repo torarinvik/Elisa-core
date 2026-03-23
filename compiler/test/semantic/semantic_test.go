@@ -4743,6 +4743,46 @@ def classify(flag: bool, node: Expr, store: Expr.Store[Local]) -> int:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsPackedEnumIfPatternRefiningScrutineeToPackedView(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def score(view_node: packedview[Expr.Int]) -> int:
+	return view_node.value + view_node.span
+
+def fold(node: Expr, store: Expr.Store[Local]) -> int:
+	if node in store as Expr.Int(value: value):
+		return score(node) + value
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_scrutinee_refined_to_view_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsPackedEnumMatchArmRefiningScrutineeToPackedView(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def score_add(view_node: packedview[Expr.Add]) -> int:
+	return view_node.left.span + view_node.right.span + view_node.span
+
+def fold(node: Expr, store: Expr.Store[Local]) -> int:
+	return match node in store:
+		Expr.Int(value: value):
+			value
+		Expr.Add(left: left, right: right):
+			score_add(node) + left.span + right.span
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_match_scrutinee_refined_to_view_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeRejectsPackedEnumIfPatternBinderWithoutAs(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)

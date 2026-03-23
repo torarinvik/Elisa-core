@@ -443,6 +443,9 @@ The backend should keep the same separation.
 - first-class packed variant witnesses should surface as `packedview[Enum.Variant]`
   so they can be passed, returned, and stored without inventing a second proof
   vocabulary
+- a successful packed pattern should refine the scrutinee itself to that
+  `packedview[Enum.Variant]` for the whole matching branch or arm, making
+  explicit `view`/`open` forms optional sugar instead of required ceremony
 
 ### Region lowering
 
