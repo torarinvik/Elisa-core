@@ -2071,7 +2071,7 @@ func (s *functionState) packedEnumVariantPayloadWordOffset(enumType *semantic.En
 	if err != nil {
 		return nil, false, err
 	}
-	if sizeBytes != wordBytes {
+	if sizeBytes == 0 || sizeBytes > wordBytes {
 		return nil, false, nil
 	}
 	payloadFieldIndex, err := s.g.packedEnumPayloadFieldIndex(enumType)

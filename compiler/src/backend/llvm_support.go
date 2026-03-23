@@ -934,6 +934,21 @@ func (s *functionState) invalidatePackedVariantView(name string) {
 	}
 }
 
+func (s *functionState) updatePackedVariantViewDecodedPtr(name string, ptr C.LLVMValueRef) {
+	if name == "" || ptr == nil {
+		return
+	}
+	for scope := s.scope; scope != nil; scope = scope.parent {
+		binding, ok := scope.packedViewPtrs[name]
+		if !ok {
+			continue
+		}
+		binding.ptr = ptr
+		scope.packedViewPtrs[name] = binding
+		return
+	}
+}
+
 func (s *functionState) lookupPackedEnumStorage(name string, enumType *semantic.EnumType) (C.LLVMValueRef, bool) {
 	if name == "" || enumType == nil || !enumType.Packed {
 		return nil, false

@@ -3343,6 +3343,7 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 			return nil, nil, true, err
 		}
 		binding.ptr = decodedPtr
+		s.updatePackedVariantViewDecodedPtr(name, decodedPtr)
 	}
 	payloadValues, err := s.loadEnumVariantPayload(binding.ptr, nil, binding.typ.Enum, binding.typ.Variant, nil)
 	if err != nil {
@@ -3498,7 +3499,7 @@ func (s *functionState) packedEnumDirectWordFieldOffset(enumType *semantic.EnumT
 	if err != nil {
 		return nil, false, err
 	}
-	if fieldSizeBytes != wordBytes {
+	if fieldSizeBytes == 0 || fieldSizeBytes > wordBytes {
 		return nil, false, nil
 	}
 	rowType, err := s.g.ensurePackedEnumStorageType(enumType)
