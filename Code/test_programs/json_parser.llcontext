@@ -113,6 +113,8 @@ struct JsonParserDocumentInternal:
     source: mutable any u8&
     source_len: mutable usize
     arena: mutable Arena
+    store_row_bytes: mutable usize
+    store_state_bits: mutable uintptr
     root: mutable JsonNode
     checksum: mutable i64
 
@@ -799,6 +801,18 @@ def json_node_invalid(store: JsonNode.Store[Local]) -> JsonNode:
         return new JsonNode.Invalid
 
 
+def json_node_store_words(store: any JsonNode.Store[Local]&) -> any uintptr&:
+    return store.cast[any u8&]().cast[any uintptr&]()
+
+
+def json_node_store_row_bytes(store: any JsonNode.Store[Local]&) -> usize:
+    return json_node_store_words(store)[1u].usize()
+
+
+def json_node_store_state_bits(store: any JsonNode.Store[Local]&) -> uintptr:
+    return json_node_store_words(store)[2u]
+
+
 def json_node_null(store: JsonNode.Store[Local]) -> JsonNode:
     in store:
         return new JsonNode.Null
@@ -964,42 +978,25 @@ def json_parse_value_node_after_ws(cursor: any JsonCursor&, arena: any Arena&, s
 
 
 def json_parse_array_node(cursor: any JsonCursor&, arena: any Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
-    count_cursor: mutable JsonCursor = zeroed
-    item_count_i64: mutable i64 = 0
-    item_count: mutable usize = 0u
-    item_capacity: mutable usize = 1u
-    items_bits: mutable uintptr = 0u64.uintptr()
+    items: mutable darray[JsonNode] = zeroed
     done: mutable bool = false
-    item_index: mutable usize = 0u
     items_checksum: mutable i64 = 0
-    item_value: mutable JsonNode = zeroed
     ch: mutable i64 = 0
     if json_advance_char(cursor) != JSON_CH_LBRACKET:
         return json_parse_node_result(invalid_node, -1)
 
     json_skip_ws(cursor)
-    count_cursor <- json_copy_cursor(cursor)
-    item_count_i64 <- json_count_array_items_after_ws((&count_cursor).cast[any JsonCursor&]())
-    if item_count_i64 < 0:
-        return json_parse_node_result(invalid_node, -1)
-
-    item_count <- item_count_i64.usize()
-    if item_count == 0u:
+    if json_cur_char(cursor) == JSON_CH_RBRACKET:
         _ = json_advance_char(cursor)
         in store:
             return json_parse_node_result(new JsonNode.Array(items_ptr: null, item_count: 0u32), 43)
-
-    item_capacity <- max(item_count, 1u)
-    items_bits <- arena_alloc(arena, item_capacity * sizeof(JsonNode)).cast[any u8&]().uintptr()
 
     while not done:
         value_result: JsonParseNodeResult = json_parse_value_node_after_ws(cursor, arena, store, invalid_node)
         if value_result.checksum < 0:
             return value_result
 
-        arena_memcpy((&item_value).cast[any void&](), (&value_result).cast[any void&](), sizeof(JsonNode))
-        arena_memcpy((items_bits.cast[any u8&]() + item_index * sizeof(JsonNode)).cast[any void&](), (&item_value).cast[any void&](), sizeof(JsonNode))
-        item_index <- item_index + 1u
+        _ = arena_da_append(arena, (&items).cast[any darray[JsonNode]&](), value_result.node)
         items_checksum <- items_checksum + value_result.checksum
 
         json_skip_ws(cursor)
@@ -1014,41 +1011,27 @@ def json_parse_array_node(cursor: any JsonCursor&, arena: any Arena&, store: Jso
             return json_parse_node_result(invalid_node, -1)
 
     in store:
-        return json_parse_node_result(new JsonNode.Array(items_ptr: items_bits.cast[any JsonNode&](), item_count: item_count.u32()), 43 + items_checksum)
+        return json_parse_node_result(new JsonNode.Array(items_ptr: items.items, item_count: items.count.u32()), 43 + items_checksum)
 
 
 def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
-    count_cursor: mutable JsonCursor = zeroed
-    field_count_i64: mutable i64 = 0
-    field_count: mutable usize = 0u
-    field_capacity: mutable usize = 1u
-    fields_bits: mutable uintptr = 0u64.uintptr()
+    fields: mutable darray[JsonField] = zeroed
     done: mutable bool = false
-    field_index: mutable usize = 0u
     fields_checksum: mutable i64 = 0
     key_lexeme: mutable JsonLexemeResult = zeroed
     key_checksum: mutable i64 = 0
     key_node: mutable JsonNode = zeroed
-    value_node: mutable JsonNode = zeroed
-    field_slot: mutable uintptr = 0u64.uintptr()
+    field_value: mutable JsonNode = zeroed
+    field_entry: mutable JsonField = zeroed
     ch: mutable i64 = 0
     if json_advance_char(cursor) != JSON_CH_LBRACE:
         return json_parse_node_result(invalid_node, -1)
 
     json_skip_ws(cursor)
-    count_cursor <- json_copy_cursor(cursor)
-    field_count_i64 <- json_count_object_fields_after_ws((&count_cursor).cast[any JsonCursor&]())
-    if field_count_i64 < 0:
-        return json_parse_node_result(invalid_node, -1)
-
-    field_count <- field_count_i64.usize()
-    if field_count == 0u:
+    if json_cur_char(cursor) == JSON_CH_RBRACE:
         _ = json_advance_char(cursor)
         in store:
             return json_parse_node_result(new JsonNode.Object(fields_ptr: null, field_count: 0u32), 47)
-
-    field_capacity <- max(field_count, 1u)
-    fields_bits <- arena_alloc(arena, field_capacity * sizeof(JsonField)).cast[any u8&]().uintptr()
 
     while not done:
         key_lexeme <- json_parse_string_lexeme(cursor)
@@ -1069,11 +1052,9 @@ def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: Js
         if value_result.checksum < 0:
             return value_result
 
-        field_slot <- fields_bits + field_index * sizeof(JsonField)
-        arena_memcpy((&value_node).cast[any void&](), (&value_result).cast[any void&](), sizeof(JsonNode))
-        arena_memcpy(field_slot.cast[any void&](), (&key_node).cast[any void&](), sizeof(JsonNode))
-        arena_memcpy((field_slot + sizeof(JsonNode)).cast[any void&](), (&value_node).cast[any void&](), sizeof(JsonNode))
-        field_index <- field_index + 1u
+        field_value <- value_result.node
+        field_entry <- JsonField(key_node, field_value)
+        _ = arena_da_append(arena, (&fields).cast[any darray[JsonField]&](), field_entry)
         fields_checksum <- fields_checksum + key_checksum + value_result.checksum
 
         json_skip_ws(cursor)
@@ -1088,7 +1069,7 @@ def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: Js
             return JsonParseNodeResult(invalid_node, -1)
 
     in store:
-        return json_parse_node_result(new JsonNode.Object(fields_ptr: fields_bits.cast[any JsonField&](), field_count: field_count.u32()), 47 + fields_checksum)
+        return json_parse_node_result(new JsonNode.Object(fields_ptr: fields.items, field_count: fields.count.u32()), 47 + fields_checksum)
 
 
 def json_parse_value_node(cursor: any JsonCursor&, arena: any Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
@@ -1148,20 +1129,46 @@ def json_ast_number_lexeme(source: any u8&, source_len: usize, node: JsonNode, s
     return json_invalid_lexeme()
 
 
+def json_ast_is_number_node(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
+    if node in store as JsonNode.Num:
+        return true
+    return false
+
+
+def json_ast_is_text_node(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
+    if node in store as JsonNode.Text:
+        return true
+    return false
+
+
+def json_ast_is_array_node(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
+    if node in store as JsonNode.Array:
+        return true
+    return false
+
+
+def json_ast_is_object_node(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
+    if node in store as JsonNode.Object:
+        return true
+    return false
+
+
 def json_ast_kind(node: JsonNode, store: JsonNode.Store[Local]) -> JsonNodeKind:
-    if node == json_node_invalid(store):
+    if json_node_is_invalid(node, store):
         return JsonNodeKind.INVALID
-    if node == json_node_null(store):
+    if json_ast_is_null(node, store):
         return JsonNodeKind.NULL
     if json_ast_bool_value(node, store) >= 0:
         return JsonNodeKind.BOOL
-    if node in store as JsonNode.Num:
+    if json_ast_is_number_node(node, store):
         return JsonNodeKind.NUMBER
-    if node in store as JsonNode.Array:
+    if json_ast_is_text_node(node, store):
+        return JsonNodeKind.STRING
+    if json_ast_is_array_node(node, store):
         return JsonNodeKind.ARRAY
-    if node in store as JsonNode.Object:
+    if json_ast_is_object_node(node, store):
         return JsonNodeKind.OBJECT
-    return JsonNodeKind.STRING
+    return JsonNodeKind.INVALID
 
 
 def json_ast_kind_code(kind: JsonNodeKind) -> i64:
@@ -1708,6 +1715,15 @@ def json_parser_document_source(impl: heap JsonParserDocumentInternal&) -> any u
     return impl.source
 
 
+def json_parser_document_store(impl: heap JsonParserDocumentInternal&) -> JsonNode.Store[Local]:
+    store: mutable JsonNode.Store[Local] = zeroed
+    words: any uintptr& = json_node_store_words((&store).cast[any JsonNode.Store[Local]&]())
+    words[0u] <- (&impl.arena).cast[any u8&]().uintptr()
+    words[1u] <- impl.store_row_bytes.uintptr()
+    words[2u] <- impl.store_state_bits
+    return move store
+
+
 def json_parser_document_field_node(impl: heap JsonParserDocumentInternal&, key: any u8&, store: JsonNode.Store[Local]) -> JsonNode:
     return json_ast_object_get(impl.root, json_parser_document_source(impl), key, store)
 
@@ -1763,6 +1779,8 @@ def json_parser_document_parse_impl(source: any u8&, out: any JsonParserDocument
     internal.source <- source_copy.cast[any u8&]()
     internal.source_len <- source_len
     internal.arena <- arena_owner
+    internal.store_row_bytes <- json_node_store_row_bytes((&store).cast[any JsonNode.Store[Local]&]())
+    internal.store_state_bits <- json_node_store_state_bits((&store).cast[any JsonNode.Store[Local]&]())
     internal.root <- result.node
     internal.checksum <- result.checksum
     out[0u] <- JsonParserDocument(internal.uintptr())
@@ -1801,7 +1819,7 @@ def json_parser_document_node_count_impl(doc: any JsonParserDocument&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
     impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     return json_ast_node_count(impl.root, store)
 
 
@@ -2206,7 +2224,7 @@ def json_parser_document_root_value_impl(doc: any JsonParserDocument&, out: any 
         return 0
 
     impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     out[0u] <- json_parser_value_from_node(impl, impl.root, store)
     return 1 if out[0u].impl_bits != 0u64.uintptr() else 0
 
@@ -2219,7 +2237,7 @@ def json_parser_value_kind_impl(value: any JsonParserValue&) -> i64:
     if not json_parser_value_is_live(value):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     return json_ast_kind_code(json_ast_kind(json_parser_value_node(value), store))
 
 
@@ -2227,7 +2245,7 @@ def json_parser_value_object_len_impl(value: any JsonParserValue&) -> i64:
     if not json_parser_value_is_live(value):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     return json_ast_object_len(json_parser_value_node(value), store)
 
 
@@ -2235,7 +2253,7 @@ def json_parser_value_array_len_impl(value: any JsonParserValue&) -> i64:
     if not json_parser_value_is_live(value):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     return json_ast_array_len(json_parser_value_node(value), store)
 
 
@@ -2327,7 +2345,7 @@ def json_parser_value_bool_impl(value: any JsonParserValue&) -> i64:
     if not json_parser_value_is_live(value):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     return json_ast_bool_value(json_parser_value_node(value), store)
 
 
@@ -2335,7 +2353,7 @@ def json_parser_value_is_null_impl(value: any JsonParserValue&) -> i64:
     if not json_parser_value_is_live(value):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     return 1 if json_ast_is_null(json_parser_value_node(value), store) else 0
 
 
@@ -2343,7 +2361,7 @@ def json_parser_value_number_kind_impl(value: any JsonParserValue&) -> i64:
     if not json_parser_value_is_live(value):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     return json_ast_number_kind_code(json_ast_number_kind(json_parser_document_source(impl), json_parser_value_node(value), store))
 
 
@@ -2359,7 +2377,7 @@ def json_parser_value_string_len_impl(value: any JsonParserValue&) -> i64:
     if not json_parser_value_is_live(value):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     return json_ast_string_len(json_parser_document_source(impl), json_parser_value_node(value), store)
 
 
@@ -2367,7 +2385,7 @@ def json_parser_value_string_copy_impl(value: any JsonParserValue&, out: any u8&
     if not json_parser_value_is_live(value):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     return json_ast_string_copy(json_parser_document_source(impl), json_parser_value_node(value), out, capacity, store)
 
 
@@ -2375,7 +2393,7 @@ def json_parser_value_i64_impl(value: any JsonParserValue&, out: any i64&) -> i6
     if not json_parser_value_is_live(value):
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     number_value: JsonNumberValue = json_ast_number_value(json_parser_document_source(impl), json_parser_value_node(value), store)
     if not json_number_value_can_materialize_i64(number_value):
         return 0
@@ -2387,7 +2405,7 @@ def json_parser_value_u64_impl(value: any JsonParserValue&, out: any u64&) -> i6
     if not json_parser_value_is_live(value):
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     number_value: JsonNumberValue = json_ast_number_value(json_parser_document_source(impl), json_parser_value_node(value), store)
     if not json_number_value_can_materialize_u64(number_value):
         return 0
@@ -2399,7 +2417,7 @@ def json_parser_value_f64_impl(value: any JsonParserValue&, out: any f64&) -> i6
     if not json_parser_value_is_live(value):
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     if not json_node_can_materialize_float(json_parser_document_source(impl), json_parser_value_node(value), store):
         return 0
     float_value: f64 = try json_ast_number_f64_value(json_parser_document_source(impl), json_parser_value_node(value), store) else 0.0
@@ -2411,7 +2429,7 @@ def json_parser_value_f32_impl(value: any JsonParserValue&, out: any f32&) -> i6
     if not json_parser_value_is_live(value):
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     if not json_node_can_materialize_float(json_parser_document_source(impl), json_parser_value_node(value), store):
         return 0
     float_value: f32 = try json_ast_number_f32_value(json_parser_document_source(impl), json_parser_value_node(value), store) else 0.0
@@ -2742,7 +2760,7 @@ def json_parser_value_array_iter_impl(value: any JsonParserValue&, out: any Json
     if not json_parser_value_is_live(value):
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     iter_cursor: JsonAstArrayIterCursor = json_ast_array_iter_first(json_parser_value_node(value), store)
     out[0u] <- json_parser_array_iter_from_cursor(impl, iter_cursor, store)
     return 1 if out[0u].impl_bits != 0u64.uintptr() else 0
@@ -2753,7 +2771,7 @@ def json_parser_value_object_iter_impl(value: any JsonParserValue&, out: any Jso
     if not json_parser_value_is_live(value):
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     iter_cursor: JsonAstObjectIterCursor = json_ast_object_iter_first(json_parser_value_node(value), store)
     out[0u] <- json_parser_object_iter_from_cursor(impl, iter_cursor, store)
     return 1 if out[0u].impl_bits != 0u64.uintptr() else 0
@@ -2767,7 +2785,7 @@ def json_parser_array_iter_kind_impl(iter: any JsonParserArrayIter&) -> i64:
     if not json_parser_array_iter_is_live(iter):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_array_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_array_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return -1
@@ -2778,7 +2796,7 @@ def json_parser_array_iter_bool_impl(iter: any JsonParserArrayIter&) -> i64:
     if not json_parser_array_iter_is_live(iter):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_array_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_array_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return -1
@@ -2789,7 +2807,7 @@ def json_parser_array_iter_is_null_impl(iter: any JsonParserArrayIter&) -> i64:
     if not json_parser_array_iter_is_live(iter):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_array_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_array_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return -1
@@ -2800,7 +2818,7 @@ def json_parser_array_iter_number_kind_impl(iter: any JsonParserArrayIter&) -> i
     if not json_parser_array_iter_is_live(iter):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_array_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_array_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return -1
@@ -2811,7 +2829,7 @@ def json_parser_array_iter_string_len_impl(iter: any JsonParserArrayIter&) -> i6
     if not json_parser_array_iter_is_live(iter):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_array_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_array_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return -1
@@ -2822,7 +2840,7 @@ def json_parser_array_iter_string_copy_impl(iter: any JsonParserArrayIter&, out:
     if not json_parser_array_iter_is_live(iter):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_array_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_array_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return -1
@@ -2844,7 +2862,7 @@ def json_parser_array_iter_i64_impl(iter: any JsonParserArrayIter&, out: any i64
     if not json_parser_array_iter_is_live(iter):
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_array_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_array_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return 0
@@ -2859,7 +2877,7 @@ def json_parser_array_iter_u64_impl(iter: any JsonParserArrayIter&, out: any u64
     if not json_parser_array_iter_is_live(iter):
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_array_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_array_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return 0
@@ -2874,7 +2892,7 @@ def json_parser_array_iter_f64_impl(iter: any JsonParserArrayIter&, out: any f64
     if not json_parser_array_iter_is_live(iter):
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_array_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_array_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return 0
@@ -2889,7 +2907,7 @@ def json_parser_array_iter_f32_impl(iter: any JsonParserArrayIter&, out: any f32
     if not json_parser_array_iter_is_live(iter):
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_array_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_array_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return 0
@@ -2904,7 +2922,7 @@ def json_parser_array_iter_array_len_impl(iter: any JsonParserArrayIter&) -> i64
     if not json_parser_array_iter_is_live(iter):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_array_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_array_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return -1
@@ -2915,7 +2933,7 @@ def json_parser_array_iter_object_len_impl(iter: any JsonParserArrayIter&) -> i6
     if not json_parser_array_iter_is_live(iter):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_array_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_array_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return -1
@@ -2927,7 +2945,7 @@ def json_parser_array_iter_value_impl(iter: any JsonParserArrayIter&, out: any J
     if not json_parser_array_iter_is_live(iter):
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_array_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_ast_array_iter_value(json_parser_array_iter_cursor(iter), store)
     out[0u] <- json_parser_value_from_node(impl, value_node, store)
     return 1 if out[0u].impl_bits != 0u64.uintptr() else 0
@@ -2938,7 +2956,7 @@ def json_parser_array_iter_next_impl(iter: any JsonParserArrayIter&, out: any Js
     if not json_parser_array_iter_is_live(iter):
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_array_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     next_cursor: JsonAstArrayIterCursor = json_ast_array_iter_next(json_parser_array_iter_cursor(iter), store)
     out[0u] <- json_parser_array_iter_from_cursor(impl, next_cursor, store)
     return 1 if out[0u].impl_bits != 0u64.uintptr() else 0
@@ -2952,7 +2970,7 @@ def json_parser_object_iter_key_string_len_impl(iter: any JsonParserObjectIter&)
     if not json_parser_object_iter_is_live(iter):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_object_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     key_node: JsonNode = json_parser_object_iter_key_node(iter, store)
     if json_node_is_invalid(key_node, store):
         return -1
@@ -2963,7 +2981,7 @@ def json_parser_object_iter_key_string_copy_impl(iter: any JsonParserObjectIter&
     if not json_parser_object_iter_is_live(iter):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_object_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     key_node: JsonNode = json_parser_object_iter_key_node(iter, store)
     if json_node_is_invalid(key_node, store):
         return -1
@@ -2985,7 +3003,7 @@ def json_parser_object_iter_value_kind_impl(iter: any JsonParserObjectIter&) -> 
     if not json_parser_object_iter_is_live(iter):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_object_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_object_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return -1
@@ -2996,7 +3014,7 @@ def json_parser_object_iter_value_bool_impl(iter: any JsonParserObjectIter&) -> 
     if not json_parser_object_iter_is_live(iter):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_object_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_object_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return -1
@@ -3007,7 +3025,7 @@ def json_parser_object_iter_value_is_null_impl(iter: any JsonParserObjectIter&) 
     if not json_parser_object_iter_is_live(iter):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_object_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_object_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return -1
@@ -3018,7 +3036,7 @@ def json_parser_object_iter_value_number_kind_impl(iter: any JsonParserObjectIte
     if not json_parser_object_iter_is_live(iter):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_object_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_object_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return -1
@@ -3029,7 +3047,7 @@ def json_parser_object_iter_value_string_len_impl(iter: any JsonParserObjectIter
     if not json_parser_object_iter_is_live(iter):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_object_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_object_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return -1
@@ -3040,7 +3058,7 @@ def json_parser_object_iter_value_string_copy_impl(iter: any JsonParserObjectIte
     if not json_parser_object_iter_is_live(iter):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_object_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_object_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return -1
@@ -3062,7 +3080,7 @@ def json_parser_object_iter_value_i64_impl(iter: any JsonParserObjectIter&, out:
     if not json_parser_object_iter_is_live(iter):
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_object_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_object_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return 0
@@ -3077,7 +3095,7 @@ def json_parser_object_iter_value_u64_impl(iter: any JsonParserObjectIter&, out:
     if not json_parser_object_iter_is_live(iter):
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_object_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_object_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return 0
@@ -3092,7 +3110,7 @@ def json_parser_object_iter_value_f64_impl(iter: any JsonParserObjectIter&, out:
     if not json_parser_object_iter_is_live(iter):
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_object_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_object_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return 0
@@ -3107,7 +3125,7 @@ def json_parser_object_iter_value_f32_impl(iter: any JsonParserObjectIter&, out:
     if not json_parser_object_iter_is_live(iter):
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_object_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_object_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return 0
@@ -3122,7 +3140,7 @@ def json_parser_object_iter_value_array_len_impl(iter: any JsonParserObjectIter&
     if not json_parser_object_iter_is_live(iter):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_object_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_object_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return -1
@@ -3133,7 +3151,7 @@ def json_parser_object_iter_value_object_len_impl(iter: any JsonParserObjectIter
     if not json_parser_object_iter_is_live(iter):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_object_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_parser_object_iter_value_node(iter, store)
     if json_node_is_invalid(value_node, store):
         return -1
@@ -3156,7 +3174,7 @@ def json_parser_object_iter_value_impl(iter: any JsonParserObjectIter&, out: any
     if not json_parser_object_iter_is_live(iter):
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_object_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     value_node: JsonNode = json_ast_object_iter_value(json_parser_object_iter_cursor(iter), store)
     out[0u] <- json_parser_value_from_node(impl, value_node, store)
     return 1 if out[0u].impl_bits != 0u64.uintptr() else 0
@@ -3167,7 +3185,7 @@ def json_parser_object_iter_next_impl(iter: any JsonParserObjectIter&, out: any 
     if not json_parser_object_iter_is_live(iter):
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_object_iter_doc_impl(iter)
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+    store: JsonNode.Store[Local] = json_parser_document_store(impl)
     next_cursor: JsonAstObjectIterCursor = json_ast_object_iter_next(json_parser_object_iter_cursor(iter), store)
     out[0u] <- json_parser_object_iter_from_cursor(impl, next_cursor, store)
     return 1 if out[0u].impl_bits != 0u64.uintptr() else 0

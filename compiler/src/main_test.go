@@ -1054,6 +1054,69 @@ func TestRunCLIJSONParserParallelBenchSmoke(t *testing.T) {
 	}
 }
 
+func TestRunCLIJSONParserDOMBenchSmoke(t *testing.T) {
+	clangPath, err := exec.LookPath("clang")
+	if err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.llcontext")
+	benchPath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_dom_bench.c")
+	shimPath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c")
+	runtimePath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_concurrency_runtime.c")
+	outputDir := t.TempDir()
+	headerPath := filepath.Join(outputDir, "json_parser.h")
+	objectPath := filepath.Join(outputDir, "json_parser.o")
+	exePath := filepath.Join(outputDir, "json_parser_dom_bench")
+	jsonPath := filepath.Join(outputDir, "sample.json")
+
+	for _, args := range [][]string{
+		{"-emit", "header", "-o", headerPath, fixturePath},
+		// This test validates benchmark wiring and smoke behavior, not optimized code quality.
+		{"-emit", "obj", "-O0", "-o", objectPath, fixturePath},
+	} {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		exitCode := runCLI(args, &stdout, &stderr)
+		if exitCode != 0 {
+			t.Fatalf("runCLI(%v) returned %d\nstderr:\n%s", args, exitCode, stderr.String())
+		}
+		if stdout.Len() != 0 {
+			t.Fatalf("expected no stdout for %v, got:\n%s", args, stdout.String())
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("expected no stderr for %v, got:\n%s", args, stderr.String())
+		}
+	}
+
+	compileArgs := []string{"-pthread", "-I", outputDir, benchPath, shimPath, runtimePath, objectPath, "-o", exePath}
+	if runtime.GOOS == "darwin" {
+		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
+	}
+	compileCmd := exec.Command(clangPath, compileArgs...)
+	compileOutput, err := compileCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clang failed: %v\n%s", err, string(compileOutput))
+	}
+
+	if err := os.WriteFile(jsonPath, []byte("{\"items\":[1,2,3,{\"ok\":true}],\"meta\":{\"name\":\"Ada\",\"pi\":3.14},\"none\":null}\n"), 0o644); err != nil {
+		t.Fatalf("failed to write sample json: %v", err)
+	}
+
+	runCmd := exec.Command(exePath, jsonPath, "4")
+	runOutput, err := runCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("dom json benchmark failed: %v\n%s", err, string(runOutput))
+	}
+	output := string(runOutput)
+	for _, check := range []string{"mode=dom", "iterations=4", "nodes=", "MiB/s="} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected dom benchmark output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunCLIExecutesJSONParserSelfHostedTests(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")

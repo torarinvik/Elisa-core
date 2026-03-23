@@ -1,0 +1,452 @@
+#include "json_parser.h"
+
+#include <inttypes.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+enum {
+    JSON_KIND_NULL = 0,
+    JSON_KIND_BOOL = 1,
+    JSON_KIND_NUMBER = 2,
+    JSON_KIND_STRING = 3,
+    JSON_KIND_ARRAY = 4,
+    JSON_KIND_OBJECT = 5,
+};
+
+enum {
+    JSON_NUMBER_UNSIGNED = 0,
+    JSON_NUMBER_SIGNED = 1,
+    JSON_NUMBER_NON_INTEGRAL = 2,
+    JSON_NUMBER_OUT_OF_RANGE = 3,
+};
+
+typedef struct ScratchBuffer {
+    uint8_t *data;
+    size_t capacity;
+} ScratchBuffer;
+
+static uint8_t *read_entire_file(const char *path, size_t *out_len) {
+    FILE *file = fopen(path, "rb");
+    if (file == NULL) {
+        fprintf(stderr, "failed to open %s\n", path);
+        return NULL;
+    }
+
+    if (fseek(file, 0, SEEK_END) != 0) {
+        fprintf(stderr, "failed to seek %s\n", path);
+        fclose(file);
+        return NULL;
+    }
+
+    long size = ftell(file);
+    if (size < 0) {
+        fprintf(stderr, "failed to stat %s\n", path);
+        fclose(file);
+        return NULL;
+    }
+
+    if (fseek(file, 0, SEEK_SET) != 0) {
+        fprintf(stderr, "failed to rewind %s\n", path);
+        fclose(file);
+        return NULL;
+    }
+
+    uint8_t *buffer = (uint8_t *)malloc((size_t)size + 1u);
+    if (buffer == NULL) {
+        fprintf(stderr, "failed to allocate %ld bytes\n", size);
+        fclose(file);
+        return NULL;
+    }
+
+    if (fread(buffer, 1, (size_t)size, file) != (size_t)size) {
+        fprintf(stderr, "failed to read %s\n", path);
+        free(buffer);
+        fclose(file);
+        return NULL;
+    }
+
+    buffer[size] = 0;
+    fclose(file);
+    *out_len = (size_t)size;
+    return buffer;
+}
+
+static double elapsed_seconds(struct timespec start, struct timespec end) {
+    return (double)(end.tv_sec - start.tv_sec) + ((double)(end.tv_nsec - start.tv_nsec) / 1000000000.0);
+}
+
+static uint64_t mix_u64(uint64_t acc, uint64_t value) {
+    acc ^= value + UINT64_C(0x9e3779b97f4a7c15) + (acc << 6) + (acc >> 2);
+    return acc;
+}
+
+static uint64_t hash_bytes(const uint8_t *bytes, size_t len) {
+    uint64_t acc = UINT64_C(1469598103934665603);
+    for (size_t i = 0; i < len; ++i) {
+        acc ^= (uint64_t)bytes[i];
+        acc *= UINT64_C(1099511628211);
+    }
+    return mix_u64(acc, (uint64_t)len);
+}
+
+static int scratch_reserve(ScratchBuffer *scratch, size_t required) {
+    if (required <= scratch->capacity) {
+        return 1;
+    }
+
+    size_t next_capacity = scratch->capacity == 0u ? 64u : scratch->capacity;
+    while (next_capacity < required) {
+        size_t grown = next_capacity * 2u;
+        if (grown < next_capacity) {
+            next_capacity = required;
+            break;
+        }
+        next_capacity = grown;
+    }
+
+    uint8_t *next = (uint8_t *)realloc(scratch->data, next_capacity);
+    if (next == NULL) {
+        return 0;
+    }
+
+    scratch->data = next;
+    scratch->capacity = next_capacity;
+    return 1;
+}
+
+static void scratch_release(ScratchBuffer *scratch) {
+    free(scratch->data);
+    scratch->data = NULL;
+    scratch->capacity = 0u;
+}
+
+static uint64_t hash_value_string(JsonParserValue *value, ScratchBuffer *scratch, int *ok) {
+    int64_t len = json_parser_value_string_len(value);
+    if (len < 0) {
+        fprintf(stderr, "value string len failed\n");
+        *ok = 0;
+        return 0;
+    }
+
+    size_t required = (size_t)len + 1u;
+    if (!scratch_reserve(scratch, required)) {
+        fprintf(stderr, "value string scratch reserve failed\n");
+        *ok = 0;
+        return 0;
+    }
+
+    int64_t copied = json_parser_value_string_copy(value, scratch->data, scratch->capacity);
+    if (copied != len) {
+        fprintf(stderr, "value string copy failed len=%" PRId64 " copied=%" PRId64 "\n", len, copied);
+        *ok = 0;
+        return 0;
+    }
+
+    *ok = 1;
+    return hash_bytes(scratch->data, (size_t)len);
+}
+
+static uint64_t hash_object_key(JsonParserObjectIter *iter, ScratchBuffer *scratch, int *ok) {
+    int64_t len = json_parser_object_iter_key_string_len(iter);
+    if (len < 0) {
+        fprintf(stderr, "object key string len failed\n");
+        *ok = 0;
+        return 0;
+    }
+
+    size_t required = (size_t)len + 1u;
+    if (!scratch_reserve(scratch, required)) {
+        fprintf(stderr, "object key scratch reserve failed\n");
+        *ok = 0;
+        return 0;
+    }
+
+    int64_t copied = json_parser_object_iter_key_string_copy(iter, scratch->data, scratch->capacity);
+    if (copied != len) {
+        fprintf(stderr, "object key string copy failed len=%" PRId64 " copied=%" PRId64 "\n", len, copied);
+        *ok = 0;
+        return 0;
+    }
+
+    *ok = 1;
+    return hash_bytes(scratch->data, (size_t)len);
+}
+
+static uint64_t hash_f64(double value) {
+    uint64_t bits = 0;
+    memcpy(&bits, &value, sizeof(bits));
+    return bits;
+}
+
+static uint64_t dom_visit_value(JsonParserValue *value, ScratchBuffer *scratch, int *ok);
+
+static uint64_t dom_visit_array(JsonParserValue *value, ScratchBuffer *scratch, int *ok) {
+    int64_t len = json_parser_value_array_len(value);
+    if (len < 0) {
+        fprintf(stderr, "value array len failed\n");
+        *ok = 0;
+        return 0;
+    }
+
+    uint64_t acc = mix_u64(UINT64_C(0xa4d94f3c2b1e9071), (uint64_t)len);
+    JsonParserArrayIter iter = {0};
+    if (len > 0 && json_parser_value_array_iter(value, &iter) != 1) {
+        fprintf(stderr, "value array iter creation failed len=%" PRId64 "\n", len);
+        *ok = 0;
+        return 0;
+    }
+
+    while (json_parser_array_iter_is_valid(&iter) == 1) {
+        JsonParserValue child = {0};
+        if (json_parser_array_iter_value(&iter, &child) != 1) {
+            fprintf(stderr, "array iter value failed\n");
+            *ok = 0;
+            return 0;
+        }
+
+        acc = mix_u64(acc, dom_visit_value(&child, scratch, ok));
+        if (!*ok) {
+            return 0;
+        }
+
+        JsonParserArrayIter next = {0};
+        if (json_parser_array_iter_next(&iter, &next) != 1) {
+            break;
+        }
+        iter = next;
+    }
+
+    return mix_u64(acc, UINT64_C(0x51ed270b84f7e3a9));
+}
+
+static uint64_t dom_visit_object(JsonParserValue *value, ScratchBuffer *scratch, int *ok) {
+    int64_t len = json_parser_value_object_len(value);
+    if (len < 0) {
+        fprintf(stderr, "value object len failed\n");
+        *ok = 0;
+        return 0;
+    }
+
+    uint64_t acc = mix_u64(UINT64_C(0x3c79ac492ba7b653), (uint64_t)len);
+    JsonParserObjectIter iter = {0};
+    if (len > 0 && json_parser_value_object_iter(value, &iter) != 1) {
+        fprintf(stderr, "value object iter creation failed len=%" PRId64 "\n", len);
+        *ok = 0;
+        return 0;
+    }
+
+    while (json_parser_object_iter_is_valid(&iter) == 1) {
+        acc = mix_u64(acc, UINT64_C(0x6eed0e9da4d94a4f));
+        acc = mix_u64(acc, hash_object_key(&iter, scratch, ok));
+        if (!*ok) {
+            return 0;
+        }
+
+        JsonParserValue child = {0};
+        if (json_parser_object_iter_value(&iter, &child) != 1) {
+            fprintf(stderr, "object iter value failed\n");
+            *ok = 0;
+            return 0;
+        }
+
+        acc = mix_u64(acc, dom_visit_value(&child, scratch, ok));
+        if (!*ok) {
+            return 0;
+        }
+
+        JsonParserObjectIter next = {0};
+        if (json_parser_object_iter_next(&iter, &next) != 1) {
+            break;
+        }
+        iter = next;
+    }
+
+    return mix_u64(acc, UINT64_C(0x94d049bb133111eb));
+}
+
+static uint64_t dom_visit_value(JsonParserValue *value, ScratchBuffer *scratch, int *ok) {
+    int64_t kind = json_parser_value_kind(value);
+    if (kind < 0) {
+        fprintf(stderr, "value kind failed\n");
+        *ok = 0;
+        return 0;
+    }
+    uint64_t acc = mix_u64(UINT64_C(0x243f6a8885a308d3), (uint64_t)(uint8_t)kind);
+
+    switch (kind) {
+    case JSON_KIND_NULL:
+        if (json_parser_value_is_null(value) != 1) {
+            fprintf(stderr, "value null check failed\n");
+            *ok = 0;
+            return 0;
+        }
+        return mix_u64(acc, UINT64_C(0x13198a2e03707344));
+    case JSON_KIND_BOOL: {
+        int64_t bool_value = json_parser_value_bool(value);
+        if (bool_value < 0) {
+            fprintf(stderr, "value bool failed\n");
+            *ok = 0;
+            return 0;
+        }
+        return mix_u64(acc, (uint64_t)bool_value);
+    }
+    case JSON_KIND_NUMBER: {
+        int64_t number_kind = json_parser_value_number_kind(value);
+        if (number_kind < 0) {
+            fprintf(stderr, "value number kind failed\n");
+            *ok = 0;
+            return 0;
+        }
+        acc = mix_u64(acc, (uint64_t)(uint8_t)number_kind);
+        switch (number_kind) {
+        case JSON_NUMBER_UNSIGNED: {
+            uint64_t number = 0;
+            if (json_parser_value_u64(value, &number) != 1) {
+                fprintf(stderr, "value u64 failed\n");
+                *ok = 0;
+                return 0;
+            }
+            return mix_u64(acc, number);
+        }
+        case JSON_NUMBER_SIGNED: {
+            int64_t number = 0;
+            if (json_parser_value_i64(value, &number) != 1) {
+                fprintf(stderr, "value i64 failed\n");
+                *ok = 0;
+                return 0;
+            }
+            return mix_u64(acc, (uint64_t)number);
+        }
+        case JSON_NUMBER_NON_INTEGRAL:
+        case JSON_NUMBER_OUT_OF_RANGE: {
+            double number = 0.0;
+            if (json_parser_value_f64(value, &number) != 1) {
+                fprintf(stderr, "value f64 failed\n");
+                *ok = 0;
+                return 0;
+            }
+            return mix_u64(acc, hash_f64(number));
+        }
+        default:
+            fprintf(stderr, "unexpected number kind=%" PRId64 "\n", number_kind);
+            *ok = 0;
+            return 0;
+        }
+    }
+    case JSON_KIND_STRING:
+        return mix_u64(acc, hash_value_string(value, scratch, ok));
+    case JSON_KIND_ARRAY:
+        return mix_u64(acc, dom_visit_array(value, scratch, ok));
+    case JSON_KIND_OBJECT:
+        return mix_u64(acc, dom_visit_object(value, scratch, ok));
+    default:
+        fprintf(stderr, "unexpected value kind=%" PRId64 "\n", kind);
+        *ok = 0;
+        return 0;
+    }
+}
+
+static int64_t document_dom_checksum(uint8_t *input, int64_t *out_node_count) {
+    JsonParserDocument doc = {0};
+    JsonParserValue root = {0};
+    ScratchBuffer scratch = {0};
+    int ok = 1;
+    int64_t result = -1;
+
+    if (json_parser_document_parse(input, &doc) != 1) {
+        fprintf(stderr, "document parse failed\n");
+        goto cleanup;
+    }
+
+    if (json_parser_document_root_value(&doc, &root) != 1) {
+        fprintf(stderr, "document root value failed\n");
+        goto cleanup;
+    }
+
+    if (out_node_count != NULL) {
+        *out_node_count = json_parser_document_node_count(&doc);
+        if (*out_node_count < 0) {
+            fprintf(stderr, "document node count failed\n");
+            goto cleanup;
+        }
+    }
+
+    result = (int64_t)(dom_visit_value(&root, &scratch, &ok) & (uint64_t)INT64_MAX);
+    if (!ok) {
+        fprintf(stderr, "dom visit failed\n");
+        result = -1;
+    }
+
+cleanup:
+    scratch_release(&scratch);
+    if (doc.impl_bits != (uintptr_t)0) {
+        (void)json_parser_document_destroy(doc.impl_bits);
+        doc.impl_bits = (uintptr_t)0;
+    }
+    return result;
+}
+
+int main(int argc, char **argv) {
+    if (argc < 3) {
+        fprintf(stderr, "usage: %s <json-file> <iterations>\n", argv[0]);
+        return 1;
+    }
+
+    const char *path = argv[1];
+    int iterations = atoi(argv[2]);
+    if (iterations <= 0) {
+        fprintf(stderr, "iterations must be positive\n");
+        return 1;
+    }
+
+    size_t input_len = 0;
+    uint8_t *input = read_entire_file(path, &input_len);
+    if (input == NULL) {
+        return 1;
+    }
+
+    int64_t node_count = -1;
+    int64_t warmup_checksum = document_dom_checksum(input, &node_count);
+    if (warmup_checksum < 0 || node_count < 0) {
+        fprintf(stderr, "dom parser rejected %s\n", path);
+        free(input);
+        return 1;
+    }
+
+    struct timespec start = {0};
+    struct timespec end = {0};
+    clock_gettime(CLOCK_MONOTONIC, &start);
+
+    int64_t checksum_acc = 0;
+    for (int i = 0; i < iterations; ++i) {
+        int64_t iteration_checksum = document_dom_checksum(input, NULL);
+        if (iteration_checksum < 0) {
+            fprintf(stderr, "dom traversal failed for %s at iteration %d\n", path, i);
+            free(input);
+            return 1;
+        }
+        checksum_acc += iteration_checksum;
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &end);
+
+    double seconds = elapsed_seconds(start, end);
+    double total_bytes = (double)input_len * (double)iterations;
+    double mib_per_second = seconds > 0.0 ? (total_bytes / (1024.0 * 1024.0)) / seconds : 0.0;
+
+    printf("mode=dom file=%s bytes=%zu nodes=%" PRId64 " iterations=%d checksum=%" PRId64 " total_checksum=%" PRId64 " seconds=%.6f MiB/s=%.2f\n",
+           path,
+           input_len,
+           node_count,
+           iterations,
+           warmup_checksum,
+           checksum_acc,
+           seconds,
+           mib_per_second);
+
+    free(input);
+    return 0;
+}
