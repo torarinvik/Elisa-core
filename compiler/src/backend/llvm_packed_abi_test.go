@@ -374,6 +374,38 @@ def fold_common() -> int:
 	}
 }
 
+func TestGenerateLLVMIRUsesIndexReadHelperForRepeatedCommonFieldReads(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Lit(value: int)
+
+def fold_common() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	in store:
+		node: Expr = new Expr.Lit(span: 7, value: 5)
+		return node.span + node.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_field_cache_index_soa.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_index_word(")
+	if readCalls != 2 {
+		t.Fatalf("expected repeated packed common-field reads in index-soa mode to lower through ctx_packed_store_read_index_word twice, got %d helper calls:\n%s", readCalls, output)
+	}
+	if !strings.Contains(output, "call void @ctx_packed_store_record_prefix_words(") {
+		t.Fatalf("expected index-soa constructor lowering to record fixed prefix words, got:\n%s", output)
+	}
+	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode_index(")
+	if decodeCalls != 0 {
+		t.Fatalf("expected no full decode for repeated packed common-field reads in index-soa mode, got %d decode calls:\n%s", decodeCalls, output)
+	}
+}
+
 func TestGenerateLLVMIRUsesSingleDecodeForFrozenRepeatedCommonFieldReads(t *testing.T) {
 	src := `packed enum Expr:
 	common:
@@ -1536,6 +1568,36 @@ def fold() -> int:
 	}
 	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
 		t.Fatalf("expected mixed packed match in index-soa mode to avoid eager decode on the fast path, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRUsesIndexTailViewFastPathInIndexSOA(t *testing.T) {
+	src := `packed enum Expr:
+	Block(count: usize, items: tail int)
+
+def fold() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	in store:
+		source_items: array[int, 3] = [1, 2, 3]
+		node: Expr = new Expr.Block(count: 3u, items: source_items[0u:3u])
+		return match node:
+			Expr.Block(count: _, items: items):
+				items[0u] + items[2u]
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_tail_payload_index_soa.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	for _, check := range []string{"call i32 @ctx_packed_store_read_index_tag(", "call i64 @ctx_packed_store_read_index_word(", "packed.payload.tail.data", "packed.payload.tail.len", "packed.payload.tail.elem_size"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
+		t.Fatalf("expected index-soa tail payload match to avoid full decode on the fast path, got:\n%s", output)
 	}
 }
 

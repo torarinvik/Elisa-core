@@ -402,18 +402,91 @@ func (ops *packedStoreOps) loadTailView(handleValue C.LLVMValueRef, enumType *se
 	if ops == nil || enumType == nil || !enumType.Packed || variant == nil {
 		return nil, false, nil
 	}
-	if !ops.canDirectWordRead() {
+	if ops.s == nil || ops.s.g == nil || ops.s.g.packedEnumABI != packedEnumABIIndexSOA {
 		return nil, false, nil
 	}
 	tailIndex, ok := variant.TailPayloadIndex()
 	if !ok || tailIndex != payloadIndex {
 		return nil, false, nil
 	}
-	// Current backends still recover tail views through full decode.
-	// This method exists as the stable insertion point for future SOA lowering.
-	_ = handleValue
-	_ = name
-	return nil, false, nil
+	viewType, ok := variant.TailPayloadViewType()
+	if !ok || viewType == nil {
+		return nil, false, nil
+	}
+	wordBytes := uint64(ops.s.g.wordBits / 8)
+	if wordBytes == 0 {
+		wordBytes = 8
+	}
+	payloadFieldIndex, err := ops.s.g.packedEnumPayloadFieldIndex(enumType)
+	if err != nil {
+		return nil, false, err
+	}
+	rowType, err := ops.s.g.ensurePackedEnumStorageType(enumType)
+	if err != nil {
+		return nil, false, err
+	}
+	usizeType := ops.s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := ops.s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, false, err
+	}
+	i32Type := C.LLVMInt32TypeInContext(ops.s.g.context)
+	zeroIndex := C.LLVMConstInt(i32Type, 0, 0)
+	payloadFieldIndexValue := C.LLVMConstInt(i32Type, C.ulonglong(payloadFieldIndex), 0)
+	nullPtr := C.LLVMConstNull(C.LLVMPointerTypeInContext(ops.s.g.context, 0))
+	payloadIndices := []C.LLVMValueRef{zeroIndex, payloadFieldIndexValue}
+	payloadPtr := C.LLVMBuildGEP2(ops.s.builder, rowType, nullPtr, llvmValueSlicePtr(payloadIndices), C.unsigned(len(payloadIndices)), cStringFree(name+".payload.word.ptr"))
+	payloadOffsetBytes := C.LLVMBuildPtrToInt(ops.s.builder, payloadPtr, usizeLLVMType, cStringFree(name+".payload.word.bytes"))
+	wordBytesValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(wordBytes), 0)
+	baseWordOffset := C.LLVMBuildUDiv(ops.s.builder, payloadOffsetBytes, wordBytesValue, cStringFree(name+".payload.word.offset"))
+	payloadType, err := ops.s.g.lowerEnumVariantPayloadType(variant)
+	if err != nil {
+		return nil, false, err
+	}
+	fieldIndexValue := C.LLVMConstInt(i32Type, C.ulonglong(payloadIndex), 0)
+	fieldIndices := []C.LLVMValueRef{zeroIndex, fieldIndexValue}
+	fieldPtr := C.LLVMBuildGEP2(ops.s.builder, payloadType, nullPtr, llvmValueSlicePtr(fieldIndices), C.unsigned(len(fieldIndices)), cStringFree(name+".field.word.ptr"))
+	fieldOffsetBytes := C.LLVMBuildPtrToInt(ops.s.builder, fieldPtr, usizeLLVMType, cStringFree(name+".field.word.bytes"))
+	fieldWordOffset := C.LLVMBuildUDiv(ops.s.builder, fieldOffsetBytes, wordBytesValue, cStringFree(name+".field.word.offset"))
+	viewBaseWordOffset := C.LLVMBuildAdd(ops.s.builder, baseWordOffset, fieldWordOffset, cStringFree(name+".field.word.base"))
+	oneWord := C.LLVMConstInt(usizeLLVMType, 1, 0)
+	twoWords := C.LLVMConstInt(usizeLLVMType, 2, 0)
+	dataWord, err := ops.loadPayloadWord(handleValue, enumType, viewBaseWordOffset, name+".data.word")
+	if err != nil {
+		return nil, false, err
+	}
+	lenWordOffset := C.LLVMBuildAdd(ops.s.builder, viewBaseWordOffset, oneWord, cStringFree(name+".len.word.offset"))
+	lenWord, err := ops.loadPayloadWord(handleValue, enumType, lenWordOffset, name+".len.word")
+	if err != nil {
+		return nil, false, err
+	}
+	elemSizeWordOffset := C.LLVMBuildAdd(ops.s.builder, viewBaseWordOffset, twoWords, cStringFree(name+".elem_size.word.offset"))
+	elemSizeWord, err := ops.loadPayloadWord(handleValue, enumType, elemSizeWordOffset, name+".elem_size.word")
+	if err != nil {
+		return nil, false, err
+	}
+	voidRefType := ops.voidRefType()
+	dataValue, err := ops.s.coerceValue(dataWord, ops.s.g.result.NamedTypes["uintptr"], voidRefType)
+	if err != nil {
+		return nil, false, err
+	}
+	lenValue, err := ops.s.coerceValue(lenWord, ops.s.g.result.NamedTypes["uintptr"], usizeType)
+	if err != nil {
+		return nil, false, err
+	}
+	elemSizeValue, err := ops.s.coerceValue(elemSizeWord, ops.s.g.result.NamedTypes["uintptr"], usizeType)
+	if err != nil {
+		return nil, false, err
+	}
+	viewLLVMType, err := ops.s.g.lowerType(viewType)
+	if err != nil {
+		return nil, false, err
+	}
+	viewValue := C.LLVMGetUndef(viewLLVMType)
+	viewValue = C.LLVMBuildInsertValue(ops.s.builder, viewValue, dataValue, 0, cStringFree(name+".data"))
+	viewValue = C.LLVMBuildInsertValue(ops.s.builder, viewValue, lenValue, 1, cStringFree(name+".len"))
+	viewValue = C.LLVMBuildInsertValue(ops.s.builder, viewValue, elemSizeValue, 2, cStringFree(name+".elem_size"))
+	return viewValue, true, nil
 }
 
 func (ops *packedStoreOps) storeSlice(startValue C.LLVMValueRef, endValue C.LLVMValueRef, resultType semantic.Type, name string) (C.LLVMValueRef, semantic.Type, error) {
@@ -590,6 +663,33 @@ func (ops *packedStoreOps) recordTag(tagValue C.LLVMValueRef, name string) error
 		return err
 	}
 	ops.s.buildCall(recordLLVMType, recordCallee, []C.LLVMValueRef{arenaValue, tagValue, stateValue}, "")
+	return nil
+}
+
+func (ops *packedStoreOps) recordPrefixWords(rowPtr C.LLVMValueRef, name string) error {
+	if ops == nil || ops.s == nil || ops.s.g == nil || ops.s.g.packedEnumABI != packedEnumABIIndexSOA {
+		return nil
+	}
+	arenaValue, err := ops.arenaValue(name + ".arena")
+	if err != nil {
+		return err
+	}
+	stateValue, err := ops.stateValue(name + ".state")
+	if err != nil {
+		return err
+	}
+	arenaType := ops.s.g.result.NamedTypes["Arena"]
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	recordType := &semantic.FuncType{Name: "ctx_packed_store_record_prefix_words", Params: []semantic.Type{arenaRefType, ops.voidRefType(), ops.voidRefType()}, Return: ops.s.g.result.NamedTypes["void"]}
+	recordCallee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_record_prefix_words", recordType)
+	if err != nil {
+		return err
+	}
+	recordLLVMType, err := ops.s.g.lowerFunctionType(recordType)
+	if err != nil {
+		return err
+	}
+	ops.s.buildCall(recordLLVMType, recordCallee, []C.LLVMValueRef{arenaValue, rowPtr, stateValue}, "")
 	return nil
 }
 

@@ -4263,6 +4263,10 @@ func (s *functionState) emitPackedEnumConstructorAlloc(storeValue C.LLVMValueRef
 			C.LLVMBuildStore(s.builder, aggregate, payloadPtr)
 		}
 	}
+	ops := &packedStoreOps{s: s, storeValue: storeValue, storeType: enumType.StoreType}
+	if err := ops.recordPrefixWords(allocPtr, "packed.prefix.record"); err != nil {
+		return nil, nil, err
+	}
 	if err := s.emitPackedStoreRecordTag(storeValue, enumType.StoreType, tagValue); err != nil {
 		return nil, nil, err
 	}
