@@ -663,7 +663,7 @@ def ctx_packed_store_alloc_fixed_result(a: any Arena&, state_bits: any void&) ->
         a.end_index <- state.alloc_region_index
 
     offset_words: uintptr = offset_bytes / sizeof(uintptr).uintptr()
-    handle: uintptr = (state.alloc_region_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
+    handle: uintptr = (state.alloc_region_index.uintptr() << 32u64.uintptr()) | ((offset_words + 1u64.uintptr()) << 1u64.uintptr())
     needed_rows: usize = state.handles.count + 1u
     packed_store_ensure_metadata_capacity(a, state, needed_rows)
 
@@ -723,7 +723,7 @@ def ctx_packed_store_alloc_result(a: any Arena&, size_bytes: usize, state_bits: 
         a.end_index <- state.alloc_region_index
 
     offset_words: uintptr = offset_bytes / sizeof(uintptr).uintptr()
-    handle: uintptr = (state.alloc_region_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
+    handle: uintptr = (state.alloc_region_index.uintptr() << 32u64.uintptr()) | ((offset_words + 1u64.uintptr()) << 1u64.uintptr())
     needed_rows: usize = state.handles.count + 1u
     packed_store_ensure_metadata_capacity(a, state, needed_rows)
 
@@ -841,7 +841,7 @@ def ctx_packed_store_encode(a: any Arena&, ptr: any void&, state_bits: any void&
             if raw >= alloc_data_begin and raw < alloc_data_end:
                 alloc_offset_bytes: uintptr = raw - alloc_data_begin
                 alloc_offset_words: uintptr = alloc_offset_bytes / sizeof(uintptr).uintptr()
-                return (state.alloc_region_index.uintptr() << 32u64.uintptr()) | (alloc_offset_words + 1u64.uintptr())
+                return (state.alloc_region_index.uintptr() << 32u64.uintptr()) | ((alloc_offset_words + 1u64.uintptr()) << 1u64.uintptr())
 
         if state.decode_region != null:
             decode_data_base: heap u8& = packed_store_region_data(state.decode_region)
@@ -851,7 +851,7 @@ def ctx_packed_store_encode(a: any Arena&, ptr: any void&, state_bits: any void&
             if raw >= decode_data_begin and raw < decode_data_end:
                 decode_offset_bytes: uintptr = raw - decode_data_begin
                 decode_offset_words: uintptr = decode_offset_bytes / sizeof(uintptr).uintptr()
-                return (state.decode_region_index.uintptr() << 32u64.uintptr()) | (decode_offset_words + 1u64.uintptr())
+                return (state.decode_region_index.uintptr() << 32u64.uintptr()) | ((decode_offset_words + 1u64.uintptr()) << 1u64.uintptr())
 
         owner_cursor: mutable heap Region&? = state.head_region
         while owner_cursor != null:
@@ -862,7 +862,7 @@ def ctx_packed_store_encode(a: any Arena&, ptr: any void&, state_bits: any void&
             if raw >= owner_data_begin and raw < owner_data_end:
                 owner_offset_bytes: uintptr = raw - owner_data_begin
                 owner_offset_words: uintptr = owner_offset_bytes / sizeof(uintptr).uintptr()
-                return (owner_cursor.global_index.uintptr() << 32u64.uintptr()) | (owner_offset_words + 1u64.uintptr())
+                return (owner_cursor.global_index.uintptr() << 32u64.uintptr()) | ((owner_offset_words + 1u64.uintptr()) << 1u64.uintptr())
 
             owner_cursor <- owner_cursor.owner_next
 
@@ -874,7 +874,7 @@ def ctx_packed_store_encode(a: any Arena&, ptr: any void&, state_bits: any void&
         if raw >= end_data_begin and raw < end_data_end:
             end_offset_bytes: uintptr = raw - end_data_begin
             end_offset_words: uintptr = end_offset_bytes / sizeof(uintptr).uintptr()
-            return (a.end_index.uintptr() << 32u64.uintptr()) | (end_offset_words + 1u64.uintptr())
+            return (a.end_index.uintptr() << 32u64.uintptr()) | ((end_offset_words + 1u64.uintptr()) << 1u64.uintptr())
 
     r: mutable heap Region&? = a.begin
 
@@ -886,17 +886,19 @@ def ctx_packed_store_encode(a: any Arena&, ptr: any void&, state_bits: any void&
         if raw >= data_begin and raw < data_end:
             offset_bytes: uintptr = raw - data_begin
             offset_words: uintptr = offset_bytes / sizeof(uintptr).uintptr()
-            return (r.global_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
+            return (r.global_index.uintptr() << 32u64.uintptr()) | ((offset_words + 1u64.uintptr()) << 1u64.uintptr())
 
         r <- r.next
 
     panic("packed store encode pointer outside arena")
 
-def ctx_packed_store_decode(a: any Arena&, handle: uintptr, state_bits: any void&) -> any void&:
+def ctx_packed_store_decode(a: any Arena&, handle: uintptr, state_bits: any void&) -> any void& can[Abort.Panic]:
     assert handle != 0u64.uintptr()
+    if handle & 1u64.uintptr() != 0u64.uintptr():
+        panic("packed store decode cannot materialize inline word handles")
 
     region_index: usize = (handle >> 32u64.uintptr()).usize()
-    offset_words_plus_one: usize = (handle & 0xffffffffu64.uintptr()).usize()
+    offset_words_plus_one: usize = ((handle & 0xffffffffu64.uintptr()) >> 1u64.uintptr()).usize()
     assert offset_words_plus_one > 0
 
     if state_bits != null:
@@ -989,9 +991,11 @@ def ctx_packed_store_decode(a: any Arena&, handle: uintptr, state_bits: any void
 
 def ctx_packed_store_read_tag(a: any Arena&, handle: uintptr, state_bits: any void&) -> u32:
     assert handle != 0u64.uintptr()
+    if handle & 1u64.uintptr() != 0u64.uintptr():
+        return (handle >> 49u64.uintptr()).u32()
 
     region_index: usize = (handle >> 32u64.uintptr()).usize()
-    offset_words_plus_one: usize = (handle & 0xffffffffu64.uintptr()).usize()
+    offset_words_plus_one: usize = ((handle & 0xffffffffu64.uintptr()) >> 1u64.uintptr()).usize()
     assert offset_words_plus_one > 0
 
     if state_bits != null:
@@ -1100,7 +1104,7 @@ def ctx_packed_store_encode_index(a: any Arena&, ptr: any void&, state_bits: any
         i <- i + 1u
     panic("packed store encode index missing handle")
 
-def ctx_packed_store_decode_index(a: any Arena&, index: u32, state_bits: any void&) -> any void&:
+def ctx_packed_store_decode_index(a: any Arena&, index: u32, state_bits: any void&) -> any void& can[Abort.Panic]:
     assert state_bits != null
     state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
     index_usize: usize = index.usize()
@@ -1118,11 +1122,13 @@ def ctx_packed_store_read_index_tag(state_bits: any void&, index: u32) -> u32:
     tags: any u32& = state.tags.items
     return tags[index_usize]
 
-def ctx_packed_store_read_word(a: any Arena&, handle: uintptr, state_bits: any void&, word_offset: usize) -> uintptr:
+def ctx_packed_store_read_word(a: any Arena&, handle: uintptr, state_bits: any void&, word_offset: usize) -> uintptr can[Abort.Panic]:
     assert handle != 0u64.uintptr()
+    if handle & 1u64.uintptr() != 0u64.uintptr():
+        panic("packed store read_word cannot read inline word handles")
 
     region_index: usize = (handle >> 32u64.uintptr()).usize()
-    offset_words_plus_one: usize = (handle & 0xffffffffu64.uintptr()).usize()
+    offset_words_plus_one: usize = ((handle & 0xffffffffu64.uintptr()) >> 1u64.uintptr()).usize()
     assert offset_words_plus_one > 0
 
     if state_bits != null:
@@ -1218,7 +1224,7 @@ def ctx_packed_store_read_word(a: any Arena&, handle: uintptr, state_bits: any v
     row_words: any uintptr& = (data_base + offset_words * sizeof(uintptr)).cast[any uintptr&]()
     return row_words[word_offset]
 
-def ctx_packed_store_read_index_word(a: any Arena&, index: u32, state_bits: any void&, word_offset: usize) -> uintptr:
+def ctx_packed_store_read_index_word(a: any Arena&, index: u32, state_bits: any void&, word_offset: usize) -> uintptr can[Abort.Panic]:
     assert state_bits != null
     state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
     index_usize: usize = index.usize()

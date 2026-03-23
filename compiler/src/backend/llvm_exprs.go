@@ -3799,7 +3799,7 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 			s.updatePackedVariantViewDecodedPtr(name, decodedPtr)
 		}
 	}
-	payloadValues, err := s.loadEnumVariantPayload(binding.ptr, nil, binding.typ.Enum, binding.typ.Variant, nil)
+	payloadValues, err := s.loadEnumVariantPayload(binding.ptr, binding.handle, binding.typ.Enum, binding.typ.Variant, nil)
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -4750,15 +4750,31 @@ func (s *functionState) emitPackedEnumConstructorAlloc(storeValue C.LLVMValueRef
 	if len(orderedArgs) != len(variant.Payload) {
 		return nil, nil, fmt.Errorf("enum constructor %s.%s expects %d arguments, got %d", enumType.Name, variant.Name, len(variant.Payload), len(args))
 	}
+	tagValue, err := s.enumTagConstant(variant.Tag)
+	if err != nil {
+		return nil, nil, err
+	}
+	if s.canInlinePackedEnumVariant(enumType, variant) {
+		var payloadValue C.LLVMValueRef
+		var payloadType semantic.Type
+		if len(orderedArgs) == 1 {
+			payloadType = variant.Payload[0]
+			payloadValue, _, err = s.emitExpr(orderedArgs[0], payloadType)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		inlineHandle, err := s.buildInlinePackedEnumHandle(tagValue, payloadValue, payloadType)
+		if err != nil {
+			return nil, nil, err
+		}
+		return inlineHandle, enumType, nil
+	}
 	rowType, err := s.g.ensurePackedEnumStorageType(enumType)
 	if err != nil {
 		return nil, nil, err
 	}
 	tailPlan, err := s.preparePackedEnumTailPayloadPlan(variant, orderedArgs)
-	if err != nil {
-		return nil, nil, err
-	}
-	tagValue, err := s.enumTagConstant(variant.Tag)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -4829,6 +4845,25 @@ func (s *functionState) emitPackedEnumConstructorAlloc(storeValue C.LLVMValueRef
 		}
 	}
 	return enumValue, enumType, nil
+}
+
+func (s *functionState) canInlinePackedEnumVariant(enumType *semantic.EnumType, variant *semantic.EnumVariant) bool {
+	return s != nil && s.g != nil && s.g.packedEnumABI == packedEnumABIWordHandle && s.g.wordBits == 64 && variant != nil && variant.CanInlineWordHandle(enumType)
+}
+
+func (s *functionState) buildInlinePackedEnumHandle(tagValue C.LLVMValueRef, payloadValue C.LLVMValueRef, payloadType semantic.Type) (C.LLVMValueRef, error) {
+	uintptrLLVMType, err := s.g.lowerBuiltin("uintptr")
+	if err != nil {
+		return nil, err
+	}
+	handleValue := C.LLVMBuildZExt(s.builder, tagValue, uintptrLLVMType, cStringFree("packed.inline.tag.zext"))
+	handleValue = C.LLVMBuildShl(s.builder, handleValue, C.LLVMConstInt(uintptrLLVMType, 49, 0), cStringFree("packed.inline.tag.shift"))
+	if payloadValue != nil && payloadType != nil {
+		payloadBits := C.LLVMBuildZExt(s.builder, payloadValue, uintptrLLVMType, cStringFree("packed.inline.payload.zext"))
+		payloadBits = C.LLVMBuildShl(s.builder, payloadBits, C.LLVMConstInt(uintptrLLVMType, 1, 0), cStringFree("packed.inline.payload.shift"))
+		handleValue = C.LLVMBuildOr(s.builder, handleValue, payloadBits, cStringFree("packed.inline.payload.or"))
+	}
+	return C.LLVMBuildOr(s.builder, handleValue, C.LLVMConstInt(uintptrLLVMType, 1, 0), cStringFree("packed.inline.handle")), nil
 }
 
 func (s *functionState) emitPackedStoreRecordTag(storeValue C.LLVMValueRef, storeType *semantic.PackedEnumStoreType, tagValue C.LLVMValueRef) error {

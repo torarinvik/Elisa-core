@@ -311,18 +311,18 @@ def fold_frozen() -> int:
 	}
 
 	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
-	if decodeCalls != 1 {
-		t.Fatalf("expected frozen packed payload match to use a single eager decode, got %d decode calls:\n%s", decodeCalls, output)
+	if decodeCalls != 0 {
+		t.Fatalf("expected frozen packed payload match to avoid eager decode when inline-capable variants share the enum, got %d decode calls:\n%s", decodeCalls, output)
 	}
-	if strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
-		t.Fatalf("expected frozen packed payload match to avoid ctx_packed_store_read_tag after eager decode, got:\n%s", output)
+	if !strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
+		t.Fatalf("expected frozen packed payload match to use ctx_packed_store_read_tag for dispatch, got:\n%s", output)
 	}
-	if strings.Contains(output, "call i64 @ctx_packed_store_read_word(") {
-		t.Fatalf("expected frozen packed payload match to avoid ctx_packed_store_read_word after eager decode, got:\n%s", output)
+	if !strings.Contains(output, "call i64 @ctx_packed_store_read_word(") {
+		t.Fatalf("expected frozen packed payload match to use ctx_packed_store_read_word for non-inline payload extraction, got:\n%s", output)
 	}
-	for _, check := range []string{"packed.decode.store.arena", "packed.decode.store.state"} {
+	for _, check := range []string{"packed.tag.store.arena", "packed.payload.word.arena"} {
 		if !strings.Contains(output, check) {
-			t.Fatalf("expected frozen packed payload eager decode to contain %q, got:\n%s", check, output)
+			t.Fatalf("expected frozen packed payload fast path to contain %q, got:\n%s", check, output)
 		}
 	}
 }
@@ -385,18 +385,18 @@ def fold_frozen_mixed() -> int:
 	}
 
 	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
-	if decodeCalls != 1 {
-		t.Fatalf("expected mixed frozen packed payload match to use a single eager decode, got %d decode calls:\n%s", decodeCalls, output)
+	if decodeCalls != 0 {
+		t.Fatalf("expected mixed frozen packed payload match to avoid eager decode when inline-capable variants share the enum, got %d decode calls:\n%s", decodeCalls, output)
 	}
-	if strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
-		t.Fatalf("expected mixed frozen packed payload match to avoid ctx_packed_store_read_tag after eager decode, got:\n%s", output)
+	if !strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
+		t.Fatalf("expected mixed frozen packed payload match to use ctx_packed_store_read_tag for dispatch, got:\n%s", output)
 	}
-	if strings.Contains(output, "call i64 @ctx_packed_store_read_word(") {
-		t.Fatalf("expected mixed frozen packed payload match to avoid ctx_packed_store_read_word after eager decode, got:\n%s", output)
+	if !strings.Contains(output, "call i64 @ctx_packed_store_read_word(") {
+		t.Fatalf("expected mixed frozen packed payload match to use ctx_packed_store_read_word for non-inline payload extraction, got:\n%s", output)
 	}
-	for _, check := range []string{"packed.decode.store.arena", "packed.decode.store.state"} {
+	for _, check := range []string{"packed.tag.store.arena", "packed.payload.word.arena"} {
 		if !strings.Contains(output, check) {
-			t.Fatalf("expected mixed frozen packed payload eager decode to contain %q, got:\n%s", check, output)
+			t.Fatalf("expected mixed frozen packed payload fast path to contain %q, got:\n%s", check, output)
 		}
 	}
 }
@@ -1976,9 +1976,88 @@ def choose() -> int:
 	if !strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
 		t.Fatalf("expected payloadless packed match to read tag through ctx_packed_store_read_tag, got:\n%s", output)
 	}
+	if strings.Contains(output, "call %PackedStoreAllocResult @ctx_packed_store_alloc_fixed_tagged_result(") {
+		t.Fatalf("expected payloadless packed match to inline constructor handles without ctx_packed_store_alloc_fixed_tagged_result, got:\n%s", output)
+	}
 	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
 	if decodeCalls != 0 {
 		t.Fatalf("expected no full decode for payloadless packed match after constructor alloc returns a writable row directly, got %d decode calls:\n%s", decodeCalls, output)
+	}
+}
+
+func TestGenerateLLVMIRUsesInlineWordHandleFastPathForSmallScalarPayloadMatches(t *testing.T) {
+	src := `packed enum Expr:
+	Lit(value: i32)
+	End
+
+def fold() -> i32:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	node: Expr = new[store] Expr.Lit(value: 5i32)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	return match node in frozen:
+		Expr.Lit(value):
+			value
+		Expr.End:
+			0i32
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_inline_word_handle_small_scalar_match.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	if strings.Contains(output, "call %PackedStoreAllocResult @ctx_packed_store_alloc_fixed_tagged_result(") {
+		t.Fatalf("expected inline small-scalar packed constructor to avoid ctx_packed_store_alloc_fixed_tagged_result, got:\n%s", output)
+	}
+	if !strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
+		t.Fatalf("expected inline small-scalar packed match to keep ctx_packed_store_read_tag for dispatch, got:\n%s", output)
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode(") {
+		t.Fatalf("expected inline small-scalar packed match to avoid eager decode, got:\n%s", output)
+	}
+	if strings.Contains(output, "call i64 @ctx_packed_store_read_word(") {
+		t.Fatalf("expected inline small-scalar packed match to avoid ctx_packed_store_read_word for payload extraction, got:\n%s", output)
+	}
+	if !strings.Contains(output, "lshr i64") || !strings.Contains(output, "trunc i64") {
+		t.Fatalf("expected inline small-scalar packed match to extract payload bits directly from the handle, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRLowersInlinePackedViewsWithoutDecode(t *testing.T) {
+	src := `packed enum Expr:
+	Lit(value: i32)
+
+def score(view_value: packedview[Expr.Lit]) -> i32:
+	return view_value.value
+
+def fold_view_value() -> i32:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	in store:
+		node: Expr = new Expr.Lit(value: 7i32)
+		view node in store as Expr.Lit(lit_view):
+			kept: packedview[Expr.Lit] = lit_view
+			return score(kept)
+	return 0i32
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_inline_word_handle_packedview.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode(") {
+		t.Fatalf("expected inline packedview lowering to avoid ctx_packed_store_decode, got:\n%s", output)
+	}
+	if strings.Contains(output, "call i64 @ctx_packed_store_read_word(") {
+		t.Fatalf("expected inline packedview lowering to avoid ctx_packed_store_read_word, got:\n%s", output)
+	}
+	if !strings.Contains(output, "%PackedView__Expr__Lit = type { i64, %Expr__Store }") {
+		t.Fatalf("expected inline packedview lowering to keep the packedview carrier ABI, got:\n%s", output)
+	}
+	if !strings.Contains(output, "lshr i64") || !strings.Contains(output, "trunc i64") {
+		t.Fatalf("expected inline packedview lowering to extract payload bits directly from the handle, got:\n%s", output)
 	}
 }
 

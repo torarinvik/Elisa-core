@@ -961,11 +961,62 @@ func (t *EnumType) Variant(name string) (*EnumVariant, bool) {
 	return variant, ok
 }
 
+func (t *EnumType) HasInlineWordHandleVariant() bool {
+	if t == nil {
+		return false
+	}
+	for _, variant := range t.Variants {
+		if variant.CanInlineWordHandle(t) {
+			return true
+		}
+	}
+	return false
+}
+
 func (v *EnumVariant) HasNamedPayloads() bool {
 	if v == nil || len(v.PayloadNames) == 0 {
 		return false
 	}
 	return v.PayloadNames[0] != ""
+}
+
+func (v *EnumVariant) CanInlineWordHandle(enumType *EnumType) bool {
+	if v == nil || enumType == nil || !enumType.Packed {
+		return false
+	}
+	if len(enumType.Common) != 0 {
+		return false
+	}
+	if v.Tag >= 1<<15 {
+		return false
+	}
+	if _, hasTail := v.TailPayloadIndex(); hasTail {
+		return false
+	}
+	switch len(v.Payload) {
+	case 0:
+		return true
+	case 1:
+		return inlineWordHandlePayloadType(v.Payload[0])
+	default:
+		return false
+	}
+}
+
+func inlineWordHandlePayloadType(t Type) bool {
+	if storage, ok := ConstEnumStorageType(t); ok {
+		return inlineWordHandlePayloadType(storage)
+	}
+	builtin, ok := t.(*BuiltinType)
+	if !ok || builtin == nil {
+		return false
+	}
+	switch builtin.Name {
+	case "bool", "i8", "i16", "i32", "u8", "u16", "u32":
+		return true
+	default:
+		return false
+	}
 }
 
 func (v *EnumVariant) PayloadIndex(name string) (int, bool) {

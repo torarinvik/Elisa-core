@@ -645,6 +645,8 @@ func (s *functionState) emitViewStmt(stmt *ast.ViewStmt) error {
 	needsDecodedView := true
 	if s.g.packedEnumABI == packedEnumABIIndexSOA && storeBinding != nil {
 		needsDecodedView = false
+	} else if s.canInlinePackedEnumVariant(enumType, variant) {
+		needsDecodedView = false
 	}
 	if viewDecodedValue == nil && needsDecodedView {
 		viewDecodedValue, err = s.decodePackedEnumHandleWithStore(enumValue, enumType, storeBinding)
@@ -664,9 +666,13 @@ func (s *functionState) emitViewStmt(stmt *ast.ViewStmt) error {
 				storeCopy = &copied
 			}
 			s.bindPackedVariantView(stmt.Pattern.Name, resolvedViewType, viewDecodedValue, enumValue, storeCopy)
-		} else if s.g.packedEnumABI == packedEnumABIIndexSOA && storeBinding != nil {
-			storeCopy := *storeBinding
-			s.bindPackedVariantView(stmt.Pattern.Name, resolvedViewType, nil, enumValue, &storeCopy)
+		} else if s.g.packedEnumABI == packedEnumABIIndexSOA || s.canInlinePackedEnumVariant(enumType, variant) {
+			var storeCopy *packedStoreBinding
+			if storeBinding != nil {
+				copied := *storeBinding
+				storeCopy = &copied
+			}
+			s.bindPackedVariantView(stmt.Pattern.Name, resolvedViewType, nil, enumValue, storeCopy)
 		}
 	}
 	if err := s.emitBlock(stmt.Body, false); err != nil {
@@ -1596,6 +1602,10 @@ func (s *functionState) bindMatchedPackedVariantView(valueExpr ast.Expr, pattern
 	if store != nil {
 		storeCopy := *store
 		s.bindPackedVariantView(name, viewType, nil, enumValue, &storeCopy)
+		return
+	}
+	if s.canInlinePackedEnumVariant(enumType, variant) {
+		s.bindPackedVariantView(name, viewType, nil, enumValue, nil)
 	}
 }
 
@@ -1613,7 +1623,7 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 		return err
 	}
 	var decodedMatchValue C.LLVMValueRef
-	if enumType.Packed && packedMatchShouldEagerDecode(s.g.result, s.g.packedEnumABI, stmt.Value, storeBinding, stmt.Arms) {
+	if enumType.Packed && packedMatchShouldEagerDecode(s.g.result, s.g.packedEnumABI, enumType, stmt.Value, storeBinding, stmt.Arms) {
 		decodedMatchValue, err = s.decodePackedEnumHandleWithStore(enumValue, enumType, storeBinding)
 		if err != nil {
 			return err
@@ -1686,7 +1696,7 @@ func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, sema
 		return nil, nil, err
 	}
 	var decodedMatchValue C.LLVMValueRef
-	if enumType.Packed && packedMatchShouldEagerDecode(s.g.result, s.g.packedEnumABI, expr.Value, storeBinding, expr.Arms) {
+	if enumType.Packed && packedMatchShouldEagerDecode(s.g.result, s.g.packedEnumABI, enumType, expr.Value, storeBinding, expr.Arms) {
 		decodedMatchValue, err = s.decodePackedEnumHandleWithStore(enumValue, enumType, storeBinding)
 		if err != nil {
 			return nil, nil, err
@@ -2008,6 +2018,24 @@ func (s *functionState) loadEnumTag(decodedEnumPtr C.LLVMValueRef, enumPtr C.LLV
 	return C.LLVMBuildLoad2(s.builder, tagType, tagPtr, cStringFree("match.tag.value")), nil
 }
 
+func (s *functionState) readInlineWordHandlePayload(handleValue C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant) ([]C.LLVMValueRef, bool, error) {
+	if !s.canInlinePackedEnumVariant(enumType, variant) || len(variant.Payload) != 1 {
+		return nil, false, nil
+	}
+	uintptrLLVMType, err := s.g.lowerBuiltin("uintptr")
+	if err != nil {
+		return nil, false, err
+	}
+	payloadLLVMType, err := s.g.lowerType(variant.Payload[0])
+	if err != nil {
+		return nil, false, err
+	}
+	shifted := C.LLVMBuildLShr(s.builder, handleValue, C.LLVMConstInt(uintptrLLVMType, 1, 0), cStringFree("packed.inline.payload.bits"))
+	masked := C.LLVMBuildAnd(s.builder, shifted, C.LLVMConstInt(uintptrLLVMType, C.ulonglong(0x0000ffffffffffff), 0), cStringFree("packed.inline.payload.mask"))
+	value := C.LLVMBuildTrunc(s.builder, masked, payloadLLVMType, cStringFree("packed.inline.payload.value"))
+	return []C.LLVMValueRef{value}, true, nil
+}
+
 func (s *functionState) loadEnumVariantPayload(decodedEnumPtr C.LLVMValueRef, enumPtr C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, store *packedStoreBinding) ([]C.LLVMValueRef, error) {
 	if variant == nil || len(variant.Payload) == 0 {
 		return nil, nil
@@ -2016,6 +2044,13 @@ func (s *functionState) loadEnumVariantPayload(decodedEnumPtr C.LLVMValueRef, en
 		if decodedEnumPtr != nil {
 			enumPtr = decodedEnumPtr
 		} else {
+			values, ok, inlineErr := s.readInlineWordHandlePayload(enumPtr, enumType, variant)
+			if inlineErr != nil {
+				return nil, inlineErr
+			}
+			if ok {
+				return values, nil
+			}
 			values, ok, readErr := s.readPackedEnumVariantPayloadWithStore(enumPtr, enumType, variant, store)
 			if readErr != nil {
 				return nil, readErr
@@ -2053,6 +2088,11 @@ func (s *functionState) loadEnumVariantPayload(decodedEnumPtr C.LLVMValueRef, en
 func (s *functionState) readPackedEnumVariantPayloadWithStore(handleValue C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, store *packedStoreBinding) ([]C.LLVMValueRef, bool, error) {
 	if enumType == nil || !enumType.Packed || variant == nil || len(variant.Payload) == 0 {
 		return nil, false, nil
+	}
+	if values, ok, err := s.readInlineWordHandlePayload(handleValue, enumType, variant); err != nil {
+		return nil, false, err
+	} else if ok {
+		return values, true, nil
 	}
 	ops, ok := s.packedStoreOpsFromBinding(store)
 	if !ok {
@@ -2168,7 +2208,10 @@ func packedMatchNeedsEagerDecode(arms []ast.MatchArm) bool {
 	return false
 }
 
-func packedMatchShouldEagerDecode(result *semantic.Result, abi packedEnumABIMode, matchValue ast.Expr, store *packedStoreBinding, arms []ast.MatchArm) bool {
+func packedMatchShouldEagerDecode(result *semantic.Result, abi packedEnumABIMode, enumType *semantic.EnumType, matchValue ast.Expr, store *packedStoreBinding, arms []ast.MatchArm) bool {
+	if abi == packedEnumABIWordHandle && enumType != nil && enumType.HasInlineWordHandleVariant() {
+		return false
+	}
 	needsPayloadDecode := packedMatchNeedsEagerDecode(arms)
 	ident, ok := matchValue.(*ast.Ident)
 	readsMatchedValueField := ok && matchArmsReadMatchedValueField(ident.Name, arms)
