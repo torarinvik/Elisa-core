@@ -64,14 +64,11 @@ struct JsonAstObjectIterCursor:
 
 
 packed enum JsonNode:
-    common:
-        source_offset: usize
-        source_len: usize
     Invalid
     Null
     Bool(value: bool)
-    Num
-    Text
+    Num(source_offset: usize, source_len: usize)
+    Text(source_offset: usize, source_len: usize)
     Array(items: tail JsonNode)
     Object(fields: tail JsonField)
 
@@ -1025,20 +1022,6 @@ def json_ast_kind_code(kind: JsonNodeKind) -> i64:
     return -1
 
 
-def json_ast_has_scalar_source_span(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
-    return node.source_len > 0u
-
-
-def json_ast_is_text_node(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> bool:
-    if not json_ast_has_scalar_source_span(node, store):
-        return false
-    return source[node.source_offset].i64() == JSON_CH_DQUOTE
-
-
-def json_ast_is_number_node(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> bool:
-    return json_ast_has_scalar_source_span(node, store) and not json_ast_is_text_node(source, node, store)
-
-
 def json_ast_number_kind_code(kind: JsonNumberKind) -> i64:
     if kind == JsonNumberKind.UNSIGNED:
         return 0
@@ -1052,16 +1035,18 @@ def json_ast_number_kind_code(kind: JsonNumberKind) -> i64:
 
 
 def json_ast_source_view(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> StringView:
-    if json_ast_has_scalar_source_span(node, store):
-        return StringView(source + node.source_offset, node.source_len.i64())
+    if node in store as JsonNode.Text(source_offset: off, source_len: len):
+        return StringView(source + off, len.i64())
+    if node in store as JsonNode.Num(source_offset: off, source_len: len):
+        return StringView(source + off, len.i64())
     return json_empty_view()
 
 
 def json_ast_string_view(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> StringView:
-    if json_ast_is_text_node(source, node, store):
-        if node.source_len < 2u:
+    if node in store as JsonNode.Text(source_offset: off, source_len: len):
+        if len < 2u:
             return json_empty_view()
-        return StringView(source + node.source_offset + 1u, (node.source_len - 2u).i64())
+        return StringView(source + off + 1u, (len - 2u).i64())
     return json_empty_view()
 
 
@@ -1088,20 +1073,20 @@ def json_ast_string_value_from_span(source: any u8&, source_offset: usize, sourc
 
 
 def json_ast_string_len(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> i64:
-    if json_ast_is_text_node(source, node, store):
-        return json_decoded_string_len(source, node.source_offset, node.source_len)
+    if node in store as JsonNode.Text(source_offset: off, source_len: len):
+        return json_decoded_string_len(source, off, len)
     return -1
 
 
 def json_ast_string_copy(source: any u8&, node: JsonNode, out: any u8&, capacity: usize, store: JsonNode.Store[Local]) -> i64:
-    if json_ast_is_text_node(source, node, store):
-        decoded_len: i64 = json_decoded_string_len(source, node.source_offset, node.source_len)
+    if node in store as JsonNode.Text(source_offset: off, source_len: len):
+        decoded_len: i64 = json_decoded_string_len(source, off, len)
         if decoded_len < 0:
             return -1
         required_capacity: usize = decoded_len.usize() + 1u
         if capacity < required_capacity:
             return decoded_len
-        written: i64 = json_decode_string_into(source, node.source_offset, node.source_len, out)
+        written: i64 = json_decode_string_into(source, off, len, out)
         if written < 0:
             return -1
         out[written.usize()] <- 0
@@ -1110,8 +1095,8 @@ def json_ast_string_copy(source: any u8&, node: JsonNode, out: any u8&, capacity
 
 
 def json_ast_number_view(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> StringView:
-    if json_ast_is_number_node(source, node, store):
-        return StringView(source + node.source_offset, node.source_len.i64())
+    if node in store as JsonNode.Num(source_offset: off, source_len: len):
+        return StringView(source + off, len.i64())
     return json_empty_view()
 
 
@@ -1207,8 +1192,8 @@ def json_parse_number_value(source: any u8&, source_offset: usize, source_len: u
 
 
 def json_ast_number_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> JsonNumberValue:
-    if json_ast_is_number_node(source, node, store):
-        return json_parse_number_value(source, node.source_offset, node.source_len)
+    if node in store as JsonNode.Num(source_offset: off, source_len: len):
+        return json_parse_number_value(source, off, len)
     return json_invalid_number_value()
 
 
@@ -1239,14 +1224,14 @@ def json_ast_number_i64_value(source: any u8&, node: JsonNode, store: JsonNode.S
 
 
 def json_ast_number_f64_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> f64 error[JsonNumberAccessError]:
-    if json_ast_is_number_node(source, node, store):
-        return try json_parse_number_f64_value(source, node.source_offset, node.source_len)
+    if node in store as JsonNode.Num(source_offset: off, source_len: len):
+        return try json_parse_number_f64_value(source, off, len)
     raise JsonNumberAccessError.Invalid
 
 
 def json_ast_number_f32_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> f32 error[JsonNumberAccessError]:
-    if json_ast_is_number_node(source, node, store):
-        return try json_parse_number_f32_value(source, node.source_offset, node.source_len)
+    if node in store as JsonNode.Num(source_offset: off, source_len: len):
+        return try json_parse_number_f32_value(source, off, len)
     raise JsonNumberAccessError.Invalid
 
 
@@ -1260,18 +1245,20 @@ def json_number_value_can_materialize_i64(value: JsonNumberValue) -> bool:
 
 
 def json_node_can_materialize_float(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> bool:
-    return json_ast_is_number_node(source, node, store)
+    if node in store as JsonNode.Num:
+        return true
+    return false
 
 
 def json_ast_string_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> heap u8& can[Memory.Allocate, Abort.Panic]:
-    if json_ast_is_text_node(source, node, store):
-        return json_ast_string_value_from_span(source, node.source_offset, node.source_len)
+    if node in store as JsonNode.Text(source_offset: off, source_len: len):
+        return json_ast_string_value_from_span(source, off, len)
     return intern_small_string("".cast[any u8&](), 0)
 
 
 def json_ast_string_eq_literal(source: any u8&, node: JsonNode, literal: any u8&, store: JsonNode.Store[Local]) -> bool:
-    if json_ast_is_text_node(source, node, store):
-        return json_string_matches_literal(source, node.source_offset, node.source_len, literal)
+    if node in store as JsonNode.Text(source_offset: off, source_len: len):
+        return json_string_matches_literal(source, off, len, literal)
     return false
 
 
