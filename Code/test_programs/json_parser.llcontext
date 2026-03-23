@@ -30,6 +30,7 @@ const JSON_CH_t = 116
 const JSON_CH_u = 117
 const JSON_CH_LBRACE = 123
 const JSON_CH_RBRACE = 125
+const JSON_MAX_INLINE_SOURCE_OFFSET = 4294967295u64
 
 struct JsonCursor:
     source: mutable any u8&
@@ -67,10 +68,10 @@ packed enum JsonNode:
     Invalid
     Null
     Bool(value: bool)
-    Num(source_offset: usize, source_len: usize)
-    Text(source_offset: usize, source_len: usize)
-    Array(items: tail JsonNode)
-    Object(fields: tail JsonField)
+    Num(source_offset: u32)
+    Text(source_offset: u32)
+    Array(items_ptr: any JsonNode&?, item_count: u32)
+    Object(fields_ptr: any JsonField&?, field_count: u32)
 
 
 const enum JsonNodeKind of i8:
@@ -157,6 +158,10 @@ def json_new_cursor_with_len(source: any u8&, source_len: usize) -> JsonCursor:
 
 def json_new_cursor(source: any u8&) -> JsonCursor:
     return json_new_cursor_with_len(source, runtime_strlen(source))
+
+
+def json_copy_cursor(cursor: any JsonCursor&) -> JsonCursor:
+    return JsonCursor(cursor.source, cursor.source_len, cursor.pos)
 
 
 def json_char_at(source: any u8&, source_len: usize, index: usize) -> i64:
@@ -555,6 +560,22 @@ def json_parse_number(cursor: any JsonCursor&) -> i64:
     return json_parse_number_lexeme(cursor).checksum
 
 
+def json_parse_string_lexeme_at(source: any u8&, source_len: usize, source_offset: u32) -> JsonLexemeResult:
+    if source_offset.u64() > JSON_MAX_INLINE_SOURCE_OFFSET or source_offset.usize() >= source_len:
+        return json_invalid_lexeme()
+    cursor: mutable JsonCursor = json_new_cursor_with_len(source, source_len)
+    cursor.pos <- source_offset.usize()
+    return json_parse_string_lexeme((&cursor).cast[any JsonCursor&]())
+
+
+def json_parse_number_lexeme_at(source: any u8&, source_len: usize, source_offset: u32) -> JsonLexemeResult:
+    if source_offset.u64() > JSON_MAX_INLINE_SOURCE_OFFSET or source_offset.usize() >= source_len:
+        return json_invalid_lexeme()
+    cursor: mutable JsonCursor = json_new_cursor_with_len(source, source_len)
+    cursor.pos <- source_offset.usize()
+    return json_parse_number_lexeme((&cursor).cast[any JsonCursor&]())
+
+
 def json_parse_value_after_ws(cursor: any JsonCursor&) -> i64:
     ch: i64 = json_cur_char(cursor)
     if ch == JSON_CH_DQUOTE:
@@ -572,6 +593,68 @@ def json_parse_value_after_ws(cursor: any JsonCursor&) -> i64:
     if ch == JSON_CH_MINUS or json_is_digit(ch):
         return json_parse_number(cursor)
     return -1
+
+
+def json_count_array_items_after_ws(cursor: any JsonCursor&) -> i64:
+    if json_cur_char(cursor) == JSON_CH_RBRACKET:
+        _ = json_advance_char(cursor)
+        return 0
+
+    count: mutable i64 = 0
+    done: mutable bool = false
+    while not done:
+        item: i64 = json_parse_value_after_ws(cursor)
+        if item < 0:
+            return -1
+        count <- count + 1
+        json_skip_ws(cursor)
+
+        ch: i64 = json_cur_char(cursor)
+        if ch == JSON_CH_COMMA:
+            _ = json_advance_char(cursor)
+            json_skip_ws(cursor)
+        elif ch == JSON_CH_RBRACKET:
+            _ = json_advance_char(cursor)
+            done <- true
+        else:
+            return -1
+
+    return count
+
+
+def json_count_object_fields_after_ws(cursor: any JsonCursor&) -> i64:
+    if json_cur_char(cursor) == JSON_CH_RBRACE:
+        _ = json_advance_char(cursor)
+        return 0
+
+    count: mutable i64 = 0
+    done: mutable bool = false
+    while not done:
+        key: i64 = json_parse_string(cursor)
+        if key < 0:
+            return -1
+        json_skip_ws(cursor)
+        if json_advance_char(cursor) != JSON_CH_COLON:
+            return -1
+
+        json_skip_ws(cursor)
+        value: i64 = json_parse_value_after_ws(cursor)
+        if value < 0:
+            return -1
+        count <- count + 1
+        json_skip_ws(cursor)
+
+        ch: i64 = json_cur_char(cursor)
+        if ch == JSON_CH_COMMA:
+            _ = json_advance_char(cursor)
+            json_skip_ws(cursor)
+        elif ch == JSON_CH_RBRACE:
+            _ = json_advance_char(cursor)
+            done <- true
+        else:
+            return -1
+
+    return count
 
 
 def json_parse_array(cursor: any JsonCursor&) -> i64:
@@ -669,6 +752,18 @@ def json_empty_node_view() -> dview[JsonNode]:
 
 def json_empty_field_view() -> dview[JsonField]:
     return DynArrayView(null, 0u, sizeof(JsonField))
+
+
+def json_node_items_view(items_ptr: any JsonNode&?, item_count: u32) -> dview[JsonNode]:
+    if items_ptr == null or item_count == 0u32:
+        return json_empty_node_view()
+    return DynArrayView(items_ptr.cast[any void&](), item_count.usize(), sizeof(JsonNode))
+
+
+def json_field_items_view(fields_ptr: any JsonField&?, field_count: u32) -> dview[JsonField]:
+    if fields_ptr == null or field_count == 0u32:
+        return json_empty_field_view()
+    return DynArrayView(fields_ptr.cast[any void&](), field_count.usize(), sizeof(JsonField))
 
 
 def json_invalid_array_iter_cursor() -> JsonAstArrayIterCursor:
@@ -793,7 +888,7 @@ def json_parse_string_node(cursor: any JsonCursor&, store: JsonNode.Store[Local]
     if checksum < 0:
         return json_parse_node_result(invalid_node, -1)
     in store:
-        return json_parse_node_result(new JsonNode.Text(source_offset: lexeme.source_offset, source_len: lexeme.source_len), checksum)
+        return json_parse_node_result(new JsonNode.Text(source_offset: lexeme.source_offset.u32()), checksum)
 
 
 def json_parse_number_node(cursor: any JsonCursor&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult:
@@ -802,7 +897,7 @@ def json_parse_number_node(cursor: any JsonCursor&, store: JsonNode.Store[Local]
     if checksum < 0:
         return json_parse_node_result(invalid_node, -1)
     in store:
-        return json_parse_node_result(new JsonNode.Num(source_offset: lexeme.source_offset, source_len: lexeme.source_len), checksum)
+        return json_parse_node_result(new JsonNode.Num(source_offset: lexeme.source_offset.u32()), checksum)
 
 
 def json_parse_true_node(cursor: any JsonCursor&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult:
@@ -852,27 +947,36 @@ def json_parse_value_node_after_ws(cursor: any JsonCursor&, arena: any Arena&, s
 
 
 def json_parse_array_node(cursor: any JsonCursor&, arena: any Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
-    start: usize = cursor.pos
     if json_advance_char(cursor) != JSON_CH_LBRACKET:
         return json_parse_node_result(invalid_node, -1)
 
     json_skip_ws(cursor)
-    region items_scratch(1024u)
-    items_arena: any Arena& = (&items_scratch).cast[any Arena&]()
-    items: mutable darray[JsonNode] = zeroed
-    items_checksum: mutable i64 = 0
-    if json_cur_char(cursor) == JSON_CH_RBRACKET:
+    count_cursor: mutable JsonCursor = json_copy_cursor(cursor)
+    item_count_i64: i64 = json_count_array_items_after_ws((&count_cursor).cast[any JsonCursor&]())
+    if item_count_i64 < 0:
+        return json_parse_node_result(invalid_node, -1)
+
+    item_count: usize = item_count_i64.usize()
+    items_ptr: any JsonNode&? = null
+    if item_count > 0u:
+        items_ptr <- arena_alloc(arena, item_count * sizeof(JsonNode)).cast[any JsonNode&]()
+
+    if item_count == 0u:
         _ = json_advance_char(cursor)
         in store:
-            return json_parse_node_result(new JsonNode.Array(items: json_empty_node_view()), 43)
+            return json_parse_node_result(new JsonNode.Array(items_ptr: null, item_count: 0u32), 43)
 
     done: mutable bool = false
+    item_index: mutable usize = 0u
+    items_checksum: mutable i64 = 0
     while not done:
         value_result: JsonParseNodeResult = json_parse_value_node_after_ws(cursor, arena, store, invalid_node)
         if value_result.checksum < 0:
             return value_result
 
-        _ = arena_da_append(items_arena, (&items).cast[any darray[JsonNode]&](), value_result.node)
+        assert items_ptr != null
+        items_ptr[item_index] <- value_result.node
+        item_index <- item_index + 1u
         items_checksum <- items_checksum + value_result.checksum
 
         json_skip_ws(cursor)
@@ -886,27 +990,33 @@ def json_parse_array_node(cursor: any JsonCursor&, arena: any Arena&, store: Jso
         else:
             return json_parse_node_result(invalid_node, -1)
 
-    items_view: dview[JsonNode] = arena_da_view((&items).cast[any darray[JsonNode]&](), 0u, items.count)
     in store:
-        return json_parse_node_result(new JsonNode.Array(items: items_view), 43 + items_checksum)
+        return json_parse_node_result(new JsonNode.Array(items_ptr: items_ptr, item_count: item_count.u32()), 43 + items_checksum)
 
 
 def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
-    start: usize = cursor.pos
     if json_advance_char(cursor) != JSON_CH_LBRACE:
         return json_parse_node_result(invalid_node, -1)
 
     json_skip_ws(cursor)
-    region fields_scratch(1024u)
-    fields_arena: any Arena& = (&fields_scratch).cast[any Arena&]()
-    fields: mutable darray[JsonField] = zeroed
-    fields_checksum: mutable i64 = 0
-    if json_cur_char(cursor) == JSON_CH_RBRACE:
+    count_cursor: mutable JsonCursor = json_copy_cursor(cursor)
+    field_count_i64: i64 = json_count_object_fields_after_ws((&count_cursor).cast[any JsonCursor&]())
+    if field_count_i64 < 0:
+        return json_parse_node_result(invalid_node, -1)
+
+    field_count: usize = field_count_i64.usize()
+    fields_ptr: any JsonField&? = null
+    if field_count > 0u:
+        fields_ptr <- arena_alloc(arena, field_count * sizeof(JsonField)).cast[any JsonField&]()
+
+    if field_count == 0u:
         _ = json_advance_char(cursor)
         in store:
-            return json_parse_node_result(new JsonNode.Object(fields: json_empty_field_view()), 47)
+            return json_parse_node_result(new JsonNode.Object(fields_ptr: null, field_count: 0u32), 47)
 
     done: mutable bool = false
+    field_index: mutable usize = 0u
+    fields_checksum: mutable i64 = 0
     while not done:
         key_lexeme: JsonLexemeResult = json_parse_string_lexeme(cursor)
         key_checksum: i64 = key_lexeme.checksum
@@ -915,7 +1025,7 @@ def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: Js
 
         key_node: mutable JsonNode = invalid_node
         in store:
-            key_node <- new JsonNode.Text(source_offset: key_lexeme.source_offset, source_len: key_lexeme.source_len)
+            key_node <- new JsonNode.Text(source_offset: key_lexeme.source_offset.u32())
 
         json_skip_ws(cursor)
         if json_advance_char(cursor) != JSON_CH_COLON:
@@ -926,7 +1036,9 @@ def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: Js
         if value_result.checksum < 0:
             return value_result
 
-        _ = arena_da_append(fields_arena, (&fields).cast[any darray[JsonField]&](), JsonField(key_node, value_result.node))
+        assert fields_ptr != null
+        fields_ptr[field_index] <- JsonField(key_node, value_result.node)
+        field_index <- field_index + 1u
         fields_checksum <- fields_checksum + key_checksum + value_result.checksum
 
         json_skip_ws(cursor)
@@ -940,9 +1052,8 @@ def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: Js
         else:
             return JsonParseNodeResult(invalid_node, -1)
 
-    fields_view: dview[JsonField] = arena_da_view((&fields).cast[any darray[JsonField]&](), 0u, fields.count)
     in store:
-        return json_parse_node_result(new JsonNode.Object(fields: fields_view), 47 + fields_checksum)
+        return json_parse_node_result(new JsonNode.Object(fields_ptr: fields_ptr, field_count: field_count.u32()), 47 + fields_checksum)
 
 
 def json_parse_value_node(cursor: any JsonCursor&, arena: any Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
@@ -990,6 +1101,18 @@ def json_parse_number_f32_value(source: any u8&, source_offset: usize, source_le
     return parsed.f32()
 
 
+def json_ast_text_lexeme(source: any u8&, source_len: usize, node: JsonNode, store: JsonNode.Store[Local]) -> JsonLexemeResult:
+    if node in store as JsonNode.Text(source_offset: off):
+        return json_parse_string_lexeme_at(source, source_len, off)
+    return json_invalid_lexeme()
+
+
+def json_ast_number_lexeme(source: any u8&, source_len: usize, node: JsonNode, store: JsonNode.Store[Local]) -> JsonLexemeResult:
+    if node in store as JsonNode.Num(source_offset: off):
+        return json_parse_number_lexeme_at(source, source_len, off)
+    return json_invalid_lexeme()
+
+
 def json_ast_kind(node: JsonNode, store: JsonNode.Store[Local]) -> JsonNodeKind:
     if node == json_node_invalid(store):
         return JsonNodeKind.INVALID
@@ -999,9 +1122,9 @@ def json_ast_kind(node: JsonNode, store: JsonNode.Store[Local]) -> JsonNodeKind:
         return JsonNodeKind.BOOL
     if node in store as JsonNode.Num:
         return JsonNodeKind.NUMBER
-    if node in store as JsonNode.Array(items: items):
+    if node in store as JsonNode.Array:
         return JsonNodeKind.ARRAY
-    if node in store as JsonNode.Object(fields: fields):
+    if node in store as JsonNode.Object:
         return JsonNodeKind.OBJECT
     return JsonNodeKind.STRING
 
@@ -1035,18 +1158,22 @@ def json_ast_number_kind_code(kind: JsonNumberKind) -> i64:
 
 
 def json_ast_source_view(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> StringView:
-    if node in store as JsonNode.Text(source_offset: off, source_len: len):
-        return StringView(source + off, len.i64())
-    if node in store as JsonNode.Num(source_offset: off, source_len: len):
-        return StringView(source + off, len.i64())
+    source_len: usize = runtime_strlen(source)
+    text_lexeme: JsonLexemeResult = json_ast_text_lexeme(source, source_len, node, store)
+    if text_lexeme.checksum >= 0:
+        return StringView(source + text_lexeme.source_offset, text_lexeme.source_len.i64())
+    number_lexeme: JsonLexemeResult = json_ast_number_lexeme(source, source_len, node, store)
+    if number_lexeme.checksum >= 0:
+        return StringView(source + number_lexeme.source_offset, number_lexeme.source_len.i64())
     return json_empty_view()
 
 
 def json_ast_string_view(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> StringView:
-    if node in store as JsonNode.Text(source_offset: off, source_len: len):
-        if len < 2u:
+    lexeme: JsonLexemeResult = json_ast_text_lexeme(source, runtime_strlen(source), node, store)
+    if lexeme.checksum >= 0:
+        if lexeme.source_len < 2u:
             return json_empty_view()
-        return StringView(source + off + 1u, (len - 2u).i64())
+        return StringView(source + lexeme.source_offset + 1u, (lexeme.source_len - 2u).i64())
     return json_empty_view()
 
 
@@ -1073,20 +1200,22 @@ def json_ast_string_value_from_span(source: any u8&, source_offset: usize, sourc
 
 
 def json_ast_string_len(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> i64:
-    if node in store as JsonNode.Text(source_offset: off, source_len: len):
-        return json_decoded_string_len(source, off, len)
+    lexeme: JsonLexemeResult = json_ast_text_lexeme(source, runtime_strlen(source), node, store)
+    if lexeme.checksum >= 0:
+        return json_decoded_string_len(source, lexeme.source_offset, lexeme.source_len)
     return -1
 
 
 def json_ast_string_copy(source: any u8&, node: JsonNode, out: any u8&, capacity: usize, store: JsonNode.Store[Local]) -> i64:
-    if node in store as JsonNode.Text(source_offset: off, source_len: len):
-        decoded_len: i64 = json_decoded_string_len(source, off, len)
+    lexeme: JsonLexemeResult = json_ast_text_lexeme(source, runtime_strlen(source), node, store)
+    if lexeme.checksum >= 0:
+        decoded_len: i64 = json_decoded_string_len(source, lexeme.source_offset, lexeme.source_len)
         if decoded_len < 0:
             return -1
         required_capacity: usize = decoded_len.usize() + 1u
         if capacity < required_capacity:
             return decoded_len
-        written: i64 = json_decode_string_into(source, off, len, out)
+        written: i64 = json_decode_string_into(source, lexeme.source_offset, lexeme.source_len, out)
         if written < 0:
             return -1
         out[written.usize()] <- 0
@@ -1095,8 +1224,9 @@ def json_ast_string_copy(source: any u8&, node: JsonNode, out: any u8&, capacity
 
 
 def json_ast_number_view(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> StringView:
-    if node in store as JsonNode.Num(source_offset: off, source_len: len):
-        return StringView(source + off, len.i64())
+    lexeme: JsonLexemeResult = json_ast_number_lexeme(source, runtime_strlen(source), node, store)
+    if lexeme.checksum >= 0:
+        return StringView(source + lexeme.source_offset, lexeme.source_len.i64())
     return json_empty_view()
 
 
@@ -1192,8 +1322,9 @@ def json_parse_number_value(source: any u8&, source_offset: usize, source_len: u
 
 
 def json_ast_number_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> JsonNumberValue:
-    if node in store as JsonNode.Num(source_offset: off, source_len: len):
-        return json_parse_number_value(source, off, len)
+    lexeme: JsonLexemeResult = json_ast_number_lexeme(source, runtime_strlen(source), node, store)
+    if lexeme.checksum >= 0:
+        return json_parse_number_value(source, lexeme.source_offset, lexeme.source_len)
     return json_invalid_number_value()
 
 
@@ -1224,14 +1355,16 @@ def json_ast_number_i64_value(source: any u8&, node: JsonNode, store: JsonNode.S
 
 
 def json_ast_number_f64_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> f64 error[JsonNumberAccessError]:
-    if node in store as JsonNode.Num(source_offset: off, source_len: len):
-        return try json_parse_number_f64_value(source, off, len)
+    lexeme: JsonLexemeResult = json_ast_number_lexeme(source, runtime_strlen(source), node, store)
+    if lexeme.checksum >= 0:
+        return try json_parse_number_f64_value(source, lexeme.source_offset, lexeme.source_len)
     raise JsonNumberAccessError.Invalid
 
 
 def json_ast_number_f32_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> f32 error[JsonNumberAccessError]:
-    if node in store as JsonNode.Num(source_offset: off, source_len: len):
-        return try json_parse_number_f32_value(source, off, len)
+    lexeme: JsonLexemeResult = json_ast_number_lexeme(source, runtime_strlen(source), node, store)
+    if lexeme.checksum >= 0:
+        return try json_parse_number_f32_value(source, lexeme.source_offset, lexeme.source_len)
     raise JsonNumberAccessError.Invalid
 
 
@@ -1251,14 +1384,16 @@ def json_node_can_materialize_float(source: any u8&, node: JsonNode, store: Json
 
 
 def json_ast_string_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> heap u8& can[Memory.Allocate, Abort.Panic]:
-    if node in store as JsonNode.Text(source_offset: off, source_len: len):
-        return json_ast_string_value_from_span(source, off, len)
+    lexeme: JsonLexemeResult = json_ast_text_lexeme(source, runtime_strlen(source), node, store)
+    if lexeme.checksum >= 0:
+        return json_ast_string_value_from_span(source, lexeme.source_offset, lexeme.source_len)
     return intern_small_string("".cast[any u8&](), 0)
 
 
 def json_ast_string_eq_literal(source: any u8&, node: JsonNode, literal: any u8&, store: JsonNode.Store[Local]) -> bool:
-    if node in store as JsonNode.Text(source_offset: off, source_len: len):
-        return json_string_matches_literal(source, off, len, literal)
+    lexeme: JsonLexemeResult = json_ast_text_lexeme(source, runtime_strlen(source), node, store)
+    if lexeme.checksum >= 0:
+        return json_string_matches_literal(source, lexeme.source_offset, lexeme.source_len, literal)
     return false
 
 
@@ -1275,26 +1410,28 @@ def json_ast_is_null(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
 
 
 def json_ast_array_len(node: JsonNode, store: JsonNode.Store[Local]) -> i64:
-    if node in store as JsonNode.Array(items: items):
-        return items.len.i64()
+    if node in store as JsonNode.Array(items_ptr: items_ptr, item_count: item_count):
+        return item_count.i64()
     return -1
 
 
 def json_ast_object_len(node: JsonNode, store: JsonNode.Store[Local]) -> i64:
-    if node in store as JsonNode.Object(fields: fields):
-        return fields.len.i64()
+    if node in store as JsonNode.Object(fields_ptr: fields_ptr, field_count: field_count):
+        return field_count.i64()
     return -1
 
 
 def json_ast_array_nth(node: JsonNode, index: usize, store: JsonNode.Store[Local]) -> JsonNode:
-    if node in store as JsonNode.Array(items: items):
+    if node in store as JsonNode.Array(items_ptr: items_ptr, item_count: item_count):
+        items: dview[JsonNode] = json_node_items_view(items_ptr, item_count)
         if index < items.len:
             return arena_da_view_get(items, index)
     return json_node_invalid(store)
 
 
 def json_ast_array_iter_first(node: JsonNode, store: JsonNode.Store[Local]) -> JsonAstArrayIterCursor:
-    if node in store as JsonNode.Array(items: items):
+    if node in store as JsonNode.Array(items_ptr: items_ptr, item_count: item_count):
+        items: dview[JsonNode] = json_node_items_view(items_ptr, item_count)
         if items.len > 0u:
             return JsonAstArrayIterCursor(items, 0u)
     return json_invalid_array_iter_cursor()
@@ -1315,8 +1452,8 @@ def json_ast_array_iter_next(cursor: JsonAstArrayIterCursor, store: JsonNode.Sto
 
 
 def json_ast_object_get(node: JsonNode, source: any u8&, key: any u8&, store: JsonNode.Store[Local]) -> JsonNode:
-    if node in store as JsonNode.Object(fields: fields):
-        readonly_fields: dview[JsonField] = readonly(fields)
+    if node in store as JsonNode.Object(fields_ptr: fields_ptr, field_count: field_count):
+        readonly_fields: dview[JsonField] = json_field_items_view(fields_ptr, field_count)
         index: mutable usize = 0u
         while index < readonly_fields.len:
             field: JsonField = arena_da_view_get(readonly_fields, index)
@@ -1327,7 +1464,8 @@ def json_ast_object_get(node: JsonNode, source: any u8&, key: any u8&, store: Js
 
 
 def json_ast_object_iter_first(node: JsonNode, store: JsonNode.Store[Local]) -> JsonAstObjectIterCursor:
-    if node in store as JsonNode.Object(fields: fields):
+    if node in store as JsonNode.Object(fields_ptr: fields_ptr, field_count: field_count):
+        fields: dview[JsonField] = json_field_items_view(fields_ptr, field_count)
         if fields.len > 0u:
             return JsonAstObjectIterCursor(fields, 0u)
     return json_invalid_object_iter_cursor()
@@ -1356,14 +1494,16 @@ def json_ast_object_iter_next(cursor: JsonAstObjectIterCursor, store: JsonNode.S
 
 
 def json_ast_array_iter_nth(node: JsonNode, index: usize, store: JsonNode.Store[Local]) -> JsonAstArrayIterCursor:
-    if node in store as JsonNode.Array(items: items):
+    if node in store as JsonNode.Array(items_ptr: items_ptr, item_count: item_count):
+        items: dview[JsonNode] = json_node_items_view(items_ptr, item_count)
         if index < items.len:
             return JsonAstArrayIterCursor(items, index)
     return json_invalid_array_iter_cursor()
 
 
 def json_ast_object_iter_nth(node: JsonNode, index: usize, store: JsonNode.Store[Local]) -> JsonAstObjectIterCursor:
-    if node in store as JsonNode.Object(fields: fields):
+    if node in store as JsonNode.Object(fields_ptr: fields_ptr, field_count: field_count):
+        fields: dview[JsonField] = json_field_items_view(fields_ptr, field_count)
         if index < fields.len:
             return JsonAstObjectIterCursor(fields, index)
     return json_invalid_object_iter_cursor()
@@ -1389,8 +1529,10 @@ def json_parser_checksum_impl(source: any u8&) -> i64:
 
 
 def json_parse_document_node_with_len(source: any u8&, source_len: usize, arena: any Arena&, store: JsonNode.Store[Local]) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
-    cursor: mutable JsonCursor = json_new_cursor_with_len(source, source_len)
     invalid_node: JsonNode = json_node_invalid(store)
+    if source_len > JSON_MAX_INLINE_SOURCE_OFFSET.usize():
+        return json_parse_node_result(invalid_node, -1)
+    cursor: mutable JsonCursor = json_new_cursor_with_len(source, source_len)
     result: JsonParseNodeResult = json_parse_value_node((&cursor).cast[any JsonCursor&](), arena, store, invalid_node)
     if result.checksum < 0:
         return result
@@ -1536,6 +1678,9 @@ def json_parser_document_parse_impl(source: any u8&, out: any JsonParserDocument
         json_parser_document_destroy_impl(out)
 
     source_len: usize = runtime_strlen(source)
+    if source_len > JSON_MAX_INLINE_SOURCE_OFFSET.usize():
+        out[0u] <- json_parser_document_null()
+        return 0
     internal_words: usize = (sizeof(JsonParserDocumentInternal) + sizeof(uintptr) - 1u) / sizeof(uintptr)
     source_words: usize = (source_len + 1u + sizeof(uintptr) - 1u) / sizeof(uintptr)
     first_region: heap Region& = new_region(json_ast_scratch_capacity(source_len) + internal_words + source_words)
