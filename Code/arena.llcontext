@@ -379,6 +379,44 @@ def packed_store_tag_table(state: any PackedStoreState&) -> any darray[u32]&:
 def packed_store_prefix_column_table(state: any PackedStoreState&) -> any darray[uintptr]&:
     return (&state.prefix_columns).cast[any darray[uintptr]&]()
 
+def arena_da_reserve[T](a: any Arena&, da: any darray[T, shape_in]&, needed: usize) -> any darray[T, shape_out]& can[Memory.Allocate, Abort.Panic]:
+    if needed <= da.capacity:
+        return da
+
+    new_capacity: mutable usize = da.capacity
+    if new_capacity == 0u:
+        new_capacity <- ARENA_DA_INIT_CAP
+
+    while needed > new_capacity:
+        new_capacity <- new_capacity * 2u
+
+    old_size: usize = da.capacity * sizeof(T)
+    new_size: usize = new_capacity * sizeof(T)
+
+    if da.items == null:
+        da.items as & <- arena_alloc(a, new_size).cast[any T&]()
+    else:
+        da.items as & <- arena_realloc(
+            a,
+            da.items.cast[any void&](),
+            old_size,
+            new_size
+        ).cast[any T&]()
+
+    da.capacity <- new_capacity
+    return da
+
+def packed_store_ensure_metadata_capacity(a: any Arena&, state: any PackedStoreState&, needed_rows: usize) can[Memory.Allocate, Abort.Panic]:
+    handles: any darray[uintptr]& = packed_store_handle_table(state)
+    indices: any darray[u32]& = packed_store_index_table(state)
+    tags: any darray[u32]& = packed_store_tag_table(state)
+
+    _ = arena_da_reserve(a, handles, needed_rows)
+    _ = arena_da_reserve(a, indices, needed_rows)
+    _ = arena_da_reserve(a, tags, needed_rows)
+
+    packed_store_ensure_prefix_columns(a, state, needed_rows)
+
 def packed_store_append_handle(a: any Arena&, state: any PackedStoreState&, handle: uintptr) can[Memory.Allocate, Abort.Panic]:
     handles: any darray[uintptr]& = packed_store_handle_table(state)
     _ = arena_da_append(a, handles, handle)
@@ -626,8 +664,16 @@ def ctx_packed_store_alloc_fixed_result(a: any Arena&, state_bits: any void&) ->
 
     offset_words: uintptr = offset_bytes / sizeof(uintptr).uintptr()
     handle: uintptr = (state.alloc_region_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
-    packed_store_append_handle(a, state, handle)
-    packed_store_append_index(a, state, (state.handles.count - 1u).u32())
+    needed_rows: usize = state.handles.count + 1u
+    packed_store_ensure_metadata_capacity(a, state, needed_rows)
+
+    assert state.handles.items != null
+    state.handles.items[state.handles.count] <- handle
+    state.handles.count <- state.handles.count + 1u
+
+    assert state.indices.items != null
+    state.indices.items[state.indices.count] <- (state.handles.count - 1u).u32()
+    state.indices.count <- state.indices.count + 1u
     return PackedStoreAllocResult(ptr, handle)
 
 def ctx_packed_store_alloc_result(a: any Arena&, size_bytes: usize, state_bits: any void&) -> PackedStoreAllocResult can[Memory.Allocate, Abort.Panic]:
@@ -664,8 +710,16 @@ def ctx_packed_store_alloc_result(a: any Arena&, size_bytes: usize, state_bits: 
 
     offset_words: uintptr = offset_bytes / sizeof(uintptr).uintptr()
     handle: uintptr = (state.alloc_region_index.uintptr() << 32u64.uintptr()) | (offset_words + 1u64.uintptr())
-    packed_store_append_handle(a, state, handle)
-    packed_store_append_index(a, state, (state.handles.count - 1u).u32())
+    needed_rows: usize = state.handles.count + 1u
+    packed_store_ensure_metadata_capacity(a, state, needed_rows)
+
+    assert state.handles.items != null
+    state.handles.items[state.handles.count] <- handle
+    state.handles.count <- state.handles.count + 1u
+
+    assert state.indices.items != null
+    state.indices.items[state.indices.count] <- (state.handles.count - 1u).u32()
+    state.indices.count <- state.indices.count + 1u
     return PackedStoreAllocResult(ptr, handle)
 
 def ctx_packed_store_alloc_fixed_index_result(a: any Arena&, state_bits: any void&) -> PackedStoreIndexAllocResult can[Memory.Allocate, Abort.Panic]:
@@ -738,7 +792,14 @@ def ctx_packed_store_record_prefix_words(a: any Arena&, row: any void&, state_bi
 
 def ctx_packed_store_record_tag(a: any Arena&, tag: u32, state_bits: any void&) can[Memory.Allocate, Abort.Panic]:
     assert state_bits != null
-    packed_store_append_tag(a, state_bits.cast[any PackedStoreState&](), tag)
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    needed_rows: mutable usize = state.tags.count + 1u
+    if needed_rows < state.handles.count:
+        needed_rows <- state.handles.count
+    packed_store_ensure_metadata_capacity(a, state, needed_rows)
+    assert state.tags.items != null
+    state.tags.items[state.tags.count] <- tag
+    state.tags.count <- state.tags.count + 1u
 
 def ctx_packed_store_alloc(a: any Arena&, size_bytes: usize, state_bits: any void&) -> uintptr can[Memory.Allocate, Abort.Panic]:
     result: PackedStoreAllocResult = ctx_packed_store_alloc_result(a, size_bytes, state_bits)
@@ -1711,23 +1772,7 @@ def arena_da_from_view[T](a: any Arena&, view: dview[T]) -> darray[T, shape_out]
     return out
 
 def arena_da_append[T](a: any Arena&, da: any darray[T, shape_in]&, item: T) -> any darray[T, shape_out]& can[Memory.Allocate, Abort.Panic]:
-    if da.count >= da.capacity:
-        new_capacity: usize = ARENA_DA_INIT_CAP if da.capacity == 0 else da.capacity * 2
-
-        old_size: usize = da.capacity * sizeof(T)
-        new_size: usize = new_capacity * sizeof(T)
-
-        if da.items == null:
-            da.items as & <- arena_alloc(a, new_size).cast[any T&]()
-        else:
-            da.items as & <- arena_realloc(
-                a,
-                da.items.cast[any void&](),
-                old_size,
-                new_size
-            ).cast[any T&]()
-
-        da.capacity <- new_capacity
+    _ = arena_da_reserve(a, da, da.count + 1u)
 
     assert da.items != null
 
