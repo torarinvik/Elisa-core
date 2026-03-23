@@ -183,6 +183,23 @@ func (ops *packedStoreOps) encodeHandle(rowPtr C.LLVMValueRef, enumType *semanti
 		}
 		encoded := ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, rowPtr, stateValue}, name)
 		return ops.s.coerceValue(encoded, u32Type, enumType)
+	case packedEnumABIVariantSparse:
+		stateValue, err := ops.stateValue(name + ".state")
+		if err != nil {
+			return nil, err
+		}
+		u32Type := ops.s.g.result.NamedTypes["u32"]
+		helperType := &semantic.FuncType{Name: "ctx_packed_store_encode_variant_sparse", Params: []semantic.Type{ops.voidRefType(), ops.voidRefType()}, Return: u32Type}
+		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_encode_variant_sparse", helperType)
+		if err != nil {
+			return nil, err
+		}
+		llvmFnType, err := ops.s.g.lowerFunctionType(helperType)
+		if err != nil {
+			return nil, err
+		}
+		encoded := ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{rowPtr, stateValue}, name)
+		return ops.s.coerceValue(encoded, u32Type, enumType)
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", ops.s.g.packedModeForEnum(enumType))
 	}
@@ -246,6 +263,26 @@ func (ops *packedStoreOps) decodeHandle(handleValue C.LLVMValueRef, enumType *se
 			return nil, err
 		}
 		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, coercedHandle, stateValue}, name), nil
+	case packedEnumABIVariantSparse:
+		stateValue, err := ops.stateValue(name + ".state")
+		if err != nil {
+			return nil, err
+		}
+		u32Type := ops.s.g.result.NamedTypes["u32"]
+		helperType := &semantic.FuncType{Name: "ctx_packed_store_decode_variant_sparse", Params: []semantic.Type{u32Type, ops.voidRefType()}, Return: ops.voidRefType()}
+		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_decode_variant_sparse", helperType)
+		if err != nil {
+			return nil, err
+		}
+		llvmFnType, err := ops.s.g.lowerFunctionType(helperType)
+		if err != nil {
+			return nil, err
+		}
+		coercedHandle, err := ops.s.coerceValue(handleValue, enumType, u32Type)
+		if err != nil {
+			return nil, err
+		}
+		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{coercedHandle, stateValue}, name), nil
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", ops.s.g.packedModeForEnum(enumType))
 	}
@@ -291,7 +328,7 @@ func (ops *packedStoreOps) storeValueAt(indexValue C.LLVMValueRef, name string) 
 			return nil, nil, err
 		}
 		return coerced, ops.storeType.Enum, nil
-	case packedEnumABIIndexSOA:
+	case packedEnumABIIndexSOA, packedEnumABIVariantSparse:
 		u32Type := ops.s.g.result.NamedTypes["u32"]
 		helperType := &semantic.FuncType{Name: "ctx_packed_store_index_at", Params: []semantic.Type{ops.voidRefType(), usizeType}, Return: u32Type}
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_index_at", helperType)
@@ -332,6 +369,21 @@ func (ops *packedStoreOps) storeTagAt(handleValue C.LLVMValueRef, enumType *sema
 	case packedEnumABIIndexSOA:
 		helperType := &semantic.FuncType{Name: "ctx_packed_store_read_index_tag", Params: []semantic.Type{ops.voidRefType(), tagType}, Return: tagType}
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_read_index_tag", helperType)
+		if err != nil {
+			return nil, err
+		}
+		llvmFnType, err := ops.s.g.lowerFunctionType(helperType)
+		if err != nil {
+			return nil, err
+		}
+		coercedHandle, err := ops.s.coerceValue(handleValue, enumType, tagType)
+		if err != nil {
+			return nil, err
+		}
+		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, coercedHandle}, name), nil
+	case packedEnumABIVariantSparse:
+		helperType := &semantic.FuncType{Name: "ctx_packed_store_read_variant_sparse_tag", Params: []semantic.Type{ops.voidRefType(), tagType}, Return: tagType}
+		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_read_variant_sparse_tag", helperType)
 		if err != nil {
 			return nil, err
 		}
@@ -394,6 +446,22 @@ func (ops *packedStoreOps) loadPayloadWord(handleValue C.LLVMValueRef, enumType 
 			return nil, err
 		}
 		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, coercedHandle, stateValue, wordOffset}, name), nil
+	case packedEnumABIVariantSparse:
+		u32Type := ops.s.g.result.NamedTypes["u32"]
+		helperType := &semantic.FuncType{Name: "ctx_packed_store_read_variant_sparse_word", Params: []semantic.Type{u32Type, ops.voidRefType(), ops.s.g.result.NamedTypes["usize"]}, Return: uintptrType}
+		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_read_variant_sparse_word", helperType)
+		if err != nil {
+			return nil, err
+		}
+		llvmFnType, err := ops.s.g.lowerFunctionType(helperType)
+		if err != nil {
+			return nil, err
+		}
+		coercedHandle, err := ops.s.coerceValue(handleValue, enumType, u32Type)
+		if err != nil {
+			return nil, err
+		}
+		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{coercedHandle, stateValue, wordOffset}, name), nil
 	default:
 		helperType := &semantic.FuncType{Name: "ctx_packed_store_read_word", Params: []semantic.Type{arenaRefType, uintptrType, ops.voidRefType(), ops.s.g.result.NamedTypes["usize"]}, Return: uintptrType}
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_read_word", helperType)
@@ -417,7 +485,7 @@ func (ops *packedStoreOps) canDirectWordRead() bool {
 		return false
 	}
 	mode := ops.s.g.packedLoweringForStore(ops.storeType)
-	return mode == packedEnumABIWordHandle || mode == packedEnumABIIndexSOA
+	return packedModeUsesDirectWordReads(mode)
 }
 
 func (ops *packedStoreOps) canDirectTagRead() bool {
@@ -544,7 +612,7 @@ func (ops *packedStoreOps) storeSlice(startValue C.LLVMValueRef, endValue C.LLVM
 		return nil, nil, err
 	}
 	helperName := "ctx_packed_store_view"
-	if ops.s.g.packedLoweringForStore(ops.storeType) == packedEnumABIIndexSOA {
+	if packedModeUsesDenseIndexHandle(ops.s.g.packedLoweringForStore(ops.storeType)) {
 		helperName = "ctx_packed_store_indices_view"
 	}
 	helperType := &semantic.FuncType{
@@ -678,6 +746,46 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 			return nil, nil, nil, err
 		}
 		allocResult := ops.s.buildCall(allocLLVMFnType, allocCallee, allocArgs, "packed.index.alloc")
+		allocPtr := C.LLVMBuildExtractValue(ops.s.builder, allocResult, 0, cStringFree("packed.alloc.ptr"))
+		indexValue := C.LLVMBuildExtractValue(ops.s.builder, allocResult, 1, cStringFree("packed.alloc.index"))
+		enumValue, err := ops.s.coerceValue(indexValue, ops.s.g.result.NamedTypes["u32"], enumType)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return allocPtr, enumValue, rowSizeValue, nil
+	case packedEnumABIVariantSparse:
+		arenaValue, err := ops.arenaValue(name + ".arena")
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		stateValue, err := ops.stateValue(name + ".state")
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		arenaType := ops.s.g.result.NamedTypes["Arena"]
+		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+		allocResultType := ops.s.g.result.NamedTypes["PackedStoreIndexAllocResult"]
+		if allocResultType == nil {
+			return nil, nil, nil, fmt.Errorf("missing builtin PackedStoreIndexAllocResult type for variant-sparse packed enum allocation")
+		}
+		allocHelperName := "ctx_packed_store_alloc_fixed_tagged_variant_sparse_result"
+		allocHelperParams := []semantic.Type{arenaRefType, ops.voidRefType(), ops.s.g.result.NamedTypes["u32"]}
+		allocArgs := []C.LLVMValueRef{arenaValue, stateValue, fixedTagValue}
+		if hasTail {
+			allocHelperName = "ctx_packed_store_alloc_tagged_variant_sparse_result"
+			allocHelperParams = []semantic.Type{arenaRefType, ops.s.g.result.NamedTypes["usize"], ops.voidRefType(), ops.s.g.result.NamedTypes["u32"]}
+			allocArgs = []C.LLVMValueRef{arenaValue, totalSizeValue, stateValue, fixedTagValue}
+		}
+		allocHelperType := &semantic.FuncType{Name: allocHelperName, Params: allocHelperParams, Return: allocResultType}
+		allocCallee, err := ops.s.g.ensureFunctionDeclared(allocHelperName, allocHelperType)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		allocLLVMFnType, err := ops.s.g.lowerFunctionType(allocHelperType)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		allocResult := ops.s.buildCall(allocLLVMFnType, allocCallee, allocArgs, "packed.variant_sparse.alloc")
 		allocPtr := C.LLVMBuildExtractValue(ops.s.builder, allocResult, 0, cStringFree("packed.alloc.ptr"))
 		indexValue := C.LLVMBuildExtractValue(ops.s.builder, allocResult, 1, cStringFree("packed.alloc.index"))
 		enumValue, err := ops.s.coerceValue(indexValue, ops.s.g.result.NamedTypes["u32"], enumType)

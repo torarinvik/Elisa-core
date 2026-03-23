@@ -766,6 +766,18 @@ def json_field_items_view(fields_ptr: any JsonField&?, field_count: u32) -> dvie
     return DynArrayView(fields_ptr.cast[any void&](), field_count.usize(), sizeof(JsonField))
 
 
+def json_node_view_ref(items: dview[JsonNode], index: usize) -> any JsonNode&:
+    assert index < items.len
+    assert items.data != null
+    return (items.data.cast[any u8&]() + index * items.elem_size).cast[any JsonNode&]()
+
+
+def json_field_view_ref(fields: dview[JsonField], index: usize) -> any JsonField&:
+    assert index < fields.len
+    assert fields.data != null
+    return (fields.data.cast[any u8&]() + index * fields.elem_size).cast[any JsonField&]()
+
+
 def json_invalid_array_iter_cursor() -> JsonAstArrayIterCursor:
     return JsonAstArrayIterCursor(json_empty_node_view(), 0u)
 
@@ -816,7 +828,8 @@ def json_ast_nodes_count(items: dview[JsonNode], store: JsonNode.Store[Local]) -
     total: mutable i64 = 0
     index: mutable usize = 0u
     while index < readonly_items.len:
-        item: JsonNode = arena_da_view_get(readonly_items, index)
+        item: mutable JsonNode = zeroed
+        arena_memcpy((&item).cast[any void&](), json_node_view_ref(readonly_items, index).cast[any void&](), sizeof(JsonNode))
         item_count: i64 = json_ast_node_count(item, store)
         if item_count < 0:
             return -1
@@ -831,11 +844,15 @@ def json_ast_fields_count(fields: dview[JsonField], store: JsonNode.Store[Local]
     total: mutable i64 = 0
     index: mutable usize = 0u
     while index < readonly_fields.len:
-        field: JsonField = arena_da_view_get(readonly_fields, index)
-        key_count: i64 = json_ast_node_count(field.key, store)
+        field_ref: any JsonField& = json_field_view_ref(readonly_fields, index)
+        key_node: mutable JsonNode = zeroed
+        value_node: mutable JsonNode = zeroed
+        arena_memcpy((&key_node).cast[any void&](), field_ref.cast[any void&](), sizeof(JsonNode))
+        arena_memcpy((&value_node).cast[any void&](), (field_ref.cast[any u8&]() + sizeof(JsonNode)).cast[any void&](), sizeof(JsonNode))
+        key_count: i64 = json_ast_node_count(key_node, store)
         if key_count < 0:
             return -1
-        value_count: i64 = json_ast_node_count(field.value, store)
+        value_count: i64 = json_ast_node_count(value_node, store)
         if value_count < 0:
             return -1
         total <- total + key_count + value_count
@@ -947,40 +964,46 @@ def json_parse_value_node_after_ws(cursor: any JsonCursor&, arena: any Arena&, s
 
 
 def json_parse_array_node(cursor: any JsonCursor&, arena: any Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
+    count_cursor: mutable JsonCursor = zeroed
+    item_count_i64: mutable i64 = 0
+    item_count: mutable usize = 0u
+    item_capacity: mutable usize = 1u
+    items_bits: mutable uintptr = 0u64.uintptr()
+    done: mutable bool = false
+    item_index: mutable usize = 0u
+    items_checksum: mutable i64 = 0
+    item_value: mutable JsonNode = zeroed
+    ch: mutable i64 = 0
     if json_advance_char(cursor) != JSON_CH_LBRACKET:
         return json_parse_node_result(invalid_node, -1)
 
     json_skip_ws(cursor)
-    count_cursor: mutable JsonCursor = json_copy_cursor(cursor)
-    item_count_i64: i64 = json_count_array_items_after_ws((&count_cursor).cast[any JsonCursor&]())
+    count_cursor <- json_copy_cursor(cursor)
+    item_count_i64 <- json_count_array_items_after_ws((&count_cursor).cast[any JsonCursor&]())
     if item_count_i64 < 0:
         return json_parse_node_result(invalid_node, -1)
 
-    item_count: usize = item_count_i64.usize()
-    items_ptr: any JsonNode&? = null
-    if item_count > 0u:
-        items_ptr <- arena_alloc(arena, item_count * sizeof(JsonNode)).cast[any JsonNode&]()
-
+    item_count <- item_count_i64.usize()
     if item_count == 0u:
         _ = json_advance_char(cursor)
         in store:
             return json_parse_node_result(new JsonNode.Array(items_ptr: null, item_count: 0u32), 43)
 
-    done: mutable bool = false
-    item_index: mutable usize = 0u
-    items_checksum: mutable i64 = 0
+    item_capacity <- max(item_count, 1u)
+    items_bits <- arena_alloc(arena, item_capacity * sizeof(JsonNode)).cast[any u8&]().uintptr()
+
     while not done:
         value_result: JsonParseNodeResult = json_parse_value_node_after_ws(cursor, arena, store, invalid_node)
         if value_result.checksum < 0:
             return value_result
 
-        assert items_ptr != null
-        items_ptr[item_index] <- value_result.node
+        arena_memcpy((&item_value).cast[any void&](), (&value_result).cast[any void&](), sizeof(JsonNode))
+        arena_memcpy((items_bits.cast[any u8&]() + item_index * sizeof(JsonNode)).cast[any void&](), (&item_value).cast[any void&](), sizeof(JsonNode))
         item_index <- item_index + 1u
         items_checksum <- items_checksum + value_result.checksum
 
         json_skip_ws(cursor)
-        ch: i64 = json_cur_char(cursor)
+        ch <- json_cur_char(cursor)
         if ch == JSON_CH_COMMA:
             _ = json_advance_char(cursor)
             json_skip_ws(cursor)
@@ -991,39 +1014,49 @@ def json_parse_array_node(cursor: any JsonCursor&, arena: any Arena&, store: Jso
             return json_parse_node_result(invalid_node, -1)
 
     in store:
-        return json_parse_node_result(new JsonNode.Array(items_ptr: items_ptr, item_count: item_count.u32()), 43 + items_checksum)
+        return json_parse_node_result(new JsonNode.Array(items_ptr: items_bits.cast[any JsonNode&](), item_count: item_count.u32()), 43 + items_checksum)
 
 
 def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
+    count_cursor: mutable JsonCursor = zeroed
+    field_count_i64: mutable i64 = 0
+    field_count: mutable usize = 0u
+    field_capacity: mutable usize = 1u
+    fields_bits: mutable uintptr = 0u64.uintptr()
+    done: mutable bool = false
+    field_index: mutable usize = 0u
+    fields_checksum: mutable i64 = 0
+    key_lexeme: mutable JsonLexemeResult = zeroed
+    key_checksum: mutable i64 = 0
+    key_node: mutable JsonNode = zeroed
+    value_node: mutable JsonNode = zeroed
+    field_slot: mutable uintptr = 0u64.uintptr()
+    ch: mutable i64 = 0
     if json_advance_char(cursor) != JSON_CH_LBRACE:
         return json_parse_node_result(invalid_node, -1)
 
     json_skip_ws(cursor)
-    count_cursor: mutable JsonCursor = json_copy_cursor(cursor)
-    field_count_i64: i64 = json_count_object_fields_after_ws((&count_cursor).cast[any JsonCursor&]())
+    count_cursor <- json_copy_cursor(cursor)
+    field_count_i64 <- json_count_object_fields_after_ws((&count_cursor).cast[any JsonCursor&]())
     if field_count_i64 < 0:
         return json_parse_node_result(invalid_node, -1)
 
-    field_count: usize = field_count_i64.usize()
-    fields_ptr: any JsonField&? = null
-    if field_count > 0u:
-        fields_ptr <- arena_alloc(arena, field_count * sizeof(JsonField)).cast[any JsonField&]()
-
+    field_count <- field_count_i64.usize()
     if field_count == 0u:
         _ = json_advance_char(cursor)
         in store:
             return json_parse_node_result(new JsonNode.Object(fields_ptr: null, field_count: 0u32), 47)
 
-    done: mutable bool = false
-    field_index: mutable usize = 0u
-    fields_checksum: mutable i64 = 0
+    field_capacity <- max(field_count, 1u)
+    fields_bits <- arena_alloc(arena, field_capacity * sizeof(JsonField)).cast[any u8&]().uintptr()
+
     while not done:
-        key_lexeme: JsonLexemeResult = json_parse_string_lexeme(cursor)
-        key_checksum: i64 = key_lexeme.checksum
+        key_lexeme <- json_parse_string_lexeme(cursor)
+        key_checksum <- key_lexeme.checksum
         if key_checksum < 0:
             return JsonParseNodeResult(invalid_node, -1)
 
-        key_node: mutable JsonNode = invalid_node
+        key_node <- invalid_node
         in store:
             key_node <- new JsonNode.Text(source_offset: key_lexeme.source_offset.u32())
 
@@ -1036,13 +1069,15 @@ def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: Js
         if value_result.checksum < 0:
             return value_result
 
-        assert fields_ptr != null
-        fields_ptr[field_index] <- JsonField(key_node, value_result.node)
+        field_slot <- fields_bits + field_index * sizeof(JsonField)
+        arena_memcpy((&value_node).cast[any void&](), (&value_result).cast[any void&](), sizeof(JsonNode))
+        arena_memcpy(field_slot.cast[any void&](), (&key_node).cast[any void&](), sizeof(JsonNode))
+        arena_memcpy((field_slot + sizeof(JsonNode)).cast[any void&](), (&value_node).cast[any void&](), sizeof(JsonNode))
         field_index <- field_index + 1u
         fields_checksum <- fields_checksum + key_checksum + value_result.checksum
 
         json_skip_ws(cursor)
-        ch: i64 = json_cur_char(cursor)
+        ch <- json_cur_char(cursor)
         if ch == JSON_CH_COMMA:
             _ = json_advance_char(cursor)
             json_skip_ws(cursor)
@@ -1053,7 +1088,7 @@ def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: Js
             return JsonParseNodeResult(invalid_node, -1)
 
     in store:
-        return json_parse_node_result(new JsonNode.Object(fields_ptr: fields_ptr, field_count: field_count.u32()), 47 + fields_checksum)
+        return json_parse_node_result(new JsonNode.Object(fields_ptr: fields_bits.cast[any JsonField&](), field_count: field_count.u32()), 47 + fields_checksum)
 
 
 def json_parse_value_node(cursor: any JsonCursor&, arena: any Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
@@ -1425,7 +1460,9 @@ def json_ast_array_nth(node: JsonNode, index: usize, store: JsonNode.Store[Local
     if node in store as JsonNode.Array(items_ptr: items_ptr, item_count: item_count):
         items: dview[JsonNode] = json_node_items_view(items_ptr, item_count)
         if index < items.len:
-            return arena_da_view_get(items, index)
+            out: mutable JsonNode = zeroed
+            arena_memcpy((&out).cast[any void&](), json_node_view_ref(items, index).cast[any void&](), sizeof(JsonNode))
+            return move out
     return json_node_invalid(store)
 
 
@@ -1441,7 +1478,9 @@ def json_ast_array_iter_value(cursor: JsonAstArrayIterCursor, store: JsonNode.St
     invalid_node: JsonNode = json_node_invalid(store)
     if not json_ast_array_iter_is_valid(cursor):
         return invalid_node
-    return arena_da_view_get(cursor.items, cursor.index)
+    out: mutable JsonNode = zeroed
+    arena_memcpy((&out).cast[any void&](), json_node_view_ref(cursor.items, cursor.index).cast[any void&](), sizeof(JsonNode))
+    return move out
     return invalid_node
 
 
@@ -1456,9 +1495,13 @@ def json_ast_object_get(node: JsonNode, source: any u8&, key: any u8&, store: Js
         readonly_fields: dview[JsonField] = json_field_items_view(fields_ptr, field_count)
         index: mutable usize = 0u
         while index < readonly_fields.len:
-            field: JsonField = arena_da_view_get(readonly_fields, index)
-            if json_ast_string_eq_literal(source, field.key, key, store):
-                return field.value
+            field_ref: any JsonField& = json_field_view_ref(readonly_fields, index)
+            key_node: mutable JsonNode = zeroed
+            value_node: mutable JsonNode = zeroed
+            arena_memcpy((&key_node).cast[any void&](), field_ref.cast[any void&](), sizeof(JsonNode))
+            arena_memcpy((&value_node).cast[any void&](), (field_ref.cast[any u8&]() + sizeof(JsonNode)).cast[any void&](), sizeof(JsonNode))
+            if json_ast_string_eq_literal(source, key_node, key, store):
+                return move value_node
             index <- index + 1u
     return json_node_invalid(store)
 
@@ -1475,7 +1518,10 @@ def json_ast_object_iter_key(cursor: JsonAstObjectIterCursor, store: JsonNode.St
     invalid_node: JsonNode = json_node_invalid(store)
     if not json_ast_object_iter_is_valid(cursor):
         return invalid_node
-    return arena_da_view_get(cursor.fields, cursor.index).key
+    field_ref: any JsonField& = json_field_view_ref(cursor.fields, cursor.index)
+    out: mutable JsonNode = zeroed
+    arena_memcpy((&out).cast[any void&](), field_ref.cast[any void&](), sizeof(JsonNode))
+    return move out
     return invalid_node
 
 
@@ -1483,7 +1529,10 @@ def json_ast_object_iter_value(cursor: JsonAstObjectIterCursor, store: JsonNode.
     invalid_node: JsonNode = json_node_invalid(store)
     if not json_ast_object_iter_is_valid(cursor):
         return invalid_node
-    return arena_da_view_get(cursor.fields, cursor.index).value
+    field_ref: any JsonField& = json_field_view_ref(cursor.fields, cursor.index)
+    out: mutable JsonNode = zeroed
+    arena_memcpy((&out).cast[any void&](), (field_ref.cast[any u8&]() + sizeof(JsonNode)).cast[any void&](), sizeof(JsonNode))
+    return move out
     return invalid_node
 
 
@@ -1589,7 +1638,10 @@ def json_parser_array_iter_doc_impl(iter: any JsonParserArrayIter&) -> heap Json
 
 
 def json_parser_array_iter_cursor(iter: any JsonParserArrayIter&) -> JsonAstArrayIterCursor:
-    return json_parser_array_iter_impl(iter).cursor
+    impl_ref: any JsonParserArrayIterInternal& = json_parser_array_iter_impl(iter)
+    out: mutable JsonAstArrayIterCursor = zeroed
+    arena_memcpy((&out).cast[any void&](), (impl_ref.cast[any u8&]() + sizeof(uintptr)).cast[any void&](), sizeof(JsonAstArrayIterCursor))
+    return move out
 
 
 def json_parser_object_iter_is_live(iter: any JsonParserObjectIter&) -> bool:
@@ -1605,7 +1657,10 @@ def json_parser_object_iter_doc_impl(iter: any JsonParserObjectIter&) -> heap Js
 
 
 def json_parser_object_iter_cursor(iter: any JsonParserObjectIter&) -> JsonAstObjectIterCursor:
-    return json_parser_object_iter_impl(iter).cursor
+    impl_ref: any JsonParserObjectIterInternal& = json_parser_object_iter_impl(iter)
+    out: mutable JsonAstObjectIterCursor = zeroed
+    arena_memcpy((&out).cast[any void&](), (impl_ref.cast[any u8&]() + sizeof(uintptr)).cast[any void&](), sizeof(JsonAstObjectIterCursor))
+    return move out
 
 
 def json_parser_value_doc_impl(value: any JsonParserValue&) -> heap JsonParserDocumentInternal&:
@@ -1613,7 +1668,10 @@ def json_parser_value_doc_impl(value: any JsonParserValue&) -> heap JsonParserDo
 
 
 def json_parser_value_node(value: any JsonParserValue&) -> JsonNode:
-    return json_parser_value_impl(value).node
+    impl_ref: any JsonParserValueInternal& = json_parser_value_impl(value)
+    out: mutable JsonNode = zeroed
+    arena_memcpy((&out).cast[any void&](), (impl_ref.cast[any u8&]() + sizeof(uintptr)).cast[any void&](), sizeof(JsonNode))
+    return move out
 
 
 def json_parser_value_from_node(impl: heap JsonParserDocumentInternal&, node: JsonNode, store: JsonNode.Store[Local]) -> JsonParserValue can[Memory.Allocate, Abort.Panic]:

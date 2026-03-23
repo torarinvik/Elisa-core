@@ -52,6 +52,10 @@ struct PackedStoreIndexAllocResult:
     row: mutable heap void&?
     index: mutable u32
 
+struct PackedStoreVariantRows:
+    tag: mutable u32
+    rows: mutable darray[uintptr]
+
 struct PackedStoreState:
     head_region: mutable heap Region&?
     alloc_region: mutable heap Region&?
@@ -63,6 +67,8 @@ struct PackedStoreState:
     handles: mutable darray[uintptr]
     indices: mutable darray[u32]
     tags: mutable darray[u32]
+    variant_slots: mutable darray[u32]
+    variant_rows: mutable darray[PackedStoreVariantRows]
     prefix_words: mutable usize
     prefix_columns: mutable darray[uintptr]
     prefix_column_capacity: mutable usize
@@ -376,6 +382,12 @@ def packed_store_index_table(state: any PackedStoreState&) -> any darray[u32]&:
 def packed_store_tag_table(state: any PackedStoreState&) -> any darray[u32]&:
     return (&state.tags).cast[any darray[u32]&]()
 
+def packed_store_variant_slot_table(state: any PackedStoreState&) -> any darray[u32]&:
+    return (&state.variant_slots).cast[any darray[u32]&]()
+
+def packed_store_variant_rows_table(state: any PackedStoreState&) -> any darray[PackedStoreVariantRows]&:
+    return (&state.variant_rows).cast[any darray[PackedStoreVariantRows]&]()
+
 def packed_store_prefix_column_table(state: any PackedStoreState&) -> any darray[uintptr]&:
     return (&state.prefix_columns).cast[any darray[uintptr]&]()
 
@@ -410,10 +422,12 @@ def packed_store_ensure_metadata_capacity(a: any Arena&, state: any PackedStoreS
     handles: any darray[uintptr]& = packed_store_handle_table(state)
     indices: any darray[u32]& = packed_store_index_table(state)
     tags: any darray[u32]& = packed_store_tag_table(state)
+    variant_slots: any darray[u32]& = packed_store_variant_slot_table(state)
 
     _ = arena_da_reserve(a, handles, needed_rows)
     _ = arena_da_reserve(a, indices, needed_rows)
     _ = arena_da_reserve(a, tags, needed_rows)
+    _ = arena_da_reserve(a, variant_slots, needed_rows)
 
     packed_store_ensure_prefix_columns(a, state, needed_rows)
 
@@ -428,6 +442,55 @@ def packed_store_append_index(a: any Arena&, state: any PackedStoreState&, index
 def packed_store_append_tag(a: any Arena&, state: any PackedStoreState&, tag: u32) can[Memory.Allocate, Abort.Panic]:
     tags: any darray[u32]& = packed_store_tag_table(state)
     _ = arena_da_append(a, tags, tag)
+
+def packed_store_append_variant_slot(a: any Arena&, state: any PackedStoreState&, slot: u32) can[Memory.Allocate, Abort.Panic]:
+    variant_slots: any darray[u32]& = packed_store_variant_slot_table(state)
+    _ = arena_da_append(a, variant_slots, slot)
+
+def packed_store_find_variant_rows(state: any PackedStoreState&, tag: u32) -> any PackedStoreVariantRows&?:
+    variants: any darray[PackedStoreVariantRows]& = packed_store_variant_rows_table(state)
+    if variants.items == null:
+        return null
+
+    i: mutable usize = 0u
+    while i < variants.count:
+        if variants.items[i].tag == tag:
+            return &variants.items[i]
+        i <- i + 1u
+
+    return null
+
+def packed_store_get_or_create_variant_rows(a: any Arena&, state: any PackedStoreState&, tag: u32) -> any PackedStoreVariantRows& can[Memory.Allocate, Abort.Panic]:
+    found: any PackedStoreVariantRows&? = packed_store_find_variant_rows(state, tag)
+    if found != null:
+        return found
+
+    variants: any darray[PackedStoreVariantRows]& = packed_store_variant_rows_table(state)
+    created: mutable PackedStoreVariantRows = zeroed
+    created.tag <- tag
+    _ = arena_da_append(a, variants, created)
+
+    assert variants.items != null
+    return &variants.items[variants.count - 1u]
+
+def packed_store_append_variant_row(a: any Arena&, state: any PackedStoreState&, tag: u32, row: any void&) -> u32 can[Memory.Allocate, Abort.Panic]:
+    variant_rows: any PackedStoreVariantRows& = packed_store_get_or_create_variant_rows(a, state, tag)
+    rows: any darray[uintptr]& = (&variant_rows.rows).cast[any darray[uintptr]&]()
+    slot: u32 = rows.count.u32()
+    _ = arena_da_append(a, rows, row.cast[any u8&]().uintptr())
+    return slot
+
+def packed_store_variant_row_ptr(state: any PackedStoreState&, tag: u32, slot: u32) -> any void& can[Abort.Panic]:
+    variant_rows: any PackedStoreVariantRows&? = packed_store_find_variant_rows(state, tag)
+    assert variant_rows != null
+
+    rows: any darray[uintptr]& = (&variant_rows.rows).cast[any darray[uintptr]&]()
+    slot_index: usize = slot.usize()
+    assert rows.items != null
+    assert slot_index < rows.count
+
+    row_ptrs: any uintptr& = rows.items
+    return row_ptrs[slot_index].cast[heap u8&]().cast[any void&]()
 
 def packed_store_ensure_prefix_columns(a: any Arena&, state: any PackedStoreState&, needed_rows: usize) can[Memory.Allocate, Abort.Panic]:
     if state.prefix_words == 0u:
@@ -519,7 +582,39 @@ def ctx_packed_store_state_new(a: any Arena&, row_bytes: usize) -> heap void& ca
     state.handles <- zeroed
     state.indices <- zeroed
     state.tags <- zeroed
+    state.variant_slots <- zeroed
+    state.variant_rows <- zeroed
     state.prefix_words <- row_words
+    state.prefix_columns <- zeroed
+    state.prefix_column_capacity <- 0u
+    state.row_words <- row_words
+    state.preferred_region_capacity <- preferred_region_capacity
+    return state.cast[heap void&]()
+
+def ctx_packed_store_state_new_variant_sparse(a: any Arena&, row_bytes: usize) -> heap void& can[Memory.Allocate, Abort.Panic]:
+    state: heap PackedStoreState& = arena_alloc(a, sizeof(PackedStoreState)).cast[heap PackedStoreState&]()
+    row_words: usize = (row_bytes + sizeof(uintptr) - 1) / sizeof(uintptr)
+    preferred_region_capacity: mutable usize = ARENA_REGION_DEFAULT_CAPACITY
+    hinted_capacity: usize = row_words * PACKED_STORE_MIN_ROWS_PER_REGION
+
+    if preferred_region_capacity < hinted_capacity:
+        preferred_region_capacity <- hinted_capacity
+    if preferred_region_capacity < row_words:
+        preferred_region_capacity <- row_words
+
+    state.head_region <- null
+    state.alloc_region <- null
+    state.alloc_region_index <- 0
+    state.decode_region <- null
+    state.decode_region_index <- 0
+    state.tail_region <- null
+    state.regions <- zeroed
+    state.handles <- zeroed
+    state.indices <- zeroed
+    state.tags <- zeroed
+    state.variant_slots <- zeroed
+    state.variant_rows <- zeroed
+    state.prefix_words <- 0u
     state.prefix_columns <- zeroed
     state.prefix_column_capacity <- 0u
     state.row_words <- row_words
@@ -760,10 +855,99 @@ def ctx_packed_store_alloc_index_result(a: any Arena&, size_bytes: usize, state_
     indices: any u32& = state.indices.items
     return PackedStoreIndexAllocResult(result.row, indices[state.indices.count - 1u])
 
+def ctx_packed_store_alloc_tagged_variant_sparse_result(a: any Arena&, size_bytes: usize, state_bits: any void&, tag: u32) -> PackedStoreIndexAllocResult can[Memory.Allocate, Abort.Panic]:
+    assert state_bits != null
+
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    row_words: mutable usize = (size_bytes + sizeof(uintptr) - 1) / sizeof(uintptr)
+    if row_words == 0u:
+        row_words <- 1u
+    if row_words > state.row_words:
+        state.row_words <- row_words
+
+    row_size_bytes: usize = row_words * sizeof(uintptr)
+    row: heap void& = arena_alloc(a, row_size_bytes)
+    global_index: u32 = state.handles.count.u32()
+    needed_rows: usize = state.handles.count + 1u
+    packed_store_ensure_metadata_capacity(a, state, needed_rows)
+
+    slot: u32 = packed_store_append_variant_row(a, state, tag, row.cast[any void&]())
+
+    assert state.handles.items != null
+    state.handles.items[state.handles.count] <- row.cast[any u8&]().uintptr()
+    state.handles.count <- state.handles.count + 1u
+
+    assert state.indices.items != null
+    state.indices.items[state.indices.count] <- global_index
+    state.indices.count <- state.indices.count + 1u
+
+    assert state.tags.items != null
+    state.tags.items[state.tags.count] <- tag
+    state.tags.count <- state.tags.count + 1u
+
+    assert state.variant_slots.items != null
+    state.variant_slots.items[state.variant_slots.count] <- slot
+    state.variant_slots.count <- state.variant_slots.count + 1u
+
+    return PackedStoreIndexAllocResult(row, global_index)
+
+def ctx_packed_store_alloc_fixed_tagged_variant_sparse_result(a: any Arena&, state_bits: any void&, tag: u32) -> PackedStoreIndexAllocResult can[Memory.Allocate, Abort.Panic]:
+    assert state_bits != null
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    return ctx_packed_store_alloc_tagged_variant_sparse_result(a, state.row_words * sizeof(uintptr), state_bits, tag)
+
 def ctx_packed_store_count(state_bits: any void&) -> usize:
     assert state_bits != null
     state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
     return state.handles.count
+
+def ctx_packed_store_encode_variant_sparse(ptr: any void&, state_bits: any void&) -> u32 can[Abort.Panic]:
+    assert state_bits != null
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    raw: uintptr = ptr.cast[any u8&]().uintptr()
+    assert state.handles.items != null
+
+    handles: any uintptr& = state.handles.items
+    i: mutable usize = 0u
+    while i < state.handles.count:
+        if handles[i] == raw:
+            return i.u32()
+        i <- i + 1u
+
+    panic("variant-sparse packed store encode missing row pointer")
+
+def ctx_packed_store_decode_variant_sparse(index: u32, state_bits: any void&) -> any void& can[Abort.Panic]:
+    assert state_bits != null
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    index_usize: usize = index.usize()
+    assert index_usize < state.handles.count
+    assert state.handles.items != null
+
+    handles: any uintptr& = state.handles.items
+    return handles[index_usize].cast[heap u8&]().cast[any void&]()
+
+def ctx_packed_store_read_variant_sparse_tag(state_bits: any void&, index: u32) -> u32:
+    assert state_bits != null
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    index_usize: usize = index.usize()
+    assert index_usize < state.tags.count
+    assert state.tags.items != null
+
+    tags: any u32& = state.tags.items
+    return tags[index_usize]
+
+def ctx_packed_store_read_variant_sparse_word(index: u32, state_bits: any void&, word_offset: usize) -> uintptr can[Abort.Panic]:
+    assert state_bits != null
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    index_usize: usize = index.usize()
+    assert index_usize < state.tags.count
+    assert state.tags.items != null
+    assert state.variant_slots.items != null
+
+    tags: any u32& = state.tags.items
+    slots: any u32& = state.variant_slots.items
+    row_words: any uintptr& = packed_store_variant_row_ptr(state, tags[index_usize], slots[index_usize]).cast[any uintptr&]()
+    return row_words[word_offset]
 
 def ctx_packed_store_word_handle_at(state_bits: any void&, index: usize) -> uintptr:
     assert state_bits != null

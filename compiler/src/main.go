@@ -291,9 +291,9 @@ func parseArgs(args []string) (cliOptions, error) {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprintf(w, "Usage: llcontext [-emit %s|%s|%s|%s|%s|%s|%s|%s|%s|%s] [-filter <substring>] [-packed-abi <legacy-debug-override>] [-O0|-O2|-O3] [-o <output>] <file.llcontext>\n", emitAST, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitHeader, emitBitcode, emitObject)
-	fmt.Fprintf(w, "Packed enums lower canonically as handle-based %s in compiler mode; frozen stores remain the readonly publication form.\n", backend.PackedEnumABIIndexSOA)
-	fmt.Fprintf(w, "-packed-abi is a temporary legacy/debug override: %s | %s | %s\n", backend.PackedEnumABIRowHandle, backend.PackedEnumABIWordHandle, backend.PackedEnumABIIndexSOA)
+	fmt.Fprintf(w, "Usage: llcontext [-emit %s|%s|%s|%s|%s|%s|%s|%s|%s|%s] [-filter <substring>] [-packed-abi <packed-lowering-override>] [-O0|-O2|-O3] [-o <output>] <file.llcontext>\n", emitAST, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitHeader, emitBitcode, emitObject)
+	fmt.Fprintf(w, "Packed enums lower canonically as handle-based %s in compiler mode; frozen stores remain the readonly publication form.\n", backend.PackedEnumABIVariantSparse)
+	fmt.Fprintf(w, "-packed-abi can pin an alternate lowering for debugging/compatibility: %s | %s | %s | %s\n", backend.PackedEnumABIRowHandle, backend.PackedEnumABIWordHandle, backend.PackedEnumABIIndexSOA, backend.PackedEnumABIVariantSparse)
 }
 
 func parseOptimizationArg(value string) (backend.OptimizationLevel, error) {

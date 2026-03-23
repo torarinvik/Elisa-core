@@ -115,7 +115,7 @@ func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
 		context:            ctx,
 		module:             mod,
 		packedProfile:      DefaultPackedLoweringProfile(),
-		packedEnumABI:      packedEnumABIIndexSOA,
+		packedEnumABI:      packedEnumABIVariantSparse,
 		symbolsByNode:      map[ast.Node]*semantic.Symbol{},
 		structTypes:        map[string]C.LLVMTypeRef{},
 		structBodies:       map[string]bool{},

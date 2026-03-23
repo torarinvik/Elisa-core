@@ -294,7 +294,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			checks: []string{
 				"%JsonCursor = type { ptr, i64, i64 }",
 				"%JsonLexemeResult = type { i64, i64, i64 }",
-				"%JsonNode = type { i32, [3 x i64] }",
+				"%JsonNode = type { i32, [2 x i64] }",
 				"%JsonParseNodeResult = type { i32, i64 }",
 				"define %JsonLexemeResult @json_parse_string_lexeme(ptr",
 				"define %JsonLexemeResult @json_parse_number_lexeme(ptr",
@@ -750,10 +750,10 @@ func TestRunCLICompilesJSONParserWithCanonicalPackedLoweringByDefault(t *testing
 		"define %JsonParseNodeResult @json_parse_value_node(ptr",
 		"define %JsonParseNodeResult @json_parse_array_node(ptr",
 		"define %JsonParseNodeResult @json_parse_object_node(ptr",
-		"call %PackedStoreIndexAllocResult @ctx_packed_store_alloc_fixed_tagged_index_result(ptr %packed.alloc.store.arena, ptr %packed.alloc.store.state, i32 ",
-		"call %PackedStoreIndexAllocResult @ctx_packed_store_alloc_index_result(ptr %packed.alloc.store.arena, i64 %packed.alloc.bytes, ptr %packed.alloc.store.state)",
-		"call i32 @ctx_packed_store_read_index_tag(ptr %packed.tag.store.state, i32 ",
-		"call i64 @ctx_packed_store_read_index_word(",
+		"call %PackedStoreIndexAllocResult @ctx_packed_store_alloc_fixed_tagged_variant_sparse_result(",
+		"call %PackedStoreIndexAllocResult @ctx_packed_store_alloc_tagged_variant_sparse_result(",
+		"call i32 @ctx_packed_store_read_variant_sparse_tag(ptr %packed.tag.store.state, i32 ",
+		"call i64 @ctx_packed_store_read_variant_sparse_word(",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -764,8 +764,11 @@ func TestRunCLICompilesJSONParserWithCanonicalPackedLoweringByDefault(t *testing
 		"call i64 @ctx_packed_store_read_word(ptr %packed.payload.word.arena",
 		"call i64 @ctx_packed_store_read_word(ptr %packed.common.store.arena",
 		"call ptr @ctx_packed_store_decode(ptr %packed.decode.store.arena, i64",
+		"call ptr @ctx_packed_store_decode_index(ptr %packed.decode.store.arena, i32",
 		"call %PackedStoreAllocResult @ctx_packed_store_alloc_fixed_tagged_result(ptr %packed.alloc.store.arena, ptr %packed.alloc.store.state, i32 ",
 		"call %PackedStoreAllocResult @ctx_packed_store_alloc_result(ptr %packed.alloc.store.arena, i64 %packed.alloc.bytes, ptr %packed.alloc.store.state)",
+		"call %PackedStoreIndexAllocResult @ctx_packed_store_alloc_fixed_tagged_index_result(ptr %packed.alloc.store.arena, ptr %packed.alloc.store.state, i32 ",
+		"call %PackedStoreIndexAllocResult @ctx_packed_store_alloc_index_result(ptr %packed.alloc.store.arena, i64 %packed.alloc.bytes, ptr %packed.alloc.store.state)",
 	} {
 		if strings.Contains(output, bad) {
 			t.Fatalf("expected canonical packed lowering default to avoid %q, got:\n%s", bad, output)
@@ -796,7 +799,7 @@ func TestRunCLICompilesJSONParserWithPackedWordHandleABI(t *testing.T) {
 		"define %JsonParseNodeResult @json_parse_object_node(ptr",
 		"call %PackedStoreAllocResult @ctx_packed_store_alloc_fixed_tagged_result(ptr %packed.alloc.store.arena, ptr %packed.alloc.store.state, i32 ",
 		"call i64 @ctx_packed_store_read_word(",
-		"call ptr @ctx_packed_store_decode(ptr %packed.decode.store.arena, i64",
+		"call ptr @ctx_packed_store_decode(",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {

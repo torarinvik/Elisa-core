@@ -62,6 +62,8 @@ func generateLLVMIRWithPackedABIForTest(result *semantic.Result, abi packedEnumA
 		g.packedProfile = mustLegacyPackedLoweringProfile(PackedEnumABIWordHandle)
 	case packedEnumABIIndexSOA:
 		g.packedProfile = mustLegacyPackedLoweringProfile(PackedEnumABIIndexSOA)
+	case packedEnumABIVariantSparse:
+		g.packedProfile = mustLegacyPackedLoweringProfile(PackedEnumABIVariantSparse)
 	default:
 		return "", fmt.Errorf("unsupported packed enum ABI mode %d", abi)
 	}
@@ -87,6 +89,8 @@ func packedABITestName(abi packedEnumABIMode) string {
 		return "word_handle"
 	case packedEnumABIIndexSOA:
 		return "index_soa"
+	case packedEnumABIVariantSparse:
+		return "variant_sparse"
 	default:
 		return "packed_abi_unknown"
 	}
@@ -112,8 +116,8 @@ def fold() -> int:
 	if result.PackedLowering.Contract != string(PackedLoweringContractCanonicalCompilerGraph) {
 		t.Fatalf("expected canonical packed lowering contract metadata, got %q", result.PackedLowering.Contract)
 	}
-	if result.PackedLowering.CanonicalPackedLowering != string(PackedEnumABIIndexSOA) {
-		t.Fatalf("expected canonical packed lowering metadata to record %q, got %q", PackedEnumABIIndexSOA, result.PackedLowering.CanonicalPackedLowering)
+	if result.PackedLowering.CanonicalPackedLowering != string(PackedEnumABIVariantSparse) {
+		t.Fatalf("expected canonical packed lowering metadata to record %q, got %q", PackedEnumABIVariantSparse, result.PackedLowering.CanonicalPackedLowering)
 	}
 	if result.PackedLowering.UsesLegacyOverride {
 		t.Fatalf("expected canonical packed lowering metadata not to mark a legacy override, got %+v", result.PackedLowering)
@@ -387,18 +391,21 @@ def sum_pair() -> int:
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
 
-	if !strings.Contains(output, "call i32 @ctx_packed_store_read_index_tag(") {
-		t.Fatalf("expected canonical packed lowering to use ctx_packed_store_read_index_tag for dispatch, got:\n%s", output)
+	if !strings.Contains(output, "call i32 @ctx_packed_store_read_variant_sparse_tag(") {
+		t.Fatalf("expected canonical packed lowering to use ctx_packed_store_read_variant_sparse_tag for dispatch, got:\n%s", output)
 	}
-	readWordCalls := strings.Count(output, "call i64 @ctx_packed_store_read_index_word(")
+	readWordCalls := strings.Count(output, "call i64 @ctx_packed_store_read_variant_sparse_word(")
 	if readWordCalls != 2 {
-		t.Fatalf("expected canonical packed lowering to use two direct index payload word reads for Pair.Both, got %d helper calls:\n%s", readWordCalls, output)
+		t.Fatalf("expected canonical packed lowering to use two direct variant-sparse payload word reads for Pair.Both, got %d helper calls:\n%s", readWordCalls, output)
 	}
-	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_variant_sparse(") {
 		t.Fatalf("expected canonical packed lowering to avoid full decode for direct multi-field payload reads, got:\n%s", output)
 	}
 	if strings.Contains(output, "call i64 @ctx_packed_store_read_word(") {
 		t.Fatalf("expected canonical packed lowering to avoid row/word-handle payload reads, got:\n%s", output)
+	}
+	if strings.Contains(output, "call i64 @ctx_packed_store_read_index_word(") {
+		t.Fatalf("expected canonical packed lowering to avoid legacy index-soa payload reads, got:\n%s", output)
 	}
 }
 
@@ -497,18 +504,21 @@ def fold_frozen() -> int:
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
 
-	if !strings.Contains(output, "call i32 @ctx_packed_store_read_index_tag(") {
-		t.Fatalf("expected canonical frozen packed payload match to use direct index tag reads, got:\n%s", output)
+	if !strings.Contains(output, "call i32 @ctx_packed_store_read_variant_sparse_tag(") {
+		t.Fatalf("expected canonical frozen packed payload match to use direct variant-sparse tag reads, got:\n%s", output)
 	}
-	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_index_word(")
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_variant_sparse_word(")
 	if readCalls != 1 {
-		t.Fatalf("expected canonical frozen packed payload match to use one direct index payload read, got %d helper calls:\n%s", readCalls, output)
+		t.Fatalf("expected canonical frozen packed payload match to use one direct variant-sparse payload read, got %d helper calls:\n%s", readCalls, output)
 	}
-	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_variant_sparse(") {
 		t.Fatalf("expected canonical frozen packed payload match to avoid eager decode, got:\n%s", output)
 	}
 	if strings.Contains(output, "call i64 @ctx_packed_store_read_word(") {
 		t.Fatalf("expected canonical frozen packed payload match to avoid row/word-handle payload reads, got:\n%s", output)
+	}
+	if strings.Contains(output, "call i64 @ctx_packed_store_read_index_word(") {
+		t.Fatalf("expected canonical frozen packed payload match to avoid legacy index-soa payload reads, got:\n%s", output)
 	}
 }
 

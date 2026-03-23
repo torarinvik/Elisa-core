@@ -64,7 +64,7 @@ func (p PackedLoweringProfile) LegacyOverride() (PackedEnumABI, bool) {
 }
 
 func (p PackedLoweringProfile) canonicalPackedMode() packedEnumABIMode {
-	return packedEnumABIIndexSOA
+	return packedEnumABIVariantSparse
 }
 
 func (p PackedLoweringProfile) packedModeForPackedEnum(enumType *semantic.EnumType) packedEnumABIMode {
@@ -94,7 +94,7 @@ func (p PackedLoweringProfile) metadata() semantic.PackedLoweringMetadata {
 	}
 	return semantic.PackedLoweringMetadata{
 		Contract:                          string(p.Contract()),
-		CanonicalPackedLowering:           string(PackedEnumABIIndexSOA),
+		CanonicalPackedLowering:           string(PackedEnumABIVariantSparse),
 		LegacyOverride:                    legacyOverride,
 		UsesLegacyOverride:                p.hasLegacyOverride,
 		OnePackedEnumOneHandleInvariant:   true,

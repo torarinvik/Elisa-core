@@ -3067,7 +3067,7 @@ func (s *functionState) emitDenseKeyHelperCall(expr *ast.CallExpr) (C.LLVMValueR
 	ops := &packedStoreOps{s: s, storeValue: storeValue, storeType: storeType}
 	var indexValue C.LLVMValueRef
 	switch s.g.packedModeForEnum(sourceEnum) {
-	case packedEnumABIIndexSOA:
+	case packedEnumABIIndexSOA, packedEnumABIVariantSparse:
 		indexValue, err = s.coerceValue(handleValue, sourceEnum, s.g.result.NamedTypes["u32"])
 		if err != nil {
 			return nil, nil, true, err
@@ -3751,8 +3751,12 @@ func (s *functionState) emitPackedStoreValue(arenaExpr ast.Expr, storeType *sema
 	arenaType := s.g.result.NamedTypes["Arena"]
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	stateHelperType := &semantic.FuncType{Name: "ctx_packed_store_state_new", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
-	stateCallee, err := s.g.ensureFunctionDeclared("ctx_packed_store_state_new", stateHelperType)
+	stateHelperName := "ctx_packed_store_state_new"
+	if s.g.packedLoweringForStore(storeType) == packedEnumABIVariantSparse {
+		stateHelperName = "ctx_packed_store_state_new_variant_sparse"
+	}
+	stateHelperType := &semantic.FuncType{Name: stateHelperName, Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
+	stateCallee, err := s.g.ensureFunctionDeclared(stateHelperName, stateHelperType)
 	if err != nil {
 		return nil, err
 	}
@@ -4142,7 +4146,7 @@ func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMVa
 		return nil, nil, false, nil
 	}
 	if s.g != nil && s.g.result != nil && s.g.result.ExprHasOnlyFrozenPackedStoreDeps(expr.Object) {
-		if s.g.packedModeForEnum(enumType) != packedEnumABIIndexSOA {
+		if !packedModeUsesDenseIndexHandle(s.g.packedModeForEnum(enumType)) {
 			return nil, nil, false, nil
 		}
 	}
@@ -4173,7 +4177,7 @@ func (s *functionState) emitPackedStoreValueAtDenseKey(ops *packedStoreOps, keyI
 		return nil, nil, fmt.Errorf("dense-key packed store read requires store metadata")
 	}
 	switch s.g.packedModeForEnum(ops.storeType.Enum) {
-	case packedEnumABIIndexSOA:
+	case packedEnumABIIndexSOA, packedEnumABIVariantSparse:
 		coerced, err := s.coerceValue(keyIndex, s.g.result.NamedTypes["u32"], ops.storeType.Enum)
 		if err != nil {
 			return nil, nil, err
@@ -5147,7 +5151,7 @@ func (s *functionState) emitPackedEnumConstructorAlloc(storeValue C.LLVMValueRef
 		return nil, nil, err
 	}
 	mode := s.g.packedModeForEnum(enumType)
-	if tailPlan != nil || (mode != packedEnumABIWordHandle && mode != packedEnumABIIndexSOA) {
+	if mode != packedEnumABIVariantSparse && (tailPlan != nil || (mode != packedEnumABIWordHandle && mode != packedEnumABIIndexSOA)) {
 		if err := s.emitPackedStoreRecordTag(storeValue, enumType.StoreType, tagValue); err != nil {
 			return nil, nil, err
 		}

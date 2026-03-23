@@ -643,7 +643,7 @@ func (s *functionState) emitViewStmt(stmt *ast.ViewStmt) error {
 	C.LLVMPositionBuilderAtEnd(s.builder, successBB)
 	viewDecodedValue := matchedDecodedValue
 	needsDecodedView := true
-	if s.g.packedModeForEnum(enumType) == packedEnumABIIndexSOA && storeBinding != nil {
+	if packedModeUsesDenseIndexHandle(s.g.packedModeForEnum(enumType)) && storeBinding != nil {
 		needsDecodedView = false
 	} else if s.canInlinePackedEnumVariant(enumType, variant) {
 		needsDecodedView = false
@@ -666,7 +666,7 @@ func (s *functionState) emitViewStmt(stmt *ast.ViewStmt) error {
 				storeCopy = &copied
 			}
 			s.bindPackedVariantView(stmt.Pattern.Name, resolvedViewType, viewDecodedValue, enumValue, storeCopy)
-		} else if s.g.packedModeForEnum(enumType) == packedEnumABIIndexSOA || s.canInlinePackedEnumVariant(enumType, variant) {
+		} else if packedModeUsesDenseIndexHandle(s.g.packedModeForEnum(enumType)) || s.canInlinePackedEnumVariant(enumType, variant) {
 			var storeCopy *packedStoreBinding
 			if storeBinding != nil {
 				copied := *storeBinding
@@ -2240,7 +2240,7 @@ func packedMatchShouldEagerDecode(result *semantic.Result, abi packedEnumABIMode
 		hasFrozenPackedStoreDeps = true
 	}
 	if hasFrozenPackedStoreDeps {
-		if abi == packedEnumABIIndexSOA {
+		if packedModeUsesDenseIndexHandle(abi) {
 			return false
 		}
 		return true

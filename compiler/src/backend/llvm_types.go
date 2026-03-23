@@ -32,14 +32,16 @@ const (
 	packedEnumABIRowHandle packedEnumABIMode = iota
 	packedEnumABIWordHandle
 	packedEnumABIIndexSOA
+	packedEnumABIVariantSparse
 )
 
 type PackedEnumABI string
 
 const (
-	PackedEnumABIRowHandle  PackedEnumABI = "row-handle"
-	PackedEnumABIWordHandle PackedEnumABI = "word-handle"
-	PackedEnumABIIndexSOA   PackedEnumABI = "index-soa"
+	PackedEnumABIRowHandle     PackedEnumABI = "row-handle"
+	PackedEnumABIWordHandle    PackedEnumABI = "word-handle"
+	PackedEnumABIIndexSOA      PackedEnumABI = "index-soa"
+	PackedEnumABIVariantSparse PackedEnumABI = "variant-sparse"
 )
 
 func ParsePackedEnumABI(value string) (PackedEnumABI, error) {
@@ -50,8 +52,10 @@ func ParsePackedEnumABI(value string) (PackedEnumABI, error) {
 		return PackedEnumABIWordHandle, nil
 	case string(PackedEnumABIIndexSOA), "index", "soa", "indexsoa":
 		return PackedEnumABIIndexSOA, nil
+	case string(PackedEnumABIVariantSparse), "variant", "variantsparse", "sparse":
+		return PackedEnumABIVariantSparse, nil
 	default:
-		return "", fmt.Errorf("unsupported packed enum ABI %q (expected %q, %q, or %q)", value, PackedEnumABIRowHandle, PackedEnumABIWordHandle, PackedEnumABIIndexSOA)
+		return "", fmt.Errorf("unsupported packed enum ABI %q (expected %q, %q, %q, or %q)", value, PackedEnumABIRowHandle, PackedEnumABIWordHandle, PackedEnumABIIndexSOA, PackedEnumABIVariantSparse)
 	}
 }
 
@@ -67,9 +71,19 @@ func (abi PackedEnumABI) mode() (packedEnumABIMode, error) {
 		return packedEnumABIWordHandle, nil
 	case PackedEnumABIIndexSOA:
 		return packedEnumABIIndexSOA, nil
+	case PackedEnumABIVariantSparse:
+		return packedEnumABIVariantSparse, nil
 	default:
 		return packedEnumABIRowHandle, fmt.Errorf("unsupported packed enum ABI %q", abi)
 	}
+}
+
+func packedModeUsesDenseIndexHandle(mode packedEnumABIMode) bool {
+	return mode == packedEnumABIIndexSOA || mode == packedEnumABIVariantSparse
+}
+
+func packedModeUsesDirectWordReads(mode packedEnumABIMode) bool {
+	return mode == packedEnumABIWordHandle || packedModeUsesDenseIndexHandle(mode)
 }
 
 func isVoidRefLikeType(t semantic.Type) bool {
@@ -329,6 +343,8 @@ func (g *llvmGenerator) shouldNeverInlineDefinedFunction(name string) bool {
 		return true
 	case "ctx_packed_store_alloc_fixed_tagged_result", "ctx_packed_store_alloc_fixed_tagged_index_result":
 		return true
+	case "ctx_packed_store_alloc_fixed_tagged_variant_sparse_result", "ctx_packed_store_alloc_tagged_variant_sparse_result":
+		return true
 	default:
 		return false
 	}
@@ -505,7 +521,7 @@ func (g *llvmGenerator) lowerPackedEnumType(enumType *semantic.EnumType) (C.LLVM
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	case packedEnumABIWordHandle:
 		return g.lowerBuiltin("uintptr")
-	case packedEnumABIIndexSOA:
+	case packedEnumABIIndexSOA, packedEnumABIVariantSparse:
 		return g.lowerBuiltin("u32")
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedModeForEnum(enumType))
@@ -521,7 +537,7 @@ func (g *llvmGenerator) lowerPackedEnumStoreType(storeType *semantic.PackedEnumS
 		fallthrough
 	case packedEnumABIWordHandle:
 		fallthrough
-	case packedEnumABIIndexSOA:
+	case packedEnumABIIndexSOA, packedEnumABIVariantSparse:
 		return g.ensurePackedEnumStoreCarrierType(storeType)
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedLoweringForStore(storeType))
@@ -537,7 +553,7 @@ func (g *llvmGenerator) ensurePackedEnumStorageType(enumType *semantic.EnumType)
 		fallthrough
 	case packedEnumABIWordHandle:
 		fallthrough
-	case packedEnumABIIndexSOA:
+	case packedEnumABIIndexSOA, packedEnumABIVariantSparse:
 		return g.ensurePackedEnumRowType(enumType.Name, enumType)
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedModeForEnum(enumType))
@@ -582,7 +598,7 @@ func (g *llvmGenerator) packedEnumPayloadFieldIndex(enumType *semantic.EnumType)
 		fallthrough
 	case packedEnumABIWordHandle:
 		fallthrough
-	case packedEnumABIIndexSOA:
+	case packedEnumABIIndexSOA, packedEnumABIVariantSparse:
 		payloadIndex := 1
 		if enumType.Decl != nil {
 			payloadIndex += len(enumType.Decl.Common)
