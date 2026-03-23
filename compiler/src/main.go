@@ -79,9 +79,9 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", emitTest)
 			return 1
 		}
-		return executeSelectedTests(options.filename, result, options.filter, effectiveOptimizationLevel(options), options.packedABI, stdout, stderr)
+		return executeSelectedTests(options.filename, result, options.filter, effectiveOptimizationLevel(options), options.packedProfile, stdout, stderr)
 	case emitLLVM:
-		output, err := backend.GenerateLLVMIRWithOptAndPackedABI(result, effectiveOptimizationLevel(options), options.packedABI)
+		output, err := backend.GenerateLLVMIRWithOptAndPackedLoweringProfile(result, effectiveOptimizationLevel(options), options.packedProfile)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
@@ -111,13 +111,13 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 		}
 		return 0
 	case emitBitcode:
-		if err := backend.WriteLLVMBitcodeFileWithOptAndPackedABI(result, outputPathForEmit(options.filename, options.output, ".bc"), effectiveOptimizationLevel(options), options.packedABI); err != nil {
+		if err := backend.WriteLLVMBitcodeFileWithOptAndPackedLoweringProfile(result, outputPathForEmit(options.filename, options.output, ".bc"), effectiveOptimizationLevel(options), options.packedProfile); err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
 		}
 		return 0
 	case emitObject:
-		if err := backend.WriteLLVMObjectFileWithOptAndPackedABI(result, outputPathForEmit(options.filename, options.output, ".o"), effectiveOptimizationLevel(options), options.packedABI); err != nil {
+		if err := backend.WriteLLVMObjectFileWithOptAndPackedLoweringProfile(result, outputPathForEmit(options.filename, options.output, ".o"), effectiveOptimizationLevel(options), options.packedProfile); err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
 		}
@@ -178,17 +178,19 @@ const (
 )
 
 type cliOptions struct {
-	emit        string
-	filename    string
-	output      string
-	filter      string
-	packedABI   backend.PackedEnumABI
-	optLevel    backend.OptimizationLevel
-	hasOptLevel bool
+	emit          string
+	filename      string
+	output        string
+	filter        string
+	packedProfile backend.PackedLoweringProfile
+	packedABI     backend.PackedEnumABI
+	hasPackedABI  bool
+	optLevel      backend.OptimizationLevel
+	hasOptLevel   bool
 }
 
 func parseArgs(args []string) (cliOptions, error) {
-	options := cliOptions{emit: emitAST, packedABI: backend.PackedEnumABIRowHandle}
+	options := cliOptions{emit: emitAST, packedProfile: backend.DefaultPackedLoweringProfile()}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
@@ -239,6 +241,12 @@ func parseArgs(args []string) (cliOptions, error) {
 				return cliOptions{}, err
 			}
 			options.packedABI = abi
+			options.hasPackedABI = true
+			profile, err := backend.LegacyPackedLoweringProfile(abi)
+			if err != nil {
+				return cliOptions{}, err
+			}
+			options.packedProfile = profile
 		case arg == "-packed-abi":
 			i++
 			if i >= len(args) {
@@ -249,6 +257,12 @@ func parseArgs(args []string) (cliOptions, error) {
 				return cliOptions{}, err
 			}
 			options.packedABI = abi
+			options.hasPackedABI = true
+			profile, err := backend.LegacyPackedLoweringProfile(abi)
+			if err != nil {
+				return cliOptions{}, err
+			}
+			options.packedProfile = profile
 		case strings.HasPrefix(arg, "-o="):
 			options.output = strings.TrimSpace(strings.TrimPrefix(arg, "-o="))
 		case arg == "-o":
@@ -277,7 +291,9 @@ func parseArgs(args []string) (cliOptions, error) {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprintf(w, "Usage: llcontext [-emit %s|%s|%s|%s|%s|%s|%s|%s|%s|%s] [-filter <substring>] [-packed-abi %s|%s] [-O0|-O2|-O3] [-o <output>] <file.llcontext>\n", emitAST, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitHeader, emitBitcode, emitObject, backend.PackedEnumABIRowHandle, backend.PackedEnumABIWordHandle)
+	fmt.Fprintf(w, "Usage: llcontext [-emit %s|%s|%s|%s|%s|%s|%s|%s|%s|%s] [-filter <substring>] [-packed-abi <legacy-debug-override>] [-O0|-O2|-O3] [-o <output>] <file.llcontext>\n", emitAST, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitHeader, emitBitcode, emitObject)
+	fmt.Fprintf(w, "Packed enums lower canonically as handle-based %s in compiler mode; frozen stores remain the readonly publication form.\n", backend.PackedEnumABIIndexSOA)
+	fmt.Fprintf(w, "-packed-abi is a temporary legacy/debug override: %s | %s | %s\n", backend.PackedEnumABIRowHandle, backend.PackedEnumABIWordHandle, backend.PackedEnumABIIndexSOA)
 }
 
 func parseOptimizationArg(value string) (backend.OptimizationLevel, error) {

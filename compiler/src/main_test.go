@@ -194,8 +194,8 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			name: "compiler_parallel_fixture",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "compiler_parallel_fixture.llcontext"),
 			checks: []string{
-				"%Expr = type { i32, i64, [2 x i64] }",
-				"%FrozenExprGraph = type { %Expr__Store, ptr }",
+				"%Expr = type { i32, i64, [1 x i64] }",
+				"%FrozenExprGraph = type { %Expr__Store, i32 }",
 				"%Thread__i64__Joinable = type { i64, ptr }",
 				"%Task__i64__Pending = type { i64, ptr }",
 				"define %FrozenExprGraph @build_frozen_expr_graph(",
@@ -268,12 +268,11 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			name: "packed_enum_common",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "packed_enum_common.llcontext"),
 			checks: []string{
-				"%Expr = type { i32, i64, [2 x i64] }",
+				"%Expr = type { i32, i64, [1 x i64] }",
 				"%Token = type { i32, i64 }",
-				"define ptr @build_expr(%Arena",
-				"define i64 @eval(ptr",
+				"define i32 @build_expr(%Arena",
+				"define i64 @eval(i32",
 				"define i64 @packed_demo()",
-				"call ptr @arena_alloc(ptr",
 				"load i64, ptr",
 			},
 		},
@@ -296,7 +295,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"%JsonCursor = type { ptr, i64, i64 }",
 				"%JsonLexemeResult = type { i64, i64, i64 }",
 				"%JsonNode = type { i32, i64, i64, [3 x i64] }",
-				"%JsonParseNodeResult = type { ptr, i64 }",
+				"%JsonParseNodeResult = type { i32, i64 }",
 				"define %JsonLexemeResult @json_parse_string_lexeme(ptr",
 				"define %JsonLexemeResult @json_parse_number_lexeme(ptr",
 				"define i64 @json_parse_string(ptr",
@@ -306,11 +305,11 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"define %JsonParseNodeResult @json_parse_value_node(ptr",
 				"define %JsonParseNodeResult @json_parse_array_node(ptr",
 				"define %JsonParseNodeResult @json_parse_object_node(ptr",
-				"define i8 @json_ast_kind(ptr %0, %JsonNode__Store %1)",
-				"define %JsonAstArrayIterCursor @json_ast_array_iter_first(ptr %0, %JsonNode__Store %1)",
-				"define %JsonAstObjectIterCursor @json_ast_object_iter_first(ptr %0, %JsonNode__Store %1)",
-				"define ptr @json_ast_array_nth(ptr %0, i64 %1, %JsonNode__Store %2)",
-				"define ptr @json_ast_object_get(ptr %0, ptr %1, ptr %2, %JsonNode__Store %3)",
+				"define i8 @json_ast_kind(i32 %0, %JsonNode__Store %1)",
+				"define %JsonAstArrayIterCursor @json_ast_array_iter_first(i32 %0, %JsonNode__Store %1)",
+				"define %JsonAstObjectIterCursor @json_ast_object_iter_first(i32 %0, %JsonNode__Store %1)",
+				"define i32 @json_ast_array_nth(i32 %0, i64 %1, %JsonNode__Store %2)",
+				"define i32 @json_ast_object_get(i32 %0, ptr %1, ptr %2, %JsonNode__Store %3)",
 				"define i64 @json_parser_parity_suite()",
 				"define i64 @json_parser_checksum(ptr",
 				"define i64 @json_parser_ast_checksum(ptr",
@@ -696,10 +695,81 @@ func TestParseArgsAcceptsPackedABI(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseArgs returned error: %v", err)
 			}
+			if !options.hasPackedABI {
+				t.Fatal("expected packed ABI flag to be marked as explicitly set")
+			}
 			if options.packedABI != test.want {
 				t.Fatalf("expected packed ABI %q, got %q", test.want, options.packedABI)
 			}
+			if options.packedProfile.Contract() != backend.PackedLoweringContractLegacyOverride {
+				t.Fatalf("expected packed ABI flag to produce a legacy override profile, got %q", options.packedProfile.Contract())
+			}
+			override, ok := options.packedProfile.LegacyOverride()
+			if !ok {
+				t.Fatal("expected packed ABI flag to populate a legacy override profile")
+			}
+			if override != test.want {
+				t.Fatalf("expected legacy override %q, got %q", test.want, override)
+			}
 		})
+	}
+}
+
+func TestParseArgsDefaultsPackedLoweringToCanonicalProfile(t *testing.T) {
+	options, err := parseArgs([]string{"fixture.llcontext"})
+	if err != nil {
+		t.Fatalf("parseArgs returned error: %v", err)
+	}
+	if options.hasPackedABI {
+		t.Fatal("expected canonical packed lowering default not to mark a packed ABI override")
+	}
+	if options.packedProfile.Contract() != backend.PackedLoweringContractCanonicalCompilerGraph {
+		t.Fatalf("expected canonical packed lowering profile by default, got %q", options.packedProfile.Contract())
+	}
+	if _, ok := options.packedProfile.LegacyOverride(); ok {
+		t.Fatal("expected canonical packed lowering default not to carry a legacy override")
+	}
+}
+
+func TestRunCLICompilesJSONParserWithCanonicalPackedLoweringByDefault(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.llcontext")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	checks := []string{
+		"%JsonParseNodeResult = type { i32, i64 }",
+		"define %JsonParseNodeResult @json_parse_value_node(ptr",
+		"define %JsonParseNodeResult @json_parse_array_node(ptr",
+		"define %JsonParseNodeResult @json_parse_object_node(ptr",
+		"call %PackedStoreIndexAllocResult @ctx_packed_store_alloc_fixed_tagged_index_result(ptr %packed.alloc.store.arena, ptr %packed.alloc.store.state, i32 ",
+		"call %PackedStoreIndexAllocResult @ctx_packed_store_alloc_index_result(ptr %packed.alloc.store.arena, i64 %packed.alloc.bytes, ptr %packed.alloc.store.state)",
+		"call i32 @ctx_packed_store_read_index_tag(ptr %packed.tag.store.state, i32 ",
+		"call i64 @ctx_packed_store_read_index_word(",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	for _, bad := range []string{
+		"call i64 @ctx_packed_store_read_word(ptr %packed.payload.word.arena",
+		"call i64 @ctx_packed_store_read_word(ptr %packed.common.store.arena",
+		"call ptr @ctx_packed_store_decode(ptr %packed.decode.store.arena, i64",
+		"call %PackedStoreAllocResult @ctx_packed_store_alloc_fixed_tagged_result(ptr %packed.alloc.store.arena, ptr %packed.alloc.store.state, i32 ",
+		"call %PackedStoreAllocResult @ctx_packed_store_alloc_result(ptr %packed.alloc.store.arena, i64 %packed.alloc.bytes, ptr %packed.alloc.store.state)",
+	} {
+		if strings.Contains(output, bad) {
+			t.Fatalf("expected canonical packed lowering default to avoid %q, got:\n%s", bad, output)
+		}
 	}
 }
 
@@ -787,9 +857,9 @@ func TestRunCLIGeneratedHeaderInteropHarness(t *testing.T) {
 	exePath := filepath.Join(outputDir, "export_vec2i_generated_harness")
 
 	for _, args := range [][]string{
-		{"-emit", "header", "-o", headerPath, fixturePath},
+		{"-emit", "header", "-packed-abi", "row-handle", "-o", headerPath, fixturePath},
 		// This test validates generated-header ABI wiring, not optimized code quality.
-		{"-emit", "obj", "-O0", "-o", objectPath, fixturePath},
+		{"-emit", "obj", "-O0", "-packed-abi", "row-handle", "-o", objectPath, fixturePath},
 	} {
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
@@ -832,9 +902,9 @@ func TestRunCLIFrontendLexerGeneratedHeaderInteropHarness(t *testing.T) {
 	exePath := filepath.Join(outputDir, "frontend_lexer_generated_harness")
 
 	for _, args := range [][]string{
-		{"-emit", "header", "-o", headerPath, fixturePath},
+		{"-emit", "header", "-packed-abi", "row-handle", "-o", headerPath, fixturePath},
 		// This test validates generated-header ABI wiring, not optimized code quality.
-		{"-emit", "obj", "-O0", "-o", objectPath, fixturePath},
+		{"-emit", "obj", "-O0", "-packed-abi", "row-handle", "-o", objectPath, fixturePath},
 	} {
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
@@ -882,9 +952,9 @@ func TestRunCLIJSONParserGeneratedHeaderInteropHarness(t *testing.T) {
 	exePath := filepath.Join(outputDir, "json_parser_generated_harness")
 
 	for _, args := range [][]string{
-		{"-emit", "header", "-o", headerPath, fixturePath},
+		{"-emit", "header", "-packed-abi", "row-handle", "-o", headerPath, fixturePath},
 		// This test validates generated-header ABI wiring, not optimized code quality.
-		{"-emit", "obj", "-O0", "-o", objectPath, fixturePath},
+		{"-emit", "obj", "-O0", "-packed-abi", "row-handle", "-o", objectPath, fixturePath},
 	} {
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer

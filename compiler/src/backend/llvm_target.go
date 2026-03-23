@@ -77,14 +77,14 @@ func WriteLLVMBitcodeFile(result *semantic.Result, outputPath string) error {
 }
 
 func WriteLLVMBitcodeFileWithOpt(result *semantic.Result, outputPath string, optLevel OptimizationLevel) error {
-	return WriteLLVMBitcodeFileWithOptAndPackedABI(result, outputPath, optLevel, PackedEnumABIRowHandle)
+	return WriteLLVMBitcodeFileWithOptAndPackedLoweringProfile(result, outputPath, optLevel, DefaultPackedLoweringProfile())
 }
 
-func WriteLLVMBitcodeFileWithOptAndPackedABI(result *semantic.Result, outputPath string, optLevel OptimizationLevel, packedABI PackedEnumABI) error {
+func WriteLLVMBitcodeFileWithOptAndPackedLoweringProfile(result *semantic.Result, outputPath string, optLevel OptimizationLevel, profile PackedLoweringProfile) error {
 	if strings.TrimSpace(outputPath) == "" {
 		return fmt.Errorf("output path cannot be empty")
 	}
-	g, err := compileLLVMModule(result, optLevel, packedABI)
+	g, err := compileLLVMModule(result, optLevel, profile)
 	if err != nil {
 		return err
 	}
@@ -95,24 +95,40 @@ func WriteLLVMBitcodeFileWithOptAndPackedABI(result *semantic.Result, outputPath
 	return g.writeBitcodeFile(outputPath)
 }
 
+func WriteLLVMBitcodeFileWithOptAndPackedABI(result *semantic.Result, outputPath string, optLevel OptimizationLevel, packedABI PackedEnumABI) error {
+	profile, err := LegacyPackedLoweringProfile(packedABI)
+	if err != nil {
+		return err
+	}
+	return WriteLLVMBitcodeFileWithOptAndPackedLoweringProfile(result, outputPath, optLevel, profile)
+}
+
 func WriteLLVMObjectFile(result *semantic.Result, outputPath string) error {
 	return WriteLLVMObjectFileWithOpt(result, outputPath, OptimizationLevel3)
 }
 
 func WriteLLVMObjectFileWithOpt(result *semantic.Result, outputPath string, optLevel OptimizationLevel) error {
-	return WriteLLVMObjectFileWithOptAndPackedABI(result, outputPath, optLevel, PackedEnumABIRowHandle)
+	return WriteLLVMObjectFileWithOptAndPackedLoweringProfile(result, outputPath, optLevel, DefaultPackedLoweringProfile())
 }
 
-func WriteLLVMObjectFileWithOptAndPackedABI(result *semantic.Result, outputPath string, optLevel OptimizationLevel, packedABI PackedEnumABI) error {
+func WriteLLVMObjectFileWithOptAndPackedLoweringProfile(result *semantic.Result, outputPath string, optLevel OptimizationLevel, profile PackedLoweringProfile) error {
 	if strings.TrimSpace(outputPath) == "" {
 		return fmt.Errorf("output path cannot be empty")
 	}
-	g, err := compileLLVMModule(result, optLevel, packedABI)
+	g, err := compileLLVMModule(result, optLevel, profile)
 	if err != nil {
 		return err
 	}
 	defer g.dispose()
 	return g.writeObjectFile(outputPath, optLevel)
+}
+
+func WriteLLVMObjectFileWithOptAndPackedABI(result *semantic.Result, outputPath string, optLevel OptimizationLevel, packedABI PackedEnumABI) error {
+	profile, err := LegacyPackedLoweringProfile(packedABI)
+	if err != nil {
+		return err
+	}
+	return WriteLLVMObjectFileWithOptAndPackedLoweringProfile(result, outputPath, optLevel, profile)
 }
 
 func (g *llvmGenerator) writeBitcodeFile(outputPath string) error {

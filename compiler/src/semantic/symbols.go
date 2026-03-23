@@ -34,6 +34,7 @@ type Result struct {
 	ConstValues     map[string]ConstValue
 	ExprTypes       map[ast.Expr]Type
 	ExprFacts       map[ast.Expr]OptimizationFacts
+	PackedLowering  PackedLoweringMetadata
 	ParallelFor     map[*ast.ParallelForStmt]*ParallelForInfo
 	AnnotatedFuncs  []*AnnotatedFunc
 	ExportedTypes   []*ExportedType
@@ -46,6 +47,15 @@ type ParallelForInfo struct {
 	SourceType Type
 	ItemType   Type
 	Captures   []string
+}
+
+type PackedLoweringMetadata struct {
+	Contract                          string
+	CanonicalPackedLowering           string
+	LegacyOverride                    string
+	UsesLegacyOverride                bool
+	OnePackedEnumOneHandleInvariant   bool
+	PublicationReadonlyGateStoreState string
 }
 
 type AnnotatedFunc struct {

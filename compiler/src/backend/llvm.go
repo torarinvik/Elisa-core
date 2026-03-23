@@ -35,11 +35,11 @@ func GenerateLLVMIR(result *semantic.Result) (string, error) {
 // GenerateLLVMIRWithOpt lowers the analyzed program and optionally optimizes the
 // module before returning textual LLVM IR.
 func GenerateLLVMIRWithOpt(result *semantic.Result, optLevel OptimizationLevel) (string, error) {
-	return GenerateLLVMIRWithOptAndPackedABI(result, optLevel, PackedEnumABIRowHandle)
+	return GenerateLLVMIRWithOptAndPackedLoweringProfile(result, optLevel, DefaultPackedLoweringProfile())
 }
 
-func GenerateLLVMIRWithOptAndPackedABI(result *semantic.Result, optLevel OptimizationLevel, packedABI PackedEnumABI) (string, error) {
-	g, err := compileLLVMModule(result, optLevel, packedABI)
+func GenerateLLVMIRWithOptAndPackedLoweringProfile(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile) (string, error) {
+	g, err := compileLLVMModule(result, optLevel, profile)
 	if err != nil {
 		return "", err
 	}
@@ -50,17 +50,24 @@ func GenerateLLVMIRWithOptAndPackedABI(result *semantic.Result, optLevel Optimiz
 	return g.printModule(), nil
 }
 
-func compileLLVMModule(result *semantic.Result, optLevel OptimizationLevel, packedABI PackedEnumABI) (*llvmGenerator, error) {
+func GenerateLLVMIRWithOptAndPackedABI(result *semantic.Result, optLevel OptimizationLevel, packedABI PackedEnumABI) (string, error) {
+	profile, err := LegacyPackedLoweringProfile(packedABI)
+	if err != nil {
+		return "", err
+	}
+	return GenerateLLVMIRWithOptAndPackedLoweringProfile(result, optLevel, profile)
+}
+
+func compileLLVMModule(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile) (*llvmGenerator, error) {
 	g, err := newLLVMGenerator(result)
 	if err != nil {
 		return nil, err
 	}
-	mode, err := packedABI.mode()
-	if err != nil {
-		g.dispose()
-		return nil, err
+	g.packedProfile = profile
+	g.packedEnumABI = profile.packedModeForStore(nil)
+	if g.result != nil {
+		g.result.PackedLowering = profile.metadata()
 	}
-	g.packedEnumABI = mode
 	g.preferPrivateLinkage = optLevel != OptimizationLevel0
 	if err := g.emitModule(); err != nil {
 		g.dispose()
@@ -82,6 +89,7 @@ type llvmGenerator struct {
 	targetTriple         *C.char
 	optimizedForCodegen  bool
 	preferPrivateLinkage bool
+	packedProfile        PackedLoweringProfile
 	packedEnumABI        packedEnumABIMode
 	symbolsByNode        map[ast.Node]*semantic.Symbol
 	structTypes          map[string]C.LLVMTypeRef
@@ -106,7 +114,8 @@ func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
 		result:             result,
 		context:            ctx,
 		module:             mod,
-		packedEnumABI:      packedEnumABIRowHandle,
+		packedProfile:      DefaultPackedLoweringProfile(),
+		packedEnumABI:      packedEnumABIIndexSOA,
 		symbolsByNode:      map[ast.Node]*semantic.Symbol{},
 		structTypes:        map[string]C.LLVMTypeRef{},
 		structBodies:       map[string]bool{},
@@ -123,6 +132,27 @@ func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
 		g.symbolsByNode[sym.Node] = sym
 	}
 	return g, nil
+}
+
+func (g *llvmGenerator) packedModeForEnum(enumType *semantic.EnumType) packedEnumABIMode {
+	if g == nil {
+		return packedEnumABIRowHandle
+	}
+	return g.packedProfile.packedModeForPackedEnum(enumType)
+}
+
+func (g *llvmGenerator) packedLoweringForStore(storeType *semantic.PackedEnumStoreType) packedEnumABIMode {
+	if g == nil {
+		return packedEnumABIRowHandle
+	}
+	return g.packedProfile.packedModeForStore(storeType)
+}
+
+func (g *llvmGenerator) usesCanonicalPackedLowering() bool {
+	if g == nil {
+		return false
+	}
+	return g.packedProfile.Contract() == PackedLoweringContractCanonicalCompilerGraph && !g.packedProfile.HasLegacyOverride()
 }
 
 func (g *llvmGenerator) nextSyntheticName(prefix string) string {

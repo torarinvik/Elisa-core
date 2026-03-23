@@ -500,7 +500,7 @@ func (g *llvmGenerator) lowerPackedEnumType(enumType *semantic.EnumType) (C.LLVM
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum type")
 	}
-	switch g.packedEnumABI {
+	switch g.packedModeForEnum(enumType) {
 	case packedEnumABIRowHandle:
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	case packedEnumABIWordHandle:
@@ -508,7 +508,7 @@ func (g *llvmGenerator) lowerPackedEnumType(enumType *semantic.EnumType) (C.LLVM
 	case packedEnumABIIndexSOA:
 		return g.lowerBuiltin("u32")
 	default:
-		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedEnumABI)
+		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedModeForEnum(enumType))
 	}
 }
 
@@ -516,7 +516,7 @@ func (g *llvmGenerator) lowerPackedEnumStoreType(storeType *semantic.PackedEnumS
 	if storeType == nil {
 		return nil, fmt.Errorf("missing packed enum store type")
 	}
-	switch g.packedEnumABI {
+	switch g.packedLoweringForStore(storeType) {
 	case packedEnumABIRowHandle:
 		fallthrough
 	case packedEnumABIWordHandle:
@@ -524,7 +524,7 @@ func (g *llvmGenerator) lowerPackedEnumStoreType(storeType *semantic.PackedEnumS
 	case packedEnumABIIndexSOA:
 		return g.ensurePackedEnumStoreCarrierType(storeType)
 	default:
-		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedEnumABI)
+		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedLoweringForStore(storeType))
 	}
 }
 
@@ -532,7 +532,7 @@ func (g *llvmGenerator) ensurePackedEnumStorageType(enumType *semantic.EnumType)
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum storage type")
 	}
-	switch g.packedEnumABI {
+	switch g.packedModeForEnum(enumType) {
 	case packedEnumABIRowHandle:
 		fallthrough
 	case packedEnumABIWordHandle:
@@ -540,7 +540,7 @@ func (g *llvmGenerator) ensurePackedEnumStorageType(enumType *semantic.EnumType)
 	case packedEnumABIIndexSOA:
 		return g.ensurePackedEnumRowType(enumType.Name, enumType)
 	default:
-		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedEnumABI)
+		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedModeForEnum(enumType))
 	}
 }
 
@@ -577,7 +577,7 @@ func (g *llvmGenerator) packedEnumPayloadFieldIndex(enumType *semantic.EnumType)
 	if enumType == nil || !enumType.Packed {
 		return 0, fmt.Errorf("missing packed enum payload metadata")
 	}
-	switch g.packedEnumABI {
+	switch g.packedModeForEnum(enumType) {
 	case packedEnumABIRowHandle:
 		fallthrough
 	case packedEnumABIWordHandle:
@@ -589,7 +589,7 @@ func (g *llvmGenerator) packedEnumPayloadFieldIndex(enumType *semantic.EnumType)
 		}
 		return payloadIndex, nil
 	default:
-		return 0, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedEnumABI)
+		return 0, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedModeForEnum(enumType))
 	}
 }
 

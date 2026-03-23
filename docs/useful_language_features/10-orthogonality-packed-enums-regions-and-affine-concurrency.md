@@ -131,6 +131,36 @@ Packed enums remain a layout and store feature.
 
 They should obey these rules.
 
+### Packed lowering contract (v1)
+
+The v1 compiler lowering contract is intentionally simple:
+
+- packed enums are always handle-based values
+- the canonical compiler-graph lowering is `index-soa`
+- frozen stores are the intended flat-scan / publication form
+- `Store[Frozen]` is a semantic publication and readonly gate, not a second
+  packed-handle representation
+
+The key invariance rule is explicit:
+
+> one packed enum gets one runtime handle representation across all store
+> states in a compilation unit
+
+That means `Expr.Store[Local]` and `Expr.Store[Frozen]` may differ in what
+operations are legal and profitable, but not in the runtime handle type used
+for `Expr` values. The semantic `Frozen` state controls readonly bulk forms
+such as `parallel for`, `frozen.tags`, and published scans. It does not select
+an alternate packed ABI.
+
+The public/default compiler story in v1 is therefore:
+
+- compiler-shaped packed graphs canonically lower as handle-based
+  `index-soa`
+- frozen stores are the intended publication form for readonly scans and bulk
+  operations
+- legacy packed ABI selection is temporary, for debugging and compatibility,
+  rather than the primary model users are expected to think in
+
 ### Packed enum values are handles, not ownership modes
 
 A packed enum value like `Expr` is a cheap typed handle into an `Expr.Store`.
@@ -439,6 +469,9 @@ The backend should keep the same separation.
 ### Packed lowering
 
 - packed tags and payloads use the existing store-aware ABI
+- canonical compiler lowering uses handle-based `index-soa` by default for
+  packed enums, including compiler-graph workloads built first in
+  `Store[Local]` and later published through `Store[Frozen]`
 - packed pattern sugar lowers to the same packed decode helpers as `match`
 - first-class packed variant witnesses should surface as `packedview[Enum.Variant]`
   so they can be passed, returned, and stored without inventing a second proof
@@ -490,6 +523,9 @@ The current implementation is partway to this model:
 - visible `affine struct` declarations exist
 - stateful packed stores exist as `Store[Local]` and `Store[Frozen]`
 - `freeze(move store)` exists and is the publication boundary for packed stores
+- canonical backend lowering now treats packed compiler graphs as
+  handle-based `index-soa` by default, with one handle representation per packed
+  enum across all store states in a compilation unit
 - compiler-internal send/share checks are enforced at transfer seams such as
   `spawn1` and `pool_submit1`
 - `sendable/shareable` currently remain compiler-internal derived judgments

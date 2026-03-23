@@ -3,6 +3,7 @@
 package backend
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -54,6 +55,16 @@ func generateLLVMIRWithPackedABIForTest(result *semantic.Result, abi packedEnumA
 		return "", err
 	}
 	defer g.dispose()
+	switch abi {
+	case packedEnumABIRowHandle:
+		g.packedProfile = mustLegacyPackedLoweringProfile(PackedEnumABIRowHandle)
+	case packedEnumABIWordHandle:
+		g.packedProfile = mustLegacyPackedLoweringProfile(PackedEnumABIWordHandle)
+	case packedEnumABIIndexSOA:
+		g.packedProfile = mustLegacyPackedLoweringProfile(PackedEnumABIIndexSOA)
+	default:
+		return "", fmt.Errorf("unsupported packed enum ABI mode %d", abi)
+	}
 	g.packedEnumABI = abi
 	if err := g.emitModule(); err != nil {
 		return "", err
@@ -62,6 +73,10 @@ func generateLLVMIRWithPackedABIForTest(result *semantic.Result, abi packedEnumA
 		return "", err
 	}
 	return g.printModule(), nil
+}
+
+func generateLLVMIRWithDefaultPackedLoweringForTest(result *semantic.Result) (string, error) {
+	return GenerateLLVMIRWithOpt(result, OptimizationLevel0)
 }
 
 func packedABITestName(abi packedEnumABIMode) string {
@@ -74,6 +89,68 @@ func packedABITestName(abi packedEnumABIMode) string {
 		return "index_soa"
 	default:
 		return "packed_abi_unknown"
+	}
+}
+
+func TestGenerateLLVMIRRecordsCanonicalPackedLoweringMetadataByDefault(t *testing.T) {
+	src := `packed enum Expr:
+	Lit(value: int)
+
+def fold() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	in store:
+		node: Expr = new Expr.Lit(value: 5)
+		return match node:
+			Expr.Lit(value):
+				value
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_metadata_default.llcontext", src)
+	if _, err := generateLLVMIRWithDefaultPackedLoweringForTest(result); err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if result.PackedLowering.Contract != string(PackedLoweringContractCanonicalCompilerGraph) {
+		t.Fatalf("expected canonical packed lowering contract metadata, got %q", result.PackedLowering.Contract)
+	}
+	if result.PackedLowering.CanonicalPackedLowering != string(PackedEnumABIIndexSOA) {
+		t.Fatalf("expected canonical packed lowering metadata to record %q, got %q", PackedEnumABIIndexSOA, result.PackedLowering.CanonicalPackedLowering)
+	}
+	if result.PackedLowering.UsesLegacyOverride {
+		t.Fatalf("expected canonical packed lowering metadata not to mark a legacy override, got %+v", result.PackedLowering)
+	}
+	if result.PackedLowering.PublicationReadonlyGateStoreState != "Frozen" {
+		t.Fatalf("expected frozen publication gate metadata, got %q", result.PackedLowering.PublicationReadonlyGateStoreState)
+	}
+	if !result.PackedLowering.OnePackedEnumOneHandleInvariant {
+		t.Fatalf("expected one-packed-enum/one-handle invariant metadata to be recorded")
+	}
+}
+
+func TestGenerateLLVMIRRecordsLegacyPackedLoweringMetadataForOverride(t *testing.T) {
+	src := `packed enum Expr:
+	Lit(value: int)
+
+def fold() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	in store:
+		node: Expr = new Expr.Lit(value: 5)
+		return match node:
+			Expr.Lit(value):
+				value
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_metadata_legacy.llcontext", src)
+	if _, err := GenerateLLVMIRWithOptAndPackedABI(result, OptimizationLevel0, PackedEnumABIWordHandle); err != nil {
+		t.Fatalf("GenerateLLVMIRWithOptAndPackedABI returned error: %v", err)
+	}
+	if result.PackedLowering.Contract != string(PackedLoweringContractLegacyOverride) {
+		t.Fatalf("expected legacy override packed lowering metadata, got %q", result.PackedLowering.Contract)
+	}
+	if !result.PackedLowering.UsesLegacyOverride {
+		t.Fatalf("expected legacy override metadata to mark the override, got %+v", result.PackedLowering)
+	}
+	if result.PackedLowering.LegacyOverride != string(PackedEnumABIWordHandle) {
+		t.Fatalf("expected legacy override metadata %q, got %q", PackedEnumABIWordHandle, result.PackedLowering.LegacyOverride)
 	}
 }
 
@@ -288,6 +365,43 @@ def sum_pair() -> int:
 	}
 }
 
+func TestGenerateLLVMIRUsesCanonicalIndexReadHelpersForPackedPayloadMatchByDefault(t *testing.T) {
+	src := `packed enum Pair:
+	Both(left: int, right: int)
+	End
+
+def sum_pair() -> int:
+	region scratch(256u)
+	store: Pair.Store[Local] = Pair.Store(scratch)
+	in store:
+		node: Pair = new Pair.Both(left: 2, right: 3)
+		return match node:
+			Pair.Both(left: left, right: right):
+				left + right
+			Pair.End:
+				0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_payload_words_default.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+
+	if !strings.Contains(output, "call i32 @ctx_packed_store_read_index_tag(") {
+		t.Fatalf("expected canonical packed lowering to use ctx_packed_store_read_index_tag for dispatch, got:\n%s", output)
+	}
+	readWordCalls := strings.Count(output, "call i64 @ctx_packed_store_read_index_word(")
+	if readWordCalls != 2 {
+		t.Fatalf("expected canonical packed lowering to use two direct index payload word reads for Pair.Both, got %d helper calls:\n%s", readWordCalls, output)
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
+		t.Fatalf("expected canonical packed lowering to avoid full decode for direct multi-field payload reads, got:\n%s", output)
+	}
+	if strings.Contains(output, "call i64 @ctx_packed_store_read_word(") {
+		t.Fatalf("expected canonical packed lowering to avoid row/word-handle payload reads, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRUsesSingleDecodeForFrozenPackedPayloadMatch(t *testing.T) {
 	src := `packed enum Expr:
 	Lit(value: int)
@@ -358,6 +472,43 @@ def fold_frozen() -> int:
 	}
 	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
 		t.Fatalf("expected frozen packed payload match in index-soa mode to avoid eager decode, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRUsesCanonicalIndexReadHelpersForFrozenPackedPayloadMatchByDefault(t *testing.T) {
+	src := `packed enum Expr:
+	Lit(value: int)
+	End
+
+def fold_frozen() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	node: Expr = new[store] Expr.Lit(value: 5)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	return match node in frozen:
+		Expr.Lit(value):
+			value
+		Expr.End:
+			0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_payload_decode_default.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+
+	if !strings.Contains(output, "call i32 @ctx_packed_store_read_index_tag(") {
+		t.Fatalf("expected canonical frozen packed payload match to use direct index tag reads, got:\n%s", output)
+	}
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_index_word(")
+	if readCalls != 1 {
+		t.Fatalf("expected canonical frozen packed payload match to use one direct index payload read, got %d helper calls:\n%s", readCalls, output)
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
+		t.Fatalf("expected canonical frozen packed payload match to avoid eager decode, got:\n%s", output)
+	}
+	if strings.Contains(output, "call i64 @ctx_packed_store_read_word(") {
+		t.Fatalf("expected canonical frozen packed payload match to avoid row/word-handle payload reads, got:\n%s", output)
 	}
 }
 

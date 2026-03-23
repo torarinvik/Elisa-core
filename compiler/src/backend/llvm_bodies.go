@@ -643,7 +643,7 @@ func (s *functionState) emitViewStmt(stmt *ast.ViewStmt) error {
 	C.LLVMPositionBuilderAtEnd(s.builder, successBB)
 	viewDecodedValue := matchedDecodedValue
 	needsDecodedView := true
-	if s.g.packedEnumABI == packedEnumABIIndexSOA && storeBinding != nil {
+	if s.g.packedModeForEnum(enumType) == packedEnumABIIndexSOA && storeBinding != nil {
 		needsDecodedView = false
 	} else if s.canInlinePackedEnumVariant(enumType, variant) {
 		needsDecodedView = false
@@ -666,7 +666,7 @@ func (s *functionState) emitViewStmt(stmt *ast.ViewStmt) error {
 				storeCopy = &copied
 			}
 			s.bindPackedVariantView(stmt.Pattern.Name, resolvedViewType, viewDecodedValue, enumValue, storeCopy)
-		} else if s.g.packedEnumABI == packedEnumABIIndexSOA || s.canInlinePackedEnumVariant(enumType, variant) {
+		} else if s.g.packedModeForEnum(enumType) == packedEnumABIIndexSOA || s.canInlinePackedEnumVariant(enumType, variant) {
 			var storeCopy *packedStoreBinding
 			if storeBinding != nil {
 				copied := *storeBinding
@@ -1637,7 +1637,7 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 		return err
 	}
 	var decodedMatchValue C.LLVMValueRef
-	if enumType.Packed && packedMatchShouldEagerDecode(s.g.result, s.g.packedEnumABI, enumType, stmt.Value, storeBinding, stmt.Arms) {
+	if enumType.Packed && packedMatchShouldEagerDecode(s.g.result, s.g.packedModeForEnum(enumType), enumType, stmt.Value, storeBinding, stmt.Arms) {
 		decodedMatchValue, err = s.decodePackedEnumHandleWithStore(enumValue, enumType, storeBinding)
 		if err != nil {
 			return err
@@ -1710,7 +1710,7 @@ func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, sema
 		return nil, nil, err
 	}
 	var decodedMatchValue C.LLVMValueRef
-	if enumType.Packed && packedMatchShouldEagerDecode(s.g.result, s.g.packedEnumABI, enumType, expr.Value, storeBinding, expr.Arms) {
+	if enumType.Packed && packedMatchShouldEagerDecode(s.g.result, s.g.packedModeForEnum(enumType), enumType, expr.Value, storeBinding, expr.Arms) {
 		decodedMatchValue, err = s.decodePackedEnumHandleWithStore(enumValue, enumType, storeBinding)
 		if err != nil {
 			return nil, nil, err

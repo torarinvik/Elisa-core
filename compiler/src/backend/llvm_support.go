@@ -1759,7 +1759,7 @@ func (s *functionState) materializePackedVariantViewValue(binding packedVariantV
 	}
 	handle := binding.handle
 	if handle == nil {
-		switch s.g.packedEnumABI {
+		switch s.g.packedModeForEnum(binding.typ.Enum) {
 		case packedEnumABIRowHandle:
 			handle = binding.ptr
 		default:
@@ -1815,7 +1815,7 @@ func (s *functionState) unpackPackedVariantViewValue(value C.LLVMValueRef, viewT
 	}
 	binding := packedVariantViewBinding{typ: viewType}
 	binding.handle = C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("packedview.handle.extract"))
-	if s.g.packedEnumABI == packedEnumABIRowHandle {
+	if s.g.packedModeForEnum(viewType.Enum) == packedEnumABIRowHandle {
 		binding.ptr = binding.handle
 	}
 	if viewType.Enum.StoreType != nil {

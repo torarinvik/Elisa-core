@@ -48,6 +48,15 @@ func loadFixtureSource(t *testing.T, relParts ...string) string {
 	return string(raw)
 }
 
+func generateLLVMIRWithPackedABIForTest(t *testing.T, result *semantic.Result, abi backend.PackedEnumABI) string {
+	t.Helper()
+	output, err := backend.GenerateLLVMIRWithOptAndPackedABI(result, backend.OptimizationLevel0, abi)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOptAndPackedABI returned error: %v", err)
+	}
+	return output
+}
+
 func functionIR(output string, name string) string {
 	marker := "@" + name + "("
 	idx := strings.Index(output, marker)
@@ -233,10 +242,7 @@ def left(node: Expr, store: Expr.Store[Local]) -> Expr:
 	return lhs
 `
 	result := parseAndAnalyze(t, "backend_move_as_packed_variant.llcontext", src)
-	output, err := backend.GenerateLLVMIR(result)
-	if err != nil {
-		t.Fatalf("GenerateLLVMIR returned error: %v", err)
-	}
+	output := generateLLVMIRWithPackedABIForTest(t, result, backend.PackedEnumABIRowHandle)
 
 	checks := []string{
 		"%Expr__Store = type { ptr, i64, ptr }",
@@ -2161,10 +2167,7 @@ def fold() -> int:
 			1 if lhs != rhs else 0
 `
 	result := parseAndAnalyze(t, "backend_packed_enum_match.llcontext", src)
-	output, err := backend.GenerateLLVMIR(result)
-	if err != nil {
-		t.Fatalf("GenerateLLVMIR returned error: %v", err)
-	}
+	output := generateLLVMIRWithPackedABIForTest(t, result, backend.PackedEnumABIRowHandle)
 
 	checks := []string{
 		"%Expr__Store = type { ptr, i64, ptr }",
@@ -2203,10 +2206,7 @@ def fold(node: Expr, store: Expr.Store[Local]) -> int:
 	return 0
 `
 	result := parseAndAnalyze(t, "backend_packed_match_refined_view_scrutinee.llcontext", src)
-	output, err := backend.GenerateLLVMIR(result)
-	if err != nil {
-		t.Fatalf("GenerateLLVMIR returned error: %v", err)
-	}
+	output := generateLLVMIRWithPackedABIForTest(t, result, backend.PackedEnumABIRowHandle)
 	for _, check := range []string{"define i64 @fold(", "%PackedView__Expr__Int = type { ptr, %Expr__Store }", "load i32, ptr"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
@@ -2235,10 +2235,7 @@ def fold() -> int:
 				node.span + lhs.span + rhs.span
 `
 	result := parseAndAnalyze(t, "backend_packed_in_store_block.llcontext", src)
-	output, err := backend.GenerateLLVMIR(result)
-	if err != nil {
-		t.Fatalf("GenerateLLVMIR returned error: %v", err)
-	}
+	output := generateLLVMIRWithPackedABIForTest(t, result, backend.PackedEnumABIRowHandle)
 
 	checks := []string{
 		"%Expr = type { i32, i64, [2 x i64] }",
@@ -2269,10 +2266,7 @@ def differs(left: Token, right: Token) -> bool:
 	return left != right
 `
 	result := parseAndAnalyze(t, "backend_packed_payloadless_enum.llcontext", src)
-	output, err := backend.GenerateLLVMIR(result)
-	if err != nil {
-		t.Fatalf("GenerateLLVMIR returned error: %v", err)
-	}
+	output := generateLLVMIRWithPackedABIForTest(t, result, backend.PackedEnumABIRowHandle)
 
 	checks := []string{
 		"define i1 @differs(ptr",
@@ -2300,10 +2294,7 @@ def read(node: Expr) -> int:
 	return node.span
 `
 	result := parseAndAnalyze(t, "backend_packed_common_field.llcontext", src)
-	output, err := backend.GenerateLLVMIR(result)
-	if err != nil {
-		t.Fatalf("GenerateLLVMIR returned error: %v", err)
-	}
+	output := generateLLVMIRWithPackedABIForTest(t, result, backend.PackedEnumABIRowHandle)
 
 	checks := []string{
 		"%Expr = type { i32, i64, [1 x i64] }",
@@ -2334,10 +2325,7 @@ def build() -> Expr:
 	return new[store] Expr.Int(span: 9, value: 5)
 `
 	result := parseAndAnalyze(t, "backend_packed_common_field_init.llcontext", src)
-	output, err := backend.GenerateLLVMIR(result)
-	if err != nil {
-		t.Fatalf("GenerateLLVMIR returned error: %v", err)
-	}
+	output := generateLLVMIRWithPackedABIForTest(t, result, backend.PackedEnumABIRowHandle)
 
 	checks := []string{
 		"%Expr = type { i32, i64, [1 x i64] }",
@@ -2367,10 +2355,7 @@ def build() -> Token:
 	return new[store] Token.Region(span: 4)
 `
 	result := parseAndAnalyze(t, "backend_payloadless_packed_common_init.llcontext", src)
-	output, err := backend.GenerateLLVMIR(result)
-	if err != nil {
-		t.Fatalf("GenerateLLVMIR returned error: %v", err)
-	}
+	output := generateLLVMIRWithPackedABIForTest(t, result, backend.PackedEnumABIRowHandle)
 
 	checks := []string{
 		"%Token = type { i32, i64 }",
@@ -2395,10 +2380,7 @@ def build() -> Token:
 	return new[store] Token.Region
 `
 	result := parseAndAnalyze(t, "backend_payloadless_packed_alloc.llcontext", src)
-	output, err := backend.GenerateLLVMIR(result)
-	if err != nil {
-		t.Fatalf("GenerateLLVMIR returned error: %v", err)
-	}
+	output := generateLLVMIRWithPackedABIForTest(t, result, backend.PackedEnumABIRowHandle)
 
 	checks := []string{
 		"%Token = type { i32 }",

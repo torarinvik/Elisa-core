@@ -862,7 +862,7 @@ func (s *functionState) encodePackedEnumHandleWithStore(rowPtr C.LLVMValueRef, e
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum handle metadata")
 	}
-	if s.g.packedEnumABI == packedEnumABIRowHandle {
+	if s.g.packedModeForEnum(enumType) == packedEnumABIRowHandle {
 		return rowPtr, nil
 	}
 	storeType := enumType.StoreType
@@ -883,7 +883,7 @@ func (s *functionState) decodePackedEnumHandleWithStore(handleValue C.LLVMValueR
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum handle metadata")
 	}
-	if s.g.packedEnumABI == packedEnumABIRowHandle {
+	if s.g.packedModeForEnum(enumType) == packedEnumABIRowHandle {
 		return handleValue, nil
 	}
 	ops, ok := s.packedStoreOpsFromBinding(store)
@@ -3868,7 +3868,7 @@ func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMVa
 		return nil, nil, false, nil
 	}
 	if s.g != nil && s.g.result != nil && s.g.result.ExprHasOnlyFrozenPackedStoreDeps(expr.Object) {
-		if s.g.packedEnumABI != packedEnumABIIndexSOA {
+		if s.g.packedModeForEnum(enumType) != packedEnumABIIndexSOA {
 			return nil, nil, false, nil
 		}
 	}
@@ -4839,7 +4839,8 @@ func (s *functionState) emitPackedEnumConstructorAlloc(storeValue C.LLVMValueRef
 	if err := ops.recordPrefixWords(allocPtr, "packed.prefix.record"); err != nil {
 		return nil, nil, err
 	}
-	if tailPlan != nil || (s.g.packedEnumABI != packedEnumABIWordHandle && s.g.packedEnumABI != packedEnumABIIndexSOA) {
+	mode := s.g.packedModeForEnum(enumType)
+	if tailPlan != nil || (mode != packedEnumABIWordHandle && mode != packedEnumABIIndexSOA) {
 		if err := s.emitPackedStoreRecordTag(storeValue, enumType.StoreType, tagValue); err != nil {
 			return nil, nil, err
 		}
@@ -4848,7 +4849,7 @@ func (s *functionState) emitPackedEnumConstructorAlloc(storeValue C.LLVMValueRef
 }
 
 func (s *functionState) canInlinePackedEnumVariant(enumType *semantic.EnumType, variant *semantic.EnumVariant) bool {
-	return s != nil && s.g != nil && s.g.packedEnumABI == packedEnumABIWordHandle && s.g.wordBits == 64 && variant != nil && variant.CanInlineWordHandle(enumType)
+	return s != nil && s.g != nil && s.g.packedModeForEnum(enumType) == packedEnumABIWordHandle && s.g.wordBits == 64 && variant != nil && variant.CanInlineWordHandle(enumType)
 }
 
 func (s *functionState) buildInlinePackedEnumHandle(tagValue C.LLVMValueRef, payloadValue C.LLVMValueRef, payloadType semantic.Type) (C.LLVMValueRef, error) {

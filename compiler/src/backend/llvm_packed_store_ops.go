@@ -87,7 +87,7 @@ func (ops *packedStoreOps) encodeHandle(rowPtr C.LLVMValueRef, enumType *semanti
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum handle metadata")
 	}
-	switch ops.s.g.packedEnumABI {
+	switch ops.s.g.packedModeForEnum(enumType) {
 	case packedEnumABIRowHandle:
 		return rowPtr, nil
 	case packedEnumABIWordHandle:
@@ -136,7 +136,7 @@ func (ops *packedStoreOps) encodeHandle(rowPtr C.LLVMValueRef, enumType *semanti
 		encoded := ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, rowPtr, stateValue}, name)
 		return ops.s.coerceValue(encoded, u32Type, enumType)
 	default:
-		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", ops.s.g.packedEnumABI)
+		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", ops.s.g.packedModeForEnum(enumType))
 	}
 }
 
@@ -144,7 +144,7 @@ func (ops *packedStoreOps) decodeHandle(handleValue C.LLVMValueRef, enumType *se
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum handle metadata")
 	}
-	switch ops.s.g.packedEnumABI {
+	switch ops.s.g.packedModeForEnum(enumType) {
 	case packedEnumABIRowHandle:
 		return handleValue, nil
 	case packedEnumABIWordHandle:
@@ -199,7 +199,7 @@ func (ops *packedStoreOps) decodeHandle(handleValue C.LLVMValueRef, enumType *se
 		}
 		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, coercedHandle, stateValue}, name), nil
 	default:
-		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", ops.s.g.packedEnumABI)
+		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", ops.s.g.packedModeForEnum(enumType))
 	}
 }
 
@@ -209,7 +209,7 @@ func (ops *packedStoreOps) storeValueAt(indexValue C.LLVMValueRef, name string) 
 		return nil, nil, err
 	}
 	usizeType := ops.s.g.result.NamedTypes["usize"]
-	switch ops.s.g.packedEnumABI {
+	switch ops.s.g.packedLoweringForStore(ops.storeType) {
 	case packedEnumABIRowHandle:
 		helperType := &semantic.FuncType{Name: "ctx_packed_store_row_ptr_at", Params: []semantic.Type{ops.voidRefType(), usizeType}, Return: ops.voidRefType()}
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_row_ptr_at", helperType)
@@ -261,7 +261,7 @@ func (ops *packedStoreOps) storeValueAt(indexValue C.LLVMValueRef, name string) 
 		}
 		return coerced, ops.storeType.Enum, nil
 	default:
-		return nil, nil, fmt.Errorf("unsupported packed enum ABI mode %d", ops.s.g.packedEnumABI)
+		return nil, nil, fmt.Errorf("unsupported packed enum ABI mode %d", ops.s.g.packedLoweringForStore(ops.storeType))
 	}
 }
 
@@ -280,7 +280,7 @@ func (ops *packedStoreOps) storeTagAt(handleValue C.LLVMValueRef, enumType *sema
 	arenaType := ops.s.g.result.NamedTypes["Arena"]
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	tagType := ops.s.g.result.NamedTypes["u32"]
-	switch ops.s.g.packedEnumABI {
+	switch ops.s.g.packedModeForEnum(enumType) {
 	case packedEnumABIIndexSOA:
 		helperType := &semantic.FuncType{Name: "ctx_packed_store_read_index_tag", Params: []semantic.Type{ops.voidRefType(), tagType}, Return: tagType}
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_read_index_tag", helperType)
@@ -329,7 +329,7 @@ func (ops *packedStoreOps) loadPayloadWord(handleValue C.LLVMValueRef, enumType 
 	arenaType := ops.s.g.result.NamedTypes["Arena"]
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	uintptrType := ops.s.g.result.NamedTypes["uintptr"]
-	switch ops.s.g.packedEnumABI {
+	switch ops.s.g.packedModeForEnum(enumType) {
 	case packedEnumABIIndexSOA:
 		u32Type := ops.s.g.result.NamedTypes["u32"]
 		helperType := &semantic.FuncType{Name: "ctx_packed_store_read_index_word", Params: []semantic.Type{arenaRefType, u32Type, ops.voidRefType(), ops.s.g.result.NamedTypes["usize"]}, Return: uintptrType}
@@ -368,7 +368,8 @@ func (ops *packedStoreOps) canDirectWordRead() bool {
 	if ops == nil || ops.s == nil || ops.s.g == nil {
 		return false
 	}
-	return ops.s.g.packedEnumABI == packedEnumABIWordHandle || ops.s.g.packedEnumABI == packedEnumABIIndexSOA
+	mode := ops.s.g.packedLoweringForStore(ops.storeType)
+	return mode == packedEnumABIWordHandle || mode == packedEnumABIIndexSOA
 }
 
 func (ops *packedStoreOps) canDirectTagRead() bool {
@@ -402,7 +403,7 @@ func (ops *packedStoreOps) loadTailView(handleValue C.LLVMValueRef, enumType *se
 	if ops == nil || enumType == nil || !enumType.Packed || variant == nil {
 		return nil, false, nil
 	}
-	if ops.s == nil || ops.s.g == nil || ops.s.g.packedEnumABI != packedEnumABIIndexSOA {
+	if ops.s == nil || ops.s.g == nil || ops.s.g.packedModeForEnum(enumType) != packedEnumABIIndexSOA {
 		return nil, false, nil
 	}
 	tailIndex, ok := variant.TailPayloadIndex()
@@ -495,7 +496,7 @@ func (ops *packedStoreOps) storeSlice(startValue C.LLVMValueRef, endValue C.LLVM
 		return nil, nil, err
 	}
 	helperName := "ctx_packed_store_view"
-	if ops.s.g.packedEnumABI == packedEnumABIIndexSOA {
+	if ops.s.g.packedLoweringForStore(ops.storeType) == packedEnumABIIndexSOA {
 		helperName = "ctx_packed_store_indices_view"
 	}
 	helperType := &semantic.FuncType{
@@ -523,7 +524,7 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	switch ops.s.g.packedEnumABI {
+	switch ops.s.g.packedModeForEnum(enumType) {
 	case packedEnumABIRowHandle:
 		arenaValue, err := ops.arenaValue(name + ".arena")
 		if err != nil {
@@ -637,7 +638,7 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 		}
 		return allocPtr, enumValue, rowSizeValue, nil
 	default:
-		return nil, nil, nil, fmt.Errorf("unsupported packed enum ABI mode %d", ops.s.g.packedEnumABI)
+		return nil, nil, nil, fmt.Errorf("unsupported packed enum ABI mode %d", ops.s.g.packedModeForEnum(enumType))
 	}
 }
 
@@ -667,7 +668,7 @@ func (ops *packedStoreOps) recordTag(tagValue C.LLVMValueRef, name string) error
 }
 
 func (ops *packedStoreOps) recordPrefixWords(rowPtr C.LLVMValueRef, name string) error {
-	if ops == nil || ops.s == nil || ops.s.g == nil || ops.s.g.packedEnumABI != packedEnumABIIndexSOA {
+	if ops == nil || ops.s == nil || ops.s.g == nil || ops.s.g.packedLoweringForStore(ops.storeType) != packedEnumABIIndexSOA {
 		return nil
 	}
 	arenaValue, err := ops.arenaValue(name + ".arena")
