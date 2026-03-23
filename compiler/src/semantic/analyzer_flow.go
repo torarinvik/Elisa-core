@@ -4405,6 +4405,8 @@ func (a *Analyzer) borrowedOwnerRefStateForProofCarryingViewCall(call *ast.CallE
 			"source": cloneBorrowedOwnerRefState(summarized),
 		}
 		return state, true
+	case "reduce_sum":
+		return borrowedOwnerRefState{}, true
 	default:
 		return borrowedOwnerRefState{}, false
 	}

@@ -3037,6 +3037,8 @@ func (s *functionState) emitProofCarryingViewHelperCall(expr *ast.CallExpr) (C.L
 		return s.emitSplitAtHelperCall(expr)
 	case "chunks_exact":
 		return s.emitChunksExactHelperCall(expr)
+	case "reduce_sum":
+		return s.emitReduceSumHelperCall(expr)
 	case "zip_map":
 		return s.emitZipMapHelperCall(expr)
 	default:
@@ -3128,6 +3130,121 @@ func (s *functionState) emitChunksExactHelperCall(expr *ast.CallExpr) (C.LLVMVal
 	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, viewValue, 0, cStringFree("chunks.source.insert"))
 	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, chunkSizeValue, 1, cStringFree("chunks.chunk_size.insert"))
 	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, chunksLen, 2, cStringFree("chunks.len.insert"))
+	return resultValue, resultType, true, nil
+}
+
+func (s *functionState) emitReduceSumHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if len(expr.Args) < 2 {
+		return nil, nil, true, fmt.Errorf("reduce_sum expects at least 2 arguments, got %d", len(expr.Args))
+	}
+	srcType, srcElemType, ok := zipMapViewInfo(s.exprType(expr.Args[0]))
+	if !ok {
+		return nil, nil, true, fmt.Errorf("reduce_sum source expects a dense view")
+	}
+	callbackType, ok := s.exprType(expr.Args[1]).(*semantic.FuncType)
+	if !ok || callbackType == nil {
+		return nil, nil, true, fmt.Errorf("reduce_sum callback expects a function value")
+	}
+	resultType := s.exprType(expr)
+	srcValue, _, err := s.emitExpr(expr.Args[0], srcType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	callbackValue, _, err := s.emitExpr(expr.Args[1], callbackType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	extraArgs := make([]C.LLVMValueRef, 0, len(expr.Args)-2)
+	for i, arg := range expr.Args[2:] {
+		var expected semantic.Type
+		if i+1 < len(callbackType.Params) {
+			expected = callbackType.Params[i+1]
+		}
+		value, _, err := s.emitExpr(arg, expected)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		extraArgs = append(extraArgs, value)
+	}
+	srcPtr, err := s.emitStackTempValue(srcValue, srcType, "reduce_sum.src")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	totalValue := C.LLVMBuildExtractValue(s.builder, srcValue, 1, cStringFree("reduce_sum.total"))
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	zeroIndex := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	one := C.LLVMConstInt(usizeLLVMType, 1, 0)
+	indexAlloca, err := s.createEntryAlloca("reduce_sum.index", usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	C.LLVMBuildStore(s.builder, zeroIndex, indexAlloca)
+	accZero, err := s.zeroValue(resultType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	accAlloca, err := s.createEntryAlloca("reduce_sum.acc", resultType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	C.LLVMBuildStore(s.builder, accZero, accAlloca)
+
+	loopCondBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("reduce_sum.cond"))
+	loopBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("reduce_sum.body"))
+	loopEndBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("reduce_sum.end"))
+	C.LLVMBuildBr(s.builder, loopCondBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, loopCondBB)
+	indexValue, err := s.loadValue(indexAlloca, usizeType, "reduce_sum.index")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	hasMore := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, totalValue, cStringFree("reduce_sum.has_more"))
+	C.LLVMBuildCondBr(s.builder, hasMore, loopBodyBB, loopEndBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, loopBodyBB)
+	srcElemPtr, _, err := s.emitRuntimeIndexedAddress(srcPtr, srcType, srcElemType, indexValue)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	srcElem, err := s.loadValue(srcElemPtr, srcElemType, "reduce_sum.src.elem")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	callbackLLVMType, err := s.g.lowerFunctionType(callbackType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	callArgs := make([]C.LLVMValueRef, 0, len(extraArgs)+1)
+	callArgs = append(callArgs, srcElem)
+	callArgs = append(callArgs, extraArgs...)
+	mappedValue := s.buildCall(callbackLLVMType, callbackValue, callArgs, "reduce_sum.call")
+	coercedValue, err := s.coerceValue(mappedValue, callbackType.Return, resultType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	accValue, err := s.loadValue(accAlloca, resultType, "reduce_sum.acc")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	nextAcc, err := s.emitAugmentedValue(lexer.TOKEN_PLUSEQ, accValue, coercedValue, resultType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	C.LLVMBuildStore(s.builder, nextAcc, accAlloca)
+	nextIndex := C.LLVMBuildAdd(s.builder, indexValue, one, cStringFree("reduce_sum.index.next"))
+	C.LLVMBuildStore(s.builder, nextIndex, indexAlloca)
+	C.LLVMBuildBr(s.builder, loopCondBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, loopEndBB)
+	resultValue, err := s.loadValue(accAlloca, resultType, "reduce_sum.result")
+	if err != nil {
+		return nil, nil, true, err
+	}
 	return resultValue, resultType, true, nil
 }
 

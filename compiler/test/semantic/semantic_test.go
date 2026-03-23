@@ -5077,6 +5077,38 @@ def bad() -> void:
 	}
 }
 
+func TestAnalyzeAcceptsReduceSumWithReadonlySourceAndExtraArgs(t *testing.T) {
+	src := `def add_bias(value: i64, bias: i64) -> i64:
+	return value + bias
+
+def run(values: darray[i64, 4], bias: i64) -> i64:
+	base: dview[i64] = values[0u:4u]
+	return reduce_sum(readonly(base), add_bias, bias)
+`
+	result, errs := parseAndAnalyze(t, "reduce_sum_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "run", "i64")
+}
+
+func TestAnalyzeRejectsReduceSumNonNumericCallbackResult(t *testing.T) {
+	src := `def is_positive(value: i64) -> bool:
+	return value > 0
+
+def bad(values: darray[i64, 4]) -> i64:
+	base: dview[i64] = values[0u:4u]
+	return reduce_sum(readonly(base), is_positive)
+`
+	_, errs := parseAndAnalyze(t, "reduce_sum_bool_callback_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "reduce_sum callback must return a numeric accumulator") {
+		t.Fatalf("expected reduce_sum numeric-callback diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsAssigningPackedStoreSliceIndexResult(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)

@@ -5520,6 +5520,38 @@ func TestGenerateLLVMIRLowersProofCarryingViewHelpers(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRLowersReduceSumHelper(t *testing.T) {
+	src := `def add_bias(value: i64, bias: i64) -> i64:
+	return value + bias
+
+def run(values: darray[i64, 4], bias: i64) -> i64:
+	base: dview[i64] = values[0u:4u]
+	return reduce_sum(readonly(base), add_bias, bias)
+`
+	result := parseAndAnalyze(t, "backend_reduce_sum_helper.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	ir := functionIR(output, "run")
+	if ir == "" {
+		t.Fatalf("expected to find LLVM IR for run, got:\n%s", output)
+	}
+	for _, check := range []string{
+		"define i64 @run(%DynArray__i64",
+		"reduce_sum.cond",
+		"reduce_sum.body",
+		"reduce_sum.end",
+		"call i64 @add_bias",
+		"add i64",
+	} {
+		if !strings.Contains(ir, check) {
+			t.Fatalf("expected run IR to contain %q, got:\n%s", check, ir)
+		}
+	}
+}
+
 func looksLikeObjectFile(data []byte) bool {
 	if len(data) < 4 {
 		return false

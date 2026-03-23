@@ -707,6 +707,15 @@ def json_ast_checksum_node(node: JsonNode, store: JsonNode.Store[Local]) -> i64:
     return node.checksum
 
 
+def json_reduce_sum_bias(value: i64, bias: i64) -> i64:
+    return value + bias
+
+
+def json_reduce_sum_smoke(values: darray[i64, 4], bias: i64) -> i64:
+    base: dview[i64] = values[0u:4u]
+    return reduce_sum(readonly(base), json_reduce_sum_bias, bias)
+
+
 def json_ast_nodes_count(items: dview[JsonNode], store: JsonNode.Store[Local]) -> i64:
     readonly_items: dview[JsonNode] = readonly(items)
     total: mutable i64 = 0

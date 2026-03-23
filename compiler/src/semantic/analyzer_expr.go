@@ -732,6 +732,8 @@ func (a *Analyzer) regionRefStateForProofCarryingViewCall(call *ast.CallExpr) (r
 			"source": cloneRegionRefState(summarized),
 		}
 		return state, true
+	case "reduce_sum":
+		return regionRefState{}, true
 	default:
 		return regionRefState{}, false
 	}
@@ -1844,6 +1846,7 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 		return a.analyzeFreezeCallExpr(expr)
 	}
 	if helperType, ok := a.analyzeProofCarryingViewHelperCall(expr); ok {
+		a.recordProofCarryingViewHelperFuncType(expr, helperType)
 		return helperType
 	}
 	if enumType, variant, ok := a.enumConstructorCall(expr); ok {
@@ -2035,6 +2038,8 @@ func (a *Analyzer) analyzeProofCarryingViewHelperCall(expr *ast.CallExpr) (Type,
 		return a.analyzeSplitAtHelperCall(expr), true
 	case "chunks_exact":
 		return a.analyzeChunksExactHelperCall(expr), true
+	case "reduce_sum":
+		return a.analyzeReduceSumHelperCall(expr), true
 	case "zip_map":
 		return a.analyzeZipMapHelperCall(expr), true
 	default:
@@ -2049,6 +2054,28 @@ func proofCarryingViewType(t Type) bool {
 	default:
 		return false
 	}
+}
+
+func (a *Analyzer) recordProofCarryingViewHelperFuncType(expr *ast.CallExpr, returnType Type) {
+	if a == nil || expr == nil || expr.Func == nil {
+		return
+	}
+	name := callIdentName(expr)
+	if name == "" {
+		return
+	}
+	params := make([]Type, 0, len(expr.Args))
+	for _, arg := range expr.Args {
+		argType := a.exprTypes[arg]
+		if argType == nil {
+			argType = invalidType
+		}
+		params = append(params, argType)
+	}
+	if returnType == nil {
+		returnType = invalidType
+	}
+	a.exprTypes[expr.Func] = &FuncType{Name: name, Params: params, Return: returnType}
 }
 
 func denseDViewType(t Type) (*DArrayViewType, bool) {
@@ -2158,6 +2185,68 @@ func (a *Analyzer) analyzeChunksExactHelperCall(expr *ast.CallExpr) Type {
 		return invalidType
 	}
 	return &GenericInstanceType{Name: "ChunksExactView", Base: base, Args: []Type{viewType.Elem}}
+}
+
+func (a *Analyzer) analyzeReduceSumHelperCall(expr *ast.CallExpr) Type {
+	if len(expr.Args) < 2 {
+		a.errorf(expr.Pos(), "reduce_sum expects at least 2 arguments, got %d", len(expr.Args))
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return invalidType
+	}
+	srcViewType, srcElemType, srcOK := zipMapDenseViewType(a.analyzeExpr(expr.Args[0]))
+	callbackType := a.analyzeExpr(expr.Args[1])
+	extraArgTypes := make([]Type, 0, len(expr.Args)-2)
+	for _, arg := range expr.Args[2:] {
+		extraArgTypes = append(extraArgTypes, a.analyzeExpr(arg))
+	}
+
+	if !srcOK {
+		actual := a.exprTypes[expr.Args[0]]
+		if actual == nil {
+			actual = invalidType
+		}
+		a.errorf(expr.Args[0].Pos(), "reduce_sum source expects a dense view[T], got %s", actual.String())
+		return invalidType
+	}
+	if !a.exprSupportsReadonlyDenseView(expr.Args[0]) {
+		a.errorf(expr.Args[0].Pos(), "reduce_sum requires source to be a readonly contiguous exact-extent view, got %s", srcViewType.String())
+	}
+
+	callbackFn, ok := callbackType.(*FuncType)
+	if !ok {
+		a.errorf(expr.Args[1].Pos(), "reduce_sum callback expects a function value, got %s", callbackType.String())
+		return invalidType
+	}
+	if callbackFn.Variadic || len(callbackFn.Params) != len(extraArgTypes)+1 {
+		a.errorf(expr.Args[1].Pos(), "reduce_sum callback must accept the source element followed by %d extra arguments", len(extraArgTypes))
+		return invalidType
+	}
+	if len(callbackFn.Permissions) != 0 {
+		a.errorf(expr.Args[1].Pos(), "reduce_sum callback must not declare effect permissions")
+	}
+	if callbackFn.Return == nil || isVoidType(callbackFn.Return) {
+		a.errorf(expr.Args[1].Pos(), "reduce_sum callback must return a numeric accumulator")
+		return invalidType
+	}
+	if _, ok := callbackFn.Return.(*ErrorUnionType); ok {
+		a.errorf(expr.Args[1].Pos(), "reduce_sum callback must not return an error union")
+		return invalidType
+	}
+	if !IsNumericType(callbackFn.Return) {
+		a.errorf(expr.Args[1].Pos(), "reduce_sum callback must return a numeric accumulator, got %s", callbackFn.Return.String())
+		return invalidType
+	}
+	if !AssignableTo(callbackFn.Params[0], srcElemType) {
+		a.errorf(expr.Args[1].Pos(), "reduce_sum callback first parameter expects %s, got %s", callbackFn.Params[0].String(), srcElemType.String())
+	}
+	for i, argType := range extraArgTypes {
+		if !AssignableTo(callbackFn.Params[i+1], argType) {
+			a.errorf(expr.Args[1].Pos(), "reduce_sum callback parameter %d expects %s, got %s", i+2, callbackFn.Params[i+1].String(), argType.String())
+		}
+	}
+	return callbackFn.Return
 }
 
 func (a *Analyzer) analyzeZipMapHelperCall(expr *ast.CallExpr) Type {
