@@ -56,3 +56,5 @@ def ast_number_helpers_materialize_float_values_across_fractional_and_large_inpu
 @test
 def ast_iterator_helpers_walk_object_fields_and_array_items() -> void:
     assert(json_parser_checksum_impl("{\"first\":1,\"second\":2,\"third\":3,\"items\":[4,5,6]}".cast[any u8&]()) > 0)
+
+

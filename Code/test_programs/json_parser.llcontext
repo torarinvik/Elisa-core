@@ -107,6 +107,10 @@ error JsonNumberAccessError:
 extern strtod(nptr: any u8&, endptr: any u8&?) -> f64
 
 
+def readonly[T](view: dview[T]) -> dview[T]:
+    return view
+
+
 struct JsonParserDocumentInternal:
     source: mutable any u8&
     source_len: mutable usize
@@ -704,23 +708,26 @@ def json_ast_checksum_node(node: JsonNode, store: JsonNode.Store[Local]) -> i64:
 
 
 def json_ast_nodes_count(items: dview[JsonNode], store: JsonNode.Store[Local]) -> i64:
+    readonly_items: dview[JsonNode] = readonly(items)
     total: mutable i64 = 0
     index: mutable usize = 0u
-    while index < items.len:
-        item: JsonNode = arena_da_view_get(items, index)
+    while index < readonly_items.len:
+        item: JsonNode = arena_da_view_get(readonly_items, index)
         item_count: i64 = json_ast_node_count(item, store)
         if item_count < 0:
             return -1
         total <- total + item_count
         index <- index + 1u
+
     return total
 
 
 def json_ast_fields_count(fields: dview[JsonField], store: JsonNode.Store[Local]) -> i64:
+    readonly_fields: dview[JsonField] = readonly(fields)
     total: mutable i64 = 0
     index: mutable usize = 0u
-    while index < fields.len:
-        field: JsonField = arena_da_view_get(fields, index)
+    while index < readonly_fields.len:
+        field: JsonField = arena_da_view_get(readonly_fields, index)
         key_count: i64 = json_ast_node_count(field.key, store)
         if key_count < 0:
             return -1
@@ -729,6 +736,7 @@ def json_ast_fields_count(fields: dview[JsonField], store: JsonNode.Store[Local]
             return -1
         total <- total + key_count + value_count
         index <- index + 1u
+
     return total
 
 
@@ -1306,9 +1314,10 @@ def json_ast_object_get(node: JsonNode, source: any u8&, key: any u8&, store: Js
     if json_ast_kind(node, store) != JsonNodeKind.OBJECT:
         return invalid_node
     if node in store as JsonNode.Object:
+        readonly_fields: dview[JsonField] = readonly(node.fields)
         index: mutable usize = 0u
-        while index < node.fields.len:
-            field: JsonField = arena_da_view_get(node.fields, index)
+        while index < readonly_fields.len:
+            field: JsonField = arena_da_view_get(readonly_fields, index)
             if json_ast_string_eq_literal(source, field.key, key, store):
                 return field.value
             index <- index + 1u
@@ -4093,6 +4102,8 @@ def json_parser_parity_suite_impl() -> int can[Memory.Allocate, Abort.Panic]:
     if not json_expect_checksum("[-12,3.5,null]", 136):
         return 0
     if not json_expect_ast_checksum("[-12,3.5,null]", 136):
+        return 0
+    if json_parser_ast_node_count_impl("{\"a\":[1,2,3],\"b\":[4,5],\"c\":null}".cast[any u8&]()) != 12:
         return 0
     if not json_expect_invalid("[1,2}"):
         return 0

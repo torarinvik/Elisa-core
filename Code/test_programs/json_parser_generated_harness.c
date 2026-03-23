@@ -25,6 +25,7 @@ int main(void) {
     assert(json_parser_ast_checksum((uint8_t*)"{\"a\":[1,2}") < 0);
 
     assert(json_parser_ast_node_count((uint8_t*)"{\"items\":[1,2,3],\"ok\":true}") > 0);
+    assert(json_parser_ast_node_count((uint8_t*)"{\"a\":[1,2,3],\"b\":[4,5],\"c\":null}") == 12);
     assert(json_parser_ast_object_len((uint8_t*)"{\"a\":1,\"b\":2}") == 2);
     assert(json_parser_ast_object_len((uint8_t*)"[") < 0);
 
