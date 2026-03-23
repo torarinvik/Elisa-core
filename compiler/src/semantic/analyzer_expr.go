@@ -465,6 +465,12 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 			return regionRefState{}, false
 		}
 		state, ok := a.currentRegionRefs[sym]
+		if (!ok || !hasRegionProvenance(state)) && sym != nil {
+			root := symbolAliasRoot(sym)
+			if root != nil && root != sym {
+				state, ok = a.currentRegionRefs[root]
+			}
+		}
 		if !ok {
 			return regionRefState{}, false
 		}
@@ -2312,6 +2318,17 @@ func (a *Analyzer) bindFreshShape(shape Shape, origin string, bindings map[strin
 }
 
 func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
+	if viewType, ok := a.lookupRefinedPackedVariantView(expr.Object); ok {
+		if field, ok := viewType.Field(expr.Field); ok {
+			field.Type = a.specializeProjectedFunctionFieldType(expr, field.Type)
+			a.reportInvalidRegionUse(expr, field.Type)
+			if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(field.Type, map[string]bool{}) {
+				a.errorf(expr.Pos(), "%s %q cannot be used after %s", affineHandleKind(field.Type), affineValueDisplayName(expr), state.ConsumedBy)
+			}
+			a.reportBorrowedOwnerRefUseAfterConsume(expr, field.Type)
+			return field.Type
+		}
+	}
 	if field, ok := dstrSyntheticField(a.analyzeExpr(expr.Object), expr.Field); ok {
 		field.Type = a.specializeProjectedFunctionFieldType(expr, field.Type)
 		a.reportInvalidRegionUse(expr, field.Type)
@@ -2406,11 +2423,20 @@ func (a *Analyzer) resolveProjectedFieldValueExprAtPath(objectExpr ast.Expr, pat
 			if valueExpr, ok := a.currentValueBindings[sym]; ok && valueExpr != nil {
 				return a.resolveProjectedFieldValueExprAtPath(valueExpr, path)
 			}
+			if root := symbolAliasRoot(sym); root != nil && root != sym {
+				if valueExpr, ok := a.currentValueBindings[root]; ok && valueExpr != nil {
+					return a.resolveProjectedFieldValueExprAtPath(valueExpr, path)
+				}
+			}
 		}
-		if sym.Kind != SymbolLocal {
+		declSym := sym
+		if root := symbolAliasRoot(sym); root != nil {
+			declSym = root
+		}
+		if declSym.Kind != SymbolLocal {
 			return nil, false
 		}
-		decl, ok := sym.Node.(*ast.VarDeclStmt)
+		decl, ok := declSym.Node.(*ast.VarDeclStmt)
 		if !ok || decl.Value == nil {
 			return nil, false
 		}

@@ -124,8 +124,16 @@ type Symbol struct {
 	Kind       SymbolKind
 	Type       Type
 	Node       ast.Node
+	AliasOf    *Symbol
 	ParamIndex int
 	Mutable    bool
+}
+
+func symbolAliasRoot(sym *Symbol) *Symbol {
+	for sym != nil && sym.AliasOf != nil {
+		sym = sym.AliasOf
+	}
+	return sym
 }
 
 type Scope struct {

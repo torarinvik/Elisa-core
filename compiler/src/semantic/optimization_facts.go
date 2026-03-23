@@ -590,6 +590,11 @@ func (a *Analyzer) lookupIdentOptimizationFacts(ident *ast.Ident) (OptimizationF
 			if facts, ok := a.symbolFacts[sym]; ok {
 				return facts, true
 			}
+			if root := symbolAliasRoot(sym); root != nil && root != sym {
+				if facts, ok := a.symbolFacts[root]; ok {
+					return facts, true
+				}
+			}
 		}
 	}
 	if a.globalScope != nil {

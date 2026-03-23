@@ -366,6 +366,17 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 	if expected == nil || actual == nil || semantic.SameType(actual, expected) {
 		return value, nil
 	}
+	if expectedBuiltin, ok := expected.(*semantic.BuiltinType); ok && expectedBuiltin.Name == "bool" {
+		actualLLVM, err := s.g.lowerType(actual)
+		if err != nil {
+			return nil, err
+		}
+		zero := C.LLVMConstNull(actualLLVM)
+		if isFloatType(actual) {
+			return C.LLVMBuildFCmp(s.builder, C.LLVMRealPredicate(C.LLVMRealONE), value, zero, cStringFree("tobool")), nil
+		}
+		return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), value, zero, cStringFree("tobool")), nil
+	}
 	if expectedErrSet, ok := expected.(*semantic.ErrorSetType); ok {
 		if actualErrSet, ok := actual.(*semantic.ErrorSetType); ok {
 			return s.remapErrorCode(value, actualErrSet, expectedErrSet)
@@ -931,6 +942,23 @@ func (s *functionState) invalidatePackedVariantView(name string) {
 	}
 	for scope := s.scope; scope != nil; scope = scope.parent {
 		delete(scope.packedViewPtrs, name)
+	}
+}
+
+func packedVariantViewTargetName(expr ast.Expr) (string, bool) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return n.Name, true
+	case *ast.ParenExpr:
+		return packedVariantViewTargetName(n.Inner)
+	default:
+		return "", false
+	}
+}
+
+func (s *functionState) invalidatePackedVariantViewExpr(expr ast.Expr) {
+	if name, ok := packedVariantViewTargetName(expr); ok {
+		s.invalidatePackedVariantView(name)
 	}
 }
 

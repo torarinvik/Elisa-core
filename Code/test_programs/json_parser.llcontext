@@ -1235,8 +1235,8 @@ def json_ast_string_eq_literal(source: any u8&, node: JsonNode, literal: any u8&
 def json_ast_bool_value(node: JsonNode, store: JsonNode.Store[Local]) -> i64:
     if json_ast_kind(node, store) != JsonNodeKind.BOOL:
         return -1
-    open node in store as JsonNode.Bool(value):
-        return 1 if value else 0
+    if node in store as JsonNode.Bool:
+        return 1 if node.value else 0
     return -1
 
 
@@ -1247,16 +1247,16 @@ def json_ast_is_null(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
 def json_ast_array_len(node: JsonNode, store: JsonNode.Store[Local]) -> i64:
     if json_ast_kind(node, store) != JsonNodeKind.ARRAY:
         return -1
-    view node in store as JsonNode.Array(array):
-        return array.items.len.i64()
+    if node in store as JsonNode.Array:
+        return node.items.len.i64()
     return -1
 
 
 def json_ast_object_len(node: JsonNode, store: JsonNode.Store[Local]) -> i64:
     if json_ast_kind(node, store) != JsonNodeKind.OBJECT:
         return -1
-    view node in store as JsonNode.Object(object):
-        return object.fields.len.i64()
+    if node in store as JsonNode.Object:
+        return node.fields.len.i64()
     return -1
 
 
@@ -1264,18 +1264,18 @@ def json_ast_array_nth(node: JsonNode, index: usize, store: JsonNode.Store[Local
     invalid_node: JsonNode = json_node_invalid(store)
     if json_ast_kind(node, store) != JsonNodeKind.ARRAY:
         return invalid_node
-    view node in store as JsonNode.Array(array):
-        if index < array.items.len:
-            return arena_da_view_get(array.items, index)
+    if node in store as JsonNode.Array:
+        if index < node.items.len:
+            return arena_da_view_get(node.items, index)
     return invalid_node
 
 
 def json_ast_array_iter_first(node: JsonNode, store: JsonNode.Store[Local]) -> JsonAstArrayIterCursor:
     if json_ast_kind(node, store) != JsonNodeKind.ARRAY:
         return json_invalid_array_iter_cursor()
-    view node in store as JsonNode.Array(array):
-        if array.items.len > 0u:
-            return JsonAstArrayIterCursor(array.items, 0u)
+    if node in store as JsonNode.Array:
+        if node.items.len > 0u:
+            return JsonAstArrayIterCursor(node.items, 0u)
     return json_invalid_array_iter_cursor()
 
 
@@ -1297,10 +1297,10 @@ def json_ast_object_get(node: JsonNode, source: any u8&, key: any u8&, store: Js
     invalid_node: JsonNode = json_node_invalid(store)
     if json_ast_kind(node, store) != JsonNodeKind.OBJECT:
         return invalid_node
-    view node in store as JsonNode.Object(object):
+    if node in store as JsonNode.Object:
         index: mutable usize = 0u
-        while index < object.fields.len:
-            field: JsonField = arena_da_view_get(object.fields, index)
+        while index < node.fields.len:
+            field: JsonField = arena_da_view_get(node.fields, index)
             if json_ast_string_eq_literal(source, field.key, key, store):
                 return field.value
             index <- index + 1u
@@ -1310,9 +1310,9 @@ def json_ast_object_get(node: JsonNode, source: any u8&, key: any u8&, store: Js
 def json_ast_object_iter_first(node: JsonNode, store: JsonNode.Store[Local]) -> JsonAstObjectIterCursor:
     if json_ast_kind(node, store) != JsonNodeKind.OBJECT:
         return json_invalid_object_iter_cursor()
-    view node in store as JsonNode.Object(object):
-        if object.fields.len > 0u:
-            return JsonAstObjectIterCursor(object.fields, 0u)
+    if node in store as JsonNode.Object:
+        if node.fields.len > 0u:
+            return JsonAstObjectIterCursor(node.fields, 0u)
     return json_invalid_object_iter_cursor()
 
 
@@ -1341,18 +1341,18 @@ def json_ast_object_iter_next(cursor: JsonAstObjectIterCursor, store: JsonNode.S
 def json_ast_array_iter_nth(node: JsonNode, index: usize, store: JsonNode.Store[Local]) -> JsonAstArrayIterCursor:
     if json_ast_kind(node, store) != JsonNodeKind.ARRAY:
         return json_invalid_array_iter_cursor()
-    view node in store as JsonNode.Array(array):
-        if index < array.items.len:
-            return JsonAstArrayIterCursor(array.items, index)
+    if node in store as JsonNode.Array:
+        if index < node.items.len:
+            return JsonAstArrayIterCursor(node.items, index)
     return json_invalid_array_iter_cursor()
 
 
 def json_ast_object_iter_nth(node: JsonNode, index: usize, store: JsonNode.Store[Local]) -> JsonAstObjectIterCursor:
     if json_ast_kind(node, store) != JsonNodeKind.OBJECT:
         return json_invalid_object_iter_cursor()
-    view node in store as JsonNode.Object(object):
-        if index < object.fields.len:
-            return JsonAstObjectIterCursor(object.fields, index)
+    if node in store as JsonNode.Object:
+        if index < node.fields.len:
+            return JsonAstObjectIterCursor(node.fields, index)
     return json_invalid_object_iter_cursor()
 
 

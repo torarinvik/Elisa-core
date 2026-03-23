@@ -372,6 +372,7 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			return err
 		}
 		s.invalidatePackedEnumStorageExpr(n.Target)
+		s.invalidatePackedVariantViewExpr(n.Target)
 		value, _, err := s.emitExpr(n.Value, targetType)
 		if err != nil {
 			return err
@@ -385,6 +386,7 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			return err
 		}
 		s.invalidatePackedEnumStorageExpr(n.Target)
+		s.invalidatePackedVariantViewExpr(n.Target)
 		value, _, err := s.emitExpr(n.Value, targetType)
 		if err != nil {
 			return err
@@ -1560,6 +1562,33 @@ func (s *functionState) emitForLoopContinueCmp(op lexer.TokenKind, loopType sema
 	return C.LLVMBuildICmp(s.builder, pred, currentValue, endValue, cStringFree("for.cmp")), nil
 }
 
+func (s *functionState) bindMatchedPackedVariantView(valueExpr ast.Expr, pattern ast.MatchPattern, enumValue C.LLVMValueRef, decodedValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding) {
+	if enumType == nil || !enumType.Packed {
+		return
+	}
+	ident, ok := valueExpr.(*ast.Ident)
+	if !ok || ident.Name == "" {
+		return
+	}
+	variantPattern, ok := pattern.(*ast.MatchVariantPattern)
+	if !ok {
+		return
+	}
+	variant, ok := enumType.Variant(variantPattern.Variant)
+	if !ok || variant == nil {
+		return
+	}
+	viewType := &semantic.PackedVariantViewType{Enum: enumType, Variant: variant}
+	if decodedValue != nil {
+		s.bindPackedVariantView(ident.Name, viewType, decodedValue, nil, nil)
+		return
+	}
+	if store != nil {
+		storeCopy := *store
+		s.bindPackedVariantView(ident.Name, viewType, nil, enumValue, &storeCopy)
+	}
+}
+
 func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 	enumType, ok := s.exprType(stmt.Value).(*semantic.EnumType)
 	if !ok {
@@ -1602,6 +1631,7 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 		if ident, ok := stmt.Value.(*ast.Ident); ok && enumType.Packed && armDecodedValue != nil {
 			s.bindPackedEnumStorage(ident.Name, enumType, armDecodedValue)
 		}
+		s.bindMatchedPackedVariantView(stmt.Value, arm.Pattern, enumValue, armDecodedValue, enumType, storeBinding)
 		if err := s.emitBlock(arm.Body, false); err != nil {
 			s.popScope()
 			return err
@@ -1674,6 +1704,7 @@ func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, sema
 		if ident, ok := expr.Value.(*ast.Ident); ok && enumType.Packed && armDecodedValue != nil {
 			s.bindPackedEnumStorage(ident.Name, enumType, armDecodedValue)
 		}
+		s.bindMatchedPackedVariantView(expr.Value, arm.Pattern, enumValue, armDecodedValue, enumType, storeBinding)
 		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, resultType)
 		if err != nil {
 			s.popScope()

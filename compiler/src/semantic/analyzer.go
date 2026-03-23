@@ -94,6 +94,7 @@ type Analyzer struct {
 	currentFunctionValues             map[*Symbol]*FuncType
 	currentSpecializedValueTypes      map[*Symbol]Type
 	currentValueBindings              map[*Symbol]ast.Expr
+	currentPackedVariantViews         map[*Symbol]*PackedVariantViewType
 	currentPackedStores               map[string]*PackedEnumStoreType
 	currentPoolScopes                 []poolScopeState
 	currentFunctionUsedPermissions    map[string]bool
@@ -1836,6 +1837,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	savedFunctionValues := a.currentFunctionValues
 	savedSpecializedValueTypes := a.currentSpecializedValueTypes
 	savedValueBindings := a.currentValueBindings
+	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
@@ -1850,6 +1852,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentFunctionValues = map[*Symbol]*FuncType{}
 	a.currentSpecializedValueTypes = map[*Symbol]Type{}
 	a.currentValueBindings = map[*Symbol]ast.Expr{}
+	a.currentPackedVariantViews = map[*Symbol]*PackedVariantViewType{}
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
@@ -1914,6 +1917,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentFunctionValues = savedFunctionValues
 	a.currentSpecializedValueTypes = savedSpecializedValueTypes
 	a.currentValueBindings = savedValueBindings
+	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
@@ -1942,6 +1946,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	savedFunctionValues := a.currentFunctionValues
 	savedSpecializedValueTypes := a.currentSpecializedValueTypes
 	savedValueBindings := a.currentValueBindings
+	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
@@ -1960,6 +1965,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentFunctionValues = map[*Symbol]*FuncType{}
 	a.currentSpecializedValueTypes = map[*Symbol]Type{}
 	a.currentValueBindings = map[*Symbol]ast.Expr{}
+	a.currentPackedVariantViews = map[*Symbol]*PackedVariantViewType{}
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
@@ -2016,6 +2022,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentFunctionValues = savedFunctionValues
 	a.currentSpecializedValueTypes = savedSpecializedValueTypes
 	a.currentValueBindings = savedValueBindings
+	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
@@ -2045,6 +2052,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	savedFunctionValues := a.currentFunctionValues
 	savedSpecializedValueTypes := a.currentSpecializedValueTypes
 	savedValueBindings := a.currentValueBindings
+	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
@@ -2063,6 +2071,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentFunctionValues = map[*Symbol]*FuncType{}
 	a.currentSpecializedValueTypes = map[*Symbol]Type{}
 	a.currentValueBindings = map[*Symbol]ast.Expr{}
+	a.currentPackedVariantViews = map[*Symbol]*PackedVariantViewType{}
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
@@ -2113,6 +2122,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentFunctionValues = savedFunctionValues
 	a.currentSpecializedValueTypes = savedSpecializedValueTypes
 	a.currentValueBindings = savedValueBindings
+	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs

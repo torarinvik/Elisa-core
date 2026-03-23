@@ -2158,7 +2158,7 @@ def fold() -> int:
 	}
 }
 
-func TestGenerateLLVMIRUsesSingleDecodeForFrozenPackedViewStmt(t *testing.T) {
+func TestGenerateLLVMIRUsesSingleDecodeForFrozenPackedIfVariantView(t *testing.T) {
 	src := `packed enum Expr:
 	common:
 		span: int
@@ -2170,8 +2170,8 @@ def fold_view() -> int:
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	view node in frozen as Expr.Lit(lit):
-		return lit.value + lit.span + lit.value
+	if node in frozen as Expr.Lit(value: value):
+		return node.value + node.span + value
 	return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_view_stmt.llcontext", src)
@@ -2182,13 +2182,13 @@ def fold_view() -> int:
 
 	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
 	if decodeCalls != 1 {
-		t.Fatalf("expected frozen packed view stmt to use a single eager decode, got %d decode calls:\n%s", decodeCalls, output)
+		t.Fatalf("expected frozen packed if variant view to use a single eager decode, got %d decode calls:\n%s", decodeCalls, output)
 	}
 	if strings.Contains(output, "call i64 @ctx_packed_store_read_word(") {
-		t.Fatalf("expected frozen packed view stmt field reads to reuse the decoded row instead of ctx_packed_store_read_word, got:\n%s", output)
+		t.Fatalf("expected frozen packed if variant view field reads to reuse the decoded row instead of ctx_packed_store_read_word, got:\n%s", output)
 	}
-	if !strings.Contains(output, "declare void @llvm.trap()") || !strings.Contains(output, "call void @llvm.trap()") {
-		t.Fatalf("expected packed view stmt to lower mismatch handling through llvm.trap, got:\n%s", output)
+	if strings.Contains(output, "@llvm.trap") {
+		t.Fatalf("expected packed if variant view to preserve ordinary if fallthrough instead of trapping on mismatch, got:\n%s", output)
 	}
 	for _, check := range []string{"packed.decode.store.arena", "packed.decode.store.state"} {
 		if !strings.Contains(output, check) {
@@ -2197,7 +2197,7 @@ def fold_view() -> int:
 	}
 }
 
-func TestGenerateLLVMIRUsesIndexReadHelpersForFrozenPackedViewStmtInIndexSOA(t *testing.T) {
+func TestGenerateLLVMIRUsesIndexReadHelpersForFrozenPackedIfVariantViewInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:
 		span: int
@@ -2209,8 +2209,8 @@ def fold_view() -> int:
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	view node in frozen as Expr.Lit(lit):
-		return lit.value + lit.span + lit.value
+	if node in frozen as Expr.Lit(value: value):
+		return node.value + node.span + value
 	return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_view_stmt_index_soa.llcontext", src)
@@ -2221,17 +2221,17 @@ def fold_view() -> int:
 
 	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_index_word(")
 	if readCalls != 3 {
-		t.Fatalf("expected frozen packed view stmt in index-soa mode to use three direct index word reads, got %d helper calls:\n%s", readCalls, output)
+		t.Fatalf("expected frozen packed if variant view in index-soa mode to use three direct index word reads, got %d helper calls:\n%s", readCalls, output)
 	}
 	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
-		t.Fatalf("expected frozen packed view stmt in index-soa mode to avoid eager decode, got:\n%s", output)
+		t.Fatalf("expected frozen packed if variant view in index-soa mode to avoid eager decode, got:\n%s", output)
 	}
-	if !strings.Contains(output, "declare void @llvm.trap()") || !strings.Contains(output, "call void @llvm.trap()") {
-		t.Fatalf("expected packed view stmt mismatch handling to remain trap-based, got:\n%s", output)
+	if strings.Contains(output, "@llvm.trap") {
+		t.Fatalf("expected packed if variant view in index-soa mode to preserve ordinary if fallthrough instead of trapping on mismatch, got:\n%s", output)
 	}
 }
 
-func TestGenerateLLVMIRUsesIndexTailViewFastPathForFrozenPackedViewStmtInIndexSOA(t *testing.T) {
+func TestGenerateLLVMIRUsesIndexTailViewFastPathForFrozenPackedIfVariantViewInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	Block(count: usize, items: tail int)
 
@@ -2241,8 +2241,8 @@ def fold_view() -> int:
 	source_items: array[int, 3] = [1, 2, 3]
 	node: Expr = new[store] Expr.Block(count: 3u, items: source_items[0u:3u])
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	view node in frozen as Expr.Block(block):
-		return block.items[0u] + block.items[2u]
+	if node in frozen as Expr.Block:
+		return node.items[0u] + node.items[2u]
 	return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_view_stmt_tail_index_soa.llcontext", src)
@@ -2258,11 +2258,11 @@ def fold_view() -> int:
 		"packed.payload.tail.elem_size",
 	} {
 		if !strings.Contains(output, check) {
-			t.Fatalf("expected frozen packed tail view stmt in index-soa mode to contain %q, got:\n%s", check, output)
+			t.Fatalf("expected frozen packed tail if variant view in index-soa mode to contain %q, got:\n%s", check, output)
 		}
 	}
 	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
-		t.Fatalf("expected frozen packed tail view stmt in index-soa mode to avoid eager decode, got:\n%s", output)
+		t.Fatalf("expected frozen packed tail if variant view in index-soa mode to avoid eager decode, got:\n%s", output)
 	}
 }
 
@@ -2285,7 +2285,7 @@ def walk(owner: Arena) -> int:
 	while index < frozen.count:
 		node: Expr = frozen[index]
 		if node in frozen as Expr.Int(value: value):
-			total <- total + value + node.span
+			total <- total + value + node.value + node.span
 		index <- index + 1u
 	return total
 `
@@ -2315,7 +2315,7 @@ def first(owner: Arena) -> int:
 	match node in frozen:
 		Expr.Int(value: value):
 			if frozen.count > 0u:
-				return value
+				return value + node.value
 	return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_store_count_index_row.llcontext", src)
@@ -2350,7 +2350,7 @@ def walk(owner: Arena) -> int:
 	while index < frozen.count:
 		node: Expr = frozen[index]
 		if node in frozen as Expr.Int(value: value):
-			total <- total + value + node.span
+			total <- total + value + node.value + node.span
 		index <- index + 1u
 	return total
 `

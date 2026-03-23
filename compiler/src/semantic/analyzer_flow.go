@@ -96,6 +96,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.invalidateRegionMarks(sym, func(regionMarkState) bool { return true }, fmt.Sprintf("destroy of region %q", n.Name))
 	case *ast.AssignStmt:
 		targetType := a.assignmentTargetType(n.Target)
+		a.clearPackedVariantViewExpr(n.Target)
 		valueType := a.analyzeValueExpr(n.Value, targetType)
 		if !AssignableTo(targetType, valueType) {
 			a.errorf(n.Pos(), "cannot assign %s to %s", valueType.String(), targetType.String())
@@ -125,6 +126,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 	case *ast.AsRefAssignStmt:
 		targetType := a.asRefTargetType(n.Target, n.AsKind)
+		a.clearPackedVariantViewExpr(n.Target)
 		valueType := a.analyzeValueExpr(n.Value, targetType)
 		if !AssignableTo(targetType, valueType) {
 			a.errorf(n.Pos(), "cannot assign %s to %s", valueType.String(), targetType.String())
@@ -538,6 +540,85 @@ func (a *Analyzer) resolveViewBindType(stmt *ast.ViewStmt, actual Type) (*Packed
 	return viewType, true
 }
 
+func (a *Analyzer) clonePackedVariantViewBindings() map[*Symbol]*PackedVariantViewType {
+	if a.currentPackedVariantViews == nil {
+		return nil
+	}
+	cloned := make(map[*Symbol]*PackedVariantViewType, len(a.currentPackedVariantViews))
+	for sym, viewType := range a.currentPackedVariantViews {
+		cloned[sym] = viewType
+	}
+	return cloned
+}
+
+func unwrapPackedVariantViewExpr(expr ast.Expr) ast.Expr {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return unwrapPackedVariantViewExpr(n.Inner)
+	case *ast.CastExpr:
+		return unwrapPackedVariantViewExpr(n.Operand)
+	case *ast.CanExpr:
+		return unwrapPackedVariantViewExpr(n.Expr)
+	default:
+		return expr
+	}
+}
+
+func (a *Analyzer) bindMatchedPackedVariantView(expr ast.Expr, viewType *PackedVariantViewType) {
+	if viewType == nil || a.currentScope == nil {
+		return
+	}
+	ident, ok := unwrapPackedVariantViewExpr(expr).(*ast.Ident)
+	if !ok {
+		return
+	}
+	sym, ok := a.currentScope.Lookup(ident.Name)
+	if !ok || sym == nil {
+		return
+	}
+	if a.currentPackedVariantViews == nil {
+		a.currentPackedVariantViews = map[*Symbol]*PackedVariantViewType{}
+	}
+	a.currentPackedVariantViews[sym] = viewType
+}
+
+func (a *Analyzer) lookupRefinedPackedVariantView(expr ast.Expr) (*PackedVariantViewType, bool) {
+	if a.currentPackedVariantViews == nil || a.currentScope == nil {
+		return nil, false
+	}
+	ident, ok := unwrapPackedVariantViewExpr(expr).(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+	sym, ok := a.currentScope.Lookup(ident.Name)
+	if ok && sym != nil {
+		if viewType, ok := a.currentPackedVariantViews[sym]; ok && viewType != nil {
+			return viewType, true
+		}
+	}
+	for candidate, viewType := range a.currentPackedVariantViews {
+		if candidate != nil && candidate.Name == ident.Name && viewType != nil {
+			return viewType, true
+		}
+	}
+	return nil, false
+}
+
+func (a *Analyzer) clearPackedVariantViewExpr(expr ast.Expr) {
+	if a.currentPackedVariantViews == nil || a.currentScope == nil {
+		return
+	}
+	ident, ok := unwrapPackedVariantViewExpr(expr).(*ast.Ident)
+	if !ok {
+		return
+	}
+	sym, ok := a.currentScope.Lookup(ident.Name)
+	if !ok || sym == nil {
+		return
+	}
+	delete(a.currentPackedVariantViews, sym)
+}
+
 type moveBindResolvedField struct {
 	Name string
 	Type Type
@@ -836,12 +917,14 @@ func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
 	savedRegions := a.currentRegions
 	savedRegionMarks := a.currentRegionMarks
 	savedRegionRefs := a.currentRegionRefs
+	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
 	savedPools := a.currentPoolScopes
 	a.currentScope = NewScope(savedScope)
 	a.currentRegions = a.cloneRegionStates()
 	a.currentRegionMarks = a.cloneRegionMarkStates()
 	a.currentRegionRefs = a.cloneRegionRefStates()
+	a.currentPackedVariantViews = a.clonePackedVariantViewBindings()
 	a.currentPackedStores = a.clonePackedStores()
 	a.currentPoolScopes = append(append([]poolScopeState(nil), savedPools...), poolScopeState{Name: stmt.Name})
 	a.defineLocal(&Symbol{Name: stmt.Name, Kind: SymbolLocal, Type: poolType, Node: stmt, Mutable: false}, stmt.Pos())
@@ -852,6 +935,7 @@ func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
 	a.currentRegions = savedRegions
 	a.currentRegionMarks = savedRegionMarks
 	a.currentRegionRefs = savedRegionRefs
+	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
 	a.currentPoolScopes = savedPools
 }
@@ -1445,12 +1529,14 @@ func (a *Analyzer) analyzeLockStmt(stmt *ast.LockStmt) {
 	savedRegions := a.currentRegions
 	savedRegionMarks := a.currentRegionMarks
 	savedRegionRefs := a.currentRegionRefs
+	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
 	guardSym := &Symbol{Name: stmt.GuardName, Kind: SymbolLocal, Type: guardType, Node: stmt, Mutable: true}
 	a.currentScope = NewScope(savedScope)
 	a.currentRegions = a.cloneRegionStates()
 	a.currentRegionMarks = a.cloneRegionMarkStates()
 	a.currentRegionRefs = a.cloneRegionRefStates()
+	a.currentPackedVariantViews = a.clonePackedVariantViewBindings()
 	a.currentPackedStores = a.clonePackedStores()
 	a.defineLocal(guardSym, stmt.Pos())
 	for _, inner := range stmt.Body {
@@ -1467,6 +1553,7 @@ func (a *Analyzer) analyzeLockStmt(stmt *ast.LockStmt) {
 	a.currentRegions = savedRegions
 	a.currentRegionMarks = savedRegionMarks
 	a.currentRegionRefs = savedRegionRefs
+	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
 }
 
@@ -1479,12 +1566,14 @@ func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
 		return
 	}
 	savedPackedStores := a.currentPackedStores
+	savedPackedVariantViews := a.currentPackedVariantViews
 	a.currentPackedStores = a.clonePackedStores()
 	if a.currentPackedStores == nil {
 		a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	}
 	a.currentPackedStores[packedStore.Enum.Name] = packedStore
 	a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
+	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
 }
 
@@ -1600,6 +1689,7 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 		if a.analyzeTopLevelMatchPattern(arm.Pattern, enumType, stmt.Value, scope, i, len(stmt.Arms), covered) {
 			hasWildcard = true
 		}
+		a.bindPackedVariantViewAliasForBody(arm.Pattern, enumType, stmt.Value, arm.Body, scope)
 		armSnapshot := a.analyzeBlockWithAffineClone(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
 			if !hasFallthrough {
@@ -1668,6 +1758,7 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 		if a.analyzeTopLevelMatchPattern(arm.Pattern, enumType, expr.Value, scope, i, len(expr.Arms), covered) {
 			hasWildcard = true
 		}
+		a.bindPackedVariantViewAliasForBody(arm.Pattern, enumType, expr.Value, arm.Body, scope)
 		armType, armSnapshot := a.analyzeMatchExprArmBodyWithAffineSnapshot(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
 			if !hasFallthrough {
@@ -1870,13 +1961,16 @@ func matchPatternSummary(pattern ast.MatchPattern) string {
 func (a *Analyzer) analyzeMatchExprArmBody(body []ast.Stmt, scope *Scope) Type {
 	savedScope := a.currentScope
 	savedRegions := a.currentRegions
+	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
 	a.currentScope = scope
 	a.currentRegions = a.cloneRegionStates()
+	a.currentPackedVariantViews = a.clonePackedVariantViewBindings()
 	a.currentPackedStores = a.clonePackedStores()
 	defer func() {
 		a.currentScope = savedScope
 		a.currentRegions = savedRegions
+		a.currentPackedVariantViews = savedPackedVariantViews
 		a.currentPackedStores = savedPackedStores
 	}()
 	if len(body) == 0 {
@@ -1928,6 +2022,9 @@ func (a *Analyzer) analyzeTopLevelMatchPattern(pattern ast.MatchPattern, enumTyp
 		if covered != nil {
 			covered[variant.Name] = true
 		}
+		if enumType.Packed {
+			a.bindMatchedPackedVariantView(valueExpr, &PackedVariantViewType{Enum: enumType, Variant: variant})
+		}
 		orderedArgs := a.resolveMatchPatternArgs(p, variant, qualified, false)
 		for i, arg := range orderedArgs {
 			if arg == nil {
@@ -1944,6 +2041,288 @@ func (a *Analyzer) analyzeTopLevelMatchPattern(pattern ast.MatchPattern, enumTyp
 		a.errorf(pattern.Pos(), "unsupported match pattern %T", pattern)
 		return false
 	}
+}
+
+func (a *Analyzer) bindPackedVariantViewAliasForBody(pattern ast.MatchPattern, enumType *EnumType, valueExpr ast.Expr, body []ast.Stmt, scope *Scope) {
+	if a == nil || scope == nil || enumType == nil || !enumType.Packed || !matchBodyReferencesVariantFields(body, valueExpr) {
+		return
+	}
+	variantPattern, ok := pattern.(*ast.MatchVariantPattern)
+	if !ok || variantPattern == nil || variantPattern.EnumName != enumType.Name {
+		return
+	}
+	variant, ok := enumType.Variant(variantPattern.Variant)
+	if !ok || variant == nil {
+		return
+	}
+	ident, ok := unwrapPackedVariantViewExpr(valueExpr).(*ast.Ident)
+	if !ok || ident == nil {
+		return
+	}
+	if _, exists := scope.Symbols[ident.Name]; exists {
+		return
+	}
+	var aliasOf *Symbol
+	if scope.Parent != nil {
+		aliasOf, _ = scope.Parent.Lookup(ident.Name)
+	}
+	viewType := &PackedVariantViewType{Enum: enumType, Variant: variant}
+	sym := &Symbol{Name: ident.Name, Kind: SymbolLocal, Type: viewType, Node: variantPattern, AliasOf: aliasOf, Mutable: false}
+	a.defineLocalInScope(scope, sym, variantPattern.Pos())
+	if a.currentPackedVariantViews != nil {
+		a.currentPackedVariantViews[sym] = viewType
+	}
+}
+
+func matchBodyReferencesVariantFields(stmts []ast.Stmt, valueExpr ast.Expr) bool {
+	ident, ok := unwrapPackedVariantViewExpr(valueExpr).(*ast.Ident)
+	if !ok || ident == nil || ident.Name == "" {
+		return false
+	}
+	for _, stmt := range stmts {
+		if stmtReferencesVariantFields(stmt, ident.Name) {
+			return true
+		}
+	}
+	return false
+}
+
+func stmtReferencesVariantFields(stmt ast.Stmt, name string) bool {
+	if stmt == nil || name == "" {
+		return false
+	}
+	switch n := stmt.(type) {
+	case *ast.VarDeclStmt:
+		return exprReferencesVariantFields(n.Value, name)
+	case *ast.MoveBindStmt:
+		return exprReferencesVariantFields(n.Value, name) || exprReferencesVariantFields(n.Store, name)
+	case *ast.OpenStmt:
+		if exprReferencesVariantFields(n.Value, name) || exprReferencesVariantFields(n.Store, name) {
+			return true
+		}
+		for _, inner := range n.Body {
+			if stmtReferencesVariantFields(inner, name) {
+				return true
+			}
+		}
+	case *ast.ViewStmt:
+		if exprReferencesVariantFields(n.Value, name) || exprReferencesVariantFields(n.Store, name) {
+			return true
+		}
+		for _, inner := range n.Body {
+			if stmtReferencesVariantFields(inner, name) {
+				return true
+			}
+		}
+	case *ast.AssignStmt:
+		return exprReferencesVariantFields(n.Target, name) || exprReferencesVariantFields(n.Value, name)
+	case *ast.AugAssignStmt:
+		return exprReferencesVariantFields(n.Target, name) || exprReferencesVariantFields(n.Value, name)
+	case *ast.AsRefAssignStmt:
+		return exprReferencesVariantFields(n.Target, name) || exprReferencesVariantFields(n.Value, name)
+	case *ast.ReturnStmt:
+		return exprReferencesVariantFields(n.Value, name)
+	case *ast.IfStmt:
+		if exprReferencesVariantFields(n.Cond, name) {
+			return true
+		}
+		for _, inner := range n.Then {
+			if stmtReferencesVariantFields(inner, name) {
+				return true
+			}
+		}
+		for _, elif := range n.Elifs {
+			if exprReferencesVariantFields(elif.Cond, name) {
+				return true
+			}
+			for _, inner := range elif.Body {
+				if stmtReferencesVariantFields(inner, name) {
+					return true
+				}
+			}
+		}
+		for _, inner := range n.Else {
+			if stmtReferencesVariantFields(inner, name) {
+				return true
+			}
+		}
+	case *ast.MatchStmt:
+		if exprReferencesVariantFields(n.Value, name) || exprReferencesVariantFields(n.Store, name) {
+			return true
+		}
+		for _, arm := range n.Arms {
+			for _, inner := range arm.Body {
+				if stmtReferencesVariantFields(inner, name) {
+					return true
+				}
+			}
+		}
+	case *ast.InStoreStmt:
+		if exprReferencesVariantFields(n.Store, name) {
+			return true
+		}
+		for _, inner := range n.Body {
+			if stmtReferencesVariantFields(inner, name) {
+				return true
+			}
+		}
+	case *ast.CanStmt:
+		for _, inner := range n.Body {
+			if stmtReferencesVariantFields(inner, name) {
+				return true
+			}
+		}
+	case *ast.PoolStmt:
+		if exprReferencesVariantFields(n.Workers, name) {
+			return true
+		}
+		for _, inner := range n.Body {
+			if stmtReferencesVariantFields(inner, name) {
+				return true
+			}
+		}
+	case *ast.LockStmt:
+		if exprReferencesVariantFields(n.Mutex, name) {
+			return true
+		}
+		for _, inner := range n.Body {
+			if stmtReferencesVariantFields(inner, name) {
+				return true
+			}
+		}
+	case *ast.WhileStmt:
+		if exprReferencesVariantFields(n.Cond, name) {
+			return true
+		}
+		for _, inner := range n.Body {
+			if stmtReferencesVariantFields(inner, name) {
+				return true
+			}
+		}
+	case *ast.ForStmt:
+		if exprReferencesVariantFields(n.Start, name) || exprReferencesVariantFields(n.End, name) || exprReferencesVariantFields(n.Step, name) {
+			return true
+		}
+		for _, inner := range n.Body {
+			if stmtReferencesVariantFields(inner, name) {
+				return true
+			}
+		}
+	case *ast.ParallelForStmt:
+		if exprReferencesVariantFields(n.Source, name) {
+			return true
+		}
+		for _, inner := range n.Body {
+			if stmtReferencesVariantFields(inner, name) {
+				return true
+			}
+		}
+	case *ast.PanicStmt:
+		return exprReferencesVariantFields(n.Message, name)
+	case *ast.ExprStmt:
+		return exprReferencesVariantFields(n.Expr, name)
+	case *ast.StaticIfStmt:
+		for _, inner := range n.Then {
+			if stmtReferencesVariantFields(inner, name) {
+				return true
+			}
+		}
+		for _, elif := range n.Elifs {
+			for _, inner := range elif.Body {
+				if stmtReferencesVariantFields(inner, name) {
+					return true
+				}
+			}
+		}
+		for _, inner := range n.Else {
+			if stmtReferencesVariantFields(inner, name) {
+				return true
+			}
+		}
+	case *ast.StaticErrorStmt:
+		return exprReferencesVariantFields(n.Message, name)
+	case *ast.DiscardStmt:
+		return exprReferencesVariantFields(n.Value, name)
+	}
+	return false
+}
+
+func exprReferencesVariantFields(expr ast.Expr, name string) bool {
+	if expr == nil || name == "" {
+		return false
+	}
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return false
+	case *ast.FieldExpr:
+		if ident, ok := unwrapPackedVariantViewExpr(n.Object).(*ast.Ident); ok && ident != nil && ident.Name == name {
+			return true
+		}
+		return exprReferencesVariantFields(n.Object, name)
+	case *ast.BinaryExpr:
+		return exprReferencesVariantFields(n.Left, name) || exprReferencesVariantFields(n.Right, name)
+	case *ast.UnaryExpr:
+		return exprReferencesVariantFields(n.Operand, name)
+	case *ast.CallExpr:
+		if exprReferencesVariantFields(n.Func, name) {
+			return true
+		}
+		for _, arg := range n.Args {
+			if exprReferencesVariantFields(arg, name) {
+				return true
+			}
+		}
+	case *ast.IndexExpr:
+		return exprReferencesVariantFields(n.Object, name) || exprReferencesVariantFields(n.Index, name)
+	case *ast.SliceExpr:
+		return exprReferencesVariantFields(n.Object, name) || exprReferencesVariantFields(n.Start, name) || exprReferencesVariantFields(n.End, name)
+	case *ast.ListLitExpr:
+		for _, elem := range n.Elems {
+			if exprReferencesVariantFields(elem, name) {
+				return true
+			}
+		}
+	case *ast.CastExpr:
+		return exprReferencesVariantFields(n.Operand, name)
+	case *ast.TernaryExpr:
+		return exprReferencesVariantFields(n.Value, name) || exprReferencesVariantFields(n.Cond, name) || exprReferencesVariantFields(n.Alt, name)
+	case *ast.AddrOfExpr:
+		return exprReferencesVariantFields(n.Operand, name)
+	case *ast.MoveExpr:
+		return exprReferencesVariantFields(n.Operand, name)
+	case *ast.SpecializeExpr:
+		return exprReferencesVariantFields(n.Operand, name)
+	case *ast.StructLitExpr:
+		for _, arg := range n.Args {
+			if exprReferencesVariantFields(arg, name) {
+				return true
+			}
+		}
+	case *ast.ParenExpr:
+		return exprReferencesVariantFields(n.Inner, name)
+	case *ast.RaiseExpr:
+		return exprReferencesVariantFields(n.Error, name)
+	case *ast.TryExpr:
+		return exprReferencesVariantFields(n.Value, name) || exprReferencesVariantFields(n.Fallback, name)
+	case *ast.UnwrapElseExpr:
+		return exprReferencesVariantFields(n.Value, name) || exprReferencesVariantFields(n.Fallback, name)
+	case *ast.AllocExpr:
+		return exprReferencesVariantFields(n.Owner, name) || exprReferencesVariantFields(n.Value, name)
+	case *ast.CanExpr:
+		return exprReferencesVariantFields(n.Expr, name)
+	case *ast.MatchExpr:
+		if exprReferencesVariantFields(n.Value, name) || exprReferencesVariantFields(n.Store, name) {
+			return true
+		}
+		for _, arm := range n.Arms {
+			for _, inner := range arm.Body {
+				if stmtReferencesVariantFields(inner, name) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected Type, valueExpr ast.Expr, scope *Scope) {
@@ -2112,15 +2491,18 @@ func (a *Analyzer) analyzeBlockWithRegionClone(stmts []ast.Stmt, scope *Scope) {
 	savedRegions := a.currentRegions
 	savedRegionMarks := a.currentRegionMarks
 	savedRegionRefs := a.currentRegionRefs
+	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
 	a.currentRegions = a.cloneRegionStates()
 	a.currentRegionMarks = a.cloneRegionMarkStates()
 	a.currentRegionRefs = a.cloneRegionRefStates()
+	a.currentPackedVariantViews = a.clonePackedVariantViewBindings()
 	a.currentPackedStores = a.clonePackedStores()
 	a.analyzeBlockInScope(stmts, scope)
 	a.currentRegions = savedRegions
 	a.currentRegionMarks = savedRegionMarks
 	a.currentRegionRefs = savedRegionRefs
+	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
 }
 
@@ -2149,6 +2531,7 @@ func (a *Analyzer) analyzeBlockWithAffineClone(stmts []ast.Stmt, scope *Scope) a
 	savedFunctionValues := a.currentFunctionValues
 	savedSpecializedValueTypes := a.currentSpecializedValueTypes
 	savedValueBindings := a.currentValueBindings
+	savedPackedVariantViews := a.currentPackedVariantViews
 	a.currentAffineValues = a.cloneAffineValueStates()
 	a.currentBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
 	a.currentFunctionValues = a.cloneFunctionValueBindings()
@@ -2161,6 +2544,7 @@ func (a *Analyzer) analyzeBlockWithAffineClone(stmts []ast.Stmt, scope *Scope) a
 	a.currentFunctionValues = savedFunctionValues
 	a.currentSpecializedValueTypes = savedSpecializedValueTypes
 	a.currentValueBindings = savedValueBindings
+	a.currentPackedVariantViews = savedPackedVariantViews
 	return snapshot
 }
 
@@ -3851,6 +4235,14 @@ func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRef
 		}
 		if state, ok := a.currentBorrowedOwnerRefs[sym]; ok && hasBorrowedOwnerRefState(state) {
 			return cloneBorrowedOwnerRefState(state), true
+		}
+		if root := symbolAliasRoot(sym); root != nil && root != sym {
+			if state, ok := a.currentBorrowedOwnerRefs[root]; ok && hasBorrowedOwnerRefState(state) {
+				return cloneBorrowedOwnerRefState(state), true
+			}
+			if _, ok := borrowableOwnerRefElemType(root.Type); ok {
+				return borrowedOwnerRefState{HasDirect: true, Direct: affineValueKey{Root: root}}, true
+			}
 		}
 		if _, ok := borrowableOwnerRefElemType(sym.Type); ok {
 			return borrowedOwnerRefState{HasDirect: true, Direct: affineValueKey{Root: sym}}, true
