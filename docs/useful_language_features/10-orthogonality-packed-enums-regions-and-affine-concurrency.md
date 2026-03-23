@@ -440,6 +440,9 @@ The backend should keep the same separation.
 
 - packed tags and payloads use the existing store-aware ABI
 - packed pattern sugar lowers to the same packed decode helpers as `match`
+- first-class packed variant witnesses should surface as `packedview[Enum.Variant]`
+  so they can be passed, returned, and stored without inventing a second proof
+  vocabulary
 
 ### Region lowering
 

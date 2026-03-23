@@ -423,14 +423,14 @@ func (p *Parser) parseBuiltinTypeExpr(pos lexer.Pos, name string) ast.TypeExpr {
 		size := p.parseExpr()
 		p.expect(lexer.TOKEN_RBRACKET)
 		return &ast.BuiltinTypeExpr{Position: pos, Name: "dstring", ValueArgs: []ast.Expr{size}}
-	case "view", "dview":
+	case "view", "dview", "packedview":
 		p.advance()
 		elem := p.parseTypeExpr()
 		if p.match(lexer.TOKEN_RBRACKET) {
 			return &ast.BuiltinTypeExpr{Position: pos, Name: name, TypeArgs: []ast.TypeExpr{elem}}
 		}
-		if name == "dview" {
-			p.errorf("dview expects 1 argument, got 3")
+		if name == "dview" || name == "packedview" {
+			p.errorf("%s expects 1 argument, got 3", name)
 			for p.peek() != lexer.TOKEN_RBRACKET && p.peek() != lexer.TOKEN_EOF {
 				p.advance()
 			}

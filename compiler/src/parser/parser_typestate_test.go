@@ -300,6 +300,41 @@ func TestParsePackedOpenAndViewStatements(t *testing.T) {
 	}
 }
 
+func TestParsePackedViewSurfaceType(t *testing.T) {
+	file, errs := parseSourceFile(t, "packed enum Expr:\n    common:\n        span: int\n    Lit(value: int)\n\ndef keep(view_value: packedview[Expr.Lit]) -> packedview[Expr.Lit]:\n    return view_value\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[1])
+	}
+	paramType, ok := decl.Params[0].Type.(*ast.BuiltinTypeExpr)
+	if !ok {
+		t.Fatalf("expected builtin packedview type, got %T", decl.Params[0].Type)
+	}
+	if paramType.Name != "packedview" {
+		t.Fatalf("expected packedview builtin type name, got %q", paramType.Name)
+	}
+	if len(paramType.TypeArgs) != 1 {
+		t.Fatalf("expected one packedview type arg, got %d", len(paramType.TypeArgs))
+	}
+	variantType, ok := paramType.TypeArgs[0].(*ast.NamedType)
+	if !ok {
+		t.Fatalf("expected packedview variant named type, got %T", paramType.TypeArgs[0])
+	}
+	if variantType.Name != "Expr.Lit" {
+		t.Fatalf("expected packedview variant Expr.Lit, got %q", variantType.Name)
+	}
+	retType, ok := decl.ReturnType.(*ast.BuiltinTypeExpr)
+	if !ok {
+		t.Fatalf("expected builtin packedview return type, got %T", decl.ReturnType)
+	}
+	if retType.Name != "packedview" {
+		t.Fatalf("expected packedview return type name, got %q", retType.Name)
+	}
+}
+
 func TestParseOpenAndViewRemainContextualIdentifiers(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep() -> int:\n    open: int = 1\n    view: int = open\n    open(view)\n    return view\n")
 	if len(errs) != 0 {

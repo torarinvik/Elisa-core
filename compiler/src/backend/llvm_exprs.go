@@ -182,6 +182,10 @@ func (s *functionState) buildCall(llvmFnType C.LLVMTypeRef, callee C.LLVMValueRe
 func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Type, error) {
 	if actualType := s.exprType(expr); semantic.IsNullType(actualType) {
 		return s.emitNullLiteral()
+	} else if _, ok := actualType.(*semantic.PackedVariantViewType); ok {
+		if binding, ok := s.lookupPackedVariantView(expr.Name); ok {
+			return s.materializePackedVariantViewValue(binding)
+		}
 	}
 	if ptr, valueType, err := s.emitIdentValueAddress(expr); err == nil {
 		value, loadErr := s.loadValue(ptr, valueType, expr.Name)
@@ -3273,12 +3277,31 @@ func (s *functionState) emitPackedStoreTagsExpr(expr *ast.FieldExpr) (C.LLVMValu
 }
 
 func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
-	name, ok := packedVariantViewName(expr.Object)
-	if !ok {
-		return nil, nil, false, nil
-	}
+	name, hasName := packedVariantViewName(expr.Object)
 	binding, ok := s.lookupPackedVariantView(name)
-	if !ok || binding.typ == nil || (binding.ptr == nil && binding.handle == nil) {
+	if !ok {
+		viewType, ok := s.exprType(expr.Object).(*semantic.PackedVariantViewType)
+		if !ok || viewType == nil {
+			return nil, nil, false, nil
+		}
+		objectValue, _, err := s.emitExpr(expr.Object, viewType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		binding, err = s.unpackPackedVariantViewValue(objectValue, viewType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		if hasName {
+			var storeCopy *packedStoreBinding
+			if binding.store.typ != nil {
+				copied := binding.store
+				storeCopy = &copied
+			}
+			s.bindPackedVariantView(name, viewType, binding.ptr, binding.handle, storeCopy)
+		}
+	}
+	if binding.typ == nil || (binding.ptr == nil && binding.handle == nil) {
 		return nil, nil, false, nil
 	}
 	field, ok := binding.typ.Field(expr.Field)
@@ -3314,6 +3337,9 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 				return nil, nil, true, err
 			}
 			binding.ptr = decodedPtr
+			if hasName {
+				s.updatePackedVariantViewDecodedPtr(name, decodedPtr)
+			}
 		}
 		containerType, err := s.loweredEnumStorageType(binding.typ.Enum)
 		if err != nil {
@@ -3343,7 +3369,9 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 			return nil, nil, true, err
 		}
 		binding.ptr = decodedPtr
-		s.updatePackedVariantViewDecodedPtr(name, decodedPtr)
+		if hasName {
+			s.updatePackedVariantViewDecodedPtr(name, decodedPtr)
+		}
 	}
 	payloadValues, err := s.loadEnumVariantPayload(binding.ptr, nil, binding.typ.Enum, binding.typ.Variant, nil)
 	if err != nil {

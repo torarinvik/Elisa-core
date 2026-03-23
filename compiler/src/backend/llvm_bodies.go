@@ -658,7 +658,12 @@ func (s *functionState) emitViewStmt(stmt *ast.ViewStmt) error {
 	}
 	if stmt.Pattern.Name != "_" {
 		if viewDecodedValue != nil {
-			s.bindPackedVariantView(stmt.Pattern.Name, resolvedViewType, viewDecodedValue, nil, nil)
+			var storeCopy *packedStoreBinding
+			if storeBinding != nil {
+				copied := *storeBinding
+				storeCopy = &copied
+			}
+			s.bindPackedVariantView(stmt.Pattern.Name, resolvedViewType, viewDecodedValue, enumValue, storeCopy)
 		} else if s.g.packedEnumABI == packedEnumABIIndexSOA && storeBinding != nil {
 			storeCopy := *storeBinding
 			s.bindPackedVariantView(stmt.Pattern.Name, resolvedViewType, nil, enumValue, &storeCopy)
@@ -1580,7 +1585,12 @@ func (s *functionState) bindMatchedPackedVariantView(valueExpr ast.Expr, pattern
 	}
 	viewType := &semantic.PackedVariantViewType{Enum: enumType, Variant: variant}
 	if decodedValue != nil {
-		s.bindPackedVariantView(ident.Name, viewType, decodedValue, nil, nil)
+		var storeCopy *packedStoreBinding
+		if store != nil {
+			copied := *store
+			storeCopy = &copied
+		}
+		s.bindPackedVariantView(ident.Name, viewType, decodedValue, enumValue, storeCopy)
 		return
 	}
 	if store != nil {

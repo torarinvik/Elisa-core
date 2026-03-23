@@ -457,6 +457,46 @@ func (a *Analyzer) resolveDynamicShapeType(expr *ast.GenericType) (Type, bool) {
 	}
 }
 
+func (a *Analyzer) resolvePackedVariantViewSurfaceType(expr ast.TypeExpr, pos lexer.Pos) Type {
+	named, ok := expr.(*ast.NamedType)
+	if !ok {
+		a.errorf(pos, "packedview expects a packed enum variant like packedview[Expr.Lit]")
+		return invalidType
+	}
+	lastDot := strings.LastIndex(named.Name, ".")
+	if lastDot <= 0 || lastDot >= len(named.Name)-1 {
+		a.errorf(pos, "packedview expects a packed enum variant like packedview[Expr.Lit]")
+		return invalidType
+	}
+	enumName := named.Name[:lastDot]
+	variantName := named.Name[lastDot+1:]
+	base, ok := a.namedTypes[enumName]
+	if !ok {
+		a.errorf(pos, "unknown packed enum %q in packedview type", enumName)
+		return invalidType
+	}
+	enumType, ok := base.(*EnumType)
+	if !ok {
+		a.errorf(pos, "packedview expects a packed enum variant like packedview[Expr.Lit]")
+		return invalidType
+	}
+	if !enumType.Packed {
+		a.errorf(pos, "packedview requires a packed enum variant, got ordinary enum %q", enumType.Name)
+		return invalidType
+	}
+	variant, ok := enumType.Variant(variantName)
+	if !ok {
+		a.errorf(pos, "enum %q has no variant %q", enumType.Name, variantName)
+		return invalidType
+	}
+	viewType := &PackedVariantViewType{Enum: enumType, Variant: variant}
+	if !viewType.HasNamedPayloadFields() {
+		a.errorf(pos, "packedview %q.%q requires named payload fields in v1", enumType.Name, variant.Name)
+		return invalidType
+	}
+	return viewType
+}
+
 func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
 	switch expr.Name {
 	case "array":
@@ -530,6 +570,12 @@ func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
 			return invalidType
 		}
 		return &DArrayViewType{Elem: a.resolveType(expr.TypeArgs[0]), SurfaceName: "dview"}
+	case "packedview":
+		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
+			a.errorf(expr.Pos(), "packedview expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+			return invalidType
+		}
+		return a.resolvePackedVariantViewSurfaceType(expr.TypeArgs[0], expr.Pos())
 	case "sview":
 		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 2 {
 			a.errorf(expr.Pos(), "sview expects 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))

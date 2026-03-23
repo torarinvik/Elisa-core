@@ -1244,11 +1244,20 @@ def json_ast_is_null(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
     return json_ast_kind(node, store) == JsonNodeKind.NULL
 
 
+def json_ast_array_view_len(view_node: packedview[JsonNode.Array]) -> i64:
+    return view_node.items.len.i64()
+
+
+def json_ast_object_view_len(view_node: packedview[JsonNode.Object]) -> i64:
+    return view_node.fields.len.i64()
+
+
 def json_ast_array_len(node: JsonNode, store: JsonNode.Store[Local]) -> i64:
     if json_ast_kind(node, store) != JsonNodeKind.ARRAY:
         return -1
     if node in store as JsonNode.Array:
-        return node.items.len.i64()
+        view node in store as JsonNode.Array(array_view):
+            return json_ast_array_view_len(array_view)
     return -1
 
 
@@ -1256,7 +1265,8 @@ def json_ast_object_len(node: JsonNode, store: JsonNode.Store[Local]) -> i64:
     if json_ast_kind(node, store) != JsonNodeKind.OBJECT:
         return -1
     if node in store as JsonNode.Object:
-        return node.fields.len.i64()
+        view node in store as JsonNode.Object(object_view):
+            return json_ast_object_view_len(object_view)
     return -1
 
 

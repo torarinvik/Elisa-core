@@ -561,7 +561,7 @@ func (t *PackedVariantViewType) String() string {
 	if t == nil || t.Enum == nil || t.Variant == nil {
 		return "<invalid-packed-view>"
 	}
-	return fmt.Sprintf("view[%s.%s]", t.Enum.Name, t.Variant.Name)
+	return fmt.Sprintf("packedview[%s.%s]", t.Enum.Name, t.Variant.Name)
 }
 func (t *ConstEnumType) Member(name string) (*ConstEnumMember, bool) {
 	if t == nil || t.MemberMap == nil {

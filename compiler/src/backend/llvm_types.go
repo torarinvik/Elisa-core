@@ -105,6 +105,16 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 		err = nil
 	case *semantic.ConstEnumType:
 		err = g.noteType(tt.Storage)
+	case *semantic.PackedVariantViewType:
+		if err = g.noteType(tt.Enum); err != nil {
+			break
+		}
+		if tt.Enum != nil && tt.Enum.StoreType != nil {
+			if err = g.noteType(tt.Enum.StoreType); err != nil {
+				break
+			}
+		}
+		_, err = g.ensurePackedVariantViewCarrierType(tt)
 	case *semantic.PackedEnumStoreType:
 		_, err = g.lowerPackedEnumStoreType(tt)
 	case *semantic.ErrorUnionType:
@@ -432,6 +442,8 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	case *semantic.PackedEnumStoreType:
 		return g.lowerPackedEnumStoreType(tt)
+	case *semantic.PackedVariantViewType:
+		return g.ensurePackedVariantViewCarrierType(tt)
 	case *semantic.ArrayType:
 		elemType, err := g.lowerType(tt.Elem)
 		if err != nil {
@@ -530,6 +542,35 @@ func (g *llvmGenerator) ensurePackedEnumStorageType(enumType *semantic.EnumType)
 	default:
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedEnumABI)
 	}
+}
+
+func (g *llvmGenerator) ensurePackedVariantViewCarrierType(viewType *semantic.PackedVariantViewType) (C.LLVMTypeRef, error) {
+	if viewType == nil || viewType.Enum == nil || viewType.Variant == nil {
+		return nil, fmt.Errorf("missing packedview carrier metadata")
+	}
+	name := "PackedView__" + sanitizeIdentifier(viewType.Enum.Name) + "__" + sanitizeIdentifier(viewType.Variant.Name)
+	ty, err := g.ensureNamedStructType(name)
+	if err != nil {
+		return nil, err
+	}
+	if g.structBodies[name] {
+		return ty, nil
+	}
+	handleType, err := g.lowerPackedEnumType(viewType.Enum)
+	if err != nil {
+		return nil, err
+	}
+	fields := []C.LLVMTypeRef{handleType}
+	if viewType.Enum.StoreType != nil {
+		storeType, err := g.lowerPackedEnumStoreType(viewType.Enum.StoreType)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, storeType)
+	}
+	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	g.structBodies[name] = true
+	return ty, nil
 }
 
 func (g *llvmGenerator) packedEnumPayloadFieldIndex(enumType *semantic.EnumType) (int, error) {
@@ -993,6 +1034,8 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type) semantic.Ty
 		return &semantic.ViewType{Elem: substituteType(tt.Elem, subst), Begin: tt.Begin, End: tt.End}
 	case *semantic.DArrayViewType:
 		return &semantic.DArrayViewType{Elem: substituteType(tt.Elem, subst), Begin: tt.Begin, End: tt.End, SurfaceName: tt.SurfaceName}
+	case *semantic.PackedVariantViewType:
+		return tt
 	case *semantic.DictType:
 		return &semantic.DictType{Key: substituteType(tt.Key, subst), Value: substituteType(tt.Value, subst), SurfaceName: tt.SurfaceName}
 	case *semantic.SViewType:

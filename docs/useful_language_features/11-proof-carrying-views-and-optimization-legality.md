@@ -133,6 +133,8 @@ Preferred:
 - disjoint split APIs
 - zip/same-length combinators
 - restricted kernel forms later
+- packed variant witness values spelled as `packedview[Enum.Variant]` when a
+  packed-pattern proof needs to survive as a first-class value
 
 Avoid by default:
 

@@ -1478,6 +1478,11 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 			return nil, err
 		}
 		return &semantic.DArrayViewType{Elem: elem, SurfaceName: "dview"}, nil
+	case "packedview":
+		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
+			return nil, fmt.Errorf("packedview expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
+		}
+		return s.resolvePackedVariantViewSurfaceTypeExpr(expr.TypeArgs[0])
 	case "sview":
 		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 2 {
 			return nil, fmt.Errorf("sview expects 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
@@ -1509,6 +1514,12 @@ func (s *functionState) exprType(expr ast.Expr) semantic.Type {
 			if fieldType, ok := dstrSyntheticFieldType(s.exprType(n.Object), n.Field); ok {
 				t = fieldType
 				break
+			}
+			if viewType, ok := s.exprType(n.Object).(*semantic.PackedVariantViewType); ok {
+				if field, ok := viewType.Field(n.Field); ok {
+					t = field.Type
+					break
+				}
 			}
 			objType := s.exprType(n.Object)
 			if objType != nil {
@@ -1563,6 +1574,8 @@ func (s *functionState) resolveDynamicShapeType(expr *ast.GenericType) (semantic
 			return nil, true, err
 		}
 		return &semantic.DArrayViewType{Elem: elem, SurfaceName: "dview"}, true, nil
+	case "packedview":
+		return nil, true, fmt.Errorf("packedview must be written with builtin syntax like packedview[Expr.Lit]")
 	case "DArray":
 		return nil, true, legacyBuiltinReplacementError("DArray", "darray")
 	case "DArrayView":
@@ -1687,4 +1700,111 @@ func exprSummary(expr ast.Expr) string {
 	default:
 		return "?"
 	}
+}
+
+func (s *functionState) resolvePackedVariantViewSurfaceTypeExpr(expr ast.TypeExpr) (semantic.Type, error) {
+	named, ok := expr.(*ast.NamedType)
+	if !ok {
+		return nil, fmt.Errorf("packedview expects a packed enum variant like packedview[Expr.Lit]")
+	}
+	lastDot := strings.LastIndex(named.Name, ".")
+	if lastDot <= 0 || lastDot >= len(named.Name)-1 {
+		return nil, fmt.Errorf("packedview expects a packed enum variant like packedview[Expr.Lit]")
+	}
+	enumName := named.Name[:lastDot]
+	variantName := named.Name[lastDot+1:]
+	base, ok := s.g.result.NamedTypes[enumName]
+	if !ok {
+		return nil, fmt.Errorf("unknown packed enum %q in packedview type", enumName)
+	}
+	enumType, ok := base.(*semantic.EnumType)
+	if !ok || enumType == nil {
+		return nil, fmt.Errorf("packedview expects a packed enum variant like packedview[Expr.Lit]")
+	}
+	if !enumType.Packed {
+		return nil, fmt.Errorf("packedview requires a packed enum variant, got ordinary enum %q", enumType.Name)
+	}
+	variant, ok := enumType.Variant(variantName)
+	if !ok {
+		return nil, fmt.Errorf("enum %q has no variant %q", enumType.Name, variantName)
+	}
+	viewType := &semantic.PackedVariantViewType{Enum: enumType, Variant: variant}
+	if !viewType.HasNamedPayloadFields() {
+		return nil, fmt.Errorf("packedview %q.%q requires named payload fields in v1", enumType.Name, variant.Name)
+	}
+	return viewType, nil
+}
+
+func (s *functionState) materializePackedVariantViewValue(binding packedVariantViewBinding) (C.LLVMValueRef, semantic.Type, error) {
+	if binding.typ == nil {
+		return nil, nil, fmt.Errorf("missing packedview binding type")
+	}
+	handle := binding.handle
+	if handle == nil {
+		switch s.g.packedEnumABI {
+		case packedEnumABIRowHandle:
+			handle = binding.ptr
+		default:
+			if binding.ptr == nil {
+				return nil, nil, fmt.Errorf("packedview %s is missing both handle and decoded row", binding.typ.String())
+			}
+			if binding.store.typ == nil || binding.store.value == nil {
+				return nil, nil, fmt.Errorf("packedview %s requires store context for materialization", binding.typ.String())
+			}
+			var err error
+			handle, err = s.encodePackedEnumHandleWithStore(binding.ptr, binding.typ.Enum, binding.store.value)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	value, err := s.buildPackedVariantViewValue(binding.typ, handle, &binding.store)
+	if err != nil {
+		return nil, nil, err
+	}
+	return value, binding.typ, nil
+}
+
+func (s *functionState) buildPackedVariantViewValue(viewType *semantic.PackedVariantViewType, handle C.LLVMValueRef, store *packedStoreBinding) (C.LLVMValueRef, error) {
+	if viewType == nil || viewType.Enum == nil {
+		return nil, fmt.Errorf("missing packedview type metadata")
+	}
+	llvmType, err := s.g.lowerType(viewType)
+	if err != nil {
+		return nil, err
+	}
+	value := C.LLVMGetUndef(llvmType)
+	value = C.LLVMBuildInsertValue(s.builder, value, handle, 0, cStringFree("packedview.handle"))
+	if viewType.Enum.StoreType != nil {
+		storeValue := C.LLVMValueRef(nil)
+		if store != nil && store.typ != nil && store.value != nil {
+			storeValue = store.value
+		}
+		if storeValue == nil {
+			storeValue, err = s.zeroValue(viewType.Enum.StoreType)
+			if err != nil {
+				return nil, err
+			}
+		}
+		value = C.LLVMBuildInsertValue(s.builder, value, storeValue, 1, cStringFree("packedview.store"))
+	}
+	return value, nil
+}
+
+func (s *functionState) unpackPackedVariantViewValue(value C.LLVMValueRef, viewType *semantic.PackedVariantViewType) (packedVariantViewBinding, error) {
+	if viewType == nil || viewType.Enum == nil {
+		return packedVariantViewBinding{}, fmt.Errorf("missing packedview type metadata")
+	}
+	binding := packedVariantViewBinding{typ: viewType}
+	binding.handle = C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("packedview.handle.extract"))
+	if s.g.packedEnumABI == packedEnumABIRowHandle {
+		binding.ptr = binding.handle
+	}
+	if viewType.Enum.StoreType != nil {
+		binding.store = packedStoreBinding{
+			value: C.LLVMBuildExtractValue(s.builder, value, 1, cStringFree("packedview.store.extract")),
+			typ:   viewType.Enum.StoreType,
+		}
+	}
+	return binding, nil
 }
