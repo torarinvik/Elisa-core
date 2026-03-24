@@ -123,7 +123,7 @@ static void scratch_release(ScratchBuffer *scratch) {
     scratch->capacity = 0u;
 }
 
-static uint64_t hash_value_string(JsonParserValue *value, ScratchBuffer *scratch, int *ok) {
+static uint64_t hash_value_string_fallback(JsonParserValue *value, ScratchBuffer *scratch, int *ok) {
     int64_t len = json_parser_value_string_len(value);
     if (len < 0) {
         fprintf(stderr, "value string len failed\n");
@@ -149,7 +149,30 @@ static uint64_t hash_value_string(JsonParserValue *value, ScratchBuffer *scratch
     return hash_bytes(scratch->data, (size_t)len);
 }
 
-static uint64_t hash_object_key(JsonParserObjectIter *iter, ScratchBuffer *scratch, int *ok) {
+static uint64_t hash_value_string(JsonParserValue *value, ScratchBuffer *scratch, int *ok) {
+    int64_t escaped = json_parser_value_string_is_escaped(value);
+    if (escaped < 0) {
+        fprintf(stderr, "value string escaped check failed\n");
+        *ok = 0;
+        return 0;
+    }
+
+    if (escaped == 0) {
+        uint8_t *raw = json_parser_value_string_raw_ptr(value);
+        int64_t raw_len = json_parser_value_string_raw_len(value);
+        if (raw == NULL || raw_len < 0) {
+            fprintf(stderr, "value raw string view failed\n");
+            *ok = 0;
+            return 0;
+        }
+        *ok = 1;
+        return hash_bytes(raw, (size_t)raw_len);
+    }
+
+    return hash_value_string_fallback(value, scratch, ok);
+}
+
+static uint64_t hash_object_key_fallback(JsonParserObjectIter *iter, ScratchBuffer *scratch, int *ok) {
     int64_t len = json_parser_object_iter_key_string_len(iter);
     if (len < 0) {
         fprintf(stderr, "object key string len failed\n");
@@ -173,6 +196,29 @@ static uint64_t hash_object_key(JsonParserObjectIter *iter, ScratchBuffer *scrat
 
     *ok = 1;
     return hash_bytes(scratch->data, (size_t)len);
+}
+
+static uint64_t hash_object_key(JsonParserObjectIter *iter, ScratchBuffer *scratch, int *ok) {
+    int64_t escaped = json_parser_object_iter_key_string_is_escaped(iter);
+    if (escaped < 0) {
+        fprintf(stderr, "object key escaped check failed\n");
+        *ok = 0;
+        return 0;
+    }
+
+    if (escaped == 0) {
+        uint8_t *raw = json_parser_object_iter_key_string_raw_ptr(iter);
+        int64_t raw_len = json_parser_object_iter_key_string_raw_len(iter);
+        if (raw == NULL || raw_len < 0) {
+            fprintf(stderr, "object key raw string view failed\n");
+            *ok = 0;
+            return 0;
+        }
+        *ok = 1;
+        return hash_bytes(raw, (size_t)raw_len);
+    }
+
+    return hash_object_key_fallback(iter, scratch, ok);
 }
 
 static uint64_t hash_f64(double value) {
@@ -294,42 +340,22 @@ static uint64_t dom_visit_value(JsonParserValue *value, ScratchBuffer *scratch, 
         return mix_u64(acc, (uint64_t)bool_value);
     }
     case JSON_KIND_NUMBER: {
-        int64_t number_kind = json_parser_value_number_kind(value);
-        if (number_kind < 0) {
-            fprintf(stderr, "value number kind failed\n");
+        JsonParserNumberData number = {0};
+        if (json_parser_value_number_data(value, &number) != 1) {
+            fprintf(stderr, "value number data failed\n");
             *ok = 0;
             return 0;
         }
+        int64_t number_kind = number.kind;
         acc = mix_u64(acc, (uint64_t)(uint8_t)number_kind);
         switch (number_kind) {
-        case JSON_NUMBER_UNSIGNED: {
-            uint64_t number = 0;
-            if (json_parser_value_u64(value, &number) != 1) {
-                fprintf(stderr, "value u64 failed\n");
-                *ok = 0;
-                return 0;
-            }
-            return mix_u64(acc, number);
-        }
-        case JSON_NUMBER_SIGNED: {
-            int64_t number = 0;
-            if (json_parser_value_i64(value, &number) != 1) {
-                fprintf(stderr, "value i64 failed\n");
-                *ok = 0;
-                return 0;
-            }
-            return mix_u64(acc, (uint64_t)number);
-        }
+        case JSON_NUMBER_UNSIGNED:
+            return mix_u64(acc, number.unsigned_value);
+        case JSON_NUMBER_SIGNED:
+            return mix_u64(acc, (uint64_t)number.signed_value);
         case JSON_NUMBER_NON_INTEGRAL:
-        case JSON_NUMBER_OUT_OF_RANGE: {
-            double number = 0.0;
-            if (json_parser_value_f64(value, &number) != 1) {
-                fprintf(stderr, "value f64 failed\n");
-                *ok = 0;
-                return 0;
-            }
-            return mix_u64(acc, hash_f64(number));
-        }
+        case JSON_NUMBER_OUT_OF_RANGE:
+            return mix_u64(acc, hash_f64(number.float_value));
         default:
             fprintf(stderr, "unexpected number kind=%" PRId64 "\n", number_kind);
             *ok = 0;

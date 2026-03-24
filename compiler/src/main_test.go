@@ -386,7 +386,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"define i64 @json_parser_document_array_string_copy_at(ptr",
 				"define i64 @json_parser_document_array_f64_at(ptr",
 				"define i64 @json_parser_document_array_f32_at(ptr",
-				"%JsonParserValue = type { i64, [3 x i64] }",
+				"%JsonParserValue = type { i64, ptr }",
 				"define i64 @json_parser_document_root_value(ptr",
 				"define i64 @json_parser_value_is_valid(ptr",
 				"define i64 @json_parser_value_kind(ptr",

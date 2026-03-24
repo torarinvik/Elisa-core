@@ -32,21 +32,21 @@ type codegenScope struct {
 }
 
 type functionState struct {
-	g                 *llvmGenerator
-	decl              *ast.FuncDecl
-	fnValue           C.LLVMValueRef
-	fnType            *semantic.FuncType
-	builder           C.LLVMBuilderRef
-	scope             *codegenScope
-	typeMap           map[string]semantic.Type
-	resultSlot        C.LLVMValueRef
-	regions           []regionBinding
-	packedStores      map[string]packedStoreBinding
-	packedStoreValues map[packedStoreExtractCacheKey]C.LLVMValueRef
+	g                            *llvmGenerator
+	decl                         *ast.FuncDecl
+	fnValue                      C.LLVMValueRef
+	fnType                       *semantic.FuncType
+	builder                      C.LLVMBuilderRef
+	scope                        *codegenScope
+	typeMap                      map[string]semantic.Type
+	resultSlot                   C.LLVMValueRef
+	regions                      []regionBinding
+	packedStores                 map[string]packedStoreBinding
+	packedStoreValues            map[packedStoreExtractCacheKey]C.LLVMValueRef
 	packedVariantSparseTagReads  map[packedVariantSparseTagReadCacheKey]C.LLVMValueRef
 	packedVariantSparseWordReads map[packedVariantSparseWordReadCacheKey]C.LLVMValueRef
-	scopedCleanups    []scopedCleanupBinding
-	poolScopes        []activePoolBinding
+	scopedCleanups               []scopedCleanupBinding
+	poolScopes                   []activePoolBinding
 }
 
 type scopedCleanupKind int
@@ -135,15 +135,15 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	C.LLVMPositionBuilderAtEnd(builder, entry)
 
 	state := &functionState{
-		g:                 g,
-		decl:              decl,
-		fnValue:           fnValue,
-		fnType:            fnType,
-		builder:           builder,
-		scope:             &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}, packedViewPtrs: map[string]packedVariantViewBinding{}},
-		typeMap:           typeBindings,
-		packedStores:      map[string]packedStoreBinding{},
-		packedStoreValues: map[packedStoreExtractCacheKey]C.LLVMValueRef{},
+		g:                            g,
+		decl:                         decl,
+		fnValue:                      fnValue,
+		fnType:                       fnType,
+		builder:                      builder,
+		scope:                        &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}, packedViewPtrs: map[string]packedVariantViewBinding{}},
+		typeMap:                      typeBindings,
+		packedStores:                 map[string]packedStoreBinding{},
+		packedStoreValues:            map[packedStoreExtractCacheKey]C.LLVMValueRef{},
 		packedVariantSparseTagReads:  map[packedVariantSparseTagReadCacheKey]C.LLVMValueRef{},
 		packedVariantSparseWordReads: map[packedVariantSparseWordReadCacheKey]C.LLVMValueRef{},
 	}
