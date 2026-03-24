@@ -30,6 +30,9 @@ typedef struct ScratchBuffer {
 
 typedef enum BenchmarkMode {
     BENCHMARK_MODE_PARSE,
+    BENCHMARK_MODE_COPY,
+    BENCHMARK_MODE_BUILD,
+    BENCHMARK_MODE_DESTROY,
     BENCHMARK_MODE_WALK,
 } BenchmarkMode;
 
@@ -238,6 +241,12 @@ static const char *benchmark_mode_name(BenchmarkMode mode) {
     switch (mode) {
     case BENCHMARK_MODE_PARSE:
         return "dom-parse";
+    case BENCHMARK_MODE_COPY:
+        return "dom-copy";
+    case BENCHMARK_MODE_BUILD:
+        return "dom-build";
+    case BENCHMARK_MODE_DESTROY:
+        return "dom-destroy";
     case BENCHMARK_MODE_WALK:
         return "dom-walk";
     default:
@@ -251,6 +260,18 @@ static int parse_benchmark_mode(const char *text, BenchmarkMode *out_mode) {
     }
     if (strcmp(text, "parse") == 0 || strcmp(text, "dom-parse") == 0) {
         *out_mode = BENCHMARK_MODE_PARSE;
+        return 1;
+    }
+    if (strcmp(text, "copy") == 0 || strcmp(text, "dom-copy") == 0) {
+        *out_mode = BENCHMARK_MODE_COPY;
+        return 1;
+    }
+    if (strcmp(text, "build") == 0 || strcmp(text, "dom-build") == 0) {
+        *out_mode = BENCHMARK_MODE_BUILD;
+        return 1;
+    }
+    if (strcmp(text, "destroy") == 0 || strcmp(text, "dom-destroy") == 0) {
+        *out_mode = BENCHMARK_MODE_DESTROY;
         return 1;
     }
     if (strcmp(text, "walk") == 0 || strcmp(text, "dom") == 0 || strcmp(text, "dom-walk") == 0) {
@@ -406,14 +427,14 @@ static uint64_t dom_visit_value(JsonParserValue *value, ScratchBuffer *scratch, 
     }
 }
 
-static int64_t document_dom_checksum(uint8_t *input, int64_t *out_node_count) {
+static int64_t document_dom_checksum(uint8_t *input, size_t input_len, int64_t *out_node_count) {
     JsonParserDocument doc = {0};
     JsonParserValue root = {0};
     ScratchBuffer scratch = {0};
     int ok = 1;
     int64_t result = -1;
 
-    if (json_parser_document_parse(input, &doc) != 1) {
+    if (json_parser_document_parse_with_len(input, input_len, &doc) != 1) {
         fprintf(stderr, "document parse failed\n");
         goto cleanup;
     }
@@ -446,11 +467,11 @@ cleanup:
     return result;
 }
 
-static int document_dom_parse_only(uint8_t *input) {
+static int document_dom_parse_only(uint8_t *input, size_t input_len) {
     JsonParserDocument doc = {0};
     int ok = 0;
 
-    if (json_parser_document_parse(input, &doc) != 1) {
+    if (json_parser_document_parse_with_len(input, input_len, &doc) != 1) {
         fprintf(stderr, "document parse failed\n");
         goto cleanup;
     }
@@ -465,9 +486,46 @@ cleanup:
     return ok;
 }
 
+static int document_copy_only(const uint8_t *input, size_t input_len, uint8_t *scratch) {
+    if (scratch == NULL) {
+        return 0;
+    }
+    if (input_len > 0u) {
+        memcpy(scratch, input, input_len);
+    }
+    scratch[input_len] = 0;
+    return 1;
+}
+
+static void destroy_document_batch(JsonParserDocument *docs, int count) {
+    if (docs == NULL) {
+        return;
+    }
+    for (int i = 0; i < count; ++i) {
+        if (docs[i].impl_bits != (uintptr_t)0) {
+            (void)json_parser_document_destroy(docs[i].impl_bits);
+            docs[i].impl_bits = (uintptr_t)0;
+        }
+    }
+}
+
+static int build_document_batch(uint8_t *input, size_t input_len, JsonParserDocument *docs, int count) {
+    if (docs == NULL) {
+        return 0;
+    }
+    for (int i = 0; i < count; ++i) {
+        if (json_parser_document_parse_with_len(input, input_len, &docs[i]) != 1) {
+            fprintf(stderr, "document parse failed at batch slot %d\n", i);
+            destroy_document_batch(docs, count);
+            return 0;
+        }
+    }
+    return 1;
+}
+
 int main(int argc, char **argv) {
     if (argc < 3) {
-        fprintf(stderr, "usage: %s <json-file> <iterations> [parse|walk]\n", argv[0]);
+        fprintf(stderr, "usage: %s <json-file> <iterations> [parse|copy|build|destroy|walk]\n", argv[0]);
         return 1;
     }
 
@@ -493,16 +551,66 @@ int main(int argc, char **argv) {
     int64_t node_count = -1;
     int64_t warmup_checksum = -1;
 
+    JsonParserDocument *docs = NULL;
+    if (mode == BENCHMARK_MODE_BUILD || mode == BENCHMARK_MODE_DESTROY) {
+        docs = (JsonParserDocument *)calloc((size_t)iterations, sizeof(*docs));
+        if (docs == NULL) {
+            fprintf(stderr, "failed to allocate %d document handles\n", iterations);
+            free(input);
+            return 1;
+        }
+    }
+
+    uint8_t *copy_scratch = NULL;
+    if (mode == BENCHMARK_MODE_COPY) {
+        copy_scratch = (uint8_t *)malloc(input_len + 1u);
+        if (copy_scratch == NULL) {
+            fprintf(stderr, "failed to allocate copy scratch\n");
+            free(docs);
+            free(input);
+            return 1;
+        }
+    }
+
     if (mode == BENCHMARK_MODE_PARSE) {
-        if (!document_dom_parse_only(input)) {
+        if (!document_dom_parse_only(input, input_len)) {
             fprintf(stderr, "dom parser rejected %s\n", path);
+            free(copy_scratch);
+            free(docs);
+            free(input);
+            return 1;
+        }
+    } else if (mode == BENCHMARK_MODE_COPY) {
+        if (!document_copy_only(input, input_len, copy_scratch)) {
+            fprintf(stderr, "dom copy warmup failed for %s\n", path);
+            free(copy_scratch);
+            free(docs);
+            free(input);
+            return 1;
+        }
+    } else if (mode == BENCHMARK_MODE_BUILD) {
+        if (!build_document_batch(input, input_len, docs, 1)) {
+            fprintf(stderr, "dom build warmup failed for %s\n", path);
+            free(copy_scratch);
+            free(docs);
+            free(input);
+            return 1;
+        }
+        destroy_document_batch(docs, 1);
+    } else if (mode == BENCHMARK_MODE_DESTROY) {
+        if (!build_document_batch(input, input_len, docs, iterations)) {
+            fprintf(stderr, "dom destroy warmup failed for %s\n", path);
+            free(copy_scratch);
+            free(docs);
             free(input);
             return 1;
         }
     } else {
-        warmup_checksum = document_dom_checksum(input, &node_count);
+        warmup_checksum = document_dom_checksum(input, input_len, &node_count);
         if (warmup_checksum < 0 || node_count < 0) {
             fprintf(stderr, "dom parser rejected %s\n", path);
+            free(copy_scratch);
+            free(docs);
             free(input);
             return 1;
         }
@@ -515,16 +623,50 @@ int main(int argc, char **argv) {
     int64_t total_metric = 0;
     for (int i = 0; i < iterations; ++i) {
         if (mode == BENCHMARK_MODE_PARSE) {
-            if (!document_dom_parse_only(input)) {
+            if (!document_dom_parse_only(input, input_len)) {
                 fprintf(stderr, "dom parse failed for %s at iteration %d\n", path, i);
+                free(copy_scratch);
+                free(docs);
                 free(input);
                 return 1;
             }
             total_metric += 1;
+        } else if (mode == BENCHMARK_MODE_COPY) {
+            if (!document_copy_only(input, input_len, copy_scratch)) {
+                fprintf(stderr, "dom copy failed for %s at iteration %d\n", path, i);
+                free(copy_scratch);
+                free(docs);
+                free(input);
+                return 1;
+            }
+            total_metric += 1;
+        } else if (mode == BENCHMARK_MODE_BUILD) {
+            if (json_parser_document_parse_with_len(input, input_len, &docs[i]) != 1) {
+                fprintf(stderr, "dom build failed for %s at iteration %d\n", path, i);
+                destroy_document_batch(docs, iterations);
+                free(copy_scratch);
+                free(docs);
+                free(input);
+                return 1;
+            }
+            total_metric += 1;
+        } else if (mode == BENCHMARK_MODE_DESTROY) {
+            if (docs[i].impl_bits == (uintptr_t)0) {
+                fprintf(stderr, "dom destroy missing handle for %s at iteration %d\n", path, i);
+                free(copy_scratch);
+                free(docs);
+                free(input);
+                return 1;
+            }
+            (void)json_parser_document_destroy(docs[i].impl_bits);
+            docs[i].impl_bits = (uintptr_t)0;
+            total_metric += 1;
         } else {
-            int64_t iteration_checksum = document_dom_checksum(input, NULL);
+            int64_t iteration_checksum = document_dom_checksum(input, input_len, NULL);
             if (iteration_checksum < 0) {
                 fprintf(stderr, "dom traversal failed for %s at iteration %d\n", path, i);
+                free(copy_scratch);
+                free(docs);
                 free(input);
                 return 1;
             }
@@ -538,7 +680,12 @@ int main(int argc, char **argv) {
     double total_bytes = (double)input_len * (double)iterations;
     double mib_per_second = seconds > 0.0 ? (total_bytes / (1024.0 * 1024.0)) / seconds : 0.0;
 
-    if (mode == BENCHMARK_MODE_PARSE) {
+    if (mode == BENCHMARK_MODE_BUILD) {
+        destroy_document_batch(docs, iterations);
+    }
+
+    if (mode == BENCHMARK_MODE_PARSE || mode == BENCHMARK_MODE_COPY ||
+        mode == BENCHMARK_MODE_BUILD || mode == BENCHMARK_MODE_DESTROY) {
         printf("mode=%s file=%s bytes=%zu iterations=%d parses=%" PRId64 " seconds=%.6f MiB/s=%.2f\n",
                benchmark_mode_name(mode),
                path,
@@ -560,6 +707,8 @@ int main(int argc, char **argv) {
                mib_per_second);
     }
 
+    free(copy_scratch);
+    free(docs);
     free(input);
     return 0;
 }

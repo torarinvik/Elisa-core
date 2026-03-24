@@ -306,7 +306,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			checks: []string{
 				"%JsonCursor = type { ptr, i64, i64 }",
 				"%JsonLexemeResult = type { i64, i64, i64 }",
-				"%JsonNode = type { i32, [3 x i64] }",
+				"%JsonNode = type { i32, [2 x i64] }",
 				"%JsonParseNodeResult = type { i32, i64 }",
 				"define %JsonLexemeResult @json_parse_string_lexeme(ptr",
 				"define %JsonLexemeResult @json_parse_number_lexeme(ptr",
@@ -1116,16 +1116,31 @@ func TestRunCLIJSONParserDOMBenchSmoke(t *testing.T) {
 		t.Fatalf("failed to write sample json: %v", err)
 	}
 
-	runCmd := exec.Command(exePath, jsonPath, "4")
-	runOutput, err := runCmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("dom json benchmark failed: %v\n%s", err, string(runOutput))
-	}
-	output := string(runOutput)
-	for _, check := range []string{"mode=dom-parse", "iterations=4", "parses=4", "MiB/s="} {
-		if !strings.Contains(output, check) {
-			t.Fatalf("expected dom benchmark output to contain %q, got:\n%s", check, output)
-		}
+	for _, tc := range []struct {
+		name     string
+		mode     string
+		contains []string
+	}{
+		{name: "default-parse", mode: "", contains: []string{"mode=dom-parse", "iterations=4", "parses=4", "MiB/s="}},
+		{name: "build", mode: "build", contains: []string{"mode=dom-build", "iterations=4", "parses=4", "MiB/s="}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := []string{jsonPath, "4"}
+			if tc.mode != "" {
+				args = append(args, tc.mode)
+			}
+			runCmd := exec.Command(exePath, args...)
+			runOutput, err := runCmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("dom json benchmark failed: %v\n%s", err, string(runOutput))
+			}
+			output := string(runOutput)
+			for _, check := range tc.contains {
+				if !strings.Contains(output, check) {
+					t.Fatalf("expected dom benchmark output to contain %q, got:\n%s", check, output)
+				}
+			}
+		})
 	}
 }
 

@@ -70,8 +70,8 @@ packed enum JsonNode:
     Bool(value: bool)
     Num(source_offset: u32)
     Text(source_offset: u32)
-    Array(items: tail JsonNode)
-    Object(fields: tail JsonField)
+    Array(items_ptr: any JsonNode&?, item_count: usize)
+    Object(fields_ptr: any JsonField&?, field_count: usize)
 
 
 const enum JsonNodeKind of i8:
@@ -783,14 +783,14 @@ def json_field_items_view(fields_ptr: any JsonField&?, field_count: usize) -> dv
 
 
 def json_ast_array_items_view(node: JsonNode, store: JsonNode.Store[Local]) -> dview[JsonNode]:
-    if node in store as JsonNode.Array(items: items):
-        return items
+    if node in store as JsonNode.Array(items_ptr: items_ptr, item_count: item_count):
+        return json_node_items_view(items_ptr, item_count)
     return json_empty_node_view()
 
 
 def json_ast_object_fields_view(node: JsonNode, store: JsonNode.Store[Local]) -> dview[JsonField]:
-    if node in store as JsonNode.Object(fields: fields):
-        return fields
+    if node in store as JsonNode.Object(fields_ptr: fields_ptr, field_count: field_count):
+        return json_field_items_view(fields_ptr, field_count)
     return json_empty_field_view()
 
 
@@ -1021,7 +1021,6 @@ def json_parse_array_node(cursor: any JsonCursor&, arena: any Arena&, store: Jso
     items: mutable darray[JsonNode] = zeroed
     done: mutable bool = false
     items_checksum: mutable i64 = 0
-    ch: mutable i64 = 0
     if json_advance_char(cursor) != JSON_CH_LBRACKET:
         return json_parse_node_result(invalid_node, -1)
 
@@ -1029,7 +1028,7 @@ def json_parse_array_node(cursor: any JsonCursor&, arena: any Arena&, store: Jso
     if json_cur_char(cursor) == JSON_CH_RBRACKET:
         _ = json_advance_char(cursor)
         in store:
-            return json_parse_node_result(new JsonNode.Array(items: json_empty_node_view()), 43)
+            return json_parse_node_result(new JsonNode.Array(items_ptr: null, item_count: 0u), 43)
 
     while not done:
         value_result: JsonParseNodeResult = json_parse_value_node_after_ws(cursor, arena, store, invalid_node)
@@ -1040,7 +1039,7 @@ def json_parse_array_node(cursor: any JsonCursor&, arena: any Arena&, store: Jso
         items_checksum <- items_checksum + value_result.checksum
 
         json_skip_ws(cursor)
-        ch <- json_cur_char(cursor)
+        ch: i64 = json_cur_char(cursor)
         if ch == JSON_CH_COMMA:
             _ = json_advance_char(cursor)
             json_skip_ws(cursor)
@@ -1050,9 +1049,8 @@ def json_parse_array_node(cursor: any JsonCursor&, arena: any Arena&, store: Jso
         else:
             return json_parse_node_result(invalid_node, -1)
 
-    items_view: dview[JsonNode] = json_node_items_view(items.items, items.count)
     in store:
-        return json_parse_node_result(new JsonNode.Array(items: items_view), 43 + items_checksum)
+        return json_parse_node_result(new JsonNode.Array(items_ptr: items.items, item_count: items.count), 43 + items_checksum)
 
 
 def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
@@ -1064,7 +1062,6 @@ def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: Js
     key_node: mutable JsonNode = zeroed
     field_value: mutable JsonNode = zeroed
     field_entry: mutable JsonField = zeroed
-    ch: mutable i64 = 0
     if json_advance_char(cursor) != JSON_CH_LBRACE:
         return json_parse_node_result(invalid_node, -1)
 
@@ -1072,7 +1069,7 @@ def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: Js
     if json_cur_char(cursor) == JSON_CH_RBRACE:
         _ = json_advance_char(cursor)
         in store:
-            return json_parse_node_result(new JsonNode.Object(fields: json_empty_field_view()), 47)
+            return json_parse_node_result(new JsonNode.Object(fields_ptr: null, field_count: 0u), 47)
 
     while not done:
         key_lexeme <- json_parse_string_lexeme(cursor)
@@ -1099,7 +1096,7 @@ def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: Js
         fields_checksum <- fields_checksum + key_checksum + value_result.checksum
 
         json_skip_ws(cursor)
-        ch <- json_cur_char(cursor)
+        ch: i64 = json_cur_char(cursor)
         if ch == JSON_CH_COMMA:
             _ = json_advance_char(cursor)
             json_skip_ws(cursor)
@@ -1109,9 +1106,8 @@ def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: Js
         else:
             return JsonParseNodeResult(invalid_node, -1)
 
-    fields_view: dview[JsonField] = json_field_items_view(fields.items, fields.count)
     in store:
-        return json_parse_node_result(new JsonNode.Object(fields: fields_view), 47 + fields_checksum)
+        return json_parse_node_result(new JsonNode.Object(fields_ptr: fields.items, field_count: fields.count), 47 + fields_checksum)
 
 
 def json_parse_value_node(cursor: any JsonCursor&, arena: any Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
@@ -1548,14 +1544,14 @@ def json_ast_is_null(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
 
 
 def json_ast_array_len(node: JsonNode, store: JsonNode.Store[Local]) -> i64:
-    if node in store as JsonNode.Array(items: items):
-        return items.len.i64()
+    if node in store as JsonNode.Array(items_ptr: _, item_count: item_count):
+        return item_count.i64()
     return -1
 
 
 def json_ast_object_len(node: JsonNode, store: JsonNode.Store[Local]) -> i64:
-    if node in store as JsonNode.Object(fields: fields):
-        return fields.len.i64()
+    if node in store as JsonNode.Object(fields_ptr: _, field_count: field_count):
+        return field_count.i64()
     return -1
 
 
@@ -1877,16 +1873,17 @@ def json_parser_document_array_item_node_at(impl: heap JsonParserDocumentInterna
     return json_ast_array_nth(impl.root, index, store)
 
 
-def json_parser_document_parse_impl(source: any u8&, out: any JsonParserDocument&) -> i64 can[Memory.Allocate, Memory.Release, Abort.Panic]:
+def json_parser_document_parse_with_len_impl(source: any u8&, source_len: usize, out: any JsonParserDocument&) -> i64 can[Memory.Allocate, Memory.Release, Abort.Panic]:
     if out[0u].impl_bits != 0u64.uintptr():
         json_parser_document_destroy_impl(out)
 
-    source_len: usize = runtime_strlen(source)
     if source_len > JSON_MAX_INLINE_SOURCE_OFFSET.usize():
         out[0u] <- json_parser_document_null()
         return 0
+
     internal_words: usize = (sizeof(JsonParserDocumentInternal) + sizeof(uintptr) - 1u) / sizeof(uintptr)
     source_words: usize = (source_len + 1u + sizeof(uintptr) - 1u) / sizeof(uintptr)
+
     first_region: heap Region& = new_region(json_ast_scratch_capacity(source_len) + internal_words + source_words)
     first_region.count <- internal_words
 
@@ -1915,6 +1912,10 @@ def json_parser_document_parse_impl(source: any u8&, out: any JsonParserDocument
     internal.checksum <- result.checksum
     out[0u] <- JsonParserDocument(internal.uintptr())
     return 1
+
+
+def json_parser_document_parse_impl(source: any u8&, out: any JsonParserDocument&) -> i64 can[Memory.Allocate, Memory.Release, Abort.Panic]:
+    return json_parser_document_parse_with_len_impl(source, runtime_strlen(source), out)
 
 
 def json_parser_document_destroy_impl(doc: any JsonParserDocument&) can[Memory.Release, Abort.Panic]:
@@ -4845,6 +4846,7 @@ export func json_parser_ast_array_string_copy_at(source: any u8&, index: usize, 
 export func json_parser_ast_array_string_eq_at(source: any u8&, index: usize, literal: any u8&) -> i64 = json_parser_ast_array_string_eq_at_impl
 export func json_parser_ast_array_bool_at(source: any u8&, index: usize) -> i64 = json_parser_ast_array_bool_at_impl
 export func json_parser_ast_array_is_null_at(source: any u8&, index: usize) -> i64 = json_parser_ast_array_is_null_at_impl
+export func json_parser_document_parse_with_len(source: any u8&, source_len: usize, out: any JsonParserDocument&) -> i64 = json_parser_document_parse_with_len_impl
 export func json_parser_document_parse(source: any u8&, out: any JsonParserDocument&) -> i64 = json_parser_document_parse_impl
 export func json_parser_document_destroy(doc_bits: uintptr) -> i64 = json_parser_document_destroy_handle_impl
 export func json_parser_document_checksum(doc: any JsonParserDocument&) -> i64 = json_parser_document_checksum_impl
