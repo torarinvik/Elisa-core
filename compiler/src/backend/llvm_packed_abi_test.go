@@ -744,6 +744,73 @@ def fold_common_frozen() -> int:
 	}
 }
 
+func TestGenerateLLVMIRUsesCanonicalVariantSparseReadCacheForFrozenRepeatedCommonFieldReads(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Lit(value: int)
+
+def fold_common_frozen() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	in frozen:
+		return node.span + node.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_field_cache_frozen_default.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_variant_sparse_word(")
+	if readCalls != 1 {
+		t.Fatalf("expected canonical frozen repeated packed common-field reads to reuse one variant-sparse payload read, got %d helper calls:\n%s", readCalls, output)
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_variant_sparse(") {
+		t.Fatalf("expected canonical frozen repeated packed common-field reads to avoid eager variant-sparse decode, got:\n%s", output)
+	}
+	if strings.Contains(output, "call i64 @ctx_packed_store_read_word(") || strings.Contains(output, "call i64 @ctx_packed_store_read_index_word(") {
+		t.Fatalf("expected canonical frozen repeated packed common-field reads to stay on variant-sparse helpers, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRUsesCanonicalVariantSparseReadCacheAcrossMatchedAccessorPatterns(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Wrap(child: Expr)
+
+def fold_child_common_frozen() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	child: Expr = new[store] Expr.Int(span: 5, value: 7)
+	node: Expr = new[store] Expr.Wrap(span: 9, child: child)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	open node in frozen as Expr.Wrap(child: child_alias):
+		return child_alias.span + child_alias.span
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_matched_field_cache_default.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+
+	if !strings.Contains(output, "call i32 @ctx_packed_store_read_variant_sparse_tag(") {
+		t.Fatalf("expected canonical frozen packed match to use variant-sparse tag reads, got:\n%s", output)
+	}
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_variant_sparse_word(")
+	if readCalls != 2 {
+		t.Fatalf("expected canonical frozen matched accessor pattern to use two total variant-sparse word reads (child payload + cached repeated child common field), got %d helper calls:\n%s", readCalls, output)
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_variant_sparse(") {
+		t.Fatalf("expected canonical frozen matched accessor pattern to avoid eager variant-sparse decode, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRUsesSingleDecodeForFrozenRepeatedCommonFieldReadsOutsideCheckpoint(t *testing.T) {
 	src := `packed enum Expr:
 	common:

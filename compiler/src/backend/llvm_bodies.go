@@ -43,6 +43,8 @@ type functionState struct {
 	regions           []regionBinding
 	packedStores      map[string]packedStoreBinding
 	packedStoreValues map[packedStoreExtractCacheKey]C.LLVMValueRef
+	packedVariantSparseTagReads  map[packedVariantSparseTagReadCacheKey]C.LLVMValueRef
+	packedVariantSparseWordReads map[packedVariantSparseWordReadCacheKey]C.LLVMValueRef
 	scopedCleanups    []scopedCleanupBinding
 	poolScopes        []activePoolBinding
 }
@@ -76,6 +78,21 @@ type packedStoreExtractCacheKey struct {
 	block C.LLVMBasicBlockRef
 	store C.LLVMValueRef
 	index C.unsigned
+}
+
+type packedVariantSparseTagReadCacheKey struct {
+	block     C.LLVMBasicBlockRef
+	storeType *semantic.PackedEnumStoreType
+	state     C.LLVMValueRef
+	handle    C.LLVMValueRef
+}
+
+type packedVariantSparseWordReadCacheKey struct {
+	block     C.LLVMBasicBlockRef
+	storeType *semantic.PackedEnumStoreType
+	state     C.LLVMValueRef
+	handle    C.LLVMValueRef
+	offset    C.LLVMValueRef
 }
 
 type packedEnumStorageBinding struct {
@@ -127,6 +144,8 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		typeMap:           typeBindings,
 		packedStores:      map[string]packedStoreBinding{},
 		packedStoreValues: map[packedStoreExtractCacheKey]C.LLVMValueRef{},
+		packedVariantSparseTagReads:  map[packedVariantSparseTagReadCacheKey]C.LLVMValueRef{},
+		packedVariantSparseWordReads: map[packedVariantSparseWordReadCacheKey]C.LLVMValueRef{},
 	}
 
 	paramOffset := 0
@@ -2177,19 +2196,15 @@ func (s *functionState) packedEnumVariantPayloadWordOffset(enumType *semantic.En
 	if err != nil {
 		return nil, false, err
 	}
+	baseOffsetBytes, err := s.g.abiOffsetOfLLVMElement(rowType, payloadFieldIndex)
+	if err != nil {
+		return nil, false, err
+	}
 	usizeType, err := s.g.lowerBuiltin("usize")
 	if err != nil {
 		return nil, false, err
 	}
-	i32Type := C.LLVMInt32TypeInContext(s.g.context)
-	zeroIndex := C.LLVMConstInt(i32Type, 0, 0)
-	payloadFieldIndexValue := C.LLVMConstInt(i32Type, C.ulonglong(payloadFieldIndex), 0)
-	nullPtr := C.LLVMConstNull(C.LLVMPointerTypeInContext(s.g.context, 0))
-	payloadIndices := []C.LLVMValueRef{zeroIndex, payloadFieldIndexValue}
-	payloadPtr := C.LLVMBuildGEP2(s.builder, rowType, nullPtr, llvmValueSlicePtr(payloadIndices), C.unsigned(len(payloadIndices)), cStringFree("packed.payload.word.ptr"))
-	payloadOffsetBytes := C.LLVMBuildPtrToInt(s.builder, payloadPtr, usizeType, cStringFree("packed.payload.word.bytes"))
-	wordBytesValue := C.LLVMConstInt(usizeType, C.ulonglong(wordBytes), 0)
-	baseWordOffset := C.LLVMBuildUDiv(s.builder, payloadOffsetBytes, wordBytesValue, cStringFree("packed.payload.word.offset"))
+	baseWordOffset := C.LLVMConstInt(usizeType, C.ulonglong(baseOffsetBytes/wordBytes), 0)
 	if len(variant.Payload) == 1 {
 		return baseWordOffset, true, nil
 	}
@@ -2197,12 +2212,11 @@ func (s *functionState) packedEnumVariantPayloadWordOffset(enumType *semantic.En
 	if err != nil {
 		return nil, false, err
 	}
-	fieldIndexValue := C.LLVMConstInt(i32Type, C.ulonglong(payloadIndex), 0)
-	fieldIndices := []C.LLVMValueRef{zeroIndex, fieldIndexValue}
-	fieldPtr := C.LLVMBuildGEP2(s.builder, payloadType, nullPtr, llvmValueSlicePtr(fieldIndices), C.unsigned(len(fieldIndices)), cStringFree("packed.payload.field.word.ptr"))
-	fieldOffsetBytes := C.LLVMBuildPtrToInt(s.builder, fieldPtr, usizeType, cStringFree("packed.payload.field.word.bytes"))
-	fieldWordOffset := C.LLVMBuildUDiv(s.builder, fieldOffsetBytes, wordBytesValue, cStringFree("packed.payload.field.word.offset"))
-	return C.LLVMBuildAdd(s.builder, baseWordOffset, fieldWordOffset, cStringFree("packed.payload.word.total")), true, nil
+	fieldOffsetBytes, err := s.g.abiOffsetOfLLVMElement(payloadType, payloadIndex)
+	if err != nil {
+		return nil, false, err
+	}
+	return C.LLVMConstInt(usizeType, C.ulonglong((baseOffsetBytes+fieldOffsetBytes)/wordBytes), 0), true, nil
 }
 
 func (s *functionState) readPackedEnumTagWithStore(handleValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding) (C.LLVMValueRef, error) {

@@ -65,6 +65,38 @@ func (ops *packedStoreOps) rowBytesValue(name string) (C.LLVMValueRef, error) {
 	return ops.s.emitPackedStoreRowBytesValueNamed(ops.storeValue, ops.storeType, name)
 }
 
+func (ops *packedStoreOps) currentBlock() C.LLVMBasicBlockRef {
+	if ops == nil || ops.s == nil || ops.s.builder == nil {
+		return nil
+	}
+	return C.LLVMGetInsertBlock(ops.s.builder)
+}
+
+func (ops *packedStoreOps) canCacheVariantSparseReads(enumType *semantic.EnumType) bool {
+	if ops == nil || ops.s == nil || ops.s.g == nil || enumType == nil || !enumType.Packed {
+		return false
+	}
+	if ops.s.g.packedModeForEnum(enumType) != packedEnumABIVariantSparse {
+		return false
+	}
+	if ops.storeType == nil || !semantic.IsFrozenPackedEnumStoreType(ops.storeType) {
+		return false
+	}
+	return ops.currentBlock() != nil
+}
+
+func (ops *packedStoreOps) canonicalizeVariantSparseHandleKey(handleValue C.LLVMValueRef) C.LLVMValueRef {
+	if handleValue == nil {
+		return nil
+	}
+	if C.LLVMIsALoadInst(handleValue) != nil {
+		if sourcePtr := C.LLVMGetOperand(handleValue, 0); sourcePtr != nil {
+			return sourcePtr
+		}
+	}
+	return handleValue
+}
+
 func (ops *packedStoreOps) storeCount(name string) (C.LLVMValueRef, error) {
 	stateValue, err := ops.stateValue(name + ".state")
 	if err != nil {
@@ -354,19 +386,13 @@ func (ops *packedStoreOps) storeTagAt(handleValue C.LLVMValueRef, enumType *sema
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum tag metadata")
 	}
-	arenaValue, err := ops.arenaValue(name + ".arena")
-	if err != nil {
-		return nil, err
-	}
-	stateValue, err := ops.stateValue(name + ".state")
-	if err != nil {
-		return nil, err
-	}
-	arenaType := ops.s.g.result.NamedTypes["Arena"]
-	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	tagType := ops.s.g.result.NamedTypes["u32"]
 	switch ops.s.g.packedModeForEnum(enumType) {
 	case packedEnumABIIndexSOA:
+		stateValue, err := ops.stateValue(name + ".state")
+		if err != nil {
+			return nil, err
+		}
 		helperType := &semantic.FuncType{Name: "ctx_packed_store_read_index_tag", Params: []semantic.Type{ops.voidRefType(), tagType}, Return: tagType}
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_read_index_tag", helperType)
 		if err != nil {
@@ -382,6 +408,10 @@ func (ops *packedStoreOps) storeTagAt(handleValue C.LLVMValueRef, enumType *sema
 		}
 		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, coercedHandle}, name), nil
 	case packedEnumABIVariantSparse:
+		stateValue, err := ops.stateValue(name + ".state")
+		if err != nil {
+			return nil, err
+		}
 		helperType := &semantic.FuncType{Name: "ctx_packed_store_read_variant_sparse_tag", Params: []semantic.Type{ops.voidRefType(), tagType}, Return: tagType}
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_read_variant_sparse_tag", helperType)
 		if err != nil {
@@ -395,8 +425,27 @@ func (ops *packedStoreOps) storeTagAt(handleValue C.LLVMValueRef, enumType *sema
 		if err != nil {
 			return nil, err
 		}
+		if ops.canCacheVariantSparseReads(enumType) && ops.s.packedVariantSparseTagReads != nil {
+			key := packedVariantSparseTagReadCacheKey{block: ops.currentBlock(), storeType: ops.storeType, state: stateValue, handle: ops.canonicalizeVariantSparseHandleKey(coercedHandle)}
+			if cached, ok := ops.s.packedVariantSparseTagReads[key]; ok && cached != nil {
+				return cached, nil
+			}
+			tagValue := ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, coercedHandle}, name)
+			ops.s.packedVariantSparseTagReads[key] = tagValue
+			return tagValue, nil
+		}
 		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, coercedHandle}, name), nil
 	default:
+		arenaValue, err := ops.arenaValue(name + ".arena")
+		if err != nil {
+			return nil, err
+		}
+		stateValue, err := ops.stateValue(name + ".state")
+		if err != nil {
+			return nil, err
+		}
+		arenaType := ops.s.g.result.NamedTypes["Arena"]
+		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 		helperType := &semantic.FuncType{Name: "ctx_packed_store_read_tag", Params: []semantic.Type{arenaRefType, ops.s.g.result.NamedTypes["uintptr"], ops.voidRefType()}, Return: tagType}
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_read_tag", helperType)
 		if err != nil {
@@ -418,19 +467,19 @@ func (ops *packedStoreOps) loadPayloadWord(handleValue C.LLVMValueRef, enumType 
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum payload metadata")
 	}
-	arenaValue, err := ops.arenaValue(name + ".arena")
-	if err != nil {
-		return nil, err
-	}
-	stateValue, err := ops.stateValue(name + ".state")
-	if err != nil {
-		return nil, err
-	}
-	arenaType := ops.s.g.result.NamedTypes["Arena"]
-	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	uintptrType := ops.s.g.result.NamedTypes["uintptr"]
 	switch ops.s.g.packedModeForEnum(enumType) {
 	case packedEnumABIIndexSOA:
+		arenaValue, err := ops.arenaValue(name + ".arena")
+		if err != nil {
+			return nil, err
+		}
+		stateValue, err := ops.stateValue(name + ".state")
+		if err != nil {
+			return nil, err
+		}
+		arenaType := ops.s.g.result.NamedTypes["Arena"]
+		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 		u32Type := ops.s.g.result.NamedTypes["u32"]
 		helperType := &semantic.FuncType{Name: "ctx_packed_store_read_index_word", Params: []semantic.Type{arenaRefType, u32Type, ops.voidRefType(), ops.s.g.result.NamedTypes["usize"]}, Return: uintptrType}
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_read_index_word", helperType)
@@ -447,6 +496,10 @@ func (ops *packedStoreOps) loadPayloadWord(handleValue C.LLVMValueRef, enumType 
 		}
 		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, coercedHandle, stateValue, wordOffset}, name), nil
 	case packedEnumABIVariantSparse:
+		stateValue, err := ops.stateValue(name + ".state")
+		if err != nil {
+			return nil, err
+		}
 		u32Type := ops.s.g.result.NamedTypes["u32"]
 		helperType := &semantic.FuncType{Name: "ctx_packed_store_read_variant_sparse_word", Params: []semantic.Type{u32Type, ops.voidRefType(), ops.s.g.result.NamedTypes["usize"]}, Return: uintptrType}
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_read_variant_sparse_word", helperType)
@@ -461,8 +514,27 @@ func (ops *packedStoreOps) loadPayloadWord(handleValue C.LLVMValueRef, enumType 
 		if err != nil {
 			return nil, err
 		}
+		if ops.canCacheVariantSparseReads(enumType) && ops.s.packedVariantSparseWordReads != nil {
+			key := packedVariantSparseWordReadCacheKey{block: ops.currentBlock(), storeType: ops.storeType, state: stateValue, handle: ops.canonicalizeVariantSparseHandleKey(coercedHandle), offset: wordOffset}
+			if cached, ok := ops.s.packedVariantSparseWordReads[key]; ok && cached != nil {
+				return cached, nil
+			}
+			wordValue := ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{coercedHandle, stateValue, wordOffset}, name)
+			ops.s.packedVariantSparseWordReads[key] = wordValue
+			return wordValue, nil
+		}
 		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{coercedHandle, stateValue, wordOffset}, name), nil
 	default:
+		arenaValue, err := ops.arenaValue(name + ".arena")
+		if err != nil {
+			return nil, err
+		}
+		stateValue, err := ops.stateValue(name + ".state")
+		if err != nil {
+			return nil, err
+		}
+		arenaType := ops.s.g.result.NamedTypes["Arena"]
+		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 		helperType := &semantic.FuncType{Name: "ctx_packed_store_read_word", Params: []semantic.Type{arenaRefType, uintptrType, ops.voidRefType(), ops.s.g.result.NamedTypes["usize"]}, Return: uintptrType}
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_read_word", helperType)
 		if err != nil {

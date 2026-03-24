@@ -4291,18 +4291,15 @@ func (s *functionState) packedEnumDirectWordFieldOffset(enumType *semantic.EnumT
 	if err != nil {
 		return nil, false, err
 	}
+	offsetBytes, err := s.g.abiOffsetOfLLVMElement(rowType, fieldIndex)
+	if err != nil {
+		return nil, false, err
+	}
 	usizeType, err := s.g.lowerBuiltin("usize")
 	if err != nil {
 		return nil, false, err
 	}
-	zeroIndex := C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), 0, 0)
-	fieldIndexValue := C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), C.ulonglong(fieldIndex), 0)
-	nullPtr := C.LLVMConstNull(C.LLVMPointerTypeInContext(s.g.context, 0))
-	indices := []C.LLVMValueRef{zeroIndex, fieldIndexValue}
-	fieldPtr := C.LLVMBuildGEP2(s.builder, rowType, nullPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("packed.common.word.ptr"))
-	offsetBytes := C.LLVMBuildPtrToInt(s.builder, fieldPtr, usizeType, cStringFree("packed.common.word.bytes"))
-	wordBytesValue := C.LLVMConstInt(usizeType, C.ulonglong(wordBytes), 0)
-	return C.LLVMBuildUDiv(s.builder, offsetBytes, wordBytesValue, cStringFree("packed.common.word.offset")), true, nil
+	return C.LLVMConstInt(usizeType, C.ulonglong(offsetBytes/wordBytes), 0), true, nil
 }
 
 func (s *functionState) readPackedEnumWordWithStore(handleValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding, wordOffset C.LLVMValueRef) (C.LLVMValueRef, error) {

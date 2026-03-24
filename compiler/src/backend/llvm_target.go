@@ -253,6 +253,19 @@ func (g *llvmGenerator) abiSizeOfLLVMType(llvmType C.LLVMTypeRef) (uint64, error
 	return uint64(C.LLVMABISizeOfType(g.targetData, llvmType)), nil
 }
 
+func (g *llvmGenerator) abiOffsetOfLLVMElement(llvmType C.LLVMTypeRef, elementIndex int) (uint64, error) {
+	if llvmType == nil {
+		return 0, fmt.Errorf("cannot compute ABI offset for nil LLVM type")
+	}
+	if elementIndex < 0 {
+		return 0, fmt.Errorf("cannot compute ABI offset for negative element index %d", elementIndex)
+	}
+	if err := g.ensureTargetMachine(); err != nil {
+		return 0, err
+	}
+	return uint64(C.LLVMOffsetOfElement(g.targetData, llvmType, C.unsigned(elementIndex))), nil
+}
+
 func disposeLLVMMessage(message *C.char, fallback string) string {
 	if message == nil {
 		return fallback
