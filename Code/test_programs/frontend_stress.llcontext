@@ -70,13 +70,13 @@ def parser_advance(state: any ParserState&) -> TokenKind:
 
 def scope_define(a: any Arena&, scope: any Scope&, name: dstr, kind: SymbolKind, first_kind: TokenKind) -> bool error[RuntimeError]:
     entry: Symbol = Symbol(name, kind, scope.depth, first_kind)
-    slot: any Symbol&? = try arena_dict_put__Symbol(a, (&scope.symbols).cast[any dict[dstr, Symbol]&](), name, entry) else null
+    slot: any Symbol&? = try arena_dict_put__Symbol(a, (&scope.symbols).cast[any dict[dstr, Symbol]&], name, entry) else null
     return slot != null
 
 def scope_contains(scope: any Scope&, name: dstr) -> bool:
     current: mutable any Scope&? = scope
     while current != null:
-        if arena_dict_contains__Symbol((&current.symbols).cast[any dict[dstr, Symbol]&](), name):
+        if arena_dict_contains__Symbol((&current.symbols).cast[any dict[dstr, Symbol]&], name):
             return true
         current <- current.parent
     return false
@@ -87,23 +87,23 @@ def make_tokens() -> view[Token]:
 
 def frontend_scope_stress(tokens: view[Token], local_name: dstr) -> bool error[RuntimeError]:
     region parse(4096u)
-    parse_arena: any Arena& = (&parse).cast[any Arena&]()
+    parse_arena: any Arena& = (&parse).cast[any Arena&]
 
     root: parse Scope& = new[parse] Scope(null, arena_dict_new__Symbol(parse_arena, 8u), 0)
-    child: parse Scope& = new[parse] Scope(root.cast[any Scope&?](), arena_dict_new__Symbol(parse_arena, 8u), root.depth + 1)
-    parser: parse ParserState& = new[parse] ParserState(tokens, 0u, child.cast[any Scope&?]())
+    child: parse Scope& = new[parse] Scope(root.cast[any Scope&?], arena_dict_new__Symbol(parse_arena, 8u), root.depth + 1)
+    parser: parse ParserState& = new[parse] ParserState(tokens, 0u, child.cast[any Scope&?])
 
-    match parser_peek(parser.cast[any ParserState&]()):
+    match parser_peek(parser.cast[any ParserState&]):
         TokenKind.Eof:
             return false
 
-    first_kind: TokenKind = parser_advance(parser.cast[any ParserState&]())
-    try arena_dict_reserve__Symbol(parse_arena, (&root.symbols).cast[any dict[dstr, Symbol]&](), 16u)
+    first_kind: TokenKind = parser_advance(parser.cast[any ParserState&])
+    try arena_dict_reserve__Symbol(parse_arena, (&root.symbols).cast[any dict[dstr, Symbol]&], 16u)
 
-    global_ok: bool = try scope_define(parse_arena, root.cast[any Scope&](), "parse_file", SymbolKind.Func, TokenKind.Def)
-    local_ok: bool = try scope_define(parse_arena, child.cast[any Scope&](), local_name, SymbolKind.Local, first_kind)
+    global_ok: bool = try scope_define(parse_arena, root.cast[any Scope&], "parse_file", SymbolKind.Func, TokenKind.Def)
+    local_ok: bool = try scope_define(parse_arena, child.cast[any Scope&], local_name, SymbolKind.Local, first_kind)
 
-    return global_ok and local_ok and scope_contains(child.cast[any Scope&](), "parse_file") and scope_contains(child.cast[any Scope&](), local_name)
+    return global_ok and local_ok and scope_contains(child.cast[any Scope&], "parse_file") and scope_contains(child.cast[any Scope&], local_name)
 
 def frontend_region_token(line: int, column: int) -> int:
     region scratch(2048u)

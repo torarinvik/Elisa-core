@@ -786,7 +786,7 @@ func exprStr(e ast.Expr) string {
 	case *ast.SliceExpr:
 		return fmt.Sprintf("%s[%s:%s]", exprStr(n.Object), exprStr(n.Start), exprStr(n.End))
 	case *ast.CastExpr:
-		return fmt.Sprintf("%s -> %s", exprStr(n.Operand), typeStr(n.Target))
+		return fmt.Sprintf("%s.cast[%s]", exprStr(n.Operand), typeStr(n.Target))
 	case *ast.SizeofExpr:
 		return fmt.Sprintf("sizeof(%s)", typeStr(n.Type))
 	case *ast.TernaryExpr:

@@ -2,7 +2,7 @@
 
 def atomic_roundtrip() -> i64 can[Atomics.Load, Atomics.Store, Atomics.Exchange, Atomics.CompareExchange, Atomics.Rmw, Atomics.Fence]:
 	slot: atomic[i64] = zeroed
-	slot_ref: any atomic[i64]& = (&slot).cast[any atomic[i64]&]()
+	slot_ref: any atomic[i64]& = (&slot).cast[any atomic[i64]&]
 
 	store(slot_ref, 41, MemoryOrder.Release)
 	prior_add: i64 = fetch_add(slot_ref, 1, MemoryOrder.AcqRel)
@@ -33,7 +33,7 @@ def concurrency_handles(thread: Thread[i64, Joinable], task: Task[i64, Pending],
 	)
 	detach(move thread)
 	mutex_unlock(move guard)
-	task_group_add((&group).cast[any TaskGroup&](), move task)
+	task_group_add((&group).cast[any TaskGroup&], move task)
 	wait all group
 	return result
 
@@ -41,7 +41,7 @@ def thread_worker(value: i64) -> i64:
 	return value + 1
 
 def permissioned_thread_worker(value: i64) -> i64 can[Console.Write]:
-	puts("worker".cast[any u8&]()) can Console.Write
+	puts("worker".cast[any u8&]) can Console.Write
 	return value + 2
 
 struct SharedGate:
@@ -75,7 +75,7 @@ def typed_pool_roundtrip(pool: any ThreadPool&, value: i64) -> i64 can[Pool.Subm
 def typed_group_waitall(pool: any ThreadPool&, value: i64) can[Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
 	group: TaskGroup = task_group_new()
 	task: Task[i64, Pending] = pool_submit1(pool, thread_worker, value)
-	task_group_add((&group).cast[any TaskGroup&](), move task)
+	task_group_add((&group).cast[any TaskGroup&], move task)
 	wait all group
 
 def typed_pool_scope(value: i64) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
@@ -92,7 +92,7 @@ def typed_runtime_carrier_transfer(pool: any ThreadPool&, mu: Mutex, cv: CondVar
 def typed_lock_scope(mu: mutable Mutex, cv: mutable CondVar, ready: bool) -> bool can[Sync.Lock, Sync.Unlock, Sync.Wait]:
 	lock mu as g:
 		while not ready:
-			g <- cond_wait((&cv).cast[any CondVar&](), move g)
+			g <- cond_wait((&cv).cast[any CondVar&], move g)
 		return g.handle != null
 
 def typed_notify_scope(cv: mutable CondVar, broadcast: bool) can[Sync.Notify]:

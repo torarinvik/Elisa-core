@@ -1370,8 +1370,8 @@ func TestRunCLIWarnsOnLegacyCastSyntax(t *testing.T) {
 	if !strings.Contains(stderr.String(), "legacy cast syntax `.cast[T]()` is deprecated") {
 		t.Fatalf("expected legacy cast warning on stderr, got:\n%s", stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "const VALUE = 1 -> i64") {
-		t.Fatalf("expected AST output to normalize to arrow cast syntax, got:\n%s", stdout.String())
+	if !strings.Contains(stdout.String(), "const VALUE = 1.cast[i64]") {
+		t.Fatalf("expected AST output to normalize to .cast[T] syntax, got:\n%s", stdout.String())
 	}
 }
 

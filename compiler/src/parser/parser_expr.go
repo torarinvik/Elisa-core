@@ -753,9 +753,13 @@ func (p *Parser) parsePostfix() ast.Expr {
 				p.advance()
 				target := p.parseTypeExpr()
 				p.expect(lexer.TOKEN_RBRACKET)
-				p.expect(lexer.TOKEN_LPAREN)
-				p.expect(lexer.TOKEN_RPAREN)
-				expr = &ast.CastExpr{Position: pos, Operand: expr, Target: target, LegacySyntax: true}
+				legacySyntax := false
+				if p.peek() == lexer.TOKEN_LPAREN && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_RPAREN {
+					p.advance()
+					p.advance()
+					legacySyntax = true
+				}
+				expr = &ast.CastExpr{Position: pos, Operand: expr, Target: target, LegacySyntax: legacySyntax}
 				continue
 			}
 
@@ -783,7 +787,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 				var target ast.TypeExpr = &ast.NamedType{Position: castPos, Name: field}
 				target, _ = p.parseRefTypeSuffixes(target, castPos, ast.RefStorageAny, false, "", "")
 				if p.peek() == lexer.TOKEN_LPAREN {
-					p.errorf("legacy reference cast syntax is no longer supported; use .cast[any T&]() with an explicit target type instead")
+					p.errorf("legacy reference cast syntax is no longer supported; use .cast[any T&] with an explicit target type instead")
 					p.advance()
 					p.expect(lexer.TOKEN_RPAREN)
 					expr = &ast.CastExpr{Position: castPos, Operand: expr, Target: target}

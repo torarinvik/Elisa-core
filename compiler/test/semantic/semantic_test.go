@@ -357,7 +357,7 @@ def invoke_writer(fn: func(any u8&) -> int can[Console.Write], text: any u8&) ->
     return fn(text)
 
 def run() -> int can[Console.Write]:
-    return invoke_writer(puts, "hello".cast[any u8&]())
+	return invoke_writer(puts, "hello".cast[any u8&])
 `
 	result, errs := parseAndAnalyze(t, "function_type_permissions.llcontext", src)
 	requireNoErrors(t, errs)
@@ -371,7 +371,7 @@ def invoke_writer[permission P](fn: func(any u8&) -> int can[P], text: any u8&) 
     return fn(text)
 
 def run() -> int can[Console.Write]:
-    return invoke_writer(puts, "hello".cast[any u8&]())
+	return invoke_writer(puts, "hello".cast[any u8&])
 `
 	result, errs := parseAndAnalyze(t, "permission_polymorphic_function_wrapper.llcontext", src)
 	requireNoErrors(t, errs)
@@ -397,14 +397,14 @@ func TestAnalyzeAcceptsFunctionValueErasureCasts(t *testing.T) {
     return value + 1
 
 def call_erased(raw: any void&, value: i64) -> i64:
-    fn: func(i64) -> i64 = raw.cast[func(i64) -> i64]()
+	fn: func(i64) -> i64 = raw.cast[func(i64) -> i64]
     return fn(value)
 
 def run() -> i64:
-    raw: any void& = inc.cast[any void&]()
-    bits: uintptr = raw.cast[uintptr]()
-    fn: func(i64) -> i64 = bits.cast[func(i64) -> i64]()
-    return call_erased(fn.cast[any void&](), 40)
+	raw: any void& = inc.cast[any void&]
+	bits: uintptr = raw.cast[uintptr]
+	fn: func(i64) -> i64 = bits.cast[func(i64) -> i64]
+	return call_erased(fn.cast[any void&], 40)
 `
 	result, errs := parseAndAnalyze(t, "function_value_erasure_casts.llcontext", src)
 	requireNoErrors(t, errs)
@@ -576,7 +576,7 @@ func TestAnalyzeRejectsAwaitAfterTaskGroupTransfer(t *testing.T) {
 extern pool_await(task: Task[i64, Pending]) -> i64
 
 def bad(group: mutable TaskGroup, task: Task[i64, Pending]) -> i64:
-    task_group_add((&group).cast[any TaskGroup&](), move task)
+	task_group_add((&group).cast[any TaskGroup&], move task)
     return await task
 `
 	_, errs := parseAndAnalyze(t, "consumed_task_handle_reject.llcontext", src)
@@ -680,7 +680,7 @@ func TestAnalyzeRejectsDroppedTaskGroupWithPendingTasksAtScopeExit(t *testing.T)
 	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
 
 def bad(group: mutable TaskGroup, task: Task[i64, Pending]) -> void:
-    task_group_add((&group).cast[any TaskGroup&](), move task)
+	task_group_add((&group).cast[any TaskGroup&], move task)
 `
 	_, errs := parseAndAnalyze(t, "drop_task_group_with_pending_tasks_scope_exit_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -699,7 +699,7 @@ repr(c) struct Holder:
     group: mutable TaskGroup
 
 def bad(holder: mutable Holder, task: Task[i64, Pending]) -> void:
-    task_group_add((&holder.group).cast[any TaskGroup&](), move task)
+	task_group_add((&holder.group).cast[any TaskGroup&], move task)
 `
 	_, errs := parseAndAnalyze(t, "drop_task_group_holder_with_pending_tasks_scope_exit_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -716,7 +716,7 @@ func TestAnalyzeAcceptsWaitAllAfterTaskGroupAdd(t *testing.T) {
 extern task_group_wait_all(group: any TaskGroup&) -> void
 
 def ok(group: mutable TaskGroup, task: Task[i64, Pending]) -> void:
-    task_group_add((&group).cast[any TaskGroup&](), move task)
+	task_group_add((&group).cast[any TaskGroup&], move task)
     wait all group
 `
 	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_ok.llcontext", src)
@@ -730,7 +730,7 @@ func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaBorrowedAlias(t *testing.T) {
 extern task_group_wait_all(group: any TaskGroup&) -> void
 
 def ok(group: mutable TaskGroup, task: Task[i64, Pending]) -> void:
-	group_ref: any TaskGroup& = (&group).cast[any TaskGroup&]()
+	group_ref: any TaskGroup& = (&group).cast[any TaskGroup&]
 	task_group_add(group_ref, move task)
 	wait all group
 `
@@ -748,7 +748,7 @@ repr(c) struct GroupHolder:
 	group_ref: any TaskGroup&
 
 def ok(group: mutable TaskGroup, task: Task[i64, Pending]) -> void:
-	holder: GroupHolder = GroupHolder((&group).cast[any TaskGroup&]())
+	holder: GroupHolder = GroupHolder((&group).cast[any TaskGroup&])
 	task_group_add(holder.group_ref, move task)
 	wait all group
 `
@@ -816,7 +816,7 @@ extern pool_shutdown(pool: any ThreadPool&) -> void
 
 def ok() -> void:
 	pool: ThreadPool = pool_new(2u)
-	pool_shutdown((&pool).cast[any ThreadPool&]())
+	pool_shutdown((&pool).cast[any ThreadPool&])
 `
 	result, errs := parseAndAnalyze(t, "pool_shutdown_after_pool_new_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -837,8 +837,8 @@ def work(value: i64) -> i64:
 
 def bad() -> void:
 	pool: ThreadPool = pool_new(2u)
-	pool_shutdown((&pool).cast[any ThreadPool&]())
-	_ = pool_submit1((&pool).cast[any ThreadPool&](), work, 1)
+	pool_shutdown((&pool).cast[any ThreadPool&])
+	_ = pool_submit1((&pool).cast[any ThreadPool&], work, 1)
 `
 	_, errs := parseAndAnalyze(t, "thread_pool_submit_after_shutdown_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -863,9 +863,9 @@ def work(value: i64) -> i64:
 
 def bad() -> void:
 	pool: ThreadPool = pool_new(2u)
-	pool_ref: any ThreadPool& = (&pool).cast[any ThreadPool&]()
+	pool_ref: any ThreadPool& = (&pool).cast[any ThreadPool&]
 	pool_shutdown(pool_ref)
-	_ = pool_submit1((&pool).cast[any ThreadPool&](), work, 1)
+	_ = pool_submit1((&pool).cast[any ThreadPool&], work, 1)
 `
 	_, errs := parseAndAnalyze(t, "thread_pool_submit_after_alias_shutdown_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -917,9 +917,9 @@ def work(value: i64) -> i64:
 
 def bad() -> void:
 	pool: ThreadPool = pool_new(2u)
-	holder: PoolHolder = PoolHolder((&pool).cast[any ThreadPool&]())
+	holder: PoolHolder = PoolHolder((&pool).cast[any ThreadPool&])
 	pool_shutdown(holder.pool_ref)
-	_ = pool_submit1((&pool).cast[any ThreadPool&](), work, 1)
+	_ = pool_submit1((&pool).cast[any ThreadPool&], work, 1)
 `
 	_, errs := parseAndAnalyze(t, "thread_pool_submit_after_projected_alias_shutdown_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -2195,8 +2195,8 @@ extern pool_shutdown(pool: any ThreadPool&) -> void
 
 def bad() -> void:
 	pool: ThreadPool = pool_new(2u)
-	pool_shutdown((&pool).cast[any ThreadPool&]())
-	pool_shutdown((&pool).cast[any ThreadPool&]())
+	pool_shutdown((&pool).cast[any ThreadPool&])
+	pool_shutdown((&pool).cast[any ThreadPool&])
 `
 	_, errs := parseAndAnalyze(t, "thread_pool_double_shutdown_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -2214,9 +2214,9 @@ extern pool_shutdown(pool: any ThreadPool&) -> void
 
 def ok() -> void:
 	pool: mutable ThreadPool = pool_new(2u)
-	pool_shutdown((&pool).cast[any ThreadPool&]())
+	pool_shutdown((&pool).cast[any ThreadPool&])
 	pool <- pool_new(1u)
-	pool_shutdown((&pool).cast[any ThreadPool&]())
+	pool_shutdown((&pool).cast[any ThreadPool&])
 `
 	result, errs := parseAndAnalyze(t, "thread_pool_reinitialize_after_shutdown_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -2296,7 +2296,7 @@ extern fetch_and(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 
 extern fetch_xor(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
 
 def ok(slot: mutable atomic[i64]) -> i64 can[Atomics.Rmw]:
-	slot_ref: any atomic[i64]& = (&slot).cast[any atomic[i64]&]()
+	slot_ref: any atomic[i64]& = (&slot).cast[any atomic[i64]&]
 	add: i64 = fetch_add(slot_ref, 1, MemoryOrder.AcqRel)
 	sub: i64 = fetch_sub(slot_ref, 2, MemoryOrder.AcqRel)
 	or_bits: i64 = fetch_or(slot_ref, 4, MemoryOrder.AcqRel)
@@ -2321,7 +2321,7 @@ func TestAnalyzeRejectsAtomicRmwOnBoolPayload(t *testing.T) {
 extern fetch_or(slot: any atomic[bool]&, value: bool, order: MemoryOrder) -> bool can[Atomics.Rmw]
 
 def bad(slot: mutable atomic[bool]) -> bool can[Atomics.Rmw]:
-	slot_ref: any atomic[bool]& = (&slot).cast[any atomic[bool]&]()
+	slot_ref: any atomic[bool]& = (&slot).cast[any atomic[bool]&]
 	return fetch_or(slot_ref, true, MemoryOrder.AcqRel)
 `
 	_, errs := parseAndAnalyze(t, "atomic_rmw_bool_reject.llcontext", src)
@@ -2345,7 +2345,7 @@ func TestAnalyzeRejectsAtomicRmwOnPointerPayload(t *testing.T) {
 extern fetch_xor(slot: any atomic[any u8&]&, value: any u8&, order: MemoryOrder) -> any u8& can[Atomics.Rmw]
 
 def bad(slot: mutable atomic[any u8&], value: any u8&) -> any u8& can[Atomics.Rmw]:
-	slot_ref: any atomic[any u8&]& = (&slot).cast[any atomic[any u8&]&]()
+	slot_ref: any atomic[any u8&]& = (&slot).cast[any atomic[any u8&]&]
 	return fetch_xor(slot_ref, value, MemoryOrder.AcqRel)
 `
 	_, errs := parseAndAnalyze(t, "atomic_rmw_pointer_reject.llcontext", src)
@@ -2366,7 +2366,7 @@ extern cond_wait(cv: any CondVar&, g: MutexGuard[Held]) -> MutexGuard[Held]
 def ok(mu: mutable Mutex, cv: mutable CondVar, ready: bool) -> void can[Sync.Lock, Sync.Unlock, Sync.Wait]:
     lock mu as g:
         while not ready:
-			g <- cond_wait((&cv).cast[any CondVar&](), move g)
+			g <- cond_wait((&cv).cast[any CondVar&], move g)
 `
 	result, errs := parseAndAnalyze(t, "lock_scope_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -3590,7 +3590,7 @@ export func pass_array_c(value: i32[4]) -> i32[4] = pass_array
 
 func TestAnalyzeTernaryRefinesNullablePointerBranch(t *testing.T) {
 	src := `def choose_text(value: any u8&?) -> any u8&:
-	return value if value != null else "".cast[any u8&]()
+	return value if value != null else "".cast[any u8&]
 `
 	_, errs := parseAndAnalyze(t, "ternary_refinement.llcontext", src)
 	requireNoErrors(t, errs)
@@ -3604,7 +3604,7 @@ extern maybe_box() -> any Box&?
 
 def bad() -> any Box&:
     box: any Box&? = maybe_box()
-    return box.cast[any Box&]()
+	return box.cast[any Box&]
 `
 	_, errs := parseAndAnalyze(t, "nonnull_cast_rejection.llcontext", src)
 	if len(errs) == 0 {
@@ -3670,16 +3670,16 @@ func TestAnalyzeAcceptsStorageQualifiedPointersAndCastSyntax(t *testing.T) {
 extern maybe_heap_box() -> heap Box&?
 
 def widen(box: heap Box&?) -> any Box&?:
-	return box -> any Box&?
+	return box.cast[any Box&?]
 
 def keep_heap(box: heap Box&?) -> heap Box&?:
-	return box -> any Box&? -> heap Box&?
+	return box.cast[any Box&?].cast[heap Box&?]
 
 def coerce_text() -> any u8&:
-	return "hello" -> any u8&
+	return "hello".cast[any u8&]
 
 def use_source() -> any Box&?:
-	return maybe_heap_box() -> any Box&?
+	return maybe_heap_box().cast[any Box&?]
 `
 	result, errs := parseAndAnalyze(t, "storage_cast_syntax.llcontext", src)
 	requireNoErrors(t, errs)
@@ -4202,7 +4202,7 @@ func TestAnalyzeRejectsReturningCastedReferenceAllocatedFromLocalRegion(t *testi
 	src := `def bad() -> any i32&:
 	region scratch(1024u)
 	value: any i32& = new[scratch] 1
-	return value.cast[any i32&]()
+	return value.cast[any i32&]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_return_cast_ref_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -6148,7 +6148,7 @@ def bad() -> i32:
 	mark scratch as cp
 	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
 	window: Window = Window(items[0u:2u], 9i32)
-	selected: view[Holder] = get_items((&window).cast[any Window&]())
+	selected: view[Holder] = get_items((&window).cast[any Window&])
 	which: usize = 1u
 	alias: any i32& = selected[which].value
 	restore scratch from cp
@@ -6181,7 +6181,7 @@ def bad() -> i32:
 	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
 	window: Window = Window(items[0u:2u], 9i32)
 	which: usize = 1u
-	item: Holder = get_item((&window).cast[any Window&](), which)
+	item: Holder = get_item((&window).cast[any Window&], which)
 	alias: any i32& = item.value
 	restore scratch from cp
 	return alias[0u]
@@ -6831,7 +6831,7 @@ def load_text(path: any u8&) -> dstr[file_text] error[IoError.NotFound, ...]:
 	return text
 
 def load_with_fallback(path: any u8&) -> any u8&:
-	text: any u8& = try read_file(path) else "".cast[any u8&]()
+	text: any u8& = try read_file(path) else "".cast[any u8&]
 	return text
 `
 	_, errs := parseAndAnalyze(t, "error_handling_ok.llcontext", src)
@@ -7124,7 +7124,7 @@ func TestAnalyzeRejectsTryOnNonFallibleExpression(t *testing.T) {
 
 func TestAnalyzeRejectsElseOnNonNullableReference(t *testing.T) {
 	src := `def bad(value: any u8&) -> any u8&:
-	return value else "".cast[any u8&]()
+	return value else "".cast[any u8&]
 `
 	_, errs := parseAndAnalyze(t, "else_on_nonnullable_ref.llcontext", src)
 	if len(errs) == 0 {

@@ -402,7 +402,7 @@ def json_decoded_string_len(source: any u8&, source_offset: usize, source_len: u
         if ch != JSON_CH_BSLASH:
             total <- total + 1
         else:
-            codepoint: i64 = json_decode_escape_codepoint_from_source(source, end, (&pos).cast[any usize&]())
+            codepoint: i64 = json_decode_escape_codepoint_from_source(source, end, (&pos).cast[any usize&])
             if codepoint < 0:
                 return -1
             utf8_size: usize = json_utf8_codepoint_size(codepoint)
@@ -420,7 +420,7 @@ def json_decode_string_into(source: any u8&, source_offset: usize, source_len: u
     raw_len: usize = source_len - 2u
     if not json_string_has_escape(source, source_offset, source_len):
         if raw_len > 0u:
-            memcpy(dst.cast[any void&](), (source + raw_offset).cast[any void&](), raw_len)
+            memcpy(dst.cast[any void&], (source + raw_offset).cast[any void&], raw_len)
         return raw_len.i64()
 
     pos: mutable usize = raw_offset
@@ -433,7 +433,7 @@ def json_decode_string_into(source: any u8&, source_offset: usize, source_len: u
             dst[out_pos] <- ch.u8()
             out_pos <- out_pos + 1u
         else:
-            codepoint: i64 = json_decode_escape_codepoint_from_source(source, end, (&pos).cast[any usize&]())
+            codepoint: i64 = json_decode_escape_codepoint_from_source(source, end, (&pos).cast[any usize&])
             if codepoint < 0:
                 return -1
             out_pos <- out_pos + json_write_utf8_codepoint(dst, out_pos, codepoint)
@@ -458,11 +458,11 @@ def json_string_matches_literal(source: any u8&, source_offset: usize, source_le
                 return false
             literal_pos <- literal_pos + 1u
         else:
-            codepoint: i64 = json_decode_escape_codepoint_from_source(source, end, (&pos).cast[any usize&]())
+            codepoint: i64 = json_decode_escape_codepoint_from_source(source, end, (&pos).cast[any usize&])
             if codepoint < 0:
                 return false
             utf8: u8[4] = zeroed
-            encoded_len: usize = json_write_utf8_codepoint((&utf8[0]).cast[any u8&](), 0u, codepoint)
+            encoded_len: usize = json_write_utf8_codepoint((&utf8[0]).cast[any u8&], 0u, codepoint)
             if literal_pos + encoded_len > literal_len:
                 return false
             i: mutable usize = 0u
@@ -581,7 +581,7 @@ def json_parse_string_lexeme_at(source: any u8&, source_len: usize, source_offse
         return json_invalid_lexeme()
     cursor: mutable JsonCursor = json_new_cursor_with_len(source, source_len)
     cursor.pos <- source_offset.usize()
-    return json_parse_string_lexeme((&cursor).cast[any JsonCursor&]())
+    return json_parse_string_lexeme((&cursor).cast[any JsonCursor&])
 
 
 def json_parse_number_lexeme_at(source: any u8&, source_len: usize, source_offset: u32) -> JsonLexemeResult:
@@ -589,7 +589,7 @@ def json_parse_number_lexeme_at(source: any u8&, source_len: usize, source_offse
         return json_invalid_lexeme()
     cursor: mutable JsonCursor = json_new_cursor_with_len(source, source_len)
     cursor.pos <- source_offset.usize()
-    return json_parse_number_lexeme((&cursor).cast[any JsonCursor&]())
+    return json_parse_number_lexeme((&cursor).cast[any JsonCursor&])
 
 
 def json_parse_value_after_ws(cursor: any JsonCursor&) -> i64:
@@ -745,19 +745,19 @@ def json_parse_object(cursor: any JsonCursor&) -> i64:
 
 
 def json_parse_true(cursor: any JsonCursor&) -> i64:
-    if json_expect_literal_with_len(cursor, "true".cast[any u8&](), 4u):
+    if json_expect_literal_with_len(cursor, "true".cast[any u8&], 4u):
         return 31
     return -1
 
 
 def json_parse_false(cursor: any JsonCursor&) -> i64:
-    if json_expect_literal_with_len(cursor, "false".cast[any u8&](), 5u):
+    if json_expect_literal_with_len(cursor, "false".cast[any u8&], 5u):
         return 37
     return -1
 
 
 def json_parse_null(cursor: any JsonCursor&) -> i64:
-    if json_expect_literal_with_len(cursor, "null".cast[any u8&](), 4u):
+    if json_expect_literal_with_len(cursor, "null".cast[any u8&], 4u):
         return 41
     return -1
 
@@ -773,13 +773,13 @@ def json_empty_field_view() -> dview[JsonField]:
 def json_node_items_view(items_ptr: any JsonNode&?, item_count: usize) -> dview[JsonNode]:
     if items_ptr == null or item_count == 0u:
         return json_empty_node_view()
-    return DynArrayView(items_ptr.cast[any void&](), item_count, sizeof(JsonNode))
+    return DynArrayView(items_ptr.cast[any void&], item_count, sizeof(JsonNode))
 
 
 def json_field_items_view(fields_ptr: any JsonField&?, field_count: usize) -> dview[JsonField]:
     if fields_ptr == null or field_count == 0u:
         return json_empty_field_view()
-    return DynArrayView(fields_ptr.cast[any void&](), field_count, sizeof(JsonField))
+    return DynArrayView(fields_ptr.cast[any void&], field_count, sizeof(JsonField))
 
 
 def json_ast_array_items_view(node: JsonNode, store: JsonNode.Store[Local]) -> dview[JsonNode]:
@@ -797,27 +797,27 @@ def json_ast_object_fields_view(node: JsonNode, store: JsonNode.Store[Local]) ->
 def json_node_view_ref(items: dview[JsonNode], index: usize) -> any JsonNode&:
     assert index < items.len
     assert items.data != null
-    return (items.data.cast[any u8&]() + index * items.elem_size).cast[any JsonNode&]()
+    return (items.data.cast[any u8&] + index * items.elem_size).cast[any JsonNode&]
 
 
 def json_field_view_ref(fields: dview[JsonField], index: usize) -> any JsonField&:
     assert index < fields.len
     assert fields.data != null
-    return (fields.data.cast[any u8&]() + index * fields.elem_size).cast[any JsonField&]()
+    return (fields.data.cast[any u8&] + index * fields.elem_size).cast[any JsonField&]
 
 
 def json_node_copy_ref(node_ref: any JsonNode&) -> JsonNode:
     out: mutable JsonNode = zeroed
-    arena_memcpy((&out).cast[any void&](), node_ref.cast[any void&](), sizeof(JsonNode))
+    arena_memcpy((&out).cast[any void&], node_ref.cast[any void&], sizeof(JsonNode))
     return move out
 
 
 def json_field_key_ref(field_ref: any JsonField&) -> any JsonNode&:
-    return field_ref.cast[any JsonNode&]()
+    return field_ref.cast[any JsonNode&]
 
 
 def json_field_value_ref(field_ref: any JsonField&) -> any JsonNode&:
-    return (field_ref.cast[any u8&]() + sizeof(JsonNode)).cast[any JsonNode&]()
+    return (field_ref.cast[any u8&] + sizeof(JsonNode)).cast[any JsonNode&]
 
 
 def json_invalid_array_iter_cursor() -> JsonAstArrayIterCursor:
@@ -842,7 +842,7 @@ def json_node_invalid(store: JsonNode.Store[Local]) -> JsonNode:
 
 
 def json_node_store_words(store: any JsonNode.Store[Local]&) -> any uintptr&:
-    return store.cast[any u8&]().cast[any uintptr&]()
+    return store.cast[any u8&].cast[any uintptr&]
 
 
 def json_node_store_row_bytes(store: any JsonNode.Store[Local]&) -> usize:
@@ -883,7 +883,7 @@ def json_ast_nodes_count(items: dview[JsonNode], store: JsonNode.Store[Local]) -
     index: mutable usize = 0u
     while index < readonly_items.len:
         item: mutable JsonNode = zeroed
-        arena_memcpy((&item).cast[any void&](), json_node_view_ref(readonly_items, index).cast[any void&](), sizeof(JsonNode))
+        arena_memcpy((&item).cast[any void&], json_node_view_ref(readonly_items, index).cast[any void&], sizeof(JsonNode))
         item_count: i64 = json_ast_node_count(item, store)
         if item_count < 0:
             return -1
@@ -901,8 +901,8 @@ def json_ast_fields_count(fields: dview[JsonField], store: JsonNode.Store[Local]
         field_ref: any JsonField& = json_field_view_ref(readonly_fields, index)
         key_node: mutable JsonNode = zeroed
         value_node: mutable JsonNode = zeroed
-        arena_memcpy((&key_node).cast[any void&](), field_ref.cast[any void&](), sizeof(JsonNode))
-        arena_memcpy((&value_node).cast[any void&](), (field_ref.cast[any u8&]() + sizeof(JsonNode)).cast[any void&](), sizeof(JsonNode))
+        arena_memcpy((&key_node).cast[any void&], field_ref.cast[any void&], sizeof(JsonNode))
+        arena_memcpy((&value_node).cast[any void&], (field_ref.cast[any u8&] + sizeof(JsonNode)).cast[any void&], sizeof(JsonNode))
         key_count: i64 = json_ast_node_count(key_node, store)
         if key_count < 0:
             return -1
@@ -1036,7 +1036,7 @@ def json_parse_array_node(cursor: any JsonCursor&, arena: any Arena&, store: Jso
         if value_result.checksum < 0:
             return value_result
 
-        _ = arena_da_append(arena, (&items).cast[any darray[JsonNode]&](), value_result.node)
+        _ = arena_da_append(arena, (&items).cast[any darray[JsonNode]&], value_result.node)
         items_checksum <- items_checksum + value_result.checksum
 
         json_skip_ws(cursor)
@@ -1095,7 +1095,7 @@ def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: Js
 
         field_value <- value_result.node
         field_entry <- JsonField(key_node, field_value)
-        _ = arena_da_append(arena, (&fields).cast[any darray[JsonField]&](), field_entry)
+        _ = arena_da_append(arena, (&fields).cast[any darray[JsonField]&], field_entry)
         fields_checksum <- fields_checksum + key_checksum + value_result.checksum
 
         json_skip_ws(cursor)
@@ -1125,7 +1125,7 @@ def json_parse_value(cursor: any JsonCursor&) -> i64:
 
 
 def json_empty_view() -> StringView:
-    return StringView("".cast[any u8&](), 0)
+    return StringView("".cast[any u8&], 0)
 
 
 def json_invalid_number_value() -> JsonNumberValue:
@@ -1271,22 +1271,22 @@ def json_ast_string_view(source: any u8&, node: JsonNode, store: JsonNode.Store[
 def json_ast_string_value_from_span(source: any u8&, source_offset: usize, source_len: usize) -> heap u8& can[Memory.Allocate, Abort.Panic]:
     decoded_len: i64 = json_decoded_string_len(source, source_offset, source_len)
     if decoded_len < 0:
-        return intern_small_string("".cast[any u8&](), 0)
+        return intern_small_string("".cast[any u8&], 0)
 
     if decoded_len <= 8:
         text: u8[9] = zeroed
-        written: i64 = json_decode_string_into(source, source_offset, source_len, (&text[0]).cast[any u8&]())
+        written: i64 = json_decode_string_into(source, source_offset, source_len, (&text[0]).cast[any u8&])
         if written < 0:
-            return intern_small_string("".cast[any u8&](), 0)
+            return intern_small_string("".cast[any u8&], 0)
         text[written.usize()] <- 0
-        return intern_small_string((&text[0]).cast[any u8&](), written.usize())
+        return intern_small_string((&text[0]).cast[any u8&], written.usize())
 
-    out: heap u8& = alloc_perm((decoded_len + 1).i64()).cast[heap u8&]()
-    written: i64 = json_decode_string_into(source, source_offset, source_len, out.cast[any u8&]())
+    out: heap u8& = alloc_perm((decoded_len + 1).i64()).cast[heap u8&]
+    written: i64 = json_decode_string_into(source, source_offset, source_len, out.cast[any u8&])
     if written < 0:
-        return intern_small_string("".cast[any u8&](), 0)
+        return intern_small_string("".cast[any u8&], 0)
     out[written.usize()] <- 0
-    register_perm_string_len(out.cast[any u8&](), written.usize())
+    register_perm_string_len(out.cast[any u8&], written.usize())
     return out
 
 
@@ -1385,7 +1385,7 @@ def json_u64_digits_exceed_max(source: any u8&, source_offset: usize, source_end
     if digit_count > 20u:
         return true
 
-    max_digits: any u8& = "18446744073709551615".cast[any u8&]()
+    max_digits: any u8& = "18446744073709551615".cast[any u8&]
     pos: mutable usize = source_offset
     max_pos: mutable usize = 0u
     while pos < source_end:
@@ -1517,7 +1517,7 @@ def json_ast_string_value_with_len(source: any u8&, source_len: usize, node: Jso
     lexeme: JsonLexemeResult = json_ast_text_lexeme(source, source_len, node, store)
     if lexeme.checksum >= 0:
         return json_ast_string_value_from_span(source, lexeme.source_offset, lexeme.source_len)
-    return intern_small_string("".cast[any u8&](), 0)
+    return intern_small_string("".cast[any u8&], 0)
 
 
 def json_ast_string_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> heap u8& can[Memory.Allocate, Abort.Panic]:
@@ -1569,7 +1569,7 @@ def json_ast_array_nth_ref(node: JsonNode, index: usize, store: JsonNode.Store[L
 def json_ast_array_nth(node: JsonNode, index: usize, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: any JsonNode&? = json_ast_array_nth_ref(node, index, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[any JsonNode&]())
+        return json_node_copy_ref(node_ref.cast[any JsonNode&])
     return json_node_invalid(store)
 
 
@@ -1589,7 +1589,7 @@ def json_ast_array_iter_value_ref(cursor: JsonAstArrayIterCursor, store: JsonNod
 def json_ast_array_iter_value(cursor: JsonAstArrayIterCursor, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: any JsonNode&? = json_ast_array_iter_value_ref(cursor, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[any JsonNode&]())
+        return json_node_copy_ref(node_ref.cast[any JsonNode&])
     return json_node_invalid(store)
 
 
@@ -1614,7 +1614,7 @@ def json_ast_object_get_ref(node: JsonNode, source: any u8&, key: any u8&, store
 def json_ast_object_get(node: JsonNode, source: any u8&, key: any u8&, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: any JsonNode&? = json_ast_object_get_ref(node, source, key, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[any JsonNode&]())
+        return json_node_copy_ref(node_ref.cast[any JsonNode&])
     return json_node_invalid(store)
 
 
@@ -1635,7 +1635,7 @@ def json_ast_object_iter_key_ref(cursor: JsonAstObjectIterCursor, store: JsonNod
 def json_ast_object_iter_key(cursor: JsonAstObjectIterCursor, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: any JsonNode&? = json_ast_object_iter_key_ref(cursor, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[any JsonNode&]())
+        return json_node_copy_ref(node_ref.cast[any JsonNode&])
     return json_node_invalid(store)
 
 
@@ -1649,7 +1649,7 @@ def json_ast_object_iter_value_ref(cursor: JsonAstObjectIterCursor, store: JsonN
 def json_ast_object_iter_value(cursor: JsonAstObjectIterCursor, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: any JsonNode&? = json_ast_object_iter_value_ref(cursor, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[any JsonNode&]())
+        return json_node_copy_ref(node_ref.cast[any JsonNode&])
     return json_node_invalid(store)
 
 
@@ -1680,7 +1680,7 @@ def json_ast_object_key_nth_ref(node: JsonNode, index: usize, store: JsonNode.St
 def json_ast_object_key_nth(node: JsonNode, index: usize, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: any JsonNode&? = json_ast_object_key_nth_ref(node, index, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[any JsonNode&]())
+        return json_node_copy_ref(node_ref.cast[any JsonNode&])
     return json_node_invalid(store)
 
 
@@ -1691,16 +1691,16 @@ def json_ast_object_value_nth_ref(node: JsonNode, index: usize, store: JsonNode.
 def json_ast_object_value_nth(node: JsonNode, index: usize, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: any JsonNode&? = json_ast_object_value_nth_ref(node, index, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[any JsonNode&]())
+        return json_node_copy_ref(node_ref.cast[any JsonNode&])
     return json_node_invalid(store)
 
 
 def json_parser_checksum_impl(source: any u8&) -> i64:
     cursor: mutable JsonCursor = json_new_cursor(source)
-    checksum: i64 = json_parse_value((&cursor).cast[any JsonCursor&]())
+    checksum: i64 = json_parse_value((&cursor).cast[any JsonCursor&])
     if checksum < 0:
         return -1
-    json_skip_ws((&cursor).cast[any JsonCursor&]())
+    json_skip_ws((&cursor).cast[any JsonCursor&])
     if cursor.pos != cursor.source_len:
         return -1
     return checksum
@@ -1711,10 +1711,10 @@ def json_parse_document_node_with_len(source: any u8&, source_len: usize, arena:
     if source_len > JSON_MAX_INLINE_SOURCE_OFFSET.usize():
         return json_parse_node_result(invalid_node, -1)
     cursor: mutable JsonCursor = json_new_cursor_with_len(source, source_len)
-    result: JsonParseNodeResult = json_parse_value_node((&cursor).cast[any JsonCursor&](), arena, store, invalid_node)
+    result: JsonParseNodeResult = json_parse_value_node((&cursor).cast[any JsonCursor&], arena, store, invalid_node)
     if result.checksum < 0:
         return result
-    json_skip_ws((&cursor).cast[any JsonCursor&]())
+    json_skip_ws((&cursor).cast[any JsonCursor&])
     if cursor.pos != cursor.source_len:
         return json_parse_node_result(invalid_node, -1)
     return result
@@ -1758,13 +1758,13 @@ def json_parser_array_iter_is_live(iter: any JsonParserArrayIter&) -> bool:
 
 
 def json_parser_array_iter_doc_impl(iter: any JsonParserArrayIter&) -> heap JsonParserDocumentInternal&:
-    return iter[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    return iter[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
 
 
 def json_parser_array_iter_cursor(iter: any JsonParserArrayIter&) -> JsonAstArrayIterCursor:
     if not json_parser_array_iter_is_live(iter):
         return json_invalid_array_iter_cursor()
-    items: dview[JsonNode] = json_node_items_view(iter[0u].items_ptr.cast[any JsonNode&?](), iter[0u].item_count)
+    items: dview[JsonNode] = json_node_items_view(iter[0u].items_ptr.cast[any JsonNode&?], iter[0u].item_count)
     if iter[0u].index < items.len:
         return JsonAstArrayIterCursor(items, iter[0u].index)
     return json_invalid_array_iter_cursor()
@@ -1775,30 +1775,30 @@ def json_parser_object_iter_is_live(iter: any JsonParserObjectIter&) -> bool:
 
 
 def json_parser_object_iter_doc_impl(iter: any JsonParserObjectIter&) -> heap JsonParserDocumentInternal&:
-    return iter[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    return iter[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
 
 
 def json_parser_object_iter_cursor(iter: any JsonParserObjectIter&) -> JsonAstObjectIterCursor:
     if not json_parser_object_iter_is_live(iter):
         return json_invalid_object_iter_cursor()
-    fields: dview[JsonField] = json_field_items_view(iter[0u].fields_ptr.cast[any JsonField&?](), iter[0u].field_count)
+    fields: dview[JsonField] = json_field_items_view(iter[0u].fields_ptr.cast[any JsonField&?], iter[0u].field_count)
     if iter[0u].index < fields.len:
         return JsonAstObjectIterCursor(fields, iter[0u].index)
     return json_invalid_object_iter_cursor()
 
 
 def json_parser_value_doc_impl(value: any JsonParserValue&) -> heap JsonParserDocumentInternal&:
-    return value[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    return value[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
 
 
 def json_parser_value_node_ref(value: any JsonParserValue&) -> any JsonNode&?:
-    return value[0u].node_ptr.cast[any JsonNode&?]()
+    return value[0u].node_ptr.cast[any JsonNode&?]
 
 
 def json_parser_value_node(value: any JsonParserValue&) -> JsonNode:
     node_ref: any JsonNode&? = json_parser_value_node_ref(value)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[any JsonNode&]())
+        return json_node_copy_ref(node_ref.cast[any JsonNode&])
     out: mutable JsonNode = zeroed
     return move out
 
@@ -1809,7 +1809,7 @@ def json_parser_value_from_node_ref(impl: heap JsonParserDocumentInternal&, node
 
     out: mutable JsonParserValue = zeroed
     out.impl_bits <- impl.uintptr()
-    out.node_ptr <- node_ref.cast[any void&?]()
+    out.node_ptr <- node_ref.cast[any void&?]
     return move out
 
 
@@ -1847,8 +1847,8 @@ def json_parser_document_source_len(impl: heap JsonParserDocumentInternal&) -> u
 
 def json_parser_document_store(impl: heap JsonParserDocumentInternal&) -> JsonNode.Store[Local]:
     store: mutable JsonNode.Store[Local] = zeroed
-    words: any uintptr& = json_node_store_words((&store).cast[any JsonNode.Store[Local]&]())
-    words[0u] <- (&impl.arena).cast[any u8&]().uintptr()
+    words: any uintptr& = json_node_store_words((&store).cast[any JsonNode.Store[Local]&])
+    words[0u] <- (&impl.arena).cast[any u8&].uintptr()
     words[1u] <- impl.store_row_bytes.uintptr()
     words[2u] <- impl.store_state_bits
     return move store
@@ -1890,27 +1890,27 @@ def json_parser_document_parse_impl(source: any u8&, out: any JsonParserDocument
     first_region: heap Region& = new_region(json_ast_scratch_capacity(source_len) + internal_words + source_words)
     first_region.count <- internal_words
 
-    internal: heap JsonParserDocumentInternal& = packed_store_region_data(first_region).cast[heap JsonParserDocumentInternal&]()
+    internal: heap JsonParserDocumentInternal& = packed_store_region_data(first_region).cast[heap JsonParserDocumentInternal&]
     arena_owner: mutable Arena = Arena(first_region, first_region, 0u)
-    source_copy: heap u8& = arena_alloc((&arena_owner).cast[any Arena&](), source_len + 1u).cast[heap u8&]()
+    source_copy: heap u8& = arena_alloc((&arena_owner).cast[any Arena&], source_len + 1u).cast[heap u8&]
     if source_len > 0u:
-        memcpy(source_copy.cast[any void&](), source.cast[any void&](), source_len)
+        memcpy(source_copy.cast[any void&], source.cast[any void&], source_len)
     source_copy[source_len] <- 0
 
-    arena: any Arena& = (&arena_owner).cast[any Arena&]()
+    arena: any Arena& = (&arena_owner).cast[any Arena&]
     store: JsonNode.Store[Local] = JsonNode.Store(arena_owner)
-    result: JsonParseNodeResult = json_parse_document_node_with_len(source_copy.cast[any u8&](), source_len, arena, store)
+    result: JsonParseNodeResult = json_parse_document_node_with_len(source_copy.cast[any u8&], source_len, arena, store)
     if result.checksum < 0:
         arena_to_free: mutable Arena = arena_owner
         out[0u] <- json_parser_document_null()
-        arena_free((&arena_to_free).cast[any Arena&]())
+        arena_free((&arena_to_free).cast[any Arena&])
         return 0
 
-    internal.source <- source_copy.cast[any u8&]()
+    internal.source <- source_copy.cast[any u8&]
     internal.source_len <- source_len
     internal.arena <- arena_owner
-    internal.store_row_bytes <- json_node_store_row_bytes((&store).cast[any JsonNode.Store[Local]&]())
-    internal.store_state_bits <- json_node_store_state_bits((&store).cast[any JsonNode.Store[Local]&]())
+    internal.store_row_bytes <- json_node_store_row_bytes((&store).cast[any JsonNode.Store[Local]&])
+    internal.store_state_bits <- json_node_store_state_bits((&store).cast[any JsonNode.Store[Local]&])
     internal.root <- result.node
     internal.checksum <- result.checksum
     out[0u] <- JsonParserDocument(internal.uintptr())
@@ -1922,33 +1922,33 @@ def json_parser_document_destroy_impl(doc: any JsonParserDocument&) can[Memory.R
     if impl_bits == 0u64.uintptr():
         return
 
-    impl: heap JsonParserDocumentInternal& = impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = impl_bits.cast[heap JsonParserDocumentInternal&]
     arena_to_free: mutable Arena = impl.arena
     doc[0u].impl_bits <- 0u64.uintptr()
-    arena_free((&arena_to_free).cast[any Arena&]())
+    arena_free((&arena_to_free).cast[any Arena&])
 
 
 def json_parser_document_destroy_handle_impl(doc_bits: uintptr) -> i64 can[Memory.Release, Abort.Panic]:
     if doc_bits == 0u64.uintptr():
         return 0
 
-    impl: heap JsonParserDocumentInternal& = doc_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc_bits.cast[heap JsonParserDocumentInternal&]
     arena_to_free: mutable Arena = impl.arena
-    arena_free((&arena_to_free).cast[any Arena&]())
+    arena_free((&arena_to_free).cast[any Arena&])
     return 1
 
 
 def json_parser_document_checksum_impl(doc: any JsonParserDocument&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     return impl.checksum
 
 
 def json_parser_document_node_count_impl(doc: any JsonParserDocument&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = json_parser_document_store(impl)
     return json_ast_node_count(impl.root, store)
 
@@ -1956,7 +1956,7 @@ def json_parser_document_node_count_impl(doc: any JsonParserDocument&) -> i64:
 def json_parser_document_root_kind_impl(doc: any JsonParserDocument&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     return json_ast_kind_code(json_ast_kind(impl.root, store))
 
@@ -1964,7 +1964,7 @@ def json_parser_document_root_kind_impl(doc: any JsonParserDocument&) -> i64:
 def json_parser_document_object_len_impl(doc: any JsonParserDocument&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     return json_ast_object_len(impl.root, store)
 
@@ -1972,7 +1972,7 @@ def json_parser_document_object_len_impl(doc: any JsonParserDocument&) -> i64:
 def json_parser_document_array_len_impl(doc: any JsonParserDocument&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     return json_ast_array_len(impl.root, store)
 
@@ -1980,7 +1980,7 @@ def json_parser_document_array_len_impl(doc: any JsonParserDocument&) -> i64:
 def json_parser_document_field_bool_impl(doc: any JsonParserDocument&, key: any u8&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     field_node: JsonNode = json_parser_document_field_node(impl, key, store)
     if json_node_is_invalid(field_node, store):
@@ -1991,7 +1991,7 @@ def json_parser_document_field_bool_impl(doc: any JsonParserDocument&, key: any 
 def json_parser_document_field_is_null_impl(doc: any JsonParserDocument&, key: any u8&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     field_node: JsonNode = json_parser_document_field_node(impl, key, store)
     if json_node_is_invalid(field_node, store):
@@ -2002,7 +2002,7 @@ def json_parser_document_field_is_null_impl(doc: any JsonParserDocument&, key: a
 def json_parser_document_field_kind_impl(doc: any JsonParserDocument&, key: any u8&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     field_node: JsonNode = json_parser_document_field_node(impl, key, store)
     if json_node_is_invalid(field_node, store):
@@ -2013,7 +2013,7 @@ def json_parser_document_field_kind_impl(doc: any JsonParserDocument&, key: any 
 def json_parser_document_field_number_kind_impl(doc: any JsonParserDocument&, key: any u8&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     field_node: JsonNode = json_parser_document_field_node(impl, key, store)
     if json_node_is_invalid(field_node, store):
@@ -2024,7 +2024,7 @@ def json_parser_document_field_number_kind_impl(doc: any JsonParserDocument&, ke
 def json_parser_document_field_string_len_impl(doc: any JsonParserDocument&, key: any u8&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     field_node: JsonNode = json_parser_document_field_node(impl, key, store)
     if json_node_is_invalid(field_node, store):
@@ -2035,7 +2035,7 @@ def json_parser_document_field_string_len_impl(doc: any JsonParserDocument&, key
 def json_parser_document_field_string_copy_impl(doc: any JsonParserDocument&, key: any u8&, out: any u8&, capacity: usize) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     field_node: JsonNode = json_parser_document_field_node(impl, key, store)
     if json_node_is_invalid(field_node, store):
@@ -2046,7 +2046,7 @@ def json_parser_document_field_string_copy_impl(doc: any JsonParserDocument&, ke
 def json_parser_document_field_i64_impl(doc: any JsonParserDocument&, key: any u8&, out: any i64&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return 0
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     field_node: JsonNode = json_parser_document_field_node(impl, key, store)
     if json_node_is_invalid(field_node, store):
@@ -2061,7 +2061,7 @@ def json_parser_document_field_i64_impl(doc: any JsonParserDocument&, key: any u
 def json_parser_document_field_u64_impl(doc: any JsonParserDocument&, key: any u8&, out: any u64&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return 0
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     field_node: JsonNode = json_parser_document_field_node(impl, key, store)
     if json_node_is_invalid(field_node, store):
@@ -2076,7 +2076,7 @@ def json_parser_document_field_u64_impl(doc: any JsonParserDocument&, key: any u
 def json_parser_document_field_f64_impl(doc: any JsonParserDocument&, key: any u8&, out: any f64&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return 0
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     field_node: JsonNode = json_parser_document_field_node(impl, key, store)
     if json_node_is_invalid(field_node, store):
@@ -2091,7 +2091,7 @@ def json_parser_document_field_f64_impl(doc: any JsonParserDocument&, key: any u
 def json_parser_document_field_f32_impl(doc: any JsonParserDocument&, key: any u8&, out: any f32&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return 0
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     field_node: JsonNode = json_parser_document_field_node(impl, key, store)
     if json_node_is_invalid(field_node, store):
@@ -2106,7 +2106,7 @@ def json_parser_document_field_f32_impl(doc: any JsonParserDocument&, key: any u
 def json_parser_document_array_field_len_impl(doc: any JsonParserDocument&, key: any u8&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     field_node: JsonNode = json_parser_document_field_node(impl, key, store)
     if json_node_is_invalid(field_node, store):
@@ -2117,7 +2117,7 @@ def json_parser_document_array_field_len_impl(doc: any JsonParserDocument&, key:
 def json_parser_document_object_field_len_impl(doc: any JsonParserDocument&, key: any u8&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     field_node: JsonNode = json_parser_document_field_node(impl, key, store)
     if json_node_is_invalid(field_node, store):
@@ -2128,7 +2128,7 @@ def json_parser_document_object_field_len_impl(doc: any JsonParserDocument&, key
 def json_parser_document_array_field_i64_at_impl(doc: any JsonParserDocument&, key: any u8&, index: usize, out: any i64&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return 0
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     item_node: JsonNode = json_parser_document_array_field_item_node(impl, key, index, store)
     if json_node_is_invalid(item_node, store):
@@ -2143,7 +2143,7 @@ def json_parser_document_array_field_i64_at_impl(doc: any JsonParserDocument&, k
 def json_parser_document_array_field_f64_at_impl(doc: any JsonParserDocument&, key: any u8&, index: usize, out: any f64&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return 0
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     item_node: JsonNode = json_parser_document_array_field_item_node(impl, key, index, store)
     if json_node_is_invalid(item_node, store):
@@ -2158,7 +2158,7 @@ def json_parser_document_array_field_f64_at_impl(doc: any JsonParserDocument&, k
 def json_parser_document_array_field_f32_at_impl(doc: any JsonParserDocument&, key: any u8&, index: usize, out: any f32&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return 0
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     item_node: JsonNode = json_parser_document_array_field_item_node(impl, key, index, store)
     if json_node_is_invalid(item_node, store):
@@ -2173,7 +2173,7 @@ def json_parser_document_array_field_f32_at_impl(doc: any JsonParserDocument&, k
 def json_parser_document_array_field_kind_at_impl(doc: any JsonParserDocument&, key: any u8&, index: usize) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     item_node: JsonNode = json_parser_document_array_field_item_node(impl, key, index, store)
     if json_node_is_invalid(item_node, store):
@@ -2184,7 +2184,7 @@ def json_parser_document_array_field_kind_at_impl(doc: any JsonParserDocument&, 
 def json_parser_document_array_field_string_copy_at_impl(doc: any JsonParserDocument&, key: any u8&, index: usize, out: any u8&, capacity: usize) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     item_node: JsonNode = json_parser_document_array_field_item_node(impl, key, index, store)
     if json_node_is_invalid(item_node, store):
@@ -2195,7 +2195,7 @@ def json_parser_document_array_field_string_copy_at_impl(doc: any JsonParserDocu
 def json_parser_document_object_key_len_at_impl(doc: any JsonParserDocument&, index: usize) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     key_node: JsonNode = json_parser_document_object_key_node_at(impl, index, store)
     if json_node_is_invalid(key_node, store):
@@ -2206,7 +2206,7 @@ def json_parser_document_object_key_len_at_impl(doc: any JsonParserDocument&, in
 def json_parser_document_object_key_copy_at_impl(doc: any JsonParserDocument&, index: usize, out: any u8&, capacity: usize) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     key_node: JsonNode = json_parser_document_object_key_node_at(impl, index, store)
     if json_node_is_invalid(key_node, store):
@@ -2217,7 +2217,7 @@ def json_parser_document_object_key_copy_at_impl(doc: any JsonParserDocument&, i
 def json_parser_document_object_value_kind_at_impl(doc: any JsonParserDocument&, index: usize) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     value_node: JsonNode = json_parser_document_object_value_node_at(impl, index, store)
     if json_node_is_invalid(value_node, store):
@@ -2228,7 +2228,7 @@ def json_parser_document_object_value_kind_at_impl(doc: any JsonParserDocument&,
 def json_parser_document_object_value_string_copy_at_impl(doc: any JsonParserDocument&, index: usize, out: any u8&, capacity: usize) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     value_node: JsonNode = json_parser_document_object_value_node_at(impl, index, store)
     if json_node_is_invalid(value_node, store):
@@ -2239,7 +2239,7 @@ def json_parser_document_object_value_string_copy_at_impl(doc: any JsonParserDoc
 def json_parser_document_object_field_i64_at_impl(doc: any JsonParserDocument&, index: usize, out: any i64&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return 0
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     value_node: JsonNode = json_parser_document_object_value_node_at(impl, index, store)
     if json_node_is_invalid(value_node, store):
@@ -2254,7 +2254,7 @@ def json_parser_document_object_field_i64_at_impl(doc: any JsonParserDocument&, 
 def json_parser_document_object_field_f64_at_impl(doc: any JsonParserDocument&, index: usize, out: any f64&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return 0
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     value_node: JsonNode = json_parser_document_object_value_node_at(impl, index, store)
     if json_node_is_invalid(value_node, store):
@@ -2269,7 +2269,7 @@ def json_parser_document_object_field_f64_at_impl(doc: any JsonParserDocument&, 
 def json_parser_document_object_field_f32_at_impl(doc: any JsonParserDocument&, index: usize, out: any f32&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return 0
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     value_node: JsonNode = json_parser_document_object_value_node_at(impl, index, store)
     if json_node_is_invalid(value_node, store):
@@ -2284,7 +2284,7 @@ def json_parser_document_object_field_f32_at_impl(doc: any JsonParserDocument&, 
 def json_parser_document_array_i64_at_impl(doc: any JsonParserDocument&, index: usize, out: any i64&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return 0
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     item_node: JsonNode = json_parser_document_array_item_node_at(impl, index, store)
     if json_node_is_invalid(item_node, store):
@@ -2299,7 +2299,7 @@ def json_parser_document_array_i64_at_impl(doc: any JsonParserDocument&, index: 
 def json_parser_document_array_f64_at_impl(doc: any JsonParserDocument&, index: usize, out: any f64&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return 0
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     item_node: JsonNode = json_parser_document_array_item_node_at(impl, index, store)
     if json_node_is_invalid(item_node, store):
@@ -2314,7 +2314,7 @@ def json_parser_document_array_f64_at_impl(doc: any JsonParserDocument&, index: 
 def json_parser_document_array_f32_at_impl(doc: any JsonParserDocument&, index: usize, out: any f32&) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return 0
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     item_node: JsonNode = json_parser_document_array_item_node_at(impl, index, store)
     if json_node_is_invalid(item_node, store):
@@ -2329,7 +2329,7 @@ def json_parser_document_array_f32_at_impl(doc: any JsonParserDocument&, index: 
 def json_parser_document_array_kind_at_impl(doc: any JsonParserDocument&, index: usize) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     item_node: JsonNode = json_parser_document_array_item_node_at(impl, index, store)
     if json_node_is_invalid(item_node, store):
@@ -2340,7 +2340,7 @@ def json_parser_document_array_kind_at_impl(doc: any JsonParserDocument&, index:
 def json_parser_document_array_string_copy_at_impl(doc: any JsonParserDocument&, index: usize, out: any u8&, capacity: usize) -> i64:
     if doc[0u].impl_bits == 0u64.uintptr():
         return -1
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
     store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
     item_node: JsonNode = json_parser_document_array_item_node_at(impl, index, store)
     if json_node_is_invalid(item_node, store):
@@ -2353,8 +2353,8 @@ def json_parser_document_root_value_impl(doc: any JsonParserDocument&, out: any 
     if doc[0u].impl_bits == 0u64.uintptr():
         return 0
 
-    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]()
-    out[0u] <- json_parser_value_from_node_ref(impl, (&impl.root).cast[any JsonNode&]())
+    impl: heap JsonParserDocumentInternal& = doc[0u].impl_bits.cast[heap JsonParserDocumentInternal&]
+    out[0u] <- json_parser_value_from_node_ref(impl, (&impl.root).cast[any JsonNode&])
     return 1 if out[0u].impl_bits != 0u64.uintptr() else 0
 
 
@@ -2418,7 +2418,7 @@ def json_parser_value_field_node_ref(value: any JsonParserValue&, key: any u8&, 
 def json_parser_value_field_node(value: any JsonParserValue&, key: any u8&, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: any JsonNode&? = json_parser_value_field_node_ref(value, key, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[any JsonNode&]())
+        return json_node_copy_ref(node_ref.cast[any JsonNode&])
     return json_node_invalid(store)
 
 
@@ -2431,7 +2431,7 @@ def json_parser_value_index_node_ref(value: any JsonParserValue&, index: usize, 
 def json_parser_value_index_node(value: any JsonParserValue&, index: usize, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: any JsonNode&? = json_parser_value_index_node_ref(value, index, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[any JsonNode&]())
+        return json_node_copy_ref(node_ref.cast[any JsonNode&])
     return json_node_invalid(store)
 
 
@@ -2444,7 +2444,7 @@ def json_parser_array_iter_value_node_ref(iter: any JsonParserArrayIter&, store:
 def json_parser_array_iter_value_node(iter: any JsonParserArrayIter&, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: any JsonNode&? = json_parser_array_iter_value_node_ref(iter, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[any JsonNode&]())
+        return json_node_copy_ref(node_ref.cast[any JsonNode&])
     return json_node_invalid(store)
 
 
@@ -2457,7 +2457,7 @@ def json_parser_object_iter_key_node_ref(iter: any JsonParserObjectIter&, store:
 def json_parser_object_iter_key_node(iter: any JsonParserObjectIter&, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: any JsonNode&? = json_parser_object_iter_key_node_ref(iter, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[any JsonNode&]())
+        return json_node_copy_ref(node_ref.cast[any JsonNode&])
     return json_node_invalid(store)
 
 
@@ -2470,7 +2470,7 @@ def json_parser_object_iter_value_node_ref(iter: any JsonParserObjectIter&, stor
 def json_parser_object_iter_value_node(iter: any JsonParserObjectIter&, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: any JsonNode&? = json_parser_object_iter_value_node_ref(iter, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[any JsonNode&]())
+        return json_node_copy_ref(node_ref.cast[any JsonNode&])
     return json_node_invalid(store)
 
 
@@ -3437,7 +3437,7 @@ def json_parser_ast_checksum_impl(source: any u8&) -> i64 can[Memory.Allocate, A
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     checksum: i64 = result.checksum
     if checksum < 0:
@@ -3451,7 +3451,7 @@ def json_parser_ast_cached_checksum_impl(source: any u8&) -> i64 can[Memory.Allo
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     checksum: i64 = result.checksum
     if checksum < 0:
@@ -3465,7 +3465,7 @@ def json_parser_ast_node_count_impl(source: any u8&) -> i64 can[Memory.Allocate,
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3479,7 +3479,7 @@ def json_parser_ast_object_len_impl(source: any u8&) -> i64 can[Memory.Allocate,
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3493,7 +3493,7 @@ def json_parser_ast_field_string_eq_impl(source: any u8&, key: any u8&, literal:
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3511,7 +3511,7 @@ def json_parser_ast_field_bool_impl(source: any u8&, key: any u8&) -> i64 can[Me
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3529,7 +3529,7 @@ def json_parser_ast_field_is_null_impl(source: any u8&, key: any u8&) -> i64 can
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3547,7 +3547,7 @@ def json_parser_ast_field_kind_impl(source: any u8&, key: any u8&) -> i64 can[Me
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3565,7 +3565,7 @@ def json_parser_ast_array_field_len_impl(source: any u8&, key: any u8&) -> i64 c
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3583,7 +3583,7 @@ def json_parser_ast_object_field_len_impl(source: any u8&, key: any u8&) -> i64 
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3601,7 +3601,7 @@ def json_parser_ast_field_number_kind_impl(source: any u8&, key: any u8&) -> i64
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3619,7 +3619,7 @@ def json_parser_ast_field_string_len_impl(source: any u8&, key: any u8&) -> i64 
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3637,7 +3637,7 @@ def json_parser_ast_field_string_copy_impl(source: any u8&, key: any u8&, out: a
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3655,7 +3655,7 @@ def json_parser_ast_field_i64_impl(source: any u8&, key: any u8&, out: any i64&)
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3677,7 +3677,7 @@ def json_parser_ast_field_u64_impl(source: any u8&, key: any u8&, out: any u64&)
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3699,7 +3699,7 @@ def json_parser_ast_field_f64_impl(source: any u8&, key: any u8&, out: any f64&)
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3721,7 +3721,7 @@ def json_parser_ast_field_f32_impl(source: any u8&, key: any u8&, out: any f32&)
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3743,7 +3743,7 @@ def json_parser_ast_array_field_i64_at_impl(source: any u8&, key: any u8&, index
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3769,7 +3769,7 @@ def json_parser_ast_array_field_f64_at_impl(source: any u8&, key: any u8&, index
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3795,7 +3795,7 @@ def json_parser_ast_array_field_f32_at_impl(source: any u8&, key: any u8&, index
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3821,7 +3821,7 @@ def json_parser_ast_array_field_kind_at_impl(source: any u8&, key: any u8&, inde
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3843,7 +3843,7 @@ def json_parser_ast_array_field_string_eq_at_impl(source: any u8&, key: any u8&,
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3865,7 +3865,7 @@ def json_parser_ast_array_field_bool_at_impl(source: any u8&, key: any u8&, inde
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3887,7 +3887,7 @@ def json_parser_ast_array_field_is_null_at_impl(source: any u8&, key: any u8&, i
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3909,7 +3909,7 @@ def json_parser_ast_array_field_array_len_at_impl(source: any u8&, key: any u8&,
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3931,7 +3931,7 @@ def json_parser_ast_array_field_object_len_at_impl(source: any u8&, key: any u8&
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3953,7 +3953,7 @@ def json_parser_ast_array_field_number_kind_at_impl(source: any u8&, key: any u8
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3975,7 +3975,7 @@ def json_parser_ast_array_field_string_len_at_impl(source: any u8&, key: any u8&
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -3997,7 +3997,7 @@ def json_parser_ast_array_field_string_copy_at_impl(source: any u8&, key: any u8
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4019,7 +4019,7 @@ def json_parser_ast_object_key_eq_at_impl(source: any u8&, index: usize, literal
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4037,7 +4037,7 @@ def json_parser_ast_object_key_len_at_impl(source: any u8&, index: usize) -> i64
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4055,7 +4055,7 @@ def json_parser_ast_object_key_copy_at_impl(source: any u8&, index: usize, out: 
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4073,7 +4073,7 @@ def json_parser_ast_object_field_i64_at_impl(source: any u8&, index: usize, out:
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4095,7 +4095,7 @@ def json_parser_ast_object_field_f64_at_impl(source: any u8&, index: usize, out:
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4117,7 +4117,7 @@ def json_parser_ast_object_field_f32_at_impl(source: any u8&, index: usize, out:
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4139,7 +4139,7 @@ def json_parser_ast_object_value_string_eq_at_impl(source: any u8&, index: usize
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4157,7 +4157,7 @@ def json_parser_ast_object_field_bool_at_impl(source: any u8&, index: usize) -> 
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4175,7 +4175,7 @@ def json_parser_ast_object_field_is_null_at_impl(source: any u8&, index: usize) 
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4193,7 +4193,7 @@ def json_parser_ast_object_value_kind_at_impl(source: any u8&, index: usize) -> 
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4211,7 +4211,7 @@ def json_parser_ast_object_value_array_len_at_impl(source: any u8&, index: usize
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4229,7 +4229,7 @@ def json_parser_ast_object_value_object_len_at_impl(source: any u8&, index: usiz
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4247,7 +4247,7 @@ def json_parser_ast_object_value_number_kind_at_impl(source: any u8&, index: usi
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4265,7 +4265,7 @@ def json_parser_ast_object_value_string_len_at_impl(source: any u8&, index: usiz
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4283,7 +4283,7 @@ def json_parser_ast_object_value_string_copy_at_impl(source: any u8&, index: usi
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4301,7 +4301,7 @@ def json_parser_ast_array_i64_at_impl(source: any u8&, index: usize, out: any i6
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4323,7 +4323,7 @@ def json_parser_ast_array_f64_at_impl(source: any u8&, index: usize, out: any f6
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4345,7 +4345,7 @@ def json_parser_ast_array_f32_at_impl(source: any u8&, index: usize, out: any f3
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4367,7 +4367,7 @@ def json_parser_ast_array_kind_at_impl(source: any u8&, index: usize) -> i64 can
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4385,7 +4385,7 @@ def json_parser_ast_array_array_len_at_impl(source: any u8&, index: usize) -> i6
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4403,7 +4403,7 @@ def json_parser_ast_array_object_len_at_impl(source: any u8&, index: usize) -> i
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4421,7 +4421,7 @@ def json_parser_ast_array_number_kind_at_impl(source: any u8&, index: usize) -> 
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4439,7 +4439,7 @@ def json_parser_ast_array_string_len_at_impl(source: any u8&, index: usize) -> i
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4457,7 +4457,7 @@ def json_parser_ast_array_string_copy_at_impl(source: any u8&, index: usize, out
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4475,7 +4475,7 @@ def json_parser_ast_array_string_eq_at_impl(source: any u8&, index: usize, liter
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4493,7 +4493,7 @@ def json_parser_ast_array_bool_at_impl(source: any u8&, index: usize) -> i64 can
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4511,7 +4511,7 @@ def json_parser_ast_array_is_null_at_impl(source: any u8&, index: usize) -> i64 
     source_len: usize = runtime_strlen(source)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
@@ -4526,19 +4526,19 @@ def json_parser_ast_array_is_null_at_impl(source: any u8&, index: usize) -> i64 
 
 
 def json_expect_checksum(source: static u8&, expected: i64) -> bool:
-    return json_parser_checksum_impl(source.cast[any u8&]()) == expected
+    return json_parser_checksum_impl(source.cast[any u8&]) == expected
 
 
 def json_expect_invalid(source: static u8&) -> bool:
-    return json_parser_checksum_impl(source.cast[any u8&]()) < 0
+    return json_parser_checksum_impl(source.cast[any u8&]) < 0
 
 
 def json_expect_ast_checksum(source: static u8&, expected: i64) -> bool can[Memory.Allocate, Abort.Panic]:
-    return json_parser_ast_checksum_impl(source.cast[any u8&]()) == expected
+    return json_parser_ast_checksum_impl(source.cast[any u8&]) == expected
 
 
 def json_expect_invalid_ast(source: static u8&) -> bool can[Memory.Allocate, Abort.Panic]:
-    return json_parser_ast_checksum_impl(source.cast[any u8&]()) < 0
+    return json_parser_ast_checksum_impl(source.cast[any u8&]) < 0
 
 
 def json_parser_parity_suite_impl() -> int can[Memory.Allocate, Abort.Panic]:
@@ -4562,7 +4562,7 @@ def json_parser_parity_suite_impl() -> int can[Memory.Allocate, Abort.Panic]:
         return 0
     if not json_expect_ast_checksum("[-12,3.5,null]", 136):
         return 0
-    if json_parser_ast_node_count_impl("{\"a\":[1,2,3],\"b\":[4,5],\"c\":null}".cast[any u8&]()) != 12:
+    if json_parser_ast_node_count_impl("{\"a\":[1,2,3],\"b\":[4,5],\"c\":null}".cast[any u8&]) != 12:
         return 0
     if not json_expect_invalid("[1,2}"):
         return 0
@@ -4591,51 +4591,51 @@ def json_parser_parity_suite_impl() -> int can[Memory.Allocate, Abort.Panic]:
         return 0
 
     source: static u8& = "{\"na\\u006de\":\"line\\nbreak\",\"quote\":\"\\\"\",\"smile\":\"\\u263A\"}"
-    source_any: any u8& = source.cast[any u8&]()
+    source_any: any u8& = source.cast[any u8&]
     source_len: usize = runtime_strlen(source_any)
     region scratch(json_ast_scratch_capacity(source_len))
     store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-    arena: any Arena& = (&scratch).cast[any Arena&]()
+    arena: any Arena& = (&scratch).cast[any Arena&]
     result: JsonParseNodeResult = json_parse_document_node_with_len(source_any, source_len, arena, store)
     if result.checksum < 0:
         destroy scratch
         return 0
 
-    name_node: JsonNode = json_ast_object_get(result.node, source_any, "name".cast[any u8&](), store)
-    quote_node: JsonNode = json_ast_object_get(result.node, source_any, "quote".cast[any u8&](), store)
-    smile_node: JsonNode = json_ast_object_get(result.node, source_any, "smile".cast[any u8&](), store)
+    name_node: JsonNode = json_ast_object_get(result.node, source_any, "name".cast[any u8&], store)
+    quote_node: JsonNode = json_ast_object_get(result.node, source_any, "quote".cast[any u8&], store)
+    smile_node: JsonNode = json_ast_object_get(result.node, source_any, "smile".cast[any u8&], store)
     if json_node_is_invalid(name_node, store) or json_node_is_invalid(quote_node, store) or json_node_is_invalid(smile_node, store):
         destroy scratch
         return 0
-    if not json_ast_string_eq_literal(source_any, name_node, "line\nbreak".cast[any u8&](), store):
+    if not json_ast_string_eq_literal(source_any, name_node, "line\nbreak".cast[any u8&], store):
         destroy scratch
         return 0
-    if not json_ast_string_eq_literal(source_any, quote_node, "\"".cast[any u8&](), store):
+    if not json_ast_string_eq_literal(source_any, quote_node, "\"".cast[any u8&], store):
         destroy scratch
         return 0
-    if not json_ast_string_eq_literal(source_any, smile_node, "\u263A".cast[any u8&](), store):
+    if not json_ast_string_eq_literal(source_any, smile_node, "\u263A".cast[any u8&], store):
         destroy scratch
         return 0
     destroy scratch
 
     numbers_source: static u8& = "{\"small\":123,\"big\":18446744073709551615,\"neg\":-9223372036854775808,\"frac\":1.5,\"exp\":1e3,\"huge\":18446744073709551616,\"tiny\":-9223372036854775809}"
-    numbers_any: any u8& = numbers_source.cast[any u8&]()
+    numbers_any: any u8& = numbers_source.cast[any u8&]
     numbers_len: usize = runtime_strlen(numbers_any)
     region numbers_scratch(json_ast_scratch_capacity(numbers_len))
     numbers_store: JsonNode.Store[Local] = JsonNode.Store(numbers_scratch)
-    numbers_arena: any Arena& = (&numbers_scratch).cast[any Arena&]()
+    numbers_arena: any Arena& = (&numbers_scratch).cast[any Arena&]
     numbers_result: JsonParseNodeResult = json_parse_document_node_with_len(numbers_any, numbers_len, numbers_arena, numbers_store)
     if numbers_result.checksum < 0:
         destroy numbers_scratch
         return 0
 
-    small_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "small".cast[any u8&](), numbers_store)
-    big_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "big".cast[any u8&](), numbers_store)
-    neg_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "neg".cast[any u8&](), numbers_store)
-    frac_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "frac".cast[any u8&](), numbers_store)
-    exp_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "exp".cast[any u8&](), numbers_store)
-    huge_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "huge".cast[any u8&](), numbers_store)
-    tiny_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "tiny".cast[any u8&](), numbers_store)
+    small_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "small".cast[any u8&], numbers_store)
+    big_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "big".cast[any u8&], numbers_store)
+    neg_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "neg".cast[any u8&], numbers_store)
+    frac_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "frac".cast[any u8&], numbers_store)
+    exp_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "exp".cast[any u8&], numbers_store)
+    huge_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "huge".cast[any u8&], numbers_store)
+    tiny_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "tiny".cast[any u8&], numbers_store)
 
     small_u64: u64 = try json_ast_number_u64_value(numbers_any, small_node, numbers_store) else 0u64
     small_i64: i64 = try json_ast_number_i64_value(numbers_any, small_node, numbers_store) else -1
@@ -4717,8 +4717,8 @@ def json_parallel_parse_once(source: any u8&, mode: i64) -> i64 can[Memory.Alloc
 
 
 def json_parallel_worker(job: JsonParallelJob) -> i64 can[Memory.Allocate, Abort.Panic]:
-    source: any u8& = job.source_bits.cast[any u8&]()
-    result_slot: any i64& = job.result_bits.cast[any i64&]()
+    source: any u8& = job.source_bits.cast[any u8&]
+    result_slot: any i64& = job.result_bits.cast[any i64&]
     remaining: mutable usize = job.repeats
     total: mutable i64 = 0
     while remaining > 0u:
@@ -4757,10 +4757,10 @@ def json_parallel_checksum_impl(source: any u8&, worker_count: usize, iterations
             if slot < extra_repeats:
                 repeats <- repeats + 1u
 
-            result_bits: uintptr = (&partials[slot]).cast[any i64&]().uintptr()
+            result_bits: uintptr = (&partials[slot]).cast[any i64&].uintptr()
             job: JsonParallelJob = JsonParallelJob(source_bits, repeats, result_bits, mode)
             task: Task[i64, Pending] = submit json_parallel_worker(job)
-            task_group_add((&group).cast[any TaskGroup&](), move task)
+            task_group_add((&group).cast[any TaskGroup&], move task)
             slot <- slot + 1u
 
         wait all group

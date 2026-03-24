@@ -7,8 +7,8 @@
 # ------------------------------------------------------------
 
 def concat2(lhs: any u8&?, rhs: any u8&?) -> any u8& can[Memory.Allocate, Abort.Panic]:
-    left: any u8& = lhs.cast[any u8&]() if lhs != null else "".cast[any u8&]()
-    right: any u8& = rhs.cast[any u8&]() if rhs != null else "".cast[any u8&]()
+    left: any u8& = lhs.cast[any u8&] if lhs != null else "".cast[any u8&]
+    right: any u8& = rhs.cast[any u8&] if rhs != null else "".cast[any u8&]
 
     left_len: usize = runtime_strlen(left)
     right_len: usize = runtime_strlen(right)
@@ -21,21 +21,21 @@ def concat2(lhs: any u8&?, rhs: any u8&?) -> any u8& can[Memory.Allocate, Abort.
 
     if left_len + right_len <= 8:
         text: u8[9]
-        memcpy((&text[0]).cast[any void&](), left.cast[any void&](), left_len)
-        memcpy((&text[0] + left_len).cast[any void&](), right.cast[any void&](), right_len)
+        memcpy((&text[0]).cast[any void&], left.cast[any void&], left_len)
+        memcpy((&text[0] + left_len).cast[any void&], right.cast[any void&], right_len)
         text[left_len + right_len] <- 0
-        return intern_small_string((&text[0]).cast[any u8&](), left_len + right_len).cast[any u8&]()
+        return intern_small_string((&text[0]).cast[any u8&], left_len + right_len).cast[any u8&]
 
-    out: any u8& = alloc_perm((left_len + right_len + 1).i64()).cast[any u8&]()
-    memcpy(out.cast[any void&](), left.cast[any void&](), left_len)
-    memcpy((out + left_len).cast[any void&](), right.cast[any void&](), right_len)
+    out: any u8& = alloc_perm((left_len + right_len + 1).i64()).cast[any u8&]
+    memcpy(out.cast[any void&], left.cast[any void&], left_len)
+    memcpy((out + left_len).cast[any void&], right.cast[any void&], right_len)
     out[left_len + right_len] <- 0
     register_perm_string_len(out, left_len + right_len)
     return out
 
 def concat2_scratch(lhs: any u8&?, rhs: any u8&?) -> any u8& can[Memory.Allocate, Abort.Panic]:
-    left: any u8& = lhs.cast[any u8&]() if lhs != null else "".cast[any u8&]()
-    right: any u8& = rhs.cast[any u8&]() if rhs != null else "".cast[any u8&]()
+    left: any u8& = lhs.cast[any u8&] if lhs != null else "".cast[any u8&]
+    right: any u8& = rhs.cast[any u8&] if rhs != null else "".cast[any u8&]
 
     left_len: usize = runtime_strlen(left)
     right_len: usize = runtime_strlen(right)
@@ -48,14 +48,14 @@ def concat2_scratch(lhs: any u8&?, rhs: any u8&?) -> any u8& can[Memory.Allocate
 
     if left_len + right_len <= 8:
         text: u8[9]
-        memcpy((&text[0]).cast[any void&](), left.cast[any void&](), left_len)
-        memcpy((&text[0] + left_len).cast[any void&](), right.cast[any void&](), right_len)
+        memcpy((&text[0]).cast[any void&], left.cast[any void&], left_len)
+        memcpy((&text[0] + left_len).cast[any void&], right.cast[any void&], right_len)
         text[left_len + right_len] <- 0
-        return intern_small_string((&text[0]).cast[any u8&](), left_len + right_len).cast[any u8&]()
+        return intern_small_string((&text[0]).cast[any u8&], left_len + right_len).cast[any u8&]
 
-    out: any u8& = alloc_scratch((left_len + right_len + 1).i64()).cast[any u8&]()
-    memcpy(out.cast[any void&](), left.cast[any void&](), left_len)
-    memcpy((out + left_len).cast[any void&](), right.cast[any void&](), right_len)
+    out: any u8& = alloc_scratch((left_len + right_len + 1).i64()).cast[any u8&]
+    memcpy(out.cast[any void&], left.cast[any void&], left_len)
+    memcpy((out + left_len).cast[any void&], right.cast[any void&], right_len)
     out[left_len + right_len] <- 0
     return out
 
@@ -64,7 +64,7 @@ def concat2_scratch(lhs: any u8&?, rhs: any u8&?) -> any u8& can[Memory.Allocate
 # ------------------------------------------------------------
 
 def string_index(value: any u8&?, index: i64) -> i64:
-    src: any u8& = value if value != null else "".cast[any u8&]()
+    src: any u8& = value if value != null else "".cast[any u8&]
     len: usize = runtime_strlen(src)
 
     if index < 0 or index.usize() >= len:
@@ -73,8 +73,8 @@ def string_index(value: any u8&?, index: i64) -> i64:
     return src[index.usize()].i64()
 
 def string_slice_eq(value: any u8&?, start: i64, end: i64, other: any u8&?) -> int:
-    src: any u8& = value if value != null else "".cast[any u8&]()
-    rhs: any u8& = other if other != null else "".cast[any u8&]()
+    src: any u8& = value if value != null else "".cast[any u8&]
+    rhs: any u8& = other if other != null else "".cast[any u8&]
     len: usize = runtime_strlen(src)
 
     lo: mutable usize = 0
@@ -105,11 +105,11 @@ def string_slice_eq(value: any u8&?, start: i64, end: i64, other: any u8&?) -> i
     if src + lo == rhs:
         return 1
 
-    return 1 if memcmp((src + lo).cast[any void&](), rhs.cast[any void&](), slice_len) == 0 else 0
+    return 1 if memcmp((src + lo).cast[any void&], rhs.cast[any void&], slice_len) == 0 else 0
 
 def string_slices_eq(lhs: any u8&?, lhs_start: i64, lhs_end: i64, rhs: any u8&?, rhs_start: i64, rhs_end: i64) -> int:
-    left: any u8& = lhs if lhs != null else "".cast[any u8&]()
-    right: any u8& = rhs if rhs != null else "".cast[any u8&]()
+    left: any u8& = lhs if lhs != null else "".cast[any u8&]
+    right: any u8& = rhs if rhs != null else "".cast[any u8&]
     left_len: usize = runtime_strlen(left)
     right_len: usize = runtime_strlen(right)
 
@@ -156,10 +156,10 @@ def string_slices_eq(lhs: any u8&?, lhs_start: i64, lhs_end: i64, rhs: any u8&?,
     if left + left_lo == right + right_lo:
         return 1
 
-    return 1 if memcmp((left + left_lo).cast[any void&](), (right + right_lo).cast[any void&](), left_slice_len) == 0 else 0
+    return 1 if memcmp((left + left_lo).cast[any void&], (right + right_lo).cast[any void&], left_slice_len) == 0 else 0
 
 def string_slice(value: any u8&?, start: i64, end: i64) -> any u8& can[Memory.Allocate, Abort.Panic]:
-    src: any u8& = value if value != null else "".cast[any u8&]()
+    src: any u8& = value if value != null else "".cast[any u8&]
     len: usize = runtime_strlen(src)
 
     lo: mutable usize = 0
@@ -184,19 +184,19 @@ def string_slice(value: any u8&?, start: i64, end: i64) -> any u8& can[Memory.Al
     out_len: usize = hi - lo
 
     if out_len == 0:
-        return "".cast[any u8&]()
+        return "".cast[any u8&]
 
     if out_len <= 8:
-        return intern_small_string(src + lo, out_len).cast[any u8&]()
+        return intern_small_string(src + lo, out_len).cast[any u8&]
 
-    out: any u8& = alloc_perm((out_len + 1).i64()).cast[any u8&]()
-    memcpy(out.cast[any void&](), (src + lo).cast[any void&](), out_len)
+    out: any u8& = alloc_perm((out_len + 1).i64()).cast[any u8&]
+    memcpy(out.cast[any void&], (src + lo).cast[any void&], out_len)
     out[out_len] <- 0
     register_perm_string_len(out, out_len)
     return out
 
 def string_view(value: any u8&?, start: i64, end: i64) -> StringView:
-    src: any u8& = value if value != null else "".cast[any u8&]()
+    src: any u8& = value if value != null else "".cast[any u8&]
     len: usize = runtime_strlen(src)
 
     lo: mutable usize = 0
@@ -246,7 +246,7 @@ def string_view_index(view: StringView, index: i64) -> i64:
     return view.data[index.usize()].i64()
 
 def string_view_eq(view: StringView, other: any u8&?) -> int:
-    rhs: any u8& = other if other != null else "".cast[any u8&]()
+    rhs: any u8& = other if other != null else "".cast[any u8&]
     rhs_len: usize = runtime_strlen(rhs)
 
     if view.len < 0 or view.len.usize() != rhs_len:
@@ -256,7 +256,7 @@ def string_view_eq(view: StringView, other: any u8&?) -> int:
     if view.data == rhs:
         return 1
 
-    return 1 if memcmp(view.data.cast[any void&](), rhs.cast[any void&](), view.len.usize()) == 0 else 0
+    return 1 if memcmp(view.data.cast[any void&], rhs.cast[any void&], view.len.usize()) == 0 else 0
 
 def string_views_eq(lhs: StringView, rhs: StringView) -> int:
     if lhs.len != rhs.len:
@@ -266,17 +266,17 @@ def string_views_eq(lhs: StringView, rhs: StringView) -> int:
     if lhs.data == rhs.data:
         return 1
 
-    return 1 if memcmp(lhs.data.cast[any void&](), rhs.data.cast[any void&](), lhs.len.usize()) == 0 else 0
+    return 1 if memcmp(lhs.data.cast[any void&], rhs.data.cast[any void&], lhs.len.usize()) == 0 else 0
 
 def string_view_copy(view: StringView) -> heap u8& can[Memory.Allocate, Abort.Panic]:
     if view.len <= 0:
-        return intern_small_string("".cast[any u8&](), 0)
+        return intern_small_string("".cast[any u8&], 0)
 
     if view.len <= 8:
         return intern_small_string(view.data, view.len.usize())
 
-    out: heap u8& = alloc_perm((view.len + 1).usize()).cast[heap u8&]()
-    memcpy(out.cast[any void&](), view.data.cast[any void&](), view.len.usize())
+    out: heap u8& = alloc_perm((view.len + 1).usize()).cast[heap u8&]
+    memcpy(out.cast[any void&], view.data.cast[any void&], view.len.usize())
     out[view.len.usize()] <- 0
-    register_perm_string_len(out.cast[any u8&](), view.len.usize())
+    register_perm_string_len(out.cast[any u8&], view.len.usize())
     return out

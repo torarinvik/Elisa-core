@@ -99,12 +99,12 @@ def ctx_concurrency_alloc(size: usize) -> heap void& can[Memory.Allocate, Abort.
 	raw: heap void&? = malloc(size) can Memory.Allocate
 	if raw == null:
 		panic("concurrency allocation failed")
-	ptr: heap void& = raw.cast[heap void&]()
+	ptr: heap void& = raw.cast[heap void&]
 	return ptr
 
 def ctx_concurrency_box_new[T](value: T) -> heap ConcurrencyBox[T]& can[Memory.Allocate, Abort.Panic]:
 	raw: heap void& = ctx_concurrency_alloc(sizeof(ConcurrencyBox[T]))
-	box: heap ConcurrencyBox[T]& = raw.cast[heap ConcurrencyBox[T]&]()
+	box: heap ConcurrencyBox[T]& = raw.cast[heap ConcurrencyBox[T]&]
 	box.value <- value
 	return box
 
@@ -119,43 +119,43 @@ def ctx_concurrency_ref_release(slot: any atomic[i64]&) -> i64 can[Atomics.Load,
 def ctx_concurrency_work1_release(state_bits: any void&?) can[Memory.Release, Atomics.Load, Atomics.CompareExchange]:
 	if state_bits == null:
 		return
-	live_bits: any void& = state_bits.cast[any void&]()
-	state: heap ConcurrencyWorkStart1& = live_bits.cast[heap ConcurrencyWorkStart1&]()
-	remaining: i64 = ctx_concurrency_ref_release((&state.refs).cast[any atomic[i64]&]())
+	live_bits: any void& = state_bits.cast[any void&]
+	state: heap ConcurrencyWorkStart1& = live_bits.cast[heap ConcurrencyWorkStart1&]
+	remaining: i64 = ctx_concurrency_ref_release((&state.refs).cast[any atomic[i64]&])
 	if remaining == 0:
-		free(state.arg_bits.cast[heap void&]()) can Memory.Release
-		free(state.result_bits.cast[heap void&]()) can Memory.Release
-		free(state.cast[heap void&]()) can Memory.Release
+		free(state.arg_bits.cast[heap void&]) can Memory.Release
+		free(state.result_bits.cast[heap void&]) can Memory.Release
+		free(state.cast[heap void&]) can Memory.Release
 
 def ctx_concurrency_work1_new[A, R, permission P](fn: func(A) -> R can[P], arg: A) -> heap ConcurrencyWorkStart1& can[Memory.Allocate, Abort.Panic]:
 	arg_box: heap ConcurrencyBox[A]& = ctx_concurrency_box_new(arg)
 	result_seed: R = zeroed
 	result_box: heap ConcurrencyBox[R]& = ctx_concurrency_box_new(result_seed)
 	raw: heap void& = ctx_concurrency_alloc(sizeof(ConcurrencyWorkStart1))
-	state: heap ConcurrencyWorkStart1& = raw.cast[heap ConcurrencyWorkStart1&]()
-	state.fn_bits <- fn.cast[uintptr]()
-	state.arg_bits <- arg_box.cast[any void&]()
-	state.result_bits <- result_box.cast[any void&]()
+	state: heap ConcurrencyWorkStart1& = raw.cast[heap ConcurrencyWorkStart1&]
+	state.fn_bits <- fn.cast[uintptr]
+	state.arg_bits <- arg_box.cast[any void&]
+	state.result_bits <- result_box.cast[any void&]
 	state.refs.value <- 2
 	return state
 
 def ctx_concurrency_work1_entry[A, R, permission P](state_bits: any void&) -> any void& can[P, Memory.Release, Atomics.Load, Atomics.CompareExchange]:
-	state: heap ConcurrencyWorkStart1& = state_bits.cast[heap ConcurrencyWorkStart1&]()
-	fn: func(A) -> R can[P] = state.fn_bits.cast[func(A) -> R can[P]]()
-	arg_box: heap ConcurrencyBox[A]& = state.arg_bits.cast[heap ConcurrencyBox[A]&]()
-	result_box: heap ConcurrencyBox[R]& = state.result_bits.cast[heap ConcurrencyBox[R]&]()
+	state: heap ConcurrencyWorkStart1& = state_bits.cast[heap ConcurrencyWorkStart1&]
+	fn: func(A) -> R can[P] = state.fn_bits.cast[func(A) -> R can[P]]
+	arg_box: heap ConcurrencyBox[A]& = state.arg_bits.cast[heap ConcurrencyBox[A]&]
+	result_box: heap ConcurrencyBox[R]& = state.result_bits.cast[heap ConcurrencyBox[R]&]
 	result_box.value <- fn(arg_box.value)
-	ctx_concurrency_work1_release(state.cast[any void&]())
-	return state.cast[any void&]()
+	ctx_concurrency_work1_release(state.cast[any void&])
+	return state.cast[any void&]
 
 def ctx_concurrency_work1_take_result[R](state_bits: any void&?) -> R can[Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
 	if state_bits == null:
 		panic("concurrency work returned no state")
-	live_bits: any void& = state_bits.cast[any void&]()
-	state: heap ConcurrencyWorkStart1& = live_bits.cast[heap ConcurrencyWorkStart1&]()
-	result_box: heap ConcurrencyBox[R]& = state.result_bits.cast[heap ConcurrencyBox[R]&]()
+	live_bits: any void& = state_bits.cast[any void&]
+	state: heap ConcurrencyWorkStart1& = live_bits.cast[heap ConcurrencyWorkStart1&]
+	result_box: heap ConcurrencyBox[R]& = state.result_bits.cast[heap ConcurrencyBox[R]&]
 	result: R = result_box.value
-	ctx_concurrency_work1_release(state.cast[any void&]())
+	ctx_concurrency_work1_release(state.cast[any void&])
 	return result
 
 def ctx_thread_from_raw[R, S](raw: Thread[any void&?, S]) -> Thread[R, S]:
@@ -191,33 +191,33 @@ def ctx_task_group_push_state(group: any TaskGroup&, state_bits: any void&?) can
 	if state_bits == null:
 		return
 	raw: heap void& = ctx_concurrency_alloc(sizeof(ConcurrencyTaskGroupNode))
-	node: heap ConcurrencyTaskGroupNode& = raw.cast[heap ConcurrencyTaskGroupNode&]()
+	node: heap ConcurrencyTaskGroupNode& = raw.cast[heap ConcurrencyTaskGroupNode&]
 	if group.cleanup == null:
 		node.next <- null
 	else:
-		node.next <- group.cleanup.cast[heap ConcurrencyTaskGroupNode&]()
-	node.state_bits <- state_bits.cast[any void&]()
-	group.cleanup <- node.cast[any void&]()
+		node.next <- group.cleanup.cast[heap ConcurrencyTaskGroupNode&]
+	node.state_bits <- state_bits.cast[any void&]
+	group.cleanup <- node.cast[any void&]
 
 def ctx_task_group_release_all(group: any TaskGroup&) can[Memory.Release, Atomics.Load, Atomics.CompareExchange]:
 	if group.cleanup == null:
 		return
-	current: mutable heap ConcurrencyTaskGroupNode&? = group.cleanup.cast[heap ConcurrencyTaskGroupNode&?]()
+	current: mutable heap ConcurrencyTaskGroupNode&? = group.cleanup.cast[heap ConcurrencyTaskGroupNode&?]
 	group.cleanup <- null
 	while current != null:
 		next: mutable heap ConcurrencyTaskGroupNode&? = current.next
-		ctx_concurrency_work1_release(current.state_bits.cast[any void&]())
-		free(current.cast[heap void&]()) can Memory.Release
+		ctx_concurrency_work1_release(current.state_bits.cast[any void&])
+		free(current.cast[heap void&]) can Memory.Release
 		current <- next
 
 def spawn1[A, R, permission P](fn: func(A) -> R can[P], arg: A) -> Thread[R, Joinable] can[Thread.Spawn, Memory.Allocate, Abort.Panic]:
 	from_raw: func(Thread[any void&?, Joinable]) -> Thread[R, Joinable] = ctx_thread_from_raw.specialize[R, Joinable]()
 	state: heap ConcurrencyWorkStart1& = ctx_concurrency_work1_new(fn, arg)
 	raw: Thread[any void&?, Joinable] = spawn_raw(
-		ctx_concurrency_work1_entry.specialize[A, R]().cast[any void&](),
-		state.cast[any void&]()
+		ctx_concurrency_work1_entry.specialize[A, R]().cast[any void&],
+		state.cast[any void&]
 	) can Thread.Spawn
-	raw.state <- state.cast[any void&]()
+	raw.state <- state.cast[any void&]
 	return from_raw(move raw)
 
 def join[R](thread: Thread[R, Joinable]) -> R can[Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
@@ -238,10 +238,10 @@ def pool_submit1[A, R, permission P](pool: any ThreadPool&, fn: func(A) -> R can
 	state: heap ConcurrencyWorkStart1& = ctx_concurrency_work1_new(fn, arg)
 	raw: Task[any void&?, Pending] = pool_submit_raw(
 		pool,
-		ctx_concurrency_work1_entry.specialize[A, R]().cast[any void&](),
-		state.cast[any void&]()
+		ctx_concurrency_work1_entry.specialize[A, R]().cast[any void&],
+		state.cast[any void&]
 	) can Pool.Submit
-	raw.state <- state.cast[any void&]()
+	raw.state <- state.cast[any void&]
 	return from_raw(move raw)
 
 def pool_await[R](task: Task[R, Pending]) -> R can[Pool.Await, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:

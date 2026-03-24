@@ -255,7 +255,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		src := a.analyzeExpr(n.Operand)
 		dst := a.resolveType(n.Target)
 		if n.LegacySyntax {
-			a.warnf(n.Pos(), "legacy cast syntax `.cast[T]()` is deprecated; use `expr -> T` instead")
+			a.warnf(n.Pos(), "legacy cast syntax `.cast[T]()` is deprecated; use `.cast[T]` instead")
 		}
 		if !a.validCast(src, dst) {
 			a.errorf(n.Pos(), "invalid cast from %s to %s", src.String(), dst.String())

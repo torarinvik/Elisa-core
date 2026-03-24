@@ -90,14 +90,14 @@ def borrow_then_release_single_pair() -> int error[MemoryError, DiskError, NetEr
 
 
 def checked_write_into_heap(buffer: heap u8&, size: usize, format: static u8&) -> int error[FormatError] can[Console.Format]:
-    written: int = snprintf(buffer.cast[any u8&?](), size, format, 11) can Console.Format
+    written: int = snprintf(buffer.cast[any u8&?], size, format, 11) can Console.Format
     if written < 0:
         raise FormatError.WriteFailed
     return written
 
 
 def checked_write_into_stack(buffer: stack u8&, size: usize, format: static u8&) -> int error[FormatError] can[Console.Format]:
-    written: int = snprintf(buffer.cast[any u8&?](), size, format, 11) can Console.Format
+    written: int = snprintf(buffer.cast[any u8&?], size, format, 11) can Console.Format
     if written < 0:
         raise FormatError.WriteFailed
     return written

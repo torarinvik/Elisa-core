@@ -3,8 +3,8 @@ def ptr_bits(ptr: any u8&) -> uintptr:
 
 
 def bits_ptr(bits: uintptr) -> any u8&:
-    return bits.cast[any u8&]()
+    return bits.cast[any u8&]
 
 
 def advance_raw(ptr: any void&, offset: usize) -> any void&:
-    return (ptr.cast[any u8&]() + offset).cast[any void&]()
+    return (ptr.cast[any u8&] + offset).cast[any void&]

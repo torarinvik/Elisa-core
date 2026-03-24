@@ -177,7 +177,7 @@ def inv_handle(ptr: heap void&?) -> bool:
 # ------------------------------------------------------------
 
 def sfree[T](ptr: heap T&) -> heap T! can[Memory.Release]:
-    free(ptr.cast[heap void&]())
+    free(ptr.cast[heap void&])
     return null
 
 # ------------------------------------------------------------
@@ -190,7 +190,7 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> heap Region& c
     static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
         raw: heap void&? = malloc(size_bytes)
         assert raw != null
-        r: heap Region& = raw.cast[heap Region&]()
+        r: heap Region& = raw.cast[heap Region&]
 
     static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
         raw: heap void&? = mmap(
@@ -202,7 +202,7 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> heap Region& c
             0
         )
         assert raw != MAP_FAILED()
-        r: heap Region& = raw.cast[heap Region&]()
+        r: heap Region& = raw.cast[heap Region&]
 
     static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
         raw: heap void&? = VirtualAllocEx(
@@ -213,10 +213,10 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> heap Region& c
             PAGE_READWRITE
         )
         assert not inv_handle(raw)
-        r: heap Region& = raw.cast[heap Region&]()
+        r: heap Region& = raw.cast[heap Region&]
 
     static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
-        r: heap Region& = bump_pointer.cast[heap Region&]()
+        r: heap Region& = bump_pointer.cast[heap Region&]
         current_memory_size: usize = ARENA_WASM_PAGE_SIZE * wasm_memory_size(0).usize()
         desired_memory_size: usize = bump_pointer.usize() + size_bytes
 
@@ -245,17 +245,17 @@ def new_region(capacity: usize) -> heap Region& can[Memory.Allocate, Abort.Panic
 
 def free_region(r: heap Region&) can[Memory.Release, Abort.Panic]:
     static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
-        free(r.cast[heap void&]())
+        free(r.cast[heap void&])
 
     static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
         size_bytes: usize = sizeof(Region) + sizeof(uintptr) * r.capacity
-        ret: int = munmap(r.cast[heap void&](), size_bytes)
+        ret: int = munmap(r.cast[heap void&], size_bytes)
         assert ret == 0
 
     static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
         ok: bool = VirtualFreeEx(
             GetCurrentProcess(),
-            r.cast[heap void&](),
+            r.cast[heap void&],
             0,
             MEM_RELEASE
         )
@@ -301,19 +301,19 @@ def arena_alloc(a: any Arena&, size_bytes: usize) -> heap void& can[Memory.Alloc
         a.end_index <- a.end_index + 1
         a.end.global_index <- a.end_index
 
-    data_base: heap u8& = (a.end.cast[heap u8&]() + sizeof(Region)).cast[heap u8&]()
+    data_base: heap u8& = (a.end.cast[heap u8&] + sizeof(Region)).cast[heap u8&]
     offset_bytes: usize = a.end.count * sizeof(uintptr)
-    result: heap void& = (data_base + offset_bytes).cast[heap void&]()
+    result: heap void& = (data_base + offset_bytes).cast[heap void&]
     a.end.count <- a.end.count + size
     return result
 
 def arena_realloc(a: any Arena&, oldptr: any void&, oldsz: usize, newsz: usize) -> heap void& can[Memory.Allocate, Abort.Panic]:
     if newsz <= oldsz:
-        return oldptr.cast[heap void&]()
+        return oldptr.cast[heap void&]
 
     newptr: heap void& = arena_alloc(a, newsz)
-    newptr_bytes: heap u8& = newptr.cast[heap u8&]()
-    oldptr_bytes: any u8& = oldptr.cast[any u8&]()
+    newptr_bytes: heap u8& = newptr.cast[heap u8&]
+    oldptr_bytes: any u8& = oldptr.cast[any u8&]
 
     i: mutable usize = 0
     while i < oldsz:
@@ -333,8 +333,8 @@ def arena_strlen(s: any u8&) -> usize:
     return n
 
 def arena_memcpy(dest: any void&, src: any void&, n: usize) -> any void&:
-    d: any u8& = dest.cast[any u8&]()
-    s: any u8& = src.cast[any u8&]()
+    d: any u8& = dest.cast[any u8&]
+    s: any u8& = src.cast[any u8&]
 
 	i: mutable usize = 0
     while i < n:
@@ -344,8 +344,8 @@ def arena_memcpy(dest: any void&, src: any void&, n: usize) -> any void&:
     return dest
 
 def arena_memeq(lhs: any void&, rhs: any void&, n: usize) -> bool:
-    left: any u8& = lhs.cast[any u8&]()
-    right: any u8& = rhs.cast[any u8&]()
+    left: any u8& = lhs.cast[any u8&]
+    right: any u8& = rhs.cast[any u8&]
 
     i: mutable usize = 0
     while i < n:
@@ -357,39 +357,39 @@ def arena_memeq(lhs: any void&, rhs: any void&, n: usize) -> bool:
 
 def arena_strdup(a: any Arena&, cstr: any u8&) -> heap u8& can[Memory.Allocate, Abort.Panic]:
     n: usize = arena_strlen(cstr)
-    dup: heap u8& = arena_alloc(a, n + 1).cast[heap u8&]()
-    arena_memcpy(dup.cast[any void&](), cstr.cast[any void&](), n)
+    dup: heap u8& = arena_alloc(a, n + 1).cast[heap u8&]
+    arena_memcpy(dup.cast[any void&], cstr.cast[any void&], n)
     dup[n] <- 0
     return dup
 
 def arena_memdup(a: any Arena&, data: any void&, size: usize) -> heap void& can[Memory.Allocate, Abort.Panic]:
     dup: heap void& = arena_alloc(a, size)
-    _ = arena_memcpy(dup.cast[any void&](), data, size)
+    _ = arena_memcpy(dup.cast[any void&], data, size)
     return dup
 
 def packed_store_region_data(r: heap Region&) -> heap u8&:
-    return (r.cast[heap u8&]() + sizeof(Region)).cast[heap u8&]()
+    return (r.cast[heap u8&] + sizeof(Region)).cast[heap u8&]
 
 def packed_store_region_table(state: any PackedStoreState&) -> any darray[heap Region&?]&:
-    return (&state.regions).cast[any darray[heap Region&?]&]()
+    return (&state.regions).cast[any darray[heap Region&?]&]
 
 def packed_store_handle_table(state: any PackedStoreState&) -> any darray[uintptr]&:
-    return (&state.handles).cast[any darray[uintptr]&]()
+    return (&state.handles).cast[any darray[uintptr]&]
 
 def packed_store_index_table(state: any PackedStoreState&) -> any darray[u32]&:
-    return (&state.indices).cast[any darray[u32]&]()
+    return (&state.indices).cast[any darray[u32]&]
 
 def packed_store_tag_table(state: any PackedStoreState&) -> any darray[u32]&:
-    return (&state.tags).cast[any darray[u32]&]()
+    return (&state.tags).cast[any darray[u32]&]
 
 def packed_store_variant_slot_table(state: any PackedStoreState&) -> any darray[u32]&:
-    return (&state.variant_slots).cast[any darray[u32]&]()
+    return (&state.variant_slots).cast[any darray[u32]&]
 
 def packed_store_variant_rows_table(state: any PackedStoreState&) -> any darray[PackedStoreVariantRows]&:
-    return (&state.variant_rows).cast[any darray[PackedStoreVariantRows]&]()
+    return (&state.variant_rows).cast[any darray[PackedStoreVariantRows]&]
 
 def packed_store_prefix_column_table(state: any PackedStoreState&) -> any darray[uintptr]&:
-    return (&state.prefix_columns).cast[any darray[uintptr]&]()
+    return (&state.prefix_columns).cast[any darray[uintptr]&]
 
 def arena_da_reserve[T](a: any Arena&, da: any darray[T, shape_in]&, needed: usize) -> any darray[T, shape_out]& can[Memory.Allocate, Abort.Panic]:
     if needed <= da.capacity:
@@ -406,14 +406,14 @@ def arena_da_reserve[T](a: any Arena&, da: any darray[T, shape_in]&, needed: usi
     new_size: usize = new_capacity * sizeof(T)
 
     if da.items == null:
-        da.items as & <- arena_alloc(a, new_size).cast[any T&]()
+        da.items as & <- arena_alloc(a, new_size).cast[any T&]
     else:
         da.items as & <- arena_realloc(
             a,
-            da.items.cast[any void&](),
+            da.items.cast[any void&],
             old_size,
             new_size
-        ).cast[any T&]()
+        ).cast[any T&]
 
     da.capacity <- new_capacity
     return da
@@ -475,22 +475,22 @@ def packed_store_get_or_create_variant_rows(a: any Arena&, state: any PackedStor
 
 def packed_store_append_variant_row(a: any Arena&, state: any PackedStoreState&, tag: u32, row: any void&) -> u32 can[Memory.Allocate, Abort.Panic]:
     variant_rows: any PackedStoreVariantRows& = packed_store_get_or_create_variant_rows(a, state, tag)
-    rows: any darray[uintptr]& = (&variant_rows.rows).cast[any darray[uintptr]&]()
+    rows: any darray[uintptr]& = (&variant_rows.rows).cast[any darray[uintptr]&]
     slot: u32 = rows.count.u32()
-    _ = arena_da_append(a, rows, row.cast[any u8&]().uintptr())
+    _ = arena_da_append(a, rows, row.cast[any u8&].uintptr())
     return slot
 
 def packed_store_variant_row_ptr(state: any PackedStoreState&, tag: u32, slot: u32) -> any void& can[Abort.Panic]:
     variant_rows: any PackedStoreVariantRows&? = packed_store_find_variant_rows(state, tag)
     assert variant_rows != null
 
-    rows: any darray[uintptr]& = (&variant_rows.rows).cast[any darray[uintptr]&]()
+    rows: any darray[uintptr]& = (&variant_rows.rows).cast[any darray[uintptr]&]
     slot_index: usize = slot.usize()
     assert rows.items != null
     assert slot_index < rows.count
 
     row_ptrs: any uintptr& = rows.items
-    return row_ptrs[slot_index].cast[heap u8&]().cast[any void&]()
+    return row_ptrs[slot_index].cast[heap u8&].cast[any void&]
 
 def packed_store_ensure_prefix_columns(a: any Arena&, state: any PackedStoreState&, needed_rows: usize) can[Memory.Allocate, Abort.Panic]:
     if state.prefix_words == 0u:
@@ -514,15 +514,15 @@ def packed_store_ensure_prefix_columns(a: any Arena&, state: any PackedStoreStat
     i: mutable usize = 0u
     while i < state.prefix_words:
         if column_ptrs[i] == 0u64.uintptr():
-            column_ptrs[i] <- arena_alloc(a, new_size).cast[heap uintptr&]().cast[heap u8&]().uintptr()
+            column_ptrs[i] <- arena_alloc(a, new_size).cast[heap uintptr&].cast[heap u8&].uintptr()
         else:
-            current_ptr: heap uintptr& = column_ptrs[i].cast[heap u8&]().cast[heap uintptr&]()
+            current_ptr: heap uintptr& = column_ptrs[i].cast[heap u8&].cast[heap uintptr&]
             column_ptrs[i] <- arena_realloc(
                 a,
-                current_ptr.cast[any void&](),
+                current_ptr.cast[any void&],
                 old_size,
                 new_size
-            ).cast[heap uintptr&]().cast[heap u8&]().uintptr()
+            ).cast[heap uintptr&].cast[heap u8&].uintptr()
         i <- i + 1u
 
     state.prefix_column_capacity <- new_capacity
@@ -534,12 +534,12 @@ def packed_store_append_prefix_words(a: any Arena&, state: any PackedStoreState&
     packed_store_ensure_prefix_columns(a, state, needed_rows)
     assert state.prefix_columns.items != null
     column_ptrs: any uintptr& = state.prefix_columns.items
-    row_words: any uintptr& = row.cast[any uintptr&]()
+    row_words: any uintptr& = row.cast[any uintptr&]
     row_index: usize = needed_rows - 1u
     i: mutable usize = 0u
     while i < state.prefix_words:
         assert column_ptrs[i] != 0u64.uintptr()
-        column: any uintptr& = column_ptrs[i].cast[heap u8&]().cast[any uintptr&]()
+        column: any uintptr& = column_ptrs[i].cast[heap u8&].cast[any uintptr&]
         column[row_index] <- row_words[i]
         i <- i + 1u
 
@@ -562,7 +562,7 @@ def packed_store_lookup_region(state: any PackedStoreState&, global_index: usize
     return state.regions.items[global_index]
 
 def ctx_packed_store_state_new(a: any Arena&, row_bytes: usize) -> heap void& can[Memory.Allocate, Abort.Panic]:
-    state: heap PackedStoreState& = arena_alloc(a, sizeof(PackedStoreState)).cast[heap PackedStoreState&]()
+    state: heap PackedStoreState& = arena_alloc(a, sizeof(PackedStoreState)).cast[heap PackedStoreState&]
     row_words: usize = (row_bytes + sizeof(uintptr) - 1) / sizeof(uintptr)
     preferred_region_capacity: mutable usize = ARENA_REGION_DEFAULT_CAPACITY
     hinted_capacity: usize = row_words * PACKED_STORE_MIN_ROWS_PER_REGION
@@ -589,10 +589,10 @@ def ctx_packed_store_state_new(a: any Arena&, row_bytes: usize) -> heap void& ca
     state.prefix_column_capacity <- 0u
     state.row_words <- row_words
     state.preferred_region_capacity <- preferred_region_capacity
-    return state.cast[heap void&]()
+    return state.cast[heap void&]
 
 def ctx_packed_store_state_new_variant_sparse(a: any Arena&, row_bytes: usize) -> heap void& can[Memory.Allocate, Abort.Panic]:
-    state: heap PackedStoreState& = arena_alloc(a, sizeof(PackedStoreState)).cast[heap PackedStoreState&]()
+    state: heap PackedStoreState& = arena_alloc(a, sizeof(PackedStoreState)).cast[heap PackedStoreState&]
     row_words: usize = (row_bytes + sizeof(uintptr) - 1) / sizeof(uintptr)
     preferred_region_capacity: mutable usize = ARENA_REGION_DEFAULT_CAPACITY
     hinted_capacity: usize = row_words * PACKED_STORE_MIN_ROWS_PER_REGION
@@ -619,7 +619,7 @@ def ctx_packed_store_state_new_variant_sparse(a: any Arena&, row_bytes: usize) -
     state.prefix_column_capacity <- 0u
     state.row_words <- row_words
     state.preferred_region_capacity <- preferred_region_capacity
-    return state.cast[heap void&]()
+    return state.cast[heap void&]
 
 def ctx_packed_store_alloc_result_slow(a: any Arena&, size: usize, owner_tag: uintptr, state: any PackedStoreState&) can[Memory.Allocate, Abort.Panic]:
     if state.alloc_region == null:
@@ -736,8 +736,8 @@ def ctx_packed_store_alloc_fixed_result_slow(a: any Arena&, owner_tag: uintptr, 
 def ctx_packed_store_alloc_fixed_result(a: any Arena&, state_bits: any void&) -> PackedStoreAllocResult can[Memory.Allocate, Abort.Panic]:
     assert state_bits != null
 
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
-    owner_tag: uintptr = state_bits.cast[any u8&]().uintptr()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
+    owner_tag: uintptr = state_bits.cast[any u8&].uintptr()
     size: usize = state.row_words
     assert size > 0
 
@@ -748,7 +748,7 @@ def ctx_packed_store_alloc_fixed_result(a: any Arena&, state_bits: any void&) ->
 
     data_base: heap u8& = packed_store_region_data(state.alloc_region)
     offset_bytes: uintptr = (state.alloc_region.count * sizeof(uintptr)).uintptr()
-    ptr: heap void& = (data_base + state.alloc_region.count * sizeof(uintptr)).cast[heap void&]()
+    ptr: heap void& = (data_base + state.alloc_region.count * sizeof(uintptr)).cast[heap void&]
     state.alloc_region.count <- state.alloc_region.count + size
     state.decode_region <- state.alloc_region
     state.decode_region_index <- state.alloc_region_index
@@ -773,7 +773,7 @@ def ctx_packed_store_alloc_fixed_result(a: any Arena&, state_bits: any void&) ->
 
 def ctx_packed_store_alloc_fixed_tagged_result(a: any Arena&, state_bits: any void&, tag: u32) -> PackedStoreAllocResult can[Memory.Allocate, Abort.Panic]:
     result: PackedStoreAllocResult = ctx_packed_store_alloc_fixed_result(a, state_bits)
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
 
     needed_rows: mutable usize = state.tags.count + 1u
     if needed_rows < state.handles.count:
@@ -788,8 +788,8 @@ def ctx_packed_store_alloc_fixed_tagged_result(a: any Arena&, state_bits: any vo
 def ctx_packed_store_alloc_result(a: any Arena&, size_bytes: usize, state_bits: any void&) -> PackedStoreAllocResult can[Memory.Allocate, Abort.Panic]:
     assert state_bits != null
 
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
-    owner_tag: uintptr = state_bits.cast[any u8&]().uintptr()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
+    owner_tag: uintptr = state_bits.cast[any u8&].uintptr()
     size: usize = (size_bytes + sizeof(uintptr) - 1) / sizeof(uintptr)
 
     if size > state.row_words:
@@ -808,7 +808,7 @@ def ctx_packed_store_alloc_result(a: any Arena&, size_bytes: usize, state_bits: 
 
     data_base: heap u8& = packed_store_region_data(state.alloc_region)
     offset_bytes: uintptr = (state.alloc_region.count * sizeof(uintptr)).uintptr()
-    ptr: heap void& = (data_base + state.alloc_region.count * sizeof(uintptr)).cast[heap void&]()
+    ptr: heap void& = (data_base + state.alloc_region.count * sizeof(uintptr)).cast[heap void&]
     state.alloc_region.count <- state.alloc_region.count + size
     state.decode_region <- state.alloc_region
     state.decode_region_index <- state.alloc_region_index
@@ -833,7 +833,7 @@ def ctx_packed_store_alloc_result(a: any Arena&, size_bytes: usize, state_bits: 
 
 def ctx_packed_store_alloc_fixed_index_result(a: any Arena&, state_bits: any void&) -> PackedStoreIndexAllocResult can[Memory.Allocate, Abort.Panic]:
     result: PackedStoreAllocResult = ctx_packed_store_alloc_fixed_result(a, state_bits)
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
     assert state.indices.items != null
     assert state.indices.count > 0u
     indices: any u32& = state.indices.items
@@ -841,7 +841,7 @@ def ctx_packed_store_alloc_fixed_index_result(a: any Arena&, state_bits: any voi
 
 def ctx_packed_store_alloc_fixed_tagged_index_result(a: any Arena&, state_bits: any void&, tag: u32) -> PackedStoreIndexAllocResult can[Memory.Allocate, Abort.Panic]:
     result: PackedStoreAllocResult = ctx_packed_store_alloc_fixed_tagged_result(a, state_bits, tag)
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
     assert state.indices.items != null
     assert state.indices.count > 0u
     indices: any u32& = state.indices.items
@@ -849,7 +849,7 @@ def ctx_packed_store_alloc_fixed_tagged_index_result(a: any Arena&, state_bits: 
 
 def ctx_packed_store_alloc_index_result(a: any Arena&, size_bytes: usize, state_bits: any void&) -> PackedStoreIndexAllocResult can[Memory.Allocate, Abort.Panic]:
     result: PackedStoreAllocResult = ctx_packed_store_alloc_result(a, size_bytes, state_bits)
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
     assert state.indices.items != null
     assert state.indices.count > 0u
     indices: any u32& = state.indices.items
@@ -858,7 +858,7 @@ def ctx_packed_store_alloc_index_result(a: any Arena&, size_bytes: usize, state_
 def ctx_packed_store_alloc_tagged_variant_sparse_result(a: any Arena&, size_bytes: usize, state_bits: any void&, tag: u32) -> PackedStoreIndexAllocResult can[Memory.Allocate, Abort.Panic]:
     assert state_bits != null
 
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
     row_words: mutable usize = (size_bytes + sizeof(uintptr) - 1) / sizeof(uintptr)
     if row_words == 0u:
         row_words <- 1u
@@ -871,10 +871,10 @@ def ctx_packed_store_alloc_tagged_variant_sparse_result(a: any Arena&, size_byte
     needed_rows: usize = state.handles.count + 1u
     packed_store_ensure_metadata_capacity(a, state, needed_rows)
 
-    slot: u32 = packed_store_append_variant_row(a, state, tag, row.cast[any void&]())
+    slot: u32 = packed_store_append_variant_row(a, state, tag, row.cast[any void&])
 
     assert state.handles.items != null
-    state.handles.items[state.handles.count] <- row.cast[any u8&]().uintptr()
+    state.handles.items[state.handles.count] <- row.cast[any u8&].uintptr()
     state.handles.count <- state.handles.count + 1u
 
     assert state.indices.items != null
@@ -893,18 +893,18 @@ def ctx_packed_store_alloc_tagged_variant_sparse_result(a: any Arena&, size_byte
 
 def ctx_packed_store_alloc_fixed_tagged_variant_sparse_result(a: any Arena&, state_bits: any void&, tag: u32) -> PackedStoreIndexAllocResult can[Memory.Allocate, Abort.Panic]:
     assert state_bits != null
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
     return ctx_packed_store_alloc_tagged_variant_sparse_result(a, state.row_words * sizeof(uintptr), state_bits, tag)
 
 def ctx_packed_store_count(state_bits: any void&) -> usize:
     assert state_bits != null
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
     return state.handles.count
 
 def ctx_packed_store_encode_variant_sparse(ptr: any void&, state_bits: any void&) -> u32 can[Abort.Panic]:
     assert state_bits != null
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
-    raw: uintptr = ptr.cast[any u8&]().uintptr()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
+    raw: uintptr = ptr.cast[any u8&].uintptr()
     assert state.handles.items != null
 
     handles: any uintptr& = state.handles.items
@@ -918,17 +918,17 @@ def ctx_packed_store_encode_variant_sparse(ptr: any void&, state_bits: any void&
 
 def ctx_packed_store_decode_variant_sparse(index: u32, state_bits: any void&) -> any void& can[Abort.Panic]:
     assert state_bits != null
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
     index_usize: usize = index.usize()
     assert index_usize < state.handles.count
     assert state.handles.items != null
 
     handles: any uintptr& = state.handles.items
-    return handles[index_usize].cast[heap u8&]().cast[any void&]()
+    return handles[index_usize].cast[heap u8&].cast[any void&]
 
 def ctx_packed_store_read_variant_sparse_tag(state_bits: any void&, index: u32) -> u32:
     assert state_bits != null
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
     index_usize: usize = index.usize()
     assert index_usize < state.tags.count
     assert state.tags.items != null
@@ -938,7 +938,7 @@ def ctx_packed_store_read_variant_sparse_tag(state_bits: any void&, index: u32) 
 
 def ctx_packed_store_read_variant_sparse_word(index: u32, state_bits: any void&, word_offset: usize) -> uintptr can[Abort.Panic]:
     assert state_bits != null
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
     index_usize: usize = index.usize()
     assert index_usize < state.tags.count
     assert state.tags.items != null
@@ -946,12 +946,12 @@ def ctx_packed_store_read_variant_sparse_word(index: u32, state_bits: any void&,
 
     tags: any u32& = state.tags.items
     slots: any u32& = state.variant_slots.items
-    row_words: any uintptr& = packed_store_variant_row_ptr(state, tags[index_usize], slots[index_usize]).cast[any uintptr&]()
+    row_words: any uintptr& = packed_store_variant_row_ptr(state, tags[index_usize], slots[index_usize]).cast[any uintptr&]
     return row_words[word_offset]
 
 def ctx_packed_store_word_handle_at(state_bits: any void&, index: usize) -> uintptr:
     assert state_bits != null
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
     assert state.handles.items != null
     assert index < state.handles.count
     handles: any uintptr& = state.handles.items
@@ -960,11 +960,11 @@ def ctx_packed_store_word_handle_at(state_bits: any void&, index: usize) -> uint
 def ctx_packed_store_row_ptr_at(state_bits: any void&, index: usize) -> any void&:
     handle: uintptr = ctx_packed_store_word_handle_at(state_bits, index)
     assert handle != 0u64.uintptr()
-    return handle.cast[any u8&]().cast[any void&]()
+    return handle.cast[any u8&].cast[any void&]
 
 def ctx_packed_store_index_at(state_bits: any void&, index: usize) -> u32:
     assert state_bits != null
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
     assert state.indices.items != null
     assert index < state.indices.count
     indices: any u32& = state.indices.items
@@ -972,33 +972,33 @@ def ctx_packed_store_index_at(state_bits: any void&, index: usize) -> u32:
 
 def ctx_packed_store_view(state_bits: any void&, start: usize, end: usize) -> dview[uintptr]:
     assert state_bits != null
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
     handles: any darray[uintptr]& = packed_store_handle_table(state)
     return arena_da_view(handles, start, end)
 
 def ctx_packed_store_indices_view[T](state_bits: any void&, start: usize, end: usize) -> dview[T]:
     assert state_bits != null
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
     indices: any darray[u32]& = packed_store_index_table(state)
-    return arena_da_view(indices.cast[any darray[T]&](), start, end)
+    return arena_da_view(indices.cast[any darray[T]&], start, end)
 
 def ctx_packed_store_tags_view[T](state_bits: any void&, start: usize, end: usize) -> dview[T]:
     assert state_bits != null
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
     tags: any darray[u32]& = packed_store_tag_table(state)
-    return arena_da_view(tags.cast[any darray[T]&](), start, end)
+    return arena_da_view(tags.cast[any darray[T]&], start, end)
 
 def ctx_packed_store_record_row_ptr(a: any Arena&, row: any void&, state_bits: any void&) can[Memory.Allocate, Abort.Panic]:
     assert state_bits != null
-    packed_store_append_handle(a, state_bits.cast[any PackedStoreState&](), row.cast[any u8&]().uintptr())
+    packed_store_append_handle(a, state_bits.cast[any PackedStoreState&], row.cast[any u8&].uintptr())
 
 def ctx_packed_store_record_prefix_words(a: any Arena&, row: any void&, state_bits: any void&) can[Memory.Allocate, Abort.Panic]:
     assert state_bits != null
-    packed_store_append_prefix_words(a, state_bits.cast[any PackedStoreState&](), row)
+    packed_store_append_prefix_words(a, state_bits.cast[any PackedStoreState&], row)
 
 def ctx_packed_store_record_tag(a: any Arena&, tag: u32, state_bits: any void&) can[Memory.Allocate, Abort.Panic]:
     assert state_bits != null
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
     needed_rows: mutable usize = state.tags.count + 1u
     if needed_rows < state.handles.count:
         needed_rows <- state.handles.count
@@ -1012,10 +1012,10 @@ def ctx_packed_store_alloc(a: any Arena&, size_bytes: usize, state_bits: any voi
     return result.handle
 
 def ctx_packed_store_encode(a: any Arena&, ptr: any void&, state_bits: any void&) -> uintptr can[Abort.Panic]:
-    raw: uintptr = ptr.cast[any u8&]().uintptr()
+    raw: uintptr = ptr.cast[any u8&].uintptr()
 
     if state_bits != null:
-        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
 
         if state.alloc_region != null:
             alloc_data_base: heap u8& = packed_store_region_data(state.alloc_region)
@@ -1086,20 +1086,20 @@ def ctx_packed_store_decode(a: any Arena&, handle: uintptr, state_bits: any void
     assert offset_words_plus_one > 0
 
     if state_bits != null:
-        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
         if state.alloc_region != null and state.alloc_region_index == region_index:
             offset_words: usize = offset_words_plus_one - 1
             assert offset_words < state.alloc_region.capacity
 
             data_base: heap u8& = packed_store_region_data(state.alloc_region)
-            return (data_base + offset_words * sizeof(uintptr)).cast[any void&]()
+            return (data_base + offset_words * sizeof(uintptr)).cast[any void&]
 
         if state.decode_region != null and state.decode_region_index == region_index:
             offset_words: usize = offset_words_plus_one - 1
             assert offset_words < state.decode_region.capacity
 
             data_base: heap u8& = packed_store_region_data(state.decode_region)
-            return (data_base + offset_words * sizeof(uintptr)).cast[any void&]()
+            return (data_base + offset_words * sizeof(uintptr)).cast[any void&]
 
         indexed_region: heap Region&? = packed_store_lookup_region(state, region_index)
         if indexed_region != null:
@@ -1110,13 +1110,13 @@ def ctx_packed_store_decode(a: any Arena&, handle: uintptr, state_bits: any void
             state.decode_region_index <- region_index
 
             data_base: heap u8& = packed_store_region_data(indexed_region)
-            return (data_base + offset_words * sizeof(uintptr)).cast[any void&]()
+            return (data_base + offset_words * sizeof(uintptr)).cast[any void&]
 
     r: mutable heap Region&? = a.begin
     i: mutable usize = 0
 
     if state_bits != null:
-        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
         owner_cursor: mutable heap Region&? = null
         owner_cursor_index: mutable usize = 0
 
@@ -1154,7 +1154,7 @@ def ctx_packed_store_decode(a: any Arena&, handle: uintptr, state_bits: any void
                 state.decode_region_index <- region_index
 
                 data_base: heap u8& = packed_store_region_data(owner_cursor)
-                return (data_base + offset_words * sizeof(uintptr)).cast[any void&]()
+                return (data_base + offset_words * sizeof(uintptr)).cast[any void&]
 
     while i < region_index and r != null:
         r <- r.next
@@ -1166,12 +1166,12 @@ def ctx_packed_store_decode(a: any Arena&, handle: uintptr, state_bits: any void
     assert offset_words < r.capacity
 
     if state_bits != null:
-        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
         state.decode_region <- r
         state.decode_region_index <- region_index
 
     data_base: heap u8& = packed_store_region_data(r)
-    return (data_base + offset_words * sizeof(uintptr)).cast[any void&]()
+    return (data_base + offset_words * sizeof(uintptr)).cast[any void&]
 
 def ctx_packed_store_read_tag(a: any Arena&, handle: uintptr, state_bits: any void&) -> u32:
     assert handle != 0u64.uintptr()
@@ -1183,13 +1183,13 @@ def ctx_packed_store_read_tag(a: any Arena&, handle: uintptr, state_bits: any vo
     assert offset_words_plus_one > 0
 
     if state_bits != null:
-        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
         if state.alloc_region != null and state.alloc_region_index == region_index:
             offset_words: usize = offset_words_plus_one - 1
             assert offset_words < state.alloc_region.capacity
 
             data_base: heap u8& = packed_store_region_data(state.alloc_region)
-            row_tag: any u32& = (data_base + offset_words * sizeof(uintptr)).cast[any u32&]()
+            row_tag: any u32& = (data_base + offset_words * sizeof(uintptr)).cast[any u32&]
             return row_tag[0]
 
         if state.decode_region != null and state.decode_region_index == region_index:
@@ -1197,7 +1197,7 @@ def ctx_packed_store_read_tag(a: any Arena&, handle: uintptr, state_bits: any vo
             assert offset_words < state.decode_region.capacity
 
             data_base: heap u8& = packed_store_region_data(state.decode_region)
-            row_tag: any u32& = (data_base + offset_words * sizeof(uintptr)).cast[any u32&]()
+            row_tag: any u32& = (data_base + offset_words * sizeof(uintptr)).cast[any u32&]
             return row_tag[0]
 
         indexed_region: heap Region&? = packed_store_lookup_region(state, region_index)
@@ -1209,14 +1209,14 @@ def ctx_packed_store_read_tag(a: any Arena&, handle: uintptr, state_bits: any vo
             state.decode_region_index <- region_index
 
             data_base: heap u8& = packed_store_region_data(indexed_region)
-            row_tag: any u32& = (data_base + offset_words * sizeof(uintptr)).cast[any u32&]()
+            row_tag: any u32& = (data_base + offset_words * sizeof(uintptr)).cast[any u32&]
             return row_tag[0]
 
     r: mutable heap Region&? = a.begin
     i: mutable usize = 0
 
     if state_bits != null:
-        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
         owner_cursor: mutable heap Region&? = null
         owner_cursor_index: mutable usize = 0
 
@@ -1254,7 +1254,7 @@ def ctx_packed_store_read_tag(a: any Arena&, handle: uintptr, state_bits: any vo
                 state.decode_region_index <- region_index
 
                 data_base: heap u8& = packed_store_region_data(owner_cursor)
-                row_tag: any u32& = (data_base + offset_words * sizeof(uintptr)).cast[any u32&]()
+                row_tag: any u32& = (data_base + offset_words * sizeof(uintptr)).cast[any u32&]
                 return row_tag[0]
 
     while i < region_index and r != null:
@@ -1267,17 +1267,17 @@ def ctx_packed_store_read_tag(a: any Arena&, handle: uintptr, state_bits: any vo
     assert offset_words < r.capacity
 
     if state_bits != null:
-        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
         state.decode_region <- r
         state.decode_region_index <- region_index
 
     data_base: heap u8& = packed_store_region_data(r)
-    row_tag: any u32& = (data_base + offset_words * sizeof(uintptr)).cast[any u32&]()
+    row_tag: any u32& = (data_base + offset_words * sizeof(uintptr)).cast[any u32&]
     return row_tag[0]
 
 def ctx_packed_store_encode_index(a: any Arena&, ptr: any void&, state_bits: any void&) -> u32 can[Abort.Panic]:
     assert state_bits != null
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
     encoded: uintptr = ctx_packed_store_encode(a, ptr, state_bits)
     i: mutable usize = 0u
     assert state.handles.items != null
@@ -1290,7 +1290,7 @@ def ctx_packed_store_encode_index(a: any Arena&, ptr: any void&, state_bits: any
 
 def ctx_packed_store_decode_index(a: any Arena&, index: u32, state_bits: any void&) -> any void& can[Abort.Panic]:
     assert state_bits != null
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
     index_usize: usize = index.usize()
     assert index_usize < state.handles.count
     assert state.handles.items != null
@@ -1299,7 +1299,7 @@ def ctx_packed_store_decode_index(a: any Arena&, index: u32, state_bits: any voi
 
 def ctx_packed_store_read_index_tag(state_bits: any void&, index: u32) -> u32:
     assert state_bits != null
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
     index_usize: usize = index.usize()
     assert index_usize < state.tags.count
     assert state.tags.items != null
@@ -1316,13 +1316,13 @@ def ctx_packed_store_read_word(a: any Arena&, handle: uintptr, state_bits: any v
     assert offset_words_plus_one > 0
 
     if state_bits != null:
-        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
         if state.alloc_region != null and state.alloc_region_index == region_index:
             offset_words: usize = offset_words_plus_one - 1
             assert offset_words + word_offset < state.alloc_region.capacity
 
             data_base: heap u8& = packed_store_region_data(state.alloc_region)
-            row_words: any uintptr& = (data_base + offset_words * sizeof(uintptr)).cast[any uintptr&]()
+            row_words: any uintptr& = (data_base + offset_words * sizeof(uintptr)).cast[any uintptr&]
             return row_words[word_offset]
 
         if state.decode_region != null and state.decode_region_index == region_index:
@@ -1330,7 +1330,7 @@ def ctx_packed_store_read_word(a: any Arena&, handle: uintptr, state_bits: any v
             assert offset_words + word_offset < state.decode_region.capacity
 
             data_base: heap u8& = packed_store_region_data(state.decode_region)
-            row_words: any uintptr& = (data_base + offset_words * sizeof(uintptr)).cast[any uintptr&]()
+            row_words: any uintptr& = (data_base + offset_words * sizeof(uintptr)).cast[any uintptr&]
             return row_words[word_offset]
 
         indexed_region: heap Region&? = packed_store_lookup_region(state, region_index)
@@ -1342,14 +1342,14 @@ def ctx_packed_store_read_word(a: any Arena&, handle: uintptr, state_bits: any v
             state.decode_region_index <- region_index
 
             data_base: heap u8& = packed_store_region_data(indexed_region)
-            row_words: any uintptr& = (data_base + offset_words * sizeof(uintptr)).cast[any uintptr&]()
+            row_words: any uintptr& = (data_base + offset_words * sizeof(uintptr)).cast[any uintptr&]
             return row_words[word_offset]
 
     r: mutable heap Region&? = a.begin
     i: mutable usize = 0
 
     if state_bits != null:
-        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
         owner_cursor: mutable heap Region&? = null
         owner_cursor_index: mutable usize = 0
 
@@ -1387,7 +1387,7 @@ def ctx_packed_store_read_word(a: any Arena&, handle: uintptr, state_bits: any v
                 state.decode_region_index <- region_index
 
                 data_base: heap u8& = packed_store_region_data(owner_cursor)
-                row_words: any uintptr& = (data_base + offset_words * sizeof(uintptr)).cast[any uintptr&]()
+                row_words: any uintptr& = (data_base + offset_words * sizeof(uintptr)).cast[any uintptr&]
                 return row_words[word_offset]
 
     while i < region_index and r != null:
@@ -1400,17 +1400,17 @@ def ctx_packed_store_read_word(a: any Arena&, handle: uintptr, state_bits: any v
     assert offset_words + word_offset < r.capacity
 
     if state_bits != null:
-        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+        state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
         state.decode_region <- r
         state.decode_region_index <- region_index
 
     data_base: heap u8& = packed_store_region_data(r)
-    row_words: any uintptr& = (data_base + offset_words * sizeof(uintptr)).cast[any uintptr&]()
+    row_words: any uintptr& = (data_base + offset_words * sizeof(uintptr)).cast[any uintptr&]
     return row_words[word_offset]
 
 def ctx_packed_store_read_index_word(a: any Arena&, index: u32, state_bits: any void&, word_offset: usize) -> uintptr can[Abort.Panic]:
     assert state_bits != null
-    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]()
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
     index_usize: usize = index.usize()
     assert index_usize < state.handles.count
     if word_offset < state.prefix_words:
@@ -1418,7 +1418,7 @@ def ctx_packed_store_read_index_word(a: any Arena&, index: u32, state_bits: any 
         columns: any uintptr& = state.prefix_columns.items
         assert word_offset < state.prefix_columns.count
         assert columns[word_offset] != 0u64.uintptr()
-        column: any uintptr& = columns[word_offset].cast[heap u8&]().cast[any uintptr&]()
+        column: any uintptr& = columns[word_offset].cast[heap u8&].cast[any uintptr&]
         return column[index_usize]
     assert state.handles.items != null
     handles: any uintptr& = state.handles.items
@@ -1535,7 +1535,7 @@ def arena_dict_key_eq[T](bucket: any DictBucket[T]&, key: dstr[key_shape], hash:
     if bucket.key_data == null:
         return false
 
-    return arena_memeq(bucket.key_data.cast[any void&](), key_bytes.cast[any void&](), key_len)
+    return arena_memeq(bucket.key_data.cast[any void&], key_bytes.cast[any void&], key_len)
 
 def arena_dict_probe_slot[T](m: any dict[dstr[key_shape], T]&, key: dstr[key_shape], hash: u64, key_len: usize) -> DictProbeResult:
     if m.capacity == 0 or m.items == null:
@@ -1572,7 +1572,7 @@ def arena_dict_probe_slot[T](m: any dict[dstr[key_shape], T]&, key: dstr[key_sha
     return DictProbeResult(0, false)
 
 def arena_dict_zero_buckets[T](items: any DictBucket[T]&, capacity: usize):
-    view: dview[DictBucket[T]] = DynArrayView(items.cast[any void&](), capacity, sizeof(DictBucket[T]))
+    view: dview[DictBucket[T]] = DynArrayView(items.cast[any void&], capacity, sizeof(DictBucket[T]))
     arena_da_fill(view, zeroed)
 
 def arena_dict_copy_key(a: any Arena&, key: dstr[key_shape]) -> heap u8& can[Memory.Allocate, Abort.Panic]:
@@ -1580,12 +1580,12 @@ def arena_dict_copy_key(a: any Arena&, key: dstr[key_shape]) -> heap u8& can[Mem
     key_bytes: any u8& = key
 
     if key_len == 0:
-        out: heap u8& = arena_alloc(a, 1).cast[heap u8&]()
+        out: heap u8& = arena_alloc(a, 1).cast[heap u8&]
         out[0] <- 0
         return out
 
-    out: heap u8& = arena_alloc(a, key_len + 1).cast[heap u8&]()
-    arena_memcpy(out.cast[any void&](), key_bytes.cast[any void&](), key_len)
+    out: heap u8& = arena_alloc(a, key_len + 1).cast[heap u8&]
+    arena_memcpy(out.cast[any void&], key_bytes.cast[any void&], key_len)
     out[key_len] <- 0
     return out
 
@@ -1625,7 +1625,7 @@ def arena_dict_new[T](a: any Arena&, initial_capacity: usize) -> dict[dstr[key_s
     if capacity == 0:
         return out
 
-    items: any DictBucket[T]& = arena_alloc(a, capacity * sizeof(DictBucket[T])).cast[any DictBucket[T]&]()
+    items: any DictBucket[T]& = arena_alloc(a, capacity * sizeof(DictBucket[T])).cast[any DictBucket[T]&]
     arena_dict_zero_buckets(items, capacity)
 
     out.items as & <- items
@@ -1642,7 +1642,7 @@ def arena_dict_reserve[T](a: any Arena&, m: any dict[dstr[key_shape], T]&, min_c
         return
 
     owner: any Arena& = m.arena if m.arena != null else a
-    new_items: any DictBucket[T]& = arena_alloc(owner, target_capacity * sizeof(DictBucket[T])).cast[any DictBucket[T]&]()
+    new_items: any DictBucket[T]& = arena_alloc(owner, target_capacity * sizeof(DictBucket[T])).cast[any DictBucket[T]&]
     arena_dict_zero_buckets(new_items, target_capacity)
 
     rebuilt: mutable dict[dstr[key_shape], T] = zeroed
@@ -1655,7 +1655,7 @@ def arena_dict_reserve[T](a: any Arena&, m: any dict[dstr[key_shape], T]&, min_c
         i: mutable usize = 0
         while i < m.capacity:
             if old_items[i].state == DICT_BUCKET_FULL:
-                _ = arena_dict_insert_existing_bucket((&rebuilt).cast[any dict[dstr[key_shape], T]&](), old_items[i])
+                _ = arena_dict_insert_existing_bucket((&rebuilt).cast[any dict[dstr[key_shape], T]&], old_items[i])
             i <- i + 1
 
     m.items as & <- rebuilt.items
@@ -1758,7 +1758,7 @@ def arena_dict_new__i64(a: any Arena&, initial_capacity: usize) -> DynDict[i64] 
     if capacity == 0:
         return out
 
-    items: any DictBucket[i64]& = arena_alloc(a, capacity * sizeof(DictBucket[i64])).cast[any DictBucket[i64]&]()
+    items: any DictBucket[i64]& = arena_alloc(a, capacity * sizeof(DictBucket[i64])).cast[any DictBucket[i64]&]
     arena_dict_zero_buckets(items, capacity)
 
     out.items as & <- items
@@ -1775,7 +1775,7 @@ def arena_dict_reserve__i64(a: any Arena&, m: any DynDict[i64]&, min_capacity: u
         return
 
     owner: any Arena& = m.arena if m.arena != null else a
-    new_items: any DictBucket[i64]& = arena_alloc(owner, target_capacity * sizeof(DictBucket[i64])).cast[any DictBucket[i64]&]()
+    new_items: any DictBucket[i64]& = arena_alloc(owner, target_capacity * sizeof(DictBucket[i64])).cast[any DictBucket[i64]&]
     arena_dict_zero_buckets(new_items, target_capacity)
 
     rebuilt: mutable DynDict[i64] = zeroed
@@ -1788,7 +1788,7 @@ def arena_dict_reserve__i64(a: any Arena&, m: any DynDict[i64]&, min_capacity: u
         i: mutable usize = 0
         while i < m.capacity:
             if old_items[i].state == DICT_BUCKET_FULL:
-                _ = arena_dict_insert_existing_bucket((&rebuilt).cast[any DynDict[i64]&](), old_items[i])
+                _ = arena_dict_insert_existing_bucket((&rebuilt).cast[any DynDict[i64]&], old_items[i])
             i <- i + 1
 
     m.items as & <- rebuilt.items
@@ -1896,7 +1896,7 @@ def arena_da_view[T](da: any darray[T, shape_in]&, start: usize, end: usize) -> 
     if hi == lo:
         return DynArrayView(null, 0, elem_size)
 
-    return DynArrayView((da.items + lo).cast[any void&](), hi - lo, elem_size)
+    return DynArrayView((da.items + lo).cast[any void&], hi - lo, elem_size)
 
 def arena_da_view_len[T](view: dview[T]) -> usize:
     return view.len
@@ -1914,7 +1914,7 @@ def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]
         return DynArrayView(null, 0, view.elem_size)
 
     offset: usize = lo * view.elem_size
-    return DynArrayView((view.data.cast[any u8&]() + offset).cast[any void&](), hi - lo, view.elem_size)
+    return DynArrayView((view.data.cast[any u8&] + offset).cast[any void&], hi - lo, view.elem_size)
 
 def arena_da_view_prefix[T](view: dview[T], end: usize) -> dview[T]:
     return arena_da_view_slice(view, 0u, end)
@@ -1927,7 +1927,7 @@ def arena_da_view_get[T](view: dview[T], index: usize) -> T:
     assert view.data != null
 
     offset: usize = index * view.elem_size
-    base: any T& = (view.data.cast[any u8&]() + offset).cast[any T&]()
+    base: any T& = (view.data.cast[any u8&] + offset).cast[any T&]
     return base[0]
 
 def arena_da_fill[T](dst: dview[T], value: T):
@@ -1936,7 +1936,7 @@ def arena_da_fill[T](dst: dview[T], value: T):
 
 	assert dst.data != null
 
-	out: any T& = dst.data.cast[any T&]()
+    out: any T& = dst.data.cast[any T&]
 	i: mutable usize = 0u
 	while i < dst.len:
 		out[i] <- value
@@ -1950,8 +1950,8 @@ def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
     assert dst.data != null
     assert src.data != null
 
-    out: any T& = dst.data.cast[any T&]()
-    src_items: any T& = src.data.cast[any T&]()
+    out: any T& = dst.data.cast[any T&]
+    src_items: any T& = src.data.cast[any T&]
     i: mutable usize = 0u
     while i < dst.len:
         out[i] <- src_items[i]
@@ -1967,15 +1967,15 @@ def arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool:
     assert right.data != null
 
     byte_count: usize = left.len * left.elem_size
-    return arena_memeq(left.data.cast[any void&](), right.data.cast[any void&](), byte_count)
+    return arena_memeq(left.data.cast[any void&], right.data.cast[any void&], byte_count)
 
 def arena_da_from_view[T](a: any Arena&, view: dview[T]) -> darray[T, shape_out] can[Memory.Allocate, Abort.Panic]:
     if view.len == 0:
         return zeroed
 
-    items: any T& = arena_alloc(a, view.len * sizeof(T)).cast[any T&]()
+    items: any T& = arena_alloc(a, view.len * sizeof(T)).cast[any T&]
     assert view.data != null
-    arena_memcpy(items.cast[any void&](), view.data.cast[any void&](), view.len * view.elem_size)
+    arena_memcpy(items.cast[any void&], view.data.cast[any void&], view.len * view.elem_size)
 
     out: mutable darray[T, shape_out] = zeroed
     out.items as & <- items
@@ -2007,22 +2007,22 @@ def arena_da_append_many[T](a: any Arena&, da: any darray[T, shape_in]&, new_ite
         new_size: usize = new_capacity * sizeof(T)
 
         if da.items == null:
-            da.items as & <- arena_alloc(a, new_size).cast[any T&]()
+            da.items as & <- arena_alloc(a, new_size).cast[any T&]
         else:
             da.items as & <- arena_realloc(
                 a,
-                da.items.cast[any void&](),
+                da.items.cast[any void&],
                 old_size,
                 new_size
-            ).cast[any T&]()
+            ).cast[any T&]
 
         da.capacity <- new_capacity
 
     assert da.items != null
 
     arena_memcpy(
-        (da.items + da.count).cast[any void&](),
-        new_items.cast[any void&](),
+        (da.items + da.count).cast[any void&],
+        new_items.cast[any void&],
         new_items_count * sizeof(T)
     )
 
@@ -2061,6 +2061,6 @@ def arena_vsprintf(a: any Arena&, format: any u8&, args: va_list) -> heap u8& ca
 
     assert n >= 0
 
-    result: heap u8& = arena_alloc(a, n.usize() + 1).cast[heap u8&]()
-    _ = vsnprintf(result.cast[any u8&?](), n.usize() + 1, format, args)
+    result: heap u8& = arena_alloc(a, n.usize() + 1).cast[heap u8&]
+    _ = vsnprintf(result.cast[any u8&?], n.usize() + 1, format, args)
     return result

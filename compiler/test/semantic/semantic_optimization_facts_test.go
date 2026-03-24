@@ -188,7 +188,7 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
 	return DynArrayView(null, 0u, sizeof(T))
 
 def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
@@ -470,7 +470,7 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
 	return DynArrayView(null, 0u, sizeof(T))
 
 def arena_da_view_prefix[T](view: dview[T], end: usize) -> dview[T]:
@@ -526,7 +526,7 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
 	return DynArrayView(null, 0u, sizeof(T))
 
 def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
@@ -574,7 +574,7 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
 	return DynArrayView(null, 0u, sizeof(T))
 
 def inspect(values: any darray[i32, 4]&) -> int:

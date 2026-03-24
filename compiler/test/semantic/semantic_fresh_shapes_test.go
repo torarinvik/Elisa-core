@@ -237,7 +237,7 @@ def bad(a: any Arena&, da: any darray[i32, row]&) -> any darray[i32, row]&:
 
 func TestAnalyzeStage1StringConcatWrapperReturnsFreshShape(t *testing.T) {
 	src := `def concat2(lhs: any u8&?, rhs: any u8&?) -> any u8&:
-	return lhs if lhs != null else rhs.cast[any u8&]()
+	return lhs if lhs != null else rhs.cast[any u8&]
 
 def rt_concat2(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[shape_result]:
 	return concat2(lhs, rhs)

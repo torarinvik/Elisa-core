@@ -20,7 +20,7 @@ def frontend_new_lexer(a: any Arena&, filename: any u8&, source: any u8&) -> Fro
     out.pending_index <- 0u
     out.at_line_start <- true
     out.paren_depth <- 0
-    _ = arena_da_append(a, (&out.indent_stack).cast[any darray[usize]&](), 0u)
+    _ = arena_da_append(a, (&out.indent_stack).cast[any darray[usize]&], 0u)
     return out
 
 
@@ -82,7 +82,7 @@ def frontend_pending_has_tokens(lexer: any FrontendLexer&) -> bool:
 
 
 def frontend_push_pending(lexer: any FrontendLexer&, token: FrontendToken) can[Memory.Allocate, Abort.Panic]:
-    _ = arena_da_append(frontend_require_arena(lexer), (&lexer.pending_tokens).cast[any darray[FrontendToken]&](), token)
+    _ = arena_da_append(frontend_require_arena(lexer), (&lexer.pending_tokens).cast[any darray[FrontendToken]&], token)
 
 
 def frontend_pop_pending(lexer: any FrontendLexer&) -> FrontendToken:
@@ -126,7 +126,7 @@ def frontend_indent_top(lexer: any FrontendLexer&) -> usize:
 
 
 def frontend_push_indent(lexer: any FrontendLexer&, value: usize) can[Memory.Allocate, Abort.Panic]:
-    _ = arena_da_append(frontend_require_arena(lexer), (&lexer.indent_stack).cast[any darray[usize]&](), value)
+    _ = arena_da_append(frontend_require_arena(lexer), (&lexer.indent_stack).cast[any darray[usize]&], value)
 
 
 def frontend_pop_indent(lexer: any FrontendLexer&):
@@ -831,8 +831,8 @@ def frontend_tokenize(a: any Arena&, filename: any u8&, source: any u8&) -> darr
     tokens: mutable darray[FrontendToken] = zeroed
 
     while true:
-        token: FrontendToken = frontend_next_token((&lexer).cast[any FrontendLexer&]())
-        _ = arena_da_append(a, (&tokens).cast[any darray[FrontendToken]&](), token)
+        token: FrontendToken = frontend_next_token((&lexer).cast[any FrontendLexer&])
+        _ = arena_da_append(a, (&tokens).cast[any darray[FrontendToken]&], token)
         match token.kind:
             FrontendTokenKind.Eof:
                 return tokens

@@ -25,15 +25,15 @@ def arena_dict_clear__i32(m: any dict[dstr[key_shape], i32]&):
 
 def touch_dict(a: any Arena&, key: dstr[key_shape]) -> bool error[RuntimeError]:
     values: mutable dict[dstr[key_shape], i32] = arena_dict_new__i32(a, 4u)
-    try arena_dict_reserve__i32(a, (&values).cast[any dict[dstr[key_shape], i32]&](), 8u)
+    try arena_dict_reserve__i32(a, (&values).cast[any dict[dstr[key_shape], i32]&], 8u)
 
-    slot: any i32&? = try arena_dict_put__i32(a, (&values).cast[any dict[dstr[key_shape], i32]&](), key, 7) else null
+    slot: any i32&? = try arena_dict_put__i32(a, (&values).cast[any dict[dstr[key_shape], i32]&], key, 7) else null
     if slot == null:
         return false
 
-    present: bool = arena_dict_contains__i32((&values).cast[any dict[dstr[key_shape], i32]&](), key)
-    fetched: any i32&? = arena_dict_get__i32((&values).cast[any dict[dstr[key_shape], i32]&](), key)
-    removed: bool = arena_dict_remove__i32((&values).cast[any dict[dstr[key_shape], i32]&](), key)
-    arena_dict_clear__i32((&values).cast[any dict[dstr[key_shape], i32]&]())
+    present: bool = arena_dict_contains__i32((&values).cast[any dict[dstr[key_shape], i32]&], key)
+    fetched: any i32&? = arena_dict_get__i32((&values).cast[any dict[dstr[key_shape], i32]&], key)
+    removed: bool = arena_dict_remove__i32((&values).cast[any dict[dstr[key_shape], i32]&], key)
+    arena_dict_clear__i32((&values).cast[any dict[dstr[key_shape], i32]&])
 
     return present and fetched != null and removed

@@ -6,6 +6,6 @@ struct RegionNode:
 def region_ref_sum(seed: i32) -> i32:
     region scratch(1024u)
     first: scratch RegionNode& = new[scratch] RegionNode(null, seed)
-    second: scratch RegionNode& = new[scratch] RegionNode(first.cast[any RegionNode&?](), seed + 1)
+    second: scratch RegionNode& = new[scratch] RegionNode(first.cast[any RegionNode&?], seed + 1)
     alias: any RegionNode& = second
     return first.value + alias.value

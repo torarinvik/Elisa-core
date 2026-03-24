@@ -233,7 +233,7 @@ extern malloc(bytes: usize) -> heap void&? can[Memory]
 extern free(ptr: heap void&) -> void can[Memory]
 
 def sfree_node(node: heap Node&) -> heap Node! can[Memory]:
-    free(node.cast[heap void&]()) can Memory.Release
+    free(node.cast[heap void&]) can Memory.Release
     return null
 ```
 

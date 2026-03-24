@@ -437,7 +437,7 @@ extern fetch_and(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 
 extern fetch_xor(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
 
 def bump(slot: mutable atomic[i64]) -> i64 can[Atomics.Rmw]:
-	slot_ref: any atomic[i64]& = (&slot).cast[any atomic[i64]&]()
+	slot_ref: any atomic[i64]& = (&slot).cast[any atomic[i64]&]
 	add: i64 = fetch_add(slot_ref, 1, MemoryOrder.AcqRel)
 	sub: i64 = fetch_sub(slot_ref, 2, MemoryOrder.AcqRel)
 	or_bits: i64 = fetch_or(slot_ref, 4, MemoryOrder.AcqRel)
@@ -617,11 +617,11 @@ func TestGenerateLLVMIRLowersFunctionValueErasureCasts(t *testing.T) {
     return value + 1
 
 def call_bits(bits: uintptr, value: i64) -> i64:
-    fn: func(i64) -> i64 = bits.cast[func(i64) -> i64]()
+	fn: func(i64) -> i64 = bits.cast[func(i64) -> i64]
     return fn(value)
 
 def run() -> i64:
-    bits: uintptr = inc.cast[uintptr]()
+	bits: uintptr = inc.cast[uintptr]
     return call_bits(bits, 41)
 `
 	result := parseAndAnalyze(t, "backend_function_value_erasure_casts.llcontext", src)
@@ -738,13 +738,13 @@ def view_char(text: sview[0, 4]) -> char:
 
 func TestGenerateLLVMIRLowersEscapedStringLiteralBytes(t *testing.T) {
 	src := `def newline_text() -> any u8&:
-	return "line\nbreak".cast[any u8&]()
+	return "line\nbreak".cast[any u8&]
 
 def quoted_text() -> any u8&:
-	return "quote: \" slash: \\ hex: \x41".cast[any u8&]()
+	return "quote: \" slash: \\ hex: \x41".cast[any u8&]
 
 def unicode_text() -> any u8&:
-	return "\u263A".cast[any u8&]()
+	return "\u263A".cast[any u8&]
 `
 	result := parseAndAnalyze(t, "backend_string_escapes.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -1544,7 +1544,7 @@ func TestGenerateLLVMIRLowersPointerIntegerCasts(t *testing.T) {
 	return ptr.uintptr()
 
 def bits_ptr(bits: uintptr) -> any u8&:
-	return bits.cast[any u8&]()
+	return bits.cast[any u8&]
 `
 	result := parseAndAnalyze(t, "backend_pointer_integer_casts.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -2624,7 +2624,7 @@ def load_text(path: any u8&) -> dstr[file_text] error[IoError.NotFound, ...]:
 	return text
 
 def load_with_fallback(path: any u8&) -> any u8&:
-	text: any u8& = try read_file(path) else "".cast[any u8&]()
+	text: any u8& = try read_file(path) else "".cast[any u8&]
 	return text
 `
 	result := parseAndAnalyze(t, "backend_error_handling.llcontext", src)
@@ -3050,7 +3050,7 @@ func TestGenerateLLVMIRSpecializesSameExtentRuntimeStringEquality(t *testing.T) 
 def string_view(value: any u8&?, start: i64, end: i64) -> StringView:
 	_ = value
 	_ = start
-	return StringView("".cast[any u8&](), end - start)
+	return StringView("".cast[any u8&], end - start)
 
 def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
 	return string_view(value, start, end)
@@ -3463,7 +3463,7 @@ func TestGenerateLLVMIRSpecializesLongStringViewLiteralHelperCalls(t *testing.T)
 	src := `extern string_view_eq(view: StringView, other: any u8&?) -> int
 
 def same_long(view: StringView) -> bool:
-	return string_view_eq(view, "destroy_region".cast[any u8&]()) != 0
+	return string_view_eq(view, "destroy_region".cast[any u8&]) != 0
 `
 	result := parseAndAnalyze(t, "backend_runtime_string_literal_eq_long.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -3541,7 +3541,7 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
 	return DynArrayView(null, 0u, sizeof(T))
 
 def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
@@ -4138,7 +4138,7 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
 	return DynArrayView(null, 0u, sizeof(T))
 
 def arena_da_fill[T](dst: dview[T], value: T):
@@ -4213,7 +4213,7 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
 	return DynArrayView(null, 0u, sizeof(T))
 
 def arena_da_fill[T](dst: dview[T], value: T):
@@ -4304,7 +4304,7 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
 	return DynArrayView(null, 0u, sizeof(T))
 
 def arena_da_fill[T](dst: dview[T], value: T):
@@ -4379,7 +4379,7 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
 	return DynArrayView(null, 0u, sizeof(T))
 
 def arena_da_fill[T](dst: dview[T], value: T):
@@ -4440,7 +4440,7 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
 	return DynArrayView(null, 0u, sizeof(T))
 
 def arena_da_fill[T](dst: dview[T], value: T):
@@ -4482,7 +4482,7 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
 	return DynArrayView(null, 0u, sizeof(T))
 
 def arena_da_fill[T](dst: dview[T], value: T):
@@ -4573,7 +4573,7 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
 	return DynArrayView(null, 0u, sizeof(T))
 
 def arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool:
@@ -5144,7 +5144,7 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
 	return DynArrayView(null, 0u, sizeof(T))
 
 def arena_da_from_view[T](a: any Arena&, view: dview[T]) -> darray[T, shape_out]:
@@ -5200,7 +5200,7 @@ extern register_perm_string_len(ptr: any u8&?, len: usize)
 extern intern_small_string(src: any u8&, len: usize) -> heap u8&
 
 def string_view(value: any u8&?, start: i64, end: i64) -> StringView:
-	src: any u8& = value if value != null else "".cast[any u8&]()
+	src: any u8& = value if value != null else "".cast[any u8&]
 	_ = start
 	return StringView(src, end)
 
@@ -5209,7 +5209,7 @@ def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
 
 def string_view_copy(view: StringView) -> heap u8&:
 	_ = view
-	return intern_small_string("".cast[any u8&](), 0u)
+	return intern_small_string("".cast[any u8&], 0u)
 
 def ctx_string_from_view(view: StringView) -> dstr[shape_out]:
 	return string_view_copy(view)
@@ -5283,7 +5283,7 @@ func TestGenerateLLVMIRSpecializesStringViewLiteralWrapperCalls(t *testing.T) {
 	src := `extern string_view_eq(view: StringView, other: any u8&?) -> int
 
 def frontend_sv_eq_literal(view: StringView, literal: static u8&) -> bool:
-	return string_view_eq(view, literal.cast[any u8&]()) != 0
+	return string_view_eq(view, literal.cast[any u8&]) != 0
 
 def same_short(view: StringView) -> bool:
 	return frontend_sv_eq_literal(view, "def")

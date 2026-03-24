@@ -7,22 +7,22 @@
 # ------------------------------------------------------------
 
 def int_to_string(value: i64) -> heap u8& can[Memory.Allocate, Console.Format, Abort.Panic]:
-    return int_to_string_into((&perm_arena).cast[any Arena&](), value)
+    return int_to_string_into((&perm_arena).cast[any Arena&], value)
 
 def int_to_string_scratch(value: i64) -> heap u8& can[Memory.Allocate, Console.Format, Abort.Panic]:
-    return int_to_string_into((&scratch_arena).cast[any Arena&](), value)
+    return int_to_string_into((&scratch_arena).cast[any Arena&], value)
 
 def bool_to_string(value: int) -> any u8&:
-    return bool_to_string_into((&perm_arena).cast[any Arena&](), value)
+    return bool_to_string_into((&perm_arena).cast[any Arena&], value)
 
 def bool_to_string_scratch(value: int) -> any u8&:
-    return bool_to_string_into((&scratch_arena).cast[any Arena&](), value)
+    return bool_to_string_into((&scratch_arena).cast[any Arena&], value)
 
 def char_to_string(value: i64) -> heap u8& can[Memory.Allocate, Abort.Panic]:
-    return char_to_string_into((&perm_arena).cast[any Arena&](), value)
+    return char_to_string_into((&perm_arena).cast[any Arena&], value)
 
 def char_to_string_scratch(value: i64) -> heap u8& can[Memory.Allocate, Abort.Panic]:
-    return char_to_string_into((&scratch_arena).cast[any Arena&](), value)
+    return char_to_string_into((&scratch_arena).cast[any Arena&], value)
 
 # ------------------------------------------------------------
 # Basic string predicates
@@ -32,8 +32,8 @@ def string_len(value: any u8&?) -> i64:
     return runtime_strlen(value).i64()
 
 def streq(lhs: any u8&?, rhs: any u8&?) -> int:
-    left: any u8& = lhs if lhs != null else "".cast[any u8&]()
-    right: any u8& = rhs if rhs != null else "".cast[any u8&]()
+    left: any u8& = lhs if lhs != null else "".cast[any u8&]
+    right: any u8& = rhs if rhs != null else "".cast[any u8&]
 
     if left == right:
         return 1
@@ -57,7 +57,7 @@ def rt_string_builder_append(builder: heap StringBuilder&?, suffix: any u8&?) ->
     return string_builder_append(builder, suffix)
 
 def rt_string_builder_finish(builder: heap StringBuilder&?) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
-    return string_builder_finish(builder).cast[any u8&]()
+    return string_builder_finish(builder).cast[any u8&]
 
 def rt_int_to_string(value: i64) -> dstr[shape_out] can[Memory.Allocate, Console.Format, Abort.Panic]:
     return int_to_string(value)
@@ -120,13 +120,13 @@ def ctx_string_views_eq(lhs: StringView, rhs: StringView) -> int:
     return string_views_eq(lhs, rhs)
 
 def ctx_string_from_view(view: StringView) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
-    return string_view_copy(view).cast[any u8&]()
+    return string_view_copy(view).cast[any u8&]
 
 def rt_reset_scratch():
     reset_scratch()
 
 def rt_puts(value: any u8&?) -> int can[Console.Write]:
-    return puts(value if value != null else "".cast[any u8&]())
+    return puts(value if value != null else "".cast[any u8&])
 
 # ------------------------------------------------------------
 # Fatal error handler (weak linkage)
@@ -134,6 +134,6 @@ def rt_puts(value: any u8&?) -> int can[Console.Write]:
 
 # weak
 def ctx_llvm_codegen_fatal(msg: any u8&?) can[Console, Abort.Exit]:
-    actual_msg: any u8& = msg if msg != null else "<null>".cast[any u8&]()
-    fprintf(stderr, "ctx_llvm_codegen_fatal: %s\n".cast[any u8&](), actual_msg)
+    actual_msg: any u8& = msg if msg != null else "<null>".cast[any u8&]
+    fprintf(stderr, "ctx_llvm_codegen_fatal: %s\n".cast[any u8&], actual_msg)
     exit(1)
