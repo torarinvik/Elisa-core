@@ -48,22 +48,25 @@ type PackedEnumABI string
 const (
 	PackedEnumABIRowHandle     PackedEnumABI = "row-handle"
 	PackedEnumABIWordHandle    PackedEnumABI = "word-handle"
+	PackedEnumABIDenseFixed    PackedEnumABI = "dense-fixed"
 	PackedEnumABIIndexSOA      PackedEnumABI = "index-soa"
 	PackedEnumABIVariantSparse PackedEnumABI = "variant-sparse"
 )
 
 func ParsePackedEnumABI(value string) (PackedEnumABI, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", string(PackedEnumABIRowHandle), "row", "rowhandle":
+	case "", string(PackedEnumABIRowHandle), "row", "rowhandle", "row_handle":
 		return PackedEnumABIRowHandle, nil
-	case string(PackedEnumABIWordHandle), "word", "wordhandle":
+	case string(PackedEnumABIWordHandle), "word", "wordhandle", "word_handle":
 		return PackedEnumABIWordHandle, nil
-	case string(PackedEnumABIIndexSOA), "index", "soa", "indexsoa":
+	case string(PackedEnumABIDenseFixed), "dense_fixed", "densefixed", "fixed_dense", "fixed-dense":
+		return PackedEnumABIDenseFixed, nil
+	case string(PackedEnumABIIndexSOA), "index", "soa", "indexsoa", "index_soa":
 		return PackedEnumABIIndexSOA, nil
-	case string(PackedEnumABIVariantSparse), "variant", "variantsparse", "sparse":
+	case string(PackedEnumABIVariantSparse), "variant", "variantsparse", "variant_sparse", "sparse":
 		return PackedEnumABIVariantSparse, nil
 	default:
-		return "", fmt.Errorf("unsupported packed enum ABI %q (expected %q, %q, %q, or %q)", value, PackedEnumABIRowHandle, PackedEnumABIWordHandle, PackedEnumABIIndexSOA, PackedEnumABIVariantSparse)
+		return "", fmt.Errorf("unsupported packed enum ABI %q (expected %q, %q, %q, %q, or %q)", value, PackedEnumABIRowHandle, PackedEnumABIWordHandle, PackedEnumABIDenseFixed, PackedEnumABIIndexSOA, PackedEnumABIVariantSparse)
 	}
 }
 
@@ -77,6 +80,8 @@ func (abi PackedEnumABI) mode() (packedEnumABIMode, error) {
 		return packedEnumABIRowHandle, nil
 	case PackedEnumABIWordHandle:
 		return packedEnumABIWordHandle, nil
+	case PackedEnumABIDenseFixed:
+		return packedEnumABIIndexSOA, nil
 	case PackedEnumABIIndexSOA:
 		return packedEnumABIIndexSOA, nil
 	case PackedEnumABIVariantSparse:

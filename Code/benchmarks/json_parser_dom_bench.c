@@ -34,6 +34,7 @@ typedef enum BenchmarkMode {
     BENCHMARK_MODE_BUILD,
     BENCHMARK_MODE_DESTROY,
     BENCHMARK_MODE_WALK,
+    BENCHMARK_MODE_RETAINED_WALK,
 } BenchmarkMode;
 
 static uint8_t *read_entire_file(const char *path, size_t *out_len) {
@@ -249,6 +250,8 @@ static const char *benchmark_mode_name(BenchmarkMode mode) {
         return "dom-destroy";
     case BENCHMARK_MODE_WALK:
         return "dom-walk";
+    case BENCHMARK_MODE_RETAINED_WALK:
+        return "dom-retained-walk";
     default:
         return "unknown";
     }
@@ -276,6 +279,10 @@ static int parse_benchmark_mode(const char *text, BenchmarkMode *out_mode) {
     }
     if (strcmp(text, "walk") == 0 || strcmp(text, "dom") == 0 || strcmp(text, "dom-walk") == 0) {
         *out_mode = BENCHMARK_MODE_WALK;
+        return 1;
+    }
+    if (strcmp(text, "retained") == 0 || strcmp(text, "retained-walk") == 0 || strcmp(text, "dom-retained-walk") == 0) {
+        *out_mode = BENCHMARK_MODE_RETAINED_WALK;
         return 1;
     }
     return 0;
@@ -467,6 +474,41 @@ cleanup:
     return result;
 }
 
+static int64_t document_dom_retained_checksum(JsonParserDocument *doc, int64_t *out_node_count) {
+    JsonParserValue root = {0};
+    ScratchBuffer scratch = {0};
+    int ok = 1;
+    int64_t result = -1;
+
+    if (doc == NULL || doc->impl_bits == (uintptr_t)0) {
+        fprintf(stderr, "retained document missing handle\n");
+        goto cleanup;
+    }
+
+    if (json_parser_document_root_value(doc, &root) != 1) {
+        fprintf(stderr, "retained document root value failed\n");
+        goto cleanup;
+    }
+
+    if (out_node_count != NULL) {
+        *out_node_count = json_parser_document_node_count(doc);
+        if (*out_node_count < 0) {
+            fprintf(stderr, "retained document node count failed\n");
+            goto cleanup;
+        }
+    }
+
+    result = (int64_t)(dom_visit_value(&root, &scratch, &ok) & (uint64_t)INT64_MAX);
+    if (!ok) {
+        fprintf(stderr, "retained dom visit failed\n");
+        result = -1;
+    }
+
+cleanup:
+    scratch_release(&scratch);
+    return result;
+}
+
 static int document_dom_parse_only(uint8_t *input, size_t input_len) {
     JsonParserDocument doc = {0};
     int ok = 0;
@@ -525,7 +567,7 @@ static int build_document_batch(uint8_t *input, size_t input_len, JsonParserDocu
 
 int main(int argc, char **argv) {
     if (argc < 3) {
-        fprintf(stderr, "usage: %s <json-file> <iterations> [parse|copy|build|destroy|walk]\n", argv[0]);
+        fprintf(stderr, "usage: %s <json-file> <iterations> [parse|copy|build|destroy|walk|retained-walk]\n", argv[0]);
         return 1;
     }
 
@@ -550,6 +592,7 @@ int main(int argc, char **argv) {
 
     int64_t node_count = -1;
     int64_t warmup_checksum = -1;
+    JsonParserDocument retained_doc = {0};
 
     JsonParserDocument *docs = NULL;
     if (mode == BENCHMARK_MODE_BUILD || mode == BENCHMARK_MODE_DESTROY) {
@@ -606,9 +649,24 @@ int main(int argc, char **argv) {
             return 1;
         }
     } else {
-        warmup_checksum = document_dom_checksum(input, input_len, &node_count);
+        if (mode == BENCHMARK_MODE_RETAINED_WALK) {
+            if (json_parser_document_parse_with_len(input, input_len, &retained_doc) != 1) {
+                fprintf(stderr, "retained dom parser rejected %s\n", path);
+                free(copy_scratch);
+                free(docs);
+                free(input);
+                return 1;
+            }
+            warmup_checksum = document_dom_retained_checksum(&retained_doc, &node_count);
+        } else {
+            warmup_checksum = document_dom_checksum(input, input_len, &node_count);
+        }
         if (warmup_checksum < 0 || node_count < 0) {
             fprintf(stderr, "dom parser rejected %s\n", path);
+            if (retained_doc.impl_bits != (uintptr_t)0) {
+                (void)json_parser_document_destroy(retained_doc.impl_bits);
+                retained_doc.impl_bits = (uintptr_t)0;
+            }
             free(copy_scratch);
             free(docs);
             free(input);
@@ -661,6 +719,16 @@ int main(int argc, char **argv) {
             (void)json_parser_document_destroy(docs[i].impl_bits);
             docs[i].impl_bits = (uintptr_t)0;
             total_metric += 1;
+        } else if (mode == BENCHMARK_MODE_RETAINED_WALK) {
+            int64_t iteration_checksum = document_dom_retained_checksum(&retained_doc, NULL);
+            if (iteration_checksum < 0) {
+                fprintf(stderr, "retained dom traversal failed for %s at iteration %d\n", path, i);
+                free(copy_scratch);
+                free(docs);
+                free(input);
+                return 1;
+            }
+            total_metric += iteration_checksum;
         } else {
             int64_t iteration_checksum = document_dom_checksum(input, input_len, NULL);
             if (iteration_checksum < 0) {
@@ -682,6 +750,10 @@ int main(int argc, char **argv) {
 
     if (mode == BENCHMARK_MODE_BUILD) {
         destroy_document_batch(docs, iterations);
+    }
+    if (retained_doc.impl_bits != (uintptr_t)0) {
+        (void)json_parser_document_destroy(retained_doc.impl_bits);
+        retained_doc.impl_bits = (uintptr_t)0;
     }
 
     if (mode == BENCHMARK_MODE_PARSE || mode == BENCHMARK_MODE_COPY ||

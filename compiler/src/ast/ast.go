@@ -50,11 +50,12 @@ type PermissionDecl struct {
 }
 
 type EnumDecl struct {
-	Position lexer.Pos
-	Name     string
-	Packed   bool
-	Common   []FieldDecl
-	Variants []EnumVariantDecl
+	Position    lexer.Pos
+	Annotations []Annotation
+	Name        string
+	Packed      bool
+	Common      []FieldDecl
+	Variants    []EnumVariantDecl
 }
 
 type EnumVariantDecl struct {

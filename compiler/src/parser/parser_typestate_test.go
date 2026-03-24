@@ -300,6 +300,26 @@ func TestParsePackedOpenAndViewStatements(t *testing.T) {
 	}
 }
 
+func TestParsePackedEnumAnnotation(t *testing.T) {
+	file, errs := parseSourceFile(t, "@packed_abi(dense_fixed)\npacked enum Expr:\n    Lit(value: int)\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.EnumDecl)
+	if !ok {
+		t.Fatalf("expected enum decl, got %T", file.Decls[0])
+	}
+	if len(decl.Annotations) != 1 {
+		t.Fatalf("expected one enum annotation, got %d", len(decl.Annotations))
+	}
+	if decl.Annotations[0].Name != "packed_abi" {
+		t.Fatalf("expected packed_abi annotation, got %q", decl.Annotations[0].Name)
+	}
+	if len(decl.Annotations[0].Args) != 1 || decl.Annotations[0].Args[0] != "dense_fixed" {
+		t.Fatalf("expected packed_abi(dense_fixed), got %#v", decl.Annotations[0].Args)
+	}
+}
+
 func TestParsePackedViewSurfaceType(t *testing.T) {
 	file, errs := parseSourceFile(t, "packed enum Expr:\n    common:\n        span: int\n    Lit(value: int)\n\ndef keep(view_value: packedview[Expr.Lit]) -> packedview[Expr.Lit]:\n    return view_value\n")
 	if len(errs) != 0 {

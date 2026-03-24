@@ -165,6 +165,68 @@ def fold() -> int:
 	}
 }
 
+func TestGenerateLLVMIRUsesEnumPackedABIOverrideWithoutGlobalOverride(t *testing.T) {
+	src := `@packed_abi(dense_fixed)
+packed enum Pair:
+	Left(value: int)
+	Right(value: int)
+
+def fold(node: Pair, store: Pair.Store[Frozen]) -> int:
+	if node in store as Pair.Left(value: value):
+		return value
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_enum_override.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "ctx_packed_store_read_index_tag") {
+		t.Fatalf("expected enum-level @packed_abi(dense_fixed) override to use dense fixed-width index tag reads, got:\n%s", output)
+	}
+	if strings.Contains(output, "ctx_packed_store_read_variant_sparse_tag") {
+		t.Fatalf("expected enum-level @packed_abi(dense_fixed) override to avoid canonical variant-sparse tag reads, got:\n%s", output)
+	}
+	if result.PackedLowering.Contract != string(PackedLoweringContractCanonicalCompilerGraph) {
+		t.Fatalf("expected result metadata to remain canonical without a global override, got %q", result.PackedLowering.Contract)
+	}
+	enumType, ok := result.NamedTypes["Pair"].(*semantic.EnumType)
+	if !ok || enumType == nil {
+		t.Fatalf("expected Pair named type to resolve to semantic.EnumType, got %#v", result.NamedTypes["Pair"])
+	}
+	if !enumType.HasPackedABIOverride || enumType.PackedABIOverride != string(PackedEnumABIDenseFixed) {
+		t.Fatalf("expected semantic enum type to record dense-fixed override, got %+v", enumType)
+	}
+	if result.PackedLowering.UsesLegacyOverride {
+		t.Fatalf("expected enum-level override not to mark result metadata as a legacy global override")
+	}
+}
+
+func TestGenerateLLVMIRGlobalPackedABIOverrideBeatsEnumOverride(t *testing.T) {
+	src := `@packed_abi(dense_fixed)
+packed enum Pair:
+	Left(value: int)
+	Right(value: int)
+
+def differs(left: Pair, right: Pair) -> bool:
+	return left != right
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_enum_override_global_wins.llcontext", src)
+	output, err := GenerateLLVMIRWithOptAndPackedABI(result, OptimizationLevel0, PackedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOptAndPackedABI returned error: %v", err)
+	}
+	if !strings.Contains(output, "define i1 @differs(i64") {
+		t.Fatalf("expected global word-handle override to win over enum annotation, got:\n%s", output)
+	}
+	if strings.Contains(output, "ctx_packed_store_read_index_tag") {
+		t.Fatalf("expected global word-handle override to suppress enum-level dense-fixed helpers, got:\n%s", output)
+	}
+	if !result.PackedLowering.UsesLegacyOverride || result.PackedLowering.LegacyOverride != string(PackedEnumABIWordHandle) {
+		t.Fatalf("expected result metadata to record the global word-handle override, got %+v", result.PackedLowering)
+	}
+}
+
 func TestGenerateLLVMIRLowersPackedEnumsAsWordHandlesInAlternateABI(t *testing.T) {
 	src := `packed enum Expr:
 	common:

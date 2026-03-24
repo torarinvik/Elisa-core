@@ -183,14 +183,16 @@ type PackedVariantViewType struct {
 }
 
 type EnumType struct {
-	Name       string
-	Packed     bool
-	Common     map[string]Field
-	StoreType  *PackedEnumStoreType
-	TagType    *ConstEnumType
-	Variants   []*EnumVariant
-	VariantMap map[string]*EnumVariant
-	Decl       *ast.EnumDecl
+	Name                 string
+	Packed               bool
+	PackedABIOverride    string
+	HasPackedABIOverride bool
+	Common               map[string]Field
+	StoreType            *PackedEnumStoreType
+	TagType              *ConstEnumType
+	Variants             []*EnumVariant
+	VariantMap           map[string]*EnumVariant
+	Decl                 *ast.EnumDecl
 }
 
 type ConstEnumType struct {

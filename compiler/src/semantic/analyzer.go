@@ -690,6 +690,7 @@ func (a *Analyzer) populateEnumVariants(decls []ast.Decl) {
 		if enumType == nil {
 			continue
 		}
+		a.analyzeEnumAnnotations(enumDecl, enumType)
 		if len(enumDecl.Common) > 0 && !enumDecl.Packed {
 			a.errorf(enumDecl.Pos(), "enum %q only supports common: fields for packed enums", enumDecl.Name)
 		}
@@ -883,6 +884,68 @@ func isSupportedExternFunctionAnnotation(name string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func normalizePackedABIAnnotationArg(value string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "row-handle", "row_handle", "row", "rowhandle":
+		return "row-handle", true
+	case "word-handle", "word_handle", "word", "wordhandle":
+		return "word-handle", true
+	case "dense-fixed", "dense_fixed", "densefixed", "fixed-dense", "fixed_dense":
+		return "dense-fixed", true
+	case "index-soa", "index_soa", "index", "soa", "indexsoa":
+		return "index-soa", true
+	case "variant-sparse", "variant_sparse", "variant", "variantsparse", "sparse":
+		return "variant-sparse", true
+	default:
+		return "", false
+	}
+}
+
+func isSupportedEnumAnnotation(name string) bool {
+	switch name {
+	case "packed_abi":
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *Analyzer) analyzeEnumAnnotations(enumDecl *ast.EnumDecl, enumType *EnumType) {
+	if enumDecl == nil || enumType == nil || len(enumDecl.Annotations) == 0 {
+		return
+	}
+	seen := make(map[string]lexer.Pos, len(enumDecl.Annotations))
+	for _, annotation := range enumDecl.Annotations {
+		if prev, exists := seen[annotation.Name]; exists {
+			a.errorf(annotation.Position, "duplicate @%s annotation on enum %q (first seen at %s:%d:%d)", annotation.Name, enumDecl.Name, prev.File, prev.Line, prev.Col)
+			continue
+		}
+		seen[annotation.Name] = annotation.Position
+		if !isSupportedEnumAnnotation(annotation.Name) {
+			a.errorf(annotation.Position, "unknown enum annotation @%s on %q", annotation.Name, enumDecl.Name)
+			continue
+		}
+		switch annotation.Name {
+		case "packed_abi":
+			if !enumDecl.Packed {
+				a.errorf(annotation.Position, "@packed_abi on enum %q requires a packed enum", enumDecl.Name)
+				continue
+			}
+			if len(annotation.Args) != 1 {
+				a.errorf(annotation.Position, "@packed_abi on enum %q expects exactly one ABI argument", enumDecl.Name)
+				continue
+			}
+			normalized, ok := normalizePackedABIAnnotationArg(annotation.Args[0])
+			if !ok {
+				a.errorf(annotation.Position, "@packed_abi on enum %q uses unsupported ABI %q (expected row_handle, word_handle, dense_fixed, index_soa, or variant_sparse)", enumDecl.Name, annotation.Args[0])
+				continue
+			}
+			enumType.PackedABIOverride = normalized
+			enumType.HasPackedABIOverride = true
+		}
 	}
 }
 

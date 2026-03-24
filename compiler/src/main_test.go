@@ -699,6 +699,7 @@ func TestParseArgsAcceptsPackedABI(t *testing.T) {
 	}{
 		{name: "equals", args: []string{"-packed-abi=word-handle", "fixture.llcontext"}, want: backend.PackedEnumABIWordHandle},
 		{name: "separate", args: []string{"-packed-abi", "row-handle", "fixture.llcontext"}, want: backend.PackedEnumABIRowHandle},
+		{name: "dense-fixed-alias", args: []string{"-packed-abi", "dense-fixed", "fixture.llcontext"}, want: backend.PackedEnumABIDenseFixed},
 	}
 	for _, test := range tests {
 		test := test
@@ -743,7 +744,7 @@ func TestParseArgsDefaultsPackedLoweringToCanonicalProfile(t *testing.T) {
 	}
 }
 
-func TestRunCLICompilesJSONParserWithCanonicalPackedLoweringByDefault(t *testing.T) {
+func TestRunCLICompilesJSONParserWithEnumDenseFixedOverrideByDefault(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.llcontext")
 
@@ -762,10 +763,9 @@ func TestRunCLICompilesJSONParserWithCanonicalPackedLoweringByDefault(t *testing
 		"define %JsonParseNodeResult @json_parse_value_node(ptr",
 		"define %JsonParseNodeResult @json_parse_array_node(ptr",
 		"define %JsonParseNodeResult @json_parse_object_node(ptr",
-		"call %PackedStoreIndexAllocResult @ctx_packed_store_alloc_fixed_tagged_variant_sparse_result(",
-		"call %PackedStoreIndexAllocResult @ctx_packed_store_alloc_tagged_variant_sparse_result(",
-		"call i32 @ctx_packed_store_read_variant_sparse_tag(ptr %packed.tag.store.state, i32 ",
-		"call i64 @ctx_packed_store_read_variant_sparse_word(",
+		"call %PackedStoreIndexAllocResult @ctx_packed_store_alloc_fixed_tagged_index_result(",
+		"call i32 @ctx_packed_store_read_index_tag(ptr %packed.tag.store.state, i32 ",
+		"call i64 @ctx_packed_store_read_index_word(",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -773,17 +773,19 @@ func TestRunCLICompilesJSONParserWithCanonicalPackedLoweringByDefault(t *testing
 		}
 	}
 	for _, bad := range []string{
+		"call %PackedStoreIndexAllocResult @ctx_packed_store_alloc_fixed_tagged_variant_sparse_result(ptr %packed.alloc.store.arena, ptr %packed.alloc.store.state, i32 ",
+		"call %PackedStoreIndexAllocResult @ctx_packed_store_alloc_tagged_variant_sparse_result(ptr %packed.alloc.store.arena, i64 ",
+		"call i32 @ctx_packed_store_read_variant_sparse_tag(ptr %packed.tag.store.state, i32 ",
+		"call i64 @ctx_packed_store_read_variant_sparse_word(i32 %node2, ptr %packed.payload.word.state, i64 ",
 		"call i64 @ctx_packed_store_read_word(ptr %packed.payload.word.arena",
 		"call i64 @ctx_packed_store_read_word(ptr %packed.common.store.arena",
 		"call ptr @ctx_packed_store_decode(ptr %packed.decode.store.arena, i64",
 		"call ptr @ctx_packed_store_decode_index(ptr %packed.decode.store.arena, i32",
 		"call %PackedStoreAllocResult @ctx_packed_store_alloc_fixed_tagged_result(ptr %packed.alloc.store.arena, ptr %packed.alloc.store.state, i32 ",
 		"call %PackedStoreAllocResult @ctx_packed_store_alloc_result(ptr %packed.alloc.store.arena, i64 %packed.alloc.bytes, ptr %packed.alloc.store.state)",
-		"call %PackedStoreIndexAllocResult @ctx_packed_store_alloc_fixed_tagged_index_result(ptr %packed.alloc.store.arena, ptr %packed.alloc.store.state, i32 ",
-		"call %PackedStoreIndexAllocResult @ctx_packed_store_alloc_index_result(ptr %packed.alloc.store.arena, i64 %packed.alloc.bytes, ptr %packed.alloc.store.state)",
 	} {
 		if strings.Contains(output, bad) {
-			t.Fatalf("expected canonical packed lowering default to avoid %q, got:\n%s", bad, output)
+			t.Fatalf("expected enum-level dense-fixed lowering default to avoid %q, got:\n%s", bad, output)
 		}
 	}
 }

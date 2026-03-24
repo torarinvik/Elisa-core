@@ -531,11 +531,40 @@ def packed_store_append_prefix_words(a: any Arena&, state: any PackedStoreState&
     if state.prefix_words == 0u:
         return
     needed_rows: usize = state.handles.count
-    packed_store_ensure_prefix_columns(a, state, needed_rows)
+    assert state.prefix_column_capacity >= needed_rows
     assert state.prefix_columns.items != null
     column_ptrs: any uintptr& = state.prefix_columns.items
     row_words: any uintptr& = row.cast[any uintptr&]
     row_index: usize = needed_rows - 1u
+    assert state.prefix_columns.count >= state.prefix_words
+
+    if state.prefix_words == 1u:
+        assert column_ptrs[0u] != 0u64.uintptr()
+        column0: any uintptr& = column_ptrs[0u].cast[heap u8&].cast[any uintptr&]
+        column0[row_index] <- row_words[0u]
+        return
+
+    if state.prefix_words == 2u:
+        assert column_ptrs[0u] != 0u64.uintptr()
+        assert column_ptrs[1u] != 0u64.uintptr()
+        column0: any uintptr& = column_ptrs[0u].cast[heap u8&].cast[any uintptr&]
+        column1: any uintptr& = column_ptrs[1u].cast[heap u8&].cast[any uintptr&]
+        column0[row_index] <- row_words[0u]
+        column1[row_index] <- row_words[1u]
+        return
+
+    if state.prefix_words == 3u:
+        assert column_ptrs[0u] != 0u64.uintptr()
+        assert column_ptrs[1u] != 0u64.uintptr()
+        assert column_ptrs[2u] != 0u64.uintptr()
+        column0: any uintptr& = column_ptrs[0u].cast[heap u8&].cast[any uintptr&]
+        column1: any uintptr& = column_ptrs[1u].cast[heap u8&].cast[any uintptr&]
+        column2: any uintptr& = column_ptrs[2u].cast[heap u8&].cast[any uintptr&]
+        column0[row_index] <- row_words[0u]
+        column1[row_index] <- row_words[1u]
+        column2[row_index] <- row_words[2u]
+        return
+
     i: mutable usize = 0u
     while i < state.prefix_words:
         assert column_ptrs[i] != 0u64.uintptr()

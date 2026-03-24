@@ -123,8 +123,16 @@ func (p *Parser) parseDecl() ast.Decl {
 			return p.parseFuncDeclWithAnnotations(annotations)
 		case lexer.TOKEN_EXTERN:
 			return p.parseExternDeclWithAnnotations(annotations)
+		case lexer.TOKEN_PACKED:
+			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ENUM {
+				return p.parsePackedEnumDeclWithAnnotations(annotations)
+			}
+			p.errorf("declaration annotations must be followed by def, extern, enum, or packed enum, got %s", p.cur())
+			return nil
+		case lexer.TOKEN_ENUM:
+			return p.parseEnumDeclWithAnnotations(annotations)
 		default:
-			p.errorf("function annotations must be followed by def or extern, got %s", p.cur())
+			p.errorf("declaration annotations must be followed by def, extern, enum, or packed enum, got %s", p.cur())
 			return nil
 		}
 	}
@@ -217,10 +225,14 @@ func (p *Parser) parseAnnotationArg() string {
 }
 
 func (p *Parser) parsePackedEnumDecl() *ast.EnumDecl {
+	return p.parsePackedEnumDeclWithAnnotations(nil)
+}
+
+func (p *Parser) parsePackedEnumDeclWithAnnotations(annotations []ast.Annotation) *ast.EnumDecl {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_PACKED)
 	p.expect(lexer.TOKEN_ENUM)
-	return p.parseEnumDeclRest(pos, true)
+	return p.parseEnumDeclRest(pos, true, annotations)
 }
 
 func (p *Parser) parseErrorDecl() *ast.ErrorDecl {
@@ -268,12 +280,16 @@ func (p *Parser) parsePermissionDecl() *ast.PermissionDecl {
 }
 
 func (p *Parser) parseEnumDecl() *ast.EnumDecl {
-	pos := p.cur().Pos
-	p.expect(lexer.TOKEN_ENUM)
-	return p.parseEnumDeclRest(pos, false)
+	return p.parseEnumDeclWithAnnotations(nil)
 }
 
-func (p *Parser) parseEnumDeclRest(pos lexer.Pos, packed bool) *ast.EnumDecl {
+func (p *Parser) parseEnumDeclWithAnnotations(annotations []ast.Annotation) *ast.EnumDecl {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_ENUM)
+	return p.parseEnumDeclRest(pos, false, annotations)
+}
+
+func (p *Parser) parseEnumDeclRest(pos lexer.Pos, packed bool, annotations []ast.Annotation) *ast.EnumDecl {
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
@@ -294,7 +310,7 @@ func (p *Parser) parseEnumDeclRest(pos lexer.Pos, packed bool) *ast.EnumDecl {
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.EnumDecl{Position: pos, Name: name, Packed: packed, Common: commonFields, Variants: variants}
+	return &ast.EnumDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Packed: packed, Common: commonFields, Variants: variants}
 }
 
 func (p *Parser) parseEnumCommonFields() []ast.FieldDecl {

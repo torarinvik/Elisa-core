@@ -74,6 +74,13 @@ func (p PackedLoweringProfile) packedModeForPackedEnum(enumType *semantic.EnumTy
 	if p.hasLegacyOverride {
 		return p.legacyMode
 	}
+	if enumType.HasPackedABIOverride {
+		if abi, err := ParsePackedEnumABI(enumType.PackedABIOverride); err == nil {
+			if mode, err := abi.mode(); err == nil {
+				return mode
+			}
+		}
+	}
 	return p.canonicalPackedMode()
 }
 
