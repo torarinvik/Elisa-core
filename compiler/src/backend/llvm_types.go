@@ -14,6 +14,14 @@ static void llcontextAddAlwaysInlineAttr(LLVMContextRef Ctx, LLVMValueRef Fn, co
 	LLVMAttributeRef Attr = LLVMCreateEnumAttribute(Ctx, Kind, 0);
 	LLVMAddAttributeAtIndex(Fn, LLVMAttributeFunctionIndex, Attr);
 }
+
+static LLVMTypeRef llcontextGlobalValueType(LLVMValueRef Value) {
+	return LLVMGlobalGetValueType(Value);
+}
+
+static char* llcontextPrintType(LLVMTypeRef Type) {
+	return LLVMPrintTypeToString(Type);
+}
 */
 import "C"
 
@@ -238,6 +246,9 @@ func noteTypeKey(t semantic.Type) string {
 
 func (g *llvmGenerator) ensureFunctionDeclared(name string, fn *semantic.FuncType) (C.LLVMValueRef, error) {
 	if value, ok := g.functions[name]; ok {
+		if err := g.ensureDeclaredFunctionType(name, value, fn); err != nil {
+			return nil, err
+		}
 		return value, nil
 	}
 	value, err := g.addFunction(name, fn)
@@ -246,6 +257,26 @@ func (g *llvmGenerator) ensureFunctionDeclared(name string, fn *semantic.FuncTyp
 	}
 	g.functions[name] = value
 	return value, nil
+}
+
+func (g *llvmGenerator) ensureDeclaredFunctionType(name string, value C.LLVMValueRef, fn *semantic.FuncType) error {
+	if g == nil || value == nil || fn == nil {
+		return nil
+	}
+	expectedType, err := g.lowerFunctionType(fn)
+	if err != nil {
+		return err
+	}
+	actualType := C.llcontextGlobalValueType(value)
+	if actualType == expectedType {
+		return nil
+	}
+	actualText := disposeLLVMMessage(C.llcontextPrintType(actualType), "<unknown>")
+	expectedText := disposeLLVMMessage(C.llcontextPrintType(expectedType), "<unknown>")
+	if actualText == expectedText {
+		return nil
+	}
+	return fmt.Errorf("conflicting LLVM function declaration for %q: existing %s, requested %s", name, actualText, expectedText)
 }
 
 func (g *llvmGenerator) ensureGlobalDeclared(name string, t semantic.Type, external bool) (C.LLVMValueRef, error) {

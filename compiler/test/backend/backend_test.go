@@ -4465,6 +4465,99 @@ def fill_runtime_byte(values: any darray[u8, 4]&, value: u8) -> void:
 	}
 }
 
+func TestGenerateOptimizedLLVMObjectFileSupportsArenaDViewByteFillWithRuntimeMemsetDecl(t *testing.T) {
+	src := `extern memset(dest: any void&, val: int, n: usize) -> any void&
+
+repr(c) struct DynArray[T]:
+	items: mutable any T&?
+	count: mutable usize
+	capacity: mutable usize
+
+repr(c) struct DynArrayView:
+	data: mutable any void&?
+	len: mutable usize
+	elem_size: mutable usize
+
+def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+	_ = start
+	_ = end
+	if values.items != null:
+		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+	return DynArrayView(null, 0u, sizeof(T))
+
+def arena_da_fill[T](dst: dview[T], value: T):
+	_ = dst
+	_ = value
+
+def fill_runtime_byte(values: any darray[u8, 4]&, value: u8) -> void:
+	base: dview[u8] = arena_da_view(values, 0u, 4u)
+	left: dview[u8] = base[0u:2u]
+	arena_da_fill(left, value)
+`
+	result := parseAndAnalyze(t, "backend_dview_fill_dynamic_byte_object.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+	if !strings.Contains(output, "declare ptr @memset(ptr, i64, i64)") {
+		t.Fatalf("expected runtime memset declaration to lower to an int-sized second argument, got:\n%s", output)
+	}
+	fillBody := functionIR(output, "fill_runtime_byte")
+	if fillBody == "" {
+		t.Fatalf("expected to find fill_runtime_byte body, got:\n%s", output)
+	}
+	if !strings.Contains(fillBody, "call ptr @memset(ptr") {
+		t.Fatalf("expected fill_runtime_byte to lower through memset, got:\n%s", fillBody)
+	}
+	if strings.Contains(fillBody, "call ptr @memset(ptr %dview.fill.dst.data, i32") {
+		t.Fatalf("expected fill_runtime_byte memset fast-path to match the runtime int-sized declaration, got:\n%s", fillBody)
+	}
+
+	outputPath := filepath.Join(t.TempDir(), "fill_runtime_byte.o")
+	if err := backend.WriteLLVMObjectFileWithOpt(result, outputPath, backend.OptimizationLevel3); err != nil {
+		t.Fatalf("WriteLLVMObjectFileWithOpt returned error: %v", err)
+	}
+	if _, err := os.Stat(outputPath); err != nil {
+		t.Fatalf("expected optimized object file at %s: %v", outputPath, err)
+	}
+}
+
+func TestGenerateOptimizedLLVMObjectFileSkipsRedundantPackedZeroPayloadStores(t *testing.T) {
+	src := `repr(c) struct Payload:
+	data: mutable any u8&?
+	len: mutable i32
+
+packed enum Node:
+	Empty(Payload)
+	Byte(u8)
+
+def build() -> Node:
+	region scratch(256u)
+	store: Node.Store[Local] = Node.Store(scratch)
+	return new[store] Node.Empty(zeroed)
+`
+	result := parseAndAnalyze(t, "backend_packed_zero_payload_object.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+	buildBody := functionIR(output, "build")
+	if buildBody == "" {
+		t.Fatalf("expected to find build body, got:\n%s", output)
+	}
+	if strings.Contains(buildBody, "store %Payload zeroinitializer, ptr %enum.payload.ptr") {
+		t.Fatalf("expected packed zero payload constructor to avoid redundant aggregate zero stores into enum payload storage, got:\n%s", buildBody)
+	}
+
+	outputPath := filepath.Join(t.TempDir(), "packed_zero_payload.o")
+	if err := backend.WriteLLVMObjectFileWithOpt(result, outputPath, backend.OptimizationLevel3); err != nil {
+		t.Fatalf("WriteLLVMObjectFileWithOpt returned error: %v", err)
+	}
+	if _, err := os.Stat(outputPath); err != nil {
+		t.Fatalf("expected optimized object file at %s: %v", outputPath, err)
+	}
+}
+
 func TestGenerateLLVMIRSpecializesArenaDViewEqExact(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
 	items: mutable any T&?

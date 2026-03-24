@@ -5,6 +5,10 @@ package backend
 /*
 #include <stdlib.h>
 #include <llvm-c/Core.h>
+
+static int llcontextLLVMIsZeroValue(LLVMValueRef value) {
+	return LLVMIsAConstant(value) != NULL && LLVMIsNull(value);
+}
 */
 import "C"
 
@@ -17,6 +21,10 @@ import (
 	"llcontext/src/lexer"
 	"llcontext/src/semantic"
 )
+
+func llvmValueIsZeroConstant(value C.LLVMValueRef) bool {
+	return value != nil && C.llcontextLLVMIsZeroValue(value) != 0
+}
 
 func (s *functionState) addCallSiteEnumAttribute(call C.LLVMValueRef, index C.uint, name string) {
 	nameC := cString(name)
@@ -2598,8 +2606,13 @@ func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.
 	C.LLVMPositionBuilderAtEnd(s.builder, fillBB)
 	voidType := s.g.result.NamedTypes["void"]
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	memsetType := &semantic.FuncType{Name: "memset", Params: []semantic.Type{voidRefType, s.g.result.NamedTypes["i32"], s.g.result.NamedTypes["usize"]}, Return: voidRefType}
+	memsetValueType := s.g.result.NamedTypes["int"]
+	memsetType := &semantic.FuncType{Name: "memset", Params: []semantic.Type{voidRefType, memsetValueType, s.g.result.NamedTypes["usize"]}, Return: voidRefType}
 	memsetCallee, err := s.g.ensureFunctionDeclared("memset", memsetType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	fillValue, err = s.coerceValue(fillValue, s.g.result.NamedTypes["i32"], memsetValueType)
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -5023,21 +5036,29 @@ func (s *functionState) emitEnumConstructorValue(enumType *semantic.EnumType, va
 			if err != nil {
 				return nil, nil, err
 			}
-			C.LLVMBuildStore(s.builder, argValue, payloadPtr)
+			if !llvmValueIsZeroConstant(argValue) {
+				C.LLVMBuildStore(s.builder, argValue, payloadPtr)
+			}
 		} else {
 			payloadType, err := s.g.lowerEnumVariantPayloadType(variant)
 			if err != nil {
 				return nil, nil, err
 			}
 			aggregate := C.LLVMGetUndef(payloadType)
+			allZero := true
 			for i, payload := range variant.Payload {
 				argValue, _, err := s.emitExpr(orderedArgs[i], payload)
 				if err != nil {
 					return nil, nil, err
 				}
+				if !llvmValueIsZeroConstant(argValue) {
+					allZero = false
+				}
 				aggregate = C.LLVMBuildInsertValue(s.builder, aggregate, argValue, C.unsigned(i), cStringFree("enum.payload.ins"))
 			}
-			C.LLVMBuildStore(s.builder, aggregate, payloadPtr)
+			if !allZero {
+				C.LLVMBuildStore(s.builder, aggregate, payloadPtr)
+			}
 		}
 	}
 	value, err := s.loadValue(enumPtr, enumType, "enum.value")
@@ -5125,22 +5146,30 @@ func (s *functionState) emitPackedEnumConstructorAlloc(storeValue C.LLVMValueRef
 			if err != nil {
 				return nil, nil, err
 			}
-			C.LLVMBuildStore(s.builder, argValue, payloadPtr)
+			if !llvmValueIsZeroConstant(argValue) {
+				C.LLVMBuildStore(s.builder, argValue, payloadPtr)
+			}
 		} else {
 			payloadType, err := s.g.lowerEnumVariantPayloadType(variant)
 			if err != nil {
 				return nil, nil, err
 			}
 			aggregate := C.LLVMGetUndef(payloadType)
+			allZero := true
 			for i, payload := range variant.Payload {
 				_ = payload
 				argValue, err := s.emitPackedEnumConstructorPayloadValue(variant, i, orderedArgs[i], tailPlan, tailDataPtr)
 				if err != nil {
 					return nil, nil, err
 				}
+				if !llvmValueIsZeroConstant(argValue) {
+					allZero = false
+				}
 				aggregate = C.LLVMBuildInsertValue(s.builder, aggregate, argValue, C.unsigned(i), cStringFree("packed.enum.payload.ins"))
 			}
-			C.LLVMBuildStore(s.builder, aggregate, payloadPtr)
+			if !allZero {
+				C.LLVMBuildStore(s.builder, aggregate, payloadPtr)
+			}
 		}
 	}
 	ops := &packedStoreOps{s: s, storeValue: storeValue, storeType: enumType.StoreType}
