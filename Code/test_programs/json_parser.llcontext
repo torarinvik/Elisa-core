@@ -64,7 +64,7 @@ struct JsonAstObjectIterCursor:
     index: mutable usize
 
 
-@packed_abi(dense_fixed)
+@packed_profile(retained_reads)
 packed enum JsonNode:
     Invalid
     Null
