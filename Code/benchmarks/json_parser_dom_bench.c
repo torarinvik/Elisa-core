@@ -28,6 +28,11 @@ typedef struct ScratchBuffer {
     size_t capacity;
 } ScratchBuffer;
 
+typedef enum BenchmarkMode {
+    BENCHMARK_MODE_PARSE,
+    BENCHMARK_MODE_WALK,
+} BenchmarkMode;
+
 static uint8_t *read_entire_file(const char *path, size_t *out_len) {
     FILE *file = fopen(path, "rb");
     if (file == NULL) {
@@ -229,6 +234,32 @@ static uint64_t hash_f64(double value) {
 
 static uint64_t dom_visit_value(JsonParserValue *value, ScratchBuffer *scratch, int *ok);
 
+static const char *benchmark_mode_name(BenchmarkMode mode) {
+    switch (mode) {
+    case BENCHMARK_MODE_PARSE:
+        return "dom-parse";
+    case BENCHMARK_MODE_WALK:
+        return "dom-walk";
+    default:
+        return "unknown";
+    }
+}
+
+static int parse_benchmark_mode(const char *text, BenchmarkMode *out_mode) {
+    if (text == NULL || out_mode == NULL) {
+        return 0;
+    }
+    if (strcmp(text, "parse") == 0 || strcmp(text, "dom-parse") == 0) {
+        *out_mode = BENCHMARK_MODE_PARSE;
+        return 1;
+    }
+    if (strcmp(text, "walk") == 0 || strcmp(text, "dom") == 0 || strcmp(text, "dom-walk") == 0) {
+        *out_mode = BENCHMARK_MODE_WALK;
+        return 1;
+    }
+    return 0;
+}
+
 static uint64_t dom_visit_array(JsonParserValue *value, ScratchBuffer *scratch, int *ok) {
     int64_t len = json_parser_value_array_len(value);
     if (len < 0) {
@@ -415,9 +446,28 @@ cleanup:
     return result;
 }
 
+static int document_dom_parse_only(uint8_t *input) {
+    JsonParserDocument doc = {0};
+    int ok = 0;
+
+    if (json_parser_document_parse(input, &doc) != 1) {
+        fprintf(stderr, "document parse failed\n");
+        goto cleanup;
+    }
+
+    ok = 1;
+
+cleanup:
+    if (doc.impl_bits != (uintptr_t)0) {
+        (void)json_parser_document_destroy(doc.impl_bits);
+        doc.impl_bits = (uintptr_t)0;
+    }
+    return ok;
+}
+
 int main(int argc, char **argv) {
     if (argc < 3) {
-        fprintf(stderr, "usage: %s <json-file> <iterations>\n", argv[0]);
+        fprintf(stderr, "usage: %s <json-file> <iterations> [parse|walk]\n", argv[0]);
         return 1;
     }
 
@@ -428,6 +478,12 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    BenchmarkMode mode = BENCHMARK_MODE_PARSE;
+    if (argc >= 4 && !parse_benchmark_mode(argv[3], &mode)) {
+        fprintf(stderr, "unknown benchmark mode '%s' (expected parse or walk)\n", argv[3]);
+        return 1;
+    }
+
     size_t input_len = 0;
     uint8_t *input = read_entire_file(path, &input_len);
     if (input == NULL) {
@@ -435,26 +491,45 @@ int main(int argc, char **argv) {
     }
 
     int64_t node_count = -1;
-    int64_t warmup_checksum = document_dom_checksum(input, &node_count);
-    if (warmup_checksum < 0 || node_count < 0) {
-        fprintf(stderr, "dom parser rejected %s\n", path);
-        free(input);
-        return 1;
+    int64_t warmup_checksum = -1;
+
+    if (mode == BENCHMARK_MODE_PARSE) {
+        if (!document_dom_parse_only(input)) {
+            fprintf(stderr, "dom parser rejected %s\n", path);
+            free(input);
+            return 1;
+        }
+    } else {
+        warmup_checksum = document_dom_checksum(input, &node_count);
+        if (warmup_checksum < 0 || node_count < 0) {
+            fprintf(stderr, "dom parser rejected %s\n", path);
+            free(input);
+            return 1;
+        }
     }
 
     struct timespec start = {0};
     struct timespec end = {0};
     clock_gettime(CLOCK_MONOTONIC, &start);
 
-    int64_t checksum_acc = 0;
+    int64_t total_metric = 0;
     for (int i = 0; i < iterations; ++i) {
-        int64_t iteration_checksum = document_dom_checksum(input, NULL);
-        if (iteration_checksum < 0) {
-            fprintf(stderr, "dom traversal failed for %s at iteration %d\n", path, i);
-            free(input);
-            return 1;
+        if (mode == BENCHMARK_MODE_PARSE) {
+            if (!document_dom_parse_only(input)) {
+                fprintf(stderr, "dom parse failed for %s at iteration %d\n", path, i);
+                free(input);
+                return 1;
+            }
+            total_metric += 1;
+        } else {
+            int64_t iteration_checksum = document_dom_checksum(input, NULL);
+            if (iteration_checksum < 0) {
+                fprintf(stderr, "dom traversal failed for %s at iteration %d\n", path, i);
+                free(input);
+                return 1;
+            }
+            total_metric += iteration_checksum;
         }
-        checksum_acc += iteration_checksum;
     }
 
     clock_gettime(CLOCK_MONOTONIC, &end);
@@ -463,15 +538,27 @@ int main(int argc, char **argv) {
     double total_bytes = (double)input_len * (double)iterations;
     double mib_per_second = seconds > 0.0 ? (total_bytes / (1024.0 * 1024.0)) / seconds : 0.0;
 
-    printf("mode=dom file=%s bytes=%zu nodes=%" PRId64 " iterations=%d checksum=%" PRId64 " total_checksum=%" PRId64 " seconds=%.6f MiB/s=%.2f\n",
-           path,
-           input_len,
-           node_count,
-           iterations,
-           warmup_checksum,
-           checksum_acc,
-           seconds,
-           mib_per_second);
+    if (mode == BENCHMARK_MODE_PARSE) {
+        printf("mode=%s file=%s bytes=%zu iterations=%d parses=%" PRId64 " seconds=%.6f MiB/s=%.2f\n",
+               benchmark_mode_name(mode),
+               path,
+               input_len,
+               iterations,
+               total_metric,
+               seconds,
+               mib_per_second);
+    } else {
+        printf("mode=%s file=%s bytes=%zu nodes=%" PRId64 " iterations=%d checksum=%" PRId64 " total_checksum=%" PRId64 " seconds=%.6f MiB/s=%.2f\n",
+               benchmark_mode_name(mode),
+               path,
+               input_len,
+               node_count,
+               iterations,
+               warmup_checksum,
+               total_metric,
+               seconds,
+               mib_per_second);
+    }
 
     free(input);
     return 0;

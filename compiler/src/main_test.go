@@ -1110,7 +1110,7 @@ func TestRunCLIJSONParserDOMBenchSmoke(t *testing.T) {
 		t.Fatalf("dom json benchmark failed: %v\n%s", err, string(runOutput))
 	}
 	output := string(runOutput)
-	for _, check := range []string{"mode=dom", "iterations=4", "nodes=", "MiB/s="} {
+	for _, check := range []string{"mode=dom-parse", "iterations=4", "parses=4", "MiB/s="} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected dom benchmark output to contain %q, got:\n%s", check, output)
 		}

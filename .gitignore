@@ -8,3 +8,4 @@ Code/benchmarks/reduce_sum_u64_bench_O3
 Code/test_programs/mutating_fuzzer_temp.llcontext
 .*/ 
 Code/zimdjson/
+Code/benchmarks/tmp_zig_dom_input.json

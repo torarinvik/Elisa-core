@@ -4425,6 +4425,46 @@ def fill_runtime_int_to_bytes(values: any darray[u8, 4]&, value: int) -> void:
 	}
 }
 
+func TestGenerateOptimizedLLVMIRSupportsArenaDViewByteFillMemsetFastPath(t *testing.T) {
+	src := `repr(c) struct DynArray[T]:
+	items: mutable any T&?
+	count: mutable usize
+	capacity: mutable usize
+
+repr(c) struct DynArrayView:
+	data: mutable any void&?
+	len: mutable usize
+	elem_size: mutable usize
+
+def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+	_ = start
+	_ = end
+	if values.items != null:
+		return DynArrayView(values.items.cast[any void&](), values.count, sizeof(T))
+	return DynArrayView(null, 0u, sizeof(T))
+
+def arena_da_fill[T](dst: dview[T], value: T):
+	_ = dst
+	_ = value
+
+def fill_runtime_byte(values: any darray[u8, 4]&, value: u8) -> void:
+	base: dview[u8] = arena_da_view(values, 0u, 4u)
+	left: dview[u8] = base[0u:2u]
+	arena_da_fill(left, value)
+`
+	result := parseAndAnalyze(t, "backend_dview_fill_dynamic_byte_optimized.llcontext", src)
+	output, err := backend.GenerateLLVMIRWithOpt(result, backend.OptimizationLevel3)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatalf("expected optimized output to be non-empty")
+	}
+	if strings.Contains(output, "llvm.memset.p0.i64.invalid") {
+		t.Fatalf("expected optimized output to avoid malformed llvm.memset intrinsic names, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRSpecializesArenaDViewEqExact(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
 	items: mutable any T&?

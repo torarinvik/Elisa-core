@@ -351,14 +351,18 @@ func (g *llvmGenerator) shouldNeverInlineDefinedFunction(name string) bool {
 }
 
 func (g *llvmGenerator) lookupIntrinsic(name string, fn *semantic.FuncType) (C.uint, []C.LLVMTypeRef, bool, error) {
+	if !strings.HasPrefix(strings.TrimSpace(name), "llvm.") {
+		return 0, nil, false, nil
+	}
 	nameC := cString(name)
 	defer C.free(unsafe.Pointer(nameC))
 	intrinsicID := C.LLVMLookupIntrinsicID(nameC, C.size_t(len(name)))
 	if intrinsicID == 0 {
 		return 0, nil, false, nil
 	}
-	paramTypes := make([]C.LLVMTypeRef, 0, len(fn.Params))
-	for _, param := range fn.Params {
+	overloadParams := intrinsicOverloadParams(name, fn)
+	paramTypes := make([]C.LLVMTypeRef, 0, len(overloadParams))
+	for _, param := range overloadParams {
 		paramType, err := g.lowerType(param)
 		if err != nil {
 			return 0, nil, false, err
@@ -366,6 +370,19 @@ func (g *llvmGenerator) lookupIntrinsic(name string, fn *semantic.FuncType) (C.u
 		paramTypes = append(paramTypes, paramType)
 	}
 	return intrinsicID, paramTypes, true, nil
+}
+
+func intrinsicOverloadParams(name string, fn *semantic.FuncType) []semantic.Type {
+	if fn == nil {
+		return nil
+	}
+	switch name {
+	case "memset", "llvm.memset":
+		if len(fn.Params) >= 3 {
+			return []semantic.Type{fn.Params[0], fn.Params[2]}
+		}
+	}
+	return fn.Params
 }
 
 func (g *llvmGenerator) addGlobal(name string, t semantic.Type, external bool) (C.LLVMValueRef, error) {
