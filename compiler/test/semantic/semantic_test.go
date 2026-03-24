@@ -57,9 +57,26 @@ func requireNoErrors(t *testing.T, errs []string) {
 
 func requireNoWarnings(t *testing.T, result *semantic.Result) {
 	t.Helper()
-	if warns := result.Warnings(); len(warns) != 0 {
+	if warns := nonDeprecatedWarnings(result); len(warns) != 0 {
 		t.Fatalf("expected no warnings, got:\n%s", strings.Join(warns, "\n"))
 	}
+}
+
+const legacyCastDeprecationSubstring = "legacy cast syntax `.cast[T]()` is deprecated"
+
+func nonDeprecatedWarnings(result *semantic.Result) []string {
+	if result == nil {
+		return nil
+	}
+	warns := result.Warnings()
+	filtered := warns[:0]
+	for _, warn := range warns {
+		if strings.Contains(warn, legacyCastDeprecationSubstring) {
+			continue
+		}
+		filtered = append(filtered, warn)
+	}
+	return filtered
 }
 
 func requireDeclaredFunctionPermissionRefs(t *testing.T, result *semantic.Result, name string, expected ...string) {
@@ -3653,19 +3670,35 @@ func TestAnalyzeAcceptsStorageQualifiedPointersAndCastSyntax(t *testing.T) {
 extern maybe_heap_box() -> heap Box&?
 
 def widen(box: heap Box&?) -> any Box&?:
-	return box.cast[any Box&?]()
+	return box -> any Box&?
 
 def keep_heap(box: heap Box&?) -> heap Box&?:
-	return box.cast[heap Box&?]()
+	return box -> any Box&? -> heap Box&?
 
 def coerce_text() -> any u8&:
-	return "hello".cast[any u8&]()
+	return "hello" -> any u8&
 
 def use_source() -> any Box&?:
-	return maybe_heap_box().cast[any Box&?]()
+	return maybe_heap_box() -> any Box&?
 `
-	_, errs := parseAndAnalyze(t, "storage_cast_syntax.llcontext", src)
+	result, errs := parseAndAnalyze(t, "storage_cast_syntax.llcontext", src)
 	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
+
+func TestAnalyzeWarnsOnLegacyCastSyntax(t *testing.T) {
+	src := `repr(c) struct Box:
+	value: int
+
+def widen(box: heap Box&?) -> any Box&?:
+	return box.cast[any Box&?]()
+`
+	result, errs := parseAndAnalyze(t, "legacy_cast_warning.llcontext", src)
+	requireNoErrors(t, errs)
+	warns := strings.Join(result.Warnings(), "\n")
+	if !strings.Contains(warns, legacyCastDeprecationSubstring) {
+		t.Fatalf("expected legacy cast deprecation warning, got:\n%s", warns)
+	}
 }
 
 func TestAnalyzeRejectsImplicitStorageMismatchWithoutCast(t *testing.T) {

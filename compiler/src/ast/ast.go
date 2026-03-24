@@ -424,9 +424,10 @@ type ListLitExpr struct {
 }
 
 type CastExpr struct {
-	Position lexer.Pos
-	Operand  Expr
-	Target   TypeExpr
+	Position     lexer.Pos
+	Operand      Expr
+	Target       TypeExpr
+	LegacySyntax bool
 }
 
 type SizeofExpr struct {
@@ -647,11 +648,11 @@ type ForStmt struct {
 }
 
 type ParallelForStmt struct {
-	Position lexer.Pos
-	Name     string
+	Position  lexer.Pos
+	Name      string
 	IndexName string
-	Source   Expr
-	Body     []Stmt
+	Source    Expr
+	Body      []Stmt
 }
 
 type MatchStmt struct {

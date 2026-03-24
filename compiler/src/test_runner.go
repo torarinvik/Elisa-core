@@ -54,7 +54,7 @@ func generateTestRunnerSource(inputFile string, result *semantic.Result, filter 
 		message := llcontextStringLiteral(fmt.Sprintf("[ NO TESTS ] no @test functions matched filter %q", strings.TrimSpace(filter)))
 		out.WriteString("\tputs(")
 		out.WriteString(message)
-		out.WriteString(".cast[any u8&]())\n")
+		out.WriteString(" -> any u8&)\n")
 		out.WriteString("\treturn 1\n\n")
 		out.WriteString("export func main() -> int = ctx_test_main\n")
 		return out.String(), nil
@@ -65,19 +65,19 @@ func generateTestRunnerSource(inputFile string, result *semantic.Result, filter 
 		okLine := llcontextStringLiteral(fmt.Sprintf("[       OK ] %s", testFn.Name))
 		out.WriteString("\tputs(")
 		out.WriteString(runLine)
-		out.WriteString(".cast[any u8&]())\n")
+		out.WriteString(" -> any u8&)\n")
 		out.WriteString("\t")
 		out.WriteString(testFn.Name)
 		out.WriteString("()\n")
 		out.WriteString("\tputs(")
 		out.WriteString(okLine)
-		out.WriteString(".cast[any u8&]())\n")
+		out.WriteString(" -> any u8&)\n")
 	}
 
 	summaryLine := llcontextStringLiteral(fmt.Sprintf("[ SUMMARY  ] %d test(s) selected", len(tests)))
 	out.WriteString("\tputs(")
 	out.WriteString(summaryLine)
-	out.WriteString(".cast[any u8&]())\n")
+	out.WriteString(" -> any u8&)\n")
 	out.WriteString("\treturn 0\n\n")
 	out.WriteString("export func main() -> int = ctx_test_main\n")
 	return out.String(), nil

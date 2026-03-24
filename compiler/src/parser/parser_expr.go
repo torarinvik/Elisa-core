@@ -755,7 +755,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 				p.expect(lexer.TOKEN_RBRACKET)
 				p.expect(lexer.TOKEN_LPAREN)
 				p.expect(lexer.TOKEN_RPAREN)
-				expr = &ast.CastExpr{Position: pos, Operand: expr, Target: target}
+				expr = &ast.CastExpr{Position: pos, Operand: expr, Target: target, LegacySyntax: true}
 				continue
 			}
 
@@ -802,6 +802,12 @@ func (p *Parser) parsePostfix() ast.Expr {
 			}
 
 			expr = &ast.FieldExpr{Position: pos, Object: expr, Field: field}
+
+		case lexer.TOKEN_ARROW:
+			pos := p.cur().Pos
+			p.advance()
+			target := p.parseTypeExpr()
+			expr = &ast.CastExpr{Position: pos, Operand: expr, Target: target}
 
 		case lexer.TOKEN_LBRACKET:
 			pos := p.cur().Pos

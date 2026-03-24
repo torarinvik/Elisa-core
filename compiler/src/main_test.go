@@ -12,6 +12,18 @@ import (
 	"llcontext/src/backend"
 )
 
+func TestMain(m *testing.M) {
+	prev, hadPrev := os.LookupEnv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS")
+	_ = os.Setenv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS", "1")
+	exitCode := m.Run()
+	if hadPrev {
+		_ = os.Setenv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS", prev)
+	} else {
+		_ = os.Unsetenv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS")
+	}
+	os.Exit(exitCode)
+}
+
 func repoRootFromMainTest(t *testing.T) string {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
@@ -294,7 +306,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			checks: []string{
 				"%JsonCursor = type { ptr, i64, i64 }",
 				"%JsonLexemeResult = type { i64, i64, i64 }",
-				"%JsonNode = type { i32, [2 x i64] }",
+				"%JsonNode = type { i32, [3 x i64] }",
 				"%JsonParseNodeResult = type { i32, i64 }",
 				"define %JsonLexemeResult @json_parse_string_lexeme(ptr",
 				"define %JsonLexemeResult @json_parse_number_lexeme(ptr",
@@ -793,11 +805,11 @@ func TestRunCLICompilesJSONParserWithPackedWordHandleABI(t *testing.T) {
 	checks := []string{
 		"%JsonNode__Store = type { ptr, i64, ptr }",
 		"%PackedStoreAllocResult = type { ptr, i64 }",
+		"%PackedStoreIndexAllocResult = type { ptr, i32 }",
 		"%JsonParseNodeResult = type { i64, i64 }",
 		"define %JsonParseNodeResult @json_parse_value_node(ptr",
 		"define %JsonParseNodeResult @json_parse_array_node(ptr",
 		"define %JsonParseNodeResult @json_parse_object_node(ptr",
-		"call %PackedStoreAllocResult @ctx_packed_store_alloc_fixed_tagged_result(ptr %packed.alloc.store.arena, ptr %packed.alloc.store.state, i32 ",
 		"call i64 @ctx_packed_store_read_word(",
 		"call ptr @ctx_packed_store_decode(",
 	}
@@ -1208,7 +1220,7 @@ func TestRunCLICompilesStage1RuntimeToLLVM(t *testing.T) {
 func TestRunCLIRejectsInvalidStringEscape(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "invalid_escape.llcontext")
-	if err := os.WriteFile(fixturePath, []byte("def bad() -> any u8&:\n    return \"oops\\q\".cast[any u8&]()\n"), 0o644); err != nil {
+	if err := os.WriteFile(fixturePath, []byte("def bad() -> any u8&:\n    return \"oops\\q\" -> any u8&\n"), 0o644); err != nil {
 		t.Fatalf("failed to write invalid fixture: %v", err)
 	}
 
@@ -1309,7 +1321,7 @@ func TestRunCLIPrintsConstEnumInAST(t *testing.T) {
 func TestRunCLICompilesConstEnumSourceToLLVM(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "const_enum_llvm.llcontext")
-	src := "const enum JsonNodeKind of i8:\n    Invalid = -1\n    Null\n    Bool = 1\n    String\n\nconst DEFAULT_KIND: JsonNodeKind = JsonNodeKind.String\n\ndef kind_raw(kind: JsonNodeKind) -> i8:\n    return kind.i8()\n\ndef is_string(kind: JsonNodeKind) -> bool:\n    return kind == JsonNodeKind.String\n\ndef default_kind() -> JsonNodeKind:\n    return DEFAULT_KIND\n\ndef make_kind() -> JsonNodeKind:\n    return 1i8.cast[JsonNodeKind]()\n"
+	src := "const enum JsonNodeKind of i8:\n    Invalid = -1\n    Null\n    Bool = 1\n    String\n\nconst DEFAULT_KIND: JsonNodeKind = JsonNodeKind.String\n\ndef kind_raw(kind: JsonNodeKind) -> i8:\n    return kind.i8()\n\ndef is_string(kind: JsonNodeKind) -> bool:\n    return kind == JsonNodeKind.String\n\ndef default_kind() -> JsonNodeKind:\n    return DEFAULT_KIND\n\ndef make_kind() -> JsonNodeKind:\n    return 1i8 -> JsonNodeKind\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write const enum LLVM fixture: %v", err)
 	}
@@ -1328,6 +1340,38 @@ func TestRunCLICompilesConstEnumSourceToLLVM(t *testing.T) {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected LLVM output to contain %q, got:\n%s", check, output)
 		}
+	}
+}
+
+func TestRunCLIWarnsOnLegacyCastSyntax(t *testing.T) {
+	prev, hadPrev := os.LookupEnv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS")
+	_ = os.Unsetenv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS")
+	defer func() {
+		if hadPrev {
+			_ = os.Setenv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS", prev)
+		} else {
+			_ = os.Unsetenv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS")
+		}
+	}()
+
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "legacy_cast_warning.llcontext")
+	src := "const VALUE: i64 = 1.cast[i64]()\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write legacy cast fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "ast", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to succeed, stderr:\n%s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "legacy cast syntax `.cast[T]()` is deprecated") {
+		t.Fatalf("expected legacy cast warning on stderr, got:\n%s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "const VALUE = 1 -> i64") {
+		t.Fatalf("expected AST output to normalize to arrow cast syntax, got:\n%s", stdout.String())
 	}
 }
 

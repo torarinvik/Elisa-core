@@ -151,6 +151,9 @@ func analyzeProgram(filename string, src []byte, stderr io.Writer) (*ast.File, *
 	result := semantic.Analyze(file)
 	if warns := result.Warnings(); len(warns) > 0 {
 		for _, w := range warns {
+			if suppressDeprecatedWarningsForTests() && strings.Contains(w, legacyCastDeprecationNotice) {
+				continue
+			}
 			fmt.Fprintf(stderr, "%s\n", w)
 		}
 	}
@@ -162,6 +165,12 @@ func analyzeProgram(filename string, src []byte, stderr io.Writer) (*ast.File, *
 	}
 
 	return file, result, true
+}
+
+const legacyCastDeprecationNotice = "legacy cast syntax `.cast[T]()` is deprecated"
+
+func suppressDeprecatedWarningsForTests() bool {
+	return os.Getenv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS") == "1"
 }
 
 const (
@@ -777,7 +786,7 @@ func exprStr(e ast.Expr) string {
 	case *ast.SliceExpr:
 		return fmt.Sprintf("%s[%s:%s]", exprStr(n.Object), exprStr(n.Start), exprStr(n.End))
 	case *ast.CastExpr:
-		return fmt.Sprintf("%s.%s()", exprStr(n.Operand), typeStr(n.Target))
+		return fmt.Sprintf("%s -> %s", exprStr(n.Operand), typeStr(n.Target))
 	case *ast.SizeofExpr:
 		return fmt.Sprintf("sizeof(%s)", typeStr(n.Type))
 	case *ast.TernaryExpr:
