@@ -320,6 +320,46 @@ func TestParsePackedEnumAnnotation(t *testing.T) {
 	}
 }
 
+func TestParsePackedEnumPrefixAnnotation(t *testing.T) {
+	file, errs := parseSourceFile(t, "@packed_abi(dense_fixed)\n@packed_prefix(common_only)\npacked enum Expr:\n    common:\n        span: int\n    Lit(value: int)\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.EnumDecl)
+	if !ok {
+		t.Fatalf("expected enum decl, got %T", file.Decls[0])
+	}
+	if len(decl.Annotations) != 2 {
+		t.Fatalf("expected two enum annotations, got %d", len(decl.Annotations))
+	}
+	if decl.Annotations[1].Name != "packed_prefix" {
+		t.Fatalf("expected packed_prefix annotation, got %q", decl.Annotations[1].Name)
+	}
+	if len(decl.Annotations[1].Args) != 1 || decl.Annotations[1].Args[0] != "common_only" {
+		t.Fatalf("expected packed_prefix(common_only), got %#v", decl.Annotations[1].Args)
+	}
+}
+
+func TestParsePackedEnumProfileAnnotation(t *testing.T) {
+	file, errs := parseSourceFile(t, "@packed_profile(build_heavy)\npacked enum Expr:\n    common:\n        span: int\n    Lit(value: int)\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.EnumDecl)
+	if !ok {
+		t.Fatalf("expected enum decl, got %T", file.Decls[0])
+	}
+	if len(decl.Annotations) != 1 {
+		t.Fatalf("expected one enum annotation, got %d", len(decl.Annotations))
+	}
+	if decl.Annotations[0].Name != "packed_profile" {
+		t.Fatalf("expected packed_profile annotation, got %q", decl.Annotations[0].Name)
+	}
+	if len(decl.Annotations[0].Args) != 1 || decl.Annotations[0].Args[0] != "build_heavy" {
+		t.Fatalf("expected packed_profile(build_heavy), got %#v", decl.Annotations[0].Args)
+	}
+}
+
 func TestParsePackedViewSurfaceType(t *testing.T) {
 	file, errs := parseSourceFile(t, "packed enum Expr:\n    common:\n        span: int\n    Lit(value: int)\n\ndef keep(view_value: packedview[Expr.Lit]) -> packedview[Expr.Lit]:\n    return view_value\n")
 	if len(errs) != 0 {

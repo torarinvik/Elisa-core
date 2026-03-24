@@ -854,6 +854,48 @@ func (g *llvmGenerator) ensurePackedEnumRowType(name string, enum *semantic.Enum
 	return ty, nil
 }
 
+func (g *llvmGenerator) packedEnumCommonPrefixWordCount(enum *semantic.EnumType) (uint64, error) {
+	if enum == nil || enum.Decl == nil || len(enum.Decl.Common) == 0 {
+		return 0, nil
+	}
+	rowType, err := g.ensurePackedEnumStorageType(enum)
+	if err != nil {
+		return 0, err
+	}
+	hasPayload := false
+	for _, variant := range enum.Variants {
+		slots, err := g.enumVariantPayloadSlots(variant)
+		if err != nil {
+			return 0, err
+		}
+		if slots > 0 {
+			hasPayload = true
+			break
+		}
+	}
+	prefixBytes := uint64(0)
+	if hasPayload {
+		prefixBytes, err = g.abiOffsetOfLLVMElement(rowType, 1+len(enum.Decl.Common))
+	} else {
+		prefixBytes, err = g.abiSizeOfLLVMType(rowType)
+	}
+	if err != nil {
+		return 0, err
+	}
+	wordType, err := g.lowerBuiltin("uintptr")
+	if err != nil {
+		return 0, err
+	}
+	wordBytes, err := g.abiSizeOfLLVMType(wordType)
+	if err != nil {
+		return 0, err
+	}
+	if wordBytes == 0 {
+		return 0, fmt.Errorf("uintptr ABI size resolved to zero bytes")
+	}
+	return (prefixBytes + wordBytes - 1) / wordBytes, nil
+}
+
 func enumIsTagOnly(enum *semantic.EnumType) bool {
 	if enum == nil {
 		return false

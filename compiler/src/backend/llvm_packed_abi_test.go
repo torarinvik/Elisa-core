@@ -227,6 +227,128 @@ def differs(left: Pair, right: Pair) -> bool:
 	}
 }
 
+func TestGenerateLLVMIRUsesEnumPackedPrefixOverrideForDenseStoreConstruction(t *testing.T) {
+	src := `@packed_abi(dense_fixed)
+@packed_prefix(common_only)
+packed enum Pair:
+	common:
+		span: int
+	Both(left: int, right: int)
+	End
+
+def sum_pair() -> int:
+	region scratch(256u)
+	store: Pair.Store[Local] = Pair.Store(scratch)
+	in store:
+		node: Pair = new Pair.Both(span: 7, left: 2, right: 3)
+		return node.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_prefix_override.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "call ptr @ctx_packed_store_state_new_with_prefix_words(") {
+		t.Fatalf("expected enum-level @packed_prefix(common_only) override to use dense custom-prefix state helper, got:\n%s", output)
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_state_new_variant_sparse(") {
+		t.Fatalf("expected enum-level dense overrides to avoid canonical variant-sparse store initialization, got:\n%s", output)
+	}
+	enumType, ok := result.NamedTypes["Pair"].(*semantic.EnumType)
+	if !ok || enumType == nil {
+		t.Fatalf("expected Pair named type to resolve to semantic.EnumType, got %#v", result.NamedTypes["Pair"])
+	}
+	if !enumType.HasPackedPrefixOverride || enumType.PackedPrefixOverride != "common-only" {
+		t.Fatalf("expected semantic enum type to record common-only packed prefix override, got %+v", enumType)
+	}
+}
+
+func TestGenerateLLVMIRUsesEnumPackedProfileBuildHeavy(t *testing.T) {
+	src := `@packed_profile(build_heavy)
+packed enum Pair:
+	common:
+		span: int
+	Both(left: int, right: int)
+	End
+
+def sum_pair() -> int:
+	region scratch(256u)
+	store: Pair.Store[Local] = Pair.Store(scratch)
+	in store:
+		node: Pair = new Pair.Both(span: 7, left: 2, right: 3)
+		return node.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_profile_build_heavy.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "call ptr @ctx_packed_store_state_new_with_prefix_words(") {
+		t.Fatalf("expected @packed_profile(build_heavy) to use dense custom-prefix state helper, got:\n%s", output)
+	}
+	if !strings.Contains(output, "ctx_packed_store_read_index_word") {
+		t.Fatalf("expected @packed_profile(build_heavy) to select dense/index packed lowering helpers, got:\n%s", output)
+	}
+	enumType, ok := result.NamedTypes["Pair"].(*semantic.EnumType)
+	if !ok || enumType == nil {
+		t.Fatalf("expected Pair named type to resolve to semantic.EnumType, got %#v", result.NamedTypes["Pair"])
+	}
+	if !enumType.HasPackedProfile || enumType.PackedProfile != "build-heavy" {
+		t.Fatalf("expected semantic enum type to record build-heavy packed profile, got %+v", enumType)
+	}
+	if !enumType.HasPackedABIOverride || enumType.PackedABIOverride != string(PackedEnumABIDenseFixed) {
+		t.Fatalf("expected build-heavy packed profile to default to dense-fixed ABI, got %+v", enumType)
+	}
+	if !enumType.HasPackedPrefixOverride || enumType.PackedPrefixOverride != "common-only" {
+		t.Fatalf("expected build-heavy packed profile to default to common-only prefix, got %+v", enumType)
+	}
+	if result.PackedLowering.UsesLegacyOverride {
+		t.Fatalf("expected enum-level packed profile not to mark result metadata as a legacy global override")
+	}
+}
+
+func TestGenerateLLVMIRExplicitPackedABIOverridesPackedProfile(t *testing.T) {
+	src := `@packed_profile(retained_reads)
+@packed_abi(variant_sparse)
+packed enum Pair:
+	common:
+		span: int
+	Both(left: int, right: int)
+	End
+
+def sum_pair() -> int:
+	region scratch(256u)
+	store: Pair.Store[Local] = Pair.Store(scratch)
+	in store:
+		node: Pair = new Pair.Both(span: 7, left: 2, right: 3)
+		return node.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_profile_explicit_abi_wins.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "call ptr @ctx_packed_store_state_new_variant_sparse(") {
+		t.Fatalf("expected explicit @packed_abi(variant_sparse) to override packed profile ABI, got:\n%s", output)
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_state_new_with_prefix_words(") {
+		t.Fatalf("expected explicit variant-sparse ABI override to suppress dense prefix helper, got:\n%s", output)
+	}
+	enumType, ok := result.NamedTypes["Pair"].(*semantic.EnumType)
+	if !ok || enumType == nil {
+		t.Fatalf("expected Pair named type to resolve to semantic.EnumType, got %#v", result.NamedTypes["Pair"])
+	}
+	if !enumType.HasPackedProfile || enumType.PackedProfile != "retained-reads" {
+		t.Fatalf("expected semantic enum type to record retained-reads packed profile, got %+v", enumType)
+	}
+	if !enumType.HasPackedABIOverride || enumType.PackedABIOverride != string(PackedEnumABIVariantSparse) {
+		t.Fatalf("expected explicit ABI override to win over packed profile ABI, got %+v", enumType)
+	}
+	if !enumType.HasPackedPrefixOverride || enumType.PackedPrefixOverride != "all-words" {
+		t.Fatalf("expected retained-reads packed profile to keep its all-words prefix default when not explicitly overridden, got %+v", enumType)
+	}
+}
+
 func TestGenerateLLVMIRLowersPackedEnumsAsWordHandlesInAlternateABI(t *testing.T) {
 	src := `packed enum Expr:
 	common:

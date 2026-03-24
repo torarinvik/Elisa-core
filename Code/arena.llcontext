@@ -620,6 +620,15 @@ def ctx_packed_store_state_new(a: any Arena&, row_bytes: usize) -> heap void& ca
     state.preferred_region_capacity <- preferred_region_capacity
     return state.cast[heap void&]
 
+def ctx_packed_store_state_new_with_prefix_words(a: any Arena&, row_bytes: usize, prefix_words: usize) -> heap void& can[Memory.Allocate, Abort.Panic]:
+    state_bits: heap void& = ctx_packed_store_state_new(a, row_bytes)
+    state: heap PackedStoreState& = state_bits.cast[heap PackedStoreState&]
+    if prefix_words < state.row_words:
+        state.prefix_words <- prefix_words
+    else:
+        state.prefix_words <- state.row_words
+    return state_bits
+
 def ctx_packed_store_state_new_variant_sparse(a: any Arena&, row_bytes: usize) -> heap void& can[Memory.Allocate, Abort.Panic]:
     state: heap PackedStoreState& = arena_alloc(a, sizeof(PackedStoreState)).cast[heap PackedStoreState&]
     row_words: usize = (row_bytes + sizeof(uintptr) - 1) / sizeof(uintptr)

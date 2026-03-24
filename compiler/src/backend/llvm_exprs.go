@@ -3765,10 +3765,20 @@ func (s *functionState) emitPackedStoreValue(arenaExpr ast.Expr, storeType *sema
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	stateHelperName := "ctx_packed_store_state_new"
+	stateHelperParams := []semantic.Type{arenaRefType, usizeType}
+	stateArgs := []C.LLVMValueRef{arenaPtr, rowSizeValue}
 	if s.g.packedLoweringForStore(storeType) == packedEnumABIVariantSparse {
 		stateHelperName = "ctx_packed_store_state_new_variant_sparse"
+	} else if storeType.Enum != nil && storeType.Enum.HasPackedPrefixOverride && storeType.Enum.PackedPrefixOverride == "common-only" && s.g.packedLoweringForStore(storeType) == packedEnumABIIndexSOA {
+		prefixWords, err := s.g.packedEnumCommonPrefixWordCount(storeType.Enum)
+		if err != nil {
+			return nil, err
+		}
+		stateHelperName = "ctx_packed_store_state_new_with_prefix_words"
+		stateHelperParams = []semantic.Type{arenaRefType, usizeType, usizeType}
+		stateArgs = append(stateArgs, C.LLVMConstInt(usizeLLVMType, C.ulonglong(prefixWords), 0))
 	}
-	stateHelperType := &semantic.FuncType{Name: stateHelperName, Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
+	stateHelperType := &semantic.FuncType{Name: stateHelperName, Params: stateHelperParams, Return: voidRefType}
 	stateCallee, err := s.g.ensureFunctionDeclared(stateHelperName, stateHelperType)
 	if err != nil {
 		return nil, err
@@ -3777,7 +3787,7 @@ func (s *functionState) emitPackedStoreValue(arenaExpr ast.Expr, storeType *sema
 	if err != nil {
 		return nil, err
 	}
-	stateValue := s.buildCall(stateLLVMFnType, stateCallee, []C.LLVMValueRef{arenaPtr, rowSizeValue}, "packed.store.state")
+	stateValue := s.buildCall(stateLLVMFnType, stateCallee, stateArgs, "packed.store.state")
 	storeValue := C.LLVMGetUndef(storeLLVMType)
 	storeValue = C.LLVMBuildInsertValue(s.builder, storeValue, arenaPtr, 0, cStringFree("packed.store.arena"))
 	storeValue = C.LLVMBuildInsertValue(s.builder, storeValue, rowSizeValue, 1, cStringFree("packed.store.row_bytes"))

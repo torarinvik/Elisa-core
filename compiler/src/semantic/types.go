@@ -185,8 +185,12 @@ type PackedVariantViewType struct {
 type EnumType struct {
 	Name                 string
 	Packed               bool
+	PackedProfile        string
+	HasPackedProfile     bool
 	PackedABIOverride    string
 	HasPackedABIOverride bool
+	PackedPrefixOverride    string
+	HasPackedPrefixOverride bool
 	Common               map[string]Field
 	StoreType            *PackedEnumStoreType
 	TagType              *ConstEnumType
