@@ -2270,6 +2270,24 @@ def fold(node: Expr, store: Expr.Store[Local]) -> int:
 	}
 }
 
+func TestGenerateLLVMIRLowersUnnamedPackedViewSurfaceType(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(int)
+
+def score(view_node: packedview[Expr.Int]) -> int:
+	return view_node.span
+`
+	result := parseAndAnalyze(t, "backend_packed_unnamed_view_type.llcontext", src)
+	output := generateLLVMIRWithPackedABIForTest(t, result, backend.PackedEnumABIRowHandle)
+	for _, check := range []string{"define i64 @score(", "%PackedView__Expr__Int = type { ptr, %Expr__Store }", "load i64, ptr"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersPackedInStoreBlockSugar(t *testing.T) {
 	src := `packed enum Expr:
 	common:

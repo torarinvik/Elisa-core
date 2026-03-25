@@ -533,10 +533,6 @@ func (a *Analyzer) resolveViewBindType(stmt *ast.ViewStmt, actual Type) (*Packed
 		return nil, false
 	}
 	viewType := &PackedVariantViewType{Enum: enumType, Variant: variant}
-	if !viewType.HasNamedPayloadFields() {
-		a.errorf(stmt.Pattern.Pos(), "view %q.%q requires named payload fields in v1", enumType.Name, variant.Name)
-		return nil, false
-	}
 	return viewType, true
 }
 
@@ -784,14 +780,12 @@ func (a *Analyzer) resolveMoveBindVariantPattern(stmt *ast.MoveBindStmt, pattern
 	}
 	var storeState *regionRefState
 	if enumType.Packed {
-		if stmt.Store == nil {
-			a.errorf(pattern.Pos(), "packed move-as pattern %q.%q requires an in-store clause", pattern.EnumName, pattern.Variant)
-			return nil, nil, nil, false
-		}
 		a.validateMoveBindStore(pattern.Pos(), enumType, stmt.Store)
-		if state, ok := a.regionRefStateForExpr(stmt.Store); ok {
-			cloned := cloneRegionRefState(state)
-			storeState = &cloned
+		if stmt.Store != nil {
+			if state, ok := a.regionRefStateForExpr(stmt.Store); ok {
+				cloned := cloneRegionRefState(state)
+				storeState = &cloned
+			}
 		}
 	} else if stmt.Store != nil {
 		a.errorf(stmt.Store.Pos(), "ordinary enum move-as over %q does not take an in-store clause", enumType.Name)

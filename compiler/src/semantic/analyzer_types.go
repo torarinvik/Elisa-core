@@ -93,7 +93,7 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorage
 		ShapeParams:            shapeParams,
 		FreshReturnShapeParams: knownFreshReturnShapeParams(name, retType),
 		InlineMode:             FuncInlineModeDefault,
-		HasNoRecurse:          false,
+		HasNoRecurse:           false,
 		TemperatureMode:        FuncTemperatureModeDefault,
 		Params:                 ptypes,
 		Return:                 retType,
@@ -493,10 +493,6 @@ func (a *Analyzer) resolvePackedVariantViewSurfaceType(expr ast.TypeExpr, pos le
 		return invalidType
 	}
 	viewType := &PackedVariantViewType{Enum: enumType, Variant: variant}
-	if !viewType.HasNamedPayloadFields() {
-		a.errorf(pos, "packedview %q.%q requires named payload fields in v1", enumType.Name, variant.Name)
-		return invalidType
-	}
 	return viewType
 }
 

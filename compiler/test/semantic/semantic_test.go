@@ -4795,6 +4795,25 @@ def fold(node: Expr, store: Expr.Store[Local]) -> int:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsPackedEnumIfPatternRefiningUnnamedScrutineeToPackedView(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(int)
+	Add(Expr, Expr)
+
+def score(view_node: packedview[Expr.Int]) -> int:
+	return view_node.span
+
+def fold(node: Expr, store: Expr.Store[Local]) -> int:
+	if node in store as Expr.Int(value):
+		return score(node) + value + node.span
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_scrutinee_refined_to_unnamed_view_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeAcceptsPackedEnumMatchArmRefiningScrutineeToPackedView(t *testing.T) {
 	src := `packed enum Expr:
 	common:
@@ -4833,6 +4852,23 @@ def fold(node: Expr, store: Expr.Store[Local]) -> int:
 	return 0
 `
 	_, errs := parseAndAnalyze(t, "packed_enum_match_on_refined_view_scrutinee_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsViewStmtForUnnamedPackedVariantWithInferredStore(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(int)
+	Add(Expr, Expr)
+
+def read(node: Expr, store: Expr.Store[Local]) -> int:
+	in store:
+		view node as Expr.Int(lit):
+			return lit.span
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_view_unnamed_payload_inferred_store_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
@@ -5859,6 +5895,23 @@ def left(node: Expr, store: Expr.Store[Frozen]) -> Expr:
 	return lhs
 `
 	result, errs := parseAndAnalyze(t, "move_as_packed_variant_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "left", "Expr")
+}
+
+func TestAnalyzeAcceptsMoveAsPackedVariantDestructureWithInferredStore(t *testing.T) {
+	src := `packed enum Expr:
+	Int(int)
+	Add(Expr, Expr)
+
+def left(node: Expr, store: Expr.Store[Frozen]) -> Expr:
+	in store:
+		move node as Expr.Add(lhs, rhs)
+		_ = rhs
+		return lhs
+`
+	result, errs := parseAndAnalyze(t, "move_as_packed_variant_inferred_store_ok.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "left", "Expr")

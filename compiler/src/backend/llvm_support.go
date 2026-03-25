@@ -1805,9 +1805,6 @@ func (s *functionState) resolvePackedVariantViewSurfaceTypeExpr(expr ast.TypeExp
 		return nil, fmt.Errorf("enum %q has no variant %q", enumType.Name, variantName)
 	}
 	viewType := &semantic.PackedVariantViewType{Enum: enumType, Variant: variant}
-	if !viewType.HasNamedPayloadFields() {
-		return nil, fmt.Errorf("packedview %q.%q requires named payload fields in v1", enumType.Name, variant.Name)
-	}
 	return viewType, nil
 }
 
