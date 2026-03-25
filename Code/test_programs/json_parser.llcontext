@@ -405,7 +405,7 @@ def json_decoded_string_len(source: any u8&, source_offset: usize, source_len: u
     while pos < end:
         ch: i64 = source[pos].i64()
         pos <- pos + 1u
-        if ch != JSON_CH_BSLASH:
+        if likely ch != JSON_CH_BSLASH:
             total <- total + 1
         else:
             codepoint: i64 = json_decode_escape_codepoint_from_source(source, end, (&pos).cast[any usize&])
@@ -435,7 +435,7 @@ def json_decode_string_into(source: any u8&, source_offset: usize, source_len: u
     while pos < end:
         ch: i64 = source[pos].i64()
         pos <- pos + 1u
-        if ch != JSON_CH_BSLASH:
+        if likely ch != JSON_CH_BSLASH:
             dst[out_pos] <- ch.u8()
             out_pos <- out_pos + 1u
         else:
@@ -459,7 +459,7 @@ def json_string_matches_literal(source: any u8&, source_offset: usize, source_le
     while pos < end:
         ch: i64 = source[pos].i64()
         pos <- pos + 1u
-        if ch != JSON_CH_BSLASH:
+        if likely ch != JSON_CH_BSLASH:
             if literal_pos >= literal_len or literal[literal_pos].i64() != ch:
                 return false
             literal_pos <- literal_pos + 1u
@@ -528,13 +528,13 @@ def json_parse_string_lexeme(cursor: any JsonCursor&) -> JsonLexemeResult:
         if ch == JSON_CH_DQUOTE:
             return JsonLexemeResult(17 + length, start, cursor.pos - start)
 
-        if ch == JSON_CH_BSLASH:
-            if json_decode_escape_codepoint(cursor) < 0:
+        if likely ch != JSON_CH_BSLASH:
+            if ch < JSON_CH_SPACE:
                 return json_invalid_lexeme()
             length <- length + 1
-        elif ch < JSON_CH_SPACE:
-            return json_invalid_lexeme()
         else:
+            if json_decode_escape_codepoint(cursor) < 0:
+                return json_invalid_lexeme()
             length <- length + 1
 
     return json_invalid_lexeme()
@@ -634,7 +634,7 @@ def json_count_array_items_after_ws(cursor: any JsonCursor&) -> i64:
         json_skip_ws(cursor)
 
         ch: i64 = json_cur_char(cursor)
-        if ch == JSON_CH_COMMA:
+        if likely ch == JSON_CH_COMMA:
             _ = json_advance_char(cursor)
             json_skip_ws(cursor)
         elif ch == JSON_CH_RBRACKET:
@@ -669,7 +669,7 @@ def json_count_object_fields_after_ws(cursor: any JsonCursor&) -> i64:
         json_skip_ws(cursor)
 
         ch: i64 = json_cur_char(cursor)
-        if ch == JSON_CH_COMMA:
+        if likely ch == JSON_CH_COMMA:
             _ = json_advance_char(cursor)
             json_skip_ws(cursor)
         elif ch == JSON_CH_RBRACE:
@@ -700,7 +700,7 @@ def json_parse_array(cursor: any JsonCursor&) -> i64:
         json_skip_ws(cursor)
 
         ch: i64 = json_cur_char(cursor)
-        if ch == JSON_CH_COMMA:
+        if likely ch == JSON_CH_COMMA:
             _ = json_advance_char(cursor)
             json_skip_ws(cursor)
         elif ch == JSON_CH_RBRACKET:
@@ -740,7 +740,7 @@ def json_parse_object(cursor: any JsonCursor&) -> i64:
         json_skip_ws(cursor)
 
         ch: i64 = json_cur_char(cursor)
-        if ch == JSON_CH_COMMA:
+        if likely ch == JSON_CH_COMMA:
             _ = json_advance_char(cursor)
             json_skip_ws(cursor)
         elif ch == JSON_CH_RBRACE:
@@ -1048,7 +1048,7 @@ def json_parse_array_node(cursor: any JsonCursor&, arena: any Arena&, store: Jso
 
         json_skip_ws(cursor)
         ch: i64 = json_cur_char(cursor)
-        if ch == JSON_CH_COMMA:
+        if likely ch == JSON_CH_COMMA:
             _ = json_advance_char(cursor)
             json_skip_ws(cursor)
         elif ch == JSON_CH_RBRACKET:
@@ -1105,7 +1105,7 @@ def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: Js
 
         json_skip_ws(cursor)
         ch: i64 = json_cur_char(cursor)
-        if ch == JSON_CH_COMMA:
+        if likely ch == JSON_CH_COMMA:
             _ = json_advance_char(cursor)
             json_skip_ws(cursor)
         elif ch == JSON_CH_RBRACE:
