@@ -1816,8 +1816,8 @@ func TestGenerateLLVMIRLowersManualRegions(t *testing.T) {
 
 	checks := []string{
 		"%Arena = type { ptr, ptr, i64 }",
-		"declare ptr @new_region(i64)",
-		"declare ptr @arena_alloc(ptr, i64)",
+		"declare noalias ptr @new_region(i64)",
+		"declare noalias ptr @arena_alloc(ptr, i64)",
 		"declare void @arena_free(ptr)",
 		"call ptr @new_region(i64 1024)",
 		"call ptr @arena_alloc(ptr",

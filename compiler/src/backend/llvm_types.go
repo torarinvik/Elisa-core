@@ -6,13 +6,22 @@ package backend
 #include <stdlib.h>
 #include <llvm-c/Core.h>
 
-static void llcontextAddAlwaysInlineAttr(LLVMContextRef Ctx, LLVMValueRef Fn, const char* Name, size_t NameLen) {
+static void llcontextAddFunctionEnumAttr(LLVMContextRef Ctx, LLVMValueRef Fn, const char* Name, size_t NameLen) {
 	unsigned Kind = LLVMGetEnumAttributeKindForName(Name, NameLen);
 	if (Kind == 0) {
 		return;
 	}
 	LLVMAttributeRef Attr = LLVMCreateEnumAttribute(Ctx, Kind, 0);
 	LLVMAddAttributeAtIndex(Fn, LLVMAttributeFunctionIndex, Attr);
+}
+
+static void llcontextAddReturnEnumAttr(LLVMContextRef Ctx, LLVMValueRef Fn, const char* Name, size_t NameLen) {
+	unsigned Kind = LLVMGetEnumAttributeKindForName(Name, NameLen);
+	if (Kind == 0) {
+		return;
+	}
+	LLVMAttributeRef Attr = LLVMCreateEnumAttribute(Ctx, Kind, 0);
+	LLVMAddAttributeAtIndex(Fn, LLVMAttributeReturnIndex, Attr);
 }
 
 static LLVMTypeRef llcontextGlobalValueType(LLVMValueRef Value) {
@@ -315,6 +324,7 @@ func (g *llvmGenerator) addFunction(name string, fn *semantic.FuncType) (C.LLVMV
 	defer C.free(unsafe.Pointer(nameC))
 	value := C.LLVMAddFunction(g.module, nameC, fnType)
 	C.LLVMSetLinkage(value, C.LLVMExternalLinkage)
+	g.applyKnownFunctionAttributes(name, value)
 	return value, nil
 }
 
@@ -425,13 +435,51 @@ func (g *llvmGenerator) addColdAttribute(fn C.LLVMValueRef) {
 	g.addFunctionEnumAttribute(fn, "cold")
 }
 
+func (g *llvmGenerator) addReturnNoAliasAttribute(fn C.LLVMValueRef) {
+	if g == nil || g.context == nil || fn == nil {
+		return
+	}
+	g.addReturnEnumAttribute(fn, "noalias")
+}
+
+func (g *llvmGenerator) applyKnownFunctionAttributes(name string, fn C.LLVMValueRef) {
+	if g == nil || fn == nil {
+		return
+	}
+	if g.functionReturnsFreshNoAlias(name) {
+		g.addReturnNoAliasAttribute(fn)
+	}
+}
+
+func (g *llvmGenerator) functionReturnsFreshNoAlias(name string) bool {
+	switch name {
+	case "malloc", "new_region", "new_region_with_owner", "arena_alloc", "alloc_perm", "alloc_scratch", "ctx_packed_store_state_new", "ctx_packed_store_state_new_with_prefix_words", "ctx_packed_store_state_new_variant_sparse":
+		return true
+	default:
+		return false
+	}
+}
+
 func (g *llvmGenerator) addFunctionEnumAttribute(fn C.LLVMValueRef, name string) {
+	g.addFunctionOnlyEnumAttribute(fn, name)
+}
+
+func (g *llvmGenerator) addFunctionOnlyEnumAttribute(fn C.LLVMValueRef, name string) {
 	if g == nil || g.context == nil || fn == nil || name == "" {
 		return
 	}
 	nameC := cString(name)
 	defer C.free(unsafe.Pointer(nameC))
-	C.llcontextAddAlwaysInlineAttr(g.context, fn, nameC, C.size_t(len(name)))
+	C.llcontextAddFunctionEnumAttr(g.context, fn, nameC, C.size_t(len(name)))
+}
+
+func (g *llvmGenerator) addReturnEnumAttribute(fn C.LLVMValueRef, name string) {
+	if g == nil || g.context == nil || fn == nil || name == "" {
+		return
+	}
+	nameC := cString(name)
+	defer C.free(unsafe.Pointer(nameC))
+	C.llcontextAddReturnEnumAttr(g.context, fn, nameC, C.size_t(len(name)))
 }
 
 func (g *llvmGenerator) shouldNeverInlineDefinedFunction(name string) bool {
