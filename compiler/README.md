@@ -63,6 +63,7 @@ Current packed-enum rules:
 - packed values are handle-backed and must be created with `new[store] Enum.Variant(...)`
 - `Enum.Store` is the explicit per-enum store constructor surface
 - packed control-flow and projection forms (`match`, `open`, `view`, `move-as`, and ownerless `new`) can infer the active store when a matching `Enum.Store[...]` is already in scope
+- first-class `packedview[Enum.Variant]` carriers also provide the omitted-store context for packed `open` / `view` / `move-as`, so those forms do not need a separate `in store` clause when operating on the view itself
 - packed `common:` fields are readable on the packed handle (`node.span`)
 - packed `common:` fields can be initialized by name during allocation; omitted common fields remain zero-initialized
 - packed variants may include one tail payload, which lowers as a `dview[...]` regardless of where that payload appears in the variant field list

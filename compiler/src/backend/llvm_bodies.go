@@ -547,7 +547,7 @@ func (s *functionState) emitMoveBindStmt(stmt *ast.MoveBindStmt) error {
 		if !ok {
 			return fmt.Errorf("move-as variant pattern requires an enum value, got %s", valueType.String())
 		}
-		storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, stmt.Store)
+		storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, stmt.Value, stmt.Store)
 		if err != nil {
 			return err
 		}
@@ -588,7 +588,7 @@ func (s *functionState) emitOpenStmt(stmt *ast.OpenStmt) error {
 	if !ok {
 		return fmt.Errorf("open requires a packed enum value")
 	}
-	storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, stmt.Store)
+	storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, stmt.Value, stmt.Store)
 	if err != nil {
 		return err
 	}
@@ -648,7 +648,7 @@ func (s *functionState) emitViewStmt(stmt *ast.ViewStmt) error {
 		return fmt.Errorf("enum %s has no variant %s", enumType.Name, stmt.Pattern.Variant)
 	}
 	resolvedViewType := &semantic.PackedVariantViewType{Enum: enumType, Variant: variant}
-	storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, stmt.Store)
+	storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, stmt.Value, stmt.Store)
 	if err != nil {
 		return err
 	}
@@ -1683,7 +1683,7 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 	if !ok {
 		return fmt.Errorf("match requires an enum value")
 	}
-	storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, stmt.Store)
+	storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, stmt.Value, stmt.Store)
 	if err != nil {
 		return err
 	}
@@ -1756,7 +1756,7 @@ func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, sema
 	if !ok {
 		return nil, nil, fmt.Errorf("match requires an enum value")
 	}
-	storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, expr.Store)
+	storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, expr.Value, expr.Store)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -2496,7 +2496,51 @@ func (s *functionState) enumPayloadPtr(enumPtr C.LLVMValueRef, enumType *semanti
 	return C.LLVMBuildStructGEP2(s.builder, enumLLVMType, enumPtr, C.unsigned(payloadIndex), cStringFree("enum.payload.ptr")), nil
 }
 
-func (s *functionState) resolvePackedMatchStoreBinding(enumType *semantic.EnumType, storeExpr ast.Expr) (*packedStoreBinding, error) {
+func (s *functionState) resolvePackedViewStoreBinding(expr ast.Expr, enumType *semantic.EnumType) (*packedStoreBinding, bool, error) {
+	if expr == nil || enumType == nil {
+		return nil, false, nil
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return s.resolvePackedViewStoreBinding(n.Inner, enumType)
+	case *ast.CastExpr:
+		return s.resolvePackedViewStoreBinding(n.Operand, enumType)
+	case *ast.MoveExpr:
+		return s.resolvePackedViewStoreBinding(n.Operand, enumType)
+	case *ast.CanExpr:
+		return s.resolvePackedViewStoreBinding(n.Expr, enumType)
+	case *ast.Ident:
+		if binding, ok := s.lookupPackedVariantView(n.Name); ok && binding.typ != nil && binding.typ.Enum == enumType && binding.store.typ != nil && binding.store.value != nil {
+			storeCopy := binding.store
+			return &storeCopy, true, nil
+		}
+		valueBinding, ok := s.lookupBinding(n.Name)
+		if !ok {
+			return nil, false, nil
+		}
+		viewType, ok := valueBinding.typ.(*semantic.PackedVariantViewType)
+		if !ok || viewType == nil || viewType.Enum != enumType {
+			return nil, false, nil
+		}
+		viewValue, err := s.loadValue(valueBinding.ptr, valueBinding.typ, n.Name)
+		if err != nil {
+			return nil, false, err
+		}
+		viewBinding, err := s.unpackPackedVariantViewValue(viewValue, viewType)
+		if err != nil {
+			return nil, false, err
+		}
+		if viewBinding.store.typ == nil || viewBinding.store.value == nil {
+			return nil, false, nil
+		}
+		storeCopy := viewBinding.store
+		return &storeCopy, true, nil
+	default:
+		return nil, false, nil
+	}
+}
+
+func (s *functionState) resolvePackedMatchStoreBinding(enumType *semantic.EnumType, valueExpr ast.Expr, storeExpr ast.Expr) (*packedStoreBinding, error) {
 	if enumType == nil || !enumType.Packed {
 		return nil, nil
 	}
@@ -2514,6 +2558,11 @@ func (s *functionState) resolvePackedMatchStoreBinding(enumType *semantic.EnumTy
 	}
 	binding, ok := s.lookupPackedStore(enumType)
 	if !ok {
+		if inferred, ok, err := s.resolvePackedViewStoreBinding(valueExpr, enumType); err != nil {
+			return nil, err
+		} else if ok {
+			return inferred, nil
+		}
 		return nil, fmt.Errorf("missing active packed enum store for %s", enumType.Name)
 	}
 	return &binding, nil

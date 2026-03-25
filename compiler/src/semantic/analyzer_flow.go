@@ -580,7 +580,7 @@ func (a *Analyzer) resolveViewBindType(stmt *ast.ViewStmt, actual Type) (*Packed
 		a.errorf(stmt.Pos(), "view requires a packed enum value, got ordinary enum %q", enumType.Name)
 		return nil, false
 	}
-	a.validateMatchStore(stmt.Pos(), enumType, stmt.Store)
+	a.validateMatchStore(stmt.Pos(), stmt.Value, actual, enumType, stmt.Store)
 	if stmt.Pattern.EnumName != enumType.Name {
 		a.errorf(stmt.Pattern.Pos(), "view pattern expects enum %q, got %q", enumType.Name, stmt.Pattern.EnumName)
 		return nil, false
@@ -838,7 +838,7 @@ func (a *Analyzer) resolveMoveBindVariantPattern(stmt *ast.MoveBindStmt, pattern
 	}
 	var storeState *regionRefState
 	if enumType.Packed {
-		a.validateMoveBindStore(pattern.Pos(), enumType, stmt.Store)
+		a.validateMoveBindStore(pattern.Pos(), stmt.Value, actual, enumType, stmt.Store)
 		if stmt.Store != nil {
 			if state, ok := a.regionRefStateForExpr(stmt.Store); ok {
 				cloned := cloneRegionRefState(state)
@@ -949,7 +949,18 @@ func (a *Analyzer) resolveMatchVariantPayloadValueExpr(value ast.Expr, pattern *
 	return a.resolveVariantPayloadValueExpr(value, pattern.EnumName, pattern.Variant, key)
 }
 
-func (a *Analyzer) validateMoveBindStore(pos lexer.Pos, enumType *EnumType, storeExpr ast.Expr) {
+func (a *Analyzer) canInferPackedStoreFromValue(actual Type, enumType *EnumType) bool {
+	if enumType == nil || !enumType.Packed || actual == nil {
+		return false
+	}
+	actual = StripAggregateStateType(actual)
+	if viewType, ok := actual.(*PackedVariantViewType); ok && viewType != nil && viewType.Enum == enumType {
+		return true
+	}
+	return false
+}
+
+func (a *Analyzer) validateMoveBindStore(pos lexer.Pos, valueExpr ast.Expr, actual Type, enumType *EnumType, storeExpr ast.Expr) {
 	if enumType == nil {
 		return
 	}
@@ -961,6 +972,10 @@ func (a *Analyzer) validateMoveBindStore(pos lexer.Pos, enumType *EnumType, stor
 	}
 	if storeExpr == nil {
 		if _, ok := a.lookupPackedStore(enumType); ok {
+			return
+		}
+		_ = valueExpr
+		if a.canInferPackedStoreFromValue(actual, enumType) {
 			return
 		}
 		a.errorf(pos, "packed enum move-as over %q requires an in %s clause", enumType.Name, packedEnumStoreTypeName(enumType.Name))
@@ -1749,7 +1764,7 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 		}
 		return
 	}
-	a.validateMatchStore(stmt.Pos(), enumType, stmt.Store)
+	a.validateMatchStore(stmt.Pos(), stmt.Value, valueType, enumType, stmt.Store)
 	baselineAffine := a.cloneAffineValueStates()
 	baselineBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
 	baselineFunctionValues := a.cloneFunctionValueBindings()
@@ -1817,7 +1832,7 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 		}
 		return invalidType
 	}
-	a.validateMatchStore(expr.Pos(), enumType, expr.Store)
+	a.validateMatchStore(expr.Pos(), expr.Value, valueType, enumType, expr.Store)
 	covered := map[string]bool{}
 	hasWildcard := false
 	resultType := Type(nil)
@@ -1911,7 +1926,7 @@ func resolveMatchableEnumType(actual Type) (*EnumType, *PackedVariantViewType, b
 	}
 }
 
-func (a *Analyzer) validateMatchStore(pos lexer.Pos, enumType *EnumType, storeExpr ast.Expr) {
+func (a *Analyzer) validateMatchStore(pos lexer.Pos, valueExpr ast.Expr, actual Type, enumType *EnumType, storeExpr ast.Expr) {
 	if enumType == nil {
 		return
 	}
@@ -1923,6 +1938,10 @@ func (a *Analyzer) validateMatchStore(pos lexer.Pos, enumType *EnumType, storeEx
 	}
 	if storeExpr == nil {
 		if _, ok := a.lookupPackedStore(enumType); ok {
+			return
+		}
+		_ = valueExpr
+		if a.canInferPackedStoreFromValue(actual, enumType) {
 			return
 		}
 		a.errorf(pos, "packed enum match over %q requires an in %s clause", enumType.Name, packedEnumStoreTypeName(enumType.Name))

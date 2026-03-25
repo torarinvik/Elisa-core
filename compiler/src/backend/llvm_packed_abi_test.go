@@ -2680,6 +2680,34 @@ def fold_open() -> int:
 	}
 }
 
+func TestGenerateLLVMIRLowersPackedViewParamOpenWithoutExplicitStoreInWordHandleABI(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Lit(value: int)
+
+def read(view_node: packedview[Expr.Lit]) -> int:
+	open view_node as Expr.Lit(value: value):
+		return value + view_node.value + view_node.span
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packedview_param_open_inferred_store_word_handle.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	for _, check := range []string{
+		"%PackedView__Expr__Lit = type { i64, %Expr__Store }",
+		"packedview.store.extract",
+		"call i64 @ctx_packed_store_read_word(",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRUsesIndexReadHelpersForFrozenPackedOpenStmtInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:

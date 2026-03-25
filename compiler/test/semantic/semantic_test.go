@@ -4964,6 +4964,21 @@ def read(node: Expr, store: Expr.Store[Frozen]) -> int:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsViewStmtWithPackedViewParamWithoutStoreClause(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+
+def read(view_node: packedview[Expr.Int]) -> int:
+	view view_node as Expr.Int(value: value):
+		return value + view_node.value + view_node.span
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_view_packedview_param_inferred_store_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeAcceptsViewStmtWithUnnamedPayloadDestructure(t *testing.T) {
 	src := `packed enum Expr:
 	common:
@@ -4991,6 +5006,21 @@ def read(node: Expr, store: Expr.Store[Frozen]) -> int:
 	return 0
 `
 	_, errs := parseAndAnalyze(t, "packed_enum_open_active_store_param_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsOpenStmtWithPackedViewParamWithoutStoreClause(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+
+def read(view_node: packedview[Expr.Int]) -> int:
+	open view_node as Expr.Int(value: value):
+		return value + view_node.span
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_open_packedview_param_inferred_store_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
@@ -6081,6 +6111,22 @@ def left(node: Expr, store: Expr.Store[Frozen]) -> Expr:
 	return lhs
 `
 	result, errs := parseAndAnalyze(t, "move_as_packed_variant_active_store_param_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "left", "Expr")
+}
+
+func TestAnalyzeAcceptsMoveAsPackedViewParamWithoutStoreClause(t *testing.T) {
+	src := `packed enum Expr:
+	Int(int)
+	Add(Expr, Expr)
+
+def left(view_node: packedview[Expr.Add]) -> Expr:
+	move view_node as Expr.Add(lhs, rhs)
+	_ = rhs
+	return lhs
+`
+	result, errs := parseAndAnalyze(t, "move_as_packedview_param_inferred_store_ok.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "left", "Expr")
