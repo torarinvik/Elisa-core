@@ -1608,17 +1608,21 @@ func (a *Analyzer) resolveFrozenPackedStoreRoot(expr ast.Expr) (*Symbol, *Packed
 	return a.resolveFrozenPackedStoreRootWithSeen(expr, map[*Symbol]bool{})
 }
 
-func (a *Analyzer) resolveFrozenPackedStoreRootWithSeen(expr ast.Expr, seen map[*Symbol]bool) (*Symbol, *PackedEnumStoreType, bool) {
+func (a *Analyzer) resolvePackedStoreRoot(expr ast.Expr) (*Symbol, *PackedEnumStoreType, bool) {
+	return a.resolvePackedStoreRootWithSeen(expr, map[*Symbol]bool{})
+}
+
+func (a *Analyzer) resolvePackedStoreRootWithSeen(expr ast.Expr, seen map[*Symbol]bool) (*Symbol, *PackedEnumStoreType, bool) {
 	if a == nil || expr == nil {
 		return nil, nil, false
 	}
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
-		return a.resolveFrozenPackedStoreRootWithSeen(n.Inner, seen)
+		return a.resolvePackedStoreRootWithSeen(n.Inner, seen)
 	case *ast.CastExpr:
-		return a.resolveFrozenPackedStoreRootWithSeen(n.Operand, seen)
+		return a.resolvePackedStoreRootWithSeen(n.Operand, seen)
 	case *ast.MoveExpr:
-		return a.resolveFrozenPackedStoreRootWithSeen(n.Operand, seen)
+		return a.resolvePackedStoreRootWithSeen(n.Operand, seen)
 	case *ast.Ident:
 		if a.currentScope == nil {
 			return nil, nil, false
@@ -1633,7 +1637,7 @@ func (a *Analyzer) resolveFrozenPackedStoreRootWithSeen(expr ast.Expr, seen map[
 		seen[sym] = true
 		if a.currentValueBindings != nil {
 			if valueExpr, ok := a.currentValueBindings[sym]; ok && valueExpr != nil {
-				if root, storeType, ok := a.resolveFrozenPackedStoreRootWithSeen(valueExpr, seen); ok {
+				if root, storeType, ok := a.resolvePackedStoreRootWithSeen(valueExpr, seen); ok {
 					return root, storeType, true
 				}
 			}
@@ -1642,17 +1646,25 @@ func (a *Analyzer) resolveFrozenPackedStoreRootWithSeen(expr ast.Expr, seen map[
 		if root == nil {
 			root = sym
 		}
-		if storeType, ok := root.Type.(*PackedEnumStoreType); ok && storeType != nil && IsFrozenPackedEnumStoreType(storeType) {
+		if storeType, ok := root.Type.(*PackedEnumStoreType); ok && storeType != nil {
 			if root.Kind == SymbolLocal || root.Kind == SymbolParam {
 				return root, storeType, true
 			}
 		}
 		decl, ok := root.Node.(*ast.VarDeclStmt)
 		if ok && decl != nil && decl.Value != nil {
-			return a.resolveFrozenPackedStoreRootWithSeen(decl.Value, seen)
+			return a.resolvePackedStoreRootWithSeen(decl.Value, seen)
 		}
 	}
 	return nil, nil, false
+}
+
+func (a *Analyzer) resolveFrozenPackedStoreRootWithSeen(expr ast.Expr, seen map[*Symbol]bool) (*Symbol, *PackedEnumStoreType, bool) {
+	root, storeType, ok := a.resolvePackedStoreRootWithSeen(expr, seen)
+	if !ok || storeType == nil || !IsFrozenPackedEnumStoreType(storeType) {
+		return nil, nil, false
+	}
+	return root, storeType, true
 }
 
 func (a *Analyzer) resolvePackedNodeStoreRoot(expr ast.Expr, enumType *EnumType) (*Symbol, bool) {
@@ -1703,7 +1715,7 @@ func (a *Analyzer) resolvePackedNodeStoreRootWithSeen(expr ast.Expr, enumType *E
 			return a.resolvePackedNodeStoreRootWithSeen(decl.Value, enumType, seen)
 		}
 	case *ast.IndexExpr:
-		if root, storeType, ok := a.resolveFrozenPackedStoreRootWithSeen(n.Object, seen); ok {
+		if root, storeType, ok := a.resolvePackedStoreRootWithSeen(n.Object, seen); ok {
 			if storeType.Enum == enumType {
 				return root, true
 			}

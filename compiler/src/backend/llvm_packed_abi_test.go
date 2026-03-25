@@ -2738,6 +2738,44 @@ def read(store: Expr.Store[Frozen], index: usize) -> int:
 	}
 }
 
+func TestGenerateLLVMIRLowersHiddenStoreFieldIndexedAliasOpenWithoutExplicitStoreInWordHandleABI(t *testing.T) {
+	src := `packed enum Expr:
+	Lit(value: int)
+
+struct Box:
+	store: Expr.Store[Local]
+
+def make_box(owner: Arena) -> Box:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		_ = new Expr.Lit(value: 7)
+	return Box(move store)
+
+def read(owner: Arena) -> int:
+	box: Box = make_box(owner)
+	node: Expr = box.store[0u]
+	alias: Expr = node
+	open alias as Expr.Lit(value: value):
+		return value
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_hidden_store_field_index_alias_open_inferred_store_word_handle.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	for _, check := range []string{
+		"define %Box @make_box",
+		"call i64 @ctx_packed_store_word_handle_at(",
+		"call i64 @ctx_packed_store_read_word(",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRUsesIndexReadHelpersForFrozenPackedOpenStmtInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:

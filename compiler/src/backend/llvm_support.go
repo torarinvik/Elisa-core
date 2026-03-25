@@ -1074,7 +1074,7 @@ func (s *functionState) bindPackedEnumStoreOrigin(name string, enumType *semanti
 	if name == "" || enumType == nil || !enumType.Packed || store == nil || store.typ == nil || store.value == nil {
 		return
 	}
-	if store.typ.Enum != enumType || !semantic.IsFrozenPackedEnumStoreType(store.typ) {
+	if store.typ.Enum != enumType {
 		return
 	}
 	if s.scope == nil {

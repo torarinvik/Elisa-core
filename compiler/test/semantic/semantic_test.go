@@ -4766,6 +4766,29 @@ def read(store: Expr.Store[Frozen], index: usize) -> int:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsPackedMatchWithoutStoreClauseFromHiddenStoreFieldIndexExpr(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+struct Box:
+	store: Expr.Store[Local]
+
+def make_box(owner: Arena) -> Box:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		_ = new Expr.Int(value: 7)
+	return Box(move store)
+
+def read(owner: Arena) -> int:
+	box: Box = make_box(owner)
+	return match box.store[0u]:
+		Expr.Int(value: value):
+			value
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_match_hidden_store_field_index_inferred_store_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeRejectsOrdinaryEnumMatchWithStoreClause(t *testing.T) {
 	src := `enum Expr:
 	Int(value: int)
@@ -5051,6 +5074,31 @@ def read(store: Expr.Store[Frozen], index: usize) -> int:
 	return 0
 `
 	_, errs := parseAndAnalyze(t, "packed_enum_open_frozen_index_alias_inferred_store_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsOpenStmtWithHiddenStoreFieldIndexAliasWithoutStoreClause(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+struct Box:
+	store: Expr.Store[Local]
+
+def make_box(owner: Arena) -> Box:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		_ = new Expr.Int(value: 7)
+	return Box(move store)
+
+def read(owner: Arena) -> int:
+	box: Box = make_box(owner)
+	node: Expr = box.store[0u]
+	alias: Expr = node
+	open alias as Expr.Int(value: value):
+		return value
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_open_hidden_store_field_index_alias_inferred_store_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 

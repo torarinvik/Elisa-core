@@ -27,11 +27,11 @@ type valueBinding struct {
 }
 
 type codegenScope struct {
-	parent         *codegenScope
-	bindings       map[string]valueBinding
-	packedEnumPtrs map[string]packedEnumStorageBinding
+	parent           *codegenScope
+	bindings         map[string]valueBinding
+	packedEnumPtrs   map[string]packedEnumStorageBinding
 	packedEnumStores map[string]packedStoreBinding
-	packedViewPtrs map[string]packedVariantViewBinding
+	packedViewPtrs   map[string]packedVariantViewBinding
 }
 
 type functionState struct {
@@ -2583,24 +2583,46 @@ func (s *functionState) resolvePackedViewStoreBinding(expr ast.Expr, enumType *s
 	}
 }
 
-func (s *functionState) resolveFrozenPackedStoreBinding(expr ast.Expr, enumType *semantic.EnumType) (*packedStoreBinding, bool, error) {
+func (s *functionState) resolvePackedStoreBindingExpr(expr ast.Expr, enumType *semantic.EnumType) (*packedStoreBinding, bool, error) {
 	if expr == nil {
 		return nil, false, nil
 	}
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
-		return s.resolveFrozenPackedStoreBinding(n.Inner, enumType)
+		return s.resolvePackedStoreBindingExpr(n.Inner, enumType)
 	case *ast.CastExpr:
-		return s.resolveFrozenPackedStoreBinding(n.Operand, enumType)
+		return s.resolvePackedStoreBindingExpr(n.Operand, enumType)
 	case *ast.MoveExpr:
-		return s.resolveFrozenPackedStoreBinding(n.Operand, enumType)
+		return s.resolvePackedStoreBindingExpr(n.Operand, enumType)
+	case *ast.FieldExpr:
+		actualType := s.exprType(expr)
+		storeType, ok := actualType.(*semantic.PackedEnumStoreType)
+		if !ok || storeType == nil || storeType.Enum == nil {
+			return nil, false, nil
+		}
+		if enumType != nil && storeType.Enum != enumType {
+			return nil, false, nil
+		}
+		storeValue, actualType, err := s.emitExpr(expr, nil)
+		if err != nil {
+			return nil, false, err
+		}
+		resolvedType, ok := actualType.(*semantic.PackedEnumStoreType)
+		if !ok || resolvedType == nil || resolvedType.Enum == nil {
+			return nil, false, nil
+		}
+		if enumType != nil && resolvedType.Enum != enumType {
+			return nil, false, nil
+		}
+		resolved := &packedStoreBinding{value: storeValue, typ: resolvedType}
+		return resolved, true, nil
 	case *ast.Ident:
 		binding, ok := s.lookupBinding(n.Name)
 		if !ok {
 			return nil, false, nil
 		}
 		storeType, ok := binding.typ.(*semantic.PackedEnumStoreType)
-		if !ok || storeType == nil || storeType.Enum == nil || !semantic.IsFrozenPackedEnumStoreType(storeType) {
+		if !ok || storeType == nil || storeType.Enum == nil {
 			return nil, false, nil
 		}
 		if enumType != nil && storeType.Enum != enumType {
@@ -2637,7 +2659,7 @@ func (s *functionState) resolvePackedNodeStoreBinding(expr ast.Expr, enumType *s
 	case *ast.CanExpr:
 		return s.resolvePackedNodeStoreBinding(n.Expr, enumType)
 	case *ast.IndexExpr:
-		return s.resolveFrozenPackedStoreBinding(n.Object, enumType)
+		return s.resolvePackedStoreBindingExpr(n.Object, enumType)
 	default:
 		return nil, false, nil
 	}
