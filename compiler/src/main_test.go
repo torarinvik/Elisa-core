@@ -763,6 +763,7 @@ func TestRunCLICompilesJSONParserWithEnumDenseFixedOverrideByDefault(t *testing.
 		"define %JsonParseNodeResult @json_parse_value_node(ptr",
 		"define %JsonParseNodeResult @json_parse_array_node(ptr",
 		"define %JsonParseNodeResult @json_parse_object_node(ptr",
+		"call void @ctx_packed_store_reserve(",
 		"call %PackedStoreIndexAllocResult @ctx_packed_store_alloc_fixed_tagged_index_result(",
 		"call i32 @ctx_packed_store_read_index_tag(ptr %packed.tag.store.state, i32 ",
 		"call i64 @ctx_packed_store_read_index_word(",
@@ -812,6 +813,7 @@ func TestRunCLICompilesJSONParserWithPackedWordHandleABI(t *testing.T) {
 		"define %JsonParseNodeResult @json_parse_value_node(ptr",
 		"define %JsonParseNodeResult @json_parse_array_node(ptr",
 		"define %JsonParseNodeResult @json_parse_object_node(ptr",
+		"call void @ctx_packed_store_reserve(",
 		"call i64 @ctx_packed_store_read_word(",
 		"call ptr @ctx_packed_store_decode(",
 	}
@@ -1207,6 +1209,7 @@ func TestRunCLICompilesStage1RuntimeToLLVM(t *testing.T) {
 		"define %PackedStoreAllocResult @ctx_packed_store_alloc_fixed_result(ptr",
 		"define %PackedStoreAllocResult @ctx_packed_store_alloc_fixed_tagged_result(ptr",
 		"define void @ctx_packed_store_alloc_fixed_result_slow(ptr",
+		"define void @ctx_packed_store_reserve(ptr",
 		"define %PackedStoreIndexAllocResult @ctx_packed_store_alloc_fixed_tagged_index_result(ptr",
 		"%DynDict__i64 = type { ptr, i64, i64, i64, ptr }",
 		"define %DynDict__i64 @arena_dict_new__i64(",

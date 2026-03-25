@@ -860,6 +860,13 @@ def json_node_store_state_bits(store: any JsonNode.Store[Local]&) -> uintptr:
     return json_node_store_words(store)[2u]
 
 
+def json_node_store_reserve(arena: any Arena&, store: any JsonNode.Store[Local]&, needed_rows: usize) can[Memory.Allocate, Abort.Panic]:
+    state_bits: uintptr = json_node_store_state_bits(store)
+    if state_bits == 0u64.uintptr():
+        return
+    ctx_packed_store_reserve(arena, needed_rows, state_bits.cast[any u8&].cast[any void&])
+
+
 def json_node_null(store: JsonNode.Store[Local]) -> JsonNode:
     return JsonNode.Null
 
@@ -1721,6 +1728,11 @@ def json_ast_scratch_capacity(source_len: usize) -> usize:
     return max(capacity, ARENA_REGION_DEFAULT_CAPACITY)
 
 
+def json_ast_estimated_node_reserve(source_len: usize) -> usize:
+    estimated_rows: usize = source_len / 12u + 64u
+    return max(estimated_rows, ARENA_DA_INIT_CAP)
+
+
 def json_parser_document_null() -> JsonParserDocument:
     return JsonParserDocument(0u64.uintptr())
 
@@ -1891,6 +1903,7 @@ def json_parser_document_parse_with_len_impl(source: any u8&, source_len: usize,
 
     arena: any Arena& = (&arena_owner).cast[any Arena&]
     store: JsonNode.Store[Local] = JsonNode.Store(arena_owner)
+    json_node_store_reserve(arena, (&store).cast[any JsonNode.Store[Local]&], json_ast_estimated_node_reserve(source_len))
     result: JsonParseNodeResult = json_parse_document_node_with_len(source_copy.cast[any u8&], source_len, arena, store)
     if result.checksum < 0:
         arena_to_free: mutable Arena = arena_owner

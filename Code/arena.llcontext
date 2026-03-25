@@ -935,6 +935,16 @@ def ctx_packed_store_count(state_bits: any void&) -> usize:
     state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
     return state.handles.count
 
+
+def ctx_packed_store_reserve(a: any Arena&, needed_rows: usize, state_bits: any void&) can[Memory.Allocate, Abort.Panic]:
+    assert state_bits != null
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
+
+    if needed_rows <= state.handles.capacity:
+        return
+
+    packed_store_ensure_metadata_capacity(a, state, needed_rows)
+
 def ctx_packed_store_encode_variant_sparse(ptr: any void&, state_bits: any void&) -> u32 can[Abort.Panic]:
     assert state_bits != null
     state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
