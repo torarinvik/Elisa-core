@@ -2336,6 +2336,29 @@ def score(view_node: packedview[Expr.Int]) -> int:
 	}
 }
 
+func TestGenerateLLVMIRLowersPackedEnumWithAffinePayloadMatch(t *testing.T) {
+	src := `extern join(thread: Thread[i64, Joinable]) -> i64
+
+packed enum Job:
+	Run(thread: Thread[i64, Joinable])
+
+def consume(owner: Arena, thread: Thread[i64, Joinable]) -> i64:
+	store: Job.Store[Local] = Job.Store(owner)
+	job: Job = new[store] Job.Run(thread: move thread)
+	match job in store:
+		Job.Run(thread: taken):
+			return join(move taken)
+	return 0
+`
+	result := parseAndAnalyze(t, "backend_packed_affine_payload_match.llcontext", src)
+	output := generateLLVMIRWithPackedABIForTest(t, result, backend.PackedEnumABIRowHandle)
+	for _, check := range []string{"define i64 @consume(", "declare i64 @join(", "call i64 @join("} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersViewStmtPayloadDestructureAndRefinedScrutinee(t *testing.T) {
 	src := `packed enum Expr:
 	common:

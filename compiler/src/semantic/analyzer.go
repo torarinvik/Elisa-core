@@ -707,9 +707,6 @@ func (a *Analyzer) populateEnumVariants(decls []ast.Decl) {
 				continue
 			}
 			commonType := a.resolveType(commonDecl.Type)
-			if enumDecl.Packed && a.containsAffineHandleValues(commonType, map[string]bool{}) {
-				a.errorf(commonDecl.Position, "packed enum %q common field %q cannot contain affine payload type %s", enumDecl.Name, commonDecl.Name, commonType.String())
-			}
 			enumType.Common[commonDecl.Name] = Field{Name: commonDecl.Name, Type: commonType, Mutable: false}
 		}
 		variants := make([]*EnumVariant, 0, len(enumDecl.Variants))
@@ -750,9 +747,6 @@ func (a *Analyzer) populateEnumVariants(decls []ast.Decl) {
 				}
 				if !enumDecl.Packed && SameType(payloadType, enumType) {
 					a.errorf(payloadDecl.Type.Pos(), "enum %q variant %q cannot contain %q by value; use a reference type instead", enumDecl.Name, variantDecl.Name, enumDecl.Name)
-				}
-				if enumDecl.Packed && a.containsAffineHandleValues(payloadType, map[string]bool{}) {
-					a.errorf(payloadDecl.Type.Pos(), "packed enum %q variant %q cannot contain affine payload type %s", enumDecl.Name, variantDecl.Name, payloadType.String())
 				}
 				payload = append(payload, payloadType)
 				payloadNames = append(payloadNames, payloadDecl.Name)
@@ -1609,6 +1603,20 @@ func (a *Analyzer) containsAffineHandleValues(t Type, seen map[string]bool) bool
 		for _, payloadType := range tt.Variant.Payload {
 			if a.containsAffineHandleValues(payloadType, seen) {
 				return true
+			}
+		}
+		return false
+	case *EnumType:
+		for _, field := range tt.Common {
+			if a.containsAffineHandleValues(field.Type, seen) {
+				return true
+			}
+		}
+		for _, variant := range tt.Variants {
+			for _, payloadType := range variant.Payload {
+				if a.containsAffineHandleValues(payloadType, seen) {
+					return true
+				}
 			}
 		}
 		return false

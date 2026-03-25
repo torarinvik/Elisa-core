@@ -489,11 +489,10 @@ func (a *Analyzer) analyzeOpenStmt(stmt *ast.OpenStmt) {
 		}
 	}
 	a.currentScope = savedScope
-	if !ok {
-		a.analyzeBlockWithRegionClone(stmt.Body, scope)
-		return
-	}
 	a.analyzeBlockWithRegionClone(stmt.Body, scope)
+	if ok {
+		a.recordAffineDestructureConsumption(stmt.Value, valueType, "open over affine enum")
+	}
 }
 
 func (a *Analyzer) analyzeViewStmt(stmt *ast.ViewStmt) {
@@ -558,6 +557,9 @@ func (a *Analyzer) analyzeViewStmt(stmt *ast.ViewStmt) {
 		a.currentScope = savedScope
 	}
 	a.analyzeBlockWithRegionClone(stmt.Body, scope)
+	if ok {
+		a.recordAffineDestructureConsumption(stmt.Value, valueType, "view over affine enum")
+	}
 }
 
 func viewBindPatternAsMoveBindPattern(pattern *ast.ViewBindPattern) *ast.MoveBindVariantPattern {
@@ -1893,6 +1895,7 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 	a.currentFunctionValues = mergedFunctionValues
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+	a.recordAffineDestructureConsumption(stmt.Value, valueType, "match over affine enum")
 }
 
 func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
@@ -1975,6 +1978,7 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 	a.currentFunctionValues = mergedFunctionValues
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+	a.recordAffineDestructureConsumption(expr.Value, valueType, "match over affine enum")
 	a.reportNonExhaustiveMatch(expr.Pos(), enumType, covered, hasWildcard)
 	if resultType == nil {
 		return neverType
@@ -4031,6 +4035,20 @@ func (a *Analyzer) containsBorrowedOwnerRefValues(t Type, seen map[string]bool) 
 			}
 		}
 		return false
+	case *EnumType:
+		for _, field := range tt.Common {
+			if a.containsBorrowedOwnerRefValues(field.Type, seen) {
+				return true
+			}
+		}
+		for _, variant := range tt.Variants {
+			for _, payloadType := range variant.Payload {
+				if a.containsBorrowedOwnerRefValues(payloadType, seen) {
+					return true
+				}
+			}
+		}
+		return false
 	case *StructType:
 		for _, field := range tt.Fields {
 			if a.containsBorrowedOwnerRefValues(field.Type, seen) {
@@ -4809,6 +4827,20 @@ func (a *Analyzer) containsTrackedProtocolCarrierValues(t Type, seen map[string]
 		return a.containsTrackedProtocolCarrierValues(tt.Elem, seen)
 	case *DictType:
 		return a.containsTrackedProtocolCarrierValues(tt.Key, seen) || a.containsTrackedProtocolCarrierValues(tt.Value, seen)
+	case *EnumType:
+		for _, field := range tt.Common {
+			if a.containsTrackedProtocolCarrierValues(field.Type, seen) {
+				return true
+			}
+		}
+		for _, variant := range tt.Variants {
+			for _, payloadType := range variant.Payload {
+				if a.containsTrackedProtocolCarrierValues(payloadType, seen) {
+					return true
+				}
+			}
+		}
+		return false
 	case *GenericInstanceType:
 		if base, ok := tt.Base.(*StructType); ok {
 			bindings := map[string]Type{}
@@ -4900,6 +4932,12 @@ func (a *Analyzer) protocolKindsInType(t Type, seen map[string]bool) (bool, bool
 		return hasThread, hasTask, hasGuard
 	case *EnumType:
 		var hasThread, hasTask, hasGuard bool
+		for _, field := range tt.Common {
+			fieldThread, fieldTask, fieldGuard := a.protocolKindsInType(field.Type, seen)
+			hasThread = hasThread || fieldThread
+			hasTask = hasTask || fieldTask
+			hasGuard = hasGuard || fieldGuard
+		}
 		for _, variant := range tt.Variants {
 			for _, payload := range variant.Payload {
 				payloadThread, payloadTask, payloadGuard := a.protocolKindsInType(payload, seen)
@@ -4994,6 +5032,30 @@ func (a *Analyzer) protocolLiveLeafPaths(t Type, prefix string, seen map[string]
 			}
 		}
 		return paths
+	case *EnumType:
+		paths := map[string]Type{}
+		for _, field := range tt.Common {
+			if !a.containsProtocolLeakValues(field.Type) {
+				continue
+			}
+			for childPath, liveType := range a.protocolLiveLeafPaths(field.Type, field.Name, mapsCloneBool(seen)) {
+				paths[joinAffinePath(prefix, childPath)] = liveType
+			}
+		}
+		for _, variant := range tt.Variants {
+			for i, payloadType := range variant.Payload {
+				label := variant.PayloadLabel(i)
+				if label == "" || !a.containsProtocolLeakValues(payloadType) {
+					continue
+				}
+				for childPath, liveType := range a.protocolLiveLeafPaths(payloadType, label, mapsCloneBool(seen)) {
+					paths[joinAffinePath(prefix, childPath)] = liveType
+				}
+			}
+		}
+		if len(paths) != 0 {
+			return paths
+		}
 	case *GenericInstanceType:
 		if base, ok := tt.Base.(*StructType); ok {
 			bindings := map[string]Type{}
@@ -5022,6 +5084,20 @@ func (a *Analyzer) protocolLiveLeafPaths(t Type, prefix string, seen map[string]
 		return map[string]Type{prefix: t}
 	}
 	return nil
+}
+
+func (a *Analyzer) recordAffineDestructureConsumption(expr ast.Expr, actual Type, reason string) {
+	if expr == nil || actual == nil {
+		return
+	}
+	if !a.containsAffineHandleValues(actual, map[string]bool{}) {
+		return
+	}
+	key, ok := a.lookupAffineValueKey(expr)
+	if !ok {
+		return
+	}
+	a.recordAffineConsumption(key, reason)
 }
 
 func mapsCloneBool(src map[string]bool) map[string]bool {

@@ -5720,25 +5720,55 @@ def build(store_owner: Arena) -> Token:
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeRejectsAffinePayloadsInPackedEnums(t *testing.T) {
-	src := `affine repr(c) struct Handle:
+func TestAnalyzeAcceptsAffinePayloadsInPackedEnums(t *testing.T) {
+	src := `extern join(thread: Thread[i64, Joinable]) -> i64
+extern take_handle(handle: Handle) -> void
+
+affine repr(c) struct Handle:
 	raw: mutable uintptr
 
-packed enum Expr:
+packed enum Job:
 	common:
 		handle: Handle
-	Run(value: Thread[i64, Joinable])
+	Run(thread: Thread[i64, Joinable])
+
+def consume(owner: Arena, handle: Handle, thread: Thread[i64, Joinable]) -> i64:
+	store: Job.Store[Local] = Job.Store(owner)
+	job: Job = new[store] Job.Run(handle: move handle, thread: move thread)
+	match job in store:
+		Job.Run(thread: taken):
+			take_handle(move job.handle)
+			return join(move taken)
+	return 0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_affine_payload_reject.llcontext", src)
+	_, errs := parseAndAnalyze(t, "packed_enum_affine_payload_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeConsumesAffinePackedEnumAfterMatch(t *testing.T) {
+	src := `extern join(thread: Thread[i64, Joinable]) -> i64
+
+packed enum Job:
+	Run(thread: Thread[i64, Joinable])
+
+def consume_twice(owner: Arena, thread: Thread[i64, Joinable]) -> i64:
+	store: Job.Store[Local] = Job.Store(owner)
+	job: Job = new[store] Job.Run(thread: move thread)
+	match job in store:
+		Job.Run(thread: taken):
+			_ = join(move taken)
+	match job in store:
+		Job.Run(thread: taken):
+			return join(move taken)
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_affine_payload_match_consumes_root.llcontext", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "packed enum \"Expr\" common field \"handle\" cannot contain affine payload type Handle") {
-		t.Fatalf("expected packed common-field affine diagnostic, got:\n%s", all)
-	}
-	if !strings.Contains(all, "packed enum \"Expr\" variant \"Run\" cannot contain affine payload type Thread[i64, Joinable]") {
-		t.Fatalf("expected packed payload affine diagnostic, got:\n%s", all)
+	if !strings.Contains(all, "cannot be used after match over affine enum") {
+		t.Fatalf("expected affine packed match consumption diagnostic, got:\n%s", all)
 	}
 }
 

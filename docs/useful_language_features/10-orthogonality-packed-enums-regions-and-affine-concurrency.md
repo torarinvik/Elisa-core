@@ -209,20 +209,20 @@ look nicer.
 The runtime seam may erase typed entry points or results. That is acceptable.
 But the packed payload path itself should stay explicit and cheap.
 
-### Phase-1 restriction: no affine payloads inside packed enums
+### Affine payloads are allowed, and make the packed handle affine
 
-Packed enums are essential for compiler graphs. Affine protocol values are
-essential for one-shot concurrency capabilities.
-
-Do not mix those in the first slice.
+Packed enums are still primarily a layout/store feature, but their payloads now
+follow the same structural affine rule as other aggregates.
 
 So:
 
 - packed enums may contain copyable payloads
-- packed enums should not contain `Thread[...]`, `Task[...]`, `MutexGuard[...]`, user-declared `affine struct` values, or aggregates containing them
+- packed enums may also contain `Thread[...]`, `Task[...]`, `MutexGuard[...]`, user-declared `affine struct` values, or aggregates containing them
+- when a packed enum contains any affine common field or payload, the packed handle itself becomes affine
+- successful packed destructuring (`match`, `open`, or `view`) consumes that affine packed handle after the payload bindings are introduced
 
-That avoids needing packed-pattern partial-move rules before the ordinary affine
-system is fully settled.
+This keeps the rule orthogonal: packedness still describes layout, while
+affinity still comes from the values stored inside the packed carrier.
 
 ## Regions And Region Dependencies
 
@@ -447,12 +447,11 @@ restrictions.
 - user-declared `affine struct`
 - explicit `move`
 - `move ... as ...` for whole-value rebinding, simple struct destructure, ordinary enum variant destructure, and packed enum variant destructure with explicit `in store`
-- packed enums with copyable payloads
+- packed enums with copyable or affine payloads/common fields
 - region checkpoints with conservative invalidation
 
 ### Disallowed or intentionally deferred
 
-- affine payloads inside packed enums
 - implicit partial moves from aggregates
 - references to affine-containing values
 - sending mutable regions or mutable packed stores across threads

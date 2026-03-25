@@ -68,6 +68,7 @@ Current packed-enum rules:
 - packed `common:` fields are readable on the packed handle (`node.span`)
 - packed `common:` fields can be initialized by name during allocation; omitted common fields remain zero-initialized
 - packed variants may include one tail payload, which lowers as a `dview[...]` regardless of where that payload appears in the variant field list
+- packed enums may carry affine common fields and affine payloads; when they do, the packed handle becomes affine and packed destructuring forms consume that handle after a successful `match`, `open`, or `view`
 - `view value as Enum.Variant(alias):` still binds a first-class `packedview[Enum.Variant]` alias, while `view value as Enum.Variant(field: x, ...)` and multi-payload positional forms now destructure payloads directly
 - inside a successful `view` body, identifier scrutinees are also refined to `packedview[Enum.Variant]`, so variant fields can be read from the viewed value directly
 
