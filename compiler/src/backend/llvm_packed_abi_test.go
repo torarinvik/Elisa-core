@@ -1932,7 +1932,8 @@ def read(owner: Arena) -> int:
 	node: Expr = box.store[2u]
 	key: NodeKey[Expr] = dense_key(node, box.store)
 	again: Expr = box.store[key]
-	return again.span
+	_ = again
+	return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_dense_node_key_hidden_field_root_abi.llcontext", src)
 

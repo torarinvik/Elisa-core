@@ -858,8 +858,29 @@ func (a *Analyzer) exprSummary(expr ast.Expr) string {
 		return n.Value
 	case *ast.Ident:
 		return n.Name
+	case *ast.FieldExpr:
+		object := a.exprSummary(n.Object)
+		if object == "?" {
+			return "?"
+		}
+		return fmt.Sprintf("%s.%s", object, n.Field)
+	case *ast.IndexExpr:
+		object := a.exprSummary(n.Object)
+		index := a.exprSummary(n.Index)
+		if object == "?" || index == "?" {
+			return "?"
+		}
+		return fmt.Sprintf("%s[%s]", object, index)
 	case *ast.BinaryExpr:
 		return fmt.Sprintf("%s%s%s", a.exprSummary(n.Left), lexer.TokenName(n.Op), a.exprSummary(n.Right))
+	case *ast.ParenExpr:
+		return a.exprSummary(n.Inner)
+	case *ast.CastExpr:
+		return a.exprSummary(n.Operand)
+	case *ast.MoveExpr:
+		return a.exprSummary(n.Operand)
+	case *ast.CanExpr:
+		return a.exprSummary(n.Expr)
 	default:
 		return "?"
 	}

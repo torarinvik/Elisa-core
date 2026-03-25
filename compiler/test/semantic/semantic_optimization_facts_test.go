@@ -359,6 +359,9 @@ def inspect(owner: Arena) -> i32:
 	if !nodesFacts.HasExactExtent() {
 		t.Fatalf("expected full frozen-store slice to preserve an exact extent, got %#v", nodesFacts)
 	}
+	if !result.ExprsHaveSameExtent(valuesExpr, nodesExpr) {
+		t.Fatalf("expected node-table values view extent to match the frozen-store full-span slice, got values=%s nodes=%s", valuesFacts.Extent, nodesFacts.Extent)
+	}
 }
 
 func TestAnalyzeInfersDenseWritableFactsForNodeTableValuesFromHiddenFrozenStoreFieldRoot(t *testing.T) {
@@ -423,6 +426,9 @@ def inspect(owner: Arena) -> i32:
 	}
 	if !nodesFacts.HasExactExtent() {
 		t.Fatalf("expected hidden-root full frozen-store slice to preserve an exact extent, got %#v", nodesFacts)
+	}
+	if !result.ExprsHaveSameExtent(valuesExpr, nodesExpr) {
+		t.Fatalf("expected hidden-root node-table values view extent to match the boxed frozen-store full-span slice, got values=%s nodes=%s", valuesFacts.Extent, nodesFacts.Extent)
 	}
 }
 
