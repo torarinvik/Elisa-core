@@ -939,6 +939,17 @@ func normalizeInlineAnnotationArg(value string) (FuncInlineMode, bool) {
 	}
 }
 
+func temperatureModeForAnnotationName(name string) (FuncTemperatureMode, bool) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "hot":
+		return FuncTemperatureModeHot, true
+	case "cold":
+		return FuncTemperatureModeCold, true
+	default:
+		return FuncTemperatureModeDefault, false
+	}
+}
+
 func packedProfileDefaults(profile string) (string, string, bool) {
 	switch profile {
 	case "canonical":
@@ -1963,6 +1974,8 @@ func (a *Analyzer) analyzeFunctionAnnotations(fn *ast.FuncDecl) {
 			switch annotation.Name {
 			case "inline":
 				a.applyFunctionInlineAnnotation(annotation, fn, signature)
+			case "hot", "cold":
+				a.applyFunctionTemperatureAnnotation(annotation, fn, signature)
 			default:
 				accepted = append(accepted, annotation)
 			}
@@ -1991,6 +2004,24 @@ func (a *Analyzer) applyFunctionInlineAnnotation(annotation ast.Annotation, fn *
 	signature.HasInlineMode = true
 }
 
+func (a *Analyzer) applyFunctionTemperatureAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) {
+	if signature == nil || len(annotation.Args) != 0 {
+		return
+	}
+	mode, ok := temperatureModeForAnnotationName(annotation.Name)
+	if !ok {
+		return
+	}
+	if signature.HasTemperatureMode {
+		if signature.TemperatureMode != mode {
+			a.errorf(annotation.Position, "@%s on function %q conflicts with existing @%s annotation", annotation.Name, fn.Name, string(signature.TemperatureMode))
+		}
+		return
+	}
+	signature.TemperatureMode = mode
+	signature.HasTemperatureMode = true
+}
+
 func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) bool {
 	if signature == nil {
 		a.errorf(annotation.Position, "cannot resolve signature for @%s function %q", annotation.Name, fn.Name)
@@ -2003,6 +2034,13 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 		}
 		if _, ok := normalizeInlineAnnotationArg(annotation.Args[0]); !ok {
 			a.errorf(annotation.Position, "@inline on function %q uses unsupported mode %q (expected always or never)", fn.Name, annotation.Args[0])
+			return false
+		}
+		return true
+	}
+	if annotation.Name == "hot" || annotation.Name == "cold" {
+		if len(annotation.Args) != 0 {
+			a.errorf(annotation.Position, "@%s on function %q does not take arguments", annotation.Name, fn.Name)
 			return false
 		}
 		return true
@@ -2035,7 +2073,7 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "fixture", "inline":
+	case "test", "bench", "fixture", "inline", "hot", "cold":
 		return true
 	default:
 		return false

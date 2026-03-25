@@ -123,3 +123,110 @@ def helper() -> int:
 		t.Fatalf("expected explicit @inline(never) to suppress alwaysinline, got attributes {%s}\nIR:\n%s", attrs, output)
 	}
 }
+
+func TestAnalyzeHotAnnotationSetsFunctionMetadata(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "hot_semantics.llcontext", `@hot
+def helper[T](value: T) -> T:
+	return value
+`)
+	sym, ok := result.GlobalScope.Lookup("helper")
+	if !ok {
+		t.Fatal("expected helper to be defined")
+	}
+	fnType, ok := sym.Type.(*semantic.FuncType)
+	if !ok || fnType == nil {
+		t.Fatalf("expected helper to resolve to semantic.FuncType, got %#v", sym.Type)
+	}
+	if !fnType.HasTemperatureMode || fnType.TemperatureMode != semantic.FuncTemperatureModeHot {
+		t.Fatalf("expected helper temperature metadata to record hot, got %+v", fnType)
+	}
+	specialized := specializeFuncType(fnType, map[string]semantic.Type{"T": result.NamedTypes["int"]})
+	if specialized == nil {
+		t.Fatal("expected specializeFuncType to produce a function type")
+	}
+	if !specialized.HasTemperatureMode || specialized.TemperatureMode != semantic.FuncTemperatureModeHot {
+		t.Fatalf("expected specialized helper temperature metadata to be preserved, got %+v", specialized)
+	}
+}
+
+func TestAnalyzeFunctionTemperatureRejectsArguments(t *testing.T) {
+	result := analyzeInlineTestSource(t, "cold_invalid_args.llcontext", `@cold(always)
+def helper() -> int:
+	return 1
+`)
+	errText := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(errText, `@cold on function "helper" does not take arguments`) {
+		t.Fatalf("expected invalid cold argument diagnostic, got:\n%s", errText)
+	}
+}
+
+func TestAnalyzeFunctionTemperatureRejectsConflictingModes(t *testing.T) {
+	result := analyzeInlineTestSource(t, "temperature_conflict.llcontext", `@hot
+@cold
+def helper() -> int:
+	return 1
+`)
+	errText := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(errText, `@cold on function "helper" conflicts with existing @hot annotation`) {
+		t.Fatalf("expected conflicting temperature diagnostic, got:\n%s", errText)
+	}
+}
+
+func TestGenerateLLVMIRAppliesHotAttributeFromAnnotation(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_hot.llcontext", `@hot
+def helper(value: int) -> int:
+	return value + 1
+`)
+	g, err := compileLLVMModule(result, OptimizationLevel2, DefaultPackedLoweringProfile())
+	if err != nil {
+		t.Fatalf("compileLLVMModule returned error: %v", err)
+	}
+	defer g.dispose()
+	output := g.printModule()
+	attrs := functionAttributeGroupForTest(t, output, "helper")
+	if !strings.Contains(attrs, "hot") {
+		t.Fatalf("expected helper to carry hot, got attributes {%s}\nIR:\n%s", attrs, output)
+	}
+	if strings.Contains(attrs, "cold") {
+		t.Fatalf("expected helper not to carry cold, got attributes {%s}\nIR:\n%s", attrs, output)
+	}
+}
+
+func TestGenerateLLVMIRAppliesColdAttributeFromAnnotation(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_cold.llcontext", `@cold
+def helper(value: int) -> int:
+	return value + 1
+`)
+	g, err := compileLLVMModule(result, OptimizationLevel2, DefaultPackedLoweringProfile())
+	if err != nil {
+		t.Fatalf("compileLLVMModule returned error: %v", err)
+	}
+	defer g.dispose()
+	output := g.printModule()
+	attrs := functionAttributeGroupForTest(t, output, "helper")
+	if !strings.Contains(attrs, "cold") {
+		t.Fatalf("expected helper to carry cold, got attributes {%s}\nIR:\n%s", attrs, output)
+	}
+	if strings.Contains(attrs, "hot") {
+		t.Fatalf("expected helper not to carry hot, got attributes {%s}\nIR:\n%s", attrs, output)
+	}
+}
+
+func TestGenerateLLVMIRPropagatesHotAttributeToExportWrapper(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_hot_export.llcontext", `@hot
+def helper(value: int) -> int:
+	return value + 1
+
+export func public_helper(value: int) -> int = helper
+`)
+	g, err := compileLLVMModule(result, OptimizationLevel2, DefaultPackedLoweringProfile())
+	if err != nil {
+		t.Fatalf("compileLLVMModule returned error: %v", err)
+	}
+	defer g.dispose()
+	output := g.printModule()
+	attrs := functionAttributeGroupForTest(t, output, "public_helper")
+	if !strings.Contains(attrs, "hot") {
+		t.Fatalf("expected export wrapper to carry hot, got attributes {%s}\nIR:\n%s", attrs, output)
+	}
+}

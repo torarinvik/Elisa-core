@@ -73,9 +73,6 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 	if err != nil {
 		return err
 	}
-	if C.LLVMCountBasicBlocks(fnValue) != 0 {
-		return nil
-	}
 
 	var (
 		targetValue C.LLVMValueRef
@@ -92,6 +89,10 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 		if err != nil {
 			return err
 		}
+	}
+	g.applyFunctionTemperatureAttributes(fnValue, targetType)
+	if C.LLVMCountBasicBlocks(fnValue) != 0 {
+		return nil
 	}
 
 	builder := C.LLVMCreateBuilderInContext(g.context)

@@ -341,13 +341,20 @@ func (g *llvmGenerator) setDefinedFunctionLinkage(name string, value C.LLVMValue
 		linkage = C.LLVMLinkage(C.LLVMExternalLinkage)
 	}
 	C.LLVMSetLinkage(value, linkage)
-	if fnType != nil && fnType.HasInlineMode {
-		switch fnType.InlineMode {
-		case semantic.FuncInlineModeAlways:
-			g.addAlwaysInlineAttribute(value)
-		case semantic.FuncInlineModeNever:
-			g.addNoInlineAttribute(value)
+	explicitInlineMode := false
+	if fnType != nil {
+		if fnType.HasInlineMode {
+			explicitInlineMode = true
+			switch fnType.InlineMode {
+			case semantic.FuncInlineModeAlways:
+				g.addAlwaysInlineAttribute(value)
+			case semantic.FuncInlineModeNever:
+				g.addNoInlineAttribute(value)
+			}
 		}
+		g.applyFunctionTemperatureAttributes(value, fnType)
+	}
+	if explicitInlineMode {
 		return
 	}
 	if linkage == C.LLVMLinkage(C.LLVMPrivateLinkage) {
@@ -356,6 +363,18 @@ func (g *llvmGenerator) setDefinedFunctionLinkage(name string, value C.LLVMValue
 		} else {
 			g.addAlwaysInlineAttribute(value)
 		}
+	}
+}
+
+func (g *llvmGenerator) applyFunctionTemperatureAttributes(fn C.LLVMValueRef, fnType *semantic.FuncType) {
+	if g == nil || fn == nil || fnType == nil || !fnType.HasTemperatureMode {
+		return
+	}
+	switch fnType.TemperatureMode {
+	case semantic.FuncTemperatureModeHot:
+		g.addHotAttribute(fn)
+	case semantic.FuncTemperatureModeCold:
+		g.addColdAttribute(fn)
 	}
 }
 
@@ -371,6 +390,20 @@ func (g *llvmGenerator) addNoInlineAttribute(fn C.LLVMValueRef) {
 		return
 	}
 	g.addFunctionEnumAttribute(fn, "noinline")
+}
+
+func (g *llvmGenerator) addHotAttribute(fn C.LLVMValueRef) {
+	if g == nil || g.context == nil || fn == nil {
+		return
+	}
+	g.addFunctionEnumAttribute(fn, "hot")
+}
+
+func (g *llvmGenerator) addColdAttribute(fn C.LLVMValueRef) {
+	if g == nil || g.context == nil || fn == nil {
+		return
+	}
+	g.addFunctionEnumAttribute(fn, "cold")
 }
 
 func (g *llvmGenerator) addFunctionEnumAttribute(fn C.LLVMValueRef, name string) {
@@ -1184,6 +1217,8 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type) semantic.Ty
 			FreshReturnShapeParams: append([]string(nil), tt.FreshReturnShapeParams...),
 			InlineMode:             tt.InlineMode,
 			HasInlineMode:          tt.HasInlineMode,
+			TemperatureMode:        tt.TemperatureMode,
+			HasTemperatureMode:     tt.HasTemperatureMode,
 			Params:                 params,
 			Return:                 substituteType(tt.Return, subst),
 			Variadic:               tt.Variadic,

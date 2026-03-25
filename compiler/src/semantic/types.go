@@ -251,6 +251,14 @@ const (
 	FuncInlineModeNever   FuncInlineMode = "never"
 )
 
+type FuncTemperatureMode string
+
+const (
+	FuncTemperatureModeDefault FuncTemperatureMode = ""
+	FuncTemperatureModeHot     FuncTemperatureMode = "hot"
+	FuncTemperatureModeCold    FuncTemperatureMode = "cold"
+)
+
 type FuncType struct {
 	Name                         string
 	TypeParams                   []string
@@ -268,6 +276,8 @@ type FuncType struct {
 	FreshReturnShapeParams       []string
 	InlineMode                   FuncInlineMode
 	HasInlineMode                bool
+	TemperatureMode              FuncTemperatureMode
+	HasTemperatureMode           bool
 	Params                       []Type
 	Return                       Type
 	Variadic                     bool
