@@ -450,7 +450,7 @@ def json_string_matches_literal(source: any u8&, source_offset: usize, source_le
     if source_len < 2u:
         return false
     if not json_string_has_escape(source, source_offset, source_len):
-        return string_view_eq(StringView(source + source_offset + 1u, (source_len - 2u).i64()), literal) != 0
+        return StringView(source + source_offset + 1u, (source_len - 2u).i64()) == literal
 
     literal_len: usize = runtime_strlen(literal)
     pos: mutable usize = source_offset + 1u

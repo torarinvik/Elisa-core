@@ -10,3 +10,4 @@ Code/test_programs/mutating_fuzzer_temp.llcontext
 Code/zimdjson/
 Code/benchmarks/tmp_zig_dom_input.json
 Code/lua/
+Code/llcontext_lua
