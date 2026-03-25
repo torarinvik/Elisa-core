@@ -65,6 +65,7 @@ Current packed-enum rules:
 - packed control-flow and projection forms (`match`, `open`, `view`, `move-as`, and ownerless `new`) can infer the active store when a matching `Enum.Store[...]` is already in scope
 - packed `common:` fields are readable on the packed handle (`node.span`)
 - packed `common:` fields can be initialized by name during allocation; omitted common fields remain zero-initialized
+- packed variants may include one tail payload, which lowers as a `dview[...]` regardless of where that payload appears in the variant field list
 - `view value as Enum.Variant(alias):` still binds a first-class `packedview[Enum.Variant]` alias, while `view value as Enum.Variant(field: x, ...)` and multi-payload positional forms now destructure payloads directly
 - inside a successful `view` body, identifier scrutinees are also refined to `packedview[Enum.Variant]`, so variant fields can be read from the viewed value directly
 

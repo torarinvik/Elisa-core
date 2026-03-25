@@ -743,9 +743,6 @@ func (a *Analyzer) populateEnumVariants(decls []ast.Decl) {
 						if tailIndex >= 0 {
 							a.errorf(payloadDecl.Type.Pos(), "packed enum %q variant %q can only declare one tail payload", enumDecl.Name, variantDecl.Name)
 						}
-						if payloadIndex != len(variantDecl.Payload)-1 {
-							a.errorf(payloadDecl.Type.Pos(), "packed enum %q variant %q tail payload %q must be the final payload field", enumDecl.Name, variantDecl.Name, payloadDecl.Name)
-						}
 						tailElemType := a.resolveType(tailExpr.Elem)
 						payloadType = &DArrayViewType{Elem: tailElemType, SurfaceName: "dview"}
 						tailIndex = payloadIndex

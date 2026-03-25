@@ -454,6 +454,48 @@ def fold() -> int:
 	}
 }
 
+func TestGenerateLLVMIRLowersNonFinalPackedTailPayloadsInWordHandleABI(t *testing.T) {
+	src := `packed enum Expr:
+	Block(items: tail int, count: usize)
+
+def fold() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	in store:
+		source_items: array[int, 3] = [1, 2, 3]
+		node: Expr = new Expr.Block(items: source_items[0u:3u], count: 3u)
+		return match node:
+			Expr.Block(items: items, count: count):
+				count.int() + items[0u] + items[2u]
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_tail_payload_non_final_word_handle.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	checks := []string{
+		"call %PackedStoreAllocResult @ctx_packed_store_alloc_result(",
+		"call ptr @arena_memcpy(",
+		"packed.tail.view.len",
+		"packed.tail.view.elem_size",
+		"call ptr @ctx_packed_store_decode(",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	for _, bad := range []string{
+		"call %PackedStoreAllocResult @ctx_packed_store_alloc_fixed_result(",
+		"call i64 @ctx_packed_store_read_word(",
+	} {
+		if strings.Contains(output, bad) {
+			t.Fatalf("expected non-final packed tail payload lowering to avoid %q, got:\n%s", bad, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRUsesTagReadHelperForMixedPackedMatchWithoutMatchedValueBodyAccess(t *testing.T) {
 	src := `packed enum Expr:
 	Lit(value: int)
@@ -3183,6 +3225,36 @@ def fold() -> int:
 	}
 	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
 		t.Fatalf("expected index-soa tail payload match to avoid full decode on the fast path, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRUsesIndexTailViewFastPathForNonFinalTailPayloadInIndexSOA(t *testing.T) {
+	src := `packed enum Expr:
+	Block(items: tail int, count: usize)
+
+def fold() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	in store:
+		source_items: array[int, 3] = [1, 2, 3]
+		node: Expr = new Expr.Block(items: source_items[0u:3u], count: 3u)
+		return match node:
+			Expr.Block(items: items, count: count):
+				count.int() + items[0u] + items[2u]
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_tail_payload_non_final_index_soa.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	for _, check := range []string{"call i32 @ctx_packed_store_read_index_tag(", "call i64 @ctx_packed_store_read_index_word(", "packed.payload.tail.data", "packed.payload.tail.len", "packed.payload.tail.elem_size"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
+		t.Fatalf("expected index-soa non-final tail payload match to avoid full decode on the fast path, got:\n%s", output)
 	}
 }
 

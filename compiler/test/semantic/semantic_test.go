@@ -4578,17 +4578,42 @@ func TestAnalyzeRejectsTailPayloadsOnOrdinaryEnums(t *testing.T) {
 	}
 }
 
-func TestAnalyzeRejectsNonFinalPackedEnumTailPayloads(t *testing.T) {
+func TestAnalyzeAcceptsNonFinalPackedEnumTailPayloads(t *testing.T) {
 	src := `packed enum Expr:
 	Block(items: tail int, count: usize)
+
+def build() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	node: Expr = new[store] Expr.Block(items: [1, 2, 3], count: 3u)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	return match node in frozen:
+		Expr.Block(items: items, count: count):
+			if items.len == count:
+				items[1u]
+			0
 `
-	_, errs := parseAndAnalyze(t, "packed_enum_tail_payload_not_final_reject.llcontext", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
+	result, errs := parseAndAnalyze(t, "packed_enum_tail_payload_not_final_ok.llcontext", src)
+	requireNoErrors(t, errs)
+
+	enumType, ok := result.NamedTypes["Expr"].(*semantic.EnumType)
+	if !ok || enumType == nil {
+		t.Fatalf("expected Expr enum type, got %T", result.NamedTypes["Expr"])
 	}
-	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "packed enum \"Expr\" variant \"Block\" tail payload \"items\" must be the final payload field") {
-		t.Fatalf("expected non-final tail payload diagnostic, got:\n%s", all)
+	variant, ok := enumType.Variant("Block")
+	if !ok || variant == nil {
+		t.Fatal("expected Expr.Block variant metadata")
+	}
+	tailIndex, ok := variant.TailPayloadIndex()
+	if !ok || tailIndex != 0 {
+		t.Fatalf("expected Expr.Block tail payload index 0, got %d (ok=%v)", tailIndex, ok)
+	}
+	viewType, ok := variant.TailPayloadViewType()
+	if !ok || viewType == nil {
+		t.Fatal("expected Expr.Block tail payload to lower as dview")
+	}
+	if viewType.String() != "dview[int]" {
+		t.Fatalf("expected Expr.Block tail payload type dview[int], got %s", viewType.String())
 	}
 }
 
