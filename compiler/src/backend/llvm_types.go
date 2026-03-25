@@ -352,6 +352,7 @@ func (g *llvmGenerator) setDefinedFunctionLinkage(name string, value C.LLVMValue
 				g.addNoInlineAttribute(value)
 			}
 		}
+		g.applyFunctionNoRecurseAttributes(value, fnType)
 		g.applyFunctionTemperatureAttributes(value, fnType)
 	}
 	if explicitInlineMode {
@@ -364,6 +365,13 @@ func (g *llvmGenerator) setDefinedFunctionLinkage(name string, value C.LLVMValue
 			g.addAlwaysInlineAttribute(value)
 		}
 	}
+}
+
+func (g *llvmGenerator) applyFunctionNoRecurseAttributes(fn C.LLVMValueRef, fnType *semantic.FuncType) {
+	if g == nil || fn == nil || fnType == nil || !fnType.HasNoRecurse {
+		return
+	}
+	g.addNoRecurseAttribute(fn)
 }
 
 func (g *llvmGenerator) applyFunctionTemperatureAttributes(fn C.LLVMValueRef, fnType *semantic.FuncType) {
@@ -390,6 +398,13 @@ func (g *llvmGenerator) addNoInlineAttribute(fn C.LLVMValueRef) {
 		return
 	}
 	g.addFunctionEnumAttribute(fn, "noinline")
+}
+
+func (g *llvmGenerator) addNoRecurseAttribute(fn C.LLVMValueRef) {
+	if g == nil || g.context == nil || fn == nil {
+		return
+	}
+	g.addFunctionEnumAttribute(fn, "norecurse")
 }
 
 func (g *llvmGenerator) addHotAttribute(fn C.LLVMValueRef) {
@@ -1217,6 +1232,7 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type) semantic.Ty
 			FreshReturnShapeParams: append([]string(nil), tt.FreshReturnShapeParams...),
 			InlineMode:             tt.InlineMode,
 			HasInlineMode:          tt.HasInlineMode,
+			HasNoRecurse:           tt.HasNoRecurse,
 			TemperatureMode:        tt.TemperatureMode,
 			HasTemperatureMode:     tt.HasTemperatureMode,
 			Params:                 params,

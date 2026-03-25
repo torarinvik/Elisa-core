@@ -276,6 +276,7 @@ type FuncType struct {
 	FreshReturnShapeParams       []string
 	InlineMode                   FuncInlineMode
 	HasInlineMode                bool
+	HasNoRecurse                 bool
 	TemperatureMode              FuncTemperatureMode
 	HasTemperatureMode           bool
 	Params                       []Type

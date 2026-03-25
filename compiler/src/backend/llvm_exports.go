@@ -90,6 +90,7 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 			return err
 		}
 	}
+	g.applyFunctionNoRecurseAttributes(fnValue, targetType)
 	g.applyFunctionTemperatureAttributes(fnValue, targetType)
 	if C.LLVMCountBasicBlocks(fnValue) != 0 {
 		return nil

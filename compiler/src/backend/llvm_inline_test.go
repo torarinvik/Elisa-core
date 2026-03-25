@@ -67,6 +67,42 @@ def helper[T](value: T) -> T:
 	}
 }
 
+func TestAnalyzeNoRecurseAnnotationSetsFunctionMetadata(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "norecurse_semantics.llcontext", `@norecurse
+def helper[T](value: T) -> T:
+	return value
+`)
+	sym, ok := result.GlobalScope.Lookup("helper")
+	if !ok {
+		t.Fatal("expected helper to be defined")
+	}
+	fnType, ok := sym.Type.(*semantic.FuncType)
+	if !ok || fnType == nil {
+		t.Fatalf("expected helper to resolve to semantic.FuncType, got %#v", sym.Type)
+	}
+	if !fnType.HasNoRecurse {
+		t.Fatalf("expected helper norecurse metadata to be recorded, got %+v", fnType)
+	}
+	specialized := specializeFuncType(fnType, map[string]semantic.Type{"T": result.NamedTypes["int"]})
+	if specialized == nil {
+		t.Fatal("expected specializeFuncType to produce a function type")
+	}
+	if !specialized.HasNoRecurse {
+		t.Fatalf("expected specialized helper norecurse metadata to be preserved, got %+v", specialized)
+	}
+}
+
+func TestAnalyzeNoRecurseAnnotationRejectsArguments(t *testing.T) {
+	result := analyzeInlineTestSource(t, "norecurse_invalid_args.llcontext", `@norecurse(always)
+def helper() -> int:
+	return 1
+`)
+	errText := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(errText, `@norecurse on function "helper" does not take arguments`) {
+		t.Fatalf("expected invalid norecurse argument diagnostic, got:\n%s", errText)
+	}
+}
+
 func TestAnalyzeInlineAnnotationRejectsUnsupportedMode(t *testing.T) {
 	result := analyzeInlineTestSource(t, "inline_invalid_mode.llcontext", `@inline(sometimes)
 def helper() -> int:
@@ -98,6 +134,23 @@ def helper(value: int) -> int:
 	}
 	if strings.Contains(attrs, "noinline") {
 		t.Fatalf("expected helper not to carry noinline, got attributes {%s}\nIR:\n%s", attrs, output)
+	}
+}
+
+func TestGenerateLLVMIRAppliesNoRecurseAttributeFromAnnotation(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_norecurse.llcontext", `@norecurse
+def helper(value: int) -> int:
+	return value + 1
+`)
+	g, err := compileLLVMModule(result, OptimizationLevel2, DefaultPackedLoweringProfile())
+	if err != nil {
+		t.Fatalf("compileLLVMModule returned error: %v", err)
+	}
+	defer g.dispose()
+	output := g.printModule()
+	attrs := functionAttributeGroupForTest(t, output, "helper")
+	if !strings.Contains(attrs, "norecurse") {
+		t.Fatalf("expected helper to carry norecurse, got attributes {%s}\nIR:\n%s", attrs, output)
 	}
 }
 
@@ -228,5 +281,24 @@ export func public_helper(value: int) -> int = helper
 	attrs := functionAttributeGroupForTest(t, output, "public_helper")
 	if !strings.Contains(attrs, "hot") {
 		t.Fatalf("expected export wrapper to carry hot, got attributes {%s}\nIR:\n%s", attrs, output)
+	}
+}
+
+func TestGenerateLLVMIRPropagatesNoRecurseAttributeToExportWrapper(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_norecurse_export.llcontext", `@norecurse
+def helper(value: int) -> int:
+	return value + 1
+
+export func public_helper(value: int) -> int = helper
+`)
+	g, err := compileLLVMModule(result, OptimizationLevel2, DefaultPackedLoweringProfile())
+	if err != nil {
+		t.Fatalf("compileLLVMModule returned error: %v", err)
+	}
+	defer g.dispose()
+	output := g.printModule()
+	attrs := functionAttributeGroupForTest(t, output, "public_helper")
+	if !strings.Contains(attrs, "norecurse") {
+		t.Fatalf("expected export wrapper to carry norecurse, got attributes {%s}\nIR:\n%s", attrs, output)
 	}
 }

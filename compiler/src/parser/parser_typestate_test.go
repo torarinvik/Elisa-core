@@ -380,6 +380,26 @@ func TestParseInlineFunctionAnnotation(t *testing.T) {
 	}
 }
 
+func TestParseNoRecurseFunctionAnnotation(t *testing.T) {
+	file, errs := parseSourceFile(t, "@norecurse\ndef fold(value: int) -> int:\n    return value\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[0])
+	}
+	if len(decl.Annotations) != 1 {
+		t.Fatalf("expected one function annotation, got %d", len(decl.Annotations))
+	}
+	if decl.Annotations[0].Name != "norecurse" {
+		t.Fatalf("expected norecurse annotation, got %q", decl.Annotations[0].Name)
+	}
+	if len(decl.Annotations[0].Args) != 0 {
+		t.Fatalf("expected norecurse to take no args, got %#v", decl.Annotations[0].Args)
+	}
+}
+
 func TestParseHotFunctionAnnotation(t *testing.T) {
 	file, errs := parseSourceFile(t, "@hot\ndef fold(value: int) -> int:\n    return value\n")
 	if len(errs) != 0 {

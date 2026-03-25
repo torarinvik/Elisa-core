@@ -1974,6 +1974,8 @@ func (a *Analyzer) analyzeFunctionAnnotations(fn *ast.FuncDecl) {
 			switch annotation.Name {
 			case "inline":
 				a.applyFunctionInlineAnnotation(annotation, fn, signature)
+			case "norecurse":
+				a.applyFunctionNoRecurseAnnotation(annotation, fn, signature)
 			case "hot", "cold":
 				a.applyFunctionTemperatureAnnotation(annotation, fn, signature)
 			default:
@@ -2002,6 +2004,13 @@ func (a *Analyzer) applyFunctionInlineAnnotation(annotation ast.Annotation, fn *
 	}
 	signature.InlineMode = mode
 	signature.HasInlineMode = true
+}
+
+func (a *Analyzer) applyFunctionNoRecurseAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) {
+	if signature == nil || len(annotation.Args) != 0 {
+		return
+	}
+	signature.HasNoRecurse = true
 }
 
 func (a *Analyzer) applyFunctionTemperatureAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) {
@@ -2034,6 +2043,13 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 		}
 		if _, ok := normalizeInlineAnnotationArg(annotation.Args[0]); !ok {
 			a.errorf(annotation.Position, "@inline on function %q uses unsupported mode %q (expected always or never)", fn.Name, annotation.Args[0])
+			return false
+		}
+		return true
+	}
+	if annotation.Name == "norecurse" {
+		if len(annotation.Args) != 0 {
+			a.errorf(annotation.Position, "@norecurse on function %q does not take arguments", fn.Name)
 			return false
 		}
 		return true
@@ -2073,7 +2089,7 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "fixture", "inline", "hot", "cold":
+	case "test", "bench", "fixture", "inline", "norecurse", "hot", "cold":
 		return true
 	default:
 		return false

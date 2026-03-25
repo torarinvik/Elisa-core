@@ -186,6 +186,7 @@ func specializeExportFuncType(a *Analyzer, base *FuncType, bindings map[string]T
 		FreshReturnShapeParams: append([]string(nil), specialized.FreshReturnShapeParams...),
 		InlineMode:             specialized.InlineMode,
 		HasInlineMode:          specialized.HasInlineMode,
+		HasNoRecurse:           specialized.HasNoRecurse,
 		TemperatureMode:        specialized.TemperatureMode,
 		HasTemperatureMode:     specialized.HasTemperatureMode,
 		Params:                 append([]Type(nil), specialized.Params...),
