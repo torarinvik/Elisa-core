@@ -1816,8 +1816,8 @@ func TestGenerateLLVMIRLowersManualRegions(t *testing.T) {
 
 	checks := []string{
 		"%Arena = type { ptr, ptr, i64 }",
-		"declare noalias ptr @new_region(i64)",
-		"declare noalias ptr @arena_alloc(ptr, i64)",
+		"declare ptr @new_region(i64)",
+		"declare ptr @arena_alloc(ptr, i64)",
 		"declare void @arena_free(ptr)",
 		"call ptr @new_region(i64 1024)",
 		"call ptr @arena_alloc(ptr",
@@ -3622,6 +3622,9 @@ def copy_overlap_unknown(values: any darray[i32, shape_in]&) -> void:
 	copyOverlapUnknownBody := functionIR(output, "copy_overlap_unknown")
 	if copyOverlapUnknownBody == "" {
 		t.Fatalf("expected to find copy_overlap_unknown body, got:\n%s", output)
+	}
+	if strings.Contains(copyOverlapUnknownBody, "call ptr @arena_memcpy") {
+		t.Fatalf("expected copy_overlap_unknown to preserve overlap semantics instead of arena_memcpy, got:\n%s", copyOverlapUnknownBody)
 	}
 	if !strings.Contains(copyOverlapUnknownBody, "call void @arena_da_copy_exact") {
 		t.Fatalf("expected copy_overlap_unknown to keep helper fallback when extent is not exact, got:\n%s", copyOverlapUnknownBody)

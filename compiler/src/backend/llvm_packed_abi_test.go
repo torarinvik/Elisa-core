@@ -378,7 +378,7 @@ def fold() -> int:
 		"%PackedStoreAllocResult = type { ptr, i64 }",
 		"define i1 @differs(i64",
 		"icmp ne i64",
-		"declare noalias ptr @ctx_packed_store_state_new(ptr, i64)",
+		"declare ptr @ctx_packed_store_state_new(ptr, i64)",
 		"call ptr @ctx_packed_store_state_new(ptr",
 		"call %PackedStoreAllocResult @ctx_packed_store_alloc_fixed_tagged_result(ptr %packed.alloc.store.arena, ptr %packed.alloc.store.state, i32 ",
 		"call ptr @ctx_packed_store_decode(ptr %packed.alloc.store.arena, i64",
