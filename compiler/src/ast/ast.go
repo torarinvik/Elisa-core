@@ -49,6 +49,17 @@ type PermissionDecl struct {
 	Members  []string
 }
 
+type NamespaceDecl struct {
+	Position lexer.Pos
+	Name     string
+	Decls    []Decl
+}
+
+type UsingDecl struct {
+	Position lexer.Pos
+	Name     string
+}
+
 type EnumDecl struct {
 	Position    lexer.Pos
 	Annotations []Annotation
@@ -789,6 +800,8 @@ func (n *ConstEnumMemberDecl) Pos() lexer.Pos {
 }
 func (n *ErrorDecl) Pos() lexer.Pos      { return n.Position }
 func (n *PermissionDecl) Pos() lexer.Pos { return n.Position }
+func (n *NamespaceDecl) Pos() lexer.Pos  { return n.Position }
+func (n *UsingDecl) Pos() lexer.Pos      { return n.Position }
 func (n *EnumDecl) Pos() lexer.Pos       { return n.Position }
 func (n *GlobalDecl) Pos() lexer.Pos     { return n.Position }
 func (n *StructDecl) Pos() lexer.Pos     { return n.Position }
@@ -897,6 +910,8 @@ func (*ConstEnumDecl) nodeTag()             {}
 func (*ConstEnumMemberDecl) nodeTag()       {}
 func (*ErrorDecl) nodeTag()                 {}
 func (*PermissionDecl) nodeTag()            {}
+func (*NamespaceDecl) nodeTag()             {}
+func (*UsingDecl) nodeTag()                 {}
 func (*EnumDecl) nodeTag()                  {}
 func (*GlobalDecl) nodeTag()                {}
 func (*StructDecl) nodeTag()                {}
@@ -990,6 +1005,8 @@ func (*ConstDecl) declTag()        {}
 func (*ConstEnumDecl) declTag()    {}
 func (*ErrorDecl) declTag()        {}
 func (*PermissionDecl) declTag()   {}
+func (*NamespaceDecl) declTag()    {}
+func (*UsingDecl) declTag()        {}
 func (*EnumDecl) declTag()         {}
 func (*GlobalDecl) declTag()       {}
 func (*StructDecl) declTag()       {}

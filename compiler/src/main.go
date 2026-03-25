@@ -574,6 +574,13 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 	switch n := d.(type) {
 	case *ast.PermissionDecl:
 		fmt.Fprintf(w, "%spermission %s: (%d members)\n", prefix, n.Name, len(n.Members))
+	case *ast.NamespaceDecl:
+		fmt.Fprintf(w, "%snamespace %s: (%d decls)\n", prefix, n.Name, len(n.Decls))
+		for _, decl := range n.Decls {
+			printDecl(w, decl, level+1)
+		}
+	case *ast.UsingDecl:
+		fmt.Fprintf(w, "%susing %s\n", prefix, n.Name)
 	case *ast.ConstDecl:
 		fmt.Fprintf(w, "%sconst %s = %s\n", prefix, n.Name, exprStr(n.Value))
 	case *ast.ConstEnumDecl:

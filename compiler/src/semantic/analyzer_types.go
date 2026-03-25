@@ -117,7 +117,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		if t, ok := a.lookupTypeParam(n.Name); ok {
 			return t
 		}
-		if t, ok := a.namedTypes[n.Name]; ok {
+		if t, _, ok := a.lookupVisibleType(n.Name); ok {
 			return DefaultAggregateStateType(t)
 		}
 		a.errorf(n.Pos(), "unknown type %q", n.Name)
@@ -232,7 +232,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			return a.resolveArrayType(arrayExpr)
 		}
 		args := make([]Type, 0, len(n.Args))
-		base, ok := a.namedTypes[n.Name]
+		base, _, ok := a.lookupVisibleType(n.Name)
 		if !ok {
 			a.errorf(n.Pos(), "unknown type %q", n.Name)
 			return invalidType
@@ -349,6 +349,13 @@ func (a *Analyzer) resolveErrorSetExpr(expr *ast.ErrorSetExpr) Type {
 
 func (a *Analyzer) lookupDeclaredErrorSet(tag ast.ErrorTagExpr) (string, *ErrorSetType) {
 	t, ok := a.namedTypes[tag.SetName]
+	if !ok {
+		var resolved Type
+		resolved, _, ok = a.lookupVisibleType(tag.SetName)
+		if ok {
+			t = resolved
+		}
+	}
 	if !ok {
 		a.errorf(tag.Position, "unknown error set %q", tag.SetName)
 		return "", nil

@@ -108,6 +108,8 @@ type Analyzer struct {
 	returnProvenanceInProgress        map[string]bool
 	returnBorrowedOwnerRefInProgress  map[string]bool
 	parallelForInfo                   map[*ast.ParallelForStmt]*ParallelForInfo
+	currentNamespace                  string
+	currentUsings                     []string
 }
 
 type regionState struct {
@@ -178,8 +180,8 @@ func Analyze(file *ast.File) *Result {
 		returnBorrowedOwnerRefInProgress: map[string]bool{},
 	}
 	a.registerBuiltins()
-	a.collectConstValues(file.Decls)
-	activeDecls := a.expandActiveDecls(file.Decls)
+	activeDecls := a.flattenScopedDecls(file.Decls, "", nil)
+	a.collectConstValues(activeDecls)
 	a.collectPermissionDecls(activeDecls)
 	a.collectNamedTypes(activeDecls)
 	a.populateConstEnumMembers(activeDecls)
@@ -459,37 +461,37 @@ func isBuiltinRuntimeStructName(name string) bool {
 	}
 }
 
-func (a *Analyzer) collectConstValues(decls []ast.Decl) {
-	for _, decl := range decls {
-		switch n := decl.(type) {
-		case *ast.ConstDecl:
-			if value, ok := a.evalConstExpr(n.Value); ok {
-				a.constValues[n.Name] = value
-			}
-		case *ast.ConstEnumDecl:
-			nextValue := int64(0)
-			hasValue := false
-			for i := range n.Members {
-				member := &n.Members[i]
-				value := nextValue
-				if member.Value != nil {
-					resolved, ok := a.evalConstExpr(member.Value)
-					if !ok || resolved.Kind != ConstInt {
-						continue
-					}
-					value = resolved.Int
+func (a *Analyzer) collectConstValues(decls []scopedDecl) {
+	for _, scoped := range decls {
+		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+			switch n := scoped.Decl.(type) {
+			case *ast.ConstDecl:
+				if value, ok := a.evalConstExpr(n.Value); ok {
+					a.constValues[joinQualifiedName(scoped.Namespace, n.Name)] = value
 				}
-				qualifiedName := n.Name + "." + member.Name
-				a.constValues[qualifiedName] = ConstValue{Kind: ConstInt, Int: value}
-				nextValue = value + 1
-				hasValue = true
+			case *ast.ConstEnumDecl:
+				nextValue := int64(0)
+				hasValue := false
+				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
+				for i := range n.Members {
+					member := &n.Members[i]
+					value := nextValue
+					if member.Value != nil {
+						resolved, ok := a.evalConstExpr(member.Value)
+						if !ok || resolved.Kind != ConstInt {
+							continue
+						}
+						value = resolved.Int
+					}
+					a.constValues[qualifiedName+"."+member.Name] = ConstValue{Kind: ConstInt, Int: value}
+					nextValue = value + 1
+					hasValue = true
+				}
+				if !hasValue {
+					nextValue = 0
+				}
 			}
-			if !hasValue {
-				nextValue = 0
-			}
-		case *ast.StaticIfDecl:
-			a.collectConstValues(a.activeDeclBranch(n))
-		}
+		})
 	}
 }
 
@@ -549,97 +551,102 @@ func (a *Analyzer) activeStmtBranch(n *ast.StaticIfStmt) []ast.Stmt {
 	return n.Else
 }
 
-func (a *Analyzer) collectNamedTypes(decls []ast.Decl) {
-	for _, decl := range decls {
-		switch n := decl.(type) {
-		case *ast.StructDecl:
-			if existing, exists := a.namedTypes[n.Name]; exists {
-				if st, ok := existing.(*StructType); ok && st.Builtin && isBuiltinRuntimeStructName(n.Name) {
-					continue
+func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
+	for _, scoped := range decls {
+		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+			switch n := scoped.Decl.(type) {
+			case *ast.StructDecl:
+				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
+				if existing, exists := a.namedTypes[qualifiedName]; exists {
+					if st, ok := existing.(*StructType); ok && st.Builtin && isBuiltinRuntimeStructName(n.Name) {
+						return
+					}
+					a.errorf(n.Pos(), "duplicate type %q", qualifiedName)
+					return
 				}
-				a.errorf(n.Pos(), "duplicate type %q", n.Name)
-				continue
-			}
-			st := &StructType{
-				Name:             n.Name,
-				TypeParams:       append([]string(nil), n.TypeParams...),
-				RefStorageParams: append([]string(nil), n.RefStorageParams...),
-				RefStateParams:   append([]string(nil), n.RefStateParams...),
-				GenericParams:    append([]ast.GenericParam(nil), n.GenericParams...),
-				Fields:           map[string]Field{},
-				Affine:           n.Affine,
-				ReprC:            n.ReprC,
-				Decl:             n,
-			}
-			a.namedTypes[n.Name] = st
-		case *ast.ConstEnumDecl:
-			if _, exists := a.namedTypes[n.Name]; exists {
-				a.errorf(n.Pos(), "duplicate type %q", n.Name)
-				continue
-			}
-			a.namedTypes[n.Name] = &ConstEnumType{Name: n.Name, MemberMap: map[string]*ConstEnumMember{}, Decl: n}
-		case *ast.EnumDecl:
-			if _, exists := a.namedTypes[n.Name]; exists {
-				a.errorf(n.Pos(), "duplicate type %q", n.Name)
-				continue
-			}
-			enumType := &EnumType{Name: n.Name, Packed: n.Packed, Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: n}
-			a.namedTypes[n.Name] = enumType
-			if n.Packed {
-				tagName := packedEnumTagTypeName(n.Name)
-				if _, exists := a.namedTypes[tagName]; exists {
-					a.errorf(n.Pos(), "duplicate type %q", tagName)
-					continue
+				st := &StructType{
+					Name:             qualifiedName,
+					TypeParams:       append([]string(nil), n.TypeParams...),
+					RefStorageParams: append([]string(nil), n.RefStorageParams...),
+					RefStateParams:   append([]string(nil), n.RefStateParams...),
+					GenericParams:    append([]ast.GenericParam(nil), n.GenericParams...),
+					Fields:           map[string]Field{},
+					Affine:           n.Affine,
+					ReprC:            n.ReprC,
+					Decl:             n,
 				}
-				tagType := &ConstEnumType{Name: tagName, Storage: a.namedTypes["u32"], MemberMap: map[string]*ConstEnumMember{}}
-				enumType.TagType = tagType
-				a.namedTypes[tagName] = tagType
-				storeName := packedEnumStoreTypeName(n.Name)
-				if _, exists := a.namedTypes[storeName]; exists {
-					a.errorf(n.Pos(), "duplicate type %q", storeName)
-					continue
+				a.namedTypes[qualifiedName] = st
+			case *ast.ConstEnumDecl:
+				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
+				if _, exists := a.namedTypes[qualifiedName]; exists {
+					a.errorf(n.Pos(), "duplicate type %q", qualifiedName)
+					return
 				}
-				storeType := &PackedEnumStoreType{Name: storeName, Enum: enumType}
-				enumType.StoreType = storeType
-				a.namedTypes[storeName] = storeType
-			}
-		case *ast.ExternTypeDecl:
-			if _, exists := a.namedTypes[n.Name]; exists {
-				a.errorf(n.Pos(), "duplicate type %q", n.Name)
-				continue
-			}
-			a.namedTypes[n.Name] = &OpaqueType{Name: n.Name}
-		case *ast.ErrorDecl:
-			if _, exists := a.namedTypes[n.Name]; exists {
-				a.errorf(n.Pos(), "duplicate type %q", n.Name)
-				continue
-			}
-			seenTags := map[string]bool{}
-			resolvedTags := make([]string, 0, len(n.Tags))
-			for _, tag := range n.Tags {
-				if seenTags[tag] {
-					a.errorf(n.Pos(), "duplicate error tag %q in error set %q", tag, n.Name)
-					continue
+				a.namedTypes[qualifiedName] = &ConstEnumType{Name: qualifiedName, MemberMap: map[string]*ConstEnumMember{}, Decl: n}
+			case *ast.EnumDecl:
+				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
+				if _, exists := a.namedTypes[qualifiedName]; exists {
+					a.errorf(n.Pos(), "duplicate type %q", qualifiedName)
+					return
 				}
-				seenTags[tag] = true
-				resolvedTags = append(resolvedTags, QualifyErrorTag(n.Name, tag))
+				enumType := &EnumType{Name: qualifiedName, Packed: n.Packed, Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: n}
+				a.namedTypes[qualifiedName] = enumType
+				if n.Packed {
+					tagName := packedEnumTagTypeName(qualifiedName)
+					if _, exists := a.namedTypes[tagName]; exists {
+						a.errorf(n.Pos(), "duplicate type %q", tagName)
+						return
+					}
+					tagType := &ConstEnumType{Name: tagName, Storage: a.namedTypes["u32"], MemberMap: map[string]*ConstEnumMember{}}
+					enumType.TagType = tagType
+					a.namedTypes[tagName] = tagType
+					storeName := packedEnumStoreTypeName(qualifiedName)
+					if _, exists := a.namedTypes[storeName]; exists {
+						a.errorf(n.Pos(), "duplicate type %q", storeName)
+						return
+					}
+					storeType := &PackedEnumStoreType{Name: storeName, Enum: enumType}
+					enumType.StoreType = storeType
+					a.namedTypes[storeName] = storeType
+				}
+			case *ast.ExternTypeDecl:
+				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
+				if _, exists := a.namedTypes[qualifiedName]; exists {
+					a.errorf(n.Pos(), "duplicate type %q", qualifiedName)
+					return
+				}
+				a.namedTypes[qualifiedName] = &OpaqueType{Name: qualifiedName}
+			case *ast.ErrorDecl:
+				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
+				if _, exists := a.namedTypes[qualifiedName]; exists {
+					a.errorf(n.Pos(), "duplicate type %q", qualifiedName)
+					return
+				}
+				seenTags := map[string]bool{}
+				resolvedTags := make([]string, 0, len(n.Tags))
+				for _, tag := range n.Tags {
+					if seenTags[tag] {
+						a.errorf(n.Pos(), "duplicate error tag %q in error set %q", tag, n.Name)
+						continue
+					}
+					seenTags[tag] = true
+					resolvedTags = append(resolvedTags, QualifyErrorTag(qualifiedName, tag))
+				}
+				a.namedTypes[qualifiedName] = &ErrorSetType{Name: qualifiedName, Tags: resolvedTags}
+			case *ast.PermissionDecl:
+			case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			}
-			a.namedTypes[n.Name] = &ErrorSetType{Name: n.Name, Tags: resolvedTags}
-		case *ast.PermissionDecl:
-			continue
-		case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
-			continue
-		}
+		})
 	}
 }
 
-func (a *Analyzer) populateConstEnumMembers(decls []ast.Decl) {
-	for _, decl := range decls {
-		constEnumDecl, ok := decl.(*ast.ConstEnumDecl)
+func (a *Analyzer) populateConstEnumMembers(decls []scopedDecl) {
+	for _, scoped := range decls {
+		constEnumDecl, ok := scoped.Decl.(*ast.ConstEnumDecl)
 		if !ok {
 			continue
 		}
-		constEnumType, _ := a.namedTypes[constEnumDecl.Name].(*ConstEnumType)
+		constEnumType, _ := a.namedTypes[joinQualifiedName(scoped.Namespace, constEnumDecl.Name)].(*ConstEnumType)
 		if constEnumType == nil {
 			continue
 		}
@@ -682,193 +689,200 @@ func packedEnumTagTypeName(enumName string) string {
 	return enumName + ".Tag"
 }
 
-func (a *Analyzer) populateEnumVariants(decls []ast.Decl) {
-	for _, decl := range decls {
-		enumDecl, ok := decl.(*ast.EnumDecl)
+func (a *Analyzer) populateEnumVariants(decls []scopedDecl) {
+	for _, scoped := range decls {
+		enumDecl, ok := scoped.Decl.(*ast.EnumDecl)
 		if !ok {
 			continue
 		}
-		enumType, _ := a.namedTypes[enumDecl.Name].(*EnumType)
+		enumType, _ := a.namedTypes[joinQualifiedName(scoped.Namespace, enumDecl.Name)].(*EnumType)
 		if enumType == nil {
 			continue
 		}
-		a.analyzeEnumAnnotations(enumDecl, enumType)
-		if len(enumDecl.Common) > 0 && !enumDecl.Packed {
-			a.errorf(enumDecl.Pos(), "enum %q only supports common: fields for packed enums", enumDecl.Name)
-		}
-		for _, commonDecl := range enumDecl.Common {
-			if commonDecl.Mutable {
-				a.errorf(commonDecl.Position, "packed enum %q common field %q cannot be mutable in v1", enumDecl.Name, commonDecl.Name)
+		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+			a.analyzeEnumAnnotations(enumDecl, enumType)
+			if len(enumDecl.Common) > 0 && !enumDecl.Packed {
+				a.errorf(enumDecl.Pos(), "enum %q only supports common: fields for packed enums", enumDecl.Name)
 			}
-			if commonDecl.IsTail {
-				a.errorf(commonDecl.Position, "packed enum %q common field %q cannot be tail-allocated", enumDecl.Name, commonDecl.Name)
-			}
-			if _, exists := enumType.Common[commonDecl.Name]; exists {
-				a.errorf(commonDecl.Position, "duplicate common field %q in enum %q", commonDecl.Name, enumDecl.Name)
-				continue
-			}
-			commonType := a.resolveType(commonDecl.Type)
-			enumType.Common[commonDecl.Name] = Field{Name: commonDecl.Name, Type: commonType, Mutable: false}
-		}
-		variants := make([]*EnumVariant, 0, len(enumDecl.Variants))
-		for i := range enumDecl.Variants {
-			variantDecl := &enumDecl.Variants[i]
-			if _, exists := enumType.VariantMap[variantDecl.Name]; exists {
-				a.errorf(variantDecl.Position, "duplicate variant %q in enum %q", variantDecl.Name, enumDecl.Name)
-				continue
-			}
-			payload := make([]Type, 0, len(variantDecl.Payload))
-			payloadNames := make([]string, 0, len(variantDecl.Payload))
-			tailIndex := -1
-			seenPayloadNames := map[string]bool{}
-			hasNamedPayloads := false
-			hasUnnamedPayloads := false
-			for payloadIndex, payloadDecl := range variantDecl.Payload {
-				if payloadDecl.Name != "" {
-					hasNamedPayloads = true
-					if seenPayloadNames[payloadDecl.Name] {
-						a.errorf(payloadDecl.Position, "duplicate payload field %q in enum variant %q.%q", payloadDecl.Name, enumDecl.Name, variantDecl.Name)
-					}
-					seenPayloadNames[payloadDecl.Name] = true
-				} else {
-					hasUnnamedPayloads = true
+			for _, commonDecl := range enumDecl.Common {
+				if commonDecl.Mutable {
+					a.errorf(commonDecl.Position, "packed enum %q common field %q cannot be mutable in v1", enumDecl.Name, commonDecl.Name)
 				}
-				payloadType := a.resolveType(payloadDecl.Type)
-				if tailExpr, ok := payloadDecl.Type.(*ast.TailType); ok {
-					if !enumDecl.Packed {
-						a.errorf(payloadDecl.Type.Pos(), "enum %q variant %q tail payloads are only supported for packed enums", enumDecl.Name, variantDecl.Name)
-					} else {
-						if tailIndex >= 0 {
-							a.errorf(payloadDecl.Type.Pos(), "packed enum %q variant %q can only declare one tail payload", enumDecl.Name, variantDecl.Name)
+				if commonDecl.IsTail {
+					a.errorf(commonDecl.Position, "packed enum %q common field %q cannot be tail-allocated", enumDecl.Name, commonDecl.Name)
+				}
+				if _, exists := enumType.Common[commonDecl.Name]; exists {
+					a.errorf(commonDecl.Position, "duplicate common field %q in enum %q", commonDecl.Name, enumDecl.Name)
+					continue
+				}
+				commonType := a.resolveType(commonDecl.Type)
+				enumType.Common[commonDecl.Name] = Field{Name: commonDecl.Name, Type: commonType, Mutable: false}
+			}
+			variants := make([]*EnumVariant, 0, len(enumDecl.Variants))
+			for i := range enumDecl.Variants {
+				variantDecl := &enumDecl.Variants[i]
+				if _, exists := enumType.VariantMap[variantDecl.Name]; exists {
+					a.errorf(variantDecl.Position, "duplicate variant %q in enum %q", variantDecl.Name, enumDecl.Name)
+					continue
+				}
+				payload := make([]Type, 0, len(variantDecl.Payload))
+				payloadNames := make([]string, 0, len(variantDecl.Payload))
+				tailIndex := -1
+				seenPayloadNames := map[string]bool{}
+				hasNamedPayloads := false
+				hasUnnamedPayloads := false
+				for payloadIndex, payloadDecl := range variantDecl.Payload {
+					if payloadDecl.Name != "" {
+						hasNamedPayloads = true
+						if seenPayloadNames[payloadDecl.Name] {
+							a.errorf(payloadDecl.Position, "duplicate payload field %q in enum variant %q.%q", payloadDecl.Name, enumDecl.Name, variantDecl.Name)
 						}
-						tailElemType := a.resolveType(tailExpr.Elem)
-						payloadType = &DArrayViewType{Elem: tailElemType, SurfaceName: "dview"}
-						tailIndex = payloadIndex
+						seenPayloadNames[payloadDecl.Name] = true
+					} else {
+						hasUnnamedPayloads = true
 					}
+					payloadType := a.resolveType(payloadDecl.Type)
+					if tailExpr, ok := payloadDecl.Type.(*ast.TailType); ok {
+						if !enumDecl.Packed {
+							a.errorf(payloadDecl.Type.Pos(), "enum %q variant %q tail payloads are only supported for packed enums", enumDecl.Name, variantDecl.Name)
+						} else {
+							if tailIndex >= 0 {
+								a.errorf(payloadDecl.Type.Pos(), "packed enum %q variant %q can only declare one tail payload", enumDecl.Name, variantDecl.Name)
+							}
+							tailElemType := a.resolveType(tailExpr.Elem)
+							payloadType = &DArrayViewType{Elem: tailElemType, SurfaceName: "dview"}
+							tailIndex = payloadIndex
+						}
+					}
+					if !enumDecl.Packed && SameType(payloadType, enumType) {
+						a.errorf(payloadDecl.Type.Pos(), "enum %q variant %q cannot contain %q by value; use a reference type instead", enumDecl.Name, variantDecl.Name, enumDecl.Name)
+					}
+					payload = append(payload, payloadType)
+					payloadNames = append(payloadNames, payloadDecl.Name)
 				}
-				if !enumDecl.Packed && SameType(payloadType, enumType) {
-					a.errorf(payloadDecl.Type.Pos(), "enum %q variant %q cannot contain %q by value; use a reference type instead", enumDecl.Name, variantDecl.Name, enumDecl.Name)
+				if hasNamedPayloads && hasUnnamedPayloads {
+					a.errorf(variantDecl.Position, "enum variant %q.%q must name either all payload fields or none", enumDecl.Name, variantDecl.Name)
 				}
-				payload = append(payload, payloadType)
-				payloadNames = append(payloadNames, payloadDecl.Name)
+				variant := &EnumVariant{Name: variantDecl.Name, Tag: uint32(i), Payload: payload, PayloadNames: payloadNames, TailIndex: tailIndex, Decl: variantDecl}
+				enumType.VariantMap[variant.Name] = variant
+				variants = append(variants, variant)
+				if enumType.Packed && enumType.TagType != nil {
+					member := &ConstEnumMember{Name: variant.Name, Value: int64(variant.Tag)}
+					enumType.TagType.Members = append(enumType.TagType.Members, member)
+					enumType.TagType.MemberMap[member.Name] = member
+					a.constValues[enumType.TagType.Name+"."+member.Name] = ConstValue{Kind: ConstInt, Int: member.Value}
+				}
 			}
-			if hasNamedPayloads && hasUnnamedPayloads {
-				a.errorf(variantDecl.Position, "enum variant %q.%q must name either all payload fields or none", enumDecl.Name, variantDecl.Name)
-			}
-			variant := &EnumVariant{Name: variantDecl.Name, Tag: uint32(i), Payload: payload, PayloadNames: payloadNames, TailIndex: tailIndex, Decl: variantDecl}
-			enumType.VariantMap[variant.Name] = variant
-			variants = append(variants, variant)
-			if enumType.Packed && enumType.TagType != nil {
-				member := &ConstEnumMember{Name: variant.Name, Value: int64(variant.Tag)}
-				enumType.TagType.Members = append(enumType.TagType.Members, member)
-				enumType.TagType.MemberMap[member.Name] = member
-				a.constValues[enumType.TagType.Name+"."+member.Name] = ConstValue{Kind: ConstInt, Int: member.Value}
-			}
-		}
-		enumType.Variants = variants
+			enumType.Variants = variants
+		})
 	}
 }
 
-func (a *Analyzer) populateStructFields(decls []ast.Decl) {
-	for _, decl := range decls {
-		stDecl, ok := decl.(*ast.StructDecl)
+func (a *Analyzer) populateStructFields(decls []scopedDecl) {
+	for _, scoped := range decls {
+		stDecl, ok := scoped.Decl.(*ast.StructDecl)
 		if !ok {
 			continue
 		}
-		st, _ := a.namedTypes[stDecl.Name].(*StructType)
+		st, _ := a.namedTypes[joinQualifiedName(scoped.Namespace, stDecl.Name)].(*StructType)
 		if st == nil {
 			continue
 		}
 		if st.Builtin && isBuiltinRuntimeStructName(stDecl.Name) {
 			continue
 		}
-		a.analyzeStructAnnotations(stDecl, st)
-		a.withGenericParams(stDecl.GenericParams, nil, func() {
-			for _, field := range stDecl.Fields {
-				if _, exists := st.Fields[field.Name]; exists {
-					a.errorf(field.Position, "duplicate field %q in struct %q", field.Name, stDecl.Name)
-					continue
+		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+			a.analyzeStructAnnotations(stDecl, st)
+			a.withGenericParams(stDecl.GenericParams, nil, func() {
+				for _, field := range stDecl.Fields {
+					if _, exists := st.Fields[field.Name]; exists {
+						a.errorf(field.Position, "duplicate field %q in struct %q", field.Name, stDecl.Name)
+						continue
+					}
+					fieldType := a.resolveType(field.Type)
+					if field.IsTail {
+						fieldType = &RefType{Elem: fieldType, State: RefStateNonNull, Storage: RefStorageAny}
+					}
+					st.Fields[field.Name] = Field{
+						Name:    field.Name,
+						Type:    fieldType,
+						Mutable: field.Mutable,
+						IsTail:  field.IsTail,
+					}
 				}
-				fieldType := a.resolveType(field.Type)
-				if field.IsTail {
-					fieldType = &RefType{Elem: fieldType, State: RefStateNonNull, Storage: RefStorageAny}
-				}
-				st.Fields[field.Name] = Field{
-					Name:    field.Name,
-					Type:    fieldType,
-					Mutable: field.Mutable,
-					IsTail:  field.IsTail,
-				}
-			}
+			})
 		})
 	}
 }
 
-func (a *Analyzer) collectValueSymbols(decls []ast.Decl) {
-	for _, decl := range decls {
-		switch n := decl.(type) {
-		case *ast.ConstDecl:
-			var declType Type = invalidType
-			if n.Type != nil {
-				declType = a.resolveType(n.Type)
-			} else {
-				declType = a.analyzeExprInScope(n.Value, a.globalScope)
-				if IsInvalidType(declType) {
-					if value, ok := a.evalConstExpr(n.Value); ok {
-						switch value.Kind {
-						case ConstInt:
-							declType = a.namedTypes["int"]
-						case ConstFloat:
-							declType = a.namedTypes["f64"]
-						case ConstBool:
-							declType = a.namedTypes["bool"]
-						case ConstString:
-							declType = &RefType{Elem: a.namedTypes["u8"], State: RefStateNonNull, Storage: RefStorageStatic, ExplicitStorage: true}
+func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
+	for _, scoped := range decls {
+		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+			switch n := scoped.Decl.(type) {
+			case *ast.ConstDecl:
+				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
+				var declType Type = invalidType
+				if n.Type != nil {
+					declType = a.resolveType(n.Type)
+				} else {
+					declType = a.analyzeExprInScope(n.Value, a.globalScope)
+					if IsInvalidType(declType) {
+						if value, ok := a.evalConstExpr(n.Value); ok {
+							switch value.Kind {
+							case ConstInt:
+								declType = a.namedTypes["int"]
+							case ConstFloat:
+								declType = a.namedTypes["f64"]
+							case ConstBool:
+								declType = a.namedTypes["bool"]
+							case ConstString:
+								declType = &RefType{Elem: a.namedTypes["u8"], State: RefStateNonNull, Storage: RefStorageStatic, ExplicitStorage: true}
+							}
 						}
 					}
+					if IsInvalidType(declType) {
+						declType = a.inferLiteralType(n.Value)
+					}
 				}
-				if IsInvalidType(declType) {
-					declType = a.inferLiteralType(n.Value)
+				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolConst, Type: declType, Node: n, Mutable: false}, n.Pos())
+			case *ast.ConstEnumDecl:
+			case *ast.GlobalDecl:
+				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
+				declType := a.resolveType(n.Type)
+				if a.containsAffineHandleValues(declType, map[string]bool{}) {
+					a.errorf(n.Pos(), "global %q cannot store affine handle values of type %s", n.Name, declType.String())
 				}
+				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolGlobal, Type: declType, Node: n, Mutable: n.Mutable}, n.Pos())
+			case *ast.FuncDecl:
+				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
+				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Params, n.ReturnType, false)
+				a.functionTypes[qualifiedName] = fnType
+				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolFunc, Type: fnType, Node: n, Mutable: false}, n.Pos())
+			case *ast.ExternFuncDecl:
+				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
+				fnType := a.funcTypeFromDecl(qualifiedName, nil, nil, nil, nil, n.RegionParams, nil, n.Permissions, n.Params, n.ReturnType, n.Variadic)
+				a.applyExternFuncAnnotations(n, fnType)
+				if !fnType.ReturnProvenanceKnown {
+					fnType.ReturnProvenanceKnown = true
+				}
+				if !fnType.ReturnBorrowedOwnerRefsKnown {
+					fnType.ReturnBorrowedOwnerRefsKnown = true
+				}
+				a.functionTypes[qualifiedName] = fnType
+				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: n, Mutable: false}, n.Pos())
+			case *ast.ExternVarDecl:
+				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
+				declType := a.resolveType(n.Type)
+				if a.containsAffineHandleValues(declType, map[string]bool{}) {
+					a.errorf(n.Pos(), "extern var %q cannot store affine handle values of type %s", n.Name, declType.String())
+				}
+				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolExternVar, Type: declType, Node: n, Mutable: true}, n.Pos())
+			case *ast.EnumDecl:
+			case *ast.ErrorDecl:
+			case *ast.PermissionDecl:
+			case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			}
-			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolConst, Type: declType, Node: n, Mutable: false}, n.Pos())
-		case *ast.ConstEnumDecl:
-			continue
-		case *ast.GlobalDecl:
-			declType := a.resolveType(n.Type)
-			if a.containsAffineHandleValues(declType, map[string]bool{}) {
-				a.errorf(n.Pos(), "global %q cannot store affine handle values of type %s", n.Name, declType.String())
-			}
-			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolGlobal, Type: declType, Node: n, Mutable: n.Mutable}, n.Pos())
-		case *ast.FuncDecl:
-			fnType := a.funcTypeFromDecl(n.Name, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Params, n.ReturnType, false)
-			a.functionTypes[n.Name] = fnType
-			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolFunc, Type: fnType, Node: n, Mutable: false}, n.Pos())
-		case *ast.ExternFuncDecl:
-			fnType := a.funcTypeFromDecl(n.Name, nil, nil, nil, nil, n.RegionParams, nil, n.Permissions, n.Params, n.ReturnType, n.Variadic)
-			a.applyExternFuncAnnotations(n, fnType)
-			if !fnType.ReturnProvenanceKnown {
-				fnType.ReturnProvenanceKnown = true
-			}
-			if !fnType.ReturnBorrowedOwnerRefsKnown {
-				fnType.ReturnBorrowedOwnerRefsKnown = true
-			}
-			a.functionTypes[n.Name] = fnType
-			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolExternFunc, Type: fnType, Node: n, Mutable: false}, n.Pos())
-		case *ast.ExternVarDecl:
-			declType := a.resolveType(n.Type)
-			if a.containsAffineHandleValues(declType, map[string]bool{}) {
-				a.errorf(n.Pos(), "extern var %q cannot store affine handle values of type %s", n.Name, declType.String())
-			}
-			a.defineGlobal(&Symbol{Name: n.Name, Kind: SymbolExternVar, Type: declType, Node: n, Mutable: true}, n.Pos())
-		case *ast.EnumDecl:
-			continue
-		case *ast.ErrorDecl:
-		case *ast.PermissionDecl:
-			continue
-		case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
-			continue
-		}
+		})
 	}
 }
 
@@ -1990,43 +2004,41 @@ func (a *Analyzer) abstractParamRegionRefState(t Type, paramIndex int, seen map[
 	return state, true
 }
 
-func (a *Analyzer) analyzeDecls(decls []ast.Decl) {
-	for _, decl := range decls {
-		switch n := decl.(type) {
-		case *ast.ConstDecl:
-			if sym, ok := a.globalScope.Lookup(n.Name); ok {
-				valueType := a.analyzeValueExprInScope(n.Value, sym.Type, a.globalScope)
-				if !AssignableTo(sym.Type, valueType) {
-					a.errorf(n.Pos(), "const %q expects %s, got %s", n.Name, sym.Type.String(), valueType.String())
-				}
-				if value, ok := a.evalConstExpr(n.Value); ok {
-					a.constValues[n.Name] = value
-				} else {
-					a.errorf(n.Value.Pos(), "const %q initializer must be a compile-time %s value", n.Name, sym.Type.String())
-				}
-			}
-		case *ast.GlobalDecl:
-			if n.Value != nil {
-				if sym, ok := a.globalScope.Lookup(n.Name); ok {
+func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
+	for _, scoped := range decls {
+		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+			switch n := scoped.Decl.(type) {
+			case *ast.ConstDecl:
+				if sym, ok := a.globalScope.Lookup(joinQualifiedName(scoped.Namespace, n.Name)); ok {
 					valueType := a.analyzeValueExprInScope(n.Value, sym.Type, a.globalScope)
 					if !AssignableTo(sym.Type, valueType) {
-						a.errorf(n.Pos(), "global %q expects %s, got %s", n.Name, sym.Type.String(), valueType.String())
+						a.errorf(n.Pos(), "const %q expects %s, got %s", n.Name, sym.Type.String(), valueType.String())
+					}
+					if value, ok := a.evalConstExpr(n.Value); ok {
+						a.constValues[joinQualifiedName(scoped.Namespace, n.Name)] = value
+					} else {
+						a.errorf(n.Value.Pos(), "const %q initializer must be a compile-time %s value", n.Name, sym.Type.String())
 					}
 				}
+			case *ast.GlobalDecl:
+				if n.Value != nil {
+					if sym, ok := a.globalScope.Lookup(joinQualifiedName(scoped.Namespace, n.Name)); ok {
+						valueType := a.analyzeValueExprInScope(n.Value, sym.Type, a.globalScope)
+						if !AssignableTo(sym.Type, valueType) {
+							a.errorf(n.Pos(), "global %q expects %s, got %s", n.Name, sym.Type.String(), valueType.String())
+						}
+					}
+				}
+			case *ast.FuncDecl:
+				a.analyzeFunctionAnnotations(n)
+				a.analyzeFunc(n)
+			case *ast.ConstEnumDecl:
+			case *ast.EnumDecl:
+			case *ast.ErrorDecl:
+			case *ast.PermissionDecl:
+			case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			}
-		case *ast.FuncDecl:
-			a.analyzeFunctionAnnotations(n)
-			a.analyzeFunc(n)
-		case *ast.ConstEnumDecl:
-			continue
-		case *ast.EnumDecl:
-			continue
-		case *ast.ErrorDecl:
-		case *ast.PermissionDecl:
-			continue
-		case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
-			continue
-		}
+		})
 	}
 }
 
@@ -2055,7 +2067,7 @@ func (a *Analyzer) analyzeFunctionAnnotations(fn *ast.FuncDecl) {
 	}
 
 	var signature *FuncType
-	if sym, ok := a.globalScope.Lookup(fn.Name); ok {
+	if sym, _, ok := a.lookupVisibleGlobal(fn.Name); ok {
 		signature, _ = sym.Type.(*FuncType)
 	}
 	accepted := make([]ast.Annotation, 0, len(valid))
@@ -2192,7 +2204,7 @@ func isVoidType(t Type) bool {
 }
 
 func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
-	sym, _ := a.globalScope.Lookup(fn.Name)
+	sym, _, _ := a.lookupVisibleGlobal(fn.Name)
 	fnType, _ := sym.Type.(*FuncType)
 	savedScope := a.currentScope
 	savedReturn := a.currentReturn

@@ -7,12 +7,13 @@ import (
 	"llcontext/src/lexer"
 )
 
-func (a *Analyzer) collectPermissionDecls(decls []ast.Decl) {
-	for _, decl := range decls {
-		permissionDecl, ok := decl.(*ast.PermissionDecl)
+func (a *Analyzer) collectPermissionDecls(decls []scopedDecl) {
+	for _, scoped := range decls {
+		permissionDecl, ok := scoped.Decl.(*ast.PermissionDecl)
 		if !ok {
 			continue
 		}
+		qualifiedName := joinQualifiedName(scoped.Namespace, permissionDecl.Name)
 		members := make([]string, 0, len(permissionDecl.Members))
 		memberSet := make(map[string]bool, len(permissionDecl.Members))
 		for _, member := range permissionDecl.Members {
@@ -23,18 +24,18 @@ func (a *Analyzer) collectPermissionDecls(decls []ast.Decl) {
 			memberSet[member] = true
 			members = append(members, member)
 		}
-		if existing, exists := a.permissions[permissionDecl.Name]; exists {
+		if existing, exists := a.permissions[qualifiedName]; exists {
 			if existing.Builtin && permissionMembersMatch(existing, members) {
 				continue
 			}
 			if existing.Builtin {
-				a.errorf(permissionDecl.Pos(), "permission %q conflicts with the builtin members %q", permissionDecl.Name, existing.Members)
+				a.errorf(permissionDecl.Pos(), "permission %q conflicts with the builtin members %q", qualifiedName, existing.Members)
 				continue
 			}
-			a.errorf(permissionDecl.Pos(), "duplicate permission %q", permissionDecl.Name)
+			a.errorf(permissionDecl.Pos(), "duplicate permission %q", qualifiedName)
 			continue
 		}
-		a.permissions[permissionDecl.Name] = &PermissionSet{Name: permissionDecl.Name, Members: members, MemberSet: memberSet, Decl: permissionDecl}
+		a.permissions[qualifiedName] = &PermissionSet{Name: qualifiedName, Members: members, MemberSet: memberSet, Decl: permissionDecl}
 	}
 }
 
@@ -221,7 +222,7 @@ func (a *Analyzer) resolvePermissionRefs(refs []ast.PermissionRef, report bool) 
 			valid = append(valid, ast.PermissionRef{Position: ref.Position, Name: ref.Name})
 			continue
 		}
-		permission, ok := a.permissions[ref.Name]
+		permission, _, ok := a.lookupVisiblePermission(ref.Name)
 		if !ok {
 			if report {
 				a.errorf(ref.Position, "unknown permission %q", ref.Name)
@@ -331,33 +332,35 @@ func sameStringSlice(left []string, right []string) bool {
 	return true
 }
 
-func (a *Analyzer) inferFunctionPermissionEffects(decls []ast.Decl) {
+func (a *Analyzer) inferFunctionPermissionEffects(decls []scopedDecl) {
 	for iter := 0; iter < len(decls)+4; iter++ {
 		changed := false
-		for _, decl := range decls {
-			fn, ok := decl.(*ast.FuncDecl)
+		for _, scoped := range decls {
+			fn, ok := scoped.Decl.(*ast.FuncDecl)
 			if !ok {
 				continue
 			}
-			sym, ok := a.globalScope.Lookup(fn.Name)
-			if !ok {
-				continue
-			}
-			fnType, ok := sym.Type.(*FuncType)
-			if !ok || fnType == nil {
-				continue
-			}
-			usedRefs := a.collectFunctionPermissionRefs(fn)
-			mergedRefs := mergePermissionRefs(fnType.DeclaredPermissionRefs, usedRefs)
-			mergedFamilies := mergePermissionFamilies(fnType.DeclaredPermissions, permissionFamiliesFromRefs(mergedRefs))
-			if !samePermissionRefs(fnType.PermissionRefs, mergedRefs) {
-				fnType.PermissionRefs = mergedRefs
-				changed = true
-			}
-			if !sameStringSlice(fnType.Permissions, mergedFamilies) {
-				fnType.Permissions = mergedFamilies
-				changed = true
-			}
+			a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+				sym, _, ok := a.lookupVisibleGlobal(fn.Name)
+				if !ok {
+					return
+				}
+				fnType, ok := sym.Type.(*FuncType)
+				if !ok || fnType == nil {
+					return
+				}
+				usedRefs := a.collectFunctionPermissionRefs(fn)
+				mergedRefs := mergePermissionRefs(fnType.DeclaredPermissionRefs, usedRefs)
+				mergedFamilies := mergePermissionFamilies(fnType.DeclaredPermissions, permissionFamiliesFromRefs(mergedRefs))
+				if !samePermissionRefs(fnType.PermissionRefs, mergedRefs) {
+					fnType.PermissionRefs = mergedRefs
+					changed = true
+				}
+				if !sameStringSlice(fnType.Permissions, mergedFamilies) {
+					fnType.Permissions = mergedFamilies
+					changed = true
+				}
+			})
 		}
 		if !changed {
 			return
@@ -365,30 +368,32 @@ func (a *Analyzer) inferFunctionPermissionEffects(decls []ast.Decl) {
 	}
 }
 
-func (a *Analyzer) warnOnImplicitFunctionPermissions(decls []ast.Decl) {
-	for _, decl := range decls {
-		fn, ok := decl.(*ast.FuncDecl)
+func (a *Analyzer) warnOnImplicitFunctionPermissions(decls []scopedDecl) {
+	for _, scoped := range decls {
+		fn, ok := scoped.Decl.(*ast.FuncDecl)
 		if !ok {
 			continue
 		}
-		sym, ok := a.globalScope.Lookup(fn.Name)
-		if !ok {
-			continue
-		}
-		fnType, ok := sym.Type.(*FuncType)
-		if !ok || fnType == nil {
-			continue
-		}
-		missing := missingPermissionFamilies(fnType.DeclaredPermissions, fnType.Permissions)
-		if len(missing) == 0 {
-			continue
-		}
-		hint := permissionDeclHint(functionPermissionRefs(fnType), missing)
-		if len(fnType.DeclaredPermissions) == 0 {
-			a.warnf(fn.Pos(), "function %q infers%s from its body; add explicit%s to make the effect contract visible", fn.Name, permissionFamiliesString(missing), hint)
-			continue
-		}
-		a.warnf(fn.Pos(), "function %q declares%s but body also uses%s; add explicit%s to silence this warning", fn.Name, permissionFamiliesString(fnType.DeclaredPermissions), permissionFamiliesString(missing), hint)
+		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+			sym, _, ok := a.lookupVisibleGlobal(fn.Name)
+			if !ok {
+				return
+			}
+			fnType, ok := sym.Type.(*FuncType)
+			if !ok || fnType == nil {
+				return
+			}
+			missing := missingPermissionFamilies(fnType.DeclaredPermissions, fnType.Permissions)
+			if len(missing) == 0 {
+				return
+			}
+			hint := permissionDeclHint(functionPermissionRefs(fnType), missing)
+			if len(fnType.DeclaredPermissions) == 0 {
+				a.warnf(fn.Pos(), "function %q infers%s from its body; add explicit%s to make the effect contract visible", fn.Name, permissionFamiliesString(missing), hint)
+				return
+			}
+			a.warnf(fn.Pos(), "function %q declares%s but body also uses%s; add explicit%s to silence this warning", fn.Name, permissionFamiliesString(fnType.DeclaredPermissions), permissionFamiliesString(missing), hint)
+		})
 	}
 }
 
@@ -595,19 +600,21 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 	}
 }
 
-func (a *Analyzer) validatePermissionUsage(decls []ast.Decl) {
-	for _, decl := range decls {
-		fn, ok := decl.(*ast.FuncDecl)
+func (a *Analyzer) validatePermissionUsage(decls []scopedDecl) {
+	for _, scoped := range decls {
+		fn, ok := scoped.Decl.(*ast.FuncDecl)
 		if !ok {
 			continue
 		}
-		a.validateFunctionPermissionUsage(fn)
+		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+			a.validateFunctionPermissionUsage(fn)
+		})
 	}
 }
 
 func (a *Analyzer) validateFunctionPermissionUsage(fn *ast.FuncDecl) {
 	granted := map[string]bool{}
-	if sym, ok := a.globalScope.Lookup(fn.Name); ok {
+	if sym, _, ok := a.lookupVisibleGlobal(fn.Name); ok {
 		if fnType, ok := sym.Type.(*FuncType); ok && fnType != nil {
 			for _, family := range fnType.DeclaredPermissions {
 				granted[family] = true

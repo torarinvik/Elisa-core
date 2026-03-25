@@ -73,15 +73,19 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 	case *ast.StringLit:
 		return ConstValue{Kind: ConstString, String: n.Value}, true
 	case *ast.Ident:
-		value, ok := a.constValues[n.Name]
+		value, ok := a.lookupVisibleConst(n.Name)
 		return value, ok
 	case *ast.FieldExpr:
 		ident, ok := n.Object.(*ast.Ident)
 		if !ok {
 			return ConstValue{}, false
 		}
-		value, ok := a.constValues[ident.Name+"."+n.Field]
-		return value, ok
+		for _, candidate := range a.visibleNameCandidates(ident.Name) {
+			if value, ok := a.constValues[candidate+"."+n.Field]; ok {
+				return value, true
+			}
+		}
+		return ConstValue{}, false
 	case *ast.ParenExpr:
 		return a.evalConstExpr(n.Inner)
 	case *ast.CastExpr:

@@ -67,7 +67,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			result = t
 			return
 		}
-		if sym, ok := a.globalScope.Lookup(n.Name); ok {
+		if sym, _, ok := a.lookupVisibleGlobal(n.Name); ok {
 			result = sym.Type
 			return
 		}
@@ -312,7 +312,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = a.analyzeSpecializeExpr(n)
 		return
 	case *ast.StructLitExpr:
-		if t, ok := a.namedTypes[n.Name]; ok {
+		if t, _, ok := a.lookupVisibleType(n.Name); ok {
 			switch tt := t.(type) {
 			case *StructType:
 				a.analyzeStructLiteralArgs(n, tt, nil)
@@ -353,7 +353,7 @@ func (a *Analyzer) analyzeSpecializeExpr(expr *ast.SpecializeExpr) Type {
 		}
 		return invalidType
 	}
-	sym, ok := a.globalScope.Lookup(ident.Name)
+	sym, _, ok := a.lookupVisibleGlobal(ident.Name)
 	if !ok {
 		a.errorf(expr.Pos(), "undefined generic function %q", ident.Name)
 		for _, arg := range expr.TypeArgs {
@@ -821,7 +821,7 @@ func (a *Analyzer) inferFuncReturnProvenanceForExpr(expr ast.Expr, fnType *FuncT
 		if a.globalScope == nil {
 			return
 		}
-		sym, ok := a.globalScope.Lookup(n.Name)
+		sym, _, ok := a.lookupVisibleGlobal(n.Name)
 		if !ok {
 			return
 		}
@@ -882,7 +882,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefsForExpr(expr ast.Expr, fnType
 		if a.globalScope == nil {
 			return
 		}
-		sym, ok := a.globalScope.Lookup(n.Name)
+		sym, _, ok := a.lookupVisibleGlobal(n.Name)
 		if !ok {
 			return
 		}
@@ -954,7 +954,7 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 	if fieldExpr, ok := expr.Value.(*ast.FieldExpr); ok {
 		ident, ok := fieldExpr.Object.(*ast.Ident)
 		if ok {
-			base, ok := a.namedTypes[ident.Name]
+			base, _, ok := a.lookupVisibleType(ident.Name)
 			if ok {
 				enumType, ok := base.(*EnumType)
 				if ok {
@@ -1137,7 +1137,7 @@ func (a *Analyzer) errorExprTagName(expr ast.Expr) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	base, ok := a.namedTypes[ident.Name]
+	base, _, ok := a.lookupVisibleType(ident.Name)
 	if !ok {
 		return "", false
 	}
@@ -1153,7 +1153,7 @@ func (a *Analyzer) errorTagType(expr *ast.FieldExpr) (Type, bool) {
 	if !ok {
 		return nil, false
 	}
-	base, ok := a.namedTypes[ident.Name]
+	base, _, ok := a.lookupVisibleType(ident.Name)
 	if !ok {
 		return nil, false
 	}
@@ -1173,7 +1173,7 @@ func (a *Analyzer) packedEnumTagExprType(expr *ast.FieldExpr) (Type, bool) {
 	if !ok {
 		return nil, false
 	}
-	base, ok := a.namedTypes[ident.Name]
+	base, _, ok := a.lookupVisibleType(ident.Name)
 	if !ok {
 		return nil, false
 	}
@@ -1191,7 +1191,7 @@ func (a *Analyzer) packedEnumTagExprType(expr *ast.FieldExpr) (Type, bool) {
 func (a *Analyzer) constEnumTypeForExpr(expr ast.Expr) (*ConstEnumType, bool) {
 	switch n := expr.(type) {
 	case *ast.Ident:
-		base, ok := a.namedTypes[n.Name]
+		base, _, ok := a.lookupVisibleType(n.Name)
 		if !ok {
 			return nil, false
 		}
@@ -1228,7 +1228,7 @@ func (a *Analyzer) enumVariantExprType(expr *ast.FieldExpr) (*EnumType, Type, bo
 	if !ok {
 		return nil, nil, false
 	}
-	base, ok := a.namedTypes[ident.Name]
+	base, _, ok := a.lookupVisibleType(ident.Name)
 	if !ok {
 		return nil, nil, false
 	}
@@ -1266,7 +1266,7 @@ func (a *Analyzer) packedStoreExprType(expr *ast.FieldExpr) (*PackedEnumStoreTyp
 	if !ok {
 		return nil, nil, false
 	}
-	base, ok := a.namedTypes[ident.Name]
+	base, _, ok := a.lookupVisibleType(ident.Name)
 	if !ok {
 		return nil, nil, false
 	}
@@ -1333,7 +1333,7 @@ func (a *Analyzer) enumConstructorInfoFromFieldExpr(expr *ast.FieldExpr) (*EnumT
 	if !ok {
 		return nil, nil, false
 	}
-	base, ok := a.namedTypes[ident.Name]
+	base, _, ok := a.lookupVisibleType(ident.Name)
 	if !ok {
 		return nil, nil, false
 	}
@@ -3734,7 +3734,7 @@ func (a *Analyzer) resolveProjectedFieldExternFuncDecl(fnExpr ast.Expr) (*ast.Ex
 		if a.globalScope == nil {
 			return nil, false
 		}
-		sym, ok := a.globalScope.Lookup(n.Name)
+		sym, _, ok := a.lookupVisibleGlobal(n.Name)
 		if !ok {
 			return nil, false
 		}
@@ -4456,7 +4456,7 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 			sym, ok = a.currentScope.Lookup(n.Name)
 		}
 		if !ok {
-			if sym, ok = a.globalScope.Lookup(n.Name); !ok {
+			if sym, _, ok = a.lookupVisibleGlobal(n.Name); !ok {
 				a.errorf(n.Pos(), "undefined assignment target %q", n.Name)
 				return invalidType
 			}
@@ -4513,7 +4513,7 @@ func (a *Analyzer) asRefTargetType(expr ast.Expr, asKind string) Type {
 			sym, ok = a.currentScope.Lookup(n.Name)
 		}
 		if !ok {
-			if sym, ok = a.globalScope.Lookup(n.Name); !ok {
+			if sym, _, ok = a.lookupVisibleGlobal(n.Name); !ok {
 				a.errorf(n.Pos(), "undefined assignment target %q", n.Name)
 				return invalidType
 			}
@@ -4578,7 +4578,7 @@ func (a *Analyzer) inferAddrOfStorage(expr ast.Expr) RefStorage {
 				}
 			}
 		}
-		if sym, ok := a.globalScope.Lookup(n.Name); ok && sym.Kind == SymbolGlobal {
+		if sym, _, ok := a.lookupVisibleGlobal(n.Name); ok && sym.Kind == SymbolGlobal {
 			return RefStorageStatic
 		}
 	case *ast.FieldExpr:

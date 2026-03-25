@@ -113,6 +113,12 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("permission") {
 		return p.parsePermissionDecl()
 	}
+	if p.peekIdentText("namespace") {
+		return p.parseNamespaceDecl()
+	}
+	if p.peekIdentText("using") {
+		return p.parseUsingDecl()
+	}
 	if p.peekIdentText("affine") {
 		return p.parseStructDecl()
 	}
@@ -297,6 +303,32 @@ func (p *Parser) parsePermissionDecl() *ast.PermissionDecl {
 	p.expect(lexer.TOKEN_DEDENT)
 
 	return &ast.PermissionDecl{Position: pos, Name: name, Members: members}
+}
+
+func (p *Parser) parseQualifiedDeclName() string {
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	for p.match(lexer.TOKEN_DOT) {
+		name += "." + p.expect(lexer.TOKEN_IDENT).Text
+	}
+	return name
+}
+
+func (p *Parser) parseNamespaceDecl() *ast.NamespaceDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("namespace")
+	name := p.parseQualifiedDeclName()
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	decls := p.parseDeclBlock()
+	return &ast.NamespaceDecl{Position: pos, Name: name, Decls: decls}
+}
+
+func (p *Parser) parseUsingDecl() *ast.UsingDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("using")
+	name := p.parseQualifiedDeclName()
+	p.expectNewline()
+	return &ast.UsingDecl{Position: pos, Name: name}
 }
 
 func (p *Parser) parseEnumDecl() *ast.EnumDecl {

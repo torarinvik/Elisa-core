@@ -27,18 +27,19 @@ type structLayoutField struct {
 	Index int
 }
 
-func (a *Analyzer) warnOnAvoidableStructPadding(decls []ast.Decl) {
-	for _, decl := range decls {
-		stDecl, ok := decl.(*ast.StructDecl)
+func (a *Analyzer) warnOnAvoidableStructPadding(decls []scopedDecl) {
+	for _, scoped := range decls {
+		stDecl, ok := scoped.Decl.(*ast.StructDecl)
 		if !ok {
 			continue
 		}
-		st, _ := a.namedTypes[stDecl.Name].(*StructType)
+		qualifiedName := joinQualifiedName(scoped.Namespace, stDecl.Name)
+		st, _ := a.namedTypes[qualifiedName].(*StructType)
 		warning, ok := a.analyzeAvoidableStructPadding(st)
 		if !ok {
 			continue
 		}
-		a.warnf(stDecl.Pos(), "struct %q has %d bytes of avoidable padding in declared field order (current estimated size %d bytes, reordered estimate %d bytes); consider ordering fields as %s", stDecl.Name, warning.AvoidableBytes, warning.CurrentSize, warning.BestSize, quotedFieldOrder(warning.SuggestedOrder))
+		a.warnf(stDecl.Pos(), "struct %q has %d bytes of avoidable padding in declared field order (current estimated size %d bytes, reordered estimate %d bytes); consider ordering fields as %s", qualifiedName, warning.AvoidableBytes, warning.CurrentSize, warning.BestSize, quotedFieldOrder(warning.SuggestedOrder))
 	}
 }
 

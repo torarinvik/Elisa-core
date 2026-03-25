@@ -2,51 +2,55 @@ package semantic
 
 import "llcontext/src/ast"
 
-func (a *Analyzer) collectExportTypeAliases(decls []ast.Decl) {
-	for _, decl := range decls {
-		exportDecl, ok := decl.(*ast.ExportTypeDecl)
+func (a *Analyzer) collectExportTypeAliases(decls []scopedDecl) {
+	for _, scoped := range decls {
+		exportDecl, ok := scoped.Decl.(*ast.ExportTypeDecl)
 		if !ok {
 			continue
 		}
-		if _, exists := a.namedTypes[exportDecl.Alias]; exists {
-			a.errorf(exportDecl.Pos(), "duplicate type %q", exportDecl.Alias)
-			continue
-		}
-		resolved := a.resolveType(exportDecl.ExportedType)
-		if IsInvalidType(resolved) {
-			continue
-		}
-		if containsTypeParam(resolved) {
-			a.errorf(exportDecl.Pos(), "export type %q must name a concrete C-ABI-compatible struct or concrete instantiation", exportDecl.Alias)
-			continue
-		}
-		if !exportedNamedTypeAllowed(resolved) {
-			a.errorf(exportDecl.Pos(), "export type %q must name a concrete C-ABI-compatible struct or concrete instantiation", exportDecl.Alias)
-			continue
-		}
-		if !isCABICompatibleType(resolved) {
-			a.errorf(exportDecl.Pos(), "export type %q is not C-ABI-compatible", exportDecl.Alias)
-			continue
-		}
-		a.namedTypes[exportDecl.Alias] = resolved
-		a.exportedTypes = append(a.exportedTypes, &ExportedType{PublicName: exportDecl.Alias, Type: resolved, Decl: exportDecl})
+		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+			if _, exists := a.namedTypes[exportDecl.Alias]; exists {
+				a.errorf(exportDecl.Pos(), "duplicate type %q", exportDecl.Alias)
+				return
+			}
+			resolved := a.resolveType(exportDecl.ExportedType)
+			if IsInvalidType(resolved) {
+				return
+			}
+			if containsTypeParam(resolved) {
+				a.errorf(exportDecl.Pos(), "export type %q must name a concrete C-ABI-compatible struct or concrete instantiation", exportDecl.Alias)
+				return
+			}
+			if !exportedNamedTypeAllowed(resolved) {
+				a.errorf(exportDecl.Pos(), "export type %q must name a concrete C-ABI-compatible struct or concrete instantiation", exportDecl.Alias)
+				return
+			}
+			if !isCABICompatibleType(resolved) {
+				a.errorf(exportDecl.Pos(), "export type %q is not C-ABI-compatible", exportDecl.Alias)
+				return
+			}
+			a.namedTypes[exportDecl.Alias] = resolved
+			a.exportedTypes = append(a.exportedTypes, &ExportedType{PublicName: exportDecl.Alias, Type: resolved, Decl: exportDecl})
+		})
 	}
 }
 
-func (a *Analyzer) analyzeExports(decls []ast.Decl) {
+func (a *Analyzer) analyzeExports(decls []scopedDecl) {
 	seenPublicNames := map[string]bool{}
 	for _, exported := range a.exportedTypes {
 		if exported != nil {
 			seenPublicNames[exported.PublicName] = true
 		}
 	}
-	for _, decl := range decls {
-		switch exportDecl := decl.(type) {
-		case *ast.ExportFuncDecl:
-			a.analyzeExportFunc(exportDecl, seenPublicNames)
-		case *ast.ExportGlobalDecl:
-			a.analyzeExportGlobal(exportDecl, seenPublicNames)
-		}
+	for _, scoped := range decls {
+		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+			switch exportDecl := scoped.Decl.(type) {
+			case *ast.ExportFuncDecl:
+				a.analyzeExportFunc(exportDecl, seenPublicNames)
+			case *ast.ExportGlobalDecl:
+				a.analyzeExportGlobal(exportDecl, seenPublicNames)
+			}
+		})
 	}
 }
 
@@ -66,7 +70,7 @@ func (a *Analyzer) analyzeExportFunc(decl *ast.ExportFuncDecl, seenPublicNames m
 		return
 	}
 
-	targetSym, ok := a.globalScope.Lookup(decl.TargetName)
+	targetSym, _, ok := a.lookupVisibleGlobal(decl.TargetName)
 	if !ok {
 		a.errorf(decl.Pos(), "export target %q is undefined", decl.TargetName)
 		return
@@ -141,7 +145,7 @@ func (a *Analyzer) analyzeExportGlobal(decl *ast.ExportGlobalDecl, seenPublicNam
 		}
 	}
 
-	targetSym, ok := a.globalScope.Lookup(decl.TargetName)
+	targetSym, _, ok := a.lookupVisibleGlobal(decl.TargetName)
 	if !ok {
 		a.errorf(decl.Pos(), "export target %q is undefined", decl.TargetName)
 		return
