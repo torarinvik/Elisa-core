@@ -2288,6 +2288,29 @@ def score(view_node: packedview[Expr.Int]) -> int:
 	}
 }
 
+func TestGenerateLLVMIRLowersViewStmtPayloadDestructureAndRefinedScrutinee(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+
+def read(node: Expr, store: Expr.Store[Local]) -> int:
+	view node as Expr.Int(value: value):
+		return value + node.value + node.span
+	return 0
+`
+	result := parseAndAnalyze(t, "backend_packed_view_destructure_refined_scrutinee.llcontext", src)
+	output := generateLLVMIRWithPackedABIForTest(t, result, backend.PackedEnumABIRowHandle)
+	for _, check := range []string{"define i64 @read(", "%Expr = type { i32, i64, [1 x i64] }", "load i64, ptr %value, align 8"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Count(output, "getelementptr inbounds nuw %Expr, ptr %node1, i32 0, i32 2") < 2 {
+		t.Fatalf("expected refined view scrutinee lowering to address the payload both for destructuring and for node.value field access, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersPackedInStoreBlockSugar(t *testing.T) {
 	src := `packed enum Expr:
 	common:
@@ -2354,6 +2377,25 @@ def differs(left: Token, right: Token) -> bool:
 	for _, bad := range []string{"ret i32", "icmp ne i32"} {
 		if strings.Contains(output, bad) {
 			t.Fatalf("expected payloadless packed enums to stay handle-backed and avoid %q, got:\n%s", bad, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersBarePackedConstructorCallWithActiveStore(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+
+def build(owner: Arena) -> Expr:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	return Expr.Int(span: 7, value: 1)
+`
+	result := parseAndAnalyze(t, "backend_packed_ctor_active_store.llcontext", src)
+	output := generateLLVMIRWithPackedABIForTest(t, result, backend.PackedEnumABIRowHandle)
+	for _, check := range []string{"define ptr @build(", "call ptr @arena_alloc", "store %Expr { i32 0, i64 7, [1 x i64] zeroinitializer }, ptr %packed.alloc"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
 }

@@ -4650,9 +4650,21 @@ def bad() -> Expr:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "packed enum constructor \"Expr.Int\" must be allocated with new[Expr.Store]") {
+	if !strings.Contains(all, "packed enum constructor \"Expr.Int\" requires an active in Expr.Store: scope or explicit new[Expr.Store]") {
 		t.Fatalf("expected packed constructor diagnostic, got:\n%s", all)
 	}
+}
+
+func TestAnalyzeAcceptsBarePackedEnumConstructorCallWithActiveStoreLocal(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+def build(owner: Arena) -> Expr:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	return Expr.Int(value: 1)
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_ctor_with_active_store_local_ok.llcontext", src)
+	requireNoErrors(t, errs)
 }
 
 func TestAnalyzeRejectsBarePackedAllocOutsideInStoreScope(t *testing.T) {
@@ -4909,6 +4921,51 @@ def read(node: Expr, store: Expr.Store[Frozen]) -> int:
 	return 0
 `
 	_, errs := parseAndAnalyze(t, "packed_enum_view_active_store_param_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsViewStmtWithNamedPayloadDestructureAndRefinedScrutinee(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+
+def read(node: Expr, store: Expr.Store[Frozen]) -> int:
+	view node as Expr.Int(value: value):
+		return value + node.value + node.span
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_view_named_destructure_refined_scrutinee_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsViewStmtWithUnnamedPayloadDestructure(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Pair(int, int)
+
+def read(node: Expr, store: Expr.Store[Frozen]) -> int:
+	view node as Expr.Pair(left, right):
+		return left + right + node.span
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_view_unnamed_destructure_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsOpenStmtWithActiveStoreParam(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+
+def read(node: Expr, store: Expr.Store[Frozen]) -> int:
+	open node as Expr.Int(value: value):
+		return value + node.span
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_open_active_store_param_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
@@ -5952,6 +6009,22 @@ def left(node: Expr, store: Expr.Store[Frozen]) -> Expr:
 		return lhs
 `
 	result, errs := parseAndAnalyze(t, "move_as_packed_variant_inferred_store_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "left", "Expr")
+}
+
+func TestAnalyzeAcceptsMoveAsPackedVariantDestructureWithActiveStoreParam(t *testing.T) {
+	src := `packed enum Expr:
+	Int(int)
+	Add(Expr, Expr)
+
+def left(node: Expr, store: Expr.Store[Frozen]) -> Expr:
+	move node as Expr.Add(lhs, rhs)
+	_ = rhs
+	return lhs
+`
+	result, errs := parseAndAnalyze(t, "move_as_packed_variant_active_store_param_ok.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "left", "Expr")

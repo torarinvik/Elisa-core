@@ -62,9 +62,11 @@ Current packed-enum rules:
 
 - packed values are handle-backed and must be created with `new[store] Enum.Variant(...)`
 - `Enum.Store` is the explicit per-enum store constructor surface
-- `match` over packed enums requires `match value in store:`
+- packed control-flow and projection forms (`match`, `open`, `view`, `move-as`, and ownerless `new`) can infer the active store when a matching `Enum.Store[...]` is already in scope
 - packed `common:` fields are readable on the packed handle (`node.span`)
 - packed `common:` fields can be initialized by name during allocation; omitted common fields remain zero-initialized
+- `view value as Enum.Variant(alias):` still binds a first-class `packedview[Enum.Variant]` alias, while `view value as Enum.Variant(field: x, ...)` and multi-payload positional forms now destructure payloads directly
+- inside a successful `view` body, identifier scrutinees are also refined to `packedview[Enum.Variant]`, so variant fields can be read from the viewed value directly
 
 For a compile-checked end-to-end example, see `../Code/test_programs/packed_enum_common.llcontext`.
 
@@ -79,7 +81,7 @@ def build(owner: Arena) -> Expr:
     return new Expr.Add(span: 3, left: left, right: right)
 ```
 
-Inside an active `in store:` block, packed allocations can omit `[store]` and packed matches can omit `in store`; both forms still lower to the same explicit-store representation.
+Inside an active store context — whether introduced by `in store:` or by an in-scope `Enum.Store[...]` local/parameter — packed allocations can omit `[store]`, packed matches can omit `in store`, and `open`/`view`/`move-as` can omit their store clause; all forms still lower to the same explicit-store representation.
 
 ## Frozen packed projections
 

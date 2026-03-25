@@ -565,6 +565,7 @@ type ViewBindPattern struct {
 	EnumName string
 	Variant  string
 	Name     string
+	Args     []MatchPatternArg
 }
 
 type MoveBindArg struct {

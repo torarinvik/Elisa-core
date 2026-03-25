@@ -447,9 +447,23 @@ func (p *Parser) parseViewBindPattern() *ast.ViewBindPattern {
 	p.expect(lexer.TOKEN_DOT)
 	variant := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_LPAREN)
-	name := p.expect(lexer.TOKEN_IDENT).Text
+	pattern := &ast.ViewBindPattern{Position: pos, EnumName: enumName, Variant: variant}
+	if p.match(lexer.TOKEN_RPAREN) {
+		return pattern
+	}
+	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_RPAREN {
+		pattern.Name = p.expect(lexer.TOKEN_IDENT).Text
+		p.expect(lexer.TOKEN_RPAREN)
+		return pattern
+	}
+	for {
+		pattern.Args = append(pattern.Args, p.parseMoveBindVariantArg())
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
 	p.expect(lexer.TOKEN_RPAREN)
-	return &ast.ViewBindPattern{Position: pos, EnumName: enumName, Variant: variant, Name: name}
+	return pattern
 }
 
 func (p *Parser) parseCanStmt() *ast.CanStmt {

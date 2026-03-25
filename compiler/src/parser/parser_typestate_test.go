@@ -298,6 +298,44 @@ func TestParsePackedOpenAndViewStatements(t *testing.T) {
 	if viewStmt.Pattern.EnumName != "Expr" || viewStmt.Pattern.Variant != "Lit" || viewStmt.Pattern.Name != "lit" {
 		t.Fatalf("expected Expr.Lit(lit) view pattern, got %#v", viewStmt.Pattern)
 	}
+	if len(viewStmt.Pattern.Args) != 0 {
+		t.Fatalf("expected alias-form view pattern to have no payload args, got %#v", viewStmt.Pattern.Args)
+	}
+}
+
+func TestParsePackedViewPayloadDestructureStatement(t *testing.T) {
+	file, errs := parseSourceFile(t, "packed enum Expr:\n    common:\n        span: int\n    Add(left: int, right: int)\n\ndef fold(node: Expr, store: Expr.Store[Local]) -> int:\n    view node in store as Expr.Add(left: lhs, right: rhs):\n        return lhs + rhs + node.span\n    return 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[1])
+	}
+	viewStmt, ok := decl.Body[0].(*ast.ViewStmt)
+	if !ok {
+		t.Fatalf("expected view stmt, got %T", decl.Body[0])
+	}
+	if viewStmt.Pattern == nil {
+		t.Fatal("expected view stmt to record a view pattern")
+	}
+	if viewStmt.Pattern.Name != "" {
+		t.Fatalf("expected destructuring-form view pattern to have no alias name, got %q", viewStmt.Pattern.Name)
+	}
+	if len(viewStmt.Pattern.Args) != 2 {
+		t.Fatalf("expected two destructured payload args, got %d", len(viewStmt.Pattern.Args))
+	}
+	if viewStmt.Pattern.Args[0].Name != "left" || viewStmt.Pattern.Args[1].Name != "right" {
+		t.Fatalf("expected named payload bindings left/right, got %#v", viewStmt.Pattern.Args)
+	}
+	leftBind, ok := viewStmt.Pattern.Args[0].Pattern.(*ast.MatchBindPattern)
+	if !ok || leftBind.Name != "lhs" {
+		t.Fatalf("expected lhs bind pattern, got %T %#v", viewStmt.Pattern.Args[0].Pattern, viewStmt.Pattern.Args[0].Pattern)
+	}
+	rightBind, ok := viewStmt.Pattern.Args[1].Pattern.(*ast.MatchBindPattern)
+	if !ok || rightBind.Name != "rhs" {
+		t.Fatalf("expected rhs bind pattern, got %T %#v", viewStmt.Pattern.Args[1].Pattern, viewStmt.Pattern.Args[1].Pattern)
+	}
 }
 
 func TestParsePackedEnumAnnotation(t *testing.T) {

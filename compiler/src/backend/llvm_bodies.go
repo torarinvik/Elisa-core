@@ -659,7 +659,7 @@ func (s *functionState) emitViewStmt(stmt *ast.ViewStmt) error {
 	successBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.ok"))
 	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.fail"))
 	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.cont"))
-	matchPattern := &ast.MatchVariantPattern{Position: stmt.Pattern.Position, EnumName: stmt.Pattern.EnumName, Variant: stmt.Pattern.Variant}
+	matchPattern := &ast.MatchVariantPattern{Position: stmt.Pattern.Position, EnumName: stmt.Pattern.EnumName, Variant: stmt.Pattern.Variant, Args: append([]ast.MatchPatternArg(nil), stmt.Pattern.Args...)}
 	s.pushScope()
 	matchedDecodedValue, err := s.emitMatchPatternTest(matchPattern, enumValue, nil, enumType, storeBinding, successBB, failBB)
 	if err != nil {
@@ -681,10 +681,22 @@ func (s *functionState) emitViewStmt(stmt *ast.ViewStmt) error {
 			return err
 		}
 	}
-	if ident, ok := stmt.Value.(*ast.Ident); ok && viewDecodedValue != nil {
-		s.bindPackedEnumStorage(ident.Name, enumType, viewDecodedValue)
+	if ident, ok := stmt.Value.(*ast.Ident); ok {
+		if viewDecodedValue != nil {
+			s.bindPackedEnumStorage(ident.Name, enumType, viewDecodedValue)
+		}
+		var storeCopy *packedStoreBinding
+		if storeBinding != nil {
+			copied := *storeBinding
+			storeCopy = &copied
+		}
+		if viewDecodedValue != nil {
+			s.bindPackedVariantView(ident.Name, resolvedViewType, viewDecodedValue, enumValue, storeCopy)
+		} else if packedModeUsesDenseIndexHandle(s.g.packedModeForEnum(enumType)) || s.canInlinePackedEnumVariant(enumType, variant) {
+			s.bindPackedVariantView(ident.Name, resolvedViewType, nil, enumValue, storeCopy)
+		}
 	}
-	if stmt.Pattern.Name != "_" {
+	if stmt.Pattern.Name != "" && stmt.Pattern.Name != "_" {
 		if viewDecodedValue != nil {
 			var storeCopy *packedStoreBinding
 			if storeBinding != nil {

@@ -503,19 +503,68 @@ func (a *Analyzer) analyzeViewStmt(stmt *ast.ViewStmt) {
 	valueType := a.analyzeExpr(stmt.Value)
 	viewType, ok := a.resolveViewBindType(stmt, valueType)
 	scope := NewScope(a.currentScope)
-	if ok && stmt.Pattern.Name != "_" {
+	if ok {
 		savedScope := a.currentScope
 		a.currentScope = scope
-		sym := &Symbol{Name: stmt.Pattern.Name, Kind: SymbolLocal, Type: viewType, Node: stmt.Pattern, Mutable: false}
-		a.defineLocal(sym, stmt.Pattern.Pos())
-		a.recordValueBinding(sym, stmt.Value)
-		a.recordBorrowedOwnerRefBinding(sym, stmt.Value)
-		a.recordFunctionValueBinding(sym, stmt.Value)
-		a.recordImmutableSymbolOptimizationFacts(sym, stmt.Value)
-		a.recordRegionRefBinding(sym, stmt.Value)
+		a.bindMatchedPackedVariantView(stmt.Value, viewType)
+		if stmt.Pattern.Name != "" && stmt.Pattern.Name != "_" {
+			sym := &Symbol{Name: stmt.Pattern.Name, Kind: SymbolLocal, Type: viewType, Node: stmt.Pattern, Mutable: false}
+			a.defineLocal(sym, stmt.Pattern.Pos())
+			a.recordValueBinding(sym, stmt.Value)
+			a.recordBorrowedOwnerRefBinding(sym, stmt.Value)
+			a.recordFunctionValueBinding(sym, stmt.Value)
+			a.recordImmutableSymbolOptimizationFacts(sym, stmt.Value)
+			a.recordRegionRefBinding(sym, stmt.Value)
+		}
+		if len(stmt.Pattern.Args) != 0 {
+			resolvedPattern := viewBindPatternAsMoveBindPattern(stmt.Pattern)
+			resolvedStmt := &ast.MoveBindStmt{Position: stmt.Position, Value: stmt.Value, Store: stmt.Store, Pattern: resolvedPattern}
+			payloads, _, packedStoreState, payloadsOK := a.resolveMoveBindVariantPattern(resolvedStmt, resolvedPattern, valueType)
+			valueState, hasValueState := a.regionRefStateForExpr(stmt.Value)
+			borrowedOwnerState, hasBorrowedOwnerState := a.borrowedOwnerRefStateForExpr(stmt.Value)
+			if payloadsOK {
+				for _, payload := range payloads {
+					if payload.BindName == "" || payload.BindName == "_" {
+						continue
+					}
+					sym := &Symbol{Name: payload.BindName, Kind: SymbolLocal, Type: payload.Type, Node: stmt.Pattern, Mutable: false}
+					a.defineLocal(sym, stmt.Pattern.Position)
+					if valueExpr, ok := a.resolveMoveBindVariantPayloadValueExpr(stmt.Value, resolvedPattern, payload.Key); ok {
+						a.recordValueBinding(sym, valueExpr)
+						a.recordFunctionValueBinding(sym, valueExpr)
+						a.recordImmutableSymbolOptimizationFacts(sym, valueExpr)
+					}
+					if hasBorrowedOwnerState {
+						if fieldState, ok := projectBorrowedOwnerRefFieldState(borrowedOwnerState, payload.Key); ok {
+							a.currentBorrowedOwnerRefs[sym] = fieldState
+						}
+					}
+					if hasValueState {
+						if fieldState, ok := projectRegionFieldState(valueState, payload.Key); ok {
+							a.recordResolvedRegionRefBinding(sym, fieldState)
+							continue
+						}
+						if a.typeCanContainRegionRefs(payload.Type, map[string]bool{}) {
+							a.recordResolvedRegionRefBinding(sym, valueState)
+							continue
+						}
+					}
+					if packedStoreState != nil && a.typeCanContainRegionRefs(payload.Type, map[string]bool{}) {
+						a.recordResolvedRegionRefBinding(sym, *packedStoreState)
+					}
+				}
+			}
+		}
 		a.currentScope = savedScope
 	}
 	a.analyzeBlockWithRegionClone(stmt.Body, scope)
+}
+
+func viewBindPatternAsMoveBindPattern(pattern *ast.ViewBindPattern) *ast.MoveBindVariantPattern {
+	if pattern == nil {
+		return nil
+	}
+	return &ast.MoveBindVariantPattern{Position: pattern.Position, EnumName: pattern.EnumName, Variant: pattern.Variant, Args: append([]ast.MatchPatternArg(nil), pattern.Args...)}
 }
 
 func (a *Analyzer) resolveViewBindType(stmt *ast.ViewStmt, actual Type) (*PackedVariantViewType, bool) {

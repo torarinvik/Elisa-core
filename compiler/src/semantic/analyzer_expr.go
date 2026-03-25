@@ -657,20 +657,43 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 			return regionRefState{}, false
 		}
 		if enumType, variant, ok := a.enumConstructorCall(n); ok && enumType != nil && variant != nil {
-			orderedArgs, ok := a.resolveEnumConstructorArgs(n, enumType, variant)
-			if !ok {
-				return regionRefState{}, false
-			}
-			states := make([]regionRefState, 0, len(orderedArgs))
+			states := make([]regionRefState, 0, len(n.Args))
 			fieldStates := map[string]regionRefState{}
-			for _, arg := range orderedArgs {
-				if state, ok := a.regionRefStateForExpr(arg); ok && hasRegionProvenance(state) {
-					states = append(states, state)
+			if enumType.Packed {
+				orderedArgs, commonArgs, ok := a.resolvePackedEnumConstructorArgs(n, enumType, variant)
+				if !ok {
+					return regionRefState{}, false
 				}
-			}
-			for i := 0; i < len(orderedArgs) && i < len(variant.Payload); i++ {
-				if state, ok := a.regionRefStateForExpr(orderedArgs[i]); ok && hasRegionProvenance(state) {
+				for i := 0; i < len(orderedArgs) && i < len(variant.Payload); i++ {
+					state, ok := a.regionRefStateForExpr(orderedArgs[i])
+					if !ok || !hasRegionProvenance(state) {
+						continue
+					}
+					states = append(states, state)
 					fieldStates[moveBindVariantFieldKey(variant, i)] = state
+				}
+				for name, arg := range commonArgs {
+					state, ok := a.regionRefStateForExpr(arg)
+					if !ok || !hasRegionProvenance(state) {
+						continue
+					}
+					states = append(states, state)
+					fieldStates[name] = state
+				}
+			} else {
+				orderedArgs, ok := a.resolveEnumConstructorArgs(n, enumType, variant)
+				if !ok {
+					return regionRefState{}, false
+				}
+				for _, arg := range orderedArgs {
+					if state, ok := a.regionRefStateForExpr(arg); ok && hasRegionProvenance(state) {
+						states = append(states, state)
+					}
+				}
+				for i := 0; i < len(orderedArgs) && i < len(variant.Payload); i++ {
+					if state, ok := a.regionRefStateForExpr(orderedArgs[i]); ok && hasRegionProvenance(state) {
+						fieldStates[moveBindVariantFieldKey(variant, i)] = state
+					}
 				}
 			}
 			merged, ok := mergeRegionRefStates(states...)
@@ -1213,8 +1236,13 @@ func (a *Analyzer) enumVariantExprType(expr *ast.FieldExpr) (*EnumType, Type, bo
 		return enumType, invalidType, true
 	}
 	if enumType.Packed {
-		a.errorf(expr.Pos(), "packed enum constructor %q must be allocated with new[%s]", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name))
-		return enumType, invalidType, true
+		if len(variant.Payload) == 0 {
+			a.errorf(expr.Pos(), "packed enum constructor %q must be allocated with new[%s]", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name))
+			return enumType, invalidType, true
+		}
+		params := make([]Type, len(variant.Payload))
+		copy(params, variant.Payload)
+		return enumType, &FuncType{Name: enumType.Name + "." + variant.Name, Params: params, Return: enumType}, true
 	}
 	if len(variant.Payload) == 0 {
 		return enumType, nil, true
@@ -2299,11 +2327,7 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 			return invalidType
 		}
 		if enumType.Packed {
-			a.errorf(expr.Pos(), "packed enum constructor %q must be allocated with new[%s]", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name))
-			for _, arg := range expr.Args {
-				a.analyzeExpr(arg)
-			}
-			return enumType
+			return a.analyzeScopedPackedAllocExpr(&ast.AllocExpr{Position: expr.Pos(), Value: expr})
 		}
 		orderedArgs, ok := a.resolveEnumConstructorArgs(expr, enumType, variant)
 		if !ok {

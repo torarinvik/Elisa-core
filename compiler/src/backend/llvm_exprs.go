@@ -3244,6 +3244,13 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 		if variant == nil {
 			return nil, nil, fmt.Errorf("unknown enum constructor")
 		}
+		if enumType != nil && enumType.Packed {
+			store, ok := s.lookupPackedStore(enumType)
+			if !ok {
+				return nil, nil, fmt.Errorf("packed enum constructor %s.%s requires an active in %s: scope or explicit new[%s]", enumType.Name, variant.Name, enumType.StoreType.Name, enumType.StoreType.Name)
+			}
+			return s.emitPackedEnumConstructorAlloc(store.value, enumType, variant, expr.Args, expr.ArgNames)
+		}
 		return s.emitEnumConstructorValue(enumType, variant, expr.Args, expr.ArgNames)
 	}
 	if value, actualType, handled, err := s.emitProofCarryingViewHelperCall(expr); handled {
