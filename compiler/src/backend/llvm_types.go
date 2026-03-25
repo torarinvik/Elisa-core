@@ -329,7 +329,7 @@ func (g *llvmGenerator) isDirectlyExportedFunction(name string) bool {
 	return false
 }
 
-func (g *llvmGenerator) setDefinedFunctionLinkage(name string, value C.LLVMValueRef) {
+func (g *llvmGenerator) setDefinedFunctionLinkage(name string, value C.LLVMValueRef, fnType *semantic.FuncType) {
 	if value == nil {
 		return
 	}
@@ -341,6 +341,15 @@ func (g *llvmGenerator) setDefinedFunctionLinkage(name string, value C.LLVMValue
 		linkage = C.LLVMLinkage(C.LLVMExternalLinkage)
 	}
 	C.LLVMSetLinkage(value, linkage)
+	if fnType != nil && fnType.HasInlineMode {
+		switch fnType.InlineMode {
+		case semantic.FuncInlineModeAlways:
+			g.addAlwaysInlineAttribute(value)
+		case semantic.FuncInlineModeNever:
+			g.addNoInlineAttribute(value)
+		}
+		return
+	}
 	if linkage == C.LLVMLinkage(C.LLVMPrivateLinkage) {
 		if g.shouldNeverInlineDefinedFunction(name) {
 			g.addNoInlineAttribute(value)
@@ -1173,6 +1182,8 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type) semantic.Ty
 			GenericParams:          append([]ast.GenericParam(nil), tt.GenericParams...),
 			ShapeParams:            append([]string(nil), tt.ShapeParams...),
 			FreshReturnShapeParams: append([]string(nil), tt.FreshReturnShapeParams...),
+			InlineMode:             tt.InlineMode,
+			HasInlineMode:          tt.HasInlineMode,
 			Params:                 params,
 			Return:                 substituteType(tt.Return, subst),
 			Variadic:               tt.Variadic,

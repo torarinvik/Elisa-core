@@ -953,7 +953,7 @@ func (s *functionState) emitParallelForWorkerFunction(stmt *ast.ParallelForStmt,
 		return nil, nil, nil, err
 	}
 	s.g.functions[workerName] = workerFn
-	s.g.setDefinedFunctionLinkage(workerName, workerFn)
+	s.g.setDefinedFunctionLinkage(workerName, workerFn, workerType)
 
 	chunkParamName := prefix + "_chunk"
 	sourceLocalName := prefix + "_source"

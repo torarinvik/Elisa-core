@@ -38,7 +38,7 @@ func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *sema
 	if err != nil {
 		return nil, nil, err
 	}
-	g.setDefinedFunctionLinkage(specializedName, fnValue)
+	g.setDefinedFunctionLinkage(specializedName, fnValue, specializedType)
 	g.functions[specializedName] = fnValue
 	if err := g.defineFunctionBodyWithBindings(decl, specializedType, fnValue, typeBindings); err != nil {
 		return nil, nil, err
@@ -63,6 +63,8 @@ func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semanti
 		GenericParams:          nil,
 		ShapeParams:            append([]string(nil), base.ShapeParams...),
 		FreshReturnShapeParams: append([]string(nil), base.FreshReturnShapeParams...),
+		InlineMode:             base.InlineMode,
+		HasInlineMode:          base.HasInlineMode,
 		Params:                 params,
 		Return:                 substituteType(base.Return, typeBindings),
 		Variadic:               base.Variadic,

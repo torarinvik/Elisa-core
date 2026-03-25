@@ -319,7 +319,7 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 		if err != nil {
 			return err
 		}
-		g.setDefinedFunctionLinkage(sym.Name, fnValue)
+		g.setDefinedFunctionLinkage(sym.Name, fnValue, fn)
 		return g.defineFunctionBody(n, fn, fnValue)
 	case *ast.ExternFuncDecl:
 		return nil

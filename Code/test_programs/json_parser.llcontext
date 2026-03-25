@@ -181,12 +181,14 @@ def json_copy_cursor(cursor: any JsonCursor&) -> JsonCursor:
     return JsonCursor(cursor.source, cursor.source_len, cursor.pos)
 
 
+@inline(always)
 def json_char_at(source: any u8&, source_len: usize, index: usize) -> i64:
     if index >= source_len:
         return JSON_CH_NUL
     return source[index].i64()
 
 
+@inline(always)
 def json_cur_char(cursor: any JsonCursor&) -> i64:
     return json_char_at(cursor.source, cursor.source_len, cursor.pos)
 
@@ -195,6 +197,7 @@ def json_peek_char(cursor: any JsonCursor&, offset: usize) -> i64:
     return json_char_at(cursor.source, cursor.source_len, cursor.pos + offset)
 
 
+@inline(always)
 def json_advance_char(cursor: any JsonCursor&) -> i64:
     ch: i64 = json_cur_char(cursor)
     if cursor.pos < cursor.source_len:
@@ -202,6 +205,7 @@ def json_advance_char(cursor: any JsonCursor&) -> i64:
     return ch
 
 
+@inline(always)
 def json_is_digit(ch: i64) -> bool:
     return ch >= JSON_CH_0 and ch <= JSON_CH_9
 
@@ -210,6 +214,7 @@ def json_is_hex_digit(ch: i64) -> bool:
     return json_is_digit(ch) or (ch >= 65 and ch <= 70) or (ch >= JSON_CH_a and ch <= JSON_CH_f)
 
 
+@inline(always)
 def json_hex_digit_value(ch: i64) -> i64:
     if ch >= JSON_CH_0 and ch <= JSON_CH_9:
         return ch - JSON_CH_0
@@ -475,6 +480,7 @@ def json_string_matches_literal(source: any u8&, source_offset: usize, source_le
     return literal_pos == literal_len
 
 
+@inline(always)
 def json_skip_ws(cursor: any JsonCursor&):
     scanning: mutable bool = true
     while scanning:
@@ -485,6 +491,7 @@ def json_skip_ws(cursor: any JsonCursor&):
             scanning <- false
 
 
+@inline(always)
 def json_expect_literal_with_len(cursor: any JsonCursor&, literal: any u8&, literal_len: usize) -> bool:
     if cursor.pos + literal_len > cursor.source_len:
         return false

@@ -928,6 +928,17 @@ func normalizePackedProfileAnnotationArg(value string) (string, bool) {
 	}
 }
 
+func normalizeInlineAnnotationArg(value string) (FuncInlineMode, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "always", "force", "on":
+		return FuncInlineModeAlways, true
+	case "never", "off", "no":
+		return FuncInlineModeNever, true
+	default:
+		return FuncInlineModeDefault, false
+	}
+}
+
 func packedProfileDefaults(profile string) (string, string, bool) {
 	switch profile {
 	case "canonical":
@@ -1949,7 +1960,12 @@ func (a *Analyzer) analyzeFunctionAnnotations(fn *ast.FuncDecl) {
 	accepted := make([]ast.Annotation, 0, len(valid))
 	for _, annotation := range valid {
 		if a.validateFunctionAnnotation(annotation, fn, signature) {
-			accepted = append(accepted, annotation)
+			switch annotation.Name {
+			case "inline":
+				a.applyFunctionInlineAnnotation(annotation, fn, signature)
+			default:
+				accepted = append(accepted, annotation)
+			}
 		}
 	}
 	if len(accepted) == 0 {
@@ -1963,10 +1979,33 @@ func (a *Analyzer) analyzeFunctionAnnotations(fn *ast.FuncDecl) {
 	})
 }
 
+func (a *Analyzer) applyFunctionInlineAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) {
+	if signature == nil || len(annotation.Args) != 1 {
+		return
+	}
+	mode, ok := normalizeInlineAnnotationArg(annotation.Args[0])
+	if !ok {
+		return
+	}
+	signature.InlineMode = mode
+	signature.HasInlineMode = true
+}
+
 func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) bool {
 	if signature == nil {
 		a.errorf(annotation.Position, "cannot resolve signature for @%s function %q", annotation.Name, fn.Name)
 		return false
+	}
+	if annotation.Name == "inline" {
+		if len(annotation.Args) != 1 {
+			a.errorf(annotation.Position, "@inline on function %q expects exactly one mode argument", fn.Name)
+			return false
+		}
+		if _, ok := normalizeInlineAnnotationArg(annotation.Args[0]); !ok {
+			a.errorf(annotation.Position, "@inline on function %q uses unsupported mode %q (expected always or never)", fn.Name, annotation.Args[0])
+			return false
+		}
+		return true
 	}
 	if len(signature.TypeParams) > 0 || len(signature.RegionParams) > 0 || len(signature.ShapeParams) > 0 {
 		a.errorf(annotation.Position, "@%s function %q must not have type or shape parameters; got %s", annotation.Name, fn.Name, signature.String())
@@ -1996,7 +2035,7 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "fixture":
+	case "test", "bench", "fixture", "inline":
 		return true
 	default:
 		return false

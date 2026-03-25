@@ -360,6 +360,26 @@ func TestParsePackedEnumProfileAnnotation(t *testing.T) {
 	}
 }
 
+func TestParseInlineFunctionAnnotation(t *testing.T) {
+	file, errs := parseSourceFile(t, "@inline(always)\ndef fold(value: int) -> int:\n    return value\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[0])
+	}
+	if len(decl.Annotations) != 1 {
+		t.Fatalf("expected one function annotation, got %d", len(decl.Annotations))
+	}
+	if decl.Annotations[0].Name != "inline" {
+		t.Fatalf("expected inline annotation, got %q", decl.Annotations[0].Name)
+	}
+	if len(decl.Annotations[0].Args) != 1 || decl.Annotations[0].Args[0] != "always" {
+		t.Fatalf("expected inline(always), got %#v", decl.Annotations[0].Args)
+	}
+}
+
 func TestParsePackedViewSurfaceType(t *testing.T) {
 	file, errs := parseSourceFile(t, "packed enum Expr:\n    common:\n        span: int\n    Lit(value: int)\n\ndef keep(view_value: packedview[Expr.Lit]) -> packedview[Expr.Lit]:\n    return view_value\n")
 	if len(errs) != 0 {

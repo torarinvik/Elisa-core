@@ -243,6 +243,14 @@ type AggregateStateType struct {
 	States []RefState
 }
 
+type FuncInlineMode string
+
+const (
+	FuncInlineModeDefault FuncInlineMode = ""
+	FuncInlineModeAlways  FuncInlineMode = "always"
+	FuncInlineModeNever   FuncInlineMode = "never"
+)
+
 type FuncType struct {
 	Name                         string
 	TypeParams                   []string
@@ -258,6 +266,8 @@ type FuncType struct {
 	Permissions                  []string
 	ShapeParams                  []string
 	FreshReturnShapeParams       []string
+	InlineMode                   FuncInlineMode
+	HasInlineMode                bool
 	Params                       []Type
 	Return                       Type
 	Variadic                     bool
