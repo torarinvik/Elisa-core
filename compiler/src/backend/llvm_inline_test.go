@@ -42,6 +42,26 @@ func functionAttributeGroupForTest(t *testing.T, output string, name string) str
 	return attrs[1]
 }
 
+func functionBranchWeightsForTest(t *testing.T, output string, name string) (string, string) {
+	t.Helper()
+	bodyRe := regexp.MustCompile(`(?s)define[^@]*@` + regexp.QuoteMeta(name) + `\([^)]*\)[^{]*\{(.*?)\n\}`)
+	bodyMatch := bodyRe.FindStringSubmatch(output)
+	if len(bodyMatch) != 2 {
+		t.Fatalf("expected function body for %q, got:\n%s", name, output)
+	}
+	branchRe := regexp.MustCompile(`br i1 [^\n]*, !prof !([0-9]+)`)
+	branchMatch := branchRe.FindStringSubmatch(bodyMatch[1])
+	if len(branchMatch) != 2 {
+		t.Fatalf("expected conditional branch metadata for %q, got body:\n%s\nIR:\n%s", name, bodyMatch[1], output)
+	}
+	metadataRe := regexp.MustCompile(`!` + regexp.QuoteMeta(branchMatch[1]) + ` = !\{!"branch_weights", i32 ([0-9]+), i32 ([0-9]+)\}`)
+	metadataMatch := metadataRe.FindStringSubmatch(output)
+	if len(metadataMatch) != 3 {
+		t.Fatalf("expected branch_weights metadata !%s for %q, got:\n%s", branchMatch[1], name, output)
+	}
+	return metadataMatch[1], metadataMatch[2]
+}
+
 func TestAnalyzeInlineAnnotationSetsFunctionMetadata(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "inline_semantics.llcontext", `@inline(always)
 def helper[T](value: T) -> T:
@@ -300,5 +320,43 @@ export func public_helper(value: int) -> int = helper
 	attrs := functionAttributeGroupForTest(t, output, "public_helper")
 	if !strings.Contains(attrs, "norecurse") {
 		t.Fatalf("expected export wrapper to carry norecurse, got attributes {%s}\nIR:\n%s", attrs, output)
+	}
+}
+
+func TestGenerateLLVMIRAppliesLikelyBranchWeightsToIf(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_if_likely.llcontext", `def helper(value: bool) -> int:
+	if likely value:
+		return 1
+	return 0
+`)
+	g, err := compileLLVMModule(result, OptimizationLevel0, DefaultPackedLoweringProfile())
+	if err != nil {
+		t.Fatalf("compileLLVMModule returned error: %v", err)
+	}
+	defer g.dispose()
+	output := g.printModule()
+	trueWeight, falseWeight := functionBranchWeightsForTest(t, output, "helper")
+	if trueWeight != "2000" || falseWeight != "1" {
+		t.Fatalf("expected likely branch weights 2000/1, got %s/%s\nIR:\n%s", trueWeight, falseWeight, output)
+	}
+}
+
+func TestGenerateLLVMIRAppliesUnlikelyBranchWeightsToWhile(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_while_unlikely.llcontext", `def helper(value: bool) -> int:
+	total: mutable int = 0
+	while unlikely value:
+		total <- total + 1
+		return total
+	return total
+`)
+	g, err := compileLLVMModule(result, OptimizationLevel0, DefaultPackedLoweringProfile())
+	if err != nil {
+		t.Fatalf("compileLLVMModule returned error: %v", err)
+	}
+	defer g.dispose()
+	output := g.printModule()
+	trueWeight, falseWeight := functionBranchWeightsForTest(t, output, "helper")
+	if trueWeight != "1" || falseWeight != "2000" {
+		t.Fatalf("expected unlikely branch weights 1/2000, got %s/%s\nIR:\n%s", trueWeight, falseWeight, output)
 	}
 }

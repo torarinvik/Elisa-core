@@ -5,6 +5,8 @@ package backend
 /*
 #include <stdlib.h>
 #include <llvm-c/Core.h>
+
+void llctxSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigned trueWeight, unsigned falseWeight);
 */
 import "C"
 
@@ -113,6 +115,11 @@ type activePoolBinding struct {
 	typ     semantic.Type
 	workers C.LLVMValueRef
 }
+
+const (
+	branchWeightLikely   = 2000
+	branchWeightUnlikely = 1
+)
 
 func (g *llvmGenerator) defineFunctionBody(decl *ast.FuncDecl, fnType *semantic.FuncType, fnValue C.LLVMValueRef) error {
 	return g.defineFunctionBodyWithBindings(decl, fnType, fnValue, nil)
@@ -1023,7 +1030,7 @@ func (s *functionState) emitParallelForWorkerFunction(stmt *ast.ParallelForStmt,
 		Target:   &ast.Ident{Position: stmt.Position, Name: indexLocalName},
 		Value:    &ast.IntLit{Position: stmt.Position, Value: "1", Suffix: "u"},
 	})
-	body = append(body, &ast.WhileStmt{Position: stmt.Position, Cond: condExpr, Body: loopBody})
+	body = append(body, &ast.WhileStmt{Position: stmt.Position, Hint: ast.BranchHintNone, Cond: condExpr, Body: loopBody})
 
 	s.g.result.ExprTypes[condExpr] = s.g.result.NamedTypes["bool"]
 
@@ -1344,6 +1351,23 @@ func (s *functionState) emitArenaReset(arenaPtr C.LLVMValueRef, arenaType semant
 	return nil
 }
 
+func (s *functionState) attachBranchHintMetadata(branch C.LLVMValueRef, hint ast.BranchHint) {
+	if s == nil || s.g == nil || branch == nil || hint == ast.BranchHintNone {
+		return
+	}
+	trueWeight := branchWeightLikely
+	falseWeight := branchWeightUnlikely
+	if hint == ast.BranchHintUnlikely {
+		trueWeight, falseWeight = falseWeight, trueWeight
+	}
+	C.llctxSetBranchWeights(branch, s.g.context, C.uint(trueWeight), C.uint(falseWeight))
+}
+
+func (s *functionState) buildCondBrWithHint(condValue C.LLVMValueRef, trueBB C.LLVMBasicBlockRef, falseBB C.LLVMBasicBlockRef, hint ast.BranchHint) {
+	branch := C.LLVMBuildCondBr(s.builder, condValue, trueBB, falseBB)
+	s.attachBranchHintMetadata(branch, hint)
+}
+
 func (s *functionState) emitIf(stmt *ast.IfStmt) error {
 	stmt = normalizeIf(stmt)
 	condValue, _, err := s.emitExpr(stmt.Cond, s.g.result.NamedTypes["bool"])
@@ -1364,9 +1388,9 @@ func (s *functionState) emitIf(stmt *ast.IfStmt) error {
 		elseName := cString("if.else")
 		defer C.free(unsafe.Pointer(elseName))
 		elseBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, elseName)
-		C.LLVMBuildCondBr(s.builder, condValue, thenBB, elseBB)
+		s.buildCondBrWithHint(condValue, thenBB, elseBB, stmt.Hint)
 	} else {
-		C.LLVMBuildCondBr(s.builder, condValue, thenBB, mergeBB)
+		s.buildCondBrWithHint(condValue, thenBB, mergeBB, stmt.Hint)
 	}
 
 	C.LLVMPositionBuilderAtEnd(s.builder, thenBB)
@@ -1416,7 +1440,7 @@ func (s *functionState) emitWhile(stmt *ast.WhileStmt) error {
 	if err != nil {
 		return err
 	}
-	C.LLVMBuildCondBr(s.builder, condValue, bodyBB, exitBB)
+	s.buildCondBrWithHint(condValue, bodyBB, exitBB, stmt.Hint)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 	if err := s.emitBlock(stmt.Body, true); err != nil {

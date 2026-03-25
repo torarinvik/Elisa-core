@@ -51,9 +51,9 @@ func normalizeIf(stmt *ast.IfStmt) *ast.IfStmt {
 	elseBody := stmt.Else
 	for i := len(stmt.Elifs) - 1; i >= 0; i-- {
 		elif := stmt.Elifs[i]
-		elseBody = []ast.Stmt{&ast.IfStmt{Position: elif.Position, Cond: elif.Cond, Then: elif.Body, Else: elseBody}}
+		elseBody = []ast.Stmt{&ast.IfStmt{Position: elif.Position, Hint: elif.Hint, Cond: elif.Cond, Then: elif.Body, Else: elseBody}}
 	}
-	return &ast.IfStmt{Position: stmt.Position, Cond: stmt.Cond, Then: stmt.Then, Else: elseBody}
+	return &ast.IfStmt{Position: stmt.Position, Hint: stmt.Hint, Cond: stmt.Cond, Then: stmt.Then, Else: elseBody}
 }
 
 func (s *functionState) evalConstIntExpr(expr ast.Expr) (int64, error) {

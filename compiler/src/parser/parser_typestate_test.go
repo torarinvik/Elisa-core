@@ -420,6 +420,48 @@ func TestParseHotFunctionAnnotation(t *testing.T) {
 	}
 }
 
+func TestParseLikelyIfHint(t *testing.T) {
+	file, errs := parseSourceFile(t, "def fold(value: bool) -> int:\n    if likely value:\n        return 1\n    return 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[0])
+	}
+	stmt, ok := decl.Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected first stmt to be if, got %T", decl.Body[0])
+	}
+	if stmt.Hint != ast.BranchHintLikely {
+		t.Fatalf("expected if stmt to record likely hint, got %v", stmt.Hint)
+	}
+	if ident, ok := stmt.Cond.(*ast.Ident); !ok || ident.Name != "value" {
+		t.Fatalf("expected raw condition ident value, got %T %#v", stmt.Cond, stmt.Cond)
+	}
+}
+
+func TestParseUnlikelyWhileHint(t *testing.T) {
+	file, errs := parseSourceFile(t, "def fold(value: bool) -> int:\n    while unlikely value:\n        return 1\n    return 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[0])
+	}
+	stmt, ok := decl.Body[0].(*ast.WhileStmt)
+	if !ok {
+		t.Fatalf("expected first stmt to be while, got %T", decl.Body[0])
+	}
+	if stmt.Hint != ast.BranchHintUnlikely {
+		t.Fatalf("expected while stmt to record unlikely hint, got %v", stmt.Hint)
+	}
+	if ident, ok := stmt.Cond.(*ast.Ident); !ok || ident.Name != "value" {
+		t.Fatalf("expected raw condition ident value, got %T %#v", stmt.Cond, stmt.Cond)
+	}
+}
+
 func TestParsePackedViewSurfaceType(t *testing.T) {
 	file, errs := parseSourceFile(t, "packed enum Expr:\n    common:\n        span: int\n    Lit(value: int)\n\ndef keep(view_value: packedview[Expr.Lit]) -> packedview[Expr.Lit]:\n    return view_value\n")
 	if len(errs) != 0 {

@@ -235,6 +235,14 @@ const (
 	RefStorageStatic
 )
 
+type BranchHint int
+
+const (
+	BranchHintNone BranchHint = iota
+	BranchHintLikely
+	BranchHintUnlikely
+)
+
 type RefType struct {
 	Position     lexer.Pos
 	Elem         TypeExpr
@@ -626,6 +634,7 @@ type ReturnStmt struct {
 
 type IfStmt struct {
 	Position lexer.Pos
+	Hint     BranchHint
 	Cond     Expr
 	Then     []Stmt
 	Elifs    []ElifClause
@@ -634,6 +643,7 @@ type IfStmt struct {
 
 type WhileStmt struct {
 	Position lexer.Pos
+	Hint     BranchHint
 	Cond     Expr
 	Body     []Stmt
 }
@@ -757,6 +767,7 @@ type ResetStmt struct {
 
 type ElifClause struct {
 	Position lexer.Pos
+	Hint     BranchHint
 	Cond     Expr
 	Body     []Stmt
 }

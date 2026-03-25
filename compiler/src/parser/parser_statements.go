@@ -616,11 +616,22 @@ func (p *Parser) parsePanic() *ast.PanicStmt {
 
 type ifClause struct {
 	Position lexer.Pos
+	Hint     ast.BranchHint
 	Cond     ast.Expr
 	Value    ast.Expr
 	Store    ast.Expr
 	Pattern  ast.MatchPattern
 	Body     []ast.Stmt
+}
+
+func (p *Parser) parseBranchHint() ast.BranchHint {
+	if p.matchIdentText("likely") {
+		return ast.BranchHintLikely
+	}
+	if p.matchIdentText("unlikely") {
+		return ast.BranchHintUnlikely
+	}
+	return ast.BranchHintNone
 }
 
 func (p *Parser) parseIf() ast.Stmt {
@@ -645,15 +656,23 @@ func (p *Parser) parseIf() ast.Stmt {
 
 func (p *Parser) parseIfClause(isElif bool) ifClause {
 	pos := p.cur().Pos
+	hint := p.parseBranchHint()
 	head := p.parseExpr()
 	if p.match(lexer.TOKEN_IN) {
+		if hint != ast.BranchHintNone {
+			if isElif {
+				p.errorf("elif likely/unlikely hint cannot be combined with pattern binders")
+			} else {
+				p.errorf("if likely/unlikely hint cannot be combined with pattern binders")
+			}
+		}
 		store := p.parseExpr()
 		if p.match(lexer.TOKEN_AS) {
 			pattern := p.parseMatchPattern()
 			p.expect(lexer.TOKEN_COLON)
 			p.expectNewline()
 			body := p.parseBlock()
-			return ifClause{Position: pos, Value: head, Store: store, Pattern: pattern, Body: body}
+			return ifClause{Position: pos, Hint: hint, Value: head, Store: store, Pattern: pattern, Body: body}
 		}
 		if isElif {
 			p.errorf("elif pattern binder requires `as Enum.Variant(...)` after store expression")
@@ -664,7 +683,7 @@ func (p *Parser) parseIfClause(isElif bool) ifClause {
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	body := p.parseBlock()
-	return ifClause{Position: pos, Cond: head, Body: body}
+	return ifClause{Position: pos, Hint: hint, Cond: head, Body: body}
 }
 
 func lowerIfClauses(clauses []ifClause, elseBlock []ast.Stmt) ast.Stmt {
@@ -683,7 +702,7 @@ func lowerIfClauses(clauses []ifClause, elseBlock []ast.Stmt) ast.Stmt {
 			}}
 			continue
 		}
-		tail = []ast.Stmt{&ast.IfStmt{Position: clause.Position, Cond: clause.Cond, Then: clause.Body, Else: tail}}
+		tail = []ast.Stmt{&ast.IfStmt{Position: clause.Position, Hint: clause.Hint, Cond: clause.Cond, Then: clause.Body, Else: tail}}
 	}
 	if len(tail) == 0 {
 		return &ast.PassStmt{}
@@ -694,11 +713,12 @@ func lowerIfClauses(clauses []ifClause, elseBlock []ast.Stmt) ast.Stmt {
 func (p *Parser) parseWhile() *ast.WhileStmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_WHILE)
+	hint := p.parseBranchHint()
 	cond := p.parseExpr()
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	body := p.parseBlock()
-	return &ast.WhileStmt{Position: pos, Cond: cond, Body: body}
+	return &ast.WhileStmt{Position: pos, Hint: hint, Cond: cond, Body: body}
 }
 
 func (p *Parser) parseStaticStmt() ast.Stmt {
