@@ -132,7 +132,16 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		} else if constEnumType, member, ok := s.constEnumMemberInfo(n); ok {
 			value, actualType, err = s.emitConstEnumMemberExpr(constEnumType, member)
 		} else if enumType, variant, ok := s.enumConstructorInfoFromField(n); ok && variant != nil && len(variant.Payload) == 0 {
-			value, actualType, err = s.emitEnumConstructorValue(enumType, variant, nil, nil)
+			if enumType != nil && enumType.Packed {
+				store, ok := s.lookupPackedStore(enumType)
+				if !ok {
+					err = fmt.Errorf("packed enum constructor %s.%s requires an active in %s: scope or explicit new[%s]", enumType.Name, variant.Name, enumType.StoreType.Name, enumType.StoreType.Name)
+				} else {
+					value, actualType, err = s.emitPackedEnumConstructorAlloc(store.value, enumType, variant, nil, nil)
+				}
+			} else {
+				value, actualType, err = s.emitEnumConstructorValue(enumType, variant, nil, nil)
+			}
 		} else {
 			value, actualType, err = s.emitFieldExpr(n)
 		}

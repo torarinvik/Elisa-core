@@ -2515,6 +2515,35 @@ def build() -> Token:
 	}
 }
 
+func TestGenerateLLVMIRLowersBarePayloadlessPackedConstructorWithActiveStore(t *testing.T) {
+	src := `packed enum Token:
+	Ident
+	Region
+
+def build() -> Token:
+	region scratch(256u)
+	store: Token.Store[Local] = Token.Store(scratch)
+	return Token.Region
+`
+	result := parseAndAnalyze(t, "backend_payloadless_packed_ctor_active_store.llcontext", src)
+	output := generateLLVMIRWithPackedABIForTest(t, result, backend.PackedEnumABIRowHandle)
+
+	checks := []string{
+		"%Token = type { i32 }",
+		"define ptr @build()",
+		"call ptr @arena_alloc(ptr",
+		"store %Token { i32 1 }, ptr %packed.alloc",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "unknown enum constructor") {
+		t.Fatalf("expected bare payloadless packed constructor sugar to lower successfully, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersDictSurfaceTypesViaDynDictCarrier(t *testing.T) {
 	src := `extern take_runtime(values: DynDict[i32]) -> void
 extern make_runtime() -> DynDict[i32]

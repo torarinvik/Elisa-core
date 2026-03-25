@@ -588,6 +588,12 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		}
 		return merged, true
 	case *ast.FieldExpr:
+		if enumType, variant, ok := a.enumConstructorInfoFromFieldExpr(n); ok && enumType != nil && variant != nil && enumType.Packed && len(variant.Payload) == 0 {
+			if state, ok := a.activePackedStoreRegionState(enumType); ok {
+				return state, true
+			}
+			return regionRefState{}, false
+		}
 		if n.Field == "tags" {
 			if storeType, ok := a.exprTypes[n.Object].(*PackedEnumStoreType); ok && IsFrozenPackedEnumStoreType(storeType) {
 				return a.regionRefStateForExpr(n.Object)
@@ -1237,7 +1243,10 @@ func (a *Analyzer) enumVariantExprType(expr *ast.FieldExpr) (*EnumType, Type, bo
 	}
 	if enumType.Packed {
 		if len(variant.Payload) == 0 {
-			a.errorf(expr.Pos(), "packed enum constructor %q must be allocated with new[%s]", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name))
+			if _, ok := a.lookupPackedStore(enumType); ok {
+				return enumType, nil, true
+			}
+			a.errorf(expr.Pos(), "packed enum constructor %q requires an active in %s: scope or explicit new[%s]", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name), packedEnumStoreTypeName(enumType.Name))
 			return enumType, invalidType, true
 		}
 		params := make([]Type, len(variant.Payload))
@@ -1337,6 +1346,31 @@ func (a *Analyzer) enumConstructorInfoFromFieldExpr(expr *ast.FieldExpr) (*EnumT
 		return enumType, nil, true
 	}
 	return enumType, variant, true
+}
+
+func (a *Analyzer) activePackedStoreRegionState(enumType *EnumType) (regionRefState, bool) {
+	if a == nil || enumType == nil {
+		return regionRefState{}, false
+	}
+	activeStore, ok := a.lookupPackedStore(enumType)
+	if !ok || activeStore == nil {
+		return regionRefState{}, false
+	}
+	for scope := a.currentScope; scope != nil; scope = scope.Parent {
+		for _, sym := range scope.Symbols {
+			storeType, ok := sym.Type.(*PackedEnumStoreType)
+			if !ok || storeType == nil || storeType.Enum != enumType || !SameType(storeType, activeStore) {
+				continue
+			}
+			if a.currentRegionRefs != nil {
+				if state, ok := a.currentRegionRefs[sym]; ok && hasRegionProvenance(state) {
+					return cloneRegionRefState(state), true
+				}
+			}
+			return regionRefStateFromPackedStoreDependency(sym, storeType), true
+		}
+	}
+	return regionRefState{}, false
 }
 
 func (a *Analyzer) packedAllocConstructorInfo(expr ast.Expr) (*EnumType, *EnumVariant, bool) {

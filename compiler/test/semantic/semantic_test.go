@@ -5457,6 +5457,37 @@ def build(store_owner: Arena) -> Token:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeRejectsBarePayloadlessPackedConstructorWithoutActiveStore(t *testing.T) {
+	src := `packed enum Token:
+	Ident
+	Region
+
+def build() -> Token:
+	return Token.Region
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_payloadless_ctor_without_store_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "packed enum constructor \"Token.Region\" requires an active in Token.Store: scope or explicit new[Token.Store]") {
+		t.Fatalf("expected payloadless packed constructor diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsBarePayloadlessPackedConstructorWithActiveStoreLocal(t *testing.T) {
+	src := `packed enum Token:
+	Ident
+	Region
+
+def build(store_owner: Arena) -> Token:
+	store: Token.Store[Local] = Token.Store(store_owner)
+	return Token.Region
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_payloadless_ctor_active_store_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeRejectsAffinePayloadsInPackedEnums(t *testing.T) {
 	src := `affine repr(c) struct Handle:
 	raw: mutable uintptr

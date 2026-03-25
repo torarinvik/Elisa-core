@@ -845,8 +845,7 @@ def json_ast_object_iter_is_valid(cursor: JsonAstObjectIterCursor) -> bool:
 
 
 def json_node_invalid(store: JsonNode.Store[Local]) -> JsonNode:
-    in store:
-        return new JsonNode.Invalid
+    return JsonNode.Invalid
 
 
 def json_node_store_words(store: any JsonNode.Store[Local]&) -> any uintptr&:
@@ -862,8 +861,7 @@ def json_node_store_state_bits(store: any JsonNode.Store[Local]&) -> uintptr:
 
 
 def json_node_null(store: JsonNode.Store[Local]) -> JsonNode:
-    in store:
-        return new JsonNode.Null
+    return JsonNode.Null
 
 
 def json_node_is_invalid(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
@@ -966,8 +964,7 @@ def json_parse_string_node(cursor: any JsonCursor&, store: JsonNode.Store[Local]
     checksum: i64 = lexeme.checksum
     if checksum < 0:
         return json_parse_node_result(invalid_node, -1)
-    in store:
-        return json_parse_node_result(new JsonNode.Text(source_offset: lexeme.source_offset.u32()), checksum)
+    return json_parse_node_result(JsonNode.Text(source_offset: lexeme.source_offset.u32()), checksum)
 
 
 def json_parse_number_node(cursor: any JsonCursor&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult:
@@ -975,8 +972,7 @@ def json_parse_number_node(cursor: any JsonCursor&, store: JsonNode.Store[Local]
     checksum: i64 = lexeme.checksum
     if checksum < 0:
         return json_parse_node_result(invalid_node, -1)
-    in store:
-        return json_parse_node_result(new JsonNode.Num(source_offset: lexeme.source_offset.u32()), checksum)
+    return json_parse_node_result(JsonNode.Num(source_offset: lexeme.source_offset.u32()), checksum)
 
 
 def json_parse_true_node(cursor: any JsonCursor&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult:
@@ -984,8 +980,7 @@ def json_parse_true_node(cursor: any JsonCursor&, store: JsonNode.Store[Local], 
     checksum: i64 = json_parse_true(cursor)
     if checksum < 0:
         return json_parse_node_result(invalid_node, -1)
-    in store:
-        return json_parse_node_result(new JsonNode.Bool(value: true), checksum)
+    return json_parse_node_result(JsonNode.Bool(value: true), checksum)
 
 
 def json_parse_false_node(cursor: any JsonCursor&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult:
@@ -993,8 +988,7 @@ def json_parse_false_node(cursor: any JsonCursor&, store: JsonNode.Store[Local],
     checksum: i64 = json_parse_false(cursor)
     if checksum < 0:
         return json_parse_node_result(invalid_node, -1)
-    in store:
-        return json_parse_node_result(new JsonNode.Bool(value: false), checksum)
+    return json_parse_node_result(JsonNode.Bool(value: false), checksum)
 
 
 def json_parse_null_node(cursor: any JsonCursor&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult:
@@ -1002,8 +996,7 @@ def json_parse_null_node(cursor: any JsonCursor&, store: JsonNode.Store[Local], 
     checksum: i64 = json_parse_null(cursor)
     if checksum < 0:
         return json_parse_node_result(invalid_node, -1)
-    in store:
-        return json_parse_node_result(new JsonNode.Null, checksum)
+    return json_parse_node_result(JsonNode.Null, checksum)
 
 
 def json_parse_value_node_after_ws(cursor: any JsonCursor&, arena: any Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
@@ -1035,8 +1028,7 @@ def json_parse_array_node(cursor: any JsonCursor&, arena: any Arena&, store: Jso
     json_skip_ws(cursor)
     if json_cur_char(cursor) == JSON_CH_RBRACKET:
         _ = json_advance_char(cursor)
-        in store:
-            return json_parse_node_result(new JsonNode.Array(items_ptr: null, item_count: 0u), 43)
+        return json_parse_node_result(JsonNode.Array(items_ptr: null, item_count: 0u), 43)
 
     while not done:
         value_result: JsonParseNodeResult = json_parse_value_node_after_ws(cursor, arena, store, invalid_node)
@@ -1057,8 +1049,7 @@ def json_parse_array_node(cursor: any JsonCursor&, arena: any Arena&, store: Jso
         else:
             return json_parse_node_result(invalid_node, -1)
 
-    in store:
-        return json_parse_node_result(new JsonNode.Array(items_ptr: items.items, item_count: items.count), 43 + items_checksum)
+    return json_parse_node_result(JsonNode.Array(items_ptr: items.items, item_count: items.count), 43 + items_checksum)
 
 
 def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
@@ -1076,8 +1067,7 @@ def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: Js
     json_skip_ws(cursor)
     if json_cur_char(cursor) == JSON_CH_RBRACE:
         _ = json_advance_char(cursor)
-        in store:
-            return json_parse_node_result(new JsonNode.Object(fields_ptr: null, field_count: 0u), 47)
+        return json_parse_node_result(JsonNode.Object(fields_ptr: null, field_count: 0u), 47)
 
     while not done:
         key_lexeme <- json_parse_string_lexeme(cursor)
@@ -1085,9 +1075,7 @@ def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: Js
         if key_checksum < 0:
             return JsonParseNodeResult(invalid_node, -1)
 
-        key_node <- invalid_node
-        in store:
-            key_node <- new JsonNode.Text(source_offset: key_lexeme.source_offset.u32())
+        key_node <- JsonNode.Text(source_offset: key_lexeme.source_offset.u32())
 
         json_skip_ws(cursor)
         if json_advance_char(cursor) != JSON_CH_COLON:
@@ -1114,8 +1102,7 @@ def json_parse_object_node(cursor: any JsonCursor&, arena: any Arena&, store: Js
         else:
             return JsonParseNodeResult(invalid_node, -1)
 
-    in store:
-        return json_parse_node_result(new JsonNode.Object(fields_ptr: fields.items, field_count: fields.count), 47 + fields_checksum)
+    return json_parse_node_result(JsonNode.Object(fields_ptr: fields.items, field_count: fields.count), 47 + fields_checksum)
 
 
 def json_parse_value_node(cursor: any JsonCursor&, arena: any Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
