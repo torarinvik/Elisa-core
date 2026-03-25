@@ -5772,6 +5772,56 @@ def consume_twice(owner: Arena, thread: Thread[i64, Joinable]) -> i64:
 	}
 }
 
+func TestAnalyzeWarnsOnAvoidableStructPadding(t *testing.T) {
+	src := `struct Padded:
+	flag: bool
+	value: i64
+	small: i16
+`
+	result, errs := parseAndAnalyze(t, "struct_padding_warn.llcontext", src)
+	requireNoErrors(t, errs)
+	warns := nonDeprecatedWarnings(result)
+	if len(warns) == 0 {
+		t.Fatal("expected padding warning, got none")
+	}
+	all := strings.Join(warns, "\n")
+	if !strings.Contains(all, `struct "Padded" has 8 bytes of avoidable padding`) {
+		t.Fatalf("expected padding-size warning, got:\n%s", all)
+	}
+	if !strings.Contains(all, `consider ordering fields as "value", "small", "flag"`) {
+		t.Fatalf("expected field reorder suggestion, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeDoesNotWarnOnDenseStructFieldOrder(t *testing.T) {
+	src := `struct Dense:
+	value: i64
+	small: i16
+	flag: bool
+`
+	result, errs := parseAndAnalyze(t, "struct_padding_dense_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
+
+func TestAnalyzeWarnsOnReprCStructPadding(t *testing.T) {
+	src := `repr(c) struct CLayout:
+	flag: bool
+	value: i64
+	small: i16
+`
+	result, errs := parseAndAnalyze(t, "struct_padding_reprc_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	warns := nonDeprecatedWarnings(result)
+	if len(warns) == 0 {
+		t.Fatal("expected padding warning for repr(c) struct, got none")
+	}
+	all := strings.Join(warns, "\n")
+	if !strings.Contains(all, `struct "CLayout" has 8 bytes of avoidable padding`) {
+		t.Fatalf("expected repr(c) padding warning, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsSpawnOfValueDependingOnUnpublishedPackedStore(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)

@@ -185,6 +185,7 @@ func Analyze(file *ast.File) *Result {
 	a.populateConstEnumMembers(activeDecls)
 	a.populateStructFields(activeDecls)
 	a.populateEnumVariants(activeDecls)
+	a.warnOnAvoidableStructPadding(activeDecls)
 	a.collectExportTypeAliases(activeDecls)
 	a.collectValueSymbols(activeDecls)
 	a.analyzeDecls(activeDecls)
