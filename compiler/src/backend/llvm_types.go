@@ -19,6 +19,10 @@ static LLVMTypeRef llcontextGlobalValueType(LLVMValueRef Value) {
 	return LLVMGlobalGetValueType(Value);
 }
 
+static void llcontextSetAlignment(LLVMValueRef Value, unsigned Bytes) {
+	LLVMSetAlignment(Value, Bytes);
+}
+
 static char* llcontextPrintType(LLVMTypeRef Type) {
 	return LLVMPrintTypeToString(Type);
 }
@@ -487,8 +491,20 @@ func (g *llvmGenerator) addGlobal(name string, t semantic.Type, external bool) (
 	defer C.free(unsafe.Pointer(nameC))
 	value := C.LLVMAddGlobal(g.module, globalType, nameC)
 	C.LLVMSetLinkage(value, C.LLVMExternalLinkage)
+	g.applyTypeAlignment(value, t)
 	_ = external
 	return value, nil
+}
+
+func (g *llvmGenerator) applyTypeAlignment(value C.LLVMValueRef, t semantic.Type) {
+	if g == nil || value == nil {
+		return
+	}
+	alignment, ok := semantic.RequestedAlignment(t)
+	if !ok || alignment <= 0 {
+		return
+	}
+	C.llcontextSetAlignment(value, C.uint(alignment))
 }
 
 func (g *llvmGenerator) lowerFunctionType(fn *semantic.FuncType) (C.LLVMTypeRef, error) {

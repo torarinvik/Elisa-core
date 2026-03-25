@@ -80,6 +80,7 @@ type GlobalDecl struct {
 
 type StructDecl struct {
 	Position         lexer.Pos
+	Annotations      []Annotation
 	Name             string
 	TypeParams       []string
 	RefStorageParams []string

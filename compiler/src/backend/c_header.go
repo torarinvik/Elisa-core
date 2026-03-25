@@ -61,7 +61,9 @@ func GenerateCHeader(result *semantic.Result) (string, error) {
 			out.WriteString(decl)
 			out.WriteString(";\n")
 		}
-		out.WriteString("};\n\n")
+		out.WriteString("}")
+		out.WriteString(cAlignmentAttributeSuffix(agg.Type))
+		out.WriteString(";\n\n")
 	}
 
 	for _, exported := range result.ExportedGlobals {
@@ -409,7 +411,15 @@ func formatGlobalDeclaration(exported *semantic.ExportedGlobal, result *semantic
 	if err != nil {
 		return "", fmt.Errorf("failed to render exported global %s: %w", exported.PublicName, err)
 	}
-	return "extern " + decl, nil
+	return "extern " + decl + cAlignmentAttributeSuffix(exported.Type), nil
+}
+
+func cAlignmentAttributeSuffix(t semantic.Type) string {
+	alignment, ok := semantic.RequestedAlignment(t)
+	if !ok || alignment <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(" __attribute__((aligned(%d)))", alignment)
 }
 
 func formatCDecl(t semantic.Type, name string, result *semantic.Result) (string, error) {

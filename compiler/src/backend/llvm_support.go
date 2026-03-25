@@ -847,7 +847,9 @@ func (s *functionState) createEntryAlloca(name string, t semantic.Type) (C.LLVMV
 	}
 	nameC := cString(name)
 	defer C.free(unsafe.Pointer(nameC))
-	return C.LLVMBuildAlloca(builder, llvmType, nameC), nil
+	alloca := C.LLVMBuildAlloca(builder, llvmType, nameC)
+	s.g.applyTypeAlignment(alloca, t)
+	return alloca, nil
 }
 
 func (s *functionState) currentBlockTerminated() bool {

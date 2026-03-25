@@ -320,6 +320,46 @@ func TestParsePackedEnumAnnotation(t *testing.T) {
 	}
 }
 
+func TestParseAlignedStructAnnotation(t *testing.T) {
+	file, errs := parseSourceFile(t, "@align(32)\nstruct Vec4:\n    x: f32\n    y: f32\n    z: f32\n    w: f32\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.StructDecl)
+	if !ok {
+		t.Fatalf("expected struct decl, got %T", file.Decls[0])
+	}
+	if len(decl.Annotations) != 1 {
+		t.Fatalf("expected one struct annotation, got %d", len(decl.Annotations))
+	}
+	if decl.Annotations[0].Name != "align" {
+		t.Fatalf("expected align annotation, got %q", decl.Annotations[0].Name)
+	}
+	if len(decl.Annotations[0].Args) != 1 || decl.Annotations[0].Args[0] != "32" {
+		t.Fatalf("expected align(32), got %#v", decl.Annotations[0].Args)
+	}
+}
+
+func TestParseCachelineAlignedStructAnnotation(t *testing.T) {
+	file, errs := parseSourceFile(t, "@cacheline_aligned\nstruct Counter:\n    value: i64\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.StructDecl)
+	if !ok {
+		t.Fatalf("expected struct decl, got %T", file.Decls[0])
+	}
+	if len(decl.Annotations) != 1 {
+		t.Fatalf("expected one struct annotation, got %d", len(decl.Annotations))
+	}
+	if decl.Annotations[0].Name != "cacheline_aligned" {
+		t.Fatalf("expected cacheline_aligned annotation, got %q", decl.Annotations[0].Name)
+	}
+	if len(decl.Annotations[0].Args) != 0 {
+		t.Fatalf("expected cacheline_aligned to take no args, got %#v", decl.Annotations[0].Args)
+	}
+}
+
 func TestParsePackedEnumPrefixAnnotation(t *testing.T) {
 	file, errs := parseSourceFile(t, "@packed_abi(dense_fixed)\n@packed_prefix(common_only)\npacked enum Expr:\n    common:\n        span: int\n    Lit(value: int)\n")
 	if len(errs) != 0 {

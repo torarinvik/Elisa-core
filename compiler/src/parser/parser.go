@@ -118,21 +118,28 @@ func (p *Parser) parseDecl() ast.Decl {
 	}
 	if p.peek() == lexer.TOKEN_AT {
 		annotations := p.parseFuncAnnotations()
+		if p.peekIdentText("affine") {
+			return p.parseStructDeclWithAnnotations(annotations)
+		}
 		switch p.peek() {
 		case lexer.TOKEN_DEF:
 			return p.parseFuncDeclWithAnnotations(annotations)
 		case lexer.TOKEN_EXTERN:
 			return p.parseExternDeclWithAnnotations(annotations)
+		case lexer.TOKEN_REPR:
+			return p.parseStructDeclWithAnnotations(annotations)
 		case lexer.TOKEN_PACKED:
 			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ENUM {
 				return p.parsePackedEnumDeclWithAnnotations(annotations)
 			}
-			p.errorf("declaration annotations must be followed by def, extern, enum, or packed enum, got %s", p.cur())
+			p.errorf("declaration annotations must be followed by def, extern, struct, enum, or packed enum, got %s", p.cur())
 			return nil
 		case lexer.TOKEN_ENUM:
 			return p.parseEnumDeclWithAnnotations(annotations)
+		case lexer.TOKEN_STRUCT:
+			return p.parseStructDeclWithAnnotations(annotations)
 		default:
-			p.errorf("declaration annotations must be followed by def, extern, enum, or packed enum, got %s", p.cur())
+			p.errorf("declaration annotations must be followed by def, extern, struct, enum, or packed enum, got %s", p.cur())
 			return nil
 		}
 	}
@@ -195,6 +202,19 @@ func (p *Parser) parseFuncAnnotations() []ast.Annotation {
 }
 
 func (p *Parser) parseAnnotationArg() string {
+	switch p.peek() {
+	case lexer.TOKEN_INT_LIT, lexer.TOKEN_HEX_LIT:
+		tok := p.advance()
+		if tok.Suffix != "" {
+			return tok.Text + tok.Suffix
+		}
+		return tok.Text
+	case lexer.TOKEN_IDENT:
+		// handled below
+	default:
+		p.errorf("expected annotation argument, got %s", p.cur())
+		return p.advance().Text
+	}
 	root := p.expect(lexer.TOKEN_IDENT).Text
 	var b strings.Builder
 	b.WriteString(root)
@@ -432,6 +452,10 @@ func (p *Parser) parseGlobalDecl() *ast.GlobalDecl {
 }
 
 func (p *Parser) parseStructDecl() *ast.StructDecl {
+	return p.parseStructDeclWithAnnotations(nil)
+}
+
+func (p *Parser) parseStructDeclWithAnnotations(annotations []ast.Annotation) *ast.StructDecl {
 	pos := p.cur().Pos
 	affine := p.matchIdentText("affine")
 	reprC := true
@@ -491,7 +515,7 @@ func (p *Parser) parseStructDecl() *ast.StructDecl {
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.StructDecl{Position: pos, Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, GenericParams: genericParams, HasStateParam: hasStateParam, StateParamCount: stateParamCount, Affine: affine, ReprC: reprC, Fields: fields}
+	return &ast.StructDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, GenericParams: genericParams, HasStateParam: hasStateParam, StateParamCount: stateParamCount, Affine: affine, ReprC: reprC, Fields: fields}
 }
 
 func joinAggregateStateMarkers(states []ast.RefState) string {

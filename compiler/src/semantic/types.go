@@ -183,20 +183,20 @@ type PackedVariantViewType struct {
 }
 
 type EnumType struct {
-	Name                 string
-	Packed               bool
-	PackedProfile        string
-	HasPackedProfile     bool
-	PackedABIOverride    string
-	HasPackedABIOverride bool
+	Name                    string
+	Packed                  bool
+	PackedProfile           string
+	HasPackedProfile        bool
+	PackedABIOverride       string
+	HasPackedABIOverride    bool
 	PackedPrefixOverride    string
 	HasPackedPrefixOverride bool
-	Common               map[string]Field
-	StoreType            *PackedEnumStoreType
-	TagType              *ConstEnumType
-	Variants             []*EnumVariant
-	VariantMap           map[string]*EnumVariant
-	Decl                 *ast.EnumDecl
+	Common                  map[string]Field
+	StoreType               *PackedEnumStoreType
+	TagType                 *ConstEnumType
+	Variants                []*EnumVariant
+	VariantMap              map[string]*EnumVariant
+	Decl                    *ast.EnumDecl
 }
 
 type ConstEnumType struct {
@@ -223,6 +223,8 @@ type StructType struct {
 	Fields           map[string]Field
 	Affine           bool
 	ReprC            bool
+	Alignment        int
+	HasAlignment     bool
 	Decl             *ast.StructDecl
 	Builtin          bool
 }
@@ -600,6 +602,26 @@ func (t *ConstEnumType) Member(name string) (*ConstEnumMember, bool) {
 func (t *EnumType) String() string   { return t.Name }
 func (t *StructType) String() string { return t.Name }
 func (t *OpaqueType) String() string { return t.Name }
+
+func RequestedAlignment(t Type) (int, bool) {
+	if t == nil {
+		return 0, false
+	}
+	t = StripAggregateStateType(t)
+	switch tt := t.(type) {
+	case *StructType:
+		if tt != nil && tt.HasAlignment {
+			return tt.Alignment, true
+		}
+	case *GenericInstanceType:
+		base, ok := tt.Base.(*StructType)
+		if ok && base != nil && base.HasAlignment {
+			return base.Alignment, true
+		}
+	}
+	return 0, false
+}
+
 func (t *GenericInstanceType) String() string {
 	parts := make([]string, 0, len(t.Args))
 	for _, arg := range t.Args {

@@ -3,6 +3,7 @@ package semantic
 import (
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
+	"math/bits"
 	"strconv"
 	"strings"
 )
@@ -789,6 +790,7 @@ func (a *Analyzer) populateStructFields(decls []ast.Decl) {
 		if st.Builtin && isBuiltinRuntimeStructName(stDecl.Name) {
 			continue
 		}
+		a.analyzeStructAnnotations(stDecl, st)
 		a.withGenericParams(stDecl.GenericParams, nil, func() {
 			for _, field := range stDecl.Fields {
 				if _, exists := st.Fields[field.Name]; exists {
@@ -939,6 +941,22 @@ func normalizeInlineAnnotationArg(value string) (FuncInlineMode, bool) {
 	}
 }
 
+func normalizeStructAlignmentAnnotationArg(value string) (int, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return 0, false
+	}
+	parsed, err := strconv.ParseUint(trimmed, 0, 32)
+	if err != nil || parsed == 0 {
+		return 0, false
+	}
+	alignment := int(parsed)
+	if bits.OnesCount32(uint32(alignment)) != 1 {
+		return 0, false
+	}
+	return alignment, true
+}
+
 func temperatureModeForAnnotationName(name string) (FuncTemperatureMode, bool) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "hot":
@@ -966,6 +984,15 @@ func packedProfileDefaults(profile string) (string, string, bool) {
 func isSupportedEnumAnnotation(name string) bool {
 	switch name {
 	case "packed_abi", "packed_prefix", "packed_profile":
+		return true
+	default:
+		return false
+	}
+}
+
+func isSupportedStructAnnotation(name string) bool {
+	switch name {
+	case "align", "cacheline_aligned":
 		return true
 	default:
 		return false
@@ -1065,6 +1092,63 @@ func (a *Analyzer) analyzeEnumAnnotations(enumDecl *ast.EnumDecl, enumType *Enum
 	if hasPrefixOverride {
 		enumType.PackedPrefixOverride = prefixOverride
 		enumType.HasPackedPrefixOverride = true
+	}
+}
+
+func (a *Analyzer) analyzeStructAnnotations(structDecl *ast.StructDecl, structType *StructType) {
+	if structDecl == nil || structType == nil || len(structDecl.Annotations) == 0 {
+		return
+	}
+	seen := make(map[string]lexer.Pos, len(structDecl.Annotations))
+	alignment := 0
+	hasAlignment := false
+	alignmentSource := ""
+	for _, annotation := range structDecl.Annotations {
+		if prev, exists := seen[annotation.Name]; exists {
+			a.errorf(annotation.Position, "duplicate @%s annotation on struct %q (first seen at %s:%d:%d)", annotation.Name, structDecl.Name, prev.File, prev.Line, prev.Col)
+			continue
+		}
+		seen[annotation.Name] = annotation.Position
+		if !isSupportedStructAnnotation(annotation.Name) {
+			a.errorf(annotation.Position, "unknown struct annotation @%s on %q", annotation.Name, structDecl.Name)
+			continue
+		}
+		switch annotation.Name {
+		case "align":
+			if len(annotation.Args) != 1 {
+				a.errorf(annotation.Position, "@align on struct %q expects exactly one integer byte alignment", structDecl.Name)
+				continue
+			}
+			parsed, ok := normalizeStructAlignmentAnnotationArg(annotation.Args[0])
+			if !ok {
+				a.errorf(annotation.Position, "@align on struct %q expects a positive power-of-two byte alignment, got %q", structDecl.Name, annotation.Args[0])
+				continue
+			}
+			if hasAlignment && alignment != parsed {
+				a.errorf(annotation.Position, "@align on struct %q conflicts with existing @%s request for %d-byte alignment", structDecl.Name, alignmentSource, alignment)
+				continue
+			}
+			alignment = parsed
+			hasAlignment = true
+			alignmentSource = annotation.Name
+		case "cacheline_aligned":
+			if len(annotation.Args) != 0 {
+				a.errorf(annotation.Position, "@cacheline_aligned on struct %q does not take arguments", structDecl.Name)
+				continue
+			}
+			const cachelineAlignment = 64
+			if hasAlignment && alignment != cachelineAlignment {
+				a.errorf(annotation.Position, "@cacheline_aligned on struct %q conflicts with existing @%s request for %d-byte alignment", structDecl.Name, alignmentSource, alignment)
+				continue
+			}
+			alignment = cachelineAlignment
+			hasAlignment = true
+			alignmentSource = annotation.Name
+		}
+	}
+	if hasAlignment {
+		structType.Alignment = alignment
+		structType.HasAlignment = true
 	}
 }
 
