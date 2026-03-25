@@ -5204,6 +5204,9 @@ def inspect(owner: Arena) -> i32:
 	if keyInfo.StoreRoot == nil {
 		t.Fatalf("expected dense_key exact frozen store root provenance, got %#v", keyInfo)
 	}
+	if keyInfo.StorePath != "" {
+		t.Fatalf("expected dense_key direct-store provenance path to be empty, got %#v", keyInfo)
+	}
 
 	tableInfo, ok := result.NodeTables[tableExpr]
 	if !ok {
@@ -5218,8 +5221,68 @@ def inspect(owner: Arena) -> i32:
 	if tableInfo.StoreRoot == nil {
 		t.Fatalf("expected node table exact frozen store root provenance, got %#v", tableInfo)
 	}
+	if tableInfo.StorePath != "" {
+		t.Fatalf("expected node table direct-store provenance path to be empty, got %#v", tableInfo)
+	}
 	if tableInfo.CountExpr == "" {
 		t.Fatalf("expected node table count expression metadata, got %#v", tableInfo)
+	}
+}
+
+func TestAnalyzeAcceptsDenseNodeKeysAndNodeTablesFromHiddenFrozenStoreFieldRoots(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: i32
+	Lit(value: i32)
+	Add(left: Expr, right: Expr)
+
+struct FrozenBox:
+	store: Expr.Store[Frozen]
+
+def make_box(owner: Arena) -> FrozenBox:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		left: Expr = new Expr.Lit(span: 1i32, value: 3i32)
+		right: Expr = new Expr.Lit(span: 2i32, value: 4i32)
+		_ = new Expr.Add(span: 5i32, left: left, right: right)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	return FrozenBox(frozen)
+
+def inspect(owner: Arena) -> i32:
+	box: FrozenBox = make_box(owner)
+	node: Expr = box.store[2u]
+	key: NodeKey[Expr] = dense_key(node, box.store)
+	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, box.store, -1i32)
+	table[key] <- 0i32
+	again: Expr = box.store[key]
+	values: dview[i32] = table.values
+	if values.len == box.store.count:
+		return again.span
+	return 0i32
+`
+	result, errs := parseAndAnalyze(t, "packed_store_dense_node_key_hidden_frozen_field_root_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "inspect", "i32")
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	keyExpr := requireOptimizationFactsVarInitExpr(t, fn, "key")
+	tableExpr := requireOptimizationFactsVarInitExpr(t, fn, "table")
+
+	keyInfo, ok := result.DenseNodeKeys[keyExpr]
+	if !ok {
+		t.Fatal("expected dense_key expression provenance to be recorded")
+	}
+	if keyInfo.StoreRoot == nil || keyInfo.StorePath != "store" {
+		t.Fatalf("expected dense_key hidden frozen store-field provenance, got %#v", keyInfo)
+	}
+
+	tableInfo, ok := result.NodeTables[tableExpr]
+	if !ok {
+		t.Fatal("expected node_table_fill expression metadata to be recorded")
+	}
+	if tableInfo.StoreRoot == nil || tableInfo.StorePath != "store" {
+		t.Fatalf("expected node_table hidden frozen store-field provenance, got %#v", tableInfo)
 	}
 }
 
@@ -5249,6 +5312,42 @@ def bad(owner: Arena) -> Expr:
 	all := strings.Join(errs, "\n")
 	if !strings.Contains(all, "node key and frozen store must share the same exact frozen store root") {
 		t.Fatalf("expected cross-store dense node key diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsDenseNodeKeyIndexingAcrossDifferentHiddenFrozenStoreFieldRoots(t *testing.T) {
+	src := `packed enum Expr:
+	Lit(value: int)
+
+struct FrozenPair:
+	left: Expr.Store[Frozen]
+	right: Expr.Store[Frozen]
+
+def make_pair(owner: Arena) -> FrozenPair:
+	left_store: Expr.Store[Local] = Expr.Store(owner)
+	in left_store:
+		_ = new Expr.Lit(value: 1)
+	left_frozen: Expr.Store[Frozen] = freeze(move left_store)
+
+	right_store: Expr.Store[Local] = Expr.Store(owner)
+	in right_store:
+		_ = new Expr.Lit(value: 2)
+	right_frozen: Expr.Store[Frozen] = freeze(move right_store)
+	return FrozenPair(left_frozen, right_frozen)
+
+def bad(owner: Arena) -> Expr:
+	pair: FrozenPair = make_pair(owner)
+	node: Expr = pair.left[0u]
+	key: NodeKey[Expr] = dense_key(node, pair.left)
+	return pair.right[key]
+`
+	_, errs := parseAndAnalyze(t, "packed_store_dense_node_key_cross_hidden_field_root_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "node key and frozen store must share the same exact frozen store root") {
+		t.Fatalf("expected hidden-field dense node key root diagnostic, got:\n%s", all)
 	}
 }
 

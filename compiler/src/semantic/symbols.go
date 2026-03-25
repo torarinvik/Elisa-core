@@ -54,12 +54,14 @@ type ParallelForInfo struct {
 type DenseNodeKeyInfo struct {
 	Enum      *EnumType
 	StoreRoot *Symbol
+	StorePath string
 }
 
 type NodeTableInfo struct {
 	Enum      *EnumType
 	Elem      Type
 	StoreRoot *Symbol
+	StorePath string
 	CountExpr string
 }
 

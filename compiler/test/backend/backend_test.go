@@ -2245,6 +2245,54 @@ def inspect(owner: Arena) -> i32:
 	}
 }
 
+func TestGenerateLLVMIRLowersDenseNodeTablesFromHiddenFrozenStoreFieldRoots(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: i32
+	Lit(value: i32)
+	Add(left: Expr, right: Expr)
+
+struct FrozenBox:
+	store: Expr.Store[Frozen]
+
+def make_box(owner: Arena) -> FrozenBox:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		left: Expr = new Expr.Lit(span: 1i32, value: 3i32)
+		right: Expr = new Expr.Lit(span: 2i32, value: 4i32)
+		_ = new Expr.Add(span: 5i32, left: left, right: right)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	return FrozenBox(frozen)
+
+def inspect(owner: Arena) -> i32:
+	box: FrozenBox = make_box(owner)
+	node: Expr = box.store[2u]
+	key: NodeKey[Expr] = dense_key(node, box.store)
+	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, box.store, -1i32)
+	table[key] <- 7i32
+	return table[key]
+`
+	result := parseAndAnalyze(t, "backend_dense_node_table_hidden_frozen_field_root.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	for _, check := range []string{
+		"%NodeKey__Expr = type { i32 }",
+		"%NodeTable__Expr__i32 = type { %DynArrayView }",
+		"call ptr @arena_alloc(",
+		"call void @arena_da_fill(",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "@node_table_fill(") {
+		t.Fatalf("expected hidden-field node_table_fill to lower directly in the backend without a runtime wrapper, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersMatchOnRefinedPackedViewScrutinee(t *testing.T) {
 	src := `packed enum Expr:
 	common:

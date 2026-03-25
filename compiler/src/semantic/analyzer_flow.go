@@ -957,7 +957,7 @@ func (a *Analyzer) canInferPackedStoreFromValue(valueExpr ast.Expr, actual Type,
 	if viewType, ok := actual.(*PackedVariantViewType); ok && viewType != nil && viewType.Enum == enumType {
 		return true
 	}
-	if _, ok := a.resolvePackedNodeStoreRoot(valueExpr, enumType); ok {
+	if _, _, ok := a.resolvePackedNodeStoreRoot(valueExpr, enumType); ok {
 		return true
 	}
 	if a.valueHasExactPackedStoreIndexRoot(valueExpr, enumType) {
