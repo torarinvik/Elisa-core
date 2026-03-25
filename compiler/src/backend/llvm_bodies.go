@@ -30,6 +30,7 @@ type codegenScope struct {
 	parent         *codegenScope
 	bindings       map[string]valueBinding
 	packedEnumPtrs map[string]packedEnumStorageBinding
+	packedEnumStores map[string]packedStoreBinding
 	packedViewPtrs map[string]packedVariantViewBinding
 }
 
@@ -147,7 +148,7 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		fnValue:                      fnValue,
 		fnType:                       fnType,
 		builder:                      builder,
-		scope:                        &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}, packedViewPtrs: map[string]packedVariantViewBinding{}},
+		scope:                        &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}, packedEnumStores: map[string]packedStoreBinding{}, packedViewPtrs: map[string]packedVariantViewBinding{}},
 		typeMap:                      typeBindings,
 		packedStores:                 map[string]packedStoreBinding{},
 		packedStoreValues:            map[packedStoreExtractCacheKey]C.LLVMValueRef{},
@@ -321,6 +322,15 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			}
 			C.LLVMBuildStore(s.builder, value, alloca)
 			s.bindPackedStoreValue(declType, value)
+			if enumType, ok := declType.(*semantic.EnumType); ok && enumType.Packed {
+				origin, ok, err := s.resolvePackedNodeStoreBinding(n.Value, enumType)
+				if err != nil {
+					return err
+				}
+				if ok {
+					s.bindPackedEnumStoreOrigin(n.Name, enumType, origin)
+				}
+			}
 		}
 		return nil
 	case *ast.MoveBindStmt:
@@ -398,6 +408,7 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			return err
 		}
 		s.invalidatePackedEnumStorageExpr(n.Target)
+		s.invalidatePackedEnumStoreOriginExpr(n.Target)
 		s.invalidatePackedVariantViewExpr(n.Target)
 		value, _, err := s.emitExpr(n.Value, targetType)
 		if err != nil {
@@ -412,6 +423,7 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			return err
 		}
 		s.invalidatePackedEnumStorageExpr(n.Target)
+		s.invalidatePackedEnumStoreOriginExpr(n.Target)
 		s.invalidatePackedVariantViewExpr(n.Target)
 		value, _, err := s.emitExpr(n.Value, targetType)
 		if err != nil {
@@ -525,7 +537,19 @@ func (s *functionState) emitMoveBindStmt(stmt *ast.MoveBindStmt) error {
 	}
 	switch p := stmt.Pattern.(type) {
 	case *ast.MoveBindNamePattern:
-		return s.emitMoveBindLocal(p.Name, valueType, value)
+		if err := s.emitMoveBindLocal(p.Name, valueType, value); err != nil {
+			return err
+		}
+		if enumType, ok := valueType.(*semantic.EnumType); ok && enumType.Packed {
+			origin, ok, err := s.resolvePackedNodeStoreBinding(stmt.Value, enumType)
+			if err != nil {
+				return err
+			}
+			if ok {
+				s.bindPackedEnumStoreOrigin(p.Name, enumType, origin)
+			}
+		}
+		return nil
 	case *ast.MoveBindStructPattern:
 		fields, err := s.g.structLiteralFields(valueType)
 		if err != nil {
@@ -609,6 +633,11 @@ func (s *functionState) emitOpenStmt(stmt *ast.OpenStmt) error {
 	C.LLVMPositionBuilderAtEnd(s.builder, successBB)
 	if ident, ok := stmt.Value.(*ast.Ident); ok && matchedDecodedValue != nil {
 		s.bindPackedEnumStorage(ident.Name, enumType, matchedDecodedValue)
+	}
+	if storeBinding != nil {
+		if key, ok := s.packedEnumStoragePath(stmt.Value); ok {
+			s.bindPackedEnumStoreOrigin(key, enumType, storeBinding)
+		}
 	}
 	if err := s.emitBlock(stmt.Body, false); err != nil {
 		s.popScope()
@@ -694,6 +723,11 @@ func (s *functionState) emitViewStmt(stmt *ast.ViewStmt) error {
 			s.bindPackedVariantView(ident.Name, resolvedViewType, viewDecodedValue, enumValue, storeCopy)
 		} else if packedModeUsesDenseIndexHandle(s.g.packedModeForEnum(enumType)) || s.canInlinePackedEnumVariant(enumType, variant) {
 			s.bindPackedVariantView(ident.Name, resolvedViewType, nil, enumValue, storeCopy)
+		}
+	}
+	if storeBinding != nil {
+		if key, ok := s.packedEnumStoragePath(stmt.Value); ok {
+			s.bindPackedEnumStoreOrigin(key, enumType, storeBinding)
 		}
 	}
 	if stmt.Pattern.Name != "" && stmt.Pattern.Name != "_" {
@@ -1720,6 +1754,9 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 		if key, ok := s.packedEnumStoragePath(stmt.Value); ok && enumType.Packed && armDecodedValue != nil {
 			s.bindPackedEnumStorage(key, enumType, armDecodedValue)
 		}
+		if key, ok := s.packedEnumStoragePath(stmt.Value); ok && enumType.Packed {
+			s.bindPackedEnumStoreOrigin(key, enumType, storeBinding)
+		}
 		s.bindMatchedPackedVariantView(stmt.Value, arm.Pattern, enumValue, armDecodedValue, enumType, storeBinding)
 		if err := s.emitBlock(arm.Body, false); err != nil {
 			s.popScope()
@@ -1792,6 +1829,9 @@ func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, sema
 		s.pushScope()
 		if ident, ok := expr.Value.(*ast.Ident); ok && enumType.Packed && armDecodedValue != nil {
 			s.bindPackedEnumStorage(ident.Name, enumType, armDecodedValue)
+		}
+		if key, ok := s.packedEnumStoragePath(expr.Value); ok && enumType.Packed {
+			s.bindPackedEnumStoreOrigin(key, enumType, storeBinding)
 		}
 		s.bindMatchedPackedVariantView(expr.Value, arm.Pattern, enumValue, armDecodedValue, enumType, storeBinding)
 		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, resultType)
@@ -1891,6 +1931,9 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		s.defineBinding(p.Name, valueBinding{ptr: alloca, typ: actualType})
 		if enumType, ok := actualType.(*semantic.EnumType); ok && enumType.Packed && decodedActualValue != nil {
 			s.bindPackedEnumStorage(p.Name, enumType, decodedActualValue)
+		}
+		if enumType, ok := actualType.(*semantic.EnumType); ok && enumType.Packed {
+			s.bindPackedEnumStoreOrigin(p.Name, enumType, store)
 		}
 		C.LLVMBuildBr(s.builder, successBB)
 		return decodedActualValue, nil
@@ -2540,6 +2583,66 @@ func (s *functionState) resolvePackedViewStoreBinding(expr ast.Expr, enumType *s
 	}
 }
 
+func (s *functionState) resolveFrozenPackedStoreBinding(expr ast.Expr, enumType *semantic.EnumType) (*packedStoreBinding, bool, error) {
+	if expr == nil {
+		return nil, false, nil
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return s.resolveFrozenPackedStoreBinding(n.Inner, enumType)
+	case *ast.CastExpr:
+		return s.resolveFrozenPackedStoreBinding(n.Operand, enumType)
+	case *ast.MoveExpr:
+		return s.resolveFrozenPackedStoreBinding(n.Operand, enumType)
+	case *ast.Ident:
+		binding, ok := s.lookupBinding(n.Name)
+		if !ok {
+			return nil, false, nil
+		}
+		storeType, ok := binding.typ.(*semantic.PackedEnumStoreType)
+		if !ok || storeType == nil || storeType.Enum == nil || !semantic.IsFrozenPackedEnumStoreType(storeType) {
+			return nil, false, nil
+		}
+		if enumType != nil && storeType.Enum != enumType {
+			return nil, false, nil
+		}
+		storeValue, err := s.loadValue(binding.ptr, binding.typ, n.Name)
+		if err != nil {
+			return nil, false, err
+		}
+		resolved := &packedStoreBinding{value: storeValue, typ: storeType}
+		return resolved, true, nil
+	default:
+		return nil, false, nil
+	}
+}
+
+func (s *functionState) resolvePackedNodeStoreBinding(expr ast.Expr, enumType *semantic.EnumType) (*packedStoreBinding, bool, error) {
+	if expr == nil || enumType == nil || !enumType.Packed {
+		return nil, false, nil
+	}
+	if path, ok := s.packedEnumStoragePath(expr); ok {
+		if binding, ok := s.lookupPackedEnumStoreOrigin(path, enumType); ok {
+			storeCopy := binding
+			return &storeCopy, true, nil
+		}
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return s.resolvePackedNodeStoreBinding(n.Inner, enumType)
+	case *ast.CastExpr:
+		return s.resolvePackedNodeStoreBinding(n.Operand, enumType)
+	case *ast.MoveExpr:
+		return s.resolvePackedNodeStoreBinding(n.Operand, enumType)
+	case *ast.CanExpr:
+		return s.resolvePackedNodeStoreBinding(n.Expr, enumType)
+	case *ast.IndexExpr:
+		return s.resolveFrozenPackedStoreBinding(n.Object, enumType)
+	default:
+		return nil, false, nil
+	}
+}
+
 func (s *functionState) resolvePackedMatchStoreBinding(enumType *semantic.EnumType, valueExpr ast.Expr, storeExpr ast.Expr) (*packedStoreBinding, error) {
 	if enumType == nil || !enumType.Packed {
 		return nil, nil
@@ -2559,6 +2662,11 @@ func (s *functionState) resolvePackedMatchStoreBinding(enumType *semantic.EnumTy
 	binding, ok := s.lookupPackedStore(enumType)
 	if !ok {
 		if inferred, ok, err := s.resolvePackedViewStoreBinding(valueExpr, enumType); err != nil {
+			return nil, err
+		} else if ok {
+			return inferred, nil
+		}
+		if inferred, ok, err := s.resolvePackedNodeStoreBinding(valueExpr, enumType); err != nil {
 			return nil, err
 		} else if ok {
 			return inferred, nil

@@ -2708,6 +2708,36 @@ def read(view_node: packedview[Expr.Lit]) -> int:
 	}
 }
 
+func TestGenerateLLVMIRLowersFrozenIndexedAliasOpenWithoutExplicitStoreInWordHandleABI(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Lit(value: int)
+
+def read(store: Expr.Store[Frozen], index: usize) -> int:
+	node: Expr = store[index]
+	alias: Expr = node
+	open alias as Expr.Lit(value: value):
+		return value + alias.span
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_frozen_index_alias_open_inferred_store_word_handle.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	for _, check := range []string{
+		"call i64 @ctx_packed_store_word_handle_at(",
+		"call i64 @ctx_packed_store_read_word(",
+		"packed.tag.store.state",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRUsesIndexReadHelpersForFrozenPackedOpenStmtInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:

@@ -861,7 +861,7 @@ func (s *functionState) currentBlockTerminated() bool {
 }
 
 func (s *functionState) pushScope() {
-	s.scope = &codegenScope{parent: s.scope, bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}, packedViewPtrs: map[string]packedVariantViewBinding{}}
+	s.scope = &codegenScope{parent: s.scope, bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}, packedEnumStores: map[string]packedStoreBinding{}, packedViewPtrs: map[string]packedVariantViewBinding{}}
 }
 
 func (s *functionState) popScope() {
@@ -912,9 +912,10 @@ func (s *functionState) bindPackedStoreValue(t semantic.Type, value C.LLVMValueR
 
 func (s *functionState) defineBinding(name string, binding valueBinding) {
 	if s.scope == nil {
-		s.scope = &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}, packedViewPtrs: map[string]packedVariantViewBinding{}}
+		s.scope = &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}, packedEnumStores: map[string]packedStoreBinding{}, packedViewPtrs: map[string]packedVariantViewBinding{}}
 	}
 	s.invalidatePackedEnumStorage(name)
+	s.invalidatePackedEnumStoreOrigin(name)
 	s.invalidatePackedVariantView(name)
 	s.scope.bindings[name] = binding
 }
@@ -974,7 +975,7 @@ func (s *functionState) bindPackedEnumStorage(name string, enumType *semantic.En
 		return
 	}
 	if s.scope == nil {
-		s.scope = &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}, packedViewPtrs: map[string]packedVariantViewBinding{}}
+		s.scope = &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}, packedEnumStores: map[string]packedStoreBinding{}, packedViewPtrs: map[string]packedVariantViewBinding{}}
 	}
 	if s.scope.packedEnumPtrs == nil {
 		s.scope.packedEnumPtrs = map[string]packedEnumStorageBinding{}
@@ -987,7 +988,7 @@ func (s *functionState) bindPackedVariantView(name string, viewType *semantic.Pa
 		return
 	}
 	if s.scope == nil {
-		s.scope = &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}, packedViewPtrs: map[string]packedVariantViewBinding{}}
+		s.scope = &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}, packedEnumStores: map[string]packedStoreBinding{}, packedViewPtrs: map[string]packedVariantViewBinding{}}
 	}
 	if s.scope.packedViewPtrs == nil {
 		s.scope.packedViewPtrs = map[string]packedVariantViewBinding{}
@@ -1069,6 +1070,45 @@ func (s *functionState) lookupPackedEnumStorage(name string, enumType *semantic.
 	return nil, false
 }
 
+func (s *functionState) bindPackedEnumStoreOrigin(name string, enumType *semantic.EnumType, store *packedStoreBinding) {
+	if name == "" || enumType == nil || !enumType.Packed || store == nil || store.typ == nil || store.value == nil {
+		return
+	}
+	if store.typ.Enum != enumType || !semantic.IsFrozenPackedEnumStoreType(store.typ) {
+		return
+	}
+	if s.scope == nil {
+		s.scope = &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}, packedEnumStores: map[string]packedStoreBinding{}, packedViewPtrs: map[string]packedVariantViewBinding{}}
+	}
+	if s.scope.packedEnumStores == nil {
+		s.scope.packedEnumStores = map[string]packedStoreBinding{}
+	}
+	s.scope.packedEnumStores[name] = *store
+}
+
+func (s *functionState) lookupPackedEnumStoreOrigin(name string, enumType *semantic.EnumType) (packedStoreBinding, bool) {
+	if name == "" || enumType == nil || !enumType.Packed {
+		return packedStoreBinding{}, false
+	}
+	for scope := s.scope; scope != nil; scope = scope.parent {
+		binding, ok := scope.packedEnumStores[name]
+		if !ok {
+			continue
+		}
+		if binding.typ == enumTypeStoreType(enumType, binding.typ) && binding.value != nil {
+			return binding, true
+		}
+	}
+	return packedStoreBinding{}, false
+}
+
+func enumTypeStoreType(enumType *semantic.EnumType, storeType *semantic.PackedEnumStoreType) *semantic.PackedEnumStoreType {
+	if enumType == nil || storeType == nil || storeType.Enum != enumType {
+		return nil
+	}
+	return storeType
+}
+
 func (s *functionState) invalidatePackedEnumStorage(name string) {
 	if name == "" {
 		return
@@ -1082,9 +1122,28 @@ func (s *functionState) invalidatePackedEnumStorage(name string) {
 	}
 }
 
+func (s *functionState) invalidatePackedEnumStoreOrigin(name string) {
+	if name == "" {
+		return
+	}
+	for scope := s.scope; scope != nil; scope = scope.parent {
+		for key := range scope.packedEnumStores {
+			if key == name || strings.HasPrefix(key, name+".") {
+				delete(scope.packedEnumStores, key)
+			}
+		}
+	}
+}
+
 func (s *functionState) invalidatePackedEnumStorageExpr(expr ast.Expr) {
 	if path, ok := s.packedEnumStoragePath(expr); ok {
 		s.invalidatePackedEnumStorage(path)
+	}
+}
+
+func (s *functionState) invalidatePackedEnumStoreOriginExpr(expr ast.Expr) {
+	if path, ok := s.packedEnumStoragePath(expr); ok {
+		s.invalidatePackedEnumStoreOrigin(path)
 	}
 }
 

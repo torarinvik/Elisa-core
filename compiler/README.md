@@ -64,6 +64,7 @@ Current packed-enum rules:
 - `Enum.Store` is the explicit per-enum store constructor surface
 - packed control-flow and projection forms (`match`, `open`, `view`, `move-as`, and ownerless `new`) can infer the active store when a matching `Enum.Store[...]` is already in scope
 - first-class `packedview[Enum.Variant]` carriers also provide the omitted-store context for packed `open` / `view` / `move-as`, so those forms do not need a separate `in store` clause when operating on the view itself
+- packed values loaded from an exact `Enum.Store[Frozen]` index root (including immutable whole-value aliases of those loads) also carry enough provenance for omitted-store `match` / `open` / `view` / `move-as`
 - packed `common:` fields are readable on the packed handle (`node.span`)
 - packed `common:` fields can be initialized by name during allocation; omitted common fields remain zero-initialized
 - packed variants may include one tail payload, which lowers as a `dview[...]` regardless of where that payload appears in the variant field list
@@ -83,7 +84,7 @@ def build(owner: Arena) -> Expr:
     return new Expr.Add(span: 3, left: left, right: right)
 ```
 
-Inside an active store context — whether introduced by `in store:` or by an in-scope `Enum.Store[...]` local/parameter — packed allocations can omit `[store]`, packed matches can omit `in store`, and `open`/`view`/`move-as` can omit their store clause; all forms still lower to the same explicit-store representation.
+Inside an active store context — whether introduced by `in store:` or by an in-scope `Enum.Store[...]` local/parameter — packed allocations can omit `[store]`, packed matches can omit `in store`, and `open`/`view`/`move-as` can omit their store clause; the same omitted-store forms also work when the packed value itself is proven to come from an exact frozen-store index root. All forms still lower to the same explicit-store representation.
 
 ## Frozen packed projections
 

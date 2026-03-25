@@ -4753,6 +4753,19 @@ def read(node: Expr, store: Expr.Store[Frozen]) -> int:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsPackedMatchWithoutStoreClauseFromFrozenIndexExpr(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+def read(store: Expr.Store[Frozen], index: usize) -> int:
+	return match store[index]:
+		Expr.Int(value: value):
+			value
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_match_frozen_index_inferred_store_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeRejectsOrdinaryEnumMatchWithStoreClause(t *testing.T) {
 	src := `enum Expr:
 	Int(value: int)
@@ -5021,6 +5034,23 @@ def read(view_node: packedview[Expr.Int]) -> int:
 	return 0
 `
 	_, errs := parseAndAnalyze(t, "packed_enum_open_packedview_param_inferred_store_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsOpenStmtWithFrozenIndexAliasWithoutStoreClause(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+
+def read(store: Expr.Store[Frozen], index: usize) -> int:
+	node: Expr = store[index]
+	alias: Expr = node
+	open alias as Expr.Int(value: value):
+		return value + alias.span
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_open_frozen_index_alias_inferred_store_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
