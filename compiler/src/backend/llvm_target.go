@@ -243,7 +243,11 @@ func (g *llvmGenerator) abiSizeOfType(t semantic.Type) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return g.abiSizeOfLLVMType(llvmType)
+	size, err := g.abiSizeOfLLVMType(llvmType)
+	if err != nil {
+		return 0, err
+	}
+	return size, nil
 }
 
 func (g *llvmGenerator) abiSizeOfLLVMType(llvmType C.LLVMTypeRef) (uint64, error) {

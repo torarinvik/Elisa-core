@@ -501,7 +501,7 @@ func (g *llvmGenerator) applyTypeAlignment(value C.LLVMValueRef, t semantic.Type
 		return
 	}
 	alignment, ok := semantic.RequestedAlignment(t)
-	if !ok || alignment <= 0 {
+	if !ok || alignment == 0 {
 		return
 	}
 	C.llcontextSetAlignment(value, C.uint(alignment))

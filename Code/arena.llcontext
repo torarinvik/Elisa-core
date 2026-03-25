@@ -264,10 +264,6 @@ def free_region(r: heap Region&) can[Memory.Release, Abort.Panic]:
     static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
         pass
 
-# ------------------------------------------------------------
-# Core arena allocation
-# ------------------------------------------------------------
-
 def arena_alloc(a: any Arena&, size_bytes: usize) -> heap void& can[Memory.Allocate, Abort.Panic]:
     size: usize = (size_bytes + sizeof(uintptr) - 1) / sizeof(uintptr)
 
