@@ -50,6 +50,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if from, fromType, ok := a.freezeMovedPackedStoreSource(n.Value); ok {
 			a.remapPackedStoreDependencies(from, sym, PackedEnumStoreWithState(fromType, a.namedTypes["Frozen"]))
 		}
+		if n.Value != nil && AssignableTo(bindingType, valueType) {
+			a.bindActivePackedStoreType(bindingType)
+		}
 		a.consumeAffineValueExpr(n.Value, bindingType, "move into local "+strconvQuote(n.Name))
 	case *ast.MoveBindStmt:
 		a.analyzeMoveBindStmt(n)
@@ -117,6 +120,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.markCreatedProtocolTarget(n.Target, n.Value, targetType)
 		a.recordBorrowedOwnerRefTarget(n.Target, targetType, n.Value)
 		a.recordFunctionValueTarget(n.Target, n.Value)
+		if AssignableTo(targetType, valueType) {
+			a.bindActivePackedStoreType(targetType)
+		}
 		a.consumeAffineValueExpr(n.Value, targetType, "assignment")
 	case *ast.AugAssignStmt:
 		targetType := a.assignmentTargetType(n.Target)
@@ -140,6 +146,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.markCreatedProtocolTarget(n.Target, n.Value, targetType)
 		a.recordBorrowedOwnerRefTarget(n.Target, targetType, n.Value)
 		a.recordFunctionValueTarget(n.Target, n.Value)
+		if AssignableTo(targetType, valueType) {
+			a.bindActivePackedStoreType(targetType)
+		}
 		a.consumeAffineValueExpr(n.Value, targetType, "assignment")
 	case *ast.ReturnStmt:
 		if n.Value == nil {
@@ -4925,6 +4934,17 @@ func (a *Analyzer) clonePackedStores() map[string]*PackedEnumStoreType {
 		cloned[name] = store
 	}
 	return cloned
+}
+
+func (a *Analyzer) bindActivePackedStoreType(t Type) {
+	storeType, ok := t.(*PackedEnumStoreType)
+	if !ok || storeType == nil || storeType.Enum == nil {
+		return
+	}
+	if a.currentPackedStores == nil {
+		a.currentPackedStores = map[string]*PackedEnumStoreType{}
+	}
+	a.currentPackedStores[storeType.Enum.Name] = storeType
 }
 
 func (a *Analyzer) lookupPackedStore(enumType *EnumType) (*PackedEnumStoreType, bool) {

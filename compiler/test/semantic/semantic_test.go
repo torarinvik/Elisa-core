@@ -4672,6 +4672,18 @@ def bad() -> Expr:
 	}
 }
 
+func TestAnalyzeAcceptsBarePackedAllocWithActiveStoreLocal(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+def build(owner: Arena) -> Expr:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	return new Expr.Int(value: 1)
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_alloc_with_active_store_local_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeRejectsPackedMatchWithoutStoreClause(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)
@@ -4689,6 +4701,19 @@ def bad(node: Expr) -> int:
 	if !strings.Contains(all, "packed enum match over \"Expr\" requires an in Expr.Store clause") {
 		t.Fatalf("expected packed match-store diagnostic, got:\n%s", all)
 	}
+}
+
+func TestAnalyzeAcceptsPackedMatchWithoutStoreClauseWithActiveStoreParam(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+def read(node: Expr, store: Expr.Store[Frozen]) -> int:
+	return match node:
+		Expr.Int(value: value):
+			value
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_match_with_active_store_param_ok.llcontext", src)
+	requireNoErrors(t, errs)
 }
 
 func TestAnalyzeRejectsOrdinaryEnumMatchWithStoreClause(t *testing.T) {
@@ -4869,6 +4894,21 @@ def read(node: Expr, store: Expr.Store[Local]) -> int:
 	return 0
 `
 	_, errs := parseAndAnalyze(t, "packed_enum_view_unnamed_payload_inferred_store_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsViewStmtWithActiveStoreParam(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+
+def read(node: Expr, store: Expr.Store[Frozen]) -> int:
+	view node as Expr.Int(lit):
+		return lit.value + lit.span
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_view_active_store_param_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 

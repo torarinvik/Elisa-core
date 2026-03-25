@@ -2235,6 +2235,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 						}
 						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, ParamIndex: i, Mutable: a.paramIsMutable(param)}
 						a.defineLocal(sym, param.Position)
+						a.bindActivePackedStoreType(ptype)
 						a.recordValueBinding(sym, nil)
 						a.recordBorrowedOwnerRefParam(sym)
 						if state, ok := a.abstractParamRegionRefState(ptype, i, map[string]bool{}); ok {
@@ -2346,6 +2347,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 						}
 						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, ParamIndex: i, Mutable: a.paramIsMutable(param)}
 						a.defineLocal(sym, param.Position)
+						a.bindActivePackedStoreType(ptype)
 						a.recordValueBinding(sym, nil)
 						a.recordBorrowedOwnerRefParam(sym)
 						if state, ok := a.abstractParamRegionRefState(ptype, i, map[string]bool{}); ok {
@@ -2452,6 +2454,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 						}
 						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, ParamIndex: i, Mutable: a.paramIsMutable(param)}
 						a.defineLocal(sym, param.Position)
+						a.bindActivePackedStoreType(ptype)
 						a.recordValueBinding(sym, nil)
 						a.recordBorrowedOwnerRefParam(sym)
 						if state, ok := a.abstractParamRegionRefState(ptype, i, map[string]bool{}); ok {
