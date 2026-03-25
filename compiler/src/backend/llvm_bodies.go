@@ -1712,11 +1712,27 @@ func resolveMatchableEnumType(actual semantic.Type) (*semantic.EnumType, bool) {
 	}
 }
 
+func runtimeStringLiteralType() semantic.Type {
+	return &semantic.RefType{Elem: &semantic.BuiltinType{Name: "u8"}, State: semantic.RefStateNonNull, Storage: semantic.RefStorageStatic, ExplicitStorage: true}
+}
+
+func isStringMatchableType(actual semantic.Type) bool {
+	_, _, _, _, ok := runtimeStringCompareInfo(actual, runtimeStringLiteralType())
+	return ok
+}
+
 func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 	enumType, ok := resolveMatchableEnumType(s.exprType(stmt.Value))
-	if !ok {
-		return fmt.Errorf("match requires an enum value")
+	if ok {
+		return s.emitEnumMatch(stmt, enumType)
 	}
+	if isStringMatchableType(s.exprType(stmt.Value)) {
+		return s.emitStringMatch(stmt)
+	}
+	return fmt.Errorf("match requires an enum or string value")
+}
+
+func (s *functionState) emitEnumMatch(stmt *ast.MatchStmt, enumType *semantic.EnumType) error {
 	storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, stmt.Value, stmt.Store)
 	if err != nil {
 		return err
@@ -1790,9 +1806,16 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, semantic.Type, error) {
 	resultType := s.exprType(expr)
 	enumType, ok := resolveMatchableEnumType(s.exprType(expr.Value))
-	if !ok {
-		return nil, nil, fmt.Errorf("match requires an enum value")
+	if ok {
+		return s.emitEnumMatchExpr(expr, resultType, enumType)
 	}
+	if isStringMatchableType(s.exprType(expr.Value)) {
+		return s.emitStringMatchExpr(expr, resultType)
+	}
+	return nil, nil, fmt.Errorf("match requires an enum or string value")
+}
+
+func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semantic.Type, enumType *semantic.EnumType) (C.LLVMValueRef, semantic.Type, error) {
 	storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, expr.Value, expr.Store)
 	if err != nil {
 		return nil, nil, err
@@ -1854,6 +1877,135 @@ func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, sema
 
 	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
 	if semantic.IsNeverType(resultType) {
+		C.LLVMBuildUnreachable(s.builder)
+	} else {
+		llvmType, err := s.g.lowerType(resultType)
+		if err != nil {
+			return nil, nil, err
+		}
+		undefValue := C.LLVMGetUndef(llvmType)
+		failEnd := C.LLVMGetInsertBlock(s.builder)
+		incomingValues = append(incomingValues, undefValue)
+		incomingBlocks = append(incomingBlocks, failEnd)
+		C.LLVMBuildBr(s.builder, mergeBB)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	if len(incomingValues) == 0 {
+		C.LLVMBuildUnreachable(s.builder)
+		return nil, resultType, nil
+	}
+	if len(incomingValues) == 1 || semantic.IsNeverType(resultType) {
+		return incomingValues[0], resultType, nil
+	}
+	llvmType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, err
+	}
+	phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree("match.expr.phi"))
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+	return phi, resultType, nil
+}
+
+func matchHasWildcard(arms []ast.MatchArm) bool {
+	for _, arm := range arms {
+		if _, ok := arm.Pattern.(*ast.MatchWildcardPattern); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *functionState) emitStringMatch(stmt *ast.MatchStmt) error {
+	actualType := s.exprType(stmt.Value)
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.end"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.fail"))
+	allTerminated := true
+	for i, arm := range stmt.Arms {
+		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.arm"))
+		var nextBB C.LLVMBasicBlockRef
+		if i == len(stmt.Arms)-1 {
+			nextBB = failBB
+		} else {
+			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.next"))
+		}
+		if err := s.emitStringMatchPatternTest(arm.Pattern, stmt.Value, actualType, bodyBB, nextBB); err != nil {
+			return err
+		}
+
+		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+		s.pushScope()
+		if err := s.emitBlock(arm.Body, false); err != nil {
+			s.popScope()
+			return err
+		}
+		s.popScope()
+		if !s.currentBlockTerminated() {
+			allTerminated = false
+			C.LLVMBuildBr(s.builder, mergeBB)
+		}
+
+		if nextBB != mergeBB {
+			C.LLVMPositionBuilderAtEnd(s.builder, nextBB)
+		}
+	}
+
+	hasWildcard := matchHasWildcard(stmt.Arms)
+	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	if hasWildcard {
+		C.LLVMBuildUnreachable(s.builder)
+	} else {
+		C.LLVMBuildBr(s.builder, mergeBB)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	if allTerminated && hasWildcard {
+		C.LLVMBuildUnreachable(s.builder)
+	}
+	return nil
+}
+
+func (s *functionState) emitStringMatchExpr(expr *ast.MatchExpr, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+	actualType := s.exprType(expr.Value)
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.end"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.fail"))
+	incomingValues := make([]C.LLVMValueRef, 0, len(expr.Arms))
+	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(expr.Arms))
+	for i, arm := range expr.Arms {
+		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.arm"))
+		var nextBB C.LLVMBasicBlockRef
+		if i == len(expr.Arms)-1 {
+			nextBB = failBB
+		} else {
+			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.next"))
+		}
+		if err := s.emitStringMatchPatternTest(arm.Pattern, expr.Value, actualType, bodyBB, nextBB); err != nil {
+			return nil, nil, err
+		}
+
+		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+		s.pushScope()
+		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, resultType)
+		if err != nil {
+			s.popScope()
+			return nil, nil, err
+		}
+		if reachable && !s.currentBlockTerminated() {
+			armEnd := C.LLVMGetInsertBlock(s.builder)
+			incomingValues = append(incomingValues, armValue)
+			incomingBlocks = append(incomingBlocks, armEnd)
+			C.LLVMBuildBr(s.builder, mergeBB)
+		}
+		s.popScope()
+
+		if nextBB != mergeBB {
+			C.LLVMPositionBuilderAtEnd(s.builder, nextBB)
+		}
+	}
+
+	hasWildcard := matchHasWildcard(expr.Arms)
+	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	if hasWildcard || semantic.IsNeverType(resultType) {
 		C.LLVMBuildUnreachable(s.builder)
 	} else {
 		llvmType, err := s.g.lowerType(resultType)
@@ -2001,6 +2153,30 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		return matchedDecodedValue, nil
 	default:
 		return nil, fmt.Errorf("unsupported match pattern %T", pattern)
+	}
+}
+
+func (s *functionState) emitStringMatchPatternTest(pattern ast.MatchPattern, actualExpr ast.Expr, actualType semantic.Type, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) error {
+	switch p := pattern.(type) {
+	case *ast.MatchWildcardPattern:
+		C.LLVMBuildBr(s.builder, successBB)
+		return nil
+	case *ast.MatchStringLiteralPattern:
+		literalExpr := &ast.StringLit{Position: p.Pos(), Value: p.Value}
+		literalType := runtimeStringLiteralType()
+		helperName, firstType, secondType, swap, ok := runtimeStringCompareInfo(actualType, literalType)
+		if !ok {
+			return fmt.Errorf("string match pattern requires a string value, got %s", actualType.String())
+		}
+		synthetic := &ast.BinaryExpr{Position: p.Pos(), Op: lexer.TOKEN_EQEQ, Left: actualExpr, Right: literalExpr}
+		cmp, _, err := s.emitRuntimeStringCompareExpr(synthetic, helperName, firstType, secondType, swap)
+		if err != nil {
+			return err
+		}
+		C.LLVMBuildCondBr(s.builder, cmp, successBB, failureBB)
+		return nil
+	default:
+		return fmt.Errorf("unsupported string match pattern %T", pattern)
 	}
 }
 

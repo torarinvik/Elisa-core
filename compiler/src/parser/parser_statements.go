@@ -505,16 +505,19 @@ func (p *Parser) parseMatchArm() ast.MatchArm {
 func (p *Parser) parseMatchPattern() ast.MatchPattern {
 	pattern := p.parseNestedMatchPattern()
 	switch pattern.(type) {
-	case *ast.MatchWildcardPattern, *ast.MatchVariantPattern:
+	case *ast.MatchWildcardPattern, *ast.MatchStringLiteralPattern, *ast.MatchVariantPattern:
 		return pattern
 	default:
-		p.errorf("top-level match arm must use Enum.Variant(...) or _")
+		p.errorf("top-level match arm must use Enum.Variant(...), a string literal, or _")
 		return pattern
 	}
 }
 
 func (p *Parser) parseNestedMatchPattern() ast.MatchPattern {
 	pos := p.cur().Pos
+	if p.peek() == lexer.TOKEN_STRING_LIT {
+		return &ast.MatchStringLiteralPattern{Position: pos, Value: p.advance().Text}
+	}
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_" {
 		p.advance()
 		return &ast.MatchWildcardPattern{Position: pos}

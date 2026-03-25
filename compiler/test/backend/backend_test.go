@@ -1968,6 +1968,48 @@ def unwrap_or(value: MaybeInt, fallback: int) -> int:
 	}
 }
 
+func TestGenerateLLVMIRLowersStringMatchExpressionsViaPhi(t *testing.T) {
+	src := `def classify(text: StringView) -> int:
+	return match text:
+		"if":
+			1
+		"local":
+			2
+		_:
+			0
+`
+	result := parseAndAnalyze(t, "backend_string_match_expr.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	body := functionIR(output, "classify")
+	if body == "" {
+		t.Fatalf("expected to find classify body, got:\n%s", output)
+	}
+	checks := []string{
+		"define i64 @classify(%StringView",
+		"phi i64",
+		"extractvalue %StringView",
+		"load i8, ptr",
+		"getelementptr i8, ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	for _, bad := range []string{"ctx_string_view_eq", "ctx_string_views_eq", "@memcmp("} {
+		if strings.Contains(body, bad) {
+			t.Fatalf("expected tiny string match literals to avoid %q, got:\n%s", bad, body)
+		}
+	}
+	if strings.Count(body, "icmp eq i8") < 2 {
+		t.Fatalf("expected classify to compare literal bytes directly for both string arms, got:\n%s", body)
+	}
+}
+
 func TestGenerateLLVMIRLowersNestedMatchPatterns(t *testing.T) {
 	src := `enum Inner:
 	A(int)

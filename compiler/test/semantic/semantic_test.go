@@ -4441,6 +4441,54 @@ def unwrap(value: MaybeInt) -> int:
 	}
 }
 
+func TestAnalyzeAcceptsStringLiteralMatchStatement(t *testing.T) {
+	src := `def classify(text: StringView) -> int:
+	match text:
+		"local":
+			return 1
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "string_match_stmt_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsNonExhaustiveStringMatchExpression(t *testing.T) {
+	src := `def classify(text: StringView) -> int:
+	return match text:
+		"local":
+			1
+`
+	_, errs := parseAndAnalyze(t, "string_match_expr_non_exhaustive.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "non-exhaustive string match expression; add a final _ arm") {
+		t.Fatalf("expected non-exhaustive string-match diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsShadowedStringMatchArms(t *testing.T) {
+	src := `def classify(text: StringView) -> int:
+	match text:
+		"local":
+			return 1
+		"local":
+			return 2
+		_:
+			return 0
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "string_match_shadowed_stmt.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "match arm \"local\" is unreachable because an earlier arm already matches it") {
+		t.Fatalf("expected shadowed string-arm diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsRecursiveEnumPayloadByValue(t *testing.T) {
 	src := `enum Expr:
 	Int(int)
