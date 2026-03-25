@@ -121,6 +121,7 @@ def annotate(owner: Arena) -> i32:
 Current dense frozen-node-table rules:
 
 - `dense_key(node, frozen)` is only valid for packed-enum values or packed views proven to come from the exact same frozen store root.
+- That frozen root can come from an exact hidden store-field projection such as `box.store`, not just a bare frozen local or parameter.
 - `NodeKey[Enum]` is a compact carrier for the dense frozen index; `frozen[key]` rehydrates the packed handle from that key.
 - `node_table_fill.specialize[Enum, T]()(arena, frozen, init)` allocates a fixed-size `NodeTable[Enum, T]` with one slot per frozen packed-store row and initializes it eagerly.
 - `table[key]` is writable, while `table.values` is a dense `dview[T]` with frozen packed-store provenance and exact extent tracking.
