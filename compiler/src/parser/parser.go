@@ -183,7 +183,7 @@ func (p *Parser) parseDecl() ast.Decl {
 	}
 }
 
-func (p *Parser) parseFuncAnnotations() []ast.Annotation {
+func (p *Parser) parseAnnotations() []ast.Annotation {
 	annotations := make([]ast.Annotation, 0, 1)
 	for p.peek() == lexer.TOKEN_AT {
 		pos := p.cur().Pos
@@ -205,6 +205,10 @@ func (p *Parser) parseFuncAnnotations() []ast.Annotation {
 		p.skipNewlines()
 	}
 	return annotations
+}
+
+func (p *Parser) parseFuncAnnotations() []ast.Annotation {
+	return p.parseAnnotations()
 }
 
 func (p *Parser) parseAnnotationArg() string {
@@ -562,6 +566,7 @@ func joinAggregateStateMarkers(states []ast.RefState) string {
 }
 
 func (p *Parser) parseFieldDecl() ast.FieldDecl {
+	annotations := p.parseAnnotations()
 	pos := p.cur().Pos
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_COLON)
@@ -579,7 +584,7 @@ func (p *Parser) parseFieldDecl() ast.FieldDecl {
 	typ := p.parseTypeExpr()
 	p.expectNewline()
 
-	return ast.FieldDecl{Position: pos, Name: name, Mutable: mutable, IsTail: isTail, Type: typ}
+	return ast.FieldDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Mutable: mutable, IsTail: isTail, Type: typ}
 }
 
 func (p *Parser) parseFuncDecl() *ast.FuncDecl {

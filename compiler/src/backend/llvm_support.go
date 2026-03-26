@@ -1740,15 +1740,18 @@ func (g *llvmGenerator) fieldInfo(objType semantic.Type, fieldName string) (sema
 		if enumType.Decl == nil {
 			return nil, 0, nil, false, fmt.Errorf("packed enum %s is missing declaration metadata", enumType.Name)
 		}
-		for i, fieldDecl := range enumType.Decl.Common {
+		for _, fieldDecl := range enumType.Decl.Common {
 			if fieldDecl.Name != fieldName {
 				continue
 			}
-			field, ok := enumType.Common[fieldName]
-			if !ok {
-				return nil, 0, nil, false, fmt.Errorf("missing packed enum common field %s.%s", enumType.Name, fieldName)
+			layout, err := g.packedEnumCommonFieldLayout(enumType, fieldName)
+			if err != nil {
+				return nil, 0, nil, false, err
 			}
-			return field.Type, 1 + i, enumType, true, nil
+			if !layout.StoredInline {
+				return nil, 0, nil, false, fmt.Errorf("packed enum common field %s.%s is stored in a side table and does not have an inline address", enumType.Name, fieldName)
+			}
+			return layout.Field.Type, layout.RowFieldIndex, enumType, true, nil
 		}
 		return nil, 0, nil, false, fmt.Errorf("packed enum %s has no common field %s", enumType.Name, fieldName)
 	}

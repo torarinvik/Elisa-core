@@ -34,6 +34,9 @@ struct PackedStoreState:
     prefix_words: mutable usize
     prefix_columns: mutable darray[uintptr]
     prefix_column_capacity: mutable usize
+    side_words: mutable usize
+    side_columns: mutable darray[uintptr]
+    side_column_capacity: mutable usize
     row_words: mutable usize
     preferred_region_capacity: mutable usize
 
@@ -61,6 +64,9 @@ def packed_store_variant_rows_table(state: any PackedStoreState&) -> any darray[
 def packed_store_prefix_column_table(state: any PackedStoreState&) -> any darray[uintptr]&:
     return (&state.prefix_columns).cast[any darray[uintptr]&]
 
+def packed_store_side_column_table(state: any PackedStoreState&) -> any darray[uintptr]&:
+    return (&state.side_columns).cast[any darray[uintptr]&]
+
 def packed_store_ensure_metadata_capacity(a: any Arena&, state: any PackedStoreState&, needed_rows: usize) can[Memory.Allocate, Abort.Panic]:
     handles: any darray[uintptr]& = packed_store_handle_table(state)
     indices: any darray[u32]& = packed_store_index_table(state)
@@ -73,6 +79,7 @@ def packed_store_ensure_metadata_capacity(a: any Arena&, state: any PackedStoreS
     _ = arena_da_reserve(a, variant_slots, needed_rows)
 
     packed_store_ensure_prefix_columns(a, state, needed_rows)
+    packed_store_ensure_side_columns(a, state, needed_rows)
 
 def packed_store_append_handle(a: any Arena&, state: any PackedStoreState&, handle: uintptr) can[Memory.Allocate, Abort.Panic]:
     handles: any darray[uintptr]& = packed_store_handle_table(state)
@@ -215,6 +222,86 @@ def packed_store_append_prefix_words(a: any Arena&, state: any PackedStoreState&
         column[row_index] <- row_words[i]
         i <- i + 1u
 
+def packed_store_ensure_side_columns(a: any Arena&, state: any PackedStoreState&, needed_rows: usize) can[Memory.Allocate, Abort.Panic]:
+    if state.side_words == 0u:
+        return
+
+    columns: any darray[uintptr]& = packed_store_side_column_table(state)
+    while columns.count < state.side_words:
+        _ = arena_da_append(a, columns, 0u64.uintptr())
+
+    if state.side_column_capacity >= needed_rows:
+        return
+
+    new_capacity: mutable usize = ARENA_DA_INIT_CAP if state.side_column_capacity == 0u else state.side_column_capacity * 2u
+    while new_capacity < needed_rows:
+        new_capacity <- new_capacity * 2u
+
+    old_size: usize = state.side_column_capacity * sizeof(uintptr)
+    new_size: usize = new_capacity * sizeof(uintptr)
+    assert columns.items != null
+    column_ptrs: any uintptr& = columns.items
+    i: mutable usize = 0u
+    while i < state.side_words:
+        if column_ptrs[i] == 0u64.uintptr():
+            column_ptrs[i] <- arena_alloc(a, new_size).cast[heap uintptr&].cast[heap u8&].uintptr()
+        else:
+            current_ptr: heap uintptr& = column_ptrs[i].cast[heap u8&].cast[heap uintptr&]
+            column_ptrs[i] <- arena_realloc(
+                a,
+                current_ptr.cast[any void&],
+                old_size,
+                new_size
+            ).cast[heap uintptr&].cast[heap u8&].uintptr()
+        i <- i + 1u
+
+    state.side_column_capacity <- new_capacity
+
+def packed_store_append_side_words(a: any Arena&, state: any PackedStoreState&, words: any void&) can[Memory.Allocate, Abort.Panic]:
+    if state.side_words == 0u:
+        return
+    needed_rows: usize = state.handles.count
+    assert state.side_column_capacity >= needed_rows
+    assert state.side_columns.items != null
+    column_ptrs: any uintptr& = state.side_columns.items
+    source_words: any uintptr& = words.cast[any uintptr&]
+    row_index: usize = needed_rows - 1u
+    assert state.side_columns.count >= state.side_words
+
+    if state.side_words == 1u:
+        assert column_ptrs[0u] != 0u64.uintptr()
+        column0: any uintptr& = column_ptrs[0u].cast[heap u8&].cast[any uintptr&]
+        column0[row_index] <- source_words[0u]
+        return
+
+    if state.side_words == 2u:
+        assert column_ptrs[0u] != 0u64.uintptr()
+        assert column_ptrs[1u] != 0u64.uintptr()
+        column0: any uintptr& = column_ptrs[0u].cast[heap u8&].cast[any uintptr&]
+        column1: any uintptr& = column_ptrs[1u].cast[heap u8&].cast[any uintptr&]
+        column0[row_index] <- source_words[0u]
+        column1[row_index] <- source_words[1u]
+        return
+
+    if state.side_words == 3u:
+        assert column_ptrs[0u] != 0u64.uintptr()
+        assert column_ptrs[1u] != 0u64.uintptr()
+        assert column_ptrs[2u] != 0u64.uintptr()
+        column0: any uintptr& = column_ptrs[0u].cast[heap u8&].cast[any uintptr&]
+        column1: any uintptr& = column_ptrs[1u].cast[heap u8&].cast[any uintptr&]
+        column2: any uintptr& = column_ptrs[2u].cast[heap u8&].cast[any uintptr&]
+        column0[row_index] <- source_words[0u]
+        column1[row_index] <- source_words[1u]
+        column2[row_index] <- source_words[2u]
+        return
+
+    i: mutable usize = 0u
+    while i < state.side_words:
+        assert column_ptrs[i] != 0u64.uintptr()
+        column: any uintptr& = column_ptrs[i].cast[heap u8&].cast[any uintptr&]
+        column[row_index] <- source_words[i]
+        i <- i + 1u
+
 def packed_store_register_region(a: any Arena&, state: any PackedStoreState&, r: heap Region&?, global_index: usize) can[Memory.Allocate, Abort.Panic]:
     assert r != null
 
@@ -259,6 +346,9 @@ def ctx_packed_store_state_new(a: any Arena&, row_bytes: usize) -> heap void& ca
     state.prefix_words <- row_words
     state.prefix_columns <- zeroed
     state.prefix_column_capacity <- 0u
+    state.side_words <- 0u
+    state.side_columns <- zeroed
+    state.side_column_capacity <- 0u
     state.row_words <- row_words
     state.preferred_region_capacity <- preferred_region_capacity
     return state.cast[heap void&]
@@ -270,6 +360,18 @@ def ctx_packed_store_state_new_with_prefix_words(a: any Arena&, row_bytes: usize
         state.prefix_words <- prefix_words
     else:
         state.prefix_words <- state.row_words
+    return state_bits
+
+def ctx_packed_store_state_new_with_side_words(a: any Arena&, row_bytes: usize, side_words: usize) -> heap void& can[Memory.Allocate, Abort.Panic]:
+    state_bits: heap void& = ctx_packed_store_state_new(a, row_bytes)
+    state: heap PackedStoreState& = state_bits.cast[heap PackedStoreState&]
+    state.side_words <- side_words
+    return state_bits
+
+def ctx_packed_store_state_new_with_prefix_and_side_words(a: any Arena&, row_bytes: usize, prefix_words: usize, side_words: usize) -> heap void& can[Memory.Allocate, Abort.Panic]:
+    state_bits: heap void& = ctx_packed_store_state_new_with_prefix_words(a, row_bytes, prefix_words)
+    state: heap PackedStoreState& = state_bits.cast[heap PackedStoreState&]
+    state.side_words <- side_words
     return state_bits
 
 def ctx_packed_store_state_new_variant_sparse(a: any Arena&, row_bytes: usize) -> heap void& can[Memory.Allocate, Abort.Panic]:
@@ -298,9 +400,18 @@ def ctx_packed_store_state_new_variant_sparse(a: any Arena&, row_bytes: usize) -
     state.prefix_words <- 0u
     state.prefix_columns <- zeroed
     state.prefix_column_capacity <- 0u
+    state.side_words <- 0u
+    state.side_columns <- zeroed
+    state.side_column_capacity <- 0u
     state.row_words <- row_words
     state.preferred_region_capacity <- preferred_region_capacity
     return state.cast[heap void&]
+
+def ctx_packed_store_state_new_variant_sparse_with_side_words(a: any Arena&, row_bytes: usize, side_words: usize) -> heap void& can[Memory.Allocate, Abort.Panic]:
+    state_bits: heap void& = ctx_packed_store_state_new_variant_sparse(a, row_bytes)
+    state: heap PackedStoreState& = state_bits.cast[heap PackedStoreState&]
+    state.side_words <- side_words
+    return state_bits
 
 def ctx_packed_store_alloc_result_slow(a: any Arena&, size: usize, owner_tag: uintptr, state: any PackedStoreState&) can[Memory.Allocate, Abort.Panic]:
     if state.alloc_region == null:
@@ -638,6 +749,24 @@ def ctx_packed_store_read_variant_sparse_word(index: u32, state_bits: any void&,
     slots: any u32& = state.variant_slots.items
     row_words: any uintptr& = packed_store_variant_row_ptr(state, tags[index_usize], slots[index_usize]).cast[any uintptr&]
     return row_words[word_offset]
+
+def ctx_packed_store_record_side_words(a: any Arena&, words: any void&, state_bits: any void&) can[Memory.Allocate, Abort.Panic]:
+    assert state_bits != null
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
+    packed_store_append_side_words(a, state, words)
+
+def ctx_packed_store_read_side_word(state_bits: any void&, index: u32, word_offset: usize) -> uintptr can[Abort.Panic]:
+    assert state_bits != null
+    state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
+    index_usize: usize = index.usize()
+    assert index_usize < state.handles.count
+    assert word_offset < state.side_words
+    assert state.side_columns.items != null
+
+    column_ptrs: any uintptr& = state.side_columns.items
+    assert column_ptrs[word_offset] != 0u64.uintptr()
+    column: any uintptr& = column_ptrs[word_offset].cast[heap u8&].cast[any uintptr&]
+    return column[index_usize]
 
 def ctx_packed_store_word_handle_at(state_bits: any void&, index: usize) -> uintptr:
     assert state_bits != null

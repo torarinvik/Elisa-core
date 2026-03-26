@@ -2026,6 +2026,71 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 	requireFunctionReturnTypeString(t, result, "ok", "void")
 }
 
+func TestAnalyzeAcceptsPackedCommonFieldStorageAnnotations(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		@storage(side_table)
+		span: int
+		@storage(inline)
+		kind: int
+	Lit(value: int)
+	End
+`
+	result, errs := parseAndAnalyze(t, "packed_common_field_storage_annotations.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	enumType, ok := result.NamedTypes["Expr"].(*semantic.EnumType)
+	if !ok || enumType == nil {
+		t.Fatalf("expected Expr named type to resolve to semantic.EnumType, got %#v", result.NamedTypes["Expr"])
+	}
+	spanField, ok := enumType.Common["span"]
+	if !ok {
+		t.Fatalf("expected packed enum common field span to be present")
+	}
+	if spanField.PackedStorage != semantic.PackedFieldStorageSideTable {
+		t.Fatalf("expected Expr.common.span to resolve to side-table storage, got %q", spanField.PackedStorage)
+	}
+	kindField, ok := enumType.Common["kind"]
+	if !ok {
+		t.Fatalf("expected packed enum common field kind to be present")
+	}
+	if kindField.PackedStorage != semantic.PackedFieldStorageInline {
+		t.Fatalf("expected Expr.common.kind to resolve to inline storage, got %q", kindField.PackedStorage)
+	}
+}
+
+func TestAnalyzeRejectsPackedFieldStorageAnnotationsOutsidePackedEnumCommonFields(t *testing.T) {
+	src := `struct Bad:
+	@storage(side_table)
+	value: int
+`
+	_, errs := parseAndAnalyze(t, "packed_common_field_storage_annotation_target_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "field annotation @storage is only supported on packed enum common fields") {
+		t.Fatalf("expected unsupported field-annotation target diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsInvalidPackedCommonFieldStorageMode(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		@storage(moonbeam)
+		span: int
+	Lit(value: int)
+`
+	_, errs := parseAndAnalyze(t, "packed_common_field_storage_mode_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "expected inline or side_table") {
+		t.Fatalf("expected invalid storage mode diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsReusingExternReturnedBorrowedThreadPoolAliasAfterShutdown(t *testing.T) {
 	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
 

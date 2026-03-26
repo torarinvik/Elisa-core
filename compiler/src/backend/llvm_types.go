@@ -103,6 +103,21 @@ func packedModeUsesDirectWordReads(mode packedEnumABIMode) bool {
 	return mode == packedEnumABIWordHandle || packedModeUsesDenseIndexHandle(mode)
 }
 
+func packedModeName(mode packedEnumABIMode) string {
+	switch mode {
+	case packedEnumABIRowHandle:
+		return string(PackedEnumABIRowHandle)
+	case packedEnumABIWordHandle:
+		return string(PackedEnumABIWordHandle)
+	case packedEnumABIIndexSOA:
+		return string(PackedEnumABIIndexSOA)
+	case packedEnumABIVariantSparse:
+		return string(PackedEnumABIVariantSparse)
+	default:
+		return fmt.Sprintf("mode-%d", mode)
+	}
+}
+
 func isVoidRefLikeType(t semantic.Type) bool {
 	ref, ok := t.(*semantic.RefType)
 	if !ok {
@@ -727,14 +742,144 @@ func (g *llvmGenerator) packedEnumPayloadFieldIndex(enumType *semantic.EnumType)
 	case packedEnumABIWordHandle:
 		fallthrough
 	case packedEnumABIIndexSOA, packedEnumABIVariantSparse:
-		payloadIndex := 1
-		if enumType.Decl != nil {
-			payloadIndex += len(enumType.Decl.Common)
+		inlineCommonCount, err := g.packedEnumInlineCommonFieldCount(enumType)
+		if err != nil {
+			return 0, err
 		}
-		return payloadIndex, nil
+		return 1 + inlineCommonCount, nil
 	default:
 		return 0, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedModeForEnum(enumType))
 	}
+}
+
+type packedEnumCommonFieldLayout struct {
+	Field          semantic.Field
+	DeclarationIdx int
+	RowFieldIndex  int
+	SideWordOffset uint64
+	WordCount      uint64
+	StoredInline   bool
+}
+
+func packedFieldUsesSideTable(field semantic.Field) bool {
+	return field.PackedStorage == semantic.PackedFieldStorageSideTable
+}
+
+func (g *llvmGenerator) packedEnumSupportsSideTableCommonFields(enumType *semantic.EnumType) bool {
+	if enumType == nil {
+		return false
+	}
+	return packedModeUsesDenseIndexHandle(g.packedModeForEnum(enumType))
+}
+
+func (g *llvmGenerator) packedEnumInlineCommonFieldCount(enumType *semantic.EnumType) (int, error) {
+	if enumType == nil || enumType.Decl == nil {
+		return 0, nil
+	}
+	count := 0
+	for _, fieldDecl := range enumType.Decl.Common {
+		field, ok := enumType.Common[fieldDecl.Name]
+		if !ok {
+			return 0, fmt.Errorf("missing packed enum common field %s.%s", enumType.Name, fieldDecl.Name)
+		}
+		if !packedFieldUsesSideTable(field) {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (g *llvmGenerator) packedEnumCommonSideTableWordCount(enumType *semantic.EnumType) (uint64, error) {
+	if enumType == nil || enumType.Decl == nil {
+		return 0, nil
+	}
+	if !g.packedEnumSupportsSideTableCommonFields(enumType) {
+		for _, fieldDecl := range enumType.Decl.Common {
+			field, ok := enumType.Common[fieldDecl.Name]
+			if !ok {
+				return 0, fmt.Errorf("missing packed enum common field %s.%s", enumType.Name, fieldDecl.Name)
+			}
+			if packedFieldUsesSideTable(field) {
+				return 0, fmt.Errorf("packed enum %s common field %s uses @storage(side_table), but packed ABI %q does not support side-tabled common fields", enumType.Name, fieldDecl.Name, packedModeName(g.packedModeForEnum(enumType)))
+			}
+		}
+		return 0, nil
+	}
+	wordBytes := uint64(g.wordBits / 8)
+	if wordBytes == 0 {
+		wordBytes = 8
+	}
+	total := uint64(0)
+	for _, fieldDecl := range enumType.Decl.Common {
+		field, ok := enumType.Common[fieldDecl.Name]
+		if !ok {
+			return 0, fmt.Errorf("missing packed enum common field %s.%s", enumType.Name, fieldDecl.Name)
+		}
+		if !packedFieldUsesSideTable(field) {
+			continue
+		}
+		sizeBytes, err := g.abiSizeOfType(field.Type)
+		if err != nil {
+			return 0, err
+		}
+		if sizeBytes == 0 {
+			continue
+		}
+		total += (sizeBytes + wordBytes - 1) / wordBytes
+	}
+	return total, nil
+}
+
+func (g *llvmGenerator) packedEnumCommonFieldLayout(enumType *semantic.EnumType, fieldName string) (*packedEnumCommonFieldLayout, error) {
+	if enumType == nil || !enumType.Packed || enumType.Decl == nil {
+		return nil, fmt.Errorf("missing packed enum common field layout metadata")
+	}
+	wordBytes := uint64(g.wordBits / 8)
+	if wordBytes == 0 {
+		wordBytes = 8
+	}
+	rowFieldIndex := 1
+	sideWordOffset := uint64(0)
+	for declarationIdx, fieldDecl := range enumType.Decl.Common {
+		field, ok := enumType.Common[fieldDecl.Name]
+		if !ok {
+			return nil, fmt.Errorf("missing packed enum common field %s.%s", enumType.Name, fieldDecl.Name)
+		}
+		storedInline := !packedFieldUsesSideTable(field)
+		wordCount := uint64(0)
+		if !storedInline {
+			if !g.packedEnumSupportsSideTableCommonFields(enumType) {
+				return nil, fmt.Errorf("packed enum %s common field %s uses @storage(side_table), but packed ABI %q does not support side-tabled common fields", enumType.Name, fieldDecl.Name, packedModeName(g.packedModeForEnum(enumType)))
+			}
+			sizeBytes, err := g.abiSizeOfType(field.Type)
+			if err != nil {
+				return nil, err
+			}
+			if sizeBytes > 0 {
+				wordCount = (sizeBytes + wordBytes - 1) / wordBytes
+			}
+		}
+		if fieldDecl.Name == fieldName {
+			layout := &packedEnumCommonFieldLayout{
+				Field:          field,
+				DeclarationIdx: declarationIdx,
+				RowFieldIndex:  -1,
+				SideWordOffset: sideWordOffset,
+				WordCount:      wordCount,
+				StoredInline:   storedInline,
+			}
+			if storedInline {
+				layout.RowFieldIndex = rowFieldIndex
+			}
+			return layout, nil
+		}
+		if storedInline {
+			rowFieldIndex++
+		} else {
+			sideWordOffset += wordCount
+		}
+	}
+	return nil, fmt.Errorf("packed enum %s has no common field %s", enumType.Name, fieldName)
 }
 
 func (g *llvmGenerator) ensurePackedEnumStoreCarrierType(storeType *semantic.PackedEnumStoreType) (C.LLVMTypeRef, error) {
@@ -899,6 +1044,12 @@ func (g *llvmGenerator) ensurePackedEnumRowType(name string, enum *semantic.Enum
 			if !ok {
 				return nil, fmt.Errorf("missing packed enum common field %s.%s", enum.Name, fieldDecl.Name)
 			}
+			if packedFieldUsesSideTable(field) {
+				if !g.packedEnumSupportsSideTableCommonFields(enum) {
+					return nil, fmt.Errorf("packed enum %s common field %s uses @storage(side_table), but packed ABI %q does not support side-tabled common fields", enum.Name, fieldDecl.Name, packedModeName(g.packedModeForEnum(enum)))
+				}
+				continue
+			}
 			fieldType, err := g.lowerType(field.Type)
 			if err != nil {
 				return nil, err
@@ -950,7 +1101,11 @@ func (g *llvmGenerator) packedEnumCommonPrefixWordCount(enum *semantic.EnumType)
 	}
 	prefixBytes := uint64(0)
 	if hasPayload {
-		prefixBytes, err = g.abiOffsetOfLLVMElement(rowType, 1+len(enum.Decl.Common))
+		payloadIndex, payloadErr := g.packedEnumPayloadFieldIndex(enum)
+		if payloadErr != nil {
+			return 0, payloadErr
+		}
+		prefixBytes, err = g.abiOffsetOfLLVMElement(rowType, payloadIndex)
 	} else {
 		prefixBytes, err = g.abiSizeOfLLVMType(rowType)
 	}

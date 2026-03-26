@@ -199,6 +199,14 @@ type EnumType struct {
 	Decl                    *ast.EnumDecl
 }
 
+type PackedFieldStorageMode string
+
+const (
+	PackedFieldStorageDefault   PackedFieldStorageMode = ""
+	PackedFieldStorageInline    PackedFieldStorageMode = "inline"
+	PackedFieldStorageSideTable PackedFieldStorageMode = "side_table"
+)
+
 type ConstEnumType struct {
 	Name      string
 	Storage   Type
@@ -208,10 +216,11 @@ type ConstEnumType struct {
 }
 
 type Field struct {
-	Name    string
-	Type    Type
-	Mutable bool
-	IsTail  bool
+	Name          string
+	Type          Type
+	Mutable       bool
+	IsTail        bool
+	PackedStorage PackedFieldStorageMode
 }
 
 type StructType struct {

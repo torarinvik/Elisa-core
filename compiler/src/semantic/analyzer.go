@@ -705,6 +705,7 @@ func (a *Analyzer) populateEnumVariants(decls []scopedDecl) {
 				a.errorf(enumDecl.Pos(), "enum %q only supports common: fields for packed enums", enumDecl.Name)
 			}
 			for _, commonDecl := range enumDecl.Common {
+				storage := a.analyzePackedCommonFieldAnnotations(enumDecl, commonDecl)
 				if commonDecl.Mutable {
 					a.errorf(commonDecl.Position, "packed enum %q common field %q cannot be mutable in v1", enumDecl.Name, commonDecl.Name)
 				}
@@ -716,7 +717,7 @@ func (a *Analyzer) populateEnumVariants(decls []scopedDecl) {
 					continue
 				}
 				commonType := a.resolveType(commonDecl.Type)
-				enumType.Common[commonDecl.Name] = Field{Name: commonDecl.Name, Type: commonType, Mutable: false}
+				enumType.Common[commonDecl.Name] = Field{Name: commonDecl.Name, Type: commonType, Mutable: false, PackedStorage: storage}
 			}
 			variants := make([]*EnumVariant, 0, len(enumDecl.Variants))
 			for i := range enumDecl.Variants {
@@ -795,6 +796,11 @@ func (a *Analyzer) populateStructFields(decls []scopedDecl) {
 			a.analyzeStructAnnotations(stDecl, st)
 			a.withGenericParams(stDecl.GenericParams, nil, func() {
 				for _, field := range stDecl.Fields {
+					if len(field.Annotations) != 0 {
+						for _, annotation := range field.Annotations {
+							a.errorf(annotation.Position, "field annotation @%s is only supported on packed enum common fields", annotation.Name)
+						}
+					}
 					if _, exists := st.Fields[field.Name]; exists {
 						a.errorf(field.Position, "duplicate field %q in struct %q", field.Name, stDecl.Name)
 						continue
@@ -936,6 +942,17 @@ func normalizePackedProfileAnnotationArg(value string) (string, bool) {
 	}
 }
 
+func normalizePackedFieldStorageAnnotationArg(value string) (PackedFieldStorageMode, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "inline", "in_place", "in-place", "row":
+		return PackedFieldStorageInline, true
+	case "side_table", "side-table", "sidetable", "cold":
+		return PackedFieldStorageSideTable, true
+	default:
+		return PackedFieldStorageDefault, false
+	}
+}
+
 func normalizeInlineAnnotationArg(value string) (FuncInlineMode, bool) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "always", "force", "on":
@@ -1003,6 +1020,48 @@ func isSupportedStructAnnotation(name string) bool {
 	default:
 		return false
 	}
+}
+
+func isSupportedPackedCommonFieldAnnotation(name string) bool {
+	switch name {
+	case "storage":
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *Analyzer) analyzePackedCommonFieldAnnotations(enumDecl *ast.EnumDecl, fieldDecl ast.FieldDecl) PackedFieldStorageMode {
+	storage := PackedFieldStorageInline
+	if enumDecl == nil || len(fieldDecl.Annotations) == 0 {
+		return storage
+	}
+	seen := make(map[string]lexer.Pos, len(fieldDecl.Annotations))
+	for _, annotation := range fieldDecl.Annotations {
+		if prev, exists := seen[annotation.Name]; exists {
+			a.errorf(annotation.Position, "duplicate @%s annotation on packed enum %q common field %q (first seen at %s:%d:%d)", annotation.Name, enumDecl.Name, fieldDecl.Name, prev.File, prev.Line, prev.Col)
+			continue
+		}
+		seen[annotation.Name] = annotation.Position
+		if !isSupportedPackedCommonFieldAnnotation(annotation.Name) {
+			a.errorf(annotation.Position, "unknown packed enum common-field annotation @%s on %q.%s", annotation.Name, enumDecl.Name, fieldDecl.Name)
+			continue
+		}
+		switch annotation.Name {
+		case "storage":
+			if len(annotation.Args) != 1 {
+				a.errorf(annotation.Position, "@storage on packed enum %q common field %q expects exactly one argument", enumDecl.Name, fieldDecl.Name)
+				continue
+			}
+			normalized, ok := normalizePackedFieldStorageAnnotationArg(annotation.Args[0])
+			if !ok {
+				a.errorf(annotation.Position, "@storage on packed enum %q common field %q uses unsupported mode %q (expected inline or side_table)", enumDecl.Name, fieldDecl.Name, annotation.Args[0])
+				continue
+			}
+			storage = normalized
+		}
+	}
+	return storage
 }
 
 func (a *Analyzer) analyzeEnumAnnotations(enumDecl *ast.EnumDecl, enumType *EnumType) {

@@ -922,6 +922,60 @@ func (ops *packedStoreOps) recordPrefixWords(rowPtr C.LLVMValueRef, name string)
 	return nil
 }
 
+func (ops *packedStoreOps) recordSideWords(wordsPtr C.LLVMValueRef, name string) error {
+	if ops == nil || ops.s == nil || ops.s.g == nil || ops.storeType == nil || ops.storeType.Enum == nil {
+		return nil
+	}
+	if !packedModeUsesDenseIndexHandle(ops.s.g.packedLoweringForStore(ops.storeType)) {
+		return nil
+	}
+	arenaValue, err := ops.arenaValue(name + ".arena")
+	if err != nil {
+		return err
+	}
+	stateValue, err := ops.stateValue(name + ".state")
+	if err != nil {
+		return err
+	}
+	arenaType := ops.s.g.result.NamedTypes["Arena"]
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	recordType := &semantic.FuncType{Name: "ctx_packed_store_record_side_words", Params: []semantic.Type{arenaRefType, ops.voidRefType(), ops.voidRefType()}, Return: ops.s.g.result.NamedTypes["void"]}
+	recordCallee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_record_side_words", recordType)
+	if err != nil {
+		return err
+	}
+	recordLLVMType, err := ops.s.g.lowerFunctionType(recordType)
+	if err != nil {
+		return err
+	}
+	ops.s.buildCall(recordLLVMType, recordCallee, []C.LLVMValueRef{arenaValue, wordsPtr, stateValue}, "")
+	return nil
+}
+
+func (ops *packedStoreOps) loadSideWord(indexValue C.LLVMValueRef, wordOffset C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	stateValue, err := ops.stateValue(name + ".state")
+	if err != nil {
+		return nil, err
+	}
+	u32Type := ops.s.g.result.NamedTypes["u32"]
+	usizeType := ops.s.g.result.NamedTypes["usize"]
+	uintptrType := ops.s.g.result.NamedTypes["uintptr"]
+	coercedIndex, err := ops.s.coerceValue(indexValue, ops.storeType.Enum, u32Type)
+	if err != nil {
+		return nil, err
+	}
+	helperType := &semantic.FuncType{Name: "ctx_packed_store_read_side_word", Params: []semantic.Type{ops.voidRefType(), u32Type, usizeType}, Return: uintptrType}
+	callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_read_side_word", helperType)
+	if err != nil {
+		return nil, err
+	}
+	llvmFnType, err := ops.s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, err
+	}
+	return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, coercedIndex, wordOffset}, name), nil
+}
+
 func (ops *packedStoreOps) storeTagsView(startValue C.LLVMValueRef, endValue C.LLVMValueRef, resultType *semantic.DArrayViewType, name string) (C.LLVMValueRef, semantic.Type, error) {
 	stateValue, err := ops.stateValue(name + ".state")
 	if err != nil {

@@ -897,6 +897,100 @@ def fold_common() -> int:
 	}
 }
 
+func TestGenerateLLVMIRUsesSideWordHelpersForRepeatedSideTableCommonFieldReadsByDefault(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		@storage(side_table)
+		span: int
+	Lit(value: int)
+
+def fold_common() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	in store:
+		node: Expr = new Expr.Lit(span: 7, value: 5)
+		return node.span + node.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_side_table_common_default.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+
+	if !strings.Contains(output, "call ptr @ctx_packed_store_state_new_variant_sparse_with_side_words(") {
+		t.Fatalf("expected canonical packed lowering to allocate side columns for side-tabled common fields, got:\n%s", output)
+	}
+	if !strings.Contains(output, "call void @ctx_packed_store_record_side_words(") {
+		t.Fatalf("expected canonical packed constructor lowering to record side-table common-field words, got:\n%s", output)
+	}
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_side_word(")
+	if readCalls != 2 {
+		t.Fatalf("expected repeated side-tabled common-field reads to lower through ctx_packed_store_read_side_word twice, got %d helper calls:\n%s", readCalls, output)
+	}
+	if strings.Contains(output, "call i64 @ctx_packed_store_read_variant_sparse_word(") {
+		t.Fatalf("expected side-tabled common-field reads to bypass inline variant-sparse word helpers, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRUsesSideWordHelpersForRepeatedSideTableCommonFieldReadsInIndexSOA(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		@storage(side_table)
+		span: int
+	Lit(value: int)
+
+def fold_common() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	in store:
+		node: Expr = new Expr.Lit(span: 7, value: 5)
+		return node.span + node.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_side_table_common_index_soa.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	if !strings.Contains(output, "call ptr @ctx_packed_store_state_new_with_side_words(") {
+		t.Fatalf("expected index-soa packed lowering to allocate side columns for side-tabled common fields, got:\n%s", output)
+	}
+	if !strings.Contains(output, "call void @ctx_packed_store_record_side_words(") {
+		t.Fatalf("expected index-soa packed constructor lowering to record side-table common-field words, got:\n%s", output)
+	}
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_side_word(")
+	if readCalls != 2 {
+		t.Fatalf("expected repeated side-tabled common-field reads in index-soa mode to lower through ctx_packed_store_read_side_word twice, got %d helper calls:\n%s", readCalls, output)
+	}
+	if strings.Contains(output, "call i64 @ctx_packed_store_read_index_word(") {
+		t.Fatalf("expected side-tabled common-field reads in index-soa mode to bypass inline index-word helpers, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRRejectsSideTableCommonFieldsInUnsupportedPackedABIs(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		@storage(side_table)
+		span: int
+	Lit(value: int)
+
+def fold_common() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	in store:
+		node: Expr = new Expr.Lit(span: 7, value: 5)
+		return node.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_side_table_common_word_handle_reject.llcontext", src)
+	_, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err == nil {
+		t.Fatal("expected unsupported side-table common-field ABI error, got none")
+	}
+	if !strings.Contains(err.Error(), "does not support side-tabled common fields") {
+		t.Fatalf("expected unsupported side-table common-field ABI diagnostic, got: %v", err)
+	}
+}
+
 func TestGenerateLLVMIRUsesSingleDecodeForFrozenRepeatedCommonFieldReads(t *testing.T) {
 	src := `packed enum Expr:
 	common:

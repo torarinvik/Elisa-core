@@ -121,11 +121,12 @@ type GenericParam struct {
 }
 
 type FieldDecl struct {
-	Position lexer.Pos
-	Name     string
-	Mutable  bool
-	IsTail   bool
-	Type     TypeExpr
+	Position    lexer.Pos
+	Annotations []Annotation
+	Name        string
+	Mutable     bool
+	IsTail      bool
+	Type        TypeExpr
 }
 
 type Annotation struct {

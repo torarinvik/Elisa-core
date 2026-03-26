@@ -308,16 +308,16 @@ func (s *functionState) errorTagInfo(expr *ast.FieldExpr) (*semantic.ErrorSetTyp
 	if !ok {
 		return nil, "", false
 	}
-	errSet, ok := base.(*semantic.ErrorSetType)
-	if !ok || !errSet.HasQualifiedTag(ident.Name, expr.Field) {
+	errorType, ok := base.(*semantic.ErrorSetType)
+	if !ok || !errorType.HasQualifiedTag(ident.Name, expr.Field) {
 		return nil, "", false
 	}
-	return errSet, semantic.QualifyErrorTag(ident.Name, expr.Field), true
+	return errorType, semantic.QualifyErrorTag(ident.Name, expr.Field), true
 }
 
 func (s *functionState) constEnumMemberInfo(expr *ast.FieldExpr) (*semantic.ConstEnumType, *semantic.ConstEnumMember, bool) {
 	constEnumType, ok := s.constEnumTypeForExpr(expr.Object)
-	if !ok {
+	if !ok || constEnumType == nil {
 		return nil, nil, false
 	}
 	member, ok := constEnumType.Member(expr.Field)
@@ -3784,6 +3784,10 @@ func (s *functionState) emitPackedStoreValue(arenaExpr ast.Expr, storeType *sema
 	if err != nil {
 		return nil, err
 	}
+	sideWords, err := s.g.packedEnumCommonSideTableWordCount(storeType.Enum)
+	if err != nil {
+		return nil, err
+	}
 	arenaType := s.g.result.NamedTypes["Arena"]
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
@@ -3791,15 +3795,34 @@ func (s *functionState) emitPackedStoreValue(arenaExpr ast.Expr, storeType *sema
 	stateHelperParams := []semantic.Type{arenaRefType, usizeType}
 	stateArgs := []C.LLVMValueRef{arenaPtr, rowSizeValue}
 	if s.g.packedLoweringForStore(storeType) == packedEnumABIVariantSparse {
-		stateHelperName = "ctx_packed_store_state_new_variant_sparse"
+		if sideWords > 0 {
+			stateHelperName = "ctx_packed_store_state_new_variant_sparse_with_side_words"
+			stateHelperParams = []semantic.Type{arenaRefType, usizeType, usizeType}
+			stateArgs = append(stateArgs, C.LLVMConstInt(usizeLLVMType, C.ulonglong(sideWords), 0))
+		} else {
+			stateHelperName = "ctx_packed_store_state_new_variant_sparse"
+		}
 	} else if storeType.Enum != nil && storeType.Enum.HasPackedPrefixOverride && storeType.Enum.PackedPrefixOverride == "common-only" && s.g.packedLoweringForStore(storeType) == packedEnumABIIndexSOA {
 		prefixWords, err := s.g.packedEnumCommonPrefixWordCount(storeType.Enum)
 		if err != nil {
 			return nil, err
 		}
-		stateHelperName = "ctx_packed_store_state_new_with_prefix_words"
+		if sideWords > 0 {
+			stateHelperName = "ctx_packed_store_state_new_with_prefix_and_side_words"
+			stateHelperParams = []semantic.Type{arenaRefType, usizeType, usizeType, usizeType}
+			stateArgs = append(stateArgs,
+				C.LLVMConstInt(usizeLLVMType, C.ulonglong(prefixWords), 0),
+				C.LLVMConstInt(usizeLLVMType, C.ulonglong(sideWords), 0),
+			)
+		} else {
+			stateHelperName = "ctx_packed_store_state_new_with_prefix_words"
+			stateHelperParams = []semantic.Type{arenaRefType, usizeType, usizeType}
+			stateArgs = append(stateArgs, C.LLVMConstInt(usizeLLVMType, C.ulonglong(prefixWords), 0))
+		}
+	} else if sideWords > 0 {
+		stateHelperName = "ctx_packed_store_state_new_with_side_words"
 		stateHelperParams = []semantic.Type{arenaRefType, usizeType, usizeType}
-		stateArgs = append(stateArgs, C.LLVMConstInt(usizeLLVMType, C.ulonglong(prefixWords), 0))
+		stateArgs = append(stateArgs, C.LLVMConstInt(usizeLLVMType, C.ulonglong(sideWords), 0))
 	}
 	stateHelperType := &semantic.FuncType{Name: stateHelperName, Params: stateHelperParams, Return: voidRefType}
 	stateCallee, err := s.g.ensureFunctionDeclared(stateHelperName, stateHelperType)
@@ -4059,14 +4082,22 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 		return nil, nil, true, fmt.Errorf("%s has no field %s", binding.typ.String(), expr.Field)
 	}
 	if _, isCommonField := binding.typ.Enum.Common[expr.Field]; isCommonField {
-		fieldType, fieldIndex, _, _, err := s.g.fieldInfo(binding.typ.Enum, expr.Field)
+		layout, err := s.g.packedEnumCommonFieldLayout(binding.typ.Enum, expr.Field)
 		if err != nil {
 			return nil, nil, true, err
+		}
+		fieldType := layout.Field.Type
+		if !layout.StoredInline {
+			if binding.handle == nil || binding.store.typ == nil {
+				return nil, nil, true, fmt.Errorf("packed enum common field %s.%s is stored in a side table and requires store context", binding.typ.Enum.Name, expr.Field)
+			}
+			value, err := s.emitPackedSideTableFieldRead(binding.handle, binding.typ.Enum, &binding.store, fieldType, layout.SideWordOffset, layout.WordCount, "packed.view.common.side")
+			return value, fieldType, true, err
 		}
 		if binding.ptr == nil && binding.handle != nil && binding.store.typ != nil {
 			ops, ok := s.packedStoreOpsFromBinding(&binding.store)
 			if ok && ops.canDirectWordRead() {
-				fieldWordOffset, ok, err := s.packedEnumDirectWordFieldOffset(binding.typ.Enum, fieldIndex, fieldType)
+				fieldWordOffset, ok, err := s.packedEnumDirectWordFieldOffset(binding.typ.Enum, layout.RowFieldIndex, fieldType)
 				if err != nil {
 					return nil, nil, true, err
 				}
@@ -4095,7 +4126,7 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 		if err != nil {
 			return nil, nil, true, err
 		}
-		fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerType, binding.ptr, C.unsigned(fieldIndex), cStringFree("view.common.field"))
+		fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerType, binding.ptr, C.unsigned(layout.RowFieldIndex), cStringFree("view.common.field"))
 		value, err := s.loadValue(fieldPtr, fieldType, expr.Field)
 		return value, fieldType, true, err
 	}
@@ -4170,22 +4201,47 @@ func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMVa
 	if objectType == nil {
 		return nil, nil, false, nil
 	}
-	fieldType, fieldIndex, containerType, _, err := s.g.fieldInfo(objectType, expr.Field)
-	if err != nil {
-		return nil, nil, false, nil
+	containerType := objectType
+	if refType, ok := objectType.(*semantic.RefType); ok {
+		containerType = refType.Elem
 	}
+	containerType = semantic.StripAggregateStateType(containerType)
 	enumType, ok := containerType.(*semantic.EnumType)
 	if !ok || enumType == nil || !enumType.Packed {
 		return nil, nil, false, nil
 	}
-	if key, ok := s.packedEnumStoragePath(expr.Object); ok {
-		if _, ok := s.lookupPackedEnumStorage(key, enumType); ok {
-			return nil, nil, false, nil
+	if _, ok := enumType.Common[expr.Field]; !ok {
+		return nil, nil, false, nil
+	}
+	layout, err := s.g.packedEnumCommonFieldLayout(enumType, expr.Field)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	fieldType := layout.Field.Type
+	if layout.StoredInline {
+		if key, ok := s.packedEnumStoragePath(expr.Object); ok {
+			if _, ok := s.lookupPackedEnumStorage(key, enumType); ok {
+				return nil, nil, false, nil
+			}
 		}
 	}
 	store, ok := s.lookupPackedStore(enumType)
 	if !ok {
-		return nil, nil, false, nil
+		if layout.StoredInline {
+			return nil, nil, false, nil
+		}
+		return nil, nil, true, fmt.Errorf("packed enum common field %s.%s is stored in a side table and requires store context", enumType.Name, expr.Field)
+	}
+	if !layout.StoredInline {
+		handleValue, err := s.packedEnumFieldHandleValue(expr.Object, objectType, enumType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		value, err := s.emitPackedSideTableFieldRead(handleValue, enumType, &store, fieldType, layout.SideWordOffset, layout.WordCount, "packed.common.side")
+		if err != nil {
+			return nil, nil, true, err
+		}
+		return value, fieldType, true, nil
 	}
 	ops, ok := s.packedStoreOpsFromBinding(&store)
 	if !ok || !ops.canDirectWordRead() {
@@ -4196,7 +4252,7 @@ func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMVa
 			return nil, nil, false, nil
 		}
 	}
-	fieldWordOffset, ok, err := s.packedEnumDirectWordFieldOffset(enumType, fieldIndex, fieldType)
+	fieldWordOffset, ok, err := s.packedEnumDirectWordFieldOffset(enumType, layout.RowFieldIndex, fieldType)
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -4309,6 +4365,124 @@ func (s *functionState) packedEnumFieldHandleValue(expr ast.Expr, objectType sem
 		return nil, err
 	}
 	return handleValue, nil
+}
+
+func (s *functionState) emitRawMemcpy(dstPtr C.LLVMValueRef, srcPtr C.LLVMValueRef, byteCount uint64, name string) error {
+	if byteCount == 0 {
+		return nil
+	}
+	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	usizeType := s.g.result.NamedTypes["usize"]
+	memcpyType := &semantic.FuncType{Name: "memcpy", Params: []semantic.Type{voidRefType, voidRefType, usizeType}, Return: voidRefType}
+	memcpyCallee, err := s.g.ensureFunctionDeclared("memcpy", memcpyType)
+	if err != nil {
+		return err
+	}
+	memcpyLLVMType, err := s.g.lowerFunctionType(memcpyType)
+	if err != nil {
+		return err
+	}
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return err
+	}
+	byteCountValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(byteCount), 0)
+	_ = s.buildCall(memcpyLLVMType, memcpyCallee, []C.LLVMValueRef{dstPtr, srcPtr, byteCountValue}, name)
+	return nil
+}
+
+func (s *functionState) emitByteOffsetPtr(basePtr C.LLVMValueRef, byteOffset uint64, name string) (C.LLVMValueRef, error) {
+	i8Type := s.g.result.NamedTypes["u8"]
+	i8LLVMType, err := s.g.lowerType(i8Type)
+	if err != nil {
+		return nil, err
+	}
+	usizeType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return nil, err
+	}
+	indices := []C.LLVMValueRef{C.LLVMConstInt(usizeType, C.ulonglong(byteOffset), 0)}
+	return C.LLVMBuildGEP2(s.builder, i8LLVMType, basePtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree(name)), nil
+}
+
+func (s *functionState) emitPackedSideTableFieldRead(handleValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding, fieldType semantic.Type, sideWordOffset uint64, wordCount uint64, name string) (C.LLVMValueRef, error) {
+	if enumType == nil || !enumType.Packed {
+		return nil, fmt.Errorf("packed side-table field read requires packed enum metadata")
+	}
+	if !packedModeUsesDenseIndexHandle(s.g.packedModeForEnum(enumType)) {
+		return nil, fmt.Errorf("packed enum %s side-tabled common fields require an index-based packed ABI", enumType.Name)
+	}
+	ops, ok := s.packedStoreOpsFromBinding(store)
+	if !ok {
+		return nil, fmt.Errorf("packed enum %s side-tabled common-field read requires store context", enumType.Name)
+	}
+	fieldSizeBytes, err := s.g.abiSizeOfType(fieldType)
+	if err != nil {
+		return nil, err
+	}
+	if fieldSizeBytes == 0 || wordCount == 0 {
+		return s.zeroValue(fieldType)
+	}
+	fieldPtr, err := s.createEntryAlloca(name+".tmp", fieldType)
+	if err != nil {
+		return nil, err
+	}
+	fieldLLVMType, err := s.g.lowerType(fieldType)
+	if err != nil {
+		return nil, err
+	}
+	C.LLVMBuildStore(s.builder, C.LLVMConstNull(fieldLLVMType), fieldPtr)
+	wordBytes := uint64(s.g.wordBits / 8)
+	if wordBytes == 0 {
+		wordBytes = 8
+	}
+	for i := uint64(0); i < wordCount; i++ {
+		wordOffsetValue, err := s.g.lowerBuiltin("usize")
+		if err != nil {
+			return nil, err
+		}
+		wordValue, err := ops.loadSideWord(handleValue, C.LLVMConstInt(wordOffsetValue, C.ulonglong(sideWordOffset+i), 0), name+".word")
+		if err != nil {
+			return nil, err
+		}
+		wordPtr, err := s.createEntryAlloca(name+".word.tmp", s.g.result.NamedTypes["uintptr"])
+		if err != nil {
+			return nil, err
+		}
+		C.LLVMBuildStore(s.builder, wordValue, wordPtr)
+		dstPtr, err := s.emitByteOffsetPtr(fieldPtr, i*wordBytes, name+".dst")
+		if err != nil {
+			return nil, err
+		}
+		remainingBytes := fieldSizeBytes - i*wordBytes
+		copyBytes := wordBytes
+		if remainingBytes < copyBytes {
+			copyBytes = remainingBytes
+		}
+		if err := s.emitRawMemcpy(dstPtr, wordPtr, copyBytes, name+".copy"); err != nil {
+			return nil, err
+		}
+	}
+	return s.loadValue(fieldPtr, fieldType, name+".value")
+}
+
+func (s *functionState) emitPackSideTableFieldValue(bufferPtr C.LLVMValueRef, byteOffset uint64, fieldValue C.LLVMValueRef, fieldType semantic.Type, name string) error {
+	fieldSizeBytes, err := s.g.abiSizeOfType(fieldType)
+	if err != nil {
+		return err
+	}
+	if fieldSizeBytes == 0 {
+		return nil
+	}
+	fieldPtr, err := s.emitStackTempValue(fieldValue, fieldType, name+".field.tmp")
+	if err != nil {
+		return err
+	}
+	dstPtr, err := s.emitByteOffsetPtr(bufferPtr, byteOffset, name+".dst")
+	if err != nil {
+		return err
+	}
+	return s.emitRawMemcpy(dstPtr, fieldPtr, fieldSizeBytes, name+".copy")
 }
 
 func (s *functionState) packedEnumDirectWordFieldOffset(enumType *semantic.EnumType, fieldIndex int, fieldType semantic.Type) (C.LLVMValueRef, bool, error) {
@@ -5135,6 +5309,10 @@ func (s *functionState) emitPackedEnumConstructorAlloc(storeValue C.LLVMValueRef
 	if err != nil {
 		return nil, nil, err
 	}
+	sideWords, err := s.g.packedEnumCommonSideTableWordCount(enumType)
+	if err != nil {
+		return nil, nil, err
+	}
 	tailPlan, err := s.preparePackedEnumTailPayloadPlan(variant, orderedArgs)
 	if err != nil {
 		return nil, nil, err
@@ -5145,20 +5323,24 @@ func (s *functionState) emitPackedEnumConstructorAlloc(storeValue C.LLVMValueRef
 	}
 	rowValue := C.LLVMConstNull(rowType)
 	rowValue = C.LLVMBuildInsertValue(s.builder, rowValue, tagValue, 0, cStringFree("packed.enum.tag.ins"))
-	for i, commonDecl := range enumType.Decl.Common {
+	commonValues := make(map[string]C.LLVMValueRef, len(enumType.Decl.Common))
+	for _, commonDecl := range enumType.Decl.Common {
 		arg, ok := commonArgs[commonDecl.Name]
 		if !ok {
 			continue
 		}
-		field, ok := enumType.Common[commonDecl.Name]
-		if !ok {
-			return nil, nil, fmt.Errorf("missing packed enum common field %s.%s", enumType.Name, commonDecl.Name)
-		}
-		fieldValue, _, err := s.emitExpr(arg, field.Type)
+		layout, err := s.g.packedEnumCommonFieldLayout(enumType, commonDecl.Name)
 		if err != nil {
 			return nil, nil, err
 		}
-		rowValue = C.LLVMBuildInsertValue(s.builder, rowValue, fieldValue, C.unsigned(1+i), cStringFree("packed.enum.common.ins"))
+		fieldValue, _, err := s.emitExpr(arg, layout.Field.Type)
+		if err != nil {
+			return nil, nil, err
+		}
+		commonValues[commonDecl.Name] = fieldValue
+		if layout.StoredInline {
+			rowValue = C.LLVMBuildInsertValue(s.builder, rowValue, fieldValue, C.unsigned(layout.RowFieldIndex), cStringFree("packed.enum.common.ins"))
+		}
 	}
 	C.LLVMBuildStore(s.builder, rowValue, allocPtr)
 	if len(variant.Payload) > 0 {
@@ -5205,6 +5387,41 @@ func (s *functionState) emitPackedEnumConstructorAlloc(storeValue C.LLVMValueRef
 		}
 	}
 	ops := &packedStoreOps{s: s, storeValue: storeValue, storeType: enumType.StoreType}
+	if sideWords > 0 {
+		wordBytes := uint64(s.g.wordBits / 8)
+		if wordBytes == 0 {
+			wordBytes = 8
+		}
+		sideBufferType := &semantic.ArrayType{Elem: s.g.result.NamedTypes["uintptr"], HasConstSize: true, ConstSize: int64(sideWords)}
+		sideBufferPtr, err := s.createEntryAlloca("packed.side.words", sideBufferType)
+		if err != nil {
+			return nil, nil, err
+		}
+		sideBufferLLVMType, err := s.g.lowerType(sideBufferType)
+		if err != nil {
+			return nil, nil, err
+		}
+		C.LLVMBuildStore(s.builder, C.LLVMConstNull(sideBufferLLVMType), sideBufferPtr)
+		for _, commonDecl := range enumType.Decl.Common {
+			layout, err := s.g.packedEnumCommonFieldLayout(enumType, commonDecl.Name)
+			if err != nil {
+				return nil, nil, err
+			}
+			if layout.StoredInline {
+				continue
+			}
+			fieldValue, ok := commonValues[commonDecl.Name]
+			if !ok {
+				continue
+			}
+			if err := s.emitPackSideTableFieldValue(sideBufferPtr, layout.SideWordOffset*wordBytes, fieldValue, layout.Field.Type, "packed.side.pack"); err != nil {
+				return nil, nil, err
+			}
+		}
+		if err := ops.recordSideWords(sideBufferPtr, "packed.side.record"); err != nil {
+			return nil, nil, err
+		}
+	}
 	if err := ops.recordPrefixWords(allocPtr, "packed.prefix.record"); err != nil {
 		return nil, nil, err
 	}
