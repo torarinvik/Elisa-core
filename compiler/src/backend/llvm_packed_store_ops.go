@@ -446,7 +446,10 @@ func (ops *packedStoreOps) storeTagAt(handleValue C.LLVMValueRef, enumType *sema
 		if err != nil {
 			return nil, err
 		}
-		if ops.canCacheDenseHandleReads(enumType) && ops.s.packedDenseTagReads != nil {
+		if ops.canCacheDenseHandleReads(enumType) {
+			if ops.s.packedDenseTagReads == nil {
+				ops.s.packedDenseTagReads = map[packedDenseTagReadCacheKey]C.LLVMValueRef{}
+			}
 			key := packedDenseTagReadCacheKey{block: ops.currentBlock(), storeType: ops.storeType, state: stateValue, handle: ops.canonicalizeDenseHandleKey(coercedHandle)}
 			if cached, ok := ops.s.packedDenseTagReads[key]; ok && cached != nil {
 				return cached, nil
@@ -474,7 +477,10 @@ func (ops *packedStoreOps) storeTagAt(handleValue C.LLVMValueRef, enumType *sema
 		if err != nil {
 			return nil, err
 		}
-		if ops.canCacheDenseHandleReads(enumType) && ops.s.packedVariantSparseTagReads != nil {
+		if ops.canCacheDenseHandleReads(enumType) {
+			if ops.s.packedVariantSparseTagReads == nil {
+				ops.s.packedVariantSparseTagReads = map[packedVariantSparseTagReadCacheKey]C.LLVMValueRef{}
+			}
 			key := packedVariantSparseTagReadCacheKey{block: ops.currentBlock(), storeType: ops.storeType, state: stateValue, handle: ops.canonicalizeDenseHandleKey(coercedHandle)}
 			if cached, ok := ops.s.packedVariantSparseTagReads[key]; ok && cached != nil {
 				return cached, nil
@@ -543,7 +549,10 @@ func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, e
 		if err != nil {
 			return nil, err
 		}
-		if ops.canCacheDenseHandleReads(enumType) && ops.s.packedDenseWordReads != nil {
+		if ops.canCacheDenseHandleReads(enumType) {
+			if ops.s.packedDenseWordReads == nil {
+				ops.s.packedDenseWordReads = map[packedDenseWordReadCacheKey]C.LLVMValueRef{}
+			}
 			originKey, cacheHandle := ops.denseReadCacheIdentity(origin, coercedHandle)
 			key := packedDenseWordReadCacheKey{block: ops.currentBlock(), storeType: ops.storeType, state: stateValue, origin: originKey, handle: cacheHandle, offset: wordOffset}
 			if cached, ok := ops.s.packedDenseWordReads[key]; ok && cached != nil {
@@ -575,7 +584,10 @@ func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, e
 		if err != nil {
 			return nil, err
 		}
-		if ops.canCacheDenseHandleReads(enumType) && ops.s.packedVariantSparseWordReads != nil {
+		if ops.canCacheDenseHandleReads(enumType) {
+			if ops.s.packedVariantSparseWordReads == nil {
+				ops.s.packedVariantSparseWordReads = map[packedVariantSparseWordReadCacheKey]C.LLVMValueRef{}
+			}
 			key := packedVariantSparseWordReadCacheKey{block: ops.currentBlock(), storeType: ops.storeType, state: stateValue, handle: ops.canonicalizeDenseHandleKey(coercedHandle), offset: wordOffset}
 			if cached, ok := ops.s.packedVariantSparseWordReads[key]; ok && cached != nil {
 				return cached, nil
@@ -1046,7 +1058,10 @@ func (ops *packedStoreOps) loadSideWordAtOrigin(indexValue C.LLVMValueRef, wordO
 	if err != nil {
 		return nil, err
 	}
-	if ops.canCacheDenseHandleReads(ops.storeType.Enum) && ops.s.packedDenseSideWordReads != nil {
+	if ops.canCacheDenseHandleReads(ops.storeType.Enum) {
+		if ops.s.packedDenseSideWordReads == nil {
+			ops.s.packedDenseSideWordReads = map[packedDenseSideWordReadCacheKey]C.LLVMValueRef{}
+		}
 		originKey, cacheIndex := ops.denseReadCacheIdentity(origin, coercedIndex)
 		key := packedDenseSideWordReadCacheKey{block: ops.currentBlock(), storeType: ops.storeType, state: stateValue, origin: originKey, index: cacheIndex, offset: wordOffset}
 		if cached, ok := ops.s.packedDenseSideWordReads[key]; ok && cached != nil {

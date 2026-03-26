@@ -256,7 +256,7 @@ func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Typ
 				if err != nil {
 					return nil, nil, err
 				}
-				s.bindPackedVariantView(expr.Name, viewType, nil, handle, &store, nil)
+				s.bindPackedVariantView(expr.Name, viewType, nil, handle, store, nil)
 				return value, viewType, nil
 			}
 		}
@@ -3849,7 +3849,10 @@ func (s *functionState) emitPackedStoreFieldValueNamed(storeValue C.LLVMValueRef
 	if storeType == nil {
 		return nil, fmt.Errorf("missing packed enum store type")
 	}
-	if block := C.LLVMGetInsertBlock(s.builder); block != nil && s.packedStoreValues != nil && storeValue != nil {
+	if block := C.LLVMGetInsertBlock(s.builder); block != nil && storeValue != nil {
+		if s.packedStoreValues == nil {
+			s.packedStoreValues = map[packedStoreExtractCacheKey]C.LLVMValueRef{}
+		}
 		key := packedStoreExtractCacheKey{block: block, store: storeValue, index: index}
 		if cached, ok := s.packedStoreValues[key]; ok && cached != nil {
 			return cached, nil
@@ -4063,12 +4066,7 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 			return nil, nil, true, err
 		}
 		if hasName {
-			var storeCopy *packedStoreBinding
-			if binding.store.typ != nil {
-				copied := binding.store
-				storeCopy = &copied
-			}
-			s.bindPackedVariantView(name, viewType, binding.ptr, binding.handle, storeCopy, binding.payloadValues)
+			s.bindPackedVariantView(name, viewType, binding.ptr, binding.handle, binding.store, binding.payloadValues)
 		}
 	}
 	if binding.typ == nil || (binding.ptr == nil && binding.handle == nil) {

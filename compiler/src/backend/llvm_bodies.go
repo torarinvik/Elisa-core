@@ -27,11 +27,15 @@ type valueBinding struct {
 }
 
 type codegenScope struct {
-	parent           *codegenScope
-	bindings         map[string]valueBinding
-	packedEnumPtrs   map[string]packedEnumStorageBinding
-	packedEnumStores map[string]packedStoreBinding
-	packedViewPtrs   map[string]packedVariantViewBinding
+	parent                 *codegenScope
+	bindings               map[string]valueBinding
+	packedEnumPtrs         map[string]packedEnumStorageBinding
+	packedEnumStoreName    string
+	packedEnumStoreBinding packedStoreBinding
+	packedEnumStores       map[string]packedStoreBinding
+	packedViewName         string
+	packedViewBinding      packedVariantViewBinding
+	packedViewPtrs         map[string]packedVariantViewBinding
 }
 
 type functionState struct {
@@ -178,20 +182,12 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	C.LLVMPositionBuilderAtEnd(builder, entry)
 
 	state := &functionState{
-		g:                            g,
-		decl:                         decl,
-		fnValue:                      fnValue,
-		fnType:                       fnType,
-		builder:                      builder,
-		scope:                        &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}, packedEnumStores: map[string]packedStoreBinding{}, packedViewPtrs: map[string]packedVariantViewBinding{}},
-		typeMap:                      typeBindings,
-		packedStores:                 map[string]packedStoreBinding{},
-		packedStoreValues:            map[packedStoreExtractCacheKey]C.LLVMValueRef{},
-		packedVariantSparseTagReads:  map[packedVariantSparseTagReadCacheKey]C.LLVMValueRef{},
-		packedVariantSparseWordReads: map[packedVariantSparseWordReadCacheKey]C.LLVMValueRef{},
-		packedDenseTagReads:          map[packedDenseTagReadCacheKey]C.LLVMValueRef{},
-		packedDenseWordReads:         map[packedDenseWordReadCacheKey]C.LLVMValueRef{},
-		packedDenseSideWordReads:     map[packedDenseSideWordReadCacheKey]C.LLVMValueRef{},
+		g:       g,
+		decl:    decl,
+		fnValue: fnValue,
+		fnType:  fnType,
+		builder: builder,
+		typeMap: typeBindings,
 	}
 
 	paramOffset := 0
@@ -752,18 +748,17 @@ func (s *functionState) emitViewStmt(stmt *ast.ViewStmt) error {
 		}
 	}
 	if ident, ok := stmt.Value.(*ast.Ident); ok {
+		storeValue := packedStoreBinding{}
+		if storeBinding != nil {
+			storeValue = *storeBinding
+		}
 		if viewDecodedValue != nil {
 			s.bindPackedEnumStorage(ident.Name, enumType, viewDecodedValue)
 		}
-		var storeCopy *packedStoreBinding
-		if storeBinding != nil {
-			copied := *storeBinding
-			storeCopy = &copied
-		}
 		if viewDecodedValue != nil {
-			s.bindPackedVariantView(ident.Name, resolvedViewType, viewDecodedValue, enumValue, storeCopy, matchedPayloadValues)
+			s.bindPackedVariantView(ident.Name, resolvedViewType, viewDecodedValue, enumValue, storeValue, matchedPayloadValues)
 		} else if packedModeUsesDenseIndexHandle(s.g.packedModeForEnum(enumType)) || s.canInlinePackedEnumVariant(enumType, variant) {
-			s.bindPackedVariantView(ident.Name, resolvedViewType, nil, enumValue, storeCopy, matchedPayloadValues)
+			s.bindPackedVariantView(ident.Name, resolvedViewType, nil, enumValue, storeValue, matchedPayloadValues)
 		}
 	}
 	if storeBinding != nil {
@@ -772,20 +767,14 @@ func (s *functionState) emitViewStmt(stmt *ast.ViewStmt) error {
 		}
 	}
 	if stmt.Pattern.Name != "" && stmt.Pattern.Name != "_" {
+		storeValue := packedStoreBinding{}
+		if storeBinding != nil {
+			storeValue = *storeBinding
+		}
 		if viewDecodedValue != nil {
-			var storeCopy *packedStoreBinding
-			if storeBinding != nil {
-				copied := *storeBinding
-				storeCopy = &copied
-			}
-			s.bindPackedVariantView(stmt.Pattern.Name, resolvedViewType, viewDecodedValue, enumValue, storeCopy, matchedPayloadValues)
+			s.bindPackedVariantView(stmt.Pattern.Name, resolvedViewType, viewDecodedValue, enumValue, storeValue, matchedPayloadValues)
 		} else if packedModeUsesDenseIndexHandle(s.g.packedModeForEnum(enumType)) || s.canInlinePackedEnumVariant(enumType, variant) {
-			var storeCopy *packedStoreBinding
-			if storeBinding != nil {
-				copied := *storeBinding
-				storeCopy = &copied
-			}
-			s.bindPackedVariantView(stmt.Pattern.Name, resolvedViewType, nil, enumValue, storeCopy, matchedPayloadValues)
+			s.bindPackedVariantView(stmt.Pattern.Name, resolvedViewType, nil, enumValue, storeValue, matchedPayloadValues)
 		}
 	}
 	if err := s.emitBlock(stmt.Body, false); err != nil {
@@ -1721,21 +1710,19 @@ func (s *functionState) bindMatchedPackedVariantView(valueExpr ast.Expr, pattern
 	}
 	viewType := &semantic.PackedVariantViewType{Enum: enumType, Variant: variant}
 	if decodedValue != nil {
-		var storeCopy *packedStoreBinding
+		storeValue := packedStoreBinding{}
 		if store != nil {
-			copied := *store
-			storeCopy = &copied
+			storeValue = *store
 		}
-		s.bindPackedVariantView(name, viewType, decodedValue, enumValue, storeCopy, payloadValues)
+		s.bindPackedVariantViewOwned(name, viewType, decodedValue, enumValue, storeValue, payloadValues)
 		return
 	}
 	if store != nil {
-		storeCopy := *store
-		s.bindPackedVariantView(name, viewType, nil, enumValue, &storeCopy, payloadValues)
+		s.bindPackedVariantViewOwned(name, viewType, nil, enumValue, *store, payloadValues)
 		return
 	}
 	if s.canInlinePackedEnumVariant(enumType, variant) {
-		s.bindPackedVariantView(name, viewType, nil, enumValue, nil, payloadValues)
+		s.bindPackedVariantViewOwned(name, viewType, nil, enumValue, packedStoreBinding{}, payloadValues)
 	}
 }
 
@@ -2176,7 +2163,7 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		if err != nil {
 			return nil, nil, err
 		}
-		cachedPayloads := make(map[string]C.LLVMValueRef)
+		var cachedPayloads map[string]C.LLVMValueRef
 		for i, value := range payloadValues {
 			if value == nil {
 				continue
@@ -2184,6 +2171,9 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 			label := variant.PayloadLabel(i)
 			if label == "" {
 				continue
+			}
+			if cachedPayloads == nil {
+				cachedPayloads = make(map[string]C.LLVMValueRef, len(payloadValues))
 			}
 			cachedPayloads[label] = value
 		}
