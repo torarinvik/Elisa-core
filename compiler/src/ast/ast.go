@@ -445,10 +445,18 @@ type ListLitExpr struct {
 	Elems    []Expr
 }
 
+type CastExprOrigin int
+
+const (
+	CastExprOriginGeneral CastExprOrigin = iota
+	CastExprOriginPostfixShorthand
+)
+
 type CastExpr struct {
 	Position     lexer.Pos
 	Operand      Expr
 	Target       TypeExpr
+	Origin       CastExprOrigin
 	LegacySyntax bool
 }
 

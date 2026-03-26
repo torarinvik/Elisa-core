@@ -257,6 +257,16 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		if n.LegacySyntax {
 			a.warnf(n.Pos(), "legacy cast syntax `.cast[T]()` is deprecated; use `.cast[T]` instead")
 		}
+		if n.Origin == ast.CastExprOriginPostfixShorthand {
+			if hookSym, ok := a.lookupVisibleCastHook(src, dst); ok {
+				a.resolvedCastHooks[n] = hookSym
+				if fnType, ok := hookSym.Type.(*FuncType); ok {
+					a.recordFunctionPermissionRefs(functionPermissionRefs(fnType))
+				}
+				result = dst
+				return
+			}
+		}
 		if !a.validCast(src, dst) {
 			a.errorf(n.Pos(), "invalid cast from %s to %s", src.String(), dst.String())
 		}

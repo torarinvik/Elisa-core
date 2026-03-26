@@ -5021,6 +5021,28 @@ func classifyRuntimeStringCompareKind(t semantic.Type) runtimeStringCompareKind 
 	return runtimeStringCompareNone
 }
 func (s *functionState) emitCastExpr(expr *ast.CastExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if s != nil && s.g != nil && s.g.result != nil && s.g.result.CastHooks != nil {
+		if sym, ok := s.g.result.CastHooks[expr]; ok && sym != nil {
+			fnType, ok := sym.Type.(*semantic.FuncType)
+			if !ok || fnType == nil || len(fnType.Params) != 1 {
+				return nil, nil, fmt.Errorf("invalid semantic cast hook for %T", expr)
+			}
+			arg, _, err := s.emitExpr(expr.Operand, fnType.Params[0])
+			if err != nil {
+				return nil, nil, err
+			}
+			callee, err := s.g.ensureFunctionDeclared(sym.Name, fnType)
+			if err != nil {
+				return nil, nil, err
+			}
+			llvmFnType, err := s.g.lowerFunctionType(fnType)
+			if err != nil {
+				return nil, nil, err
+			}
+			call := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arg}, "casthook")
+			return call, fnType.Return, nil
+		}
+	}
 	targetType := s.exprType(expr)
 	if targetType == nil {
 		return nil, nil, fmt.Errorf("missing semantic type for cast target")

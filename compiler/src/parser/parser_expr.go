@@ -801,7 +801,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 				p.advance()
 				p.advance()
 				target := &ast.NamedType{Position: castPos, Name: field}
-				expr = &ast.CastExpr{Position: castPos, Operand: expr, Target: target}
+				expr = &ast.CastExpr{Position: castPos, Operand: expr, Target: target, Origin: ast.CastExprOriginPostfixShorthand}
 				continue
 			}
 

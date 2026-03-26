@@ -341,7 +341,7 @@ func (a *Analyzer) inferFunctionPermissionEffects(decls []scopedDecl) {
 				continue
 			}
 			a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
-				sym, _, ok := a.lookupVisibleGlobal(fn.Name)
+				sym, ok := a.symbolForFuncDecl(fn)
 				if !ok {
 					return
 				}
@@ -375,7 +375,7 @@ func (a *Analyzer) warnOnImplicitFunctionPermissions(decls []scopedDecl) {
 			continue
 		}
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
-			sym, _, ok := a.lookupVisibleGlobal(fn.Name)
+			sym, ok := a.symbolForFuncDecl(fn)
 			if !ok {
 				return
 			}
@@ -561,6 +561,11 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		}
 	case *ast.CastExpr:
 		c.collectExpr(n.Operand)
+		if sym, ok := c.analyzer.resolvedCastHooks[n]; ok {
+			if fnType, ok := sym.Type.(*FuncType); ok {
+				c.addRefs(functionPermissionRefs(fnType))
+			}
+		}
 	case *ast.TernaryExpr:
 		c.collectExpr(n.Value)
 		c.collectExpr(n.Cond)
@@ -614,7 +619,7 @@ func (a *Analyzer) validatePermissionUsage(decls []scopedDecl) {
 
 func (a *Analyzer) validateFunctionPermissionUsage(fn *ast.FuncDecl) {
 	granted := map[string]bool{}
-	if sym, _, ok := a.lookupVisibleGlobal(fn.Name); ok {
+	if sym, ok := a.symbolForFuncDecl(fn); ok {
 		if fnType, ok := sym.Type.(*FuncType); ok && fnType != nil {
 			for _, family := range fnType.DeclaredPermissions {
 				granted[family] = true
@@ -765,6 +770,11 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		}
 	case *ast.CastExpr:
 		a.validatePermissionExpr(n.Operand, granted)
+		if sym, ok := a.resolvedCastHooks[n]; ok {
+			if fnType, ok := sym.Type.(*FuncType); ok {
+				a.validateRequiredPermissions(n.Position, fnType, granted)
+			}
+		}
 	case *ast.TernaryExpr:
 		a.validatePermissionExpr(n.Value, granted)
 		a.validatePermissionExpr(n.Cond, granted)
@@ -812,7 +822,14 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 
 func (a *Analyzer) validateCallPermissions(pos lexer.Pos, fnExpr ast.Expr, granted map[string]bool) {
 	fnType, ok := a.exprTypes[fnExpr].(*FuncType)
-	if !ok || len(fnType.Permissions) == 0 {
+	if !ok {
+		return
+	}
+	a.validateRequiredPermissions(pos, fnType, granted)
+}
+
+func (a *Analyzer) validateRequiredPermissions(pos lexer.Pos, fnType *FuncType, granted map[string]bool) {
+	if fnType == nil || len(fnType.Permissions) == 0 {
 		return
 	}
 	missing := make([]string, 0)

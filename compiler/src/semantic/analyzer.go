@@ -1,11 +1,13 @@
 package semantic
 
 import (
+	"fmt"
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
 	"math/bits"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 type ConstValueKind int
@@ -72,9 +74,12 @@ type Analyzer struct {
 	constValues                       map[string]ConstValue
 	exprTypes                         map[ast.Expr]Type
 	exprFacts                         map[ast.Expr]OptimizationFacts
+	resolvedCastHooks                 map[ast.Expr]*Symbol
 	exprDenseNodeKeys                 map[ast.Expr]DenseNodeKeyInfo
 	exprNodeTables                    map[ast.Expr]NodeTableInfo
 	symbolFacts                       map[*Symbol]OptimizationFacts
+	funcDeclSymbols                   map[*ast.FuncDecl]*Symbol
+	castHooksByName                   map[string]map[castHookSignature]*Symbol
 	typeParamScopes                   []map[string]Type
 	refStorageParamScopes             []map[string]Type
 	refStateParamScopes               []map[string]Type
@@ -105,11 +110,16 @@ type Analyzer struct {
 	currentReturnProvenance           regionRefState
 	currentReturnBorrowedOwnerRefs    borrowedOwnerRefSummary
 	suppressDiagnostics               bool
-	returnProvenanceInProgress        map[string]bool
-	returnBorrowedOwnerRefInProgress  map[string]bool
+	returnProvenanceInProgress        map[*ast.FuncDecl]bool
+	returnBorrowedOwnerRefInProgress  map[*ast.FuncDecl]bool
 	parallelForInfo                   map[*ast.ParallelForStmt]*ParallelForInfo
 	currentNamespace                  string
 	currentUsings                     []string
+}
+
+type castHookSignature struct {
+	Source string
+	Target string
 }
 
 type regionState struct {
@@ -172,12 +182,15 @@ func Analyze(file *ast.File) *Result {
 		constValues:                      map[string]ConstValue{},
 		exprTypes:                        map[ast.Expr]Type{},
 		exprFacts:                        map[ast.Expr]OptimizationFacts{},
+		resolvedCastHooks:                map[ast.Expr]*Symbol{},
 		exprDenseNodeKeys:                map[ast.Expr]DenseNodeKeyInfo{},
 		exprNodeTables:                   map[ast.Expr]NodeTableInfo{},
 		parallelForInfo:                  map[*ast.ParallelForStmt]*ParallelForInfo{},
 		symbolFacts:                      map[*Symbol]OptimizationFacts{},
-		returnProvenanceInProgress:       map[string]bool{},
-		returnBorrowedOwnerRefInProgress: map[string]bool{},
+		funcDeclSymbols:                  map[*ast.FuncDecl]*Symbol{},
+		castHooksByName:                  map[string]map[castHookSignature]*Symbol{},
+		returnProvenanceInProgress:       map[*ast.FuncDecl]bool{},
+		returnBorrowedOwnerRefInProgress: map[*ast.FuncDecl]bool{},
 	}
 	a.registerBuiltins()
 	activeDecls := a.flattenScopedDecls(file.Decls, "", nil)
@@ -202,6 +215,7 @@ func Analyze(file *ast.File) *Result {
 		ConstValues:     a.constValues,
 		ExprTypes:       a.exprTypes,
 		ExprFacts:       a.exprFacts,
+		CastHooks:       a.resolvedCastHooks,
 		DenseNodeKeys:   a.exprDenseNodeKeys,
 		NodeTables:      a.exprNodeTables,
 		ParallelFor:     a.parallelForInfo,
@@ -862,8 +876,17 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 			case *ast.FuncDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Params, n.ReturnType, false)
-				a.functionTypes[qualifiedName] = fnType
-				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolFunc, Type: fnType, Node: n, Mutable: false}, n.Pos())
+				symbolName := qualifiedName
+				if n.Name == "__cast__" {
+					symbolName = castHookSymbolName(qualifiedName, fnType, n.Pos())
+				}
+				sym := &Symbol{Name: symbolName, Kind: SymbolFunc, Type: fnType, Node: n, Mutable: false}
+				a.functionTypes[symbolName] = fnType
+				a.funcDeclSymbols[n] = sym
+				a.defineGlobal(sym, n.Pos())
+				if n.Name == "__cast__" {
+					a.registerCastHook(scoped.Namespace, n, fnType, sym)
+				}
 			case *ast.ExternFuncDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				fnType := a.funcTypeFromDecl(qualifiedName, nil, nil, nil, nil, n.RegionParams, nil, n.Permissions, n.Params, n.ReturnType, n.Variadic)
@@ -890,6 +913,118 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 			}
 		})
 	}
+}
+
+func exactTypeKey(t Type) string {
+	if t == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%T:%s", t, t.String())
+}
+
+func castHookKey(source Type, target Type) castHookSignature {
+	return castHookSignature{Source: exactTypeKey(source), Target: exactTypeKey(target)}
+}
+
+func sanitizeHookSymbolFragment(value string) string {
+	if value == "" {
+		return "anon"
+	}
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range value {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '.' || r == '_' {
+			b.WriteRune(r)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore {
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	out := strings.Trim(b.String(), "_")
+	if out == "" {
+		return "anon"
+	}
+	return out
+}
+
+func castHookSymbolName(qualifiedName string, fnType *FuncType, pos lexer.Pos) string {
+	source := "invalid_src"
+	target := "invalid_dst"
+	if fnType != nil && len(fnType.Params) == 1 && fnType.Params[0] != nil {
+		source = sanitizeHookSymbolFragment(fnType.Params[0].String())
+	}
+	if fnType != nil && fnType.Return != nil {
+		target = sanitizeHookSymbolFragment(fnType.Return.String())
+	}
+	base := sanitizeHookSymbolFragment(qualifiedName)
+	return fmt.Sprintf("%s__%s__to__%s__L%d_C%d", base, source, target, pos.Line, pos.Col)
+}
+
+func (a *Analyzer) registerCastHook(namespace string, decl *ast.FuncDecl, fnType *FuncType, sym *Symbol) {
+	if a == nil || decl == nil || fnType == nil || sym == nil {
+		return
+	}
+	qualifiedName := joinQualifiedName(namespace, decl.Name)
+	if len(fnType.Params) != 1 {
+		a.errorf(decl.Pos(), "__cast__ hook %q must take exactly 1 parameter, got %d", qualifiedName, len(fnType.Params))
+		return
+	}
+	if len(fnType.TypeParams) != 0 || len(fnType.RefStorageParams) != 0 || len(fnType.RefStateParams) != 0 || len(fnType.RegionParams) != 0 {
+		a.errorf(decl.Pos(), "__cast__ hook %q must not be generic in v1", qualifiedName)
+		return
+	}
+	if fnType.Variadic {
+		a.errorf(decl.Pos(), "__cast__ hook %q must not be variadic", qualifiedName)
+		return
+	}
+	if fnType.Return == nil || isVoidType(fnType.Return) {
+		a.errorf(decl.Pos(), "__cast__ hook %q must return a concrete non-void type", qualifiedName)
+		return
+	}
+	key := castHookKey(fnType.Params[0], fnType.Return)
+	hooks := a.castHooksByName[qualifiedName]
+	if hooks == nil {
+		hooks = map[castHookSignature]*Symbol{}
+		a.castHooksByName[qualifiedName] = hooks
+	}
+	if existing, ok := hooks[key]; ok {
+		a.errorf(decl.Pos(), "duplicate __cast__ hook for %s -> %s (already defined as %q)", fnType.Params[0].String(), fnType.Return.String(), existing.Name)
+		return
+	}
+	hooks[key] = sym
+}
+
+func (a *Analyzer) lookupVisibleCastHook(source Type, target Type) (*Symbol, bool) {
+	if a == nil {
+		return nil, false
+	}
+	key := castHookKey(source, target)
+	for _, candidate := range a.visibleNameCandidates("__cast__") {
+		hooks := a.castHooksByName[candidate]
+		if hooks == nil {
+			continue
+		}
+		if sym, ok := hooks[key]; ok {
+			return sym, true
+		}
+	}
+	return nil, false
+}
+
+func (a *Analyzer) symbolForFuncDecl(fn *ast.FuncDecl) (*Symbol, bool) {
+	if a == nil || fn == nil {
+		return nil, false
+	}
+	if sym, ok := a.funcDeclSymbols[fn]; ok && sym != nil {
+		return sym, true
+	}
+	if sym, _, ok := a.lookupVisibleGlobal(fn.Name); ok {
+		return sym, true
+	}
+	return nil, false
 }
 
 func isSupportedExternFunctionAnnotation(name string) bool {
@@ -2126,7 +2261,7 @@ func (a *Analyzer) analyzeFunctionAnnotations(fn *ast.FuncDecl) {
 	}
 
 	var signature *FuncType
-	if sym, _, ok := a.lookupVisibleGlobal(fn.Name); ok {
+	if sym, ok := a.symbolForFuncDecl(fn); ok {
 		signature, _ = sym.Type.(*FuncType)
 	}
 	accepted := make([]ast.Annotation, 0, len(valid))
@@ -2278,7 +2413,7 @@ func isVoidType(t Type) bool {
 }
 
 func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
-	sym, _, _ := a.lookupVisibleGlobal(fn.Name)
+	sym, _ := a.symbolForFuncDecl(fn)
 	fnType, _ := sym.Type.(*FuncType)
 	savedScope := a.currentScope
 	savedReturn := a.currentReturn
@@ -2384,11 +2519,11 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	if fn == nil || fnType == nil || fnType.ReturnProvenanceKnown {
 		return
 	}
-	if a.returnProvenanceInProgress[fn.Name] {
+	if a.returnProvenanceInProgress[fn] {
 		return
 	}
-	a.returnProvenanceInProgress[fn.Name] = true
-	defer delete(a.returnProvenanceInProgress, fn.Name)
+	a.returnProvenanceInProgress[fn] = true
+	defer delete(a.returnProvenanceInProgress, fn)
 
 	savedScope := a.currentScope
 	savedReturn := a.currentReturn
@@ -2491,11 +2626,11 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	if fn == nil || fnType == nil || fnType.ReturnBorrowedOwnerRefsKnown {
 		return
 	}
-	if a.returnBorrowedOwnerRefInProgress[fn.Name] {
+	if a.returnBorrowedOwnerRefInProgress[fn] {
 		return
 	}
-	a.returnBorrowedOwnerRefInProgress[fn.Name] = true
-	defer delete(a.returnBorrowedOwnerRefInProgress, fn.Name)
+	a.returnBorrowedOwnerRefInProgress[fn] = true
+	defer delete(a.returnBorrowedOwnerRefInProgress, fn)
 
 	savedScope := a.currentScope
 	savedReturn := a.currentReturn

@@ -1395,6 +1395,109 @@ func TestRunCLIWarnsOnLegacyCastSyntax(t *testing.T) {
 	}
 }
 
+func TestRunCLIPrintsPostfixCastHookSyntaxInAST(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "postfix_cast_hook_ast.llcontext")
+	src := "const VALUE: i64 = 1.i64()\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write postfix cast hook AST fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "ast", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{"const VALUE = 1.i64()"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected AST output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestRunCLICompilesPostfixCastHookToHookCall(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "postfix_cast_hook_llvm.llcontext")
+	src := "enum Op:\n    Add\n    Sub\n\ndef __cast__(op: Op) -> i64:\n    if op == Op.Add:\n        return 10\n    return 20\n\ndef via_postfix(op: Op) -> i64:\n    return op.i64()\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write postfix cast hook LLVM fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"define i64 @cast__Op__to__i64__L5_C1(",
+		"define i64 @via_postfix(",
+		"call i64 @cast__Op__to__i64__L5_C1(",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected LLVM output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestRunCLICompilesMultiplePostfixCastHooksInOneFile(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "multiple_postfix_cast_hooks.llcontext")
+	src := "const enum LuaUnaryOp of i8:\n    NEGATE = 0\n    NOT = 1\n\nconst enum LuaBinaryOp of i8:\n    ADD = 0\n    SUB = 1\n\ndef __cast__(op: LuaBinaryOp) -> i64:\n    if op == LuaBinaryOp.ADD:\n        return 3\n    return op.cast[i64] + 5\n\ndef __cast__(op: LuaUnaryOp) -> i64:\n    if op == LuaUnaryOp.NEGATE:\n        return 29\n    return 31\n\ndef binary_score(op: LuaBinaryOp) -> i64:\n    return op.i64()\n\ndef unary_score(op: LuaUnaryOp) -> i64:\n    return op.i64()\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write multi-hook fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"define i64 @cast__LuaBinaryOp__to__i64__L9_C1(",
+		"define i64 @cast__LuaUnaryOp__to__i64__L14_C1(",
+		"call i64 @cast__LuaBinaryOp__to__i64__L9_C1(",
+		"call i64 @cast__LuaUnaryOp__to__i64__L14_C1(",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected LLVM output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestRunCLIRejectsArrowCastWhenOnlyPostfixHookExists(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "postfix_cast_hook_reject_arrow.llcontext")
+	src := "enum Op:\n    Add\n\ndef __cast__(op: Op) -> i64:\n    return 10\n\ndef bad(op: Op) -> i64:\n    return op -> i64\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write postfix cast rejection fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", fixturePath}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected runCLI to fail, got stdout:\n%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "invalid cast from Op to i64") {
+		t.Fatalf("expected explicit cast diagnostic, got:\n%s", stderr.String())
+	}
+}
+
 func TestRunCLIRejectsImplicitIntReturnToConstEnum(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "const_enum_reject.llcontext")

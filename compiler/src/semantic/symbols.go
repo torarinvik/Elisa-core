@@ -34,6 +34,7 @@ type Result struct {
 	ConstValues     map[string]ConstValue
 	ExprTypes       map[ast.Expr]Type
 	ExprFacts       map[ast.Expr]OptimizationFacts
+	CastHooks       map[ast.Expr]*Symbol
 	DenseNodeKeys   map[ast.Expr]DenseNodeKeyInfo
 	NodeTables      map[ast.Expr]NodeTableInfo
 	PackedLowering  PackedLoweringMetadata
