@@ -3849,10 +3849,6 @@ func (s *functionState) emitPackedStoreFieldValueNamed(storeValue C.LLVMValueRef
 	if storeType == nil {
 		return nil, fmt.Errorf("missing packed enum store type")
 	}
-	_, err := s.g.lowerPackedEnumStoreType(storeType)
-	if err != nil {
-		return nil, err
-	}
 	if block := C.LLVMGetInsertBlock(s.builder); block != nil && s.packedStoreValues != nil && storeValue != nil {
 		key := packedStoreExtractCacheKey{block: block, store: storeValue, index: index}
 		if cached, ok := s.packedStoreValues[key]; ok && cached != nil {

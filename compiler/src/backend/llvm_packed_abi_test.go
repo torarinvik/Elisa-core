@@ -672,7 +672,7 @@ def fold_frozen() -> int:
 	if !strings.Contains(output, "call i64 @ctx_packed_store_read_word(") {
 		t.Fatalf("expected frozen packed payload match to use ctx_packed_store_read_word for non-inline payload extraction, got:\n%s", output)
 	}
-	for _, check := range []string{"packed.tag.store.arena", "packed.payload.word.arena"} {
+	for _, check := range []string{"packed.tag.store.arena", "packed.arena"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected frozen packed payload fast path to contain %q, got:\n%s", check, output)
 		}
@@ -786,7 +786,7 @@ def fold_frozen_mixed() -> int:
 	if !strings.Contains(output, "call i64 @ctx_packed_store_read_word(") {
 		t.Fatalf("expected mixed frozen packed payload match to use ctx_packed_store_read_word for non-inline payload extraction, got:\n%s", output)
 	}
-	for _, check := range []string{"packed.tag.store.arena", "packed.payload.word.arena"} {
+	for _, check := range []string{"packed.tag.store.arena", "packed.arena"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected mixed frozen packed payload fast path to contain %q, got:\n%s", check, output)
 		}

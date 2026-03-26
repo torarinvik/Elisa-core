@@ -512,18 +512,18 @@ func (ops *packedStoreOps) storeTagAt(handleValue C.LLVMValueRef, enumType *sema
 	}
 }
 
-func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, enumType *semantic.EnumType, wordOffset C.LLVMValueRef, origin packedReadOriginKey, name string) (C.LLVMValueRef, error) {
+func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, enumType *semantic.EnumType, wordOffset C.LLVMValueRef, origin packedReadOriginKey, _ string) (C.LLVMValueRef, error) {
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum payload metadata")
 	}
 	uintptrType := ops.s.g.result.NamedTypes["uintptr"]
 	switch ops.s.g.packedModeForEnum(enumType) {
 	case packedEnumABIIndexSOA:
-		arenaValue, err := ops.arenaValue(name + ".arena")
+		arenaValue, err := ops.arenaValue("packed.arena")
 		if err != nil {
 			return nil, err
 		}
-		stateValue, err := ops.stateValue(name + ".state")
+		stateValue, err := ops.stateValue("packed.state")
 		if err != nil {
 			return nil, err
 		}
@@ -549,13 +549,13 @@ func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, e
 			if cached, ok := ops.s.packedDenseWordReads[key]; ok && cached != nil {
 				return cached, nil
 			}
-			wordValue := ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, coercedHandle, stateValue, wordOffset}, name)
+			wordValue := ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, coercedHandle, stateValue, wordOffset}, "")
 			ops.s.packedDenseWordReads[key] = wordValue
 			return wordValue, nil
 		}
-		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, coercedHandle, stateValue, wordOffset}, name), nil
+		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, coercedHandle, stateValue, wordOffset}, ""), nil
 	case packedEnumABIVariantSparse:
-		stateValue, err := ops.stateValue(name + ".state")
+		stateValue, err := ops.stateValue("packed.state")
 		if err != nil {
 			return nil, err
 		}
@@ -580,17 +580,17 @@ func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, e
 			if cached, ok := ops.s.packedVariantSparseWordReads[key]; ok && cached != nil {
 				return cached, nil
 			}
-			wordValue := ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{coercedHandle, stateValue, wordOffset}, name)
+			wordValue := ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{coercedHandle, stateValue, wordOffset}, "")
 			ops.s.packedVariantSparseWordReads[key] = wordValue
 			return wordValue, nil
 		}
-		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{coercedHandle, stateValue, wordOffset}, name), nil
+		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{coercedHandle, stateValue, wordOffset}, ""), nil
 	default:
-		arenaValue, err := ops.arenaValue(name + ".arena")
+		arenaValue, err := ops.arenaValue("packed.arena")
 		if err != nil {
 			return nil, err
 		}
-		stateValue, err := ops.stateValue(name + ".state")
+		stateValue, err := ops.stateValue("packed.state")
 		if err != nil {
 			return nil, err
 		}
@@ -609,7 +609,7 @@ func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, e
 		if err != nil {
 			return nil, err
 		}
-		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, coercedHandle, stateValue, wordOffset}, name), nil
+		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, coercedHandle, stateValue, wordOffset}, ""), nil
 	}
 }
 
