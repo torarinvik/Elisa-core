@@ -910,6 +910,17 @@ func (s *functionState) bindPackedStoreValue(t semantic.Type, value C.LLVMValueR
 	s.packedStores[storeType.Enum.Name] = packedStoreBinding{value: value, typ: storeType}
 }
 
+func (s *functionState) invalidatePackedReadCaches() {
+	if s == nil {
+		return
+	}
+	s.packedVariantSparseTagReads = map[packedVariantSparseTagReadCacheKey]C.LLVMValueRef{}
+	s.packedVariantSparseWordReads = map[packedVariantSparseWordReadCacheKey]C.LLVMValueRef{}
+	s.packedDenseTagReads = map[packedDenseTagReadCacheKey]C.LLVMValueRef{}
+	s.packedDenseWordReads = map[packedDenseWordReadCacheKey]C.LLVMValueRef{}
+	s.packedDenseSideWordReads = map[packedDenseSideWordReadCacheKey]C.LLVMValueRef{}
+}
+
 func (s *functionState) defineBinding(name string, binding valueBinding) {
 	if s.scope == nil {
 		s.scope = &codegenScope{bindings: map[string]valueBinding{}, packedEnumPtrs: map[string]packedEnumStorageBinding{}, packedEnumStores: map[string]packedStoreBinding{}, packedViewPtrs: map[string]packedVariantViewBinding{}}
@@ -967,6 +978,54 @@ func packedEnumStorageIndexKey(expr ast.Expr) (string, bool) {
 		return packedEnumStorageIndexKey(n.Inner)
 	default:
 		return "", false
+	}
+}
+
+func (s *functionState) packedReadOriginKey(expr ast.Expr) (packedReadOriginKey, bool, error) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		if binding, ok := s.lookupBinding(n.Name); ok && binding.ptr != nil {
+			return packedReadOriginKey{root: binding.ptr}, true, nil
+		}
+		if s.g == nil || s.g.result == nil {
+			return packedReadOriginKey{}, false, nil
+		}
+		if sym, ok := s.g.result.GlobalScope.Lookup(n.Name); ok {
+			if sym.Kind == semantic.SymbolGlobal || sym.Kind == semantic.SymbolExternVar {
+				global, err := s.g.ensureGlobalDeclared(n.Name, sym.Type, sym.Kind == semantic.SymbolExternVar)
+				if err != nil {
+					return packedReadOriginKey{}, false, err
+				}
+				return packedReadOriginKey{root: global}, true, nil
+			}
+		}
+		return packedReadOriginKey{}, false, nil
+	case *ast.FieldExpr:
+		origin, ok, err := s.packedReadOriginKey(n.Object)
+		if err != nil || !ok {
+			return packedReadOriginKey{}, ok, err
+		}
+		return packedReadOriginKey{root: origin.root, path: origin.path + "." + n.Field}, true, nil
+	case *ast.IndexExpr:
+		origin, ok, err := s.packedReadOriginKey(n.Object)
+		if err != nil || !ok {
+			return packedReadOriginKey{}, ok, err
+		}
+		indexKey, ok := packedEnumStorageIndexKey(n.Index)
+		if !ok {
+			return packedReadOriginKey{}, false, nil
+		}
+		return packedReadOriginKey{root: origin.root, path: origin.path + "[" + indexKey + "]"}, true, nil
+	case *ast.CastExpr:
+		return s.packedReadOriginKey(n.Operand)
+	case *ast.CanExpr:
+		return s.packedReadOriginKey(n.Expr)
+	case *ast.MoveExpr:
+		return s.packedReadOriginKey(n.Operand)
+	case *ast.ParenExpr:
+		return s.packedReadOriginKey(n.Inner)
+	default:
+		return packedReadOriginKey{}, false, nil
 	}
 }
 

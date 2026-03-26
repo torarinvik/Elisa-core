@@ -48,6 +48,9 @@ type functionState struct {
 	packedStoreValues            map[packedStoreExtractCacheKey]C.LLVMValueRef
 	packedVariantSparseTagReads  map[packedVariantSparseTagReadCacheKey]C.LLVMValueRef
 	packedVariantSparseWordReads map[packedVariantSparseWordReadCacheKey]C.LLVMValueRef
+	packedDenseTagReads          map[packedDenseTagReadCacheKey]C.LLVMValueRef
+	packedDenseWordReads         map[packedDenseWordReadCacheKey]C.LLVMValueRef
+	packedDenseSideWordReads     map[packedDenseSideWordReadCacheKey]C.LLVMValueRef
 	scopedCleanups               []scopedCleanupBinding
 	poolScopes                   []activePoolBinding
 }
@@ -95,6 +98,37 @@ type packedVariantSparseWordReadCacheKey struct {
 	storeType *semantic.PackedEnumStoreType
 	state     C.LLVMValueRef
 	handle    C.LLVMValueRef
+	offset    C.LLVMValueRef
+}
+
+type packedReadOriginKey struct {
+	root C.LLVMValueRef
+	path string
+}
+
+type packedDenseTagReadCacheKey struct {
+	block     C.LLVMBasicBlockRef
+	storeType *semantic.PackedEnumStoreType
+	state     C.LLVMValueRef
+	origin    packedReadOriginKey
+	handle    C.LLVMValueRef
+}
+
+type packedDenseWordReadCacheKey struct {
+	block     C.LLVMBasicBlockRef
+	storeType *semantic.PackedEnumStoreType
+	state     C.LLVMValueRef
+	origin    packedReadOriginKey
+	handle    C.LLVMValueRef
+	offset    C.LLVMValueRef
+}
+
+type packedDenseSideWordReadCacheKey struct {
+	block     C.LLVMBasicBlockRef
+	storeType *semantic.PackedEnumStoreType
+	state     C.LLVMValueRef
+	origin    packedReadOriginKey
+	index     C.LLVMValueRef
 	offset    C.LLVMValueRef
 }
 
@@ -154,6 +188,9 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		packedStoreValues:            map[packedStoreExtractCacheKey]C.LLVMValueRef{},
 		packedVariantSparseTagReads:  map[packedVariantSparseTagReadCacheKey]C.LLVMValueRef{},
 		packedVariantSparseWordReads: map[packedVariantSparseWordReadCacheKey]C.LLVMValueRef{},
+		packedDenseTagReads:          map[packedDenseTagReadCacheKey]C.LLVMValueRef{},
+		packedDenseWordReads:         map[packedDenseWordReadCacheKey]C.LLVMValueRef{},
+		packedDenseSideWordReads:     map[packedDenseSideWordReadCacheKey]C.LLVMValueRef{},
 	}
 
 	paramOffset := 0
@@ -416,6 +453,7 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		}
 		C.LLVMBuildStore(s.builder, value, ptr)
 		s.bindPackedStoreValue(targetType, value)
+		s.invalidatePackedReadCaches()
 		return nil
 	case *ast.AsRefAssignStmt:
 		ptr, targetType, err := s.emitAddress(n.Target)
@@ -431,6 +469,7 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		}
 		C.LLVMBuildStore(s.builder, value, ptr)
 		s.bindPackedStoreValue(targetType, value)
+		s.invalidatePackedReadCaches()
 		return nil
 	case *ast.AugAssignStmt:
 		ptr, targetType, err := s.emitAddress(n.Target)
@@ -450,6 +489,7 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			return err
 		}
 		C.LLVMBuildStore(s.builder, result, ptr)
+		s.invalidatePackedReadCaches()
 		return nil
 	case *ast.ReturnStmt:
 		if n.Value == nil {

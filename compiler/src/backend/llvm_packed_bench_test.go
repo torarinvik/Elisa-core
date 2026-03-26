@@ -11,7 +11,25 @@ import (
 	"llcontext/src/semantic"
 )
 
-const packedLoweringBenchmarkSource = `@packed_profile(retained_reads)
+const packedLoweringBenchmarkSource = `packed enum Expr:
+    common:
+        span: i64
+        depth: i32
+    Lit(value: i64)
+    Add(left: Expr, right: Expr)
+
+def checksum(frozen: Expr.Store[Frozen]) -> i64:
+    total: mutable i64 = 0
+    i: mutable usize = 0u
+    while i < frozen.count:
+        node: Expr = frozen[i]
+        total <- total + node.span + node.span
+        total <- total + node.depth.i64() + node.depth.i64()
+        i <- i + 1u
+    return total
+`
+
+const packedLoweringRetainedReadsBenchmarkSource = `@packed_profile(retained_reads)
 packed enum Expr:
     common:
         span: i64
@@ -24,8 +42,26 @@ def checksum(frozen: Expr.Store[Frozen]) -> i64:
     i: mutable usize = 0u
     while i < frozen.count:
         node: Expr = frozen[i]
-        total <- total + node.span
-        total <- total + node.depth.i64()
+        total <- total + node.span + node.span
+        total <- total + node.depth.i64() + node.depth.i64()
+        i <- i + 1u
+    return total
+`
+
+const packedLoweringRetainedReadsSideTableBenchmarkSource = `@packed_profile(retained_reads)
+packed enum Expr:
+    common:
+        @storage(side_table)
+        span: i64
+    Lit(value: i64)
+    Add(left: Expr, right: Expr)
+
+def checksum(frozen: Expr.Store[Frozen]) -> i64:
+    total: mutable i64 = 0
+    i: mutable usize = 0u
+    while i < frozen.count:
+        node: Expr = frozen[i]
+        total <- total + node.span + node.span
         i <- i + 1u
     return total
 `
@@ -49,9 +85,9 @@ func parseAndAnalyzeBackendBenchmarkSource(b *testing.B, filename string, src st
 	return result
 }
 
-func benchmarkPackedLowering(b *testing.B, profile PackedLoweringProfile) {
+func benchmarkPackedLowering(b *testing.B, filename string, src string, profile PackedLoweringProfile) {
 	b.Helper()
-	result := parseAndAnalyzeBackendBenchmarkSource(b, "packed_lowering_bench.llcontext", packedLoweringBenchmarkSource)
+	result := parseAndAnalyzeBackendBenchmarkSource(b, filename, src)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -62,7 +98,15 @@ func benchmarkPackedLowering(b *testing.B, profile PackedLoweringProfile) {
 }
 
 func BenchmarkGenerateLLVMIRPackedLoweringCanonical(b *testing.B) {
-	benchmarkPackedLowering(b, DefaultPackedLoweringProfile())
+	benchmarkPackedLowering(b, "packed_lowering_bench.llcontext", packedLoweringBenchmarkSource, DefaultPackedLoweringProfile())
+}
+
+func BenchmarkGenerateLLVMIRPackedLoweringRetainedReads(b *testing.B) {
+	benchmarkPackedLowering(b, "packed_lowering_retained_reads_bench.llcontext", packedLoweringRetainedReadsBenchmarkSource, DefaultPackedLoweringProfile())
+}
+
+func BenchmarkGenerateLLVMIRPackedLoweringRetainedReadsSideTable(b *testing.B) {
+	benchmarkPackedLowering(b, "packed_lowering_retained_reads_side_table_bench.llcontext", packedLoweringRetainedReadsSideTableBenchmarkSource, DefaultPackedLoweringProfile())
 }
 
 func BenchmarkGenerateLLVMIRPackedLoweringWordHandle(b *testing.B) {
@@ -70,11 +114,11 @@ func BenchmarkGenerateLLVMIRPackedLoweringWordHandle(b *testing.B) {
 	if err != nil {
 		b.Fatalf("LegacyPackedLoweringProfile returned error: %v", err)
 	}
-	benchmarkPackedLowering(b, profile)
+	benchmarkPackedLowering(b, "packed_lowering_bench.llcontext", packedLoweringBenchmarkSource, profile)
 }
 
 func BenchmarkDescribePackedLowering(b *testing.B) {
-	result := parseAndAnalyzeBackendBenchmarkSource(b, "packed_describe_bench.llcontext", packedLoweringBenchmarkSource)
+	result := parseAndAnalyzeBackendBenchmarkSource(b, "packed_describe_bench.llcontext", packedLoweringRetainedReadsBenchmarkSource)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

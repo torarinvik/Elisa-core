@@ -1055,8 +1055,8 @@ def fold_common_frozen() -> int:
 	}
 
 	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_index_word(")
-	if readCalls != 2 {
-		t.Fatalf("expected repeated frozen packed common-field reads in index-soa mode to use ctx_packed_store_read_index_word twice, got %d helper calls:\n%s", readCalls, output)
+	if readCalls != 1 {
+		t.Fatalf("expected repeated frozen packed common-field reads in index-soa mode to reuse one ctx_packed_store_read_index_word call, got %d helper calls:\n%s", readCalls, output)
 	}
 	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode_index(")
 	if decodeCalls != 0 {
@@ -1193,8 +1193,8 @@ def fold_common_frozen_direct() -> int:
 	}
 
 	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_index_word(")
-	if readCalls != 2 {
-		t.Fatalf("expected direct repeated frozen packed common-field reads outside an explicit frozen checkpoint in index-soa mode to use ctx_packed_store_read_index_word twice, got %d helper calls:\n%s", readCalls, output)
+	if readCalls != 1 {
+		t.Fatalf("expected direct repeated frozen packed common-field reads outside an explicit frozen checkpoint in index-soa mode to reuse one ctx_packed_store_read_index_word call, got %d helper calls:\n%s", readCalls, output)
 	}
 	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
 		t.Fatalf("expected direct repeated frozen packed common-field reads outside an explicit frozen checkpoint in index-soa mode to avoid eager decode, got:\n%s", output)
@@ -1277,8 +1277,8 @@ def fold_common_frozen_wrapped_direct() -> int:
 	}
 
 	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_index_word(")
-	if readCalls != 2 {
-		t.Fatalf("expected helper-wrapped repeated frozen packed common-field reads in index-soa mode to use ctx_packed_store_read_index_word twice, got %d helper calls:\n%s", readCalls, output)
+	if readCalls != 1 {
+		t.Fatalf("expected helper-wrapped repeated frozen packed common-field reads in index-soa mode to reuse one ctx_packed_store_read_index_word call, got %d helper calls:\n%s", readCalls, output)
 	}
 	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
 		t.Fatalf("expected helper-wrapped repeated frozen packed common-field reads in index-soa mode to avoid eager decode, got:\n%s", output)
@@ -1367,11 +1367,92 @@ def fold_common_frozen_helper_indexed_direct() -> int:
 	}
 
 	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_index_word(")
-	if readCalls != 2 {
-		t.Fatalf("expected helper-indexed repeated frozen packed common-field reads in index-soa mode to use ctx_packed_store_read_index_word twice, got %d helper calls:\n%s", readCalls, output)
+	if readCalls != 1 {
+		t.Fatalf("expected helper-indexed repeated frozen packed common-field reads in index-soa mode to reuse one ctx_packed_store_read_index_word call, got %d helper calls:\n%s", readCalls, output)
 	}
 	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
 		t.Fatalf("expected helper-indexed repeated frozen packed common-field reads in index-soa mode to avoid eager decode, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRUsesSideWordReadForFrozenHelperWrappedRepeatedSideTableCommonFieldReadsOutsideCheckpoint(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		@storage(side_table)
+		span: int
+	Lit(value: int)
+
+repr(c) struct Box:
+	node: mutable Expr
+
+@borrows_return_field(node, node)
+extern wrap_node(node: Expr) -> Box
+
+def fold_side_common_frozen_wrapped_direct() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	boxed: Box = wrap_node(node)
+	return boxed.node.span + boxed.node.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_wrapped_side_field_cache_direct_index_soa.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_side_word(")
+	if readCalls != 1 {
+		t.Fatalf("expected helper-wrapped repeated frozen side-tabled common-field reads in index-soa mode to reuse one ctx_packed_store_read_side_word call, got %d helper calls:\n%s", readCalls, output)
+	}
+	if strings.Contains(output, "call i64 @ctx_packed_store_read_index_word(") {
+		t.Fatalf("expected helper-wrapped repeated frozen side-tabled common-field reads in index-soa mode to bypass inline index-word helpers, got:\n%s", output)
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
+		t.Fatalf("expected helper-wrapped repeated frozen side-tabled common-field reads in index-soa mode to avoid eager decode, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRUsesSideWordReadForHelperIndexedFrozenRepeatedSideTableCommonFieldReadsOutsideCheckpoint(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		@storage(side_table)
+		span: int
+	Lit(value: int)
+
+repr(c) struct Box:
+	node: Expr
+
+repr(c) struct BoxHolder:
+	items: array[Box, 1]
+
+@borrows_return_field(items[0].node, node)
+extern wrap_indexed_node(node: Expr) -> BoxHolder
+
+def fold_side_common_frozen_helper_indexed_direct() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
+	wrapped: BoxHolder = wrap_indexed_node(node)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	return wrapped.items[0u].node.span + wrapped.items[0u].node.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_helper_indexed_side_field_cache_direct_index_soa.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_side_word(")
+	if readCalls != 1 {
+		t.Fatalf("expected helper-indexed repeated frozen side-tabled common-field reads in index-soa mode to reuse one ctx_packed_store_read_side_word call, got %d helper calls:\n%s", readCalls, output)
+	}
+	if strings.Contains(output, "call i64 @ctx_packed_store_read_index_word(") {
+		t.Fatalf("expected helper-indexed repeated frozen side-tabled common-field reads in index-soa mode to bypass inline index-word helpers, got:\n%s", output)
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
+		t.Fatalf("expected helper-indexed repeated frozen side-tabled common-field reads in index-soa mode to avoid eager decode, got:\n%s", output)
 	}
 }
 
@@ -1631,8 +1712,8 @@ def fold_common_frozen_nested_helper_indexed_direct() -> int:
 	}
 
 	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_index_word(")
-	if readCalls != 2 {
-		t.Fatalf("expected nested rebased helper-indexed repeated frozen packed common-field reads outside an explicit frozen checkpoint in index-soa mode to use ctx_packed_store_read_index_word twice, got %d helper calls:\n%s", readCalls, output)
+	if readCalls != 1 {
+		t.Fatalf("expected nested rebased helper-indexed repeated frozen packed common-field reads outside an explicit frozen checkpoint in index-soa mode to reuse one ctx_packed_store_read_index_word call, got %d helper calls:\n%s", readCalls, output)
 	}
 	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
 		t.Fatalf("expected nested rebased helper-indexed repeated frozen packed common-field reads outside an explicit frozen checkpoint in index-soa mode to avoid eager decode, got:\n%s", output)
@@ -1730,8 +1811,8 @@ def fold_common_frozen_nested_wild_helper_indexed_direct() -> int:
 	}
 
 	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_index_word(")
-	if readCalls != 2 {
-		t.Fatalf("expected nested wildcard rebased helper-indexed repeated frozen packed common-field reads in index-soa mode to use ctx_packed_store_read_index_word twice, got %d helper calls:\n%s", readCalls, output)
+	if readCalls != 1 {
+		t.Fatalf("expected nested wildcard rebased helper-indexed repeated frozen packed common-field reads in index-soa mode to reuse one ctx_packed_store_read_index_word call, got %d helper calls:\n%s", readCalls, output)
 	}
 	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
 		t.Fatalf("expected nested wildcard rebased helper-indexed repeated frozen packed common-field reads in index-soa mode to avoid eager decode, got:\n%s", output)
@@ -2137,8 +2218,8 @@ def fold_common_frozen_mixed() -> int:
 	}
 
 	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_index_word(")
-	if readCalls != 2 {
-		t.Fatalf("expected repeated mixed frozen packed common-field reads in index-soa mode to use ctx_packed_store_read_index_word twice, got %d helper calls:\n%s", readCalls, output)
+	if readCalls != 1 {
+		t.Fatalf("expected repeated mixed frozen packed common-field reads in index-soa mode to reuse one ctx_packed_store_read_index_word call, got %d helper calls:\n%s", readCalls, output)
 	}
 	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
 		t.Fatalf("expected repeated mixed frozen packed common-field reads in index-soa mode to avoid eager decode, got:\n%s", output)
@@ -2618,8 +2699,8 @@ def choose() -> int:
 		t.Fatalf("expected frozen payloadless packed match with matched-value field reads in index-soa mode to use direct tag reads, got:\n%s", output)
 	}
 	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_index_word(")
-	if readCalls != 2 {
-		t.Fatalf("expected frozen payloadless packed match with matched-value field reads in index-soa mode to use two direct index word reads, got %d helper calls:\n%s", readCalls, output)
+	if readCalls != 1 {
+		t.Fatalf("expected frozen payloadless packed match with matched-value field reads in index-soa mode to reuse one direct index word read, got %d helper calls:\n%s", readCalls, output)
 	}
 	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
 		t.Fatalf("expected frozen payloadless packed match with matched-value field reads in index-soa mode to avoid eager decode, got:\n%s", output)

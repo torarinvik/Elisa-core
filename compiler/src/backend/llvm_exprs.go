@@ -4091,7 +4091,7 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 			if binding.handle == nil || binding.store.typ == nil {
 				return nil, nil, true, fmt.Errorf("packed enum common field %s.%s is stored in a side table and requires store context", binding.typ.Enum.Name, expr.Field)
 			}
-			value, err := s.emitPackedSideTableFieldRead(binding.handle, binding.typ.Enum, &binding.store, fieldType, layout.SideWordOffset, layout.WordCount, "packed.view.common.side")
+			value, err := s.emitPackedSideTableFieldRead(binding.handle, binding.typ.Enum, &binding.store, fieldType, layout.SideWordOffset, layout.WordCount, packedReadOriginKey{}, "packed.view.common.side")
 			return value, fieldType, true, err
 		}
 		if binding.ptr == nil && binding.handle != nil && binding.store.typ != nil {
@@ -4237,7 +4237,14 @@ func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMVa
 		if err != nil {
 			return nil, nil, true, err
 		}
-		value, err := s.emitPackedSideTableFieldRead(handleValue, enumType, &store, fieldType, layout.SideWordOffset, layout.WordCount, "packed.common.side")
+		origin, ok, err := s.packedReadOriginKey(expr.Object)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		if !ok {
+			origin = packedReadOriginKey{}
+		}
+		value, err := s.emitPackedSideTableFieldRead(handleValue, enumType, &store, fieldType, layout.SideWordOffset, layout.WordCount, origin, "packed.common.side")
 		if err != nil {
 			return nil, nil, true, err
 		}
@@ -4263,7 +4270,14 @@ func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMVa
 	if err != nil {
 		return nil, nil, true, err
 	}
-	wordValue, err := ops.loadPayloadWord(handleValue, enumType, fieldWordOffset, "packed.common.store")
+	origin, ok, err := s.packedReadOriginKey(expr.Object)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if !ok {
+		origin = packedReadOriginKey{}
+	}
+	wordValue, err := ops.loadPayloadWordAtOrigin(handleValue, enumType, fieldWordOffset, origin, "packed.common.store")
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -4405,7 +4419,7 @@ func (s *functionState) emitByteOffsetPtr(basePtr C.LLVMValueRef, byteOffset uin
 	return C.LLVMBuildGEP2(s.builder, i8LLVMType, basePtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree(name)), nil
 }
 
-func (s *functionState) emitPackedSideTableFieldRead(handleValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding, fieldType semantic.Type, sideWordOffset uint64, wordCount uint64, name string) (C.LLVMValueRef, error) {
+func (s *functionState) emitPackedSideTableFieldRead(handleValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding, fieldType semantic.Type, sideWordOffset uint64, wordCount uint64, origin packedReadOriginKey, name string) (C.LLVMValueRef, error) {
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("packed side-table field read requires packed enum metadata")
 	}
@@ -4441,7 +4455,7 @@ func (s *functionState) emitPackedSideTableFieldRead(handleValue C.LLVMValueRef,
 		if err != nil {
 			return nil, err
 		}
-		wordValue, err := ops.loadSideWord(handleValue, C.LLVMConstInt(wordOffsetValue, C.ulonglong(sideWordOffset+i), 0), name+".word")
+		wordValue, err := ops.loadSideWordAtOrigin(handleValue, C.LLVMConstInt(wordOffsetValue, C.ulonglong(sideWordOffset+i), 0), origin, name+".word")
 		if err != nil {
 			return nil, err
 		}
