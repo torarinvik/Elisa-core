@@ -3943,8 +3943,9 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 				value, specialized, err := s.g.ensureSpecializedFunction(decl, fnType, bindings)
 				return value, specialized, err
 			}
-			value, err := s.g.ensureFunctionDeclared(ident.Name, specializeFuncType(fnType, s.typeMap))
-			return value, specializeFuncType(fnType, s.typeMap), err
+			specialized := specializeFuncType(fnType, s.typeMap)
+			value, err := s.g.ensureFunctionDeclared(ident.Name, specialized)
+			return value, specialized, err
 		}
 	}
 	calleeType, ok := s.exprType(expr.Func).(*semantic.FuncType)

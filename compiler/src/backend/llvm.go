@@ -96,6 +96,7 @@ type llvmGenerator struct {
 	structBodies         map[string]bool
 	functionTypes        map[*semantic.FuncType]C.LLVMTypeRef
 	runtimeHelperTypes   map[string]*semantic.FuncType
+	specializedFuncTypes map[string]*semantic.FuncType
 	functions            map[string]C.LLVMValueRef
 	globals              map[string]C.LLVMValueRef
 	noteTypeInProgress   map[semantic.Type]bool
@@ -125,6 +126,7 @@ func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
 		structBodies:       map[string]bool{},
 		functionTypes:      map[*semantic.FuncType]C.LLVMTypeRef{},
 		runtimeHelperTypes: map[string]*semantic.FuncType{},
+		specializedFuncTypes: map[string]*semantic.FuncType{},
 		functions:          map[string]C.LLVMValueRef{},
 		globals:            map[string]C.LLVMValueRef{},
 		noteTypeInProgress: map[semantic.Type]bool{},
