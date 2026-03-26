@@ -6,7 +6,12 @@ This directory contains the Go-based frontend for `.llcontext` source files.
 
 Repository-level release notes now live in `../CHANGELOG.md`.
 
-The current unreleased highlight is first-class `refstorage` / `refstate` generics for pointer storage and proof-state abstraction across structs, functions, exports, specialization, LLVM lowering, and generated C headers.
+The current unreleased highlights include:
+
+- postfix shorthand cast hooks, so exact `__cast__` helpers can back method-like conversions such as `op.i64()`
+- side-table storage for packed-enum `common:` fields via `@storage(side_table)`
+- `Abort.*` permissions on `@test` functions
+- the earlier `refstorage` / `refstate` generic work across parsing, semantics, specialization, lowering, and generated C headers
 
 For a compile-checked end-to-end example, see `../Code/test_programs/ref_qualifier_generics.llcontext`.
 
@@ -166,6 +171,18 @@ clang -O3 -pthread -Wl,-undefined,dynamic_lookup -I /tmp ../Code/benchmarks/json
 /tmp/json_parser_parallel_bench /tmp/llcontext-large.json 20 4 checksum
 /tmp/json_parser_parallel_bench /tmp/llcontext-large.json 20 4 ast-cached
 go test ./test/benchmarks -run '^$' -bench '^BenchmarkEncodingJSONParseSyntheticCorpus/large$' -benchmem -benchtime=20x
+```
+
+There is also now a Lua frontend storage-layout benchmark lane for comparing the checked-in side-table packed-span layout against a temporary inline-control variant:
+
+- `../Code/llcontext_lua/src/lua_ast.llcontext` uses `@storage(side_table)` on `LuaNode.common.span`
+- `../Code/benchmarks/lua_frontend_bench.c` benchmarks exported parse/sample checksum entry points
+- `./scripts/run_lua_frontend_storage_benchmark.py` builds both layouts, generates valid Lua input, runs repeated parse/sample measurements, and summarizes throughput deltas
+
+One way to run it is:
+
+```text
+python3 ./scripts/run_lua_frontend_storage_benchmark.py --stmt-count 4000 --parse-iterations 20 --sample-iterations 5000 --repeats 3
 ```
 
 ## Layout

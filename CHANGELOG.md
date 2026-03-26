@@ -6,6 +6,10 @@ All notable changes to this repository should be documented in this file.
 
 ### Highlights
 
+- Postfix shorthand casts like `value.i64()` now dispatch to visible `__cast__` hooks when an exact source-to-target hook exists, with permission-aware semantic analysis and LLVM lowering.
+- Packed-enum `common:` fields can now opt into side-table storage via `@storage(side_table)`, including end-to-end runtime/backend support and ABI validation.
+- `@test` functions may now declare `Abort.*` permissions, which keeps panic/assert-heavy compiler fixtures valid without opening the door to unrelated declared permissions.
+- The Lua frontend experiment now ships with a storage-layout benchmark harness that compares the checked-in side-table layout against a temporary inline-control variant.
 - First-class `refstorage` / `refstate` generics now work end to end across parsing, semantic analysis, specialization, exports, LLVM lowering, and C header generation.
 - Concrete export wrappers such as `keep_handle[heap, &]` now parse and lower correctly, including stable public header emission for concrete qualifier-specialized exports.
 - A compile-checked showcase for the feature now lives at `Code/test_programs/ref_qualifier_generics.llcontext`.
@@ -14,6 +18,11 @@ All notable changes to this repository should be documented in this file.
 
 ### Added
 
+- Postfix shorthand cast-hook resolution for `expr.TargetType()` syntax when a visible `def __cast__(value: Source) -> Target` hook matches exactly.
+- Side-table packed common-field storage via `@storage(side_table)` on `packed enum` `common:` fields.
+- Lua frontend storage benchmark tooling:
+  - `Code/benchmarks/lua_frontend_bench.c`
+  - `compiler/scripts/run_lua_frontend_storage_benchmark.py`
 - First-class generic parameter kinds for pointer storage and pointer proof state:
   - `refstorage name`
   - `refstate name`
@@ -32,6 +41,9 @@ All notable changes to this repository should be documented in this file.
   - export analysis and C header generation
   - CLI/type formatting
 - Regression coverage for:
+  - postfix cast-hook AST printing, LLVM emission, duplicate/misuse rejection, and arrow-cast non-dispatch
+  - packed side-table common-field lowering and ABI/error cases
+  - `@test` functions that declare `Abort.Panic` while rejecting non-`Abort` declared permissions
   - named qualifier parsing
   - nearest-`&` state attachment
   - qualifier-generic call inference
@@ -46,6 +58,9 @@ All notable changes to this repository should be documented in this file.
 
 ### Changed
 
+- `@test` annotations now permit declared `Abort` permissions while continuing to reject other declared permission families.
+- Explicit casts (`expr.cast[T]`, legacy `.cast[T]()`, and `expr -> T`) continue to use ordinary cast rules even when a postfix `__cast__` hook exists; only postfix shorthand dispatches to hooks.
+- Packed-enum layout computation, runtime helpers, and LLVM lowering now support `common:` fields stored in side tables as well as inline words.
 - Mixed generic argument order is now declaration order for:
   - ordinary type parameters
   - `refstorage`
@@ -64,6 +79,8 @@ All notable changes to this repository should be documented in this file.
 
 ### Documentation
 
+- `compiler/README.md` now documents the latest postfix cast-hook surface and the Lua frontend storage benchmark harness.
+- `Code/llcontext_lua/README.md` now reflects the current parser/export surface, side-table packed-span layout, and benchmark entry points.
 - Expanded pointer typestate documentation in:
   - `docs/useful_language_features/02-pointer-typestate-practical.md`
   - `docs/useful_language_features/03-pointer-typestate-formal.md`
