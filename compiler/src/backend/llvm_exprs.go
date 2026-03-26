@@ -137,10 +137,10 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 				if !ok {
 					err = fmt.Errorf("packed enum constructor %s.%s requires an active in %s: scope or explicit new[%s]", enumType.Name, variant.Name, enumType.StoreType.Name, enumType.StoreType.Name)
 				} else {
-					value, actualType, err = s.emitPackedEnumConstructorAlloc(store.value, enumType, variant, nil, nil)
+					value, actualType, err = s.emitPackedEnumConstructorAlloc(nil, store.value, enumType, variant, nil, nil)
 				}
 			} else {
-				value, actualType, err = s.emitEnumConstructorValue(enumType, variant, nil, nil)
+				value, actualType, err = s.emitEnumConstructorValue(nil, enumType, variant, nil, nil)
 			}
 		} else {
 			value, actualType, err = s.emitFieldExpr(n)
@@ -2965,7 +2965,7 @@ func (s *functionState) emitScopedPackedAllocExpr(expr *ast.AllocExpr) (C.LLVMVa
 		if !ok {
 			return nil, nil, fmt.Errorf("missing active packed enum store for %s", enumType.Name)
 		}
-		return s.emitPackedEnumConstructorAlloc(store.value, enumType, variant, nil, nil)
+		return s.emitPackedEnumConstructorAlloc(nil, store.value, enumType, variant, nil, nil)
 	case *ast.CallExpr:
 		enumType, variant, ok := s.enumConstructorInfo(n)
 		if !ok || enumType == nil || variant == nil || !enumType.Packed {
@@ -2975,7 +2975,7 @@ func (s *functionState) emitScopedPackedAllocExpr(expr *ast.AllocExpr) (C.LLVMVa
 		if !ok {
 			return nil, nil, fmt.Errorf("missing active packed enum store for %s", enumType.Name)
 		}
-		return s.emitPackedEnumConstructorAlloc(store.value, enumType, variant, n.Args, n.ArgNames)
+		return s.emitPackedEnumConstructorAlloc(n, store.value, enumType, variant, n.Args, n.ArgNames)
 	default:
 		return nil, nil, fmt.Errorf("new without [...] expects a packed enum constructor inside an in-store block")
 	}
@@ -2989,7 +2989,7 @@ func (s *functionState) emitPackedAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef
 	if fieldExpr, ok := expr.Value.(*ast.FieldExpr); ok {
 		enumType, variant, ok := s.enumConstructorInfoFromField(fieldExpr)
 		if ok && enumType != nil && variant != nil && enumType.Packed && len(variant.Payload) == 0 {
-			return s.emitPackedEnumConstructorAlloc(storeValue, enumType, variant, nil, nil)
+			return s.emitPackedEnumConstructorAlloc(nil, storeValue, enumType, variant, nil, nil)
 		}
 	}
 	callExpr, ok := expr.Value.(*ast.CallExpr)
@@ -3000,7 +3000,7 @@ func (s *functionState) emitPackedAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef
 	if !ok || enumType == nil || variant == nil || !enumType.Packed {
 		return nil, nil, fmt.Errorf("packed enum allocation expects a packed enum constructor call")
 	}
-	return s.emitPackedEnumConstructorAlloc(storeValue, enumType, variant, callExpr.Args, callExpr.ArgNames)
+	return s.emitPackedEnumConstructorAlloc(callExpr, storeValue, enumType, variant, callExpr.Args, callExpr.ArgNames)
 }
 
 func (s *functionState) nodeTableFillTypeArgs(expr *ast.CallExpr) (*semantic.EnumType, semantic.Type, error) {
@@ -3258,9 +3258,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 			if !ok {
 				return nil, nil, fmt.Errorf("packed enum constructor %s.%s requires an active in %s: scope or explicit new[%s]", enumType.Name, variant.Name, enumType.StoreType.Name, enumType.StoreType.Name)
 			}
-			return s.emitPackedEnumConstructorAlloc(store.value, enumType, variant, expr.Args, expr.ArgNames)
+			return s.emitPackedEnumConstructorAlloc(expr, store.value, enumType, variant, expr.Args, expr.ArgNames)
 		}
-		return s.emitEnumConstructorValue(enumType, variant, expr.Args, expr.ArgNames)
+		return s.emitEnumConstructorValue(expr, enumType, variant, expr.Args, expr.ArgNames)
 	}
 	if value, actualType, handled, err := s.emitProofCarryingViewHelperCall(expr); handled {
 		return value, actualType, err
@@ -3850,15 +3850,12 @@ func (s *functionState) emitPackedStoreFieldValueNamed(storeValue C.LLVMValueRef
 		return nil, fmt.Errorf("missing packed enum store type")
 	}
 	if block := C.LLVMGetInsertBlock(s.builder); block != nil && storeValue != nil {
-		if s.packedStoreValues == nil {
-			s.packedStoreValues = map[packedStoreExtractCacheKey]C.LLVMValueRef{}
-		}
 		key := packedStoreExtractCacheKey{block: block, store: storeValue, index: index}
-		if cached, ok := s.packedStoreValues[key]; ok && cached != nil {
+		if cached, ok := s.lookupPackedStoreFieldValue(key); ok && cached != nil {
 			return cached, nil
 		}
 		value := C.LLVMBuildExtractValue(s.builder, storeValue, index, cStringFree(name))
-		s.packedStoreValues[key] = value
+		s.cachePackedStoreFieldValue(key, value)
 		return value, nil
 	}
 	return C.LLVMBuildExtractValue(s.builder, storeValue, index, cStringFree(name)), nil
@@ -3961,7 +3958,7 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, sema
 			return nil, nil, fmt.Errorf("unknown enum constructor %s.%s", enumType.Name, expr.Field)
 		}
 		if len(variant.Payload) == 0 {
-			return s.emitEnumConstructorValue(enumType, variant, nil, nil)
+			return s.emitEnumConstructorValue(nil, enumType, variant, nil, nil)
 		}
 	}
 	if fieldType, ok := dstrSyntheticFieldType(s.exprType(expr.Object), expr.Field); ok {
@@ -5237,14 +5234,14 @@ func (s *functionState) enumConstructorInfoFromField(expr *ast.FieldExpr) (*sema
 	return enumType, variant, true
 }
 
-func (s *functionState) emitEnumConstructorValue(enumType *semantic.EnumType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitEnumConstructorValue(callExpr *ast.CallExpr, enumType *semantic.EnumType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string) (C.LLVMValueRef, semantic.Type, error) {
 	if enumType == nil || variant == nil {
 		return nil, nil, fmt.Errorf("missing enum constructor metadata")
 	}
 	if enumType.Packed {
 		return nil, nil, fmt.Errorf("packed enum constructor %s.%s must be allocated with new[%s]", enumType.Name, variant.Name, enumType.StoreType.Name)
 	}
-	orderedArgs, err := s.resolveEnumConstructorArgs(enumType, variant, args, argNames)
+	orderedArgs, err := s.resolveEnumConstructorArgs(callExpr, enumType, variant, args, argNames)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -5314,11 +5311,11 @@ func (s *functionState) emitEnumConstructorValue(enumType *semantic.EnumType, va
 	return value, enumType, nil
 }
 
-func (s *functionState) emitPackedEnumConstructorAlloc(storeValue C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, storeValue C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string) (C.LLVMValueRef, semantic.Type, error) {
 	if enumType == nil || variant == nil || !enumType.Packed {
 		return nil, nil, fmt.Errorf("missing packed enum constructor metadata")
 	}
-	orderedArgs, commonArgs, err := s.resolvePackedEnumConstructorArgs(enumType, variant, args, argNames)
+	orderedArgs, commonArgs, err := s.resolvePackedEnumConstructorArgs(callExpr, enumType, variant, args, argNames)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -5657,9 +5654,12 @@ func (s *functionState) emitPackedEnumStorageAlloc(storeValue C.LLVMValueRef, en
 	return ops.allocateStorage(enumType, totalSizeValue, tailPlan != nil, fixedTagValue, "packed.alloc.store")
 }
 
-func (s *functionState) resolveEnumConstructorArgs(enumType *semantic.EnumType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string) ([]ast.Expr, error) {
+func (s *functionState) resolveEnumConstructorArgs(callExpr *ast.CallExpr, enumType *semantic.EnumType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string) ([]ast.Expr, error) {
 	if variant == nil {
 		return nil, fmt.Errorf("missing enum constructor metadata")
+	}
+	if callExpr != nil && callExpr.ResolvedArgsValid && len(callExpr.ResolvedArgs) == len(variant.Payload) && callExpr.ResolvedCommonArgs == nil {
+		return callExpr.ResolvedArgs, nil
 	}
 	namedCount := 0
 	for _, name := range argNames {
@@ -5668,6 +5668,11 @@ func (s *functionState) resolveEnumConstructorArgs(enumType *semantic.EnumType, 
 		}
 	}
 	if namedCount == 0 {
+		if callExpr != nil {
+			callExpr.ResolvedArgsValid = true
+			callExpr.ResolvedArgs = args
+			callExpr.ResolvedCommonArgs = nil
+		}
 		return args, nil
 	}
 	if namedCount != len(args) {
@@ -5702,12 +5707,20 @@ func (s *functionState) resolveEnumConstructorArgs(enumType *semantic.EnumType, 
 			return nil, fmt.Errorf("enum constructor %s.%s is missing payload field %q", enumType.Name, variant.Name, label)
 		}
 	}
+	if callExpr != nil {
+		callExpr.ResolvedArgsValid = true
+		callExpr.ResolvedArgs = ordered
+		callExpr.ResolvedCommonArgs = nil
+	}
 	return ordered, nil
 }
 
-func (s *functionState) resolvePackedEnumConstructorArgs(enumType *semantic.EnumType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string) ([]ast.Expr, map[string]ast.Expr, error) {
+func (s *functionState) resolvePackedEnumConstructorArgs(callExpr *ast.CallExpr, enumType *semantic.EnumType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string) ([]ast.Expr, map[string]ast.Expr, error) {
 	if enumType == nil || variant == nil {
 		return nil, nil, fmt.Errorf("missing packed enum constructor metadata")
+	}
+	if callExpr != nil && callExpr.ResolvedArgsValid && len(callExpr.ResolvedArgs) == len(variant.Payload) {
+		return callExpr.ResolvedArgs, callExpr.ResolvedCommonArgs, nil
 	}
 	namedCount := 0
 	for _, name := range argNames {
@@ -5716,6 +5729,11 @@ func (s *functionState) resolvePackedEnumConstructorArgs(enumType *semantic.Enum
 		}
 	}
 	if namedCount == 0 {
+		if callExpr != nil {
+			callExpr.ResolvedArgsValid = true
+			callExpr.ResolvedArgs = args
+			callExpr.ResolvedCommonArgs = nil
+		}
 		return args, nil, nil
 	}
 	if namedCount != len(args) {
@@ -5754,6 +5772,11 @@ func (s *functionState) resolvePackedEnumConstructorArgs(enumType *semantic.Enum
 			}
 			return nil, nil, fmt.Errorf("enum constructor %s.%s is missing payload field %q", enumType.Name, variant.Name, label)
 		}
+	}
+	if callExpr != nil {
+		callExpr.ResolvedArgsValid = true
+		callExpr.ResolvedArgs = ordered
+		callExpr.ResolvedCommonArgs = commonArgs
 	}
 	return ordered, commonArgs, nil
 }

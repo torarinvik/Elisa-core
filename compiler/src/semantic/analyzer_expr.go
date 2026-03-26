@@ -3032,8 +3032,14 @@ func (a *Analyzer) resolveEnumConstructorArgs(expr *ast.CallExpr, enumType *Enum
 	if expr == nil || variant == nil {
 		return nil, false
 	}
+	if expr.ResolvedArgsValid && len(expr.ResolvedArgs) == len(variant.Payload) && expr.ResolvedCommonArgs == nil {
+		return expr.ResolvedArgs, true
+	}
 	namedCount := expr.NamedArgCount()
 	if namedCount == 0 {
+		expr.ResolvedArgsValid = true
+		expr.ResolvedArgs = expr.Args
+		expr.ResolvedCommonArgs = nil
 		return expr.Args, true
 	}
 	if namedCount != len(expr.Args) {
@@ -3088,6 +3094,9 @@ func (a *Analyzer) resolveEnumConstructorArgs(expr *ast.CallExpr, enumType *Enum
 	if !ok {
 		return nil, false
 	}
+	expr.ResolvedArgsValid = true
+	expr.ResolvedArgs = ordered
+	expr.ResolvedCommonArgs = nil
 	return ordered, true
 }
 
@@ -3095,8 +3104,14 @@ func (a *Analyzer) resolvePackedEnumConstructorArgs(expr *ast.CallExpr, enumType
 	if expr == nil || enumType == nil || variant == nil {
 		return nil, nil, false
 	}
+	if expr.ResolvedArgsValid && len(expr.ResolvedArgs) == len(variant.Payload) {
+		return expr.ResolvedArgs, expr.ResolvedCommonArgs, true
+	}
 	namedCount := expr.NamedArgCount()
 	if namedCount == 0 {
+		expr.ResolvedArgsValid = true
+		expr.ResolvedArgs = expr.Args
+		expr.ResolvedCommonArgs = nil
 		return expr.Args, nil, true
 	}
 	if namedCount != len(expr.Args) {
@@ -3151,6 +3166,9 @@ func (a *Analyzer) resolvePackedEnumConstructorArgs(expr *ast.CallExpr, enumType
 	if !ok {
 		return nil, nil, false
 	}
+	expr.ResolvedArgsValid = true
+	expr.ResolvedArgs = ordered
+	expr.ResolvedCommonArgs = commonArgs
 	return ordered, commonArgs, true
 }
 

@@ -52,6 +52,12 @@ type functionState struct {
 	resultSlot                   C.LLVMValueRef
 	regions                      []regionBinding
 	packedStores                 map[string]packedStoreBinding
+	packedStoreValueKey1         packedStoreExtractCacheKey
+	packedStoreValue1            C.LLVMValueRef
+	packedStoreValueKey2         packedStoreExtractCacheKey
+	packedStoreValue2            C.LLVMValueRef
+	packedStoreValueKey3         packedStoreExtractCacheKey
+	packedStoreValue3            C.LLVMValueRef
 	packedStoreValues            map[packedStoreExtractCacheKey]C.LLVMValueRef
 	packedVariantSparseTagReads  map[packedVariantSparseTagReadCacheKey]C.LLVMValueRef
 	packedVariantSparseWordReads map[packedVariantSparseWordReadCacheKey]C.LLVMValueRef

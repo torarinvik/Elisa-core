@@ -419,6 +419,10 @@ type CallExpr struct {
 	Func     Expr
 	Args     []Expr
 	ArgNames []string
+
+	ResolvedArgsValid  bool
+	ResolvedArgs       []Expr
+	ResolvedCommonArgs map[string]Expr
 }
 
 type FieldExpr struct {

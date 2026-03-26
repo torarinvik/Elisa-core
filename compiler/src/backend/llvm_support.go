@@ -935,11 +935,60 @@ func (s *functionState) invalidatePackedReadCaches() {
 	if s == nil {
 		return
 	}
+	s.packedStoreValueKey1 = packedStoreExtractCacheKey{}
+	s.packedStoreValue1 = nil
+	s.packedStoreValueKey2 = packedStoreExtractCacheKey{}
+	s.packedStoreValue2 = nil
+	s.packedStoreValueKey3 = packedStoreExtractCacheKey{}
+	s.packedStoreValue3 = nil
+	clear(s.packedStoreValues)
 	clear(s.packedVariantSparseTagReads)
 	clear(s.packedVariantSparseWordReads)
 	clear(s.packedDenseTagReads)
 	clear(s.packedDenseWordReads)
 	clear(s.packedDenseSideWordReads)
+}
+
+func (s *functionState) lookupPackedStoreFieldValue(key packedStoreExtractCacheKey) (C.LLVMValueRef, bool) {
+	if s == nil {
+		return nil, false
+	}
+	if s.packedStoreValue1 != nil && s.packedStoreValueKey1 == key {
+		return s.packedStoreValue1, true
+	}
+	if s.packedStoreValue2 != nil && s.packedStoreValueKey2 == key {
+		return s.packedStoreValue2, true
+	}
+	if s.packedStoreValue3 != nil && s.packedStoreValueKey3 == key {
+		return s.packedStoreValue3, true
+	}
+	value, ok := s.packedStoreValues[key]
+	return value, ok && value != nil
+}
+
+func (s *functionState) cachePackedStoreFieldValue(key packedStoreExtractCacheKey, value C.LLVMValueRef) {
+	if s == nil || value == nil {
+		return
+	}
+	if s.packedStoreValue1 == nil || s.packedStoreValueKey1 == key {
+		s.packedStoreValueKey1 = key
+		s.packedStoreValue1 = value
+		return
+	}
+	if s.packedStoreValue2 == nil || s.packedStoreValueKey2 == key {
+		s.packedStoreValueKey2 = key
+		s.packedStoreValue2 = value
+		return
+	}
+	if s.packedStoreValue3 == nil || s.packedStoreValueKey3 == key {
+		s.packedStoreValueKey3 = key
+		s.packedStoreValue3 = value
+		return
+	}
+	if s.packedStoreValues == nil {
+		s.packedStoreValues = map[packedStoreExtractCacheKey]C.LLVMValueRef{}
+	}
+	s.packedStoreValues[key] = value
 }
 
 func (s *functionState) defineBinding(name string, binding valueBinding) {
