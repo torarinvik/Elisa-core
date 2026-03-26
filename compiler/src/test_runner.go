@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"llcontext/src/ast"
 	"llcontext/src/backend"
 	"llcontext/src/semantic"
 	"os"
@@ -13,6 +14,31 @@ import (
 	"strconv"
 	"strings"
 )
+
+func selectedTestPermissionRefs(tests []*semantic.AnnotatedFunc) []ast.PermissionRef {
+	refs := []ast.PermissionRef{{Name: "Console", Member: "Write"}}
+	seen := map[string]bool{"Console.Write": true}
+	for _, testFn := range tests {
+		if testFn == nil || testFn.Signature == nil {
+			continue
+		}
+		fnRefs := testFn.Signature.PermissionRefs
+		if len(fnRefs) == 0 {
+			for _, family := range testFn.Signature.Permissions {
+				fnRefs = append(fnRefs, ast.PermissionRef{Name: family})
+			}
+		}
+		for _, ref := range fnRefs {
+			key := semantic.PermissionRefString(ref)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			refs = append(refs, ref)
+		}
+	}
+	return refs
+}
 
 func selectAnnotatedFunctions(result *semantic.Result, annotationName string, filter string) []*semantic.AnnotatedFunc {
 	if result == nil || annotationName == "" {
@@ -48,7 +74,9 @@ func generateTestRunnerSource(inputFile string, result *semantic.Result, filter 
 	if !strings.Contains(string(source), "extern puts(") {
 		out.WriteString("extern puts(text: any u8&) -> int can[Console.Write]\n\n")
 	}
-	out.WriteString("def ctx_test_main() -> int can[Console.Write]:\n")
+	out.WriteString("def ctx_test_main() -> int")
+	out.WriteString(semantic.PermissionRefsString(selectedTestPermissionRefs(tests)))
+	out.WriteString(":\n")
 
 	if len(tests) == 0 {
 		message := llcontextStringLiteral(fmt.Sprintf("[ NO TESTS ] no @test functions matched filter %q", strings.TrimSpace(filter)))

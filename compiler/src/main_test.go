@@ -1186,7 +1186,7 @@ func TestRunCLIExecutesJSONParserSelfHostedTests(t *testing.T) {
 
 func TestRunCLICompilesStage1RuntimeToLLVM(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "contextlang_runtime.llcontext")
+	fixturePath := filepath.Join(repoRoot, "Code", "llcontext_std", "contextlang_runtime.llcontext")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

@@ -1,0 +1,11 @@
+# ============================================================
+# Test helpers - low level Contextlang runtime dialect
+# ============================================================
+
+def assert_eq[T](actual: T, expected: T) can[Abort.Panic]:
+    if actual != expected:
+        panic("assert_eq failed")
+
+def assert_ne[T](actual: T, expected: T) can[Abort.Panic]:
+    if actual == expected:
+        panic("assert_ne failed")

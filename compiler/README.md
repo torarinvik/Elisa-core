@@ -198,11 +198,10 @@ go test ./...
 
 ## Runtime source of truth
 
-The active runtime implementation lives in llcontext source files under `../Code/`.
+The active runtime implementation lives in llcontext source files under `../Code/llcontext_std/`.
 
-- `../Code/contextlang_runtime.llcontext` — canonical runtime entrypoint
-- `../Code/runtime_llcontext/` — staged runtime helpers and wrappers
-- `../Code/arena.llcontext` — arena, dynamic-array, and dictionary support
+- `../Code/llcontext_std/contextlang_runtime.llcontext` — canonical runtime entrypoint
+- `../Code/llcontext_std/` — staged runtime helpers, wrappers, allocator, collections, stores, and test support
 
 Retained C sources under `../Code/benchmarks/` are benchmark scaffolding only and are not part of the active runtime implementation.
 

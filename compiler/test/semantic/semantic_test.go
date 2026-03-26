@@ -182,10 +182,9 @@ func loadSourceWithIncludes(t *testing.T, filename string, seen map[string]bool)
 		t.Fatalf("failed to resolve %s: %v", filename, err)
 	}
 	if seen[abs] {
-		t.Fatalf("cyclic include detected for %s", abs)
+		return ""
 	}
 	seen[abs] = true
-	defer delete(seen, abs)
 
 	raw, err := os.ReadFile(abs)
 	if err != nil {
@@ -4489,6 +4488,67 @@ func TestAnalyzeRejectsShadowedStringMatchArms(t *testing.T) {
 	}
 }
 
+func TestAnalyzeRejectsNestedStringLiteralPatterns(t *testing.T) {
+	src := `enum Wrapper:
+	Text(StringView)
+	Other
+
+def classify(value: Wrapper) -> int:
+	return match value:
+		Wrapper.Text("local"):
+			1
+		Wrapper.Other:
+			0
+`
+	_, errs := parseAndAnalyze(t, "string_match_nested_pattern_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "nested string literal match patterns are not supported") {
+		t.Fatalf("expected nested string-pattern diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsStringMatchOverNonStringValue(t *testing.T) {
+	src := `def classify(value: int) -> int:
+	return match value:
+		"local":
+			1
+		_:
+			0
+`
+	_, errs := parseAndAnalyze(t, "string_match_non_string_value_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "match requires an enum or string value, got int") {
+		t.Fatalf("expected non-string match diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsNonLiteralTopLevelStringMatchArm(t *testing.T) {
+	src := `enum Token:
+	Region
+
+def classify(text: StringView) -> int:
+	return match text:
+		Token.Region:
+			1
+		_:
+			0
+`
+	_, errs := parseAndAnalyze(t, "string_match_non_literal_arm_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "top-level string match arm must use a string literal or _") {
+		t.Fatalf("expected top-level string-arm diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsRecursiveEnumPayloadByValue(t *testing.T) {
 	src := `enum Expr:
 	Int(int)
@@ -7905,7 +7965,7 @@ func TestAnalyzeAcceptsAllocatorOwnershipFixturePatterns(t *testing.T) {
 
 func TestAnalyzePinsArenaBuiltinPermissionContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "arena.llcontext"), map[string]bool{})
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "llcontext_std", "arena.llcontext"), map[string]bool{})
 	result, errs := parseAndAnalyze(t, "arena.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
@@ -7925,7 +7985,7 @@ func TestAnalyzePinsArenaBuiltinPermissionContracts(t *testing.T) {
 
 func TestAnalyzePinsArenaHeapPointerContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "arena.llcontext"), map[string]bool{})
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "llcontext_std", "arena.llcontext"), map[string]bool{})
 	result, errs := parseAndAnalyze(t, "arena.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
@@ -7937,14 +7997,30 @@ func TestAnalyzePinsArenaHeapPointerContracts(t *testing.T) {
 	requireFunctionReturnTypeString(t, result, "arena_realloc", "heap void&")
 	requireFunctionReturnTypeString(t, result, "arena_strdup", "heap u8&")
 	requireFunctionReturnTypeString(t, result, "arena_memdup", "heap void&")
-	requireFunctionReturnTypeString(t, result, "ctx_packed_store_state_new", "heap void&")
-	requireFunctionReturnTypeString(t, result, "arena_dict_copy_key", "heap u8&")
 	requireFunctionReturnTypeString(t, result, "arena_vsprintf", "heap u8&")
+}
+
+func TestAnalyzePinsCollectionsHeapPointerContracts(t *testing.T) {
+	repoRoot := repoRootFromTestFile(t)
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "llcontext_std", "collections.llcontext"), map[string]bool{})
+	result, errs := parseAndAnalyze(t, "collections.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "arena_dict_copy_key", "heap u8&")
+}
+
+func TestAnalyzePinsStoresHeapPointerContracts(t *testing.T) {
+	repoRoot := repoRootFromTestFile(t)
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "llcontext_std", "stores.llcontext"), map[string]bool{})
+	result, errs := parseAndAnalyze(t, "stores.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ctx_packed_store_state_new", "heap void&")
 }
 
 func TestAnalyzePinsRuntimePreludeBuiltinExternPermissionContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "runtime_llcontext", "contextlang_runtime_prelude.llcontext"), map[string]bool{})
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "llcontext_std", "contextlang_runtime_prelude.llcontext"), map[string]bool{})
 	result, errs := parseAndAnalyze(t, "contextlang_runtime_prelude.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
@@ -7956,7 +8032,7 @@ func TestAnalyzePinsRuntimePreludeBuiltinExternPermissionContracts(t *testing.T)
 
 func TestAnalyzePinsRuntimePreludeHeapPointerContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "runtime_llcontext", "contextlang_runtime_prelude.llcontext"), map[string]bool{})
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "llcontext_std", "contextlang_runtime_prelude.llcontext"), map[string]bool{})
 	result, errs := parseAndAnalyze(t, "contextlang_runtime_prelude.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
@@ -7972,7 +8048,7 @@ func TestAnalyzePinsRuntimePreludeHeapPointerContracts(t *testing.T) {
 
 func TestAnalyzePinsRuntimeStage1BuiltinPermissionContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
-	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "contextlang_runtime.llcontext"), map[string]bool{})
+	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "llcontext_std", "contextlang_runtime.llcontext"), map[string]bool{})
 	result, errs := parseAndAnalyze(t, "contextlang_runtime.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
