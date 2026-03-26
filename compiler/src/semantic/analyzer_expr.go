@@ -590,10 +590,7 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 			return regionRefState{}, false
 		}
 		if len(fieldStates) != 0 {
-			wildcard, ok := mergeRegionRefStates(elemStates...)
-			if ok {
-				fieldStates[regionAnyIndexFieldKey()] = wildcard
-			}
+			fieldStates[regionAnyIndexFieldKey()] = cloneRegionRefState(merged)
 			merged.Fields = fieldStates
 		}
 		return merged, true

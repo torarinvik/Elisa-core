@@ -3023,6 +3023,29 @@ func cloneRegionRefState(state regionRefState) regionRefState {
 	return cloned
 }
 
+func cloneRegionRefStateShallowFields(state regionRefState) regionRefState {
+	cloned := regionRefState{}
+	if len(state.Deps) != 0 {
+		cloned.Deps = make(map[*Symbol]regionDependencyState, len(state.Deps))
+		for region, dep := range state.Deps {
+			cloned.Deps[region] = dep
+		}
+	}
+	if len(state.StoreDeps) != 0 {
+		cloned.StoreDeps = make(map[*Symbol]packedStoreDependencyState, len(state.StoreDeps))
+		for store, dep := range state.StoreDeps {
+			cloned.StoreDeps[store] = dep
+		}
+	}
+	if len(state.ParamDeps) != 0 {
+		cloned.ParamDeps = make(map[int]bool, len(state.ParamDeps))
+		for index, dep := range state.ParamDeps {
+			cloned.ParamDeps[index] = dep
+		}
+	}
+	return cloned
+}
+
 func hasRegionDependencies(state regionRefState) bool {
 	return len(state.Deps) != 0 || len(state.StoreDeps) != 0
 }
@@ -3189,7 +3212,7 @@ func summarizeRegionIndexStates(state regionRefState) (regionRefState, bool) {
 	if !hasRegionProvenance(state) {
 		return regionRefState{}, false
 	}
-	summary := cloneRegionRefState(state)
+	summary := cloneRegionRefStateShallowFields(state)
 	if len(state.Fields) == 0 {
 		return summary, true
 	}
@@ -3381,6 +3404,10 @@ func cloneBorrowedOwnerRefState(state borrowedOwnerRefState) borrowedOwnerRefSta
 	return cloned
 }
 
+func cloneBorrowedOwnerRefStateShallowFields(state borrowedOwnerRefState) borrowedOwnerRefState {
+	return borrowedOwnerRefState{HasDirect: state.HasDirect, Direct: state.Direct}
+}
+
 func cloneBorrowedOwnerRefSummaryTarget(target borrowedOwnerRefSummaryTarget) borrowedOwnerRefSummaryTarget {
 	cloned := borrowedOwnerRefSummaryTarget{ParamIndex: target.ParamIndex}
 	if len(target.Path) != 0 {
@@ -3566,7 +3593,7 @@ func summarizeBorrowedOwnerRefIndexStates(state borrowedOwnerRefState) (borrowed
 	if !hasBorrowedOwnerRefState(state) {
 		return borrowedOwnerRefState{}, false
 	}
-	summary := cloneBorrowedOwnerRefState(state)
+	summary := cloneBorrowedOwnerRefStateShallowFields(state)
 	if len(state.Fields) == 0 {
 		return summary, true
 	}
