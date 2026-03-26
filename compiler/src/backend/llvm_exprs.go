@@ -256,7 +256,7 @@ func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Typ
 				if err != nil {
 					return nil, nil, err
 				}
-				s.bindPackedVariantView(expr.Name, viewType, nil, handle, &store)
+				s.bindPackedVariantView(expr.Name, viewType, nil, handle, &store, nil)
 				return value, viewType, nil
 			}
 		}
@@ -4071,11 +4071,17 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 				copied := binding.store
 				storeCopy = &copied
 			}
-			s.bindPackedVariantView(name, viewType, binding.ptr, binding.handle, storeCopy)
+			s.bindPackedVariantView(name, viewType, binding.ptr, binding.handle, storeCopy, binding.payloadValues)
 		}
 	}
 	if binding.typ == nil || (binding.ptr == nil && binding.handle == nil) {
 		return nil, nil, false, nil
+	}
+	origin := packedReadOriginKey{}
+	if resolvedOrigin, ok, err := s.packedReadOriginKey(expr.Object); err != nil {
+		return nil, nil, true, err
+	} else if ok {
+		origin = resolvedOrigin
 	}
 	field, ok := binding.typ.Field(expr.Field)
 	if !ok {
@@ -4091,7 +4097,7 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 			if binding.handle == nil || binding.store.typ == nil {
 				return nil, nil, true, fmt.Errorf("packed enum common field %s.%s is stored in a side table and requires store context", binding.typ.Enum.Name, expr.Field)
 			}
-			value, err := s.emitPackedSideTableFieldRead(binding.handle, binding.typ.Enum, &binding.store, fieldType, layout.SideWordOffset, layout.WordCount, packedReadOriginKey{}, "packed.view.common.side")
+			value, err := s.emitPackedSideTableFieldRead(binding.handle, binding.typ.Enum, &binding.store, fieldType, layout.SideWordOffset, layout.WordCount, origin, "packed.view.common.side")
 			return value, fieldType, true, err
 		}
 		if binding.ptr == nil && binding.handle != nil && binding.store.typ != nil {
@@ -4102,7 +4108,7 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 					return nil, nil, true, err
 				}
 				if ok {
-					wordValue, err := ops.loadPayloadWord(binding.handle, binding.typ.Enum, fieldWordOffset, "packed.view.common")
+					wordValue, err := ops.loadPayloadWordAtOrigin(binding.handle, binding.typ.Enum, fieldWordOffset, origin, "packed.view.common")
 					if err != nil {
 						return nil, nil, true, err
 					}
@@ -4130,10 +4136,13 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 		value, err := s.loadValue(fieldPtr, fieldType, expr.Field)
 		return value, fieldType, true, err
 	}
+	if cachedValue, ok := binding.payloadValues[expr.Field]; ok && cachedValue != nil {
+		return cachedValue, field.Type, true, nil
+	}
 	if binding.ptr == nil && binding.handle != nil && binding.store.typ != nil {
 		ops, ok := s.packedStoreOpsFromBinding(&binding.store)
 		if ok && ops.canDirectWordRead() {
-			payloadValues, ok, err := s.readPackedEnumVariantPayloadWithStore(binding.handle, binding.typ.Enum, binding.typ.Variant, &binding.store)
+			payloadValues, ok, err := s.readPackedEnumVariantPayloadWithStore(binding.handle, binding.typ.Enum, binding.typ.Variant, &binding.store, origin)
 			if err != nil {
 				return nil, nil, true, err
 			}
@@ -4154,7 +4163,7 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 			s.updatePackedVariantViewDecodedPtr(name, decodedPtr)
 		}
 	}
-	payloadValues, err := s.loadEnumVariantPayload(binding.ptr, binding.handle, binding.typ.Enum, binding.typ.Variant, nil)
+	payloadValues, err := s.loadEnumVariantPayload(binding.ptr, binding.handle, binding.typ.Enum, binding.typ.Variant, nil, origin)
 	if err != nil {
 		return nil, nil, true, err
 	}

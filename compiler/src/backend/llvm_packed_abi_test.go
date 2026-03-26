@@ -3102,7 +3102,7 @@ def fold_view() -> int:
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	if node in frozen as Expr.Lit(value: value):
-		return node.value + node.span + value
+		return node.value + node.value + node.span + value
 	return 0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_view_stmt.llcontext", src)
@@ -3151,8 +3151,8 @@ def fold_view() -> int:
 	}
 
 	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_index_word(")
-	if readCalls != 3 {
-		t.Fatalf("expected frozen packed if variant view in index-soa mode to use three direct index word reads, got %d helper calls:\n%s", readCalls, output)
+	if readCalls != 2 {
+		t.Fatalf("expected frozen packed if variant view in index-soa mode to reuse one repeated payload index word read plus one common-field read, got %d helper calls:\n%s", readCalls, output)
 	}
 	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
 		t.Fatalf("expected frozen packed if variant view in index-soa mode to avoid eager decode, got:\n%s", output)

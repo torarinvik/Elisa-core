@@ -2460,8 +2460,8 @@ def read(node: Expr, store: Expr.Store[Local]) -> int:
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
 	}
-	if strings.Count(output, "getelementptr inbounds nuw %Expr, ptr %node1, i32 0, i32 2") < 2 {
-		t.Fatalf("expected refined view scrutinee lowering to address the payload both for destructuring and for node.value field access, got:\n%s", output)
+	if strings.Count(output, "getelementptr inbounds nuw %Expr, ptr %node1, i32 0, i32 2") != 1 {
+		t.Fatalf("expected refined view scrutinee lowering to address the payload once for destructuring and reuse that value for node.value field access, got:\n%s", output)
 	}
 }
 

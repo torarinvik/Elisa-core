@@ -1042,7 +1042,23 @@ func (s *functionState) bindPackedEnumStorage(name string, enumType *semantic.En
 	s.scope.packedEnumPtrs[name] = packedEnumStorageBinding{ptr: ptr, typ: enumType}
 }
 
-func (s *functionState) bindPackedVariantView(name string, viewType *semantic.PackedVariantViewType, ptr C.LLVMValueRef, handle C.LLVMValueRef, store *packedStoreBinding) {
+func clonePackedPayloadValues(values map[string]C.LLVMValueRef) map[string]C.LLVMValueRef {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make(map[string]C.LLVMValueRef, len(values))
+	for key, value := range values {
+		if value != nil {
+			cloned[key] = value
+		}
+	}
+	if len(cloned) == 0 {
+		return nil
+	}
+	return cloned
+}
+
+func (s *functionState) bindPackedVariantView(name string, viewType *semantic.PackedVariantViewType, ptr C.LLVMValueRef, handle C.LLVMValueRef, store *packedStoreBinding, payloadValues map[string]C.LLVMValueRef) {
 	if name == "" || viewType == nil || (ptr == nil && handle == nil) {
 		return
 	}
@@ -1056,6 +1072,7 @@ func (s *functionState) bindPackedVariantView(name string, viewType *semantic.Pa
 	if store != nil {
 		binding.store = *store
 	}
+	binding.payloadValues = clonePackedPayloadValues(payloadValues)
 	s.scope.packedViewPtrs[name] = binding
 }
 
