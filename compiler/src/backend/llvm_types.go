@@ -139,12 +139,11 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 	if t == nil {
 		return nil
 	}
-	key := noteTypeKey(t)
-	if g.noteTypeDone[key] || g.noteTypeInProgress[key] {
+	if g.noteTypeDone[t] || g.noteTypeInProgress[t] {
 		return nil
 	}
-	g.noteTypeInProgress[key] = true
-	defer delete(g.noteTypeInProgress, key)
+	g.noteTypeInProgress[t] = true
+	defer delete(g.noteTypeInProgress, t)
 	var err error
 	switch tt := t.(type) {
 	case *semantic.InvalidType, *semantic.NeverType, *semantic.NullType, *semantic.BuiltinType, *semantic.TypeParamType, *semantic.DStrType, *semantic.ErrorSetType:
@@ -256,16 +255,9 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 		err = fmt.Errorf("unsupported semantic type %T", t)
 	}
 	if err == nil {
-		g.noteTypeDone[key] = true
+		g.noteTypeDone[t] = true
 	}
 	return err
-}
-
-func noteTypeKey(t semantic.Type) string {
-	if t == nil {
-		return "<nil>"
-	}
-	return fmt.Sprintf("%T:%s", t, t.String())
 }
 
 func (g *llvmGenerator) ensureFunctionDeclared(name string, fn *semantic.FuncType) (C.LLVMValueRef, error) {
@@ -528,8 +520,7 @@ func (g *llvmGenerator) lowerFunctionType(fn *semantic.FuncType) (C.LLVMTypeRef,
 	if g == nil || fn == nil {
 		return nil, fmt.Errorf("missing function type for LLVM lowering")
 	}
-	key := noteTypeKey(fn)
-	if cached, ok := g.functionTypes[key]; ok && cached != nil {
+	if cached, ok := g.functionTypes[fn]; ok && cached != nil {
 		return cached, nil
 	}
 	returnType, err := g.lowerFunctionReturnType(fn.Return)
@@ -552,7 +543,7 @@ func (g *llvmGenerator) lowerFunctionType(fn *semantic.FuncType) (C.LLVMTypeRef,
 		params = append(params, paramType)
 	}
 	lowered := C.LLVMFunctionType(returnType, llvmTypeSlicePtr(params), C.unsigned(len(params)), boolToLLVMBool(fn.Variadic))
-	g.functionTypes[key] = lowered
+	g.functionTypes[fn] = lowered
 	return lowered, nil
 }
 

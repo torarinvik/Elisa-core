@@ -45,12 +45,45 @@ func (s *functionState) packedStoreOpsFromExpr(expr ast.Expr) (*packedStoreOps, 
 }
 
 func (ops *packedStoreOps) voidRefType() *semantic.RefType {
-	return &semantic.RefType{
-		Elem:            ops.s.g.result.NamedTypes["void"],
-		State:           semantic.RefStateNonNull,
-		Storage:         semantic.RefStorageAny,
-		ExplicitStorage: true,
+	if ops == nil || ops.s == nil || ops.s.g == nil {
+		return &semantic.RefType{}
 	}
+	if ops.s.g.cachedVoidRefType == nil {
+		ops.s.g.cachedVoidRefType = &semantic.RefType{
+			Elem:            ops.s.g.result.NamedTypes["void"],
+			State:           semantic.RefStateNonNull,
+			Storage:         semantic.RefStorageAny,
+			ExplicitStorage: true,
+		}
+	}
+	return ops.s.g.cachedVoidRefType
+}
+
+func (ops *packedStoreOps) arenaRefType() *semantic.RefType {
+	if ops == nil || ops.s == nil || ops.s.g == nil {
+		return &semantic.RefType{}
+	}
+	if ops.s.g.cachedArenaRefType == nil {
+		ops.s.g.cachedArenaRefType = &semantic.RefType{
+			Elem:            ops.s.g.result.NamedTypes["Arena"],
+			State:           semantic.RefStateNonNull,
+			Storage:         semantic.RefStorageAny,
+			ExplicitStorage: true,
+		}
+	}
+	return ops.s.g.cachedArenaRefType
+}
+
+func (ops *packedStoreOps) cachedRuntimeHelperType(name string, build func() *semantic.FuncType) *semantic.FuncType {
+	if ops == nil || ops.s == nil || ops.s.g == nil {
+		return build()
+	}
+	if cached := ops.s.g.runtimeHelperTypes[name]; cached != nil {
+		return cached
+	}
+	helperType := build()
+	ops.s.g.runtimeHelperTypes[name] = helperType
+	return helperType
 }
 
 func (ops *packedStoreOps) stateValue(name string) (C.LLVMValueRef, error) {
@@ -494,10 +527,10 @@ func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, e
 		if err != nil {
 			return nil, err
 		}
-		arenaType := ops.s.g.result.NamedTypes["Arena"]
-		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 		u32Type := ops.s.g.result.NamedTypes["u32"]
-		helperType := &semantic.FuncType{Name: "ctx_packed_store_read_index_word", Params: []semantic.Type{arenaRefType, u32Type, ops.voidRefType(), ops.s.g.result.NamedTypes["usize"]}, Return: uintptrType}
+		helperType := ops.cachedRuntimeHelperType("ctx_packed_store_read_index_word", func() *semantic.FuncType {
+			return &semantic.FuncType{Name: "ctx_packed_store_read_index_word", Params: []semantic.Type{ops.arenaRefType(), u32Type, ops.voidRefType(), ops.s.g.result.NamedTypes["usize"]}, Return: uintptrType}
+		})
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_read_index_word", helperType)
 		if err != nil {
 			return nil, err
@@ -527,7 +560,9 @@ func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, e
 			return nil, err
 		}
 		u32Type := ops.s.g.result.NamedTypes["u32"]
-		helperType := &semantic.FuncType{Name: "ctx_packed_store_read_variant_sparse_word", Params: []semantic.Type{u32Type, ops.voidRefType(), ops.s.g.result.NamedTypes["usize"]}, Return: uintptrType}
+		helperType := ops.cachedRuntimeHelperType("ctx_packed_store_read_variant_sparse_word", func() *semantic.FuncType {
+			return &semantic.FuncType{Name: "ctx_packed_store_read_variant_sparse_word", Params: []semantic.Type{u32Type, ops.voidRefType(), ops.s.g.result.NamedTypes["usize"]}, Return: uintptrType}
+		})
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_read_variant_sparse_word", helperType)
 		if err != nil {
 			return nil, err
@@ -559,9 +594,9 @@ func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, e
 		if err != nil {
 			return nil, err
 		}
-		arenaType := ops.s.g.result.NamedTypes["Arena"]
-		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-		helperType := &semantic.FuncType{Name: "ctx_packed_store_read_word", Params: []semantic.Type{arenaRefType, uintptrType, ops.voidRefType(), ops.s.g.result.NamedTypes["usize"]}, Return: uintptrType}
+		helperType := ops.cachedRuntimeHelperType("ctx_packed_store_read_word", func() *semantic.FuncType {
+			return &semantic.FuncType{Name: "ctx_packed_store_read_word", Params: []semantic.Type{ops.arenaRefType(), uintptrType, ops.voidRefType(), ops.s.g.result.NamedTypes["usize"]}, Return: uintptrType}
+		})
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_read_word", helperType)
 		if err != nil {
 			return nil, err

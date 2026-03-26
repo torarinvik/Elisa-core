@@ -94,11 +94,14 @@ type llvmGenerator struct {
 	symbolsByNode        map[ast.Node]*semantic.Symbol
 	structTypes          map[string]C.LLVMTypeRef
 	structBodies         map[string]bool
-	functionTypes        map[string]C.LLVMTypeRef
+	functionTypes        map[*semantic.FuncType]C.LLVMTypeRef
+	runtimeHelperTypes   map[string]*semantic.FuncType
 	functions            map[string]C.LLVMValueRef
 	globals              map[string]C.LLVMValueRef
-	noteTypeInProgress   map[string]bool
-	noteTypeDone         map[string]bool
+	noteTypeInProgress   map[semantic.Type]bool
+	noteTypeDone         map[semantic.Type]bool
+	cachedVoidRefType    *semantic.RefType
+	cachedArenaRefType   *semantic.RefType
 	syntheticCounter     int
 	wordBits             int
 }
@@ -120,11 +123,12 @@ func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
 		symbolsByNode:      map[ast.Node]*semantic.Symbol{},
 		structTypes:        map[string]C.LLVMTypeRef{},
 		structBodies:       map[string]bool{},
-		functionTypes:      map[string]C.LLVMTypeRef{},
+		functionTypes:      map[*semantic.FuncType]C.LLVMTypeRef{},
+		runtimeHelperTypes: map[string]*semantic.FuncType{},
 		functions:          map[string]C.LLVMValueRef{},
 		globals:            map[string]C.LLVMValueRef{},
-		noteTypeInProgress: map[string]bool{},
-		noteTypeDone:       map[string]bool{},
+		noteTypeInProgress: map[semantic.Type]bool{},
+		noteTypeDone:       map[semantic.Type]bool{},
 		wordBits:           int(unsafe.Sizeof(uintptr(0)) * 8),
 	}
 	for _, sym := range result.GlobalScope.Symbols {

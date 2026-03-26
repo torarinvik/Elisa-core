@@ -12,3 +12,4 @@ Code/benchmarks/tmp_zig_dom_input.json
 Code/lua/
 Code/llcontext_lua
 .DS_Store
+compiler/backend.test
