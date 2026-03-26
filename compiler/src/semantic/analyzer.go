@@ -2167,7 +2167,7 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 		a.errorf(annotation.Position, "@%s function %q must not have type or shape parameters; got %s", annotation.Name, fn.Name, signature.String())
 		return false
 	}
-	if len(signature.Permissions) > 0 {
+	if !annotationAllowsDeclaredPermissions(annotation.Name, signature) {
 		a.errorf(annotation.Position, "@%s function %q must not require permissions; got %s", annotation.Name, fn.Name, signature.String())
 		return false
 	}
@@ -2183,6 +2183,21 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 	case "test", "bench":
 		if !isVoidType(signature.Return) {
 			a.errorf(annotation.Position, "@%s function %q must return void, got %s", annotation.Name, fn.Name, signature.Return.String())
+			return false
+		}
+	}
+	return true
+}
+
+func annotationAllowsDeclaredPermissions(annotationName string, signature *FuncType) bool {
+	if signature == nil || len(signature.Permissions) == 0 {
+		return true
+	}
+	if annotationName != "test" {
+		return false
+	}
+	for _, ref := range signature.PermissionRefs {
+		if ref.Name != "Abort" {
 			return false
 		}
 	}

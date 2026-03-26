@@ -3530,6 +3530,38 @@ def sample_case(value: int) -> void:
 	}
 }
 
+func TestAnalyzeAllowsTestFunctionAbortPermission(t *testing.T) {
+	src := `@test
+def sample_case() -> void can[Abort.Panic]:
+	assert(true)
+`
+	result, errs := parseAndAnalyze(t, "function_annotations_test_abort.llcontext", src)
+	if len(errs) != 0 {
+		t.Fatalf("expected no semantic errors, got:\n%s", strings.Join(errs, "\n"))
+	}
+	if result == nil || len(result.AnnotatedFuncs) != 1 {
+		t.Fatalf("expected one discovered annotated function, got %#v", result)
+	}
+	refs := result.AnnotatedFuncs[0].Signature.PermissionRefs
+	if len(refs) != 1 || refs[0].Name != "Abort" || refs[0].Member != "Panic" {
+		t.Fatalf("expected discovered @test signature to keep Abort.Panic permission ref, got %#v", refs)
+	}
+}
+
+func TestAnalyzeRejectsTestFunctionNonAbortPermission(t *testing.T) {
+	src := `@test
+def sample_case() -> void can[Console.Write]:
+	pass
+`
+	_, errs := parseAndAnalyze(t, "function_annotations_test_console_permission.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "@test function \"sample_case\" must not require permissions") {
+		t.Fatalf("expected test-permission diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeRejectsBenchFunctionNonVoidReturn(t *testing.T) {
 	src := `@bench
 def hot_loop() -> int:
