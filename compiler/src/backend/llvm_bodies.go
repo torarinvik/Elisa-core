@@ -1699,12 +1699,11 @@ func (s *functionState) emitForLoopContinueCmp(op lexer.TokenKind, loopType sema
 	return C.LLVMBuildICmp(s.builder, pred, currentValue, endValue, cStringFree("for.cmp")), nil
 }
 
-func (s *functionState) bindMatchedPackedVariantView(valueExpr ast.Expr, pattern ast.MatchPattern, enumValue C.LLVMValueRef, decodedValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding, payloadValues packedPayloadValueCache) {
+func (s *functionState) bindMatchedPackedVariantView(name string, pattern ast.MatchPattern, enumValue C.LLVMValueRef, decodedValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding, payloadValues packedPayloadValueCache) {
 	if enumType == nil || !enumType.Packed {
 		return
 	}
-	name, ok := s.packedEnumStoragePath(valueExpr)
-	if !ok || name == "" {
+	if name == "" {
 		return
 	}
 	variantPattern, ok := pattern.(*ast.MatchVariantPattern)
@@ -1786,6 +1785,7 @@ func (s *functionState) emitEnumMatch(stmt *ast.MatchStmt, enumType *semantic.En
 	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.end"))
 	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.fail"))
 	allTerminated := true
+	valuePath, hasValuePath := s.packedEnumStoragePath(stmt.Value)
 
 	for i, arm := range stmt.Arms {
 		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.arm"))
@@ -1802,13 +1802,13 @@ func (s *functionState) emitEnumMatch(stmt *ast.MatchStmt, enumType *semantic.En
 
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
-		if key, ok := s.packedEnumStoragePath(stmt.Value); ok && enumType.Packed && armDecodedValue != nil {
-			s.bindPackedEnumStorage(key, enumType, armDecodedValue)
+		if hasValuePath && enumType.Packed && armDecodedValue != nil {
+			s.bindPackedEnumStorage(valuePath, enumType, armDecodedValue)
 		}
-		if key, ok := s.packedEnumStoragePath(stmt.Value); ok && enumType.Packed {
-			s.bindPackedEnumStoreOrigin(key, enumType, storeBinding)
+		if hasValuePath && enumType.Packed {
+			s.bindPackedEnumStoreOrigin(valuePath, enumType, storeBinding)
 		}
-		s.bindMatchedPackedVariantView(stmt.Value, arm.Pattern, enumValue, armDecodedValue, enumType, storeBinding, armPayloadValues)
+		s.bindMatchedPackedVariantView(valuePath, arm.Pattern, enumValue, armDecodedValue, enumType, storeBinding, armPayloadValues)
 		if err := s.emitBlock(arm.Body, false); err != nil {
 			s.popScope()
 			return err
@@ -1870,6 +1870,8 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.fail"))
 	incomingValues := make([]C.LLVMValueRef, 0, len(expr.Arms)+1)
 	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(expr.Arms)+1)
+	valuePath, hasValuePath := s.packedEnumStoragePath(expr.Value)
+	valueIdent, hasValueIdent := expr.Value.(*ast.Ident)
 	for i, arm := range expr.Arms {
 		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.arm"))
 		var nextBB C.LLVMBasicBlockRef
@@ -1885,13 +1887,13 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
-		if ident, ok := expr.Value.(*ast.Ident); ok && enumType.Packed && armDecodedValue != nil {
-			s.bindPackedEnumStorage(ident.Name, enumType, armDecodedValue)
+		if hasValueIdent && enumType.Packed && armDecodedValue != nil {
+			s.bindPackedEnumStorage(valueIdent.Name, enumType, armDecodedValue)
 		}
-		if key, ok := s.packedEnumStoragePath(expr.Value); ok && enumType.Packed {
-			s.bindPackedEnumStoreOrigin(key, enumType, storeBinding)
+		if hasValuePath && enumType.Packed {
+			s.bindPackedEnumStoreOrigin(valuePath, enumType, storeBinding)
 		}
-		s.bindMatchedPackedVariantView(expr.Value, arm.Pattern, enumValue, armDecodedValue, enumType, storeBinding, armPayloadValues)
+		s.bindMatchedPackedVariantView(valuePath, arm.Pattern, enumValue, armDecodedValue, enumType, storeBinding, armPayloadValues)
 		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, resultType)
 		if err != nil {
 			s.popScope()
@@ -2181,11 +2183,7 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 				if value == nil {
 					continue
 				}
-				label := variant.PayloadLabel(i)
-				if label == "" {
-					continue
-				}
-				cachedPayloads.add(label, value)
+				cachedPayloads.add(variant.PayloadLabel(i), value)
 			}
 			for i := range p.Args {
 				if p.Args[i].Pattern == nil {
@@ -2231,11 +2229,7 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 			if value == nil {
 				continue
 			}
-			label := variant.PayloadLabel(i)
-			if label == "" {
-				continue
-			}
-			cachedPayloads.add(label, value)
+			cachedPayloads.add(variant.PayloadLabel(i), value)
 		}
 		for i := range orderedArgs {
 			if orderedArgs[i] == nil {
