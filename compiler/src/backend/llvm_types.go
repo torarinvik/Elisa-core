@@ -761,6 +761,11 @@ type packedEnumCommonFieldLayout struct {
 	StoredInline   bool
 }
 
+type packedEnumCommonFieldLayoutCacheKey struct {
+	enum  *semantic.EnumType
+	field string
+}
+
 func packedFieldUsesSideTable(field semantic.Field) bool {
 	return field.PackedStorage == semantic.PackedFieldStorageSideTable
 }
@@ -834,6 +839,10 @@ func (g *llvmGenerator) packedEnumCommonFieldLayout(enumType *semantic.EnumType,
 	if enumType == nil || !enumType.Packed || enumType.Decl == nil {
 		return nil, fmt.Errorf("missing packed enum common field layout metadata")
 	}
+	cacheKey := packedEnumCommonFieldLayoutCacheKey{enum: enumType, field: fieldName}
+	if layout, ok := g.commonFieldLayouts[cacheKey]; ok && layout != nil {
+		return layout, nil
+	}
 	wordBytes := uint64(g.wordBits / 8)
 	if wordBytes == 0 {
 		wordBytes = 8
@@ -871,6 +880,7 @@ func (g *llvmGenerator) packedEnumCommonFieldLayout(enumType *semantic.EnumType,
 			if storedInline {
 				layout.RowFieldIndex = rowFieldIndex
 			}
+			g.commonFieldLayouts[cacheKey] = layout
 			return layout, nil
 		}
 		if storedInline {
@@ -1175,7 +1185,7 @@ func (g *llvmGenerator) lowerEnumVariantPayloadType(variant *semantic.EnumVarian
 		}
 		fields = append(fields, fieldType)
 	}
-	return C.LLVMStructType(llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0), nil
+	return C.LLVMStructTypeInContext(g.context, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0), nil
 }
 
 func (g *llvmGenerator) ensureRuntimeDynArray(elem semantic.Type) (C.LLVMTypeRef, error) {

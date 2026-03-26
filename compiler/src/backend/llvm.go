@@ -97,6 +97,7 @@ type llvmGenerator struct {
 	functionTypes        map[*semantic.FuncType]C.LLVMTypeRef
 	runtimeHelperTypes   map[string]*semantic.FuncType
 	packedViewTypes      map[*semantic.EnumVariant]*semantic.PackedVariantViewType
+	commonFieldLayouts   map[packedEnumCommonFieldLayoutCacheKey]*packedEnumCommonFieldLayout
 	specializedFuncTypes map[string]*semantic.FuncType
 	functions            map[string]C.LLVMValueRef
 	globals              map[string]C.LLVMValueRef
@@ -128,6 +129,7 @@ func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
 		functionTypes:        map[*semantic.FuncType]C.LLVMTypeRef{},
 		runtimeHelperTypes:   map[string]*semantic.FuncType{},
 		packedViewTypes:      map[*semantic.EnumVariant]*semantic.PackedVariantViewType{},
+		commonFieldLayouts:   map[packedEnumCommonFieldLayoutCacheKey]*packedEnumCommonFieldLayout{},
 		specializedFuncTypes: map[string]*semantic.FuncType{},
 		functions:            map[string]C.LLVMValueRef{},
 		globals:              map[string]C.LLVMValueRef{},

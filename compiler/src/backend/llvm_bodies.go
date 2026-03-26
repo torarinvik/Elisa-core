@@ -28,6 +28,8 @@ type valueBinding struct {
 
 type codegenScope struct {
 	parent                 *codegenScope
+	bindingName            string
+	binding                valueBinding
 	bindings               map[string]valueBinding
 	packedEnumPtrs         map[string]packedEnumStorageBinding
 	packedEnumStoreName    string
@@ -46,6 +48,7 @@ type functionState struct {
 	builder                      C.LLVMBuilderRef
 	scope                        *codegenScope
 	typeMap                      map[string]semantic.Type
+	specializedFuncTypes         map[*semantic.FuncType]*semantic.FuncType
 	resultSlot                   C.LLVMValueRef
 	regions                      []regionBinding
 	packedStores                 map[string]packedStoreBinding
@@ -625,7 +628,7 @@ func (s *functionState) emitMoveBindStmt(stmt *ast.MoveBindStmt) error {
 		failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("move.as.variant.fail"))
 		contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("move.as.variant.cont"))
 		matchPattern := &ast.MatchVariantPattern{Position: p.Position, EnumName: p.EnumName, Variant: p.Variant, Args: append([]ast.MatchPatternArg(nil), p.Args...)}
-		if _, _, err := s.emitMatchPatternTest(matchPattern, value, nil, enumType, storeBinding, stmt.Value, successBB, failBB); err != nil {
+		if _, _, err := s.emitMatchPatternTest(matchPattern, value, nil, enumType, storeBinding, stmt.Value, nil, successBB, failBB); err != nil {
 			return err
 		}
 		C.LLVMPositionBuilderAtEnd(s.builder, successBB)
@@ -671,7 +674,7 @@ func (s *functionState) emitOpenStmt(stmt *ast.OpenStmt) error {
 	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("open.cont"))
 	matchPattern := &ast.MatchVariantPattern{Position: stmt.Pattern.Position, EnumName: stmt.Pattern.EnumName, Variant: stmt.Pattern.Variant, Args: append([]ast.MatchPatternArg(nil), stmt.Pattern.Args...)}
 	s.pushScope()
-	matchedDecodedValue, _, err := s.emitMatchPatternTest(matchPattern, enumValue, nil, enumType, storeBinding, stmt.Value, successBB, failBB)
+	matchedDecodedValue, _, err := s.emitMatchPatternTest(matchPattern, enumValue, nil, enumType, storeBinding, stmt.Value, nil, successBB, failBB)
 	if err != nil {
 		s.popScope()
 		return err
@@ -736,7 +739,7 @@ func (s *functionState) emitViewStmt(stmt *ast.ViewStmt) error {
 	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("view.cont"))
 	matchPattern := &ast.MatchVariantPattern{Position: stmt.Pattern.Position, EnumName: stmt.Pattern.EnumName, Variant: stmt.Pattern.Variant, Args: append([]ast.MatchPatternArg(nil), stmt.Pattern.Args...)}
 	s.pushScope()
-	matchedDecodedValue, matchedPayloadValues, err := s.emitMatchPatternTest(matchPattern, enumValue, nil, enumType, storeBinding, stmt.Value, successBB, failBB)
+	matchedDecodedValue, matchedPayloadValues, err := s.emitMatchPatternTest(matchPattern, enumValue, nil, enumType, storeBinding, stmt.Value, nil, successBB, failBB)
 	if err != nil {
 		s.popScope()
 		return err
@@ -1784,6 +1787,10 @@ func (s *functionState) emitEnumMatch(stmt *ast.MatchStmt, enumType *semantic.En
 			return err
 		}
 	}
+	matchTagValue, err := s.extractEnumTagValue(enumValue, decodedMatchValue, enumType, storeBinding)
+	if err != nil {
+		return err
+	}
 	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.end"))
 	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.fail"))
 	allTerminated := true
@@ -1797,7 +1804,7 @@ func (s *functionState) emitEnumMatch(stmt *ast.MatchStmt, enumType *semantic.En
 		} else {
 			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.next"))
 		}
-		armDecodedValue, armPayloadValues, err := s.emitMatchPatternTest(arm.Pattern, enumValue, decodedMatchValue, enumType, storeBinding, stmt.Value, bodyBB, nextBB)
+		armDecodedValue, armPayloadValues, err := s.emitMatchPatternTest(arm.Pattern, enumValue, decodedMatchValue, enumType, storeBinding, stmt.Value, matchTagValue, bodyBB, nextBB)
 		if err != nil {
 			return err
 		}
@@ -1868,6 +1875,10 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 			return nil, nil, err
 		}
 	}
+	matchTagValue, err := s.extractEnumTagValue(enumValue, decodedMatchValue, enumType, storeBinding)
+	if err != nil {
+		return nil, nil, err
+	}
 	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.end"))
 	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.fail"))
 	incomingValues := make([]C.LLVMValueRef, 0, len(expr.Arms)+1)
@@ -1882,7 +1893,7 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 		} else {
 			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.next"))
 		}
-		armDecodedValue, armPayloadValues, err := s.emitMatchPatternTest(arm.Pattern, enumValue, decodedMatchValue, enumType, storeBinding, expr.Value, bodyBB, nextBB)
+		armDecodedValue, armPayloadValues, err := s.emitMatchPatternTest(arm.Pattern, enumValue, decodedMatchValue, enumType, storeBinding, expr.Value, matchTagValue, bodyBB, nextBB)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -2108,7 +2119,7 @@ func (s *functionState) emitMatchExprArmBody(body []ast.Stmt, resultType semanti
 	return nil, false, fmt.Errorf("match expression arm must end with an expression")
 }
 
-func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualValue C.LLVMValueRef, decodedActualValue C.LLVMValueRef, actualType semantic.Type, store *packedStoreBinding, originExpr ast.Expr, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) (C.LLVMValueRef, packedPayloadValueCache, error) {
+func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualValue C.LLVMValueRef, decodedActualValue C.LLVMValueRef, actualType semantic.Type, store *packedStoreBinding, originExpr ast.Expr, precomputedTagValue C.LLVMValueRef, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) (C.LLVMValueRef, packedPayloadValueCache, error) {
 	switch p := pattern.(type) {
 	case *ast.MatchWildcardPattern:
 		C.LLVMBuildBr(s.builder, successBB)
@@ -2137,9 +2148,13 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		if !ok {
 			return nil, packedPayloadValueCache{}, fmt.Errorf("enum %s has no variant %s", enumType.Name, p.Variant)
 		}
-		tagValue, err := s.extractEnumTagValue(actualValue, decodedActualValue, enumType, store)
-		if err != nil {
-			return nil, packedPayloadValueCache{}, err
+		tagValue := precomputedTagValue
+		if tagValue == nil {
+			var err error
+			tagValue, err = s.extractEnumTagValue(actualValue, decodedActualValue, enumType, store)
+			if err != nil {
+				return nil, packedPayloadValueCache{}, err
+			}
 		}
 		tagConst, err := s.enumTagConstant(variant.Tag)
 		if err != nil {
@@ -2195,7 +2210,7 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 				if i != len(p.Args)-1 {
 					nextSuccess = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.pattern.next"))
 				}
-				if _, _, err := s.emitMatchPatternTest(p.Args[i].Pattern, payloadValues[i], nil, variant.Payload[i], store, nil, nextSuccess, failureBB); err != nil {
+				if _, _, err := s.emitMatchPatternTest(p.Args[i].Pattern, payloadValues[i], nil, variant.Payload[i], store, nil, nil, nextSuccess, failureBB); err != nil {
 					return nil, packedPayloadValueCache{}, err
 				}
 				if i != len(p.Args)-1 {
@@ -2241,7 +2256,7 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 			if i != len(orderedArgs)-1 {
 				nextSuccess = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.pattern.next"))
 			}
-			if _, _, err := s.emitMatchPatternTest(orderedArgs[i].Pattern, payloadValues[i], nil, variant.Payload[i], store, nil, nextSuccess, failureBB); err != nil {
+			if _, _, err := s.emitMatchPatternTest(orderedArgs[i].Pattern, payloadValues[i], nil, variant.Payload[i], store, nil, nil, nextSuccess, failureBB); err != nil {
 				return nil, packedPayloadValueCache{}, err
 			}
 			if i != len(orderedArgs)-1 {
