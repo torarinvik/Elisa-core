@@ -861,12 +861,31 @@ func (s *functionState) currentBlockTerminated() bool {
 }
 
 func (s *functionState) pushScope() {
-	s.scope = &codegenScope{parent: s.scope}
+	var scope *codegenScope
+	if n := len(s.scopePool); n != 0 {
+		scope = s.scopePool[n-1]
+		s.scopePool = s.scopePool[:n-1]
+	} else {
+		scope = &codegenScope{}
+	}
+	scope.parent = s.scope
+	s.scope = scope
 }
 
 func (s *functionState) popScope() {
 	if s.scope != nil {
-		s.scope = s.scope.parent
+		scope := s.scope
+		s.scope = scope.parent
+		scope.parent = nil
+		clear(scope.bindings)
+		clear(scope.packedEnumPtrs)
+		scope.packedEnumStoreName = ""
+		scope.packedEnumStoreBinding = packedStoreBinding{}
+		clear(scope.packedEnumStores)
+		scope.packedViewName = ""
+		scope.packedViewBinding = packedVariantViewBinding{}
+		clear(scope.packedViewPtrs)
+		s.scopePool = append(s.scopePool, scope)
 	}
 }
 
@@ -1045,31 +1064,58 @@ func (s *functionState) bindPackedEnumStorage(name string, enumType *semantic.En
 	s.scope.packedEnumPtrs[name] = packedEnumStorageBinding{ptr: ptr, typ: enumType}
 }
 
-func clonePackedPayloadValues(values map[string]C.LLVMValueRef) map[string]C.LLVMValueRef {
-	if len(values) == 0 {
-		return nil
+func clonePackedPayloadValues(values packedPayloadValueCache) packedPayloadValueCache {
+	cloned := packedPayloadValueCache{name: values.name, value: values.value}
+	if len(values.values) == 0 {
+		return cloned
 	}
-	cloned := make(map[string]C.LLVMValueRef, len(values))
-	for key, value := range values {
+	cloned.values = make(map[string]C.LLVMValueRef, len(values.values))
+	for key, value := range values.values {
 		if value != nil {
-			cloned[key] = value
+			cloned.values[key] = value
 		}
 	}
-	if len(cloned) == 0 {
-		return nil
+	if len(cloned.values) == 0 {
+		cloned.values = nil
 	}
 	return cloned
 }
 
-func (s *functionState) bindPackedVariantView(name string, viewType *semantic.PackedVariantViewType, ptr C.LLVMValueRef, handle C.LLVMValueRef, store packedStoreBinding, payloadValues map[string]C.LLVMValueRef) {
+func (c *packedPayloadValueCache) add(name string, value C.LLVMValueRef) {
+	if c == nil || name == "" || value == nil {
+		return
+	}
+	if c.name == "" || c.name == name {
+		c.name = name
+		c.value = value
+		return
+	}
+	if c.values == nil {
+		c.values = map[string]C.LLVMValueRef{c.name: c.value}
+	}
+	c.values[name] = value
+}
+
+func (c packedPayloadValueCache) lookup(name string) (C.LLVMValueRef, bool) {
+	if name == "" {
+		return nil, false
+	}
+	if c.name == name && c.value != nil {
+		return c.value, true
+	}
+	value, ok := c.values[name]
+	return value, ok && value != nil
+}
+
+func (s *functionState) bindPackedVariantView(name string, viewType *semantic.PackedVariantViewType, ptr C.LLVMValueRef, handle C.LLVMValueRef, store packedStoreBinding, payloadValues packedPayloadValueCache) {
 	s.bindPackedVariantViewInternal(name, viewType, ptr, handle, store, payloadValues, true)
 }
 
-func (s *functionState) bindPackedVariantViewOwned(name string, viewType *semantic.PackedVariantViewType, ptr C.LLVMValueRef, handle C.LLVMValueRef, store packedStoreBinding, payloadValues map[string]C.LLVMValueRef) {
+func (s *functionState) bindPackedVariantViewOwned(name string, viewType *semantic.PackedVariantViewType, ptr C.LLVMValueRef, handle C.LLVMValueRef, store packedStoreBinding, payloadValues packedPayloadValueCache) {
 	s.bindPackedVariantViewInternal(name, viewType, ptr, handle, store, payloadValues, false)
 }
 
-func (s *functionState) bindPackedVariantViewInternal(name string, viewType *semantic.PackedVariantViewType, ptr C.LLVMValueRef, handle C.LLVMValueRef, store packedStoreBinding, payloadValues map[string]C.LLVMValueRef, clonePayloads bool) {
+func (s *functionState) bindPackedVariantViewInternal(name string, viewType *semantic.PackedVariantViewType, ptr C.LLVMValueRef, handle C.LLVMValueRef, store packedStoreBinding, payloadValues packedPayloadValueCache, clonePayloads bool) {
 	if name == "" || viewType == nil || (ptr == nil && handle == nil) {
 		return
 	}
@@ -1081,8 +1127,8 @@ func (s *functionState) bindPackedVariantViewInternal(name string, viewType *sem
 		binding.store = store
 	}
 	switch {
-	case len(payloadValues) == 0:
-		binding.payloadValues = nil
+	case payloadValues.name == "" && len(payloadValues.values) == 0:
+		binding.payloadValues = packedPayloadValueCache{}
 	case clonePayloads:
 		binding.payloadValues = clonePackedPayloadValues(payloadValues)
 	default:
@@ -1999,7 +2045,7 @@ func (s *functionState) resolvePackedVariantViewSurfaceTypeExpr(expr ast.TypeExp
 	if !ok {
 		return nil, fmt.Errorf("enum %q has no variant %q", enumType.Name, variantName)
 	}
-	viewType := &semantic.PackedVariantViewType{Enum: enumType, Variant: variant}
+	viewType := s.g.cachedPackedVariantViewType(enumType, variant)
 	return viewType, nil
 }
 
@@ -2057,6 +2103,18 @@ func (s *functionState) buildPackedVariantViewValue(viewType *semantic.PackedVar
 		value = C.LLVMBuildInsertValue(s.builder, value, storeValue, 1, cStringFree("packedview.store"))
 	}
 	return value, nil
+}
+
+func (g *llvmGenerator) cachedPackedVariantViewType(enumType *semantic.EnumType, variant *semantic.EnumVariant) *semantic.PackedVariantViewType {
+	if g == nil || enumType == nil || variant == nil {
+		return nil
+	}
+	if cached, ok := g.packedViewTypes[variant]; ok && cached != nil {
+		return cached
+	}
+	viewType := &semantic.PackedVariantViewType{Enum: enumType, Variant: variant}
+	g.packedViewTypes[variant] = viewType
+	return viewType
 }
 
 func (s *functionState) unpackPackedVariantViewValue(value C.LLVMValueRef, viewType *semantic.PackedVariantViewType) (packedVariantViewBinding, error) {

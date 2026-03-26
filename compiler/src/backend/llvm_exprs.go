@@ -256,7 +256,7 @@ func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Typ
 				if err != nil {
 					return nil, nil, err
 				}
-				s.bindPackedVariantView(expr.Name, viewType, nil, handle, store, nil)
+				s.bindPackedVariantView(expr.Name, viewType, nil, handle, store, packedPayloadValueCache{})
 				return value, viewType, nil
 			}
 		}
@@ -4131,7 +4131,7 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 		value, err := s.loadValue(fieldPtr, fieldType, expr.Field)
 		return value, fieldType, true, err
 	}
-	if cachedValue, ok := binding.payloadValues[expr.Field]; ok && cachedValue != nil {
+	if cachedValue, ok := binding.payloadValues.lookup(expr.Field); ok && cachedValue != nil {
 		return cachedValue, field.Type, true, nil
 	}
 	if binding.ptr == nil && binding.handle != nil && binding.store.typ != nil {

@@ -57,6 +57,7 @@ type functionState struct {
 	packedDenseSideWordReads     map[packedDenseSideWordReadCacheKey]C.LLVMValueRef
 	scopedCleanups               []scopedCleanupBinding
 	poolScopes                   []activePoolBinding
+	scopePool                    []*codegenScope
 }
 
 type scopedCleanupKind int
@@ -146,7 +147,13 @@ type packedVariantViewBinding struct {
 	handle        C.LLVMValueRef
 	store         packedStoreBinding
 	typ           *semantic.PackedVariantViewType
-	payloadValues map[string]C.LLVMValueRef
+	payloadValues packedPayloadValueCache
+}
+
+type packedPayloadValueCache struct {
+	name   string
+	value  C.LLVMValueRef
+	values map[string]C.LLVMValueRef
 }
 
 type activePoolBinding struct {
@@ -713,7 +720,7 @@ func (s *functionState) emitViewStmt(stmt *ast.ViewStmt) error {
 	if !ok {
 		return fmt.Errorf("enum %s has no variant %s", enumType.Name, stmt.Pattern.Variant)
 	}
-	resolvedViewType := &semantic.PackedVariantViewType{Enum: enumType, Variant: variant}
+	resolvedViewType := s.g.cachedPackedVariantViewType(enumType, variant)
 	storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, stmt.Value, stmt.Store)
 	if err != nil {
 		return err
@@ -1692,7 +1699,7 @@ func (s *functionState) emitForLoopContinueCmp(op lexer.TokenKind, loopType sema
 	return C.LLVMBuildICmp(s.builder, pred, currentValue, endValue, cStringFree("for.cmp")), nil
 }
 
-func (s *functionState) bindMatchedPackedVariantView(valueExpr ast.Expr, pattern ast.MatchPattern, enumValue C.LLVMValueRef, decodedValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding, payloadValues map[string]C.LLVMValueRef) {
+func (s *functionState) bindMatchedPackedVariantView(valueExpr ast.Expr, pattern ast.MatchPattern, enumValue C.LLVMValueRef, decodedValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding, payloadValues packedPayloadValueCache) {
 	if enumType == nil || !enumType.Packed {
 		return
 	}
@@ -1708,7 +1715,7 @@ func (s *functionState) bindMatchedPackedVariantView(valueExpr ast.Expr, pattern
 	if !ok || variant == nil {
 		return
 	}
-	viewType := &semantic.PackedVariantViewType{Enum: enumType, Variant: variant}
+	viewType := s.g.cachedPackedVariantViewType(enumType, variant)
 	if decodedValue != nil {
 		storeValue := packedStoreBinding{}
 		if store != nil {
@@ -1861,8 +1868,8 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 	}
 	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.end"))
 	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.fail"))
-	incomingValues := make([]C.LLVMValueRef, 0, len(expr.Arms))
-	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(expr.Arms))
+	incomingValues := make([]C.LLVMValueRef, 0, len(expr.Arms)+1)
+	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(expr.Arms)+1)
 	for i, arm := range expr.Arms {
 		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.arm"))
 		var nextBB C.LLVMBasicBlockRef
@@ -1997,8 +2004,8 @@ func (s *functionState) emitStringMatchExpr(expr *ast.MatchExpr, resultType sema
 	actualType := s.exprType(expr.Value)
 	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.end"))
 	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.fail"))
-	incomingValues := make([]C.LLVMValueRef, 0, len(expr.Arms))
-	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(expr.Arms))
+	incomingValues := make([]C.LLVMValueRef, 0, len(expr.Arms)+1)
+	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(expr.Arms)+1)
 	for i, arm := range expr.Arms {
 		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.arm"))
 		var nextBB C.LLVMBasicBlockRef
@@ -2097,15 +2104,15 @@ func (s *functionState) emitMatchExprArmBody(body []ast.Stmt, resultType semanti
 	return nil, false, fmt.Errorf("match expression arm must end with an expression")
 }
 
-func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualValue C.LLVMValueRef, decodedActualValue C.LLVMValueRef, actualType semantic.Type, store *packedStoreBinding, originExpr ast.Expr, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) (C.LLVMValueRef, map[string]C.LLVMValueRef, error) {
+func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualValue C.LLVMValueRef, decodedActualValue C.LLVMValueRef, actualType semantic.Type, store *packedStoreBinding, originExpr ast.Expr, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) (C.LLVMValueRef, packedPayloadValueCache, error) {
 	switch p := pattern.(type) {
 	case *ast.MatchWildcardPattern:
 		C.LLVMBuildBr(s.builder, successBB)
-		return decodedActualValue, nil, nil
+		return decodedActualValue, packedPayloadValueCache{}, nil
 	case *ast.MatchBindPattern:
 		alloca, err := s.createEntryAlloca(p.Name, actualType)
 		if err != nil {
-			return nil, nil, err
+			return nil, packedPayloadValueCache{}, err
 		}
 		C.LLVMBuildStore(s.builder, actualValue, alloca)
 		s.defineBinding(p.Name, valueBinding{ptr: alloca, typ: actualType})
@@ -2116,37 +2123,93 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 			s.bindPackedEnumStoreOrigin(p.Name, enumType, store)
 		}
 		C.LLVMBuildBr(s.builder, successBB)
-		return decodedActualValue, nil, nil
+		return decodedActualValue, packedPayloadValueCache{}, nil
 	case *ast.MatchVariantPattern:
 		enumType, ok := actualType.(*semantic.EnumType)
 		if !ok {
-			return nil, nil, fmt.Errorf("variant pattern %s.%s requires enum type, got %s", p.EnumName, p.Variant, actualType.String())
+			return nil, packedPayloadValueCache{}, fmt.Errorf("variant pattern %s.%s requires enum type, got %s", p.EnumName, p.Variant, actualType.String())
 		}
 		variant, ok := enumType.Variant(p.Variant)
 		if !ok {
-			return nil, nil, fmt.Errorf("enum %s has no variant %s", enumType.Name, p.Variant)
+			return nil, packedPayloadValueCache{}, fmt.Errorf("enum %s has no variant %s", enumType.Name, p.Variant)
 		}
 		tagValue, err := s.extractEnumTagValue(actualValue, decodedActualValue, enumType, store)
 		if err != nil {
-			return nil, nil, err
+			return nil, packedPayloadValueCache{}, err
 		}
 		tagConst, err := s.enumTagConstant(variant.Tag)
 		if err != nil {
-			return nil, nil, err
+			return nil, packedPayloadValueCache{}, err
 		}
 		matchedBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.pattern.ok"))
 		pred := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), tagValue, tagConst, cStringFree("match.tag"))
 		C.LLVMBuildCondBr(s.builder, pred, matchedBB, failureBB)
 
 		C.LLVMPositionBuilderAtEnd(s.builder, matchedBB)
+		matchedDecodedValue := decodedActualValue
+		if len(p.Args) == 0 {
+			C.LLVMBuildBr(s.builder, successBB)
+			return matchedDecodedValue, packedPayloadValueCache{}, nil
+		}
+		namedCount := 0
+		for i := range p.Args {
+			if p.Args[i].Name != "" {
+				namedCount++
+			}
+		}
+		if namedCount == 0 {
+			if len(p.Args) != len(variant.Payload) {
+				return nil, packedPayloadValueCache{}, fmt.Errorf("match arm %s.%s expects %d payload patterns, got %d", p.EnumName, p.Variant, len(variant.Payload), len(p.Args))
+			}
+			hasNestedPattern := false
+			for i := range p.Args {
+				if p.Args[i].Pattern != nil {
+					hasNestedPattern = true
+					break
+				}
+			}
+			if !hasNestedPattern {
+				C.LLVMBuildBr(s.builder, successBB)
+				return matchedDecodedValue, packedPayloadValueCache{}, nil
+			}
+			payloadValues, err := s.extractEnumVariantPayloadValues(actualValue, matchedDecodedValue, enumType, variant, store, originExpr)
+			if err != nil {
+				return nil, packedPayloadValueCache{}, err
+			}
+			var cachedPayloads packedPayloadValueCache
+			for i, value := range payloadValues {
+				if value == nil {
+					continue
+				}
+				label := variant.PayloadLabel(i)
+				if label == "" {
+					continue
+				}
+				cachedPayloads.add(label, value)
+			}
+			for i := range p.Args {
+				if p.Args[i].Pattern == nil {
+					continue
+				}
+				nextSuccess := successBB
+				if i != len(p.Args)-1 {
+					nextSuccess = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.pattern.next"))
+				}
+				if _, _, err := s.emitMatchPatternTest(p.Args[i].Pattern, payloadValues[i], nil, variant.Payload[i], store, nil, nextSuccess, failureBB); err != nil {
+					return nil, packedPayloadValueCache{}, err
+				}
+				if i != len(p.Args)-1 {
+					C.LLVMPositionBuilderAtEnd(s.builder, nextSuccess)
+				}
+			}
+			return matchedDecodedValue, cachedPayloads, nil
+		}
+		if namedCount != len(p.Args) {
+			return nil, packedPayloadValueCache{}, fmt.Errorf("match arm %s.%s cannot mix positional and named payload patterns", p.EnumName, p.Variant)
+		}
 		orderedArgs, err := s.resolveMatchPatternArgs(p, variant)
 		if err != nil {
-			return nil, nil, err
-		}
-		matchedDecodedValue := decodedActualValue
-		if len(orderedArgs) == 0 {
-			C.LLVMBuildBr(s.builder, successBB)
-			return matchedDecodedValue, nil, nil
+			return nil, packedPayloadValueCache{}, err
 		}
 		hasNestedPattern := false
 		for i := range orderedArgs {
@@ -2157,13 +2220,13 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		}
 		if !hasNestedPattern {
 			C.LLVMBuildBr(s.builder, successBB)
-			return matchedDecodedValue, nil, nil
+			return matchedDecodedValue, packedPayloadValueCache{}, nil
 		}
 		payloadValues, err := s.extractEnumVariantPayloadValues(actualValue, matchedDecodedValue, enumType, variant, store, originExpr)
 		if err != nil {
-			return nil, nil, err
+			return nil, packedPayloadValueCache{}, err
 		}
-		var cachedPayloads map[string]C.LLVMValueRef
+		var cachedPayloads packedPayloadValueCache
 		for i, value := range payloadValues {
 			if value == nil {
 				continue
@@ -2172,10 +2235,7 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 			if label == "" {
 				continue
 			}
-			if cachedPayloads == nil {
-				cachedPayloads = make(map[string]C.LLVMValueRef, len(payloadValues))
-			}
-			cachedPayloads[label] = value
+			cachedPayloads.add(label, value)
 		}
 		for i := range orderedArgs {
 			if orderedArgs[i] == nil {
@@ -2186,7 +2246,7 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 				nextSuccess = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.pattern.next"))
 			}
 			if _, _, err := s.emitMatchPatternTest(orderedArgs[i].Pattern, payloadValues[i], nil, variant.Payload[i], store, nil, nextSuccess, failureBB); err != nil {
-				return nil, nil, err
+				return nil, packedPayloadValueCache{}, err
 			}
 			if i != len(orderedArgs)-1 {
 				C.LLVMPositionBuilderAtEnd(s.builder, nextSuccess)
@@ -2194,7 +2254,7 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		}
 		return matchedDecodedValue, cachedPayloads, nil
 	default:
-		return nil, nil, fmt.Errorf("unsupported match pattern %T", pattern)
+		return nil, packedPayloadValueCache{}, fmt.Errorf("unsupported match pattern %T", pattern)
 	}
 }
 

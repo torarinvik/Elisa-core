@@ -96,6 +96,7 @@ type llvmGenerator struct {
 	structBodies         map[string]bool
 	functionTypes        map[*semantic.FuncType]C.LLVMTypeRef
 	runtimeHelperTypes   map[string]*semantic.FuncType
+	packedViewTypes      map[*semantic.EnumVariant]*semantic.PackedVariantViewType
 	specializedFuncTypes map[string]*semantic.FuncType
 	functions            map[string]C.LLVMValueRef
 	globals              map[string]C.LLVMValueRef
@@ -116,22 +117,23 @@ func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
 	defer C.free(unsafe.Pointer(moduleName))
 	mod := C.LLVMModuleCreateWithNameInContext(moduleName, ctx)
 	g := &llvmGenerator{
-		result:             result,
-		context:            ctx,
-		module:             mod,
-		packedProfile:      DefaultPackedLoweringProfile(),
-		packedEnumABI:      packedEnumABIVariantSparse,
-		symbolsByNode:      map[ast.Node]*semantic.Symbol{},
-		structTypes:        map[string]C.LLVMTypeRef{},
-		structBodies:       map[string]bool{},
-		functionTypes:      map[*semantic.FuncType]C.LLVMTypeRef{},
-		runtimeHelperTypes: map[string]*semantic.FuncType{},
+		result:               result,
+		context:              ctx,
+		module:               mod,
+		packedProfile:        DefaultPackedLoweringProfile(),
+		packedEnumABI:        packedEnumABIVariantSparse,
+		symbolsByNode:        map[ast.Node]*semantic.Symbol{},
+		structTypes:          map[string]C.LLVMTypeRef{},
+		structBodies:         map[string]bool{},
+		functionTypes:        map[*semantic.FuncType]C.LLVMTypeRef{},
+		runtimeHelperTypes:   map[string]*semantic.FuncType{},
+		packedViewTypes:      map[*semantic.EnumVariant]*semantic.PackedVariantViewType{},
 		specializedFuncTypes: map[string]*semantic.FuncType{},
-		functions:          map[string]C.LLVMValueRef{},
-		globals:            map[string]C.LLVMValueRef{},
-		noteTypeInProgress: map[semantic.Type]bool{},
-		noteTypeDone:       map[semantic.Type]bool{},
-		wordBits:           int(unsafe.Sizeof(uintptr(0)) * 8),
+		functions:            map[string]C.LLVMValueRef{},
+		globals:              map[string]C.LLVMValueRef{},
+		noteTypeInProgress:   map[semantic.Type]bool{},
+		noteTypeDone:         map[semantic.Type]bool{},
+		wordBits:             int(unsafe.Sizeof(uintptr(0)) * 8),
 	}
 	for _, sym := range result.GlobalScope.Symbols {
 		if sym == nil || sym.Node == nil {
