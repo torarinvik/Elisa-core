@@ -3,13 +3,17 @@
 package backend
 
 import (
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"llcontext/src/lexer"
 	"llcontext/src/parser"
 	"llcontext/src/semantic"
 )
+
+const packedLoweringParallelWorkerCount = 10
 
 const packedLoweringBenchmarkSource = `packed enum Expr:
     common:
@@ -415,6 +419,42 @@ func benchmarkPackedLowering(b *testing.B, filename string, src string, profile 
 	}
 }
 
+func benchmarkPackedLoweringParallel(b *testing.B, filename string, src string, profile PackedLoweringProfile, workers int) {
+	b.Helper()
+	result := parseAndAnalyzeBackendBenchmarkSource(b, filename, src)
+	prevMaxProcs := runtime.GOMAXPROCS(workers)
+	defer runtime.GOMAXPROCS(prevMaxProcs)
+	b.ReportAllocs()
+	b.ResetTimer()
+	jobs := make(chan struct{}, workers)
+	errs := make(chan error, 1)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range jobs {
+				if _, err := GenerateLLVMIRWithOptAndPackedLoweringProfile(result, OptimizationLevel0, profile); err != nil {
+					select {
+					case errs <- err:
+					default:
+					}
+				}
+			}
+		}()
+	}
+	for i := 0; i < b.N; i++ {
+		jobs <- struct{}{}
+	}
+	close(jobs)
+	wg.Wait()
+	select {
+	case err := <-errs:
+		b.Fatalf("GenerateLLVMIRWithOptAndPackedLoweringProfile returned error: %v", err)
+	default:
+	}
+}
+
 func BenchmarkGenerateLLVMIRPackedLoweringCanonical(b *testing.B) {
 	benchmarkPackedLowering(b, "packed_lowering_bench.llcontext", packedLoweringBenchmarkSource, DefaultPackedLoweringProfile())
 }
@@ -449,6 +489,18 @@ func BenchmarkGenerateLLVMIRPackedLoweringParserASTMegaWordHandle(b *testing.B) 
 		b.Fatalf("LegacyPackedLoweringProfile returned error: %v", err)
 	}
 	benchmarkPackedLowering(b, "packed_lowering_parser_ast_mega_bench.llcontext", packedLoweringParserASTMegaBenchmarkSource, profile)
+}
+
+func BenchmarkGenerateLLVMIRPackedLoweringParserASTMegaParallelRetainedReads(b *testing.B) {
+	benchmarkPackedLoweringParallel(b, "packed_lowering_parser_ast_mega_parallel_bench.llcontext", packedLoweringParserASTMegaBenchmarkSource, DefaultPackedLoweringProfile(), packedLoweringParallelWorkerCount)
+}
+
+func BenchmarkGenerateLLVMIRPackedLoweringParserASTMegaParallelWordHandle(b *testing.B) {
+	profile, err := LegacyPackedLoweringProfile(PackedEnumABIWordHandle)
+	if err != nil {
+		b.Fatalf("LegacyPackedLoweringProfile returned error: %v", err)
+	}
+	benchmarkPackedLoweringParallel(b, "packed_lowering_parser_ast_mega_parallel_bench.llcontext", packedLoweringParserASTMegaBenchmarkSource, profile, packedLoweringParallelWorkerCount)
 }
 
 func BenchmarkGenerateLLVMIRPackedLoweringWordHandle(b *testing.B) {

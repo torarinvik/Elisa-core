@@ -2773,6 +2773,7 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 func (a *Analyzer) resolveMatchPatternArgs(pattern *ast.MatchVariantPattern, variant *EnumVariant, qualified string, nested bool) []*ast.MatchPatternArg {
 	ordered := make([]*ast.MatchPatternArg, len(variant.Payload))
 	if len(pattern.Args) == 0 {
+		pattern.ResolvedArgs = ordered
 		return ordered
 	}
 	namedCount := 0
@@ -2795,10 +2796,12 @@ func (a *Analyzer) resolveMatchPatternArgs(pattern *ast.MatchVariantPattern, var
 		for i := 0; i < limit; i++ {
 			ordered[i] = &pattern.Args[i]
 		}
+		pattern.ResolvedArgs = ordered
 		return ordered
 	}
 	if !variant.HasNamedPayloads() {
 		a.errorf(pattern.Pos(), "%s does not declare named payload fields", matchPatternContext(qualified, nested))
+		pattern.ResolvedArgs = ordered
 		return ordered
 	}
 	seen := map[int]lexer.Pos{}
@@ -2826,6 +2829,7 @@ func (a *Analyzer) resolveMatchPatternArgs(pattern *ast.MatchVariantPattern, var
 		sort.Strings(missing)
 		a.errorf(pattern.Pos(), "%s is missing named payload patterns for: %s", matchPatternContext(qualified, nested), strings.Join(missing, ", "))
 	}
+	pattern.ResolvedArgs = ordered
 	return ordered
 }
 

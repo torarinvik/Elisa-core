@@ -2279,8 +2279,12 @@ func (s *functionState) emitStringMatchPatternTest(pattern ast.MatchPattern, act
 }
 
 func (s *functionState) resolveMatchPatternArgs(pattern *ast.MatchVariantPattern, variant *semantic.EnumVariant) ([]*ast.MatchPatternArg, error) {
+	if len(pattern.ResolvedArgs) == len(variant.Payload) {
+		return pattern.ResolvedArgs, nil
+	}
 	ordered := make([]*ast.MatchPatternArg, len(variant.Payload))
 	if len(pattern.Args) == 0 {
+		pattern.ResolvedArgs = ordered
 		return ordered, nil
 	}
 	namedCount := 0
@@ -2296,6 +2300,7 @@ func (s *functionState) resolveMatchPatternArgs(pattern *ast.MatchVariantPattern
 		for i := range pattern.Args {
 			ordered[i] = &pattern.Args[i]
 		}
+		pattern.ResolvedArgs = ordered
 		return ordered, nil
 	}
 	if namedCount != len(pattern.Args) {
@@ -2304,7 +2309,7 @@ func (s *functionState) resolveMatchPatternArgs(pattern *ast.MatchVariantPattern
 	if !variant.HasNamedPayloads() {
 		return nil, fmt.Errorf("match arm %s.%s uses named payload patterns but the variant payloads are unnamed", pattern.EnumName, pattern.Variant)
 	}
-	seen := map[int]bool{}
+	seen := make([]bool, len(variant.Payload))
 	for i := range pattern.Args {
 		arg := &pattern.Args[i]
 		index, ok := variant.PayloadIndex(arg.Name)
@@ -2327,6 +2332,7 @@ func (s *functionState) resolveMatchPatternArgs(pattern *ast.MatchVariantPattern
 		sort.Strings(missing)
 		return nil, fmt.Errorf("match arm %s.%s is missing named payload patterns for: %s", pattern.EnumName, pattern.Variant, strings.Join(missing, ", "))
 	}
+	pattern.ResolvedArgs = ordered
 	return ordered, nil
 }
 

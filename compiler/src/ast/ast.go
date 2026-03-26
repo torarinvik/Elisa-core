@@ -550,10 +550,11 @@ type MatchStringLiteralPattern struct {
 }
 
 type MatchVariantPattern struct {
-	Position lexer.Pos
-	EnumName string
-	Variant  string
-	Args     []MatchPatternArg
+	Position     lexer.Pos
+	EnumName     string
+	Variant      string
+	Args         []MatchPatternArg
+	ResolvedArgs []*MatchPatternArg
 }
 
 type MatchPatternArg struct {
