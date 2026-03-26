@@ -81,32 +81,33 @@ func compileLLVMModule(result *semantic.Result, optLevel OptimizationLevel, prof
 }
 
 type llvmGenerator struct {
-	result               *semantic.Result
-	context              C.LLVMContextRef
-	module               C.LLVMModuleRef
-	targetMachine        C.LLVMTargetMachineRef
-	targetData           C.LLVMTargetDataRef
-	targetTriple         *C.char
-	optimizedForCodegen  bool
-	preferPrivateLinkage bool
-	packedProfile        PackedLoweringProfile
-	packedEnumABI        packedEnumABIMode
-	symbolsByNode        map[ast.Node]*semantic.Symbol
-	structTypes          map[string]C.LLVMTypeRef
-	structBodies         map[string]bool
-	functionTypes        map[*semantic.FuncType]C.LLVMTypeRef
-	runtimeHelperTypes   map[string]*semantic.FuncType
-	packedViewTypes      map[*semantic.EnumVariant]*semantic.PackedVariantViewType
-	commonFieldLayouts   map[packedEnumCommonFieldLayoutCacheKey]*packedEnumCommonFieldLayout
-	specializedFuncTypes map[string]*semantic.FuncType
-	functions            map[string]C.LLVMValueRef
-	globals              map[string]C.LLVMValueRef
-	noteTypeInProgress   map[semantic.Type]bool
-	noteTypeDone         map[semantic.Type]bool
-	cachedVoidRefType    *semantic.RefType
-	cachedArenaRefType   *semantic.RefType
-	syntheticCounter     int
-	wordBits             int
+	result                    *semantic.Result
+	context                   C.LLVMContextRef
+	module                    C.LLVMModuleRef
+	targetMachine             C.LLVMTargetMachineRef
+	targetData                C.LLVMTargetDataRef
+	targetTriple              *C.char
+	optimizedForCodegen       bool
+	preferPrivateLinkage      bool
+	packedProfile             PackedLoweringProfile
+	packedEnumABI             packedEnumABIMode
+	symbolsByNode             map[ast.Node]*semantic.Symbol
+	structTypes               map[string]C.LLVMTypeRef
+	structBodies              map[string]bool
+	functionTypes             map[*semantic.FuncType]C.LLVMTypeRef
+	runtimeHelperTypes        map[string]*semantic.FuncType
+	packedViewTypes           map[*semantic.EnumVariant]*semantic.PackedVariantViewType
+	packedVariantPayloadTypes map[*semantic.EnumVariant]C.LLVMTypeRef
+	commonFieldLayouts        map[packedEnumCommonFieldLayoutCacheKey]*packedEnumCommonFieldLayout
+	specializedFuncTypes      map[string]*semantic.FuncType
+	functions                 map[string]C.LLVMValueRef
+	globals                   map[string]C.LLVMValueRef
+	noteTypeInProgress        map[semantic.Type]bool
+	noteTypeDone              map[semantic.Type]bool
+	cachedVoidRefType         *semantic.RefType
+	cachedArenaRefType        *semantic.RefType
+	syntheticCounter          int
+	wordBits                  int
 }
 
 func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
@@ -118,24 +119,25 @@ func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
 	defer C.free(unsafe.Pointer(moduleName))
 	mod := C.LLVMModuleCreateWithNameInContext(moduleName, ctx)
 	g := &llvmGenerator{
-		result:               result,
-		context:              ctx,
-		module:               mod,
-		packedProfile:        DefaultPackedLoweringProfile(),
-		packedEnumABI:        packedEnumABIVariantSparse,
-		symbolsByNode:        map[ast.Node]*semantic.Symbol{},
-		structTypes:          map[string]C.LLVMTypeRef{},
-		structBodies:         map[string]bool{},
-		functionTypes:        map[*semantic.FuncType]C.LLVMTypeRef{},
-		runtimeHelperTypes:   map[string]*semantic.FuncType{},
-		packedViewTypes:      map[*semantic.EnumVariant]*semantic.PackedVariantViewType{},
-		commonFieldLayouts:   map[packedEnumCommonFieldLayoutCacheKey]*packedEnumCommonFieldLayout{},
-		specializedFuncTypes: map[string]*semantic.FuncType{},
-		functions:            map[string]C.LLVMValueRef{},
-		globals:              map[string]C.LLVMValueRef{},
-		noteTypeInProgress:   map[semantic.Type]bool{},
-		noteTypeDone:         map[semantic.Type]bool{},
-		wordBits:             int(unsafe.Sizeof(uintptr(0)) * 8),
+		result:                    result,
+		context:                   ctx,
+		module:                    mod,
+		packedProfile:             DefaultPackedLoweringProfile(),
+		packedEnumABI:             packedEnumABIVariantSparse,
+		symbolsByNode:             map[ast.Node]*semantic.Symbol{},
+		structTypes:               map[string]C.LLVMTypeRef{},
+		structBodies:              map[string]bool{},
+		functionTypes:             map[*semantic.FuncType]C.LLVMTypeRef{},
+		runtimeHelperTypes:        map[string]*semantic.FuncType{},
+		packedViewTypes:           map[*semantic.EnumVariant]*semantic.PackedVariantViewType{},
+		packedVariantPayloadTypes: map[*semantic.EnumVariant]C.LLVMTypeRef{},
+		commonFieldLayouts:        map[packedEnumCommonFieldLayoutCacheKey]*packedEnumCommonFieldLayout{},
+		specializedFuncTypes:      map[string]*semantic.FuncType{},
+		functions:                 map[string]C.LLVMValueRef{},
+		globals:                   map[string]C.LLVMValueRef{},
+		noteTypeInProgress:        map[semantic.Type]bool{},
+		noteTypeDone:              map[semantic.Type]bool{},
+		wordBits:                  int(unsafe.Sizeof(uintptr(0)) * 8),
 	}
 	for _, sym := range result.GlobalScope.Symbols {
 		if sym == nil || sym.Node == nil {

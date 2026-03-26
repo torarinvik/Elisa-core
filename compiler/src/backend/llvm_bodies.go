@@ -2594,19 +2594,19 @@ func (s *functionState) packedEnumVariantPayloadWordOffset(enumType *semantic.En
 	if err != nil {
 		return nil, false, err
 	}
-	baseWordOffset := C.LLVMConstInt(usizeType, C.ulonglong(baseOffsetBytes/wordBytes), 0)
-	if len(variant.Payload) == 1 {
-		return baseWordOffset, true, nil
+	offset := C.LLVMConstInt(usizeType, C.ulonglong(baseOffsetBytes/wordBytes), 0)
+	if len(variant.Payload) > 1 {
+		payloadType, err := s.g.lowerEnumVariantPayloadType(variant)
+		if err != nil {
+			return nil, false, err
+		}
+		fieldOffsetBytes, err := s.g.abiOffsetOfLLVMElement(payloadType, payloadIndex)
+		if err != nil {
+			return nil, false, err
+		}
+		offset = C.LLVMConstInt(usizeType, C.ulonglong((baseOffsetBytes+fieldOffsetBytes)/wordBytes), 0)
 	}
-	payloadType, err := s.g.lowerEnumVariantPayloadType(variant)
-	if err != nil {
-		return nil, false, err
-	}
-	fieldOffsetBytes, err := s.g.abiOffsetOfLLVMElement(payloadType, payloadIndex)
-	if err != nil {
-		return nil, false, err
-	}
-	return C.LLVMConstInt(usizeType, C.ulonglong((baseOffsetBytes+fieldOffsetBytes)/wordBytes), 0), true, nil
+	return offset, true, nil
 }
 
 func (s *functionState) readPackedEnumTagWithStore(handleValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding) (C.LLVMValueRef, error) {

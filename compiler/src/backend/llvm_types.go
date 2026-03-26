@@ -1177,6 +1177,9 @@ func (g *llvmGenerator) lowerEnumVariantPayloadType(variant *semantic.EnumVarian
 	if len(variant.Payload) == 1 {
 		return g.lowerType(variant.Payload[0])
 	}
+	if cached := g.packedVariantPayloadTypes[variant]; cached != nil {
+		return cached, nil
+	}
 	fields := make([]C.LLVMTypeRef, 0, len(variant.Payload))
 	for _, payload := range variant.Payload {
 		fieldType, err := g.lowerType(payload)
@@ -1185,7 +1188,9 @@ func (g *llvmGenerator) lowerEnumVariantPayloadType(variant *semantic.EnumVarian
 		}
 		fields = append(fields, fieldType)
 	}
-	return C.LLVMStructTypeInContext(g.context, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0), nil
+	payloadType := C.LLVMStructTypeInContext(g.context, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	g.packedVariantPayloadTypes[variant] = payloadType
+	return payloadType, nil
 }
 
 func (g *llvmGenerator) ensureRuntimeDynArray(elem semantic.Type) (C.LLVMTypeRef, error) {
