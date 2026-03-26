@@ -773,19 +773,19 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 	if enumType == nil || !enumType.Packed {
 		return nil, nil, nil, fmt.Errorf("missing packed enum storage metadata")
 	}
-	rowSizeValue, err := ops.rowBytesValue(name + ".row_bytes")
+	rowSizeValue, err := ops.rowBytesValue("packed.row_bytes")
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	switch ops.s.g.packedModeForEnum(enumType) {
 	case packedEnumABIRowHandle:
-		arenaValue, err := ops.arenaValue(name + ".arena")
+		arenaValue, err := ops.arenaValue("packed.arena")
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		arenaType := ops.s.g.result.NamedTypes["Arena"]
-		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-		helperType := &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaRefType, ops.s.g.result.NamedTypes["usize"]}, Return: ops.voidRefType()}
+		helperType := ops.cachedRuntimeHelperType("arena_alloc", func() *semantic.FuncType {
+			return &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{ops.arenaRefType(), ops.s.g.result.NamedTypes["usize"]}, Return: ops.voidRefType()}
+		})
 		callee, err := ops.s.g.ensureFunctionDeclared("arena_alloc", helperType)
 		if err != nil {
 			return nil, nil, nil, err
@@ -795,11 +795,13 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 			return nil, nil, nil, err
 		}
 		allocPtr := ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{arenaValue, totalSizeValue}, "packed.alloc")
-		stateValue, err := ops.stateValue(name + ".state")
+		stateValue, err := ops.stateValue("packed.state")
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		recordType := &semantic.FuncType{Name: "ctx_packed_store_record_row_ptr", Params: []semantic.Type{arenaRefType, ops.voidRefType(), ops.voidRefType()}, Return: ops.s.g.result.NamedTypes["void"]}
+		recordType := ops.cachedRuntimeHelperType("ctx_packed_store_record_row_ptr", func() *semantic.FuncType {
+			return &semantic.FuncType{Name: "ctx_packed_store_record_row_ptr", Params: []semantic.Type{ops.arenaRefType(), ops.voidRefType(), ops.voidRefType()}, Return: ops.s.g.result.NamedTypes["void"]}
+		})
 		recordCallee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_record_row_ptr", recordType)
 		if err != nil {
 			return nil, nil, nil, err
@@ -811,29 +813,31 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 		ops.s.buildCall(recordLLVMType, recordCallee, []C.LLVMValueRef{arenaValue, allocPtr, stateValue}, "")
 		return allocPtr, allocPtr, rowSizeValue, nil
 	case packedEnumABIWordHandle:
-		arenaValue, err := ops.arenaValue(name + ".arena")
+		arenaValue, err := ops.arenaValue("packed.arena")
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		stateValue, err := ops.stateValue(name + ".state")
+		stateValue, err := ops.stateValue("packed.state")
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		arenaType := ops.s.g.result.NamedTypes["Arena"]
-		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 		allocResultType := ops.s.g.result.NamedTypes["PackedStoreAllocResult"]
 		if allocResultType == nil {
 			return nil, nil, nil, fmt.Errorf("missing builtin PackedStoreAllocResult type for packed enum allocation")
 		}
 		allocHelperName := "ctx_packed_store_alloc_fixed_tagged_result"
-		allocHelperParams := []semantic.Type{arenaRefType, ops.voidRefType(), ops.s.g.result.NamedTypes["u32"]}
 		allocArgs := []C.LLVMValueRef{arenaValue, stateValue, fixedTagValue}
 		if hasTail {
 			allocHelperName = "ctx_packed_store_alloc_result"
-			allocHelperParams = []semantic.Type{arenaRefType, ops.s.g.result.NamedTypes["usize"], ops.voidRefType()}
 			allocArgs = []C.LLVMValueRef{arenaValue, totalSizeValue, stateValue}
 		}
-		allocHelperType := &semantic.FuncType{Name: allocHelperName, Params: allocHelperParams, Return: allocResultType}
+		allocHelperType := ops.cachedRuntimeHelperType(allocHelperName, func() *semantic.FuncType {
+			params := []semantic.Type{ops.arenaRefType(), ops.voidRefType(), ops.s.g.result.NamedTypes["u32"]}
+			if hasTail {
+				params = []semantic.Type{ops.arenaRefType(), ops.s.g.result.NamedTypes["usize"], ops.voidRefType()}
+			}
+			return &semantic.FuncType{Name: allocHelperName, Params: params, Return: allocResultType}
+		})
 		allocCallee, err := ops.s.g.ensureFunctionDeclared(allocHelperName, allocHelperType)
 		if err != nil {
 			return nil, nil, nil, err
@@ -851,29 +855,31 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 		}
 		return allocPtr, enumValue, rowSizeValue, nil
 	case packedEnumABIIndexSOA:
-		arenaValue, err := ops.arenaValue(name + ".arena")
+		arenaValue, err := ops.arenaValue("packed.arena")
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		stateValue, err := ops.stateValue(name + ".state")
+		stateValue, err := ops.stateValue("packed.state")
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		arenaType := ops.s.g.result.NamedTypes["Arena"]
-		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 		allocResultType := ops.s.g.result.NamedTypes["PackedStoreIndexAllocResult"]
 		if allocResultType == nil {
 			return nil, nil, nil, fmt.Errorf("missing builtin PackedStoreIndexAllocResult type for packed enum allocation")
 		}
 		allocHelperName := "ctx_packed_store_alloc_fixed_tagged_index_result"
-		allocHelperParams := []semantic.Type{arenaRefType, ops.voidRefType(), ops.s.g.result.NamedTypes["u32"]}
 		allocArgs := []C.LLVMValueRef{arenaValue, stateValue, fixedTagValue}
 		if hasTail {
 			allocHelperName = "ctx_packed_store_alloc_index_result"
-			allocHelperParams = []semantic.Type{arenaRefType, ops.s.g.result.NamedTypes["usize"], ops.voidRefType()}
 			allocArgs = []C.LLVMValueRef{arenaValue, totalSizeValue, stateValue}
 		}
-		allocHelperType := &semantic.FuncType{Name: allocHelperName, Params: allocHelperParams, Return: allocResultType}
+		allocHelperType := ops.cachedRuntimeHelperType(allocHelperName, func() *semantic.FuncType {
+			params := []semantic.Type{ops.arenaRefType(), ops.voidRefType(), ops.s.g.result.NamedTypes["u32"]}
+			if hasTail {
+				params = []semantic.Type{ops.arenaRefType(), ops.s.g.result.NamedTypes["usize"], ops.voidRefType()}
+			}
+			return &semantic.FuncType{Name: allocHelperName, Params: params, Return: allocResultType}
+		})
 		allocCallee, err := ops.s.g.ensureFunctionDeclared(allocHelperName, allocHelperType)
 		if err != nil {
 			return nil, nil, nil, err
@@ -891,29 +897,31 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 		}
 		return allocPtr, enumValue, rowSizeValue, nil
 	case packedEnumABIVariantSparse:
-		arenaValue, err := ops.arenaValue(name + ".arena")
+		arenaValue, err := ops.arenaValue("packed.arena")
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		stateValue, err := ops.stateValue(name + ".state")
+		stateValue, err := ops.stateValue("packed.state")
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		arenaType := ops.s.g.result.NamedTypes["Arena"]
-		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 		allocResultType := ops.s.g.result.NamedTypes["PackedStoreIndexAllocResult"]
 		if allocResultType == nil {
 			return nil, nil, nil, fmt.Errorf("missing builtin PackedStoreIndexAllocResult type for variant-sparse packed enum allocation")
 		}
 		allocHelperName := "ctx_packed_store_alloc_fixed_tagged_variant_sparse_result"
-		allocHelperParams := []semantic.Type{arenaRefType, ops.voidRefType(), ops.s.g.result.NamedTypes["u32"]}
 		allocArgs := []C.LLVMValueRef{arenaValue, stateValue, fixedTagValue}
 		if hasTail {
 			allocHelperName = "ctx_packed_store_alloc_tagged_variant_sparse_result"
-			allocHelperParams = []semantic.Type{arenaRefType, ops.s.g.result.NamedTypes["usize"], ops.voidRefType(), ops.s.g.result.NamedTypes["u32"]}
 			allocArgs = []C.LLVMValueRef{arenaValue, totalSizeValue, stateValue, fixedTagValue}
 		}
-		allocHelperType := &semantic.FuncType{Name: allocHelperName, Params: allocHelperParams, Return: allocResultType}
+		allocHelperType := ops.cachedRuntimeHelperType(allocHelperName, func() *semantic.FuncType {
+			params := []semantic.Type{ops.arenaRefType(), ops.voidRefType(), ops.s.g.result.NamedTypes["u32"]}
+			if hasTail {
+				params = []semantic.Type{ops.arenaRefType(), ops.s.g.result.NamedTypes["usize"], ops.voidRefType(), ops.s.g.result.NamedTypes["u32"]}
+			}
+			return &semantic.FuncType{Name: allocHelperName, Params: params, Return: allocResultType}
+		})
 		allocCallee, err := ops.s.g.ensureFunctionDeclared(allocHelperName, allocHelperType)
 		if err != nil {
 			return nil, nil, nil, err
@@ -935,19 +943,19 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 	}
 }
 
-func (ops *packedStoreOps) recordTag(tagValue C.LLVMValueRef, name string) error {
-	arenaValue, err := ops.arenaValue(name + ".arena")
+func (ops *packedStoreOps) recordTag(tagValue C.LLVMValueRef, _ string) error {
+	arenaValue, err := ops.arenaValue("packed.arena")
 	if err != nil {
 		return err
 	}
-	stateValue, err := ops.stateValue(name + ".state")
+	stateValue, err := ops.stateValue("packed.state")
 	if err != nil {
 		return err
 	}
-	arenaType := ops.s.g.result.NamedTypes["Arena"]
-	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	tagType := ops.s.g.result.NamedTypes["u32"]
-	recordType := &semantic.FuncType{Name: "ctx_packed_store_record_tag", Params: []semantic.Type{arenaRefType, tagType, ops.voidRefType()}, Return: ops.s.g.result.NamedTypes["void"]}
+	recordType := ops.cachedRuntimeHelperType("ctx_packed_store_record_tag", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "ctx_packed_store_record_tag", Params: []semantic.Type{ops.arenaRefType(), tagType, ops.voidRefType()}, Return: ops.s.g.result.NamedTypes["void"]}
+	})
 	recordCallee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_record_tag", recordType)
 	if err != nil {
 		return err
@@ -960,21 +968,21 @@ func (ops *packedStoreOps) recordTag(tagValue C.LLVMValueRef, name string) error
 	return nil
 }
 
-func (ops *packedStoreOps) recordPrefixWords(rowPtr C.LLVMValueRef, name string) error {
+func (ops *packedStoreOps) recordPrefixWords(rowPtr C.LLVMValueRef, _ string) error {
 	if ops == nil || ops.s == nil || ops.s.g == nil || ops.s.g.packedLoweringForStore(ops.storeType) != packedEnumABIIndexSOA {
 		return nil
 	}
-	arenaValue, err := ops.arenaValue(name + ".arena")
+	arenaValue, err := ops.arenaValue("packed.arena")
 	if err != nil {
 		return err
 	}
-	stateValue, err := ops.stateValue(name + ".state")
+	stateValue, err := ops.stateValue("packed.state")
 	if err != nil {
 		return err
 	}
-	arenaType := ops.s.g.result.NamedTypes["Arena"]
-	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	recordType := &semantic.FuncType{Name: "ctx_packed_store_record_prefix_words", Params: []semantic.Type{arenaRefType, ops.voidRefType(), ops.voidRefType()}, Return: ops.s.g.result.NamedTypes["void"]}
+	recordType := ops.cachedRuntimeHelperType("ctx_packed_store_record_prefix_words", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "ctx_packed_store_record_prefix_words", Params: []semantic.Type{ops.arenaRefType(), ops.voidRefType(), ops.voidRefType()}, Return: ops.s.g.result.NamedTypes["void"]}
+	})
 	recordCallee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_record_prefix_words", recordType)
 	if err != nil {
 		return err
@@ -987,24 +995,24 @@ func (ops *packedStoreOps) recordPrefixWords(rowPtr C.LLVMValueRef, name string)
 	return nil
 }
 
-func (ops *packedStoreOps) recordSideWords(wordsPtr C.LLVMValueRef, name string) error {
+func (ops *packedStoreOps) recordSideWords(wordsPtr C.LLVMValueRef, _ string) error {
 	if ops == nil || ops.s == nil || ops.s.g == nil || ops.storeType == nil || ops.storeType.Enum == nil {
 		return nil
 	}
 	if !packedModeUsesDenseIndexHandle(ops.s.g.packedLoweringForStore(ops.storeType)) {
 		return nil
 	}
-	arenaValue, err := ops.arenaValue(name + ".arena")
+	arenaValue, err := ops.arenaValue("packed.arena")
 	if err != nil {
 		return err
 	}
-	stateValue, err := ops.stateValue(name + ".state")
+	stateValue, err := ops.stateValue("packed.state")
 	if err != nil {
 		return err
 	}
-	arenaType := ops.s.g.result.NamedTypes["Arena"]
-	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	recordType := &semantic.FuncType{Name: "ctx_packed_store_record_side_words", Params: []semantic.Type{arenaRefType, ops.voidRefType(), ops.voidRefType()}, Return: ops.s.g.result.NamedTypes["void"]}
+	recordType := ops.cachedRuntimeHelperType("ctx_packed_store_record_side_words", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "ctx_packed_store_record_side_words", Params: []semantic.Type{ops.arenaRefType(), ops.voidRefType(), ops.voidRefType()}, Return: ops.s.g.result.NamedTypes["void"]}
+	})
 	recordCallee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_record_side_words", recordType)
 	if err != nil {
 		return err
