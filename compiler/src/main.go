@@ -95,6 +95,21 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 			fmt.Fprint(stdout, output)
 		}
 		return 0
+	case emitPacked:
+		output, err := backend.DescribePackedLowering(result, options.packedProfile)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %s\n", err)
+			return 1
+		}
+		if options.output != "" {
+			if err := os.WriteFile(options.output, []byte(output), 0o644); err != nil {
+				fmt.Fprintf(stderr, "error: %s\n", err)
+				return 1
+			}
+		} else {
+			fmt.Fprint(stdout, output)
+		}
+		return 0
 	case emitHeader:
 		output, err := backend.GenerateCHeader(result)
 		if err != nil {
@@ -181,6 +196,7 @@ const (
 	emitTest       = "test"
 	emitTestRunner = "test-runner"
 	emitLLVM       = "llvm"
+	emitPacked     = "packed"
 	emitHeader     = "header"
 	emitBitcode    = "bc"
 	emitObject     = "obj"
@@ -300,7 +316,7 @@ func parseArgs(args []string) (cliOptions, error) {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprintf(w, "Usage: llcontext [-emit %s|%s|%s|%s|%s|%s|%s|%s|%s|%s] [-filter <substring>] [-packed-abi <packed-lowering-override>] [-O0|-O2|-O3] [-o <output>] <file.llcontext>\n", emitAST, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitHeader, emitBitcode, emitObject)
+	fmt.Fprintf(w, "Usage: llcontext [-emit %s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s] [-filter <substring>] [-packed-abi <packed-lowering-override>] [-O0|-O2|-O3] [-o <output>] <file.llcontext>\n", emitAST, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitHeader, emitBitcode, emitObject)
 	fmt.Fprintf(w, "Packed enums lower canonically as handle-based %s in compiler mode; frozen stores remain the readonly publication form.\n", backend.PackedEnumABIVariantSparse)
 	fmt.Fprintf(w, "-packed-abi can pin an alternate lowering for debugging/compatibility: %s | %s | %s | %s | %s\n", backend.PackedEnumABIRowHandle, backend.PackedEnumABIWordHandle, backend.PackedEnumABIDenseFixed, backend.PackedEnumABIIndexSOA, backend.PackedEnumABIVariantSparse)
 }
@@ -346,6 +362,8 @@ func normalizeEmitMode(value string) string {
 		return emitTestRunner
 	case emitLLVM:
 		return emitLLVM
+	case emitPacked, "packed-info", "packedinfo":
+		return emitPacked
 	case emitHeader:
 		return emitHeader
 	case emitBitcode, "bitcode":

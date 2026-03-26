@@ -94,6 +94,7 @@ type llvmGenerator struct {
 	symbolsByNode        map[ast.Node]*semantic.Symbol
 	structTypes          map[string]C.LLVMTypeRef
 	structBodies         map[string]bool
+	functionTypes        map[string]C.LLVMTypeRef
 	functions            map[string]C.LLVMValueRef
 	globals              map[string]C.LLVMValueRef
 	noteTypeInProgress   map[string]bool
@@ -119,6 +120,7 @@ func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
 		symbolsByNode:      map[ast.Node]*semantic.Symbol{},
 		structTypes:        map[string]C.LLVMTypeRef{},
 		structBodies:       map[string]bool{},
+		functionTypes:      map[string]C.LLVMTypeRef{},
 		functions:          map[string]C.LLVMValueRef{},
 		globals:            map[string]C.LLVMValueRef{},
 		noteTypeInProgress: map[string]bool{},

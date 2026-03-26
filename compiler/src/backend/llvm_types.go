@@ -525,6 +525,13 @@ func (g *llvmGenerator) applyTypeAlignment(value C.LLVMValueRef, t semantic.Type
 }
 
 func (g *llvmGenerator) lowerFunctionType(fn *semantic.FuncType) (C.LLVMTypeRef, error) {
+	if g == nil || fn == nil {
+		return nil, fmt.Errorf("missing function type for LLVM lowering")
+	}
+	key := noteTypeKey(fn)
+	if cached, ok := g.functionTypes[key]; ok && cached != nil {
+		return cached, nil
+	}
 	returnType, err := g.lowerFunctionReturnType(fn.Return)
 	if err != nil {
 		return nil, err
@@ -544,7 +551,9 @@ func (g *llvmGenerator) lowerFunctionType(fn *semantic.FuncType) (C.LLVMTypeRef,
 		}
 		params = append(params, paramType)
 	}
-	return C.LLVMFunctionType(returnType, llvmTypeSlicePtr(params), C.unsigned(len(params)), boolToLLVMBool(fn.Variadic)), nil
+	lowered := C.LLVMFunctionType(returnType, llvmTypeSlicePtr(params), C.unsigned(len(params)), boolToLLVMBool(fn.Variadic))
+	g.functionTypes[key] = lowered
+	return lowered, nil
 }
 
 func (g *llvmGenerator) lowerFunctionReturnType(t semantic.Type) (C.LLVMTypeRef, error) {

@@ -744,6 +744,16 @@ func TestParseArgsDefaultsPackedLoweringToCanonicalProfile(t *testing.T) {
 	}
 }
 
+func TestParseArgsAcceptsPackedInspectEmitAlias(t *testing.T) {
+	options, err := parseArgs([]string{"-emit", "packed-info", "fixture.llcontext"})
+	if err != nil {
+		t.Fatalf("parseArgs returned error: %v", err)
+	}
+	if options.emit != emitPacked {
+		t.Fatalf("expected packed emit mode, got %q", options.emit)
+	}
+}
+
 func TestRunCLICompilesJSONParserWithEnumDenseFixedOverrideByDefault(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.llcontext")
@@ -787,6 +797,42 @@ func TestRunCLICompilesJSONParserWithEnumDenseFixedOverrideByDefault(t *testing.
 	} {
 		if strings.Contains(output, bad) {
 			t.Fatalf("expected enum-level dense-fixed lowering default to avoid %q, got:\n%s", bad, output)
+		}
+	}
+}
+
+func TestRunCLIPrintsPackedLoweringSummary(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "packed_info.llcontext")
+	src := "@packed_profile(build_heavy)\npacked enum Expr:\n    common:\n        @storage(side_table)\n        span: i64\n        kind: u32\n    Lit(value: i64)\n    End\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write packed info fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "packed", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"packed lowering",
+		"contract: canonical-compiler-graph",
+		"Expr",
+		"effective abi: index-soa",
+		"profile: build-heavy",
+		"declared abi override: dense-fixed",
+		"declared prefix override: common-only",
+		"side-table common words: 1",
+		"- span: i64 side_table word_offset=0 words=1",
+		"- kind: u32 inline row_field=1",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected packed summary to contain %q, got:\n%s", check, output)
 		}
 	}
 }
