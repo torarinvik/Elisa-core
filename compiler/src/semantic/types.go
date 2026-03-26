@@ -163,12 +163,13 @@ type SViewType struct {
 }
 
 type EnumVariant struct {
-	Name         string
-	Tag          uint32
-	Payload      []Type
-	PayloadNames []string
-	TailIndex    int
-	Decl         *ast.EnumVariantDecl
+	Name           string
+	Tag            uint32
+	Payload        []Type
+	PayloadNames   []string
+	TailIndex      int
+	Decl           *ast.EnumVariantDecl
+	packedViewType *PackedVariantViewType
 }
 
 type PackedEnumStoreType struct {
@@ -1094,6 +1095,17 @@ func (v *EnumVariant) PayloadLabel(index int) string {
 		return ""
 	}
 	return v.PayloadNames[index]
+}
+
+func (v *EnumVariant) PackedViewType(enumType *EnumType) *PackedVariantViewType {
+	if v == nil || enumType == nil {
+		return nil
+	}
+	if v.packedViewType != nil && v.packedViewType.Enum == enumType {
+		return v.packedViewType
+	}
+	v.packedViewType = &PackedVariantViewType{Enum: enumType, Variant: v}
+	return v.packedViewType
 }
 
 func (t *PackedVariantViewType) Field(name string) (Field, bool) {

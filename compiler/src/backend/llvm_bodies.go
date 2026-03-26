@@ -151,8 +151,10 @@ type packedVariantViewBinding struct {
 }
 
 type packedPayloadValueCache struct {
-	name   string
-	value  C.LLVMValueRef
+	name1  string
+	value1 C.LLVMValueRef
+	name2  string
+	value2 C.LLVMValueRef
 	values map[string]C.LLVMValueRef
 }
 

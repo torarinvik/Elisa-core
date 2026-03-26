@@ -1065,7 +1065,12 @@ func (s *functionState) bindPackedEnumStorage(name string, enumType *semantic.En
 }
 
 func clonePackedPayloadValues(values packedPayloadValueCache) packedPayloadValueCache {
-	cloned := packedPayloadValueCache{name: values.name, value: values.value}
+	cloned := packedPayloadValueCache{
+		name1:  values.name1,
+		value1: values.value1,
+		name2:  values.name2,
+		value2: values.value2,
+	}
 	if len(values.values) == 0 {
 		return cloned
 	}
@@ -1085,13 +1090,21 @@ func (c *packedPayloadValueCache) add(name string, value C.LLVMValueRef) {
 	if c == nil || name == "" || value == nil {
 		return
 	}
-	if c.name == "" || c.name == name {
-		c.name = name
-		c.value = value
+	if c.name1 == "" || c.name1 == name {
+		c.name1 = name
+		c.value1 = value
+		return
+	}
+	if c.name2 == "" || c.name2 == name {
+		c.name2 = name
+		c.value2 = value
 		return
 	}
 	if c.values == nil {
-		c.values = map[string]C.LLVMValueRef{c.name: c.value}
+		c.values = map[string]C.LLVMValueRef{
+			c.name1: c.value1,
+			c.name2: c.value2,
+		}
 	}
 	c.values[name] = value
 }
@@ -1100,8 +1113,11 @@ func (c packedPayloadValueCache) lookup(name string) (C.LLVMValueRef, bool) {
 	if name == "" {
 		return nil, false
 	}
-	if c.name == name && c.value != nil {
-		return c.value, true
+	if c.name1 == name && c.value1 != nil {
+		return c.value1, true
+	}
+	if c.name2 == name && c.value2 != nil {
+		return c.value2, true
 	}
 	value, ok := c.values[name]
 	return value, ok && value != nil
@@ -1127,7 +1143,7 @@ func (s *functionState) bindPackedVariantViewInternal(name string, viewType *sem
 		binding.store = store
 	}
 	switch {
-	case payloadValues.name == "" && len(payloadValues.values) == 0:
+	case payloadValues.name1 == "" && payloadValues.name2 == "" && len(payloadValues.values) == 0:
 		binding.payloadValues = packedPayloadValueCache{}
 	case clonePayloads:
 		binding.payloadValues = clonePackedPayloadValues(payloadValues)
@@ -2106,14 +2122,18 @@ func (s *functionState) buildPackedVariantViewValue(viewType *semantic.PackedVar
 }
 
 func (g *llvmGenerator) cachedPackedVariantViewType(enumType *semantic.EnumType, variant *semantic.EnumVariant) *semantic.PackedVariantViewType {
-	if g == nil || enumType == nil || variant == nil {
+	if enumType == nil || variant == nil {
 		return nil
 	}
-	if cached, ok := g.packedViewTypes[variant]; ok && cached != nil {
-		return cached
+	if g != nil && g.packedViewTypes != nil {
+		if cached, ok := g.packedViewTypes[variant]; ok && cached != nil {
+			return cached
+		}
 	}
-	viewType := &semantic.PackedVariantViewType{Enum: enumType, Variant: variant}
-	g.packedViewTypes[variant] = viewType
+	viewType := variant.PackedViewType(enumType)
+	if g != nil && g.packedViewTypes != nil && viewType != nil {
+		g.packedViewTypes[variant] = viewType
+	}
 	return viewType
 }
 
