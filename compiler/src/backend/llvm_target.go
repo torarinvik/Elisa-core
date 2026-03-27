@@ -42,7 +42,6 @@ static char *llcontextRunOptimizationPipeline(
 	if (Options == NULL) {
 		return LLVMGetErrorMessage(LLVMCreateStringError("failed to create LLVM pass builder options"));
 	}
-	LLVMPassBuilderOptionsSetVerifyEach(Options, 1);
 	LLVMPassBuilderOptionsSetLoopInterleaving(Options, 1);
 	LLVMPassBuilderOptionsSetLoopVectorization(Options, 1);
 	LLVMPassBuilderOptionsSetSLPVectorization(Options, 1);

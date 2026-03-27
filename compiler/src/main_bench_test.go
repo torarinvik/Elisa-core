@@ -27,7 +27,7 @@ func repoRootFromMainBench(b *testing.B) string {
 	return filepath.Join(filepath.Dir(thisFile), "..", "..")
 }
 
-func benchmarkCLICompileToLLVM(b *testing.B, sourcePath string) {
+func benchmarkCLICompileToLLVM(b *testing.B, sourcePath string, extraArgs ...string) {
 	b.Helper()
 
 	expandedSource, err := readSourceWithIncludes(sourcePath, map[string]bool{})
@@ -38,7 +38,8 @@ func benchmarkCLICompileToLLVM(b *testing.B, sourcePath string) {
 		b.Fatalf("expected benchmark source %s to contain input", sourcePath)
 	}
 
-	args := []string{"-emit", "llvm", sourcePath}
+	args := append([]string{"-emit", "llvm"}, extraArgs...)
+	args = append(args, sourcePath)
 	var stderr bytes.Buffer
 
 	b.SetBytes(int64(len(expandedSource)))
@@ -285,6 +286,24 @@ func BenchmarkRunCLICompileJSONParserFixtureToLLVM(b *testing.B) {
 		b.Fatalf("failed to stat %s: %v", sourcePath, err)
 	}
 	benchmarkCLICompileToLLVM(b, sourcePath)
+}
+
+func BenchmarkRunCLICompileFrontendLexerFixtureToLLVM(b *testing.B) {
+	repoRoot := repoRootFromMainBench(b)
+	sourcePath := filepath.Join(repoRoot, "Code", "test_programs", "frontend_lexer.llcontext")
+	if _, err := os.Stat(sourcePath); err != nil {
+		b.Fatalf("failed to stat %s: %v", sourcePath, err)
+	}
+	benchmarkCLICompileToLLVM(b, sourcePath)
+}
+
+func BenchmarkRunCLICompileFrontendLexerFixtureToLLVMO3(b *testing.B) {
+	repoRoot := repoRootFromMainBench(b)
+	sourcePath := filepath.Join(repoRoot, "Code", "test_programs", "frontend_lexer.llcontext")
+	if _, err := os.Stat(sourcePath); err != nil {
+		b.Fatalf("failed to stat %s: %v", sourcePath, err)
+	}
+	benchmarkCLICompileToLLVM(b, sourcePath, "-O3")
 }
 
 func BenchmarkRunCLICompilePackedMegaASTToLLVM(b *testing.B) {
