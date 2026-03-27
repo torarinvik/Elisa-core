@@ -5887,7 +5887,7 @@ func (a *Analyzer) recordResolvedRegionRefBinding(sym *Symbol, state regionRefSt
 	}
 	state, _ = a.resolvePackedStoreDependenciesInState(state)
 	state = withPackedStoreProvenanceSummary(state)
-	a.currentRegionRefs[sym] = cloneRegionRefState(state)
+	a.currentRegionRefs[sym] = cloneRegionRefStateSharedFields(state)
 }
 
 func (a *Analyzer) recordRegionRefAssignment(target ast.Expr, value ast.Expr) {

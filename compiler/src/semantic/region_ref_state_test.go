@@ -359,3 +359,37 @@ func TestInstantiateReturnProvenanceKeepsOverlayMutationLocal(t *testing.T) {
 		t.Fatalf("expected instantiated overlay field map to gain the inserted field")
 	}
 }
+
+func TestRecordResolvedRegionRefBindingKeepsNestedFieldMutationLocal(t *testing.T) {
+	src := &Symbol{Name: "src", Kind: SymbolLocal}
+	dst := &Symbol{Name: "dst", Kind: SymbolLocal}
+	scope := NewScope(nil)
+	scope.Define(src)
+	scope.Define(dst)
+
+	a := &Analyzer{
+		currentScope: scope,
+		currentRegionRefs: map[*Symbol]regionRefState{
+			src: {
+				Fields: map[string]regionRefState{
+					"left": {
+						ParamDeps: map[int]bool{0: true},
+					},
+				},
+			},
+		},
+	}
+
+	a.recordResolvedRegionRefBinding(dst, a.currentRegionRefs[src])
+	updated := assignRegionRefStateAtPath(a.currentRegionRefs[dst], []borrowReturnAnnotationStep{{Field: "right"}}, regionRefState{
+		ParamDeps: map[int]bool{1: true},
+	})
+	a.currentRegionRefs[dst] = updated
+
+	if _, ok := a.currentRegionRefs[src].Fields["right"]; ok {
+		t.Fatalf("expected source binding field map to remain unchanged")
+	}
+	if _, ok := a.currentRegionRefs[dst].Fields["right"]; !ok {
+		t.Fatalf("expected rebound field map to gain the inserted field")
+	}
+}
