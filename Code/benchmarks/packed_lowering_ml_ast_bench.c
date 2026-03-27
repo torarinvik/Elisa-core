@@ -41,9 +41,7 @@ int main(int argc, char **argv) {
 
     int64_t total_checksum = 0;
     if (strcmp(mode, "scalar") == 0) {
-        for (int i = 0; i < iterations; i++) {
-            total_checksum += packed_ml_ast_checksum();
-        }
+        total_checksum = packed_ml_ast_repeated_checksum((uintptr_t)iterations);
     } else if (strcmp(mode, "parallel") == 0) {
         if ((int64_t)workers > packed_ml_ast_parallel_max_workers()) {
             fprintf(stderr, "workers must be <= %" PRId64 "\n", packed_ml_ast_parallel_max_workers());
