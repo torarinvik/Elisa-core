@@ -246,3 +246,34 @@ func TestCloneRegionRefStatesKeepsStoreRemapLocal(t *testing.T) {
 		t.Fatalf("expected cloned store dependency to use the remapped store type")
 	}
 }
+
+func TestMergeFlatRegionRefStatesKeepsDependencyInvalidationLocal(t *testing.T) {
+	region := &Symbol{Name: "scratch", Kind: SymbolRegion}
+	left := regionRefState{
+		Deps: map[*Symbol]regionDependencyState{
+			region: {Generation: 1, Valid: true},
+		},
+	}
+	right := regionRefState{
+		ParamDeps: map[int]bool{0: true},
+	}
+
+	merged, ok := mergeFlatRegionRefStates(left, right)
+	if !ok {
+		t.Fatalf("expected mergeFlatRegionRefStates to merge flat provenance states")
+	}
+	updated, changed := invalidateRegionDependencyInState(merged, region, nil, "test")
+	if !changed {
+		t.Fatalf("expected invalidateRegionDependencyInState to report a change")
+	}
+
+	if dep := left.Deps[region]; !dep.Valid {
+		t.Fatalf("expected original flat dependency to remain valid")
+	}
+	if dep := updated.Deps[region]; dep.Valid {
+		t.Fatalf("expected merged flat dependency to be invalidated")
+	}
+	if !updated.ParamDeps[0] {
+		t.Fatalf("expected merged flat state to keep parameter provenance")
+	}
+}

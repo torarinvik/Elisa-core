@@ -3238,7 +3238,7 @@ func mergeRegionRefStates(states ...regionRefState) (regionRefState, bool) {
 			}
 			for name, fieldState := range state.Fields {
 				if existing, ok := merged.Fields[name]; ok {
-					if next, ok := mergeRegionRefStates(existing, fieldState); ok {
+					if next, ok := mergeFlatRegionRefStates(existing, fieldState); ok {
 						merged.Fields[name] = next
 					} else {
 						delete(merged.Fields, name)
@@ -3251,6 +3251,71 @@ func mergeRegionRefStates(states ...regionRefState) (regionRefState, bool) {
 	}
 	if !hasRegionProvenance(merged) {
 		return regionRefState{}, false
+	}
+	return merged, true
+}
+
+func mergeFlatRegionRefStates(left regionRefState, right regionRefState) (regionRefState, bool) {
+	if len(left.Fields) != 0 || len(right.Fields) != 0 {
+		return mergeRegionRefStates(left, right)
+	}
+	if !hasRegionProvenance(left) {
+		if !hasRegionProvenance(right) {
+			return regionRefState{}, false
+		}
+		return cloneRegionRefStateSharedFields(right), true
+	}
+	if !hasRegionProvenance(right) {
+		return cloneRegionRefStateSharedFields(left), true
+	}
+
+	merged := regionRefState{PackedStoreSummaryKnown: true}
+	mergePackedStoreProvenanceInto(&merged.PackedStoreSummary, summarizePackedStoreProvenance(left))
+	mergePackedStoreProvenanceInto(&merged.PackedStoreSummary, summarizePackedStoreProvenance(right))
+
+	if len(left.Deps) != 0 || len(right.Deps) != 0 {
+		merged.Deps = map[*Symbol]regionDependencyState{}
+		for region, dep := range left.Deps {
+			merged.Deps[region] = dep
+		}
+		for region, dep := range right.Deps {
+			existing, ok := merged.Deps[region]
+			if !ok {
+				merged.Deps[region] = dep
+				continue
+			}
+			if !existing.Valid {
+				if !dep.Valid && dep.Generation > existing.Generation {
+					merged.Deps[region] = dep
+				}
+				continue
+			}
+			if !dep.Valid {
+				merged.Deps[region] = dep
+				continue
+			}
+			if dep.Generation > existing.Generation {
+				merged.Deps[region] = dep
+			}
+		}
+	}
+	if len(left.StoreDeps) != 0 || len(right.StoreDeps) != 0 {
+		merged.StoreDeps = map[*Symbol]packedStoreDependencyState{}
+		for store, dep := range left.StoreDeps {
+			merged.StoreDeps[store] = dep
+		}
+		for store, dep := range right.StoreDeps {
+			merged.StoreDeps[store] = dep
+		}
+	}
+	if len(left.ParamDeps) != 0 || len(right.ParamDeps) != 0 {
+		merged.ParamDeps = map[int]bool{}
+		for index, dep := range left.ParamDeps {
+			merged.ParamDeps[index] = dep
+		}
+		for index, dep := range right.ParamDeps {
+			merged.ParamDeps[index] = dep
+		}
 	}
 	return merged, true
 }
