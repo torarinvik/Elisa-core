@@ -150,3 +150,31 @@ func TestRegionRefStateForExprAppliesPackedStoreRemapLazily(t *testing.T) {
 		t.Fatalf("expected canonicalized state to depend only on frozen packed stores")
 	}
 }
+
+func TestCloneRegionRefStatesKeepsFieldInsertionLocal(t *testing.T) {
+	value := &Symbol{Name: "value", Kind: SymbolLocal}
+	a := &Analyzer{
+		currentRegionRefs: map[*Symbol]regionRefState{
+			value: {
+				Fields: map[string]regionRefState{
+					"left": {
+						ParamDeps: map[int]bool{0: true},
+					},
+				},
+			},
+		},
+	}
+
+	cloned := a.cloneRegionRefStates()
+	updated := assignRegionRefStateAtPath(cloned[value], []borrowReturnAnnotationStep{{Field: "right"}}, regionRefState{
+		ParamDeps: map[int]bool{1: true},
+	})
+	cloned[value] = updated
+
+	if _, ok := a.currentRegionRefs[value].Fields["right"]; ok {
+		t.Fatalf("expected original region ref state field map to remain unchanged")
+	}
+	if _, ok := cloned[value].Fields["right"]; !ok {
+		t.Fatalf("expected cloned region ref state field map to gain the inserted field")
+	}
+}

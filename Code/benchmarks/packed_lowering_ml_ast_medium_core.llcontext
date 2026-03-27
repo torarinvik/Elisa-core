@@ -1,0 +1,548 @@
+# include "../llcontext_std/contextlang_runtime.llcontext"
+
+const ML_AST_PARALLEL_MAX_WORKERS = 128u
+const ML_AST_FOREST_ROUNDS = 6u
+
+@packed_profile(retained_reads)
+packed enum TypeExpr:
+    common:
+        span: i64
+        weight: i64
+    Var(symbol: i64)
+    Tuple(left: TypeExpr, right: TypeExpr)
+    Arrow(param: TypeExpr, result: TypeExpr)
+    Effect(label: i64, carrier: TypeExpr)
+    Record(label: i64, field_ty: TypeExpr, rest: TypeExpr)
+    App(callee: TypeExpr, arg: TypeExpr)
+
+@packed_profile(retained_reads)
+packed enum Pattern:
+    common:
+        span: i64
+        weight: i64
+    Wildcard
+    Bind(symbol: i64, ann: TypeExpr)
+    Alias(alias_symbol: i64, inner: Pattern)
+    Tuple(left: Pattern, right: Pattern)
+    Ctor(label: i64, arg: Pattern, ann: TypeExpr)
+    LiteralInt(value: i64)
+    LiteralBool(value: bool)
+    ListNil
+    ListCons(head: Pattern, rest: Pattern)
+    Or(left: Pattern, right: Pattern)
+    Guarded(inner: Pattern, guard: Expr)
+
+@packed_profile(retained_reads)
+packed enum Expr:
+    common:
+        span: i64
+        cost: i64
+    LiteralInt(value: i64)
+    LiteralBool(value: bool)
+    Name(symbol: i64, ty: TypeExpr)
+    Lambda(param: Pattern, body: Expr, ty: TypeExpr)
+    Apply(callee: Expr, arg: Expr, ty: TypeExpr)
+    Let(pattern: Pattern, value: Expr, body: Expr, ty: TypeExpr)
+    Match(scrutinee: Expr, clauses: Clause, ty: TypeExpr)
+    Ctor(label: i64, arg: Expr, ty: TypeExpr)
+    Record(label: i64, field_value: Expr, rest: Expr, ty: TypeExpr)
+    Project(base: Expr, label: i64, ty: TypeExpr)
+    If(cond: Expr, then_branch: Expr, else_branch: Expr, ty: TypeExpr)
+
+@packed_profile(retained_reads)
+packed enum Clause:
+    common:
+        span: i64
+        weight: i64
+    Terminal(pattern: Pattern, body: Expr)
+    Chain(pattern: Pattern, body: Expr, next: Clause)
+    Guarded(pattern: Pattern, guard: Expr, body: Expr, next: Clause)
+
+@packed_profile(retained_reads)
+packed enum Stmt:
+    common:
+        span: i64
+        effect: i64
+    Let(pattern: Pattern, ann: TypeExpr, value: Expr, next: Stmt)
+    Match(scrutinee: Expr, clauses: Clause, next: Stmt)
+    Block(first: Stmt, second: Stmt, result_expr: Expr)
+    Return(value: Expr)
+
+@packed_profile(retained_reads)
+packed enum Decl:
+    common:
+        span: i64
+        phase: i64
+    Function(name: i64, param: Pattern, signature: TypeExpr, body: Stmt)
+    TypeAlias(name: i64, target: TypeExpr)
+    Value(name: i64, pattern: Pattern, value: Expr)
+    Data(name: i64, payload: TypeExpr, ctor_pattern: Pattern)
+    Script(name: i64, body: Stmt, result: Expr)
+    Group(left: Decl, right: Decl)
+
+@packed_profile(retained_reads)
+packed enum Module:
+    common:
+        span: i64
+        weight: i64
+    Unit(name: i64, primary: Decl, bootstrap: Stmt, summary: Expr)
+    Nested(name: i64, primary: Decl, fallback: Decl, script: Stmt, summary: Expr)
+    Bundle(left: Module, right: Module)
+
+@packed_profile(retained_reads)
+packed enum Root:
+    common:
+        span: i64
+        phase: i64
+    ModuleRoot(module: Module, witness: Pattern)
+    Script(script: Stmt, result: Expr, witness: Pattern)
+    Eval(module: Module, expr: Expr, witness: Pattern)
+
+struct FrozenMlAstForest:
+    types: TypeExpr.Store[Frozen]
+    patterns: Pattern.Store[Frozen]
+    exprs: Expr.Store[Frozen]
+    clauses: Clause.Store[Frozen]
+    stmts: Stmt.Store[Frozen]
+    decls: Decl.Store[Frozen]
+    modules: Module.Store[Frozen]
+    roots: Root.Store[Frozen]
+
+struct MlAstParallelJob:
+    forest_bits: uintptr
+    start: usize
+    end: usize
+    repeats: usize
+    result_bits: uintptr
+
+def bool_score(value: bool, when_true: i64, when_false: i64) -> i64:
+    if value:
+        return when_true
+    return when_false
+
+def score_type(node: TypeExpr, forest: any FrozenMlAstForest&) -> i64:
+    return match node in forest.types:
+        TypeExpr.Record(label: label, field_ty: TypeExpr.Tuple(left: left, right: right), rest: rest):
+            node.span + node.weight + label + score_type(left, forest) + score_type(right, forest) + score_type(rest, forest) + 17
+        TypeExpr.App(callee: TypeExpr.Arrow(param: param, result: result), arg: arg):
+            node.span + node.weight + score_type(param, forest) + score_type(result, forest) + score_type(arg, forest) + 23
+        TypeExpr.Var(symbol: symbol):
+            node.span + node.weight + symbol + node.span + 3
+        TypeExpr.Tuple(left: left, right: right):
+            node.span + node.weight + score_type(left, forest) + score_type(right, forest) + 5
+        TypeExpr.Arrow(param: param, result: result):
+            node.span + node.weight + score_type(param, forest) + score_type(result, forest) + 7
+        TypeExpr.Effect(label: label, carrier: carrier):
+            node.span + node.weight + label + score_type(carrier, forest) + 11
+        TypeExpr.Record(label: label, field_ty: field_ty, rest: rest):
+            node.span + node.weight + label + score_type(field_ty, forest) + score_type(rest, forest) + 13
+        TypeExpr.App(callee: callee, arg: arg):
+            node.span + node.weight + score_type(callee, forest) + score_type(arg, forest) + 19
+
+def score_pattern(node: Pattern, forest: any FrozenMlAstForest&) -> i64:
+    return match node in forest.patterns:
+        Pattern.Wildcard:
+            node.span + node.weight + 43
+        Pattern.Bind(symbol: symbol, ann: ann):
+            node.span + node.weight + symbol + score_type(ann, forest) + 47
+        Pattern.Alias(alias_symbol: alias_symbol, inner: inner):
+            node.span + node.weight + alias_symbol + score_pattern(inner, forest) + 53
+        Pattern.Tuple(left: left, right: right):
+            node.span + node.weight + score_pattern(left, forest) + score_pattern(right, forest) + 59
+        Pattern.Ctor(label: label, arg: arg, ann: ann):
+            node.span + node.weight + label + score_pattern(arg, forest) + score_type(ann, forest) + 61
+        Pattern.LiteralInt(value: value):
+            node.span + node.weight + value + 67
+        Pattern.LiteralBool(value: value):
+            node.span + node.weight + bool_score(value, 71, 73)
+        Pattern.ListNil:
+            node.span + node.weight + 79
+        Pattern.ListCons(head: head, rest: rest):
+            node.span + node.weight + score_pattern(head, forest) + score_pattern(rest, forest) + 83
+        Pattern.Or(left: left, right: right):
+            node.span + node.weight + score_pattern(left, forest) + score_pattern(right, forest) + 89
+        Pattern.Guarded(inner: inner, guard: guard):
+            node.span + node.weight + score_pattern(inner, forest) + score_expr(guard, forest) + 97
+
+def score_expr(node: Expr, forest: any FrozenMlAstForest&) -> i64:
+    return match node in forest.exprs:
+        Expr.LiteralInt(value: value):
+            node.span + node.cost + value + 131
+        Expr.LiteralBool(value: value):
+            node.span + node.cost + bool_score(value, 137, 139)
+        Expr.Name(symbol: symbol, ty: ty):
+            node.span + node.cost + symbol + score_type(ty, forest) + 149
+        Expr.Lambda(param: param, body: body, ty: ty):
+            node.span + node.cost + score_pattern(param, forest) + score_expr(body, forest) + score_type(ty, forest) + 151
+        Expr.Apply(callee: callee, arg: arg, ty: ty):
+            node.span + node.cost + score_expr(callee, forest) + score_expr(arg, forest) + score_type(ty, forest) + 157
+        Expr.Let(pattern: pattern, value: value, body: body, ty: ty):
+            node.span + node.cost + score_pattern(pattern, forest) + score_expr(value, forest) + score_expr(body, forest) + score_type(ty, forest) + 163
+        Expr.Match(scrutinee: scrutinee, clauses: clauses, ty: ty):
+            node.span + node.cost + score_expr(scrutinee, forest) + score_clause(clauses, forest) + score_type(ty, forest) + 167
+        Expr.Ctor(label: label, arg: arg, ty: ty):
+            node.span + node.cost + label + score_expr(arg, forest) + score_type(ty, forest) + 173
+        Expr.Record(label: label, field_value: field_value, rest: rest, ty: ty):
+            node.span + node.cost + label + score_expr(field_value, forest) + score_expr(rest, forest) + score_type(ty, forest) + 179
+        Expr.Project(base: base, label: label, ty: ty):
+            node.span + node.cost + score_expr(base, forest) + label + score_type(ty, forest) + 181
+        Expr.If(cond: cond, then_branch: then_branch, else_branch: else_branch, ty: ty):
+            node.span + node.cost + score_expr(cond, forest) + score_expr(then_branch, forest) + score_expr(else_branch, forest) + score_type(ty, forest) + 191
+
+def score_clause(node: Clause, forest: any FrozenMlAstForest&) -> i64:
+    return match node in forest.clauses:
+        Clause.Terminal(pattern: pattern, body: body):
+            node.span + node.weight + score_pattern(pattern, forest) + score_expr(body, forest) + 211
+        Clause.Chain(pattern: pattern, body: body, next: next):
+            node.span + node.weight + score_pattern(pattern, forest) + score_expr(body, forest) + score_clause(next, forest) + 223
+        Clause.Guarded(pattern: pattern, guard: guard, body: body, next: next):
+            node.span + node.weight + score_pattern(pattern, forest) + score_expr(guard, forest) + score_expr(body, forest) + score_clause(next, forest) + 227
+
+def score_stmt(node: Stmt, forest: any FrozenMlAstForest&) -> i64:
+    return match node in forest.stmts:
+        Stmt.Let(pattern: pattern, ann: ann, value: value, next: next):
+            node.span + node.effect + score_pattern(pattern, forest) + score_type(ann, forest) + score_expr(value, forest) + score_stmt(next, forest) + 239
+        Stmt.Match(scrutinee: scrutinee, clauses: clauses, next: next):
+            node.span + node.effect + score_expr(scrutinee, forest) + score_clause(clauses, forest) + score_stmt(next, forest) + 241
+        Stmt.Block(first: first, second: second, result_expr: result_expr):
+            node.span + node.effect + score_stmt(first, forest) + score_stmt(second, forest) + score_expr(result_expr, forest) + 251
+        Stmt.Return(value: value):
+            node.span + node.effect + score_expr(value, forest) + 257
+
+def score_decl(node: Decl, forest: any FrozenMlAstForest&) -> i64:
+    return match node in forest.decls:
+        Decl.Function(name: name, param: param, signature: signature, body: body):
+            node.span + node.phase + name + score_pattern(param, forest) + score_type(signature, forest) + score_stmt(body, forest) + 277
+        Decl.TypeAlias(name: name, target: target):
+            node.span + node.phase + name + score_type(target, forest) + 281
+        Decl.Value(name: name, pattern: pattern, value: value):
+            node.span + node.phase + name + score_pattern(pattern, forest) + score_expr(value, forest) + 283
+        Decl.Data(name: name, payload: payload, ctor_pattern: ctor_pattern):
+            node.span + node.phase + name + score_type(payload, forest) + score_pattern(ctor_pattern, forest) + 293
+        Decl.Script(name: name, body: body, result: result):
+            node.span + node.phase + name + score_stmt(body, forest) + score_expr(result, forest) + 307
+        Decl.Group(left: left, right: right):
+            node.span + node.phase + score_decl(left, forest) + score_decl(right, forest) + 311
+
+def score_module(node: Module, forest: any FrozenMlAstForest&) -> i64:
+    return match node in forest.modules:
+        Module.Unit(name: name, primary: primary, bootstrap: bootstrap, summary: summary):
+            node.span + node.weight + name + score_decl(primary, forest) + score_stmt(bootstrap, forest) + score_expr(summary, forest) + 331
+        Module.Nested(name: name, primary: primary, fallback: fallback, script: script, summary: summary):
+            node.span + node.weight + name + score_decl(primary, forest) + score_decl(fallback, forest) + score_stmt(script, forest) + score_expr(summary, forest) + 337
+        Module.Bundle(left: left, right: right):
+            node.span + node.weight + score_module(left, forest) + score_module(right, forest) + 347
+
+def score_root(node: Root, forest: any FrozenMlAstForest&) -> i64:
+    return match node in forest.roots:
+        Root.ModuleRoot(module: module, witness: witness):
+            node.span + node.phase + score_module(module, forest) + score_pattern(witness, forest) + 359
+        Root.Script(script: script, result: result, witness: witness):
+            node.span + node.phase + score_stmt(script, forest) + score_expr(result, forest) + score_pattern(witness, forest) + 367
+        Root.Eval(module: module, expr: expr, witness: witness):
+            node.span + node.phase + score_module(module, forest) + score_expr(expr, forest) + score_pattern(witness, forest) + 373
+
+def checksum_root_range(start: usize, end: usize, forest: any FrozenMlAstForest&) -> i64:
+    total: mutable i64 = 0
+    i: mutable usize = start
+    while i < end:
+        total <- total + score_root(forest.roots[i], forest)
+        i <- i + 1u
+    return total
+
+def build_seed_type(seed: usize, current: TypeExpr, previous: TypeExpr, store: TypeExpr.Store[Local]) -> TypeExpr:
+    seed_i64: i64 = seed.i64()
+    if seed % 4u == 0u:
+        pair: TypeExpr = new[store] TypeExpr.Tuple(span: 100 + seed_i64, weight: 7 + seed_i64, left: current, right: previous)
+        return new[store] TypeExpr.Record(span: 101 + seed_i64, weight: 11 + seed_i64, label: 400 + seed_i64, field_ty: pair, rest: current)
+    if seed % 4u == 1u:
+        arrow: TypeExpr = new[store] TypeExpr.Arrow(span: 102 + seed_i64, weight: 13 + seed_i64, param: previous, result: current)
+        return new[store] TypeExpr.App(span: 103 + seed_i64, weight: 17 + seed_i64, callee: arrow, arg: current)
+    if seed % 4u == 2u:
+        row: TypeExpr = new[store] TypeExpr.Record(span: 104 + seed_i64, weight: 19 + seed_i64, label: 500 + seed_i64, field_ty: previous, rest: current)
+        return new[store] TypeExpr.Effect(span: 105 + seed_i64, weight: 23 + seed_i64, label: 600 + seed_i64, carrier: row)
+    return new[store] TypeExpr.Tuple(span: 106 + seed_i64, weight: 29 + seed_i64, left: current, right: previous)
+
+def build_seed_pattern(seed: usize, current: Pattern, previous: Pattern, guard: Expr, ann: TypeExpr, store: Pattern.Store[Local]) -> Pattern:
+    seed_i64: i64 = seed.i64()
+    if seed % 5u == 0u:
+        binding: Pattern = new[store] Pattern.Bind(span: 200 + seed_i64, weight: 3 + seed_i64, symbol: 1000 + seed_i64, ann: ann)
+        return new[store] Pattern.Alias(span: 201 + seed_i64, weight: 5 + seed_i64, alias_symbol: 1100 + seed_i64, inner: binding)
+    if seed % 5u == 1u:
+        wildcard: Pattern = new[store] Pattern.Wildcard(span: 202 + seed_i64, weight: 7 + seed_i64)
+        return new[store] Pattern.Tuple(span: 203 + seed_i64, weight: 11 + seed_i64, left: wildcard, right: current)
+    if seed % 5u == 2u:
+        nil_pat: Pattern = new[store] Pattern.ListNil(span: 204 + seed_i64, weight: 13 + seed_i64)
+        cons: Pattern = new[store] Pattern.ListCons(span: 205 + seed_i64, weight: 17 + seed_i64, head: current, rest: nil_pat)
+        return new[store] Pattern.Ctor(span: 206 + seed_i64, weight: 19 + seed_i64, label: 1200 + seed_i64, arg: cons, ann: ann)
+    if seed % 5u == 3u:
+        lit_bool: Pattern = new[store] Pattern.LiteralBool(span: 207 + seed_i64, weight: 23 + seed_i64, value: seed % 2u == 0u)
+        return new[store] Pattern.Or(span: 208 + seed_i64, weight: 29 + seed_i64, left: current, right: lit_bool)
+    alias_inner: Pattern = new[store] Pattern.Alias(span: 209 + seed_i64, weight: 31 + seed_i64, alias_symbol: 1300 + seed_i64, inner: previous)
+    return new[store] Pattern.Guarded(span: 210 + seed_i64, weight: 37 + seed_i64, inner: alias_inner, guard: guard)
+
+def build_seed_clause(seed: usize, pattern: Pattern, body: Expr, alternative: Expr, current: Clause, store: Clause.Store[Local]) -> Clause:
+    seed_i64: i64 = seed.i64()
+    if seed % 3u == 0u:
+        return new[store] Clause.Terminal(span: 300 + seed_i64, weight: 5 + seed_i64, pattern: pattern, body: body)
+    if seed % 3u == 1u:
+        return new[store] Clause.Guarded(span: 301 + seed_i64, weight: 7 + seed_i64, pattern: pattern, guard: body, body: alternative, next: current)
+    return new[store] Clause.Chain(span: 302 + seed_i64, weight: 11 + seed_i64, pattern: pattern, body: body, next: current)
+
+def build_seed_expr(seed: usize, pattern: Pattern, current: Expr, alternative: Expr, clause: Clause, ty: TypeExpr, store: Expr.Store[Local]) -> Expr:
+    seed_i64: i64 = seed.i64()
+    if seed % 8u == 0u:
+        return new[store] Expr.Lambda(span: 400 + seed_i64, cost: 3 + seed_i64, param: pattern, body: current, ty: ty)
+    if seed % 8u == 1u:
+        lambda_expr: Expr = new[store] Expr.Lambda(span: 401 + seed_i64, cost: 5 + seed_i64, param: pattern, body: current, ty: ty)
+        return new[store] Expr.Apply(span: 402 + seed_i64, cost: 7 + seed_i64, callee: lambda_expr, arg: alternative, ty: ty)
+    if seed % 8u == 2u:
+        return new[store] Expr.Let(span: 403 + seed_i64, cost: 11 + seed_i64, pattern: pattern, value: alternative, body: current, ty: ty)
+    if seed % 8u == 3u:
+        return new[store] Expr.Match(span: 404 + seed_i64, cost: 13 + seed_i64, scrutinee: current, clauses: clause, ty: ty)
+    if seed % 8u == 4u:
+        return new[store] Expr.Ctor(span: 405 + seed_i64, cost: 17 + seed_i64, label: 1400 + seed_i64, arg: current, ty: ty)
+    if seed % 8u == 5u:
+        return new[store] Expr.Record(span: 406 + seed_i64, cost: 19 + seed_i64, label: 1500 + seed_i64, field_value: current, rest: alternative, ty: ty)
+    if seed % 8u == 6u:
+        record_expr: Expr = new[store] Expr.Record(span: 407 + seed_i64, cost: 23 + seed_i64, label: 1600 + seed_i64, field_value: current, rest: alternative, ty: ty)
+        return new[store] Expr.Project(span: 408 + seed_i64, cost: 29 + seed_i64, base: record_expr, label: 1700 + seed_i64, ty: ty)
+    cond_expr: Expr = new[store] Expr.LiteralBool(span: 409 + seed_i64, cost: 31 + seed_i64, value: seed % 2u == 0u)
+    return new[store] Expr.If(span: 410 + seed_i64, cost: 37 + seed_i64, cond: cond_expr, then_branch: current, else_branch: alternative, ty: ty)
+
+def build_seed_stmt(seed: usize, pattern: Pattern, value: Expr, alternative: Expr, clause: Clause, current: Stmt, ann: TypeExpr, store: Stmt.Store[Local]) -> Stmt:
+    seed_i64: i64 = seed.i64()
+    if seed % 4u == 0u:
+        return new[store] Stmt.Let(span: 500 + seed_i64, effect: 3 + seed_i64, pattern: pattern, ann: ann, value: value, next: current)
+    if seed % 4u == 1u:
+        return new[store] Stmt.Match(span: 501 + seed_i64, effect: 5 + seed_i64, scrutinee: value, clauses: clause, next: current)
+    if seed % 4u == 2u:
+        trailing_stmt: Stmt = new[store] Stmt.Return(span: 502 + seed_i64, effect: 7 + seed_i64, value: alternative)
+        return new[store] Stmt.Block(span: 503 + seed_i64, effect: 11 + seed_i64, first: current, second: trailing_stmt, result_expr: value)
+    return new[store] Stmt.Return(span: 504 + seed_i64, effect: 13 + seed_i64, value: value)
+
+def build_seed_decl(seed: usize, pattern: Pattern, value: Expr, stmt: Stmt, ann: TypeExpr, current: Decl, store: Decl.Store[Local]) -> Decl:
+    seed_i64: i64 = seed.i64()
+    if seed % 6u == 0u:
+        return new[store] Decl.Function(span: 600 + seed_i64, phase: 3 + seed_i64, name: 1800 + seed_i64, param: pattern, signature: ann, body: stmt)
+    if seed % 6u == 1u:
+        return new[store] Decl.TypeAlias(span: 601 + seed_i64, phase: 5 + seed_i64, name: 1900 + seed_i64, target: ann)
+    if seed % 6u == 2u:
+        return new[store] Decl.Value(span: 602 + seed_i64, phase: 7 + seed_i64, name: 2000 + seed_i64, pattern: pattern, value: value)
+    if seed % 6u == 3u:
+        return new[store] Decl.Data(span: 603 + seed_i64, phase: 11 + seed_i64, name: 2100 + seed_i64, payload: ann, ctor_pattern: pattern)
+    if seed % 6u == 4u:
+        return new[store] Decl.Script(span: 604 + seed_i64, phase: 13 + seed_i64, name: 2200 + seed_i64, body: stmt, result: value)
+    side_decl: Decl = new[store] Decl.Value(span: 605 + seed_i64, phase: 17 + seed_i64, name: 2300 + seed_i64, pattern: pattern, value: value)
+    return new[store] Decl.Group(span: 606 + seed_i64, phase: 19 + seed_i64, left: current, right: side_decl)
+
+def build_seed_module(seed: usize, primary: Decl, fallback: Decl, script: Stmt, summary: Expr, current: Module, store: Module.Store[Local]) -> Module:
+    seed_i64: i64 = seed.i64()
+    if seed % 3u == 0u:
+        return new[store] Module.Unit(span: 700 + seed_i64, weight: 3 + seed_i64, name: 2400 + seed_i64, primary: primary, bootstrap: script, summary: summary)
+    if seed % 3u == 1u:
+        return new[store] Module.Nested(span: 701 + seed_i64, weight: 5 + seed_i64, name: 2500 + seed_i64, primary: primary, fallback: fallback, script: script, summary: summary)
+    side_module: Module = new[store] Module.Unit(span: 702 + seed_i64, weight: 7 + seed_i64, name: 2600 + seed_i64, primary: primary, bootstrap: script, summary: summary)
+    return new[store] Module.Bundle(span: 703 + seed_i64, weight: 11 + seed_i64, left: current, right: side_module)
+
+def build_seed_root(seed: usize, module: Module, expr: Expr, stmt: Stmt, witness: Pattern, store: Root.Store[Local]) -> Root:
+    seed_i64: i64 = seed.i64()
+    if seed % 3u == 0u:
+        return new[store] Root.ModuleRoot(span: 800 + seed_i64, phase: 3 + seed_i64, module: module, witness: witness)
+    if seed % 3u == 1u:
+        return new[store] Root.Script(span: 801 + seed_i64, phase: 5 + seed_i64, script: stmt, result: expr, witness: witness)
+    return new[store] Root.Eval(span: 802 + seed_i64, phase: 7 + seed_i64, module: module, expr: expr, witness: witness)
+
+def build_ml_ast_forest(
+    type_store: TypeExpr.Store[Local],
+    pattern_store: Pattern.Store[Local],
+    expr_store: Expr.Store[Local],
+    clause_store: Clause.Store[Local],
+    stmt_store: Stmt.Store[Local],
+    decl_store: Decl.Store[Local],
+    module_store: Module.Store[Local],
+    root_store: Root.Store[Local]
+) -> FrozenMlAstForest:
+    node_ty: TypeExpr = new[type_store] TypeExpr.Var(span: 1, weight: 1, symbol: 11)
+    int_ty: TypeExpr = new[type_store] TypeExpr.Var(span: 2, weight: 1, symbol: 12)
+    bool_ty: TypeExpr = new[type_store] TypeExpr.Var(span: 3, weight: 1, symbol: 13)
+    pair_ty: TypeExpr = new[type_store] TypeExpr.Tuple(span: 4, weight: 2, left: int_ty, right: bool_ty)
+    list_ty: TypeExpr = new[type_store] TypeExpr.App(span: 5, weight: 3, callee: node_ty, arg: pair_ty)
+    effect_ty: TypeExpr = new[type_store] TypeExpr.Effect(span: 6, weight: 5, label: 91, carrier: list_ty)
+    parser_ty: TypeExpr = new[type_store] TypeExpr.Arrow(span: 7, weight: 7, param: effect_ty, result: node_ty)
+    record_ty: TypeExpr = new[type_store] TypeExpr.Record(span: 8, weight: 11, label: 92, field_ty: parser_ty, rest: pair_ty)
+
+    wildcard_pat: Pattern = new[pattern_store] Pattern.Wildcard(span: 9, weight: 1)
+    bind_pat: Pattern = new[pattern_store] Pattern.Bind(span: 10, weight: 2, symbol: 31, ann: int_ty)
+    int_pat: Pattern = new[pattern_store] Pattern.LiteralInt(span: 11, weight: 3, value: 5)
+    bool_pat: Pattern = new[pattern_store] Pattern.LiteralBool(span: 12, weight: 4, value: true)
+    nil_pat: Pattern = new[pattern_store] Pattern.ListNil(span: 13, weight: 5)
+    cons_pat: Pattern = new[pattern_store] Pattern.ListCons(span: 14, weight: 6, head: bind_pat, rest: nil_pat)
+    alias_pat: Pattern = new[pattern_store] Pattern.Alias(span: 15, weight: 7, alias_symbol: 41, inner: bind_pat)
+    or_pat: Pattern = new[pattern_store] Pattern.Or(span: 16, weight: 8, left: alias_pat, right: int_pat)
+    ctor_pat: Pattern = new[pattern_store] Pattern.Ctor(span: 17, weight: 9, label: 42, arg: cons_pat, ann: record_ty)
+
+    lit_expr: Expr = new[expr_store] Expr.LiteralInt(span: 18, cost: 1, value: 99)
+    false_expr: Expr = new[expr_store] Expr.LiteralBool(span: 19, cost: 1, value: false)
+    name_expr: Expr = new[expr_store] Expr.Name(span: 20, cost: 2, symbol: 51, ty: node_ty)
+    ctor_expr: Expr = new[expr_store] Expr.Ctor(span: 21, cost: 3, label: 61, arg: lit_expr, ty: list_ty)
+    record_expr: Expr = new[expr_store] Expr.Record(span: 22, cost: 5, label: 62, field_value: ctor_expr, rest: name_expr, ty: record_ty)
+    project_expr: Expr = new[expr_store] Expr.Project(span: 23, cost: 7, base: record_expr, label: 63, ty: parser_ty)
+    lambda_expr: Expr = new[expr_store] Expr.Lambda(span: 24, cost: 11, param: alias_pat, body: project_expr, ty: parser_ty)
+    apply_expr: Expr = new[expr_store] Expr.Apply(span: 25, cost: 13, callee: lambda_expr, arg: false_expr, ty: parser_ty)
+    if_expr: Expr = new[expr_store] Expr.If(span: 26, cost: 17, cond: false_expr, then_branch: apply_expr, else_branch: ctor_expr, ty: node_ty)
+    let_expr: Expr = new[expr_store] Expr.Let(span: 27, cost: 19, pattern: ctor_pat, value: if_expr, body: project_expr, ty: record_ty)
+
+    terminal_clause: Clause = new[clause_store] Clause.Terminal(span: 28, weight: 3, pattern: wildcard_pat, body: project_expr)
+    guarded_pat: Pattern = new[pattern_store] Pattern.Guarded(span: 29, weight: 10, inner: or_pat, guard: let_expr)
+    guarded_clause: Clause = new[clause_store] Clause.Guarded(span: 30, weight: 5, pattern: guarded_pat, guard: apply_expr, body: let_expr, next: terminal_clause)
+    chain_clause: Clause = new[clause_store] Clause.Chain(span: 31, weight: 7, pattern: ctor_pat, body: if_expr, next: guarded_clause)
+    match_expr: Expr = new[expr_store] Expr.Match(span: 32, cost: 23, scrutinee: ctor_expr, clauses: chain_clause, ty: record_ty)
+
+    ret_stmt: Stmt = new[stmt_store] Stmt.Return(span: 33, effect: 2, value: match_expr)
+    let_stmt: Stmt = new[stmt_store] Stmt.Let(span: 34, effect: 3, pattern: guarded_pat, ann: parser_ty, value: let_expr, next: ret_stmt)
+    match_stmt: Stmt = new[stmt_store] Stmt.Match(span: 35, effect: 5, scrutinee: match_expr, clauses: chain_clause, next: ret_stmt)
+    block_stmt: Stmt = new[stmt_store] Stmt.Block(span: 36, effect: 7, first: let_stmt, second: match_stmt, result_expr: if_expr)
+
+    alias_decl: Decl = new[decl_store] Decl.TypeAlias(span: 37, phase: 2, name: 71, target: record_ty)
+    value_decl: Decl = new[decl_store] Decl.Value(span: 38, phase: 3, name: 72, pattern: guarded_pat, value: match_expr)
+    data_decl: Decl = new[decl_store] Decl.Data(span: 39, phase: 5, name: 73, payload: list_ty, ctor_pattern: ctor_pat)
+    function_decl: Decl = new[decl_store] Decl.Function(span: 40, phase: 7, name: 74, param: alias_pat, signature: parser_ty, body: block_stmt)
+    script_decl: Decl = new[decl_store] Decl.Script(span: 41, phase: 11, name: 75, body: match_stmt, result: let_expr)
+    group_decl: Decl = new[decl_store] Decl.Group(span: 42, phase: 13, left: function_decl, right: data_decl)
+
+    unit_module: Module = new[module_store] Module.Unit(span: 43, weight: 3, name: 81, primary: group_decl, bootstrap: block_stmt, summary: match_expr)
+    nested_module: Module = new[module_store] Module.Nested(span: 44, weight: 5, name: 82, primary: alias_decl, fallback: script_decl, script: match_stmt, summary: let_expr)
+    bundle_module: Module = new[module_store] Module.Bundle(span: 45, weight: 7, left: unit_module, right: nested_module)
+
+    _ = new[root_store] Root.ModuleRoot(span: 46, phase: 3, module: bundle_module, witness: guarded_pat)
+    _ = new[root_store] Root.Script(span: 47, phase: 5, script: block_stmt, result: if_expr, witness: or_pat)
+    _ = new[root_store] Root.Eval(span: 48, phase: 7, module: nested_module, expr: match_expr, witness: ctor_pat)
+
+    previous_type: mutable TypeExpr = bool_ty
+    current_type: mutable TypeExpr = record_ty
+    previous_pattern: mutable Pattern = bool_pat
+    current_pattern: mutable Pattern = guarded_pat
+    previous_expr: mutable Expr = if_expr
+    current_expr: mutable Expr = match_expr
+    current_clause: mutable Clause = chain_clause
+    current_stmt: mutable Stmt = block_stmt
+    current_decl: mutable Decl = group_decl
+    current_module: mutable Module = bundle_module
+
+    seed: mutable usize = 0u
+    while seed < ML_AST_FOREST_ROUNDS:
+        next_type: TypeExpr = build_seed_type(seed, current_type, previous_type, type_store)
+        next_pattern: Pattern = build_seed_pattern(seed, current_pattern, previous_pattern, current_expr, next_type, pattern_store)
+        next_clause: Clause = build_seed_clause(seed, next_pattern, current_expr, previous_expr, current_clause, clause_store)
+        next_expr: Expr = build_seed_expr(seed, next_pattern, current_expr, previous_expr, next_clause, next_type, expr_store)
+        next_stmt: Stmt = build_seed_stmt(seed, next_pattern, next_expr, previous_expr, next_clause, current_stmt, next_type, stmt_store)
+        next_decl: Decl = build_seed_decl(seed, next_pattern, next_expr, next_stmt, next_type, current_decl, decl_store)
+        next_module: Module = build_seed_module(seed, next_decl, current_decl, next_stmt, next_expr, current_module, module_store)
+        _ = build_seed_root(seed, next_module, next_expr, next_stmt, next_pattern, root_store)
+
+        previous_type <- current_type
+        current_type <- next_type
+        previous_pattern <- current_pattern
+        current_pattern <- next_pattern
+        previous_expr <- current_expr
+        current_expr <- next_expr
+        current_clause <- next_clause
+        current_stmt <- next_stmt
+        current_decl <- next_decl
+        current_module <- next_module
+        seed <- seed + 1u
+
+    frozen_types: TypeExpr.Store[Frozen] = freeze(move type_store)
+    frozen_patterns: Pattern.Store[Frozen] = freeze(move pattern_store)
+    frozen_exprs: Expr.Store[Frozen] = freeze(move expr_store)
+    frozen_clauses: Clause.Store[Frozen] = freeze(move clause_store)
+    frozen_stmts: Stmt.Store[Frozen] = freeze(move stmt_store)
+    frozen_decls: Decl.Store[Frozen] = freeze(move decl_store)
+    frozen_modules: Module.Store[Frozen] = freeze(move module_store)
+    frozen_roots: Root.Store[Frozen] = freeze(move root_store)
+
+    return FrozenMlAstForest(frozen_types, frozen_patterns, frozen_exprs, frozen_clauses, frozen_stmts, frozen_decls, frozen_modules, frozen_roots)
+
+def packed_ml_ast_checksum_impl() -> i64:
+    region scratch(262144u)
+    type_store: TypeExpr.Store[Local] = TypeExpr.Store(scratch)
+    pattern_store: Pattern.Store[Local] = Pattern.Store(scratch)
+    expr_store: Expr.Store[Local] = Expr.Store(scratch)
+    clause_store: Clause.Store[Local] = Clause.Store(scratch)
+    stmt_store: Stmt.Store[Local] = Stmt.Store(scratch)
+    decl_store: Decl.Store[Local] = Decl.Store(scratch)
+    module_store: Module.Store[Local] = Module.Store(scratch)
+    root_store: Root.Store[Local] = Root.Store(scratch)
+    forest: FrozenMlAstForest = build_ml_ast_forest(type_store, pattern_store, expr_store, clause_store, stmt_store, decl_store, module_store, root_store)
+    return checksum_root_range(0u, forest.roots.count, (&forest).cast[any FrozenMlAstForest&])
+
+def ml_ast_parallel_worker(job: MlAstParallelJob) -> i64:
+    forest: any FrozenMlAstForest& = job.forest_bits.cast[any FrozenMlAstForest&]
+    result_slot: any i64& = job.result_bits.cast[any i64&]
+    total: mutable i64 = 0
+    remaining: mutable usize = job.repeats
+    while remaining > 0u:
+        total <- total + checksum_root_range(job.start, job.end, forest)
+        remaining <- remaining - 1u
+    result_slot[0u] <- total
+    return total
+
+def packed_ml_ast_parallel_max_workers_impl() -> i64:
+    return ML_AST_PARALLEL_MAX_WORKERS.i64()
+
+def packed_ml_ast_parallel_checksum_impl(worker_count: usize, iterations: usize) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+    if worker_count == 0u or iterations == 0u or worker_count > ML_AST_PARALLEL_MAX_WORKERS:
+        return -1
+
+    region scratch(262144u)
+    type_store: TypeExpr.Store[Local] = TypeExpr.Store(scratch)
+    pattern_store: Pattern.Store[Local] = Pattern.Store(scratch)
+    expr_store: Expr.Store[Local] = Expr.Store(scratch)
+    clause_store: Clause.Store[Local] = Clause.Store(scratch)
+    stmt_store: Stmt.Store[Local] = Stmt.Store(scratch)
+    decl_store: Decl.Store[Local] = Decl.Store(scratch)
+    module_store: Module.Store[Local] = Module.Store(scratch)
+    root_store: Root.Store[Local] = Root.Store(scratch)
+    forest: FrozenMlAstForest = build_ml_ast_forest(type_store, pattern_store, expr_store, clause_store, stmt_store, decl_store, module_store, root_store)
+
+    worker_total: mutable usize = worker_count
+    if worker_total > forest.roots.count:
+        worker_total <- forest.roots.count
+    if worker_total == 0u:
+        return -1
+
+    partials: i64[128] = zeroed
+    base_roots: usize = forest.roots.count / worker_total
+    extra_roots: usize = forest.roots.count % worker_total
+
+    pool workers(worker_total):
+        group: TaskGroup = task_group_new()
+        start: mutable usize = 0u
+        slot: mutable usize = 0u
+        while slot < worker_total:
+            span: mutable usize = base_roots
+            if slot < extra_roots:
+                span <- span + 1u
+
+            end: usize = start + span
+            forest_bits: uintptr = (&forest).cast[any FrozenMlAstForest&].uintptr()
+            result_bits: uintptr = (&partials[slot]).cast[any i64&].uintptr()
+            job: MlAstParallelJob = MlAstParallelJob(forest_bits, start, end, iterations, result_bits)
+            task: Task[i64, Pending] = submit ml_ast_parallel_worker(job)
+            task_group_add((&group).cast[any TaskGroup&], move task)
+            start <- end
+            slot <- slot + 1u
+
+        wait all group
+
+    total: mutable i64 = 0
+    slot: mutable usize = 0u
+    while slot < worker_total:
+        total <- total + partials[slot]
+        slot <- slot + 1u
+    return total
+
+export func packed_ml_ast_checksum() -> i64 = packed_ml_ast_checksum_impl
+export func packed_ml_ast_parallel_max_workers() -> i64 = packed_ml_ast_parallel_max_workers_impl
+export func packed_ml_ast_parallel_checksum(worker_count: usize, iterations: usize) -> i64 = packed_ml_ast_parallel_checksum_impl

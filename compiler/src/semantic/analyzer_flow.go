@@ -3052,7 +3052,7 @@ func (a *Analyzer) cloneRegionRefStates() map[*Symbol]regionRefState {
 	}
 	cloned := make(map[*Symbol]regionRefState, len(a.currentRegionRefs))
 	for sym, state := range a.currentRegionRefs {
-		cloned[sym] = cloneRegionRefState(state)
+		cloned[sym] = cloneRegionRefStateSharedFields(state)
 	}
 	return cloned
 }
@@ -3107,6 +3107,17 @@ func cloneRegionRefState(state regionRefState) regionRefState {
 		StoreDeps:               clonePackedStoreDependencyStates(state.StoreDeps),
 		ParamDeps:               cloneRegionParamDeps(state.ParamDeps),
 		Fields:                  cloneRegionRefFields(state.Fields),
+		PackedStoreSummary:      state.PackedStoreSummary,
+		PackedStoreSummaryKnown: state.PackedStoreSummaryKnown,
+	}
+}
+
+func cloneRegionRefStateSharedFields(state regionRefState) regionRefState {
+	return regionRefState{
+		Deps:                    cloneRegionDependencyStates(state.Deps),
+		StoreDeps:               clonePackedStoreDependencyStates(state.StoreDeps),
+		ParamDeps:               cloneRegionParamDeps(state.ParamDeps),
+		Fields:                  state.Fields,
 		PackedStoreSummary:      state.PackedStoreSummary,
 		PackedStoreSummaryKnown: state.PackedStoreSummaryKnown,
 	}
@@ -3233,7 +3244,7 @@ func mergeRegionRefStates(states ...regionRefState) (regionRefState, bool) {
 						delete(merged.Fields, name)
 					}
 				} else {
-					merged.Fields[name] = cloneRegionRefState(fieldState)
+					merged.Fields[name] = cloneRegionRefStateSharedFields(fieldState)
 				}
 			}
 		}
