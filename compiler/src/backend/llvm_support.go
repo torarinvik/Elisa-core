@@ -397,6 +397,37 @@ func (s *functionState) loweredEnumStorageType(enumType *semantic.EnumType) (C.L
 	return s.g.lowerType(enumType)
 }
 
+func (s *functionState) coercePackedEnumHandleValue(value C.LLVMValueRef, actual semantic.Type, expected *semantic.EnumType) (C.LLVMValueRef, bool, error) {
+	if s == nil || s.g == nil || expected == nil || !expected.Packed {
+		return nil, false, nil
+	}
+	switch s.g.packedModeForEnum(expected) {
+	case packedEnumABIRowHandle:
+		if !isNumericCastType(actual) {
+			return nil, false, nil
+		}
+		expectedLLVM, err := s.g.lowerType(expected)
+		if err != nil {
+			return nil, true, err
+		}
+		return C.LLVMBuildIntToPtr(s.builder, value, expectedLLVM, cStringFree("inttoptr")), true, nil
+	case packedEnumABIWordHandle:
+		if !isNumericCastType(actual) {
+			return nil, false, nil
+		}
+		coerced, err := s.coerceNumericValue(value, actual, s.g.result.NamedTypes["uintptr"])
+		return coerced, true, err
+	case packedEnumABIIndexSOA, packedEnumABIVariantSparse:
+		if !isNumericCastType(actual) {
+			return nil, false, nil
+		}
+		coerced, err := s.coerceNumericValue(value, actual, s.g.result.NamedTypes["u32"])
+		return coerced, true, err
+	default:
+		return nil, false, nil
+	}
+}
+
 func runtimeIndexedElemType(t semantic.Type) (semantic.Type, bool) {
 	switch tt := t.(type) {
 	case *semantic.DArrayType:
@@ -506,6 +537,9 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 				return nil, err
 			}
 			return binding.handle, nil
+		}
+		if coerced, ok, err := s.coercePackedEnumHandleValue(value, actual, expectedEnum); ok || err != nil {
+			return coerced, err
 		}
 	}
 	if expectedView, ok := expected.(*semantic.PackedVariantViewType); ok {

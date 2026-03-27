@@ -753,6 +753,81 @@ def fold_frozen() -> int:
 	}
 }
 
+func TestGenerateLLVMIRUsesIndexReadHelpersForNestedFrozenPackedPayloadMatchInIndexSOA(t *testing.T) {
+	src := `packed enum Expr:
+	Lit(value: int)
+	Wrap(inner: Expr)
+
+def fold_frozen(node: Expr, frozen: Expr.Store[Frozen]) -> int:
+	return match node in frozen:
+		Expr.Wrap(inner: Expr.Lit(value: value)):
+			value
+		Expr.Wrap(inner: inner):
+			fold_frozen(inner, frozen)
+		Expr.Lit(value: value):
+			value
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_payload_decode_index_soa.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	tagCalls := strings.Count(output, "call i32 @ctx_packed_store_read_index_tag(")
+	if tagCalls < 2 {
+		t.Fatalf("expected nested frozen packed payload match in index-soa mode to use direct tag reads for both levels, got %d helper calls:\n%s", tagCalls, output)
+	}
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_index_word(")
+	if readCalls < 2 {
+		t.Fatalf("expected nested frozen packed payload match in index-soa mode to use direct payload reads for both levels, got %d helper calls:\n%s", readCalls, output)
+	}
+	if !strings.Contains(output, "trunc i64") {
+		t.Fatalf("expected nested frozen packed payload match in index-soa mode to truncate direct word reads back to packed enum handles, got:\n%s", output)
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
+		t.Fatalf("expected nested frozen packed payload match in index-soa mode to avoid eager decode, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRUsesCanonicalIndexReadHelpersForNestedFrozenPackedPayloadMatchByDefault(t *testing.T) {
+	src := `packed enum Expr:
+	Lit(value: int)
+	Wrap(inner: Expr)
+
+def fold_frozen(node: Expr, frozen: Expr.Store[Frozen]) -> int:
+	return match node in frozen:
+		Expr.Wrap(inner: Expr.Lit(value: value)):
+			value
+		Expr.Wrap(inner: inner):
+			fold_frozen(inner, frozen)
+		Expr.Lit(value: value):
+			value
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_nested_payload_decode_default.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+
+	tagCalls := strings.Count(output, "call i32 @ctx_packed_store_read_variant_sparse_tag(")
+	if tagCalls < 2 {
+		t.Fatalf("expected canonical nested frozen packed payload match to use direct variant-sparse tag reads for both levels, got %d helper calls:\n%s", tagCalls, output)
+	}
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_variant_sparse_word(")
+	if readCalls < 2 {
+		t.Fatalf("expected canonical nested frozen packed payload match to use direct variant-sparse payload reads for both levels, got %d helper calls:\n%s", readCalls, output)
+	}
+	if !strings.Contains(output, "trunc i64") {
+		t.Fatalf("expected canonical nested frozen packed payload match to truncate direct word reads back to packed enum handles, got:\n%s", output)
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_variant_sparse(") {
+		t.Fatalf("expected canonical nested frozen packed payload match to avoid eager decode, got:\n%s", output)
+	}
+	if strings.Contains(output, "call i64 @ctx_packed_store_read_index_word(") {
+		t.Fatalf("expected canonical nested frozen packed payload match to avoid legacy index-soa payload reads, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRUsesSingleDecodeForMixedFrozenPackedPayloadMatch(t *testing.T) {
 	src := `packed enum Expr:
 	Hold(value: any i32&)
