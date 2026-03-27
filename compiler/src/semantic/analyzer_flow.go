@@ -3042,56 +3042,65 @@ func (a *Analyzer) cloneRegionRefStates() map[*Symbol]regionRefState {
 	return cloned
 }
 
-func cloneRegionRefState(state regionRefState) regionRefState {
-	cloned := regionRefState{}
-	if len(state.Deps) != 0 {
-		cloned.Deps = make(map[*Symbol]regionDependencyState, len(state.Deps))
-		for region, dep := range state.Deps {
-			cloned.Deps[region] = dep
-		}
+func cloneRegionDependencyStates(src map[*Symbol]regionDependencyState) map[*Symbol]regionDependencyState {
+	if len(src) == 0 {
+		return nil
 	}
-	if len(state.StoreDeps) != 0 {
-		cloned.StoreDeps = make(map[*Symbol]packedStoreDependencyState, len(state.StoreDeps))
-		for store, dep := range state.StoreDeps {
-			cloned.StoreDeps[store] = dep
-		}
-	}
-	if len(state.ParamDeps) != 0 {
-		cloned.ParamDeps = make(map[int]bool, len(state.ParamDeps))
-		for index, dep := range state.ParamDeps {
-			cloned.ParamDeps[index] = dep
-		}
-	}
-	if len(state.Fields) != 0 {
-		cloned.Fields = make(map[string]regionRefState, len(state.Fields))
-		for name, fieldState := range state.Fields {
-			cloned.Fields[name] = cloneRegionRefState(fieldState)
-		}
+	cloned := make(map[*Symbol]regionDependencyState, len(src))
+	for region, dep := range src {
+		cloned[region] = dep
 	}
 	return cloned
 }
 
-func cloneRegionRefStateShallowFields(state regionRefState) regionRefState {
-	cloned := regionRefState{}
-	if len(state.Deps) != 0 {
-		cloned.Deps = make(map[*Symbol]regionDependencyState, len(state.Deps))
-		for region, dep := range state.Deps {
-			cloned.Deps[region] = dep
-		}
+func clonePackedStoreDependencyStates(src map[*Symbol]packedStoreDependencyState) map[*Symbol]packedStoreDependencyState {
+	if len(src) == 0 {
+		return nil
 	}
-	if len(state.StoreDeps) != 0 {
-		cloned.StoreDeps = make(map[*Symbol]packedStoreDependencyState, len(state.StoreDeps))
-		for store, dep := range state.StoreDeps {
-			cloned.StoreDeps[store] = dep
-		}
-	}
-	if len(state.ParamDeps) != 0 {
-		cloned.ParamDeps = make(map[int]bool, len(state.ParamDeps))
-		for index, dep := range state.ParamDeps {
-			cloned.ParamDeps[index] = dep
-		}
+	cloned := make(map[*Symbol]packedStoreDependencyState, len(src))
+	for store, dep := range src {
+		cloned[store] = dep
 	}
 	return cloned
+}
+
+func cloneRegionParamDeps(src map[int]bool) map[int]bool {
+	if len(src) == 0 {
+		return nil
+	}
+	cloned := make(map[int]bool, len(src))
+	for index, dep := range src {
+		cloned[index] = dep
+	}
+	return cloned
+}
+
+func cloneRegionRefFields(src map[string]regionRefState) map[string]regionRefState {
+	if len(src) == 0 {
+		return nil
+	}
+	cloned := make(map[string]regionRefState, len(src))
+	for name, fieldState := range src {
+		cloned[name] = fieldState
+	}
+	return cloned
+}
+
+func cloneRegionRefState(state regionRefState) regionRefState {
+	return regionRefState{
+		Deps:      cloneRegionDependencyStates(state.Deps),
+		StoreDeps: clonePackedStoreDependencyStates(state.StoreDeps),
+		ParamDeps: cloneRegionParamDeps(state.ParamDeps),
+		Fields:    cloneRegionRefFields(state.Fields),
+	}
+}
+
+func cloneRegionRefStateShallowFields(state regionRefState) regionRefState {
+	return regionRefState{
+		Deps:      cloneRegionDependencyStates(state.Deps),
+		StoreDeps: clonePackedStoreDependencyStates(state.StoreDeps),
+		ParamDeps: cloneRegionParamDeps(state.ParamDeps),
+	}
 }
 
 func hasRegionDependencies(state regionRefState) bool {
@@ -3375,11 +3384,14 @@ func firstLiveRegionDependency(state regionRefState) (*Symbol, regionDependencyS
 
 func invalidateRegionDependencyInState(state regionRefState, region *Symbol, predicate func(regionDependencyState) bool, reason string) (regionRefState, bool) {
 	changed := false
+	depsCloned := false
+	fieldsCloned := false
 	if region != nil {
 		if dep, ok := state.Deps[region]; ok && dep.Valid {
 			if predicate == nil || predicate(dep) {
-				if state.Deps == nil {
-					state.Deps = map[*Symbol]regionDependencyState{}
+				if !depsCloned {
+					state.Deps = cloneRegionDependencyStates(state.Deps)
+					depsCloned = true
 				}
 				dep.Valid = false
 				dep.InvalidatedBy = reason
@@ -3394,8 +3406,9 @@ func invalidateRegionDependencyInState(state regionRefState, region *Symbol, pre
 			if !fieldChanged {
 				continue
 			}
-			if state.Fields == nil {
-				state.Fields = map[string]regionRefState{}
+			if !fieldsCloned {
+				state.Fields = cloneRegionRefFields(state.Fields)
+				fieldsCloned = true
 			}
 			state.Fields[name] = nextField
 			changed = true
@@ -5587,9 +5600,12 @@ func (a *Analyzer) remapPackedStoreDependencies(from *Symbol, to *Symbol, nextTy
 
 func remapPackedStoreDependencyInState(state regionRefState, from *Symbol, to *Symbol, nextType *PackedEnumStoreType) (regionRefState, bool) {
 	changed := false
+	storeDepsCloned := false
+	fieldsCloned := false
 	if dep, ok := state.StoreDeps[from]; ok {
-		if state.StoreDeps == nil {
-			state.StoreDeps = map[*Symbol]packedStoreDependencyState{}
+		if !storeDepsCloned {
+			state.StoreDeps = clonePackedStoreDependencyStates(state.StoreDeps)
+			storeDepsCloned = true
 		}
 		delete(state.StoreDeps, from)
 		dep.Type = nextType
@@ -5601,8 +5617,9 @@ func remapPackedStoreDependencyInState(state regionRefState, from *Symbol, to *S
 		if !fieldChanged {
 			continue
 		}
-		if state.Fields == nil {
-			state.Fields = map[string]regionRefState{}
+		if !fieldsCloned {
+			state.Fields = cloneRegionRefFields(state.Fields)
+			fieldsCloned = true
 		}
 		state.Fields[name] = nextField
 		changed = true

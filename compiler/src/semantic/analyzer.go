@@ -1623,12 +1623,14 @@ func assignRegionRefStateAtPath(dst regionRefState, steps []borrowReturnAnnotati
 		}
 		return value
 	}
-	if dst.Fields == nil {
-		dst.Fields = map[string]regionRefState{}
-	}
 	key := regionFieldKeyForBorrowStep(steps[0])
-	child := dst.Fields[key]
-	dst.Fields[key] = assignRegionRefStateAtPath(child, steps[1:], value)
+	nextFields := cloneRegionRefFields(dst.Fields)
+	if nextFields == nil {
+		nextFields = map[string]regionRefState{}
+	}
+	child := nextFields[key]
+	nextFields[key] = assignRegionRefStateAtPath(child, steps[1:], value)
+	dst.Fields = nextFields
 	return dst
 }
 
