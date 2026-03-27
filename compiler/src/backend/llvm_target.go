@@ -19,7 +19,7 @@ static LLVMBool llcontextInitializeNativeAsmPrinter(void) {
 	return LLVMInitializeNativeAsmPrinter();
 }
 
-static LLVMTargetMachineRef llcontextCreateTargetMachineAggressive(
+static LLVMTargetMachineRef llcontextCreateTargetMachineDefault(
 	LLVMTargetRef Target,
 	char *Triple,
 	char *CPU,
@@ -29,7 +29,7 @@ static LLVMTargetMachineRef llcontextCreateTargetMachineAggressive(
 		Triple,
 		CPU,
 		Features,
-		LLVMCodeGenLevelAggressive,
+		LLVMCodeGenLevelDefault,
 		LLVMRelocDefault,
 		LLVMCodeModelDefault);
 }
@@ -140,9 +140,6 @@ func (g *llvmGenerator) writeBitcodeFile(outputPath string) error {
 }
 
 func (g *llvmGenerator) writeObjectFile(outputPath string, optLevel OptimizationLevel) error {
-	if err := g.ensureTargetMachine(); err != nil {
-		return err
-	}
 	if err := g.optimizeModule(optLevel); err != nil {
 		return err
 	}
@@ -211,7 +208,7 @@ func (g *llvmGenerator) ensureTargetMachine() error {
 
 	cpu := cString("")
 	features := cString("")
-	tm := C.llcontextCreateTargetMachineAggressive(target, triple, cpu, features)
+	tm := C.llcontextCreateTargetMachineDefault(target, triple, cpu, features)
 	C.free(unsafe.Pointer(cpu))
 	C.free(unsafe.Pointer(features))
 	if tm == nil {

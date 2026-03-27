@@ -15,3 +15,4 @@ Code/llcontext_lua
 compiler/backend.test
 compiler/src/backend/backend.test
 compiler/src/backend/backend.test
+compiler/src.test

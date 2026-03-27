@@ -117,6 +117,40 @@ func benchmarkCLICompileToLLVMParallel(b *testing.B, sourcePath string, workers 
 	}
 }
 
+func benchmarkCLICompileToObject(b *testing.B, sourcePath string, extraArgs ...string) {
+	b.Helper()
+
+	expandedSource, err := readSourceWithIncludes(sourcePath, map[string]bool{})
+	if err != nil {
+		b.Fatalf("failed to read benchmark source %s: %v", sourcePath, err)
+	}
+	if len(expandedSource) == 0 {
+		b.Fatalf("expected benchmark source %s to contain input", sourcePath)
+	}
+
+	outputPath := filepath.Join(b.TempDir(), "bench_output.o")
+	argsPrefix := append([]string{"-emit", "obj"}, extraArgs...)
+
+	b.SetBytes(int64(len(expandedSource)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		args := append(append([]string{}, argsPrefix...), "-o", outputPath, sourcePath)
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		exitCode := runCLI(args, &stdout, &stderr)
+		if exitCode != 0 {
+			b.Fatalf("runCLI(%v) returned %d\nstderr:\n%s", args, exitCode, stderr.String())
+		}
+		if stdout.Len() != 0 {
+			b.Fatalf("expected no stdout for %v, got:\n%s", args, stdout.String())
+		}
+		if stderr.Len() != 0 {
+			b.Fatalf("expected no stderr for %v, got:\n%s", args, stderr.String())
+		}
+	}
+}
+
 func buildFrontendLexerBenchExecutableForBench(b *testing.B) string {
 	b.Helper()
 
@@ -304,6 +338,15 @@ func BenchmarkRunCLICompileFrontendLexerFixtureToLLVMO3(b *testing.B) {
 		b.Fatalf("failed to stat %s: %v", sourcePath, err)
 	}
 	benchmarkCLICompileToLLVM(b, sourcePath, "-O3")
+}
+
+func BenchmarkRunCLICompileFrontendLexerFixtureToObjectO3(b *testing.B) {
+	repoRoot := repoRootFromMainBench(b)
+	sourcePath := filepath.Join(repoRoot, "Code", "test_programs", "frontend_lexer.llcontext")
+	if _, err := os.Stat(sourcePath); err != nil {
+		b.Fatalf("failed to stat %s: %v", sourcePath, err)
+	}
+	benchmarkCLICompileToObject(b, sourcePath, "-O3")
 }
 
 func BenchmarkRunCLICompilePackedMegaASTToLLVM(b *testing.B) {
