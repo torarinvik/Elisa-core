@@ -3088,19 +3088,30 @@ func cloneRegionRefFields(src map[string]regionRefState) map[string]regionRefSta
 
 func cloneRegionRefState(state regionRefState) regionRefState {
 	return regionRefState{
-		Deps:      cloneRegionDependencyStates(state.Deps),
-		StoreDeps: clonePackedStoreDependencyStates(state.StoreDeps),
-		ParamDeps: cloneRegionParamDeps(state.ParamDeps),
-		Fields:    cloneRegionRefFields(state.Fields),
+		Deps:                    cloneRegionDependencyStates(state.Deps),
+		StoreDeps:               clonePackedStoreDependencyStates(state.StoreDeps),
+		ParamDeps:               cloneRegionParamDeps(state.ParamDeps),
+		Fields:                  cloneRegionRefFields(state.Fields),
+		PackedStoreSummary:      state.PackedStoreSummary,
+		PackedStoreSummaryKnown: state.PackedStoreSummaryKnown,
 	}
 }
 
 func cloneRegionRefStateShallowFields(state regionRefState) regionRefState {
-	return regionRefState{
+	return withPackedStoreProvenanceSummary(regionRefState{
 		Deps:      cloneRegionDependencyStates(state.Deps),
 		StoreDeps: clonePackedStoreDependencyStates(state.StoreDeps),
 		ParamDeps: cloneRegionParamDeps(state.ParamDeps),
+	})
+}
+
+func withPackedStoreProvenanceSummary(state regionRefState) regionRefState {
+	if state.PackedStoreSummaryKnown {
+		return state
 	}
+	state.PackedStoreSummary = summarizePackedStoreProvenance(state)
+	state.PackedStoreSummaryKnown = true
+	return state
 }
 
 func hasRegionDependencies(state regionRefState) bool {
@@ -3115,44 +3126,45 @@ func regionRefStateFromDependency(region *Symbol, generation int) regionRefState
 	if region == nil {
 		return regionRefState{}
 	}
-	return regionRefState{
+	return withPackedStoreProvenanceSummary(regionRefState{
 		Deps: map[*Symbol]regionDependencyState{
 			region: {
 				Generation: generation,
 				Valid:      true,
 			},
 		},
-	}
+	})
 }
 
 func regionRefStateFromPackedStoreDependency(store *Symbol, storeType *PackedEnumStoreType) regionRefState {
 	if store == nil || storeType == nil {
 		return regionRefState{}
 	}
-	return regionRefState{
+	return withPackedStoreProvenanceSummary(regionRefState{
 		StoreDeps: map[*Symbol]packedStoreDependencyState{
 			store: {Type: storeType},
 		},
-	}
+	})
 }
 
 func regionRefStateFromParamDependency(index int) regionRefState {
 	if index < 0 {
 		return regionRefState{}
 	}
-	return regionRefState{
+	return withPackedStoreProvenanceSummary(regionRefState{
 		ParamDeps: map[int]bool{
 			index: true,
 		},
-	}
+	})
 }
 
 func mergeRegionRefStates(states ...regionRefState) (regionRefState, bool) {
-	merged := regionRefState{}
+	merged := regionRefState{PackedStoreSummaryKnown: true}
 	for _, state := range states {
 		if !hasRegionProvenance(state) {
 			continue
 		}
+		mergePackedStoreProvenanceInto(&merged.PackedStoreSummary, summarizePackedStoreProvenance(state))
 		if len(state.Deps) != 0 {
 			if merged.Deps == nil {
 				merged.Deps = map[*Symbol]regionDependencyState{}
@@ -3285,17 +3297,18 @@ func summarizeRegionIndexStates(state regionRefState) (regionRefState, bool) {
 	}
 	if len(indexStates) == 0 {
 		summary.Fields = nil
-		return summary, true
+		return withPackedStoreProvenanceSummary(summary), true
 	}
 	merged, ok := mergeRegionRefStates(indexStates...)
 	if !ok {
 		summary.Fields = nil
-		return summary, true
+		return withPackedStoreProvenanceSummary(summary), true
 	}
 	summary.Fields = map[string]regionRefState{
 		regionAnyIndexFieldKey(): merged,
 	}
-	return summary, true
+	summary.PackedStoreSummaryKnown = false
+	return withPackedStoreProvenanceSummary(summary), true
 }
 
 func firstInvalidRegionDependency(state regionRefState) (*Symbol, regionDependencyState, bool) {
@@ -3333,7 +3346,7 @@ func abstractParamOnlyRegionRefState(state regionRefState) (regionRefState, bool
 	if !hasRegionProvenance(out) {
 		return regionRefState{}, false
 	}
-	return out, true
+	return withPackedStoreProvenanceSummary(out), true
 }
 
 func (a *Analyzer) instantiateReturnProvenance(state regionRefState, args []ast.Expr) (regionRefState, bool) {
@@ -3370,7 +3383,8 @@ func (a *Analyzer) instantiateReturnProvenance(state regionRefState, args []ast.
 	if !hasRegionProvenance(instantiated) {
 		return regionRefState{}, false
 	}
-	return instantiated, true
+	instantiated.PackedStoreSummaryKnown = false
+	return withPackedStoreProvenanceSummary(instantiated), true
 }
 
 func firstLiveRegionDependency(state regionRefState) (*Symbol, regionDependencyState, bool) {
@@ -3413,6 +3427,10 @@ func invalidateRegionDependencyInState(state regionRefState, region *Symbol, pre
 			state.Fields[name] = nextField
 			changed = true
 		}
+	}
+	if changed {
+		state.PackedStoreSummaryKnown = false
+		state = withPackedStoreProvenanceSummary(state)
 	}
 	return state, changed
 }
@@ -5571,6 +5589,7 @@ func (a *Analyzer) recordResolvedRegionRefBinding(sym *Symbol, state regionRefSt
 		delete(a.currentRegionRefs, sym)
 		return
 	}
+	state = withPackedStoreProvenanceSummary(state)
 	a.currentRegionRefs[sym] = cloneRegionRefState(state)
 }
 
@@ -5623,6 +5642,10 @@ func remapPackedStoreDependencyInState(state regionRefState, from *Symbol, to *S
 		}
 		state.Fields[name] = nextField
 		changed = true
+	}
+	if changed {
+		state.PackedStoreSummaryKnown = false
+		state = withPackedStoreProvenanceSummary(state)
 	}
 	return state, changed
 }

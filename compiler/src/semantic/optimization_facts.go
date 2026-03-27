@@ -508,13 +508,30 @@ func mergeAlternativeOptimizationFacts(left OptimizationFacts, right Optimizatio
 }
 
 func summarizePackedStoreProvenance(state regionRefState) PackedStoreProvenance {
+	if state.PackedStoreSummaryKnown {
+		return state.PackedStoreSummary
+	}
 	var out PackedStoreProvenance
 	summarizePackedStoreProvenanceInto(&out, state)
 	return out
 }
 
+func mergePackedStoreProvenanceInto(dst *PackedStoreProvenance, src PackedStoreProvenance) {
+	if dst == nil {
+		return
+	}
+	dst.HasPackedStoreDeps = dst.HasPackedStoreDeps || src.HasPackedStoreDeps
+	dst.HasFrozenPackedStoreDeps = dst.HasFrozenPackedStoreDeps || src.HasFrozenPackedStoreDeps
+	dst.HasNonFrozenPackedStoreDeps = dst.HasNonFrozenPackedStoreDeps || src.HasNonFrozenPackedStoreDeps
+	dst.HasNonStoreProvenance = dst.HasNonStoreProvenance || src.HasNonStoreProvenance
+}
+
 func summarizePackedStoreProvenanceInto(out *PackedStoreProvenance, state regionRefState) {
 	if out == nil {
+		return
+	}
+	if state.PackedStoreSummaryKnown {
+		mergePackedStoreProvenanceInto(out, state.PackedStoreSummary)
 		return
 	}
 	if len(state.Deps) != 0 || len(state.ParamDeps) != 0 {
@@ -553,6 +570,10 @@ func (a *Analyzer) exprDependsOnlyOnFrozenPackedStores(expr ast.Expr) bool {
 }
 
 func regionRefStateDependsOnlyOnFrozenPackedStores(state regionRefState) (bool, bool) {
+	if state.PackedStoreSummaryKnown {
+		summary := state.PackedStoreSummary
+		return summary.DependsOnlyOnFrozenPackedStores() || (!summary.HasAnyPackedStoreProvenance() && !summary.HasNonStoreProvenance), summary.DependsOnFrozenPackedStores()
+	}
 	if len(state.Deps) != 0 || len(state.ParamDeps) != 0 {
 		return false, false
 	}

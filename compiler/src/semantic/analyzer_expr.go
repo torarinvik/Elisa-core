@@ -530,8 +530,9 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 						for key, fieldState := range fieldStates {
 							merged.Fields[key] = fieldState
 						}
+						merged.PackedStoreSummaryKnown = false
 					}
-					return merged, true
+					return withPackedStoreProvenanceSummary(merged), true
 				}
 			}
 			if ownerType := a.analyzeExpr(n.Owner); ownerType != nil {
@@ -574,8 +575,9 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		merged, _ := mergeRegionRefStates(unionStates...)
 		if len(fieldStates) != 0 {
 			merged.Fields = fieldStates
+			merged.PackedStoreSummaryKnown = false
 		}
-		return merged, true
+		return withPackedStoreProvenanceSummary(merged), true
 	case *ast.ListLitExpr:
 		elemStates := make([]regionRefState, 0, len(n.Elems))
 		fieldStates := map[string]regionRefState{}
@@ -592,8 +594,9 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		if len(fieldStates) != 0 {
 			fieldStates[regionAnyIndexFieldKey()] = cloneRegionRefState(merged)
 			merged.Fields = fieldStates
+			merged.PackedStoreSummaryKnown = false
 		}
-		return merged, true
+		return withPackedStoreProvenanceSummary(merged), true
 	case *ast.FieldExpr:
 		if enumType, variant, ok := a.enumConstructorInfoFromFieldExpr(n); ok && enumType != nil && variant != nil && enumType.Packed && len(variant.Payload) == 0 {
 			if state, ok := a.activePackedStoreRegionState(enumType); ok {
@@ -720,8 +723,9 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 				for key, state := range fieldStates {
 					merged.Fields[key] = state
 				}
+				merged.PackedStoreSummaryKnown = false
 			}
-			return merged, true
+			return withPackedStoreProvenanceSummary(merged), true
 		}
 		fnType, _ := a.exprTypes[n.Func].(*FuncType)
 		if fnType == nil {
@@ -764,13 +768,15 @@ func (a *Analyzer) regionRefStateForProofCarryingViewCall(call *ast.CallExpr) (r
 			"left":  cloneRegionRefState(summarized),
 			"right": cloneRegionRefState(summarized),
 		}
-		return state, true
+		state.PackedStoreSummaryKnown = false
+		return withPackedStoreProvenanceSummary(state), true
 	case "chunks_exact":
 		state := cloneRegionRefState(summarized)
 		state.Fields = map[string]regionRefState{
 			"source": cloneRegionRefState(summarized),
 		}
-		return state, true
+		state.PackedStoreSummaryKnown = false
+		return withPackedStoreProvenanceSummary(state), true
 	case "reduce_sum":
 		return regionRefState{}, true
 	default:

@@ -145,10 +145,12 @@ type packedStoreDependencyState struct {
 }
 
 type regionRefState struct {
-	Deps      map[*Symbol]regionDependencyState
-	StoreDeps map[*Symbol]packedStoreDependencyState
-	ParamDeps map[int]bool
-	Fields    map[string]regionRefState
+	Deps                    map[*Symbol]regionDependencyState
+	StoreDeps               map[*Symbol]packedStoreDependencyState
+	ParamDeps               map[int]bool
+	Fields                  map[string]regionRefState
+	PackedStoreSummary      PackedStoreProvenance
+	PackedStoreSummaryKnown bool
 }
 
 type borrowedOwnerRefState struct {
@@ -1631,7 +1633,8 @@ func assignRegionRefStateAtPath(dst regionRefState, steps []borrowReturnAnnotati
 	child := nextFields[key]
 	nextFields[key] = assignRegionRefStateAtPath(child, steps[1:], value)
 	dst.Fields = nextFields
-	return dst
+	dst.PackedStoreSummaryKnown = false
+	return withPackedStoreProvenanceSummary(dst)
 }
 
 func regionFieldKeyForBorrowStep(step borrowReturnAnnotationStep) string {
@@ -2104,7 +2107,8 @@ func (a *Analyzer) abstractParamRegionRefState(t Type, paramIndex int, seen map[
 				state.Fields = cloneRegionRefState(elemState).Fields
 			}
 		}
-		return state, true
+		state.PackedStoreSummaryKnown = false
+		return withPackedStoreProvenanceSummary(state), true
 	case *StructType:
 		for _, field := range tt.Fields {
 			fieldState, ok := a.abstractParamRegionRefState(field.Type, paramIndex, seen)
@@ -2138,7 +2142,8 @@ func (a *Analyzer) abstractParamRegionRefState(t Type, paramIndex int, seen map[
 				}
 				state.Fields[field.Name] = fieldState
 			}
-			return state, true
+			state.PackedStoreSummaryKnown = false
+			return withPackedStoreProvenanceSummary(state), true
 		}
 		if base, ok := tt.Base.(*EnumType); ok {
 			for _, variant := range base.Variants {
@@ -2154,7 +2159,8 @@ func (a *Analyzer) abstractParamRegionRefState(t Type, paramIndex int, seen map[
 					state.Fields[moveBindVariantFieldKey(variant, i)] = fieldState
 				}
 			}
-			return state, true
+			state.PackedStoreSummaryKnown = false
+			return withPackedStoreProvenanceSummary(state), true
 		}
 	case *EnumType:
 		if tt.Packed {
@@ -2197,7 +2203,8 @@ func (a *Analyzer) abstractParamRegionRefState(t Type, paramIndex int, seen map[
 			}
 		}
 	}
-	return state, true
+	state.PackedStoreSummaryKnown = false
+	return withPackedStoreProvenanceSummary(state), true
 }
 
 func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
