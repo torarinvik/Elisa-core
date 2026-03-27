@@ -1340,6 +1340,78 @@ def fold_child_common_frozen() -> int:
 	}
 }
 
+func TestGenerateLLVMIRUsesCanonicalDirectReadsForFrozenMatchedValueFieldAccess(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Lit(value: int)
+	End
+
+def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
+	return match node in frozen:
+		Expr.Lit(value):
+			node.span + node.span + value
+		Expr.End:
+			0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_matched_value_field_cache_default.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+
+	if !strings.Contains(output, "call i32 @ctx_packed_store_read_variant_sparse_tag(") {
+		t.Fatalf("expected canonical frozen matched-value field access to use variant-sparse tag reads, got:\n%s", output)
+	}
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_variant_sparse_word(")
+	if readCalls != 2 {
+		t.Fatalf("expected canonical frozen matched-value field access to use two total variant-sparse payload reads (cached repeated common field + payload value), got %d helper calls:\n%s", readCalls, output)
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_variant_sparse(") {
+		t.Fatalf("expected canonical frozen matched-value field access to avoid eager variant-sparse decode, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRUsesCanonicalDirectReadsForNestedMatchedValueFieldAccess(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Lit(value: int)
+	Wrap(child: Expr)
+
+def fold_child(node: Expr, frozen: Expr.Store[Frozen]) -> int:
+	return match node in frozen:
+		Expr.Lit(value):
+			node.span + node.span + value
+		Expr.Wrap(child: inner):
+			fold_child(inner, frozen)
+
+def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
+	return match node in frozen:
+		Expr.Wrap(child: child):
+			fold_child(child, frozen)
+		Expr.Lit(value):
+			node.span + value
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_nested_matched_value_field_cache_default.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_variant_sparse(") {
+		t.Fatalf("expected canonical nested matched-value field access to avoid eager variant-sparse decode, got:\n%s", output)
+	}
+	tagCalls := strings.Count(output, "call i32 @ctx_packed_store_read_variant_sparse_tag(")
+	if tagCalls < 2 {
+		t.Fatalf("expected canonical nested matched-value field access to use direct tag reads for both levels, got %d helper calls:\n%s", tagCalls, output)
+	}
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_variant_sparse_word(")
+	if readCalls < 3 {
+		t.Fatalf("expected canonical nested matched-value field access to stay on variant-sparse payload reads, got %d helper calls:\n%s", readCalls, output)
+	}
+}
+
 func TestGenerateLLVMIRUsesSingleDecodeForFrozenRepeatedCommonFieldReadsOutsideCheckpoint(t *testing.T) {
 	src := `packed enum Expr:
 	common:

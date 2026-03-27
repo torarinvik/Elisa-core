@@ -4496,6 +4496,28 @@ func (s *functionState) emitPackedDirectFieldReadAtOrigin(ops *packedStoreOps, h
 	if fieldSizeBytes == 0 {
 		return s.zeroValue(fieldType)
 	}
+	var cacheKey packedDirectFieldReadCacheKey
+	cacheDirectField := false
+	if ops.canCacheDirectReadValues(enumType) {
+		if s.packedDirectFieldReads == nil {
+			s.packedDirectFieldReads = map[packedDirectFieldReadCacheKey]C.LLVMValueRef{}
+		}
+		originKey, cacheHandle := ops.directReadCacheIdentity(enumType, origin, handleValue)
+		cacheKey = packedDirectFieldReadCacheKey{
+			block:    ops.currentBlock(),
+			store:    ops.storeValue,
+			enumType: enumType,
+			origin:   originKey,
+			handle:   cacheHandle,
+			offset:   fieldOffsetBytes,
+			size:     fieldSizeBytes,
+			typeKey:  fieldType.String(),
+		}
+		if cached, ok := s.packedDirectFieldReads[cacheKey]; ok && cached != nil {
+			return cached, nil
+		}
+		cacheDirectField = true
+	}
 	wordBytes := uint64(s.g.wordBits / 8)
 	if wordBytes == 0 {
 		wordBytes = 8
@@ -4519,7 +4541,14 @@ func (s *functionState) emitPackedDirectFieldReadAtOrigin(ops *packedStoreOps, h
 			shiftBits := C.LLVMConstInt(uintptrLLVMType, C.ulonglong(byteOffsetInWord*8), 0)
 			wordValue = C.LLVMBuildLShr(s.builder, wordValue, shiftBits, cStringFree(name+".shift"))
 		}
-		return s.coerceValue(wordValue, s.g.result.NamedTypes["uintptr"], fieldType)
+		coerced, err := s.coerceValue(wordValue, s.g.result.NamedTypes["uintptr"], fieldType)
+		if err != nil {
+			return nil, err
+		}
+		if cacheDirectField {
+			s.packedDirectFieldReads[cacheKey] = coerced
+		}
+		return coerced, nil
 	}
 
 	fieldPtr, err := s.createEntryAlloca(name+".tmp", fieldType)
@@ -4577,7 +4606,14 @@ func (s *functionState) emitPackedDirectFieldReadAtOrigin(ops *packedStoreOps, h
 			return nil, err
 		}
 	}
-	return s.loadValue(fieldPtr, fieldType, name+".value")
+	value, err := s.loadValue(fieldPtr, fieldType, name+".value")
+	if err != nil {
+		return nil, err
+	}
+	if cacheDirectField {
+		s.packedDirectFieldReads[cacheKey] = value
+	}
+	return value, nil
 }
 
 func (s *functionState) emitPackSideTableFieldValue(bufferPtr C.LLVMValueRef, byteOffset uint64, fieldValue C.LLVMValueRef, fieldType semantic.Type, name string) error {

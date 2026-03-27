@@ -118,6 +118,19 @@ func (ops *packedStoreOps) canCacheDenseHandleReads(enumType *semantic.EnumType)
 	return ops.currentBlock() != nil
 }
 
+func (ops *packedStoreOps) canCacheDirectReadValues(enumType *semantic.EnumType) bool {
+	if ops == nil || ops.s == nil || ops.s.g == nil || enumType == nil || !enumType.Packed {
+		return false
+	}
+	if !packedModeUsesDirectWordReads(ops.s.g.packedModeForEnum(enumType)) {
+		return false
+	}
+	if ops.storeType == nil || !semantic.IsFrozenPackedEnumStoreType(ops.storeType) {
+		return false
+	}
+	return ops.currentBlock() != nil
+}
+
 func (ops *packedStoreOps) canonicalizeDenseHandleKey(handleValue C.LLVMValueRef) C.LLVMValueRef {
 	if handleValue == nil {
 		return nil
@@ -133,6 +146,16 @@ func (ops *packedStoreOps) canonicalizeDenseHandleKey(handleValue C.LLVMValueRef
 func (ops *packedStoreOps) denseReadCacheIdentity(origin packedReadOriginKey, handleValue C.LLVMValueRef) (packedReadOriginKey, C.LLVMValueRef) {
 	if origin.root != nil {
 		return origin, nil
+	}
+	return packedReadOriginKey{}, ops.canonicalizeDenseHandleKey(handleValue)
+}
+
+func (ops *packedStoreOps) directReadCacheIdentity(enumType *semantic.EnumType, origin packedReadOriginKey, handleValue C.LLVMValueRef) (packedReadOriginKey, C.LLVMValueRef) {
+	if ops == nil {
+		return packedReadOriginKey{}, handleValue
+	}
+	if enumType != nil && packedModeUsesDenseIndexHandle(ops.s.g.packedModeForEnum(enumType)) {
+		return ops.denseReadCacheIdentity(origin, handleValue)
 	}
 	return packedReadOriginKey{}, ops.canonicalizeDenseHandleKey(handleValue)
 }

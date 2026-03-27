@@ -981,6 +981,8 @@ func (s *functionState) invalidatePackedReadCaches() {
 	clear(s.packedDenseTagReads)
 	clear(s.packedDenseWordReads)
 	clear(s.packedDenseSideWordReads)
+	clear(s.packedDirectFieldReads)
+	clear(s.packedVariantPayloadReads)
 }
 
 func (s *functionState) lookupPackedStoreFieldValue(key packedStoreExtractCacheKey) (C.LLVMValueRef, bool) {

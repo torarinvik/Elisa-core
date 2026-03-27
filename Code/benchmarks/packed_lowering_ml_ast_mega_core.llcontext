@@ -122,10 +122,6 @@ def bool_score(value: bool, when_true: i64, when_false: i64) -> i64:
 
 def score_type(node: TypeExpr, forest: any FrozenMlAstForest&) -> i64:
     return match node in forest.types:
-        TypeExpr.Record(label: label, field_ty: TypeExpr.Tuple(left: left, right: right), rest: rest):
-            node.span + node.weight + label + score_type(left, forest) + score_type(right, forest) + score_type(rest, forest) + 17
-        TypeExpr.App(callee: TypeExpr.Arrow(param: param, result: result), arg: arg):
-            node.span + node.weight + score_type(param, forest) + score_type(result, forest) + score_type(arg, forest) + 23
         TypeExpr.Var(symbol: symbol):
             node.span + node.weight + symbol + node.span + 3
         TypeExpr.Tuple(left: left, right: right):
@@ -135,9 +131,19 @@ def score_type(node: TypeExpr, forest: any FrozenMlAstForest&) -> i64:
         TypeExpr.Effect(label: label, carrier: carrier):
             node.span + node.weight + label + score_type(carrier, forest) + 11
         TypeExpr.Record(label: label, field_ty: field_ty, rest: rest):
-            node.span + node.weight + label + score_type(field_ty, forest) + score_type(rest, forest) + 13
+            field_ty_node: TypeExpr = field_ty
+            return node.span + node.weight + label + score_type(rest, forest) + match field_ty in forest.types:
+                TypeExpr.Tuple(left: left, right: right):
+                    score_type(left, forest) + score_type(right, forest) + 17
+                _:
+                    score_type(field_ty_node, forest) + 13
         TypeExpr.App(callee: callee, arg: arg):
-            node.span + node.weight + score_type(callee, forest) + score_type(arg, forest) + 19
+            callee_node: TypeExpr = callee
+            return node.span + node.weight + score_type(arg, forest) + match callee in forest.types:
+                TypeExpr.Arrow(param: param, result: result):
+                    score_type(param, forest) + score_type(result, forest) + 23
+                _:
+                    score_type(callee_node, forest) + 19
 
 def score_pattern(node: Pattern, forest: any FrozenMlAstForest&) -> i64:
     return match node in forest.patterns:

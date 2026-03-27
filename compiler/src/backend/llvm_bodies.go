@@ -64,6 +64,8 @@ type functionState struct {
 	packedDenseTagReads          map[packedDenseTagReadCacheKey]C.LLVMValueRef
 	packedDenseWordReads         map[packedDenseWordReadCacheKey]C.LLVMValueRef
 	packedDenseSideWordReads     map[packedDenseSideWordReadCacheKey]C.LLVMValueRef
+	packedDirectFieldReads       map[packedDirectFieldReadCacheKey]C.LLVMValueRef
+	packedVariantPayloadReads    map[packedVariantPayloadReadCacheKey][]C.LLVMValueRef
 	scopedCleanups               []scopedCleanupBinding
 	poolScopes                   []activePoolBinding
 	scopePool                    []*codegenScope
@@ -144,6 +146,26 @@ type packedDenseSideWordReadCacheKey struct {
 	origin    packedReadOriginKey
 	index     C.LLVMValueRef
 	offset    C.LLVMValueRef
+}
+
+type packedDirectFieldReadCacheKey struct {
+	block    C.LLVMBasicBlockRef
+	store    C.LLVMValueRef
+	enumType *semantic.EnumType
+	origin   packedReadOriginKey
+	handle   C.LLVMValueRef
+	offset   uint64
+	size     uint64
+	typeKey  string
+}
+
+type packedVariantPayloadReadCacheKey struct {
+	block    C.LLVMBasicBlockRef
+	store    C.LLVMValueRef
+	enumType *semantic.EnumType
+	variant  *semantic.EnumVariant
+	origin   packedReadOriginKey
+	handle   C.LLVMValueRef
 }
 
 type packedEnumStorageBinding struct {
@@ -2521,6 +2543,26 @@ func (s *functionState) readPackedEnumVariantPayloadWithStore(handleValue C.LLVM
 	if !ok {
 		return nil, false, nil
 	}
+	var payloadCacheKey packedVariantPayloadReadCacheKey
+	cachePayloadValues := false
+	if ops.canCacheDirectReadValues(enumType) {
+		if s.packedVariantPayloadReads == nil {
+			s.packedVariantPayloadReads = map[packedVariantPayloadReadCacheKey][]C.LLVMValueRef{}
+		}
+		originKey, cacheHandle := ops.directReadCacheIdentity(enumType, origin, handleValue)
+		payloadCacheKey = packedVariantPayloadReadCacheKey{
+			block:    ops.currentBlock(),
+			store:    ops.storeValue,
+			enumType: enumType,
+			variant:  variant,
+			origin:   originKey,
+			handle:   cacheHandle,
+		}
+		if cached, ok := s.packedVariantPayloadReads[payloadCacheKey]; ok && len(cached) == len(variant.Payload) {
+			return cached, true, nil
+		}
+		cachePayloadValues = true
+	}
 	tailIndex, hasTail := variant.TailPayloadIndex()
 	var tailValue C.LLVMValueRef
 	if hasTail {
@@ -2553,6 +2595,9 @@ func (s *functionState) readPackedEnumVariantPayloadWithStore(handleValue C.LLVM
 			return nil, false, err
 		}
 		values = append(values, coerced)
+	}
+	if cachePayloadValues && len(values) == len(variant.Payload) {
+		s.packedVariantPayloadReads[payloadCacheKey] = values
 	}
 	return values, true, nil
 }
@@ -2612,6 +2657,9 @@ func packedMatchShouldEagerDecode(result *semantic.Result, abi packedEnumABIMode
 	ident, ok := matchValue.(*ast.Ident)
 	readsMatchedValueField := ok && matchArmsReadMatchedValueField(ident.Name, arms)
 	if !needsPayloadDecode && !readsMatchedValueField {
+		return false
+	}
+	if store != nil && store.typ != nil && semantic.IsFrozenPackedEnumStoreType(store.typ) && packedModeUsesDirectWordReads(abi) {
 		return false
 	}
 	hasFrozenPackedStoreDeps := false
