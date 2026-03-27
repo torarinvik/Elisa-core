@@ -3507,7 +3507,6 @@ func (a *Analyzer) instantiateReturnProvenance(state regionRefState, args []ast.
 	if !hasRegionProvenance(state) {
 		return regionRefState{}, false
 	}
-	instantiated := regionRefState{}
 	argStates := make([]regionRefState, 0, len(state.ParamDeps))
 	for index := range state.ParamDeps {
 		if index < 0 || index >= len(args) {
@@ -3519,20 +3518,22 @@ func (a *Analyzer) instantiateReturnProvenance(state regionRefState, args []ast.
 		}
 		argStates = append(argStates, argState)
 	}
-	if mergedArgs, ok := mergeRegionRefStates(argStates...); ok {
-		instantiated = mergedArgs
-	}
+	fieldStates := map[string]regionRefState{}
 	if len(state.Fields) != 0 {
 		for name, fieldState := range state.Fields {
 			instField, ok := a.instantiateReturnProvenance(fieldState, args)
 			if !ok {
 				continue
 			}
-			if instantiated.Fields == nil {
-				instantiated.Fields = map[string]regionRefState{}
-			}
-			instantiated.Fields[name] = instField
+			fieldStates[name] = instField
 		}
+	}
+	if len(fieldStates) != 0 {
+		return mergeRegionRefStatesWithExplicitFields(argStates, fieldStates)
+	}
+	instantiated := regionRefState{}
+	if mergedArgs, ok := mergeRegionRefStates(argStates...); ok {
+		instantiated = mergedArgs
 	}
 	if !hasRegionProvenance(instantiated) {
 		return regionRefState{}, false

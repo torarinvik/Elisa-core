@@ -304,3 +304,58 @@ func TestMergeRegionRefStatesWithExplicitFieldsKeepsOverlayMutationLocal(t *test
 		t.Fatalf("expected merged overlay field map to gain the inserted field")
 	}
 }
+
+func TestInstantiateReturnProvenanceKeepsOverlayMutationLocal(t *testing.T) {
+	left := &Symbol{Name: "left", Kind: SymbolLocal}
+	right := &Symbol{Name: "right", Kind: SymbolLocal}
+	scope := NewScope(nil)
+	scope.Define(left)
+	scope.Define(right)
+
+	a := &Analyzer{
+		currentScope: scope,
+		currentRegionRefs: map[*Symbol]regionRefState{
+			left: {
+				ParamDeps: map[int]bool{9: true},
+			},
+			right: {
+				Fields: map[string]regionRefState{
+					"inner": {
+						ParamDeps: map[int]bool{7: true},
+					},
+				},
+			},
+		},
+	}
+
+	summary := regionRefState{
+		ParamDeps: map[int]bool{0: true},
+		Fields: map[string]regionRefState{
+			"slot": {
+				ParamDeps: map[int]bool{1: true},
+			},
+		},
+	}
+
+	instantiated, ok := a.instantiateReturnProvenance(summary, []ast.Expr{
+		&ast.Ident{Name: "left"},
+		&ast.Ident{Name: "right"},
+	})
+	if !ok {
+		t.Fatalf("expected instantiateReturnProvenance to resolve explicit field overlays")
+	}
+	if !instantiated.ParamDeps[9] {
+		t.Fatalf("expected instantiated return provenance to include top-level argument provenance")
+	}
+
+	updated := assignRegionRefStateAtPath(instantiated, []borrowReturnAnnotationStep{{Field: "slot"}, {Field: "extra"}}, regionRefState{
+		ParamDeps: map[int]bool{2: true},
+	})
+
+	if _, ok := a.currentRegionRefs[right].Fields["extra"]; ok {
+		t.Fatalf("expected original argument field map to remain unchanged")
+	}
+	if _, ok := updated.Fields["slot"].Fields["extra"]; !ok {
+		t.Fatalf("expected instantiated overlay field map to gain the inserted field")
+	}
+}

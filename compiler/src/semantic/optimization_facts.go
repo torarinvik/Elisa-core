@@ -432,11 +432,34 @@ func (a *Analyzer) inferExprOptimizationFacts(expr ast.Expr, t Type) Optimizatio
 	case *ast.UnwrapElseExpr:
 		facts = a.inferRecoveredExprOptimizationFacts(n.Value, n.Fallback, facts)
 	}
-	if provenance, ok := a.exprPackedStoreProvenance(expr); ok {
-		facts.PackedStoreProvenance = provenance
-		facts.FrozenPackedStoreOnly = provenance.DependsOnlyOnFrozenPackedStores()
+	if typeMayCarryRegionProvenanceForOptimization(t) {
+		if provenance, ok := a.exprPackedStoreProvenance(expr); ok {
+			facts.PackedStoreProvenance = provenance
+			facts.FrozenPackedStoreOnly = provenance.DependsOnlyOnFrozenPackedStores()
+		}
 	}
 	return facts
+}
+
+func typeMayCarryRegionProvenanceForOptimization(t Type) bool {
+	switch tt := t.(type) {
+	case nil:
+		return false
+	case *InvalidType, *NeverType, *NullType, *BuiltinType, *RefStorageParamType, *RefStorageValueType, *RefStateParamType, *RefStateValueType, *ErrorSetType, *ConstEnumType, *FuncType, *OpaqueType:
+		return false
+	case *ErrorUnionType:
+		return typeMayCarryRegionProvenanceForOptimization(tt.Value)
+	case *OptionalType:
+		return typeMayCarryRegionProvenanceForOptimization(tt.Value)
+	case *ArrayType:
+		return typeMayCarryRegionProvenanceForOptimization(tt.Elem)
+	case *DictType:
+		return typeMayCarryRegionProvenanceForOptimization(tt.Key) || typeMayCarryRegionProvenanceForOptimization(tt.Value)
+	case *AggregateStateType:
+		return typeMayCarryRegionProvenanceForOptimization(tt.Base)
+	default:
+		return true
+	}
 }
 
 func (a *Analyzer) inferRecoveredExprOptimizationFacts(value ast.Expr, fallback ast.Expr, facts OptimizationFacts) OptimizationFacts {

@@ -5,6 +5,7 @@ import (
 	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
+	"unsafe"
 )
 
 type Lexer struct {
@@ -190,11 +191,11 @@ func (l *Lexer) readString() Token {
 		ch := l.peek()
 		if ch == '"' {
 			l.advance()
-			return Token{Kind: TOKEN_STRING_LIT, Text: string(decoded), Pos: p}
+			return Token{Kind: TOKEN_STRING_LIT, Text: bytesToStringView(decoded), Pos: p}
 		}
 		if ch == '\n' {
 			l.reportErrorAt(p, "unterminated string literal")
-			return Token{Kind: TOKEN_STRING_LIT, Text: string(decoded), Pos: p}
+			return Token{Kind: TOKEN_STRING_LIT, Text: bytesToStringView(decoded), Pos: p}
 		}
 		if ch != '\\' {
 			decoded = append(decoded, ch)
@@ -206,7 +207,7 @@ func (l *Lexer) readString() Token {
 		l.advance() // consume backslash
 		if l.pos >= len(l.src) {
 			l.reportErrorAt(escapePos, "unterminated escape sequence in string literal")
-			return Token{Kind: TOKEN_STRING_LIT, Text: string(decoded), Pos: p}
+			return Token{Kind: TOKEN_STRING_LIT, Text: bytesToStringView(decoded), Pos: p}
 		}
 
 		esc := l.peek()
@@ -268,7 +269,7 @@ func (l *Lexer) readString() Token {
 			decoded = utf8.AppendRune(decoded, rune(value))
 		case '\n':
 			l.reportErrorAt(p, "unterminated string literal")
-			return Token{Kind: TOKEN_STRING_LIT, Text: string(decoded), Pos: p}
+			return Token{Kind: TOKEN_STRING_LIT, Text: bytesToStringView(decoded), Pos: p}
 		default:
 			l.reportErrorAt(escapePos, "invalid escape sequence \\\\%c in string literal", esc)
 			l.advance()
@@ -276,7 +277,7 @@ func (l *Lexer) readString() Token {
 	}
 
 	l.reportErrorAt(p, "unterminated string literal")
-	return Token{Kind: TOKEN_STRING_LIT, Text: string(decoded), Pos: p}
+	return Token{Kind: TOKEN_STRING_LIT, Text: bytesToStringView(decoded), Pos: p}
 }
 
 func (l *Lexer) readFixedHexDigits(count int) (int, bool) {
@@ -300,7 +301,7 @@ func (l *Lexer) readNumber() Token {
 		for l.pos < len(l.src) && isHexDigit(l.peek()) {
 			l.advance()
 		}
-		text := string(l.src[start:l.pos])
+		text := bytesToStringView(l.src[start:l.pos])
 		suffix := l.readTypeSuffix()
 		return Token{Kind: TOKEN_HEX_LIT, Text: text, Pos: p, Suffix: suffix}
 	}
@@ -332,7 +333,7 @@ func (l *Lexer) readNumber() Token {
 			}
 		}
 	}
-	text := string(l.src[start:l.pos])
+	text := bytesToStringView(l.src[start:l.pos])
 	suffix := l.readTypeSuffix()
 	if suffix == "f32" || suffix == "f64" {
 		isFloat = true
@@ -392,7 +393,7 @@ func (l *Lexer) readTypeSuffix() string {
 	for l.pos < len(l.src) && (isDigit(l.peek()) || isAlpha(l.peek())) {
 		l.advance()
 	}
-	suffix := string(l.src[start:l.pos])
+	suffix := bytesToStringView(l.src[start:l.pos])
 
 	// Validate known suffixes
 	switch suffix {
@@ -419,7 +420,7 @@ func (l *Lexer) readIdent() Token {
 		}
 		l.advanceRune()
 	}
-	text := string(l.src[start:l.pos])
+	text := bytesToStringView(l.src[start:l.pos])
 	kind := LookupKeyword(text)
 	return Token{Kind: kind, Text: text, Pos: p}
 }
@@ -676,7 +677,7 @@ func (l *Lexer) NextToken() Token {
 
 // Tokenize returns all tokens from the source.
 func (l *Lexer) Tokenize() []Token {
-	var tokens []Token
+	tokens := make([]Token, 0, max(16, len(l.src)/4))
 	for {
 		tok := l.NextToken()
 		tokens = append(tokens, tok)
@@ -685,6 +686,13 @@ func (l *Lexer) Tokenize() []Token {
 		}
 	}
 	return tokens
+}
+
+func bytesToStringView(src []byte) string {
+	if len(src) == 0 {
+		return ""
+	}
+	return unsafe.String(unsafe.SliceData(src), len(src))
 }
 
 func isDigit(ch byte) bool {

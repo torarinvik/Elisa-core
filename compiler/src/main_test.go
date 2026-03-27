@@ -564,6 +564,34 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 	}
 }
 
+func TestReadSourceWithIncludesPreservesIncludeBoundariesWithoutTrailingNewlines(t *testing.T) {
+	dir := t.TempDir()
+	leafPath := filepath.Join(dir, "leaf.llcontext")
+	midPath := filepath.Join(dir, "mid.llcontext")
+	rootPath := filepath.Join(dir, "root.llcontext")
+
+	if err := os.WriteFile(leafPath, []byte("leaf_line"), 0o644); err != nil {
+		t.Fatalf("write leaf fixture: %v", err)
+	}
+	if err := os.WriteFile(midPath, []byte("# include \"leaf.llcontext\"\nmid_line"), 0o644); err != nil {
+		t.Fatalf("write mid fixture: %v", err)
+	}
+	if err := os.WriteFile(rootPath, []byte("root_start\n# include \"mid.llcontext\"\nroot_end"), 0o644); err != nil {
+		t.Fatalf("write root fixture: %v", err)
+	}
+
+	expanded, err := readSourceWithIncludes(rootPath, map[string]bool{})
+	if err != nil {
+		t.Fatalf("readSourceWithIncludes: %v", err)
+	}
+
+	got := string(expanded)
+	want := "root_start\nleaf_line\nmid_line\nroot_end"
+	if got != want {
+		t.Fatalf("unexpected expanded source:\nwant %q\ngot  %q", want, got)
+	}
+}
+
 func TestRunCLIEmitsBitcodeAndObjectForFixtureProgram(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "pointer_alloc.llcontext")

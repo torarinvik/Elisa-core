@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"llcontext/src/ast"
@@ -400,42 +401,60 @@ func outputPathForEmit(inputPath string, explicit string, ext string) string {
 }
 
 func readSourceWithIncludes(filename string, seen map[string]bool) ([]byte, error) {
-	abs, err := filepath.Abs(filename)
-	if err != nil {
+	var out bytes.Buffer
+	if err := writeSourceWithIncludes(&out, filename, seen); err != nil {
 		return nil, err
 	}
+	return out.Bytes(), nil
+}
+
+func writeSourceWithIncludes(out *bytes.Buffer, filename string, seen map[string]bool) error {
+	abs, err := filepath.Abs(filename)
+	if err != nil {
+		return err
+	}
 	if seen[abs] {
-		return nil, fmt.Errorf("cyclic include detected for %s", abs)
+		return fmt.Errorf("cyclic include detected for %s", abs)
 	}
 	seen[abs] = true
 	defer delete(seen, abs)
 
 	raw, err := os.ReadFile(abs)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	lines := strings.Split(string(raw), "\n")
-	var out strings.Builder
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if includePath, ok := parseIncludeDirective(trimmed); ok {
-			included, err := readSourceWithIncludes(filepath.Join(filepath.Dir(abs), includePath), seen)
-			if err != nil {
-				return nil, err
+	out.Grow(len(raw))
+	start := 0
+	for start <= len(raw) {
+		end := bytes.IndexByte(raw[start:], '\n')
+		hasNewline := end >= 0
+		if hasNewline {
+			end += start
+		} else {
+			end = len(raw)
+		}
+		line := raw[start:end]
+		if includePath, ok := parseIncludeDirectiveBytes(bytes.TrimSpace(line)); ok {
+			outLenBefore := out.Len()
+			if err := writeSourceWithIncludes(out, filepath.Join(filepath.Dir(abs), includePath), seen); err != nil {
+				return err
 			}
-			out.Write(included)
-			if len(included) == 0 || included[len(included)-1] != '\n' {
+			if out.Len() == outLenBefore || out.Bytes()[out.Len()-1] != '\n' {
 				out.WriteByte('\n')
 			}
-			continue
+		} else {
+			out.Write(line)
+			if hasNewline {
+				out.WriteByte('\n')
+			}
 		}
-		out.WriteString(line)
-		if i < len(lines)-1 {
-			out.WriteByte('\n')
+		if !hasNewline {
+			break
 		}
+		start = end + 1
 	}
-	return []byte(out.String()), nil
+	return nil
 }
 
 func parseIncludeDirective(line string) (string, bool) {
@@ -447,6 +466,18 @@ func parseIncludeDirective(line string) (string, bool) {
 		return "", false
 	}
 	return rest[1 : len(rest)-1], true
+}
+
+func parseIncludeDirectiveBytes(line []byte) (string, bool) {
+	const prefix = "# include "
+	if !bytes.HasPrefix(line, []byte(prefix)) {
+		return "", false
+	}
+	rest := bytes.TrimSpace(line[len(prefix):])
+	if len(rest) < 2 || rest[0] != '"' || rest[len(rest)-1] != '"' {
+		return "", false
+	}
+	return string(rest[1 : len(rest)-1]), true
 }
 
 func printFile(w io.Writer, f *ast.File) {
