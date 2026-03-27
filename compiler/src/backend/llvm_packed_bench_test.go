@@ -218,6 +218,8 @@ packed enum TypeExpr:
     Apply(callee: TypeExpr, arg: TypeExpr)
     Func(param: TypeExpr, result: TypeExpr)
     Effect(label: i64, carrier: TypeExpr)
+    Tuple(first: TypeExpr, second: TypeExpr, rest: TypeExpr)
+    Optional(inner: TypeExpr, fallback: TypeExpr)
 
 @packed_profile(retained_reads)
 packed enum Pattern:
@@ -228,6 +230,7 @@ packed enum Pattern:
     Tuple(left: Pattern, right: Pattern)
     Annotated(inner: Pattern, ann: TypeExpr)
     Destructure(head: Pattern, rest: Pattern, ann: TypeExpr)
+    Alias(symbol: i64, inner: Pattern, ann: TypeExpr)
 
 @packed_profile(retained_reads)
 packed enum Expr:
@@ -240,6 +243,8 @@ packed enum Expr:
     Construct(pattern: Pattern, body: Expr, ty: TypeExpr)
     Select(base: Expr, field: i64, ty: TypeExpr)
     LetExpr(pattern: Pattern, value: Expr, body: Expr, ty: TypeExpr)
+    Binary(op: i64, left: Expr, right: Expr, ty: TypeExpr)
+    Match(scrutinee: Expr, binder: Pattern, on_match: Expr, on_miss: Expr, ty: TypeExpr)
 
 @packed_profile(retained_reads)
 packed enum Stmt:
@@ -250,6 +255,8 @@ packed enum Stmt:
     If(cond: Expr, then_branch: Stmt, else_branch: Stmt)
     Block(first: Stmt, second: Stmt, result_expr: Expr)
     While(cond: Expr, body: Stmt, next: Stmt)
+    Assign(target: Pattern, value: Expr, next: Stmt)
+    ExprStmt(value: Expr, next: Stmt)
     Return(value: Expr)
 
 @packed_profile(retained_reads)
@@ -262,6 +269,7 @@ packed enum Decl:
     Entry(initializer: Expr, script: Stmt, summary: Expr)
     Nested(name: i64, signature: TypeExpr, body: Stmt, inner: Decl)
     Bundle(left: Decl, right: Decl)
+    Module(name: i64, exports: TypeExpr, bootstrap: Stmt, inner: Decl)
 
 def score_type(node: TypeExpr, frozen: TypeExpr.Store[Frozen]) -> i64:
     return match node in frozen:
@@ -273,6 +281,10 @@ def score_type(node: TypeExpr, frozen: TypeExpr.Store[Frozen]) -> i64:
             node.span + node.weight + score_type(param, frozen) + score_type(result, frozen) + node.span + node.weight
         TypeExpr.Effect(label: label, carrier: carrier):
             node.span + node.weight + label + score_type(carrier, frozen) + node.span + node.weight
+        TypeExpr.Tuple(first: first, second: second, rest: rest):
+            node.span + node.weight + score_type(first, frozen) + score_type(second, frozen) + score_type(rest, frozen) + node.span + node.weight
+        TypeExpr.Optional(inner: inner, fallback: fallback):
+            node.span + node.weight + score_type(inner, frozen) + score_type(fallback, frozen) + node.span + node.weight
 
 def score_pattern(node: Pattern, frozen: Pattern.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
     return match node in frozen:
@@ -284,6 +296,8 @@ def score_pattern(node: Pattern, frozen: Pattern.Store[Frozen], types: TypeExpr.
             node.span + node.weight + score_pattern(inner, frozen, types) + score_type(ann, types) + node.span + node.weight
         Pattern.Destructure(head: head, rest: rest, ann: ann):
             node.span + node.weight + score_pattern(head, frozen, types) + score_pattern(rest, frozen, types) + score_type(ann, types) + node.span + node.weight
+        Pattern.Alias(symbol: symbol, inner: inner, ann: ann):
+            node.span + node.weight + symbol + score_pattern(inner, frozen, types) + score_type(ann, types) + node.span + node.weight
 
 def score_expr(node: Expr, frozen: Expr.Store[Frozen], patterns: Pattern.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
     return match node in frozen:
@@ -299,6 +313,10 @@ def score_expr(node: Expr, frozen: Expr.Store[Frozen], patterns: Pattern.Store[F
             node.span + node.cost + score_expr(base, frozen, patterns, types) + field + score_type(ty, types) + node.span + node.cost
         Expr.LetExpr(pattern: pattern, value: value, body: body, ty: ty):
             node.span + node.cost + score_pattern(pattern, patterns, types) + score_expr(value, frozen, patterns, types) + score_expr(body, frozen, patterns, types) + score_type(ty, types) + node.span + node.cost
+        Expr.Binary(op: op, left: left, right: right, ty: ty):
+            node.span + node.cost + op + score_expr(left, frozen, patterns, types) + score_expr(right, frozen, patterns, types) + score_type(ty, types) + node.span + node.cost
+        Expr.Match(scrutinee: scrutinee, binder: binder, on_match: on_match, on_miss: on_miss, ty: ty):
+            node.span + node.cost + score_expr(scrutinee, frozen, patterns, types) + score_pattern(binder, patterns, types) + score_expr(on_match, frozen, patterns, types) + score_expr(on_miss, frozen, patterns, types) + score_type(ty, types) + node.span + node.cost
 
 def score_stmt(node: Stmt, frozen: Stmt.Store[Frozen], exprs: Expr.Store[Frozen], patterns: Pattern.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
     return match node in frozen:
@@ -310,6 +328,10 @@ def score_stmt(node: Stmt, frozen: Stmt.Store[Frozen], exprs: Expr.Store[Frozen]
             node.span + node.effect + score_stmt(first, frozen, exprs, patterns, types) + score_stmt(second, frozen, exprs, patterns, types) + score_expr(result_expr, exprs, patterns, types) + node.span + node.effect
         Stmt.While(cond: cond, body: body, next: next):
             node.span + node.effect + score_expr(cond, exprs, patterns, types) + score_stmt(body, frozen, exprs, patterns, types) + score_stmt(next, frozen, exprs, patterns, types) + node.span + node.effect
+        Stmt.Assign(target: target, value: value, next: next):
+            node.span + node.effect + score_pattern(target, patterns, types) + score_expr(value, exprs, patterns, types) + score_stmt(next, frozen, exprs, patterns, types) + node.span + node.effect
+        Stmt.ExprStmt(value: value, next: next):
+            node.span + node.effect + score_expr(value, exprs, patterns, types) + score_stmt(next, frozen, exprs, patterns, types) + node.span + node.effect
         Stmt.Return(value: value):
             node.span + node.effect + score_expr(value, exprs, patterns, types) + node.span + node.effect
 
@@ -325,6 +347,8 @@ def score_decl(node: Decl, frozen: Decl.Store[Frozen], stmts: Stmt.Store[Frozen]
             node.span + node.phase + name + score_type(signature, types) + score_stmt(body, stmts, exprs, patterns, types) + score_decl(inner, frozen, stmts, exprs, patterns, types) + node.span + node.phase
         Decl.Bundle(left: left, right: right):
             node.span + node.phase + score_decl(left, frozen, stmts, exprs, patterns, types) + score_decl(right, frozen, stmts, exprs, patterns, types) + node.span + node.phase
+        Decl.Module(name: name, exports: exports, bootstrap: bootstrap, inner: inner):
+            node.span + node.phase + name + score_type(exports, types) + score_stmt(bootstrap, stmts, exprs, patterns, types) + score_decl(inner, frozen, stmts, exprs, patterns, types) + node.span + node.phase
 
 def checksum_language_ast(decls: Decl.Store[Frozen], stmts: Stmt.Store[Frozen], exprs: Expr.Store[Frozen], patterns: Pattern.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
     total: mutable i64 = 0
@@ -335,7 +359,7 @@ def checksum_language_ast(decls: Decl.Store[Frozen], stmts: Stmt.Store[Frozen], 
     return total
 
 def build_and_checksum_mega() -> i64:
-    region scratch(16384u)
+    region scratch(32768u)
     type_store: TypeExpr.Store[Local] = TypeExpr.Store(scratch)
     pattern_store: Pattern.Store[Local] = Pattern.Store(scratch)
     expr_store: Expr.Store[Local] = Expr.Store(scratch)
@@ -344,38 +368,65 @@ def build_and_checksum_mega() -> i64:
 
     token_ty: TypeExpr = new[type_store] TypeExpr.Name(span: 1, weight: 1, symbol: 11)
     trivia_ty: TypeExpr = new[type_store] TypeExpr.Name(span: 2, weight: 1, symbol: 12)
-    effect_ty: TypeExpr = new[type_store] TypeExpr.Effect(span: 3, weight: 2, label: 91, carrier: token_ty)
-    list_ty: TypeExpr = new[type_store] TypeExpr.Apply(span: 4, weight: 3, callee: trivia_ty, arg: token_ty)
-    nested_ty: TypeExpr = new[type_store] TypeExpr.Apply(span: 5, weight: 4, callee: list_ty, arg: effect_ty)
-    fn_ty: TypeExpr = new[type_store] TypeExpr.Func(span: 6, weight: 5, param: nested_ty, result: token_ty)
-    parser_ty: TypeExpr = new[type_store] TypeExpr.Func(span: 7, weight: 6, param: fn_ty, result: nested_ty)
+    stream_ty: TypeExpr = new[type_store] TypeExpr.Name(span: 3, weight: 2, symbol: 13)
+    node_ty: TypeExpr = new[type_store] TypeExpr.Name(span: 4, weight: 2, symbol: 14)
+    effect_ty: TypeExpr = new[type_store] TypeExpr.Effect(span: 5, weight: 3, label: 91, carrier: token_ty)
+    list_ty: TypeExpr = new[type_store] TypeExpr.Apply(span: 6, weight: 4, callee: trivia_ty, arg: token_ty)
+    nested_ty: TypeExpr = new[type_store] TypeExpr.Apply(span: 7, weight: 5, callee: list_ty, arg: effect_ty)
+    tuple_ty: TypeExpr = new[type_store] TypeExpr.Tuple(span: 8, weight: 6, first: token_ty, second: stream_ty, rest: nested_ty)
+    parser_state_ty: TypeExpr = new[type_store] TypeExpr.Optional(span: 9, weight: 7, inner: tuple_ty, fallback: trivia_ty)
+    fn_ty: TypeExpr = new[type_store] TypeExpr.Func(span: 10, weight: 8, param: nested_ty, result: token_ty)
+    parser_ty: TypeExpr = new[type_store] TypeExpr.Func(span: 11, weight: 9, param: fn_ty, result: parser_state_ty)
+    result_ty: TypeExpr = new[type_store] TypeExpr.Tuple(span: 12, weight: 10, first: parser_ty, second: node_ty, rest: effect_ty)
+    optional_parser_ty: TypeExpr = new[type_store] TypeExpr.Optional(span: 13, weight: 11, inner: parser_ty, fallback: result_ty)
+    module_ty: TypeExpr = new[type_store] TypeExpr.Func(span: 14, weight: 12, param: optional_parser_ty, result: tuple_ty)
 
-    bind_pat: Pattern = new[pattern_store] Pattern.Bind(span: 8, weight: 1, symbol: 31, ann: token_ty)
-    tuple_pat: Pattern = new[pattern_store] Pattern.Tuple(span: 9, weight: 2, left: bind_pat, right: bind_pat)
-    ann_pat: Pattern = new[pattern_store] Pattern.Annotated(span: 10, weight: 3, inner: tuple_pat, ann: fn_ty)
-    destruct_pat: Pattern = new[pattern_store] Pattern.Destructure(span: 11, weight: 4, head: ann_pat, rest: tuple_pat, ann: parser_ty)
+    bind_pat: Pattern = new[pattern_store] Pattern.Bind(span: 15, weight: 1, symbol: 31, ann: token_ty)
+    tuple_pat: Pattern = new[pattern_store] Pattern.Tuple(span: 16, weight: 2, left: bind_pat, right: bind_pat)
+    ann_pat: Pattern = new[pattern_store] Pattern.Annotated(span: 17, weight: 3, inner: tuple_pat, ann: fn_ty)
+    destruct_pat: Pattern = new[pattern_store] Pattern.Destructure(span: 18, weight: 4, head: ann_pat, rest: tuple_pat, ann: parser_ty)
+    alias_pat: Pattern = new[pattern_store] Pattern.Alias(span: 19, weight: 5, symbol: 32, inner: destruct_pat, ann: optional_parser_ty)
+    module_pat: Pattern = new[pattern_store] Pattern.Tuple(span: 20, weight: 6, left: alias_pat, right: ann_pat)
+    state_pat: Pattern = new[pattern_store] Pattern.Annotated(span: 21, weight: 7, inner: module_pat, ann: module_ty)
 
-    lit_expr: Expr = new[expr_store] Expr.Int(span: 12, cost: 1, value: 99)
-    name_expr: Expr = new[expr_store] Expr.Name(span: 13, cost: 2, symbol: 41, ty: token_ty)
-    select_expr: Expr = new[expr_store] Expr.Select(span: 14, cost: 3, base: name_expr, field: 7, ty: list_ty)
-    call_expr: Expr = new[expr_store] Expr.Call(span: 15, cost: 4, callee: select_expr, arg: lit_expr, ty: fn_ty)
-    ctor_expr: Expr = new[expr_store] Expr.Construct(span: 16, cost: 5, pattern: destruct_pat, body: call_expr, ty: nested_ty)
-    let_expr: Expr = new[expr_store] Expr.LetExpr(span: 17, cost: 6, pattern: ann_pat, value: ctor_expr, body: select_expr, ty: parser_ty)
-    chain_expr: Expr = new[expr_store] Expr.Call(span: 18, cost: 7, callee: let_expr, arg: ctor_expr, ty: parser_ty)
+    lit_expr: Expr = new[expr_store] Expr.Int(span: 22, cost: 1, value: 99)
+    zero_expr: Expr = new[expr_store] Expr.Int(span: 23, cost: 1, value: 0)
+    name_expr: Expr = new[expr_store] Expr.Name(span: 24, cost: 2, symbol: 41, ty: token_ty)
+    state_expr: Expr = new[expr_store] Expr.Name(span: 25, cost: 3, symbol: 42, ty: parser_state_ty)
+    select_expr: Expr = new[expr_store] Expr.Select(span: 26, cost: 4, base: name_expr, field: 7, ty: list_ty)
+    nested_select_expr: Expr = new[expr_store] Expr.Select(span: 27, cost: 5, base: state_expr, field: 9, ty: tuple_ty)
+    call_expr: Expr = new[expr_store] Expr.Call(span: 28, cost: 6, callee: select_expr, arg: lit_expr, ty: fn_ty)
+    ctor_expr: Expr = new[expr_store] Expr.Construct(span: 29, cost: 7, pattern: destruct_pat, body: call_expr, ty: nested_ty)
+    let_expr: Expr = new[expr_store] Expr.LetExpr(span: 30, cost: 8, pattern: ann_pat, value: ctor_expr, body: select_expr, ty: parser_ty)
+    binary_expr: Expr = new[expr_store] Expr.Binary(span: 31, cost: 9, op: 61, left: call_expr, right: nested_select_expr, ty: result_ty)
+    match_expr: Expr = new[expr_store] Expr.Match(span: 32, cost: 10, scrutinee: binary_expr, binder: alias_pat, on_match: let_expr, on_miss: ctor_expr, ty: optional_parser_ty)
+    chain_expr: Expr = new[expr_store] Expr.Call(span: 33, cost: 11, callee: let_expr, arg: match_expr, ty: parser_ty)
+    replay_expr: Expr = new[expr_store] Expr.Binary(span: 34, cost: 12, op: 62, left: chain_expr, right: binary_expr, ty: module_ty)
+    fold_expr: Expr = new[expr_store] Expr.Match(span: 35, cost: 13, scrutinee: replay_expr, binder: state_pat, on_match: chain_expr, on_miss: zero_expr, ty: result_ty)
+    bootstrap_expr: Expr = new[expr_store] Expr.LetExpr(span: 36, cost: 14, pattern: module_pat, value: fold_expr, body: replay_expr, ty: module_ty)
 
-    ret_stmt: Stmt = new[stmt_store] Stmt.Return(span: 19, effect: 1, value: chain_expr)
-    let_stmt: Stmt = new[stmt_store] Stmt.Let(span: 20, effect: 2, pattern: destruct_pat, ann: parser_ty, value: let_expr, next: ret_stmt)
-    block_stmt: Stmt = new[stmt_store] Stmt.Block(span: 21, effect: 3, first: let_stmt, second: ret_stmt, result_expr: chain_expr)
-    while_stmt: Stmt = new[stmt_store] Stmt.While(span: 22, effect: 4, cond: select_expr, body: block_stmt, next: let_stmt)
-    if_stmt: Stmt = new[stmt_store] Stmt.If(span: 23, effect: 5, cond: name_expr, then_branch: while_stmt, else_branch: block_stmt)
-    mega_block: Stmt = new[stmt_store] Stmt.Block(span: 24, effect: 6, first: if_stmt, second: while_stmt, result_expr: let_expr)
+    ret_stmt: Stmt = new[stmt_store] Stmt.Return(span: 37, effect: 1, value: fold_expr)
+    expr_stmt: Stmt = new[stmt_store] Stmt.ExprStmt(span: 38, effect: 2, value: bootstrap_expr, next: ret_stmt)
+    assign_stmt: Stmt = new[stmt_store] Stmt.Assign(span: 39, effect: 3, target: alias_pat, value: match_expr, next: expr_stmt)
+    let_stmt: Stmt = new[stmt_store] Stmt.Let(span: 40, effect: 4, pattern: destruct_pat, ann: parser_ty, value: let_expr, next: assign_stmt)
+    block_stmt: Stmt = new[stmt_store] Stmt.Block(span: 41, effect: 5, first: let_stmt, second: expr_stmt, result_expr: chain_expr)
+    while_stmt: Stmt = new[stmt_store] Stmt.While(span: 42, effect: 6, cond: select_expr, body: block_stmt, next: let_stmt)
+    if_stmt: Stmt = new[stmt_store] Stmt.If(span: 43, effect: 7, cond: name_expr, then_branch: while_stmt, else_branch: block_stmt)
+    dispatch_stmt: Stmt = new[stmt_store] Stmt.Block(span: 44, effect: 8, first: assign_stmt, second: if_stmt, result_expr: bootstrap_expr)
+    mega_block: Stmt = new[stmt_store] Stmt.Block(span: 45, effect: 9, first: dispatch_stmt, second: while_stmt, result_expr: fold_expr)
+    final_stmt: Stmt = new[stmt_store] Stmt.ExprStmt(span: 46, effect: 10, value: replay_expr, next: mega_block)
 
-    leaf_decl: Decl = new[decl_store] Decl.TypeAlias(span: 25, phase: 1, name: 71, target: parser_ty)
-    fun_decl: Decl = new[decl_store] Decl.Fun(span: 26, phase: 2, name: 72, param: destruct_pat, signature: parser_ty, body: mega_block)
-    nested_decl: Decl = new[decl_store] Decl.Nested(span: 27, phase: 3, name: 73, signature: fn_ty, body: if_stmt, inner: fun_decl)
-    entry_decl: Decl = new[decl_store] Decl.Entry(span: 28, phase: 4, initializer: chain_expr, script: mega_block, summary: let_expr)
-    bundle_left: Decl = new[decl_store] Decl.Bundle(span: 29, phase: 5, left: nested_decl, right: entry_decl)
-    _ = new[decl_store] Decl.Bundle(span: 30, phase: 6, left: bundle_left, right: leaf_decl)
+    leaf_decl: Decl = new[decl_store] Decl.TypeAlias(span: 47, phase: 1, name: 71, target: parser_ty)
+    result_decl: Decl = new[decl_store] Decl.TypeAlias(span: 48, phase: 2, name: 72, target: result_ty)
+    fun_decl: Decl = new[decl_store] Decl.Fun(span: 49, phase: 3, name: 73, param: destruct_pat, signature: parser_ty, body: mega_block)
+    helper_decl: Decl = new[decl_store] Decl.Fun(span: 50, phase: 4, name: 74, param: alias_pat, signature: module_ty, body: final_stmt)
+    nested_decl: Decl = new[decl_store] Decl.Nested(span: 51, phase: 5, name: 75, signature: fn_ty, body: if_stmt, inner: fun_decl)
+    entry_decl: Decl = new[decl_store] Decl.Entry(span: 52, phase: 6, initializer: chain_expr, script: mega_block, summary: let_expr)
+    module_decl: Decl = new[decl_store] Decl.Module(span: 53, phase: 7, name: 76, exports: result_ty, bootstrap: final_stmt, inner: helper_decl)
+    bundle_left: Decl = new[decl_store] Decl.Bundle(span: 54, phase: 8, left: nested_decl, right: entry_decl)
+    bundle_right: Decl = new[decl_store] Decl.Bundle(span: 55, phase: 9, left: module_decl, right: result_decl)
+    outer_bundle: Decl = new[decl_store] Decl.Bundle(span: 56, phase: 10, left: bundle_left, right: bundle_right)
+    _ = new[decl_store] Decl.Bundle(span: 57, phase: 11, left: outer_bundle, right: leaf_decl)
 
     frozen_types: TypeExpr.Store[Frozen] = freeze(move type_store)
     frozen_patterns: Pattern.Store[Frozen] = freeze(move pattern_store)
@@ -385,6 +436,9 @@ def build_and_checksum_mega() -> i64:
 
     total: mutable i64 = checksum_language_ast(frozen_decls, frozen_stmts, frozen_exprs, frozen_patterns, frozen_types)
     total <- total + checksum_language_ast(frozen_decls, frozen_stmts, frozen_exprs, frozen_patterns, frozen_types)
+    total <- total + score_decl(module_decl, frozen_decls, frozen_stmts, frozen_exprs, frozen_patterns, frozen_types)
+    total <- total + score_stmt(final_stmt, frozen_stmts, frozen_exprs, frozen_patterns, frozen_types)
+    total <- total + score_expr(bootstrap_expr, frozen_exprs, frozen_patterns, frozen_types)
     return total
 `
 
