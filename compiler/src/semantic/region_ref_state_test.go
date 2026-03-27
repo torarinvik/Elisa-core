@@ -178,3 +178,71 @@ func TestCloneRegionRefStatesKeepsFieldInsertionLocal(t *testing.T) {
 		t.Fatalf("expected cloned region ref state field map to gain the inserted field")
 	}
 }
+
+func TestCloneRegionRefStatesKeepsDependencyInvalidationLocal(t *testing.T) {
+	value := &Symbol{Name: "value", Kind: SymbolLocal}
+	region := &Symbol{Name: "scratch", Kind: SymbolRegion}
+	a := &Analyzer{
+		currentRegionRefs: map[*Symbol]regionRefState{
+			value: {
+				Deps: map[*Symbol]regionDependencyState{
+					region: {Generation: 1, Valid: true},
+				},
+			},
+		},
+	}
+
+	cloned := a.cloneRegionRefStates()
+	updated, changed := invalidateRegionDependencyInState(cloned[value], region, nil, "test")
+	if !changed {
+		t.Fatalf("expected invalidateRegionDependencyInState to report a change")
+	}
+	cloned[value] = updated
+
+	if dep := a.currentRegionRefs[value].Deps[region]; !dep.Valid {
+		t.Fatalf("expected original region dependency to remain valid")
+	}
+	if dep := cloned[value].Deps[region]; dep.Valid {
+		t.Fatalf("expected cloned region dependency to be invalidated")
+	}
+}
+
+func TestCloneRegionRefStatesKeepsStoreRemapLocal(t *testing.T) {
+	value := &Symbol{Name: "value", Kind: SymbolLocal}
+	from := &Symbol{Name: "from", Kind: SymbolLocal}
+	to := &Symbol{Name: "to", Kind: SymbolLocal}
+	localState := &BuiltinType{Name: "Local"}
+	frozenState := &BuiltinType{Name: "Frozen"}
+	enumType := &EnumType{Name: "Expr", Packed: true}
+	originalType := &PackedEnumStoreType{Enum: enumType, State: localState}
+	remappedType := &PackedEnumStoreType{Enum: enumType, State: frozenState}
+	a := &Analyzer{
+		currentRegionRefs: map[*Symbol]regionRefState{
+			value: {
+				StoreDeps: map[*Symbol]packedStoreDependencyState{
+					from: {Type: originalType},
+				},
+			},
+		},
+	}
+
+	cloned := a.cloneRegionRefStates()
+	updated, changed := remapPackedStoreDependencyInState(cloned[value], from, to, remappedType)
+	if !changed {
+		t.Fatalf("expected remapPackedStoreDependencyInState to report a change")
+	}
+	cloned[value] = updated
+
+	if _, ok := a.currentRegionRefs[value].StoreDeps[from]; !ok {
+		t.Fatalf("expected original store dependency to keep the original symbol")
+	}
+	if _, ok := a.currentRegionRefs[value].StoreDeps[to]; ok {
+		t.Fatalf("expected original store dependency to avoid the remapped symbol")
+	}
+	if _, ok := cloned[value].StoreDeps[from]; ok {
+		t.Fatalf("expected cloned store dependency to drop the original symbol")
+	}
+	if dep, ok := cloned[value].StoreDeps[to]; !ok || dep.Type != remappedType {
+		t.Fatalf("expected cloned store dependency to use the remapped store type")
+	}
+}

@@ -3114,9 +3114,9 @@ func cloneRegionRefState(state regionRefState) regionRefState {
 
 func cloneRegionRefStateSharedFields(state regionRefState) regionRefState {
 	return regionRefState{
-		Deps:                    cloneRegionDependencyStates(state.Deps),
-		StoreDeps:               clonePackedStoreDependencyStates(state.StoreDeps),
-		ParamDeps:               cloneRegionParamDeps(state.ParamDeps),
+		Deps:                    state.Deps,
+		StoreDeps:               state.StoreDeps,
+		ParamDeps:               state.ParamDeps,
 		Fields:                  state.Fields,
 		PackedStoreSummary:      state.PackedStoreSummary,
 		PackedStoreSummaryKnown: state.PackedStoreSummaryKnown,
@@ -3125,9 +3125,9 @@ func cloneRegionRefStateSharedFields(state regionRefState) regionRefState {
 
 func cloneRegionRefStateShallowFields(state regionRefState) regionRefState {
 	return withPackedStoreProvenanceSummary(regionRefState{
-		Deps:      cloneRegionDependencyStates(state.Deps),
-		StoreDeps: clonePackedStoreDependencyStates(state.StoreDeps),
-		ParamDeps: cloneRegionParamDeps(state.ParamDeps),
+		Deps:      state.Deps,
+		StoreDeps: state.StoreDeps,
+		ParamDeps: state.ParamDeps,
 	})
 }
 

@@ -185,6 +185,32 @@ One way to run it is:
 python3 ./scripts/run_lua_frontend_storage_benchmark.py --stmt-count 4000 --parse-iterations 20 --sample-iterations 5000 --repeats 3
 ```
 
+There is also now an ML-style packed AST benchmark ladder under `../Code/benchmarks/` for exercising packed/frozen tree matching and the produced native runtime:
+
+- `packed_lowering_ml_ast_medium_{core,bench,parallel_bench}.llcontext` is the default everyday perf tier
+- `packed_lowering_ml_ast_mega_{core,bench,parallel_bench}.llcontext` is the explicit slow validation tier
+- generic ML AST benchmark names now target the medium fixture, while explicit `Mega` benchmark names keep the long-running workload available
+- `LLCONTEXT_SLOW_NATIVE=1` gates the full mega native smoke in `src/main_test.go`
+- `scripts/run_ml_ast_perf_loop.sh` runs the normal repro -> medium loop, and `--mega` adds the explicit slow-path validation lane
+
+Recommended workflow:
+
+- `repro`: use `TestRunCLIPackedMLExprReproSmoke` for bug fixing and tiny correctness checks
+- `medium`: use the generic `PackedMLAST...` benchmarks for normal compiler/runtime perf iteration
+- `mega`: use the explicit `PackedMLASTMega...` benches/tests before landing changes that touch packed lowering, semantic provenance, or native benchmark wiring
+
+One way to run the default loop is:
+
+```text
+./scripts/run_ml_ast_perf_loop.sh --benchtime 1x
+```
+
+And one way to run the milestone validation pass is:
+
+```text
+./scripts/run_ml_ast_perf_loop.sh --benchtime 1x --mega
+```
+
 ## Layout
 
 - `src/` — active compiler source code
