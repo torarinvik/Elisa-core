@@ -372,8 +372,6 @@ func (g *llvmGenerator) setDefinedFunctionLinkage(name string, value C.LLVMValue
 	if linkage == C.LLVMLinkage(C.LLVMPrivateLinkage) {
 		if g.shouldNeverInlineDefinedFunction(name) {
 			g.addNoInlineAttribute(value)
-		} else {
-			g.addAlwaysInlineAttribute(value)
 		}
 	}
 }

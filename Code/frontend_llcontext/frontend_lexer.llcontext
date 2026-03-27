@@ -28,38 +28,46 @@ def frontend_new_lexer(a: any Arena&, filename: any u8&, source: any u8&) -> Fro
     return frontend_new_lexer_with_len(a, filename, source, runtime_strlen(source))
 
 
+@inline(always)
 def frontend_cur_pos(lexer: any FrontendLexer&) -> FrontendPos:
     return FrontendPos(lexer.line, lexer.col, lexer.pos)
 
 
+@inline(always)
 def frontend_is_eof(lexer: any FrontendLexer&) -> bool:
     return lexer.pos >= lexer.source_len
 
 
+@inline(always)
 def frontend_char_at(source: any u8&, source_len: usize, index: usize) -> i64:
     if index >= source_len:
         return FRONTEND_CH_NUL
     return source[index].i64()
 
 
+@inline(always)
 def frontend_cur_char(lexer: any FrontendLexer&) -> i64:
     return frontend_char_at(lexer.source, lexer.source_len, lexer.pos)
 
 
+@inline(always)
 def frontend_peek_char_at(lexer: any FrontendLexer&, offset: usize) -> i64:
     return frontend_char_at(lexer.source, lexer.source_len, lexer.pos + offset)
 
 
+@inline(always)
 def frontend_make_source_view(source: any u8&, start: usize, end: usize) -> StringView:
     if end <= start:
         return frontend_empty_view()
     return string_view(source, start.i64(), end.i64())
 
 
+@inline(always)
 def frontend_make_lexer_view(lexer: any FrontendLexer&, start: usize, end: usize) -> StringView:
     return frontend_make_source_view(lexer.source, start, end)
 
 
+@inline(always)
 def frontend_advance_char(lexer: any FrontendLexer&) -> i64:
     if frontend_is_eof(lexer):
         return FRONTEND_CH_NUL
@@ -74,6 +82,7 @@ def frontend_advance_char(lexer: any FrontendLexer&) -> i64:
     return ch
 
 
+@inline(always)
 def frontend_match_char(lexer: any FrontendLexer&, expected: i64) -> bool:
     if frontend_cur_char(lexer) == expected:
         _ = frontend_advance_char(lexer)
@@ -81,6 +90,7 @@ def frontend_match_char(lexer: any FrontendLexer&, expected: i64) -> bool:
     return false
 
 
+@inline(always)
 def frontend_pending_has_tokens(lexer: any FrontendLexer&) -> bool:
     return lexer.pending_index < lexer.pending_tokens.count
 
@@ -171,64 +181,79 @@ def frontend_handle_indentation(lexer: any FrontendLexer&) can[Memory.Allocate, 
             frontend_emit_pending_token(lexer, FrontendTokenKind.Dedent)
 
 
+@inline(always)
 def frontend_is_digit(ch: i64) -> bool:
     return ch >= 48 and ch <= 57
 
 
+@inline(always)
 def frontend_is_hex_digit(ch: i64) -> bool:
     return frontend_is_digit(ch) or (ch >= FRONTEND_CH_a and ch <= FRONTEND_CH_f) or (ch >= FRONTEND_CH_A and ch <= FRONTEND_CH_F)
 
 
+@inline(always)
 def frontend_is_ascii_alpha(ch: i64) -> bool:
     return (ch >= 97 and ch <= 122) or (ch >= 65 and ch <= 90)
 
 
+@inline(always)
 def frontend_is_ascii_alnum(ch: i64) -> bool:
     return frontend_is_ascii_alpha(ch) or frontend_is_digit(ch)
 
 
+@inline(always)
 def frontend_is_ident_start(ch: i64) -> bool:
     return ch == FRONTEND_CH_UNDERSCORE or frontend_is_ascii_alpha(ch)
 
 
+@inline(always)
 def frontend_is_ident_char(ch: i64) -> bool:
     return ch == FRONTEND_CH_UNDERSCORE or frontend_is_ascii_alnum(ch)
 
 
+@inline(always)
 def frontend_sv_first_char(view: StringView) -> i64:
     if view.len <= 0:
         return FRONTEND_CH_NUL
     return view.data[0u].i64()
 
 
+@inline(always)
 def frontend_sv_is_1(view: StringView, a: i64) -> bool:
     return view.len == 1 and view.data[0u].i64() == a
 
 
+@inline(always)
 def frontend_sv_is_2(view: StringView, a: i64, b: i64) -> bool:
     return view.len == 2 and view.data[0u].i64() == a and view.data[1u].i64() == b
 
 
+@inline(always)
 def frontend_sv_is_3(view: StringView, a: i64, b: i64, c: i64) -> bool:
     return view.len == 3 and view.data[0u].i64() == a and view.data[1u].i64() == b and view.data[2u].i64() == c
 
 
+@inline(always)
 def frontend_sv_is_4(view: StringView, a: i64, b: i64, c: i64, d: i64) -> bool:
     return view.len == 4 and view.data[0u].i64() == a and view.data[1u].i64() == b and view.data[2u].i64() == c and view.data[3u].i64() == d
 
 
+@inline(always)
 def frontend_sv_is_5(view: StringView, a: i64, b: i64, c: i64, d: i64, e: i64) -> bool:
     return view.len == 5 and view.data[0u].i64() == a and view.data[1u].i64() == b and view.data[2u].i64() == c and view.data[3u].i64() == d and view.data[4u].i64() == e
 
 
+@inline(always)
 def frontend_sv_is_6(view: StringView, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64) -> bool:
     return view.len == 6 and view.data[0u].i64() == a and view.data[1u].i64() == b and view.data[2u].i64() == c and view.data[3u].i64() == d and view.data[4u].i64() == e and view.data[5u].i64() == f
 
 
+@inline(always)
 def frontend_sv_is_7(view: StringView, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64, g: i64) -> bool:
     return view.len == 7 and view.data[0u].i64() == a and view.data[1u].i64() == b and view.data[2u].i64() == c and view.data[3u].i64() == d and view.data[4u].i64() == e and view.data[5u].i64() == f and view.data[6u].i64() == g
 
 
+@inline(always)
 def frontend_valid_suffix(view: StringView) -> bool:
     first: i64 = frontend_sv_first_char(view)
     if first == FRONTEND_CH_u:
@@ -240,6 +265,7 @@ def frontend_valid_suffix(view: StringView) -> bool:
     return false
 
 
+@inline(always)
 def frontend_try_read_type_suffix(lexer: any FrontendLexer&) -> StringView:
     start: usize = lexer.pos
     first: i64 = frontend_cur_char(lexer)
@@ -259,6 +285,7 @@ def frontend_try_read_type_suffix(lexer: any FrontendLexer&) -> StringView:
     return suffix
 
 
+@inline(always)
 def frontend_lookup_keyword(text: StringView) -> FrontendTokenKind:
     first: i64 = frontend_sv_first_char(text)
 
@@ -357,6 +384,7 @@ def frontend_lookup_keyword(text: StringView) -> FrontendTokenKind:
     return FrontendTokenKind.Ident
 
 
+@inline(always)
 def frontend_maybe_keyword_first_char(ch: i64) -> bool:
     return ch == 97 or ch == 99 or ch == 100 or ch == 101 or ch == 102 or ch == 103 or ch == 104 or ch == 105 or ch == 109 or ch == 110 or ch == 111 or ch == 112 or ch == 114 or ch == 115 or ch == 116 or ch == 119 or ch == 122
 
@@ -433,11 +461,13 @@ def frontend_read_ident(lexer: any FrontendLexer&) -> FrontendToken:
     return frontend_make_token(frontend_lookup_keyword(text), pos, text, frontend_empty_view())
 
 
+@inline(always)
 def frontend_skip_spaces(lexer: any FrontendLexer&):
     while not frontend_is_eof(lexer) and (frontend_cur_char(lexer) == FRONTEND_CH_SPACE or frontend_cur_char(lexer) == FRONTEND_CH_TAB):
         _ = frontend_advance_char(lexer)
 
 
+@inline(always)
 def frontend_skip_string_kind(lexer: any FrontendLexer&) -> FrontendTokenKind:
     _ = frontend_advance_char(lexer)
 
@@ -454,6 +484,7 @@ def frontend_skip_string_kind(lexer: any FrontendLexer&) -> FrontendTokenKind:
     return FrontendTokenKind.StringLit
 
 
+@inline(always)
 def frontend_read_number_kind(lexer: any FrontendLexer&) -> FrontendTokenKind:
     if frontend_cur_char(lexer) == 48 and (frontend_peek_char_at(lexer, 1u) == FRONTEND_CH_x or frontend_peek_char_at(lexer, 1u) == FRONTEND_CH_X):
         _ = frontend_advance_char(lexer)
@@ -492,6 +523,7 @@ def frontend_read_number_kind(lexer: any FrontendLexer&) -> FrontendTokenKind:
     return FrontendTokenKind.IntLit
 
 
+@inline(always)
 def frontend_read_ident_kind(lexer: any FrontendLexer&) -> FrontendTokenKind:
     start: usize = lexer.pos
     while not frontend_is_eof(lexer) and frontend_is_ident_char(frontend_cur_char(lexer)):
@@ -509,6 +541,7 @@ def frontend_read_ident_kind(lexer: any FrontendLexer&) -> FrontendTokenKind:
     return frontend_lookup_keyword(text)
 
 
+@inline(always)
 def frontend_next_token_kind(lexer: any FrontendLexer&) -> FrontendTokenKind can[Memory.Allocate, Abort.Panic]:
     if frontend_pending_has_tokens(lexer):
         token: FrontendToken = frontend_pop_pending(lexer)
