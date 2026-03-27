@@ -319,7 +319,7 @@ func benchmarkNativePackedMLASTRuntime(b *testing.B, sourcePath string, mode str
 
 	exePath := buildExecutable(b, repoRootFromMainBench(b), "-O3")
 
-	args := []string{mode, "1"}
+	args := []string{mode, strconv.Itoa(b.N)}
 	if mode == "parallel" {
 		args = append(args, strconv.Itoa(workers))
 	}
@@ -327,12 +327,10 @@ func benchmarkNativePackedMLASTRuntime(b *testing.B, sourcePath string, mode str
 	b.SetBytes(int64(len(expandedSource)))
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		cmd := exec.Command(exePath, args...)
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			b.Fatalf("native packed ML AST benchmark failed for %s (%s): %v\n%s", sourcePath, mode, err, string(output))
-		}
+	cmd := exec.Command(exePath, args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		b.Fatalf("native packed ML AST benchmark failed for %s (%s): %v\n%s", sourcePath, mode, err, string(output))
 	}
 }
 

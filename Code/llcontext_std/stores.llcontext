@@ -1227,6 +1227,7 @@ def ctx_packed_store_read_word(a: any Arena&, handle: uintptr, state_bits: any v
     row_words: any uintptr& = (data_base + offset_words * sizeof(uintptr)).cast[any uintptr&]
     return row_words[word_offset]
 
+@inline(always)
 def ctx_packed_store_read_index_word(a: any Arena&, index: u32, state_bits: any void&, word_offset: usize) -> uintptr can[Abort.Panic]:
     assert state_bits != null
     state: any PackedStoreState& = state_bits.cast[any PackedStoreState&]
