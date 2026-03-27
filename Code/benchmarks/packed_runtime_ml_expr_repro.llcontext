@@ -1,0 +1,166 @@
+# include "../llcontext_std/contextlang_runtime.llcontext"
+
+@packed_profile(retained_reads)
+packed enum TypeExpr:
+    common:
+        span: i64
+        weight: i64
+    Var(symbol: i64)
+    Tuple(left: TypeExpr, right: TypeExpr)
+    Arrow(param: TypeExpr, result: TypeExpr)
+    Record(label: i64, field_ty: TypeExpr, rest: TypeExpr)
+
+@packed_profile(retained_reads)
+packed enum Pattern:
+    common:
+        span: i64
+        weight: i64
+    Wildcard
+    Bind(symbol: i64, ann: TypeExpr)
+    Alias(alias_symbol: i64, inner: Pattern)
+    Tuple(left: Pattern, right: Pattern)
+    Ctor(label: i64, arg: Pattern, ann: TypeExpr)
+    LiteralInt(value: i64)
+    Or(left: Pattern, right: Pattern)
+    Guarded(inner: Pattern, guard: Expr)
+
+@packed_profile(retained_reads)
+packed enum Expr:
+    common:
+        span: i64
+        cost: i64
+    LiteralInt(value: i64)
+    LiteralBool(value: bool)
+    Name(symbol: i64, ty: TypeExpr)
+    Lambda(param: Pattern, body: Expr, ty: TypeExpr)
+    Apply(callee: Expr, arg: Expr, ty: TypeExpr)
+    Let(pattern: Pattern, value: Expr, body: Expr, ty: TypeExpr)
+    Match(scrutinee: Expr, clauses: Clause, ty: TypeExpr)
+    Ctor(label: i64, arg: Expr, ty: TypeExpr)
+    Record(label: i64, field_value: Expr, rest: Expr, ty: TypeExpr)
+    Project(base: Expr, label: i64, ty: TypeExpr)
+    If(cond: Expr, then_branch: Expr, else_branch: Expr, ty: TypeExpr)
+
+@packed_profile(retained_reads)
+packed enum Clause:
+    common:
+        span: i64
+        weight: i64
+    Terminal(pattern: Pattern, body: Expr)
+    Chain(pattern: Pattern, body: Expr, next: Clause)
+    Guarded(pattern: Pattern, guard: Expr, body: Expr, next: Clause)
+
+def bool_score(value: bool, when_true: i64, when_false: i64) -> i64:
+    if value:
+        return when_true
+    return when_false
+
+def score_type(node: TypeExpr, types: TypeExpr.Store[Frozen]) -> i64:
+    return match node in types:
+        TypeExpr.Record(label: label, field_ty: TypeExpr.Tuple(left: left, right: right), rest: rest):
+            node.span + node.weight + label + score_type(left, types) + score_type(right, types) + score_type(rest, types) + 17
+        TypeExpr.Var(symbol: symbol):
+            node.span + node.weight + symbol + 3
+        TypeExpr.Tuple(left: left, right: right):
+            node.span + node.weight + score_type(left, types) + score_type(right, types) + 5
+        TypeExpr.Arrow(param: param, result: result):
+            node.span + node.weight + score_type(param, types) + score_type(result, types) + 7
+        TypeExpr.Record(label: label, field_ty: field_ty, rest: rest):
+            node.span + node.weight + label + score_type(field_ty, types) + score_type(rest, types) + 13
+
+def score_pattern(node: Pattern, patterns: Pattern.Store[Frozen], exprs: Expr.Store[Frozen], clauses: Clause.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
+    return match node in patterns:
+        Pattern.Wildcard:
+            node.span + node.weight + 43
+        Pattern.Bind(symbol: symbol, ann: ann):
+            node.span + node.weight + symbol + score_type(ann, types) + 47
+        Pattern.Alias(alias_symbol: alias_symbol, inner: inner):
+            node.span + node.weight + alias_symbol + score_pattern(inner, patterns, exprs, clauses, types) + 53
+        Pattern.Tuple(left: left, right: right):
+            node.span + node.weight + score_pattern(left, patterns, exprs, clauses, types) + score_pattern(right, patterns, exprs, clauses, types) + 59
+        Pattern.Ctor(label: label, arg: arg, ann: ann):
+            node.span + node.weight + label + score_pattern(arg, patterns, exprs, clauses, types) + score_type(ann, types) + 61
+        Pattern.LiteralInt(value: value):
+            node.span + node.weight + value + 67
+        Pattern.Or(left: left, right: right):
+            node.span + node.weight + score_pattern(left, patterns, exprs, clauses, types) + score_pattern(right, patterns, exprs, clauses, types) + 89
+        Pattern.Guarded(inner: inner, guard: guard):
+            node.span + node.weight + score_pattern(inner, patterns, exprs, clauses, types) + score_expr(guard, exprs, clauses, patterns, types) + 97
+
+def score_clause(node: Clause, clauses: Clause.Store[Frozen], exprs: Expr.Store[Frozen], patterns: Pattern.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
+    return match node in clauses:
+        Clause.Terminal(pattern: pattern, body: body):
+            node.span + node.weight + score_pattern(pattern, patterns, exprs, clauses, types) + score_expr(body, exprs, clauses, patterns, types) + 211
+        Clause.Chain(pattern: pattern, body: body, next: next):
+            node.span + node.weight + score_pattern(pattern, patterns, exprs, clauses, types) + score_expr(body, exprs, clauses, patterns, types) + score_clause(next, clauses, exprs, patterns, types) + 223
+        Clause.Guarded(pattern: pattern, guard: guard, body: body, next: next):
+            node.span + node.weight + score_pattern(pattern, patterns, exprs, clauses, types) + score_expr(guard, exprs, clauses, patterns, types) + score_expr(body, exprs, clauses, patterns, types) + score_clause(next, clauses, exprs, patterns, types) + 227
+
+def score_expr(node: Expr, exprs: Expr.Store[Frozen], clauses: Clause.Store[Frozen], patterns: Pattern.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
+    return match node in exprs:
+        Expr.LiteralInt(value: value):
+            node.span + node.cost + value + 131
+        Expr.LiteralBool(value: value):
+            node.span + node.cost + bool_score(value, 137, 139)
+        Expr.Name(symbol: symbol, ty: ty):
+            node.span + node.cost + symbol + score_type(ty, types) + 149
+        Expr.Lambda(param: param, body: body, ty: ty):
+            node.span + node.cost + score_pattern(param, patterns, exprs, clauses, types) + score_expr(body, exprs, clauses, patterns, types) + score_type(ty, types) + 151
+        Expr.Apply(callee: callee, arg: arg, ty: ty):
+            node.span + node.cost + score_expr(callee, exprs, clauses, patterns, types) + score_expr(arg, exprs, clauses, patterns, types) + score_type(ty, types) + 157
+        Expr.Let(pattern: pattern, value: value, body: body, ty: ty):
+            node.span + node.cost + score_pattern(pattern, patterns, exprs, clauses, types) + score_expr(value, exprs, clauses, patterns, types) + score_expr(body, exprs, clauses, patterns, types) + score_type(ty, types) + 163
+        Expr.Match(scrutinee: scrutinee, clauses: match_clauses, ty: ty):
+            node.span + node.cost + score_expr(scrutinee, exprs, clauses, patterns, types) + score_clause(match_clauses, clauses, exprs, patterns, types) + score_type(ty, types) + 167
+        Expr.Ctor(label: label, arg: arg, ty: ty):
+            node.span + node.cost + label + score_expr(arg, exprs, clauses, patterns, types) + score_type(ty, types) + 173
+        Expr.Record(label: label, field_value: field_value, rest: rest, ty: ty):
+            node.span + node.cost + label + score_expr(field_value, exprs, clauses, patterns, types) + score_expr(rest, exprs, clauses, patterns, types) + score_type(ty, types) + 179
+        Expr.Project(base: base, label: label, ty: ty):
+            node.span + node.cost + score_expr(base, exprs, clauses, patterns, types) + label + score_type(ty, types) + 181
+        Expr.If(cond: cond, then_branch: then_branch, else_branch: else_branch, ty: ty):
+            node.span + node.cost + score_expr(cond, exprs, clauses, patterns, types) + score_expr(then_branch, exprs, clauses, patterns, types) + score_expr(else_branch, exprs, clauses, patterns, types) + score_type(ty, types) + 191
+
+def packed_ml_expr_repro_impl() -> i64:
+    region scratch(65536u)
+    types: TypeExpr.Store[Local] = TypeExpr.Store(scratch)
+    patterns: Pattern.Store[Local] = Pattern.Store(scratch)
+    exprs: Expr.Store[Local] = Expr.Store(scratch)
+    clauses: Clause.Store[Local] = Clause.Store(scratch)
+
+    int_ty: TypeExpr = new[types] TypeExpr.Var(span: 1, weight: 1, symbol: 11)
+    bool_ty: TypeExpr = new[types] TypeExpr.Var(span: 2, weight: 1, symbol: 12)
+    pair_ty: TypeExpr = new[types] TypeExpr.Tuple(span: 3, weight: 2, left: int_ty, right: bool_ty)
+    record_ty: TypeExpr = new[types] TypeExpr.Record(span: 4, weight: 3, label: 21, field_ty: pair_ty, rest: int_ty)
+    arrow_ty: TypeExpr = new[types] TypeExpr.Arrow(span: 5, weight: 5, param: record_ty, result: pair_ty)
+
+    wildcard_pat: Pattern = new[patterns] Pattern.Wildcard(span: 6, weight: 1)
+    bind_pat: Pattern = new[patterns] Pattern.Bind(span: 7, weight: 2, symbol: 31, ann: int_ty)
+    alias_pat: Pattern = new[patterns] Pattern.Alias(span: 8, weight: 3, alias_symbol: 32, inner: bind_pat)
+    tuple_pat: Pattern = new[patterns] Pattern.Tuple(span: 9, weight: 5, left: alias_pat, right: wildcard_pat)
+    ctor_pat: Pattern = new[patterns] Pattern.Ctor(span: 10, weight: 7, label: 41, arg: tuple_pat, ann: record_ty)
+
+    lit_expr: Expr = new[exprs] Expr.LiteralInt(span: 11, cost: 1, value: 99)
+    false_expr: Expr = new[exprs] Expr.LiteralBool(span: 12, cost: 1, value: false)
+    name_expr: Expr = new[exprs] Expr.Name(span: 13, cost: 2, symbol: 51, ty: arrow_ty)
+    record_expr: Expr = new[exprs] Expr.Record(span: 14, cost: 3, label: 61, field_value: lit_expr, rest: name_expr, ty: record_ty)
+    project_expr: Expr = new[exprs] Expr.Project(span: 15, cost: 5, base: record_expr, label: 62, ty: arrow_ty)
+    lambda_expr: Expr = new[exprs] Expr.Lambda(span: 16, cost: 7, param: alias_pat, body: project_expr, ty: arrow_ty)
+    apply_expr: Expr = new[exprs] Expr.Apply(span: 17, cost: 11, callee: lambda_expr, arg: false_expr, ty: arrow_ty)
+    if_expr: Expr = new[exprs] Expr.If(span: 18, cost: 13, cond: false_expr, then_branch: apply_expr, else_branch: lit_expr, ty: record_ty)
+    let_expr: Expr = new[exprs] Expr.Let(span: 19, cost: 17, pattern: ctor_pat, value: if_expr, body: project_expr, ty: record_ty)
+    guarded_pat: Pattern = new[patterns] Pattern.Guarded(span: 20, weight: 11, inner: tuple_pat, guard: let_expr)
+
+    terminal_clause: Clause = new[clauses] Clause.Terminal(span: 21, weight: 3, pattern: wildcard_pat, body: project_expr)
+    guarded_clause: Clause = new[clauses] Clause.Guarded(span: 22, weight: 5, pattern: guarded_pat, guard: apply_expr, body: let_expr, next: terminal_clause)
+    chain_clause: Clause = new[clauses] Clause.Chain(span: 23, weight: 7, pattern: ctor_pat, body: if_expr, next: guarded_clause)
+    match_expr: Expr = new[exprs] Expr.Match(span: 24, cost: 19, scrutinee: record_expr, clauses: chain_clause, ty: record_ty)
+
+    frozen_types: TypeExpr.Store[Frozen] = freeze(move types)
+    frozen_patterns: Pattern.Store[Frozen] = freeze(move patterns)
+    frozen_exprs: Expr.Store[Frozen] = freeze(move exprs)
+    frozen_clauses: Clause.Store[Frozen] = freeze(move clauses)
+
+    return score_expr(match_expr, frozen_exprs, frozen_clauses, frozen_patterns, frozen_types) + score_pattern(guarded_pat, frozen_patterns, frozen_exprs, frozen_clauses, frozen_types)
+
+export func packed_ml_expr_repro() -> i64 = packed_ml_expr_repro_impl

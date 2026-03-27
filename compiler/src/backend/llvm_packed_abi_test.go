@@ -828,6 +828,140 @@ def fold_frozen(node: Expr, frozen: Expr.Store[Frozen]) -> int:
 	}
 }
 
+func TestGenerateLLVMIRShiftsAdjacentFrozenPackedHandlePayloadsInIndexSOA(t *testing.T) {
+	src := `@packed_profile(retained_reads)
+packed enum TypeExpr:
+	Var(symbol: i64)
+
+@packed_profile(retained_reads)
+packed enum Clause:
+	Terminal(body: Expr)
+
+@packed_profile(retained_reads)
+packed enum Expr:
+	Literal(value: i64)
+	Match(scrutinee: Expr, clauses: Clause, ty: TypeExpr)
+
+def score_type(node: TypeExpr, types: TypeExpr.Store[Frozen]) -> i64:
+	return match node in types:
+		TypeExpr.Var(symbol: symbol):
+			symbol
+
+def score_clause(node: Clause, clauses: Clause.Store[Frozen], exprs: Expr.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
+	return match node in clauses:
+		Clause.Terminal(body: body):
+			score_expr(body, exprs, clauses, types) + 1
+
+def score_expr(node: Expr, exprs: Expr.Store[Frozen], clauses: Clause.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
+	return match node in exprs:
+		Expr.Literal(value: value):
+			value
+		Expr.Match(scrutinee: scrutinee, clauses: match_clauses, ty: ty):
+			score_expr(scrutinee, exprs, clauses, types) + score_clause(match_clauses, clauses, exprs, types) + score_type(ty, types)
+
+def fold_frozen() -> i64:
+	region scratch(512u)
+	types: TypeExpr.Store[Local] = TypeExpr.Store(scratch)
+	exprs: Expr.Store[Local] = Expr.Store(scratch)
+	clauses: Clause.Store[Local] = Clause.Store(scratch)
+	ty: TypeExpr = new[types] TypeExpr.Var(symbol: 7)
+	lit: Expr = new[exprs] Expr.Literal(value: 9)
+	clause: Clause = new[clauses] Clause.Terminal(body: lit)
+	node: Expr = new[exprs] Expr.Match(scrutinee: lit, clauses: clause, ty: ty)
+	frozen_types: TypeExpr.Store[Frozen] = freeze(move types)
+	frozen_exprs: Expr.Store[Frozen] = freeze(move exprs)
+	frozen_clauses: Clause.Store[Frozen] = freeze(move clauses)
+	return score_expr(node, frozen_exprs, frozen_clauses, frozen_types)
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_adjacent_frozen_handle_payload_index_soa.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	if !strings.Contains(output, "call i32 @ctx_packed_store_read_index_tag(") {
+		t.Fatalf("expected adjacent frozen packed handle payload match in index-soa mode to use direct tag reads, got:\n%s", output)
+	}
+	if strings.Count(output, "call i64 @ctx_packed_store_read_index_word(") < 2 {
+		t.Fatalf("expected adjacent frozen packed handle payload match in index-soa mode to use direct payload reads, got:\n%s", output)
+	}
+	if !strings.Contains(output, "lshr i64") {
+		t.Fatalf("expected adjacent frozen packed handle payload match in index-soa mode to shift packed word reads before truncation, got:\n%s", output)
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
+		t.Fatalf("expected adjacent frozen packed handle payload match in index-soa mode to avoid eager decode, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRShiftsAdjacentFrozenPackedHandlePayloadsByDefault(t *testing.T) {
+	src := `@packed_profile(retained_reads)
+packed enum TypeExpr:
+	Var(symbol: i64)
+
+@packed_profile(retained_reads)
+packed enum Clause:
+	Terminal(body: Expr)
+
+@packed_profile(retained_reads)
+packed enum Expr:
+	Literal(value: i64)
+	Match(scrutinee: Expr, clauses: Clause, ty: TypeExpr)
+
+def score_type(node: TypeExpr, types: TypeExpr.Store[Frozen]) -> i64:
+	return match node in types:
+		TypeExpr.Var(symbol: symbol):
+			symbol
+
+def score_clause(node: Clause, clauses: Clause.Store[Frozen], exprs: Expr.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
+	return match node in clauses:
+		Clause.Terminal(body: body):
+			score_expr(body, exprs, clauses, types) + 1
+
+def score_expr(node: Expr, exprs: Expr.Store[Frozen], clauses: Clause.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
+	return match node in exprs:
+		Expr.Literal(value: value):
+			value
+		Expr.Match(scrutinee: scrutinee, clauses: match_clauses, ty: ty):
+			score_expr(scrutinee, exprs, clauses, types) + score_clause(match_clauses, clauses, exprs, types) + score_type(ty, types)
+
+def fold_frozen() -> i64:
+	region scratch(512u)
+	types: TypeExpr.Store[Local] = TypeExpr.Store(scratch)
+	exprs: Expr.Store[Local] = Expr.Store(scratch)
+	clauses: Clause.Store[Local] = Clause.Store(scratch)
+	ty: TypeExpr = new[types] TypeExpr.Var(symbol: 7)
+	lit: Expr = new[exprs] Expr.Literal(value: 9)
+	clause: Clause = new[clauses] Clause.Terminal(body: lit)
+	node: Expr = new[exprs] Expr.Match(scrutinee: lit, clauses: clause, ty: ty)
+	frozen_types: TypeExpr.Store[Frozen] = freeze(move types)
+	frozen_exprs: Expr.Store[Frozen] = freeze(move exprs)
+	frozen_clauses: Clause.Store[Frozen] = freeze(move clauses)
+	return score_expr(node, frozen_exprs, frozen_clauses, frozen_types)
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_adjacent_frozen_handle_payload_default.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+
+	hasIndexTags := strings.Contains(output, "call i32 @ctx_packed_store_read_index_tag(")
+	hasVariantSparseTags := strings.Contains(output, "call i32 @ctx_packed_store_read_variant_sparse_tag(")
+	if !hasIndexTags && !hasVariantSparseTags {
+		t.Fatalf("expected adjacent frozen packed handle payload match to use default non-row-handle direct tag reads, got:\n%s", output)
+	}
+	indexWordReads := strings.Count(output, "call i64 @ctx_packed_store_read_index_word(")
+	variantSparseWordReads := strings.Count(output, "call i64 @ctx_packed_store_read_variant_sparse_word(")
+	if indexWordReads < 2 && variantSparseWordReads < 2 {
+		t.Fatalf("expected adjacent frozen packed handle payload match to use default non-row-handle direct payload reads, got:\n%s", output)
+	}
+	if !strings.Contains(output, "lshr i64") {
+		t.Fatalf("expected adjacent frozen packed handle payload match to shift packed word reads before truncation, got:\n%s", output)
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_variant_sparse(") || strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
+		t.Fatalf("expected adjacent frozen packed handle payload match to avoid eager decode, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRUsesSingleDecodeForMixedFrozenPackedPayloadMatch(t *testing.T) {
 	src := `packed enum Expr:
 	Hold(value: any i32&)

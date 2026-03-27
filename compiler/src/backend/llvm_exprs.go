@@ -4107,16 +4107,12 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 		if binding.ptr == nil && binding.handle != nil && binding.store.typ != nil {
 			ops, ok := s.packedStoreOpsFromBinding(&binding.store)
 			if ok && ops.canDirectWordRead() {
-				fieldWordOffset, ok, err := s.packedEnumDirectWordFieldOffset(binding.typ.Enum, layout.RowFieldIndex, fieldType)
+				fieldOffsetBytes, ok, err := s.packedEnumDirectFieldByteOffset(binding.typ.Enum, layout.RowFieldIndex)
 				if err != nil {
 					return nil, nil, true, err
 				}
 				if ok {
-					wordValue, err := ops.loadPayloadWordAtOrigin(binding.handle, binding.typ.Enum, fieldWordOffset, origin, "packed.view.common")
-					if err != nil {
-						return nil, nil, true, err
-					}
-					coerced, err := s.coerceValue(wordValue, s.g.result.NamedTypes["uintptr"], fieldType)
+					coerced, err := s.emitPackedDirectFieldReadAtOrigin(ops, binding.handle, binding.typ.Enum, fieldType, fieldOffsetBytes, origin, "packed.view.common")
 					if err != nil {
 						return nil, nil, true, err
 					}
@@ -4272,7 +4268,7 @@ func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMVa
 			return nil, nil, false, nil
 		}
 	}
-	fieldWordOffset, ok, err := s.packedEnumDirectWordFieldOffset(enumType, layout.RowFieldIndex, fieldType)
+	fieldOffsetBytes, ok, err := s.packedEnumDirectFieldByteOffset(enumType, layout.RowFieldIndex)
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -4290,11 +4286,7 @@ func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMVa
 	if !ok {
 		origin = packedReadOriginKey{}
 	}
-	wordValue, err := ops.loadPayloadWordAtOrigin(handleValue, enumType, fieldWordOffset, origin, "packed.common.store")
-	if err != nil {
-		return nil, nil, true, err
-	}
-	coerced, err := s.coerceValue(wordValue, s.g.result.NamedTypes["uintptr"], fieldType)
+	coerced, err := s.emitPackedDirectFieldReadAtOrigin(ops, handleValue, enumType, fieldType, fieldOffsetBytes, origin, "packed.common.store")
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -4493,6 +4485,101 @@ func (s *functionState) emitPackedSideTableFieldRead(handleValue C.LLVMValueRef,
 	return s.loadValue(fieldPtr, fieldType, name+".value")
 }
 
+func (s *functionState) emitPackedDirectFieldReadAtOrigin(ops *packedStoreOps, handleValue C.LLVMValueRef, enumType *semantic.EnumType, fieldType semantic.Type, fieldOffsetBytes uint64, origin packedReadOriginKey, name string) (C.LLVMValueRef, error) {
+	if ops == nil || enumType == nil || !enumType.Packed {
+		return nil, fmt.Errorf("packed direct field read requires packed enum metadata")
+	}
+	fieldSizeBytes, err := s.g.abiSizeOfType(fieldType)
+	if err != nil {
+		return nil, err
+	}
+	if fieldSizeBytes == 0 {
+		return s.zeroValue(fieldType)
+	}
+	wordBytes := uint64(s.g.wordBits / 8)
+	if wordBytes == 0 {
+		wordBytes = 8
+	}
+	wordOffset := fieldOffsetBytes / wordBytes
+	byteOffsetInWord := fieldOffsetBytes % wordBytes
+	if byteOffsetInWord+fieldSizeBytes <= wordBytes {
+		usizeType, err := s.g.lowerBuiltin("usize")
+		if err != nil {
+			return nil, err
+		}
+		wordValue, err := ops.loadPayloadWordAtOrigin(handleValue, enumType, C.LLVMConstInt(usizeType, C.ulonglong(wordOffset), 0), origin, name+".word")
+		if err != nil {
+			return nil, err
+		}
+		if byteOffsetInWord != 0 {
+			uintptrLLVMType, err := s.g.lowerBuiltin("uintptr")
+			if err != nil {
+				return nil, err
+			}
+			shiftBits := C.LLVMConstInt(uintptrLLVMType, C.ulonglong(byteOffsetInWord*8), 0)
+			wordValue = C.LLVMBuildLShr(s.builder, wordValue, shiftBits, cStringFree(name+".shift"))
+		}
+		return s.coerceValue(wordValue, s.g.result.NamedTypes["uintptr"], fieldType)
+	}
+
+	fieldPtr, err := s.createEntryAlloca(name+".tmp", fieldType)
+	if err != nil {
+		return nil, err
+	}
+	fieldLLVMType, err := s.g.lowerType(fieldType)
+	if err != nil {
+		return nil, err
+	}
+	C.LLVMBuildStore(s.builder, C.LLVMConstNull(fieldLLVMType), fieldPtr)
+	lastByte := byteOffsetInWord + fieldSizeBytes
+	wordCount := lastByte / wordBytes
+	if lastByte%wordBytes != 0 {
+		wordCount++
+	}
+	usizeType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return nil, err
+	}
+	for i := uint64(0); i < wordCount; i++ {
+		wordValue, err := ops.loadPayloadWordAtOrigin(handleValue, enumType, C.LLVMConstInt(usizeType, C.ulonglong(wordOffset+i), 0), origin, name+".word")
+		if err != nil {
+			return nil, err
+		}
+		wordPtr, err := s.createEntryAlloca(name+".word.tmp", s.g.result.NamedTypes["uintptr"])
+		if err != nil {
+			return nil, err
+		}
+		C.LLVMBuildStore(s.builder, wordValue, wordPtr)
+		wordStart := i * wordBytes
+		copyStart := wordStart
+		if copyStart < byteOffsetInWord {
+			copyStart = byteOffsetInWord
+		}
+		copyEnd := wordStart + wordBytes
+		if copyEnd > lastByte {
+			copyEnd = lastByte
+		}
+		if copyEnd <= copyStart {
+			continue
+		}
+		srcPtr := wordPtr
+		if copyStart > wordStart {
+			srcPtr, err = s.emitByteOffsetPtr(wordPtr, copyStart-wordStart, name+".src")
+			if err != nil {
+				return nil, err
+			}
+		}
+		dstPtr, err := s.emitByteOffsetPtr(fieldPtr, copyStart-byteOffsetInWord, name+".dst")
+		if err != nil {
+			return nil, err
+		}
+		if err := s.emitRawMemcpy(dstPtr, srcPtr, copyEnd-copyStart, name+".copy"); err != nil {
+			return nil, err
+		}
+	}
+	return s.loadValue(fieldPtr, fieldType, name+".value")
+}
+
 func (s *functionState) emitPackSideTableFieldValue(bufferPtr C.LLVMValueRef, byteOffset uint64, fieldValue C.LLVMValueRef, fieldType semantic.Type, name string) error {
 	fieldSizeBytes, err := s.g.abiSizeOfType(fieldType)
 	if err != nil {
@@ -4512,41 +4599,26 @@ func (s *functionState) emitPackSideTableFieldValue(bufferPtr C.LLVMValueRef, by
 	return s.emitRawMemcpy(dstPtr, fieldPtr, fieldSizeBytes, name+".copy")
 }
 
-func (s *functionState) packedEnumDirectWordFieldOffset(enumType *semantic.EnumType, fieldIndex int, fieldType semantic.Type) (C.LLVMValueRef, bool, error) {
+func (s *functionState) packedEnumDirectFieldByteOffset(enumType *semantic.EnumType, fieldIndex int) (uint64, bool, error) {
 	if enumType == nil || !enumType.Packed || fieldIndex <= 0 {
-		return nil, false, nil
+		return 0, false, nil
 	}
 	payloadIndex, err := s.g.packedEnumPayloadFieldIndex(enumType)
 	if err != nil {
-		return nil, false, err
+		return 0, false, err
 	}
 	if fieldIndex >= payloadIndex {
-		return nil, false, nil
-	}
-	if !isNumericType(fieldType) {
-		return nil, false, nil
-	}
-	wordBytes := uint64(s.g.wordBits / 8)
-	fieldSizeBytes, err := s.g.abiSizeOfType(fieldType)
-	if err != nil {
-		return nil, false, err
-	}
-	if fieldSizeBytes == 0 || fieldSizeBytes > wordBytes {
-		return nil, false, nil
+		return 0, false, nil
 	}
 	rowType, err := s.g.ensurePackedEnumStorageType(enumType)
 	if err != nil {
-		return nil, false, err
+		return 0, false, err
 	}
 	offsetBytes, err := s.g.abiOffsetOfLLVMElement(rowType, fieldIndex)
 	if err != nil {
-		return nil, false, err
+		return 0, false, err
 	}
-	usizeType, err := s.g.lowerBuiltin("usize")
-	if err != nil {
-		return nil, false, err
-	}
-	return C.LLVMConstInt(usizeType, C.ulonglong(offsetBytes/wordBytes), 0), true, nil
+	return offsetBytes, true, nil
 }
 
 func (s *functionState) readPackedEnumWordWithStore(handleValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding, wordOffset C.LLVMValueRef) (C.LLVMValueRef, error) {

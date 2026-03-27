@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -1133,9 +1134,9 @@ func TestRunCLIPackedMLASTBenchSmoke(t *testing.T) {
 	exePath := filepath.Join(outputDir, "packed_lowering_ml_ast_bench")
 
 	for _, args := range [][]string{
-		{"-emit", "header", "-packed-abi", "row-handle", "-o", headerPath, fixturePath},
+		{"-emit", "header", "-o", headerPath, fixturePath},
 		// This test validates benchmark wiring and smoke behavior, not optimized code quality.
-		{"-emit", "obj", "-O0", "-packed-abi", "row-handle", "-o", objectPath, fixturePath},
+		{"-emit", "obj", "-O0", "-o", objectPath, fixturePath},
 	} {
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
@@ -1182,6 +1183,76 @@ func TestRunCLIPackedMLASTBenchSmoke(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRunCLIPackedMLExprReproSmoke(t *testing.T) {
+	clangPath, err := exec.LookPath("clang")
+	if err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixturePath := filepath.Join(repoRoot, "Code", "benchmarks", "packed_runtime_ml_expr_repro.llcontext")
+	shimPath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c")
+	runtimePath := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_concurrency_runtime.c")
+	outputDir := t.TempDir()
+	headerPath := filepath.Join(outputDir, "packed_runtime_ml_expr_repro.h")
+	objectPath := filepath.Join(outputDir, "packed_runtime_ml_expr_repro.o")
+	harnessPath := filepath.Join(outputDir, "packed_runtime_ml_expr_repro_main.c")
+	exePath := filepath.Join(outputDir, "packed_runtime_ml_expr_repro")
+	harnessSource := `#include <stdint.h>
+#include <stdio.h>
+#include "packed_runtime_ml_expr_repro.h"
+
+int main(void) {
+	printf("%lld\n", (long long)packed_ml_expr_repro());
+	return 0;
+}
+`
+	if err := os.WriteFile(harnessPath, []byte(harnessSource), 0o644); err != nil {
+		t.Fatalf("failed to write harness: %v", err)
+	}
+
+	for _, args := range [][]string{
+		{"-emit", "header", "-o", headerPath, fixturePath},
+		{"-emit", "obj", "-O0", "-o", objectPath, fixturePath},
+	} {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		exitCode := runCLI(args, &stdout, &stderr)
+		if exitCode != 0 {
+			t.Fatalf("runCLI(%v) returned %d\nstderr:\n%s", args, exitCode, stderr.String())
+		}
+		if stdout.Len() != 0 {
+			t.Fatalf("expected no stdout for %v, got:\n%s", args, stdout.String())
+		}
+		if stderr.Len() != 0 {
+			t.Fatalf("expected no stderr for %v, got:\n%s", args, stderr.String())
+		}
+	}
+
+	compileArgs := []string{"-I", outputDir, harnessPath, shimPath, runtimePath, objectPath, "-o", exePath}
+	if runtime.GOOS == "darwin" {
+		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
+	}
+	compileCmd := exec.Command(clangPath, compileArgs...)
+	compileOutput, err := compileCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clang failed: %v\n%s", err, string(compileOutput))
+	}
+
+	runCmd := exec.Command(exePath)
+	runOutput, err := runCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("packed ML expr repro failed: %v\n%s", err, string(runOutput))
+	}
+	output := strings.TrimSpace(string(runOutput))
+	if output == "" {
+		t.Fatal("expected packed ML expr repro to print a checksum")
+	}
+	if _, err := strconv.ParseInt(output, 10, 64); err != nil {
+		t.Fatalf("expected packed ML expr repro to print an integer checksum, got %q", output)
 	}
 }
 
