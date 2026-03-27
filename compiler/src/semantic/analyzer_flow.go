@@ -1850,10 +1850,21 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 
 func (a *Analyzer) analyzeEnumMatchStmt(stmt *ast.MatchStmt, valueType Type, enumType *EnumType) {
 	a.validateMatchStore(stmt.Pos(), stmt.Value, valueType, enumType, stmt.Store)
-	baselineAffine := a.cloneAffineValueStates()
-	baselineBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
-	baselineFunctionValues := a.cloneFunctionValueBindings()
-	baselineSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
+	baselineCloned := false
+	var baselineAffine map[affineValueKey]affineValueState
+	var baselineBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
+	var baselineFunctionValues map[*Symbol]*FuncType
+	var baselineSpecializedValueTypes map[*Symbol]Type
+	cloneBaseline := func() {
+		if baselineCloned {
+			return
+		}
+		baselineAffine = a.cloneAffineValueStates()
+		baselineBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
+		baselineFunctionValues = a.cloneFunctionValueBindings()
+		baselineSpecializedValueTypes = a.cloneSpecializedValueTypeBindings()
+		baselineCloned = true
+	}
 	var mergedAffine map[affineValueKey]affineValueState
 	var mergedBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
 	var mergedFunctionValues map[*Symbol]*FuncType
@@ -1889,6 +1900,7 @@ func (a *Analyzer) analyzeEnumMatchStmt(stmt *ast.MatchStmt, valueType Type, enu
 		priorPatterns = append(priorPatterns, arm.Pattern)
 	}
 	if !a.matchCoversAllVariants(enumType, covered, hasWildcard) {
+		cloneBaseline()
 		if !hasFallthrough {
 			mergedAffine = baselineAffine
 			mergedBorrowedOwnerRefs = baselineBorrowedOwnerRefs
@@ -1930,10 +1942,21 @@ func (a *Analyzer) analyzeEnumMatchExpr(expr *ast.MatchExpr, valueType Type, enu
 	covered := map[string]bool{}
 	hasWildcard := false
 	resultType := Type(nil)
-	baselineAffine := a.cloneAffineValueStates()
-	baselineBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
-	baselineFunctionValues := a.cloneFunctionValueBindings()
-	baselineSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
+	baselineCloned := false
+	var baselineAffine map[affineValueKey]affineValueState
+	var baselineBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
+	var baselineFunctionValues map[*Symbol]*FuncType
+	var baselineSpecializedValueTypes map[*Symbol]Type
+	cloneBaseline := func() {
+		if baselineCloned {
+			return
+		}
+		baselineAffine = a.cloneAffineValueStates()
+		baselineBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
+		baselineFunctionValues = a.cloneFunctionValueBindings()
+		baselineSpecializedValueTypes = a.cloneSpecializedValueTypeBindings()
+		baselineCloned = true
+	}
 	var mergedAffine map[affineValueKey]affineValueState
 	var mergedBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
 	var mergedFunctionValues map[*Symbol]*FuncType
@@ -1980,6 +2003,7 @@ func (a *Analyzer) analyzeEnumMatchExpr(expr *ast.MatchExpr, valueType Type, enu
 		priorPatterns = append(priorPatterns, arm.Pattern)
 	}
 	if !a.matchCoversAllVariants(enumType, covered, hasWildcard) {
+		cloneBaseline()
 		if !hasFallthrough {
 			mergedAffine = baselineAffine
 			mergedBorrowedOwnerRefs = baselineBorrowedOwnerRefs
@@ -2008,10 +2032,21 @@ func (a *Analyzer) analyzeStringMatchStmt(stmt *ast.MatchStmt, valueType Type) {
 	if stmt.Store != nil {
 		a.errorf(stmt.Store.Pos(), "string match does not take an in-store clause")
 	}
-	baselineAffine := a.cloneAffineValueStates()
-	baselineBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
-	baselineFunctionValues := a.cloneFunctionValueBindings()
-	baselineSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
+	baselineCloned := false
+	var baselineAffine map[affineValueKey]affineValueState
+	var baselineBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
+	var baselineFunctionValues map[*Symbol]*FuncType
+	var baselineSpecializedValueTypes map[*Symbol]Type
+	cloneBaseline := func() {
+		if baselineCloned {
+			return
+		}
+		baselineAffine = a.cloneAffineValueStates()
+		baselineBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
+		baselineFunctionValues = a.cloneFunctionValueBindings()
+		baselineSpecializedValueTypes = a.cloneSpecializedValueTypeBindings()
+		baselineCloned = true
+	}
 	var mergedAffine map[affineValueKey]affineValueState
 	var mergedBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
 	var mergedFunctionValues map[*Symbol]*FuncType
@@ -2045,6 +2080,7 @@ func (a *Analyzer) analyzeStringMatchStmt(stmt *ast.MatchStmt, valueType Type) {
 		priorPatterns = append(priorPatterns, arm.Pattern)
 	}
 	if !hasWildcard {
+		cloneBaseline()
 		if !hasFallthrough {
 			mergedAffine = baselineAffine
 			mergedBorrowedOwnerRefs = baselineBorrowedOwnerRefs
@@ -2068,10 +2104,21 @@ func (a *Analyzer) analyzeStringMatchExpr(expr *ast.MatchExpr, valueType Type) T
 		a.errorf(expr.Store.Pos(), "string match does not take an in-store clause")
 	}
 	resultType := Type(nil)
-	baselineAffine := a.cloneAffineValueStates()
-	baselineBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
-	baselineFunctionValues := a.cloneFunctionValueBindings()
-	baselineSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
+	baselineCloned := false
+	var baselineAffine map[affineValueKey]affineValueState
+	var baselineBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
+	var baselineFunctionValues map[*Symbol]*FuncType
+	var baselineSpecializedValueTypes map[*Symbol]Type
+	cloneBaseline := func() {
+		if baselineCloned {
+			return
+		}
+		baselineAffine = a.cloneAffineValueStates()
+		baselineBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
+		baselineFunctionValues = a.cloneFunctionValueBindings()
+		baselineSpecializedValueTypes = a.cloneSpecializedValueTypeBindings()
+		baselineCloned = true
+	}
 	var mergedAffine map[affineValueKey]affineValueState
 	var mergedBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
 	var mergedFunctionValues map[*Symbol]*FuncType
@@ -2118,6 +2165,7 @@ func (a *Analyzer) analyzeStringMatchExpr(expr *ast.MatchExpr, valueType Type) T
 		priorPatterns = append(priorPatterns, arm.Pattern)
 	}
 	if !hasWildcard {
+		cloneBaseline()
 		if !hasFallthrough {
 			mergedAffine = baselineAffine
 			mergedBorrowedOwnerRefs = baselineBorrowedOwnerRefs
@@ -4810,14 +4858,14 @@ func (a *Analyzer) borrowedOwnerRefStateForProofCarryingViewCall(call *ast.CallE
 	if !ok || !hasBorrowedOwnerRefState(sourceState) {
 		return borrowedOwnerRefState{}, false
 	}
-	summarized, summaryOK := summarizeBorrowedOwnerRefIndexStates(sourceState)
-	if !summaryOK {
-		summarized = cloneBorrowedOwnerRefState(sourceState)
-	}
 	switch callIdentName(call) {
 	case "readonly":
 		return cloneBorrowedOwnerRefState(sourceState), true
 	case "split_at":
+		summarized, summaryOK := summarizeBorrowedOwnerRefIndexStates(sourceState)
+		if !summaryOK {
+			summarized = cloneBorrowedOwnerRefState(sourceState)
+		}
 		state := cloneBorrowedOwnerRefState(summarized)
 		state.Fields = map[string]borrowedOwnerRefState{
 			"left":  cloneBorrowedOwnerRefState(summarized),
@@ -4825,6 +4873,10 @@ func (a *Analyzer) borrowedOwnerRefStateForProofCarryingViewCall(call *ast.CallE
 		}
 		return state, true
 	case "chunks_exact":
+		summarized, summaryOK := summarizeBorrowedOwnerRefIndexStates(sourceState)
+		if !summaryOK {
+			summarized = cloneBorrowedOwnerRefState(sourceState)
+		}
 		state := cloneBorrowedOwnerRefState(summarized)
 		state.Fields = map[string]borrowedOwnerRefState{
 			"source": cloneBorrowedOwnerRefState(summarized),
