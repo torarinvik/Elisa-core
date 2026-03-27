@@ -3,6 +3,8 @@
 package backend
 
 import (
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -416,6 +418,72 @@ func parseAndAnalyzeBackendBenchmarkSource(b *testing.B, filename string, src st
 	return result
 }
 
+func repoRootFromPackedBench(b *testing.B) string {
+	b.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		b.Fatal("failed to determine backend benchmark file path")
+	}
+	return filepath.Join(filepath.Dir(thisFile), "..", "..", "..")
+}
+
+func parsePackedBenchIncludeDirective(line string) (string, bool) {
+	const prefix = "# include "
+	if !strings.HasPrefix(line, prefix) {
+		return "", false
+	}
+	rest := strings.TrimSpace(line[len(prefix):])
+	if len(rest) < 2 || rest[0] != '"' || rest[len(rest)-1] != '"' {
+		return "", false
+	}
+	return rest[1 : len(rest)-1], true
+}
+
+func readPackedBenchSourceWithIncludes(path string, seen map[string]bool) ([]byte, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	if seen[abs] {
+		return nil, nil
+	}
+	seen[abs] = true
+
+	raw, err := os.ReadFile(abs)
+	if err != nil {
+		return nil, err
+	}
+
+	var out strings.Builder
+	lines := strings.SplitAfter(string(raw), "\n")
+	for _, line := range lines {
+		includePath, ok := parsePackedBenchIncludeDirective(strings.TrimSpace(line))
+		if !ok {
+			out.WriteString(line)
+			continue
+		}
+		expanded, err := readPackedBenchSourceWithIncludes(filepath.Join(filepath.Dir(abs), includePath), seen)
+		if err != nil {
+			return nil, err
+		}
+		out.Write(expanded)
+	}
+	return []byte(out.String()), nil
+}
+
+func loadPackedBenchSourceFromFile(b *testing.B, relativePath string) string {
+	b.Helper()
+	sourcePath := filepath.Join(repoRootFromPackedBench(b), relativePath)
+	expanded, err := readPackedBenchSourceWithIncludes(sourcePath, map[string]bool{})
+	if err != nil {
+		b.Fatalf("failed to read benchmark source %s: %v", sourcePath, err)
+	}
+	if len(expanded) == 0 {
+		b.Fatalf("expected benchmark source %s to contain input", sourcePath)
+	}
+	return string(expanded)
+}
+
 func benchmarkPackedLowering(b *testing.B, filename string, src string, profile PackedLoweringProfile) {
 	b.Helper()
 	result := parseAndAnalyzeBackendBenchmarkSource(b, filename, src)
@@ -510,6 +578,42 @@ func BenchmarkGenerateLLVMIRPackedLoweringParserASTMegaParallelWordHandle(b *tes
 		b.Fatalf("LegacyPackedLoweringProfile returned error: %v", err)
 	}
 	benchmarkPackedLoweringParallel(b, "packed_lowering_parser_ast_mega_parallel_bench.llcontext", packedLoweringParserASTMegaBenchmarkSource, profile, packedLoweringParallelWorkerCount)
+}
+
+func BenchmarkGenerateLLVMIRPackedLoweringMLASTMegaRowHandle(b *testing.B) {
+	profile, err := LegacyPackedLoweringProfile(PackedEnumABIRowHandle)
+	if err != nil {
+		b.Fatalf("LegacyPackedLoweringProfile returned error: %v", err)
+	}
+	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_mega_bench.llcontext"))
+	benchmarkPackedLowering(b, "packed_lowering_ml_ast_mega_bench.llcontext", src, profile)
+}
+
+func BenchmarkGenerateLLVMIRPackedLoweringMLASTMegaWordHandle(b *testing.B) {
+	profile, err := LegacyPackedLoweringProfile(PackedEnumABIWordHandle)
+	if err != nil {
+		b.Fatalf("LegacyPackedLoweringProfile returned error: %v", err)
+	}
+	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_mega_bench.llcontext"))
+	benchmarkPackedLowering(b, "packed_lowering_ml_ast_mega_bench.llcontext", src, profile)
+}
+
+func BenchmarkGenerateLLVMIRPackedLoweringMLASTMegaParallelRowHandle(b *testing.B) {
+	profile, err := LegacyPackedLoweringProfile(PackedEnumABIRowHandle)
+	if err != nil {
+		b.Fatalf("LegacyPackedLoweringProfile returned error: %v", err)
+	}
+	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_mega_parallel_bench.llcontext"))
+	benchmarkPackedLoweringParallel(b, "packed_lowering_ml_ast_mega_parallel_bench.llcontext", src, profile, packedLoweringParallelWorkerCount)
+}
+
+func BenchmarkGenerateLLVMIRPackedLoweringMLASTMegaParallelWordHandle(b *testing.B) {
+	profile, err := LegacyPackedLoweringProfile(PackedEnumABIWordHandle)
+	if err != nil {
+		b.Fatalf("LegacyPackedLoweringProfile returned error: %v", err)
+	}
+	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_mega_parallel_bench.llcontext"))
+	benchmarkPackedLoweringParallel(b, "packed_lowering_ml_ast_mega_parallel_bench.llcontext", src, profile, packedLoweringParallelWorkerCount)
 }
 
 func BenchmarkGenerateLLVMIRPackedLoweringWordHandle(b *testing.B) {
