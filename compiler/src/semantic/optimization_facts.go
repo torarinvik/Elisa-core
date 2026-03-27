@@ -44,6 +44,10 @@ type PackedStoreProvenance struct {
 	HasNonStoreProvenance       bool
 }
 
+func (p PackedStoreProvenance) HasAnyFacts() bool {
+	return p.HasPackedStoreDeps || p.HasFrozenPackedStoreDeps || p.HasNonFrozenPackedStoreDeps || p.HasNonStoreProvenance
+}
+
 func (p PackedStoreProvenance) HasAnyPackedStoreProvenance() bool {
 	return p.HasPackedStoreDeps
 }
@@ -104,6 +108,17 @@ func (f OptimizationFacts) SameExtentSize(other OptimizationFacts) bool {
 
 func (f OptimizationFacts) Disjoint(other OptimizationFacts) bool {
 	return OptimizationFactsDisjoint(f, other)
+}
+
+func (f OptimizationFacts) HasAnyFacts() bool {
+	return f.Exclusive ||
+		f.ReadOnly ||
+		f.Contiguous ||
+		f.UnitStride ||
+		f.FrozenPackedStoreOnly ||
+		f.Extent != nil ||
+		f.base != "" ||
+		f.PackedStoreProvenance.HasAnyFacts()
 }
 
 func OptimizationFactsDisjoint(a, b OptimizationFacts) bool {
@@ -325,7 +340,10 @@ func optimizationFactsForType(t Type) OptimizationFacts {
 }
 
 func (a *Analyzer) inferExprOptimizationFacts(expr ast.Expr, t Type) OptimizationFacts {
-	facts := optimizationFactsForType(t)
+	return a.inferExprOptimizationFactsWithBase(expr, t, optimizationFactsForType(t))
+}
+
+func (a *Analyzer) inferExprOptimizationFactsWithBase(expr ast.Expr, t Type, facts OptimizationFacts) OptimizationFacts {
 	if expr == nil {
 		return facts
 	}
@@ -439,6 +457,15 @@ func (a *Analyzer) inferExprOptimizationFacts(expr ast.Expr, t Type) Optimizatio
 		}
 	}
 	return facts
+}
+
+func exprRequiresOptimizationFactInference(expr ast.Expr) bool {
+	switch expr.(type) {
+	case *ast.Ident, *ast.IndexExpr, *ast.FieldExpr, *ast.CallExpr, *ast.AllocExpr, *ast.SliceExpr, *ast.TernaryExpr, *ast.TryExpr, *ast.UnwrapElseExpr:
+		return true
+	default:
+		return false
+	}
 }
 
 func typeMayCarryRegionProvenanceForOptimization(t Type) bool {

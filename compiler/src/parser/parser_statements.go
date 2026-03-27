@@ -9,7 +9,7 @@ import (
 
 func (p *Parser) parseBlock() []ast.Stmt {
 	p.expect(lexer.TOKEN_INDENT)
-	var stmts []ast.Stmt
+	stmts := make([]ast.Stmt, 0, p.estimateIndentedItemCount())
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 		p.skipNewlines()
 		if p.peek() == lexer.TOKEN_DEDENT {
@@ -527,7 +527,7 @@ func (p *Parser) parseNestedMatchPattern() ast.MatchPattern {
 		return &ast.MatchBindPattern{Position: pos, Name: name}
 	}
 	variant := p.expect(lexer.TOKEN_IDENT).Text
-	args := make([]ast.MatchPatternArg, 0)
+	args := make([]ast.MatchPatternArg, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 	if p.match(lexer.TOKEN_LPAREN) {
 		if p.peek() != lexer.TOKEN_RPAREN {
 			for {

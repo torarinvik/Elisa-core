@@ -710,8 +710,9 @@ func (p *Parser) parseMatchExpr() ast.Expr {
 }
 
 func (p *Parser) parseCallArgs() ([]ast.Expr, []string) {
-	var args []ast.Expr
-	var argNames []string
+	argCapacity := p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN)
+	args := make([]ast.Expr, 0, argCapacity)
+	argNames := make([]string, 0, argCapacity)
 	if p.peek() == lexer.TOKEN_RPAREN {
 		return nil, nil
 	}
@@ -765,7 +766,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 
 			if field == "specialize" && p.peek() == lexer.TOKEN_LBRACKET {
 				p.advance()
-				typeArgs := make([]ast.TypeExpr, 0)
+				typeArgs := make([]ast.TypeExpr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))
 				if p.peek() != lexer.TOKEN_RBRACKET {
 					for {
 						typeArgs = append(typeArgs, p.parseTypeExpr())
@@ -876,7 +877,7 @@ func (p *Parser) parsePrimary() ast.Expr {
 	case lexer.TOKEN_LBRACKET:
 		pos := p.cur().Pos
 		p.advance()
-		var elems []ast.Expr
+		elems := make([]ast.Expr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))
 		if p.peek() != lexer.TOKEN_RBRACKET {
 			for {
 				elems = append(elems, p.parseExpr())
@@ -910,7 +911,7 @@ func (p *Parser) parsePrimary() ast.Expr {
 		tok := p.advance()
 		if p.peek() == lexer.TOKEN_LPAREN && len(tok.Text) > 0 && tok.Text[0] >= 'A' && tok.Text[0] <= 'Z' {
 			p.advance()
-			var args []ast.Expr
+			args := make([]ast.Expr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 			if p.peek() != lexer.TOKEN_RPAREN {
 				for {
 					args = append(args, p.parseExpr())

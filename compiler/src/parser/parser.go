@@ -97,7 +97,7 @@ func (p *Parser) skipNewlines() {
 // ---------- Top-level parsing ----------
 
 func (p *Parser) ParseFile(filename string) *ast.File {
-	file := &ast.File{Filename: filename}
+	file := &ast.File{Filename: filename, Decls: make([]ast.Decl, 0, p.estimateTopLevelItemCount())}
 	p.skipNewlines()
 	for p.peek() != lexer.TOKEN_EOF {
 		decl := p.parseDecl()
@@ -295,7 +295,7 @@ func (p *Parser) parsePermissionDecl() *ast.PermissionDecl {
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
 
-	members := make([]string, 0)
+	members := make([]string, 0, p.estimateIndentedItemCount())
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 		p.skipNewlines()
 		if p.peek() == lexer.TOKEN_DEDENT {
@@ -351,8 +351,9 @@ func (p *Parser) parseEnumDeclRest(pos lexer.Pos, packed bool, annotations []ast
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
 
-	commonFields := make([]ast.FieldDecl, 0)
-	variants := make([]ast.EnumVariantDecl, 0)
+	itemCapacity := p.estimateIndentedItemCount()
+	commonFields := make([]ast.FieldDecl, 0, itemCapacity/2)
+	variants := make([]ast.EnumVariantDecl, 0, itemCapacity)
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 		p.skipNewlines()
 		if p.peek() == lexer.TOKEN_DEDENT {
@@ -375,7 +376,7 @@ func (p *Parser) parseEnumCommonFields() []ast.FieldDecl {
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
 
-	fields := make([]ast.FieldDecl, 0)
+	fields := make([]ast.FieldDecl, 0, p.estimateIndentedItemCount())
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 		p.skipNewlines()
 		if p.peek() == lexer.TOKEN_DEDENT {
@@ -390,7 +391,7 @@ func (p *Parser) parseEnumCommonFields() []ast.FieldDecl {
 func (p *Parser) parseEnumVariantDecl() ast.EnumVariantDecl {
 	pos := p.cur().Pos
 	name := p.expect(lexer.TOKEN_IDENT).Text
-	payload := make([]ast.EnumPayloadDecl, 0)
+	payload := make([]ast.EnumPayloadDecl, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 	if p.match(lexer.TOKEN_LPAREN) {
 		if p.peek() != lexer.TOKEN_RPAREN {
 			for {
@@ -446,7 +447,7 @@ func (p *Parser) parseConstEnumDecl() *ast.ConstEnumDecl {
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
 
-	members := make([]ast.ConstEnumMemberDecl, 0)
+	members := make([]ast.ConstEnumMemberDecl, 0, p.estimateIndentedItemCount())
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 		p.skipNewlines()
 		if p.peek() == lexer.TOKEN_DEDENT {
@@ -541,7 +542,7 @@ func (p *Parser) parseStructDeclWithAnnotations(annotations []ast.Annotation) *a
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
 
-	var fields []ast.FieldDecl
+	fields := make([]ast.FieldDecl, 0, p.estimateIndentedItemCount())
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 		p.skipNewlines()
 		if p.peek() == lexer.TOKEN_DEDENT {
@@ -601,12 +602,13 @@ func (p *Parser) parseFuncGenericParams() ([]string, []string, []string, []strin
 }
 
 func (p *Parser) parseGenericParamListAfterLBracket(allowRegion bool, allowPermission bool) ([]string, []string, []string, []string, []string, []ast.GenericParam) {
-	typeParams := make([]string, 0)
-	refStorageParams := make([]string, 0)
-	refStateParams := make([]string, 0)
-	regionParams := make([]string, 0)
-	permissionParams := make([]string, 0)
-	genericParams := make([]ast.GenericParam, 0)
+	paramCapacity := p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET)
+	typeParams := make([]string, 0, paramCapacity)
+	refStorageParams := make([]string, 0, paramCapacity)
+	refStateParams := make([]string, 0, paramCapacity)
+	regionParams := make([]string, 0, paramCapacity)
+	permissionParams := make([]string, 0, paramCapacity)
+	genericParams := make([]ast.GenericParam, 0, paramCapacity)
 	seenType := map[string]bool{}
 	seenRefStorage := map[string]bool{}
 	seenRefState := map[string]bool{}
@@ -703,7 +705,7 @@ func (p *Parser) parsePermissionRefs(bracketed bool) []ast.PermissionRef {
 	} else if p.match(lexer.TOKEN_LBRACKET) {
 		bracketed = true
 	}
-	refs := make([]ast.PermissionRef, 0)
+	refs := make([]ast.PermissionRef, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))
 	for {
 		refs = append(refs, p.parsePermissionRef())
 		if !p.match(lexer.TOKEN_COMMA) {
@@ -745,7 +747,7 @@ func (p *Parser) parseFuncDeclWithAnnotations(annotations []ast.Annotation) *ast
 }
 
 func (p *Parser) parseParamList() []ast.ParamDecl {
-	var params []ast.ParamDecl
+	params := make([]ast.ParamDecl, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 	if p.peek() == lexer.TOKEN_RPAREN {
 		return params
 	}
@@ -809,7 +811,7 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 
 	// extern name(params...) [-> RetType]  (function)
 	p.expect(lexer.TOKEN_LPAREN)
-	var params []ast.ParamDecl
+	params := make([]ast.ParamDecl, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 	variadic := false
 	if p.peek() != lexer.TOKEN_RPAREN {
 		for {
@@ -876,6 +878,7 @@ func (p *Parser) parseExportDecl() ast.Decl {
 		targetName := p.expect(lexer.TOKEN_IDENT).Text
 		var targetTypeArgs []ast.TypeExpr
 		if p.match(lexer.TOKEN_LBRACKET) {
+			targetTypeArgs = make([]ast.TypeExpr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))
 			for {
 				targetTypeArgs = append(targetTypeArgs, p.parseGenericTypeArgExpr())
 				if !p.match(lexer.TOKEN_COMMA) {
@@ -911,7 +914,7 @@ func (p *Parser) parseStaticIfDecl() *ast.StaticIfDecl {
 
 	thenBlock := p.parseDeclBlock()
 
-	var elifs []ast.StaticElifDecl
+	elifs := make([]ast.StaticElifDecl, 0, 2)
 	var elseBlock []ast.Decl
 
 	for p.skipNewlines(); p.peek() == lexer.TOKEN_STATIC; p.skipNewlines() {
@@ -941,7 +944,7 @@ func (p *Parser) parseStaticIfDecl() *ast.StaticIfDecl {
 
 func (p *Parser) parseDeclBlock() []ast.Decl {
 	p.expect(lexer.TOKEN_INDENT)
-	var decls []ast.Decl
+	decls := make([]ast.Decl, 0, p.estimateIndentedItemCount())
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 		p.skipNewlines()
 		if p.peek() == lexer.TOKEN_DEDENT {

@@ -11,7 +11,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	defer func() {
 		if expr != nil {
 			a.exprTypes[expr] = result
-			a.exprFacts[expr] = a.inferExprOptimizationFacts(expr, result)
+			a.recordExprOptimizationFacts(expr, result)
 		}
 	}()
 	switch n := expr.(type) {
@@ -4179,7 +4179,28 @@ func (a *Analyzer) recordAnalyzedExprType(expr ast.Expr, result Type) {
 		return
 	}
 	a.exprTypes[expr] = result
-	a.exprFacts[expr] = a.inferExprOptimizationFacts(expr, result)
+	a.recordExprOptimizationFacts(expr, result)
+}
+
+func (a *Analyzer) recordExprOptimizationFacts(expr ast.Expr, result Type) {
+	if a == nil || expr == nil || a.exprFacts == nil {
+		return
+	}
+	baseFacts := optimizationFactsForType(result)
+	if !exprRequiresOptimizationFactInference(expr) && !typeMayCarryRegionProvenanceForOptimization(result) {
+		if baseFacts.HasAnyFacts() {
+			a.exprFacts[expr] = baseFacts
+			return
+		}
+		delete(a.exprFacts, expr)
+		return
+	}
+	facts := a.inferExprOptimizationFactsWithBase(expr, result, baseFacts)
+	if facts.HasAnyFacts() {
+		a.exprFacts[expr] = facts
+		return
+	}
+	delete(a.exprFacts, expr)
 }
 
 func contextualFloatLiteralType(expected Type) (Type, bool) {

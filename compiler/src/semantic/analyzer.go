@@ -181,6 +181,28 @@ type poolScopeState struct {
 }
 
 func Analyze(file *ast.File) *Result {
+	census := analyzeASTCensus(file)
+	exprCapacity := census.exprs
+	exprFactsCapacity := census.exprs / 8
+	if exprFactsCapacity < 32 {
+		exprFactsCapacity = 32
+	}
+	resolvedCastHookCapacity := census.exprs / 32
+	if resolvedCastHookCapacity < 8 {
+		resolvedCastHookCapacity = 8
+	}
+	denseNodeCapacity := census.exprs / 64
+	if denseNodeCapacity < 8 {
+		denseNodeCapacity = 8
+	}
+	funcDeclCapacity := census.funcDecls
+	if funcDeclCapacity < 8 {
+		funcDeclCapacity = 8
+	}
+	parallelForCapacity := census.parallelFors
+	if parallelForCapacity < 4 {
+		parallelForCapacity = 4
+	}
 	a := &Analyzer{
 		file:                             file,
 		namedTypes:                       map[string]Type{},
@@ -188,14 +210,14 @@ func Analyze(file *ast.File) *Result {
 		globalScope:                      NewScope(nil),
 		functionTypes:                    map[string]*FuncType{},
 		constValues:                      map[string]ConstValue{},
-		exprTypes:                        map[ast.Expr]Type{},
-		exprFacts:                        map[ast.Expr]OptimizationFacts{},
-		resolvedCastHooks:                map[ast.Expr]*Symbol{},
-		exprDenseNodeKeys:                map[ast.Expr]DenseNodeKeyInfo{},
-		exprNodeTables:                   map[ast.Expr]NodeTableInfo{},
-		parallelForInfo:                  map[*ast.ParallelForStmt]*ParallelForInfo{},
+		exprTypes:                        make(map[ast.Expr]Type, exprCapacity),
+		exprFacts:                        make(map[ast.Expr]OptimizationFacts, exprFactsCapacity),
+		resolvedCastHooks:                make(map[ast.Expr]*Symbol, resolvedCastHookCapacity),
+		exprDenseNodeKeys:                make(map[ast.Expr]DenseNodeKeyInfo, denseNodeCapacity),
+		exprNodeTables:                   make(map[ast.Expr]NodeTableInfo, denseNodeCapacity),
+		parallelForInfo:                  make(map[*ast.ParallelForStmt]*ParallelForInfo, parallelForCapacity),
 		symbolFacts:                      map[*Symbol]OptimizationFacts{},
-		funcDeclSymbols:                  map[*ast.FuncDecl]*Symbol{},
+		funcDeclSymbols:                  make(map[*ast.FuncDecl]*Symbol, funcDeclCapacity),
 		castHooksByName:                  map[string]map[castHookSignature]*Symbol{},
 		returnProvenanceInProgress:       map[*ast.FuncDecl]bool{},
 		returnBorrowedOwnerRefInProgress: map[*ast.FuncDecl]bool{},
