@@ -401,6 +401,15 @@ func BenchmarkRunCLICompilePackedMegaASTParallel10ToLLVM(b *testing.B) {
 
 func BenchmarkRunCLICompilePackedMLASTToLLVM(b *testing.B) {
 	repoRoot := repoRootFromMainBench(b)
+	sourcePath := filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_medium_bench.llcontext")
+	if _, err := os.Stat(sourcePath); err != nil {
+		b.Fatalf("failed to stat %s: %v", sourcePath, err)
+	}
+	benchmarkCLICompileToLLVM(b, sourcePath)
+}
+
+func BenchmarkRunCLICompilePackedMLASTMegaToLLVM(b *testing.B) {
+	repoRoot := repoRootFromMainBench(b)
 	sourcePath := filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_mega_bench.llcontext")
 	if _, err := os.Stat(sourcePath); err != nil {
 		b.Fatalf("failed to stat %s: %v", sourcePath, err)
@@ -419,6 +428,15 @@ func BenchmarkRunCLICompilePackedMLASTMediumToLLVM(b *testing.B) {
 
 func BenchmarkRunCLICompilePackedMLASTParallel10ToLLVM(b *testing.B) {
 	repoRoot := repoRootFromMainBench(b)
+	sourcePath := filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_medium_parallel_bench.llcontext")
+	if _, err := os.Stat(sourcePath); err != nil {
+		b.Fatalf("failed to stat %s: %v", sourcePath, err)
+	}
+	benchmarkCLICompileToLLVMParallel(b, sourcePath, 10)
+}
+
+func BenchmarkRunCLICompilePackedMLASTMegaParallel10ToLLVM(b *testing.B) {
+	repoRoot := repoRootFromMainBench(b)
 	sourcePath := filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_mega_parallel_bench.llcontext")
 	if _, err := os.Stat(sourcePath); err != nil {
 		b.Fatalf("failed to stat %s: %v", sourcePath, err)
@@ -436,6 +454,15 @@ func BenchmarkRunCLICompilePackedMLASTMediumParallel10ToLLVM(b *testing.B) {
 }
 
 func BenchmarkRunCLICompilePackedMLASTToObjectO3(b *testing.B) {
+	repoRoot := repoRootFromMainBench(b)
+	sourcePath := filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_medium_bench.llcontext")
+	if _, err := os.Stat(sourcePath); err != nil {
+		b.Fatalf("failed to stat %s: %v", sourcePath, err)
+	}
+	benchmarkCLICompileToObject(b, sourcePath, "-O3")
+}
+
+func BenchmarkRunCLICompilePackedMLASTMegaToObjectO3(b *testing.B) {
 	repoRoot := repoRootFromMainBench(b)
 	sourcePath := filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_mega_bench.llcontext")
 	if _, err := os.Stat(sourcePath); err != nil {
@@ -473,6 +500,15 @@ func BenchmarkRunNativeFrontendLexerPackedMegaASTParallel10(b *testing.B) {
 
 func BenchmarkRunNativePackedMLASTRuntime(b *testing.B) {
 	repoRoot := repoRootFromMainBench(b)
+	sourcePath := filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_medium_core.llcontext")
+	if _, err := os.Stat(sourcePath); err != nil {
+		b.Fatalf("failed to stat %s: %v", sourcePath, err)
+	}
+	benchmarkNativePackedMLASTRuntime(b, sourcePath, "scalar", 1, buildPackedMLASTMediumNativeExecutable)
+}
+
+func BenchmarkRunNativePackedMLASTMegaRuntime(b *testing.B) {
+	repoRoot := repoRootFromMainBench(b)
 	sourcePath := filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_mega_core.llcontext")
 	if _, err := os.Stat(sourcePath); err != nil {
 		b.Fatalf("failed to stat %s: %v", sourcePath, err)
@@ -481,6 +517,15 @@ func BenchmarkRunNativePackedMLASTRuntime(b *testing.B) {
 }
 
 func BenchmarkRunNativePackedMLASTRuntimeParallel10(b *testing.B) {
+	repoRoot := repoRootFromMainBench(b)
+	sourcePath := filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_medium_core.llcontext")
+	if _, err := os.Stat(sourcePath); err != nil {
+		b.Fatalf("failed to stat %s: %v", sourcePath, err)
+	}
+	benchmarkNativePackedMLASTRuntime(b, sourcePath, "parallel", 10, buildPackedMLASTMediumNativeExecutable)
+}
+
+func BenchmarkRunNativePackedMLASTMegaRuntimeParallel10(b *testing.B) {
 	repoRoot := repoRootFromMainBench(b)
 	sourcePath := filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_mega_core.llcontext")
 	if _, err := os.Stat(sourcePath); err != nil {

@@ -1117,11 +1117,8 @@ func TestRunCLIJSONParserParallelBenchSmoke(t *testing.T) {
 	}
 }
 
-func TestRunCLIPackedMLASTBenchSmoke(t *testing.T) {
-	requireSlowNativeMLAST(t)
-
-	repoRoot := repoRootFromMainTest(t)
-	exePath := buildPackedMLASTNativeExecutable(t, repoRoot, "-O3")
+func runPackedMLASTBenchSmoke(t *testing.T, exePath string) {
+	t.Helper()
 
 	for _, tc := range []struct {
 		name     string
@@ -1145,6 +1142,20 @@ func TestRunCLIPackedMLASTBenchSmoke(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRunCLIPackedMLASTBenchSmoke(t *testing.T) {
+	repoRoot := repoRootFromMainTest(t)
+	exePath := buildPackedMLASTMediumNativeExecutable(t, repoRoot, "-O3")
+	runPackedMLASTBenchSmoke(t, exePath)
+}
+
+func TestRunCLIPackedMLASTMegaBenchSmoke(t *testing.T) {
+	requireSlowNativeMLAST(t)
+
+	repoRoot := repoRootFromMainTest(t)
+	exePath := buildPackedMLASTNativeExecutable(t, repoRoot, "-O3")
+	runPackedMLASTBenchSmoke(t, exePath)
 }
 
 func TestRunCLIPackedMLExprReproSmoke(t *testing.T) {
