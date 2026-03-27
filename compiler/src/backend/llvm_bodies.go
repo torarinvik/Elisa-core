@@ -2405,8 +2405,8 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		if err != nil {
 			return nil, packedPayloadValueCache{}, err
 		}
-		matchedBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.pattern.ok"))
 		pred := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), tagValue, tagConst, cStringFree("match.tag"))
+		matchedBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.pattern.ok"))
 		C.LLVMBuildCondBr(s.builder, pred, matchedBB, failureBB)
 
 		C.LLVMPositionBuilderAtEnd(s.builder, matchedBB)
