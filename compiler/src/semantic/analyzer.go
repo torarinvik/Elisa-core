@@ -104,6 +104,7 @@ type Analyzer struct {
 	currentValueBindings              map[*Symbol]ast.Expr
 	currentPackedVariantViews         map[*Symbol]*PackedVariantViewType
 	currentPackedStores               map[string]*PackedEnumStoreType
+	currentPackedStoreResolutions     map[*Symbol]packedStoreResolution
 	currentPoolScopes                 []poolScopeState
 	currentFunctionUsedPermissions    map[string]bool
 	currentFunctionUsedPermissionRefs []ast.PermissionRef
@@ -142,6 +143,11 @@ type regionDependencyState struct {
 
 type packedStoreDependencyState struct {
 	Type *PackedEnumStoreType
+}
+
+type packedStoreResolution struct {
+	Symbol *Symbol
+	Type   *PackedEnumStoreType
 }
 
 type regionRefState struct {
@@ -2437,6 +2443,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	savedValueBindings := a.currentValueBindings
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
+	savedPackedStoreResolutions := a.currentPackedStoreResolutions
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
 	savedReturnProvenance := a.currentReturnProvenance
@@ -2452,6 +2459,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentValueBindings = map[*Symbol]ast.Expr{}
 	a.currentPackedVariantViews = map[*Symbol]*PackedVariantViewType{}
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
+	a.currentPackedStoreResolutions = map[*Symbol]packedStoreResolution{}
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
 	a.currentReturnProvenance = regionRefState{}
@@ -2518,6 +2526,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentValueBindings = savedValueBindings
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
+	a.currentPackedStoreResolutions = savedPackedStoreResolutions
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
 	a.currentReturnProvenance = savedReturnProvenance
@@ -2547,6 +2556,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	savedValueBindings := a.currentValueBindings
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
+	savedPackedStoreResolutions := a.currentPackedStoreResolutions
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
 	savedReturnProvenance := a.currentReturnProvenance
@@ -2566,6 +2576,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentValueBindings = map[*Symbol]ast.Expr{}
 	a.currentPackedVariantViews = map[*Symbol]*PackedVariantViewType{}
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
+	a.currentPackedStoreResolutions = map[*Symbol]packedStoreResolution{}
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
 	a.currentReturnProvenance = regionRefState{}
@@ -2624,6 +2635,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentValueBindings = savedValueBindings
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
+	a.currentPackedStoreResolutions = savedPackedStoreResolutions
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
 	a.currentReturnProvenance = savedReturnProvenance
@@ -2654,6 +2666,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	savedValueBindings := a.currentValueBindings
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
+	savedPackedStoreResolutions := a.currentPackedStoreResolutions
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
 	savedReturnProvenance := a.currentReturnProvenance
@@ -2673,6 +2686,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentValueBindings = map[*Symbol]ast.Expr{}
 	a.currentPackedVariantViews = map[*Symbol]*PackedVariantViewType{}
 	a.currentPackedStores = map[string]*PackedEnumStoreType{}
+	a.currentPackedStoreResolutions = map[*Symbol]packedStoreResolution{}
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
 	a.currentReturnProvenance = regionRefState{}
@@ -2725,6 +2739,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentValueBindings = savedValueBindings
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
+	a.currentPackedStoreResolutions = savedPackedStoreResolutions
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
 	a.currentReturnProvenance = savedReturnProvenance

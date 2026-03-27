@@ -477,16 +477,19 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		if !ok {
 			return regionRefState{}, false
 		}
+		stateSym := sym
 		state, ok := a.currentRegionRefs[sym]
 		if (!ok || !hasRegionProvenance(state)) && sym != nil {
 			root := symbolAliasRoot(sym)
 			if root != nil && root != sym {
+				stateSym = root
 				state, ok = a.currentRegionRefs[root]
 			}
 		}
 		if !ok {
 			return regionRefState{}, false
 		}
+		state = a.canonicalizeStoredRegionRefBinding(stateSym, state)
 		return state, true
 	case *ast.AllocExpr:
 		if n.Owner != nil {
@@ -1377,6 +1380,7 @@ func (a *Analyzer) activePackedStoreRegionState(enumType *EnumType) (regionRefSt
 			}
 			if a.currentRegionRefs != nil {
 				if state, ok := a.currentRegionRefs[sym]; ok && hasRegionProvenance(state) {
+					state = a.canonicalizeStoredRegionRefBinding(sym, state)
 					return cloneRegionRefState(state), true
 				}
 			}

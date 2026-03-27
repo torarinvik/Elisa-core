@@ -1086,6 +1086,7 @@ func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
 	savedRegionRefs := a.currentRegionRefs
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
+	savedPackedStoreResolutions := a.currentPackedStoreResolutions
 	savedPools := a.currentPoolScopes
 	a.currentScope = NewScope(savedScope)
 	a.currentRegions = a.cloneRegionStates()
@@ -1093,6 +1094,7 @@ func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
 	a.currentRegionRefs = a.cloneRegionRefStates()
 	a.currentPackedVariantViews = a.clonePackedVariantViewBindings()
 	a.currentPackedStores = a.clonePackedStores()
+	a.currentPackedStoreResolutions = a.clonePackedStoreResolutions()
 	a.currentPoolScopes = append(append([]poolScopeState(nil), savedPools...), poolScopeState{Name: stmt.Name})
 	a.defineLocal(&Symbol{Name: stmt.Name, Kind: SymbolLocal, Type: poolType, Node: stmt, Mutable: false}, stmt.Pos())
 	for _, inner := range stmt.Body {
@@ -1104,6 +1106,7 @@ func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
 	a.currentRegionRefs = savedRegionRefs
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
+	a.currentPackedStoreResolutions = savedPackedStoreResolutions
 	a.currentPoolScopes = savedPools
 }
 
@@ -1702,6 +1705,7 @@ func (a *Analyzer) analyzeLockStmt(stmt *ast.LockStmt) {
 	savedRegionRefs := a.currentRegionRefs
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
+	savedPackedStoreResolutions := a.currentPackedStoreResolutions
 	guardSym := &Symbol{Name: stmt.GuardName, Kind: SymbolLocal, Type: guardType, Node: stmt, Mutable: true}
 	a.currentScope = NewScope(savedScope)
 	a.currentRegions = a.cloneRegionStates()
@@ -1709,6 +1713,7 @@ func (a *Analyzer) analyzeLockStmt(stmt *ast.LockStmt) {
 	a.currentRegionRefs = a.cloneRegionRefStates()
 	a.currentPackedVariantViews = a.clonePackedVariantViewBindings()
 	a.currentPackedStores = a.clonePackedStores()
+	a.currentPackedStoreResolutions = a.clonePackedStoreResolutions()
 	a.defineLocal(guardSym, stmt.Pos())
 	for _, inner := range stmt.Body {
 		a.analyzeStmt(inner)
@@ -1726,6 +1731,7 @@ func (a *Analyzer) analyzeLockStmt(stmt *ast.LockStmt) {
 	a.currentRegionRefs = savedRegionRefs
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
+	a.currentPackedStoreResolutions = savedPackedStoreResolutions
 }
 
 func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
@@ -1737,8 +1743,10 @@ func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
 		return
 	}
 	savedPackedStores := a.currentPackedStores
+	savedPackedStoreResolutions := a.currentPackedStoreResolutions
 	savedPackedVariantViews := a.currentPackedVariantViews
 	a.currentPackedStores = a.clonePackedStores()
+	a.currentPackedStoreResolutions = a.clonePackedStoreResolutions()
 	if a.currentPackedStores == nil {
 		a.currentPackedStores = map[string]*PackedEnumStoreType{}
 	}
@@ -1746,6 +1754,7 @@ func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
 	a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
+	a.currentPackedStoreResolutions = savedPackedStoreResolutions
 }
 
 func (a *Analyzer) analyzeMarkStmt(stmt *ast.MarkStmt) {
@@ -2384,15 +2393,18 @@ func (a *Analyzer) analyzeMatchExprArmBody(body []ast.Stmt, scope *Scope) Type {
 	savedRegions := a.currentRegions
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
+	savedPackedStoreResolutions := a.currentPackedStoreResolutions
 	a.currentScope = scope
 	a.currentRegions = a.cloneRegionStates()
 	a.currentPackedVariantViews = a.clonePackedVariantViewBindings()
 	a.currentPackedStores = a.clonePackedStores()
+	a.currentPackedStoreResolutions = a.clonePackedStoreResolutions()
 	defer func() {
 		a.currentScope = savedScope
 		a.currentRegions = savedRegions
 		a.currentPackedVariantViews = savedPackedVariantViews
 		a.currentPackedStores = savedPackedStores
+		a.currentPackedStoreResolutions = savedPackedStoreResolutions
 	}()
 	if len(body) == 0 {
 		return invalidType
@@ -2954,17 +2966,20 @@ func (a *Analyzer) analyzeBlockWithRegionClone(stmts []ast.Stmt, scope *Scope) {
 	savedRegionRefs := a.currentRegionRefs
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
+	savedPackedStoreResolutions := a.currentPackedStoreResolutions
 	a.currentRegions = a.cloneRegionStates()
 	a.currentRegionMarks = a.cloneRegionMarkStates()
 	a.currentRegionRefs = a.cloneRegionRefStates()
 	a.currentPackedVariantViews = a.clonePackedVariantViewBindings()
 	a.currentPackedStores = a.clonePackedStores()
+	a.currentPackedStoreResolutions = a.clonePackedStoreResolutions()
 	a.analyzeBlockInScope(stmts, scope)
 	a.currentRegions = savedRegions
 	a.currentRegionMarks = savedRegionMarks
 	a.currentRegionRefs = savedRegionRefs
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
+	a.currentPackedStoreResolutions = savedPackedStoreResolutions
 }
 
 type affineFlowSnapshot struct {
@@ -5482,6 +5497,17 @@ func (a *Analyzer) clonePackedStores() map[string]*PackedEnumStoreType {
 	return cloned
 }
 
+func (a *Analyzer) clonePackedStoreResolutions() map[*Symbol]packedStoreResolution {
+	if a.currentPackedStoreResolutions == nil {
+		return nil
+	}
+	cloned := make(map[*Symbol]packedStoreResolution, len(a.currentPackedStoreResolutions))
+	for sym, resolution := range a.currentPackedStoreResolutions {
+		cloned[sym] = resolution
+	}
+	return cloned
+}
+
 func (a *Analyzer) bindActivePackedStoreType(t Type) {
 	storeType, ok := t.(*PackedEnumStoreType)
 	if !ok || storeType == nil || storeType.Enum == nil {
@@ -5581,6 +5607,89 @@ func (a *Analyzer) freezeMovedPackedStoreSource(expr ast.Expr) (*Symbol, *Packed
 	return sym, storeType, true
 }
 
+func (a *Analyzer) resolvePackedStoreDependency(store *Symbol, dep packedStoreDependencyState) (*Symbol, packedStoreDependencyState, bool) {
+	if store == nil || len(a.currentPackedStoreResolutions) == 0 {
+		return store, dep, false
+	}
+	resolvedStore := store
+	resolvedDep := dep
+	changed := false
+	seen := map[*Symbol]bool{}
+	for resolvedStore != nil {
+		if seen[resolvedStore] {
+			break
+		}
+		seen[resolvedStore] = true
+		resolution, ok := a.currentPackedStoreResolutions[resolvedStore]
+		if !ok {
+			break
+		}
+		if resolution.Type != nil && resolution.Type != resolvedDep.Type {
+			resolvedDep.Type = resolution.Type
+			changed = true
+		}
+		if resolution.Symbol == nil || resolution.Symbol == resolvedStore {
+			break
+		}
+		resolvedStore = resolution.Symbol
+		changed = true
+	}
+	if changed && store != nil && a.currentPackedStoreResolutions != nil {
+		a.currentPackedStoreResolutions[store] = packedStoreResolution{Symbol: resolvedStore, Type: resolvedDep.Type}
+	}
+	return resolvedStore, resolvedDep, changed
+}
+
+func (a *Analyzer) resolvePackedStoreDependenciesInState(state regionRefState) (regionRefState, bool) {
+	if len(a.currentPackedStoreResolutions) == 0 || !hasPackedStoreDependencies(state) {
+		return state, false
+	}
+	changed := false
+	storeDepsCloned := false
+	fieldsCloned := false
+	for store, dep := range state.StoreDeps {
+		nextStore, nextDep, depChanged := a.resolvePackedStoreDependency(store, dep)
+		if !depChanged {
+			continue
+		}
+		if !storeDepsCloned {
+			state.StoreDeps = clonePackedStoreDependencyStates(state.StoreDeps)
+			storeDepsCloned = true
+		}
+		delete(state.StoreDeps, store)
+		state.StoreDeps[nextStore] = nextDep
+		changed = true
+	}
+	for name, fieldState := range state.Fields {
+		if !hasPackedStoreDependencies(fieldState) {
+			continue
+		}
+		nextField, fieldChanged := a.resolvePackedStoreDependenciesInState(fieldState)
+		if !fieldChanged {
+			continue
+		}
+		if !fieldsCloned {
+			state.Fields = cloneRegionRefFields(state.Fields)
+			fieldsCloned = true
+		}
+		state.Fields[name] = nextField
+		changed = true
+	}
+	if changed {
+		state.PackedStoreSummaryKnown = false
+		state = withPackedStoreProvenanceSummary(state)
+	}
+	return state, changed
+}
+
+func (a *Analyzer) canonicalizeStoredRegionRefBinding(sym *Symbol, state regionRefState) regionRefState {
+	nextState, changed := a.resolvePackedStoreDependenciesInState(state)
+	if changed && a.currentRegionRefs != nil && sym != nil {
+		a.currentRegionRefs[sym] = nextState
+	}
+	return nextState
+}
+
 func (a *Analyzer) recordResolvedRegionRefBinding(sym *Symbol, state regionRefState) {
 	if a.currentRegionRefs == nil || sym == nil {
 		return
@@ -5589,6 +5698,7 @@ func (a *Analyzer) recordResolvedRegionRefBinding(sym *Symbol, state regionRefSt
 		delete(a.currentRegionRefs, sym)
 		return
 	}
+	state, _ = a.resolvePackedStoreDependenciesInState(state)
 	state = withPackedStoreProvenanceSummary(state)
 	a.currentRegionRefs[sym] = cloneRegionRefState(state)
 }
@@ -5606,15 +5716,14 @@ func (a *Analyzer) recordRegionRefAssignment(target ast.Expr, value ast.Expr) {
 }
 
 func (a *Analyzer) remapPackedStoreDependencies(from *Symbol, to *Symbol, nextType *PackedEnumStoreType) {
-	if a.currentRegionRefs == nil || from == nil || to == nil || nextType == nil {
+	if from == nil || to == nil || nextType == nil {
 		return
 	}
-	for sym, state := range a.currentRegionRefs {
-		nextState, changed := remapPackedStoreDependencyInState(state, from, to, nextType)
-		if changed {
-			a.currentRegionRefs[sym] = nextState
-		}
+	resolvedTo, resolvedDep, _ := a.resolvePackedStoreDependency(to, packedStoreDependencyState{Type: nextType})
+	if a.currentPackedStoreResolutions == nil {
+		a.currentPackedStoreResolutions = map[*Symbol]packedStoreResolution{}
 	}
+	a.currentPackedStoreResolutions[from] = packedStoreResolution{Symbol: resolvedTo, Type: resolvedDep.Type}
 }
 
 func remapPackedStoreDependencyInState(state regionRefState, from *Symbol, to *Symbol, nextType *PackedEnumStoreType) (regionRefState, bool) {

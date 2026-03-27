@@ -1,6 +1,10 @@
 package semantic
 
-import "testing"
+import (
+	"testing"
+
+	"llcontext/src/ast"
+)
 
 func TestCloneRegionRefStateKeepsNestedInvalidationLocal(t *testing.T) {
 	region := &Symbol{Name: "scratch", Kind: SymbolRegion}
@@ -89,5 +93,60 @@ func TestAssignRegionRefStateAtPathDoesNotMutateExistingNestedFields(t *testing.
 	}
 	if _, ok := updated.Fields["ret"].Fields["right"]; !ok {
 		t.Fatalf("expected assigned state to populate the new nested field")
+	}
+}
+
+func TestRegionRefStateForExprAppliesPackedStoreRemapLazily(t *testing.T) {
+	from := &Symbol{Name: "from", Kind: SymbolLocal}
+	to := &Symbol{Name: "to", Kind: SymbolLocal}
+	value := &Symbol{Name: "value", Kind: SymbolLocal}
+	localState := &BuiltinType{Name: "Local"}
+	frozenState := &BuiltinType{Name: "Frozen"}
+	enumType := &EnumType{Name: "Expr", Packed: true}
+	originalType := &PackedEnumStoreType{Enum: enumType, State: localState}
+	remappedType := &PackedEnumStoreType{Enum: enumType, State: frozenState}
+
+	scope := NewScope(nil)
+	scope.Define(value)
+
+	a := &Analyzer{
+		currentScope: scope,
+		currentRegionRefs: map[*Symbol]regionRefState{
+			value: {
+				Fields: map[string]regionRefState{
+					"node": {
+						StoreDeps: map[*Symbol]packedStoreDependencyState{
+							from: {Type: originalType},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	a.remapPackedStoreDependencies(from, to, remappedType)
+
+	if _, ok := a.currentRegionRefs[value].Fields["node"].StoreDeps[from]; !ok {
+		t.Fatalf("expected lazy remap to leave stored state untouched before lookup")
+	}
+
+	state, ok := a.regionRefStateForExpr(&ast.Ident{Name: "value"})
+	if !ok {
+		t.Fatalf("expected regionRefStateForExpr to resolve the stored binding")
+	}
+	if _, ok := state.Fields["node"].StoreDeps[from]; ok {
+		t.Fatalf("expected lazy remap lookup to drop the old packed store symbol")
+	}
+	if dep, ok := state.Fields["node"].StoreDeps[to]; !ok || dep.Type != remappedType {
+		t.Fatalf("expected lazy remap lookup to use the frozen packed store target")
+	}
+	if _, ok := a.currentRegionRefs[value].Fields["node"].StoreDeps[from]; ok {
+		t.Fatalf("expected lookup to canonicalize the cached binding")
+	}
+	if dep, ok := a.currentRegionRefs[value].Fields["node"].StoreDeps[to]; !ok || dep.Type != remappedType {
+		t.Fatalf("expected lookup to update the cached binding to the frozen packed store target")
+	}
+	if onlyFrozen, hasFrozen := regionRefStateDependsOnlyOnFrozenPackedStores(state); !onlyFrozen || !hasFrozen {
+		t.Fatalf("expected canonicalized state to depend only on frozen packed stores")
 	}
 }
