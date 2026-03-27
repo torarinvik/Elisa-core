@@ -71,7 +71,7 @@ int main(int argc, char **argv) {
     clock_t start = clock();
     int64_t checksum = 0;
     for (long i = 0; i < iterations; ++i) {
-        checksum += frontend_lexer_token_count(source);
+        checksum += frontend_lexer_token_count_with_len(source, source_len);
     }
     clock_t end = clock();
 

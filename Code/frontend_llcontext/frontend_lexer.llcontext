@@ -8,12 +8,12 @@ def frontend_require_arena(lexer: any FrontendLexer&) -> any Arena& can[Abort.Pa
     return lexer.arena
 
 
-def frontend_new_lexer(a: any Arena&, filename: any u8&, source: any u8&) -> FrontendLexer can[Memory.Allocate, Abort.Panic]:
+def frontend_new_lexer_with_len(a: any Arena&, filename: any u8&, source: any u8&, source_len: usize) -> FrontendLexer can[Memory.Allocate, Abort.Panic]:
     out: mutable FrontendLexer = zeroed
     out.arena as & <- a
     out.filename <- filename
     out.source <- source
-    out.source_len <- runtime_strlen(source)
+    out.source_len <- source_len
     out.pos <- 0u
     out.line <- 1
     out.col <- 1
@@ -22,6 +22,10 @@ def frontend_new_lexer(a: any Arena&, filename: any u8&, source: any u8&) -> Fro
     out.paren_depth <- 0
     _ = arena_da_append(a, (&out.indent_stack).cast[any darray[usize]&], 0u)
     return out
+
+
+def frontend_new_lexer(a: any Arena&, filename: any u8&, source: any u8&) -> FrontendLexer can[Memory.Allocate, Abort.Panic]:
+    return frontend_new_lexer_with_len(a, filename, source, runtime_strlen(source))
 
 
 def frontend_cur_pos(lexer: any FrontendLexer&) -> FrontendPos:
@@ -197,8 +201,43 @@ def frontend_sv_first_char(view: StringView) -> i64:
     return view.data[0u].i64()
 
 
+def frontend_sv_is_1(view: StringView, a: i64) -> bool:
+    return view.len == 1 and view.data[0u].i64() == a
+
+
+def frontend_sv_is_2(view: StringView, a: i64, b: i64) -> bool:
+    return view.len == 2 and view.data[0u].i64() == a and view.data[1u].i64() == b
+
+
+def frontend_sv_is_3(view: StringView, a: i64, b: i64, c: i64) -> bool:
+    return view.len == 3 and view.data[0u].i64() == a and view.data[1u].i64() == b and view.data[2u].i64() == c
+
+
+def frontend_sv_is_4(view: StringView, a: i64, b: i64, c: i64, d: i64) -> bool:
+    return view.len == 4 and view.data[0u].i64() == a and view.data[1u].i64() == b and view.data[2u].i64() == c and view.data[3u].i64() == d
+
+
+def frontend_sv_is_5(view: StringView, a: i64, b: i64, c: i64, d: i64, e: i64) -> bool:
+    return view.len == 5 and view.data[0u].i64() == a and view.data[1u].i64() == b and view.data[2u].i64() == c and view.data[3u].i64() == d and view.data[4u].i64() == e
+
+
+def frontend_sv_is_6(view: StringView, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64) -> bool:
+    return view.len == 6 and view.data[0u].i64() == a and view.data[1u].i64() == b and view.data[2u].i64() == c and view.data[3u].i64() == d and view.data[4u].i64() == e and view.data[5u].i64() == f
+
+
+def frontend_sv_is_7(view: StringView, a: i64, b: i64, c: i64, d: i64, e: i64, f: i64, g: i64) -> bool:
+    return view.len == 7 and view.data[0u].i64() == a and view.data[1u].i64() == b and view.data[2u].i64() == c and view.data[3u].i64() == d and view.data[4u].i64() == e and view.data[5u].i64() == f and view.data[6u].i64() == g
+
+
 def frontend_valid_suffix(view: StringView) -> bool:
-    return frontend_sv_eq_literal(view, "u8") or frontend_sv_eq_literal(view, "u16") or frontend_sv_eq_literal(view, "u32") or frontend_sv_eq_literal(view, "u64") or frontend_sv_eq_literal(view, "u") or frontend_sv_eq_literal(view, "i8") or frontend_sv_eq_literal(view, "i16") or frontend_sv_eq_literal(view, "i32") or frontend_sv_eq_literal(view, "i64") or frontend_sv_eq_literal(view, "usize") or frontend_sv_eq_literal(view, "isize") or frontend_sv_eq_literal(view, "f32") or frontend_sv_eq_literal(view, "f64")
+    first: i64 = frontend_sv_first_char(view)
+    if first == FRONTEND_CH_u:
+        return frontend_sv_is_1(view, FRONTEND_CH_u) or frontend_sv_is_2(view, FRONTEND_CH_u, 56) or frontend_sv_is_3(view, FRONTEND_CH_u, 49, 54) or frontend_sv_is_3(view, FRONTEND_CH_u, 51, 50) or frontend_sv_is_3(view, FRONTEND_CH_u, 54, 52) or frontend_sv_is_5(view, FRONTEND_CH_u, 115, 105, 122, 101)
+    if first == FRONTEND_CH_i:
+        return frontend_sv_is_2(view, FRONTEND_CH_i, 56) or frontend_sv_is_3(view, FRONTEND_CH_i, 49, 54) or frontend_sv_is_3(view, FRONTEND_CH_i, 51, 50) or frontend_sv_is_3(view, FRONTEND_CH_i, 54, 52) or frontend_sv_is_5(view, FRONTEND_CH_i, 115, 105, 122, 101)
+    if first == FRONTEND_CH_f:
+        return frontend_sv_is_3(view, FRONTEND_CH_f, 51, 50) or frontend_sv_is_3(view, FRONTEND_CH_f, 54, 52)
+    return false
 
 
 def frontend_try_read_type_suffix(lexer: any FrontendLexer&) -> StringView:
@@ -221,80 +260,100 @@ def frontend_try_read_type_suffix(lexer: any FrontendLexer&) -> StringView:
 
 
 def frontend_lookup_keyword(text: StringView) -> FrontendTokenKind:
-    if frontend_sv_eq_literal(text, "def"):
-        return FrontendTokenKind.Def
-    if frontend_sv_eq_literal(text, "error"):
-        return FrontendTokenKind.Error
-    if frontend_sv_eq_literal(text, "enum"):
-        return FrontendTokenKind.Enum
-    if frontend_sv_eq_literal(text, "struct"):
-        return FrontendTokenKind.Struct
-    if frontend_sv_eq_literal(text, "const"):
-        return FrontendTokenKind.Const
-    if frontend_sv_eq_literal(text, "global"):
-        return FrontendTokenKind.Global
-    if frontend_sv_eq_literal(text, "extern"):
-        return FrontendTokenKind.Extern
-    if frontend_sv_eq_literal(text, "export"):
-        return FrontendTokenKind.Export
-    if frontend_sv_eq_literal(text, "if"):
-        return FrontendTokenKind.If
-    if frontend_sv_eq_literal(text, "match"):
-        return FrontendTokenKind.Match
-    if frontend_sv_eq_literal(text, "elif"):
-        return FrontendTokenKind.Elif
-    if frontend_sv_eq_literal(text, "else"):
-        return FrontendTokenKind.Else
-    if frontend_sv_eq_literal(text, "while"):
-        return FrontendTokenKind.While
-    if frontend_sv_eq_literal(text, "return"):
-        return FrontendTokenKind.Return
-    if frontend_sv_eq_literal(text, "any"):
-        return FrontendTokenKind.Any
-    if frontend_sv_eq_literal(text, "heap"):
-        return FrontendTokenKind.Heap
-    if frontend_sv_eq_literal(text, "stack"):
-        return FrontendTokenKind.Stack
-    if frontend_sv_eq_literal(text, "static"):
-        return FrontendTokenKind.Static
-    if frontend_sv_eq_literal(text, "mutable"):
-        return FrontendTokenKind.Mutable
-    if frontend_sv_eq_literal(text, "repr"):
-        return FrontendTokenKind.Repr
-    if frontend_sv_eq_literal(text, "packed"):
-        return FrontendTokenKind.Packed
-    if frontend_sv_eq_literal(text, "aligned"):
-        return FrontendTokenKind.Aligned
-    if frontend_sv_eq_literal(text, "pass"):
-        return FrontendTokenKind.Pass
-    if frontend_sv_eq_literal(text, "panic"):
-        return FrontendTokenKind.Panic
-    if frontend_sv_eq_literal(text, "not"):
-        return FrontendTokenKind.Not
-    if frontend_sv_eq_literal(text, "and"):
-        return FrontendTokenKind.And
-    if frontend_sv_eq_literal(text, "or"):
-        return FrontendTokenKind.Or
-    if frontend_sv_eq_literal(text, "null"):
-        return FrontendTokenKind.Null
-    if frontend_sv_eq_literal(text, "true"):
-        return FrontendTokenKind.True
-    if frontend_sv_eq_literal(text, "false"):
-        return FrontendTokenKind.False
-    if frontend_sv_eq_literal(text, "zeroed"):
-        return FrontendTokenKind.Zeroed
-    if frontend_sv_eq_literal(text, "sizeof"):
-        return FrontendTokenKind.Sizeof
-    if frontend_sv_eq_literal(text, "tail"):
-        return FrontendTokenKind.Tail
-    if frontend_sv_eq_literal(text, "try"):
-        return FrontendTokenKind.Try
-    if frontend_sv_eq_literal(text, "raise"):
-        return FrontendTokenKind.Raise
-    if frontend_sv_eq_literal(text, "as"):
-        return FrontendTokenKind.As
-    if frontend_sv_eq_literal(text, "in"):
-        return FrontendTokenKind.In
+    first: i64 = frontend_sv_first_char(text)
+
+    if text.len == 2:
+        if first == 97 and frontend_sv_is_2(text, 97, 115):
+            return FrontendTokenKind.As
+        if first == 105 and frontend_sv_is_2(text, 105, 102):
+            return FrontendTokenKind.If
+        if first == 105 and frontend_sv_is_2(text, 105, 110):
+            return FrontendTokenKind.In
+        if first == 111 and frontend_sv_is_2(text, 111, 114):
+            return FrontendTokenKind.Or
+        return FrontendTokenKind.Ident
+
+    if text.len == 3:
+        if first == 97 and frontend_sv_is_3(text, 97, 110, 100):
+            return FrontendTokenKind.And
+        if first == 97 and frontend_sv_is_3(text, 97, 110, 121):
+            return FrontendTokenKind.Any
+        if first == 100 and frontend_sv_is_3(text, 100, 101, 102):
+            return FrontendTokenKind.Def
+        if first == 110 and frontend_sv_is_3(text, 110, 111, 116):
+            return FrontendTokenKind.Not
+        if first == 116 and frontend_sv_is_3(text, 116, 114, 121):
+            return FrontendTokenKind.Try
+        return FrontendTokenKind.Ident
+
+    if text.len == 4:
+        if first == 101 and frontend_sv_is_4(text, 101, 108, 105, 102):
+            return FrontendTokenKind.Elif
+        if first == 101 and frontend_sv_is_4(text, 101, 108, 115, 101):
+            return FrontendTokenKind.Else
+        if first == 101 and frontend_sv_is_4(text, 101, 110, 117, 109):
+            return FrontendTokenKind.Enum
+        if first == 104 and frontend_sv_is_4(text, 104, 101, 97, 112):
+            return FrontendTokenKind.Heap
+        if first == 110 and frontend_sv_is_4(text, 110, 117, 108, 108):
+            return FrontendTokenKind.Null
+        if first == 112 and frontend_sv_is_4(text, 112, 97, 115, 115):
+            return FrontendTokenKind.Pass
+        if first == 114 and frontend_sv_is_4(text, 114, 101, 112, 114):
+            return FrontendTokenKind.Repr
+        if first == 116 and frontend_sv_is_4(text, 116, 97, 105, 108):
+            return FrontendTokenKind.Tail
+        if first == 116 and frontend_sv_is_4(text, 116, 114, 117, 101):
+            return FrontendTokenKind.True
+        return FrontendTokenKind.Ident
+
+    if text.len == 5:
+        if first == 99 and frontend_sv_is_5(text, 99, 111, 110, 115, 116):
+            return FrontendTokenKind.Const
+        if first == 101 and frontend_sv_is_5(text, 101, 114, 114, 111, 114):
+            return FrontendTokenKind.Error
+        if first == 102 and frontend_sv_is_5(text, 102, 97, 108, 115, 101):
+            return FrontendTokenKind.False
+        if first == 109 and frontend_sv_is_5(text, 109, 97, 116, 99, 104):
+            return FrontendTokenKind.Match
+        if first == 112 and frontend_sv_is_5(text, 112, 97, 110, 105, 99):
+            return FrontendTokenKind.Panic
+        if first == 114 and frontend_sv_is_5(text, 114, 97, 105, 115, 101):
+            return FrontendTokenKind.Raise
+        if first == 115 and frontend_sv_is_5(text, 115, 116, 97, 99, 107):
+            return FrontendTokenKind.Stack
+        if first == 119 and frontend_sv_is_5(text, 119, 104, 105, 108, 101):
+            return FrontendTokenKind.While
+        return FrontendTokenKind.Ident
+
+    if text.len == 6:
+        if first == 101 and frontend_sv_is_6(text, 101, 120, 112, 111, 114, 116):
+            return FrontendTokenKind.Export
+        if first == 101 and frontend_sv_is_6(text, 101, 120, 116, 101, 114, 110):
+            return FrontendTokenKind.Extern
+        if first == 103 and frontend_sv_is_6(text, 103, 108, 111, 98, 97, 108):
+            return FrontendTokenKind.Global
+        if first == 112 and frontend_sv_is_6(text, 112, 97, 99, 107, 101, 100):
+            return FrontendTokenKind.Packed
+        if first == 114 and frontend_sv_is_6(text, 114, 101, 116, 117, 114, 110):
+            return FrontendTokenKind.Return
+        if first == 115 and frontend_sv_is_6(text, 115, 105, 122, 101, 111, 102):
+            return FrontendTokenKind.Sizeof
+        if first == 115 and frontend_sv_is_6(text, 115, 116, 97, 116, 105, 99):
+            return FrontendTokenKind.Static
+        if first == 115 and frontend_sv_is_6(text, 115, 116, 114, 117, 99, 116):
+            return FrontendTokenKind.Struct
+        if first == 122 and frontend_sv_is_6(text, 122, 101, 114, 111, 101, 100):
+            return FrontendTokenKind.Zeroed
+        return FrontendTokenKind.Ident
+
+    if text.len == 7:
+        if first == 97 and frontend_sv_is_7(text, 97, 108, 105, 103, 110, 101, 100):
+            return FrontendTokenKind.Aligned
+        if first == 109 and frontend_sv_is_7(text, 109, 117, 116, 97, 98, 108, 101):
+            return FrontendTokenKind.Mutable
+        return FrontendTokenKind.Ident
+
     return FrontendTokenKind.Ident
 
 
@@ -827,7 +886,11 @@ def frontend_next_token(lexer: any FrontendLexer&) -> FrontendToken can[Memory.A
 
 
 def frontend_tokenize(a: any Arena&, filename: any u8&, source: any u8&) -> darray[FrontendToken] can[Memory.Allocate, Abort.Panic]:
-    lexer: mutable FrontendLexer = frontend_new_lexer(a, filename, source)
+    return frontend_tokenize_with_len(a, filename, source, runtime_strlen(source))
+
+
+def frontend_tokenize_with_len(a: any Arena&, filename: any u8&, source: any u8&, source_len: usize) -> darray[FrontendToken] can[Memory.Allocate, Abort.Panic]:
+    lexer: mutable FrontendLexer = frontend_new_lexer_with_len(a, filename, source, source_len)
     tokens: mutable darray[FrontendToken] = zeroed
 
     while true:

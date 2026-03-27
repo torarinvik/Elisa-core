@@ -520,7 +520,11 @@ def frontend_lexer_parity_suite_impl() -> int can[Memory.Allocate, Abort.Panic]:
 
 
 def frontend_count_tokens(a: any Arena&, filename: any u8&, source: any u8&) -> usize can[Memory.Allocate, Abort.Panic]:
-    lexer: mutable FrontendLexer = frontend_new_lexer(a, filename, source)
+    return frontend_count_tokens_with_len(a, filename, source, runtime_strlen(source))
+
+
+def frontend_count_tokens_with_len(a: any Arena&, filename: any u8&, source: any u8&, source_len: usize) -> usize can[Memory.Allocate, Abort.Panic]:
+    lexer: mutable FrontendLexer = frontend_new_lexer_with_len(a, filename, source, source_len)
     count: mutable usize = 0u
 
     while true:
@@ -534,31 +538,47 @@ def frontend_count_tokens(a: any Arena&, filename: any u8&, source: any u8&) -> 
 
 
 def frontend_lexer_token_count_impl(source: any u8&) -> i64 can[Memory.Allocate, Abort.Panic]:
+    return frontend_lexer_token_count_with_len_impl(source, runtime_strlen(source))
+
+
+def frontend_lexer_token_count_with_len_impl(source: any u8&, source_len: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
     arena: any Arena& = (&frontend_lexer_bench_arena).cast[any Arena&]
     arena_reset(arena)
-    return frontend_count_tokens(arena, "frontend_lexer_bench.llcontext".cast[any u8&], source).i64()
+    return frontend_count_tokens_with_len(arena, "frontend_lexer_bench.llcontext".cast[any u8&], source, source_len).i64()
 
 
 def frontend_lexer_token_checksum_impl(source: any u8&) -> u64 can[Memory.Allocate, Abort.Panic]:
+    return frontend_lexer_token_checksum_with_len_impl(source, runtime_strlen(source))
+
+
+def frontend_lexer_token_checksum_with_len_impl(source: any u8&, source_len: usize) -> u64 can[Memory.Allocate, Abort.Panic]:
     arena: any Arena& = (&frontend_lexer_bench_arena).cast[any Arena&]
     arena_reset(arena)
-    tokens: darray[FrontendToken] = frontend_tokenize(arena, "frontend_lexer_bench.llcontext".cast[any u8&], source)
+    tokens: darray[FrontendToken] = frontend_tokenize_with_len(arena, "frontend_lexer_bench.llcontext".cast[any u8&], source, source_len)
     return frontend_token_checksum(tokens)
 
 
 def frontend_lexer_token_kind_at_impl(source: any u8&, index: usize) -> u64 can[Memory.Allocate, Abort.Panic]:
+    return frontend_lexer_token_kind_at_with_len_impl(source, runtime_strlen(source), index)
+
+
+def frontend_lexer_token_kind_at_with_len_impl(source: any u8&, source_len: usize, index: usize) -> u64 can[Memory.Allocate, Abort.Panic]:
     arena: any Arena& = (&frontend_lexer_bench_arena).cast[any Arena&]
     arena_reset(arena)
-    tokens: darray[FrontendToken] = frontend_tokenize(arena, "frontend_lexer_bench.llcontext".cast[any u8&], source)
+    tokens: darray[FrontendToken] = frontend_tokenize_with_len(arena, "frontend_lexer_bench.llcontext".cast[any u8&], source, source_len)
     if index >= tokens.count:
         return 0u64
     return frontend_token_kind_code(tokens[index].kind)
 
 
 def frontend_lexer_copy_token_kinds_impl(source: any u8&, out: any u64&, capacity: usize) -> usize can[Memory.Allocate, Abort.Panic]:
+    return frontend_lexer_copy_token_kinds_with_len_impl(source, runtime_strlen(source), out, capacity)
+
+
+def frontend_lexer_copy_token_kinds_with_len_impl(source: any u8&, source_len: usize, out: any u64&, capacity: usize) -> usize can[Memory.Allocate, Abort.Panic]:
     arena: any Arena& = (&frontend_lexer_bench_arena).cast[any Arena&]
     arena_reset(arena)
-    tokens: darray[FrontendToken] = frontend_tokenize(arena, "frontend_lexer_bench.llcontext".cast[any u8&], source)
+    tokens: darray[FrontendToken] = frontend_tokenize_with_len(arena, "frontend_lexer_bench.llcontext".cast[any u8&], source, source_len)
     if capacity < tokens.count:
         return tokens.count
 
@@ -570,6 +590,10 @@ def frontend_lexer_copy_token_kinds_impl(source: any u8&, out: any u64&, capacit
 
 export func frontend_lexer_parity_suite() -> int = frontend_lexer_parity_suite_impl
 export func frontend_lexer_token_count(source: any u8&) -> i64 = frontend_lexer_token_count_impl
+export func frontend_lexer_token_count_with_len(source: any u8&, source_len: usize) -> i64 = frontend_lexer_token_count_with_len_impl
 export func frontend_lexer_token_checksum(source: any u8&) -> u64 = frontend_lexer_token_checksum_impl
+export func frontend_lexer_token_checksum_with_len(source: any u8&, source_len: usize) -> u64 = frontend_lexer_token_checksum_with_len_impl
 export func frontend_lexer_token_kind_at(source: any u8&, index: usize) -> u64 = frontend_lexer_token_kind_at_impl
+export func frontend_lexer_token_kind_at_with_len(source: any u8&, source_len: usize, index: usize) -> u64 = frontend_lexer_token_kind_at_with_len_impl
 export func frontend_lexer_copy_token_kinds(source: any u8&, out: any u64&, capacity: usize) -> usize = frontend_lexer_copy_token_kinds_impl
+export func frontend_lexer_copy_token_kinds_with_len(source: any u8&, source_len: usize, out: any u64&, capacity: usize) -> usize = frontend_lexer_copy_token_kinds_with_len_impl
