@@ -3320,6 +3320,69 @@ func mergeFlatRegionRefStates(left regionRefState, right regionRefState) (region
 	return merged, true
 }
 
+func mergeRegionRefStatesWithExplicitFields(states []regionRefState, fieldStates map[string]regionRefState) (regionRefState, bool) {
+	merged := regionRefState{PackedStoreSummaryKnown: true}
+	found := false
+	for _, state := range states {
+		if !hasRegionProvenance(state) {
+			continue
+		}
+		found = true
+		mergePackedStoreProvenanceInto(&merged.PackedStoreSummary, summarizePackedStoreProvenance(state))
+		if len(state.Deps) != 0 {
+			if merged.Deps == nil {
+				merged.Deps = map[*Symbol]regionDependencyState{}
+			}
+			for region, dep := range state.Deps {
+				existing, ok := merged.Deps[region]
+				if !ok {
+					merged.Deps[region] = dep
+					continue
+				}
+				if !existing.Valid {
+					if !dep.Valid && dep.Generation > existing.Generation {
+						merged.Deps[region] = dep
+					}
+					continue
+				}
+				if !dep.Valid {
+					merged.Deps[region] = dep
+					continue
+				}
+				if dep.Generation > existing.Generation {
+					merged.Deps[region] = dep
+				}
+			}
+		}
+		if len(state.StoreDeps) != 0 {
+			if merged.StoreDeps == nil {
+				merged.StoreDeps = map[*Symbol]packedStoreDependencyState{}
+			}
+			for store, dep := range state.StoreDeps {
+				merged.StoreDeps[store] = dep
+			}
+		}
+		if len(state.ParamDeps) != 0 {
+			if merged.ParamDeps == nil {
+				merged.ParamDeps = map[int]bool{}
+			}
+			for index, dep := range state.ParamDeps {
+				merged.ParamDeps[index] = dep
+			}
+		}
+	}
+	if len(fieldStates) != 0 {
+		merged.Fields = fieldStates
+		found = true
+		merged.PackedStoreSummaryKnown = false
+		return withPackedStoreProvenanceSummary(merged), true
+	}
+	if !found || !hasRegionProvenance(merged) {
+		return regionRefState{}, false
+	}
+	return merged, true
+}
+
 func regionIndexFieldKey(index int64) string {
 	return fmt.Sprintf("[%d]", index)
 }

@@ -522,20 +522,7 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 						fieldStates[key] = fieldState
 						states = append(states, fieldState)
 					}
-					merged, ok := mergeRegionRefStates(states...)
-					if !ok {
-						return regionRefState{}, false
-					}
-					if len(fieldStates) != 0 {
-						if merged.Fields == nil {
-							merged.Fields = map[string]regionRefState{}
-						}
-						for key, fieldState := range fieldStates {
-							merged.Fields[key] = fieldState
-						}
-						merged.PackedStoreSummaryKnown = false
-					}
-					return withPackedStoreProvenanceSummary(merged), true
+					return mergeRegionRefStatesWithExplicitFields(states, fieldStates)
 				}
 			}
 			if ownerType := a.analyzeExpr(n.Owner); ownerType != nil {
@@ -575,12 +562,7 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		if len(unionStates) == 0 {
 			return regionRefState{}, false
 		}
-		merged, _ := mergeRegionRefStates(unionStates...)
-		if len(fieldStates) != 0 {
-			merged.Fields = fieldStates
-			merged.PackedStoreSummaryKnown = false
-		}
-		return withPackedStoreProvenanceSummary(merged), true
+		return mergeRegionRefStatesWithExplicitFields(unionStates, fieldStates)
 	case *ast.ListLitExpr:
 		elemStates := make([]regionRefState, 0, len(n.Elems))
 		fieldStates := map[string]regionRefState{}
@@ -715,20 +697,7 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 					}
 				}
 			}
-			merged, ok := mergeRegionRefStates(states...)
-			if !ok {
-				return regionRefState{}, false
-			}
-			if len(fieldStates) != 0 {
-				if merged.Fields == nil {
-					merged.Fields = map[string]regionRefState{}
-				}
-				for key, state := range fieldStates {
-					merged.Fields[key] = state
-				}
-				merged.PackedStoreSummaryKnown = false
-			}
-			return withPackedStoreProvenanceSummary(merged), true
+			return mergeRegionRefStatesWithExplicitFields(states, fieldStates)
 		}
 		fnType, _ := a.exprTypes[n.Func].(*FuncType)
 		if fnType == nil {

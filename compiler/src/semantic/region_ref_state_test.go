@@ -277,3 +277,30 @@ func TestMergeFlatRegionRefStatesKeepsDependencyInvalidationLocal(t *testing.T) 
 		t.Fatalf("expected merged flat state to keep parameter provenance")
 	}
 }
+
+func TestMergeRegionRefStatesWithExplicitFieldsKeepsOverlayMutationLocal(t *testing.T) {
+	overlay := regionRefState{
+		Fields: map[string]regionRefState{
+			"inner": {
+				ParamDeps: map[int]bool{0: true},
+			},
+		},
+	}
+
+	merged, ok := mergeRegionRefStatesWithExplicitFields([]regionRefState{overlay}, map[string]regionRefState{
+		"slot": overlay,
+	})
+	if !ok {
+		t.Fatalf("expected mergeRegionRefStatesWithExplicitFields to keep overlay provenance")
+	}
+	updated := assignRegionRefStateAtPath(merged, []borrowReturnAnnotationStep{{Field: "slot"}, {Field: "extra"}}, regionRefState{
+		ParamDeps: map[int]bool{1: true},
+	})
+
+	if _, ok := overlay.Fields["extra"]; ok {
+		t.Fatalf("expected original overlay field map to remain unchanged")
+	}
+	if _, ok := updated.Fields["slot"].Fields["extra"]; !ok {
+		t.Fatalf("expected merged overlay field map to gain the inserted field")
+	}
+}
