@@ -1412,6 +1412,37 @@ def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
 	}
 }
 
+func TestGenerateLLVMIRUsesSwitchForCanonicalFrozenUniqueVariantMatch(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Lit(value: int)
+	Wrap(child: Expr)
+	End
+
+def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
+	return match node in frozen:
+		Expr.Lit(value):
+			node.span + value
+		Expr.Wrap(child):
+			child.span
+		Expr.End:
+			0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_match_switch_default.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+
+	if !strings.Contains(output, "switch i32") {
+		t.Fatalf("expected canonical frozen unique-variant match to lower through an LLVM switch, got:\n%s", output)
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_variant_sparse(") {
+		t.Fatalf("expected canonical frozen unique-variant match to avoid eager variant-sparse decode, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRUsesSingleDecodeForFrozenRepeatedCommonFieldReadsOutsideCheckpoint(t *testing.T) {
 	src := `packed enum Expr:
 	common:
