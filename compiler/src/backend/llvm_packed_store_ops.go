@@ -143,7 +143,9 @@ func (ops *packedStoreOps) storeCount(name string) (C.LLVMValueRef, error) {
 		return nil, err
 	}
 	usizeType := ops.s.g.result.NamedTypes["usize"]
-	helperType := &semantic.FuncType{Name: "ctx_packed_store_count", Params: []semantic.Type{ops.voidRefType()}, Return: usizeType}
+	helperType := ops.cachedRuntimeHelperType("ctx_packed_store_count", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "ctx_packed_store_count", Params: []semantic.Type{ops.voidRefType()}, Return: usizeType}
+	})
 	callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_count", helperType)
 	if err != nil {
 		return nil, err
@@ -219,9 +221,9 @@ func (ops *packedStoreOps) encodeHandle(rowPtr C.LLVMValueRef, enumType *semanti
 		if err != nil {
 			return nil, err
 		}
-		arenaType := ops.s.g.result.NamedTypes["Arena"]
-		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-		helperType := &semantic.FuncType{Name: "ctx_packed_store_encode", Params: []semantic.Type{arenaRefType, ops.voidRefType(), ops.voidRefType()}, Return: ops.s.g.result.NamedTypes["uintptr"]}
+		helperType := ops.cachedRuntimeHelperType("ctx_packed_store_encode", func() *semantic.FuncType {
+			return &semantic.FuncType{Name: "ctx_packed_store_encode", Params: []semantic.Type{ops.arenaRefType(), ops.voidRefType(), ops.voidRefType()}, Return: ops.s.g.result.NamedTypes["uintptr"]}
+		})
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_encode", helperType)
 		if err != nil {
 			return nil, err
@@ -293,9 +295,9 @@ func (ops *packedStoreOps) decodeHandle(handleValue C.LLVMValueRef, enumType *se
 		if err != nil {
 			return nil, err
 		}
-		arenaType := ops.s.g.result.NamedTypes["Arena"]
-		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-		helperType := &semantic.FuncType{Name: "ctx_packed_store_decode", Params: []semantic.Type{arenaRefType, ops.s.g.result.NamedTypes["uintptr"], ops.voidRefType()}, Return: ops.voidRefType()}
+		helperType := ops.cachedRuntimeHelperType("ctx_packed_store_decode", func() *semantic.FuncType {
+			return &semantic.FuncType{Name: "ctx_packed_store_decode", Params: []semantic.Type{ops.arenaRefType(), ops.s.g.result.NamedTypes["uintptr"], ops.voidRefType()}, Return: ops.voidRefType()}
+		})
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_decode", helperType)
 		if err != nil {
 			return nil, err
@@ -368,7 +370,9 @@ func (ops *packedStoreOps) storeValueAt(indexValue C.LLVMValueRef, name string) 
 	usizeType := ops.s.g.result.NamedTypes["usize"]
 	switch ops.s.g.packedLoweringForStore(ops.storeType) {
 	case packedEnumABIRowHandle:
-		helperType := &semantic.FuncType{Name: "ctx_packed_store_row_ptr_at", Params: []semantic.Type{ops.voidRefType(), usizeType}, Return: ops.voidRefType()}
+		helperType := ops.cachedRuntimeHelperType("ctx_packed_store_row_ptr_at", func() *semantic.FuncType {
+			return &semantic.FuncType{Name: "ctx_packed_store_row_ptr_at", Params: []semantic.Type{ops.voidRefType(), usizeType}, Return: ops.voidRefType()}
+		})
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_row_ptr_at", helperType)
 		if err != nil {
 			return nil, nil, err
@@ -385,7 +389,9 @@ func (ops *packedStoreOps) storeValueAt(indexValue C.LLVMValueRef, name string) 
 		return coerced, ops.storeType.Enum, nil
 	case packedEnumABIWordHandle:
 		uintptrType := ops.s.g.result.NamedTypes["uintptr"]
-		helperType := &semantic.FuncType{Name: "ctx_packed_store_word_handle_at", Params: []semantic.Type{ops.voidRefType(), usizeType}, Return: uintptrType}
+		helperType := ops.cachedRuntimeHelperType("ctx_packed_store_word_handle_at", func() *semantic.FuncType {
+			return &semantic.FuncType{Name: "ctx_packed_store_word_handle_at", Params: []semantic.Type{ops.voidRefType(), usizeType}, Return: uintptrType}
+		})
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_word_handle_at", helperType)
 		if err != nil {
 			return nil, nil, err
@@ -402,7 +408,9 @@ func (ops *packedStoreOps) storeValueAt(indexValue C.LLVMValueRef, name string) 
 		return coerced, ops.storeType.Enum, nil
 	case packedEnumABIIndexSOA, packedEnumABIVariantSparse:
 		u32Type := ops.s.g.result.NamedTypes["u32"]
-		helperType := &semantic.FuncType{Name: "ctx_packed_store_index_at", Params: []semantic.Type{ops.voidRefType(), usizeType}, Return: u32Type}
+		helperType := ops.cachedRuntimeHelperType("ctx_packed_store_index_at", func() *semantic.FuncType {
+			return &semantic.FuncType{Name: "ctx_packed_store_index_at", Params: []semantic.Type{ops.voidRefType(), usizeType}, Return: u32Type}
+		})
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_index_at", helperType)
 		if err != nil {
 			return nil, nil, err
@@ -433,7 +441,9 @@ func (ops *packedStoreOps) storeTagAt(handleValue C.LLVMValueRef, enumType *sema
 		if err != nil {
 			return nil, err
 		}
-		helperType := &semantic.FuncType{Name: "ctx_packed_store_read_index_tag", Params: []semantic.Type{ops.voidRefType(), tagType}, Return: tagType}
+		helperType := ops.cachedRuntimeHelperType("ctx_packed_store_read_index_tag", func() *semantic.FuncType {
+			return &semantic.FuncType{Name: "ctx_packed_store_read_index_tag", Params: []semantic.Type{ops.voidRefType(), tagType}, Return: tagType}
+		})
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_read_index_tag", helperType)
 		if err != nil {
 			return nil, err
@@ -464,7 +474,9 @@ func (ops *packedStoreOps) storeTagAt(handleValue C.LLVMValueRef, enumType *sema
 		if err != nil {
 			return nil, err
 		}
-		helperType := &semantic.FuncType{Name: "ctx_packed_store_read_variant_sparse_tag", Params: []semantic.Type{ops.voidRefType(), tagType}, Return: tagType}
+		helperType := ops.cachedRuntimeHelperType("ctx_packed_store_read_variant_sparse_tag", func() *semantic.FuncType {
+			return &semantic.FuncType{Name: "ctx_packed_store_read_variant_sparse_tag", Params: []semantic.Type{ops.voidRefType(), tagType}, Return: tagType}
+		})
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_read_variant_sparse_tag", helperType)
 		if err != nil {
 			return nil, err
@@ -499,9 +511,10 @@ func (ops *packedStoreOps) storeTagAt(handleValue C.LLVMValueRef, enumType *sema
 		if err != nil {
 			return nil, err
 		}
-		arenaType := ops.s.g.result.NamedTypes["Arena"]
-		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-		helperType := &semantic.FuncType{Name: "ctx_packed_store_read_tag", Params: []semantic.Type{arenaRefType, ops.s.g.result.NamedTypes["uintptr"], ops.voidRefType()}, Return: tagType}
+		arenaRefType := ops.arenaRefType()
+		helperType := ops.cachedRuntimeHelperType("ctx_packed_store_read_tag", func() *semantic.FuncType {
+			return &semantic.FuncType{Name: "ctx_packed_store_read_tag", Params: []semantic.Type{arenaRefType, ops.s.g.result.NamedTypes["uintptr"], ops.voidRefType()}, Return: tagType}
+		})
 		callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_read_tag", helperType)
 		if err != nil {
 			return nil, err
@@ -1049,7 +1062,9 @@ func (ops *packedStoreOps) loadSideWordAtOrigin(indexValue C.LLVMValueRef, wordO
 	if err != nil {
 		return nil, err
 	}
-	helperType := &semantic.FuncType{Name: "ctx_packed_store_read_side_word", Params: []semantic.Type{ops.voidRefType(), u32Type, usizeType}, Return: uintptrType}
+	helperType := ops.cachedRuntimeHelperType("ctx_packed_store_read_side_word", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "ctx_packed_store_read_side_word", Params: []semantic.Type{ops.voidRefType(), u32Type, usizeType}, Return: uintptrType}
+	})
 	callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_read_side_word", helperType)
 	if err != nil {
 		return nil, err

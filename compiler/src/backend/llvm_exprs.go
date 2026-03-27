@@ -2311,7 +2311,9 @@ func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.
 	zeroBytes := C.LLVMConstInt(usizeType, 0, 0)
 	voidType := s.g.result.NamedTypes["void"]
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	memcpyType := &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, s.g.result.NamedTypes["usize"]}, Return: voidRefType}
+	memcpyType := s.g.cachedRuntimeHelperType("arena_memcpy", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, s.g.result.NamedTypes["usize"]}, Return: voidRefType}
+	})
 	memcpyCallee, err := s.g.ensureFunctionDeclared("arena_memcpy", memcpyType)
 	if err != nil {
 		return nil, nil, true, err
@@ -2490,7 +2492,9 @@ func (s *functionState) emitSpecializedArenaFromViewCall(expr *ast.CallExpr) (C.
 	if _, ok := resultType.(*semantic.DArrayType); !ok {
 		return nil, nil, true, fmt.Errorf("arena_da_from_view specialization expected darray result type, got %T", resultType)
 	}
-	allocType := &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaType, usizeType}, Return: voidRefType}
+	allocType := s.g.cachedRuntimeHelperType("arena_alloc", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaType, usizeType}, Return: voidRefType}
+	})
 	allocCallee, err := s.g.ensureFunctionDeclared("arena_alloc", allocType)
 	if err != nil {
 		return nil, nil, true, err
@@ -2501,7 +2505,9 @@ func (s *functionState) emitSpecializedArenaFromViewCall(expr *ast.CallExpr) (C.
 	}
 	allocPtr := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{arenaValue, byteCount}, "dview.materialize.alloc")
 
-	memcpyType := &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, usizeType}, Return: voidRefType}
+	memcpyType := s.g.cachedRuntimeHelperType("arena_memcpy", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, usizeType}, Return: voidRefType}
+	})
 	memcpyCallee, err := s.g.ensureFunctionDeclared("arena_memcpy", memcpyType)
 	if err != nil {
 		return nil, nil, true, err
@@ -2940,7 +2946,9 @@ func (s *functionState) emitAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, sema
 	arenaRefType := &semantic.RefType{Elem: binding.typ, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	voidType := s.g.result.NamedTypes["void"]
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	allocType := &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
+	allocType := s.g.cachedRuntimeHelperType("arena_alloc", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
+	})
 	allocCallee, err := s.g.ensureFunctionDeclared("arena_alloc", allocType)
 	if err != nil {
 		return nil, nil, err
@@ -3181,7 +3189,9 @@ func (s *functionState) emitNodeTableFillHelperCall(expr *ast.CallExpr) (C.LLVMV
 	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	voidType := s.g.result.NamedTypes["void"]
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	allocType := &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
+	allocType := s.g.cachedRuntimeHelperType("arena_alloc", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
+	})
 	allocCallee, err := s.g.ensureFunctionDeclared("arena_alloc", allocType)
 	if err != nil {
 		return nil, nil, true, err
@@ -3208,7 +3218,9 @@ func (s *functionState) emitNodeTableFillHelperCall(expr *ast.CallExpr) (C.LLVMV
 	if err != nil {
 		return nil, nil, true, err
 	}
-	fillType := &semantic.FuncType{Name: "arena_da_fill", Params: []semantic.Type{viewType, elemType}, Return: s.g.result.NamedTypes["void"]}
+	fillType := s.g.cachedRuntimeHelperType("arena_da_fill", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "arena_da_fill", Params: []semantic.Type{viewType, elemType}, Return: s.g.result.NamedTypes["void"]}
+	})
 	fillCallee, err := s.g.ensureFunctionDeclared("arena_da_fill", fillType)
 	if err != nil {
 		return nil, nil, true, err
@@ -5619,7 +5631,9 @@ func (s *functionState) emitPackedEnumTailMemcpy(dstData C.LLVMValueRef, srcData
 	voidType := s.g.result.NamedTypes["void"]
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	usizeType := s.g.result.NamedTypes["usize"]
-	memcpyType := &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, usizeType}, Return: voidRefType}
+	memcpyType := s.g.cachedRuntimeHelperType("arena_memcpy", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, usizeType}, Return: voidRefType}
+	})
 	memcpyCallee, err := s.g.ensureFunctionDeclared("arena_memcpy", memcpyType)
 	if err != nil {
 		return err

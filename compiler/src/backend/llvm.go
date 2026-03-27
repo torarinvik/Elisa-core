@@ -162,6 +162,18 @@ func (g *llvmGenerator) packedLoweringForStore(storeType *semantic.PackedEnumSto
 	return g.packedProfile.packedModeForStore(storeType)
 }
 
+func (g *llvmGenerator) cachedRuntimeHelperType(name string, build func() *semantic.FuncType) *semantic.FuncType {
+	if g == nil {
+		return build()
+	}
+	if cached := g.runtimeHelperTypes[name]; cached != nil {
+		return cached
+	}
+	helperType := build()
+	g.runtimeHelperTypes[name] = helperType
+	return helperType
+}
+
 func (g *llvmGenerator) usesCanonicalPackedLowering() bool {
 	if g == nil {
 		return false
