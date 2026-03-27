@@ -3090,6 +3090,67 @@ func cloneRegionParamDeps(src map[int]bool) map[int]bool {
 	return cloned
 }
 
+func hasRegionParamDependencies(state regionRefState) bool {
+	return state.HasDirectParamDep || len(state.ParamDeps) != 0
+}
+
+func regionRefStateHasParamDep(state regionRefState, index int) bool {
+	if state.HasDirectParamDep && state.DirectParamDep == index {
+		return true
+	}
+	return state.ParamDeps[index]
+}
+
+func regionRefStateParamDepCount(state regionRefState) int {
+	if !state.HasDirectParamDep {
+		return len(state.ParamDeps)
+	}
+	if len(state.ParamDeps) == 0 || !state.ParamDeps[state.DirectParamDep] {
+		return len(state.ParamDeps) + 1
+	}
+	return len(state.ParamDeps)
+}
+
+func forEachRegionParamDep(state regionRefState, fn func(int)) {
+	if fn == nil {
+		return
+	}
+	if state.HasDirectParamDep {
+		fn(state.DirectParamDep)
+	}
+	for index, dep := range state.ParamDeps {
+		if !dep {
+			continue
+		}
+		if state.HasDirectParamDep && index == state.DirectParamDep {
+			continue
+		}
+		fn(index)
+	}
+}
+
+func appendRegionParamDep(state *regionRefState, index int) {
+	if state == nil || index < 0 {
+		return
+	}
+	if state.HasDirectParamDep {
+		if state.DirectParamDep == index {
+			return
+		}
+		if state.ParamDeps == nil {
+			state.ParamDeps = make(map[int]bool, 1)
+		}
+		state.ParamDeps[index] = true
+		return
+	}
+	if state.ParamDeps != nil {
+		state.ParamDeps[index] = true
+		return
+	}
+	state.DirectParamDep = index
+	state.HasDirectParamDep = true
+}
+
 func cloneRegionRefFields(src map[string]regionRefState) map[string]regionRefState {
 	if len(src) == 0 {
 		return nil
@@ -3105,6 +3166,8 @@ func cloneRegionRefState(state regionRefState) regionRefState {
 	return regionRefState{
 		Deps:                    cloneRegionDependencyStates(state.Deps),
 		StoreDeps:               clonePackedStoreDependencyStates(state.StoreDeps),
+		DirectParamDep:          state.DirectParamDep,
+		HasDirectParamDep:       state.HasDirectParamDep,
 		ParamDeps:               cloneRegionParamDeps(state.ParamDeps),
 		Fields:                  cloneRegionRefFields(state.Fields),
 		PackedStoreSummary:      state.PackedStoreSummary,
@@ -3116,6 +3179,8 @@ func cloneRegionRefStateSharedFields(state regionRefState) regionRefState {
 	return regionRefState{
 		Deps:                    state.Deps,
 		StoreDeps:               state.StoreDeps,
+		DirectParamDep:          state.DirectParamDep,
+		HasDirectParamDep:       state.HasDirectParamDep,
 		ParamDeps:               state.ParamDeps,
 		Fields:                  state.Fields,
 		PackedStoreSummary:      state.PackedStoreSummary,
@@ -3125,9 +3190,11 @@ func cloneRegionRefStateSharedFields(state regionRefState) regionRefState {
 
 func cloneRegionRefStateShallowFields(state regionRefState) regionRefState {
 	return withPackedStoreProvenanceSummary(regionRefState{
-		Deps:      state.Deps,
-		StoreDeps: state.StoreDeps,
-		ParamDeps: state.ParamDeps,
+		Deps:             state.Deps,
+		StoreDeps:        state.StoreDeps,
+		DirectParamDep:   state.DirectParamDep,
+		HasDirectParamDep: state.HasDirectParamDep,
+		ParamDeps:        state.ParamDeps,
 	})
 }
 
@@ -3145,7 +3212,7 @@ func hasRegionDependencies(state regionRefState) bool {
 }
 
 func hasRegionProvenance(state regionRefState) bool {
-	return hasRegionDependencies(state) || len(state.ParamDeps) != 0 || len(state.Fields) != 0
+	return hasRegionDependencies(state) || hasRegionParamDependencies(state) || len(state.Fields) != 0
 }
 
 func regionRefStateFromDependency(region *Symbol, generation int) regionRefState {
@@ -3178,9 +3245,8 @@ func regionRefStateFromParamDependency(index int) regionRefState {
 		return regionRefState{}
 	}
 	return withPackedStoreProvenanceSummary(regionRefState{
-		ParamDeps: map[int]bool{
-			index: true,
-		},
+		DirectParamDep:    index,
+		HasDirectParamDep: true,
 	})
 }
 
@@ -3224,14 +3290,9 @@ func mergeRegionRefStates(states ...regionRefState) (regionRefState, bool) {
 				merged.StoreDeps[store] = dep
 			}
 		}
-		if len(state.ParamDeps) != 0 {
-			if merged.ParamDeps == nil {
-				merged.ParamDeps = map[int]bool{}
-			}
-			for index, dep := range state.ParamDeps {
-				merged.ParamDeps[index] = dep
-			}
-		}
+		forEachRegionParamDep(state, func(index int) {
+			appendRegionParamDep(&merged, index)
+		})
 		if len(state.Fields) != 0 {
 			if merged.Fields == nil {
 				merged.Fields = map[string]regionRefState{}
@@ -3308,15 +3369,12 @@ func mergeFlatRegionRefStates(left regionRefState, right regionRefState) (region
 			merged.StoreDeps[store] = dep
 		}
 	}
-	if len(left.ParamDeps) != 0 || len(right.ParamDeps) != 0 {
-		merged.ParamDeps = map[int]bool{}
-		for index, dep := range left.ParamDeps {
-			merged.ParamDeps[index] = dep
-		}
-		for index, dep := range right.ParamDeps {
-			merged.ParamDeps[index] = dep
-		}
-	}
+	forEachRegionParamDep(left, func(index int) {
+		appendRegionParamDep(&merged, index)
+	})
+	forEachRegionParamDep(right, func(index int) {
+		appendRegionParamDep(&merged, index)
+	})
 	return merged, true
 }
 
@@ -3362,14 +3420,9 @@ func mergeRegionRefStatesWithExplicitFields(states []regionRefState, fieldStates
 				merged.StoreDeps[store] = dep
 			}
 		}
-		if len(state.ParamDeps) != 0 {
-			if merged.ParamDeps == nil {
-				merged.ParamDeps = map[int]bool{}
-			}
-			for index, dep := range state.ParamDeps {
-				merged.ParamDeps[index] = dep
-			}
-		}
+		forEachRegionParamDep(state, func(index int) {
+			appendRegionParamDep(&merged, index)
+		})
 	}
 	if len(fieldStates) != 0 {
 		merged.Fields = fieldStates
@@ -3479,12 +3532,9 @@ func abstractParamOnlyRegionRefState(state regionRefState) (regionRefState, bool
 		return regionRefState{}, false
 	}
 	out := regionRefState{}
-	if len(state.ParamDeps) != 0 {
-		out.ParamDeps = make(map[int]bool, len(state.ParamDeps))
-		for index, dep := range state.ParamDeps {
-			out.ParamDeps[index] = dep
-		}
-	}
+	out.DirectParamDep = state.DirectParamDep
+	out.HasDirectParamDep = state.HasDirectParamDep
+	out.ParamDeps = cloneRegionParamDeps(state.ParamDeps)
 	if len(state.Fields) != 0 {
 		for name, fieldState := range state.Fields {
 			filtered, ok := abstractParamOnlyRegionRefState(fieldState)
@@ -3507,17 +3557,17 @@ func (a *Analyzer) instantiateReturnProvenance(state regionRefState, args []ast.
 	if !hasRegionProvenance(state) {
 		return regionRefState{}, false
 	}
-	argStates := make([]regionRefState, 0, len(state.ParamDeps))
-	for index := range state.ParamDeps {
+	argStates := make([]regionRefState, 0, regionRefStateParamDepCount(state))
+	forEachRegionParamDep(state, func(index int) {
 		if index < 0 || index >= len(args) {
-			continue
+			return
 		}
 		argState, ok := a.regionRefStateForExpr(args[index])
 		if !ok {
-			continue
+			return
 		}
 		argStates = append(argStates, argState)
-	}
+	})
 	fieldStates := map[string]regionRefState{}
 	if len(state.Fields) != 0 {
 		for name, fieldState := range state.Fields {
@@ -4169,16 +4219,13 @@ func mergeBorrowedOwnerRefBindings(dst map[*Symbol]borrowedOwnerRefState, src ma
 
 func intersectRegionRefSummary(dst regionRefState, src regionRefState) (regionRefState, bool) {
 	merged := regionRefState{}
-	if len(dst.ParamDeps) != 0 && len(src.ParamDeps) != 0 {
-		for index := range dst.ParamDeps {
-			if !src.ParamDeps[index] {
-				continue
+	if hasRegionParamDependencies(dst) && hasRegionParamDependencies(src) {
+		forEachRegionParamDep(dst, func(index int) {
+			if !regionRefStateHasParamDep(src, index) {
+				return
 			}
-			if merged.ParamDeps == nil {
-				merged.ParamDeps = map[int]bool{}
-			}
-			merged.ParamDeps[index] = true
-		}
+			appendRegionParamDep(&merged, index)
+		})
 	}
 	if len(dst.Fields) != 0 && len(src.Fields) != 0 {
 		for key, child := range dst.Fields {

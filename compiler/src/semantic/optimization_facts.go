@@ -584,7 +584,7 @@ func summarizePackedStoreProvenanceInto(out *PackedStoreProvenance, state region
 		mergePackedStoreProvenanceInto(out, state.PackedStoreSummary)
 		return
 	}
-	if len(state.Deps) != 0 || len(state.ParamDeps) != 0 {
+	if len(state.Deps) != 0 || hasRegionParamDependencies(state) {
 		out.HasNonStoreProvenance = true
 	}
 	for _, dep := range state.StoreDeps {
@@ -624,7 +624,7 @@ func regionRefStateDependsOnlyOnFrozenPackedStores(state regionRefState) (bool, 
 		summary := state.PackedStoreSummary
 		return summary.DependsOnlyOnFrozenPackedStores() || (!summary.HasAnyPackedStoreProvenance() && !summary.HasNonStoreProvenance), summary.DependsOnFrozenPackedStores()
 	}
-	if len(state.Deps) != 0 || len(state.ParamDeps) != 0 {
+	if len(state.Deps) != 0 || hasRegionParamDependencies(state) {
 		return false, false
 	}
 	hasFrozen := false

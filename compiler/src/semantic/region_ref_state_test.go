@@ -273,7 +273,7 @@ func TestMergeFlatRegionRefStatesKeepsDependencyInvalidationLocal(t *testing.T) 
 	if dep := updated.Deps[region]; dep.Valid {
 		t.Fatalf("expected merged flat dependency to be invalidated")
 	}
-	if !updated.ParamDeps[0] {
+	if !regionRefStateHasParamDep(updated, 0) {
 		t.Fatalf("expected merged flat state to keep parameter provenance")
 	}
 }
@@ -344,7 +344,7 @@ func TestInstantiateReturnProvenanceKeepsOverlayMutationLocal(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected instantiateReturnProvenance to resolve explicit field overlays")
 	}
-	if !instantiated.ParamDeps[9] {
+	if !regionRefStateHasParamDep(instantiated, 9) {
 		t.Fatalf("expected instantiated return provenance to include top-level argument provenance")
 	}
 

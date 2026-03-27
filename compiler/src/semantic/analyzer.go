@@ -153,6 +153,8 @@ type packedStoreResolution struct {
 type regionRefState struct {
 	Deps                    map[*Symbol]regionDependencyState
 	StoreDeps               map[*Symbol]packedStoreDependencyState
+	DirectParamDep          int
+	HasDirectParamDep       bool
 	ParamDeps               map[int]bool
 	Fields                  map[string]regionRefState
 	PackedStoreSummary      PackedStoreProvenance
