@@ -63,6 +63,7 @@ func compileLLVMModule(result *semantic.Result, optLevel OptimizationLevel, prof
 	if err != nil {
 		return nil, err
 	}
+	g.optLevel = optLevel
 	g.packedProfile = profile
 	g.packedEnumABI = profile.packedModeForStore(nil)
 	if g.result != nil {
@@ -82,6 +83,7 @@ func compileLLVMModule(result *semantic.Result, optLevel OptimizationLevel, prof
 
 type llvmGenerator struct {
 	result                    *semantic.Result
+	optLevel                  OptimizationLevel
 	context                   C.LLVMContextRef
 	module                    C.LLVMModuleRef
 	targetMachine             C.LLVMTargetMachineRef

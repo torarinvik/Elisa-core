@@ -3253,6 +3253,34 @@ export func fold_export() -> int = fold
 	}
 }
 
+func TestGenerateOptimizedLLVMIRUsesDirectPrefixColumnLoadsForFrozenRepeatedCommonFieldReadsInIndexSOA(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Lit(value: int)
+
+def fold_common_frozen() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	in frozen:
+		return node.span + node.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_field_cache_frozen_index_soa_opt.llcontext", src)
+	output, err := GenerateLLVMIRWithOptAndPackedABI(result, OptimizationLevel3, PackedEnumABIIndexSOA)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOptAndPackedABI returned error: %v", err)
+	}
+
+	if strings.Contains(output, "call i64 @ctx_packed_store_read_index_word(") {
+		t.Fatalf("expected optimized frozen repeated packed common-field reads in index-soa mode to avoid ctx_packed_store_read_index_word, got:\n%s", output)
+	}
+	if strings.Contains(output, "call fastcc i64 @ctx_packed_store_read_word(") {
+		t.Fatalf("expected optimized frozen repeated packed common-field reads in index-soa mode to avoid ctx_packed_store_read_word fallback calls, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRUsesSingleDecodeForFrozenPackedOpenStmt(t *testing.T) {
 	src := `packed enum Expr:
 	common:

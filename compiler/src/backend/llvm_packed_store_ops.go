@@ -4,6 +4,14 @@ package backend
 
 /*
 #include <llvm-c/Core.h>
+
+static int llcontextConstIntGetZExtValue(LLVMValueRef Value, unsigned long long* Out) {
+	if (LLVMIsAConstantInt(Value) == NULL) {
+		return 0;
+	}
+	*Out = LLVMConstIntGetZExtValue(Value);
+	return 1;
+}
 */
 import "C"
 
@@ -158,6 +166,77 @@ func (ops *packedStoreOps) directReadCacheIdentity(enumType *semantic.EnumType, 
 		return ops.denseReadCacheIdentity(origin, handleValue)
 	}
 	return packedReadOriginKey{}, ops.canonicalizeDenseHandleKey(handleValue)
+}
+
+func (ops *packedStoreOps) constantUint64(value C.LLVMValueRef) (uint64, bool) {
+	if value == nil {
+		return 0, false
+	}
+	var raw C.ulonglong
+	if C.llcontextConstIntGetZExtValue(value, &raw) == 0 {
+		return 0, false
+	}
+	return uint64(raw), true
+}
+
+func (ops *packedStoreOps) canUseOptimizedIndexSOADirectPrefixRead(enumType *semantic.EnumType) bool {
+	if ops == nil || ops.s == nil || ops.s.g == nil || enumType == nil {
+		return false
+	}
+	if ops.s.g.optLevel == OptimizationLevel0 {
+		return false
+	}
+	if ops.s.g.packedModeForEnum(enumType) != packedEnumABIIndexSOA {
+		return false
+	}
+	return ops.storeType != nil && semantic.IsFrozenPackedEnumStoreType(ops.storeType)
+}
+
+func (ops *packedStoreOps) loadIndexSOAPrefixWordDirect(stateValue C.LLVMValueRef, indexValue C.LLVMValueRef, wordOffset uint64, name string) (C.LLVMValueRef, error) {
+	if ops == nil || ops.s == nil || ops.s.g == nil {
+		return nil, fmt.Errorf("missing packed store lowering state")
+	}
+	uintptrType := ops.s.g.result.NamedTypes["uintptr"]
+	usizeType := ops.s.g.result.NamedTypes["usize"]
+	u32Type := ops.s.g.result.NamedTypes["u32"]
+	uintptrLLVMType, err := ops.s.g.lowerType(uintptrType)
+	if err != nil {
+		return nil, err
+	}
+	usizeLLVMType, err := ops.s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, err
+	}
+	wordBytes, err := ops.s.g.abiSizeOfLLVMType(usizeLLVMType)
+	if err != nil {
+		return nil, err
+	}
+	prefixColumnsType := &semantic.DArrayType{Elem: uintptrType}
+	prefixColumnsLLVMType, err := ops.s.g.lowerType(prefixColumnsType)
+	if err != nil {
+		return nil, err
+	}
+	darrayBytes, err := ops.s.g.abiSizeOfLLVMType(prefixColumnsLLVMType)
+	if err != nil {
+		return nil, err
+	}
+	prefixColumnsOffsetBytes := uint64(6)*wordBytes + uint64(6)*darrayBytes + wordBytes
+	opaquePtrType := C.LLVMPointerTypeInContext(ops.s.g.context, 0)
+	itemsPtrPtr, err := ops.s.emitByteOffsetPtr(stateValue, prefixColumnsOffsetBytes, name+".prefix.columns.items.ptr")
+	if err != nil {
+		return nil, err
+	}
+	columnsDataPtr := C.LLVMBuildLoad2(ops.s.builder, opaquePtrType, itemsPtrPtr, cStringFree(name+".prefix.columns.items"))
+	columnOffsetValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(wordOffset), 0)
+	columnSlotPtr := C.LLVMBuildGEP2(ops.s.builder, uintptrLLVMType, columnsDataPtr, llvmValueSlicePtr([]C.LLVMValueRef{columnOffsetValue}), 1, cStringFree(name+".prefix.column.slot.ptr"))
+	columnBaseValue := C.LLVMBuildLoad2(ops.s.builder, uintptrLLVMType, columnSlotPtr, cStringFree(name+".prefix.column.base"))
+	columnDataPtr := C.LLVMBuildIntToPtr(ops.s.builder, columnBaseValue, opaquePtrType, cStringFree(name+".prefix.column.ptr"))
+	columnIndex, err := ops.s.coerceValue(indexValue, u32Type, usizeType)
+	if err != nil {
+		return nil, err
+	}
+	columnWordPtr := C.LLVMBuildGEP2(ops.s.builder, uintptrLLVMType, columnDataPtr, llvmValueSlicePtr([]C.LLVMValueRef{columnIndex}), 1, cStringFree(name+".prefix.word.ptr"))
+	return C.LLVMBuildLoad2(ops.s.builder, uintptrLLVMType, columnWordPtr, cStringFree(name+".prefix.word")), nil
 }
 
 func (ops *packedStoreOps) storeCount(name string) (C.LLVMValueRef, error) {
@@ -584,6 +663,31 @@ func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, e
 		coercedHandle, err := ops.s.coerceValue(handleValue, enumType, u32Type)
 		if err != nil {
 			return nil, err
+		}
+		if prefixWordOffset, ok := ops.constantUint64(wordOffset); ok && ops.canUseOptimizedIndexSOADirectPrefixRead(enumType) {
+			prefixWordCount, err := ops.s.g.packedEnumCommonPrefixWordCount(enumType)
+			if err != nil {
+				return nil, err
+			}
+			if prefixWordOffset < prefixWordCount {
+				if ops.canCacheDenseHandleReads(enumType) {
+					if ops.s.packedDenseWordReads == nil {
+						ops.s.packedDenseWordReads = map[packedDenseWordReadCacheKey]C.LLVMValueRef{}
+					}
+					originKey, cacheHandle := ops.denseReadCacheIdentity(origin, coercedHandle)
+					key := packedDenseWordReadCacheKey{block: ops.currentBlock(), storeType: ops.storeType, state: stateValue, origin: originKey, handle: cacheHandle, offset: wordOffset}
+					if cached, ok := ops.s.packedDenseWordReads[key]; ok && cached != nil {
+						return cached, nil
+					}
+					wordValue, err := ops.loadIndexSOAPrefixWordDirect(stateValue, coercedHandle, prefixWordOffset, "packed.index.prefix.word")
+					if err != nil {
+						return nil, err
+					}
+					ops.s.packedDenseWordReads[key] = wordValue
+					return wordValue, nil
+				}
+				return ops.loadIndexSOAPrefixWordDirect(stateValue, coercedHandle, prefixWordOffset, "packed.index.prefix.word")
+			}
 		}
 		if ops.canCacheDenseHandleReads(enumType) {
 			if ops.s.packedDenseWordReads == nil {
