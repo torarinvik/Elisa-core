@@ -786,7 +786,7 @@ func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, e
 			return nil, err
 		}
 		if prefixWordOffset, ok := ops.constantUint64(wordOffset); ok && ops.canUseOptimizedIndexSOADirectPrefixRead(enumType) {
-			prefixWordCount, err := ops.s.g.packedEnumCommonPrefixWordCount(enumType)
+			prefixWordCount, err := ops.s.g.packedEnumConfiguredPrefixWordCount(enumType)
 			if err != nil {
 				return nil, err
 			}

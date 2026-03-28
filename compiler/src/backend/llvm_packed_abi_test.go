@@ -3317,6 +3317,49 @@ def fold_match_frozen() -> int:
 	}
 }
 
+func TestGenerateOptimizedLLVMIRUsesDirectAllWordsPrefixLoadsForRetainedReadsFrozenWidePayloadMatch(t *testing.T) {
+	src := `@packed_profile(retained_reads)
+packed enum Expr:
+	common:
+		span: int
+		cost: int
+	Leaf(value: int)
+	Wide(first: int, second: int, third: int)
+	End
+
+def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
+	return match node in frozen:
+		Expr.Wide(first: first, second: second, third: third):
+			node.span + node.cost + first + second + third
+		Expr.Leaf(value: value):
+			node.span + node.cost + value
+		Expr.End:
+			0
+
+def fold_export() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	node: Expr = new[store] Expr.Wide(span: 7, cost: 11, first: 2, second: 3, third: 5)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	return fold(node, frozen)
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_retained_reads_wide_payload_opt.llcontext", src)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel3)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+
+	if strings.Contains(output, "call i64 @ctx_packed_store_read_index_word(") {
+		t.Fatalf("expected optimized retained-reads frozen wide payload match to avoid ctx_packed_store_read_index_word, got:\n%s", output)
+	}
+	if strings.Contains(output, "call fastcc i64 @ctx_packed_store_read_word(") {
+		t.Fatalf("expected optimized retained-reads frozen wide payload match to avoid ctx_packed_store_read_word fallback calls, got:\n%s", output)
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
+		t.Fatalf("expected optimized retained-reads frozen wide payload match to avoid eager decode, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRUsesSingleDecodeForFrozenPackedOpenStmt(t *testing.T) {
 	src := `packed enum Expr:
 	common:

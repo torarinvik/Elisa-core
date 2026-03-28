@@ -982,7 +982,6 @@ def ctx_packed_store_decode(a: any Arena&, handle: uintptr, state_bits: any void
         i <- i + 1
 
     assert r != null
-
     offset_words: usize = offset_words_plus_one - 1
     assert offset_words < r.capacity
 
@@ -1083,7 +1082,6 @@ def ctx_packed_store_read_tag(a: any Arena&, handle: uintptr, state_bits: any vo
         i <- i + 1
 
     assert r != null
-
     offset_words: usize = offset_words_plus_one - 1
     assert offset_words < r.capacity
 
@@ -1216,7 +1214,6 @@ def ctx_packed_store_read_word(a: any Arena&, handle: uintptr, state_bits: any v
         i <- i + 1
 
     assert r != null
-
     offset_words: usize = offset_words_plus_one - 1
     assert offset_words + word_offset < r.capacity
 

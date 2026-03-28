@@ -1134,6 +1134,35 @@ func (g *llvmGenerator) packedEnumCommonPrefixWordCount(enum *semantic.EnumType)
 	return (prefixBytes + wordBytes - 1) / wordBytes, nil
 }
 
+func (g *llvmGenerator) packedEnumConfiguredPrefixWordCount(enum *semantic.EnumType) (uint64, error) {
+	if enum == nil || !enum.Packed {
+		return 0, nil
+	}
+	if enum.HasPackedPrefixOverride && enum.PackedPrefixOverride == "common-only" {
+		return g.packedEnumCommonPrefixWordCount(enum)
+	}
+	rowType, err := g.ensurePackedEnumStorageType(enum)
+	if err != nil {
+		return 0, err
+	}
+	rowBytes, err := g.abiSizeOfLLVMType(rowType)
+	if err != nil {
+		return 0, err
+	}
+	wordType, err := g.lowerBuiltin("uintptr")
+	if err != nil {
+		return 0, err
+	}
+	wordBytes, err := g.abiSizeOfLLVMType(wordType)
+	if err != nil {
+		return 0, err
+	}
+	if wordBytes == 0 {
+		return 0, fmt.Errorf("uintptr ABI size resolved to zero bytes")
+	}
+	return (rowBytes + wordBytes - 1) / wordBytes, nil
+}
+
 func enumIsTagOnly(enum *semantic.EnumType) bool {
 	if enum == nil {
 		return false
