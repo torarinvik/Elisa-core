@@ -40,6 +40,7 @@ struct PackedStoreState:
     row_words: mutable usize
     preferred_region_capacity: mutable usize
 
+@inline(always)
 def packed_store_region_data(r: heap Region&) -> heap u8&:
     return (r.cast[heap u8&] + sizeof(Region)).cast[heap u8&]
 
@@ -313,6 +314,7 @@ def packed_store_register_region(a: any Arena&, state: any PackedStoreState&, r:
     assert regions.items != null
     regions.items[global_index] <- r
 
+@inline(always)
 def packed_store_lookup_region(state: any PackedStoreState&, global_index: usize) -> heap Region&?:
     if state.regions.items == null:
         return null
