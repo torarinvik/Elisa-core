@@ -59,6 +59,12 @@ func buildPackedMLASTNativeExecutable(tb testing.TB, repoRoot string, objectOpt 
 	return buildCachedNativeArtifacts(tb, repoRoot, spec).executable
 }
 
+func buildPackedMLASTUltraNativeExecutable(tb testing.TB, repoRoot string, objectOpt string) string {
+	tb.Helper()
+	spec := packedMLASTUltraNativeSpec(repoRoot, objectOpt)
+	return buildCachedNativeArtifacts(tb, repoRoot, spec).executable
+}
+
 func buildPackedMLASTMediumNativeExecutable(tb testing.TB, repoRoot string, objectOpt string) string {
 	tb.Helper()
 	spec := packedMLASTMediumNativeSpec(repoRoot, objectOpt)
@@ -206,6 +212,27 @@ func packedMLASTMegaNativeSpec(repoRoot string, objectOpt string) nativeArtifact
 		generateHeader:  true,
 		headerName:      "packed_lowering_ml_ast_mega_core.h",
 		objectName:      "packed_lowering_ml_ast_mega_core.o",
+		clangArgs:       []string{objectOpt, "-pthread"},
+		hashExpandedSrc: true,
+		hashFiles: []string{
+			filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_bench.c"),
+			filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c"),
+			filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_concurrency_runtime.c"),
+		},
+	}
+}
+
+func packedMLASTUltraNativeSpec(repoRoot string, objectOpt string) nativeArtifactSpec {
+	return nativeArtifactSpec{
+		name:            "packed-ml-ast-ultra",
+		objectOpt:       objectOpt,
+		fixturePath:     filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_ultra_core.llcontext"),
+		exeName:         "packed_lowering_ml_ast_ultra_bench",
+		harnessPath:     filepath.Join(repoRoot, "Code", "benchmarks", "packed_lowering_ml_ast_bench.c"),
+		shimPaths:       []string{filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_runtime_shims.c"), filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_concurrency_runtime.c")},
+		generateHeader:  true,
+		headerName:      "packed_lowering_ml_ast_mega_core.h",
+		objectName:      "packed_lowering_ml_ast_ultra_core.o",
 		clangArgs:       []string{objectOpt, "-pthread"},
 		hashExpandedSrc: true,
 		hashFiles: []string{

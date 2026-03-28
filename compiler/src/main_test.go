@@ -1186,6 +1186,14 @@ func TestRunCLIPackedMLASTMegaBenchSmoke(t *testing.T) {
 	runPackedMLASTBenchSmoke(t, exePath)
 }
 
+func TestRunCLIPackedMLASTUltraBenchSmoke(t *testing.T) {
+	requireSlowNativeMLAST(t)
+
+	repoRoot := repoRootFromMainTest(t)
+	exePath := buildPackedMLASTUltraNativeExecutable(t, repoRoot, "-O3")
+	runPackedMLASTBenchSmoke(t, exePath)
+}
+
 func TestRunCLIPackedMLExprReproSmoke(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
 	exePath := buildPackedMLExprReproExecutable(t, repoRoot, "-O0")

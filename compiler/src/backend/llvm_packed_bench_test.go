@@ -599,6 +599,11 @@ func BenchmarkGenerateLLVMIRPackedLoweringMLASTMegaRetainedReads(b *testing.B) {
 	benchmarkPackedLowering(b, "packed_lowering_ml_ast_mega_bench.llcontext", src, DefaultPackedLoweringProfile())
 }
 
+func BenchmarkGenerateLLVMIRPackedLoweringMLASTUltraRetainedReads(b *testing.B) {
+	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_ultra_bench.llcontext"))
+	benchmarkPackedLowering(b, "packed_lowering_ml_ast_ultra_bench.llcontext", src, DefaultPackedLoweringProfile())
+}
+
 func BenchmarkGenerateLLVMIRPackedLoweringMLASTMegaWordHandle(b *testing.B) {
 	profile, err := LegacyPackedLoweringProfile(PackedEnumABIWordHandle)
 	if err != nil {
@@ -635,6 +640,11 @@ func BenchmarkGenerateLLVMIRPackedLoweringMLASTMediumParallelRetainedReads(b *te
 func BenchmarkGenerateLLVMIRPackedLoweringMLASTMegaParallelRetainedReads(b *testing.B) {
 	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_mega_parallel_bench.llcontext"))
 	benchmarkPackedLoweringParallel(b, "packed_lowering_ml_ast_mega_parallel_bench.llcontext", src, DefaultPackedLoweringProfile(), packedLoweringParallelWorkerCount)
+}
+
+func BenchmarkGenerateLLVMIRPackedLoweringMLASTUltraParallelRetainedReads(b *testing.B) {
+	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_ultra_parallel_bench.llcontext"))
+	benchmarkPackedLoweringParallel(b, "packed_lowering_ml_ast_ultra_parallel_bench.llcontext", src, DefaultPackedLoweringProfile(), packedLoweringParallelWorkerCount)
 }
 
 func BenchmarkGenerateLLVMIRPackedLoweringMLASTMegaParallelWordHandle(b *testing.B) {
