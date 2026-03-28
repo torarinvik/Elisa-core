@@ -209,12 +209,10 @@ func (ops *packedStoreOps) loadPackedStoreDArrayElementDirect(stateValue C.LLVMV
 	if err != nil {
 		return nil, err
 	}
-	itemsPtrPtr, err := ops.s.emitByteOffsetPtr(stateValue, fieldOffsetBytes+itemsOffsetBytes, name+".items.ptr")
+	itemsDataPtr, err := ops.loadPackedStoreDArrayItemsDirect(stateValue, fieldOffsetBytes+itemsOffsetBytes, name+".items")
 	if err != nil {
 		return nil, err
 	}
-	opaquePtrType := C.LLVMPointerTypeInContext(ops.s.g.context, 0)
-	itemsDataPtr := C.LLVMBuildLoad2(ops.s.builder, opaquePtrType, itemsPtrPtr, cStringFree(name+".items"))
 	elemLLVMType, err := ops.s.g.lowerType(elemType)
 	if err != nil {
 		return nil, err
@@ -226,6 +224,37 @@ func (ops *packedStoreOps) loadPackedStoreDArrayElementDirect(stateValue C.LLVMV
 	}
 	elemPtr := C.LLVMBuildGEP2(ops.s.builder, elemLLVMType, itemsDataPtr, llvmValueSlicePtr([]C.LLVMValueRef{coercedIndex}), 1, cStringFree(name+".elem.ptr"))
 	return C.LLVMBuildLoad2(ops.s.builder, elemLLVMType, elemPtr, cStringFree(name+".elem")), nil
+}
+
+func (ops *packedStoreOps) loadPackedStoreDArrayItemsDirect(stateValue C.LLVMValueRef, fieldOffsetBytes uint64, name string) (C.LLVMValueRef, error) {
+	if ops == nil || ops.s == nil || ops.s.g == nil {
+		return nil, fmt.Errorf("missing packed store lowering state")
+	}
+	if ops.canCacheDenseHandleReads(ops.storeType.Enum) {
+		if ops.s.packedDenseDArrayItemsReads == nil {
+			ops.s.packedDenseDArrayItemsReads = map[packedDenseDArrayItemsReadCacheKey]C.LLVMValueRef{}
+		}
+		key := packedDenseDArrayItemsReadCacheKey{block: ops.currentBlock(), storeType: ops.storeType, state: stateValue, fieldOffsetBytes: fieldOffsetBytes}
+		if cached, ok := ops.s.packedDenseDArrayItemsReads[key]; ok && cached != nil {
+			return cached, nil
+		}
+		itemsDataPtr, err := ops.loadPackedStoreDArrayItemsDirectUncached(stateValue, fieldOffsetBytes, name)
+		if err != nil {
+			return nil, err
+		}
+		ops.s.packedDenseDArrayItemsReads[key] = itemsDataPtr
+		return itemsDataPtr, nil
+	}
+	return ops.loadPackedStoreDArrayItemsDirectUncached(stateValue, fieldOffsetBytes, name)
+}
+
+func (ops *packedStoreOps) loadPackedStoreDArrayItemsDirectUncached(stateValue C.LLVMValueRef, fieldOffsetBytes uint64, name string) (C.LLVMValueRef, error) {
+	itemsPtrPtr, err := ops.s.emitByteOffsetPtr(stateValue, fieldOffsetBytes, name+".ptr")
+	if err != nil {
+		return nil, err
+	}
+	opaquePtrType := C.LLVMPointerTypeInContext(ops.s.g.context, 0)
+	return C.LLVMBuildLoad2(ops.s.builder, opaquePtrType, itemsPtrPtr, cStringFree(name)), nil
 }
 
 func (ops *packedStoreOps) loadIndexSOAHandleDirect(stateValue C.LLVMValueRef, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
@@ -303,12 +332,11 @@ func (ops *packedStoreOps) loadIndexSOAPrefixWordDirect(stateValue C.LLVMValueRe
 		return nil, err
 	}
 	prefixColumnsOffsetBytes := uint64(6)*wordBytes + uint64(6)*darrayBytes + wordBytes
-	opaquePtrType := C.LLVMPointerTypeInContext(ops.s.g.context, 0)
-	itemsPtrPtr, err := ops.s.emitByteOffsetPtr(stateValue, prefixColumnsOffsetBytes, name+".prefix.columns.items.ptr")
+	columnsDataPtr, err := ops.loadPackedStoreDArrayItemsDirect(stateValue, prefixColumnsOffsetBytes, name+".prefix.columns.items")
 	if err != nil {
 		return nil, err
 	}
-	columnsDataPtr := C.LLVMBuildLoad2(ops.s.builder, opaquePtrType, itemsPtrPtr, cStringFree(name+".prefix.columns.items"))
+	opaquePtrType := C.LLVMPointerTypeInContext(ops.s.g.context, 0)
 	columnOffsetValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(wordOffset), 0)
 	columnSlotPtr := C.LLVMBuildGEP2(ops.s.builder, uintptrLLVMType, columnsDataPtr, llvmValueSlicePtr([]C.LLVMValueRef{columnOffsetValue}), 1, cStringFree(name+".prefix.column.slot.ptr"))
 	columnBaseValue := C.LLVMBuildLoad2(ops.s.builder, uintptrLLVMType, columnSlotPtr, cStringFree(name+".prefix.column.base"))

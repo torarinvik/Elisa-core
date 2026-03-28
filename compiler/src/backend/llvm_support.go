@@ -978,6 +978,7 @@ func (s *functionState) invalidatePackedReadCaches() {
 	clear(s.packedStoreValues)
 	clear(s.packedVariantSparseTagReads)
 	clear(s.packedVariantSparseWordReads)
+	clear(s.packedDenseDArrayItemsReads)
 	clear(s.packedDenseTagReads)
 	clear(s.packedDenseWordReads)
 	clear(s.packedDenseSideWordReads)

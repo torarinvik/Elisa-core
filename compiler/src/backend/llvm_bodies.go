@@ -61,6 +61,7 @@ type functionState struct {
 	packedStoreValues            map[packedStoreExtractCacheKey]C.LLVMValueRef
 	packedVariantSparseTagReads  map[packedVariantSparseTagReadCacheKey]C.LLVMValueRef
 	packedVariantSparseWordReads map[packedVariantSparseWordReadCacheKey]C.LLVMValueRef
+	packedDenseDArrayItemsReads  map[packedDenseDArrayItemsReadCacheKey]C.LLVMValueRef
 	packedDenseTagReads          map[packedDenseTagReadCacheKey]C.LLVMValueRef
 	packedDenseWordReads         map[packedDenseWordReadCacheKey]C.LLVMValueRef
 	packedDenseSideWordReads     map[packedDenseSideWordReadCacheKey]C.LLVMValueRef
@@ -128,6 +129,13 @@ type packedDenseTagReadCacheKey struct {
 	state     C.LLVMValueRef
 	origin    packedReadOriginKey
 	handle    C.LLVMValueRef
+}
+
+type packedDenseDArrayItemsReadCacheKey struct {
+	block            C.LLVMBasicBlockRef
+	storeType        *semantic.PackedEnumStoreType
+	state            C.LLVMValueRef
+	fieldOffsetBytes uint64
 }
 
 type packedDenseWordReadCacheKey struct {
