@@ -192,6 +192,88 @@ func (ops *packedStoreOps) canUseOptimizedIndexSOADirectPrefixRead(enumType *sem
 	return ops.storeType != nil && semantic.IsFrozenPackedEnumStoreType(ops.storeType)
 }
 
+func (ops *packedStoreOps) canUseOptimizedIndexSOADirectMetadataRead(enumType *semantic.EnumType) bool {
+	return ops.canUseOptimizedIndexSOADirectPrefixRead(enumType)
+}
+
+func (ops *packedStoreOps) loadPackedStoreDArrayElementDirect(stateValue C.LLVMValueRef, fieldOffsetBytes uint64, elemType semantic.Type, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	if ops == nil || ops.s == nil || ops.s.g == nil {
+		return nil, fmt.Errorf("missing packed store lowering state")
+	}
+	darrayType := &semantic.DArrayType{Elem: elemType}
+	darrayLLVMType, err := ops.s.g.lowerType(darrayType)
+	if err != nil {
+		return nil, err
+	}
+	itemsOffsetBytes, err := ops.s.g.abiOffsetOfLLVMElement(darrayLLVMType, 0)
+	if err != nil {
+		return nil, err
+	}
+	itemsPtrPtr, err := ops.s.emitByteOffsetPtr(stateValue, fieldOffsetBytes+itemsOffsetBytes, name+".items.ptr")
+	if err != nil {
+		return nil, err
+	}
+	opaquePtrType := C.LLVMPointerTypeInContext(ops.s.g.context, 0)
+	itemsDataPtr := C.LLVMBuildLoad2(ops.s.builder, opaquePtrType, itemsPtrPtr, cStringFree(name+".items"))
+	elemLLVMType, err := ops.s.g.lowerType(elemType)
+	if err != nil {
+		return nil, err
+	}
+	usizeType := ops.s.g.result.NamedTypes["usize"]
+	coercedIndex, err := ops.s.coerceValue(indexValue, ops.s.g.result.NamedTypes["u32"], usizeType)
+	if err != nil {
+		return nil, err
+	}
+	elemPtr := C.LLVMBuildGEP2(ops.s.builder, elemLLVMType, itemsDataPtr, llvmValueSlicePtr([]C.LLVMValueRef{coercedIndex}), 1, cStringFree(name+".elem.ptr"))
+	return C.LLVMBuildLoad2(ops.s.builder, elemLLVMType, elemPtr, cStringFree(name+".elem")), nil
+}
+
+func (ops *packedStoreOps) loadIndexSOAHandleDirect(stateValue C.LLVMValueRef, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	usizeType := ops.s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := ops.s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, err
+	}
+	wordBytes, err := ops.s.g.abiSizeOfLLVMType(usizeLLVMType)
+	if err != nil {
+		return nil, err
+	}
+	uintptrArrayType := &semantic.DArrayType{Elem: ops.s.g.result.NamedTypes["uintptr"]}
+	uintptrArrayLLVMType, err := ops.s.g.lowerType(uintptrArrayType)
+	if err != nil {
+		return nil, err
+	}
+	darrayBytes, err := ops.s.g.abiSizeOfLLVMType(uintptrArrayLLVMType)
+	if err != nil {
+		return nil, err
+	}
+	handlesOffsetBytes := uint64(6)*wordBytes + darrayBytes
+	return ops.loadPackedStoreDArrayElementDirect(stateValue, handlesOffsetBytes, ops.s.g.result.NamedTypes["uintptr"], indexValue, name)
+}
+
+func (ops *packedStoreOps) loadIndexSOATagDirect(stateValue C.LLVMValueRef, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	usizeType := ops.s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := ops.s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, err
+	}
+	wordBytes, err := ops.s.g.abiSizeOfLLVMType(usizeLLVMType)
+	if err != nil {
+		return nil, err
+	}
+	uintptrArrayType := &semantic.DArrayType{Elem: ops.s.g.result.NamedTypes["uintptr"]}
+	uintptrArrayLLVMType, err := ops.s.g.lowerType(uintptrArrayType)
+	if err != nil {
+		return nil, err
+	}
+	darrayBytes, err := ops.s.g.abiSizeOfLLVMType(uintptrArrayLLVMType)
+	if err != nil {
+		return nil, err
+	}
+	tagsOffsetBytes := uint64(6)*wordBytes + uint64(3)*darrayBytes
+	return ops.loadPackedStoreDArrayElementDirect(stateValue, tagsOffsetBytes, ops.s.g.result.NamedTypes["u32"], indexValue, name)
+}
+
 func (ops *packedStoreOps) loadIndexSOAPrefixWordDirect(stateValue C.LLVMValueRef, indexValue C.LLVMValueRef, wordOffset uint64, name string) (C.LLVMValueRef, error) {
 	if ops == nil || ops.s == nil || ops.s.g == nil {
 		return nil, fmt.Errorf("missing packed store lowering state")
@@ -566,9 +648,20 @@ func (ops *packedStoreOps) storeTagAt(handleValue C.LLVMValueRef, enumType *sema
 			if cached, ok := ops.s.packedDenseTagReads[key]; ok && cached != nil {
 				return cached, nil
 			}
-			tagValue := ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, coercedHandle}, name)
+			var tagValue C.LLVMValueRef
+			if ops.canUseOptimizedIndexSOADirectMetadataRead(enumType) {
+				tagValue, err = ops.loadIndexSOATagDirect(stateValue, coercedHandle, name+".direct")
+				if err != nil {
+					return nil, err
+				}
+			} else {
+				tagValue = ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, coercedHandle}, name)
+			}
 			ops.s.packedDenseTagReads[key] = tagValue
 			return tagValue, nil
+		}
+		if ops.canUseOptimizedIndexSOADirectMetadataRead(enumType) {
+			return ops.loadIndexSOATagDirect(stateValue, coercedHandle, name+".direct")
 		}
 		return ops.s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stateValue, coercedHandle}, name), nil
 	case packedEnumABIVariantSparse:

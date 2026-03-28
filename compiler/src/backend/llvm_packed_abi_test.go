@@ -3281,6 +3281,42 @@ def fold_common_frozen() -> int:
 	}
 }
 
+func TestGenerateOptimizedLLVMIRUsesDirectDenseMetadataLoadsForFrozenPackedMatchInIndexSOA(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Lit(value: int)
+	End
+
+def fold_match_frozen() -> int:
+	region scratch(256u)
+	store: Expr.Store[Local] = Expr.Store(scratch)
+	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
+	frozen: Expr.Store[Frozen] = freeze(move store)
+	in frozen:
+		return match node:
+			Expr.Lit(value):
+				value + node.span
+			Expr.End:
+				0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_match_frozen_index_soa_opt.llcontext", src)
+	output, err := GenerateLLVMIRWithOptAndPackedABI(result, OptimizationLevel3, PackedEnumABIIndexSOA)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOptAndPackedABI returned error: %v", err)
+	}
+
+	if strings.Contains(output, "call i32 @ctx_packed_store_read_index_tag(") {
+		t.Fatalf("expected optimized frozen packed match in index-soa mode to avoid ctx_packed_store_read_index_tag, got:\n%s", output)
+	}
+	if strings.Contains(output, "call i64 @ctx_packed_store_read_index_word(") {
+		t.Fatalf("expected optimized frozen packed match in index-soa mode to avoid ctx_packed_store_read_index_word, got:\n%s", output)
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
+		t.Fatalf("expected optimized frozen packed match in index-soa mode to avoid eager decode, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRUsesSingleDecodeForFrozenPackedOpenStmt(t *testing.T) {
 	src := `packed enum Expr:
 	common:
