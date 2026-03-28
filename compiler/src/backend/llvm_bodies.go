@@ -2010,6 +2010,7 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(expr.Arms)+1)
 	valuePath, hasValuePath := s.packedEnumStoragePath(expr.Value)
 	valueIdent, hasValueIdent := expr.Value.(*ast.Ident)
+	exhaustive := matchIsExhaustive(enumType, expr.Arms)
 	if packedEnumMatchCanUseTagSwitch(enumType, expr.Arms) {
 		wildcardIndex := -1
 		variantArmCount := 0
@@ -2100,7 +2101,7 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 		}
 
 		C.LLVMPositionBuilderAtEnd(s.builder, failBB)
-		if semantic.IsNeverType(resultType) {
+		if semantic.IsNeverType(resultType) || exhaustive {
 			C.LLVMBuildUnreachable(s.builder)
 		} else {
 			llvmType, err := s.g.lowerType(resultType)
@@ -2171,7 +2172,7 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 	}
 
 	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
-	if semantic.IsNeverType(resultType) {
+	if semantic.IsNeverType(resultType) || exhaustive {
 		C.LLVMBuildUnreachable(s.builder)
 	} else {
 		llvmType, err := s.g.lowerType(resultType)
@@ -2870,6 +2871,22 @@ func packedMatchNeedsEagerDecode(arms []ast.MatchArm) bool {
 	return false
 }
 
+func packedMatchHasWidePayloadAccess(arms []ast.MatchArm, minArgs int) bool {
+	if minArgs <= 0 {
+		return false
+	}
+	for _, arm := range arms {
+		pattern, ok := arm.Pattern.(*ast.MatchVariantPattern)
+		if !ok {
+			continue
+		}
+		if len(pattern.Args) >= minArgs {
+			return true
+		}
+	}
+	return false
+}
+
 func packedMatchShouldEagerDecode(result *semantic.Result, abi packedEnumABIMode, enumType *semantic.EnumType, matchValue ast.Expr, store *packedStoreBinding, arms []ast.MatchArm) bool {
 	if abi == packedEnumABIWordHandle && enumType != nil && enumType.HasInlineWordHandleVariant() {
 		return false
@@ -2881,6 +2898,11 @@ func packedMatchShouldEagerDecode(result *semantic.Result, abi packedEnumABIMode
 		return false
 	}
 	if store != nil && store.typ != nil && semantic.IsFrozenPackedEnumStoreType(store.typ) && packedModeUsesDirectWordReads(abi) {
+		if abi == packedEnumABIWordHandle {
+			if readsMatchedValueField || packedMatchHasWidePayloadAccess(arms, 3) {
+				return true
+			}
+		}
 		return false
 	}
 	hasFrozenPackedStoreDeps := false

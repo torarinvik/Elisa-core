@@ -1372,6 +1372,38 @@ def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
 	}
 }
 
+func TestGenerateLLVMIRUsesSingleDecodeForFrozenWidePayloadMatchInWordHandleMode(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Triple(left: int, middle: int, right: int)
+	End
+
+def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
+	return match node in frozen:
+		Expr.Triple(left, middle, right):
+			node.span + left + middle + right
+		Expr.End:
+			0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_frozen_wide_payload_match_word_handle.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
+	if decodeCalls != 1 {
+		t.Fatalf("expected frozen wide payload match in word-handle mode to use a single eager decode, got %d decode calls:\n%s", decodeCalls, output)
+	}
+	if strings.Contains(output, "call i64 @ctx_packed_store_read_word(") {
+		t.Fatalf("expected frozen wide payload match in word-handle mode to avoid ctx_packed_store_read_word after eager decode, got:\n%s", output)
+	}
+	if strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
+		t.Fatalf("expected frozen wide payload match in word-handle mode to avoid ctx_packed_store_read_tag after eager decode, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRUsesCanonicalDirectReadsForNestedMatchedValueFieldAccess(t *testing.T) {
 	src := `packed enum Expr:
 	common:
@@ -1440,6 +1472,32 @@ def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
 	}
 	if strings.Contains(output, "call ptr @ctx_packed_store_decode_variant_sparse(") {
 		t.Fatalf("expected canonical frozen unique-variant match to avoid eager variant-sparse decode, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRDoesNotMaterializeUndefFailPathForExhaustiveCanonicalMatchExpr(t *testing.T) {
+	src := `packed enum Expr:
+	Lit(value: int)
+	End
+
+def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
+	return match node in frozen:
+		Expr.Lit(value):
+			value
+		Expr.End:
+			0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_match_expr_exhaustive_no_undef_default.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+
+	if strings.Contains(output, "phi i64 [ undef") {
+		t.Fatalf("expected exhaustive canonical packed match expr to avoid materializing an undef fail path, got:\n%s", output)
+	}
+	if !strings.Contains(output, "unreachable") {
+		t.Fatalf("expected exhaustive canonical packed match expr to terminate the impossible fail path with unreachable, got:\n%s", output)
 	}
 }
 
