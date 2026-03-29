@@ -42,13 +42,13 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 		return 1
 	}
 
-	file, result, ok := analyzeProgram(options.filename, src, stderr)
-	if !ok {
-		return 1
-	}
-
 	switch options.emit {
 	case emitAST:
+		file, ok := parseProgram(options.filename, src, stderr)
+		if !ok {
+			return 1
+		}
+		emitSemanticWarningsIfNoErrors(file, stderr)
 		if options.output != "" {
 			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", emitAST)
 			return 1
@@ -56,6 +56,11 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 		printFile(stdout, file)
 		return 0
 	case emitFmt:
+		file, ok := parseProgram(options.filename, src, stderr)
+		if !ok {
+			return 1
+		}
+		emitSemanticWarningsIfNoErrors(file, stderr)
 		formatted := unparse.FormatFile(file)
 		if options.output != "" {
 			if err := os.WriteFile(options.output, []byte(formatted), 0o644); err != nil {
@@ -67,6 +72,11 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 		}
 		return 0
 	case emitDoc:
+		file, ok := parseProgram(options.filename, src, stderr)
+		if !ok {
+			return 1
+		}
+		emitSemanticWarningsIfNoErrors(file, stderr)
 		documentation := generateReferenceDoc(options.filename, file)
 		if options.output != "" {
 			if err := os.WriteFile(options.output, []byte(documentation), 0o644); err != nil {
@@ -77,6 +87,14 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 			fmt.Fprint(stdout, documentation)
 		}
 		return 0
+	}
+
+	_, result, ok := analyzeProgram(options.filename, src, stderr)
+	if !ok {
+		return 1
+	}
+
+	switch options.emit {
 	case emitTests, emitBenches, emitFixtures:
 		if options.output != "" {
 			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", options.emit)
@@ -169,14 +187,14 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 	}
 }
 
-func analyzeProgram(filename string, src []byte, stderr io.Writer) (*ast.File, *semantic.Result, bool) {
+func parseProgram(filename string, src []byte, stderr io.Writer) (*ast.File, bool) {
 	l := lexer.New(filename, src)
 	tokens := l.Tokenize()
 	if errs := l.Errors(); len(errs) > 0 {
 		for _, e := range errs {
 			fmt.Fprintf(stderr, "%s\n", e)
 		}
-		return nil, nil, false
+		return nil, false
 	}
 
 	p := parser.New(tokens)
@@ -185,6 +203,14 @@ func analyzeProgram(filename string, src []byte, stderr io.Writer) (*ast.File, *
 		for _, e := range errs {
 			fmt.Fprintf(stderr, "%s\n", e)
 		}
+		return nil, false
+	}
+	return file, true
+}
+
+func analyzeProgram(filename string, src []byte, stderr io.Writer) (*ast.File, *semantic.Result, bool) {
+	file, ok := parseProgram(filename, src, stderr)
+	if !ok {
 		return nil, nil, false
 	}
 
@@ -205,6 +231,24 @@ func analyzeProgram(filename string, src []byte, stderr io.Writer) (*ast.File, *
 	}
 
 	return file, result, true
+}
+
+func emitSemanticWarningsIfNoErrors(file *ast.File, stderr io.Writer) {
+	if file == nil {
+		return
+	}
+	result := semantic.Analyze(file)
+	if len(result.Errors()) != 0 {
+		return
+	}
+	if warns := result.Warnings(); len(warns) > 0 {
+		for _, w := range warns {
+			if suppressDeprecatedWarningsForTests() && strings.Contains(w, legacyCastDeprecationNotice) {
+				continue
+			}
+			fmt.Fprintf(stderr, "%s\n", w)
+		}
+	}
 }
 
 const legacyCastDeprecationNotice = "legacy cast syntax `.cast[T]()` is deprecated"

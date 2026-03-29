@@ -2371,6 +2371,9 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 		a.errorf(annotation.Position, "cannot resolve signature for @%s function %q", annotation.Name, fn.Name)
 		return false
 	}
+	if annotation.Name == "skip" || annotation.Name == "ignore" {
+		return true
+	}
 	if annotation.Name == "inline" {
 		if len(annotation.Args) != 1 {
 			a.errorf(annotation.Position, "@inline on function %q expects exactly one mode argument", fn.Name)
@@ -2439,7 +2442,7 @@ func annotationAllowsDeclaredPermissions(annotationName string, signature *FuncT
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "fixture", "inline", "norecurse", "hot", "cold":
+	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold":
 		return true
 	default:
 		return false

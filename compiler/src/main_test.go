@@ -2263,7 +2263,7 @@ func TestRunCLIContinuesAfterFailingAndSkippedTests(t *testing.T) {
 
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "execute_fail_skip_fixture.llcontext")
-	src := "@test\ndef alpha_case() -> void:\n    panic(\"boom\")\n\n@skip(todo)\n@test\ndef beta_case() -> void:\n    pass\n\n@test\ndef gamma_case() -> void:\n    pass\n"
+	src := "@test\ndef alpha_case() -> void can[Abort.Panic]:\n    panic(\"boom\")\n\n@skip(todo)\n@test\ndef beta_case() -> void:\n    pass\n\n@test\ndef gamma_case() -> void:\n    pass\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write fail/skip execute-tests fixture: %v", err)
 	}
@@ -2298,7 +2298,7 @@ func TestRunCLIContinuesAfterFailingAndSkippedTests(t *testing.T) {
 func TestRunCLICompilesPanicToBacktraceAwareLLVM(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "panic_backtrace_fixture.llcontext")
-	src := "def main() -> int:\n    panic(\"boom\")\n"
+	src := "def main() -> int can[Abort.Panic]:\n    panic(\"boom\")\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write panic backtrace fixture: %v", err)
 	}
@@ -2314,12 +2314,12 @@ func TestRunCLICompilesPanicToBacktraceAwareLLVM(t *testing.T) {
 	}
 	output := stdout.String()
 	for _, check := range []string{
-		"declare i32 @printf(ptr, ...)",
-		"declare i32 @backtrace(ptr, i32)",
-		"declare void @backtrace_symbols_fd(ptr, i32, i32)",
+		"declare i64 @printf(ptr, ...)",
+		"declare i64 @backtrace(ptr, i64)",
+		"declare void @backtrace_symbols_fd(ptr, i64, i64)",
 		"declare void @abort()",
-		"call i32 (ptr, ...) @printf(",
-		"call i32 @backtrace(ptr",
+		"call i64 (ptr, ...) @printf(",
+		"call i64 @backtrace(ptr",
 		"call void @backtrace_symbols_fd(ptr",
 		"call void @abort()",
 	} {

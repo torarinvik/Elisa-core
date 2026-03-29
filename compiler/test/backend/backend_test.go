@@ -728,7 +728,7 @@ def run() -> i64:
 	}
 }
 
-func TestGenerateLLVMIRLowersPanicViaTrapCall(t *testing.T) {
+func TestGenerateLLVMIRLowersPanicViaBacktraceAwareAbort(t *testing.T) {
 	src := `def fail() -> void:
 	panic("boom")
 `
@@ -739,9 +739,15 @@ func TestGenerateLLVMIRLowersPanicViaTrapCall(t *testing.T) {
 	}
 
 	checks := []string{
-		"declare void @llvm.trap()",
 		"define void @fail()",
-		"call void @llvm.trap()",
+		"declare i64 @printf(ptr, ...)",
+		"declare i64 @backtrace(ptr, i64)",
+		"declare void @backtrace_symbols_fd(ptr, i64, i64)",
+		"declare void @abort()",
+		"call i64 (ptr, ...) @printf(",
+		"call i64 @backtrace(ptr",
+		"call void @backtrace_symbols_fd(ptr",
+		"call void @abort()",
 		"unreachable",
 	}
 	for _, check := range checks {

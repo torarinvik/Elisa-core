@@ -35,7 +35,7 @@ func writeDeclReference(b *strings.Builder, decl ast.Decl, headingLevel int, nam
 	case *ast.NamespaceDecl:
 		qualified := qualifyDocName(namespace, n.Name)
 		fmt.Fprintf(b, "%s Namespace `%s`\n\n", headingPrefix, qualified)
-		fmt.Fprintf(b, "- declaration: `%s`\n\n", firstLine(unparse.FormatDecl(n)))
+		fmt.Fprintf(b, "- declaration: `%s`\n\n", declarationHeadline(unparse.FormatDecl(n)))
 		for i, nested := range n.Decls {
 			if i > 0 {
 				b.WriteByte('\n')
@@ -43,25 +43,25 @@ func writeDeclReference(b *strings.Builder, decl ast.Decl, headingLevel int, nam
 			writeDeclReference(b, nested, minHeading(headingLevel+1), qualified)
 		}
 	case *ast.PermissionDecl:
-		writeSimpleReferenceSection(b, headingPrefix, "Permission", qualifyDocName(namespace, n.Name), firstLine(unparse.FormatDecl(n)), func() {
+		writeSimpleReferenceSection(b, headingPrefix, "Permission", qualifyDocName(namespace, n.Name), declarationHeadline(unparse.FormatDecl(n)), func() {
 			fmt.Fprintf(b, "- members:\n")
 			for _, member := range n.Members {
 				fmt.Fprintf(b, "  - `%s`\n", member)
 			}
 		})
 	case *ast.ErrorDecl:
-		writeSimpleReferenceSection(b, headingPrefix, "Error set", qualifyDocName(namespace, n.Name), firstLine(unparse.FormatDecl(n)), func() {
+		writeSimpleReferenceSection(b, headingPrefix, "Error set", qualifyDocName(namespace, n.Name), declarationHeadline(unparse.FormatDecl(n)), func() {
 			fmt.Fprintf(b, "- tags:\n")
 			for _, tag := range n.Tags {
 				fmt.Fprintf(b, "  - `%s`\n", tag)
 			}
 		})
 	case *ast.UsingDecl:
-		writeSimpleReferenceSection(b, headingPrefix, "Using", qualifyDocName(namespace, n.Name), firstLine(unparse.FormatDecl(n)), nil)
+		writeSimpleReferenceSection(b, headingPrefix, "Using", qualifyDocName(namespace, n.Name), declarationHeadline(unparse.FormatDecl(n)), nil)
 	case *ast.ConstDecl:
-		writeSimpleReferenceSection(b, headingPrefix, "Constant", qualifyDocName(namespace, n.Name), firstLine(unparse.FormatDecl(n)), nil)
+		writeSimpleReferenceSection(b, headingPrefix, "Constant", qualifyDocName(namespace, n.Name), declarationHeadline(unparse.FormatDecl(n)), nil)
 	case *ast.ConstEnumDecl:
-		writeSimpleReferenceSection(b, headingPrefix, "Const enum", qualifyDocName(namespace, n.Name), firstLine(unparse.FormatDecl(n)), func() {
+		writeSimpleReferenceSection(b, headingPrefix, "Const enum", qualifyDocName(namespace, n.Name), declarationHeadline(unparse.FormatDecl(n)), func() {
 			fmt.Fprintf(b, "- storage: `%s`\n", unparse.FormatType(n.Storage))
 			fmt.Fprintf(b, "- members:\n")
 			for _, member := range n.Members {
@@ -73,9 +73,9 @@ func writeDeclReference(b *strings.Builder, decl ast.Decl, headingLevel int, nam
 			}
 		})
 	case *ast.GlobalDecl:
-		writeSimpleReferenceSection(b, headingPrefix, "Global", qualifyDocName(namespace, n.Name), firstLine(unparse.FormatDecl(n)), nil)
+		writeSimpleReferenceSection(b, headingPrefix, "Global", qualifyDocName(namespace, n.Name), declarationHeadline(unparse.FormatDecl(n)), nil)
 	case *ast.StructDecl:
-		writeSimpleReferenceSection(b, headingPrefix, "Struct", qualifyDocName(namespace, n.Name), firstLine(unparse.FormatDecl(n)), func() {
+		writeSimpleReferenceSection(b, headingPrefix, "Struct", qualifyDocName(namespace, n.Name), declarationHeadline(unparse.FormatDecl(n)), func() {
 			writeAnnotationsList(b, n.Annotations)
 			fmt.Fprintf(b, "- fields:\n")
 			for _, field := range n.Fields {
@@ -87,7 +87,7 @@ func writeDeclReference(b *strings.Builder, decl ast.Decl, headingLevel int, nam
 		if n.Packed {
 			kind = "Packed enum"
 		}
-		writeSimpleReferenceSection(b, headingPrefix, kind, qualifyDocName(namespace, n.Name), firstLine(unparse.FormatDecl(n)), func() {
+		writeSimpleReferenceSection(b, headingPrefix, kind, qualifyDocName(namespace, n.Name), declarationHeadline(unparse.FormatDecl(n)), func() {
 			writeAnnotationsList(b, n.Annotations)
 			if len(n.Common) > 0 {
 				fmt.Fprintf(b, "- common fields:\n")
@@ -101,28 +101,28 @@ func writeDeclReference(b *strings.Builder, decl ast.Decl, headingLevel int, nam
 			}
 		})
 	case *ast.FuncDecl:
-		writeSimpleReferenceSection(b, headingPrefix, "Function", qualifyDocName(namespace, n.Name), firstLine(unparse.FormatDecl(n)), func() {
+		writeSimpleReferenceSection(b, headingPrefix, "Function", qualifyDocName(namespace, n.Name), declarationHeadline(unparse.FormatDecl(n)), func() {
 			writeAnnotationsList(b, n.Annotations)
 			fmt.Fprintf(b, "- body statements: %d\n", len(n.Body))
 		})
 	case *ast.ExternFuncDecl:
-		writeSimpleReferenceSection(b, headingPrefix, "Extern function", qualifyDocName(namespace, n.Name), firstLine(unparse.FormatDecl(n)), func() {
+		writeSimpleReferenceSection(b, headingPrefix, "Extern function", qualifyDocName(namespace, n.Name), declarationHeadline(unparse.FormatDecl(n)), func() {
 			writeAnnotationsList(b, n.Annotations)
 		})
 	case *ast.ExternVarDecl:
-		writeSimpleReferenceSection(b, headingPrefix, "Extern variable", qualifyDocName(namespace, n.Name), firstLine(unparse.FormatDecl(n)), nil)
+		writeSimpleReferenceSection(b, headingPrefix, "Extern variable", qualifyDocName(namespace, n.Name), declarationHeadline(unparse.FormatDecl(n)), nil)
 	case *ast.ExternTypeDecl:
-		writeSimpleReferenceSection(b, headingPrefix, "Extern type", qualifyDocName(namespace, n.Name), firstLine(unparse.FormatDecl(n)), nil)
+		writeSimpleReferenceSection(b, headingPrefix, "Extern type", qualifyDocName(namespace, n.Name), declarationHeadline(unparse.FormatDecl(n)), nil)
 	case *ast.ExportTypeDecl:
-		writeSimpleReferenceSection(b, headingPrefix, "Exported type", qualifyDocName(namespace, n.Alias), firstLine(unparse.FormatDecl(n)), nil)
+		writeSimpleReferenceSection(b, headingPrefix, "Exported type", qualifyDocName(namespace, n.Alias), declarationHeadline(unparse.FormatDecl(n)), nil)
 	case *ast.ExportFuncDecl:
-		writeSimpleReferenceSection(b, headingPrefix, "Exported function", qualifyDocName(namespace, n.Name), firstLine(unparse.FormatDecl(n)), nil)
+		writeSimpleReferenceSection(b, headingPrefix, "Exported function", qualifyDocName(namespace, n.Name), declarationHeadline(unparse.FormatDecl(n)), nil)
 	case *ast.ExportGlobalDecl:
 		name := n.Alias
 		if name == "" {
 			name = n.TargetName
 		}
-		writeSimpleReferenceSection(b, headingPrefix, "Exported global", qualifyDocName(namespace, name), firstLine(unparse.FormatDecl(n)), nil)
+		writeSimpleReferenceSection(b, headingPrefix, "Exported global", qualifyDocName(namespace, name), declarationHeadline(unparse.FormatDecl(n)), nil)
 	case *ast.StaticIfDecl:
 		fmt.Fprintf(b, "%s Static conditional\n\n", headingPrefix)
 		fmt.Fprintf(b, "- condition: `%s`\n", unparse.FormatExpr(n.Cond))
@@ -131,7 +131,7 @@ func writeDeclReference(b *strings.Builder, decl ast.Decl, headingLevel int, nam
 		fmt.Fprintf(b, "- else declarations: %d\n", len(n.Else))
 	default:
 		fmt.Fprintf(b, "%s Declaration\n\n", headingPrefix)
-		fmt.Fprintf(b, "- surface: `%s`\n", firstLine(unparse.FormatDecl(decl)))
+		fmt.Fprintf(b, "- surface: `%s`\n", declarationHeadline(unparse.FormatDecl(decl)))
 	}
 }
 
@@ -198,6 +198,21 @@ func firstLine(text string) string {
 		return text[:idx]
 	}
 	return text
+}
+
+func declarationHeadline(text string) string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return ""
+	}
+	for _, line := range strings.Split(trimmed, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "@") {
+			continue
+		}
+		return line
+	}
+	return firstLine(trimmed)
 }
 
 func qualifyDocName(namespace string, name string) string {
