@@ -117,10 +117,8 @@ def score_decl(node: Decl, frozen: Decl.Store[Frozen], stmts: Stmt.Store[Frozen]
 
 def checksum_language_ast(decls: Decl.Store[Frozen], stmts: Stmt.Store[Frozen], exprs: Expr.Store[Frozen], patterns: Pattern.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
     total: mutable i64 = 0
-    i: mutable usize = 0u
-    while i < decls.count:
+    for i in 0u..<decls.count:
         total <- total + score_decl(decls[i], decls, stmts, exprs, patterns, types)
-        i <- i + 1u
     return total
 
 def build_and_checksum_mega() -> i64:

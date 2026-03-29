@@ -39,12 +39,10 @@ def retained_nested_type_repro_impl() -> i64:
     current: mutable TypeExpr = new[store] TypeExpr.Tuple(span: 3, weight: 2, left: int_ty, right: bool_ty)
     previous: mutable TypeExpr = bool_ty
 
-    seed: mutable usize = 0u
-    while seed < RETAINED_TYPE_ROUNDS:
+    for seed in 0u..<RETAINED_TYPE_ROUNDS:
         next: TypeExpr = build_type(seed, current, previous, store)
         previous <- current
         current <- next
-        seed <- seed + 1u
 
     frozen: TypeExpr.Store[Frozen] = freeze(move store)
     return score_type(current, frozen)

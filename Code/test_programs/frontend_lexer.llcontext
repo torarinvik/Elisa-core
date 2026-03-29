@@ -236,10 +236,8 @@ def frontend_hash_token(hash: u64, token: FrontendToken) -> u64:
 
 def frontend_token_checksum(tokens: darray[FrontendToken]) -> u64:
     hash: mutable u64 = frontend_token_hash_mix(FRONTEND_TOKEN_HASH_OFFSET, tokens.count.u64())
-    i: mutable usize = 0u
-    while i < tokens.count:
+    for i in 0u..<tokens.count:
         hash <- frontend_hash_token(hash, tokens[i])
-        i <- i + 1u
     return hash
 
 
@@ -253,12 +251,10 @@ def frontend_expect_lookup_keyword(text: static u8&, expected: FrontendTokenKind
 
 
 def frontend_expect_lookup_keyword_entries(entries: any FrontendKeywordEntry&, count: usize) -> bool:
-    i: mutable usize = 0u
-    while i < count:
+    for i in 0u..<count:
         entry: FrontendKeywordEntry = entries[i]
         if not frontend_expect_lookup_keyword(entry.text, entry.kind):
             return false
-        i <- i + 1u
     return true
 
 
@@ -530,10 +526,8 @@ def frontend_lexer_copy_token_kinds_with_len_impl(source: any u8&, source_len: u
     if capacity < tokens.count:
         return tokens.count
 
-    i: mutable usize = 0u
-    while i < tokens.count:
+    for i in 0u..<tokens.count:
         out[i] <- frontend_token_kind_code(tokens[i].kind)
-        i <- i + 1u
     return tokens.count
 
 export func frontend_lexer_parity_suite() -> int = frontend_lexer_parity_suite_impl

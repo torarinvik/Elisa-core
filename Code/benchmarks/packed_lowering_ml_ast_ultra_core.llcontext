@@ -274,10 +274,8 @@ def score_root(node: Root, forest: any FrozenMlAstForest&) -> i64:
 
 def checksum_root_range(start: usize, end: usize, forest: any FrozenMlAstForest&) -> i64:
     total: mutable i64 = 0
-    i: mutable usize = start
-    while i < end:
+    for i in start..<end:
         total <- total + score_root(forest.roots[i], forest)
-        i <- i + 1u
     return total
 
 def build_seed_type(seed: usize, current: TypeExpr, previous: TypeExpr, store: TypeExpr.Store[Local]) -> TypeExpr:
@@ -490,8 +488,7 @@ def build_ml_ast_forest(
     current_decl: mutable Decl = instance_decl
     current_module: mutable Module = overlay_module
 
-    seed: mutable usize = 0u
-    while seed < ML_AST_FOREST_ROUNDS:
+    for seed in 0u..<ML_AST_FOREST_ROUNDS:
         next_type: TypeExpr = build_seed_type(seed, current_type, previous_type, type_store)
         next_pattern: Pattern = build_seed_pattern(seed, current_pattern, previous_pattern, current_expr, next_type, pattern_store)
         next_clause: Clause = build_seed_clause(seed, next_pattern, current_expr, previous_expr, current_clause, clause_store)
@@ -511,7 +508,6 @@ def build_ml_ast_forest(
         current_stmt <- next_stmt
         current_decl <- next_decl
         current_module <- next_module
-        seed <- seed + 1u
 
     frozen_types: TypeExpr.Store[Frozen] = freeze(move type_store)
     frozen_patterns: Pattern.Store[Frozen] = freeze(move pattern_store)
@@ -541,20 +537,16 @@ def packed_ml_ast_repeated_checksum_impl(iterations: usize) -> i64:
     root_store: Root.Store[Local] = Root.Store(scratch)
     forest: FrozenMlAstForest = build_ml_ast_forest(type_store, pattern_store, expr_store, clause_store, stmt_store, decl_store, module_store, root_store)
     total: mutable i64 = 0
-    remaining: mutable usize = iterations
-    while remaining > 0u:
+    for iteration in 0u..<iterations:
         total <- total + checksum_root_range(0u, forest.roots.count, (&forest).cast[any FrozenMlAstForest&])
-        remaining <- remaining - 1u
     return total
 
 def ml_ast_parallel_worker(job: MlAstParallelJob) -> i64:
     forest: any FrozenMlAstForest& = job.forest_bits.cast[any FrozenMlAstForest&]
     result_slot: any i64& = job.result_bits.cast[any i64&]
     total: mutable i64 = 0
-    remaining: mutable usize = job.repeats
-    while remaining > 0u:
+    for iteration in 0u..<job.repeats:
         total <- total + checksum_root_range(job.start, job.end, forest)
-        remaining <- remaining - 1u
     result_slot[0u] <- total
     return total
 
@@ -589,8 +581,7 @@ def packed_ml_ast_parallel_checksum_impl(worker_count: usize, iterations: usize)
     pool workers(worker_total):
         group: TaskGroup = task_group_new()
         start: mutable usize = 0u
-        slot: mutable usize = 0u
-        while slot < worker_total:
+        for slot in 0u..<worker_total:
             span: mutable usize = base_roots
             if slot < extra_roots:
                 span <- span + 1u
@@ -602,15 +593,12 @@ def packed_ml_ast_parallel_checksum_impl(worker_count: usize, iterations: usize)
             task: Task[i64, Pending] = submit ml_ast_parallel_worker(job)
             task_group_add((&group).cast[any TaskGroup&], move task)
             start <- end
-            slot <- slot + 1u
 
         wait all group
 
     total: mutable i64 = 0
-    slot: mutable usize = 0u
-    while slot < worker_total:
+    for slot in 0u..<worker_total:
         total <- total + partials[slot]
-        slot <- slot + 1u
     return total
 
 export func packed_ml_ast_checksum() -> i64 = packed_ml_ast_checksum_impl

@@ -305,12 +305,10 @@ struct FrontendKeywordEntry:
 
 @inline(always)
 def frontend_lookup_keyword_bucket(entries: any FrontendKeywordEntry&, count: usize, text: StringView) -> FrontendTokenKind:
-    i: mutable usize = 0u
-    while i < count:
+    for i in 0u..<count:
         entry: FrontendKeywordEntry = entries[i]
         if frontend_sv_eq_literal(text, entry.text):
             return entry.kind
-        i <- i + 1u
     return FrontendTokenKind.Ident
 
 

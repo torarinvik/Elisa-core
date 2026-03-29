@@ -123,10 +123,8 @@ def arena_da_fill[T](dst: dview[T], value: T):
 	assert dst.data != null
 
     out: any T& = dst.data.cast[any T&]
-	i: mutable usize = 0u
-	while i < dst.len:
+    for i in 0u..<dst.len:
 		out[i] <- value
-		i <- i + 1u
 
 def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
     assert dst.len == src.len
@@ -138,10 +136,8 @@ def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
 
     out: any T& = dst.data.cast[any T&]
     src_items: any T& = src.data.cast[any T&]
-    i: mutable usize = 0u
-    while i < dst.len:
+    for i in 0u..<dst.len:
         out[i] <- src_items[i]
-        i <- i + 1u
 
 def arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool:
     assert left.len == right.len
@@ -241,12 +237,10 @@ def arena_dict_next_capacity(min_capacity: usize) -> usize:
 def arena_dict_hash_dstr(key: dstr[key_shape]) -> u64:
     hash: mutable u64 = 1469598103934665603u64
     key_len: usize = arena_strlen(key)
-    i: mutable usize = 0
 
-    while i < key_len:
+    for i in 0u..<key_len:
         hash ^= key[i].u64()
         hash *= 1099511628211u64
-        i <- i + 1
 
     return hash
 
@@ -279,9 +273,7 @@ def arena_dict_probe_slot[T](m: any dict[dstr[key_shape], T]&, key: dstr[key_sha
     index: mutable usize = (hash & mask.u64()).usize()
     first_tombstone: mutable usize = 0
     have_tombstone: mutable bool = false
-    probes: mutable usize = 0
-
-    while probes < m.capacity:
+    for probes in 0u..<m.capacity:
         bucket: any DictBucket[T]& = &items[index]
 
         if bucket.state == DICT_BUCKET_EMPTY:
@@ -297,7 +289,6 @@ def arena_dict_probe_slot[T](m: any dict[dstr[key_shape], T]&, key: dstr[key_sha
             return DictProbeResult(index, true)
 
         index <- (index + 1) & mask
-        probes <- probes + 1
 
     if have_tombstone:
         return DictProbeResult(first_tombstone, false)
@@ -385,11 +376,9 @@ def arena_dict_reserve[T](a: any Arena&, m: any dict[dstr[key_shape], T]&, min_c
 
     if m.items != null:
         old_items: any DictBucket[T]& = m.items
-        i: mutable usize = 0
-        while i < m.capacity:
+        for i in 0u..<m.capacity:
             if old_items[i].state == DICT_BUCKET_FULL:
                 _ = arena_dict_insert_existing_bucket((&rebuilt).cast[any dict[dstr[key_shape], T]&], old_items[i])
-            i <- i + 1
 
     m.items as & <- rebuilt.items
     m.count <- rebuilt.count
@@ -518,11 +507,9 @@ def arena_dict_reserve__i64(a: any Arena&, m: any DynDict[i64]&, min_capacity: u
 
     if m.items != null:
         old_items: any DictBucket[i64]& = m.items
-        i: mutable usize = 0
-        while i < m.capacity:
+        for i in 0u..<m.capacity:
             if old_items[i].state == DICT_BUCKET_FULL:
                 _ = arena_dict_insert_existing_bucket((&rebuilt).cast[any DynDict[i64]&], old_items[i])
-            i <- i + 1
 
     m.items as & <- rebuilt.items
     m.count <- rebuilt.count

@@ -161,11 +161,9 @@ def intern_small_string(src: any u8&, len: usize) -> heap u8& can[Memory.Allocat
 
 	# FNV-1a hash
 	hash: mutable u64 = 1469598103934665603u64
-	i: mutable usize = 0
-	while i < len:
+	for i in 0u..<len:
 		hash ^= src[i].u64()
 		hash *= 1099511628211u64
-		i += 1
 
 	bucket: usize = (hash & (CTX_SMALL_STRING_CACHE_BUCKETS - 1).u64()).usize()
 

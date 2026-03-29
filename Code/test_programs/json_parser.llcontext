@@ -235,14 +235,12 @@ def json_is_low_surrogate(codepoint: i64) -> bool:
 
 def json_read_hex_quad(cursor: any JsonCursor&) -> i64:
     value: mutable i64 = 0
-    digits: mutable usize = 0u
-    while digits < 4u:
+    for digits in 0u..<4u:
         digit: i64 = json_hex_digit_value(json_cur_char(cursor))
         if digit < 0:
             return -1
         _ = json_advance_char(cursor)
         value <- value * 16 + digit
-        digits <- digits + 1u
     return value
 
 
@@ -251,14 +249,12 @@ def json_read_hex_quad_from_source(source: any u8&, source_end: usize, pos: any 
         return -1
 
     value: mutable i64 = 0
-    digits: mutable usize = 0u
-    while digits < 4u:
+    for digits in 0u..<4u:
         digit: i64 = json_hex_digit_value(source[pos[0]].i64())
         if digit < 0:
             return -1
         value <- value * 16 + digit
         pos[0] <- pos[0] + 1u
-        digits <- digits + 1u
     return value
 
 
@@ -471,11 +467,9 @@ def json_string_matches_literal(source: any u8&, source_offset: usize, source_le
             encoded_len: usize = json_write_utf8_codepoint((&utf8[0]).cast[any u8&], 0u, codepoint)
             if literal_pos + encoded_len > literal_len:
                 return false
-            i: mutable usize = 0u
-            while i < encoded_len:
+            for i in 0u..<encoded_len:
                 if literal[literal_pos + i].i64() != utf8[i].i64():
                     return false
-                i <- i + 1u
             literal_pos <- literal_pos + encoded_len
     return literal_pos == literal_len
 
@@ -496,11 +490,9 @@ def json_expect_literal_with_len(cursor: any JsonCursor&, literal: any u8&, lite
     if cursor.pos + literal_len > cursor.source_len:
         return false
 
-    i: mutable usize = 0u
-    while i < literal_len:
+    for i in 0u..<literal_len:
         if cursor.source[cursor.pos + i].i64() != literal[i].i64():
             return false
-        i <- i + 1u
 
     cursor.pos <- cursor.pos + literal_len
     return true
@@ -893,15 +885,13 @@ def json_reduce_sum_smoke(values: darray[i64, 4], bias: i64) -> i64:
 def json_ast_nodes_count(items: dview[JsonNode], store: JsonNode.Store[Local]) -> i64:
     readonly_items: dview[JsonNode] = readonly(items)
     total: mutable i64 = 0
-    index: mutable usize = 0u
-    while index < readonly_items.len:
+    for index in 0u..<readonly_items.len:
         item: mutable JsonNode = zeroed
         arena_memcpy((&item).cast[any void&], json_node_view_ref(readonly_items, index).cast[any void&], sizeof(JsonNode))
         item_count: i64 = json_ast_node_count(item, store)
         if item_count < 0:
             return -1
         total <- total + item_count
-        index <- index + 1u
 
     return total
 
@@ -909,8 +899,7 @@ def json_ast_nodes_count(items: dview[JsonNode], store: JsonNode.Store[Local]) -
 def json_ast_fields_count(fields: dview[JsonField], store: JsonNode.Store[Local]) -> i64:
     readonly_fields: dview[JsonField] = readonly(fields)
     total: mutable i64 = 0
-    index: mutable usize = 0u
-    while index < readonly_fields.len:
+    for index in 0u..<readonly_fields.len:
         field_ref: any JsonField& = json_field_view_ref(readonly_fields, index)
         key_node: mutable JsonNode = zeroed
         value_node: mutable JsonNode = zeroed
@@ -923,7 +912,6 @@ def json_ast_fields_count(fields: dview[JsonField], store: JsonNode.Store[Local]
         if value_count < 0:
             return -1
         total <- total + key_count + value_count
-        index <- index + 1u
 
     return total
 
@@ -1599,13 +1587,11 @@ def json_ast_array_iter_next(cursor: JsonAstArrayIterCursor, store: JsonNode.Sto
 
 def json_ast_object_get_ref(node: JsonNode, source: any u8&, key: any u8&, store: JsonNode.Store[Local]) -> any JsonNode&?:
     readonly_fields: dview[JsonField] = json_ast_object_fields_view(node, store)
-    index: mutable usize = 0u
-    while index < readonly_fields.len:
+    for index in 0u..<readonly_fields.len:
         field_ref: any JsonField& = json_field_view_ref(readonly_fields, index)
         key_node: JsonNode = json_node_copy_ref(json_field_key_ref(field_ref))
         if json_ast_string_eq_literal(source, key_node, key, store):
             return json_field_value_ref(field_ref)
-        index <- index + 1u
     return null
 
 
@@ -4728,15 +4714,13 @@ def json_parallel_parse_once(source: any u8&, mode: i64) -> i64 can[Memory.Alloc
 def json_parallel_worker(job: JsonParallelJob) -> i64 can[Memory.Allocate, Abort.Panic]:
     source: any u8& = job.source_bits.cast[any u8&]
     result_slot: any i64& = job.result_bits.cast[any i64&]
-    remaining: mutable usize = job.repeats
     total: mutable i64 = 0
-    while remaining > 0u:
+    for iteration in 0u..<job.repeats:
         value: i64 = json_parallel_parse_once(source, job.mode)
         if value < 0:
             result_slot[0u] <- -1
             return -1
         total <- total + value
-        remaining <- remaining - 1u
     result_slot[0u] <- total
     return total
 
@@ -4760,8 +4744,7 @@ def json_parallel_checksum_impl(source: any u8&, worker_count: usize, iterations
 
     pool workers(worker_total):
         group: TaskGroup = task_group_new()
-        slot: mutable usize = 0u
-        while slot < worker_total:
+        for slot in 0u..<worker_total:
             repeats: mutable usize = base_repeats
             if slot < extra_repeats:
                 repeats <- repeats + 1u
@@ -4770,17 +4753,14 @@ def json_parallel_checksum_impl(source: any u8&, worker_count: usize, iterations
             job: JsonParallelJob = JsonParallelJob(source_bits, repeats, result_bits, mode)
             task: Task[i64, Pending] = submit json_parallel_worker(job)
             task_group_add((&group).cast[any TaskGroup&], move task)
-            slot <- slot + 1u
 
         wait all group
 
     total: mutable i64 = 0
-    slot: mutable usize = 0u
-    while slot < worker_total:
+    for slot in 0u..<worker_total:
         if partials[slot] < 0:
             return -1
         total <- total + partials[slot]
-        slot <- slot + 1u
     return total
 
 

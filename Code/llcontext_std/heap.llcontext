@@ -138,13 +138,11 @@ def memory_pool_add_capacity[T](pool: any MemoryPool[T]&, count: usize) can[Memo
     if item_size < sizeof(MemoryPoolFreeNode):
         item_size <- sizeof(MemoryPoolFreeNode)
 
-    i: mutable usize = 0u
-    while i < count:
+    for i in 0u..<count:
         raw: heap void& = arena_alloc((&pool.arena).cast[any Arena&], item_size)
         node: heap MemoryPoolFreeNode& = raw.cast[heap MemoryPoolFreeNode&]
         node.next <- pool.free_list
         pool.free_list as & <- node
-        i <- i + 1u
 
 def memory_pool_create[T](pool: any MemoryPool[T]&) -> heap T& can[Memory.Allocate, Abort.Panic]:
     if pool.free_list != null:

@@ -1,15 +1,11 @@
 def stream_axpy_u64_impl(dst: any u64&, src: any u64&, len: usize, rounds: usize, scale: u64) -> u64:
     acc: mutable u64 = scale ^ 0x9e3779b97f4a7c15u64
-    round: mutable usize = 0
 
-    while round < rounds:
-        i: mutable usize = 0
-        while i < len:
+    for round in 0u..<rounds:
+        for i in 0u..<len:
             value: u64 = dst[i] + src[i] * scale + acc
             dst[i] <- value
             acc ^= value + i.u64() + round.u64()
-            i <- i + 1
-        round <- round + 1
 
     return acc
 
