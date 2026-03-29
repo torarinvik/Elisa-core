@@ -75,6 +75,60 @@ func functionIR(output string, name string) string {
 	return output[start : idx+endOffset]
 }
 
+func requireInstructionLineContainsAll(t *testing.T, output string, needle string, want ...string) {
+	t.Helper()
+	for _, line := range strings.Split(output, "\n") {
+		if !strings.Contains(line, needle) {
+			continue
+		}
+		for _, item := range want {
+			if !strings.Contains(line, item) {
+				t.Fatalf("expected line containing %q to also contain %q, got:\n%s\n\nFull IR:\n%s", needle, item, line, output)
+			}
+		}
+		return
+	}
+	t.Fatalf("expected instruction line containing %q, got:\n%s", needle, output)
+}
+
+func requireTinyExactDViewCopyBody(t *testing.T, body string) {
+	t.Helper()
+	if strings.Contains(body, "call ptr @arena_memcpy(") {
+		t.Fatalf("expected tiny exact dview copy to avoid arena_memcpy, got:\n%s", body)
+	}
+	requireInstructionLineContainsAll(t, body, "load i32, ptr %dview.copy.src.elem.ptr", "!alias.scope", "!noalias")
+	requireInstructionLineContainsAll(t, body, "store i32 %dview.copy.elem, ptr %dview.copy.dst.elem.ptr", "!alias.scope", "!noalias")
+}
+
+func requireTinyExactDViewEqBody(t *testing.T, body string, expectAliasMetadata bool) {
+	t.Helper()
+	if strings.Contains(body, "call i64 @memcmp(") || strings.Contains(body, "call i32 @memcmp(") {
+		t.Fatalf("expected tiny exact dview equality to avoid memcmp, got:\n%s", body)
+	}
+	if !strings.Contains(body, "dview.eq.byte.eq = icmp eq i8") {
+		t.Fatalf("expected tiny exact dview equality to compare bytes directly, got:\n%s", body)
+	}
+	if expectAliasMetadata {
+		requireInstructionLineContainsAll(t, body, "dview.eq.left.byte = load i8", "!alias.scope", "!noalias")
+		requireInstructionLineContainsAll(t, body, "dview.eq.right.byte = load i8", "!alias.scope", "!noalias")
+	}
+}
+
+func requireTinyExactDViewMaterializeBody(t *testing.T, body string) {
+	t.Helper()
+	if !strings.Contains(body, "call ptr @arena_alloc(") {
+		t.Fatalf("expected tiny exact arena_da_from_view to still allocate the destination buffer, got:\n%s", body)
+	}
+	if strings.Contains(body, "call ptr @arena_memcpy(") {
+		t.Fatalf("expected tiny exact arena_da_from_view to avoid arena_memcpy, got:\n%s", body)
+	}
+	requireInstructionLineContainsAll(t, body, "load i32, ptr %dview.materialize.src.elem.ptr", "!alias.scope", "!noalias")
+	requireInstructionLineContainsAll(t, body, "store i32 %dview.materialize.elem, ptr %dview.materialize.dst.elem.ptr", "!alias.scope", "!noalias")
+	if !strings.Contains(body, "dview.materialize.items") {
+		t.Fatalf("expected tiny exact arena_da_from_view to still materialize the darray result, got:\n%s", body)
+	}
+}
+
 func TestGenerateLLVMIRDefinesSimpleFunctionBody(t *testing.T) {
 	src := `repr(c) struct Box:
     value: i32
@@ -1923,7 +1977,7 @@ def unwrap_or(value: MaybeInt, fallback: int) -> int:
 		"%MaybeInt = type { i32, [2 x i64] }",
 		"define %MaybeInt @make_pair()",
 		"define i64 @unwrap_or(%MaybeInt",
-		"icmp eq i32",
+		"switch i32 %match.tag.value",
 		"store i32 2",
 		"extractvalue { i64, i64 }",
 	}
@@ -1959,7 +2013,7 @@ def unwrap_or(value: MaybeInt, fallback: int) -> int:
 		"%MaybeInt = type { i32, [2 x i64] }",
 		"define i64 @unwrap_or(%MaybeInt",
 		"phi i64",
-		"icmp eq i32",
+		"switch i32 %match.tag.value",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -3827,12 +3881,10 @@ def copy_overlap_unknown(values: any darray[i32, shape_in]&) -> void:
 	if copySplitBody == "" {
 		t.Fatalf("expected to find copy_split body, got:\n%s", output)
 	}
-	if !strings.Contains(copySplitBody, "call ptr @arena_memcpy(ptr noalias") {
-		t.Fatalf("expected copy_split to lower through direct noalias arena_memcpy, got:\n%s", copySplitBody)
-	}
 	if strings.Contains(copySplitBody, "call void @arena_da_copy_exact") {
 		t.Fatalf("expected copy_split to avoid helper fallback, got:\n%s", copySplitBody)
 	}
+	requireTinyExactDViewCopyBody(t, copySplitBody)
 
 	copyOverlapBody := functionIR(output, "copy_overlap")
 	if copyOverlapBody == "" {
@@ -3904,23 +3956,19 @@ def copy_helper(values: array[i32, 4]) -> void:
 	if copyStructBody == "" {
 		t.Fatalf("expected to find copy_struct body, got:\n%s", output)
 	}
-	if !strings.Contains(copyStructBody, "call ptr @arena_memcpy(ptr noalias") {
-		t.Fatalf("expected copy_struct to lower through direct noalias arena_memcpy via field projections, got:\n%s", copyStructBody)
-	}
 	if strings.Contains(copyStructBody, "call void @arena_da_copy_exact") {
 		t.Fatalf("expected copy_struct to avoid helper fallback, got:\n%s", copyStructBody)
 	}
+	requireTinyExactDViewCopyBody(t, copyStructBody)
 
 	copyHelperBody := functionIR(output, "copy_helper")
 	if copyHelperBody == "" {
 		t.Fatalf("expected to find copy_helper body, got:\n%s", output)
 	}
-	if !strings.Contains(copyHelperBody, "call ptr @arena_memcpy(ptr noalias") {
-		t.Fatalf("expected copy_helper to lower through direct noalias arena_memcpy via helper-returned field projections, got:\n%s", copyHelperBody)
-	}
 	if strings.Contains(copyHelperBody, "call void @arena_da_copy_exact") {
 		t.Fatalf("expected copy_helper to avoid helper fallback, got:\n%s", copyHelperBody)
 	}
+	requireTinyExactDViewCopyBody(t, copyHelperBody)
 
 }
 
@@ -3947,12 +3995,10 @@ def copy_indexed(values: array[i32, 4]) -> void:
 	if copyIndexedBody == "" {
 		t.Fatalf("expected to find copy_indexed body, got:\n%s", output)
 	}
-	if !strings.Contains(copyIndexedBody, "call ptr @arena_memcpy(ptr noalias") {
-		t.Fatalf("expected copy_indexed to lower through direct noalias arena_memcpy via indexed field projections, got:\n%s", copyIndexedBody)
-	}
 	if strings.Contains(copyIndexedBody, "call void @arena_da_copy_exact") {
 		t.Fatalf("expected copy_indexed to avoid helper fallback, got:\n%s", copyIndexedBody)
 	}
+	requireTinyExactDViewCopyBody(t, copyIndexedBody)
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughStandardViewSliceHelperFieldProjection(t *testing.T) {
@@ -3989,12 +4035,10 @@ def copy_helper_view_slice(values: array[i32, 8]) -> void:
 	if body == "" {
 		t.Fatalf("expected to find copy_helper_view_slice body, got:\n%s", output)
 	}
-	if !strings.Contains(body, "call ptr @arena_memcpy(ptr noalias") {
-		t.Fatalf("expected copy_helper_view_slice to lower through direct noalias arena_memcpy via standard view-slice helper projections, got:\n%s", body)
-	}
 	if strings.Contains(body, "call void @arena_da_copy_exact") {
 		t.Fatalf("expected copy_helper_view_slice to avoid helper fallback, got:\n%s", body)
 	}
+	requireTinyExactDViewCopyBody(t, body)
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughHelperReturnedIndexedFieldProjection(t *testing.T) {
@@ -4026,12 +4070,10 @@ def copy_helper_indexed(values: array[i32, 4]) -> void:
 	if copyHelperIndexedBody == "" {
 		t.Fatalf("expected to find copy_helper_indexed body, got:\n%s", output)
 	}
-	if !strings.Contains(copyHelperIndexedBody, "call ptr @arena_memcpy(ptr noalias") {
-		t.Fatalf("expected copy_helper_indexed to lower through direct noalias arena_memcpy via helper-returned indexed field projections, got:\n%s", copyHelperIndexedBody)
-	}
 	if strings.Contains(copyHelperIndexedBody, "call void @arena_da_copy_exact") {
 		t.Fatalf("expected copy_helper_indexed to avoid helper fallback, got:\n%s", copyHelperIndexedBody)
 	}
+	requireTinyExactDViewCopyBody(t, copyHelperIndexedBody)
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughNestedHelperReturnedIndexedFieldProjection(t *testing.T) {
@@ -4066,12 +4108,10 @@ def copy_nested_helper_indexed(values: array[i32, 4]) -> void:
 	if copyNestedHelperIndexedBody == "" {
 		t.Fatalf("expected to find copy_nested_helper_indexed body, got:\n%s", output)
 	}
-	if !strings.Contains(copyNestedHelperIndexedBody, "call ptr @arena_memcpy(ptr noalias") {
-		t.Fatalf("expected copy_nested_helper_indexed to lower through direct noalias arena_memcpy via nested helper-returned indexed field projections, got:\n%s", copyNestedHelperIndexedBody)
-	}
 	if strings.Contains(copyNestedHelperIndexedBody, "call void @arena_da_copy_exact") {
 		t.Fatalf("expected copy_nested_helper_indexed to avoid helper fallback, got:\n%s", copyNestedHelperIndexedBody)
 	}
+	requireTinyExactDViewCopyBody(t, copyNestedHelperIndexedBody)
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
@@ -4104,12 +4144,10 @@ def copy_rebased_helper_indexed(values: array[i32, 4]) -> void:
 	if copyRebasedHelperIndexedBody == "" {
 		t.Fatalf("expected to find copy_rebased_helper_indexed body, got:\n%s", output)
 	}
-	if !strings.Contains(copyRebasedHelperIndexedBody, "call ptr @arena_memcpy(ptr noalias") {
-		t.Fatalf("expected copy_rebased_helper_indexed to lower through direct noalias arena_memcpy via rebased helper-returned indexed field projections, got:\n%s", copyRebasedHelperIndexedBody)
-	}
 	if strings.Contains(copyRebasedHelperIndexedBody, "call void @arena_da_copy_exact") {
 		t.Fatalf("expected copy_rebased_helper_indexed to avoid helper fallback, got:\n%s", copyRebasedHelperIndexedBody)
 	}
+	requireTinyExactDViewCopyBody(t, copyRebasedHelperIndexedBody)
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughWildcardRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
@@ -4142,12 +4180,10 @@ def copy_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> void:
 	if copyWildcardRebasedHelperIndexedBody == "" {
 		t.Fatalf("expected to find copy_wildcard_rebased_helper_indexed body, got:\n%s", output)
 	}
-	if !strings.Contains(copyWildcardRebasedHelperIndexedBody, "call ptr @arena_memcpy(ptr noalias") {
-		t.Fatalf("expected copy_wildcard_rebased_helper_indexed to lower through direct noalias arena_memcpy via wildcard rebased helper-returned indexed field projections, got:\n%s", copyWildcardRebasedHelperIndexedBody)
-	}
 	if strings.Contains(copyWildcardRebasedHelperIndexedBody, "call void @arena_da_copy_exact") {
 		t.Fatalf("expected copy_wildcard_rebased_helper_indexed to avoid helper fallback, got:\n%s", copyWildcardRebasedHelperIndexedBody)
 	}
+	requireTinyExactDViewCopyBody(t, copyWildcardRebasedHelperIndexedBody)
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughNestedWildcardRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
@@ -4183,12 +4219,10 @@ def copy_nested_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> void:
 	if copyNestedWildcardRebasedHelperIndexedBody == "" {
 		t.Fatalf("expected to find copy_nested_wildcard_rebased_helper_indexed body, got:\n%s", output)
 	}
-	if !strings.Contains(copyNestedWildcardRebasedHelperIndexedBody, "call ptr @arena_memcpy(ptr noalias") {
-		t.Fatalf("expected copy_nested_wildcard_rebased_helper_indexed to lower through direct noalias arena_memcpy via nested wildcard rebased helper-returned indexed field projections, got:\n%s", copyNestedWildcardRebasedHelperIndexedBody)
-	}
 	if strings.Contains(copyNestedWildcardRebasedHelperIndexedBody, "call void @arena_da_copy_exact") {
 		t.Fatalf("expected copy_nested_wildcard_rebased_helper_indexed to avoid helper fallback, got:\n%s", copyNestedWildcardRebasedHelperIndexedBody)
 	}
+	requireTinyExactDViewCopyBody(t, copyNestedWildcardRebasedHelperIndexedBody)
 }
 
 func TestGenerateLLVMIRKeepsCopyOverlapGuardrailsThroughWildcardRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
@@ -4309,12 +4343,10 @@ def copy_nested_rebased_helper_indexed(values: array[i32, 4]) -> void:
 	if copyNestedRebasedHelperIndexedBody == "" {
 		t.Fatalf("expected to find copy_nested_rebased_helper_indexed body, got:\n%s", output)
 	}
-	if !strings.Contains(copyNestedRebasedHelperIndexedBody, "call ptr @arena_memcpy(ptr noalias") {
-		t.Fatalf("expected copy_nested_rebased_helper_indexed to lower through direct noalias arena_memcpy via nested rebased helper-returned indexed field projections, got:\n%s", copyNestedRebasedHelperIndexedBody)
-	}
 	if strings.Contains(copyNestedRebasedHelperIndexedBody, "call void @arena_da_copy_exact") {
 		t.Fatalf("expected copy_nested_rebased_helper_indexed to avoid helper fallback, got:\n%s", copyNestedRebasedHelperIndexedBody)
 	}
+	requireTinyExactDViewCopyBody(t, copyNestedRebasedHelperIndexedBody)
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughNestedFieldProjection(t *testing.T) {
@@ -4350,23 +4382,19 @@ def copy_nested_helper(values: array[i32, 4]) -> void:
 	if copyStructBody == "" {
 		t.Fatalf("expected to find copy_nested_struct body, got:\n%s", output)
 	}
-	if !strings.Contains(copyStructBody, "call ptr @arena_memcpy(ptr noalias") {
-		t.Fatalf("expected copy_nested_struct to lower through direct noalias arena_memcpy via nested field projections, got:\n%s", copyStructBody)
-	}
 	if strings.Contains(copyStructBody, "call void @arena_da_copy_exact") {
 		t.Fatalf("expected copy_nested_struct to avoid helper fallback, got:\n%s", copyStructBody)
 	}
+	requireTinyExactDViewCopyBody(t, copyStructBody)
 
 	copyHelperBody := functionIR(output, "copy_nested_helper")
 	if copyHelperBody == "" {
 		t.Fatalf("expected to find copy_nested_helper body, got:\n%s", output)
 	}
-	if !strings.Contains(copyHelperBody, "call ptr @arena_memcpy(ptr noalias") {
-		t.Fatalf("expected copy_nested_helper to lower through direct noalias arena_memcpy via nested helper-returned field projections, got:\n%s", copyHelperBody)
-	}
 	if strings.Contains(copyHelperBody, "call void @arena_da_copy_exact") {
 		t.Fatalf("expected copy_nested_helper to avoid helper fallback, got:\n%s", copyHelperBody)
 	}
+	requireTinyExactDViewCopyBody(t, copyHelperBody)
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewZeroFill(t *testing.T) {
@@ -4414,11 +4442,14 @@ def fill_unknown(view: dview[i32]) -> void:
 	if zeroBody == "" {
 		t.Fatalf("expected to find zero_split body, got:\n%s", output)
 	}
-	if !strings.Contains(zeroBody, "call ptr @memset(ptr") {
-		t.Fatalf("expected zero_split to lower through memset, got:\n%s", zeroBody)
-	}
 	if strings.Contains(zeroBody, "call void @arena_da_fill") {
 		t.Fatalf("expected zero_split to avoid generic helper fallback, got:\n%s", zeroBody)
+	}
+	if strings.Contains(zeroBody, "call ptr @memset(ptr") {
+		t.Fatalf("expected zero_split to use direct zero stores on the tiny exact fast path, got:\n%s", zeroBody)
+	}
+	if strings.Count(zeroBody, "store i32 0, ptr %dview.fill.elem.ptr") < 2 {
+		t.Fatalf("expected zero_split to lower through direct zero stores, got:\n%s", zeroBody)
 	}
 
 	fillBody := functionIR(output, "fill_split")
@@ -4494,22 +4525,28 @@ def fill_nonuniform_unknown(view: dview[i32]) -> void:
 	if byteBody == "" {
 		t.Fatalf("expected to find fill_bytes body, got:\n%s", output)
 	}
-	if !strings.Contains(byteBody, "call ptr @memset(ptr") {
-		t.Fatalf("expected fill_bytes to lower through memset, got:\n%s", byteBody)
-	}
 	if strings.Contains(byteBody, "call void @arena_da_fill") {
 		t.Fatalf("expected fill_bytes to avoid generic helper fallback, got:\n%s", byteBody)
+	}
+	if strings.Contains(byteBody, "call ptr @memset(ptr") {
+		t.Fatalf("expected fill_bytes to use direct byte stores on the tiny exact fast path, got:\n%s", byteBody)
+	}
+	if strings.Count(byteBody, "store i8 7, ptr %dview.fill.elem.ptr") < 2 {
+		t.Fatalf("expected fill_bytes to lower through direct byte stores, got:\n%s", byteBody)
 	}
 
 	onesBody := functionIR(output, "fill_all_ones")
 	if onesBody == "" {
 		t.Fatalf("expected to find fill_all_ones body, got:\n%s", output)
 	}
-	if !strings.Contains(onesBody, "call ptr @memset(ptr") {
-		t.Fatalf("expected fill_all_ones to lower through memset, got:\n%s", onesBody)
-	}
 	if strings.Contains(onesBody, "call void @arena_da_fill") {
 		t.Fatalf("expected fill_all_ones to avoid generic helper fallback, got:\n%s", onesBody)
+	}
+	if strings.Contains(onesBody, "call ptr @memset(ptr") {
+		t.Fatalf("expected fill_all_ones to use direct stores on the tiny exact fast path, got:\n%s", onesBody)
+	}
+	if strings.Count(onesBody, "store i32 -1, ptr %dview.fill.elem.ptr") < 2 {
+		t.Fatalf("expected fill_all_ones to lower through direct stores, got:\n%s", onesBody)
 	}
 
 	nonUniformBody := functionIR(output, "fill_nonuniform")
@@ -4580,11 +4617,14 @@ def fill_runtime_wide_unknown(view: dview[i32], value: i32) -> void:
 	if runtimeByteBody == "" {
 		t.Fatalf("expected to find fill_runtime_byte body, got:\n%s", output)
 	}
-	if !strings.Contains(runtimeByteBody, "call ptr @memset(ptr") {
-		t.Fatalf("expected fill_runtime_byte to lower through memset, got:\n%s", runtimeByteBody)
-	}
 	if strings.Contains(runtimeByteBody, "call void @arena_da_fill") {
 		t.Fatalf("expected fill_runtime_byte to avoid generic helper fallback, got:\n%s", runtimeByteBody)
+	}
+	if strings.Contains(runtimeByteBody, "call ptr @memset(ptr") {
+		t.Fatalf("expected fill_runtime_byte to use direct byte stores on the tiny exact fast path, got:\n%s", runtimeByteBody)
+	}
+	if strings.Count(runtimeByteBody, "store i8 %value") < 2 {
+		t.Fatalf("expected fill_runtime_byte to lower through direct runtime-value byte stores, got:\n%s", runtimeByteBody)
 	}
 
 	runtimeWideBody := functionIR(output, "fill_runtime_wide")
@@ -4652,22 +4692,28 @@ def fill_runtime_int_to_bytes(values: any darray[u8, 4]&, value: int) -> void:
 	if literalBody == "" {
 		t.Fatalf("expected to find fill_literal_int_to_bytes body, got:\n%s", output)
 	}
-	if !strings.Contains(literalBody, "call ptr @memset(ptr") {
-		t.Fatalf("expected fill_literal_int_to_bytes to lower through memset, got:\n%s", literalBody)
-	}
 	if strings.Contains(literalBody, "call void @arena_da_fill") {
 		t.Fatalf("expected fill_literal_int_to_bytes to avoid generic helper fallback, got:\n%s", literalBody)
+	}
+	if strings.Contains(literalBody, "call ptr @memset(ptr") {
+		t.Fatalf("expected fill_literal_int_to_bytes to use direct byte stores on the tiny exact fast path, got:\n%s", literalBody)
+	}
+	if strings.Count(literalBody, "store i8 7, ptr %dview.fill.elem.ptr") < 2 {
+		t.Fatalf("expected fill_literal_int_to_bytes to lower through direct byte stores, got:\n%s", literalBody)
 	}
 
 	runtimeBody := functionIR(output, "fill_runtime_int_to_bytes")
 	if runtimeBody == "" {
 		t.Fatalf("expected to find fill_runtime_int_to_bytes body, got:\n%s", output)
 	}
-	if !strings.Contains(runtimeBody, "call ptr @memset(ptr") {
-		t.Fatalf("expected fill_runtime_int_to_bytes to lower through memset, got:\n%s", runtimeBody)
-	}
 	if strings.Contains(runtimeBody, "call void @arena_da_fill") {
 		t.Fatalf("expected fill_runtime_int_to_bytes to avoid generic helper fallback, got:\n%s", runtimeBody)
+	}
+	if strings.Contains(runtimeBody, "call ptr @memset(ptr") {
+		t.Fatalf("expected fill_runtime_int_to_bytes to use direct byte stores on the tiny exact fast path, got:\n%s", runtimeBody)
+	}
+	if strings.Count(runtimeBody, "store i8 %") < 2 {
+		t.Fatalf("expected fill_runtime_int_to_bytes to lower through direct runtime-value byte stores, got:\n%s", runtimeBody)
 	}
 }
 
@@ -4752,11 +4798,11 @@ def fill_runtime_byte(values: any darray[u8, 4]&, value: u8) -> void:
 	if fillBody == "" {
 		t.Fatalf("expected to find fill_runtime_byte body, got:\n%s", output)
 	}
-	if !strings.Contains(fillBody, "call ptr @memset(ptr") {
-		t.Fatalf("expected fill_runtime_byte to lower through memset, got:\n%s", fillBody)
+	if strings.Contains(fillBody, "call ptr @memset(ptr") {
+		t.Fatalf("expected fill_runtime_byte to use direct byte stores on the tiny exact fast path, got:\n%s", fillBody)
 	}
-	if strings.Contains(fillBody, "call ptr @memset(ptr %dview.fill.dst.data, i32") {
-		t.Fatalf("expected fill_runtime_byte memset fast-path to match the runtime int-sized declaration, got:\n%s", fillBody)
+	if strings.Count(fillBody, "store i8 %value") < 2 {
+		t.Fatalf("expected fill_runtime_byte to lower through direct runtime-value byte stores, got:\n%s", fillBody)
 	}
 
 	outputPath := filepath.Join(t.TempDir(), "fill_runtime_byte.o")
@@ -4859,40 +4905,28 @@ def eq_diff_extent(values: any darray[i32, 4]&) -> bool:
 	if eqSplitBody == "" {
 		t.Fatalf("expected to find eq_split body, got:\n%s", output)
 	}
-	if !strings.Contains(eqSplitBody, "call i64 @memcmp(ptr noalias") {
-		t.Fatalf("expected eq_split to lower through direct noalias memcmp, got:\n%s", eqSplitBody)
-	}
 	if strings.Contains(eqSplitBody, "call i1 @arena_da_eq_exact") {
 		t.Fatalf("expected eq_split to avoid helper fallback, got:\n%s", eqSplitBody)
 	}
+	requireTinyExactDViewEqBody(t, eqSplitBody, true)
 
 	eqOverlapBody := functionIR(output, "eq_overlap")
 	if eqOverlapBody == "" {
 		t.Fatalf("expected to find eq_overlap body, got:\n%s", output)
 	}
-	if !strings.Contains(eqOverlapBody, "call i64 @memcmp(ptr ") {
-		t.Fatalf("expected eq_overlap to lower through direct memcmp, got:\n%s", eqOverlapBody)
-	}
-	if strings.Contains(eqOverlapBody, "call i64 @memcmp(ptr noalias") {
-		t.Fatalf("expected eq_overlap to avoid noalias memcmp on overlapping views, got:\n%s", eqOverlapBody)
-	}
 	if strings.Contains(eqOverlapBody, "call i1 @arena_da_eq_exact") {
 		t.Fatalf("expected eq_overlap to avoid helper fallback, got:\n%s", eqOverlapBody)
 	}
+	requireTinyExactDViewEqBody(t, eqOverlapBody, false)
 
 	eqSameBody := functionIR(output, "eq_same")
 	if eqSameBody == "" {
 		t.Fatalf("expected to find eq_same body, got:\n%s", output)
 	}
-	if !strings.Contains(eqSameBody, "call i64 @memcmp(ptr ") {
-		t.Fatalf("expected eq_same to lower through direct memcmp, got:\n%s", eqSameBody)
-	}
-	if strings.Contains(eqSameBody, "call i64 @memcmp(ptr noalias") {
-		t.Fatalf("expected eq_same to avoid noalias memcmp on aliased views, got:\n%s", eqSameBody)
-	}
 	if strings.Contains(eqSameBody, "call i1 @arena_da_eq_exact") {
 		t.Fatalf("expected eq_same to avoid helper fallback, got:\n%s", eqSameBody)
 	}
+	requireTinyExactDViewEqBody(t, eqSameBody, false)
 
 	eqDiffExtentBody := functionIR(output, "eq_diff_extent")
 	if eqDiffExtentBody == "" {
@@ -4937,23 +4971,19 @@ def eq_helper(values: array[i32, 4]) -> bool:
 	if eqStructBody == "" {
 		t.Fatalf("expected to find eq_struct body, got:\n%s", output)
 	}
-	if !strings.Contains(eqStructBody, "call i64 @memcmp(ptr noalias") {
-		t.Fatalf("expected eq_struct to lower through direct noalias memcmp via field projections, got:\n%s", eqStructBody)
-	}
 	if strings.Contains(eqStructBody, "call i1 @arena_da_eq_exact") {
 		t.Fatalf("expected eq_struct to avoid helper fallback, got:\n%s", eqStructBody)
 	}
+	requireTinyExactDViewEqBody(t, eqStructBody, true)
 
 	eqHelperBody := functionIR(output, "eq_helper")
 	if eqHelperBody == "" {
 		t.Fatalf("expected to find eq_helper body, got:\n%s", output)
 	}
-	if !strings.Contains(eqHelperBody, "call i64 @memcmp(ptr noalias") {
-		t.Fatalf("expected eq_helper to lower through direct noalias memcmp via helper-returned field projections, got:\n%s", eqHelperBody)
-	}
 	if strings.Contains(eqHelperBody, "call i1 @arena_da_eq_exact") {
 		t.Fatalf("expected eq_helper to avoid helper fallback, got:\n%s", eqHelperBody)
 	}
+	requireTinyExactDViewEqBody(t, eqHelperBody, true)
 
 }
 
@@ -4981,12 +5011,10 @@ def eq_indexed(values: array[i32, 4]) -> bool:
 	if eqIndexedBody == "" {
 		t.Fatalf("expected to find eq_indexed body, got:\n%s", output)
 	}
-	if !strings.Contains(eqIndexedBody, "call i64 @memcmp(ptr noalias") {
-		t.Fatalf("expected eq_indexed to lower through direct noalias memcmp via indexed field projections, got:\n%s", eqIndexedBody)
-	}
 	if strings.Contains(eqIndexedBody, "call i1 @arena_da_eq_exact") {
 		t.Fatalf("expected eq_indexed to avoid helper fallback, got:\n%s", eqIndexedBody)
 	}
+	requireTinyExactDViewEqBody(t, eqIndexedBody, true)
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughHelperReturnedIndexedFieldProjection(t *testing.T) {
@@ -5019,12 +5047,10 @@ def eq_helper_indexed(values: array[i32, 4]) -> bool:
 	if eqHelperIndexedBody == "" {
 		t.Fatalf("expected to find eq_helper_indexed body, got:\n%s", output)
 	}
-	if !strings.Contains(eqHelperIndexedBody, "call i64 @memcmp(ptr noalias") {
-		t.Fatalf("expected eq_helper_indexed to lower through direct noalias memcmp via helper-returned indexed field projections, got:\n%s", eqHelperIndexedBody)
-	}
 	if strings.Contains(eqHelperIndexedBody, "call i1 @arena_da_eq_exact") {
 		t.Fatalf("expected eq_helper_indexed to avoid helper fallback, got:\n%s", eqHelperIndexedBody)
 	}
+	requireTinyExactDViewEqBody(t, eqHelperIndexedBody, true)
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughNestedHelperReturnedIndexedFieldProjection(t *testing.T) {
@@ -5060,12 +5086,10 @@ def eq_nested_helper_indexed(values: array[i32, 4]) -> bool:
 	if eqNestedHelperIndexedBody == "" {
 		t.Fatalf("expected to find eq_nested_helper_indexed body, got:\n%s", output)
 	}
-	if !strings.Contains(eqNestedHelperIndexedBody, "call i64 @memcmp(ptr noalias") {
-		t.Fatalf("expected eq_nested_helper_indexed to lower through direct noalias memcmp via nested helper-returned indexed field projections, got:\n%s", eqNestedHelperIndexedBody)
-	}
 	if strings.Contains(eqNestedHelperIndexedBody, "call i1 @arena_da_eq_exact") {
 		t.Fatalf("expected eq_nested_helper_indexed to avoid helper fallback, got:\n%s", eqNestedHelperIndexedBody)
 	}
+	requireTinyExactDViewEqBody(t, eqNestedHelperIndexedBody, true)
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
@@ -5099,12 +5123,10 @@ def eq_rebased_helper_indexed(values: array[i32, 4]) -> bool:
 	if eqRebasedHelperIndexedBody == "" {
 		t.Fatalf("expected to find eq_rebased_helper_indexed body, got:\n%s", output)
 	}
-	if !strings.Contains(eqRebasedHelperIndexedBody, "call i64 @memcmp(ptr noalias") {
-		t.Fatalf("expected eq_rebased_helper_indexed to lower through direct noalias memcmp via rebased helper-returned indexed field projections, got:\n%s", eqRebasedHelperIndexedBody)
-	}
 	if strings.Contains(eqRebasedHelperIndexedBody, "call i1 @arena_da_eq_exact") {
 		t.Fatalf("expected eq_rebased_helper_indexed to avoid helper fallback, got:\n%s", eqRebasedHelperIndexedBody)
 	}
+	requireTinyExactDViewEqBody(t, eqRebasedHelperIndexedBody, true)
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughWildcardRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
@@ -5138,12 +5160,10 @@ def eq_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> bool:
 	if eqWildcardRebasedHelperIndexedBody == "" {
 		t.Fatalf("expected to find eq_wildcard_rebased_helper_indexed body, got:\n%s", output)
 	}
-	if !strings.Contains(eqWildcardRebasedHelperIndexedBody, "call i64 @memcmp(ptr noalias") {
-		t.Fatalf("expected eq_wildcard_rebased_helper_indexed to lower through direct noalias memcmp via wildcard rebased helper-returned indexed field projections, got:\n%s", eqWildcardRebasedHelperIndexedBody)
-	}
 	if strings.Contains(eqWildcardRebasedHelperIndexedBody, "call i1 @arena_da_eq_exact") {
 		t.Fatalf("expected eq_wildcard_rebased_helper_indexed to avoid helper fallback, got:\n%s", eqWildcardRebasedHelperIndexedBody)
 	}
+	requireTinyExactDViewEqBody(t, eqWildcardRebasedHelperIndexedBody, true)
 }
 
 func TestGenerateLLVMIRKeepsOverlapGuardrailsThroughWildcardRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
@@ -5177,15 +5197,10 @@ def eq_wildcard_rebased_overlap(values: array[i32, 8]) -> bool:
 	if eqWildcardRebasedOverlapBody == "" {
 		t.Fatalf("expected to find eq_wildcard_rebased_overlap body, got:\n%s", output)
 	}
-	if !strings.Contains(eqWildcardRebasedOverlapBody, "call i64 @memcmp(ptr ") {
-		t.Fatalf("expected eq_wildcard_rebased_overlap to lower through direct memcmp, got:\n%s", eqWildcardRebasedOverlapBody)
-	}
-	if strings.Contains(eqWildcardRebasedOverlapBody, "call i64 @memcmp(ptr noalias") {
-		t.Fatalf("expected eq_wildcard_rebased_overlap to avoid noalias memcmp on overlapping wildcard rebased helper projections, got:\n%s", eqWildcardRebasedOverlapBody)
-	}
 	if strings.Contains(eqWildcardRebasedOverlapBody, "call i1 @arena_da_eq_exact") {
 		t.Fatalf("expected eq_wildcard_rebased_overlap to avoid helper fallback, got:\n%s", eqWildcardRebasedOverlapBody)
 	}
+	requireTinyExactDViewEqBody(t, eqWildcardRebasedOverlapBody, false)
 }
 
 func TestGenerateLLVMIRKeepsOverlapGuardrailsThroughNestedWildcardRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
@@ -5222,15 +5237,10 @@ def eq_nested_wildcard_rebased_overlap(values: array[i32, 8]) -> bool:
 	if eqNestedWildcardRebasedOverlapBody == "" {
 		t.Fatalf("expected to find eq_nested_wildcard_rebased_overlap body, got:\n%s", output)
 	}
-	if !strings.Contains(eqNestedWildcardRebasedOverlapBody, "call i64 @memcmp(ptr ") {
-		t.Fatalf("expected eq_nested_wildcard_rebased_overlap to lower through direct memcmp, got:\n%s", eqNestedWildcardRebasedOverlapBody)
-	}
-	if strings.Contains(eqNestedWildcardRebasedOverlapBody, "call i64 @memcmp(ptr noalias") {
-		t.Fatalf("expected eq_nested_wildcard_rebased_overlap to avoid noalias memcmp on overlapping nested wildcard rebased helper projections, got:\n%s", eqNestedWildcardRebasedOverlapBody)
-	}
 	if strings.Contains(eqNestedWildcardRebasedOverlapBody, "call i1 @arena_da_eq_exact") {
 		t.Fatalf("expected eq_nested_wildcard_rebased_overlap to avoid helper fallback, got:\n%s", eqNestedWildcardRebasedOverlapBody)
 	}
+	requireTinyExactDViewEqBody(t, eqNestedWildcardRebasedOverlapBody, false)
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughNestedRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
@@ -5267,12 +5277,10 @@ def eq_nested_rebased_helper_indexed(values: array[i32, 4]) -> bool:
 	if eqNestedRebasedHelperIndexedBody == "" {
 		t.Fatalf("expected to find eq_nested_rebased_helper_indexed body, got:\n%s", output)
 	}
-	if !strings.Contains(eqNestedRebasedHelperIndexedBody, "call i64 @memcmp(ptr noalias") {
-		t.Fatalf("expected eq_nested_rebased_helper_indexed to lower through direct noalias memcmp via nested rebased helper-returned indexed field projections, got:\n%s", eqNestedRebasedHelperIndexedBody)
-	}
 	if strings.Contains(eqNestedRebasedHelperIndexedBody, "call i1 @arena_da_eq_exact") {
 		t.Fatalf("expected eq_nested_rebased_helper_indexed to avoid helper fallback, got:\n%s", eqNestedRebasedHelperIndexedBody)
 	}
+	requireTinyExactDViewEqBody(t, eqNestedRebasedHelperIndexedBody, true)
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughNestedWildcardRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
@@ -5309,12 +5317,10 @@ def eq_nested_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> bool:
 	if eqNestedWildcardRebasedHelperIndexedBody == "" {
 		t.Fatalf("expected to find eq_nested_wildcard_rebased_helper_indexed body, got:\n%s", output)
 	}
-	if !strings.Contains(eqNestedWildcardRebasedHelperIndexedBody, "call i64 @memcmp(ptr noalias") {
-		t.Fatalf("expected eq_nested_wildcard_rebased_helper_indexed to lower through direct noalias memcmp via nested wildcard rebased helper-returned indexed field projections, got:\n%s", eqNestedWildcardRebasedHelperIndexedBody)
-	}
 	if strings.Contains(eqNestedWildcardRebasedHelperIndexedBody, "call i1 @arena_da_eq_exact") {
 		t.Fatalf("expected eq_nested_wildcard_rebased_helper_indexed to avoid helper fallback, got:\n%s", eqNestedWildcardRebasedHelperIndexedBody)
 	}
+	requireTinyExactDViewEqBody(t, eqNestedWildcardRebasedHelperIndexedBody, true)
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughNestedFieldProjection(t *testing.T) {
@@ -5351,23 +5357,19 @@ def eq_nested_helper(values: array[i32, 4]) -> bool:
 	if eqStructBody == "" {
 		t.Fatalf("expected to find eq_nested_struct body, got:\n%s", output)
 	}
-	if !strings.Contains(eqStructBody, "call i64 @memcmp(ptr noalias") {
-		t.Fatalf("expected eq_nested_struct to lower through direct noalias memcmp via nested field projections, got:\n%s", eqStructBody)
-	}
 	if strings.Contains(eqStructBody, "call i1 @arena_da_eq_exact") {
 		t.Fatalf("expected eq_nested_struct to avoid helper fallback, got:\n%s", eqStructBody)
 	}
+	requireTinyExactDViewEqBody(t, eqStructBody, true)
 
 	eqHelperBody := functionIR(output, "eq_nested_helper")
 	if eqHelperBody == "" {
 		t.Fatalf("expected to find eq_nested_helper body, got:\n%s", output)
 	}
-	if !strings.Contains(eqHelperBody, "call i64 @memcmp(ptr noalias") {
-		t.Fatalf("expected eq_nested_helper to lower through direct noalias memcmp via nested helper-returned field projections, got:\n%s", eqHelperBody)
-	}
 	if strings.Contains(eqHelperBody, "call i1 @arena_da_eq_exact") {
 		t.Fatalf("expected eq_nested_helper to avoid helper fallback, got:\n%s", eqHelperBody)
 	}
+	requireTinyExactDViewEqBody(t, eqHelperBody, true)
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewMaterialize(t *testing.T) {
@@ -5420,11 +5422,7 @@ def materialize_unknown(a: any Arena&, view: dview[i32]) -> darray[i32]:
 	if strings.Contains(materializeSplitBody, "call %DynArray__i32 @arena_da_from_view") {
 		t.Fatalf("expected materialize_split to avoid helper fallback, got:\n%s", materializeSplitBody)
 	}
-	for _, check := range []string{"call ptr @arena_alloc(", "call ptr @arena_memcpy(ptr noalias"} {
-		if !strings.Contains(materializeSplitBody, check) {
-			t.Fatalf("expected materialize_split to contain %q, got:\n%s", check, materializeSplitBody)
-		}
-	}
+	requireTinyExactDViewMaterializeBody(t, materializeSplitBody)
 
 	materializeUnknownBody := functionIR(output, "materialize_unknown")
 	if materializeUnknownBody == "" {

@@ -154,7 +154,14 @@ func SameOptimizationExtent(a, b *OptimizationExtent) bool {
 		}
 		return a.Size == b.Size
 	case OptimizationExtentViewBounds:
-		return a.Begin == b.Begin && a.End == b.End
+		if a.Begin == b.Begin && a.End == b.End {
+			return true
+		}
+		aBegin, aBeginOK := parseOptimizationAffineExpr(a.Begin)
+		bBegin, bBeginOK := parseOptimizationAffineExpr(b.Begin)
+		aEnd, aEndOK := parseOptimizationAffineExpr(a.End)
+		bEnd, bEndOK := parseOptimizationAffineExpr(b.End)
+		return aBeginOK && bBeginOK && aEndOK && bEndOK && optimizationAffineExprEqual(aBegin, bBegin) && optimizationAffineExprEqual(aEnd, bEnd)
 	default:
 		return false
 	}
