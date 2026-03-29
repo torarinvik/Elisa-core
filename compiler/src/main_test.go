@@ -1446,6 +1446,51 @@ func TestRunCLIExecutesAllocatorPortSmokeProgram(t *testing.T) {
 	}
 }
 
+func TestRunCLIExecutesDequePortSmokeProgram(t *testing.T) {
+	clangPath, err := exec.LookPath("clang")
+	if err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "deque_ports.llcontext")
+	outputDir := t.TempDir()
+	objectPath := filepath.Join(outputDir, "deque_ports.o")
+	exePath := filepath.Join(outputDir, "deque_ports")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "obj", "-O0", "-o", objectPath, fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected deque port smoke fixture to compile, stderr:\n%s", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no stdout while compiling deque port smoke fixture, got:\n%s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr while compiling deque port smoke fixture, got:\n%s", stderr.String())
+	}
+
+	compileArgs := []string{objectPath, "-o", exePath}
+	if runtime.GOOS == "darwin" {
+		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
+	}
+	compileCmd := exec.Command(clangPath, compileArgs...)
+	compileOutput, err := compileCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clang failed: %v\n%s", err, string(compileOutput))
+	}
+
+	runCmd := exec.Command(exePath)
+	runOutput, err := runCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("deque port smoke program failed: %v\n%s", err, string(runOutput))
+	}
+	if len(runOutput) != 0 {
+		t.Fatalf("expected deque port smoke program to produce no output, got:\n%s", string(runOutput))
+	}
+}
+
 func TestRunCLIPrintsAnnotatedFunctionsInAST(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "annotated.llcontext")

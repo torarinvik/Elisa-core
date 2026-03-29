@@ -1,0 +1,123 @@
+# include "../llcontext_std/test.llcontext"
+# include "../llcontext_std/heap.llcontext"
+
+def deque_i64_make_with_capacity(a: any Arena&, capacity: usize) -> Deque[i64] can[Memory.Allocate, Abort.Panic]:
+    ctor: func(any Arena&, usize) -> Deque[i64] can[Memory.Allocate, Abort.Panic] = arena_deque_with_capacity.specialize[i64]()
+    return ctor(a, capacity)
+
+def deque_i64_make_buffer(buffer: any i64&, capacity: usize) -> Deque[i64]:
+    ctor: func(any i64&, usize) -> Deque[i64] = arena_deque_init_buffer.specialize[i64]()
+    return ctor(buffer, capacity)
+
+def assert_deque_i64_value(d: any Deque[i64]&, index: usize, expected: i64) can[Abort.Panic]:
+    slot: any i64& = arena_deque_at(d, index)
+    assert_eq(slot[0u], expected)
+
+def deque_basic_smoke() -> void can[Memory.Allocate, Memory.Release, Abort.Panic]:
+    arena: mutable Arena = zeroed
+    d: mutable Deque[i64] = deque_i64_make_with_capacity((&arena).cast[any Arena&], 2u)
+
+    _ = arena_deque_push_back((&arena).cast[any Arena&], (&d).cast[any Deque[i64]&], 1)
+    _ = arena_deque_push_back((&arena).cast[any Arena&], (&d).cast[any Deque[i64]&], 2)
+    _ = arena_deque_push_front((&arena).cast[any Arena&], (&d).cast[any Deque[i64]&], 0)
+
+    assert_eq(arena_deque_len((&d).cast[any Deque[i64]&]), 3u)
+    assert not arena_deque_is_empty((&d).cast[any Deque[i64]&])
+
+    front_opt: any i64&? = arena_deque_front((&d).cast[any Deque[i64]&])
+    back_opt: any i64&? = arena_deque_back((&d).cast[any Deque[i64]&])
+    assert front_opt != null
+    assert back_opt != null
+
+    front_ref: any i64& = front_opt.cast[any i64&]
+    back_ref: any i64& = back_opt.cast[any i64&]
+    assert_eq(front_ref[0u], 0)
+    assert_eq(back_ref[0u], 2)
+
+    middle: any i64& = arena_deque_at((&d).cast[any Deque[i64]&], 1u)
+    middle[0u] <- 7
+    assert_deque_i64_value((&d).cast[any Deque[i64]&], 1u, 7)
+
+    popped: mutable i64 = 0
+    assert arena_deque_pop_front((&d).cast[any Deque[i64]&], (&popped).cast[any i64&])
+    assert_eq(popped, 0)
+    assert arena_deque_pop_back((&d).cast[any Deque[i64]&], (&popped).cast[any i64&])
+    assert_eq(popped, 2)
+    assert_eq(arena_deque_len((&d).cast[any Deque[i64]&]), 1u)
+
+    arena_deque_clear((&d).cast[any Deque[i64]&])
+    assert arena_deque_is_empty((&d).cast[any Deque[i64]&])
+
+    _ = arena_deque_push_back((&arena).cast[any Arena&], (&d).cast[any Deque[i64]&], 9)
+    assert_deque_i64_value((&d).cast[any Deque[i64]&], 0u, 9)
+
+    arena_free((&arena).cast[any Arena&]) can Memory.Release
+
+def deque_wraparound_smoke() -> void can[Abort.Panic]:
+    buffer: i64[4] = zeroed
+    d: mutable Deque[i64] = deque_i64_make_buffer((&buffer[0u]).cast[any i64&], 4u)
+
+    assert arena_deque_push_back_bounded((&d).cast[any Deque[i64]&], 1)
+    assert arena_deque_push_back_bounded((&d).cast[any Deque[i64]&], 2)
+    assert arena_deque_push_back_bounded((&d).cast[any Deque[i64]&], 3)
+
+    popped: mutable i64 = 0
+    assert arena_deque_pop_front((&d).cast[any Deque[i64]&], (&popped).cast[any i64&])
+    assert_eq(popped, 1)
+    assert arena_deque_pop_front((&d).cast[any Deque[i64]&], (&popped).cast[any i64&])
+    assert_eq(popped, 2)
+
+    assert arena_deque_push_back_bounded((&d).cast[any Deque[i64]&], 4)
+    assert arena_deque_push_back_bounded((&d).cast[any Deque[i64]&], 5)
+    assert arena_deque_push_front_bounded((&d).cast[any Deque[i64]&], 2)
+    assert not arena_deque_push_back_bounded((&d).cast[any Deque[i64]&], 6)
+
+    assert_eq(arena_deque_len((&d).cast[any Deque[i64]&]), 4u)
+    assert_deque_i64_value((&d).cast[any Deque[i64]&], 0u, 2)
+    assert_deque_i64_value((&d).cast[any Deque[i64]&], 1u, 3)
+    assert_deque_i64_value((&d).cast[any Deque[i64]&], 2u, 4)
+    assert_deque_i64_value((&d).cast[any Deque[i64]&], 3u, 5)
+
+    front_opt: any i64&? = arena_deque_front((&d).cast[any Deque[i64]&])
+    back_opt: any i64&? = arena_deque_back((&d).cast[any Deque[i64]&])
+    assert front_opt != null
+    assert back_opt != null
+    assert_eq(front_opt.cast[any i64&][0u], 2)
+    assert_eq(back_opt.cast[any i64&][0u], 5)
+
+def deque_resize_smoke() -> void can[Memory.Allocate, Memory.Release, Abort.Panic]:
+    arena: mutable Arena = zeroed
+    buffer: i64[4] = zeroed
+    d: mutable Deque[i64] = deque_i64_make_buffer((&buffer[0u]).cast[any i64&], 4u)
+
+    assert arena_deque_push_back_bounded((&d).cast[any Deque[i64]&], 10)
+    assert arena_deque_push_back_bounded((&d).cast[any Deque[i64]&], 11)
+    assert arena_deque_push_back_bounded((&d).cast[any Deque[i64]&], 12)
+
+    popped: mutable i64 = 0
+    assert arena_deque_pop_front((&d).cast[any Deque[i64]&], (&popped).cast[any i64&])
+    assert_eq(popped, 10)
+
+    assert arena_deque_push_back_bounded((&d).cast[any Deque[i64]&], 13)
+    assert arena_deque_push_back_bounded((&d).cast[any Deque[i64]&], 14)
+
+    _ = arena_deque_push_back((&arena).cast[any Arena&], (&d).cast[any Deque[i64]&], 15)
+
+    assert_eq(arena_deque_capacity((&d).cast[any Deque[i64]&]), 8u)
+    assert_eq(d.head, 0u)
+    assert_eq(arena_deque_len((&d).cast[any Deque[i64]&]), 5u)
+    assert_deque_i64_value((&d).cast[any Deque[i64]&], 0u, 11)
+    assert_deque_i64_value((&d).cast[any Deque[i64]&], 1u, 12)
+    assert_deque_i64_value((&d).cast[any Deque[i64]&], 2u, 13)
+    assert_deque_i64_value((&d).cast[any Deque[i64]&], 3u, 14)
+    assert_deque_i64_value((&d).cast[any Deque[i64]&], 4u, 15)
+
+    arena_free((&arena).cast[any Arena&]) can Memory.Release
+
+def deque_ports_main_impl() -> int can[Memory.Allocate, Memory.Release, Abort.Panic]:
+    deque_basic_smoke()
+    deque_wraparound_smoke()
+    deque_resize_smoke()
+    return 0
+
+export func main() -> int = deque_ports_main_impl
