@@ -383,6 +383,11 @@ type StringLit struct {
 	Value    string
 }
 
+type CharLit struct {
+	Position lexer.Pos
+	Value    string
+}
+
 type BoolLit struct {
 	Position lexer.Pos
 	Value    bool
@@ -860,6 +865,7 @@ func (n *Ident) Pos() lexer.Pos            { return n.Position }
 func (n *IntLit) Pos() lexer.Pos           { return n.Position }
 func (n *FloatLit) Pos() lexer.Pos         { return n.Position }
 func (n *StringLit) Pos() lexer.Pos        { return n.Position }
+func (n *CharLit) Pos() lexer.Pos          { return n.Position }
 func (n *BoolLit) Pos() lexer.Pos          { return n.Position }
 func (n *NullLit) Pos() lexer.Pos          { return n.Position }
 func (n *ZeroedLit) Pos() lexer.Pos        { return n.Position }
@@ -963,6 +969,7 @@ func (*Ident) nodeTag()                     {}
 func (*IntLit) nodeTag()                    {}
 func (*FloatLit) nodeTag()                  {}
 func (*StringLit) nodeTag()                 {}
+func (*CharLit) nodeTag()                   {}
 func (*BoolLit) nodeTag()                   {}
 func (*NullLit) nodeTag()                   {}
 func (*ZeroedLit) nodeTag()                 {}
@@ -1061,6 +1068,7 @@ func (*Ident) exprTag()      {}
 func (*IntLit) exprTag()     {}
 func (*FloatLit) exprTag()   {}
 func (*StringLit) exprTag()  {}
+func (*CharLit) exprTag()    {}
 func (*BoolLit) exprTag()    {}
 func (*NullLit) exprTag()    {}
 func (*ZeroedLit) exprTag()  {}

@@ -97,6 +97,7 @@ enum FrontendTokenKind:
     LShift
     RShift
     Tilde
+    CharLit
 
 struct FrontendPos:
     line: mutable int
@@ -133,6 +134,7 @@ const FRONTEND_CH_PERCENT = 37
 const FRONTEND_CH_AMP = 38
 const FRONTEND_CH_LPAREN = 40
 const FRONTEND_CH_RPAREN = 41
+const FRONTEND_CH_SQUOTE = 39
 const FRONTEND_CH_STAR = 42
 const FRONTEND_CH_PLUS = 43
 const FRONTEND_CH_COMMA = 44

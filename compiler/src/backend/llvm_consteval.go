@@ -121,6 +121,12 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 		return semantic.ConstValue{Kind: semantic.ConstBool, Bool: n.Value}, true
 	case *ast.StringLit:
 		return semantic.ConstValue{Kind: semantic.ConstString, String: n.Value}, true
+	case *ast.CharLit:
+		value, ok := semantic.ParseCharLiteral(n)
+		if !ok {
+			return semantic.ConstValue{}, false
+		}
+		return semantic.ConstValue{Kind: semantic.ConstInt, Int: value}, true
 	case *ast.Ident:
 		if lookup != nil {
 			if value, ok := lookup(n.Name); ok {

@@ -11,6 +11,7 @@ import (
 	"llcontext/src/semantic"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -801,6 +802,11 @@ func exprStr(e ast.Expr) string {
 		return s
 	case *ast.StringLit:
 		return fmt.Sprintf("%q", n.Value)
+	case *ast.CharLit:
+		if len(n.Value) == 1 {
+			return strconv.QuoteRuneToASCII(rune(n.Value[0]))
+		}
+		return "'<invalid-char>'"
 	case *ast.BoolLit:
 		if n.Value {
 			return "true"

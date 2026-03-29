@@ -20,6 +20,27 @@ func parseSourceFile(t *testing.T, src string) (*ast.File, []string) {
 	return file, p.Errors()
 }
 
+func TestParseCharLiteralInConstDecl(t *testing.T) {
+	file, errs := parseSourceFile(t, "const VALUE: char = '\\n'\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.ConstDecl)
+	if !ok {
+		t.Fatalf("expected const decl, got %T", file.Decls[0])
+	}
+	lit, ok := decl.Value.(*ast.CharLit)
+	if !ok {
+		t.Fatalf("expected char literal, got %T", decl.Value)
+	}
+	if lit.Value != "\n" {
+		t.Fatalf("expected decoded newline char literal, got %q", lit.Value)
+	}
+	if named, ok := decl.Type.(*ast.NamedType); !ok || named.Name != "char" {
+		t.Fatalf("expected const type char, got %T %#v", decl.Type, decl.Type)
+	}
+}
+
 func TestParseStructDeclWithAggregateStateParam(t *testing.T) {
 	file, errs := parseSourceFile(t, "struct Holder[?]:\n    value: any i32&\n")
 	if len(errs) != 0 {

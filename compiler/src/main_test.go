@@ -472,6 +472,16 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			},
 		},
 		{
+			name: "char_literals",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "char_literals.llcontext"),
+			checks: []string{
+				"define i64 @char_code()",
+				"define i64 @escaped_char_code()",
+				"define i1 @char_compare()",
+				"define i64 @char_array_checksum()",
+			},
+		},
+		{
 			name: "value_optionals",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "value_optionals.llcontext"),
 			checks: []string{
@@ -1398,6 +1408,69 @@ func TestRunCLIRejectsInvalidStringEscape(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "invalid escape sequence \\\\q in string literal") {
 		t.Fatalf("expected invalid escape diagnostic, got:\n%s", stderr.String())
+	}
+}
+
+func TestRunCLIRejectsInvalidCharLiteral(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "invalid_char.llcontext")
+	if err := os.WriteFile(fixturePath, []byte("def bad() -> i64:\n    return '\\u0080'.i64()\n"), 0o644); err != nil {
+		t.Fatalf("failed to write invalid char fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", fixturePath}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected runCLI to fail, got stdout:\n%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "char literal must decode to exactly one code unit") {
+		t.Fatalf("expected invalid char diagnostic, got:\n%s", stderr.String())
+	}
+}
+
+func TestRunCLIExecutesCharLiteralSmokeProgram(t *testing.T) {
+	clangPath, err := exec.LookPath("clang")
+	if err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "char_literals.llcontext")
+	outputDir := t.TempDir()
+	objectPath := filepath.Join(outputDir, "char_literals.o")
+	exePath := filepath.Join(outputDir, "char_literals")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "obj", "-O0", "-o", objectPath, fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected char literal smoke fixture to compile, stderr:\n%s", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no stdout while compiling char literal smoke fixture, got:\n%s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr while compiling char literal smoke fixture, got:\n%s", stderr.String())
+	}
+
+	compileArgs := []string{objectPath, "-o", exePath}
+	if runtime.GOOS == "darwin" {
+		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
+	}
+	compileCmd := exec.Command(clangPath, compileArgs...)
+	compileOutput, err := compileCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("clang failed: %v\n%s", err, string(compileOutput))
+	}
+
+	runCmd := exec.Command(exePath)
+	runOutput, err := runCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("char literal smoke program failed: %v\n%s", err, string(runOutput))
+	}
+	if len(runOutput) != 0 {
+		t.Fatalf("expected char literal smoke program to produce no output, got:\n%s", string(runOutput))
 	}
 }
 

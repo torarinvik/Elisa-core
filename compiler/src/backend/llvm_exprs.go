@@ -199,6 +199,8 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, actualType, err = s.emitFloatLiteral(n)
 	case *ast.StringLit:
 		value, actualType, err = s.emitStringLiteral(n)
+	case *ast.CharLit:
+		value, actualType, err = s.emitCharLiteral(n)
 	case *ast.BoolLit:
 		value, actualType, err = s.emitBoolLiteral(n)
 	case *ast.NullLit:
@@ -791,6 +793,22 @@ func (s *functionState) emitStringLiteral(expr *ast.StringLit) (C.LLVMValueRef, 
 	defer C.free(unsafe.Pointer(text))
 	value := C.LLVMBuildGlobalStringPtr(s.builder, text, name)
 	return value, s.exprType(expr), nil
+}
+
+func (s *functionState) emitCharLiteral(expr *ast.CharLit) (C.LLVMValueRef, semantic.Type, error) {
+	t := s.exprType(expr)
+	if t == nil {
+		t = s.g.result.NamedTypes["char"]
+	}
+	llvmType, err := s.g.lowerType(t)
+	if err != nil {
+		return nil, nil, err
+	}
+	parsed, ok := semantic.ParseCharLiteral(expr)
+	if !ok {
+		return nil, nil, fmt.Errorf("failed to parse char literal %q", expr.Value)
+	}
+	return C.LLVMConstInt(llvmType, C.ulonglong(parsed), 0), t, nil
 }
 
 func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {

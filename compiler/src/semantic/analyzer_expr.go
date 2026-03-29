@@ -103,6 +103,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	case *ast.StringLit:
 		result = &RefType{Elem: a.namedTypes["u8"], State: RefStateNonNull, Storage: RefStorageStatic, ExplicitStorage: true}
 		return
+	case *ast.CharLit:
+		result = a.namedTypes["char"]
+		return
 	case *ast.BoolLit:
 		result = a.namedTypes["bool"]
 		return

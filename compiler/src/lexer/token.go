@@ -114,6 +114,9 @@ const (
 	TOKEN_LSHIFT // <<
 	TOKEN_RSHIFT // >>
 	TOKEN_TILDE  // ~
+
+	// Surface-only literals appended here to preserve legacy token numbering.
+	TOKEN_CHAR_LIT // 'a'
 )
 
 var tokenNames = map[TokenKind]string{
@@ -127,6 +130,7 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_FLOAT_LIT:  "FLOAT",
 	TOKEN_HEX_LIT:    "HEX",
 	TOKEN_STRING_LIT: "STRING",
+	TOKEN_CHAR_LIT:   "CHAR",
 
 	TOKEN_DEF:     "def",
 	TOKEN_ERROR:   "error",

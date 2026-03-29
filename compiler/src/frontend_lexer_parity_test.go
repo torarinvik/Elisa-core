@@ -194,6 +194,7 @@ func TestRunCLIFrontendLexerChecksumMatchesGoLexer(t *testing.T) {
 		{name: "operators-and-indent", path: writeCase("ops_indent.llcontext", "def foo:\n    x <- 1\n    y <- 2\nz <- 3\n")},
 		{name: "region-syntax", path: writeCase("region_syntax.llcontext", "region parse\nvalue: any i32& = new[parse] 1\ndestroy parse\n")},
 		{name: "string-and-comment", path: writeCase("string_comment.llcontext", "\"hello\\nworld\" # comment\n")},
+		{name: "char-literals", path: writeCase("char_literals.llcontext", "'a' '\\n' '\\x41' '\\u0041'\n")},
 		{name: "all-keywords", path: writeCase("all_keywords.llcontext", "as if in or and any def not try elif else enum heap null pass repr tail true const error false match panic raise stack while export extern global packed return sizeof static struct zeroed aligned mutable region new destroy\n")},
 		{name: "self-hosted-source", path: filepath.Join(repoRoot, "Code", "frontend_llcontext", "frontend_lexer.llcontext")},
 	}

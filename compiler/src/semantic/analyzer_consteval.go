@@ -72,6 +72,12 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 		return ConstValue{Kind: ConstBool, Bool: n.Value}, true
 	case *ast.StringLit:
 		return ConstValue{Kind: ConstString, String: n.Value}, true
+	case *ast.CharLit:
+		value, ok := ParseCharLiteral(n)
+		if !ok {
+			return ConstValue{}, false
+		}
+		return ConstValue{Kind: ConstInt, Int: value}, true
 	case *ast.Ident:
 		value, ok := a.lookupVisibleConst(n.Name)
 		return value, ok
@@ -326,6 +332,13 @@ func ParseFloatLiteral(expr *ast.FloatLit) (float64, bool) {
 		return 0, false
 	}
 	return v, true
+}
+
+func ParseCharLiteral(expr *ast.CharLit) (int64, bool) {
+	if expr == nil || len(expr.Value) != 1 {
+		return 0, false
+	}
+	return int64(expr.Value[0]), true
 }
 
 func CastConstValue(value ConstValue, dst Type) (ConstValue, bool) {

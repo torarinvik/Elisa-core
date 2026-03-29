@@ -53,6 +53,8 @@ def frontend_token_kind_code(kind: FrontendTokenKind) -> u64:
             return 8u64
         FrontendTokenKind.StringLit:
             return 9u64
+        FrontendTokenKind.CharLit:
+            return 95u64
         FrontendTokenKind.Def:
             return 10u64
         FrontendTokenKind.Error:
@@ -224,6 +226,16 @@ def frontend_token_kind_code(kind: FrontendTokenKind) -> u64:
         FrontendTokenKind.Tilde:
             return 94u64
     return 0u64
+
+
+def frontend_case_char_literals() -> bool can[Memory.Allocate, Abort.Panic]:
+    region scratch(4096u)
+    a: any Arena& = (&scratch).cast[any Arena&]
+    bytes: u8[26] = [39u8, 97u8, 39u8, 32u8, 39u8, 92u8, 110u8, 39u8, 32u8, 39u8, 92u8, 120u8, 52u8, 49u8, 39u8, 32u8, 39u8, 92u8, 117u8, 48u8, 48u8, 52u8, 49u8, 39u8, 10u8, 0u8]
+    tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, (&bytes[0u]).cast[any u8&])
+    if not frontend_expect_token_count(tokens, 6u):
+        return false
+    return frontend_expect_kind(tokens, 0u, FrontendTokenKind.CharLit) and frontend_expect_kind(tokens, 1u, FrontendTokenKind.CharLit) and frontend_expect_kind(tokens, 2u, FrontendTokenKind.CharLit) and frontend_expect_kind(tokens, 3u, FrontendTokenKind.CharLit) and frontend_expect_kind(tokens, 4u, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 5u, FrontendTokenKind.Eof)
 
 
 def frontend_token_hash_mix(hash: u64, value: u64) -> u64:
@@ -459,6 +471,8 @@ def frontend_lexer_parity_suite_impl() -> int can[Memory.Allocate, Abort.Panic]:
     if not frontend_case_lookup_keyword_table():
         return 0
     if not frontend_case_kind_only_keyword_path():
+        return 0
+    if not frontend_case_char_literals():
         return 0
     return 1
 

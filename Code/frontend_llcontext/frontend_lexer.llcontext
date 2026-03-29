@@ -409,6 +409,26 @@ def frontend_read_string(lexer: any FrontendLexer&) -> FrontendToken:
     return frontend_make_token(FrontendTokenKind.StringLit, pos, text, frontend_empty_view())
 
 
+def frontend_read_char(lexer: any FrontendLexer&) -> FrontendToken:
+    pos: FrontendPos = frontend_cur_pos(lexer)
+    _ = frontend_advance_char(lexer)
+    start: usize = lexer.pos
+
+    while not frontend_is_eof(lexer) and frontend_cur_char(lexer) != FRONTEND_CH_SQUOTE and frontend_cur_char(lexer) != FRONTEND_CH_NL:
+        if frontend_cur_char(lexer) == FRONTEND_CH_BSLASH:
+            _ = frontend_advance_char(lexer)
+            if frontend_is_eof(lexer):
+                text: StringView = frontend_make_lexer_view(lexer, start, lexer.pos)
+                return frontend_make_token(FrontendTokenKind.CharLit, pos, text, frontend_empty_view())
+        _ = frontend_advance_char(lexer)
+
+    text: StringView = frontend_make_lexer_view(lexer, start, lexer.pos)
+    if not frontend_is_eof(lexer) and frontend_cur_char(lexer) == FRONTEND_CH_SQUOTE:
+        _ = frontend_advance_char(lexer)
+
+    return frontend_make_token(FrontendTokenKind.CharLit, pos, text, frontend_empty_view())
+
+
 def frontend_read_number(lexer: any FrontendLexer&) -> FrontendToken:
     pos: FrontendPos = frontend_cur_pos(lexer)
     start: usize = lexer.pos
@@ -482,6 +502,23 @@ def frontend_skip_string_kind(lexer: any FrontendLexer&) -> FrontendTokenKind:
         _ = frontend_advance_char(lexer)
 
     return FrontendTokenKind.StringLit
+
+
+@inline(always)
+def frontend_skip_char_kind(lexer: any FrontendLexer&) -> FrontendTokenKind:
+    _ = frontend_advance_char(lexer)
+
+    while not frontend_is_eof(lexer) and frontend_cur_char(lexer) != FRONTEND_CH_SQUOTE and frontend_cur_char(lexer) != FRONTEND_CH_NL:
+        if frontend_cur_char(lexer) == FRONTEND_CH_BSLASH:
+            _ = frontend_advance_char(lexer)
+            if frontend_is_eof(lexer):
+                return FrontendTokenKind.CharLit
+        _ = frontend_advance_char(lexer)
+
+    if not frontend_is_eof(lexer) and frontend_cur_char(lexer) == FRONTEND_CH_SQUOTE:
+        _ = frontend_advance_char(lexer)
+
+    return FrontendTokenKind.CharLit
 
 
 @inline(always)
@@ -579,6 +616,9 @@ def frontend_next_token_kind(lexer: any FrontendLexer&) -> FrontendTokenKind can
 
     if ch == FRONTEND_CH_DQUOTE:
         return frontend_skip_string_kind(lexer)
+
+    if ch == FRONTEND_CH_SQUOTE:
+        return frontend_skip_char_kind(lexer)
 
     if frontend_is_digit(ch):
         return frontend_read_number_kind(lexer)
@@ -761,6 +801,9 @@ def frontend_next_token(lexer: any FrontendLexer&) -> FrontendToken can[Memory.A
 
     if ch == FRONTEND_CH_DQUOTE:
         return frontend_read_string(lexer)
+
+    if ch == FRONTEND_CH_SQUOTE:
+        return frontend_read_char(lexer)
 
     if frontend_is_digit(ch):
         return frontend_read_number(lexer)

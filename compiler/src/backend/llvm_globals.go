@@ -92,6 +92,16 @@ func (g *llvmGenerator) constExprValue(expr ast.Expr, expected semantic.Type) (C
 		return g.constZero(expected)
 	case *ast.StringLit:
 		return g.constGlobalStringPtr(n.Value)
+	case *ast.CharLit:
+		llvmType, err := g.lowerType(actual)
+		if err != nil {
+			return nil, err
+		}
+		value, ok := semantic.ParseCharLiteral(n)
+		if !ok {
+			return nil, fmt.Errorf("failed to parse char literal %q", n.Value)
+		}
+		return C.LLVMConstInt(llvmType, C.ulonglong(value), 0), nil
 	case *ast.Ident:
 		if value, ok := g.constValue(n.Name); ok {
 			coercedType := expected
