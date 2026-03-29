@@ -2610,6 +2610,16 @@ func (s *functionState) emitSpecializedArenaFromViewCall(expr *ast.CallExpr) (C.
 	if !ok || !viewFacts.HasExactExtent() {
 		return nil, nil, false, nil
 	}
+	exactMaterializeCount := uint64(0)
+	hasSmallExactMaterializeCount := false
+	if elemType, ok := runtimeIndexedElemType(viewType); ok {
+		if elemSize, err := s.sizeOfType(elemType); err == nil && elemSize != 0 {
+			if count, ok := constOptimizationExtentSize(viewFacts.Extent); ok && count <= smallExactArenaCopyUnrollLimit {
+				exactMaterializeCount = count
+				hasSmallExactMaterializeCount = true
+			}
+		}
+	}
 	arenaValue, _, err := s.emitExpr(arenaExpr, arenaType)
 	if err != nil {
 		return nil, nil, true, err
@@ -2660,21 +2670,51 @@ func (s *functionState) emitSpecializedArenaFromViewCall(expr *ast.CallExpr) (C.
 		return nil, nil, true, err
 	}
 	allocPtr := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{arenaValue, byteCount}, "dview.materialize.alloc")
+	if hasSmallExactMaterializeCount {
+		if exactMaterializeCount != 0 {
+			elemType, ok := runtimeIndexedElemType(viewType)
+			if !ok {
+				return nil, nil, true, fmt.Errorf("arena_da_from_view specialization expected dview element type")
+			}
+			elemLLVMType, err := s.g.lowerType(elemType)
+			if err != nil {
+				return nil, nil, true, err
+			}
+			indexLLVMType, err := s.g.lowerBuiltin("usize")
+			if err != nil {
+				return nil, nil, true, err
+			}
+			domainName := fmt.Sprintf("llctx.dview.materialize.%p.domain", expr)
+			dstScopeName := domainName + ".dst"
+			srcScopeName := domainName + ".src"
+			for i := uint64(0); i < exactMaterializeCount; i++ {
+				indexValue := C.LLVMConstInt(indexLLVMType, C.ulonglong(i), 0)
+				indices := []C.LLVMValueRef{indexValue}
+				srcPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, viewData, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("dview.materialize.src.elem.ptr"))
+				elemValue := C.LLVMBuildLoad2(s.builder, elemLLVMType, srcPtr, cStringFree("dview.materialize.elem"))
+				s.attachAliasScopeMetadataWithNames(elemValue, domainName, srcScopeName, []string{dstScopeName})
+				dstPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, allocPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("dview.materialize.dst.elem.ptr"))
+				store := C.LLVMBuildStore(s.builder, elemValue, dstPtr)
+				s.attachAliasScopeMetadataWithNames(store, domainName, dstScopeName, []string{srcScopeName})
+			}
+		}
+	} else {
 
-	memcpyType := s.g.cachedRuntimeHelperType("arena_memcpy", func() *semantic.FuncType {
-		return &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, usizeType}, Return: voidRefType}
-	})
-	memcpyCallee, err := s.g.ensureFunctionDeclared("arena_memcpy", memcpyType)
-	if err != nil {
-		return nil, nil, true, err
+		memcpyType := s.g.cachedRuntimeHelperType("arena_memcpy", func() *semantic.FuncType {
+			return &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, usizeType}, Return: voidRefType}
+		})
+		memcpyCallee, err := s.g.ensureFunctionDeclared("arena_memcpy", memcpyType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		memcpyLLVMType, err := s.g.lowerFunctionType(memcpyType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		memcpyCall := s.buildCall(memcpyLLVMType, memcpyCallee, []C.LLVMValueRef{allocPtr, viewData, byteCount}, "dview.materialize.memcpy")
+		s.addCallSiteEnumAttribute(memcpyCall, C.uint(1), "noalias")
+		s.addCallSiteEnumAttribute(memcpyCall, C.uint(2), "noalias")
 	}
-	memcpyLLVMType, err := s.g.lowerFunctionType(memcpyType)
-	if err != nil {
-		return nil, nil, true, err
-	}
-	memcpyCall := s.buildCall(memcpyLLVMType, memcpyCallee, []C.LLVMValueRef{allocPtr, viewData, byteCount}, "dview.materialize.memcpy")
-	s.addCallSiteEnumAttribute(memcpyCall, C.uint(1), "noalias")
-	s.addCallSiteEnumAttribute(memcpyCall, C.uint(2), "noalias")
 
 	materialized := C.LLVMGetUndef(llvmResultType)
 	materialized = C.LLVMBuildInsertValue(s.builder, materialized, allocPtr, 0, cStringFree("dview.materialize.items"))

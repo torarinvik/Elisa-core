@@ -160,3 +160,31 @@ def kernel(buf: dview[i32]) -> bool:
 		t.Fatalf("expected tiny exact view equality to compare bytes directly, got:\n%s", output)
 	}
 }
+
+func TestGenerateLLVMIRArenaFromViewUsesUnrolledTinyExactFastPath(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_dview_materialize_unrolled_exact.llcontext", `
+def arena_da_from_view[T](a: any Arena&, view: dview[T]) -> darray[T]:
+	return zeroed
+
+def kernel(buf: dview[i32]) -> darray[i32]:
+	arena: Arena = zeroed
+	whole: dview[i32] = buf[0u:8u]
+	ro: dview[i32] = readonly(whole)
+	return arena_da_from_view((&arena).cast[any Arena&], ro[4u:8u])
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	if strings.Contains(output, "call ptr @arena_memcpy(") {
+		t.Fatalf("expected tiny exact arena_da_from_view to avoid arena_memcpy, got:\n%s", output)
+	}
+	if !strings.Contains(output, "llctx.dview.materialize.") {
+		t.Fatalf("expected tiny exact arena_da_from_view to emit named alias scopes, got:\n%s", output)
+	}
+	requireInstructionLineContainsAll(t, output, "load i32, ptr %dview.materialize.src.elem.ptr", "!alias.scope", "!noalias")
+	requireInstructionLineContainsAll(t, output, "store i32 %dview.materialize.elem, ptr %dview.materialize.dst.elem.ptr", "!alias.scope", "!noalias")
+	if !strings.Contains(output, "dview.materialize.items") {
+		t.Fatalf("expected tiny exact arena_da_from_view to still materialize the darray result, got:\n%s", output)
+	}
+}
