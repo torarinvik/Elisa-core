@@ -1,0 +1,179 @@
+# ============================================================
+# Orthogonal heap helpers - low level Contextlang runtime dialect
+# ============================================================
+
+# include "./collections.llcontext"
+
+struct FixedBufferAllocator:
+    data: mutable any u8&?
+    capacity: mutable usize
+    end_index: mutable usize
+
+struct FixedBufferMark:
+    end_index: usize
+
+struct MemoryPoolFreeNode:
+    next: mutable heap MemoryPoolFreeNode&?
+
+struct MemoryPool[T]:
+    arena: mutable Arena
+    free_list: mutable heap MemoryPoolFreeNode&?
+
+def fixed_buffer_allocator_init(buffer: any u8&, size: usize) -> FixedBufferAllocator:
+    return FixedBufferAllocator(buffer, size, 0u)
+
+def fixed_buffer_align_forward(value: usize, alignment: usize) -> usize:
+    if alignment <= 1u:
+        return value
+
+    remainder: usize = value % alignment
+    if remainder == 0u:
+        return value
+
+    return value + (alignment - remainder)
+
+def fixed_buffer_owns_ptr(a: any FixedBufferAllocator&, ptr: any void&) -> bool:
+    if a.data == null:
+        return false
+
+    base: uintptr = a.data.cast[any u8&].uintptr()
+    raw: uintptr = ptr.cast[any u8&].uintptr()
+    limit: uintptr = base + a.capacity.uintptr()
+    return raw >= base and raw < limit
+
+def fixed_buffer_owns_range(a: any FixedBufferAllocator&, ptr: any void&, size_bytes: usize) -> bool:
+    if a.data == null:
+        return false
+
+    base: uintptr = a.data.cast[any u8&].uintptr()
+    raw: uintptr = ptr.cast[any u8&].uintptr()
+    limit: uintptr = base + a.capacity.uintptr()
+    end_raw: uintptr = raw + size_bytes.uintptr()
+    return raw >= base and end_raw <= limit
+
+def fixed_buffer_is_last_allocation(a: any FixedBufferAllocator&, ptr: any void&, size_bytes: usize) -> bool:
+    if a.data == null:
+        return false
+
+    base: uintptr = a.data.cast[any u8&].uintptr()
+    raw: uintptr = ptr.cast[any u8&].uintptr()
+    end_raw: uintptr = raw + size_bytes.uintptr()
+    return end_raw == base + a.end_index.uintptr()
+
+def fixed_buffer_snapshot(a: any FixedBufferAllocator&) -> FixedBufferMark:
+    return FixedBufferMark(a.end_index)
+
+def fixed_buffer_rewind(a: any FixedBufferAllocator&, mark: FixedBufferMark) can[Abort.Panic]:
+    assert mark.end_index <= a.capacity
+    a.end_index <- mark.end_index
+
+def fixed_buffer_reset(a: any FixedBufferAllocator&):
+    a.end_index <- 0u
+
+def fixed_buffer_alloc_align(a: any FixedBufferAllocator&, size_bytes: usize, alignment: usize) -> any void&?:
+    if a.data == null:
+        return null
+
+    base: any u8& = a.data.cast[any u8&]
+    adjusted_addr: usize = fixed_buffer_align_forward((base + a.end_index).uintptr().usize(), alignment)
+    adjusted_index: usize = (adjusted_addr.uintptr() - base.uintptr()).usize()
+    if adjusted_index > a.capacity:
+        return null
+    if size_bytes > a.capacity - adjusted_index:
+        return null
+
+    result: any void& = (base + adjusted_index).cast[any void&]
+    a.end_index <- adjusted_index + size_bytes
+    return result
+
+def fixed_buffer_alloc(a: any FixedBufferAllocator&, size_bytes: usize) -> any void&?:
+    return fixed_buffer_alloc_align(a, size_bytes, sizeof(uintptr))
+
+def fixed_buffer_alloc_align_or_panic(a: any FixedBufferAllocator&, size_bytes: usize, alignment: usize) -> any void& can[Abort.Panic]:
+    raw: any void&? = fixed_buffer_alloc_align(a, size_bytes, alignment)
+    assert raw != null
+    return raw.cast[any void&]
+
+def fixed_buffer_alloc_or_panic(a: any FixedBufferAllocator&, size_bytes: usize) -> any void& can[Abort.Panic]:
+    raw: any void&? = fixed_buffer_alloc(a, size_bytes)
+    assert raw != null
+    return raw.cast[any void&]
+
+def fixed_buffer_resize(a: any FixedBufferAllocator&, ptr: any void&, old_size: usize, new_size: usize) -> bool:
+    if not fixed_buffer_owns_range(a, ptr, old_size):
+        return false
+
+    if not fixed_buffer_is_last_allocation(a, ptr, old_size):
+        return new_size <= old_size
+
+    if a.data == null:
+        return false
+
+    if new_size <= old_size:
+        a.end_index <- a.end_index - (old_size - new_size)
+        return true
+
+    base: uintptr = a.data.cast[any u8&].uintptr()
+    start_index: usize = (ptr.cast[any u8&].uintptr() - base).usize()
+    if start_index + new_size > a.capacity:
+        return false
+
+    a.end_index <- start_index + new_size
+    return true
+
+def fixed_buffer_release(a: any FixedBufferAllocator&, ptr: any void&, size_bytes: usize):
+    if fixed_buffer_is_last_allocation(a, ptr, size_bytes):
+        a.end_index <- a.end_index - size_bytes
+
+def memory_pool_init[T]() -> MemoryPool[T]:
+    return zeroed
+
+def memory_pool_init_capacity[T](count: usize) -> MemoryPool[T] can[Memory.Allocate, Abort.Panic]:
+    out: mutable MemoryPool[T] = zeroed
+    memory_pool_add_capacity((&out).cast[any MemoryPool[T]&], count)
+    return out
+
+def memory_pool_add_capacity[T](pool: any MemoryPool[T]&, count: usize) can[Memory.Allocate, Abort.Panic]:
+    item_size: mutable usize = sizeof(T)
+    if item_size < sizeof(MemoryPoolFreeNode):
+        item_size <- sizeof(MemoryPoolFreeNode)
+
+    i: mutable usize = 0u
+    while i < count:
+        raw: heap void& = arena_alloc((&pool.arena).cast[any Arena&], item_size)
+        node: heap MemoryPoolFreeNode& = raw.cast[heap MemoryPoolFreeNode&]
+        node.next <- pool.free_list
+        pool.free_list as & <- node
+        i <- i + 1u
+
+def memory_pool_create[T](pool: any MemoryPool[T]&) -> heap T& can[Memory.Allocate, Abort.Panic]:
+    if pool.free_list != null:
+        node: heap MemoryPoolFreeNode& = pool.free_list
+        pool.free_list <- node.next
+        item: heap T& = node.cast[heap T&]
+        item[0u] <- zeroed
+        return item
+
+    item_size: mutable usize = sizeof(T)
+    if item_size < sizeof(MemoryPoolFreeNode):
+        item_size <- sizeof(MemoryPoolFreeNode)
+
+    raw: heap void& = arena_alloc((&pool.arena).cast[any Arena&], item_size)
+    item: heap T& = raw.cast[heap T&]
+    item[0u] <- zeroed
+    return item
+
+def memory_pool_destroy[T](pool: any MemoryPool[T]&, ptr: heap T&):
+    ptr[0u] <- zeroed
+    node: heap MemoryPoolFreeNode& = ptr.cast[heap MemoryPoolFreeNode&]
+    node.next <- pool.free_list
+    pool.free_list as & <- node
+
+def memory_pool_reset[T](pool: any MemoryPool[T]&):
+    arena_reset((&pool.arena).cast[any Arena&])
+    pool.free_list <- null
+
+def memory_pool_deinit[T](pool: any MemoryPool[T]&) can[Memory.Release, Abort.Panic]:
+    arena_free((&pool.arena).cast[any Arena&]) can Memory.Release
+    pool.arena <- zeroed
+    pool.free_list <- null

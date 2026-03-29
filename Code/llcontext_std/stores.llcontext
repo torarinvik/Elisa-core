@@ -2,7 +2,7 @@
 # Packed store helpers - low level Contextlang runtime dialect
 # ============================================================
 
-# include "./collections.llcontext"
+# include "./heap.llcontext"
 
 const PACKED_STORE_MIN_ROWS_PER_REGION: usize = 64
 
