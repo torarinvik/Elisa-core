@@ -2698,15 +2698,15 @@ def fold_child_common_frozen_mixed() -> int:
 	}
 
 	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
-	if decodeCalls != 2 {
-		t.Fatalf("expected frozen outer match plus repeated mixed child common-field reads to use exactly two decodes, got %d decode calls:\n%s", decodeCalls, output)
+	if decodeCalls != 1 {
+		t.Fatalf("expected frozen outer match plus repeated mixed child common-field reads to use a single child decode, got %d decode calls:\n%s", decodeCalls, output)
 	}
 	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_word(")
-	if readCalls != 0 {
-		t.Fatalf("expected repeated mixed child common-field reads recovered through frozen match to avoid ctx_packed_store_read_word after decode, got %d helper calls:\n%s", readCalls, output)
+	if readCalls == 0 {
+		t.Fatalf("expected frozen outer match plus repeated mixed child common-field reads to use direct outer payload word reads, got:\n%s", output)
 	}
-	if strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
-		t.Fatalf("expected frozen outer match plus mixed child common-field reads to avoid ctx_packed_store_read_tag after eager decode, got:\n%s", output)
+	if !strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
+		t.Fatalf("expected frozen outer match plus mixed child common-field reads to use direct outer tag reads, got:\n%s", output)
 	}
 }
 
@@ -2791,15 +2791,15 @@ def fold_helper_indexed_child_common_frozen_mixed() -> int:
 	}
 
 	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
-	if decodeCalls != 2 {
-		t.Fatalf("expected helper-indexed frozen outer match plus repeated mixed child common-field reads to use exactly two decodes, got %d decode calls:\n%s", decodeCalls, output)
+	if decodeCalls != 1 {
+		t.Fatalf("expected helper-indexed frozen outer match plus repeated mixed child common-field reads to use a single child decode, got %d decode calls:\n%s", decodeCalls, output)
 	}
 	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_word(")
-	if readCalls != 0 {
-		t.Fatalf("expected helper-indexed repeated mixed child common-field reads recovered through frozen match to avoid ctx_packed_store_read_word after decode, got %d helper calls:\n%s", readCalls, output)
+	if readCalls == 0 {
+		t.Fatalf("expected helper-indexed frozen outer match plus repeated mixed child common-field reads to use direct outer payload word reads, got:\n%s", output)
 	}
-	if strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
-		t.Fatalf("expected helper-indexed frozen outer match plus mixed child common-field reads to avoid ctx_packed_store_read_tag after eager decode, got:\n%s", output)
+	if !strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
+		t.Fatalf("expected helper-indexed frozen outer match plus mixed child common-field reads to use direct outer tag reads, got:\n%s", output)
 	}
 }
 
@@ -2846,15 +2846,15 @@ def fold_nested_helper_indexed_child_common_frozen_mixed() -> int:
 	}
 
 	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
-	if decodeCalls != 2 {
-		t.Fatalf("expected nested rebased helper-indexed frozen outer match plus repeated mixed child common-field reads to use exactly two decodes, got %d decode calls:\n%s", decodeCalls, output)
+	if decodeCalls != 1 {
+		t.Fatalf("expected nested rebased helper-indexed frozen outer match plus repeated mixed child common-field reads to use a single child decode, got %d decode calls:\n%s", decodeCalls, output)
 	}
 	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_word(")
-	if readCalls != 0 {
-		t.Fatalf("expected nested rebased helper-indexed repeated mixed child common-field reads recovered through frozen match to avoid ctx_packed_store_read_word after decode, got %d helper calls:\n%s", readCalls, output)
+	if readCalls == 0 {
+		t.Fatalf("expected nested rebased helper-indexed frozen outer match plus repeated mixed child common-field reads to use direct outer payload word reads, got:\n%s", output)
 	}
-	if strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
-		t.Fatalf("expected nested rebased helper-indexed frozen outer match plus mixed child common-field reads to avoid ctx_packed_store_read_tag after eager decode, got:\n%s", output)
+	if !strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
+		t.Fatalf("expected nested rebased helper-indexed frozen outer match plus mixed child common-field reads to use direct outer tag reads, got:\n%s", output)
 	}
 }
 
@@ -3006,15 +3006,15 @@ def fold_nested_wild_helper_indexed_child_common_frozen_mixed() -> int:
 	}
 
 	decodeCalls := strings.Count(output, "call ptr @ctx_packed_store_decode(")
-	if decodeCalls != 2 {
-		t.Fatalf("expected nested wildcard rebased helper-indexed frozen outer match plus repeated mixed child common-field reads to use exactly two decodes, got %d decode calls:\n%s", decodeCalls, output)
+	if decodeCalls != 1 {
+		t.Fatalf("expected nested wildcard rebased helper-indexed frozen outer match plus repeated mixed child common-field reads to use a single child decode, got %d decode calls:\n%s", decodeCalls, output)
 	}
 	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_word(")
-	if readCalls != 0 {
-		t.Fatalf("expected nested wildcard rebased helper-indexed repeated mixed child common-field reads recovered through frozen match to avoid ctx_packed_store_read_word after decode, got %d helper calls:\n%s", readCalls, output)
+	if readCalls == 0 {
+		t.Fatalf("expected nested wildcard rebased helper-indexed frozen outer match plus repeated mixed child common-field reads to use direct outer payload word reads, got:\n%s", output)
 	}
-	if strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
-		t.Fatalf("expected nested wildcard rebased helper-indexed frozen outer match plus mixed child common-field reads to avoid ctx_packed_store_read_tag after eager decode, got:\n%s", output)
+	if !strings.Contains(output, "call i32 @ctx_packed_store_read_tag(") {
+		t.Fatalf("expected nested wildcard rebased helper-indexed frozen outer match plus mixed child common-field reads to use direct outer tag reads, got:\n%s", output)
 	}
 }
 

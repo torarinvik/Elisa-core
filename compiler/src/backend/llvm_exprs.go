@@ -3488,7 +3488,7 @@ func (s *functionState) emitReduceSumHelperCall(expr *ast.CallExpr) (C.LLVMValue
 		}
 		extraArgs = append(extraArgs, value)
 	}
-	srcPtr, err := s.emitStackTempValue(srcValue, srcType, "reduce_sum.src")
+	srcDataPtr, err := s.emitDenseViewDataPointer(srcValue, srcElemType, "reduce_sum.src")
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -3529,7 +3529,7 @@ func (s *functionState) emitReduceSumHelperCall(expr *ast.CallExpr) (C.LLVMValue
 	C.LLVMBuildCondBr(s.builder, hasMore, loopBodyBB, loopEndBB)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, loopBodyBB)
-	srcElemPtr, _, err := s.emitRuntimeIndexedAddress(srcPtr, srcType, srcElemType, indexValue)
+	srcElemPtr, err := s.emitDenseViewIndexedAddress(srcDataPtr, srcElemType, indexValue, "reduce_sum.src")
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -3606,15 +3606,15 @@ func (s *functionState) emitZipMapHelperCall(expr *ast.CallExpr) (C.LLVMValueRef
 	if err != nil {
 		return nil, nil, true, err
 	}
-	dstPtr, err := s.emitStackTempValue(dstValue, dstType, "zip_map.dst")
+	dstDataPtr, err := s.emitDenseViewDataPointer(dstValue, dstElemType, "zip_map.dst")
 	if err != nil {
 		return nil, nil, true, err
 	}
-	src1Ptr, err := s.emitStackTempValue(src1Value, src1Type, "zip_map.src1")
+	src1DataPtr, err := s.emitDenseViewDataPointer(src1Value, src1ElemType, "zip_map.src1")
 	if err != nil {
 		return nil, nil, true, err
 	}
-	src2Ptr, err := s.emitStackTempValue(src2Value, src2Type, "zip_map.src2")
+	src2DataPtr, err := s.emitDenseViewDataPointer(src2Value, src2ElemType, "zip_map.src2")
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -3646,15 +3646,15 @@ func (s *functionState) emitZipMapHelperCall(expr *ast.CallExpr) (C.LLVMValueRef
 	C.LLVMBuildCondBr(s.builder, hasMore, loopBodyBB, loopEndBB)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, loopBodyBB)
-	dstElemPtr, _, err := s.emitRuntimeIndexedAddress(dstPtr, dstType, dstElemType, indexValue)
+	dstElemPtr, err := s.emitDenseViewIndexedAddress(dstDataPtr, dstElemType, indexValue, "zip_map.dst")
 	if err != nil {
 		return nil, nil, true, err
 	}
-	src1ElemPtr, _, err := s.emitRuntimeIndexedAddress(src1Ptr, src1Type, src1ElemType, indexValue)
+	src1ElemPtr, err := s.emitDenseViewIndexedAddress(src1DataPtr, src1ElemType, indexValue, "zip_map.src1")
 	if err != nil {
 		return nil, nil, true, err
 	}
-	src2ElemPtr, _, err := s.emitRuntimeIndexedAddress(src2Ptr, src2Type, src2ElemType, indexValue)
+	src2ElemPtr, err := s.emitDenseViewIndexedAddress(src2DataPtr, src2ElemType, indexValue, "zip_map.src2")
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -3699,6 +3699,28 @@ func zipMapViewInfo(t semantic.Type) (semantic.Type, semantic.Type, bool) {
 	default:
 		return nil, nil, false
 	}
+}
+
+func (s *functionState) emitDenseViewDataPointer(viewValue C.LLVMValueRef, elemType semantic.Type, name string) (C.LLVMValueRef, error) {
+	if s == nil || s.g == nil {
+		return nil, fmt.Errorf("missing function state for dense view data extraction")
+	}
+	if elemType == nil {
+		return nil, fmt.Errorf("missing dense view element type")
+	}
+	return C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree(name+".data")), nil
+}
+
+func (s *functionState) emitDenseViewIndexedAddress(dataPtr C.LLVMValueRef, elemType semantic.Type, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	if s == nil || s.g == nil {
+		return nil, fmt.Errorf("missing function state for dense view indexing")
+	}
+	elemLLVMType, err := s.g.lowerType(elemType)
+	if err != nil {
+		return nil, err
+	}
+	indices := []C.LLVMValueRef{indexValue}
+	return C.LLVMBuildGEP2(s.builder, elemLLVMType, dataPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree(name+".ptr")), nil
 }
 
 func (s *functionState) emitArenaViewSliceValue(viewValue C.LLVMValueRef, viewType *semantic.DArrayViewType, startValue C.LLVMValueRef, endValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
