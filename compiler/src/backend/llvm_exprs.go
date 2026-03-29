@@ -4,10 +4,72 @@ package backend
 
 /*
 #include <stdlib.h>
+#include <string.h>
 #include <llvm-c/Core.h>
 
 static int llcontextLLVMIsZeroValue(LLVMValueRef value) {
 	return LLVMIsAConstant(value) != NULL && LLVMIsNull(value);
+}
+
+static LLVMMetadataRef llctxAliasMDString(LLVMContextRef ctx, const char* value) {
+	if (value == NULL) {
+		return LLVMMDStringInContext2(ctx, "", 0);
+	}
+	return LLVMMDStringInContext2(ctx, value, strlen(value));
+}
+
+static LLVMMetadataRef llctxAliasMDNode(LLVMContextRef ctx, LLVMMetadataRef* operands, size_t count) {
+	return LLVMMDNodeInContext2(ctx, operands, count);
+}
+
+static unsigned llctxMetadataKindID(LLVMContextRef ctx, const char* kindName) {
+	return LLVMGetMDKindIDInContext(ctx, kindName, strlen(kindName));
+}
+
+static void llctxSetMetadataList(LLVMValueRef inst, LLVMContextRef ctx, const char* kindName, LLVMMetadataRef* scopes, size_t count) {
+	if (inst == NULL || ctx == NULL || kindName == NULL || count == 0) {
+		return;
+	}
+	LLVMMetadataRef list = llctxAliasMDNode(ctx, scopes, count);
+	LLVMValueRef listValue = LLVMMetadataAsValue(ctx, list);
+	LLVMSetMetadata(inst, llctxMetadataKindID(ctx, kindName), listValue);
+}
+
+static LLVMMetadataRef llctxCreateAliasScopeDomain(LLVMContextRef ctx, const char* domainName) {
+	LLVMMetadataRef operands[1];
+	operands[0] = llctxAliasMDString(ctx, domainName);
+	return llctxAliasMDNode(ctx, operands, 1);
+}
+
+static LLVMMetadataRef llctxCreateAliasScope(LLVMContextRef ctx, LLVMMetadataRef domain, const char* scopeName) {
+	LLVMMetadataRef operands[2];
+	operands[0] = llctxAliasMDString(ctx, scopeName);
+	operands[1] = domain;
+	return llctxAliasMDNode(ctx, operands, 2);
+}
+
+static void llctxAttachAliasScopeMetadata(LLVMValueRef inst, LLVMContextRef ctx, const char* domainName, const char* aliasScopeName,
+	const char* noAliasScope1Name, int hasNoAliasScope1, const char* noAliasScope2Name, int hasNoAliasScope2) {
+	if (inst == NULL || ctx == NULL || domainName == NULL || aliasScopeName == NULL) {
+		return;
+	}
+	LLVMMetadataRef domain = llctxCreateAliasScopeDomain(ctx, domainName);
+	LLVMMetadataRef aliasScope = llctxCreateAliasScope(ctx, domain, aliasScopeName);
+	LLVMMetadataRef aliasScopes[1];
+	aliasScopes[0] = aliasScope;
+	llctxSetMetadataList(inst, ctx, "alias.scope", aliasScopes, 1);
+
+	LLVMMetadataRef noAliasScopes[2];
+	size_t noAliasCount = 0;
+	if (hasNoAliasScope1 && noAliasScope1Name != NULL) {
+		noAliasScopes[noAliasCount++] = llctxCreateAliasScope(ctx, domain, noAliasScope1Name);
+	}
+	if (hasNoAliasScope2 && noAliasScope2Name != NULL) {
+		noAliasScopes[noAliasCount++] = llctxCreateAliasScope(ctx, domain, noAliasScope2Name);
+	}
+	if (noAliasCount != 0) {
+		llctxSetMetadataList(inst, ctx, "noalias", noAliasScopes, noAliasCount);
+	}
 }
 */
 import "C"
@@ -35,6 +97,31 @@ func (s *functionState) addCallSiteEnumAttribute(call C.LLVMValueRef, index C.ui
 	}
 	attr := C.LLVMCreateEnumAttribute(s.g.context, kind, 0)
 	C.LLVMAddCallSiteAttribute(call, index, attr)
+}
+
+func (s *functionState) attachAliasScopeMetadataWithNames(inst C.LLVMValueRef, domainName string, aliasScopeName string, noAliasScopeNames []string) {
+	if s == nil || s.g == nil || inst == nil || domainName == "" || aliasScopeName == "" {
+		return
+	}
+	domainNameC := cString(domainName)
+	defer C.free(unsafe.Pointer(domainNameC))
+	aliasScopeNameC := cString(aliasScopeName)
+	defer C.free(unsafe.Pointer(aliasScopeNameC))
+	var noAliasScope1C *C.char
+	var noAliasScope2C *C.char
+	hasNoAliasScope1 := C.int(0)
+	hasNoAliasScope2 := C.int(0)
+	if len(noAliasScopeNames) != 0 && noAliasScopeNames[0] != "" {
+		noAliasScope1C = cString(noAliasScopeNames[0])
+		defer C.free(unsafe.Pointer(noAliasScope1C))
+		hasNoAliasScope1 = 1
+	}
+	if len(noAliasScopeNames) > 1 && noAliasScopeNames[1] != "" {
+		noAliasScope2C = cString(noAliasScopeNames[1])
+		defer C.free(unsafe.Pointer(noAliasScope2C))
+		hasNoAliasScope2 = 1
+	}
+	C.llctxAttachAliasScopeMetadata(inst, s.g.context, domainNameC, aliasScopeNameC, noAliasScope1C, hasNoAliasScope1, noAliasScope2C, hasNoAliasScope2)
 }
 
 func callIdentName(expr *ast.CallExpr) string {
@@ -3612,6 +3699,20 @@ func (s *functionState) emitZipMapHelperCall(expr *ast.CallExpr) (C.LLVMValueRef
 	if err != nil {
 		return nil, nil, true, err
 	}
+	dstSrc1Disjoint := s.g.result.ExprsAreDisjoint(expr.Args[0], expr.Args[1])
+	dstSrc2Disjoint := s.g.result.ExprsAreDisjoint(expr.Args[0], expr.Args[2])
+	src1Src2Disjoint := s.g.result.ExprsAreDisjoint(expr.Args[1], expr.Args[2])
+	domainName := ""
+	dstScopeName := ""
+	src1ScopeName := ""
+	src2ScopeName := ""
+	hasScopedNoAlias := dstSrc1Disjoint || dstSrc2Disjoint || src1Src2Disjoint
+	if hasScopedNoAlias {
+		domainName = fmt.Sprintf("llctx.zip_map.%p.domain", expr)
+		dstScopeName = domainName + ".dst"
+		src1ScopeName = domainName + ".src1"
+		src2ScopeName = domainName + ".src2"
+	}
 	totalValue := C.LLVMBuildExtractValue(s.builder, dstValue, 1, cStringFree("zip_map.total"))
 	usizeType := s.g.result.NamedTypes["usize"]
 	usizeLLVMType, err := s.g.lowerType(usizeType)
@@ -3652,9 +3753,29 @@ func (s *functionState) emitZipMapHelperCall(expr *ast.CallExpr) (C.LLVMValueRef
 	if err != nil {
 		return nil, nil, true, err
 	}
+	if hasScopedNoAlias {
+		var noAliasScopes []string
+		if dstSrc1Disjoint {
+			noAliasScopes = append(noAliasScopes, dstScopeName)
+		}
+		if src1Src2Disjoint {
+			noAliasScopes = append(noAliasScopes, src2ScopeName)
+		}
+		s.attachAliasScopeMetadataWithNames(src1Elem, domainName, src1ScopeName, noAliasScopes)
+	}
 	src2Elem, err := s.loadValue(src2ElemPtr, src2ElemType, "zip_map.src2.elem")
 	if err != nil {
 		return nil, nil, true, err
+	}
+	if hasScopedNoAlias {
+		var noAliasScopes []string
+		if dstSrc2Disjoint {
+			noAliasScopes = append(noAliasScopes, dstScopeName)
+		}
+		if src1Src2Disjoint {
+			noAliasScopes = append(noAliasScopes, src1ScopeName)
+		}
+		s.attachAliasScopeMetadataWithNames(src2Elem, domainName, src2ScopeName, noAliasScopes)
 	}
 	callbackLLVMType, err := s.g.lowerFunctionType(callbackType)
 	if err != nil {
@@ -3665,7 +3786,17 @@ func (s *functionState) emitZipMapHelperCall(expr *ast.CallExpr) (C.LLVMValueRef
 	if err != nil {
 		return nil, nil, true, err
 	}
-	C.LLVMBuildStore(s.builder, coerced, dstElemPtr)
+	store := C.LLVMBuildStore(s.builder, coerced, dstElemPtr)
+	if hasScopedNoAlias {
+		var noAliasScopes []string
+		if dstSrc1Disjoint {
+			noAliasScopes = append(noAliasScopes, src1ScopeName)
+		}
+		if dstSrc2Disjoint {
+			noAliasScopes = append(noAliasScopes, src2ScopeName)
+		}
+		s.attachAliasScopeMetadataWithNames(store, domainName, dstScopeName, noAliasScopes)
+	}
 	nextIndex := C.LLVMBuildAdd(s.builder, indexValue, one, cStringFree("zip_map.index.next"))
 	bodyEnd := C.LLVMGetInsertBlock(s.builder)
 	C.LLVMBuildBr(s.builder, loopCondBB)

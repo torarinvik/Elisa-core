@@ -7,6 +7,22 @@ import (
 	"testing"
 )
 
+func requireInstructionLineContainsAll(t *testing.T, output string, needle string, want ...string) {
+	t.Helper()
+	for _, line := range strings.Split(output, "\n") {
+		if !strings.Contains(line, needle) {
+			continue
+		}
+		for _, item := range want {
+			if !strings.Contains(line, item) {
+				t.Fatalf("expected line containing %q to also contain %q, got:\n%s\n\nFull IR:\n%s", needle, item, line, output)
+			}
+		}
+		return
+	}
+	t.Fatalf("expected instruction line containing %q, got:\n%s", needle, output)
+}
+
 func TestGenerateLLVMIRReduceSumUsesDirectDenseViewData(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_reduce_sum_direct_dense_view.llcontext", `
 def sum_one(value: i32) -> i32:
@@ -86,4 +102,10 @@ def kernel(buf: dview[i32]) -> void:
 	if !strings.Contains(output, "zip_map.index = phi") {
 		t.Fatalf("expected zip_map lowering to keep its induction variable in SSA, got:\n%s", output)
 	}
+	if !strings.Contains(output, "llctx.zip_map.") {
+		t.Fatalf("expected zip_map lowering to emit named alias scopes, got:\n%s", output)
+	}
+	requireInstructionLineContainsAll(t, output, "zip_map.src1.elem = load", "!alias.scope", "!noalias")
+	requireInstructionLineContainsAll(t, output, "zip_map.src2.elem = load", "!alias.scope", "!noalias")
+	requireInstructionLineContainsAll(t, output, "store i32 %zip_map.call, ptr %zip_map.dst.ptr", "!alias.scope", "!noalias")
 }
