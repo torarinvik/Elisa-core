@@ -155,7 +155,7 @@ type regionRefState struct {
 	StoreDeps               map[*Symbol]packedStoreDependencyState
 	DirectParamDep          int
 	HasDirectParamDep       bool
-	ParamDeps               map[int]bool
+	ParamDeps               IntBitSet
 	Fields                  map[string]regionRefState
 	PackedStoreSummary      PackedStoreProvenance
 	PackedStoreSummaryKnown bool

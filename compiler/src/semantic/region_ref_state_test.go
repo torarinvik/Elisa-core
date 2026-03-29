@@ -76,7 +76,7 @@ func TestAssignRegionRefStateAtPathDoesNotMutateExistingNestedFields(t *testing.
 			"ret": {
 				Fields: map[string]regionRefState{
 					"left": {
-						ParamDeps: map[int]bool{0: true},
+						ParamDeps: intBitSetOf(0),
 					},
 				},
 			},
@@ -85,7 +85,7 @@ func TestAssignRegionRefStateAtPathDoesNotMutateExistingNestedFields(t *testing.
 
 	cloned := cloneRegionRefState(original)
 	updated := assignRegionRefStateAtPath(cloned, []borrowReturnAnnotationStep{{Field: "ret"}, {Field: "right"}}, regionRefState{
-		ParamDeps: map[int]bool{1: true},
+		ParamDeps: intBitSetOf(1),
 	})
 
 	if _, ok := original.Fields["ret"].Fields["right"]; ok {
@@ -158,7 +158,7 @@ func TestCloneRegionRefStatesKeepsFieldInsertionLocal(t *testing.T) {
 			value: {
 				Fields: map[string]regionRefState{
 					"left": {
-						ParamDeps: map[int]bool{0: true},
+						ParamDeps: intBitSetOf(0),
 					},
 				},
 			},
@@ -167,7 +167,7 @@ func TestCloneRegionRefStatesKeepsFieldInsertionLocal(t *testing.T) {
 
 	cloned := a.cloneRegionRefStates()
 	updated := assignRegionRefStateAtPath(cloned[value], []borrowReturnAnnotationStep{{Field: "right"}}, regionRefState{
-		ParamDeps: map[int]bool{1: true},
+		ParamDeps: intBitSetOf(1),
 	})
 	cloned[value] = updated
 
@@ -255,7 +255,7 @@ func TestMergeFlatRegionRefStatesKeepsDependencyInvalidationLocal(t *testing.T) 
 		},
 	}
 	right := regionRefState{
-		ParamDeps: map[int]bool{0: true},
+		ParamDeps: intBitSetOf(0),
 	}
 
 	merged, ok := mergeFlatRegionRefStates(left, right)
@@ -282,7 +282,7 @@ func TestMergeRegionRefStatesWithExplicitFieldsKeepsOverlayMutationLocal(t *test
 	overlay := regionRefState{
 		Fields: map[string]regionRefState{
 			"inner": {
-				ParamDeps: map[int]bool{0: true},
+				ParamDeps: intBitSetOf(0),
 			},
 		},
 	}
@@ -294,7 +294,7 @@ func TestMergeRegionRefStatesWithExplicitFieldsKeepsOverlayMutationLocal(t *test
 		t.Fatalf("expected mergeRegionRefStatesWithExplicitFields to keep overlay provenance")
 	}
 	updated := assignRegionRefStateAtPath(merged, []borrowReturnAnnotationStep{{Field: "slot"}, {Field: "extra"}}, regionRefState{
-		ParamDeps: map[int]bool{1: true},
+		ParamDeps: intBitSetOf(1),
 	})
 
 	if _, ok := overlay.Fields["extra"]; ok {
@@ -316,12 +316,12 @@ func TestInstantiateReturnProvenanceKeepsOverlayMutationLocal(t *testing.T) {
 		currentScope: scope,
 		currentRegionRefs: map[*Symbol]regionRefState{
 			left: {
-				ParamDeps: map[int]bool{9: true},
+				ParamDeps: intBitSetOf(9),
 			},
 			right: {
 				Fields: map[string]regionRefState{
 					"inner": {
-						ParamDeps: map[int]bool{7: true},
+						ParamDeps: intBitSetOf(7),
 					},
 				},
 			},
@@ -329,10 +329,10 @@ func TestInstantiateReturnProvenanceKeepsOverlayMutationLocal(t *testing.T) {
 	}
 
 	summary := regionRefState{
-		ParamDeps: map[int]bool{0: true},
+		ParamDeps: intBitSetOf(0),
 		Fields: map[string]regionRefState{
 			"slot": {
-				ParamDeps: map[int]bool{1: true},
+				ParamDeps: intBitSetOf(1),
 			},
 		},
 	}
@@ -349,7 +349,7 @@ func TestInstantiateReturnProvenanceKeepsOverlayMutationLocal(t *testing.T) {
 	}
 
 	updated := assignRegionRefStateAtPath(instantiated, []borrowReturnAnnotationStep{{Field: "slot"}, {Field: "extra"}}, regionRefState{
-		ParamDeps: map[int]bool{2: true},
+		ParamDeps: intBitSetOf(2),
 	})
 
 	if _, ok := a.currentRegionRefs[right].Fields["extra"]; ok {
@@ -373,7 +373,7 @@ func TestRecordResolvedRegionRefBindingKeepsNestedFieldMutationLocal(t *testing.
 			src: {
 				Fields: map[string]regionRefState{
 					"left": {
-						ParamDeps: map[int]bool{0: true},
+						ParamDeps: intBitSetOf(0),
 					},
 				},
 			},
@@ -382,7 +382,7 @@ func TestRecordResolvedRegionRefBindingKeepsNestedFieldMutationLocal(t *testing.
 
 	a.recordResolvedRegionRefBinding(dst, a.currentRegionRefs[src])
 	updated := assignRegionRefStateAtPath(a.currentRegionRefs[dst], []borrowReturnAnnotationStep{{Field: "right"}}, regionRefState{
-		ParamDeps: map[int]bool{1: true},
+		ParamDeps: intBitSetOf(1),
 	})
 	a.currentRegionRefs[dst] = updated
 

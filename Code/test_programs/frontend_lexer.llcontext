@@ -12,124 +12,7 @@ def frontend_expect_token_count(tokens: darray[FrontendToken], expected: usize) 
 
 
 def frontend_kind_eq(actual: FrontendTokenKind, expected: FrontendTokenKind) -> bool:
-    match expected:
-        FrontendTokenKind.Eof:
-            match actual:
-                FrontendTokenKind.Eof:
-                    return true
-        FrontendTokenKind.Newline:
-            match actual:
-                FrontendTokenKind.Newline:
-                    return true
-        FrontendTokenKind.Indent:
-            match actual:
-                FrontendTokenKind.Indent:
-                    return true
-        FrontendTokenKind.Dedent:
-            match actual:
-                FrontendTokenKind.Dedent:
-                    return true
-        FrontendTokenKind.Ident:
-            match actual:
-                FrontendTokenKind.Ident:
-                    return true
-        FrontendTokenKind.IntLit:
-            match actual:
-                FrontendTokenKind.IntLit:
-                    return true
-        FrontendTokenKind.FloatLit:
-            match actual:
-                FrontendTokenKind.FloatLit:
-                    return true
-        FrontendTokenKind.HexLit:
-            match actual:
-                FrontendTokenKind.HexLit:
-                    return true
-        FrontendTokenKind.True:
-            match actual:
-                FrontendTokenKind.True:
-                    return true
-        FrontendTokenKind.False:
-            match actual:
-                FrontendTokenKind.False:
-                    return true
-        FrontendTokenKind.Zeroed:
-            match actual:
-                FrontendTokenKind.Zeroed:
-                    return true
-        FrontendTokenKind.Def:
-            match actual:
-                FrontendTokenKind.Def:
-                    return true
-        FrontendTokenKind.Any:
-            match actual:
-                FrontendTokenKind.Any:
-                    return true
-        FrontendTokenKind.Region:
-            match actual:
-                FrontendTokenKind.Region:
-                    return true
-        FrontendTokenKind.Destroy:
-            match actual:
-                FrontendTokenKind.Destroy:
-                    return true
-        FrontendTokenKind.New:
-            match actual:
-                FrontendTokenKind.New:
-                    return true
-        FrontendTokenKind.Colon:
-            match actual:
-                FrontendTokenKind.Colon:
-                    return true
-        FrontendTokenKind.Assign:
-            match actual:
-                FrontendTokenKind.Assign:
-                    return true
-        FrontendTokenKind.LParen:
-            match actual:
-                FrontendTokenKind.LParen:
-                    return true
-        FrontendTokenKind.RParen:
-            match actual:
-                FrontendTokenKind.RParen:
-                    return true
-        FrontendTokenKind.LBracket:
-            match actual:
-                FrontendTokenKind.LBracket:
-                    return true
-        FrontendTokenKind.RBracket:
-            match actual:
-                FrontendTokenKind.RBracket:
-                    return true
-        FrontendTokenKind.Comma:
-            match actual:
-                FrontendTokenKind.Comma:
-                    return true
-        FrontendTokenKind.Ampersand:
-            match actual:
-                FrontendTokenKind.Ampersand:
-                    return true
-        FrontendTokenKind.Ellipsis:
-            match actual:
-                FrontendTokenKind.Ellipsis:
-                    return true
-        FrontendTokenKind.LArrow:
-            match actual:
-                FrontendTokenKind.LArrow:
-                    return true
-        FrontendTokenKind.Arrow:
-            match actual:
-                FrontendTokenKind.Arrow:
-                    return true
-        FrontendTokenKind.LShift:
-            match actual:
-                FrontendTokenKind.LShift:
-                    return true
-        FrontendTokenKind.RShift:
-            match actual:
-                FrontendTokenKind.RShift:
-                    return true
-    return false
+    return actual == expected
 
 
 def frontend_expect_kind(tokens: darray[FrontendToken], index: usize, expected: FrontendTokenKind) -> bool:
@@ -364,6 +247,11 @@ def frontend_tokenize_test_source(a: any Arena&, source: any u8&) -> darray[Fron
     return frontend_tokenize(a, "frontend_lexer_test.llcontext".cast[any u8&], source)
 
 
+def frontend_expect_lookup_keyword(text: static u8&, expected: FrontendTokenKind) -> bool:
+    view: StringView = StringView(text.cast[any u8&], runtime_strlen(text.cast[any u8&]).i64())
+    return frontend_kind_eq(frontend_lookup_keyword(view), expected)
+
+
 def frontend_case_simple_ident() -> bool can[Memory.Allocate, Abort.Panic]:
     region scratch(4096u)
     a: any Arena& = (&scratch).cast[any Arena&]
@@ -470,6 +358,10 @@ def frontend_case_region_alloc_syntax() -> bool can[Memory.Allocate, Abort.Panic
     return ok
 
 
+def frontend_case_lookup_keyword_table() -> bool:
+    return frontend_expect_lookup_keyword("as", FrontendTokenKind.As) and frontend_expect_lookup_keyword("if", FrontendTokenKind.If) and frontend_expect_lookup_keyword("in", FrontendTokenKind.In) and frontend_expect_lookup_keyword("or", FrontendTokenKind.Or) and frontend_expect_lookup_keyword("and", FrontendTokenKind.And) and frontend_expect_lookup_keyword("any", FrontendTokenKind.Any) and frontend_expect_lookup_keyword("def", FrontendTokenKind.Def) and frontend_expect_lookup_keyword("not", FrontendTokenKind.Not) and frontend_expect_lookup_keyword("try", FrontendTokenKind.Try) and frontend_expect_lookup_keyword("elif", FrontendTokenKind.Elif) and frontend_expect_lookup_keyword("else", FrontendTokenKind.Else) and frontend_expect_lookup_keyword("enum", FrontendTokenKind.Enum) and frontend_expect_lookup_keyword("heap", FrontendTokenKind.Heap) and frontend_expect_lookup_keyword("null", FrontendTokenKind.Null) and frontend_expect_lookup_keyword("pass", FrontendTokenKind.Pass) and frontend_expect_lookup_keyword("repr", FrontendTokenKind.Repr) and frontend_expect_lookup_keyword("tail", FrontendTokenKind.Tail) and frontend_expect_lookup_keyword("true", FrontendTokenKind.True) and frontend_expect_lookup_keyword("const", FrontendTokenKind.Const) and frontend_expect_lookup_keyword("error", FrontendTokenKind.Error) and frontend_expect_lookup_keyword("false", FrontendTokenKind.False) and frontend_expect_lookup_keyword("match", FrontendTokenKind.Match) and frontend_expect_lookup_keyword("panic", FrontendTokenKind.Panic) and frontend_expect_lookup_keyword("raise", FrontendTokenKind.Raise) and frontend_expect_lookup_keyword("stack", FrontendTokenKind.Stack) and frontend_expect_lookup_keyword("while", FrontendTokenKind.While) and frontend_expect_lookup_keyword("export", FrontendTokenKind.Export) and frontend_expect_lookup_keyword("extern", FrontendTokenKind.Extern) and frontend_expect_lookup_keyword("global", FrontendTokenKind.Global) and frontend_expect_lookup_keyword("packed", FrontendTokenKind.Packed) and frontend_expect_lookup_keyword("return", FrontendTokenKind.Return) and frontend_expect_lookup_keyword("sizeof", FrontendTokenKind.Sizeof) and frontend_expect_lookup_keyword("static", FrontendTokenKind.Static) and frontend_expect_lookup_keyword("struct", FrontendTokenKind.Struct) and frontend_expect_lookup_keyword("zeroed", FrontendTokenKind.Zeroed) and frontend_expect_lookup_keyword("aligned", FrontendTokenKind.Aligned) and frontend_expect_lookup_keyword("mutable", FrontendTokenKind.Mutable) and frontend_expect_lookup_keyword("region", FrontendTokenKind.Ident) and frontend_expect_lookup_keyword("new", FrontendTokenKind.Ident) and frontend_expect_lookup_keyword("destroy", FrontendTokenKind.Ident) and frontend_expect_lookup_keyword("defin", FrontendTokenKind.Ident) and frontend_expect_lookup_keyword("truer", FrontendTokenKind.Ident)
+
+
 def frontend_case_kind_only_keyword_path() -> bool can[Memory.Allocate, Abort.Panic]:
     region scratch(4096u)
     a: any Arena& = (&scratch).cast[any Arena&]
@@ -513,6 +405,8 @@ def frontend_lexer_parity_suite_impl() -> int can[Memory.Allocate, Abort.Panic]:
     if not frontend_case_paren_suppresses_newline():
         return 0
     if not frontend_case_region_alloc_syntax():
+        return 0
+    if not frontend_case_lookup_keyword_table():
         return 0
     if not frontend_case_kind_only_keyword_path():
         return 0

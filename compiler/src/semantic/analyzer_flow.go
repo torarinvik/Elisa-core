@@ -1853,8 +1853,6 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 	for _, arm := range stmt.Arms {
 		a.analyzeBlockWithRegionClone(arm.Body, NewScope(a.currentScope))
 	}
-	return
-
 }
 
 func (a *Analyzer) analyzeEnumMatchStmt(stmt *ast.MatchStmt, valueType Type, enumType *EnumType) {
@@ -3079,36 +3077,29 @@ func clonePackedStoreDependencyStates(src map[*Symbol]packedStoreDependencyState
 	return cloned
 }
 
-func cloneRegionParamDeps(src map[int]bool) map[int]bool {
-	if len(src) == 0 {
-		return nil
-	}
-	cloned := make(map[int]bool, len(src))
-	for index, dep := range src {
-		cloned[index] = dep
-	}
-	return cloned
+func cloneRegionParamDeps(src IntBitSet) IntBitSet {
+	return src.Clone()
 }
 
 func hasRegionParamDependencies(state regionRefState) bool {
-	return state.HasDirectParamDep || len(state.ParamDeps) != 0
+	return state.HasDirectParamDep || !state.ParamDeps.IsEmpty()
 }
 
 func regionRefStateHasParamDep(state regionRefState, index int) bool {
 	if state.HasDirectParamDep && state.DirectParamDep == index {
 		return true
 	}
-	return state.ParamDeps[index]
+	return state.ParamDeps.Contains(index)
 }
 
 func regionRefStateParamDepCount(state regionRefState) int {
 	if !state.HasDirectParamDep {
-		return len(state.ParamDeps)
+		return state.ParamDeps.Count()
 	}
-	if len(state.ParamDeps) == 0 || !state.ParamDeps[state.DirectParamDep] {
-		return len(state.ParamDeps) + 1
+	if !state.ParamDeps.Contains(state.DirectParamDep) {
+		return state.ParamDeps.Count() + 1
 	}
-	return len(state.ParamDeps)
+	return state.ParamDeps.Count()
 }
 
 func forEachRegionParamDep(state regionRefState, fn func(int)) {
@@ -3118,15 +3109,12 @@ func forEachRegionParamDep(state regionRefState, fn func(int)) {
 	if state.HasDirectParamDep {
 		fn(state.DirectParamDep)
 	}
-	for index, dep := range state.ParamDeps {
-		if !dep {
-			continue
-		}
+	state.ParamDeps.ForEach(func(index int) {
 		if state.HasDirectParamDep && index == state.DirectParamDep {
-			continue
+			return
 		}
 		fn(index)
-	}
+	})
 }
 
 func appendRegionParamDep(state *regionRefState, index int) {
@@ -3137,14 +3125,11 @@ func appendRegionParamDep(state *regionRefState, index int) {
 		if state.DirectParamDep == index {
 			return
 		}
-		if state.ParamDeps == nil {
-			state.ParamDeps = make(map[int]bool, 1)
-		}
-		state.ParamDeps[index] = true
+		state.ParamDeps.Add(index)
 		return
 	}
-	if state.ParamDeps != nil {
-		state.ParamDeps[index] = true
+	if !state.ParamDeps.IsEmpty() {
+		state.ParamDeps.Add(index)
 		return
 	}
 	state.DirectParamDep = index
@@ -3190,11 +3175,11 @@ func cloneRegionRefStateSharedFields(state regionRefState) regionRefState {
 
 func cloneRegionRefStateShallowFields(state regionRefState) regionRefState {
 	return withPackedStoreProvenanceSummary(regionRefState{
-		Deps:             state.Deps,
-		StoreDeps:        state.StoreDeps,
-		DirectParamDep:   state.DirectParamDep,
+		Deps:              state.Deps,
+		StoreDeps:         state.StoreDeps,
+		DirectParamDep:    state.DirectParamDep,
 		HasDirectParamDep: state.HasDirectParamDep,
-		ParamDeps:        state.ParamDeps,
+		ParamDeps:         state.ParamDeps,
 	})
 }
 
@@ -5821,7 +5806,7 @@ func (a *Analyzer) resolvePackedStoreDependency(store *Symbol, dep packedStoreDe
 		resolvedStore = resolution.Symbol
 		changed = true
 	}
-	if changed && store != nil && a.currentPackedStoreResolutions != nil {
+	if changed && a.currentPackedStoreResolutions != nil {
 		a.currentPackedStoreResolutions[store] = packedStoreResolution{Symbol: resolvedStore, Type: resolvedDep.Type}
 	}
 	return resolvedStore, resolvedDep, changed

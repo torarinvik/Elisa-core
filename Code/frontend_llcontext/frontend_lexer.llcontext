@@ -298,101 +298,90 @@ def frontend_try_read_type_suffix(lexer: any FrontendLexer&) -> StringView:
     return suffix
 
 
+struct FrontendKeywordEntry:
+    text: mutable static u8&
+    kind: mutable FrontendTokenKind
+
+
+@inline(always)
+def frontend_lookup_keyword_bucket(entries: any FrontendKeywordEntry&, count: usize, text: StringView) -> FrontendTokenKind:
+    i: mutable usize = 0u
+    while i < count:
+        entry: FrontendKeywordEntry = entries[i]
+        if frontend_sv_eq_literal(text, entry.text):
+            return entry.kind
+        i <- i + 1u
+    return FrontendTokenKind.Ident
+
+
 @inline(always)
 def frontend_lookup_keyword(text: StringView) -> FrontendTokenKind:
-    first: i64 = frontend_sv_first_char(text)
-
     if text.len == 2:
-        if first == 97 and frontend_sv_is_2(text, 97, 115):
-            return FrontendTokenKind.As
-        if first == 105 and frontend_sv_is_2(text, 105, 102):
-            return FrontendTokenKind.If
-        if first == 105 and frontend_sv_is_2(text, 105, 110):
-            return FrontendTokenKind.In
-        if first == 111 and frontend_sv_is_2(text, 111, 114):
-            return FrontendTokenKind.Or
-        return FrontendTokenKind.Ident
+        entries: FrontendKeywordEntry[4] = [
+            FrontendKeywordEntry("as", FrontendTokenKind.As),
+            FrontendKeywordEntry("if", FrontendTokenKind.If),
+            FrontendKeywordEntry("in", FrontendTokenKind.In),
+            FrontendKeywordEntry("or", FrontendTokenKind.Or)
+        ]
+        return frontend_lookup_keyword_bucket((&entries[0u]).cast[any FrontendKeywordEntry&], 4u, text)
 
     if text.len == 3:
-        if first == 97 and frontend_sv_is_3(text, 97, 110, 100):
-            return FrontendTokenKind.And
-        if first == 97 and frontend_sv_is_3(text, 97, 110, 121):
-            return FrontendTokenKind.Any
-        if first == 100 and frontend_sv_is_3(text, 100, 101, 102):
-            return FrontendTokenKind.Def
-        if first == 110 and frontend_sv_is_3(text, 110, 111, 116):
-            return FrontendTokenKind.Not
-        if first == 116 and frontend_sv_is_3(text, 116, 114, 121):
-            return FrontendTokenKind.Try
-        return FrontendTokenKind.Ident
+        entries: FrontendKeywordEntry[5] = [
+            FrontendKeywordEntry("and", FrontendTokenKind.And),
+            FrontendKeywordEntry("any", FrontendTokenKind.Any),
+            FrontendKeywordEntry("def", FrontendTokenKind.Def),
+            FrontendKeywordEntry("not", FrontendTokenKind.Not),
+            FrontendKeywordEntry("try", FrontendTokenKind.Try)
+        ]
+        return frontend_lookup_keyword_bucket((&entries[0u]).cast[any FrontendKeywordEntry&], 5u, text)
 
     if text.len == 4:
-        if first == 101 and frontend_sv_is_4(text, 101, 108, 105, 102):
-            return FrontendTokenKind.Elif
-        if first == 101 and frontend_sv_is_4(text, 101, 108, 115, 101):
-            return FrontendTokenKind.Else
-        if first == 101 and frontend_sv_is_4(text, 101, 110, 117, 109):
-            return FrontendTokenKind.Enum
-        if first == 104 and frontend_sv_is_4(text, 104, 101, 97, 112):
-            return FrontendTokenKind.Heap
-        if first == 110 and frontend_sv_is_4(text, 110, 117, 108, 108):
-            return FrontendTokenKind.Null
-        if first == 112 and frontend_sv_is_4(text, 112, 97, 115, 115):
-            return FrontendTokenKind.Pass
-        if first == 114 and frontend_sv_is_4(text, 114, 101, 112, 114):
-            return FrontendTokenKind.Repr
-        if first == 116 and frontend_sv_is_4(text, 116, 97, 105, 108):
-            return FrontendTokenKind.Tail
-        if first == 116 and frontend_sv_is_4(text, 116, 114, 117, 101):
-            return FrontendTokenKind.True
-        return FrontendTokenKind.Ident
+        entries: FrontendKeywordEntry[9] = [
+            FrontendKeywordEntry("elif", FrontendTokenKind.Elif),
+            FrontendKeywordEntry("else", FrontendTokenKind.Else),
+            FrontendKeywordEntry("enum", FrontendTokenKind.Enum),
+            FrontendKeywordEntry("heap", FrontendTokenKind.Heap),
+            FrontendKeywordEntry("null", FrontendTokenKind.Null),
+            FrontendKeywordEntry("pass", FrontendTokenKind.Pass),
+            FrontendKeywordEntry("repr", FrontendTokenKind.Repr),
+            FrontendKeywordEntry("tail", FrontendTokenKind.Tail),
+            FrontendKeywordEntry("true", FrontendTokenKind.True)
+        ]
+        return frontend_lookup_keyword_bucket((&entries[0u]).cast[any FrontendKeywordEntry&], 9u, text)
 
     if text.len == 5:
-        if first == 99 and frontend_sv_is_5(text, 99, 111, 110, 115, 116):
-            return FrontendTokenKind.Const
-        if first == 101 and frontend_sv_is_5(text, 101, 114, 114, 111, 114):
-            return FrontendTokenKind.Error
-        if first == 102 and frontend_sv_is_5(text, 102, 97, 108, 115, 101):
-            return FrontendTokenKind.False
-        if first == 109 and frontend_sv_is_5(text, 109, 97, 116, 99, 104):
-            return FrontendTokenKind.Match
-        if first == 112 and frontend_sv_is_5(text, 112, 97, 110, 105, 99):
-            return FrontendTokenKind.Panic
-        if first == 114 and frontend_sv_is_5(text, 114, 97, 105, 115, 101):
-            return FrontendTokenKind.Raise
-        if first == 115 and frontend_sv_is_5(text, 115, 116, 97, 99, 107):
-            return FrontendTokenKind.Stack
-        if first == 119 and frontend_sv_is_5(text, 119, 104, 105, 108, 101):
-            return FrontendTokenKind.While
-        return FrontendTokenKind.Ident
+        entries: FrontendKeywordEntry[8] = [
+            FrontendKeywordEntry("const", FrontendTokenKind.Const),
+            FrontendKeywordEntry("error", FrontendTokenKind.Error),
+            FrontendKeywordEntry("false", FrontendTokenKind.False),
+            FrontendKeywordEntry("match", FrontendTokenKind.Match),
+            FrontendKeywordEntry("panic", FrontendTokenKind.Panic),
+            FrontendKeywordEntry("raise", FrontendTokenKind.Raise),
+            FrontendKeywordEntry("stack", FrontendTokenKind.Stack),
+            FrontendKeywordEntry("while", FrontendTokenKind.While)
+        ]
+        return frontend_lookup_keyword_bucket((&entries[0u]).cast[any FrontendKeywordEntry&], 8u, text)
 
     if text.len == 6:
-        if first == 101 and frontend_sv_is_6(text, 101, 120, 112, 111, 114, 116):
-            return FrontendTokenKind.Export
-        if first == 101 and frontend_sv_is_6(text, 101, 120, 116, 101, 114, 110):
-            return FrontendTokenKind.Extern
-        if first == 103 and frontend_sv_is_6(text, 103, 108, 111, 98, 97, 108):
-            return FrontendTokenKind.Global
-        if first == 112 and frontend_sv_is_6(text, 112, 97, 99, 107, 101, 100):
-            return FrontendTokenKind.Packed
-        if first == 114 and frontend_sv_is_6(text, 114, 101, 116, 117, 114, 110):
-            return FrontendTokenKind.Return
-        if first == 115 and frontend_sv_is_6(text, 115, 105, 122, 101, 111, 102):
-            return FrontendTokenKind.Sizeof
-        if first == 115 and frontend_sv_is_6(text, 115, 116, 97, 116, 105, 99):
-            return FrontendTokenKind.Static
-        if first == 115 and frontend_sv_is_6(text, 115, 116, 114, 117, 99, 116):
-            return FrontendTokenKind.Struct
-        if first == 122 and frontend_sv_is_6(text, 122, 101, 114, 111, 101, 100):
-            return FrontendTokenKind.Zeroed
-        return FrontendTokenKind.Ident
+        entries: FrontendKeywordEntry[9] = [
+            FrontendKeywordEntry("export", FrontendTokenKind.Export),
+            FrontendKeywordEntry("extern", FrontendTokenKind.Extern),
+            FrontendKeywordEntry("global", FrontendTokenKind.Global),
+            FrontendKeywordEntry("packed", FrontendTokenKind.Packed),
+            FrontendKeywordEntry("return", FrontendTokenKind.Return),
+            FrontendKeywordEntry("sizeof", FrontendTokenKind.Sizeof),
+            FrontendKeywordEntry("static", FrontendTokenKind.Static),
+            FrontendKeywordEntry("struct", FrontendTokenKind.Struct),
+            FrontendKeywordEntry("zeroed", FrontendTokenKind.Zeroed)
+        ]
+        return frontend_lookup_keyword_bucket((&entries[0u]).cast[any FrontendKeywordEntry&], 9u, text)
 
     if text.len == 7:
-        if first == 97 and frontend_sv_is_7(text, 97, 108, 105, 103, 110, 101, 100):
-            return FrontendTokenKind.Aligned
-        if first == 109 and frontend_sv_is_7(text, 109, 117, 116, 97, 98, 108, 101):
-            return FrontendTokenKind.Mutable
-        return FrontendTokenKind.Ident
+        entries: FrontendKeywordEntry[2] = [
+            FrontendKeywordEntry("aligned", FrontendTokenKind.Aligned),
+            FrontendKeywordEntry("mutable", FrontendTokenKind.Mutable)
+        ]
+        return frontend_lookup_keyword_bucket((&entries[0u]).cast[any FrontendKeywordEntry&], 2u, text)
 
     return FrontendTokenKind.Ident
 
