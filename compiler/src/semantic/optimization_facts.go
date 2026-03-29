@@ -166,6 +166,11 @@ func SameOptimizationExtentSize(a, b *OptimizationExtent) bool {
 	if SameOptimizationExtent(a, b) {
 		return true
 	}
+	aSize, aSizeOK := optimizationExtentAffineSize(a)
+	bSize, bSizeOK := optimizationExtentAffineSize(b)
+	if aSizeOK && bSizeOK && optimizationAffineExprEqual(aSize, bSize) {
+		return true
+	}
 	switch {
 	case a.Kind == OptimizationExtentShape && b.Kind == OptimizationExtentShape:
 		return SameShape(a.Shape, b.Shape)
@@ -307,6 +312,18 @@ func (e optimizationAffineExpr) scaled(factor int64) optimizationAffineExpr {
 	return out
 }
 
+func (e optimizationAffineExpr) sub(other optimizationAffineExpr) optimizationAffineExpr {
+	out := newOptimizationAffineExpr()
+	out.Const = e.Const - other.Const
+	for term, coeff := range e.Terms {
+		out.Terms[term] = coeff
+	}
+	for term, coeff := range other.Terms {
+		out.addTerm(term, -coeff)
+	}
+	return out
+}
+
 func optimizationAffineIsConst(expr optimizationAffineExpr) bool {
 	return len(expr.Terms) == 0
 }
@@ -376,6 +393,43 @@ func optimizationAffineCompareByPositiveSymbol(left optimizationAffineExpr, righ
 	}
 }
 
+func optimizationAffineCompareBySinglePositiveTerm(left optimizationAffineExpr, right optimizationAffineExpr) (int, bool) {
+	leftResidual := newOptimizationAffineExpr()
+	rightResidual := newOptimizationAffineExpr()
+	leftResidual.Const = left.Const
+	rightResidual.Const = right.Const
+	varyingTerm := ""
+	seen := map[string]bool{}
+	for term := range left.Terms {
+		seen[term] = true
+	}
+	for term := range right.Terms {
+		seen[term] = true
+	}
+	for term := range seen {
+		leftCoeff := left.Terms[term]
+		rightCoeff := right.Terms[term]
+		if leftCoeff == rightCoeff {
+			if leftCoeff != 0 {
+				leftResidual.Terms[term] = leftCoeff
+				rightResidual.Terms[term] = rightCoeff
+			}
+			continue
+		}
+		if varyingTerm != "" {
+			return 0, false
+		}
+		varyingTerm = term
+	}
+	if varyingTerm == "" {
+		return 0, false
+	}
+	if !optimizationAffineExprEqual(leftResidual, rightResidual) {
+		return 0, false
+	}
+	return optimizationAffineCompareByPositiveSymbol(left, right, varyingTerm)
+}
+
 func optimizationExtentValueCompare(left string, right string, size string) (int, bool) {
 	leftAffine, ok := parseOptimizationAffineExpr(left)
 	if !ok {
@@ -395,7 +449,33 @@ func optimizationExtentValueCompare(left string, right string, size string) (int
 			}
 		}
 	}
+	if cmp, ok := optimizationAffineCompareBySinglePositiveTerm(leftAffine, rightAffine); ok {
+		return cmp, true
+	}
 	return 0, false
+}
+
+func optimizationExtentAffineSize(extent *OptimizationExtent) (optimizationAffineExpr, bool) {
+	if extent == nil {
+		return optimizationAffineExpr{}, false
+	}
+	if extent.HasConstSize {
+		out := newOptimizationAffineExpr()
+		out.Const = extent.ConstSize
+		return out, true
+	}
+	if extent.Size != "" {
+		return parseOptimizationAffineExpr(extent.Size)
+	}
+	if extent.Kind != OptimizationExtentViewBounds {
+		return optimizationAffineExpr{}, false
+	}
+	begin, beginOK := parseOptimizationAffineExpr(extent.Begin)
+	end, endOK := parseOptimizationAffineExpr(extent.End)
+	if !beginOK || !endOK {
+		return optimizationAffineExpr{}, false
+	}
+	return end.sub(begin), true
 }
 
 func parseOptimizationAffineExpr(value string) (optimizationAffineExpr, bool) {
@@ -551,6 +631,24 @@ func optimizationAddOffsetExpr(base string, offset string) string {
 		}
 	}
 	return fmt.Sprintf("(%s + %s)", base, offset)
+}
+
+func composeOptimizationExtentWithExactBase(base *OptimizationExtent, begin string, end string) *OptimizationExtent {
+	if begin == "" || end == "" {
+		return nil
+	}
+	if base == nil || base.Kind != OptimizationExtentViewBounds {
+		return &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: begin, End: end}
+	}
+	baseBegin := base.Begin
+	if baseBegin == "" {
+		baseBegin = "0"
+	}
+	return &OptimizationExtent{
+		Kind:  OptimizationExtentViewBounds,
+		Begin: optimizationAddOffsetExpr(baseBegin, begin),
+		End:   optimizationAddOffsetExpr(baseBegin, end),
+	}
 }
 
 func optimizationConstInt(value string) (int64, bool) {
@@ -772,15 +870,28 @@ func (a *Analyzer) inferExprOptimizationFactsWithBase(expr ast.Expr, t Type, fac
 		facts.Contiguous = true
 		facts.UnitStride = true
 	case *ast.SliceExpr:
+		if objectFacts, ok := a.lookupOptimizationFactsForExpr(n.Object); ok {
+			if facts.base == "" {
+				facts.base = objectFacts.base
+				if facts.base == "" {
+					facts.base = a.optimizationBaseForExpr(n.Object)
+				}
+			}
+			facts.ReadOnly = facts.ReadOnly || objectFacts.ReadOnly
+			facts.Contiguous = facts.Contiguous || objectFacts.Contiguous
+			facts.UnitStride = facts.UnitStride || objectFacts.UnitStride
+		}
+		if field := a.sliceFullSpanField(n.Object); field != "" {
+			if extent := a.inferRelativeOptimizationExtent(n.Object, n.Start, n.End, field); extent != nil {
+				facts.Extent = extent
+			}
+		} else if fieldExpr, ok := stripOptimizationParens(n.Object).(*ast.FieldExpr); ok && fieldExpr.Field == "tags" {
+			if extent := a.inferRelativeOptimizationExtent(fieldExpr.Object, n.Start, n.End, "count"); extent != nil {
+				facts.Extent = extent
+			}
+		}
 		if facts.base == "" {
 			facts.base = a.optimizationBaseForExpr(n.Object)
-		}
-		if objectFacts, ok := a.exprFacts[n.Object]; ok && objectFacts.HasExactExtent() && isZeroOptimizationExpr(n.Start) {
-			if field := a.sliceFullSpanField(n.Object); field != "" && optimizationFieldMatches(n.End, n.Object, field) {
-				facts.Extent = cloneOptimizationExtent(objectFacts.Extent)
-			} else if fieldExpr, ok := stripOptimizationParens(n.Object).(*ast.FieldExpr); ok && fieldExpr.Field == "tags" && optimizationFieldMatches(n.End, fieldExpr.Object, "count") {
-				facts.Extent = cloneOptimizationExtent(objectFacts.Extent)
-			}
 		}
 	case *ast.TernaryExpr:
 		facts = a.inferRecoveredExprOptimizationFacts(n.Value, n.Alt, facts)
@@ -1096,84 +1207,68 @@ func (a *Analyzer) inferCallOptimizationFacts(call *ast.CallExpr, facts Optimiza
 	case "arena_da_view_prefix":
 		if viewExpr, ok := optimizationCallArg(call, 0); ok {
 			facts.base = a.optimizationBaseForExpr(viewExpr)
-			if viewFacts, ok := a.exprFacts[viewExpr]; ok {
+			if viewFacts, ok := a.lookupOptimizationFactsForExpr(viewExpr); ok {
 				if viewFacts.Exclusive {
 					facts.Exclusive = true
-				}
-				if endExpr, ok := optimizationCallArg(call, 1); ok && optimizationFieldMatches(endExpr, viewExpr, "len") && viewFacts.HasExactExtent() {
-					facts.Extent = cloneOptimizationExtent(viewFacts.Extent)
 				}
 			}
 		}
 		if facts.Extent == nil {
-			if endExpr, ok := optimizationCallArg(call, 1); ok {
-				if end := optimizationExprString(endExpr); end != "" {
-					facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: "0", End: end}
+			if viewExpr, ok := optimizationCallArg(call, 0); ok {
+				if endExpr, ok := optimizationCallArg(call, 1); ok {
+					zeroExpr := &ast.IntLit{Position: call.Position, Value: "0"}
+					facts.Extent = a.inferRelativeOptimizationExtent(viewExpr, zeroExpr, endExpr, "len")
 				}
 			}
 		}
 	case "arena_da_view_suffix":
 		if viewExpr, ok := optimizationCallArg(call, 0); ok {
 			facts.base = a.optimizationBaseForExpr(viewExpr)
-			if viewFacts, ok := a.exprFacts[viewExpr]; ok {
+			if viewFacts, ok := a.lookupOptimizationFactsForExpr(viewExpr); ok {
 				if viewFacts.Exclusive {
 					facts.Exclusive = true
-				}
-				if startExpr, ok := optimizationCallArg(call, 1); ok && isZeroOptimizationExpr(startExpr) && viewFacts.HasExactExtent() {
-					facts.Extent = cloneOptimizationExtent(viewFacts.Extent)
 				}
 			}
 		}
 		if facts.Extent == nil {
 			if viewExpr, ok := optimizationCallArg(call, 0); ok {
 				if startExpr, ok := optimizationCallArg(call, 1); ok {
-					begin := optimizationExprString(startExpr)
-					viewName := optimizationExprString(viewExpr)
-					if begin != "" && viewName != "" {
-						facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: begin, End: viewName + ".len"}
-					}
+					endExpr := &ast.FieldExpr{Position: call.Position, Object: viewExpr, Field: "len"}
+					facts.Extent = a.inferRelativeOptimizationExtent(viewExpr, startExpr, endExpr, "len")
 				}
 			}
 		}
 	case "string_view_prefix", "ctx_string_view_prefix":
 		if viewExpr, ok := optimizationCallArg(call, 0); ok {
 			facts.base = a.optimizationBaseForExpr(viewExpr)
-			if viewFacts, ok := a.exprFacts[viewExpr]; ok {
+			if viewFacts, ok := a.lookupOptimizationFactsForExpr(viewExpr); ok {
 				if viewFacts.Exclusive {
 					facts.Exclusive = true
-				}
-				if endExpr, ok := optimizationCallArg(call, 1); ok && optimizationFieldMatches(endExpr, viewExpr, "len") && viewFacts.HasExactExtent() {
-					facts.Extent = cloneOptimizationExtent(viewFacts.Extent)
 				}
 			}
 		}
 		if facts.Extent == nil {
-			if endExpr, ok := optimizationCallArg(call, 1); ok {
-				if end := optimizationExprString(endExpr); end != "" {
-					facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: "0", End: end}
+			if viewExpr, ok := optimizationCallArg(call, 0); ok {
+				if endExpr, ok := optimizationCallArg(call, 1); ok {
+					zeroExpr := &ast.IntLit{Position: call.Position, Value: "0"}
+					facts.Extent = a.inferRelativeOptimizationExtent(viewExpr, zeroExpr, endExpr, "len")
 				}
 			}
 		}
 	case "string_view_suffix", "ctx_string_view_suffix":
 		if viewExpr, ok := optimizationCallArg(call, 0); ok {
 			facts.base = a.optimizationBaseForExpr(viewExpr)
-			if viewFacts, ok := a.exprFacts[viewExpr]; ok {
+			if viewFacts, ok := a.lookupOptimizationFactsForExpr(viewExpr); ok {
 				if viewFacts.Exclusive {
 					facts.Exclusive = true
-				}
-				if startExpr, ok := optimizationCallArg(call, 1); ok && isZeroOptimizationExpr(startExpr) && viewFacts.HasExactExtent() {
-					facts.Extent = cloneOptimizationExtent(viewFacts.Extent)
 				}
 			}
 		}
 		if facts.Extent == nil {
 			if viewExpr, ok := optimizationCallArg(call, 0); ok {
 				if startExpr, ok := optimizationCallArg(call, 1); ok {
-					begin := optimizationExprString(startExpr)
-					viewName := optimizationExprString(viewExpr)
-					if begin != "" && viewName != "" {
-						facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: begin, End: viewName + ".len"}
-					}
+					endExpr := &ast.FieldExpr{Position: call.Position, Object: viewExpr, Field: "len"}
+					facts.Extent = a.inferRelativeOptimizationExtent(viewExpr, startExpr, endExpr, "len")
 				}
 			}
 		}
@@ -1301,23 +1396,36 @@ func (a *Analyzer) inferViewHelperExtent(call *ast.CallExpr, baseIndex, startInd
 	if !ok {
 		return nil
 	}
-	baseFacts, ok := a.lookupOptimizationFactsForExpr(baseExpr)
-	if ok && baseFacts.HasExactExtent() {
-		startExpr, hasStart := optimizationCallArg(call, startIndex)
-		endExpr, hasEnd := optimizationCallArg(call, endIndex)
-		if hasStart && hasEnd && isZeroOptimizationExpr(startExpr) && optimizationFieldMatches(endExpr, baseExpr, fullSpanField) {
-			return cloneOptimizationExtent(baseFacts.Extent)
-		}
-	}
 	startExpr, hasStart := optimizationCallArg(call, startIndex)
 	endExpr, hasEnd := optimizationCallArg(call, endIndex)
 	if !hasStart || !hasEnd {
+		return nil
+	}
+	return a.inferRelativeOptimizationExtent(baseExpr, startExpr, endExpr, fullSpanField)
+}
+
+func (a *Analyzer) inferRelativeOptimizationExtent(baseExpr ast.Expr, startExpr ast.Expr, endExpr ast.Expr, fullSpanField string) *OptimizationExtent {
+	if a == nil || baseExpr == nil || startExpr == nil || endExpr == nil {
 		return nil
 	}
 	begin := optimizationExprString(startExpr)
 	end := optimizationExprString(endExpr)
 	if begin == "" || end == "" {
 		return nil
+	}
+	baseFacts, ok := a.lookupOptimizationFactsForExpr(baseExpr)
+	if ok && baseFacts.HasExactExtent() {
+		if isZeroOptimizationExpr(startExpr) && optimizationFieldMatches(endExpr, baseExpr, fullSpanField) {
+			return cloneOptimizationExtent(baseFacts.Extent)
+		}
+		if optimizationFieldMatches(endExpr, baseExpr, fullSpanField) && baseFacts.Extent != nil && baseFacts.Extent.Kind == OptimizationExtentViewBounds {
+			composed := composeOptimizationExtentWithExactBase(baseFacts.Extent, begin, end)
+			if composed != nil {
+				composed.End = baseFacts.Extent.End
+			}
+			return composed
+		}
+		return composeOptimizationExtentWithExactBase(baseFacts.Extent, begin, end)
 	}
 	return &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: begin, End: end}
 }

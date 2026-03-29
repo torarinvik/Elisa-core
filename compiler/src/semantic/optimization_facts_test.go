@@ -357,3 +357,98 @@ def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
 		t.Fatalf("expected affine zip_map destination and source 2 chunk items to be disjoint")
 	}
 }
+
+func TestAnalyzeZipMapAcceptsReadonlyDirectSliceComposition(t *testing.T) {
+	file, result := parseAndAnalyzeOptimizationFactsTest(t, "zip_map_affine_direct_slices.llcontext", `
+def add(left: i32, right: i32) -> i32:
+	return left + right
+
+def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
+	limit: usize = start + (3u * chunk)
+	whole: dview[i32] = buf[start:limit]
+	ro: dview[i32] = readonly(whole)
+	dst: dview[i32] = whole[0u:chunk]
+	src1: dview[i32] = ro[chunk:(2u * chunk)]
+	src2: dview[i32] = ro[(2u * chunk):(3u * chunk)]
+	zip_map(dst, src1, src2, add)
+`)
+	if errs := result.Errors(); len(errs) > 0 {
+		t.Fatalf("expected readonly direct-slice zip_map to analyze cleanly, got:\n%s", strings.Join(errs, "\n"))
+	}
+	fn := testFuncDeclByName(t, file, "kernel")
+	src1 := mustVarDeclValueExpr(t, fn.Body[4], "src1")
+	src2 := mustVarDeclValueExpr(t, fn.Body[5], "src2")
+	src1Facts, ok := result.ExprOptimizationFacts(src1)
+	if !ok || src1Facts.Extent == nil {
+		t.Fatalf("expected src1 slice facts")
+	}
+	if !src1Facts.ReadOnly {
+		t.Fatalf("expected src1 slice of readonly view to remain readonly")
+	}
+	mustAffineExprTerms(t, src1Facts.Extent.Begin, 0, map[string]int64{"start": 1, "chunk": 1})
+	mustAffineExprTerms(t, src1Facts.Extent.End, 0, map[string]int64{"start": 1, "chunk": 2})
+	src2Facts, ok := result.ExprOptimizationFacts(src2)
+	if !ok || src2Facts.Extent == nil {
+		t.Fatalf("expected src2 slice facts")
+	}
+	if !src2Facts.ReadOnly {
+		t.Fatalf("expected src2 slice of readonly view to remain readonly")
+	}
+	mustAffineExprTerms(t, src2Facts.Extent.Begin, 0, map[string]int64{"start": 1, "chunk": 2})
+	mustAffineExprTerms(t, src2Facts.Extent.End, 0, map[string]int64{"start": 1, "chunk": 3})
+	call := mustExprStmtCall(t, fn.Body[len(fn.Body)-1], "zip_map")
+	if !result.ExprsHaveEqualExtentSize(call.Args[0], call.Args[1]) {
+		t.Fatalf("expected readonly direct-slice zip_map destination and source 1 to have equal extent size")
+	}
+	if !result.ExprsHaveEqualExtentSize(call.Args[0], call.Args[2]) {
+		t.Fatalf("expected readonly direct-slice zip_map destination and source 2 to have equal extent size")
+	}
+	if !result.ExprsAreDisjoint(call.Args[0], call.Args[1]) {
+		t.Fatalf("expected readonly direct-slice zip_map destination and source 1 to be disjoint")
+	}
+	if !result.ExprsAreDisjoint(call.Args[0], call.Args[2]) {
+		t.Fatalf("expected readonly direct-slice zip_map destination and source 2 to be disjoint")
+	}
+}
+
+func TestOptimizationFactsComposeHelperViewSlicesWithAffineBase(t *testing.T) {
+	file, result := parseAndAnalyzeOptimizationFactsTest(t, "helper_view_slice_affine.llcontext", `
+def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
+	return view[start:end]
+
+def arena_da_view_suffix[T](view: dview[T], start: usize) -> dview[T]:
+	return arena_da_view_slice(view, start, view.len)
+
+def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
+	limit: usize = start + (3u * chunk)
+	whole: dview[i32] = buf[start:limit]
+	rest_view: dview[i32] = arena_da_view_suffix(whole, chunk)
+	first: dview[i32] = arena_da_view_slice(rest_view, 0u, chunk)
+	second: dview[i32] = arena_da_view_slice(rest_view, chunk, (2u * chunk))
+	pass
+`)
+	if errs := result.Errors(); len(errs) > 0 {
+		t.Fatalf("expected helper slice composition to analyze cleanly, got:\n%s", strings.Join(errs, "\n"))
+	}
+	fn := testFuncDeclByName(t, file, "kernel")
+	first := mustVarDeclValueExpr(t, fn.Body[3], "first")
+	second := mustVarDeclValueExpr(t, fn.Body[4], "second")
+	firstFacts, ok := result.ExprOptimizationFacts(first)
+	if !ok || firstFacts.Extent == nil {
+		t.Fatalf("expected first helper slice facts")
+	}
+	mustAffineExprTerms(t, firstFacts.Extent.Begin, 0, map[string]int64{"start": 1, "chunk": 1})
+	mustAffineExprTerms(t, firstFacts.Extent.End, 0, map[string]int64{"start": 1, "chunk": 2})
+	secondFacts, ok := result.ExprOptimizationFacts(second)
+	if !ok || secondFacts.Extent == nil {
+		t.Fatalf("expected second helper slice facts")
+	}
+	mustAffineExprTerms(t, secondFacts.Extent.Begin, 0, map[string]int64{"start": 1, "chunk": 2})
+	mustAffineExprTerms(t, secondFacts.Extent.End, 0, map[string]int64{"start": 1, "chunk": 3})
+	if !result.ExprsHaveEqualExtentSize(first, second) {
+		t.Fatalf("expected helper view slices to have equal extent size")
+	}
+	if !result.ExprsAreDisjoint(first, second) {
+		t.Fatalf("expected helper view slices to be disjoint")
+	}
+}
