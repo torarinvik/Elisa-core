@@ -4092,6 +4092,11 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 		return nil, nil, true, fmt.Errorf("%s has no field %s", binding.typ.String(), expr.Field)
 	}
 	if _, isCommonField := binding.typ.Enum.Common[expr.Field]; isCommonField {
+		if hasName {
+			if cachedValue, ok := s.lookupPackedCommonFieldValue(name, binding.typ.Enum, expr.Field); ok {
+				return cachedValue, field.Type, true, nil
+			}
+		}
 		layout, err := s.g.packedEnumCommonFieldLayout(binding.typ.Enum, expr.Field)
 		if err != nil {
 			return nil, nil, true, err
@@ -4227,6 +4232,11 @@ func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMVa
 		return nil, nil, true, err
 	}
 	fieldType := layout.Field.Type
+	if key, ok := s.packedEnumStoragePath(expr.Object); ok {
+		if cachedValue, ok := s.lookupPackedCommonFieldValue(key, enumType, expr.Field); ok {
+			return cachedValue, fieldType, true, nil
+		}
+	}
 	if layout.StoredInline {
 		if key, ok := s.packedEnumStoragePath(expr.Object); ok {
 			if _, ok := s.lookupPackedEnumStorage(key, enumType); ok {

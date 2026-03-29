@@ -1372,6 +1372,78 @@ def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
 	}
 }
 
+func TestGenerateLLVMIRPreloadsCanonicalMatchedValueCommonFieldsAcrossArms(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+		weight: int
+	Lit(value: int)
+	End
+	Stop
+
+def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
+	return match node in frozen:
+		Expr.Lit(value):
+			node.span + node.weight + value
+		Expr.End:
+			node.span + node.weight
+		Expr.Stop:
+			node.span + node.weight
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_matched_value_common_preload_default.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_variant_sparse_word(")
+	if readCalls != 3 {
+		t.Fatalf("expected canonical frozen matched-value common-field preloading to reduce total variant-sparse word reads across arms to three (two common preloads + one payload), got %d helper calls:\n%s", readCalls, output)
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_variant_sparse(") {
+		t.Fatalf("expected canonical frozen matched-value common-field preloading to avoid eager variant-sparse decode, got:\n%s", output)
+	}
+	if !strings.Contains(output, "switch i32") {
+		t.Fatalf("expected canonical frozen matched-value common-field preloading case to lower through a switch, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRPreloadsIndexSOAMatchedValueCommonFieldsAcrossArms(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+		weight: int
+	Lit(value: int)
+	End
+	Stop
+
+def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
+	return match node in frozen:
+		Expr.Lit(value):
+			node.span + node.weight + value
+		Expr.End:
+			node.span + node.weight
+		Expr.Stop:
+			node.span + node.weight
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_packed_matched_value_common_preload_index_soa.llcontext", src)
+	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithPackedABIForTest returned error: %v", err)
+	}
+
+	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_index_word(")
+	if readCalls != 3 {
+		t.Fatalf("expected frozen index-soa matched-value common-field preloading to reduce total index word reads across arms to three (two common preloads + one payload), got %d helper calls:\n%s", readCalls, output)
+	}
+	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
+		t.Fatalf("expected frozen index-soa matched-value common-field preloading to avoid eager decode, got:\n%s", output)
+	}
+	if !strings.Contains(output, "switch i32") {
+		t.Fatalf("expected frozen index-soa matched-value common-field preloading case to lower through a switch, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRUsesSingleDecodeForFrozenWidePayloadMatchInWordHandleMode(t *testing.T) {
 	src := `packed enum Expr:
 	common:

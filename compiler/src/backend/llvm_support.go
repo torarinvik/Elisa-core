@@ -914,6 +914,9 @@ func (s *functionState) popScope() {
 		scope.bindingName = ""
 		scope.binding = valueBinding{}
 		clear(scope.bindings)
+		scope.packedCommonValueName = ""
+		scope.packedCommonValueBinding = packedCommonFieldValueBinding{}
+		clear(scope.packedCommonValues)
 		clear(scope.packedEnumPtrs)
 		scope.packedEnumStoreName = ""
 		scope.packedEnumStoreBinding = packedStoreBinding{}
@@ -1032,6 +1035,7 @@ func (s *functionState) defineBinding(name string, binding valueBinding) {
 	if s.scope == nil {
 		s.scope = &codegenScope{}
 	}
+	s.invalidatePackedCommonFieldValues(name)
 	s.invalidatePackedEnumStorage(name)
 	s.invalidatePackedEnumStoreOrigin(name)
 	s.invalidatePackedVariantView(name)
@@ -1182,6 +1186,49 @@ func (s *functionState) bindPackedEnumStorage(name string, enumType *semantic.En
 	s.scope.packedEnumPtrs[name] = packedEnumStorageBinding{ptr: ptr, typ: enumType}
 }
 
+func (s *functionState) bindPackedCommonFieldValues(name string, enumType *semantic.EnumType, values packedPayloadValueCache) {
+	if name == "" || enumType == nil || !enumType.Packed || values.empty() {
+		return
+	}
+	if s.scope == nil {
+		s.scope = &codegenScope{}
+	}
+	binding := packedCommonFieldValueBinding{typ: enumType, values: clonePackedPayloadValues(values)}
+	if s.scope.packedCommonValueName == "" || s.scope.packedCommonValueName == name {
+		s.scope.packedCommonValueName = name
+		s.scope.packedCommonValueBinding = binding
+		return
+	}
+	if s.scope.packedCommonValues == nil {
+		s.scope.packedCommonValues = map[string]packedCommonFieldValueBinding{}
+	}
+	s.scope.packedCommonValues[name] = binding
+}
+
+func (s *functionState) lookupPackedCommonFieldValue(name string, enumType *semantic.EnumType, fieldName string) (C.LLVMValueRef, bool) {
+	if name == "" || enumType == nil || fieldName == "" {
+		return nil, false
+	}
+	for scope := s.scope; scope != nil; scope = scope.parent {
+		if scope.packedCommonValueName == name {
+			binding := scope.packedCommonValueBinding
+			if binding.typ == enumType {
+				if value, ok := binding.values.lookup(fieldName); ok && value != nil {
+					return value, true
+				}
+			}
+		}
+		binding, ok := scope.packedCommonValues[name]
+		if !ok || binding.typ != enumType {
+			continue
+		}
+		if value, ok := binding.values.lookup(fieldName); ok && value != nil {
+			return value, true
+		}
+	}
+	return nil, false
+}
+
 func clonePackedPayloadValues(values packedPayloadValueCache) packedPayloadValueCache {
 	cloned := packedPayloadValueCache{
 		name1:  values.name1,
@@ -1202,6 +1249,10 @@ func clonePackedPayloadValues(values packedPayloadValueCache) packedPayloadValue
 		cloned.values = nil
 	}
 	return cloned
+}
+
+func (c packedPayloadValueCache) empty() bool {
+	return c.name1 == "" && c.name2 == "" && len(c.values) == 0
 }
 
 func (c *packedPayloadValueCache) add(name string, value C.LLVMValueRef) {
@@ -1311,6 +1362,23 @@ func (s *functionState) invalidatePackedVariantView(name string) {
 	}
 }
 
+func (s *functionState) invalidatePackedCommonFieldValues(name string) {
+	if name == "" {
+		return
+	}
+	for scope := s.scope; scope != nil; scope = scope.parent {
+		if key := scope.packedCommonValueName; key == name || strings.HasPrefix(key, name+".") {
+			scope.packedCommonValueName = ""
+			scope.packedCommonValueBinding = packedCommonFieldValueBinding{}
+		}
+		for key := range scope.packedCommonValues {
+			if key == name || strings.HasPrefix(key, name+".") {
+				delete(scope.packedCommonValues, key)
+			}
+		}
+	}
+}
+
 func packedVariantViewTargetName(expr ast.Expr) (string, bool) {
 	switch n := expr.(type) {
 	case *ast.Ident:
@@ -1325,6 +1393,12 @@ func packedVariantViewTargetName(expr ast.Expr) (string, bool) {
 func (s *functionState) invalidatePackedVariantViewExpr(expr ast.Expr) {
 	if name, ok := packedVariantViewTargetName(expr); ok {
 		s.invalidatePackedVariantView(name)
+	}
+}
+
+func (s *functionState) invalidatePackedCommonFieldValuesExpr(expr ast.Expr) {
+	if path, ok := s.packedEnumStoragePath(expr); ok {
+		s.invalidatePackedCommonFieldValues(path)
 	}
 }
 

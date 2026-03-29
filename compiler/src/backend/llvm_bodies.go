@@ -27,17 +27,20 @@ type valueBinding struct {
 }
 
 type codegenScope struct {
-	parent                 *codegenScope
-	bindingName            string
-	binding                valueBinding
-	bindings               map[string]valueBinding
-	packedEnumPtrs         map[string]packedEnumStorageBinding
-	packedEnumStoreName    string
-	packedEnumStoreBinding packedStoreBinding
-	packedEnumStores       map[string]packedStoreBinding
-	packedViewName         string
-	packedViewBinding      packedVariantViewBinding
-	packedViewPtrs         map[string]packedVariantViewBinding
+	parent                   *codegenScope
+	bindingName              string
+	binding                  valueBinding
+	bindings                 map[string]valueBinding
+	packedCommonValueName    string
+	packedCommonValueBinding packedCommonFieldValueBinding
+	packedCommonValues       map[string]packedCommonFieldValueBinding
+	packedEnumPtrs           map[string]packedEnumStorageBinding
+	packedEnumStoreName      string
+	packedEnumStoreBinding   packedStoreBinding
+	packedEnumStores         map[string]packedStoreBinding
+	packedViewName           string
+	packedViewBinding        packedVariantViewBinding
+	packedViewPtrs           map[string]packedVariantViewBinding
 }
 
 type functionState struct {
@@ -179,6 +182,11 @@ type packedVariantPayloadReadCacheKey struct {
 type packedEnumStorageBinding struct {
 	ptr C.LLVMValueRef
 	typ *semantic.EnumType
+}
+
+type packedCommonFieldValueBinding struct {
+	typ    *semantic.EnumType
+	values packedPayloadValueCache
 }
 
 type packedVariantViewBinding struct {
@@ -491,6 +499,7 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		}
 		s.invalidatePackedEnumStorageExpr(n.Target)
 		s.invalidatePackedEnumStoreOriginExpr(n.Target)
+		s.invalidatePackedCommonFieldValuesExpr(n.Target)
 		s.invalidatePackedVariantViewExpr(n.Target)
 		value, _, err := s.emitExpr(n.Value, targetType)
 		if err != nil {
@@ -507,6 +516,7 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		}
 		s.invalidatePackedEnumStorageExpr(n.Target)
 		s.invalidatePackedEnumStoreOriginExpr(n.Target)
+		s.invalidatePackedCommonFieldValuesExpr(n.Target)
 		s.invalidatePackedVariantViewExpr(n.Target)
 		value, _, err := s.emitExpr(n.Value, targetType)
 		if err != nil {
@@ -534,6 +544,7 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			return err
 		}
 		C.LLVMBuildStore(s.builder, result, ptr)
+		s.invalidatePackedCommonFieldValuesExpr(n.Target)
 		s.invalidatePackedReadCaches()
 		return nil
 	case *ast.ReturnStmt:
@@ -1823,6 +1834,10 @@ func (s *functionState) emitEnumMatch(stmt *ast.MatchStmt, enumType *semantic.En
 			return err
 		}
 	}
+	preloadedCommonValues, err := s.preloadPackedMatchCommonFieldValues(enumType, stmt.Value, enumValue, decodedMatchValue, storeBinding, stmt.Arms)
+	if err != nil {
+		return err
+	}
 	matchTagValue, err := s.extractEnumTagValue(enumValue, decodedMatchValue, enumType, storeBinding)
 	if err != nil {
 		return err
@@ -1882,6 +1897,9 @@ func (s *functionState) emitEnumMatch(stmt *ast.MatchStmt, enumType *semantic.En
 				s.bindPackedEnumStoreOrigin(valuePath, enumType, storeBinding)
 			}
 			s.bindMatchedPackedVariantView(valuePath, arm.Pattern, enumValue, armDecodedValue, enumType, storeBinding, armPayloadValues)
+			if hasValuePath && !preloadedCommonValues.empty() {
+				s.bindPackedCommonFieldValues(valuePath, enumType, preloadedCommonValues)
+			}
 			if err := s.emitBlock(arm.Body, false); err != nil {
 				s.popScope()
 				return err
@@ -1904,6 +1922,9 @@ func (s *functionState) emitEnumMatch(stmt *ast.MatchStmt, enumType *semantic.En
 				s.bindPackedEnumStoreOrigin(valuePath, enumType, storeBinding)
 			}
 			s.bindMatchedPackedVariantView(valuePath, arm.Pattern, enumValue, decodedMatchValue, enumType, storeBinding, packedPayloadValueCache{})
+			if hasValuePath && !preloadedCommonValues.empty() {
+				s.bindPackedCommonFieldValues(valuePath, enumType, preloadedCommonValues)
+			}
 			if err := s.emitBlock(arm.Body, false); err != nil {
 				s.popScope()
 				return err
@@ -1951,6 +1972,9 @@ func (s *functionState) emitEnumMatch(stmt *ast.MatchStmt, enumType *semantic.En
 			s.bindPackedEnumStoreOrigin(valuePath, enumType, storeBinding)
 		}
 		s.bindMatchedPackedVariantView(valuePath, arm.Pattern, enumValue, armDecodedValue, enumType, storeBinding, armPayloadValues)
+		if hasValuePath && !preloadedCommonValues.empty() {
+			s.bindPackedCommonFieldValues(valuePath, enumType, preloadedCommonValues)
+		}
 		if err := s.emitBlock(arm.Body, false); err != nil {
 			s.popScope()
 			return err
@@ -2007,6 +2031,10 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 		if err != nil {
 			return nil, nil, err
 		}
+	}
+	preloadedCommonValues, err := s.preloadPackedMatchCommonFieldValues(enumType, expr.Value, enumValue, decodedMatchValue, storeBinding, expr.Arms)
+	if err != nil {
+		return nil, nil, err
 	}
 	matchTagValue, err := s.extractEnumTagValue(enumValue, decodedMatchValue, enumType, storeBinding)
 	if err != nil {
@@ -2070,6 +2098,9 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 				s.bindPackedEnumStoreOrigin(valuePath, enumType, storeBinding)
 			}
 			s.bindMatchedPackedVariantView(valuePath, arm.Pattern, enumValue, armDecodedValue, enumType, storeBinding, armPayloadValues)
+			if hasValuePath && !preloadedCommonValues.empty() {
+				s.bindPackedCommonFieldValues(valuePath, enumType, preloadedCommonValues)
+			}
 			armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, resultType)
 			if err != nil {
 				s.popScope()
@@ -2094,6 +2125,9 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 				s.bindPackedEnumStoreOrigin(valuePath, enumType, storeBinding)
 			}
 			s.bindMatchedPackedVariantView(valuePath, arm.Pattern, enumValue, decodedMatchValue, enumType, storeBinding, packedPayloadValueCache{})
+			if hasValuePath && !preloadedCommonValues.empty() {
+				s.bindPackedCommonFieldValues(valuePath, enumType, preloadedCommonValues)
+			}
 			armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, resultType)
 			if err != nil {
 				s.popScope()
@@ -2161,6 +2195,9 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 			s.bindPackedEnumStoreOrigin(valuePath, enumType, storeBinding)
 		}
 		s.bindMatchedPackedVariantView(valuePath, arm.Pattern, enumValue, armDecodedValue, enumType, storeBinding, armPayloadValues)
+		if hasValuePath && !preloadedCommonValues.empty() {
+			s.bindPackedCommonFieldValues(valuePath, enumType, preloadedCommonValues)
+		}
 		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, resultType)
 		if err != nil {
 			s.popScope()
@@ -2893,6 +2930,81 @@ func packedMatchHasWidePayloadAccess(arms []ast.MatchArm, minArgs int) bool {
 		}
 	}
 	return false
+}
+
+func (s *functionState) preloadPackedMatchCommonFieldValues(enumType *semantic.EnumType, matchValue ast.Expr, enumValue C.LLVMValueRef, decodedMatchValue C.LLVMValueRef, store *packedStoreBinding, arms []ast.MatchArm) (packedPayloadValueCache, error) {
+	var values packedPayloadValueCache
+	if s == nil || enumType == nil || !enumType.Packed || len(enumType.Common) == 0 || !packedEnumMatchCanUseTagSwitch(enumType, arms) {
+		return values, nil
+	}
+	ident, ok := matchValue.(*ast.Ident)
+	if !ok || ident == nil || ident.Name == "" || !matchArmsReadMatchedValueField(ident.Name, arms) {
+		return values, nil
+	}
+	origin := packedReadOriginKey{}
+	if resolvedOrigin, ok, err := s.packedReadOriginKey(matchValue); err != nil {
+		return values, err
+	} else if ok {
+		origin = resolvedOrigin
+	}
+	var ops *packedStoreOps
+	if store != nil {
+		if resolvedOps, ok := s.packedStoreOpsFromBinding(store); ok {
+			ops = resolvedOps
+		}
+	}
+	fieldNames := make([]string, 0, len(enumType.Common))
+	for fieldName := range enumType.Common {
+		fieldNames = append(fieldNames, fieldName)
+	}
+	sort.Strings(fieldNames)
+	for _, fieldName := range fieldNames {
+		layout, err := s.g.packedEnumCommonFieldLayout(enumType, fieldName)
+		if err != nil {
+			return values, err
+		}
+		fieldType := layout.Field.Type
+		cacheName := "packed.match.common.preload." + fieldName
+		var fieldValue C.LLVMValueRef
+		switch {
+		case !layout.StoredInline:
+			if store == nil {
+				continue
+			}
+			fieldValue, err = s.emitPackedSideTableFieldRead(enumValue, enumType, store, fieldType, layout.SideWordOffset, layout.WordCount, origin, cacheName)
+			if err != nil {
+				return values, err
+			}
+		case decodedMatchValue != nil:
+			containerType, err := s.loweredEnumStorageType(enumType)
+			if err != nil {
+				return values, err
+			}
+			fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerType, decodedMatchValue, C.unsigned(layout.RowFieldIndex), cStringFree(cacheName+".ptr"))
+			fieldValue, err = s.loadValue(fieldPtr, fieldType, cacheName)
+			if err != nil {
+				return values, err
+			}
+		case ops != nil && ops.canDirectWordRead():
+			fieldOffsetBytes, ok, err := s.packedEnumDirectFieldByteOffset(enumType, layout.RowFieldIndex)
+			if err != nil {
+				return values, err
+			}
+			if !ok {
+				continue
+			}
+			fieldValue, err = s.emitPackedDirectFieldReadAtOrigin(ops, enumValue, enumType, fieldType, fieldOffsetBytes, origin, cacheName)
+			if err != nil {
+				return values, err
+			}
+		default:
+			continue
+		}
+		if fieldValue != nil {
+			values.add(fieldName, fieldValue)
+		}
+	}
+	return values, nil
 }
 
 func packedMatchShouldEagerDecode(result *semantic.Result, abi packedEnumABIMode, enumType *semantic.EnumType, matchValue ast.Expr, store *packedStoreBinding, arms []ast.MatchArm) bool {
