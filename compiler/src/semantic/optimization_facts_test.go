@@ -87,6 +87,25 @@ func mustExtentBounds(t *testing.T, extent *OptimizationExtent, wantBegin int64,
 	}
 }
 
+func mustAffineExprTerms(t *testing.T, value string, wantConst int64, wantTerms map[string]int64) {
+	t.Helper()
+	parsed, ok := parseOptimizationAffineExpr(value)
+	if !ok {
+		t.Fatalf("expected affine expression, got %q", value)
+	}
+	if parsed.Const != wantConst {
+		t.Fatalf("expected affine constant %d for %q, got %d", wantConst, value, parsed.Const)
+	}
+	if len(parsed.Terms) != len(wantTerms) {
+		t.Fatalf("expected affine terms %#v for %q, got %#v", wantTerms, value, parsed.Terms)
+	}
+	for term, coeff := range wantTerms {
+		if parsed.Terms[term] != coeff {
+			t.Fatalf("expected affine term %q to have coefficient %d in %q, got %#v", term, coeff, value, parsed.Terms)
+		}
+	}
+}
+
 func TestOptimizationFactsMarkConstantChunksExactItemsDisjoint(t *testing.T) {
 	file, result := parseAndAnalyzeOptimizationFactsTest(t, "chunks_exact_disjoint.llcontext", `
 def kernel(buf: dview[i32]) -> void:
@@ -243,5 +262,98 @@ def kernel(buf: dview[i32]) -> void:
 	}
 	if !result.ExprsAreDisjoint(call.Args[0], call.Args[2]) {
 		t.Fatalf("expected composed zip_map destination and source 2 chunk items to be disjoint")
+	}
+}
+
+func TestOptimizationFactsSupportAffineSplitChunkComposition(t *testing.T) {
+	file, result := parseAndAnalyzeOptimizationFactsTest(t, "affine_split_chunks_exact_offsets.llcontext", `
+def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
+	limit: usize = start + (4u * chunk)
+	whole: dview[i32] = buf[start:limit]
+	parts: SplitView[i32] = split_at(whole, (2u * chunk))
+	left_chunks: ChunksExactView[i32] = chunks_exact(parts.left, chunk)
+	right_ro: dview[i32] = readonly(parts.right)
+	right_chunks: ChunksExactView[i32] = chunks_exact(right_ro, chunk)
+	left0: dview[i32] = left_chunks[0u]
+	right0: dview[i32] = right_chunks[0u]
+	right1: dview[i32] = right_chunks[1u]
+	pass
+`)
+	if errs := result.Errors(); len(errs) > 0 {
+		t.Fatalf("semantic errors:\n%s", strings.Join(errs, "\n"))
+	}
+	fn := testFuncDeclByName(t, file, "kernel")
+	left0 := mustVarDeclValueExpr(t, fn.Body[6], "left0")
+	right0 := mustVarDeclValueExpr(t, fn.Body[7], "right0")
+	right1 := mustVarDeclValueExpr(t, fn.Body[8], "right1")
+
+	leftFacts, ok := result.ExprOptimizationFacts(left0)
+	if !ok || leftFacts.Extent == nil {
+		t.Fatalf("expected left0 chunk item facts")
+	}
+	mustAffineExprTerms(t, leftFacts.Extent.Begin, 0, map[string]int64{"start": 1})
+	mustAffineExprTerms(t, leftFacts.Extent.End, 0, map[string]int64{"start": 1, "chunk": 1})
+
+	right0Facts, ok := result.ExprOptimizationFacts(right0)
+	if !ok || right0Facts.Extent == nil {
+		t.Fatalf("expected right0 chunk item facts")
+	}
+	mustAffineExprTerms(t, right0Facts.Extent.Begin, 0, map[string]int64{"start": 1, "chunk": 2})
+	mustAffineExprTerms(t, right0Facts.Extent.End, 0, map[string]int64{"start": 1, "chunk": 3})
+
+	right1Facts, ok := result.ExprOptimizationFacts(right1)
+	if !ok || right1Facts.Extent == nil {
+		t.Fatalf("expected right1 chunk item facts")
+	}
+	mustAffineExprTerms(t, right1Facts.Extent.Begin, 0, map[string]int64{"start": 1, "chunk": 3})
+	mustAffineExprTerms(t, right1Facts.Extent.End, 0, map[string]int64{"start": 1, "chunk": 4})
+
+	if !result.ExprsHaveEqualExtentSize(left0, right0) {
+		t.Fatalf("expected affine chunk items to have equal extent size")
+	}
+	if !result.ExprsHaveEqualExtentSize(left0, right1) {
+		t.Fatalf("expected affine chunk items to have equal extent size")
+	}
+	if !result.ExprsAreDisjoint(left0, right0) {
+		t.Fatalf("expected affine left0 and right0 chunk items to be disjoint")
+	}
+	if !result.ExprsAreDisjoint(left0, right1) {
+		t.Fatalf("expected affine left0 and right1 chunk items to be disjoint")
+	}
+	if !result.ExprsAreDisjoint(right0, right1) {
+		t.Fatalf("expected affine right0 and right1 chunk items to be disjoint")
+	}
+}
+
+func TestAnalyzeZipMapAcceptsAffineSplitChunkComposition(t *testing.T) {
+	file, result := parseAndAnalyzeOptimizationFactsTest(t, "zip_map_affine_split_chunks_exact.llcontext", `
+def add(left: i32, right: i32) -> i32:
+	return left + right
+
+def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
+	limit: usize = start + (4u * chunk)
+	whole: dview[i32] = buf[start:limit]
+	parts: SplitView[i32] = split_at(whole, (2u * chunk))
+	left_chunks: ChunksExactView[i32] = chunks_exact(parts.left, chunk)
+	right_ro: dview[i32] = readonly(parts.right)
+	right_chunks: ChunksExactView[i32] = chunks_exact(right_ro, chunk)
+	zip_map(left_chunks[0u], right_chunks[0u], right_chunks[1u], add)
+`)
+	if errs := result.Errors(); len(errs) > 0 {
+		t.Fatalf("expected affine split/chunk zip_map to analyze cleanly, got:\n%s", strings.Join(errs, "\n"))
+	}
+	fn := testFuncDeclByName(t, file, "kernel")
+	call := mustExprStmtCall(t, fn.Body[len(fn.Body)-1], "zip_map")
+	if !result.ExprsHaveEqualExtentSize(call.Args[0], call.Args[1]) {
+		t.Fatalf("expected affine zip_map destination and source 1 chunk items to have equal extent size")
+	}
+	if !result.ExprsHaveEqualExtentSize(call.Args[0], call.Args[2]) {
+		t.Fatalf("expected affine zip_map destination and source 2 chunk items to have equal extent size")
+	}
+	if !result.ExprsAreDisjoint(call.Args[0], call.Args[1]) {
+		t.Fatalf("expected affine zip_map destination and source 1 chunk items to be disjoint")
+	}
+	if !result.ExprsAreDisjoint(call.Args[0], call.Args[2]) {
+		t.Fatalf("expected affine zip_map destination and source 2 chunk items to be disjoint")
 	}
 }

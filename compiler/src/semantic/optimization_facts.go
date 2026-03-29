@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"fmt"
+	"strings"
 
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
@@ -35,6 +36,11 @@ type OptimizationFacts struct {
 	PackedStoreProvenance PackedStoreProvenance
 	Extent                *OptimizationExtent
 	base                  string
+}
+
+type optimizationAffineExpr struct {
+	Const int64
+	Terms map[string]int64
 }
 
 type PackedStoreProvenance struct {
@@ -213,6 +219,12 @@ func optimizationExtentsDisjoint(a, b *OptimizationExtent) bool {
 	if b.End != "" && b.End == a.Begin {
 		return true
 	}
+	if cmp, ok := optimizationExtentValueCompare(a.End, b.Begin, a.Size); ok && cmp <= 0 {
+		return true
+	}
+	if cmp, ok := optimizationExtentValueCompare(b.End, a.Begin, b.Size); ok && cmp <= 0 {
+		return true
+	}
 	if a.Size != "" && a.Size == b.Size {
 		aBeginScale, aBeginBase, aBeginScaleOK := optimizationScaledExtentValue(a.Begin)
 		aEndScale, aEndBase, aEndScaleOK := optimizationScaledExtentValue(a.End)
@@ -259,11 +271,234 @@ func optimizationExtentConstSize(extent *OptimizationExtent) (int64, bool) {
 	return 0, false
 }
 
-func optimizationScaledExtentValue(value string) (int64, string, bool) {
+func newOptimizationAffineExpr() optimizationAffineExpr {
+	return optimizationAffineExpr{Terms: map[string]int64{}}
+}
+
+func (e *optimizationAffineExpr) add(other optimizationAffineExpr) {
+	if e == nil {
+		return
+	}
+	e.Const += other.Const
+	for term, coeff := range other.Terms {
+		e.addTerm(term, coeff)
+	}
+}
+
+func (e *optimizationAffineExpr) addTerm(term string, coeff int64) {
+	if e == nil || term == "" || coeff == 0 {
+		return
+	}
+	if e.Terms == nil {
+		e.Terms = map[string]int64{}
+	}
+	e.Terms[term] += coeff
+	if e.Terms[term] == 0 {
+		delete(e.Terms, term)
+	}
+}
+
+func (e optimizationAffineExpr) scaled(factor int64) optimizationAffineExpr {
+	out := newOptimizationAffineExpr()
+	out.Const = e.Const * factor
+	for term, coeff := range e.Terms {
+		out.Terms[term] = coeff * factor
+	}
+	return out
+}
+
+func optimizationAffineIsConst(expr optimizationAffineExpr) bool {
+	return len(expr.Terms) == 0
+}
+
+func optimizationAffineExprTermsEqual(left optimizationAffineExpr, right optimizationAffineExpr) bool {
+	if len(left.Terms) != len(right.Terms) {
+		return false
+	}
+	for term, coeff := range left.Terms {
+		if right.Terms[term] != coeff {
+			return false
+		}
+	}
+	return true
+}
+
+func optimizationAffineExprEqual(left optimizationAffineExpr, right optimizationAffineExpr) bool {
+	return left.Const == right.Const && optimizationAffineExprTermsEqual(left, right)
+}
+
+func optimizationAffineCompare(left optimizationAffineExpr, right optimizationAffineExpr) (int, bool) {
+	if !optimizationAffineExprTermsEqual(left, right) {
+		return 0, false
+	}
+	switch {
+	case left.Const < right.Const:
+		return -1, true
+	case left.Const > right.Const:
+		return 1, true
+	default:
+		return 0, true
+	}
+}
+
+func optimizationAffineCompareByPositiveSymbol(left optimizationAffineExpr, right optimizationAffineExpr, symbol string) (int, bool) {
+	if symbol == "" {
+		return 0, false
+	}
+	leftResidual := newOptimizationAffineExpr()
+	leftResidual.Const = left.Const
+	for term, coeff := range left.Terms {
+		if term == symbol {
+			continue
+		}
+		leftResidual.Terms[term] = coeff
+	}
+	rightResidual := newOptimizationAffineExpr()
+	rightResidual.Const = right.Const
+	for term, coeff := range right.Terms {
+		if term == symbol {
+			continue
+		}
+		rightResidual.Terms[term] = coeff
+	}
+	if !optimizationAffineExprEqual(leftResidual, rightResidual) {
+		return 0, false
+	}
+	leftCoeff := left.Terms[symbol]
+	rightCoeff := right.Terms[symbol]
+	switch {
+	case leftCoeff < rightCoeff:
+		return -1, true
+	case leftCoeff > rightCoeff:
+		return 1, true
+	default:
+		return 0, true
+	}
+}
+
+func optimizationExtentValueCompare(left string, right string, size string) (int, bool) {
+	leftAffine, ok := parseOptimizationAffineExpr(left)
+	if !ok {
+		return 0, false
+	}
+	rightAffine, ok := parseOptimizationAffineExpr(right)
+	if !ok {
+		return 0, false
+	}
+	if cmp, ok := optimizationAffineCompare(leftAffine, rightAffine); ok {
+		return cmp, true
+	}
+	if size != "" {
+		if _, ok := optimizationConstInt(size); !ok {
+			if cmp, ok := optimizationAffineCompareByPositiveSymbol(leftAffine, rightAffine, optimizationTrimExtentExpr(size)); ok {
+				return cmp, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func parseOptimizationAffineExpr(value string) (optimizationAffineExpr, bool) {
+	trimmed := optimizationTrimExtentExpr(value)
+	if trimmed == "" {
+		return optimizationAffineExpr{}, false
+	}
+	if parts := optimizationSplitTopLevel(trimmed, " + "); len(parts) > 1 {
+		out := newOptimizationAffineExpr()
+		for _, part := range parts {
+			parsed, ok := parseOptimizationAffineExpr(part)
+			if !ok {
+				return optimizationAffineExpr{}, false
+			}
+			out.add(parsed)
+		}
+		return out, true
+	}
+	if parts := optimizationSplitTopLevel(trimmed, " * "); len(parts) == 2 {
+		left, leftOK := parseOptimizationAffineExpr(parts[0])
+		right, rightOK := parseOptimizationAffineExpr(parts[1])
+		if !leftOK || !rightOK {
+			return optimizationAffineExpr{}, false
+		}
+		switch {
+		case optimizationAffineIsConst(left):
+			return right.scaled(left.Const), true
+		case optimizationAffineIsConst(right):
+			return left.scaled(right.Const), true
+		default:
+			return optimizationAffineExpr{}, false
+		}
+	}
+	if constValue, ok := optimizationConstInt(trimmed); ok {
+		out := newOptimizationAffineExpr()
+		out.Const = constValue
+		return out, true
+	}
+	out := newOptimizationAffineExpr()
+	out.addTerm(trimmed, 1)
+	return out, true
+}
+
+func optimizationTrimExtentExpr(value string) string {
 	trimmed := value
 	for len(trimmed) >= 2 && trimmed[0] == '(' && trimmed[len(trimmed)-1] == ')' {
+		depth := 0
+		balanced := true
+		for i := 0; i < len(trimmed); i++ {
+			switch trimmed[i] {
+			case '(':
+				depth++
+			case ')':
+				depth--
+				if depth < 0 {
+					balanced = false
+				}
+				if depth == 0 && i != len(trimmed)-1 {
+					balanced = false
+				}
+			}
+		}
+		if !balanced || depth != 0 {
+			break
+		}
 		trimmed = trimmed[1 : len(trimmed)-1]
 	}
+	return trimmed
+}
+
+func optimizationSplitTopLevel(value string, sep string) []string {
+	if value == "" || sep == "" || !strings.Contains(value, sep) {
+		return nil
+	}
+	parts := make([]string, 0, 2)
+	depth := 0
+	start := 0
+	found := false
+	for i := 0; i < len(value); i++ {
+		switch value[i] {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		}
+		if depth == 0 && i+len(sep) <= len(value) && value[i:i+len(sep)] == sep {
+			parts = append(parts, value[start:i])
+			start = i + len(sep)
+			i += len(sep) - 1
+			found = true
+		}
+	}
+	if !found {
+		return nil
+	}
+	parts = append(parts, value[start:])
+	return parts
+}
+
+func optimizationScaledExtentValue(value string) (int64, string, bool) {
+	trimmed := optimizationTrimExtentExpr(value)
 	if trimmed == "" {
 		return 0, "", false
 	}
@@ -1066,7 +1301,7 @@ func (a *Analyzer) inferViewHelperExtent(call *ast.CallExpr, baseIndex, startInd
 	if !ok {
 		return nil
 	}
-	baseFacts, ok := a.exprFacts[baseExpr]
+	baseFacts, ok := a.lookupOptimizationFactsForExpr(baseExpr)
 	if ok && baseFacts.HasExactExtent() {
 		startExpr, hasStart := optimizationCallArg(call, startIndex)
 		endExpr, hasEnd := optimizationCallArg(call, endIndex)
@@ -1169,7 +1404,7 @@ func (a *Analyzer) inferSplitViewFieldOptimizationFacts(expr *ast.FieldExpr) (Op
 	if expr.Field != "left" && expr.Field != "right" {
 		return OptimizationFacts{}, false
 	}
-	baseFacts, ok := a.exprFacts[call.Args[0]]
+	baseFacts, ok := a.lookupOptimizationFactsForExpr(call.Args[0])
 	if !ok {
 		return OptimizationFacts{}, false
 	}
@@ -1180,13 +1415,20 @@ func (a *Analyzer) inferSplitViewFieldOptimizationFacts(expr *ast.FieldExpr) (Op
 	if facts.Extent != nil {
 		index := optimizationExprString(call.Args[1])
 		if index != "" {
-			end := index
+			begin := "0"
+			end := optimizationExprString(&ast.FieldExpr{Position: call.Position, Object: call.Args[0], Field: "len"})
+			if facts.Extent.Kind == OptimizationExtentViewBounds {
+				if facts.Extent.Begin != "" {
+					begin = facts.Extent.Begin
+				}
+				if facts.Extent.End != "" {
+					end = facts.Extent.End
+				}
+			}
 			if expr.Field == "right" {
-				begin := index
-				end = optimizationExprString(&ast.FieldExpr{Position: call.Position, Object: call.Args[0], Field: "len"})
-				facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: begin, End: end}
+				facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: optimizationAddOffsetExpr(begin, index), End: end}
 			} else {
-				facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: "0", End: end}
+				facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: begin, End: optimizationAddOffsetExpr(begin, index)}
 			}
 			if expr.Field == "left" && optimizationFieldMatches(call.Args[1], call.Args[0], "len") {
 				facts.Extent = cloneOptimizationExtent(baseFacts.Extent)
