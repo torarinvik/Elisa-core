@@ -23,11 +23,27 @@ def kernel(buf: dview[i32]) -> i32:
 	if strings.Contains(output, "reduce_sum.src = alloca") {
 		t.Fatalf("expected reduce_sum lowering to avoid stack-temp carrier allocas, got:\n%s", output)
 	}
+	for _, forbidden := range []string{
+		"reduce_sum.index = alloca",
+		"reduce_sum.acc = alloca",
+	} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("expected reduce_sum lowering to avoid scalar loop allocas %q, got:\n%s", forbidden, output)
+		}
+	}
 	if !strings.Contains(output, "reduce_sum.src.data = extractvalue") {
 		t.Fatalf("expected reduce_sum lowering to extract the dense-view data pointer directly, got:\n%s", output)
 	}
 	if !strings.Contains(output, "reduce_sum.src.ptr = getelementptr") {
 		t.Fatalf("expected reduce_sum lowering to index directly from the extracted data pointer, got:\n%s", output)
+	}
+	for _, required := range []string{
+		"reduce_sum.index = phi",
+		"reduce_sum.acc = phi",
+	} {
+		if !strings.Contains(output, required) {
+			t.Fatalf("expected reduce_sum lowering to contain %q, got:\n%s", required, output)
+		}
 	}
 }
 
@@ -49,6 +65,7 @@ def kernel(buf: dview[i32]) -> void:
 		"zip_map.dst = alloca",
 		"zip_map.src1 = alloca",
 		"zip_map.src2 = alloca",
+		"zip_map.index = alloca",
 	} {
 		if strings.Contains(output, forbidden) {
 			t.Fatalf("expected zip_map lowering to avoid carrier stack-temp %q, got:\n%s", forbidden, output)
@@ -65,5 +82,8 @@ def kernel(buf: dview[i32]) -> void:
 		if !strings.Contains(output, required) {
 			t.Fatalf("expected zip_map lowering to contain %q, got:\n%s", required, output)
 		}
+	}
+	if !strings.Contains(output, "zip_map.index = phi") {
+		t.Fatalf("expected zip_map lowering to keep its induction variable in SSA, got:\n%s", output)
 	}
 }

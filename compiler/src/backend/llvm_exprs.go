@@ -3498,33 +3498,30 @@ func (s *functionState) emitReduceSumHelperCall(expr *ast.CallExpr) (C.LLVMValue
 	if err != nil {
 		return nil, nil, true, err
 	}
-	zeroIndex := C.LLVMConstInt(usizeLLVMType, 0, 0)
-	one := C.LLVMConstInt(usizeLLVMType, 1, 0)
-	indexAlloca, err := s.createEntryAlloca("reduce_sum.index", usizeType)
+	resultLLVMType, err := s.g.lowerType(resultType)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	C.LLVMBuildStore(s.builder, zeroIndex, indexAlloca)
+	zeroIndex := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	one := C.LLVMConstInt(usizeLLVMType, 1, 0)
 	accZero, err := s.zeroValue(resultType)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	accAlloca, err := s.createEntryAlloca("reduce_sum.acc", resultType)
-	if err != nil {
-		return nil, nil, true, err
-	}
-	C.LLVMBuildStore(s.builder, accZero, accAlloca)
 
+	entryBlock := C.LLVMGetInsertBlock(s.builder)
 	loopCondBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("reduce_sum.cond"))
 	loopBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("reduce_sum.body"))
 	loopEndBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("reduce_sum.end"))
 	C.LLVMBuildBr(s.builder, loopCondBB)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, loopCondBB)
-	indexValue, err := s.loadValue(indexAlloca, usizeType, "reduce_sum.index")
-	if err != nil {
-		return nil, nil, true, err
-	}
+	indexValue := C.LLVMBuildPhi(s.builder, usizeLLVMType, cStringFree("reduce_sum.index"))
+	accValue := C.LLVMBuildPhi(s.builder, resultLLVMType, cStringFree("reduce_sum.acc"))
+	initValues := []C.LLVMValueRef{zeroIndex, accZero}
+	initBlocks := []C.LLVMBasicBlockRef{entryBlock, entryBlock}
+	C.LLVMAddIncoming(indexValue, llvmValueSlicePtr(initValues[:1]), llvmBlockSlicePtr(initBlocks[:1]), 1)
+	C.LLVMAddIncoming(accValue, llvmValueSlicePtr(initValues[1:]), llvmBlockSlicePtr(initBlocks[1:]), 1)
 	hasMore := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, totalValue, cStringFree("reduce_sum.has_more"))
 	C.LLVMBuildCondBr(s.builder, hasMore, loopBodyBB, loopEndBB)
 
@@ -3549,25 +3546,22 @@ func (s *functionState) emitReduceSumHelperCall(expr *ast.CallExpr) (C.LLVMValue
 	if err != nil {
 		return nil, nil, true, err
 	}
-	accValue, err := s.loadValue(accAlloca, resultType, "reduce_sum.acc")
-	if err != nil {
-		return nil, nil, true, err
-	}
 	nextAcc, err := s.emitAugmentedValue(lexer.TOKEN_PLUSEQ, accValue, coercedValue, resultType)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	C.LLVMBuildStore(s.builder, nextAcc, accAlloca)
 	nextIndex := C.LLVMBuildAdd(s.builder, indexValue, one, cStringFree("reduce_sum.index.next"))
-	C.LLVMBuildStore(s.builder, nextIndex, indexAlloca)
+	bodyEnd := C.LLVMGetInsertBlock(s.builder)
 	C.LLVMBuildBr(s.builder, loopCondBB)
+	nextIndexValues := []C.LLVMValueRef{nextIndex}
+	nextIndexBlocks := []C.LLVMBasicBlockRef{bodyEnd}
+	C.LLVMAddIncoming(indexValue, llvmValueSlicePtr(nextIndexValues), llvmBlockSlicePtr(nextIndexBlocks), 1)
+	nextAccValues := []C.LLVMValueRef{nextAcc}
+	nextAccBlocks := []C.LLVMBasicBlockRef{bodyEnd}
+	C.LLVMAddIncoming(accValue, llvmValueSlicePtr(nextAccValues), llvmBlockSlicePtr(nextAccBlocks), 1)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, loopEndBB)
-	resultValue, err := s.loadValue(accAlloca, resultType, "reduce_sum.result")
-	if err != nil {
-		return nil, nil, true, err
-	}
-	return resultValue, resultType, true, nil
+	return accValue, resultType, true, nil
 }
 
 func (s *functionState) emitZipMapHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
@@ -3626,22 +3620,18 @@ func (s *functionState) emitZipMapHelperCall(expr *ast.CallExpr) (C.LLVMValueRef
 	}
 	zero := C.LLVMConstInt(usizeLLVMType, 0, 0)
 	one := C.LLVMConstInt(usizeLLVMType, 1, 0)
-	indexAlloca, err := s.createEntryAlloca("zip_map.index", usizeType)
-	if err != nil {
-		return nil, nil, true, err
-	}
-	C.LLVMBuildStore(s.builder, zero, indexAlloca)
 
+	entryBlock := C.LLVMGetInsertBlock(s.builder)
 	loopCondBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("zip_map.cond"))
 	loopBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("zip_map.body"))
 	loopEndBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("zip_map.end"))
 	C.LLVMBuildBr(s.builder, loopCondBB)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, loopCondBB)
-	indexValue, err := s.loadValue(indexAlloca, usizeType, "zip_map.index")
-	if err != nil {
-		return nil, nil, true, err
-	}
+	indexValue := C.LLVMBuildPhi(s.builder, usizeLLVMType, cStringFree("zip_map.index"))
+	initIndexValues := []C.LLVMValueRef{zero}
+	initIndexBlocks := []C.LLVMBasicBlockRef{entryBlock}
+	C.LLVMAddIncoming(indexValue, llvmValueSlicePtr(initIndexValues), llvmBlockSlicePtr(initIndexBlocks), 1)
 	hasMore := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, totalValue, cStringFree("zip_map.has_more"))
 	C.LLVMBuildCondBr(s.builder, hasMore, loopBodyBB, loopEndBB)
 
@@ -3677,8 +3667,11 @@ func (s *functionState) emitZipMapHelperCall(expr *ast.CallExpr) (C.LLVMValueRef
 	}
 	C.LLVMBuildStore(s.builder, coerced, dstElemPtr)
 	nextIndex := C.LLVMBuildAdd(s.builder, indexValue, one, cStringFree("zip_map.index.next"))
-	C.LLVMBuildStore(s.builder, nextIndex, indexAlloca)
+	bodyEnd := C.LLVMGetInsertBlock(s.builder)
 	C.LLVMBuildBr(s.builder, loopCondBB)
+	nextIndexValues := []C.LLVMValueRef{nextIndex}
+	nextIndexBlocks := []C.LLVMBasicBlockRef{bodyEnd}
+	C.LLVMAddIncoming(indexValue, llvmValueSlicePtr(nextIndexValues), llvmBlockSlicePtr(nextIndexBlocks), 1)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, loopEndBB)
 	return nil, s.g.result.NamedTypes["void"], true, nil
