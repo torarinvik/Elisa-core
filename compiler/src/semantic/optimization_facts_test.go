@@ -531,3 +531,49 @@ def kernel(buf: dview[i32], start: usize, chunk: usize) -> i32:
 		t.Fatalf("expected readonly helper-suffix reduce_sum to analyze cleanly, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
+
+func TestAnalyzeReduceSumAcceptsReadonlyEqualSizeTernarySlices(t *testing.T) {
+	file, result := parseAndAnalyzeOptimizationFactsTest(t, "reduce_sum_readonly_ternary_slices.llcontext", `
+def sum_one(value: i32) -> i32:
+	return value
+
+def kernel(buf: dview[i32], cond: bool, chunk: usize) -> i32:
+	whole: dview[i32] = readonly(buf[0u:(2u * chunk)])
+	picked: dview[i32] = whole[0u:chunk] if cond else whole[chunk:(2u * chunk)]
+	return reduce_sum(picked, sum_one)
+`)
+	if errs := result.Errors(); len(errs) > 0 {
+		t.Fatalf("expected readonly equal-size ternary slices to analyze cleanly, got:\n%s", strings.Join(errs, "\n"))
+	}
+	fn := testFuncDeclByName(t, file, "kernel")
+	picked := mustVarDeclValueExpr(t, fn.Body[1], "picked")
+	facts, ok := result.ExprOptimizationFacts(picked)
+	if !ok || facts.Extent == nil {
+		t.Fatalf("expected ternary-picked view facts")
+	}
+	if !facts.ReadOnly || !facts.Contiguous || !facts.UnitStride {
+		t.Fatalf("expected ternary-picked view to remain readonly dense, got %+v", facts)
+	}
+	if facts.Extent.Kind != OptimizationExtentArraySize {
+		t.Fatalf("expected ternary-picked view to keep size-only exact extent, got %v", facts.Extent.Kind)
+	}
+	mustAffineExprTerms(t, facts.Extent.Size, 0, map[string]int64{"chunk": 1})
+}
+
+func TestAnalyzeReduceSumAcceptsReadonlyEqualSizeTernaryHelperSlices(t *testing.T) {
+	_, result := parseAndAnalyzeOptimizationFactsTest(t, "reduce_sum_readonly_ternary_helper_slices.llcontext", `
+def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
+	return view[start:end]
+
+def sum_one(value: i32) -> i32:
+	return value
+
+def kernel(buf: dview[i32], cond: bool, chunk: usize) -> i32:
+	whole: dview[i32] = readonly(buf[0u:(2u * chunk)])
+	picked: dview[i32] = arena_da_view_slice(whole, 0u, chunk) if cond else arena_da_view_slice(whole, chunk, (2u * chunk))
+	return reduce_sum(picked, sum_one)
+`)
+	if errs := result.Errors(); len(errs) > 0 {
+		t.Fatalf("expected readonly equal-size ternary helper slices to analyze cleanly, got:\n%s", strings.Join(errs, "\n"))
+	}
+}

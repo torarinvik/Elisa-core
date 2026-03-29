@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"llcontext/src/ast"
@@ -478,6 +479,53 @@ func optimizationExtentAffineSize(extent *OptimizationExtent) (optimizationAffin
 	return end.sub(begin), true
 }
 
+func optimizationAffineExprString(expr optimizationAffineExpr) string {
+	parts := make([]string, 0, len(expr.Terms)+1)
+	keys := make([]string, 0, len(expr.Terms))
+	for term := range expr.Terms {
+		keys = append(keys, term)
+	}
+	sort.Strings(keys)
+	for _, term := range keys {
+		coeff := expr.Terms[term]
+		switch coeff {
+		case 1:
+			parts = append(parts, term)
+		case -1:
+			parts = append(parts, fmt.Sprintf("(-1 * %s)", term))
+		default:
+			parts = append(parts, fmt.Sprintf("(%d * %s)", coeff, term))
+		}
+	}
+	if expr.Const != 0 || len(parts) == 0 {
+		parts = append(parts, fmt.Sprintf("%d", expr.Const))
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return strings.Join(parts, " + ")
+}
+
+func optimizationSizeOnlyExtent(extent *OptimizationExtent) (*OptimizationExtent, bool) {
+	if extent == nil {
+		return nil, false
+	}
+	if extent.HasConstSize {
+		return &OptimizationExtent{Kind: OptimizationExtentArraySize, HasConstSize: true, ConstSize: extent.ConstSize, Size: fmt.Sprintf("%d", extent.ConstSize)}, true
+	}
+	if extent.Kind == OptimizationExtentArraySize && extent.Size != "" {
+		return &OptimizationExtent{Kind: OptimizationExtentArraySize, Size: extent.Size}, true
+	}
+	sizeExpr, ok := optimizationExtentAffineSize(extent)
+	if !ok {
+		return nil, false
+	}
+	if optimizationAffineIsConst(sizeExpr) {
+		return &OptimizationExtent{Kind: OptimizationExtentArraySize, HasConstSize: true, ConstSize: sizeExpr.Const, Size: fmt.Sprintf("%d", sizeExpr.Const)}, true
+	}
+	return &OptimizationExtent{Kind: OptimizationExtentArraySize, Size: optimizationAffineExprString(sizeExpr)}, true
+}
+
 func parseOptimizationAffineExpr(value string) (optimizationAffineExpr, bool) {
 	trimmed := optimizationTrimExtentExpr(value)
 	if trimmed == "" {
@@ -944,7 +992,7 @@ func (a *Analyzer) inferRecoveredExprOptimizationFacts(value ast.Expr, fallback 
 		return facts
 	}
 	if fallback == nil || a.exprDefinitelyNever(fallback) {
-		if valueFacts, ok := a.exprFacts[value]; ok {
+		if valueFacts, ok := a.lookupOptimizationFactsForExpr(value); ok {
 			facts = overlayOptimizationFacts(facts, valueFacts)
 		}
 		if facts.base == "" {
@@ -952,8 +1000,8 @@ func (a *Analyzer) inferRecoveredExprOptimizationFacts(value ast.Expr, fallback 
 		}
 		return facts
 	}
-	valueFacts, valueOK := a.exprFacts[value]
-	fallbackFacts, fallbackOK := a.exprFacts[fallback]
+	valueFacts, valueOK := a.lookupOptimizationFactsForExpr(value)
+	fallbackFacts, fallbackOK := a.lookupOptimizationFactsForExpr(fallback)
 	if valueOK && fallbackOK {
 		if merged, ok := mergeAlternativeOptimizationFacts(valueFacts, fallbackFacts); ok {
 			facts = overlayOptimizationFacts(facts, merged)
@@ -1007,6 +1055,12 @@ func mergeAlternativeOptimizationFacts(left OptimizationFacts, right Optimizatio
 		merged.Extent = cloneOptimizationExtent(left.Extent)
 		if merged.base != "" && left.Exclusive && right.Exclusive {
 			merged.Exclusive = true
+		}
+	} else if SameOptimizationExtentSize(left.Extent, right.Extent) {
+		if sizeExtent, ok := optimizationSizeOnlyExtent(left.Extent); ok {
+			merged.Extent = sizeExtent
+		} else if sizeExtent, ok := optimizationSizeOnlyExtent(right.Extent); ok {
+			merged.Extent = sizeExtent
 		}
 	}
 	if !merged.Exclusive && !merged.ReadOnly && !merged.Contiguous && !merged.UnitStride && merged.Extent == nil && merged.base == "" {
