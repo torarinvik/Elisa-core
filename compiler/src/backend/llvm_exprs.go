@@ -2758,36 +2758,29 @@ func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.
 	}
 	exactFillCount := uint64(0)
 	hasSmallExactFillCount := false
-	if !constByte && !dynamicByte {
-		if facts, ok := s.g.result.ExprOptimizationFacts(dstExpr); ok {
-			if count, ok := constOptimizationExtentSize(facts.Extent); ok && count <= smallExactArenaFillUnrollLimit {
-				exactFillCount = count
-				hasSmallExactFillCount = true
-			}
+	if facts, ok := s.g.result.ExprOptimizationFacts(dstExpr); ok {
+		if count, ok := constOptimizationExtentSize(facts.Extent); ok && count <= smallExactArenaFillUnrollLimit {
+			exactFillCount = count
+			hasSmallExactFillCount = true
 		}
-		if !hasSmallExactFillCount {
-			return nil, nil, false, nil
-		}
+	}
+	if !hasSmallExactFillCount && !constByte && !dynamicByte {
+		return nil, nil, false, nil
 	}
 	dstValue, _, err := s.emitExpr(dstExpr, dstType)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	var fillValue C.LLVMValueRef
-	if constByte {
-		fillValue = C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), C.ulonglong(fillByte), 0)
-	} else {
-		fillRawValue, actualFillType, err := s.emitExpr(fillExpr, fillType)
-		if err != nil {
-			return nil, nil, true, err
-		}
-		fillValue, err = s.coerceValue(fillRawValue, actualFillType, s.g.result.NamedTypes["i32"])
-		if err != nil {
-			return nil, nil, true, err
-		}
+	fillRawValue, actualFillType, err := s.emitExpr(fillExpr, fillType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	typedFillValue, err := s.coerceValue(fillRawValue, actualFillType, fillType)
+	if err != nil {
+		return nil, nil, true, err
 	}
 	dstData := C.LLVMBuildExtractValue(s.builder, dstValue, 0, cStringFree("dview.fill.dst.data"))
-	if !(constByte || dynamicByte) {
+	if hasSmallExactFillCount {
 		if exactFillCount == 0 {
 			return nil, resultType, true, nil
 		}
@@ -2803,9 +2796,18 @@ func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.
 			indexValue := C.LLVMConstInt(usizeType, C.ulonglong(i), 0)
 			indices := []C.LLVMValueRef{indexValue}
 			elemPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, dstData, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("dview.fill.elem.ptr"))
-			C.LLVMBuildStore(s.builder, fillValue, elemPtr)
+			C.LLVMBuildStore(s.builder, typedFillValue, elemPtr)
 		}
 		return nil, resultType, true, nil
+	}
+	var fillValue C.LLVMValueRef
+	if constByte {
+		fillValue = C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), C.ulonglong(fillByte), 0)
+	} else {
+		fillValue, err = s.coerceValue(typedFillValue, fillType, s.g.result.NamedTypes["i32"])
+		if err != nil {
+			return nil, nil, true, err
+		}
 	}
 	dstLen := C.LLVMBuildExtractValue(s.builder, dstValue, 1, cStringFree("dview.fill.dst.len"))
 	dstElemSize := C.LLVMBuildExtractValue(s.builder, dstValue, 2, cStringFree("dview.fill.dst.elem_size"))

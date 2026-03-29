@@ -188,3 +188,27 @@ def kernel(buf: dview[i32]) -> darray[i32]:
 		t.Fatalf("expected tiny exact arena_da_from_view to still materialize the darray result, got:\n%s", output)
 	}
 }
+
+func TestGenerateLLVMIRArenaViewFillUsesUnrolledTinyExactByteFastPath(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_dview_fill_unrolled_exact_byte.llcontext", `
+def arena_da_fill[T](dst: dview[T], value: T):
+	return
+
+def kernel(buf: dview[u8]) -> void:
+	whole: dview[u8] = buf[0u:8u]
+	arena_da_fill(whole[0u:4u], 7u8)
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	if strings.Contains(output, "call ptr @memset(") {
+		t.Fatalf("expected tiny exact byte fill to avoid memset, got:\n%s", output)
+	}
+	if !strings.Contains(output, "dview.fill.elem.ptr = getelementptr") {
+		t.Fatalf("expected tiny exact byte fill to compute element addresses directly, got:\n%s", output)
+	}
+	if !strings.Contains(output, "store i8 7, ptr %dview.fill.elem.ptr") {
+		t.Fatalf("expected tiny exact byte fill to lower to direct byte stores, got:\n%s", output)
+	}
+}
