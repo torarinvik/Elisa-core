@@ -133,3 +133,30 @@ def kernel(buf: dview[i32]) -> void:
 	requireInstructionLineContainsAll(t, output, "load i32, ptr %dview.copy.src.elem.ptr", "!alias.scope", "!noalias")
 	requireInstructionLineContainsAll(t, output, "store i32 %dview.copy.elem, ptr %dview.copy.dst.elem.ptr", "!alias.scope", "!noalias")
 }
+
+func TestGenerateLLVMIRArenaViewEqUsesUnrolledDisjointExactFastPath(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_dview_eq_unrolled_disjoint_exact.llcontext", `
+def arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool:
+	return false
+
+def kernel(buf: dview[i32]) -> bool:
+	whole: dview[i32] = buf[0u:8u]
+	ro: dview[i32] = readonly(whole)
+	return arena_da_eq_exact(whole[0u:4u], ro[4u:8u])
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	if strings.Contains(output, "call i64 @memcmp(") || strings.Contains(output, "call i32 @memcmp(") {
+		t.Fatalf("expected tiny disjoint exact view equality to avoid memcmp, got:\n%s", output)
+	}
+	if !strings.Contains(output, "llctx.dview.eq.") {
+		t.Fatalf("expected disjoint exact view equality to emit named alias scopes, got:\n%s", output)
+	}
+	requireInstructionLineContainsAll(t, output, "dview.eq.left.byte = load i8", "!alias.scope", "!noalias")
+	requireInstructionLineContainsAll(t, output, "dview.eq.right.byte = load i8", "!alias.scope", "!noalias")
+	if !strings.Contains(output, "dview.eq.byte.eq = icmp eq i8") {
+		t.Fatalf("expected tiny exact view equality to compare bytes directly, got:\n%s", output)
+	}
+}

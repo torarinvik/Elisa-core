@@ -2490,6 +2490,25 @@ func (s *functionState) emitSpecializedArenaViewEqCall(expr *ast.CallExpr) (C.LL
 		return nil, nil, false, nil
 	}
 	disjoint := s.g.result.ExprsAreDisjoint(leftExpr, rightExpr)
+	exactEqByteCount := uint64(0)
+	hasSmallExactEqByteCount := false
+	if elemType, ok := runtimeIndexedElemType(leftType); ok {
+		if elemSize, err := s.sizeOfType(elemType); err == nil && elemSize != 0 {
+			if leftFacts, ok := s.g.result.ExprOptimizationFacts(leftExpr); ok {
+				if leftCount, ok := constOptimizationExtentSize(leftFacts.Extent); ok {
+					if rightFacts, ok := s.g.result.ExprOptimizationFacts(rightExpr); ok {
+						if rightCount, ok := constOptimizationExtentSize(rightFacts.Extent); ok && rightCount == leftCount {
+							totalBytes := leftCount * elemSize
+							if totalBytes <= smallExactArenaEqUnrollByteLimit {
+								exactEqByteCount = totalBytes
+								hasSmallExactEqByteCount = true
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 
 	leftValue, _, err := s.emitExpr(leftExpr, leftType)
 	if err != nil {
@@ -2503,6 +2522,42 @@ func (s *functionState) emitSpecializedArenaViewEqCall(expr *ast.CallExpr) (C.LL
 	leftLen := C.LLVMBuildExtractValue(s.builder, leftValue, 1, cStringFree("dview.eq.left.len"))
 	leftElemSize := C.LLVMBuildExtractValue(s.builder, leftValue, 2, cStringFree("dview.eq.left.elem_size"))
 	rightData := C.LLVMBuildExtractValue(s.builder, rightValue, 0, cStringFree("dview.eq.right.data"))
+	if hasSmallExactEqByteCount {
+		if exactEqByteCount == 0 {
+			return C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 1, 0), resultType, true, nil
+		}
+		byteType := C.LLVMInt8TypeInContext(s.g.context)
+		usizeType, err := s.g.lowerBuiltin("usize")
+		if err != nil {
+			return nil, nil, true, err
+		}
+		cmpResult := C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 1, 0)
+		domainName := ""
+		leftScopeName := ""
+		rightScopeName := ""
+		if disjoint {
+			domainName = fmt.Sprintf("llctx.dview.eq.%p.domain", expr)
+			leftScopeName = domainName + ".left"
+			rightScopeName = domainName + ".right"
+		}
+		for i := uint64(0); i < exactEqByteCount; i++ {
+			indexValue := C.LLVMConstInt(usizeType, C.ulonglong(i), 0)
+			indices := []C.LLVMValueRef{indexValue}
+			leftBytePtr := C.LLVMBuildGEP2(s.builder, byteType, leftData, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("dview.eq.left.byte.ptr"))
+			leftByte := C.LLVMBuildLoad2(s.builder, byteType, leftBytePtr, cStringFree("dview.eq.left.byte"))
+			if disjoint {
+				s.attachAliasScopeMetadataWithNames(leftByte, domainName, leftScopeName, []string{rightScopeName})
+			}
+			rightBytePtr := C.LLVMBuildGEP2(s.builder, byteType, rightData, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("dview.eq.right.byte.ptr"))
+			rightByte := C.LLVMBuildLoad2(s.builder, byteType, rightBytePtr, cStringFree("dview.eq.right.byte"))
+			if disjoint {
+				s.attachAliasScopeMetadataWithNames(rightByte, domainName, rightScopeName, []string{leftScopeName})
+			}
+			bytesEqual := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), leftByte, rightByte, cStringFree("dview.eq.byte.eq"))
+			cmpResult = C.LLVMBuildAnd(s.builder, cmpResult, bytesEqual, cStringFree("dview.eq.byte.and"))
+		}
+		return cmpResult, resultType, true, nil
+	}
 	_ = C.LLVMBuildExtractValue(s.builder, rightValue, 1, cStringFree("dview.eq.right.len"))
 	_ = C.LLVMBuildExtractValue(s.builder, rightValue, 2, cStringFree("dview.eq.right.elem_size"))
 	byteCount := C.LLVMBuildMul(s.builder, leftLen, leftElemSize, cStringFree("dview.eq.bytes"))
