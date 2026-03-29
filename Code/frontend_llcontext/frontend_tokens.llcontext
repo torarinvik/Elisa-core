@@ -118,8 +118,7 @@ struct FrontendLexer:
     line: mutable int
     col: mutable int
     indent_stack: mutable darray[usize]
-    pending_tokens: mutable darray[FrontendToken]
-    pending_index: mutable usize
+    pending_tokens: mutable Deque[FrontendToken]
     at_line_start: mutable bool
     paren_depth: mutable int
 

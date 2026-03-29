@@ -8,6 +8,25 @@ def frontend_require_arena(lexer: any FrontendLexer&) -> any Arena& can[Abort.Pa
     return lexer.arena
 
 
+@inline(always)
+def frontend_pending_is_empty(lexer: any FrontendLexer&) -> bool:
+    is_empty: func(any Deque[FrontendToken]&) -> bool = arena_deque_is_empty.specialize[FrontendToken]()
+    return is_empty((&lexer.pending_tokens).cast[any Deque[FrontendToken]&])
+
+
+def frontend_pending_push_back(lexer: any FrontendLexer&, token: FrontendToken) can[Memory.Allocate, Abort.Panic]:
+    push_back: func(any Arena&, any Deque[FrontendToken]&, FrontendToken) -> any Deque[FrontendToken]& can[Memory.Allocate, Abort.Panic] = arena_deque_push_back.specialize[FrontendToken]()
+    _ = push_back(frontend_require_arena(lexer), (&lexer.pending_tokens).cast[any Deque[FrontendToken]&], token)
+
+
+def frontend_pending_pop_front(lexer: any FrontendLexer&) -> FrontendToken can[Abort.Panic]:
+    pop_front: func(any Deque[FrontendToken]&, any FrontendToken&) -> bool can[Abort.Panic] = arena_deque_pop_front.specialize[FrontendToken]()
+    token: mutable FrontendToken = zeroed
+    ok: bool = pop_front((&lexer.pending_tokens).cast[any Deque[FrontendToken]&], (&token).cast[any FrontendToken&])
+    assert ok
+    return token
+
+
 def frontend_new_lexer_with_len(a: any Arena&, filename: any u8&, source: any u8&, source_len: usize) -> FrontendLexer can[Memory.Allocate, Abort.Panic]:
     out: mutable FrontendLexer = zeroed
     out.arena as & <- a
@@ -17,7 +36,6 @@ def frontend_new_lexer_with_len(a: any Arena&, filename: any u8&, source: any u8
     out.pos <- 0u
     out.line <- 1
     out.col <- 1
-    out.pending_index <- 0u
     out.at_line_start <- true
     out.paren_depth <- 0
     _ = arena_da_append(a, (&out.indent_stack).cast[any darray[usize]&], 0u)
@@ -92,20 +110,15 @@ def frontend_match_char(lexer: any FrontendLexer&, expected: i64) -> bool:
 
 @inline(always)
 def frontend_pending_has_tokens(lexer: any FrontendLexer&) -> bool:
-    return lexer.pending_index < lexer.pending_tokens.count
+    return not frontend_pending_is_empty(lexer)
 
 
 def frontend_push_pending(lexer: any FrontendLexer&, token: FrontendToken) can[Memory.Allocate, Abort.Panic]:
-    _ = arena_da_append(frontend_require_arena(lexer), (&lexer.pending_tokens).cast[any darray[FrontendToken]&], token)
+    frontend_pending_push_back(lexer, token)
 
 
-def frontend_pop_pending(lexer: any FrontendLexer&) -> FrontendToken:
-    token: FrontendToken = lexer.pending_tokens[lexer.pending_index]
-    lexer.pending_index <- lexer.pending_index + 1u
-    if lexer.pending_index >= lexer.pending_tokens.count:
-        lexer.pending_tokens.count <- 0u
-        lexer.pending_index <- 0u
-    return token
+def frontend_pop_pending(lexer: any FrontendLexer&) -> FrontendToken can[Abort.Panic]:
+    return frontend_pending_pop_front(lexer)
 
 
 def frontend_emit_pending_token(lexer: any FrontendLexer&, kind: FrontendTokenKind) can[Memory.Allocate, Abort.Panic]:
