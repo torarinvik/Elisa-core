@@ -987,6 +987,14 @@ func overlayOptimizationFacts(dst OptimizationFacts, src OptimizationFacts) Opti
 	return dst
 }
 
+func overlayViewCarrierOptimizationFacts(dst OptimizationFacts, src OptimizationFacts) OptimizationFacts {
+	dst = overlayOptimizationFacts(dst, src)
+	if src.Extent != nil {
+		dst.Extent = nil
+	}
+	return dst
+}
+
 func mergeAlternativeOptimizationFacts(left OptimizationFacts, right OptimizationFacts) (OptimizationFacts, bool) {
 	merged := OptimizationFacts{}
 	if left.base != "" && left.base == right.base {
@@ -1197,8 +1205,8 @@ func (a *Analyzer) inferCallOptimizationFacts(call *ast.CallExpr, facts Optimiza
 	case "arena_da_view", "ctx_string_view", "string_view":
 		if baseExpr, ok := optimizationCallArg(call, 0); ok {
 			facts.base = a.optimizationBaseForExpr(baseExpr)
-			if baseFacts, ok := a.exprFacts[baseExpr]; ok && baseFacts.Exclusive {
-				facts.Exclusive = true
+			if baseFacts, ok := a.lookupOptimizationFactsForExpr(baseExpr); ok {
+				facts = overlayViewCarrierOptimizationFacts(facts, baseFacts)
 			}
 		}
 		if extent := a.inferViewHelperExtent(call, 0, 1, 2, "count"); extent != nil {
@@ -1208,9 +1216,7 @@ func (a *Analyzer) inferCallOptimizationFacts(call *ast.CallExpr, facts Optimiza
 		if viewExpr, ok := optimizationCallArg(call, 0); ok {
 			facts.base = a.optimizationBaseForExpr(viewExpr)
 			if viewFacts, ok := a.lookupOptimizationFactsForExpr(viewExpr); ok {
-				if viewFacts.Exclusive {
-					facts.Exclusive = true
-				}
+				facts = overlayViewCarrierOptimizationFacts(facts, viewFacts)
 			}
 		}
 		if facts.Extent == nil {
@@ -1225,9 +1231,7 @@ func (a *Analyzer) inferCallOptimizationFacts(call *ast.CallExpr, facts Optimiza
 		if viewExpr, ok := optimizationCallArg(call, 0); ok {
 			facts.base = a.optimizationBaseForExpr(viewExpr)
 			if viewFacts, ok := a.lookupOptimizationFactsForExpr(viewExpr); ok {
-				if viewFacts.Exclusive {
-					facts.Exclusive = true
-				}
+				facts = overlayViewCarrierOptimizationFacts(facts, viewFacts)
 			}
 		}
 		if facts.Extent == nil {
@@ -1242,9 +1246,7 @@ func (a *Analyzer) inferCallOptimizationFacts(call *ast.CallExpr, facts Optimiza
 		if viewExpr, ok := optimizationCallArg(call, 0); ok {
 			facts.base = a.optimizationBaseForExpr(viewExpr)
 			if viewFacts, ok := a.lookupOptimizationFactsForExpr(viewExpr); ok {
-				if viewFacts.Exclusive {
-					facts.Exclusive = true
-				}
+				facts = overlayViewCarrierOptimizationFacts(facts, viewFacts)
 			}
 		}
 		if facts.Extent == nil {
@@ -1259,9 +1261,7 @@ func (a *Analyzer) inferCallOptimizationFacts(call *ast.CallExpr, facts Optimiza
 		if viewExpr, ok := optimizationCallArg(call, 0); ok {
 			facts.base = a.optimizationBaseForExpr(viewExpr)
 			if viewFacts, ok := a.lookupOptimizationFactsForExpr(viewExpr); ok {
-				if viewFacts.Exclusive {
-					facts.Exclusive = true
-				}
+				facts = overlayViewCarrierOptimizationFacts(facts, viewFacts)
 			}
 		}
 		if facts.Extent == nil {
@@ -1275,8 +1275,8 @@ func (a *Analyzer) inferCallOptimizationFacts(call *ast.CallExpr, facts Optimiza
 	case "arena_da_view_slice", "ctx_string_view_slice", "string_view_slice":
 		if viewExpr, ok := optimizationCallArg(call, 0); ok {
 			facts.base = a.optimizationBaseForExpr(viewExpr)
-			if viewFacts, ok := a.exprFacts[viewExpr]; ok && viewFacts.Exclusive {
-				facts.Exclusive = true
+			if viewFacts, ok := a.lookupOptimizationFactsForExpr(viewExpr); ok {
+				facts = overlayViewCarrierOptimizationFacts(facts, viewFacts)
 			}
 		}
 		if extent := a.inferViewHelperExtent(call, 0, 1, 2, "len"); extent != nil {

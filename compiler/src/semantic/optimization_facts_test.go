@@ -452,3 +452,82 @@ def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
 		t.Fatalf("expected helper view slices to be disjoint")
 	}
 }
+
+func TestAnalyzeZipMapAcceptsReadonlyHelperViewSlices(t *testing.T) {
+	file, result := parseAndAnalyzeOptimizationFactsTest(t, "zip_map_readonly_helper_slices.llcontext", `
+def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
+	return view[start:end]
+
+def add(left: i32, right: i32) -> i32:
+	return left + right
+
+def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
+	limit: usize = start + (3u * chunk)
+	whole: dview[i32] = buf[start:limit]
+	ro: dview[i32] = readonly(whole)
+	dst: dview[i32] = arena_da_view_slice(whole, 0u, chunk)
+	src1: dview[i32] = arena_da_view_slice(ro, chunk, (2u * chunk))
+	src2: dview[i32] = arena_da_view_slice(ro, (2u * chunk), (3u * chunk))
+	zip_map(dst, src1, src2, add)
+`)
+	if errs := result.Errors(); len(errs) > 0 {
+		t.Fatalf("expected readonly helper-slice zip_map to analyze cleanly, got:\n%s", strings.Join(errs, "\n"))
+	}
+	fn := testFuncDeclByName(t, file, "kernel")
+	src1 := mustVarDeclValueExpr(t, fn.Body[4], "src1")
+	src2 := mustVarDeclValueExpr(t, fn.Body[5], "src2")
+	src1Facts, ok := result.ExprOptimizationFacts(src1)
+	if !ok || src1Facts.Extent == nil {
+		t.Fatalf("expected src1 helper slice facts")
+	}
+	if !src1Facts.ReadOnly {
+		t.Fatalf("expected src1 helper slice of readonly view to remain readonly")
+	}
+	mustAffineExprTerms(t, src1Facts.Extent.Begin, 0, map[string]int64{"start": 1, "chunk": 1})
+	mustAffineExprTerms(t, src1Facts.Extent.End, 0, map[string]int64{"start": 1, "chunk": 2})
+	src2Facts, ok := result.ExprOptimizationFacts(src2)
+	if !ok || src2Facts.Extent == nil {
+		t.Fatalf("expected src2 helper slice facts")
+	}
+	if !src2Facts.ReadOnly {
+		t.Fatalf("expected src2 helper slice of readonly view to remain readonly")
+	}
+	mustAffineExprTerms(t, src2Facts.Extent.Begin, 0, map[string]int64{"start": 1, "chunk": 2})
+	mustAffineExprTerms(t, src2Facts.Extent.End, 0, map[string]int64{"start": 1, "chunk": 3})
+	call := mustExprStmtCall(t, fn.Body[len(fn.Body)-1], "zip_map")
+	if !result.ExprsHaveEqualExtentSize(call.Args[0], call.Args[1]) {
+		t.Fatalf("expected readonly helper-slice zip_map destination and source 1 to have equal extent size")
+	}
+	if !result.ExprsHaveEqualExtentSize(call.Args[0], call.Args[2]) {
+		t.Fatalf("expected readonly helper-slice zip_map destination and source 2 to have equal extent size")
+	}
+	if !result.ExprsAreDisjoint(call.Args[0], call.Args[1]) {
+		t.Fatalf("expected readonly helper-slice zip_map destination and source 1 to be disjoint")
+	}
+	if !result.ExprsAreDisjoint(call.Args[0], call.Args[2]) {
+		t.Fatalf("expected readonly helper-slice zip_map destination and source 2 to be disjoint")
+	}
+}
+
+func TestAnalyzeReduceSumAcceptsReadonlyHelperSuffix(t *testing.T) {
+	_, result := parseAndAnalyzeOptimizationFactsTest(t, "reduce_sum_readonly_helper_suffix.llcontext", `
+def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
+	return view[start:end]
+
+def arena_da_view_suffix[T](view: dview[T], start: usize) -> dview[T]:
+	return arena_da_view_slice(view, start, view.len)
+
+def sum_one(value: i32) -> i32:
+	return value
+
+def kernel(buf: dview[i32], start: usize, chunk: usize) -> i32:
+	limit: usize = start + (2u * chunk)
+	whole: dview[i32] = buf[start:limit]
+	ro: dview[i32] = readonly(whole)
+	rest_view: dview[i32] = arena_da_view_suffix(ro, chunk)
+	return reduce_sum(rest_view, sum_one)
+`)
+	if errs := result.Errors(); len(errs) > 0 {
+		t.Fatalf("expected readonly helper-suffix reduce_sum to analyze cleanly, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
