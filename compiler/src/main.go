@@ -6,6 +6,8 @@ import (
 	"io"
 	"llcontext/src/ast"
 	"llcontext/src/backend"
+	"llcontext/src/frontendir"
+	"llcontext/src/interpreter"
 	"llcontext/src/lexer"
 	"llcontext/src/parser"
 	"llcontext/src/semantic"
@@ -31,20 +33,27 @@ func runCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 }
 
 func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int {
+	if options.emit == emitServe {
+		if err := serveCompileServer(options.addr, stdout, stderr); err != nil {
+			fmt.Fprintf(stderr, "error: %s\n", err)
+			return 1
+		}
+		return 0
+	}
+
 	if options.filter != "" && !emitSupportsFilter(options.emit) {
 		fmt.Fprintf(stderr, "error: -filter is only supported for -emit %s\n", supportedFilterEmitModes())
 		return 1
 	}
 
-	src, err := readSourceWithIncludes(options.filename, map[string]bool{})
-	if err != nil {
-		fmt.Fprintf(stderr, "error: %s\n", err)
+	program, ok := loadProgramInput(options.filename, stderr)
+	if !ok {
 		return 1
 	}
 
 	switch options.emit {
 	case emitAST:
-		file, ok := parseProgram(options.filename, src, stderr)
+		file, ok := parseLoadedProgram(program, stderr)
 		if !ok {
 			return 1
 		}
@@ -56,7 +65,7 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 		printFile(stdout, file)
 		return 0
 	case emitFmt:
-		file, ok := parseProgram(options.filename, src, stderr)
+		file, ok := parseLoadedProgram(program, stderr)
 		if !ok {
 			return 1
 		}
@@ -72,12 +81,12 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 		}
 		return 0
 	case emitDoc:
-		file, ok := parseProgram(options.filename, src, stderr)
+		file, ok := parseLoadedProgram(program, stderr)
 		if !ok {
 			return 1
 		}
 		emitSemanticWarningsIfNoErrors(file, stderr)
-		documentation := generateReferenceDoc(options.filename, file)
+		documentation := generateReferenceDoc(program.filename, file)
 		if options.output != "" {
 			if err := os.WriteFile(options.output, []byte(documentation), 0o644); err != nil {
 				fmt.Fprintf(stderr, "error: %s\n", err)
@@ -87,9 +96,25 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 			fmt.Fprint(stdout, documentation)
 		}
 		return 0
+	case emitIR:
+		file, _, ok := analyzeLoadedProgram(program, stderr)
+		if !ok {
+			return 1
+		}
+		encoded, err := frontendir.Encode(buildFrontendIRBundle(program, file))
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %s\n", err)
+			return 1
+		}
+		outputPath := outputPathForEmit(program.filename, options.output, frontendIRExtension)
+		if err := os.WriteFile(outputPath, encoded, 0o644); err != nil {
+			fmt.Fprintf(stderr, "error: %s\n", err)
+			return 1
+		}
+		return 0
 	}
 
-	_, result, ok := analyzeProgram(options.filename, src, stderr)
+	_, result, ok := analyzeLoadedProgram(program, stderr)
 	if !ok {
 		return 1
 	}
@@ -122,7 +147,24 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", emitTest)
 			return 1
 		}
-		return executeSelectedTests(options.filename, result, options.filter, effectiveOptimizationLevel(options), options.packedProfile, stdout, stderr)
+		return executeSelectedTests(program.filename, result, options.filter, effectiveOptimizationLevel(options), options.packedProfile, stdout, stderr)
+	case emitInterpret:
+		if options.output != "" {
+			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", emitInterpret)
+			return 1
+		}
+		execResult, err := interpreter.Execute(result, interpreter.Options{Stdout: stdout})
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %s\n", err)
+			return 1
+		}
+		if !execResult.Return.IsVoid() {
+			if execResult.Stdout != "" && !strings.HasSuffix(execResult.Stdout, "\n") {
+				fmt.Fprintln(stdout)
+			}
+			fmt.Fprintf(stdout, "[ result   ] %s\n", execResult.Return.String())
+		}
+		return 0
 	case emitLLVM:
 		output, err := backend.GenerateLLVMIRWithOptAndPackedLoweringProfile(result, effectiveOptimizationLevel(options), options.packedProfile)
 		if err != nil {
@@ -261,6 +303,9 @@ const (
 	emitAST        = "ast"
 	emitFmt        = "fmt"
 	emitDoc        = "doc"
+	emitIR         = "ir"
+	emitInterpret  = "interpret"
+	emitServe      = "serve"
 	emitTests      = "tests"
 	emitBenches    = "benches"
 	emitFixtures   = "fixtures"
@@ -277,6 +322,7 @@ type cliOptions struct {
 	emit          string
 	filename      string
 	output        string
+	addr          string
 	filter        string
 	packedProfile backend.PackedLoweringProfile
 	packedABI     backend.PackedEnumABI
@@ -323,6 +369,14 @@ func parseArgs(args []string) (cliOptions, error) {
 				return cliOptions{}, fmt.Errorf("missing value after -emit")
 			}
 			options.emit = strings.TrimSpace(args[i])
+		case strings.HasPrefix(arg, "-addr="):
+			options.addr = strings.TrimSpace(strings.TrimPrefix(arg, "-addr="))
+		case arg == "-addr":
+			i++
+			if i >= len(args) {
+				return cliOptions{}, fmt.Errorf("missing value after -addr")
+			}
+			options.addr = strings.TrimSpace(args[i])
 		case strings.HasPrefix(arg, "-filter="):
 			options.filter = strings.TrimSpace(strings.TrimPrefix(arg, "-filter="))
 		case arg == "-filter":
@@ -376,18 +430,21 @@ func parseArgs(args []string) (cliOptions, error) {
 			options.filename = arg
 		}
 	}
-	if options.filename == "" {
-		return cliOptions{}, fmt.Errorf("missing input file")
-	}
 	options.emit = normalizeEmitMode(options.emit)
 	if options.emit == "" {
 		return cliOptions{}, fmt.Errorf("emit mode cannot be empty")
+	}
+	if options.filename == "" && options.emit != emitServe {
+		return cliOptions{}, fmt.Errorf("missing input file")
+	}
+	if options.addr == "" {
+		options.addr = "127.0.0.1:8080"
 	}
 	return options, nil
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprintf(w, "Usage: llcontext [-emit %s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s] [-filter <substring>] [-packed-abi <packed-lowering-override>] [-O0|-O2|-O3] [-o <output>] <file.llcontext>\n", emitAST, emitFmt, emitDoc, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitHeader, emitBitcode, emitObject)
+	fmt.Fprintf(w, "Usage: llcontext [-emit %s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s] [-addr <host:port>] [-filter <substring>] [-packed-abi <packed-lowering-override>] [-O0|-O2|-O3] [-o <output>] <file.llcontext|file%s>\n", emitAST, emitFmt, emitDoc, emitIR, emitInterpret, emitServe, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitHeader, emitBitcode, emitObject, frontendIRExtension)
 	fmt.Fprintf(w, "Packed enums lower canonically as handle-based %s in compiler mode; frozen stores remain the readonly publication form.\n", backend.PackedEnumABIVariantSparse)
 	fmt.Fprintf(w, "-packed-abi can pin an alternate lowering for debugging/compatibility: %s | %s | %s | %s | %s\n", backend.PackedEnumABIRowHandle, backend.PackedEnumABIWordHandle, backend.PackedEnumABIDenseFixed, backend.PackedEnumABIIndexSOA, backend.PackedEnumABIVariantSparse)
 }
@@ -425,6 +482,12 @@ func normalizeEmitMode(value string) string {
 		return emitFmt
 	case emitDoc, "docs", "reference":
 		return emitDoc
+	case emitIR, "frontend-ir", "bundle":
+		return emitIR
+	case emitInterpret, "run", "interp":
+		return emitInterpret
+	case emitServe, "server":
+		return emitServe
 	case emitTests, "test-list":
 		return emitTests
 	case emitBenches, "bench-list":

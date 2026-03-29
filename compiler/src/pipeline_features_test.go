@@ -1,0 +1,99 @@
+package main
+
+import (
+	"bytes"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestRunCLIEmitsFrontendIRAndLoadsLLVMFromBundle(t *testing.T) {
+	fixtureDir := t.TempDir()
+	sourcePath := filepath.Join(fixtureDir, "sample.llcontext")
+	bundlePath := filepath.Join(fixtureDir, "sample.llctxir")
+	src := "def helper(x: i64) -> i64:\n    return x + 2\n\ndef main() -> i64:\n    return helper(40)\n"
+	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write frontend IR fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "ir", "-o", bundlePath, sourcePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected frontend IR emit to succeed, stderr:\n%s", stderr.String())
+	}
+	if _, err := os.Stat(bundlePath); err != nil {
+		t.Fatalf("expected frontend IR bundle at %s: %v", bundlePath, err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = runCLI([]string{"-emit", "llvm", bundlePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected llvm-from-bundle to succeed, stderr:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{"define i64 @helper(i64", "define i64 @main()"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected llvm output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestRunCLIInterpretsSimpleProgram(t *testing.T) {
+	fixtureDir := t.TempDir()
+	sourcePath := filepath.Join(fixtureDir, "interpret_sample.llcontext")
+	src := "def add_twice(x: i64) -> i64:\n    acc: mutable i64 = x\n    acc += x\n    return acc\n\ndef main() -> i64:\n    seed: i64 = 20\n    value: i64 = seed + 1\n    if value == 21:\n        return add_twice(value)\n    return 0\n"
+	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write interpreter fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "interpret", sourcePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected interpreter to succeed, stderr:\n%s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "[ result   ] 42") {
+		t.Fatalf("expected interpreter output to report result 42, got:\n%s", stdout.String())
+	}
+}
+
+func TestCompileServerRequestSupportsIRInterpretAndLLVM(t *testing.T) {
+	src := "def add_twice(x: i64) -> i64:\n    return x + x\n\ndef main() -> i64:\n    return add_twice(21)\n"
+	buildResp, status := executeCompileServerRequest(compileServerRequest{
+		Mode:     "ir",
+		Filename: "server_sample.llcontext",
+		Source:   src,
+	})
+	if status != http.StatusOK || !buildResp.OK {
+		t.Fatalf("expected compile server IR build to succeed, status=%d resp=%+v", status, buildResp)
+	}
+	if buildResp.IR == "" {
+		t.Fatalf("expected compile server IR response to include a bundle payload")
+	}
+
+	runResp, status := executeCompileServerRequest(compileServerRequest{
+		Mode: "interpret",
+		IR:   buildResp.IR,
+	})
+	if status != http.StatusOK || !runResp.OK {
+		t.Fatalf("expected compile server interpret to succeed, status=%d resp=%+v", status, runResp)
+	}
+	if runResp.Value != "42" {
+		t.Fatalf("expected interpret value 42, got %+v", runResp)
+	}
+
+	llvmResp, status := executeCompileServerRequest(compileServerRequest{
+		Mode: "llvm",
+		IR:   buildResp.IR,
+	})
+	if status != http.StatusOK || !llvmResp.OK {
+		t.Fatalf("expected compile server llvm to succeed, status=%d resp=%+v", status, llvmResp)
+	}
+	if !strings.Contains(llvmResp.Output, "define i64 @main()") {
+		t.Fatalf("expected llvm response to contain main definition, got:\n%s", llvmResp.Output)
+	}
+}
