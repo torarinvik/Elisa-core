@@ -6,12 +6,9 @@ import (
 	"io"
 	"llcontext/src/ast"
 	"llcontext/src/backend"
-	"llcontext/src/frontendir"
-	"llcontext/src/interpreter"
 	"llcontext/src/lexer"
 	"llcontext/src/parser"
 	"llcontext/src/semantic"
-	"llcontext/src/unparse"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -23,6 +20,9 @@ func main() {
 }
 
 func runCLI(args []string, stdout io.Writer, stderr io.Writer) int {
+	if len(args) != 0 && isProjectCommand(args[0]) {
+		return runProjectCLI(args, stdout, stderr)
+	}
 	options, err := parseArgs(args)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %s\n", err)
@@ -41,192 +41,11 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 		return 0
 	}
 
-	if options.filter != "" && !emitSupportsFilter(options.emit) {
-		fmt.Fprintf(stderr, "error: -filter is only supported for -emit %s\n", supportedFilterEmitModes())
-		return 1
-	}
-
 	program, ok := loadProgramInput(options.filename, stderr)
 	if !ok {
 		return 1
 	}
-
-	switch options.emit {
-	case emitAST:
-		file, ok := parseLoadedProgram(program, stderr)
-		if !ok {
-			return 1
-		}
-		emitSemanticWarningsIfNoErrors(file, stderr)
-		if options.output != "" {
-			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", emitAST)
-			return 1
-		}
-		printFile(stdout, file)
-		return 0
-	case emitFmt:
-		file, ok := parseLoadedProgram(program, stderr)
-		if !ok {
-			return 1
-		}
-		emitSemanticWarningsIfNoErrors(file, stderr)
-		formatted := unparse.FormatFile(file)
-		if options.output != "" {
-			if err := os.WriteFile(options.output, []byte(formatted), 0o644); err != nil {
-				fmt.Fprintf(stderr, "error: %s\n", err)
-				return 1
-			}
-		} else {
-			fmt.Fprint(stdout, formatted)
-		}
-		return 0
-	case emitDoc:
-		file, ok := parseLoadedProgram(program, stderr)
-		if !ok {
-			return 1
-		}
-		emitSemanticWarningsIfNoErrors(file, stderr)
-		documentation := generateReferenceDoc(program.filename, file)
-		if options.output != "" {
-			if err := os.WriteFile(options.output, []byte(documentation), 0o644); err != nil {
-				fmt.Fprintf(stderr, "error: %s\n", err)
-				return 1
-			}
-		} else {
-			fmt.Fprint(stdout, documentation)
-		}
-		return 0
-	case emitIR:
-		file, _, ok := analyzeLoadedProgram(program, stderr)
-		if !ok {
-			return 1
-		}
-		encoded, err := frontendir.Encode(buildFrontendIRBundle(program, file))
-		if err != nil {
-			fmt.Fprintf(stderr, "error: %s\n", err)
-			return 1
-		}
-		outputPath := outputPathForEmit(program.filename, options.output, frontendIRExtension)
-		if err := os.WriteFile(outputPath, encoded, 0o644); err != nil {
-			fmt.Fprintf(stderr, "error: %s\n", err)
-			return 1
-		}
-		return 0
-	}
-
-	_, result, ok := analyzeLoadedProgram(program, stderr)
-	if !ok {
-		return 1
-	}
-
-	switch options.emit {
-	case emitTests, emitBenches, emitFixtures:
-		if options.output != "" {
-			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", options.emit)
-			return 1
-		}
-		printAnnotatedFunctions(stdout, result, options.emit, options.filter)
-		return 0
-	case emitTestRunner:
-		runnerSource, err := generateTestRunnerSource(options.filename, result, options.filter)
-		if err != nil {
-			fmt.Fprintf(stderr, "error: %s\n", err)
-			return 1
-		}
-		if options.output != "" {
-			if err := os.WriteFile(options.output, []byte(runnerSource), 0o644); err != nil {
-				fmt.Fprintf(stderr, "error: %s\n", err)
-				return 1
-			}
-		} else {
-			fmt.Fprint(stdout, runnerSource)
-		}
-		return 0
-	case emitTest:
-		if options.output != "" {
-			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", emitTest)
-			return 1
-		}
-		return executeSelectedTests(program.filename, result, options.filter, effectiveOptimizationLevel(options), options.packedProfile, stdout, stderr)
-	case emitInterpret:
-		if options.output != "" {
-			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", emitInterpret)
-			return 1
-		}
-		execResult, err := interpreter.Execute(result, interpreter.Options{Stdout: stdout})
-		if err != nil {
-			fmt.Fprintf(stderr, "error: %s\n", err)
-			return 1
-		}
-		if !execResult.Return.IsVoid() {
-			if execResult.Stdout != "" && !strings.HasSuffix(execResult.Stdout, "\n") {
-				fmt.Fprintln(stdout)
-			}
-			fmt.Fprintf(stdout, "[ result   ] %s\n", execResult.Return.String())
-		}
-		return 0
-	case emitLLVM:
-		output, err := backend.GenerateLLVMIRWithOptAndPackedLoweringProfile(result, effectiveOptimizationLevel(options), options.packedProfile)
-		if err != nil {
-			fmt.Fprintf(stderr, "error: %s\n", err)
-			return 1
-		}
-		if options.output != "" {
-			if err := os.WriteFile(options.output, []byte(output), 0o644); err != nil {
-				fmt.Fprintf(stderr, "error: %s\n", err)
-				return 1
-			}
-		} else {
-			fmt.Fprint(stdout, output)
-		}
-		return 0
-	case emitPacked:
-		output, err := backend.DescribePackedLowering(result, options.packedProfile)
-		if err != nil {
-			fmt.Fprintf(stderr, "error: %s\n", err)
-			return 1
-		}
-		if options.output != "" {
-			if err := os.WriteFile(options.output, []byte(output), 0o644); err != nil {
-				fmt.Fprintf(stderr, "error: %s\n", err)
-				return 1
-			}
-		} else {
-			fmt.Fprint(stdout, output)
-		}
-		return 0
-	case emitHeader:
-		output, err := backend.GenerateCHeader(result)
-		if err != nil {
-			fmt.Fprintf(stderr, "error: %s\n", err)
-			return 1
-		}
-		if options.output != "" {
-			if err := os.WriteFile(options.output, []byte(output), 0o644); err != nil {
-				fmt.Fprintf(stderr, "error: %s\n", err)
-				return 1
-			}
-		} else {
-			fmt.Fprint(stdout, output)
-		}
-		return 0
-	case emitBitcode:
-		if err := backend.WriteLLVMBitcodeFileWithOptAndPackedLoweringProfile(result, outputPathForEmit(options.filename, options.output, ".bc"), effectiveOptimizationLevel(options), options.packedProfile); err != nil {
-			fmt.Fprintf(stderr, "error: %s\n", err)
-			return 1
-		}
-		return 0
-	case emitObject:
-		if err := backend.WriteLLVMObjectFileWithOptAndPackedLoweringProfile(result, outputPathForEmit(options.filename, options.output, ".o"), effectiveOptimizationLevel(options), options.packedProfile); err != nil {
-			fmt.Fprintf(stderr, "error: %s\n", err)
-			return 1
-		}
-		return 0
-	default:
-		fmt.Fprintf(stderr, "error: unsupported emit mode %q\n", options.emit)
-		printUsage(stderr)
-		return 1
-	}
+	return runLoadedProgramWithOptions(options, program, stdout, stderr)
 }
 
 func parseProgram(filename string, src []byte, stderr io.Writer) (*ast.File, bool) {
@@ -445,6 +264,10 @@ func parseArgs(args []string) (cliOptions, error) {
 
 func printUsage(w io.Writer) {
 	fmt.Fprintf(w, "Usage: llcontext [-emit %s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s] [-addr <host:port>] [-filter <substring>] [-packed-abi <packed-lowering-override>] [-O0|-O2|-O3] [-o <output>] <file.llcontext|file%s>\n", emitAST, emitFmt, emitDoc, emitIR, emitInterpret, emitServe, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitHeader, emitBitcode, emitObject, frontendIRExtension)
+	fmt.Fprintln(w, "       llcontext init <name> [--path <dir>]")
+	fmt.Fprintln(w, "       llcontext init-lib <name> [--path <dir>]")
+	fmt.Fprintln(w, "       llcontext build|run|test|bench [target] [--project <dir|project.json>]")
+	fmt.Fprintln(w, "       llcontext project view [target] [--project <dir|project.json>]")
 	fmt.Fprintf(w, "Packed enums lower canonically as handle-based %s in compiler mode; frozen stores remain the readonly publication form.\n", backend.PackedEnumABIVariantSparse)
 	fmt.Fprintf(w, "-packed-abi can pin an alternate lowering for debugging/compatibility: %s | %s | %s | %s | %s\n", backend.PackedEnumABIRowHandle, backend.PackedEnumABIWordHandle, backend.PackedEnumABIDenseFixed, backend.PackedEnumABIIndexSOA, backend.PackedEnumABIVariantSparse)
 }
