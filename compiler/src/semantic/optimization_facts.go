@@ -168,7 +168,19 @@ func SameOptimizationExtentSize(a, b *OptimizationExtent) bool {
 			return a.ConstSize == b.ConstSize
 		}
 		return a.Size != "" && a.Size == b.Size
+	case a.Kind == OptimizationExtentArraySize && b.Kind == OptimizationExtentViewBounds:
+		if a.HasConstSize {
+			if bSize, ok := optimizationExtentConstSize(b); ok {
+				return a.ConstSize == bSize
+			}
+		}
+		return a.Size != "" && a.Size == b.Size
+	case a.Kind == OptimizationExtentViewBounds && b.Kind == OptimizationExtentArraySize:
+		return SameOptimizationExtentSize(b, a)
 	case a.Kind == OptimizationExtentViewBounds && b.Kind == OptimizationExtentViewBounds:
+		if a.Size != "" && a.Size == b.Size {
+			return true
+		}
 		aBegin, aBeginOK := optimizationConstInt(a.Begin)
 		aEnd, aEndOK := optimizationConstInt(a.End)
 		bBegin, bBeginOK := optimizationConstInt(b.Begin)
@@ -201,6 +213,17 @@ func optimizationExtentsDisjoint(a, b *OptimizationExtent) bool {
 	if b.End != "" && b.End == a.Begin {
 		return true
 	}
+	if a.Size != "" && a.Size == b.Size {
+		aBeginScale, aBeginBase, aBeginScaleOK := optimizationScaledExtentValue(a.Begin)
+		aEndScale, aEndBase, aEndScaleOK := optimizationScaledExtentValue(a.End)
+		bBeginScale, bBeginBase, bBeginScaleOK := optimizationScaledExtentValue(b.Begin)
+		bEndScale, bEndBase, bEndScaleOK := optimizationScaledExtentValue(b.End)
+		if aBeginScaleOK && aEndScaleOK && bBeginScaleOK && bEndScaleOK && aBeginBase == aEndBase && aBeginBase == bBeginBase && aBeginBase == bEndBase {
+			if aEndScale <= bBeginScale || bEndScale <= aBeginScale {
+				return true
+			}
+		}
+	}
 	aBegin, aBeginOK := optimizationConstInt(a.Begin)
 	aEnd, aEndOK := optimizationConstInt(a.End)
 	bBegin, bBeginOK := optimizationConstInt(b.Begin)
@@ -212,6 +235,72 @@ func optimizationExtentsDisjoint(a, b *OptimizationExtent) bool {
 		return true
 	}
 	return false
+}
+
+func optimizationExtentConstSize(extent *OptimizationExtent) (int64, bool) {
+	if extent == nil {
+		return 0, false
+	}
+	if extent.HasConstSize {
+		return extent.ConstSize, true
+	}
+	if extent.Size != "" {
+		if value, ok := optimizationConstInt(extent.Size); ok {
+			return value, true
+		}
+	}
+	if extent.Kind == OptimizationExtentViewBounds {
+		begin, beginOK := optimizationConstInt(extent.Begin)
+		end, endOK := optimizationConstInt(extent.End)
+		if beginOK && endOK {
+			return end - begin, true
+		}
+	}
+	return 0, false
+}
+
+func optimizationScaledExtentValue(value string) (int64, string, bool) {
+	trimmed := value
+	for len(trimmed) >= 2 && trimmed[0] == '(' && trimmed[len(trimmed)-1] == ')' {
+		trimmed = trimmed[1 : len(trimmed)-1]
+	}
+	if trimmed == "" {
+		return 0, "", false
+	}
+	if constValue, ok := optimizationConstInt(trimmed); ok {
+		return constValue, "", true
+	}
+	sep := " * "
+	sepIdx := -1
+	for i := 0; i+len(sep) <= len(trimmed); i++ {
+		if trimmed[i:i+len(sep)] == sep {
+			sepIdx = i
+			break
+		}
+	}
+	if sepIdx < 0 {
+		return 1, trimmed, true
+	}
+	left := trimmed[:sepIdx]
+	right := trimmed[sepIdx+len(sep):]
+	multiplier, ok := optimizationConstInt(left)
+	if !ok {
+		return 0, "", false
+	}
+	if right == "" {
+		return 0, "", false
+	}
+	return multiplier, right, true
+}
+
+func optimizationChunkExtentOffsetExpr(chunkSize string, chunkIndex int64) string {
+	if chunkIndex <= 0 {
+		return "0"
+	}
+	if chunkIndex == 1 {
+		return chunkSize
+	}
+	return fmt.Sprintf("(%d * %s)", chunkIndex, chunkSize)
 }
 
 func optimizationConstInt(value string) (int64, bool) {
@@ -1100,14 +1189,26 @@ func (a *Analyzer) inferChunksExactItemOptimizationFacts(expr *ast.IndexExpr) (O
 		facts.base = a.optimizationBaseForExpr(expr.Object)
 	}
 	chunkSize := ""
+	chunkSizeConst, chunkSizeConstOK := int64(0), false
 	if call, ok := a.boundCallExpr(expr.Object); ok && callIdentName(call) == "chunks_exact" && len(call.Args) >= 2 {
 		chunkSize = optimizationExprString(call.Args[1])
+		chunkSizeConst, chunkSizeConstOK = a.resolveProjectedFieldConstIntExpr(call.Args[1])
 	}
 	if chunkSize == "" {
 		chunkSize = optimizationExprString(&ast.FieldExpr{Position: expr.Position, Object: expr.Object, Field: "chunk_size"})
 	}
+	chunkIndex, chunkIndexOK := a.resolveProjectedFieldConstIntExpr(expr.Index)
 	if chunkSize != "" {
-		facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: "0", End: chunkSize}
+		switch {
+		case chunkIndexOK && chunkSizeConstOK:
+			begin := chunkIndex * chunkSizeConst
+			end := begin + chunkSizeConst
+			facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Size: chunkSize, Begin: fmt.Sprintf("%d", begin), End: fmt.Sprintf("%d", end)}
+		case chunkIndexOK:
+			facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Size: chunkSize, Begin: optimizationChunkExtentOffsetExpr(chunkSize, chunkIndex), End: optimizationChunkExtentOffsetExpr(chunkSize, chunkIndex+1)}
+		default:
+			facts.Extent = &OptimizationExtent{Kind: OptimizationExtentArraySize, Size: chunkSize, HasConstSize: chunkSizeConstOK, ConstSize: chunkSizeConst}
+		}
 	}
 	return facts, true
 }

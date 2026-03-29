@@ -3614,6 +3614,20 @@ func (a *Analyzer) resolveProjectedFieldValueFromBuiltinViewHelperCall(call *ast
 		default:
 			return nil, false
 		}
+	case "chunks_exact":
+		if len(call.Args) < 2 || len(path) < 2 {
+			return nil, false
+		}
+		chunkStep := path[0]
+		if chunkStep.Index == nil || chunkStep.Field != "" || chunkStep.Wildcard {
+			return nil, false
+		}
+		chunkSize, ok := a.resolveProjectedFieldConstIntExpr(call.Args[1])
+		if !ok || chunkSize < 0 {
+			return nil, false
+		}
+		offset := (*chunkStep.Index) * chunkSize
+		return a.resolveProjectedFieldValueThroughIndexOffset(call.Args[0], offset, path[1:])
 	default:
 		return nil, false
 	}
