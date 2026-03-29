@@ -19,3 +19,4 @@ compiler/src.test
 compiler/packed_mlast_medium_current_clean.memprof
 zig_heap_std/
 zig-master/
+hare-master/

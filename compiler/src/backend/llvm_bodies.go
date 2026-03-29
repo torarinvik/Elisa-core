@@ -592,22 +592,7 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 	case *ast.PassStmt:
 		return nil
 	case *ast.PanicStmt:
-		if n.Message != nil {
-			if _, _, err := s.emitExpr(n.Message, nil); err != nil {
-				return err
-			}
-		}
-		trapFn, err := s.ensureTrapFunction()
-		if err != nil {
-			return err
-		}
-		trapType, err := s.g.lowerFunctionType(&semantic.FuncType{Name: "llvm.trap", Return: s.g.result.NamedTypes["void"]})
-		if err != nil {
-			return err
-		}
-		s.buildCall(trapType, trapFn, nil, "")
-		C.LLVMBuildUnreachable(s.builder)
-		return nil
+		return s.emitPanicWithBacktrace(n.Pos(), n.Message)
 	case *ast.ExprStmt:
 		_, _, err := s.emitExpr(n.Expr, nil)
 		return err

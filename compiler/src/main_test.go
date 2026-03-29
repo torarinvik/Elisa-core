@@ -1910,6 +1910,114 @@ func TestRunCLIRejectsFilterOutsideAnnotationListModes(t *testing.T) {
 	}
 }
 
+func TestRunCLIFormatsSourceCanonically(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "format_fixture.llcontext")
+	src := "@test\ndef sample_case(value: i64) -> i64:\n    values=[1,2,3]\n    if likely value > 0:\n        return (value)\n    return 0\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write format fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "fmt", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected formatter to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	formatted := stdout.String()
+	for _, check := range []string{
+		"@test\n",
+		"def sample_case(value: i64) -> i64:",
+		"values = [1, 2, 3]",
+		"if likely (value > 0):",
+	} {
+		if !strings.Contains(formatted, check) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", check, formatted)
+		}
+	}
+
+	formattedPath := filepath.Join(fixtureDir, "formatted_fixture.llcontext")
+	if err := os.WriteFile(formattedPath, stdout.Bytes(), 0o644); err != nil {
+		t.Fatalf("failed to write formatted fixture: %v", err)
+	}
+	var astStdout bytes.Buffer
+	var astStderr bytes.Buffer
+	exitCode = runCLI([]string{"-emit", "ast", formattedPath}, &astStdout, &astStderr)
+	if exitCode != 0 {
+		t.Fatalf("expected formatted source to reparse successfully, stderr:\n%s", astStderr.String())
+	}
+	if astStderr.Len() != 0 {
+		t.Fatalf("expected reparsed formatted source to stay warning-free, got:\n%s", astStderr.String())
+	}
+}
+
+func TestRunCLIEmitsReferenceDocs(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "reference_fixture.llcontext")
+	src := "struct Pair:\n    left: i64\n    right: i64\n\n@test\ndef build_pair(value: i64) -> Pair:\n    return Pair(value, value)\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write reference fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "doc", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected doc generation to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"# Reference: reference_fixture.llcontext",
+		"## Struct `Pair`",
+		"- declaration: `struct Pair:`",
+		"- fields:",
+		"`left: i64`",
+		"## Function `build_pair`",
+		"- declaration: `def build_pair(value: i64) -> Pair:`",
+		"- annotations:",
+		"`@test`",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected reference docs to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestRunCLIGeneratesSkippedTestRunnerSource(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "skipped_test_runner_fixture.llcontext")
+	src := "@skip(todo)\n@test\ndef alpha_case() -> void:\n    pass\n\n@test\ndef beta_case() -> void:\n    pass\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write skipped runner fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test-runner", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to generate skipped test runner, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "[ SKIPPED  ] alpha_case (todo)") {
+		t.Fatalf("expected skipped test runner to mention alpha_case skip, got:\n%s", output)
+	}
+	if strings.Contains(output, "\talpha_case()\n") {
+		t.Fatalf("expected skipped runner not to invoke alpha_case, got:\n%s", output)
+	}
+	if !strings.Contains(output, "\tbeta_case()\n") {
+		t.Fatalf("expected skipped runner to invoke beta_case, got:\n%s", output)
+	}
+}
+
 func TestRunCLIGeneratesTestRunnerSource(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "test_runner_fixture.llcontext")
@@ -2108,6 +2216,115 @@ func TestRunCLIExecutesFilteredSelectedTests(t *testing.T) {
 	} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected filtered execution output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestRunCLIExecutesSelectedTestsWithGlobFilter(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "execute_glob_tests_fixture.llcontext")
+	src := "@test\ndef alpha_case() -> void:\n    pass\n\n@test\ndef beta_case() -> void:\n    pass\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write glob execute-tests fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", "-filter", "*beta*", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected glob-filtered test execution to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	if strings.Contains(output, "alpha_case") {
+		t.Fatalf("expected glob-filtered execution not to mention alpha_case, got:\n%s", output)
+	}
+	for _, check := range []string{
+		"[ RUN      ] beta_case",
+		"[       OK ] beta_case",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected glob-filtered execution output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestRunCLIContinuesAfterFailingAndSkippedTests(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "execute_fail_skip_fixture.llcontext")
+	src := "@test\ndef alpha_case() -> void:\n    panic(\"boom\")\n\n@skip(todo)\n@test\ndef beta_case() -> void:\n    pass\n\n@test\ndef gamma_case() -> void:\n    pass\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write fail/skip execute-tests fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected fail/skip test execution to return non-zero, stdout:\n%s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected harness stderr to stay empty, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] alpha_case",
+		"PANIC",
+		"alpha_case",
+		"panic at ",
+		"backtrace:",
+		"[ SKIPPED  ] beta_case (todo)",
+		"[ RUN      ] gamma_case",
+		"[       OK ] gamma_case",
+		"[ SUMMARY  ] 3 test(s) selected; passed=1 skipped=1 failed=1",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected richer test harness output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestRunCLICompilesPanicToBacktraceAwareLLVM(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "panic_backtrace_fixture.llcontext")
+	src := "def main() -> int:\n    panic(\"boom\")\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write panic backtrace fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected panic backtrace LLVM emit to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"declare i32 @printf(ptr, ...)",
+		"declare i32 @backtrace(ptr, i32)",
+		"declare void @backtrace_symbols_fd(ptr, i32, i32)",
+		"declare void @abort()",
+		"call i32 (ptr, ...) @printf(",
+		"call i32 @backtrace(ptr",
+		"call void @backtrace_symbols_fd(ptr",
+		"call void @abort()",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected panic LLVM output to contain %q, got:\n%s", check, output)
 		}
 	}
 }

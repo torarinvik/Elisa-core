@@ -1598,6 +1598,149 @@ func (s *functionState) ensureTrapFunction() (C.LLVMValueRef, error) {
 	return s.g.ensureFunctionDeclared("llvm.trap", trapType)
 }
 
+func (s *functionState) ensureAbortFunction() (C.LLVMValueRef, *semantic.FuncType, error) {
+	voidType := s.g.result.NamedTypes["void"]
+	fnType := &semantic.FuncType{Name: "abort", Return: voidType}
+	value, err := s.g.ensureFunctionDeclared("abort", fnType)
+	if err != nil {
+		return nil, nil, err
+	}
+	return value, fnType, nil
+}
+
+func (s *functionState) ensurePrintfFunction() (C.LLVMValueRef, *semantic.FuncType, error) {
+	voidType := s.g.result.NamedTypes["void"]
+	intType := s.g.result.NamedTypes["int"]
+	u8RefType := &semantic.RefType{Elem: s.g.result.NamedTypes["u8"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	_ = voidType
+	fnType := &semantic.FuncType{Name: "printf", Params: []semantic.Type{u8RefType}, Return: intType, Variadic: true}
+	value, err := s.g.ensureFunctionDeclared("printf", fnType)
+	if err != nil {
+		return nil, nil, err
+	}
+	return value, fnType, nil
+}
+
+func (s *functionState) ensureBacktraceFunction() (C.LLVMValueRef, *semantic.FuncType, error) {
+	intType := s.g.result.NamedTypes["int"]
+	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	fnType := &semantic.FuncType{Name: "backtrace", Params: []semantic.Type{voidRefType, intType}, Return: intType}
+	value, err := s.g.ensureFunctionDeclared("backtrace", fnType)
+	if err != nil {
+		return nil, nil, err
+	}
+	return value, fnType, nil
+}
+
+func (s *functionState) ensureBacktraceSymbolsFDFunction() (C.LLVMValueRef, *semantic.FuncType, error) {
+	voidType := s.g.result.NamedTypes["void"]
+	intType := s.g.result.NamedTypes["int"]
+	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	fnType := &semantic.FuncType{Name: "backtrace_symbols_fd", Params: []semantic.Type{voidRefType, intType, intType}, Return: voidType}
+	value, err := s.g.ensureFunctionDeclared("backtrace_symbols_fd", fnType)
+	if err != nil {
+		return nil, nil, err
+	}
+	return value, fnType, nil
+}
+
+func (s *functionState) emitPanicWithBacktrace(pos lexer.Pos, message ast.Expr) error {
+	fileName := strings.TrimSpace(pos.File)
+	if fileName == "" {
+		fileName = "<unknown>"
+	}
+
+	defaultMessage := s.emitGlobalCStringLiteral("panic", "panic.default.message")
+	messagePtr := defaultMessage
+	if message != nil {
+		value, valueType, err := s.emitExpr(message, nil)
+		if err != nil {
+			return err
+		}
+		coerced, ok, err := s.coercePanicMessageToCString(value, valueType, defaultMessage)
+		if err != nil {
+			return err
+		}
+		if ok {
+			messagePtr = coerced
+		}
+	}
+
+	printfFn, printfType, err := s.ensurePrintfFunction()
+	if err != nil {
+		return err
+	}
+	printfLLVMType, err := s.g.lowerFunctionType(printfType)
+	if err != nil {
+		return err
+	}
+	formatPtr := s.emitGlobalCStringLiteral("panic at %s:%d:%d: %s\n", "panic.format")
+	filePtr := s.emitGlobalCStringLiteral(fileName, "panic.file")
+	intLLVMType, err := s.g.lowerType(s.g.result.NamedTypes["int"])
+	if err != nil {
+		return err
+	}
+	lineValue := C.LLVMConstInt(intLLVMType, C.ulonglong(pos.Line), 0)
+	colValue := C.LLVMConstInt(intLLVMType, C.ulonglong(pos.Col), 0)
+	s.buildCall(printfLLVMType, printfFn, []C.LLVMValueRef{formatPtr, filePtr, lineValue, colValue, messagePtr}, "")
+
+	backtraceFn, backtraceType, err := s.ensureBacktraceFunction()
+	if err != nil {
+		return err
+	}
+	backtraceLLVMType, err := s.g.lowerFunctionType(backtraceType)
+	if err != nil {
+		return err
+	}
+	bufferType := C.LLVMArrayType2(C.LLVMPointerTypeInContext(s.g.context, 0), 64)
+	buffer := C.LLVMBuildAlloca(s.builder, bufferType, cStringFree("panic.backtrace.buffer"))
+	bufferPtr := C.LLVMBuildBitCast(s.builder, buffer, C.LLVMPointerTypeInContext(s.g.context, 0), cStringFree("panic.backtrace.ptr"))
+	frameLimit := C.LLVMConstInt(intLLVMType, 64, 0)
+	frameCount := s.buildCall(backtraceLLVMType, backtraceFn, []C.LLVMValueRef{bufferPtr, frameLimit}, "panic.backtrace.count")
+
+	backtraceHeader := s.emitGlobalCStringLiteral("backtrace:\n", "panic.backtrace.header")
+	s.buildCall(printfLLVMType, printfFn, []C.LLVMValueRef{backtraceHeader}, "")
+
+	backtraceSymbolsFn, backtraceSymbolsType, err := s.ensureBacktraceSymbolsFDFunction()
+	if err != nil {
+		return err
+	}
+	backtraceSymbolsLLVMType, err := s.g.lowerFunctionType(backtraceSymbolsType)
+	if err != nil {
+		return err
+	}
+	stderrFD := C.LLVMConstInt(intLLVMType, 2, 0)
+	s.buildCall(backtraceSymbolsLLVMType, backtraceSymbolsFn, []C.LLVMValueRef{bufferPtr, frameCount, stderrFD}, "")
+
+	abortFn, abortType, err := s.ensureAbortFunction()
+	if err != nil {
+		return err
+	}
+	abortLLVMType, err := s.g.lowerFunctionType(abortType)
+	if err != nil {
+		return err
+	}
+	s.buildCall(abortLLVMType, abortFn, nil, "")
+	C.LLVMBuildUnreachable(s.builder)
+	return nil
+}
+
+func (s *functionState) coercePanicMessageToCString(value C.LLVMValueRef, valueType semantic.Type, fallback C.LLVMValueRef) (C.LLVMValueRef, bool, error) {
+	refType, ok := valueType.(*semantic.RefType)
+	if !ok || !semantic.SameType(refType.Elem, s.g.result.NamedTypes["u8"]) {
+		return fallback, false, nil
+	}
+	llvmType, err := s.g.lowerType(refType)
+	if err != nil {
+		return nil, false, err
+	}
+	if refType.State == semantic.RefStateNullable {
+		isNull := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), value, C.LLVMConstNull(llvmType), cStringFree("panic.message.is_null"))
+		value = C.LLVMBuildSelect(s.builder, isNull, fallback, value, cStringFree("panic.message.ptr"))
+	}
+	return value, true, nil
+}
+
 func backendAggregateStates(expr *ast.AggregateStateTypeExpr) []semantic.RefState {
 	if expr == nil {
 		return nil

@@ -9,6 +9,7 @@ import (
 	"llcontext/src/lexer"
 	"llcontext/src/parser"
 	"llcontext/src/semantic"
+	"llcontext/src/unparse"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -53,6 +54,28 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 			return 1
 		}
 		printFile(stdout, file)
+		return 0
+	case emitFmt:
+		formatted := unparse.FormatFile(file)
+		if options.output != "" {
+			if err := os.WriteFile(options.output, []byte(formatted), 0o644); err != nil {
+				fmt.Fprintf(stderr, "error: %s\n", err)
+				return 1
+			}
+		} else {
+			fmt.Fprint(stdout, formatted)
+		}
+		return 0
+	case emitDoc:
+		documentation := generateReferenceDoc(options.filename, file)
+		if options.output != "" {
+			if err := os.WriteFile(options.output, []byte(documentation), 0o644); err != nil {
+				fmt.Fprintf(stderr, "error: %s\n", err)
+				return 1
+			}
+		} else {
+			fmt.Fprint(stdout, documentation)
+		}
 		return 0
 	case emitTests, emitBenches, emitFixtures:
 		if options.output != "" {
@@ -192,6 +215,8 @@ func suppressDeprecatedWarningsForTests() bool {
 
 const (
 	emitAST        = "ast"
+	emitFmt        = "fmt"
+	emitDoc        = "doc"
 	emitTests      = "tests"
 	emitBenches    = "benches"
 	emitFixtures   = "fixtures"
@@ -318,7 +343,7 @@ func parseArgs(args []string) (cliOptions, error) {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprintf(w, "Usage: llcontext [-emit %s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s] [-filter <substring>] [-packed-abi <packed-lowering-override>] [-O0|-O2|-O3] [-o <output>] <file.llcontext>\n", emitAST, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitHeader, emitBitcode, emitObject)
+	fmt.Fprintf(w, "Usage: llcontext [-emit %s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s] [-filter <substring>] [-packed-abi <packed-lowering-override>] [-O0|-O2|-O3] [-o <output>] <file.llcontext>\n", emitAST, emitFmt, emitDoc, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitHeader, emitBitcode, emitObject)
 	fmt.Fprintf(w, "Packed enums lower canonically as handle-based %s in compiler mode; frozen stores remain the readonly publication form.\n", backend.PackedEnumABIVariantSparse)
 	fmt.Fprintf(w, "-packed-abi can pin an alternate lowering for debugging/compatibility: %s | %s | %s | %s | %s\n", backend.PackedEnumABIRowHandle, backend.PackedEnumABIWordHandle, backend.PackedEnumABIDenseFixed, backend.PackedEnumABIIndexSOA, backend.PackedEnumABIVariantSparse)
 }
@@ -352,6 +377,10 @@ func normalizeEmitMode(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case emitAST:
 		return emitAST
+	case emitFmt, "format", "formatter":
+		return emitFmt
+	case emitDoc, "docs", "reference":
+		return emitDoc
 	case emitTests, "test-list":
 		return emitTests
 	case emitBenches, "bench-list":
