@@ -2346,7 +2346,7 @@ func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.
 	if err != nil {
 		return nil, nil, true, err
 	}
-	if hasSmallExactCopyCount && !disjoint {
+	if hasSmallExactCopyCount {
 		if exactCopyCount == 0 {
 			return nil, funcType.Return, true, nil
 		}
@@ -2369,13 +2369,27 @@ func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.
 		}
 		dstData := C.LLVMBuildExtractValue(s.builder, dstValue, 0, cStringFree("dview.copy.dst.data"))
 		srcData := C.LLVMBuildExtractValue(s.builder, srcValue, 0, cStringFree("dview.copy.src.data"))
+		domainName := ""
+		dstScopeName := ""
+		srcScopeName := ""
+		if disjoint {
+			domainName = fmt.Sprintf("llctx.dview.copy.%p.domain", expr)
+			dstScopeName = domainName + ".dst"
+			srcScopeName = domainName + ".src"
+		}
 		for i := uint64(0); i < exactCopyCount; i++ {
 			indexValue := C.LLVMConstInt(usizeType, C.ulonglong(i), 0)
 			indices := []C.LLVMValueRef{indexValue}
 			srcPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, srcData, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("dview.copy.src.elem.ptr"))
 			elemValue := C.LLVMBuildLoad2(s.builder, elemLLVMType, srcPtr, cStringFree("dview.copy.elem"))
+			if disjoint {
+				s.attachAliasScopeMetadataWithNames(elemValue, domainName, srcScopeName, []string{dstScopeName})
+			}
 			dstPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, dstData, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("dview.copy.dst.elem.ptr"))
-			C.LLVMBuildStore(s.builder, elemValue, dstPtr)
+			store := C.LLVMBuildStore(s.builder, elemValue, dstPtr)
+			if disjoint {
+				s.attachAliasScopeMetadataWithNames(store, domainName, dstScopeName, []string{srcScopeName})
+			}
 		}
 		return nil, funcType.Return, true, nil
 	}

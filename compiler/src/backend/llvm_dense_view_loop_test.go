@@ -109,3 +109,27 @@ def kernel(buf: dview[i32]) -> void:
 	requireInstructionLineContainsAll(t, output, "zip_map.src2.elem = load", "!alias.scope", "!noalias")
 	requireInstructionLineContainsAll(t, output, "store i32 %zip_map.call, ptr %zip_map.dst.ptr", "!alias.scope", "!noalias")
 }
+
+func TestGenerateLLVMIRArenaViewCopyUsesUnrolledDisjointExactFastPath(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_dview_copy_unrolled_disjoint_exact.llcontext", `
+def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
+	return
+
+def kernel(buf: dview[i32]) -> void:
+	whole: dview[i32] = buf[0u:8u]
+	ro: dview[i32] = readonly(whole)
+	arena_da_copy_exact(whole[0u:4u], ro[4u:8u])
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	if strings.Contains(output, "call ptr @arena_memcpy(") {
+		t.Fatalf("expected tiny disjoint exact view copy to avoid arena_memcpy, got:\n%s", output)
+	}
+	if !strings.Contains(output, "llctx.dview.copy.") {
+		t.Fatalf("expected disjoint exact view copy to emit named alias scopes, got:\n%s", output)
+	}
+	requireInstructionLineContainsAll(t, output, "load i32, ptr %dview.copy.src.elem.ptr", "!alias.scope", "!noalias")
+	requireInstructionLineContainsAll(t, output, "store i32 %dview.copy.elem, ptr %dview.copy.dst.elem.ptr", "!alias.scope", "!noalias")
+}
