@@ -303,6 +303,21 @@ func optimizationChunkExtentOffsetExpr(chunkSize string, chunkIndex int64) strin
 	return fmt.Sprintf("(%d * %s)", chunkIndex, chunkSize)
 }
 
+func optimizationAddOffsetExpr(base string, offset string) string {
+	if base == "" || base == "0" {
+		return offset
+	}
+	if offset == "" || offset == "0" {
+		return base
+	}
+	if baseValue, baseOK := optimizationConstInt(base); baseOK {
+		if offsetValue, offsetOK := optimizationConstInt(offset); offsetOK {
+			return fmt.Sprintf("%d", baseValue+offsetValue)
+		}
+	}
+	return fmt.Sprintf("(%s + %s)", base, offset)
+}
+
 func optimizationConstInt(value string) (int64, bool) {
 	if value == "" {
 		return 0, false
@@ -1090,8 +1105,21 @@ func (a *Analyzer) exprFactsForCallArg(call *ast.CallExpr, index int) (Optimizat
 	if !ok {
 		return OptimizationFacts{}, false
 	}
-	facts, ok := a.exprFacts[expr]
-	return facts, ok
+	return a.lookupOptimizationFactsForExpr(expr)
+}
+
+func (a *Analyzer) lookupOptimizationFactsForExpr(expr ast.Expr) (OptimizationFacts, bool) {
+	if a == nil || expr == nil {
+		return OptimizationFacts{}, false
+	}
+	if facts, ok := a.exprFacts[expr]; ok {
+		return facts, true
+	}
+	ident, ok := stripOptimizationParens(expr).(*ast.Ident)
+	if !ok {
+		return OptimizationFacts{}, false
+	}
+	return a.lookupIdentOptimizationFacts(ident)
 }
 
 func (a *Analyzer) boundCallExpr(expr ast.Expr) (*ast.CallExpr, bool) {
@@ -1198,14 +1226,23 @@ func (a *Analyzer) inferChunksExactItemOptimizationFacts(expr *ast.IndexExpr) (O
 		chunkSize = optimizationExprString(&ast.FieldExpr{Position: expr.Position, Object: expr.Object, Field: "chunk_size"})
 	}
 	chunkIndex, chunkIndexOK := a.resolveProjectedFieldConstIntExpr(expr.Index)
+	sourceBegin := "0"
+	if call, ok := a.boundCallExpr(expr.Object); ok && callIdentName(call) == "chunks_exact" && len(call.Args) >= 1 {
+		if sourceFacts, ok := a.lookupOptimizationFactsForExpr(call.Args[0]); ok && sourceFacts.Extent != nil && sourceFacts.Extent.Kind == OptimizationExtentViewBounds && sourceFacts.Extent.Begin != "" {
+			sourceBegin = sourceFacts.Extent.Begin
+		}
+	}
 	if chunkSize != "" {
 		switch {
 		case chunkIndexOK && chunkSizeConstOK:
-			begin := chunkIndex * chunkSizeConst
-			end := begin + chunkSizeConst
-			facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Size: chunkSize, Begin: fmt.Sprintf("%d", begin), End: fmt.Sprintf("%d", end)}
+			offset := fmt.Sprintf("%d", chunkIndex*chunkSizeConst)
+			begin := optimizationAddOffsetExpr(sourceBegin, offset)
+			end := optimizationAddOffsetExpr(begin, fmt.Sprintf("%d", chunkSizeConst))
+			facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Size: chunkSize, Begin: begin, End: end}
 		case chunkIndexOK:
-			facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Size: chunkSize, Begin: optimizationChunkExtentOffsetExpr(chunkSize, chunkIndex), End: optimizationChunkExtentOffsetExpr(chunkSize, chunkIndex+1)}
+			begin := optimizationAddOffsetExpr(sourceBegin, optimizationChunkExtentOffsetExpr(chunkSize, chunkIndex))
+			end := optimizationAddOffsetExpr(sourceBegin, optimizationChunkExtentOffsetExpr(chunkSize, chunkIndex+1))
+			facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Size: chunkSize, Begin: begin, End: end}
 		default:
 			facts.Extent = &OptimizationExtent{Kind: OptimizationExtentArraySize, Size: chunkSize, HasConstSize: chunkSizeConstOK, ConstSize: chunkSizeConst}
 		}

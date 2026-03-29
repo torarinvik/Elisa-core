@@ -69,6 +69,24 @@ func mustExprStmtCall(t *testing.T, stmt ast.Stmt, name string) *ast.CallExpr {
 	return call
 }
 
+func mustExtentBounds(t *testing.T, extent *OptimizationExtent, wantBegin int64, wantEnd int64) {
+	t.Helper()
+	if extent == nil {
+		t.Fatalf("expected optimization extent, got nil")
+	}
+	begin, ok := optimizationConstInt(extent.Begin)
+	if !ok {
+		t.Fatalf("expected constant extent begin, got %q", extent.Begin)
+	}
+	end, ok := optimizationConstInt(extent.End)
+	if !ok {
+		t.Fatalf("expected constant extent end, got %q", extent.End)
+	}
+	if begin != wantBegin || end != wantEnd {
+		t.Fatalf("expected extent %d:%d, got %s:%s", wantBegin, wantEnd, extent.Begin, extent.End)
+	}
+}
+
 func TestOptimizationFactsMarkConstantChunksExactItemsDisjoint(t *testing.T) {
 	file, result := parseAndAnalyzeOptimizationFactsTest(t, "chunks_exact_disjoint.llcontext", `
 def kernel(buf: dview[i32]) -> void:
@@ -107,16 +125,12 @@ def kernel(buf: dview[i32]) -> void:
 	if !ok || firstFacts.Extent == nil {
 		t.Fatalf("expected first chunk item to carry optimization facts")
 	}
-	if firstFacts.Extent.Begin != "0" || firstFacts.Extent.End != "4" {
-		t.Fatalf("expected first chunk extent 0:4, got %s:%s", firstFacts.Extent.Begin, firstFacts.Extent.End)
-	}
+	mustExtentBounds(t, firstFacts.Extent, 0, 4)
 	thirdFacts, ok := result.ExprOptimizationFacts(thirdExpr)
 	if !ok || thirdFacts.Extent == nil {
 		t.Fatalf("expected third chunk item to carry optimization facts")
 	}
-	if thirdFacts.Extent.Begin != "8" || thirdFacts.Extent.End != "12" {
-		t.Fatalf("expected third chunk extent 8:12, got %s:%s", thirdFacts.Extent.Begin, thirdFacts.Extent.End)
-	}
+	mustExtentBounds(t, thirdFacts.Extent, 8, 12)
 }
 
 func TestAnalyzeZipMapAcceptsDisjointChunksExactItemsFromSharedBuffer(t *testing.T) {
@@ -149,5 +163,85 @@ def kernel(buf: dview[i32]) -> void:
 	}
 	if !result.ExprsAreDisjoint(call.Args[0], call.Args[2]) {
 		t.Fatalf("expected zip_map destination and source 2 chunk items to be disjoint")
+	}
+}
+
+func TestOptimizationFactsComposeSplitAtAndChunksExactItemOffsets(t *testing.T) {
+	file, result := parseAndAnalyzeOptimizationFactsTest(t, "split_chunks_exact_offsets.llcontext", `
+def kernel(buf: dview[i32]) -> void:
+	whole: dview[i32] = buf[0u:16u]
+	parts: SplitView[i32] = split_at(whole, 8u)
+	left_ro: dview[i32] = readonly(parts.left)
+	right_ro: dview[i32] = readonly(parts.right)
+	left_chunks: ChunksExactView[i32] = chunks_exact(left_ro, 4u)
+	right_chunks: ChunksExactView[i32] = chunks_exact(right_ro, 4u)
+	left0: dview[i32] = left_chunks[0u]
+	right0: dview[i32] = right_chunks[0u]
+	right1: dview[i32] = right_chunks[1u]
+	pass
+`)
+	if errs := result.Errors(); len(errs) > 0 {
+		t.Fatalf("semantic errors:\n%s", strings.Join(errs, "\n"))
+	}
+	fn := testFuncDeclByName(t, file, "kernel")
+	left0 := mustVarDeclValueExpr(t, fn.Body[6], "left0")
+	right0 := mustVarDeclValueExpr(t, fn.Body[7], "right0")
+	right1 := mustVarDeclValueExpr(t, fn.Body[8], "right1")
+
+	leftFacts, ok := result.ExprOptimizationFacts(left0)
+	if !ok || leftFacts.Extent == nil {
+		t.Fatalf("expected left0 chunk item facts")
+	}
+	mustExtentBounds(t, leftFacts.Extent, 0, 4)
+	right0Facts, ok := result.ExprOptimizationFacts(right0)
+	if !ok || right0Facts.Extent == nil {
+		t.Fatalf("expected right0 chunk item facts")
+	}
+	mustExtentBounds(t, right0Facts.Extent, 8, 12)
+	right1Facts, ok := result.ExprOptimizationFacts(right1)
+	if !ok || right1Facts.Extent == nil {
+		t.Fatalf("expected right1 chunk item facts")
+	}
+	mustExtentBounds(t, right1Facts.Extent, 12, 16)
+	if !result.ExprsAreDisjoint(left0, right0) {
+		t.Fatalf("expected left0 and right0 chunk items to be disjoint")
+	}
+	if !result.ExprsAreDisjoint(left0, right1) {
+		t.Fatalf("expected left0 and right1 chunk items to be disjoint")
+	}
+	if !result.ExprsAreDisjoint(right0, right1) {
+		t.Fatalf("expected right0 and right1 chunk items to be disjoint")
+	}
+}
+
+func TestAnalyzeZipMapAcceptsSplitChunksExactComposition(t *testing.T) {
+	file, result := parseAndAnalyzeOptimizationFactsTest(t, "zip_map_split_chunks_exact_disjoint.llcontext", `
+def add(left: i32, right: i32) -> i32:
+	return left + right
+
+def kernel(buf: dview[i32]) -> void:
+	whole: dview[i32] = buf[0u:16u]
+	parts: SplitView[i32] = split_at(whole, 8u)
+	left_chunks: ChunksExactView[i32] = chunks_exact(parts.left, 4u)
+	right_ro: dview[i32] = readonly(parts.right)
+	right_chunks: ChunksExactView[i32] = chunks_exact(right_ro, 4u)
+	zip_map(left_chunks[0u], right_chunks[0u], right_chunks[1u], add)
+`)
+	if errs := result.Errors(); len(errs) > 0 {
+		t.Fatalf("expected composed split/chunks zip_map to analyze cleanly, got:\n%s", strings.Join(errs, "\n"))
+	}
+	fn := testFuncDeclByName(t, file, "kernel")
+	call := mustExprStmtCall(t, fn.Body[len(fn.Body)-1], "zip_map")
+	if !result.ExprsHaveEqualExtentSize(call.Args[0], call.Args[1]) {
+		t.Fatalf("expected composed zip_map destination and source 1 chunk items to have equal extent size")
+	}
+	if !result.ExprsHaveEqualExtentSize(call.Args[0], call.Args[2]) {
+		t.Fatalf("expected composed zip_map destination and source 2 chunk items to have equal extent size")
+	}
+	if !result.ExprsAreDisjoint(call.Args[0], call.Args[1]) {
+		t.Fatalf("expected composed zip_map destination and source 1 chunk items to be disjoint")
+	}
+	if !result.ExprsAreDisjoint(call.Args[0], call.Args[2]) {
+		t.Fatalf("expected composed zip_map destination and source 2 chunk items to be disjoint")
 	}
 }
