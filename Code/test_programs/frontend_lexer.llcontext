@@ -252,6 +252,16 @@ def frontend_expect_lookup_keyword(text: static u8&, expected: FrontendTokenKind
     return frontend_kind_eq(frontend_lookup_keyword(view), expected)
 
 
+def frontend_expect_lookup_keyword_entries(entries: any FrontendKeywordEntry&, count: usize) -> bool:
+    i: mutable usize = 0u
+    while i < count:
+        entry: FrontendKeywordEntry = entries[i]
+        if not frontend_expect_lookup_keyword(entry.text, entry.kind):
+            return false
+        i <- i + 1u
+    return true
+
+
 def frontend_case_simple_ident() -> bool can[Memory.Allocate, Abort.Panic]:
     region scratch(4096u)
     a: any Arena& = (&scratch).cast[any Arena&]
@@ -359,7 +369,51 @@ def frontend_case_region_alloc_syntax() -> bool can[Memory.Allocate, Abort.Panic
 
 
 def frontend_case_lookup_keyword_table() -> bool:
-    return frontend_expect_lookup_keyword("as", FrontendTokenKind.As) and frontend_expect_lookup_keyword("if", FrontendTokenKind.If) and frontend_expect_lookup_keyword("in", FrontendTokenKind.In) and frontend_expect_lookup_keyword("or", FrontendTokenKind.Or) and frontend_expect_lookup_keyword("and", FrontendTokenKind.And) and frontend_expect_lookup_keyword("any", FrontendTokenKind.Any) and frontend_expect_lookup_keyword("def", FrontendTokenKind.Def) and frontend_expect_lookup_keyword("not", FrontendTokenKind.Not) and frontend_expect_lookup_keyword("try", FrontendTokenKind.Try) and frontend_expect_lookup_keyword("elif", FrontendTokenKind.Elif) and frontend_expect_lookup_keyword("else", FrontendTokenKind.Else) and frontend_expect_lookup_keyword("enum", FrontendTokenKind.Enum) and frontend_expect_lookup_keyword("heap", FrontendTokenKind.Heap) and frontend_expect_lookup_keyword("null", FrontendTokenKind.Null) and frontend_expect_lookup_keyword("pass", FrontendTokenKind.Pass) and frontend_expect_lookup_keyword("repr", FrontendTokenKind.Repr) and frontend_expect_lookup_keyword("tail", FrontendTokenKind.Tail) and frontend_expect_lookup_keyword("true", FrontendTokenKind.True) and frontend_expect_lookup_keyword("const", FrontendTokenKind.Const) and frontend_expect_lookup_keyword("error", FrontendTokenKind.Error) and frontend_expect_lookup_keyword("false", FrontendTokenKind.False) and frontend_expect_lookup_keyword("match", FrontendTokenKind.Match) and frontend_expect_lookup_keyword("panic", FrontendTokenKind.Panic) and frontend_expect_lookup_keyword("raise", FrontendTokenKind.Raise) and frontend_expect_lookup_keyword("stack", FrontendTokenKind.Stack) and frontend_expect_lookup_keyword("while", FrontendTokenKind.While) and frontend_expect_lookup_keyword("export", FrontendTokenKind.Export) and frontend_expect_lookup_keyword("extern", FrontendTokenKind.Extern) and frontend_expect_lookup_keyword("global", FrontendTokenKind.Global) and frontend_expect_lookup_keyword("packed", FrontendTokenKind.Packed) and frontend_expect_lookup_keyword("return", FrontendTokenKind.Return) and frontend_expect_lookup_keyword("sizeof", FrontendTokenKind.Sizeof) and frontend_expect_lookup_keyword("static", FrontendTokenKind.Static) and frontend_expect_lookup_keyword("struct", FrontendTokenKind.Struct) and frontend_expect_lookup_keyword("zeroed", FrontendTokenKind.Zeroed) and frontend_expect_lookup_keyword("aligned", FrontendTokenKind.Aligned) and frontend_expect_lookup_keyword("mutable", FrontendTokenKind.Mutable) and frontend_expect_lookup_keyword("region", FrontendTokenKind.Ident) and frontend_expect_lookup_keyword("new", FrontendTokenKind.Ident) and frontend_expect_lookup_keyword("destroy", FrontendTokenKind.Ident) and frontend_expect_lookup_keyword("defin", FrontendTokenKind.Ident) and frontend_expect_lookup_keyword("truer", FrontendTokenKind.Ident)
+    entries: FrontendKeywordEntry[42] = [
+        FrontendKeywordEntry("as", FrontendTokenKind.As),
+        FrontendKeywordEntry("if", FrontendTokenKind.If),
+        FrontendKeywordEntry("in", FrontendTokenKind.In),
+        FrontendKeywordEntry("or", FrontendTokenKind.Or),
+        FrontendKeywordEntry("and", FrontendTokenKind.And),
+        FrontendKeywordEntry("any", FrontendTokenKind.Any),
+        FrontendKeywordEntry("def", FrontendTokenKind.Def),
+        FrontendKeywordEntry("not", FrontendTokenKind.Not),
+        FrontendKeywordEntry("try", FrontendTokenKind.Try),
+        FrontendKeywordEntry("elif", FrontendTokenKind.Elif),
+        FrontendKeywordEntry("else", FrontendTokenKind.Else),
+        FrontendKeywordEntry("enum", FrontendTokenKind.Enum),
+        FrontendKeywordEntry("heap", FrontendTokenKind.Heap),
+        FrontendKeywordEntry("null", FrontendTokenKind.Null),
+        FrontendKeywordEntry("pass", FrontendTokenKind.Pass),
+        FrontendKeywordEntry("repr", FrontendTokenKind.Repr),
+        FrontendKeywordEntry("tail", FrontendTokenKind.Tail),
+        FrontendKeywordEntry("true", FrontendTokenKind.True),
+        FrontendKeywordEntry("const", FrontendTokenKind.Const),
+        FrontendKeywordEntry("error", FrontendTokenKind.Error),
+        FrontendKeywordEntry("false", FrontendTokenKind.False),
+        FrontendKeywordEntry("match", FrontendTokenKind.Match),
+        FrontendKeywordEntry("panic", FrontendTokenKind.Panic),
+        FrontendKeywordEntry("raise", FrontendTokenKind.Raise),
+        FrontendKeywordEntry("stack", FrontendTokenKind.Stack),
+        FrontendKeywordEntry("while", FrontendTokenKind.While),
+        FrontendKeywordEntry("export", FrontendTokenKind.Export),
+        FrontendKeywordEntry("extern", FrontendTokenKind.Extern),
+        FrontendKeywordEntry("global", FrontendTokenKind.Global),
+        FrontendKeywordEntry("packed", FrontendTokenKind.Packed),
+        FrontendKeywordEntry("return", FrontendTokenKind.Return),
+        FrontendKeywordEntry("sizeof", FrontendTokenKind.Sizeof),
+        FrontendKeywordEntry("static", FrontendTokenKind.Static),
+        FrontendKeywordEntry("struct", FrontendTokenKind.Struct),
+        FrontendKeywordEntry("zeroed", FrontendTokenKind.Zeroed),
+        FrontendKeywordEntry("aligned", FrontendTokenKind.Aligned),
+        FrontendKeywordEntry("mutable", FrontendTokenKind.Mutable),
+        FrontendKeywordEntry("region", FrontendTokenKind.Ident),
+        FrontendKeywordEntry("new", FrontendTokenKind.Ident),
+        FrontendKeywordEntry("destroy", FrontendTokenKind.Ident),
+        FrontendKeywordEntry("defin", FrontendTokenKind.Ident),
+        FrontendKeywordEntry("truer", FrontendTokenKind.Ident)
+    ]
+    return frontend_expect_lookup_keyword_entries((&entries[0u]).cast[any FrontendKeywordEntry&], 42u)
 
 
 def frontend_case_kind_only_keyword_path() -> bool can[Memory.Allocate, Abort.Panic]:
