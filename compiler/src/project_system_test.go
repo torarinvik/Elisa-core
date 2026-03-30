@@ -403,8 +403,8 @@ func writeNativeForeignProjectFixture(t *testing.T) string {
 `
 	writeFixtureFile(t, filepath.Join(projectRoot, projectFileName), projectJSON)
 	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.llcontext"), "extern foreign_message() -> any u8&\nextern puts(text: any u8&) -> int can[Console.Write]\n\ndef main() -> int can[Console.Write]:\n    puts(foreign_message())\n    return 0\n")
-	writeFixtureFile(t, filepath.Join(projectRoot, "test", "project_tests.llcontext"), "extern foreign_value() -> int\n\n@test\ndef foreign_case() -> void:\n    if foreign_value() != 42:\n        panic(\"expected foreign value\")\n")
-	writeFixtureFile(t, filepath.Join(projectRoot, "native", "runtime.c"), "#include <stdint.h>\n#include \"llcontext.h\"\n\nint64_t foreign_value(void) { return 42; }\nchar *foreign_message(void) { return \"native hello\"; }\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "test", "project_tests.llcontext"), "extern foreign_value() -> int\n\n@test\ndef foreign_case() -> void can[Abort.Panic]:\n    if foreign_value() != 42:\n        panic(\"expected foreign value\")\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "native", "runtime.c"), "#include <stdint.h>\n\nint64_t foreign_value(void) { return 42; }\nchar *foreign_message(void) { return \"native hello\"; }\n")
 	return projectRoot
 }
 

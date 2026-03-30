@@ -140,6 +140,12 @@ func (g *llvmGenerator) writeBitcodeFile(outputPath string) error {
 }
 
 func (g *llvmGenerator) writeObjectFile(outputPath string, optLevel OptimizationLevel) error {
+	if g.module == nil {
+		return fmt.Errorf("cannot write object file for a nil LLVM module")
+	}
+	if err := g.ensureTargetMachine(); err != nil {
+		return err
+	}
 	if err := g.optimizeModule(optLevel); err != nil {
 		return err
 	}
