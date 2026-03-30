@@ -1374,6 +1374,9 @@ func (a *Analyzer) packedAllocConstructorInfo(expr ast.Expr) (*EnumType, *EnumVa
 }
 
 func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
+	if expr.Op == lexer.TOKEN_IS {
+		return a.analyzeIsExpr(expr)
+	}
 	left := a.analyzeExpr(expr.Left)
 	right := a.analyzeExpr(expr.Right)
 	switch expr.Op {
@@ -1428,6 +1431,50 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 	default:
 		return invalidType
 	}
+}
+
+func (a *Analyzer) analyzeIsExpr(expr *ast.BinaryExpr) Type {
+	left := a.analyzeExpr(expr.Left)
+	if _, _, ok := resolveMatchableEnumType(left); !ok {
+		a.errorf(expr.Left.Pos(), "is requires an enum value, got %s", left.String())
+		return a.namedTypes["bool"]
+	}
+	fieldExpr, ok := isEnumVariantExpr(expr.Right)
+	if !ok {
+		a.analyzeExpr(expr.Right)
+		a.errorf(expr.Right.Pos(), "is expects an enum variant path like Expr.Variant")
+		return a.namedTypes["bool"]
+	}
+	enumType, variant, ok := a.enumConstructorInfoFromFieldExpr(fieldExpr)
+	if !ok {
+		a.errorf(expr.Right.Pos(), "is expects an enum variant path like Expr.Variant")
+		return a.namedTypes["bool"]
+	}
+	if variant == nil {
+		a.errorf(fieldExpr.Pos(), "enum %q has no variant %q", enumType.Name, fieldExpr.Field)
+		return a.namedTypes["bool"]
+	}
+	matchableEnum, _, _ := resolveMatchableEnumType(left)
+	if matchableEnum == nil || enumType == nil || matchableEnum.Name != enumType.Name {
+		got := "<invalid>"
+		if enumType != nil {
+			got = enumType.Name + "." + variant.Name
+		}
+		a.errorf(expr.Pos(), "is expects a variant of enum %q, got %s", matchableEnum.Name, got)
+	}
+	return a.namedTypes["bool"]
+}
+
+func isEnumVariantExpr(expr ast.Expr) (*ast.FieldExpr, bool) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return isEnumVariantExpr(n.Inner)
+	case *ast.FieldExpr:
+		if _, ok := n.Object.(*ast.Ident); ok {
+			return n, true
+		}
+	}
+	return nil, false
 }
 
 func (a *Analyzer) analyzeUnaryExpr(expr *ast.UnaryExpr) Type {

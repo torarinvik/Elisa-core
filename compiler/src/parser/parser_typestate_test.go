@@ -324,6 +324,36 @@ func TestParsePackedOpenAndViewStatements(t *testing.T) {
 	}
 }
 
+func TestParseEnumVariantIsCondition(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: int)\n    Add(left: int, right: int)\n\ndef is_int(node: Expr) -> bool:\n    if node is Expr.Int:\n        return true\n    return false\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[1])
+	}
+	ifStmt, ok := decl.Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected if stmt, got %T", decl.Body[0])
+	}
+	cond, ok := ifStmt.Cond.(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected binary condition, got %T", ifStmt.Cond)
+	}
+	if cond.Op != lexer.TOKEN_IS {
+		t.Fatalf("expected is operator, got %s", lexer.TokenName(cond.Op))
+	}
+	fieldExpr, ok := cond.Right.(*ast.FieldExpr)
+	if !ok {
+		t.Fatalf("expected field expr RHS, got %T", cond.Right)
+	}
+	enumName, ok := fieldExpr.Object.(*ast.Ident)
+	if !ok || enumName.Name != "Expr" || fieldExpr.Field != "Int" {
+		t.Fatalf("expected Expr.Int RHS, got %#v", cond.Right)
+	}
+}
+
 func TestParsePackedViewPayloadDestructureStatement(t *testing.T) {
 	file, errs := parseSourceFile(t, "packed enum Expr:\n    common:\n        span: int\n    Add(left: int, right: int)\n\ndef fold(node: Expr, store: Expr.Store[Local]) -> int:\n    view node in store as Expr.Add(left: lhs, right: rhs):\n        return lhs + rhs + node.span\n    return 0\n")
 	if len(errs) != 0 {

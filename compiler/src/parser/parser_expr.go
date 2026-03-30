@@ -522,7 +522,8 @@ func (p *Parser) parseComparison() ast.Expr {
 	left := p.parseBitwiseOr()
 	for p.peek() == lexer.TOKEN_EQEQ || p.peek() == lexer.TOKEN_BANGEQ ||
 		p.peek() == lexer.TOKEN_LT || p.peek() == lexer.TOKEN_GT ||
-		p.peek() == lexer.TOKEN_LTEQ || p.peek() == lexer.TOKEN_GTEQ {
+		p.peek() == lexer.TOKEN_LTEQ || p.peek() == lexer.TOKEN_GTEQ ||
+		p.peek() == lexer.TOKEN_IS {
 		pos := p.cur().Pos
 		op := p.advance()
 		right := p.parseBitwiseOr()

@@ -5079,6 +5079,27 @@ def classify(flag: bool, node: Expr, store: Expr.Store[Local]) -> int:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsEnumVariantIsCondition(t *testing.T) {
+	src := `enum Expr:
+	Int(value: int)
+	Add(left: int, right: int)
+
+def is_int(node: Expr) -> bool:
+	if node is Expr.Int:
+		return true
+	return false
+`
+	result, errs := parseAndAnalyze(t, "enum_variant_is_condition_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	decl := requireFuncDecl(t, result, "is_int")
+	ifStmt, ok := decl.Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected first statement to be if, got %T", decl.Body[0])
+	}
+	requireExprTypeString(t, result, ifStmt.Cond, "bool")
+}
+
 func TestAnalyzeAcceptsPackedEnumIfPatternRefiningScrutineeToPackedView(t *testing.T) {
 	src := `packed enum Expr:
 	common:

@@ -115,8 +115,9 @@ const (
 	TOKEN_RSHIFT // >>
 	TOKEN_TILDE  // ~
 
-	// Surface-only literals appended here to preserve legacy token numbering.
+	// Surface-only and compatibility tokens appended here to preserve legacy token numbering.
 	TOKEN_CHAR_LIT // 'a'
+	TOKEN_IS       // is
 )
 
 var tokenNames = map[TokenKind]string{
@@ -170,6 +171,7 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_REGION:  "region",
 	TOKEN_DESTROY: "destroy",
 	TOKEN_NEW:     "new",
+	TOKEN_IS:      "is",
 	TOKEN_AS:      "as",
 	TOKEN_IN:      "in",
 
@@ -260,6 +262,7 @@ var keywords = map[string]TokenKind{
 	"tail":    TOKEN_TAIL,
 	"try":     TOKEN_TRY,
 	"raise":   TOKEN_RAISE,
+	"is":      TOKEN_IS,
 	"as":      TOKEN_AS,
 	"in":      TOKEN_IN,
 }

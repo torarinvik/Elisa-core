@@ -266,8 +266,45 @@ func (g *GuardFactSet) addCondition(expr ast.Expr, truthy bool) {
 			if truthy {
 				g.AddLE(n.Right, n.Left)
 			}
+		case lexer.TOKEN_IS:
+			if truthy {
+				if targetExpr, guard, ok := guardFactPackedVariantTest(n); ok {
+					g.ensurePackedVariants()[guardFactExprKey(targetExpr)] = guard
+				}
+			}
 		}
 	}
+}
+
+func guardFactPackedVariantTest(expr *ast.BinaryExpr) (ast.Expr, PackedVariantGuard, bool) {
+	if expr == nil || expr.Op != lexer.TOKEN_IS {
+		return nil, PackedVariantGuard{}, false
+	}
+	fieldExpr, ok := guardFactVariantPath(expr.Right)
+	if !ok {
+		return nil, PackedVariantGuard{}, false
+	}
+	key := guardFactExprKey(expr.Left)
+	if key == "" {
+		return nil, PackedVariantGuard{}, false
+	}
+	ident, ok := fieldExpr.Object.(*ast.Ident)
+	if !ok || ident == nil || ident.Name == "" || fieldExpr.Field == "" {
+		return nil, PackedVariantGuard{}, false
+	}
+	return expr.Left, PackedVariantGuard{EnumName: ident.Name, VariantName: fieldExpr.Field}, true
+}
+
+func guardFactVariantPath(expr ast.Expr) (*ast.FieldExpr, bool) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return guardFactVariantPath(n.Inner)
+	case *ast.FieldExpr:
+		if _, ok := n.Object.(*ast.Ident); ok {
+			return n, true
+		}
+	}
+	return nil, false
 }
 
 func (g *GuardFactSet) addLEKeys(leftKey string, rightKey string) {

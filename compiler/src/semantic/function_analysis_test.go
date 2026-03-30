@@ -102,6 +102,23 @@ func TestGuardFactSetProveLEAndCheckFieldAccess(t *testing.T) {
 	}
 }
 
+func TestGuardFactsForConditionRecordsIsVariantProof(t *testing.T) {
+	nodeExpr := &ast.Ident{Name: "node"}
+	cond := &ast.BinaryExpr{
+		Op:    lexer.TOKEN_IS,
+		Left:  nodeExpr,
+		Right: &ast.FieldExpr{Object: &ast.Ident{Name: "Expr"}, Field: "Int"},
+	}
+	facts := GuardFactsForCondition(cond, true)
+	guard, ok := facts.PackedVariant(nodeExpr)
+	if !ok {
+		t.Fatalf("expected is-condition to record packed variant proof, got %#v", facts)
+	}
+	if guard.EnumName != "Expr" || guard.VariantName != "Int" {
+		t.Fatalf("expected Expr.Int packed variant proof, got %#v", guard)
+	}
+}
+
 func TestCreateTypeBoundOpsSynthesizesRecursiveCleanupOps(t *testing.T) {
 	threadPool := &StructType{Name: "ThreadPool", Builtin: true}
 	mutexGuardBase := &StructType{Name: "MutexGuard", Builtin: true}
