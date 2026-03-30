@@ -122,6 +122,9 @@ const (
 	emitAST        = "ast"
 	emitFmt        = "fmt"
 	emitDoc        = "doc"
+	emitInterface  = "iface"
+	emitDeps       = "deps"
+	emitDepsJSON   = "deps-json"
 	emitIR         = "ir"
 	emitInterpret  = "interpret"
 	emitServe      = "serve"
@@ -263,11 +266,12 @@ func parseArgs(args []string) (cliOptions, error) {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprintf(w, "Usage: llcontext [-emit %s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s] [-addr <host:port>] [-filter <substring>] [-packed-abi <packed-lowering-override>] [-O0|-O2|-O3] [-o <output>] <file.llcontext|file%s>\n", emitAST, emitFmt, emitDoc, emitIR, emitInterpret, emitServe, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitHeader, emitBitcode, emitObject, frontendIRExtension)
+	emitModes := []string{emitAST, emitFmt, emitDoc, emitInterface, emitDeps, emitDepsJSON, emitIR, emitInterpret, emitServe, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitHeader, emitBitcode, emitObject}
+	fmt.Fprintf(w, "Usage: llcontext [-emit %s] [-addr <host:port>] [-filter <substring>] [-packed-abi <packed-lowering-override>] [-O0|-O2|-O3] [-o <output>] <file%s|file%s|file%s>\n", strings.Join(emitModes, "|"), sourceExtension, interfaceExtension, frontendIRExtension)
 	fmt.Fprintln(w, "       llcontext init <name> [--path <dir>]")
 	fmt.Fprintln(w, "       llcontext init-lib <name> [--path <dir>]")
 	fmt.Fprintln(w, "       llcontext build|run|test|bench [target] [--project <dir|project.json>]")
-	fmt.Fprintln(w, "       llcontext project view [target] [--project <dir|project.json>]")
+	fmt.Fprintln(w, "       llcontext project view|deps [target] [--project <dir|project.json>] [--json]")
 	fmt.Fprintf(w, "Packed enums lower canonically as handle-based %s in compiler mode; frozen stores remain the readonly publication form.\n", backend.PackedEnumABIVariantSparse)
 	fmt.Fprintf(w, "-packed-abi can pin an alternate lowering for debugging/compatibility: %s | %s | %s | %s | %s\n", backend.PackedEnumABIRowHandle, backend.PackedEnumABIWordHandle, backend.PackedEnumABIDenseFixed, backend.PackedEnumABIIndexSOA, backend.PackedEnumABIVariantSparse)
 }
@@ -305,6 +309,12 @@ func normalizeEmitMode(value string) string {
 		return emitFmt
 	case emitDoc, "docs", "reference":
 		return emitDoc
+	case emitInterface, "interface", "api":
+		return emitInterface
+	case emitDeps, "dep", "dependencies":
+		return emitDeps
+	case emitDepsJSON, "depsjson", "dependencies-json":
+		return emitDepsJSON
 	case emitIR, "frontend-ir", "bundle":
 		return emitIR
 	case emitInterpret, "run", "interp":
@@ -628,7 +638,7 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		for _, annotation := range n.Annotations {
 			fmt.Fprintf(w, "%s%s\n", prefix, formatAnnotation(annotation))
 		}
-		tparams := formatFuncGenericParams(nil, nil, nil, nil, n.RegionParams, nil)
+		tparams := formatFuncGenericParams(n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams)
 		ret := ""
 		if n.ReturnType != nil {
 			ret = " -> " + typeStr(n.ReturnType)

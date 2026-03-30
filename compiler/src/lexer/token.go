@@ -272,14 +272,79 @@ func LookupKeyword(ident string) TokenKind {
 }
 
 type Pos struct {
-	File   string
-	Line   int
-	Col    int
-	Offset int
+	File      string
+	Line      int
+	Col       int
+	Offset    int
+	EndLine   int
+	EndCol    int
+	EndOffset int
+}
+
+func (p Pos) IsZero() bool {
+	return p.File == "" && p.Line == 0 && p.Col == 0 && p.Offset == 0 && p.EndLine == 0 && p.EndCol == 0 && p.EndOffset == 0
+}
+
+func (p Pos) normalizedEnd() Pos {
+	if p.EndLine == 0 && p.EndCol == 0 && p.EndOffset == 0 {
+		return Pos{File: p.File, Line: p.Line, Col: p.Col, Offset: p.Offset}
+	}
+	return Pos{File: p.File, Line: p.EndLine, Col: p.EndCol, Offset: p.EndOffset}
+}
+
+func (p Pos) WithEnd(end Pos) Pos {
+	if p.IsZero() {
+		p = end
+	}
+	if p.File == "" {
+		p.File = end.File
+	}
+	if p.Line == 0 {
+		p.Line = end.Line
+	}
+	if p.Col == 0 {
+		p.Col = end.Col
+	}
+	if p.Offset == 0 && (p.Line != 0 || p.Col != 0 || end.Offset != 0) {
+		p.Offset = end.Offset
+	}
+	p.EndLine = end.Line
+	p.EndCol = end.Col
+	p.EndOffset = end.Offset
+	return p
+}
+
+func (p Pos) Merge(other Pos) Pos {
+	if p.IsZero() {
+		return other
+	}
+	if other.IsZero() {
+		return p
+	}
+	return p.WithEnd(other.normalizedEnd())
+}
+
+func (p Pos) HasRange() bool {
+	if p.IsZero() {
+		return false
+	}
+	end := p.normalizedEnd()
+	return end.Line != p.Line || end.Col != p.Col || end.Offset != p.Offset
 }
 
 func (p Pos) String() string {
-	return fmt.Sprintf("%s:%d:%d", p.File, p.Line, p.Col)
+	file := p.File
+	if file == "" {
+		file = "<unknown>"
+	}
+	if !p.HasRange() {
+		return fmt.Sprintf("%s:%d:%d", file, p.Line, p.Col)
+	}
+	end := p.normalizedEnd()
+	if end.Line == p.Line {
+		return fmt.Sprintf("%s:%d:%d-%d", file, p.Line, p.Col, end.Col)
+	}
+	return fmt.Sprintf("%s:%d:%d-%d:%d", file, p.Line, p.Col, end.Line, end.Col)
 }
 
 type Token struct {

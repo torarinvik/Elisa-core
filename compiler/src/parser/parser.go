@@ -84,7 +84,7 @@ func (p *Parser) expectIdentText(text string) lexer.Token {
 
 func (p *Parser) errorf(format string, args ...interface{}) {
 	pos := p.cur().Pos
-	msg := fmt.Sprintf("%s:%d:%d: %s", pos.File, pos.Line, pos.Col, fmt.Sprintf(format, args...))
+	msg := fmt.Sprintf("%s: %s", pos, fmt.Sprintf(format, args...))
 	p.errors = append(p.errors, msg)
 }
 
@@ -801,13 +801,7 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 		return &ast.ExternVarDecl{Position: pos, Name: name, Type: typ}
 	}
 
-	typeParams, _, _, regionParams, permissionParams, _ := p.parseFuncGenericParams()
-	if len(typeParams) > 0 {
-		p.errorf("extern functions do not support type parameters yet")
-	}
-	if len(permissionParams) > 0 {
-		p.errorf("extern functions do not support permission parameters yet")
-	}
+	typeParams, refStorageParams, refStateParams, regionParams, permissionParams, genericParams := p.parseFuncGenericParams()
 
 	// extern name(params...) [-> RetType]  (function)
 	p.expect(lexer.TOKEN_LPAREN)
@@ -838,7 +832,7 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 	}
 	p.expectNewline()
 
-	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, RegionParams: regionParams, Permissions: permissions, Params: params, ReturnType: retType, Variadic: variadic}
+	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, PermissionParams: permissionParams, GenericParams: genericParams, RegionParams: regionParams, Permissions: permissions, Params: params, ReturnType: retType, Variadic: variadic}
 }
 
 func (p *Parser) parseExportDecl() ast.Decl {

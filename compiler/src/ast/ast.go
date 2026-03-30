@@ -165,14 +165,19 @@ type ParamDecl struct {
 }
 
 type ExternFuncDecl struct {
-	Position     lexer.Pos
-	Annotations  []Annotation
-	Name         string
-	RegionParams []string
-	Permissions  []PermissionRef
-	Params       []ParamDecl
-	ReturnType   TypeExpr
-	Variadic     bool
+	Position         lexer.Pos
+	Annotations      []Annotation
+	Name             string
+	TypeParams       []string
+	RefStorageParams []string
+	RefStateParams   []string
+	PermissionParams []string
+	GenericParams    []GenericParam
+	RegionParams     []string
+	Permissions      []PermissionRef
+	Params           []ParamDecl
+	ReturnType       TypeExpr
+	Variadic         bool
 }
 
 type ExternVarDecl struct {

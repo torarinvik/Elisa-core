@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -699,6 +700,110 @@ func TestRunCLIEmitsHeaderForExportFixture(t *testing.T) {
 	for _, check := range checks {
 		if !strings.Contains(header, check) {
 			t.Fatalf("expected header to contain %q, got:\n%s", check, header)
+		}
+	}
+}
+
+func TestRunCLIEmitsModuleInterface(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "module_interface_fixture.llcontext")
+	interfacePath := filepath.Join(fixtureDir, "module_interface_fixture.llcontexti")
+	src := "struct Box[T]:\n    value: T\n\nglobal counter: int = 0\n\ndef identity[T](value: T) -> T:\n    return value\n\nnamespace util:\n    def inc(value: int) -> int:\n        return value + 1\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write interface fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "iface", "-o", interfacePath, fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected interface emit to succeed, stderr:\n%s", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected interface emit with -o not to write stdout, got:\n%s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	data, err := os.ReadFile(interfacePath)
+	if err != nil {
+		t.Fatalf("expected interface output file %s to exist: %v", interfacePath, err)
+	}
+	interfaceSource := string(data)
+	for _, check := range []string{
+		"struct Box[T]:",
+		"extern counter: int",
+		"extern identity[T](value: T) -> T",
+		"namespace util:",
+		"extern inc(value: int) -> int",
+	} {
+		if !strings.Contains(interfaceSource, check) {
+			t.Fatalf("expected interface source to contain %q, got:\n%s", check, interfaceSource)
+		}
+	}
+	for _, bad := range []string{"return value", "global counter: int = 0"} {
+		if strings.Contains(interfaceSource, bad) {
+			t.Fatalf("expected interface source to omit %q, got:\n%s", bad, interfaceSource)
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = runCLI([]string{"-emit", "ast", interfacePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected generated interface to parse successfully, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected generated interface parse to be warning-free, got:\n%s", stderr.String())
+	}
+	for _, check := range []string{"extern identity[T](1 params) -> T", "extern counter: int"} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected generated interface AST to contain %q, got:\n%s", check, stdout.String())
+		}
+	}
+}
+
+func TestRunCLIEmitsSourceDependenciesJSON(t *testing.T) {
+	fixtureDir := t.TempDir()
+	leafPath := filepath.Join(fixtureDir, "leaf.llcontext")
+	midPath := filepath.Join(fixtureDir, "mid.llcontext")
+	rootPath := filepath.Join(fixtureDir, "root.llcontext")
+	for path, content := range map[string]string{
+		leafPath: "def leaf() -> int:\n    return 1\n",
+		midPath:  "# include \"leaf.llcontext\"\n\ndef mid() -> int:\n    return leaf()\n",
+		rootPath: "# include \"mid.llcontext\"\n\ndef main() -> int:\n    return mid()\n",
+	} {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "deps-json", rootPath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected deps-json emit to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	var report sourceDependencyReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("expected deps-json output to decode: %v\n%s", err, stdout.String())
+	}
+	rootAbs, _ := filepath.Abs(rootPath)
+	midAbs, _ := filepath.Abs(midPath)
+	leafAbs, _ := filepath.Abs(leafPath)
+	if report.Root != rootAbs {
+		t.Fatalf("expected root dependency %s, got %s", rootAbs, report.Root)
+	}
+	want := []string{rootAbs, midAbs, leafAbs}
+	if len(report.Files) != len(want) {
+		t.Fatalf("expected %d dependencies, got %d (%v)", len(want), len(report.Files), report.Files)
+	}
+	for i, got := range report.Files {
+		if got != want[i] {
+			t.Fatalf("dependency %d mismatch: got %s want %s", i, got, want[i])
 		}
 	}
 }

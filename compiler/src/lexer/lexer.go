@@ -41,6 +41,11 @@ func (l *Lexer) curPos() Pos {
 	return Pos{File: l.filename, Line: l.line, Col: l.col, Offset: l.pos}
 }
 
+func (l *Lexer) finishToken(tok Token) Token {
+	tok.Pos = tok.Pos.WithEnd(l.curPos())
+	return tok
+}
+
 func (l *Lexer) Errors() []string {
 	if len(l.errors) == 0 {
 		return nil
@@ -162,23 +167,23 @@ func (l *Lexer) handleIndentation() {
 
 	if indent > current {
 		l.indentStack = append(l.indentStack, indent)
-		l.pendingToks = append(l.pendingToks, Token{
+		l.pendingToks = append(l.pendingToks, l.finishToken(Token{
 			Kind: TOKEN_INDENT,
 			Pos:  l.curPos(),
-		})
+		}))
 	} else if indent < current {
 		for len(l.indentStack) > 1 && l.indentStack[len(l.indentStack)-1] > indent {
 			l.indentStack = l.indentStack[:len(l.indentStack)-1]
-			l.pendingToks = append(l.pendingToks, Token{
+			l.pendingToks = append(l.pendingToks, l.finishToken(Token{
 				Kind: TOKEN_DEDENT,
 				Pos:  l.curPos(),
-			})
+			}))
 		}
 		if l.indentStack[len(l.indentStack)-1] != indent {
-			l.pendingToks = append(l.pendingToks, Token{
+			l.pendingToks = append(l.pendingToks, l.finishToken(Token{
 				Kind: TOKEN_DEDENT,
 				Pos:  l.curPos(),
-			})
+			}))
 		}
 	}
 }
@@ -191,11 +196,11 @@ func (l *Lexer) readString() Token {
 		ch := l.peek()
 		if ch == '"' {
 			l.advance()
-			return Token{Kind: TOKEN_STRING_LIT, Text: bytesToStringView(decoded), Pos: p}
+			return l.finishToken(Token{Kind: TOKEN_STRING_LIT, Text: bytesToStringView(decoded), Pos: p})
 		}
 		if ch == '\n' {
-			l.reportErrorAt(p, "unterminated string literal")
-			return Token{Kind: TOKEN_STRING_LIT, Text: bytesToStringView(decoded), Pos: p}
+			l.reportErrorAt(p.WithEnd(l.curPos()), "unterminated string literal")
+			return l.finishToken(Token{Kind: TOKEN_STRING_LIT, Text: bytesToStringView(decoded), Pos: p})
 		}
 		if ch != '\\' {
 			decoded = append(decoded, ch)
@@ -206,8 +211,8 @@ func (l *Lexer) readString() Token {
 		escapePos := l.curPos()
 		l.advance() // consume backslash
 		if l.pos >= len(l.src) {
-			l.reportErrorAt(escapePos, "unterminated escape sequence in string literal")
-			return Token{Kind: TOKEN_STRING_LIT, Text: bytesToStringView(decoded), Pos: p}
+			l.reportErrorAt(escapePos.WithEnd(l.curPos()), "unterminated escape sequence in string literal")
+			return l.finishToken(Token{Kind: TOKEN_STRING_LIT, Text: bytesToStringView(decoded), Pos: p})
 		}
 
 		esc := l.peek()
@@ -234,7 +239,7 @@ func (l *Lexer) readString() Token {
 			l.advance()
 			value, ok := l.readFixedHexDigits(2)
 			if !ok {
-				l.reportErrorAt(escapePos, "invalid hex escape in string literal")
+				l.reportErrorAt(escapePos.WithEnd(l.curPos()), "invalid hex escape in string literal")
 				continue
 			}
 			decoded = append(decoded, byte(value))
@@ -242,20 +247,20 @@ func (l *Lexer) readString() Token {
 			l.advance()
 			value, ok := l.readFixedHexDigits(4)
 			if !ok {
-				l.reportErrorAt(escapePos, "invalid unicode escape in string literal")
+				l.reportErrorAt(escapePos.WithEnd(l.curPos()), "invalid unicode escape in string literal")
 				continue
 			}
 			if value >= 0xD800 && value <= 0xDBFF {
 				pairPos := l.curPos()
 				if l.peek() != '\\' || l.peekAt(1) != 'u' {
-					l.reportErrorAt(escapePos, "invalid unicode surrogate pair in string literal")
+					l.reportErrorAt(escapePos.WithEnd(l.curPos()), "invalid unicode surrogate pair in string literal")
 					continue
 				}
 				l.advance()
 				l.advance()
 				lowValue, ok := l.readFixedHexDigits(4)
 				if !ok || lowValue < 0xDC00 || lowValue > 0xDFFF {
-					l.reportErrorAt(pairPos, "invalid unicode surrogate pair in string literal")
+					l.reportErrorAt(pairPos.WithEnd(l.curPos()), "invalid unicode surrogate pair in string literal")
 					continue
 				}
 				r := utf16.DecodeRune(rune(value), rune(lowValue))
@@ -263,21 +268,21 @@ func (l *Lexer) readString() Token {
 				continue
 			}
 			if value >= 0xDC00 && value <= 0xDFFF {
-				l.reportErrorAt(escapePos, "invalid unicode surrogate pair in string literal")
+				l.reportErrorAt(escapePos.WithEnd(l.curPos()), "invalid unicode surrogate pair in string literal")
 				continue
 			}
 			decoded = utf8.AppendRune(decoded, rune(value))
 		case '\n':
-			l.reportErrorAt(p, "unterminated string literal")
-			return Token{Kind: TOKEN_STRING_LIT, Text: bytesToStringView(decoded), Pos: p}
+			l.reportErrorAt(p.WithEnd(l.curPos()), "unterminated string literal")
+			return l.finishToken(Token{Kind: TOKEN_STRING_LIT, Text: bytesToStringView(decoded), Pos: p})
 		default:
-			l.reportErrorAt(escapePos, "invalid escape sequence \\\\%c in string literal", esc)
+			l.reportErrorAt(escapePos.WithEnd(l.curPos()), "invalid escape sequence \\\\%c in string literal", esc)
 			l.advance()
 		}
 	}
 
-	l.reportErrorAt(p, "unterminated string literal")
-	return Token{Kind: TOKEN_STRING_LIT, Text: bytesToStringView(decoded), Pos: p}
+	l.reportErrorAt(p.WithEnd(l.curPos()), "unterminated string literal")
+	return l.finishToken(Token{Kind: TOKEN_STRING_LIT, Text: bytesToStringView(decoded), Pos: p})
 }
 
 func (l *Lexer) readChar() Token {
@@ -292,18 +297,18 @@ func (l *Lexer) readChar() Token {
 			if !invalid {
 				switch len(decoded) {
 				case 0:
-					l.reportErrorAt(p, "empty char literal")
+					l.reportErrorAt(p.WithEnd(l.curPos()), "empty char literal")
 				case 1:
 					// OK.
 				default:
-					l.reportErrorAt(p, "char literal must decode to exactly one code unit")
+					l.reportErrorAt(p.WithEnd(l.curPos()), "char literal must decode to exactly one code unit")
 				}
 			}
-			return Token{Kind: TOKEN_CHAR_LIT, Text: bytesToStringView(decoded), Pos: p}
+			return l.finishToken(Token{Kind: TOKEN_CHAR_LIT, Text: bytesToStringView(decoded), Pos: p})
 		}
 		if ch == '\n' {
-			l.reportErrorAt(p, "unterminated char literal")
-			return Token{Kind: TOKEN_CHAR_LIT, Text: bytesToStringView(decoded), Pos: p}
+			l.reportErrorAt(p.WithEnd(l.curPos()), "unterminated char literal")
+			return l.finishToken(Token{Kind: TOKEN_CHAR_LIT, Text: bytesToStringView(decoded), Pos: p})
 		}
 		if ch != '\\' {
 			decoded = append(decoded, ch)
@@ -314,8 +319,8 @@ func (l *Lexer) readChar() Token {
 		escapePos := l.curPos()
 		l.advance() // consume backslash
 		if l.pos >= len(l.src) {
-			l.reportErrorAt(escapePos, "unterminated escape sequence in char literal")
-			return Token{Kind: TOKEN_CHAR_LIT, Text: bytesToStringView(decoded), Pos: p}
+			l.reportErrorAt(escapePos.WithEnd(l.curPos()), "unterminated escape sequence in char literal")
+			return l.finishToken(Token{Kind: TOKEN_CHAR_LIT, Text: bytesToStringView(decoded), Pos: p})
 		}
 
 		esc := l.peek()
@@ -345,7 +350,7 @@ func (l *Lexer) readChar() Token {
 			l.advance()
 			value, ok := l.readFixedHexDigits(2)
 			if !ok {
-				l.reportErrorAt(escapePos, "invalid hex escape in char literal")
+				l.reportErrorAt(escapePos.WithEnd(l.curPos()), "invalid hex escape in char literal")
 				invalid = true
 				continue
 			}
@@ -354,14 +359,14 @@ func (l *Lexer) readChar() Token {
 			l.advance()
 			value, ok := l.readFixedHexDigits(4)
 			if !ok {
-				l.reportErrorAt(escapePos, "invalid unicode escape in char literal")
+				l.reportErrorAt(escapePos.WithEnd(l.curPos()), "invalid unicode escape in char literal")
 				invalid = true
 				continue
 			}
 			if value >= 0xD800 && value <= 0xDBFF {
 				pairPos := l.curPos()
 				if l.peek() != '\\' || l.peekAt(1) != 'u' {
-					l.reportErrorAt(escapePos, "invalid unicode surrogate pair in char literal")
+					l.reportErrorAt(escapePos.WithEnd(l.curPos()), "invalid unicode surrogate pair in char literal")
 					invalid = true
 					continue
 				}
@@ -369,7 +374,7 @@ func (l *Lexer) readChar() Token {
 				l.advance()
 				lowValue, ok := l.readFixedHexDigits(4)
 				if !ok || lowValue < 0xDC00 || lowValue > 0xDFFF {
-					l.reportErrorAt(pairPos, "invalid unicode surrogate pair in char literal")
+					l.reportErrorAt(pairPos.WithEnd(l.curPos()), "invalid unicode surrogate pair in char literal")
 					invalid = true
 					continue
 				}
@@ -378,23 +383,23 @@ func (l *Lexer) readChar() Token {
 				continue
 			}
 			if value >= 0xDC00 && value <= 0xDFFF {
-				l.reportErrorAt(escapePos, "invalid unicode surrogate pair in char literal")
+				l.reportErrorAt(escapePos.WithEnd(l.curPos()), "invalid unicode surrogate pair in char literal")
 				invalid = true
 				continue
 			}
 			decoded = utf8.AppendRune(decoded, rune(value))
 		case '\n':
-			l.reportErrorAt(p, "unterminated char literal")
-			return Token{Kind: TOKEN_CHAR_LIT, Text: bytesToStringView(decoded), Pos: p}
+			l.reportErrorAt(p.WithEnd(l.curPos()), "unterminated char literal")
+			return l.finishToken(Token{Kind: TOKEN_CHAR_LIT, Text: bytesToStringView(decoded), Pos: p})
 		default:
-			l.reportErrorAt(escapePos, "invalid escape sequence \\\\%c in char literal", esc)
+			l.reportErrorAt(escapePos.WithEnd(l.curPos()), "invalid escape sequence \\\\%c in char literal", esc)
 			invalid = true
 			l.advance()
 		}
 	}
 
-	l.reportErrorAt(p, "unterminated char literal")
-	return Token{Kind: TOKEN_CHAR_LIT, Text: bytesToStringView(decoded), Pos: p}
+	l.reportErrorAt(p.WithEnd(l.curPos()), "unterminated char literal")
+	return l.finishToken(Token{Kind: TOKEN_CHAR_LIT, Text: bytesToStringView(decoded), Pos: p})
 }
 
 func (l *Lexer) readFixedHexDigits(count int) (int, bool) {
@@ -420,7 +425,7 @@ func (l *Lexer) readNumber() Token {
 		}
 		text := bytesToStringView(l.src[start:l.pos])
 		suffix := l.readTypeSuffix()
-		return Token{Kind: TOKEN_HEX_LIT, Text: text, Pos: p, Suffix: suffix}
+		return l.finishToken(Token{Kind: TOKEN_HEX_LIT, Text: text, Pos: p, Suffix: suffix})
 	}
 
 	for l.pos < len(l.src) && isDigit(l.peek()) {
@@ -456,9 +461,9 @@ func (l *Lexer) readNumber() Token {
 		isFloat = true
 	}
 	if isFloat {
-		return Token{Kind: TOKEN_FLOAT_LIT, Text: text, Pos: p, Suffix: suffix}
+		return l.finishToken(Token{Kind: TOKEN_FLOAT_LIT, Text: text, Pos: p, Suffix: suffix})
 	}
-	return Token{Kind: TOKEN_INT_LIT, Text: text, Pos: p, Suffix: suffix}
+	return l.finishToken(Token{Kind: TOKEN_INT_LIT, Text: text, Pos: p, Suffix: suffix})
 }
 
 func (l *Lexer) shouldReadFloatFraction() bool {
@@ -539,7 +544,7 @@ func (l *Lexer) readIdent() Token {
 	}
 	text := bytesToStringView(l.src[start:l.pos])
 	kind := LookupKeyword(text)
-	return Token{Kind: kind, Text: text, Pos: p}
+	return l.finishToken(Token{Kind: kind, Text: text, Pos: p})
 }
 
 // NextToken returns the next token from the source.
@@ -573,9 +578,9 @@ func (l *Lexer) NextToken() Token {
 		// Emit remaining DEDENT tokens at EOF
 		if len(l.indentStack) > 1 {
 			l.indentStack = l.indentStack[:len(l.indentStack)-1]
-			return Token{Kind: TOKEN_DEDENT, Pos: l.curPos()}
+			return l.finishToken(Token{Kind: TOKEN_DEDENT, Pos: l.curPos()})
 		}
-		return Token{Kind: TOKEN_EOF, Pos: l.curPos()}
+		return l.finishToken(Token{Kind: TOKEN_EOF, Pos: l.curPos()})
 	}
 
 	ch := l.peek()
@@ -593,7 +598,7 @@ func (l *Lexer) NextToken() Token {
 			// Inside parens, skip newlines silently
 			return l.NextToken()
 		}
-		return Token{Kind: TOKEN_NEWLINE, Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_NEWLINE, Pos: p})
 	}
 
 	// Comments
@@ -627,104 +632,104 @@ func (l *Lexer) NextToken() Token {
 	case '<':
 		l.advance()
 		if l.match('-') {
-			return Token{Kind: TOKEN_LARROW, Text: "<-", Pos: p}
+			return l.finishToken(Token{Kind: TOKEN_LARROW, Text: "<-", Pos: p})
 		}
 		if l.match('<') {
 			if l.match('=') {
-				return Token{Kind: TOKEN_LSHIFTEQ, Text: "<<=", Pos: p}
+				return l.finishToken(Token{Kind: TOKEN_LSHIFTEQ, Text: "<<=", Pos: p})
 			}
-			return Token{Kind: TOKEN_LSHIFT, Text: "<<", Pos: p}
+			return l.finishToken(Token{Kind: TOKEN_LSHIFT, Text: "<<", Pos: p})
 		}
 		if l.match('=') {
-			return Token{Kind: TOKEN_LTEQ, Text: "<=", Pos: p}
+			return l.finishToken(Token{Kind: TOKEN_LTEQ, Text: "<=", Pos: p})
 		}
-		return Token{Kind: TOKEN_LT, Text: "<", Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_LT, Text: "<", Pos: p})
 
 	case '>':
 		l.advance()
 		if l.match('>') {
 			if l.match('=') {
-				return Token{Kind: TOKEN_RSHIFTEQ, Text: ">>=", Pos: p}
+				return l.finishToken(Token{Kind: TOKEN_RSHIFTEQ, Text: ">>=", Pos: p})
 			}
-			return Token{Kind: TOKEN_RSHIFT, Text: ">>", Pos: p}
+			return l.finishToken(Token{Kind: TOKEN_RSHIFT, Text: ">>", Pos: p})
 		}
 		if l.match('=') {
-			return Token{Kind: TOKEN_GTEQ, Text: ">=", Pos: p}
+			return l.finishToken(Token{Kind: TOKEN_GTEQ, Text: ">=", Pos: p})
 		}
-		return Token{Kind: TOKEN_GT, Text: ">", Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_GT, Text: ">", Pos: p})
 
 	case '=':
 		l.advance()
 		if l.match('=') {
-			return Token{Kind: TOKEN_EQEQ, Text: "==", Pos: p}
+			return l.finishToken(Token{Kind: TOKEN_EQEQ, Text: "==", Pos: p})
 		}
-		return Token{Kind: TOKEN_ASSIGN, Text: "=", Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_ASSIGN, Text: "=", Pos: p})
 
 	case '!':
 		l.advance()
 		if l.match('=') {
-			return Token{Kind: TOKEN_BANGEQ, Text: "!=", Pos: p}
+			return l.finishToken(Token{Kind: TOKEN_BANGEQ, Text: "!=", Pos: p})
 		}
-		return Token{Kind: TOKEN_BANG, Text: "!", Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_BANG, Text: "!", Pos: p})
 
 	case '+':
 		l.advance()
 		if l.match('=') {
-			return Token{Kind: TOKEN_PLUSEQ, Text: "+=", Pos: p}
+			return l.finishToken(Token{Kind: TOKEN_PLUSEQ, Text: "+=", Pos: p})
 		}
-		return Token{Kind: TOKEN_PLUS, Text: "+", Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_PLUS, Text: "+", Pos: p})
 
 	case '-':
 		l.advance()
 		if l.match('>') {
-			return Token{Kind: TOKEN_ARROW, Text: "->", Pos: p}
+			return l.finishToken(Token{Kind: TOKEN_ARROW, Text: "->", Pos: p})
 		}
 		if l.match('=') {
-			return Token{Kind: TOKEN_MINUSEQ, Text: "-=", Pos: p}
+			return l.finishToken(Token{Kind: TOKEN_MINUSEQ, Text: "-=", Pos: p})
 		}
-		return Token{Kind: TOKEN_MINUS, Text: "-", Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_MINUS, Text: "-", Pos: p})
 
 	case '*':
 		l.advance()
 		if l.match('=') {
-			return Token{Kind: TOKEN_STAREQ, Text: "*=", Pos: p}
+			return l.finishToken(Token{Kind: TOKEN_STAREQ, Text: "*=", Pos: p})
 		}
-		return Token{Kind: TOKEN_STAR, Text: "*", Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_STAR, Text: "*", Pos: p})
 
 	case '/':
 		l.advance()
 		if l.match('=') {
-			return Token{Kind: TOKEN_SLASHEQ, Text: "/=", Pos: p}
+			return l.finishToken(Token{Kind: TOKEN_SLASHEQ, Text: "/=", Pos: p})
 		}
-		return Token{Kind: TOKEN_SLASH, Text: "/", Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_SLASH, Text: "/", Pos: p})
 
 	case '%':
 		l.advance()
 		if l.match('=') {
-			return Token{Kind: TOKEN_PERCENTEQ, Text: "%=", Pos: p}
+			return l.finishToken(Token{Kind: TOKEN_PERCENTEQ, Text: "%=", Pos: p})
 		}
-		return Token{Kind: TOKEN_PERCENT, Text: "%", Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_PERCENT, Text: "%", Pos: p})
 
 	case '^':
 		l.advance()
 		if l.match('=') {
-			return Token{Kind: TOKEN_CARETEQ, Text: "^=", Pos: p}
+			return l.finishToken(Token{Kind: TOKEN_CARETEQ, Text: "^=", Pos: p})
 		}
-		return Token{Kind: TOKEN_CARET, Text: "^", Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_CARET, Text: "^", Pos: p})
 
 	case '|':
 		l.advance()
 		if l.match('=') {
-			return Token{Kind: TOKEN_PIPEEQ, Text: "|=", Pos: p}
+			return l.finishToken(Token{Kind: TOKEN_PIPEEQ, Text: "|=", Pos: p})
 		}
-		return Token{Kind: TOKEN_PIPE, Text: "|", Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_PIPE, Text: "|", Pos: p})
 
 	case '&':
 		l.advance()
 		if l.match('=') {
-			return Token{Kind: TOKEN_AMPEQ, Text: "&=", Pos: p}
+			return l.finishToken(Token{Kind: TOKEN_AMPEQ, Text: "&=", Pos: p})
 		}
-		return Token{Kind: TOKEN_AMPERSAND, Text: "&", Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_AMPERSAND, Text: "&", Pos: p})
 
 	case '.':
 		l.advance()
@@ -732,67 +737,67 @@ func (l *Lexer) NextToken() Token {
 			if l.peekAt(1) == '.' {
 				l.advance()
 				l.advance()
-				return Token{Kind: TOKEN_ELLIPSIS, Text: "...", Pos: p}
+				return l.finishToken(Token{Kind: TOKEN_ELLIPSIS, Text: "...", Pos: p})
 			}
 			l.advance()
 			if l.match('<') {
-				return Token{Kind: TOKEN_RANGE_LT, Text: "..<", Pos: p}
+				return l.finishToken(Token{Kind: TOKEN_RANGE_LT, Text: "..<", Pos: p})
 			}
 			if l.match('>') {
-				return Token{Kind: TOKEN_RANGE_GT, Text: "..>", Pos: p}
+				return l.finishToken(Token{Kind: TOKEN_RANGE_GT, Text: "..>", Pos: p})
 			}
-			return Token{Kind: TOKEN_RANGE, Text: "..", Pos: p}
+			return l.finishToken(Token{Kind: TOKEN_RANGE, Text: "..", Pos: p})
 		}
-		return Token{Kind: TOKEN_DOT, Text: ".", Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_DOT, Text: ".", Pos: p})
 
 	case ':':
 		l.advance()
-		return Token{Kind: TOKEN_COLON, Text: ":", Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_COLON, Text: ":", Pos: p})
 
 	case ',':
 		l.advance()
-		return Token{Kind: TOKEN_COMMA, Text: ",", Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_COMMA, Text: ",", Pos: p})
 
 	case '(':
 		l.advance()
 		l.parenDepth++
-		return Token{Kind: TOKEN_LPAREN, Text: "(", Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_LPAREN, Text: "(", Pos: p})
 
 	case ')':
 		l.advance()
 		if l.parenDepth > 0 {
 			l.parenDepth--
 		}
-		return Token{Kind: TOKEN_RPAREN, Text: ")", Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_RPAREN, Text: ")", Pos: p})
 
 	case '[':
 		l.advance()
 		l.parenDepth++
-		return Token{Kind: TOKEN_LBRACKET, Text: "[", Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_LBRACKET, Text: "[", Pos: p})
 
 	case ']':
 		l.advance()
 		if l.parenDepth > 0 {
 			l.parenDepth--
 		}
-		return Token{Kind: TOKEN_RBRACKET, Text: "]", Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_RBRACKET, Text: "]", Pos: p})
 
 	case '?':
 		l.advance()
-		return Token{Kind: TOKEN_QUESTION, Text: "?", Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_QUESTION, Text: "?", Pos: p})
 
 	case '~':
 		l.advance()
-		return Token{Kind: TOKEN_TILDE, Text: "~", Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_TILDE, Text: "~", Pos: p})
 
 	case '@':
 		l.advance()
-		return Token{Kind: TOKEN_AT, Text: "@", Pos: p}
+		return l.finishToken(Token{Kind: TOKEN_AT, Text: "@", Pos: p})
 	}
 
 	// Unknown character
 	l.advance()
-	return Token{Kind: TOKEN_IDENT, Text: string(ch), Pos: p}
+	return l.finishToken(Token{Kind: TOKEN_IDENT, Text: string(ch), Pos: p})
 }
 
 // Tokenize returns all tokens from the source.
@@ -851,7 +856,7 @@ func (l *Lexer) errorf(format string, args ...interface{}) error {
 
 func (l *Lexer) reportErrorAt(pos Pos, format string, args ...interface{}) {
 	msg := fmt.Sprintf(format, args...)
-	l.errors = append(l.errors, fmt.Sprintf("%s:%d:%d: %s", pos.File, pos.Line, pos.Col, msg))
+	l.errors = append(l.errors, fmt.Sprintf("%s: %s", pos, msg))
 }
 
 func hexDigitValue(ch byte) int {

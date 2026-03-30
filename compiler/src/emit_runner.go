@@ -64,6 +64,26 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			fmt.Fprint(stdout, documentation)
 		}
 		return 0
+	case emitDeps, emitDepsJSON:
+		report, err := buildSourceDependencyReport(program.filename, sourceExpandOptions{})
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %s\n", err)
+			return 1
+		}
+		payload, err := formatSourceDependencyReport(report, options.emit == emitDepsJSON)
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %s\n", err)
+			return 1
+		}
+		if options.output != "" {
+			if err := writeOutputFile(options.output, []byte(payload)); err != nil {
+				fmt.Fprintf(stderr, "error: %s\n", err)
+				return 1
+			}
+		} else {
+			fmt.Fprint(stdout, payload)
+		}
+		return 0
 	case emitIR:
 		file, _, ok := analyzeLoadedProgram(program, stderr)
 		if !ok {
@@ -88,6 +108,17 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 	}
 
 	switch options.emit {
+	case emitInterface:
+		interfaceSource := generateModuleInterface(result.File)
+		if options.output != "" {
+			if err := writeOutputFile(options.output, []byte(interfaceSource)); err != nil {
+				fmt.Fprintf(stderr, "error: %s\n", err)
+				return 1
+			}
+		} else {
+			fmt.Fprint(stdout, interfaceSource)
+		}
+		return 0
 	case emitTests, emitBenches, emitFixtures:
 		if options.output != "" {
 			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", options.emit)

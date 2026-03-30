@@ -59,3 +59,23 @@ func TestRejectInvalidCharLiterals(t *testing.T) {
 		})
 	}
 }
+
+func TestTokenizeRecordsTokenSpans(t *testing.T) {
+	l := New("spans.llcontext", []byte("alpha += 1\n"))
+	tokens := l.Tokenize()
+	if errs := l.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected lexer errors: %v", errs)
+	}
+	if got := tokens[0].Pos.String(); got != "spans.llcontext:1:1-6" {
+		t.Fatalf("unexpected ident span: %s", got)
+	}
+	if got := tokens[1].Pos.String(); got != "spans.llcontext:1:7-9" {
+		t.Fatalf("unexpected += span: %s", got)
+	}
+	if got := tokens[2].Pos.String(); got != "spans.llcontext:1:10-11" {
+		t.Fatalf("unexpected int span: %s", got)
+	}
+	if !tokens[0].Pos.HasRange() {
+		t.Fatal("expected identifier token to record a non-empty span")
+	}
+}

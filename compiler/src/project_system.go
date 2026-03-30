@@ -40,6 +40,7 @@ const (
 	projectCommandTest
 	projectCommandBench
 	projectCommandView
+	projectCommandDeps
 )
 
 type projectCLIOptions struct {
@@ -55,6 +56,7 @@ type projectCLIOptions struct {
 	hasOptLevel   bool
 	initName      string
 	packedProfile backend.PackedLoweringProfile
+	jsonOutput    bool
 }
 
 type projectDefinition struct {
@@ -62,6 +64,7 @@ type projectDefinition struct {
 	DependencySearchPaths []string                           `json:"dependency-search-paths,omitempty"`
 	Dependencies          []string                           `json:"dependencies,omitempty"`
 	IncludeDirs           []string                           `json:"include-dirs,omitempty"`
+	Foreign               []string                           `json:"foreign,omitempty"`
 	Exec                  []string                           `json:"exec,omitempty"`
 	Targets               map[string]projectTargetDefinition `json:"targets"`
 }
@@ -73,6 +76,7 @@ type projectTargetDefinition struct {
 	Output       string   `json:"output,omitempty"`
 	Dependencies []string `json:"dependencies,omitempty"`
 	IncludeDirs  []string `json:"include-dirs,omitempty"`
+	Foreign      []string `json:"foreign,omitempty"`
 	Exec         []string `json:"exec,omitempty"`
 	Opt          string   `json:"opt,omitempty"`
 	PackedABI    string   `json:"packed-abi,omitempty"`
@@ -81,8 +85,10 @@ type projectTargetDefinition struct {
 type manifestDefinition struct {
 	Provides     string   `json:"provides"`
 	Entry        string   `json:"entry,omitempty"`
+	Interface    string   `json:"interface,omitempty"`
 	Dependencies []string `json:"dependencies,omitempty"`
 	IncludeDirs  []string `json:"include-dirs,omitempty"`
+	Foreign      []string `json:"foreign,omitempty"`
 	Exec         []string `json:"exec,omitempty"`
 }
 
@@ -93,12 +99,15 @@ type resolvedProject struct {
 }
 
 type resolvedManifest struct {
-	name         string
-	dir          string
-	entryPath    string
-	includeDirs  []string
-	dependencies []*resolvedManifest
-	exec         []string
+	name          string
+	dir           string
+	manifestPath  string
+	entryPath     string
+	interfacePath string
+	includeDirs   []string
+	foreignFiles  []string
+	dependencies  []*resolvedManifest
+	exec          []string
 }
 
 type resolvedProjectTarget struct {
@@ -111,6 +120,7 @@ type resolvedProjectTarget struct {
 	includeDirs           []string
 	dependencySearchPaths []string
 	dependencyOrder       []*resolvedManifest
+	foreignFiles          []string
 	projectExec           []string
 	targetExec            []string
 	optLevel              backend.OptimizationLevel
@@ -167,6 +177,9 @@ func runProjectCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 	}
 	if options.command == projectCommandView {
 		return runProjectView(project, options, stdout, stderr)
+	}
+	if options.command == projectCommandDeps {
+		return runProjectDeps(project, options, stdout, stderr)
 	}
 
 	target, err := resolveProjectTarget(project, options)
@@ -239,10 +252,14 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 			return projectCLIOptions{}, fmt.Errorf("missing project subcommand")
 		}
 		subcommand := strings.TrimSpace(args[1])
-		if subcommand != "view" {
+		if subcommand != "view" && subcommand != "deps" {
 			return projectCLIOptions{}, fmt.Errorf("unsupported project subcommand %q", subcommand)
 		}
-		options.command = projectCommandView
+		if subcommand == "view" {
+			options.command = projectCommandView
+		} else {
+			options.command = projectCommandDeps
+		}
 		args = append([]string{args[0]}, args[2:]...)
 	default:
 		return projectCLIOptions{}, fmt.Errorf("unsupported project command %q", args[0])
@@ -314,6 +331,8 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 			options.hasOptLevel = true
 		case strings.HasPrefix(arg, "-o="):
 			options.output = strings.TrimSpace(strings.TrimPrefix(arg, "-o="))
+		case arg == "--json":
+			options.jsonOutput = true
 		case arg == "-o":
 			i++
 			if i >= len(args) {
@@ -331,7 +350,7 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 					return projectCLIOptions{}, fmt.Errorf("expected a single project or library name, got %q", arg)
 				}
 				options.initName = arg
-			case projectCommandBuild, projectCommandRun, projectCommandTest, projectCommandBench, projectCommandView:
+			case projectCommandBuild, projectCommandRun, projectCommandTest, projectCommandBench, projectCommandView, projectCommandDeps:
 				if options.targetName != "" {
 					return projectCLIOptions{}, fmt.Errorf("expected a single target name, got %q", arg)
 				}
@@ -373,6 +392,7 @@ func printProjectUsage(w io.Writer) {
 	fmt.Fprintln(w, "  llcontext test [target] [--project <dir|project.json>] [-filter <substring>] [--trust <none|include|full>] [-O0|-O2|-O3]")
 	fmt.Fprintln(w, "  llcontext bench [target] [--project <dir|project.json>] [-filter <substring>] [--trust <none|include|full>]")
 	fmt.Fprintln(w, "  llcontext project view [target] [--project <dir|project.json>]")
+	fmt.Fprintln(w, "  llcontext project deps [target] [--project <dir|project.json>] [--json]")
 }
 
 func scaffoldProject(options projectCLIOptions) error {
@@ -393,7 +413,7 @@ func scaffoldProject(options projectCLIOptions) error {
 	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
 		return err
 	}
-	for _, dir := range []string{"build", "lib", "test"} {
+	for _, dir := range []string{"build", "lib", "native", "test"} {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
 			return err
 		}
@@ -403,6 +423,7 @@ func scaffoldProject(options projectCLIOptions) error {
 		DependencySearchPaths: []string{"lib"},
 		Dependencies:          []string{},
 		IncludeDirs:           []string{"src"},
+		Foreign:               []string{},
 		Exec:                  []string{},
 		Targets: map[string]projectTargetDefinition{
 			"app": {
@@ -412,6 +433,7 @@ func scaffoldProject(options projectCLIOptions) error {
 				Output:       filepath.ToSlash(filepath.Join("build", "app.ll")),
 				Dependencies: []string{},
 				IncludeDirs:  []string{},
+				Foreign:      []string{},
 				Exec:         []string{},
 				Opt:          "O0",
 			},
@@ -457,8 +479,10 @@ func scaffoldLibrary(options projectCLIOptions) error {
 	manifest := manifestDefinition{
 		Provides:     options.initName,
 		Entry:        filepath.ToSlash(filepath.Join("src", options.initName+".llcontext")),
+		Interface:    filepath.ToSlash(filepath.Join("src", options.initName+interfaceExtension)),
 		Dependencies: []string{},
 		IncludeDirs:  []string{"src"},
+		Foreign:      []string{},
 		Exec:         []string{},
 	}
 	manifestData, err := json.MarshalIndent(manifest, "", "  ")
@@ -471,6 +495,13 @@ func scaffoldLibrary(options projectCLIOptions) error {
 	libFunc := sanitizeIdentifier(options.initName) + "_value"
 	libSource := fmt.Sprintf("def %s() -> int:\n    return 1\n", libFunc)
 	if err := writeOutputFile(filepath.Join(root, "src", options.initName+".llcontext"), []byte(libSource)); err != nil {
+		return err
+	}
+	ifaceSource := fmt.Sprintf("extern %s() -> int\n", libFunc)
+	if err := writeOutputFile(filepath.Join(root, "src", options.initName+interfaceExtension), []byte(ifaceSource)); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(root, "native"), 0o755); err != nil {
 		return err
 	}
 	if err := writeOutputFile(filepath.Join(root, "README.md"), []byte(fmt.Sprintf("# %s\n", options.initName))); err != nil {
@@ -599,8 +630,8 @@ func resolveProjectTarget(project *resolvedProject, options projectCLIOptions) (
 		return nil, fmt.Errorf("project target %q is missing an entry", targetName)
 	}
 	entryPath := projectRelativePath(project.root, definition.Entry)
-	if !strings.HasSuffix(strings.ToLower(entryPath), ".llcontext") {
-		return nil, fmt.Errorf("project target %q entry %s must be a .llcontext source file in the current MVP", targetName, entryPath)
+	if !isSurfaceSourcePath(entryPath) {
+		return nil, fmt.Errorf("project target %q entry %s must be a %s or %s source file in the current MVP", targetName, entryPath, sourceExtension, interfaceExtension)
 	}
 	dependencySearchPaths := project.config.DependencySearchPaths
 	if len(dependencySearchPaths) == 0 {
@@ -621,8 +652,13 @@ func resolveProjectTarget(project *resolvedProject, options projectCLIOptions) (
 	for _, dir := range append(append([]string{}, project.config.IncludeDirs...), definition.IncludeDirs...) {
 		includeDirs = append(includeDirs, projectRelativePath(project.root, dir))
 	}
+	foreignFiles := make([]string, 0, len(project.config.Foreign)+len(definition.Foreign))
+	for _, path := range append(append([]string{}, project.config.Foreign...), definition.Foreign...) {
+		foreignFiles = append(foreignFiles, projectRelativePath(project.root, path))
+	}
 	for _, manifest := range dependencyOrder {
 		includeDirs = append(includeDirs, manifest.includeDirs...)
+		foreignFiles = append(foreignFiles, manifest.foreignFiles...)
 	}
 	emitMode := emitLLVM
 	if strings.TrimSpace(definition.Emit) != "" {
@@ -674,6 +710,7 @@ func resolveProjectTarget(project *resolvedProject, options projectCLIOptions) (
 		includeDirs:           dedupeStrings(includeDirs),
 		dependencySearchPaths: resolver.searchPaths,
 		dependencyOrder:       dependencyOrder,
+		foreignFiles:          dedupeStrings(foreignFiles),
 		projectExec:           append([]string{}, project.config.Exec...),
 		targetExec:            append([]string{}, definition.Exec...),
 		optLevel:              optLevel,
@@ -785,19 +822,30 @@ func (r *projectResolver) resolveManifest(name string) (*resolvedManifest, error
 		return nil, fmt.Errorf("manifest %s provides %q but was requested as %q", manifestPath, definition.Provides, name)
 	}
 	resolved := &resolvedManifest{
-		name:        name,
-		dir:         manifestDir,
-		includeDirs: make([]string, 0, len(definition.IncludeDirs)),
-		exec:        append([]string{}, definition.Exec...),
+		name:         name,
+		dir:          manifestDir,
+		manifestPath: manifestPath,
+		includeDirs:  make([]string, 0, len(definition.IncludeDirs)),
+		foreignFiles: make([]string, 0, len(definition.Foreign)),
+		exec:         append([]string{}, definition.Exec...),
 	}
 	if strings.TrimSpace(definition.Entry) != "" {
 		resolved.entryPath = projectRelativePath(manifestDir, definition.Entry)
-		if !strings.HasSuffix(strings.ToLower(resolved.entryPath), ".llcontext") {
-			return nil, fmt.Errorf("manifest %s entry %s must be a .llcontext source file in the current MVP", manifestPath, resolved.entryPath)
+		if !isSurfaceSourcePath(resolved.entryPath) {
+			return nil, fmt.Errorf("manifest %s entry %s must be a %s or %s source file in the current MVP", manifestPath, resolved.entryPath, sourceExtension, interfaceExtension)
+		}
+	}
+	if strings.TrimSpace(definition.Interface) != "" {
+		resolved.interfacePath = projectRelativePath(manifestDir, definition.Interface)
+		if !isSurfaceSourcePath(resolved.interfacePath) {
+			return nil, fmt.Errorf("manifest %s interface %s must be a %s or %s source file in the current MVP", manifestPath, resolved.interfacePath, sourceExtension, interfaceExtension)
 		}
 	}
 	for _, dir := range definition.IncludeDirs {
 		resolved.includeDirs = append(resolved.includeDirs, projectRelativePath(manifestDir, dir))
+	}
+	for _, path := range definition.Foreign {
+		resolved.foreignFiles = append(resolved.foreignFiles, projectRelativePath(manifestDir, path))
 	}
 	r.cache[name] = resolved
 	for _, depName := range definition.Dependencies {
@@ -890,6 +938,10 @@ func buildProjectLoadedProgram(target *resolvedProjectTarget) (*loadedProgram, e
 	for _, manifest := range target.dependencyOrder {
 		if strings.TrimSpace(manifest.entryPath) != "" {
 			entries = append(entries, manifest.entryPath)
+			continue
+		}
+		if strings.TrimSpace(manifest.interfacePath) != "" {
+			entries = append(entries, manifest.interfacePath)
 		}
 	}
 	entries = append(entries, target.entryPath)
@@ -1030,9 +1082,41 @@ func runProjectView(project *resolvedProject, options projectCLIOptions, stdout 
 	} else {
 		for _, manifest := range selected.dependencyOrder {
 			fmt.Fprintf(stdout, "  - %s (%s)\n", manifest.name, manifest.dir)
+			if manifest.interfacePath != "" {
+				fmt.Fprintf(stdout, "    interface=%s\n", manifest.interfacePath)
+			}
+			if len(manifest.foreignFiles) != 0 {
+				fmt.Fprintf(stdout, "    foreign=%s\n", strings.Join(manifest.foreignFiles, ", "))
+			}
+		}
+	}
+	if len(selected.foreignFiles) != 0 {
+		fmt.Fprintf(stdout, "Foreign sources:\n")
+		for _, foreign := range selected.foreignFiles {
+			fmt.Fprintf(stdout, "  - %s\n", foreign)
 		}
 	}
 	fmt.Fprintf(stdout, "Exec hooks: project=%d target=%d dependencies=%d\n", len(selected.projectExec), len(selected.targetExec), countDependencyHooks(selected.dependencyOrder))
+	return 0
+}
+
+func runProjectDeps(project *resolvedProject, options projectCLIOptions, stdout io.Writer, stderr io.Writer) int {
+	selected, err := resolveProjectTarget(project, options)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %s\n", err)
+		return 1
+	}
+	report, err := buildProjectDependencyReport(selected)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %s\n", err)
+		return 1
+	}
+	payload, err := formatProjectDependencyReport(report, options.jsonOutput)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %s\n", err)
+		return 1
+	}
+	fmt.Fprint(stdout, payload)
 	return 0
 }
 

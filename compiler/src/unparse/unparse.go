@@ -179,7 +179,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 	case *ast.ExternFuncDecl:
 		f.writeAnnotations(level, n.Annotations)
-		f.writeLine(level, formatExternFuncHeader(n.Name, n.RegionParams, n.Params, n.ReturnType, n.Permissions, n.Variadic))
+		f.writeLine(level, formatExternFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams, n.Params, n.ReturnType, n.Permissions, n.Variadic))
 	case *ast.ExternVarDecl:
 		f.writeLine(level, "extern "+n.Name+": "+formatTypeExpr(n.Type))
 	case *ast.ExternTypeDecl:
@@ -483,9 +483,9 @@ func formatFuncHeader(name string, genericParams []ast.GenericParam, typeParams 
 	return line
 }
 
-func formatExternFuncHeader(name string, regionParams []string, params []ast.ParamDecl, retType ast.TypeExpr, permissions []ast.PermissionRef, variadic bool) string {
+func formatExternFuncHeader(name string, genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, retType ast.TypeExpr, permissions []ast.PermissionRef, variadic bool) string {
 	line := "extern " + name
-	line += formatGenericParams(nil, nil, nil, nil, regionParams, nil)
+	line += formatGenericParams(genericParams, typeParams, refStorageParams, refStateParams, regionParams, permissionParams)
 	line += "(" + formatParamList(params, variadic) + ")"
 	if retType != nil {
 		line += " -> " + formatTypeExpr(retType)

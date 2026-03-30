@@ -12,7 +12,16 @@ import (
 	"llcontext/src/semantic"
 )
 
-const frontendIRExtension = ".llctxir"
+const (
+	sourceExtension     = ".llcontext"
+	interfaceExtension  = ".llcontexti"
+	frontendIRExtension = ".llctxir"
+)
+
+func isSurfaceSourcePath(path string) bool {
+	ext := strings.ToLower(strings.TrimSpace(filepath.Ext(path)))
+	return ext == sourceExtension || ext == interfaceExtension
+}
 
 type loadedProgram struct {
 	filename string

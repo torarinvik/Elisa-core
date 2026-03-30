@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +28,7 @@ func TestRunCLIInitScaffoldsProjectAndLibrary(t *testing.T) {
 		filepath.Join(projectRoot, "src", "main.llcontext"),
 		filepath.Join(projectRoot, "build"),
 		filepath.Join(projectRoot, "lib"),
+		filepath.Join(projectRoot, "native"),
 		filepath.Join(projectRoot, "test"),
 	} {
 		if _, err := os.Stat(path); err != nil {
@@ -47,11 +49,20 @@ func TestRunCLIInitScaffoldsProjectAndLibrary(t *testing.T) {
 	for _, path := range []string{
 		filepath.Join(libRoot, manifestFileName),
 		filepath.Join(libRoot, "src", "mathcore.llcontext"),
+		filepath.Join(libRoot, "src", "mathcore.llcontexti"),
+		filepath.Join(libRoot, "native"),
 		filepath.Join(libRoot, "README.md"),
 	} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected scaffolded library path %s: %v", path, err)
 		}
+	}
+	manifestBytes, err := os.ReadFile(filepath.Join(libRoot, manifestFileName))
+	if err != nil {
+		t.Fatalf("expected manifest to be readable: %v", err)
+	}
+	if !strings.Contains(string(manifestBytes), `"interface": "src/mathcore.llcontexti"`) {
+		t.Fatalf("expected scaffolded manifest to record interface path, got:\n%s", string(manifestBytes))
 	}
 }
 
@@ -175,6 +186,51 @@ func TestRunCLIProjectRunsExecHookWithTrustFull(t *testing.T) {
 	}
 }
 
+func TestRunCLIProjectDepsReportsInterfacesAndForeignSources(t *testing.T) {
+	projectRoot := writeProjectFixture(t, projectFixtureOptions{})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"project", "deps", "app", "--project", projectRoot}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected project deps to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output during project deps, got:\n%s", stderr.String())
+	}
+	for _, check := range []string{"Sources:", "mathcore.llcontexti", "mathcore_runtime.c", "app_runtime.c"} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected project deps output to contain %q, got:\n%s", check, stdout.String())
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = runCLI([]string{"project", "deps", "app", "--project", projectRoot, "--json"}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected project deps --json to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output during project deps --json, got:\n%s", stderr.String())
+	}
+	var report projectDependencyReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("expected project deps json to decode: %v\n%s", err, stdout.String())
+	}
+	if report.Target != "app" {
+		t.Fatalf("expected target app, got %q", report.Target)
+	}
+	if len(report.Dependencies) != 1 {
+		t.Fatalf("expected 1 dependency report, got %d (%+v)", len(report.Dependencies), report.Dependencies)
+	}
+	if report.Dependencies[0].Interface == "" {
+		t.Fatal("expected dependency report to include interface path")
+	}
+	if len(report.Foreign) == 0 {
+		t.Fatal("expected project dependency report to include foreign sources")
+	}
+}
+
 type projectFixtureOptions struct {
 	targetHook string
 }
@@ -184,9 +240,11 @@ func writeProjectFixture(t *testing.T, options projectFixtureOptions) string {
 	projectRoot := t.TempDir()
 	for _, dir := range []string{
 		filepath.Join(projectRoot, "src"),
+		filepath.Join(projectRoot, "native"),
 		filepath.Join(projectRoot, "shared"),
 		filepath.Join(projectRoot, "test"),
 		filepath.Join(projectRoot, "lib", "mathcore.llctxlib", "src"),
+		filepath.Join(projectRoot, "lib", "mathcore.llctxlib", "native"),
 		filepath.Join(projectRoot, "lib", "mathcore.llctxlib", "shared"),
 	} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -198,6 +256,7 @@ func writeProjectFixture(t *testing.T, options projectFixtureOptions) string {
   "dependency-search-paths": ["lib"],
   "dependencies": ["mathcore"],
   "include-dirs": ["shared"],
+		"foreign": ["native/app_runtime.c"],
   "targets": {
     "app": {
       "entry": "src/main.llcontext",
@@ -224,16 +283,21 @@ func writeProjectFixture(t *testing.T, options projectFixtureOptions) string {
 `
 	writeFixtureFile(t, filepath.Join(projectRoot, projectFileName), projectJSON)
 	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.llcontext"), "# include \"project_extra.llcontext\"\n\ndef main() -> int:\n    return core_seed() + project_extra()\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "native", "app_runtime.c"), "/* app foreign stub */\n")
 	writeFixtureFile(t, filepath.Join(projectRoot, "shared", "project_extra.llcontext"), "def project_extra() -> int:\n    return 1\n")
 	writeFixtureFile(t, filepath.Join(projectRoot, "test", "project_tests.llcontext"), "@test\ndef alpha_case() -> void:\n    pass\n")
 	writeFixtureFile(t, filepath.Join(projectRoot, "test", "project_benches.llcontext"), "@bench\ndef hot_loop() -> void:\n    pass\n")
 	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.llctxlib", manifestFileName), `{
   "provides": "mathcore",
   "entry": "src/mathcore.llcontext",
-  "include-dirs": ["shared"]
+		"interface": "src/mathcore.llcontexti",
+		"include-dirs": ["shared"],
+		"foreign": ["native/mathcore_runtime.c"]
 }
 `)
 	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.llctxlib", "src", "mathcore.llcontext"), "# include \"math_helper.llcontext\"\n\ndef core_seed() -> int:\n    return math_helper()\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.llctxlib", "src", "mathcore.llcontexti"), "extern core_seed() -> int\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.llctxlib", "native", "mathcore_runtime.c"), "/* mathcore foreign stub */\n")
 	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.llctxlib", "shared", "math_helper.llcontext"), "def math_helper() -> int:\n    return 41\n")
 	return projectRoot
 }

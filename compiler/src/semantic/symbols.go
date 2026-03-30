@@ -22,9 +22,9 @@ const (
 
 func (d Diagnostic) String() string {
 	if d.Severity == "" || d.Severity == DiagnosticSeverityError {
-		return fmt.Sprintf("%s:%d:%d: %s", d.Pos.File, d.Pos.Line, d.Pos.Col, d.Message)
+		return fmt.Sprintf("%s: %s", d.Pos, d.Message)
 	}
-	return fmt.Sprintf("%s:%d:%d: %s: %s", d.Pos.File, d.Pos.Line, d.Pos.Col, d.Severity, d.Message)
+	return fmt.Sprintf("%s: %s: %s", d.Pos, d.Severity, d.Message)
 }
 
 type Result struct {

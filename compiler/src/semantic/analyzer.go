@@ -921,7 +921,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				}
 			case *ast.ExternFuncDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
-				fnType := a.funcTypeFromDecl(qualifiedName, nil, nil, nil, nil, n.RegionParams, nil, n.Permissions, n.Params, n.ReturnType, n.Variadic)
+				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Params, n.ReturnType, n.Variadic)
 				a.applyExternFuncAnnotations(n, fnType)
 				if !fnType.ReturnProvenanceKnown {
 					fnType.ReturnProvenanceKnown = true
