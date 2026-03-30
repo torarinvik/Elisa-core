@@ -146,6 +146,9 @@ type cliOptions struct {
 	output        string
 	addr          string
 	filter        string
+	foreignFiles  []string
+	linkNative    bool
+	runNative     bool
 	packedProfile backend.PackedLoweringProfile
 	packedABI     backend.PackedEnumABI
 	hasPackedABI  bool

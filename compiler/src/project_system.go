@@ -202,6 +202,7 @@ func runProjectCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 		filename:      target.entryPath,
 		output:        target.outputPath,
 		filter:        options.filter,
+		foreignFiles:  append([]string(nil), target.foreignFiles...),
 		packedProfile: target.packedProfile,
 		hasOptLevel:   target.hasOptLevel,
 		optLevel:      target.optLevel,
@@ -214,6 +215,9 @@ func runProjectCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 	case projectCommandRun:
 		cli.emit = target.runEmit
 		cli.output = ""
+		if cli.emit == emitObject {
+			cli.runNative = true
+		}
 	case projectCommandTest:
 		cli.emit = emitTest
 		cli.output = ""
@@ -221,12 +225,22 @@ func runProjectCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 		cli.emit = emitBenches
 		cli.output = ""
 	case projectCommandBuild:
-		// keep target build settings
+		if cli.emit == emitObject && shouldLinkNativeProjectBuild(cli.output) {
+			cli.linkNative = true
+		}
 	default:
 		fmt.Fprintf(stderr, "error: unsupported project command\n")
 		return 1
 	}
 	return runLoadedProgramWithOptions(cli, program, stdout, stderr)
+}
+
+func shouldLinkNativeProjectBuild(outputPath string) bool {
+	trimmed := strings.TrimSpace(outputPath)
+	if trimmed == "" {
+		return false
+	}
+	return strings.ToLower(filepath.Ext(trimmed)) != ".o"
 }
 
 func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {

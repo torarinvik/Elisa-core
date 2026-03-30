@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -213,7 +212,7 @@ func buildIsolatedTestRunnerSource(source []byte, testCase selectedTestCase) str
 	return out.String()
 }
 
-func executeSelectedTests(inputFile string, result *semantic.Result, filter string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stdout io.Writer, stderr io.Writer) int {
+func executeSelectedTests(inputFile string, result *semantic.Result, filter string, foreignFiles []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stdout io.Writer, stderr io.Writer) int {
 	source, err := readSourceWithIncludes(inputFile, map[string]bool{})
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %s\n", err)
@@ -246,7 +245,7 @@ func executeSelectedTests(inputFile string, result *semantic.Result, filter stri
 
 		fmt.Fprintln(stdout, formatTestLine("RUN", testCase.Func.Name, ""))
 		runnerSource := buildIsolatedTestRunnerSource(source, testCase)
-		exePath, cleanup, err := compileTestRunnerExecutable(clangPath, runnerSource, optLevel, packedProfile, stderr)
+		exePath, cleanup, err := compileTestRunnerExecutable(clangPath, runnerSource, foreignFiles, optLevel, packedProfile, stderr)
 		if err != nil {
 			cleanup()
 			return 1
@@ -308,7 +307,7 @@ func formatTestLine(status string, name string, detail string) string {
 	return fmt.Sprintf("[ "+width+" ] %s%s", status, name, detail)
 }
 
-func compileTestRunnerExecutable(clangPath string, runnerSource string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stderr io.Writer) (string, func(), error) {
+func compileTestRunnerExecutable(clangPath string, runnerSource string, foreignFiles []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stderr io.Writer) (string, func(), error) {
 	tempDir, err := os.MkdirTemp("", "llcontext-test-run-*")
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %s\n", err)
@@ -324,31 +323,20 @@ func compileTestRunnerExecutable(clangPath string, runnerSource string, optLevel
 		return "", cleanup, fmt.Errorf("failed to analyze generated test runner")
 	}
 
-	objectPath := filepath.Join(tempDir, "generated_runner.o")
-	if err := backend.WriteLLVMObjectFileWithOptAndPackedLoweringProfile(runnerResult, objectPath, optLevel, packedProfile); err != nil {
+	shimPath := filepath.Join(tempDir, "test_runner_runtime_shims.c")
+	if err := os.WriteFile(shimPath, []byte(testRunnerRuntimeShimSource()), 0o644); err != nil {
 		fmt.Fprintf(stderr, "error: %s\n", err)
 		return "", cleanup, err
 	}
-
-	exePath := filepath.Join(tempDir, "generated_runner")
-	linkArgs := []string{objectPath, "-o", exePath}
-	if runtime.GOOS == "darwin" {
-		shimPath := filepath.Join(tempDir, "test_runner_runtime_shims.c")
-		if err := os.WriteFile(shimPath, []byte(testRunnerRuntimeShimSource()), 0o644); err != nil {
-			fmt.Fprintf(stderr, "error: %s\n", err)
-			return "", cleanup, err
-		}
-		linkArgs = append([]string{"-Wl,-undefined,dynamic_lookup", shimPath}, linkArgs...)
-	}
-	linkCmd := exec.Command(clangPath, linkArgs...)
-	linkCmd.Stdout = stderr
-	linkCmd.Stderr = stderr
-	if err := linkCmd.Run(); err != nil {
-		fmt.Fprintf(stderr, "error: failed to link generated test runner: %s\n", err)
+	linkForeignFiles := append([]string{shimPath}, foreignFiles...)
+	exePath, nativeCleanup, err := buildNativeExecutableWithClang(clangPath, runnerResult, linkForeignFiles, filepath.Join(tempDir, "generated_runner"), optLevel, packedProfile, stderr)
+	if err != nil {
 		return "", cleanup, err
 	}
-
-	return exePath, cleanup, nil
+	return exePath, func() {
+		nativeCleanup()
+		cleanup()
+	}, nil
 }
 
 func classifyTestExecutionError(err error) (string, string) {

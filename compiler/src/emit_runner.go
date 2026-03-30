@@ -146,7 +146,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", emitTest)
 			return 1
 		}
-		return executeSelectedTests(program.filename, result, options.filter, effectiveOptimizationLevel(options), options.packedProfile, stdout, stderr)
+		return executeSelectedTests(program.filename, result, options.filter, options.foreignFiles, effectiveOptimizationLevel(options), options.packedProfile, stdout, stderr)
 	case emitInterpret:
 		if options.output != "" {
 			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", emitInterpret)
@@ -220,6 +220,26 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		}
 		return 0
 	case emitObject:
+		if options.linkNative || options.runNative {
+			exeOutputPath := options.output
+			if options.runNative {
+				exeOutputPath = ""
+			}
+			exePath, cleanup, err := buildNativeExecutable(result, options.foreignFiles, exeOutputPath, effectiveOptimizationLevel(options), options.packedProfile, stderr)
+			if err != nil {
+				cleanup()
+				fmt.Fprintf(stderr, "error: %s\n", err)
+				return 1
+			}
+			defer cleanup()
+			if options.runNative {
+				if err := runNativeExecutable(exePath, stdout, stderr); err != nil {
+					fmt.Fprintf(stderr, "error: %s\n", err)
+					return 1
+				}
+			}
+			return 0
+		}
 		if err := ensureOutputParentExists(outputPathForEmit(program.filename, options.output, ".o")); err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1

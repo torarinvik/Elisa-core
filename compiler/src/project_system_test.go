@@ -231,6 +231,73 @@ func TestRunCLIProjectDepsReportsInterfacesAndForeignSources(t *testing.T) {
 	}
 }
 
+func TestRunCLIProjectNativeBuildAndRunWithForeignSources(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	projectRoot := writeNativeForeignProjectFixture(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"build", "app", "--project", projectRoot}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected native project build to succeed, stderr:\n%s", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected native project build not to print stdout, got:\n%s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output during native project build, got:\n%s", stderr.String())
+	}
+	exePath := filepath.Join(projectRoot, "build", "app_native")
+	if _, err := os.Stat(exePath); err != nil {
+		t.Fatalf("expected native build output file %s: %v", exePath, err)
+	}
+	runCmd := exec.Command(exePath)
+	runOutput, err := runCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected built native executable to run successfully: %v\n%s", err, string(runOutput))
+	}
+	if !strings.Contains(string(runOutput), "native hello") {
+		t.Fatalf("expected built native executable output to contain native hello, got:\n%s", string(runOutput))
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = runCLI([]string{"run", "app", "--project", projectRoot}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected native project run to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output during native project run, got:\n%s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "native hello") {
+		t.Fatalf("expected native project run output to contain native hello, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunCLIProjectTestLinksForeignSources(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	projectRoot := writeNativeForeignProjectFixture(t)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"test", "tests", "--project", projectRoot}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected project test with foreign sources to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output during foreign-linked project test, got:\n%s", stderr.String())
+	}
+	for _, check := range []string{"[ RUN      ] foreign_case", "[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0"} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected foreign-linked project test output to contain %q, got:\n%s", check, stdout.String())
+		}
+	}
+}
+
 type projectFixtureOptions struct {
 	targetHook string
 }
@@ -299,6 +366,45 @@ func writeProjectFixture(t *testing.T, options projectFixtureOptions) string {
 	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.llctxlib", "src", "mathcore.llcontexti"), "extern core_seed() -> int\n")
 	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.llctxlib", "native", "mathcore_runtime.c"), "/* mathcore foreign stub */\n")
 	writeFixtureFile(t, filepath.Join(projectRoot, "lib", "mathcore.llctxlib", "shared", "math_helper.llcontext"), "def math_helper() -> int:\n    return 41\n")
+	return projectRoot
+}
+
+func writeNativeForeignProjectFixture(t *testing.T) string {
+	t.Helper()
+	projectRoot := t.TempDir()
+	for _, dir := range []string{
+		filepath.Join(projectRoot, "src"),
+		filepath.Join(projectRoot, "native"),
+		filepath.Join(projectRoot, "test"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	projectJSON := `{
+  "version": "0.1.0",
+  "foreign": ["native/runtime.c"],
+  "targets": {
+    "app": {
+      "entry": "src/main.llcontext",
+      "emit": "obj",
+      "run-emit": "obj",
+      "output": "build/app_native",
+      "opt": "O0"
+    },
+    "tests": {
+      "entry": "test/project_tests.llcontext",
+      "emit": "llvm",
+      "output": "build/tests.ll",
+      "opt": "O0"
+    }
+  }
+}
+`
+	writeFixtureFile(t, filepath.Join(projectRoot, projectFileName), projectJSON)
+	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.llcontext"), "extern foreign_message() -> any u8&\nextern puts(text: any u8&) -> int can[Console.Write]\n\ndef main() -> int can[Console.Write]:\n    puts(foreign_message())\n    return 0\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "test", "project_tests.llcontext"), "extern foreign_value() -> int\n\n@test\ndef foreign_case() -> void:\n    if foreign_value() != 42:\n        panic(\"expected foreign value\")\n")
+	writeFixtureFile(t, filepath.Join(projectRoot, "native", "runtime.c"), "#include <stdint.h>\n#include \"llcontext.h\"\n\nint64_t foreign_value(void) { return 42; }\nchar *foreign_message(void) { return \"native hello\"; }\n")
 	return projectRoot
 }
 
