@@ -1471,9 +1471,12 @@ func structGenericParams(base *semantic.StructType) []ast.GenericParam {
 	if len(base.GenericParams) != 0 {
 		return base.GenericParams
 	}
-	params := make([]ast.GenericParam, 0, len(base.TypeParams))
+	params := make([]ast.GenericParam, 0, len(base.TypeParams)+1)
 	for _, name := range base.TypeParams {
 		params = append(params, ast.GenericParam{Kind: ast.GenericParamType, Name: name})
+	}
+	if len(base.NamedStateCases) != 0 {
+		params = append(params, ast.GenericParam{Kind: ast.GenericParamState, Name: "state", StateCases: append([]string(nil), base.NamedStateCases...), StateOwner: base.Name})
 	}
 	return params
 }

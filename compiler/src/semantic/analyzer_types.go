@@ -118,9 +118,12 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			return t
 		}
 		if t, _, ok := a.lookupVisibleType(n.Name); ok {
-			return DefaultAggregateStateType(t)
+			return DefaultStatefulType(t)
 		}
 		a.errorf(n.Pos(), "unknown type %q", n.Name)
+		return invalidType
+	case *ast.StateSetTypeExpr:
+		a.errorf(n.Pos(), "state unions like %q are only valid as named struct state arguments", strings.Join(n.Cases, " | "))
 		return invalidType
 	case *ast.AggregateStateTypeExpr:
 		baseType := StripAggregateStateType(a.resolveType(n.Base))
@@ -657,9 +660,12 @@ func genericParamsForStructType(base *StructType) []ast.GenericParam {
 	if len(base.GenericParams) != 0 {
 		return base.GenericParams
 	}
-	params := make([]ast.GenericParam, 0, len(base.TypeParams))
+	params := make([]ast.GenericParam, 0, len(base.TypeParams)+1)
 	for _, name := range base.TypeParams {
 		params = append(params, ast.GenericParam{Kind: ast.GenericParamType, Name: name})
+	}
+	if len(base.NamedStateCases) != 0 {
+		params = append(params, ast.GenericParam{Kind: ast.GenericParamState, Name: "state", StateCases: append([]string(nil), base.NamedStateCases...), StateOwner: base.Name})
 	}
 	return params
 }
@@ -710,6 +716,8 @@ func genericBindingsForStructInstance(base *StructType, args []Type) map[string]
 
 func (a *Analyzer) resolveGenericArgForParam(expr ast.TypeExpr, param ast.GenericParam) Type {
 	switch param.Kind {
+	case ast.GenericParamState:
+		return a.resolveNamedStateGenericArg(expr, param)
 	case ast.GenericParamRefStorage:
 		switch n := expr.(type) {
 		case *ast.NamedType:
@@ -764,6 +772,36 @@ func (a *Analyzer) resolveGenericArgForParam(expr ast.TypeExpr, param ast.Generi
 	}
 }
 
+func (a *Analyzer) resolveNamedStateGenericArg(expr ast.TypeExpr, param ast.GenericParam) Type {
+	allowed := make(map[string]bool, len(param.StateCases))
+	for _, name := range param.StateCases {
+		allowed[name] = true
+	}
+	collect := func(names []string) Type {
+		for _, name := range names {
+			if !allowed[name] {
+				a.errorf(expr.Pos(), "generic argument %q is not a declared state of %q", name, param.StateOwner)
+				return invalidType
+			}
+		}
+		resolved := newNamedStateType(param.StateOwner, param.StateCases, names)
+		if resolved == nil {
+			a.errorf(expr.Pos(), "named state argument for %q cannot be empty", param.StateOwner)
+			return invalidType
+		}
+		return resolved
+	}
+	switch n := expr.(type) {
+	case *ast.NamedType:
+		return collect([]string{n.Name})
+	case *ast.StateSetTypeExpr:
+		return collect(n.Cases)
+	default:
+		resolved := a.resolveType(expr)
+		a.errorf(expr.Pos(), "generic argument %q for named struct state parameter of %q must be a declared state name or union", resolved.String(), param.StateOwner)
+		return invalidType
+	}
+}
 func (a *Analyzer) inferLiteralType(expr ast.Expr) Type {
 	switch n := expr.(type) {
 	case *ast.IntLit:

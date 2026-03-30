@@ -1778,9 +1778,11 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			return bound, nil
 		}
 		if t, ok := s.g.result.NamedTypes[n.Name]; ok {
-			return semantic.DefaultAggregateStateType(t), nil
+			return semantic.DefaultStatefulType(t), nil
 		}
 		return nil, fmt.Errorf("unknown type %q", n.Name)
+	case *ast.StateSetTypeExpr:
+		return nil, fmt.Errorf("state unions like %q are only valid as named struct state arguments", strings.Join(n.Cases, " | "))
 	case *ast.AggregateStateTypeExpr:
 		baseType, err := s.resolveTypeExpr(n.Base)
 		if err != nil {
@@ -1887,6 +1889,38 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 		if !ok {
 			return nil, fmt.Errorf("unknown type %q", n.Name)
 		}
+		if storeType, ok := base.(*semantic.PackedEnumStoreType); ok {
+			args := make([]semantic.Type, 0, len(n.Args))
+			for _, arg := range n.Args {
+				resolved, err := s.resolveTypeExpr(arg)
+				if err != nil {
+					return nil, err
+				}
+				args = append(args, resolved)
+			}
+			if len(args) != 1 {
+				return nil, fmt.Errorf("packed enum store type %q expects 1 state argument, got %d", n.Name, len(args))
+			}
+			return semantic.PackedEnumStoreWithState(storeType, args[0]), nil
+		}
+		if structType, ok := base.(*semantic.StructType); ok {
+			params := structGenericParams(structType)
+			if len(n.Args) != len(params) {
+				return nil, fmt.Errorf("type %q expects %d arguments, got %d", n.Name, len(params), len(n.Args))
+			}
+			args := make([]semantic.Type, 0, len(n.Args))
+			for i, arg := range n.Args {
+				resolved, err := s.resolveGenericArgForParam(arg, params[i])
+				if err != nil {
+					return nil, err
+				}
+				args = append(args, resolved)
+			}
+			return semantic.DefaultAggregateStateType(&semantic.GenericInstanceType{Name: n.Name, Base: base, Args: args}), nil
+		}
+		if _, ok := base.(*semantic.OpaqueType); ok && len(n.Args) != 0 {
+			return nil, fmt.Errorf("type %q expects 0 type arguments, got %d", n.Name, len(n.Args))
+		}
 		args := make([]semantic.Type, 0, len(n.Args))
 		for _, arg := range n.Args {
 			resolved, err := s.resolveTypeExpr(arg)
@@ -1895,24 +1929,45 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			}
 			args = append(args, resolved)
 		}
-		if storeType, ok := base.(*semantic.PackedEnumStoreType); ok {
-			if len(args) != 1 {
-				return nil, fmt.Errorf("packed enum store type %q expects 1 state argument, got %d", n.Name, len(args))
-			}
-			return semantic.PackedEnumStoreWithState(storeType, args[0]), nil
-		}
-		if structType, ok := base.(*semantic.StructType); ok {
-			params := structGenericParams(structType)
-			if len(args) != len(params) {
-				return nil, fmt.Errorf("type %q expects %d arguments, got %d", n.Name, len(params), len(args))
-			}
-		}
-		if _, ok := base.(*semantic.OpaqueType); ok && len(args) != 0 {
-			return nil, fmt.Errorf("type %q expects 0 type arguments, got %d", n.Name, len(args))
-		}
 		return semantic.DefaultAggregateStateType(&semantic.GenericInstanceType{Name: n.Name, Base: base, Args: args}), nil
 	default:
 		return nil, fmt.Errorf("unsupported type expression %T", expr)
+	}
+}
+
+func (s *functionState) resolveGenericArgForParam(expr ast.TypeExpr, param ast.GenericParam) (semantic.Type, error) {
+	switch param.Kind {
+	case ast.GenericParamState:
+		allowed := make(map[string]bool, len(param.StateCases))
+		for _, name := range param.StateCases {
+			allowed[name] = true
+		}
+		collect := func(names []string) (semantic.Type, error) {
+			for _, name := range names {
+				if !allowed[name] {
+					return nil, fmt.Errorf("generic argument %q is not a declared state of %q", name, param.StateOwner)
+				}
+			}
+			resolved := semantic.NewNamedStateTypeForBackend(param.StateOwner, param.StateCases, names)
+			if resolved == nil {
+				return nil, fmt.Errorf("named state argument for %q cannot be empty", param.StateOwner)
+			}
+			return resolved, nil
+		}
+		switch n := expr.(type) {
+		case *ast.NamedType:
+			return collect([]string{n.Name})
+		case *ast.StateSetTypeExpr:
+			return collect(n.Cases)
+		default:
+			resolved, err := s.resolveTypeExpr(expr)
+			if err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("generic argument %q for named struct state parameter of %q must be a declared state name or union", resolved.String(), param.StateOwner)
+		}
+	default:
+		return s.resolveTypeExpr(expr)
 	}
 }
 

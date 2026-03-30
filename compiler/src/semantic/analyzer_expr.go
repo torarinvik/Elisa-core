@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"strconv"
+	"strings"
 
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
@@ -325,24 +326,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = a.analyzeSpecializeExpr(n)
 		return
 	case *ast.StructLitExpr:
-		if t, _, ok := a.lookupVisibleType(n.Name); ok {
-			switch tt := t.(type) {
-			case *StructType:
-				a.analyzeStructLiteralArgs(n, tt, nil)
-				result = DefaultAggregateStateType(tt)
-				return
-			case *GenericInstanceType:
-				if _, ok := tt.Base.(*StructType); ok {
-					base := tt.Base.(*StructType)
-					bindings := genericBindingsForStructInstance(base, tt.Args)
-					a.analyzeStructLiteralArgs(n, base, bindings)
-					result = DefaultAggregateStateType(tt)
-					return
-				}
-			}
-		}
-		a.errorf(n.Pos(), "unknown struct %q", n.Name)
-		result = invalidType
+		result = a.analyzeStructLiteralExpr(n, nil)
 		return
 	case *ast.ParenExpr:
 		result = a.analyzeExpr(n.Inner)
@@ -1070,6 +1054,282 @@ func packedEnumTailPayloadSourceCompatible(expected *DArrayViewType, actual Type
 	return false
 }
 
+func (a *Analyzer) analyzeStructLiteralExpr(expr *ast.StructLitExpr, expected Type) Type {
+	targetType := a.structLiteralTargetType(expr, expected)
+	base, bindings, ok := structLiteralBaseAndBindings(targetType)
+	if !ok || base == nil {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		if !IsInvalidType(targetType) {
+			a.errorf(expr.Pos(), "type %q is not a struct", targetType.String())
+		} else {
+			a.errorf(expr.Pos(), "unknown struct %q", expr.Name)
+		}
+		return invalidType
+	}
+	a.analyzeStructLiteralArgs(expr, base, bindings)
+	if len(base.NamedStateCases) == 0 {
+		return targetType
+	}
+	desiredState, ok := namedStateCurrentArg(targetType)
+	if !ok || desiredState == nil {
+		return targetType
+	}
+	fullState := fullNamedStateType(base)
+	if sameNamedStateType(desiredState, fullState) {
+		inferredState := a.inferStructLiteralNamedState(expr, base)
+		if inferredState != nil && !sameNamedStateType(inferredState, fullState) {
+			return instantiateNamedStateStructLiteralType(base, targetType, inferredState)
+		}
+		return targetType
+	}
+	if !a.proveStructLiteralNamedState(expr, base, desiredState) {
+		a.errorf(expr.Pos(), "struct literal %q does not satisfy derived state %s", expr.Name, desiredState.String())
+	}
+	return targetType
+}
+
+func (a *Analyzer) structLiteralTargetType(expr *ast.StructLitExpr, expected Type) Type {
+	if expr == nil {
+		return invalidType
+	}
+	if len(expr.TypeArgs) != 0 {
+		return a.resolveType(&ast.GenericType{Position: expr.Position, Name: expr.Name, Args: expr.TypeArgs})
+	}
+	if base, _, ok := structLiteralBaseAndBindings(expected); ok && structTypeMatchesLiteralName(base, expr.Name) {
+		return expected
+	}
+	if t, _, ok := a.lookupVisibleType(expr.Name); ok {
+		return DefaultStatefulType(t)
+	}
+	return invalidType
+}
+
+func structTypeMatchesLiteralName(base *StructType, name string) bool {
+	if base == nil {
+		return false
+	}
+	return base.Name == name || strings.HasSuffix(base.Name, "."+name)
+}
+
+func structLiteralBaseAndBindings(t Type) (*StructType, map[string]Type, bool) {
+	t = StripAggregateStateType(t)
+	switch tt := t.(type) {
+	case *StructType:
+		return tt, nil, true
+	case *GenericInstanceType:
+		base, ok := tt.Base.(*StructType)
+		if !ok || base == nil {
+			return nil, nil, false
+		}
+		return base, genericBindingsForStructInstance(base, tt.Args), true
+	default:
+		return nil, nil, false
+	}
+}
+
+func instantiateNamedStateStructLiteralType(base *StructType, template Type, state Type) Type {
+	if base == nil || state == nil {
+		return template
+	}
+	template = StripAggregateStateType(template)
+	gi, ok := template.(*GenericInstanceType)
+	if !ok || gi == nil {
+		if defaultGI, ok := DefaultNamedStateType(base).(*GenericInstanceType); ok {
+			gi = defaultGI
+		} else {
+			return template
+		}
+	}
+	idx := namedStateArgIndex(base)
+	if idx < 0 || idx >= len(gi.Args) {
+		return template
+	}
+	args := append([]Type(nil), gi.Args...)
+	args[idx] = state
+	return &GenericInstanceType{Name: gi.Name, Base: gi.Base, Args: args}
+}
+
+func (a *Analyzer) inferStructLiteralNamedState(expr *ast.StructLitExpr, base *StructType) Type {
+	if expr == nil || base == nil || len(base.NamedStateCases) == 0 {
+		return nil
+	}
+	fieldValues, ok := structLiteralFieldValues(expr, base)
+	if !ok {
+		return fullNamedStateType(base)
+	}
+	trueStates := make([]string, 0, len(base.NamedStateCases))
+	for _, stateName := range base.NamedStateCases {
+		proven, value := a.evaluateDerivedStateForFields(base, stateName, fieldValues)
+		if !proven {
+			return fullNamedStateType(base)
+		}
+		if value {
+			trueStates = append(trueStates, stateName)
+		}
+	}
+	if len(trueStates) == 1 {
+		return newNamedStateType(base.Name, base.NamedStateCases, trueStates)
+	}
+	if len(trueStates) == 0 {
+		a.errorf(expr.Pos(), "struct literal %q does not satisfy any derived state", expr.Name)
+		return fullNamedStateType(base)
+	}
+	a.errorf(expr.Pos(), "struct literal %q satisfies multiple derived states: %s", expr.Name, strings.Join(trueStates, ", "))
+	return fullNamedStateType(base)
+}
+
+func (a *Analyzer) proveStructLiteralNamedState(expr *ast.StructLitExpr, base *StructType, desired Type) bool {
+	if expr == nil || base == nil || desired == nil {
+		return false
+	}
+	desiredCases, _, ok := namedStateTypeCases(desired)
+	if !ok {
+		return false
+	}
+	if len(desiredCases) != 1 {
+		return sameNamedStateType(desired, fullNamedStateType(base))
+	}
+	fieldValues, ok := structLiteralFieldValues(expr, base)
+	if !ok {
+		return false
+	}
+	proven, value := a.evaluateDerivedStateForFields(base, desiredCases[0], fieldValues)
+	if !proven || !value {
+		return false
+	}
+	for _, other := range base.NamedStateCases {
+		if other == desiredCases[0] {
+			continue
+		}
+		if otherProven, otherValue := a.evaluateDerivedStateForFields(base, other, fieldValues); otherProven && otherValue {
+			a.errorf(expr.Pos(), "struct literal %q satisfies multiple derived states including %q and %q", expr.Name, desiredCases[0], other)
+			return false
+		}
+	}
+	return true
+}
+
+func structLiteralFieldValues(expr *ast.StructLitExpr, base *StructType) (map[string]ast.Expr, bool) {
+	if expr == nil || base == nil || base.Decl == nil || len(expr.Args) != len(base.Decl.Fields) {
+		return nil, false
+	}
+	fieldValues := make(map[string]ast.Expr, len(base.Decl.Fields))
+	for i, fieldDecl := range base.Decl.Fields {
+		fieldValues[fieldDecl.Name] = expr.Args[i]
+	}
+	return fieldValues, true
+}
+
+func (a *Analyzer) evaluateDerivedStateForFields(base *StructType, stateName string, fieldValues map[string]ast.Expr) (bool, bool) {
+	if base == nil || fieldValues == nil || base.DerivedStateMap == nil {
+		return false, false
+	}
+	derived := base.DerivedStateMap[stateName]
+	if derived == nil || derived.Condition == nil {
+		return false, false
+	}
+	substituted, ok := substituteDerivedStateFieldExpr(derived.Condition, fieldValues)
+	if !ok {
+		return false, false
+	}
+	value, ok := a.evalConstBoolExpr(substituted)
+	return ok, value
+}
+
+func substituteDerivedStateFieldExpr(expr ast.Expr, fieldValues map[string]ast.Expr) (ast.Expr, bool) {
+	if path, ok := derivedStateSelfFieldPath(expr); ok {
+		if len(path) == 0 {
+			return nil, false
+		}
+		baseExpr, ok := fieldValues[path[0]]
+		if !ok || baseExpr == nil {
+			return nil, false
+		}
+		out := cloneDerivedStateExpr(baseExpr)
+		for _, field := range path[1:] {
+			out = &ast.FieldExpr{Position: expr.Pos(), Object: out, Field: field}
+		}
+		return out, true
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		inner, ok := substituteDerivedStateFieldExpr(n.Inner, fieldValues)
+		if !ok {
+			return nil, false
+		}
+		return &ast.ParenExpr{Position: n.Position, Inner: inner}, true
+	case *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.CharLit, *ast.BoolLit, *ast.NullLit:
+		return cloneDerivedStateExpr(expr), true
+	case *ast.UnaryExpr:
+		operand, ok := substituteDerivedStateFieldExpr(n.Operand, fieldValues)
+		if !ok {
+			return nil, false
+		}
+		return &ast.UnaryExpr{Position: n.Position, Op: n.Op, Operand: operand}, true
+	case *ast.BinaryExpr:
+		left, ok := substituteDerivedStateFieldExpr(n.Left, fieldValues)
+		if !ok {
+			return nil, false
+		}
+		right, ok := substituteDerivedStateFieldExpr(n.Right, fieldValues)
+		if !ok {
+			return nil, false
+		}
+		return &ast.BinaryExpr{Position: n.Position, Op: n.Op, Left: left, Right: right}, true
+	default:
+		return nil, false
+	}
+}
+
+func derivedStateSelfFieldPath(expr ast.Expr) ([]string, bool) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		if n.Name == "self" {
+			return nil, true
+		}
+		return nil, false
+	case *ast.FieldExpr:
+		path, ok := derivedStateSelfFieldPath(n.Object)
+		if !ok {
+			return nil, false
+		}
+		return append(path, n.Field), true
+	default:
+		return nil, false
+	}
+}
+
+func cloneDerivedStateExpr(expr ast.Expr) ast.Expr {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return &ast.Ident{Position: n.Position, Name: n.Name}
+	case *ast.IntLit:
+		return &ast.IntLit{Position: n.Position, Value: n.Value, Suffix: n.Suffix, IsHex: n.IsHex}
+	case *ast.FloatLit:
+		return &ast.FloatLit{Position: n.Position, Value: n.Value, Suffix: n.Suffix}
+	case *ast.StringLit:
+		return &ast.StringLit{Position: n.Position, Value: n.Value}
+	case *ast.CharLit:
+		return &ast.CharLit{Position: n.Position, Value: n.Value}
+	case *ast.BoolLit:
+		return &ast.BoolLit{Position: n.Position, Value: n.Value}
+	case *ast.NullLit:
+		return &ast.NullLit{Position: n.Position}
+	case *ast.ParenExpr:
+		return &ast.ParenExpr{Position: n.Position, Inner: cloneDerivedStateExpr(n.Inner)}
+	case *ast.FieldExpr:
+		return &ast.FieldExpr{Position: n.Position, Object: cloneDerivedStateExpr(n.Object), Field: n.Field}
+	case *ast.UnaryExpr:
+		return &ast.UnaryExpr{Position: n.Position, Op: n.Op, Operand: cloneDerivedStateExpr(n.Operand)}
+	case *ast.BinaryExpr:
+		return &ast.BinaryExpr{Position: n.Position, Op: n.Op, Left: cloneDerivedStateExpr(n.Left), Right: cloneDerivedStateExpr(n.Right)}
+	default:
+		return expr
+	}
+}
+
 func allocOwnerPos(expr *ast.AllocExpr) lexer.Pos {
 	if expr != nil && expr.Owner != nil {
 		return expr.Owner.Pos()
@@ -1435,34 +1695,113 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 
 func (a *Analyzer) analyzeIsExpr(expr *ast.BinaryExpr) Type {
 	left := a.analyzeExpr(expr.Left)
-	if _, _, ok := resolveMatchableEnumType(left); !ok {
-		a.errorf(expr.Left.Pos(), "is requires an enum value, got %s", left.String())
-		return a.namedTypes["bool"]
-	}
-	fieldExpr, ok := isEnumVariantExpr(expr.Right)
-	if !ok {
-		a.analyzeExpr(expr.Right)
-		a.errorf(expr.Right.Pos(), "is expects an enum variant path like Expr.Variant")
-		return a.namedTypes["bool"]
-	}
-	enumType, variant, ok := a.enumConstructorInfoFromFieldExpr(fieldExpr)
-	if !ok {
-		a.errorf(expr.Right.Pos(), "is expects an enum variant path like Expr.Variant")
-		return a.namedTypes["bool"]
-	}
-	if variant == nil {
-		a.errorf(fieldExpr.Pos(), "enum %q has no variant %q", enumType.Name, fieldExpr.Field)
-		return a.namedTypes["bool"]
-	}
-	matchableEnum, _, _ := resolveMatchableEnumType(left)
-	if matchableEnum == nil || enumType == nil || matchableEnum.Name != enumType.Name {
-		got := "<invalid>"
-		if enumType != nil {
-			got = enumType.Name + "." + variant.Name
+	if enumType, variant, ok := a.resolveEnumVariantIsTarget(expr.Right); ok {
+		if _, _, ok := resolveMatchableEnumType(left); !ok {
+			a.errorf(expr.Left.Pos(), "is requires an enum value for variant tests, got %s", left.String())
+			return a.namedTypes["bool"]
 		}
-		a.errorf(expr.Pos(), "is expects a variant of enum %q, got %s", matchableEnum.Name, got)
+		matchableEnum, _, _ := resolveMatchableEnumType(left)
+		if matchableEnum == nil || enumType == nil || matchableEnum.Name != enumType.Name {
+			expected := "<invalid>"
+			if matchableEnum != nil {
+				expected = matchableEnum.Name
+			}
+			got := "<invalid>"
+			if enumType != nil && variant != nil {
+				got = enumType.Name + "." + variant.Name
+			}
+			a.errorf(expr.Pos(), "is expects a variant of enum %q, got %s", expected, got)
+		}
+		return a.namedTypes["bool"]
 	}
+	if targetBase, _, ok := a.resolveNamedStateIsTarget(expr.Right); ok {
+		leftBase, ok := namedStateStructBase(left)
+		if !ok || leftBase == nil {
+			a.errorf(expr.Left.Pos(), "is requires a named-state struct value for type-state tests, got %s", left.String())
+			return a.namedTypes["bool"]
+		}
+		if leftBase.Name != targetBase.Name {
+			a.errorf(expr.Pos(), "is expects a state of struct %q, got state target for %q", leftBase.Name, targetBase.Name)
+		}
+		return a.namedTypes["bool"]
+	}
+	if typedExpr, ok := expr.Right.(*ast.TypeExprExpr); ok && typedExpr != nil && typedExpr.Type != nil {
+		a.resolveType(typedExpr.Type)
+	} else {
+		a.analyzeExpr(expr.Right)
+	}
+	a.errorf(expr.Right.Pos(), "is expects an enum variant like Expr.Variant or a named-state type like Player[Alive]")
 	return a.namedTypes["bool"]
+}
+
+func (a *Analyzer) resolveEnumVariantIsTarget(expr ast.Expr) (*EnumType, *EnumVariant, bool) {
+	if fieldExpr, ok := isEnumVariantExpr(expr); ok {
+		enumType, variant, ok := a.enumConstructorInfoFromFieldExpr(fieldExpr)
+		if ok && variant != nil {
+			return enumType, variant, true
+		}
+		return nil, nil, false
+	}
+	typedExpr, ok := expr.(*ast.TypeExprExpr)
+	if !ok || typedExpr == nil || typedExpr.Type == nil {
+		return nil, nil, false
+	}
+	named, ok := typedExpr.Type.(*ast.NamedType)
+	if !ok || named == nil {
+		return nil, nil, false
+	}
+	return a.enumVariantTargetFromNamedType(named)
+}
+
+func (a *Analyzer) enumVariantTargetFromNamedType(named *ast.NamedType) (*EnumType, *EnumVariant, bool) {
+	if named == nil {
+		return nil, nil, false
+	}
+	idx := strings.LastIndex(named.Name, ".")
+	if idx <= 0 || idx+1 >= len(named.Name) {
+		return nil, nil, false
+	}
+	enumName := named.Name[:idx]
+	variantName := named.Name[idx+1:]
+	base, _, ok := a.lookupVisibleType(enumName)
+	if !ok {
+		return nil, nil, false
+	}
+	enumType, ok := base.(*EnumType)
+	if !ok || enumType == nil {
+		return nil, nil, false
+	}
+	variant, ok := enumType.Variant(variantName)
+	if !ok || variant == nil {
+		return enumType, nil, false
+	}
+	return enumType, variant, true
+}
+
+func (a *Analyzer) resolveNamedStateIsTarget(expr ast.Expr) (*StructType, Type, bool) {
+	typedExpr, ok := expr.(*ast.TypeExprExpr)
+	if !ok || typedExpr == nil || typedExpr.Type == nil {
+		return nil, nil, false
+	}
+	if named, ok := typedExpr.Type.(*ast.NamedType); ok && named != nil {
+		if idx := strings.LastIndex(named.Name, "."); idx > 0 {
+			if base, _, ok := a.lookupVisibleType(named.Name[:idx]); ok {
+				if _, ok := base.(*EnumType); ok {
+					return nil, nil, false
+				}
+			}
+		}
+	}
+	resolved := a.resolveType(typedExpr.Type)
+	base, ok := namedStateStructBase(resolved)
+	if !ok || base == nil {
+		return nil, nil, false
+	}
+	stateArg, ok := namedStateCurrentArg(resolved)
+	if !ok || stateArg == nil {
+		return nil, nil, false
+	}
+	return base, stateArg, true
 }
 
 func isEnumVariantExpr(expr ast.Expr) (*ast.FieldExpr, bool) {
@@ -4271,6 +4610,11 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 }
 
 func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
+	if lit, ok := expr.(*ast.StructLitExpr); ok {
+		result := a.analyzeStructLiteralExpr(lit, expected)
+		a.recordAnalyzedExprType(lit, result)
+		return result
+	}
 	if list, ok := expr.(*ast.ListLitExpr); ok {
 		return a.analyzeListLitExprWithExpected(list, expected)
 	}

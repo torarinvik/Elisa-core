@@ -1,5 +1,7 @@
 package semantic
 
+import "llcontext/src/ast"
+
 func funcTypeHasSinglePermissionRowParam(fn *FuncType) (string, bool) {
 	if fn == nil || len(fn.UsedPermissionParams) != 1 || len(fn.PermissionRefs) != 1 {
 		return "", false
@@ -50,6 +52,22 @@ func mergeAggregateStateLists(a []RefState, b []RefState) ([]RefState, bool) {
 	return merged, true
 }
 
+func sameStringList(a []string, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func sameGenericParam(a ast.GenericParam, b ast.GenericParam) bool {
+	return a.Kind == b.Kind && a.Name == b.Name && a.StateOwner == b.StateOwner && sameStringList(a.StateCases, b.StateCases)
+}
+
 func SameType(a, b Type) bool {
 	if a == nil || b == nil {
 		return a == b
@@ -78,6 +96,10 @@ func SameType(a, b Type) bool {
 	case *TypeParamType:
 		tb, ok := b.(*TypeParamType)
 		return ok && ta.Name == tb.Name
+	case *StructStateCaseType:
+		return sameNamedStateType(ta, b)
+	case *StructStateSetType:
+		return sameNamedStateType(ta, b)
 	case *RefStorageParamType:
 		tb, ok := b.(*RefStorageParamType)
 		return ok && ta.Name == tb.Name
@@ -161,7 +183,7 @@ func SameType(a, b Type) bool {
 			return false
 		}
 		for i := range ta.GenericParams {
-			if ta.GenericParams[i] != tb.GenericParams[i] {
+			if !sameGenericParam(ta.GenericParams[i], tb.GenericParams[i]) {
 				return false
 			}
 		}
@@ -242,6 +264,18 @@ func AssignableTo(dst, src Type) bool {
 	}
 	if _, ok := src.(*TypeParamType); ok {
 		return true
+	}
+	if _, ok := dst.(*StructStateCaseType); ok {
+		return namedStateTypeAssignable(dst, src)
+	}
+	if _, ok := dst.(*StructStateSetType); ok {
+		return namedStateTypeAssignable(dst, src)
+	}
+	if _, ok := src.(*StructStateCaseType); ok {
+		return SameType(dst, src)
+	}
+	if _, ok := src.(*StructStateSetType); ok {
+		return SameType(dst, src)
 	}
 	if _, ok := dst.(*RefStorageParamType); ok {
 		_, ok = src.(*RefStorageValueType)
@@ -356,6 +390,8 @@ func matchTypePattern(pattern, actual Type) bool {
 	case *BuiltinType:
 		a, ok := actual.(*BuiltinType)
 		return ok && p.Name == a.Name
+	case *StructStateCaseType, *StructStateSetType:
+		return namedStateTypeAssignable(pattern, actual)
 	case *NullType:
 		_, ok := actual.(*NullType)
 		return ok
@@ -533,10 +569,48 @@ func MergeTypes(a, b Type) Type {
 		}
 		return &OptionalType{Value: merged}
 	}
+	if _, ok := a.(*StructStateCaseType); ok {
+		return mergeNamedStateTypes(a, b, nil)
+	}
+	if aset, ok := a.(*StructStateSetType); ok {
+		return mergeNamedStateTypes(a, b, aset.Cases)
+	}
+	if _, ok := b.(*StructStateCaseType); ok {
+		return mergeNamedStateTypes(a, b, nil)
+	}
+	if bset, ok := b.(*StructStateSetType); ok {
+		return mergeNamedStateTypes(a, b, bset.Cases)
+	}
 	if aa, ok := a.(*AggregateStateType); ok {
 		if ba, ok := b.(*AggregateStateType); ok && SameType(aa.Base, ba.Base) {
 			if states, ok := mergeAggregateStateLists(aggregateStateStates(aa), aggregateStateStates(ba)); ok {
 				return cloneAggregateStateWithBase(aa.Base, states)
+			}
+		}
+	}
+	if agi, ok := a.(*GenericInstanceType); ok {
+		if bgi, ok := b.(*GenericInstanceType); ok && agi.Name == bgi.Name && SameType(agi.Base, bgi.Base) && len(agi.Args) == len(bgi.Args) {
+			base, ok := agi.Base.(*StructType)
+			if ok && base != nil {
+				stateIndex := namedStateArgIndex(base)
+				if stateIndex >= 0 {
+					mergedArgs := make([]Type, len(agi.Args))
+					for i := range agi.Args {
+						if i == stateIndex {
+							merged := mergeNamedStateTypes(agi.Args[i], bgi.Args[i], base.NamedStateCases)
+							if IsInvalidType(merged) {
+								return invalidType
+							}
+							mergedArgs[i] = merged
+							continue
+						}
+						if !SameType(agi.Args[i], bgi.Args[i]) {
+							return invalidType
+						}
+						mergedArgs[i] = agi.Args[i]
+					}
+					return &GenericInstanceType{Name: agi.Name, Base: agi.Base, Args: mergedArgs}
+				}
 			}
 		}
 	}

@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"strings"
+
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
 )
@@ -280,7 +282,7 @@ func guardFactPackedVariantTest(expr *ast.BinaryExpr) (ast.Expr, PackedVariantGu
 	if expr == nil || expr.Op != lexer.TOKEN_IS {
 		return nil, PackedVariantGuard{}, false
 	}
-	fieldExpr, ok := guardFactVariantPath(expr.Right)
+	enumName, variantName, ok := guardFactVariantTarget(expr.Right)
 	if !ok {
 		return nil, PackedVariantGuard{}, false
 	}
@@ -288,23 +290,29 @@ func guardFactPackedVariantTest(expr *ast.BinaryExpr) (ast.Expr, PackedVariantGu
 	if key == "" {
 		return nil, PackedVariantGuard{}, false
 	}
-	ident, ok := fieldExpr.Object.(*ast.Ident)
-	if !ok || ident == nil || ident.Name == "" || fieldExpr.Field == "" {
-		return nil, PackedVariantGuard{}, false
-	}
-	return expr.Left, PackedVariantGuard{EnumName: ident.Name, VariantName: fieldExpr.Field}, true
+	return expr.Left, PackedVariantGuard{EnumName: enumName, VariantName: variantName}, true
 }
 
-func guardFactVariantPath(expr ast.Expr) (*ast.FieldExpr, bool) {
+func guardFactVariantTarget(expr ast.Expr) (string, string, bool) {
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
-		return guardFactVariantPath(n.Inner)
+		return guardFactVariantTarget(n.Inner)
 	case *ast.FieldExpr:
-		if _, ok := n.Object.(*ast.Ident); ok {
-			return n, true
+		if ident, ok := n.Object.(*ast.Ident); ok && ident != nil && ident.Name != "" && n.Field != "" {
+			return ident.Name, n.Field, true
 		}
+	case *ast.TypeExprExpr:
+		named, ok := n.Type.(*ast.NamedType)
+		if !ok || named == nil {
+			return "", "", false
+		}
+		idx := strings.LastIndex(named.Name, ".")
+		if idx <= 0 || idx+1 >= len(named.Name) {
+			return "", "", false
+		}
+		return named.Name[:idx], named.Name[idx+1:], true
 	}
-	return nil, false
+	return "", "", false
 }
 
 func (g *GuardFactSet) addLEKeys(leftKey string, rightKey string) {

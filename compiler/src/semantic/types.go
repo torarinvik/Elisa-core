@@ -40,6 +40,16 @@ type TypeParamType struct {
 	Name string
 }
 
+type StructStateCaseType struct {
+	StructName string
+	Case       string
+}
+
+type StructStateSetType struct {
+	StructName string
+	Cases      []string
+}
+
 type RefStorageParamType struct {
 	Name string
 }
@@ -224,12 +234,20 @@ type Field struct {
 	PackedStorage PackedFieldStorageMode
 }
 
+type StructDerivedState struct {
+	Name      string
+	Condition ast.Expr
+}
+
 type StructType struct {
 	Name             string
 	TypeParams       []string
 	RefStorageParams []string
 	RefStateParams   []string
 	GenericParams    []ast.GenericParam
+	NamedStateCases  []string
+	DerivedStates    []StructDerivedState
+	DerivedStateMap  map[string]*StructDerivedState
 	Fields           map[string]Field
 	Affine           bool
 	ReprC            bool
@@ -324,6 +342,8 @@ func (*NeverType) isType()             {}
 func (*NullType) isType()              {}
 func (*BuiltinType) isType()           {}
 func (*TypeParamType) isType()         {}
+func (*StructStateCaseType) isType()   {}
+func (*StructStateSetType) isType()    {}
 func (*RefStorageParamType) isType()   {}
 func (*RefStorageValueType) isType()   {}
 func (*RefStateParamType) isType()     {}
@@ -361,6 +381,18 @@ func (t *BuiltinType) String() string {
 	return t.Name
 }
 func (t *TypeParamType) String() string { return t.Name }
+func (t *StructStateCaseType) String() string {
+	if t == nil {
+		return "<invalid-struct-state>"
+	}
+	return t.Case
+}
+func (t *StructStateSetType) String() string {
+	if t == nil {
+		return "<invalid-struct-state-set>"
+	}
+	return strings.Join(t.Cases, " | ")
+}
 func (t *RefStorageParamType) String() string {
 	return t.Name
 }
@@ -631,6 +663,222 @@ func (t *ConstEnumType) Member(name string) (*ConstEnumMember, bool) {
 func (t *EnumType) String() string   { return t.Name }
 func (t *StructType) String() string { return t.Name }
 func (t *OpaqueType) String() string { return t.Name }
+
+func namedStateStructBase(t Type) (*StructType, bool) {
+	switch tt := t.(type) {
+	case *StructType:
+		return tt, tt != nil && len(tt.NamedStateCases) != 0
+	case *GenericInstanceType:
+		base, ok := tt.Base.(*StructType)
+		return base, ok && base != nil && len(base.NamedStateCases) != 0
+	default:
+		return nil, false
+	}
+}
+
+func namedStateArgs(t Type) ([]Type, bool) {
+	gi, ok := t.(*GenericInstanceType)
+	if !ok || gi == nil {
+		return nil, false
+	}
+	base, ok := gi.Base.(*StructType)
+	if !ok || base == nil || len(base.NamedStateCases) == 0 {
+		return nil, false
+	}
+	return gi.Args, true
+}
+
+func namedStateArgIndex(base *StructType) int {
+	if base == nil {
+		return -1
+	}
+	params := genericParamsForStructType(base)
+	for i, param := range params {
+		if param.Kind == ast.GenericParamState {
+			return i
+		}
+	}
+	return -1
+}
+
+func namedStateCurrentArg(t Type) (Type, bool) {
+	base, ok := namedStateStructBase(t)
+	if !ok || base == nil {
+		return nil, false
+	}
+	if args, ok := namedStateArgs(t); ok {
+		idx := namedStateArgIndex(base)
+		if idx >= 0 && idx < len(args) {
+			return args[idx], true
+		}
+	}
+	return fullNamedStateType(base), true
+}
+
+func namedStateTypeCases(t Type) ([]string, string, bool) {
+	switch tt := t.(type) {
+	case *StructStateCaseType:
+		if tt == nil {
+			return nil, "", false
+		}
+		return []string{tt.Case}, tt.StructName, true
+	case *StructStateSetType:
+		if tt == nil {
+			return nil, "", false
+		}
+		cases := append([]string(nil), tt.Cases...)
+		return cases, tt.StructName, true
+	default:
+		return nil, "", false
+	}
+}
+
+func canonicalizeNamedStateCases(allowed []string, cases []string) []string {
+	if len(allowed) == 0 || len(cases) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(cases))
+	for _, name := range cases {
+		seen[name] = true
+	}
+	ordered := make([]string, 0, len(seen))
+	for _, name := range allowed {
+		if seen[name] {
+			ordered = append(ordered, name)
+		}
+	}
+	return ordered
+}
+
+func newNamedStateType(structName string, allowed []string, cases []string) Type {
+	ordered := canonicalizeNamedStateCases(allowed, cases)
+	if len(ordered) == 0 {
+		return nil
+	}
+	if len(ordered) == 1 {
+		return &StructStateCaseType{StructName: structName, Case: ordered[0]}
+	}
+	return &StructStateSetType{StructName: structName, Cases: ordered}
+}
+
+func NewNamedStateTypeForBackend(structName string, allowed []string, cases []string) Type {
+	return newNamedStateType(structName, allowed, cases)
+}
+
+func fullNamedStateType(base *StructType) Type {
+	if base == nil || len(base.NamedStateCases) == 0 {
+		return nil
+	}
+	return newNamedStateType(base.Name, base.NamedStateCases, base.NamedStateCases)
+}
+
+func sameNamedStateType(a Type, b Type) bool {
+	acases, astruct, aok := namedStateTypeCases(a)
+	bcases, bstruct, bok := namedStateTypeCases(b)
+	if !aok || !bok || astruct != bstruct || len(acases) != len(bcases) {
+		return false
+	}
+	for i := range acases {
+		if acases[i] != bcases[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func namedStateTypeAssignable(dst Type, src Type) bool {
+	dstCases, dstStruct, dstOK := namedStateTypeCases(dst)
+	srcCases, srcStruct, srcOK := namedStateTypeCases(src)
+	if !dstOK || !srcOK || dstStruct != srcStruct {
+		return false
+	}
+	allowed := make(map[string]bool, len(dstCases))
+	for _, name := range dstCases {
+		allowed[name] = true
+	}
+	for _, name := range srcCases {
+		if !allowed[name] {
+			return false
+		}
+	}
+	return true
+}
+
+func mergeNamedStateTypes(a Type, b Type, allowed []string) Type {
+	acases, astruct, aok := namedStateTypeCases(a)
+	bcases, bstruct, bok := namedStateTypeCases(b)
+	if !aok || !bok || astruct != bstruct {
+		return invalidType
+	}
+	if len(allowed) == 0 {
+		allowed = append([]string(nil), acases...)
+		for _, name := range bcases {
+			seen := false
+			for _, existing := range allowed {
+				if existing == name {
+					seen = true
+					break
+				}
+			}
+			if !seen {
+				allowed = append(allowed, name)
+			}
+		}
+	}
+	merged := make([]string, 0, len(acases)+len(bcases))
+	seen := map[string]bool{}
+	for _, name := range acases {
+		if !seen[name] {
+			seen[name] = true
+			merged = append(merged, name)
+		}
+	}
+	for _, name := range bcases {
+		if !seen[name] {
+			seen[name] = true
+			merged = append(merged, name)
+		}
+	}
+	return newNamedStateType(astruct, allowed, merged)
+}
+
+func subtractNamedStateType(current Type, remove Type, allowed []string) Type {
+	currentCases, structName, currentOK := namedStateTypeCases(current)
+	removeCases, removeStruct, removeOK := namedStateTypeCases(remove)
+	if !currentOK || !removeOK || structName != removeStruct {
+		return nil
+	}
+	removed := make(map[string]bool, len(removeCases))
+	for _, name := range removeCases {
+		removed[name] = true
+	}
+	remaining := make([]string, 0, len(currentCases))
+	for _, name := range currentCases {
+		if !removed[name] {
+			remaining = append(remaining, name)
+		}
+	}
+	return newNamedStateType(structName, allowed, remaining)
+}
+
+func intersectNamedStateType(a Type, b Type, allowed []string) Type {
+	acases, structName, aOK := namedStateTypeCases(a)
+	bcases, bStruct, bOK := namedStateTypeCases(b)
+	if !aOK || !bOK || structName != bStruct {
+		return nil
+	}
+	allowedSet := make(map[string]bool, len(bcases))
+	for _, name := range bcases {
+		allowedSet[name] = true
+	}
+	intersection := make([]string, 0, len(acases))
+	for _, name := range acases {
+		if allowedSet[name] {
+			intersection = append(intersection, name)
+		}
+	}
+	return newNamedStateType(structName, allowed, intersection)
+}
 
 func RequestedAlignment(t Type) (int, bool) {
 	if t == nil {
@@ -974,6 +1222,44 @@ func StripAggregateStateType(t Type) Type {
 		return t
 	}
 	return agg.Base
+}
+
+func DefaultNamedStateType(t Type) Type {
+	if t == nil {
+		return nil
+	}
+	if _, ok := t.(*GenericInstanceType); ok {
+		if _, hasState := namedStateCurrentArg(t); hasState {
+			return t
+		}
+	}
+	base, ok := t.(*StructType)
+	if !ok || base == nil || len(base.NamedStateCases) == 0 {
+		return t
+	}
+	idx := namedStateArgIndex(base)
+	if idx < 0 {
+		return t
+	}
+	params := genericParamsForStructType(base)
+	args := make([]Type, len(params))
+	for i, param := range params {
+		switch param.Kind {
+		case ast.GenericParamType:
+			args[i] = &TypeParamType{Name: param.Name}
+		case ast.GenericParamRefStorage:
+			args[i] = &RefStorageParamType{Name: param.Name}
+		case ast.GenericParamRefState:
+			args[i] = &RefStateParamType{Name: param.Name}
+		case ast.GenericParamState:
+			args[i] = fullNamedStateType(base)
+		}
+	}
+	return &GenericInstanceType{Name: base.Name, Base: base, Args: args}
+}
+
+func DefaultStatefulType(t Type) Type {
+	return DefaultAggregateStateType(DefaultNamedStateType(t))
 }
 
 func AggregateStateParamCount(t Type) int {

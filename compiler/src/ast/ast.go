@@ -99,6 +99,8 @@ type StructDecl struct {
 	GenericParams    []GenericParam
 	HasStateParam    bool
 	StateParamCount  int
+	NamedStateCases  []string
+	DerivedStates    []DerivedStateDecl
 	Affine           bool
 	ReprC            bool
 	Fields           []FieldDecl
@@ -108,6 +110,7 @@ type GenericParamKind int
 
 const (
 	GenericParamType GenericParamKind = iota
+	GenericParamState
 	GenericParamRefStorage
 	GenericParamRefState
 	GenericParamRegion
@@ -115,9 +118,17 @@ const (
 )
 
 type GenericParam struct {
-	Position lexer.Pos
-	Kind     GenericParamKind
-	Name     string
+	Position   lexer.Pos
+	Kind       GenericParamKind
+	Name       string
+	StateCases []string
+	StateOwner string
+}
+
+type DerivedStateDecl struct {
+	Position  lexer.Pos
+	StateName string
+	Condition Expr
 }
 
 type FieldDecl struct {
@@ -293,6 +304,11 @@ type AggregateStateTypeExpr struct {
 	Base     TypeExpr
 	State    RefState
 	States   []RefState
+}
+
+type StateSetTypeExpr struct {
+	Position lexer.Pos
+	Cases    []string
 }
 
 type MutableType struct {
@@ -500,7 +516,13 @@ type SpecializeExpr struct {
 type StructLitExpr struct {
 	Position lexer.Pos
 	Name     string
+	TypeArgs []TypeExpr
 	Args     []Expr
+}
+
+type TypeExprExpr struct {
+	Position lexer.Pos
+	Type     TypeExpr
 }
 
 type ParenExpr struct {
@@ -869,12 +891,13 @@ func (n *GenericType) Pos() lexer.Pos { return n.Position }
 func (n *AggregateStateTypeExpr) Pos() lexer.Pos {
 	return n.Position
 }
-func (n *MutableType) Pos() lexer.Pos     { return n.Position }
-func (n *TailType) Pos() lexer.Pos        { return n.Position }
-func (n *ArrayType) Pos() lexer.Pos       { return n.Position }
-func (n *BuiltinTypeExpr) Pos() lexer.Pos { return n.Position }
-func (n *FuncTypeExpr) Pos() lexer.Pos    { return n.Position }
-func (n *ErrorSetExpr) Pos() lexer.Pos    { return n.Position }
+func (n *StateSetTypeExpr) Pos() lexer.Pos { return n.Position }
+func (n *MutableType) Pos() lexer.Pos      { return n.Position }
+func (n *TailType) Pos() lexer.Pos         { return n.Position }
+func (n *ArrayType) Pos() lexer.Pos        { return n.Position }
+func (n *BuiltinTypeExpr) Pos() lexer.Pos  { return n.Position }
+func (n *FuncTypeExpr) Pos() lexer.Pos     { return n.Position }
+func (n *ErrorSetExpr) Pos() lexer.Pos     { return n.Position }
 func (n *ErrorUnionTypeExpr) Pos() lexer.Pos {
 	return n.Position
 }
@@ -901,6 +924,7 @@ func (n *TernaryExpr) Pos() lexer.Pos      { return n.Position }
 func (n *AddrOfExpr) Pos() lexer.Pos       { return n.Position }
 func (n *SpecializeExpr) Pos() lexer.Pos   { return n.Position }
 func (n *StructLitExpr) Pos() lexer.Pos    { return n.Position }
+func (n *TypeExprExpr) Pos() lexer.Pos     { return n.Position }
 func (n *ParenExpr) Pos() lexer.Pos        { return n.Position }
 func (n *RaiseExpr) Pos() lexer.Pos        { return n.Position }
 func (n *TryExpr) Pos() lexer.Pos          { return n.Position }
@@ -976,6 +1000,7 @@ func (*RefStateLiteralTypeExpr) nodeTag()   {}
 func (*RefStorageLiteralTypeExpr) nodeTag() {}
 func (*GenericType) nodeTag()               {}
 func (*AggregateStateTypeExpr) nodeTag()    {}
+func (*StateSetTypeExpr) nodeTag()          {}
 func (*MutableType) nodeTag()               {}
 func (*TailType) nodeTag()                  {}
 func (*ArrayType) nodeTag()                 {}
@@ -1006,6 +1031,7 @@ func (*TernaryExpr) nodeTag()               {}
 func (*AddrOfExpr) nodeTag()                {}
 func (*SpecializeExpr) nodeTag()            {}
 func (*StructLitExpr) nodeTag()             {}
+func (*TypeExprExpr) nodeTag()              {}
 func (*ParenExpr) nodeTag()                 {}
 func (*RaiseExpr) nodeTag()                 {}
 func (*TryExpr) nodeTag()                   {}
@@ -1075,6 +1101,7 @@ func (*RefStateLiteralTypeExpr) typeExprTag()   {}
 func (*RefStorageLiteralTypeExpr) typeExprTag() {}
 func (*GenericType) typeExprTag()               {}
 func (*AggregateStateTypeExpr) typeExprTag()    {}
+func (*StateSetTypeExpr) typeExprTag()          {}
 func (*MutableType) typeExprTag()               {}
 func (*TailType) typeExprTag()                  {}
 func (*ArrayType) typeExprTag()                 {}
@@ -1114,6 +1141,7 @@ func (*TernaryExpr) exprTag()                       {}
 func (*AddrOfExpr) exprTag()                        {}
 func (*SpecializeExpr) exprTag()                    {}
 func (*StructLitExpr) exprTag()                     {}
+func (*TypeExprExpr) exprTag()                      {}
 func (*ParenExpr) exprTag()                         {}
 func (*RaiseExpr) exprTag()                         {}
 func (*MatchExpr) exprTag()                         {}

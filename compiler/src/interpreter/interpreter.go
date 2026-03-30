@@ -624,6 +624,9 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 	case *ast.ZeroedLit:
 		return VoidValue(), fmt.Errorf("zeroed literal requires typed context")
 	case *ast.BinaryExpr:
+		if n.Op == lexer.TOKEN_IS {
+			return i.evalIsExpr(frame, n)
+		}
 		left, err := i.evalExpr(frame, n.Left)
 		if err != nil {
 			return VoidValue(), err
@@ -745,6 +748,174 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 		return i.evalExpr(frame, n.Expr)
 	default:
 		return VoidValue(), fmt.Errorf("unsupported interpreter expression %T", expr)
+	}
+}
+
+func (i *Interpreter) evalIsExpr(frame *frame, expr *ast.BinaryExpr) (Value, error) {
+	if expr == nil {
+		return VoidValue(), fmt.Errorf("is expression is nil")
+	}
+	leftValue, err := i.evalExpr(frame, expr.Left)
+	if err != nil {
+		return VoidValue(), err
+	}
+	base, cases, ok := i.namedStateIsTarget(expr.Right)
+	if !ok || base == nil {
+		return VoidValue(), fmt.Errorf("interpreter only supports named-state struct tests for is")
+	}
+	if leftValue.kind != valueStruct || leftValue.structVal == nil {
+		return VoidValue(), fmt.Errorf("is requires a struct value, got %s", leftValue.String())
+	}
+	if leftValue.structVal.Name != base.Name {
+		return BoolValue(false), nil
+	}
+	if len(cases) == len(base.NamedStateCases) {
+		return BoolValue(true), nil
+	}
+	for _, stateName := range cases {
+		derived := base.DerivedStateMap[stateName]
+		if derived == nil || derived.Condition == nil {
+			return VoidValue(), fmt.Errorf("missing derived state rule for %s.%s", base.Name, stateName)
+		}
+		value, err := i.evalDerivedStateExpr(frame, derived.Condition, leftValue)
+		if err != nil {
+			return VoidValue(), err
+		}
+		truth, err := requireBool(value)
+		if err != nil {
+			return VoidValue(), err
+		}
+		if truth {
+			return BoolValue(true), nil
+		}
+	}
+	return BoolValue(false), nil
+}
+
+func (i *Interpreter) namedStateIsTarget(expr ast.Expr) (*semantic.StructType, []string, bool) {
+	typedExpr, ok := expr.(*ast.TypeExprExpr)
+	if !ok || typedExpr == nil || typedExpr.Type == nil || i == nil || i.result == nil {
+		return nil, nil, false
+	}
+	switch n := typedExpr.Type.(type) {
+	case *ast.NamedType:
+		base, ok := i.result.NamedTypes[n.Name]
+		if !ok {
+			return nil, nil, false
+		}
+		structType, ok := base.(*semantic.StructType)
+		if !ok || structType == nil || len(structType.NamedStateCases) == 0 {
+			return nil, nil, false
+		}
+		return structType, append([]string(nil), structType.NamedStateCases...), true
+	case *ast.GenericType:
+		base, ok := i.result.NamedTypes[n.Name]
+		if !ok {
+			return nil, nil, false
+		}
+		structType, ok := base.(*semantic.StructType)
+		if !ok || structType == nil || len(structType.NamedStateCases) == 0 {
+			return nil, nil, false
+		}
+		if len(n.Args) == 0 {
+			return structType, append([]string(nil), structType.NamedStateCases...), true
+		}
+		switch arg := n.Args[len(n.Args)-1].(type) {
+		case *ast.NamedType:
+			return structType, []string{arg.Name}, true
+		case *ast.StateSetTypeExpr:
+			return structType, append([]string(nil), arg.Cases...), true
+		default:
+			return nil, nil, false
+		}
+	default:
+		return nil, nil, false
+	}
+}
+
+func (i *Interpreter) evalDerivedStateExpr(frame *frame, expr ast.Expr, self Value) (Value, error) {
+	if path, ok := interpreterDerivedStateSelfPath(expr); ok {
+		return i.evalDerivedStateSelfPath(self, path)
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return i.evalDerivedStateExpr(frame, n.Inner, self)
+	case *ast.IntLit:
+		return parseIntLiteral(n)
+	case *ast.FloatLit:
+		value, err := strconv.ParseFloat(n.Value, 64)
+		if err != nil {
+			return VoidValue(), err
+		}
+		return FloatValue(value), nil
+	case *ast.StringLit:
+		return StringValue(n.Value), nil
+	case *ast.CharLit:
+		if n.Value == "" {
+			return IntValue(0), nil
+		}
+		r, _ := utf8.DecodeRuneInString(n.Value)
+		return IntValue(int64(r)), nil
+	case *ast.BoolLit:
+		return BoolValue(n.Value), nil
+	case *ast.NullLit:
+		return NullValue(), nil
+	case *ast.UnaryExpr:
+		operand, err := i.evalDerivedStateExpr(frame, n.Operand, self)
+		if err != nil {
+			return VoidValue(), err
+		}
+		return evalUnaryOp(n.Op, operand)
+	case *ast.BinaryExpr:
+		left, err := i.evalDerivedStateExpr(frame, n.Left, self)
+		if err != nil {
+			return VoidValue(), err
+		}
+		right, err := i.evalDerivedStateExpr(frame, n.Right, self)
+		if err != nil {
+			return VoidValue(), err
+		}
+		return evalBinaryOp(n.Op, left, right)
+	default:
+		return VoidValue(), fmt.Errorf("unsupported derived-state expression %T", expr)
+	}
+}
+
+func (i *Interpreter) evalDerivedStateSelfPath(self Value, path []string) (Value, error) {
+	value := self
+	if len(path) == 0 {
+		return value.Clone(), nil
+	}
+	for _, field := range path {
+		if value.kind != valueStruct || value.structVal == nil {
+			return VoidValue(), fmt.Errorf("derived-state field access requires a struct value")
+		}
+		next, ok := value.structVal.Fields[field]
+		if !ok {
+			return VoidValue(), fmt.Errorf("struct %s has no field %q", value.structVal.Name, field)
+		}
+		value = next
+	}
+	return value.Clone(), nil
+}
+
+func interpreterDerivedStateSelfPath(expr ast.Expr) ([]string, bool) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		if n.Name == "self" {
+			return nil, true
+		}
+		return nil, false
+	case *ast.FieldExpr:
+		path, ok := interpreterDerivedStateSelfPath(n.Object)
+		if !ok {
+			return nil, false
+		}
+		return append(path, n.Field), true
+	case *ast.ParenExpr:
+		return interpreterDerivedStateSelfPath(n.Inner)
+	default:
+		return nil, false
 	}
 }
 

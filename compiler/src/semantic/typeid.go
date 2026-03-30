@@ -73,6 +73,14 @@ func appendTypeIDKey(b *strings.Builder, t Type) bool {
 	case *TypeParamType:
 		appendKeyTag(b, "typeparam")
 		appendKeyString(b, tt.Name)
+	case *StructStateCaseType:
+		appendKeyTag(b, "structstatecase")
+		appendKeyString(b, tt.StructName)
+		appendKeyString(b, tt.Case)
+	case *StructStateSetType:
+		appendKeyTag(b, "structstateset")
+		appendKeyString(b, tt.StructName)
+		appendKeyStringSlice(b, tt.Cases)
 	case *RefStorageParamType:
 		appendKeyTag(b, "refstorageparam")
 		appendKeyString(b, tt.Name)
@@ -246,6 +254,8 @@ func appendGenericParamSlice(b *strings.Builder, params []ast.GenericParam) {
 	for _, param := range params {
 		appendKeyInt(b, int(param.Kind))
 		appendKeyString(b, param.Name)
+		appendKeyString(b, param.StateOwner)
+		appendKeyStringSlice(b, param.StateCases)
 		appendKeyPos(b, param.Position)
 	}
 }

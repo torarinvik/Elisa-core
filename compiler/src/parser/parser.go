@@ -512,6 +512,7 @@ func (p *Parser) parseStructDeclWithAnnotations(annotations []ast.Annotation) *a
 	var genericParams []ast.GenericParam
 	hasStateParam := false
 	stateParamCount := 0
+	var namedStateCases []string
 	if states, ok := p.peekAggregateStateBracketList(); ok {
 		states = p.parseAggregateStateBracketList()
 		for _, state := range states {
@@ -522,6 +523,9 @@ func (p *Parser) parseStructDeclWithAnnotations(annotations []ast.Annotation) *a
 		}
 		hasStateParam = len(states) > 0
 		stateParamCount = len(states)
+	} else if p.peekNamedStructStateBracket() {
+		namedStateCases = p.parseNamedStructStateBracket(name)
+		genericParams = append(genericParams, ast.GenericParam{Position: pos, Kind: ast.GenericParamState, Name: "state", StateCases: append([]string(nil), namedStateCases...), StateOwner: name})
 	} else if p.match(lexer.TOKEN_LBRACKET) {
 		typeParams, refStorageParams, refStateParams, _, _, genericParams = p.parseGenericParamListAfterLBracket(false, false)
 		p.expect(lexer.TOKEN_RBRACKET)
@@ -535,6 +539,9 @@ func (p *Parser) parseStructDeclWithAnnotations(annotations []ast.Annotation) *a
 			}
 			hasStateParam = len(states) > 0
 			stateParamCount = len(states)
+		} else if p.peekNamedStructStateBracket() {
+			namedStateCases = p.parseNamedStructStateBracket(name)
+			genericParams = append(genericParams, ast.GenericParam{Position: pos, Kind: ast.GenericParamState, Name: "state", StateCases: append([]string(nil), namedStateCases...), StateOwner: name})
 		}
 	}
 
@@ -543,16 +550,69 @@ func (p *Parser) parseStructDeclWithAnnotations(annotations []ast.Annotation) *a
 	p.expect(lexer.TOKEN_INDENT)
 
 	fields := make([]ast.FieldDecl, 0, p.estimateIndentedItemCount())
+	derivedStates := make([]ast.DerivedStateDecl, 0)
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 		p.skipNewlines()
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
 		}
+		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "derive" {
+			derivedStates = append(derivedStates, p.parseDerivedStateBlock()...)
+			continue
+		}
 		fields = append(fields, p.parseFieldDecl())
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.StructDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, GenericParams: genericParams, HasStateParam: hasStateParam, StateParamCount: stateParamCount, Affine: affine, ReprC: reprC, Fields: fields}
+	return &ast.StructDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, GenericParams: genericParams, HasStateParam: hasStateParam, StateParamCount: stateParamCount, NamedStateCases: append([]string(nil), namedStateCases...), DerivedStates: derivedStates, Affine: affine, ReprC: reprC, Fields: fields}
+}
+
+func (p *Parser) peekNamedStructStateBracket() bool {
+	return p.peek() == lexer.TOKEN_LBRACKET && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "state"
+}
+
+func (p *Parser) parseNamedStructStateBracket(structName string) []string {
+	p.expect(lexer.TOKEN_LBRACKET)
+	p.expectIdentText("state")
+	cases := make([]string, 0, 2)
+	seen := map[string]bool{}
+	for {
+		name := p.expect(lexer.TOKEN_IDENT).Text
+		if seen[name] {
+			p.errorf("duplicate struct state %q in %q", name, structName)
+		} else {
+			seen[name] = true
+			cases = append(cases, name)
+		}
+		if !p.match(lexer.TOKEN_PIPE) {
+			break
+		}
+	}
+	p.expect(lexer.TOKEN_RBRACKET)
+	return cases
+}
+
+func (p *Parser) parseDerivedStateBlock() []ast.DerivedStateDecl {
+	p.expectIdentText("derive")
+	p.expectIdentText("state")
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+	derived := make([]ast.DerivedStateDecl, 0, p.estimateIndentedItemCount())
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		pos := p.cur().Pos
+		stateName := p.expect(lexer.TOKEN_IDENT).Text
+		p.expectIdentText("when")
+		cond := p.parseExpr()
+		p.expectNewline()
+		derived = append(derived, ast.DerivedStateDecl{Position: pos, StateName: stateName, Condition: cond})
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	return derived
 }
 
 func joinAggregateStateMarkers(states []ast.RefState) string {

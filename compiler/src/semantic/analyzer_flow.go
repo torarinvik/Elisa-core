@@ -6520,6 +6520,11 @@ func (a *Analyzer) applyConditionRefinements(scope *Scope, expr ast.Expr, truthy
 			targetExpr, viewType, ok := a.refinedExprPackedVariantView(n, truthy)
 			if ok {
 				a.bindRefinedExprType(scope, targetExpr, viewType)
+				break
+			}
+			targetExpr, refinedType, ok := a.refinedExprNamedStateType(n, truthy)
+			if ok {
+				a.bindRefinedExprType(scope, targetExpr, refinedType)
 			}
 		}
 	case *ast.UnaryExpr:
@@ -6561,12 +6566,11 @@ func (a *Analyzer) refinedExprPackedVariantView(expr *ast.BinaryExpr, truthy boo
 	if a == nil || !truthy || expr == nil || expr.Op != lexer.TOKEN_IS {
 		return nil, nil, false
 	}
-	fieldExpr, ok := isEnumVariantExpr(expr.Right)
-	if !ok {
+	enumType, variant, ok := a.resolveEnumVariantIsTarget(expr.Right)
+	if !ok || enumType == nil || variant == nil {
 		return nil, nil, false
 	}
-	enumType, variant, ok := a.enumConstructorInfoFromFieldExpr(fieldExpr)
-	if !ok || enumType == nil || variant == nil || !enumType.Packed {
+	if !enumType.Packed {
 		return nil, nil, false
 	}
 	leftType := a.exprTypes[expr.Left]
@@ -6578,6 +6582,38 @@ func (a *Analyzer) refinedExprPackedVariantView(expr *ast.BinaryExpr, truthy boo
 		return nil, nil, false
 	}
 	return expr.Left, variant.PackedViewType(enumType), true
+}
+
+func (a *Analyzer) refinedExprNamedStateType(expr *ast.BinaryExpr, truthy bool) (ast.Expr, Type, bool) {
+	if a == nil || expr == nil || expr.Op != lexer.TOKEN_IS {
+		return nil, nil, false
+	}
+	targetBase, targetState, ok := a.resolveNamedStateIsTarget(expr.Right)
+	if !ok || targetBase == nil || targetState == nil {
+		return nil, nil, false
+	}
+	leftType := a.exprTypes[expr.Left]
+	if leftType == nil {
+		leftType = a.analyzeExpr(expr.Left)
+	}
+	leftBase, ok := namedStateStructBase(leftType)
+	if !ok || leftBase == nil || leftBase.Name != targetBase.Name {
+		return nil, nil, false
+	}
+	currentState, ok := namedStateCurrentArg(leftType)
+	if !ok || currentState == nil {
+		currentState = fullNamedStateType(leftBase)
+	}
+	var refinedState Type
+	if truthy {
+		refinedState = intersectNamedStateType(currentState, targetState, leftBase.NamedStateCases)
+	} else {
+		refinedState = subtractNamedStateType(currentState, targetState, leftBase.NamedStateCases)
+	}
+	if refinedState == nil {
+		return nil, nil, false
+	}
+	return expr.Left, instantiateNamedStateStructLiteralType(leftBase, leftType, refinedState), true
 }
 
 func (a *Analyzer) applyGuardCallConditionRefinements(scope *Scope, call *ast.CallExpr, truthy bool) {

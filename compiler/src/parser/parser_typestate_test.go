@@ -344,13 +344,93 @@ func TestParseEnumVariantIsCondition(t *testing.T) {
 	if cond.Op != lexer.TOKEN_IS {
 		t.Fatalf("expected is operator, got %s", lexer.TokenName(cond.Op))
 	}
-	fieldExpr, ok := cond.Right.(*ast.FieldExpr)
+	typeExpr, ok := cond.Right.(*ast.TypeExprExpr)
 	if !ok {
-		t.Fatalf("expected field expr RHS, got %T", cond.Right)
+		t.Fatalf("expected typed is RHS, got %T", cond.Right)
 	}
-	enumName, ok := fieldExpr.Object.(*ast.Ident)
-	if !ok || enumName.Name != "Expr" || fieldExpr.Field != "Int" {
-		t.Fatalf("expected Expr.Int RHS, got %#v", cond.Right)
+	named, ok := typeExpr.Type.(*ast.NamedType)
+	if !ok || named.Name != "Expr.Int" {
+		t.Fatalf("expected Expr.Int typed RHS, got %#v", typeExpr.Type)
+	}
+}
+
+func TestParseStructDeclWithNamedStateCasesAndDeriveBlock(t *testing.T) {
+	file, errs := parseSourceFile(t, "struct Player[state Alive | Dead]:\n    health: int\n\n    derive state:\n        Alive when self.health > 0\n        Dead when self.health <= 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.StructDecl)
+	if !ok {
+		t.Fatalf("expected struct decl, got %T", file.Decls[0])
+	}
+	if len(decl.NamedStateCases) != 2 || decl.NamedStateCases[0] != "Alive" || decl.NamedStateCases[1] != "Dead" {
+		t.Fatalf("expected named state cases [Alive Dead], got %#v", decl.NamedStateCases)
+	}
+	if len(decl.GenericParams) != 1 || decl.GenericParams[0].Kind != ast.GenericParamState {
+		t.Fatalf("expected a single struct state generic param, got %#v", decl.GenericParams)
+	}
+	if len(decl.DerivedStates) != 2 {
+		t.Fatalf("expected two derived-state clauses, got %d", len(decl.DerivedStates))
+	}
+	if decl.DerivedStates[0].StateName != "Alive" || decl.DerivedStates[1].StateName != "Dead" {
+		t.Fatalf("unexpected derived-state clause names: %#v", decl.DerivedStates)
+	}
+	if _, ok := decl.DerivedStates[0].Condition.(*ast.BinaryExpr); !ok {
+		t.Fatalf("expected first derived-state condition to be binary, got %T", decl.DerivedStates[0].Condition)
+	}
+}
+
+func TestParseNamedStateUnionTypeExpr(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(value: Player[Alive | Dead]) -> Player[Alive | Dead]:\n    pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	paramType, ok := decl.Params[0].Type.(*ast.GenericType)
+	if !ok {
+		t.Fatalf("expected generic type, got %T", decl.Params[0].Type)
+	}
+	if len(paramType.Args) != 1 {
+		t.Fatalf("expected one state arg, got %d", len(paramType.Args))
+	}
+	stateSet, ok := paramType.Args[0].(*ast.StateSetTypeExpr)
+	if !ok {
+		t.Fatalf("expected state-set type arg, got %T", paramType.Args[0])
+	}
+	if len(stateSet.Cases) != 2 || stateSet.Cases[0] != "Alive" || stateSet.Cases[1] != "Dead" {
+		t.Fatalf("expected Alive | Dead state-set, got %#v", stateSet.Cases)
+	}
+}
+
+func TestParseTypedStateIsConditionAndExplicitStatefulStructLiteral(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(node: Player[Alive | Dead]) -> Player[Alive]:\n    if node is Player[Alive]:\n        return Player[Alive](1)\n    return Player[Alive](2)\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	ifStmt, ok := decl.Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected if stmt, got %T", decl.Body[0])
+	}
+	cond := ifStmt.Cond.(*ast.BinaryExpr)
+	typed, ok := cond.Right.(*ast.TypeExprExpr)
+	if !ok {
+		t.Fatalf("expected typed is target, got %T", cond.Right)
+	}
+	target, ok := typed.Type.(*ast.GenericType)
+	if !ok || target.Name != "Player" || len(target.Args) != 1 {
+		t.Fatalf("expected Player[Alive] is target, got %#v", typed.Type)
+	}
+	ret := ifStmt.Then[0].(*ast.ReturnStmt)
+	lit, ok := ret.Value.(*ast.StructLitExpr)
+	if !ok {
+		t.Fatalf("expected explicit stateful struct literal, got %T", ret.Value)
+	}
+	if lit.Name != "Player" || len(lit.TypeArgs) != 1 {
+		t.Fatalf("expected Player[Alive](...) literal, got %#v", lit)
+	}
+	if _, ok := lit.TypeArgs[0].(*ast.NamedType); !ok {
+		t.Fatalf("expected named state type arg, got %T", lit.TypeArgs[0])
 	}
 }
 

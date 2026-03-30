@@ -349,6 +349,61 @@ def bad(value: Plain[&]) -> Plain[&]:
 	}
 }
 
+func TestAnalyzeAcceptsDerivedStructStatesAndIsNarrowing(t *testing.T) {
+	src := `struct Player[state Alive | Dead]:
+	health: int
+
+	derive state:
+		Alive when self.health > 0
+		Dead when self.health <= 0
+
+def take_alive(player: Player[Alive]) -> int:
+	return player.health
+
+def take_dead(player: Player[Dead]) -> int:
+	return player.health
+
+def make_alive() -> Player:
+	return Player(5)
+
+def route(player: Player) -> int:
+	if player is Player[Alive]:
+		return take_alive(player)
+	return take_dead(player)
+`
+	result, errs := parseAndAnalyze(t, "derived_struct_states_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "make_alive", "Player[Alive | Dead]")
+	makeAlive := requireFuncDecl(t, result, "make_alive")
+	ret, ok := makeAlive.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected make_alive body to return a struct literal, got %T", makeAlive.Body[0])
+	}
+	requireExprTypeString(t, result, ret.Value, "Player[Alive]")
+	requireFunctionReturnTypeString(t, result, "route", "int")
+}
+
+func TestAnalyzeRejectsExplicitDerivedStateConstructorMismatch(t *testing.T) {
+	src := `struct Player[state Alive | Dead]:
+	health: int
+
+	derive state:
+		Alive when self.health > 0
+		Dead when self.health <= 0
+
+def bad() -> Player[Alive]:
+	return Player[Alive](0)
+`
+	_, errs := parseAndAnalyze(t, "derived_struct_state_constructor_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "does not satisfy derived state Alive") {
+		t.Fatalf("expected derived-state constructor diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeFunctionTypePermissionsParticipateInMatching(t *testing.T) {
 	src := `extern puts(text: any u8&) -> int can[Console.Write]
 
