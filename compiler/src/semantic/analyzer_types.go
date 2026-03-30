@@ -42,6 +42,7 @@ func (a *Analyzer) defineLocal(sym *Symbol, pos lexer.Pos) {
 		return
 	}
 	a.trackAffineValueSymbol(sym)
+	a.recordSpecializedValueTypeBinding(sym, sym.Type)
 }
 
 func (a *Analyzer) defineLocalInScope(scope *Scope, sym *Symbol, pos lexer.Pos) {
@@ -53,6 +54,7 @@ func (a *Analyzer) defineLocalInScope(scope *Scope, sym *Symbol, pos lexer.Pos) 
 		return
 	}
 	a.trackAffineValueSymbol(sym)
+	a.recordSpecializedValueTypeBinding(sym, sym.Type)
 }
 
 func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorageParams []string, refStateParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {

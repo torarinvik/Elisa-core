@@ -117,6 +117,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			}
 		}
 		a.recordSpecializedValueTypeTarget(n.Target, valueType)
+		a.recordNamedStateAssignmentTarget(n.Target, n.Value, valueType)
 		a.clearAffineValueTarget(n.Target)
 		a.trackAffineValueTarget(n.Target, targetType)
 		a.markCreatedProtocolTarget(n.Target, n.Value, targetType)
@@ -132,6 +133,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if !IsNumericType(targetType) || !IsNumericType(valueType) {
 			a.errorf(n.Pos(), "augmented assignment requires numeric operands")
 		}
+		a.recordNamedStateAugAssignTarget(n.Target)
 	case *ast.AsRefAssignStmt:
 		targetType := a.asRefTargetType(n.Target, n.AsKind)
 		a.clearPackedVariantViewExpr(n.Target)
@@ -143,6 +145,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.recordAssignmentRefinement(n.Target, targetType, targetType)
 		a.recordRegionRefAssignment(n.Target, n.Value)
 		a.recordSpecializedValueTypeTarget(n.Target, valueType)
+		a.recordNamedStateAssignmentTarget(n.Target, n.Value, valueType)
 		a.clearAffineValueTarget(n.Target)
 		a.trackAffineValueTarget(n.Target, targetType)
 		a.markCreatedProtocolTarget(n.Target, n.Value, targetType)
@@ -4648,6 +4651,126 @@ func (a *Analyzer) cloneTrackedValueTypeWithSeen(t Type, seen map[Type]Type) Typ
 	}
 }
 
+func trackedNamedStateStructBase(t Type) (*StructType, bool) {
+	switch tt := t.(type) {
+	case *AggregateStateType:
+		return trackedNamedStateStructBase(tt.Base)
+	default:
+		return namedStateStructBase(t)
+	}
+}
+
+func trackedNamedStateCurrentArg(t Type) (Type, bool) {
+	switch tt := t.(type) {
+	case *AggregateStateType:
+		return trackedNamedStateCurrentArg(tt.Base)
+	default:
+		return namedStateCurrentArg(t)
+	}
+}
+
+func replaceTrackedNamedStateArg(template Type, state Type) Type {
+	switch tt := template.(type) {
+	case *AggregateStateType:
+		inner := replaceTrackedNamedStateArg(tt.Base, state)
+		if inner == nil {
+			return nil
+		}
+		return cloneAggregateStateWithBase(inner, aggregateStateStates(tt))
+	default:
+		base, ok := namedStateStructBase(template)
+		if !ok || base == nil {
+			return nil
+		}
+		return instantiateNamedStateStructLiteralType(base, template, state)
+	}
+}
+
+func applyNamedStateFromActualType(template Type, actual Type) (Type, bool) {
+	templateBase, ok := trackedNamedStateStructBase(template)
+	if !ok || templateBase == nil {
+		return nil, false
+	}
+	actualBase, ok := trackedNamedStateStructBase(actual)
+	if !ok || actualBase == nil || actualBase.Name != templateBase.Name {
+		return nil, false
+	}
+	state, ok := trackedNamedStateCurrentArg(actual)
+	if !ok || state == nil {
+		return nil, false
+	}
+	replaced := replaceTrackedNamedStateArg(template, state)
+	if replaced == nil {
+		return nil, false
+	}
+	return replaced, true
+}
+
+func (a *Analyzer) mergeTrackedNamedStateValueTypes(dst Type, src Type) (Type, bool) {
+	if dst == nil || src == nil {
+		return nil, false
+	}
+	switch dt := dst.(type) {
+	case *AggregateStateType:
+		st, ok := src.(*AggregateStateType)
+		if !ok || !sameAggregateStateLists(aggregateStateStates(dt), aggregateStateStates(st)) {
+			return nil, false
+		}
+		mergedBase, ok := a.mergeTrackedNamedStateValueTypes(dt.Base, st.Base)
+		if !ok {
+			mergedBase, ok = a.mergeSpecializedValueTypes(dt.Base, st.Base)
+			if !ok {
+				return nil, false
+			}
+		}
+		return cloneAggregateStateWithBase(mergedBase, aggregateStateStates(dt)), true
+	case *StructStateCaseType, *StructStateSetType:
+		merged := mergeNamedStateTypes(dst, src, nil)
+		if IsInvalidType(merged) {
+			return nil, false
+		}
+		return merged, true
+	case *GenericInstanceType:
+		st, ok := src.(*GenericInstanceType)
+		if !ok || dt.Name != st.Name || len(dt.Args) != len(st.Args) {
+			return nil, false
+		}
+		base, ok := dt.Base.(*StructType)
+		if !ok || base == nil {
+			return nil, false
+		}
+		stateIndex := namedStateArgIndex(base)
+		if stateIndex < 0 {
+			return nil, false
+		}
+		mergedBase, ok := a.mergeSpecializedValueTypes(dt.Base, st.Base)
+		if !ok {
+			return nil, false
+		}
+		args := make([]Type, len(dt.Args))
+		for i := range dt.Args {
+			if i == stateIndex {
+				mergedArg := mergeNamedStateTypes(dt.Args[i], st.Args[i], base.NamedStateCases)
+				if IsInvalidType(mergedArg) {
+					return nil, false
+				}
+				args[i] = mergedArg
+				continue
+			}
+			if !SameType(dt.Args[i], st.Args[i]) {
+				return nil, false
+			}
+			args[i] = a.cloneTrackedValueType(dt.Args[i])
+		}
+		cloned := *dt
+		cloned.Base = mergedBase
+		cloned.Args = args
+		return &cloned, true
+	default:
+		return nil, false
+	}
+}
+
 func (a *Analyzer) cloneSpecializedValueTypeBindings() map[*Symbol]Type {
 	if a.currentSpecializedValueTypes == nil {
 		return nil
@@ -4804,6 +4927,9 @@ func (a *Analyzer) mergeFunctionValueBindings(dst map[*Symbol]*FuncType, src map
 }
 
 func (a *Analyzer) mergeSpecializedValueTypes(dst Type, src Type) (Type, bool) {
+	if merged, ok := a.mergeTrackedNamedStateValueTypes(dst, src); ok {
+		return merged, true
+	}
 	if dst == nil || src == nil || !SameType(dst, src) {
 		return nil, false
 	}
@@ -4961,7 +5087,9 @@ func (a *Analyzer) mergeSpecializedValueTypeBindings(dst map[*Symbol]Type, src m
 		}
 		if normalized, ok := a.specializeCallbackCarryingType(sym.Type, mergedType); ok {
 			merged[sym] = normalized
+			continue
 		}
+		merged[sym] = a.cloneTrackedValueType(mergedType)
 	}
 	return merged
 }
@@ -5215,11 +5343,208 @@ func (a *Analyzer) recordSpecializedValueTypeBinding(sym *Symbol, valueType Type
 	if sym.Kind != SymbolLocal && sym.Kind != SymbolParam {
 		return
 	}
-	if specializedType, ok := a.specializeCallbackCarryingType(sym.Type, valueType); ok {
-		a.currentSpecializedValueTypes[sym] = a.cloneTrackedValueType(specializedType)
+	trackedType := sym.Type
+	trackedAny := false
+	if specializedType, ok := a.specializeCallbackCarryingType(trackedType, valueType); ok {
+		trackedType = specializedType
+		trackedAny = true
+	}
+	if namedStateType, ok := applyNamedStateFromActualType(trackedType, valueType); ok {
+		trackedType = namedStateType
+		trackedAny = true
+	}
+	if trackedAny {
+		a.currentSpecializedValueTypes[sym] = a.cloneTrackedValueType(trackedType)
 		return
 	}
 	delete(a.currentSpecializedValueTypes, sym)
+}
+
+func (a *Analyzer) currentTrackedValueType(sym *Symbol) Type {
+	if sym == nil {
+		return nil
+	}
+	current := sym.Type
+	if specializedType, ok := a.lookupCurrentSpecializedValueType(sym); ok {
+		current = specializedType
+	}
+	if a.currentScope != nil {
+		ident := &ast.Ident{Name: sym.Name}
+		if refinedType, ok := a.lookupRefinedExprType(ident); ok {
+			if specializedType, ok := a.specializeCallbackCarryingType(refinedType, current); ok {
+				current = specializedType
+			} else {
+				current = refinedType
+			}
+		}
+	}
+	return current
+}
+
+func (a *Analyzer) bindTrackedValueType(sym *Symbol, tracked Type) {
+	if a.currentSpecializedValueTypes == nil || sym == nil || tracked == nil {
+		return
+	}
+	a.currentSpecializedValueTypes[sym] = a.cloneTrackedValueType(tracked)
+	if a.currentScope != nil && sym.Name != "" {
+		a.currentScope.Refinements[sym.Name] = tracked
+	}
+}
+
+func namedStateAssignmentFieldPrefix(steps []borrowReturnAnnotationStep) []string {
+	fields := make([]string, 0, len(steps))
+	for _, step := range steps {
+		if step.Field == "" {
+			break
+		}
+		fields = append(fields, step.Field)
+	}
+	return fields
+}
+
+func namedStatePathsOverlap(left []string, right []string) bool {
+	if len(left) == 0 || len(right) == 0 {
+		return false
+	}
+	limit := len(left)
+	if len(right) < limit {
+		limit = len(right)
+	}
+	for i := 0; i < limit; i++ {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func namedStateDerivedExprDependsOnPath(expr ast.Expr, fields []string) bool {
+	if len(fields) == 0 || expr == nil {
+		return false
+	}
+	if path, ok := derivedStateSelfFieldPath(expr); ok {
+		return namedStatePathsOverlap(path, fields)
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return namedStateDerivedExprDependsOnPath(n.Inner, fields)
+	case *ast.UnaryExpr:
+		return namedStateDerivedExprDependsOnPath(n.Operand, fields)
+	case *ast.BinaryExpr:
+		return namedStateDerivedExprDependsOnPath(n.Left, fields) || namedStateDerivedExprDependsOnPath(n.Right, fields)
+	default:
+		return false
+	}
+}
+
+func namedStateAssignmentAffectsDerivedState(base *StructType, steps []borrowReturnAnnotationStep) bool {
+	if base == nil || len(base.DerivedStates) == 0 {
+		return false
+	}
+	if len(steps) == 0 {
+		return true
+	}
+	fields := namedStateAssignmentFieldPrefix(steps)
+	if len(fields) == 0 {
+		return true
+	}
+	for _, state := range base.DerivedStates {
+		if namedStateDerivedExprDependsOnPath(state.Condition, fields) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Analyzer) inferDirectFieldAssignedNamedState(pos lexer.Pos, root *Symbol, base *StructType, fieldName string, value ast.Expr) (Type, bool) {
+	if a == nil || root == nil || base == nil || base.Decl == nil || len(base.NamedStateCases) == 0 {
+		return nil, false
+	}
+	rootExpr := &ast.Ident{Position: pos, Name: root.Name}
+	fieldValues := make(map[string]ast.Expr, len(base.Decl.Fields))
+	for _, fieldDecl := range base.Decl.Fields {
+		if fieldDecl.Name == fieldName {
+			fieldValues[fieldDecl.Name] = value
+			continue
+		}
+		fieldValues[fieldDecl.Name] = &ast.FieldExpr{Position: pos, Object: rootExpr, Field: fieldDecl.Name}
+	}
+	trueStates := make([]string, 0, len(base.NamedStateCases))
+	for _, stateName := range base.NamedStateCases {
+		proven, holds := a.evaluateDerivedStateForFields(base, stateName, fieldValues)
+		if !proven {
+			return nil, false
+		}
+		if holds {
+			trueStates = append(trueStates, stateName)
+		}
+	}
+	switch len(trueStates) {
+	case 1:
+		return newNamedStateType(base.Name, base.NamedStateCases, trueStates), true
+	case 0:
+		a.errorf(pos, "assignment to %q leaves %q in no derived state", fieldName, root.Name)
+		return fullNamedStateType(base), true
+	default:
+		a.errorf(pos, "assignment to %q leaves %q satisfying multiple derived states: %s", fieldName, root.Name, strings.Join(trueStates, ", "))
+		return fullNamedStateType(base), true
+	}
+}
+
+func (a *Analyzer) recordNamedStateAssignmentTarget(target ast.Expr, value ast.Expr, valueType Type) {
+	if a.currentSpecializedValueTypes == nil || target == nil {
+		return
+	}
+	root, steps, ok := a.lookupBorrowedOwnerRefTargetPath(target)
+	if !ok || root == nil {
+		return
+	}
+	current := a.currentTrackedValueType(root)
+	base, ok := trackedNamedStateStructBase(current)
+	if !ok || base == nil {
+		return
+	}
+	if len(steps) == 0 {
+		if trackedType, ok := applyNamedStateFromActualType(current, valueType); ok {
+			a.bindTrackedValueType(root, trackedType)
+		}
+		return
+	}
+	if !namedStateAssignmentAffectsDerivedState(base, steps) {
+		a.bindTrackedValueType(root, current)
+		return
+	}
+	state := fullNamedStateType(base)
+	if len(steps) == 1 && steps[0].Field != "" {
+		if inferredState, ok := a.inferDirectFieldAssignedNamedState(target.Pos(), root, base, steps[0].Field, value); ok {
+			state = inferredState
+		}
+	}
+	if trackedType := replaceTrackedNamedStateArg(current, state); trackedType != nil {
+		a.bindTrackedValueType(root, trackedType)
+	}
+}
+
+func (a *Analyzer) recordNamedStateAugAssignTarget(target ast.Expr) {
+	if a.currentSpecializedValueTypes == nil || target == nil {
+		return
+	}
+	root, steps, ok := a.lookupBorrowedOwnerRefTargetPath(target)
+	if !ok || root == nil {
+		return
+	}
+	current := a.currentTrackedValueType(root)
+	base, ok := trackedNamedStateStructBase(current)
+	if !ok || base == nil {
+		return
+	}
+	if !namedStateAssignmentAffectsDerivedState(base, steps) {
+		a.bindTrackedValueType(root, current)
+		return
+	}
+	if trackedType := replaceTrackedNamedStateArg(current, fullNamedStateType(base)); trackedType != nil {
+		a.bindTrackedValueType(root, trackedType)
+	}
 }
 
 func (a *Analyzer) recordFunctionValueBinding(sym *Symbol, value ast.Expr) {

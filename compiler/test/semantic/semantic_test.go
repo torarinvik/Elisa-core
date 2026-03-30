@@ -404,6 +404,80 @@ def bad() -> Player[Alive]:
 	}
 }
 
+func TestAnalyzeRejectsUsingStaleDerivedStateAfterFieldMutation(t *testing.T) {
+	src := `struct Player[state Alive | Dead]:
+	health: mutable int
+	score: mutable int
+
+	derive state:
+		Alive when self.health > 0
+		Dead when self.health <= 0
+
+def take_alive(player: Player[Alive]) -> int:
+	return player.health
+
+def bad(player: mutable Player[Alive]) -> int:
+	player.health <- 0
+	return take_alive(player)
+`
+	_, errs := parseAndAnalyze(t, "derived_struct_state_field_mutation_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "expects Player[Alive], got Player[Dead]") {
+		t.Fatalf("expected post-mutation derived-state diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsConditionalDerivedStateMutationFallbackToExactPrestate(t *testing.T) {
+	src := `struct Player[state Alive | Dead]:
+	health: mutable int
+
+	derive state:
+		Alive when self.health > 0
+		Dead when self.health <= 0
+
+def take_alive(player: Player[Alive]) -> int:
+	return player.health
+
+def bad(player: mutable Player[Alive], cond: bool) -> int:
+	if cond:
+		player.health <- 0
+	return take_alive(player)
+`
+	_, errs := parseAndAnalyze(t, "derived_struct_state_conditional_mutation_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "expects Player[Alive], got Player[Alive | Dead]") {
+		t.Fatalf("expected merged post-mutation state diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzePreservesDerivedStateAcrossUnrelatedFieldMutation(t *testing.T) {
+	src := `struct Player[state Alive | Dead]:
+	health: mutable int
+	score: mutable int
+
+	derive state:
+		Alive when self.health > 0
+		Dead when self.health <= 0
+
+def take_alive(player: Player[Alive]) -> int:
+	return player.health
+
+def ok(player: mutable Player[Alive]) -> int:
+	player.score <- 1
+	return take_alive(player)
+`
+	result, errs := parseAndAnalyze(t, "derived_struct_state_unrelated_mutation_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "int")
+}
+
 func TestAnalyzeFunctionTypePermissionsParticipateInMatching(t *testing.T) {
 	src := `extern puts(text: any u8&) -> int can[Console.Write]
 
