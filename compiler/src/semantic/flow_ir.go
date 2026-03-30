@@ -109,6 +109,11 @@ func (b *cfgBuilder) buildStmtList(exits []int, stmts []ast.Stmt) []int {
 				b.appendNode(exit, stmt)
 			}
 			current = b.buildStmtList(current, n.Body)
+		case *ast.DeferStmt:
+			for _, exit := range current {
+				b.appendNode(exit, stmt)
+			}
+			current = b.buildStmtList(current, n.Body)
 		default:
 			for _, exit := range current {
 				b.appendNode(exit, stmt)

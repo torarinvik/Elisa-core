@@ -77,6 +77,7 @@ type Analyzer struct {
 	resolvedCastHooks                 map[ast.Expr]*Symbol
 	exprDenseNodeKeys                 map[ast.Expr]DenseNodeKeyInfo
 	exprNodeTables                    map[ast.Expr]NodeTableInfo
+	deferInfo                         map[*ast.DeferStmt]*DeferInfo
 	symbolFacts                       map[*Symbol]OptimizationFacts
 	funcDeclSymbols                   map[*ast.FuncDecl]*Symbol
 	castHooksByName                   map[string]map[castHookSignature]*Symbol
@@ -219,6 +220,7 @@ func Analyze(file *ast.File) *Result {
 		resolvedCastHooks:                make(map[ast.Expr]*Symbol, resolvedCastHookCapacity),
 		exprDenseNodeKeys:                make(map[ast.Expr]DenseNodeKeyInfo, denseNodeCapacity),
 		exprNodeTables:                   make(map[ast.Expr]NodeTableInfo, denseNodeCapacity),
+		deferInfo:                        map[*ast.DeferStmt]*DeferInfo{},
 		parallelForInfo:                  make(map[*ast.ParallelForStmt]*ParallelForInfo, parallelForCapacity),
 		symbolFacts:                      map[*Symbol]OptimizationFacts{},
 		funcDeclSymbols:                  make(map[*ast.FuncDecl]*Symbol, funcDeclCapacity),
@@ -255,6 +257,7 @@ func Analyze(file *ast.File) *Result {
 		DenseNodeKeys:    a.exprDenseNodeKeys,
 		NodeTables:       a.exprNodeTables,
 		ParallelFor:      a.parallelForInfo,
+		Defer:            a.deferInfo,
 		FunctionAnalyses: a.functionAnalyses,
 		AnnotatedFuncs:   a.annotatedFuncs,
 		ExportedTypes:    a.exportedTypes,

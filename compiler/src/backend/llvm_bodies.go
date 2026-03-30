@@ -72,6 +72,7 @@ type functionState struct {
 	packedVariantPayloadReads    map[packedVariantPayloadReadCacheKey][]C.LLVMValueRef
 	scopedCleanups               []scopedCleanupBinding
 	poolScopes                   []activePoolBinding
+	cleanupDepth                 int
 	scopePool                    []*codegenScope
 }
 
@@ -80,13 +81,21 @@ type scopedCleanupKind int
 const (
 	scopedCleanupLockGuard scopedCleanupKind = iota
 	scopedCleanupThreadPool
+	scopedCleanupDeferBody
 )
 
 type scopedCleanupBinding struct {
-	kind scopedCleanupKind
-	name string
-	ptr  C.LLVMValueRef
-	typ  semantic.Type
+	kind      scopedCleanupKind
+	name      string
+	ptr       C.LLVMValueRef
+	typ       semantic.Type
+	owner     *codegenScope
+	deferBody *deferredBodyBinding
+}
+
+type deferredBodyBinding struct {
+	stmt         *ast.DeferStmt
+	captureScope *codegenScope
 }
 
 type regionBinding struct {
@@ -274,6 +283,9 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		if err := state.emitActiveScopedCleanup(); err != nil {
 			return err
 		}
+		if state.currentBlockTerminated() {
+			return nil
+		}
 		if err := state.emitRegionCleanup(); err != nil {
 			return err
 		}
@@ -296,6 +308,9 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 func (s *functionState) emitFunctionReturn(value C.LLVMValueRef, actual semantic.Type) error {
 	if err := s.emitActiveScopedCleanup(); err != nil {
 		return err
+	}
+	if s.currentBlockTerminated() {
+		return nil
 	}
 	if err := s.emitRegionCleanup(); err != nil {
 		return err
@@ -342,7 +357,17 @@ func (s *functionState) emitRegionCleanup() error {
 }
 
 func (s *functionState) emitActiveScopedCleanup() error {
+	if s.cleanupDepth != 0 {
+		return nil
+	}
+	s.cleanupDepth++
+	defer func() {
+		s.cleanupDepth--
+	}()
 	for i := len(s.scopedCleanups) - 1; i >= 0; i-- {
+		if s.currentBlockTerminated() {
+			break
+		}
 		if err := s.emitScopedCleanup(s.scopedCleanups[i]); err != nil {
 			return err
 		}
@@ -351,6 +376,9 @@ func (s *functionState) emitActiveScopedCleanup() error {
 }
 
 func (s *functionState) emitScopedCleanup(binding scopedCleanupBinding) error {
+	if binding.kind == scopedCleanupDeferBody {
+		return s.emitDeferredBody(binding.deferBody)
+	}
 	ops := semantic.CreateTypeBoundOps(binding.typ)
 	if len(ops) == 0 {
 		switch binding.kind {
@@ -382,15 +410,334 @@ func (s *functionState) emitScopedCleanup(binding scopedCleanupBinding) error {
 	return nil
 }
 
+func defineBindingInCodegenScope(scope *codegenScope, name string, binding valueBinding) {
+	if scope == nil || name == "" {
+		return
+	}
+	if scope.bindingName == "" || scope.bindingName == name {
+		scope.bindingName = name
+		scope.binding = binding
+		return
+	}
+	if scope.bindings == nil {
+		scope.bindings = map[string]valueBinding{}
+	}
+	scope.bindings[name] = binding
+}
+
+func bindPackedCommonFieldValueInCodegenScope(scope *codegenScope, name string, binding packedCommonFieldValueBinding) {
+	if scope == nil || name == "" {
+		return
+	}
+	if scope.packedCommonValueName == "" || scope.packedCommonValueName == name {
+		scope.packedCommonValueName = name
+		scope.packedCommonValueBinding = binding
+		return
+	}
+	if scope.packedCommonValues == nil {
+		scope.packedCommonValues = map[string]packedCommonFieldValueBinding{}
+	}
+	scope.packedCommonValues[name] = binding
+}
+
+func bindPackedEnumStorageInCodegenScope(scope *codegenScope, name string, binding packedEnumStorageBinding) {
+	if scope == nil || name == "" {
+		return
+	}
+	if scope.packedEnumPtrs == nil {
+		scope.packedEnumPtrs = map[string]packedEnumStorageBinding{}
+	}
+	scope.packedEnumPtrs[name] = binding
+}
+
+func bindPackedEnumStoreInCodegenScope(scope *codegenScope, name string, binding packedStoreBinding) {
+	if scope == nil || name == "" {
+		return
+	}
+	if scope.packedEnumStoreName == "" || scope.packedEnumStoreName == name {
+		scope.packedEnumStoreName = name
+		scope.packedEnumStoreBinding = binding
+		return
+	}
+	if scope.packedEnumStores == nil {
+		scope.packedEnumStores = map[string]packedStoreBinding{}
+	}
+	scope.packedEnumStores[name] = binding
+}
+
+func bindPackedViewInCodegenScope(scope *codegenScope, name string, binding packedVariantViewBinding) {
+	if scope == nil || name == "" {
+		return
+	}
+	if scope.packedViewName == "" || scope.packedViewName == name {
+		scope.packedViewName = name
+		scope.packedViewBinding = binding
+		return
+	}
+	if scope.packedViewPtrs == nil {
+		scope.packedViewPtrs = map[string]packedVariantViewBinding{}
+	}
+	scope.packedViewPtrs[name] = binding
+}
+
+func cloneValueBindingMap(src map[string]valueBinding) map[string]valueBinding {
+	if len(src) == 0 {
+		return nil
+	}
+	cloned := make(map[string]valueBinding, len(src))
+	for name, binding := range src {
+		cloned[name] = binding
+	}
+	return cloned
+}
+
+func clonePackedCommonBindingMap(src map[string]packedCommonFieldValueBinding) map[string]packedCommonFieldValueBinding {
+	if len(src) == 0 {
+		return nil
+	}
+	cloned := make(map[string]packedCommonFieldValueBinding, len(src))
+	for name, binding := range src {
+		cloned[name] = binding
+	}
+	return cloned
+}
+
+func clonePackedEnumStorageBindingMap(src map[string]packedEnumStorageBinding) map[string]packedEnumStorageBinding {
+	if len(src) == 0 {
+		return nil
+	}
+	cloned := make(map[string]packedEnumStorageBinding, len(src))
+	for name, binding := range src {
+		cloned[name] = binding
+	}
+	return cloned
+}
+
+func clonePackedStoreBindingMap(src map[string]packedStoreBinding) map[string]packedStoreBinding {
+	if len(src) == 0 {
+		return nil
+	}
+	cloned := make(map[string]packedStoreBinding, len(src))
+	for name, binding := range src {
+		cloned[name] = binding
+	}
+	return cloned
+}
+
+func clonePackedViewBindingMap(src map[string]packedVariantViewBinding) map[string]packedVariantViewBinding {
+	if len(src) == 0 {
+		return nil
+	}
+	cloned := make(map[string]packedVariantViewBinding, len(src))
+	for name, binding := range src {
+		cloned[name] = binding
+	}
+	return cloned
+}
+
+func cloneCapturedCodegenScope(scope *codegenScope) *codegenScope {
+	if scope == nil {
+		return nil
+	}
+	return &codegenScope{
+		bindingName:              scope.bindingName,
+		binding:                  scope.binding,
+		bindings:                 cloneValueBindingMap(scope.bindings),
+		packedCommonValueName:    scope.packedCommonValueName,
+		packedCommonValueBinding: scope.packedCommonValueBinding,
+		packedCommonValues:       clonePackedCommonBindingMap(scope.packedCommonValues),
+		packedEnumPtrs:           clonePackedEnumStorageBindingMap(scope.packedEnumPtrs),
+		packedEnumStoreName:      scope.packedEnumStoreName,
+		packedEnumStoreBinding:   scope.packedEnumStoreBinding,
+		packedEnumStores:         clonePackedStoreBindingMap(scope.packedEnumStores),
+		packedViewName:           scope.packedViewName,
+		packedViewBinding:        scope.packedViewBinding,
+		packedViewPtrs:           clonePackedViewBindingMap(scope.packedViewPtrs),
+	}
+}
+
+func capturePrefixMatches(root string, key string) bool {
+	if root == "" || key == "" {
+		return false
+	}
+	return key == root || strings.HasPrefix(key, root+".") || strings.HasPrefix(key, root+"[")
+}
+
+func (s *functionState) captureDeferFunctionScope(stmt *ast.DeferStmt) (*codegenScope, error) {
+	if s == nil || stmt == nil || s.g == nil || s.g.result == nil {
+		return nil, nil
+	}
+	info := s.g.result.Defer[stmt]
+	if info == nil || len(info.Captures) == 0 {
+		return nil, nil
+	}
+	captured := &codegenScope{}
+	for _, name := range info.Captures {
+		binding, ok := s.lookupBinding(name)
+		if !ok {
+			return nil, fmt.Errorf("missing defer capture binding %q during LLVM lowering", name)
+		}
+		defineBindingInCodegenScope(captured, name, binding)
+	}
+	for _, root := range info.Captures {
+		for scope := s.scope; scope != nil; scope = scope.parent {
+			if key := scope.packedCommonValueName; capturePrefixMatches(root, key) {
+				bindPackedCommonFieldValueInCodegenScope(captured, key, scope.packedCommonValueBinding)
+			}
+			for key, binding := range scope.packedCommonValues {
+				if capturePrefixMatches(root, key) {
+					bindPackedCommonFieldValueInCodegenScope(captured, key, binding)
+				}
+			}
+			for key, binding := range scope.packedEnumPtrs {
+				if capturePrefixMatches(root, key) {
+					bindPackedEnumStorageInCodegenScope(captured, key, binding)
+				}
+			}
+			if key := scope.packedEnumStoreName; capturePrefixMatches(root, key) {
+				bindPackedEnumStoreInCodegenScope(captured, key, scope.packedEnumStoreBinding)
+			}
+			for key, binding := range scope.packedEnumStores {
+				if capturePrefixMatches(root, key) {
+					bindPackedEnumStoreInCodegenScope(captured, key, binding)
+				}
+			}
+			if key := scope.packedViewName; capturePrefixMatches(root, key) {
+				bindPackedViewInCodegenScope(captured, key, scope.packedViewBinding)
+			}
+			for key, binding := range scope.packedViewPtrs {
+				if capturePrefixMatches(root, key) {
+					bindPackedViewInCodegenScope(captured, key, binding)
+				}
+			}
+		}
+	}
+	return cloneCapturedCodegenScope(captured), nil
+}
+
+func (s *functionState) injectCapturedScope(captured *codegenScope) {
+	if s == nil || s.scope == nil || captured == nil {
+		return
+	}
+	if captured.bindingName != "" {
+		defineBindingInCodegenScope(s.scope, captured.bindingName, captured.binding)
+	}
+	for name, binding := range captured.bindings {
+		defineBindingInCodegenScope(s.scope, name, binding)
+	}
+	if captured.packedCommonValueName != "" {
+		bindPackedCommonFieldValueInCodegenScope(s.scope, captured.packedCommonValueName, captured.packedCommonValueBinding)
+	}
+	for name, binding := range captured.packedCommonValues {
+		bindPackedCommonFieldValueInCodegenScope(s.scope, name, binding)
+	}
+	for name, binding := range captured.packedEnumPtrs {
+		bindPackedEnumStorageInCodegenScope(s.scope, name, binding)
+	}
+	if captured.packedEnumStoreName != "" {
+		bindPackedEnumStoreInCodegenScope(s.scope, captured.packedEnumStoreName, captured.packedEnumStoreBinding)
+	}
+	for name, binding := range captured.packedEnumStores {
+		bindPackedEnumStoreInCodegenScope(s.scope, name, binding)
+	}
+	if captured.packedViewName != "" {
+		bindPackedViewInCodegenScope(s.scope, captured.packedViewName, captured.packedViewBinding)
+	}
+	for name, binding := range captured.packedViewPtrs {
+		bindPackedViewInCodegenScope(s.scope, name, binding)
+	}
+}
+
+func (s *functionState) registerScopedCleanup(binding scopedCleanupBinding) {
+	binding.owner = s.scope
+	s.scopedCleanups = append(s.scopedCleanups, binding)
+}
+
+func (s *functionState) registerFunctionCleanup(binding scopedCleanupBinding) {
+	binding.owner = nil
+	s.scopedCleanups = append(s.scopedCleanups, binding)
+}
+
+func (s *functionState) discardScopeCleanups(scope *codegenScope) {
+	if scope == nil || len(s.scopedCleanups) == 0 {
+		return
+	}
+	out := s.scopedCleanups[:0]
+	for _, binding := range s.scopedCleanups {
+		if binding.owner == scope {
+			continue
+		}
+		out = append(out, binding)
+	}
+	s.scopedCleanups = out
+}
+
+func (s *functionState) emitScopeCleanups(scope *codegenScope) error {
+	if scope == nil {
+		return nil
+	}
+	for i := len(s.scopedCleanups) - 1; i >= 0; i-- {
+		if s.currentBlockTerminated() {
+			break
+		}
+		binding := s.scopedCleanups[i]
+		if binding.owner != scope {
+			continue
+		}
+		if err := s.emitScopedCleanup(binding); err != nil {
+			return err
+		}
+	}
+	s.discardScopeCleanups(scope)
+	return nil
+}
+
+func (s *functionState) emitBlockInCurrentScope(stmts []ast.Stmt) error {
+	scope := s.scope
+	if err := s.emitBlock(stmts, false); err != nil {
+		s.discardScopeCleanups(scope)
+		return err
+	}
+	if s.currentBlockTerminated() {
+		s.discardScopeCleanups(scope)
+		return nil
+	}
+	return s.emitScopeCleanups(scope)
+}
+
+func (s *functionState) emitDeferredBody(binding *deferredBodyBinding) error {
+	if binding == nil || binding.stmt == nil {
+		return nil
+	}
+	s.pushScope()
+	defer s.popScope()
+	s.injectCapturedScope(binding.captureScope)
+	return s.emitBlockInCurrentScope(binding.stmt.Body)
+}
+
 func (s *functionState) emitBlock(stmts []ast.Stmt, scoped bool) error {
 	if scoped {
 		savedPackedStores := s.packedStores
 		s.packedStores = s.clonePackedStores()
 		s.pushScope()
+		scope := s.scope
 		defer func() {
 			s.popScope()
 			s.packedStores = savedPackedStores
 		}()
+		for _, stmt := range stmts {
+			if s.currentBlockTerminated() {
+				break
+			}
+			if err := s.emitStmt(stmt); err != nil {
+				return err
+			}
+		}
+		if s.currentBlockTerminated() {
+			s.discardScopeCleanups(scope)
+			return nil
+		}
+		return s.emitScopeCleanups(scope)
 	}
 	for _, stmt := range stmts {
 		if s.currentBlockTerminated() {
@@ -450,6 +797,8 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		return s.emitOpenStmt(n)
 	case *ast.ViewStmt:
 		return s.emitViewStmt(n)
+	case *ast.DeferStmt:
+		return s.emitDeferStmt(n)
 	case *ast.RegionStmt:
 		arenaType := s.g.result.NamedTypes["Arena"]
 		if arenaType == nil {
@@ -572,6 +921,9 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		if n.Value == nil {
 			if err := s.emitActiveScopedCleanup(); err != nil {
 				return err
+			}
+			if s.currentBlockTerminated() {
+				return nil
 			}
 			if err := s.emitRegionCleanup(); err != nil {
 				return err
@@ -741,7 +1093,7 @@ func (s *functionState) emitOpenStmt(stmt *ast.OpenStmt) error {
 			s.bindPackedEnumStoreOrigin(key, enumType, storeBinding)
 		}
 	}
-	if err := s.emitBlock(stmt.Body, false); err != nil {
+	if err := s.emitBlockInCurrentScope(stmt.Body); err != nil {
 		s.popScope()
 		return err
 	}
@@ -842,7 +1194,7 @@ func (s *functionState) emitViewStmt(stmt *ast.ViewStmt) error {
 			s.bindPackedVariantView(stmt.Pattern.Name, resolvedViewType, nil, enumValue, storeValue, matchedPayloadValues)
 		}
 	}
-	if err := s.emitBlock(stmt.Body, false); err != nil {
+	if err := s.emitBlockInCurrentScope(stmt.Body); err != nil {
 		s.popScope()
 		return err
 	}
@@ -864,6 +1216,27 @@ func (s *functionState) emitViewStmt(stmt *ast.ViewStmt) error {
 	C.LLVMBuildUnreachable(s.builder)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+	return nil
+}
+
+func (s *functionState) emitDeferStmt(stmt *ast.DeferStmt) error {
+	if stmt == nil {
+		return nil
+	}
+	binding := scopedCleanupBinding{
+		kind:      scopedCleanupDeferBody,
+		deferBody: &deferredBodyBinding{stmt: stmt},
+	}
+	if stmt.Mode == ast.DeferModeFunction {
+		captured, err := s.captureDeferFunctionScope(stmt)
+		if err != nil {
+			return err
+		}
+		binding.deferBody.captureScope = captured
+		s.registerFunctionCleanup(binding)
+		return nil
+	}
+	s.registerScopedCleanup(binding)
 	return nil
 }
 
@@ -928,19 +1301,12 @@ func (s *functionState) emitPoolStmt(stmt *ast.PoolStmt) error {
 	s.defineBinding(stmt.Name, valueBinding{ptr: poolAlloca, typ: poolType})
 	C.LLVMBuildStore(s.builder, poolValue, poolAlloca)
 	pool := scopedCleanupBinding{kind: scopedCleanupThreadPool, name: stmt.Name, ptr: poolAlloca, typ: poolType}
-	s.scopedCleanups = append(s.scopedCleanups, pool)
+	s.registerScopedCleanup(pool)
 	s.poolScopes = append(s.poolScopes, activePoolBinding{name: stmt.Name, ptr: poolAlloca, typ: poolType, workers: workersValue})
 	defer func() {
-		s.scopedCleanups = s.scopedCleanups[:len(s.scopedCleanups)-1]
 		s.poolScopes = s.poolScopes[:len(s.poolScopes)-1]
 	}()
-	if err := s.emitBlock(stmt.Body, false); err != nil {
-		return err
-	}
-	if s.currentBlockTerminated() {
-		return nil
-	}
-	return s.emitConditionalPoolShutdown(pool)
+	return s.emitBlockInCurrentScope(stmt.Body)
 }
 
 func (s *functionState) emitParallelForStmt(stmt *ast.ParallelForStmt) error {
@@ -1290,17 +1656,8 @@ func (s *functionState) emitLockStmt(stmt *ast.LockStmt) error {
 	s.defineBinding(stmt.GuardName, valueBinding{ptr: guardAlloca, typ: guardType})
 	C.LLVMBuildStore(s.builder, guardValue, guardAlloca)
 	guard := scopedCleanupBinding{kind: scopedCleanupLockGuard, name: stmt.GuardName, ptr: guardAlloca, typ: guardType}
-	s.scopedCleanups = append(s.scopedCleanups, guard)
-	defer func() {
-		s.scopedCleanups = s.scopedCleanups[:len(s.scopedCleanups)-1]
-	}()
-	if err := s.emitBlock(stmt.Body, false); err != nil {
-		return err
-	}
-	if s.currentBlockTerminated() {
-		return nil
-	}
-	return s.emitConditionalMutexUnlock(guard)
+	s.registerScopedCleanup(guard)
+	return s.emitBlockInCurrentScope(stmt.Body)
 }
 
 func (s *functionState) emitConditionalMutexUnlock(guard scopedCleanupBinding) error {
@@ -1906,7 +2263,7 @@ func (s *functionState) emitEnumMatch(stmt *ast.MatchStmt, enumType *semantic.En
 			if hasValuePath && !preloadedCommonValues.empty() {
 				s.bindPackedCommonFieldValues(valuePath, enumType, preloadedCommonValues)
 			}
-			if err := s.emitBlock(arm.Body, false); err != nil {
+			if err := s.emitBlockInCurrentScope(arm.Body); err != nil {
 				s.popScope()
 				return err
 			}
@@ -1931,7 +2288,7 @@ func (s *functionState) emitEnumMatch(stmt *ast.MatchStmt, enumType *semantic.En
 			if hasValuePath && !preloadedCommonValues.empty() {
 				s.bindPackedCommonFieldValues(valuePath, enumType, preloadedCommonValues)
 			}
-			if err := s.emitBlock(arm.Body, false); err != nil {
+			if err := s.emitBlockInCurrentScope(arm.Body); err != nil {
 				s.popScope()
 				return err
 			}
@@ -1981,7 +2338,7 @@ func (s *functionState) emitEnumMatch(stmt *ast.MatchStmt, enumType *semantic.En
 		if hasValuePath && !preloadedCommonValues.empty() {
 			s.bindPackedCommonFieldValues(valuePath, enumType, preloadedCommonValues)
 		}
-		if err := s.emitBlock(arm.Body, false); err != nil {
+		if err := s.emitBlockInCurrentScope(arm.Body); err != nil {
 			s.popScope()
 			return err
 		}
@@ -2282,7 +2639,7 @@ func (s *functionState) emitStringMatch(stmt *ast.MatchStmt) error {
 
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
-		if err := s.emitBlock(arm.Body, false); err != nil {
+		if err := s.emitBlockInCurrentScope(arm.Body); err != nil {
 			s.popScope()
 			return err
 		}
@@ -2387,13 +2744,16 @@ func (s *functionState) emitMatchExprArmBody(body []ast.Stmt, resultType semanti
 	if len(body) == 0 {
 		return nil, false, fmt.Errorf("match expression arm must end with an expression")
 	}
+	scope := s.scope
 	for i, stmt := range body {
 		isLast := i == len(body)-1
 		if !isLast {
 			if err := s.emitStmt(stmt); err != nil {
+				s.discardScopeCleanups(scope)
 				return nil, false, err
 			}
 			if s.currentBlockTerminated() {
+				s.discardScopeCleanups(scope)
 				return nil, false, nil
 			}
 			continue
@@ -2401,11 +2761,30 @@ func (s *functionState) emitMatchExprArmBody(body []ast.Stmt, resultType semanti
 		if exprStmt, ok := stmt.(*ast.ExprStmt); ok {
 			value, _, err := s.emitExpr(exprStmt.Expr, resultType)
 			if err != nil {
+				s.discardScopeCleanups(scope)
 				return nil, false, err
+			}
+			if s.currentBlockTerminated() {
+				s.discardScopeCleanups(scope)
+				return nil, false, nil
+			}
+			if err := s.emitScopeCleanups(scope); err != nil {
+				return nil, false, err
+			}
+			if s.currentBlockTerminated() {
+				return nil, false, nil
 			}
 			return value, true, nil
 		}
 		if err := s.emitStmt(stmt); err != nil {
+			s.discardScopeCleanups(scope)
+			return nil, false, err
+		}
+		if s.currentBlockTerminated() {
+			s.discardScopeCleanups(scope)
+			return nil, false, nil
+		}
+		if err := s.emitScopeCleanups(scope); err != nil {
 			return nil, false, err
 		}
 		if s.currentBlockTerminated() {
@@ -3083,6 +3462,8 @@ func stmtReadsMatchedValueField(name string, stmt ast.Stmt) bool {
 		return exprReadsMatchedValueField(name, n.Value)
 	case *ast.MoveBindStmt:
 		return exprReadsMatchedValueField(name, n.Value) || exprReadsMatchedValueField(name, n.Store)
+	case *ast.DeferStmt:
+		return stmtsReadMatchedValueField(name, n.Body)
 	case *ast.ReturnStmt:
 		return exprReadsMatchedValueField(name, n.Value)
 	case *ast.IfStmt:

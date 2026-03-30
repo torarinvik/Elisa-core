@@ -60,6 +60,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.analyzeOpenStmt(n)
 	case *ast.ViewStmt:
 		a.analyzeViewStmt(n)
+	case *ast.DeferStmt:
+		a.analyzeDeferStmt(n)
 	case *ast.RegionStmt:
 		if n.Capacity != nil {
 			capacityType := a.analyzeExpr(n.Capacity)
@@ -567,6 +569,198 @@ func viewBindPatternAsMoveBindPattern(pattern *ast.ViewBindPattern) *ast.MoveBin
 		return nil
 	}
 	return &ast.MoveBindVariantPattern{Position: pattern.Position, EnumName: pattern.EnumName, Variant: pattern.Variant, Args: append([]ast.MatchPatternArg(nil), pattern.Args...)}
+}
+
+func (a *Analyzer) analyzeDeferStmt(stmt *ast.DeferStmt) {
+	if stmt == nil {
+		return
+	}
+	if stmt.Mode == ast.DeferModeFunction && a.currentNonGlobalScopeDepth() != 1 {
+		a.errorf(stmt.Pos(), "defer function is currently only supported in the outermost function scope")
+	}
+	a.validateDeferStmtBody(stmt.Body)
+	savedReturnProvenance := a.currentReturnProvenance
+	savedReturnBorrowedOwnerRefs := a.currentReturnBorrowedOwnerRefs
+	a.analyzeBlockWithAffineClone(stmt.Body, NewScope(a.currentScope))
+	a.currentReturnProvenance = savedReturnProvenance
+	a.currentReturnBorrowedOwnerRefs = savedReturnBorrowedOwnerRefs
+	collector := newDeferCaptureCollector(a, a.currentScope)
+	collector.collectStmts(stmt.Body)
+	if a.deferInfo == nil {
+		a.deferInfo = map[*ast.DeferStmt]*DeferInfo{}
+	}
+	a.deferInfo[stmt] = &DeferInfo{Mode: stmt.Mode, Captures: append([]string(nil), collector.captureOrder...)}
+}
+
+func (a *Analyzer) currentNonGlobalScopeDepth() int {
+	depth := 0
+	for scope := a.currentScope; scope != nil && scope != a.globalScope; scope = scope.Parent {
+		depth++
+	}
+	return depth
+}
+
+func (a *Analyzer) validateDeferStmtBody(stmts []ast.Stmt) {
+	for _, stmt := range stmts {
+		a.validateDeferStmtBodyStmt(stmt)
+	}
+}
+
+func (a *Analyzer) validateDeferStmtBodyStmt(stmt ast.Stmt) {
+	switch n := stmt.(type) {
+	case *ast.VarDeclStmt:
+		a.validateDeferStmtBodyExpr(n.Value)
+	case *ast.MoveBindStmt:
+		a.validateDeferStmtBodyExpr(n.Value)
+		a.validateDeferStmtBodyExpr(n.Store)
+	case *ast.OpenStmt:
+		a.validateDeferStmtBodyExpr(n.Value)
+		a.validateDeferStmtBodyExpr(n.Store)
+		a.validateDeferStmtBody(n.Body)
+	case *ast.ViewStmt:
+		a.validateDeferStmtBodyExpr(n.Value)
+		a.validateDeferStmtBodyExpr(n.Store)
+		a.validateDeferStmtBody(n.Body)
+	case *ast.DeferStmt:
+		a.errorf(n.Pos(), "nested defer is not supported inside defer bodies")
+		a.validateDeferStmtBody(n.Body)
+	case *ast.AssignStmt:
+		a.validateDeferStmtBodyExpr(n.Target)
+		a.validateDeferStmtBodyExpr(n.Value)
+	case *ast.AugAssignStmt:
+		a.validateDeferStmtBodyExpr(n.Target)
+		a.validateDeferStmtBodyExpr(n.Value)
+	case *ast.AsRefAssignStmt:
+		a.validateDeferStmtBodyExpr(n.Target)
+		a.validateDeferStmtBodyExpr(n.Value)
+	case *ast.ReturnStmt:
+		a.errorf(n.Pos(), "defer body cannot return from the enclosing function")
+		a.validateDeferStmtBodyExpr(n.Value)
+	case *ast.IfStmt:
+		a.validateDeferStmtBodyExpr(n.Cond)
+		a.validateDeferStmtBody(n.Then)
+		for _, elif := range n.Elifs {
+			a.validateDeferStmtBodyExpr(elif.Cond)
+			a.validateDeferStmtBody(elif.Body)
+		}
+		a.validateDeferStmtBody(n.Else)
+	case *ast.MatchStmt:
+		a.validateDeferStmtBodyExpr(n.Value)
+		a.validateDeferStmtBodyExpr(n.Store)
+		for _, arm := range n.Arms {
+			a.validateDeferStmtBody(arm.Body)
+		}
+	case *ast.InStoreStmt:
+		a.validateDeferStmtBodyExpr(n.Store)
+		a.validateDeferStmtBody(n.Body)
+	case *ast.CanStmt:
+		a.validateDeferStmtBody(n.Body)
+	case *ast.PoolStmt:
+		a.validateDeferStmtBodyExpr(n.Workers)
+		a.validateDeferStmtBody(n.Body)
+	case *ast.LockStmt:
+		a.validateDeferStmtBodyExpr(n.Mutex)
+		a.validateDeferStmtBody(n.Body)
+	case *ast.WhileStmt:
+		a.validateDeferStmtBodyExpr(n.Cond)
+		a.validateDeferStmtBody(n.Body)
+	case *ast.ForStmt:
+		a.validateDeferStmtBodyExpr(n.Start)
+		a.validateDeferStmtBodyExpr(n.End)
+		a.validateDeferStmtBodyExpr(n.Step)
+		a.validateDeferStmtBody(n.Body)
+	case *ast.ParallelForStmt:
+		a.validateDeferStmtBodyExpr(n.Source)
+		a.validateDeferStmtBody(n.Body)
+	case *ast.PanicStmt:
+		a.validateDeferStmtBodyExpr(n.Message)
+	case *ast.ExprStmt:
+		a.validateDeferStmtBodyExpr(n.Expr)
+	case *ast.StaticIfStmt:
+		for _, active := range a.activeStmtBranch(n) {
+			a.validateDeferStmtBodyStmt(active)
+		}
+	case *ast.StaticErrorStmt:
+		a.validateDeferStmtBodyExpr(n.Message)
+	case *ast.DiscardStmt:
+		a.validateDeferStmtBodyExpr(n.Value)
+	case *ast.RegionStmt:
+		a.validateDeferStmtBodyExpr(n.Capacity)
+	case *ast.PassStmt, *ast.MarkStmt, *ast.RestoreStmt, *ast.ResetStmt, *ast.DestroyStmt:
+		return
+	}
+}
+
+func (a *Analyzer) validateDeferStmtBodyExpr(expr ast.Expr) {
+	if expr == nil {
+		return
+	}
+	switch n := expr.(type) {
+	case *ast.BinaryExpr:
+		a.validateDeferStmtBodyExpr(n.Left)
+		a.validateDeferStmtBodyExpr(n.Right)
+	case *ast.UnaryExpr:
+		a.validateDeferStmtBodyExpr(n.Operand)
+	case *ast.CallExpr:
+		a.validateDeferStmtBodyExpr(n.Func)
+		for _, arg := range n.Args {
+			a.validateDeferStmtBodyExpr(arg)
+		}
+	case *ast.FieldExpr:
+		a.validateDeferStmtBodyExpr(n.Object)
+	case *ast.IndexExpr:
+		a.validateDeferStmtBodyExpr(n.Object)
+		a.validateDeferStmtBodyExpr(n.Index)
+	case *ast.SliceExpr:
+		a.validateDeferStmtBodyExpr(n.Object)
+		a.validateDeferStmtBodyExpr(n.Start)
+		a.validateDeferStmtBodyExpr(n.End)
+	case *ast.ListLitExpr:
+		for _, elem := range n.Elems {
+			a.validateDeferStmtBodyExpr(elem)
+		}
+	case *ast.CastExpr:
+		a.validateDeferStmtBodyExpr(n.Operand)
+	case *ast.TernaryExpr:
+		a.validateDeferStmtBodyExpr(n.Value)
+		a.validateDeferStmtBodyExpr(n.Cond)
+		a.validateDeferStmtBodyExpr(n.Alt)
+	case *ast.AddrOfExpr:
+		a.validateDeferStmtBodyExpr(n.Operand)
+	case *ast.MoveExpr:
+		a.validateDeferStmtBodyExpr(n.Operand)
+	case *ast.SpecializeExpr:
+		a.validateDeferStmtBodyExpr(n.Operand)
+	case *ast.StructLitExpr:
+		for _, arg := range n.Args {
+			a.validateDeferStmtBodyExpr(arg)
+		}
+	case *ast.ParenExpr:
+		a.validateDeferStmtBodyExpr(n.Inner)
+	case *ast.RaiseExpr:
+		a.errorf(n.Pos(), "defer body cannot raise from the enclosing function")
+		a.validateDeferStmtBodyExpr(n.Error)
+	case *ast.TryExpr:
+		if n.Fallback == nil {
+			a.errorf(n.Pos(), "defer body cannot use try propagation without an else fallback")
+		}
+		a.validateDeferStmtBodyExpr(n.Value)
+		a.validateDeferStmtBodyExpr(n.Fallback)
+	case *ast.UnwrapElseExpr:
+		a.validateDeferStmtBodyExpr(n.Value)
+		a.validateDeferStmtBodyExpr(n.Fallback)
+	case *ast.AllocExpr:
+		a.validateDeferStmtBodyExpr(n.Owner)
+		a.validateDeferStmtBodyExpr(n.Value)
+	case *ast.CanExpr:
+		a.validateDeferStmtBodyExpr(n.Expr)
+	case *ast.MatchExpr:
+		a.validateDeferStmtBodyExpr(n.Value)
+		a.validateDeferStmtBodyExpr(n.Store)
+		for _, arm := range n.Arms {
+			a.validateDeferStmtBody(arm.Body)
+		}
+	}
 }
 
 func (a *Analyzer) resolveViewBindType(stmt *ast.ViewStmt, actual Type) (*PackedVariantViewType, bool) {
@@ -1415,6 +1609,11 @@ func (c *parallelForCaptureCollector) collectStmt(stmt ast.Stmt, locals map[stri
 		for _, innerStmt := range n.Body {
 			c.collectStmt(innerStmt, inner)
 		}
+	case *ast.DeferStmt:
+		bodyLocals := cloneParallelForLocals(locals)
+		for _, innerStmt := range n.Body {
+			c.collectStmt(innerStmt, bodyLocals)
+		}
 	case *ast.AssignStmt:
 		c.collectAssignmentTarget(n.Target, locals)
 		c.collectExpr(n.Value, locals)
@@ -1531,6 +1730,276 @@ func (c *parallelForCaptureCollector) collectStmt(stmt ast.Stmt, locals map[stri
 	case *ast.ResetStmt:
 		if !locals[n.Name] {
 			c.addError(fmt.Sprintf("parallel for body cannot reset outer region %q", n.Name))
+		}
+	}
+}
+
+type deferCaptureCollector struct {
+	analyzer     *Analyzer
+	outerScope   *Scope
+	rootLocals   map[string]bool
+	captureOrder []string
+	captureSeen  map[string]bool
+}
+
+func newDeferCaptureCollector(analyzer *Analyzer, outerScope *Scope) *deferCaptureCollector {
+	return &deferCaptureCollector{
+		analyzer:    analyzer,
+		outerScope:  outerScope,
+		rootLocals:  map[string]bool{},
+		captureSeen: map[string]bool{},
+	}
+}
+
+func (c *deferCaptureCollector) noteCapture(name string) {
+	if c.captureSeen[name] {
+		return
+	}
+	c.captureSeen[name] = true
+	c.captureOrder = append(c.captureOrder, name)
+}
+
+func (c *deferCaptureCollector) collectStmts(stmts []ast.Stmt) {
+	locals := cloneParallelForLocals(c.rootLocals)
+	for _, stmt := range stmts {
+		c.collectStmt(stmt, locals)
+	}
+}
+
+func (c *deferCaptureCollector) collectStmt(stmt ast.Stmt, locals map[string]bool) {
+	switch n := stmt.(type) {
+	case *ast.VarDeclStmt:
+		if n.Value != nil {
+			c.collectExpr(n.Value, locals)
+		}
+		locals[n.Name] = true
+	case *ast.MoveBindStmt:
+		c.collectExpr(n.Value, locals)
+		if n.Store != nil {
+			c.collectExpr(n.Store, locals)
+		}
+		for _, name := range parallelForMoveBindNames(n.Pattern) {
+			locals[name] = true
+		}
+	case *ast.OpenStmt:
+		c.collectExpr(n.Value, locals)
+		if n.Store != nil {
+			c.collectExpr(n.Store, locals)
+		}
+		inner := cloneParallelForLocals(locals)
+		for _, name := range parallelForMatchPatternNames(n.Pattern.Args) {
+			inner[name] = true
+		}
+		for _, innerStmt := range n.Body {
+			c.collectStmt(innerStmt, inner)
+		}
+	case *ast.ViewStmt:
+		c.collectExpr(n.Value, locals)
+		if n.Store != nil {
+			c.collectExpr(n.Store, locals)
+		}
+		inner := cloneParallelForLocals(locals)
+		if n.Pattern != nil && n.Pattern.Name != "" {
+			inner[n.Pattern.Name] = true
+		}
+		for _, innerStmt := range n.Body {
+			c.collectStmt(innerStmt, inner)
+		}
+	case *ast.DeferStmt:
+		bodyLocals := cloneParallelForLocals(locals)
+		for _, innerStmt := range n.Body {
+			c.collectStmt(innerStmt, bodyLocals)
+		}
+	case *ast.AssignStmt:
+		c.collectExpr(n.Target, locals)
+		c.collectExpr(n.Value, locals)
+	case *ast.AugAssignStmt:
+		c.collectExpr(n.Target, locals)
+		c.collectExpr(n.Value, locals)
+	case *ast.AsRefAssignStmt:
+		c.collectExpr(n.Target, locals)
+		c.collectExpr(n.Value, locals)
+	case *ast.ReturnStmt:
+		c.collectExpr(n.Value, locals)
+	case *ast.IfStmt:
+		c.collectExpr(n.Cond, locals)
+		thenLocals := cloneParallelForLocals(locals)
+		for _, innerStmt := range n.Then {
+			c.collectStmt(innerStmt, thenLocals)
+		}
+		for _, elif := range n.Elifs {
+			c.collectExpr(elif.Cond, locals)
+			elifLocals := cloneParallelForLocals(locals)
+			for _, innerStmt := range elif.Body {
+				c.collectStmt(innerStmt, elifLocals)
+			}
+		}
+		elseLocals := cloneParallelForLocals(locals)
+		for _, innerStmt := range n.Else {
+			c.collectStmt(innerStmt, elseLocals)
+		}
+	case *ast.WhileStmt:
+		c.collectExpr(n.Cond, locals)
+		bodyLocals := cloneParallelForLocals(locals)
+		for _, innerStmt := range n.Body {
+			c.collectStmt(innerStmt, bodyLocals)
+		}
+	case *ast.ForStmt:
+		c.collectExpr(n.Start, locals)
+		c.collectExpr(n.End, locals)
+		c.collectExpr(n.Step, locals)
+		bodyLocals := cloneParallelForLocals(locals)
+		bodyLocals[n.Name] = true
+		for _, innerStmt := range n.Body {
+			c.collectStmt(innerStmt, bodyLocals)
+		}
+	case *ast.ParallelForStmt:
+		c.collectExpr(n.Source, locals)
+		bodyLocals := cloneParallelForLocals(locals)
+		bodyLocals[n.Name] = true
+		if n.IndexName != "" {
+			bodyLocals[n.IndexName] = true
+		}
+		for _, innerStmt := range n.Body {
+			c.collectStmt(innerStmt, bodyLocals)
+		}
+	case *ast.MatchStmt:
+		c.collectExpr(n.Value, locals)
+		c.collectExpr(n.Store, locals)
+		for _, arm := range n.Arms {
+			armLocals := cloneParallelForLocals(locals)
+			for _, name := range parallelForMatchArmPatternNames(arm.Pattern) {
+				armLocals[name] = true
+			}
+			for _, innerStmt := range arm.Body {
+				c.collectStmt(innerStmt, armLocals)
+			}
+		}
+	case *ast.InStoreStmt:
+		c.collectExpr(n.Store, locals)
+		bodyLocals := cloneParallelForLocals(locals)
+		for _, innerStmt := range n.Body {
+			c.collectStmt(innerStmt, bodyLocals)
+		}
+	case *ast.CanStmt:
+		bodyLocals := cloneParallelForLocals(locals)
+		for _, innerStmt := range n.Body {
+			c.collectStmt(innerStmt, bodyLocals)
+		}
+	case *ast.PoolStmt:
+		c.collectExpr(n.Workers, locals)
+		bodyLocals := cloneParallelForLocals(locals)
+		bodyLocals[n.Name] = true
+		for _, innerStmt := range n.Body {
+			c.collectStmt(innerStmt, bodyLocals)
+		}
+	case *ast.LockStmt:
+		c.collectExpr(n.Mutex, locals)
+		bodyLocals := cloneParallelForLocals(locals)
+		bodyLocals[n.GuardName] = true
+		for _, innerStmt := range n.Body {
+			c.collectStmt(innerStmt, bodyLocals)
+		}
+	case *ast.PanicStmt:
+		c.collectExpr(n.Message, locals)
+	case *ast.ExprStmt:
+		c.collectExpr(n.Expr, locals)
+	case *ast.StaticIfStmt:
+		for _, active := range c.analyzer.activeStmtBranch(n) {
+			c.collectStmt(active, cloneParallelForLocals(locals))
+		}
+	case *ast.StaticErrorStmt:
+		c.collectExpr(n.Message, locals)
+	case *ast.DiscardStmt:
+		c.collectExpr(n.Value, locals)
+	case *ast.RegionStmt:
+		c.collectExpr(n.Capacity, locals)
+		locals[n.Name] = true
+	case *ast.MarkStmt:
+		locals[n.Name] = true
+	case *ast.RestoreStmt, *ast.ResetStmt, *ast.DestroyStmt, *ast.PassStmt:
+		return
+	}
+}
+
+func (c *deferCaptureCollector) collectExpr(expr ast.Expr, locals map[string]bool) {
+	if expr == nil {
+		return
+	}
+	switch n := expr.(type) {
+	case *ast.Ident:
+		if locals[n.Name] {
+			return
+		}
+		sym, ok := c.outerScope.Lookup(n.Name)
+		if ok && parallelForCapturableSymbolKind(sym.Kind) {
+			c.noteCapture(n.Name)
+		}
+	case *ast.BinaryExpr:
+		c.collectExpr(n.Left, locals)
+		c.collectExpr(n.Right, locals)
+	case *ast.UnaryExpr:
+		c.collectExpr(n.Operand, locals)
+	case *ast.CallExpr:
+		c.collectExpr(n.Func, locals)
+		for _, arg := range n.Args {
+			c.collectExpr(arg, locals)
+		}
+	case *ast.FieldExpr:
+		c.collectExpr(n.Object, locals)
+	case *ast.IndexExpr:
+		c.collectExpr(n.Object, locals)
+		c.collectExpr(n.Index, locals)
+	case *ast.SliceExpr:
+		c.collectExpr(n.Object, locals)
+		c.collectExpr(n.Start, locals)
+		c.collectExpr(n.End, locals)
+	case *ast.ListLitExpr:
+		for _, elem := range n.Elems {
+			c.collectExpr(elem, locals)
+		}
+	case *ast.CastExpr:
+		c.collectExpr(n.Operand, locals)
+	case *ast.TernaryExpr:
+		c.collectExpr(n.Value, locals)
+		c.collectExpr(n.Cond, locals)
+		c.collectExpr(n.Alt, locals)
+	case *ast.AddrOfExpr:
+		c.collectExpr(n.Operand, locals)
+	case *ast.MoveExpr:
+		c.collectExpr(n.Operand, locals)
+	case *ast.SpecializeExpr:
+		c.collectExpr(n.Operand, locals)
+	case *ast.StructLitExpr:
+		for _, arg := range n.Args {
+			c.collectExpr(arg, locals)
+		}
+	case *ast.ParenExpr:
+		c.collectExpr(n.Inner, locals)
+	case *ast.RaiseExpr:
+		c.collectExpr(n.Error, locals)
+	case *ast.TryExpr:
+		c.collectExpr(n.Value, locals)
+		c.collectExpr(n.Fallback, locals)
+	case *ast.UnwrapElseExpr:
+		c.collectExpr(n.Value, locals)
+		c.collectExpr(n.Fallback, locals)
+	case *ast.AllocExpr:
+		c.collectExpr(n.Owner, locals)
+		c.collectExpr(n.Value, locals)
+	case *ast.CanExpr:
+		c.collectExpr(n.Expr, locals)
+	case *ast.MatchExpr:
+		c.collectExpr(n.Value, locals)
+		c.collectExpr(n.Store, locals)
+		for _, arm := range n.Arms {
+			armLocals := cloneParallelForLocals(locals)
+			for _, name := range parallelForMatchArmPatternNames(arm.Pattern) {
+				armLocals[name] = true
+			}
+			for _, innerStmt := range arm.Body {
+				c.collectStmt(innerStmt, armLocals)
+			}
 		}
 	}
 }

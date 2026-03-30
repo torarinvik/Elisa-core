@@ -287,6 +287,15 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 		for _, stmt := range n.Body {
 			f.writeStmt(level+1, stmt)
 		}
+	case *ast.DeferStmt:
+		mode := "block"
+		if n.Mode == ast.DeferModeFunction {
+			mode = "function"
+		}
+		f.writeLine(level, "defer "+mode+":")
+		for _, stmt := range n.Body {
+			f.writeStmt(level+1, stmt)
+		}
 	case *ast.ReturnStmt:
 		if n.Value == nil {
 			f.writeLine(level, "return")

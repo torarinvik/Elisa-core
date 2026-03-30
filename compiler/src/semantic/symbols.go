@@ -39,6 +39,7 @@ type Result struct {
 	NodeTables       map[ast.Expr]NodeTableInfo
 	PackedLowering   PackedLoweringMetadata
 	ParallelFor      map[*ast.ParallelForStmt]*ParallelForInfo
+	Defer            map[*ast.DeferStmt]*DeferInfo
 	FunctionAnalyses map[*ast.FuncDecl]*FunctionAnalysis
 	AnnotatedFuncs   []*AnnotatedFunc
 	ExportedTypes    []*ExportedType
@@ -51,6 +52,11 @@ type ParallelForInfo struct {
 	SourceType Type
 	ItemType   Type
 	Captures   []string
+}
+
+type DeferInfo struct {
+	Mode     ast.DeferMode
+	Captures []string
 }
 
 type DenseNodeKeyInfo struct {

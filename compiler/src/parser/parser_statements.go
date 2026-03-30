@@ -43,6 +43,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikePoolStmt() {
 				return p.parsePoolStmt()
 			}
+		case "defer":
+			if p.looksLikeDeferStmt() {
+				return p.parseDeferStmt()
+			}
 		case "for":
 			if p.looksLikeForStmt() {
 				return p.parseForStmt()
@@ -128,6 +132,20 @@ func (p *Parser) looksLikePoolStmt() bool {
 		}
 	}
 	return false
+}
+
+func (p *Parser) looksLikeDeferStmt() bool {
+	if p.pos+2 >= len(p.tokens) {
+		return false
+	}
+	if p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT {
+		return false
+	}
+	mode := p.tokens[p.pos+1].Text
+	if mode != "block" && mode != "function" {
+		return false
+	}
+	return p.tokens[p.pos+2].Kind == lexer.TOKEN_COLON
 }
 
 func (p *Parser) looksLikeParallelForStmt() bool {
@@ -273,6 +291,25 @@ func (p *Parser) parsePoolStmt() *ast.PoolStmt {
 	body := p.parseBlock()
 	p.poolScopes = p.poolScopes[:len(p.poolScopes)-1]
 	return &ast.PoolStmt{Position: pos, Name: name, Workers: workers, Body: body}
+}
+
+func (p *Parser) parseDeferStmt() *ast.DeferStmt {
+	pos := p.cur().Pos
+	p.expectIdentText("defer")
+	modeText := p.expect(lexer.TOKEN_IDENT).Text
+	mode := ast.DeferModeBlock
+	switch modeText {
+	case "block":
+		mode = ast.DeferModeBlock
+	case "function":
+		mode = ast.DeferModeFunction
+	default:
+		p.errorf("defer expects either `block` or `function`, got %q", modeText)
+	}
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	body := p.parseBlock()
+	return &ast.DeferStmt{Position: pos, Mode: mode, Body: body}
 }
 
 func (p *Parser) parseParallelForStmt() *ast.ParallelForStmt {

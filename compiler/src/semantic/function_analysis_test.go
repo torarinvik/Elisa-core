@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"strings"
 	"testing"
 
 	"llcontext/src/ast"
@@ -25,6 +26,21 @@ func analyzeFunctionAnalysisTestSource(t *testing.T, filename string, src string
 		t.Fatalf("unexpected semantic errors: %v", errs)
 	}
 	return result
+}
+
+func analyzeFunctionAnalysisTestSourceWithSemanticErrors(t *testing.T, filename string, src string) *Result {
+	t.Helper()
+	l := lexer.New(filename, []byte(src))
+	tokens := l.Tokenize()
+	if errs := l.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected lex errors: %v", errs)
+	}
+	p := parser.New(tokens)
+	file := p.ParseFile(filename)
+	if errs := p.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected parse errors: %v", errs)
+	}
+	return Analyze(file)
 }
 
 func TestAnalyzeInfersDirectSinkParamSummary(t *testing.T) {
@@ -126,5 +142,57 @@ func TestCreateTypeBoundOpsSynthesizesRecursiveCleanupOps(t *testing.T) {
 	seqOps := CreateTypeBoundOps(&ArrayType{Elem: threadPool, HasConstSize: true, ConstSize: 2})
 	if len(seqOps) != 1 || !seqOps[0].IsFillSeq() || len(seqOps[0].Sequence) != 1 || seqOps[0].Sequence[0].Kind != TypeBoundCleanupThreadPoolShutdown {
 		t.Fatalf("expected array cleanup synthesis to wrap element ops in a fill-seq op, got %#v", seqOps)
+	}
+}
+
+func TestAnalyzeDeferFunctionRecordsCaptureMetadata(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "defer_capture.llcontext", `def keep(seed: int) -> int:
+	value: int = seed
+	defer function:
+		_ = value
+	return value
+`)
+	decl, ok := result.File.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", result.File.Decls[0])
+	}
+	stmt, ok := decl.Body[1].(*ast.DeferStmt)
+	if !ok {
+		t.Fatalf("expected defer stmt, got %T", decl.Body[1])
+	}
+	info, ok := result.Defer[stmt]
+	if !ok || info == nil {
+		t.Fatal("expected semantic defer metadata to be recorded")
+	}
+	if info.Mode != ast.DeferModeFunction {
+		t.Fatalf("expected function defer mode, got %v", info.Mode)
+	}
+	if len(info.Captures) != 1 || info.Captures[0] != "value" {
+		t.Fatalf("expected function defer to capture value, got %#v", info.Captures)
+	}
+}
+
+func TestAnalyzeDeferBodyRejectsReturn(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "defer_return_invalid.llcontext", `def keep() -> int:
+	defer block:
+		return 1
+	return 0
+`)
+	errText := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(errText, "defer body cannot return from the enclosing function") {
+		t.Fatalf("expected defer return diagnostic, got:\n%s", errText)
+	}
+}
+
+func TestAnalyzeDeferFunctionRejectsNestedScope(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "defer_function_nested_invalid.llcontext", `def keep(flag: bool) -> int:
+	if flag:
+		defer function:
+			pass
+	return 0
+`)
+	errText := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(errText, "defer function is currently only supported in the outermost function scope") {
+		t.Fatalf("expected nested function defer diagnostic, got:\n%s", errText)
 	}
 }

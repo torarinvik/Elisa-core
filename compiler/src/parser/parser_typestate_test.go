@@ -625,6 +625,57 @@ func TestParseOpenAndViewRemainContextualIdentifiers(t *testing.T) {
 	}
 }
 
+func TestParseDeferStatements(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep() -> int:\n    defer block:\n        pass\n    defer function:\n        pass\n    return 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[0])
+	}
+	blockDefer, ok := decl.Body[0].(*ast.DeferStmt)
+	if !ok {
+		t.Fatalf("expected first stmt to be defer, got %T", decl.Body[0])
+	}
+	if blockDefer.Mode != ast.DeferModeBlock {
+		t.Fatalf("expected first defer mode block, got %v", blockDefer.Mode)
+	}
+	functionDefer, ok := decl.Body[1].(*ast.DeferStmt)
+	if !ok {
+		t.Fatalf("expected second stmt to be defer, got %T", decl.Body[1])
+	}
+	if functionDefer.Mode != ast.DeferModeFunction {
+		t.Fatalf("expected second defer mode function, got %v", functionDefer.Mode)
+	}
+	if len(blockDefer.Body) != 1 || len(functionDefer.Body) != 1 {
+		t.Fatalf("expected one stmt in each defer body, got %d and %d", len(blockDefer.Body), len(functionDefer.Body))
+	}
+}
+
+func TestParseDeferRemainsContextualIdentifier(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep() -> int:\n    defer_value: int = 1\n    defer(defer_value)\n    return defer_value\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	if _, ok := decl.Body[0].(*ast.VarDeclStmt); !ok {
+		t.Fatalf("expected first stmt to stay a var decl, got %T", decl.Body[0])
+	}
+	exprStmt, ok := decl.Body[1].(*ast.ExprStmt)
+	if !ok {
+		t.Fatalf("expected second stmt to stay an expr stmt, got %T", decl.Body[1])
+	}
+	call, ok := exprStmt.Expr.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected defer(defer_value) to parse as a call, got %T", exprStmt.Expr)
+	}
+	callee, ok := call.Func.(*ast.Ident)
+	if !ok || callee.Name != "defer" {
+		t.Fatalf("expected call callee defer, got %T %#v", call.Func, call.Func)
+	}
+}
+
 func TestParseParallelForStatement(t *testing.T) {
 	file, errs := parseSourceFile(t, "packed enum Expr:\n    Int(value: int)\n\ndef walk(frozen: Expr.Store[Frozen]) -> void:\n    pool workers(4u):\n        parallel for node in frozen:\n            pass\n")
 	if len(errs) != 0 {

@@ -1649,6 +1649,14 @@ func (s *functionState) emitPanicWithBacktrace(pos lexer.Pos, message ast.Expr) 
 	if fileName == "" {
 		fileName = "<unknown>"
 	}
+	if s.cleanupDepth == 0 {
+		if err := s.emitActiveScopedCleanup(); err != nil {
+			return err
+		}
+		if s.currentBlockTerminated() {
+			return nil
+		}
+	}
 
 	defaultMessage := s.emitGlobalCStringLiteral("panic", "panic.default.message")
 	messagePtr := defaultMessage

@@ -669,6 +669,19 @@ type ViewStmt struct {
 	Body     []Stmt
 }
 
+type DeferMode int
+
+const (
+	DeferModeBlock DeferMode = iota
+	DeferModeFunction
+)
+
+type DeferStmt struct {
+	Position lexer.Pos
+	Mode     DeferMode
+	Body     []Stmt
+}
+
 type ReturnStmt struct {
 	Position lexer.Pos
 	Value    Expr
@@ -916,6 +929,7 @@ func (n *VarDeclStmt) Pos() lexer.Pos            { return n.Position }
 func (n *MoveBindStmt) Pos() lexer.Pos           { return n.Position }
 func (n *OpenStmt) Pos() lexer.Pos               { return n.Position }
 func (n *ViewStmt) Pos() lexer.Pos               { return n.Position }
+func (n *DeferStmt) Pos() lexer.Pos              { return n.Position }
 func (n *ReturnStmt) Pos() lexer.Pos             { return n.Position }
 func (n *IfStmt) Pos() lexer.Pos                 { return n.Position }
 func (n *WhileStmt) Pos() lexer.Pos              { return n.Position }
@@ -1014,6 +1028,7 @@ func (*VarDeclStmt) nodeTag()               {}
 func (*MoveBindStmt) nodeTag()              {}
 func (*OpenStmt) nodeTag()                  {}
 func (*ViewStmt) nodeTag()                  {}
+func (*DeferStmt) nodeTag()                 {}
 func (*ReturnStmt) nodeTag()                {}
 func (*IfStmt) nodeTag()                    {}
 func (*WhileStmt) nodeTag()                 {}
@@ -1115,6 +1130,7 @@ func (*VarDeclStmt) stmtTag()     {}
 func (*MoveBindStmt) stmtTag()    {}
 func (*OpenStmt) stmtTag()        {}
 func (*ViewStmt) stmtTag()        {}
+func (*DeferStmt) stmtTag()       {}
 func (*ReturnStmt) stmtTag()      {}
 func (*IfStmt) stmtTag()          {}
 func (*WhileStmt) stmtTag()       {}

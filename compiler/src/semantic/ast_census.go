@@ -82,6 +82,8 @@ func (c *analyzerASTCensus) countStmt(stmt ast.Stmt) {
 		c.countExpr(n.Store)
 		c.countViewBindPattern(n.Pattern)
 		c.countStmts(n.Body)
+	case *ast.DeferStmt:
+		c.countStmts(n.Body)
 	case *ast.ReturnStmt:
 		c.countExpr(n.Value)
 	case *ast.IfStmt:
