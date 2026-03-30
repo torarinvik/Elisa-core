@@ -3007,6 +3007,13 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	if resultPayload, ok := threadTransferResultPayloadType(ft.Name, appliedType.Return); ok {
 		a.validateThreadTransferResultType(ft.Name, expr.Pos(), resultPayload)
 	}
+	for i := 0; i < limit; i++ {
+		paramType := a.substituteType(ft.Params[i], bindings, shapeBindings, regionBindings, permissionBindings)
+		if specializedType, ok := specializedParamTypes[i]; ok {
+			paramType = specializedType
+		}
+		a.recordNamedStateCallArgMutation(expr.Args[i], paramType)
+	}
 	switch ft.Name {
 	case "pool_shutdown":
 		if len(expr.Args) >= 1 {

@@ -20,3 +20,5 @@ compiler/packed_mlast_medium_current_clean.memprof
 Code/v-master/
 docs/useful_language_features/12-nim-orthogonal-language-and-compiler-ideas.md
 docs/useful_language_features/13-v-orthogonal-language-and-compiler-ideas.md
+compiler/.backend-test.log
+compiler/.semantic-test.log

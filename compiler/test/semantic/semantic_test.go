@@ -478,6 +478,119 @@ def ok(player: mutable Player[Alive]) -> int:
 	requireFunctionReturnTypeString(t, result, "ok", "int")
 }
 
+func TestAnalyzeRejectsUsingStaleDerivedStateAfterNestedFieldMutation(t *testing.T) {
+	src := `struct Player[state Alive | Dead]:
+	health: mutable int
+
+	derive state:
+		Alive when self.health > 0
+		Dead when self.health <= 0
+
+repr(c) struct Team:
+	player: mutable Player[Alive]
+
+def take_alive(player: Player[Alive]) -> int:
+	return player.health
+
+def bad(team: mutable Team) -> int:
+	team.player.health <- 0
+	return take_alive(team.player)
+`
+	_, errs := parseAndAnalyze(t, "derived_struct_state_nested_field_mutation_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "expects Player[Alive], got Player[Dead]") {
+		t.Fatalf("expected nested post-mutation derived-state diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsUsingStaleDerivedStateAfterRefAliasMutation(t *testing.T) {
+	src := `struct Player[state Alive | Dead]:
+	health: mutable int
+
+	derive state:
+		Alive when self.health > 0
+		Dead when self.health <= 0
+
+def take_alive(player: Player[Alive]) -> int:
+	return player.health
+
+def bad(player: mutable Player[Alive]) -> int:
+	alias: any Player[Alive]& = (&player).cast[any Player[Alive]&]
+	alias.health <- 0
+	return take_alive(player)
+`
+	_, errs := parseAndAnalyze(t, "derived_struct_state_ref_alias_mutation_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "expects Player[Alive], got Player[Dead]") {
+		t.Fatalf("expected ref-alias mutation derived-state diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsUsingStaleDerivedStateAfterRefCallMutation(t *testing.T) {
+	src := `struct Player[state Alive | Dead]:
+	health: mutable int
+
+	derive state:
+		Alive when self.health > 0
+		Dead when self.health <= 0
+
+def take_alive(player: Player[Alive]) -> int:
+	return player.health
+
+def kill(player: any Player[Alive]& ) -> void:
+	player.health <- 0
+
+def bad(player: mutable Player[Alive]) -> int:
+	kill((&player).cast[any Player[Alive]&])
+	return take_alive(player)
+`
+	_, errs := parseAndAnalyze(t, "derived_struct_state_ref_call_mutation_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "expects Player[Alive], got Player[Alive | Dead]") {
+		t.Fatalf("expected ref-call mutation derived-state diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsUsingStaleDerivedStateAfterWrapperRefCallMutation(t *testing.T) {
+	src := `struct Player[state Alive | Dead]:
+	health: mutable int
+
+	derive state:
+		Alive when self.health > 0
+		Dead when self.health <= 0
+
+repr(c) struct Team:
+	player: mutable Player[Alive]
+
+def take_alive(player: Player[Alive]) -> int:
+	return player.health
+
+def kill_team(team: any Team&) -> void:
+	team.player.health <- 0
+
+def bad(team: mutable Team) -> int:
+	kill_team((&team).cast[any Team&])
+	return take_alive(team.player)
+`
+	_, errs := parseAndAnalyze(t, "derived_struct_state_wrapper_ref_call_mutation_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "expects Player[Alive], got Player[Alive | Dead]") {
+		t.Fatalf("expected wrapper ref-call mutation derived-state diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeFunctionTypePermissionsParticipateInMatching(t *testing.T) {
 	src := `extern puts(text: any u8&) -> int can[Console.Write]
 
