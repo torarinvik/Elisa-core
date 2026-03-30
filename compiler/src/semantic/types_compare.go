@@ -60,6 +60,11 @@ func SameType(a, b Type) bool {
 	if sameTypeRuntimeCompatible(a, b) {
 		return true
 	}
+	if aID, ok := TryCanonicalTypeID(a); ok {
+		if bID, ok := TryCanonicalTypeID(b); ok {
+			return aID == bID
+		}
+	}
 	switch ta := a.(type) {
 	case *NeverType:
 		_, ok := b.(*NeverType)

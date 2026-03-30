@@ -104,12 +104,24 @@ type llvmGenerator struct {
 	specializedFuncTypes      map[string]*semantic.FuncType
 	functions                 map[string]C.LLVMValueRef
 	globals                   map[string]C.LLVMValueRef
-	noteTypeInProgress        map[semantic.Type]bool
-	noteTypeDone              map[semantic.Type]bool
+	noteTypeInProgress        map[typeMemoKey]bool
+	noteTypeDone              map[typeMemoKey]bool
 	cachedVoidRefType         *semantic.RefType
 	cachedArenaRefType        *semantic.RefType
 	syntheticCounter          int
 	wordBits                  int
+}
+
+type typeMemoKey struct {
+	id  semantic.TypeID
+	typ semantic.Type
+}
+
+func noteTypeKeyFor(t semantic.Type) typeMemoKey {
+	if id, ok := semantic.TryCanonicalTypeID(t); ok {
+		return typeMemoKey{id: id}
+	}
+	return typeMemoKey{typ: t}
 }
 
 func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
@@ -137,8 +149,8 @@ func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
 		specializedFuncTypes:      map[string]*semantic.FuncType{},
 		functions:                 map[string]C.LLVMValueRef{},
 		globals:                   map[string]C.LLVMValueRef{},
-		noteTypeInProgress:        map[semantic.Type]bool{},
-		noteTypeDone:              map[semantic.Type]bool{},
+		noteTypeInProgress:        map[typeMemoKey]bool{},
+		noteTypeDone:              map[typeMemoKey]bool{},
 		wordBits:                  int(unsafe.Sizeof(uintptr(0)) * 8),
 	}
 	for _, sym := range result.GlobalScope.Symbols {

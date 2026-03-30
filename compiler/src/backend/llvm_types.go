@@ -139,11 +139,12 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 	if t == nil {
 		return nil
 	}
-	if g.noteTypeDone[t] || g.noteTypeInProgress[t] {
+	key := noteTypeKeyFor(t)
+	if g.noteTypeDone[key] || g.noteTypeInProgress[key] {
 		return nil
 	}
-	g.noteTypeInProgress[t] = true
-	defer delete(g.noteTypeInProgress, t)
+	g.noteTypeInProgress[key] = true
+	defer delete(g.noteTypeInProgress, key)
 	var err error
 	switch tt := t.(type) {
 	case *semantic.InvalidType, *semantic.NeverType, *semantic.NullType, *semantic.BuiltinType, *semantic.TypeParamType, *semantic.DStrType, *semantic.ErrorSetType:
@@ -255,7 +256,7 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 		err = fmt.Errorf("unsupported semantic type %T", t)
 	}
 	if err == nil {
-		g.noteTypeDone[t] = true
+		g.noteTypeDone[key] = true
 	}
 	return err
 }
