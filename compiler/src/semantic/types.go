@@ -271,6 +271,20 @@ const (
 	FuncTemperatureModeCold    FuncTemperatureMode = "cold"
 )
 
+type FuncGuardKind string
+
+const (
+	FuncGuardKindNonNull       FuncGuardKind = "nonnull"
+	FuncGuardKindPackedVariant FuncGuardKind = "packed_variant"
+)
+
+type FuncGuardEffect struct {
+	Kind        FuncGuardKind
+	ParamIndex  int
+	EnumName    string
+	VariantName string
+}
+
 type FuncType struct {
 	Name                         string
 	TypeParams                   []string
@@ -291,6 +305,7 @@ type FuncType struct {
 	HasNoRecurse                 bool
 	TemperatureMode              FuncTemperatureMode
 	HasTemperatureMode           bool
+	GuardEffects                 []FuncGuardEffect
 	Params                       []Type
 	Return                       Type
 	Variadic                     bool
@@ -1376,6 +1391,15 @@ func ChunksExactViewItemType(t Type) (*DArrayViewType, bool) {
 		return nil, false
 	}
 	return &DArrayViewType{Elem: gi.Args[0], SurfaceName: "dview"}, true
+}
+
+func cloneFuncGuardEffects(effects []FuncGuardEffect) []FuncGuardEffect {
+	if len(effects) == 0 {
+		return nil
+	}
+	cloned := make([]FuncGuardEffect, len(effects))
+	copy(cloned, effects)
+	return cloned
 }
 
 func NodeKeyInstance(t Type) (*GenericInstanceType, bool) {

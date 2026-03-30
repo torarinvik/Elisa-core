@@ -42,10 +42,15 @@ type CFG struct {
 }
 
 type cfgBuilder struct {
-	cfg *CFG
+	cfg        *CFG
+	guardFacts func(ast.Expr, bool) GuardFactSet
 }
 
 func ConstructCFG(fn *ast.FuncDecl) *CFG {
+	return constructCFG(fn, nil)
+}
+
+func constructCFG(fn *ast.FuncDecl, guardFacts func(ast.Expr, bool) GuardFactSet) *CFG {
 	cfg := &CFG{}
 	if fn == nil {
 		return cfg
@@ -56,10 +61,17 @@ func ConstructCFG(fn *ast.FuncDecl) *CFG {
 	for _, param := range fn.Params {
 		cfg.ParamLocations = append(cfg.ParamLocations, param.Name)
 	}
-	builder := &cfgBuilder{cfg: cfg}
+	builder := &cfgBuilder{cfg: cfg, guardFacts: guardFacts}
 	exits := builder.buildStmtList([]int{cfg.Entry}, fn.Body)
 	cfg.ExitBlocks = dedupeCFGBlockIDs(append(cfg.ExitBlocks, exits...))
 	return cfg
+}
+
+func (b *cfgBuilder) conditionGuardFacts(cond ast.Expr, truthy bool) GuardFactSet {
+	if b != nil && b.guardFacts != nil {
+		return b.guardFacts(cond, truthy)
+	}
+	return GuardFactsForCondition(cond, truthy)
 }
 
 func (b *cfgBuilder) buildStmtList(exits []int, stmts []ast.Stmt) []int {
@@ -138,8 +150,8 @@ func (b *cfgBuilder) buildIf(exits []int, stmt *ast.IfStmt) []int {
 func (b *cfgBuilder) buildConditional(from int, cond ast.Expr, thenBody []ast.Stmt, elifs []ast.ElifClause, elseBody []ast.Stmt) []int {
 	thenEntry := b.newBlock()
 	elseEntry := b.newBlock()
-	b.addEdge(from, thenEntry, GuardFactsForCondition(cond, true))
-	b.addEdge(from, elseEntry, GuardFactsForCondition(cond, false))
+	b.addEdge(from, thenEntry, b.conditionGuardFacts(cond, true))
+	b.addEdge(from, elseEntry, b.conditionGuardFacts(cond, false))
 	thenExits := b.buildStmtList([]int{thenEntry}, thenBody)
 	var elseExits []int
 	if len(elifs) != 0 {
@@ -157,8 +169,8 @@ func (b *cfgBuilder) buildWhile(exits []int, stmt *ast.WhileStmt) []int {
 		b.addEdge(exit, condBlock, GuardFactSet{})
 		bodyEntry := b.newBlock()
 		afterBlock := b.newBlock()
-		b.addEdge(condBlock, bodyEntry, GuardFactsForCondition(stmt.Cond, true))
-		b.addEdge(condBlock, afterBlock, GuardFactsForCondition(stmt.Cond, false))
+		b.addEdge(condBlock, bodyEntry, b.conditionGuardFacts(stmt.Cond, true))
+		b.addEdge(condBlock, afterBlock, b.conditionGuardFacts(stmt.Cond, false))
 		bodyExits := b.buildStmtList([]int{bodyEntry}, stmt.Body)
 		for _, bodyExit := range bodyExits {
 			b.addEdge(bodyExit, condBlock, GuardFactSet{})

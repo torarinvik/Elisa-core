@@ -549,6 +549,46 @@ func TestParseHotFunctionAnnotation(t *testing.T) {
 	}
 }
 
+func TestParseGuardNonNullFunctionAnnotation(t *testing.T) {
+	file, errs := parseSourceFile(t, "@guard_nonnull(box)\ndef has_box(box: any Box&?) -> bool:\n    return box != null\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[0])
+	}
+	if len(decl.Annotations) != 1 {
+		t.Fatalf("expected one function annotation, got %d", len(decl.Annotations))
+	}
+	if decl.Annotations[0].Name != "guard_nonnull" {
+		t.Fatalf("expected guard_nonnull annotation, got %q", decl.Annotations[0].Name)
+	}
+	if len(decl.Annotations[0].Args) != 1 || decl.Annotations[0].Args[0] != "box" {
+		t.Fatalf("expected guard_nonnull(box), got %#v", decl.Annotations[0].Args)
+	}
+}
+
+func TestParseGuardVariantFunctionAnnotation(t *testing.T) {
+	file, errs := parseSourceFile(t, "@guard_variant(node, Expr.Int)\ndef is_int(node: Expr) -> bool:\n    return node is Expr.Int\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[0])
+	}
+	if len(decl.Annotations) != 1 {
+		t.Fatalf("expected one function annotation, got %d", len(decl.Annotations))
+	}
+	if decl.Annotations[0].Name != "guard_variant" {
+		t.Fatalf("expected guard_variant annotation, got %q", decl.Annotations[0].Name)
+	}
+	if len(decl.Annotations[0].Args) != 2 || decl.Annotations[0].Args[0] != "node" || decl.Annotations[0].Args[1] != "Expr.Int" {
+		t.Fatalf("expected guard_variant(node, Expr.Int), got %#v", decl.Annotations[0].Args)
+	}
+}
+
 func TestParseLikelyIfHint(t *testing.T) {
 	file, errs := parseSourceFile(t, "def fold(value: bool) -> int:\n    if likely value:\n        return 1\n    return 0\n")
 	if len(errs) != 0 {

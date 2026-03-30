@@ -521,7 +521,7 @@ func (a *Analyzer) inferFuncSinkParams(fn *ast.FuncDecl, fnType *FuncType) {
 	a.sinkParamInferenceInProgress[fn] = true
 	defer delete(a.sinkParamInferenceInProgress, fn)
 
-	cfg := ConstructCFG(fn)
+	cfg := a.constructCFG(fn)
 	populateBasicFlowInstrs(cfg)
 	a.addImplicitSinkFlowInstrs(cfg)
 	fnType.SinkParams = inferSinkParamsFromCFG(cfg)
@@ -733,6 +733,13 @@ func (a *Analyzer) resolveSinkFuncType(expr ast.Expr) (*FuncType, *ast.FuncDecl,
 	return fnType, decl, ok
 }
 
+func (a *Analyzer) constructCFG(fn *ast.FuncDecl) *CFG {
+	if a == nil {
+		return ConstructCFG(fn)
+	}
+	return constructCFG(fn, a.guardFactsForConditionWithMetadata)
+}
+
 func (a *Analyzer) finalizeFunctionAnalysis(fn *ast.FuncDecl, fnType *FuncType) {
 	if a == nil || fn == nil || fnType == nil {
 		return
@@ -740,7 +747,7 @@ func (a *Analyzer) finalizeFunctionAnalysis(fn *ast.FuncDecl, fnType *FuncType) 
 	if !fnType.SinkParamsKnown {
 		a.inferFuncSinkParams(fn, fnType)
 	}
-	cfg := ConstructCFG(fn)
+	cfg := a.constructCFG(fn)
 	populateBasicFlowInstrs(cfg)
 	a.addImplicitSinkFlowInstrs(cfg)
 	partitions := computeGraphPartitionsFromCFG(cfg)

@@ -814,11 +814,55 @@ func unwrapPackedVariantViewExpr(expr ast.Expr) ast.Expr {
 	}
 }
 
+func directValueBindingAliasRoot(scope *Scope, expr ast.Expr) *Symbol {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return directValueBindingAliasRoot(scope, n.Inner)
+	case *ast.Ident:
+		if scope == nil {
+			return nil
+		}
+		sym, ok := scope.Lookup(n.Name)
+		if !ok || sym == nil {
+			return nil
+		}
+		if root := symbolAliasRoot(sym); root != nil {
+			return root
+		}
+		return sym
+	default:
+		return nil
+	}
+}
+
+func (a *Analyzer) aliasRootRefinementKey(scope *Scope, expr ast.Expr) (string, bool) {
+	if scope == nil {
+		return "", false
+	}
+	ident, ok := unwrapPackedVariantViewExpr(expr).(*ast.Ident)
+	if !ok || ident == nil {
+		return "", false
+	}
+	sym, ok := scope.Lookup(ident.Name)
+	if !ok || sym == nil {
+		return "", false
+	}
+	root := symbolAliasRoot(sym)
+	if root == nil || root == sym || root.Name == "" {
+		return "", false
+	}
+	return root.Name, true
+}
+
 func (a *Analyzer) bindRefinedExprType(scope *Scope, expr ast.Expr, refined Type) {
 	if scope == nil || refined == nil {
 		return
 	}
 	key, ok := exprRefinementKey(unwrapPackedVariantViewExpr(expr))
+	if aliasKey, aliasOK := a.aliasRootRefinementKey(scope, expr); aliasOK {
+		key = aliasKey
+		ok = true
+	}
 	if !ok {
 		return
 	}
@@ -5153,8 +5197,13 @@ func (a *Analyzer) recordValueBinding(sym *Symbol, value ast.Expr) {
 		return
 	}
 	if sym.Mutable || value == nil {
+		sym.AliasOf = nil
 		delete(a.currentValueBindings, sym)
 		return
+	}
+	sym.AliasOf = nil
+	if aliasRoot := directValueBindingAliasRoot(a.currentScope, value); aliasRoot != nil && aliasRoot != sym {
+		sym.AliasOf = aliasRoot
 	}
 	a.currentValueBindings[sym] = value
 }
@@ -6467,11 +6516,18 @@ func (a *Analyzer) applyConditionRefinements(scope *Scope, expr ast.Expr, truthy
 			if ok {
 				a.shadowRefinedExpr(scope, targetExpr, nonNull)
 			}
+		case lexer.TOKEN_IS:
+			targetExpr, viewType, ok := a.refinedExprPackedVariantView(n, truthy)
+			if ok {
+				a.bindRefinedExprType(scope, targetExpr, viewType)
+			}
 		}
 	case *ast.UnaryExpr:
 		if n.Op == lexer.TOKEN_NOT {
 			a.applyConditionRefinements(scope, n.Operand, !truthy)
 		}
+	case *ast.CallExpr:
+		a.applyGuardCallConditionRefinements(scope, n, truthy)
 	case *ast.ParenExpr:
 		a.applyConditionRefinements(scope, n.Inner, truthy)
 	}
@@ -6501,12 +6557,134 @@ func refinedExprNullState(expr *ast.BinaryExpr, truthy bool) (ast.Expr, bool, bo
 	return targetExpr, truthy, true
 }
 
-func (a *Analyzer) shadowRefinedExpr(scope *Scope, expr ast.Expr, nonNull bool) {
-	if scope == nil {
+func (a *Analyzer) refinedExprPackedVariantView(expr *ast.BinaryExpr, truthy bool) (ast.Expr, *PackedVariantViewType, bool) {
+	if a == nil || !truthy || expr == nil || expr.Op != lexer.TOKEN_IS {
+		return nil, nil, false
+	}
+	fieldExpr, ok := isEnumVariantExpr(expr.Right)
+	if !ok {
+		return nil, nil, false
+	}
+	enumType, variant, ok := a.enumConstructorInfoFromFieldExpr(fieldExpr)
+	if !ok || enumType == nil || variant == nil || !enumType.Packed {
+		return nil, nil, false
+	}
+	leftType := a.exprTypes[expr.Left]
+	if leftType == nil {
+		leftType = a.analyzeExpr(expr.Left)
+	}
+	matchableEnum, _, ok := resolveMatchableEnumType(leftType)
+	if !ok || matchableEnum == nil || matchableEnum.Name != enumType.Name {
+		return nil, nil, false
+	}
+	return expr.Left, variant.PackedViewType(enumType), true
+}
+
+func (a *Analyzer) applyGuardCallConditionRefinements(scope *Scope, call *ast.CallExpr, truthy bool) {
+	if a == nil || scope == nil || call == nil || !truthy {
 		return
 	}
-	key, ok := exprRefinementKey(expr)
-	if !ok {
+	_, fnType, ok := a.resolveSinkFuncDecl(call.Func)
+	if !ok || fnType == nil || len(fnType.GuardEffects) == 0 {
+		return
+	}
+	for _, effect := range fnType.GuardEffects {
+		if effect.ParamIndex < 0 || effect.ParamIndex >= len(call.Args) {
+			continue
+		}
+		argExpr := call.Args[effect.ParamIndex]
+		switch effect.Kind {
+		case FuncGuardKindNonNull:
+			a.shadowRefinedExpr(scope, argExpr, true)
+		case FuncGuardKindPackedVariant:
+			base, ok := a.namedTypes[effect.EnumName]
+			if !ok {
+				continue
+			}
+			enumType, ok := base.(*EnumType)
+			if !ok || enumType == nil || !enumType.Packed {
+				continue
+			}
+			variant, ok := enumType.Variant(effect.VariantName)
+			if !ok || variant == nil {
+				continue
+			}
+			a.bindRefinedExprType(scope, argExpr, variant.PackedViewType(enumType))
+		}
+	}
+}
+
+func (a *Analyzer) guardFactsForConditionWithMetadata(expr ast.Expr, truthy bool) GuardFactSet {
+	facts := GuardFactsForCondition(expr, truthy)
+	a.augmentGuardFactsForCondition(&facts, expr, truthy)
+	return facts
+}
+
+func (a *Analyzer) augmentGuardFactsForCondition(facts *GuardFactSet, expr ast.Expr, truthy bool) {
+	if a == nil || facts == nil || expr == nil {
+		return
+	}
+	switch n := expr.(type) {
+	case *ast.BinaryExpr:
+		switch n.Op {
+		case lexer.TOKEN_AND:
+			if truthy {
+				a.augmentGuardFactsForCondition(facts, n.Left, true)
+				a.augmentGuardFactsForCondition(facts, n.Right, true)
+			}
+		case lexer.TOKEN_OR:
+			if !truthy {
+				a.augmentGuardFactsForCondition(facts, n.Left, false)
+				a.augmentGuardFactsForCondition(facts, n.Right, false)
+			}
+		}
+	case *ast.UnaryExpr:
+		if n.Op == lexer.TOKEN_NOT {
+			a.augmentGuardFactsForCondition(facts, n.Operand, !truthy)
+		}
+	case *ast.ParenExpr:
+		a.augmentGuardFactsForCondition(facts, n.Inner, truthy)
+	case *ast.CallExpr:
+		a.addGuardCallFacts(facts, n, truthy)
+	}
+}
+
+func (a *Analyzer) addGuardCallFacts(facts *GuardFactSet, call *ast.CallExpr, truthy bool) {
+	if a == nil || facts == nil || call == nil || !truthy {
+		return
+	}
+	_, fnType, ok := a.resolveSinkFuncDecl(call.Func)
+	if !ok || fnType == nil || len(fnType.GuardEffects) == 0 {
+		return
+	}
+	for _, effect := range fnType.GuardEffects {
+		if effect.ParamIndex < 0 || effect.ParamIndex >= len(call.Args) {
+			continue
+		}
+		argExpr := call.Args[effect.ParamIndex]
+		switch effect.Kind {
+		case FuncGuardKindNonNull:
+			facts.AddNonNull(argExpr)
+		case FuncGuardKindPackedVariant:
+			base, ok := a.namedTypes[effect.EnumName]
+			if !ok {
+				continue
+			}
+			enumType, ok := base.(*EnumType)
+			if !ok || enumType == nil || !enumType.Packed {
+				continue
+			}
+			variant, ok := enumType.Variant(effect.VariantName)
+			if !ok || variant == nil {
+				continue
+			}
+			facts.AddPackedVariant(argExpr, variant.PackedViewType(enumType))
+		}
+	}
+}
+
+func (a *Analyzer) shadowRefinedExpr(scope *Scope, expr ast.Expr, nonNull bool) {
+	if scope == nil {
 		return
 	}
 	baseType := a.analyzeExprInScope(expr, scope)
@@ -6514,7 +6692,7 @@ func (a *Analyzer) shadowRefinedExpr(scope *Scope, expr ast.Expr, nonNull bool) 
 	if !ok {
 		return
 	}
-	scope.Refinements[key] = refined
+	a.bindRefinedExprType(scope, expr, refined)
 }
 
 func refinedNullComparableType(baseType Type, nonNull bool) (Type, bool) {
@@ -6576,14 +6754,21 @@ func (a *Analyzer) lookupRefinedExprType(expr ast.Expr) (Type, bool) {
 		return nil, false
 	}
 	key, ok := exprRefinementKey(expr)
+	if ok {
+		if refined, ok := a.currentScope.LookupRefinement(key); ok {
+			return refined, true
+		}
+	}
+	if aliasKey, ok := a.aliasRootRefinementKey(a.currentScope, expr); ok {
+		if refined, ok := a.currentScope.LookupRefinement(aliasKey); ok {
+			return refined, true
+		}
+	}
 	if !ok {
 		if viewType, ok := a.lookupRefinedPackedVariantView(expr); ok {
 			return viewType, true
 		}
 		return nil, false
-	}
-	if refined, ok := a.currentScope.LookupRefinement(key); ok {
-		return refined, true
 	}
 	if viewType, ok := a.lookupRefinedPackedVariantView(expr); ok {
 		return viewType, true

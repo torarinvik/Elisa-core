@@ -119,6 +119,66 @@ func TestGuardFactsForConditionRecordsIsVariantProof(t *testing.T) {
 	}
 }
 
+func TestAnalyzeFunctionAnalysisCFGRecordsGuardNonnullCallFacts(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "guard_nonnull_cfg.llcontext", `repr(c) struct Box:
+	value: i32
+
+@guard_nonnull(box)
+def has_box(box: heap Box&?) -> bool:
+	return box != null
+
+def read_box(box: heap Box&?) -> i32:
+	if has_box(box):
+		return box.value
+	return 0
+`)
+	analysis, ok := result.FunctionAnalysisByName("read_box")
+	if !ok || analysis == nil || analysis.CFG == nil {
+		t.Fatal("expected read_box function analysis CFG")
+	}
+	var sawNonNullGuard bool
+	for _, edge := range analysis.CFG.Blocks[analysis.CFG.Entry].Edges {
+		if edge.Guard.ProvesNonNull(&ast.Ident{Name: "box"}) {
+			sawNonNullGuard = true
+		}
+	}
+	if !sawNonNullGuard {
+		t.Fatalf("expected entry CFG edges to carry @guard_nonnull facts, got %#v", analysis.CFG.Blocks[analysis.CFG.Entry].Edges)
+	}
+}
+
+func TestAnalyzeFunctionAnalysisCFGRecordsGuardVariantCallFacts(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "guard_variant_cfg.llcontext", `packed enum Expr:
+	common:
+		span: i32
+	Int(value: i32)
+	Add(left: Expr, right: Expr)
+
+@guard_variant(node, Expr.Int)
+def is_int(node: Expr) -> bool:
+	return node is Expr.Int
+
+def fold(node: Expr) -> i32:
+	if is_int(node):
+		return node.value + node.span
+	return 0
+`)
+	analysis, ok := result.FunctionAnalysisByName("fold")
+	if !ok || analysis == nil || analysis.CFG == nil {
+		t.Fatal("expected fold function analysis CFG")
+	}
+	var sawVariantGuard bool
+	for _, edge := range analysis.CFG.Blocks[analysis.CFG.Entry].Edges {
+		guard, ok := edge.Guard.PackedVariant(&ast.Ident{Name: "node"})
+		if ok && guard.EnumName == "Expr" && guard.VariantName == "Int" {
+			sawVariantGuard = true
+		}
+	}
+	if !sawVariantGuard {
+		t.Fatalf("expected entry CFG edges to carry @guard_variant facts, got %#v", analysis.CFG.Blocks[analysis.CFG.Entry].Edges)
+	}
+}
+
 func TestCreateTypeBoundOpsSynthesizesRecursiveCleanupOps(t *testing.T) {
 	threadPool := &StructType{Name: "ThreadPool", Builtin: true}
 	mutexGuardBase := &StructType{Name: "MutexGuard", Builtin: true}

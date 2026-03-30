@@ -3301,6 +3301,46 @@ def read_box() -> int:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAliasGuardClauseRefinesRootAfterReturn(t *testing.T) {
+	src := `repr(c) struct Box:
+	value: mutable int
+
+extern maybe_box() -> any Box&?
+
+def read_box() -> int:
+	box: any Box&? = maybe_box()
+	alias: any Box&? = box
+	if alias == null:
+		return 0
+	return box.value
+`
+	_, errs := parseAndAnalyze(t, "alias_guard_clause_refines_root_after_return.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAliasRefinementInvalidatesAfterRootAssignment(t *testing.T) {
+	src := `repr(c) struct Box:
+	value: mutable int
+
+extern maybe_box() -> any Box&?
+
+def bad_box() -> int:
+	box: mutable any Box&? = maybe_box()
+	alias: any Box&? = box
+	if alias == null:
+		return 0
+	box <- null
+	return alias.value
+`
+	_, errs := parseAndAnalyze(t, "alias_refinement_invalidates_after_root_assignment.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "field access requires proven non-null reference") {
+		t.Fatalf("expected alias refinement invalidation diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeAcceptsBuiltinSurfaceCollectionTypes(t *testing.T) {
 	src := `extern take_array(values: array[i32, 4]) -> void
 extern take_darray(values: darray[i32, row]) -> void
@@ -5098,6 +5138,88 @@ def is_int(node: Expr) -> bool:
 		t.Fatalf("expected first statement to be if, got %T", decl.Body[0])
 	}
 	requireExprTypeString(t, result, ifStmt.Cond, "bool")
+}
+
+func TestAnalyzeAcceptsPackedEnumIsConditionRefiningScrutineeToPackedView(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def score(view_node: packedview[Expr.Int]) -> int:
+	return view_node.value + view_node.span
+
+def fold(node: Expr) -> int:
+	if node is Expr.Int:
+		return score(node)
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "packed_enum_is_condition_refines_scrutinee_to_view_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
+
+func TestAnalyzeAcceptsPackedEnumIsConditionFallthroughRefiningScrutineeToPackedView(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def score(view_node: packedview[Expr.Int]) -> int:
+	return view_node.value + view_node.span
+
+def fold(node: Expr) -> int:
+	if not (node is Expr.Int):
+		return 0
+	return score(node)
+`
+	result, errs := parseAndAnalyze(t, "packed_enum_is_condition_fallthrough_refines_scrutinee_to_view_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
+
+func TestAnalyzeAcceptsGuardNonnullConditionRefiningReference(t *testing.T) {
+	src := `repr(c) struct Box:
+	value: int
+
+@guard_nonnull(box)
+def has_box(box: any Box&?) -> bool:
+	return box != null
+
+def read(box: any Box&?) -> int:
+	if not has_box(box):
+		return 0
+	return box.value
+`
+	result, errs := parseAndAnalyze(t, "guard_nonnull_condition_refines_reference_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
+
+func TestAnalyzeAcceptsGuardVariantConditionRefiningPackedScrutinee(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+@guard_variant(node, Expr.Int)
+def is_int(node: Expr) -> bool:
+	return node is Expr.Int
+
+def score(view_node: packedview[Expr.Int]) -> int:
+	return view_node.value + view_node.span
+
+def fold(node: Expr) -> int:
+	if is_int(node):
+		return score(node)
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "guard_variant_condition_refines_packed_scrutinee_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
 }
 
 func TestAnalyzeAcceptsPackedEnumIfPatternRefiningScrutineeToPackedView(t *testing.T) {

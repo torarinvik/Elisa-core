@@ -2321,6 +2321,8 @@ func (a *Analyzer) analyzeFunctionAnnotations(fn *ast.FuncDecl) {
 				a.applyFunctionNoRecurseAnnotation(annotation, fn, signature)
 			case "hot", "cold":
 				a.applyFunctionTemperatureAnnotation(annotation, fn, signature)
+			case "guard_nonnull", "guard_variant":
+				a.applyFunctionGuardAnnotation(annotation, fn, signature)
 			default:
 				accepted = append(accepted, annotation)
 			}
@@ -2374,10 +2376,48 @@ func (a *Analyzer) applyFunctionTemperatureAnnotation(annotation ast.Annotation,
 	signature.HasTemperatureMode = true
 }
 
+func (a *Analyzer) applyFunctionGuardAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) {
+	if signature == nil {
+		return
+	}
+	switch annotation.Name {
+	case "guard_nonnull":
+		paramIndex, ok := functionAnnotationParamIndex(fn, annotation.Args[0])
+		if !ok {
+			return
+		}
+		signature.GuardEffects = append(signature.GuardEffects, FuncGuardEffect{Kind: FuncGuardKindNonNull, ParamIndex: paramIndex})
+	case "guard_variant":
+		paramIndex, ok := functionAnnotationParamIndex(fn, annotation.Args[0])
+		if !ok {
+			return
+		}
+		enumName, variantName, ok := parseFunctionGuardVariantPath(annotation.Args[1])
+		if !ok {
+			return
+		}
+		base, _, ok := a.lookupVisibleType(enumName)
+		if !ok {
+			return
+		}
+		enumType, ok := base.(*EnumType)
+		if !ok || enumType == nil {
+			return
+		}
+		signature.GuardEffects = append(signature.GuardEffects, FuncGuardEffect{Kind: FuncGuardKindPackedVariant, ParamIndex: paramIndex, EnumName: enumType.Name, VariantName: variantName})
+	}
+}
+
 func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) bool {
 	if signature == nil {
 		a.errorf(annotation.Position, "cannot resolve signature for @%s function %q", annotation.Name, fn.Name)
 		return false
+	}
+	if annotation.Name == "guard_nonnull" {
+		return a.validateFunctionGuardNonNullAnnotation(annotation, fn, signature)
+	}
+	if annotation.Name == "guard_variant" {
+		return a.validateFunctionGuardVariantAnnotation(annotation, fn, signature)
 	}
 	if annotation.Name == "skip" || annotation.Name == "ignore" {
 		return true
@@ -2433,6 +2473,125 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 	return true
 }
 
+func (a *Analyzer) validateFunctionGuardSignature(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) bool {
+	if signature.Return == nil || !IsBoolType(signature.Return) {
+		a.errorf(annotation.Position, "@%s function %q must return bool, got %s", annotation.Name, fn.Name, signature.Return.String())
+		return false
+	}
+	if signature.Variadic {
+		a.errorf(annotation.Position, "@%s function %q must not be variadic", annotation.Name, fn.Name)
+		return false
+	}
+	if len(signature.Permissions) != 0 {
+		a.errorf(annotation.Position, "@%s function %q must not require permissions; got %s", annotation.Name, fn.Name, signature.String())
+		return false
+	}
+	return true
+}
+
+func (a *Analyzer) validateFunctionGuardNonNullAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) bool {
+	if !a.validateFunctionGuardSignature(annotation, fn, signature) {
+		return false
+	}
+	if len(annotation.Args) != 1 {
+		a.errorf(annotation.Position, "@guard_nonnull on function %q expects exactly one parameter name", fn.Name)
+		return false
+	}
+	paramIndex, ok := functionAnnotationParamIndex(fn, annotation.Args[0])
+	if !ok || paramIndex >= len(signature.Params) {
+		a.errorf(annotation.Position, "@guard_nonnull on function %q references unknown parameter %q", fn.Name, annotation.Args[0])
+		return false
+	}
+	if !guardNonNullParamType(signature.Params[paramIndex]) {
+		a.errorf(annotation.Position, "@guard_nonnull on function %q requires a nullable reference or optional parameter, got %s", fn.Name, signature.Params[paramIndex].String())
+		return false
+	}
+	return true
+}
+
+func (a *Analyzer) validateFunctionGuardVariantAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) bool {
+	if !a.validateFunctionGuardSignature(annotation, fn, signature) {
+		return false
+	}
+	if len(annotation.Args) != 2 {
+		a.errorf(annotation.Position, "@guard_variant on function %q expects a parameter name and Enum.Variant path", fn.Name)
+		return false
+	}
+	paramIndex, ok := functionAnnotationParamIndex(fn, annotation.Args[0])
+	if !ok || paramIndex >= len(signature.Params) {
+		a.errorf(annotation.Position, "@guard_variant on function %q references unknown parameter %q", fn.Name, annotation.Args[0])
+		return false
+	}
+	enumName, variantName, ok := parseFunctionGuardVariantPath(annotation.Args[1])
+	if !ok {
+		a.errorf(annotation.Position, "@guard_variant on function %q expects an Enum.Variant path, got %q", fn.Name, annotation.Args[1])
+		return false
+	}
+	base, _, ok := a.lookupVisibleType(enumName)
+	if !ok {
+		a.errorf(annotation.Position, "@guard_variant on function %q references unknown enum %q", fn.Name, enumName)
+		return false
+	}
+	enumType, ok := base.(*EnumType)
+	if !ok || enumType == nil {
+		a.errorf(annotation.Position, "@guard_variant on function %q expects an enum variant path, got %q", fn.Name, annotation.Args[1])
+		return false
+	}
+	if !enumType.Packed {
+		a.errorf(annotation.Position, "@guard_variant on function %q currently requires a packed enum variant path, got %q", fn.Name, annotation.Args[1])
+		return false
+	}
+	if _, ok := enumType.Variant(variantName); !ok {
+		a.errorf(annotation.Position, "enum %q has no variant %q", enumType.Name, variantName)
+		return false
+	}
+	paramEnum, _, ok := resolveMatchableEnumType(signature.Params[paramIndex])
+	if !ok || paramEnum == nil || !paramEnum.Packed {
+		a.errorf(annotation.Position, "@guard_variant on function %q requires a packed enum parameter, got %s", fn.Name, signature.Params[paramIndex].String())
+		return false
+	}
+	if paramEnum.Name != enumType.Name {
+		a.errorf(annotation.Position, "@guard_variant on function %q expects parameter %q to use enum %q, got %q", fn.Name, annotation.Args[0], enumType.Name, paramEnum.Name)
+		return false
+	}
+	return true
+}
+
+func guardNonNullParamType(t Type) bool {
+	switch tt := StripAggregateStateType(t).(type) {
+	case *RefType:
+		return tt != nil && tt.State == RefStateNullable
+	case *OptionalType:
+		return tt != nil
+	default:
+		return false
+	}
+}
+
+func functionAnnotationParamIndex(fn *ast.FuncDecl, name string) (int, bool) {
+	if fn == nil || name == "" {
+		return 0, false
+	}
+	for i, param := range fn.Params {
+		if param.Name == name {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+func parseFunctionGuardVariantPath(text string) (string, string, bool) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return "", "", false
+	}
+	split := strings.LastIndex(trimmed, ".")
+	if split <= 0 || split >= len(trimmed)-1 {
+		return "", "", false
+	}
+	return trimmed[:split], trimmed[split+1:], true
+}
+
 func annotationAllowsDeclaredPermissions(annotationName string, signature *FuncType) bool {
 	if signature == nil || len(signature.Permissions) == 0 {
 		return true
@@ -2450,7 +2609,7 @@ func annotationAllowsDeclaredPermissions(annotationName string, signature *FuncT
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold":
+	case "test", "bench", "fixture", "skip", "ignore", "inline", "norecurse", "hot", "cold", "guard_nonnull", "guard_variant":
 		return true
 	default:
 		return false
