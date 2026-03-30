@@ -28,22 +28,23 @@ func (d Diagnostic) String() string {
 }
 
 type Result struct {
-	File            *ast.File
-	GlobalScope     *Scope
-	NamedTypes      map[string]Type
-	ConstValues     map[string]ConstValue
-	ExprTypes       map[ast.Expr]Type
-	ExprFacts       map[ast.Expr]OptimizationFacts
-	CastHooks       map[ast.Expr]*Symbol
-	DenseNodeKeys   map[ast.Expr]DenseNodeKeyInfo
-	NodeTables      map[ast.Expr]NodeTableInfo
-	PackedLowering  PackedLoweringMetadata
-	ParallelFor     map[*ast.ParallelForStmt]*ParallelForInfo
-	AnnotatedFuncs  []*AnnotatedFunc
-	ExportedTypes   []*ExportedType
-	ExportedFuncs   []*ExportedFunc
-	ExportedGlobals []*ExportedGlobal
-	Diagnostics     []Diagnostic
+	File             *ast.File
+	GlobalScope      *Scope
+	NamedTypes       map[string]Type
+	ConstValues      map[string]ConstValue
+	ExprTypes        map[ast.Expr]Type
+	ExprFacts        map[ast.Expr]OptimizationFacts
+	CastHooks        map[ast.Expr]*Symbol
+	DenseNodeKeys    map[ast.Expr]DenseNodeKeyInfo
+	NodeTables       map[ast.Expr]NodeTableInfo
+	PackedLowering   PackedLoweringMetadata
+	ParallelFor      map[*ast.ParallelForStmt]*ParallelForInfo
+	FunctionAnalyses map[*ast.FuncDecl]*FunctionAnalysis
+	AnnotatedFuncs   []*AnnotatedFunc
+	ExportedTypes    []*ExportedType
+	ExportedFuncs    []*ExportedFunc
+	ExportedGlobals  []*ExportedGlobal
+	Diagnostics      []Diagnostic
 }
 
 type ParallelForInfo struct {
@@ -117,6 +118,29 @@ func (r *Result) Errors() []string {
 		out = append(out, d.String())
 	}
 	return out
+}
+
+func (r *Result) FunctionAnalysis(decl *ast.FuncDecl) (*FunctionAnalysis, bool) {
+	if r == nil || decl == nil || r.FunctionAnalyses == nil {
+		return nil, false
+	}
+	analysis, ok := r.FunctionAnalyses[decl]
+	return analysis, ok
+}
+
+func (r *Result) FunctionAnalysisByName(name string) (*FunctionAnalysis, bool) {
+	if r == nil || name == "" || r.GlobalScope == nil {
+		return nil, false
+	}
+	sym, ok := r.GlobalScope.Lookup(name)
+	if !ok {
+		return nil, false
+	}
+	decl, ok := sym.Node.(*ast.FuncDecl)
+	if !ok {
+		return nil, false
+	}
+	return r.FunctionAnalysis(decl)
 }
 
 func (r *Result) Warnings() []string {

@@ -283,7 +283,11 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 }
 
 func (s *functionState) emitMoveExpr(expr *ast.MoveExpr, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
-	if binding, ok := s.lookupScopedMoveBinding(expr.Operand); ok {
+	return s.emitMovedValue(expr.Operand, expected)
+}
+
+func (s *functionState) emitMovedValue(operand ast.Expr, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+	if binding, ok := s.lookupScopedMoveBinding(operand); ok {
 		value, err := s.loadValue(binding.ptr, binding.typ, binding.name)
 		if err != nil {
 			return nil, nil, err
@@ -295,7 +299,7 @@ func (s *functionState) emitMoveExpr(expr *ast.MoveExpr, expected semantic.Type)
 		C.LLVMBuildStore(s.builder, zero, binding.ptr)
 		return value, binding.typ, nil
 	}
-	return s.emitExpr(expr.Operand, expected)
+	return s.emitExpr(operand, expected)
 }
 
 func (s *functionState) lookupScopedMoveBinding(expr ast.Expr) (scopedCleanupBinding, bool) {
@@ -3534,7 +3538,7 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 		if i < len(funcType.Params) {
 			expected = funcType.Params[i]
 		}
-		value, _, err := s.emitExpr(arg, expected)
+		value, _, err := s.emitCallArg(arg, expected, funcType, i)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -3565,6 +3569,27 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	}
 	call := s.buildCall(llvmFnType, callee, args, callName)
 	return call, funcType.Return, nil
+}
+
+func (s *functionState) emitCallArg(arg ast.Expr, expected semantic.Type, fnType *semantic.FuncType, index int) (C.LLVMValueRef, semantic.Type, error) {
+	if s != nil && fnType != nil && fnType.SinkParamsKnown && index >= 0 && index < len(fnType.SinkParams) && fnType.SinkParams[index] {
+		if operand, moved := backendExplicitMoveOperand(arg); moved {
+			return s.emitMovedValue(operand, expected)
+		}
+		return s.emitMovedValue(arg, expected)
+	}
+	return s.emitExpr(arg, expected)
+}
+
+func backendExplicitMoveOperand(expr ast.Expr) (ast.Expr, bool) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return backendExplicitMoveOperand(n.Inner)
+	case *ast.MoveExpr:
+		return n.Operand, true
+	default:
+		return nil, false
+	}
 }
 
 func (s *functionState) emitProofCarryingViewHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {

@@ -196,6 +196,10 @@ func specializeExportFuncType(a *Analyzer, base *FuncType, bindings map[string]T
 		Params:                 append([]Type(nil), specialized.Params...),
 		Return:                 specialized.Return,
 		Variadic:               specialized.Variadic,
+		SinkParams:             append([]bool(nil), specialized.SinkParams...),
+		SinkParamsKnown:        specialized.SinkParamsKnown,
+		ReturnIsolation:        specialized.ReturnIsolation,
+		ReturnIsolationKnown:   specialized.ReturnIsolationKnown,
 	}
 }
 

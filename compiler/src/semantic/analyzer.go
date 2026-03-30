@@ -113,7 +113,9 @@ type Analyzer struct {
 	suppressDiagnostics               bool
 	returnProvenanceInProgress        map[*ast.FuncDecl]bool
 	returnBorrowedOwnerRefInProgress  map[*ast.FuncDecl]bool
+	sinkParamInferenceInProgress      map[*ast.FuncDecl]bool
 	parallelForInfo                   map[*ast.ParallelForStmt]*ParallelForInfo
+	functionAnalyses                  map[*ast.FuncDecl]*FunctionAnalysis
 	currentNamespace                  string
 	currentUsings                     []string
 }
@@ -220,9 +222,11 @@ func Analyze(file *ast.File) *Result {
 		parallelForInfo:                  make(map[*ast.ParallelForStmt]*ParallelForInfo, parallelForCapacity),
 		symbolFacts:                      map[*Symbol]OptimizationFacts{},
 		funcDeclSymbols:                  make(map[*ast.FuncDecl]*Symbol, funcDeclCapacity),
+		functionAnalyses:                 make(map[*ast.FuncDecl]*FunctionAnalysis, funcDeclCapacity),
 		castHooksByName:                  map[string]map[castHookSignature]*Symbol{},
 		returnProvenanceInProgress:       map[*ast.FuncDecl]bool{},
 		returnBorrowedOwnerRefInProgress: map[*ast.FuncDecl]bool{},
+		sinkParamInferenceInProgress:     map[*ast.FuncDecl]bool{},
 	}
 	a.registerBuiltins()
 	activeDecls := a.flattenScopedDecls(file.Decls, "", nil)
@@ -241,21 +245,22 @@ func Analyze(file *ast.File) *Result {
 	a.validatePermissionUsage(activeDecls)
 	a.analyzeExports(activeDecls)
 	return &Result{
-		File:            file,
-		GlobalScope:     a.globalScope,
-		NamedTypes:      a.namedTypes,
-		ConstValues:     a.constValues,
-		ExprTypes:       a.exprTypes,
-		ExprFacts:       a.exprFacts,
-		CastHooks:       a.resolvedCastHooks,
-		DenseNodeKeys:   a.exprDenseNodeKeys,
-		NodeTables:      a.exprNodeTables,
-		ParallelFor:     a.parallelForInfo,
-		AnnotatedFuncs:  a.annotatedFuncs,
-		ExportedTypes:   a.exportedTypes,
-		ExportedFuncs:   a.exportedFuncs,
-		ExportedGlobals: a.exportedGlobals,
-		Diagnostics:     a.diagnostics,
+		File:             file,
+		GlobalScope:      a.globalScope,
+		NamedTypes:       a.namedTypes,
+		ConstValues:      a.constValues,
+		ExprTypes:        a.exprTypes,
+		ExprFacts:        a.exprFacts,
+		CastHooks:        a.resolvedCastHooks,
+		DenseNodeKeys:    a.exprDenseNodeKeys,
+		NodeTables:       a.exprNodeTables,
+		ParallelFor:      a.parallelForInfo,
+		FunctionAnalyses: a.functionAnalyses,
+		AnnotatedFuncs:   a.annotatedFuncs,
+		ExportedTypes:    a.exportedTypes,
+		ExportedFuncs:    a.exportedFuncs,
+		ExportedGlobals:  a.exportedGlobals,
+		Diagnostics:      a.diagnostics,
 	}
 }
 
@@ -2538,6 +2543,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 		inferredPermissions := permissionFamiliesFromRefs(inferredRefs)
 		fnType.PermissionRefs = mergePermissionRefs(fnType.DeclaredPermissionRefs, inferredRefs)
 		fnType.Permissions = mergePermissionFamilies(fnType.DeclaredPermissions, inferredPermissions)
+		a.finalizeFunctionAnalysis(fn, fnType)
 	}
 	a.reportUnconsumedProtocolValues()
 	a.currentScope = savedScope

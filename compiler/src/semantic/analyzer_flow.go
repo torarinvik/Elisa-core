@@ -4256,6 +4256,19 @@ func (a *Analyzer) mergeFunctionValueTypes(dst *FuncType, src *FuncType) (*FuncT
 			merged.ReturnBorrowedOwnerRefs = summary
 		}
 	}
+	merged.SinkParams = nil
+	merged.SinkParamsKnown = dst.SinkParamsKnown && src.SinkParamsKnown && len(dst.SinkParams) == len(src.SinkParams)
+	if merged.SinkParamsKnown {
+		merged.SinkParams = make([]bool, len(dst.SinkParams))
+		for i := range dst.SinkParams {
+			merged.SinkParams[i] = dst.SinkParams[i] && src.SinkParams[i]
+		}
+	}
+	merged.ReturnIsolation = ReturnIsolationSummary{}
+	merged.ReturnIsolationKnown = dst.ReturnIsolationKnown && src.ReturnIsolationKnown && returnIsolationSummariesEqual(dst.ReturnIsolation, src.ReturnIsolation)
+	if merged.ReturnIsolationKnown {
+		merged.ReturnIsolation = dst.ReturnIsolation
+	}
 	return merged, true
 }
 

@@ -294,10 +294,14 @@ type FuncType struct {
 	Params                       []Type
 	Return                       Type
 	Variadic                     bool
+	SinkParams                   []bool
+	SinkParamsKnown              bool
 	ReturnProvenance             regionRefState
 	ReturnProvenanceKnown        bool
 	ReturnBorrowedOwnerRefs      borrowedOwnerRefSummary
 	ReturnBorrowedOwnerRefsKnown bool
+	ReturnIsolation              ReturnIsolationSummary
+	ReturnIsolationKnown         bool
 }
 
 func (*InvalidType) isType()           {}

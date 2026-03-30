@@ -2562,7 +2562,9 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 				a.errorf(expr.Args[i].Pos(), "argument %d to %q expects %s, got %s", i+1, ft.Name, expectedType.String(), argType.String())
 				a.reportShapeMismatchNotes(expr.Args[i].Pos(), expectedType, argType)
 			}
-			a.consumeAffineValueExpr(expr.Args[i], expectedType, "argument to call "+strconv.Quote(ft.Name))
+			if !a.tryConsumeSinkCallArg(expr.Func, ft, i, expr.Args[i], expectedType) {
+				a.consumeAffineValueExpr(expr.Args[i], expectedType, "argument to call "+strconv.Quote(ft.Name))
+			}
 		} else {
 			argType = a.analyzeExpr(expr.Args[i])
 		}
@@ -2610,6 +2612,8 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 		appliedType.ReturnProvenanceKnown = false
 		appliedType.ReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
 		appliedType.ReturnBorrowedOwnerRefsKnown = false
+		appliedType.ReturnIsolation = ReturnIsolationSummary{}
+		appliedType.ReturnIsolationKnown = false
 	}
 	if len(bindings) != 0 || len(shapeBindings) != 0 || len(regionBindings) != 0 || len(permissionBindings) != 0 || len(specializedParamTypes) != 0 {
 		a.exprTypes[expr.Func] = appliedType
@@ -2643,6 +2647,46 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	}
 	a.bindFreshReturnShapes(appliedType, shapeBindings)
 	return a.substituteType(appliedType.Return, bindings, shapeBindings, regionBindings, permissionBindings)
+}
+
+func (a *Analyzer) tryConsumeSinkCallArg(funcExpr ast.Expr, fnType *FuncType, index int, arg ast.Expr, expected Type) bool {
+	if a == nil || fnType == nil || arg == nil || !a.funcParamAllowsImplicitSink(funcExpr, fnType, index) {
+		return false
+	}
+	if _, moved := explicitMoveOperand(arg); moved {
+		return false
+	}
+	if !a.containsAffineHandleValues(expected, map[string]bool{}) {
+		return false
+	}
+	key, ok := a.lookupAffineValueKey(arg)
+	if !ok {
+		return false
+	}
+	a.recordAffineConsumption(key, "argument to call "+strconv.Quote(fnType.Name))
+	return true
+}
+
+func (a *Analyzer) funcParamAllowsImplicitSink(funcExpr ast.Expr, fnType *FuncType, index int) bool {
+	if a == nil || fnType == nil || index < 0 {
+		return false
+	}
+	if decl, resolvedType, ok := a.resolveSinkFuncDecl(funcExpr); ok && resolvedType != nil {
+		if !resolvedType.SinkParamsKnown && decl != nil {
+			a.inferFuncSinkParams(decl, resolvedType)
+		}
+		if resolvedType.SinkParamsKnown {
+			if resolvedType != fnType {
+				fnType.SinkParams = append([]bool(nil), resolvedType.SinkParams...)
+				fnType.SinkParamsKnown = true
+			}
+			return index < len(resolvedType.SinkParams) && resolvedType.SinkParams[index]
+		}
+	}
+	if !fnType.SinkParamsKnown {
+		a.inferFuncSinkParamsForExpr(funcExpr, fnType)
+	}
+	return fnType.SinkParamsKnown && index < len(fnType.SinkParams) && fnType.SinkParams[index]
 }
 
 func (a *Analyzer) analyzeProofCarryingViewHelperCall(expr *ast.CallExpr) (Type, bool) {

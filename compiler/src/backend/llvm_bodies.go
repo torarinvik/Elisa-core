@@ -351,14 +351,35 @@ func (s *functionState) emitActiveScopedCleanup() error {
 }
 
 func (s *functionState) emitScopedCleanup(binding scopedCleanupBinding) error {
-	switch binding.kind {
-	case scopedCleanupLockGuard:
-		return s.emitConditionalMutexUnlock(binding)
-	case scopedCleanupThreadPool:
-		return s.emitConditionalPoolShutdown(binding)
-	default:
-		return fmt.Errorf("unsupported scoped cleanup kind %d", binding.kind)
+	ops := semantic.CreateTypeBoundOps(binding.typ)
+	if len(ops) == 0 {
+		switch binding.kind {
+		case scopedCleanupLockGuard:
+			return s.emitConditionalMutexUnlock(binding)
+		case scopedCleanupThreadPool:
+			return s.emitConditionalPoolShutdown(binding)
+		default:
+			return fmt.Errorf("unsupported scoped cleanup kind %d", binding.kind)
+		}
 	}
+	for _, op := range ops {
+		if len(op.Path) != 0 || op.IsFillSeq() {
+			return fmt.Errorf("unsupported synthesized scoped cleanup path for %q", binding.name)
+		}
+		switch op.Kind {
+		case semantic.TypeBoundCleanupMutexUnlock:
+			if err := s.emitConditionalMutexUnlock(binding); err != nil {
+				return err
+			}
+		case semantic.TypeBoundCleanupThreadPoolShutdown:
+			if err := s.emitConditionalPoolShutdown(binding); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unsupported synthesized scoped cleanup kind %q", op.Kind)
+		}
+	}
+	return nil
 }
 
 func (s *functionState) emitBlock(stmts []ast.Stmt, scoped bool) error {
