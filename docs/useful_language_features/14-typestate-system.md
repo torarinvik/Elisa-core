@@ -6,6 +6,8 @@ It is intentionally broader than the pointer-only typestate documents:
 
 - `02-pointer-typestate-practical.md` focuses on nullable/non-null pointers in practice
 - `03-pointer-typestate-formal.md` gives a more formal pointer typing model
+- `15-typestate-practical-cheat-sheet.md` is the short companion for day-to-day usage, motivating examples, and the current widening rules you are most likely to feel in real code
+- `16-ref-parameter-poststate-ensures.md` is the concrete next-step proposal for recovering precision across ref-call boundaries without giving up the current soundness model
 - **this document** explains how typestate works across:
   - references and nullness
   - aggregate state parameters
@@ -978,7 +980,7 @@ The current system is intentionally conservative at some boundaries.
 
 ### Current limitations
 
-- there is no first-class user syntax for ref-parameter poststate summaries
+- there is no first-class user syntax for ref-parameter poststate summaries such as an `ensures` clause
 - the compiler does not currently infer rich interprocedural typestate postconditions across arbitrary calls
 - reference calls therefore widen named-state facts conservatively
 - exact post-mutation inference is strongest for simple direct field writes
@@ -987,7 +989,7 @@ The current system is intentionally conservative at some boundaries.
 
 A future system could add things like:
 
-- function annotations describing poststate of ref parameters
+- `ensures` clauses describing poststate of ref parameters
 - explicit protocol transitions on refs
 - stronger interprocedural mutation summaries
 - deeper exact recomputation rules for more complex derive expressions

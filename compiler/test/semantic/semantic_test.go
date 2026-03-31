@@ -591,6 +591,149 @@ def bad(team: mutable Team) -> int:
 	}
 }
 
+func TestAnalyzeAcceptsDirectParserStateTransitionToReady(t *testing.T) {
+	src := `struct ParseJob[state Pending | Ready | Failed]:
+	stage: mutable int
+	checksum: mutable int
+
+	derive state:
+		Pending when self.stage == 0
+		Ready when self.stage == 1
+		Failed when self.stage == 2
+
+def take_ready(job: ParseJob[Ready]) -> int:
+	return job.checksum
+
+def ok(job: mutable ParseJob[Pending]) -> int:
+	job.checksum <- 7
+	job.stage <- 1
+	return take_ready(job)
+`
+	result, errs := parseAndAnalyze(t, "derived_struct_state_parser_direct_transition_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "int")
+}
+
+func TestAnalyzeRejectsUsingStaleReadyStateAfterParserRefCallMutation(t *testing.T) {
+	src := `struct ParseJob[state Pending | Ready | Failed]:
+	stage: mutable int
+	checksum: mutable int
+
+	derive state:
+		Pending when self.stage == 0
+		Ready when self.stage == 1
+		Failed when self.stage == 2
+
+def take_ready(job: ParseJob[Ready]) -> int:
+	return job.checksum
+
+def finish_ok(job: any ParseJob[Pending]&) -> void:
+	job.checksum <- 7
+	job.stage <- 1
+
+def bad(job: mutable ParseJob[Pending]) -> int:
+	finish_ok((&job).cast[any ParseJob[Pending]&])
+	return take_ready(job)
+`
+	_, errs := parseAndAnalyze(t, "derived_struct_state_parser_ref_call_mutation_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "expects ParseJob[Ready], got ParseJob[Pending | Ready | Failed]") {
+		t.Fatalf("expected parser ref-call mutation derived-state diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsReprovingReadyStateAfterParserRefCallMutation(t *testing.T) {
+	src := `struct ParseJob[state Pending | Ready | Failed]:
+	stage: mutable int
+	checksum: mutable int
+
+	derive state:
+		Pending when self.stage == 0
+		Ready when self.stage == 1
+		Failed when self.stage == 2
+
+def take_ready(job: ParseJob[Ready]) -> int:
+	return job.checksum
+
+def finish_ok(job: any ParseJob[Pending]&) -> void:
+	job.checksum <- 7
+	job.stage <- 1
+
+def ok(job: mutable ParseJob[Pending]) -> int:
+	finish_ok((&job).cast[any ParseJob[Pending]&])
+	if job is ParseJob[Ready]:
+		return take_ready(job)
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "derived_struct_state_parser_ref_call_reprove_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "int")
+}
+
+func TestAnalyzeRejectsUsingStaleOpenStateAfterSocketCloseRefCall(t *testing.T) {
+	src := `struct Socket[state Open | Closed]:
+	fd: mutable int
+	bytes_sent: mutable int
+
+	derive state:
+		Open when self.fd >= 0
+		Closed when self.fd < 0
+
+def take_open(sock: Socket[Open]) -> int:
+	return sock.bytes_sent
+
+def close_socket(sock: any Socket[Open]&) -> void:
+	sock.fd <- -1
+
+def bad(sock: mutable Socket[Open]) -> int:
+	close_socket((&sock).cast[any Socket[Open]&])
+	return take_open(sock)
+`
+	_, errs := parseAndAnalyze(t, "derived_struct_state_socket_ref_call_mutation_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "expects Socket[Open], got Socket[Open | Closed]") {
+		t.Fatalf("expected socket ref-call mutation derived-state diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsUsingStaleInitializedStateAfterBufferInitRefCall(t *testing.T) {
+	src := `struct ScratchBuffer[state Uninitialized | Initialized]:
+	capacity: mutable int
+	used: mutable int
+
+	derive state:
+		Uninitialized when self.capacity == 0
+		Initialized when self.capacity > 0
+
+def take_initialized(buf: ScratchBuffer[Initialized]) -> int:
+	return buf.capacity - buf.used
+
+def init_buffer(buf: any ScratchBuffer[Uninitialized]&) -> void:
+	buf.capacity <- 64
+	buf.used <- 0
+
+def bad(buf: mutable ScratchBuffer[Uninitialized]) -> int:
+	init_buffer((&buf).cast[any ScratchBuffer[Uninitialized]&])
+	return take_initialized(buf)
+`
+	_, errs := parseAndAnalyze(t, "derived_struct_state_buffer_ref_call_mutation_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "expects ScratchBuffer[Initialized], got ScratchBuffer[Uninitialized | Initialized]") {
+		t.Fatalf("expected buffer ref-call mutation derived-state diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeFunctionTypePermissionsParticipateInMatching(t *testing.T) {
 	src := `extern puts(text: any u8&) -> int can[Console.Write]
 
