@@ -19,7 +19,7 @@ This document is now a landing page for the split design notes in `docs/useful_l
 13. [`13-v-orthogonal-language-and-compiler-ideas.md`](docs/useful_language_features/13-v-orthogonal-language-and-compiler-ideas.md) — similar design notes inspired by V, with an emphasis on orthogonality and compiler ergonomics.
 14. [`14-typestate-system.md`](docs/useful_language_features/14-typestate-system.md) — the full typestate guide covering named states, aggregate state placeholders, refinement, mutation, aliasing, and current soundness rules.
 15. [`15-typestate-practical-cheat-sheet.md`](docs/useful_language_features/15-typestate-practical-cheat-sheet.md) — short practical companion with motivating examples, widening expectations, and guidance on when to re-prove with `is`.
-16. [`16-ref-parameter-poststate-ensures.md`](docs/useful_language_features/16-ref-parameter-poststate-ensures.md) — concrete proposal for `ensures`-based ref-call poststate summaries that recover precision after helper calls while preserving the current soundness model.
+16. [`16-ref-parameter-poststate-ensures.md`](docs/useful_language_features/16-ref-parameter-poststate-ensures.md) — concrete proposal for unified `ensures`-based call poststate summaries covering both named typestates and pointer/refstates such as `ensures node => !`.
 
 ## Notes
 
