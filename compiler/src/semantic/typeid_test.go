@@ -38,6 +38,17 @@ func TestCanonicalTypeIDDistinguishesRefQualifiers(t *testing.T) {
 	}
 }
 
+func TestCanonicalTypeIDDistinguishesWritableRefs(t *testing.T) {
+	readonly := &RefType{Elem: &BuiltinType{Name: "i32"}, State: RefStateNonNull}
+	writable := &RefType{Elem: &BuiltinType{Name: "i32"}, Mutable: true, State: RefStateNonNull}
+	if SameType(readonly, writable) {
+		t.Fatalf("expected readonly and writable refs not to be equal")
+	}
+	if leftID, rightID := requireCanonicalTypeID(t, readonly), requireCanonicalTypeID(t, writable); leftID == rightID {
+		t.Fatalf("expected writable refs to produce distinct canonical ids")
+	}
+}
+
 func TestCanonicalTypeIDPreservesFuncGenericParamPositions(t *testing.T) {
 	left := &FuncType{
 		GenericParams: []ast.GenericParam{{Position: lexer.Pos{File: "left.llcontext", Line: 1, Col: 1, Offset: 0}, Kind: ast.GenericParamType, Name: "T"}},

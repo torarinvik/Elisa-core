@@ -19,7 +19,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	case *ast.Ident:
 		if a.currentScope != nil {
 			if sym, ok := a.currentScope.Lookup(n.Name); ok {
-				result = sym.Type
+				result = promoteWritableRefType(sym.Type, sym.Mutable)
 				if sym.Kind == SymbolRegionMark {
 					a.errorf(n.Pos(), "checkpoint %q can only be used in restore <region> from %q", n.Name, n.Name)
 					return
@@ -51,13 +51,13 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 					return
 				}
 				if specializedType, ok := a.lookupCurrentSpecializedValueType(sym); ok {
-					result = specializedType
+					result = promoteWritableRefType(specializedType, sym.Mutable)
 				}
 				if t, ok := a.lookupRefinedExprType(n); ok {
 					if specializedType, ok := a.specializeCallbackCarryingType(t, result); ok {
-						result = specializedType
+						result = promoteWritableRefType(specializedType, sym.Mutable)
 					} else {
-						result = t
+						result = promoteWritableRefType(t, sym.Mutable)
 					}
 					return
 				}
@@ -69,7 +69,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			return
 		}
 		if sym, _, ok := a.lookupVisibleGlobal(n.Name); ok {
-			result = sym.Type
+			result = promoteWritableRefType(sym.Type, sym.Mutable)
 			return
 		}
 		a.errorf(n.Pos(), "undefined identifier %q", n.Name)
@@ -161,10 +161,10 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			return
 		}
 		if t, ok := a.lookupRefinedExprType(n); ok {
-			result = t
+			result = promoteWritableRefType(t, a.fieldExprProvidesWritableRef(n))
 			return
 		}
-		result = a.analyzeFieldExpr(n)
+		result = promoteWritableRefType(a.analyzeFieldExpr(n), a.fieldExprProvidesWritableRef(n))
 		return
 	case *ast.RaiseExpr:
 		errorType := a.analyzeExpr(n.Error)
@@ -274,6 +274,13 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		if !a.validCast(src, dst) {
 			a.errorf(n.Pos(), "invalid cast from %s to %s", src.String(), dst.String())
 		}
+		if srcRef, ok := src.(*RefType); ok {
+			if dstRef, ok := dst.(*RefType); ok && srcRef.Mutable && !dstRef.Mutable {
+				cloned := cloneRefType(dstRef)
+				cloned.Mutable = true
+				dst = cloned
+			}
+		}
 		result = dst
 		return
 	case *ast.SizeofExpr:
@@ -320,7 +327,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 				}
 			}
 		}
-		result = &RefType{Elem: inner, State: RefStateNonNull, Storage: a.inferAddrOfStorage(n.Operand), ExplicitStorage: true}
+		result = &RefType{Elem: inner, Mutable: a.exprCanYieldWritableRef(n.Operand), State: RefStateNonNull, Storage: a.inferAddrOfStorage(n.Operand), ExplicitStorage: true}
 		return
 	case *ast.SpecializeExpr:
 		result = a.analyzeSpecializeExpr(n)
@@ -397,6 +404,72 @@ func (a *Analyzer) analyzeSpecializeExpr(expr *ast.SpecializeExpr) Type {
 	specialized.RefStateParams = nil
 	specialized.GenericParams = nil
 	return specialized
+}
+
+func promoteWritableRefType(t Type, mutable bool) Type {
+	if !mutable {
+		return t
+	}
+	ref, ok := t.(*RefType)
+	if !ok || ref == nil || ref.Mutable {
+		return t
+	}
+	cloned := cloneRefType(ref)
+	cloned.Mutable = true
+	return cloned
+}
+
+func (a *Analyzer) fieldExprProvidesWritableRef(expr *ast.FieldExpr) bool {
+	if expr == nil {
+		return false
+	}
+	field, ok := a.lookupField(a.analyzeExpr(expr.Object), expr.Field, expr.Pos())
+	if !ok {
+		return false
+	}
+	if ref, ok := field.Type.(*RefType); ok {
+		return field.Mutable || ref.Mutable
+	}
+	return false
+}
+
+func (a *Analyzer) exprCanYieldWritableRef(expr ast.Expr) bool {
+	stripped := stripMutationTargetExpr(expr)
+	if stripped == nil {
+		return false
+	}
+	switch n := stripped.(type) {
+	case *ast.Ident:
+		var (
+			sym *Symbol
+			ok  bool
+		)
+		if a.currentScope != nil {
+			sym, ok = a.currentScope.Lookup(n.Name)
+		}
+		if !ok {
+			if sym, _, ok = a.lookupVisibleGlobal(n.Name); !ok {
+				return false
+			}
+		}
+		if _, isRef := sym.Type.(*RefType); !isRef {
+			return true
+		}
+		return sym.Mutable
+	case *ast.FieldExpr:
+		field, ok := a.lookupField(a.analyzeExpr(n.Object), n.Field, n.Pos())
+		if !ok || !field.Mutable {
+			return false
+		}
+		return a.mutationPathWritable(n.Object)
+	case *ast.IndexExpr:
+		if facts, ok := a.exprFacts[n.Object]; ok && facts.ReadOnly {
+			return false
+		}
+		return a.mutationPathWritable(n.Object)
+	default:
+		return false
+	}
 }
 
 func (a *Analyzer) analyzeCanExpr(expr *ast.CanExpr) Type {
@@ -1652,7 +1725,7 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 		if IsNumericType(left) && IsNumericType(right) {
 			return a.namedTypes["bool"]
 		}
-		if !(AssignableTo(left, right) || AssignableTo(right, left) || (IsNullType(left) && isRefLike(right)) || (IsNullType(right) && isRefLike(left))) {
+		if !(AssignableTo(left, right) || AssignableTo(right, left) || refsComparableIgnoringMutability(left, right) || (IsNullType(left) && isRefLike(right)) || (IsNullType(right) && isRefLike(left))) {
 			a.errorf(expr.Pos(), "cannot compare %s and %s", left.String(), right.String())
 		}
 		return a.namedTypes["bool"]
@@ -1693,6 +1766,21 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 	}
 }
 
+func refsComparableIgnoringMutability(left Type, right Type) bool {
+	leftRef, ok := left.(*RefType)
+	if !ok || leftRef == nil {
+		return false
+	}
+	rightRef, ok := right.(*RefType)
+	if !ok || rightRef == nil {
+		return false
+	}
+	leftClone := cloneRefType(leftRef)
+	rightClone := cloneRefType(rightRef)
+	leftClone.Mutable = false
+	rightClone.Mutable = false
+	return AssignableTo(leftClone, rightClone) || AssignableTo(rightClone, leftClone)
+}
 func (a *Analyzer) analyzeIsExpr(expr *ast.BinaryExpr) Type {
 	left := a.analyzeExpr(expr.Left)
 	if enumType, variant, ok := a.resolveEnumVariantIsTarget(expr.Right); ok {
@@ -4630,7 +4718,18 @@ func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 			return contextualType
 		}
 	}
-	return a.analyzeExpr(expr)
+	result := a.analyzeExpr(expr)
+	if expectedRef, ok := expected.(*RefType); ok && expectedRef.Mutable {
+		if actualRef, ok := result.(*RefType); ok && !actualRef.Mutable {
+			if a.mutationPathWritable(expr) || a.exprCanYieldWritableRef(expr) {
+				cloned := cloneRefType(actualRef)
+				cloned.Mutable = true
+				result = cloned
+				a.recordAnalyzedExprType(expr, result)
+			}
+		}
+	}
+	return result
 }
 
 func (a *Analyzer) recordAnalyzedExprType(expr ast.Expr, result Type) {
@@ -4947,6 +5046,10 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 		}
 		if !sym.Mutable {
 			if ref, ok := sym.Type.(*RefType); ok {
+				if !ref.Mutable {
+					a.errorf(n.Pos(), "cannot assign through readonly ref %q", sym.Name)
+					return invalidType
+				}
 				return ref.Elem
 			}
 			a.errorf(n.Pos(), "cannot assign to immutable %s %q", sym.Kind, sym.Name)
@@ -4968,6 +5071,7 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 		if !field.Mutable {
 			a.errorf(n.Pos(), "field %q is immutable", n.Field)
 		}
+		a.requireWritableMutationPath(n.Object)
 		return field.Type
 	case *ast.IndexExpr:
 		targetType := a.analyzeIndexExpr(n)
@@ -4979,10 +5083,100 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 			a.errorf(n.Pos(), "cannot assign to readonly view index result")
 			return invalidType
 		}
+		a.requireWritableMutationPath(n.Object)
 		return targetType
 	default:
 		a.errorf(expr.Pos(), "invalid assignment target")
 		return invalidType
+	}
+}
+
+func stripMutationTargetExpr(expr ast.Expr) ast.Expr {
+	for {
+		switch n := expr.(type) {
+		case *ast.ParenExpr:
+			expr = n.Inner
+		case *ast.CastExpr:
+			expr = n.Operand
+		case *ast.MoveExpr:
+			expr = n.Operand
+		case *ast.CanExpr:
+			expr = n.Expr
+		default:
+			return expr
+		}
+	}
+}
+
+func (a *Analyzer) mutationPathWritable(expr ast.Expr) bool {
+	stripped := stripMutationTargetExpr(expr)
+	if stripped == nil {
+		return true
+	}
+	objType, ok := a.exprTypes[stripped]
+	if !ok || objType == nil {
+		objType = a.analyzeExpr(stripped)
+	}
+	if ref, ok := objType.(*RefType); ok {
+		return a.refExprAllowsMutation(stripped, ref)
+	}
+	switch n := stripped.(type) {
+	case *ast.FieldExpr:
+		return a.mutationPathWritable(n.Object)
+	case *ast.IndexExpr:
+		return a.mutationPathWritable(n.Object)
+	case *ast.SliceExpr:
+		return a.mutationPathWritable(n.Object)
+	default:
+		return true
+	}
+}
+
+func (a *Analyzer) requireWritableMutationPath(expr ast.Expr) bool {
+	if a.mutationPathWritable(expr) {
+		return true
+	}
+	stripped := stripMutationTargetExpr(expr)
+	if stripped == nil {
+		return false
+	}
+	a.errorf(stripped.Pos(), "cannot mutate through readonly ref")
+	return false
+}
+
+func (a *Analyzer) refExprAllowsMutation(expr ast.Expr, ref *RefType) bool {
+	if ref == nil {
+		return false
+	}
+	if ref.Mutable {
+		return true
+	}
+	stripped := stripMutationTargetExpr(expr)
+	switch n := stripped.(type) {
+	case *ast.Ident:
+		var (
+			sym *Symbol
+			ok  bool
+		)
+		if a.currentScope != nil {
+			sym, ok = a.currentScope.Lookup(n.Name)
+		}
+		if !ok {
+			if sym, _, ok = a.lookupVisibleGlobal(n.Name); !ok {
+				return false
+			}
+		}
+		return sym.Mutable
+	case *ast.FieldExpr:
+		field, ok := a.lookupField(a.analyzeExpr(n.Object), n.Field, n.Pos())
+		if !ok {
+			return false
+		}
+		return field.Mutable
+	case *ast.IndexExpr:
+		return a.mutationPathWritable(n.Object)
+	default:
+		return false
 	}
 }
 
@@ -5003,6 +5197,13 @@ func (a *Analyzer) asRefTargetType(expr ast.Expr, asKind string) Type {
 			}
 		}
 		if !sym.Mutable {
+			if ref, ok := sym.Type.(*RefType); ok {
+				if !ref.Mutable {
+					a.errorf(n.Pos(), "cannot assign to immutable %s %q", sym.Kind, sym.Name)
+					return a.refTypeWithAsKind(sym.Type, asKind)
+				}
+				return a.refTypeWithAsKind(sym.Type, asKind)
+			}
 			a.errorf(n.Pos(), "cannot assign to immutable %s %q", sym.Kind, sym.Name)
 		}
 		return a.refTypeWithAsKind(sym.Type, asKind)
@@ -5014,6 +5215,7 @@ func (a *Analyzer) asRefTargetType(expr ast.Expr, asKind string) Type {
 		if !field.Mutable {
 			a.errorf(n.Pos(), "field %q is immutable", n.Field)
 		}
+		a.requireWritableMutationPath(n.Object)
 		return a.refTypeWithAsKind(field.Type, asKind)
 	case *ast.IndexExpr:
 		targetType := a.analyzeIndexExpr(n)
@@ -5025,6 +5227,7 @@ func (a *Analyzer) asRefTargetType(expr ast.Expr, asKind string) Type {
 			a.errorf(n.Pos(), "cannot take a reference to readonly view index result")
 			return invalidType
 		}
+		a.requireWritableMutationPath(n.Object)
 		return a.refTypeWithAsKind(targetType, asKind)
 	default:
 		a.errorf(expr.Pos(), "invalid assignment target")

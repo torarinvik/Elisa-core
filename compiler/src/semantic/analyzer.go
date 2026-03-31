@@ -2766,7 +2766,13 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 						if fnType != nil && i < len(fnType.Params) {
 							ptype = fnType.Params[i]
 						}
-						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, ParamIndex: i, Mutable: a.paramIsMutable(param)}
+						symType := ptype
+						if ref, ok := ptype.(*RefType); ok && !ref.Mutable && isLegacyOutParamName(param.Name) {
+							cloned := cloneRefType(ref)
+							cloned.Mutable = true
+							symType = cloned
+						}
+						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: symType, Node: fn, ParamIndex: i, Mutable: a.paramIsMutable(param)}
 						a.defineLocal(sym, param.Position)
 						a.bindActivePackedStoreType(ptype)
 						a.recordValueBinding(sym, nil)
@@ -2882,7 +2888,13 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 						if i < len(fnType.Params) {
 							ptype = fnType.Params[i]
 						}
-						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, ParamIndex: i, Mutable: a.paramIsMutable(param)}
+						symType := ptype
+						if ref, ok := ptype.(*RefType); ok && !ref.Mutable && isLegacyOutParamName(param.Name) {
+							cloned := cloneRefType(ref)
+							cloned.Mutable = true
+							symType = cloned
+						}
+						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: symType, Node: fn, ParamIndex: i, Mutable: a.paramIsMutable(param)}
 						a.defineLocal(sym, param.Position)
 						a.bindActivePackedStoreType(ptype)
 						a.recordValueBinding(sym, nil)
@@ -2992,7 +3004,13 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 						if i < len(fnType.Params) {
 							ptype = fnType.Params[i]
 						}
-						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: ptype, Node: fn, ParamIndex: i, Mutable: a.paramIsMutable(param)}
+						symType := ptype
+						if ref, ok := ptype.(*RefType); ok && !ref.Mutable && isLegacyOutParamName(param.Name) {
+							cloned := cloneRefType(ref)
+							cloned.Mutable = true
+							symType = cloned
+						}
+						sym := &Symbol{Name: param.Name, Kind: SymbolParam, Type: symType, Node: fn, ParamIndex: i, Mutable: a.paramIsMutable(param)}
 						a.defineLocal(sym, param.Position)
 						a.bindActivePackedStoreType(ptype)
 						a.recordValueBinding(sym, nil)

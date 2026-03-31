@@ -121,6 +121,7 @@ const (
 
 type RefType struct {
 	Elem            Type
+	Mutable         bool
 	State           RefState
 	StateParam      string
 	Storage         RefStorage
@@ -579,6 +580,9 @@ func RefStorageName(storage RefStorage) string {
 
 func (t *RefType) String() string {
 	s := t.Elem.String()
+	if t.Mutable {
+		s = "mutable " + s
+	}
 	if t.StorageParam != "" {
 		s = t.StorageParam + " " + s
 	} else if t.Region != "" {
@@ -1480,7 +1484,7 @@ func cloneRefTypeWithState(ref *RefType, state RefState) *RefType {
 	if ref == nil {
 		return nil
 	}
-	return &RefType{Elem: ref.Elem, State: state, Storage: ref.Storage, Region: ref.Region, ExplicitStorage: ref.ExplicitStorage}
+	return &RefType{Elem: ref.Elem, Mutable: ref.Mutable, State: state, StateParam: ref.StateParam, Storage: ref.Storage, StorageParam: ref.StorageParam, Region: ref.Region, ExplicitStorage: ref.ExplicitStorage}
 }
 
 func cloneRefType(ref *RefType) *RefType {

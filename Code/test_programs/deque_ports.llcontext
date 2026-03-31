@@ -1,8 +1,8 @@
 # include "../llcontext_std/test.llcontext"
 # include "../llcontext_std/heap.llcontext"
 
-def deque_i64_make_with_capacity(a: any Arena&, capacity: usize) -> Deque[i64] can[Memory.Allocate, Abort.Panic]:
-    ctor: func(any Arena&, usize) -> Deque[i64] can[Memory.Allocate, Abort.Panic] = arena_deque_with_capacity.specialize[i64]()
+def deque_i64_make_with_capacity(a: mutable any Arena&, capacity: usize) -> Deque[i64] can[Memory.Allocate, Abort.Panic]:
+    ctor: func(mutable any Arena&, usize) -> Deque[i64] can[Memory.Allocate, Abort.Panic] = arena_deque_with_capacity.specialize[i64]()
     return ctor(a, capacity)
 
 def deque_i64_make_buffer(buffer: any i64&, capacity: usize) -> Deque[i64]:
@@ -34,7 +34,7 @@ def deque_basic_smoke() -> void can[Memory.Allocate, Memory.Release, Abort.Panic
     assert_eq(front_ref[0u], 0)
     assert_eq(back_ref[0u], 2)
 
-    middle: any i64& = arena_deque_at((&d).cast[any Deque[i64]&], 1u)
+    middle: mutable any i64& = arena_deque_at((&d).cast[any Deque[i64]&], 1u)
     middle[0u] <- 7
     assert_deque_i64_value((&d).cast[any Deque[i64]&], 1u, 7)
 

@@ -5,17 +5,17 @@ struct Node:
 error MemoryError:
     OutOfMemory
 
-extern alloc_node() -> heap Node&? can[Memory.Allocate]
+extern alloc_node() -> mutable heap Node&? can[Memory.Allocate]
 extern sfree_node(node: heap Node&) -> heap Node! can[Memory.Release]
 
-def require_node() -> heap Node& error[MemoryError] can[Memory.Allocate]:
+def require_node() -> mutable heap Node& error[MemoryError] can[Memory.Allocate]:
     raw: heap Node&? = alloc_node() can Memory.Allocate
     node: heap Node& = raw else raise MemoryError.OutOfMemory
     return node
 
 def make_node_value() -> int error[MemoryError] can[Memory.Allocate]:
     can Memory.Allocate:
-        node: heap Node& = try require_node()
+        node: mutable heap Node& = try require_node()
         node.value <- 42
         return node.value
 

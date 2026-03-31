@@ -126,7 +126,7 @@ func SameType(a, b Type) bool {
 		return ok && ta.Name == tb.Name
 	case *RefType:
 		tb, ok := b.(*RefType)
-		return ok && ta.State == tb.State && ta.StateParam == tb.StateParam && ta.Storage == tb.Storage && ta.StorageParam == tb.StorageParam && ta.Region == tb.Region && SameType(ta.Elem, tb.Elem)
+		return ok && ta.Mutable == tb.Mutable && ta.State == tb.State && ta.StateParam == tb.StateParam && ta.Storage == tb.Storage && ta.StorageParam == tb.StorageParam && ta.Region == tb.Region && SameType(ta.Elem, tb.Elem)
 	case *ArrayType:
 		tb, ok := b.(*ArrayType)
 		return ok && arraySizesEqual(ta, tb) && SameType(ta.Elem, tb.Elem)
@@ -350,6 +350,9 @@ func AssignableTo(dst, src Type) bool {
 			if !SameType(dr.Elem, sr.Elem) {
 				return false
 			}
+			if dr.Mutable && !sr.Mutable && dr.State != RefStateNull && sr.State != RefStateNull {
+				return false
+			}
 			if dr.StateParam != "" || sr.StateParam != "" {
 				return dr.StateParam == sr.StateParam && dr.StorageParam == sr.StorageParam && refRegionAssignable(dr.Region, sr.Region)
 			}
@@ -412,6 +415,9 @@ func matchTypePattern(pattern, actual Type) bool {
 	case *RefType:
 		a, ok := actual.(*RefType)
 		if !ok {
+			return false
+		}
+		if p.Mutable && !a.Mutable && p.State != RefStateNull && a.State != RefStateNull {
 			return false
 		}
 		if p.StateParam != "" || a.StateParam != "" {
@@ -619,6 +625,7 @@ func MergeTypes(a, b Type) Type {
 	}
 	if ar, ok := a.(*RefType); ok {
 		if br, ok := b.(*RefType); ok && SameType(ar.Elem, br.Elem) {
+			mutable := ar.Mutable && br.Mutable
 			if ar.StateParam != br.StateParam || ar.StorageParam != br.StorageParam {
 				return invalidType
 			}
@@ -631,7 +638,7 @@ func MergeTypes(a, b Type) Type {
 				return invalidType
 			}
 			if state, ok := mergeRefStates(ar.State, br.State); ok {
-				return &RefType{Elem: ar.Elem, State: state, StateParam: ar.StateParam, Storage: storage, StorageParam: ar.StorageParam, Region: region, ExplicitStorage: explicit}
+				return &RefType{Elem: ar.Elem, Mutable: mutable, State: state, StateParam: ar.StateParam, Storage: storage, StorageParam: ar.StorageParam, Region: region, ExplicitStorage: explicit}
 			}
 		}
 	}

@@ -30,6 +30,13 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			declType = invalidType
 		}
 		bindingType := declType
+		if dstRef, ok := bindingType.(*RefType); ok {
+			if srcRef, ok := valueType.(*RefType); ok && srcRef.Mutable && !dstRef.Mutable && AssignableTo(bindingType, valueType) {
+				cloned := cloneRefType(dstRef)
+				cloned.Mutable = true
+				bindingType = cloned
+			}
+		}
 		if specializedViewType, ok := concreteDArrayViewBindingType(bindingType, valueType); ok {
 			bindingType = specializedViewType
 		}

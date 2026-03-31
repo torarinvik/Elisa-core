@@ -111,6 +111,7 @@ func appendTypeIDKey(b *strings.Builder, t Type) bool {
 		appendKeyString(b, tt.Name)
 	case *RefType:
 		appendKeyTag(b, "ref")
+		appendKeyBool(b, tt.Mutable)
 		appendKeyInt(b, int(tt.State))
 		appendKeyString(b, tt.StateParam)
 		appendKeyInt(b, int(tt.Storage))

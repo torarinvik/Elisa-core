@@ -50,10 +50,10 @@ def rt_concat2(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[shape_resu
 def rt_concat2_scratch(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[shape_result] can[Memory.Allocate, Abort.Panic]:
     return concat2_scratch(lhs, rhs)
 
-def rt_string_builder_new(initial: any u8&?) -> heap StringBuilder& can[Memory.Allocate, Abort.Panic]:
+def rt_string_builder_new(initial: any u8&?) -> mutable heap StringBuilder& can[Memory.Allocate, Abort.Panic]:
     return string_builder_new(initial)
 
-def rt_string_builder_append(builder: heap StringBuilder&?, suffix: any u8&?) -> heap StringBuilder& can[Memory.Allocate, Abort.Panic]:
+def rt_string_builder_append(builder: mutable heap StringBuilder&?, suffix: any u8&?) -> mutable heap StringBuilder& can[Memory.Allocate, Abort.Panic]:
     return string_builder_append(builder, suffix)
 
 def rt_string_builder_finish(builder: heap StringBuilder&?) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:

@@ -3,7 +3,7 @@
 # ============================================================
 
 
-def frontend_require_arena(lexer: any FrontendLexer&) -> any Arena& can[Abort.Panic]:
+def frontend_require_arena(lexer: mutable any FrontendLexer&) -> mutable any Arena& can[Abort.Panic]:
     assert lexer.arena != null
     return lexer.arena
 
@@ -14,20 +14,20 @@ def frontend_pending_is_empty(lexer: any FrontendLexer&) -> bool:
     return is_empty((&lexer.pending_tokens).cast[any Deque[FrontendToken]&])
 
 
-def frontend_pending_push_back(lexer: any FrontendLexer&, token: FrontendToken) can[Memory.Allocate, Abort.Panic]:
-    push_back: func(any Arena&, any Deque[FrontendToken]&, FrontendToken) -> any Deque[FrontendToken]& can[Memory.Allocate, Abort.Panic] = arena_deque_push_back.specialize[FrontendToken]()
-    _ = push_back(frontend_require_arena(lexer), (&lexer.pending_tokens).cast[any Deque[FrontendToken]&], token)
+def frontend_pending_push_back(lexer: mutable any FrontendLexer&, token: FrontendToken) can[Memory.Allocate, Abort.Panic]:
+    push_back: func(mutable any Arena&, mutable any Deque[FrontendToken]&, FrontendToken) -> mutable any Deque[FrontendToken]& can[Memory.Allocate, Abort.Panic] = arena_deque_push_back.specialize[FrontendToken]()
+    _ = push_back(frontend_require_arena(lexer), (&lexer.pending_tokens).cast[mutable any Deque[FrontendToken]&], token)
 
 
-def frontend_pending_pop_front(lexer: any FrontendLexer&) -> FrontendToken can[Abort.Panic]:
-    pop_front: func(any Deque[FrontendToken]&, any FrontendToken&) -> bool can[Abort.Panic] = arena_deque_pop_front.specialize[FrontendToken]()
+def frontend_pending_pop_front(lexer: mutable any FrontendLexer&) -> FrontendToken can[Abort.Panic]:
+    pop_front: func(mutable any Deque[FrontendToken]&, mutable any FrontendToken&) -> bool can[Abort.Panic] = arena_deque_pop_front.specialize[FrontendToken]()
     token: mutable FrontendToken = zeroed
-    ok: bool = pop_front((&lexer.pending_tokens).cast[any Deque[FrontendToken]&], (&token).cast[any FrontendToken&])
+    ok: bool = pop_front((&lexer.pending_tokens).cast[mutable any Deque[FrontendToken]&], (&token).cast[mutable any FrontendToken&])
     assert ok
     return token
 
 
-def frontend_new_lexer_with_len(a: any Arena&, filename: any u8&, source: any u8&, source_len: usize) -> FrontendLexer can[Memory.Allocate, Abort.Panic]:
+def frontend_new_lexer_with_len(a: mutable any Arena&, filename: any u8&, source: any u8&, source_len: usize) -> FrontendLexer can[Memory.Allocate, Abort.Panic]:
     out: mutable FrontendLexer = zeroed
     out.arena as & <- a
     out.filename <- filename
@@ -38,11 +38,11 @@ def frontend_new_lexer_with_len(a: any Arena&, filename: any u8&, source: any u8
     out.col <- 1
     out.at_line_start <- true
     out.paren_depth <- 0
-    _ = arena_da_append(a, (&out.indent_stack).cast[any darray[usize]&], 0u)
+    _ = arena_da_append(a, (&out.indent_stack).cast[mutable any darray[usize]&], 0u)
     return out
 
 
-def frontend_new_lexer(a: any Arena&, filename: any u8&, source: any u8&) -> FrontendLexer can[Memory.Allocate, Abort.Panic]:
+def frontend_new_lexer(a: mutable any Arena&, filename: any u8&, source: any u8&) -> FrontendLexer can[Memory.Allocate, Abort.Panic]:
     return frontend_new_lexer_with_len(a, filename, source, runtime_strlen(source))
 
 
@@ -86,7 +86,7 @@ def frontend_make_lexer_view(lexer: any FrontendLexer&, start: usize, end: usize
 
 
 @inline(always)
-def frontend_advance_char(lexer: any FrontendLexer&) -> i64:
+def frontend_advance_char(lexer: mutable any FrontendLexer&) -> i64:
     if frontend_is_eof(lexer):
         return FRONTEND_CH_NUL
 
@@ -101,7 +101,7 @@ def frontend_advance_char(lexer: any FrontendLexer&) -> i64:
 
 
 @inline(always)
-def frontend_match_char(lexer: any FrontendLexer&, expected: i64) -> bool:
+def frontend_match_char(lexer: mutable any FrontendLexer&, expected: i64) -> bool:
     if frontend_cur_char(lexer) == expected:
         _ = frontend_advance_char(lexer)
         return true
@@ -113,25 +113,25 @@ def frontend_pending_has_tokens(lexer: any FrontendLexer&) -> bool:
     return not frontend_pending_is_empty(lexer)
 
 
-def frontend_push_pending(lexer: any FrontendLexer&, token: FrontendToken) can[Memory.Allocate, Abort.Panic]:
+def frontend_push_pending(lexer: mutable any FrontendLexer&, token: FrontendToken) can[Memory.Allocate, Abort.Panic]:
     frontend_pending_push_back(lexer, token)
 
 
-def frontend_pop_pending(lexer: any FrontendLexer&) -> FrontendToken can[Abort.Panic]:
+def frontend_pop_pending(lexer: mutable any FrontendLexer&) -> FrontendToken can[Abort.Panic]:
     return frontend_pending_pop_front(lexer)
 
 
-def frontend_emit_pending_token(lexer: any FrontendLexer&, kind: FrontendTokenKind) can[Memory.Allocate, Abort.Panic]:
+def frontend_emit_pending_token(lexer: mutable any FrontendLexer&, kind: FrontendTokenKind) can[Memory.Allocate, Abort.Panic]:
     token: FrontendToken = frontend_make_token(kind, frontend_cur_pos(lexer), frontend_empty_view(), frontend_empty_view())
     frontend_push_pending(lexer, token)
 
 
-def frontend_skip_line_comment(lexer: any FrontendLexer&):
+def frontend_skip_line_comment(lexer: mutable any FrontendLexer&):
     while not frontend_is_eof(lexer) and frontend_cur_char(lexer) != FRONTEND_CH_NL:
         _ = frontend_advance_char(lexer)
 
 
-def frontend_measure_indent(lexer: any FrontendLexer&) -> usize:
+def frontend_measure_indent(lexer: mutable any FrontendLexer&) -> usize:
     indent: mutable usize = 0u
     while not frontend_is_eof(lexer):
         ch: i64 = frontend_cur_char(lexer)
@@ -152,16 +152,16 @@ def frontend_indent_top(lexer: any FrontendLexer&) -> usize:
     return lexer.indent_stack[lexer.indent_stack.count - 1u]
 
 
-def frontend_push_indent(lexer: any FrontendLexer&, value: usize) can[Memory.Allocate, Abort.Panic]:
-    _ = arena_da_append(frontend_require_arena(lexer), (&lexer.indent_stack).cast[any darray[usize]&], value)
+def frontend_push_indent(lexer: mutable any FrontendLexer&, value: usize) can[Memory.Allocate, Abort.Panic]:
+    _ = arena_da_append(frontend_require_arena(lexer), (&lexer.indent_stack).cast[mutable any darray[usize]&], value)
 
 
-def frontend_pop_indent(lexer: any FrontendLexer&):
+def frontend_pop_indent(lexer: mutable any FrontendLexer&):
     if lexer.indent_stack.count > 0u:
         lexer.indent_stack.count <- lexer.indent_stack.count - 1u
 
 
-def frontend_handle_indentation(lexer: any FrontendLexer&) can[Memory.Allocate, Abort.Panic]:
+def frontend_handle_indentation(lexer: mutable any FrontendLexer&) can[Memory.Allocate, Abort.Panic]:
     indent: mutable usize = frontend_measure_indent(lexer)
 
     scanning: mutable bool = true
@@ -279,7 +279,7 @@ def frontend_valid_suffix(view: StringView) -> bool:
 
 
 @inline(always)
-def frontend_try_read_type_suffix(lexer: any FrontendLexer&) -> StringView:
+def frontend_try_read_type_suffix(lexer: mutable any FrontendLexer&) -> StringView:
     start: usize = lexer.pos
     first: i64 = frontend_cur_char(lexer)
     if first != FRONTEND_CH_u and first != FRONTEND_CH_i and first != FRONTEND_CH_f:
@@ -389,7 +389,7 @@ def frontend_maybe_keyword_first_char(ch: i64) -> bool:
     return ch == 97 or ch == 99 or ch == 100 or ch == 101 or ch == 102 or ch == 103 or ch == 104 or ch == 105 or ch == 109 or ch == 110 or ch == 111 or ch == 112 or ch == 114 or ch == 115 or ch == 116 or ch == 119 or ch == 122
 
 
-def frontend_read_string(lexer: any FrontendLexer&) -> FrontendToken:
+def frontend_read_string(lexer: mutable any FrontendLexer&) -> FrontendToken:
     pos: FrontendPos = frontend_cur_pos(lexer)
     _ = frontend_advance_char(lexer)
     start: usize = lexer.pos
@@ -409,7 +409,7 @@ def frontend_read_string(lexer: any FrontendLexer&) -> FrontendToken:
     return frontend_make_token(FrontendTokenKind.StringLit, pos, text, frontend_empty_view())
 
 
-def frontend_read_char(lexer: any FrontendLexer&) -> FrontendToken:
+def frontend_read_char(lexer: mutable any FrontendLexer&) -> FrontendToken:
     pos: FrontendPos = frontend_cur_pos(lexer)
     _ = frontend_advance_char(lexer)
     start: usize = lexer.pos
@@ -429,7 +429,7 @@ def frontend_read_char(lexer: any FrontendLexer&) -> FrontendToken:
     return frontend_make_token(FrontendTokenKind.CharLit, pos, text, frontend_empty_view())
 
 
-def frontend_read_number(lexer: any FrontendLexer&) -> FrontendToken:
+def frontend_read_number(lexer: mutable any FrontendLexer&) -> FrontendToken:
     pos: FrontendPos = frontend_cur_pos(lexer)
     start: usize = lexer.pos
 
@@ -472,7 +472,7 @@ def frontend_read_number(lexer: any FrontendLexer&) -> FrontendToken:
     return frontend_make_token(FrontendTokenKind.IntLit, pos, text, suffix)
 
 
-def frontend_read_ident(lexer: any FrontendLexer&) -> FrontendToken:
+def frontend_read_ident(lexer: mutable any FrontendLexer&) -> FrontendToken:
     pos: FrontendPos = frontend_cur_pos(lexer)
     start: usize = lexer.pos
     while not frontend_is_eof(lexer) and frontend_is_ident_char(frontend_cur_char(lexer)):
@@ -482,13 +482,13 @@ def frontend_read_ident(lexer: any FrontendLexer&) -> FrontendToken:
 
 
 @inline(always)
-def frontend_skip_spaces(lexer: any FrontendLexer&):
+def frontend_skip_spaces(lexer: mutable any FrontendLexer&):
     while not frontend_is_eof(lexer) and (frontend_cur_char(lexer) == FRONTEND_CH_SPACE or frontend_cur_char(lexer) == FRONTEND_CH_TAB):
         _ = frontend_advance_char(lexer)
 
 
 @inline(always)
-def frontend_skip_string_kind(lexer: any FrontendLexer&) -> FrontendTokenKind:
+def frontend_skip_string_kind(lexer: mutable any FrontendLexer&) -> FrontendTokenKind:
     _ = frontend_advance_char(lexer)
 
     while not frontend_is_eof(lexer) and frontend_cur_char(lexer) != FRONTEND_CH_DQUOTE and frontend_cur_char(lexer) != FRONTEND_CH_NL:
@@ -505,7 +505,7 @@ def frontend_skip_string_kind(lexer: any FrontendLexer&) -> FrontendTokenKind:
 
 
 @inline(always)
-def frontend_skip_char_kind(lexer: any FrontendLexer&) -> FrontendTokenKind:
+def frontend_skip_char_kind(lexer: mutable any FrontendLexer&) -> FrontendTokenKind:
     _ = frontend_advance_char(lexer)
 
     while not frontend_is_eof(lexer) and frontend_cur_char(lexer) != FRONTEND_CH_SQUOTE and frontend_cur_char(lexer) != FRONTEND_CH_NL:
@@ -522,7 +522,7 @@ def frontend_skip_char_kind(lexer: any FrontendLexer&) -> FrontendTokenKind:
 
 
 @inline(always)
-def frontend_read_number_kind(lexer: any FrontendLexer&) -> FrontendTokenKind:
+def frontend_read_number_kind(lexer: mutable any FrontendLexer&) -> FrontendTokenKind:
     if frontend_cur_char(lexer) == 48 and (frontend_peek_char_at(lexer, 1u) == FRONTEND_CH_x or frontend_peek_char_at(lexer, 1u) == FRONTEND_CH_X):
         _ = frontend_advance_char(lexer)
         _ = frontend_advance_char(lexer)
@@ -561,7 +561,7 @@ def frontend_read_number_kind(lexer: any FrontendLexer&) -> FrontendTokenKind:
 
 
 @inline(always)
-def frontend_read_ident_kind(lexer: any FrontendLexer&) -> FrontendTokenKind:
+def frontend_read_ident_kind(lexer: mutable any FrontendLexer&) -> FrontendTokenKind:
     start: usize = lexer.pos
     while not frontend_is_eof(lexer) and frontend_is_ident_char(frontend_cur_char(lexer)):
         _ = frontend_advance_char(lexer)
@@ -579,7 +579,7 @@ def frontend_read_ident_kind(lexer: any FrontendLexer&) -> FrontendTokenKind:
 
 
 @inline(always)
-def frontend_next_token_kind(lexer: any FrontendLexer&) -> FrontendTokenKind can[Memory.Allocate, Abort.Panic]:
+def frontend_next_token_kind(lexer: mutable any FrontendLexer&) -> FrontendTokenKind can[Memory.Allocate, Abort.Panic]:
     if frontend_pending_has_tokens(lexer):
         token: FrontendToken = frontend_pop_pending(lexer)
         return token.kind
@@ -765,7 +765,7 @@ def frontend_next_token_kind(lexer: any FrontendLexer&) -> FrontendTokenKind can
     return FrontendTokenKind.Ident
 
 
-def frontend_next_token(lexer: any FrontendLexer&) -> FrontendToken can[Memory.Allocate, Abort.Panic]:
+def frontend_next_token(lexer: mutable any FrontendLexer&) -> FrontendToken can[Memory.Allocate, Abort.Panic]:
     if frontend_pending_has_tokens(lexer):
         return frontend_pop_pending(lexer)
 
@@ -961,17 +961,17 @@ def frontend_next_token(lexer: any FrontendLexer&) -> FrontendToken can[Memory.A
     return frontend_make_token(FrontendTokenKind.Eof, frontend_cur_pos(lexer), frontend_empty_view(), frontend_empty_view())
 
 
-def frontend_tokenize(a: any Arena&, filename: any u8&, source: any u8&) -> darray[FrontendToken] can[Memory.Allocate, Abort.Panic]:
+def frontend_tokenize(a: mutable any Arena&, filename: any u8&, source: any u8&) -> darray[FrontendToken] can[Memory.Allocate, Abort.Panic]:
     return frontend_tokenize_with_len(a, filename, source, runtime_strlen(source))
 
 
-def frontend_tokenize_with_len(a: any Arena&, filename: any u8&, source: any u8&, source_len: usize) -> darray[FrontendToken] can[Memory.Allocate, Abort.Panic]:
+def frontend_tokenize_with_len(a: mutable any Arena&, filename: any u8&, source: any u8&, source_len: usize) -> darray[FrontendToken] can[Memory.Allocate, Abort.Panic]:
     lexer: mutable FrontendLexer = frontend_new_lexer_with_len(a, filename, source, source_len)
     tokens: mutable darray[FrontendToken] = zeroed
 
     while true:
-        token: FrontendToken = frontend_next_token((&lexer).cast[any FrontendLexer&])
-        _ = arena_da_append(a, (&tokens).cast[any darray[FrontendToken]&], token)
+        token: FrontendToken = frontend_next_token((&lexer).cast[mutable any FrontendLexer&])
+        _ = arena_da_append(a, (&tokens).cast[mutable any darray[FrontendToken]&], token)
         match token.kind:
             FrontendTokenKind.Eof:
                 return tokens

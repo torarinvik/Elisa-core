@@ -62,13 +62,13 @@ def parser_peek(state: any ParserState&) -> TokenKind:
         return state.tokens[1u].kind
     return TokenKind.Eof
 
-def parser_advance(state: any ParserState&) -> TokenKind:
+def parser_advance(state: mutable any ParserState&) -> TokenKind:
     head: TokenKind = parser_peek(state)
     if state.cursor < 2u:
         state.cursor <- state.cursor + 1u
     return head
 
-def scope_define(a: any Arena&, scope: any Scope&, name: dstr, kind: SymbolKind, first_kind: TokenKind) -> bool error[RuntimeError]:
+def scope_define(a: any Arena&, scope: mutable any Scope&, name: dstr, kind: SymbolKind, first_kind: TokenKind) -> bool error[RuntimeError]:
     entry: Symbol = Symbol(name, kind, scope.depth, first_kind)
     slot: any Symbol&? = try arena_dict_put__Symbol(a, (&scope.symbols).cast[any dict[dstr, Symbol]&], name, entry) else null
     return slot != null
@@ -89,19 +89,19 @@ def frontend_scope_stress(tokens: view[Token], local_name: dstr) -> bool error[R
     region parse(4096u)
     parse_arena: any Arena& = (&parse).cast[any Arena&]
 
-    root: parse Scope& = new[parse] Scope(null, arena_dict_new__Symbol(parse_arena, 8u), 0)
-    child: parse Scope& = new[parse] Scope(root.cast[any Scope&?], arena_dict_new__Symbol(parse_arena, 8u), root.depth + 1)
-    parser: parse ParserState& = new[parse] ParserState(tokens, 0u, child.cast[any Scope&?])
+    root: mutable parse Scope& = new[parse] Scope(null, arena_dict_new__Symbol(parse_arena, 8u), 0)
+    child: mutable parse Scope& = new[parse] Scope(root.cast[any Scope&?], arena_dict_new__Symbol(parse_arena, 8u), root.depth + 1)
+    parser: mutable parse ParserState& = new[parse] ParserState(tokens, 0u, child.cast[any Scope&?])
 
     match parser_peek(parser.cast[any ParserState&]):
         TokenKind.Eof:
             return false
 
-    first_kind: TokenKind = parser_advance(parser.cast[any ParserState&])
+    first_kind: TokenKind = parser_advance(parser.cast[mutable any ParserState&])
     try arena_dict_reserve__Symbol(parse_arena, (&root.symbols).cast[any dict[dstr, Symbol]&], 16u)
 
-    global_ok: bool = try scope_define(parse_arena, root.cast[any Scope&], "parse_file", SymbolKind.Func, TokenKind.Def)
-    local_ok: bool = try scope_define(parse_arena, child.cast[any Scope&], local_name, SymbolKind.Local, first_kind)
+    global_ok: bool = try scope_define(parse_arena, root.cast[mutable any Scope&], "parse_file", SymbolKind.Func, TokenKind.Def)
+    local_ok: bool = try scope_define(parse_arena, child.cast[mutable any Scope&], local_name, SymbolKind.Local, first_kind)
 
     return global_ok and local_ok and scope_contains(child.cast[any Scope&], "parse_file") and scope_contains(child.cast[any Scope&], local_name)
 

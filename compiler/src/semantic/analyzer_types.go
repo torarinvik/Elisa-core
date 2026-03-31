@@ -222,7 +222,13 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			Variadic:               n.Variadic,
 		}
 	case *ast.MutableType:
-		return a.resolveType(n.Elem)
+		elemType := a.resolveType(n.Elem)
+		if ref, ok := elemType.(*RefType); ok {
+			cloned := cloneRefType(ref)
+			cloned.Mutable = true
+			return cloned
+		}
+		return elemType
 	case *ast.TailType:
 		elemType := a.resolveType(n.Elem)
 		if a.containsAffineHandleValues(elemType, map[string]bool{}) && !isBorrowableAffineOwnerType(elemType) {
@@ -1174,7 +1180,7 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 				}
 			}
 		}
-		return &RefType{Elem: a.substituteType(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings), State: state, StateParam: stateParam, Storage: storage, StorageParam: storageParam, Region: region, ExplicitStorage: n.ExplicitStorage}
+		return &RefType{Elem: a.substituteType(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings), Mutable: n.Mutable, State: state, StateParam: stateParam, Storage: storage, StorageParam: storageParam, Region: region, ExplicitStorage: n.ExplicitStorage}
 	case *ArrayType:
 		return &ArrayType{Elem: a.substituteType(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings), Size: n.Size, HasConstSize: n.HasConstSize, ConstSize: n.ConstSize, SurfaceName: n.SurfaceName}
 	case *DArrayType:
@@ -1255,8 +1261,16 @@ func (a *Analyzer) paramIsMutable(param ast.ParamDecl) bool {
 	if param.Mutable {
 		return true
 	}
-	_, ok := param.Type.(*ast.MutableType)
-	return ok
+	mutableType, ok := param.Type.(*ast.MutableType)
+	if !ok {
+		return false
+	}
+	_, refLike := mutableType.Elem.(*ast.RefType)
+	return !refLike
+}
+
+func isLegacyOutParamName(name string) bool {
+	return name == "out" || strings.HasSuffix(name, "_out")
 }
 
 func (a *Analyzer) withShapeParams(names []string, fn func()) {

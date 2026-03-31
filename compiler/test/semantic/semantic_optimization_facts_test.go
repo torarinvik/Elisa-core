@@ -1071,12 +1071,12 @@ def inspect(owner: Arena) -> int:
 	node_after_freeze: Expr = node
 	other_after_freeze: Expr = other
 	held_after_freeze: Expr = held
-	node_ref: stack Expr& = &node_after_freeze
-	other_ref: stack Expr& = &other_after_freeze
-	held_ref: stack Expr& = &held_after_freeze
-	node_ptr: stack Expr&? = node_ref
-	pure_recovered: stack Expr& = node_ptr else other_ref
-	mixed_recovered: stack Expr& = node_ptr else held_ref
+	node_ref: mutable stack Expr& = &node_after_freeze
+	other_ref: mutable stack Expr& = &other_after_freeze
+	held_ref: mutable stack Expr& = &held_after_freeze
+	node_ptr: mutable stack Expr&? = node_ref
+	pure_recovered: mutable stack Expr& = node_ptr else other_ref
+	mixed_recovered: mutable stack Expr& = node_ptr else held_ref
 	_ = frozen
 	return 0
 `

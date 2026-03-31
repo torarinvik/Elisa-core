@@ -341,7 +341,7 @@ func substituteExportType(t Type, bindings map[string]Type) Type {
 				}
 			}
 		}
-		return &RefType{Elem: substituteExportType(tt.Elem, bindings), State: state, StateParam: stateParam, Storage: storage, StorageParam: storageParam, Region: tt.Region, ExplicitStorage: tt.ExplicitStorage}
+		return &RefType{Elem: substituteExportType(tt.Elem, bindings), Mutable: tt.Mutable, State: state, StateParam: stateParam, Storage: storage, StorageParam: storageParam, Region: tt.Region, ExplicitStorage: tt.ExplicitStorage}
 	case *ArrayType:
 		return &ArrayType{Elem: substituteExportType(tt.Elem, bindings), Size: tt.Size, HasConstSize: tt.HasConstSize, ConstSize: tt.ConstSize, SurfaceName: tt.SurfaceName}
 	case *GenericInstanceType:

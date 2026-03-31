@@ -24,7 +24,7 @@ def arena_deque_init_buffer[T](buffer: any T&, capacity: usize) -> Deque[T]:
     out.capacity <- capacity
     return out
 
-def arena_deque_with_capacity[T](a: any Arena&, capacity: usize) -> Deque[T] can[Memory.Allocate, Abort.Panic]:
+def arena_deque_with_capacity[T](a: mutable any Arena&, capacity: usize) -> Deque[T] can[Memory.Allocate, Abort.Panic]:
     if capacity == 0u:
         out0: mutable Deque[T] = zeroed
         return out0
@@ -45,7 +45,7 @@ def arena_deque_capacity[T](d: any Deque[T]&) -> usize:
 def arena_deque_is_empty[T](d: any Deque[T]&) -> bool:
     return d.count == 0u
 
-def arena_deque_clear[T](d: any Deque[T]&):
+def arena_deque_clear[T](d: mutable any Deque[T]&):
     d.head <- 0u
     d.count <- 0u
 
@@ -59,7 +59,7 @@ def arena_deque_buffer_index[T](d: any Deque[T]&, logical_index: usize) -> usize
 
     return logical_index - head_len
 
-def arena_deque_copy_linearized[T](d: any Deque[T]&, dst: any T&):
+def arena_deque_copy_linearized[T](d: any Deque[T]&, dst: mutable any T&):
     if d.count == 0u:
         return
 
@@ -67,7 +67,7 @@ def arena_deque_copy_linearized[T](d: any Deque[T]&, dst: any T&):
 
     if d.head <= d.capacity - d.count:
         arena_memcpy(
-            dst.cast[any void&],
+            dst.cast[mutable any void&],
             (d.items + d.head).cast[any void&],
             d.count * sizeof(T)
         )
@@ -77,17 +77,17 @@ def arena_deque_copy_linearized[T](d: any Deque[T]&, dst: any T&):
     tail_count: usize = d.count - head_count
 
     arena_memcpy(
-        dst.cast[any void&],
+        dst.cast[mutable any void&],
         (d.items + d.head).cast[any void&],
         head_count * sizeof(T)
     )
     arena_memcpy(
-        (dst + head_count).cast[any void&],
+        (dst + head_count).cast[mutable any void&],
         d.items.cast[any void&],
         tail_count * sizeof(T)
     )
 
-def arena_deque_reserve[T](a: any Arena&, d: any Deque[T]&, needed: usize) -> any Deque[T]& can[Memory.Allocate, Abort.Panic]:
+def arena_deque_reserve[T](a: mutable any Arena&, d: mutable any Deque[T]&, needed: usize) -> mutable any Deque[T]& can[Memory.Allocate, Abort.Panic]:
     if needed <= d.capacity:
         return d
 
@@ -106,12 +106,12 @@ def arena_deque_reserve[T](a: any Arena&, d: any Deque[T]&, needed: usize) -> an
     d.capacity <- new_capacity
     return d
 
-def arena_deque_ensure_unused[T](a: any Arena&, d: any Deque[T]&, additional: usize) -> any Deque[T]& can[Memory.Allocate, Abort.Panic]:
+def arena_deque_ensure_unused[T](a: mutable any Arena&, d: mutable any Deque[T]&, additional: usize) -> mutable any Deque[T]& can[Memory.Allocate, Abort.Panic]:
     needed: usize = d.count + additional
     assert needed >= d.count
     return arena_deque_reserve(a, d, needed)
 
-def arena_deque_push_front_assume_capacity[T](d: any Deque[T]&, item: T) can[Abort.Panic]:
+def arena_deque_push_front_assume_capacity[T](d: mutable any Deque[T]&, item: T) can[Abort.Panic]:
     assert d.items != null
     assert d.count < d.capacity
 
@@ -122,7 +122,7 @@ def arena_deque_push_front_assume_capacity[T](d: any Deque[T]&, item: T) can[Abo
     d.items[d.head] <- item
     d.count <- d.count + 1u
 
-def arena_deque_push_back_assume_capacity[T](d: any Deque[T]&, item: T) can[Abort.Panic]:
+def arena_deque_push_back_assume_capacity[T](d: mutable any Deque[T]&, item: T) can[Abort.Panic]:
     assert d.items != null
     assert d.count < d.capacity
 
@@ -130,26 +130,26 @@ def arena_deque_push_back_assume_capacity[T](d: any Deque[T]&, item: T) can[Abor
     d.items[physical_index] <- item
     d.count <- d.count + 1u
 
-def arena_deque_push_front_bounded[T](d: any Deque[T]&, item: T) -> bool can[Abort.Panic]:
+def arena_deque_push_front_bounded[T](d: mutable any Deque[T]&, item: T) -> bool can[Abort.Panic]:
     if d.count >= d.capacity:
         return false
 
     arena_deque_push_front_assume_capacity(d, item)
     return true
 
-def arena_deque_push_back_bounded[T](d: any Deque[T]&, item: T) -> bool can[Abort.Panic]:
+def arena_deque_push_back_bounded[T](d: mutable any Deque[T]&, item: T) -> bool can[Abort.Panic]:
     if d.count >= d.capacity:
         return false
 
     arena_deque_push_back_assume_capacity(d, item)
     return true
 
-def arena_deque_push_front[T](a: any Arena&, d: any Deque[T]&, item: T) -> any Deque[T]& can[Memory.Allocate, Abort.Panic]:
+def arena_deque_push_front[T](a: mutable any Arena&, d: mutable any Deque[T]&, item: T) -> mutable any Deque[T]& can[Memory.Allocate, Abort.Panic]:
     _ = arena_deque_ensure_unused(a, d, 1u)
     arena_deque_push_front_assume_capacity(d, item)
     return d
 
-def arena_deque_push_back[T](a: any Arena&, d: any Deque[T]&, item: T) -> any Deque[T]& can[Memory.Allocate, Abort.Panic]:
+def arena_deque_push_back[T](a: mutable any Arena&, d: mutable any Deque[T]&, item: T) -> mutable any Deque[T]& can[Memory.Allocate, Abort.Panic]:
     _ = arena_deque_ensure_unused(a, d, 1u)
     arena_deque_push_back_assume_capacity(d, item)
     return d
@@ -174,7 +174,7 @@ def arena_deque_at[T](d: any Deque[T]&, index: usize) -> any T& can[Abort.Panic]
     physical_index: usize = arena_deque_buffer_index(d, index)
     return &d.items[physical_index]
 
-def arena_deque_pop_front[T](d: any Deque[T]&, out: any T&) -> bool can[Abort.Panic]:
+def arena_deque_pop_front[T](d: mutable any Deque[T]&, out: mutable any T&) -> bool can[Abort.Panic]:
     if d.count == 0u or d.items == null:
         return false
 
@@ -188,7 +188,7 @@ def arena_deque_pop_front[T](d: any Deque[T]&, out: any T&) -> bool can[Abort.Pa
     d.count <- d.count - 1u
     return true
 
-def arena_deque_pop_back[T](d: any Deque[T]&, out: any T&) -> bool can[Abort.Panic]:
+def arena_deque_pop_back[T](d: mutable any Deque[T]&, out: mutable any T&) -> bool can[Abort.Panic]:
     if d.count == 0u or d.items == null:
         return false
 

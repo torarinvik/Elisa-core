@@ -12,10 +12,10 @@
 
 extern strlen(s: any u8&) -> usize
 extern strcmp(lhs: any u8&, rhs: any u8&) -> int
-extern memcpy(dest: any void&, src: any void&, n: usize) -> any void&
+extern memcpy(dest: mutable any void&, src: any void&, n: usize) -> mutable any void&
 extern memcmp(lhs: any void&, rhs: any void&, n: usize) -> int
-extern memset(dest: any void&, val: int, n: usize) -> any void&
-extern snprintf(buf: any u8&?, bufsize: usize, fmt: any u8&, ...) -> int can[Console.Format]
+extern memset(dest: mutable any void&, val: int, n: usize) -> mutable any void&
+extern snprintf(buf: mutable any u8&?, bufsize: usize, fmt: any u8&, ...) -> int can[Console.Format]
 extern puts(s: any u8&) -> int can[Console.Write]
 extern fprintf(stream: any void&, fmt: any u8&, ...) -> int can[Console]
 extern exit(code: int) can[Abort.Exit]
@@ -42,7 +42,7 @@ global mutable scratch_arena: Arena = Arena(null, null, 0)
 struct SmallStringCacheEntry:
 	next: mutable heap SmallStringCacheEntry&?
 	len: mutable usize
-	text: tail u8
+	text: mutable tail u8
 
 struct StringLenCacheEntry:
 	next: mutable heap StringLenCacheEntry&?
@@ -69,11 +69,11 @@ global mutable string_len_cache: heap StringLenCacheEntry&?[CTX_STRING_LEN_CACHE
 # Permanent / scratch arena allocation
 # ------------------------------------------------------------
 
-def alloc_perm(size: i64) -> heap void& can[Memory.Allocate, Abort.Panic]:
+def alloc_perm(size: i64) -> mutable heap void& can[Memory.Allocate, Abort.Panic]:
 	resolved: usize = size.usize() if size > 0 else 1
 	return arena_alloc((&perm_arena).cast[any Arena&], resolved)
 
-def alloc_scratch(size: i64) -> heap void& can[Memory.Allocate, Abort.Panic]:
+def alloc_scratch(size: i64) -> mutable heap void& can[Memory.Allocate, Abort.Panic]:
 	resolved: usize = size.usize() if size > 0 else 1
 	return arena_alloc((&scratch_arena).cast[any Arena&], resolved)
 
@@ -110,7 +110,7 @@ def register_perm_string_len(ptr: any u8&?, len: usize) can[Memory.Allocate, Abo
 	new_entry.len <- len
 	string_len_cache[bucket] <- new_entry
 
-def lookup_cached_string_len(ptr: any u8&?, len_out: any usize&) -> int:
+def lookup_cached_string_len(ptr: any u8&?, len_out: mutable any usize&) -> int:
 	if ptr == null:
 		return 0
 
@@ -144,7 +144,7 @@ def runtime_strlen(value: any u8&?) -> usize:
 		return 0
 
 	len: mutable usize = 0
-	if lookup_cached_string_len(src, (&len).cast[any usize&]) != 0:
+	if lookup_cached_string_len(src, (&len).cast[mutable any usize&]) != 0:
 		return len
 
 	return strlen(src)
@@ -173,13 +173,13 @@ def intern_small_string(src: any u8&, len: usize) -> heap u8& can[Memory.Allocat
 			return (&entry.text[0]).cast[heap u8&]
 		entry <- entry.next
 
-	new_entry: heap SmallStringCacheEntry& = alloc_perm(
+	new_entry: mutable heap SmallStringCacheEntry& = alloc_perm(
 		(sizeof(SmallStringCacheEntry) + len + 1).i64()
 	).cast[heap SmallStringCacheEntry&]
 
 	new_entry.next <- small_string_cache[bucket]
 	new_entry.len <- len
-	memcpy((&new_entry.text[0]).cast[any void&], src.cast[any void&], len)
+	memcpy((&new_entry.text[0]).cast[mutable any void&], src.cast[any void&], len)
 	new_entry.text[len] <- 0
 	small_string_cache[bucket] <- new_entry
 
@@ -191,7 +191,7 @@ def intern_small_string(src: any u8&, len: usize) -> heap u8& can[Memory.Allocat
 # Integer / bool / char to string conversion
 # ------------------------------------------------------------
 
-def int_to_string_into(arena: any Arena&, value: i64) -> heap u8& can[Memory.Allocate, Console.Format, Abort.Panic]:
+def int_to_string_into(arena: mutable any Arena&, value: i64) -> heap u8& can[Memory.Allocate, Console.Format, Abort.Panic]:
 	len: int = snprintf(null, 0, "%lld".cast[any u8&], value)
 
 	if len > 0 and len <= 8:
@@ -228,7 +228,7 @@ def string_builder_next_cap(min_cap: i64) -> i64:
 		cap *= 2
 	return cap
 
-def string_builder_new(initial: any u8&?) -> heap StringBuilder& can[Memory.Allocate, Abort.Panic]:
+def string_builder_new(initial: any u8&?) -> mutable heap StringBuilder& can[Memory.Allocate, Abort.Panic]:
 	src: any u8& = initial if initial != null else "".cast[any u8&]
 	len: usize = runtime_strlen(src)
 
@@ -238,12 +238,12 @@ def string_builder_new(initial: any u8&?) -> heap StringBuilder& can[Memory.Allo
 	builder.data <- alloc_perm(builder.cap).cast[heap u8&]
 
 	if len > 0:
-		memcpy(builder.data.cast[any void&], src.cast[any void&], len)
+		memcpy(builder.data.cast[mutable any void&], src.cast[any void&], len)
 
 	builder.data[len] <- 0
 	return builder
 
-def string_builder_append(builder: heap StringBuilder&?, suffix: any u8&?) -> heap StringBuilder& can[Memory.Allocate, Abort.Panic]:
+def string_builder_append(builder: mutable heap StringBuilder&?, suffix: any u8&?) -> mutable heap StringBuilder& can[Memory.Allocate, Abort.Panic]:
 	src: any u8& = suffix if suffix != null else "".cast[any u8&]
 	suffix_len: usize = runtime_strlen(src)
 
@@ -261,12 +261,12 @@ def string_builder_append(builder: heap StringBuilder&?, suffix: any u8&?) -> he
 		new_data: heap u8& = alloc_perm(new_cap).cast[heap u8&]
 		if b.len > 0:
 			assert b.data != null
-			memcpy(new_data.cast[any void&], b.data.cast[any void&], b.len.usize())
+			memcpy(new_data.cast[mutable any void&], b.data.cast[any void&], b.len.usize())
 		b.data <- new_data
 		b.cap <- new_cap
 
 	assert b.data != null
-	memcpy((b.data + b.len.usize()).cast[any void&], src.cast[any void&], suffix_len)
+	memcpy((b.data + b.len.usize()).cast[mutable any void&], src.cast[any void&], suffix_len)
 	b.len += suffix_len.i64()
 	b.data[b.len.usize()] <- 0
 	return b

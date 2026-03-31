@@ -615,6 +615,29 @@ def ok(job: mutable ParseJob[Pending]) -> int:
 	requireFunctionReturnTypeString(t, result, "ok", "int")
 }
 
+func TestAnalyzeRejectsMutatingThroughReadonlyRefParam(t *testing.T) {
+	src := `struct ParseJob[state Pending | Ready | Failed]:
+	stage: mutable int
+	checksum: mutable int
+
+	derive state:
+		Pending when self.stage == 0
+		Ready when self.stage == 1
+		Failed when self.stage == 2
+
+def bad(job: any ParseJob[Pending]&) -> void:
+	job.checksum <- 7
+	job.stage <- 1
+`
+	_, errs := parseAndAnalyze(t, "readonly_ref_param_mutation_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot mutate through readonly ref") {
+		t.Fatalf("expected readonly ref mutation diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeRejectsUsingStaleReadyStateAfterParserRefCallMutation(t *testing.T) {
 	src := `struct ParseJob[state Pending | Ready | Failed]:
 	stage: mutable int
@@ -628,12 +651,12 @@ func TestAnalyzeRejectsUsingStaleReadyStateAfterParserRefCallMutation(t *testing
 def take_ready(job: ParseJob[Ready]) -> int:
 	return job.checksum
 
-def finish_ok(job: any ParseJob[Pending]&) -> void:
+def finish_ok(job: mutable any ParseJob[Pending]&) -> void:
 	job.checksum <- 7
 	job.stage <- 1
 
 def bad(job: mutable ParseJob[Pending]) -> int:
-	finish_ok((&job).cast[any ParseJob[Pending]&])
+	finish_ok((&job).cast[mutable any ParseJob[Pending]&])
 	return take_ready(job)
 `
 	_, errs := parseAndAnalyze(t, "derived_struct_state_parser_ref_call_mutation_reject.llcontext", src)
@@ -659,12 +682,12 @@ func TestAnalyzeAcceptsReprovingReadyStateAfterParserRefCallMutation(t *testing.
 def take_ready(job: ParseJob[Ready]) -> int:
 	return job.checksum
 
-def finish_ok(job: any ParseJob[Pending]&) -> void:
+def finish_ok(job: mutable any ParseJob[Pending]&) -> void:
 	job.checksum <- 7
 	job.stage <- 1
 
 def ok(job: mutable ParseJob[Pending]) -> int:
-	finish_ok((&job).cast[any ParseJob[Pending]&])
+	finish_ok((&job).cast[mutable any ParseJob[Pending]&])
 	if job is ParseJob[Ready]:
 		return take_ready(job)
 	return 0
@@ -687,11 +710,11 @@ func TestAnalyzeRejectsUsingStaleOpenStateAfterSocketCloseRefCall(t *testing.T) 
 def take_open(sock: Socket[Open]) -> int:
 	return sock.bytes_sent
 
-def close_socket(sock: any Socket[Open]&) -> void:
+def close_socket(sock: mutable any Socket[Open]&) -> void:
 	sock.fd <- -1
 
 def bad(sock: mutable Socket[Open]) -> int:
-	close_socket((&sock).cast[any Socket[Open]&])
+	close_socket((&sock).cast[mutable any Socket[Open]&])
 	return take_open(sock)
 `
 	_, errs := parseAndAnalyze(t, "derived_struct_state_socket_ref_call_mutation_reject.llcontext", src)
@@ -716,12 +739,12 @@ func TestAnalyzeRejectsUsingStaleInitializedStateAfterBufferInitRefCall(t *testi
 def take_initialized(buf: ScratchBuffer[Initialized]) -> int:
 	return buf.capacity - buf.used
 
-def init_buffer(buf: any ScratchBuffer[Uninitialized]&) -> void:
+def init_buffer(buf: mutable any ScratchBuffer[Uninitialized]&) -> void:
 	buf.capacity <- 64
 	buf.used <- 0
 
 def bad(buf: mutable ScratchBuffer[Uninitialized]) -> int:
-	init_buffer((&buf).cast[any ScratchBuffer[Uninitialized]&])
+	init_buffer((&buf).cast[mutable any ScratchBuffer[Uninitialized]&])
 	return take_initialized(buf)
 `
 	_, errs := parseAndAnalyze(t, "derived_struct_state_buffer_ref_call_mutation_reject.llcontext", src)
@@ -8614,15 +8637,15 @@ func TestAnalyzePinsArenaHeapPointerContracts(t *testing.T) {
 	result, errs := parseAndAnalyze(t, "arena.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
-	requireFunctionReturnTypeString(t, result, "malloc", "heap void&?")
+	requireFunctionReturnTypeString(t, result, "malloc", "heap mutable void&?")
 	requireFunctionReturnTypeString(t, result, "sfree", "heap T!")
-	requireFunctionReturnTypeString(t, result, "new_region_with_owner", "heap Region&")
-	requireFunctionReturnTypeString(t, result, "new_region", "heap Region&")
-	requireFunctionReturnTypeString(t, result, "arena_alloc", "heap void&")
-	requireFunctionReturnTypeString(t, result, "arena_realloc", "heap void&")
-	requireFunctionReturnTypeString(t, result, "arena_strdup", "heap u8&")
-	requireFunctionReturnTypeString(t, result, "arena_memdup", "heap void&")
-	requireFunctionReturnTypeString(t, result, "arena_vsprintf", "heap u8&")
+	requireFunctionReturnTypeString(t, result, "new_region_with_owner", "heap mutable Region&")
+	requireFunctionReturnTypeString(t, result, "new_region", "heap mutable Region&")
+	requireFunctionReturnTypeString(t, result, "arena_alloc", "heap mutable void&")
+	requireFunctionReturnTypeString(t, result, "arena_realloc", "heap mutable void&")
+	requireFunctionReturnTypeString(t, result, "arena_strdup", "heap mutable u8&")
+	requireFunctionReturnTypeString(t, result, "arena_memdup", "heap mutable void&")
+	requireFunctionReturnTypeString(t, result, "arena_vsprintf", "heap mutable u8&")
 }
 
 func TestAnalyzePinsCollectionsHeapPointerContracts(t *testing.T) {
@@ -8631,7 +8654,7 @@ func TestAnalyzePinsCollectionsHeapPointerContracts(t *testing.T) {
 	result, errs := parseAndAnalyze(t, "collections.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
-	requireFunctionReturnTypeString(t, result, "arena_dict_copy_key", "heap u8&")
+	requireFunctionReturnTypeString(t, result, "arena_dict_copy_key", "heap mutable u8&")
 }
 
 func TestAnalyzePinsStoresHeapPointerContracts(t *testing.T) {
@@ -8640,7 +8663,7 @@ func TestAnalyzePinsStoresHeapPointerContracts(t *testing.T) {
 	result, errs := parseAndAnalyze(t, "stores.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
-	requireFunctionReturnTypeString(t, result, "ctx_packed_store_state_new", "heap void&")
+	requireFunctionReturnTypeString(t, result, "ctx_packed_store_state_new", "heap mutable void&")
 }
 
 func TestAnalyzePinsRuntimePreludeBuiltinExternPermissionContracts(t *testing.T) {
@@ -8661,13 +8684,13 @@ func TestAnalyzePinsRuntimePreludeHeapPointerContracts(t *testing.T) {
 	result, errs := parseAndAnalyze(t, "contextlang_runtime_prelude.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
-	requireFunctionReturnTypeString(t, result, "alloc_perm", "heap void&")
-	requireFunctionReturnTypeString(t, result, "alloc_scratch", "heap void&")
+	requireFunctionReturnTypeString(t, result, "alloc_perm", "heap mutable void&")
+	requireFunctionReturnTypeString(t, result, "alloc_scratch", "heap mutable void&")
 	requireFunctionReturnTypeString(t, result, "intern_small_string", "heap u8&")
 	requireFunctionReturnTypeString(t, result, "int_to_string_into", "heap u8&")
 	requireFunctionReturnTypeString(t, result, "char_to_string_into", "heap u8&")
-	requireFunctionReturnTypeString(t, result, "string_builder_new", "heap StringBuilder&")
-	requireFunctionReturnTypeString(t, result, "string_builder_append", "heap StringBuilder&")
+	requireFunctionReturnTypeString(t, result, "string_builder_new", "heap mutable StringBuilder&")
+	requireFunctionReturnTypeString(t, result, "string_builder_append", "heap mutable StringBuilder&")
 	requireFunctionReturnTypeString(t, result, "string_builder_finish", "heap u8&")
 }
 
@@ -8692,8 +8715,8 @@ func TestAnalyzePinsRuntimeStage1BuiltinPermissionContracts(t *testing.T) {
 	requireFunctionReturnTypeString(t, result, "int_to_string_scratch", "heap u8&")
 	requireFunctionReturnTypeString(t, result, "char_to_string", "heap u8&")
 	requireFunctionReturnTypeString(t, result, "char_to_string_scratch", "heap u8&")
-	requireFunctionReturnTypeString(t, result, "rt_string_builder_new", "heap StringBuilder&")
-	requireFunctionReturnTypeString(t, result, "rt_string_builder_append", "heap StringBuilder&")
+	requireFunctionReturnTypeString(t, result, "rt_string_builder_new", "heap mutable StringBuilder&")
+	requireFunctionReturnTypeString(t, result, "rt_string_builder_append", "heap mutable StringBuilder&")
 	requireFunctionReturnTypeString(t, result, "string_view_copy", "heap u8&")
 }
 

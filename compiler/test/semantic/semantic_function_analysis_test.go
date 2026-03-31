@@ -94,7 +94,7 @@ def run(flag: bool, thread: Thread[i64, Joinable]) -> i64:
 }
 
 func TestAnalyzeRecordsReturnIsolationSummary(t *testing.T) {
-	src := `def borrow_ref(slot: any i32&) -> any i32&:
+	src := `def borrow_ref(slot: mutable any i32&) -> mutable any i32&:
 	slot[0u] <- 3i32
 	return slot
 `
@@ -124,8 +124,8 @@ func TestAnalyzeRecordsAliasPartitionsAndGuardedCFGEdges(t *testing.T) {
 
 def alias_flow(seed: i32, box: heap Box&?) -> i32:
 	region scratch(1024u)
-	left: scratch i32& = new[scratch] seed
-	alias: scratch i32& = left
+	left: mutable scratch i32& = new[scratch] seed
+	alias: mutable scratch i32& = left
 	alias[0u] <- seed
 	if box == null:
 		return left[0u]
