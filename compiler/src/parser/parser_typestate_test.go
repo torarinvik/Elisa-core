@@ -875,6 +875,42 @@ func TestParseExternEnsuresClause(t *testing.T) {
 	}
 }
 
+func TestParseConditionalEnsuresClauses(t *testing.T) {
+	file, errs := parseSourceFile(t, "def finish(job: any ParseJob&, player: any Player&) -> bool ensures return true => job => Ready, return false => job => Failed, player => preserve:\n    return true\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[0])
+	}
+	if len(decl.Ensures) != 3 {
+		t.Fatalf("expected three ensures clauses, got %d", len(decl.Ensures))
+	}
+	if decl.Ensures[0].Condition.Kind != ast.EnsuresConditionReturnBool || !decl.Ensures[0].Condition.ReturnBool {
+		t.Fatalf("expected first ensures clause to be return-true conditioned, got %#v", decl.Ensures[0].Condition)
+	}
+	if decl.Ensures[1].Condition.Kind != ast.EnsuresConditionReturnBool || decl.Ensures[1].Condition.ReturnBool {
+		t.Fatalf("expected second ensures clause to be return-false conditioned, got %#v", decl.Ensures[1].Condition)
+	}
+	if decl.Ensures[2].Condition.Kind != ast.EnsuresConditionAlways {
+		t.Fatalf("expected third ensures clause to stay unconditional, got %#v", decl.Ensures[2].Condition)
+	}
+	if decl.Ensures[2].Kind != ast.EnsuresKindPreserve {
+		t.Fatalf("expected unconditional clause to preserve state, got %#v", decl.Ensures[2])
+	}
+}
+
+func TestParseConditionalEnsuresRequiresBoolLiteralBranch(t *testing.T) {
+	_, errs := parseSourceFile(t, "def finish(job: any ParseJob&) -> bool ensures return maybe => job => Ready:\n    return true\n")
+	if len(errs) == 0 {
+		t.Fatal("expected parser error for non-bool ensures return condition")
+	}
+	if !strings.Contains(errs[0], "ensures return condition expects true or false") {
+		t.Fatalf("expected conditional ensures diagnostic, got %v", errs)
+	}
+}
+
 func TestParseParallelForStatement(t *testing.T) {
 	file, errs := parseSourceFile(t, "packed enum Expr:\n    Int(value: int)\n\ndef walk(frozen: Expr.Store[Frozen]) -> void:\n    pool workers(4u):\n        parallel for node in frozen:\n            pass\n")
 	if len(errs) != 0 {

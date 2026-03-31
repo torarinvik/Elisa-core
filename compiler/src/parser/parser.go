@@ -788,6 +788,27 @@ func (p *Parser) parseEnsuresPath() ast.EnsuresPath {
 	return ast.EnsuresPath{Position: pos, Root: root, Fields: fields}
 }
 
+func (p *Parser) parseEnsuresCondition() ast.EnsuresCondition {
+	pos := p.cur().Pos
+	if !p.match(lexer.TOKEN_RETURN) {
+		return ast.EnsuresCondition{Position: pos, Kind: ast.EnsuresConditionAlways}
+	}
+	condition := ast.EnsuresCondition{Position: pos, Kind: ast.EnsuresConditionReturnBool}
+	switch p.peek() {
+	case lexer.TOKEN_TRUE:
+		p.advance()
+		condition.ReturnBool = true
+	case lexer.TOKEN_FALSE:
+		p.advance()
+		condition.ReturnBool = false
+	default:
+		p.errorf("ensures return condition expects true or false, got %s", p.cur())
+		p.advance()
+	}
+	p.expect(lexer.TOKEN_FATARROW)
+	return condition
+}
+
 func (p *Parser) parseEnsuresStateCases() []string {
 	stateCases := make([]string, 0, 2)
 	stateCases = append(stateCases, p.expect(lexer.TOKEN_IDENT).Text)
@@ -799,22 +820,23 @@ func (p *Parser) parseEnsuresStateCases() []string {
 
 func (p *Parser) parseEnsuresClause() ast.EnsuresClause {
 	pos := p.cur().Pos
+	condition := p.parseEnsuresCondition()
 	target := p.parseEnsuresPath()
 	p.expect(lexer.TOKEN_FATARROW)
 	if p.matchIdentText("preserve") {
-		return ast.EnsuresClause{Position: pos, Target: target, Kind: ast.EnsuresKindPreserve}
+		return ast.EnsuresClause{Position: pos, Condition: condition, Target: target, Kind: ast.EnsuresKindPreserve}
 	}
 	if p.match(lexer.TOKEN_AMPERSAND) {
 		state := ast.RefStateNonNull
 		if p.match(lexer.TOKEN_QUESTION) {
 			state = ast.RefStateNullable
 		}
-		return ast.EnsuresClause{Position: pos, Target: target, Kind: ast.EnsuresKindRefState, RefState: state}
+		return ast.EnsuresClause{Position: pos, Condition: condition, Target: target, Kind: ast.EnsuresKindRefState, RefState: state}
 	}
 	if p.match(lexer.TOKEN_BANG) {
-		return ast.EnsuresClause{Position: pos, Target: target, Kind: ast.EnsuresKindRefState, RefState: ast.RefStateNull}
+		return ast.EnsuresClause{Position: pos, Condition: condition, Target: target, Kind: ast.EnsuresKindRefState, RefState: ast.RefStateNull}
 	}
-	return ast.EnsuresClause{Position: pos, Target: target, Kind: ast.EnsuresKindNamedState, StateCases: p.parseEnsuresStateCases()}
+	return ast.EnsuresClause{Position: pos, Condition: condition, Target: target, Kind: ast.EnsuresKindNamedState, StateCases: p.parseEnsuresStateCases()}
 }
 
 func (p *Parser) parseEnsuresClausesAfterKeyword() []ast.EnsuresClause {

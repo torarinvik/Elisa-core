@@ -313,8 +313,21 @@ const (
 	FuncPoststateKindPreserve
 )
 
+type FuncPoststateConditionKind int
+
+const (
+	FuncPoststateConditionAlways FuncPoststateConditionKind = iota
+	FuncPoststateConditionReturnBool
+)
+
+type FuncPoststateCondition struct {
+	Kind       FuncPoststateConditionKind
+	ReturnBool bool
+}
+
 type FuncPoststate struct {
 	Position   lexer.Pos
+	Condition  FuncPoststateCondition
 	ParamIndex int
 	Path       []borrowReturnAnnotationStep
 	Kind       FuncPoststateKind
@@ -1719,6 +1732,7 @@ func cloneFuncPoststates(poststates []FuncPoststate) []FuncPoststate {
 	for i, poststate := range poststates {
 		cloned[i] = FuncPoststate{
 			Position:   poststate.Position,
+			Condition:  poststate.Condition,
 			ParamIndex: poststate.ParamIndex,
 			Path:       cloneBorrowReturnAnnotationSteps(poststate.Path),
 			Kind:       poststate.Kind,

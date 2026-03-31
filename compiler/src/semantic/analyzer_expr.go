@@ -294,8 +294,8 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		}
 		mergedAffine := a.cloneAffineValueStates()
 		mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
-		left, leftSnapshot := a.analyzeExprInAffineScope(n.Value, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
-		right, rightSnapshot := a.analyzeExprInAffineScope(n.Alt, a.refinedScopeForCondition(a.currentScope, n.Cond, false))
+		left, leftSnapshot := a.analyzeExprInConditionAffineScope(n.Value, a.currentScope, n.Cond, true)
+		right, rightSnapshot := a.analyzeExprInConditionAffineScope(n.Alt, a.currentScope, n.Cond, false)
 		mergedAffine = mergeAffineValueStates(mergedAffine, leftSnapshot.Affine)
 		mergedAffine = mergeAffineValueStates(mergedAffine, rightSnapshot.Affine)
 		mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, leftSnapshot.BorrowedOwnerRefs)
@@ -3104,6 +3104,7 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 		}
 		a.recordCallArgPoststates(expr.Args[i], paramType, funcPoststatesForParam(appliedType.Poststates, i), originalTrackedByRoot)
 	}
+	a.rememberConditionalCallPoststates(expr, appliedType, originalTrackedByRoot)
 	switch ft.Name {
 	case "pool_shutdown":
 		if len(expr.Args) >= 1 {
@@ -4846,6 +4847,17 @@ func (a *Analyzer) analyzeValueExprInScope(expr ast.Expr, expected Type, scope *
 }
 
 func (a *Analyzer) analyzeValueExprInAffineScope(expr ast.Expr, expected Type, scope *Scope) (Type, affineFlowSnapshot) {
+	return a.analyzeValueExprInAffineScopePrepared(expr, expected, scope, nil)
+}
+
+func (a *Analyzer) analyzeValueExprInConditionAffineScope(expr ast.Expr, expected Type, parent *Scope, cond ast.Expr, truthy bool) (Type, affineFlowSnapshot) {
+	scope := a.refinedScopeForCondition(parent, cond, truthy)
+	return a.analyzeValueExprInAffineScopePrepared(expr, expected, scope, func() {
+		a.applyConditionRefinementsInternal(scope, cond, truthy, true)
+	})
+}
+
+func (a *Analyzer) analyzeValueExprInAffineScopePrepared(expr ast.Expr, expected Type, scope *Scope, prepare func()) (Type, affineFlowSnapshot) {
 	savedAffine := a.currentAffineValues
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
 	savedFunctionValues := a.currentFunctionValues
@@ -4856,6 +4868,9 @@ func (a *Analyzer) analyzeValueExprInAffineScope(expr ast.Expr, expected Type, s
 	a.currentFunctionValues = a.cloneFunctionValueBindings()
 	a.currentSpecializedValueTypes = a.cloneSpecializedValueTypeBindings()
 	a.currentValueBindings = a.cloneValueBindings()
+	if prepare != nil {
+		prepare()
+	}
 	result := a.analyzeValueExprInScope(expr, expected, scope)
 	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), ValueBindings: a.cloneValueBindings()}
 	a.currentAffineValues = savedAffine
@@ -4876,8 +4891,8 @@ func (a *Analyzer) analyzeContextualFloatTernaryExpr(expr *ast.TernaryExpr, expe
 	}
 	mergedAffine := a.cloneAffineValueStates()
 	mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
-	left, leftSnapshot := a.analyzeValueExprInAffineScope(expr.Value, expected, a.refinedScopeForCondition(a.currentScope, expr.Cond, true))
-	right, rightSnapshot := a.analyzeValueExprInAffineScope(expr.Alt, expected, a.refinedScopeForCondition(a.currentScope, expr.Cond, false))
+	left, leftSnapshot := a.analyzeValueExprInConditionAffineScope(expr.Value, expected, a.currentScope, expr.Cond, true)
+	right, rightSnapshot := a.analyzeValueExprInConditionAffineScope(expr.Alt, expected, a.currentScope, expr.Cond, false)
 	mergedAffine = mergeAffineValueStates(mergedAffine, leftSnapshot.Affine)
 	mergedAffine = mergeAffineValueStates(mergedAffine, rightSnapshot.Affine)
 	mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, leftSnapshot.BorrowedOwnerRefs)

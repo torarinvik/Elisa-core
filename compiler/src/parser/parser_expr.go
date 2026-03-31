@@ -123,7 +123,7 @@ func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string, strin
 		tok := p.advance()
 		return ast.RefStorageStatic, true, tok.Text, "", ""
 	default:
-		if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text != "can" {
+		if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text != "can" && p.tokens[p.pos+1].Text != "ensures" {
 			name := p.advance().Text
 			return ast.RefStorageAny, true, name, "", name
 		}

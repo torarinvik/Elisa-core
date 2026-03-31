@@ -77,7 +77,7 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorage
 					if ret != nil {
 						retType = a.resolveType(ret)
 					}
-					poststates = a.resolveFuncPoststates(name, params, ptypes, ensures)
+					poststates = a.resolveFuncPoststates(name, params, ptypes, retType, ensures)
 				})
 			})
 		})
@@ -139,6 +139,49 @@ func poststatePathKey(paramIndex int, steps []borrowReturnAnnotationStep) string
 	return strings.Join(parts, "")
 }
 
+func funcPoststateConditionFromAST(condition ast.EnsuresCondition) FuncPoststateCondition {
+	switch condition.Kind {
+	case ast.EnsuresConditionReturnBool:
+		return FuncPoststateCondition{Kind: FuncPoststateConditionReturnBool, ReturnBool: condition.ReturnBool}
+	default:
+		return FuncPoststateCondition{Kind: FuncPoststateConditionAlways}
+	}
+}
+
+func funcPoststateConditionKey(condition FuncPoststateCondition) string {
+	switch condition.Kind {
+	case FuncPoststateConditionReturnBool:
+		if condition.ReturnBool {
+			return "return:true"
+		}
+		return "return:false"
+	default:
+		return "always"
+	}
+}
+
+func funcPoststateConditionLabel(condition FuncPoststateCondition) string {
+	switch condition.Kind {
+	case FuncPoststateConditionReturnBool:
+		if condition.ReturnBool {
+			return "return true"
+		}
+		return "return false"
+	default:
+		return "always"
+	}
+}
+
+func funcPoststateConditionsOverlap(left FuncPoststateCondition, right FuncPoststateCondition) bool {
+	if left.Kind == FuncPoststateConditionAlways || right.Kind == FuncPoststateConditionAlways {
+		return true
+	}
+	if left.Kind != right.Kind {
+		return false
+	}
+	return left.ReturnBool == right.ReturnBool
+}
+
 func poststateNamedStateTargetBase(t Type) (*StructType, bool) {
 	switch tt := t.(type) {
 	case *AggregateStateType:
@@ -188,13 +231,22 @@ func (a *Analyzer) projectFuncPoststateTargetType(current Type, step borrowRetur
 	return nil, false
 }
 
-func (a *Analyzer) resolveFuncPoststates(name string, params []ast.ParamDecl, paramTypes []Type, ensures []ast.EnsuresClause) []FuncPoststate {
+func (a *Analyzer) resolveFuncPoststates(name string, params []ast.ParamDecl, paramTypes []Type, returnType Type, ensures []ast.EnsuresClause) []FuncPoststate {
 	if len(ensures) == 0 {
 		return nil
 	}
 	resolved := make([]FuncPoststate, 0, len(ensures))
-	seenTargets := make(map[string]lexer.Pos, len(ensures))
+	type seenPoststateTarget struct {
+		Condition FuncPoststateCondition
+		Position  lexer.Pos
+	}
+	seenTargets := make(map[string][]seenPoststateTarget, len(ensures))
 	for _, clause := range ensures {
+		condition := funcPoststateConditionFromAST(clause.Condition)
+		if condition.Kind == FuncPoststateConditionReturnBool && !IsBoolType(returnType) {
+			a.errorf(clause.Position, "ensures %s on function %q requires a bool return type, got %s", funcPoststateConditionLabel(condition), name, returnType.String())
+			continue
+		}
 		paramIndex := -1
 		for i, param := range params {
 			if param.Name == clause.Target.Root {
@@ -211,11 +263,20 @@ func (a *Analyzer) resolveFuncPoststates(name string, params []ast.ParamDecl, pa
 		}
 		steps := ensuresClauseSteps(clause)
 		key := poststatePathKey(paramIndex, steps)
-		if prev, exists := seenTargets[key]; exists {
-			a.errorf(clause.Position, "duplicate ensures target %q on function %q (first seen at %s:%d:%d)", clause.Target.Root+borrowAnnotationPathSuffix(steps), name, prev.File, prev.Line, prev.Col)
+		targetName := clause.Target.Root + borrowAnnotationPathSuffix(steps)
+		overlapped := false
+		for _, seen := range seenTargets[key] {
+			if !funcPoststateConditionsOverlap(seen.Condition, condition) {
+				continue
+			}
+			a.errorf(clause.Position, "overlapping ensures target %q for %s on function %q (first seen at %s:%d:%d as %s)", targetName, funcPoststateConditionLabel(condition), name, seen.Position.File, seen.Position.Line, seen.Position.Col, funcPoststateConditionLabel(seen.Condition))
+			overlapped = true
+			break
+		}
+		if overlapped {
 			continue
 		}
-		seenTargets[key] = clause.Position
+		seenTargets[key] = append(seenTargets[key], seenPoststateTarget{Condition: condition, Position: clause.Position})
 		targetType := paramTypes[paramIndex]
 		ok := true
 		for _, step := range steps {
@@ -228,7 +289,7 @@ func (a *Analyzer) resolveFuncPoststates(name string, params []ast.ParamDecl, pa
 		if !ok {
 			continue
 		}
-		poststate := FuncPoststate{Position: clause.Position, ParamIndex: paramIndex, Path: steps}
+		poststate := FuncPoststate{Position: clause.Position, Condition: condition, ParamIndex: paramIndex, Path: steps}
 		switch clause.Kind {
 		case ast.EnsuresKindNamedState:
 			base, ok := poststateNamedStateTargetBase(targetType)

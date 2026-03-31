@@ -114,6 +114,7 @@ type Analyzer struct {
 	currentReturnProvenance           regionRefState
 	currentReturnBorrowedOwnerRefs    borrowedOwnerRefSummary
 	currentConservativeCallWidenings  map[*Symbol][][]borrowReturnAnnotationStep
+	conditionalCallPoststateOriginals map[*ast.CallExpr]map[*Symbol]Type
 	suppressDiagnostics               bool
 	returnProvenanceInProgress        map[*ast.FuncDecl]bool
 	returnBorrowedOwnerRefInProgress  map[*ast.FuncDecl]bool
@@ -212,26 +213,27 @@ func Analyze(file *ast.File) *Result {
 		parallelForCapacity = 4
 	}
 	a := &Analyzer{
-		file:                             file,
-		namedTypes:                       map[string]Type{},
-		permissions:                      map[string]*PermissionSet{},
-		globalScope:                      NewScope(nil),
-		functionTypes:                    map[string]*FuncType{},
-		constValues:                      map[string]ConstValue{},
-		exprTypes:                        make(map[ast.Expr]Type, exprCapacity),
-		exprFacts:                        make(map[ast.Expr]OptimizationFacts, exprFactsCapacity),
-		resolvedCastHooks:                make(map[ast.Expr]*Symbol, resolvedCastHookCapacity),
-		exprDenseNodeKeys:                make(map[ast.Expr]DenseNodeKeyInfo, denseNodeCapacity),
-		exprNodeTables:                   make(map[ast.Expr]NodeTableInfo, denseNodeCapacity),
-		deferInfo:                        map[*ast.DeferStmt]*DeferInfo{},
-		parallelForInfo:                  make(map[*ast.ParallelForStmt]*ParallelForInfo, parallelForCapacity),
-		symbolFacts:                      map[*Symbol]OptimizationFacts{},
-		funcDeclSymbols:                  make(map[*ast.FuncDecl]*Symbol, funcDeclCapacity),
-		functionAnalyses:                 make(map[*ast.FuncDecl]*FunctionAnalysis, funcDeclCapacity),
-		castHooksByName:                  map[string]map[castHookSignature]*Symbol{},
-		returnProvenanceInProgress:       map[*ast.FuncDecl]bool{},
-		returnBorrowedOwnerRefInProgress: map[*ast.FuncDecl]bool{},
-		sinkParamInferenceInProgress:     map[*ast.FuncDecl]bool{},
+		file:                              file,
+		namedTypes:                        map[string]Type{},
+		permissions:                       map[string]*PermissionSet{},
+		globalScope:                       NewScope(nil),
+		functionTypes:                     map[string]*FuncType{},
+		constValues:                       map[string]ConstValue{},
+		exprTypes:                         make(map[ast.Expr]Type, exprCapacity),
+		exprFacts:                         make(map[ast.Expr]OptimizationFacts, exprFactsCapacity),
+		resolvedCastHooks:                 make(map[ast.Expr]*Symbol, resolvedCastHookCapacity),
+		exprDenseNodeKeys:                 make(map[ast.Expr]DenseNodeKeyInfo, denseNodeCapacity),
+		exprNodeTables:                    make(map[ast.Expr]NodeTableInfo, denseNodeCapacity),
+		deferInfo:                         map[*ast.DeferStmt]*DeferInfo{},
+		parallelForInfo:                   make(map[*ast.ParallelForStmt]*ParallelForInfo, parallelForCapacity),
+		symbolFacts:                       map[*Symbol]OptimizationFacts{},
+		funcDeclSymbols:                   make(map[*ast.FuncDecl]*Symbol, funcDeclCapacity),
+		functionAnalyses:                  make(map[*ast.FuncDecl]*FunctionAnalysis, funcDeclCapacity),
+		castHooksByName:                   map[string]map[castHookSignature]*Symbol{},
+		returnProvenanceInProgress:        map[*ast.FuncDecl]bool{},
+		returnBorrowedOwnerRefInProgress:  map[*ast.FuncDecl]bool{},
+		sinkParamInferenceInProgress:      map[*ast.FuncDecl]bool{},
+		conditionalCallPoststateOriginals: make(map[*ast.CallExpr]map[*Symbol]Type, exprCapacity/16+8),
 	}
 	a.registerBuiltins()
 	activeDecls := a.flattenScopedDecls(file.Decls, "", nil)
@@ -2748,10 +2750,47 @@ func (a *Analyzer) currentFuncParamSymbol(index int) (*Symbol, bool) {
 }
 
 func (a *Analyzer) validateCurrentFuncPoststates() {
+	a.validateCurrentFuncPoststatesForOutcome(false, false)
+}
+
+func funcPoststatesHaveConditional(poststates []FuncPoststate) bool {
+	for _, poststate := range poststates {
+		if poststate.Condition.Kind != FuncPoststateConditionAlways {
+			return true
+		}
+	}
+	return false
+}
+
+func funcPoststateAppliesForOutcome(poststate FuncPoststate, outcomeKnown bool, outcomeValue bool) bool {
+	switch poststate.Condition.Kind {
+	case FuncPoststateConditionReturnBool:
+		return outcomeKnown && poststate.Condition.ReturnBool == outcomeValue
+	default:
+		return true
+	}
+}
+
+func (a *Analyzer) validateCurrentFuncPoststatesForReturnValue(value ast.Expr) {
+	if a == nil || a.currentFuncType == nil || !funcPoststatesHaveConditional(a.currentFuncType.Poststates) {
+		a.validateCurrentFuncPoststates()
+		return
+	}
+	outcomeValue, outcomeKnown := a.evalConstBoolExpr(value)
+	if !outcomeKnown {
+		a.errorf(value.Pos(), "functions with branch-sensitive ensures must return literal true or false on each return path")
+	}
+	a.validateCurrentFuncPoststatesForOutcome(outcomeKnown, outcomeValue)
+}
+
+func (a *Analyzer) validateCurrentFuncPoststatesForOutcome(outcomeKnown bool, outcomeValue bool) {
 	if a == nil || a.suppressDiagnostics || a.currentFuncDecl == nil || a.currentFuncType == nil || len(a.currentFuncType.Poststates) == 0 {
 		return
 	}
 	for _, poststate := range a.currentFuncType.Poststates {
+		if !funcPoststateAppliesForOutcome(poststate, outcomeKnown, outcomeValue) {
+			continue
+		}
 		a.validateCurrentFuncPoststate(poststate)
 	}
 }

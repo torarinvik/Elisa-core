@@ -201,3 +201,132 @@ def bad_state(player: any Player[Alive]&) -> void can[Abort] ensures player => C
 		t.Fatalf("expected invalid named-state diagnostic, got:\n%s", errText)
 	}
 }
+
+func TestSemanticConditionalEnsuresBranchRecovery(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "conditional_ensures_branch.llcontext", `struct ParseJob[state Pending | Ready | Failed]:
+	stage: mutable int
+	checksum: mutable int
+
+	derive state:
+		Pending when self.stage == 0
+		Ready when self.stage == 1
+		Failed when self.stage == 2
+
+def expect_ready(job: any ParseJob[Ready]&) -> void:
+	pass
+
+def expect_failed(job: any ParseJob[Failed]&) -> void:
+	pass
+
+def finish(mutable job: any ParseJob[Pending]&, ok: bool) -> bool can[Abort] ensures return true => job => Ready, return false => job => Failed:
+	if ok:
+		job.stage <- 1
+		job.checksum <- 7
+		return true
+	job.stage <- 2
+	return false
+
+def use(mutable job: any ParseJob[Pending]&, ok: bool) -> void can[Abort]:
+	if finish(job, ok):
+		expect_ready(job)
+	else:
+		expect_failed(job)
+`)
+}
+
+func TestSemanticConditionalEnsuresJoinOnPlainCall(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "conditional_ensures_join.llcontext", `struct ParseJob[state Pending | Ready | Failed]:
+	stage: mutable int
+
+	derive state:
+		Pending when self.stage == 0
+		Ready when self.stage == 1
+		Failed when self.stage == 2
+
+def expect_done(job: any ParseJob[Ready | Failed]&) -> void:
+	pass
+
+def finish(mutable job: any ParseJob[Pending]&, ok: bool) -> bool can[Abort] ensures return true => job => Ready, return false => job => Failed:
+	if ok:
+		job.stage <- 1
+		return true
+	job.stage <- 2
+	return false
+
+def use(mutable job: any ParseJob[Pending]&, ok: bool) -> void can[Abort]:
+	finish(job, ok)
+	expect_done(job)
+`)
+}
+
+func TestSemanticConditionalEnsuresPreserveBranchRecovery(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "conditional_ensures_preserve.llcontext", `struct Player[state Alive | Dead]:
+	health: mutable int
+	score: mutable int
+
+	derive state:
+		Alive when self.health > 0
+		Dead when self.health <= 0
+
+def expect_alive(player: any Player[Alive]&) -> void:
+	pass
+
+def expect_dead(player: any Player[Dead]&) -> void:
+	pass
+
+def maybe_update(mutable player: any Player[Alive]&, ok: bool) -> bool can[Abort] ensures return true => player => preserve, return false => player => Dead:
+	if ok:
+		player.score <- player.score + 1
+		return true
+	player.health <- 0
+	return false
+
+def use(mutable player: any Player[Alive]&, ok: bool) -> void can[Abort]:
+	if maybe_update(player, ok):
+		expect_alive(player)
+	else:
+		expect_dead(player)
+`)
+}
+
+func TestSemanticConditionalEnsuresRejectWrongReturnBranchProof(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "conditional_ensures_wrong_branch.llcontext", `struct ParseJob[state Pending | Ready | Failed]:
+	stage: mutable int
+
+	derive state:
+		Pending when self.stage == 0
+		Ready when self.stage == 1
+		Failed when self.stage == 2
+
+def bad_finish(mutable job: any ParseJob[Pending]&, ok: bool) -> bool can[Abort] ensures return true => job => Ready, return false => job => Failed:
+	if ok:
+		job.stage <- 1
+		return false
+	job.stage <- 2
+	return true
+`)
+	errText := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(errText, "cannot prove ensures job => Failed") {
+		t.Fatalf("expected false-branch conditional ensures proof failure, got:\n%s", errText)
+	}
+	if !strings.Contains(errText, "cannot prove ensures job => Ready") {
+		t.Fatalf("expected true-branch conditional ensures proof failure, got:\n%s", errText)
+	}
+}
+
+func TestSemanticConditionalEnsuresRejectNonBoolReturn(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "conditional_ensures_non_bool.llcontext", `struct Player[state Alive | Dead]:
+	health: mutable int
+
+	derive state:
+		Alive when self.health > 0
+		Dead when self.health <= 0
+
+def bad(player: any Player[Alive]&) -> void can[Abort] ensures return true => player => preserve:
+	pass
+`)
+	errText := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(errText, "requires a bool return type") {
+		t.Fatalf("expected non-bool conditional ensures diagnostic, got:\n%s", errText)
+	}
+}

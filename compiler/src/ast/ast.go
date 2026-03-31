@@ -152,6 +152,19 @@ type PermissionRef struct {
 	Member   string
 }
 
+type EnsuresConditionKind int
+
+const (
+	EnsuresConditionAlways EnsuresConditionKind = iota
+	EnsuresConditionReturnBool
+)
+
+type EnsuresCondition struct {
+	Position   lexer.Pos
+	Kind       EnsuresConditionKind
+	ReturnBool bool
+}
+
 type EnsuresKind int
 
 const (
@@ -168,6 +181,7 @@ type EnsuresPath struct {
 
 type EnsuresClause struct {
 	Position   lexer.Pos
+	Condition  EnsuresCondition
 	Target     EnsuresPath
 	Kind       EnsuresKind
 	StateCases []string

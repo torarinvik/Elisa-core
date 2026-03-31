@@ -213,7 +213,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "return type expects %s, got %s", expectedReturn.String(), valueType.String())
 			a.reportShapeMismatchNotes(n.Pos(), expectedReturn, valueType)
 		}
-		a.validateCurrentFuncPoststates()
+		a.validateCurrentFuncPoststatesForReturnValue(n.Value)
 		a.consumeAffineValueExpr(n.Value, expectedReturn, "return")
 	case *ast.IfStmt:
 		condType := a.analyzeCondExpr(n.Cond)
@@ -224,7 +224,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
 		functionValueBranches := make([]map[*Symbol]*FuncType, 0, len(n.Elifs)+2)
 		specializedValueTypeBranches := make([]map[*Symbol]Type, 0, len(n.Elifs)+2)
-		thenSnapshot := a.analyzeBlockWithAffineClone(n.Then, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
+		thenSnapshot := a.analyzeBlockWithConditionAffineClone(n.Then, a.currentScope, n.Cond, true)
 		if !blockDefinitelyExits(n.Then) {
 			mergedAffine = mergeAffineValueStates(mergedAffine, thenSnapshot.Affine)
 			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, thenSnapshot.BorrowedOwnerRefs)
@@ -236,7 +236,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			if !IsBoolType(elifType) {
 				a.errorf(elif.Position, "elif condition must be bool, got %s", elifType.String())
 			}
-			elifSnapshot := a.analyzeBlockWithAffineClone(elif.Body, a.refinedScopeForCondition(a.currentScope, elif.Cond, true))
+			elifSnapshot := a.analyzeBlockWithConditionAffineClone(elif.Body, a.currentScope, elif.Cond, true)
 			if !blockDefinitelyExits(elif.Body) {
 				mergedAffine = mergeAffineValueStates(mergedAffine, elifSnapshot.Affine)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elifSnapshot.BorrowedOwnerRefs)
@@ -245,7 +245,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			}
 		}
 		if len(n.Elifs) == 0 {
-			elseSnapshot := a.analyzeBlockWithAffineClone(n.Else, a.refinedScopeForCondition(a.currentScope, n.Cond, false))
+			elseSnapshot := a.analyzeBlockWithConditionAffineClone(n.Else, a.currentScope, n.Cond, false)
 			if !blockDefinitelyExits(n.Else) {
 				mergedAffine = mergeAffineValueStates(mergedAffine, elseSnapshot.Affine)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elseSnapshot.BorrowedOwnerRefs)
@@ -293,7 +293,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
 		mergedFunctionValues := a.cloneFunctionValueBindings()
 		mergedSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
-		bodySnapshot := a.analyzeBlockWithAffineClone(n.Body, a.refinedScopeForCondition(a.currentScope, n.Cond, true))
+		bodySnapshot := a.analyzeBlockWithConditionAffineClone(n.Body, a.currentScope, n.Cond, true)
 		if !blockDefinitelyExits(n.Body) {
 			mergedAffine = mergeAffineValueStates(mergedAffine, bodySnapshot.Affine)
 			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, bodySnapshot.BorrowedOwnerRefs)
@@ -3526,6 +3526,17 @@ type borrowedOwnerRefSummary struct {
 }
 
 func (a *Analyzer) analyzeBlockWithAffineClone(stmts []ast.Stmt, scope *Scope) affineFlowSnapshot {
+	return a.analyzeBlockWithAffineClonePrepared(stmts, scope, nil)
+}
+
+func (a *Analyzer) analyzeBlockWithConditionAffineClone(stmts []ast.Stmt, parent *Scope, cond ast.Expr, truthy bool) affineFlowSnapshot {
+	scope := a.refinedScopeForCondition(parent, cond, truthy)
+	return a.analyzeBlockWithAffineClonePrepared(stmts, scope, func() {
+		a.applyConditionRefinementsInternal(scope, cond, truthy, true)
+	})
+}
+
+func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *Scope, prepare func()) affineFlowSnapshot {
 	savedAffine := a.currentAffineValues
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
 	savedFunctionValues := a.currentFunctionValues
@@ -3537,6 +3548,9 @@ func (a *Analyzer) analyzeBlockWithAffineClone(stmts []ast.Stmt, scope *Scope) a
 	a.currentFunctionValues = a.cloneFunctionValueBindings()
 	a.currentSpecializedValueTypes = a.cloneSpecializedValueTypeBindings()
 	a.currentValueBindings = a.cloneValueBindings()
+	if prepare != nil {
+		prepare()
+	}
 	a.analyzeBlockWithRegionClone(stmts, scope)
 	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), ValueBindings: a.cloneValueBindings()}
 	a.currentAffineValues = savedAffine
@@ -4659,6 +4673,17 @@ func (a *Analyzer) cloneTrackedValueTypeWithSeen(t Type, seen map[Type]Type) Typ
 		seen[t] = cloned
 		return cloned
 	}
+}
+
+func (a *Analyzer) cloneTrackedTypesByRoot(src map[*Symbol]Type) map[*Symbol]Type {
+	if len(src) == 0 {
+		return nil
+	}
+	cloned := make(map[*Symbol]Type, len(src))
+	for sym, tracked := range src {
+		cloned[sym] = a.cloneTrackedValueType(tracked)
+	}
+	return cloned
 }
 
 func trackedNamedStateStructBase(t Type) (*StructType, bool) {
@@ -6243,6 +6268,363 @@ func (a *Analyzer) applyFuncPoststateAtPath(original Type, current Type, steps [
 	}
 }
 
+func splitFuncPoststatesByCondition(poststates []FuncPoststate) (always []FuncPoststate, whenTrue []FuncPoststate, whenFalse []FuncPoststate) {
+	for _, poststate := range poststates {
+		switch poststate.Condition.Kind {
+		case FuncPoststateConditionReturnBool:
+			if poststate.Condition.ReturnBool {
+				whenTrue = append(whenTrue, poststate)
+			} else {
+				whenFalse = append(whenFalse, poststate)
+			}
+		default:
+			always = append(always, poststate)
+		}
+	}
+	return always, whenTrue, whenFalse
+}
+
+func (a *Analyzer) applyFuncPoststateListAtArgPath(original Type, current Type, argSteps []borrowReturnAnnotationStep, poststates []FuncPoststate) (Type, bool) {
+	if current == nil || len(poststates) == 0 {
+		return current, false
+	}
+	updated := current
+	changed := false
+	for _, poststate := range poststates {
+		fullPath := joinBorrowReturnAnnotationSteps(argSteps, poststate.Path)
+		next, ok := a.applyFuncPoststateAtPath(original, updated, fullPath, poststate)
+		if !ok || next == nil {
+			continue
+		}
+		updated = next
+		changed = true
+	}
+	return updated, changed
+}
+
+type trackedValueMergePair struct {
+	Left  Type
+	Right Type
+}
+
+func (a *Analyzer) mergeTrackedValueTypes(left Type, right Type) (Type, bool) {
+	return a.mergeTrackedValueTypesWithSeen(left, right, map[trackedValueMergePair]Type{})
+}
+
+func (a *Analyzer) mergeTrackedValueTypesWithSeen(left Type, right Type, seen map[trackedValueMergePair]Type) (Type, bool) {
+	if left == nil || right == nil {
+		return nil, false
+	}
+	if SameType(left, right) {
+		return a.cloneTrackedValueType(left), true
+	}
+	if merged := MergeTypes(left, right); !IsInvalidType(merged) {
+		return merged, true
+	}
+	pair := trackedValueMergePair{Left: left, Right: right}
+	if merged, ok := seen[pair]; ok {
+		return merged, true
+	}
+	switch lt := left.(type) {
+	case *AggregateStateType:
+		rt, ok := right.(*AggregateStateType)
+		if !ok {
+			return nil, false
+		}
+		states, ok := mergeAggregateStateLists(aggregateStateStates(lt), aggregateStateStates(rt))
+		if !ok {
+			return nil, false
+		}
+		base, ok := a.mergeTrackedValueTypesWithSeen(lt.Base, rt.Base, seen)
+		if !ok || base == nil {
+			return nil, false
+		}
+		merged := cloneAggregateStateWithBase(base, states)
+		seen[pair] = merged
+		return merged, true
+	case *RefType:
+		rt, ok := right.(*RefType)
+		if !ok || lt.StateParam != rt.StateParam || lt.StorageParam != rt.StorageParam {
+			return nil, false
+		}
+		storage, explicit, okStorage := mergeRefStorages(lt.Storage, rt.Storage, lt.ExplicitStorage, rt.ExplicitStorage)
+		region, okRegion := mergeRefRegions(lt.Region, rt.Region)
+		state, okState := mergeRefStates(lt.State, rt.State)
+		if !okStorage || !okRegion || !okState {
+			return nil, false
+		}
+		merged := &RefType{Mutable: lt.Mutable && rt.Mutable, State: state, StateParam: lt.StateParam, Storage: storage, StorageParam: lt.StorageParam, Region: region, ExplicitStorage: explicit}
+		seen[pair] = merged
+		elem, ok := a.mergeTrackedValueTypesWithSeen(lt.Elem, rt.Elem, seen)
+		if !ok || elem == nil {
+			return nil, false
+		}
+		merged.Elem = elem
+		return merged, true
+	case *ArrayType:
+		rt, ok := right.(*ArrayType)
+		if !ok || lt.SurfaceName != rt.SurfaceName || !arraySizesEqual(lt, rt) {
+			return nil, false
+		}
+		elem, ok := a.mergeTrackedValueTypesWithSeen(lt.Elem, rt.Elem, seen)
+		if !ok || elem == nil {
+			return nil, false
+		}
+		merged := *lt
+		merged.Elem = elem
+		seen[pair] = &merged
+		return &merged, true
+	case *DArrayType:
+		rt, ok := right.(*DArrayType)
+		if !ok || lt.SurfaceName != rt.SurfaceName || !SameShape(lt.Shape, rt.Shape) {
+			return nil, false
+		}
+		elem, ok := a.mergeTrackedValueTypesWithSeen(lt.Elem, rt.Elem, seen)
+		if !ok || elem == nil {
+			return nil, false
+		}
+		merged := *lt
+		merged.Elem = elem
+		seen[pair] = &merged
+		return &merged, true
+	case *ViewType:
+		rt, ok := right.(*ViewType)
+		if !ok {
+			return nil, false
+		}
+		elem, ok := a.mergeTrackedValueTypesWithSeen(lt.Elem, rt.Elem, seen)
+		if !ok || elem == nil {
+			return nil, false
+		}
+		merged := *lt
+		if !viewBoundsEqual(lt, rt) {
+			merged.Begin = ""
+			merged.End = ""
+		}
+		merged.Elem = elem
+		seen[pair] = &merged
+		return &merged, true
+	case *DArrayViewType:
+		rt, ok := right.(*DArrayViewType)
+		if !ok || lt.SurfaceName != rt.SurfaceName {
+			return nil, false
+		}
+		elem, ok := a.mergeTrackedValueTypesWithSeen(lt.Elem, rt.Elem, seen)
+		if !ok || elem == nil {
+			return nil, false
+		}
+		merged := *lt
+		if lt.Begin != rt.Begin || lt.End != rt.End {
+			merged.Begin = ""
+			merged.End = ""
+		}
+		merged.Elem = elem
+		seen[pair] = &merged
+		return &merged, true
+	case *OptionalType:
+		rt, ok := right.(*OptionalType)
+		if !ok {
+			return nil, false
+		}
+		value, ok := a.mergeTrackedValueTypesWithSeen(lt.Value, rt.Value, seen)
+		if !ok || value == nil {
+			return nil, false
+		}
+		merged := &OptionalType{Value: value}
+		seen[pair] = merged
+		return merged, true
+	case *DictType:
+		rt, ok := right.(*DictType)
+		if !ok || lt.SurfaceName != rt.SurfaceName {
+			return nil, false
+		}
+		key, ok := a.mergeTrackedValueTypesWithSeen(lt.Key, rt.Key, seen)
+		if !ok || key == nil {
+			return nil, false
+		}
+		value, ok := a.mergeTrackedValueTypesWithSeen(lt.Value, rt.Value, seen)
+		if !ok || value == nil {
+			return nil, false
+		}
+		merged := &DictType{Key: key, Value: value, SurfaceName: lt.SurfaceName}
+		seen[pair] = merged
+		return merged, true
+	case *StructType:
+		rt, ok := right.(*StructType)
+		if !ok || lt.Name != rt.Name {
+			return nil, false
+		}
+		merged := *lt
+		merged.Fields = cloneStructFields(lt.Fields)
+		mergedPtr := &merged
+		seen[pair] = mergedPtr
+		for name, leftField := range lt.Fields {
+			rightField, ok := rt.Fields[name]
+			if !ok {
+				return nil, false
+			}
+			if SameType(leftField.Type, rightField.Type) {
+				continue
+			}
+			fieldType, ok := a.mergeTrackedValueTypesWithSeen(leftField.Type, rightField.Type, seen)
+			if !ok || fieldType == nil {
+				return nil, false
+			}
+			leftField.Type = fieldType
+			mergedPtr.Fields[name] = leftField
+		}
+		return mergedPtr, true
+	case *GenericInstanceType:
+		rt, ok := right.(*GenericInstanceType)
+		if !ok || lt.Name != rt.Name || len(lt.Args) != len(rt.Args) {
+			return nil, false
+		}
+		merged := *lt
+		merged.Args = append([]Type(nil), lt.Args...)
+		mergedPtr := &merged
+		seen[pair] = mergedPtr
+		for i := range lt.Args {
+			if SameType(lt.Args[i], rt.Args[i]) {
+				continue
+			}
+			argType, ok := a.mergeTrackedValueTypesWithSeen(lt.Args[i], rt.Args[i], seen)
+			if !ok || argType == nil {
+				return nil, false
+			}
+			mergedPtr.Args[i] = argType
+		}
+		if SameType(lt.Base, rt.Base) {
+			mergedPtr.Base = a.cloneTrackedValueType(lt.Base)
+			return mergedPtr, true
+		}
+		base, ok := a.mergeTrackedValueTypesWithSeen(lt.Base, rt.Base, seen)
+		if !ok || base == nil {
+			return nil, false
+		}
+		mergedPtr.Base = base
+		return mergedPtr, true
+	case *PackedEnumStoreType:
+		rt, ok := right.(*PackedEnumStoreType)
+		if !ok || lt.Name != rt.Name || lt.Enum != rt.Enum {
+			return nil, false
+		}
+		if lt.State == nil && rt.State == nil {
+			merged := *lt
+			seen[pair] = &merged
+			return &merged, true
+		}
+		state, ok := a.mergeTrackedValueTypesWithSeen(lt.State, rt.State, seen)
+		if !ok || state == nil {
+			return nil, false
+		}
+		merged := *lt
+		merged.State = state
+		seen[pair] = &merged
+		return &merged, true
+	case *DStrType:
+		rt, ok := right.(*DStrType)
+		if !ok || lt.SurfaceName != rt.SurfaceName {
+			return nil, false
+		}
+		merged := *lt
+		if !SameShape(lt.Shape, rt.Shape) {
+			merged.Shape = &WildcardShape{}
+		}
+		seen[pair] = &merged
+		return &merged, true
+	case *SViewType:
+		rt, ok := right.(*SViewType)
+		if !ok {
+			return nil, false
+		}
+		merged := *lt
+		if lt.Begin != rt.Begin || lt.End != rt.End {
+			merged.Begin = ""
+			merged.End = ""
+		}
+		seen[pair] = &merged
+		return &merged, true
+	default:
+		return nil, false
+	}
+}
+
+func (a *Analyzer) computeCallArgPoststateTrackedType(original Type, argSteps []borrowReturnAnnotationStep, poststates []FuncPoststate, outcomeKnown bool, outcomeValue bool) (Type, bool) {
+	if original == nil {
+		return nil, false
+	}
+	if len(poststates) == 0 {
+		widened, ok := a.widenNamedStatesDeepAtPath(original, argSteps)
+		if !ok || widened == nil || SameType(widened, original) {
+			return nil, false
+		}
+		return widened, true
+	}
+	baseline := original
+	baselineChanged := false
+	if widened, ok := a.widenNamedStatesDeepAtPath(baseline, argSteps); ok && widened != nil {
+		baseline = widened
+		baselineChanged = true
+	}
+	updated := baseline
+	always, whenTrue, whenFalse := splitFuncPoststatesByCondition(poststates)
+	changed := baselineChanged
+	if next, applied := a.applyFuncPoststateListAtArgPath(original, updated, argSteps, always); applied && next != nil {
+		updated = next
+		changed = true
+	}
+	if len(whenTrue) == 0 && len(whenFalse) == 0 {
+		if !changed {
+			return nil, false
+		}
+		return updated, true
+	}
+	if outcomeKnown {
+		branch := updated
+		matching := whenFalse
+		if outcomeValue {
+			matching = whenTrue
+		}
+		if next, applied := a.applyFuncPoststateListAtArgPath(original, branch, argSteps, matching); applied && next != nil {
+			branch = next
+			changed = true
+		}
+		if !changed {
+			return nil, false
+		}
+		return branch, true
+	}
+	trueBranch := updated
+	falseBranch := updated
+	branchChanged := false
+	if next, applied := a.applyFuncPoststateListAtArgPath(original, trueBranch, argSteps, whenTrue); applied && next != nil {
+		trueBranch = next
+		branchChanged = true
+	}
+	if next, applied := a.applyFuncPoststateListAtArgPath(original, falseBranch, argSteps, whenFalse); applied && next != nil {
+		falseBranch = next
+		branchChanged = true
+	}
+	joined, ok := a.mergeTrackedValueTypes(trueBranch, falseBranch)
+	if !ok || joined == nil || IsInvalidType(joined) {
+		joined = updated
+	}
+	if !changed && !branchChanged {
+		return nil, false
+	}
+	return joined, true
+}
+
+func (a *Analyzer) rememberConditionalCallPoststates(call *ast.CallExpr, fnType *FuncType, originalByRoot map[*Symbol]Type) {
+	if a == nil || call == nil || fnType == nil || !funcPoststatesHaveConditional(fnType.Poststates) {
+		return
+	}
+	if a.conditionalCallPoststateOriginals == nil {
+		a.conditionalCallPoststateOriginals = map[*ast.CallExpr]map[*Symbol]Type{}
+	}
+	a.conditionalCallPoststateOriginals[call] = a.cloneTrackedTypesByRoot(originalByRoot)
+}
+
 func (a *Analyzer) updateNamedStateTypeAtPath(root *Symbol, current Type, structSteps []borrowReturnAnnotationStep, steps []borrowReturnAnnotationStep, pos lexer.Pos, value ast.Expr, valueType Type, unknown bool) (Type, bool) {
 	if current == nil {
 		return nil, false
@@ -6457,23 +6839,8 @@ func (a *Analyzer) recordCallArgPoststates(arg ast.Expr, paramType Type, poststa
 		original = a.currentTrackedValueType(root)
 		originalByRoot[root] = original
 	}
-	current := a.currentTrackedValueType(root)
-	updated := current
-	changed := false
-	if widened, ok := a.widenNamedStatesDeepAtPath(updated, argSteps); ok && widened != nil {
-		updated = widened
-		changed = true
-	}
-	for _, poststate := range poststates {
-		fullPath := joinBorrowReturnAnnotationSteps(argSteps, poststate.Path)
-		next, ok := a.applyFuncPoststateAtPath(original, updated, fullPath, poststate)
-		if !ok || next == nil {
-			continue
-		}
-		updated = next
-		changed = true
-	}
-	if changed {
+	updated, changed := a.computeCallArgPoststateTrackedType(original, argSteps, poststates, false, false)
+	if changed && updated != nil {
 		a.bindTrackedValueType(root, updated)
 	}
 }
@@ -7755,23 +8122,27 @@ func (a *Analyzer) invalidateRegionMarks(region *Symbol, predicate func(regionMa
 
 func (a *Analyzer) refinedScopeForCondition(parent *Scope, cond ast.Expr, truthy bool) *Scope {
 	scope := NewScope(parent)
-	a.applyConditionRefinements(scope, cond, truthy)
+	a.applyConditionRefinementsInternal(scope, cond, truthy, false)
 	return scope
 }
 
 func (a *Analyzer) applyConditionRefinements(scope *Scope, expr ast.Expr, truthy bool) {
+	a.applyConditionRefinementsInternal(scope, expr, truthy, true)
+}
+
+func (a *Analyzer) applyConditionRefinementsInternal(scope *Scope, expr ast.Expr, truthy bool, persistTracked bool) {
 	switch n := expr.(type) {
 	case *ast.BinaryExpr:
 		switch n.Op {
 		case lexer.TOKEN_AND:
 			if truthy {
-				a.applyConditionRefinements(scope, n.Left, true)
-				a.applyConditionRefinements(scope, n.Right, true)
+				a.applyConditionRefinementsInternal(scope, n.Left, true, persistTracked)
+				a.applyConditionRefinementsInternal(scope, n.Right, true, persistTracked)
 			}
 		case lexer.TOKEN_OR:
 			if !truthy {
-				a.applyConditionRefinements(scope, n.Left, false)
-				a.applyConditionRefinements(scope, n.Right, false)
+				a.applyConditionRefinementsInternal(scope, n.Left, false, persistTracked)
+				a.applyConditionRefinementsInternal(scope, n.Right, false, persistTracked)
 			}
 		case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
 			targetExpr, nonNull, ok := refinedExprNullState(n, truthy)
@@ -7791,12 +8162,13 @@ func (a *Analyzer) applyConditionRefinements(scope *Scope, expr ast.Expr, truthy
 		}
 	case *ast.UnaryExpr:
 		if n.Op == lexer.TOKEN_NOT {
-			a.applyConditionRefinements(scope, n.Operand, !truthy)
+			a.applyConditionRefinementsInternal(scope, n.Operand, !truthy, persistTracked)
 		}
 	case *ast.CallExpr:
 		a.applyGuardCallConditionRefinements(scope, n, truthy)
+		a.applyConditionalCallConditionRefinements(scope, n, truthy, persistTracked)
 	case *ast.ParenExpr:
-		a.applyConditionRefinements(scope, n.Inner, truthy)
+		a.applyConditionRefinementsInternal(scope, n.Inner, truthy, persistTracked)
 	}
 }
 
@@ -7908,6 +8280,49 @@ func (a *Analyzer) applyGuardCallConditionRefinements(scope *Scope, call *ast.Ca
 				continue
 			}
 			a.bindRefinedExprType(scope, argExpr, variant.PackedViewType(enumType))
+		}
+	}
+}
+
+func (a *Analyzer) applyConditionalCallConditionRefinements(scope *Scope, call *ast.CallExpr, truthy bool, persistTracked bool) {
+	if a == nil || scope == nil || call == nil {
+		return
+	}
+	fnType, ok := a.functionValueTypeForExpr(call.Func)
+	if !ok || fnType == nil || !funcPoststatesHaveConditional(fnType.Poststates) {
+		return
+	}
+	originalByRoot := a.conditionalCallPoststateOriginals[call]
+	if len(originalByRoot) == 0 {
+		return
+	}
+	limit := len(call.Args)
+	if len(fnType.Params) < limit {
+		limit = len(fnType.Params)
+	}
+	for i := 0; i < limit; i++ {
+		poststates := funcPoststatesForParam(fnType.Poststates, i)
+		if len(poststates) == 0 {
+			continue
+		}
+		root, argSteps, ok := a.namedStateMutationTargetPath(call.Args[i])
+		if !ok || root == nil {
+			continue
+		}
+		original := originalByRoot[root]
+		if original == nil {
+			continue
+		}
+		updated, changed := a.computeCallArgPoststateTrackedType(original, argSteps, poststates, true, truthy)
+		if !changed || updated == nil {
+			continue
+		}
+		if persistTracked && a.currentSpecializedValueTypes != nil {
+			a.bindTrackedValueType(root, updated)
+			continue
+		}
+		if root.Name != "" {
+			scope.Refinements[root.Name] = updated
 		}
 	}
 }
@@ -8207,6 +8622,17 @@ func (a *Analyzer) analyzeExprInScope(expr ast.Expr, scope *Scope) Type {
 }
 
 func (a *Analyzer) analyzeExprInAffineScope(expr ast.Expr, scope *Scope) (Type, affineFlowSnapshot) {
+	return a.analyzeExprInAffineScopePrepared(expr, scope, nil)
+}
+
+func (a *Analyzer) analyzeExprInConditionAffineScope(expr ast.Expr, parent *Scope, cond ast.Expr, truthy bool) (Type, affineFlowSnapshot) {
+	scope := a.refinedScopeForCondition(parent, cond, truthy)
+	return a.analyzeExprInAffineScopePrepared(expr, scope, func() {
+		a.applyConditionRefinementsInternal(scope, cond, truthy, true)
+	})
+}
+
+func (a *Analyzer) analyzeExprInAffineScopePrepared(expr ast.Expr, scope *Scope, prepare func()) (Type, affineFlowSnapshot) {
 	savedAffine := a.currentAffineValues
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
 	savedFunctionValues := a.currentFunctionValues
@@ -8217,6 +8643,9 @@ func (a *Analyzer) analyzeExprInAffineScope(expr ast.Expr, scope *Scope) (Type, 
 	a.currentFunctionValues = a.cloneFunctionValueBindings()
 	a.currentSpecializedValueTypes = a.cloneSpecializedValueTypeBindings()
 	a.currentValueBindings = a.cloneValueBindings()
+	if prepare != nil {
+		prepare()
+	}
 	result := a.analyzeExprInScope(expr, scope)
 	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), ValueBindings: a.cloneValueBindings()}
 	a.currentAffineValues = savedAffine
