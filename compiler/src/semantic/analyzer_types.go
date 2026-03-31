@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -57,12 +58,13 @@ func (a *Analyzer) defineLocalInScope(scope *Scope, sym *Symbol, pos lexer.Pos) 
 	a.recordSpecializedValueTypeBinding(sym, sym.Type)
 }
 
-func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorageParams []string, refStateParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
+func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorageParams []string, refStateParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
 	ptypes := make([]Type, 0, len(params))
 	retType := a.namedTypes["void"]
 	shapeParams := a.collectImplicitShapeParams(params, ret)
 	var resolvedPermissionRefs []ast.PermissionRef
 	var permissions []string
+	var poststates []FuncPoststate
 	a.withGenericParams(genericParams, nil, func() {
 		a.withRegionParams(regionParams, func() {
 			a.withPermissionParams(permissionParams, func() {
@@ -75,6 +77,7 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorage
 					if ret != nil {
 						retType = a.resolveType(ret)
 					}
+					poststates = a.resolveFuncPoststates(name, params, ptypes, ensures)
 				})
 			})
 		})
@@ -97,10 +100,189 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorage
 		InlineMode:             FuncInlineModeDefault,
 		HasNoRecurse:           false,
 		TemperatureMode:        FuncTemperatureModeDefault,
+		Poststates:             poststates,
 		Params:                 ptypes,
 		Return:                 retType,
 		Variadic:               variadic,
 	}
+}
+
+func ensuresClauseSteps(clause ast.EnsuresClause) []borrowReturnAnnotationStep {
+	if len(clause.Target.Fields) == 0 {
+		return nil
+	}
+	steps := make([]borrowReturnAnnotationStep, len(clause.Target.Fields))
+	for i, field := range clause.Target.Fields {
+		steps[i] = borrowReturnAnnotationStep{Field: field}
+	}
+	return steps
+}
+
+func poststatePathKey(paramIndex int, steps []borrowReturnAnnotationStep) string {
+	if len(steps) == 0 {
+		return strconv.Itoa(paramIndex)
+	}
+	parts := make([]string, 0, len(steps)+1)
+	parts = append(parts, strconv.Itoa(paramIndex))
+	for _, step := range steps {
+		switch {
+		case step.Field != "":
+			parts = append(parts, "."+step.Field)
+		case step.Wildcard:
+			parts = append(parts, "[*]")
+		case step.Index != nil:
+			parts = append(parts, "["+strconv.FormatInt(*step.Index, 10)+"]")
+		default:
+			parts = append(parts, "<?>")
+		}
+	}
+	return strings.Join(parts, "")
+}
+
+func poststateNamedStateTargetBase(t Type) (*StructType, bool) {
+	switch tt := t.(type) {
+	case *AggregateStateType:
+		return poststateNamedStateTargetBase(tt.Base)
+	case *RefType:
+		return poststateNamedStateTargetBase(tt.Elem)
+	default:
+		return namedStateStructBase(t)
+	}
+}
+
+func poststateRefTargetType(t Type) (*RefType, bool) {
+	switch tt := t.(type) {
+	case *AggregateStateType:
+		return poststateRefTargetType(tt.Base)
+	case *RefType:
+		return tt, tt != nil
+	default:
+		return nil, false
+	}
+}
+
+func poststateTargetTrackable(t Type) bool {
+	if _, ok := poststateNamedStateTargetBase(t); ok {
+		return true
+	}
+	_, ok := poststateRefTargetType(t)
+	return ok
+}
+
+func (a *Analyzer) projectFuncPoststateTargetType(current Type, step borrowReturnAnnotationStep) (Type, bool) {
+	if current == nil {
+		return nil, false
+	}
+	switch tt := current.(type) {
+	case *AggregateStateType:
+		return a.projectFuncPoststateTargetType(tt.Base, step)
+	case *RefType:
+		return a.projectFuncPoststateTargetType(tt.Elem, step)
+	}
+	if step.Field == "" {
+		return nil, false
+	}
+	if fieldType, ok := a.lookupResolvedFieldType(current, step.Field); ok {
+		return fieldType, true
+	}
+	return nil, false
+}
+
+func (a *Analyzer) resolveFuncPoststates(name string, params []ast.ParamDecl, paramTypes []Type, ensures []ast.EnsuresClause) []FuncPoststate {
+	if len(ensures) == 0 {
+		return nil
+	}
+	resolved := make([]FuncPoststate, 0, len(ensures))
+	seenTargets := make(map[string]lexer.Pos, len(ensures))
+	for _, clause := range ensures {
+		paramIndex := -1
+		for i, param := range params {
+			if param.Name == clause.Target.Root {
+				paramIndex = i
+				break
+			}
+		}
+		if paramIndex < 0 {
+			a.errorf(clause.Position, "ensures on function %q references unknown parameter %q", name, clause.Target.Root)
+			continue
+		}
+		if paramIndex >= len(paramTypes) {
+			continue
+		}
+		steps := ensuresClauseSteps(clause)
+		key := poststatePathKey(paramIndex, steps)
+		if prev, exists := seenTargets[key]; exists {
+			a.errorf(clause.Position, "duplicate ensures target %q on function %q (first seen at %s:%d:%d)", clause.Target.Root+borrowAnnotationPathSuffix(steps), name, prev.File, prev.Line, prev.Col)
+			continue
+		}
+		seenTargets[key] = clause.Position
+		targetType := paramTypes[paramIndex]
+		ok := true
+		for _, step := range steps {
+			targetType, ok = a.projectFuncPoststateTargetType(targetType, step)
+			if !ok {
+				a.errorf(clause.Position, "ensures on function %q references unknown target path %q", name, clause.Target.Root+borrowAnnotationPathSuffix(steps))
+				break
+			}
+		}
+		if !ok {
+			continue
+		}
+		poststate := FuncPoststate{Position: clause.Position, ParamIndex: paramIndex, Path: steps}
+		switch clause.Kind {
+		case ast.EnsuresKindNamedState:
+			base, ok := poststateNamedStateTargetBase(targetType)
+			if !ok || base == nil {
+				a.errorf(clause.Position, "ensures on function %q requires %q to resolve to a named-state-bearing target, got %s", name, clause.Target.Root+borrowAnnotationPathSuffix(steps), targetType.String())
+				continue
+			}
+			seenCases := map[string]bool{}
+			stateCases := make([]string, 0, len(clause.StateCases))
+			valid := true
+			for _, stateCase := range clause.StateCases {
+				if seenCases[stateCase] {
+					continue
+				}
+				seenCases[stateCase] = true
+				allowed := false
+				for _, candidate := range base.NamedStateCases {
+					if candidate == stateCase {
+						allowed = true
+						break
+					}
+				}
+				if !allowed {
+					a.errorf(clause.Position, "ensures on function %q uses unknown state %q for %q", name, stateCase, clause.Target.Root+borrowAnnotationPathSuffix(steps))
+					valid = false
+					break
+				}
+				stateCases = append(stateCases, stateCase)
+			}
+			if !valid || len(stateCases) == 0 {
+				continue
+			}
+			poststate.Kind = FuncPoststateKindNamedState
+			poststate.StateCases = canonicalizeNamedStateCases(base.NamedStateCases, stateCases)
+		case ast.EnsuresKindRefState:
+			if _, ok := poststateRefTargetType(targetType); !ok {
+				a.errorf(clause.Position, "ensures on function %q requires %q to resolve to a ref target for refstate effects, got %s", name, clause.Target.Root+borrowAnnotationPathSuffix(steps), targetType.String())
+				continue
+			}
+			poststate.Kind = FuncPoststateKindRefState
+			poststate.RefState = RefState(clause.RefState)
+		case ast.EnsuresKindPreserve:
+			if !poststateTargetTrackable(targetType) {
+				a.errorf(clause.Position, "ensures on function %q requires %q to resolve to a trackable poststate target, got %s", name, clause.Target.Root+borrowAnnotationPathSuffix(steps), targetType.String())
+				continue
+			}
+			poststate.Kind = FuncPoststateKindPreserve
+		default:
+			a.errorf(clause.Position, "ensures on function %q uses an unsupported poststate effect", name)
+			continue
+		}
+		resolved = append(resolved, poststate)
+	}
+	return resolved
 }
 
 func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
@@ -1211,7 +1393,7 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 			params = append(params, a.substituteType(param, bindings, shapeBindings, regionBindings, permissionBindings))
 		}
 		declaredRefs, refs, usedPermissionParams := substitutePermissionRefs(n.DeclaredPermissionRefs, n.PermissionRefs, n.UsedPermissionParams, permissionBindings)
-		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), RefStorageParams: append([]string(nil), n.RefStorageParams...), RefStateParams: append([]string(nil), n.RefStateParams...), RegionParams: append([]string(nil), n.RegionParams...), PermissionParams: append([]string(nil), n.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), n.GenericParams...), UsedPermissionParams: usedPermissionParams, DeclaredPermissionRefs: declaredRefs, DeclaredPermissions: permissionFamiliesFromRefs(declaredRefs), PermissionRefs: refs, Permissions: permissionFamiliesFromRefs(refs), ShapeParams: append([]string(nil), n.ShapeParams...), FreshReturnShapeParams: append([]string(nil), n.FreshReturnShapeParams...), InlineMode: n.InlineMode, HasInlineMode: n.HasInlineMode, HasNoRecurse: n.HasNoRecurse, TemperatureMode: n.TemperatureMode, HasTemperatureMode: n.HasTemperatureMode, GuardEffects: cloneFuncGuardEffects(n.GuardEffects), Params: params, Return: a.substituteType(n.Return, bindings, shapeBindings, regionBindings, permissionBindings), Variadic: n.Variadic, SinkParams: append([]bool(nil), n.SinkParams...), SinkParamsKnown: n.SinkParamsKnown, ReturnProvenance: cloneRegionRefState(n.ReturnProvenance), ReturnProvenanceKnown: n.ReturnProvenanceKnown, ReturnBorrowedOwnerRefs: cloneBorrowedOwnerRefSummary(n.ReturnBorrowedOwnerRefs), ReturnBorrowedOwnerRefsKnown: n.ReturnBorrowedOwnerRefsKnown, ReturnIsolation: n.ReturnIsolation, ReturnIsolationKnown: n.ReturnIsolationKnown}
+		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), RefStorageParams: append([]string(nil), n.RefStorageParams...), RefStateParams: append([]string(nil), n.RefStateParams...), RegionParams: append([]string(nil), n.RegionParams...), PermissionParams: append([]string(nil), n.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), n.GenericParams...), UsedPermissionParams: usedPermissionParams, DeclaredPermissionRefs: declaredRefs, DeclaredPermissions: permissionFamiliesFromRefs(declaredRefs), PermissionRefs: refs, Permissions: permissionFamiliesFromRefs(refs), ShapeParams: append([]string(nil), n.ShapeParams...), FreshReturnShapeParams: append([]string(nil), n.FreshReturnShapeParams...), InlineMode: n.InlineMode, HasInlineMode: n.HasInlineMode, HasNoRecurse: n.HasNoRecurse, TemperatureMode: n.TemperatureMode, HasTemperatureMode: n.HasTemperatureMode, GuardEffects: cloneFuncGuardEffects(n.GuardEffects), Poststates: cloneFuncPoststates(n.Poststates), Params: params, Return: a.substituteType(n.Return, bindings, shapeBindings, regionBindings, permissionBindings), Variadic: n.Variadic, SinkParams: append([]bool(nil), n.SinkParams...), SinkParamsKnown: n.SinkParamsKnown, ReturnProvenance: cloneRegionRefState(n.ReturnProvenance), ReturnProvenanceKnown: n.ReturnProvenanceKnown, ReturnBorrowedOwnerRefs: cloneBorrowedOwnerRefSummary(n.ReturnBorrowedOwnerRefs), ReturnBorrowedOwnerRefsKnown: n.ReturnBorrowedOwnerRefsKnown, ReturnIsolation: n.ReturnIsolation, ReturnIsolationKnown: n.ReturnIsolationKnown}
 	default:
 		return t
 	}

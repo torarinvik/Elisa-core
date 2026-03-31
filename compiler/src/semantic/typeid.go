@@ -49,17 +49,29 @@ func TryCanonicalTypeID(t Type) (TypeID, bool) {
 
 func canonicalTypeIDKey(t Type) (string, bool) {
 	var b strings.Builder
-	if !appendTypeIDKey(&b, t) {
+	active := map[Type]int{}
+	nextCycleID := 1
+	if !appendTypeIDKey(&b, t, active, &nextCycleID) {
 		return "", false
 	}
 	return b.String(), true
 }
 
-func appendTypeIDKey(b *strings.Builder, t Type) bool {
+func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleID *int) bool {
 	if t == nil {
 		appendKeyTag(b, "nil")
 		return true
 	}
+	if id, ok := active[t]; ok {
+		appendKeyTag(b, "cycle")
+		appendKeyInt(b, id)
+		return true
+	}
+	active[t] = *nextCycleID
+	appendKeyTag(b, "node")
+	appendKeyInt(b, *nextCycleID)
+	*nextCycleID++
+	defer delete(active, t)
 	switch tt := t.(type) {
 	case *InvalidType:
 		appendKeyTag(b, "invalid")
@@ -98,12 +110,12 @@ func appendTypeIDKey(b *strings.Builder, t Type) bool {
 		appendKeyStringSlice(b, tt.Tags)
 	case *ErrorUnionType:
 		appendKeyTag(b, "errorunion")
-		if !appendTypeIDKey(b, tt.Value) || !appendTypeIDKey(b, tt.Errors) {
+		if !appendTypeIDKey(b, tt.Value, active, nextCycleID) || !appendTypeIDKey(b, tt.Errors, active, nextCycleID) {
 			return false
 		}
 	case *OptionalType:
 		appendKeyTag(b, "optional")
-		if !appendTypeIDKey(b, tt.Value) {
+		if !appendTypeIDKey(b, tt.Value, active, nextCycleID) {
 			return false
 		}
 	case *ConstEnumType:
@@ -117,7 +129,7 @@ func appendTypeIDKey(b *strings.Builder, t Type) bool {
 		appendKeyInt(b, int(tt.Storage))
 		appendKeyString(b, tt.StorageParam)
 		appendKeyString(b, tt.Region)
-		if !appendTypeIDKey(b, tt.Elem) {
+		if !appendTypeIDKey(b, tt.Elem, active, nextCycleID) {
 			return false
 		}
 	case *ArrayType:
@@ -125,24 +137,24 @@ func appendTypeIDKey(b *strings.Builder, t Type) bool {
 		appendKeyBool(b, tt.HasConstSize)
 		appendKeyInt64(b, tt.ConstSize)
 		appendKeyString(b, tt.Size)
-		if !appendTypeIDKey(b, tt.Elem) {
+		if !appendTypeIDKey(b, tt.Elem, active, nextCycleID) {
 			return false
 		}
 	case *DArrayType:
 		appendKeyTag(b, "darray")
-		if !appendTypeIDKey(b, tt.Elem) || !appendShapeIDKey(b, tt.Shape) {
+		if !appendTypeIDKey(b, tt.Elem, active, nextCycleID) || !appendShapeIDKey(b, tt.Shape) {
 			return false
 		}
 	case *ViewType:
 		appendKeyTag(b, "view")
 		appendKeyString(b, tt.Begin)
 		appendKeyString(b, tt.End)
-		if !appendTypeIDKey(b, tt.Elem) {
+		if !appendTypeIDKey(b, tt.Elem, active, nextCycleID) {
 			return false
 		}
 	case *DArrayViewType:
 		appendKeyTag(b, "darrayview")
-		if !appendTypeIDKey(b, tt.Elem) {
+		if !appendTypeIDKey(b, tt.Elem, active, nextCycleID) {
 			return false
 		}
 	case *DStrType:
@@ -152,7 +164,7 @@ func appendTypeIDKey(b *strings.Builder, t Type) bool {
 		}
 	case *DictType:
 		appendKeyTag(b, "dict")
-		if !appendTypeIDKey(b, tt.Key) || !appendTypeIDKey(b, tt.Value) {
+		if !appendTypeIDKey(b, tt.Key, active, nextCycleID) || !appendTypeIDKey(b, tt.Value, active, nextCycleID) {
 			return false
 		}
 	case *SViewType:
@@ -160,7 +172,7 @@ func appendTypeIDKey(b *strings.Builder, t Type) bool {
 	case *PackedEnumStoreType:
 		appendKeyTag(b, "packedstore")
 		appendKeyString(b, tt.Name)
-		if !appendTypeIDKey(b, tt.State) {
+		if !appendTypeIDKey(b, tt.State, active, nextCycleID) {
 			return false
 		}
 	case *PackedVariantViewType:
@@ -168,7 +180,7 @@ func appendTypeIDKey(b *strings.Builder, t Type) bool {
 			return false
 		}
 		appendKeyTag(b, "packedview")
-		if !appendTypeIDKey(b, tt.Enum) {
+		if !appendTypeIDKey(b, tt.Enum, active, nextCycleID) {
 			return false
 		}
 		appendKeyString(b, tt.Variant.Name)
@@ -184,13 +196,13 @@ func appendTypeIDKey(b *strings.Builder, t Type) bool {
 	case *GenericInstanceType:
 		appendKeyTag(b, "genericinstance")
 		appendKeyString(b, tt.Name)
-		if !appendTypeIDKey(b, tt.Base) || !appendTypeSliceIDKey(b, tt.Args) {
+		if !appendTypeIDKey(b, tt.Base, active, nextCycleID) || !appendTypeSliceIDKey(b, tt.Args, active, nextCycleID) {
 			return false
 		}
 	case *AggregateStateType:
 		appendKeyTag(b, "aggregatestate")
 		appendKeyRefStateSlice(b, aggregateStateStates(tt))
-		if !appendTypeIDKey(b, tt.Base) {
+		if !appendTypeIDKey(b, tt.Base, active, nextCycleID) {
 			return false
 		}
 	case *FuncType:
@@ -206,7 +218,7 @@ func appendTypeIDKey(b *strings.Builder, t Type) bool {
 		appendKeyStringSlice(b, tt.Permissions)
 		appendKeyStringSlice(b, tt.ShapeParams)
 		appendKeyStringSlice(b, tt.FreshReturnShapeParams)
-		if !appendTypeSliceIDKey(b, tt.Params) || !appendTypeIDKey(b, tt.Return) {
+		if !appendTypeSliceIDKey(b, tt.Params, active, nextCycleID) || !appendTypeIDKey(b, tt.Return, active, nextCycleID) {
 			return false
 		}
 	default:
@@ -240,10 +252,10 @@ func appendShapeIDKey(b *strings.Builder, shape Shape) bool {
 	return true
 }
 
-func appendTypeSliceIDKey(b *strings.Builder, types []Type) bool {
+func appendTypeSliceIDKey(b *strings.Builder, types []Type, active map[Type]int, nextCycleID *int) bool {
 	appendKeyLen(b, len(types))
 	for _, typ := range types {
-		if !appendTypeIDKey(b, typ) {
+		if !appendTypeIDKey(b, typ, active, nextCycleID) {
 			return false
 		}
 	}

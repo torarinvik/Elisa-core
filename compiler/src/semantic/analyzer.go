@@ -95,6 +95,8 @@ type Analyzer struct {
 	exportedGlobals                   []*ExportedGlobal
 	currentScope                      *Scope
 	currentReturn                     Type
+	currentFuncDecl                   *ast.FuncDecl
+	currentFuncType                   *FuncType
 	currentRegions                    map[*Symbol]regionState
 	currentRegionMarks                map[*Symbol]regionMarkState
 	currentRegionRefs                 map[*Symbol]regionRefState
@@ -111,6 +113,7 @@ type Analyzer struct {
 	currentFunctionUsedPermissionRefs []ast.PermissionRef
 	currentReturnProvenance           regionRefState
 	currentReturnBorrowedOwnerRefs    borrowedOwnerRefSummary
+	currentConservativeCallWidenings  map[*Symbol][][]borrowReturnAnnotationStep
 	suppressDiagnostics               bool
 	returnProvenanceInProgress        map[*ast.FuncDecl]bool
 	returnBorrowedOwnerRefInProgress  map[*ast.FuncDecl]bool
@@ -1010,7 +1013,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolGlobal, Type: declType, Node: n, Mutable: n.Mutable}, n.Pos())
 			case *ast.FuncDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
-				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Params, n.ReturnType, false)
+				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Ensures, n.Params, n.ReturnType, false)
 				symbolName := qualifiedName
 				if n.Name == "__cast__" {
 					symbolName = castHookSymbolName(qualifiedName, fnType, n.Pos())
@@ -1024,7 +1027,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				}
 			case *ast.ExternFuncDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
-				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Params, n.ReturnType, n.Variadic)
+				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Ensures, n.Params, n.ReturnType, n.Variadic)
 				a.applyExternFuncAnnotations(n, fnType)
 				if !fnType.ReturnProvenanceKnown {
 					fnType.ReturnProvenanceKnown = true
@@ -2711,6 +2714,103 @@ func isSupportedFunctionAnnotation(name string) bool {
 	}
 }
 
+func poststateTargetDisplayName(rootName string, steps []borrowReturnAnnotationStep) string {
+	if rootName == "" {
+		return "<value>"
+	}
+	return rootName + borrowAnnotationPathSuffix(steps)
+}
+
+func poststateNamedStateCurrentType(t Type) (Type, bool) {
+	switch tt := t.(type) {
+	case *AggregateStateType:
+		return poststateNamedStateCurrentType(tt.Base)
+	case *RefType:
+		return poststateNamedStateCurrentType(tt.Elem)
+	default:
+		if _, ok := namedStateStructBase(t); ok {
+			return t, true
+		}
+		return nil, false
+	}
+}
+
+func (a *Analyzer) currentFuncParamSymbol(index int) (*Symbol, bool) {
+	if a == nil || a.currentFuncDecl == nil || a.currentScope == nil || index < 0 || index >= len(a.currentFuncDecl.Params) {
+		return nil, false
+	}
+	name := a.currentFuncDecl.Params[index].Name
+	if name == "" {
+		return nil, false
+	}
+	sym, ok := a.currentScope.Lookup(name)
+	return sym, ok && sym != nil
+}
+
+func (a *Analyzer) validateCurrentFuncPoststates() {
+	if a == nil || a.suppressDiagnostics || a.currentFuncDecl == nil || a.currentFuncType == nil || len(a.currentFuncType.Poststates) == 0 {
+		return
+	}
+	for _, poststate := range a.currentFuncType.Poststates {
+		a.validateCurrentFuncPoststate(poststate)
+	}
+}
+
+func (a *Analyzer) validateCurrentFuncPoststate(poststate FuncPoststate) {
+	sym, ok := a.currentFuncParamSymbol(poststate.ParamIndex)
+	if !ok || sym == nil {
+		return
+	}
+	targetName := poststateTargetDisplayName(sym.Name, poststate.Path)
+	currentTarget, ok := a.projectTrackedValueTypeAtPath(a.currentTrackedValueType(sym), poststate.Path)
+	if !ok || currentTarget == nil {
+		a.errorf(poststate.Position, "cannot prove ensures %s on function %q because the current tracked target cannot be resolved", targetName, a.currentFuncDecl.Name)
+		return
+	}
+	switch poststate.Kind {
+	case FuncPoststateKindPreserve:
+		for _, widenedPath := range a.currentConservativeCallWidenings[sym] {
+			if poststatePathsOverlap(widenedPath, poststate.Path) {
+				a.errorf(poststate.Position, "cannot prove ensures %s => preserve on function %q because a call may widen that path conservatively", targetName, a.currentFuncDecl.Name)
+				return
+			}
+		}
+		originalTarget, ok := a.projectTrackedValueTypeAtPath(sym.Type, poststate.Path)
+		if !ok || originalTarget == nil {
+			a.errorf(poststate.Position, "cannot prove ensures %s => preserve on function %q because the incoming tracked target cannot be resolved", targetName, a.currentFuncDecl.Name)
+			return
+		}
+		if !SameType(currentTarget, originalTarget) {
+			a.errorf(poststate.Position, "cannot prove ensures %s => preserve on function %q; current poststate is %s", targetName, a.currentFuncDecl.Name, currentTarget.String())
+		}
+	case FuncPoststateKindNamedState:
+		actualTarget, ok := poststateNamedStateCurrentType(currentTarget)
+		if !ok || actualTarget == nil {
+			a.errorf(poststate.Position, "cannot prove ensures %s on function %q because the target is not currently a named-state-bearing value", targetName, a.currentFuncDecl.Name)
+			return
+		}
+		base, ok := namedStateStructBase(actualTarget)
+		if !ok || base == nil {
+			a.errorf(poststate.Position, "cannot prove ensures %s on function %q because the target is not currently a named-state-bearing value", targetName, a.currentFuncDecl.Name)
+			return
+		}
+		desired := newNamedStateType(base.Name, base.NamedStateCases, poststate.StateCases)
+		actualState, ok := namedStateCurrentArg(actualTarget)
+		if desired == nil || !ok || actualState == nil || !namedStateTypeAssignable(desired, actualState) {
+			a.errorf(poststate.Position, "cannot prove ensures %s => %s on function %q; current poststate is %s", targetName, strings.Join(poststate.StateCases, " | "), a.currentFuncDecl.Name, actualTarget.String())
+		}
+	case FuncPoststateKindRefState:
+		actualRef, ok := poststateRefTargetType(currentTarget)
+		if !ok || actualRef == nil {
+			a.errorf(poststate.Position, "cannot prove ensures %s on function %q because the target is not currently a ref", targetName, a.currentFuncDecl.Name)
+			return
+		}
+		if !refStateAssignable(poststate.RefState, actualRef.State) {
+			a.errorf(poststate.Position, "cannot prove ensures %s => %s on function %q; current poststate is %s", targetName, ast.RefStateMarker(ast.RefState(poststate.RefState)), a.currentFuncDecl.Name, currentTarget.String())
+		}
+	}
+}
+
 func isVoidType(t Type) bool {
 	builtin, ok := t.(*BuiltinType)
 	return ok && builtin.Name == "void"
@@ -2721,6 +2821,8 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	fnType, _ := sym.Type.(*FuncType)
 	savedScope := a.currentScope
 	savedReturn := a.currentReturn
+	savedFuncDecl := a.currentFuncDecl
+	savedFuncType := a.currentFuncType
 	savedReturnFreshStatus := a.returnFreshShapeStatus
 	savedRegions := a.currentRegions
 	savedRegionMarks := a.currentRegionMarks
@@ -2737,6 +2839,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
 	savedReturnProvenance := a.currentReturnProvenance
 	savedReturnBorrowedOwnerRefs := a.currentReturnBorrowedOwnerRefs
+	savedConservativeCallWidenings := a.currentConservativeCallWidenings
 	a.currentScope = NewScope(a.globalScope)
 	a.currentRegions = map[*Symbol]regionState{}
 	a.currentRegionMarks = map[*Symbol]regionMarkState{}
@@ -2753,6 +2856,9 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentFunctionUsedPermissionRefs = nil
 	a.currentReturnProvenance = regionRefState{}
 	a.currentReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
+	a.currentFuncDecl = fn
+	a.currentFuncType = fnType
+	a.currentConservativeCallWidenings = map[*Symbol][][]borrowReturnAnnotationStep{}
 	if fnType != nil {
 		a.currentReturn = fnType.Return
 		a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)
@@ -2788,6 +2894,9 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 			})
 		})
 	})
+	if fnType != nil && !blockDefinitelyExits(fn.Body) {
+		a.validateCurrentFuncPoststates()
+	}
 	if fnType != nil {
 		if summary, ok := abstractParamOnlyRegionRefState(a.currentReturnProvenance); ok {
 			fnType.ReturnProvenance = summary
@@ -2811,6 +2920,8 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.reportUnconsumedProtocolValues()
 	a.currentScope = savedScope
 	a.currentReturn = savedReturn
+	a.currentFuncDecl = savedFuncDecl
+	a.currentFuncType = savedFuncType
 	a.returnFreshShapeStatus = savedReturnFreshStatus
 	a.currentRegions = savedRegions
 	a.currentRegionMarks = savedRegionMarks
@@ -2827,6 +2938,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
 	a.currentReturnProvenance = savedReturnProvenance
 	a.currentReturnBorrowedOwnerRefs = savedReturnBorrowedOwnerRefs
+	a.currentConservativeCallWidenings = savedConservativeCallWidenings
 }
 
 func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType) {
@@ -2841,6 +2953,8 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 
 	savedScope := a.currentScope
 	savedReturn := a.currentReturn
+	savedFuncDecl := a.currentFuncDecl
+	savedFuncType := a.currentFuncType
 	savedReturnFreshStatus := a.returnFreshShapeStatus
 	savedRegions := a.currentRegions
 	savedRegionMarks := a.currentRegionMarks
@@ -2857,10 +2971,13 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
 	savedReturnProvenance := a.currentReturnProvenance
 	savedReturnBorrowedOwnerRefs := a.currentReturnBorrowedOwnerRefs
+	savedConservativeCallWidenings := a.currentConservativeCallWidenings
 	savedSuppressDiagnostics := a.suppressDiagnostics
 
 	a.currentScope = NewScope(a.globalScope)
 	a.currentReturn = fnType.Return
+	a.currentFuncDecl = nil
+	a.currentFuncType = nil
 	a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)
 	a.currentRegions = map[*Symbol]regionState{}
 	a.currentRegionMarks = map[*Symbol]regionMarkState{}
@@ -2877,6 +2994,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentFunctionUsedPermissionRefs = nil
 	a.currentReturnProvenance = regionRefState{}
 	a.currentReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
+	a.currentConservativeCallWidenings = nil
 	a.suppressDiagnostics = true
 
 	a.withGenericParams(fn.GenericParams, nil, func() {
@@ -2926,6 +3044,8 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 
 	a.currentScope = savedScope
 	a.currentReturn = savedReturn
+	a.currentFuncDecl = savedFuncDecl
+	a.currentFuncType = savedFuncType
 	a.returnFreshShapeStatus = savedReturnFreshStatus
 	a.currentRegions = savedRegions
 	a.currentRegionMarks = savedRegionMarks
@@ -2942,6 +3062,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
 	a.currentReturnProvenance = savedReturnProvenance
 	a.currentReturnBorrowedOwnerRefs = savedReturnBorrowedOwnerRefs
+	a.currentConservativeCallWidenings = savedConservativeCallWidenings
 	a.suppressDiagnostics = savedSuppressDiagnostics
 }
 
@@ -2957,6 +3078,8 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 
 	savedScope := a.currentScope
 	savedReturn := a.currentReturn
+	savedFuncDecl := a.currentFuncDecl
+	savedFuncType := a.currentFuncType
 	savedReturnFreshStatus := a.returnFreshShapeStatus
 	savedRegions := a.currentRegions
 	savedRegionMarks := a.currentRegionMarks
@@ -2973,10 +3096,13 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
 	savedReturnProvenance := a.currentReturnProvenance
 	savedReturnBorrowedOwnerRefs := a.currentReturnBorrowedOwnerRefs
+	savedConservativeCallWidenings := a.currentConservativeCallWidenings
 	savedSuppressDiagnostics := a.suppressDiagnostics
 
 	a.currentScope = NewScope(a.globalScope)
 	a.currentReturn = fnType.Return
+	a.currentFuncDecl = nil
+	a.currentFuncType = nil
 	a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)
 	a.currentRegions = map[*Symbol]regionState{}
 	a.currentRegionMarks = map[*Symbol]regionMarkState{}
@@ -2993,6 +3119,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentFunctionUsedPermissionRefs = nil
 	a.currentReturnProvenance = regionRefState{}
 	a.currentReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
+	a.currentConservativeCallWidenings = nil
 	a.suppressDiagnostics = true
 
 	a.withGenericParams(fn.GenericParams, nil, func() {
@@ -3036,6 +3163,8 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 
 	a.currentScope = savedScope
 	a.currentReturn = savedReturn
+	a.currentFuncDecl = savedFuncDecl
+	a.currentFuncType = savedFuncType
 	a.returnFreshShapeStatus = savedReturnFreshStatus
 	a.currentRegions = savedRegions
 	a.currentRegionMarks = savedRegionMarks
@@ -3052,5 +3181,6 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
 	a.currentReturnProvenance = savedReturnProvenance
 	a.currentReturnBorrowedOwnerRefs = savedReturnBorrowedOwnerRefs
+	a.currentConservativeCallWidenings = savedConservativeCallWidenings
 	a.suppressDiagnostics = savedSuppressDiagnostics
 }

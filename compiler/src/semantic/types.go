@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"llcontext/src/ast"
+	"llcontext/src/lexer"
 )
 
 type Type interface {
@@ -304,6 +305,23 @@ type FuncGuardEffect struct {
 	VariantName string
 }
 
+type FuncPoststateKind int
+
+const (
+	FuncPoststateKindNamedState FuncPoststateKind = iota
+	FuncPoststateKindRefState
+	FuncPoststateKindPreserve
+)
+
+type FuncPoststate struct {
+	Position   lexer.Pos
+	ParamIndex int
+	Path       []borrowReturnAnnotationStep
+	Kind       FuncPoststateKind
+	StateCases []string
+	RefState   RefState
+}
+
 type FuncType struct {
 	Name                         string
 	TypeParams                   []string
@@ -325,6 +343,7 @@ type FuncType struct {
 	TemperatureMode              FuncTemperatureMode
 	HasTemperatureMode           bool
 	GuardEffects                 []FuncGuardEffect
+	Poststates                   []FuncPoststate
 	Params                       []Type
 	Return                       Type
 	Variadic                     bool
@@ -1689,6 +1708,24 @@ func cloneFuncGuardEffects(effects []FuncGuardEffect) []FuncGuardEffect {
 	}
 	cloned := make([]FuncGuardEffect, len(effects))
 	copy(cloned, effects)
+	return cloned
+}
+
+func cloneFuncPoststates(poststates []FuncPoststate) []FuncPoststate {
+	if len(poststates) == 0 {
+		return nil
+	}
+	cloned := make([]FuncPoststate, len(poststates))
+	for i, poststate := range poststates {
+		cloned[i] = FuncPoststate{
+			Position:   poststate.Position,
+			ParamIndex: poststate.ParamIndex,
+			Path:       cloneBorrowReturnAnnotationSteps(poststate.Path),
+			Kind:       poststate.Kind,
+			StateCases: append([]string(nil), poststate.StateCases...),
+			RefState:   poststate.RefState,
+		}
+	}
 	return cloned
 }
 

@@ -168,11 +168,13 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				if !SameType(currentUnion.Value, a.namedTypes["void"]) {
 					a.errorf(n.Pos(), "return value required for %s", a.currentReturn.String())
 				}
+				a.validateCurrentFuncPoststates()
 				return
 			}
 			if a.currentReturn != nil && !SameType(a.currentReturn, a.namedTypes["void"]) {
 				a.errorf(n.Pos(), "return value required for %s", a.currentReturn.String())
 			}
+			a.validateCurrentFuncPoststates()
 			return
 		}
 		valueType := a.analyzeValueExpr(n.Value, a.currentReturn)
@@ -211,6 +213,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "return type expects %s, got %s", expectedReturn.String(), valueType.String())
 			a.reportShapeMismatchNotes(n.Pos(), expectedReturn, valueType)
 		}
+		a.validateCurrentFuncPoststates()
 		a.consumeAffineValueExpr(n.Value, expectedReturn, "return")
 	case *ast.IfStmt:
 		condType := a.analyzeCondExpr(n.Cond)
@@ -4933,13 +4936,28 @@ func (a *Analyzer) mergeFunctionValueBindings(dst map[*Symbol]*FuncType, src map
 	return merged
 }
 
+type specializedTypeMergeKey struct {
+	dst Type
+	src Type
+}
+
 func (a *Analyzer) mergeSpecializedValueTypes(dst Type, src Type) (Type, bool) {
+	return a.mergeSpecializedValueTypesWithSeen(dst, src, map[specializedTypeMergeKey]bool{})
+}
+
+func (a *Analyzer) mergeSpecializedValueTypesWithSeen(dst Type, src Type, active map[specializedTypeMergeKey]bool) (Type, bool) {
 	if merged, ok := a.mergeTrackedNamedStateValueTypes(dst, src); ok {
 		return merged, true
 	}
 	if dst == nil || src == nil || !SameType(dst, src) {
 		return nil, false
 	}
+	key := specializedTypeMergeKey{dst: dst, src: src}
+	if active[key] {
+		return a.cloneTrackedValueType(dst), true
+	}
+	active[key] = true
+	defer delete(active, key)
 	if dstFunc, ok := dst.(*FuncType); ok {
 		srcFunc, ok := src.(*FuncType)
 		if !ok {
@@ -4959,7 +4977,7 @@ func (a *Analyzer) mergeSpecializedValueTypes(dst Type, src Type) (Type, bool) {
 			if !ok {
 				continue
 			}
-			mergedFieldType, ok := a.mergeSpecializedValueTypes(field.Type, srcField.Type)
+			mergedFieldType, ok := a.mergeSpecializedValueTypesWithSeen(field.Type, srcField.Type, active)
 			if !ok {
 				continue
 			}
@@ -4972,7 +4990,7 @@ func (a *Analyzer) mergeSpecializedValueTypes(dst Type, src Type) (Type, bool) {
 		if !ok {
 			return nil, false
 		}
-		mergedBase, ok := a.mergeSpecializedValueTypes(tt.Base, srcInstance.Base)
+		mergedBase, ok := a.mergeSpecializedValueTypesWithSeen(tt.Base, srcInstance.Base, active)
 		if !ok {
 			return nil, false
 		}
@@ -4989,7 +5007,7 @@ func (a *Analyzer) mergeSpecializedValueTypes(dst Type, src Type) (Type, bool) {
 		if !ok {
 			return nil, false
 		}
-		mergedElem, ok := a.mergeSpecializedValueTypes(tt.Elem, srcRef.Elem)
+		mergedElem, ok := a.mergeSpecializedValueTypesWithSeen(tt.Elem, srcRef.Elem, active)
 		if !ok {
 			return nil, false
 		}
@@ -5001,7 +5019,7 @@ func (a *Analyzer) mergeSpecializedValueTypes(dst Type, src Type) (Type, bool) {
 		if !ok {
 			return nil, false
 		}
-		mergedElem, ok := a.mergeSpecializedValueTypes(tt.Elem, srcArray.Elem)
+		mergedElem, ok := a.mergeSpecializedValueTypesWithSeen(tt.Elem, srcArray.Elem, active)
 		if !ok {
 			return nil, false
 		}
@@ -5013,7 +5031,7 @@ func (a *Analyzer) mergeSpecializedValueTypes(dst Type, src Type) (Type, bool) {
 		if !ok {
 			return nil, false
 		}
-		mergedElem, ok := a.mergeSpecializedValueTypes(tt.Elem, srcArray.Elem)
+		mergedElem, ok := a.mergeSpecializedValueTypesWithSeen(tt.Elem, srcArray.Elem, active)
 		if !ok {
 			return nil, false
 		}
@@ -5025,7 +5043,7 @@ func (a *Analyzer) mergeSpecializedValueTypes(dst Type, src Type) (Type, bool) {
 		if !ok {
 			return nil, false
 		}
-		mergedValue, ok := a.mergeSpecializedValueTypes(tt.Value, srcOpt.Value)
+		mergedValue, ok := a.mergeSpecializedValueTypesWithSeen(tt.Value, srcOpt.Value, active)
 		if !ok {
 			return nil, false
 		}
@@ -5037,7 +5055,7 @@ func (a *Analyzer) mergeSpecializedValueTypes(dst Type, src Type) (Type, bool) {
 		if !ok {
 			return nil, false
 		}
-		mergedElem, ok := a.mergeSpecializedValueTypes(tt.Elem, srcView.Elem)
+		mergedElem, ok := a.mergeSpecializedValueTypesWithSeen(tt.Elem, srcView.Elem, active)
 		if !ok {
 			return nil, false
 		}
@@ -5049,7 +5067,7 @@ func (a *Analyzer) mergeSpecializedValueTypes(dst Type, src Type) (Type, bool) {
 		if !ok {
 			return nil, false
 		}
-		mergedElem, ok := a.mergeSpecializedValueTypes(tt.Elem, srcView.Elem)
+		mergedElem, ok := a.mergeSpecializedValueTypesWithSeen(tt.Elem, srcView.Elem, active)
 		if !ok {
 			return nil, false
 		}
@@ -5061,11 +5079,11 @@ func (a *Analyzer) mergeSpecializedValueTypes(dst Type, src Type) (Type, bool) {
 		if !ok {
 			return nil, false
 		}
-		mergedKey, ok := a.mergeSpecializedValueTypes(tt.Key, srcDict.Key)
+		mergedKey, ok := a.mergeSpecializedValueTypesWithSeen(tt.Key, srcDict.Key, active)
 		if !ok {
 			return nil, false
 		}
-		mergedValue, ok := a.mergeSpecializedValueTypes(tt.Value, srcDict.Value)
+		mergedValue, ok := a.mergeSpecializedValueTypesWithSeen(tt.Value, srcDict.Value, active)
 		if !ok {
 			return nil, false
 		}
@@ -5407,6 +5425,70 @@ func cloneBorrowReturnAnnotationSteps(steps []borrowReturnAnnotationStep) []borr
 		cloned[i] = cloneBorrowReturnAnnotationStep(step)
 	}
 	return cloned
+}
+
+func joinBorrowReturnAnnotationSteps(prefix []borrowReturnAnnotationStep, suffix []borrowReturnAnnotationStep) []borrowReturnAnnotationStep {
+	if len(prefix) == 0 {
+		return cloneBorrowReturnAnnotationSteps(suffix)
+	}
+	if len(suffix) == 0 {
+		return cloneBorrowReturnAnnotationSteps(prefix)
+	}
+	joined := make([]borrowReturnAnnotationStep, 0, len(prefix)+len(suffix))
+	joined = append(joined, cloneBorrowReturnAnnotationSteps(prefix)...)
+	joined = append(joined, cloneBorrowReturnAnnotationSteps(suffix)...)
+	return joined
+}
+
+func borrowReturnAnnotationPathEqual(left []borrowReturnAnnotationStep, right []borrowReturnAnnotationStep) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if !borrowReturnAnnotationStepsEqual(left[i], right[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func poststatePathsOverlap(left []borrowReturnAnnotationStep, right []borrowReturnAnnotationStep) bool {
+	limit := len(left)
+	if len(right) < limit {
+		limit = len(right)
+	}
+	for i := 0; i < limit; i++ {
+		l := left[i]
+		r := right[i]
+		switch {
+		case l.Field != "" || r.Field != "":
+			if l.Field == "" || r.Field == "" || l.Field != r.Field {
+				return false
+			}
+		case l.Wildcard || r.Wildcard:
+			continue
+		case l.Index != nil || r.Index != nil:
+			if l.Index == nil || r.Index == nil || *l.Index != *r.Index {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func (a *Analyzer) noteConservativeCallWidening(root *Symbol, steps []borrowReturnAnnotationStep) {
+	if a == nil || a.currentConservativeCallWidenings == nil || root == nil {
+		return
+	}
+	cloned := cloneBorrowReturnAnnotationSteps(steps)
+	for _, existing := range a.currentConservativeCallWidenings[root] {
+		if borrowReturnAnnotationPathEqual(existing, cloned) {
+			return
+		}
+	}
+	a.currentConservativeCallWidenings[root] = append(a.currentConservativeCallWidenings[root], cloned)
 }
 
 func namedStateTargetDisplayName(root *Symbol, steps []borrowReturnAnnotationStep) string {
@@ -5784,6 +5866,383 @@ func (a *Analyzer) widenNamedStatesDeepAtPath(current Type, steps []borrowReturn
 	}
 }
 
+func (a *Analyzer) projectTrackedValueTypeAtPath(current Type, steps []borrowReturnAnnotationStep) (Type, bool) {
+	if current == nil {
+		return nil, false
+	}
+	if len(steps) == 0 {
+		return a.cloneTrackedValueType(current), true
+	}
+	switch tt := current.(type) {
+	case *AggregateStateType:
+		return a.projectTrackedValueTypeAtPath(tt.Base, steps)
+	case *RefType:
+		return a.projectTrackedValueTypeAtPath(tt.Elem, steps)
+	}
+	step := steps[0]
+	if step.Field != "" {
+		fieldType, ok := a.lookupResolvedFieldType(current, step.Field)
+		if !ok {
+			return nil, false
+		}
+		return a.projectTrackedValueTypeAtPath(fieldType, steps[1:])
+	}
+	if step.Wildcard || step.Index != nil {
+		switch tt := current.(type) {
+		case *ArrayType:
+			return a.projectTrackedValueTypeAtPath(tt.Elem, steps[1:])
+		case *DArrayType:
+			return a.projectTrackedValueTypeAtPath(tt.Elem, steps[1:])
+		case *ViewType:
+			return a.projectTrackedValueTypeAtPath(tt.Elem, steps[1:])
+		case *DArrayViewType:
+			return a.projectTrackedValueTypeAtPath(tt.Elem, steps[1:])
+		}
+	}
+	return nil, false
+}
+
+func (a *Analyzer) replaceTrackedValueTypeAtPath(current Type, steps []borrowReturnAnnotationStep, replacement Type) (Type, bool) {
+	if current == nil || replacement == nil {
+		return nil, false
+	}
+	if len(steps) == 0 {
+		return a.cloneTrackedValueType(replacement), true
+	}
+	switch tt := current.(type) {
+	case *AggregateStateType:
+		nextBase, ok := a.replaceTrackedValueTypeAtPath(tt.Base, steps, replacement)
+		if !ok {
+			return nil, false
+		}
+		return cloneAggregateStateWithBase(nextBase, aggregateStateStates(tt)), true
+	case *RefType:
+		nextElem, ok := a.replaceTrackedValueTypeAtPath(tt.Elem, steps, replacement)
+		if !ok {
+			return nil, false
+		}
+		cloned := *tt
+		cloned.Elem = nextElem
+		return &cloned, true
+	case *ArrayType:
+		step := steps[0]
+		if !step.Wildcard && step.Index == nil {
+			return nil, false
+		}
+		nextElem, ok := a.replaceTrackedValueTypeAtPath(tt.Elem, steps[1:], replacement)
+		if !ok {
+			return nil, false
+		}
+		cloned := *tt
+		cloned.Elem = nextElem
+		return &cloned, true
+	case *DArrayType:
+		step := steps[0]
+		if !step.Wildcard && step.Index == nil {
+			return nil, false
+		}
+		nextElem, ok := a.replaceTrackedValueTypeAtPath(tt.Elem, steps[1:], replacement)
+		if !ok {
+			return nil, false
+		}
+		cloned := *tt
+		cloned.Elem = nextElem
+		return &cloned, true
+	case *ViewType:
+		step := steps[0]
+		if !step.Wildcard && step.Index == nil {
+			return nil, false
+		}
+		nextElem, ok := a.replaceTrackedValueTypeAtPath(tt.Elem, steps[1:], replacement)
+		if !ok {
+			return nil, false
+		}
+		cloned := *tt
+		cloned.Elem = nextElem
+		return &cloned, true
+	case *DArrayViewType:
+		step := steps[0]
+		if !step.Wildcard && step.Index == nil {
+			return nil, false
+		}
+		nextElem, ok := a.replaceTrackedValueTypeAtPath(tt.Elem, steps[1:], replacement)
+		if !ok {
+			return nil, false
+		}
+		cloned := *tt
+		cloned.Elem = nextElem
+		return &cloned, true
+	}
+	step := steps[0]
+	if step.Field == "" {
+		return nil, false
+	}
+	switch tt := current.(type) {
+	case *StructType:
+		field, ok := tt.Fields[step.Field]
+		if !ok {
+			return nil, false
+		}
+		nextFieldType, ok := a.replaceTrackedValueTypeAtPath(field.Type, steps[1:], replacement)
+		if !ok {
+			return nil, false
+		}
+		fields := cloneStructFields(tt.Fields)
+		field.Type = nextFieldType
+		fields[step.Field] = field
+		return cloneStructTypeWithFields(tt, fields), true
+	case *GenericInstanceType:
+		baseStruct, ok := tt.Base.(*StructType)
+		if !ok || baseStruct == nil {
+			return nil, false
+		}
+		currentFieldType, ok := a.lookupResolvedFieldType(tt, step.Field)
+		if !ok {
+			return nil, false
+		}
+		nextFieldType, ok := a.replaceTrackedValueTypeAtPath(currentFieldType, steps[1:], replacement)
+		if !ok {
+			return nil, false
+		}
+		fields := cloneStructFields(baseStruct.Fields)
+		field, ok := fields[step.Field]
+		if !ok {
+			return nil, false
+		}
+		field.Type = nextFieldType
+		fields[step.Field] = field
+		clonedBase := cloneStructTypeWithFields(baseStruct, fields)
+		cloned := *tt
+		cloned.Base = clonedBase
+		return &cloned, true
+	default:
+		return nil, false
+	}
+}
+
+func (a *Analyzer) applyNamedStatePoststateAtPath(current Type, steps []borrowReturnAnnotationStep, stateCases []string) (Type, bool) {
+	if current == nil {
+		return nil, false
+	}
+	switch tt := current.(type) {
+	case *AggregateStateType:
+		nextBase, ok := a.applyNamedStatePoststateAtPath(tt.Base, steps, stateCases)
+		if !ok {
+			return nil, false
+		}
+		return cloneAggregateStateWithBase(nextBase, aggregateStateStates(tt)), true
+	case *RefType:
+		nextElem, ok := a.applyNamedStatePoststateAtPath(tt.Elem, steps, stateCases)
+		if !ok {
+			return nil, false
+		}
+		cloned := *tt
+		cloned.Elem = nextElem
+		return &cloned, true
+	}
+	if len(steps) == 0 {
+		base, ok := namedStateStructBase(current)
+		if !ok || base == nil {
+			return nil, false
+		}
+		desired := newNamedStateType(base.Name, base.NamedStateCases, stateCases)
+		if desired == nil {
+			return nil, false
+		}
+		replaced := replaceTrackedNamedStateArg(current, desired)
+		if replaced == nil {
+			return nil, false
+		}
+		return replaced, true
+	}
+	step := steps[0]
+	if step.Field == "" {
+		return nil, false
+	}
+	switch tt := current.(type) {
+	case *StructType:
+		field, ok := tt.Fields[step.Field]
+		if !ok {
+			return nil, false
+		}
+		nextField, ok := a.applyNamedStatePoststateAtPath(field.Type, steps[1:], stateCases)
+		if !ok {
+			return nil, false
+		}
+		fields := cloneStructFields(tt.Fields)
+		field.Type = nextField
+		fields[step.Field] = field
+		return cloneStructTypeWithFields(tt, fields), true
+	case *GenericInstanceType:
+		baseStruct, ok := tt.Base.(*StructType)
+		if !ok || baseStruct == nil {
+			return nil, false
+		}
+		currentFieldType, ok := a.lookupResolvedFieldType(tt, step.Field)
+		if !ok {
+			return nil, false
+		}
+		nextField, ok := a.applyNamedStatePoststateAtPath(currentFieldType, steps[1:], stateCases)
+		if !ok {
+			return nil, false
+		}
+		fields := cloneStructFields(baseStruct.Fields)
+		field, ok := fields[step.Field]
+		if !ok {
+			return nil, false
+		}
+		field.Type = nextField
+		fields[step.Field] = field
+		clonedBase := cloneStructTypeWithFields(baseStruct, fields)
+		cloned := *tt
+		cloned.Base = clonedBase
+		return &cloned, true
+	default:
+		return nil, false
+	}
+}
+
+func (a *Analyzer) applyRefStatePoststateAtPath(current Type, steps []borrowReturnAnnotationStep, desired RefState) (Type, bool) {
+	if current == nil {
+		return nil, false
+	}
+	switch tt := current.(type) {
+	case *AggregateStateType:
+		nextBase, ok := a.applyRefStatePoststateAtPath(tt.Base, steps, desired)
+		if !ok {
+			return nil, false
+		}
+		return cloneAggregateStateWithBase(nextBase, aggregateStateStates(tt)), true
+	case *RefType:
+		if len(steps) == 0 {
+			return cloneRefTypeWithState(tt, desired), true
+		}
+		nextElem, ok := a.applyRefStatePoststateAtPath(tt.Elem, steps, desired)
+		if !ok {
+			return nil, false
+		}
+		cloned := *tt
+		cloned.Elem = nextElem
+		return &cloned, true
+	case *ArrayType:
+		step := steps[0]
+		if !step.Wildcard && step.Index == nil {
+			return nil, false
+		}
+		nextElem, ok := a.applyRefStatePoststateAtPath(tt.Elem, steps[1:], desired)
+		if !ok {
+			return nil, false
+		}
+		cloned := *tt
+		cloned.Elem = nextElem
+		return &cloned, true
+	case *DArrayType:
+		step := steps[0]
+		if !step.Wildcard && step.Index == nil {
+			return nil, false
+		}
+		nextElem, ok := a.applyRefStatePoststateAtPath(tt.Elem, steps[1:], desired)
+		if !ok {
+			return nil, false
+		}
+		cloned := *tt
+		cloned.Elem = nextElem
+		return &cloned, true
+	case *ViewType:
+		step := steps[0]
+		if !step.Wildcard && step.Index == nil {
+			return nil, false
+		}
+		nextElem, ok := a.applyRefStatePoststateAtPath(tt.Elem, steps[1:], desired)
+		if !ok {
+			return nil, false
+		}
+		cloned := *tt
+		cloned.Elem = nextElem
+		return &cloned, true
+	case *DArrayViewType:
+		step := steps[0]
+		if !step.Wildcard && step.Index == nil {
+			return nil, false
+		}
+		nextElem, ok := a.applyRefStatePoststateAtPath(tt.Elem, steps[1:], desired)
+		if !ok {
+			return nil, false
+		}
+		cloned := *tt
+		cloned.Elem = nextElem
+		return &cloned, true
+	}
+	if len(steps) == 0 {
+		return nil, false
+	}
+	step := steps[0]
+	if step.Field == "" {
+		return nil, false
+	}
+	switch tt := current.(type) {
+	case *StructType:
+		field, ok := tt.Fields[step.Field]
+		if !ok {
+			return nil, false
+		}
+		nextField, ok := a.applyRefStatePoststateAtPath(field.Type, steps[1:], desired)
+		if !ok {
+			return nil, false
+		}
+		fields := cloneStructFields(tt.Fields)
+		field.Type = nextField
+		fields[step.Field] = field
+		return cloneStructTypeWithFields(tt, fields), true
+	case *GenericInstanceType:
+		baseStruct, ok := tt.Base.(*StructType)
+		if !ok || baseStruct == nil {
+			return nil, false
+		}
+		currentFieldType, ok := a.lookupResolvedFieldType(tt, step.Field)
+		if !ok {
+			return nil, false
+		}
+		nextField, ok := a.applyRefStatePoststateAtPath(currentFieldType, steps[1:], desired)
+		if !ok {
+			return nil, false
+		}
+		fields := cloneStructFields(baseStruct.Fields)
+		field, ok := fields[step.Field]
+		if !ok {
+			return nil, false
+		}
+		field.Type = nextField
+		fields[step.Field] = field
+		clonedBase := cloneStructTypeWithFields(baseStruct, fields)
+		cloned := *tt
+		cloned.Base = clonedBase
+		return &cloned, true
+	default:
+		return nil, false
+	}
+}
+
+func (a *Analyzer) applyFuncPoststateAtPath(original Type, current Type, steps []borrowReturnAnnotationStep, poststate FuncPoststate) (Type, bool) {
+	if current == nil {
+		return nil, false
+	}
+	switch poststate.Kind {
+	case FuncPoststateKindPreserve:
+		replacement, ok := a.projectTrackedValueTypeAtPath(original, steps)
+		if !ok {
+			return nil, false
+		}
+		return a.replaceTrackedValueTypeAtPath(current, steps, replacement)
+	case FuncPoststateKindNamedState:
+		return a.applyNamedStatePoststateAtPath(current, steps, poststate.StateCases)
+	case FuncPoststateKindRefState:
+		return a.applyRefStatePoststateAtPath(current, steps, poststate.RefState)
+	default:
+		return nil, false
+	}
+}
+
 func (a *Analyzer) updateNamedStateTypeAtPath(root *Symbol, current Type, structSteps []borrowReturnAnnotationStep, steps []borrowReturnAnnotationStep, pos lexer.Pos, value ast.Expr, valueType Type, unknown bool) (Type, bool) {
 	if current == nil {
 		return nil, false
@@ -5953,12 +6412,70 @@ func (a *Analyzer) recordNamedStateCallArgMutation(arg ast.Expr, paramType Type)
 	if !ok || root == nil {
 		return
 	}
+	a.noteConservativeCallWidening(root, steps)
 	current := a.currentTrackedValueType(root)
 	updatedType, ok := a.widenNamedStatesDeepAtPath(current, steps)
 	if !ok || updatedType == nil {
 		return
 	}
 	a.bindTrackedValueType(root, updatedType)
+}
+
+func funcPoststatesForParam(poststates []FuncPoststate, paramIndex int) []FuncPoststate {
+	if len(poststates) == 0 {
+		return nil
+	}
+	filtered := make([]FuncPoststate, 0, 1)
+	for _, poststate := range poststates {
+		if poststate.ParamIndex == paramIndex {
+			filtered = append(filtered, poststate)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
+}
+
+func (a *Analyzer) recordCallArgPoststates(arg ast.Expr, paramType Type, poststates []FuncPoststate, originalByRoot map[*Symbol]Type) {
+	if len(poststates) == 0 {
+		a.recordNamedStateCallArgMutation(arg, paramType)
+		return
+	}
+	if a.currentSpecializedValueTypes == nil || arg == nil || paramType == nil {
+		return
+	}
+	if _, ok := paramType.(*RefType); !ok {
+		return
+	}
+	root, argSteps, ok := a.namedStateMutationTargetPath(arg)
+	if !ok || root == nil {
+		return
+	}
+	original := originalByRoot[root]
+	if original == nil {
+		original = a.currentTrackedValueType(root)
+		originalByRoot[root] = original
+	}
+	current := a.currentTrackedValueType(root)
+	updated := current
+	changed := false
+	if widened, ok := a.widenNamedStatesDeepAtPath(updated, argSteps); ok && widened != nil {
+		updated = widened
+		changed = true
+	}
+	for _, poststate := range poststates {
+		fullPath := joinBorrowReturnAnnotationSteps(argSteps, poststate.Path)
+		next, ok := a.applyFuncPoststateAtPath(original, updated, fullPath, poststate)
+		if !ok || next == nil {
+			continue
+		}
+		updated = next
+		changed = true
+	}
+	if changed {
+		a.bindTrackedValueType(root, updated)
+	}
 }
 
 func (a *Analyzer) recordFunctionValueBinding(sym *Symbol, value ast.Expr) {
@@ -5984,6 +6501,12 @@ func (a *Analyzer) updateSpecializedValueTypeAtPath(declared Type, current Type,
 		current = declared
 	}
 	if len(steps) == 0 {
+		if refined := assignedRefinementType(declared, actual); refined != nil {
+			return refined, true
+		}
+		if tracked, ok := applyNamedStateFromActualType(declared, actual); ok {
+			return tracked, true
+		}
 		if specialized, ok := a.specializeCallbackCarryingType(declared, actual); ok {
 			return specialized, true
 		}
@@ -6093,7 +6616,7 @@ func (a *Analyzer) recordSpecializedValueTypeTarget(target ast.Expr, valueType T
 		a.currentSpecializedValueTypes[root] = a.cloneTrackedValueType(specializedType)
 		return
 	}
-	delete(a.currentSpecializedValueTypes, root)
+	a.currentSpecializedValueTypes[root] = a.cloneTrackedValueType(updatedType)
 }
 
 func (a *Analyzer) recordFunctionValueTarget(target ast.Expr, value ast.Expr) {
