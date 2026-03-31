@@ -118,6 +118,7 @@ const (
 	// Surface-only and compatibility tokens appended here to preserve legacy token numbering.
 	TOKEN_CHAR_LIT // 'a'
 	TOKEN_IS       // is
+	TOKEN_FATARROW // =>
 )
 
 var tokenNames = map[TokenKind]string{
@@ -177,6 +178,7 @@ var tokenNames = map[TokenKind]string{
 
 	TOKEN_COLON:     ":",
 	TOKEN_ARROW:     "->",
+	TOKEN_FATARROW:  "=>",
 	TOKEN_DOT:       ".",
 	TOKEN_RANGE:     "..",
 	TOKEN_RANGE_LT:  "..<",

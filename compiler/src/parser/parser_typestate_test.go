@@ -826,6 +826,55 @@ func TestParseDeferRemainsContextualIdentifier(t *testing.T) {
 	}
 }
 
+func TestParseFunctionEnsuresClauses(t *testing.T) {
+	file, errs := parseSourceFile(t, "def finish(team: any Team&, node: heap HeapPairNode&, maybe: heap HeapPairNode&?, player: any Player&) -> void can[Memory.Release] ensures team.player => Dead, node => !, maybe => &?, player => preserve:\n    pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[0])
+	}
+	if len(decl.Ensures) != 4 {
+		t.Fatalf("expected four ensures clauses, got %d", len(decl.Ensures))
+	}
+	if decl.Ensures[0].Target.Root != "team" || len(decl.Ensures[0].Target.Fields) != 1 || decl.Ensures[0].Target.Fields[0] != "player" {
+		t.Fatalf("expected first ensures target team.player, got %#v", decl.Ensures[0].Target)
+	}
+	if decl.Ensures[0].Kind != ast.EnsuresKindNamedState || len(decl.Ensures[0].StateCases) != 1 || decl.Ensures[0].StateCases[0] != "Dead" {
+		t.Fatalf("expected first ensures clause to be named-state Dead, got %#v", decl.Ensures[0])
+	}
+	if decl.Ensures[1].Kind != ast.EnsuresKindRefState || decl.Ensures[1].RefState != ast.RefStateNull {
+		t.Fatalf("expected second ensures clause to be refstate null, got %#v", decl.Ensures[1])
+	}
+	if decl.Ensures[2].Kind != ast.EnsuresKindRefState || decl.Ensures[2].RefState != ast.RefStateNullable {
+		t.Fatalf("expected third ensures clause to be refstate nullable, got %#v", decl.Ensures[2])
+	}
+	if decl.Ensures[3].Kind != ast.EnsuresKindPreserve {
+		t.Fatalf("expected fourth ensures clause to preserve state, got %#v", decl.Ensures[3])
+	}
+}
+
+func TestParseExternEnsuresClause(t *testing.T) {
+	file, errs := parseSourceFile(t, "extern sfree_heap_pair_node(node: heap HeapPairNode&) -> void can[Memory.Release] ensures node => !\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.ExternFuncDecl)
+	if !ok {
+		t.Fatalf("expected extern func decl, got %T", file.Decls[0])
+	}
+	if len(decl.Ensures) != 1 {
+		t.Fatalf("expected one ensures clause, got %d", len(decl.Ensures))
+	}
+	if decl.Ensures[0].Target.Root != "node" {
+		t.Fatalf("expected ensures target node, got %#v", decl.Ensures[0].Target)
+	}
+	if decl.Ensures[0].Kind != ast.EnsuresKindRefState || decl.Ensures[0].RefState != ast.RefStateNull {
+		t.Fatalf("expected extern ensures clause to set node => !, got %#v", decl.Ensures[0])
+	}
+}
+
 func TestParseParallelForStatement(t *testing.T) {
 	file, errs := parseSourceFile(t, "packed enum Expr:\n    Int(value: int)\n\ndef walk(frozen: Expr.Store[Frozen]) -> void:\n    pool workers(4u):\n        parallel for node in frozen:\n            pass\n")
 	if len(errs) != 0 {

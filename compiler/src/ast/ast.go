@@ -152,6 +152,28 @@ type PermissionRef struct {
 	Member   string
 }
 
+type EnsuresKind int
+
+const (
+	EnsuresKindNamedState EnsuresKind = iota
+	EnsuresKindRefState
+	EnsuresKindPreserve
+)
+
+type EnsuresPath struct {
+	Position lexer.Pos
+	Root     string
+	Fields   []string
+}
+
+type EnsuresClause struct {
+	Position   lexer.Pos
+	Target     EnsuresPath
+	Kind       EnsuresKind
+	StateCases []string
+	RefState   RefState
+}
+
 type FuncDecl struct {
 	Position         lexer.Pos
 	Annotations      []Annotation
@@ -163,6 +185,7 @@ type FuncDecl struct {
 	PermissionParams []string
 	GenericParams    []GenericParam
 	Permissions      []PermissionRef
+	Ensures          []EnsuresClause
 	Params           []ParamDecl
 	ReturnType       TypeExpr
 	Body             []Stmt
@@ -186,6 +209,7 @@ type ExternFuncDecl struct {
 	GenericParams    []GenericParam
 	RegionParams     []string
 	Permissions      []PermissionRef
+	Ensures          []EnsuresClause
 	Params           []ParamDecl
 	ReturnType       TypeExpr
 	Variadic         bool

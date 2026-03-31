@@ -173,13 +173,13 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 	case *ast.FuncDecl:
 		f.writeAnnotations(level, n.Annotations)
-		f.writeLine(level, formatFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams, n.Params, n.ReturnType, n.Permissions, false))
+		f.writeLine(level, formatFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams, n.Params, n.ReturnType, n.Permissions, n.Ensures, false))
 		for _, stmt := range n.Body {
 			f.writeStmt(level+1, stmt)
 		}
 	case *ast.ExternFuncDecl:
 		f.writeAnnotations(level, n.Annotations)
-		f.writeLine(level, formatExternFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams, n.Params, n.ReturnType, n.Permissions, n.Variadic))
+		f.writeLine(level, formatExternFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams, n.Params, n.ReturnType, n.Permissions, n.Ensures, n.Variadic))
 	case *ast.ExternVarDecl:
 		f.writeLine(level, "extern "+n.Name+": "+formatTypeExpr(n.Type))
 	case *ast.ExternTypeDecl:
@@ -480,7 +480,7 @@ func formatAggregateStateSuffix(hasStateParam bool, stateParamCount int) string 
 	return "[" + strings.Join(parts, ", ") + "]"
 }
 
-func formatFuncHeader(name string, genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, retType ast.TypeExpr, permissions []ast.PermissionRef, variadic bool) string {
+func formatFuncHeader(name string, genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, retType ast.TypeExpr, permissions []ast.PermissionRef, ensures []ast.EnsuresClause, variadic bool) string {
 	line := "def " + name
 	line += formatGenericParams(genericParams, typeParams, refStorageParams, refStateParams, regionParams, permissionParams)
 	line += "(" + formatParamList(params, variadic) + ")"
@@ -488,11 +488,12 @@ func formatFuncHeader(name string, genericParams []ast.GenericParam, typeParams 
 		line += " -> " + formatTypeExpr(retType)
 	}
 	line += formatPermissionRefs(permissions)
+	line += formatEnsuresClauses(ensures)
 	line += ":"
 	return line
 }
 
-func formatExternFuncHeader(name string, genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, retType ast.TypeExpr, permissions []ast.PermissionRef, variadic bool) string {
+func formatExternFuncHeader(name string, genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, retType ast.TypeExpr, permissions []ast.PermissionRef, ensures []ast.EnsuresClause, variadic bool) string {
 	line := "extern " + name
 	line += formatGenericParams(genericParams, typeParams, refStorageParams, refStateParams, regionParams, permissionParams)
 	line += "(" + formatParamList(params, variadic) + ")"
@@ -500,6 +501,7 @@ func formatExternFuncHeader(name string, genericParams []ast.GenericParam, typeP
 		line += " -> " + formatTypeExpr(retType)
 	}
 	line += formatPermissionRefs(permissions)
+	line += formatEnsuresClauses(ensures)
 	return line
 }
 
@@ -548,6 +550,47 @@ func formatPermissionRefs(refs []ast.PermissionRef) string {
 		}
 	}
 	return " can[" + strings.Join(parts, ", ") + "]"
+}
+
+func formatEnsuresClauses(clauses []ast.EnsuresClause) string {
+	if len(clauses) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(clauses))
+	for _, clause := range clauses {
+		parts = append(parts, formatEnsuresClause(clause))
+	}
+	return " ensures " + strings.Join(parts, ", ")
+}
+
+func formatEnsuresClause(clause ast.EnsuresClause) string {
+	left := formatEnsuresPath(clause.Target)
+	switch clause.Kind {
+	case ast.EnsuresKindPreserve:
+		return left + " => preserve"
+	case ast.EnsuresKindRefState:
+		return left + " => " + formatEnsuresRefState(clause.RefState)
+	default:
+		return left + " => " + strings.Join(clause.StateCases, " | ")
+	}
+}
+
+func formatEnsuresPath(path ast.EnsuresPath) string {
+	if len(path.Fields) == 0 {
+		return path.Root
+	}
+	return path.Root + "." + strings.Join(path.Fields, ".")
+}
+
+func formatEnsuresRefState(state ast.RefState) string {
+	switch state {
+	case ast.RefStateNullable:
+		return "&?"
+	case ast.RefStateNull:
+		return "!"
+	default:
+		return "&"
+	}
 }
 
 func formatEnumVariantDecl(variant ast.EnumVariantDecl) string {

@@ -778,6 +778,56 @@ func (p *Parser) parsePermissionRefs(bracketed bool) []ast.PermissionRef {
 	return refs
 }
 
+func (p *Parser) parseEnsuresPath() ast.EnsuresPath {
+	pos := p.cur().Pos
+	root := p.expect(lexer.TOKEN_IDENT).Text
+	fields := make([]string, 0, 2)
+	for p.match(lexer.TOKEN_DOT) {
+		fields = append(fields, p.expect(lexer.TOKEN_IDENT).Text)
+	}
+	return ast.EnsuresPath{Position: pos, Root: root, Fields: fields}
+}
+
+func (p *Parser) parseEnsuresStateCases() []string {
+	stateCases := make([]string, 0, 2)
+	stateCases = append(stateCases, p.expect(lexer.TOKEN_IDENT).Text)
+	for p.match(lexer.TOKEN_PIPE) {
+		stateCases = append(stateCases, p.expect(lexer.TOKEN_IDENT).Text)
+	}
+	return stateCases
+}
+
+func (p *Parser) parseEnsuresClause() ast.EnsuresClause {
+	pos := p.cur().Pos
+	target := p.parseEnsuresPath()
+	p.expect(lexer.TOKEN_FATARROW)
+	if p.matchIdentText("preserve") {
+		return ast.EnsuresClause{Position: pos, Target: target, Kind: ast.EnsuresKindPreserve}
+	}
+	if p.match(lexer.TOKEN_AMPERSAND) {
+		state := ast.RefStateNonNull
+		if p.match(lexer.TOKEN_QUESTION) {
+			state = ast.RefStateNullable
+		}
+		return ast.EnsuresClause{Position: pos, Target: target, Kind: ast.EnsuresKindRefState, RefState: state}
+	}
+	if p.match(lexer.TOKEN_BANG) {
+		return ast.EnsuresClause{Position: pos, Target: target, Kind: ast.EnsuresKindRefState, RefState: ast.RefStateNull}
+	}
+	return ast.EnsuresClause{Position: pos, Target: target, Kind: ast.EnsuresKindNamedState, StateCases: p.parseEnsuresStateCases()}
+}
+
+func (p *Parser) parseEnsuresClausesAfterKeyword() []ast.EnsuresClause {
+	clauses := make([]ast.EnsuresClause, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_COLON))
+	for {
+		clauses = append(clauses, p.parseEnsuresClause())
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	return clauses
+}
+
 func (p *Parser) parseFuncDeclWithAnnotations(annotations []ast.Annotation) *ast.FuncDecl {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_DEF)
@@ -799,11 +849,16 @@ func (p *Parser) parseFuncDeclWithAnnotations(annotations []ast.Annotation) *ast
 		permissions = p.parsePermissionRefs(true)
 	}
 
+	var ensures []ast.EnsuresClause
+	if p.matchIdentText("ensures") {
+		ensures = p.parseEnsuresClausesAfterKeyword()
+	}
+
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 
 	body := p.parseBlock()
-	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Params: params, ReturnType: retType, Body: body}
+	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ReturnType: retType, Body: body}
 }
 
 func (p *Parser) parseParamList() []ast.ParamDecl {
@@ -890,9 +945,13 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 	if p.matchIdentText("can") {
 		permissions = p.parsePermissionRefs(true)
 	}
+	var ensures []ast.EnsuresClause
+	if p.matchIdentText("ensures") {
+		ensures = p.parseEnsuresClausesAfterKeyword()
+	}
 	p.expectNewline()
 
-	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, PermissionParams: permissionParams, GenericParams: genericParams, RegionParams: regionParams, Permissions: permissions, Params: params, ReturnType: retType, Variadic: variadic}
+	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, PermissionParams: permissionParams, GenericParams: genericParams, RegionParams: regionParams, Permissions: permissions, Ensures: ensures, Params: params, ReturnType: retType, Variadic: variadic}
 }
 
 func (p *Parser) parseExportDecl() ast.Decl {

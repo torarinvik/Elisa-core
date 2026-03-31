@@ -52,6 +52,7 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 			GenericParams:    append([]ast.GenericParam(nil), n.GenericParams...),
 			RegionParams:     append([]string(nil), n.RegionParams...),
 			Permissions:      append([]ast.PermissionRef(nil), n.Permissions...),
+			Ensures:          append([]ast.EnsuresClause(nil), n.Ensures...),
 			Params:           append([]ast.ParamDecl(nil), n.Params...),
 			ReturnType:       n.ReturnType,
 		}
