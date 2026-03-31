@@ -3034,6 +3034,7 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 			}
 			if !AssignableTo(expectedType, argType) {
 				a.errorf(expr.Args[i].Pos(), "argument %d to %q expects %s, got %s", i+1, ft.Name, expectedType.String(), argType.String())
+				a.reportMutableRefArgumentNote(expr.Args[i].Pos(), expectedType, argType)
 				a.reportShapeMismatchNotes(expr.Args[i].Pos(), expectedType, argType)
 			}
 			if !a.tryConsumeSinkCallArg(expr.Func, ft, i, expr.Args[i], expectedType) {
@@ -5048,6 +5049,7 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 			if ref, ok := sym.Type.(*RefType); ok {
 				if !ref.Mutable {
 					a.errorf(n.Pos(), "cannot assign through readonly ref %q", sym.Name)
+					a.reportReadonlyRefMutationNote(n.Pos(), n, sym.Type)
 					return invalidType
 				}
 				return ref.Elem
@@ -5141,7 +5143,82 @@ func (a *Analyzer) requireWritableMutationPath(expr ast.Expr) bool {
 		return false
 	}
 	a.errorf(stripped.Pos(), "cannot mutate through readonly ref")
+	a.reportReadonlyRefMutationNote(stripped.Pos(), stripped, nil)
 	return false
+}
+
+func mutableRefSuggestionString(t Type) (string, bool) {
+	ref, ok := t.(*RefType)
+	if !ok || ref == nil {
+		return "", false
+	}
+	cloned := cloneRefType(ref)
+	cloned.Mutable = true
+	return cloned.String(), true
+}
+
+func writableRefAssignableIgnoringMutability(expected Type, actual Type) bool {
+	expectedRef, ok := expected.(*RefType)
+	if !ok || expectedRef == nil || !expectedRef.Mutable {
+		return false
+	}
+	actualRef, ok := actual.(*RefType)
+	if !ok || actualRef == nil || actualRef.Mutable {
+		return false
+	}
+	expectedReadonly := cloneRefType(expectedRef)
+	expectedReadonly.Mutable = false
+	actualReadonly := cloneRefType(actualRef)
+	actualReadonly.Mutable = false
+	return AssignableTo(expectedReadonly, actualReadonly)
+}
+
+func (a *Analyzer) writableRefSuggestionForExpr(expr ast.Expr) (string, bool) {
+	stripped := stripMutationTargetExpr(expr)
+	if stripped == nil {
+		return "", false
+	}
+	t := a.exprTypes[stripped]
+	if t == nil {
+		t = a.analyzeExpr(stripped)
+	}
+	if suggestion, ok := mutableRefSuggestionString(t); ok {
+		return suggestion, true
+	}
+	switch n := stripped.(type) {
+	case *ast.FieldExpr:
+		return a.writableRefSuggestionForExpr(n.Object)
+	case *ast.IndexExpr:
+		return a.writableRefSuggestionForExpr(n.Object)
+	case *ast.SliceExpr:
+		return a.writableRefSuggestionForExpr(n.Object)
+	default:
+		return "", false
+	}
+}
+
+func (a *Analyzer) reportReadonlyRefMutationNote(pos lexer.Pos, expr ast.Expr, t Type) {
+	if a == nil {
+		return
+	}
+	if suggestion, ok := mutableRefSuggestionString(t); ok {
+		a.errorf(pos, "note: plain refs T& are readonly; use %s if this reference should allow writes", suggestion)
+		return
+	}
+	if suggestion, ok := a.writableRefSuggestionForExpr(expr); ok {
+		a.errorf(pos, "note: plain refs T& are readonly; use %s if this reference should allow writes", suggestion)
+		return
+	}
+	a.errorf(pos, "note: plain refs T& are readonly; use mutable T& if this reference should allow writes")
+}
+
+func (a *Analyzer) reportMutableRefArgumentNote(pos lexer.Pos, expected Type, actual Type) {
+	if a == nil || !writableRefAssignableIgnoringMutability(expected, actual) {
+		return
+	}
+	if suggestion, ok := mutableRefSuggestionString(expected); ok {
+		a.errorf(pos, "note: use %s here if the callee should be allowed to write through it", suggestion)
+	}
 }
 
 func (a *Analyzer) refExprAllowsMutation(expr ast.Expr, ref *RefType) bool {

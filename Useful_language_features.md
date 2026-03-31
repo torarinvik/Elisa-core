@@ -27,3 +27,11 @@ This document is now a landing page for the split design notes in `docs/useful_l
 - Section ordering follows the original progression from syntax ideas to typing rules to implementation planning.
 - The newer typestate notes in sections 14 and 15 are a good current entry point if you care about proof-carrying state, mutation, and protocol-style APIs.
 - If you want the likely next typestate feature rather than the current model, section 16 is the design note to read next.
+
+## Current reference mutability rule
+
+- `T&` is a readonly reference.
+- `mutable T&` is a writable reference.
+- This is orthogonal to storage and nullability qualifiers, so the same rule applies to forms like `heap T&`, `any T&?`, and `stack T&`.
+- Common places that should now be `mutable T&` are out-parameters, arena/deque/darray mutation helpers, and explicit ref casts passed to callees that write through the reference.
+- If the semantic analyzer says a mutation goes through a readonly ref, the usual fix is to change the declaration, parameter, or cast from `T&` to `mutable T&`.

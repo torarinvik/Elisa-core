@@ -633,8 +633,35 @@ def bad(job: any ParseJob[Pending]&) -> void:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "cannot mutate through readonly ref") {
-		t.Fatalf("expected readonly ref mutation diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "cannot mutate through readonly ref") {
+		t.Fatalf("expected readonly ref mutation diagnostic, got:\n%s", all)
+	}
+	if !strings.Contains(all, "note: plain refs T& are readonly; use any mutable ParseJob[Pending]& if this reference should allow writes") {
+		t.Fatalf("expected readonly ref mutation hint, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsPassingReadonlyRefToMutableRefParamWithHint(t *testing.T) {
+	src := `struct ParseJob:
+	stage: mutable int
+
+def finish_ok(job: mutable any ParseJob&) -> void:
+	job.stage <- 1
+
+def bad(job: any ParseJob&) -> void:
+	finish_ok(job)
+`
+	_, errs := parseAndAnalyze(t, "readonly_ref_arg_to_mutable_param_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "argument 1 to \"finish_ok\" expects any mutable ParseJob&, got any ParseJob&") {
+		t.Fatalf("expected mutable-ref call diagnostic, got:\n%s", all)
+	}
+	if !strings.Contains(all, "note: use any mutable ParseJob& here if the callee should be allowed to write through it") {
+		t.Fatalf("expected mutable-ref call hint, got:\n%s", all)
 	}
 }
 
