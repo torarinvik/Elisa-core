@@ -157,6 +157,18 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		for _, variant := range n.Variants {
 			f.writeLine(level+1, formatEnumVariantDecl(variant))
 		}
+	case *ast.TreeDecl:
+		f.writeAnnotations(level, n.Annotations)
+		f.writeLine(level, "tree "+n.Name+":")
+		if len(n.Common) > 0 {
+			f.writeLine(level+1, "common:")
+			for _, field := range n.Common {
+				f.writeField(level+2, field)
+			}
+		}
+		for _, member := range n.Members {
+			f.writeTreeMember(level+1, member)
+		}
 	case *ast.StructDecl:
 		f.writeAnnotations(level, n.Annotations)
 		header := ""
@@ -210,6 +222,32 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			for _, nested := range n.Else {
 				f.writeDecl(level+1, nested)
 			}
+		}
+	}
+}
+
+func (f *formatter) writeTreeMember(level int, member ast.TreeMemberDecl) {
+	if member == nil {
+		return
+	}
+	switch n := member.(type) {
+	case *ast.TreeCategoryDecl:
+		f.writeAnnotations(level, n.Annotations)
+		f.writeLine(level, n.Kind+" "+n.Name+":")
+		for _, variant := range n.Variants {
+			f.writeLine(level+1, formatEnumVariantDecl(variant))
+		}
+	case *ast.TreeBlockDecl:
+		f.writeAnnotations(level, n.Annotations)
+		f.writeLine(level, "block "+n.Name+":")
+		for _, field := range n.Fields {
+			f.writeField(level+1, field)
+		}
+	case *ast.TreeStructDecl:
+		f.writeAnnotations(level, n.Annotations)
+		f.writeLine(level, "struct "+n.Name+":")
+		for _, field := range n.Fields {
+			f.writeField(level+1, field)
 		}
 	}
 }

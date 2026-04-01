@@ -613,6 +613,14 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 			mut = "mutable "
 		}
 		fmt.Fprintf(w, "%sglobal %s%s: %s\n", prefix, mut, n.Name, typeStr(n.Type))
+	case *ast.TreeDecl:
+		for _, annotation := range n.Annotations {
+			fmt.Fprintf(w, "%s%s\n", prefix, formatAnnotation(annotation))
+		}
+		fmt.Fprintf(w, "%stree %s: (%d common fields, %d members)\n", prefix, n.Name, len(n.Common), len(n.Members))
+		for _, member := range n.Members {
+			printTreeMember(w, member, level+1)
+		}
 	case *ast.StructDecl:
 		affine := ""
 		if n.Affine {
@@ -674,6 +682,27 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		for _, then := range n.Then {
 			printDecl(w, then, level+1)
 		}
+	}
+}
+
+func printTreeMember(w io.Writer, member ast.TreeMemberDecl, level int) {
+	prefix := ind(level)
+	switch n := member.(type) {
+	case *ast.TreeCategoryDecl:
+		for _, annotation := range n.Annotations {
+			fmt.Fprintf(w, "%s%s\n", prefix, formatAnnotation(annotation))
+		}
+		fmt.Fprintf(w, "%s%s %s: (%d variants)\n", prefix, n.Kind, n.Name, len(n.Variants))
+	case *ast.TreeBlockDecl:
+		for _, annotation := range n.Annotations {
+			fmt.Fprintf(w, "%s%s\n", prefix, formatAnnotation(annotation))
+		}
+		fmt.Fprintf(w, "%sblock %s: (%d fields)\n", prefix, n.Name, len(n.Fields))
+	case *ast.TreeStructDecl:
+		for _, annotation := range n.Annotations {
+			fmt.Fprintf(w, "%s%s\n", prefix, formatAnnotation(annotation))
+		}
+		fmt.Fprintf(w, "%sstruct %s: (%d fields)\n", prefix, n.Name, len(n.Fields))
 	}
 }
 

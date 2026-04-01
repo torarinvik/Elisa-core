@@ -882,6 +882,32 @@ func (a *Analyzer) resolvedStructFields(actual Type) ([]moveBindResolvedField, b
 	switch tt := actual.(type) {
 	case *StructType:
 		base = tt
+	case *TreeBlockType:
+		if tt == nil {
+			return nil, false
+		}
+		fields := make([]moveBindResolvedField, 0, len(tt.Fields))
+		for _, field := range tt.Decl.Fields {
+			resolved, ok := tt.Fields[field.Name]
+			if !ok {
+				continue
+			}
+			fields = append(fields, moveBindResolvedField{Name: field.Name, Type: resolved.Type})
+		}
+		return fields, true
+	case *TreeStructType:
+		if tt == nil {
+			return nil, false
+		}
+		fields := make([]moveBindResolvedField, 0, len(tt.Fields))
+		for _, field := range tt.Decl.Fields {
+			resolved, ok := tt.Fields[field.Name]
+			if !ok {
+				continue
+			}
+			fields = append(fields, moveBindResolvedField{Name: field.Name, Type: resolved.Type})
+		}
+		return fields, true
 	case *GenericInstanceType:
 		structBase, ok := tt.Base.(*StructType)
 		if !ok {

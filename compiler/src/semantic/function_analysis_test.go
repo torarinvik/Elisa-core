@@ -100,6 +100,24 @@ func TestGuardFactSetProveLEAndCheckFieldAccess(t *testing.T) {
 	if !facts.CheckFieldAccess(nodeExpr, enumType, "value") {
 		t.Fatalf("expected packed variant proof to allow payload field access")
 	}
+
+	treeNodeExpr := &ast.Ident{Name: "treeNode"}
+	treeCategory := &TreeCategoryType{Name: "Lua.Expr", Common: map[string]Field{"span": {Name: "span", Type: &BuiltinType{Name: "i64"}}}}
+	if !facts.CheckFieldAccess(treeNodeExpr, treeCategory, "span") {
+		t.Fatalf("expected tree category common field access to be allowed")
+	}
+
+	treeBlockExpr := &ast.Ident{Name: "treeBlock"}
+	treeBlock := &TreeBlockType{Name: "Lua.Block", Fields: map[string]Field{"stmts": {Name: "stmts", Type: &DArrayType{Elem: &BuiltinType{Name: "i64"}, Shape: &WildcardShape{}, SurfaceName: "darray"}}}}
+	if !facts.CheckFieldAccess(treeBlockExpr, treeBlock, "stmts") {
+		t.Fatalf("expected tree block field access to be allowed")
+	}
+
+	treeStructExpr := &ast.Ident{Name: "treeStruct"}
+	treeStruct := &TreeStructType{Name: "Lua.ElseIf", Fields: map[string]Field{"condition": {Name: "condition", Type: treeCategory}}}
+	if !facts.CheckFieldAccess(treeStructExpr, treeStruct, "condition") {
+		t.Fatalf("expected tree struct field access to be allowed")
+	}
 }
 
 func TestGuardFactsForConditionRecordsIsVariantProof(t *testing.T) {

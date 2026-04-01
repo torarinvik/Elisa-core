@@ -243,6 +243,7 @@ func Analyze(file *ast.File) *Result {
 	a.populateConstEnumMembers(activeDecls)
 	a.populateStructFields(activeDecls)
 	a.populateEnumVariants(activeDecls)
+	a.populateTreeMembers(activeDecls)
 	a.warnOnAvoidableStructPadding(activeDecls)
 	a.collectExportTypeAliases(activeDecls)
 	a.collectValueSymbols(activeDecls)
@@ -669,6 +670,38 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					enumType.StoreType = storeType
 					a.namedTypes[storeName] = storeType
 				}
+			case *ast.TreeDecl:
+				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
+				if _, exists := a.namedTypes[qualifiedName]; exists {
+					a.errorf(n.Pos(), "duplicate type %q", qualifiedName)
+					return
+				}
+				treeType := &TreeType{Name: qualifiedName, Common: map[string]Field{}, MemberTypes: map[string]Type{}, Decl: n}
+				a.namedTypes[qualifiedName] = treeType
+				for _, member := range n.Members {
+					memberName := treeMemberDeclName(member)
+					if memberName == "" {
+						continue
+					}
+					memberQualifiedName := treeMemberTypeName(qualifiedName, memberName)
+					if _, exists := a.namedTypes[memberQualifiedName]; exists {
+						a.errorf(member.Pos(), "duplicate type %q", memberQualifiedName)
+						continue
+					}
+					var memberType Type
+					switch m := member.(type) {
+					case *ast.TreeCategoryDecl:
+						memberType = &TreeCategoryType{Name: memberQualifiedName, Family: treeType, Kind: m.Kind, Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: m}
+					case *ast.TreeBlockDecl:
+						memberType = &TreeBlockType{Name: memberQualifiedName, Family: treeType, Fields: map[string]Field{}, Decl: m}
+					case *ast.TreeStructDecl:
+						memberType = &TreeStructType{Name: memberQualifiedName, Family: treeType, Fields: map[string]Field{}, Decl: m}
+					default:
+						continue
+					}
+					a.namedTypes[memberQualifiedName] = memberType
+					treeType.MemberTypes[memberName] = memberType
+				}
 			case *ast.ExternTypeDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				if _, exists := a.namedTypes[qualifiedName]; exists {
@@ -747,6 +780,37 @@ func packedEnumStoreTypeName(enumName string) string {
 
 func packedEnumTagTypeName(enumName string) string {
 	return enumName + ".Tag"
+}
+
+func treeMemberTypeName(treeName string, memberName string) string {
+	return treeName + "." + memberName
+}
+
+func treeMemberDeclName(member ast.TreeMemberDecl) string {
+	if member == nil {
+		return ""
+	}
+	switch n := member.(type) {
+	case *ast.TreeCategoryDecl:
+		return n.Name
+	case *ast.TreeBlockDecl:
+		return n.Name
+	case *ast.TreeStructDecl:
+		return n.Name
+	default:
+		return ""
+	}
+}
+
+func cloneTreeCommonFields(fields map[string]Field) map[string]Field {
+	if len(fields) == 0 {
+		return map[string]Field{}
+	}
+	cloned := make(map[string]Field, len(fields))
+	for name, field := range fields {
+		cloned[name] = field
+	}
+	return cloned
 }
 
 func (a *Analyzer) populateEnumVariants(decls []scopedDecl) {
@@ -836,6 +900,125 @@ func (a *Analyzer) populateEnumVariants(decls []scopedDecl) {
 			}
 			enumType.Variants = variants
 		})
+	}
+}
+
+func (a *Analyzer) populateTreeMembers(decls []scopedDecl) {
+	for _, scoped := range decls {
+		treeDecl, ok := scoped.Decl.(*ast.TreeDecl)
+		if !ok {
+			continue
+		}
+		treeQualifiedName := joinQualifiedName(scoped.Namespace, treeDecl.Name)
+		treeType, _ := a.namedTypes[treeQualifiedName].(*TreeType)
+		if treeType == nil {
+			continue
+		}
+		a.withResolutionContext(treeQualifiedName, scoped.Usings, func() {
+			for _, commonDecl := range treeDecl.Common {
+				if _, exists := treeType.Common[commonDecl.Name]; exists {
+					a.errorf(commonDecl.Position, "duplicate common field %q in tree %q", commonDecl.Name, treeDecl.Name)
+					continue
+				}
+				treeType.Common[commonDecl.Name] = Field{
+					Name:    commonDecl.Name,
+					Type:    a.resolveType(commonDecl.Type),
+					Mutable: commonDecl.Mutable,
+					IsTail:  commonDecl.IsTail,
+				}
+			}
+			for _, member := range treeDecl.Members {
+				switch n := member.(type) {
+				case *ast.TreeCategoryDecl:
+					a.populateTreeCategoryDecl(treeType, n)
+				case *ast.TreeBlockDecl:
+					a.populateTreeBlockDecl(treeType, n)
+				case *ast.TreeStructDecl:
+					a.populateTreeStructDecl(treeType, n)
+				}
+			}
+		})
+	}
+}
+
+func (a *Analyzer) populateTreeCategoryDecl(treeType *TreeType, categoryDecl *ast.TreeCategoryDecl) {
+	if treeType == nil || categoryDecl == nil {
+		return
+	}
+	categoryType, _ := treeType.Member(categoryDecl.Name)
+	category, _ := categoryType.(*TreeCategoryType)
+	if category == nil {
+		return
+	}
+	category.Common = cloneTreeCommonFields(treeType.Common)
+	variants := make([]*EnumVariant, 0, len(categoryDecl.Variants))
+	for i := range categoryDecl.Variants {
+		variantDecl := &categoryDecl.Variants[i]
+		if _, exists := category.VariantMap[variantDecl.Name]; exists {
+			a.errorf(variantDecl.Position, "duplicate variant %q in tree category %q", variantDecl.Name, category.Name)
+			continue
+		}
+		payload := make([]Type, 0, len(variantDecl.Payload))
+		payloadNames := make([]string, 0, len(variantDecl.Payload))
+		seenPayloadNames := map[string]bool{}
+		hasNamedPayloads := false
+		hasUnnamedPayloads := false
+		for _, payloadDecl := range variantDecl.Payload {
+			if payloadDecl.Name != "" {
+				hasNamedPayloads = true
+				if seenPayloadNames[payloadDecl.Name] {
+					a.errorf(payloadDecl.Position, "duplicate payload field %q in tree category variant %q.%q", payloadDecl.Name, category.Name, variantDecl.Name)
+				}
+				seenPayloadNames[payloadDecl.Name] = true
+			} else {
+				hasUnnamedPayloads = true
+			}
+			payload = append(payload, a.resolveType(payloadDecl.Type))
+			payloadNames = append(payloadNames, payloadDecl.Name)
+		}
+		if hasNamedPayloads && hasUnnamedPayloads {
+			a.errorf(variantDecl.Position, "tree category variant %q.%q must name either all payload fields or none", category.Name, variantDecl.Name)
+		}
+		variant := &EnumVariant{Name: variantDecl.Name, Tag: uint32(i), Payload: payload, PayloadNames: payloadNames, TailIndex: -1, Decl: variantDecl}
+		category.VariantMap[variant.Name] = variant
+		variants = append(variants, variant)
+	}
+	category.Variants = variants
+}
+
+func (a *Analyzer) populateTreeBlockDecl(treeType *TreeType, blockDecl *ast.TreeBlockDecl) {
+	if treeType == nil || blockDecl == nil {
+		return
+	}
+	blockType, _ := treeType.Member(blockDecl.Name)
+	block, _ := blockType.(*TreeBlockType)
+	if block == nil {
+		return
+	}
+	for _, field := range blockDecl.Fields {
+		if _, exists := block.Fields[field.Name]; exists {
+			a.errorf(field.Position, "duplicate field %q in tree block %q", field.Name, block.Name)
+			continue
+		}
+		block.Fields[field.Name] = Field{Name: field.Name, Type: a.resolveType(field.Type), Mutable: field.Mutable, IsTail: field.IsTail}
+	}
+}
+
+func (a *Analyzer) populateTreeStructDecl(treeType *TreeType, structDecl *ast.TreeStructDecl) {
+	if treeType == nil || structDecl == nil {
+		return
+	}
+	structType, _ := treeType.Member(structDecl.Name)
+	memberStruct, _ := structType.(*TreeStructType)
+	if memberStruct == nil {
+		return
+	}
+	for _, field := range structDecl.Fields {
+		if _, exists := memberStruct.Fields[field.Name]; exists {
+			a.errorf(field.Position, "duplicate field %q in tree struct %q", field.Name, memberStruct.Name)
+			continue
+		}
+		memberStruct.Fields[field.Name] = Field{Name: field.Name, Type: a.resolveType(field.Type), Mutable: field.Mutable, IsTail: field.IsTail}
 	}
 }
 
@@ -1046,6 +1229,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 					a.errorf(n.Pos(), "extern var %q cannot store affine handle values of type %s", n.Name, declType.String())
 				}
 				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolExternVar, Type: declType, Node: n, Mutable: true}, n.Pos())
+			case *ast.TreeDecl:
 			case *ast.EnumDecl:
 			case *ast.ErrorDecl:
 			case *ast.PermissionDecl:
@@ -2373,6 +2557,7 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 			case *ast.FuncDecl:
 				a.analyzeFunctionAnnotations(n)
 				a.analyzeFunc(n)
+			case *ast.TreeDecl:
 			case *ast.ConstEnumDecl:
 			case *ast.EnumDecl:
 			case *ast.ErrorDecl:

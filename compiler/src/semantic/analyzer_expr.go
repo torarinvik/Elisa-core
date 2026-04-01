@@ -5497,6 +5497,14 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 		}
 		return field, true
 	}
+	if categoryType, ok := objType.(*TreeCategoryType); ok {
+		field, ok := categoryType.Common[fieldName]
+		if !ok {
+			a.errorf(pos, "tree category %q has no common field %q", categoryType.Name, fieldName)
+			return Field{}, false
+		}
+		return field, true
+	}
 	if runtimeBacked := a.runtimeBackedStructType(objType); runtimeBacked != nil {
 		objType = runtimeBacked
 	}
@@ -5505,6 +5513,20 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 		field, ok := t.Fields[fieldName]
 		if !ok {
 			a.errorf(pos, "struct %q has no field %q", t.Name, fieldName)
+			return Field{}, false
+		}
+		return field, true
+	case *TreeBlockType:
+		field, ok := t.Fields[fieldName]
+		if !ok {
+			a.errorf(pos, "tree block %q has no field %q", t.Name, fieldName)
+			return Field{}, false
+		}
+		return field, true
+	case *TreeStructType:
+		field, ok := t.Fields[fieldName]
+		if !ok {
+			a.errorf(pos, "tree struct %q has no field %q", t.Name, fieldName)
 			return Field{}, false
 		}
 		return field, true

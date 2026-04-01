@@ -119,11 +119,17 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("using") {
 		return p.parseUsingDecl()
 	}
+	if p.peekIdentText("tree") {
+		return p.parseTreeDecl()
+	}
 	if p.peekIdentText("affine") {
 		return p.parseStructDecl()
 	}
 	if p.peek() == lexer.TOKEN_AT {
 		annotations := p.parseFuncAnnotations()
+		if p.peekIdentText("tree") {
+			return p.parseTreeDeclWithAnnotations(annotations)
+		}
 		if p.peekIdentText("affine") {
 			return p.parseStructDeclWithAnnotations(annotations)
 		}
@@ -138,14 +144,14 @@ func (p *Parser) parseDecl() ast.Decl {
 			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ENUM {
 				return p.parsePackedEnumDeclWithAnnotations(annotations)
 			}
-			p.errorf("declaration annotations must be followed by def, extern, struct, enum, or packed enum, got %s", p.cur())
+			p.errorf("declaration annotations must be followed by def, extern, struct, tree, enum, or packed enum, got %s", p.cur())
 			return nil
 		case lexer.TOKEN_ENUM:
 			return p.parseEnumDeclWithAnnotations(annotations)
 		case lexer.TOKEN_STRUCT:
 			return p.parseStructDeclWithAnnotations(annotations)
 		default:
-			p.errorf("declaration annotations must be followed by def, extern, struct, enum, or packed enum, got %s", p.cur())
+			p.errorf("declaration annotations must be followed by def, extern, struct, tree, enum, or packed enum, got %s", p.cur())
 			return nil
 		}
 	}
@@ -417,6 +423,141 @@ func (p *Parser) parseEnumPayloadDecl() ast.EnumPayloadDecl {
 	}
 	typ := p.parseTypeExpr()
 	return ast.EnumPayloadDecl{Position: typ.Pos(), Type: typ}
+}
+
+func (p *Parser) parseTreeDecl() *ast.TreeDecl {
+	return p.parseTreeDeclWithAnnotations(nil)
+}
+
+func (p *Parser) parseTreeDeclWithAnnotations(annotations []ast.Annotation) *ast.TreeDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("tree")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+
+	itemCapacity := p.estimateIndentedItemCount()
+	commonFields := make([]ast.FieldDecl, 0, itemCapacity/2)
+	members := make([]ast.TreeMemberDecl, 0, itemCapacity)
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		memberAnnotations := p.parseAnnotations()
+		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "common" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
+			if len(memberAnnotations) != 0 {
+				for _, annotation := range memberAnnotations {
+					p.errorf("tree common: block does not support declaration annotation @%s", annotation.Name)
+				}
+			}
+			commonFields = append(commonFields, p.parseTreeCommonFields()...)
+			continue
+		}
+		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "block" && p.peekTreeMemberHeader() {
+			members = append(members, p.parseTreeBlockDecl(memberAnnotations))
+			continue
+		}
+		if p.peek() == lexer.TOKEN_STRUCT {
+			members = append(members, p.parseTreeStructMemberDecl(memberAnnotations))
+			continue
+		}
+		if p.peekTreeMemberHeader() {
+			members = append(members, p.parseTreeCategoryDecl(memberAnnotations))
+			continue
+		}
+		p.errorf("expected tree member declaration, got %s", p.cur())
+		p.advance()
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+
+	return &ast.TreeDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Common: commonFields, Members: members}
+}
+
+func (p *Parser) parseTreeCommonFields() []ast.FieldDecl {
+	p.expect(lexer.TOKEN_IDENT)
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+
+	fields := make([]ast.FieldDecl, 0, p.estimateIndentedItemCount())
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		fields = append(fields, p.parseFieldDecl())
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	return fields
+}
+
+func (p *Parser) peekTreeMemberHeader() bool {
+	return p.peek() == lexer.TOKEN_IDENT && p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_COLON
+}
+
+func (p *Parser) parseTreeCategoryDecl(annotations []ast.Annotation) *ast.TreeCategoryDecl {
+	pos := p.cur().Pos
+	kind := p.expect(lexer.TOKEN_IDENT).Text
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+
+	variants := make([]ast.EnumVariantDecl, 0, p.estimateIndentedItemCount())
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		variants = append(variants, p.parseEnumVariantDecl())
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+
+	return &ast.TreeCategoryDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Kind: kind, Name: name, Variants: variants}
+}
+
+func (p *Parser) parseTreeBlockDecl(annotations []ast.Annotation) *ast.TreeBlockDecl {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_IDENT)
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+
+	fields := make([]ast.FieldDecl, 0, p.estimateIndentedItemCount())
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		fields = append(fields, p.parseFieldDecl())
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+
+	return &ast.TreeBlockDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Fields: fields}
+}
+
+func (p *Parser) parseTreeStructMemberDecl(annotations []ast.Annotation) *ast.TreeStructDecl {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_STRUCT)
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+
+	fields := make([]ast.FieldDecl, 0, p.estimateIndentedItemCount())
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		fields = append(fields, p.parseFieldDecl())
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+
+	return &ast.TreeStructDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Fields: fields}
 }
 
 func (p *Parser) parseConstDecl() *ast.ConstDecl {

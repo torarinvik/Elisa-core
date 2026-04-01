@@ -69,6 +69,41 @@ type EnumDecl struct {
 	Variants    []EnumVariantDecl
 }
 
+type TreeDecl struct {
+	Position    lexer.Pos
+	Annotations []Annotation
+	Name        string
+	Common      []FieldDecl
+	Members     []TreeMemberDecl
+}
+
+type TreeMemberDecl interface {
+	Node
+	treeMemberDeclTag()
+}
+
+type TreeCategoryDecl struct {
+	Position    lexer.Pos
+	Annotations []Annotation
+	Kind        string
+	Name        string
+	Variants    []EnumVariantDecl
+}
+
+type TreeBlockDecl struct {
+	Position    lexer.Pos
+	Annotations []Annotation
+	Name        string
+	Fields      []FieldDecl
+}
+
+type TreeStructDecl struct {
+	Position    lexer.Pos
+	Annotations []Annotation
+	Name        string
+	Fields      []FieldDecl
+}
+
 type EnumVariantDecl struct {
 	Position lexer.Pos
 	Name     string
@@ -915,6 +950,12 @@ func (n *PermissionDecl) Pos() lexer.Pos { return n.Position }
 func (n *NamespaceDecl) Pos() lexer.Pos  { return n.Position }
 func (n *UsingDecl) Pos() lexer.Pos      { return n.Position }
 func (n *EnumDecl) Pos() lexer.Pos       { return n.Position }
+func (n *TreeDecl) Pos() lexer.Pos       { return n.Position }
+
+func (n *TreeCategoryDecl) Pos() lexer.Pos { return n.Position }
+func (n *TreeBlockDecl) Pos() lexer.Pos    { return n.Position }
+func (n *TreeStructDecl) Pos() lexer.Pos   { return n.Position }
+
 func (n *GlobalDecl) Pos() lexer.Pos     { return n.Position }
 func (n *StructDecl) Pos() lexer.Pos     { return n.Position }
 func (n *FuncDecl) Pos() lexer.Pos       { return n.Position }
@@ -1034,6 +1075,10 @@ func (*PermissionDecl) nodeTag()            {}
 func (*NamespaceDecl) nodeTag()             {}
 func (*UsingDecl) nodeTag()                 {}
 func (*EnumDecl) nodeTag()                  {}
+func (*TreeDecl) nodeTag()                  {}
+func (*TreeCategoryDecl) nodeTag()          {}
+func (*TreeBlockDecl) nodeTag()             {}
+func (*TreeStructDecl) nodeTag()            {}
 func (*GlobalDecl) nodeTag()                {}
 func (*StructDecl) nodeTag()                {}
 func (*FuncDecl) nodeTag()                  {}
@@ -1136,6 +1181,7 @@ func (*PermissionDecl) declTag()   {}
 func (*NamespaceDecl) declTag()    {}
 func (*UsingDecl) declTag()        {}
 func (*EnumDecl) declTag()         {}
+func (*TreeDecl) declTag()         {}
 func (*GlobalDecl) declTag()       {}
 func (*StructDecl) declTag()       {}
 func (*FuncDecl) declTag()         {}
@@ -1146,6 +1192,10 @@ func (*ExportTypeDecl) declTag()   {}
 func (*ExportFuncDecl) declTag()   {}
 func (*ExportGlobalDecl) declTag() {}
 func (*StaticIfDecl) declTag()     {}
+
+func (*TreeCategoryDecl) treeMemberDeclTag() {}
+func (*TreeBlockDecl) treeMemberDeclTag()    {}
+func (*TreeStructDecl) treeMemberDeclTag()   {}
 
 func (*NamedType) typeExprTag()                 {}
 func (*RefType) typeExprTag()                   {}

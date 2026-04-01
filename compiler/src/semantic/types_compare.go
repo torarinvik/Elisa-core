@@ -154,6 +154,18 @@ func SameType(a, b Type) bool {
 	case *PackedVariantViewType:
 		tb, ok := b.(*PackedVariantViewType)
 		return ok && SameType(ta.Enum, tb.Enum) && ta.Variant != nil && tb.Variant != nil && ta.Variant.Name == tb.Variant.Name
+	case *TreeType:
+		tb, ok := b.(*TreeType)
+		return ok && ta.Name == tb.Name
+	case *TreeCategoryType:
+		tb, ok := b.(*TreeCategoryType)
+		return ok && ta.Name == tb.Name
+	case *TreeBlockType:
+		tb, ok := b.(*TreeBlockType)
+		return ok && ta.Name == tb.Name
+	case *TreeStructType:
+		tb, ok := b.(*TreeStructType)
+		return ok && ta.Name == tb.Name
 	case *EnumType:
 		tb, ok := b.(*EnumType)
 		return ok && ta.Name == tb.Name
@@ -465,6 +477,18 @@ func matchTypePattern(pattern, actual Type) bool {
 	case *PackedVariantViewType:
 		a, ok := actual.(*PackedVariantViewType)
 		return ok && SameType(p.Enum, a.Enum) && p.Variant != nil && a.Variant != nil && p.Variant.Name == a.Variant.Name
+	case *TreeType:
+		a, ok := actual.(*TreeType)
+		return ok && p.Name == a.Name
+	case *TreeCategoryType:
+		a, ok := actual.(*TreeCategoryType)
+		return ok && p.Name == a.Name
+	case *TreeBlockType:
+		a, ok := actual.(*TreeBlockType)
+		return ok && p.Name == a.Name
+	case *TreeStructType:
+		a, ok := actual.(*TreeStructType)
+		return ok && p.Name == a.Name
 	case *EnumType:
 		a, ok := actual.(*EnumType)
 		return ok && p.Name == a.Name

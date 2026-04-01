@@ -206,6 +206,10 @@ func (g GuardFactSet) CheckFieldAccess(expr ast.Expr, objType Type, field string
 		_, ok = variant.PayloadIndex(field)
 		return ok
 	}
+	if categoryType, ok := objType.(*TreeCategoryType); ok && categoryType != nil {
+		_, ok := categoryType.Common[field]
+		return ok
+	}
 	switch objType.(type) {
 	case *DArrayViewType:
 		return field == "data" || field == "len" || field == "elem_size"
@@ -214,6 +218,12 @@ func (g GuardFactSet) CheckFieldAccess(expr ast.Expr, objType Type, field string
 	}
 	switch t := objType.(type) {
 	case *StructType:
+		_, ok := t.Fields[field]
+		return ok
+	case *TreeBlockType:
+		_, ok := t.Fields[field]
+		return ok
+	case *TreeStructType:
 		_, ok := t.Fields[field]
 		return ok
 	case *GenericInstanceType:

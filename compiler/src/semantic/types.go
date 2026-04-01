@@ -195,6 +195,37 @@ type PackedVariantViewType struct {
 	Variant *EnumVariant
 }
 
+type TreeType struct {
+	Name        string
+	Common      map[string]Field
+	MemberTypes map[string]Type
+	Decl        *ast.TreeDecl
+}
+
+type TreeCategoryType struct {
+	Name       string
+	Family     *TreeType
+	Kind       string
+	Common     map[string]Field
+	Variants   []*EnumVariant
+	VariantMap map[string]*EnumVariant
+	Decl       *ast.TreeCategoryDecl
+}
+
+type TreeBlockType struct {
+	Name   string
+	Family *TreeType
+	Fields map[string]Field
+	Decl   *ast.TreeBlockDecl
+}
+
+type TreeStructType struct {
+	Name   string
+	Family *TreeType
+	Fields map[string]Field
+	Decl   *ast.TreeStructDecl
+}
+
 type EnumType struct {
 	Name                    string
 	Packed                  bool
@@ -395,6 +426,10 @@ func (*DictType) isType()              {}
 func (*SViewType) isType()             {}
 func (*PackedEnumStoreType) isType()   {}
 func (*PackedVariantViewType) isType() {}
+func (*TreeType) isType()              {}
+func (*TreeCategoryType) isType()      {}
+func (*TreeBlockType) isType()         {}
+func (*TreeStructType) isType()        {}
 func (*EnumType) isType()              {}
 func (*StructType) isType()            {}
 func (*OpaqueType) isType()            {}
@@ -689,6 +724,30 @@ func (t *PackedVariantViewType) String() string {
 	}
 	return fmt.Sprintf("packedview[%s.%s]", t.Enum.Name, t.Variant.Name)
 }
+func (t *TreeType) String() string {
+	if t == nil {
+		return "<invalid-tree>"
+	}
+	return t.Name
+}
+func (t *TreeCategoryType) String() string {
+	if t == nil {
+		return "<invalid-tree-category>"
+	}
+	return t.Name
+}
+func (t *TreeBlockType) String() string {
+	if t == nil {
+		return "<invalid-tree-block>"
+	}
+	return t.Name
+}
+func (t *TreeStructType) String() string {
+	if t == nil {
+		return "<invalid-tree-struct>"
+	}
+	return t.Name
+}
 func (t *ConstEnumType) Member(name string) (*ConstEnumMember, bool) {
 	if t == nil || t.MemberMap == nil {
 		return nil, false
@@ -699,6 +758,22 @@ func (t *ConstEnumType) Member(name string) (*ConstEnumMember, bool) {
 func (t *EnumType) String() string   { return t.Name }
 func (t *StructType) String() string { return t.Name }
 func (t *OpaqueType) String() string { return t.Name }
+
+func (t *TreeType) Member(name string) (Type, bool) {
+	if t == nil || t.MemberTypes == nil {
+		return nil, false
+	}
+	member, ok := t.MemberTypes[name]
+	return member, ok
+}
+
+func (t *TreeCategoryType) Variant(name string) (*EnumVariant, bool) {
+	if t == nil || t.VariantMap == nil {
+		return nil, false
+	}
+	variant, ok := t.VariantMap[name]
+	return variant, ok
+}
 
 func namedStateStructBase(t Type) (*StructType, bool) {
 	switch tt := t.(type) {
