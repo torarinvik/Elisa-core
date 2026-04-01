@@ -214,3 +214,25 @@ def child_span(node: Lua.Expr) -> i64:
 	return node.span
 `)
 }
+
+func TestAnalyzeTreeVariantBareTypeSugarAndRefinedCalls(t *testing.T) {
+	analyzeTreeTestSource(t, "tree_variant_bare_type_surface.llcontext", `tree Lua:
+	common:
+		span: i64
+	expr Expr:
+		Nil
+		Binary(left: Expr, right: Expr)
+
+def keep_binary(view_node: Lua.Expr.Binary) -> Lua.Expr.Binary:
+	return view_node
+
+def score_binary(view_node: Lua.Expr.Binary) -> i64:
+	kept: Lua.Expr.Binary = keep_binary(view_node)
+	return kept.left.span + kept.right.span + kept.span
+
+def child_span(node: Lua.Expr) -> i64:
+	if node is Lua.Expr.Binary:
+		return score_binary(node)
+	return node.span
+`)
+}

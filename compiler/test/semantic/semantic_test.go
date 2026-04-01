@@ -5676,6 +5676,47 @@ def fold(node: Expr) -> int:
 	requireNoWarnings(t, result)
 }
 
+func TestAnalyzeAcceptsPackedEnumBareVariantTypeSugar(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def keep(view_node: Expr.Int) -> Expr.Int:
+	return view_node
+
+def score(view_node: Expr.Int) -> int:
+	kept: Expr.Int = keep(view_node)
+	return kept.value + kept.span
+
+def fold(node: Expr) -> int:
+	if node is Expr.Int:
+		return score(node)
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "packed_enum_bare_variant_type_surface_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
+
+func TestAnalyzeRejectsOrdinaryEnumBareVariantTypeSugar(t *testing.T) {
+	src := `enum Expr:
+	Int(value: int)
+
+def bad(node: Expr.Int) -> int:
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "ordinary_enum_bare_variant_type_surface_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "bare variant type \"Expr.Int\" requires a packed enum or tree category") {
+		t.Fatalf("expected bare ordinary-enum variant-type diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeAcceptsPackedEnumIsConditionFallthroughRefiningScrutineeToPackedView(t *testing.T) {
 	src := `packed enum Expr:
 	common:

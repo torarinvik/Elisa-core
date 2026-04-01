@@ -116,3 +116,34 @@ def child_span(node: Lua.Expr) -> i64:
 		t.Fatalf("expected treeview surface type to lower through the existing tree pointer carrier, got:\n%s", output)
 	}
 }
+
+func TestGenerateLLVMIRLowersBareTreeVariantSurfaceTypeWithoutExtraCarrier(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	expr Expr:
+		Nil
+		Binary(left: Expr, right: Expr)
+
+def score_binary(view_node: Lua.Expr.Binary) -> i64:
+	return view_node.left.span + view_node.right.span + view_node.span
+
+def child_span(node: Lua.Expr) -> i64:
+	if node is Lua.Expr.Binary:
+		return score_binary(node)
+	return node.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_bare_variant_surface.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i64 @score_binary(ptr ", "call i64 @score_binary(ptr ", "tree.payload.field"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected bare tree variant surface lowering to include %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "TreeView__") || strings.Contains(output, "treeview.handle") {
+		t.Fatalf("expected bare tree variant surface type to lower through the existing tree pointer carrier, got:\n%s", output)
+	}
+}

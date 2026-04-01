@@ -2589,6 +2589,24 @@ def score(view_node: packedview[Expr.Int]) -> int:
 	}
 }
 
+func TestGenerateLLVMIRLowersBarePackedVariantSurfaceType(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(int)
+
+def score(view_node: Expr.Int) -> int:
+	return view_node.span
+`
+	result := parseAndAnalyze(t, "backend_packed_bare_variant_type.llcontext", src)
+	output := generateLLVMIRWithPackedABIForTest(t, result, backend.PackedEnumABIRowHandle)
+	for _, check := range []string{"define i64 @score(", "%PackedView__Expr__Int = type { ptr, %Expr__Store }", "load i64, ptr"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersPackedEnumWithAffinePayloadMatch(t *testing.T) {
 	src := `extern join(thread: Thread[i64, Joinable]) -> i64
 

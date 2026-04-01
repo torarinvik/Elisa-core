@@ -365,6 +365,9 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		if t, _, ok := a.lookupVisibleType(n.Name); ok {
 			return DefaultStatefulType(t)
 		}
+		if t, ok := a.resolveNamedVariantWitnessType(n); ok {
+			return t
+		}
 		a.errorf(n.Pos(), "unknown type %q", n.Name)
 		return invalidType
 	case *ast.StateSetTypeExpr:
@@ -773,6 +776,44 @@ func (a *Analyzer) resolveTreeVariantViewSurfaceType(expr ast.TypeExpr, pos lexe
 		return invalidType
 	}
 	return categoryType.VariantViewType(variant)
+}
+
+func (a *Analyzer) resolveNamedVariantWitnessType(named *ast.NamedType) (Type, bool) {
+	if named == nil {
+		return nil, false
+	}
+	idx := strings.LastIndex(named.Name, ".")
+	if idx <= 0 || idx+1 >= len(named.Name) {
+		return nil, false
+	}
+	baseName := named.Name[:idx]
+	variantName := named.Name[idx+1:]
+	base, _, ok := a.lookupVisibleType(baseName)
+	if !ok {
+		return nil, false
+	}
+	switch tt := base.(type) {
+	case *TreeCategoryType:
+		variant, ok := tt.Variant(variantName)
+		if !ok || variant == nil {
+			a.errorf(named.Pos(), "tree category %q has no variant %q", tt.Name, variantName)
+			return invalidType, true
+		}
+		return tt.VariantViewType(variant), true
+	case *EnumType:
+		variant, ok := tt.Variant(variantName)
+		if !ok || variant == nil {
+			a.errorf(named.Pos(), "enum %q has no variant %q", tt.Name, variantName)
+			return invalidType, true
+		}
+		if !tt.Packed {
+			a.errorf(named.Pos(), "bare variant type %q requires a packed enum or tree category; ordinary enum variants are not first-class types", named.Name)
+			return invalidType, true
+		}
+		return variant.PackedViewType(tt), true
+	default:
+		return nil, false
+	}
 }
 
 func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
