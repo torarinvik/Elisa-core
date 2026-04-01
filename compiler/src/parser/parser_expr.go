@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"strings"
+
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
 )
@@ -563,26 +565,43 @@ func (p *Parser) parseComparison() ast.Expr {
 }
 
 func (p *Parser) parseIsTestExpr() ast.Expr {
-	if p.peekVariantIsTargetWithPayload() {
+	if p.peekQualifiedVariantTargetWithPayload() {
 		return p.parseVariantIsTestExpr()
 	}
 	target := p.parseTypeExpr()
 	return &ast.TypeExprExpr{Position: target.Pos(), Type: target}
 }
 
-func (p *Parser) peekVariantIsTargetWithPayload() bool {
-	return p.peek() == lexer.TOKEN_IDENT &&
-		p.pos+3 < len(p.tokens) &&
-		p.tokens[p.pos+1].Kind == lexer.TOKEN_DOT &&
-		p.tokens[p.pos+2].Kind == lexer.TOKEN_IDENT &&
-		p.tokens[p.pos+3].Kind == lexer.TOKEN_LPAREN
+func (p *Parser) peekQualifiedVariantTargetWithPayload() bool {
+	if p.peek() != lexer.TOKEN_IDENT {
+		return false
+	}
+	i := p.pos
+	sawDot := false
+	for i+1 < len(p.tokens) && p.tokens[i+1].Kind == lexer.TOKEN_DOT {
+		if i+2 >= len(p.tokens) || p.tokens[i+2].Kind != lexer.TOKEN_IDENT {
+			return false
+		}
+		sawDot = true
+		i += 2
+	}
+	return sawDot && i+1 < len(p.tokens) && p.tokens[i+1].Kind == lexer.TOKEN_LPAREN
+}
+
+func (p *Parser) parseQualifiedVariantTarget() (string, string, lexer.Pos) {
+	pos := p.cur().Pos
+	parts := []string{p.expect(lexer.TOKEN_IDENT).Text}
+	for p.match(lexer.TOKEN_DOT) {
+		parts = append(parts, p.expect(lexer.TOKEN_IDENT).Text)
+	}
+	if len(parts) < 2 {
+		return "", "", pos
+	}
+	return strings.Join(parts[:len(parts)-1], "."), parts[len(parts)-1], pos
 }
 
 func (p *Parser) parseVariantIsTestExpr() ast.Expr {
-	pos := p.cur().Pos
-	enumName := p.expect(lexer.TOKEN_IDENT).Text
-	p.expect(lexer.TOKEN_DOT)
-	variant := p.expect(lexer.TOKEN_IDENT).Text
+	enumName, variant, pos := p.parseQualifiedVariantTarget()
 	args := make([]ast.MatchPatternArg, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 	p.expect(lexer.TOKEN_LPAREN)
 	if p.peek() != lexer.TOKEN_RPAREN {

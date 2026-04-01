@@ -160,6 +160,14 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			}
 			return
 		}
+		if treeType, ctorType, ok := a.treeVariantExprType(n); ok {
+			if ctorType != nil {
+				result = ctorType
+			} else {
+				result = treeType
+			}
+			return
+		}
 		if t, ok := a.lookupRefinedExprType(n); ok {
 			result = promoteWritableRefType(t, a.fieldExprProvidesWritableRef(n))
 			return
@@ -1544,12 +1552,38 @@ func (a *Analyzer) constEnumMemberExprType(expr *ast.FieldExpr) (Type, bool) {
 	return constEnumType, true
 }
 
+func qualifiedTypePathFromExpr(expr ast.Expr) (string, bool) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		if n == nil || n.Name == "" {
+			return "", false
+		}
+		return n.Name, true
+	case *ast.FieldExpr:
+		prefix, ok := qualifiedTypePathFromExpr(n.Object)
+		if !ok || prefix == "" || n.Field == "" {
+			return "", false
+		}
+		return prefix + "." + n.Field, true
+	case *ast.ParenExpr:
+		return qualifiedTypePathFromExpr(n.Inner)
+	case *ast.TypeExprExpr:
+		named, ok := n.Type.(*ast.NamedType)
+		if !ok || named == nil || named.Name == "" {
+			return "", false
+		}
+		return named.Name, true
+	default:
+		return "", false
+	}
+}
+
 func (a *Analyzer) enumVariantExprType(expr *ast.FieldExpr) (*EnumType, Type, bool) {
-	ident, ok := expr.Object.(*ast.Ident)
+	baseName, ok := qualifiedTypePathFromExpr(expr.Object)
 	if !ok {
 		return nil, nil, false
 	}
-	base, _, ok := a.lookupVisibleType(ident.Name)
+	base, _, ok := a.lookupVisibleType(baseName)
 	if !ok {
 		return nil, nil, false
 	}
@@ -1582,12 +1616,38 @@ func (a *Analyzer) enumVariantExprType(expr *ast.FieldExpr) (*EnumType, Type, bo
 	return enumType, &FuncType{Name: enumType.Name + "." + variant.Name, Params: params, Return: enumType}, true
 }
 
-func (a *Analyzer) packedStoreExprType(expr *ast.FieldExpr) (*PackedEnumStoreType, Type, bool) {
-	ident, ok := expr.Object.(*ast.Ident)
+func (a *Analyzer) treeVariantExprType(expr *ast.FieldExpr) (*TreeCategoryType, Type, bool) {
+	baseName, ok := qualifiedTypePathFromExpr(expr.Object)
 	if !ok {
 		return nil, nil, false
 	}
-	base, _, ok := a.lookupVisibleType(ident.Name)
+	base, _, ok := a.lookupVisibleType(baseName)
+	if !ok {
+		return nil, nil, false
+	}
+	treeType, ok := base.(*TreeCategoryType)
+	if !ok {
+		return nil, nil, false
+	}
+	variant, ok := treeType.Variant(expr.Field)
+	if !ok {
+		a.errorf(expr.Pos(), "tree category %q has no variant %q", treeType.Name, expr.Field)
+		return treeType, invalidType, true
+	}
+	if len(variant.Payload) == 0 {
+		return treeType, nil, true
+	}
+	params := make([]Type, len(variant.Payload))
+	copy(params, variant.Payload)
+	return treeType, &FuncType{Name: treeType.Name + "." + variant.Name, Params: params, Return: treeType}, true
+}
+
+func (a *Analyzer) packedStoreExprType(expr *ast.FieldExpr) (*PackedEnumStoreType, Type, bool) {
+	baseName, ok := qualifiedTypePathFromExpr(expr.Object)
+	if !ok {
+		return nil, nil, false
+	}
+	base, _, ok := a.lookupVisibleType(baseName)
 	if !ok {
 		return nil, nil, false
 	}
@@ -1650,11 +1710,11 @@ func (a *Analyzer) enumConstructorCall(expr *ast.CallExpr) (*EnumType, *EnumVari
 }
 
 func (a *Analyzer) enumConstructorInfoFromFieldExpr(expr *ast.FieldExpr) (*EnumType, *EnumVariant, bool) {
-	ident, ok := expr.Object.(*ast.Ident)
+	baseName, ok := qualifiedTypePathFromExpr(expr.Object)
 	if !ok {
 		return nil, nil, false
 	}
-	base, _, ok := a.lookupVisibleType(ident.Name)
+	base, _, ok := a.lookupVisibleType(baseName)
 	if !ok {
 		return nil, nil, false
 	}
@@ -1667,6 +1727,26 @@ func (a *Analyzer) enumConstructorInfoFromFieldExpr(expr *ast.FieldExpr) (*EnumT
 		return enumType, nil, true
 	}
 	return enumType, variant, true
+}
+
+func (a *Analyzer) treeConstructorInfoFromFieldExpr(expr *ast.FieldExpr) (*TreeCategoryType, *EnumVariant, bool) {
+	baseName, ok := qualifiedTypePathFromExpr(expr.Object)
+	if !ok {
+		return nil, nil, false
+	}
+	base, _, ok := a.lookupVisibleType(baseName)
+	if !ok {
+		return nil, nil, false
+	}
+	treeType, ok := base.(*TreeCategoryType)
+	if !ok {
+		return nil, nil, false
+	}
+	variant, ok := treeType.Variant(expr.Field)
+	if !ok {
+		return treeType, nil, true
+	}
+	return treeType, variant, true
 }
 
 func (a *Analyzer) activePackedStoreRegionState(enumType *EnumType) (regionRefState, bool) {
@@ -1704,6 +1784,22 @@ func (a *Analyzer) packedAllocConstructorInfo(expr ast.Expr) (*EnumType, *EnumVa
 	default:
 		return nil, nil, false
 	}
+}
+
+func (a *Analyzer) treeConstructorCall(expr *ast.CallExpr) (*TreeCategoryType, *EnumVariant, bool) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok {
+		return nil, nil, false
+	}
+	treeType, variant, ok := a.treeConstructorInfoFromFieldExpr(fieldExpr)
+	if !ok {
+		return nil, nil, false
+	}
+	if variant == nil {
+		a.errorf(fieldExpr.Pos(), "tree category %q has no variant %q", treeType.Name, fieldExpr.Field)
+		return treeType, nil, true
+	}
+	return treeType, variant, true
 }
 
 func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
@@ -1805,6 +1901,28 @@ func (a *Analyzer) analyzeIsExpr(expr *ast.BinaryExpr) Type {
 		}
 		return a.namedTypes["bool"]
 	}
+	if treeType, variant, ok := a.resolveTreeVariantIsTarget(expr.Right); ok {
+		if _, _, ok := resolveMatchableTreeCategoryType(left); !ok {
+			a.errorf(expr.Left.Pos(), "is requires an enum or tree-category value for variant tests, got %s", left.String())
+			return a.namedTypes["bool"]
+		}
+		matchableTree, _, _ := resolveMatchableTreeCategoryType(left)
+		if matchableTree == nil || treeType == nil || matchableTree.Name != treeType.Name {
+			expected := "<invalid>"
+			if matchableTree != nil {
+				expected = matchableTree.Name
+			}
+			got := "<invalid>"
+			if treeType != nil && variant != nil {
+				got = treeType.Name + "." + variant.Name
+			}
+			a.errorf(expr.Pos(), "is expects a variant of tree category %q, got %s", expected, got)
+		}
+		if pattern, ok := a.treeVariantIsTargetPattern(expr.Right, treeType, variant); ok && pattern != nil {
+			a.validateTreeVariantIsTargetPattern(pattern, treeType, variant)
+		}
+		return a.namedTypes["bool"]
+	}
 	if targetBase, _, ok := a.resolveNamedStateIsTarget(expr.Right); ok {
 		leftBase, ok := namedStateStructBase(left)
 		if !ok || leftBase == nil {
@@ -1821,7 +1939,7 @@ func (a *Analyzer) analyzeIsExpr(expr *ast.BinaryExpr) Type {
 	} else {
 		a.analyzeExpr(expr.Right)
 	}
-	a.errorf(expr.Right.Pos(), "is expects an enum variant like Expr.Variant or a named-state type like Player[Alive]")
+	a.errorf(expr.Right.Pos(), "is expects a variant like Expr.Variant or a named-state type like Player[Alive]")
 	return a.namedTypes["bool"]
 }
 
@@ -1844,7 +1962,84 @@ func (a *Analyzer) validateEnumVariantIsTargetPattern(pattern *ast.MatchVariantP
 		if arg == nil {
 			continue
 		}
-		a.analyzeEnumIsPayloadPattern(arg.Pattern, variant.Payload[i])
+		a.analyzeVariantIsPayloadPattern(arg.Pattern, variant.Payload[i])
+	}
+}
+
+func (a *Analyzer) treeVariantIsTargetPattern(expr ast.Expr, treeType *TreeCategoryType, variant *EnumVariant) (*ast.MatchVariantPattern, bool) {
+	if testExpr, ok := expr.(*ast.VariantTestExpr); ok && testExpr != nil && testExpr.Pattern != nil {
+		return testExpr.Pattern, true
+	}
+	if treeType == nil || variant == nil {
+		return nil, false
+	}
+	return &ast.MatchVariantPattern{Position: expr.Pos(), EnumName: treeType.Name, Variant: variant.Name}, true
+}
+
+func (a *Analyzer) validateTreeVariantIsTargetPattern(pattern *ast.MatchVariantPattern, treeType *TreeCategoryType, variant *EnumVariant) {
+	if pattern == nil || treeType == nil || variant == nil {
+		return
+	}
+	orderedArgs := a.resolveMatchPatternArgs(pattern, variant, treeType.Name+"."+pattern.Variant, false)
+	for i, arg := range orderedArgs {
+		if arg == nil {
+			continue
+		}
+		a.analyzeVariantIsPayloadPattern(arg.Pattern, variant.Payload[i])
+	}
+}
+
+func (a *Analyzer) analyzeVariantIsPayloadPattern(pattern ast.MatchPattern, expected Type) {
+	switch p := pattern.(type) {
+	case *ast.MatchWildcardPattern:
+		return
+	case *ast.MatchBindPattern:
+		a.errorf(p.Pos(), "variant is tests do not support bind names; use match or if/open/view as to bind payloads")
+	case *ast.MatchStringLiteralPattern:
+		a.analyzeLiteralMatchPatternExpr(p.Pos(), &ast.StringLit{Position: p.Position, Value: p.Value}, expected, "variant is payload pattern")
+	case *ast.MatchLiteralPattern:
+		a.analyzeLiteralMatchPatternExpr(p.Pos(), p.Value, expected, "variant is payload pattern")
+	case *ast.MatchVariantPattern:
+		switch target := expected.(type) {
+		case *EnumType:
+			if p.EnumName != target.Name {
+				a.errorf(p.Pos(), "nested variant is pattern expects enum %q, got %q", target.Name, p.EnumName)
+				return
+			}
+			variant, ok := target.Variant(p.Variant)
+			if !ok {
+				a.errorf(p.Pos(), "enum %q has no variant %q", target.Name, p.Variant)
+				return
+			}
+			orderedArgs := a.resolveMatchPatternArgs(p, variant, target.Name+"."+variant.Name, true)
+			for i, arg := range orderedArgs {
+				if arg == nil {
+					continue
+				}
+				a.analyzeVariantIsPayloadPattern(arg.Pattern, variant.Payload[i])
+			}
+		case *TreeCategoryType:
+			if p.EnumName != target.Name {
+				a.errorf(p.Pos(), "nested variant is pattern expects tree category %q, got %q", target.Name, p.EnumName)
+				return
+			}
+			variant, ok := target.Variant(p.Variant)
+			if !ok {
+				a.errorf(p.Pos(), "tree category %q has no variant %q", target.Name, p.Variant)
+				return
+			}
+			orderedArgs := a.resolveMatchPatternArgs(p, variant, target.Name+"."+variant.Name, true)
+			for i, arg := range orderedArgs {
+				if arg == nil {
+					continue
+				}
+				a.analyzeVariantIsPayloadPattern(arg.Pattern, variant.Payload[i])
+			}
+		default:
+			a.errorf(p.Pos(), "nested variant is pattern %q requires an enum or tree-category payload, got %s", p.EnumName+"."+p.Variant, expected.String())
+		}
+	default:
+		a.errorf(pattern.Pos(), "unsupported variant is payload pattern %T", pattern)
 	}
 }
 
@@ -1922,6 +2117,43 @@ func (a *Analyzer) resolveEnumVariantIsTarget(expr ast.Expr) (*EnumType, *EnumVa
 	return a.enumVariantTargetFromNamedType(named)
 }
 
+func (a *Analyzer) resolveTreeVariantIsTarget(expr ast.Expr) (*TreeCategoryType, *EnumVariant, bool) {
+	if testExpr, ok := expr.(*ast.VariantTestExpr); ok {
+		if testExpr == nil || testExpr.Pattern == nil {
+			return nil, nil, false
+		}
+		base, _, ok := a.lookupVisibleType(testExpr.Pattern.EnumName)
+		if !ok {
+			return nil, nil, false
+		}
+		treeType, ok := base.(*TreeCategoryType)
+		if !ok || treeType == nil {
+			return nil, nil, false
+		}
+		variant, ok := treeType.Variant(testExpr.Pattern.Variant)
+		if !ok || variant == nil {
+			return treeType, nil, false
+		}
+		return treeType, variant, true
+	}
+	if fieldExpr, ok := expr.(*ast.FieldExpr); ok {
+		treeType, variant, ok := a.treeConstructorInfoFromFieldExpr(fieldExpr)
+		if ok && variant != nil {
+			return treeType, variant, true
+		}
+		return nil, nil, false
+	}
+	typedExpr, ok := expr.(*ast.TypeExprExpr)
+	if !ok || typedExpr == nil || typedExpr.Type == nil {
+		return nil, nil, false
+	}
+	named, ok := typedExpr.Type.(*ast.NamedType)
+	if !ok || named == nil {
+		return nil, nil, false
+	}
+	return a.treeVariantTargetFromNamedType(named)
+}
+
 func (a *Analyzer) enumVariantTargetFromNamedType(named *ast.NamedType) (*EnumType, *EnumVariant, bool) {
 	if named == nil {
 		return nil, nil, false
@@ -1947,6 +2179,49 @@ func (a *Analyzer) enumVariantTargetFromNamedType(named *ast.NamedType) (*EnumTy
 	return enumType, variant, true
 }
 
+func (a *Analyzer) treeVariantTargetFromNamedType(named *ast.NamedType) (*TreeCategoryType, *EnumVariant, bool) {
+	if named == nil {
+		return nil, nil, false
+	}
+	idx := strings.LastIndex(named.Name, ".")
+	if idx <= 0 || idx+1 >= len(named.Name) {
+		return nil, nil, false
+	}
+	treeName := named.Name[:idx]
+	variantName := named.Name[idx+1:]
+	base, _, ok := a.lookupVisibleType(treeName)
+	if !ok {
+		return nil, nil, false
+	}
+	treeType, ok := base.(*TreeCategoryType)
+	if !ok || treeType == nil {
+		return nil, nil, false
+	}
+	variant, ok := treeType.Variant(variantName)
+	if !ok || variant == nil {
+		return treeType, nil, false
+	}
+	return treeType, variant, true
+}
+
+func resolveMatchableTreeCategoryType(actual Type) (*TreeCategoryType, *TreeVariantViewType, bool) {
+	actual = StripAggregateStateType(actual)
+	switch tt := actual.(type) {
+	case *TreeCategoryType:
+		if tt == nil {
+			return nil, nil, false
+		}
+		return tt, nil, true
+	case *TreeVariantViewType:
+		if tt == nil || tt.Category == nil {
+			return nil, nil, false
+		}
+		return tt.Category, tt, true
+	default:
+		return nil, nil, false
+	}
+}
+
 func (a *Analyzer) resolveNamedStateIsTarget(expr ast.Expr) (*StructType, Type, bool) {
 	typedExpr, ok := expr.(*ast.TypeExprExpr)
 	if !ok || typedExpr == nil || typedExpr.Type == nil {
@@ -1955,7 +2230,8 @@ func (a *Analyzer) resolveNamedStateIsTarget(expr ast.Expr) (*StructType, Type, 
 	if named, ok := typedExpr.Type.(*ast.NamedType); ok && named != nil {
 		if idx := strings.LastIndex(named.Name, "."); idx > 0 {
 			if base, _, ok := a.lookupVisibleType(named.Name[:idx]); ok {
-				if _, ok := base.(*EnumType); ok {
+				switch base.(type) {
+				case *EnumType, *TreeCategoryType:
 					return nil, nil, false
 				}
 			}
@@ -1978,7 +2254,7 @@ func isEnumVariantExpr(expr ast.Expr) (*ast.FieldExpr, bool) {
 	case *ast.ParenExpr:
 		return isEnumVariantExpr(n.Inner)
 	case *ast.FieldExpr:
-		if _, ok := n.Object.(*ast.Ident); ok {
+		if _, ok := qualifiedTypePathFromExpr(n.Object); ok {
 			return n, true
 		}
 	}
@@ -3067,6 +3343,53 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 		}
 		return enumType
 	}
+	if treeType, variant, ok := a.treeConstructorCall(expr); ok {
+		if variant == nil {
+			for _, arg := range expr.Args {
+				a.analyzeExpr(arg)
+			}
+			return invalidType
+		}
+		orderedArgs, commonArgs, ok := a.resolveTreeConstructorArgs(expr, treeType, variant)
+		if !ok {
+			return treeType
+		}
+		if len(orderedArgs) != len(variant.Payload) {
+			a.errorf(expr.Pos(), "tree constructor %q expects %d arguments, got %d", treeType.Name+"."+variant.Name, len(variant.Payload), len(expr.Args))
+		}
+		limit := len(orderedArgs)
+		if len(variant.Payload) < limit {
+			limit = len(variant.Payload)
+		}
+		for i := 0; i < len(orderedArgs); i++ {
+			if i < limit {
+				actual := a.analyzeValueExpr(orderedArgs[i], variant.Payload[i])
+				if !AssignableTo(variant.Payload[i], actual) {
+					label := variant.PayloadLabel(i)
+					if label != "" {
+						a.errorf(orderedArgs[i].Pos(), "tree constructor argument %d (%s) to %q expects %s, got %s", i+1, label, treeType.Name+"."+variant.Name, variant.Payload[i].String(), actual.String())
+					} else {
+						a.errorf(orderedArgs[i].Pos(), "tree constructor argument %d to %q expects %s, got %s", i+1, treeType.Name+"."+variant.Name, variant.Payload[i].String(), actual.String())
+					}
+				}
+				a.consumeAffineValueExpr(orderedArgs[i], variant.Payload[i], a.variantConstructorMoveReason("tree", treeType.Name, variant, i))
+			} else {
+				a.analyzeExpr(orderedArgs[i])
+			}
+		}
+		for commonName, field := range treeType.Common {
+			arg, ok := commonArgs[commonName]
+			if !ok {
+				continue
+			}
+			actual := a.analyzeValueExpr(arg, field.Type)
+			if !AssignableTo(field.Type, actual) {
+				a.errorf(arg.Pos(), "tree common field %q for %q expects %s, got %s", commonName, treeType.Name+"."+variant.Name, field.Type.String(), actual.String())
+			}
+			a.consumeAffineValueExpr(arg, field.Type, "move into tree common field "+strconv.Quote(commonName))
+		}
+		return treeType
+	}
 	fnType := a.analyzeExpr(expr.Func)
 	ft, ok := fnType.(*FuncType)
 	if !ok {
@@ -3752,6 +4075,78 @@ func (a *Analyzer) resolvePackedEnumConstructorArgs(expr *ast.CallExpr, enumType
 				a.errorf(expr.Pos(), "enum constructor %q is missing payload field %q", enumType.Name+"."+variant.Name, label)
 			} else {
 				a.errorf(expr.Pos(), "enum constructor %q is missing argument %d", enumType.Name+"."+variant.Name, i+1)
+			}
+			ok = false
+		}
+	}
+	if !ok {
+		return nil, nil, false
+	}
+	expr.ResolvedArgsValid = true
+	expr.ResolvedArgs = ordered
+	expr.ResolvedCommonArgs = commonArgs
+	return ordered, commonArgs, true
+}
+
+func (a *Analyzer) resolveTreeConstructorArgs(expr *ast.CallExpr, treeType *TreeCategoryType, variant *EnumVariant) ([]ast.Expr, map[string]ast.Expr, bool) {
+	if expr == nil || treeType == nil || variant == nil {
+		return nil, nil, false
+	}
+	if expr.ResolvedArgsValid && len(expr.ResolvedArgs) == len(variant.Payload) {
+		return expr.ResolvedArgs, expr.ResolvedCommonArgs, true
+	}
+	namedCount := expr.NamedArgCount()
+	if namedCount == 0 {
+		expr.ResolvedArgsValid = true
+		expr.ResolvedArgs = expr.Args
+		expr.ResolvedCommonArgs = nil
+		return expr.Args, nil, true
+	}
+	if namedCount != len(expr.Args) {
+		a.errorf(expr.Pos(), "tree constructor %q cannot mix positional and named arguments", treeType.Name+"."+variant.Name)
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return nil, nil, false
+	}
+	ordered := make([]ast.Expr, len(variant.Payload))
+	seenPayload := make([]bool, len(variant.Payload))
+	commonArgs := make(map[string]ast.Expr)
+	ok := true
+	for i, arg := range expr.Args {
+		name := expr.ArgName(i)
+		if index, found := variant.PayloadIndex(name); found {
+			if seenPayload[index] {
+				a.errorf(arg.Pos(), "tree constructor %q payload field %q is specified more than once", treeType.Name+"."+variant.Name, name)
+				a.analyzeExpr(arg)
+				ok = false
+				continue
+			}
+			ordered[index] = arg
+			seenPayload[index] = true
+			continue
+		}
+		if _, found := treeType.Common[name]; found {
+			if _, exists := commonArgs[name]; exists {
+				a.errorf(arg.Pos(), "tree constructor %q common field %q is specified more than once", treeType.Name+"."+variant.Name, name)
+				a.analyzeExpr(arg)
+				ok = false
+				continue
+			}
+			commonArgs[name] = arg
+			continue
+		}
+		a.errorf(arg.Pos(), "tree constructor %q has no payload or common field %q", treeType.Name+"."+variant.Name, name)
+		a.analyzeExpr(arg)
+		ok = false
+	}
+	for i, wasSeen := range seenPayload {
+		if !wasSeen {
+			label := variant.PayloadLabel(i)
+			if label != "" {
+				a.errorf(expr.Pos(), "tree constructor %q is missing payload field %q", treeType.Name+"."+variant.Name, label)
+			} else {
+				a.errorf(expr.Pos(), "tree constructor %q is missing argument %d", treeType.Name+"."+variant.Name, i+1)
 			}
 			ok = false
 		}
@@ -5066,14 +5461,18 @@ func contextualArrayLiteralType(expected Type) (*ArrayType, bool) {
 	return arrayType, true
 }
 
-func (a *Analyzer) enumConstructorMoveReason(enumName string, variant *EnumVariant, index int) string {
+func (a *Analyzer) variantConstructorMoveReason(kind string, containerName string, variant *EnumVariant, index int) string {
 	if variant == nil {
-		return "move into enum constructor payload"
+		return "move into " + kind + " constructor payload"
 	}
 	if label := variant.PayloadLabel(index); label != "" {
-		return "move into enum payload " + strconv.Quote(enumName+"."+variant.Name+"."+label)
+		return "move into " + kind + " payload " + strconv.Quote(containerName+"."+variant.Name+"."+label)
 	}
-	return "move into enum payload " + strconv.Quote(enumName+"."+variant.Name) + " argument " + strconv.Itoa(index+1)
+	return "move into " + kind + " payload " + strconv.Quote(containerName+"."+variant.Name) + " argument " + strconv.Itoa(index+1)
+}
+
+func (a *Analyzer) enumConstructorMoveReason(enumName string, variant *EnumVariant, index int) string {
+	return a.variantConstructorMoveReason("enum", enumName, variant, index)
 }
 
 func containsTypeParam(t Type) bool {
@@ -5482,6 +5881,14 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 		return field, true
 	}
 	if viewType, ok := objType.(*PackedVariantViewType); ok {
+		field, ok := viewType.Field(fieldName)
+		if !ok {
+			a.errorf(pos, "%s has no field %q", viewType.String(), fieldName)
+			return Field{}, false
+		}
+		return field, true
+	}
+	if viewType, ok := objType.(*TreeVariantViewType); ok {
 		field, ok := viewType.Field(fieldName)
 		if !ok {
 			a.errorf(pos, "%s has no field %q", viewType.String(), fieldName)

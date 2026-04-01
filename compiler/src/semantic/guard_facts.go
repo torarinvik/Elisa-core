@@ -123,11 +123,18 @@ func (g *GuardFactSet) AddPackedVariant(expr ast.Expr, viewType *PackedVariantVi
 	if g == nil || viewType == nil || viewType.Enum == nil || viewType.Variant == nil {
 		return
 	}
+	g.AddVariantProof(expr, viewType.Enum.Name, viewType.Variant.Name)
+}
+
+func (g *GuardFactSet) AddVariantProof(expr ast.Expr, typeName string, variantName string) {
+	if g == nil || typeName == "" || variantName == "" {
+		return
+	}
 	key := guardFactExprKey(expr)
 	if key == "" {
 		return
 	}
-	g.ensurePackedVariants()[key] = PackedVariantGuard{EnumName: viewType.Enum.Name, VariantName: viewType.Variant.Name}
+	g.ensurePackedVariants()[key] = PackedVariantGuard{EnumName: typeName, VariantName: variantName}
 }
 
 func (g *GuardFactSet) AddLE(left ast.Expr, right ast.Expr) {
@@ -191,6 +198,10 @@ func (g GuardFactSet) CheckFieldAccess(expr ast.Expr, objType Type, field string
 		_, ok := viewType.Field(field)
 		return ok
 	}
+	if viewType, ok := objType.(*TreeVariantViewType); ok {
+		_, ok := viewType.Field(field)
+		return ok
+	}
 	if enumType, ok := objType.(*EnumType); ok && enumType != nil && enumType.Packed {
 		if _, ok := enumType.Common[field]; ok {
 			return true
@@ -207,7 +218,18 @@ func (g GuardFactSet) CheckFieldAccess(expr ast.Expr, objType Type, field string
 		return ok
 	}
 	if categoryType, ok := objType.(*TreeCategoryType); ok && categoryType != nil {
-		_, ok := categoryType.Common[field]
+		if _, ok := categoryType.Common[field]; ok {
+			return true
+		}
+		guard, ok := g.PackedVariant(expr)
+		if !ok || guard.EnumName != categoryType.Name {
+			return false
+		}
+		variant, ok := categoryType.Variant(guard.VariantName)
+		if !ok || variant == nil {
+			return false
+		}
+		_, ok = variant.PayloadIndex(field)
 		return ok
 	}
 	switch objType.(type) {
@@ -308,8 +330,8 @@ func guardFactVariantTarget(expr ast.Expr) (string, string, bool) {
 	case *ast.ParenExpr:
 		return guardFactVariantTarget(n.Inner)
 	case *ast.FieldExpr:
-		if ident, ok := n.Object.(*ast.Ident); ok && ident != nil && ident.Name != "" && n.Field != "" {
-			return ident.Name, n.Field, true
+		if objectName, ok := qualifiedTypePathFromExpr(n.Object); ok && objectName != "" && n.Field != "" {
+			return objectName, n.Field, true
 		}
 	case *ast.TypeExprExpr:
 		named, ok := n.Type.(*ast.NamedType)

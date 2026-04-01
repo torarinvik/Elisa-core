@@ -2142,6 +2142,18 @@ func (a *Analyzer) containsAffineHandleValues(t Type, seen map[string]bool) bool
 			}
 		}
 		return false
+	case *TreeVariantViewType:
+		for _, field := range tt.Category.Common {
+			if a.containsAffineHandleValues(field.Type, seen) {
+				return true
+			}
+		}
+		for _, payloadType := range tt.Variant.Payload {
+			if a.containsAffineHandleValues(payloadType, seen) {
+				return true
+			}
+		}
+		return false
 	case *EnumType:
 		for _, field := range tt.Common {
 			if a.containsAffineHandleValues(field.Type, seen) {
@@ -2153,6 +2165,34 @@ func (a *Analyzer) containsAffineHandleValues(t Type, seen map[string]bool) bool
 				if a.containsAffineHandleValues(payloadType, seen) {
 					return true
 				}
+			}
+		}
+		return false
+	case *TreeCategoryType:
+		for _, field := range tt.Common {
+			if a.containsAffineHandleValues(field.Type, seen) {
+				return true
+			}
+		}
+		for _, variant := range tt.Variants {
+			for _, payloadType := range variant.Payload {
+				if a.containsAffineHandleValues(payloadType, seen) {
+					return true
+				}
+			}
+		}
+		return false
+	case *TreeBlockType:
+		for _, field := range tt.Fields {
+			if a.containsAffineHandleValues(field.Type, seen) {
+				return true
+			}
+		}
+		return false
+	case *TreeStructType:
+		for _, field := range tt.Fields {
+			if a.containsAffineHandleValues(field.Type, seen) {
+				return true
 			}
 		}
 		return false
@@ -2268,6 +2308,18 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 			}
 		}
 		return false
+	case *TreeVariantViewType:
+		for _, field := range tt.Category.Common {
+			if a.typeCanContainRegionRefs(field.Type, seen) {
+				return true
+			}
+		}
+		for _, payloadType := range tt.Variant.Payload {
+			if a.typeCanContainRegionRefs(payloadType, seen) {
+				return true
+			}
+		}
+		return false
 	case *StructType:
 		for _, field := range tt.Fields {
 			if a.typeCanContainRegionRefs(field.Type, seen) {
@@ -2284,6 +2336,34 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 				if a.typeCanContainRegionRefs(payload, seen) {
 					return true
 				}
+			}
+		}
+		return false
+	case *TreeCategoryType:
+		for _, field := range tt.Common {
+			if a.typeCanContainRegionRefs(field.Type, seen) {
+				return true
+			}
+		}
+		for _, variant := range tt.Variants {
+			for _, payloadType := range variant.Payload {
+				if a.typeCanContainRegionRefs(payloadType, seen) {
+					return true
+				}
+			}
+		}
+		return false
+	case *TreeBlockType:
+		for _, field := range tt.Fields {
+			if a.typeCanContainRegionRefs(field.Type, seen) {
+				return true
+			}
+		}
+		return false
+	case *TreeStructType:
+		for _, field := range tt.Fields {
+			if a.typeCanContainRegionRefs(field.Type, seen) {
+				return true
 			}
 		}
 		return false
@@ -2685,11 +2765,18 @@ func (a *Analyzer) applyFunctionGuardAnnotation(annotation ast.Annotation, fn *a
 		if !ok {
 			return
 		}
-		enumType, ok := base.(*EnumType)
-		if !ok || enumType == nil {
-			return
+		switch variantBase := base.(type) {
+		case *EnumType:
+			if variantBase == nil {
+				return
+			}
+			signature.GuardEffects = append(signature.GuardEffects, FuncGuardEffect{Kind: FuncGuardKindPackedVariant, ParamIndex: paramIndex, EnumName: variantBase.Name, VariantName: variantName})
+		case *TreeCategoryType:
+			if variantBase == nil {
+				return
+			}
+			signature.GuardEffects = append(signature.GuardEffects, FuncGuardEffect{Kind: FuncGuardKindPackedVariant, ParamIndex: paramIndex, EnumName: variantBase.Name, VariantName: variantName})
 		}
-		signature.GuardEffects = append(signature.GuardEffects, FuncGuardEffect{Kind: FuncGuardKindPackedVariant, ParamIndex: paramIndex, EnumName: enumType.Name, VariantName: variantName})
 	}
 }
 
@@ -2799,7 +2886,7 @@ func (a *Analyzer) validateFunctionGuardVariantAnnotation(annotation ast.Annotat
 		return false
 	}
 	if len(annotation.Args) != 2 {
-		a.errorf(annotation.Position, "@guard_variant on function %q expects a parameter name and Enum.Variant path", fn.Name)
+		a.errorf(annotation.Position, "@guard_variant on function %q expects a parameter name and VariantType.Variant path", fn.Name)
 		return false
 	}
 	paramIndex, ok := functionAnnotationParamIndex(fn, annotation.Args[0])
@@ -2809,34 +2896,55 @@ func (a *Analyzer) validateFunctionGuardVariantAnnotation(annotation ast.Annotat
 	}
 	enumName, variantName, ok := parseFunctionGuardVariantPath(annotation.Args[1])
 	if !ok {
-		a.errorf(annotation.Position, "@guard_variant on function %q expects an Enum.Variant path, got %q", fn.Name, annotation.Args[1])
+		a.errorf(annotation.Position, "@guard_variant on function %q expects a VariantType.Variant path, got %q", fn.Name, annotation.Args[1])
 		return false
 	}
 	base, _, ok := a.lookupVisibleType(enumName)
 	if !ok {
-		a.errorf(annotation.Position, "@guard_variant on function %q references unknown enum %q", fn.Name, enumName)
+		a.errorf(annotation.Position, "@guard_variant on function %q references unknown variant type %q", fn.Name, enumName)
 		return false
 	}
-	enumType, ok := base.(*EnumType)
-	if !ok || enumType == nil {
-		a.errorf(annotation.Position, "@guard_variant on function %q expects an enum variant path, got %q", fn.Name, annotation.Args[1])
-		return false
-	}
-	if !enumType.Packed {
-		a.errorf(annotation.Position, "@guard_variant on function %q currently requires a packed enum variant path, got %q", fn.Name, annotation.Args[1])
-		return false
-	}
-	if _, ok := enumType.Variant(variantName); !ok {
-		a.errorf(annotation.Position, "enum %q has no variant %q", enumType.Name, variantName)
-		return false
-	}
-	paramEnum, _, ok := resolveMatchableEnumType(signature.Params[paramIndex])
-	if !ok || paramEnum == nil || !paramEnum.Packed {
-		a.errorf(annotation.Position, "@guard_variant on function %q requires a packed enum parameter, got %s", fn.Name, signature.Params[paramIndex].String())
-		return false
-	}
-	if paramEnum.Name != enumType.Name {
-		a.errorf(annotation.Position, "@guard_variant on function %q expects parameter %q to use enum %q, got %q", fn.Name, annotation.Args[0], enumType.Name, paramEnum.Name)
+	switch variantBase := base.(type) {
+	case *EnumType:
+		if variantBase == nil {
+			return false
+		}
+		if !variantBase.Packed {
+			a.errorf(annotation.Position, "@guard_variant on function %q currently requires a packed enum or tree-category variant path, got %q", fn.Name, annotation.Args[1])
+			return false
+		}
+		if _, ok := variantBase.Variant(variantName); !ok {
+			a.errorf(annotation.Position, "enum %q has no variant %q", variantBase.Name, variantName)
+			return false
+		}
+		paramEnum, _, ok := resolveMatchableEnumType(signature.Params[paramIndex])
+		if !ok || paramEnum == nil || !paramEnum.Packed {
+			a.errorf(annotation.Position, "@guard_variant on function %q requires a packed enum or tree-category parameter, got %s", fn.Name, signature.Params[paramIndex].String())
+			return false
+		}
+		if paramEnum.Name != variantBase.Name {
+			a.errorf(annotation.Position, "@guard_variant on function %q expects parameter %q to use variant type %q, got %q", fn.Name, annotation.Args[0], variantBase.Name, paramEnum.Name)
+			return false
+		}
+	case *TreeCategoryType:
+		if variantBase == nil {
+			return false
+		}
+		if _, ok := variantBase.Variant(variantName); !ok {
+			a.errorf(annotation.Position, "tree category %q has no variant %q", variantBase.Name, variantName)
+			return false
+		}
+		paramTree, _, ok := resolveMatchableTreeCategoryType(signature.Params[paramIndex])
+		if !ok || paramTree == nil {
+			a.errorf(annotation.Position, "@guard_variant on function %q requires a packed enum or tree-category parameter, got %s", fn.Name, signature.Params[paramIndex].String())
+			return false
+		}
+		if paramTree.Name != variantBase.Name {
+			a.errorf(annotation.Position, "@guard_variant on function %q expects parameter %q to use variant type %q, got %q", fn.Name, annotation.Args[0], variantBase.Name, paramTree.Name)
+			return false
+		}
+	default:
+		a.errorf(annotation.Position, "@guard_variant on function %q expects a packed enum or tree-category variant path, got %q", fn.Name, annotation.Args[1])
 		return false
 	}
 	return true

@@ -168,3 +168,27 @@ def cond_span(branch: Lua.ElseIf) -> i64:
 	return branch.condition.span
 `)
 }
+
+func TestAnalyzeTreeVariantConstructorsAndIsExpr(t *testing.T) {
+	analyzeTreeTestSource(t, "tree_variant_behaviors.llcontext", `tree Lua:
+	common:
+		span: i64
+	expr Expr:
+		Nil
+		Binary(left: Expr, right: Expr)
+
+def make_nil() -> Lua.Expr:
+	return Lua.Expr.Nil
+
+def make_binary(span: i64, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr:
+	return Lua.Expr.Binary(span: span, left: left, right: right)
+
+def child_span(node: Lua.Expr) -> i64:
+	if node is Lua.Expr.Binary:
+		return node.left.span
+	return node.span
+
+def starts_with_nil(node: Lua.Expr) -> bool:
+	return node is Lua.Expr.Binary(Lua.Expr.Nil, _)
+`)
+}

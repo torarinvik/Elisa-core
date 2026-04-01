@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"strings"
+
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
 )
@@ -564,11 +566,16 @@ func (p *Parser) parseNestedMatchPattern() ast.MatchPattern {
 		p.advance()
 		return &ast.MatchWildcardPattern{Position: pos}
 	}
-	name := p.expect(lexer.TOKEN_IDENT).Text
+	parts := []string{p.expect(lexer.TOKEN_IDENT).Text}
 	if !p.match(lexer.TOKEN_DOT) {
-		return &ast.MatchBindPattern{Position: pos, Name: name}
+		return &ast.MatchBindPattern{Position: pos, Name: parts[0]}
 	}
-	variant := p.expect(lexer.TOKEN_IDENT).Text
+	parts = append(parts, p.expect(lexer.TOKEN_IDENT).Text)
+	for p.match(lexer.TOKEN_DOT) {
+		parts = append(parts, p.expect(lexer.TOKEN_IDENT).Text)
+	}
+	name := strings.Join(parts[:len(parts)-1], ".")
+	variant := parts[len(parts)-1]
 	args := make([]ast.MatchPatternArg, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 	if p.match(lexer.TOKEN_LPAREN) {
 		if p.peek() != lexer.TOKEN_RPAREN {

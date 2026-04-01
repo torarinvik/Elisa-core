@@ -184,6 +184,15 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 			return false
 		}
 		appendKeyString(b, tt.Variant.Name)
+	case *TreeVariantViewType:
+		if tt == nil || tt.Category == nil || tt.Variant == nil {
+			return false
+		}
+		appendKeyTag(b, "treeview")
+		if !appendTypeIDKey(b, tt.Category, active, nextCycleID) {
+			return false
+		}
+		appendKeyString(b, tt.Variant.Name)
 	case *TreeType:
 		appendKeyTag(b, "tree")
 		appendKeyString(b, tt.Name)

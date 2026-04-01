@@ -8327,6 +8327,11 @@ func (a *Analyzer) applyConditionRefinementsInternal(scope *Scope, expr ast.Expr
 				a.bindRefinedExprType(scope, targetExpr, viewType)
 				break
 			}
+			targetExpr, treeViewType, ok := a.refinedExprTreeVariantView(n, truthy)
+			if ok {
+				a.bindRefinedExprType(scope, targetExpr, treeViewType)
+				break
+			}
 			targetExpr, refinedType, ok := a.refinedExprNamedStateType(n, truthy)
 			if ok {
 				a.bindRefinedExprType(scope, targetExpr, refinedType)
@@ -8390,6 +8395,25 @@ func (a *Analyzer) refinedExprPackedVariantView(expr *ast.BinaryExpr, truthy boo
 	return expr.Left, variant.PackedViewType(enumType), true
 }
 
+func (a *Analyzer) refinedExprTreeVariantView(expr *ast.BinaryExpr, truthy bool) (ast.Expr, *TreeVariantViewType, bool) {
+	if a == nil || !truthy || expr == nil || expr.Op != lexer.TOKEN_IS {
+		return nil, nil, false
+	}
+	treeType, variant, ok := a.resolveTreeVariantIsTarget(expr.Right)
+	if !ok || treeType == nil || variant == nil {
+		return nil, nil, false
+	}
+	leftType := a.exprTypes[expr.Left]
+	if leftType == nil {
+		leftType = a.analyzeExpr(expr.Left)
+	}
+	matchableTree, _, ok := resolveMatchableTreeCategoryType(leftType)
+	if !ok || matchableTree == nil || matchableTree.Name != treeType.Name {
+		return nil, nil, false
+	}
+	return expr.Left, treeType.VariantViewType(variant), true
+}
+
 func (a *Analyzer) refinedExprNamedStateType(expr *ast.BinaryExpr, truthy bool) (ast.Expr, Type, bool) {
 	if a == nil || expr == nil || expr.Op != lexer.TOKEN_IS {
 		return nil, nil, false
@@ -8443,15 +8467,23 @@ func (a *Analyzer) applyGuardCallConditionRefinements(scope *Scope, call *ast.Ca
 			if !ok {
 				continue
 			}
-			enumType, ok := base.(*EnumType)
-			if !ok || enumType == nil || !enumType.Packed {
-				continue
+			switch variantBase := base.(type) {
+			case *EnumType:
+				if variantBase == nil || !variantBase.Packed {
+					continue
+				}
+				variant, ok := variantBase.Variant(effect.VariantName)
+				if !ok || variant == nil {
+					continue
+				}
+				a.bindRefinedExprType(scope, argExpr, variant.PackedViewType(variantBase))
+			case *TreeCategoryType:
+				variant, ok := variantBase.Variant(effect.VariantName)
+				if !ok || variant == nil {
+					continue
+				}
+				a.bindRefinedExprType(scope, argExpr, variantBase.VariantViewType(variant))
 			}
-			variant, ok := enumType.Variant(effect.VariantName)
-			if !ok || variant == nil {
-				continue
-			}
-			a.bindRefinedExprType(scope, argExpr, variant.PackedViewType(enumType))
 		}
 	}
 }
@@ -8555,15 +8587,23 @@ func (a *Analyzer) addGuardCallFacts(facts *GuardFactSet, call *ast.CallExpr, tr
 			if !ok {
 				continue
 			}
-			enumType, ok := base.(*EnumType)
-			if !ok || enumType == nil || !enumType.Packed {
-				continue
+			switch variantBase := base.(type) {
+			case *EnumType:
+				if variantBase == nil || !variantBase.Packed {
+					continue
+				}
+				variant, ok := variantBase.Variant(effect.VariantName)
+				if !ok || variant == nil {
+					continue
+				}
+				facts.AddPackedVariant(argExpr, variant.PackedViewType(variantBase))
+			case *TreeCategoryType:
+				variant, ok := variantBase.Variant(effect.VariantName)
+				if !ok || variant == nil {
+					continue
+				}
+				facts.AddVariantProof(argExpr, variantBase.Name, variant.Name)
 			}
-			variant, ok := enumType.Variant(effect.VariantName)
-			if !ok || variant == nil {
-				continue
-			}
-			facts.AddPackedVariant(argExpr, variant.PackedViewType(enumType))
 		}
 	}
 }

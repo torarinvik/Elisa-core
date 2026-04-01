@@ -102,9 +102,14 @@ func TestGuardFactSetProveLEAndCheckFieldAccess(t *testing.T) {
 	}
 
 	treeNodeExpr := &ast.Ident{Name: "treeNode"}
-	treeCategory := &TreeCategoryType{Name: "Lua.Expr", Common: map[string]Field{"span": {Name: "span", Type: &BuiltinType{Name: "i64"}}}}
+	treeBinaryVariant := &EnumVariant{Name: "Binary", Payload: []Type{&BuiltinType{Name: "i64"}}, PayloadNames: []string{"left"}}
+	treeCategory := &TreeCategoryType{Name: "Lua.Expr", Common: map[string]Field{"span": {Name: "span", Type: &BuiltinType{Name: "i64"}}}, Variants: []*EnumVariant{treeBinaryVariant}, VariantMap: map[string]*EnumVariant{"Binary": treeBinaryVariant}}
 	if !facts.CheckFieldAccess(treeNodeExpr, treeCategory, "span") {
 		t.Fatalf("expected tree category common field access to be allowed")
+	}
+	facts.AddVariantProof(treeNodeExpr, "Lua.Expr", "Binary")
+	if !facts.CheckFieldAccess(treeNodeExpr, treeCategory, "left") {
+		t.Fatalf("expected tree category variant proof to allow payload field access")
 	}
 
 	treeBlockExpr := &ast.Ident{Name: "treeBlock"}
@@ -117,6 +122,26 @@ func TestGuardFactSetProveLEAndCheckFieldAccess(t *testing.T) {
 	treeStruct := &TreeStructType{Name: "Lua.ElseIf", Fields: map[string]Field{"condition": {Name: "condition", Type: treeCategory}}}
 	if !facts.CheckFieldAccess(treeStructExpr, treeStruct, "condition") {
 		t.Fatalf("expected tree struct field access to be allowed")
+	}
+}
+
+func TestGuardFactsForConditionRecordsTreeVariantProof(t *testing.T) {
+	nodeExpr := &ast.Ident{Name: "node"}
+	cond := &ast.BinaryExpr{
+		Op:   lexer.TOKEN_IS,
+		Left: nodeExpr,
+		Right: &ast.FieldExpr{
+			Object: &ast.FieldExpr{Object: &ast.Ident{Name: "Lua"}, Field: "Expr"},
+			Field:  "Binary",
+		},
+	}
+	facts := GuardFactsForCondition(cond, true)
+	guard, ok := facts.PackedVariant(nodeExpr)
+	if !ok {
+		t.Fatalf("expected tree is-condition to record variant proof, got %#v", facts)
+	}
+	if guard.EnumName != "Lua.Expr" || guard.VariantName != "Binary" {
+		t.Fatalf("expected Lua.Expr.Binary variant proof, got %#v", guard)
 	}
 }
 
@@ -194,6 +219,39 @@ def fold(node: Expr) -> i32:
 	}
 	if !sawVariantGuard {
 		t.Fatalf("expected entry CFG edges to carry @guard_variant facts, got %#v", analysis.CFG.Blocks[analysis.CFG.Entry].Edges)
+	}
+}
+
+func TestAnalyzeFunctionAnalysisCFGRecordsTreeGuardVariantCallFacts(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "tree_guard_variant_cfg.llcontext", `tree Lua:
+	common:
+		span: i64
+	expr Expr:
+		Nil
+		Binary(left: Expr, right: Expr)
+
+@guard_variant(node, Lua.Expr.Binary)
+def is_binary(node: Lua.Expr) -> bool:
+	return node is Lua.Expr.Binary
+
+def fold(node: Lua.Expr) -> i64:
+	if is_binary(node):
+		return node.left.span + node.right.span + node.span
+	return node.span
+`)
+	analysis, ok := result.FunctionAnalysisByName("fold")
+	if !ok || analysis == nil || analysis.CFG == nil {
+		t.Fatal("expected fold function analysis CFG")
+	}
+	var sawVariantGuard bool
+	for _, edge := range analysis.CFG.Blocks[analysis.CFG.Entry].Edges {
+		guard, ok := edge.Guard.PackedVariant(&ast.Ident{Name: "node"})
+		if ok && guard.EnumName == "Lua.Expr" && guard.VariantName == "Binary" {
+			sawVariantGuard = true
+		}
+	}
+	if !sawVariantGuard {
+		t.Fatalf("expected entry CFG edges to carry tree @guard_variant facts, got %#v", analysis.CFG.Blocks[analysis.CFG.Entry].Edges)
 	}
 }
 

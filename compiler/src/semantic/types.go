@@ -195,6 +195,11 @@ type PackedVariantViewType struct {
 	Variant *EnumVariant
 }
 
+type TreeVariantViewType struct {
+	Category *TreeCategoryType
+	Variant  *EnumVariant
+}
+
 type TreeType struct {
 	Name        string
 	Common      map[string]Field
@@ -426,6 +431,7 @@ func (*DictType) isType()              {}
 func (*SViewType) isType()             {}
 func (*PackedEnumStoreType) isType()   {}
 func (*PackedVariantViewType) isType() {}
+func (*TreeVariantViewType) isType()   {}
 func (*TreeType) isType()              {}
 func (*TreeCategoryType) isType()      {}
 func (*TreeBlockType) isType()         {}
@@ -724,6 +730,12 @@ func (t *PackedVariantViewType) String() string {
 	}
 	return fmt.Sprintf("packedview[%s.%s]", t.Enum.Name, t.Variant.Name)
 }
+func (t *TreeVariantViewType) String() string {
+	if t == nil || t.Category == nil || t.Variant == nil {
+		return "<invalid-tree-view>"
+	}
+	return fmt.Sprintf("treeview[%s.%s]", t.Category.Name, t.Variant.Name)
+}
 func (t *TreeType) String() string {
 	if t == nil {
 		return "<invalid-tree>"
@@ -773,6 +785,42 @@ func (t *TreeCategoryType) Variant(name string) (*EnumVariant, bool) {
 	}
 	variant, ok := t.VariantMap[name]
 	return variant, ok
+}
+
+func (t *TreeCategoryType) VariantViewType(variant *EnumVariant) *TreeVariantViewType {
+	if t == nil || variant == nil {
+		return nil
+	}
+	return &TreeVariantViewType{Category: t, Variant: variant}
+}
+
+func (t *TreeVariantViewType) Field(name string) (Field, bool) {
+	if t == nil || t.Category == nil || t.Variant == nil {
+		return Field{}, false
+	}
+	if field, ok := t.Category.Common[name]; ok {
+		return field, true
+	}
+	index, ok := t.Variant.PayloadIndex(name)
+	if !ok || index < 0 || index >= len(t.Variant.Payload) {
+		return Field{}, false
+	}
+	return Field{Name: name, Type: t.Variant.Payload[index], Mutable: false}, true
+}
+
+func (t *TreeVariantViewType) HasNamedPayloadFields() bool {
+	if t == nil || t.Variant == nil || len(t.Variant.Payload) == 0 {
+		return true
+	}
+	if len(t.Variant.PayloadNames) != len(t.Variant.Payload) {
+		return false
+	}
+	for i := range t.Variant.Payload {
+		if t.Variant.PayloadLabel(i) == "" {
+			return false
+		}
+	}
+	return true
 }
 
 func namedStateStructBase(t Type) (*StructType, bool) {
