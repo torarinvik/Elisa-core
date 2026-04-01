@@ -161,6 +161,96 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 			}
 		}
 		_, err = g.ensurePackedVariantViewCarrierType(tt)
+	case *semantic.TreeVariantViewType:
+		if tt == nil || tt.Category == nil {
+			err = fmt.Errorf("missing tree variant view metadata")
+			break
+		}
+		err = g.noteType(tt.Category)
+	case *semantic.TreeType:
+		if tt != nil && tt.Decl != nil {
+			for _, fieldDecl := range tt.Decl.Common {
+				field, ok := tt.Common[fieldDecl.Name]
+				if !ok {
+					continue
+				}
+				if err = g.noteType(field.Type); err != nil {
+					break
+				}
+			}
+		}
+		if err != nil {
+			break
+		}
+		for _, memberType := range tt.MemberTypes {
+			if err = g.noteType(memberType); err != nil {
+				break
+			}
+		}
+	case *semantic.TreeCategoryType:
+		if tt == nil {
+			err = fmt.Errorf("missing tree category metadata")
+			break
+		}
+		for _, fieldDecl := range treeCommonFieldDecls(tt) {
+			field, ok := tt.Common[fieldDecl.Name]
+			if !ok {
+				continue
+			}
+			if err = g.noteType(field.Type); err != nil {
+				break
+			}
+		}
+		if err != nil {
+			break
+		}
+		for _, variant := range tt.Variants {
+			for _, payload := range variant.Payload {
+				if err = g.noteType(payload); err != nil {
+					break
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+		if err == nil {
+			_, err = g.ensureTreeCategoryBody(tt)
+		}
+	case *semantic.TreeBlockType:
+		if tt == nil {
+			err = fmt.Errorf("missing tree block metadata")
+			break
+		}
+		for _, fieldDecl := range treeBlockFieldDecls(tt) {
+			field, ok := tt.Fields[fieldDecl.Name]
+			if !ok {
+				continue
+			}
+			if err = g.noteType(field.Type); err != nil {
+				break
+			}
+		}
+		if err == nil {
+			_, err = g.ensureTreeBlockBody(tt)
+		}
+	case *semantic.TreeStructType:
+		if tt == nil {
+			err = fmt.Errorf("missing tree struct metadata")
+			break
+		}
+		for _, fieldDecl := range treeStructFieldDecls(tt) {
+			field, ok := tt.Fields[fieldDecl.Name]
+			if !ok {
+				continue
+			}
+			if err = g.noteType(field.Type); err != nil {
+				break
+			}
+		}
+		if err == nil {
+			_, err = g.ensureTreeStructBody(tt)
+		}
 	case *semantic.PackedEnumStoreType:
 		_, err = g.lowerPackedEnumStoreType(tt)
 	case *semantic.ErrorUnionType:
@@ -602,6 +692,19 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		return g.lowerPackedEnumStoreType(tt)
 	case *semantic.PackedVariantViewType:
 		return g.ensurePackedVariantViewCarrierType(tt)
+	case *semantic.TreeVariantViewType:
+		if tt == nil || tt.Category == nil {
+			return nil, fmt.Errorf("missing tree variant view metadata")
+		}
+		return g.lowerTreeCategoryType(tt.Category)
+	case *semantic.TreeType:
+		return nil, fmt.Errorf("tree family %s is not a runtime value type", tt.Name)
+	case *semantic.TreeCategoryType:
+		return g.lowerTreeCategoryType(tt)
+	case *semantic.TreeBlockType:
+		return g.ensureTreeBlockBody(tt)
+	case *semantic.TreeStructType:
+		return g.ensureTreeStructBody(tt)
 	case *semantic.ArrayType:
 		elemType, err := g.lowerType(tt.Elem)
 		if err != nil {
@@ -1032,6 +1135,138 @@ func (g *llvmGenerator) ensureEnumBody(name string, enum *semantic.EnumType) (C.
 	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
 	g.structBodies[name] = true
 	return ty, nil
+}
+
+func (g *llvmGenerator) lowerTreeCategoryType(category *semantic.TreeCategoryType) (C.LLVMTypeRef, error) {
+	if category == nil {
+		return nil, fmt.Errorf("missing tree category type")
+	}
+	if _, err := g.ensureTreeCategoryStorageNamedType(category); err != nil {
+		return nil, err
+	}
+	return C.LLVMPointerTypeInContext(g.context, 0), nil
+}
+
+func treeCategoryStorageName(category *semantic.TreeCategoryType) string {
+	if category == nil {
+		return "TreeCategory__Node"
+	}
+	return sanitizeIdentifier(category.Name) + "__Node"
+}
+
+func (g *llvmGenerator) ensureTreeCategoryStorageNamedType(category *semantic.TreeCategoryType) (C.LLVMTypeRef, error) {
+	if category == nil {
+		return nil, fmt.Errorf("missing tree category storage metadata")
+	}
+	return g.ensureNamedStructType(treeCategoryStorageName(category))
+}
+
+func (g *llvmGenerator) ensureTreeCategoryBody(category *semantic.TreeCategoryType) (C.LLVMTypeRef, error) {
+	ty, err := g.ensureTreeCategoryStorageNamedType(category)
+	if err != nil {
+		return nil, err
+	}
+	name := treeCategoryStorageName(category)
+	if g.structBodies[name] || category == nil {
+		return ty, nil
+	}
+	tagType, err := g.lowerBuiltin("u32")
+	if err != nil {
+		return nil, err
+	}
+	fields := []C.LLVMTypeRef{tagType}
+	for _, fieldDecl := range treeCommonFieldDecls(category) {
+		field, ok := category.Common[fieldDecl.Name]
+		if !ok {
+			return nil, fmt.Errorf("missing tree common field %s.%s", category.Name, fieldDecl.Name)
+		}
+		fieldType, err := g.lowerType(field.Type)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, fieldType)
+	}
+	maxSlots := uint64(0)
+	for _, variant := range category.Variants {
+		slots, err := g.enumVariantPayloadSlots(variant)
+		if err != nil {
+			return nil, err
+		}
+		if slots > maxSlots {
+			maxSlots = slots
+		}
+	}
+	if maxSlots > 0 {
+		wordType, err := g.lowerBuiltin("uintptr")
+		if err != nil {
+			return nil, err
+		}
+		payloadType := C.LLVMArrayType2(wordType, C.ulonglong(maxSlots))
+		fields = append(fields, payloadType)
+	}
+	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	g.structBodies[name] = true
+	return ty, nil
+}
+
+func (g *llvmGenerator) ensureTreeBlockBody(blockType *semantic.TreeBlockType) (C.LLVMTypeRef, error) {
+	if blockType == nil {
+		return nil, fmt.Errorf("missing tree block metadata")
+	}
+	return g.ensureTreeFieldsBody(blockType.Name, treeBlockFieldDecls(blockType), blockType.Fields)
+}
+
+func (g *llvmGenerator) ensureTreeStructBody(structType *semantic.TreeStructType) (C.LLVMTypeRef, error) {
+	if structType == nil {
+		return nil, fmt.Errorf("missing tree struct metadata")
+	}
+	return g.ensureTreeFieldsBody(structType.Name, treeStructFieldDecls(structType), structType.Fields)
+}
+
+func (g *llvmGenerator) ensureTreeFieldsBody(name string, decls []ast.FieldDecl, fieldsMap map[string]semantic.Field) (C.LLVMTypeRef, error) {
+	ty, err := g.ensureNamedStructType(name)
+	if err != nil {
+		return nil, err
+	}
+	if g.structBodies[name] {
+		return ty, nil
+	}
+	fields := make([]C.LLVMTypeRef, 0, len(decls))
+	for _, fieldDecl := range decls {
+		field, ok := fieldsMap[fieldDecl.Name]
+		if !ok {
+			return nil, fmt.Errorf("missing semantic tree field %s.%s", name, fieldDecl.Name)
+		}
+		fieldType, err := g.lowerType(field.Type)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, fieldType)
+	}
+	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
+	g.structBodies[name] = true
+	return ty, nil
+}
+
+func treeCommonFieldDecls(category *semantic.TreeCategoryType) []ast.FieldDecl {
+	if category == nil || category.Family == nil || category.Family.Decl == nil {
+		return nil
+	}
+	return category.Family.Decl.Common
+}
+
+func treeBlockFieldDecls(blockType *semantic.TreeBlockType) []ast.FieldDecl {
+	if blockType == nil || blockType.Decl == nil {
+		return nil
+	}
+	return blockType.Decl.Fields
+}
+
+func treeStructFieldDecls(structType *semantic.TreeStructType) []ast.FieldDecl {
+	if structType == nil || structType.Decl == nil {
+		return nil
+	}
+	return structType.Decl.Fields
 }
 
 func (g *llvmGenerator) ensurePackedEnumRowType(name string, enum *semantic.EnumType) (C.LLVMTypeRef, error) {

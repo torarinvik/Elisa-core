@@ -2096,6 +2096,53 @@ func TestGenerateLLVMIRLowersStringMatchExpressionsViaPhi(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRLowersTreeMembersAndFieldAccess(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	expr Expr:
+		Nil
+		Binary(left: Expr, right: Expr)
+	block Block:
+		stmts: darray[i64]
+	struct ElseIf:
+		condition: Expr
+		body: Block
+
+def make_nil() -> Lua.Expr:
+	return Lua.Expr.Nil(span: 7)
+
+def span_of(node: Lua.Expr) -> i64:
+	return node.span
+
+def stmt_count(block: Lua.Block) -> usize:
+	return block.stmts.count
+
+def cond_span(branch: Lua.ElseIf) -> i64:
+	return branch.condition.span
+`
+	result := parseAndAnalyze(t, "backend_tree_members.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"%Lua_Expr__Node = type { i32, i64, [2 x i64] }",
+		"declare ptr @alloc_perm(i64)",
+		"define ptr @make_nil()",
+		"define i64 @span_of(ptr",
+		"define i64 @stmt_count(",
+		"define i64 @cond_span(",
+		"tree.alloc",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersStringMatchStatementsWithoutPhi(t *testing.T) {
 	src := `def classify(text: StringView) -> int:
 	match text:

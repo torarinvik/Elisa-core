@@ -99,6 +99,9 @@ func (s *functionState) refinedOptionalPayloadAddress(ptr C.LLVMValueRef, stored
 }
 
 func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if ptr, fieldType, handled, err := s.emitTreeFieldAddress(expr); handled {
+		return ptr, fieldType, err
+	}
 	objType := s.exprType(expr.Object)
 	if objType == nil {
 		return nil, nil, fmt.Errorf("missing semantic type for field base when lowering .%s", expr.Field)
@@ -151,6 +154,12 @@ func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, s
 }
 
 func (s *functionState) emitReadableFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if ptr, fieldType, handled, err := s.emitTreeFieldAddress(expr); handled {
+		if err != nil {
+			return nil, nil, err
+		}
+		return s.refinedOptionalPayloadAddress(ptr, fieldType, s.exprType(expr), expr.Field)
+	}
 	objType := s.exprType(expr.Object)
 	if objType == nil {
 		return nil, nil, fmt.Errorf("missing semantic type for field base when lowering .%s", expr.Field)
@@ -200,6 +209,27 @@ func (s *functionState) emitReadableFieldAddress(expr *ast.FieldExpr) (C.LLVMVal
 	}
 	fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, objPtr, C.unsigned(index), cStringFree(expr.Field))
 	return s.refinedOptionalPayloadAddress(fieldPtr, fieldType, s.exprType(expr), expr.Field)
+}
+
+func (s *functionState) emitTreeFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if expr == nil {
+		return nil, nil, false, nil
+	}
+	objType := s.exprType(expr.Object)
+	categoryType, _, ok := resolveMatchableTreeCategoryTypeBackend(objType)
+	if !ok {
+		if refType, ok := semantic.StripAggregateStateType(objType).(*semantic.RefType); ok {
+			categoryType, _, ok = resolveMatchableTreeCategoryTypeBackend(refType.Elem)
+		}
+	}
+	if !ok || categoryType == nil {
+		return nil, nil, false, nil
+	}
+	if _, _, err := treeCategoryCommonFieldInfo(categoryType, expr.Field); err != nil {
+		return nil, nil, false, nil
+	}
+	ptr, fieldType, err := s.emitTreeCommonFieldAddress(expr.Object, objType, expr.Field)
+	return ptr, fieldType, true, err
 }
 
 func (s *functionState) packedEnumStoragePtrFromExprValue(value C.LLVMValueRef, exprType semantic.Type, enumType *semantic.EnumType, store *packedStoreBinding) (C.LLVMValueRef, error) {
@@ -2366,6 +2396,12 @@ func (g *llvmGenerator) fieldInfo(objType semantic.Type, fieldName string) (sema
 		}
 		subst := genericBindingsForArgs(structGenericParams(base), t.Args)
 		return substituteType(field.Type, subst), index, t, pointerLike, nil
+	case *semantic.TreeBlockType:
+		index, field, err := fieldInfoFromOrderedFields(t.Name, treeBlockFieldDecls(t), t.Fields, fieldName)
+		return field.Type, index, t, pointerLike, err
+	case *semantic.TreeStructType:
+		index, field, err := fieldInfoFromOrderedFields(t.Name, treeStructFieldDecls(t), t.Fields, fieldName)
+		return field.Type, index, t, pointerLike, err
 	default:
 		return nil, 0, nil, false, fmt.Errorf("field access requires a struct type, got %s", objType.String())
 	}
@@ -2385,6 +2421,20 @@ func fieldInfoFromStruct(st *semantic.StructType, fieldName string) (int, semant
 		}
 	}
 	return 0, semantic.Field{}, fmt.Errorf("struct %s has no field %s", st.Name, fieldName)
+}
+
+func fieldInfoFromOrderedFields(typeName string, decls []ast.FieldDecl, fields map[string]semantic.Field, fieldName string) (int, semantic.Field, error) {
+	for i, fieldDecl := range decls {
+		if fieldDecl.Name != fieldName {
+			continue
+		}
+		field, ok := fields[fieldName]
+		if !ok {
+			return 0, semantic.Field{}, fmt.Errorf("missing field %s.%s", typeName, fieldName)
+		}
+		return i, field, nil
+	}
+	return 0, semantic.Field{}, fmt.Errorf("type %s has no field %s", typeName, fieldName)
 }
 
 func (g *llvmGenerator) runtimeBackedStructType(t semantic.Type) semantic.Type {

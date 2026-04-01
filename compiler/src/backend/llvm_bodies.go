@@ -2898,7 +2898,28 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 	case *ast.MatchVariantPattern:
 		enumType, ok := actualType.(*semantic.EnumType)
 		if !ok {
-			return nil, packedPayloadValueCache{}, fmt.Errorf("variant pattern %s.%s requires enum type, got %s", p.EnumName, p.Variant, actualType.String())
+			treeType, _, treeOK := resolveMatchableTreeCategoryTypeBackend(actualType)
+			if !treeOK || treeType == nil {
+				return nil, packedPayloadValueCache{}, fmt.Errorf("variant pattern %s.%s requires enum or tree-category type, got %s", p.EnumName, p.Variant, actualType.String())
+			}
+			variant, ok := treeType.Variant(p.Variant)
+			if !ok {
+				return nil, packedPayloadValueCache{}, fmt.Errorf("tree category %s has no variant %s", treeType.Name, p.Variant)
+			}
+			tagValue, err := s.extractTreeCategoryTagValue(actualValue, treeType)
+			if err != nil {
+				return nil, packedPayloadValueCache{}, err
+			}
+			tagConst, err := s.enumTagConstant(variant.Tag)
+			if err != nil {
+				return nil, packedPayloadValueCache{}, err
+			}
+			pred := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), tagValue, tagConst, cStringFree("match.tree.tag"))
+			matchedBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.tree.pattern.ok"))
+			C.LLVMBuildCondBr(s.builder, pred, matchedBB, failureBB)
+
+			C.LLVMPositionBuilderAtEnd(s.builder, matchedBB)
+			return s.emitMatchedTreeVariantPayloadPatternTest(p, actualValue, treeType, variant, successBB, failureBB)
 		}
 		variant, ok := enumType.Variant(p.Variant)
 		if !ok {
@@ -3069,6 +3090,74 @@ func (s *functionState) emitMatchedVariantPayloadPatternTest(pattern *ast.MatchV
 		}
 	}
 	return matchedDecodedValue, cachedPayloads, nil
+}
+
+func (s *functionState) emitMatchedTreeVariantPayloadPatternTest(pattern *ast.MatchVariantPattern, actualValue C.LLVMValueRef, treeType *semantic.TreeCategoryType, variant *semantic.EnumVariant, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) (C.LLVMValueRef, packedPayloadValueCache, error) {
+	if pattern == nil || variant == nil {
+		C.LLVMBuildBr(s.builder, successBB)
+		return actualValue, packedPayloadValueCache{}, nil
+	}
+	if len(pattern.Args) == 0 {
+		C.LLVMBuildBr(s.builder, successBB)
+		return actualValue, packedPayloadValueCache{}, nil
+	}
+	namedCount := 0
+	for i := range pattern.Args {
+		if pattern.Args[i].Name != "" {
+			namedCount++
+		}
+	}
+	var orderedArgs []*ast.MatchPatternArg
+	if namedCount == 0 {
+		if len(pattern.Args) != len(variant.Payload) {
+			return nil, packedPayloadValueCache{}, fmt.Errorf("match arm %s.%s expects %d payload patterns, got %d", pattern.EnumName, pattern.Variant, len(variant.Payload), len(pattern.Args))
+		}
+		orderedArgs = make([]*ast.MatchPatternArg, len(pattern.Args))
+		for i := range pattern.Args {
+			orderedArgs[i] = &pattern.Args[i]
+		}
+	} else {
+		if namedCount != len(pattern.Args) {
+			return nil, packedPayloadValueCache{}, fmt.Errorf("match arm %s.%s cannot mix positional and named payload patterns", pattern.EnumName, pattern.Variant)
+		}
+		var err error
+		orderedArgs, err = s.resolveMatchPatternArgs(pattern, variant)
+		if err != nil {
+			return nil, packedPayloadValueCache{}, err
+		}
+	}
+	hasNestedPattern := false
+	for i := range orderedArgs {
+		if orderedArgs[i] != nil && orderedArgs[i].Pattern != nil {
+			hasNestedPattern = true
+			break
+		}
+	}
+	if !hasNestedPattern {
+		C.LLVMBuildBr(s.builder, successBB)
+		return actualValue, packedPayloadValueCache{}, nil
+	}
+	payloadValues, err := s.extractTreeVariantPayloadValues(actualValue, treeType, variant)
+	if err != nil {
+		return nil, packedPayloadValueCache{}, err
+	}
+	for i := range orderedArgs {
+		arg := orderedArgs[i]
+		if arg == nil || arg.Pattern == nil {
+			continue
+		}
+		nextSuccess := successBB
+		if i != len(orderedArgs)-1 {
+			nextSuccess = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.tree.pattern.next"))
+		}
+		if _, _, err := s.emitMatchPatternTest(arg.Pattern, payloadValues[i], nil, variant.Payload[i], nil, nil, nil, nextSuccess, failureBB); err != nil {
+			return nil, packedPayloadValueCache{}, err
+		}
+		if i != len(orderedArgs)-1 {
+			C.LLVMPositionBuilderAtEnd(s.builder, nextSuccess)
+		}
+	}
+	return actualValue, packedPayloadValueCache{}, nil
 }
 
 func packedEnumMatchCanUseTagSwitch(enumType *semantic.EnumType, arms []ast.MatchArm) bool {

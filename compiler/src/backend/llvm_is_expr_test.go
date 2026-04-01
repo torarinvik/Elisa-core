@@ -51,3 +51,37 @@ def is_pi(node: Expr) -> bool:
 		}
 	}
 }
+
+func TestGenerateLLVMIRLowersTreeConstructorsAndIsExprPatterns(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	expr Expr:
+		Nil
+		Binary(left: Expr, right: Expr)
+
+def make_nil() -> Lua.Expr:
+	return Lua.Expr.Nil(span: 1)
+
+def make_binary(span: i64, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr:
+	return Lua.Expr.Binary(span: span, left: left, right: right)
+
+def child_span(node: Lua.Expr) -> i64:
+	if node is Lua.Expr.Binary:
+		return node.left.span
+	return node.span
+
+def starts_with_nil(node: Lua.Expr) -> bool:
+	return node is Lua.Expr.Binary(Lua.Expr.Nil, _)
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_is_expr.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"%Lua_Expr__Node = type { i32, i64, [2 x i64] }", "declare ptr @alloc_perm(i64)", "define ptr @make_binary(i64 ", "is.tree.variant.result", "match.tree.tag", "tree.payload.field"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected tree is lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}

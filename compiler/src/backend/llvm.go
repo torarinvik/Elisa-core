@@ -270,6 +270,8 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 		}
 		_, err := g.ensureEnumBody(n.Name, enumType)
 		return err
+	case *ast.TreeDecl:
+		return g.predeclareTreeDeclTypes(n)
 	case *ast.ExternTypeDecl:
 		_, err := g.ensureNamedStructType(n.Name)
 		return err
@@ -343,6 +345,8 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 		}
 		_, err := g.ensureEnumBody(n.Name, enumType)
 		return err
+	case *ast.TreeDecl:
+		return g.emitTreeDecl(n)
 	case *ast.FuncDecl:
 		if len(n.GenericParams) > 0 {
 			return nil
@@ -386,6 +390,114 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 		return nil
 	default:
 		return fmt.Errorf("unsupported declaration %T", decl)
+	}
+}
+
+func (g *llvmGenerator) predeclareTreeDeclTypes(decl *ast.TreeDecl) error {
+	if decl == nil {
+		return nil
+	}
+	familyBase, ok := g.result.NamedTypes[decl.Name]
+	if !ok {
+		return fmt.Errorf("missing semantic tree type %s", decl.Name)
+	}
+	familyType, ok := familyBase.(*semantic.TreeType)
+	if !ok || familyType == nil {
+		return fmt.Errorf("declaration %s does not resolve to tree type", decl.Name)
+	}
+	for _, memberDecl := range decl.Members {
+		memberType, err := g.treeMemberTypeForDecl(familyType, memberDecl)
+		if err != nil {
+			return err
+		}
+		switch tt := memberType.(type) {
+		case *semantic.TreeCategoryType:
+			if _, err := g.ensureTreeCategoryStorageNamedType(tt); err != nil {
+				return err
+			}
+		case *semantic.TreeBlockType:
+			if _, err := g.ensureNamedStructType(tt.Name); err != nil {
+				return err
+			}
+		case *semantic.TreeStructType:
+			if _, err := g.ensureNamedStructType(tt.Name); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unsupported tree member type %T", memberType)
+		}
+	}
+	for _, memberDecl := range decl.Members {
+		memberType, err := g.treeMemberTypeForDecl(familyType, memberDecl)
+		if err != nil {
+			return err
+		}
+		if err := g.noteType(memberType); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (g *llvmGenerator) emitTreeDecl(decl *ast.TreeDecl) error {
+	if decl == nil {
+		return nil
+	}
+	familyBase, ok := g.result.NamedTypes[decl.Name]
+	if !ok {
+		return fmt.Errorf("missing semantic tree type %s", decl.Name)
+	}
+	familyType, ok := familyBase.(*semantic.TreeType)
+	if !ok || familyType == nil {
+		return fmt.Errorf("declaration %s does not resolve to tree type", decl.Name)
+	}
+	for _, memberDecl := range decl.Members {
+		memberType, err := g.treeMemberTypeForDecl(familyType, memberDecl)
+		if err != nil {
+			return err
+		}
+		switch tt := memberType.(type) {
+		case *semantic.TreeCategoryType:
+			if _, err := g.ensureTreeCategoryBody(tt); err != nil {
+				return err
+			}
+		case *semantic.TreeBlockType:
+			if _, err := g.ensureTreeBlockBody(tt); err != nil {
+				return err
+			}
+		case *semantic.TreeStructType:
+			if _, err := g.ensureTreeStructBody(tt); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unsupported tree member type %T", memberType)
+		}
+	}
+	return nil
+}
+
+func (g *llvmGenerator) treeMemberTypeForDecl(familyType *semantic.TreeType, memberDecl ast.TreeMemberDecl) (semantic.Type, error) {
+	if familyType == nil || memberDecl == nil {
+		return nil, fmt.Errorf("missing tree member metadata")
+	}
+	memberName := treeMemberDeclName(memberDecl)
+	memberType, ok := familyType.Member(memberName)
+	if !ok || memberType == nil {
+		return nil, fmt.Errorf("missing semantic tree member type %s.%s", familyType.Name, memberName)
+	}
+	return memberType, nil
+}
+
+func treeMemberDeclName(memberDecl ast.TreeMemberDecl) string {
+	switch decl := memberDecl.(type) {
+	case *ast.TreeCategoryDecl:
+		return decl.Name
+	case *ast.TreeBlockDecl:
+		return decl.Name
+	case *ast.TreeStructDecl:
+		return decl.Name
+	default:
+		return ""
 	}
 }
 
