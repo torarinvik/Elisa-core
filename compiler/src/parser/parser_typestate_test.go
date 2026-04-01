@@ -324,6 +324,36 @@ func TestParsePackedOpenAndViewStatements(t *testing.T) {
 	}
 }
 
+func TestParsePackedOpenNestedPayloadPattern(t *testing.T) {
+	file, errs := parseSourceFile(t, "packed enum Expr:\n    Int(value: int)\n    Add(left: Expr, right: Expr)\n\ndef left_value(node: Expr, store: Expr.Store[Local]) -> int:\n    open node in store as Expr.Add(Expr.Int(value), rhs):\n        return value\n    return 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[1])
+	}
+	openStmt, ok := decl.Body[0].(*ast.OpenStmt)
+	if !ok {
+		t.Fatalf("expected open stmt, got %T", decl.Body[0])
+	}
+	if openStmt.Pattern == nil || len(openStmt.Pattern.Args) != 2 {
+		t.Fatalf("expected two open payload patterns, got %#v", openStmt.Pattern)
+	}
+	leftPattern, ok := openStmt.Pattern.Args[0].Pattern.(*ast.MatchVariantPattern)
+	if !ok || leftPattern.EnumName != "Expr" || leftPattern.Variant != "Int" || len(leftPattern.Args) != 1 {
+		t.Fatalf("expected nested Expr.Int(value) pattern, got %#v", openStmt.Pattern.Args[0].Pattern)
+	}
+	leftBind, ok := leftPattern.Args[0].Pattern.(*ast.MatchBindPattern)
+	if !ok || leftBind.Name != "value" {
+		t.Fatalf("expected nested bind pattern value, got %T %#v", leftPattern.Args[0].Pattern, leftPattern.Args[0].Pattern)
+	}
+	rightBind, ok := openStmt.Pattern.Args[1].Pattern.(*ast.MatchBindPattern)
+	if !ok || rightBind.Name != "rhs" {
+		t.Fatalf("expected rhs bind pattern, got %T %#v", openStmt.Pattern.Args[1].Pattern, openStmt.Pattern.Args[1].Pattern)
+	}
+}
+
 func TestParseEnumVariantIsCondition(t *testing.T) {
 	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: int)\n    Add(left: int, right: int)\n\ndef is_int(node: Expr) -> bool:\n    if node is Expr.Int:\n        return true\n    return false\n")
 	if len(errs) != 0 {

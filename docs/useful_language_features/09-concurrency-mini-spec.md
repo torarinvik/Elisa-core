@@ -204,6 +204,15 @@ move job as Job.Run(thread, priority)
 move node in store as Expr.Add(left, right)
 ```
 
+Nested payload destructuring is also supported:
+
+```context
+move node in store as Expr.Add(Expr.Int(value), rhs)
+```
+
+Pattern payloads may omit field names positionally when the order is obvious,
+or use named payloads when that reads better.
+
 The semantic rule is:
 
 > partial by-value field extraction from an affine-containing aggregate is not
@@ -536,6 +545,7 @@ Rules:
 - `Expr.Store(owner)` returns `Expr.Store[Local]`
 - `new[store] Expr.Variant(...)` requires `store : Expr.Store[Local]`
 - `match node in store:` accepts either `Expr.Store[Local]` or `Expr.Store[Frozen]`
+- `move/open/view ... as Expr.Variant(...)` accept the same nested payload-pattern grammar as `match`
 - packed-store provenance is structural and recursive through aggregates,
   arrays, views, helper returns, and destructuring binders
 - `freeze(move store)` remaps nested dependencies structurally from
@@ -695,6 +705,23 @@ def run(holder: move Holder) -> i64 can[Thread.Join]:
 ```
 
 This is preferred over field-by-field partial moves.
+
+### 2.5 Nested Packed Pattern Destructuring
+
+```context
+packed enum Expr:
+    Int(value: int)
+    Add(left: Expr, right: Expr)
+
+def left_value(node: Expr, store: Expr.Store[Frozen]) -> int:
+    open node as Expr.Add(Expr.Int(value), rhs):
+        _ = rhs
+        return value
+    return 0
+```
+
+This uses the same recursive payload-pattern surface as `match`, but on the
+statement-oriented packed destructuring forms.
 
 ### 3. Pool-Scoped Tasks
 

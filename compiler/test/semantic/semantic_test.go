@@ -5834,6 +5834,21 @@ def read(node: Expr, store: Expr.Store[Frozen]) -> int:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsViewStmtWithNestedPackedVariantPattern(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def left_value(node: Expr, store: Expr.Store[Frozen]) -> int:
+	view node as Expr.Add(Expr.Int(value), rhs):
+		_ = rhs
+		return value
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_view_nested_pattern_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeAcceptsViewStmtWithNamedPayloadDestructureAndRefinedScrutinee(t *testing.T) {
 	src := `packed enum Expr:
 	common:
@@ -5910,6 +5925,21 @@ def read(node: Expr, store: Expr.Store[Frozen]) -> int:
 	return 0
 `
 	_, errs := parseAndAnalyze(t, "packed_enum_open_active_store_param_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsOpenStmtWithNestedPackedVariantPattern(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def left_value(node: Expr, store: Expr.Store[Frozen]) -> int:
+	open node as Expr.Add(Expr.Int(value), rhs):
+		_ = rhs
+		return value
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_open_nested_pattern_ok.llcontext", src)
 	requireNoErrors(t, errs)
 }
 
@@ -7255,6 +7285,22 @@ def left(node: Expr, store: Expr.Store[Frozen]) -> Expr:
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "left", "Expr")
+}
+
+func TestAnalyzeAcceptsMoveAsPackedVariantNestedPattern(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def left_value(node: Expr, store: Expr.Store[Frozen]) -> int:
+	move node in store as Expr.Add(Expr.Int(value), rhs)
+	_ = rhs
+	return value
+`
+	result, errs := parseAndAnalyze(t, "move_as_packed_variant_nested_pattern_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "left_value", "int")
 }
 
 func TestAnalyzeAcceptsMoveAsPackedVariantDestructureWithInferredStore(t *testing.T) {

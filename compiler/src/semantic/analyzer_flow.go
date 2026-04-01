@@ -410,39 +410,7 @@ func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {
 			return
 		}
 		_ = enumType
-		for _, payload := range payloads {
-			if payload.BindName == "" || payload.BindName == "_" {
-				continue
-			}
-			sym := &Symbol{Name: payload.BindName, Kind: SymbolLocal, Type: payload.Type, Node: p, Mutable: false}
-			a.defineLocal(sym, p.Position)
-			if valueExpr, ok := a.resolveMoveBindVariantPayloadValueExpr(stmt.Value, p, payload.Key); ok {
-				a.recordValueBinding(sym, valueExpr)
-				a.recordFunctionValueBinding(sym, valueExpr)
-				a.recordImmutableSymbolOptimizationFacts(sym, valueExpr)
-			}
-			if hasBorrowedOwnerState {
-				if fieldState, ok := projectBorrowedOwnerRefFieldState(borrowedOwnerState, payload.Key); ok {
-					a.currentBorrowedOwnerRefs[sym] = fieldState
-				}
-			}
-			if !hasValueState && packedStoreState == nil {
-				continue
-			}
-			if hasValueState {
-				if fieldState, ok := projectRegionFieldState(valueState, payload.Key); ok {
-					a.recordResolvedRegionRefBinding(sym, fieldState)
-					continue
-				}
-				if a.typeCanContainRegionRefs(payload.Type, map[string]bool{}) {
-					a.recordResolvedRegionRefBinding(sym, valueState)
-					continue
-				}
-			}
-			if packedStoreState != nil && a.typeCanContainRegionRefs(payload.Type, map[string]bool{}) {
-				a.recordResolvedRegionRefBinding(sym, *packedStoreState)
-			}
-		}
+		a.bindResolvedMoveBindVariantFields(payloads, stmt.Value, p, p, valueState, hasValueState, borrowedOwnerState, hasBorrowedOwnerState, packedStoreState)
 	default:
 		a.errorf(stmt.Pos(), "unsupported move-as pattern %T", stmt.Pattern)
 		return
@@ -473,36 +441,7 @@ func (a *Analyzer) analyzeOpenStmt(stmt *ast.OpenStmt) {
 	scope := NewScope(a.currentScope)
 	savedScope := a.currentScope
 	a.currentScope = scope
-	for _, payload := range payloads {
-		if payload.BindName == "" || payload.BindName == "_" {
-			continue
-		}
-		sym := &Symbol{Name: payload.BindName, Kind: SymbolLocal, Type: payload.Type, Node: stmt.Pattern, Mutable: false}
-		a.defineLocal(sym, stmt.Pattern.Position)
-		if valueExpr, ok := a.resolveMoveBindVariantPayloadValueExpr(stmt.Value, stmt.Pattern, payload.Key); ok {
-			a.recordValueBinding(sym, valueExpr)
-			a.recordFunctionValueBinding(sym, valueExpr)
-			a.recordImmutableSymbolOptimizationFacts(sym, valueExpr)
-		}
-		if hasBorrowedOwnerState {
-			if fieldState, ok := projectBorrowedOwnerRefFieldState(borrowedOwnerState, payload.Key); ok {
-				a.currentBorrowedOwnerRefs[sym] = fieldState
-			}
-		}
-		if hasValueState {
-			if fieldState, ok := projectRegionFieldState(valueState, payload.Key); ok {
-				a.recordResolvedRegionRefBinding(sym, fieldState)
-				continue
-			}
-			if a.typeCanContainRegionRefs(payload.Type, map[string]bool{}) {
-				a.recordResolvedRegionRefBinding(sym, valueState)
-				continue
-			}
-		}
-		if packedStoreState != nil && a.typeCanContainRegionRefs(payload.Type, map[string]bool{}) {
-			a.recordResolvedRegionRefBinding(sym, *packedStoreState)
-		}
-	}
+	a.bindResolvedMoveBindVariantFields(payloads, stmt.Value, stmt.Pattern, stmt.Pattern, valueState, hasValueState, borrowedOwnerState, hasBorrowedOwnerState, packedStoreState)
 	a.currentScope = savedScope
 	a.analyzeBlockWithRegionClone(stmt.Body, scope)
 	if ok {
@@ -537,36 +476,7 @@ func (a *Analyzer) analyzeViewStmt(stmt *ast.ViewStmt) {
 			valueState, hasValueState := a.regionRefStateForExpr(stmt.Value)
 			borrowedOwnerState, hasBorrowedOwnerState := a.borrowedOwnerRefStateForExpr(stmt.Value)
 			if payloadsOK {
-				for _, payload := range payloads {
-					if payload.BindName == "" || payload.BindName == "_" {
-						continue
-					}
-					sym := &Symbol{Name: payload.BindName, Kind: SymbolLocal, Type: payload.Type, Node: stmt.Pattern, Mutable: false}
-					a.defineLocal(sym, stmt.Pattern.Position)
-					if valueExpr, ok := a.resolveMoveBindVariantPayloadValueExpr(stmt.Value, resolvedPattern, payload.Key); ok {
-						a.recordValueBinding(sym, valueExpr)
-						a.recordFunctionValueBinding(sym, valueExpr)
-						a.recordImmutableSymbolOptimizationFacts(sym, valueExpr)
-					}
-					if hasBorrowedOwnerState {
-						if fieldState, ok := projectBorrowedOwnerRefFieldState(borrowedOwnerState, payload.Key); ok {
-							a.currentBorrowedOwnerRefs[sym] = fieldState
-						}
-					}
-					if hasValueState {
-						if fieldState, ok := projectRegionFieldState(valueState, payload.Key); ok {
-							a.recordResolvedRegionRefBinding(sym, fieldState)
-							continue
-						}
-						if a.typeCanContainRegionRefs(payload.Type, map[string]bool{}) {
-							a.recordResolvedRegionRefBinding(sym, valueState)
-							continue
-						}
-					}
-					if packedStoreState != nil && a.typeCanContainRegionRefs(payload.Type, map[string]bool{}) {
-						a.recordResolvedRegionRefBinding(sym, *packedStoreState)
-					}
-				}
+				a.bindResolvedMoveBindVariantFields(payloads, stmt.Value, resolvedPattern, stmt.Pattern, valueState, hasValueState, borrowedOwnerState, hasBorrowedOwnerState, packedStoreState)
 			}
 		}
 		a.currentScope = savedScope
@@ -957,9 +867,10 @@ type moveBindResolvedField struct {
 }
 
 type moveBindResolvedVariantField struct {
-	Key      string
+	Path     []string
 	Type     Type
 	BindName string
+	Position lexer.Pos
 }
 
 func (a *Analyzer) resolvedStructFields(actual Type) ([]moveBindResolvedField, bool) {
@@ -1055,17 +966,6 @@ func moveBindVariantAsMatchPattern(pattern *ast.MoveBindVariantPattern) *ast.Mat
 	return &ast.MatchVariantPattern{Position: pattern.Position, EnumName: pattern.EnumName, Variant: pattern.Variant, Args: append([]ast.MatchPatternArg(nil), pattern.Args...)}
 }
 
-func moveBindVariantArgBindingName(pattern ast.MatchPattern) string {
-	switch p := pattern.(type) {
-	case *ast.MatchBindPattern:
-		return p.Name
-	case *ast.MatchWildcardPattern:
-		return "_"
-	default:
-		return ""
-	}
-}
-
 func moveBindVariantFieldKey(variant *EnumVariant, index int) string {
 	if variant == nil {
 		return ""
@@ -1108,20 +1008,59 @@ func (a *Analyzer) resolveMoveBindVariantPattern(stmt *ast.MoveBindStmt, pattern
 		return nil, nil, nil, false
 	}
 	orderedArgs := a.resolveMatchPatternArgs(moveBindVariantAsMatchPattern(pattern), variant, enumType.Name+"."+variant.Name, false)
-	fields := make([]moveBindResolvedVariantField, len(orderedArgs))
+	fields := make([]moveBindResolvedVariantField, 0, len(orderedArgs))
 	for i, arg := range orderedArgs {
 		if arg == nil {
 			continue
 		}
-		switch arg.Pattern.(type) {
-		case *ast.MatchBindPattern, *ast.MatchWildcardPattern:
-		default:
-			a.errorf(arg.Position, "move-as variant patterns only support bind names and _")
-			return nil, nil, nil, false
-		}
-		fields[i] = moveBindResolvedVariantField{Key: moveBindVariantFieldKey(variant, i), Type: variant.Payload[i], BindName: moveBindVariantArgBindingName(arg.Pattern)}
+		fields = a.collectMoveBindVariantBindings(arg.Pattern, variant.Payload[i], []string{moveBindVariantFieldKey(variant, i)}, fields)
 	}
 	return fields, enumType, storeState, true
+}
+
+func (a *Analyzer) collectMoveBindVariantBindings(pattern ast.MatchPattern, expected Type, path []string, fields []moveBindResolvedVariantField) []moveBindResolvedVariantField {
+	if pattern == nil {
+		return fields
+	}
+	switch p := pattern.(type) {
+	case *ast.MatchWildcardPattern:
+		return fields
+	case *ast.MatchBindPattern:
+		return append(fields, moveBindResolvedVariantField{Path: append([]string(nil), path...), Type: expected, BindName: p.Name, Position: p.Pos()})
+	case *ast.MatchStringLiteralPattern:
+		a.analyzeLiteralMatchPatternExpr(p.Pos(), &ast.StringLit{Position: p.Position, Value: p.Value}, expected, "move-as nested pattern")
+		return fields
+	case *ast.MatchLiteralPattern:
+		a.analyzeLiteralMatchPatternExpr(p.Pos(), p.Value, expected, "move-as nested pattern")
+		return fields
+	case *ast.MatchVariantPattern:
+		enumType, ok := expected.(*EnumType)
+		if !ok {
+			a.errorf(p.Pos(), "nested move-as pattern %q requires an enum payload, got %s", p.EnumName+"."+p.Variant, expected.String())
+			return fields
+		}
+		if p.EnumName != enumType.Name {
+			a.errorf(p.Pos(), "nested move-as pattern expects enum %q, got %q", enumType.Name, p.EnumName)
+			return fields
+		}
+		variant, ok := enumType.Variant(p.Variant)
+		if !ok {
+			a.errorf(p.Pos(), "enum %q has no variant %q", enumType.Name, p.Variant)
+			return fields
+		}
+		orderedArgs := a.resolveMatchPatternArgs(p, variant, enumType.Name+"."+variant.Name, true)
+		for i, arg := range orderedArgs {
+			if arg == nil {
+				continue
+			}
+			childPath := append(append([]string(nil), path...), moveBindVariantFieldKey(variant, i))
+			fields = a.collectMoveBindVariantBindings(arg.Pattern, variant.Payload[i], childPath, fields)
+		}
+		return fields
+	default:
+		a.errorf(pattern.Pos(), "unsupported move-as nested pattern %T", pattern)
+		return fields
+	}
 }
 
 func (a *Analyzer) resolveVariantPayloadValueExpr(value ast.Expr, enumName string, variantName string, key string) (ast.Expr, bool) {
@@ -1193,6 +1132,113 @@ func (a *Analyzer) resolveMoveBindVariantPayloadValueExpr(value ast.Expr, patter
 		return nil, false
 	}
 	return a.resolveVariantPayloadValueExpr(value, pattern.EnumName, pattern.Variant, key)
+}
+
+func (a *Analyzer) resolveMatchVariantPayloadValueExprPath(value ast.Expr, pattern *ast.MatchVariantPattern, path []string) (ast.Expr, bool) {
+	if pattern == nil || len(path) == 0 {
+		return nil, false
+	}
+	current, ok := a.resolveMatchVariantPayloadValueExpr(value, pattern, path[0])
+	if !ok {
+		return nil, false
+	}
+	if len(path) == 1 {
+		return current, true
+	}
+	base, _, ok := a.lookupVisibleType(pattern.EnumName)
+	if !ok {
+		return nil, false
+	}
+	enumType, ok := base.(*EnumType)
+	if !ok || enumType == nil {
+		return nil, false
+	}
+	variant, ok := enumType.Variant(pattern.Variant)
+	if !ok || variant == nil {
+		return nil, false
+	}
+	orderedArgs := a.resolveMatchPatternArgs(pattern, variant, enumType.Name+"."+variant.Name, true)
+	for i, arg := range orderedArgs {
+		if arg == nil || moveBindVariantFieldKey(variant, i) != path[0] {
+			continue
+		}
+		nested, ok := arg.Pattern.(*ast.MatchVariantPattern)
+		if !ok {
+			return nil, false
+		}
+		return a.resolveMatchVariantPayloadValueExprPath(current, nested, path[1:])
+	}
+	return nil, false
+}
+
+func (a *Analyzer) resolveMoveBindVariantPayloadValueExprPath(value ast.Expr, pattern *ast.MoveBindVariantPattern, path []string) (ast.Expr, bool) {
+	if pattern == nil {
+		return nil, false
+	}
+	return a.resolveMatchVariantPayloadValueExprPath(value, moveBindVariantAsMatchPattern(pattern), path)
+}
+
+func projectRegionFieldPathState(state regionRefState, path []string) (regionRefState, bool) {
+	current := cloneRegionRefState(state)
+	for _, field := range path {
+		next, ok := projectRegionFieldState(current, field)
+		if !ok {
+			return regionRefState{}, false
+		}
+		current = next
+	}
+	return current, true
+}
+
+func projectBorrowedOwnerRefFieldPathState(state borrowedOwnerRefState, path []string) (borrowedOwnerRefState, bool) {
+	current := cloneBorrowedOwnerRefState(state)
+	for _, field := range path {
+		next, ok := projectBorrowedOwnerRefFieldState(current, field)
+		if !ok {
+			return borrowedOwnerRefState{}, false
+		}
+		current = next
+	}
+	return current, true
+}
+
+func (a *Analyzer) bindResolvedMoveBindVariantFields(payloads []moveBindResolvedVariantField, value ast.Expr, pattern *ast.MoveBindVariantPattern, node ast.Node, valueState regionRefState, hasValueState bool, borrowedOwnerState borrowedOwnerRefState, hasBorrowedOwnerState bool, packedStoreState *regionRefState) {
+	if a == nil || pattern == nil {
+		return
+	}
+	for _, payload := range payloads {
+		if payload.BindName == "" || payload.BindName == "_" {
+			continue
+		}
+		sym := &Symbol{Name: payload.BindName, Kind: SymbolLocal, Type: payload.Type, Node: node, Mutable: false}
+		a.defineLocal(sym, payload.Position)
+		if valueExpr, ok := a.resolveMoveBindVariantPayloadValueExprPath(value, pattern, payload.Path); ok {
+			a.recordValueBinding(sym, valueExpr)
+			a.recordFunctionValueBinding(sym, valueExpr)
+			a.recordImmutableSymbolOptimizationFacts(sym, valueExpr)
+		}
+		if hasBorrowedOwnerState {
+			if fieldState, ok := projectBorrowedOwnerRefFieldPathState(borrowedOwnerState, payload.Path); ok {
+				a.currentBorrowedOwnerRefs[sym] = fieldState
+			}
+		}
+		if !hasValueState && packedStoreState == nil {
+			continue
+		}
+		if hasValueState {
+			if fieldState, ok := projectRegionFieldPathState(valueState, payload.Path); ok {
+				a.recordResolvedRegionRefBinding(sym, fieldState)
+				continue
+			}
+			if a.typeCanContainRegionRefs(payload.Type, map[string]bool{}) {
+				a.recordResolvedRegionRefBinding(sym, valueState)
+				continue
+			}
+		}
+		if packedStoreState != nil && a.typeCanContainRegionRefs(payload.Type, map[string]bool{}) {
+			a.recordResolvedRegionRefBinding(sym, *packedStoreState)
+		}
+	}
 }
 
 func (a *Analyzer) resolveMatchVariantPayloadValueExpr(value ast.Expr, pattern *ast.MatchVariantPattern, key string) (ast.Expr, bool) {

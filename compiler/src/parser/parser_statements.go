@@ -930,13 +930,7 @@ func (p *Parser) parseMoveBindVariantArg() ast.MatchPatternArg {
 }
 
 func (p *Parser) parseMoveBindVariantBindingPattern() ast.MatchPattern {
-	pos := p.cur().Pos
-	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_" {
-		p.advance()
-		return &ast.MatchWildcardPattern{Position: pos}
-	}
-	name := p.expect(lexer.TOKEN_IDENT).Text
-	return &ast.MatchBindPattern{Position: pos, Name: name}
+	return p.parseNestedMatchPattern()
 }
 
 // parseExprOrAssignStmt: handles expressions, assignments, var decls, discards

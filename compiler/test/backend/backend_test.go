@@ -315,6 +315,32 @@ def left(node: Expr, store: Expr.Store[Local]) -> Expr:
 	}
 }
 
+func TestGenerateLLVMIRLowersPackedMoveAsNestedVariantDestructure(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+	Add(left: Expr, right: Expr)
+
+def left_value(node: Expr, store: Expr.Store[Local]) -> int:
+	move node in store as Expr.Add(Expr.Int(value), rhs)
+	_ = rhs
+	return value
+`
+	result := parseAndAnalyze(t, "backend_move_as_packed_nested_variant.llcontext", src)
+	output := generateLLVMIRWithPackedABIForTest(t, result, backend.PackedEnumABIRowHandle)
+
+	for _, check := range []string{"%Expr__Store = type { ptr, i64, ptr }", "%Expr = type { i32, [2 x i64] }", "define i64 @left_value(", "call void @llvm.trap()", "load i32, ptr"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Count(output, "load i32, ptr") < 2 {
+		t.Fatalf("expected nested packed variant pattern lowering to load at least two tags, got:\n%s", output)
+	}
+	if strings.Contains(output, "extractvalue %Expr,") {
+		t.Fatalf("expected nested packed move-as destructure to decode through store-backed loads, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersLocalsCallsAndControlFlow(t *testing.T) {
 	src := `extern add_one(value: i32) -> i32
 

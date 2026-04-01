@@ -118,6 +118,7 @@ These forms all follow the same design direction:
 - `move holder as Holder(thread, count)`
 - `move job as Job.Run(thread, priority)`
 - `move node in store as Expr.Add(left, right)`
+- `move node in store as Expr.Add(Expr.Int(value), rhs)`
 
 They are all statement-oriented capability binders.
 
@@ -193,10 +194,15 @@ Implemented packed destructuring uses:
 
 ```context
 move expr in store as Expr.Add(left, right)
+open expr in store as Expr.Add(Expr.Int(value), rhs):
+  return value
 ```
 
 that must lower through the same tag-read and payload decode path already used
 by packed `match` / `in store:` operations.
+
+Payload subpatterns can use positional omission when the variant order is clear,
+and they may nest recursively just like `match` arms do.
 
 It must not invent a second “destructure packed payload” subsystem.
 
@@ -333,6 +339,9 @@ Examples:
 result: i64 = join(move worker)
 move job as Job(thread, priority)
 move node in store as Expr.Add(left, right)
+open node as Expr.Add(Expr.Int(value), rhs):
+  _ = rhs
+  return value
 detach(move thread)
 ```
 
