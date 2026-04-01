@@ -192,3 +192,25 @@ def starts_with_nil(node: Lua.Expr) -> bool:
 	return node is Lua.Expr.Binary(Lua.Expr.Nil, _)
 `)
 }
+
+func TestAnalyzeTreeViewSurfaceTypeAndRefinedCalls(t *testing.T) {
+	analyzeTreeTestSource(t, "tree_view_surface.llcontext", `tree Lua:
+	common:
+		span: i64
+	expr Expr:
+		Nil
+		Binary(left: Expr, right: Expr)
+
+def keep_binary(view_node: treeview[Lua.Expr.Binary]) -> treeview[Lua.Expr.Binary]:
+	return view_node
+
+def score_binary(view_node: treeview[Lua.Expr.Binary]) -> i64:
+	kept: treeview[Lua.Expr.Binary] = keep_binary(view_node)
+	return kept.left.span + kept.right.span + kept.span
+
+def child_span(node: Lua.Expr) -> i64:
+	if node is Lua.Expr.Binary:
+		return score_binary(node)
+	return node.span
+`)
+}

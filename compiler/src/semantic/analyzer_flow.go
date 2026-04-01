@@ -1487,6 +1487,25 @@ type iterLoopSourceInfo struct {
 	ItemType        Type
 	AllowRef        bool
 	AllowMutableRef bool
+	ItemFacts       OptimizationFacts
+	HasItemFacts    bool
+}
+
+func (a *Analyzer) inferIterLoopItemOptimizationFacts(sourceExpr ast.Expr, sourceType Type) (OptimizationFacts, bool) {
+	if a == nil || sourceExpr == nil || sourceType == nil {
+		return OptimizationFacts{}, false
+	}
+	switch tt := sourceType.(type) {
+	case *GenericInstanceType:
+		if _, ok := ChunksExactViewItemType(tt); ok {
+			return a.inferChunksExactItemOptimizationFacts(&ast.IndexExpr{
+				Position: sourceExpr.Pos(),
+				Object:   sourceExpr,
+				Index:    &ast.Ident{Position: sourceExpr.Pos(), Name: "__iter_index"},
+			})
+		}
+	}
+	return OptimizationFacts{}, false
 }
 
 func (a *Analyzer) resolveIterLoopSourceInfo(sourceExpr ast.Expr, sourceType Type) (iterLoopSourceInfo, bool) {
@@ -1514,6 +1533,16 @@ func (a *Analyzer) resolveIterLoopSourceInfo(sourceExpr ast.Expr, sourceType Typ
 		return iterLoopSourceInfo{ItemType: a.namedTypes["char"]}, true
 	case *SViewType:
 		return iterLoopSourceInfo{ItemType: a.namedTypes["char"]}, true
+	case *GenericInstanceType:
+		if itemType, ok := ChunksExactViewItemType(tt); ok {
+			info := iterLoopSourceInfo{ItemType: itemType}
+			if itemFacts, ok := a.inferIterLoopItemOptimizationFacts(sourceExpr, sourceType); ok {
+				info.ItemFacts = itemFacts
+				info.HasItemFacts = true
+			}
+			return info, true
+		}
+		return iterLoopSourceInfo{}, false
 	case *StructType:
 		if isRuntimeStringViewType(tt) {
 			return iterLoopSourceInfo{ItemType: a.namedTypes["char"]}, true
@@ -1541,7 +1570,7 @@ func iterLoopRefType(itemType Type, mutable bool) Type {
 	return &RefType{Elem: itemType, Mutable: mutable, State: RefStateNonNull, Storage: RefStorageAny}
 }
 
-func (a *Analyzer) bindIterLoopPattern(scope *Scope, pattern ast.MoveBindPattern, mode ast.IterBindMode, itemType Type) bool {
+func (a *Analyzer) bindIterLoopPattern(scope *Scope, pattern ast.MoveBindPattern, mode ast.IterBindMode, itemType Type, itemFacts OptimizationFacts, hasItemFacts bool) bool {
 	if scope == nil || pattern == nil {
 		return false
 	}
@@ -1567,6 +1596,9 @@ func (a *Analyzer) bindIterLoopPattern(scope *Scope, pattern ast.MoveBindPattern
 		}
 		sym := &Symbol{Name: p.Name, Kind: SymbolLocal, Type: bindingTypeFor(p.Pos(), p.Name, itemType, true), Node: p, Mutable: false}
 		a.defineLocal(sym, p.Pos())
+		if mode == ast.IterBindValue && hasItemFacts && a.symbolFacts != nil {
+			a.symbolFacts[sym] = itemFacts
+		}
 		return true
 	case *ast.MoveBindStructPattern:
 		fields, ok := a.resolveMoveBindStructPattern(p, itemType)
@@ -1594,7 +1626,7 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	sourceType := a.analyzeExpr(stmt.Source)
 	info, ok := a.resolveIterLoopSourceInfo(stmt.Source, sourceType)
 	if !ok {
-		a.errorf(stmt.Source.Pos(), "iterable for loop currently requires an array, dynamic array, view, or string-like iterable, got %s", sourceType.String())
+		a.errorf(stmt.Source.Pos(), "iterable for loop currently requires an array, dynamic array, view, string-like iterable, or ChunksExactView, got %s", sourceType.String())
 		info.ItemType = invalidType
 	}
 	if stmt.Mode == ast.IterBindValue && a.containsAffineHandleValues(info.ItemType, map[string]bool{}) {
@@ -1615,7 +1647,7 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	}
 
 	loopScope := NewScope(a.currentScope)
-	a.bindIterLoopPattern(loopScope, stmt.Pattern, stmt.Mode, info.ItemType)
+	a.bindIterLoopPattern(loopScope, stmt.Pattern, stmt.Mode, info.ItemType, info.ItemFacts, info.HasItemFacts)
 
 	mergedAffine := a.cloneAffineValueStates()
 	mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()

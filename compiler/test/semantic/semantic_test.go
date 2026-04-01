@@ -6426,6 +6426,41 @@ func TestAnalyzeAcceptsIterableForLoopOverDynamicString(t *testing.T) {
 	requireFunctionReturnTypeString(t, result, "checksum", "int")
 }
 
+func TestAnalyzeAcceptsIterableForLoopOverChunksExactView(t *testing.T) {
+	src := `def add_bias(value: i64, bias: i64) -> i64:
+	return value + bias
+
+def run(values: darray[i64, 4], bias: i64) -> i64:
+	base: dview[i64] = values[0u:4u]
+	chunks: ChunksExactView[i64] = chunks_exact(readonly(base), 2u)
+	total: mutable i64 = 0
+	for chunk in chunks:
+		total <- total + reduce_sum(chunk, add_bias, bias)
+	return total
+`
+	result, errs := parseAndAnalyze(t, "iterable_for_chunks_exact_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "run", "i64")
+}
+
+func TestAnalyzeRejectsIterableForLoopRefOverChunksExactView(t *testing.T) {
+	src := `def bad(values: darray[i32, 4]) -> void:
+	base: dview[i32] = values[0u:4u]
+	chunks: ChunksExactView[i32] = chunks_exact(readonly(base), 2u)
+	for ref chunk in chunks:
+		_ = chunk
+`
+	_, errs := parseAndAnalyze(t, "iterable_for_chunks_exact_ref_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "for ref requires an addressable array-like iterable, got ChunksExactView[i32]") {
+		t.Fatalf("expected chunks_exact ref-binder diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsForLoopZeroStep(t *testing.T) {
 	src := `def bad() -> void:
 	for i in 0..10..0:

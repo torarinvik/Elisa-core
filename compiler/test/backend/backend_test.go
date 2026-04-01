@@ -6171,6 +6171,40 @@ func TestGenerateLLVMIRLowersIterableForLoopOverDynamicString(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRLowersIterableForLoopOverChunksExactView(t *testing.T) {
+	src := `def checksum(values: darray[i32, 4]) -> i32:
+	base: dview[i32] = values[0u:4u]
+	chunks: ChunksExactView[i32] = chunks_exact(readonly(base), 2u)
+	total: mutable i32 = 0
+	for chunk in chunks:
+		total <- total + chunk[0u] + chunk[1u]
+	return total
+`
+	result := parseAndAnalyze(t, "backend_iterable_for_chunks_exact.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+	if !strings.Contains(output, "%ChunksExactView__i32 = type { %DynArrayView, i64, i64 }") {
+		t.Fatalf("expected output to declare the ChunksExactView carrier type, got:\n%s", output)
+	}
+	ir := functionIR(output, "checksum")
+	if ir == "" {
+		t.Fatalf("expected to find LLVM IR for checksum, got:\n%s", output)
+	}
+	for _, check := range []string{
+		"iter.cond",
+		"iter.body",
+		"iter.end",
+		"mul i64",
+		"call %DynArrayView @arena_da_view_slice(%DynArrayView",
+	} {
+		if !strings.Contains(ir, check) {
+			t.Fatalf("expected checksum IR to contain %q, got:\n%s", check, ir)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersProofCarryingViewHelpers(t *testing.T) {
 	src := `def run(values: darray[i32, 4]) -> void:
 	base: dview[i32] = values[0u:4u]

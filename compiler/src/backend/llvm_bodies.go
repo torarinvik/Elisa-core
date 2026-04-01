@@ -1292,6 +1292,22 @@ func isIterLoopRuntimeStringViewType(t semantic.Type) bool {
 	return ok && st != nil && st.Name == "StringView"
 }
 
+func (s *functionState) emitIterLoopChunksExactItemValue(carrierValue C.LLVMValueRef, carrierType *semantic.GenericInstanceType, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, semantic.Type, error) {
+	chunkType, ok := semantic.ChunksExactViewItemType(carrierType)
+	if !ok || chunkType == nil {
+		return nil, nil, fmt.Errorf("iterable loop chunks_exact item type is not supported for %s", carrierType.String())
+	}
+	sourceValue := C.LLVMBuildExtractValue(s.builder, carrierValue, 0, cStringFree(name+".chunks.source"))
+	chunkSizeValue := C.LLVMBuildExtractValue(s.builder, carrierValue, 1, cStringFree(name+".chunks.chunk_size"))
+	startValue := C.LLVMBuildMul(s.builder, indexValue, chunkSizeValue, cStringFree(name+".chunks.start"))
+	endValue := C.LLVMBuildAdd(s.builder, startValue, chunkSizeValue, cStringFree(name+".chunks.end"))
+	value, err := s.emitArenaViewSliceValue(sourceValue, chunkType, startValue, endValue, name+".chunks.item")
+	if err != nil {
+		return nil, nil, err
+	}
+	return value, chunkType, nil
+}
+
 func (s *functionState) emitIterLoopCount(sourceAlloca C.LLVMValueRef, sourceType semantic.Type, sourceName string) (C.LLVMValueRef, error) {
 	usizeType := s.g.result.NamedTypes["usize"]
 	usizeLLVMType, err := s.g.lowerType(usizeType)
@@ -1336,6 +1352,20 @@ func (s *functionState) emitIterLoopCount(sourceAlloca C.LLVMValueRef, sourceTyp
 			return nil, err
 		}
 		return s.coerceValue(lenValue, s.g.result.NamedTypes["i64"], usizeType)
+	case *semantic.GenericInstanceType:
+		if _, ok := semantic.ChunksExactViewItemType(tt); !ok {
+			return nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
+		}
+		containerLLVMType, err := s.g.lowerType(sourceType)
+		if err != nil {
+			return nil, err
+		}
+		lenPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, sourceAlloca, 2, cStringFree(sourceName+".iter.len.ptr"))
+		lenValue, err := s.loadValue(lenPtr, usizeType, sourceName+".iter.len")
+		if err != nil {
+			return nil, err
+		}
+		return lenValue, nil
 	case *semantic.StructType:
 		if !isIterLoopRuntimeStringViewType(tt) {
 			return nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
@@ -1406,6 +1436,20 @@ func (s *functionState) emitIterLoopCount(sourceAlloca C.LLVMValueRef, sourceTyp
 				return nil, err
 			}
 			return s.coerceValue(lenValue, s.g.result.NamedTypes["i64"], usizeType)
+		case *semantic.GenericInstanceType:
+			if _, ok := semantic.ChunksExactViewItemType(elem); !ok {
+				return nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
+			}
+			containerLLVMType, err := s.g.lowerType(tt.Elem)
+			if err != nil {
+				return nil, err
+			}
+			lenPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, sourceValue, 2, cStringFree(sourceName+".iter.len.ptr"))
+			lenValue, err := s.loadValue(lenPtr, usizeType, sourceName+".iter.len")
+			if err != nil {
+				return nil, err
+			}
+			return lenValue, nil
 		default:
 			return nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
 		}
@@ -1543,6 +1587,15 @@ func (s *functionState) emitIterLoopElementValue(sourceAlloca C.LLVMValueRef, so
 			return nil, nil, err
 		}
 		return s.emitIterLoopStringIndexValue(sourceValue, sourceType, indexValue, sourceName+".iter.char")
+	case *semantic.GenericInstanceType:
+		if _, ok := semantic.ChunksExactViewItemType(tt); !ok {
+			return nil, nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
+		}
+		sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.source")
+		if err != nil {
+			return nil, nil, err
+		}
+		return s.emitIterLoopChunksExactItemValue(sourceValue, tt, indexValue, sourceName)
 	case *semantic.StructType:
 		if !isIterLoopRuntimeStringViewType(tt) {
 			return nil, nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
@@ -1598,6 +1651,19 @@ func (s *functionState) emitIterLoopElementValue(sourceAlloca C.LLVMValueRef, so
 				return nil, nil, err
 			}
 			return s.emitIterLoopStringIndexValue(loadedView, tt.Elem, indexValue, sourceName+".iter.char")
+		case *semantic.GenericInstanceType:
+			if _, ok := semantic.ChunksExactViewItemType(elem); !ok {
+				return nil, nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
+			}
+			sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.ref")
+			if err != nil {
+				return nil, nil, err
+			}
+			loadedCarrier, err := s.loadValue(sourceValue, tt.Elem, sourceName+".iter.chunks")
+			if err != nil {
+				return nil, nil, err
+			}
+			return s.emitIterLoopChunksExactItemValue(loadedCarrier, elem, indexValue, sourceName)
 		default:
 			return nil, nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
 		}

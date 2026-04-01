@@ -808,6 +808,41 @@ func TestParsePackedViewSurfaceType(t *testing.T) {
 	}
 }
 
+func TestParseTreeViewSurfaceType(t *testing.T) {
+	file, errs := parseSourceFile(t, "tree Lua:\n    common:\n        span: i64\n    expr Expr:\n        Nil\n        Binary(left: Expr, right: Expr)\n\ndef keep(view_value: treeview[Lua.Expr.Binary]) -> treeview[Lua.Expr.Binary]:\n    return view_value\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[1])
+	}
+	paramType, ok := decl.Params[0].Type.(*ast.BuiltinTypeExpr)
+	if !ok {
+		t.Fatalf("expected builtin treeview type, got %T", decl.Params[0].Type)
+	}
+	if paramType.Name != "treeview" {
+		t.Fatalf("expected treeview builtin type name, got %q", paramType.Name)
+	}
+	if len(paramType.TypeArgs) != 1 {
+		t.Fatalf("expected one treeview type arg, got %d", len(paramType.TypeArgs))
+	}
+	variantType, ok := paramType.TypeArgs[0].(*ast.NamedType)
+	if !ok {
+		t.Fatalf("expected treeview variant named type, got %T", paramType.TypeArgs[0])
+	}
+	if variantType.Name != "Lua.Expr.Binary" {
+		t.Fatalf("expected treeview variant Lua.Expr.Binary, got %q", variantType.Name)
+	}
+	retType, ok := decl.ReturnType.(*ast.BuiltinTypeExpr)
+	if !ok {
+		t.Fatalf("expected builtin treeview return type, got %T", decl.ReturnType)
+	}
+	if retType.Name != "treeview" {
+		t.Fatalf("expected treeview return type name, got %q", retType.Name)
+	}
+}
+
 func TestParseOpenAndViewRemainContextualIdentifiers(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep() -> int:\n    open: int = 1\n    view: int = open\n    open(view)\n    return view\n")
 	if len(errs) != 0 {
