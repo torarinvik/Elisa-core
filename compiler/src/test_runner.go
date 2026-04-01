@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,7 +16,86 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
+
+type isolatedTestTiming struct {
+	RunnerSource time.Duration
+	Compile      time.Duration
+	Run          time.Duration
+	Native       nativeBuildTiming
+	Analyze      time.Duration
+	ShimWrite    time.Duration
+	Total        time.Duration
+}
+
+type timingField struct {
+	textKey   string
+	textValue string
+	jsonKey   string
+	jsonValue any
+}
+
+func testTimingMode() string {
+	return strings.ToLower(strings.TrimSpace(os.Getenv("LLCONTEXT_TEST_TIMING")))
+}
+
+func testTimingEnabled() bool {
+	mode := testTimingMode()
+	return mode != "" && mode != "0" && mode != "false" && mode != "off"
+}
+
+func testTimingJSONEnabled() bool {
+	mode := testTimingMode()
+	return mode == "json" || mode == "jsonl"
+}
+
+func durationTimingField(key string, value time.Duration) timingField {
+	return timingField{
+		textKey:   key,
+		textValue: value.Round(time.Millisecond).String(),
+		jsonKey:   key + "_ms",
+		jsonValue: float64(value) / float64(time.Millisecond),
+	}
+}
+
+func boolTimingField(key string, value bool) timingField {
+	return timingField{
+		textKey:   key,
+		textValue: fmt.Sprintf("%t", value),
+		jsonKey:   key,
+		jsonValue: value,
+	}
+}
+
+func writeTestTimingLine(w io.Writer, label string, fields ...timingField) {
+	if w == nil || !testTimingEnabled() {
+		return
+	}
+	if testTimingJSONEnabled() {
+		event := map[string]any{"label": label}
+		for _, field := range fields {
+			if field.jsonKey == "" {
+				continue
+			}
+			event[field.jsonKey] = field.jsonValue
+		}
+		_ = json.NewEncoder(w).Encode(event)
+		return
+	}
+	parts := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if field.textKey == "" {
+			continue
+		}
+		parts = append(parts, field.textKey+"="+field.textValue)
+	}
+	if len(parts) == 0 {
+		fmt.Fprintf(w, "[ timing   ] %s\n", label)
+		return
+	}
+	fmt.Fprintf(w, "[ timing   ] %s %s\n", label, strings.Join(parts, " "))
+}
 
 func selectedTestPermissionRefs(tests []*semantic.AnnotatedFunc) []ast.PermissionRef {
 	refs := []ast.PermissionRef{{Name: "Console", Member: "Write"}}
@@ -212,7 +292,106 @@ func buildIsolatedTestRunnerSource(source []byte, testCase selectedTestCase) str
 	return out.String()
 }
 
+func testCaseExportName(index int) string {
+	return fmt.Sprintf("ctx_test_case_%d", index)
+}
+
+func testCaseInternalName(index int) string {
+	return fmt.Sprintf("ctx_test_case_impl_%d", index)
+}
+
+func testCasePermissionRefs(testFn *semantic.AnnotatedFunc) []ast.PermissionRef {
+	if testFn == nil || testFn.Signature == nil {
+		return nil
+	}
+	if len(testFn.Signature.PermissionRefs) != 0 {
+		return testFn.Signature.PermissionRefs
+	}
+	refs := make([]ast.PermissionRef, 0, len(testFn.Signature.Permissions))
+	for _, family := range testFn.Signature.Permissions {
+		refs = append(refs, ast.PermissionRef{Name: family})
+	}
+	return refs
+}
+
+func buildDispatchTestRunnerSource(source []byte, cases []selectedTestCase) string {
+	var out strings.Builder
+	out.Write(source)
+	if len(source) == 0 || source[len(source)-1] != '\n' {
+		out.WriteByte('\n')
+	}
+	out.WriteByte('\n')
+	for index, testCase := range cases {
+		if testCase.Func == nil || testCase.skipped() {
+			continue
+		}
+		exportName := testCaseExportName(index)
+		internalName := testCaseInternalName(index)
+		out.WriteString("def ")
+		out.WriteString(internalName)
+		out.WriteString("() -> int")
+		out.WriteString(semantic.PermissionRefsString(testCasePermissionRefs(testCase.Func)))
+		out.WriteString(":\n")
+		out.WriteString("\t")
+		out.WriteString(testCase.Func.Name)
+		out.WriteString("()\n")
+		out.WriteString("\treturn 0\n\n")
+		out.WriteString("export func ")
+		out.WriteString(exportName)
+		out.WriteString("() -> int = ")
+		out.WriteString(internalName)
+		out.WriteString("\n\n")
+	}
+	return out.String()
+}
+
+func testRunnerDispatchShimSource(cases []selectedTestCase) string {
+	var out strings.Builder
+	out.WriteString(testRunnerRuntimeShimSource())
+	out.WriteString("\nextern int strcmp(const char* lhs, const char* rhs);\n\n")
+	for index, testCase := range cases {
+		if testCase.Func == nil || testCase.skipped() {
+			continue
+		}
+		out.WriteString("long long ")
+		out.WriteString(testCaseExportName(index))
+		out.WriteString("(void);\n")
+	}
+	out.WriteString("\nint main(int argc, char **argv) {\n")
+	out.WriteString("    if (argc < 2) {\n")
+	out.WriteString("        return 2;\n")
+	out.WriteString("    }\n")
+	out.WriteString("    const char *test_name = argv[1];\n")
+	for index, testCase := range cases {
+		if testCase.Func == nil || testCase.skipped() {
+			continue
+		}
+		out.WriteString("    if (strcmp(test_name, ")
+		out.WriteString(strconv.Quote(testCase.Func.Name))
+		out.WriteString(") == 0) {\n")
+		out.WriteString("        return (int)")
+		out.WriteString(testCaseExportName(index))
+		out.WriteString("();\n")
+		out.WriteString("    }\n")
+	}
+	out.WriteString("    return 2;\n")
+	out.WriteString("}\n")
+	return out.String()
+}
+
+func runnableTestCases(cases []selectedTestCase) []selectedTestCase {
+	out := make([]selectedTestCase, 0, len(cases))
+	for _, testCase := range cases {
+		if testCase.Func == nil || testCase.skipped() {
+			continue
+		}
+		out = append(out, testCase)
+	}
+	return out
+}
+
 func executeSelectedTests(inputFile string, result *semantic.Result, filter string, foreignFiles []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stdout io.Writer, stderr io.Writer) int {
+	suiteStart := time.Now()
 	source, err := readSourceWithIncludes(inputFile, map[string]bool{})
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %s\n", err)
@@ -223,6 +402,7 @@ func executeSelectedTests(inputFile string, result *semantic.Result, filter stri
 		fmt.Fprintf(stdout, "[ NO TESTS ] no @test functions matched filter %q\n", strings.TrimSpace(filter))
 		return 1
 	}
+	runnableCases := runnableTestCases(testCases)
 
 	clangPath, err := exec.LookPath("clang")
 	if err != nil {
@@ -233,6 +413,58 @@ func executeSelectedTests(inputFile string, result *semantic.Result, filter stri
 	passed := 0
 	skipped := 0
 	failed := 0
+	var compileTotal time.Duration
+	var runTotal time.Duration
+	var analyzeTotal time.Duration
+	var nativeObjectTotal time.Duration
+	var nativeHeaderGenTotal time.Duration
+	var nativeHeaderWriteTotal time.Duration
+	var nativeLinkTotal time.Duration
+	var cacheLookupTotal time.Duration
+	var cachePublishTotal time.Duration
+	cacheHit := false
+	compileStarted := false
+	var exePath string
+	cleanup := func() {}
+	if len(runnableCases) > 0 {
+		compileStarted = true
+		runnerSourceStart := time.Now()
+		runnerSource := buildDispatchTestRunnerSource(source, runnableCases)
+		runnerSourceElapsed := time.Since(runnerSourceStart)
+		compileStart := time.Now()
+		dispatchShim := testRunnerDispatchShimSource(runnableCases)
+		var nativeTiming nativeBuildTiming
+		var analyzeTime time.Duration
+		var shimWriteTime time.Duration
+		exePath, cleanup, nativeTiming, analyzeTime, shimWriteTime, err = compileTestRunnerExecutableWithShim(clangPath, runnerSource, dispatchShim, foreignFiles, optLevel, packedProfile, stderr)
+		compileTotal = time.Since(compileStart)
+		analyzeTotal = analyzeTime
+		nativeObjectTotal = nativeTiming.ObjectWrite
+		nativeHeaderGenTotal = nativeTiming.HeaderGen
+		nativeHeaderWriteTotal = nativeTiming.HeaderWrite
+		nativeLinkTotal = nativeTiming.Link
+		cacheLookupTotal = nativeTiming.CacheLookup
+		cachePublishTotal = nativeTiming.CachePublish
+		cacheHit = nativeTiming.CacheHit
+		if err != nil {
+			cleanup()
+			return 1
+		}
+		writeTestTimingLine(stderr, "compile",
+			durationTimingField("build_runner", runnerSourceElapsed),
+			durationTimingField("compile", compileTotal),
+			durationTimingField("analyze", analyzeTime),
+			durationTimingField("shim", shimWriteTime),
+			durationTimingField("obj", nativeTiming.ObjectWrite),
+			durationTimingField("header_gen", nativeTiming.HeaderGen),
+			durationTimingField("header_write", nativeTiming.HeaderWrite),
+			durationTimingField("link", nativeTiming.Link),
+			durationTimingField("cache_lookup", nativeTiming.CacheLookup),
+			durationTimingField("cache_publish", nativeTiming.CachePublish),
+			boolTimingField("cache_hit", nativeTiming.CacheHit),
+		)
+		defer cleanup()
+	}
 	for _, testCase := range testCases {
 		if testCase.Func == nil {
 			continue
@@ -244,20 +476,23 @@ func executeSelectedTests(inputFile string, result *semantic.Result, filter stri
 		}
 
 		fmt.Fprintln(stdout, formatTestLine("RUN", testCase.Func.Name, ""))
-		runnerSource := buildIsolatedTestRunnerSource(source, testCase)
-		exePath, cleanup, err := compileTestRunnerExecutable(clangPath, runnerSource, foreignFiles, optLevel, packedProfile, stderr)
-		if err != nil {
-			cleanup()
-			return 1
-		}
+		testStart := time.Now()
+		timing := isolatedTestTiming{}
 
 		var testStdout bytes.Buffer
 		var testStderr bytes.Buffer
-		runCmd := exec.Command(exePath)
+		runCmd := exec.Command(exePath, testCase.Func.Name)
 		runCmd.Stdout = &testStdout
 		runCmd.Stderr = &testStderr
+		runStart := time.Now()
 		runErr := runCmd.Run()
-		cleanup()
+		timing.Run = time.Since(runStart)
+		timing.Total = time.Since(testStart)
+		runTotal += timing.Run
+		writeTestTimingLine(stderr, testCase.Func.Name,
+			durationTimingField("total", timing.Total),
+			durationTimingField("run", timing.Run),
+		)
 
 		if runErr == nil {
 			passed++
@@ -271,6 +506,20 @@ func executeSelectedTests(inputFile string, result *semantic.Result, filter stri
 		writeCapturedTestOutput(stdout, testCase.Func.Name, testStdout.String(), testStderr.String())
 	}
 	fmt.Fprintf(stdout, "[ SUMMARY  ] %d test(s) selected; passed=%d skipped=%d failed=%d\n", len(testCases), passed, skipped, failed)
+	writeTestTimingLine(stderr, "suite",
+		durationTimingField("total", time.Since(suiteStart)),
+		durationTimingField("compile", compileTotal),
+		durationTimingField("run", runTotal),
+		durationTimingField("analyze", analyzeTotal),
+		durationTimingField("obj", nativeObjectTotal),
+		durationTimingField("header_gen", nativeHeaderGenTotal),
+		durationTimingField("header_write", nativeHeaderWriteTotal),
+		durationTimingField("link", nativeLinkTotal),
+		durationTimingField("cache_lookup", cacheLookupTotal),
+		durationTimingField("cache_publish", cachePublishTotal),
+		boolTimingField("cache_hit", cacheHit),
+		boolTimingField("compiled", compileStarted),
+	)
 	if failed > 0 {
 		return 1
 	}
@@ -307,36 +556,72 @@ func formatTestLine(status string, name string, detail string) string {
 	return fmt.Sprintf("[ "+width+" ] %s%s", status, name, detail)
 }
 
-func compileTestRunnerExecutable(clangPath string, runnerSource string, foreignFiles []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stderr io.Writer) (string, func(), error) {
+func compileTestRunnerExecutable(clangPath string, runnerSource string, foreignFiles []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stderr io.Writer) (string, func(), nativeBuildTiming, time.Duration, time.Duration, error) {
+	return compileTestRunnerExecutableWithShim(clangPath, runnerSource, testRunnerRuntimeShimSource(), foreignFiles, optLevel, packedProfile, stderr)
+}
+
+func compileTestRunnerExecutableWithShim(clangPath string, runnerSource string, shimSource string, foreignFiles []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stderr io.Writer) (string, func(), nativeBuildTiming, time.Duration, time.Duration, error) {
+	cacheLookupStart := time.Now()
+	cacheArtifact := testRunnerCacheArtifact{}
+	if testRunnerCacheEnabled() {
+		artifact, hit, err := locateCachedTestRunner(runnerSource, shimSource, foreignFiles, optLevel, packedProfile)
+		cacheArtifact = artifact
+		lookupElapsed := time.Since(cacheLookupStart)
+		if err != nil {
+			return "", func() {}, nativeBuildTiming{CacheLookup: lookupElapsed}, 0, 0, err
+		}
+		if hit {
+			debugTestRunnerCache(stderr, "hit", artifact)
+			return artifact.executable, func() {}, nativeBuildTiming{CacheLookup: lookupElapsed, CacheHit: true}, 0, 0, nil
+		}
+		debugTestRunnerCache(stderr, "miss", artifact)
+	}
 	tempDir, err := os.MkdirTemp("", "llcontext-test-run-*")
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %s\n", err)
-		return "", func() {}, err
+		return "", func() {}, nativeBuildTiming{CacheLookup: time.Since(cacheLookupStart)}, 0, 0, err
 	}
 	cleanup := func() {
 		_ = os.RemoveAll(tempDir)
 	}
 
 	runnerPath := filepath.Join(tempDir, "generated_runner.llcontext")
+	analyzeStart := time.Now()
 	_, runnerResult, ok := analyzeProgram(runnerPath, []byte(runnerSource), stderr)
+	analyzeElapsed := time.Since(analyzeStart)
 	if !ok {
-		return "", cleanup, fmt.Errorf("failed to analyze generated test runner")
+		return "", cleanup, nativeBuildTiming{CacheLookup: time.Since(cacheLookupStart)}, analyzeElapsed, 0, fmt.Errorf("failed to analyze generated test runner")
 	}
 
 	shimPath := filepath.Join(tempDir, "test_runner_runtime_shims.c")
-	if err := os.WriteFile(shimPath, []byte(testRunnerRuntimeShimSource()), 0o644); err != nil {
+	shimStart := time.Now()
+	if err := os.WriteFile(shimPath, []byte(shimSource), 0o644); err != nil {
 		fmt.Fprintf(stderr, "error: %s\n", err)
-		return "", cleanup, err
+		return "", cleanup, nativeBuildTiming{CacheLookup: time.Since(cacheLookupStart)}, analyzeElapsed, time.Since(shimStart), err
 	}
+	shimElapsed := time.Since(shimStart)
 	linkForeignFiles := append([]string{shimPath}, foreignFiles...)
-	exePath, nativeCleanup, err := buildNativeExecutableWithClang(clangPath, runnerResult, linkForeignFiles, filepath.Join(tempDir, "generated_runner"), optLevel, packedProfile, stderr)
+	exePath, nativeCleanup, timing, err := buildNativeExecutableWithClang(clangPath, runnerResult, linkForeignFiles, filepath.Join(tempDir, "generated_runner"), optLevel, packedProfile, stderr)
+	timing.CacheLookup = time.Since(cacheLookupStart)
 	if err != nil {
-		return "", cleanup, err
+		return "", cleanup, timing, analyzeElapsed, shimElapsed, err
+	}
+	if testRunnerCacheEnabled() && cacheArtifact.executable != "" {
+		publishStart := time.Now()
+		if err := publishCachedTestRunner(cacheArtifact, exePath); err == nil {
+			timing.CachePublish = time.Since(publishStart)
+			debugTestRunnerCache(stderr, "publish", cacheArtifact)
+		} else {
+			timing.CachePublish = time.Since(publishStart)
+			if testRunnerCacheDebugEnabled() && stderr != nil {
+				fmt.Fprintf(stderr, "[ cache    ] publish-error key=%s err=%s\n", cacheArtifact.key, err)
+			}
+		}
 	}
 	return exePath, func() {
 		nativeCleanup()
 		cleanup()
-	}, nil
+	}, timing, analyzeElapsed, shimElapsed, nil
 }
 
 func classifyTestExecutionError(err error) (string, string) {

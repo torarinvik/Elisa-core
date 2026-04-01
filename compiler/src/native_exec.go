@@ -11,55 +11,74 @@ import (
 	"runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"llcontext/src/backend"
 	"llcontext/src/semantic"
 )
+
+type nativeBuildTiming struct {
+	ObjectWrite  time.Duration
+	HeaderGen    time.Duration
+	HeaderWrite  time.Duration
+	Link         time.Duration
+	CacheLookup  time.Duration
+	CachePublish time.Duration
+	CacheHit     bool
+}
 
 func buildNativeExecutable(result *semantic.Result, foreignFiles []string, outputPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stderr io.Writer) (string, func(), error) {
 	clangPath, err := exec.LookPath("clang")
 	if err != nil {
 		return "", func() {}, fmt.Errorf("clang is required to build native executables: %w", err)
 	}
-	return buildNativeExecutableWithClang(clangPath, result, foreignFiles, outputPath, optLevel, packedProfile, stderr)
+	exePath, cleanup, _, err := buildNativeExecutableWithClang(clangPath, result, foreignFiles, outputPath, optLevel, packedProfile, stderr)
+	return exePath, cleanup, err
 }
 
-func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, foreignFiles []string, outputPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stderr io.Writer) (string, func(), error) {
+func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, foreignFiles []string, outputPath string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stderr io.Writer) (string, func(), nativeBuildTiming, error) {
 	if result == nil {
-		return "", func() {}, fmt.Errorf("semantic result is nil")
+		return "", func() {}, nativeBuildTiming{}, fmt.Errorf("semantic result is nil")
 	}
 	tempDir, err := os.MkdirTemp("", "llcontext-native-run-*")
 	if err != nil {
-		return "", func() {}, err
+		return "", func() {}, nativeBuildTiming{}, err
 	}
 	cleanup := func() {
 		_ = os.RemoveAll(tempDir)
 	}
+	timing := nativeBuildTiming{}
 
 	exePath := strings.TrimSpace(outputPath)
 	if exePath == "" {
 		exePath = filepath.Join(tempDir, "llcontext_program")
 	} else if err := ensureOutputParentExists(exePath); err != nil {
 		cleanup()
-		return "", func() {}, err
+		return "", func() {}, timing, err
 	}
 
 	objectPath := filepath.Join(tempDir, "llcontext_module.o")
+	objectStart := time.Now()
 	if err := backend.WriteLLVMObjectFileWithOptAndPackedLoweringProfile(result, objectPath, optLevel, packedProfile); err != nil {
 		cleanup()
-		return "", func() {}, err
+		return "", func() {}, timing, err
 	}
+	timing.ObjectWrite = time.Since(objectStart)
+	headerGenStart := time.Now()
 	headerSource, err := backend.GenerateCHeader(result)
 	if err != nil {
 		cleanup()
-		return "", func() {}, err
+		return "", func() {}, timing, err
 	}
+	timing.HeaderGen = time.Since(headerGenStart)
+	headerWriteStart := time.Now()
 	for _, name := range nativeHeaderNames(result, exePath) {
 		if err := os.WriteFile(filepath.Join(tempDir, name), []byte(headerSource), 0o644); err != nil {
 			cleanup()
-			return "", func() {}, err
+			return "", func() {}, timing, err
 		}
 	}
+	timing.HeaderWrite = time.Since(headerWriteStart)
 
 	linkArgs := make([]string, 0, 4+len(foreignFiles))
 	linkArgs = append(linkArgs, "-I", tempDir)
@@ -73,11 +92,13 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	linkCmd := exec.Command(clangPath, linkArgs...)
 	linkCmd.Stdout = stderr
 	linkCmd.Stderr = stderr
+	linkStart := time.Now()
 	if err := linkCmd.Run(); err != nil {
 		cleanup()
-		return "", func() {}, fmt.Errorf("failed to link native executable: %w", err)
+		return "", func() {}, timing, fmt.Errorf("failed to link native executable: %w", err)
 	}
-	return exePath, cleanup, nil
+	timing.Link = time.Since(linkStart)
+	return exePath, cleanup, timing, nil
 }
 
 func runNativeExecutable(exePath string, stdout io.Writer, stderr io.Writer) error {
