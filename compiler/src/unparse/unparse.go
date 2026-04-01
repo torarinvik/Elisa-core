@@ -372,6 +372,19 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 		for _, stmt := range n.Body {
 			f.writeStmt(level+1, stmt)
 		}
+	case *ast.IterForStmt:
+		line := "for "
+		switch n.Mode {
+		case ast.IterBindRef:
+			line += "ref "
+		case ast.IterBindMutableRef:
+			line += "mutable ref "
+		}
+		line += formatMoveBindPattern(n.Pattern) + " in " + formatExpr(n.Source) + ":"
+		f.writeLine(level, line)
+		for _, stmt := range n.Body {
+			f.writeStmt(level+1, stmt)
+		}
 	case *ast.ParallelForStmt:
 		line := "parallel for " + n.Name
 		if n.IndexName != "" {

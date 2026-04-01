@@ -1068,6 +1068,53 @@ func TestParseForStatementRangeForms(t *testing.T) {
 	}
 }
 
+func TestParseIterableForStatementWithRefDestructuring(t *testing.T) {
+	file, errs := parseSourceFile(t, "struct Pair:\n    left: int\n    right: int\n\ndef walk(items: array[Pair, 2]) -> void:\n    for ref Pair(left, right) in items:\n        pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	iterStmt, ok := decl.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
+	}
+	if iterStmt.Mode != ast.IterBindRef {
+		t.Fatalf("expected readonly ref bind mode, got %v", iterStmt.Mode)
+	}
+	pattern, ok := iterStmt.Pattern.(*ast.MoveBindStructPattern)
+	if !ok {
+		t.Fatalf("expected struct bind pattern, got %T", iterStmt.Pattern)
+	}
+	if pattern.TypeName != "Pair" {
+		t.Fatalf("expected Pair pattern, got %q", pattern.TypeName)
+	}
+	if len(pattern.Args) != 2 || pattern.Args[0].Name != "left" || pattern.Args[1].Name != "right" {
+		t.Fatalf("unexpected iterable pattern args: %#v", pattern.Args)
+	}
+	if _, ok := iterStmt.Source.(*ast.Ident); !ok {
+		t.Fatalf("expected iterable source ident, got %T", iterStmt.Source)
+	}
+}
+
+func TestParseIterableForStatementWithMutableRefBinder(t *testing.T) {
+	file, errs := parseSourceFile(t, "def walk(items: darray[int]) -> void:\n    for mutable ref item in items:\n        pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	iterStmt, ok := decl.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
+	}
+	if iterStmt.Mode != ast.IterBindMutableRef {
+		t.Fatalf("expected mutable ref bind mode, got %v", iterStmt.Mode)
+	}
+	pattern, ok := iterStmt.Pattern.(*ast.MoveBindNamePattern)
+	if !ok || pattern.Name != "item" {
+		t.Fatalf("expected mutable ref name pattern item, got %T %#v", iterStmt.Pattern, iterStmt.Pattern)
+	}
+}
+
 func TestParseForRemainsContextualIdentifier(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep() -> int:\n    for_value: int = 1\n    for(for_value)\n    return for_value\n")
 	if len(errs) != 0 {

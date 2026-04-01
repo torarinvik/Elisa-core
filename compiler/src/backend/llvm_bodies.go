@@ -22,8 +22,9 @@ import (
 )
 
 type valueBinding struct {
-	ptr C.LLVMValueRef
-	typ semantic.Type
+	ptr     C.LLVMValueRef
+	typ     semantic.Type
+	mutable bool
 }
 
 type codegenScope struct {
@@ -271,7 +272,7 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		}
 		paramValue := C.LLVMGetParam(fnValue, C.unsigned(i+paramOffset))
 		C.LLVMBuildStore(builder, paramValue, alloca)
-		state.defineBinding(param.Name, valueBinding{ptr: alloca, typ: fnType.Params[i]})
+		state.defineBinding(param.Name, valueBinding{ptr: alloca, typ: fnType.Params[i], mutable: param.Mutable})
 		state.bindPackedStoreValue(fnType.Params[i], paramValue)
 	}
 
@@ -772,7 +773,7 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		if err != nil {
 			return err
 		}
-		s.defineBinding(n.Name, valueBinding{ptr: alloca, typ: declType})
+		s.defineBinding(n.Name, valueBinding{ptr: alloca, typ: declType, mutable: n.Mutable})
 		if n.Value != nil {
 			value, _, err := s.emitExpr(n.Value, declType)
 			if err != nil {
@@ -964,6 +965,8 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		return s.emitWhile(n)
 	case *ast.ForStmt:
 		return s.emitForStmt(n)
+	case *ast.IterForStmt:
+		return s.emitIterForStmt(n)
 	case *ast.ParallelForStmt:
 		return s.emitParallelForStmt(n)
 	case *ast.PassStmt:
@@ -1255,6 +1258,507 @@ func (s *functionState) emitMoveBindLocal(name string, typ semantic.Type, value 
 	s.defineBinding(name, valueBinding{ptr: alloca, typ: typ})
 	C.LLVMBuildStore(s.builder, value, alloca)
 	s.bindPackedStoreValue(typ, value)
+	return nil
+}
+
+func iterLoopItemTypeBackend(t semantic.Type) (semantic.Type, bool) {
+	switch tt := t.(type) {
+	case *semantic.ArrayType:
+		if tt.SurfaceName == "str" || tt.SurfaceName == "string" {
+			return nil, false
+		}
+		return tt.Elem, true
+	case *semantic.DArrayType:
+		return tt.Elem, true
+	case *semantic.ViewType:
+		return tt.Elem, true
+	case *semantic.DArrayViewType:
+		if tt.SurfaceName != "" && tt.SurfaceName != "dview" {
+			return nil, false
+		}
+		return tt.Elem, true
+	case *semantic.RefType:
+		if tt.State != semantic.RefStateNonNull {
+			return nil, false
+		}
+		return iterLoopItemTypeBackend(tt.Elem)
+	default:
+		return nil, false
+	}
+}
+
+func isIterLoopRuntimeStringViewType(t semantic.Type) bool {
+	st, ok := t.(*semantic.StructType)
+	return ok && st != nil && st.Name == "StringView"
+}
+
+func (s *functionState) emitIterLoopCount(sourceAlloca C.LLVMValueRef, sourceType semantic.Type, sourceName string) (C.LLVMValueRef, error) {
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, err
+	}
+	switch tt := sourceType.(type) {
+	case *semantic.ArrayType:
+		if !tt.HasConstSize {
+			return nil, fmt.Errorf("iterable loop over %s requires constant array extent metadata", sourceType.String())
+		}
+		return C.LLVMConstInt(usizeLLVMType, C.ulonglong(tt.ConstSize), 0), nil
+	case *semantic.DArrayType, *semantic.ViewType, *semantic.DArrayViewType:
+		containerLLVMType, err := s.g.lowerType(sourceType)
+		if err != nil {
+			return nil, err
+		}
+		lenPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, sourceAlloca, 1, cStringFree(sourceName+".iter.len.ptr"))
+		lenValue, err := s.loadValue(lenPtr, usizeType, sourceName+".iter.len")
+		if err != nil {
+			return nil, err
+		}
+		return lenValue, nil
+	case *semantic.DStrType:
+		sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.source")
+		if err != nil {
+			return nil, err
+		}
+		lenValue, err := s.emitRuntimeStringLengthValue(sourceValue, sourceType, s.g.result.NamedTypes["i64"], sourceName+".iter.len")
+		if err != nil {
+			return nil, err
+		}
+		return s.coerceValue(lenValue, s.g.result.NamedTypes["i64"], usizeType)
+	case *semantic.SViewType:
+		containerLLVMType, err := s.g.lowerType(sourceType)
+		if err != nil {
+			return nil, err
+		}
+		lenPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, sourceAlloca, 1, cStringFree(sourceName+".iter.len.ptr"))
+		lenValue, err := s.loadValue(lenPtr, s.g.result.NamedTypes["i64"], sourceName+".iter.len")
+		if err != nil {
+			return nil, err
+		}
+		return s.coerceValue(lenValue, s.g.result.NamedTypes["i64"], usizeType)
+	case *semantic.StructType:
+		if !isIterLoopRuntimeStringViewType(tt) {
+			return nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
+		}
+		containerLLVMType, err := s.g.lowerType(sourceType)
+		if err != nil {
+			return nil, err
+		}
+		lenPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, sourceAlloca, 1, cStringFree(sourceName+".iter.len.ptr"))
+		lenValue, err := s.loadValue(lenPtr, s.g.result.NamedTypes["i64"], sourceName+".iter.len")
+		if err != nil {
+			return nil, err
+		}
+		return s.coerceValue(lenValue, s.g.result.NamedTypes["i64"], usizeType)
+	case *semantic.RefType:
+		if tt.State != semantic.RefStateNonNull {
+			return nil, fmt.Errorf("iterable loop requires a non-null reference source, got %s", sourceType.String())
+		}
+		sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.ref")
+		if err != nil {
+			return nil, err
+		}
+		switch elem := tt.Elem.(type) {
+		case *semantic.ArrayType:
+			if !elem.HasConstSize {
+				return nil, fmt.Errorf("iterable loop over %s requires constant array extent metadata", sourceType.String())
+			}
+			return C.LLVMConstInt(usizeLLVMType, C.ulonglong(elem.ConstSize), 0), nil
+		case *semantic.DArrayType, *semantic.ViewType, *semantic.DArrayViewType:
+			containerLLVMType, err := s.g.lowerType(tt.Elem)
+			if err != nil {
+				return nil, err
+			}
+			lenPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, sourceValue, 1, cStringFree(sourceName+".iter.len.ptr"))
+			lenValue, err := s.loadValue(lenPtr, usizeType, sourceName+".iter.len")
+			if err != nil {
+				return nil, err
+			}
+			return lenValue, nil
+		case *semantic.DStrType:
+			lenValue, err := s.emitRuntimeStringLengthValue(sourceValue, tt.Elem, s.g.result.NamedTypes["i64"], sourceName+".iter.len")
+			if err != nil {
+				return nil, err
+			}
+			return s.coerceValue(lenValue, s.g.result.NamedTypes["i64"], usizeType)
+		case *semantic.SViewType:
+			containerLLVMType, err := s.g.lowerType(tt.Elem)
+			if err != nil {
+				return nil, err
+			}
+			lenPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, sourceValue, 1, cStringFree(sourceName+".iter.len.ptr"))
+			lenValue, err := s.loadValue(lenPtr, s.g.result.NamedTypes["i64"], sourceName+".iter.len")
+			if err != nil {
+				return nil, err
+			}
+			return s.coerceValue(lenValue, s.g.result.NamedTypes["i64"], usizeType)
+		case *semantic.StructType:
+			if !isIterLoopRuntimeStringViewType(elem) {
+				return nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
+			}
+			containerLLVMType, err := s.g.lowerType(tt.Elem)
+			if err != nil {
+				return nil, err
+			}
+			lenPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, sourceValue, 1, cStringFree(sourceName+".iter.len.ptr"))
+			lenValue, err := s.loadValue(lenPtr, s.g.result.NamedTypes["i64"], sourceName+".iter.len")
+			if err != nil {
+				return nil, err
+			}
+			return s.coerceValue(lenValue, s.g.result.NamedTypes["i64"], usizeType)
+		default:
+			return nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
+		}
+	default:
+		return nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
+	}
+}
+
+func (s *functionState) emitIterLoopElementAddress(sourceAlloca C.LLVMValueRef, sourceType semantic.Type, indexValue C.LLVMValueRef, sourceName string) (C.LLVMValueRef, semantic.Type, error) {
+	zero := C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), 0, 0)
+	switch tt := sourceType.(type) {
+	case *semantic.ArrayType:
+		arrayLLVMType, err := s.g.lowerType(tt)
+		if err != nil {
+			return nil, nil, err
+		}
+		indices := []C.LLVMValueRef{zero, indexValue}
+		ptr := C.LLVMBuildGEP2(s.builder, arrayLLVMType, sourceAlloca, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree(sourceName+".iter.ptr"))
+		return ptr, tt.Elem, nil
+	case *semantic.DArrayType:
+		return s.emitRuntimePointerIndexedAddressWithType(sourceAlloca, mustLowerType(s, tt), tt.Elem, indexValue)
+	case *semantic.ViewType:
+		return s.emitRuntimePointerIndexedAddressWithType(sourceAlloca, mustLowerType(s, tt), tt.Elem, indexValue)
+	case *semantic.DArrayViewType:
+		return s.emitRuntimePointerIndexedAddressWithType(sourceAlloca, mustLowerType(s, tt), tt.Elem, indexValue)
+	case *semantic.RefType:
+		if tt.State != semantic.RefStateNonNull {
+			return nil, nil, fmt.Errorf("iterable loop requires a non-null reference source, got %s", sourceType.String())
+		}
+		sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.ref")
+		if err != nil {
+			return nil, nil, err
+		}
+		switch elem := tt.Elem.(type) {
+		case *semantic.ArrayType:
+			arrayLLVMType, err := s.g.lowerType(elem)
+			if err != nil {
+				return nil, nil, err
+			}
+			indices := []C.LLVMValueRef{zero, indexValue}
+			ptr := C.LLVMBuildGEP2(s.builder, arrayLLVMType, sourceValue, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree(sourceName+".iter.ptr"))
+			return ptr, elem.Elem, nil
+		case *semantic.DArrayType:
+			containerLLVMType, err := s.g.lowerType(tt.Elem)
+			if err != nil {
+				return nil, nil, err
+			}
+			return s.emitRuntimePointerIndexedAddressWithType(sourceValue, containerLLVMType, elem.Elem, indexValue)
+		case *semantic.ViewType:
+			containerLLVMType, err := s.g.lowerType(tt.Elem)
+			if err != nil {
+				return nil, nil, err
+			}
+			return s.emitRuntimePointerIndexedAddressWithType(sourceValue, containerLLVMType, elem.Elem, indexValue)
+		case *semantic.DArrayViewType:
+			containerLLVMType, err := s.g.lowerType(tt.Elem)
+			if err != nil {
+				return nil, nil, err
+			}
+			return s.emitRuntimePointerIndexedAddressWithType(sourceValue, containerLLVMType, elem.Elem, indexValue)
+		default:
+			return nil, nil, fmt.Errorf("iterable loop does not support ref binding for %s", sourceType.String())
+		}
+	default:
+		return nil, nil, fmt.Errorf("iterable loop does not support ref binding for %s", sourceType.String())
+	}
+}
+
+func mustLowerType(s *functionState, t semantic.Type) C.LLVMTypeRef {
+	llvmType, err := s.g.lowerType(t)
+	if err != nil {
+		return nil
+	}
+	return llvmType
+}
+
+func (s *functionState) emitIterLoopStringIndexValue(stringValue C.LLVMValueRef, operandType semantic.Type, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, semantic.Type, error) {
+	helperName, _, ok := runtimeStringIndexedOperand(operandType)
+	if !ok {
+		return nil, nil, fmt.Errorf("iterable loop string index is not supported for %s", operandType.String())
+	}
+	indexType := s.g.result.NamedTypes["i64"]
+	coercedIndex, err := s.coerceValue(indexValue, s.g.result.NamedTypes["usize"], indexType)
+	if err != nil {
+		return nil, nil, err
+	}
+	resultType := s.g.result.NamedTypes["char"]
+	helperType := &semantic.FuncType{
+		Name:   helperName,
+		Params: []semantic.Type{operandType, indexType},
+		Return: resultType,
+	}
+	callee, err := s.g.ensureFunctionDeclared(helperName, helperType)
+	if err != nil {
+		return nil, nil, err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, nil, err
+	}
+	call := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{stringValue, coercedIndex}, name)
+	return call, resultType, nil
+}
+
+func (s *functionState) emitIterLoopElementValue(sourceAlloca C.LLVMValueRef, sourceType semantic.Type, indexValue C.LLVMValueRef, sourceName string) (C.LLVMValueRef, semantic.Type, error) {
+	switch tt := sourceType.(type) {
+	case *semantic.ArrayType:
+		ptr, elemType, err := s.emitIterLoopElementAddress(sourceAlloca, sourceType, indexValue, sourceName)
+		if err != nil {
+			return nil, nil, err
+		}
+		if tt.SurfaceName == "str" || tt.SurfaceName == "string" {
+			loaded, err := s.loadValue(ptr, elemType, sourceName+".iter.byte")
+			if err != nil {
+				return nil, nil, err
+			}
+			llvmResultType, err := s.g.lowerType(s.g.result.NamedTypes["char"])
+			if err != nil {
+				return nil, nil, err
+			}
+			return C.LLVMBuildZExt(s.builder, loaded, llvmResultType, cStringFree(sourceName+".iter.char")), s.g.result.NamedTypes["char"], nil
+		}
+		value, err := s.loadValue(ptr, elemType, sourceName+".iter.value")
+		return value, elemType, err
+	case *semantic.DArrayType, *semantic.ViewType, *semantic.DArrayViewType:
+		ptr, elemType, err := s.emitIterLoopElementAddress(sourceAlloca, sourceType, indexValue, sourceName)
+		if err != nil {
+			return nil, nil, err
+		}
+		value, err := s.loadValue(ptr, elemType, sourceName+".iter.value")
+		return value, elemType, err
+	case *semantic.DStrType, *semantic.SViewType:
+		sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.source")
+		if err != nil {
+			return nil, nil, err
+		}
+		return s.emitIterLoopStringIndexValue(sourceValue, sourceType, indexValue, sourceName+".iter.char")
+	case *semantic.StructType:
+		if !isIterLoopRuntimeStringViewType(tt) {
+			return nil, nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
+		}
+		sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.source")
+		if err != nil {
+			return nil, nil, err
+		}
+		return s.emitIterLoopStringIndexValue(sourceValue, sourceType, indexValue, sourceName+".iter.char")
+	case *semantic.RefType:
+		switch elem := tt.Elem.(type) {
+		case *semantic.ArrayType, *semantic.DArrayType, *semantic.ViewType, *semantic.DArrayViewType:
+			ptr, elemType, err := s.emitIterLoopElementAddress(sourceAlloca, sourceType, indexValue, sourceName)
+			if err != nil {
+				return nil, nil, err
+			}
+			if arrayElem, ok := elem.(*semantic.ArrayType); ok && (arrayElem.SurfaceName == "str" || arrayElem.SurfaceName == "string") {
+				loaded, err := s.loadValue(ptr, elemType, sourceName+".iter.byte")
+				if err != nil {
+					return nil, nil, err
+				}
+				llvmResultType, err := s.g.lowerType(s.g.result.NamedTypes["char"])
+				if err != nil {
+					return nil, nil, err
+				}
+				return C.LLVMBuildZExt(s.builder, loaded, llvmResultType, cStringFree(sourceName+".iter.char")), s.g.result.NamedTypes["char"], nil
+			}
+			value, err := s.loadValue(ptr, elemType, sourceName+".iter.value")
+			return value, elemType, err
+		case *semantic.DStrType, *semantic.SViewType:
+			sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.ref")
+			if err != nil {
+				return nil, nil, err
+			}
+			if _, ok := elem.(*semantic.SViewType); ok {
+				loadedView, err := s.loadValue(sourceValue, tt.Elem, sourceName+".iter.view")
+				if err != nil {
+					return nil, nil, err
+				}
+				return s.emitIterLoopStringIndexValue(loadedView, tt.Elem, indexValue, sourceName+".iter.char")
+			}
+			return s.emitIterLoopStringIndexValue(sourceValue, tt.Elem, indexValue, sourceName+".iter.char")
+		case *semantic.StructType:
+			if !isIterLoopRuntimeStringViewType(elem) {
+				return nil, nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
+			}
+			sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.ref")
+			if err != nil {
+				return nil, nil, err
+			}
+			loadedView, err := s.loadValue(sourceValue, tt.Elem, sourceName+".iter.view")
+			if err != nil {
+				return nil, nil, err
+			}
+			return s.emitIterLoopStringIndexValue(loadedView, tt.Elem, indexValue, sourceName+".iter.char")
+		default:
+			return nil, nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
+		}
+	default:
+		return nil, nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
+	}
+}
+
+func (s *functionState) emitIterLoopRefLocal(name string, refType *semantic.RefType, ptrValue C.LLVMValueRef) error {
+	if name == "_" {
+		return nil
+	}
+	alloca, err := s.createEntryAlloca(name, refType)
+	if err != nil {
+		return err
+	}
+	s.defineBinding(name, valueBinding{ptr: alloca, typ: refType})
+	C.LLVMBuildStore(s.builder, ptrValue, alloca)
+	return nil
+}
+
+func (s *functionState) emitIterLoopPatternBindings(pattern ast.MoveBindPattern, mode ast.IterBindMode, itemType semantic.Type, itemValue C.LLVMValueRef, itemPtr C.LLVMValueRef) error {
+	switch p := pattern.(type) {
+	case *ast.MoveBindNamePattern:
+		if mode == ast.IterBindValue {
+			return s.emitMoveBindLocal(p.Name, itemType, itemValue)
+		}
+		return s.emitIterLoopRefLocal(p.Name, &semantic.RefType{Elem: itemType, Mutable: mode == ast.IterBindMutableRef, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny}, itemPtr)
+	case *ast.MoveBindStructPattern:
+		fields, err := s.g.structLiteralFields(itemType)
+		if err != nil {
+			return err
+		}
+		limit := len(p.Args)
+		if len(fields) < limit {
+			limit = len(fields)
+		}
+		if mode == ast.IterBindValue {
+			for i := 0; i < limit; i++ {
+				if p.Args[i].Name == "_" {
+					continue
+				}
+				fieldValue := C.LLVMBuildExtractValue(s.builder, itemValue, C.unsigned(fields[i].Index), cStringFree(p.Args[i].Name+".iter.field"))
+				if err := s.emitMoveBindLocal(p.Args[i].Name, fields[i].Type, fieldValue); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		containerLLVMType, err := s.g.lowerType(semantic.StripAggregateStateType(itemType))
+		if err != nil {
+			return err
+		}
+		for i := 0; i < limit; i++ {
+			if p.Args[i].Name == "_" {
+				continue
+			}
+			fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, itemPtr, C.unsigned(fields[i].Index), cStringFree(p.Args[i].Name+".iter.field.ptr"))
+			refType := &semantic.RefType{Elem: fields[i].Type, Mutable: mode == ast.IterBindMutableRef, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny}
+			if err := s.emitIterLoopRefLocal(p.Args[i].Name, refType, fieldPtr); err != nil {
+				return err
+			}
+		}
+		return nil
+	case *ast.MoveBindVariantPattern:
+		return fmt.Errorf("iterable loop lowering requires an irrefutable pattern, got variant pattern %s.%s", p.EnumName, p.Variant)
+	default:
+		return fmt.Errorf("unsupported iterable loop pattern %T", pattern)
+	}
+}
+
+func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
+	sourceType := s.exprType(stmt.Source)
+	if sourceType == nil {
+		return fmt.Errorf("missing semantic type for iterable loop source")
+	}
+	sourceName := s.g.nextSyntheticName("iter.src.")
+	sourceAlloca, err := s.createEntryAlloca(sourceName, sourceType)
+	if err != nil {
+		return err
+	}
+	sourceValue, _, err := s.emitExpr(stmt.Source, sourceType)
+	if err != nil {
+		return err
+	}
+	C.LLVMBuildStore(s.builder, sourceValue, sourceAlloca)
+
+	countValue, err := s.emitIterLoopCount(sourceAlloca, sourceType, sourceName)
+	if err != nil {
+		return err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return err
+	}
+	indexAlloca, err := s.createEntryAlloca(sourceName+".index", usizeType)
+	if err != nil {
+		return err
+	}
+	zeroValue := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	C.LLVMBuildStore(s.builder, zeroValue, indexAlloca)
+
+	condBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.cond"))
+	bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.body"))
+	exitBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.end"))
+	C.LLVMBuildBr(s.builder, condBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, condBB)
+	indexValue, err := s.loadValue(indexAlloca, usizeType, sourceName+".index")
+	if err != nil {
+		return err
+	}
+	condValue := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, countValue, cStringFree("iter.cmp"))
+	C.LLVMBuildCondBr(s.builder, condValue, bodyBB, exitBB)
+
+	itemType, ok := iterLoopItemTypeBackend(sourceType)
+	if !ok && stmt.Mode != ast.IterBindValue {
+		return fmt.Errorf("iterable loop ref binding requires an addressable array-like source, got %s", sourceType.String())
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+	s.pushScope()
+	if stmt.Mode == ast.IterBindValue {
+		itemValue, resolvedItemType, err := s.emitIterLoopElementValue(sourceAlloca, sourceType, indexValue, sourceName)
+		if err != nil {
+			s.popScope()
+			return err
+		}
+		if itemType == nil {
+			itemType = resolvedItemType
+		}
+		if err := s.emitIterLoopPatternBindings(stmt.Pattern, stmt.Mode, itemType, itemValue, nil); err != nil {
+			s.popScope()
+			return err
+		}
+	} else {
+		itemPtr, resolvedItemType, err := s.emitIterLoopElementAddress(sourceAlloca, sourceType, indexValue, sourceName)
+		if err != nil {
+			s.popScope()
+			return err
+		}
+		if itemType == nil {
+			itemType = resolvedItemType
+		}
+		if err := s.emitIterLoopPatternBindings(stmt.Pattern, stmt.Mode, itemType, nil, itemPtr); err != nil {
+			s.popScope()
+			return err
+		}
+	}
+	if err := s.emitBlock(stmt.Body, true); err != nil {
+		s.popScope()
+		return err
+	}
+	s.popScope()
+	if !s.currentBlockTerminated() {
+		nextValue := C.LLVMBuildAdd(s.builder, indexValue, C.LLVMConstInt(usizeLLVMType, 1, 0), cStringFree("iter.next"))
+		C.LLVMBuildStore(s.builder, nextValue, indexAlloca)
+		C.LLVMBuildBr(s.builder, condBB)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, exitBB)
 	return nil
 }
 
@@ -3709,6 +4213,8 @@ func stmtReadsMatchedValueField(name string, stmt ast.Stmt) bool {
 		return exprReadsMatchedValueField(name, n.Cond) || stmtsReadMatchedValueField(name, n.Body)
 	case *ast.ForStmt:
 		return exprReadsMatchedValueField(name, n.Start) || exprReadsMatchedValueField(name, n.End) || exprReadsMatchedValueField(name, n.Step) || stmtsReadMatchedValueField(name, n.Body)
+	case *ast.IterForStmt:
+		return exprReadsMatchedValueField(name, n.Source) || stmtsReadMatchedValueField(name, n.Body)
 	case *ast.ParallelForStmt:
 		return exprReadsMatchedValueField(name, n.Source) || stmtsReadMatchedValueField(name, n.Body)
 	case *ast.MatchStmt:

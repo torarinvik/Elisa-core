@@ -306,6 +306,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.currentSpecializedValueTypes = mergedSpecializedValueTypes
 	case *ast.ForStmt:
 		a.analyzeForStmt(n)
+	case *ast.IterForStmt:
+		a.analyzeIterForStmt(n)
 	case *ast.ParallelForStmt:
 		a.analyzeParallelForStmt(n)
 	case *ast.PassStmt:
@@ -592,6 +594,9 @@ func (a *Analyzer) validateDeferStmtBodyStmt(stmt ast.Stmt) {
 		a.validateDeferStmtBodyExpr(n.End)
 		a.validateDeferStmtBodyExpr(n.Step)
 		a.validateDeferStmtBody(n.Body)
+	case *ast.IterForStmt:
+		a.validateDeferStmtBodyExpr(n.Source)
+		a.validateDeferStmtBody(n.Body)
 	case *ast.ParallelForStmt:
 		a.validateDeferStmtBodyExpr(n.Source)
 		a.validateDeferStmtBody(n.Body)
@@ -862,8 +867,9 @@ func (a *Analyzer) clearPackedVariantViewExpr(expr ast.Expr) {
 }
 
 type moveBindResolvedField struct {
-	Name string
-	Type Type
+	Name    string
+	Type    Type
+	Mutable bool
 }
 
 type moveBindResolvedVariantField struct {
@@ -892,7 +898,7 @@ func (a *Analyzer) resolvedStructFields(actual Type) ([]moveBindResolvedField, b
 			if !ok {
 				continue
 			}
-			fields = append(fields, moveBindResolvedField{Name: field.Name, Type: resolved.Type})
+			fields = append(fields, moveBindResolvedField{Name: field.Name, Type: resolved.Type, Mutable: resolved.Mutable})
 		}
 		return fields, true
 	case *TreeStructType:
@@ -905,7 +911,7 @@ func (a *Analyzer) resolvedStructFields(actual Type) ([]moveBindResolvedField, b
 			if !ok {
 				continue
 			}
-			fields = append(fields, moveBindResolvedField{Name: field.Name, Type: resolved.Type})
+			fields = append(fields, moveBindResolvedField{Name: field.Name, Type: resolved.Type, Mutable: resolved.Mutable})
 		}
 		return fields, true
 	case *GenericInstanceType:
@@ -935,7 +941,7 @@ func (a *Analyzer) resolvedStructFields(actual Type) ([]moveBindResolvedField, b
 		if len(bindings) != 0 {
 			fieldType = a.substituteType(fieldType, bindings, nil, nil, nil)
 		}
-		fields = append(fields, moveBindResolvedField{Name: fieldDecl.Name, Type: fieldType})
+		fields = append(fields, moveBindResolvedField{Name: fieldDecl.Name, Type: fieldType, Mutable: field.Mutable})
 	}
 	return fields, true
 }
@@ -1477,6 +1483,157 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
 }
 
+type iterLoopSourceInfo struct {
+	ItemType        Type
+	AllowRef        bool
+	AllowMutableRef bool
+}
+
+func (a *Analyzer) resolveIterLoopSourceInfo(sourceExpr ast.Expr, sourceType Type) (iterLoopSourceInfo, bool) {
+	if sourceType == nil {
+		return iterLoopSourceInfo{}, false
+	}
+	facts, hasFacts := a.exprFacts[sourceExpr]
+	readOnly := hasFacts && facts.ReadOnly
+	switch tt := sourceType.(type) {
+	case *ArrayType:
+		if isStringArrayType(tt) {
+			return iterLoopSourceInfo{ItemType: a.namedTypes["char"]}, true
+		}
+		return iterLoopSourceInfo{ItemType: tt.Elem, AllowRef: true, AllowMutableRef: true}, true
+	case *DArrayType:
+		return iterLoopSourceInfo{ItemType: tt.Elem, AllowRef: true, AllowMutableRef: !readOnly}, true
+	case *ViewType:
+		return iterLoopSourceInfo{ItemType: tt.Elem, AllowRef: true, AllowMutableRef: !readOnly}, true
+	case *DArrayViewType:
+		if tt.SurfaceName != "" && tt.SurfaceName != "dview" {
+			return iterLoopSourceInfo{}, false
+		}
+		return iterLoopSourceInfo{ItemType: tt.Elem, AllowRef: true, AllowMutableRef: !readOnly}, true
+	case *DStrType:
+		return iterLoopSourceInfo{ItemType: a.namedTypes["char"]}, true
+	case *SViewType:
+		return iterLoopSourceInfo{ItemType: a.namedTypes["char"]}, true
+	case *StructType:
+		if isRuntimeStringViewType(tt) {
+			return iterLoopSourceInfo{ItemType: a.namedTypes["char"]}, true
+		}
+		return iterLoopSourceInfo{}, false
+	case *RefType:
+		if tt.State != RefStateNonNull {
+			a.errorf(sourceExpr.Pos(), "iterable for loop requires a proven non-null reference source, got %s", sourceType.String())
+			return iterLoopSourceInfo{}, false
+		}
+		info, ok := a.resolveIterLoopSourceInfo(sourceExpr, tt.Elem)
+		if !ok {
+			return iterLoopSourceInfo{}, false
+		}
+		if !tt.Mutable {
+			info.AllowMutableRef = false
+		}
+		return info, true
+	default:
+		return iterLoopSourceInfo{}, false
+	}
+}
+
+func iterLoopRefType(itemType Type, mutable bool) Type {
+	return &RefType{Elem: itemType, Mutable: mutable, State: RefStateNonNull, Storage: RefStorageAny}
+}
+
+func (a *Analyzer) bindIterLoopPattern(scope *Scope, pattern ast.MoveBindPattern, mode ast.IterBindMode, itemType Type) bool {
+	if scope == nil || pattern == nil {
+		return false
+	}
+	savedScope := a.currentScope
+	a.currentScope = scope
+	defer func() {
+		a.currentScope = savedScope
+	}()
+	bindingTypeFor := func(pos lexer.Pos, fieldName string, fieldType Type, fieldMutable bool) Type {
+		if mode == ast.IterBindValue {
+			return fieldType
+		}
+		if mode == ast.IterBindMutableRef && !fieldMutable {
+			a.errorf(pos, "for mutable ref destructuring requires mutable field %q", fieldName)
+			return invalidType
+		}
+		return iterLoopRefType(fieldType, mode == ast.IterBindMutableRef)
+	}
+	switch p := pattern.(type) {
+	case *ast.MoveBindNamePattern:
+		if p.Name == "_" {
+			return true
+		}
+		sym := &Symbol{Name: p.Name, Kind: SymbolLocal, Type: bindingTypeFor(p.Pos(), p.Name, itemType, true), Node: p, Mutable: false}
+		a.defineLocal(sym, p.Pos())
+		return true
+	case *ast.MoveBindStructPattern:
+		fields, ok := a.resolveMoveBindStructPattern(p, itemType)
+		if !ok {
+			return false
+		}
+		for i, arg := range p.Args {
+			if i >= len(fields) || arg.Name == "_" {
+				continue
+			}
+			sym := &Symbol{Name: arg.Name, Kind: SymbolLocal, Type: bindingTypeFor(arg.Position, fields[i].Name, fields[i].Type, fields[i].Mutable), Node: p, Mutable: false}
+			a.defineLocal(sym, arg.Position)
+		}
+		return true
+	case *ast.MoveBindVariantPattern:
+		a.errorf(p.Pos(), "iterable for loop pattern must be irrefutable; variant patterns are not supported here")
+		return false
+	default:
+		a.errorf(pattern.Pos(), "unsupported iterable for pattern %T", pattern)
+		return false
+	}
+}
+
+func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
+	sourceType := a.analyzeExpr(stmt.Source)
+	info, ok := a.resolveIterLoopSourceInfo(stmt.Source, sourceType)
+	if !ok {
+		a.errorf(stmt.Source.Pos(), "iterable for loop currently requires an array, dynamic array, view, or string-like iterable, got %s", sourceType.String())
+		info.ItemType = invalidType
+	}
+	if stmt.Mode == ast.IterBindValue && a.containsAffineHandleValues(info.ItemType, map[string]bool{}) {
+		a.errorf(stmt.Pos(), "for value iteration does not support affine element type %s; use ref or mutable ref", info.ItemType.String())
+	}
+	if stmt.Mode != ast.IterBindValue && a.containsAffineHandleValues(info.ItemType, map[string]bool{}) && !isBorrowableAffineOwnerType(info.ItemType) {
+		a.errorf(stmt.Pos(), "references to values containing affine handles are not supported; got %s&", info.ItemType.String())
+	}
+	switch stmt.Mode {
+	case ast.IterBindRef:
+		if !info.AllowRef {
+			a.errorf(stmt.Pos(), "for ref requires an addressable array-like iterable, got %s", sourceType.String())
+		}
+	case ast.IterBindMutableRef:
+		if !info.AllowMutableRef {
+			a.errorf(stmt.Pos(), "for mutable ref requires a writable addressable array-like iterable, got %s", sourceType.String())
+		}
+	}
+
+	loopScope := NewScope(a.currentScope)
+	a.bindIterLoopPattern(loopScope, stmt.Pattern, stmt.Mode, info.ItemType)
+
+	mergedAffine := a.cloneAffineValueStates()
+	mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
+	mergedFunctionValues := a.cloneFunctionValueBindings()
+	mergedSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
+	bodySnapshot := a.analyzeBlockWithAffineClone(stmt.Body, loopScope)
+	if !blockDefinitelyExits(stmt.Body) {
+		mergedAffine = mergeAffineValueStates(mergedAffine, bodySnapshot.Affine)
+		mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, bodySnapshot.BorrowedOwnerRefs)
+		mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, bodySnapshot.FunctionValues)
+		mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, bodySnapshot.SpecializedValueTypes)
+	}
+	a.currentAffineValues = mergedAffine
+	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
+	a.currentFunctionValues = mergedFunctionValues
+	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+}
+
 func (a *Analyzer) analyzeParallelForStmt(stmt *ast.ParallelForStmt) {
 	sourceType := a.analyzeExpr(stmt.Source)
 	itemType, ok := parallelForItemType(sourceType)
@@ -1979,6 +2136,15 @@ func (c *deferCaptureCollector) collectStmt(stmt ast.Stmt, locals map[string]boo
 		c.collectExpr(n.Step, locals)
 		bodyLocals := cloneParallelForLocals(locals)
 		bodyLocals[n.Name] = true
+		for _, innerStmt := range n.Body {
+			c.collectStmt(innerStmt, bodyLocals)
+		}
+	case *ast.IterForStmt:
+		c.collectExpr(n.Source, locals)
+		bodyLocals := cloneParallelForLocals(locals)
+		for _, name := range parallelForMoveBindNames(n.Pattern) {
+			bodyLocals[name] = true
+		}
 		for _, innerStmt := range n.Body {
 			c.collectStmt(innerStmt, bodyLocals)
 		}
@@ -3332,6 +3498,15 @@ func stmtReferencesVariantFields(stmt ast.Stmt, name string) bool {
 		}
 	case *ast.ForStmt:
 		if exprReferencesVariantFields(n.Start, name) || exprReferencesVariantFields(n.End, name) || exprReferencesVariantFields(n.Step, name) {
+			return true
+		}
+		for _, inner := range n.Body {
+			if stmtReferencesVariantFields(inner, name) {
+				return true
+			}
+		}
+	case *ast.IterForStmt:
+		if exprReferencesVariantFields(n.Source, name) {
 			return true
 		}
 		for _, inner := range n.Body {

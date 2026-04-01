@@ -147,6 +147,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.IfStmt{})
 		gob.Register(&ast.WhileStmt{})
 		gob.Register(&ast.ForStmt{})
+		gob.Register(&ast.IterForStmt{})
 		gob.Register(&ast.ParallelForStmt{})
 		gob.Register(&ast.MatchStmt{})
 		gob.Register(&ast.InStoreStmt{})

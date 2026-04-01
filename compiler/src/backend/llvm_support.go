@@ -26,6 +26,13 @@ func (s *functionState) emitAddress(expr ast.Expr) (C.LLVMValueRef, semantic.Typ
 	switch n := expr.(type) {
 	case *ast.Ident:
 		if binding, ok := s.lookupBinding(n.Name); ok {
+			if refType, ok := binding.typ.(*semantic.RefType); ok && !binding.mutable {
+				refValue, err := s.loadValue(binding.ptr, binding.typ, n.Name+".ref")
+				if err != nil {
+					return nil, nil, err
+				}
+				return refValue, refType.Elem, nil
+			}
 			return binding.ptr, binding.typ, nil
 		}
 		if sym, ok := s.g.result.GlobalScope.Lookup(n.Name); ok {

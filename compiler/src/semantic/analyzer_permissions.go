@@ -523,6 +523,9 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 			c.collectExpr(n.Step)
 		}
 		c.collectStmts(n.Body)
+	case *ast.IterForStmt:
+		c.collectExpr(n.Source)
+		c.collectStmts(n.Body)
 	case *ast.ParallelForStmt:
 		c.collectExpr(n.Source)
 		c.addRefs([]ast.PermissionRef{
@@ -741,6 +744,9 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		if n.Step != nil {
 			a.validatePermissionExpr(n.Step, granted)
 		}
+		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
+	case *ast.IterForStmt:
+		a.validatePermissionExpr(n.Source, granted)
 		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.ParallelForStmt:
 		a.validatePermissionExpr(n.Source, granted)

@@ -176,6 +176,8 @@ func appendBasicFlowInstrsForNode(block *CFGBlock, node ast.Node) {
 		appendBasicFlowExprInstrs(block, n.Start)
 		appendBasicFlowExprInstrs(block, n.End)
 		appendBasicFlowExprInstrs(block, n.Step)
+	case *ast.IterForStmt:
+		appendBasicFlowExprInstrs(block, n.Source)
 	case *ast.ParallelForStmt:
 		appendBasicFlowExprInstrs(block, n.Source)
 	case *ast.IfStmt:
@@ -585,6 +587,8 @@ func (a *Analyzer) appendImplicitSinkFlowInstrsForNode(block *CFGBlock, node ast
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Start)
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.End)
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Step)
+	case *ast.IterForStmt:
+		a.appendImplicitSinkFlowInstrsForExpr(block, n.Source)
 	case *ast.ParallelForStmt:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Source)
 	case *ast.IfStmt:

@@ -195,18 +195,15 @@ func (p *Parser) looksLikeParallelForStmt() bool {
 }
 
 func (p *Parser) looksLikeForStmt() bool {
-	if p.pos+4 >= len(p.tokens) {
+	if p.pos+2 >= len(p.tokens) {
 		return false
 	}
-	if p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT {
-		return false
-	}
-	if p.tokens[p.pos+2].Kind != lexer.TOKEN_IN {
+	if p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT && p.tokens[p.pos+1].Kind != lexer.TOKEN_MUTABLE {
 		return false
 	}
 	depth := 0
-	seenRange := false
-	for i := p.pos + 3; i < len(p.tokens); i++ {
+	seenIn := false
+	for i := p.pos + 1; i < len(p.tokens); i++ {
 		tok := p.tokens[i]
 		switch tok.Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
@@ -215,17 +212,33 @@ func (p *Parser) looksLikeForStmt() bool {
 			if depth > 0 {
 				depth--
 			}
-		case lexer.TOKEN_RANGE, lexer.TOKEN_RANGE_LT, lexer.TOKEN_RANGE_GT:
+		case lexer.TOKEN_IN:
 			if depth == 0 {
-				seenRange = true
+				seenIn = true
 			}
 		case lexer.TOKEN_COLON:
-			return depth == 0 && seenRange
+			return depth == 0 && seenIn
 		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
 			return false
 		}
 	}
 	return false
+}
+
+func (p *Parser) parseIterBindMode() ast.IterBindMode {
+	if p.match(lexer.TOKEN_MUTABLE) {
+		if !p.peekIdentText("ref") {
+			p.errorf("for mutable binder expects `mutable ref`")
+			return ast.IterBindMutableRef
+		}
+		p.advance()
+		return ast.IterBindMutableRef
+	}
+	if p.peekIdentText("ref") && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind != lexer.TOKEN_IN {
+		p.advance()
+		return ast.IterBindRef
+	}
+	return ast.IterBindValue
 }
 
 func (p *Parser) looksLikeLockStmt() bool {
@@ -332,25 +345,37 @@ func (p *Parser) parseParallelForStmt() *ast.ParallelForStmt {
 	return &ast.ParallelForStmt{Position: pos, Name: name, IndexName: indexName, Source: source, Body: body}
 }
 
-func (p *Parser) parseForStmt() *ast.ForStmt {
+func (p *Parser) parseForStmt() ast.Stmt {
 	pos := p.cur().Pos
 	p.expectIdentText("for")
-	name := p.expect(lexer.TOKEN_IDENT).Text
+	mode := p.parseIterBindMode()
+	pattern := p.parseMoveBindPattern()
 	p.expect(lexer.TOKEN_IN)
-	start := p.parseExpr()
-	op := p.advance()
-	if op.Kind != lexer.TOKEN_RANGE && op.Kind != lexer.TOKEN_RANGE_LT && op.Kind != lexer.TOKEN_RANGE_GT {
-		p.errorf("for loop requires a range operator (`..`, `..<`, or `..>`) after the start expression")
-	}
-	end := p.parseExpr()
-	var step ast.Expr
-	if p.match(lexer.TOKEN_RANGE) {
-		step = p.parseExpr()
+	startOrSource := p.parseExpr()
+	if p.peek() == lexer.TOKEN_RANGE || p.peek() == lexer.TOKEN_RANGE_LT || p.peek() == lexer.TOKEN_RANGE_GT {
+		namePattern, ok := pattern.(*ast.MoveBindNamePattern)
+		if !ok {
+			p.errorf("range for loop requires a simple loop name")
+			namePattern = &ast.MoveBindNamePattern{Position: pos, Name: "_"}
+		}
+		if mode != ast.IterBindValue {
+			p.errorf("range for loop does not support ref binders")
+		}
+		op := p.advance()
+		end := p.parseExpr()
+		var step ast.Expr
+		if p.match(lexer.TOKEN_RANGE) {
+			step = p.parseExpr()
+		}
+		p.expect(lexer.TOKEN_COLON)
+		p.expectNewline()
+		body := p.parseBlock()
+		return &ast.ForStmt{Position: pos, Name: namePattern.Name, Start: startOrSource, End: end, Step: step, Op: op.Kind, Body: body}
 	}
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	body := p.parseBlock()
-	return &ast.ForStmt{Position: pos, Name: name, Start: start, End: end, Step: step, Op: op.Kind, Body: body}
+	return &ast.IterForStmt{Position: pos, Pattern: pattern, Mode: mode, Source: startOrSource, Body: body}
 }
 
 func (p *Parser) parseWaitAllStmt() ast.Stmt {

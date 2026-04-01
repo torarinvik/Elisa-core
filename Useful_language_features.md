@@ -20,6 +20,7 @@ This document is now a landing page for the split design notes in `docs/useful_l
 14. [`14-typestate-system.md`](docs/useful_language_features/14-typestate-system.md) — the full typestate guide covering named states, aggregate state placeholders, refinement, mutation, aliasing, and current soundness rules.
 15. [`15-typestate-practical-cheat-sheet.md`](docs/useful_language_features/15-typestate-practical-cheat-sheet.md) — short practical companion with motivating examples, widening expectations, and guidance on when to re-prove with `is`.
 16. [`16-ref-parameter-poststate-ensures.md`](docs/useful_language_features/16-ref-parameter-poststate-ensures.md) — concrete proposal for unified `ensures`-based call poststate summaries covering both named typestates and pointer/refstates such as `ensures node => !`.
+17. [`17-iterators-and-for-in-mini-spec.md`](docs/useful_language_features/17-iterators-and-for-in-mini-spec.md) — proposal for builtin iterable categories, `for in` over values/refs/mutable refs, loop destructuring, explicit tree child iteration, and a parallel-friendly iteration model.
 
 ## Notes
 
@@ -27,6 +28,7 @@ This document is now a landing page for the split design notes in `docs/useful_l
 - Section ordering follows the original progression from syntax ideas to typing rules to implementation planning.
 - The newer typestate notes in sections 14 and 15 are a good current entry point if you care about proof-carrying state, mutation, and protocol-style APIs.
 - If you want the likely next typestate feature rather than the current model, section 16 is the design note to read next.
+- If you care about ergonomic traversal, tree-friendly iteration, and future parallel-loop foundations, section 17 is the new iterator design note to read next.
 
 ## Current reference mutability rule
 

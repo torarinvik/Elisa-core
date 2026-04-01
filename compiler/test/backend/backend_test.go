@@ -6075,6 +6075,102 @@ func TestGenerateLLVMIRLowersForLoopRanges(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRLowersIterableForLoopDestructuring(t *testing.T) {
+	src := `struct Pair:
+	left: int
+	right: int
+
+def sum_pairs(items: array[Pair, 2]) -> int:
+	total: mutable int = 0
+	for Pair(left, right) in items:
+		total <- total + left + right
+	return total
+`
+	result := parseAndAnalyze(t, "backend_iterable_for_destructure.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+	ir := functionIR(output, "sum_pairs")
+	if ir == "" {
+		t.Fatalf("expected to find LLVM IR for sum_pairs, got:\n%s", output)
+	}
+	for _, check := range []string{
+		"iter.cond",
+		"iter.body",
+		"iter.end",
+		"extractvalue %Pair",
+		"add i64",
+	} {
+		if !strings.Contains(ir, check) {
+			t.Fatalf("expected sum_pairs IR to contain %q, got:\n%s", check, ir)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersIterableForLoopMutableRef(t *testing.T) {
+	src := `struct Counter:
+	value: mutable int
+
+def bump() -> int:
+	items: mutable array[Counter, 2] = [Counter(1), Counter(2)]
+	for mutable ref item in items:
+		item.value <- item.value + 1
+	return items[0].value + items[1].value
+`
+	result := parseAndAnalyze(t, "backend_iterable_for_mutable_ref.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+	ir := functionIR(output, "bump")
+	if ir == "" {
+		t.Fatalf("expected to find LLVM IR for bump, got:\n%s", output)
+	}
+	for _, check := range []string{
+		"iter.cond",
+		"iter.body",
+		"iter.end",
+		"iter.next",
+		"getelementptr inbounds nuw %Counter",
+		"store i64",
+		"add i64",
+	} {
+		if !strings.Contains(ir, check) {
+			t.Fatalf("expected bump IR to contain %q, got:\n%s", check, ir)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersIterableForLoopOverDynamicString(t *testing.T) {
+	src := `def checksum(text: dstr[row]) -> int:
+	total: mutable int = 0
+	for ch in text:
+		total <- total + ch
+	return total
+`
+	result := parseAndAnalyze(t, "backend_iterable_for_dstr.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+	ir := functionIR(output, "checksum")
+	if ir == "" {
+		t.Fatalf("expected to find LLVM IR for checksum, got:\n%s", output)
+	}
+	for _, check := range []string{
+		"iter.cond",
+		"iter.body",
+		"iter.end",
+		"declare i64 @ctx_string_index",
+		"add i64",
+	} {
+		if !strings.Contains(output, check) && !strings.Contains(ir, check) {
+			t.Fatalf("expected iterable string lowering to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersProofCarryingViewHelpers(t *testing.T) {
 	src := `def run(values: darray[i32, 4]) -> void:
 	base: dview[i32] = values[0u:4u]

@@ -6380,6 +6380,52 @@ func TestAnalyzeAcceptsForLoopRangeForms(t *testing.T) {
 	requireFunctionReturnTypeString(t, result, "walk", "int")
 }
 
+func TestAnalyzeAcceptsIterableForLoopValueDestructuring(t *testing.T) {
+	src := `struct Pair:
+	left: int
+	right: int
+
+def walk(items: array[Pair, 2]) -> int:
+	total: mutable int = 0
+	for Pair(left, right) in items:
+		total <- total + left + right
+	return total
+`
+	result, errs := parseAndAnalyze(t, "iterable_for_value_destructure_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "walk", "int")
+}
+
+func TestAnalyzeAcceptsIterableForLoopMutableRef(t *testing.T) {
+	src := `struct Counter:
+	value: mutable int
+
+def bump() -> int:
+	items: mutable array[Counter, 2] = [Counter(1), Counter(2)]
+	for mutable ref item in items:
+		item.value <- item.value + 1
+	return items[0].value + items[1].value
+`
+	result, errs := parseAndAnalyze(t, "iterable_for_mutable_ref_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "bump", "int")
+}
+
+func TestAnalyzeAcceptsIterableForLoopOverDynamicString(t *testing.T) {
+	src := `def checksum(text: dstr[row]) -> int:
+	total: mutable int = 0
+	for ch in text:
+		total <- total + ch
+	return total
+`
+	result, errs := parseAndAnalyze(t, "iterable_for_dstr_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "checksum", "int")
+}
+
 func TestAnalyzeRejectsForLoopZeroStep(t *testing.T) {
 	src := `def bad() -> void:
 	for i in 0..10..0:

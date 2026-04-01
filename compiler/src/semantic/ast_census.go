@@ -102,6 +102,10 @@ func (c *analyzerASTCensus) countStmt(stmt ast.Stmt) {
 		c.countExpr(n.End)
 		c.countExpr(n.Step)
 		c.countStmts(n.Body)
+	case *ast.IterForStmt:
+		c.countExpr(n.Source)
+		c.countMoveBindPattern(n.Pattern)
+		c.countStmts(n.Body)
 	case *ast.ParallelForStmt:
 		c.parallelFors++
 		c.countExpr(n.Source)

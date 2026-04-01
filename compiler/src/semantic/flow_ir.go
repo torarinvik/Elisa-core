@@ -89,6 +89,8 @@ func (b *cfgBuilder) buildStmtList(exits []int, stmts []ast.Stmt) []int {
 			current = b.buildMatch(current, n)
 		case *ast.ForStmt:
 			current = b.buildLoopBody(current, n.Body)
+		case *ast.IterForStmt:
+			current = b.buildLoopBody(current, n.Body)
 		case *ast.ParallelForStmt:
 			current = b.buildLoopBody(current, n.Body)
 		case *ast.PoolStmt:
