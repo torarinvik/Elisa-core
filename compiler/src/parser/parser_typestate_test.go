@@ -354,6 +354,38 @@ func TestParseEnumVariantIsCondition(t *testing.T) {
 	}
 }
 
+func TestParseEnumVariantIsConditionWithPayloadPattern(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Float(PI: f64)\n\ndef is_pi(node: Expr) -> bool:\n    return node is Expr.Float(3.14)\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[1])
+	}
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	cond, ok := ret.Value.(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected binary condition, got %T", ret.Value)
+	}
+	variantTarget, ok := cond.Right.(*ast.VariantTestExpr)
+	if !ok {
+		t.Fatalf("expected variant is target, got %T", cond.Right)
+	}
+	if variantTarget.Pattern == nil || variantTarget.Pattern.EnumName != "Expr" || variantTarget.Pattern.Variant != "Float" {
+		t.Fatalf("expected Expr.Float payload test, got %#v", variantTarget.Pattern)
+	}
+	if len(variantTarget.Pattern.Args) != 1 {
+		t.Fatalf("expected one payload pattern, got %#v", variantTarget.Pattern.Args)
+	}
+	if _, ok := variantTarget.Pattern.Args[0].Pattern.(*ast.MatchLiteralPattern); !ok {
+		t.Fatalf("expected positional literal payload pattern, got %T", variantTarget.Pattern.Args[0].Pattern)
+	}
+}
+
 func TestParseStructDeclWithNamedStateCasesAndDeriveBlock(t *testing.T) {
 	file, errs := parseSourceFile(t, "struct Player[state Alive | Dead]:\n    health: int\n\n    derive state:\n        Alive when self.health > 0\n        Dead when self.health <= 0\n")
 	if len(errs) != 0 {

@@ -1298,10 +1298,10 @@ func (a *Analyzer) validateMoveBindStore(pos lexer.Pos, valueExpr ast.Expr, actu
 		return
 	}
 	if storeExpr == nil {
-		if _, ok := a.lookupPackedStore(enumType); ok {
+		if a.canInferPackedStoreFromValue(valueExpr, actual, enumType) {
 			return
 		}
-		if a.canInferPackedStoreFromValue(valueExpr, actual, enumType) {
+		if _, ok := a.lookupPackedStore(enumType); ok {
 			return
 		}
 		a.errorf(pos, "packed enum move-as over %q requires an in %s clause", enumType.Name, packedEnumStoreTypeName(enumType.Name))
@@ -2758,10 +2758,10 @@ func (a *Analyzer) validateMatchStore(pos lexer.Pos, valueExpr ast.Expr, actual 
 		return
 	}
 	if storeExpr == nil {
-		if _, ok := a.lookupPackedStore(enumType); ok {
+		if a.canInferPackedStoreFromValue(valueExpr, actual, enumType) {
 			return
 		}
-		if a.canInferPackedStoreFromValue(valueExpr, actual, enumType) {
+		if _, ok := a.lookupPackedStore(enumType); ok {
 			return
 		}
 		a.errorf(pos, "packed enum match over %q requires an in %s clause", enumType.Name, packedEnumStoreTypeName(enumType.Name))
@@ -2797,6 +2797,11 @@ func (a *Analyzer) stringMatchPatternShadowedByPrevious(pattern ast.MatchPattern
 			if ok && curr.Value == p.Value {
 				return true
 			}
+		case *ast.MatchLiteralPattern:
+			curr, ok := pattern.(*ast.MatchLiteralPattern)
+			if ok && a.matchLiteralPatternEquals(p.Value, curr.Value) {
+				return true
+			}
 		}
 	}
 	return false
@@ -2808,6 +2813,24 @@ func (a *Analyzer) matchPatternCovers(prev ast.MatchPattern, current ast.MatchPa
 		return true
 	case *ast.MatchBindPattern:
 		return true
+	case *ast.MatchStringLiteralPattern:
+		switch curr := current.(type) {
+		case *ast.MatchStringLiteralPattern:
+			return curr.Value == p.Value
+		case *ast.MatchLiteralPattern:
+			return a.matchLiteralPatternEquals(&ast.StringLit{Position: p.Position, Value: p.Value}, curr.Value)
+		default:
+			return false
+		}
+	case *ast.MatchLiteralPattern:
+		switch curr := current.(type) {
+		case *ast.MatchLiteralPattern:
+			return a.matchLiteralPatternEquals(p.Value, curr.Value)
+		case *ast.MatchStringLiteralPattern:
+			return a.matchLiteralPatternEquals(p.Value, &ast.StringLit{Position: curr.Position, Value: curr.Value})
+		default:
+			return false
+		}
 	case *ast.MatchVariantPattern:
 		currVariant, ok := current.(*ast.MatchVariantPattern)
 		if !ok {
@@ -2841,6 +2864,21 @@ func (a *Analyzer) matchPatternCovers(prev ast.MatchPattern, current ast.MatchPa
 	default:
 		return false
 	}
+}
+
+func (a *Analyzer) matchLiteralPatternEquals(left ast.Expr, right ast.Expr) bool {
+	if a == nil || left == nil || right == nil {
+		return false
+	}
+	leftValue, leftOK := a.evalConstExpr(left)
+	rightValue, rightOK := a.evalConstExpr(right)
+	if leftOK && rightOK {
+		equal, ok := a.evalConstEquality(leftValue, rightValue, true)
+		return ok && equal.Kind == ConstBool && equal.Bool
+	}
+	_, leftNull := left.(*ast.NullLit)
+	_, rightNull := right.(*ast.NullLit)
+	return leftNull && rightNull
 }
 
 func orderedMatchPatternArgs(pattern *ast.MatchVariantPattern, variant *EnumVariant) ([]*ast.MatchPatternArg, bool) {
@@ -2894,6 +2932,8 @@ func matchPatternSummary(pattern ast.MatchPattern) string {
 		return p.Name
 	case *ast.MatchStringLiteralPattern:
 		return p.Value
+	case *ast.MatchLiteralPattern:
+		return matchLiteralPatternSummary(p.Value)
 	case *ast.MatchVariantPattern:
 		if len(p.Args) == 0 {
 			return p.EnumName + "." + p.Variant
@@ -2909,6 +2949,41 @@ func matchPatternSummary(pattern ast.MatchPattern) string {
 		return p.EnumName + "." + p.Variant + "(" + strings.Join(parts, ", ") + ")"
 	default:
 		return "<pattern>"
+	}
+}
+
+func matchLiteralPatternSummary(expr ast.Expr) string {
+	if expr == nil {
+		return "<literal>"
+	}
+	switch n := expr.(type) {
+	case *ast.IntLit:
+		if n.Suffix != "" {
+			return n.Value + n.Suffix
+		}
+		return n.Value
+	case *ast.FloatLit:
+		if n.Suffix != "" {
+			return n.Value + n.Suffix
+		}
+		return n.Value
+	case *ast.StringLit:
+		return strconv.Quote(n.Value)
+	case *ast.CharLit:
+		return n.Value
+	case *ast.BoolLit:
+		if n.Value {
+			return "true"
+		}
+		return "false"
+	case *ast.NullLit:
+		return "null"
+	case *ast.UnaryExpr:
+		return lexer.TokenName(n.Op) + matchLiteralPatternSummary(n.Operand)
+	case *ast.ParenExpr:
+		return "(" + matchLiteralPatternSummary(n.Inner) + ")"
+	default:
+		return "<literal>"
 	}
 }
 
@@ -3348,10 +3423,35 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 			a.analyzeNestedMatchPattern(arg.Pattern, variant.Payload[i], payloadExpr, scope)
 		}
 	case *ast.MatchStringLiteralPattern:
-		a.errorf(p.Pos(), "nested string literal match patterns are not supported")
+		a.analyzeLiteralMatchPatternExpr(p.Pos(), &ast.StringLit{Position: p.Position, Value: p.Value}, expected, "nested literal match pattern")
+	case *ast.MatchLiteralPattern:
+		a.analyzeLiteralMatchPatternExpr(p.Pos(), p.Value, expected, "nested literal match pattern")
 	default:
 		a.errorf(pattern.Pos(), "unsupported nested match pattern %T", pattern)
 	}
+}
+
+func (a *Analyzer) analyzeLiteralMatchPatternExpr(pos lexer.Pos, literalExpr ast.Expr, expected Type, context string) {
+	if literalExpr == nil || expected == nil {
+		return
+	}
+	actual := a.analyzeExpr(literalExpr)
+	if runtimeStringComparable(expected, actual) {
+		return
+	}
+	if IsNumericType(expected) && IsNumericType(actual) {
+		return
+	}
+	if IsBoolType(expected) && IsBoolType(actual) {
+		return
+	}
+	if (IsNullType(actual) && isRefLike(expected)) || (IsNullType(expected) && isRefLike(actual)) {
+		return
+	}
+	if AssignableTo(expected, actual) || AssignableTo(actual, expected) || refsComparableIgnoringMutability(expected, actual) {
+		return
+	}
+	a.errorf(pos, "%s cannot compare %s against %s", context, actual.String(), expected.String())
 }
 
 func (a *Analyzer) resolveMatchPatternArgs(pattern *ast.MatchVariantPattern, variant *EnumVariant, qualified string, nested bool) []*ast.MatchPatternArg {

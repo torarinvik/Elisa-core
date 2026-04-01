@@ -981,8 +981,8 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 }
 
 func (s *functionState) emitIsExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, semantic.Type, error) {
-	if enumType, variant, ok := s.enumIsTarget(expr.Right); ok {
-		return s.emitEnumIsTest(expr.Left, enumType, variant)
+	if enumType, variant, pattern, ok := s.enumIsTargetPattern(expr.Right); ok {
+		return s.emitEnumIsTest(expr.Left, enumType, variant, pattern)
 	}
 	if base, cases, ok := s.namedStateIsTarget(expr.Right); ok {
 		return s.emitNamedStateIsTest(expr.Left, base, cases)
@@ -990,7 +990,7 @@ func (s *functionState) emitIsExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, semant
 	return nil, nil, fmt.Errorf("unsupported is target %T", expr.Right)
 }
 
-func (s *functionState) emitEnumIsTest(leftExpr ast.Expr, enumType *semantic.EnumType, variant *semantic.EnumVariant) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitEnumIsTest(leftExpr ast.Expr, enumType *semantic.EnumType, variant *semantic.EnumVariant, pattern *ast.MatchVariantPattern) (C.LLVMValueRef, semantic.Type, error) {
 	storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, leftExpr, nil)
 	if err != nil {
 		return nil, nil, err
@@ -998,6 +998,31 @@ func (s *functionState) emitEnumIsTest(leftExpr ast.Expr, enumType *semantic.Enu
 	enumValue, _, err := s.emitExpr(leftExpr, enumType)
 	if err != nil {
 		return nil, nil, err
+	}
+	if pattern != nil && len(pattern.Args) != 0 {
+		successBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("is.variant.ok"))
+		failureBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("is.variant.fail"))
+		contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("is.variant.cont"))
+		if _, _, err := s.emitMatchPatternTest(pattern, enumValue, nil, enumType, storeBinding, leftExpr, nil, successBB, failureBB); err != nil {
+			return nil, nil, err
+		}
+
+		C.LLVMPositionBuilderAtEnd(s.builder, successBB)
+		successValue := C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 1, 0)
+		C.LLVMBuildBr(s.builder, contBB)
+		successEnd := C.LLVMGetInsertBlock(s.builder)
+
+		C.LLVMPositionBuilderAtEnd(s.builder, failureBB)
+		failureValue := C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 0, 0)
+		C.LLVMBuildBr(s.builder, contBB)
+		failureEnd := C.LLVMGetInsertBlock(s.builder)
+
+		C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+		phi := C.LLVMBuildPhi(s.builder, C.LLVMInt1TypeInContext(s.g.context), cStringFree("is.variant.result"))
+		values := []C.LLVMValueRef{successValue, failureValue}
+		blocks := []C.LLVMBasicBlockRef{successEnd, failureEnd}
+		C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+		return phi, s.g.result.NamedTypes["bool"], nil
 	}
 	tagValue, err := s.extractEnumTagValue(enumValue, nil, enumType, storeBinding)
 	if err != nil {
@@ -1009,6 +1034,33 @@ func (s *functionState) emitEnumIsTest(leftExpr ast.Expr, enumType *semantic.Enu
 	}
 	cmp := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), tagValue, tagConst, cStringFree("istag"))
 	return cmp, s.g.result.NamedTypes["bool"], nil
+}
+
+func (s *functionState) enumIsTargetPattern(expr ast.Expr) (*semantic.EnumType, *semantic.EnumVariant, *ast.MatchVariantPattern, bool) {
+	if testExpr, ok := expr.(*ast.VariantTestExpr); ok {
+		if testExpr == nil || testExpr.Pattern == nil {
+			return nil, nil, nil, false
+		}
+		base, ok := s.g.result.NamedTypes[testExpr.Pattern.EnumName]
+		if !ok {
+			return nil, nil, nil, false
+		}
+		enumType, ok := base.(*semantic.EnumType)
+		if !ok || enumType == nil {
+			return nil, nil, nil, false
+		}
+		variant, ok := enumType.Variant(testExpr.Pattern.Variant)
+		if !ok || variant == nil {
+			return nil, nil, nil, false
+		}
+		return enumType, variant, testExpr.Pattern, true
+	}
+	enumType, variant, ok := s.enumIsTarget(expr)
+	if !ok || enumType == nil || variant == nil {
+		return nil, nil, nil, false
+	}
+	pattern := &ast.MatchVariantPattern{Position: expr.Pos(), EnumName: enumType.Name, Variant: variant.Name}
+	return enumType, variant, pattern, true
 }
 
 func (s *functionState) emitNamedStateIsTest(leftExpr ast.Expr, base *semantic.StructType, cases []string) (C.LLVMValueRef, semantic.Type, error) {

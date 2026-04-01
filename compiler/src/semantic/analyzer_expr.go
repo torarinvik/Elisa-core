@@ -1800,6 +1800,9 @@ func (a *Analyzer) analyzeIsExpr(expr *ast.BinaryExpr) Type {
 			}
 			a.errorf(expr.Pos(), "is expects a variant of enum %q, got %s", expected, got)
 		}
+		if pattern, ok := a.enumVariantIsTargetPattern(expr.Right, enumType, variant); ok && pattern != nil {
+			a.validateEnumVariantIsTargetPattern(pattern, variant)
+		}
 		return a.namedTypes["bool"]
 	}
 	if targetBase, _, ok := a.resolveNamedStateIsTarget(expr.Right); ok {
@@ -1822,7 +1825,85 @@ func (a *Analyzer) analyzeIsExpr(expr *ast.BinaryExpr) Type {
 	return a.namedTypes["bool"]
 }
 
+func (a *Analyzer) enumVariantIsTargetPattern(expr ast.Expr, enumType *EnumType, variant *EnumVariant) (*ast.MatchVariantPattern, bool) {
+	if testExpr, ok := expr.(*ast.VariantTestExpr); ok && testExpr != nil && testExpr.Pattern != nil {
+		return testExpr.Pattern, true
+	}
+	if enumType == nil || variant == nil {
+		return nil, false
+	}
+	return &ast.MatchVariantPattern{Position: expr.Pos(), EnumName: enumType.Name, Variant: variant.Name}, true
+}
+
+func (a *Analyzer) validateEnumVariantIsTargetPattern(pattern *ast.MatchVariantPattern, variant *EnumVariant) {
+	if pattern == nil || variant == nil {
+		return
+	}
+	orderedArgs := a.resolveMatchPatternArgs(pattern, variant, pattern.EnumName+"."+pattern.Variant, false)
+	for i, arg := range orderedArgs {
+		if arg == nil {
+			continue
+		}
+		a.analyzeEnumIsPayloadPattern(arg.Pattern, variant.Payload[i])
+	}
+}
+
+func (a *Analyzer) analyzeEnumIsPayloadPattern(pattern ast.MatchPattern, expected Type) {
+	switch p := pattern.(type) {
+	case *ast.MatchWildcardPattern:
+		return
+	case *ast.MatchBindPattern:
+		a.errorf(p.Pos(), "variant is tests do not support bind names; use match or if/open/view as to bind payloads")
+	case *ast.MatchStringLiteralPattern:
+		a.analyzeLiteralMatchPatternExpr(p.Pos(), &ast.StringLit{Position: p.Position, Value: p.Value}, expected, "variant is payload pattern")
+	case *ast.MatchLiteralPattern:
+		a.analyzeLiteralMatchPatternExpr(p.Pos(), p.Value, expected, "variant is payload pattern")
+	case *ast.MatchVariantPattern:
+		enumType, ok := expected.(*EnumType)
+		if !ok {
+			a.errorf(p.Pos(), "nested variant is pattern %q requires an enum payload, got %s", p.EnumName+"."+p.Variant, expected.String())
+			return
+		}
+		if p.EnumName != enumType.Name {
+			a.errorf(p.Pos(), "nested variant is pattern expects enum %q, got %q", enumType.Name, p.EnumName)
+			return
+		}
+		variant, ok := enumType.Variant(p.Variant)
+		if !ok {
+			a.errorf(p.Pos(), "enum %q has no variant %q", enumType.Name, p.Variant)
+			return
+		}
+		orderedArgs := a.resolveMatchPatternArgs(p, variant, enumType.Name+"."+variant.Name, true)
+		for i, arg := range orderedArgs {
+			if arg == nil {
+				continue
+			}
+			a.analyzeEnumIsPayloadPattern(arg.Pattern, variant.Payload[i])
+		}
+	default:
+		a.errorf(pattern.Pos(), "unsupported variant is payload pattern %T", pattern)
+	}
+}
+
 func (a *Analyzer) resolveEnumVariantIsTarget(expr ast.Expr) (*EnumType, *EnumVariant, bool) {
+	if testExpr, ok := expr.(*ast.VariantTestExpr); ok {
+		if testExpr == nil || testExpr.Pattern == nil {
+			return nil, nil, false
+		}
+		base, _, ok := a.lookupVisibleType(testExpr.Pattern.EnumName)
+		if !ok {
+			return nil, nil, false
+		}
+		enumType, ok := base.(*EnumType)
+		if !ok || enumType == nil {
+			return nil, nil, false
+		}
+		variant, ok := enumType.Variant(testExpr.Pattern.Variant)
+		if !ok || variant == nil {
+			return enumType, nil, false
+		}
+		return enumType, variant, true
+	}
 	if fieldExpr, ok := isEnumVariantExpr(expr); ok {
 		enumType, variant, ok := a.enumConstructorInfoFromFieldExpr(fieldExpr)
 		if ok && variant != nil {
@@ -2194,6 +2275,11 @@ func (a *Analyzer) resolvePackedNodeStoreRootWithSeen(expr ast.Expr, enumType *E
 		return a.resolvePackedNodeStoreRootWithSeen(n.Operand, enumType, seen)
 	case *ast.CanExpr:
 		return a.resolvePackedNodeStoreRootWithSeen(n.Expr, enumType, seen)
+	case *ast.FieldExpr:
+		if resolved, ok := a.resolveProjectedFieldValueExpr(n.Object, n.Field); ok && resolved != nil {
+			return a.resolvePackedNodeStoreRootWithSeen(resolved, enumType, seen)
+		}
+		return nil, "", false
 	case *ast.Ident:
 		if a.currentScope == nil {
 			return nil, "", false

@@ -833,6 +833,11 @@ func formatExpr(expr ast.Expr) string {
 			parts = append(parts, formatExpr(arg))
 		}
 		return n.Name + "(" + strings.Join(parts, ", ") + ")"
+	case *ast.VariantTestExpr:
+		if n.Pattern == nil {
+			return "<variant-test>"
+		}
+		return formatMatchPattern(n.Pattern)
 	case *ast.ParenExpr:
 		return "(" + formatExpr(n.Inner) + ")"
 	case *ast.RaiseExpr:
@@ -887,6 +892,8 @@ func formatMatchPattern(pattern ast.MatchPattern) string {
 		return n.Name
 	case *ast.MatchStringLiteralPattern:
 		return strconv.Quote(n.Value)
+	case *ast.MatchLiteralPattern:
+		return formatExpr(n.Value)
 	case *ast.MatchVariantPattern:
 		parts := make([]string, 0, len(n.Args))
 		for _, arg := range n.Args {

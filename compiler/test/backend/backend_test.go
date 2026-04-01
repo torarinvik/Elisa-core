@@ -2332,6 +2332,43 @@ def fold() -> int:
 	}
 }
 
+func TestGenerateLLVMIRLowersPackedIfPatternWithoutExplicitStore(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+struct Box:
+	store: Expr.Store[Local]
+
+def make_box(owner: Arena) -> Box:
+	store: Expr.Store[Local] = Expr.Store(owner)
+	in store:
+		_ = new Expr.Int(value: 7)
+	return Box(move store)
+
+def read(owner: Arena) -> int:
+	box: Box = make_box(owner)
+	if box.store[0u] as Expr.Int(value: value):
+		return value
+	return 0
+`
+	result := parseAndAnalyze(t, "backend_packed_if_pattern_inferred_store.llcontext", src)
+	output := generateLLVMIRWithPackedABIForTest(t, result, backend.PackedEnumABIRowHandle)
+
+	checks := []string{
+		"define i64 @read(",
+		"ctx_packed_store_row_ptr_at",
+		"load i32, ptr",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "missing active packed enum store") {
+		t.Fatalf("expected inferred packed store lowering, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersDenseNodeTablesDirectly(t *testing.T) {
 	src := `packed enum Expr:
 	common:
@@ -2522,6 +2559,33 @@ def read(node: Expr, store: Expr.Store[Local]) -> int:
 	}
 	if strings.Count(output, "getelementptr inbounds nuw %Expr, ptr %node1, i32 0, i32 2") != 1 {
 		t.Fatalf("expected refined view scrutinee lowering to address the payload once for destructuring and reuse that value for node.value field access, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRLowersViewStmtWithDirectFieldProjectionWithoutExplicitStore(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+
+struct RootBox:
+	root: Expr
+
+def read(store: Expr.Store[Frozen], index: usize) -> int:
+	box: RootBox = RootBox(store[index])
+	view box.root as Expr.Int(value: value):
+		return value + box.root.span
+	return 0
+`
+	result := parseAndAnalyze(t, "backend_packed_view_direct_field_projection_inferred_store.llcontext", src)
+	output := generateLLVMIRWithPackedABIForTest(t, result, backend.PackedEnumABIRowHandle)
+	for _, check := range []string{"define i64 @read(", "%RootBox = type { ptr }", "load i64, ptr %value, align 8"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "missing active packed enum store") {
+		t.Fatalf("expected direct field projection packed store inference during lowering, got:\n%s", output)
 	}
 }
 

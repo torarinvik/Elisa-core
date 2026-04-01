@@ -555,6 +555,11 @@ func (p *Parser) parseNestedMatchPattern() ast.MatchPattern {
 	if p.peek() == lexer.TOKEN_STRING_LIT {
 		return &ast.MatchStringLiteralPattern{Position: pos, Value: p.advance().Text}
 	}
+	if p.peek() == lexer.TOKEN_INT_LIT || p.peek() == lexer.TOKEN_FLOAT_LIT || p.peek() == lexer.TOKEN_HEX_LIT ||
+		p.peek() == lexer.TOKEN_CHAR_LIT || p.peek() == lexer.TOKEN_TRUE || p.peek() == lexer.TOKEN_FALSE ||
+		p.peek() == lexer.TOKEN_NULL || p.peek() == lexer.TOKEN_MINUS || p.peek() == lexer.TOKEN_LPAREN {
+		return &ast.MatchLiteralPattern{Position: pos, Value: p.parseMatchLiteralPatternExpr()}
+	}
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_" {
 		p.advance()
 		return &ast.MatchWildcardPattern{Position: pos}
@@ -577,6 +582,45 @@ func (p *Parser) parseNestedMatchPattern() ast.MatchPattern {
 		p.expect(lexer.TOKEN_RPAREN)
 	}
 	return &ast.MatchVariantPattern{Position: pos, EnumName: name, Variant: variant, Args: args}
+}
+
+func (p *Parser) parseMatchLiteralPatternExpr() ast.Expr {
+	switch p.peek() {
+	case lexer.TOKEN_INT_LIT:
+		tok := p.advance()
+		return &ast.IntLit{Position: tok.Pos, Value: tok.Text, Suffix: tok.Suffix, IsHex: false}
+	case lexer.TOKEN_HEX_LIT:
+		tok := p.advance()
+		return &ast.IntLit{Position: tok.Pos, Value: tok.Text, Suffix: tok.Suffix, IsHex: true}
+	case lexer.TOKEN_FLOAT_LIT:
+		tok := p.advance()
+		return &ast.FloatLit{Position: tok.Pos, Value: tok.Text, Suffix: tok.Suffix}
+	case lexer.TOKEN_CHAR_LIT:
+		tok := p.advance()
+		return &ast.CharLit{Position: tok.Pos, Value: tok.Text}
+	case lexer.TOKEN_TRUE:
+		tok := p.advance()
+		return &ast.BoolLit{Position: tok.Pos, Value: true}
+	case lexer.TOKEN_FALSE:
+		tok := p.advance()
+		return &ast.BoolLit{Position: tok.Pos, Value: false}
+	case lexer.TOKEN_NULL:
+		tok := p.advance()
+		return &ast.NullLit{Position: tok.Pos}
+	case lexer.TOKEN_MINUS:
+		pos := p.cur().Pos
+		p.advance()
+		return &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_MINUS, Operand: p.parseMatchLiteralPatternExpr()}
+	case lexer.TOKEN_LPAREN:
+		pos := p.cur().Pos
+		p.advance()
+		inner := p.parseMatchLiteralPatternExpr()
+		p.expect(lexer.TOKEN_RPAREN)
+		return &ast.ParenExpr{Position: pos, Inner: inner}
+	default:
+		p.errorf("variant payload literal pattern expects a literal")
+		return &ast.IntLit{Position: p.cur().Pos, Value: "0"}
+	}
 }
 
 func (p *Parser) parseMatchPatternArg() ast.MatchPatternArg {
@@ -712,6 +756,20 @@ func (p *Parser) parseIfClause(isElif bool) ifClause {
 	pos := p.cur().Pos
 	hint := p.parseBranchHint()
 	head := p.parseExpr()
+	if p.match(lexer.TOKEN_AS) {
+		if hint != ast.BranchHintNone {
+			if isElif {
+				p.errorf("elif likely/unlikely hint cannot be combined with pattern binders")
+			} else {
+				p.errorf("if likely/unlikely hint cannot be combined with pattern binders")
+			}
+		}
+		pattern := p.parseMatchPattern()
+		p.expect(lexer.TOKEN_COLON)
+		p.expectNewline()
+		body := p.parseBlock()
+		return ifClause{Position: pos, Hint: hint, Value: head, Pattern: pattern, Body: body}
+	}
 	if p.match(lexer.TOKEN_IN) {
 		if hint != ast.BranchHintNone {
 			if isElif {

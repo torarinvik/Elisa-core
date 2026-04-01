@@ -780,14 +780,8 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			}
 			C.LLVMBuildStore(s.builder, value, alloca)
 			s.bindPackedStoreValue(declType, value)
-			if enumType, ok := declType.(*semantic.EnumType); ok && enumType.Packed {
-				origin, ok, err := s.resolvePackedNodeStoreBinding(n.Value, enumType)
-				if err != nil {
-					return err
-				}
-				if ok {
-					s.bindPackedEnumStoreOrigin(n.Name, enumType, origin)
-				}
+			if err := s.bindPackedStoreOriginsForExprPath(n.Name, n.Value, declType); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -877,6 +871,11 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		}
 		C.LLVMBuildStore(s.builder, value, ptr)
 		s.bindPackedStoreValue(targetType, value)
+		if path, ok := s.packedEnumStoragePath(n.Target); ok {
+			if err := s.bindPackedStoreOriginsForExprPath(path, n.Value, targetType); err != nil {
+				return err
+			}
+		}
 		s.invalidatePackedReadCaches()
 		return nil
 	case *ast.AsRefAssignStmt:
@@ -894,6 +893,11 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		}
 		C.LLVMBuildStore(s.builder, value, ptr)
 		s.bindPackedStoreValue(targetType, value)
+		if path, ok := s.packedEnumStoragePath(n.Target); ok {
+			if err := s.bindPackedStoreOriginsForExprPath(path, n.Value, targetType); err != nil {
+				return err
+			}
+		}
 		s.invalidatePackedReadCaches()
 		return nil
 	case *ast.AugAssignStmt:
@@ -1251,6 +1255,72 @@ func (s *functionState) emitMoveBindLocal(name string, typ semantic.Type, value 
 	s.defineBinding(name, valueBinding{ptr: alloca, typ: typ})
 	C.LLVMBuildStore(s.builder, value, alloca)
 	s.bindPackedStoreValue(typ, value)
+	return nil
+}
+
+func unwrapPackedStoreOriginExpr(expr ast.Expr) ast.Expr {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return unwrapPackedStoreOriginExpr(n.Inner)
+	case *ast.CastExpr:
+		return unwrapPackedStoreOriginExpr(n.Operand)
+	case *ast.MoveExpr:
+		return unwrapPackedStoreOriginExpr(n.Operand)
+	case *ast.CanExpr:
+		return unwrapPackedStoreOriginExpr(n.Expr)
+	default:
+		return expr
+	}
+}
+
+func (s *functionState) bindPackedStoreOriginsForExprPath(path string, expr ast.Expr, typ semantic.Type) error {
+	if path == "" || expr == nil || typ == nil {
+		return nil
+	}
+	stripped := semantic.StripAggregateStateType(typ)
+	if enumType, ok := stripped.(*semantic.EnumType); ok {
+		if !enumType.Packed {
+			return nil
+		}
+		origin, ok, err := s.resolvePackedNodeStoreBinding(expr, enumType)
+		if err != nil {
+			return err
+		}
+		if ok {
+			s.bindPackedEnumStoreOrigin(path, enumType, origin)
+		}
+		return nil
+	}
+	switch stripped.(type) {
+	case *semantic.StructType, *semantic.GenericInstanceType:
+	default:
+		return nil
+	}
+	fields, err := s.g.structLiteralFields(stripped)
+	if err != nil {
+		return err
+	}
+	sourceExpr := unwrapPackedStoreOriginExpr(expr)
+	if lit, ok := sourceExpr.(*ast.StructLitExpr); ok {
+		limit := len(fields)
+		if len(lit.Args) < limit {
+			limit = len(lit.Args)
+		}
+		for i := 0; i < limit; i++ {
+			childPath := path + "." + fields[i].Decl.Name
+			if err := s.bindPackedStoreOriginsForExprPath(childPath, lit.Args[i], fields[i].Type); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, field := range fields {
+		childPath := path + "." + field.Decl.Name
+		childExpr := &ast.FieldExpr{Position: expr.Pos(), Object: expr, Field: field.Decl.Name}
+		if err := s.bindPackedStoreOriginsForExprPath(childPath, childExpr, field.Type); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -2815,6 +2885,16 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		}
 		C.LLVMBuildBr(s.builder, successBB)
 		return decodedActualValue, packedPayloadValueCache{}, nil
+	case *ast.MatchLiteralPattern:
+		if err := s.emitLiteralMatchPatternTest(p.Value, actualValue, actualType, successBB, failureBB); err != nil {
+			return nil, packedPayloadValueCache{}, err
+		}
+		return decodedActualValue, packedPayloadValueCache{}, nil
+	case *ast.MatchStringLiteralPattern:
+		if err := s.emitLiteralMatchPatternTest(&ast.StringLit{Position: p.Position, Value: p.Value}, actualValue, actualType, successBB, failureBB); err != nil {
+			return nil, packedPayloadValueCache{}, err
+		}
+		return decodedActualValue, packedPayloadValueCache{}, nil
 	case *ast.MatchVariantPattern:
 		enumType, ok := actualType.(*semantic.EnumType)
 		if !ok {
@@ -2845,6 +2925,74 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 	default:
 		return nil, packedPayloadValueCache{}, fmt.Errorf("unsupported match pattern %T", pattern)
 	}
+}
+
+func (s *functionState) emitLiteralMatchPatternTest(literalExpr ast.Expr, actualValue C.LLVMValueRef, actualType semantic.Type, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) error {
+	if literalExpr == nil {
+		return fmt.Errorf("missing literal pattern expression")
+	}
+	actualType = semantic.StripAggregateStateType(actualType)
+	literalType := s.exprType(literalExpr)
+	if helperName, firstType, secondType, swap, ok := runtimeStringCompareInfo(actualType, literalType); ok {
+		cmp, err := s.emitRuntimeStringCompareLiteralValue(actualValue, literalExpr, literalType, helperName, firstType, secondType, swap)
+		if err != nil {
+			return err
+		}
+		C.LLVMBuildCondBr(s.builder, cmp, successBB, failureBB)
+		return nil
+	}
+	comparisonType := actualType
+	if semantic.IsNumericType(actualType) && semantic.IsNumericType(literalType) {
+		comparisonType = semantic.CommonNumericType(actualType, literalType)
+	}
+	coercedActual := actualValue
+	if comparisonType != actualType {
+		var err error
+		coercedActual, err = s.coerceValue(actualValue, actualType, comparisonType)
+		if err != nil {
+			return err
+		}
+	}
+	literalValue, _, err := s.emitExpr(literalExpr, comparisonType)
+	if err != nil {
+		return err
+	}
+	if isFloatType(comparisonType) {
+		cmp := C.LLVMBuildFCmp(s.builder, C.LLVMRealOEQ, coercedActual, literalValue, cStringFree("match.literal.eq"))
+		C.LLVMBuildCondBr(s.builder, cmp, successBB, failureBB)
+		return nil
+	}
+	cmp := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), coercedActual, literalValue, cStringFree("match.literal.eq"))
+	C.LLVMBuildCondBr(s.builder, cmp, successBB, failureBB)
+	return nil
+}
+
+func (s *functionState) emitRuntimeStringCompareLiteralValue(actualValue C.LLVMValueRef, literalExpr ast.Expr, literalType semantic.Type, helperName string, firstType semantic.Type, secondType semantic.Type, swap bool) (C.LLVMValueRef, error) {
+	firstValue := actualValue
+	secondValue, _, err := s.emitExpr(literalExpr, literalType)
+	if err != nil {
+		return nil, err
+	}
+	if swap {
+		firstValue, secondValue = secondValue, firstValue
+	}
+	helperReturn := s.g.result.NamedTypes["int"]
+	helperType := &semantic.FuncType{Name: helperName, Params: []semantic.Type{firstType, secondType}, Return: helperReturn}
+	callee, err := s.g.ensureFunctionDeclared(helperName, helperType)
+	if err != nil {
+		return nil, err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, err
+	}
+	call := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{firstValue, secondValue}, "match.literal.str")
+	helperLLVMType, err := s.g.lowerType(helperReturn)
+	if err != nil {
+		return nil, err
+	}
+	zero := C.LLVMConstInt(helperLLVMType, 0, 0)
+	return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), call, zero, cStringFree("match.literal.str.eq")), nil
 }
 
 func (s *functionState) emitMatchedVariantPayloadPatternTest(pattern *ast.MatchVariantPattern, actualValue C.LLVMValueRef, decodedActualValue C.LLVMValueRef, enumType *semantic.EnumType, variant *semantic.EnumVariant, store *packedStoreBinding, originExpr ast.Expr, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) (C.LLVMValueRef, packedPayloadValueCache, error) {
@@ -3768,18 +3916,18 @@ func (s *functionState) resolvePackedMatchStoreBinding(enumType *semantic.EnumTy
 		binding := &packedStoreBinding{value: storeValue, typ: storeType}
 		return binding, nil
 	}
+	if inferred, ok, err := s.resolvePackedViewStoreBinding(valueExpr, enumType); err != nil {
+		return nil, err
+	} else if ok {
+		return inferred, nil
+	}
+	if inferred, ok, err := s.resolvePackedNodeStoreBinding(valueExpr, enumType); err != nil {
+		return nil, err
+	} else if ok {
+		return inferred, nil
+	}
 	binding, ok := s.lookupPackedStore(enumType)
 	if !ok {
-		if inferred, ok, err := s.resolvePackedViewStoreBinding(valueExpr, enumType); err != nil {
-			return nil, err
-		} else if ok {
-			return inferred, nil
-		}
-		if inferred, ok, err := s.resolvePackedNodeStoreBinding(valueExpr, enumType); err != nil {
-			return nil, err
-		} else if ok {
-			return inferred, nil
-		}
 		return nil, fmt.Errorf("missing active packed enum store for %s", enumType.Name)
 	}
 	return &binding, nil

@@ -5060,7 +5060,7 @@ func TestAnalyzeRejectsShadowedStringMatchArms(t *testing.T) {
 	}
 }
 
-func TestAnalyzeRejectsNestedStringLiteralPatterns(t *testing.T) {
+func TestAnalyzeAcceptsNestedStringLiteralPatterns(t *testing.T) {
 	src := `enum Wrapper:
 	Text(StringView)
 	Other
@@ -5072,14 +5072,9 @@ def classify(value: Wrapper) -> int:
 		Wrapper.Other:
 			0
 `
-	_, errs := parseAndAnalyze(t, "string_match_nested_pattern_reject.llcontext", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
-	}
-	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "nested string literal match patterns are not supported") {
-		t.Fatalf("expected nested string-pattern diagnostic, got:\n%s", all)
-	}
+	result, errs := parseAndAnalyze(t, "string_match_nested_pattern_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
 }
 
 func TestAnalyzeRejectsStringMatchOverNonStringValue(t *testing.T) {
@@ -5469,6 +5464,23 @@ def read(owner: Arena) -> int:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsPackedMatchWithoutStoreClauseFromImmutableFieldProjection(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+struct RootBox:
+	root: Expr
+
+def read(store: Expr.Store[Frozen], index: usize) -> int:
+	box: RootBox = RootBox(store[index])
+	return match box.root:
+		Expr.Int(value: value):
+			value
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_match_field_projection_inferred_store_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeRejectsOrdinaryEnumMatchWithStoreClause(t *testing.T) {
 	src := `enum Expr:
 	Int(value: int)
@@ -5573,6 +5585,60 @@ def is_int(node: Expr) -> bool:
 		t.Fatalf("expected first statement to be if, got %T", decl.Body[0])
 	}
 	requireExprTypeString(t, result, ifStmt.Cond, "bool")
+}
+
+func TestAnalyzeAcceptsEnumVariantIsConditionWithPositionalLiteralPayloadPattern(t *testing.T) {
+	src := `enum Expr:
+	Float(PI: f64)
+	Int(value: int)
+
+def is_pi(node: Expr) -> bool:
+	return node is Expr.Float(3.14)
+`
+	result, errs := parseAndAnalyze(t, "enum_variant_is_condition_positional_literal_payload_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
+
+func TestAnalyzeAcceptsEnumVariantIsConditionWithNamedLiteralPayloadPattern(t *testing.T) {
+	src := `enum Expr:
+	Float(PI: int)
+	Int(value: int)
+
+def is_pi(node: Expr) -> bool:
+	return node is Expr.Float(PI: 314)
+`
+	result, errs := parseAndAnalyze(t, "enum_variant_is_condition_named_literal_payload_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
+
+func TestAnalyzeAcceptsEnumIfPatternWithPositionalLiteralPayloadPattern(t *testing.T) {
+	src := `enum Expr:
+	Float(PI: int)
+	Int(value: int)
+
+def classify(node: Expr) -> int:
+	if node as Expr.Float(314):
+		return 1
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "enum_if_pattern_positional_literal_payload_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsEnumVariantIsConditionPayloadBindPattern(t *testing.T) {
+	src := `enum Expr:
+	Float(PI: int)
+
+def bad(node: Expr) -> bool:
+	return node is Expr.Float(value)
+`
+	_, errs := parseAndAnalyze(t, "enum_variant_is_condition_payload_bind_pattern_bad.llcontext", src)
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "variant is tests do not support bind names") {
+		t.Fatalf("expected bind-pattern rejection, got:\n%s", all)
+	}
 }
 
 func TestAnalyzeAcceptsPackedEnumIsConditionRefiningScrutineeToPackedView(t *testing.T) {
@@ -5813,6 +5879,25 @@ def read(node: Expr, store: Expr.Store[Frozen]) -> int:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsViewStmtWithDirectFieldProjectionWithoutStoreClause(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+
+struct RootBox:
+	root: Expr
+
+def read(store: Expr.Store[Frozen], index: usize) -> int:
+	box: RootBox = RootBox(store[index])
+	view box.root as Expr.Int(value: value):
+		return value + box.root.span
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_view_direct_field_projection_inferred_store_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeAcceptsOpenStmtWithActiveStoreParam(t *testing.T) {
 	src := `packed enum Expr:
 	common:
@@ -5885,6 +5970,25 @@ def read(owner: Arena) -> int:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsOpenStmtWithDirectFieldProjectionWithoutStoreClause(t *testing.T) {
+	src := `packed enum Expr:
+	common:
+		span: int
+	Int(value: int)
+
+struct RootBox:
+	root: Expr
+
+def read(store: Expr.Store[Frozen], index: usize) -> int:
+	box: RootBox = RootBox(store[index])
+	open box.root as Expr.Int(value: value):
+		return value + box.root.span
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_open_direct_field_projection_inferred_store_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeRejectsPackedEnumIfPatternBinderWithoutAs(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)
@@ -5904,6 +6008,36 @@ def bad(flag: bool, node: Expr, store: Expr.Store[Local]) -> int:
 	if !strings.Contains(all, "if pattern binder requires `as Enum.Variant(...)` after store expression") {
 		t.Fatalf("expected missing `as` diagnostic, got:\n%s", all)
 	}
+}
+
+func TestAnalyzeAcceptsPackedEnumIfPatternBinderWithoutStoreClauseWithActiveStoreParam(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+def read(node: Expr, store: Expr.Store[Frozen]) -> int:
+	if node as Expr.Int(value: value):
+		return value
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_without_store_active_param_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeAcceptsPackedEnumIfPatternBinderWithoutStoreClauseFromFieldProjection(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+struct RootBox:
+	root: Expr
+
+def read(store: Expr.Store[Frozen], index: usize) -> int:
+	box: RootBox = RootBox(store[index])
+	if box.root as Expr.Int(value: value):
+		return value
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_field_projection_inferred_store_ok.llcontext", src)
+	requireNoErrors(t, errs)
 }
 
 func TestAnalyzeAcceptsPackedStoreCountAndIndexTraversal(t *testing.T) {

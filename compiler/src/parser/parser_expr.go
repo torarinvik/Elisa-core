@@ -563,8 +563,38 @@ func (p *Parser) parseComparison() ast.Expr {
 }
 
 func (p *Parser) parseIsTestExpr() ast.Expr {
+	if p.peekVariantIsTargetWithPayload() {
+		return p.parseVariantIsTestExpr()
+	}
 	target := p.parseTypeExpr()
 	return &ast.TypeExprExpr{Position: target.Pos(), Type: target}
+}
+
+func (p *Parser) peekVariantIsTargetWithPayload() bool {
+	return p.peek() == lexer.TOKEN_IDENT &&
+		p.pos+3 < len(p.tokens) &&
+		p.tokens[p.pos+1].Kind == lexer.TOKEN_DOT &&
+		p.tokens[p.pos+2].Kind == lexer.TOKEN_IDENT &&
+		p.tokens[p.pos+3].Kind == lexer.TOKEN_LPAREN
+}
+
+func (p *Parser) parseVariantIsTestExpr() ast.Expr {
+	pos := p.cur().Pos
+	enumName := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_DOT)
+	variant := p.expect(lexer.TOKEN_IDENT).Text
+	args := make([]ast.MatchPatternArg, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
+	p.expect(lexer.TOKEN_LPAREN)
+	if p.peek() != lexer.TOKEN_RPAREN {
+		for {
+			args = append(args, p.parseMatchPatternArg())
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+	return &ast.VariantTestExpr{Position: pos, Pattern: &ast.MatchVariantPattern{Position: pos, EnumName: enumName, Variant: variant, Args: args}}
 }
 
 func (p *Parser) parseBitwiseOr() ast.Expr {

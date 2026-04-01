@@ -31,3 +31,23 @@ def score(player: Player) -> int:
 		}
 	}
 }
+
+func TestGenerateLLVMIRLowersEnumIsExprWithLiteralPayloadPattern(t *testing.T) {
+	src := `enum Expr:
+	Float(PI: f64)
+	Int(value: int)
+
+def is_pi(node: Expr) -> bool:
+	return node is Expr.Float(3.14)
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_enum_is_expr_literal_payload.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i1 @is_pi(", "fcmp oeq double", "is.variant.result"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected literal-payload is lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
