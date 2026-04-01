@@ -4102,6 +4102,21 @@ def sample_case() -> void can[Console.Write]:
 	}
 }
 
+func TestAnalyzeAllowsTestFunctionLocalMemoryGrantWithoutImpossiblePermissionWarning(t *testing.T) {
+	src := `extern alloc_i32() -> mutable heap i32&? can[Memory.Allocate]
+
+@test
+def sample_case() -> void:
+	can Memory.Allocate:
+		_ = alloc_i32()
+`
+	result, errs := parseAndAnalyze(t, "function_annotations_test_local_memory_grant_ok.llcontext", src)
+	if len(errs) != 0 {
+		t.Fatalf("expected no semantic errors, got:\n%s", strings.Join(errs, "\n"))
+	}
+	requireNoWarnings(t, result)
+}
+
 func TestAnalyzeRejectsBenchFunctionNonVoidReturn(t *testing.T) {
 	src := `@bench
 def hot_loop() -> int:
