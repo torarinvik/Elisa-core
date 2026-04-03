@@ -506,10 +506,7 @@ func (p *Parser) parseViewStmt() *ast.ViewStmt {
 }
 
 func (p *Parser) parseViewBindPattern() *ast.ViewBindPattern {
-	pos := p.cur().Pos
-	enumName := p.expect(lexer.TOKEN_IDENT).Text
-	p.expect(lexer.TOKEN_DOT)
-	variant := p.expect(lexer.TOKEN_IDENT).Text
+	enumName, variant, pos := p.parseQualifiedVariantTarget()
 	p.expect(lexer.TOKEN_LPAREN)
 	pattern := &ast.ViewBindPattern{Position: pos, EnumName: enumName, Variant: variant}
 	if p.match(lexer.TOKEN_RPAREN) {
@@ -916,7 +913,12 @@ func (p *Parser) parseMoveBindPattern() ast.MoveBindPattern {
 	pos := p.cur().Pos
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	if p.match(lexer.TOKEN_DOT) {
-		variant := p.expect(lexer.TOKEN_IDENT).Text
+		parts := []string{name, p.expect(lexer.TOKEN_IDENT).Text}
+		for p.match(lexer.TOKEN_DOT) {
+			parts = append(parts, p.expect(lexer.TOKEN_IDENT).Text)
+		}
+		name = strings.Join(parts[:len(parts)-1], ".")
+		variant := parts[len(parts)-1]
 		args := make([]ast.MatchPatternArg, 0)
 		if p.match(lexer.TOKEN_LPAREN) {
 			if p.peek() != lexer.TOKEN_RPAREN {

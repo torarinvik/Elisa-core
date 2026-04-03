@@ -426,29 +426,52 @@ func (a *Analyzer) analyzeOpenStmt(stmt *ast.OpenStmt) {
 	}
 	valueType := a.analyzeExpr(stmt.Value)
 	enumType, _, ok := resolveMatchableEnumType(valueType)
-	if !ok {
-		a.errorf(stmt.Pos(), "open requires a packed enum value, got %s", valueType.String())
-		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
+	if ok {
+		if !enumType.Packed {
+			a.errorf(stmt.Pos(), "open requires a packed enum value, got ordinary enum %q", enumType.Name)
+			a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
+			return
+		}
+		resolvedStmt := &ast.MoveBindStmt{Position: stmt.Position, Value: stmt.Value, Store: stmt.Store, Pattern: stmt.Pattern}
+		payloads, _, packedStoreState, ok := a.resolveMoveBindVariantPattern(resolvedStmt, stmt.Pattern, valueType)
+		valueState, hasValueState := a.regionRefStateForExpr(stmt.Value)
+		borrowedOwnerState, hasBorrowedOwnerState := a.borrowedOwnerRefStateForExpr(stmt.Value)
+		scope := NewScope(a.currentScope)
+		savedScope := a.currentScope
+		a.currentScope = scope
+		a.bindResolvedMoveBindVariantFields(payloads, stmt.Value, stmt.Pattern, stmt.Pattern, valueState, hasValueState, borrowedOwnerState, hasBorrowedOwnerState, packedStoreState)
+		a.currentScope = savedScope
+		a.analyzeBlockWithRegionClone(stmt.Body, scope)
+		if ok {
+			a.recordAffineDestructureConsumption(stmt.Value, valueType, "open over affine enum")
+		}
 		return
 	}
-	if !enumType.Packed {
-		a.errorf(stmt.Pos(), "open requires a packed enum value, got ordinary enum %q", enumType.Name)
-		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
+	treeType, _, ok := resolveMatchableTreeCategoryType(valueType)
+	if ok {
+		a.analyzeTreeOpenStmt(stmt, treeType)
 		return
 	}
-	resolvedStmt := &ast.MoveBindStmt{Position: stmt.Position, Value: stmt.Value, Store: stmt.Store, Pattern: stmt.Pattern}
-	payloads, _, packedStoreState, ok := a.resolveMoveBindVariantPattern(resolvedStmt, stmt.Pattern, valueType)
+	a.errorf(stmt.Pos(), "open requires a packed enum or tree-category value, got %s", valueType.String())
+	a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
+}
+
+func (a *Analyzer) analyzeTreeOpenStmt(stmt *ast.OpenStmt, treeType *TreeCategoryType) {
+	if stmt == nil || stmt.Pattern == nil || treeType == nil {
+		return
+	}
+	a.validateTreeVariantBinderStore("open", treeType, stmt.Store)
+	payloads, ok := a.resolveMoveBindTreeVariantPattern(stmt.Pattern, treeType)
 	valueState, hasValueState := a.regionRefStateForExpr(stmt.Value)
 	borrowedOwnerState, hasBorrowedOwnerState := a.borrowedOwnerRefStateForExpr(stmt.Value)
 	scope := NewScope(a.currentScope)
 	savedScope := a.currentScope
 	a.currentScope = scope
-	a.bindResolvedMoveBindVariantFields(payloads, stmt.Value, stmt.Pattern, stmt.Pattern, valueState, hasValueState, borrowedOwnerState, hasBorrowedOwnerState, packedStoreState)
+	if ok {
+		a.bindResolvedMoveBindVariantFields(payloads, stmt.Value, stmt.Pattern, stmt.Pattern, valueState, hasValueState, borrowedOwnerState, hasBorrowedOwnerState, nil)
+	}
 	a.currentScope = savedScope
 	a.analyzeBlockWithRegionClone(stmt.Body, scope)
-	if ok {
-		a.recordAffineDestructureConsumption(stmt.Value, valueType, "open over affine enum")
-	}
 }
 
 func (a *Analyzer) analyzeViewStmt(stmt *ast.ViewStmt) {
@@ -456,6 +479,11 @@ func (a *Analyzer) analyzeViewStmt(stmt *ast.ViewStmt) {
 		return
 	}
 	valueType := a.analyzeExpr(stmt.Value)
+	treeType, _, ok := resolveMatchableTreeCategoryType(valueType)
+	if ok {
+		a.analyzeTreeViewStmt(stmt, treeType)
+		return
+	}
 	viewType, ok := a.resolveViewBindType(stmt, valueType)
 	scope := NewScope(a.currentScope)
 	if ok {
@@ -489,11 +517,95 @@ func (a *Analyzer) analyzeViewStmt(stmt *ast.ViewStmt) {
 	}
 }
 
+func (a *Analyzer) analyzeTreeViewStmt(stmt *ast.ViewStmt, treeType *TreeCategoryType) {
+	if stmt == nil || stmt.Pattern == nil || treeType == nil {
+		return
+	}
+	viewType, ok := a.resolveTreeViewBindType(stmt, treeType)
+	scope := NewScope(a.currentScope)
+	if ok {
+		savedScope := a.currentScope
+		a.currentScope = scope
+		a.bindRefinedExprType(a.currentScope, stmt.Value, viewType)
+		if stmt.Pattern.Name != "" && stmt.Pattern.Name != "_" {
+			sym := &Symbol{Name: stmt.Pattern.Name, Kind: SymbolLocal, Type: viewType, Node: stmt.Pattern, Mutable: false}
+			a.defineLocal(sym, stmt.Pattern.Pos())
+			a.recordValueBinding(sym, stmt.Value)
+			a.recordBorrowedOwnerRefBinding(sym, stmt.Value)
+			a.recordFunctionValueBinding(sym, stmt.Value)
+			a.recordImmutableSymbolOptimizationFacts(sym, stmt.Value)
+			a.recordRegionRefBinding(sym, stmt.Value)
+		}
+		if len(stmt.Pattern.Args) != 0 {
+			resolvedPattern := viewBindPatternAsMoveBindPattern(stmt.Pattern)
+			payloads, payloadsOK := a.resolveMoveBindTreeVariantPattern(resolvedPattern, treeType)
+			valueState, hasValueState := a.regionRefStateForExpr(stmt.Value)
+			borrowedOwnerState, hasBorrowedOwnerState := a.borrowedOwnerRefStateForExpr(stmt.Value)
+			if payloadsOK {
+				a.bindResolvedMoveBindVariantFields(payloads, stmt.Value, resolvedPattern, stmt.Pattern, valueState, hasValueState, borrowedOwnerState, hasBorrowedOwnerState, nil)
+			}
+		}
+		a.currentScope = savedScope
+	}
+	a.analyzeBlockWithRegionClone(stmt.Body, scope)
+}
+
 func viewBindPatternAsMoveBindPattern(pattern *ast.ViewBindPattern) *ast.MoveBindVariantPattern {
 	if pattern == nil {
 		return nil
 	}
 	return &ast.MoveBindVariantPattern{Position: pattern.Position, EnumName: pattern.EnumName, Variant: pattern.Variant, Args: append([]ast.MatchPatternArg(nil), pattern.Args...)}
+}
+
+func (a *Analyzer) validateTreeVariantBinderStore(keyword string, treeType *TreeCategoryType, storeExpr ast.Expr) {
+	if treeType == nil || storeExpr == nil {
+		return
+	}
+	a.errorf(storeExpr.Pos(), "tree %s over %q does not take an in-store clause", keyword, treeType.Name)
+}
+
+func (a *Analyzer) resolveTreeViewBindType(stmt *ast.ViewStmt, treeType *TreeCategoryType) (*TreeVariantViewType, bool) {
+	if stmt == nil || stmt.Pattern == nil || treeType == nil {
+		return nil, false
+	}
+	a.validateTreeVariantBinderStore("view", treeType, stmt.Store)
+	if stmt.Pattern.EnumName != treeType.Name {
+		a.errorf(stmt.Pattern.Pos(), "view pattern expects tree category %q, got %q", treeType.Name, stmt.Pattern.EnumName)
+		return nil, false
+	}
+	variant, ok := treeType.Variant(stmt.Pattern.Variant)
+	if !ok {
+		a.errorf(stmt.Pattern.Pos(), "tree category %q has no variant %q", treeType.Name, stmt.Pattern.Variant)
+		return nil, false
+	}
+	return treeType.VariantViewType(variant), true
+}
+
+func (a *Analyzer) resolveViewBindType(stmt *ast.ViewStmt, actual Type) (*PackedVariantViewType, bool) {
+	if stmt == nil || stmt.Pattern == nil {
+		return nil, false
+	}
+	enumType, _, ok := resolveMatchableEnumType(actual)
+	if !ok {
+		a.errorf(stmt.Pos(), "view requires a packed enum or tree-category value, got %s", actual.String())
+		return nil, false
+	}
+	if !enumType.Packed {
+		a.errorf(stmt.Pos(), "view requires a packed enum value, got ordinary enum %q", enumType.Name)
+		return nil, false
+	}
+	a.validateMatchStore(stmt.Pos(), stmt.Value, actual, enumType, stmt.Store)
+	if stmt.Pattern.EnumName != enumType.Name {
+		a.errorf(stmt.Pattern.Pos(), "view pattern expects enum %q, got %q", enumType.Name, stmt.Pattern.EnumName)
+		return nil, false
+	}
+	variant, ok := enumType.Variant(stmt.Pattern.Variant)
+	if !ok {
+		a.errorf(stmt.Pattern.Pos(), "enum %q has no variant %q", enumType.Name, stmt.Pattern.Variant)
+		return nil, false
+	}
+	viewType := &PackedVariantViewType{Enum: enumType, Variant: variant}
+	return viewType, true
 }
 
 func (a *Analyzer) analyzeDeferStmt(stmt *ast.DeferStmt) {
@@ -689,33 +801,6 @@ func (a *Analyzer) validateDeferStmtBodyExpr(expr ast.Expr) {
 			a.validateDeferStmtBody(arm.Body)
 		}
 	}
-}
-
-func (a *Analyzer) resolveViewBindType(stmt *ast.ViewStmt, actual Type) (*PackedVariantViewType, bool) {
-	if stmt == nil || stmt.Pattern == nil {
-		return nil, false
-	}
-	enumType, _, ok := resolveMatchableEnumType(actual)
-	if !ok {
-		a.errorf(stmt.Pos(), "view requires a packed enum value, got %s", actual.String())
-		return nil, false
-	}
-	if !enumType.Packed {
-		a.errorf(stmt.Pos(), "view requires a packed enum value, got ordinary enum %q", enumType.Name)
-		return nil, false
-	}
-	a.validateMatchStore(stmt.Pos(), stmt.Value, actual, enumType, stmt.Store)
-	if stmt.Pattern.EnumName != enumType.Name {
-		a.errorf(stmt.Pattern.Pos(), "view pattern expects enum %q, got %q", enumType.Name, stmt.Pattern.EnumName)
-		return nil, false
-	}
-	variant, ok := enumType.Variant(stmt.Pattern.Variant)
-	if !ok {
-		a.errorf(stmt.Pattern.Pos(), "enum %q has no variant %q", enumType.Name, stmt.Pattern.Variant)
-		return nil, false
-	}
-	viewType := &PackedVariantViewType{Enum: enumType, Variant: variant}
-	return viewType, true
 }
 
 func (a *Analyzer) clonePackedVariantViewBindings() map[*Symbol]*PackedVariantViewType {
@@ -1050,6 +1135,30 @@ func (a *Analyzer) resolveMoveBindVariantPattern(stmt *ast.MoveBindStmt, pattern
 	return fields, enumType, storeState, true
 }
 
+func (a *Analyzer) resolveMoveBindTreeVariantPattern(pattern *ast.MoveBindVariantPattern, treeType *TreeCategoryType) ([]moveBindResolvedVariantField, bool) {
+	if pattern == nil || treeType == nil {
+		return nil, false
+	}
+	if treeType.Name != pattern.EnumName {
+		a.errorf(pattern.Pos(), "move-as pattern expects tree category %q, got %q", pattern.EnumName, treeType.Name)
+		return nil, false
+	}
+	variant, ok := treeType.Variant(pattern.Variant)
+	if !ok {
+		a.errorf(pattern.Pos(), "tree category %q has no variant %q", treeType.Name, pattern.Variant)
+		return nil, false
+	}
+	orderedArgs := a.resolveMatchPatternArgs(moveBindVariantAsMatchPattern(pattern), variant, treeType.Name+"."+variant.Name, false)
+	fields := make([]moveBindResolvedVariantField, 0, len(orderedArgs))
+	for i, arg := range orderedArgs {
+		if arg == nil {
+			continue
+		}
+		fields = a.collectMoveBindVariantBindings(arg.Pattern, variant.Payload[i], []string{moveBindVariantFieldKey(variant, i)}, fields)
+	}
+	return fields, true
+}
+
 func (a *Analyzer) collectMoveBindVariantBindings(pattern ast.MatchPattern, expected Type, path []string, fields []moveBindResolvedVariantField) []moveBindResolvedVariantField {
 	if pattern == nil {
 		return fields
@@ -1066,21 +1175,42 @@ func (a *Analyzer) collectMoveBindVariantBindings(pattern ast.MatchPattern, expe
 		a.analyzeLiteralMatchPatternExpr(p.Pos(), p.Value, expected, "move-as nested pattern")
 		return fields
 	case *ast.MatchVariantPattern:
-		enumType, ok := expected.(*EnumType)
+		enumType, _, enumOK := resolveMatchableEnumType(expected)
+		if enumOK && enumType != nil {
+			if p.EnumName != enumType.Name {
+				a.errorf(p.Pos(), "nested move-as pattern expects enum %q, got %q", enumType.Name, p.EnumName)
+				return fields
+			}
+			variant, ok := enumType.Variant(p.Variant)
+			if !ok {
+				a.errorf(p.Pos(), "enum %q has no variant %q", enumType.Name, p.Variant)
+				return fields
+			}
+			orderedArgs := a.resolveMatchPatternArgs(p, variant, enumType.Name+"."+variant.Name, true)
+			for i, arg := range orderedArgs {
+				if arg == nil {
+					continue
+				}
+				childPath := append(append([]string(nil), path...), moveBindVariantFieldKey(variant, i))
+				fields = a.collectMoveBindVariantBindings(arg.Pattern, variant.Payload[i], childPath, fields)
+			}
+			return fields
+		}
+		treeType, _, treeOK := resolveMatchableTreeCategoryType(expected)
+		if !treeOK || treeType == nil {
+			a.errorf(p.Pos(), "nested move-as pattern %q requires an enum or tree-category payload, got %s", p.EnumName+"."+p.Variant, expected.String())
+			return fields
+		}
+		if p.EnumName != treeType.Name {
+			a.errorf(p.Pos(), "nested move-as pattern expects tree category %q, got %q", treeType.Name, p.EnumName)
+			return fields
+		}
+		variant, ok := treeType.Variant(p.Variant)
 		if !ok {
-			a.errorf(p.Pos(), "nested move-as pattern %q requires an enum payload, got %s", p.EnumName+"."+p.Variant, expected.String())
+			a.errorf(p.Pos(), "tree category %q has no variant %q", treeType.Name, p.Variant)
 			return fields
 		}
-		if p.EnumName != enumType.Name {
-			a.errorf(p.Pos(), "nested move-as pattern expects enum %q, got %q", enumType.Name, p.EnumName)
-			return fields
-		}
-		variant, ok := enumType.Variant(p.Variant)
-		if !ok {
-			a.errorf(p.Pos(), "enum %q has no variant %q", enumType.Name, p.Variant)
-			return fields
-		}
-		orderedArgs := a.resolveMatchPatternArgs(p, variant, enumType.Name+"."+variant.Name, true)
+		orderedArgs := a.resolveMatchPatternArgs(p, variant, treeType.Name+"."+variant.Name, true)
 		for i, arg := range orderedArgs {
 			if arg == nil {
 				continue
