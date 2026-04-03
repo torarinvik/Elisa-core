@@ -5105,7 +5105,7 @@ func TestAnalyzeRejectsStringMatchOverNonStringValue(t *testing.T) {
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "match requires an enum or string value, got int") {
+	if !strings.Contains(all, "match requires an enum, tree-category, or string value, got int") {
 		t.Fatalf("expected non-string match diagnostic, got:\n%s", all)
 	}
 }

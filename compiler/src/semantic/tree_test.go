@@ -236,3 +236,30 @@ def child_span(node: Lua.Expr) -> i64:
 	return node.span
 `)
 }
+
+func TestAnalyzeTreeMatchStatementsAndExpressions(t *testing.T) {
+	analyzeTreeTestSource(t, "tree_match_surface.llcontext", `tree Lua:
+	common:
+		span: i64
+	expr Expr:
+		Nil
+		Int(value: i64)
+		Binary(left: Expr, right: Expr)
+
+def child_span(node: Lua.Expr) -> i64:
+	match node:
+		Lua.Expr.Binary(left: left, right: _):
+			return node.left.span + left.span
+		_:
+			return node.span
+
+def eval(node: Lua.Expr) -> i64:
+	return match node:
+		Lua.Expr.Nil:
+			0
+		Lua.Expr.Int(value: value):
+			value
+		Lua.Expr.Binary(left: Lua.Expr.Int(value: lhs), right: right):
+			lhs + eval(right)
+`)
+}

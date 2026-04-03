@@ -147,3 +147,40 @@ def child_span(node: Lua.Expr) -> i64:
 		t.Fatalf("expected bare tree variant surface type to lower through the existing tree pointer carrier, got:\n%s", output)
 	}
 }
+
+func TestGenerateLLVMIRLowersTreeMatchStatementsAndExpressions(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	expr Expr:
+		Nil
+		Int(value: i64)
+		Binary(left: Expr, right: Expr)
+
+def child_span(node: Lua.Expr) -> i64:
+	match node:
+		Lua.Expr.Binary(left: left, right: _):
+			return node.left.span + left.span
+		_:
+			return node.span
+
+def eval(node: Lua.Expr) -> i64:
+	return match node:
+		Lua.Expr.Nil:
+			0
+		Lua.Expr.Int(value: value):
+			value
+		Lua.Expr.Binary(left: Lua.Expr.Int(value: lhs), right: right):
+			lhs + eval(right)
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_match.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i64 @child_span(ptr ", "define i64 @eval(ptr ", "match.tree.tag", "tree.payload.field"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected tree match lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
