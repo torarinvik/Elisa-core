@@ -742,6 +742,9 @@ func formatTypeExpr(typ ast.TypeExpr) string {
 	case *ast.ArrayType:
 		return formatTypeExpr(n.Elem) + "[" + formatExpr(n.Size) + "]"
 	case *ast.BuiltinTypeExpr:
+		if n.Name == "treeview" && len(n.TypeArgs) == 1 && len(n.ValueArgs) == 0 {
+			return formatTypeExpr(n.TypeArgs[0])
+		}
 		parts := make([]string, 0, len(n.TypeArgs)+len(n.ValueArgs))
 		for _, arg := range n.TypeArgs {
 			parts = append(parts, formatTypeExpr(arg))

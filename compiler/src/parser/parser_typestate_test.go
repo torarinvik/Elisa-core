@@ -6,6 +6,7 @@ import (
 
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
+	"llcontext/src/unparse"
 )
 
 func parseSourceFile(t *testing.T, src string) (*ast.File, []string) {
@@ -840,6 +841,9 @@ func TestParseTreeViewSurfaceType(t *testing.T) {
 	}
 	if retType.Name != "treeview" {
 		t.Fatalf("expected treeview return type name, got %q", retType.Name)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "def keep(view_value: Lua.Expr.Binary) -> Lua.Expr.Binary:") {
+		t.Fatalf("expected formatter to canonicalize treeview surface types, got:\n%s", formatted)
 	}
 }
 

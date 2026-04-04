@@ -763,13 +763,13 @@ func (a *Analyzer) resolvePackedVariantViewSurfaceType(expr ast.TypeExpr, pos le
 func (a *Analyzer) resolveTreeVariantViewSurfaceType(expr ast.TypeExpr, pos lexer.Pos) Type {
 	named, ok := expr.(*ast.NamedType)
 	if !ok {
-		a.errorf(pos, "treeview expects a tree variant like treeview[Lua.Expr.Binary]")
+		a.errorf(pos, "treeview expects a tree variant like Lua.Expr.Binary")
 		return invalidType
 	}
 	categoryType, variant, ok := a.treeVariantTargetFromNamedType(named)
 	if !ok || categoryType == nil || variant == nil {
 		if categoryType == nil {
-			a.errorf(pos, "treeview expects a tree variant like treeview[Lua.Expr.Binary]")
+			a.errorf(pos, "treeview expects a tree variant like Lua.Expr.Binary")
 			return invalidType
 		}
 		a.errorf(pos, "tree category %q has no variant %q", categoryType.Name, named.Name[strings.LastIndex(named.Name, ".")+1:])

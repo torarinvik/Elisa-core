@@ -311,6 +311,37 @@ def child_span(node: Lua.Expr) -> i64:
 `)
 }
 
+func TestAnalyzeTreeVariantViewTypeStringCanonicalizesToBareVariant(t *testing.T) {
+	result := analyzeTreeTestSource(t, "tree_variant_view_string.llcontext", `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Nil
+		Binary(left: Expr, right: Expr)
+
+def keep_binary(view_node: treeview[Lua.Expr.Binary]) -> treeview[Lua.Expr.Binary]:
+	return view_node
+`)
+	sym, ok := result.GlobalScope.Lookup("keep_binary")
+	if !ok {
+		t.Fatal("expected keep_binary symbol")
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected keep_binary function type, got %T", sym.Type)
+	}
+	if len(fnType.Params) != 1 || fnType.Return == nil {
+		t.Fatalf("unexpected keep_binary function type shape: %#v", fnType)
+	}
+	if fnType.Params[0].String() != "Lua.Expr.Binary" {
+		t.Fatalf("expected canonical bare refined variant parameter type, got %q", fnType.Params[0].String())
+	}
+	if fnType.Return.String() != "Lua.Expr.Binary" {
+		t.Fatalf("expected canonical bare refined variant return type, got %q", fnType.Return.String())
+	}
+}
+
 func TestAnalyzeTreeMatchStatementsAndExpressions(t *testing.T) {
 	analyzeTreeTestSource(t, "tree_match_surface.llcontext", `tree Lua:
 	common:

@@ -731,11 +731,16 @@ func (t *PackedVariantViewType) String() string {
 	}
 	return fmt.Sprintf("packedview[%s.%s]", t.Enum.Name, t.Variant.Name)
 }
-func (t *TreeVariantViewType) String() string {
+
+func (t *TreeVariantViewType) SurfaceName() string {
 	if t == nil || t.Category == nil || t.Variant == nil {
 		return "<invalid-tree-view>"
 	}
-	return fmt.Sprintf("treeview[%s.%s]", t.Category.Name, t.Variant.Name)
+	return fmt.Sprintf("%s.%s", t.Category.Name, t.Variant.Name)
+}
+
+func (t *TreeVariantViewType) String() string {
+	return t.SurfaceName()
 }
 func (t *TreeType) String() string {
 	if t == nil {
