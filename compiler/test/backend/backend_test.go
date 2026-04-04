@@ -754,6 +754,43 @@ def run() -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersGenericBuilderStructFunctionFields(t *testing.T) {
+	src := `struct Box[T]:
+    value: T
+
+struct Builder[T]:
+    make: func(T) -> Box[T]
+
+def make_i64_box(value: i64) -> Box[i64]:
+    return Box[i64](value)
+
+def wrap[T](builder: Builder[T], value: T) -> Box[T]:
+    return builder.make(value)
+
+def run() -> i64:
+    builder: Builder[i64] = Builder[i64](make_i64_box)
+    boxed: Box[i64] = wrap(builder, 7)
+    return boxed.value
+`
+	result := parseAndAnalyze(t, "backend_generic_builder_struct_function_field.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	checks := []string{
+		"define %Box__i64 @wrap__i64(",
+		"define i64 @run()",
+		"store %Builder__i64 { ptr @make_i64_box }",
+		"call %Box__i64 %",
+	}
+	for _, check := range checks {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersPanicViaBacktraceAwareAbort(t *testing.T) {
 	src := `def fail() -> void:
 	panic("boom")

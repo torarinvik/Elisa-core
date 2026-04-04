@@ -865,6 +865,31 @@ def run() -> i64:
 	requireFunctionReturnTypeString(t, result, "run", "i64")
 }
 
+func TestAnalyzeAcceptsGenericBuilderStructFunctionFields(t *testing.T) {
+	src := `struct Box[T]:
+    value: T
+
+struct Builder[T]:
+    make: func(T) -> Box[T]
+
+def make_i64_box(value: i64) -> Box[i64]:
+    return Box[i64](value)
+
+def wrap[T](builder: Builder[T], value: T) -> Box[T]:
+    return builder.make(value)
+
+def run() -> i64:
+    builder: Builder[i64] = Builder[i64](make_i64_box)
+    boxed: Box[i64] = wrap(builder, 7)
+    return boxed.value
+`
+	result, errs := parseAndAnalyze(t, "generic_builder_struct_function_field.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "wrap", "Box[T]")
+	requireFunctionReturnTypeString(t, result, "run", "i64")
+}
+
 func TestAnalyzeAcceptsRefQualifierGenericFunctionInference(t *testing.T) {
 	src := `repr(c) struct Node:
 	value: mutable i32
