@@ -210,7 +210,7 @@ type TreeType struct {
 type TreeCategoryType struct {
 	Name       string
 	Family     *TreeType
-	Kind       string
+	Role       string
 	Common     map[string]Field
 	Variants   []*EnumVariant
 	VariantMap map[string]*EnumVariant

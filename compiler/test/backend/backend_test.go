@@ -2100,7 +2100,8 @@ func TestGenerateLLVMIRLowersTreeMembersAndFieldAccess(t *testing.T) {
 	src := `tree Lua:
 	common:
 		span: i64
-	expr Expr:
+	@role(expr)
+	node Expr:
 		Nil
 		Binary(left: Expr, right: Expr)
 	block Block:
@@ -2110,7 +2111,8 @@ func TestGenerateLLVMIRLowersTreeMembersAndFieldAccess(t *testing.T) {
 		body: Block
 
 def make_nil() -> Lua.Expr:
-	return Lua.Expr.Nil(span: 7)
+	in perm:
+		return Lua.Expr.Nil(span: 7)
 
 def span_of(node: Lua.Expr) -> i64:
 	return node.span

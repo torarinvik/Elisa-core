@@ -56,6 +56,7 @@ type functionState struct {
 	resultSlot                   C.LLVMValueRef
 	regions                      []regionBinding
 	packedStores                 map[string]packedStoreBinding
+	treeAllocOwner               treeAllocOwnerBinding
 	packedStoreValueKey1         packedStoreExtractCacheKey
 	packedStoreValue1            C.LLVMValueRef
 	packedStoreValueKey2         packedStoreExtractCacheKey
@@ -108,6 +109,11 @@ type regionBinding struct {
 type packedStoreBinding struct {
 	value C.LLVMValueRef
 	typ   *semantic.PackedEnumStoreType
+}
+
+type treeAllocOwnerBinding struct {
+	isPerm   bool
+	arenaRef C.LLVMValueRef
 }
 
 type packedStoreExtractCacheKey struct {
@@ -2014,13 +2020,23 @@ func (s *functionState) bindPackedStoreOriginsForExprPath(path string, expr ast.
 }
 
 func (s *functionState) emitInStore(stmt *ast.InStoreStmt) error {
+	savedTreeOwner := s.treeAllocOwner
+	if owner, ok, err := s.classifyTreeAllocOwnerExpr(stmt.Store); err != nil {
+		return err
+	} else if ok {
+		s.treeAllocOwner = owner
+		defer func() {
+			s.treeAllocOwner = savedTreeOwner
+		}()
+		return s.emitBlock(stmt.Body, true)
+	}
 	storeValue, actualType, err := s.emitExpr(stmt.Store, nil)
 	if err != nil {
 		return err
 	}
 	storeType, ok := actualType.(*semantic.PackedEnumStoreType)
 	if !ok {
-		return fmt.Errorf("in-store block requires a packed enum store, got %s", actualType.String())
+		return fmt.Errorf("in-block requires a packed enum store, perm, an Arena value, or an Arena reference, got %s", actualType.String())
 	}
 	savedStores := s.packedStores
 	s.packedStores = s.clonePackedStores()
@@ -2029,6 +2045,7 @@ func (s *functionState) emitInStore(stmt *ast.InStoreStmt) error {
 	}
 	s.packedStores[storeType.Enum.Name] = packedStoreBinding{value: storeValue, typ: storeType}
 	defer func() {
+		s.treeAllocOwner = savedTreeOwner
 		s.packedStores = savedStores
 	}()
 	return s.emitBlock(stmt.Body, true)

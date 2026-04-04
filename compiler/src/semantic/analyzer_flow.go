@@ -2698,16 +2698,33 @@ func (a *Analyzer) analyzeLockStmt(stmt *ast.LockStmt) {
 }
 
 func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
-	storeType := a.analyzeExpr(stmt.Store)
-	packedStore, ok := storeType.(*PackedEnumStoreType)
-	if !ok {
-		a.errorf(stmt.Store.Pos(), "in-store block requires a packed enum store, got %s", storeType.String())
-		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
-		return
-	}
 	savedPackedStores := a.currentPackedStores
 	savedPackedStoreResolutions := a.currentPackedStoreResolutions
 	savedPackedVariantViews := a.currentPackedVariantViews
+	savedTreeAllocOwner := a.currentTreeAllocOwner
+	if owner, _, ok := a.classifyTreeAllocOwnerExpr(stmt.Store); ok {
+		a.currentTreeAllocOwner = owner
+		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
+		a.currentTreeAllocOwner = savedTreeAllocOwner
+		a.currentPackedVariantViews = savedPackedVariantViews
+		a.currentPackedStores = savedPackedStores
+		a.currentPackedStoreResolutions = savedPackedStoreResolutions
+		return
+	}
+	storeType := a.exprTypes[stmt.Store]
+	if storeType == nil {
+		storeType = a.analyzeExpr(stmt.Store)
+	}
+	packedStore, ok := storeType.(*PackedEnumStoreType)
+	if !ok {
+		a.errorf(stmt.Store.Pos(), "in-block requires a packed enum store, perm, an Arena value, or an Arena reference, got %s", storeType.String())
+		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
+		a.currentTreeAllocOwner = savedTreeAllocOwner
+		a.currentPackedVariantViews = savedPackedVariantViews
+		a.currentPackedStores = savedPackedStores
+		a.currentPackedStoreResolutions = savedPackedStoreResolutions
+		return
+	}
 	a.currentPackedStores = a.clonePackedStores()
 	a.currentPackedStoreResolutions = a.clonePackedStoreResolutions()
 	if a.currentPackedStores == nil {
@@ -2715,6 +2732,7 @@ func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
 	}
 	a.currentPackedStores[packedStore.Enum.Name] = packedStore
 	a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
+	a.currentTreeAllocOwner = savedTreeAllocOwner
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
 	a.currentPackedStoreResolutions = savedPackedStoreResolutions

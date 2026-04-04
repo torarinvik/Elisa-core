@@ -455,7 +455,7 @@ func (p *Parser) parseTreeDeclWithAnnotations(annotations []ast.Annotation) *ast
 			commonFields = append(commonFields, p.parseTreeCommonFields()...)
 			continue
 		}
-		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "block" && p.peekTreeMemberHeader() {
+		if p.peekTreeMemberHeader("block") {
 			members = append(members, p.parseTreeBlockDecl(memberAnnotations))
 			continue
 		}
@@ -463,7 +463,7 @@ func (p *Parser) parseTreeDeclWithAnnotations(annotations []ast.Annotation) *ast
 			members = append(members, p.parseTreeStructMemberDecl(memberAnnotations))
 			continue
 		}
-		if p.peekTreeMemberHeader() {
+		if p.peekTreeMemberHeader("node") {
 			members = append(members, p.parseTreeCategoryDecl(memberAnnotations))
 			continue
 		}
@@ -493,13 +493,13 @@ func (p *Parser) parseTreeCommonFields() []ast.FieldDecl {
 	return fields
 }
 
-func (p *Parser) peekTreeMemberHeader() bool {
-	return p.peek() == lexer.TOKEN_IDENT && p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_COLON
+func (p *Parser) peekTreeMemberHeader(keyword string) bool {
+	return p.peek() == lexer.TOKEN_IDENT && p.cur().Text == keyword && p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_COLON
 }
 
 func (p *Parser) parseTreeCategoryDecl(annotations []ast.Annotation) *ast.TreeCategoryDecl {
 	pos := p.cur().Pos
-	kind := p.expect(lexer.TOKEN_IDENT).Text
+	p.expectIdentText("node")
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
@@ -515,7 +515,7 @@ func (p *Parser) parseTreeCategoryDecl(annotations []ast.Annotation) *ast.TreeCa
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.TreeCategoryDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Kind: kind, Name: name, Variants: variants}
+	return &ast.TreeCategoryDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Variants: variants}
 }
 
 func (p *Parser) parseTreeBlockDecl(annotations []ast.Annotation) *ast.TreeBlockDecl {

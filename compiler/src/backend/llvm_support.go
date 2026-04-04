@@ -983,6 +983,59 @@ func (s *functionState) clonePackedStores() map[string]packedStoreBinding {
 	return cloned
 }
 
+func stripTreeAllocOwnerExpr(expr ast.Expr) ast.Expr {
+	for expr != nil {
+		if paren, ok := expr.(*ast.ParenExpr); ok {
+			expr = paren.Inner
+			continue
+		}
+		return expr
+	}
+	return nil
+}
+
+func isTreeAllocPermExpr(expr ast.Expr) bool {
+	ident, ok := stripTreeAllocOwnerExpr(expr).(*ast.Ident)
+	return ok && ident != nil && ident.Name == "perm"
+}
+
+func (s *functionState) classifyTreeAllocOwnerExpr(expr ast.Expr) (treeAllocOwnerBinding, bool, error) {
+	if expr == nil {
+		return treeAllocOwnerBinding{}, false, nil
+	}
+	if isTreeAllocPermExpr(expr) {
+		return treeAllocOwnerBinding{isPerm: true}, true, nil
+	}
+	arenaType := s.g.result.NamedTypes["Arena"]
+	if arenaType == nil {
+		return treeAllocOwnerBinding{}, false, nil
+	}
+	ownerType := s.exprType(expr)
+	stripped := stripTreeAllocOwnerExpr(expr)
+	if ident, ok := stripped.(*ast.Ident); ok && semantic.SameType(ownerType, arenaType) {
+		binding, ok := s.lookupBinding(ident.Name)
+		if !ok {
+			return treeAllocOwnerBinding{}, false, fmt.Errorf("unknown Arena owner %q during LLVM lowering", ident.Name)
+		}
+		return treeAllocOwnerBinding{arenaRef: binding.ptr}, true, nil
+	}
+	if refType, ok := ownerType.(*semantic.RefType); ok && refType != nil && semantic.SameType(refType.Elem, arenaType) {
+		ownerValue, _, err := s.emitExpr(expr, ownerType)
+		if err != nil {
+			return treeAllocOwnerBinding{}, false, err
+		}
+		return treeAllocOwnerBinding{arenaRef: ownerValue}, true, nil
+	}
+	return treeAllocOwnerBinding{}, false, nil
+}
+
+func (s *functionState) lookupTreeAllocOwner() (treeAllocOwnerBinding, bool) {
+	if s.treeAllocOwner.isPerm || s.treeAllocOwner.arenaRef != nil {
+		return s.treeAllocOwner, true
+	}
+	return treeAllocOwnerBinding{}, false
+}
+
 func (s *functionState) lookupPackedStore(enumType *semantic.EnumType) (packedStoreBinding, bool) {
 	if s.packedStores == nil || enumType == nil {
 		return packedStoreBinding{}, false

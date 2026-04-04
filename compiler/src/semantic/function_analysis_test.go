@@ -226,7 +226,8 @@ func TestAnalyzeFunctionAnalysisCFGRecordsTreeGuardVariantCallFacts(t *testing.T
 	result := analyzeFunctionAnalysisTestSource(t, "tree_guard_variant_cfg.llcontext", `tree Lua:
 	common:
 		span: i64
-	expr Expr:
+	@role(expr)
+	node Expr:
 		Nil
 		Binary(left: Expr, right: Expr)
 

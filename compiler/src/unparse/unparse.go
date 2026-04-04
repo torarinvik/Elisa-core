@@ -233,7 +233,7 @@ func (f *formatter) writeTreeMember(level int, member ast.TreeMemberDecl) {
 	switch n := member.(type) {
 	case *ast.TreeCategoryDecl:
 		f.writeAnnotations(level, n.Annotations)
-		f.writeLine(level, n.Kind+" "+n.Name+":")
+		f.writeLine(level, "node "+n.Name+":")
 		for _, variant := range n.Variants {
 			f.writeLine(level+1, formatEnumVariantDecl(variant))
 		}

@@ -692,7 +692,7 @@ func printTreeMember(w io.Writer, member ast.TreeMemberDecl, level int) {
 		for _, annotation := range n.Annotations {
 			fmt.Fprintf(w, "%s%s\n", prefix, formatAnnotation(annotation))
 		}
-		fmt.Fprintf(w, "%s%s %s: (%d variants)\n", prefix, n.Kind, n.Name, len(n.Variants))
+		fmt.Fprintf(w, "%snode %s: (%d variants)\n", prefix, n.Name, len(n.Variants))
 	case *ast.TreeBlockDecl:
 		for _, annotation := range n.Annotations {
 			fmt.Fprintf(w, "%s%s\n", prefix, formatAnnotation(annotation))

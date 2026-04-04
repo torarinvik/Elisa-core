@@ -85,7 +85,6 @@ type TreeMemberDecl interface {
 type TreeCategoryDecl struct {
 	Position    lexer.Pos
 	Annotations []Annotation
-	Kind        string
 	Name        string
 	Variants    []EnumVariantDecl
 }

@@ -56,15 +56,18 @@ func TestGenerateLLVMIRLowersTreeConstructorsAndIsExprPatterns(t *testing.T) {
 	src := `tree Lua:
 	common:
 		span: i64
-	expr Expr:
+	@role(expr)
+	node Expr:
 		Nil
 		Binary(left: Expr, right: Expr)
 
 def make_nil() -> Lua.Expr:
-	return Lua.Expr.Nil(span: 1)
+	in perm:
+		return Lua.Expr.Nil(span: 1)
 
 def make_binary(span: i64, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr:
-	return Lua.Expr.Binary(span: span, left: left, right: right)
+	in perm:
+		return Lua.Expr.Binary(span: span, left: left, right: right)
 
 def child_span(node: Lua.Expr) -> i64:
 	if node is Lua.Expr.Binary:
@@ -86,11 +89,41 @@ def starts_with_nil(node: Lua.Expr) -> bool:
 	}
 }
 
+func TestGenerateLLVMIRLowersTreeConstructorsWithArenaOwners(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Nil
+		Binary(left: Expr, right: Expr)
+
+def build(owner: Arena) -> Lua.Expr:
+	alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+	in alloc:
+		left: Lua.Expr = Lua.Expr.Nil(span: 1)
+		right: Lua.Expr = new[alloc] Lua.Expr.Nil(span: 2)
+		return Lua.Expr.Binary(span: 3, left: left, right: right)
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_owner_scope.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "@arena_alloc") {
+		t.Fatalf("expected tree arena owner lowering to call arena_alloc, got:\n%s", output)
+	}
+	if strings.Contains(output, "@alloc_perm") {
+		t.Fatalf("expected tree arena owner lowering to avoid alloc_perm, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersFirstClassTreeViewWithoutExtraCarrier(t *testing.T) {
 	src := `tree Lua:
 	common:
 		span: i64
-	expr Expr:
+	@role(expr)
+	node Expr:
 		Nil
 		Binary(left: Expr, right: Expr)
 
@@ -121,7 +154,8 @@ func TestGenerateLLVMIRLowersBareTreeVariantSurfaceTypeWithoutExtraCarrier(t *te
 	src := `tree Lua:
 	common:
 		span: i64
-	expr Expr:
+	@role(expr)
+	node Expr:
 		Nil
 		Binary(left: Expr, right: Expr)
 
@@ -152,7 +186,8 @@ func TestGenerateLLVMIRLowersTreeMatchStatementsAndExpressions(t *testing.T) {
 	src := `tree Lua:
 	common:
 		span: i64
-	expr Expr:
+	@role(expr)
+	node Expr:
 		Nil
 		Int(value: i64)
 		Binary(left: Expr, right: Expr)
@@ -189,7 +224,8 @@ func TestGenerateLLVMIRLowersTreeOpenAndViewStatements(t *testing.T) {
 	src := `tree Lua:
 	common:
 		span: i64
-	expr Expr:
+	@role(expr)
+	node Expr:
 		Nil
 		Int(value: i64)
 		Binary(left: Expr, right: Expr)

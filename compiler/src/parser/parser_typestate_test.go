@@ -809,7 +809,7 @@ func TestParsePackedViewSurfaceType(t *testing.T) {
 }
 
 func TestParseTreeViewSurfaceType(t *testing.T) {
-	file, errs := parseSourceFile(t, "tree Lua:\n    common:\n        span: i64\n    expr Expr:\n        Nil\n        Binary(left: Expr, right: Expr)\n\ndef keep(view_value: treeview[Lua.Expr.Binary]) -> treeview[Lua.Expr.Binary]:\n    return view_value\n")
+	file, errs := parseSourceFile(t, "tree Lua:\n    common:\n        span: i64\n    @role(expr)\n    node Expr:\n        Nil\n        Binary(left: Expr, right: Expr)\n\ndef keep(view_value: treeview[Lua.Expr.Binary]) -> treeview[Lua.Expr.Binary]:\n    return view_value\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}

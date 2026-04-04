@@ -9,7 +9,7 @@ import (
 )
 
 func TestParseTreeDeclWithAnnotationsAndMembers(t *testing.T) {
-	file, errs := parseSourceFile(t, "@packed_profile(retained_reads)\ntree Lua:\n    common:\n        @storage(side_table)\n        span: LuaSpan\n    @packed_profile(retained_reads)\n    expr Expr:\n        Nil\n        Binary(op: LuaBinaryOp, left: Expr, right: Expr)\n    stmt Stmt:\n        Return(value: Expr)\n    block Block:\n        stmts: List[Stmt]\n    struct ElseIf:\n        condition: Expr\n        body: Block\n")
+	file, errs := parseSourceFile(t, "@packed_profile(retained_reads)\ntree Lua:\n    common:\n        @storage(side_table)\n        span: LuaSpan\n    @role(expr)\n    @packed_profile(retained_reads)\n    node Expr:\n        Nil\n        Binary(op: LuaBinaryOp, left: Expr, right: Expr)\n    @role(stmt)\n    node Stmt:\n        Return(value: Expr)\n    block Block:\n        stmts: List[Stmt]\n    struct ElseIf:\n        condition: Expr\n        body: Block\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -38,21 +38,24 @@ func TestParseTreeDeclWithAnnotationsAndMembers(t *testing.T) {
 
 	exprMember, ok := decl.Members[0].(*ast.TreeCategoryDecl)
 	if !ok {
-		t.Fatalf("expected expr category member, got %T", decl.Members[0])
+		t.Fatalf("expected node member, got %T", decl.Members[0])
 	}
-	if exprMember.Kind != "expr" || exprMember.Name != "Expr" || len(exprMember.Variants) != 2 {
-		t.Fatalf("unexpected expr category member: %#v", exprMember)
+	if exprMember.Name != "Expr" || len(exprMember.Variants) != 2 {
+		t.Fatalf("unexpected Expr node member: %#v", exprMember)
 	}
-	if len(exprMember.Annotations) != 1 || exprMember.Annotations[0].Name != "packed_profile" {
-		t.Fatalf("expected expr category annotation, got %#v", exprMember.Annotations)
+	if len(exprMember.Annotations) != 2 || exprMember.Annotations[0].Name != "role" || len(exprMember.Annotations[0].Args) != 1 || exprMember.Annotations[0].Args[0] != "expr" || exprMember.Annotations[1].Name != "packed_profile" {
+		t.Fatalf("expected stacked Expr node annotations, got %#v", exprMember.Annotations)
 	}
 
 	stmtMember, ok := decl.Members[1].(*ast.TreeCategoryDecl)
 	if !ok {
-		t.Fatalf("expected stmt category member, got %T", decl.Members[1])
+		t.Fatalf("expected node member, got %T", decl.Members[1])
 	}
-	if stmtMember.Kind != "stmt" || stmtMember.Name != "Stmt" || len(stmtMember.Variants) != 1 {
-		t.Fatalf("unexpected stmt category member: %#v", stmtMember)
+	if stmtMember.Name != "Stmt" || len(stmtMember.Variants) != 1 {
+		t.Fatalf("unexpected Stmt node member: %#v", stmtMember)
+	}
+	if len(stmtMember.Annotations) != 1 || stmtMember.Annotations[0].Name != "role" || len(stmtMember.Annotations[0].Args) != 1 || stmtMember.Annotations[0].Args[0] != "stmt" {
+		t.Fatalf("expected @role(stmt) on Stmt node, got %#v", stmtMember.Annotations)
 	}
 
 	blockMember, ok := decl.Members[2].(*ast.TreeBlockDecl)
@@ -75,7 +78,7 @@ func TestParseTreeDeclWithAnnotationsAndMembers(t *testing.T) {
 	}
 
 	formatted := unparse.FormatDecl(decl)
-	for _, want := range []string{"tree Lua:", "expr Expr:", "stmt Stmt:", "block Block:", "struct ElseIf:"} {
+	for _, want := range []string{"tree Lua:", "@role(expr)", "node Expr:", "@role(stmt)", "node Stmt:", "block Block:", "struct ElseIf:"} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected formatted tree decl to contain %q, got:\n%s", want, formatted)
 		}
@@ -83,7 +86,7 @@ func TestParseTreeDeclWithAnnotationsAndMembers(t *testing.T) {
 }
 
 func TestParseTreeDeclPreservesGenericCategoryNames(t *testing.T) {
-	file, errs := parseSourceFile(t, "tree Compiler:\n    pattern Pattern:\n        Bind(name: Symbol)\n")
+	file, errs := parseSourceFile(t, "tree Compiler:\n    @role(pattern)\n    node Pattern:\n        Bind(name: Symbol)\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -95,8 +98,11 @@ func TestParseTreeDeclPreservesGenericCategoryNames(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected tree category member, got %T", decl.Members[0])
 	}
-	if member.Kind != "pattern" || member.Name != "Pattern" {
-		t.Fatalf("expected pattern Pattern category, got %#v", member)
+	if member.Name != "Pattern" {
+		t.Fatalf("expected Pattern node, got %#v", member)
+	}
+	if len(member.Annotations) != 1 || member.Annotations[0].Name != "role" || len(member.Annotations[0].Args) != 1 || member.Annotations[0].Args[0] != "pattern" {
+		t.Fatalf("expected @role(pattern) on Pattern node, got %#v", member.Annotations)
 	}
 	if len(member.Variants) != 1 || member.Variants[0].Name != "Bind" {
 		t.Fatalf("expected Bind variant in pattern category, got %#v", member.Variants)

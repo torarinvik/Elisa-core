@@ -222,7 +222,7 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		} else if constEnumType, member, ok := s.constEnumMemberInfo(n); ok {
 			value, actualType, err = s.emitConstEnumMemberExpr(constEnumType, member)
 		} else if treeType, variant, ok := s.treeConstructorInfoFromField(n); ok && variant != nil && len(variant.Payload) == 0 {
-			value, actualType, err = s.emitTreeConstructorValue(nil, treeType, variant, nil, nil)
+			value, actualType, err = s.emitTreeConstructorValue(nil, treeType, variant, nil, nil, nil)
 		} else if enumType, variant, ok := s.enumConstructorInfoFromField(n); ok && variant != nil && len(variant.Payload) == 0 {
 			if enumType != nil && enumType.Packed {
 				store, ok := s.lookupPackedStore(enumType)
@@ -3536,6 +3536,22 @@ func (s *functionState) emitAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, sema
 	if expr.Owner == nil {
 		return s.emitScopedPackedAllocExpr(expr)
 	}
+	if treeType, variant, callExpr, ok := s.treeAllocConstructorInfo(expr.Value); ok {
+		if variant == nil {
+			return nil, nil, fmt.Errorf("unknown tree constructor")
+		}
+		owner, ownerOK, err := s.classifyTreeAllocOwnerExpr(expr.Owner)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !ownerOK {
+			return nil, nil, fmt.Errorf("tree allocation owner must be perm, an Arena value, or an Arena reference")
+		}
+		return s.emitTreeConstructorValue(callExpr, treeType, variant, treeAllocArgs(callExpr), treeAllocArgNames(callExpr), &owner)
+	}
+	if isTreeAllocPermExpr(expr.Owner) {
+		return nil, nil, fmt.Errorf("new[perm] expects a tree constructor")
+	}
 	if _, ok := s.exprType(expr.Owner).(*semantic.PackedEnumStoreType); ok {
 		return s.emitPackedAllocExpr(expr)
 	}
@@ -3900,7 +3916,7 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 		if variant == nil {
 			return nil, nil, fmt.Errorf("unknown tree constructor")
 		}
-		return s.emitTreeConstructorValue(expr, treeType, variant, expr.Args, expr.ArgNames)
+		return s.emitTreeConstructorValue(expr, treeType, variant, expr.Args, expr.ArgNames, nil)
 	}
 	if value, actualType, handled, err := s.emitProofCarryingViewHelperCall(expr); handled {
 		return value, actualType, err
@@ -4678,7 +4694,7 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, sema
 			return nil, nil, fmt.Errorf("unknown tree constructor %s.%s", treeType.Name, expr.Field)
 		}
 		if len(variant.Payload) == 0 {
-			return s.emitTreeConstructorValue(nil, treeType, variant, nil, nil)
+			return s.emitTreeConstructorValue(nil, treeType, variant, nil, nil, nil)
 		}
 	}
 	if enumType, variant, ok := s.enumConstructorInfoFromField(expr); ok {
@@ -6111,6 +6127,39 @@ func (s *functionState) treeConstructorInfoFromField(expr *ast.FieldExpr) (*sema
 	return treeType, variant, true
 }
 
+func (s *functionState) treeAllocConstructorInfo(expr ast.Expr) (*semantic.TreeCategoryType, *semantic.EnumVariant, *ast.CallExpr, bool) {
+	switch n := expr.(type) {
+	case *ast.FieldExpr:
+		treeType, variant, ok := s.treeConstructorInfoFromField(n)
+		if !ok {
+			return nil, nil, nil, false
+		}
+		if variant != nil && len(variant.Payload) != 0 {
+			return nil, nil, nil, false
+		}
+		return treeType, variant, nil, true
+	case *ast.CallExpr:
+		treeType, variant, ok := s.treeConstructorInfo(n)
+		return treeType, variant, n, ok
+	default:
+		return nil, nil, nil, false
+	}
+}
+
+func treeAllocArgs(callExpr *ast.CallExpr) []ast.Expr {
+	if callExpr != nil {
+		return callExpr.Args
+	}
+	return nil
+}
+
+func treeAllocArgNames(callExpr *ast.CallExpr) []string {
+	if callExpr != nil {
+		return callExpr.ArgNames
+	}
+	return nil
+}
+
 func qualifiedFieldOwnerAndLeaf(expr *ast.FieldExpr) (string, string, bool) {
 	parts, ok := qualifiedFieldParts(expr)
 	if !ok || len(parts) < 2 {
@@ -6257,7 +6306,7 @@ func (s *functionState) emitTreeIsTest(leftExpr ast.Expr, treeType *semantic.Tre
 	return cmp, s.g.result.NamedTypes["bool"], nil
 }
 
-func (s *functionState) emitTreeCategoryAlloc(treeType *semantic.TreeCategoryType) (C.LLVMValueRef, error) {
+func (s *functionState) emitTreeCategoryAlloc(treeType *semantic.TreeCategoryType, owner treeAllocOwnerBinding) (C.LLVMValueRef, error) {
 	if treeType == nil {
 		return nil, fmt.Errorf("missing tree constructor metadata")
 	}
@@ -6268,6 +6317,33 @@ func (s *functionState) emitTreeCategoryAlloc(treeType *semantic.TreeCategoryTyp
 	storageBytes, err := s.g.abiSizeOfLLVMType(storageType)
 	if err != nil {
 		return nil, err
+	}
+	if !owner.isPerm {
+		if owner.arenaRef == nil {
+			return nil, fmt.Errorf("missing Arena owner for tree constructor")
+		}
+		usizeType := s.g.result.NamedTypes["usize"]
+		usizeLLVMType, err := s.g.lowerType(usizeType)
+		if err != nil {
+			return nil, err
+		}
+		sizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(storageBytes), 0)
+		arenaType := s.g.result.NamedTypes["Arena"]
+		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+		voidType := s.g.result.NamedTypes["void"]
+		voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+		allocType := s.g.cachedRuntimeHelperType("arena_alloc", func() *semantic.FuncType {
+			return &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
+		})
+		callee, err := s.g.ensureFunctionDeclared("arena_alloc", allocType)
+		if err != nil {
+			return nil, err
+		}
+		llvmFnType, err := s.g.lowerFunctionType(allocType)
+		if err != nil {
+			return nil, err
+		}
+		return s.buildCall(llvmFnType, callee, []C.LLVMValueRef{owner.arenaRef, sizeValue}, "tree.region.alloc"), nil
 	}
 	voidType := s.g.result.NamedTypes["void"]
 	heapVoidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageHeap, ExplicitStorage: true}
@@ -6286,9 +6362,19 @@ func (s *functionState) emitTreeCategoryAlloc(treeType *semantic.TreeCategoryTyp
 	return s.buildCall(llvmFnType, callee, []C.LLVMValueRef{sizeValue}, "tree.alloc"), nil
 }
 
-func (s *functionState) emitTreeConstructorValue(callExpr *ast.CallExpr, treeType *semantic.TreeCategoryType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitTreeConstructorValue(callExpr *ast.CallExpr, treeType *semantic.TreeCategoryType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string, owner *treeAllocOwnerBinding) (C.LLVMValueRef, semantic.Type, error) {
 	if treeType == nil || variant == nil {
 		return nil, nil, fmt.Errorf("missing tree constructor metadata")
+	}
+	resolvedOwner := treeAllocOwnerBinding{}
+	if owner != nil {
+		resolvedOwner = *owner
+	} else {
+		activeOwner, ok := s.lookupTreeAllocOwner()
+		if !ok {
+			return nil, nil, fmt.Errorf("tree constructor %s.%s requires an active in <owner>: scope or explicit new[owner]", treeType.Name, variant.Name)
+		}
+		resolvedOwner = activeOwner
 	}
 	orderedArgs, commonArgs, err := s.resolveTreeConstructorArgs(callExpr, treeType, variant, args, argNames)
 	if err != nil {
@@ -6301,7 +6387,7 @@ func (s *functionState) emitTreeConstructorValue(callExpr *ast.CallExpr, treeTyp
 	if err != nil {
 		return nil, nil, err
 	}
-	nodePtr, err := s.emitTreeCategoryAlloc(treeType)
+	nodePtr, err := s.emitTreeCategoryAlloc(treeType, resolvedOwner)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -47,10 +47,12 @@ func TestAnalyzeRegistersTreeFamilyAndMembers(t *testing.T) {
     common:
         @storage(side_table)
         span: i64
-    expr Expr:
+    @role(expr)
+    node Expr:
         Nil
         Binary(op: i32, left: Expr, right: Expr)
-    stmt Stmt:
+    @role(stmt)
+    node Stmt:
         Return(value: Expr)
     block Block:
         stmts: darray[Stmt]
@@ -77,7 +79,7 @@ func TestAnalyzeRegistersTreeFamilyAndMembers(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected Lua.Expr tree category type, got %T", result.NamedTypes["Lua.Expr"])
 	}
-	if exprType.Kind != "expr" || exprType.Family != family {
+	if exprType.Role != "expr" || exprType.Family != family {
 		t.Fatalf("unexpected expr category metadata: %#v", exprType)
 	}
 	if len(exprType.Common) != 1 {
@@ -135,7 +137,7 @@ func TestAnalyzeRegistersTreeFamilyAndMembers(t *testing.T) {
 
 func TestAnalyzeRejectsDuplicateTreeMemberTypes(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_duplicate_member.llcontext", `tree Lua:
-    expr Expr:
+    node Expr:
         Nil
     struct Expr:
         value: i64
@@ -146,11 +148,32 @@ func TestAnalyzeRejectsDuplicateTreeMemberTypes(t *testing.T) {
 	}
 }
 
+func TestAnalyzeTreeCategoryRoleDirectives(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_role_directives.llcontext", `tree Lua:
+    @role(expr)
+    @role(stmt)
+    node Expr:
+        Nil
+
+    @role
+    node Broken:
+        Nil
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `duplicate @role annotation on tree node "Expr"`) {
+		t.Fatalf("expected duplicate @role diagnostic, got:\n%s", all)
+	}
+	if !strings.Contains(all, `@role on tree node "Broken" expects exactly one role argument`) {
+		t.Fatalf("expected malformed @role diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeTreeFieldAccess(t *testing.T) {
 	analyzeTreeTestSource(t, "tree_field_access.llcontext", `tree Lua:
 	common:
 		span: i64
-	expr Expr:
+	@role(expr)
+	node Expr:
 		Nil
 	block Block:
 		stmts: darray[i64]
@@ -173,15 +196,18 @@ func TestAnalyzeTreeVariantConstructorsAndIsExpr(t *testing.T) {
 	analyzeTreeTestSource(t, "tree_variant_behaviors.llcontext", `tree Lua:
 	common:
 		span: i64
-	expr Expr:
+	@role(expr)
+	node Expr:
 		Nil
 		Binary(left: Expr, right: Expr)
 
 def make_nil() -> Lua.Expr:
-	return Lua.Expr.Nil
+	in perm:
+		return Lua.Expr.Nil
 
 def make_binary(span: i64, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr:
-	return Lua.Expr.Binary(span: span, left: left, right: right)
+	in perm:
+		return Lua.Expr.Binary(span: span, left: left, right: right)
 
 def child_span(node: Lua.Expr) -> i64:
 	if node is Lua.Expr.Binary:
@@ -193,11 +219,51 @@ def starts_with_nil(node: Lua.Expr) -> bool:
 `)
 }
 
+func TestAnalyzeTreeConstructorsSupportExplicitAndScopedOwners(t *testing.T) {
+	analyzeTreeTestSource(t, "tree_owner_surface.llcontext", `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Nil
+		Binary(left: Expr, right: Expr)
+
+def build(owner: Arena) -> Lua.Expr:
+	alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+	in alloc:
+		left: Lua.Expr = Lua.Expr.Nil(span: 1)
+		right: Lua.Expr = new[alloc] Lua.Expr.Nil(span: 2)
+		return Lua.Expr.Binary(span: 3, left: left, right: right)
+
+def build_perm() -> Lua.Expr:
+	return new[perm] Lua.Expr.Nil(span: 7)
+`)
+}
+
+func TestAnalyzeRejectsBareTreeConstructorsOutsideOwnerScope(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_owner_required.llcontext", `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Nil
+		Binary(left: Expr, right: Expr)
+
+def make_nil() -> Lua.Expr:
+	return Lua.Expr.Nil(span: 1)
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `tree constructor "Lua.Expr.Nil" requires an active in <owner>: scope or explicit new[owner]`) {
+		t.Fatalf("expected bare tree constructor owner diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeTreeViewSurfaceTypeAndRefinedCalls(t *testing.T) {
 	analyzeTreeTestSource(t, "tree_view_surface.llcontext", `tree Lua:
 	common:
 		span: i64
-	expr Expr:
+	@role(expr)
+	node Expr:
 		Nil
 		Binary(left: Expr, right: Expr)
 
@@ -219,7 +285,8 @@ func TestAnalyzeTreeVariantBareTypeSugarAndRefinedCalls(t *testing.T) {
 	analyzeTreeTestSource(t, "tree_variant_bare_type_surface.llcontext", `tree Lua:
 	common:
 		span: i64
-	expr Expr:
+	@role(expr)
+	node Expr:
 		Nil
 		Binary(left: Expr, right: Expr)
 
@@ -241,7 +308,8 @@ func TestAnalyzeTreeMatchStatementsAndExpressions(t *testing.T) {
 	analyzeTreeTestSource(t, "tree_match_surface.llcontext", `tree Lua:
 	common:
 		span: i64
-	expr Expr:
+	@role(expr)
+	node Expr:
 		Nil
 		Int(value: i64)
 		Binary(left: Expr, right: Expr)
@@ -268,7 +336,8 @@ func TestAnalyzeTreeOpenAndViewStatements(t *testing.T) {
 	analyzeTreeTestSource(t, "tree_open_view_surface.llcontext", `tree Lua:
 	common:
 		span: i64
-	expr Expr:
+	@role(expr)
+	node Expr:
 		Nil
 		Int(value: i64)
 		Binary(left: Expr, right: Expr)
@@ -293,7 +362,8 @@ func TestAnalyzeRejectsTreeOpenAndViewStoreClauses(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_open_view_store_reject.llcontext", `tree Lua:
 	common:
 		span: i64
-	expr Expr:
+	@role(expr)
+	node Expr:
 		Int(value: i64)
 
 def bad_open(node: Lua.Expr, slot: i64) -> i64:

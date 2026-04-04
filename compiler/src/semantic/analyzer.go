@@ -108,6 +108,7 @@ type Analyzer struct {
 	currentPackedVariantViews         map[*Symbol]*PackedVariantViewType
 	currentPackedStores               map[string]*PackedEnumStoreType
 	currentPackedStoreResolutions     map[*Symbol]packedStoreResolution
+	currentTreeAllocOwner             treeAllocOwnerBinding
 	currentPoolScopes                 []poolScopeState
 	currentFunctionUsedPermissions    map[string]bool
 	currentFunctionUsedPermissionRefs []ast.PermissionRef
@@ -155,6 +156,20 @@ type packedStoreDependencyState struct {
 type packedStoreResolution struct {
 	Symbol *Symbol
 	Type   *PackedEnumStoreType
+}
+
+type treeAllocOwnerKind int
+
+const (
+	treeAllocOwnerNone treeAllocOwnerKind = iota
+	treeAllocOwnerPerm
+	treeAllocOwnerRegion
+	treeAllocOwnerArena
+)
+
+type treeAllocOwnerBinding struct {
+	Kind       treeAllocOwnerKind
+	RegionName string
 }
 
 type regionRefState struct {
@@ -691,7 +706,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					var memberType Type
 					switch m := member.(type) {
 					case *ast.TreeCategoryDecl:
-						memberType = &TreeCategoryType{Name: memberQualifiedName, Family: treeType, Kind: m.Kind, Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: m}
+						memberType = &TreeCategoryType{Name: memberQualifiedName, Family: treeType, Role: a.treeCategoryRole(m), Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: m}
 					case *ast.TreeBlockDecl:
 						memberType = &TreeBlockType{Name: memberQualifiedName, Family: treeType, Fields: map[string]Field{}, Decl: m}
 					case *ast.TreeStructDecl:
@@ -984,6 +999,36 @@ func (a *Analyzer) populateTreeCategoryDecl(treeType *TreeType, categoryDecl *as
 		variants = append(variants, variant)
 	}
 	category.Variants = variants
+}
+
+func (a *Analyzer) treeCategoryRole(categoryDecl *ast.TreeCategoryDecl) string {
+	if categoryDecl == nil || len(categoryDecl.Annotations) == 0 {
+		return ""
+	}
+	role := ""
+	var rolePos lexer.Pos
+	seenRole := false
+	for _, annotation := range categoryDecl.Annotations {
+		if annotation.Name != "role" {
+			continue
+		}
+		if seenRole {
+			a.errorf(annotation.Position, "duplicate @role annotation on tree node %q (first seen at %s:%d:%d)", categoryDecl.Name, rolePos.File, rolePos.Line, rolePos.Col)
+			continue
+		}
+		seenRole = true
+		rolePos = annotation.Position
+		if len(annotation.Args) != 1 {
+			a.errorf(annotation.Position, "@role on tree node %q expects exactly one role argument", categoryDecl.Name)
+			continue
+		}
+		if strings.TrimSpace(annotation.Args[0]) == "" {
+			a.errorf(annotation.Position, "@role on tree node %q expects a non-empty role argument", categoryDecl.Name)
+			continue
+		}
+		role = annotation.Args[0]
+	}
+	return role
 }
 
 func (a *Analyzer) populateTreeBlockDecl(treeType *TreeType, blockDecl *ast.TreeBlockDecl) {

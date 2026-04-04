@@ -160,6 +160,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			}
 			return
 		}
+		if treeType, variant, ok := a.treeConstructorInfoFromFieldExpr(n); ok && treeType != nil && variant != nil && len(variant.Payload) == 0 {
+			a.requireActiveTreeConstructorOwner(n.Pos(), treeType, variant)
+		}
 		if treeType, ctorType, ok := a.treeVariantExprType(n); ok {
 			if ctorType != nil {
 				result = ctorType
@@ -496,6 +499,24 @@ func (a *Analyzer) analyzeAllocExpr(expr *ast.AllocExpr) Type {
 	if expr.Owner == nil {
 		return a.analyzeScopedPackedAllocExpr(expr)
 	}
+	if treeType, variant, callExpr, ok := a.treeAllocConstructorInfo(expr.Value); ok {
+		owner, ownerType, ownerOK := a.classifyTreeAllocOwnerExpr(expr.Owner)
+		if !ownerOK {
+			ownerLabel := "<invalid>"
+			if ownerType != nil {
+				ownerLabel = ownerType.String()
+			}
+			a.errorf(allocOwnerPos(expr), "tree allocation owner must be perm, an Arena value, or an Arena reference, got %s", ownerLabel)
+			return a.analyzeTreeAllocExpr(expr, treeType, variant, callExpr)
+		}
+		_ = owner
+		return a.analyzeTreeAllocExpr(expr, treeType, variant, callExpr)
+	}
+	if isTreeAllocPermExpr(expr.Owner) {
+		valueType := a.analyzeExpr(expr.Value)
+		a.errorf(expr.Value.Pos(), "new[perm] expects a tree constructor, got %s", valueType.String())
+		return invalidType
+	}
 	ownerType := a.analyzeExpr(expr.Owner)
 	if storeType, ok := ownerType.(*PackedEnumStoreType); ok {
 		return a.analyzePackedAllocExpr(expr, storeType)
@@ -522,6 +543,113 @@ func (a *Analyzer) analyzeAllocExpr(expr *ast.AllocExpr) Type {
 	}
 	valueType := a.analyzeExpr(expr.Value)
 	return &RefType{Elem: valueType, State: RefStateNonNull, Storage: RefStorageAny, Region: ident.Name, ExplicitStorage: true}
+}
+
+func stripTreeAllocOwnerExpr(expr ast.Expr) ast.Expr {
+	for expr != nil {
+		if paren, ok := expr.(*ast.ParenExpr); ok {
+			expr = paren.Inner
+			continue
+		}
+		return expr
+	}
+	return nil
+}
+
+func isTreeAllocPermExpr(expr ast.Expr) bool {
+	ident, ok := stripTreeAllocOwnerExpr(expr).(*ast.Ident)
+	return ok && ident != nil && ident.Name == "perm"
+}
+
+func (a *Analyzer) classifyTreeAllocOwnerExpr(expr ast.Expr) (treeAllocOwnerBinding, Type, bool) {
+	if expr == nil {
+		return treeAllocOwnerBinding{}, invalidType, false
+	}
+	if isTreeAllocPermExpr(expr) {
+		return treeAllocOwnerBinding{Kind: treeAllocOwnerPerm}, nil, true
+	}
+	ownerType := a.analyzeExpr(expr)
+	arenaType := a.namedTypes["Arena"]
+	if arenaType == nil {
+		return treeAllocOwnerBinding{}, ownerType, false
+	}
+	stripped := stripTreeAllocOwnerExpr(expr)
+	if ident, ok := stripped.(*ast.Ident); ok && SameType(ownerType, arenaType) {
+		if regionSym, state := a.lookupRegionState(ident.Name); regionSym != nil {
+			if state.Destroyed {
+				a.errorf(expr.Pos(), "cannot allocate from destroyed region %q", ident.Name)
+				return treeAllocOwnerBinding{}, ownerType, false
+			}
+			return treeAllocOwnerBinding{Kind: treeAllocOwnerRegion, RegionName: ident.Name}, ownerType, true
+		}
+		return treeAllocOwnerBinding{Kind: treeAllocOwnerArena}, ownerType, true
+	}
+	if refType, ok := ownerType.(*RefType); ok && refType != nil && SameType(refType.Elem, arenaType) {
+		return treeAllocOwnerBinding{Kind: treeAllocOwnerArena}, ownerType, true
+	}
+	return treeAllocOwnerBinding{}, ownerType, false
+}
+
+func (a *Analyzer) requireActiveTreeConstructorOwner(pos lexer.Pos, treeType *TreeCategoryType, variant *EnumVariant) bool {
+	if treeType == nil || variant == nil {
+		return false
+	}
+	constructorName := treeType.Name + "." + variant.Name
+	switch a.currentTreeAllocOwner.Kind {
+	case treeAllocOwnerPerm, treeAllocOwnerArena:
+		return true
+	case treeAllocOwnerRegion:
+		if a.currentTreeAllocOwner.RegionName != "" {
+			if regionSym, state := a.lookupRegionState(a.currentTreeAllocOwner.RegionName); regionSym == nil || state.Destroyed {
+				a.errorf(pos, "tree constructor %q cannot allocate from destroyed region %q", constructorName, a.currentTreeAllocOwner.RegionName)
+				return false
+			}
+		}
+		return true
+	default:
+		a.errorf(pos, "tree constructor %q requires an active in <owner>: scope or explicit new[owner]", constructorName)
+		return false
+	}
+}
+
+func (a *Analyzer) treeAllocConstructorInfo(expr ast.Expr) (*TreeCategoryType, *EnumVariant, *ast.CallExpr, bool) {
+	switch n := expr.(type) {
+	case *ast.FieldExpr:
+		treeType, variant, ok := a.treeConstructorInfoFromFieldExpr(n)
+		if !ok {
+			return nil, nil, nil, false
+		}
+		if variant != nil && len(variant.Payload) != 0 {
+			return nil, nil, nil, false
+		}
+		return treeType, variant, nil, true
+	case *ast.CallExpr:
+		treeType, variant, ok := a.treeConstructorCall(n)
+		return treeType, variant, n, ok
+	default:
+		return nil, nil, nil, false
+	}
+}
+
+func (a *Analyzer) analyzeTreeAllocExpr(expr *ast.AllocExpr, treeType *TreeCategoryType, variant *EnumVariant, callExpr *ast.CallExpr) Type {
+	if treeType == nil {
+		if expr != nil && expr.Value != nil {
+			a.analyzeExpr(expr.Value)
+		}
+		return invalidType
+	}
+	if variant == nil {
+		if callExpr != nil {
+			for _, arg := range callExpr.Args {
+				a.analyzeExpr(arg)
+			}
+		}
+		return invalidType
+	}
+	if callExpr == nil {
+		return treeType
+	}
+	return a.analyzeTreeConstructorCallExpr(callExpr, treeType, variant)
 }
 
 func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
@@ -561,6 +689,14 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		return state, true
 	case *ast.AllocExpr:
 		if n.Owner != nil {
+			if _, _, _, ok := a.treeAllocConstructorInfo(n.Value); ok {
+				if isTreeAllocPermExpr(n.Owner) {
+					return regionRefState{}, false
+				}
+				if owner, _, ownerOK := a.classifyTreeAllocOwnerExpr(n.Owner); ownerOK && owner.Kind != treeAllocOwnerNone {
+					return regionRefState{}, false
+				}
+			}
 			if ownerType := a.exprTypes[n.Owner]; ownerType != nil {
 				if _, ok := ownerType.(*PackedEnumStoreType); ok {
 					ownerState, ownerOK := a.regionRefStateForExpr(n.Owner)
@@ -3344,51 +3480,10 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 		return enumType
 	}
 	if treeType, variant, ok := a.treeConstructorCall(expr); ok {
-		if variant == nil {
-			for _, arg := range expr.Args {
-				a.analyzeExpr(arg)
-			}
-			return invalidType
+		if variant != nil {
+			a.requireActiveTreeConstructorOwner(expr.Pos(), treeType, variant)
 		}
-		orderedArgs, commonArgs, ok := a.resolveTreeConstructorArgs(expr, treeType, variant)
-		if !ok {
-			return treeType
-		}
-		if len(orderedArgs) != len(variant.Payload) {
-			a.errorf(expr.Pos(), "tree constructor %q expects %d arguments, got %d", treeType.Name+"."+variant.Name, len(variant.Payload), len(expr.Args))
-		}
-		limit := len(orderedArgs)
-		if len(variant.Payload) < limit {
-			limit = len(variant.Payload)
-		}
-		for i := 0; i < len(orderedArgs); i++ {
-			if i < limit {
-				actual := a.analyzeValueExpr(orderedArgs[i], variant.Payload[i])
-				if !AssignableTo(variant.Payload[i], actual) {
-					label := variant.PayloadLabel(i)
-					if label != "" {
-						a.errorf(orderedArgs[i].Pos(), "tree constructor argument %d (%s) to %q expects %s, got %s", i+1, label, treeType.Name+"."+variant.Name, variant.Payload[i].String(), actual.String())
-					} else {
-						a.errorf(orderedArgs[i].Pos(), "tree constructor argument %d to %q expects %s, got %s", i+1, treeType.Name+"."+variant.Name, variant.Payload[i].String(), actual.String())
-					}
-				}
-				a.consumeAffineValueExpr(orderedArgs[i], variant.Payload[i], a.variantConstructorMoveReason("tree", treeType.Name, variant, i))
-			} else {
-				a.analyzeExpr(orderedArgs[i])
-			}
-		}
-		for commonName, field := range treeType.Common {
-			arg, ok := commonArgs[commonName]
-			if !ok {
-				continue
-			}
-			actual := a.analyzeValueExpr(arg, field.Type)
-			if !AssignableTo(field.Type, actual) {
-				a.errorf(arg.Pos(), "tree common field %q for %q expects %s, got %s", commonName, treeType.Name+"."+variant.Name, field.Type.String(), actual.String())
-			}
-			a.consumeAffineValueExpr(arg, field.Type, "move into tree common field "+strconv.Quote(commonName))
-		}
-		return treeType
+		return a.analyzeTreeConstructorCallExpr(expr, treeType, variant)
 	}
 	fnType := a.analyzeExpr(expr.Func)
 	ft, ok := fnType.(*FuncType)
@@ -3540,6 +3635,57 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	}
 	a.bindFreshReturnShapes(appliedType, shapeBindings)
 	return a.substituteType(appliedType.Return, bindings, shapeBindings, regionBindings, permissionBindings)
+}
+
+func (a *Analyzer) analyzeTreeConstructorCallExpr(expr *ast.CallExpr, treeType *TreeCategoryType, variant *EnumVariant) Type {
+	if expr == nil || treeType == nil {
+		return invalidType
+	}
+	if variant == nil {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return invalidType
+	}
+	orderedArgs, commonArgs, ok := a.resolveTreeConstructorArgs(expr, treeType, variant)
+	if !ok {
+		return treeType
+	}
+	if len(orderedArgs) != len(variant.Payload) {
+		a.errorf(expr.Pos(), "tree constructor %q expects %d arguments, got %d", treeType.Name+"."+variant.Name, len(variant.Payload), len(expr.Args))
+	}
+	limit := len(orderedArgs)
+	if len(variant.Payload) < limit {
+		limit = len(variant.Payload)
+	}
+	for i := 0; i < len(orderedArgs); i++ {
+		if i < limit {
+			actual := a.analyzeValueExpr(orderedArgs[i], variant.Payload[i])
+			if !AssignableTo(variant.Payload[i], actual) {
+				label := variant.PayloadLabel(i)
+				if label != "" {
+					a.errorf(orderedArgs[i].Pos(), "tree constructor argument %d (%s) to %q expects %s, got %s", i+1, label, treeType.Name+"."+variant.Name, variant.Payload[i].String(), actual.String())
+				} else {
+					a.errorf(orderedArgs[i].Pos(), "tree constructor argument %d to %q expects %s, got %s", i+1, treeType.Name+"."+variant.Name, variant.Payload[i].String(), actual.String())
+				}
+			}
+			a.consumeAffineValueExpr(orderedArgs[i], variant.Payload[i], a.variantConstructorMoveReason("tree", treeType.Name, variant, i))
+		} else {
+			a.analyzeExpr(orderedArgs[i])
+		}
+	}
+	for commonName, field := range treeType.Common {
+		arg, ok := commonArgs[commonName]
+		if !ok {
+			continue
+		}
+		actual := a.analyzeValueExpr(arg, field.Type)
+		if !AssignableTo(field.Type, actual) {
+			a.errorf(arg.Pos(), "tree common field %q for %q expects %s, got %s", commonName, treeType.Name+"."+variant.Name, field.Type.String(), actual.String())
+		}
+		a.consumeAffineValueExpr(arg, field.Type, "move into tree common field "+strconv.Quote(commonName))
+	}
+	return treeType
 }
 
 func (a *Analyzer) tryConsumeSinkCallArg(funcExpr ast.Expr, fnType *FuncType, index int, arg ast.Expr, expected Type) bool {
