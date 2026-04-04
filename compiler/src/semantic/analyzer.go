@@ -698,6 +698,15 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 				}
 				treeType := &TreeType{Name: qualifiedName, Common: map[string]Field{}, MemberTypes: map[string]Type{}, Decl: n}
 				a.namedTypes[qualifiedName] = treeType
+				nodeQualifiedName := treeMemberTypeName(qualifiedName, "Node")
+				if _, exists := a.namedTypes[nodeQualifiedName]; exists {
+					a.errorf(n.Pos(), "duplicate type %q", nodeQualifiedName)
+					return
+				}
+				nodeType := &TreeNodeType{Name: nodeQualifiedName, Family: treeType}
+				treeType.NodeType = nodeType
+				a.namedTypes[nodeQualifiedName] = nodeType
+				treeType.MemberTypes["Node"] = nodeType
 				for _, member := range n.Members {
 					memberName := treeMemberDeclName(member)
 					if memberName == "" {

@@ -253,6 +253,20 @@ func appendBasicFlowExprInstrs(block *CFGBlock, expr ast.Expr) {
 				appendBasicFlowInstrsForNode(block, stmt)
 			}
 		}
+	case *ast.VisitExpr:
+		appendBasicFlowExprInstrs(block, n.Value)
+		for _, arm := range n.Arms {
+			for _, stmt := range arm.Body {
+				appendBasicFlowInstrsForNode(block, stmt)
+			}
+		}
+	case *ast.FoldExpr:
+		appendBasicFlowExprInstrs(block, n.Value)
+		for _, arm := range n.Arms {
+			for _, stmt := range arm.Body {
+				appendBasicFlowInstrsForNode(block, stmt)
+			}
+		}
 	}
 }
 
@@ -653,6 +667,20 @@ func (a *Analyzer) appendImplicitSinkFlowInstrsForExpr(block *CFGBlock, expr ast
 	case *ast.MatchExpr:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Value)
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Store)
+		for _, arm := range n.Arms {
+			for _, stmt := range arm.Body {
+				a.appendImplicitSinkFlowInstrsForNode(block, stmt)
+			}
+		}
+	case *ast.VisitExpr:
+		a.appendImplicitSinkFlowInstrsForExpr(block, n.Value)
+		for _, arm := range n.Arms {
+			for _, stmt := range arm.Body {
+				a.appendImplicitSinkFlowInstrsForNode(block, stmt)
+			}
+		}
+	case *ast.FoldExpr:
+		a.appendImplicitSinkFlowInstrsForExpr(block, n.Value)
 		for _, arm := range n.Arms {
 			for _, stmt := range arm.Body {
 				a.appendImplicitSinkFlowInstrsForNode(block, stmt)

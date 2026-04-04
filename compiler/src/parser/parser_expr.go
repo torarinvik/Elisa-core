@@ -794,6 +794,80 @@ func (p *Parser) parseMatchExpr() ast.Expr {
 	return &ast.MatchExpr{Position: pos, Value: value, Store: store, Arms: arms}
 }
 
+func (p *Parser) parseVisitExpr() ast.Expr {
+	pos := p.cur().Pos
+	p.expectIdentText("visit")
+	value := p.parseExpr()
+	var root ast.TypeExpr
+	if p.match(lexer.TOKEN_AS) {
+		root = p.parseTypeExpr()
+	}
+	arms := p.parseVisitArms()
+	return &ast.VisitExpr{Position: pos, Value: value, Root: root, Arms: arms}
+}
+
+func (p *Parser) parseFoldExpr() ast.Expr {
+	pos := p.cur().Pos
+	p.expectIdentText("fold")
+	value := p.parseExpr()
+	p.expect(lexer.TOKEN_AS)
+	root := p.parseTypeExpr()
+	p.expectIdentText("into")
+	resultType := p.parseTypeExpr()
+	arms := p.parseVisitArms()
+	return &ast.FoldExpr{Position: pos, Value: value, Root: root, ResultType: resultType, Arms: arms}
+}
+
+func (p *Parser) parseQualifiedTargetName() (string, lexer.Pos) {
+	pos := p.cur().Pos
+	parts := []string{p.expect(lexer.TOKEN_IDENT).Text}
+	for p.match(lexer.TOKEN_DOT) {
+		parts = append(parts, p.expect(lexer.TOKEN_IDENT).Text)
+	}
+	return strings.Join(parts, "."), pos
+}
+
+func (p *Parser) parseVisitArms() []ast.VisitArm {
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+
+	arms := make([]ast.VisitArm, 0)
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		arms = append(arms, p.parseVisitArm())
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	return arms
+}
+
+func (p *Parser) parseVisitArm() ast.VisitArm {
+	pos := p.cur().Pos
+	arm := ast.VisitArm{Position: pos}
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_" {
+		p.advance()
+		arm.Wildcard = true
+	} else {
+		arm.TargetName, _ = p.parseQualifiedTargetName()
+		if p.match(lexer.TOKEN_LPAREN) {
+			if p.peek() != lexer.TOKEN_RPAREN {
+				arm.BindName = p.expect(lexer.TOKEN_IDENT).Text
+				if p.match(lexer.TOKEN_COMMA) {
+					arm.ChildResultsName = p.expect(lexer.TOKEN_IDENT).Text
+				}
+			}
+			p.expect(lexer.TOKEN_RPAREN)
+		}
+	}
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	arm.Body = p.parseBlock()
+	return arm
+}
+
 func (p *Parser) parseCallArgs() ([]ast.Expr, []string) {
 	argCapacity := p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN)
 	args := make([]ast.Expr, 0, argCapacity)
@@ -996,6 +1070,12 @@ func (p *Parser) parsePrimary() ast.Expr {
 	case lexer.TOKEN_MATCH:
 		return p.parseMatchExpr()
 	case lexer.TOKEN_IDENT:
+		if p.cur().Text == "visit" && !(p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LPAREN) {
+			return p.parseVisitExpr()
+		}
+		if p.cur().Text == "fold" && !(p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LPAREN) {
+			return p.parseFoldExpr()
+		}
 		tok := p.advance()
 		if len(tok.Text) > 0 && tok.Text[0] >= 'A' && tok.Text[0] <= 'Z' && p.peekStructLiteralTypeArgCall() {
 			typeArgs := p.parseStructLiteralTypeArgs()

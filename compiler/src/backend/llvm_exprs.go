@@ -247,6 +247,10 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, actualType, err = s.emitAllocExpr(n)
 	case *ast.MatchExpr:
 		value, actualType, err = s.emitMatchExpr(n)
+	case *ast.VisitExpr:
+		value, actualType, err = s.emitVisitExpr(n)
+	case *ast.FoldExpr:
+		return nil, nil, fmt.Errorf("fold expression lowering is not implemented yet")
 	case *ast.IndexExpr:
 		value, actualType, err = s.emitIndexExpr(n)
 	case *ast.SliceExpr:

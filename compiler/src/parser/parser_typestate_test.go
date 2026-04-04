@@ -876,6 +876,54 @@ func TestParseOpenAndViewRemainContextualIdentifiers(t *testing.T) {
 	}
 }
 
+func TestParseTreeVisitAndFoldExprs(t *testing.T) {
+	file, errs := parseSourceFile(t, "tree Lua:\n    common:\n        span: i64\n    @role(expr)\n    node Expr:\n        Nil\n        Binary(child left: Expr, child right: Expr)\n\ndef kind(node: Lua.Expr) -> i64:\n    return visit node:\n        Lua.Expr.Nil(expr):\n            0\n        Lua.Expr.Binary(expr):\n            expr.left.span\n\ndef score(node: Lua.Expr) -> i64:\n    return fold node as Lua.Node into i64:\n        Lua.Expr.Nil(expr, children):\n            expr.span + children.len.i64()\n        Lua.Expr.Binary(expr, children):\n            children[0u] + children[1u] + expr.span\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	kindDecl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected first func decl, got %T", file.Decls[1])
+	}
+	retKind, ok := kindDecl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", kindDecl.Body[0])
+	}
+	visitExpr, ok := retKind.Value.(*ast.VisitExpr)
+	if !ok {
+		t.Fatalf("expected visit expr, got %T", retKind.Value)
+	}
+	if visitExpr.Root != nil {
+		t.Fatalf("expected implicit visit root, got %#v", visitExpr.Root)
+	}
+	if len(visitExpr.Arms) != 2 || visitExpr.Arms[1].BindName != "expr" {
+		t.Fatalf("unexpected visit arms: %#v", visitExpr.Arms)
+	}
+	foldDecl, ok := file.Decls[2].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected second func decl, got %T", file.Decls[2])
+	}
+	retFold, ok := foldDecl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", foldDecl.Body[0])
+	}
+	foldExpr, ok := retFold.Value.(*ast.FoldExpr)
+	if !ok {
+		t.Fatalf("expected fold expr, got %T", retFold.Value)
+	}
+	rootType, ok := foldExpr.Root.(*ast.NamedType)
+	if !ok || rootType.Name != "Lua.Node" {
+		t.Fatalf("expected fold root Lua.Node, got %#v", foldExpr.Root)
+	}
+	resultType, ok := foldExpr.ResultType.(*ast.NamedType)
+	if !ok || resultType.Name != "i64" {
+		t.Fatalf("expected fold result i64, got %#v", foldExpr.ResultType)
+	}
+	if len(foldExpr.Arms) != 2 || foldExpr.Arms[0].ChildResultsName != "children" {
+		t.Fatalf("unexpected fold arms: %#v", foldExpr.Arms)
+	}
+}
+
 func TestParseDeferStatements(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep() -> int:\n    defer block:\n        pass\n    defer function:\n        pass\n    return 0\n")
 	if len(errs) != 0 {

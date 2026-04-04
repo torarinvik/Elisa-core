@@ -265,6 +265,12 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	case *ast.MatchExpr:
 		result = a.analyzeMatchExpr(n)
 		return
+	case *ast.VisitExpr:
+		result = a.analyzeVisitExpr(n)
+		return
+	case *ast.FoldExpr:
+		result = a.analyzeFoldExpr(n)
+		return
 	case *ast.IndexExpr:
 		result = a.analyzeIndexExpr(n)
 		return

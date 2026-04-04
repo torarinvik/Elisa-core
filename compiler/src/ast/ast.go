@@ -653,6 +653,30 @@ type MatchExpr struct {
 	Arms     []MatchArm
 }
 
+type VisitExpr struct {
+	Position lexer.Pos
+	Value    Expr
+	Root     TypeExpr
+	Arms     []VisitArm
+}
+
+type FoldExpr struct {
+	Position   lexer.Pos
+	Value      Expr
+	Root       TypeExpr
+	ResultType TypeExpr
+	Arms       []VisitArm
+}
+
+type VisitArm struct {
+	Position         lexer.Pos
+	TargetName       string
+	BindName         string
+	ChildResultsName string
+	Wildcard         bool
+	Body             []Stmt
+}
+
 type MatchPattern interface {
 	Node
 	matchPatternTag()
@@ -1047,6 +1071,8 @@ func (n *UnwrapElseExpr) Pos() lexer.Pos   { return n.Position }
 func (n *AllocExpr) Pos() lexer.Pos        { return n.Position }
 func (n *CanExpr) Pos() lexer.Pos          { return n.Position }
 func (n *MatchExpr) Pos() lexer.Pos        { return n.Position }
+func (n *VisitExpr) Pos() lexer.Pos        { return n.Position }
+func (n *FoldExpr) Pos() lexer.Pos         { return n.Position }
 func (n *MatchWildcardPattern) Pos() lexer.Pos {
 	return n.Position
 }
@@ -1161,6 +1187,8 @@ func (*UnwrapElseExpr) nodeTag()            {}
 func (*AllocExpr) nodeTag()                 {}
 func (*CanExpr) nodeTag()                   {}
 func (*MatchExpr) nodeTag()                 {}
+func (*VisitExpr) nodeTag()                 {}
+func (*FoldExpr) nodeTag()                  {}
 func (*MatchWildcardPattern) nodeTag()      {}
 func (*MatchBindPattern) nodeTag()          {}
 func (*MatchStringLiteralPattern) nodeTag() {}
@@ -1276,6 +1304,8 @@ func (*TypeExprExpr) exprTag()                      {}
 func (*ParenExpr) exprTag()                         {}
 func (*RaiseExpr) exprTag()                         {}
 func (*MatchExpr) exprTag()                         {}
+func (*VisitExpr) exprTag()                         {}
+func (*FoldExpr) exprTag()                          {}
 func (*MatchStmt) stmtTag()                         {}
 func (*TryExpr) exprTag()                           {}
 func (*UnwrapElseExpr) exprTag()                    {}

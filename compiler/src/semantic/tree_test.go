@@ -140,6 +140,10 @@ func TestAnalyzeRegistersTreeFamilyAndMembers(t *testing.T) {
 	if !ok || !SameType(memberExpr, exprType) {
 		t.Fatalf("expected family member lookup for Expr to resolve to Lua.Expr, got %#v", memberExpr)
 	}
+	nodeRoot, ok := result.NamedTypes["Lua.Node"].(*TreeNodeType)
+	if !ok || nodeRoot.Family != family {
+		t.Fatalf("expected synthesized Lua.Node tree root, got %#v", result.NamedTypes["Lua.Node"])
+	}
 }
 
 func TestAnalyzeRejectsDuplicateTreeMemberTypes(t *testing.T) {
@@ -443,6 +447,66 @@ def count_binary(binary: Lua.Expr.Binary) -> i64:
 	for child in children(binary):
 		total <- total + child.span
 	return total
+`)
+}
+
+func TestAnalyzeTreeVisitExpr(t *testing.T) {
+	analyzeTreeTestSource(t, "tree_visit_surface.llcontext", `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Nil
+		Int(value: i64)
+		Binary(child left: Expr, child right: Expr)
+
+def score(node: Lua.Expr) -> i64:
+	return visit node:
+		Lua.Expr.Nil(expr):
+			expr.span
+		Lua.Expr.Int(expr):
+			expr.value
+		Lua.Expr.Binary(expr):
+			expr.left.span + expr.right.span
+`)
+}
+
+func TestAnalyzeTreeVisitExactMemberExpr(t *testing.T) {
+	analyzeTreeTestSource(t, "tree_visit_exact_member_surface.llcontext", `tree Lua:
+	@role(stmt)
+	node Stmt:
+		ExprStmt(child expr: Expr)
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+	block Block:
+		stmts: darray[Stmt]
+
+def stmt_total(block: Lua.Block) -> i64:
+	return visit block:
+		Lua.Block(node):
+			node.stmts.count.i64()
+`)
+}
+
+func TestAnalyzeTreeFoldExpr(t *testing.T) {
+	analyzeTreeTestSource(t, "tree_fold_surface.llcontext", `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Nil
+		Int(value: i64)
+		Binary(child left: Expr, child right: Expr)
+
+def score(node: Lua.Expr) -> i64:
+	return fold node as Lua.Node into i64:
+		Lua.Expr.Nil(expr, children):
+			expr.span + children.len.i64()
+		Lua.Expr.Int(expr, children):
+			expr.value + children.len.i64()
+		Lua.Expr.Binary(expr, children):
+			children[0u] + children[1u] + expr.span
 `)
 }
 

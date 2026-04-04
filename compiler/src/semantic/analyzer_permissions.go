@@ -628,6 +628,16 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		for _, arm := range n.Arms {
 			c.collectStmts(arm.Body)
 		}
+	case *ast.VisitExpr:
+		c.collectExpr(n.Value)
+		for _, arm := range n.Arms {
+			c.collectStmts(arm.Body)
+		}
+	case *ast.FoldExpr:
+		c.collectExpr(n.Value)
+		for _, arm := range n.Arms {
+			c.collectStmts(arm.Body)
+		}
 	}
 }
 
@@ -845,6 +855,16 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		if n.Store != nil {
 			a.validatePermissionExpr(n.Store, granted)
 		}
+		for _, arm := range n.Arms {
+			a.validatePermissionStmts(arm.Body, cloneGrantedPermissionFamilies(granted))
+		}
+	case *ast.VisitExpr:
+		a.validatePermissionExpr(n.Value, granted)
+		for _, arm := range n.Arms {
+			a.validatePermissionStmts(arm.Body, cloneGrantedPermissionFamilies(granted))
+		}
+	case *ast.FoldExpr:
+		a.validatePermissionExpr(n.Value, granted)
 		for _, arm := range n.Arms {
 			a.validatePermissionStmts(arm.Body, cloneGrantedPermissionFamilies(granted))
 		}

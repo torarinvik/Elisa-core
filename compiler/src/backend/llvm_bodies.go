@@ -3828,6 +3828,211 @@ func (s *functionState) emitTreeMatchExpr(expr *ast.MatchExpr, resultType semant
 	return phi, resultType, nil
 }
 
+type treeVisitRelevantArm struct {
+	arm      ast.VisitArm
+	variant  *semantic.EnumVariant
+	wildcard bool
+}
+
+func exactTreeVisitArm(memberName string, arms []ast.VisitArm) (ast.VisitArm, bool, bool) {
+	for _, arm := range arms {
+		if arm.Wildcard {
+			return arm, true, true
+		}
+		if arm.TargetName == memberName {
+			return arm, true, false
+		}
+	}
+	return ast.VisitArm{}, false, false
+}
+
+func (s *functionState) treeVisitRelevantArms(categoryType *semantic.TreeCategoryType, arms []ast.VisitArm) ([]treeVisitRelevantArm, bool, error) {
+	relevant := make([]treeVisitRelevantArm, 0, len(arms))
+	exhaustive := false
+	covered := map[string]bool{}
+	for _, arm := range arms {
+		if arm.Wildcard {
+			relevant = append(relevant, treeVisitRelevantArm{arm: arm, wildcard: true})
+			exhaustive = true
+			continue
+		}
+		idx := strings.LastIndex(arm.TargetName, ".")
+		if idx <= 0 || idx+1 >= len(arm.TargetName) {
+			continue
+		}
+		categoryName := arm.TargetName[:idx]
+		variantName := arm.TargetName[idx+1:]
+		if categoryName != categoryType.Name {
+			continue
+		}
+		variant, ok := categoryType.Variant(variantName)
+		if !ok {
+			return nil, false, fmt.Errorf("tree category %s has no variant %s", categoryType.Name, variantName)
+		}
+		relevant = append(relevant, treeVisitRelevantArm{arm: arm, variant: variant})
+		covered[variant.Name] = true
+	}
+	if !exhaustive && categoryType != nil {
+		exhaustive = len(covered) == len(categoryType.Variants)
+	}
+	return relevant, exhaustive, nil
+}
+
+func (s *functionState) emitVisitExpr(expr *ast.VisitExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if expr == nil {
+		return nil, nil, fmt.Errorf("missing visit expression")
+	}
+	actualType := s.exprType(expr.Value)
+	resultType := s.exprType(expr)
+	switch tt := semantic.StripAggregateStateType(actualType).(type) {
+	case *semantic.TreeBlockType:
+		return s.emitExactTreeVisitExpr(expr, tt.Name, tt, resultType)
+	case *semantic.TreeStructType:
+		return s.emitExactTreeVisitExpr(expr, tt.Name, tt, resultType)
+	}
+	categoryType, _, ok := resolveMatchableTreeCategoryTypeBackend(actualType)
+	if !ok || categoryType == nil {
+		return nil, nil, fmt.Errorf("visit expression lowering currently requires a tree category, tree block, or tree struct source, got %s", actualType.String())
+	}
+	treeValue, _, err := s.emitExpr(expr.Value, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	relevantArms, exhaustive, err := s.treeVisitRelevantArms(categoryType, expr.Arms)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(relevantArms) == 0 {
+		return nil, nil, fmt.Errorf("visit expression over %s has no relevant arms", categoryType.Name)
+	}
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("visit.expr.end"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("visit.expr.fail"))
+	incomingValues := make([]C.LLVMValueRef, 0, len(relevantArms)+1)
+	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(relevantArms)+1)
+
+	for i, armInfo := range relevantArms {
+		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("visit.expr.arm"))
+		var nextBB C.LLVMBasicBlockRef
+		if i == len(relevantArms)-1 {
+			nextBB = failBB
+		} else {
+			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("visit.expr.next"))
+		}
+		if armInfo.wildcard {
+			C.LLVMBuildBr(s.builder, bodyBB)
+		} else {
+			matchPattern := &ast.MatchVariantPattern{Position: armInfo.arm.Position, EnumName: categoryType.Name, Variant: armInfo.variant.Name}
+			if _, _, err := s.emitMatchPatternTest(matchPattern, treeValue, nil, actualType, nil, expr.Value, nil, bodyBB, nextBB); err != nil {
+				return nil, nil, err
+			}
+		}
+		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+		s.pushScope()
+		if armInfo.arm.BindName != "" && armInfo.arm.BindName != "_" && armInfo.variant != nil {
+			viewType := categoryType.VariantViewType(armInfo.variant)
+			if err := s.emitMoveBindLocal(armInfo.arm.BindName, viewType, treeValue); err != nil {
+				s.popScope()
+				return nil, nil, err
+			}
+		}
+		armValue, reachable, err := s.emitMatchExprArmBody(armInfo.arm.Body, resultType)
+		if err != nil {
+			s.popScope()
+			return nil, nil, err
+		}
+		if reachable && !s.currentBlockTerminated() {
+			armEnd := C.LLVMGetInsertBlock(s.builder)
+			incomingValues = append(incomingValues, armValue)
+			incomingBlocks = append(incomingBlocks, armEnd)
+			C.LLVMBuildBr(s.builder, mergeBB)
+		}
+		s.popScope()
+		if nextBB != mergeBB && !armInfo.wildcard {
+			C.LLVMPositionBuilderAtEnd(s.builder, nextBB)
+		}
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	if semantic.IsNeverType(resultType) || exhaustive {
+		C.LLVMBuildUnreachable(s.builder)
+	} else {
+		llvmType, err := s.g.lowerType(resultType)
+		if err != nil {
+			return nil, nil, err
+		}
+		undefValue := C.LLVMGetUndef(llvmType)
+		failEnd := C.LLVMGetInsertBlock(s.builder)
+		incomingValues = append(incomingValues, undefValue)
+		incomingBlocks = append(incomingBlocks, failEnd)
+		C.LLVMBuildBr(s.builder, mergeBB)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	if len(incomingValues) == 0 {
+		C.LLVMBuildUnreachable(s.builder)
+		return nil, resultType, nil
+	}
+	if len(incomingValues) == 1 || semantic.IsNeverType(resultType) {
+		return incomingValues[0], resultType, nil
+	}
+	llvmType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, err
+	}
+	phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree("visit.expr.phi"))
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+	return phi, resultType, nil
+}
+
+func (s *functionState) emitExactTreeVisitExpr(expr *ast.VisitExpr, memberName string, bindType semantic.Type, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+	value, _, err := s.emitExpr(expr.Value, bindType)
+	if err != nil {
+		return nil, nil, err
+	}
+	arm, ok, _ := exactTreeVisitArm(memberName, expr.Arms)
+	if !ok {
+		if semantic.IsNeverType(resultType) {
+			C.LLVMBuildUnreachable(s.builder)
+			return nil, resultType, nil
+		}
+		llvmType, err := s.g.lowerType(resultType)
+		if err != nil {
+			return nil, nil, err
+		}
+		return C.LLVMGetUndef(llvmType), resultType, nil
+	}
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("visit.exact.end"))
+	bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("visit.exact.arm"))
+	C.LLVMBuildBr(s.builder, bodyBB)
+	C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+	s.pushScope()
+	if arm.BindName != "" && arm.BindName != "_" {
+		if err := s.emitMoveBindLocal(arm.BindName, bindType, value); err != nil {
+			s.popScope()
+			return nil, nil, err
+		}
+	}
+	armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, resultType)
+	if err != nil {
+		s.popScope()
+		return nil, nil, err
+	}
+	var incomingValue C.LLVMValueRef
+	hasIncoming := false
+	if reachable && !s.currentBlockTerminated() {
+		incomingValue = armValue
+		hasIncoming = true
+		C.LLVMBuildBr(s.builder, mergeBB)
+	}
+	s.popScope()
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	if !hasIncoming {
+		C.LLVMBuildUnreachable(s.builder)
+		return nil, resultType, nil
+	}
+	return incomingValue, resultType, nil
+}
+
 func matchHasWildcard(arms []ast.MatchArm) bool {
 	for _, arm := range arms {
 		if _, ok := arm.Pattern.(*ast.MatchWildcardPattern); ok {
@@ -4975,6 +5180,26 @@ func exprReadsMatchedValueField(name string, expr ast.Expr) bool {
 		return exprReadsMatchedValueField(name, n.Owner) || exprReadsMatchedValueField(name, n.Value)
 	case *ast.MatchExpr:
 		return exprReadsMatchedValueField(name, n.Value) || exprReadsMatchedValueField(name, n.Store) || matchArmsReadMatchedValueField(name, n.Arms)
+	case *ast.VisitExpr:
+		if exprReadsMatchedValueField(name, n.Value) {
+			return true
+		}
+		for _, arm := range n.Arms {
+			if stmtsReadMatchedValueField(name, arm.Body) {
+				return true
+			}
+		}
+		return false
+	case *ast.FoldExpr:
+		if exprReadsMatchedValueField(name, n.Value) {
+			return true
+		}
+		for _, arm := range n.Arms {
+			if stmtsReadMatchedValueField(name, arm.Body) {
+				return true
+			}
+		}
+		return false
 	default:
 		return false
 	}

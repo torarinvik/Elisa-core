@@ -157,6 +157,9 @@ func SameType(a, b Type) bool {
 	case *TreeVariantViewType:
 		tb, ok := b.(*TreeVariantViewType)
 		return ok && SameType(ta.Category, tb.Category) && ta.Variant != nil && tb.Variant != nil && ta.Variant.Name == tb.Variant.Name
+	case *TreeNodeType:
+		tb, ok := b.(*TreeNodeType)
+		return ok && ta.Name == tb.Name
 	case *TreeType:
 		tb, ok := b.(*TreeType)
 		return ok && ta.Name == tb.Name
@@ -375,6 +378,18 @@ func AssignableTo(dst, src Type) bool {
 				return dr.StateParam == sr.StateParam && dr.StorageParam == sr.StorageParam && refStateAssignable(dr.State, sr.State) && refRegionAssignable(dr.Region, sr.Region)
 			}
 			return refStateAssignable(dr.State, sr.State) && refStorageAssignable(dr.Storage, sr.Storage, dr.ExplicitStorage, sr.ExplicitStorage) && refRegionAssignable(dr.Region, sr.Region)
+		}
+	}
+	if dstNode, ok := dst.(*TreeNodeType); ok && dstNode != nil {
+		switch srcTree := StripAggregateStateType(src).(type) {
+		case *TreeCategoryType:
+			return srcTree.Family == dstNode.Family
+		case *TreeVariantViewType:
+			return srcTree.Category != nil && srcTree.Category.Family == dstNode.Family
+		case *TreeBlockType:
+			return srcTree.Family == dstNode.Family
+		case *TreeStructType:
+			return srcTree.Family == dstNode.Family
 		}
 	}
 	return false

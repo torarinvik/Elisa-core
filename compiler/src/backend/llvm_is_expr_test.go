@@ -287,3 +287,62 @@ def count_nodes(node: Lua.Expr) -> i64:
 		}
 	}
 }
+
+func TestGenerateLLVMIRLowersTreeVisitExpr(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Nil
+		Int(value: i64)
+		Binary(child left: Expr, child right: Expr)
+
+def score(node: Lua.Expr) -> i64:
+	return visit node:
+		Lua.Expr.Nil(expr):
+			expr.span
+		Lua.Expr.Int(expr):
+			expr.value
+		Lua.Expr.Binary(expr):
+			expr.left.span + expr.right.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_visit_expr.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i64 @score(ptr ", "visit.expr.arm", "visit.expr.phi", "match.tree.tag", "tree.payload.field"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected tree visit lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersExactTreeVisitExpr(t *testing.T) {
+	src := `tree Lua:
+	@role(stmt)
+	node Stmt:
+		ExprStmt(child expr: Expr)
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+	block Block:
+		stmts: darray[Stmt]
+
+def stmt_total(block: Lua.Block) -> i64:
+	return visit block:
+		Lua.Block(node):
+			node.stmts.count.i64()
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_visit_exact_expr.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i64 @stmt_total(%Lua.Block", "visit.exact.arm", "visit.exact.end"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected exact tree visit lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}

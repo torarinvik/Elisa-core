@@ -800,6 +800,16 @@ func (a *Analyzer) validateDeferStmtBodyExpr(expr ast.Expr) {
 		for _, arm := range n.Arms {
 			a.validateDeferStmtBody(arm.Body)
 		}
+	case *ast.VisitExpr:
+		a.validateDeferStmtBodyExpr(n.Value)
+		for _, arm := range n.Arms {
+			a.validateDeferStmtBody(arm.Body)
+		}
+	case *ast.FoldExpr:
+		a.validateDeferStmtBodyExpr(n.Value)
+		for _, arm := range n.Arms {
+			a.validateDeferStmtBody(arm.Body)
+		}
 	}
 }
 
@@ -2498,6 +2508,34 @@ func (c *deferCaptureCollector) collectExpr(expr ast.Expr, locals map[string]boo
 				c.collectStmt(innerStmt, armLocals)
 			}
 		}
+	case *ast.VisitExpr:
+		c.collectExpr(n.Value, locals)
+		for _, arm := range n.Arms {
+			armLocals := cloneParallelForLocals(locals)
+			if arm.BindName != "" {
+				armLocals[arm.BindName] = true
+			}
+			if arm.ChildResultsName != "" {
+				armLocals[arm.ChildResultsName] = true
+			}
+			for _, innerStmt := range arm.Body {
+				c.collectStmt(innerStmt, armLocals)
+			}
+		}
+	case *ast.FoldExpr:
+		c.collectExpr(n.Value, locals)
+		for _, arm := range n.Arms {
+			armLocals := cloneParallelForLocals(locals)
+			if arm.BindName != "" {
+				armLocals[arm.BindName] = true
+			}
+			if arm.ChildResultsName != "" {
+				armLocals[arm.ChildResultsName] = true
+			}
+			for _, innerStmt := range arm.Body {
+				c.collectStmt(innerStmt, armLocals)
+			}
+		}
 	}
 }
 
@@ -3005,6 +3043,475 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 	}
 	return invalidType
 
+}
+
+type treeVisitRootKind int
+
+const (
+	treeVisitRootKindCategory treeVisitRootKind = iota
+	treeVisitRootKindExact
+	treeVisitRootKindFamily
+)
+
+type treeVisitRootInfo struct {
+	Kind     treeVisitRootKind
+	Family   *TreeType
+	Category *TreeCategoryType
+	Exact    Type
+}
+
+type treeVisitArmInfo struct {
+	Arm      ast.VisitArm
+	Key      string
+	BindType Type
+	Category *TreeCategoryType
+	Variant  *EnumVariant
+	Exact    Type
+}
+
+func resolveTreeVisitSourceType(actual Type) (Type, *TreeType, bool) {
+	actual = StripAggregateStateType(actual)
+	switch tt := actual.(type) {
+	case *TreeCategoryType:
+		if tt == nil || tt.Family == nil {
+			return nil, nil, false
+		}
+		return tt, tt.Family, true
+	case *TreeVariantViewType:
+		if tt == nil || tt.Category == nil || tt.Category.Family == nil {
+			return nil, nil, false
+		}
+		return tt, tt.Category.Family, true
+	case *TreeBlockType:
+		if tt == nil || tt.Family == nil {
+			return nil, nil, false
+		}
+		return tt, tt.Family, true
+	case *TreeStructType:
+		if tt == nil || tt.Family == nil {
+			return nil, nil, false
+		}
+		return tt, tt.Family, true
+	case *TreeNodeType:
+		if tt == nil || tt.Family == nil {
+			return nil, nil, false
+		}
+		return tt, tt.Family, true
+	default:
+		return nil, nil, false
+	}
+}
+
+func visitDomainKeys(root treeVisitRootInfo) []string {
+	switch root.Kind {
+	case treeVisitRootKindCategory:
+		if root.Category == nil {
+			return nil
+		}
+		keys := make([]string, 0, len(root.Category.Variants))
+		for _, variant := range root.Category.Variants {
+			keys = append(keys, root.Category.Name+"."+variant.Name)
+		}
+		return keys
+	case treeVisitRootKindExact:
+		if root.Exact == nil {
+			return nil
+		}
+		return []string{root.Exact.String()}
+	case treeVisitRootKindFamily:
+		if root.Family == nil {
+			return nil
+		}
+		keys := make([]string, 0)
+		memberNames := make([]string, 0, len(root.Family.MemberTypes))
+		for name := range root.Family.MemberTypes {
+			if name == "Node" {
+				continue
+			}
+			memberNames = append(memberNames, name)
+		}
+		sort.Strings(memberNames)
+		for _, name := range memberNames {
+			member := root.Family.MemberTypes[name]
+			if category, ok := member.(*TreeCategoryType); ok {
+				for _, variant := range category.Variants {
+					keys = append(keys, category.Name+"."+variant.Name)
+				}
+			} else {
+				keys = append(keys, member.String())
+			}
+		}
+		return keys
+	default:
+		return nil
+	}
+}
+
+func (a *Analyzer) reportNonExhaustiveVisit(pos lexer.Pos, root treeVisitRootInfo, covered map[string]bool, hasWildcard bool) {
+	if hasWildcard {
+		return
+	}
+	missing := make([]string, 0)
+	for _, key := range visitDomainKeys(root) {
+		if !covered[key] {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) == 0 {
+		return
+	}
+	sort.Strings(missing)
+	label := "visit"
+	switch root.Kind {
+	case treeVisitRootKindCategory:
+		if root.Category != nil {
+			label = root.Category.String()
+		}
+	case treeVisitRootKindExact:
+		if root.Exact != nil {
+			label = root.Exact.String()
+		}
+	case treeVisitRootKindFamily:
+		if root.Family != nil && root.Family.NodeType != nil {
+			label = root.Family.NodeType.String()
+		}
+	}
+	a.errorf(pos, "non-exhaustive visit over %s; missing %s", label, strings.Join(missing, ", "))
+}
+
+func (a *Analyzer) resolveVisitRootInfo(valueType Type, rootExpr ast.TypeExpr, pos lexer.Pos) (treeVisitRootInfo, bool) {
+	sourceMember, sourceFamily, ok := resolveTreeVisitSourceType(valueType)
+	if !ok || sourceFamily == nil {
+		a.errorf(pos, "visit/fold expects a tree node source, got %s", valueType.String())
+		return treeVisitRootInfo{}, false
+	}
+	if rootExpr == nil {
+		if category, _, ok := resolveMatchableTreeCategoryType(valueType); ok {
+			return treeVisitRootInfo{Kind: treeVisitRootKindCategory, Family: category.Family, Category: category}, true
+		}
+		switch tt := sourceMember.(type) {
+		case *TreeBlockType:
+			return treeVisitRootInfo{Kind: treeVisitRootKindExact, Family: tt.Family, Exact: tt}, true
+		case *TreeStructType:
+			return treeVisitRootInfo{Kind: treeVisitRootKindExact, Family: tt.Family, Exact: tt}, true
+		default:
+			a.errorf(pos, "visit/fold requires an explicit `as Family.Node` root for %s", valueType.String())
+			return treeVisitRootInfo{}, false
+		}
+	}
+	rootType := a.resolveType(rootExpr)
+	switch tt := StripAggregateStateType(rootType).(type) {
+	case *TreeNodeType:
+		if tt == nil || tt.Family == nil {
+			break
+		}
+		if sourceFamily != tt.Family {
+			a.errorf(rootExpr.Pos(), "visit/fold root %s does not match source family %s", tt.String(), sourceFamily.Name)
+			return treeVisitRootInfo{}, false
+		}
+		return treeVisitRootInfo{Kind: treeVisitRootKindFamily, Family: tt.Family}, true
+	case *TreeCategoryType:
+		category, _, matchable := resolveMatchableTreeCategoryType(valueType)
+		if !matchable || category != tt {
+			a.errorf(rootExpr.Pos(), "visit/fold root %s requires a %s source, got %s", tt.String(), tt.String(), valueType.String())
+			return treeVisitRootInfo{}, false
+		}
+		return treeVisitRootInfo{Kind: treeVisitRootKindCategory, Family: tt.Family, Category: tt}, true
+	case *TreeBlockType:
+		if !SameType(sourceMember, tt) {
+			a.errorf(rootExpr.Pos(), "visit/fold root %s requires a %s source, got %s", tt.String(), tt.String(), valueType.String())
+			return treeVisitRootInfo{}, false
+		}
+		return treeVisitRootInfo{Kind: treeVisitRootKindExact, Family: tt.Family, Exact: tt}, true
+	case *TreeStructType:
+		if !SameType(sourceMember, tt) {
+			a.errorf(rootExpr.Pos(), "visit/fold root %s requires a %s source, got %s", tt.String(), tt.String(), valueType.String())
+			return treeVisitRootInfo{}, false
+		}
+		return treeVisitRootInfo{Kind: treeVisitRootKindExact, Family: tt.Family, Exact: tt}, true
+	}
+	a.errorf(rootExpr.Pos(), "visit/fold root expects a tree category, tree member, or Family.Node type, got %s", rootType.String())
+	return treeVisitRootInfo{}, false
+}
+
+func (a *Analyzer) resolveVisitArmInfo(root treeVisitRootInfo, arm ast.VisitArm) (treeVisitArmInfo, bool) {
+	if arm.Wildcard {
+		return treeVisitArmInfo{Arm: arm}, true
+	}
+	namedTarget := &ast.NamedType{Position: arm.Position, Name: arm.TargetName}
+	if category, variant, ok := a.treeVariantTargetFromNamedType(namedTarget); ok {
+		switch root.Kind {
+		case treeVisitRootKindCategory:
+			if category != root.Category {
+				a.errorf(arm.Position, "visit arm %q is outside the %s visit domain", arm.TargetName, root.Category.String())
+				return treeVisitArmInfo{}, false
+			}
+		case treeVisitRootKindFamily:
+			if category == nil || category.Family != root.Family {
+				a.errorf(arm.Position, "visit arm %q is outside the %s visit domain", arm.TargetName, root.Family.NodeType.String())
+				return treeVisitArmInfo{}, false
+			}
+		default:
+			a.errorf(arm.Position, "visit arm %q cannot appear when visiting exact member %s", arm.TargetName, root.Exact.String())
+			return treeVisitArmInfo{}, false
+		}
+		viewType := category.VariantViewType(variant)
+		return treeVisitArmInfo{Arm: arm, Key: viewType.String(), BindType: viewType, Category: category, Variant: variant}, true
+	}
+	resolved, _, ok := a.lookupVisibleType(arm.TargetName)
+	if !ok {
+		a.errorf(arm.Position, "unknown visit arm target %q", arm.TargetName)
+		return treeVisitArmInfo{}, false
+	}
+	switch tt := resolved.(type) {
+	case *TreeBlockType:
+		switch root.Kind {
+		case treeVisitRootKindFamily:
+			if tt.Family != root.Family {
+				a.errorf(arm.Position, "visit arm %q is outside the %s visit domain", arm.TargetName, root.Family.NodeType.String())
+				return treeVisitArmInfo{}, false
+			}
+		case treeVisitRootKindExact:
+			if !SameType(tt, root.Exact) {
+				a.errorf(arm.Position, "visit arm %q is outside the %s visit domain", arm.TargetName, root.Exact.String())
+				return treeVisitArmInfo{}, false
+			}
+		default:
+			a.errorf(arm.Position, "visit arm %q cannot appear in a %s visit", arm.TargetName, root.Category.String())
+			return treeVisitArmInfo{}, false
+		}
+		return treeVisitArmInfo{Arm: arm, Key: tt.String(), BindType: tt, Exact: tt}, true
+	case *TreeStructType:
+		switch root.Kind {
+		case treeVisitRootKindFamily:
+			if tt.Family != root.Family {
+				a.errorf(arm.Position, "visit arm %q is outside the %s visit domain", arm.TargetName, root.Family.NodeType.String())
+				return treeVisitArmInfo{}, false
+			}
+		case treeVisitRootKindExact:
+			if !SameType(tt, root.Exact) {
+				a.errorf(arm.Position, "visit arm %q is outside the %s visit domain", arm.TargetName, root.Exact.String())
+				return treeVisitArmInfo{}, false
+			}
+		default:
+			a.errorf(arm.Position, "visit arm %q cannot appear in a %s visit", arm.TargetName, root.Category.String())
+			return treeVisitArmInfo{}, false
+		}
+		return treeVisitArmInfo{Arm: arm, Key: tt.String(), BindType: tt, Exact: tt}, true
+	case *TreeCategoryType:
+		a.errorf(arm.Position, "visit arm %q must name a concrete tree variant or exact tree member", arm.TargetName)
+		return treeVisitArmInfo{}, false
+	default:
+		a.errorf(arm.Position, "visit arm %q is not a tree visit target", arm.TargetName)
+		return treeVisitArmInfo{}, false
+	}
+}
+
+func (a *Analyzer) analyzeVisitArmBody(armInfo treeVisitArmInfo, resultType Type, scope *Scope, forFold bool) (Type, affineFlowSnapshot) {
+	if armInfo.Arm.BindName != "" && armInfo.BindType != nil {
+		a.defineLocalInScope(scope, &Symbol{Name: armInfo.Arm.BindName, Kind: SymbolLocal, Type: armInfo.BindType, Mutable: false}, armInfo.Arm.Position)
+	}
+	if forFold && armInfo.Arm.ChildResultsName != "" && resultType != nil {
+		childViewType := &DArrayViewType{Elem: resultType, SurfaceName: "dview"}
+		a.defineLocalInScope(scope, &Symbol{Name: armInfo.Arm.ChildResultsName, Kind: SymbolLocal, Type: childViewType, Mutable: false}, armInfo.Arm.Position)
+	}
+	return a.analyzeMatchExprArmBodyWithAffineSnapshot(armInfo.Arm.Body, scope)
+}
+
+func (a *Analyzer) analyzeVisitExpr(expr *ast.VisitExpr) Type {
+	valueType := a.analyzeExpr(expr.Value)
+	root, ok := a.resolveVisitRootInfo(valueType, expr.Root, expr.Pos())
+	if !ok {
+		for _, arm := range expr.Arms {
+			a.analyzeMatchExprArmBody(arm.Body, NewScope(a.currentScope))
+		}
+		return invalidType
+	}
+	covered := map[string]bool{}
+	priorKeys := map[string]bool{}
+	hasWildcard := false
+	resultType := Type(nil)
+	baselineCloned := false
+	var baselineAffine map[affineValueKey]affineValueState
+	var baselineBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
+	var baselineFunctionValues map[*Symbol]*FuncType
+	var baselineSpecializedValueTypes map[*Symbol]Type
+	cloneBaseline := func() {
+		if baselineCloned {
+			return
+		}
+		baselineAffine = a.cloneAffineValueStates()
+		baselineBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
+		baselineFunctionValues = a.cloneFunctionValueBindings()
+		baselineSpecializedValueTypes = a.cloneSpecializedValueTypeBindings()
+		baselineCloned = true
+	}
+	var mergedAffine map[affineValueKey]affineValueState
+	var mergedBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
+	var mergedFunctionValues map[*Symbol]*FuncType
+	var mergedSpecializedValueTypes map[*Symbol]Type
+	hasFallthrough := false
+	for _, arm := range expr.Arms {
+		armInfo, armOK := a.resolveVisitArmInfo(root, arm)
+		if armInfo.Arm.Wildcard {
+			if hasWildcard {
+				a.errorf(arm.Position, "visit wildcard arm is unreachable because an earlier wildcard already matches")
+			}
+			hasWildcard = true
+		} else if armOK {
+			if hasWildcard {
+				a.errorf(arm.Position, "visit arm %q is unreachable because an earlier wildcard already matches", arm.TargetName)
+			}
+			if priorKeys[armInfo.Key] {
+				a.errorf(arm.Position, "visit arm %q is unreachable because an earlier arm already matches it", arm.TargetName)
+			}
+			priorKeys[armInfo.Key] = true
+			covered[armInfo.Key] = true
+		}
+		scope := NewScope(a.currentScope)
+		armType, armSnapshot := a.analyzeVisitArmBody(armInfo, nil, scope, false)
+		if !blockDefinitelyExits(arm.Body) {
+			if !hasFallthrough {
+				mergedAffine = armSnapshot.Affine
+				mergedBorrowedOwnerRefs = armSnapshot.BorrowedOwnerRefs
+				mergedFunctionValues = armSnapshot.FunctionValues
+				mergedSpecializedValueTypes = armSnapshot.SpecializedValueTypes
+				hasFallthrough = true
+			} else {
+				mergedAffine = mergeAffineValueStates(mergedAffine, armSnapshot.Affine)
+				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, armSnapshot.BorrowedOwnerRefs)
+				mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, armSnapshot.FunctionValues)
+				mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, armSnapshot.SpecializedValueTypes)
+			}
+		}
+		if resultType == nil {
+			resultType = armType
+			continue
+		}
+		merged := MergeTypes(resultType, armType)
+		if IsInvalidType(merged) {
+			a.errorf(arm.Position, "visit expression arms are incompatible: %s and %s", resultType.String(), armType.String())
+			resultType = invalidType
+			continue
+		}
+		resultType = merged
+	}
+	if !hasWildcard {
+		cloneBaseline()
+		if !hasFallthrough {
+			mergedAffine = baselineAffine
+			mergedBorrowedOwnerRefs = baselineBorrowedOwnerRefs
+			mergedFunctionValues = baselineFunctionValues
+			mergedSpecializedValueTypes = baselineSpecializedValueTypes
+		} else if len(visitDomainKeys(root)) != len(covered) {
+			mergedAffine = mergeAffineValueStates(mergedAffine, baselineAffine)
+			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, baselineBorrowedOwnerRefs)
+			mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, baselineFunctionValues)
+			mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, baselineSpecializedValueTypes)
+		}
+	}
+	a.currentAffineValues = mergedAffine
+	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
+	a.currentFunctionValues = mergedFunctionValues
+	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+	a.reportNonExhaustiveVisit(expr.Pos(), root, covered, hasWildcard)
+	if resultType == nil {
+		return neverType
+	}
+	return resultType
+}
+
+func (a *Analyzer) analyzeFoldExpr(expr *ast.FoldExpr) Type {
+	valueType := a.analyzeExpr(expr.Value)
+	root, ok := a.resolveVisitRootInfo(valueType, expr.Root, expr.Pos())
+	if !ok {
+		for _, arm := range expr.Arms {
+			a.analyzeMatchExprArmBody(arm.Body, NewScope(a.currentScope))
+		}
+		return invalidType
+	}
+	resultType := a.resolveType(expr.ResultType)
+	covered := map[string]bool{}
+	priorKeys := map[string]bool{}
+	hasWildcard := false
+	baselineCloned := false
+	var baselineAffine map[affineValueKey]affineValueState
+	var baselineBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
+	var baselineFunctionValues map[*Symbol]*FuncType
+	var baselineSpecializedValueTypes map[*Symbol]Type
+	cloneBaseline := func() {
+		if baselineCloned {
+			return
+		}
+		baselineAffine = a.cloneAffineValueStates()
+		baselineBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
+		baselineFunctionValues = a.cloneFunctionValueBindings()
+		baselineSpecializedValueTypes = a.cloneSpecializedValueTypeBindings()
+		baselineCloned = true
+	}
+	var mergedAffine map[affineValueKey]affineValueState
+	var mergedBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
+	var mergedFunctionValues map[*Symbol]*FuncType
+	var mergedSpecializedValueTypes map[*Symbol]Type
+	hasFallthrough := false
+	for _, arm := range expr.Arms {
+		armInfo, armOK := a.resolveVisitArmInfo(root, arm)
+		if armInfo.Arm.Wildcard {
+			if hasWildcard {
+				a.errorf(arm.Position, "fold wildcard arm is unreachable because an earlier wildcard already matches")
+			}
+			hasWildcard = true
+		} else if armOK {
+			if hasWildcard {
+				a.errorf(arm.Position, "fold arm %q is unreachable because an earlier wildcard already matches", arm.TargetName)
+			}
+			if priorKeys[armInfo.Key] {
+				a.errorf(arm.Position, "fold arm %q is unreachable because an earlier arm already matches it", arm.TargetName)
+			}
+			priorKeys[armInfo.Key] = true
+			covered[armInfo.Key] = true
+		}
+		scope := NewScope(a.currentScope)
+		armType, armSnapshot := a.analyzeVisitArmBody(armInfo, resultType, scope, true)
+		if !IsNeverType(armType) && !AssignableTo(resultType, armType) {
+			a.errorf(arm.Position, "fold arm %q expects %s, got %s", arm.TargetName, resultType.String(), armType.String())
+			a.reportShapeMismatchNotes(arm.Position, resultType, armType)
+		}
+		if !blockDefinitelyExits(arm.Body) {
+			if !hasFallthrough {
+				mergedAffine = armSnapshot.Affine
+				mergedBorrowedOwnerRefs = armSnapshot.BorrowedOwnerRefs
+				mergedFunctionValues = armSnapshot.FunctionValues
+				mergedSpecializedValueTypes = armSnapshot.SpecializedValueTypes
+				hasFallthrough = true
+			} else {
+				mergedAffine = mergeAffineValueStates(mergedAffine, armSnapshot.Affine)
+				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, armSnapshot.BorrowedOwnerRefs)
+				mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, armSnapshot.FunctionValues)
+				mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, armSnapshot.SpecializedValueTypes)
+			}
+		}
+	}
+	if !hasWildcard {
+		cloneBaseline()
+		if !hasFallthrough {
+			mergedAffine = baselineAffine
+			mergedBorrowedOwnerRefs = baselineBorrowedOwnerRefs
+			mergedFunctionValues = baselineFunctionValues
+			mergedSpecializedValueTypes = baselineSpecializedValueTypes
+		} else if len(visitDomainKeys(root)) != len(covered) {
+			mergedAffine = mergeAffineValueStates(mergedAffine, baselineAffine)
+			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, baselineBorrowedOwnerRefs)
+			mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, baselineFunctionValues)
+			mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, baselineSpecializedValueTypes)
+		}
+	}
+	a.currentAffineValues = mergedAffine
+	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
+	a.currentFunctionValues = mergedFunctionValues
+	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+	a.reportNonExhaustiveVisit(expr.Pos(), root, covered, hasWildcard)
+	return resultType
 }
 
 func (a *Analyzer) analyzeEnumMatchExpr(expr *ast.MatchExpr, valueType Type, enumType *EnumType) Type {
@@ -4085,6 +4592,28 @@ func exprReferencesVariantFields(expr ast.Expr, name string) bool {
 		return exprReferencesVariantFields(n.Expr, name)
 	case *ast.MatchExpr:
 		if exprReferencesVariantFields(n.Value, name) || exprReferencesVariantFields(n.Store, name) {
+			return true
+		}
+		for _, arm := range n.Arms {
+			for _, inner := range arm.Body {
+				if stmtReferencesVariantFields(inner, name) {
+					return true
+				}
+			}
+		}
+	case *ast.VisitExpr:
+		if exprReferencesVariantFields(n.Value, name) {
+			return true
+		}
+		for _, arm := range n.Arms {
+			for _, inner := range arm.Body {
+				if stmtReferencesVariantFields(inner, name) {
+					return true
+				}
+			}
+		}
+	case *ast.FoldExpr:
+		if exprReferencesVariantFields(n.Value, name) {
 			return true
 		}
 		for _, arm := range n.Arms {

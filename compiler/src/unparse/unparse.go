@@ -918,6 +918,10 @@ func formatExpr(expr ast.Expr) string {
 		return formatExpr(n.Expr) + formatPermissionRefs(n.Permissions)
 	case *ast.MatchExpr:
 		return formatMatchExpr(n)
+	case *ast.VisitExpr:
+		return formatVisitExpr(n)
+	case *ast.FoldExpr:
+		return formatFoldExpr(n)
 	default:
 		return "<expr>"
 	}
@@ -941,6 +945,74 @@ func formatMatchExpr(expr *ast.MatchExpr) string {
 		}
 	}
 	return builder.String()
+}
+
+func formatVisitExpr(expr *ast.VisitExpr) string {
+	if expr == nil {
+		return "visit <nil>:"
+	}
+	var builder strings.Builder
+	builder.WriteString("visit ")
+	builder.WriteString(formatExpr(expr.Value))
+	if expr.Root != nil {
+		builder.WriteString(" as ")
+		builder.WriteString(formatTypeExpr(expr.Root))
+	}
+	builder.WriteString(":")
+	formatVisitArmsInto(&builder, expr.Arms)
+	return builder.String()
+}
+
+func formatFoldExpr(expr *ast.FoldExpr) string {
+	if expr == nil {
+		return "fold <nil> as <type> into <type>:"
+	}
+	var builder strings.Builder
+	builder.WriteString("fold ")
+	builder.WriteString(formatExpr(expr.Value))
+	builder.WriteString(" as ")
+	builder.WriteString(formatTypeExpr(expr.Root))
+	builder.WriteString(" into ")
+	builder.WriteString(formatTypeExpr(expr.ResultType))
+	builder.WriteString(":")
+	formatVisitArmsInto(&builder, expr.Arms)
+	return builder.String()
+}
+
+func formatVisitArmsInto(builder *strings.Builder, arms []ast.VisitArm) {
+	for _, arm := range arms {
+		builder.WriteByte('\n')
+		builder.WriteString(indentUnit)
+		builder.WriteString(formatVisitArm(arm))
+		builder.WriteString(":")
+		for _, stmt := range arm.Body {
+			builder.WriteByte('\n')
+			stmtText := indentMultiline(FormatStmt(stmt), 2)
+			builder.WriteString(strings.TrimRight(stmtText, "\n"))
+		}
+	}
+}
+
+func formatVisitArm(arm ast.VisitArm) string {
+	if arm.Wildcard {
+		return "_"
+	}
+	line := arm.TargetName
+	if arm.BindName == "" && arm.ChildResultsName == "" {
+		return line
+	}
+	line += "("
+	if arm.BindName != "" {
+		line += arm.BindName
+	}
+	if arm.ChildResultsName != "" {
+		if arm.BindName != "" {
+			line += ", "
+		}
+		line += arm.ChildResultsName
+	}
+	line += ")"
+	return line
 }
 
 func formatMatchPattern(pattern ast.MatchPattern) string {

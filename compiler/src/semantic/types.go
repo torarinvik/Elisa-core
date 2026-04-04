@@ -201,10 +201,16 @@ type TreeVariantViewType struct {
 	Variant  *EnumVariant
 }
 
+type TreeNodeType struct {
+	Name   string
+	Family *TreeType
+}
+
 type TreeType struct {
 	Name        string
 	Common      map[string]Field
 	MemberTypes map[string]Type
+	NodeType    *TreeNodeType
 	Decl        *ast.TreeDecl
 }
 
@@ -433,6 +439,7 @@ func (*SViewType) isType()             {}
 func (*PackedEnumStoreType) isType()   {}
 func (*PackedVariantViewType) isType() {}
 func (*TreeVariantViewType) isType()   {}
+func (*TreeNodeType) isType()          {}
 func (*TreeType) isType()              {}
 func (*TreeCategoryType) isType()      {}
 func (*TreeBlockType) isType()         {}
@@ -741,6 +748,12 @@ func (t *TreeVariantViewType) SurfaceName() string {
 
 func (t *TreeVariantViewType) String() string {
 	return t.SurfaceName()
+}
+func (t *TreeNodeType) String() string {
+	if t == nil {
+		return "<invalid-tree-node>"
+	}
+	return t.Name
 }
 func (t *TreeType) String() string {
 	if t == nil {

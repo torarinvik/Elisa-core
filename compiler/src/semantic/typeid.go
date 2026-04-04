@@ -193,6 +193,9 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 			return false
 		}
 		appendKeyString(b, tt.Variant.Name)
+	case *TreeNodeType:
+		appendKeyTag(b, "treenode")
+		appendKeyString(b, tt.Name)
 	case *TreeType:
 		appendKeyTag(b, "tree")
 		appendKeyString(b, tt.Name)

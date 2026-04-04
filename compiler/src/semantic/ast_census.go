@@ -208,6 +208,12 @@ func (c *analyzerASTCensus) countExpr(expr ast.Expr) {
 		c.countExpr(n.Value)
 		c.countExpr(n.Store)
 		c.countArms(n.Arms)
+	case *ast.VisitExpr:
+		c.countExpr(n.Value)
+		c.countVisitArms(n.Arms)
+	case *ast.FoldExpr:
+		c.countExpr(n.Value)
+		c.countVisitArms(n.Arms)
 	case *ast.VariantTestExpr:
 		c.countMatchPattern(n.Pattern)
 	}
@@ -216,6 +222,12 @@ func (c *analyzerASTCensus) countExpr(expr ast.Expr) {
 func (c *analyzerASTCensus) countArms(arms []ast.MatchArm) {
 	for _, arm := range arms {
 		c.countMatchPattern(arm.Pattern)
+		c.countStmts(arm.Body)
+	}
+}
+
+func (c *analyzerASTCensus) countVisitArms(arms []ast.VisitArm) {
+	for _, arm := range arms {
 		c.countStmts(arm.Body)
 	}
 }
