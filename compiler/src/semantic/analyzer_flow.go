@@ -1701,6 +1701,9 @@ func (a *Analyzer) resolveIterLoopSourceInfo(sourceExpr ast.Expr, sourceType Typ
 	case *SViewType:
 		return iterLoopSourceInfo{ItemType: a.namedTypes["char"]}, true
 	case *GenericInstanceType:
+		if itemType, ok := TreeChildrenItemType(tt); ok {
+			return iterLoopSourceInfo{ItemType: itemType}, true
+		}
 		if itemType, ok := ChunksExactViewItemType(tt); ok {
 			info := iterLoopSourceInfo{ItemType: itemType}
 			if itemFacts, ok := a.inferIterLoopItemOptimizationFacts(sourceExpr, sourceType); ok {
@@ -1793,7 +1796,7 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	sourceType := a.analyzeExpr(stmt.Source)
 	info, ok := a.resolveIterLoopSourceInfo(stmt.Source, sourceType)
 	if !ok {
-		a.errorf(stmt.Source.Pos(), "iterable for loop currently requires an array, dynamic array, view, string-like iterable, or ChunksExactView, got %s", sourceType.String())
+		a.errorf(stmt.Source.Pos(), "iterable for loop currently requires an array, dynamic array, view, string-like iterable, ChunksExactView, or children(node), got %s", sourceType.String())
 		info.ItemType = invalidType
 	}
 	if stmt.Mode == ast.IterBindValue && a.containsAffineHandleValues(info.ItemType, map[string]bool{}) {

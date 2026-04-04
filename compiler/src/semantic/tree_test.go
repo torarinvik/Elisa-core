@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"llcontext/src/ast"
 	"llcontext/src/lexer"
 	"llcontext/src/parser"
 )
@@ -50,10 +51,10 @@ func TestAnalyzeRegistersTreeFamilyAndMembers(t *testing.T) {
     @role(expr)
     node Expr:
         Nil
-        Binary(op: i32, left: Expr, right: Expr)
+        Binary(op: i32, child left: Expr, child right: Expr)
     @role(stmt)
     node Stmt:
-        Return(value: Expr)
+        Return(child value: Expr)
     block Block:
         stmts: darray[Stmt]
     struct ElseIf:
@@ -95,6 +96,9 @@ func TestAnalyzeRegistersTreeFamilyAndMembers(t *testing.T) {
 	if len(binaryVariant.Payload) != 3 {
 		t.Fatalf("expected Binary payload arity 3, got %#v", binaryVariant.Payload)
 	}
+	if binaryVariant.PayloadRelation(1) != ast.EnumPayloadRelationChild || binaryVariant.PayloadRelation(2) != ast.EnumPayloadRelationChild {
+		t.Fatalf("expected Binary left/right payloads to be structural children, got %#v", binaryVariant.PayloadRelations)
+	}
 	if !SameType(binaryVariant.Payload[1], exprType) || !SameType(binaryVariant.Payload[2], exprType) {
 		t.Fatalf("expected Binary child payloads to resolve to Lua.Expr, got %#v", binaryVariant.Payload)
 	}
@@ -106,6 +110,9 @@ func TestAnalyzeRegistersTreeFamilyAndMembers(t *testing.T) {
 	returnVariant, ok := stmtType.Variant("Return")
 	if !ok || len(returnVariant.Payload) != 1 || !SameType(returnVariant.Payload[0], exprType) {
 		t.Fatalf("expected Return(value: Expr) payload to resolve to Lua.Expr, got %#v", returnVariant)
+	}
+	if returnVariant.PayloadRelation(0) != ast.EnumPayloadRelationChild {
+		t.Fatalf("expected Return value payload to be a structural child, got %#v", returnVariant.PayloadRelations)
 	}
 
 	blockType, ok := result.NamedTypes["Lua.Block"].(*TreeBlockType)
@@ -356,6 +363,54 @@ def left_value(node: Lua.Expr) -> i64:
 		return value + rhs.span
 	return node.span
 `)
+}
+
+func TestAnalyzeTreeChildrenLoops(t *testing.T) {
+	analyzeTreeTestSource(t, "tree_children_surface.llcontext", `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Nil
+		Unary(op: i32, child expr: Expr)
+		Binary(op: i32, child left: Expr, child right: Expr)
+		Call(child callee: Expr, children args: darray[Expr], link source_expr: Expr)
+
+def count_nodes(node: Lua.Expr) -> i64:
+	total: mutable i64 = 1
+	for child in children(node):
+		total <- total + count_nodes(child)
+	return total
+
+def count_binary(binary: Lua.Expr.Binary) -> i64:
+	total: mutable i64 = 0
+	for child in children(binary):
+		total <- total + child.span
+	return total
+`)
+}
+
+func TestAnalyzeRejectsChildrenOnMixedStructuralItemTypes(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_children_mixed.llcontext", `tree Lua:
+	@role(stmt)
+	node Stmt:
+		IfStmt(child condition: Lua.Expr, child body: Lua.Block)
+	@role(expr)
+	node Expr:
+		Name(name_index: u32)
+	block Block:
+		stmts: darray[Lua.Stmt]
+
+def visit(stmt: Lua.Stmt) -> i64:
+	total: mutable i64 = 0
+	for child in children(stmt):
+		total <- total + 1
+	return total
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `children(...) requires all structural child payloads to have the same item type`) {
+		t.Fatalf("expected mixed structural child type diagnostic, got:\n%s", all)
+	}
 }
 
 func TestAnalyzeRejectsTreeOpenAndViewStoreClauses(t *testing.T) {

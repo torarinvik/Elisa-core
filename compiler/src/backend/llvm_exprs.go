@@ -3921,6 +3921,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if value, actualType, handled, err := s.emitProofCarryingViewHelperCall(expr); handled {
 		return value, actualType, err
 	}
+	if value, actualType, handled, err := s.emitTreeTraversalHelperCall(expr); handled {
+		return value, actualType, err
+	}
 	if value, actualType, handled, err := s.emitSpecializedRuntimeCall(expr); handled {
 		return value, actualType, err
 	}
@@ -4031,6 +4034,40 @@ func (s *functionState) emitProofCarryingViewHelperCall(expr *ast.CallExpr) (C.L
 	default:
 		return nil, nil, false, nil
 	}
+}
+
+func (s *functionState) emitTreeTraversalHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	switch callIdentName(expr) {
+	case "children":
+		return s.emitChildrenHelperCall(expr)
+	default:
+		return nil, nil, false, nil
+	}
+}
+
+func (s *functionState) emitChildrenHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if len(expr.Args) != 1 {
+		return nil, nil, true, fmt.Errorf("children expects 1 argument, got %d", len(expr.Args))
+	}
+	sourceType := s.exprType(expr.Args[0])
+	if sourceType == nil {
+		return nil, nil, true, fmt.Errorf("children source is missing a semantic type")
+	}
+	resultType := s.exprType(expr)
+	if resultType == nil {
+		return nil, nil, true, fmt.Errorf("children result is missing a semantic type")
+	}
+	sourceValue, _, err := s.emitExpr(expr.Args[0], sourceType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	resultLLVMType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	resultValue := C.LLVMGetUndef(resultLLVMType)
+	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, sourceValue, 0, cStringFree("tree.children.node.insert"))
+	return resultValue, resultType, true, nil
 }
 
 func (s *functionState) emitReadonlyHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {

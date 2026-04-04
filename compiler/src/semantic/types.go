@@ -175,13 +175,14 @@ type SViewType struct {
 }
 
 type EnumVariant struct {
-	Name           string
-	Tag            uint32
-	Payload        []Type
-	PayloadNames   []string
-	TailIndex      int
-	Decl           *ast.EnumVariantDecl
-	packedViewType *PackedVariantViewType
+	Name             string
+	Tag              uint32
+	Payload          []Type
+	PayloadNames     []string
+	PayloadRelations []ast.EnumPayloadRelation
+	TailIndex        int
+	Decl             *ast.EnumVariantDecl
+	packedViewType   *PackedVariantViewType
 }
 
 type PackedEnumStoreType struct {
@@ -1561,6 +1562,26 @@ func (v *EnumVariant) PayloadLabel(index int) string {
 	return v.PayloadNames[index]
 }
 
+func (v *EnumVariant) PayloadRelation(index int) ast.EnumPayloadRelation {
+	if v == nil || index < 0 || index >= len(v.PayloadRelations) {
+		return ast.EnumPayloadRelationNone
+	}
+	return v.PayloadRelations[index]
+}
+
+func (v *EnumVariant) HasStructuralPayloads() bool {
+	if v == nil {
+		return false
+	}
+	for i := range v.Payload {
+		switch v.PayloadRelation(i) {
+		case ast.EnumPayloadRelationChild, ast.EnumPayloadRelationChildren:
+			return true
+		}
+	}
+	return false
+}
+
 func (v *EnumVariant) PackedViewType(enumType *EnumType) *PackedVariantViewType {
 	if v == nil || enumType == nil {
 		return nil
@@ -1836,6 +1857,48 @@ func ChunksExactViewItemType(t Type) (*DArrayViewType, bool) {
 		return nil, false
 	}
 	return &DArrayViewType{Elem: gi.Args[0], SurfaceName: "dview"}, true
+}
+
+func TreeChildrenInstance(t Type) (*GenericInstanceType, bool) {
+	gi, ok := t.(*GenericInstanceType)
+	if !ok || gi == nil || gi.Name != "TreeChildren" || len(gi.Args) != 2 {
+		return nil, false
+	}
+	return gi, true
+}
+
+func TreeChildrenSourceType(t Type) (Type, bool) {
+	gi, ok := TreeChildrenInstance(t)
+	if !ok {
+		return nil, false
+	}
+	return gi.Args[0], true
+}
+
+func TreeChildrenItemType(t Type) (Type, bool) {
+	gi, ok := TreeChildrenInstance(t)
+	if !ok {
+		return nil, false
+	}
+	return gi.Args[1], true
+}
+
+func TreeStructuralSequenceElemType(t Type) (Type, bool) {
+	switch tt := t.(type) {
+	case *ArrayType:
+		return tt.Elem, true
+	case *DArrayType:
+		return tt.Elem, true
+	case *ViewType:
+		return tt.Elem, true
+	case *DArrayViewType:
+		if tt.SurfaceName != "" && tt.SurfaceName != "dview" {
+			return nil, false
+		}
+		return tt.Elem, true
+	default:
+		return nil, false
+	}
 }
 
 func cloneFuncGuardEffects(effects []FuncGuardEffect) []FuncGuardEffect {

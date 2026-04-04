@@ -109,8 +109,18 @@ type EnumVariantDecl struct {
 	Payload  []EnumPayloadDecl
 }
 
+type EnumPayloadRelation string
+
+const (
+	EnumPayloadRelationNone     EnumPayloadRelation = ""
+	EnumPayloadRelationChild    EnumPayloadRelation = "child"
+	EnumPayloadRelationChildren EnumPayloadRelation = "children"
+	EnumPayloadRelationLink     EnumPayloadRelation = "link"
+)
+
 type EnumPayloadDecl struct {
 	Position lexer.Pos
+	Relation EnumPayloadRelation
 	Name     string
 	Type     TypeExpr
 }

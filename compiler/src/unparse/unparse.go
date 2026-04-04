@@ -651,11 +651,16 @@ func formatEnumVariantDecl(variant ast.EnumVariantDecl) string {
 	}
 	parts := make([]string, 0, len(variant.Payload))
 	for _, payload := range variant.Payload {
-		if payload.Name != "" {
-			parts = append(parts, payload.Name+": "+formatTypeExpr(payload.Type))
-		} else {
-			parts = append(parts, formatTypeExpr(payload.Type))
+		part := ""
+		if payload.Relation != ast.EnumPayloadRelationNone {
+			part = string(payload.Relation) + " "
 		}
+		if payload.Name != "" {
+			part += payload.Name + ": " + formatTypeExpr(payload.Type)
+		} else {
+			part += formatTypeExpr(payload.Type)
+		}
+		parts = append(parts, part)
 	}
 	return line + "(" + strings.Join(parts, ", ") + ")"
 }

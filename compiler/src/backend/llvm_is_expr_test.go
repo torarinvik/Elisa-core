@@ -258,3 +258,32 @@ def left_value(node: Lua.Expr) -> i64:
 		t.Fatalf("expected tree open/view lowering to keep treeview as the existing tree pointer carrier, got:\n%s", output)
 	}
 }
+
+func TestGenerateLLVMIRLowersTreeChildrenLoops(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Nil
+		Unary(op: i32, child expr: Expr)
+		Binary(op: i32, child left: Expr, child right: Expr)
+		Call(child callee: Expr, children args: darray[Expr], link source_expr: Expr)
+
+def count_nodes(node: Lua.Expr) -> i64:
+	total: mutable i64 = 1
+	for child in children(node):
+		total <- total + count_nodes(child)
+	return total
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_children.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"TreeChildren", "tree.children.node.insert", "tree.children.count.phi", "tree.children.value.phi"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected tree children lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}

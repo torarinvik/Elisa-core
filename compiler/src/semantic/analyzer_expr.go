@@ -3437,7 +3437,11 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 		return helperType
 	}
 	if helperType, ok := a.analyzeProofCarryingViewHelperCall(expr); ok {
-		a.recordProofCarryingViewHelperFuncType(expr, helperType)
+		a.recordBuiltinHelperFuncType(expr, callIdentName(expr), helperType)
+		return helperType
+	}
+	if helperType, ok := a.analyzeTreeTraversalHelperCall(expr); ok {
+		a.recordBuiltinHelperFuncType(expr, callIdentName(expr), helperType)
 		return helperType
 	}
 	if enumType, variant, ok := a.enumConstructorCall(expr); ok {
@@ -3745,6 +3749,68 @@ func (a *Analyzer) analyzeProofCarryingViewHelperCall(expr *ast.CallExpr) (Type,
 	}
 }
 
+func treeChildrenSourceInfo(sourceType Type) (*TreeCategoryType, *EnumVariant, bool) {
+	switch tt := sourceType.(type) {
+	case *TreeCategoryType:
+		return tt, nil, tt != nil
+	case *TreeVariantViewType:
+		if tt == nil || tt.Category == nil || tt.Variant == nil {
+			return nil, nil, false
+		}
+		return tt.Category, tt.Variant, true
+	default:
+		return nil, nil, false
+	}
+}
+
+func treeChildrenCandidateItemType(sourceType Type) (Type, bool) {
+	category, fixedVariant, ok := treeChildrenSourceInfo(sourceType)
+	if !ok || category == nil {
+		return nil, false
+	}
+	var candidates []Type
+	appendCandidate := func(candidate Type) {
+		if candidate == nil {
+			return
+		}
+		candidates = append(candidates, candidate)
+	}
+	for _, variant := range category.Variants {
+		if fixedVariant != nil && variant != fixedVariant {
+			continue
+		}
+		for payloadIndex, payloadType := range variant.Payload {
+			switch variant.PayloadRelation(payloadIndex) {
+			case ast.EnumPayloadRelationChild:
+				appendCandidate(payloadType)
+			case ast.EnumPayloadRelationChildren:
+				if elemType, ok := TreeStructuralSequenceElemType(payloadType); ok {
+					appendCandidate(elemType)
+				}
+			}
+		}
+	}
+	if len(candidates) == 0 {
+		return nil, false
+	}
+	itemType := candidates[0]
+	for _, candidate := range candidates[1:] {
+		if !SameType(itemType, candidate) {
+			return invalidType, true
+		}
+	}
+	return itemType, true
+}
+
+func (a *Analyzer) analyzeTreeTraversalHelperCall(expr *ast.CallExpr) (Type, bool) {
+	switch callIdentName(expr) {
+	case "children":
+		return a.analyzeChildrenHelperCall(expr), true
+	default:
+		return nil, false
+	}
+}
+
 func proofCarryingViewType(t Type) bool {
 	switch t.(type) {
 	case *ViewType, *DArrayViewType, *DStrType, *SViewType:
@@ -3754,26 +3820,39 @@ func proofCarryingViewType(t Type) bool {
 	}
 }
 
-func (a *Analyzer) recordProofCarryingViewHelperFuncType(expr *ast.CallExpr, returnType Type) {
-	if a == nil || expr == nil || expr.Func == nil {
-		return
-	}
-	name := callIdentName(expr)
-	if name == "" {
-		return
-	}
-	params := make([]Type, 0, len(expr.Args))
-	for _, arg := range expr.Args {
-		argType := a.exprTypes[arg]
-		if argType == nil {
-			argType = invalidType
+func (a *Analyzer) analyzeChildrenHelperCall(expr *ast.CallExpr) Type {
+	if len(expr.Args) != 1 {
+		a.errorf(expr.Pos(), "children expects 1 argument, got %d", len(expr.Args))
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
 		}
-		params = append(params, argType)
+		return invalidType
 	}
-	if returnType == nil {
-		returnType = invalidType
+	sourceType := a.analyzeExpr(expr.Args[0])
+	category, fixedVariant, ok := treeChildrenSourceInfo(sourceType)
+	if !ok || category == nil {
+		a.errorf(expr.Args[0].Pos(), "children expects a tree node or refined tree view, got %s", sourceType.String())
+		return invalidType
 	}
-	a.exprTypes[expr.Func] = &FuncType{Name: name, Params: params, Return: returnType}
+	itemType, ok := treeChildrenCandidateItemType(sourceType)
+	if !ok {
+		if fixedVariant != nil {
+			a.errorf(expr.Args[0].Pos(), "children(...) requires at least one child or children payload on %s.%s", category.Name, fixedVariant.Name)
+		} else {
+			a.errorf(expr.Args[0].Pos(), "children(...) requires at least one child or children payload on %s", category.Name)
+		}
+		return invalidType
+	}
+	if IsInvalidType(itemType) {
+		a.errorf(expr.Args[0].Pos(), "children(...) requires all structural child payloads to have the same item type")
+		return invalidType
+	}
+	base, ok := a.namedTypes["TreeChildren"].(*StructType)
+	if !ok || base == nil {
+		a.errorf(expr.Pos(), "missing builtin TreeChildren carrier type")
+		return invalidType
+	}
+	return &GenericInstanceType{Name: "TreeChildren", Base: base, Args: []Type{sourceType, itemType}}
 }
 
 func denseDViewType(t Type) (*DArrayViewType, bool) {

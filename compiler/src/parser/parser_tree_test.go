@@ -108,3 +108,38 @@ func TestParseTreeDeclPreservesGenericCategoryNames(t *testing.T) {
 		t.Fatalf("expected Bind variant in pattern category, got %#v", member.Variants)
 	}
 }
+
+func TestParseTreePayloadRelations(t *testing.T) {
+	file, errs := parseSourceFile(t, "tree Lua:\n    @role(expr)\n    node Expr:\n        Binary(op: LuaBinaryOp, child left: Expr, child right: Expr)\n        Call(child callee: Expr, children args: darray[Expr], link origin: Expr)\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.TreeDecl)
+	if !ok {
+		t.Fatalf("expected tree decl, got %T", file.Decls[0])
+	}
+	member, ok := decl.Members[0].(*ast.TreeCategoryDecl)
+	if !ok {
+		t.Fatalf("expected tree category member, got %T", decl.Members[0])
+	}
+	if len(member.Variants) != 2 {
+		t.Fatalf("expected two variants, got %#v", member.Variants)
+	}
+	binary := member.Variants[0]
+	if len(binary.Payload) != 3 {
+		t.Fatalf("expected Binary payload arity 3, got %#v", binary.Payload)
+	}
+	if binary.Payload[1].Relation != ast.EnumPayloadRelationChild || binary.Payload[2].Relation != ast.EnumPayloadRelationChild {
+		t.Fatalf("expected Binary left/right payloads to preserve child relation, got %#v", binary.Payload)
+	}
+	call := member.Variants[1]
+	if call.Payload[0].Relation != ast.EnumPayloadRelationChild || call.Payload[1].Relation != ast.EnumPayloadRelationChildren || call.Payload[2].Relation != ast.EnumPayloadRelationLink {
+		t.Fatalf("expected Call payload relations to be preserved, got %#v", call.Payload)
+	}
+	formatted := unparse.FormatDecl(decl)
+	for _, want := range []string{"child left: Expr", "children args: darray[Expr]", "link origin: Expr"} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted tree decl to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}

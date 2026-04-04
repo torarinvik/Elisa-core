@@ -401,6 +401,9 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 		{name: "chunk_size", typ: namedTypeExpr("usize", false), mutable: false},
 		{name: "len", typ: namedTypeExpr("usize", false), mutable: false},
 	})
+	a.registerBuiltinStructType("TreeChildren", []string{"N", "T"}, false, []builtinFieldSpec{
+		{name: "node", typ: namedTypeExpr("N", false), mutable: false},
+	})
 	a.registerBuiltinStructType("NodeKey", []string{"T"}, false, []builtinFieldSpec{
 		{name: "index", typ: namedTypeExpr("u32", false), mutable: false},
 	})
@@ -525,7 +528,7 @@ func isBuiltinRuntimeStructName(name string) bool {
 		return true
 	case "Region", "Arena", "ArenaMark", "StringView", "DynArray", "DynArrayView", "DictBucket", "DynDict":
 		return true
-	case "SplitView", "ChunksExactView":
+	case "SplitView", "ChunksExactView", "TreeChildren":
 		return true
 	case "NodeKey", "NodeTable":
 		return true
@@ -872,6 +875,9 @@ func (a *Analyzer) populateEnumVariants(decls []scopedDecl) {
 				hasNamedPayloads := false
 				hasUnnamedPayloads := false
 				for payloadIndex, payloadDecl := range variantDecl.Payload {
+					if payloadDecl.Relation != ast.EnumPayloadRelationNone {
+						a.errorf(payloadDecl.Position, "enum variant %q.%q does not support payload relation %q; child/link relations are only available on tree nodes", enumDecl.Name, variantDecl.Name, string(payloadDecl.Relation))
+					}
 					if payloadDecl.Name != "" {
 						hasNamedPayloads = true
 						if seenPayloadNames[payloadDecl.Name] {
@@ -975,10 +981,11 @@ func (a *Analyzer) populateTreeCategoryDecl(treeType *TreeType, categoryDecl *as
 		}
 		payload := make([]Type, 0, len(variantDecl.Payload))
 		payloadNames := make([]string, 0, len(variantDecl.Payload))
+		payloadRelations := make([]ast.EnumPayloadRelation, 0, len(variantDecl.Payload))
 		seenPayloadNames := map[string]bool{}
 		hasNamedPayloads := false
 		hasUnnamedPayloads := false
-		for _, payloadDecl := range variantDecl.Payload {
+		for payloadIndex, payloadDecl := range variantDecl.Payload {
 			if payloadDecl.Name != "" {
 				hasNamedPayloads = true
 				if seenPayloadNames[payloadDecl.Name] {
@@ -988,17 +995,69 @@ func (a *Analyzer) populateTreeCategoryDecl(treeType *TreeType, categoryDecl *as
 			} else {
 				hasUnnamedPayloads = true
 			}
-			payload = append(payload, a.resolveType(payloadDecl.Type))
+			payloadType := a.resolveType(payloadDecl.Type)
+			a.validateTreePayloadRelation(category, variantDecl, payloadIndex, payloadDecl, payloadType)
+			payload = append(payload, payloadType)
 			payloadNames = append(payloadNames, payloadDecl.Name)
+			payloadRelations = append(payloadRelations, payloadDecl.Relation)
 		}
 		if hasNamedPayloads && hasUnnamedPayloads {
 			a.errorf(variantDecl.Position, "tree category variant %q.%q must name either all payload fields or none", category.Name, variantDecl.Name)
 		}
-		variant := &EnumVariant{Name: variantDecl.Name, Tag: uint32(i), Payload: payload, PayloadNames: payloadNames, TailIndex: -1, Decl: variantDecl}
+		variant := &EnumVariant{Name: variantDecl.Name, Tag: uint32(i), Payload: payload, PayloadNames: payloadNames, PayloadRelations: payloadRelations, TailIndex: -1, Decl: variantDecl}
 		category.VariantMap[variant.Name] = variant
 		variants = append(variants, variant)
 	}
 	category.Variants = variants
+}
+
+func treePayloadTargetMemberType(t Type) (Type, *TreeType, bool) {
+	switch tt := t.(type) {
+	case *TreeCategoryType:
+		if tt == nil || tt.Family == nil {
+			return nil, nil, false
+		}
+		return tt, tt.Family, true
+	case *TreeBlockType:
+		if tt == nil || tt.Family == nil {
+			return nil, nil, false
+		}
+		return tt, tt.Family, true
+	case *TreeStructType:
+		if tt == nil || tt.Family == nil {
+			return nil, nil, false
+		}
+		return tt, tt.Family, true
+	default:
+		return nil, nil, false
+	}
+}
+
+func (a *Analyzer) validateTreePayloadRelation(category *TreeCategoryType, variantDecl *ast.EnumVariantDecl, payloadIndex int, payloadDecl ast.EnumPayloadDecl, payloadType Type) {
+	if a == nil || category == nil || variantDecl == nil || payloadDecl.Relation == ast.EnumPayloadRelationNone {
+		return
+	}
+	targetType := payloadType
+	if payloadDecl.Relation == ast.EnumPayloadRelationChildren {
+		elemType, ok := TreeStructuralSequenceElemType(payloadType)
+		if !ok {
+			a.errorf(payloadDecl.Position, "tree node payload relation %q on %q.%q expects an array-like payload, got %s", string(payloadDecl.Relation), category.Name, variantDecl.Name, payloadType.String())
+			return
+		}
+		targetType = elemType
+	}
+	memberType, family, ok := treePayloadTargetMemberType(targetType)
+	if !ok {
+		a.errorf(payloadDecl.Position, "tree node payload relation %q on %q.%q expects a tree member type, got %s", string(payloadDecl.Relation), category.Name, variantDecl.Name, targetType.String())
+		return
+	}
+	if family != category.Family {
+		a.errorf(payloadDecl.Position, "tree node payload relation %q on %q.%q must stay within tree family %q, got %s", string(payloadDecl.Relation), category.Name, variantDecl.Name, category.Family.Name, memberType.String())
+		return
+	}
+	if payloadDecl.Relation == ast.EnumPayloadRelationLink && payloadIndex < len(variantDecl.Payload) && payloadDecl.Name == "" {
+		a.errorf(payloadDecl.Position, "tree node payload relation %q on %q.%q requires a named payload field", string(payloadDecl.Relation), category.Name, variantDecl.Name)
+	}
 }
 
 func (a *Analyzer) treeCategoryRole(categoryDecl *ast.TreeCategoryDecl) string {

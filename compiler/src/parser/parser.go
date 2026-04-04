@@ -414,6 +414,26 @@ func (p *Parser) parseEnumVariantDecl() ast.EnumVariantDecl {
 }
 
 func (p *Parser) parseEnumPayloadDecl() ast.EnumPayloadDecl {
+	if p.peek() == lexer.TOKEN_IDENT && p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_COLON {
+		relationText := p.tokens[p.pos].Text
+		var relation ast.EnumPayloadRelation
+		switch relationText {
+		case string(ast.EnumPayloadRelationChild):
+			relation = ast.EnumPayloadRelationChild
+		case string(ast.EnumPayloadRelationChildren):
+			relation = ast.EnumPayloadRelationChildren
+		case string(ast.EnumPayloadRelationLink):
+			relation = ast.EnumPayloadRelationLink
+		}
+		if relation != ast.EnumPayloadRelationNone {
+			pos := p.cur().Pos
+			p.expect(lexer.TOKEN_IDENT)
+			name := p.expect(lexer.TOKEN_IDENT).Text
+			p.expect(lexer.TOKEN_COLON)
+			typ := p.parseTypeExpr()
+			return ast.EnumPayloadDecl{Position: pos, Relation: relation, Name: name, Type: typ}
+		}
+	}
 	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
 		pos := p.cur().Pos
 		name := p.expect(lexer.TOKEN_IDENT).Text
