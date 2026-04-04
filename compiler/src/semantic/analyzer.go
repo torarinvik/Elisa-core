@@ -74,6 +74,7 @@ type Analyzer struct {
 	constValues                       map[string]ConstValue
 	exprTypes                         map[ast.Expr]Type
 	exprFacts                         map[ast.Expr]OptimizationFacts
+	treeConstructorCallees            map[ast.Expr]bool
 	resolvedCastHooks                 map[ast.Expr]*Symbol
 	exprDenseNodeKeys                 map[ast.Expr]DenseNodeKeyInfo
 	exprNodeTables                    map[ast.Expr]NodeTableInfo
@@ -236,6 +237,7 @@ func Analyze(file *ast.File) *Result {
 		constValues:                       map[string]ConstValue{},
 		exprTypes:                         make(map[ast.Expr]Type, exprCapacity),
 		exprFacts:                         make(map[ast.Expr]OptimizationFacts, exprFactsCapacity),
+		treeConstructorCallees:            make(map[ast.Expr]bool, exprCapacity/16+8),
 		resolvedCastHooks:                 make(map[ast.Expr]*Symbol, resolvedCastHookCapacity),
 		exprDenseNodeKeys:                 make(map[ast.Expr]DenseNodeKeyInfo, denseNodeCapacity),
 		exprNodeTables:                    make(map[ast.Expr]NodeTableInfo, denseNodeCapacity),

@@ -160,8 +160,13 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			}
 			return
 		}
-		if treeType, variant, ok := a.treeConstructorInfoFromFieldExpr(n); ok && treeType != nil && variant != nil && len(variant.Payload) == 0 {
+		if treeType, variant, ok := a.treeConstructorInfoFromFieldExpr(n); ok && treeType != nil && variant != nil && len(variant.Payload) == 0 && !a.treeConstructorCallees[n] {
 			a.requireActiveTreeConstructorOwner(n.Pos(), treeType, variant)
+			if treeType.Family != nil && treeType.Family.Decl != nil && len(treeType.Family.Decl.Common) != 0 {
+				a.errorf(n.Pos(), "tree constructor %q requires explicit common fields; use call syntax with named arguments", treeType.Name+"."+variant.Name)
+				result = invalidType
+				return
+			}
 		}
 		if treeType, ctorType, ok := a.treeVariantExprType(n); ok {
 			if ctorType != nil {
@@ -647,6 +652,10 @@ func (a *Analyzer) analyzeTreeAllocExpr(expr *ast.AllocExpr, treeType *TreeCateg
 		return invalidType
 	}
 	if callExpr == nil {
+		if treeType.Family != nil && treeType.Family.Decl != nil && len(treeType.Family.Decl.Common) != 0 {
+			a.errorf(expr.Pos(), "tree constructor %q requires explicit common fields; use call syntax with named arguments", treeType.Name+"."+variant.Name)
+			return invalidType
+		}
 		return treeType
 	}
 	return a.analyzeTreeConstructorCallExpr(callExpr, treeType, variant)
@@ -1927,6 +1936,7 @@ func (a *Analyzer) treeConstructorCall(expr *ast.CallExpr) (*TreeCategoryType, *
 	if !ok {
 		return nil, nil, false
 	}
+	a.treeConstructorCallees[fieldExpr] = true
 	treeType, variant, ok := a.treeConstructorInfoFromFieldExpr(fieldExpr)
 	if !ok {
 		return nil, nil, false
@@ -4322,6 +4332,13 @@ func (a *Analyzer) resolveTreeConstructorArgs(expr *ast.CallExpr, treeType *Tree
 	}
 	namedCount := expr.NamedArgCount()
 	if namedCount == 0 {
+		if treeType.Family != nil && treeType.Family.Decl != nil && len(treeType.Family.Decl.Common) != 0 {
+			a.errorf(expr.Pos(), "tree constructor %q has required common fields and therefore requires named arguments", treeType.Name+"."+variant.Name)
+			for _, arg := range expr.Args {
+				a.analyzeExpr(arg)
+			}
+			return nil, nil, false
+		}
 		expr.ResolvedArgsValid = true
 		expr.ResolvedArgs = expr.Args
 		expr.ResolvedCommonArgs = nil
@@ -4375,6 +4392,13 @@ func (a *Analyzer) resolveTreeConstructorArgs(expr *ast.CallExpr, treeType *Tree
 			}
 			ok = false
 		}
+	}
+	for _, fieldDecl := range treeType.Family.Decl.Common {
+		if _, ok := commonArgs[fieldDecl.Name]; ok {
+			continue
+		}
+		a.errorf(expr.Pos(), "tree constructor %q is missing common field %q", treeType.Name+"."+variant.Name, fieldDecl.Name)
+		ok = false
 	}
 	if !ok {
 		return nil, nil, false

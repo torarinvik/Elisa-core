@@ -4731,6 +4731,9 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, sema
 			return nil, nil, fmt.Errorf("unknown tree constructor %s.%s", treeType.Name, expr.Field)
 		}
 		if len(variant.Payload) == 0 {
+			if treeType.Family != nil && treeType.Family.Decl != nil && len(treeType.Family.Decl.Common) != 0 {
+				return nil, nil, fmt.Errorf("tree constructor %s.%s requires explicit common fields; use call syntax with named arguments", treeType.Name, variant.Name)
+			}
 			return s.emitTreeConstructorValue(nil, treeType, variant, nil, nil, nil)
 		}
 	}

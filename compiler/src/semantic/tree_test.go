@@ -210,7 +210,7 @@ func TestAnalyzeTreeVariantConstructorsAndIsExpr(t *testing.T) {
 
 def make_nil() -> Lua.Expr:
 	in perm:
-		return Lua.Expr.Nil
+		return Lua.Expr.Nil(span: 1)
 
 def make_binary(span: i64, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr:
 	in perm:
@@ -262,6 +262,31 @@ def make_nil() -> Lua.Expr:
 	all := strings.Join(result.Errors(), "\n")
 	if !strings.Contains(all, `tree constructor "Lua.Expr.Nil" requires an active in <owner>: scope or explicit new[owner]`) {
 		t.Fatalf("expected bare tree constructor owner diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsMissingCommonTreeConstructorFields(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_common_fields_required.llcontext", `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Nil
+		Binary(left: Expr, right: Expr)
+
+def make_nil() -> Lua.Expr:
+	return new[perm] Lua.Expr.Nil
+
+def make_binary(left: Lua.Expr, right: Lua.Expr) -> Lua.Expr:
+	in perm:
+		return Lua.Expr.Binary(left: left, right: right)
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `tree constructor "Lua.Expr.Nil" requires explicit common fields; use call syntax with named arguments`) {
+		t.Fatalf("expected explicit common field diagnostic for bare tree constructor, got:\n%s", all)
+	}
+	if !strings.Contains(all, `tree constructor "Lua.Expr.Binary" is missing common field "span"`) {
+		t.Fatalf("expected missing common field diagnostic for tree constructor call, got:\n%s", all)
 	}
 }
 
