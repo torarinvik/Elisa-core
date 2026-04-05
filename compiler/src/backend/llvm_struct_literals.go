@@ -47,7 +47,7 @@ func (g *llvmGenerator) structLiteralFields(t semantic.Type) ([]structLiteralFie
 			if !ok {
 				return nil, fmt.Errorf("missing semantic field %s.%s", base.Name, fieldDecl.Name)
 			}
-			fields = append(fields, structLiteralField{Decl: fieldDecl, Type: substituteType(field.Type, subst), Index: i})
+			fields = append(fields, structLiteralField{Decl: fieldDecl, Type: substituteType(field.Type, subst, g.result.StaticImpls), Index: i})
 		}
 		return fields, nil
 	case *semantic.TreeBlockType:

@@ -136,6 +136,10 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = a.analyzeCallExpr(n)
 		return
 	case *ast.FieldExpr:
+		if interfaceMethodType, ok := a.resolveInterfaceMethodExprType(n); ok {
+			result = interfaceMethodType
+			return
+		}
 		if errorType, ok := a.errorTagType(n); ok {
 			result = errorType
 			return
@@ -3983,6 +3987,28 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	for _, name := range ft.RegionParams {
 		if _, ok := regionBindings[name]; !ok {
 			a.errorf(expr.Pos(), "cannot infer region parameter %q for call to %q", name, ft.Name)
+		}
+	}
+	for _, param := range ft.GenericParams {
+		if param.Kind != ast.GenericParamType || param.InterfaceBound == "" {
+			continue
+		}
+		bound, ok := bindings[param.Name]
+		if !ok || bound == nil {
+			a.errorf(expr.Pos(), "cannot infer interface-constrained type parameter %q for call to %q; use explicit specialization", param.Name, ft.Name)
+			continue
+		}
+		iface := a.staticInterfaces[param.InterfaceBound]
+		if iface == nil {
+			var ok bool
+			iface, _, ok = a.lookupVisibleStaticInterface(param.InterfaceBound)
+			if !ok || iface == nil {
+				a.errorf(expr.Pos(), "unknown interface %q", param.InterfaceBound)
+				continue
+			}
+		}
+		if !a.typeSatisfiesStaticInterface(bound, iface) {
+			a.errorf(expr.Pos(), "type %q does not implement interface %q for call to %q", bound.String(), iface.Name, ft.Name)
 		}
 	}
 	for _, name := range ft.RefStorageParams {

@@ -183,6 +183,33 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		for _, field := range n.Fields {
 			f.writeField(level+1, field)
 		}
+	case *ast.InterfaceDecl:
+		f.writeLine(level, "interface "+n.Name+":")
+		for _, member := range n.Members {
+			switch m := member.(type) {
+			case *ast.AssociatedTypeDecl:
+				f.writeLine(level+1, "type "+m.Name)
+			case *ast.ExternFuncDecl:
+				f.writeLine(level+1, formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RefStorageParams, m.RefStateParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, m.Variadic))
+			}
+		}
+	case *ast.ImplDecl:
+		f.writeLine(level, "impl "+n.InterfaceName+" for "+formatTypeExpr(n.ForType)+":")
+		for _, member := range n.Members {
+			switch m := member.(type) {
+			case *ast.ImplAssociatedTypeDecl:
+				f.writeLine(level+1, "type "+m.Name+" = "+formatTypeExpr(m.Type))
+			case *ast.FuncDecl:
+				f.writeAnnotations(level+1, m.Annotations)
+				f.writeLine(level+1, formatFuncHeader(m.Name, m.GenericParams, m.TypeParams, m.RefStorageParams, m.RefStateParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, false))
+				for _, stmt := range m.Body {
+					f.writeStmt(level+2, stmt)
+				}
+			case *ast.ExternFuncDecl:
+				f.writeAnnotations(level+1, m.Annotations)
+				f.writeLine(level+1, formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RefStorageParams, m.RefStateParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, m.Variadic))
+			}
+		}
 	case *ast.FuncDecl:
 		f.writeAnnotations(level, n.Annotations)
 		f.writeLine(level, formatFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams, n.Params, n.ReturnType, n.Permissions, n.Ensures, false))
@@ -492,7 +519,11 @@ func formatGenericParams(genericParams []ast.GenericParam, typeParams []string, 
 			case ast.GenericParamPermission:
 				parts = append(parts, "permission "+param.Name)
 			default:
-				parts = append(parts, param.Name)
+				if param.InterfaceBound != "" {
+					parts = append(parts, param.Name+": "+param.InterfaceBound)
+				} else {
+					parts = append(parts, param.Name)
+				}
 			}
 		}
 	} else {
@@ -532,6 +563,12 @@ func formatAggregateStateSuffix(hasStateParam bool, stateParamCount int) string 
 }
 
 func formatFuncHeader(name string, genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, retType ast.TypeExpr, permissions []ast.PermissionRef, ensures []ast.EnsuresClause, variadic bool) string {
+	line := formatImplMethodHeader(name, genericParams, typeParams, refStorageParams, refStateParams, regionParams, permissionParams, params, retType, permissions, ensures, variadic)
+	line += ":"
+	return line
+}
+
+func formatImplMethodHeader(name string, genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, retType ast.TypeExpr, permissions []ast.PermissionRef, ensures []ast.EnsuresClause, variadic bool) string {
 	line := "def " + name
 	line += formatGenericParams(genericParams, typeParams, refStorageParams, refStateParams, regionParams, permissionParams)
 	line += "(" + formatParamList(params, variadic) + ")"
@@ -540,7 +577,6 @@ func formatFuncHeader(name string, genericParams []ast.GenericParam, typeParams 
 	}
 	line += formatPermissionRefs(permissions)
 	line += formatEnsuresClauses(ensures)
-	line += ":"
 	return line
 }
 

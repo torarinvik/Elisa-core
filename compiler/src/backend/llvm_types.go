@@ -135,6 +135,20 @@ func nonVoidErrorUnion(t semantic.Type) (*semantic.ErrorUnionType, bool) {
 	return unionType, true
 }
 
+func (g *llvmGenerator) resolveAssociatedTypeProjection(proj *semantic.AssociatedTypeProjection) (semantic.Type, error) {
+	if proj == nil {
+		return nil, fmt.Errorf("missing associated type projection")
+	}
+	if g == nil || g.result == nil {
+		return nil, fmt.Errorf("missing semantic result for associated type projection %s", proj.String())
+	}
+	resolved, ok := semantic.ResolveAssociatedTypeProjection(proj, g.result.StaticImpls)
+	if !ok || resolved == nil {
+		return nil, fmt.Errorf("unresolved associated type projection %s", proj.String())
+	}
+	return resolved, nil
+}
+
 func (g *llvmGenerator) noteType(t semantic.Type) error {
 	if t == nil {
 		return nil
@@ -149,6 +163,13 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 	switch tt := t.(type) {
 	case *semantic.InvalidType, *semantic.NeverType, *semantic.NullType, *semantic.BuiltinType, *semantic.TypeParamType, *semantic.DStrType, *semantic.ErrorSetType:
 		err = nil
+	case *semantic.AssociatedTypeProjection:
+		resolved, resolveErr := g.resolveAssociatedTypeProjection(tt)
+		if resolveErr != nil {
+			err = resolveErr
+			break
+		}
+		err = g.noteType(resolved)
 	case *semantic.ConstEnumType:
 		err = g.noteType(tt.Storage)
 	case *semantic.PackedVariantViewType:
@@ -689,6 +710,12 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		return g.lowerType(tt.Storage)
 	case *semantic.ErrorSetType:
 		return g.lowerBuiltin("u32")
+	case *semantic.AssociatedTypeProjection:
+		resolved, err := g.resolveAssociatedTypeProjection(tt)
+		if err != nil {
+			return nil, err
+		}
+		return g.lowerType(resolved)
 	case *semantic.ErrorUnionType:
 		errType, err := g.lowerType(tt.Errors)
 		if err != nil {
@@ -1651,7 +1678,7 @@ func (g *llvmGenerator) ensureGenericInstanceStruct(inst *semantic.GenericInstan
 		if !ok {
 			return nil, fmt.Errorf("missing semantic field %s.%s", base.Name, fieldDecl.Name)
 		}
-		fieldType, err := g.lowerType(substituteType(field.Type, subst))
+		fieldType, err := g.lowerType(substituteType(field.Type, subst, g.result.StaticImpls))
 		if err != nil {
 			return nil, err
 		}
@@ -1662,7 +1689,7 @@ func (g *llvmGenerator) ensureGenericInstanceStruct(inst *semantic.GenericInstan
 	return ty, nil
 }
 
-func substituteType(t semantic.Type, subst map[string]semantic.Type) semantic.Type {
+func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[string]*semantic.StaticImpl) semantic.Type {
 	if t == nil {
 		return nil
 	}
@@ -1672,6 +1699,13 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type) semantic.Ty
 			return mapped
 		}
 		return t
+	case *semantic.AssociatedTypeProjection:
+		receiver := substituteType(tt.Receiver, subst, impls)
+		projected := &semantic.AssociatedTypeProjection{Receiver: receiver, InterfaceName: tt.InterfaceName, Name: tt.Name}
+		if resolved, ok := semantic.ResolveAssociatedTypeProjection(projected, impls); ok {
+			return resolved
+		}
+		return projected
 	case *semantic.RefStorageParamType:
 		if mapped, ok := subst[tt.Name]; ok {
 			return mapped
@@ -1683,7 +1717,7 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type) semantic.Ty
 		}
 		return t
 	case *semantic.ErrorUnionType:
-		return &semantic.ErrorUnionType{Value: substituteType(tt.Value, subst), Errors: tt.Errors}
+		return &semantic.ErrorUnionType{Value: substituteType(tt.Value, subst, impls), Errors: tt.Errors}
 	case *semantic.RefType:
 		state := tt.State
 		stateParam := tt.StateParam
@@ -1711,33 +1745,33 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type) semantic.Ty
 				}
 			}
 		}
-		return &semantic.RefType{Elem: substituteType(tt.Elem, subst), State: state, StateParam: stateParam, Storage: storage, StorageParam: storageParam, Region: tt.Region, ExplicitStorage: tt.ExplicitStorage}
+		return &semantic.RefType{Elem: substituteType(tt.Elem, subst, impls), State: state, StateParam: stateParam, Storage: storage, StorageParam: storageParam, Region: tt.Region, ExplicitStorage: tt.ExplicitStorage}
 	case *semantic.ArrayType:
-		return &semantic.ArrayType{Elem: substituteType(tt.Elem, subst), Size: tt.Size, HasConstSize: tt.HasConstSize, ConstSize: tt.ConstSize, SurfaceName: tt.SurfaceName}
+		return &semantic.ArrayType{Elem: substituteType(tt.Elem, subst, impls), Size: tt.Size, HasConstSize: tt.HasConstSize, ConstSize: tt.ConstSize, SurfaceName: tt.SurfaceName}
 	case *semantic.DArrayType:
-		return &semantic.DArrayType{Elem: substituteType(tt.Elem, subst), Shape: tt.Shape, SurfaceName: tt.SurfaceName}
+		return &semantic.DArrayType{Elem: substituteType(tt.Elem, subst, impls), Shape: tt.Shape, SurfaceName: tt.SurfaceName}
 	case *semantic.ViewType:
-		return &semantic.ViewType{Elem: substituteType(tt.Elem, subst), Begin: tt.Begin, End: tt.End}
+		return &semantic.ViewType{Elem: substituteType(tt.Elem, subst, impls), Begin: tt.Begin, End: tt.End}
 	case *semantic.DArrayViewType:
-		return &semantic.DArrayViewType{Elem: substituteType(tt.Elem, subst), Begin: tt.Begin, End: tt.End, SurfaceName: tt.SurfaceName}
+		return &semantic.DArrayViewType{Elem: substituteType(tt.Elem, subst, impls), Begin: tt.Begin, End: tt.End, SurfaceName: tt.SurfaceName}
 	case *semantic.PackedVariantViewType:
 		return tt
 	case *semantic.DictType:
-		return &semantic.DictType{Key: substituteType(tt.Key, subst), Value: substituteType(tt.Value, subst), SurfaceName: tt.SurfaceName}
+		return &semantic.DictType{Key: substituteType(tt.Key, subst, impls), Value: substituteType(tt.Value, subst, impls), SurfaceName: tt.SurfaceName}
 	case *semantic.SViewType:
 		return &semantic.SViewType{Begin: tt.Begin, End: tt.End}
 	case *semantic.GenericInstanceType:
 		args := make([]semantic.Type, 0, len(tt.Args))
 		for _, arg := range tt.Args {
-			args = append(args, substituteType(arg, subst))
+			args = append(args, substituteType(arg, subst, impls))
 		}
-		return &semantic.GenericInstanceType{Name: tt.Name, Base: substituteType(tt.Base, subst), Args: args}
+		return &semantic.GenericInstanceType{Name: tt.Name, Base: substituteType(tt.Base, subst, impls), Args: args}
 	case *semantic.AggregateStateType:
-		return &semantic.AggregateStateType{Base: substituteType(tt.Base, subst), State: tt.State, States: append([]semantic.RefState(nil), tt.States...)}
+		return &semantic.AggregateStateType{Base: substituteType(tt.Base, subst, impls), State: tt.State, States: append([]semantic.RefState(nil), tt.States...)}
 	case *semantic.FuncType:
 		params := make([]semantic.Type, 0, len(tt.Params))
 		for _, param := range tt.Params {
-			params = append(params, substituteType(param, subst))
+			params = append(params, substituteType(param, subst, impls))
 		}
 		return &semantic.FuncType{
 			Name:                   tt.Name,
@@ -1754,7 +1788,7 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type) semantic.Ty
 			TemperatureMode:        tt.TemperatureMode,
 			HasTemperatureMode:     tt.HasTemperatureMode,
 			Params:                 params,
-			Return:                 substituteType(tt.Return, subst),
+			Return:                 substituteType(tt.Return, subst, impls),
 			Variadic:               tt.Variadic,
 		}
 	default:

@@ -56,6 +56,30 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 			Params:           append([]ast.ParamDecl(nil), n.Params...),
 			ReturnType:       n.ReturnType,
 		}
+	case *ast.InterfaceDecl:
+		members := make([]ast.InterfaceMember, 0, len(n.Members))
+		for _, member := range n.Members {
+			switch m := member.(type) {
+			case *ast.AssociatedTypeDecl:
+				members = append(members, &ast.AssociatedTypeDecl{Position: m.Position, Name: m.Name})
+			case *ast.ExternFuncDecl:
+				members = append(members, &ast.ExternFuncDecl{Position: m.Position, Annotations: append([]ast.Annotation(nil), m.Annotations...), Name: m.Name, TypeParams: append([]string(nil), m.TypeParams...), RefStorageParams: append([]string(nil), m.RefStorageParams...), RefStateParams: append([]string(nil), m.RefStateParams...), PermissionParams: append([]string(nil), m.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), m.GenericParams...), RegionParams: append([]string(nil), m.RegionParams...), Permissions: append([]ast.PermissionRef(nil), m.Permissions...), Ensures: append([]ast.EnsuresClause(nil), m.Ensures...), Params: append([]ast.ParamDecl(nil), m.Params...), ReturnType: m.ReturnType, Variadic: m.Variadic})
+			}
+		}
+		return &ast.InterfaceDecl{Position: n.Position, Name: n.Name, Members: members}
+	case *ast.ImplDecl:
+		members := make([]ast.ImplMember, 0, len(n.Members))
+		for _, member := range n.Members {
+			switch m := member.(type) {
+			case *ast.ImplAssociatedTypeDecl:
+				members = append(members, &ast.ImplAssociatedTypeDecl{Position: m.Position, Name: m.Name, Type: m.Type})
+			case *ast.FuncDecl:
+				members = append(members, &ast.ExternFuncDecl{Position: m.Position, Annotations: append([]ast.Annotation(nil), m.Annotations...), Name: m.Name, TypeParams: append([]string(nil), m.TypeParams...), RefStorageParams: append([]string(nil), m.RefStorageParams...), RefStateParams: append([]string(nil), m.RefStateParams...), PermissionParams: append([]string(nil), m.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), m.GenericParams...), RegionParams: append([]string(nil), m.RegionParams...), Permissions: append([]ast.PermissionRef(nil), m.Permissions...), Ensures: append([]ast.EnsuresClause(nil), m.Ensures...), Params: append([]ast.ParamDecl(nil), m.Params...), ReturnType: m.ReturnType})
+			case *ast.ExternFuncDecl:
+				members = append(members, &ast.ExternFuncDecl{Position: m.Position, Annotations: append([]ast.Annotation(nil), m.Annotations...), Name: m.Name, TypeParams: append([]string(nil), m.TypeParams...), RefStorageParams: append([]string(nil), m.RefStorageParams...), RefStateParams: append([]string(nil), m.RefStateParams...), PermissionParams: append([]string(nil), m.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), m.GenericParams...), RegionParams: append([]string(nil), m.RegionParams...), Permissions: append([]ast.PermissionRef(nil), m.Permissions...), Ensures: append([]ast.EnsuresClause(nil), m.Ensures...), Params: append([]ast.ParamDecl(nil), m.Params...), ReturnType: m.ReturnType, Variadic: m.Variadic})
+			}
+		}
+		return &ast.ImplDecl{Position: n.Position, InterfaceName: n.InterfaceName, ForType: n.ForType, Members: members}
 	case *ast.GlobalDecl:
 		return &ast.ExternVarDecl{Position: n.Position, Name: n.Name, Type: n.Type}
 	case *ast.NamespaceDecl:

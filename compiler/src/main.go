@@ -510,7 +510,11 @@ func formatFuncGenericParams(genericParams []ast.GenericParam, typeParams []stri
 			case ast.GenericParamRefState:
 				parts = append(parts, "refstate "+param.Name)
 			default:
-				parts = append(parts, param.Name)
+				if param.InterfaceBound != "" {
+					parts = append(parts, param.Name+": "+param.InterfaceBound)
+				} else {
+					parts = append(parts, param.Name)
+				}
 			}
 		}
 	} else {
@@ -635,6 +639,10 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 			tparams += aggregateStatePlaceholders(stateParamCount)
 		}
 		fmt.Fprintf(w, "%s%sstruct %s%s (%d fields)\n", prefix, affine, n.Name, tparams, len(n.Fields))
+	case *ast.InterfaceDecl:
+		fmt.Fprintf(w, "%sinterface %s: (%d members)\n", prefix, n.Name, len(n.Members))
+	case *ast.ImplDecl:
+		fmt.Fprintf(w, "%simpl %s for %s: (%d members)\n", prefix, n.InterfaceName, typeStr(n.ForType), len(n.Members))
 	case *ast.FuncDecl:
 		for _, annotation := range n.Annotations {
 			fmt.Fprintf(w, "%s%s\n", prefix, formatAnnotation(annotation))

@@ -59,13 +59,22 @@ func (a *Analyzer) defineLocalInScope(scope *Scope, sym *Symbol, pos lexer.Pos) 
 }
 
 func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorageParams []string, refStateParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
+	resolvedGenericParams := append([]ast.GenericParam(nil), genericParams...)
+	for i, param := range resolvedGenericParams {
+		if param.Kind != ast.GenericParamType || param.InterfaceBound == "" {
+			continue
+		}
+		if iface, _, ok := a.lookupVisibleStaticInterface(param.InterfaceBound); ok && iface != nil {
+			resolvedGenericParams[i].InterfaceBound = iface.Name
+		}
+	}
 	ptypes := make([]Type, 0, len(params))
 	retType := a.namedTypes["void"]
 	shapeParams := a.collectImplicitShapeParams(params, ret)
 	var resolvedPermissionRefs []ast.PermissionRef
 	var permissions []string
 	var poststates []FuncPoststate
-	a.withGenericParams(genericParams, nil, func() {
+	a.withGenericParams(resolvedGenericParams, nil, func() {
 		a.withRegionParams(regionParams, func() {
 			a.withPermissionParams(permissionParams, func() {
 				resolvedPermissionRefs = a.resolvePermissionRefs(permissionRefs, true)
@@ -89,7 +98,7 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorage
 		RefStateParams:         append([]string(nil), refStateParams...),
 		RegionParams:           append([]string(nil), regionParams...),
 		PermissionParams:       append([]string(nil), permissionParams...),
-		GenericParams:          append([]ast.GenericParam(nil), genericParams...),
+		GenericParams:          append([]ast.GenericParam(nil), resolvedGenericParams...),
 		UsedPermissionParams:   append([]string(nil), a.permissionParamsInRefs(permissionRefs)...),
 		DeclaredPermissionRefs: append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
 		DeclaredPermissions:    append([]string(nil), permissions...),
@@ -362,8 +371,14 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		if t, ok := a.lookupTypeParam(n.Name); ok {
 			return t
 		}
+		if t, ok := a.lookupInterfaceAssocType(n.Name); ok {
+			return t
+		}
 		if t, _, ok := a.lookupVisibleType(n.Name); ok {
 			return DefaultStatefulType(t)
+		}
+		if t, ok := a.resolveProjectedAssociatedType(n); ok {
+			return t
 		}
 		if t, ok := a.resolveNamedVariantWitnessType(n); ok {
 			return t
@@ -1037,6 +1052,18 @@ func genericBindingsForStructInstance(base *StructType, args []Type) map[string]
 	return genericBindingsForParams(genericParamsForStructType(base), args)
 }
 
+func (a *Analyzer) typeSatisfiesStaticInterface(candidate Type, iface *StaticInterface) bool {
+	if a == nil || candidate == nil || iface == nil {
+		return false
+	}
+	if typeParam, ok := candidate.(*TypeParamType); ok && typeParam != nil {
+		boundIface, ok := a.lookupTypeParamInterface(typeParam.Name)
+		return ok && boundIface != nil && boundIface.Name == iface.Name
+	}
+	_, ok := LookupStaticImpl(a.staticImpls, iface.Name, candidate)
+	return ok
+}
+
 func (a *Analyzer) resolveGenericArgForParam(expr ast.TypeExpr, param ast.GenericParam) Type {
 	switch param.Kind {
 	case ast.GenericParamState:
@@ -1090,6 +1117,21 @@ func (a *Analyzer) resolveGenericArgForParam(expr ast.TypeExpr, param ast.Generi
 		if _, ok := resolved.(*RefStateValueType); ok {
 			a.errorf(expr.Pos(), "refstate literal %q cannot be used as a type argument", resolved.String())
 			return invalidType
+		}
+		if param.InterfaceBound != "" {
+			iface := a.staticInterfaces[param.InterfaceBound]
+			if iface == nil {
+				var ok bool
+				iface, _, ok = a.lookupVisibleStaticInterface(param.InterfaceBound)
+				if !ok || iface == nil {
+					a.errorf(expr.Pos(), "unknown interface %q", param.InterfaceBound)
+					return invalidType
+				}
+			}
+			if !a.typeSatisfiesStaticInterface(resolved, iface) {
+				a.errorf(expr.Pos(), "type argument %q does not implement interface %q", resolved.String(), iface.Name)
+				return invalidType
+			}
 		}
 		return resolved
 	}
@@ -1320,6 +1362,7 @@ func (a *Analyzer) withGenericParams(params []ast.GenericParam, args []Type, fn 
 	}
 	typeNames := make([]string, 0)
 	typeArgs := make([]Type, 0)
+	typeInterfaces := make(map[string]*StaticInterface)
 	refStorageNames := make([]string, 0)
 	refStorageArgs := make([]Type, 0)
 	refStateNames := make([]string, 0)
@@ -1333,6 +1376,14 @@ func (a *Analyzer) withGenericParams(params []ast.GenericParam, args []Type, fn 
 		case ast.GenericParamType:
 			typeNames = append(typeNames, param.Name)
 			typeArgs = append(typeArgs, arg)
+			if param.InterfaceBound != "" {
+				iface, _, ok := a.lookupVisibleStaticInterface(param.InterfaceBound)
+				if !ok || iface == nil {
+					a.errorf(param.Position, "unknown interface %q", param.InterfaceBound)
+				} else {
+					typeInterfaces[param.Name] = iface
+				}
+			}
 		case ast.GenericParamRefStorage:
 			refStorageNames = append(refStorageNames, param.Name)
 			refStorageArgs = append(refStorageArgs, arg)
@@ -1341,9 +1392,11 @@ func (a *Analyzer) withGenericParams(params []ast.GenericParam, args []Type, fn 
 			refStateArgs = append(refStateArgs, arg)
 		}
 	}
-	a.withTypeParams(typeNames, typeArgs, func() {
-		a.withRefStorageParams(refStorageNames, refStorageArgs, func() {
-			a.withRefStateParams(refStateNames, refStateArgs, fn)
+	a.withTypeParamInterfaces(typeInterfaces, func() {
+		a.withTypeParams(typeNames, typeArgs, func() {
+			a.withRefStorageParams(refStorageNames, refStorageArgs, func() {
+				a.withRefStateParams(refStateNames, refStateArgs, fn)
+			})
 		})
 	})
 }
@@ -1453,6 +1506,13 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 			return resolved
 		}
 		return n
+	case *AssociatedTypeProjection:
+		receiver := a.substituteType(n.Receiver, bindings, shapeBindings, regionBindings, permissionBindings)
+		projected := &AssociatedTypeProjection{Receiver: receiver, InterfaceName: n.InterfaceName, Name: n.Name}
+		if resolved, ok := ResolveAssociatedTypeProjection(projected, a.staticImpls); ok {
+			return resolved
+		}
+		return projected
 	case *RefStorageParamType:
 		if resolved, ok := bindings[n.Name]; ok {
 			return resolved

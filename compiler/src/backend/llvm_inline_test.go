@@ -78,7 +78,7 @@ def helper[T](value: T) -> T:
 	if !fnType.HasInlineMode || fnType.InlineMode != semantic.FuncInlineModeAlways {
 		t.Fatalf("expected helper inline metadata to record always, got %+v", fnType)
 	}
-	specialized := specializeFuncType(fnType, map[string]semantic.Type{"T": result.NamedTypes["int"]})
+	specialized := specializeFuncType(fnType, map[string]semantic.Type{"T": result.NamedTypes["int"]}, nil)
 	if specialized == nil {
 		t.Fatal("expected specializeFuncType to produce a function type")
 	}
@@ -103,7 +103,7 @@ def helper[T](value: T) -> T:
 	if !fnType.HasNoRecurse {
 		t.Fatalf("expected helper norecurse metadata to be recorded, got %+v", fnType)
 	}
-	specialized := specializeFuncType(fnType, map[string]semantic.Type{"T": result.NamedTypes["int"]})
+	specialized := specializeFuncType(fnType, map[string]semantic.Type{"T": result.NamedTypes["int"]}, nil)
 	if specialized == nil {
 		t.Fatal("expected specializeFuncType to produce a function type")
 	}
@@ -213,7 +213,7 @@ def helper[T](value: T) -> T:
 	if !fnType.HasTemperatureMode || fnType.TemperatureMode != semantic.FuncTemperatureModeHot {
 		t.Fatalf("expected helper temperature metadata to record hot, got %+v", fnType)
 	}
-	specialized := specializeFuncType(fnType, map[string]semantic.Type{"T": result.NamedTypes["int"]})
+	specialized := specializeFuncType(fnType, map[string]semantic.Type{"T": result.NamedTypes["int"]}, nil)
 	if specialized == nil {
 		t.Fatal("expected specializeFuncType to produce a function type")
 	}

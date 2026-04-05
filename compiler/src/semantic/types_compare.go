@@ -65,7 +65,7 @@ func sameStringList(a []string, b []string) bool {
 }
 
 func sameGenericParam(a ast.GenericParam, b ast.GenericParam) bool {
-	return a.Kind == b.Kind && a.Name == b.Name && a.StateOwner == b.StateOwner && sameStringList(a.StateCases, b.StateCases)
+	return a.Kind == b.Kind && a.Name == b.Name && a.InterfaceBound == b.InterfaceBound && a.StateOwner == b.StateOwner && sameStringList(a.StateCases, b.StateCases)
 }
 
 func SameType(a, b Type) bool {
@@ -96,6 +96,9 @@ func SameType(a, b Type) bool {
 	case *TypeParamType:
 		tb, ok := b.(*TypeParamType)
 		return ok && ta.Name == tb.Name
+	case *AssociatedTypeProjection:
+		tb, ok := b.(*AssociatedTypeProjection)
+		return ok && ta.InterfaceName == tb.InterfaceName && ta.Name == tb.Name && SameType(ta.Receiver, tb.Receiver)
 	case *StructStateCaseType:
 		return sameNamedStateType(ta, b)
 	case *StructStateSetType:
@@ -285,6 +288,12 @@ func AssignableTo(dst, src Type) bool {
 	}
 	if _, ok := src.(*TypeParamType); ok {
 		return true
+	}
+	if _, ok := dst.(*AssociatedTypeProjection); ok {
+		return SameType(dst, src)
+	}
+	if _, ok := src.(*AssociatedTypeProjection); ok {
+		return SameType(dst, src)
 	}
 	if _, ok := dst.(*StructStateCaseType); ok {
 		return namedStateTypeAssignable(dst, src)

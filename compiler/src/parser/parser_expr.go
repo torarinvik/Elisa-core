@@ -7,6 +7,21 @@ import (
 	"llcontext/src/lexer"
 )
 
+func isPostfixShorthandCastTarget(name string) bool {
+	switch name {
+	case "void", "bool", "char", "int",
+		"i8", "i16", "i32", "i64", "isize",
+		"u8", "u16", "u32", "u64", "usize", "uintptr",
+		"f32", "f64":
+		return true
+	}
+	if name == "" {
+		return false
+	}
+	first := name[0]
+	return first >= 'A' && first <= 'Z'
+}
+
 // ---------- Type expressions ----------
 
 func (p *Parser) parseTypeExpr() ast.TypeExpr {
@@ -1035,7 +1050,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 				p.pos = savedCastPos
 			}
 
-			if p.peek() == lexer.TOKEN_LPAREN && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_RPAREN {
+			if isPostfixShorthandCastTarget(field) && p.peek() == lexer.TOKEN_LPAREN && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_RPAREN {
 				castPos := pos
 				p.advance()
 				p.advance()

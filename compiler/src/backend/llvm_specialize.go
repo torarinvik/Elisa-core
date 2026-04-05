@@ -31,7 +31,7 @@ func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *sema
 	specializedName := mangleGenericType(decl.Name, orderedArgs)
 	specializedType := g.specializedFuncTypes[specializedName]
 	if specializedType == nil {
-		specializedType = specializeFuncType(base, typeBindings)
+		specializedType = specializeFuncType(base, typeBindings, g.result.StaticImpls)
 		g.specializedFuncTypes[specializedName] = specializedType
 	}
 	if existing, ok := g.functions[specializedName]; ok {
@@ -49,13 +49,13 @@ func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *sema
 	return fnValue, specializedType, nil
 }
 
-func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semantic.Type) *semantic.FuncType {
+func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semantic.Type, impls map[string]*semantic.StaticImpl) *semantic.FuncType {
 	if base == nil {
 		return nil
 	}
 	params := make([]semantic.Type, 0, len(base.Params))
 	for _, param := range base.Params {
-		params = append(params, substituteType(param, typeBindings))
+		params = append(params, substituteType(param, typeBindings, impls))
 	}
 	return &semantic.FuncType{
 		Name:                   base.Name,
@@ -72,7 +72,7 @@ func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semanti
 		TemperatureMode:        base.TemperatureMode,
 		HasTemperatureMode:     base.HasTemperatureMode,
 		Params:                 params,
-		Return:                 substituteType(base.Return, typeBindings),
+		Return:                 substituteType(base.Return, typeBindings, impls),
 		Variadic:               base.Variadic,
 	}
 }

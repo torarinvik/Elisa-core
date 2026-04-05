@@ -2969,7 +2969,7 @@ func (s *functionState) ensureRuntimeFunction(name string, bindings map[string]s
 		value, lowered, err := s.g.ensureSpecializedFunction(decl, fnType, bindings)
 		return value, lowered, err
 	}
-	lowered := specializeFuncType(fnType, bindings)
+	lowered := specializeFuncType(fnType, bindings, s.g.result.StaticImpls)
 	value, err := s.g.ensureFunctionDeclared(name, lowered)
 	return value, lowered, err
 }

@@ -4893,6 +4893,15 @@ func (s *functionState) emitPackedStoreValueFromExpr(expr ast.Expr) (C.LLVMValue
 }
 
 func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *semantic.FuncType, error) {
+	if fieldExpr, ok := expr.Func.(*ast.FieldExpr); ok {
+		if sym, fnType, handled, err := s.resolveStaticInterfaceMethod(fieldExpr); handled {
+			if err != nil {
+				return nil, nil, err
+			}
+			value, err := s.g.ensureFunctionDeclared(sym.Name, fnType)
+			return value, fnType, err
+		}
+	}
 	if ident, ok := expr.Func.(*ast.Ident); ok {
 		if sym, ok := s.g.result.GlobalScope.Lookup(ident.Name); ok {
 			fnType, ok := sym.Type.(*semantic.FuncType)
@@ -4922,6 +4931,9 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 }
 
 func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if value, fieldType, handled, err := s.emitStaticInterfaceMethodExpr(expr); handled {
+		return value, fieldType, err
+	}
 	if treeType, variant, ok := s.treeConstructorInfoFromField(expr); ok {
 		if variant == nil {
 			return nil, nil, fmt.Errorf("unknown tree constructor %s.%s", treeType.Name, expr.Field)
@@ -6298,7 +6310,7 @@ func (s *functionState) emitSpecializeExpr(expr *ast.SpecializeExpr) (C.LLVMValu
 		}
 		bindings[params[i].Name] = resolved
 	}
-	specialized := specializeFuncType(baseType, bindings)
+	specialized := specializeFuncType(baseType, bindings, s.g.result.StaticImpls)
 	if decl, ok := sym.Node.(*ast.FuncDecl); ok {
 		value, lowered, err := s.g.ensureSpecializedFunction(decl, baseType, bindings)
 		return value, lowered, err

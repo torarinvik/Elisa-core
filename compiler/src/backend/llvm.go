@@ -276,15 +276,18 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 		_, err := g.ensureNamedStructType(n.Name)
 		return err
 	case *ast.FuncDecl, *ast.ExternFuncDecl:
+		if fnDecl, ok := decl.(*ast.FuncDecl); ok && len(fnDecl.GenericParams) > 0 {
+			return nil
+		}
+		if externDecl, ok := decl.(*ast.ExternFuncDecl); ok && len(externDecl.GenericParams) > 0 {
+			return nil
+		}
 		sym, ok := g.symbolsByNode[decl]
 		if !ok || sym.Type == nil {
 			return nil
 		}
 		if err := g.noteType(sym.Type); err != nil {
 			return err
-		}
-		if fnDecl, ok := decl.(*ast.FuncDecl); ok && len(fnDecl.GenericParams) > 0 {
-			return nil
 		}
 		fn, ok := sym.Type.(*semantic.FuncType)
 		if !ok {
@@ -302,6 +305,35 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 		}
 		_, err := g.ensureGlobalDeclared(sym.Name, sym.Type, declIsExternVar(decl))
 		return err
+	case *ast.InterfaceDecl:
+		return nil
+	case *ast.ImplDecl:
+		for _, member := range n.Members {
+			switch fnDecl := member.(type) {
+			case *ast.FuncDecl, *ast.ExternFuncDecl:
+				if methodDecl, ok := member.(*ast.FuncDecl); ok && len(methodDecl.GenericParams) > 0 {
+					continue
+				}
+				if externDecl, ok := member.(*ast.ExternFuncDecl); ok && len(externDecl.GenericParams) > 0 {
+					continue
+				}
+				sym, ok := g.symbolsByNode[fnDecl]
+				if !ok || sym.Type == nil {
+					continue
+				}
+				if err := g.noteType(sym.Type); err != nil {
+					return err
+				}
+				fn, ok := sym.Type.(*semantic.FuncType)
+				if !ok {
+					return fmt.Errorf("impl method %s does not resolve to semantic function type", sym.Name)
+				}
+				if _, err := g.ensureFunctionDeclared(sym.Name, fn); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	case *ast.ConstDecl, *ast.ConstEnumDecl, *ast.StaticIfDecl:
 		return nil
 	case *ast.PermissionDecl:
@@ -378,6 +410,36 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 		}
 		if globalDecl, ok := decl.(*ast.GlobalDecl); ok {
 			return g.defineGlobal(globalDecl, sym.Type, globalValue)
+		}
+		return nil
+	case *ast.InterfaceDecl:
+		return nil
+	case *ast.ImplDecl:
+		for _, member := range n.Members {
+			switch fnDecl := member.(type) {
+			case *ast.FuncDecl:
+				if len(fnDecl.GenericParams) > 0 {
+					continue
+				}
+				sym, ok := g.symbolsByNode[fnDecl]
+				if !ok {
+					return fmt.Errorf("missing semantic symbol for impl method declaration")
+				}
+				fn, ok := sym.Type.(*semantic.FuncType)
+				if !ok {
+					return fmt.Errorf("impl method %s does not resolve to semantic function type", sym.Name)
+				}
+				fnValue, err := g.ensureFunctionDeclared(sym.Name, fn)
+				if err != nil {
+					return err
+				}
+				g.setDefinedFunctionLinkage(sym.Name, fnValue, fn)
+				if err := g.defineFunctionBody(fnDecl, fn, fnValue); err != nil {
+					return err
+				}
+			case *ast.ExternFuncDecl:
+				continue
+			}
 		}
 		return nil
 	case *ast.ExternTypeDecl, *ast.StaticIfDecl:

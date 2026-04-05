@@ -162,11 +162,12 @@ const (
 )
 
 type GenericParam struct {
-	Position   lexer.Pos
-	Kind       GenericParamKind
-	Name       string
-	StateCases []string
-	StateOwner string
+	Position       lexer.Pos
+	Kind           GenericParamKind
+	Name           string
+	InterfaceBound string
+	StateCases     []string
+	StateOwner     string
 }
 
 type DerivedStateDecl struct {

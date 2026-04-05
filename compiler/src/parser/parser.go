@@ -110,6 +110,12 @@ func (p *Parser) ParseFile(filename string) *ast.File {
 }
 
 func (p *Parser) parseDecl() ast.Decl {
+	if p.peekIdentText("interface") {
+		return p.parseInterfaceDecl()
+	}
+	if p.peekIdentText("impl") {
+		return p.parseImplDecl()
+	}
 	if p.peekIdentText("permission") {
 		return p.parsePermissionDecl()
 	}
@@ -895,12 +901,16 @@ func (p *Parser) parseGenericParamListAfterLBracket(allowRegion bool, allowPermi
 			}
 		} else {
 			name := p.expect(lexer.TOKEN_IDENT).Text
+			boundName := ""
+			if p.match(lexer.TOKEN_COLON) {
+				boundName = p.parseQualifiedDeclName()
+			}
 			if seenType[name] || seenRegion[name] || seenPermission[name] || seenRefStorage[name] || seenRefState[name] {
 				p.errorf("duplicate function generic parameter %q", name)
 			} else {
 				seenType[name] = true
 				typeParams = append(typeParams, name)
-				genericParams = append(genericParams, ast.GenericParam{Position: paramPos, Kind: kind, Name: name})
+				genericParams = append(genericParams, ast.GenericParam{Position: paramPos, Kind: kind, Name: name, InterfaceBound: boundName})
 			}
 		}
 		if !p.match(lexer.TOKEN_COMMA) {

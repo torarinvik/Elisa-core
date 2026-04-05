@@ -1164,15 +1164,32 @@ func (t *FuncType) String() string {
 	for _, p := range t.Params {
 		parts = append(parts, p.String())
 	}
-	generics := make([]string, 0, len(t.TypeParams)+len(t.RegionParams)+len(t.PermissionParams))
-	for _, param := range t.TypeParams {
-		generics = append(generics, param)
-	}
-	for _, param := range t.RefStorageParams {
-		generics = append(generics, "refstorage "+param)
-	}
-	for _, param := range t.RefStateParams {
-		generics = append(generics, "refstate "+param)
+	generics := make([]string, 0, len(t.GenericParams)+len(t.RegionParams)+len(t.PermissionParams))
+	if len(t.GenericParams) != 0 {
+		for _, param := range t.GenericParams {
+			switch param.Kind {
+			case ast.GenericParamRefStorage:
+				generics = append(generics, "refstorage "+param.Name)
+			case ast.GenericParamRefState:
+				generics = append(generics, "refstate "+param.Name)
+			default:
+				if param.InterfaceBound != "" {
+					generics = append(generics, param.Name+": "+param.InterfaceBound)
+				} else {
+					generics = append(generics, param.Name)
+				}
+			}
+		}
+	} else {
+		for _, param := range t.TypeParams {
+			generics = append(generics, param)
+		}
+		for _, param := range t.RefStorageParams {
+			generics = append(generics, "refstorage "+param)
+		}
+		for _, param := range t.RefStateParams {
+			generics = append(generics, "refstate "+param)
+		}
 	}
 	for _, param := range t.RegionParams {
 		generics = append(generics, "region "+param)

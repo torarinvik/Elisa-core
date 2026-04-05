@@ -1193,7 +1193,7 @@ func (s *functionState) specializeFunctionType(base *semantic.FuncType) *semanti
 	} else {
 		s.specializedFuncTypes = make(map[*semantic.FuncType]*semantic.FuncType)
 	}
-	specialized := specializeFuncType(base, s.typeMap)
+	specialized := specializeFuncType(base, s.typeMap, s.g.result.StaticImpls)
 	s.specializedFuncTypes[base] = specialized
 	return specialized
 }
@@ -1894,6 +1894,12 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 		if t, ok := s.g.result.NamedTypes[n.Name]; ok {
 			return semantic.DefaultStatefulType(t), nil
 		}
+		if t, handled, err := s.resolveStaticAssociatedType(n.Name); handled {
+			if err != nil {
+				return nil, err
+			}
+			return t, nil
+		}
 		return nil, fmt.Errorf("unknown type %q", n.Name)
 	case *ast.StateSetTypeExpr:
 		return nil, fmt.Errorf("state unions like %q are only valid as named struct state arguments", strings.Join(n.Cases, " | "))
@@ -2402,7 +2408,7 @@ func (s *functionState) exprType(expr ast.Expr) semantic.Type {
 	if t == nil || len(s.typeMap) == 0 {
 		return t
 	}
-	return substituteType(t, s.typeMap)
+	return substituteType(t, s.typeMap, s.g.result.StaticImpls)
 }
 
 func (s *functionState) resolveDynamicShapeType(expr *ast.GenericType) (semantic.Type, bool, error) {
@@ -2492,7 +2498,7 @@ func (g *llvmGenerator) fieldInfo(objType semantic.Type, fieldName string) (sema
 			return nil, 0, nil, false, err
 		}
 		subst := genericBindingsForArgs(structGenericParams(base), t.Args)
-		return substituteType(field.Type, subst), index, t, pointerLike, nil
+		return substituteType(field.Type, subst, g.result.StaticImpls), index, t, pointerLike, nil
 	case *semantic.TreeBlockType:
 		index, field, err := fieldInfoFromOrderedFields(t.Name, treeBlockFieldDecls(t), t.Fields, fieldName)
 		return field.Type, index, t, pointerLike, err

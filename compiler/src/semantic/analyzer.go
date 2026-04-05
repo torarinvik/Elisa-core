@@ -68,11 +68,14 @@ type Analyzer struct {
 	file                              *ast.File
 	diagnostics                       []Diagnostic
 	namedTypes                        map[string]Type
+	staticInterfaces                  map[string]*StaticInterface
+	staticImpls                       map[string]*StaticImpl
 	permissions                       map[string]*PermissionSet
 	globalScope                       *Scope
 	functionTypes                     map[string]*FuncType
 	constValues                       map[string]ConstValue
 	exprTypes                         map[ast.Expr]Type
+	interfaceMethodRefs               map[*ast.FieldExpr]*InterfaceMethodRef
 	exprFacts                         map[ast.Expr]OptimizationFacts
 	treeConstructorCallees            map[ast.Expr]bool
 	resolvedCastHooks                 map[ast.Expr]*Symbol
@@ -84,6 +87,8 @@ type Analyzer struct {
 	funcDeclSymbols                   map[*ast.FuncDecl]*Symbol
 	castHooksByName                   map[string]map[castHookSignature]*Symbol
 	typeParamScopes                   []map[string]Type
+	typeParamInterfaceScopes          []map[string]*StaticInterface
+	interfaceAssocTypeScopes          []map[string]Type
 	refStorageParamScopes             []map[string]Type
 	refStateParamScopes               []map[string]Type
 	shapeParamScopes                  []map[string]Shape
@@ -234,11 +239,14 @@ func Analyze(file *ast.File) *Result {
 	a := &Analyzer{
 		file:                              file,
 		namedTypes:                        map[string]Type{},
+		staticInterfaces:                  map[string]*StaticInterface{},
+		staticImpls:                       map[string]*StaticImpl{},
 		permissions:                       map[string]*PermissionSet{},
 		globalScope:                       NewScope(nil),
 		functionTypes:                     map[string]*FuncType{},
 		constValues:                       map[string]ConstValue{},
 		exprTypes:                         make(map[ast.Expr]Type, exprCapacity),
+		interfaceMethodRefs:               make(map[*ast.FieldExpr]*InterfaceMethodRef, exprCapacity/16+8),
 		exprFacts:                         make(map[ast.Expr]OptimizationFacts, exprFactsCapacity),
 		treeConstructorCallees:            make(map[ast.Expr]bool, exprCapacity/16+8),
 		resolvedCastHooks:                 make(map[ast.Expr]*Symbol, resolvedCastHookCapacity),
@@ -261,6 +269,7 @@ func Analyze(file *ast.File) *Result {
 	a.collectConstValues(activeDecls)
 	a.collectPermissionDecls(activeDecls)
 	a.collectNamedTypes(activeDecls)
+	a.collectStaticInterfaces(activeDecls)
 	a.populateConstEnumMembers(activeDecls)
 	a.populateStructFields(activeDecls)
 	a.populateEnumVariants(activeDecls)
@@ -268,30 +277,34 @@ func Analyze(file *ast.File) *Result {
 	a.warnOnAvoidableStructPadding(activeDecls)
 	a.collectExportTypeAliases(activeDecls)
 	a.collectValueSymbols(activeDecls)
+	a.collectStaticImpls(activeDecls)
 	a.analyzeDecls(activeDecls)
 	a.inferFunctionPermissionEffects(activeDecls)
 	a.warnOnImplicitFunctionPermissions(activeDecls)
 	a.validatePermissionUsage(activeDecls)
 	a.analyzeExports(activeDecls)
 	return &Result{
-		File:             file,
-		GlobalScope:      a.globalScope,
-		NamedTypes:       a.namedTypes,
-		ConstValues:      a.constValues,
-		ExprTypes:        a.exprTypes,
-		ExprFacts:        a.exprFacts,
-		CastHooks:        a.resolvedCastHooks,
-		DenseNodeKeys:    a.exprDenseNodeKeys,
-		NodeTables:       a.exprNodeTables,
-		ParallelFor:      a.parallelForInfo,
-		Defer:            a.deferInfo,
-		Fold:             a.foldInfo,
-		FunctionAnalyses: a.functionAnalyses,
-		AnnotatedFuncs:   a.annotatedFuncs,
-		ExportedTypes:    a.exportedTypes,
-		ExportedFuncs:    a.exportedFuncs,
-		ExportedGlobals:  a.exportedGlobals,
-		Diagnostics:      a.diagnostics,
+		File:                file,
+		GlobalScope:         a.globalScope,
+		NamedTypes:          a.namedTypes,
+		StaticInterfaces:    a.staticInterfaces,
+		StaticImpls:         a.staticImpls,
+		ConstValues:         a.constValues,
+		ExprTypes:           a.exprTypes,
+		InterfaceMethodRefs: a.interfaceMethodRefs,
+		ExprFacts:           a.exprFacts,
+		CastHooks:           a.resolvedCastHooks,
+		DenseNodeKeys:       a.exprDenseNodeKeys,
+		NodeTables:          a.exprNodeTables,
+		ParallelFor:         a.parallelForInfo,
+		Defer:               a.deferInfo,
+		Fold:                a.foldInfo,
+		FunctionAnalyses:    a.functionAnalyses,
+		AnnotatedFuncs:      a.annotatedFuncs,
+		ExportedTypes:       a.exportedTypes,
+		ExportedFuncs:       a.exportedFuncs,
+		ExportedGlobals:     a.exportedGlobals,
+		Diagnostics:         a.diagnostics,
 	}
 }
 
@@ -1470,6 +1483,33 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				a.defineGlobal(sym, n.Pos())
 				if n.Name == "__cast__" {
 					a.registerCastHook(scoped.Namespace, n, fnType, sym)
+				}
+			case *ast.InterfaceDecl:
+			case *ast.ImplDecl:
+				_, interfaceName, ok := a.lookupVisibleStaticInterface(n.InterfaceName)
+				if !ok {
+					return
+				}
+				receiver := a.resolveType(n.ForType)
+				if receiver == nil || IsInvalidType(receiver) {
+					return
+				}
+				for _, member := range n.Members {
+					switch fnDecl := member.(type) {
+					case *ast.FuncDecl:
+						qualifiedName := StaticImplMethodSymbolName(interfaceName, receiver, fnDecl.Name)
+						fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ReturnType, false)
+						sym := &Symbol{Name: qualifiedName, Kind: SymbolFunc, Type: fnType, Node: fnDecl, Mutable: false}
+						a.functionTypes[qualifiedName] = fnType
+						a.funcDeclSymbols[fnDecl] = sym
+						a.defineGlobal(sym, fnDecl.Pos())
+					case *ast.ExternFuncDecl:
+						qualifiedName := StaticImplMethodSymbolName(interfaceName, receiver, fnDecl.Name)
+						fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ReturnType, fnDecl.Variadic)
+						sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: fnDecl, Mutable: false}
+						a.functionTypes[qualifiedName] = fnType
+						a.defineGlobal(sym, fnDecl.Pos())
+					}
 				}
 			case *ast.ExternFuncDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
@@ -2901,6 +2941,16 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 			case *ast.FuncDecl:
 				a.analyzeFunctionAnnotations(n)
 				a.analyzeFunc(n)
+			case *ast.InterfaceDecl:
+			case *ast.ImplDecl:
+				for _, member := range n.Members {
+					fnDecl, ok := member.(*ast.FuncDecl)
+					if !ok {
+						continue
+					}
+					a.analyzeFunctionAnnotations(fnDecl)
+					a.analyzeFunc(fnDecl)
+				}
 			case *ast.TreeDecl:
 			case *ast.ConstEnumDecl:
 			case *ast.EnumDecl:
