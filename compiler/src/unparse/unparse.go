@@ -1000,7 +1000,7 @@ func formatVisitArm(arm ast.VisitArm) string {
 		return "_"
 	}
 	line := arm.TargetName
-	if arm.BindName == "" && arm.ChildResultsName == "" {
+	if arm.BindName == "" && arm.ChildResultsName == "" && len(arm.ChildBindings) == 0 {
 		return line
 	}
 	line += "("
@@ -1012,6 +1012,17 @@ func formatVisitArm(arm ast.VisitArm) string {
 			line += ", "
 		}
 		line += arm.ChildResultsName
+	} else if len(arm.ChildBindings) != 0 {
+		for i, binding := range arm.ChildBindings {
+			if arm.BindName != "" || i != 0 {
+				line += ", "
+			}
+			line += binding.FieldName
+			if binding.BindName != "" && binding.BindName != binding.FieldName {
+				line += ": "
+				line += binding.BindName
+			}
+		}
 	}
 	line += ")"
 	return line

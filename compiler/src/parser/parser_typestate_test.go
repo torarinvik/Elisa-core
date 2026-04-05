@@ -877,7 +877,7 @@ func TestParseOpenAndViewRemainContextualIdentifiers(t *testing.T) {
 }
 
 func TestParseTreeVisitAndFoldExprs(t *testing.T) {
-	file, errs := parseSourceFile(t, "tree Lua:\n    common:\n        span: i64\n    @role(expr)\n    node Expr:\n        Nil\n        Binary(child left: Expr, child right: Expr)\n\ndef kind(node: Lua.Expr) -> i64:\n    return visit node:\n        Lua.Expr.Nil(expr):\n            0\n        Lua.Expr.Binary(expr):\n            expr.left.span\n\ndef score(node: Lua.Expr) -> i64:\n    return fold node as Lua.Node into i64:\n        Lua.Expr.Nil(expr, children):\n            expr.span + children.len.i64()\n        Lua.Expr.Binary(expr, children):\n            children[0u] + children[1u] + expr.span\n")
+	file, errs := parseSourceFile(t, "tree Lua:\n    common:\n        span: i64\n    @role(expr)\n    node Expr:\n        Nil\n        Unary(child expr: Expr)\n        Binary(child left: Expr, child right: Expr)\n        Call(child callee: Expr, children args: darray[Expr])\n\ndef kind(node: Lua.Expr) -> i64:\n    return visit node:\n        Lua.Expr.Nil(expr):\n            0\n        Lua.Expr.Binary(expr):\n            expr.left.span\n\ndef score(node: Lua.Expr) -> i64:\n    return fold node as Lua.Node into i64:\n        Lua.Expr.Nil(expr, children):\n            expr.span + children.len.i64()\n        Lua.Expr.Unary(expr, expr: inner):\n            try inner + expr.span\n        Lua.Expr.Binary(expr, left, right):\n            try left + try right + expr.span\n        Lua.Expr.Call(expr, callee, args: arg_values):\n            try callee + arg_values.len.i64() + expr.span\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -919,8 +919,17 @@ func TestParseTreeVisitAndFoldExprs(t *testing.T) {
 	if !ok || resultType.Name != "i64" {
 		t.Fatalf("expected fold result i64, got %#v", foldExpr.ResultType)
 	}
-	if len(foldExpr.Arms) != 2 || foldExpr.Arms[0].ChildResultsName != "children" {
+	if len(foldExpr.Arms) != 4 || foldExpr.Arms[0].ChildResultsName != "children" {
 		t.Fatalf("unexpected fold arms: %#v", foldExpr.Arms)
+	}
+	if len(foldExpr.Arms[1].ChildBindings) != 1 || foldExpr.Arms[1].ChildBindings[0].FieldName != "expr" || foldExpr.Arms[1].ChildBindings[0].BindName != "inner" {
+		t.Fatalf("unexpected unary fold child bindings: %#v", foldExpr.Arms[1].ChildBindings)
+	}
+	if len(foldExpr.Arms[2].ChildBindings) != 2 || foldExpr.Arms[2].ChildBindings[0].FieldName != "left" || foldExpr.Arms[2].ChildBindings[0].BindName != "left" || foldExpr.Arms[2].ChildBindings[1].FieldName != "right" || foldExpr.Arms[2].ChildBindings[1].BindName != "right" {
+		t.Fatalf("unexpected binary fold child bindings: %#v", foldExpr.Arms[2].ChildBindings)
+	}
+	if len(foldExpr.Arms[3].ChildBindings) != 2 || foldExpr.Arms[3].ChildBindings[0].FieldName != "callee" || foldExpr.Arms[3].ChildBindings[0].BindName != "callee" || foldExpr.Arms[3].ChildBindings[1].FieldName != "args" || foldExpr.Arms[3].ChildBindings[1].BindName != "arg_values" {
+		t.Fatalf("unexpected call fold child bindings: %#v", foldExpr.Arms[3].ChildBindings)
 	}
 }
 

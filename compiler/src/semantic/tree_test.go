@@ -612,6 +612,7 @@ func TestAnalyzeTreeFoldExpr(t *testing.T) {
 	node Expr:
 		Nil
 		Int(value: i64)
+		Call(child callee: Expr, children args: darray[Expr])
 		Binary(child left: Expr, child right: Expr)
 
 def score(node: Lua.Expr) -> i64:
@@ -620,8 +621,10 @@ def score(node: Lua.Expr) -> i64:
 			expr.span + children.len.i64()
 		Lua.Expr.Int(expr, children):
 			expr.value + children.len.i64()
-		Lua.Expr.Binary(expr, children):
-			children[0u] + children[1u] + expr.span
+		Lua.Expr.Call(expr, callee, args: arg_values):
+			callee + arg_values.len.i64() + expr.span
+		Lua.Expr.Binary(expr, left, right):
+			left + right + expr.span
 `)
 }
 

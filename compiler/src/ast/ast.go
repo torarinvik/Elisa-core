@@ -673,11 +673,18 @@ type FoldExpr struct {
 	Arms       []VisitArm
 }
 
+type VisitArmChildBinding struct {
+	Position  lexer.Pos
+	FieldName string
+	BindName  string
+}
+
 type VisitArm struct {
 	Position         lexer.Pos
 	TargetName       string
 	BindName         string
 	ChildResultsName string
+	ChildBindings    []VisitArmChildBinding
 	Wildcard         bool
 	Body             []Stmt
 }

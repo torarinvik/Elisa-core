@@ -890,7 +890,7 @@ func (p *Parser) parseVisitArm() ast.VisitArm {
 			if p.peek() != lexer.TOKEN_RPAREN {
 				arm.BindName = p.expect(lexer.TOKEN_IDENT).Text
 				if p.match(lexer.TOKEN_COMMA) {
-					arm.ChildResultsName = p.expect(lexer.TOKEN_IDENT).Text
+					arm = p.parseVisitArmChildBindings(arm)
 				}
 			}
 			p.expect(lexer.TOKEN_RPAREN)
@@ -900,6 +900,32 @@ func (p *Parser) parseVisitArm() ast.VisitArm {
 	p.expectNewline()
 	arm.Body = p.parseBlock()
 	return arm
+}
+
+func (p *Parser) parseVisitArmChildBindings(arm ast.VisitArm) ast.VisitArm {
+	if p.peek() != lexer.TOKEN_IDENT {
+		p.errorf("expected fold child result binding name, got %s", p.cur())
+		return arm
+	}
+	firstTok := p.expect(lexer.TOKEN_IDENT)
+	if p.peek() != lexer.TOKEN_COLON && p.peek() == lexer.TOKEN_RPAREN {
+		arm.ChildResultsName = firstTok.Text
+		return arm
+	}
+	arm.ChildBindings = append(arm.ChildBindings, p.finishVisitArmChildBinding(firstTok))
+	for p.match(lexer.TOKEN_COMMA) {
+		nameTok := p.expect(lexer.TOKEN_IDENT)
+		arm.ChildBindings = append(arm.ChildBindings, p.finishVisitArmChildBinding(nameTok))
+	}
+	return arm
+}
+
+func (p *Parser) finishVisitArmChildBinding(nameTok lexer.Token) ast.VisitArmChildBinding {
+	binding := ast.VisitArmChildBinding{Position: nameTok.Pos, FieldName: nameTok.Text, BindName: nameTok.Text}
+	if p.match(lexer.TOKEN_COLON) {
+		binding.BindName = p.expect(lexer.TOKEN_IDENT).Text
+	}
+	return binding
 }
 
 func (p *Parser) parseCallArgs() ([]ast.Expr, []string) {

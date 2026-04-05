@@ -2145,6 +2145,63 @@ func TreeFieldStructuralRelation(family *TreeType, fieldType Type) ast.EnumPaylo
 	return ast.EnumPayloadRelationNone
 }
 
+type TreeStructuralChildBinding struct {
+	Name     string
+	Type     Type
+	Relation ast.EnumPayloadRelation
+}
+
+func TreeStructuralChildBindings(t Type) []TreeStructuralChildBinding {
+	switch tt := StripAggregateStateType(t).(type) {
+	case *TreeVariantViewType:
+		if tt == nil || tt.Variant == nil {
+			return nil
+		}
+		out := make([]TreeStructuralChildBinding, 0, len(tt.Variant.Payload))
+		for i, payloadType := range tt.Variant.Payload {
+			relation := tt.Variant.PayloadRelation(i)
+			if relation != ast.EnumPayloadRelationChild && relation != ast.EnumPayloadRelationChildren {
+				continue
+			}
+			name := tt.Variant.PayloadLabel(i)
+			if name == "" {
+				continue
+			}
+			out = append(out, TreeStructuralChildBinding{Name: name, Type: payloadType, Relation: relation})
+		}
+		return out
+	case *TreeBlockType:
+		return treeExactStructuralChildBindings(tt, TreeBlockFieldDeclsWithCommon(tt))
+	case *TreeStructType:
+		return treeExactStructuralChildBindings(tt, TreeStructFieldDeclsWithCommon(tt))
+	default:
+		return nil
+	}
+}
+
+func treeExactStructuralChildBindings(member Type, fieldDecls []ast.FieldDecl) []TreeStructuralChildBinding {
+	family, ok := TreeFamilyForMemberType(member)
+	if !ok || family == nil {
+		return nil
+	}
+	out := make([]TreeStructuralChildBinding, 0, len(fieldDecls))
+	for _, fieldDecl := range fieldDecls {
+		field, ok := TreeExactFieldInfo(member, fieldDecl.Name)
+		if !ok {
+			continue
+		}
+		relation := TreeFieldStructuralRelation(family, field.Type)
+		if relation != ast.EnumPayloadRelationChild && relation != ast.EnumPayloadRelationChildren {
+			continue
+		}
+		if fieldDecl.Name == "" {
+			continue
+		}
+		out = append(out, TreeStructuralChildBinding{Name: fieldDecl.Name, Type: field.Type, Relation: relation})
+	}
+	return out
+}
+
 func TreeFamilyExactMembersInTagOrder(treeType *TreeType) []Type {
 	if treeType == nil || treeType.Decl == nil {
 		return nil

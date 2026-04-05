@@ -408,6 +408,7 @@ func TestGenerateLLVMIRLowersTreeFoldExpr(t *testing.T) {
 	node Expr:
 		Nil
 		Int(value: i64)
+		Call(child callee: Expr, children args: darray[Expr])
 		Binary(child left: Expr, child right: Expr)
 
 def score(node: Lua.Expr) -> i64:
@@ -416,15 +417,17 @@ def score(node: Lua.Expr) -> i64:
 			expr.span + children.len.i64()
 		Lua.Expr.Int(expr, children):
 			expr.value + children.len.i64()
-		Lua.Expr.Binary(expr, children):
-			children[0u] + children[1u] + expr.span
+		Lua.Expr.Call(expr, callee, args: arg_values):
+			callee + arg_values.len.i64() + expr.span
+		Lua.Expr.Binary(expr, left, right):
+			left + right + expr.span
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_tree_fold_expr.llcontext", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"define i64 @score(%Lua__TreeHandle ", "define private i64 @tree_fold_", "call i64 @tree_fold_", "fold.arm.buffer", "fold.arm.view.len"} {
+	for _, check := range []string{"define i64 @score(%Lua__TreeHandle ", "define private i64 @tree_fold_", "call i64 @tree_fold_", "fold.arm.buffer", "fold.arm.view.len", "fold.arm.named.args.sub.view.len", "fold.arm.named.left.value", "fold.arm.named.right.value"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected tree fold lowering to include %q, got:\n%s", check, output)
 		}

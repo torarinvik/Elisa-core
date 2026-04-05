@@ -2512,12 +2512,7 @@ func (c *deferCaptureCollector) collectExpr(expr ast.Expr, locals map[string]boo
 		c.collectExpr(n.Value, locals)
 		for _, arm := range n.Arms {
 			armLocals := cloneParallelForLocals(locals)
-			if arm.BindName != "" {
-				armLocals[arm.BindName] = true
-			}
-			if arm.ChildResultsName != "" {
-				armLocals[arm.ChildResultsName] = true
-			}
+			appendVisitArmLocals(armLocals, arm)
 			for _, innerStmt := range arm.Body {
 				c.collectStmt(innerStmt, armLocals)
 			}
@@ -2526,15 +2521,27 @@ func (c *deferCaptureCollector) collectExpr(expr ast.Expr, locals map[string]boo
 		c.collectExpr(n.Value, locals)
 		for _, arm := range n.Arms {
 			armLocals := cloneParallelForLocals(locals)
-			if arm.BindName != "" {
-				armLocals[arm.BindName] = true
-			}
-			if arm.ChildResultsName != "" {
-				armLocals[arm.ChildResultsName] = true
-			}
+			appendVisitArmLocals(armLocals, arm)
 			for _, innerStmt := range arm.Body {
 				c.collectStmt(innerStmt, armLocals)
 			}
+		}
+	}
+}
+
+func appendVisitArmLocals(locals map[string]bool, arm ast.VisitArm) {
+	if locals == nil {
+		return
+	}
+	if arm.BindName != "" {
+		locals[arm.BindName] = true
+	}
+	if arm.ChildResultsName != "" {
+		locals[arm.ChildResultsName] = true
+	}
+	for _, binding := range arm.ChildBindings {
+		if binding.BindName != "" {
+			locals[binding.BindName] = true
 		}
 	}
 }
@@ -3324,7 +3331,51 @@ func (a *Analyzer) analyzeVisitArmBody(armInfo treeVisitArmInfo, resultType Type
 		childViewType := &DArrayViewType{Elem: resultType, SurfaceName: "dview"}
 		a.defineLocalInScope(scope, &Symbol{Name: armInfo.Arm.ChildResultsName, Kind: SymbolLocal, Type: childViewType, Mutable: false}, armInfo.Arm.Position)
 	}
+	if len(armInfo.Arm.ChildBindings) != 0 {
+		if !forFold {
+			a.errorf(armInfo.Arm.Position, "visit arm %q cannot bind fold child results", armInfo.Arm.TargetName)
+		} else {
+			bindingTypes := treeFoldArmChildBindingTypes(armInfo.BindType, resultType)
+			seenFields := map[string]bool{}
+			for _, binding := range armInfo.Arm.ChildBindings {
+				if binding.FieldName == "" || binding.BindName == "" {
+					continue
+				}
+				if seenFields[binding.FieldName] {
+					a.errorf(binding.Position, "fold arm %q binds child result %q more than once", armInfo.Arm.TargetName, binding.FieldName)
+					continue
+				}
+				seenFields[binding.FieldName] = true
+				bindingType, ok := bindingTypes[binding.FieldName]
+				if !ok {
+					a.errorf(binding.Position, "fold arm %q has no structural child result named %q", armInfo.Arm.TargetName, binding.FieldName)
+					continue
+				}
+				a.defineLocalInScope(scope, &Symbol{Name: binding.BindName, Kind: SymbolLocal, Type: bindingType, Mutable: false}, binding.Position)
+			}
+		}
+	}
 	return a.analyzeMatchExprArmBodyWithAffineSnapshot(armInfo.Arm.Body, scope)
+}
+
+func treeFoldArmChildBindingTypes(bindType Type, resultType Type) map[string]Type {
+	if bindType == nil || resultType == nil {
+		return nil
+	}
+	childViewType := &DArrayViewType{Elem: resultType, SurfaceName: "dview"}
+	out := make(map[string]Type)
+	for _, binding := range TreeStructuralChildBindings(bindType) {
+		if binding.Name == "" {
+			continue
+		}
+		switch binding.Relation {
+		case ast.EnumPayloadRelationChild:
+			out[binding.Name] = resultType
+		case ast.EnumPayloadRelationChildren:
+			out[binding.Name] = childViewType
+		}
+	}
+	return out
 }
 
 func (a *Analyzer) analyzeVisitExpr(expr *ast.VisitExpr) Type {
@@ -3559,12 +3610,7 @@ func (a *Analyzer) recordFoldExprInfo(expr *ast.FoldExpr) {
 	collector := newDeferCaptureCollector(a, a.currentScope)
 	for _, arm := range expr.Arms {
 		armLocals := map[string]bool{}
-		if arm.BindName != "" {
-			armLocals[arm.BindName] = true
-		}
-		if arm.ChildResultsName != "" {
-			armLocals[arm.ChildResultsName] = true
-		}
+		appendVisitArmLocals(armLocals, arm)
 		for _, stmt := range arm.Body {
 			collector.collectStmt(stmt, cloneParallelForLocals(armLocals))
 		}

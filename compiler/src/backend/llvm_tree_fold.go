@@ -425,6 +425,116 @@ func (s *functionState) emitTreeFoldChildResultsView(helper *treeFoldHelperInfo,
 	return viewValue, nil
 }
 
+func (s *functionState) emitTreeFoldChildResultAtIndex(childViewValue C.LLVMValueRef, resultType semantic.Type, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	resultLLVMType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, err
+	}
+	viewData := C.LLVMBuildExtractValue(s.builder, childViewValue, 0, cStringFree(name+".data"))
+	elemPtr := C.LLVMBuildGEP2(s.builder, resultLLVMType, viewData, llvmValueSlicePtr([]C.LLVMValueRef{indexValue}), 1, cStringFree(name+".ptr"))
+	return C.LLVMBuildLoad2(s.builder, resultLLVMType, elemPtr, cStringFree(name+".value")), nil
+}
+
+func (s *functionState) emitTreeFoldChildResultsSubview(childViewValue C.LLVMValueRef, resultType semantic.Type, offsetValue C.LLVMValueRef, countValue C.LLVMValueRef, name string) (C.LLVMValueRef, semantic.Type, error) {
+	viewType := &semantic.DArrayViewType{Elem: resultType, SurfaceName: "dview"}
+	viewLLVMType, err := s.g.lowerType(viewType)
+	if err != nil {
+		return nil, nil, err
+	}
+	resultLLVMType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, err
+	}
+	viewData := C.LLVMBuildExtractValue(s.builder, childViewValue, 0, cStringFree(name+".data"))
+	viewElemSize := C.LLVMBuildExtractValue(s.builder, childViewValue, 2, cStringFree(name+".elem_size"))
+	subData := C.LLVMBuildGEP2(s.builder, resultLLVMType, viewData, llvmValueSlicePtr([]C.LLVMValueRef{offsetValue}), 1, cStringFree(name+".sub.data"))
+	subView := C.LLVMGetUndef(viewLLVMType)
+	subView = C.LLVMBuildInsertValue(s.builder, subView, subData, 0, cStringFree(name+".sub.view.data"))
+	subView = C.LLVMBuildInsertValue(s.builder, subView, countValue, 1, cStringFree(name+".sub.view.len"))
+	subView = C.LLVMBuildInsertValue(s.builder, subView, viewElemSize, 2, cStringFree(name+".sub.view.elem_size"))
+	return subView, viewType, nil
+}
+
+func (s *functionState) emitTreeFoldNamedChildBindingLocals(helper *treeFoldHelperInfo, nodeValue C.LLVMValueRef, memberType semantic.Type, childViewValue C.LLVMValueRef, arm ast.VisitArm, name string) error {
+	if len(arm.ChildBindings) == 0 {
+		return nil
+	}
+	requested := make(map[string]string, len(arm.ChildBindings))
+	for _, binding := range arm.ChildBindings {
+		if binding.FieldName == "" || binding.BindName == "" || binding.BindName == "_" {
+			continue
+		}
+		requested[binding.FieldName] = binding.BindName
+	}
+	if len(requested) == 0 {
+		return nil
+	}
+	family := treeExactMemberFamily(memberType)
+	if family == nil {
+		return fmt.Errorf("fold child binding source %s is missing tree family metadata", treeExactMemberSurfaceName(memberType))
+	}
+	stateValue := s.emitTreeHandleStateValue(nodeValue, name+".state")
+	rowIndex, err := s.emitTreeHandleIndexValue(nodeValue, name+".index")
+	if err != nil {
+		return err
+	}
+	tablePtr, err := s.emitTreeStateTablePtr(stateValue, family, memberType, name)
+	if err != nil {
+		return err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return err
+	}
+	offsetValue := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	oneValue := C.LLVMConstInt(usizeLLVMType, 1, 0)
+	boundFields := map[string]bool{}
+	for _, childBinding := range semantic.TreeStructuralChildBindings(memberType) {
+		bindName, wanted := requested[childBinding.Name]
+		switch childBinding.Relation {
+		case ast.EnumPayloadRelationChild:
+			if wanted {
+				childResult, err := s.emitTreeFoldChildResultAtIndex(childViewValue, helper.resultType, offsetValue, name+"."+childBinding.Name)
+				if err != nil {
+					return err
+				}
+				if err := s.emitMoveBindLocal(bindName, helper.resultType, childResult); err != nil {
+					return err
+				}
+				boundFields[childBinding.Name] = true
+			}
+			offsetValue = C.LLVMBuildAdd(s.builder, offsetValue, oneValue, cStringFree(name+"."+childBinding.Name+".offset.next"))
+		case ast.EnumPayloadRelationChildren:
+			fieldValue, _, err := s.emitTreeExactFieldValueAtIndex(tablePtr, memberType, childBinding.Name, rowIndex, name+"."+childBinding.Name)
+			if err != nil {
+				return err
+			}
+			countValue, err := s.emitTreeStructuralSequenceCount(fieldValue, childBinding.Type, name+"."+childBinding.Name+".count")
+			if err != nil {
+				return err
+			}
+			if wanted {
+				subViewValue, subViewType, err := s.emitTreeFoldChildResultsSubview(childViewValue, helper.resultType, offsetValue, countValue, name+"."+childBinding.Name)
+				if err != nil {
+					return err
+				}
+				if err := s.emitMoveBindLocal(bindName, subViewType, subViewValue); err != nil {
+					return err
+				}
+				boundFields[childBinding.Name] = true
+			}
+			offsetValue = C.LLVMBuildAdd(s.builder, offsetValue, countValue, cStringFree(name+"."+childBinding.Name+".offset.next"))
+		}
+	}
+	for fieldName := range requested {
+		if !boundFields[fieldName] {
+			return fmt.Errorf("fold arm child binding %q was not resolved for %s", fieldName, treeExactMemberSurfaceName(memberType))
+		}
+	}
+	return nil
+}
+
 func (s *functionState) emitTreeFoldArmValue(helper *treeFoldHelperInfo, envValue C.LLVMValueRef, nodeValue C.LLVMValueRef, memberType semantic.Type, arm ast.VisitArm) (C.LLVMValueRef, bool, error) {
 	childViewValue, err := s.emitTreeFoldChildResultsView(helper, envValue, nodeValue, memberType, "fold.arm")
 	if err != nil {
@@ -443,6 +553,10 @@ func (s *functionState) emitTreeFoldArmValue(helper *treeFoldHelperInfo, envValu
 			s.popScope()
 			return nil, false, err
 		}
+	}
+	if err := s.emitTreeFoldNamedChildBindingLocals(helper, nodeValue, memberType, childViewValue, arm, "fold.arm.named"); err != nil {
+		s.popScope()
+		return nil, false, err
 	}
 	armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, helper.resultType)
 	s.popScope()
