@@ -709,8 +709,16 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					return
 				}
 				nodeType := &TreeNodeType{Name: nodeQualifiedName, Family: treeType}
+				kindName := treeNodeKindTypeName(nodeQualifiedName)
+				if _, exists := a.namedTypes[kindName]; exists {
+					a.errorf(n.Pos(), "duplicate type %q", kindName)
+					return
+				}
+				kindType := &ConstEnumType{Name: kindName, Storage: a.namedTypes["u32"], MemberMap: map[string]*ConstEnumMember{}}
+				nodeType.KindType = kindType
 				treeType.NodeType = nodeType
 				a.namedTypes[nodeQualifiedName] = nodeType
+				a.namedTypes[kindName] = kindType
 				treeType.MemberTypes["Node"] = nodeType
 				storeName := treeStoreTypeName(qualifiedName)
 				if _, exists := a.namedTypes[storeName]; exists {
@@ -836,6 +844,10 @@ func packedEnumTagTypeName(enumName string) string {
 
 func treeCategoryKindTypeName(categoryName string) string {
 	return categoryName + ".Kind"
+}
+
+func treeNodeKindTypeName(nodeName string) string {
+	return nodeName + ".Kind"
 }
 
 func treeMemberTypeName(treeName string, memberName string) string {
@@ -990,6 +1002,7 @@ func (a *Analyzer) populateTreeMembers(decls []scopedDecl) {
 					IsTail:  commonDecl.IsTail,
 				}
 			}
+			a.populateTreeNodeKindType(treeType)
 			for _, member := range treeDecl.Members {
 				switch n := member.(type) {
 				case *ast.TreeCategoryDecl:
@@ -1001,6 +1014,61 @@ func (a *Analyzer) populateTreeMembers(decls []scopedDecl) {
 				}
 			}
 		})
+	}
+}
+
+func (a *Analyzer) populateTreeNodeKindType(treeType *TreeType) {
+	if treeType == nil || treeType.NodeType == nil || treeType.NodeType.KindType == nil || treeType.Decl == nil {
+		return
+	}
+	kindType := treeType.NodeType.KindType
+	for _, memberDecl := range treeType.Decl.Members {
+		switch decl := memberDecl.(type) {
+		case *ast.TreeCategoryDecl:
+			if decl == nil {
+				continue
+			}
+			nextExactTag := treeFamilyNextExactTag(treeType, decl.Name, "")
+			for i := range decl.Variants {
+				variantDecl := &decl.Variants[i]
+				memberName := decl.Name + "." + variantDecl.Name
+				if _, exists := kindType.MemberMap[memberName]; exists {
+					a.errorf(variantDecl.Position, "duplicate tree root kind member %q in %q", memberName, kindType.Name)
+					continue
+				}
+				member := &ConstEnumMember{Name: memberName, Value: int64(nextExactTag), Decl: nil}
+				kindType.Members = append(kindType.Members, member)
+				kindType.MemberMap[member.Name] = member
+				a.constValues[kindType.Name+"."+member.Name] = ConstValue{Kind: ConstInt, Int: member.Value}
+				nextExactTag++
+			}
+		case *ast.TreeBlockDecl:
+			if decl == nil {
+				continue
+			}
+			if _, exists := kindType.MemberMap[decl.Name]; exists {
+				a.errorf(decl.Pos(), "duplicate tree root kind member %q in %q", decl.Name, kindType.Name)
+				continue
+			}
+			tag := treeFamilyNextExactTag(treeType, "", decl.Name)
+			member := &ConstEnumMember{Name: decl.Name, Value: int64(tag), Decl: nil}
+			kindType.Members = append(kindType.Members, member)
+			kindType.MemberMap[member.Name] = member
+			a.constValues[kindType.Name+"."+member.Name] = ConstValue{Kind: ConstInt, Int: member.Value}
+		case *ast.TreeStructDecl:
+			if decl == nil {
+				continue
+			}
+			if _, exists := kindType.MemberMap[decl.Name]; exists {
+				a.errorf(decl.Pos(), "duplicate tree root kind member %q in %q", decl.Name, kindType.Name)
+				continue
+			}
+			tag := treeFamilyNextExactTag(treeType, "", decl.Name)
+			member := &ConstEnumMember{Name: decl.Name, Value: int64(tag), Decl: nil}
+			kindType.Members = append(kindType.Members, member)
+			kindType.MemberMap[member.Name] = member
+			a.constValues[kindType.Name+"."+member.Name] = ConstValue{Kind: ConstInt, Int: member.Value}
+		}
 	}
 }
 

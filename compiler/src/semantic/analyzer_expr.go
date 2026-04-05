@@ -1849,23 +1849,73 @@ func (a *Analyzer) analyzeContextualShorthandValueExpr(expr ast.Expr, expected T
 }
 
 func (a *Analyzer) treeCategoryKindExprType(expr *ast.FieldExpr) (Type, bool) {
-	baseName, ok := qualifiedTypePathFromExpr(expr.Object)
+	fullName, ok := qualifiedTypePathFromExpr(expr)
 	if !ok || expr.Field != "Kind" {
 		return nil, false
 	}
-	base, _, ok := a.lookupVisibleType(baseName)
+	base, _, ok := a.lookupVisibleType(fullName)
+	if ok {
+		if constEnumType, ok := base.(*ConstEnumType); ok {
+			return constEnumType, true
+		}
+	}
+	baseName, ok := qualifiedTypePathFromExpr(expr.Object)
 	if !ok {
 		return nil, false
 	}
-	categoryType, ok := base.(*TreeCategoryType)
+	base, _, ok = a.lookupVisibleType(baseName)
 	if !ok {
 		return nil, false
 	}
-	if categoryType.KindType == nil {
-		a.errorf(expr.Pos(), "tree category %q has no nested kind type", categoryType.Name)
-		return invalidType, true
+	switch tt := base.(type) {
+	case *TreeCategoryType:
+		if tt.KindType == nil {
+			a.errorf(expr.Pos(), "tree category %q has no nested kind type", tt.Name)
+			return invalidType, true
+		}
+		return tt.KindType, true
+	case *TreeNodeType:
+		if tt.KindType == nil {
+			a.errorf(expr.Pos(), "tree root %q has no nested kind type", tt.Name)
+			return invalidType, true
+		}
+		return tt.KindType, true
+	default:
+		return nil, false
 	}
-	return categoryType.KindType, true
+}
+
+func (a *Analyzer) constEnumMemberInfoForExpr(expr ast.Expr) (*ConstEnumType, string, *ConstEnumMember, bool) {
+	fullName, ok := qualifiedTypePathFromExpr(expr)
+	if !ok || fullName == "" {
+		return nil, "", nil, false
+	}
+	parts := strings.Split(fullName, ".")
+	var matchedType *ConstEnumType
+	var matchedMemberName string
+	for i := len(parts) - 1; i >= 1; i-- {
+		baseName := strings.Join(parts[:i], ".")
+		base, _, ok := a.lookupVisibleType(baseName)
+		if !ok {
+			continue
+		}
+		constEnumType, ok := base.(*ConstEnumType)
+		if !ok || constEnumType == nil {
+			continue
+		}
+		memberName := strings.Join(parts[i:], ".")
+		if matchedType == nil {
+			matchedType = constEnumType
+			matchedMemberName = memberName
+		}
+		if member, ok := constEnumType.Member(memberName); ok {
+			return constEnumType, memberName, member, true
+		}
+	}
+	if matchedType != nil {
+		return matchedType, matchedMemberName, nil, true
+	}
+	return nil, "", nil, false
 }
 
 func (a *Analyzer) constEnumTypeForExpr(expr ast.Expr) (*ConstEnumType, bool) {
@@ -1896,12 +1946,12 @@ func (a *Analyzer) constEnumTypeForExpr(expr ast.Expr) (*ConstEnumType, bool) {
 }
 
 func (a *Analyzer) constEnumMemberExprType(expr *ast.FieldExpr) (Type, bool) {
-	constEnumType, ok := a.constEnumTypeForExpr(expr.Object)
+	constEnumType, memberName, member, ok := a.constEnumMemberInfoForExpr(expr)
 	if !ok {
 		return nil, false
 	}
-	if _, ok := constEnumType.Member(expr.Field); !ok {
-		a.errorf(expr.Pos(), "const enum %q has no member %q", constEnumType.Name, expr.Field)
+	if member == nil {
+		a.errorf(expr.Pos(), "const enum %q has no member %q", constEnumType.Name, memberName)
 		return invalidType, true
 	}
 	return constEnumType, true

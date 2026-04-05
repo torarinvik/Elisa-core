@@ -422,15 +422,47 @@ func (s *functionState) errorTagInfo(expr *ast.FieldExpr) (*semantic.ErrorSetTyp
 }
 
 func (s *functionState) constEnumMemberInfo(expr *ast.FieldExpr) (*semantic.ConstEnumType, *semantic.ConstEnumMember, bool) {
-	constEnumType, ok := s.constEnumTypeForExpr(expr.Object)
-	if !ok || constEnumType == nil {
+	constEnumType, _, member, ok := s.constEnumMemberInfoForExpr(expr)
+	if !ok {
 		return nil, nil, false
 	}
-	member, ok := constEnumType.Member(expr.Field)
-	if !ok {
-		return constEnumType, nil, false
+	return constEnumType, member, member != nil
+}
+
+func (s *functionState) constEnumMemberInfoForExpr(expr ast.Expr) (*semantic.ConstEnumType, string, *semantic.ConstEnumMember, bool) {
+	parts, ok := qualifiedFieldParts(expr)
+	if !ok || len(parts) < 2 {
+		return nil, "", nil, false
 	}
-	return constEnumType, member, true
+	fullName := strings.Join(parts, ".")
+	if !ok || fullName == "" {
+		return nil, "", nil, false
+	}
+	var matchedType *semantic.ConstEnumType
+	var matchedMemberName string
+	for i := len(parts) - 1; i >= 1; i-- {
+		baseName := strings.Join(parts[:i], ".")
+		base, ok := s.g.result.NamedTypes[baseName]
+		if !ok {
+			continue
+		}
+		constEnumType, ok := base.(*semantic.ConstEnumType)
+		if !ok || constEnumType == nil {
+			continue
+		}
+		memberName := strings.Join(parts[i:], ".")
+		if matchedType == nil {
+			matchedType = constEnumType
+			matchedMemberName = memberName
+		}
+		if member, ok := constEnumType.Member(memberName); ok {
+			return constEnumType, memberName, member, true
+		}
+	}
+	if matchedType != nil {
+		return matchedType, matchedMemberName, nil, true
+	}
+	return nil, "", nil, false
 }
 
 func (s *functionState) constEnumTypeForExpr(expr ast.Expr) (*semantic.ConstEnumType, bool) {
@@ -6894,6 +6926,19 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 			return value, field.Type, true, err
 		}
 		return nil, nil, true, fmt.Errorf("%s has no field %s", tt.String(), expr.Field)
+	case *semantic.TreeNodeType:
+		if expr.Field == "kind" {
+			kindType, ok := semantic.TreeKindType(tt)
+			if !ok || kindType == nil {
+				return nil, nil, true, fmt.Errorf("%s has no kind", tt.String())
+			}
+			value, err := s.emitTreeHandleTagValue(handleValue, "tree.field.kind")
+			if err != nil {
+				return nil, nil, true, err
+			}
+			return value, kindType, true, nil
+		}
+		return nil, nil, true, fmt.Errorf("%s has no field %s", tt.String(), expr.Field)
 	case *semantic.TreeCategoryType:
 		if expr.Field == "kind" {
 			kindType, ok := semantic.TreeKindType(tt)
@@ -6958,6 +7003,22 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 		}
 		return nil, nil, false, nil
 	case *semantic.TreeBlockType, *semantic.TreeStructType:
+		if expr.Field == "kind" {
+			kindType, ok := semantic.TreeKindType(tt)
+			if !ok || kindType == nil {
+				return nil, nil, true, fmt.Errorf("%s has no kind", baseType.String())
+			}
+			llvmType, err := s.g.lowerType(kindType)
+			if err != nil {
+				return nil, nil, true, err
+			}
+			tag, ok := semantic.TreeExactTag(tt)
+			if !ok {
+				return nil, nil, true, fmt.Errorf("%s has no exact tree tag", baseType.String())
+			}
+			value := C.LLVMConstInt(llvmType, C.ulonglong(tag), 0)
+			return value, kindType, true, nil
+		}
 		field, ok := semantic.TreeExactFieldInfo(tt, expr.Field)
 		if !ok {
 			return nil, nil, true, fmt.Errorf("%s has no field %s", baseType.String(), expr.Field)

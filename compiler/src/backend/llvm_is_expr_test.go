@@ -330,6 +330,8 @@ func TestGenerateLLVMIRLowersTreeKindFieldAndShorthandMembers(t *testing.T) {
 	@role(stmt)
 	node Stmt:
 		Return(value: Expr)
+	block Block:
+		stmts: darray[Stmt]
 
 def is_binary(node: Lua.Expr) -> bool:
 	return node.kind == .Binary
@@ -340,15 +342,27 @@ def stmt_is_return(stmt: Lua.Stmt) -> bool:
 def binary_kind(node: Lua.Expr.Binary) -> Lua.Expr.Kind:
 	return node.kind
 
+def node_kind(node: Lua.Node) -> Lua.Node.Kind:
+	return node.kind
+
+def node_is_binary(node: Lua.Node) -> bool:
+	return node.kind == .Expr.Binary
+
+def block_kind(node: Lua.Block) -> Lua.Node.Kind:
+	return node.kind
+
 def explicit_binary_kind() -> Lua.Expr.Kind:
 	return Lua.Expr.Kind.Binary
+
+def explicit_root_binary_kind() -> Lua.Node.Kind:
+	return Lua.Node.Kind.Expr.Binary
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_tree_kind.llcontext", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"define i1 @is_binary(%Lua__TreeHandle ", "define i1 @stmt_is_return(%Lua__TreeHandle ", "define i32 @binary_kind(%Lua__TreeHandle ", "define i32 @explicit_binary_kind()", "icmp eq i32"} {
+	for _, check := range []string{"define i1 @is_binary(%Lua__TreeHandle ", "define i1 @stmt_is_return(%Lua__TreeHandle ", "define i32 @binary_kind(%Lua__TreeHandle ", "define i32 @node_kind(%Lua__TreeHandle ", "define i1 @node_is_binary(%Lua__TreeHandle ", "define i32 @block_kind(%Lua__TreeHandle ", "define i32 @explicit_binary_kind()", "define i32 @explicit_root_binary_kind()", "icmp eq i32"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected tree kind lowering to include %q, got:\n%s", check, output)
 		}

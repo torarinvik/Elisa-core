@@ -208,8 +208,9 @@ type TreeVariantViewType struct {
 }
 
 type TreeNodeType struct {
-	Name   string
-	Family *TreeType
+	Name     string
+	Family   *TreeType
+	KindType *ConstEnumType
 }
 
 type TreeType struct {
@@ -845,6 +846,21 @@ func TreeKindType(t Type) (*ConstEnumType, bool) {
 			return nil, false
 		}
 		return tt.Category.KindType, true
+	case *TreeNodeType:
+		if tt == nil || tt.KindType == nil {
+			return nil, false
+		}
+		return tt.KindType, true
+	case *TreeBlockType:
+		if tt == nil || tt.Family == nil || tt.Family.NodeType == nil || tt.Family.NodeType.KindType == nil {
+			return nil, false
+		}
+		return tt.Family.NodeType.KindType, true
+	case *TreeStructType:
+		if tt == nil || tt.Family == nil || tt.Family.NodeType == nil || tt.Family.NodeType.KindType == nil {
+			return nil, false
+		}
+		return tt.Family.NodeType.KindType, true
 	default:
 		return nil, false
 	}

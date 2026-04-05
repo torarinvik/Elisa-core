@@ -157,6 +157,8 @@ func TestAnalyzeSynthesizesTreeCategoryKindTypesAndShorthandComparisons(t *testi
 	@role(stmt)
 	node Stmt:
 		Return(child value: Expr)
+	block Block:
+		stmts: darray[Stmt]
 
 def expr_kind(node: Lua.Expr) -> Lua.Expr.Kind:
 	return node.kind
@@ -164,14 +166,32 @@ def expr_kind(node: Lua.Expr) -> Lua.Expr.Kind:
 def binary_kind(node: Lua.Expr.Binary) -> Lua.Expr.Kind:
 	return node.kind
 
+def node_kind(node: Lua.Node) -> Lua.Node.Kind:
+	return node.kind
+
+def block_kind(block: Lua.Block) -> Lua.Node.Kind:
+	return block.kind
+
 def stmt_is_return(node: Lua.Stmt) -> bool:
 	return node.kind == .Return
+
+def node_is_binary(node: Lua.Node) -> bool:
+	return node.kind == .Expr.Binary
 
 def explicit_binary_kind() -> Lua.Expr.Kind:
 	return Lua.Expr.Kind.Binary
 
+def explicit_root_binary_kind() -> Lua.Node.Kind:
+	return Lua.Node.Kind.Expr.Binary
+
+def explicit_root_block_kind() -> Lua.Node.Kind:
+	return Lua.Node.Kind.Block
+
 def shorthand_nil_kind() -> Lua.Expr.Kind:
 	return .Nil
+
+def shorthand_root_binary_kind() -> Lua.Node.Kind:
+	return .Expr.Binary
 `)
 
 	exprType, ok := result.NamedTypes["Lua.Expr"].(*TreeCategoryType)
@@ -190,11 +210,22 @@ def shorthand_nil_kind() -> Lua.Expr.Kind:
 	if !ok || stmtKindType == nil {
 		t.Fatalf("expected synthesized Lua.Stmt.Kind const enum type, got %T", result.NamedTypes["Lua.Stmt.Kind"])
 	}
+	nodeType, ok := result.NamedTypes["Lua.Node"].(*TreeNodeType)
+	if !ok || nodeType == nil {
+		t.Fatalf("expected Lua.Node tree root type, got %T", result.NamedTypes["Lua.Node"])
+	}
+	nodeKindType, ok := result.NamedTypes["Lua.Node.Kind"].(*ConstEnumType)
+	if !ok || nodeKindType == nil {
+		t.Fatalf("expected synthesized Lua.Node.Kind const enum type, got %T", result.NamedTypes["Lua.Node.Kind"])
+	}
 	if exprType.KindType != exprKindType {
 		t.Fatalf("expected Lua.Expr kind type to point at synthesized const enum, got %#v", exprType.KindType)
 	}
 	if stmtType.KindType != stmtKindType {
 		t.Fatalf("expected Lua.Stmt kind type to point at synthesized const enum, got %#v", stmtType.KindType)
+	}
+	if nodeType.KindType != nodeKindType {
+		t.Fatalf("expected Lua.Node kind type to point at synthesized const enum, got %#v", nodeType.KindType)
 	}
 	binaryVariant, ok := exprType.Variant("Binary")
 	if !ok || binaryVariant == nil {
@@ -215,6 +246,18 @@ def shorthand_nil_kind() -> Lua.Expr.Kind:
 	nilMember, ok := exprKindType.Member("Nil")
 	if !ok || nilMember == nil {
 		t.Fatalf("expected Lua.Expr.Kind.Nil member, got %#v", exprKindType.MemberMap)
+	}
+	rootBinaryMember, ok := nodeKindType.Member("Expr.Binary")
+	if !ok || rootBinaryMember == nil || rootBinaryMember.Value != int64(binaryVariant.Tag) {
+		t.Fatalf("expected Lua.Node.Kind.Expr.Binary to mirror Binary tag %d, got %#v", binaryVariant.Tag, rootBinaryMember)
+	}
+	rootReturnMember, ok := nodeKindType.Member("Stmt.Return")
+	if !ok || rootReturnMember == nil || rootReturnMember.Value != int64(returnVariant.Tag) {
+		t.Fatalf("expected Lua.Node.Kind.Stmt.Return to mirror Return tag %d, got %#v", returnVariant.Tag, rootReturnMember)
+	}
+	rootBlockMember, ok := nodeKindType.Member("Block")
+	if !ok || rootBlockMember == nil {
+		t.Fatalf("expected Lua.Node.Kind.Block member, got %#v", nodeKindType.MemberMap)
 	}
 }
 
