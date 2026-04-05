@@ -101,6 +101,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		}
 		result = a.namedTypes["f64"]
 		return
+	case *ast.ShorthandMemberExpr:
+		result = a.analyzeShorthandMemberExpr(n, nil)
+		return
 	case *ast.StringLit:
 		result = &RefType{Elem: a.namedTypes["u8"], State: RefStateNonNull, Storage: RefStorageStatic, ExplicitStorage: true}
 		return
@@ -138,6 +141,10 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		}
 		if tagType, ok := a.packedEnumTagExprType(n); ok {
 			result = tagType
+			return
+		}
+		if kindType, ok := a.treeCategoryKindExprType(n); ok {
+			result = kindType
 			return
 		}
 		if constEnumType, ok := a.constEnumMemberExprType(n); ok {
@@ -1780,6 +1787,87 @@ func (a *Analyzer) packedEnumTagExprType(expr *ast.FieldExpr) (Type, bool) {
 	return enumType.TagType, true
 }
 
+func shorthandMemberName(parts []string) string {
+	return strings.Join(parts, ".")
+}
+
+func shorthandMemberDisplay(parts []string) string {
+	return "." + shorthandMemberName(parts)
+}
+
+func contextualShorthandExpr(expr ast.Expr) (*ast.ShorthandMemberExpr, bool) {
+	switch n := expr.(type) {
+	case *ast.ShorthandMemberExpr:
+		return n, true
+	case *ast.ParenExpr:
+		return contextualShorthandExpr(n.Inner)
+	default:
+		return nil, false
+	}
+}
+
+func (a *Analyzer) analyzeShorthandMemberExpr(expr *ast.ShorthandMemberExpr, expected Type) Type {
+	if expr == nil {
+		return invalidType
+	}
+	if expected == nil {
+		a.errorf(expr.Pos(), "shorthand member %q requires an expected const enum type", shorthandMemberDisplay(expr.Parts))
+		return invalidType
+	}
+	if IsInvalidType(expected) {
+		return invalidType
+	}
+	constEnumType, ok := expected.(*ConstEnumType)
+	if !ok || constEnumType == nil {
+		a.errorf(expr.Pos(), "shorthand member %q requires an expected const enum type", shorthandMemberDisplay(expr.Parts))
+		return invalidType
+	}
+	memberName := shorthandMemberName(expr.Parts)
+	if _, ok := constEnumType.Member(memberName); !ok {
+		a.errorf(expr.Pos(), "const enum %q has no member %q", constEnumType.Name, memberName)
+		return invalidType
+	}
+	return constEnumType
+}
+
+func (a *Analyzer) analyzeContextualShorthandValueExpr(expr ast.Expr, expected Type) (Type, bool) {
+	switch n := expr.(type) {
+	case *ast.ShorthandMemberExpr:
+		result := a.analyzeShorthandMemberExpr(n, expected)
+		a.recordAnalyzedExprType(n, result)
+		return result, true
+	case *ast.ParenExpr:
+		innerType, ok := a.analyzeContextualShorthandValueExpr(n.Inner, expected)
+		if !ok {
+			return nil, false
+		}
+		a.recordAnalyzedExprType(n, innerType)
+		return innerType, true
+	default:
+		return nil, false
+	}
+}
+
+func (a *Analyzer) treeCategoryKindExprType(expr *ast.FieldExpr) (Type, bool) {
+	baseName, ok := qualifiedTypePathFromExpr(expr.Object)
+	if !ok || expr.Field != "Kind" {
+		return nil, false
+	}
+	base, _, ok := a.lookupVisibleType(baseName)
+	if !ok {
+		return nil, false
+	}
+	categoryType, ok := base.(*TreeCategoryType)
+	if !ok {
+		return nil, false
+	}
+	if categoryType.KindType == nil {
+		a.errorf(expr.Pos(), "tree category %q has no nested kind type", categoryType.Name)
+		return invalidType, true
+	}
+	return categoryType.KindType, true
+}
+
 func (a *Analyzer) constEnumTypeForExpr(expr ast.Expr) (*ConstEnumType, bool) {
 	switch n := expr.(type) {
 	case *ast.Ident:
@@ -1790,6 +1878,10 @@ func (a *Analyzer) constEnumTypeForExpr(expr ast.Expr) (*ConstEnumType, bool) {
 		constEnumType, ok := base.(*ConstEnumType)
 		return constEnumType, ok
 	case *ast.FieldExpr:
+		if kindType, ok := a.treeCategoryKindExprType(n); ok {
+			constEnumType, ok := kindType.(*ConstEnumType)
+			return constEnumType, ok
+		}
 		tagType, ok := a.packedEnumTagExprType(n)
 		if !ok {
 			return nil, false
@@ -2191,8 +2283,29 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 	if expr.Op == lexer.TOKEN_IS {
 		return a.analyzeIsExpr(expr)
 	}
-	left := a.analyzeExpr(expr.Left)
-	right := a.analyzeExpr(expr.Right)
+	leftShorthand, leftIsShorthand := contextualShorthandExpr(expr.Left)
+	rightShorthand, rightIsShorthand := contextualShorthandExpr(expr.Right)
+	var left Type
+	var right Type
+	switch {
+	case leftIsShorthand && !rightIsShorthand:
+		right = a.analyzeExpr(expr.Right)
+		left = a.analyzeValueExpr(expr.Left, right)
+	case rightIsShorthand && !leftIsShorthand:
+		left = a.analyzeExpr(expr.Left)
+		right = a.analyzeValueExpr(expr.Right, left)
+	default:
+		if leftIsShorthand && leftShorthand != nil {
+			left = a.analyzeShorthandMemberExpr(leftShorthand, nil)
+		} else {
+			left = a.analyzeExpr(expr.Left)
+		}
+		if rightIsShorthand && rightShorthand != nil {
+			right = a.analyzeShorthandMemberExpr(rightShorthand, nil)
+		} else {
+			right = a.analyzeExpr(expr.Right)
+		}
+	}
 	switch expr.Op {
 	case lexer.TOKEN_AND, lexer.TOKEN_OR:
 		if !IsBoolType(left) || !IsBoolType(right) {
@@ -5895,6 +6008,9 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 }
 
 func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
+	if shorthandType, ok := a.analyzeContextualShorthandValueExpr(expr, expected); ok {
+		return shorthandType
+	}
 	if lit, ok := expr.(*ast.StructLitExpr); ok {
 		result := a.analyzeStructLiteralExpr(lit, expected)
 		a.recordAnalyzedExprType(lit, result)
@@ -6584,6 +6700,9 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 	}
 	objType = StripAggregateStateType(objType)
 	if field, ok := packedStoreSyntheticField(objType, fieldName); ok {
+		return field, true
+	}
+	if field, ok := TreeKindFieldInfo(objType); ok && fieldName == field.Name {
 		return field, true
 	}
 	if viewType, ok := objType.(*PackedVariantViewType); ok {

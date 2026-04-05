@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
@@ -92,6 +93,16 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 			}
 		}
 		return ConstValue{}, false
+	case *ast.ShorthandMemberExpr:
+		constEnumType, ok := a.exprTypes[n].(*ConstEnumType)
+		if !ok || constEnumType == nil {
+			return ConstValue{}, false
+		}
+		member, ok := constEnumType.Member(strings.Join(n.Parts, "."))
+		if !ok || member == nil {
+			return ConstValue{}, false
+		}
+		return ConstValue{Kind: ConstInt, Int: member.Value}, true
 	case *ast.ParenExpr:
 		return a.evalConstExpr(n.Inner)
 	case *ast.CastExpr:

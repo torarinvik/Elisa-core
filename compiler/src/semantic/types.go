@@ -225,6 +225,7 @@ type TreeCategoryType struct {
 	Name       string
 	Family     *TreeType
 	Role       string
+	KindType   *ConstEnumType
 	Common     map[string]Field
 	Variants   []*EnumVariant
 	VariantMap map[string]*EnumVariant
@@ -832,9 +833,37 @@ func (t *TreeCategoryType) VariantViewType(variant *EnumVariant) *TreeVariantVie
 	return &TreeVariantViewType{Category: t, Variant: variant}
 }
 
+func TreeKindType(t Type) (*ConstEnumType, bool) {
+	switch tt := StripAggregateStateType(t).(type) {
+	case *TreeCategoryType:
+		if tt == nil || tt.KindType == nil {
+			return nil, false
+		}
+		return tt.KindType, true
+	case *TreeVariantViewType:
+		if tt == nil || tt.Category == nil || tt.Category.KindType == nil {
+			return nil, false
+		}
+		return tt.Category.KindType, true
+	default:
+		return nil, false
+	}
+}
+
+func TreeKindFieldInfo(t Type) (Field, bool) {
+	kindType, ok := TreeKindType(t)
+	if !ok || kindType == nil {
+		return Field{}, false
+	}
+	return Field{Name: "kind", Type: kindType, Mutable: false}, true
+}
+
 func (t *TreeVariantViewType) Field(name string) (Field, bool) {
 	if t == nil || t.Category == nil || t.Variant == nil {
 		return Field{}, false
+	}
+	if name == "kind" {
+		return TreeKindFieldInfo(t)
 	}
 	if field, ok := t.Category.Common[name]; ok {
 		return field, true

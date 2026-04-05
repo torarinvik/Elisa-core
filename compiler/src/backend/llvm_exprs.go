@@ -198,6 +198,12 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, actualType, err = s.emitIntLiteral(n)
 	case *ast.FloatLit:
 		value, actualType, err = s.emitFloatLiteral(n)
+	case *ast.ShorthandMemberExpr:
+		if constEnumType, member, ok := s.shorthandConstEnumMemberInfo(n); ok {
+			value, actualType, err = s.emitConstEnumMemberExpr(constEnumType, member)
+		} else {
+			err = fmt.Errorf("unsupported shorthand member %q during LLVM lowering", shorthandMemberDisplayBackend(n))
+		}
 	case *ast.StringLit:
 		value, actualType, err = s.emitStringLiteral(n)
 	case *ast.CharLit:
@@ -443,6 +449,9 @@ func (s *functionState) constEnumTypeForExpr(expr ast.Expr) (*semantic.ConstEnum
 		constEnumType, ok := base.(*semantic.ConstEnumType)
 		return constEnumType, ok
 	case *ast.FieldExpr:
+		if kindType, ok := s.treeCategoryKindTypeForExpr(n); ok {
+			return kindType, true
+		}
 		ident, ok := n.Object.(*ast.Ident)
 		if !ok || n.Field != "Tag" {
 			return nil, false
@@ -461,6 +470,54 @@ func (s *functionState) constEnumTypeForExpr(expr ast.Expr) (*semantic.ConstEnum
 	default:
 		return nil, false
 	}
+}
+
+func shorthandMemberNameBackend(expr *ast.ShorthandMemberExpr) string {
+	if expr == nil {
+		return ""
+	}
+	return strings.Join(expr.Parts, ".")
+}
+
+func shorthandMemberDisplayBackend(expr *ast.ShorthandMemberExpr) string {
+	if expr == nil {
+		return ".<invalid>"
+	}
+	return "." + shorthandMemberNameBackend(expr)
+}
+
+func (s *functionState) shorthandConstEnumMemberInfo(expr *ast.ShorthandMemberExpr) (*semantic.ConstEnumType, *semantic.ConstEnumMember, bool) {
+	if expr == nil {
+		return nil, nil, false
+	}
+	constEnumType, ok := s.exprType(expr).(*semantic.ConstEnumType)
+	if !ok || constEnumType == nil {
+		return nil, nil, false
+	}
+	member, ok := constEnumType.Member(shorthandMemberNameBackend(expr))
+	if !ok || member == nil {
+		return nil, nil, false
+	}
+	return constEnumType, member, true
+}
+
+func (s *functionState) treeCategoryKindTypeForExpr(expr *ast.FieldExpr) (*semantic.ConstEnumType, bool) {
+	if expr == nil || expr.Field != "Kind" {
+		return nil, false
+	}
+	ownerName, _, ok := qualifiedFieldOwnerAndLeaf(expr)
+	if !ok {
+		return nil, false
+	}
+	base, ok := s.g.result.NamedTypes[ownerName]
+	if !ok {
+		return nil, false
+	}
+	categoryType, ok := base.(*semantic.TreeCategoryType)
+	if !ok || categoryType == nil || categoryType.KindType == nil {
+		return nil, false
+	}
+	return categoryType.KindType, true
 }
 
 func (s *functionState) treeTypeForExpr(expr ast.Expr) (*semantic.TreeType, bool) {
@@ -6811,6 +6868,18 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 	}
 	switch tt := baseType.(type) {
 	case *semantic.TreeVariantViewType:
+		if expr.Field == "kind" {
+			kindType, ok := semantic.TreeKindType(tt)
+			if !ok || kindType == nil {
+				return nil, nil, true, fmt.Errorf("%s has no kind", tt.String())
+			}
+			llvmType, err := s.g.lowerType(kindType)
+			if err != nil {
+				return nil, nil, true, err
+			}
+			value := C.LLVMConstInt(llvmType, C.ulonglong(tt.Variant.Tag), 0)
+			return value, kindType, true, nil
+		}
 		if field, ok := treeExactFieldInfo(tt, expr.Field); ok {
 			stateValue := s.emitTreeHandleStateValue(handleValue, "tree.field")
 			rowIndex, err := s.emitTreeHandleIndexValue(handleValue, "tree.field")
@@ -6826,6 +6895,17 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 		}
 		return nil, nil, true, fmt.Errorf("%s has no field %s", tt.String(), expr.Field)
 	case *semantic.TreeCategoryType:
+		if expr.Field == "kind" {
+			kindType, ok := semantic.TreeKindType(tt)
+			if !ok || kindType == nil {
+				return nil, nil, true, fmt.Errorf("%s has no kind", tt.String())
+			}
+			value, err := s.extractTreeCategoryTagValue(handleValue, tt)
+			if err != nil {
+				return nil, nil, true, err
+			}
+			return value, kindType, true, nil
+		}
 		if _, ok := tt.Common[expr.Field]; ok {
 			tagValue, err := s.emitTreeHandleTagValue(handleValue, "tree.field")
 			if err != nil {

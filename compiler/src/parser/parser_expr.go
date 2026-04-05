@@ -1070,6 +1070,14 @@ func (p *Parser) parsePrimary() ast.Expr {
 	case lexer.TOKEN_ZEROED:
 		tok := p.advance()
 		return &ast.ZeroedLit{Position: tok.Pos}
+	case lexer.TOKEN_DOT:
+		pos := p.cur().Pos
+		p.advance()
+		parts := []string{p.expect(lexer.TOKEN_IDENT).Text}
+		for p.match(lexer.TOKEN_DOT) {
+			parts = append(parts, p.expect(lexer.TOKEN_IDENT).Text)
+		}
+		return &ast.ShorthandMemberExpr{Position: pos, Parts: parts}
 	case lexer.TOKEN_LBRACKET:
 		pos := p.cur().Pos
 		p.advance()

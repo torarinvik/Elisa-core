@@ -857,6 +857,8 @@ func formatExpr(expr ast.Expr) string {
 		return formatExpr(n.Func) + "(" + strings.Join(parts, ", ") + ")"
 	case *ast.FieldExpr:
 		return formatExpr(n.Object) + "." + n.Field
+	case *ast.ShorthandMemberExpr:
+		return "." + strings.Join(n.Parts, ".")
 	case *ast.IndexExpr:
 		return formatExpr(n.Object) + "[" + formatExpr(n.Index) + "]"
 	case *ast.SliceExpr:

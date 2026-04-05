@@ -105,6 +105,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.MoveExpr{})
 		gob.Register(&ast.CallExpr{})
 		gob.Register(&ast.FieldExpr{})
+		gob.Register(&ast.ShorthandMemberExpr{})
 		gob.Register(&ast.IndexExpr{})
 		gob.Register(&ast.SliceExpr{})
 		gob.Register(&ast.ListLitExpr{})

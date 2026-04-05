@@ -171,8 +171,8 @@ const (
 )
 
 type treeAllocOwnerBinding struct {
-	Kind       treeAllocOwnerKind
-	RegionName string
+	Kind        treeAllocOwnerKind
+	RegionName  string
 	StoreFamily *TreeType
 }
 
@@ -734,7 +734,16 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					var memberType Type
 					switch m := member.(type) {
 					case *ast.TreeCategoryDecl:
-						memberType = &TreeCategoryType{Name: memberQualifiedName, Family: treeType, Role: a.treeCategoryRole(m), Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: m}
+						categoryType := &TreeCategoryType{Name: memberQualifiedName, Family: treeType, Role: a.treeCategoryRole(m), Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: m}
+						kindName := treeCategoryKindTypeName(memberQualifiedName)
+						if _, exists := a.namedTypes[kindName]; exists {
+							a.errorf(member.Pos(), "duplicate type %q", kindName)
+							continue
+						}
+						kindType := &ConstEnumType{Name: kindName, Storage: a.namedTypes["u32"], MemberMap: map[string]*ConstEnumMember{}}
+						categoryType.KindType = kindType
+						a.namedTypes[kindName] = kindType
+						memberType = categoryType
 					case *ast.TreeBlockDecl:
 						memberType = &TreeBlockType{Name: memberQualifiedName, Family: treeType, Fields: map[string]Field{}, Decl: m}
 					case *ast.TreeStructDecl:
@@ -823,6 +832,10 @@ func packedEnumStoreTypeName(enumName string) string {
 
 func packedEnumTagTypeName(enumName string) string {
 	return enumName + ".Tag"
+}
+
+func treeCategoryKindTypeName(categoryName string) string {
+	return categoryName + ".Kind"
 }
 
 func treeMemberTypeName(treeName string, memberName string) string {
@@ -1039,6 +1052,12 @@ func (a *Analyzer) populateTreeCategoryDecl(treeType *TreeType, categoryDecl *as
 		nextExactTag++
 		category.VariantMap[variant.Name] = variant
 		variants = append(variants, variant)
+		if category.KindType != nil {
+			member := &ConstEnumMember{Name: variant.Name, Value: int64(variant.Tag)}
+			category.KindType.Members = append(category.KindType.Members, member)
+			category.KindType.MemberMap[member.Name] = member
+			a.constValues[category.KindType.Name+"."+member.Name] = ConstValue{Kind: ConstInt, Int: member.Value}
+		}
 	}
 	category.Variants = variants
 }

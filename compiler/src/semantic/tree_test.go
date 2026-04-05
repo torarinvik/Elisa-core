@@ -146,6 +146,78 @@ func TestAnalyzeRegistersTreeFamilyAndMembers(t *testing.T) {
 	}
 }
 
+func TestAnalyzeSynthesizesTreeCategoryKindTypesAndShorthandComparisons(t *testing.T) {
+	result := analyzeTreeTestSource(t, "tree_kind_types.llcontext", `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Nil
+		Binary(child left: Expr, child right: Expr)
+	@role(stmt)
+	node Stmt:
+		Return(child value: Expr)
+
+def expr_kind(node: Lua.Expr) -> Lua.Expr.Kind:
+	return node.kind
+
+def binary_kind(node: Lua.Expr.Binary) -> Lua.Expr.Kind:
+	return node.kind
+
+def stmt_is_return(node: Lua.Stmt) -> bool:
+	return node.kind == .Return
+
+def explicit_binary_kind() -> Lua.Expr.Kind:
+	return Lua.Expr.Kind.Binary
+
+def shorthand_nil_kind() -> Lua.Expr.Kind:
+	return .Nil
+`)
+
+	exprType, ok := result.NamedTypes["Lua.Expr"].(*TreeCategoryType)
+	if !ok || exprType == nil {
+		t.Fatalf("expected Lua.Expr tree category type, got %T", result.NamedTypes["Lua.Expr"])
+	}
+	stmtType, ok := result.NamedTypes["Lua.Stmt"].(*TreeCategoryType)
+	if !ok || stmtType == nil {
+		t.Fatalf("expected Lua.Stmt tree category type, got %T", result.NamedTypes["Lua.Stmt"])
+	}
+	exprKindType, ok := result.NamedTypes["Lua.Expr.Kind"].(*ConstEnumType)
+	if !ok || exprKindType == nil {
+		t.Fatalf("expected synthesized Lua.Expr.Kind const enum type, got %T", result.NamedTypes["Lua.Expr.Kind"])
+	}
+	stmtKindType, ok := result.NamedTypes["Lua.Stmt.Kind"].(*ConstEnumType)
+	if !ok || stmtKindType == nil {
+		t.Fatalf("expected synthesized Lua.Stmt.Kind const enum type, got %T", result.NamedTypes["Lua.Stmt.Kind"])
+	}
+	if exprType.KindType != exprKindType {
+		t.Fatalf("expected Lua.Expr kind type to point at synthesized const enum, got %#v", exprType.KindType)
+	}
+	if stmtType.KindType != stmtKindType {
+		t.Fatalf("expected Lua.Stmt kind type to point at synthesized const enum, got %#v", stmtType.KindType)
+	}
+	binaryVariant, ok := exprType.Variant("Binary")
+	if !ok || binaryVariant == nil {
+		t.Fatalf("expected Binary variant on Lua.Expr, got %#v", exprType.VariantMap)
+	}
+	returnVariant, ok := stmtType.Variant("Return")
+	if !ok || returnVariant == nil {
+		t.Fatalf("expected Return variant on Lua.Stmt, got %#v", stmtType.VariantMap)
+	}
+	binaryMember, ok := exprKindType.Member("Binary")
+	if !ok || binaryMember == nil || binaryMember.Value != int64(binaryVariant.Tag) {
+		t.Fatalf("expected Lua.Expr.Kind.Binary to mirror Binary tag %d, got %#v", binaryVariant.Tag, binaryMember)
+	}
+	returnMember, ok := stmtKindType.Member("Return")
+	if !ok || returnMember == nil || returnMember.Value != int64(returnVariant.Tag) {
+		t.Fatalf("expected Lua.Stmt.Kind.Return to mirror Return tag %d, got %#v", returnVariant.Tag, returnMember)
+	}
+	nilMember, ok := exprKindType.Member("Nil")
+	if !ok || nilMember == nil {
+		t.Fatalf("expected Lua.Expr.Kind.Nil member, got %#v", exprKindType.MemberMap)
+	}
+}
+
 func TestAnalyzeRejectsDuplicateTreeMemberTypes(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_duplicate_member.llcontext", `tree Lua:
     node Expr:

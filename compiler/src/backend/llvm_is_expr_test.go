@@ -319,6 +319,45 @@ def score(node: Lua.Expr) -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersTreeKindFieldAndShorthandMembers(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Nil
+		Binary(left: Expr, right: Expr)
+	@role(stmt)
+	node Stmt:
+		Return(value: Expr)
+
+def is_binary(node: Lua.Expr) -> bool:
+	return node.kind == .Binary
+
+def stmt_is_return(stmt: Lua.Stmt) -> bool:
+	return stmt.kind == .Return
+
+def binary_kind(node: Lua.Expr.Binary) -> Lua.Expr.Kind:
+	return node.kind
+
+def explicit_binary_kind() -> Lua.Expr.Kind:
+	return Lua.Expr.Kind.Binary
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_kind.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i1 @is_binary(%Lua__TreeHandle ", "define i1 @stmt_is_return(%Lua__TreeHandle ", "define i32 @binary_kind(%Lua__TreeHandle ", "define i32 @explicit_binary_kind()", "icmp eq i32"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected tree kind lowering to include %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "tree.field.column.ptr") {
+		t.Fatalf("expected tree kind lowering to avoid tree field column loads, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersExactTreeVisitExpr(t *testing.T) {
 	src := `tree Lua:
 	@role(stmt)
