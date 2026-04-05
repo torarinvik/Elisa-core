@@ -2756,9 +2756,18 @@ func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
 	if storeType == nil {
 		storeType = a.analyzeExpr(stmt.Store)
 	}
+	if treeStore, ok := storeType.(*TreeStoreType); ok {
+		a.currentTreeAllocOwner = treeAllocOwnerBinding{Kind: treeAllocOwnerStore, StoreFamily: treeStore.Family}
+		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
+		a.currentTreeAllocOwner = savedTreeAllocOwner
+		a.currentPackedVariantViews = savedPackedVariantViews
+		a.currentPackedStores = savedPackedStores
+		a.currentPackedStoreResolutions = savedPackedStoreResolutions
+		return
+	}
 	packedStore, ok := storeType.(*PackedEnumStoreType)
 	if !ok {
-		a.errorf(stmt.Store.Pos(), "in-block requires a packed enum store, perm, an Arena value, or an Arena reference, got %s", storeType.String())
+		a.errorf(stmt.Store.Pos(), "in-block requires a tree store, packed enum store, perm, an Arena value, or an Arena reference, got %s", storeType.String())
 		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
 		a.currentTreeAllocOwner = savedTreeAllocOwner
 		a.currentPackedVariantViews = savedPackedVariantViews
@@ -3125,7 +3134,7 @@ func visitDomainKeys(root treeVisitRootInfo) []string {
 		keys := make([]string, 0)
 		memberNames := make([]string, 0, len(root.Family.MemberTypes))
 		for name := range root.Family.MemberTypes {
-			if name == "Node" {
+			if name == "Node" || name == "Store" {
 				continue
 			}
 			memberNames = append(memberNames, name)
@@ -3421,6 +3430,148 @@ func (a *Analyzer) analyzeVisitExpr(expr *ast.VisitExpr) Type {
 	return resultType
 }
 
+func treeVisitRootBindType(root treeVisitRootInfo) Type {
+	switch root.Kind {
+	case treeVisitRootKindCategory:
+		return root.Category
+	case treeVisitRootKindExact:
+		return root.Exact
+	case treeVisitRootKindFamily:
+		if root.Family != nil {
+			return root.Family.NodeType
+		}
+	}
+	return nil
+}
+
+func treeExactStructuralChildTypes(exact Type) []Type {
+	family, ok := TreeFamilyForMemberType(exact)
+	if !ok || family == nil {
+		return nil
+	}
+	var decls []ast.FieldDecl
+	switch tt := StripAggregateStateType(exact).(type) {
+	case *TreeBlockType:
+		decls = TreeBlockFieldDeclsWithCommon(tt)
+	case *TreeStructType:
+		decls = TreeStructFieldDeclsWithCommon(tt)
+	default:
+		return nil
+	}
+	out := make([]Type, 0, len(decls))
+	for _, fieldDecl := range decls {
+		field, ok := TreeExactFieldInfo(exact, fieldDecl.Name)
+		if !ok {
+			continue
+		}
+		switch TreeFieldStructuralRelation(family, field.Type) {
+		case ast.EnumPayloadRelationChild:
+			out = append(out, field.Type)
+		case ast.EnumPayloadRelationChildren:
+			if elemType, ok := TreeStructuralSequenceElemType(field.Type); ok {
+				out = append(out, elemType)
+			}
+		}
+	}
+	return out
+}
+
+func treeVisitRootStructuralChildTypes(root treeVisitRootInfo) []Type {
+	switch root.Kind {
+	case treeVisitRootKindCategory:
+		if root.Category == nil {
+			return nil
+		}
+		out := make([]Type, 0)
+		for _, variant := range root.Category.Variants {
+			for i, payloadType := range variant.Payload {
+				switch variant.PayloadRelation(i) {
+				case ast.EnumPayloadRelationChild:
+					out = append(out, payloadType)
+				case ast.EnumPayloadRelationChildren:
+					if elemType, ok := TreeStructuralSequenceElemType(payloadType); ok {
+						out = append(out, elemType)
+					}
+				}
+			}
+		}
+		return out
+	case treeVisitRootKindExact:
+		return treeExactStructuralChildTypes(root.Exact)
+	case treeVisitRootKindFamily:
+		if root.Family == nil {
+			return nil
+		}
+		out := make([]Type, 0)
+		for _, member := range TreeFamilyExactMembersInTagOrder(root.Family) {
+			switch tt := member.(type) {
+			case *TreeVariantViewType:
+				if tt == nil || tt.Variant == nil {
+					continue
+				}
+				for i, payloadType := range tt.Variant.Payload {
+					switch tt.Variant.PayloadRelation(i) {
+					case ast.EnumPayloadRelationChild:
+						out = append(out, payloadType)
+					case ast.EnumPayloadRelationChildren:
+						if elemType, ok := TreeStructuralSequenceElemType(payloadType); ok {
+							out = append(out, elemType)
+						}
+					}
+				}
+			default:
+				out = append(out, treeExactStructuralChildTypes(member)...)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func (a *Analyzer) validateFoldRecursionRoot(pos lexer.Pos, root treeVisitRootInfo) {
+	if a == nil || root.Kind == treeVisitRootKindFamily {
+		return
+	}
+	rootType := treeVisitRootBindType(root)
+	if rootType == nil {
+		return
+	}
+	for _, childType := range treeVisitRootStructuralChildTypes(root) {
+		if childType == nil {
+			continue
+		}
+		if !AssignableTo(rootType, childType) {
+			familyLabel := "<tree>"
+			if root.Family != nil && root.Family.NodeType != nil {
+				familyLabel = root.Family.NodeType.String()
+			}
+			a.errorf(pos, "fold over %s requires an explicit `as %s` root because structural children include %s", rootType.String(), familyLabel, childType.String())
+			return
+		}
+	}
+}
+
+func (a *Analyzer) recordFoldExprInfo(expr *ast.FoldExpr) {
+	if a == nil || expr == nil || a.currentScope == nil {
+		return
+	}
+	collector := newDeferCaptureCollector(a, a.currentScope)
+	for _, arm := range expr.Arms {
+		armLocals := map[string]bool{}
+		if arm.BindName != "" {
+			armLocals[arm.BindName] = true
+		}
+		if arm.ChildResultsName != "" {
+			armLocals[arm.ChildResultsName] = true
+		}
+		for _, stmt := range arm.Body {
+			collector.collectStmt(stmt, cloneParallelForLocals(armLocals))
+		}
+	}
+	a.foldInfo[expr] = &FoldInfo{Captures: append([]string(nil), collector.captureOrder...)}
+}
+
 func (a *Analyzer) analyzeFoldExpr(expr *ast.FoldExpr) Type {
 	valueType := a.analyzeExpr(expr.Value)
 	root, ok := a.resolveVisitRootInfo(valueType, expr.Root, expr.Pos())
@@ -3430,6 +3581,8 @@ func (a *Analyzer) analyzeFoldExpr(expr *ast.FoldExpr) Type {
 		}
 		return invalidType
 	}
+	a.validateFoldRecursionRoot(expr.Pos(), root)
+	a.recordFoldExprInfo(expr)
 	resultType := a.resolveType(expr.ResultType)
 	covered := map[string]bool{}
 	priorKeys := map[string]bool{}

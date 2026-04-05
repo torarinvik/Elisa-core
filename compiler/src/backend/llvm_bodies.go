@@ -57,6 +57,7 @@ type functionState struct {
 	regions                      []regionBinding
 	packedStores                 map[string]packedStoreBinding
 	treeAllocOwner               treeAllocOwnerBinding
+	treeImplicitStores           map[treeImplicitStoreCacheKey]treeImplicitStoreSlot
 	packedStoreValueKey1         packedStoreExtractCacheKey
 	packedStoreValue1            C.LLVMValueRef
 	packedStoreValueKey2         packedStoreExtractCacheKey
@@ -112,8 +113,21 @@ type packedStoreBinding struct {
 }
 
 type treeAllocOwnerBinding struct {
-	isPerm   bool
-	arenaRef C.LLVMValueRef
+	isPerm     bool
+	arenaRef   C.LLVMValueRef
+	storeValue C.LLVMValueRef
+	storeType  *semantic.TreeStoreType
+}
+
+type treeImplicitStoreCacheKey struct {
+	family *semantic.TreeType
+	isPerm bool
+	arena  C.LLVMValueRef
+}
+
+type treeImplicitStoreSlot struct {
+	ptr       C.LLVMValueRef
+	storeType *semantic.TreeStoreType
 }
 
 type packedStoreExtractCacheKey struct {
@@ -1400,6 +1414,19 @@ func treeChildrenSourceInfo(sourceType semantic.Type) (*semantic.TreeCategoryTyp
 	}
 }
 
+func treeChildrenExactSourceInfo(sourceType semantic.Type) (semantic.Type, *semantic.TreeType, bool) {
+	switch tt := semantic.StripAggregateStateType(sourceType).(type) {
+	case *semantic.TreeBlockType:
+		return tt, tt.Family, tt != nil && tt.Family != nil
+	case *semantic.TreeStructType:
+		return tt, tt.Family, tt != nil && tt.Family != nil
+	case *semantic.TreeNodeType:
+		return tt, tt.Family, tt != nil && tt.Family != nil
+	default:
+		return nil, nil, false
+	}
+}
+
 func (s *functionState) emitTreeChildrenTrapBlock(block C.LLVMBasicBlockRef) error {
 	C.LLVMPositionBuilderAtEnd(s.builder, block)
 	trapFn, err := s.ensureTrapFunction()
@@ -1543,7 +1570,192 @@ func (s *functionState) emitTreeVariantStructuralChildValue(nodeValue C.LLVMValu
 	return phi, nil
 }
 
+func (s *functionState) emitTreeExactStructuralChildCount(nodeValue C.LLVMValueRef, memberType semantic.Type, name string) (C.LLVMValueRef, error) {
+	family := treeExactMemberFamily(memberType)
+	if family == nil {
+		return nil, fmt.Errorf("children(...) exact member is missing tree family metadata")
+	}
+	stateValue := s.emitTreeHandleStateValue(nodeValue, name+".state")
+	rowIndex, err := s.emitTreeHandleIndexValue(nodeValue, name+".index")
+	if err != nil {
+		return nil, err
+	}
+	tablePtr, err := s.emitTreeStateTablePtr(stateValue, family, memberType, name)
+	if err != nil {
+		return nil, err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, err
+	}
+	total := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	for _, fieldDecl := range treeExactFieldDecls(memberType) {
+		field, ok := treeExactFieldInfo(memberType, fieldDecl.Name)
+		if !ok {
+			return nil, fmt.Errorf("missing exact tree field %s.%s", treeExactMemberSurfaceName(memberType), fieldDecl.Name)
+		}
+		relation := semantic.TreeFieldStructuralRelation(family, field.Type)
+		switch relation {
+		case ast.EnumPayloadRelationChild:
+			total = C.LLVMBuildAdd(s.builder, total, C.LLVMConstInt(usizeLLVMType, 1, 0), cStringFree(name+".count"))
+		case ast.EnumPayloadRelationChildren:
+			fieldValue, _, err := s.emitTreeExactFieldValueAtIndex(tablePtr, memberType, fieldDecl.Name, rowIndex, name)
+			if err != nil {
+				return nil, err
+			}
+			seqCount, err := s.emitTreeStructuralSequenceCount(fieldValue, field.Type, name)
+			if err != nil {
+				return nil, err
+			}
+			total = C.LLVMBuildAdd(s.builder, total, seqCount, cStringFree(name+".count"))
+		}
+	}
+	return total, nil
+}
+
+func (s *functionState) emitTreeExactStructuralChildValue(nodeValue C.LLVMValueRef, memberType semantic.Type, indexValue C.LLVMValueRef, itemType semantic.Type, name string) (C.LLVMValueRef, error) {
+	family := treeExactMemberFamily(memberType)
+	if family == nil {
+		return nil, fmt.Errorf("children(...) exact member is missing tree family metadata")
+	}
+	stateValue := s.emitTreeHandleStateValue(nodeValue, name+".state")
+	rowIndex, err := s.emitTreeHandleIndexValue(nodeValue, name+".index")
+	if err != nil {
+		return nil, err
+	}
+	tablePtr, err := s.emitTreeStateTablePtr(stateValue, family, memberType, name)
+	if err != nil {
+		return nil, err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, err
+	}
+	itemLLVMType, err := s.g.lowerType(itemType)
+	if err != nil {
+		return nil, err
+	}
+	resultBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".result"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".fail"))
+	var incomingValues []C.LLVMValueRef
+	var incomingBlocks []C.LLVMBasicBlockRef
+	remaining := indexValue
+	zero := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	one := C.LLVMConstInt(usizeLLVMType, 1, 0)
+	for _, fieldDecl := range treeExactFieldDecls(memberType) {
+		field, ok := treeExactFieldInfo(memberType, fieldDecl.Name)
+		if !ok {
+			return nil, fmt.Errorf("missing exact tree field %s.%s", treeExactMemberSurfaceName(memberType), fieldDecl.Name)
+		}
+		relation := semantic.TreeFieldStructuralRelation(family, field.Type)
+		if relation != ast.EnumPayloadRelationChild && relation != ast.EnumPayloadRelationChildren {
+			continue
+		}
+		fieldValue, _, err := s.emitTreeExactFieldValueAtIndex(tablePtr, memberType, fieldDecl.Name, rowIndex, name)
+		if err != nil {
+			return nil, err
+		}
+		matchBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".match"))
+		continueBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".next"))
+		var condValue C.LLVMValueRef
+		var seqCount C.LLVMValueRef
+		if relation == ast.EnumPayloadRelationChild {
+			condValue = C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), remaining, zero, cStringFree(name+".eq"))
+		} else {
+			seqCount, err = s.emitTreeStructuralSequenceCount(fieldValue, field.Type, name)
+			if err != nil {
+				return nil, err
+			}
+			condValue = C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), remaining, seqCount, cStringFree(name+".lt"))
+		}
+		C.LLVMBuildCondBr(s.builder, condValue, matchBB, continueBB)
+
+		C.LLVMPositionBuilderAtEnd(s.builder, matchBB)
+		var matchValue C.LLVMValueRef
+		if relation == ast.EnumPayloadRelationChild {
+			matchValue = fieldValue
+		} else {
+			value, resolvedType, err := s.emitTreeStructuralSequenceItemValue(fieldValue, field.Type, remaining, name)
+			if err != nil {
+				return nil, err
+			}
+			if resolvedType != nil && !semantic.SameType(resolvedType, itemType) {
+				return nil, fmt.Errorf("tree structural child item type mismatch: expected %s, got %s", itemType.String(), resolvedType.String())
+			}
+			matchValue = value
+		}
+		incomingValues = append(incomingValues, matchValue)
+		incomingBlocks = append(incomingBlocks, C.LLVMGetInsertBlock(s.builder))
+		C.LLVMBuildBr(s.builder, resultBB)
+
+		C.LLVMPositionBuilderAtEnd(s.builder, continueBB)
+		if relation == ast.EnumPayloadRelationChild {
+			remaining = C.LLVMBuildSub(s.builder, remaining, one, cStringFree(name+".rem"))
+		} else {
+			remaining = C.LLVMBuildSub(s.builder, remaining, seqCount, cStringFree(name+".rem"))
+		}
+	}
+	C.LLVMBuildBr(s.builder, failBB)
+	if err := s.emitTreeChildrenTrapBlock(failBB); err != nil {
+		return nil, err
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, resultBB)
+	phi := C.LLVMBuildPhi(s.builder, itemLLVMType, cStringFree(name+".phi"))
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+	return phi, nil
+}
+
 func (s *functionState) emitTreeChildrenCount(sourceType semantic.Type, nodeValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	if exactType, family, ok := treeChildrenExactSourceInfo(sourceType); ok {
+		switch exact := exactType.(type) {
+		case *semantic.TreeBlockType, *semantic.TreeStructType:
+			return s.emitTreeExactStructuralChildCount(nodeValue, exact, name)
+		case *semantic.TreeNodeType:
+			tagValue, err := s.emitTreeHandleTagValue(nodeValue, name+".node")
+			if err != nil {
+				return nil, err
+			}
+			usizeType := s.g.result.NamedTypes["usize"]
+			usizeLLVMType, err := s.g.lowerType(usizeType)
+			if err != nil {
+				return nil, err
+			}
+			resultBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".node.result"))
+			failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".node.fail"))
+			switchInst := C.LLVMBuildSwitch(s.builder, tagValue, failBB, C.unsigned(len(semantic.TreeFamilyExactMembersInTagOrder(family))))
+			var incomingValues []C.LLVMValueRef
+			var incomingBlocks []C.LLVMBasicBlockRef
+			for _, member := range semantic.TreeFamilyExactMembersInTagOrder(family) {
+				tag, ok := treeExactMemberTag(member)
+				if !ok {
+					continue
+				}
+				tagConst, err := s.enumTagConstant(tag)
+				if err != nil {
+					return nil, err
+				}
+				caseBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".node.case"))
+				C.LLVMAddCase(switchInst, tagConst, caseBB)
+				C.LLVMPositionBuilderAtEnd(s.builder, caseBB)
+				countValue, err := s.emitTreeExactStructuralChildCount(nodeValue, member, name)
+				if err != nil {
+					return nil, err
+				}
+				incomingValues = append(incomingValues, countValue)
+				incomingBlocks = append(incomingBlocks, C.LLVMGetInsertBlock(s.builder))
+				C.LLVMBuildBr(s.builder, resultBB)
+			}
+			if err := s.emitTreeChildrenTrapBlock(failBB); err != nil {
+				return nil, err
+			}
+			C.LLVMPositionBuilderAtEnd(s.builder, resultBB)
+			phi := C.LLVMBuildPhi(s.builder, usizeLLVMType, cStringFree(name+".node.count.phi"))
+			C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+			return phi, nil
+		}
+	}
 	categoryType, fixedVariant, ok := treeChildrenSourceInfo(sourceType)
 	if !ok || categoryType == nil {
 		return nil, fmt.Errorf("children(...) expects a tree node source, got %s", sourceType.String())
@@ -1591,6 +1803,53 @@ func (s *functionState) emitTreeChildrenCount(sourceType semantic.Type, nodeValu
 }
 
 func (s *functionState) emitTreeChildrenValue(sourceType semantic.Type, nodeValue C.LLVMValueRef, itemType semantic.Type, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	if exactType, family, ok := treeChildrenExactSourceInfo(sourceType); ok {
+		switch exact := exactType.(type) {
+		case *semantic.TreeBlockType, *semantic.TreeStructType:
+			return s.emitTreeExactStructuralChildValue(nodeValue, exact, indexValue, itemType, name)
+		case *semantic.TreeNodeType:
+			tagValue, err := s.emitTreeHandleTagValue(nodeValue, name+".node")
+			if err != nil {
+				return nil, err
+			}
+			itemLLVMType, err := s.g.lowerType(itemType)
+			if err != nil {
+				return nil, err
+			}
+			resultBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".node.value.result"))
+			failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".node.value.fail"))
+			switchInst := C.LLVMBuildSwitch(s.builder, tagValue, failBB, C.unsigned(len(semantic.TreeFamilyExactMembersInTagOrder(family))))
+			var incomingValues []C.LLVMValueRef
+			var incomingBlocks []C.LLVMBasicBlockRef
+			for _, member := range semantic.TreeFamilyExactMembersInTagOrder(family) {
+				tag, ok := treeExactMemberTag(member)
+				if !ok {
+					continue
+				}
+				tagConst, err := s.enumTagConstant(tag)
+				if err != nil {
+					return nil, err
+				}
+				caseBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".node.value.case"))
+				C.LLVMAddCase(switchInst, tagConst, caseBB)
+				C.LLVMPositionBuilderAtEnd(s.builder, caseBB)
+				value, err := s.emitTreeExactStructuralChildValue(nodeValue, member, indexValue, itemType, name)
+				if err != nil {
+					return nil, err
+				}
+				incomingValues = append(incomingValues, value)
+				incomingBlocks = append(incomingBlocks, C.LLVMGetInsertBlock(s.builder))
+				C.LLVMBuildBr(s.builder, resultBB)
+			}
+			if err := s.emitTreeChildrenTrapBlock(failBB); err != nil {
+				return nil, err
+			}
+			C.LLVMPositionBuilderAtEnd(s.builder, resultBB)
+			phi := C.LLVMBuildPhi(s.builder, itemLLVMType, cStringFree(name+".node.value.phi"))
+			C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+			return phi, nil
+		}
+	}
 	categoryType, fixedVariant, ok := treeChildrenSourceInfo(sourceType)
 	if !ok || categoryType == nil {
 		return nil, fmt.Errorf("children(...) expects a tree node source, got %s", sourceType.String())
@@ -2325,11 +2584,19 @@ func (s *functionState) emitInStore(stmt *ast.InStoreStmt) error {
 	if err != nil {
 		return err
 	}
+	savedStores := s.packedStores
+	if treeStore, ok := actualType.(*semantic.TreeStoreType); ok {
+		s.treeAllocOwner = treeAllocOwnerBinding{storeValue: storeValue, storeType: treeStore}
+		defer func() {
+			s.treeAllocOwner = savedTreeOwner
+			s.packedStores = savedStores
+		}()
+		return s.emitBlock(stmt.Body, true)
+	}
 	storeType, ok := actualType.(*semantic.PackedEnumStoreType)
 	if !ok {
-		return fmt.Errorf("in-block requires a packed enum store, perm, an Arena value, or an Arena reference, got %s", actualType.String())
+		return fmt.Errorf("in-block requires a tree store, packed enum store, perm, an Arena value, or an Arena reference, got %s", actualType.String())
 	}
-	savedStores := s.packedStores
 	s.packedStores = s.clonePackedStores()
 	if s.packedStores == nil {
 		s.packedStores = map[string]packedStoreBinding{}
@@ -3834,6 +4101,12 @@ type treeVisitRelevantArm struct {
 	wildcard bool
 }
 
+type treeVisitExactArm struct {
+	arm      ast.VisitArm
+	member   semantic.Type
+	wildcard bool
+}
+
 func exactTreeVisitArm(memberName string, arms []ast.VisitArm) (ast.VisitArm, bool, bool) {
 	for _, arm := range arms {
 		if arm.Wildcard {
@@ -3878,6 +4151,29 @@ func (s *functionState) treeVisitRelevantArms(categoryType *semantic.TreeCategor
 	return relevant, exhaustive, nil
 }
 
+func (s *functionState) treeVisitRelevantExactArms(treeType *semantic.TreeType, arms []ast.VisitArm) ([]treeVisitExactArm, bool, error) {
+	if treeType == nil {
+		return nil, false, fmt.Errorf("missing tree family for visit lowering")
+	}
+	relevant := make([]treeVisitExactArm, 0, len(semantic.TreeFamilyExactMembersInTagOrder(treeType)))
+	exhaustive := false
+	for _, member := range semantic.TreeFamilyExactMembersInTagOrder(treeType) {
+		memberName := treeExactMemberSurfaceName(member)
+		arm, ok, wildcard := exactTreeVisitArm(memberName, arms)
+		if !ok {
+			continue
+		}
+		relevant = append(relevant, treeVisitExactArm{arm: arm, member: member, wildcard: wildcard})
+		if wildcard {
+			exhaustive = true
+		}
+	}
+	if !exhaustive {
+		exhaustive = len(relevant) == len(semantic.TreeFamilyExactMembersInTagOrder(treeType))
+	}
+	return relevant, exhaustive, nil
+}
+
 func (s *functionState) emitVisitExpr(expr *ast.VisitExpr) (C.LLVMValueRef, semantic.Type, error) {
 	if expr == nil {
 		return nil, nil, fmt.Errorf("missing visit expression")
@@ -3885,6 +4181,8 @@ func (s *functionState) emitVisitExpr(expr *ast.VisitExpr) (C.LLVMValueRef, sema
 	actualType := s.exprType(expr.Value)
 	resultType := s.exprType(expr)
 	switch tt := semantic.StripAggregateStateType(actualType).(type) {
+	case *semantic.TreeNodeType:
+		return s.emitFamilyTreeVisitExpr(expr, tt, resultType)
 	case *semantic.TreeBlockType:
 		return s.emitExactTreeVisitExpr(expr, tt.Name, tt, resultType)
 	case *semantic.TreeStructType:
@@ -3980,6 +4278,94 @@ func (s *functionState) emitVisitExpr(expr *ast.VisitExpr) (C.LLVMValueRef, sema
 		return nil, nil, err
 	}
 	phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree("visit.expr.phi"))
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+	return phi, resultType, nil
+}
+
+func (s *functionState) emitFamilyTreeVisitExpr(expr *ast.VisitExpr, rootType *semantic.TreeNodeType, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+	if rootType == nil || rootType.Family == nil {
+		return nil, nil, fmt.Errorf("missing family-root visit metadata")
+	}
+	treeValue, _, err := s.emitExpr(expr.Value, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	relevantArms, exhaustive, err := s.treeVisitRelevantExactArms(rootType.Family, expr.Arms)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(relevantArms) == 0 {
+		return nil, nil, fmt.Errorf("visit expression over %s has no relevant arms", rootType.String())
+	}
+	tagValue, err := s.emitTreeHandleTagValue(treeValue, "visit.node")
+	if err != nil {
+		return nil, nil, err
+	}
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("visit.node.end"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("visit.node.fail"))
+	switchInst := C.LLVMBuildSwitch(s.builder, tagValue, failBB, C.unsigned(len(relevantArms)))
+	incomingValues := make([]C.LLVMValueRef, 0, len(relevantArms)+1)
+	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(relevantArms)+1)
+	for _, armInfo := range relevantArms {
+		if armInfo.member == nil {
+			continue
+		}
+		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("visit.node.arm"))
+		tag, ok := treeExactMemberTag(armInfo.member)
+		if !ok {
+			return nil, nil, fmt.Errorf("missing exact tag for %s", treeExactMemberSurfaceName(armInfo.member))
+		}
+		tagConst, err := s.errorCodeConstant(tag)
+		if err != nil {
+			return nil, nil, err
+		}
+		C.LLVMAddCase(switchInst, tagConst, bodyBB)
+		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+		s.pushScope()
+		if armInfo.arm.BindName != "" && armInfo.arm.BindName != "_" {
+			if err := s.emitMoveBindLocal(armInfo.arm.BindName, armInfo.member, treeValue); err != nil {
+				s.popScope()
+				return nil, nil, err
+			}
+		}
+		armValue, reachable, err := s.emitMatchExprArmBody(armInfo.arm.Body, resultType)
+		if err != nil {
+			s.popScope()
+			return nil, nil, err
+		}
+		if reachable && !s.currentBlockTerminated() {
+			incomingValues = append(incomingValues, armValue)
+			incomingBlocks = append(incomingBlocks, C.LLVMGetInsertBlock(s.builder))
+			C.LLVMBuildBr(s.builder, mergeBB)
+		}
+		s.popScope()
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	if semantic.IsNeverType(resultType) || exhaustive {
+		C.LLVMBuildUnreachable(s.builder)
+	} else {
+		llvmType, err := s.g.lowerType(resultType)
+		if err != nil {
+			return nil, nil, err
+		}
+		undefValue := C.LLVMGetUndef(llvmType)
+		incomingValues = append(incomingValues, undefValue)
+		incomingBlocks = append(incomingBlocks, C.LLVMGetInsertBlock(s.builder))
+		C.LLVMBuildBr(s.builder, mergeBB)
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	if len(incomingValues) == 0 {
+		C.LLVMBuildUnreachable(s.builder)
+		return nil, resultType, nil
+	}
+	if len(incomingValues) == 1 || semantic.IsNeverType(resultType) {
+		return incomingValues[0], resultType, nil
+	}
+	llvmType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, err
+	}
+	phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree("visit.node.phi"))
 	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
 	return phi, resultType, nil
 }

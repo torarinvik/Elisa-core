@@ -250,7 +250,7 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 	case *ast.VisitExpr:
 		value, actualType, err = s.emitVisitExpr(n)
 	case *ast.FoldExpr:
-		return nil, nil, fmt.Errorf("fold expression lowering is not implemented yet")
+		value, actualType, err = s.emitFoldExpr(n)
 	case *ast.IndexExpr:
 		value, actualType, err = s.emitIndexExpr(n)
 	case *ast.SliceExpr:
@@ -458,6 +458,28 @@ func (s *functionState) constEnumTypeForExpr(expr ast.Expr) (*semantic.ConstEnum
 		return enumType.TagType, true
 	case *ast.ParenExpr:
 		return s.constEnumTypeForExpr(n.Inner)
+	default:
+		return nil, false
+	}
+}
+
+func (s *functionState) treeTypeForExpr(expr ast.Expr) (*semantic.TreeType, bool) {
+	if expr == nil {
+		return nil, false
+	}
+	if treeType, ok := s.exprType(expr).(*semantic.TreeType); ok {
+		return treeType, true
+	}
+	switch n := expr.(type) {
+	case *ast.Ident:
+		base, ok := s.g.result.NamedTypes[n.Name]
+		if !ok {
+			return nil, false
+		}
+		treeType, ok := base.(*semantic.TreeType)
+		return treeType, ok
+	case *ast.ParenExpr:
+		return s.treeTypeForExpr(n.Inner)
 	default:
 		return nil, false
 	}
@@ -3540,6 +3562,18 @@ func (s *functionState) emitAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, sema
 	if expr.Owner == nil {
 		return s.emitScopedPackedAllocExpr(expr)
 	}
+	if callExpr, ok := expr.Value.(*ast.CallExpr); ok {
+		if memberType, ok := s.treeExactMemberConstructorCall(callExpr); ok {
+			owner, ownerOK, err := s.classifyTreeAllocOwnerExpr(expr.Owner)
+			if err != nil {
+				return nil, nil, err
+			}
+			if !ownerOK {
+				return nil, nil, fmt.Errorf("tree allocation owner must be perm, a tree store, an Arena value, or an Arena reference")
+			}
+			return s.emitTreeExactMemberConstructorValue(callExpr, memberType, &owner)
+		}
+	}
 	if treeType, variant, callExpr, ok := s.treeAllocConstructorInfo(expr.Value); ok {
 		if variant == nil {
 			return nil, nil, fmt.Errorf("unknown tree constructor")
@@ -3549,7 +3583,7 @@ func (s *functionState) emitAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, sema
 			return nil, nil, err
 		}
 		if !ownerOK {
-			return nil, nil, fmt.Errorf("tree allocation owner must be perm, an Arena value, or an Arena reference")
+			return nil, nil, fmt.Errorf("tree allocation owner must be perm, a tree store, an Arena value, or an Arena reference")
 		}
 		return s.emitTreeConstructorValue(callExpr, treeType, variant, treeAllocArgs(callExpr), treeAllocArgNames(callExpr), &owner)
 	}
@@ -3890,6 +3924,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if storeType, ok := s.packedStoreConstructorCall(expr); ok {
 		return s.emitPackedStoreConstructorValue(expr, storeType)
 	}
+	if storeType, ok := s.treeStoreConstructorCall(expr); ok {
+		return s.emitTreeStoreConstructorValue(expr, storeType)
+	}
 	if callIdentName(expr) == "freeze" {
 		if len(expr.Args) != 1 {
 			return nil, nil, fmt.Errorf("freeze expects 1 argument, got %d", len(expr.Args))
@@ -3921,6 +3958,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 			return nil, nil, fmt.Errorf("unknown tree constructor")
 		}
 		return s.emitTreeConstructorValue(expr, treeType, variant, expr.Args, expr.ArgNames, nil)
+	}
+	if memberType, ok := s.treeExactMemberConstructorCall(expr); ok {
+		return s.emitTreeExactMemberConstructorValue(expr, memberType, nil)
 	}
 	if value, actualType, handled, err := s.emitProofCarryingViewHelperCall(expr); handled {
 		return value, actualType, err
@@ -4530,6 +4570,69 @@ func (s *functionState) emitPackedStoreConstructorValue(expr *ast.CallExpr, stor
 		return nil, nil, err
 	}
 	return value, storeType, nil
+}
+
+func (s *functionState) emitTreeStoreConstructorValue(expr *ast.CallExpr, storeType *semantic.TreeStoreType) (C.LLVMValueRef, semantic.Type, error) {
+	if expr == nil || len(expr.Args) != 1 {
+		return nil, nil, fmt.Errorf("tree store constructor expects exactly one arena argument")
+	}
+	value, err := s.emitTreeStoreValue(expr.Args[0], storeType)
+	if err != nil {
+		return nil, nil, err
+	}
+	return value, storeType, nil
+}
+
+func (s *functionState) emitTreeStoreValue(arenaExpr ast.Expr, storeType *semantic.TreeStoreType) (C.LLVMValueRef, error) {
+	if storeType == nil {
+		return nil, fmt.Errorf("missing tree store type")
+	}
+	arenaPtr, _, err := s.emitAddressOrTemp(arenaExpr)
+	if err != nil {
+		return nil, err
+	}
+	return s.emitTreeStoreValueFromArenaRef(arenaPtr, storeType)
+}
+
+func (s *functionState) emitTreeStoreArenaValue(storeValue C.LLVMValueRef, storeType *semantic.TreeStoreType) (C.LLVMValueRef, error) {
+	if storeType == nil {
+		return nil, fmt.Errorf("missing tree store type")
+	}
+	return s.emitTreeStoreArenaValueNamed(storeValue, "tree.store.arena.value"), nil
+}
+
+func (s *functionState) emitTreeStoreValueFromExpr(expr ast.Expr) (C.LLVMValueRef, *semantic.TreeStoreType, error) {
+	if expr == nil {
+		return nil, nil, fmt.Errorf("missing tree store expression")
+	}
+	objectType := s.exprType(expr)
+	if objectType == nil {
+		return nil, nil, fmt.Errorf("missing semantic type for tree store expression")
+	}
+	if storeType, ok := objectType.(*semantic.TreeStoreType); ok {
+		value, _, err := s.emitExpr(expr, storeType)
+		if err != nil {
+			return nil, nil, err
+		}
+		return value, storeType, nil
+	}
+	refType, ok := objectType.(*semantic.RefType)
+	if !ok || refType.State != semantic.RefStateNonNull {
+		return nil, nil, fmt.Errorf("tree store access requires a store value or proven non-null store reference")
+	}
+	storeType, ok := refType.Elem.(*semantic.TreeStoreType)
+	if !ok {
+		return nil, nil, fmt.Errorf("tree store access requires a tree store, got %s", objectType.String())
+	}
+	ptrValue, _, err := s.emitExpr(expr, objectType)
+	if err != nil {
+		return nil, nil, err
+	}
+	storeValue, err := s.loadValue(ptrValue, storeType, "tree.store.load")
+	if err != nil {
+		return nil, nil, err
+	}
+	return storeValue, storeType, nil
 }
 
 func (s *functionState) emitPackedStoreValue(arenaExpr ast.Expr, storeType *semantic.PackedEnumStoreType) (C.LLVMValueRef, error) {
@@ -5470,12 +5573,36 @@ func (s *functionState) packedStoreConstructorInfoFromField(expr *ast.FieldExpr)
 	return semantic.PackedEnumStoreWithState(enumType.StoreType, s.g.result.NamedTypes["Local"]), true
 }
 
+func (s *functionState) treeStoreConstructorInfoFromField(expr *ast.FieldExpr) (*semantic.TreeStoreType, bool) {
+	ident, ok := expr.Object.(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+	base, ok := s.g.result.NamedTypes[ident.Name]
+	if !ok {
+		return nil, false
+	}
+	treeType, ok := base.(*semantic.TreeType)
+	if !ok || expr.Field != "Store" || treeType.StoreType == nil {
+		return nil, false
+	}
+	return semantic.TreeStoreWithState(treeType.StoreType, s.g.result.NamedTypes["Local"]), true
+}
+
 func (s *functionState) packedStoreConstructorCall(expr *ast.CallExpr) (*semantic.PackedEnumStoreType, bool) {
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
 	if !ok {
 		return nil, false
 	}
 	return s.packedStoreConstructorInfoFromField(fieldExpr)
+}
+
+func (s *functionState) treeStoreConstructorCall(expr *ast.CallExpr) (*semantic.TreeStoreType, bool) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok {
+		return nil, false
+	}
+	return s.treeStoreConstructorInfoFromField(fieldExpr)
 }
 
 func (s *functionState) emitSliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, semantic.Type, error) {
@@ -6151,6 +6278,37 @@ func (s *functionState) treeConstructorInfo(expr *ast.CallExpr) (*semantic.TreeC
 	return s.treeConstructorInfoFromField(fieldExpr)
 }
 
+func (s *functionState) treeExactMemberConstructorInfoFromField(expr *ast.FieldExpr) (semantic.Type, bool) {
+	if expr == nil {
+		return nil, false
+	}
+	base, ok := s.treeTypeForExpr(expr.Object)
+	if !ok || base == nil {
+		return nil, false
+	}
+	memberType, ok := base.Member(expr.Field)
+	if !ok {
+		return nil, false
+	}
+	switch semantic.StripAggregateStateType(memberType).(type) {
+	case *semantic.TreeBlockType, *semantic.TreeStructType:
+		return memberType, true
+	default:
+		return nil, false
+	}
+}
+
+func (s *functionState) treeExactMemberConstructorCall(expr *ast.CallExpr) (semantic.Type, bool) {
+	if expr == nil {
+		return nil, false
+	}
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok {
+		return nil, false
+	}
+	return s.treeExactMemberConstructorInfoFromField(fieldExpr)
+}
+
 func (s *functionState) treeConstructorInfoFromField(expr *ast.FieldExpr) (*semantic.TreeCategoryType, *semantic.EnumVariant, bool) {
 	ownerName, variantName, ok := qualifiedFieldOwnerAndLeaf(expr)
 	if !ok {
@@ -6363,6 +6521,13 @@ func (s *functionState) emitTreeCategoryAlloc(treeType *semantic.TreeCategoryTyp
 		return nil, err
 	}
 	if !owner.isPerm {
+		if owner.storeValue != nil && owner.storeType != nil {
+			arenaRef, err := s.emitTreeStoreArenaValue(owner.storeValue, owner.storeType)
+			if err != nil {
+				return nil, err
+			}
+			owner.arenaRef = arenaRef
+		}
 		if owner.arenaRef == nil {
 			return nil, fmt.Errorf("missing Arena owner for tree constructor")
 		}
@@ -6427,72 +6592,149 @@ func (s *functionState) emitTreeConstructorValue(callExpr *ast.CallExpr, treeTyp
 	if len(orderedArgs) != len(variant.Payload) {
 		return nil, nil, fmt.Errorf("tree constructor %s.%s expects %d arguments, got %d", treeType.Name, variant.Name, len(variant.Payload), len(args))
 	}
-	storageType, err := s.g.ensureTreeCategoryBody(treeType)
+	storeValue, _, err := s.ensureTreeOwnerStoreValue(resolvedOwner, treeType.Family)
 	if err != nil {
 		return nil, nil, err
 	}
-	nodePtr, err := s.emitTreeCategoryAlloc(treeType, resolvedOwner)
+	arenaValue := s.emitTreeStoreArenaValueNamed(storeValue, "tree.store.arena")
+	stateValue := s.emitTreeStoreStateValueNamed(storeValue, "tree.store.state")
+	memberType := treeType.VariantViewType(variant)
+	tablePtr, err := s.emitTreeStateTablePtr(stateValue, treeType.Family, memberType, "tree.ctor")
 	if err != nil {
 		return nil, nil, err
 	}
-	tagValue, err := s.enumTagConstant(variant.Tag)
+	rowIndex, err := s.emitTreeTableCountValue(tablePtr, memberType, "tree.ctor")
 	if err != nil {
 		return nil, nil, err
 	}
-	storageValue := C.LLVMConstNull(storageType)
-	storageValue = C.LLVMBuildInsertValue(s.builder, storageValue, tagValue, 0, cStringFree("tree.tag.ins"))
+	usizeType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return nil, nil, err
+	}
+	neededCount := C.LLVMBuildAdd(s.builder, rowIndex, C.LLVMConstInt(usizeType, 1, 0), cStringFree("tree.ctor.needed"))
+	if err := s.emitTreeEnsureTableCapacity(arenaValue, tablePtr, memberType, neededCount, "tree.ctor"); err != nil {
+		return nil, nil, err
+	}
 	for _, fieldDecl := range treeCommonFieldDecls(treeType) {
-		arg, ok := commonArgs[fieldDecl.Name]
+		arg := commonArgs[fieldDecl.Name]
+		field, ok := treeExactFieldInfo(memberType, fieldDecl.Name)
 		if !ok {
-			continue
-		}
-		field, fieldIndex, err := treeCategoryCommonFieldInfo(treeType, fieldDecl.Name)
-		if err != nil {
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("missing tree common field %s.%s", treeType.Name, fieldDecl.Name)
 		}
 		fieldValue, _, err := s.emitExpr(arg, field.Type)
 		if err != nil {
 			return nil, nil, err
 		}
-		storageValue = C.LLVMBuildInsertValue(s.builder, storageValue, fieldValue, C.unsigned(fieldIndex), cStringFree("tree.common.ins"))
+		if err := s.emitTreeStoreExactFieldValueAtIndex(tablePtr, memberType, fieldDecl.Name, rowIndex, fieldValue, "tree.ctor"); err != nil {
+			return nil, nil, err
+		}
 	}
-	C.LLVMBuildStore(s.builder, storageValue, nodePtr)
-	if len(variant.Payload) > 0 {
-		payloadPtr, err := s.treeCategoryPayloadPtr(nodePtr, treeType)
+	for i, payloadType := range variant.Payload {
+		fieldName := variant.PayloadLabel(i)
+		if fieldName == "" {
+			fieldName = fmt.Sprintf("payload%d", i)
+		}
+		fieldValue, _, err := s.emitExpr(orderedArgs[i], payloadType)
 		if err != nil {
 			return nil, nil, err
 		}
-		if len(variant.Payload) == 1 {
-			argValue, _, err := s.emitExpr(orderedArgs[0], variant.Payload[0])
-			if err != nil {
-				return nil, nil, err
-			}
-			if !llvmValueIsZeroConstant(argValue) {
-				C.LLVMBuildStore(s.builder, argValue, payloadPtr)
-			}
-		} else {
-			payloadType, err := s.g.lowerEnumVariantPayloadType(variant)
-			if err != nil {
-				return nil, nil, err
-			}
-			aggregate := C.LLVMGetUndef(payloadType)
-			allZero := true
-			for i, payload := range variant.Payload {
-				argValue, _, err := s.emitExpr(orderedArgs[i], payload)
-				if err != nil {
-					return nil, nil, err
-				}
-				if !llvmValueIsZeroConstant(argValue) {
-					allZero = false
-				}
-				aggregate = C.LLVMBuildInsertValue(s.builder, aggregate, argValue, C.unsigned(i), cStringFree("tree.payload.ins"))
-			}
-			if !allZero {
-				C.LLVMBuildStore(s.builder, aggregate, payloadPtr)
-			}
+		if err := s.emitTreeStoreExactFieldValueAtIndex(tablePtr, memberType, fieldName, rowIndex, fieldValue, "tree.ctor"); err != nil {
+			return nil, nil, err
 		}
 	}
-	return nodePtr, treeType, nil
+	if err := s.emitTreeTableSetCount(tablePtr, memberType, neededCount, "tree.ctor"); err != nil {
+		return nil, nil, err
+	}
+	keyValue, err := s.buildTreeHandleKey(variant.Tag, rowIndex, "tree.ctor")
+	if err != nil {
+		return nil, nil, err
+	}
+	handleValue, err := s.buildTreeHandleValue(treeType.Family, stateValue, keyValue, "tree.ctor")
+	if err != nil {
+		return nil, nil, err
+	}
+	return handleValue, treeType, nil
+}
+
+func (s *functionState) emitTreeExactMemberConstructorValue(callExpr *ast.CallExpr, memberType semantic.Type, owner *treeAllocOwnerBinding) (C.LLVMValueRef, semantic.Type, error) {
+	if memberType == nil {
+		return nil, nil, fmt.Errorf("missing exact tree member constructor metadata")
+	}
+	family := treeExactMemberFamily(memberType)
+	if family == nil {
+		return nil, nil, fmt.Errorf("missing tree family metadata for %s", memberType.String())
+	}
+	tag, ok := treeExactMemberTag(memberType)
+	if !ok {
+		return nil, nil, fmt.Errorf("missing exact tree member tag for %s", memberType.String())
+	}
+	resolvedOwner := treeAllocOwnerBinding{}
+	if owner != nil {
+		resolvedOwner = *owner
+	} else {
+		activeOwner, ok := s.lookupTreeAllocOwner()
+		if !ok {
+			return nil, nil, fmt.Errorf("tree constructor %s requires an active in <owner>: scope or explicit new[owner]", memberType.String())
+		}
+		resolvedOwner = activeOwner
+	}
+	fieldDecls := treeExactFieldDecls(memberType)
+	var orderedArgs []ast.Expr
+	if callExpr != nil && callExpr.ResolvedArgsValid && len(callExpr.ResolvedArgs) == len(fieldDecls) {
+		orderedArgs = callExpr.ResolvedArgs
+	} else if callExpr != nil {
+		orderedArgs = callExpr.Args
+	}
+	if len(orderedArgs) != len(fieldDecls) {
+		return nil, nil, fmt.Errorf("tree constructor %s expects %d fields, got %d", memberType.String(), len(fieldDecls), len(orderedArgs))
+	}
+	storeValue, _, err := s.ensureTreeOwnerStoreValue(resolvedOwner, family)
+	if err != nil {
+		return nil, nil, err
+	}
+	arenaValue := s.emitTreeStoreArenaValueNamed(storeValue, "tree.exact.store.arena")
+	stateValue := s.emitTreeStoreStateValueNamed(storeValue, "tree.exact.store.state")
+	tablePtr, err := s.emitTreeStateTablePtr(stateValue, family, memberType, "tree.exact")
+	if err != nil {
+		return nil, nil, err
+	}
+	rowIndex, err := s.emitTreeTableCountValue(tablePtr, memberType, "tree.exact")
+	if err != nil {
+		return nil, nil, err
+	}
+	usizeType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return nil, nil, err
+	}
+	neededCount := C.LLVMBuildAdd(s.builder, rowIndex, C.LLVMConstInt(usizeType, 1, 0), cStringFree("tree.exact.needed"))
+	if err := s.emitTreeEnsureTableCapacity(arenaValue, tablePtr, memberType, neededCount, "tree.exact"); err != nil {
+		return nil, nil, err
+	}
+	for i, fieldDecl := range fieldDecls {
+		field, ok := treeExactFieldInfo(memberType, fieldDecl.Name)
+		if !ok {
+			return nil, nil, fmt.Errorf("missing exact tree field %s.%s", memberType.String(), fieldDecl.Name)
+		}
+		fieldValue, _, err := s.emitExpr(orderedArgs[i], field.Type)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := s.emitTreeStoreExactFieldValueAtIndex(tablePtr, memberType, fieldDecl.Name, rowIndex, fieldValue, "tree.exact"); err != nil {
+			return nil, nil, err
+		}
+	}
+	if err := s.emitTreeTableSetCount(tablePtr, memberType, neededCount, "tree.exact"); err != nil {
+		return nil, nil, err
+	}
+	keyValue, err := s.buildTreeHandleKey(tag, rowIndex, "tree.exact")
+	if err != nil {
+		return nil, nil, err
+	}
+	handleValue, err := s.buildTreeHandleValue(family, stateValue, keyValue, "tree.exact")
+	if err != nil {
+		return nil, nil, err
+	}
+	return handleValue, memberType, nil
 }
 
 func (s *functionState) resolveTreeConstructorArgs(callExpr *ast.CallExpr, treeType *semantic.TreeCategoryType, variant *semantic.EnumVariant, args []ast.Expr, argNames []string) ([]ast.Expr, map[string]ast.Expr, error) {
@@ -6563,85 +6805,127 @@ func (s *functionState) resolveTreeConstructorArgs(callExpr *ast.CallExpr, treeT
 
 func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	objType := s.exprType(expr.Object)
-	categoryType, viewType, ok := resolveMatchableTreeCategoryTypeBackend(objType)
-	if !ok {
-		if refType, ok := semantic.StripAggregateStateType(objType).(*semantic.RefType); ok {
-			categoryType, viewType, ok = resolveMatchableTreeCategoryTypeBackend(refType.Elem)
+	handleValue, baseType, err := s.emitTreeHandleValue(expr.Object, objType)
+	if err != nil || handleValue == nil || baseType == nil {
+		return nil, nil, false, err
+	}
+	switch tt := baseType.(type) {
+	case *semantic.TreeVariantViewType:
+		if field, ok := treeExactFieldInfo(tt, expr.Field); ok {
+			stateValue := s.emitTreeHandleStateValue(handleValue, "tree.field")
+			rowIndex, err := s.emitTreeHandleIndexValue(handleValue, "tree.field")
+			if err != nil {
+				return nil, nil, true, err
+			}
+			tablePtr, err := s.emitTreeStateTablePtr(stateValue, tt.Category.Family, tt, "tree.field")
+			if err != nil {
+				return nil, nil, true, err
+			}
+			value, _, err := s.emitTreeExactFieldValueAtIndex(tablePtr, tt, expr.Field, rowIndex, "tree.field")
+			return value, field.Type, true, err
 		}
-	}
-	if !ok || categoryType == nil {
+		return nil, nil, true, fmt.Errorf("%s has no field %s", tt.String(), expr.Field)
+	case *semantic.TreeCategoryType:
+		if _, ok := tt.Common[expr.Field]; ok {
+			tagValue, err := s.emitTreeHandleTagValue(handleValue, "tree.field")
+			if err != nil {
+				return nil, nil, true, err
+			}
+			rowIndex, err := s.emitTreeHandleIndexValue(handleValue, "tree.field")
+			if err != nil {
+				return nil, nil, true, err
+			}
+			var fieldType semantic.Type
+			resultBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("tree.field.result"))
+			failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("tree.field.fail"))
+			switchInst := C.LLVMBuildSwitch(s.builder, tagValue, failBB, C.unsigned(len(tt.Variants)))
+			var incomingValues []C.LLVMValueRef
+			var incomingBlocks []C.LLVMBasicBlockRef
+			for _, variant := range tt.Variants {
+				memberType := tt.VariantViewType(variant)
+				caseBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("tree.field.case"))
+				tagConst, err := s.enumTagConstant(variant.Tag)
+				if err != nil {
+					return nil, nil, true, err
+				}
+				C.LLVMAddCase(switchInst, tagConst, caseBB)
+				C.LLVMPositionBuilderAtEnd(s.builder, caseBB)
+				stateValue := s.emitTreeHandleStateValue(handleValue, "tree.field")
+				tablePtr, err := s.emitTreeStateTablePtr(stateValue, tt.Family, memberType, "tree.field")
+				if err != nil {
+					return nil, nil, true, err
+				}
+				value, resolvedType, err := s.emitTreeExactFieldValueAtIndex(tablePtr, memberType, expr.Field, rowIndex, "tree.field")
+				if err != nil {
+					return nil, nil, true, err
+				}
+				fieldType = resolvedType
+				incomingValues = append(incomingValues, value)
+				incomingBlocks = append(incomingBlocks, C.LLVMGetInsertBlock(s.builder))
+				C.LLVMBuildBr(s.builder, resultBB)
+			}
+			if err := s.emitTreeChildrenTrapBlock(failBB); err != nil {
+				return nil, nil, true, err
+			}
+			C.LLVMPositionBuilderAtEnd(s.builder, resultBB)
+			llvmFieldType, err := s.g.lowerType(fieldType)
+			if err != nil {
+				return nil, nil, true, err
+			}
+			phi := C.LLVMBuildPhi(s.builder, llvmFieldType, cStringFree("tree.field.phi"))
+			C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+			return phi, fieldType, true, nil
+		}
 		return nil, nil, false, nil
-	}
-	if _, _, err := treeCategoryCommonFieldInfo(categoryType, expr.Field); err == nil {
-		ptr, fieldType, err := s.emitTreeCommonFieldAddress(expr.Object, objType, expr.Field)
+	case *semantic.TreeBlockType, *semantic.TreeStructType:
+		field, ok := semantic.TreeExactFieldInfo(tt, expr.Field)
+		if !ok {
+			return nil, nil, true, fmt.Errorf("%s has no field %s", baseType.String(), expr.Field)
+		}
+		stateValue := s.emitTreeHandleStateValue(handleValue, "tree.field")
+		rowIndex, err := s.emitTreeHandleIndexValue(handleValue, "tree.field")
 		if err != nil {
 			return nil, nil, true, err
 		}
-		value, err := s.loadValue(ptr, fieldType, expr.Field)
-		return value, fieldType, true, err
-	}
-	if viewType == nil || viewType.Variant == nil {
+		tablePtr, err := s.emitTreeStateTablePtr(stateValue, treeExactMemberFamily(tt), tt, "tree.field")
+		if err != nil {
+			return nil, nil, true, err
+		}
+		value, _, err := s.emitTreeExactFieldValueAtIndex(tablePtr, tt, expr.Field, rowIndex, "tree.field")
+		return value, field.Type, true, err
+	default:
 		return nil, nil, false, nil
 	}
-	fieldIndex, ok := viewType.Variant.PayloadIndex(expr.Field)
-	if !ok {
-		return nil, nil, true, fmt.Errorf("%s has no field %s", viewType.String(), expr.Field)
-	}
-	nodePtr, _, _, err := s.emitTreeNodeStoragePtr(expr.Object, objType)
-	if err != nil {
-		return nil, nil, true, err
-	}
-	payloadValues, err := s.extractTreeVariantPayloadValues(nodePtr, viewType.Category, viewType.Variant)
-	if err != nil {
-		return nil, nil, true, err
-	}
-	return payloadValues[fieldIndex], viewType.Variant.Payload[fieldIndex], true, nil
 }
 
-func (s *functionState) emitTreeNodeStoragePtr(expr ast.Expr, objType semantic.Type) (C.LLVMValueRef, *semantic.TreeCategoryType, *semantic.TreeVariantViewType, error) {
+func (s *functionState) emitTreeHandleValue(expr ast.Expr, objType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
 	baseType := semantic.StripAggregateStateType(objType)
 	if refType, ok := baseType.(*semantic.RefType); ok {
-		innerType := semantic.StripAggregateStateType(refType.Elem)
-		categoryType, viewType, ok := resolveMatchableTreeCategoryTypeBackend(innerType)
-		if !ok || categoryType == nil {
-			return nil, nil, nil, fmt.Errorf("tree field access requires a tree category base")
+		if _, ok := treeNodeHandleFamily(refType.Elem); !ok {
+			return nil, nil, fmt.Errorf("tree field access requires a tree node base")
 		}
 		valuePtr, _, err := s.emitExpr(expr, objType)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
-		nodePtr, err := s.loadValue(valuePtr, refType.Elem, "tree.node.load")
+		value, err := s.loadValue(valuePtr, refType.Elem, "tree.handle.load")
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
-		return nodePtr, categoryType, viewType, nil
+		return value, refType.Elem, nil
 	}
-	categoryType, viewType, ok := resolveMatchableTreeCategoryTypeBackend(baseType)
-	if !ok || categoryType == nil {
-		return nil, nil, nil, fmt.Errorf("tree field access requires a tree category base")
+	if _, ok := treeNodeHandleFamily(baseType); !ok {
+		return nil, nil, fmt.Errorf("tree field access requires a tree node base")
 	}
-	nodePtr, _, err := s.emitExpr(expr, objType)
+	value, _, err := s.emitExpr(expr, objType)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-	return nodePtr, categoryType, viewType, nil
+	return value, baseType, nil
 }
 
 func (s *functionState) emitTreeCommonFieldAddress(objExpr ast.Expr, objType semantic.Type, fieldName string) (C.LLVMValueRef, semantic.Type, error) {
-	nodePtr, categoryType, _, err := s.emitTreeNodeStoragePtr(objExpr, objType)
-	if err != nil {
-		return nil, nil, err
-	}
-	field, fieldIndex, err := treeCategoryCommonFieldInfo(categoryType, fieldName)
-	if err != nil {
-		return nil, nil, err
-	}
-	storageType, err := s.g.ensureTreeCategoryBody(categoryType)
-	if err != nil {
-		return nil, nil, err
-	}
-	fieldPtr := C.LLVMBuildStructGEP2(s.builder, storageType, nodePtr, C.unsigned(fieldIndex), cStringFree(fieldName))
-	return fieldPtr, field.Type, nil
+	return nil, nil, fmt.Errorf("tree field addresses are not supported for handle-lowered tree values")
 }
 
 func treeCategoryCommonFieldInfo(categoryType *semantic.TreeCategoryType, fieldName string) (semantic.Field, int, error) {
@@ -6685,39 +6969,41 @@ func (s *functionState) treeCategoryPayloadPtr(nodePtr C.LLVMValueRef, categoryT
 	return C.LLVMBuildStructGEP2(s.builder, storageType, nodePtr, C.unsigned(treeCategoryPayloadFieldIndex(categoryType)), cStringFree("tree.payload.ptr")), nil
 }
 
-func (s *functionState) extractTreeCategoryTagValue(nodePtr C.LLVMValueRef, categoryType *semantic.TreeCategoryType) (C.LLVMValueRef, error) {
-	storageType, err := s.g.ensureTreeCategoryBody(categoryType)
-	if err != nil {
-		return nil, err
+func (s *functionState) extractTreeCategoryTagValue(nodeValue C.LLVMValueRef, categoryType *semantic.TreeCategoryType) (C.LLVMValueRef, error) {
+	if categoryType == nil {
+		return nil, fmt.Errorf("missing tree category metadata")
 	}
-	tagPtr := C.LLVMBuildStructGEP2(s.builder, storageType, nodePtr, 0, cStringFree("tree.tag.ptr"))
-	tagType, err := s.g.lowerBuiltin("u32")
-	if err != nil {
-		return nil, err
-	}
-	return C.LLVMBuildLoad2(s.builder, tagType, tagPtr, cStringFree("tree.tag.value")), nil
+	return s.emitTreeHandleTagValue(nodeValue, "tree.tag")
 }
 
-func (s *functionState) extractTreeVariantPayloadValues(nodePtr C.LLVMValueRef, categoryType *semantic.TreeCategoryType, variant *semantic.EnumVariant) ([]C.LLVMValueRef, error) {
+func (s *functionState) extractTreeVariantPayloadValues(nodeValue C.LLVMValueRef, categoryType *semantic.TreeCategoryType, variant *semantic.EnumVariant) ([]C.LLVMValueRef, error) {
 	if variant == nil || len(variant.Payload) == 0 {
 		return nil, nil
 	}
-	payloadPtr, err := s.treeCategoryPayloadPtr(nodePtr, categoryType)
+	if categoryType == nil || categoryType.Family == nil {
+		return nil, fmt.Errorf("missing tree category metadata")
+	}
+	stateValue := s.emitTreeHandleStateValue(nodeValue, "tree.payload")
+	rowIndex, err := s.emitTreeHandleIndexValue(nodeValue, "tree.payload")
 	if err != nil {
 		return nil, err
 	}
-	payloadType, err := s.g.lowerEnumVariantPayloadType(variant)
+	memberType := categoryType.VariantViewType(variant)
+	tablePtr, err := s.emitTreeStateTablePtr(stateValue, categoryType.Family, memberType, "tree.payload")
 	if err != nil {
 		return nil, err
 	}
-	if len(variant.Payload) == 1 {
-		value := C.LLVMBuildLoad2(s.builder, payloadType, payloadPtr, cStringFree("tree.payload"))
-		return []C.LLVMValueRef{value}, nil
-	}
-	aggregate := C.LLVMBuildLoad2(s.builder, payloadType, payloadPtr, cStringFree("tree.payload"))
 	values := make([]C.LLVMValueRef, 0, len(variant.Payload))
 	for i := range variant.Payload {
-		values = append(values, C.LLVMBuildExtractValue(s.builder, aggregate, C.unsigned(i), cStringFree("tree.payload.field")))
+		fieldName := variant.PayloadLabel(i)
+		if fieldName == "" {
+			fieldName = fmt.Sprintf("payload%d", i)
+		}
+		value, _, err := s.emitTreeExactFieldValueAtIndex(tablePtr, memberType, fieldName, rowIndex, "tree.payload.field")
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
 	}
 	return values, nil
 }

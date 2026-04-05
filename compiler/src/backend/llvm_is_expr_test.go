@@ -82,7 +82,7 @@ def starts_with_nil(node: Lua.Expr) -> bool:
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"%Lua_Expr__Node = type { i32, i64, [2 x i64] }", "declare ptr @alloc_perm(i64)", "define ptr @make_binary(i64 ", "is.tree.variant.result", "match.tree.tag", "tree.payload.field"} {
+	for _, check := range []string{"%Lua__TreeHandle = type { ptr, i64 }", "%Lua__TreeStoreState = type {", "@Lua__perm_tree_store", "define %Lua__TreeHandle @make_binary(i64 ", "is.tree.variant.result", "match.tree.tag", "tree.field.column.ptr"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected tree is lowering to include %q, got:\n%s", check, output)
 		}
@@ -140,13 +140,13 @@ def child_span(node: Lua.Expr) -> i64:
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"define i64 @score_binary(ptr ", "call i64 @score_binary(ptr ", "tree.payload.field"} {
+	for _, check := range []string{"define i64 @score_binary(%Lua__TreeHandle ", "call i64 @score_binary(%Lua__TreeHandle ", "tree.field.column.ptr"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected first-class treeview lowering to include %q, got:\n%s", check, output)
 		}
 	}
 	if strings.Contains(output, "TreeView__") || strings.Contains(output, "treeview.handle") {
-		t.Fatalf("expected treeview surface type to lower through the existing tree pointer carrier, got:\n%s", output)
+		t.Fatalf("expected treeview surface type to lower through the existing tree handle carrier, got:\n%s", output)
 	}
 }
 
@@ -172,13 +172,13 @@ def child_span(node: Lua.Expr) -> i64:
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"define i64 @score_binary(ptr ", "call i64 @score_binary(ptr ", "tree.payload.field"} {
+	for _, check := range []string{"define i64 @score_binary(%Lua__TreeHandle ", "call i64 @score_binary(%Lua__TreeHandle ", "tree.field.column.ptr"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected bare tree variant surface lowering to include %q, got:\n%s", check, output)
 		}
 	}
 	if strings.Contains(output, "TreeView__") || strings.Contains(output, "treeview.handle") {
-		t.Fatalf("expected bare tree variant surface type to lower through the existing tree pointer carrier, got:\n%s", output)
+		t.Fatalf("expected bare tree variant surface type to lower through the existing tree handle carrier, got:\n%s", output)
 	}
 }
 
@@ -213,7 +213,7 @@ def eval(node: Lua.Expr) -> i64:
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"define i64 @child_span(ptr ", "define i64 @eval(ptr ", "match.tree.tag", "tree.payload.field"} {
+	for _, check := range []string{"define i64 @child_span(%Lua__TreeHandle ", "define i64 @eval(%Lua__TreeHandle ", "match.tree.tag", "tree.field.column.ptr"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected tree match lowering to include %q, got:\n%s", check, output)
 		}
@@ -249,13 +249,13 @@ def left_value(node: Lua.Expr) -> i64:
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"define i64 @child_span(ptr ", "define i64 @left_value(ptr ", "call ptr @keep_binary(ptr ", "match.tree.tag", "tree.payload.field", "call void @llvm.trap()"} {
+	for _, check := range []string{"define i64 @child_span(%Lua__TreeHandle ", "define i64 @left_value(%Lua__TreeHandle ", "call %Lua__TreeHandle @keep_binary(%Lua__TreeHandle ", "match.tree.tag", "tree.field.column.ptr", "call void @llvm.trap()"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected tree open/view lowering to include %q, got:\n%s", check, output)
 		}
 	}
 	if strings.Contains(output, "TreeView__") || strings.Contains(output, "treeview.handle") {
-		t.Fatalf("expected tree open/view lowering to keep treeview as the existing tree pointer carrier, got:\n%s", output)
+		t.Fatalf("expected tree open/view lowering to keep treeview as the existing tree handle carrier, got:\n%s", output)
 	}
 }
 
@@ -312,7 +312,7 @@ def score(node: Lua.Expr) -> i64:
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"define i64 @score(ptr ", "visit.expr.arm", "visit.expr.phi", "match.tree.tag", "tree.payload.field"} {
+	for _, check := range []string{"define i64 @score(%Lua__TreeHandle ", "visit.expr.arm", "visit.expr.phi", "match.tree.tag", "tree.field.column.ptr"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected tree visit lowering to include %q, got:\n%s", check, output)
 		}
@@ -340,9 +340,40 @@ def stmt_total(block: Lua.Block) -> i64:
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"define i64 @stmt_total(%Lua.Block", "visit.exact.arm", "visit.exact.end"} {
+	for _, check := range []string{"define i64 @stmt_total(%Lua__TreeHandle ", "visit.exact.arm", "visit.exact.end"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected exact tree visit lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersTreeFoldExpr(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Nil
+		Int(value: i64)
+		Binary(child left: Expr, child right: Expr)
+
+def score(node: Lua.Expr) -> i64:
+	return fold node as Lua.Node into i64:
+		Lua.Expr.Nil(expr, children):
+			expr.span + children.len.i64()
+		Lua.Expr.Int(expr, children):
+			expr.value + children.len.i64()
+		Lua.Expr.Binary(expr, children):
+			children[0u] + children[1u] + expr.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_fold_expr.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i64 @score(%Lua__TreeHandle ", "define private i64 @tree_fold_", "call i64 @tree_fold_", "fold.arm.buffer", "fold.arm.view.len"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected tree fold lowering to include %q, got:\n%s", check, output)
 		}
 	}
 }

@@ -340,16 +340,20 @@ func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label stri
 		if builtin := p.parseBuiltinTypeExpr(pos, name); builtin != nil {
 			typ = builtin
 		} else {
+			hasTopLevelComma := p.peekTopLevelCommaInCurrentBracketList()
 			afterBracket := lexer.TOKEN_EOF
 			if p.pos+1 < len(p.tokens) {
 				afterBracket = p.tokens[p.pos+1].Kind
 			}
 			isArray := afterBracket == lexer.TOKEN_INT_LIT || afterBracket == lexer.TOKEN_HEX_LIT
-			if afterBracket == lexer.TOKEN_IDENT && p.pos+2 < len(p.tokens) {
+			if !hasTopLevelComma && afterBracket == lexer.TOKEN_IDENT && p.pos+2 < len(p.tokens) {
 				afterIdent := p.tokens[p.pos+2].Kind
 				isArray = afterIdent != lexer.TOKEN_AMPERSAND && afterIdent != lexer.TOKEN_QUESTION &&
 					afterIdent != lexer.TOKEN_BANG && afterIdent != lexer.TOKEN_RBRACKET && afterIdent != lexer.TOKEN_COMMA &&
-					afterIdent != lexer.TOKEN_LBRACKET && afterIdent != lexer.TOKEN_PIPE
+					afterIdent != lexer.TOKEN_LBRACKET && afterIdent != lexer.TOKEN_PIPE && afterIdent != lexer.TOKEN_DOT
+			}
+			if hasTopLevelComma {
+				isArray = false
 			}
 
 			if isArray {
@@ -405,6 +409,36 @@ func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label stri
 	}
 
 	return typ
+}
+
+func (p *Parser) peekTopLevelCommaInCurrentBracketList() bool {
+	if p.peek() != lexer.TOKEN_LBRACKET {
+		return false
+	}
+	bracketDepth := 0
+	parenDepth := 0
+	for i := p.pos; i < len(p.tokens); i++ {
+		switch p.tokens[i].Kind {
+		case lexer.TOKEN_LBRACKET:
+			bracketDepth++
+		case lexer.TOKEN_RBRACKET:
+			bracketDepth--
+			if bracketDepth == 0 {
+				return false
+			}
+		case lexer.TOKEN_LPAREN:
+			parenDepth++
+		case lexer.TOKEN_RPAREN:
+			if parenDepth > 0 {
+				parenDepth--
+			}
+		case lexer.TOKEN_COMMA:
+			if bracketDepth == 1 && parenDepth == 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (p *Parser) parseBuiltinTypeExpr(pos lexer.Pos, name string) ast.TypeExpr {

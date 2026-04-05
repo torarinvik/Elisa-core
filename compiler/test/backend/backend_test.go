@@ -2167,13 +2167,13 @@ def cond_span(branch: Lua.ElseIf) -> i64:
 	}
 
 	checks := []string{
-		"%Lua_Expr__Node = type { i32, i64, [2 x i64] }",
-		"declare ptr @alloc_perm(i64)",
-		"define ptr @make_nil()",
-		"define i64 @span_of(ptr",
+		"%Lua__TreeHandle = type { ptr, i64 }",
+		"@Lua__perm_tree_store = private global %Lua__TreeStore zeroinitializer",
+		"define %Lua__TreeHandle @make_nil()",
+		"define i64 @span_of(%Lua__TreeHandle",
 		"define i64 @stmt_count(",
 		"define i64 @cond_span(",
-		"tree.alloc",
+		"tree.field.column.ptr",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {

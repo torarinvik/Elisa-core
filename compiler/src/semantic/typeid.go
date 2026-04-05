@@ -175,6 +175,12 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 		if !appendTypeIDKey(b, tt.State, active, nextCycleID) {
 			return false
 		}
+	case *TreeStoreType:
+		appendKeyTag(b, "treestore")
+		appendKeyString(b, tt.Name)
+		if !appendTypeIDKey(b, tt.State, active, nextCycleID) {
+			return false
+		}
 	case *PackedVariantViewType:
 		if tt == nil || tt.Enum == nil || tt.Variant == nil {
 			return false

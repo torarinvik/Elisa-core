@@ -151,6 +151,9 @@ func SameType(a, b Type) bool {
 	case *PackedEnumStoreType:
 		tb, ok := b.(*PackedEnumStoreType)
 		return ok && ta.Name == tb.Name && SameType(ta.State, tb.State)
+	case *TreeStoreType:
+		tb, ok := b.(*TreeStoreType)
+		return ok && ta.Name == tb.Name && SameType(ta.State, tb.State)
 	case *PackedVariantViewType:
 		tb, ok := b.(*PackedVariantViewType)
 		return ok && SameType(ta.Enum, tb.Enum) && ta.Variant != nil && tb.Variant != nil && ta.Variant.Name == tb.Variant.Name
@@ -491,6 +494,9 @@ func matchTypePattern(pattern, actual Type) bool {
 		return ok
 	case *PackedEnumStoreType:
 		a, ok := actual.(*PackedEnumStoreType)
+		return ok && p.Name == a.Name && matchTypePattern(p.State, a.State)
+	case *TreeStoreType:
+		a, ok := actual.(*TreeStoreType)
 		return ok && p.Name == a.Name && matchTypePattern(p.State, a.State)
 	case *PackedVariantViewType:
 		a, ok := actual.(*PackedVariantViewType)

@@ -152,6 +152,14 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			}
 			return
 		}
+		if storeType, ctorType, ok := a.treeStoreExprType(n); ok {
+			if ctorType != nil {
+				result = ctorType
+			} else {
+				result = storeType
+			}
+			return
+		}
 		if enumType, ctorType, ok := a.enumVariantExprType(n); ok {
 			if ctorType != nil {
 				result = ctorType
@@ -173,6 +181,22 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 				result = ctorType
 			} else {
 				result = treeType
+			}
+			return
+		}
+		if memberType, ctorType, ok := a.treeExactMemberExprType(n); ok {
+			if ctorType != nil {
+				result = ctorType
+			} else {
+				if family, ok := TreeFamilyForMemberType(memberType); ok {
+					a.requireActiveTreeFamilyConstructorOwner(n.Pos(), family, memberType.String())
+				}
+				if len(treeExactMemberFieldDecls(memberType)) != 0 {
+					a.errorf(n.Pos(), "tree constructor %q requires explicit constructor arguments", memberType.String())
+					result = invalidType
+				} else {
+					result = memberType
+				}
 			}
 			return
 		}
@@ -517,11 +541,29 @@ func (a *Analyzer) analyzeAllocExpr(expr *ast.AllocExpr) Type {
 			if ownerType != nil {
 				ownerLabel = ownerType.String()
 			}
-			a.errorf(allocOwnerPos(expr), "tree allocation owner must be perm, an Arena value, or an Arena reference, got %s", ownerLabel)
+			a.errorf(allocOwnerPos(expr), "tree allocation owner must be perm, a tree store, an Arena value, or an Arena reference, got %s", ownerLabel)
 			return a.analyzeTreeAllocExpr(expr, treeType, variant, callExpr)
 		}
-		_ = owner
+		if owner.Kind == treeAllocOwnerStore && owner.StoreFamily != nil && treeType.Family != owner.StoreFamily {
+			a.errorf(allocOwnerPos(expr), "tree constructor %q requires store %q, got %q", treeType.Name+"."+variant.Name, treeType.Family.StoreType.String(), ownerType.String())
+		}
 		return a.analyzeTreeAllocExpr(expr, treeType, variant, callExpr)
+	}
+	if memberType, callExpr, ok := a.treeExactAllocConstructorInfo(expr.Value); ok {
+		owner, ownerType, ownerOK := a.classifyTreeAllocOwnerExpr(expr.Owner)
+		family, _ := TreeFamilyForMemberType(memberType)
+		if !ownerOK {
+			ownerLabel := "<invalid>"
+			if ownerType != nil {
+				ownerLabel = ownerType.String()
+			}
+			a.errorf(allocOwnerPos(expr), "tree allocation owner must be perm, a tree store, an Arena value, or an Arena reference, got %s", ownerLabel)
+			return a.analyzeTreeExactAllocExpr(expr, memberType, callExpr)
+		}
+		if owner.Kind == treeAllocOwnerStore && owner.StoreFamily != nil && family != owner.StoreFamily {
+			a.errorf(allocOwnerPos(expr), "tree constructor %q requires store %q, got %q", memberType.String(), family.StoreType.String(), ownerType.String())
+		}
+		return a.analyzeTreeExactAllocExpr(expr, memberType, callExpr)
 	}
 	if isTreeAllocPermExpr(expr.Owner) {
 		valueType := a.analyzeExpr(expr.Value)
@@ -532,9 +574,14 @@ func (a *Analyzer) analyzeAllocExpr(expr *ast.AllocExpr) Type {
 	if storeType, ok := ownerType.(*PackedEnumStoreType); ok {
 		return a.analyzePackedAllocExpr(expr, storeType)
 	}
+	if _, ok := ownerType.(*TreeStoreType); ok {
+		valueType := a.analyzeExpr(expr.Value)
+		a.errorf(expr.Value.Pos(), "new[%s] expects a tree constructor, got %s", ownerType.String(), valueType.String())
+		return invalidType
+	}
 	ident, ok := expr.Owner.(*ast.Ident)
 	if !ok {
-		a.errorf(expr.Pos(), "new[...] owner must be a region name or packed enum store, got %s", ownerType.String())
+		a.errorf(expr.Pos(), "new[...] owner must be a region name, tree store, or packed enum store, got %s", ownerType.String())
 		a.analyzeExpr(expr.Value)
 		return invalidType
 	}
@@ -544,7 +591,7 @@ func (a *Analyzer) analyzeAllocExpr(expr *ast.AllocExpr) Type {
 		return invalidType
 	}
 	if sym, ok := a.currentScope.Lookup(ident.Name); !ok || sym.Kind != SymbolRegion {
-		a.errorf(expr.Pos(), "new[...] owner must be a region name or packed enum store, got %s", ownerType.String())
+		a.errorf(expr.Pos(), "new[...] owner must be a region name, tree store, or packed enum store, got %s", ownerType.String())
 		a.analyzeExpr(expr.Value)
 		return invalidType
 	}
@@ -580,6 +627,9 @@ func (a *Analyzer) classifyTreeAllocOwnerExpr(expr ast.Expr) (treeAllocOwnerBind
 		return treeAllocOwnerBinding{Kind: treeAllocOwnerPerm}, nil, true
 	}
 	ownerType := a.analyzeExpr(expr)
+	if storeType, ok := ownerType.(*TreeStoreType); ok && storeType != nil {
+		return treeAllocOwnerBinding{Kind: treeAllocOwnerStore, StoreFamily: storeType.Family}, ownerType, true
+	}
 	arenaType := a.namedTypes["Arena"]
 	if arenaType == nil {
 		return treeAllocOwnerBinding{}, ownerType, false
@@ -605,7 +655,13 @@ func (a *Analyzer) requireActiveTreeConstructorOwner(pos lexer.Pos, treeType *Tr
 	if treeType == nil || variant == nil {
 		return false
 	}
-	constructorName := treeType.Name + "." + variant.Name
+	return a.requireActiveTreeFamilyConstructorOwner(pos, treeType.Family, treeType.Name+"."+variant.Name)
+}
+
+func (a *Analyzer) requireActiveTreeFamilyConstructorOwner(pos lexer.Pos, family *TreeType, constructorName string) bool {
+	if family == nil {
+		return false
+	}
 	switch a.currentTreeAllocOwner.Kind {
 	case treeAllocOwnerPerm, treeAllocOwnerArena:
 		return true
@@ -615,6 +671,12 @@ func (a *Analyzer) requireActiveTreeConstructorOwner(pos lexer.Pos, treeType *Tr
 				a.errorf(pos, "tree constructor %q cannot allocate from destroyed region %q", constructorName, a.currentTreeAllocOwner.RegionName)
 				return false
 			}
+		}
+		return true
+	case treeAllocOwnerStore:
+		if a.currentTreeAllocOwner.StoreFamily != nil && family != a.currentTreeAllocOwner.StoreFamily {
+			a.errorf(pos, "tree constructor %q requires active store %q, got active store for %q", constructorName, family.StoreType.String(), a.currentTreeAllocOwner.StoreFamily.Name)
+			return false
 		}
 		return true
 	default:
@@ -642,6 +704,28 @@ func (a *Analyzer) treeAllocConstructorInfo(expr ast.Expr) (*TreeCategoryType, *
 	}
 }
 
+func (a *Analyzer) treeExactAllocConstructorInfo(expr ast.Expr) (Type, *ast.CallExpr, bool) {
+	switch n := expr.(type) {
+	case *ast.FieldExpr:
+		memberType, ok := a.treeExactMemberTypeFromFieldExpr(n)
+		if !ok {
+			return nil, nil, false
+		}
+		if len(treeExactMemberFieldDecls(memberType)) != 0 {
+			return nil, nil, false
+		}
+		return memberType, nil, true
+	case *ast.CallExpr:
+		memberType, ok := a.treeExactMemberConstructorCall(n)
+		if !ok {
+			return nil, nil, false
+		}
+		return memberType, n, true
+	default:
+		return nil, nil, false
+	}
+}
+
 func (a *Analyzer) analyzeTreeAllocExpr(expr *ast.AllocExpr, treeType *TreeCategoryType, variant *EnumVariant, callExpr *ast.CallExpr) Type {
 	if treeType == nil {
 		if expr != nil && expr.Value != nil {
@@ -665,6 +749,23 @@ func (a *Analyzer) analyzeTreeAllocExpr(expr *ast.AllocExpr, treeType *TreeCateg
 		return treeType
 	}
 	return a.analyzeTreeConstructorCallExpr(callExpr, treeType, variant)
+}
+
+func (a *Analyzer) analyzeTreeExactAllocExpr(expr *ast.AllocExpr, memberType Type, callExpr *ast.CallExpr) Type {
+	if memberType == nil {
+		if expr != nil && expr.Value != nil {
+			a.analyzeExpr(expr.Value)
+		}
+		return invalidType
+	}
+	if callExpr == nil {
+		if len(treeExactMemberFieldDecls(memberType)) != 0 {
+			a.errorf(expr.Pos(), "tree constructor %q requires explicit constructor arguments", memberType.String())
+			return invalidType
+		}
+		return memberType
+	}
+	return a.analyzeTreeExactMemberConstructorCallExpr(callExpr, memberType)
 }
 
 func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
@@ -705,6 +806,14 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 	case *ast.AllocExpr:
 		if n.Owner != nil {
 			if _, _, _, ok := a.treeAllocConstructorInfo(n.Value); ok {
+				if isTreeAllocPermExpr(n.Owner) {
+					return regionRefState{}, false
+				}
+				if owner, _, ownerOK := a.classifyTreeAllocOwnerExpr(n.Owner); ownerOK && owner.Kind != treeAllocOwnerNone {
+					return regionRefState{}, false
+				}
+			}
+			if _, _, ok := a.treeExactAllocConstructorInfo(n.Value); ok {
 				if isTreeAllocPermExpr(n.Owner) {
 					return regionRefState{}, false
 				}
@@ -874,6 +983,9 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 			return a.regionRefStateForExpr(freezeStoreArg)
 		}
 		if _, ok := a.packedStoreConstructorCall(n); ok {
+			return regionRefState{}, false
+		}
+		if _, ok := a.treeStoreConstructorCall(n); ok {
 			return regionRefState{}, false
 		}
 		if enumType, variant, ok := a.enumConstructorCall(n); ok && enumType != nil && variant != nil {
@@ -1793,6 +1905,63 @@ func (a *Analyzer) treeVariantExprType(expr *ast.FieldExpr) (*TreeCategoryType, 
 	return treeType, &FuncType{Name: treeType.Name + "." + variant.Name, Params: params, Return: treeType}, true
 }
 
+func treeExactMemberFieldDecls(memberType Type) []ast.FieldDecl {
+	switch tt := StripAggregateStateType(memberType).(type) {
+	case *TreeBlockType:
+		return TreeBlockFieldDeclsWithCommon(tt)
+	case *TreeStructType:
+		return TreeStructFieldDeclsWithCommon(tt)
+	default:
+		return nil
+	}
+}
+
+func (a *Analyzer) treeExactMemberTypeFromFieldExpr(expr *ast.FieldExpr) (Type, bool) {
+	baseName, ok := qualifiedTypePathFromExpr(expr.Object)
+	if !ok {
+		return nil, false
+	}
+	base, _, ok := a.lookupVisibleType(baseName)
+	if !ok {
+		return nil, false
+	}
+	treeType, ok := base.(*TreeType)
+	if !ok || treeType == nil {
+		return nil, false
+	}
+	memberType, ok := treeType.Member(expr.Field)
+	if !ok {
+		return nil, false
+	}
+	switch StripAggregateStateType(memberType).(type) {
+	case *TreeBlockType, *TreeStructType:
+		return memberType, true
+	default:
+		return nil, false
+	}
+}
+
+func (a *Analyzer) treeExactMemberExprType(expr *ast.FieldExpr) (Type, Type, bool) {
+	memberType, ok := a.treeExactMemberTypeFromFieldExpr(expr)
+	if !ok {
+		return nil, nil, false
+	}
+	fieldDecls := treeExactMemberFieldDecls(memberType)
+	if len(fieldDecls) == 0 {
+		return memberType, nil, true
+	}
+	params := make([]Type, 0, len(fieldDecls))
+	for _, fieldDecl := range fieldDecls {
+		field, ok := TreeExactFieldInfo(memberType, fieldDecl.Name)
+		if !ok {
+			params = append(params, invalidType)
+			continue
+		}
+		params = append(params, field.Type)
+	}
+	return memberType, &FuncType{Name: memberType.String(), Params: params, Return: memberType}, true
+}
+
 func (a *Analyzer) packedStoreExprType(expr *ast.FieldExpr) (*PackedEnumStoreType, Type, bool) {
 	baseName, ok := qualifiedTypePathFromExpr(expr.Object)
 	if !ok {
@@ -1815,6 +1984,70 @@ func (a *Analyzer) packedStoreExprType(expr *ast.FieldExpr) (*PackedEnumStoreTyp
 	}
 	localStore := PackedEnumStoreWithState(enumType.StoreType, a.namedTypes["Local"])
 	return enumType.StoreType, &FuncType{Name: enumType.StoreType.Name, Params: []Type{arenaType}, Return: localStore}, true
+}
+
+func (a *Analyzer) treeStoreExprType(expr *ast.FieldExpr) (*TreeStoreType, Type, bool) {
+	baseName, ok := qualifiedTypePathFromExpr(expr.Object)
+	if !ok {
+		return nil, nil, false
+	}
+	base, _, ok := a.lookupVisibleType(baseName)
+	if !ok {
+		return nil, nil, false
+	}
+	treeType, ok := base.(*TreeType)
+	if !ok || expr.Field != "Store" {
+		return nil, nil, false
+	}
+	if treeType.StoreType == nil {
+		return nil, invalidType, true
+	}
+	arenaType, ok := a.namedTypes["Arena"]
+	if !ok {
+		return treeType.StoreType, invalidType, true
+	}
+	localStore := TreeStoreWithState(treeType.StoreType, a.namedTypes["Local"])
+	return treeType.StoreType, &FuncType{Name: treeType.StoreType.Name, Params: []Type{arenaType}, Return: localStore}, true
+}
+
+func (a *Analyzer) treeStoreConstructorCall(expr *ast.CallExpr) (*TreeStoreType, bool) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok {
+		return nil, false
+	}
+	storeType, _, ok := a.treeStoreExprType(fieldExpr)
+	if !ok {
+		return nil, false
+	}
+	if len(expr.Args) != 1 {
+		a.errorf(expr.Pos(), "store constructor %q expects 1 argument, got %d", storeType.String(), len(expr.Args))
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return TreeStoreWithState(storeType, a.namedTypes["Local"]), true
+	}
+	if arenaType, ok := a.namedTypes["Arena"]; ok {
+		actual := a.analyzeValueExpr(expr.Args[0], arenaType)
+		if !AssignableTo(arenaType, actual) {
+			a.errorf(expr.Args[0].Pos(), "store constructor %q expects %s, got %s", storeType.String(), arenaType.String(), actual.String())
+		}
+	} else {
+		a.analyzeExpr(expr.Args[0])
+	}
+	return TreeStoreWithState(storeType, a.namedTypes["Local"]), true
+}
+
+func (a *Analyzer) treeExactMemberConstructorCall(expr *ast.CallExpr) (Type, bool) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok {
+		return nil, false
+	}
+	a.treeConstructorCallees[fieldExpr] = true
+	memberType, ok := a.treeExactMemberTypeFromFieldExpr(fieldExpr)
+	if !ok {
+		return nil, false
+	}
+	return memberType, true
 }
 
 func (a *Analyzer) packedStoreConstructorCall(expr *ast.CallExpr) (*PackedEnumStoreType, bool) {
@@ -3446,6 +3679,9 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	if storeType, ok := a.packedStoreConstructorCall(expr); ok {
 		return storeType
 	}
+	if storeType, ok := a.treeStoreConstructorCall(expr); ok {
+		return storeType
+	}
 	if callIdentName(expr) == "freeze" {
 		return a.analyzeFreezeCallExpr(expr)
 	}
@@ -3504,6 +3740,12 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 			a.requireActiveTreeConstructorOwner(expr.Pos(), treeType, variant)
 		}
 		return a.analyzeTreeConstructorCallExpr(expr, treeType, variant)
+	}
+	if memberType, ok := a.treeExactMemberConstructorCall(expr); ok {
+		if family, ok := TreeFamilyForMemberType(memberType); ok {
+			a.requireActiveTreeFamilyConstructorOwner(expr.Pos(), family, memberType.String())
+		}
+		return a.analyzeTreeExactMemberConstructorCallExpr(expr, memberType)
 	}
 	fnType := a.analyzeExpr(expr.Func)
 	ft, ok := fnType.(*FuncType)
@@ -3708,6 +3950,41 @@ func (a *Analyzer) analyzeTreeConstructorCallExpr(expr *ast.CallExpr, treeType *
 	return treeType
 }
 
+func (a *Analyzer) analyzeTreeExactMemberConstructorCallExpr(expr *ast.CallExpr, memberType Type) Type {
+	if expr == nil || memberType == nil {
+		return invalidType
+	}
+	fieldDecls := treeExactMemberFieldDecls(memberType)
+	orderedArgs, ok := a.resolveTreeExactMemberConstructorArgs(expr, memberType)
+	if !ok {
+		return memberType
+	}
+	if len(orderedArgs) != len(fieldDecls) {
+		a.errorf(expr.Pos(), "tree constructor %q expects %d arguments, got %d", memberType.String(), len(fieldDecls), len(expr.Args))
+	}
+	limit := len(orderedArgs)
+	if len(fieldDecls) < limit {
+		limit = len(fieldDecls)
+	}
+	for i := 0; i < len(orderedArgs); i++ {
+		if i >= limit {
+			a.analyzeExpr(orderedArgs[i])
+			continue
+		}
+		field, ok := TreeExactFieldInfo(memberType, fieldDecls[i].Name)
+		if !ok {
+			a.analyzeExpr(orderedArgs[i])
+			continue
+		}
+		actual := a.analyzeValueExpr(orderedArgs[i], field.Type)
+		if !AssignableTo(field.Type, actual) {
+			a.errorf(orderedArgs[i].Pos(), "tree constructor field %q for %q expects %s, got %s", fieldDecls[i].Name, memberType.String(), field.Type.String(), actual.String())
+		}
+		a.consumeAffineValueExpr(orderedArgs[i], field.Type, "move into tree constructor field "+strconv.Quote(fieldDecls[i].Name))
+	}
+	return memberType
+}
+
 func (a *Analyzer) tryConsumeSinkCallArg(funcExpr ast.Expr, fnType *FuncType, index int, arg ast.Expr, expected Type) bool {
 	if a == nil || fnType == nil || arg == nil || !a.funcParamAllowsImplicitSink(funcExpr, fnType, index) {
 		return false
@@ -3765,47 +4042,134 @@ func (a *Analyzer) analyzeProofCarryingViewHelperCall(expr *ast.CallExpr) (Type,
 	}
 }
 
-func treeChildrenSourceInfo(sourceType Type) (*TreeCategoryType, *EnumVariant, bool) {
-	switch tt := sourceType.(type) {
+type treeChildrenSourceKind int
+
+const (
+	treeChildrenSourceInvalid treeChildrenSourceKind = iota
+	treeChildrenSourceCategory
+	treeChildrenSourceExact
+	treeChildrenSourceFamily
+)
+
+type treeChildrenSource struct {
+	Kind     treeChildrenSourceKind
+	Category *TreeCategoryType
+	Variant  *EnumVariant
+	Exact    Type
+	Family   *TreeType
+}
+
+func resolveTreeChildrenSourceInfo(sourceType Type) (treeChildrenSource, bool) {
+	switch tt := StripAggregateStateType(sourceType).(type) {
 	case *TreeCategoryType:
-		return tt, nil, tt != nil
+		if tt == nil {
+			return treeChildrenSource{}, false
+		}
+		return treeChildrenSource{Kind: treeChildrenSourceCategory, Category: tt, Family: tt.Family}, true
 	case *TreeVariantViewType:
 		if tt == nil || tt.Category == nil || tt.Variant == nil {
-			return nil, nil, false
+			return treeChildrenSource{}, false
 		}
-		return tt.Category, tt.Variant, true
+		return treeChildrenSource{Kind: treeChildrenSourceCategory, Category: tt.Category, Variant: tt.Variant, Family: tt.Category.Family}, true
+	case *TreeBlockType:
+		if tt == nil {
+			return treeChildrenSource{}, false
+		}
+		return treeChildrenSource{Kind: treeChildrenSourceExact, Exact: tt, Family: tt.Family}, true
+	case *TreeStructType:
+		if tt == nil {
+			return treeChildrenSource{}, false
+		}
+		return treeChildrenSource{Kind: treeChildrenSourceExact, Exact: tt, Family: tt.Family}, true
+	case *TreeNodeType:
+		if tt == nil {
+			return treeChildrenSource{}, false
+		}
+		return treeChildrenSource{Kind: treeChildrenSourceFamily, Family: tt.Family}, true
 	default:
-		return nil, nil, false
+		return treeChildrenSource{}, false
+	}
+}
+
+func appendTreeStructuralChildCandidates(candidates *[]Type, sourceType Type) {
+	switch tt := StripAggregateStateType(sourceType).(type) {
+	case *TreeCategoryType:
+		if tt == nil {
+			return
+		}
+		for _, variant := range tt.Variants {
+			appendTreeVariantStructuralChildCandidates(candidates, variant)
+		}
+	case *TreeVariantViewType:
+		if tt == nil || tt.Variant == nil {
+			return
+		}
+		appendTreeVariantStructuralChildCandidates(candidates, tt.Variant)
+	case *TreeBlockType:
+		appendTreeExactStructuralChildCandidates(candidates, tt)
+	case *TreeStructType:
+		appendTreeExactStructuralChildCandidates(candidates, tt)
+	case *TreeNodeType:
+		if tt == nil || tt.Family == nil {
+			return
+		}
+		for _, member := range TreeFamilyExactMembersInTagOrder(tt.Family) {
+			appendTreeStructuralChildCandidates(candidates, member)
+		}
+	}
+}
+
+func appendTreeVariantStructuralChildCandidates(candidates *[]Type, variant *EnumVariant) {
+	if variant == nil {
+		return
+	}
+	for payloadIndex, payloadType := range variant.Payload {
+		switch variant.PayloadRelation(payloadIndex) {
+		case ast.EnumPayloadRelationChild:
+			if payloadType != nil {
+				*candidates = append(*candidates, payloadType)
+			}
+		case ast.EnumPayloadRelationChildren:
+			if elemType, ok := TreeStructuralSequenceElemType(payloadType); ok && elemType != nil {
+				*candidates = append(*candidates, elemType)
+			}
+		}
+	}
+}
+
+func appendTreeExactStructuralChildCandidates(candidates *[]Type, exact Type) {
+	family, ok := TreeFamilyForMemberType(exact)
+	if !ok || family == nil {
+		return
+	}
+	var decls []ast.FieldDecl
+	switch tt := StripAggregateStateType(exact).(type) {
+	case *TreeBlockType:
+		decls = TreeBlockFieldDeclsWithCommon(tt)
+	case *TreeStructType:
+		decls = TreeStructFieldDeclsWithCommon(tt)
+	default:
+		return
+	}
+	for _, fieldDecl := range decls {
+		field, ok := TreeExactFieldInfo(exact, fieldDecl.Name)
+		if !ok {
+			continue
+		}
+		switch TreeFieldStructuralRelation(family, field.Type) {
+		case ast.EnumPayloadRelationChild:
+			*candidates = append(*candidates, field.Type)
+		case ast.EnumPayloadRelationChildren:
+			if elemType, ok := TreeStructuralSequenceElemType(field.Type); ok && elemType != nil {
+				*candidates = append(*candidates, elemType)
+			}
+		}
 	}
 }
 
 func treeChildrenCandidateItemType(sourceType Type) (Type, bool) {
-	category, fixedVariant, ok := treeChildrenSourceInfo(sourceType)
-	if !ok || category == nil {
-		return nil, false
-	}
 	var candidates []Type
-	appendCandidate := func(candidate Type) {
-		if candidate == nil {
-			return
-		}
-		candidates = append(candidates, candidate)
-	}
-	for _, variant := range category.Variants {
-		if fixedVariant != nil && variant != fixedVariant {
-			continue
-		}
-		for payloadIndex, payloadType := range variant.Payload {
-			switch variant.PayloadRelation(payloadIndex) {
-			case ast.EnumPayloadRelationChild:
-				appendCandidate(payloadType)
-			case ast.EnumPayloadRelationChildren:
-				if elemType, ok := TreeStructuralSequenceElemType(payloadType); ok {
-					appendCandidate(elemType)
-				}
-			}
-		}
-	}
+	appendTreeStructuralChildCandidates(&candidates, sourceType)
 	if len(candidates) == 0 {
 		return nil, false
 	}
@@ -3816,6 +4180,32 @@ func treeChildrenCandidateItemType(sourceType Type) (Type, bool) {
 		}
 	}
 	return itemType, true
+}
+
+func treeChildrenSourceLabel(sourceType Type) string {
+	switch tt := StripAggregateStateType(sourceType).(type) {
+	case *TreeCategoryType:
+		if tt != nil {
+			return tt.Name
+		}
+	case *TreeVariantViewType:
+		if tt != nil && tt.Category != nil && tt.Variant != nil {
+			return tt.Category.Name + "." + tt.Variant.Name
+		}
+	case *TreeBlockType:
+		if tt != nil {
+			return tt.Name
+		}
+	case *TreeStructType:
+		if tt != nil {
+			return tt.Name
+		}
+	case *TreeNodeType:
+		if tt != nil {
+			return tt.Name
+		}
+	}
+	return sourceType.String()
 }
 
 func (a *Analyzer) analyzeTreeTraversalHelperCall(expr *ast.CallExpr) (Type, bool) {
@@ -3845,18 +4235,14 @@ func (a *Analyzer) analyzeChildrenHelperCall(expr *ast.CallExpr) Type {
 		return invalidType
 	}
 	sourceType := a.analyzeExpr(expr.Args[0])
-	category, fixedVariant, ok := treeChildrenSourceInfo(sourceType)
-	if !ok || category == nil {
-		a.errorf(expr.Args[0].Pos(), "children expects a tree node or refined tree view, got %s", sourceType.String())
+	sourceInfo, ok := resolveTreeChildrenSourceInfo(sourceType)
+	if !ok {
+		a.errorf(expr.Args[0].Pos(), "children expects a tree node, refined tree view, exact tree member, or Family.Node value, got %s", sourceType.String())
 		return invalidType
 	}
 	itemType, ok := treeChildrenCandidateItemType(sourceType)
 	if !ok {
-		if fixedVariant != nil {
-			a.errorf(expr.Args[0].Pos(), "children(...) requires at least one child or children payload on %s.%s", category.Name, fixedVariant.Name)
-		} else {
-			a.errorf(expr.Args[0].Pos(), "children(...) requires at least one child or children payload on %s", category.Name)
-		}
+		a.errorf(expr.Args[0].Pos(), "children(...) requires at least one structural child edge on %s", treeChildrenSourceLabel(sourceType))
 		return invalidType
 	}
 	if IsInvalidType(itemType) {
@@ -3868,6 +4254,7 @@ func (a *Analyzer) analyzeChildrenHelperCall(expr *ast.CallExpr) Type {
 		a.errorf(expr.Pos(), "missing builtin TreeChildren carrier type")
 		return invalidType
 	}
+	_ = sourceInfo
 	return &GenericInstanceType{Name: "TreeChildren", Base: base, Args: []Type{sourceType, itemType}}
 }
 
@@ -4413,6 +4800,70 @@ func (a *Analyzer) resolveTreeConstructorArgs(expr *ast.CallExpr, treeType *Tree
 	expr.ResolvedArgs = ordered
 	expr.ResolvedCommonArgs = commonArgs
 	return ordered, commonArgs, true
+}
+
+func (a *Analyzer) resolveTreeExactMemberConstructorArgs(expr *ast.CallExpr, memberType Type) ([]ast.Expr, bool) {
+	fieldDecls := treeExactMemberFieldDecls(memberType)
+	if expr == nil {
+		return nil, false
+	}
+	if expr.ResolvedArgsValid && len(expr.ResolvedArgs) == len(fieldDecls) && expr.ResolvedCommonArgs == nil {
+		return expr.ResolvedArgs, true
+	}
+	namedCount := expr.NamedArgCount()
+	if namedCount == 0 {
+		expr.ResolvedArgsValid = true
+		expr.ResolvedArgs = expr.Args
+		expr.ResolvedCommonArgs = nil
+		return expr.Args, true
+	}
+	if namedCount != len(expr.Args) {
+		a.errorf(expr.Pos(), "tree constructor %q cannot mix positional and named arguments", memberType.String())
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return nil, false
+	}
+	ordered := make([]ast.Expr, len(fieldDecls))
+	seen := make([]bool, len(fieldDecls))
+	ok := true
+	for i, arg := range expr.Args {
+		name := expr.ArgName(i)
+		fieldIndex := -1
+		for j, fieldDecl := range fieldDecls {
+			if fieldDecl.Name == name {
+				fieldIndex = j
+				break
+			}
+		}
+		if fieldIndex < 0 {
+			a.errorf(arg.Pos(), "tree constructor %q has no field %q", memberType.String(), name)
+			a.analyzeExpr(arg)
+			ok = false
+			continue
+		}
+		if seen[fieldIndex] {
+			a.errorf(arg.Pos(), "tree constructor %q field %q is specified more than once", memberType.String(), name)
+			a.analyzeExpr(arg)
+			ok = false
+			continue
+		}
+		ordered[fieldIndex] = arg
+		seen[fieldIndex] = true
+	}
+	for i, wasSeen := range seen {
+		if !wasSeen {
+			a.errorf(expr.Pos(), "tree constructor %q is missing field %q", memberType.String(), fieldDecls[i].Name)
+			ok = false
+		}
+	}
+	if !ok {
+		return nil, false
+	}
+	expr.ResolvedArgsValid = true
+	expr.ResolvedArgs = ordered
+	expr.ResolvedCommonArgs = nil
+	return ordered, true
 }
 
 func (a *Analyzer) collectRuntimeBridgeBindings(pattern, actual Type, bindings map[string]Type, shapeBindings map[string]Shape, regionBindings map[string]string, permissionBindings map[string][]ast.PermissionRef, regionParams map[string]bool) bool {
@@ -6179,14 +6630,14 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 		}
 		return field, true
 	case *TreeBlockType:
-		field, ok := t.Fields[fieldName]
+		field, ok := TreeExactFieldInfo(t, fieldName)
 		if !ok {
 			a.errorf(pos, "tree block %q has no field %q", t.Name, fieldName)
 			return Field{}, false
 		}
 		return field, true
 	case *TreeStructType:
-		field, ok := t.Fields[fieldName]
+		field, ok := TreeExactFieldInfo(t, fieldName)
 		if !ok {
 			a.errorf(pos, "tree struct %q has no field %q", t.Name, fieldName)
 			return Field{}, false

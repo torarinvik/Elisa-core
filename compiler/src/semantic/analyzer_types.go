@@ -502,6 +502,13 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			}
 			args = append(args, a.resolveType(n.Args[0]))
 			return PackedEnumStoreWithState(base, args[0])
+		case *TreeStoreType:
+			if len(n.Args) != 1 {
+				a.errorf(n.Pos(), "tree store type %q expects 1 state argument, got %d", n.Name, len(args))
+				return invalidType
+			}
+			args = append(args, a.resolveType(n.Args[0]))
+			return TreeStoreWithState(base, args[0])
 		case *StructType:
 			params := genericParamsForStructType(base)
 			if len(n.Args) != len(params) {
@@ -958,7 +965,7 @@ func (a *Analyzer) genericTypeAsArrayType(expr *ast.GenericType) (*ast.ArrayType
 		return nil, false
 	}
 	switch base.(type) {
-	case *StructType, *OpaqueType, *PackedEnumStoreType:
+	case *StructType, *OpaqueType, *PackedEnumStoreType, *TreeStoreType:
 		return nil, false
 	}
 	sizeTypeExpr, ok := expr.Args[0].(*ast.NamedType)
@@ -1513,6 +1520,8 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 		return cloneAggregateStateWithBase(a.substituteType(n.Base, bindings, shapeBindings, regionBindings, permissionBindings), aggregateStateStates(n))
 	case *PackedEnumStoreType:
 		return PackedEnumStoreWithState(n, a.substituteType(n.State, bindings, shapeBindings, regionBindings, permissionBindings))
+	case *TreeStoreType:
+		return TreeStoreWithState(n, a.substituteType(n.State, bindings, shapeBindings, regionBindings, permissionBindings))
 	case *FuncType:
 		params := make([]Type, 0, len(n.Params))
 		for _, param := range n.Params {

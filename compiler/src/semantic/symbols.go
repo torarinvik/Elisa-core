@@ -40,6 +40,7 @@ type Result struct {
 	PackedLowering   PackedLoweringMetadata
 	ParallelFor      map[*ast.ParallelForStmt]*ParallelForInfo
 	Defer            map[*ast.DeferStmt]*DeferInfo
+	Fold             map[*ast.FoldExpr]*FoldInfo
 	FunctionAnalyses map[*ast.FuncDecl]*FunctionAnalysis
 	AnnotatedFuncs   []*AnnotatedFunc
 	ExportedTypes    []*ExportedType
@@ -56,6 +57,10 @@ type ParallelForInfo struct {
 
 type DeferInfo struct {
 	Mode     ast.DeferMode
+	Captures []string
+}
+
+type FoldInfo struct {
 	Captures []string
 }
 

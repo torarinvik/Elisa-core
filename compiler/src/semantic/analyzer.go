@@ -79,6 +79,7 @@ type Analyzer struct {
 	exprDenseNodeKeys                 map[ast.Expr]DenseNodeKeyInfo
 	exprNodeTables                    map[ast.Expr]NodeTableInfo
 	deferInfo                         map[*ast.DeferStmt]*DeferInfo
+	foldInfo                          map[*ast.FoldExpr]*FoldInfo
 	symbolFacts                       map[*Symbol]OptimizationFacts
 	funcDeclSymbols                   map[*ast.FuncDecl]*Symbol
 	castHooksByName                   map[string]map[castHookSignature]*Symbol
@@ -166,11 +167,13 @@ const (
 	treeAllocOwnerPerm
 	treeAllocOwnerRegion
 	treeAllocOwnerArena
+	treeAllocOwnerStore
 )
 
 type treeAllocOwnerBinding struct {
 	Kind       treeAllocOwnerKind
 	RegionName string
+	StoreFamily *TreeType
 }
 
 type regionRefState struct {
@@ -242,6 +245,7 @@ func Analyze(file *ast.File) *Result {
 		exprDenseNodeKeys:                 make(map[ast.Expr]DenseNodeKeyInfo, denseNodeCapacity),
 		exprNodeTables:                    make(map[ast.Expr]NodeTableInfo, denseNodeCapacity),
 		deferInfo:                         map[*ast.DeferStmt]*DeferInfo{},
+		foldInfo:                          map[*ast.FoldExpr]*FoldInfo{},
 		parallelForInfo:                   make(map[*ast.ParallelForStmt]*ParallelForInfo, parallelForCapacity),
 		symbolFacts:                       map[*Symbol]OptimizationFacts{},
 		funcDeclSymbols:                   make(map[*ast.FuncDecl]*Symbol, funcDeclCapacity),
@@ -281,6 +285,7 @@ func Analyze(file *ast.File) *Result {
 		NodeTables:       a.exprNodeTables,
 		ParallelFor:      a.parallelForInfo,
 		Defer:            a.deferInfo,
+		Fold:             a.foldInfo,
 		FunctionAnalyses: a.functionAnalyses,
 		AnnotatedFuncs:   a.annotatedFuncs,
 		ExportedTypes:    a.exportedTypes,
@@ -707,6 +712,15 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 				treeType.NodeType = nodeType
 				a.namedTypes[nodeQualifiedName] = nodeType
 				treeType.MemberTypes["Node"] = nodeType
+				storeName := treeStoreTypeName(qualifiedName)
+				if _, exists := a.namedTypes[storeName]; exists {
+					a.errorf(n.Pos(), "duplicate type %q", storeName)
+					return
+				}
+				storeType := &TreeStoreType{Name: storeName, Family: treeType}
+				treeType.StoreType = storeType
+				a.namedTypes[storeName] = storeType
+				treeType.MemberTypes["Store"] = storeType
 				for _, member := range n.Members {
 					memberName := treeMemberDeclName(member)
 					if memberName == "" {
@@ -813,6 +827,10 @@ func packedEnumTagTypeName(enumName string) string {
 
 func treeMemberTypeName(treeName string, memberName string) string {
 	return treeName + "." + memberName
+}
+
+func treeStoreTypeName(treeName string) string {
+	return treeName + ".Store"
 }
 
 func treeMemberDeclName(member ast.TreeMemberDecl) string {
@@ -984,6 +1002,7 @@ func (a *Analyzer) populateTreeCategoryDecl(treeType *TreeType, categoryDecl *as
 	}
 	category.Common = cloneTreeCommonFields(treeType.Common)
 	variants := make([]*EnumVariant, 0, len(categoryDecl.Variants))
+	nextExactTag := treeFamilyNextExactTag(treeType, categoryDecl.Name, "")
 	for i := range categoryDecl.Variants {
 		variantDecl := &categoryDecl.Variants[i]
 		if _, exists := category.VariantMap[variantDecl.Name]; exists {
@@ -1015,11 +1034,49 @@ func (a *Analyzer) populateTreeCategoryDecl(treeType *TreeType, categoryDecl *as
 		if hasNamedPayloads && hasUnnamedPayloads {
 			a.errorf(variantDecl.Position, "tree category variant %q.%q must name either all payload fields or none", category.Name, variantDecl.Name)
 		}
-		variant := &EnumVariant{Name: variantDecl.Name, Tag: uint32(i), Payload: payload, PayloadNames: payloadNames, PayloadRelations: payloadRelations, TailIndex: -1, Decl: variantDecl}
+		_ = i
+		variant := &EnumVariant{Name: variantDecl.Name, Tag: nextExactTag, Payload: payload, PayloadNames: payloadNames, PayloadRelations: payloadRelations, TailIndex: -1, Decl: variantDecl}
+		nextExactTag++
 		category.VariantMap[variant.Name] = variant
 		variants = append(variants, variant)
 	}
 	category.Variants = variants
+}
+
+func treeFamilyNextExactTag(treeType *TreeType, categoryName string, memberName string) uint32 {
+	if treeType == nil || treeType.Decl == nil {
+		return 0
+	}
+	tag := uint32(0)
+	for _, member := range treeType.Decl.Members {
+		switch decl := member.(type) {
+		case *ast.TreeCategoryDecl:
+			if decl == nil {
+				continue
+			}
+			if categoryName != "" && decl.Name == categoryName {
+				return tag
+			}
+			tag += uint32(len(decl.Variants))
+		case *ast.TreeBlockDecl:
+			if decl == nil {
+				continue
+			}
+			if memberName != "" && decl.Name == memberName {
+				return tag
+			}
+			tag++
+		case *ast.TreeStructDecl:
+			if decl == nil {
+				continue
+			}
+			if memberName != "" && decl.Name == memberName {
+				return tag
+			}
+			tag++
+		}
+	}
+	return tag
 }
 
 func treePayloadTargetMemberType(t Type) (Type, *TreeType, bool) {
@@ -1110,6 +1167,7 @@ func (a *Analyzer) populateTreeBlockDecl(treeType *TreeType, blockDecl *ast.Tree
 	if block == nil {
 		return
 	}
+	block.ExactTag = treeFamilyNextExactTag(treeType, "", blockDecl.Name)
 	for _, field := range blockDecl.Fields {
 		if _, exists := block.Fields[field.Name]; exists {
 			a.errorf(field.Position, "duplicate field %q in tree block %q", field.Name, block.Name)
@@ -1128,6 +1186,7 @@ func (a *Analyzer) populateTreeStructDecl(treeType *TreeType, structDecl *ast.Tr
 	if memberStruct == nil {
 		return
 	}
+	memberStruct.ExactTag = treeFamilyNextExactTag(treeType, "", structDecl.Name)
 	for _, field := range structDecl.Fields {
 		if _, exists := memberStruct.Fields[field.Name]; exists {
 			a.errorf(field.Position, "duplicate field %q in tree struct %q", field.Name, memberStruct.Name)
@@ -2387,6 +2446,9 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 		return true
 	}
 	if _, ok := t.(*PackedEnumStoreType); ok {
+		return true
+	}
+	if _, ok := t.(*TreeStoreType); ok {
 		return true
 	}
 	key := t.String()

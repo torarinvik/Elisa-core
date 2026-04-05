@@ -191,6 +191,12 @@ type PackedEnumStoreType struct {
 	State Type
 }
 
+type TreeStoreType struct {
+	Name   string
+	Family *TreeType
+	State  Type
+}
+
 type PackedVariantViewType struct {
 	Enum    *EnumType
 	Variant *EnumVariant
@@ -211,6 +217,7 @@ type TreeType struct {
 	Common      map[string]Field
 	MemberTypes map[string]Type
 	NodeType    *TreeNodeType
+	StoreType   *TreeStoreType
 	Decl        *ast.TreeDecl
 }
 
@@ -225,17 +232,19 @@ type TreeCategoryType struct {
 }
 
 type TreeBlockType struct {
-	Name   string
-	Family *TreeType
-	Fields map[string]Field
-	Decl   *ast.TreeBlockDecl
+	Name     string
+	Family   *TreeType
+	ExactTag uint32
+	Fields   map[string]Field
+	Decl     *ast.TreeBlockDecl
 }
 
 type TreeStructType struct {
-	Name   string
-	Family *TreeType
-	Fields map[string]Field
-	Decl   *ast.TreeStructDecl
+	Name     string
+	Family   *TreeType
+	ExactTag uint32
+	Fields   map[string]Field
+	Decl     *ast.TreeStructDecl
 }
 
 type EnumType struct {
@@ -437,6 +446,7 @@ func (*DStrType) isType()              {}
 func (*DictType) isType()              {}
 func (*SViewType) isType()             {}
 func (*PackedEnumStoreType) isType()   {}
+func (*TreeStoreType) isType()         {}
 func (*PackedVariantViewType) isType() {}
 func (*TreeVariantViewType) isType()   {}
 func (*TreeNodeType) isType()          {}
@@ -726,6 +736,15 @@ func (t *SViewType) String() string {
 func (t *PackedEnumStoreType) String() string {
 	if t == nil {
 		return "<invalid-packed-store>"
+	}
+	if t.State != nil {
+		return fmt.Sprintf("%s[%s]", t.Name, t.State.String())
+	}
+	return t.Name
+}
+func (t *TreeStoreType) String() string {
+	if t == nil {
+		return "<invalid-tree-store>"
 	}
 	if t.State != nil {
 		return fmt.Sprintf("%s[%s]", t.Name, t.State.String())
@@ -1149,8 +1168,35 @@ func BasePackedEnumStoreType(t Type) (*PackedEnumStoreType, bool) {
 	return &base, true
 }
 
+func BaseTreeStoreType(t Type) (*TreeStoreType, bool) {
+	storeType, ok := t.(*TreeStoreType)
+	if !ok || storeType == nil {
+		return nil, false
+	}
+	if storeType.Family != nil && storeType.Family.StoreType != nil {
+		return storeType.Family.StoreType, true
+	}
+	base := *storeType
+	base.State = nil
+	return &base, true
+}
+
 func PackedEnumStoreWithState(storeType *PackedEnumStoreType, state Type) *PackedEnumStoreType {
 	if base, ok := BasePackedEnumStoreType(storeType); ok && base != nil {
+		next := *base
+		next.State = state
+		return &next
+	}
+	if storeType == nil {
+		return nil
+	}
+	next := *storeType
+	next.State = state
+	return &next
+}
+
+func TreeStoreWithState(storeType *TreeStoreType, state Type) *TreeStoreType {
+	if base, ok := BaseTreeStoreType(storeType); ok && base != nil {
 		next := *base
 		next.State = state
 		return &next
@@ -1171,8 +1217,27 @@ func PackedEnumStoreState(t Type) Type {
 	return storeType.State
 }
 
+func TreeStoreState(t Type) Type {
+	storeType, ok := t.(*TreeStoreType)
+	if !ok || storeType == nil {
+		return nil
+	}
+	return storeType.State
+}
+
 func PackedEnumStoreStateName(t Type) string {
 	state := PackedEnumStoreState(t)
+	if state == nil {
+		return ""
+	}
+	if builtin, ok := state.(*BuiltinType); ok {
+		return builtin.Name
+	}
+	return state.String()
+}
+
+func TreeStoreStateName(t Type) string {
+	state := TreeStoreState(t)
 	if state == nil {
 		return ""
 	}
@@ -1188,6 +1253,10 @@ func IsLocalPackedEnumStoreType(t Type) bool {
 
 func IsFrozenPackedEnumStoreType(t Type) bool {
 	return PackedEnumStoreStateName(t) == "Frozen"
+}
+
+func IsLocalTreeStoreType(t Type) bool {
+	return TreeStoreStateName(t) == "Local"
 }
 
 func PermissionRefString(ref ast.PermissionRef) string {
@@ -1917,6 +1986,186 @@ func TreeStructuralSequenceElemType(t Type) (Type, bool) {
 	default:
 		return nil, false
 	}
+}
+
+func TreeFamilyForMemberType(t Type) (*TreeType, bool) {
+	switch tt := StripAggregateStateType(t).(type) {
+	case *TreeCategoryType:
+		return tt.Family, tt != nil && tt.Family != nil
+	case *TreeVariantViewType:
+		if tt == nil || tt.Category == nil {
+			return nil, false
+		}
+		return tt.Category.Family, tt.Category.Family != nil
+	case *TreeBlockType:
+		return tt.Family, tt != nil && tt.Family != nil
+	case *TreeStructType:
+		return tt.Family, tt != nil && tt.Family != nil
+	case *TreeNodeType:
+		return tt.Family, tt != nil && tt.Family != nil
+	default:
+		return nil, false
+	}
+}
+
+func TreeCommonFieldDeclsForFamily(treeType *TreeType) []ast.FieldDecl {
+	if treeType == nil || treeType.Decl == nil {
+		return nil
+	}
+	return treeType.Decl.Common
+}
+
+func TreeBlockFieldDeclsWithCommon(blockType *TreeBlockType) []ast.FieldDecl {
+	if blockType == nil {
+		return nil
+	}
+	out := append([]ast.FieldDecl(nil), TreeCommonFieldDeclsForFamily(blockType.Family)...)
+	if blockType.Decl != nil {
+		out = append(out, blockType.Decl.Fields...)
+	}
+	return out
+}
+
+func TreeStructFieldDeclsWithCommon(structType *TreeStructType) []ast.FieldDecl {
+	if structType == nil {
+		return nil
+	}
+	out := append([]ast.FieldDecl(nil), TreeCommonFieldDeclsForFamily(structType.Family)...)
+	if structType.Decl != nil {
+		out = append(out, structType.Decl.Fields...)
+	}
+	return out
+}
+
+func TreeExactFieldInfo(member Type, fieldName string) (Field, bool) {
+	switch tt := StripAggregateStateType(member).(type) {
+	case *TreeBlockType:
+		if tt == nil {
+			return Field{}, false
+		}
+		if field, ok := tt.Family.Common[fieldName]; ok {
+			return field, true
+		}
+		field, ok := tt.Fields[fieldName]
+		return field, ok
+	case *TreeStructType:
+		if tt == nil {
+			return Field{}, false
+		}
+		if field, ok := tt.Family.Common[fieldName]; ok {
+			return field, true
+		}
+		field, ok := tt.Fields[fieldName]
+		return field, ok
+	default:
+		return Field{}, false
+	}
+}
+
+func TreeExactTag(t Type) (uint32, bool) {
+	switch tt := StripAggregateStateType(t).(type) {
+	case *TreeBlockType:
+		if tt == nil {
+			return 0, false
+		}
+		return tt.ExactTag, true
+	case *TreeStructType:
+		if tt == nil {
+			return 0, false
+		}
+		return tt.ExactTag, true
+	default:
+		return 0, false
+	}
+}
+
+func TreeFieldStructuralRelation(family *TreeType, fieldType Type) ast.EnumPayloadRelation {
+	if family == nil || fieldType == nil {
+		return ast.EnumPayloadRelationNone
+	}
+	if memberFamily, ok := TreeFamilyForMemberType(fieldType); ok && memberFamily == family {
+		switch StripAggregateStateType(fieldType).(type) {
+		case *TreeCategoryType, *TreeVariantViewType, *TreeBlockType, *TreeStructType:
+			return ast.EnumPayloadRelationChild
+		}
+	}
+	if elemType, ok := TreeStructuralSequenceElemType(fieldType); ok {
+		if memberFamily, ok := TreeFamilyForMemberType(elemType); ok && memberFamily == family {
+			switch StripAggregateStateType(elemType).(type) {
+			case *TreeCategoryType, *TreeVariantViewType, *TreeBlockType, *TreeStructType:
+				return ast.EnumPayloadRelationChildren
+			}
+		}
+	}
+	return ast.EnumPayloadRelationNone
+}
+
+func TreeFamilyExactMembersInTagOrder(treeType *TreeType) []Type {
+	if treeType == nil || treeType.Decl == nil {
+		return nil
+	}
+	count := uint32(0)
+	for _, member := range treeType.Decl.Members {
+		switch decl := member.(type) {
+		case *ast.TreeCategoryDecl:
+			count += uint32(len(decl.Variants))
+		case *ast.TreeBlockDecl, *ast.TreeStructDecl:
+			count++
+		}
+	}
+	if count == 0 {
+		return nil
+	}
+	out := make([]Type, count)
+	for _, member := range treeType.Decl.Members {
+		switch decl := member.(type) {
+		case *ast.TreeCategoryDecl:
+			memberType, ok := treeType.Member(decl.Name)
+			if !ok {
+				continue
+			}
+			category, _ := memberType.(*TreeCategoryType)
+			if category == nil {
+				continue
+			}
+			for _, variant := range category.Variants {
+				if int(variant.Tag) < len(out) {
+					out[variant.Tag] = category.VariantViewType(variant)
+				}
+			}
+		case *ast.TreeBlockDecl:
+			memberType, ok := treeType.Member(decl.Name)
+			if !ok {
+				continue
+			}
+			blockType, _ := memberType.(*TreeBlockType)
+			if blockType == nil {
+				continue
+			}
+			if int(blockType.ExactTag) < len(out) {
+				out[blockType.ExactTag] = blockType
+			}
+		case *ast.TreeStructDecl:
+			memberType, ok := treeType.Member(decl.Name)
+			if !ok {
+				continue
+			}
+			structType, _ := memberType.(*TreeStructType)
+			if structType == nil {
+				continue
+			}
+			if int(structType.ExactTag) < len(out) {
+				out[structType.ExactTag] = structType
+			}
+		}
+	}
+	filtered := make([]Type, 0, len(out))
+	for _, member := range out {
+		if member != nil {
+			filtered = append(filtered, member)
+		}
+	}
+	return filtered
 }
 
 func cloneFuncGuardEffects(effects []FuncGuardEffect) []FuncGuardEffect {

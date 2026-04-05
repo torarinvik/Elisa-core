@@ -223,20 +223,14 @@ func (s *functionState) emitTreeFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRe
 		return nil, nil, false, nil
 	}
 	objType := s.exprType(expr.Object)
-	categoryType, _, ok := resolveMatchableTreeCategoryTypeBackend(objType)
-	if !ok {
-		if refType, ok := semantic.StripAggregateStateType(objType).(*semantic.RefType); ok {
-			categoryType, _, ok = resolveMatchableTreeCategoryTypeBackend(refType.Elem)
-		}
+	baseType := semantic.StripAggregateStateType(objType)
+	if refType, ok := baseType.(*semantic.RefType); ok {
+		baseType = semantic.StripAggregateStateType(refType.Elem)
 	}
-	if !ok || categoryType == nil {
+	if _, ok := treeNodeHandleFamily(baseType); !ok {
 		return nil, nil, false, nil
 	}
-	if _, _, err := treeCategoryCommonFieldInfo(categoryType, expr.Field); err != nil {
-		return nil, nil, false, nil
-	}
-	ptr, fieldType, err := s.emitTreeCommonFieldAddress(expr.Object, objType, expr.Field)
-	return ptr, fieldType, true, err
+	return nil, nil, true, fmt.Errorf("tree field addresses are not supported for handle-lowered tree values")
 }
 
 func (s *functionState) packedEnumStoragePtrFromExprValue(value C.LLVMValueRef, exprType semantic.Type, enumType *semantic.EnumType, store *packedStoreBinding) (C.LLVMValueRef, error) {
@@ -489,6 +483,16 @@ func (s *functionState) loadValue(ptr C.LLVMValueRef, t semantic.Type, name stri
 func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, expected semantic.Type) (C.LLVMValueRef, error) {
 	if expected == nil || actual == nil || semantic.SameType(actual, expected) {
 		return value, nil
+	}
+	if semantic.IsNeverType(actual) {
+		if isVoidType(expected) {
+			return nil, nil
+		}
+		llvmType, err := s.g.lowerType(expected)
+		if err != nil {
+			return nil, err
+		}
+		return C.LLVMGetUndef(llvmType), nil
 	}
 	if expectedBuiltin, ok := expected.(*semantic.BuiltinType); ok && expectedBuiltin.Name == "bool" {
 		actualLLVM, err := s.g.lowerType(actual)
@@ -1006,6 +1010,26 @@ func (s *functionState) classifyTreeAllocOwnerExpr(expr ast.Expr) (treeAllocOwne
 	if isTreeAllocPermExpr(expr) {
 		return treeAllocOwnerBinding{isPerm: true}, true, nil
 	}
+	if storeType, ok := s.exprType(expr).(*semantic.TreeStoreType); ok && storeType != nil {
+		storeValue, _, err := s.emitExpr(expr, storeType)
+		if err != nil {
+			return treeAllocOwnerBinding{}, false, err
+		}
+		return treeAllocOwnerBinding{storeValue: storeValue, storeType: storeType}, true, nil
+	}
+	if refType, ok := s.exprType(expr).(*semantic.RefType); ok && refType != nil && refType.State == semantic.RefStateNonNull {
+		if storeType, ok := refType.Elem.(*semantic.TreeStoreType); ok && storeType != nil {
+			storePtr, _, err := s.emitExpr(expr, refType)
+			if err != nil {
+				return treeAllocOwnerBinding{}, false, err
+			}
+			storeValue, err := s.loadValue(storePtr, storeType, "tree.store.load")
+			if err != nil {
+				return treeAllocOwnerBinding{}, false, err
+			}
+			return treeAllocOwnerBinding{storeValue: storeValue, storeType: storeType}, true, nil
+		}
+	}
 	arenaType := s.g.result.NamedTypes["Arena"]
 	if arenaType == nil {
 		return treeAllocOwnerBinding{}, false, nil
@@ -1030,7 +1054,7 @@ func (s *functionState) classifyTreeAllocOwnerExpr(expr ast.Expr) (treeAllocOwne
 }
 
 func (s *functionState) lookupTreeAllocOwner() (treeAllocOwnerBinding, bool) {
-	if s.treeAllocOwner.isPerm || s.treeAllocOwner.arenaRef != nil {
+	if s.treeAllocOwner.isPerm || s.treeAllocOwner.arenaRef != nil || s.treeAllocOwner.storeValue != nil {
 		return s.treeAllocOwner, true
 	}
 	return treeAllocOwnerBinding{}, false
