@@ -119,6 +119,7 @@ const (
 	TOKEN_CHAR_LIT // 'a'
 	TOKEN_IS       // is
 	TOKEN_FATARROW // =>
+	TOKEN_TO       // to
 )
 
 var tokenNames = map[TokenKind]string{
@@ -175,6 +176,7 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_IS:      "is",
 	TOKEN_AS:      "as",
 	TOKEN_IN:      "in",
+	TOKEN_TO:      "to",
 
 	TOKEN_COLON:     ":",
 	TOKEN_ARROW:     "->",
@@ -267,6 +269,7 @@ var keywords = map[string]TokenKind{
 	"is":      TOKEN_IS,
 	"as":      TOKEN_AS,
 	"in":      TOKEN_IN,
+	"to":      TOKEN_TO,
 }
 
 func LookupKeyword(ident string) TokenKind {

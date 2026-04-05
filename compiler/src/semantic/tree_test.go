@@ -565,6 +565,27 @@ def count_binary(binary: Lua.Expr.Binary) -> i64:
 `)
 }
 
+func TestAnalyzeTreeChildrenMixedToRootLoop(t *testing.T) {
+	analyzeTreeTestSource(t, "tree_children_root_surface.llcontext", `tree Lua:
+	common:
+		span: i64
+	@role(stmt)
+	node Stmt:
+		IfStmt(child condition: Lua.Expr, child body: Lua.Block)
+	@role(expr)
+	node Expr:
+		Name(name_index: u32)
+	block Block:
+		stmts: darray[Lua.Stmt]
+
+def visit(stmt: Lua.Stmt) -> i64:
+	total: mutable i64 = 0
+	for child in children(stmt to Lua.Node):
+		total <- total + child.kind.i64()
+	return total
+`)
+}
+
 func TestAnalyzeTreeVisitExpr(t *testing.T) {
 	analyzeTreeTestSource(t, "tree_visit_surface.llcontext", `tree Lua:
 	common:
@@ -648,6 +669,29 @@ def visit(stmt: Lua.Stmt) -> i64:
 	all := strings.Join(result.Errors(), "\n")
 	if !strings.Contains(all, `children(...) requires all structural child payloads to have the same item type`) {
 		t.Fatalf("expected mixed structural child type diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsChildrenOverrideIncompatibleType(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_children_override_incompatible.llcontext", `tree Lua:
+	@role(stmt)
+	node Stmt:
+		IfStmt(child condition: Lua.Expr, child body: Lua.Block)
+	@role(expr)
+	node Expr:
+		Name(name_index: u32)
+	block Block:
+		stmts: darray[Lua.Stmt]
+
+def visit(stmt: Lua.Stmt) -> i64:
+	total: mutable i64 = 0
+	for child in children(stmt to Lua.Expr):
+		total <- total + child.name_index.i64()
+	return total
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `children(...) override Lua.Expr is incompatible with structural child Lua.Block`) {
+		t.Fatalf("expected incompatible children override diagnostic, got:\n%s", all)
 	}
 }
 

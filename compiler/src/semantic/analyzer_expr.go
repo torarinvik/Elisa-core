@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -4345,6 +4346,29 @@ func treeChildrenCandidateItemType(sourceType Type) (Type, bool) {
 	return itemType, true
 }
 
+func treeChildrenOverrideItemType(sourceType Type, overrideType Type) (Type, string, bool) {
+	if sourceType == nil || overrideType == nil {
+		return nil, "", false
+	}
+	if _, ok := resolveTreeChildrenSourceInfo(overrideType); !ok {
+		return nil, "", false
+	}
+	var candidates []Type
+	appendTreeStructuralChildCandidates(&candidates, sourceType)
+	if len(candidates) == 0 {
+		return nil, fmt.Sprintf("children(...) requires at least one structural child edge on %s", treeChildrenSourceLabel(sourceType)), true
+	}
+	for _, candidate := range candidates {
+		if candidate == nil {
+			continue
+		}
+		if !AssignableTo(overrideType, candidate) {
+			return nil, fmt.Sprintf("children(...) override %s is incompatible with structural child %s", overrideType.String(), candidate.String()), true
+		}
+	}
+	return overrideType, "", true
+}
+
 func treeChildrenSourceLabel(sourceType Type) string {
 	switch tt := StripAggregateStateType(sourceType).(type) {
 	case *TreeCategoryType:
@@ -4397,15 +4421,36 @@ func (a *Analyzer) analyzeChildrenHelperCall(expr *ast.CallExpr) Type {
 		}
 		return invalidType
 	}
-	sourceType := a.analyzeExpr(expr.Args[0])
-	sourceInfo, ok := resolveTreeChildrenSourceInfo(sourceType)
+	sourceExpr := expr.Args[0]
+	sourceType := a.analyzeExpr(sourceExpr)
+	carrierSourceType := sourceType
+	if castExpr, ok := sourceExpr.(*ast.CastExpr); ok {
+		actualSourceType := a.exprTypes[castExpr.Operand]
+		if actualSourceType == nil {
+			actualSourceType = a.analyzeExpr(castExpr.Operand)
+		}
+		if overrideItemType, diag, handled := treeChildrenOverrideItemType(actualSourceType, sourceType); handled {
+			if diag != "" {
+				a.errorf(sourceExpr.Pos(), "%s", diag)
+				return invalidType
+			}
+			carrierSourceType = actualSourceType
+			base, ok := a.namedTypes["TreeChildren"].(*StructType)
+			if !ok || base == nil {
+				a.errorf(expr.Pos(), "missing builtin TreeChildren carrier type")
+				return invalidType
+			}
+			return &GenericInstanceType{Name: "TreeChildren", Base: base, Args: []Type{carrierSourceType, overrideItemType}}
+		}
+	}
+	sourceInfo, ok := resolveTreeChildrenSourceInfo(carrierSourceType)
 	if !ok {
-		a.errorf(expr.Args[0].Pos(), "children expects a tree node, refined tree view, exact tree member, or Family.Node value, got %s", sourceType.String())
+		a.errorf(expr.Args[0].Pos(), "children expects a tree node, refined tree view, exact tree member, or Family.Node value, got %s", carrierSourceType.String())
 		return invalidType
 	}
-	itemType, ok := treeChildrenCandidateItemType(sourceType)
+	itemType, ok := treeChildrenCandidateItemType(carrierSourceType)
 	if !ok {
-		a.errorf(expr.Args[0].Pos(), "children(...) requires at least one structural child edge on %s", treeChildrenSourceLabel(sourceType))
+		a.errorf(expr.Args[0].Pos(), "children(...) requires at least one structural child edge on %s", treeChildrenSourceLabel(carrierSourceType))
 		return invalidType
 	}
 	if IsInvalidType(itemType) {
@@ -4418,7 +4463,7 @@ func (a *Analyzer) analyzeChildrenHelperCall(expr *ast.CallExpr) Type {
 		return invalidType
 	}
 	_ = sourceInfo
-	return &GenericInstanceType{Name: "TreeChildren", Base: base, Args: []Type{sourceType, itemType}}
+	return &GenericInstanceType{Name: "TreeChildren", Base: base, Args: []Type{carrierSourceType, itemType}}
 }
 
 func denseDViewType(t Type) (*DArrayViewType, bool) {

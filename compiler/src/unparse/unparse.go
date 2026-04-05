@@ -870,6 +870,9 @@ func formatExpr(expr ast.Expr) string {
 		}
 		return "[" + strings.Join(parts, ", ") + "]"
 	case *ast.CastExpr:
+		if n.Origin == ast.CastExprOriginToSyntax {
+			return formatExpr(n.Operand) + " to " + formatTypeExpr(n.Target)
+		}
 		if n.Origin == ast.CastExprOriginPostfixShorthand && !n.LegacySyntax {
 			if named, ok := n.Target.(*ast.NamedType); ok {
 				return formatExpr(n.Operand) + "." + named.Name + "()"

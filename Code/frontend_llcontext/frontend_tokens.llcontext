@@ -98,6 +98,9 @@ enum FrontendTokenKind:
     RShift
     Tilde
     CharLit
+    Is
+    FatArrow
+    To
 
 struct FrontendPos:
     line: mutable int

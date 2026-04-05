@@ -288,6 +288,37 @@ def count_nodes(node: Lua.Expr) -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersMixedTreeChildrenToRootLoops(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(stmt)
+	node Stmt:
+		IfStmt(child condition: Lua.Expr, child body: Lua.Block)
+	@role(expr)
+	node Expr:
+		Name(name_index: u32)
+	block Block:
+		stmts: darray[Lua.Stmt]
+
+def count_children(stmt: Lua.Stmt) -> i64:
+	total: mutable i64 = 0
+	for child in children(stmt to Lua.Node):
+		total <- total + child.kind.i64()
+	return total
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_children_root.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i64 @count_children(%Lua__TreeHandle ", "TreeChildren", "tree.children.value.phi", "tree.field.kind.tag.trunc"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected mixed tree children lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersTreeVisitExpr(t *testing.T) {
 	src := `tree Lua:
 	common:

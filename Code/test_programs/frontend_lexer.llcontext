@@ -135,6 +135,8 @@ def frontend_token_kind_code(kind: FrontendTokenKind) -> u64:
             return 48u64
         FrontendTokenKind.In:
             return 49u64
+        FrontendTokenKind.To:
+            return 98u64
         FrontendTokenKind.Colon:
             return 50u64
         FrontendTokenKind.Arrow:
@@ -225,6 +227,10 @@ def frontend_token_kind_code(kind: FrontendTokenKind) -> u64:
             return 93u64
         FrontendTokenKind.Tilde:
             return 94u64
+        FrontendTokenKind.Is:
+            return 96u64
+        FrontendTokenKind.FatArrow:
+            return 97u64
     return 0u64
 
 
@@ -377,11 +383,12 @@ def frontend_case_region_alloc_syntax() -> bool can[Memory.Allocate, Abort.Panic
 
 
 def frontend_case_lookup_keyword_table() -> bool:
-    entries: FrontendKeywordEntry[42] = [
+    entries: FrontendKeywordEntry[43] = [
         FrontendKeywordEntry("as", FrontendTokenKind.As),
         FrontendKeywordEntry("if", FrontendTokenKind.If),
         FrontendKeywordEntry("in", FrontendTokenKind.In),
         FrontendKeywordEntry("or", FrontendTokenKind.Or),
+        FrontendKeywordEntry("to", FrontendTokenKind.To),
         FrontendKeywordEntry("and", FrontendTokenKind.And),
         FrontendKeywordEntry("any", FrontendTokenKind.Any),
         FrontendKeywordEntry("def", FrontendTokenKind.Def),
@@ -421,7 +428,7 @@ def frontend_case_lookup_keyword_table() -> bool:
         FrontendKeywordEntry("defin", FrontendTokenKind.Ident),
         FrontendKeywordEntry("truer", FrontendTokenKind.Ident)
     ]
-    return frontend_expect_lookup_keyword_entries((&entries[0u]).cast[any FrontendKeywordEntry&], 42u)
+    return frontend_expect_lookup_keyword_entries((&entries[0u]).cast[any FrontendKeywordEntry&], 43u)
 
 
 def frontend_case_kind_only_keyword_path() -> bool can[Memory.Allocate, Abort.Panic]:

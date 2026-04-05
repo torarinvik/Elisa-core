@@ -566,6 +566,7 @@ type CastExprOrigin int
 
 const (
 	CastExprOriginGeneral CastExprOrigin = iota
+	CastExprOriginToSyntax
 	CastExprOriginPostfixShorthand
 )
 

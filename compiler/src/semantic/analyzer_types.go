@@ -1173,6 +1173,9 @@ func (a *Analyzer) validCast(src, dst Type) bool {
 	if _, ok := dst.(*TypeParamType); ok {
 		return true
 	}
+	if AssignableTo(dst, src) {
+		return true
+	}
 	if IsNumericType(src) && IsNumericType(dst) {
 		return true
 	}

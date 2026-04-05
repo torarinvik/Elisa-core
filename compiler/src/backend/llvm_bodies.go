@@ -1458,6 +1458,16 @@ func (s *functionState) emitTreeStructuralSequenceItemValue(payloadValue C.LLVMV
 	return s.emitIterLoopElementValue(tempAlloca, payloadType, indexValue, name+".tree.children.seq")
 }
 
+func (s *functionState) coerceTreeChildrenItemValue(value C.LLVMValueRef, actualType semantic.Type, itemType semantic.Type) (C.LLVMValueRef, error) {
+	if actualType == nil || itemType == nil {
+		return value, nil
+	}
+	if !semantic.AssignableTo(itemType, actualType) {
+		return nil, fmt.Errorf("tree structural child item type mismatch: expected %s, got %s", itemType.String(), actualType.String())
+	}
+	return s.coerceValue(value, actualType, itemType)
+}
+
 func (s *functionState) emitTreeVariantStructuralChildCount(nodeValue C.LLVMValueRef, categoryType *semantic.TreeCategoryType, variant *semantic.EnumVariant, name string) (C.LLVMValueRef, error) {
 	usizeType := s.g.result.NamedTypes["usize"]
 	usizeLLVMType, err := s.g.lowerType(usizeType)
@@ -1537,17 +1547,20 @@ func (s *functionState) emitTreeVariantStructuralChildValue(nodeValue C.LLVMValu
 
 		C.LLVMPositionBuilderAtEnd(s.builder, matchBB)
 		var matchValue C.LLVMValueRef
+		resolvedType := payloadType
 		if relation == ast.EnumPayloadRelationChild {
 			matchValue = payloadValues[payloadIndex]
 		} else {
-			value, resolvedType, err := s.emitTreeStructuralSequenceItemValue(payloadValues[payloadIndex], payloadType, remaining, name)
+			var value C.LLVMValueRef
+			value, resolvedType, err = s.emitTreeStructuralSequenceItemValue(payloadValues[payloadIndex], payloadType, remaining, name)
 			if err != nil {
 				return nil, err
 			}
-			if resolvedType != nil && !semantic.SameType(resolvedType, itemType) {
-				return nil, fmt.Errorf("tree structural child item type mismatch: expected %s, got %s", itemType.String(), resolvedType.String())
-			}
 			matchValue = value
+		}
+		matchValue, err = s.coerceTreeChildrenItemValue(matchValue, resolvedType, itemType)
+		if err != nil {
+			return nil, err
 		}
 		incomingValues = append(incomingValues, matchValue)
 		incomingBlocks = append(incomingBlocks, C.LLVMGetInsertBlock(s.builder))
@@ -1674,17 +1687,20 @@ func (s *functionState) emitTreeExactStructuralChildValue(nodeValue C.LLVMValueR
 
 		C.LLVMPositionBuilderAtEnd(s.builder, matchBB)
 		var matchValue C.LLVMValueRef
+		resolvedType := field.Type
 		if relation == ast.EnumPayloadRelationChild {
 			matchValue = fieldValue
 		} else {
-			value, resolvedType, err := s.emitTreeStructuralSequenceItemValue(fieldValue, field.Type, remaining, name)
+			var value C.LLVMValueRef
+			value, resolvedType, err = s.emitTreeStructuralSequenceItemValue(fieldValue, field.Type, remaining, name)
 			if err != nil {
 				return nil, err
 			}
-			if resolvedType != nil && !semantic.SameType(resolvedType, itemType) {
-				return nil, fmt.Errorf("tree structural child item type mismatch: expected %s, got %s", itemType.String(), resolvedType.String())
-			}
 			matchValue = value
+		}
+		matchValue, err = s.coerceTreeChildrenItemValue(matchValue, resolvedType, itemType)
+		if err != nil {
+			return nil, err
 		}
 		incomingValues = append(incomingValues, matchValue)
 		incomingBlocks = append(incomingBlocks, C.LLVMGetInsertBlock(s.builder))

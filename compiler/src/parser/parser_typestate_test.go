@@ -1211,6 +1211,81 @@ func TestParseIterableForStatementWithMutableRefBinder(t *testing.T) {
 	}
 }
 
+func TestParseChildrenToOverrideExpr(t *testing.T) {
+	file, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        BreakStmt\n\ndef keep(stmt: Lua.Stmt) -> Lua.Node:\n    return children(stmt to Lua.Node).node\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	field, ok := ret.Value.(*ast.FieldExpr)
+	if !ok {
+		t.Fatalf("expected field expr, got %T", ret.Value)
+	}
+	call, ok := field.Object.(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 {
+		t.Fatalf("expected children call, got %T %#v", field.Object, field.Object)
+	}
+	cast, ok := call.Args[0].(*ast.CastExpr)
+	if !ok {
+		t.Fatalf("expected to-override arg, got %T", call.Args[0])
+	}
+	if cast.Origin != ast.CastExprOriginToSyntax {
+		t.Fatalf("expected to-syntax cast origin, got %v", cast.Origin)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "children(stmt to Lua.Node)") {
+		t.Fatalf("expected unparse to preserve to-override syntax, got:\n%s", formatted)
+	}
+}
+
+func TestParsePostfixCastWithAnyRefTarget(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep() -> any u8&:\n    return \"hello\".cast[any u8&]\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	cast, ok := ret.Value.(*ast.CastExpr)
+	if !ok {
+		t.Fatalf("expected cast expr, got %T", ret.Value)
+	}
+	target, ok := cast.Target.(*ast.RefType)
+	if !ok {
+		t.Fatalf("expected ref target type, got %T", cast.Target)
+	}
+	if target.Storage != ast.RefStorageAny || target.State != ast.RefStateNonNull {
+		t.Fatalf("unexpected cast target %#v", target)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, ".cast[any u8&]") {
+		t.Fatalf("expected unparse to preserve postfix cast target, got:\n%s", formatted)
+	}
+}
+
+func TestParsePostfixCastWithMutableAnyRefTarget(t *testing.T) {
+	file, errs := parseSourceFile(t, "struct Cursor:\n    pos: i64\n\ndef keep(cursor: any Cursor&) -> mutable any Cursor&:\n    return cursor.cast[mutable any Cursor&]\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	cast, ok := ret.Value.(*ast.CastExpr)
+	if !ok {
+		t.Fatalf("expected cast expr, got %T", ret.Value)
+	}
+	if _, ok := cast.Target.(*ast.MutableType); !ok {
+		t.Fatalf("expected mutable cast target, got %T", cast.Target)
+	}
+}
+
 func TestParseForRemainsContextualIdentifier(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep() -> int:\n    for_value: int = 1\n    for(for_value)\n    return for_value\n")
 	if len(errs) != 0 {

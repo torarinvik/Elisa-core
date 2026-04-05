@@ -547,6 +547,25 @@ func (p *Parser) parseExpr() ast.Expr {
 	return expr
 }
 
+func (p *Parser) parseChildrenCallArgs() ([]ast.Expr, []string) {
+	if p.peek() == lexer.TOKEN_RPAREN {
+		return nil, nil
+	}
+	args := make([]ast.Expr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
+	for {
+		arg := p.parseExpr()
+		if p.match(lexer.TOKEN_TO) {
+			target := p.parseTypeExpr()
+			arg = &ast.CastExpr{Position: arg.Pos(), Operand: arg, Target: target, Origin: ast.CastExprOriginToSyntax}
+		}
+		args = append(args, arg)
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	return args, nil
+}
+
 func (p *Parser) parseOr() ast.Expr {
 	left := p.parseAnd()
 	for p.peek() == lexer.TOKEN_OR {
@@ -1049,7 +1068,13 @@ func (p *Parser) parsePostfix() ast.Expr {
 		case lexer.TOKEN_LPAREN:
 			pos := p.cur().Pos
 			p.advance()
-			args, argNames := p.parseCallArgs()
+			var args []ast.Expr
+			var argNames []string
+			if ident, ok := expr.(*ast.Ident); ok && ident.Name == "children" {
+				args, argNames = p.parseChildrenCallArgs()
+			} else {
+				args, argNames = p.parseCallArgs()
+			}
 			p.expect(lexer.TOKEN_RPAREN)
 			expr = &ast.CallExpr{Position: pos, Func: expr, Args: args, ArgNames: argNames}
 

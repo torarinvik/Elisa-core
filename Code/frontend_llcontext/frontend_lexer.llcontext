@@ -315,13 +315,14 @@ def frontend_lookup_keyword_bucket(entries: any FrontendKeywordEntry&, count: us
 @inline(always)
 def frontend_lookup_keyword(text: StringView) -> FrontendTokenKind:
     if text.len == 2:
-        entries: FrontendKeywordEntry[4] = [
+        entries: FrontendKeywordEntry[5] = [
             FrontendKeywordEntry("as", FrontendTokenKind.As),
             FrontendKeywordEntry("if", FrontendTokenKind.If),
             FrontendKeywordEntry("in", FrontendTokenKind.In),
-            FrontendKeywordEntry("or", FrontendTokenKind.Or)
+            FrontendKeywordEntry("or", FrontendTokenKind.Or),
+            FrontendKeywordEntry("to", FrontendTokenKind.To)
         ]
-        return frontend_lookup_keyword_bucket((&entries[0u]).cast[any FrontendKeywordEntry&], 4u, text)
+        return frontend_lookup_keyword_bucket((&entries[0u]).cast[any FrontendKeywordEntry&], 5u, text)
 
     if text.len == 3:
         entries: FrontendKeywordEntry[5] = [
