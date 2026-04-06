@@ -133,6 +133,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	}
 	if p.peek() == lexer.TOKEN_AT {
 		annotations := p.parseFuncAnnotations()
+		if p.peekIdentText("impl") {
+			return p.parseImplDeclWithAnnotations(annotations)
+		}
 		if p.peekIdentText("tree") {
 			return p.parseTreeDeclWithAnnotations(annotations)
 		}
@@ -150,14 +153,14 @@ func (p *Parser) parseDecl() ast.Decl {
 			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ENUM {
 				return p.parsePackedEnumDeclWithAnnotations(annotations)
 			}
-			p.errorf("declaration annotations must be followed by def, extern, struct, tree, enum, or packed enum, got %s", p.cur())
+			p.errorf("declaration annotations must be followed by def, extern, struct, tree, enum, packed enum, or impl, got %s", p.cur())
 			return nil
 		case lexer.TOKEN_ENUM:
 			return p.parseEnumDeclWithAnnotations(annotations)
 		case lexer.TOKEN_STRUCT:
 			return p.parseStructDeclWithAnnotations(annotations)
 		default:
-			p.errorf("declaration annotations must be followed by def, extern, struct, tree, enum, or packed enum, got %s", p.cur())
+			p.errorf("declaration annotations must be followed by def, extern, struct, tree, enum, packed enum, or impl, got %s", p.cur())
 			return nil
 		}
 	}
@@ -203,12 +206,13 @@ func (p *Parser) parseAnnotations() []ast.Annotation {
 		name := p.expect(lexer.TOKEN_IDENT).Text
 		var args []string
 		if p.match(lexer.TOKEN_LPAREN) {
-			if p.peek() != lexer.TOKEN_RPAREN {
-				for {
-					args = append(args, p.parseAnnotationArg())
-					if !p.match(lexer.TOKEN_COMMA) {
-						break
-					}
+			for p.peek() != lexer.TOKEN_RPAREN && p.peek() != lexer.TOKEN_EOF {
+				args = append(args, p.parseAnnotationArg())
+				if p.match(lexer.TOKEN_COMMA) {
+					continue
+				}
+				if !annotationArgCanStart(p.peek()) {
+					break
 				}
 			}
 			p.expect(lexer.TOKEN_RPAREN)
@@ -221,6 +225,15 @@ func (p *Parser) parseAnnotations() []ast.Annotation {
 
 func (p *Parser) parseFuncAnnotations() []ast.Annotation {
 	return p.parseAnnotations()
+}
+
+func annotationArgCanStart(kind lexer.TokenKind) bool {
+	switch kind {
+	case lexer.TOKEN_INT_LIT, lexer.TOKEN_HEX_LIT, lexer.TOKEN_IDENT:
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *Parser) parseAnnotationArg() string {

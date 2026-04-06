@@ -194,6 +194,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			}
 		}
 	case *ast.ImplDecl:
+		f.writeAnnotations(level, n.Annotations)
 		header := ""
 		if n.IsExtension() {
 			header = "impl " + formatTypeExpr(n.ForType) + ":"
@@ -207,13 +208,21 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 				f.writeLine(level+1, "type "+m.Name+" = "+formatTypeExpr(m.Type))
 			case *ast.FuncDecl:
 				f.writeAnnotations(level+1, m.Annotations)
-				f.writeLine(level+1, formatFuncHeader(m.Name, m.GenericParams, m.TypeParams, m.RefStorageParams, m.RefStateParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, false))
+				header := formatFuncHeader(m.Name, m.GenericParams, m.TypeParams, m.RefStorageParams, m.RefStateParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, false)
+				if m.Override {
+					header = "override " + header
+				}
+				f.writeLine(level+1, header)
 				for _, stmt := range m.Body {
 					f.writeStmt(level+2, stmt)
 				}
 			case *ast.ExternFuncDecl:
 				f.writeAnnotations(level+1, m.Annotations)
-				f.writeLine(level+1, formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RefStorageParams, m.RefStateParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, m.Variadic))
+				header := formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RefStorageParams, m.RefStateParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, m.Variadic)
+				if m.Override {
+					header = "override " + header
+				}
+				f.writeLine(level+1, header)
 			}
 		}
 	case *ast.FuncDecl:

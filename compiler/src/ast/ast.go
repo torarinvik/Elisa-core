@@ -236,6 +236,7 @@ type EnsuresClause struct {
 type FuncDecl struct {
 	Position         lexer.Pos
 	Annotations      []Annotation
+	Override         bool
 	Name             string
 	TypeParams       []string
 	RefStorageParams []string
@@ -260,6 +261,7 @@ type ParamDecl struct {
 type ExternFuncDecl struct {
 	Position         lexer.Pos
 	Annotations      []Annotation
+	Override         bool
 	Name             string
 	TypeParams       []string
 	RefStorageParams []string

@@ -104,6 +104,10 @@ func (p *Parser) parseInterfaceMethodDecl() *ast.ExternFuncDecl {
 }
 
 func (p *Parser) parseImplDecl() *ast.ImplDecl {
+	return p.parseImplDeclWithAnnotations(nil)
+}
+
+func (p *Parser) parseImplDeclWithAnnotations(annotations []ast.Annotation) *ast.ImplDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("impl")
 	interfaceName := ""
@@ -126,9 +130,17 @@ func (p *Parser) parseImplDecl() *ast.ImplDecl {
 			break
 		}
 		annotations := p.parseAnnotations()
+		override := false
+		if p.peekIdentText("override") {
+			override = true
+			p.advance()
+		}
 		if p.peekIdentText("type") {
 			if interfaceName == "" {
 				p.errorf("extension impls do not support associated types")
+			}
+			if override {
+				p.errorf("override can only be applied to impl methods")
 			}
 			if len(annotations) != 0 {
 				for _, annotation := range annotations {
@@ -139,8 +151,11 @@ func (p *Parser) parseImplDecl() *ast.ImplDecl {
 			continue
 		}
 		if p.peek() == lexer.TOKEN_DEF {
-			members = append(members, p.parseImplMethodDeclWithAnnotations(annotations))
+			members = append(members, p.parseImplMethodDeclWithAnnotations(annotations, override))
 			continue
+		}
+		if override {
+			p.errorf("override in an impl must be followed by def, got %s", p.cur())
 		}
 		if len(annotations) != 0 {
 			p.errorf("impl member annotations must be followed by def, got %s", p.cur())
@@ -150,7 +165,7 @@ func (p *Parser) parseImplDecl() *ast.ImplDecl {
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.ImplDecl{Position: pos, InterfaceName: interfaceName, ForType: forType, Members: members}
+	return &ast.ImplDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), InterfaceName: interfaceName, ForType: forType, Members: members}
 }
 
 func (p *Parser) parseImplAssociatedTypeDecl() *ast.ImplAssociatedTypeDecl {
@@ -163,7 +178,7 @@ func (p *Parser) parseImplAssociatedTypeDecl() *ast.ImplAssociatedTypeDecl {
 	return &ast.ImplAssociatedTypeDecl{Position: pos, Name: name, Type: typ}
 }
 
-func (p *Parser) parseImplMethodDeclWithAnnotations(annotations []ast.Annotation) ast.ImplMember {
+func (p *Parser) parseImplMethodDeclWithAnnotations(annotations []ast.Annotation, override bool) ast.ImplMember {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_DEF)
 	name := p.expect(lexer.TOKEN_IDENT).Text
@@ -192,8 +207,8 @@ func (p *Parser) parseImplMethodDeclWithAnnotations(annotations []ast.Annotation
 	if p.match(lexer.TOKEN_COLON) {
 		p.expectNewline()
 		body := p.parseBlock()
-		return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ReturnType: retType, Body: body}
+		return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ReturnType: retType, Body: body}
 	}
 	p.expectNewline()
-	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ReturnType: retType}
+	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ReturnType: retType}
 }

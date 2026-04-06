@@ -276,6 +276,7 @@ func Analyze(file *ast.File) *Result {
 	a.populateStructFields(activeDecls)
 	a.populateEnumVariants(activeDecls)
 	a.populateTreeMembers(activeDecls)
+	a.synthesizeDerivedImplMembers(activeDecls)
 	a.warnOnAvoidableStructPadding(activeDecls)
 	a.collectExportTypeAliases(activeDecls)
 	a.collectValueSymbols(activeDecls)
@@ -3492,8 +3493,16 @@ func isVoidType(t Type) bool {
 }
 
 func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
-	sym, _ := a.symbolForFuncDecl(fn)
+	sym, ok := a.symbolForFuncDecl(fn)
+	if !ok || sym == nil {
+		a.errorf(fn.Pos(), "internal error: missing function symbol for %q", fn.Name)
+		return
+	}
 	fnType, _ := sym.Type.(*FuncType)
+	if fnType == nil {
+		a.errorf(fn.Pos(), "internal error: function %q does not resolve to a function type", fn.Name)
+		return
+	}
 	savedScope := a.currentScope
 	savedReturn := a.currentReturn
 	savedFuncDecl := a.currentFuncDecl

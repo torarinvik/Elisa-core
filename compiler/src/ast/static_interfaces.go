@@ -20,6 +20,7 @@ type AssociatedTypeDecl struct {
 
 type ImplDecl struct {
 	Position      lexer.Pos
+	Annotations   []Annotation
 	InterfaceName string
 	ForType       TypeExpr
 	Members       []ImplMember

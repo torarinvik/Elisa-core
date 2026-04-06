@@ -186,3 +186,51 @@ def read(tok: Tok) -> i64:
 		t.Fatalf("expected zero explicit call args, got %d", len(call.Args))
 	}
 }
+
+func TestParseDerivedImplAnnotationAndOverrideMethod(t *testing.T) {
+	file, errs := parseSourceFile(t, `
+struct BuilderTag:
+    tag: int
+
+interface Builder:
+    type Node
+    def make(value: int) -> Node
+
+@derive(parse_builder tree Lua)
+impl Builder for BuilderTag:
+    type Node = int
+
+    override def make(value: int) -> int:
+        return value
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	if len(file.Decls) != 3 {
+		t.Fatalf("expected 3 top-level decls, got %d", len(file.Decls))
+	}
+	impl, ok := file.Decls[2].(*ast.ImplDecl)
+	if !ok {
+		t.Fatalf("expected impl decl, got %T", file.Decls[2])
+	}
+	if len(impl.Annotations) != 1 {
+		t.Fatalf("expected 1 impl annotation, got %d", len(impl.Annotations))
+	}
+	annotation := impl.Annotations[0]
+	if annotation.Name != "derive" {
+		t.Fatalf("expected @derive annotation, got %q", annotation.Name)
+	}
+	if len(annotation.Args) != 3 || annotation.Args[0] != "parse_builder" || annotation.Args[1] != "tree" || annotation.Args[2] != "Lua" {
+		t.Fatalf("expected spaced derive args [parse_builder tree Lua], got %#v", annotation.Args)
+	}
+	if len(impl.Members) != 2 {
+		t.Fatalf("expected 2 impl members, got %d", len(impl.Members))
+	}
+	method, ok := impl.Members[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func impl member, got %T", impl.Members[1])
+	}
+	if !method.Override {
+		t.Fatal("expected override def to set FuncDecl.Override")
+	}
+}
