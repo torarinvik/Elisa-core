@@ -1950,6 +1950,16 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			return nil, fmt.Errorf("value optionals cannot wrap references; use &? instead of %s?", valueType.String())
 		}
 		return &semantic.OptionalType{Value: valueType}, nil
+	case *ast.TupleTypeExpr:
+		fields := make([]semantic.TupleField, 0, len(n.Fields))
+		for _, field := range n.Fields {
+			resolved, err := s.resolveTypeExpr(field.Type)
+			if err != nil {
+				return nil, err
+			}
+			fields = append(fields, semantic.TupleField{Name: field.Name, Type: resolved})
+		}
+		return &semantic.TupleType{Fields: fields}, nil
 	case *ast.RefType:
 		elem, err := s.resolveTypeExpr(n.Elem)
 		if err != nil {
@@ -2485,6 +2495,13 @@ func (g *llvmGenerator) fieldInfo(objType semantic.Type, fieldName string) (sema
 		objType = runtimeBacked
 	}
 	switch t := objType.(type) {
+	case *semantic.TupleType:
+		for i, field := range t.Fields {
+			if field.Name == fieldName {
+				return field.Type, i, t, pointerLike, nil
+			}
+		}
+		return nil, 0, nil, false, fmt.Errorf("tuple %s has no field %s", t.String(), fieldName)
 	case *semantic.StructType:
 		index, field, err := fieldInfoFromStruct(t, fieldName)
 		return field.Type, index, t, pointerLike, err

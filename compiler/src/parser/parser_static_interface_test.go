@@ -234,3 +234,74 @@ impl Builder for BuilderTag:
 		t.Fatal("expected override def to set FuncDecl.Override")
 	}
 }
+
+func TestParseStaticInterfaceTupleReturnAndDestructure(t *testing.T) {
+	file, errs := parseSourceFile(t, `
+struct BuilderTag:
+    tag: int
+
+interface Builder:
+    type Node
+    def make(value: int) -> Node
+
+impl Builder for BuilderTag:
+    type Node = int
+
+    def make(value: int) -> int:
+        return value
+
+def build_pair[B: Builder](value: int) -> (node: B.Node, checksum: int):
+    return B.make(value), value
+
+def use_pair[B: Builder](value: int) -> B.Node:
+    built = build_pair.specialize[B]()(value)
+    node, checksum = built
+    _ = checksum
+    return node
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	if len(file.Decls) != 5 {
+		t.Fatalf("expected 5 top-level decls, got %d", len(file.Decls))
+	}
+	buildDecl, ok := file.Decls[3].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected build_pair decl, got %T", file.Decls[3])
+	}
+	retType, ok := buildDecl.ReturnType.(*ast.TupleTypeExpr)
+	if !ok {
+		t.Fatalf("expected tuple return type, got %T", buildDecl.ReturnType)
+	}
+	if len(retType.Fields) != 2 || retType.Fields[0].Name != "node" || retType.Fields[1].Name != "checksum" {
+		t.Fatalf("unexpected tuple return fields: %#v", retType.Fields)
+	}
+	retStmt, ok := buildDecl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", buildDecl.Body[0])
+	}
+	retTuple, ok := retStmt.Value.(*ast.TupleExpr)
+	if !ok {
+		t.Fatalf("expected tuple return expr, got %T", retStmt.Value)
+	}
+	if len(retTuple.Elems) != 2 {
+		t.Fatalf("expected 2 tuple return elems, got %d", len(retTuple.Elems))
+	}
+	useDecl, ok := file.Decls[4].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected use_pair decl, got %T", file.Decls[4])
+	}
+	tupleBind, ok := useDecl.Body[1].(*ast.TupleBindStmt)
+	if !ok {
+		t.Fatalf("expected tuple destructuring stmt, got %T", useDecl.Body[1])
+	}
+	if !tupleBind.Declare {
+		t.Fatal("expected tuple destructuring stmt to declare locals")
+	}
+	if len(tupleBind.Names) != 2 || tupleBind.Names[0].Name != "node" || tupleBind.Names[1].Name != "checksum" {
+		t.Fatalf("unexpected tuple bind names: %#v", tupleBind.Names)
+	}
+	if ident, ok := tupleBind.Value.(*ast.Ident); !ok || ident.Name != "built" {
+		t.Fatalf("expected tuple bind source to be built, got %T %#v", tupleBind.Value, tupleBind.Value)
+	}
+}

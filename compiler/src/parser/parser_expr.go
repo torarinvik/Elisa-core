@@ -36,8 +36,13 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "func" {
 		return p.parseFuncTypeExpr()
 	}
-	storage, explicit, label, region, storageParam := p.parseRefStorageQualifier()
-	typ := p.parseBaseType(storage, explicit, label, region, storageParam)
+	var typ ast.TypeExpr
+	if p.peek() == lexer.TOKEN_LPAREN {
+		typ = p.parseTupleTypeExpr()
+	} else {
+		storage, explicit, label, region, storageParam := p.parseRefStorageQualifier()
+		typ = p.parseBaseType(storage, explicit, label, region, storageParam)
+	}
 	if p.match(lexer.TOKEN_PIPE) {
 		errType := p.parseTypeExpr()
 		p.errorf("legacy fallible return syntax `T | ErrorSet` is no longer supported; use `T error[SomeSet]` instead")
@@ -48,6 +53,39 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 		return &ast.ErrorUnionTypeExpr{Position: typ.Pos(), Value: typ, Errors: errType}
 	}
 	return typ
+}
+
+func (p *Parser) parseTupleTypeExpr() ast.TypeExpr {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_LPAREN)
+	fields := make([]ast.TupleTypeField, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
+	if p.peek() != lexer.TOKEN_RPAREN {
+		for {
+			fieldPos := p.cur().Pos
+			name := p.expect(lexer.TOKEN_IDENT).Text
+			p.expect(lexer.TOKEN_COLON)
+			fields = append(fields, ast.TupleTypeField{Position: fieldPos, Name: name, Type: p.parseTypeExpr()})
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+			if p.peek() == lexer.TOKEN_RPAREN {
+				break
+			}
+		}
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+	if len(fields) == 0 {
+		p.errorf("tuple type requires at least one field")
+	}
+	return &ast.TupleTypeExpr{Position: pos, Fields: fields}
+}
+
+func (p *Parser) parseTupleExprFromFirst(pos lexer.Pos, first ast.Expr) ast.Expr {
+	elems := []ast.Expr{first}
+	for p.match(lexer.TOKEN_COMMA) {
+		elems = append(elems, p.parseExpr())
+	}
+	return &ast.TupleExpr{Position: pos, Elems: elems}
 }
 
 func (p *Parser) parseFuncTypeExpr() ast.TypeExpr {
@@ -1260,10 +1298,16 @@ func (p *Parser) parsePrimary() ast.Expr {
 		}
 		return &ast.Ident{Position: tok.Pos, Name: tok.Text}
 	case lexer.TOKEN_LPAREN:
+		pos := p.cur().Pos
 		p.advance()
 		inner := p.parseExpr()
+		if p.peek() == lexer.TOKEN_COMMA {
+			tuple := p.parseTupleExprFromFirst(pos, inner)
+			p.expect(lexer.TOKEN_RPAREN)
+			return tuple
+		}
 		p.expect(lexer.TOKEN_RPAREN)
-		return &ast.ParenExpr{Position: inner.Pos(), Inner: inner}
+		return &ast.ParenExpr{Position: pos, Inner: inner}
 	default:
 		p.errorf("unexpected token %s in expression", p.cur())
 		tok := p.advance()

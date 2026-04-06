@@ -94,6 +94,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.ErrorSetExpr{})
 		gob.Register(&ast.ErrorUnionTypeExpr{})
 		gob.Register(&ast.OptionalTypeExpr{})
+		gob.Register(&ast.TupleTypeExpr{})
 
 		// Expressions.
 		gob.Register(&ast.Ident{})
@@ -119,6 +120,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.AddrOfExpr{})
 		gob.Register(&ast.SpecializeExpr{})
 		gob.Register(&ast.StructLitExpr{})
+		gob.Register(&ast.TupleExpr{})
 		gob.Register(&ast.VariantTestExpr{})
 		gob.Register(&ast.IsPatternExpr{})
 		gob.Register(&ast.ParenExpr{})
@@ -147,6 +149,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.AugAssignStmt{})
 		gob.Register(&ast.AsRefAssignStmt{})
 		gob.Register(&ast.VarDeclStmt{})
+		gob.Register(&ast.TupleBindStmt{})
 		gob.Register(&ast.MoveBindStmt{})
 		gob.Register(&ast.OpenStmt{})
 		gob.Register(&ast.ViewStmt{})

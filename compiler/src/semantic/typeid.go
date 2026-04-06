@@ -118,6 +118,14 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 		if !appendTypeIDKey(b, tt.Value, active, nextCycleID) {
 			return false
 		}
+	case *TupleType:
+		appendKeyTag(b, "tuple")
+		appendKeyLen(b, len(tt.Fields))
+		for _, field := range tt.Fields {
+			if !appendTypeIDKey(b, field.Type, active, nextCycleID) {
+				return false
+			}
+		}
 	case *ConstEnumType:
 		appendKeyTag(b, "constenum")
 		appendKeyString(b, tt.Name)

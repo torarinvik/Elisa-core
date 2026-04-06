@@ -310,6 +310,12 @@ func substituteAssocTypeExpr(expr ast.TypeExpr, assocExprs map[string]ast.TypeEx
 		return &ast.ErrorUnionTypeExpr{Position: n.Position, Value: substituteAssocTypeExpr(n.Value, assocExprs), Errors: substituteAssocTypeExpr(n.Errors, assocExprs)}
 	case *ast.OptionalTypeExpr:
 		return &ast.OptionalTypeExpr{Position: n.Position, Value: substituteAssocTypeExpr(n.Value, assocExprs)}
+	case *ast.TupleTypeExpr:
+		fields := make([]ast.TupleTypeField, 0, len(n.Fields))
+		for _, field := range n.Fields {
+			fields = append(fields, ast.TupleTypeField{Position: field.Position, Name: field.Name, Type: substituteAssocTypeExpr(field.Type, assocExprs)})
+		}
+		return &ast.TupleTypeExpr{Position: n.Position, Fields: fields}
 	default:
 		return expr
 	}

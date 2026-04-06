@@ -44,6 +44,10 @@ func collectShapeParamsInType(t Type, out map[string]bool) {
 		if param, ok := n.Shape.(*ShapeParam); ok {
 			out[param.Name] = true
 		}
+	case *TupleType:
+		for _, field := range n.Fields {
+			collectShapeParamsInType(field.Type, out)
+		}
 	case *GenericInstanceType:
 		for _, arg := range n.Args {
 			collectShapeParamsInType(arg, out)

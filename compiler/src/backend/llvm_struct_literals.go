@@ -31,6 +31,12 @@ func (g *llvmGenerator) structLiteralFields(t semantic.Type) ([]structLiteralFie
 			fields = append(fields, structLiteralField{Decl: fieldDecl, Type: field.Type, Index: i})
 		}
 		return fields, nil
+	case *semantic.TupleType:
+		fields := make([]structLiteralField, 0, len(tt.Fields))
+		for i, field := range tt.Fields {
+			fields = append(fields, structLiteralField{Decl: ast.FieldDecl{Name: field.Name}, Type: field.Type, Index: i})
+		}
+		return fields, nil
 	case *semantic.GenericInstanceType:
 		base, ok := tt.Base.(*semantic.StructType)
 		if !ok || base.Decl == nil {

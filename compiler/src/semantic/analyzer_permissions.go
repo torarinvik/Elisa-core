@@ -455,6 +455,8 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		if n.Value != nil {
 			c.collectExpr(n.Value)
 		}
+	case *ast.TupleBindStmt:
+		c.collectExpr(n.Value)
 	case *ast.MoveBindStmt:
 		c.collectExpr(n.Value)
 		if n.Store != nil {
@@ -606,6 +608,10 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		for _, arg := range n.Args {
 			c.collectExpr(arg)
 		}
+	case *ast.TupleExpr:
+		for _, elem := range n.Elems {
+			c.collectExpr(elem)
+		}
 	case *ast.ParenExpr:
 		c.collectExpr(n.Inner)
 	case *ast.RaiseExpr:
@@ -683,6 +689,8 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		if n.Value != nil {
 			a.validatePermissionExpr(n.Value, granted)
 		}
+	case *ast.TupleBindStmt:
+		a.validatePermissionExpr(n.Value, granted)
 	case *ast.MoveBindStmt:
 		a.validatePermissionExpr(n.Value, granted)
 		if n.Store != nil {
@@ -835,6 +843,10 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 	case *ast.StructLitExpr:
 		for _, arg := range n.Args {
 			a.validatePermissionExpr(arg, granted)
+		}
+	case *ast.TupleExpr:
+		for _, elem := range n.Elems {
+			a.validatePermissionExpr(elem, granted)
 		}
 	case *ast.ParenExpr:
 		a.validatePermissionExpr(n.Inner, granted)

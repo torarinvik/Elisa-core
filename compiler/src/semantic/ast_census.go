@@ -68,6 +68,8 @@ func (c *analyzerASTCensus) countStmt(stmt ast.Stmt) {
 		c.countExpr(n.Value)
 	case *ast.VarDeclStmt:
 		c.countExpr(n.Value)
+	case *ast.TupleBindStmt:
+		c.countExpr(n.Value)
 	case *ast.MoveBindStmt:
 		c.countExpr(n.Value)
 		c.countExpr(n.Store)
@@ -188,6 +190,10 @@ func (c *analyzerASTCensus) countExpr(expr ast.Expr) {
 	case *ast.StructLitExpr:
 		for _, arg := range n.Args {
 			c.countExpr(arg)
+		}
+	case *ast.TupleExpr:
+		for _, elem := range n.Elems {
+			c.countExpr(elem)
 		}
 	case *ast.ParenExpr:
 		c.countExpr(n.Inner)

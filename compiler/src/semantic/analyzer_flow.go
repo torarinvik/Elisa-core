@@ -61,6 +61,83 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.bindActivePackedStoreType(bindingType)
 		}
 		a.consumeAffineValueExpr(n.Value, bindingType, "move into local "+strconvQuote(n.Name))
+	case *ast.TupleBindStmt:
+		var expectedTuple Type
+		targetTypes := make([]Type, len(n.Names))
+		if !n.Declare {
+			expectedFields := make([]TupleField, 0, len(n.Names))
+			for i, binding := range n.Names {
+				if binding.Name == "_" {
+					expectedFields = append(expectedFields, TupleField{Name: binding.Name})
+					continue
+				}
+				target := &ast.Ident{Position: binding.Position, Name: binding.Name}
+				targetTypes[i] = a.assignmentTargetType(target)
+				expectedFields = append(expectedFields, TupleField{Name: binding.Name, Type: targetTypes[i]})
+			}
+			expectedTuple = &TupleType{Fields: expectedFields}
+		}
+		valueType := a.analyzeValueExpr(n.Value, expectedTuple)
+		fields, ok := a.resolvedStructFields(valueType)
+		if !ok {
+			a.errorf(n.Pos(), "tuple destructuring requires a tuple value, got %s", valueType.String())
+			return
+		}
+		if _, isTuple := StripAggregateStateType(valueType).(*TupleType); !isTuple {
+			a.errorf(n.Pos(), "tuple destructuring requires a tuple value, got %s", valueType.String())
+			return
+		}
+		if len(n.Names) != len(fields) {
+			a.errorf(n.Pos(), "tuple destructuring expects %d bindings, got %d", len(fields), len(n.Names))
+		}
+		limit := len(n.Names)
+		if len(fields) < limit {
+			limit = len(fields)
+		}
+		for i := 0; i < limit; i++ {
+			binding := n.Names[i]
+			fieldExpr := &ast.FieldExpr{Position: binding.Position, Object: n.Value, Field: fields[i].Name}
+			a.recordAnalyzedExprType(fieldExpr, fields[i].Type)
+			if binding.Name == "_" {
+				if n.Declare {
+					a.consumeAffineValueExpr(fieldExpr, fields[i].Type, "discard tuple element")
+				}
+				continue
+			}
+			if n.Declare {
+				sym := &Symbol{Name: binding.Name, Kind: SymbolLocal, Type: fields[i].Type, Node: n, Mutable: false}
+				a.defineLocal(sym, binding.Position)
+				a.recordValueBinding(sym, fieldExpr)
+				a.recordFunctionValueBinding(sym, fieldExpr)
+				a.recordImmutableSymbolOptimizationFacts(sym, fieldExpr)
+				a.recordBorrowedOwnerRefBinding(sym, fieldExpr)
+				a.recordRegionRefBinding(sym, fieldExpr)
+				continue
+			}
+			target := &ast.Ident{Position: binding.Position, Name: binding.Name}
+			targetType := targetTypes[i]
+			if targetType == nil {
+				targetType = a.assignmentTargetType(target)
+			}
+			a.clearPackedVariantViewExpr(target)
+			if !AssignableTo(targetType, fields[i].Type) {
+				a.errorf(binding.Position, "cannot assign %s to %s", fields[i].Type.String(), targetType.String())
+				a.reportShapeMismatchNotes(binding.Position, targetType, fields[i].Type)
+			}
+			a.recordAssignmentRefinement(target, targetType, fields[i].Type)
+			a.recordRegionRefAssignment(target, fieldExpr)
+			a.recordSpecializedValueTypeTarget(target, fields[i].Type)
+			a.recordNamedStateAssignmentTarget(target, fieldExpr, fields[i].Type)
+			a.clearAffineValueTarget(target)
+			a.trackAffineValueTarget(target, targetType)
+			a.markCreatedProtocolTarget(target, fieldExpr, targetType)
+			a.recordBorrowedOwnerRefTarget(target, targetType, fieldExpr)
+			a.recordFunctionValueTarget(target, fieldExpr)
+			if AssignableTo(targetType, fields[i].Type) {
+				a.bindActivePackedStoreType(targetType)
+			}
+			a.consumeAffineValueExpr(fieldExpr, targetType, "assignment")
+		}
 	case *ast.MoveBindStmt:
 		a.analyzeMoveBindStmt(n)
 	case *ast.OpenStmt:
@@ -1009,6 +1086,15 @@ func (a *Analyzer) resolvedStructFields(actual Type) ([]moveBindResolvedField, b
 			fields = append(fields, moveBindResolvedField{Name: field.Name, Type: resolved.Type, Mutable: resolved.Mutable})
 		}
 		return fields, true
+	case *TupleType:
+		if tt == nil {
+			return nil, false
+		}
+		fields := make([]moveBindResolvedField, 0, len(tt.Fields))
+		for _, field := range tt.Fields {
+			fields = append(fields, moveBindResolvedField{Name: field.Name, Type: field.Type, Mutable: false})
+		}
+		return fields, true
 	case *GenericInstanceType:
 		structBase, ok := tt.Base.(*StructType)
 		if !ok {
@@ -1075,6 +1161,9 @@ func (a *Analyzer) resolveMoveBindStructPattern(pattern *ast.MoveBindStructPatte
 			a.errorf(pattern.Pos(), "move-as destructuring is not supported for builtin struct %q", base.Name)
 			return nil, false
 		}
+	case *TupleType:
+		a.errorf(pattern.Pos(), "move-as pattern %q requires a concrete struct value, got %s", pattern.TypeName, actual.String())
+		return nil, false
 	}
 	if len(pattern.Args) != len(fields) {
 		a.errorf(pattern.Pos(), "move-as pattern %q expects %d bindings, got %d", pattern.TypeName, len(fields), len(pattern.Args))

@@ -731,10 +731,51 @@ func (p *Parser) parseReturn() *ast.ReturnStmt {
 	p.expect(lexer.TOKEN_RETURN)
 	var value ast.Expr
 	if p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_EOF && p.peek() != lexer.TOKEN_DEDENT {
-		value = p.parseExpr()
+		value = p.parseValueExprAllowTuple()
 	}
 	p.expectNewline()
 	return &ast.ReturnStmt{Position: pos, Value: value}
+}
+
+func (p *Parser) parseValueExprAllowTuple() ast.Expr {
+	first := p.parseExpr()
+	if p.peek() != lexer.TOKEN_COMMA {
+		return first
+	}
+	return p.parseTupleExprFromFirst(first.Pos(), first)
+}
+
+func (p *Parser) tryParseTupleBindStmt(pos lexer.Pos) ast.Stmt {
+	if p.peek() != lexer.TOKEN_IDENT || p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_COMMA {
+		return nil
+	}
+	savedPos := p.pos
+	names := make([]ast.TupleBindName, 0, 4)
+	for {
+		if p.peek() != lexer.TOKEN_IDENT {
+			p.pos = savedPos
+			return nil
+		}
+		tok := p.advance()
+		names = append(names, ast.TupleBindName{Position: tok.Pos, Name: tok.Text})
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	declare := false
+	switch p.peek() {
+	case lexer.TOKEN_ASSIGN:
+		declare = true
+		p.advance()
+	case lexer.TOKEN_LARROW:
+		p.advance()
+	default:
+		p.pos = savedPos
+		return nil
+	}
+	value := p.parseValueExprAllowTuple()
+	p.expectNewline()
+	return &ast.TupleBindStmt{Position: pos, Names: names, Declare: declare, Value: value}
 }
 
 func (p *Parser) parsePass() *ast.PassStmt {
@@ -990,9 +1031,13 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ASSIGN {
 		p.advance() // _
 		p.advance() // =
-		value := p.parseExpr()
+		value := p.parseValueExprAllowTuple()
 		p.expectNewline()
 		return &ast.DiscardStmt{Position: pos, Value: value}
+	}
+
+	if tupleStmt := p.tryParseTupleBindStmt(pos); tupleStmt != nil {
+		return tupleStmt
 	}
 
 	// Variable declaration: name: [mutable] Type [= value]
@@ -1018,7 +1063,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 
 			var value ast.Expr
 			if p.match(lexer.TOKEN_ASSIGN) {
-				value = p.parseExpr()
+				value = p.parseValueExprAllowTuple()
 			}
 			p.expectNewline()
 			return &ast.VarDeclStmt{Position: pos, Name: name, Mutable: mutable, Type: typ, Value: value}
@@ -1029,7 +1074,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		name := p.cur().Text
 		p.advance()
 		p.advance()
-		value := p.parseExpr()
+		value := p.parseValueExprAllowTuple()
 		p.expectNewline()
 		return &ast.VarDeclStmt{Position: pos, Name: name, Value: value}
 	}
@@ -1058,7 +1103,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 	switch p.peek() {
 	case lexer.TOKEN_LARROW:
 		p.advance()
-		value := p.parseExpr()
+		value := p.parseValueExprAllowTuple()
 		p.expectNewline()
 		return &ast.AssignStmt{Position: pos, Target: expr, Value: value}
 
@@ -1079,7 +1124,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 			asKind = "!"
 		}
 		p.expect(lexer.TOKEN_LARROW)
-		value := p.parseExpr()
+		value := p.parseValueExprAllowTuple()
 		p.expectNewline()
 		return &ast.AsRefAssignStmt{Position: pos, Target: expr, AsKind: asKind, Value: value}
 	}

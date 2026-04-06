@@ -427,6 +427,12 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			return invalidType
 		}
 		return &OptionalType{Value: valueType}
+	case *ast.TupleTypeExpr:
+		fields := make([]TupleField, 0, len(n.Fields))
+		for _, field := range n.Fields {
+			fields = append(fields, TupleField{Name: field.Name, Type: a.resolveType(field.Type)})
+		}
+		return &TupleType{Fields: fields}
 	case *ast.RefType:
 		region := n.Region
 		storageParam := n.StorageParam
@@ -1579,6 +1585,12 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 			args = append(args, a.substituteType(arg, bindings, shapeBindings, regionBindings, permissionBindings))
 		}
 		return &GenericInstanceType{Name: n.Name, Base: n.Base, Args: args}
+	case *TupleType:
+		fields := make([]TupleField, 0, len(n.Fields))
+		for _, field := range n.Fields {
+			fields = append(fields, TupleField{Name: field.Name, Type: a.substituteType(field.Type, bindings, shapeBindings, regionBindings, permissionBindings)})
+		}
+		return &TupleType{Fields: fields}
 	case *AggregateStateType:
 		return cloneAggregateStateWithBase(a.substituteType(n.Base, bindings, shapeBindings, regionBindings, permissionBindings), aggregateStateStates(n))
 	case *PackedEnumStoreType:
@@ -1697,6 +1709,10 @@ func (a *Analyzer) collectImplicitShapeParamsFromType(expr ast.TypeExpr, seen ma
 		a.collectImplicitShapeParamsFromType(n.Elem, seen, order)
 	case *ast.ArrayType:
 		a.collectImplicitShapeParamsFromType(n.Elem, seen, order)
+	case *ast.TupleTypeExpr:
+		for _, field := range n.Fields {
+			a.collectImplicitShapeParamsFromType(field.Type, seen, order)
+		}
 	case *ast.BuiltinTypeExpr:
 		switch n.Name {
 		case "array", "view", "dview":

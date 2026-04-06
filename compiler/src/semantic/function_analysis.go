@@ -136,6 +136,8 @@ func appendBasicFlowInstrsForNode(block *CFGBlock, node ast.Node) {
 			appendFlowInstrUnique(block, FlowInstr{Kind: FlowInstrAlias, Location: n.Name, Source: loc, Note: "var init alias"})
 		}
 		appendBasicFlowExprInstrs(block, n.Value)
+	case *ast.TupleBindStmt:
+		appendBasicFlowExprInstrs(block, n.Value)
 	case *ast.AssignStmt:
 		appendMutationFlowInstr(block, flowLocationForExpr(n.Target), "assign")
 		appendBasicFlowExprInstrs(block, n.Value)
@@ -230,6 +232,10 @@ func appendBasicFlowExprInstrs(block *CFGBlock, expr ast.Expr) {
 	case *ast.StructLitExpr:
 		for _, arg := range n.Args {
 			appendBasicFlowExprInstrs(block, arg)
+		}
+	case *ast.TupleExpr:
+		for _, elem := range n.Elems {
+			appendBasicFlowExprInstrs(block, elem)
 		}
 	case *ast.ListLitExpr:
 		for _, elem := range n.Elems {
@@ -576,6 +582,8 @@ func (a *Analyzer) appendImplicitSinkFlowInstrsForNode(block *CFGBlock, node ast
 	switch n := node.(type) {
 	case *ast.VarDeclStmt:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Value)
+	case *ast.TupleBindStmt:
+		a.appendImplicitSinkFlowInstrsForExpr(block, n.Value)
 	case *ast.AssignStmt:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Value)
 	case *ast.AsRefAssignStmt:
@@ -655,6 +663,10 @@ func (a *Analyzer) appendImplicitSinkFlowInstrsForExpr(block *CFGBlock, expr ast
 	case *ast.StructLitExpr:
 		for _, arg := range n.Args {
 			a.appendImplicitSinkFlowInstrsForExpr(block, arg)
+		}
+	case *ast.TupleExpr:
+		for _, elem := range n.Elems {
+			a.appendImplicitSinkFlowInstrsForExpr(block, elem)
 		}
 	case *ast.ListLitExpr:
 		for _, elem := range n.Elems {

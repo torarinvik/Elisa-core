@@ -81,6 +81,15 @@ type OptionalType struct {
 	Value Type
 }
 
+type TupleField struct {
+	Name string
+	Type Type
+}
+
+type TupleType struct {
+	Fields []TupleField
+}
+
 type ConstEnumMember struct {
 	Name  string
 	Value int64
@@ -438,6 +447,7 @@ func (*RefStateValueType) isType()     {}
 func (*ErrorSetType) isType()          {}
 func (*ErrorUnionType) isType()        {}
 func (*OptionalType) isType()          {}
+func (*TupleType) isType()             {}
 func (*ConstEnumType) isType()         {}
 func (*RefType) isType()               {}
 func (*ArrayType) isType()             {}
@@ -517,6 +527,28 @@ func (t *OptionalType) String() string {
 		return "<invalid-optional>"
 	}
 	return t.Value.String() + "?"
+}
+func (t *TupleType) String() string {
+	if t == nil {
+		return "<invalid-tuple>"
+	}
+	parts := make([]string, 0, len(t.Fields))
+	for _, field := range t.Fields {
+		if field.Type == nil {
+			if field.Name != "" {
+				parts = append(parts, field.Name+": <invalid>")
+			} else {
+				parts = append(parts, "<invalid>")
+			}
+			continue
+		}
+		if field.Name != "" {
+			parts = append(parts, field.Name+": "+field.Type.String())
+			continue
+		}
+		parts = append(parts, field.Type.String())
+	}
+	return "(" + strings.Join(parts, ", ") + ")"
 }
 func (t *ConstEnumType) String() string {
 	if t == nil {

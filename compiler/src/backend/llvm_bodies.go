@@ -806,6 +806,8 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			}
 		}
 		return nil
+	case *ast.TupleBindStmt:
+		return s.emitTupleBindStmt(n)
 	case *ast.MoveBindStmt:
 		return s.emitMoveBindStmt(n)
 	case *ast.OpenStmt:
@@ -1006,6 +1008,66 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 	default:
 		return fmt.Errorf("unsupported statement %T", stmt)
 	}
+}
+
+func (s *functionState) emitTupleBindStmt(stmt *ast.TupleBindStmt) error {
+	if stmt == nil {
+		return nil
+	}
+	value, valueType, err := s.emitExpr(stmt.Value, nil)
+	if err != nil {
+		return err
+	}
+	if _, ok := semantic.StripAggregateStateType(valueType).(*semantic.TupleType); !ok {
+		return fmt.Errorf("tuple destructuring requires a tuple value, got %s", valueType.String())
+	}
+	fields, err := s.g.structLiteralFields(valueType)
+	if err != nil {
+		return err
+	}
+	if len(stmt.Names) != len(fields) {
+		return fmt.Errorf("tuple destructuring expects %d bindings, got %d", len(fields), len(stmt.Names))
+	}
+	limit := len(stmt.Names)
+	if len(fields) < limit {
+		limit = len(fields)
+	}
+	for i := 0; i < limit; i++ {
+		name := stmt.Names[i].Name
+		fieldValue := C.LLVMBuildExtractValue(s.builder, value, C.unsigned(i), cStringFree("tuple.field"))
+		if name == "_" {
+			continue
+		}
+		if stmt.Declare {
+			alloca, err := s.createEntryAlloca(name, fields[i].Type)
+			if err != nil {
+				return err
+			}
+			s.defineBinding(name, valueBinding{ptr: alloca, typ: fields[i].Type, mutable: false})
+			C.LLVMBuildStore(s.builder, fieldValue, alloca)
+			continue
+		}
+		target := &ast.Ident{Position: stmt.Names[i].Position, Name: name}
+		s.invalidatePackedEnumStorageExpr(target)
+		s.invalidatePackedEnumStoreOriginExpr(target)
+		s.invalidatePackedCommonFieldValuesExpr(target)
+		s.invalidatePackedVariantViewExpr(target)
+		binding, ok := s.lookupBinding(name)
+		if !ok {
+			return fmt.Errorf("unknown tuple destructuring target %q", name)
+		}
+		if !binding.mutable {
+			return fmt.Errorf("cannot assign to immutable binding %q", name)
+		}
+		coerced, err := s.coerceValue(fieldValue, fields[i].Type, binding.typ)
+		if err != nil {
+			return err
+		}
+		C.LLVMBuildStore(s.builder, coerced, binding.ptr)
+		s.bindPackedStoreValue(binding.typ, coerced)
+		s.invalidatePackedReadCaches()
+	}
+	return nil
 }
 
 func (s *functionState) emitMoveBindStmt(stmt *ast.MoveBindStmt) error {

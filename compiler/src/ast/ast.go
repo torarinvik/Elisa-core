@@ -450,6 +450,17 @@ type OptionalTypeExpr struct {
 	Value    TypeExpr
 }
 
+type TupleTypeExpr struct {
+	Position lexer.Pos
+	Fields   []TupleTypeField
+}
+
+type TupleTypeField struct {
+	Position lexer.Pos
+	Name     string
+	Type     TypeExpr
+}
+
 func RefStateMarker(state RefState) string {
 	switch state {
 	case RefStateNullable:
@@ -609,6 +620,11 @@ type StructLitExpr struct {
 	Name     string
 	TypeArgs []TypeExpr
 	Args     []Expr
+}
+
+type TupleExpr struct {
+	Position lexer.Pos
+	Elems    []Expr
 }
 
 type VariantTestExpr struct {
@@ -803,6 +819,18 @@ type VarDeclStmt struct {
 	Name     string
 	Mutable  bool
 	Type     TypeExpr
+	Value    Expr
+}
+
+type TupleBindName struct {
+	Position lexer.Pos
+	Name     string
+}
+
+type TupleBindStmt struct {
+	Position lexer.Pos
+	Names    []TupleBindName
+	Declare  bool
 	Value    Expr
 }
 
@@ -1062,6 +1090,7 @@ func (n *ErrorUnionTypeExpr) Pos() lexer.Pos {
 	return n.Position
 }
 func (n *OptionalTypeExpr) Pos() lexer.Pos { return n.Position }
+func (n *TupleTypeExpr) Pos() lexer.Pos    { return n.Position }
 func (n *Ident) Pos() lexer.Pos            { return n.Position }
 func (n *IntLit) Pos() lexer.Pos           { return n.Position }
 func (n *FloatLit) Pos() lexer.Pos         { return n.Position }
@@ -1087,6 +1116,7 @@ func (n *TernaryExpr) Pos() lexer.Pos     { return n.Position }
 func (n *AddrOfExpr) Pos() lexer.Pos      { return n.Position }
 func (n *SpecializeExpr) Pos() lexer.Pos  { return n.Position }
 func (n *StructLitExpr) Pos() lexer.Pos   { return n.Position }
+func (n *TupleExpr) Pos() lexer.Pos       { return n.Position }
 func (n *VariantTestExpr) Pos() lexer.Pos { return n.Position }
 func (n *IsPatternExpr) Pos() lexer.Pos   { return n.Position }
 func (n *TypeExprExpr) Pos() lexer.Pos    { return n.Position }
@@ -1118,6 +1148,7 @@ func (n *AssignStmt) Pos() lexer.Pos             { return n.Position }
 func (n *AugAssignStmt) Pos() lexer.Pos          { return n.Position }
 func (n *AsRefAssignStmt) Pos() lexer.Pos        { return n.Position }
 func (n *VarDeclStmt) Pos() lexer.Pos            { return n.Position }
+func (n *TupleBindStmt) Pos() lexer.Pos          { return n.Position }
 func (n *MoveBindStmt) Pos() lexer.Pos           { return n.Position }
 func (n *OpenStmt) Pos() lexer.Pos               { return n.Position }
 func (n *ViewStmt) Pos() lexer.Pos               { return n.Position }
@@ -1182,6 +1213,7 @@ func (*FuncTypeExpr) nodeTag()              {}
 func (*ErrorSetExpr) nodeTag()              {}
 func (*ErrorUnionTypeExpr) nodeTag()        {}
 func (*OptionalTypeExpr) nodeTag()          {}
+func (*TupleTypeExpr) nodeTag()             {}
 func (*Ident) nodeTag()                     {}
 func (*IntLit) nodeTag()                    {}
 func (*FloatLit) nodeTag()                  {}
@@ -1205,6 +1237,7 @@ func (*TernaryExpr) nodeTag()               {}
 func (*AddrOfExpr) nodeTag()                {}
 func (*SpecializeExpr) nodeTag()            {}
 func (*StructLitExpr) nodeTag()             {}
+func (*TupleExpr) nodeTag()                 {}
 func (*VariantTestExpr) nodeTag()           {}
 func (*IsPatternExpr) nodeTag()             {}
 func (*TypeExprExpr) nodeTag()              {}
@@ -1230,6 +1263,7 @@ func (*AssignStmt) nodeTag()                {}
 func (*AugAssignStmt) nodeTag()             {}
 func (*AsRefAssignStmt) nodeTag()           {}
 func (*VarDeclStmt) nodeTag()               {}
+func (*TupleBindStmt) nodeTag()             {}
 func (*MoveBindStmt) nodeTag()              {}
 func (*OpenStmt) nodeTag()                  {}
 func (*ViewStmt) nodeTag()                  {}
@@ -1295,6 +1329,7 @@ func (*FuncTypeExpr) typeExprTag()              {}
 func (*ErrorSetExpr) typeExprTag()              {}
 func (*ErrorUnionTypeExpr) typeExprTag()        {}
 func (*OptionalTypeExpr) typeExprTag()          {}
+func (*TupleTypeExpr) typeExprTag()             {}
 
 func (*Ident) exprTag()               {}
 func (*IntLit) exprTag()              {}
@@ -1328,6 +1363,7 @@ func (*TernaryExpr) exprTag()                       {}
 func (*AddrOfExpr) exprTag()                        {}
 func (*SpecializeExpr) exprTag()                    {}
 func (*StructLitExpr) exprTag()                     {}
+func (*TupleExpr) exprTag()                         {}
 func (*VariantTestExpr) exprTag()                   {}
 func (*IsPatternExpr) exprTag()                     {}
 func (*TypeExprExpr) exprTag()                      {}
@@ -1346,6 +1382,7 @@ func (*AssignStmt) stmtTag()      {}
 func (*AugAssignStmt) stmtTag()   {}
 func (*AsRefAssignStmt) stmtTag() {}
 func (*VarDeclStmt) stmtTag()     {}
+func (*TupleBindStmt) stmtTag()   {}
 func (*MoveBindStmt) stmtTag()    {}
 func (*OpenStmt) stmtTag()        {}
 func (*ViewStmt) stmtTag()        {}

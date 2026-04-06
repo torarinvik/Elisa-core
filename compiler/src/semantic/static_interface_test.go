@@ -156,3 +156,33 @@ def entry() -> int:
 		t.Fatal("expected derived impl method symbol for touch")
 	}
 }
+
+func TestAnalyzeStaticInterfaceTupleReturnAndDestructure(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "static_interface_tuple_return.llcontext", `
+struct BuilderTag:
+    tag: int
+
+interface Builder:
+    type Node
+    def make(value: int) -> Node
+
+impl Builder for BuilderTag:
+    type Node = int
+
+    def make(value: int) -> int:
+        return value
+
+def build_pair[B: Builder](value: int) -> (node: B.Node, checksum: int):
+    return B.make(value), value
+
+def use_pair[B: Builder](value: int) -> B.Node:
+    built = build_pair.specialize[B]()(value)
+    node, checksum = built
+    _ = checksum
+    return node
+`)
+
+	if len(result.Errors()) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", result.Errors())
+	}
+}

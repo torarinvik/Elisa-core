@@ -86,3 +86,25 @@ func TestCanonicalTypeIDRejectsMalformedPackedVariantView(t *testing.T) {
 		t.Fatalf("expected malformed packed variant views not to receive a canonical type id, got %d", id)
 	}
 }
+
+func TestCanonicalTypeIDMatchesSeparateEqualTupleTypes(t *testing.T) {
+	left := &TupleType{Fields: []TupleField{{Name: "node", Type: &BuiltinType{Name: "i32"}}, {Name: "checksum", Type: &BuiltinType{Name: "i64"}}}}
+	right := &TupleType{Fields: []TupleField{{Name: "value", Type: &BuiltinType{Name: "i32"}}, {Name: "sum", Type: &BuiltinType{Name: "i64"}}}}
+	if !SameType(left, right) {
+		t.Fatalf("expected tuple types with matching element types to remain equal")
+	}
+	if leftID, rightID := requireCanonicalTypeID(t, left), requireCanonicalTypeID(t, right); leftID != rightID {
+		t.Fatalf("expected equal tuple types to share a canonical type id, got %d and %d", leftID, rightID)
+	}
+}
+
+func TestCanonicalTypeIDDistinguishesTupleElementOrder(t *testing.T) {
+	left := &TupleType{Fields: []TupleField{{Name: "node", Type: &BuiltinType{Name: "i32"}}, {Name: "checksum", Type: &BuiltinType{Name: "i64"}}}}
+	right := &TupleType{Fields: []TupleField{{Name: "node", Type: &BuiltinType{Name: "i64"}}, {Name: "checksum", Type: &BuiltinType{Name: "i32"}}}}
+	if SameType(left, right) {
+		t.Fatalf("expected tuple element order to matter")
+	}
+	if leftID, rightID := requireCanonicalTypeID(t, left), requireCanonicalTypeID(t, right); leftID == rightID {
+		t.Fatalf("expected distinct tuple element orderings to produce distinct canonical ids")
+	}
+}

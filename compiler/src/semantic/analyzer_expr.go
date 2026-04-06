@@ -393,6 +393,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	case *ast.StructLitExpr:
 		result = a.analyzeStructLiteralExpr(n, nil)
 		return
+	case *ast.TupleExpr:
+		result = a.analyzeTupleExprWithExpected(n, nil)
+		return
 	case *ast.ParenExpr:
 		result = a.analyzeExpr(n.Inner)
 		return
@@ -5359,6 +5362,12 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 				a.collectTypeBindings(p.Args[i], act.Args[i], bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
 			}
 		}
+	case *TupleType:
+		if act, ok := actual.(*TupleType); ok && len(p.Fields) == len(act.Fields) {
+			for i := range p.Fields {
+				a.collectTypeBindings(p.Fields[i].Type, act.Fields[i].Type, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
+			}
+		}
 	case *AggregateStateType:
 		if act, ok := actual.(*AggregateStateType); ok {
 			a.collectTypeBindings(p.Base, act.Base, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
@@ -5577,6 +5586,29 @@ func (a *Analyzer) resolveProjectedFieldValueExprAtPath(objectExpr ast.Expr, pat
 				return nil, false
 			}
 			return a.resolveProjectedFieldValueExprAtPath(n.Args[i], path[1:])
+		}
+		return nil, false
+	case *ast.TupleExpr:
+		actual := a.exprTypes[n]
+		if actual == nil {
+			actual = a.analyzeExpr(n)
+		}
+		fields, ok := a.resolvedStructFields(actual)
+		if !ok {
+			return nil, false
+		}
+		step := path[0]
+		if step.Field == "" {
+			return nil, false
+		}
+		for i, resolved := range fields {
+			if resolved.Name != step.Field {
+				continue
+			}
+			if i >= len(n.Elems) {
+				return nil, false
+			}
+			return a.resolveProjectedFieldValueExprAtPath(n.Elems[i], path[1:])
 		}
 		return nil, false
 	case *ast.CallExpr:
@@ -6247,6 +6279,62 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 	return invalidType
 }
 
+func contextualTupleType(expected Type) (*TupleType, bool) {
+	if unionType, ok := expected.(*ErrorUnionType); ok {
+		expected = unionType.Value
+	}
+	tupleType, ok := StripAggregateStateType(expected).(*TupleType)
+	if !ok || tupleType == nil {
+		return nil, false
+	}
+	return tupleType, true
+}
+
+func (a *Analyzer) analyzeTupleExprWithExpected(expr *ast.TupleExpr, expected Type) Type {
+	if expr == nil {
+		return invalidType
+	}
+	expectedTuple, useExpected := contextualTupleType(expected)
+	mismatchedArity := false
+	if useExpected && len(expectedTuple.Fields) != len(expr.Elems) {
+		a.errorf(expr.Pos(), "tuple expects %d elements, got %d", len(expectedTuple.Fields), len(expr.Elems))
+		mismatchedArity = true
+	}
+	fields := make([]TupleField, 0, len(expr.Elems))
+	for i, elem := range expr.Elems {
+		fieldName := fmt.Sprintf("_%d", i)
+		var expectedElem Type
+		if useExpected && i < len(expectedTuple.Fields) {
+			expectedElem = expectedTuple.Fields[i].Type
+			if expectedTuple.Fields[i].Name != "" {
+				fieldName = expectedTuple.Fields[i].Name
+			}
+		}
+		itemType := a.analyzeValueExpr(elem, expectedElem)
+		moveType := itemType
+		if expectedElem != nil {
+			moveType = expectedElem
+			if !AssignableTo(expectedElem, itemType) {
+				a.errorf(elem.Pos(), "tuple element %d (%s) expects %s, got %s", i+1, fieldName, expectedElem.String(), itemType.String())
+				a.reportShapeMismatchNotes(elem.Pos(), expectedElem, itemType)
+			}
+		}
+		a.consumeAffineValueExpr(elem, moveType, "move into tuple element "+strconv.Quote(fieldName))
+		fields = append(fields, TupleField{Name: fieldName, Type: itemType})
+	}
+	if useExpected {
+		if mismatchedArity {
+			a.recordAnalyzedExprType(expr, invalidType)
+			return invalidType
+		}
+		a.recordAnalyzedExprType(expr, expectedTuple)
+		return expectedTuple
+	}
+	result := &TupleType{Fields: fields}
+	a.recordAnalyzedExprType(expr, result)
+	return result
+}
+
 func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 	if shorthandType, ok := a.analyzeContextualShorthandValueExpr(expr, expected); ok {
 		return shorthandType
@@ -6258,6 +6346,9 @@ func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 	}
 	if list, ok := expr.(*ast.ListLitExpr); ok {
 		return a.analyzeListLitExprWithExpected(list, expected)
+	}
+	if tuple, ok := expr.(*ast.TupleExpr); ok {
+		return a.analyzeTupleExprWithExpected(tuple, expected)
 	}
 	if contextualExpected, ok := contextualFloatLiteralType(expected); ok {
 		if contextualType, ok := a.analyzeContextualFloatValueExpr(expr, contextualExpected); ok {
@@ -6559,6 +6650,13 @@ func containsTypeParam(t Type) bool {
 		return containsTypeParam(n.Elem)
 	case *DArrayViewType:
 		return containsTypeParam(n.Elem)
+	case *TupleType:
+		for _, field := range n.Fields {
+			if containsTypeParam(field.Type) {
+				return true
+			}
+		}
+		return false
 	case *GenericInstanceType:
 		for _, arg := range n.Args {
 			if containsTypeParam(arg) {
@@ -6999,6 +7097,16 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 		objType = runtimeBacked
 	}
 	switch t := objType.(type) {
+	case *TupleType:
+		for _, field := range t.Fields {
+			if field.Name == fieldName {
+				return Field{Name: field.Name, Type: field.Type}, true
+			}
+		}
+		if emitDiagnostics {
+			a.errorf(pos, "tuple %s has no field %q", t.String(), fieldName)
+		}
+		return Field{}, false
 	case *StructType:
 		field, ok := t.Fields[fieldName]
 		if !ok {

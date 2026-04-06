@@ -124,6 +124,17 @@ func SameType(a, b Type) bool {
 	case *OptionalType:
 		tb, ok := b.(*OptionalType)
 		return ok && SameType(ta.Value, tb.Value)
+	case *TupleType:
+		tb, ok := b.(*TupleType)
+		if !ok || len(ta.Fields) != len(tb.Fields) {
+			return false
+		}
+		for i := range ta.Fields {
+			if !SameType(ta.Fields[i].Type, tb.Fields[i].Type) {
+				return false
+			}
+		}
+		return true
 	case *ConstEnumType:
 		tb, ok := b.(*ConstEnumType)
 		return ok && ta.Name == tb.Name
@@ -356,6 +367,18 @@ func AssignableTo(dst, src Type) bool {
 		}
 		return AssignableTo(dstOpt.Value, src)
 	}
+	if dstTuple, ok := dst.(*TupleType); ok {
+		srcTuple, ok := src.(*TupleType)
+		if !ok || len(dstTuple.Fields) != len(srcTuple.Fields) {
+			return false
+		}
+		for i := range dstTuple.Fields {
+			if !AssignableTo(dstTuple.Fields[i].Type, srcTuple.Fields[i].Type) {
+				return false
+			}
+		}
+		return true
+	}
 	if dstAgg, ok := dst.(*AggregateStateType); ok {
 		srcAgg, ok := src.(*AggregateStateType)
 		if !ok {
@@ -451,6 +474,17 @@ func matchTypePattern(pattern, actual Type) bool {
 	case *OptionalType:
 		a, ok := actual.(*OptionalType)
 		return ok && matchTypePattern(p.Value, a.Value)
+	case *TupleType:
+		a, ok := actual.(*TupleType)
+		if !ok || len(p.Fields) != len(a.Fields) {
+			return false
+		}
+		for i := range p.Fields {
+			if !matchTypePattern(p.Fields[i].Type, a.Fields[i].Type) {
+				return false
+			}
+		}
+		return true
 	case *ConstEnumType:
 		a, ok := actual.(*ConstEnumType)
 		return ok && p.Name == a.Name
@@ -634,6 +668,23 @@ func MergeTypes(a, b Type) Type {
 			return invalidType
 		}
 		return &OptionalType{Value: merged}
+	}
+	if at, ok := a.(*TupleType); ok {
+		if bt, ok := b.(*TupleType); ok && len(at.Fields) == len(bt.Fields) {
+			fields := make([]TupleField, len(at.Fields))
+			for i := range at.Fields {
+				merged := MergeTypes(at.Fields[i].Type, bt.Fields[i].Type)
+				if IsInvalidType(merged) {
+					return invalidType
+				}
+				name := at.Fields[i].Name
+				if name == "" {
+					name = bt.Fields[i].Name
+				}
+				fields[i] = TupleField{Name: name, Type: merged}
+			}
+			return &TupleType{Fields: fields}
+		}
 	}
 	if _, ok := a.(*StructStateCaseType); ok {
 		return mergeNamedStateTypes(a, b, nil)

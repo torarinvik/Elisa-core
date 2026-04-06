@@ -730,6 +730,16 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 			return nil, fmt.Errorf("optional type %s cannot wrap void", tt.String())
 		}
 		return g.ensureOptionalType(tt)
+	case *semantic.TupleType:
+		fields := make([]C.LLVMTypeRef, 0, len(tt.Fields))
+		for _, field := range tt.Fields {
+			fieldType, err := g.lowerType(field.Type)
+			if err != nil {
+				return nil, err
+			}
+			fields = append(fields, fieldType)
+		}
+		return C.LLVMStructTypeInContext(g.context, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0), nil
 	case *semantic.TypeParamType:
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	case *semantic.RefType:
@@ -1754,6 +1764,12 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 		return &semantic.ViewType{Elem: substituteType(tt.Elem, subst, impls), Begin: tt.Begin, End: tt.End}
 	case *semantic.DArrayViewType:
 		return &semantic.DArrayViewType{Elem: substituteType(tt.Elem, subst, impls), Begin: tt.Begin, End: tt.End, SurfaceName: tt.SurfaceName}
+	case *semantic.TupleType:
+		fields := make([]semantic.TupleField, 0, len(tt.Fields))
+		for _, field := range tt.Fields {
+			fields = append(fields, semantic.TupleField{Name: field.Name, Type: substituteType(field.Type, subst, impls)})
+		}
+		return &semantic.TupleType{Fields: fields}
 	case *semantic.PackedVariantViewType:
 		return tt
 	case *semantic.DictType:

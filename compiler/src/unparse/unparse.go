@@ -337,6 +337,16 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 			line += " = " + formatExpr(n.Value)
 		}
 		f.writePrefixedMultiline(level, "", line)
+	case *ast.TupleBindStmt:
+		names := make([]string, 0, len(n.Names))
+		for _, name := range n.Names {
+			names = append(names, name.Name)
+		}
+		op := " <- "
+		if n.Declare {
+			op = " = "
+		}
+		f.writePrefixedMultiline(level, "", strings.Join(names, ", ")+op+formatExpr(n.Value))
 	case *ast.MoveBindStmt:
 		line := formatExpr(n.Value)
 		if _, ok := n.Value.(*ast.MoveExpr); !ok {
@@ -835,6 +845,12 @@ func formatTypeExpr(typ ast.TypeExpr) string {
 		return formatTypeExpr(n.Value) + " " + formatTypeExpr(n.Errors)
 	case *ast.OptionalTypeExpr:
 		return formatTypeExpr(n.Value) + "?"
+	case *ast.TupleTypeExpr:
+		parts := make([]string, 0, len(n.Fields))
+		for _, field := range n.Fields {
+			parts = append(parts, field.Name+": "+formatTypeExpr(field.Type))
+		}
+		return "(" + strings.Join(parts, ", ") + ")"
 	default:
 		return "<type>"
 	}
@@ -952,6 +968,12 @@ func formatExpr(expr ast.Expr) string {
 			parts = append(parts, formatExpr(arg))
 		}
 		return n.Name + "(" + strings.Join(parts, ", ") + ")"
+	case *ast.TupleExpr:
+		parts := make([]string, 0, len(n.Elems))
+		for _, elem := range n.Elems {
+			parts = append(parts, formatExpr(elem))
+		}
+		return "(" + strings.Join(parts, ", ") + ")"
 	case *ast.VariantTestExpr:
 		if n.Pattern == nil {
 			return "<variant-test>"

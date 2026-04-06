@@ -275,6 +275,8 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, actualType, err = s.emitSpecializeExpr(n)
 	case *ast.StructLitExpr:
 		value, actualType, err = s.emitStructLitExpr(n)
+	case *ast.TupleExpr:
+		value, actualType, err = s.emitTupleExpr(n)
 	case *ast.ParenExpr:
 		value, actualType, err = s.emitExpr(n.Inner, expected)
 	case *ast.CanExpr:
@@ -6435,6 +6437,29 @@ func (s *functionState) emitStructLitExpr(expr *ast.StructLitExpr) (C.LLVMValueR
 		value = C.LLVMBuildInsertValue(s.builder, value, fieldValue, C.unsigned(i), cStringFree("ins"))
 	}
 	return value, structType, nil
+}
+
+func (s *functionState) emitTupleExpr(expr *ast.TupleExpr) (C.LLVMValueRef, semantic.Type, error) {
+	tupleType, ok := semantic.StripAggregateStateType(s.exprType(expr)).(*semantic.TupleType)
+	if !ok || tupleType == nil {
+		return nil, nil, fmt.Errorf("tuple expression requires a tuple type, got %s", s.exprType(expr))
+	}
+	llvmType, err := s.g.lowerType(tupleType)
+	if err != nil {
+		return nil, nil, err
+	}
+	value := C.LLVMGetUndef(llvmType)
+	for i, elem := range expr.Elems {
+		if i >= len(tupleType.Fields) {
+			break
+		}
+		elemValue, _, err := s.emitExpr(elem, tupleType.Fields[i].Type)
+		if err != nil {
+			return nil, nil, err
+		}
+		value = C.LLVMBuildInsertValue(s.builder, value, elemValue, C.unsigned(i), cStringFree("tuple.ins"))
+	}
+	return value, tupleType, nil
 }
 
 func (s *functionState) enumConstructorInfo(expr *ast.CallExpr) (*semantic.EnumType, *semantic.EnumVariant, bool) {
