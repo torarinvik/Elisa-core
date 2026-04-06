@@ -631,12 +631,18 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 	case *ast.VisitExpr:
 		c.collectExpr(n.Value)
 		for _, arm := range n.Arms {
+			c.collectExpr(arm.Guard)
 			c.collectStmts(arm.Body)
 		}
 	case *ast.FoldExpr:
 		c.collectExpr(n.Value)
 		for _, arm := range n.Arms {
+			c.collectExpr(arm.Guard)
 			c.collectStmts(arm.Body)
+		}
+	case *ast.IsPatternExpr:
+		for _, target := range n.Targets {
+			c.collectExpr(target)
 		}
 	}
 }
@@ -861,12 +867,18 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 	case *ast.VisitExpr:
 		a.validatePermissionExpr(n.Value, granted)
 		for _, arm := range n.Arms {
+			a.validatePermissionExpr(arm.Guard, granted)
 			a.validatePermissionStmts(arm.Body, cloneGrantedPermissionFamilies(granted))
 		}
 	case *ast.FoldExpr:
 		a.validatePermissionExpr(n.Value, granted)
 		for _, arm := range n.Arms {
+			a.validatePermissionExpr(arm.Guard, granted)
 			a.validatePermissionStmts(arm.Body, cloneGrantedPermissionFamilies(granted))
+		}
+	case *ast.IsPatternExpr:
+		for _, target := range n.Targets {
+			a.validatePermissionExpr(target, granted)
 		}
 	}
 }

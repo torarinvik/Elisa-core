@@ -120,6 +120,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.SpecializeExpr{})
 		gob.Register(&ast.StructLitExpr{})
 		gob.Register(&ast.VariantTestExpr{})
+		gob.Register(&ast.IsPatternExpr{})
 		gob.Register(&ast.ParenExpr{})
 		gob.Register(&ast.RaiseExpr{})
 		gob.Register(&ast.TryExpr{})

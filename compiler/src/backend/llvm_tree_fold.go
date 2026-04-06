@@ -252,12 +252,18 @@ func (s *functionState) treeVisitRelevantCategoryExactArms(categoryType *semanti
 			continue
 		}
 		relevant = append(relevant, treeVisitExactArm{arm: arm, member: member, wildcard: wildcard})
-		if wildcard {
+		if wildcard && arm.Guard == nil {
 			exhaustive = true
 		}
 	}
 	if !exhaustive {
-		exhaustive = len(relevant) == len(categoryType.Variants)
+		exhaustive = true
+		for _, member := range treeCategoryMembersInTagOrder(categoryType) {
+			if !visitArmsCoverExactMember(treeExactMemberSurfaceName(member), arms) {
+				exhaustive = false
+				break
+			}
+		}
 	}
 	return relevant, exhaustive, nil
 }
@@ -640,7 +646,112 @@ func (s *functionState) emitTreeFoldArmValue(helper *treeFoldHelperInfo, envValu
 	return armValue, reachable, err
 }
 
+func (s *functionState) emitTreeFoldArmSequence(helper *treeFoldHelperInfo, envValue C.LLVMValueRef, nodeValue C.LLVMValueRef, memberType semantic.Type, arms []ast.VisitArm, failUnreachable bool, name string) (C.LLVMValueRef, bool, error) {
+	if len(arms) == 0 {
+		if semantic.IsNeverType(helper.resultType) || failUnreachable {
+			C.LLVMBuildUnreachable(s.builder)
+			return nil, true, nil
+		}
+		llvmType, err := s.g.lowerType(helper.resultType)
+		if err != nil {
+			return nil, false, err
+		}
+		return C.LLVMGetUndef(llvmType), false, nil
+	}
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".end"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".fail"))
+	incomingValues := make([]C.LLVMValueRef, 0, len(arms)+1)
+	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(arms)+1)
+	for i, arm := range arms {
+		bodyEntryBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".arm.entry"))
+		var nextBB C.LLVMBasicBlockRef
+		if i == len(arms)-1 {
+			nextBB = failBB
+		} else {
+			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".next"))
+		}
+		C.LLVMBuildBr(s.builder, bodyEntryBB)
+		C.LLVMPositionBuilderAtEnd(s.builder, bodyEntryBB)
+		childViewValue, err := s.emitTreeFoldChildResultsView(helper, envValue, nodeValue, memberType, name+".arm")
+		if err != nil {
+			return nil, false, err
+		}
+		s.pushScope()
+		if arm.BindName != "" && arm.BindName != "_" {
+			if err := s.emitMoveBindLocal(arm.BindName, memberType, nodeValue); err != nil {
+				s.popScope()
+				return nil, false, err
+			}
+		}
+		if arm.ChildResultsName != "" && arm.ChildResultsName != "_" {
+			childViewType := &semantic.DArrayViewType{Elem: helper.resultType, SurfaceName: "dview"}
+			if err := s.emitMoveBindLocal(arm.ChildResultsName, childViewType, childViewValue); err != nil {
+				s.popScope()
+				return nil, false, err
+			}
+		}
+		if err := s.emitTreeFoldNamedChildBindingLocals(helper, nodeValue, memberType, childViewValue, arm, name+".named"); err != nil {
+			s.popScope()
+			return nil, false, err
+		}
+		if arm.Guard != nil {
+			guardBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".guard.body"))
+			guardValue, _, err := s.emitExpr(arm.Guard, s.g.result.NamedTypes["bool"])
+			if err != nil {
+				s.popScope()
+				return nil, false, err
+			}
+			C.LLVMBuildCondBr(s.builder, guardValue, guardBodyBB, nextBB)
+			C.LLVMPositionBuilderAtEnd(s.builder, guardBodyBB)
+		}
+		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, helper.resultType)
+		if err != nil {
+			s.popScope()
+			return nil, false, err
+		}
+		if reachable && !s.currentBlockTerminated() {
+			inBlock := C.LLVMGetInsertBlock(s.builder)
+			incomingValues = append(incomingValues, armValue)
+			incomingBlocks = append(incomingBlocks, inBlock)
+			C.LLVMBuildBr(s.builder, mergeBB)
+		}
+		s.popScope()
+		C.LLVMPositionBuilderAtEnd(s.builder, nextBB)
+	}
+	if semantic.IsNeverType(helper.resultType) || failUnreachable {
+		C.LLVMBuildUnreachable(s.builder)
+	} else {
+		llvmType, err := s.g.lowerType(helper.resultType)
+		if err != nil {
+			return nil, false, err
+		}
+		inBlock := C.LLVMGetInsertBlock(s.builder)
+		incomingValues = append(incomingValues, C.LLVMGetUndef(llvmType))
+		incomingBlocks = append(incomingBlocks, inBlock)
+		C.LLVMBuildBr(s.builder, mergeBB)
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	if len(incomingValues) == 0 {
+		C.LLVMBuildUnreachable(s.builder)
+		return nil, true, nil
+	}
+	if len(incomingValues) == 1 || semantic.IsNeverType(helper.resultType) {
+		return incomingValues[0], false, nil
+	}
+	llvmType, err := s.g.lowerType(helper.resultType)
+	if err != nil {
+		return nil, false, err
+	}
+	phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree(name+".phi"))
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+	return phi, false, nil
+}
+
 func (s *functionState) emitTreeFoldExactDispatch(helper *treeFoldHelperInfo, envValue C.LLVMValueRef, nodeValue C.LLVMValueRef, memberType semantic.Type, arms []ast.VisitArm) (C.LLVMValueRef, bool, error) {
+	if visitArmsHaveGuard(arms) {
+		memberName := treeExactMemberSurfaceName(memberType)
+		return s.emitTreeFoldArmSequence(helper, envValue, nodeValue, memberType, exactTreeVisitArms(memberName, arms), visitArmsCoverExactMember(memberName, arms), "fold.exact")
+	}
 	arm, ok, _ := exactTreeVisitArm(treeExactMemberSurfaceName(memberType), arms)
 	if !ok {
 		if semantic.IsNeverType(helper.resultType) {
@@ -724,6 +835,75 @@ func (s *functionState) emitTreeFoldSwitchDispatch(helper *treeFoldHelperInfo, e
 	return phi, false, nil
 }
 
+func (s *functionState) emitTreeFoldGuardedSwitchDispatch(helper *treeFoldHelperInfo, envValue C.LLVMValueRef, nodeValue C.LLVMValueRef, members []semantic.Type, arms []ast.VisitArm, exhaustive bool, name string) (C.LLVMValueRef, bool, error) {
+	if len(members) == 0 {
+		return nil, false, fmt.Errorf("fold over %s has no relevant arms", helper.root.bindType().String())
+	}
+	tagValue, err := s.emitTreeHandleTagValue(nodeValue, name+".tag")
+	if err != nil {
+		return nil, false, err
+	}
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".end"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".fail"))
+	switchInst := C.LLVMBuildSwitch(s.builder, tagValue, failBB, C.unsigned(len(members)))
+	incomingValues := make([]C.LLVMValueRef, 0, len(members)+1)
+	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(members)+1)
+	for _, member := range members {
+		memberName := treeExactMemberSurfaceName(member)
+		memberArms := exactTreeVisitArms(memberName, arms)
+		if len(memberArms) == 0 {
+			continue
+		}
+		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".arm"))
+		tag, ok := treeExactMemberTag(member)
+		if !ok {
+			return nil, false, fmt.Errorf("missing exact tag for %s", treeExactMemberSurfaceName(member))
+		}
+		tagConst, err := s.enumTagConstant(tag)
+		if err != nil {
+			return nil, false, err
+		}
+		C.LLVMAddCase(switchInst, tagConst, bodyBB)
+		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+		armValue, terminated, err := s.emitTreeFoldArmSequence(helper, envValue, nodeValue, member, memberArms, visitArmsCoverExactMember(memberName, arms), name+".exact")
+		if err != nil {
+			return nil, false, err
+		}
+		if !terminated && !s.currentBlockTerminated() {
+			incomingValues = append(incomingValues, armValue)
+			incomingBlocks = append(incomingBlocks, C.LLVMGetInsertBlock(s.builder))
+			C.LLVMBuildBr(s.builder, mergeBB)
+		}
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	if semantic.IsNeverType(helper.resultType) || exhaustive {
+		C.LLVMBuildUnreachable(s.builder)
+	} else {
+		llvmType, err := s.g.lowerType(helper.resultType)
+		if err != nil {
+			return nil, false, err
+		}
+		incomingValues = append(incomingValues, C.LLVMGetUndef(llvmType))
+		incomingBlocks = append(incomingBlocks, C.LLVMGetInsertBlock(s.builder))
+		C.LLVMBuildBr(s.builder, mergeBB)
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	if len(incomingValues) == 0 {
+		C.LLVMBuildUnreachable(s.builder)
+		return nil, true, nil
+	}
+	if len(incomingValues) == 1 || semantic.IsNeverType(helper.resultType) {
+		return incomingValues[0], false, nil
+	}
+	llvmType, err := s.g.lowerType(helper.resultType)
+	if err != nil {
+		return nil, false, err
+	}
+	phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree(name+".phi"))
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+	return phi, false, nil
+}
+
 func (s *functionState) emitTreeFoldHelperBody(expr *ast.FoldExpr, helper *treeFoldHelperInfo, nodeParam C.LLVMValueRef, envParam C.LLVMValueRef) error {
 	if helper.hasEnvParam && helper.envStruct != nil {
 		for i, capture := range helper.captures {
@@ -740,18 +920,42 @@ func (s *functionState) emitTreeFoldHelperBody(expr *ast.FoldExpr, helper *treeF
 	)
 	switch helper.root.kind {
 	case treeFoldRootFamily:
-		var relevant []treeVisitExactArm
 		var exhaustive bool
-		relevant, exhaustive, err = s.treeVisitRelevantExactArms(helper.root.family, expr.Arms)
-		if err == nil {
-			resultValue, terminated, err = s.emitTreeFoldSwitchDispatch(helper, envParam, nodeParam, relevant, exhaustive, helper.name+".node")
+		if visitArmsHaveGuard(expr.Arms) {
+			exhaustive = true
+			members := semantic.TreeFamilyExactMembersInTagOrder(helper.root.family)
+			for _, member := range members {
+				if !visitArmsCoverExactMember(treeExactMemberSurfaceName(member), expr.Arms) {
+					exhaustive = false
+					break
+				}
+			}
+			resultValue, terminated, err = s.emitTreeFoldGuardedSwitchDispatch(helper, envParam, nodeParam, members, expr.Arms, exhaustive, helper.name+".node")
+		} else {
+			var relevant []treeVisitExactArm
+			relevant, exhaustive, err = s.treeVisitRelevantExactArms(helper.root.family, expr.Arms)
+			if err == nil {
+				resultValue, terminated, err = s.emitTreeFoldSwitchDispatch(helper, envParam, nodeParam, relevant, exhaustive, helper.name+".node")
+			}
 		}
 	case treeFoldRootCategory:
-		var relevant []treeVisitExactArm
 		var exhaustive bool
-		relevant, exhaustive, err = s.treeVisitRelevantCategoryExactArms(helper.root.category, expr.Arms)
-		if err == nil {
-			resultValue, terminated, err = s.emitTreeFoldSwitchDispatch(helper, envParam, nodeParam, relevant, exhaustive, helper.name+".category")
+		if visitArmsHaveGuard(expr.Arms) {
+			exhaustive = true
+			members := treeCategoryMembersInTagOrder(helper.root.category)
+			for _, member := range members {
+				if !visitArmsCoverExactMember(treeExactMemberSurfaceName(member), expr.Arms) {
+					exhaustive = false
+					break
+				}
+			}
+			resultValue, terminated, err = s.emitTreeFoldGuardedSwitchDispatch(helper, envParam, nodeParam, members, expr.Arms, exhaustive, helper.name+".category")
+		} else {
+			var relevant []treeVisitExactArm
+			relevant, exhaustive, err = s.treeVisitRelevantCategoryExactArms(helper.root.category, expr.Arms)
+			if err == nil {
+				resultValue, terminated, err = s.emitTreeFoldSwitchDispatch(helper, envParam, nodeParam, relevant, exhaustive, helper.name+".category")
+			}
 		}
 	case treeFoldRootExact:
 		resultValue, terminated, err = s.emitTreeFoldExactDispatch(helper, envParam, nodeParam, helper.root.exact, expr.Arms)

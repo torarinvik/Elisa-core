@@ -3323,7 +3323,7 @@ func (a *Analyzer) resolveVisitArmInfo(root treeVisitRootInfo, arm ast.VisitArm)
 	}
 }
 
-func (a *Analyzer) analyzeVisitArmBody(armInfo treeVisitArmInfo, resultType Type, scope *Scope, forFold bool) (Type, affineFlowSnapshot) {
+func (a *Analyzer) analyzeVisitArmBody(armInfo treeVisitArmInfo, resultType Type, scope *Scope, forFold bool) (Type, affineFlowSnapshot, bool) {
 	if armInfo.Arm.BindName != "" && armInfo.BindType != nil {
 		a.defineLocalInScope(scope, &Symbol{Name: armInfo.Arm.BindName, Kind: SymbolLocal, Type: armInfo.BindType, Mutable: false}, armInfo.Arm.Position)
 	}
@@ -3355,7 +3355,29 @@ func (a *Analyzer) analyzeVisitArmBody(armInfo treeVisitArmInfo, resultType Type
 			}
 		}
 	}
-	return a.analyzeMatchExprArmBodyWithAffineSnapshot(armInfo.Arm.Body, scope)
+	bodyScope := scope
+	guardFallthrough := affineFlowSnapshot{}
+	hasGuard := armInfo.Arm.Guard != nil
+	if hasGuard {
+		guardType, guardSnapshot := a.analyzeExprInAffineScope(armInfo.Arm.Guard, scope)
+		if !IsBoolType(guardType) {
+			a.errorf(armInfo.Arm.Guard.Pos(), "visit arm guard must be bool, got %s", guardType.String())
+		}
+		guardFallthrough = guardSnapshot
+		bodyScope = a.refinedScopeForCondition(scope, armInfo.Arm.Guard, true)
+	}
+	bodyType, bodySnapshot := a.analyzeMatchExprArmBodyWithAffineSnapshot(armInfo.Arm.Body, bodyScope)
+	canFallthrough := hasGuard || !blockDefinitelyExits(armInfo.Arm.Body)
+	if hasGuard {
+		if blockDefinitelyExits(armInfo.Arm.Body) {
+			return bodyType, guardFallthrough, true
+		}
+		bodySnapshot.Affine = mergeAffineValueStates(bodySnapshot.Affine, guardFallthrough.Affine)
+		bodySnapshot.BorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(bodySnapshot.BorrowedOwnerRefs, guardFallthrough.BorrowedOwnerRefs)
+		bodySnapshot.FunctionValues = a.mergeFunctionValueBindings(bodySnapshot.FunctionValues, guardFallthrough.FunctionValues)
+		bodySnapshot.SpecializedValueTypes = a.mergeSpecializedValueTypeBindings(bodySnapshot.SpecializedValueTypes, guardFallthrough.SpecializedValueTypes)
+	}
+	return bodyType, bodySnapshot, canFallthrough
 }
 
 func treeFoldArmChildBindingTypes(bindType Type, resultType Type) map[string]Type {
@@ -3421,11 +3443,14 @@ func (a *Analyzer) analyzeVisitExpr(expr *ast.VisitExpr) Type {
 	hasFallthrough := false
 	for _, arm := range expr.Arms {
 		armInfo, armOK := a.resolveVisitArmInfo(root, arm)
+		guarded := arm.Guard != nil
 		if armInfo.Arm.Wildcard {
 			if hasWildcard {
 				a.errorf(arm.Position, "visit wildcard arm is unreachable because an earlier wildcard already matches")
 			}
-			hasWildcard = true
+			if !guarded {
+				hasWildcard = true
+			}
 		} else if armOK {
 			if hasWildcard {
 				a.errorf(arm.Position, "visit arm %q is unreachable because an earlier wildcard already matches", arm.TargetName)
@@ -3433,12 +3458,14 @@ func (a *Analyzer) analyzeVisitExpr(expr *ast.VisitExpr) Type {
 			if priorKeys[armInfo.Key] {
 				a.errorf(arm.Position, "visit arm %q is unreachable because an earlier arm already matches it", arm.TargetName)
 			}
-			priorKeys[armInfo.Key] = true
-			covered[armInfo.Key] = true
+			if !guarded {
+				priorKeys[armInfo.Key] = true
+				covered[armInfo.Key] = true
+			}
 		}
 		scope := NewScope(a.currentScope)
-		armType, armSnapshot := a.analyzeVisitArmBody(armInfo, nil, scope, false)
-		if !blockDefinitelyExits(arm.Body) {
+		armType, armSnapshot, armCanFallthrough := a.analyzeVisitArmBody(armInfo, nil, scope, false)
+		if armCanFallthrough {
 			if !hasFallthrough {
 				mergedAffine = armSnapshot.Affine
 				mergedBorrowedOwnerRefs = armSnapshot.BorrowedOwnerRefs
@@ -3607,6 +3634,7 @@ func (a *Analyzer) recordFoldExprInfo(expr *ast.FoldExpr) {
 	for _, arm := range expr.Arms {
 		armLocals := map[string]bool{}
 		appendVisitArmLocals(armLocals, arm)
+		collector.collectExpr(arm.Guard, cloneParallelForLocals(armLocals))
 		for _, stmt := range arm.Body {
 			collector.collectStmt(stmt, cloneParallelForLocals(armLocals))
 		}
@@ -3651,11 +3679,14 @@ func (a *Analyzer) analyzeFoldExpr(expr *ast.FoldExpr) Type {
 	hasFallthrough := false
 	for _, arm := range expr.Arms {
 		armInfo, armOK := a.resolveVisitArmInfo(root, arm)
+		guarded := arm.Guard != nil
 		if armInfo.Arm.Wildcard {
 			if hasWildcard {
 				a.errorf(arm.Position, "fold wildcard arm is unreachable because an earlier wildcard already matches")
 			}
-			hasWildcard = true
+			if !guarded {
+				hasWildcard = true
+			}
 		} else if armOK {
 			if hasWildcard {
 				a.errorf(arm.Position, "fold arm %q is unreachable because an earlier wildcard already matches", arm.TargetName)
@@ -3663,16 +3694,18 @@ func (a *Analyzer) analyzeFoldExpr(expr *ast.FoldExpr) Type {
 			if priorKeys[armInfo.Key] {
 				a.errorf(arm.Position, "fold arm %q is unreachable because an earlier arm already matches it", arm.TargetName)
 			}
-			priorKeys[armInfo.Key] = true
-			covered[armInfo.Key] = true
+			if !guarded {
+				priorKeys[armInfo.Key] = true
+				covered[armInfo.Key] = true
+			}
 		}
 		scope := NewScope(a.currentScope)
-		armType, armSnapshot := a.analyzeVisitArmBody(armInfo, resultType, scope, true)
+		armType, armSnapshot, armCanFallthrough := a.analyzeVisitArmBody(armInfo, resultType, scope, true)
 		if !IsNeverType(armType) && !AssignableTo(resultType, armType) {
 			a.errorf(arm.Position, "fold arm %q expects %s, got %s", arm.TargetName, resultType.String(), armType.String())
 			a.reportShapeMismatchNotes(arm.Position, resultType, armType)
 		}
-		if !blockDefinitelyExits(arm.Body) {
+		if armCanFallthrough {
 			if !hasFallthrough {
 				mergedAffine = armSnapshot.Affine
 				mergedBorrowedOwnerRefs = armSnapshot.BorrowedOwnerRefs

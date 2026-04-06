@@ -1098,16 +1098,88 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 }
 
 func (s *functionState) emitIsExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, semantic.Type, error) {
-	if treeType, variant, pattern, ok := s.treeIsTargetPattern(expr.Right); ok {
-		return s.emitTreeIsTest(expr.Left, treeType, variant, pattern)
+	targets := flattenIsTargetExprsBackend(expr.Right)
+	if len(targets) == 0 {
+		return nil, nil, fmt.Errorf("is expression is missing a target")
 	}
-	if enumType, variant, pattern, ok := s.enumIsTargetPattern(expr.Right); ok {
-		return s.emitEnumIsTest(expr.Left, enumType, variant, pattern)
+	var combined C.LLVMValueRef
+	for i, target := range targets {
+		var (
+			value C.LLVMValueRef
+			err   error
+		)
+		if treeType, variant, pattern, ok := s.treeIsTargetPattern(target); ok {
+			value, _, err = s.emitTreeIsTest(expr.Left, treeType, variant, pattern)
+		} else if enumType, variant, pattern, ok := s.enumIsTargetPattern(target); ok {
+			value, _, err = s.emitEnumIsTest(expr.Left, enumType, variant, pattern)
+		} else if base, cases, ok := s.namedStateIsTarget(target); ok {
+			value, _, err = s.emitNamedStateIsTest(expr.Left, base, cases)
+		} else {
+			value, _, err = s.emitComparableIsTargetTest(expr.Left, target)
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		if i == 0 {
+			combined = value
+			continue
+		}
+		combined = C.LLVMBuildOr(s.builder, combined, value, cStringFree("istest.or"))
 	}
-	if base, cases, ok := s.namedStateIsTarget(expr.Right); ok {
-		return s.emitNamedStateIsTest(expr.Left, base, cases)
+	return combined, s.g.result.NamedTypes["bool"], nil
+}
+
+func appendIsTargetExprsBackend(out []ast.Expr, expr ast.Expr) []ast.Expr {
+	if expr == nil {
+		return out
 	}
-	return nil, nil, fmt.Errorf("unsupported is target %T", expr.Right)
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return appendIsTargetExprsBackend(out, n.Inner)
+	case *ast.IsPatternExpr:
+		for _, target := range n.Targets {
+			out = appendIsTargetExprsBackend(out, target)
+		}
+		return out
+	default:
+		return append(out, expr)
+	}
+}
+
+func flattenIsTargetExprsBackend(expr ast.Expr) []ast.Expr {
+	return appendIsTargetExprsBackend(nil, expr)
+}
+
+func (s *functionState) emitComparableIsTargetTest(leftExpr ast.Expr, targetExpr ast.Expr) (C.LLVMValueRef, semantic.Type, error) {
+	leftType := s.exprType(leftExpr)
+	rightType := s.exprType(targetExpr)
+	resultType := s.g.result.NamedTypes["bool"]
+	synthetic := &ast.BinaryExpr{Position: leftExpr.Pos(), Op: lexer.TOKEN_EQEQ, Left: leftExpr, Right: targetExpr}
+	if helperName, firstType, secondType, swap, ok := runtimeStringCompareInfo(leftType, rightType); ok {
+		return s.emitRuntimeStringCompareExpr(synthetic, helperName, firstType, secondType, swap)
+	}
+	if value, actualType, handled, err := s.emitOptionalCompareExpr(synthetic, leftType, rightType, resultType); handled {
+		return value, actualType, err
+	}
+	if value, actualType, handled, err := s.emitPointerCompareExpr(synthetic, leftType, rightType, resultType); handled {
+		return value, actualType, err
+	}
+	operandType := s.binaryOperandType(lexer.TOKEN_EQEQ, leftType, rightType)
+	left, _, err := s.emitExpr(leftExpr, operandType)
+	if err != nil {
+		return nil, nil, err
+	}
+	right, _, err := s.emitExpr(targetExpr, operandType)
+	if err != nil {
+		return nil, nil, err
+	}
+	if enumType, ok := operandType.(*semantic.EnumType); ok {
+		return s.emitEnumCompareExpr(lexer.TOKEN_EQEQ, enumType, left, right, resultType)
+	}
+	if isFloatType(operandType) {
+		return C.LLVMBuildFCmp(s.builder, C.LLVMRealOEQ, left, right, cStringFree("isvalue.eq")), resultType, nil
+	}
+	return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), left, right, cStringFree("isvalue.eq")), resultType, nil
 }
 
 func (s *functionState) emitEnumIsTest(leftExpr ast.Expr, enumType *semantic.EnumType, variant *semantic.EnumVariant, pattern *ast.MatchVariantPattern) (C.LLVMValueRef, semantic.Type, error) {
@@ -1157,6 +1229,9 @@ func (s *functionState) emitEnumIsTest(leftExpr ast.Expr, enumType *semantic.Enu
 }
 
 func (s *functionState) enumIsTargetPattern(expr ast.Expr) (*semantic.EnumType, *semantic.EnumVariant, *ast.MatchVariantPattern, bool) {
+	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
+		return s.enumIsTargetPattern(paren.Inner)
+	}
 	if testExpr, ok := expr.(*ast.VariantTestExpr); ok {
 		if testExpr == nil || testExpr.Pattern == nil {
 			return nil, nil, nil, false
@@ -1418,6 +1493,9 @@ func (s *functionState) enumIsTarget(expr ast.Expr) (*semantic.EnumType, *semant
 }
 
 func (s *functionState) namedStateIsTarget(expr ast.Expr) (*semantic.StructType, []string, bool) {
+	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
+		return s.namedStateIsTarget(paren.Inner)
+	}
 	typedExpr, ok := expr.(*ast.TypeExprExpr)
 	if !ok || typedExpr == nil || typedExpr.Type == nil {
 		return nil, nil, false
@@ -6523,6 +6601,9 @@ func resolveMatchableTreeCategoryTypeBackend(actual semantic.Type) (*semantic.Tr
 }
 
 func (s *functionState) treeIsTargetPattern(expr ast.Expr) (*semantic.TreeCategoryType, *semantic.EnumVariant, *ast.MatchVariantPattern, bool) {
+	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
+		return s.treeIsTargetPattern(paren.Inner)
+	}
 	if testExpr, ok := expr.(*ast.VariantTestExpr); ok {
 		if testExpr == nil || testExpr.Pattern == nil {
 			return nil, nil, nil, false

@@ -759,40 +759,63 @@ func (i *Interpreter) evalIsExpr(frame *frame, expr *ast.BinaryExpr) (Value, err
 	if err != nil {
 		return VoidValue(), err
 	}
-	base, cases, ok := i.namedStateIsTarget(expr.Right)
-	if !ok || base == nil {
-		return VoidValue(), fmt.Errorf("interpreter only supports named-state struct tests for is")
-	}
-	if leftValue.kind != valueStruct || leftValue.structVal == nil {
-		return VoidValue(), fmt.Errorf("is requires a struct value, got %s", leftValue.String())
-	}
-	if leftValue.structVal.Name != base.Name {
-		return BoolValue(false), nil
-	}
-	if len(cases) == len(base.NamedStateCases) {
-		return BoolValue(true), nil
-	}
-	for _, stateName := range cases {
-		derived := base.DerivedStateMap[stateName]
-		if derived == nil || derived.Condition == nil {
-			return VoidValue(), fmt.Errorf("missing derived state rule for %s.%s", base.Name, stateName)
+	for _, target := range flattenInterpreterIsTargets(expr.Right) {
+		base, cases, ok := i.namedStateIsTarget(target)
+		if !ok || base == nil {
+			return VoidValue(), fmt.Errorf("interpreter only supports named-state struct tests for is")
 		}
-		value, err := i.evalDerivedStateExpr(frame, derived.Condition, leftValue)
-		if err != nil {
-			return VoidValue(), err
+		if leftValue.kind != valueStruct || leftValue.structVal == nil {
+			return VoidValue(), fmt.Errorf("is requires a struct value, got %s", leftValue.String())
 		}
-		truth, err := requireBool(value)
-		if err != nil {
-			return VoidValue(), err
+		if leftValue.structVal.Name != base.Name {
+			continue
 		}
-		if truth {
+		if len(cases) == len(base.NamedStateCases) {
 			return BoolValue(true), nil
+		}
+		for _, stateName := range cases {
+			derived := base.DerivedStateMap[stateName]
+			if derived == nil || derived.Condition == nil {
+				return VoidValue(), fmt.Errorf("missing derived state rule for %s.%s", base.Name, stateName)
+			}
+			value, err := i.evalDerivedStateExpr(frame, derived.Condition, leftValue)
+			if err != nil {
+				return VoidValue(), err
+			}
+			truth, err := requireBool(value)
+			if err != nil {
+				return VoidValue(), err
+			}
+			if truth {
+				return BoolValue(true), nil
+			}
 		}
 	}
 	return BoolValue(false), nil
 }
 
+func flattenInterpreterIsTargets(expr ast.Expr) []ast.Expr {
+	if expr == nil {
+		return nil
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return flattenInterpreterIsTargets(n.Inner)
+	case *ast.IsPatternExpr:
+		out := make([]ast.Expr, 0, len(n.Targets))
+		for _, target := range n.Targets {
+			out = append(out, flattenInterpreterIsTargets(target)...)
+		}
+		return out
+	default:
+		return []ast.Expr{expr}
+	}
+}
+
 func (i *Interpreter) namedStateIsTarget(expr ast.Expr) (*semantic.StructType, []string, bool) {
+	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
+		return i.namedStateIsTarget(paren.Inner)
+	}
 	typedExpr, ok := expr.(*ast.TypeExprExpr)
 	if !ok || typedExpr == nil || typedExpr.Type == nil || i == nil || i.result == nil {
 		return nil, nil, false

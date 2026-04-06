@@ -4201,6 +4201,37 @@ func exactTreeVisitArm(memberName string, arms []ast.VisitArm) (ast.VisitArm, bo
 	return ast.VisitArm{}, false, false
 }
 
+func exactTreeVisitArms(memberName string, arms []ast.VisitArm) []ast.VisitArm {
+	matched := make([]ast.VisitArm, 0)
+	for _, arm := range arms {
+		if arm.Wildcard || arm.TargetName == memberName {
+			matched = append(matched, arm)
+		}
+	}
+	return matched
+}
+
+func visitArmsHaveGuard(arms []ast.VisitArm) bool {
+	for _, arm := range arms {
+		if arm.Guard != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func visitArmsCoverExactMember(memberName string, arms []ast.VisitArm) bool {
+	for _, arm := range arms {
+		if arm.Guard != nil {
+			continue
+		}
+		if arm.Wildcard || arm.TargetName == memberName {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *functionState) treeVisitRelevantArms(categoryType *semantic.TreeCategoryType, arms []ast.VisitArm) ([]treeVisitRelevantArm, bool, error) {
 	relevant := make([]treeVisitRelevantArm, 0, len(arms))
 	exhaustive := false
@@ -4208,7 +4239,9 @@ func (s *functionState) treeVisitRelevantArms(categoryType *semantic.TreeCategor
 	for _, arm := range arms {
 		if arm.Wildcard {
 			relevant = append(relevant, treeVisitRelevantArm{arm: arm, wildcard: true})
-			exhaustive = true
+			if arm.Guard == nil {
+				exhaustive = true
+			}
 			continue
 		}
 		idx := strings.LastIndex(arm.TargetName, ".")
@@ -4225,7 +4258,9 @@ func (s *functionState) treeVisitRelevantArms(categoryType *semantic.TreeCategor
 			return nil, false, fmt.Errorf("tree category %s has no variant %s", categoryType.Name, variantName)
 		}
 		relevant = append(relevant, treeVisitRelevantArm{arm: arm, variant: variant})
-		covered[variant.Name] = true
+		if arm.Guard == nil {
+			covered[variant.Name] = true
+		}
 	}
 	if !exhaustive && categoryType != nil {
 		exhaustive = len(covered) == len(categoryType.Variants)
@@ -4246,14 +4281,106 @@ func (s *functionState) treeVisitRelevantExactArms(treeType *semantic.TreeType, 
 			continue
 		}
 		relevant = append(relevant, treeVisitExactArm{arm: arm, member: member, wildcard: wildcard})
-		if wildcard {
+		if wildcard && arm.Guard == nil {
 			exhaustive = true
 		}
 	}
 	if !exhaustive {
-		exhaustive = len(relevant) == len(semantic.TreeFamilyExactMembersInTagOrder(treeType))
+		exhaustive = true
+		for _, member := range semantic.TreeFamilyExactMembersInTagOrder(treeType) {
+			if !visitArmsCoverExactMember(treeExactMemberSurfaceName(member), arms) {
+				exhaustive = false
+				break
+			}
+		}
 	}
 	return relevant, exhaustive, nil
+}
+
+func (s *functionState) emitExactVisitArmSequence(value C.LLVMValueRef, bindType semantic.Type, arms []ast.VisitArm, resultType semantic.Type, name string) (C.LLVMValueRef, bool, error) {
+	if len(arms) == 0 {
+		if semantic.IsNeverType(resultType) {
+			C.LLVMBuildUnreachable(s.builder)
+			return nil, true, nil
+		}
+		llvmType, err := s.g.lowerType(resultType)
+		if err != nil {
+			return nil, false, err
+		}
+		return C.LLVMGetUndef(llvmType), false, nil
+	}
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".end"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".fail"))
+	incomingValues := make([]C.LLVMValueRef, 0, len(arms)+1)
+	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(arms)+1)
+	for i, arm := range arms {
+		bodyEntryBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".arm.entry"))
+		var nextBB C.LLVMBasicBlockRef
+		if i == len(arms)-1 {
+			nextBB = failBB
+		} else {
+			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".next"))
+		}
+		C.LLVMBuildBr(s.builder, bodyEntryBB)
+		C.LLVMPositionBuilderAtEnd(s.builder, bodyEntryBB)
+		s.pushScope()
+		if arm.BindName != "" && arm.BindName != "_" {
+			if err := s.emitMoveBindLocal(arm.BindName, bindType, value); err != nil {
+				s.popScope()
+				return nil, false, err
+			}
+		}
+		if arm.Guard != nil {
+			guardBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".guard.body"))
+			guardValue, _, err := s.emitExpr(arm.Guard, s.g.result.NamedTypes["bool"])
+			if err != nil {
+				s.popScope()
+				return nil, false, err
+			}
+			C.LLVMBuildCondBr(s.builder, guardValue, guardBodyBB, nextBB)
+			C.LLVMPositionBuilderAtEnd(s.builder, guardBodyBB)
+		}
+		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, resultType)
+		if err != nil {
+			s.popScope()
+			return nil, false, err
+		}
+		if reachable && !s.currentBlockTerminated() {
+			inBlock := C.LLVMGetInsertBlock(s.builder)
+			incomingValues = append(incomingValues, armValue)
+			incomingBlocks = append(incomingBlocks, inBlock)
+			C.LLVMBuildBr(s.builder, mergeBB)
+		}
+		s.popScope()
+		C.LLVMPositionBuilderAtEnd(s.builder, nextBB)
+	}
+	if semantic.IsNeverType(resultType) {
+		C.LLVMBuildUnreachable(s.builder)
+	} else {
+		llvmType, err := s.g.lowerType(resultType)
+		if err != nil {
+			return nil, false, err
+		}
+		inBlock := C.LLVMGetInsertBlock(s.builder)
+		incomingValues = append(incomingValues, C.LLVMGetUndef(llvmType))
+		incomingBlocks = append(incomingBlocks, inBlock)
+		C.LLVMBuildBr(s.builder, mergeBB)
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	if len(incomingValues) == 0 {
+		C.LLVMBuildUnreachable(s.builder)
+		return nil, true, nil
+	}
+	if len(incomingValues) == 1 || semantic.IsNeverType(resultType) {
+		return incomingValues[0], false, nil
+	}
+	llvmType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, false, err
+	}
+	phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree(name+".phi"))
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+	return phi, false, nil
 }
 
 func (s *functionState) emitVisitExpr(expr *ast.VisitExpr) (C.LLVMValueRef, semantic.Type, error) {
@@ -4315,6 +4442,16 @@ func (s *functionState) emitVisitExpr(expr *ast.VisitExpr) (C.LLVMValueRef, sema
 				return nil, nil, err
 			}
 		}
+		if armInfo.arm.Guard != nil {
+			guardBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("visit.expr.guard.body"))
+			guardValue, _, err := s.emitExpr(armInfo.arm.Guard, s.g.result.NamedTypes["bool"])
+			if err != nil {
+				s.popScope()
+				return nil, nil, err
+			}
+			C.LLVMBuildCondBr(s.builder, guardValue, guardBodyBB, nextBB)
+			C.LLVMPositionBuilderAtEnd(s.builder, guardBodyBB)
+		}
 		armValue, reachable, err := s.emitMatchExprArmBody(armInfo.arm.Body, resultType)
 		if err != nil {
 			s.popScope()
@@ -4371,6 +4508,74 @@ func (s *functionState) emitFamilyTreeVisitExpr(expr *ast.VisitExpr, rootType *s
 	treeValue, _, err := s.emitExpr(expr.Value, nil)
 	if err != nil {
 		return nil, nil, err
+	}
+	if visitArmsHaveGuard(expr.Arms) {
+		mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("visit.node.end"))
+		failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("visit.node.fail"))
+		tagValue, err := s.emitTreeHandleTagValue(treeValue, "visit.node")
+		if err != nil {
+			return nil, nil, err
+		}
+		members := semantic.TreeFamilyExactMembersInTagOrder(rootType.Family)
+		switchInst := C.LLVMBuildSwitch(s.builder, tagValue, failBB, C.unsigned(len(members)))
+		incomingValues := make([]C.LLVMValueRef, 0, len(members)+1)
+		incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(members)+1)
+		for _, member := range members {
+			memberName := treeExactMemberSurfaceName(member)
+			memberArms := exactTreeVisitArms(memberName, expr.Arms)
+			if len(memberArms) == 0 {
+				continue
+			}
+			bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("visit.node.arm"))
+			tag, ok := treeExactMemberTag(member)
+			if !ok {
+				return nil, nil, fmt.Errorf("missing exact tag for %s", memberName)
+			}
+			tagConst, err := s.errorCodeConstant(tag)
+			if err != nil {
+				return nil, nil, err
+			}
+			C.LLVMAddCase(switchInst, tagConst, bodyBB)
+			C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+			armValue, terminated, err := s.emitExactVisitArmSequence(treeValue, member, memberArms, resultType, "visit.node.exact")
+			if err != nil {
+				return nil, nil, err
+			}
+			if !terminated && !s.currentBlockTerminated() {
+				inBlock := C.LLVMGetInsertBlock(s.builder)
+				incomingValues = append(incomingValues, armValue)
+				incomingBlocks = append(incomingBlocks, inBlock)
+				C.LLVMBuildBr(s.builder, mergeBB)
+			}
+		}
+		C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+		if semantic.IsNeverType(resultType) {
+			C.LLVMBuildUnreachable(s.builder)
+		} else {
+			llvmType, err := s.g.lowerType(resultType)
+			if err != nil {
+				return nil, nil, err
+			}
+			inBlock := C.LLVMGetInsertBlock(s.builder)
+			incomingValues = append(incomingValues, C.LLVMGetUndef(llvmType))
+			incomingBlocks = append(incomingBlocks, inBlock)
+			C.LLVMBuildBr(s.builder, mergeBB)
+		}
+		C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+		if len(incomingValues) == 0 {
+			C.LLVMBuildUnreachable(s.builder)
+			return nil, resultType, nil
+		}
+		if len(incomingValues) == 1 || semantic.IsNeverType(resultType) {
+			return incomingValues[0], resultType, nil
+		}
+		llvmType, err := s.g.lowerType(resultType)
+		if err != nil {
+			return nil, nil, err
+		}
+		phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree("visit.node.phi"))
+		C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+		return phi, resultType, nil
 	}
 	relevantArms, exhaustive, err := s.treeVisitRelevantExactArms(rootType.Family, expr.Arms)
 	if err != nil {
@@ -4456,6 +4661,10 @@ func (s *functionState) emitExactTreeVisitExpr(expr *ast.VisitExpr, memberName s
 	value, _, err := s.emitExpr(expr.Value, bindType)
 	if err != nil {
 		return nil, nil, err
+	}
+	if visitArmsHaveGuard(expr.Arms) {
+		armValue, _, err := s.emitExactVisitArmSequence(value, bindType, exactTreeVisitArms(memberName, expr.Arms), resultType, "visit.exact")
+		return armValue, resultType, err
 	}
 	arm, ok, _ := exactTreeVisitArm(memberName, expr.Arms)
 	if !ok {
@@ -5653,6 +5862,9 @@ func exprReadsMatchedValueField(name string, expr ast.Expr) bool {
 			return true
 		}
 		for _, arm := range n.Arms {
+			if exprReadsMatchedValueField(name, arm.Guard) {
+				return true
+			}
 			if stmtsReadMatchedValueField(name, arm.Body) {
 				return true
 			}
@@ -5663,7 +5875,17 @@ func exprReadsMatchedValueField(name string, expr ast.Expr) bool {
 			return true
 		}
 		for _, arm := range n.Arms {
+			if exprReadsMatchedValueField(name, arm.Guard) {
+				return true
+			}
 			if stmtsReadMatchedValueField(name, arm.Body) {
+				return true
+			}
+		}
+		return false
+	case *ast.IsPatternExpr:
+		for _, target := range n.Targets {
+			if exprReadsMatchedValueField(name, target) {
 				return true
 			}
 		}

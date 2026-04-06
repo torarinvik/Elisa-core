@@ -548,19 +548,32 @@ func (p *Parser) parseMatchArms() []ast.MatchArm {
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
 		}
-		arms = append(arms, p.parseMatchArm())
+		arms = append(arms, p.parseMatchArm()...)
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 	return arms
 }
 
-func (p *Parser) parseMatchArm() ast.MatchArm {
+func (p *Parser) parseMatchArm() []ast.MatchArm {
 	pos := p.cur().Pos
-	pattern := p.parseMatchPattern()
+	patterns := p.parseTopLevelMatchPatterns()
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	body := p.parseBlock()
-	return ast.MatchArm{Position: pos, Pattern: pattern, Body: body}
+	arms := make([]ast.MatchArm, 0, len(patterns))
+	for _, pattern := range patterns {
+		arms = append(arms, ast.MatchArm{Position: pos, Pattern: pattern, Body: body})
+	}
+	return arms
+}
+
+func (p *Parser) parseTopLevelMatchPatterns() []ast.MatchPattern {
+	patterns := []ast.MatchPattern{p.parseMatchPattern()}
+	for p.peek() == lexer.TOKEN_PIPE {
+		p.advance()
+		patterns = append(patterns, p.parseMatchPattern())
+	}
+	return patterns
 }
 
 func (p *Parser) parseMatchPattern() ast.MatchPattern {
@@ -747,7 +760,7 @@ type ifClause struct {
 	Cond     ast.Expr
 	Value    ast.Expr
 	Store    ast.Expr
-	Pattern  ast.MatchPattern
+	Patterns []ast.MatchPattern
 	Body     []ast.Stmt
 }
 
@@ -793,11 +806,11 @@ func (p *Parser) parseIfClause(isElif bool) ifClause {
 				p.errorf("if likely/unlikely hint cannot be combined with pattern binders")
 			}
 		}
-		pattern := p.parseMatchPattern()
+		patterns := p.parseTopLevelMatchPatterns()
 		p.expect(lexer.TOKEN_COLON)
 		p.expectNewline()
 		body := p.parseBlock()
-		return ifClause{Position: pos, Hint: hint, Value: head, Pattern: pattern, Body: body}
+		return ifClause{Position: pos, Hint: hint, Value: head, Patterns: patterns, Body: body}
 	}
 	if p.match(lexer.TOKEN_IN) {
 		if hint != ast.BranchHintNone {
@@ -809,11 +822,11 @@ func (p *Parser) parseIfClause(isElif bool) ifClause {
 		}
 		store := p.parseExpr()
 		if p.match(lexer.TOKEN_AS) {
-			pattern := p.parseMatchPattern()
+			patterns := p.parseTopLevelMatchPatterns()
 			p.expect(lexer.TOKEN_COLON)
 			p.expectNewline()
 			body := p.parseBlock()
-			return ifClause{Position: pos, Hint: hint, Value: head, Store: store, Pattern: pattern, Body: body}
+			return ifClause{Position: pos, Hint: hint, Value: head, Store: store, Patterns: patterns, Body: body}
 		}
 		if isElif {
 			p.errorf("elif pattern binder requires `as Enum.Variant(...)` after store expression")
@@ -831,15 +844,17 @@ func lowerIfClauses(clauses []ifClause, elseBlock []ast.Stmt) ast.Stmt {
 	tail := elseBlock
 	for i := len(clauses) - 1; i >= 0; i-- {
 		clause := clauses[i]
-		if clause.Pattern != nil {
+		if len(clause.Patterns) != 0 {
+			arms := make([]ast.MatchArm, 0, len(clause.Patterns)+1)
+			for _, pattern := range clause.Patterns {
+				arms = append(arms, ast.MatchArm{Position: pattern.Pos(), Pattern: pattern, Body: clause.Body})
+			}
+			arms = append(arms, ast.MatchArm{Position: clause.Position, Pattern: &ast.MatchWildcardPattern{Position: clause.Position}, Body: tail})
 			tail = []ast.Stmt{&ast.MatchStmt{
 				Position: clause.Position,
 				Value:    clause.Value,
 				Store:    clause.Store,
-				Arms: []ast.MatchArm{
-					{Position: clause.Pattern.Pos(), Pattern: clause.Pattern, Body: clause.Body},
-					{Position: clause.Position, Pattern: &ast.MatchWildcardPattern{Position: clause.Position}, Body: tail},
-				},
+				Arms:     arms,
 			}}
 			continue
 		}

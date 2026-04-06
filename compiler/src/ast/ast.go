@@ -614,6 +614,11 @@ type VariantTestExpr struct {
 	Pattern  *MatchVariantPattern
 }
 
+type IsPatternExpr struct {
+	Position lexer.Pos
+	Targets  []Expr
+}
+
 type TypeExprExpr struct {
 	Position lexer.Pos
 	Type     TypeExpr
@@ -687,6 +692,7 @@ type VisitArm struct {
 	BindName         string
 	ChildResultsName string
 	ChildBindings    []VisitArmChildBinding
+	Guard            Expr
 	Wildcard         bool
 	Body             []Stmt
 }
@@ -1080,6 +1086,7 @@ func (n *AddrOfExpr) Pos() lexer.Pos      { return n.Position }
 func (n *SpecializeExpr) Pos() lexer.Pos  { return n.Position }
 func (n *StructLitExpr) Pos() lexer.Pos   { return n.Position }
 func (n *VariantTestExpr) Pos() lexer.Pos { return n.Position }
+func (n *IsPatternExpr) Pos() lexer.Pos   { return n.Position }
 func (n *TypeExprExpr) Pos() lexer.Pos    { return n.Position }
 func (n *ParenExpr) Pos() lexer.Pos       { return n.Position }
 func (n *RaiseExpr) Pos() lexer.Pos       { return n.Position }
@@ -1197,6 +1204,7 @@ func (*AddrOfExpr) nodeTag()                {}
 func (*SpecializeExpr) nodeTag()            {}
 func (*StructLitExpr) nodeTag()             {}
 func (*VariantTestExpr) nodeTag()           {}
+func (*IsPatternExpr) nodeTag()             {}
 func (*TypeExprExpr) nodeTag()              {}
 func (*ParenExpr) nodeTag()                 {}
 func (*RaiseExpr) nodeTag()                 {}
@@ -1319,6 +1327,7 @@ func (*AddrOfExpr) exprTag()                        {}
 func (*SpecializeExpr) exprTag()                    {}
 func (*StructLitExpr) exprTag()                     {}
 func (*VariantTestExpr) exprTag()                   {}
+func (*IsPatternExpr) exprTag()                     {}
 func (*TypeExprExpr) exprTag()                      {}
 func (*ParenExpr) exprTag()                         {}
 func (*RaiseExpr) exprTag()                         {}

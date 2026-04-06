@@ -2430,69 +2430,119 @@ func refsComparableIgnoringMutability(left Type, right Type) bool {
 	rightClone.Mutable = false
 	return AssignableTo(leftClone, rightClone) || AssignableTo(rightClone, leftClone)
 }
+
+func appendIsTargetExprs(out []ast.Expr, expr ast.Expr) []ast.Expr {
+	if expr == nil {
+		return out
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return appendIsTargetExprs(out, n.Inner)
+	case *ast.IsPatternExpr:
+		for _, target := range n.Targets {
+			out = appendIsTargetExprs(out, target)
+		}
+		return out
+	default:
+		return append(out, expr)
+	}
+}
+
+func flattenIsTargetExprs(expr ast.Expr) []ast.Expr {
+	return appendIsTargetExprs(nil, expr)
+}
+
+func isComparableValueTarget(left Type, right Type) bool {
+	return runtimeStringComparable(left, right) ||
+		(IsNumericType(left) && IsNumericType(right)) ||
+		AssignableTo(left, right) ||
+		AssignableTo(right, left) ||
+		refsComparableIgnoringMutability(left, right) ||
+		(IsNullType(left) && isRefLike(right)) ||
+		(IsNullType(right) && isRefLike(left))
+}
+
+func (a *Analyzer) analyzeIsComparableTarget(left Type, target ast.Expr) bool {
+	if typedExpr, ok := target.(*ast.TypeExprExpr); ok && typedExpr != nil && typedExpr.Type != nil {
+		a.resolveType(typedExpr.Type)
+		a.errorf(target.Pos(), "is target must be a variant, a named-state target, or a comparable value")
+		return false
+	}
+	targetShorthand, targetIsShorthand := contextualShorthandExpr(target)
+	var right Type
+	if targetIsShorthand && targetShorthand != nil {
+		right = a.analyzeValueExpr(target, left)
+	} else {
+		right = a.analyzeExpr(target)
+	}
+	if !isComparableValueTarget(left, right) {
+		a.errorf(target.Pos(), "is expects a comparable value alternative, got %s", right.String())
+		return false
+	}
+	return true
+}
+
 func (a *Analyzer) analyzeIsExpr(expr *ast.BinaryExpr) Type {
 	left := a.analyzeExpr(expr.Left)
-	if enumType, variant, ok := a.resolveEnumVariantIsTarget(expr.Right); ok {
-		if _, _, ok := resolveMatchableEnumType(left); !ok {
-			a.errorf(expr.Left.Pos(), "is requires an enum value for variant tests, got %s", left.String())
-			return a.namedTypes["bool"]
-		}
-		matchableEnum, _, _ := resolveMatchableEnumType(left)
-		if matchableEnum == nil || enumType == nil || matchableEnum.Name != enumType.Name {
-			expected := "<invalid>"
-			if matchableEnum != nil {
-				expected = matchableEnum.Name
+	targets := flattenIsTargetExprs(expr.Right)
+	for _, target := range targets {
+		if enumType, variant, ok := a.resolveEnumVariantIsTarget(target); ok {
+			if _, _, ok := resolveMatchableEnumType(left); !ok {
+				a.errorf(expr.Left.Pos(), "is requires an enum value for variant tests, got %s", left.String())
+				continue
 			}
-			got := "<invalid>"
-			if enumType != nil && variant != nil {
-				got = enumType.Name + "." + variant.Name
+			matchableEnum, _, _ := resolveMatchableEnumType(left)
+			if matchableEnum == nil || enumType == nil || matchableEnum.Name != enumType.Name {
+				expected := "<invalid>"
+				if matchableEnum != nil {
+					expected = matchableEnum.Name
+				}
+				got := "<invalid>"
+				if enumType != nil && variant != nil {
+					got = enumType.Name + "." + variant.Name
+				}
+				a.errorf(expr.Pos(), "is expects a variant of enum %q, got %s", expected, got)
 			}
-			a.errorf(expr.Pos(), "is expects a variant of enum %q, got %s", expected, got)
-		}
-		if pattern, ok := a.enumVariantIsTargetPattern(expr.Right, enumType, variant); ok && pattern != nil {
-			a.validateEnumVariantIsTargetPattern(pattern, variant)
-		}
-		return a.namedTypes["bool"]
-	}
-	if treeType, variant, ok := a.resolveTreeVariantIsTarget(expr.Right); ok {
-		if _, _, ok := resolveMatchableTreeCategoryType(left); !ok {
-			a.errorf(expr.Left.Pos(), "is requires an enum or tree-category value for variant tests, got %s", left.String())
-			return a.namedTypes["bool"]
-		}
-		matchableTree, _, _ := resolveMatchableTreeCategoryType(left)
-		if matchableTree == nil || treeType == nil || matchableTree.Name != treeType.Name {
-			expected := "<invalid>"
-			if matchableTree != nil {
-				expected = matchableTree.Name
+			if pattern, ok := a.enumVariantIsTargetPattern(target, enumType, variant); ok && pattern != nil {
+				a.validateEnumVariantIsTargetPattern(pattern, variant)
 			}
-			got := "<invalid>"
-			if treeType != nil && variant != nil {
-				got = treeType.Name + "." + variant.Name
+			continue
+		}
+		if treeType, variant, ok := a.resolveTreeVariantIsTarget(target); ok {
+			if _, _, ok := resolveMatchableTreeCategoryType(left); !ok {
+				a.errorf(expr.Left.Pos(), "is requires an enum or tree-category value for variant tests, got %s", left.String())
+				continue
 			}
-			a.errorf(expr.Pos(), "is expects a variant of tree category %q, got %s", expected, got)
+			matchableTree, _, _ := resolveMatchableTreeCategoryType(left)
+			if matchableTree == nil || treeType == nil || matchableTree.Name != treeType.Name {
+				expected := "<invalid>"
+				if matchableTree != nil {
+					expected = matchableTree.Name
+				}
+				got := "<invalid>"
+				if treeType != nil && variant != nil {
+					got = treeType.Name + "." + variant.Name
+				}
+				a.errorf(expr.Pos(), "is expects a variant of tree category %q, got %s", expected, got)
+			}
+			if pattern, ok := a.treeVariantIsTargetPattern(target, treeType, variant); ok && pattern != nil {
+				a.validateTreeVariantIsTargetPattern(pattern, treeType, variant)
+			}
+			continue
 		}
-		if pattern, ok := a.treeVariantIsTargetPattern(expr.Right, treeType, variant); ok && pattern != nil {
-			a.validateTreeVariantIsTargetPattern(pattern, treeType, variant)
+		if targetBase, _, ok := a.resolveNamedStateIsTarget(target); ok {
+			leftBase, ok := namedStateStructBase(left)
+			if !ok || leftBase == nil {
+				a.errorf(expr.Left.Pos(), "is requires a named-state struct value for type-state tests, got %s", left.String())
+				continue
+			}
+			if leftBase.Name != targetBase.Name {
+				a.errorf(expr.Pos(), "is expects a state of struct %q, got state target for %q", leftBase.Name, targetBase.Name)
+			}
+			continue
 		}
-		return a.namedTypes["bool"]
+		a.analyzeIsComparableTarget(left, target)
 	}
-	if targetBase, _, ok := a.resolveNamedStateIsTarget(expr.Right); ok {
-		leftBase, ok := namedStateStructBase(left)
-		if !ok || leftBase == nil {
-			a.errorf(expr.Left.Pos(), "is requires a named-state struct value for type-state tests, got %s", left.String())
-			return a.namedTypes["bool"]
-		}
-		if leftBase.Name != targetBase.Name {
-			a.errorf(expr.Pos(), "is expects a state of struct %q, got state target for %q", leftBase.Name, targetBase.Name)
-		}
-		return a.namedTypes["bool"]
-	}
-	if typedExpr, ok := expr.Right.(*ast.TypeExprExpr); ok && typedExpr != nil && typedExpr.Type != nil {
-		a.resolveType(typedExpr.Type)
-	} else {
-		a.analyzeExpr(expr.Right)
-	}
-	a.errorf(expr.Right.Pos(), "is expects a variant like Expr.Variant or a named-state type like Player[Alive]")
 	return a.namedTypes["bool"]
 }
 
@@ -2634,6 +2684,9 @@ func (a *Analyzer) analyzeEnumIsPayloadPattern(pattern ast.MatchPattern, expecte
 }
 
 func (a *Analyzer) resolveEnumVariantIsTarget(expr ast.Expr) (*EnumType, *EnumVariant, bool) {
+	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
+		return a.resolveEnumVariantIsTarget(paren.Inner)
+	}
 	if testExpr, ok := expr.(*ast.VariantTestExpr); ok {
 		if testExpr == nil || testExpr.Pattern == nil {
 			return nil, nil, false
@@ -2671,6 +2724,9 @@ func (a *Analyzer) resolveEnumVariantIsTarget(expr ast.Expr) (*EnumType, *EnumVa
 }
 
 func (a *Analyzer) resolveTreeVariantIsTarget(expr ast.Expr) (*TreeCategoryType, *EnumVariant, bool) {
+	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
+		return a.resolveTreeVariantIsTarget(paren.Inner)
+	}
 	if testExpr, ok := expr.(*ast.VariantTestExpr); ok {
 		if testExpr == nil || testExpr.Pattern == nil {
 			return nil, nil, false
@@ -2776,6 +2832,9 @@ func resolveMatchableTreeCategoryType(actual Type) (*TreeCategoryType, *TreeVari
 }
 
 func (a *Analyzer) resolveNamedStateIsTarget(expr ast.Expr) (*StructType, Type, bool) {
+	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
+		return a.resolveNamedStateIsTarget(paren.Inner)
+	}
 	typedExpr, ok := expr.(*ast.TypeExprExpr)
 	if !ok || typedExpr == nil || typedExpr.Type == nil {
 		return nil, nil, false

@@ -948,6 +948,12 @@ func formatExpr(expr ast.Expr) string {
 			return "<variant-test>"
 		}
 		return formatMatchPattern(n.Pattern)
+	case *ast.IsPatternExpr:
+		parts := make([]string, 0, len(n.Targets))
+		for _, target := range n.Targets {
+			parts = append(parts, formatExpr(target))
+		}
+		return strings.Join(parts, " | ")
 	case *ast.ParenExpr:
 		return "(" + formatExpr(n.Inner) + ")"
 	case *ast.RaiseExpr:
@@ -1046,10 +1052,17 @@ func formatVisitArmsInto(builder *strings.Builder, arms []ast.VisitArm) {
 
 func formatVisitArm(arm ast.VisitArm) string {
 	if arm.Wildcard {
-		return "_"
+		line := "_"
+		if arm.Guard != nil {
+			line += " when " + formatExpr(arm.Guard)
+		}
+		return line
 	}
 	line := arm.TargetName
 	if arm.BindName == "" && arm.ChildResultsName == "" && len(arm.ChildBindings) == 0 {
+		if arm.Guard != nil {
+			line += " when " + formatExpr(arm.Guard)
+		}
 		return line
 	}
 	line += "("
@@ -1074,6 +1087,9 @@ func formatVisitArm(arm ast.VisitArm) string {
 		}
 	}
 	line += ")"
+	if arm.Guard != nil {
+		line += " when " + formatExpr(arm.Guard)
+	}
 	return line
 }
 

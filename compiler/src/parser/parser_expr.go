@@ -633,8 +633,32 @@ func (p *Parser) parseComparison() ast.Expr {
 }
 
 func (p *Parser) parseIsTestExpr() ast.Expr {
+	pos := p.cur().Pos
+	targets := make([]ast.Expr, 0, 1)
+	targets = append(targets, p.parseSingleIsTestTargetExpr())
+	for p.peek() == lexer.TOKEN_PIPE {
+		p.advance()
+		targets = append(targets, p.parseSingleIsTestTargetExpr())
+	}
+	if len(targets) == 1 {
+		return targets[0]
+	}
+	return &ast.IsPatternExpr{Position: pos, Targets: targets}
+}
+
+func (p *Parser) parseSingleIsTestTargetExpr() ast.Expr {
 	if p.peekQualifiedVariantTargetWithPayload() {
 		return p.parseVariantIsTestExpr()
+	}
+	if p.peek() == lexer.TOKEN_DOT {
+		return p.parsePrimary()
+	}
+	if p.peek() == lexer.TOKEN_LPAREN {
+		pos := p.cur().Pos
+		p.advance()
+		inner := p.parseIsTestExpr()
+		p.expect(lexer.TOKEN_RPAREN)
+		return &ast.ParenExpr{Position: pos, Inner: inner}
 	}
 	target := p.parseTypeExpr()
 	return &ast.TypeExprExpr{Position: target.Pos(), Type: target}
@@ -906,13 +930,36 @@ func (p *Parser) parseVisitArms() []ast.VisitArm {
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
 		}
-		arms = append(arms, p.parseVisitArm())
+		arms = append(arms, p.parseVisitArm()...)
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 	return arms
 }
 
-func (p *Parser) parseVisitArm() ast.VisitArm {
+func (p *Parser) parseVisitArm() []ast.VisitArm {
+	arms := []ast.VisitArm{p.parseVisitArmHead()}
+	for p.peek() == lexer.TOKEN_PIPE {
+		p.advance()
+		arms = append(arms, p.parseVisitArmHead())
+	}
+	var guard ast.Expr
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "when" {
+		p.advance()
+		guard = p.parseExpr()
+	}
+	for i := range arms {
+		arms[i].Guard = guard
+	}
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	body := p.parseBlock()
+	for i := range arms {
+		arms[i].Body = body
+	}
+	return arms
+}
+
+func (p *Parser) parseVisitArmHead() ast.VisitArm {
 	pos := p.cur().Pos
 	arm := ast.VisitArm{Position: pos}
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_" {
@@ -930,9 +977,6 @@ func (p *Parser) parseVisitArm() ast.VisitArm {
 			p.expect(lexer.TOKEN_RPAREN)
 		}
 	}
-	p.expect(lexer.TOKEN_COLON)
-	p.expectNewline()
-	arm.Body = p.parseBlock()
 	return arm
 }
 

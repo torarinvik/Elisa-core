@@ -52,6 +52,28 @@ def is_pi(node: Expr) -> bool:
 	}
 }
 
+func TestGenerateLLVMIRLowersIsExprWithAlternativeValueTargets(t *testing.T) {
+	src := `const enum Tok of i32:
+	LT = 1
+	LTEQ = 2
+	GT = 3
+	GTEQ = 4
+
+def is_rel(kind: Tok) -> bool:
+	return kind is .LT | .LTEQ | .GT | .GTEQ
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_is_expr_alternatives.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i1 @is_rel(i32 ", "isvalue.eq", "istest.or"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected alternative is lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersTreeConstructorsAndIsExprPatterns(t *testing.T) {
 	src := `tree Lua:
 	common:
@@ -442,6 +464,49 @@ def score(node: Lua.Expr) -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersGuardedTreeVisitExpr(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(stmt)
+	node Stmt:
+		ExprStmt(child expr: Expr)
+	@role(expr)
+	node Expr:
+		Name(name_index: u32)
+		Call(child callee: Expr)
+		Int(value: i64)
+	block Block:
+		stmts: darray[Stmt]
+
+def score_expr(node: Lua.Expr) -> i64:
+	return visit node:
+		Lua.Expr.Int(expr) when expr.value > 0:
+			expr.value
+		_:
+			0
+
+def score_node(node: Lua.Node) -> i64:
+	return visit node as Lua.Node:
+		Lua.Stmt.ExprStmt(stmt) when stmt.expr.kind == .Call:
+			stmt.span + 1
+		Lua.Stmt.ExprStmt(stmt) when stmt.expr.kind == .Name:
+			stmt.span + 2
+		_:
+			0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_visit_guard.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i64 @score_expr(%Lua__TreeHandle ", "define i64 @score_node(%Lua__TreeHandle ", "visit.expr.guard.body", "visit.node.exact.guard.body", "visit.node.exact.phi"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected guarded visit lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersTreeKindFieldAndShorthandMembers(t *testing.T) {
 	src := `tree Lua:
 	common:
@@ -553,6 +618,36 @@ def score(node: Lua.Expr) -> i64:
 	for _, check := range []string{"define i64 @score(%Lua__TreeHandle ", "define private i64 @tree_fold_", "call i64 @tree_fold_", "fold.arm.buffer", "fold.arm.view.len", "fold.arm.named.args.sub.view.len", "fold.arm.named.left.value", "fold.arm.named.right.value"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected tree fold lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersGuardedTreeFoldExpr(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Binary(child left: Expr, child right: Expr)
+
+def score(node: Lua.Expr) -> i64:
+	return fold node as Lua.Node into i64:
+		Lua.Expr.Int(expr, children) when expr.value > 0:
+			expr.value + children.len.i64()
+		Lua.Expr.Int(expr, children):
+			0
+		Lua.Expr.Binary(expr, left, right):
+			left + right + expr.span
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_fold_guard.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i64 @score(%Lua__TreeHandle ", "define private i64 @tree_fold_", "guard.body"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected guarded fold lowering to include %q, got:\n%s", check, output)
 		}
 	}
 }
