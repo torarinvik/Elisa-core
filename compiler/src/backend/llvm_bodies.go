@@ -27,6 +27,11 @@ type valueBinding struct {
 	mutable bool
 }
 
+type conditionBindingInfo struct {
+	name string
+	typ  semantic.Type
+}
+
 type codegenScope struct {
 	parent                   *codegenScope
 	bindingName              string
@@ -3366,104 +3371,277 @@ func (s *functionState) directStructIsCondition(expr ast.Expr) (ast.Expr, *ast.M
 	}
 }
 
-func (s *functionState) emitStructPatternBoolTestValue(actualValue C.LLVMValueRef, actualType semantic.Type, actualExpr ast.Expr, pattern *ast.MatchStructPattern, prefix string) (C.LLVMValueRef, error) {
-	successBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(prefix+".ok"))
-	failureBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(prefix+".fail"))
-	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(prefix+".cont"))
-	if _, _, err := s.emitMatchPatternTest(pattern, actualValue, nil, actualType, nil, actualExpr, nil, successBB, failureBB); err != nil {
-		return nil, err
-	}
-
-	C.LLVMPositionBuilderAtEnd(s.builder, successBB)
-	successValue := C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 1, 0)
-	C.LLVMBuildBr(s.builder, contBB)
-	successEnd := C.LLVMGetInsertBlock(s.builder)
-
-	C.LLVMPositionBuilderAtEnd(s.builder, failureBB)
-	failureValue := C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 0, 0)
-	C.LLVMBuildBr(s.builder, contBB)
-	failureEnd := C.LLVMGetInsertBlock(s.builder)
-
-	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
-	phi := C.LLVMBuildPhi(s.builder, C.LLVMInt1TypeInContext(s.g.context), cStringFree(prefix+".result"))
-	values := []C.LLVMValueRef{successValue, failureValue}
-	blocks := []C.LLVMBasicBlockRef{successEnd, failureEnd}
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
-	return phi, nil
-}
-
-func (s *functionState) emitConditionStructPatternBindings(pattern ast.MatchPattern, actualType semantic.Type, actualValue C.LLVMValueRef) error {
-	if pattern == nil || actualType == nil {
-		return nil
-	}
-	switch p := pattern.(type) {
-	case *ast.MatchWildcardPattern, *ast.MatchStringLiteralPattern, *ast.MatchLiteralPattern, *ast.MatchVariantPattern:
-		return nil
-	case *ast.MatchBindPattern:
-		if p.Name == "_" || p.Name == "" {
+func (s *functionState) collectTruthyConditionBindings(expr ast.Expr) ([]conditionBindingInfo, error) {
+	seen := map[string]semantic.Type{}
+	out := make([]conditionBindingInfo, 0, 4)
+	var collectPattern func(pattern ast.MatchPattern, expected semantic.Type) error
+	collectPattern = func(pattern ast.MatchPattern, expected semantic.Type) error {
+		if pattern == nil || expected == nil {
 			return nil
 		}
-		alloca, err := s.createEntryAlloca(p.Name, actualType)
-		if err != nil {
-			return err
-		}
-		C.LLVMBuildStore(s.builder, actualValue, alloca)
-		s.defineBinding(p.Name, valueBinding{ptr: alloca, typ: actualType, mutable: false})
-		return nil
-	case *ast.MatchStructPattern:
-		fields, orderedArgs, err := s.resolveStructMatchPatternArgs(p, actualType)
-		if err != nil {
-			return err
-		}
-		for i, arg := range orderedArgs {
-			if arg == nil {
-				continue
+		switch p := pattern.(type) {
+		case *ast.MatchBindPattern:
+			if p.Name == "" || p.Name == "_" {
+				return nil
 			}
-			fieldValue := C.LLVMBuildExtractValue(s.builder, actualValue, C.unsigned(fields[i].Index), cStringFree("cond.struct.field"))
-			if err := s.emitConditionStructPatternBindings(arg.Pattern, fields[i].Type, fieldValue); err != nil {
+			if prev, ok := seen[p.Name]; ok {
+				if !semantic.SameType(prev, expected) {
+					return fmt.Errorf("condition binding %q has inconsistent types %s and %s", p.Name, prev.String(), expected.String())
+				}
+				return nil
+			}
+			seen[p.Name] = expected
+			out = append(out, conditionBindingInfo{name: p.Name, typ: expected})
+			return nil
+		case *ast.MatchStructPattern:
+			fields, orderedArgs, err := s.resolveStructMatchPatternArgs(p, expected)
+			if err != nil {
 				return err
 			}
+			for i, arg := range orderedArgs {
+				if arg == nil {
+					continue
+				}
+				if err := collectPattern(arg.Pattern, fields[i].Type); err != nil {
+					return err
+				}
+			}
+			return nil
+		case *ast.MatchVariantPattern:
+			switch base := expected.(type) {
+			case *semantic.EnumType:
+				variant, ok := base.Variant(p.Variant)
+				if !ok {
+					return nil
+				}
+				orderedArgs, err := s.resolveMatchPatternArgs(p, variant)
+				if err != nil {
+					return err
+				}
+				for i, arg := range orderedArgs {
+					if arg == nil {
+						continue
+					}
+					if err := collectPattern(arg.Pattern, variant.Payload[i]); err != nil {
+						return err
+					}
+				}
+			case *semantic.TreeCategoryType:
+				variant, ok := base.Variant(p.Variant)
+				if !ok {
+					return nil
+				}
+				orderedArgs, err := s.resolveMatchPatternArgs(p, variant)
+				if err != nil {
+					return err
+				}
+				for i, arg := range orderedArgs {
+					if arg == nil {
+						continue
+					}
+					if err := collectPattern(arg.Pattern, variant.Payload[i]); err != nil {
+						return err
+					}
+				}
+			}
 		}
 		return nil
-	default:
+	}
+	var collectExpr func(expr ast.Expr, truthy bool) error
+	collectExpr = func(expr ast.Expr, truthy bool) error {
+		if expr == nil || !truthy {
+			return nil
+		}
+		switch n := expr.(type) {
+		case *ast.ParenExpr:
+			return collectExpr(n.Inner, truthy)
+		case *ast.UnaryExpr:
+			if n.Op == lexer.TOKEN_NOT {
+				return collectExpr(n.Operand, !truthy)
+			}
+			return nil
+		case *ast.BinaryExpr:
+			switch n.Op {
+			case lexer.TOKEN_AND:
+				if err := collectExpr(n.Left, true); err != nil {
+					return err
+				}
+				return collectExpr(n.Right, true)
+			case lexer.TOKEN_OR:
+				return nil
+			}
+		}
+		leftExpr, pattern, ok := s.directStructIsCondition(expr)
+		if !ok || leftExpr == nil || pattern == nil {
+			return nil
+		}
+		return collectPattern(pattern, s.exprType(leftExpr))
+	}
+	if err := collectExpr(expr, true); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *functionState) createConditionBindingScope(expr ast.Expr) (*codegenScope, bool, error) {
+	infos, err := s.collectTruthyConditionBindings(expr)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(infos) == 0 {
+		return nil, false, nil
+	}
+	scope := &codegenScope{parent: s.scope}
+	for _, info := range infos {
+		alloca, err := s.createEntryAlloca(info.name+".cond", info.typ)
+		if err != nil {
+			return nil, false, err
+		}
+		defineBindingInCodegenScope(scope, info.name, valueBinding{ptr: alloca, typ: info.typ, mutable: false})
+	}
+	return scope, true, nil
+}
+
+func (s *functionState) emitConditionPatternTestAndBind(pattern ast.MatchPattern, actualValue C.LLVMValueRef, actualType semantic.Type, actualExpr ast.Expr, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) error {
+	if pattern == nil || actualType == nil {
+		C.LLVMBuildBr(s.builder, successBB)
 		return nil
+	}
+	if actualExpr == nil {
+		actualExpr = &ast.Ident{Name: "<cond>"}
+	}
+	if bindPattern, ok := pattern.(*ast.MatchBindPattern); ok {
+		if bindPattern.Name != "" && bindPattern.Name != "_" {
+			if binding, ok := s.lookupBinding(bindPattern.Name); ok && binding.ptr != nil {
+				C.LLVMBuildStore(s.builder, actualValue, binding.ptr)
+			}
+		}
+		C.LLVMBuildBr(s.builder, successBB)
+		return nil
+	}
+	if structPattern, ok := pattern.(*ast.MatchStructPattern); ok {
+		fields, orderedArgs, err := s.resolveStructMatchPatternArgs(structPattern, actualType)
+		if err != nil {
+			return err
+		}
+		matchedIndexes := make([]int, 0, len(orderedArgs))
+		for i, arg := range orderedArgs {
+			if arg != nil {
+				matchedIndexes = append(matchedIndexes, i)
+			}
+		}
+		if len(matchedIndexes) == 0 {
+			C.LLVMBuildBr(s.builder, successBB)
+			return nil
+		}
+		for i, fieldIndex := range matchedIndexes {
+			arg := orderedArgs[fieldIndex]
+			fieldValue := C.LLVMBuildExtractValue(s.builder, actualValue, C.unsigned(fields[fieldIndex].Index), cStringFree("cond.struct.field"))
+			nextSuccess := successBB
+			if i != len(matchedIndexes)-1 {
+				nextSuccess = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("cond.struct.next"))
+			}
+			fieldExpr := ast.Expr(nil)
+			if actualExpr != nil {
+				fieldExpr = &ast.FieldExpr{Position: arg.Position, Object: actualExpr, Field: fields[fieldIndex].Decl.Name}
+			}
+			if err := s.emitConditionPatternTestAndBind(arg.Pattern, fieldValue, fields[fieldIndex].Type, fieldExpr, nextSuccess, failureBB); err != nil {
+				return err
+			}
+			if i != len(matchedIndexes)-1 {
+				C.LLVMPositionBuilderAtEnd(s.builder, nextSuccess)
+			}
+		}
+		return nil
+	}
+	if _, _, err := s.emitMatchPatternTest(pattern, actualValue, nil, actualType, nil, actualExpr, nil, successBB, failureBB); err != nil {
+		return err
+	}
+	return nil
+}
+
+func invertBranchHint(hint ast.BranchHint) ast.BranchHint {
+	switch hint {
+	case ast.BranchHintLikely:
+		return ast.BranchHintUnlikely
+	case ast.BranchHintUnlikely:
+		return ast.BranchHintLikely
+	default:
+		return hint
 	}
 }
 
-func (s *functionState) emitIf(stmt *ast.IfStmt) error {
-	stmt = normalizeIf(stmt)
-	if leftExpr, pattern, ok := s.directStructIsCondition(stmt.Cond); ok {
+func (s *functionState) emitConditionBranchWithBindings(expr ast.Expr, trueBB C.LLVMBasicBlockRef, falseBB C.LLVMBasicBlockRef, hint ast.BranchHint) error {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return s.emitConditionBranchWithBindings(n.Inner, trueBB, falseBB, hint)
+	case *ast.UnaryExpr:
+		if n.Op == lexer.TOKEN_NOT {
+			return s.emitConditionBranchWithBindings(n.Operand, falseBB, trueBB, invertBranchHint(hint))
+		}
+	case *ast.BinaryExpr:
+		switch n.Op {
+		case lexer.TOKEN_AND:
+			rhsBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("cond.and.rhs"))
+			if err := s.emitConditionBranchWithBindings(n.Left, rhsBB, falseBB, hint); err != nil {
+				return err
+			}
+			C.LLVMPositionBuilderAtEnd(s.builder, rhsBB)
+			return s.emitConditionBranchWithBindings(n.Right, trueBB, falseBB, ast.BranchHintNone)
+		case lexer.TOKEN_OR:
+			rhsBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("cond.or.rhs"))
+			if err := s.emitConditionBranchWithBindings(n.Left, trueBB, rhsBB, hint); err != nil {
+				return err
+			}
+			C.LLVMPositionBuilderAtEnd(s.builder, rhsBB)
+			return s.emitConditionBranchWithBindings(n.Right, trueBB, falseBB, ast.BranchHintNone)
+		}
+	}
+	if leftExpr, pattern, ok := s.directStructIsCondition(expr); ok {
 		leftType := s.exprType(leftExpr)
 		leftValue, _, err := s.emitExpr(leftExpr, leftType)
 		if err != nil {
 			return err
 		}
-		condValue, err := s.emitStructPatternBoolTestValue(leftValue, leftType, leftExpr, pattern, "if.struct")
-		if err != nil {
-			return err
-		}
+		return s.emitConditionPatternTestAndBind(pattern, leftValue, leftType, leftExpr, trueBB, falseBB)
+	}
+	condValue, _, err := s.emitExpr(expr, s.g.result.NamedTypes["bool"])
+	if err != nil {
+		return err
+	}
+	s.buildCondBrWithHint(condValue, trueBB, falseBB, hint)
+	return nil
+}
 
+func (s *functionState) emitIf(stmt *ast.IfStmt) error {
+	stmt = normalizeIf(stmt)
+	if condScope, ok, err := s.createConditionBindingScope(stmt.Cond); err != nil {
+		return err
+	} else if ok {
+		parentScope := s.scope
+		s.scope = condScope
 		thenBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("if.then"))
 		mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("if.end"))
 		var elseBB C.LLVMBasicBlockRef
 		if len(stmt.Else) > 0 {
 			elseBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("if.else"))
-			s.buildCondBrWithHint(condValue, thenBB, elseBB, stmt.Hint)
+			if err := s.emitConditionBranchWithBindings(stmt.Cond, thenBB, elseBB, stmt.Hint); err != nil {
+				s.scope = parentScope
+				return err
+			}
 		} else {
-			s.buildCondBrWithHint(condValue, thenBB, mergeBB, stmt.Hint)
+			if err := s.emitConditionBranchWithBindings(stmt.Cond, thenBB, mergeBB, stmt.Hint); err != nil {
+				s.scope = parentScope
+				return err
+			}
 		}
 
 		C.LLVMPositionBuilderAtEnd(s.builder, thenBB)
-		s.pushScope()
-		if err := s.emitConditionStructPatternBindings(pattern, leftType, leftValue); err != nil {
-			s.popScope()
+		s.scope = condScope
+		if err := s.emitBlock(stmt.Then, true); err != nil {
+			s.scope = parentScope
 			return err
 		}
-		if err := s.emitBlockInCurrentScope(stmt.Then); err != nil {
-			s.popScope()
-			return err
-		}
-		s.popScope()
 		thenTerminated := s.currentBlockTerminated()
 		if !thenTerminated {
 			C.LLVMBuildBr(s.builder, mergeBB)
@@ -3472,7 +3650,9 @@ func (s *functionState) emitIf(stmt *ast.IfStmt) error {
 		elseTerminated := false
 		if len(stmt.Else) > 0 {
 			C.LLVMPositionBuilderAtEnd(s.builder, elseBB)
+			s.scope = parentScope
 			if err := s.emitBlock(stmt.Else, true); err != nil {
+				s.scope = parentScope
 				return err
 			}
 			elseTerminated = s.currentBlockTerminated()
@@ -3482,6 +3662,7 @@ func (s *functionState) emitIf(stmt *ast.IfStmt) error {
 		}
 
 		C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+		s.scope = parentScope
 		if len(stmt.Else) > 0 && thenTerminated && elseTerminated {
 			C.LLVMBuildUnreachable(s.builder)
 		}
@@ -3539,40 +3720,34 @@ func (s *functionState) emitIf(stmt *ast.IfStmt) error {
 }
 
 func (s *functionState) emitWhile(stmt *ast.WhileStmt) error {
-	if leftExpr, pattern, ok := s.directStructIsCondition(stmt.Cond); ok {
+	if condScope, ok, err := s.createConditionBindingScope(stmt.Cond); err != nil {
+		return err
+	} else if ok {
+		parentScope := s.scope
 		condBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("while.cond"))
 		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("while.body"))
 		exitBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("while.end"))
 
 		C.LLVMBuildBr(s.builder, condBB)
 		C.LLVMPositionBuilderAtEnd(s.builder, condBB)
-		leftType := s.exprType(leftExpr)
-		leftValue, _, err := s.emitExpr(leftExpr, leftType)
-		if err != nil {
+		s.scope = condScope
+		if err := s.emitConditionBranchWithBindings(stmt.Cond, bodyBB, exitBB, stmt.Hint); err != nil {
+			s.scope = parentScope
 			return err
 		}
-		condValue, err := s.emitStructPatternBoolTestValue(leftValue, leftType, leftExpr, pattern, "while.struct")
-		if err != nil {
-			return err
-		}
-		s.buildCondBrWithHint(condValue, bodyBB, exitBB, stmt.Hint)
 
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
-		s.pushScope()
-		if err := s.emitConditionStructPatternBindings(pattern, leftType, leftValue); err != nil {
-			s.popScope()
+		s.scope = condScope
+		if err := s.emitBlock(stmt.Body, true); err != nil {
+			s.scope = parentScope
 			return err
 		}
-		if err := s.emitBlockInCurrentScope(stmt.Body); err != nil {
-			s.popScope()
-			return err
-		}
-		s.popScope()
 		if !s.currentBlockTerminated() {
 			C.LLVMBuildBr(s.builder, condBB)
 		}
 
 		C.LLVMPositionBuilderAtEnd(s.builder, exitBB)
+		s.scope = parentScope
 		return nil
 	}
 	condName := cString("while.cond")

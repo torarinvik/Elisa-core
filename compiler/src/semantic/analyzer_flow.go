@@ -5648,7 +5648,6 @@ func (a *Analyzer) analyzeBlockWithConditionAffineClone(stmts []ast.Stmt, parent
 	scope := a.refinedScopeForCondition(parent, cond, truthy)
 	return a.analyzeBlockWithAffineClonePrepared(stmts, scope, func() {
 		a.applyConditionRefinementsInternal(scope, cond, truthy, true)
-		a.bindConditionPatternLocals(scope, cond, truthy)
 	})
 }
 
@@ -5673,6 +5672,25 @@ func unwrapDirectStructIsCondition(expr ast.Expr) (*ast.BinaryExpr, ast.Expr, *a
 func (a *Analyzer) bindConditionPatternLocals(scope *Scope, expr ast.Expr, truthy bool) {
 	if a == nil || scope == nil || !truthy {
 		return
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		a.bindConditionPatternLocals(scope, n.Inner, truthy)
+		return
+	case *ast.UnaryExpr:
+		if n.Op == lexer.TOKEN_NOT {
+			a.bindConditionPatternLocals(scope, n.Operand, !truthy)
+		}
+		return
+	case *ast.BinaryExpr:
+		switch n.Op {
+		case lexer.TOKEN_AND:
+			a.bindConditionPatternLocals(scope, n.Left, true)
+			a.bindConditionPatternLocals(scope, n.Right, true)
+			return
+		case lexer.TOKEN_OR:
+			return
+		}
 	}
 	_, valueExpr, pattern, ok := unwrapDirectStructIsCondition(expr)
 	if !ok || valueExpr == nil || pattern == nil {
@@ -10340,6 +10358,7 @@ func (a *Analyzer) invalidateRegionMarks(region *Symbol, predicate func(regionMa
 func (a *Analyzer) refinedScopeForCondition(parent *Scope, cond ast.Expr, truthy bool) *Scope {
 	scope := NewScope(parent)
 	a.applyConditionRefinementsInternal(scope, cond, truthy, false)
+	a.bindConditionPatternLocals(scope, cond, truthy)
 	return scope
 }
 

@@ -139,9 +139,40 @@ def loop_value(tok: Token) -> i64:
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"define i64 @score(", "define i64 @loop_value(", "if.struct.result", "while.struct.result", "cond.struct.field"} {
+	for _, check := range []string{"define i64 @score(", "define i64 @loop_value(", "cond.struct.field", "store i64", "match.literal.eq"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected struct condition binding lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersStructIsConditionBindingsThroughAnd(t *testing.T) {
+	src := `const enum Tok of i32:
+	INTEGER = 1
+	FLOAT = 2
+
+struct Token:
+	kind: Tok
+	value: i64
+
+def score(tok: Token) -> i64:
+	if tok is Token(kind: .INTEGER, value: value) and value > 0:
+		return value
+	return 0
+
+def loop_value(tok: Token) -> i64:
+	while tok is Token(kind: .INTEGER, value: value) and value > 0:
+		return value
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_struct_if_while_bindings_and.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i64 @score(", "define i64 @loop_value(", "cond.and.rhs", "cond.struct.field", "load i64"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected short-circuit struct condition binding lowering to include %q, got:\n%s", check, output)
 		}
 	}
 }

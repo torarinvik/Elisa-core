@@ -5185,6 +5185,30 @@ def loop_value(tok: Token) -> i64:
 	requireNoWarnings(t, result)
 }
 
+func TestAnalyzeStructIsConditionBindingsFlowThroughAnd(t *testing.T) {
+	src := `const enum Tok of i32:
+	INTEGER = 1
+	FLOAT = 2
+
+struct Token:
+	kind: Tok
+	value: i64
+
+def score(tok: Token) -> i64:
+	if tok is Token(kind: .INTEGER, value: value) and value > 0:
+		return value
+	return 0
+
+def loop_value(tok: Token) -> i64:
+	while tok is Token(kind: .INTEGER, value: value) and value > 0:
+		return value
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "struct_is_condition_bindings_and_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
+
 func TestAnalyzeRejectsRecursiveEnumPayloadByValue(t *testing.T) {
 	src := `enum Expr:
 	Int(int)
