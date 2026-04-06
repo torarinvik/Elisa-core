@@ -642,7 +642,11 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 	case *ast.InterfaceDecl:
 		fmt.Fprintf(w, "%sinterface %s: (%d members)\n", prefix, n.Name, len(n.Members))
 	case *ast.ImplDecl:
-		fmt.Fprintf(w, "%simpl %s for %s: (%d members)\n", prefix, n.InterfaceName, typeStr(n.ForType), len(n.Members))
+		if n.IsExtension() {
+			fmt.Fprintf(w, "%simpl %s: (%d members)\n", prefix, typeStr(n.ForType), len(n.Members))
+		} else {
+			fmt.Fprintf(w, "%simpl %s for %s: (%d members)\n", prefix, n.InterfaceName, typeStr(n.ForType), len(n.Members))
+		}
 	case *ast.FuncDecl:
 		for _, annotation := range n.Annotations {
 			fmt.Fprintf(w, "%s%s\n", prefix, formatAnnotation(annotation))

@@ -36,6 +36,10 @@ type ImplAssociatedTypeDecl struct {
 	Type     TypeExpr
 }
 
+func (n *ImplDecl) IsExtension() bool {
+	return n != nil && n.InterfaceName == ""
+}
+
 func (n *InterfaceDecl) Pos() lexer.Pos          { return n.Position }
 func (n *AssociatedTypeDecl) Pos() lexer.Pos     { return n.Position }
 func (n *ImplDecl) Pos() lexer.Pos               { return n.Position }

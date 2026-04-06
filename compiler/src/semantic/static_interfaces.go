@@ -342,6 +342,9 @@ func (a *Analyzer) collectStaticImpls(decls []scopedDecl) {
 		if !ok {
 			continue
 		}
+		if decl.IsExtension() {
+			continue
+		}
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
 			iface, interfaceName, ok := a.lookupVisibleStaticInterface(decl.InterfaceName)
 			if !ok || iface == nil {

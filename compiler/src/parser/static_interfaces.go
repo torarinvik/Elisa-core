@@ -5,6 +5,17 @@ import (
 	"llcontext/src/lexer"
 )
 
+func (p *Parser) peekQualifiedDeclNameFollowedBy(text string) bool {
+	if p.peek() != lexer.TOKEN_IDENT {
+		return false
+	}
+	i := p.pos + 1
+	for i+1 < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_DOT && p.tokens[i+1].Kind == lexer.TOKEN_IDENT {
+		i += 2
+	}
+	return i < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_IDENT && p.tokens[i].Text == text
+}
+
 func (p *Parser) parseInterfaceDecl() *ast.InterfaceDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("interface")
@@ -95,9 +106,15 @@ func (p *Parser) parseInterfaceMethodDecl() *ast.ExternFuncDecl {
 func (p *Parser) parseImplDecl() *ast.ImplDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("impl")
-	interfaceName := p.parseQualifiedDeclName()
-	p.expectIdentText("for")
-	forType := p.parseTypeExpr()
+	interfaceName := ""
+	var forType ast.TypeExpr
+	if p.peekQualifiedDeclNameFollowedBy("for") {
+		interfaceName = p.parseQualifiedDeclName()
+		p.expectIdentText("for")
+		forType = p.parseTypeExpr()
+	} else {
+		forType = p.parseTypeExpr()
+	}
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
@@ -110,6 +127,9 @@ func (p *Parser) parseImplDecl() *ast.ImplDecl {
 		}
 		annotations := p.parseAnnotations()
 		if p.peekIdentText("type") {
+			if interfaceName == "" {
+				p.errorf("extension impls do not support associated types")
+			}
 			if len(annotations) != 0 {
 				for _, annotation := range annotations {
 					p.errorf("impl associated types do not support annotation @%s", annotation.Name)

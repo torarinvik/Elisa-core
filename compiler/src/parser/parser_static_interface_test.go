@@ -122,3 +122,67 @@ def build[B: Builder]() -> B.State:
 		t.Fatalf("expected zero call args, got %d", len(call.Args))
 	}
 }
+
+func TestParseExtensionImplAndValueMethodCall(t *testing.T) {
+	file, errs := parseSourceFile(t, `
+const enum Tok of i8:
+	PLUS = 0
+
+impl Tok:
+	def score(self: Tok) -> i64:
+		return 7
+
+def read(tok: Tok) -> i64:
+	return tok.score()
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	if len(file.Decls) != 3 {
+		t.Fatalf("expected 3 top-level decls, got %d", len(file.Decls))
+	}
+	impl, ok := file.Decls[1].(*ast.ImplDecl)
+	if !ok {
+		t.Fatalf("expected impl decl, got %T", file.Decls[1])
+	}
+	if !impl.IsExtension() {
+		t.Fatalf("expected receiver-scoped extension impl, got interface impl %#v", impl)
+	}
+	receiver, ok := impl.ForType.(*ast.NamedType)
+	if !ok || receiver.Name != "Tok" {
+		t.Fatalf("expected extension receiver Tok, got %T %#v", impl.ForType, impl.ForType)
+	}
+	if len(impl.Members) != 1 {
+		t.Fatalf("expected 1 extension method, got %d", len(impl.Members))
+	}
+	method, ok := impl.Members[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function member, got %T", impl.Members[0])
+	}
+	if method.Name != "score" || len(method.Params) != 1 || method.Params[0].Name != "self" {
+		t.Fatalf("expected extension method score(self: Tok), got %#v", method)
+	}
+	funcDecl, ok := file.Decls[2].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[2])
+	}
+	ret, ok := funcDecl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", funcDecl.Body[0])
+	}
+	call, ok := ret.Value.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected method call, got %T", ret.Value)
+	}
+	callee, ok := call.Func.(*ast.FieldExpr)
+	if !ok {
+		t.Fatalf("expected field callee, got %T", call.Func)
+	}
+	owner, ok := callee.Object.(*ast.Ident)
+	if !ok || owner.Name != "tok" || callee.Field != "score" {
+		t.Fatalf("expected callee tok.score, got %T %#v", callee.Object, callee)
+	}
+	if len(call.Args) != 0 {
+		t.Fatalf("expected zero explicit call args, got %d", len(call.Args))
+	}
+}

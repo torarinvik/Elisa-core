@@ -3844,6 +3844,10 @@ func (a *Analyzer) specializeCallbackCarryingTypeFromExpr(expected Type, actualE
 }
 
 func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
+	switch a.rewriteExtensionMethodCall(expr) {
+	case extensionMethodCallRewriteInvalid:
+		return invalidType
+	}
 	if storeType, ok := a.packedStoreConstructorCall(expr); ok {
 		return storeType
 	}
@@ -4087,6 +4091,72 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	}
 	a.bindFreshReturnShapes(appliedType, shapeBindings)
 	return a.substituteType(appliedType.Return, bindings, shapeBindings, regionBindings, permissionBindings)
+}
+
+type extensionMethodCallRewriteStatus int
+
+const (
+	extensionMethodCallRewriteNone extensionMethodCallRewriteStatus = iota
+	extensionMethodCallRewriteApplied
+	extensionMethodCallRewriteInvalid
+)
+
+func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMethodCallRewriteStatus {
+	if a == nil || expr == nil {
+		return extensionMethodCallRewriteNone
+	}
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Object == nil || fieldExpr.Field == "" {
+		return extensionMethodCallRewriteNone
+	}
+	if a.exprResolvesToTypePath(fieldExpr.Object) {
+		return extensionMethodCallRewriteNone
+	}
+	receiverType := a.analyzeExpr(fieldExpr.Object)
+	if receiverType == nil || IsInvalidType(receiverType) {
+		return extensionMethodCallRewriteNone
+	}
+	if _, ok := a.lookupFieldNoError(receiverType, fieldExpr.Field); ok {
+		return extensionMethodCallRewriteNone
+	}
+	method, ok, err := a.lookupVisibleExtensionMethod(fieldExpr.Field, receiverType)
+	if err != nil {
+		a.errorf(expr.Pos(), "%s", err.Error())
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return extensionMethodCallRewriteInvalid
+	}
+	if !ok || method == nil || method.Symbol == nil {
+		return extensionMethodCallRewriteNone
+	}
+	prependedArgs := make([]ast.Expr, 0, len(expr.Args)+1)
+	prependedArgs = append(prependedArgs, fieldExpr.Object)
+	prependedArgs = append(prependedArgs, expr.Args...)
+	expr.Args = prependedArgs
+	if len(expr.ArgNames) != 0 {
+		prependedNames := make([]string, 0, len(expr.ArgNames)+1)
+		prependedNames = append(prependedNames, "")
+		prependedNames = append(prependedNames, expr.ArgNames...)
+		expr.ArgNames = prependedNames
+	}
+	expr.Func = &ast.Ident{Position: fieldExpr.Position, Name: method.Symbol.Name}
+	return extensionMethodCallRewriteApplied
+}
+
+func (a *Analyzer) exprResolvesToTypePath(expr ast.Expr) bool {
+	if a == nil || expr == nil {
+		return false
+	}
+	name, ok := qualifiedTypePathFromExpr(expr)
+	if !ok || name == "" {
+		return false
+	}
+	if _, ok := a.lookupTypeParam(name); ok {
+		return true
+	}
+	_, _, ok = a.lookupVisibleType(name)
+	return ok
 }
 
 func (a *Analyzer) analyzeTreeConstructorCallExpr(expr *ast.CallExpr, treeType *TreeCategoryType, variant *EnumVariant) Type {
@@ -6799,12 +6869,22 @@ func (a *Analyzer) inferAddrOfStorage(expr ast.Expr) RefStorage {
 }
 
 func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (Field, bool) {
+	return a.lookupFieldWithDiagnostics(objType, fieldName, pos, true)
+}
+
+func (a *Analyzer) lookupFieldNoError(objType Type, fieldName string) (Field, bool) {
+	return a.lookupFieldWithDiagnostics(objType, fieldName, lexer.Pos{}, false)
+}
+
+func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, pos lexer.Pos, emitDiagnostics bool) (Field, bool) {
 	if field, ok := dstrSyntheticField(objType, fieldName); ok {
 		return field, true
 	}
 	if ref, ok := objType.(*RefType); ok {
 		if ref.State != RefStateNonNull {
-			a.errorf(pos, "field access requires proven non-null reference, got %s", objType.String())
+			if emitDiagnostics {
+				a.errorf(pos, "field access requires proven non-null reference, got %s", objType.String())
+			}
 			return Field{}, false
 		}
 		objType = ref.Elem
@@ -6819,7 +6899,9 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 	if viewType, ok := objType.(*PackedVariantViewType); ok {
 		field, ok := viewType.Field(fieldName)
 		if !ok {
-			a.errorf(pos, "%s has no field %q", viewType.String(), fieldName)
+			if emitDiagnostics {
+				a.errorf(pos, "%s has no field %q", viewType.String(), fieldName)
+			}
 			return Field{}, false
 		}
 		return field, true
@@ -6827,7 +6909,9 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 	if viewType, ok := objType.(*TreeVariantViewType); ok {
 		field, ok := TreeVariantSurfaceFieldInfo(viewType, fieldName)
 		if !ok {
-			a.errorf(pos, "%s has no field %q", viewType.String(), fieldName)
+			if emitDiagnostics {
+				a.errorf(pos, "%s has no field %q", viewType.String(), fieldName)
+			}
 			return Field{}, false
 		}
 		return field, true
@@ -6835,7 +6919,9 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 	if enumType, ok := objType.(*EnumType); ok && enumType.Packed {
 		field, ok := enumType.Common[fieldName]
 		if !ok {
-			a.errorf(pos, "packed enum %q has no common field %q", enumType.Name, fieldName)
+			if emitDiagnostics {
+				a.errorf(pos, "packed enum %q has no common field %q", enumType.Name, fieldName)
+			}
 			return Field{}, false
 		}
 		return field, true
@@ -6843,7 +6929,9 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 	if categoryType, ok := objType.(*TreeCategoryType); ok {
 		field, ok := TreeCategorySurfaceFieldInfo(categoryType, fieldName)
 		if !ok {
-			a.errorf(pos, "tree category %q has no common field %q", categoryType.Name, fieldName)
+			if emitDiagnostics {
+				a.errorf(pos, "tree category %q has no common field %q", categoryType.Name, fieldName)
+			}
 			return Field{}, false
 		}
 		return field, true
@@ -6855,40 +6943,52 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 	case *StructType:
 		field, ok := t.Fields[fieldName]
 		if !ok {
-			a.errorf(pos, "struct %q has no field %q", t.Name, fieldName)
+			if emitDiagnostics {
+				a.errorf(pos, "struct %q has no field %q", t.Name, fieldName)
+			}
 			return Field{}, false
 		}
 		return field, true
 	case *TreeBlockType:
 		field, ok := TreeExactSurfaceFieldInfo(t, fieldName)
 		if !ok {
-			a.errorf(pos, "tree block %q has no field %q", t.Name, fieldName)
+			if emitDiagnostics {
+				a.errorf(pos, "tree block %q has no field %q", t.Name, fieldName)
+			}
 			return Field{}, false
 		}
 		return field, true
 	case *TreeStructType:
 		field, ok := TreeExactSurfaceFieldInfo(t, fieldName)
 		if !ok {
-			a.errorf(pos, "tree struct %q has no field %q", t.Name, fieldName)
+			if emitDiagnostics {
+				a.errorf(pos, "tree struct %q has no field %q", t.Name, fieldName)
+			}
 			return Field{}, false
 		}
 		return field, true
 	case *GenericInstanceType:
 		baseStruct, ok := t.Base.(*StructType)
 		if !ok {
-			a.errorf(pos, "field access requires struct type, got %s", objType.String())
+			if emitDiagnostics {
+				a.errorf(pos, "field access requires struct type, got %s", objType.String())
+			}
 			return Field{}, false
 		}
 		field, ok := baseStruct.Fields[fieldName]
 		if !ok {
-			a.errorf(pos, "struct %q has no field %q", baseStruct.Name, fieldName)
+			if emitDiagnostics {
+				a.errorf(pos, "struct %q has no field %q", baseStruct.Name, fieldName)
+			}
 			return Field{}, false
 		}
 		bindings := genericBindingsForStructInstance(baseStruct, t.Args)
 		field.Type = a.substituteType(field.Type, bindings, nil, nil, nil)
 		return field, true
 	default:
-		a.errorf(pos, "field access requires struct type, got %s", objType.String())
+		if emitDiagnostics {
+			a.errorf(pos, "field access requires struct type, got %s", objType.String())
+		}
 		return Field{}, false
 	}
 }

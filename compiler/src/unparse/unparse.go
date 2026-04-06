@@ -194,7 +194,13 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			}
 		}
 	case *ast.ImplDecl:
-		f.writeLine(level, "impl "+n.InterfaceName+" for "+formatTypeExpr(n.ForType)+":")
+		header := ""
+		if n.IsExtension() {
+			header = "impl " + formatTypeExpr(n.ForType) + ":"
+		} else {
+			header = "impl " + n.InterfaceName + " for " + formatTypeExpr(n.ForType) + ":"
+		}
+		f.writeLine(level, header)
 		for _, member := range n.Members {
 			switch m := member.(type) {
 			case *ast.ImplAssociatedTypeDecl:
