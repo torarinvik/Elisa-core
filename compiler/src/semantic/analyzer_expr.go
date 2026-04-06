@@ -6835,7 +6835,7 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 		return field, true
 	}
 	if viewType, ok := objType.(*TreeVariantViewType); ok {
-		field, ok := viewType.Field(fieldName)
+		field, ok := TreeVariantSurfaceFieldInfo(viewType, fieldName)
 		if !ok {
 			a.errorf(pos, "%s has no field %q", viewType.String(), fieldName)
 			return Field{}, false
@@ -6851,7 +6851,7 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 		return field, true
 	}
 	if categoryType, ok := objType.(*TreeCategoryType); ok {
-		field, ok := categoryType.Common[fieldName]
+		field, ok := TreeCategorySurfaceFieldInfo(categoryType, fieldName)
 		if !ok {
 			a.errorf(pos, "tree category %q has no common field %q", categoryType.Name, fieldName)
 			return Field{}, false
@@ -6870,14 +6870,14 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 		}
 		return field, true
 	case *TreeBlockType:
-		field, ok := TreeExactFieldInfo(t, fieldName)
+		field, ok := TreeExactSurfaceFieldInfo(t, fieldName)
 		if !ok {
 			a.errorf(pos, "tree block %q has no field %q", t.Name, fieldName)
 			return Field{}, false
 		}
 		return field, true
 	case *TreeStructType:
-		field, ok := TreeExactFieldInfo(t, fieldName)
+		field, ok := TreeExactSurfaceFieldInfo(t, fieldName)
 		if !ok {
 			a.errorf(pos, "tree struct %q has no field %q", t.Name, fieldName)
 			return Field{}, false

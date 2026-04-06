@@ -319,6 +319,45 @@ def count_children(stmt: Lua.Stmt) -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersTreeSequenceFieldViews(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(stmt)
+	node Stmt:
+		Return(child value: Expr)
+		ElseIf(child condition: Expr, child body: Block)
+		IfStmt(child condition: Expr, child then_block: Block, children elseifs: darray[Stmt], has_else: bool, child else_block: Block)
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+	block Block:
+		stmts: darray[Stmt]
+
+def block_total(block: Lua.Block) -> i64:
+	total: mutable i64 = block.stmts.len.i64()
+	for stmt in block.stmts:
+		total <- total + stmt.kind.i64()
+	return total + block.stmts[0u].kind.i64()
+
+def elseif_total(stmt: Lua.Stmt.IfStmt) -> i64:
+	total: mutable i64 = stmt.elseifs.len.i64()
+	for branch in stmt.elseifs:
+		total <- total + branch.kind.i64()
+	return total + stmt.elseifs[0u].kind.i64()
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_sequence_fields.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i64 @block_total(%Lua__TreeHandle ", "define i64 @elseif_total(%Lua__TreeHandle ", "DynArrayView", "tree.field.surface.view.len", "tree.field.surface.view.elem_size", "iter.len.ptr"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected tree sequence field lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersTreeVisitExpr(t *testing.T) {
 	src := `tree Lua:
 	common:
@@ -417,7 +456,7 @@ func TestGenerateLLVMIRLowersExactTreeVisitExpr(t *testing.T) {
 def stmt_total(block: Lua.Block) -> i64:
 	return visit block:
 		Lua.Block(node):
-			node.stmts.count.i64()
+			node.stmts.len.i64()
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_tree_visit_exact_expr.llcontext", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)

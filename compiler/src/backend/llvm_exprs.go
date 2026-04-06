@@ -6924,7 +6924,7 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 			value := C.LLVMConstInt(llvmType, C.ulonglong(tt.Variant.Tag), 0)
 			return value, kindType, true, nil
 		}
-		if field, ok := treeExactFieldInfo(tt, expr.Field); ok {
+		if field, ok := semantic.TreeVariantSurfaceFieldInfo(tt, expr.Field); ok {
 			stateValue := s.emitTreeHandleStateValue(handleValue, "tree.field")
 			rowIndex, err := s.emitTreeHandleIndexValue(handleValue, "tree.field")
 			if err != nil {
@@ -6934,8 +6934,12 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 			if err != nil {
 				return nil, nil, true, err
 			}
-			value, _, err := s.emitTreeExactFieldValueAtIndex(tablePtr, tt, expr.Field, rowIndex, "tree.field")
-			return value, field.Type, true, err
+			value, rawType, err := s.emitTreeExactFieldValueAtIndex(tablePtr, tt, expr.Field, rowIndex, "tree.field")
+			if err != nil {
+				return nil, nil, true, err
+			}
+			surfaceValue, surfaceType, err := s.treeFieldSurfaceValue(value, rawType, field.Type, "tree.field")
+			return surfaceValue, surfaceType, true, err
 		}
 		return nil, nil, true, fmt.Errorf("%s has no field %s", tt.String(), expr.Field)
 	case *semantic.TreeNodeType:
@@ -6963,7 +6967,7 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 			}
 			return value, kindType, true, nil
 		}
-		if _, ok := tt.Common[expr.Field]; ok {
+		if field, ok := semantic.TreeCategorySurfaceFieldInfo(tt, expr.Field); ok {
 			tagValue, err := s.emitTreeHandleTagValue(handleValue, "tree.field")
 			if err != nil {
 				return nil, nil, true, err
@@ -6972,7 +6976,6 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 			if err != nil {
 				return nil, nil, true, err
 			}
-			var fieldType semantic.Type
 			resultBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("tree.field.result"))
 			failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("tree.field.fail"))
 			switchInst := C.LLVMBuildSwitch(s.builder, tagValue, failBB, C.unsigned(len(tt.Variants)))
@@ -6992,12 +6995,15 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 				if err != nil {
 					return nil, nil, true, err
 				}
-				value, resolvedType, err := s.emitTreeExactFieldValueAtIndex(tablePtr, memberType, expr.Field, rowIndex, "tree.field")
+				value, rawType, err := s.emitTreeExactFieldValueAtIndex(tablePtr, memberType, expr.Field, rowIndex, "tree.field")
 				if err != nil {
 					return nil, nil, true, err
 				}
-				fieldType = resolvedType
-				incomingValues = append(incomingValues, value)
+				surfaceValue, _, err := s.treeFieldSurfaceValue(value, rawType, field.Type, "tree.field")
+				if err != nil {
+					return nil, nil, true, err
+				}
+				incomingValues = append(incomingValues, surfaceValue)
 				incomingBlocks = append(incomingBlocks, C.LLVMGetInsertBlock(s.builder))
 				C.LLVMBuildBr(s.builder, resultBB)
 			}
@@ -7005,13 +7011,13 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 				return nil, nil, true, err
 			}
 			C.LLVMPositionBuilderAtEnd(s.builder, resultBB)
-			llvmFieldType, err := s.g.lowerType(fieldType)
+			llvmFieldType, err := s.g.lowerType(field.Type)
 			if err != nil {
 				return nil, nil, true, err
 			}
 			phi := C.LLVMBuildPhi(s.builder, llvmFieldType, cStringFree("tree.field.phi"))
 			C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
-			return phi, fieldType, true, nil
+			return phi, field.Type, true, nil
 		}
 		return nil, nil, false, nil
 	case *semantic.TreeBlockType, *semantic.TreeStructType:
@@ -7031,7 +7037,7 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 			value := C.LLVMConstInt(llvmType, C.ulonglong(tag), 0)
 			return value, kindType, true, nil
 		}
-		field, ok := semantic.TreeExactFieldInfo(tt, expr.Field)
+		field, ok := semantic.TreeExactSurfaceFieldInfo(tt, expr.Field)
 		if !ok {
 			return nil, nil, true, fmt.Errorf("%s has no field %s", baseType.String(), expr.Field)
 		}
@@ -7044,11 +7050,64 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 		if err != nil {
 			return nil, nil, true, err
 		}
-		value, _, err := s.emitTreeExactFieldValueAtIndex(tablePtr, tt, expr.Field, rowIndex, "tree.field")
-		return value, field.Type, true, err
+		value, rawType, err := s.emitTreeExactFieldValueAtIndex(tablePtr, tt, expr.Field, rowIndex, "tree.field")
+		if err != nil {
+			return nil, nil, true, err
+		}
+		surfaceValue, surfaceType, err := s.treeFieldSurfaceValue(value, rawType, field.Type, "tree.field")
+		return surfaceValue, surfaceType, true, err
 	default:
 		return nil, nil, false, nil
 	}
+}
+
+func (s *functionState) buildDynArrayViewValue(arrayValue C.LLVMValueRef, arrayType *semantic.DArrayType, viewType *semantic.DArrayViewType, name string) (C.LLVMValueRef, error) {
+	if s == nil || arrayType == nil || viewType == nil {
+		return nil, fmt.Errorf("missing dynamic array view conversion metadata")
+	}
+	viewLLVMType, err := s.g.lowerType(viewType)
+	if err != nil {
+		return nil, err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, err
+	}
+	elemSize, err := s.sizeOfType(viewType.Elem)
+	if err != nil {
+		return nil, err
+	}
+	dataValue := C.LLVMBuildExtractValue(s.builder, arrayValue, 0, cStringFree(name+".data"))
+	lenValue := C.LLVMBuildExtractValue(s.builder, arrayValue, 1, cStringFree(name+".len"))
+	elemSizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(elemSize), 0)
+	viewValue := C.LLVMGetUndef(viewLLVMType)
+	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, dataValue, 0, cStringFree(name+".view.data"))
+	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, lenValue, 1, cStringFree(name+".view.len"))
+	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, elemSizeValue, 2, cStringFree(name+".view.elem_size"))
+	return viewValue, nil
+}
+
+func (s *functionState) treeFieldSurfaceValue(value C.LLVMValueRef, rawType semantic.Type, surfaceType semantic.Type, name string) (C.LLVMValueRef, semantic.Type, error) {
+	if rawType == nil {
+		return nil, nil, fmt.Errorf("missing raw tree field type")
+	}
+	if surfaceType == nil || semantic.SameType(rawType, surfaceType) {
+		return value, rawType, nil
+	}
+	rawArray, ok := rawType.(*semantic.DArrayType)
+	if !ok || rawArray == nil {
+		return nil, nil, fmt.Errorf("unsupported tree field surface conversion from %s to %s", rawType.String(), surfaceType.String())
+	}
+	viewType, ok := surfaceType.(*semantic.DArrayViewType)
+	if !ok || viewType == nil || !semantic.SameType(rawArray.Elem, viewType.Elem) {
+		return nil, nil, fmt.Errorf("unsupported tree field surface conversion from %s to %s", rawType.String(), surfaceType.String())
+	}
+	viewValue, err := s.buildDynArrayViewValue(value, rawArray, viewType, name+".surface")
+	if err != nil {
+		return nil, nil, err
+	}
+	return viewValue, viewType, nil
 }
 
 func (s *functionState) emitTreeHandleValue(expr ast.Expr, objType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {

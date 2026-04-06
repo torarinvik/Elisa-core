@@ -621,7 +621,36 @@ func TestAnalyzeTreeVisitExactMemberExpr(t *testing.T) {
 def stmt_total(block: Lua.Block) -> i64:
 	return visit block:
 		Lua.Block(node):
-			node.stmts.count.i64()
+			node.stmts.len.i64()
+`)
+}
+
+func TestAnalyzeTreeSequenceFieldsSurfaceAsViews(t *testing.T) {
+	analyzeTreeTestSource(t, "tree_sequence_field_surface.llcontext", `tree Lua:
+	common:
+		span: i64
+	@role(stmt)
+	node Stmt:
+		Return(child value: Expr)
+		ElseIf(child condition: Expr, child body: Block)
+		IfStmt(child condition: Expr, child then_block: Block, children elseifs: darray[Stmt], has_else: bool, child else_block: Block)
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+	block Block:
+		stmts: darray[Stmt]
+
+def block_total(block: Lua.Block) -> i64:
+	total: mutable i64 = block.stmts.len.i64()
+	for stmt in block.stmts:
+		total <- total + stmt.kind.i64()
+	return total + block.stmts[0u].kind.i64()
+
+def elseif_total(stmt: Lua.Stmt.IfStmt) -> i64:
+	total: mutable i64 = stmt.elseifs.len.i64()
+	for branch in stmt.elseifs:
+		total <- total + branch.kind.i64()
+	return total + stmt.elseifs[0u].kind.i64()
 `)
 }
 

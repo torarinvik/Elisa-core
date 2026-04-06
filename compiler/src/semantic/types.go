@@ -2050,6 +2050,74 @@ func TreeStructuralSequenceElemType(t Type) (Type, bool) {
 	}
 }
 
+func TreeStructuralSequenceViewType(t Type) (*DArrayViewType, bool) {
+	darray, ok := t.(*DArrayType)
+	if !ok || darray == nil {
+		return nil, false
+	}
+	return &DArrayViewType{Elem: darray.Elem, SurfaceName: "dview"}, true
+}
+
+func treeSurfaceSequenceField(field Field, relation ast.EnumPayloadRelation) Field {
+	if relation != ast.EnumPayloadRelationChildren {
+		return field
+	}
+	if viewType, ok := TreeStructuralSequenceViewType(field.Type); ok {
+		field.Type = viewType
+	}
+	return field
+}
+
+func TreeVariantSurfaceFieldInfo(viewType *TreeVariantViewType, fieldName string) (Field, bool) {
+	if viewType == nil || viewType.Category == nil || viewType.Variant == nil {
+		return Field{}, false
+	}
+	field, ok := viewType.Field(fieldName)
+	if !ok {
+		return Field{}, false
+	}
+	if fieldName == "kind" {
+		return field, true
+	}
+	if _, ok := viewType.Category.Common[fieldName]; ok {
+		relation := TreeFieldStructuralRelation(viewType.Category.Family, field.Type)
+		return treeSurfaceSequenceField(field, relation), true
+	}
+	if index, ok := viewType.Variant.PayloadIndex(fieldName); ok {
+		relation := viewType.Variant.PayloadRelation(index)
+		return treeSurfaceSequenceField(field, relation), true
+	}
+	return field, true
+}
+
+func TreeCategorySurfaceFieldInfo(categoryType *TreeCategoryType, fieldName string) (Field, bool) {
+	if categoryType == nil {
+		return Field{}, false
+	}
+	if fieldName == "kind" {
+		return TreeKindFieldInfo(categoryType)
+	}
+	field, ok := categoryType.Common[fieldName]
+	if !ok {
+		return Field{}, false
+	}
+	relation := TreeFieldStructuralRelation(categoryType.Family, field.Type)
+	return treeSurfaceSequenceField(field, relation), true
+}
+
+func TreeExactSurfaceFieldInfo(member Type, fieldName string) (Field, bool) {
+	field, ok := TreeExactFieldInfo(member, fieldName)
+	if !ok {
+		return Field{}, false
+	}
+	family, ok := TreeFamilyForMemberType(member)
+	if !ok || family == nil {
+		return field, true
+	}
+	relation := TreeFieldStructuralRelation(family, field.Type)
+	return treeSurfaceSequenceField(field, relation), true
+}
+
 func TreeFamilyForMemberType(t Type) (*TreeType, bool) {
 	switch tt := StripAggregateStateType(t).(type) {
 	case *TreeCategoryType:
