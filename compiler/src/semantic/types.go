@@ -22,6 +22,19 @@ type PermissionSet struct {
 	Builtin   bool
 }
 
+type ContextBundleField struct {
+	Name    string
+	Type    Type
+	Mutable bool
+	Decl    ast.ParamDecl
+}
+
+type ContextBundle struct {
+	Name   string
+	Fields []ContextBundleField
+	Decl   *ast.ContextDecl
+}
+
 type Shape interface {
 	String() string
 	isShape()
@@ -421,6 +434,8 @@ type FuncType struct {
 	GuardEffects                 []FuncGuardEffect
 	Poststates                   []FuncPoststate
 	Params                       []Type
+	ExplicitParamCount           int
+	ImplicitParamNames           []string
 	Return                       Type
 	Variadic                     bool
 	SinkParams                   []bool
@@ -1191,10 +1206,48 @@ func (t *AggregateStateType) String() string {
 	}
 	return fmt.Sprintf("%s[%s]", t.Base.String(), strings.Join(parts, ", "))
 }
+
+func funcTypeExplicitParamCount(t *FuncType) int {
+	if t == nil {
+		return 0
+	}
+	if t.ExplicitParamCount != 0 || len(t.ImplicitParamNames) != 0 {
+		return t.ExplicitParamCount
+	}
+	return len(t.Params)
+}
+
+func funcTypeImplicitParamTypes(t *FuncType) []Type {
+	if t == nil {
+		return nil
+	}
+	explicitCount := funcTypeExplicitParamCount(t)
+	if explicitCount < 0 {
+		explicitCount = 0
+	}
+	if explicitCount > len(t.Params) {
+		explicitCount = len(t.Params)
+	}
+	return t.Params[explicitCount:]
+}
+
 func (t *FuncType) String() string {
-	parts := make([]string, 0, len(t.Params))
-	for _, p := range t.Params {
+	explicitCount := funcTypeExplicitParamCount(t)
+	if explicitCount > len(t.Params) {
+		explicitCount = len(t.Params)
+	}
+	parts := make([]string, 0, explicitCount)
+	for _, p := range t.Params[:explicitCount] {
 		parts = append(parts, p.String())
+	}
+	implicitParts := make([]string, 0, len(t.ImplicitParamNames))
+	for i, name := range t.ImplicitParamNames {
+		index := explicitCount + i
+		if index >= len(t.Params) || t.Params[index] == nil {
+			implicitParts = append(implicitParts, name+": <invalid>")
+			continue
+		}
+		implicitParts = append(implicitParts, name+": "+t.Params[index].String())
 	}
 	generics := make([]string, 0, len(t.GenericParams)+len(t.RegionParams)+len(t.PermissionParams))
 	if len(t.GenericParams) != 0 {
@@ -1236,10 +1289,14 @@ func (t *FuncType) String() string {
 	if t.Variadic {
 		parts = append(parts, "...")
 	}
-	if t.Return == nil {
-		return fmt.Sprintf("func%s(%s)%s", prefix, strings.Join(parts, ", "), permissionFamiliesString(t.Permissions))
+	withClause := ""
+	if len(implicitParts) != 0 {
+		withClause = " with " + strings.Join(implicitParts, ", ")
 	}
-	return fmt.Sprintf("func%s(%s) -> %s%s", prefix, strings.Join(parts, ", "), t.Return.String(), permissionFamiliesString(t.Permissions))
+	if t.Return == nil {
+		return fmt.Sprintf("func%s(%s)%s%s", prefix, strings.Join(parts, ", "), withClause, permissionFamiliesString(t.Permissions))
+	}
+	return fmt.Sprintf("func%s(%s)%s -> %s%s", prefix, strings.Join(parts, ", "), withClause, t.Return.String(), permissionFamiliesString(t.Permissions))
 }
 
 func permissionFamiliesString(families []string) string {

@@ -119,6 +119,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("permission") {
 		return p.parsePermissionDecl()
 	}
+	if p.peek() == lexer.TOKEN_CONTEXT {
+		return p.parseContextDecl()
+	}
 	if p.peekIdentText("namespace") {
 		return p.parseNamespaceDecl()
 	}
@@ -175,6 +178,8 @@ func (p *Parser) parseDecl() ast.Decl {
 		return p.parseConstDecl()
 	case lexer.TOKEN_ERROR:
 		return p.parseErrorDecl()
+	case lexer.TOKEN_CONTEXT:
+		return p.parseContextDecl()
 	case lexer.TOKEN_ENUM:
 		return p.parseEnumDecl()
 	case lexer.TOKEN_GLOBAL:
@@ -332,6 +337,27 @@ func (p *Parser) parsePermissionDecl() *ast.PermissionDecl {
 	p.expect(lexer.TOKEN_DEDENT)
 
 	return &ast.PermissionDecl{Position: pos, Name: name, Members: members}
+}
+
+func (p *Parser) parseContextDecl() *ast.ContextDecl {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_CONTEXT)
+	name := p.parseQualifiedDeclName()
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+
+	fields := make([]ast.ParamDecl, 0, p.estimateIndentedItemCount())
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		fields = append(fields, p.parseParam())
+		p.expectNewline()
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	return &ast.ContextDecl{Position: pos, Name: name, Fields: fields}
 }
 
 func (p *Parser) parseQualifiedDeclName() string {
@@ -1066,6 +1092,13 @@ func (p *Parser) parseFuncDeclWithAnnotations(annotations []ast.Annotation) *ast
 	params := p.parseParamList()
 	p.expect(lexer.TOKEN_RPAREN)
 
+	var implicitParams []ast.ParamDecl
+	var implicitBundles []string
+	var implicitItemOrder []ast.ImplicitSigItem
+	if p.peek() == lexer.TOKEN_WITH {
+		implicitParams, implicitBundles, implicitItemOrder = p.parseWithSignatureClause()
+	}
+
 	var retType ast.TypeExpr
 	if p.match(lexer.TOKEN_ARROW) {
 		retType = p.parseTypeExpr()
@@ -1085,7 +1118,7 @@ func (p *Parser) parseFuncDeclWithAnnotations(annotations []ast.Annotation) *ast
 	p.expectNewline()
 
 	body := p.parseBlock()
-	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ReturnType: retType, Body: body}
+	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Body: body}
 }
 
 func (p *Parser) parseParamList() []ast.ParamDecl {
@@ -1112,6 +1145,44 @@ func (p *Parser) parseParam() ast.ParamDecl {
 	p.expect(lexer.TOKEN_COLON)
 	typ := p.parseTypeExpr()
 	return ast.ParamDecl{Position: pos, Name: name, Mutable: mutable, Type: typ}
+}
+
+func (p *Parser) lookaheadParamDecl() bool {
+	i := p.pos
+	if i >= len(p.tokens) {
+		return false
+	}
+	if p.tokens[i].Kind == lexer.TOKEN_MUTABLE {
+		i++
+	}
+	if i >= len(p.tokens) || p.tokens[i].Kind != lexer.TOKEN_IDENT {
+		return false
+	}
+	i++
+	return i < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_COLON
+}
+
+func (p *Parser) parseWithSignatureClause() ([]ast.ParamDecl, []string, []ast.ImplicitSigItem) {
+	p.expect(lexer.TOKEN_WITH)
+	implicitParams := make([]ast.ParamDecl, 0, 2)
+	implicitBundles := make([]string, 0, 2)
+	implicitItemOrder := make([]ast.ImplicitSigItem, 0, 2)
+	for {
+		if p.lookaheadParamDecl() {
+			param := p.parseParam()
+			implicitParams = append(implicitParams, param)
+			implicitItemOrder = append(implicitItemOrder, ast.ImplicitSigItem{Position: param.Position, Param: param})
+		} else {
+			namePos := p.cur().Pos
+			bundle := p.parseQualifiedDeclName()
+			implicitBundles = append(implicitBundles, bundle)
+			implicitItemOrder = append(implicitItemOrder, ast.ImplicitSigItem{Position: namePos, Bundle: bundle, IsBundle: true})
+		}
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	return implicitParams, implicitBundles, implicitItemOrder
 }
 
 func (p *Parser) parseExternDecl() ast.Decl {
@@ -1164,6 +1235,13 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 	}
 	p.expect(lexer.TOKEN_RPAREN)
 
+	var implicitParams []ast.ParamDecl
+	var implicitBundles []string
+	var implicitItemOrder []ast.ImplicitSigItem
+	if p.peek() == lexer.TOKEN_WITH {
+		implicitParams, implicitBundles, implicitItemOrder = p.parseWithSignatureClause()
+	}
+
 	var retType ast.TypeExpr
 	if p.match(lexer.TOKEN_ARROW) {
 		retType = p.parseTypeExpr()
@@ -1178,7 +1256,7 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 	}
 	p.expectNewline()
 
-	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, PermissionParams: permissionParams, GenericParams: genericParams, RegionParams: regionParams, Permissions: permissions, Ensures: ensures, Params: params, ReturnType: retType, Variadic: variadic}
+	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, PermissionParams: permissionParams, GenericParams: genericParams, RegionParams: regionParams, Permissions: permissions, Ensures: ensures, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Variadic: variadic}
 }
 
 func (p *Parser) parseExportDecl() ast.Decl {

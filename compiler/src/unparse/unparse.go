@@ -99,6 +99,11 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		for _, member := range n.Members {
 			f.writeLine(level+1, member)
 		}
+	case *ast.ContextDecl:
+		f.writeLine(level, "context "+n.Name+":")
+		for _, field := range n.Fields {
+			f.writeLine(level+1, formatParamDecl(field))
+		}
 	case *ast.NamespaceDecl:
 		f.writeLine(level, "namespace "+n.Name+":")
 		for i, nested := range n.Decls {
@@ -190,7 +195,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			case *ast.AssociatedTypeDecl:
 				f.writeLine(level+1, "type "+m.Name)
 			case *ast.ExternFuncDecl:
-				f.writeLine(level+1, formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RefStorageParams, m.RefStateParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, m.Variadic))
+				f.writeLine(level+1, formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RefStorageParams, m.RefStateParams, m.RegionParams, m.PermissionParams, m.Params, m.ImplicitParams, m.ImplicitBundles, m.ImplicitItemOrder, m.ReturnType, m.Permissions, m.Ensures, m.Variadic))
 			}
 		}
 	case *ast.ImplDecl:
@@ -208,7 +213,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 				f.writeLine(level+1, "type "+m.Name+" = "+formatTypeExpr(m.Type))
 			case *ast.FuncDecl:
 				f.writeAnnotations(level+1, m.Annotations)
-				header := formatFuncHeader(m.Name, m.GenericParams, m.TypeParams, m.RefStorageParams, m.RefStateParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, false)
+				header := formatFuncHeader(m.Name, m.GenericParams, m.TypeParams, m.RefStorageParams, m.RefStateParams, m.RegionParams, m.PermissionParams, m.Params, m.ImplicitParams, m.ImplicitBundles, m.ImplicitItemOrder, m.ReturnType, m.Permissions, m.Ensures, false)
 				if m.Override {
 					header = "override " + header
 				}
@@ -218,7 +223,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 				}
 			case *ast.ExternFuncDecl:
 				f.writeAnnotations(level+1, m.Annotations)
-				header := formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RefStorageParams, m.RefStateParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, m.Variadic)
+				header := formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RefStorageParams, m.RefStateParams, m.RegionParams, m.PermissionParams, m.Params, m.ImplicitParams, m.ImplicitBundles, m.ImplicitItemOrder, m.ReturnType, m.Permissions, m.Ensures, m.Variadic)
 				if m.Override {
 					header = "override " + header
 				}
@@ -227,13 +232,13 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 	case *ast.FuncDecl:
 		f.writeAnnotations(level, n.Annotations)
-		f.writeLine(level, formatFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams, n.Params, n.ReturnType, n.Permissions, n.Ensures, false))
+		f.writeLine(level, formatFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams, n.Params, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, n.Permissions, n.Ensures, false))
 		for _, stmt := range n.Body {
 			f.writeStmt(level+1, stmt)
 		}
 	case *ast.ExternFuncDecl:
 		f.writeAnnotations(level, n.Annotations)
-		f.writeLine(level, formatExternFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams, n.Params, n.ReturnType, n.Permissions, n.Ensures, n.Variadic))
+		f.writeLine(level, formatExternFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams, n.Params, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, n.Permissions, n.Ensures, n.Variadic))
 	case *ast.ExternVarDecl:
 		f.writeLine(level, "extern "+n.Name+": "+formatTypeExpr(n.Type))
 	case *ast.ExternTypeDecl:
@@ -460,6 +465,11 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 		for _, stmt := range n.Body {
 			f.writeStmt(level+1, stmt)
 		}
+	case *ast.WithStmt:
+		f.writeLine(level, "with "+formatWithValueClause(n.Bundles, n.Args, n.WithItemOrder)+":")
+		for _, stmt := range n.Body {
+			f.writeStmt(level+1, stmt)
+		}
 	case *ast.PoolStmt:
 		f.writeLine(level, "pool "+n.Name+"("+formatExpr(n.Workers)+"):")
 		for _, stmt := range n.Body {
@@ -587,16 +597,17 @@ func formatAggregateStateSuffix(hasStateParam bool, stateParamCount int) string 
 	return "[" + strings.Join(parts, ", ") + "]"
 }
 
-func formatFuncHeader(name string, genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, retType ast.TypeExpr, permissions []ast.PermissionRef, ensures []ast.EnsuresClause, variadic bool) string {
-	line := formatImplMethodHeader(name, genericParams, typeParams, refStorageParams, refStateParams, regionParams, permissionParams, params, retType, permissions, ensures, variadic)
+func formatFuncHeader(name string, genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, implicitParams []ast.ParamDecl, implicitBundles []string, implicitItemOrder []ast.ImplicitSigItem, retType ast.TypeExpr, permissions []ast.PermissionRef, ensures []ast.EnsuresClause, variadic bool) string {
+	line := formatImplMethodHeader(name, genericParams, typeParams, refStorageParams, refStateParams, regionParams, permissionParams, params, implicitParams, implicitBundles, implicitItemOrder, retType, permissions, ensures, variadic)
 	line += ":"
 	return line
 }
 
-func formatImplMethodHeader(name string, genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, retType ast.TypeExpr, permissions []ast.PermissionRef, ensures []ast.EnsuresClause, variadic bool) string {
+func formatImplMethodHeader(name string, genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, implicitParams []ast.ParamDecl, implicitBundles []string, implicitItemOrder []ast.ImplicitSigItem, retType ast.TypeExpr, permissions []ast.PermissionRef, ensures []ast.EnsuresClause, variadic bool) string {
 	line := "def " + name
 	line += formatGenericParams(genericParams, typeParams, refStorageParams, refStateParams, regionParams, permissionParams)
 	line += "(" + formatParamList(params, variadic) + ")"
+	line += formatWithSignatureClause(implicitBundles, implicitParams, implicitItemOrder)
 	if retType != nil {
 		line += " -> " + formatTypeExpr(retType)
 	}
@@ -605,10 +616,11 @@ func formatImplMethodHeader(name string, genericParams []ast.GenericParam, typeP
 	return line
 }
 
-func formatExternFuncHeader(name string, genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, retType ast.TypeExpr, permissions []ast.PermissionRef, ensures []ast.EnsuresClause, variadic bool) string {
+func formatExternFuncHeader(name string, genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, implicitParams []ast.ParamDecl, implicitBundles []string, implicitItemOrder []ast.ImplicitSigItem, retType ast.TypeExpr, permissions []ast.PermissionRef, ensures []ast.EnsuresClause, variadic bool) string {
 	line := "extern " + name
 	line += formatGenericParams(genericParams, typeParams, refStorageParams, refStateParams, regionParams, permissionParams)
 	line += "(" + formatParamList(params, variadic) + ")"
+	line += formatWithSignatureClause(implicitBundles, implicitParams, implicitItemOrder)
 	if retType != nil {
 		line += " -> " + formatTypeExpr(retType)
 	}
@@ -636,15 +648,80 @@ func formatExportFuncHeader(n *ast.ExportFuncDecl) string {
 func formatParamList(params []ast.ParamDecl, variadic bool) string {
 	parts := make([]string, 0, len(params)+1)
 	for _, param := range params {
-		line := ""
-		if param.Mutable {
-			line += "mutable "
-		}
-		line += param.Name + ": " + formatTypeExpr(param.Type)
-		parts = append(parts, line)
+		parts = append(parts, formatParamDecl(param))
 	}
 	if variadic {
 		parts = append(parts, "...")
+	}
+	return strings.Join(parts, ", ")
+}
+
+func formatParamDecl(param ast.ParamDecl) string {
+	line := ""
+	if param.Mutable {
+		line += "mutable "
+	}
+	line += param.Name + ": " + formatTypeExpr(param.Type)
+	return line
+}
+
+func formatWithSignatureClause(bundles []string, params []ast.ParamDecl, order []ast.ImplicitSigItem) string {
+	parts := make([]string, 0, len(bundles)+len(params))
+	if len(order) != 0 {
+		for _, item := range order {
+			if item.IsBundle {
+				parts = append(parts, item.Bundle)
+				continue
+			}
+			parts = append(parts, formatParamDecl(item.Param))
+		}
+	} else {
+		parts = append(parts, bundles...)
+		for _, param := range params {
+			parts = append(parts, formatParamDecl(param))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " with " + strings.Join(parts, ", ")
+}
+
+func formatWithArg(arg ast.WithArg) string {
+	if arg.Shorthand {
+		return arg.Name
+	}
+	if arg.Value == nil {
+		return arg.Name
+	}
+	return arg.Name + " = " + formatExpr(arg.Value)
+}
+
+func formatWithBundleUse(bundle ast.WithBundleUse) string {
+	parts := make([]string, 0, len(bundle.Args))
+	for _, arg := range bundle.Args {
+		parts = append(parts, arg.Name+" = "+formatExpr(arg.Value))
+	}
+	return bundle.Name + "(" + strings.Join(parts, ", ") + ")"
+}
+
+func formatWithValueClause(bundles []ast.WithBundleUse, args []ast.WithArg, order []ast.WithItem) string {
+	parts := make([]string, 0, len(bundles)+len(args))
+	if len(order) != 0 {
+		for _, item := range order {
+			if item.IsBundle {
+				parts = append(parts, formatWithBundleUse(item.Bundle))
+				continue
+			}
+			parts = append(parts, formatWithArg(item.Arg))
+		}
+	} else {
+		for _, bundle := range bundles {
+			parts = append(parts, formatWithBundleUse(bundle))
+		}
+		for _, arg := range args {
+			parts = append(parts, formatWithArg(arg))
+		}
 	}
 	return strings.Join(parts, ", ")
 }
@@ -827,6 +904,7 @@ func formatTypeExpr(typ ast.TypeExpr) string {
 			parts = append(parts, "...")
 		}
 		line := "func(" + strings.Join(parts, ", ") + ")"
+		line += formatWithSignatureClause(n.ImplicitBundles, n.ImplicitParams, n.ImplicitItemOrder)
 		if n.Return != nil {
 			line += " -> " + formatTypeExpr(n.Return)
 		}
@@ -925,7 +1003,11 @@ func formatExpr(expr ast.Expr) string {
 				parts = append(parts, formatExpr(arg))
 			}
 		}
-		return formatExpr(n.Func) + "(" + strings.Join(parts, ", ") + ")"
+		line := formatExpr(n.Func) + "(" + strings.Join(parts, ", ") + ")"
+		if len(n.WithArgs) != 0 || len(n.WithBundles) != 0 {
+			line += " with " + formatWithValueClause(n.WithBundles, n.WithArgs, n.WithItemOrder)
+		}
+		return line
 	case *ast.FieldExpr:
 		return formatExpr(n.Object) + "." + n.Field
 	case *ast.ShorthandMemberExpr:
@@ -961,7 +1043,7 @@ func formatExpr(expr ast.Expr) string {
 		for _, arg := range n.TypeArgs {
 			parts = append(parts, formatTypeExpr(arg))
 		}
-		return formatExpr(n.Operand) + ".specialize[" + strings.Join(parts, ", ") + "]()"
+		return formatExpr(n.Operand) + "[" + strings.Join(parts, ", ") + "]"
 	case *ast.StructLitExpr:
 		parts := make([]string, 0, len(n.Args))
 		for _, arg := range n.Args {

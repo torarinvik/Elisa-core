@@ -72,6 +72,7 @@ type Analyzer struct {
 	staticImpls                       map[string]*StaticImpl
 	extensionMethodsByName            map[string][]*ExtensionMethod
 	permissions                       map[string]*PermissionSet
+	contextBundles                    map[string]*ContextBundle
 	globalScope                       *Scope
 	functionTypes                     map[string]*FuncType
 	constValues                       map[string]ConstValue
@@ -130,8 +131,11 @@ type Analyzer struct {
 	sinkParamInferenceInProgress      map[*ast.FuncDecl]bool
 	parallelForInfo                   map[*ast.ParallelForStmt]*ParallelForInfo
 	functionAnalyses                  map[*ast.FuncDecl]*FunctionAnalysis
+	loweredWithStmts                  map[*ast.WithStmt]bool
 	currentNamespace                  string
 	currentUsings                     []string
+	currentImplicitScopes             []map[string]ast.Expr
+	implicitTempCounter               int
 }
 
 type castHookSignature struct {
@@ -244,6 +248,7 @@ func Analyze(file *ast.File) *Result {
 		staticImpls:                       map[string]*StaticImpl{},
 		extensionMethodsByName:            map[string][]*ExtensionMethod{},
 		permissions:                       map[string]*PermissionSet{},
+		contextBundles:                    map[string]*ContextBundle{},
 		globalScope:                       NewScope(nil),
 		functionTypes:                     map[string]*FuncType{},
 		constValues:                       map[string]ConstValue{},
@@ -260,6 +265,7 @@ func Analyze(file *ast.File) *Result {
 		symbolFacts:                       map[*Symbol]OptimizationFacts{},
 		funcDeclSymbols:                   make(map[*ast.FuncDecl]*Symbol, funcDeclCapacity),
 		functionAnalyses:                  make(map[*ast.FuncDecl]*FunctionAnalysis, funcDeclCapacity),
+		loweredWithStmts:                  map[*ast.WithStmt]bool{},
 		castHooksByName:                   map[string]map[castHookSignature]*Symbol{},
 		returnProvenanceInProgress:        map[*ast.FuncDecl]bool{},
 		returnBorrowedOwnerRefInProgress:  map[*ast.FuncDecl]bool{},
@@ -271,6 +277,7 @@ func Analyze(file *ast.File) *Result {
 	a.collectConstValues(activeDecls)
 	a.collectPermissionDecls(activeDecls)
 	a.collectNamedTypes(activeDecls)
+	a.collectContextBundles(activeDecls)
 	a.collectStaticInterfaces(activeDecls)
 	a.populateConstEnumMembers(activeDecls)
 	a.populateStructFields(activeDecls)
@@ -292,6 +299,7 @@ func Analyze(file *ast.File) *Result {
 		NamedTypes:          a.namedTypes,
 		StaticInterfaces:    a.staticInterfaces,
 		StaticImpls:         a.staticImpls,
+		ContextBundles:      a.contextBundles,
 		ConstValues:         a.constValues,
 		ExprTypes:           a.exprTypes,
 		InterfaceMethodRefs: a.interfaceMethodRefs,
@@ -1478,7 +1486,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolGlobal, Type: declType, Node: n, Mutable: n.Mutable}, n.Pos())
 			case *ast.FuncDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
-				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Ensures, n.Params, n.ReturnType, false)
+				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Ensures, n.Params, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, false)
 				symbolName := qualifiedName
 				if n.Name == "__cast__" {
 					symbolName = castHookSymbolName(qualifiedName, fnType, n.Pos())
@@ -1502,7 +1510,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 						case *ast.FuncDecl:
 							visibleName := joinQualifiedName(scoped.Namespace, fnDecl.Name)
 							qualifiedName := ExtensionMethodSymbolName(visibleName, receiver, fnDecl.Name)
-							fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ReturnType, false)
+							fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, false)
 							sym := &Symbol{Name: qualifiedName, Kind: SymbolFunc, Type: fnType, Node: fnDecl, Mutable: false}
 							a.functionTypes[qualifiedName] = fnType
 							a.funcDeclSymbols[fnDecl] = sym
@@ -1511,7 +1519,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 						case *ast.ExternFuncDecl:
 							visibleName := joinQualifiedName(scoped.Namespace, fnDecl.Name)
 							qualifiedName := ExtensionMethodSymbolName(visibleName, receiver, fnDecl.Name)
-							fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ReturnType, fnDecl.Variadic)
+							fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, fnDecl.Variadic)
 							sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: fnDecl, Mutable: false}
 							a.functionTypes[qualifiedName] = fnType
 							a.defineGlobal(sym, fnDecl.Pos())
@@ -1528,14 +1536,14 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 					switch fnDecl := member.(type) {
 					case *ast.FuncDecl:
 						qualifiedName := StaticImplMethodSymbolName(interfaceName, receiver, fnDecl.Name)
-						fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ReturnType, false)
+						fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, false)
 						sym := &Symbol{Name: qualifiedName, Kind: SymbolFunc, Type: fnType, Node: fnDecl, Mutable: false}
 						a.functionTypes[qualifiedName] = fnType
 						a.funcDeclSymbols[fnDecl] = sym
 						a.defineGlobal(sym, fnDecl.Pos())
 					case *ast.ExternFuncDecl:
 						qualifiedName := StaticImplMethodSymbolName(interfaceName, receiver, fnDecl.Name)
-						fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ReturnType, fnDecl.Variadic)
+						fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, fnDecl.Variadic)
 						sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: fnDecl, Mutable: false}
 						a.functionTypes[qualifiedName] = fnType
 						a.defineGlobal(sym, fnDecl.Pos())
@@ -1543,7 +1551,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				}
 			case *ast.ExternFuncDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
-				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Ensures, n.Params, n.ReturnType, n.Variadic)
+				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Ensures, n.Params, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, n.Variadic)
 				a.applyExternFuncAnnotations(n, fnType)
 				if !fnType.ReturnProvenanceKnown {
 					fnType.ReturnProvenanceKnown = true
@@ -1623,8 +1631,12 @@ func (a *Analyzer) registerCastHook(namespace string, decl *ast.FuncDecl, fnType
 		return
 	}
 	qualifiedName := joinQualifiedName(namespace, decl.Name)
-	if len(fnType.Params) != 1 {
-		a.errorf(decl.Pos(), "__cast__ hook %q must take exactly 1 parameter, got %d", qualifiedName, len(fnType.Params))
+	if len(fnType.ImplicitParamNames) != 0 {
+		a.errorf(decl.Pos(), "__cast__ hook %q must not declare implicit parameters in v1", qualifiedName)
+		return
+	}
+	if funcTypeExplicitParamCount(fnType) != 1 {
+		a.errorf(decl.Pos(), "__cast__ hook %q must take exactly 1 parameter, got %d", qualifiedName, funcTypeExplicitParamCount(fnType))
 		return
 	}
 	if len(fnType.TypeParams) != 0 || len(fnType.RefStorageParams) != 0 || len(fnType.RefStateParams) != 0 || len(fnType.RegionParams) != 0 {
@@ -3375,10 +3387,17 @@ func poststateNamedStateCurrentType(t Type) (Type, bool) {
 }
 
 func (a *Analyzer) currentFuncParamSymbol(index int) (*Symbol, bool) {
-	if a == nil || a.currentFuncDecl == nil || a.currentScope == nil || index < 0 || index >= len(a.currentFuncDecl.Params) {
+	if a == nil || a.currentFuncDecl == nil || a.currentScope == nil || index < 0 {
 		return nil, false
 	}
-	name := a.currentFuncDecl.Params[index].Name
+	params := append([]ast.ParamDecl(nil), a.currentFuncDecl.Params...)
+	if implicitDecls, _ := a.expandImplicitParamDecls(a.currentFuncDecl.Params, a.currentFuncDecl.ImplicitParams, a.currentFuncDecl.ImplicitBundles, a.currentFuncDecl.ImplicitItemOrder, a.currentFuncDecl.Name); len(implicitDecls) != 0 {
+		params = append(params, implicitDecls...)
+	}
+	if index >= len(params) {
+		return nil, false
+	}
+	name := params[index].Name
 	if name == "" {
 		return nil, false
 	}
@@ -3547,11 +3566,15 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 		a.currentReturn = fnType.Return
 		a.returnFreshShapeStatus = freshReturnTracker(fnType.Return)
 	}
+	allParamDecls := append([]ast.ParamDecl(nil), fn.Params...)
+	if implicitDecls, _ := a.expandImplicitParamDecls(fn.Params, fn.ImplicitParams, fn.ImplicitBundles, fn.ImplicitItemOrder, sym.Name); len(implicitDecls) != 0 {
+		allParamDecls = append(allParamDecls, implicitDecls...)
+	}
 	a.withGenericParams(fn.GenericParams, nil, func() {
 		a.withRegionParams(fn.RegionParams, func() {
 			a.withPermissionParams(fn.PermissionParams, func() {
 				a.withShapeParams(fnType.ShapeParams, func() {
-					for i, param := range fn.Params {
+					for i, param := range allParamDecls {
 						var ptype Type = invalidType
 						if fnType != nil && i < len(fnType.Params) {
 							ptype = fnType.Params[i]

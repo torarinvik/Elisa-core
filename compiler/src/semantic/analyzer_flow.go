@@ -357,6 +357,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.analyzeInStoreStmt(n)
 	case *ast.CanStmt:
 		a.analyzeCanStmt(n)
+	case *ast.WithStmt:
+		a.analyzeWithStmt(n)
+
 	case *ast.PoolStmt:
 		a.analyzePoolStmt(n)
 	case *ast.LockStmt:

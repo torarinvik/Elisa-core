@@ -33,6 +33,7 @@ type Result struct {
 	NamedTypes          map[string]Type
 	StaticInterfaces    map[string]*StaticInterface
 	StaticImpls         map[string]*StaticImpl
+	ContextBundles      map[string]*ContextBundle
 	ConstValues         map[string]ConstValue
 	ExprTypes           map[ast.Expr]Type
 	InterfaceMethodRefs map[*ast.FieldExpr]*InterfaceMethodRef

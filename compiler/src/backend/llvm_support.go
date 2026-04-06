@@ -1194,6 +1194,10 @@ func (s *functionState) specializeFunctionType(base *semantic.FuncType) *semanti
 		s.specializedFuncTypes = make(map[*semantic.FuncType]*semantic.FuncType)
 	}
 	specialized := specializeFuncType(base, s.typeMap, s.g.result.StaticImpls)
+	if specialized != nil {
+		specialized.ExplicitParamCount = base.ExplicitParamCount
+		specialized.ImplicitParamNames = append([]string(nil), base.ImplicitParamNames...)
+	}
 	s.specializedFuncTypes[base] = specialized
 	return specialized
 }

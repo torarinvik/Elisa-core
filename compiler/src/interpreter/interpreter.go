@@ -352,9 +352,24 @@ func cloneArgs(args []Value) []Value {
 	return cloned
 }
 
+func (i *Interpreter) loweredFuncParams(fn *ast.FuncDecl) []ast.ParamDecl {
+	params := append([]ast.ParamDecl(nil), fn.Params...)
+	if i == nil || i.result == nil || i.result.GlobalScope == nil {
+		return params
+	}
+	if sym, ok := i.result.GlobalScope.Lookup(fn.Name); ok && sym != nil {
+		if fnType, ok := sym.Type.(*semantic.FuncType); ok {
+			for _, name := range fnType.ImplicitParamNames {
+				params = append(params, ast.ParamDecl{Name: name})
+			}
+		}
+	}
+	return params
+}
+
 func (i *Interpreter) callFunction(fn *ast.FuncDecl, positional []Value, named map[string]Value) (Value, error) {
 	frame := &frame{locals: map[string]Value{}}
-	if err := bindCallArgs(frame.locals, fn.Params, positional, named); err != nil {
+	if err := bindCallArgs(frame.locals, i.loweredFuncParams(fn), positional, named); err != nil {
 		return VoidValue(), fmt.Errorf("%s: %w", fn.Pos(), err)
 	}
 	signal, err := i.execBlock(frame, fn.Body)
@@ -549,6 +564,8 @@ func (i *Interpreter) execStmt(frame *frame, stmt ast.Stmt) (controlSignal, erro
 		}
 		return controlSignal{}, nil
 	case *ast.CanStmt:
+		return i.execBlock(frame, n.Body)
+	case *ast.WithStmt:
 		return i.execBlock(frame, n.Body)
 	case *ast.StaticIfStmt:
 		cond, err := i.evalExpr(frame, n.Cond)
@@ -954,9 +971,10 @@ func (i *Interpreter) evalCallExpr(frame *frame, expr *ast.CallExpr) (Value, err
 		}
 		name = calleeValue.funcName
 	}
-	positional := make([]Value, 0, len(expr.Args))
+	loweredArgs := expr.LoweredArgs()
+	positional := make([]Value, 0, len(loweredArgs))
 	named := map[string]Value{}
-	for index, argExpr := range expr.Args {
+	for index, argExpr := range loweredArgs {
 		value, err := i.evalExpr(frame, argExpr)
 		if err != nil {
 			return VoidValue(), err

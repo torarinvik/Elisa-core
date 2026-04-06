@@ -246,6 +246,8 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 	case *FuncType:
 		appendKeyTag(b, "func")
 		appendKeyBool(b, tt.Variadic)
+		appendKeyInt(b, funcTypeExplicitParamCount(tt))
+		appendKeyStringSlice(b, tt.ImplicitParamNames)
 		appendGenericParamSlice(b, tt.GenericParams)
 		appendKeyStringSlice(b, tt.TypeParams)
 		appendKeyStringSlice(b, tt.RefStorageParams)

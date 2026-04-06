@@ -256,6 +256,22 @@ func (g *llvmGenerator) defineFunctionBody(decl *ast.FuncDecl, fnType *semantic.
 	return g.defineFunctionBodyWithBindings(decl, fnType, fnValue, nil)
 }
 
+func backendExplicitParamCount(fnType *semantic.FuncType, decl *ast.FuncDecl) int {
+	if fnType == nil {
+		if decl == nil {
+			return 0
+		}
+		return len(decl.Params)
+	}
+	if fnType.ExplicitParamCount != 0 || len(fnType.ImplicitParamNames) != 0 {
+		return fnType.ExplicitParamCount
+	}
+	if decl != nil {
+		return len(decl.Params)
+	}
+	return len(fnType.Params)
+}
+
 func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnType *semantic.FuncType, fnValue C.LLVMValueRef, typeBindings map[string]semantic.Type) error {
 	if decl == nil || fnType == nil || fnValue == nil {
 		return fmt.Errorf("cannot define function body without declaration, type, and value")
@@ -287,18 +303,31 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		paramOffset = 1
 	}
 
-	for i, param := range decl.Params {
-		if i >= len(fnType.Params) {
-			break
+	explicitCount := backendExplicitParamCount(fnType, decl)
+	bindParam := func(name string, mutable bool, typeIndex int, llvmIndex int) error {
+		if typeIndex < 0 || typeIndex >= len(fnType.Params) {
+			return nil
 		}
-		alloca, err := state.createEntryAlloca(param.Name, fnType.Params[i])
+		alloca, err := state.createEntryAlloca(name, fnType.Params[typeIndex])
 		if err != nil {
 			return err
 		}
-		paramValue := C.LLVMGetParam(fnValue, C.unsigned(i+paramOffset))
+		paramValue := C.LLVMGetParam(fnValue, C.unsigned(llvmIndex+paramOffset))
 		C.LLVMBuildStore(builder, paramValue, alloca)
-		state.defineBinding(param.Name, valueBinding{ptr: alloca, typ: fnType.Params[i], mutable: param.Mutable})
-		state.bindPackedStoreValue(fnType.Params[i], paramValue)
+		state.defineBinding(name, valueBinding{ptr: alloca, typ: fnType.Params[typeIndex], mutable: mutable})
+		state.bindPackedStoreValue(fnType.Params[typeIndex], paramValue)
+		return nil
+	}
+
+	for i, param := range decl.Params {
+		if err := bindParam(param.Name, param.Mutable, i, i); err != nil {
+			return err
+		}
+	}
+	for i, name := range fnType.ImplicitParamNames {
+		if err := bindParam(name, false, explicitCount+i, explicitCount+i); err != nil {
+			return err
+		}
 	}
 
 	if err := state.emitBlock(decl.Body, false); err != nil {
@@ -983,6 +1012,8 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 	case *ast.InStoreStmt:
 		return s.emitInStore(n)
 	case *ast.CanStmt:
+		return s.emitBlock(n.Body, true)
+	case *ast.WithStmt:
 		return s.emitBlock(n.Body, true)
 	case *ast.PoolStmt:
 		return s.emitPoolStmt(n)

@@ -104,6 +104,8 @@ func (p *Parser) parseStmt() ast.Stmt {
 		return p.parseMatch()
 	case lexer.TOKEN_IN:
 		return p.parseInStore()
+	case lexer.TOKEN_WITH:
+		return p.parseWithStmt()
 	case lexer.TOKEN_WHILE:
 		return p.parseWhile()
 	case lexer.TOKEN_STATIC:
@@ -535,6 +537,15 @@ func (p *Parser) parseCanStmt() *ast.CanStmt {
 	p.expectNewline()
 	body := p.parseBlock()
 	return &ast.CanStmt{Position: pos, Permissions: permissions, Body: body}
+}
+
+func (p *Parser) parseWithStmt() *ast.WithStmt {
+	pos := p.cur().Pos
+	args, bundles, items := p.parseWithValueClause()
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	body := p.parseBlock()
+	return &ast.WithStmt{Position: pos, Args: args, Bundles: bundles, WithItemOrder: items, Body: body}
 }
 
 func (p *Parser) parseMatchArms() []ast.MatchArm {

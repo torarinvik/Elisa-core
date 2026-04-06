@@ -338,6 +338,8 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 		return nil
 	case *ast.PermissionDecl:
 		return nil
+	case *ast.ContextDecl:
+		return nil
 	case *ast.ErrorDecl:
 		return nil
 	case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
@@ -445,6 +447,8 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 	case *ast.ExternTypeDecl, *ast.StaticIfDecl:
 		return nil
 	case *ast.PermissionDecl:
+		return nil
+	case *ast.ContextDecl:
 		return nil
 	case *ast.ErrorDecl:
 		return nil

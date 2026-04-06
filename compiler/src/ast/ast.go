@@ -233,22 +233,58 @@ type EnsuresClause struct {
 	RefState   RefState
 }
 
+type ContextDecl struct {
+	Position lexer.Pos
+	Name     string
+	Fields   []ParamDecl
+}
+
+type WithArg struct {
+	Position  lexer.Pos
+	Name      string
+	Value     Expr
+	Shorthand bool
+}
+
+type WithBundleUse struct {
+	Position lexer.Pos
+	Name     string
+	Args     []WithArg
+}
+
+type ImplicitSigItem struct {
+	Position lexer.Pos
+	Bundle   string
+	Param    ParamDecl
+	IsBundle bool
+}
+
+type WithItem struct {
+	Position lexer.Pos
+	Arg      WithArg
+	Bundle   WithBundleUse
+	IsBundle bool
+}
+
 type FuncDecl struct {
-	Position         lexer.Pos
-	Annotations      []Annotation
-	Override         bool
-	Name             string
-	TypeParams       []string
-	RefStorageParams []string
-	RefStateParams   []string
-	RegionParams     []string
-	PermissionParams []string
-	GenericParams    []GenericParam
-	Permissions      []PermissionRef
-	Ensures          []EnsuresClause
-	Params           []ParamDecl
-	ReturnType       TypeExpr
-	Body             []Stmt
+	Position          lexer.Pos
+	Annotations       []Annotation
+	Override          bool
+	Name              string
+	TypeParams        []string
+	RefStorageParams  []string
+	RefStateParams    []string
+	RegionParams      []string
+	PermissionParams  []string
+	GenericParams     []GenericParam
+	Permissions       []PermissionRef
+	Ensures           []EnsuresClause
+	Params            []ParamDecl
+	ImplicitParams    []ParamDecl
+	ImplicitBundles   []string
+	ImplicitItemOrder []ImplicitSigItem
+	ReturnType        TypeExpr
+	Body              []Stmt
 }
 
 type ParamDecl struct {
@@ -259,21 +295,24 @@ type ParamDecl struct {
 }
 
 type ExternFuncDecl struct {
-	Position         lexer.Pos
-	Annotations      []Annotation
-	Override         bool
-	Name             string
-	TypeParams       []string
-	RefStorageParams []string
-	RefStateParams   []string
-	PermissionParams []string
-	GenericParams    []GenericParam
-	RegionParams     []string
-	Permissions      []PermissionRef
-	Ensures          []EnsuresClause
-	Params           []ParamDecl
-	ReturnType       TypeExpr
-	Variadic         bool
+	Position          lexer.Pos
+	Annotations       []Annotation
+	Override          bool
+	Name              string
+	TypeParams        []string
+	RefStorageParams  []string
+	RefStateParams    []string
+	PermissionParams  []string
+	GenericParams     []GenericParam
+	RegionParams      []string
+	Permissions       []PermissionRef
+	Ensures           []EnsuresClause
+	Params            []ParamDecl
+	ImplicitParams    []ParamDecl
+	ImplicitBundles   []string
+	ImplicitItemOrder []ImplicitSigItem
+	ReturnType        TypeExpr
+	Variadic          bool
 }
 
 type ExternVarDecl struct {
@@ -420,11 +459,14 @@ type BuiltinTypeExpr struct {
 }
 
 type FuncTypeExpr struct {
-	Position    lexer.Pos
-	Params      []TypeExpr
-	Return      TypeExpr
-	Permissions []PermissionRef
-	Variadic    bool
+	Position          lexer.Pos
+	Params            []TypeExpr
+	ImplicitParams    []ParamDecl
+	ImplicitBundles   []string
+	ImplicitItemOrder []ImplicitSigItem
+	Return            TypeExpr
+	Permissions       []PermissionRef
+	Variadic          bool
 }
 
 type ErrorTagExpr struct {
@@ -537,14 +579,19 @@ type MoveExpr struct {
 }
 
 type CallExpr struct {
-	Position lexer.Pos
-	Func     Expr
-	Args     []Expr
-	ArgNames []string
+	Position      lexer.Pos
+	Func          Expr
+	Args          []Expr
+	ArgNames      []string
+	WithArgs      []WithArg
+	WithBundles   []WithBundleUse
+	WithItemOrder []WithItem
 
-	ResolvedArgsValid  bool
-	ResolvedArgs       []Expr
-	ResolvedCommonArgs map[string]Expr
+	ResolvedArgsValid         bool
+	ResolvedArgs              []Expr
+	ResolvedCommonArgs        map[string]Expr
+	ResolvedImplicitArgsValid bool
+	ResolvedImplicitArgs      []Expr
 }
 
 type FieldExpr struct {
@@ -956,6 +1003,14 @@ type CanStmt struct {
 	Body        []Stmt
 }
 
+type WithStmt struct {
+	Position      lexer.Pos
+	Args          []WithArg
+	Bundles       []WithBundleUse
+	WithItemOrder []WithItem
+	Body          []Stmt
+}
+
 type PoolStmt struct {
 	Position lexer.Pos
 	Name     string
@@ -1058,6 +1113,7 @@ func (n *ConstEnumMemberDecl) Pos() lexer.Pos {
 }
 func (n *ErrorDecl) Pos() lexer.Pos      { return n.Position }
 func (n *PermissionDecl) Pos() lexer.Pos { return n.Position }
+func (n *ContextDecl) Pos() lexer.Pos    { return n.Position }
 func (n *NamespaceDecl) Pos() lexer.Pos  { return n.Position }
 func (n *UsingDecl) Pos() lexer.Pos      { return n.Position }
 func (n *EnumDecl) Pos() lexer.Pos       { return n.Position }
@@ -1176,6 +1232,7 @@ func (n *ParallelForStmt) Pos() lexer.Pos        { return n.Position }
 func (n *MatchStmt) Pos() lexer.Pos              { return n.Position }
 func (n *InStoreStmt) Pos() lexer.Pos            { return n.Position }
 func (n *CanStmt) Pos() lexer.Pos                { return n.Position }
+func (n *WithStmt) Pos() lexer.Pos               { return n.Position }
 func (n *PoolStmt) Pos() lexer.Pos               { return n.Position }
 func (n *LockStmt) Pos() lexer.Pos               { return n.Position }
 func (n *PassStmt) Pos() lexer.Pos               { return n.Position }
@@ -1195,6 +1252,7 @@ func (*ConstEnumDecl) nodeTag()             {}
 func (*ConstEnumMemberDecl) nodeTag()       {}
 func (*ErrorDecl) nodeTag()                 {}
 func (*PermissionDecl) nodeTag()            {}
+func (*ContextDecl) nodeTag()               {}
 func (*NamespaceDecl) nodeTag()             {}
 func (*UsingDecl) nodeTag()                 {}
 func (*EnumDecl) nodeTag()                  {}
@@ -1293,6 +1351,7 @@ func (*ParallelForStmt) nodeTag()           {}
 func (*MatchStmt) nodeTag()                 {}
 func (*InStoreStmt) nodeTag()               {}
 func (*CanStmt) nodeTag()                   {}
+func (*WithStmt) nodeTag()                  {}
 func (*PoolStmt) nodeTag()                  {}
 func (*LockStmt) nodeTag()                  {}
 func (*PassStmt) nodeTag()                  {}
@@ -1311,6 +1370,7 @@ func (*ConstDecl) declTag()        {}
 func (*ConstEnumDecl) declTag()    {}
 func (*ErrorDecl) declTag()        {}
 func (*PermissionDecl) declTag()   {}
+func (*ContextDecl) declTag()      {}
 func (*NamespaceDecl) declTag()    {}
 func (*UsingDecl) declTag()        {}
 func (*EnumDecl) declTag()         {}
@@ -1413,6 +1473,7 @@ func (*IterForStmt) stmtTag()     {}
 func (*ParallelForStmt) stmtTag() {}
 func (*InStoreStmt) stmtTag()     {}
 func (*CanStmt) stmtTag()         {}
+func (*WithStmt) stmtTag()        {}
 func (*PoolStmt) stmtTag()        {}
 func (*LockStmt) stmtTag()        {}
 func (*PassStmt) stmtTag()        {}
@@ -1445,4 +1506,17 @@ func (n *CallExpr) NamedArgCount() int {
 		}
 	}
 	return count
+}
+
+func (n *CallExpr) LoweredArgs() []Expr {
+	if n == nil {
+		return nil
+	}
+	if !n.ResolvedImplicitArgsValid || len(n.ResolvedImplicitArgs) == 0 {
+		return n.Args
+	}
+	out := make([]Expr, 0, len(n.Args)+len(n.ResolvedImplicitArgs))
+	out = append(out, n.Args...)
+	out = append(out, n.ResolvedImplicitArgs...)
+	return out
 }

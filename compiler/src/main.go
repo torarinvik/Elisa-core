@@ -790,17 +790,61 @@ func typeStr(t ast.TypeExpr) string {
 		for _, param := range n.Params {
 			parts = append(parts, typeStr(param))
 		}
+		if n.Variadic {
+			parts = append(parts, "...")
+		}
 		ret := ""
+		withClause := formatMainWithSignatureClause(n.ImplicitBundles, n.ImplicitParams)
 		if n.Return != nil {
 			ret = " -> " + typeStr(n.Return)
 		}
 		can := formatPermissionRefs(n.Permissions)
-		return "func(" + strings.Join(parts, ", ") + ")" + ret + can
+		return "func(" + strings.Join(parts, ", ") + ")" + withClause + ret + can
 	case *ast.OptionalTypeExpr:
 		return typeStr(n.Value) + "?"
 	default:
 		return "<type>"
 	}
+}
+
+func formatMainParamDecl(param ast.ParamDecl) string {
+	line := ""
+	if param.Mutable {
+		line += "mutable "
+	}
+	line += param.Name + ": " + typeStr(param.Type)
+	return line
+}
+
+func formatMainWithSignatureClause(bundles []string, params []ast.ParamDecl) string {
+	parts := make([]string, 0, len(bundles)+len(params))
+	parts = append(parts, bundles...)
+	for _, param := range params {
+		parts = append(parts, formatMainParamDecl(param))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " with " + strings.Join(parts, ", ")
+}
+
+func formatMainWithValueClause(bundles []ast.WithBundleUse, args []ast.WithArg) string {
+	parts := make([]string, 0, len(bundles)+len(args))
+	for _, bundle := range bundles {
+		bundleParts := make([]string, 0, len(bundle.Args))
+		for _, arg := range bundle.Args {
+			bundleParts = append(bundleParts, arg.Name+" = "+exprStr(arg.Value))
+		}
+		parts = append(parts, bundle.Name+"("+strings.Join(bundleParts, ", ")+")")
+	}
+	for _, arg := range args {
+		if arg.Shorthand {
+			parts = append(parts, arg.Name)
+			continue
+		}
+		parts = append(parts, arg.Name+" = "+exprStr(arg.Value))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func exprStr(e ast.Expr) string {
@@ -851,7 +895,11 @@ func exprStr(e ast.Expr) string {
 			}
 			args = append(args, exprStr(a))
 		}
-		return fmt.Sprintf("%s(%s)", exprStr(n.Func), strings.Join(args, ", "))
+		line := fmt.Sprintf("%s(%s)", exprStr(n.Func), strings.Join(args, ", "))
+		if len(n.WithArgs) != 0 || len(n.WithBundles) != 0 {
+			line += " with " + formatMainWithValueClause(n.WithBundles, n.WithArgs)
+		}
+		return line
 	case *ast.AllocExpr:
 		if n.Owner == nil {
 			return fmt.Sprintf("new %s", exprStr(n.Value))
@@ -883,7 +931,7 @@ func exprStr(e ast.Expr) string {
 		for _, arg := range n.TypeArgs {
 			typeArgs = append(typeArgs, typeStr(arg))
 		}
-		return fmt.Sprintf("%s.specialize[%s]()", exprStr(n.Operand), strings.Join(typeArgs, ", "))
+		return fmt.Sprintf("%s[%s]", exprStr(n.Operand), strings.Join(typeArgs, ", "))
 	case *ast.StructLitExpr:
 		var args []string
 		for _, a := range n.Args {

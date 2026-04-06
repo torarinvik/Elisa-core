@@ -59,6 +59,8 @@ const (
 	TOKEN_NEW
 	TOKEN_AS
 	TOKEN_IN
+	TOKEN_WITH
+	TOKEN_CONTEXT
 
 	// Punctuation & Operators
 	TOKEN_COLON     // :
@@ -176,6 +178,8 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_IS:      "is",
 	TOKEN_AS:      "as",
 	TOKEN_IN:      "in",
+	TOKEN_WITH:    "with",
+	TOKEN_CONTEXT: "context",
 	TOKEN_TO:      "to",
 
 	TOKEN_COLON:     ":",
@@ -269,6 +273,8 @@ var keywords = map[string]TokenKind{
 	"is":      TOKEN_IS,
 	"as":      TOKEN_AS,
 	"in":      TOKEN_IN,
+	"with":    TOKEN_WITH,
+	"context": TOKEN_CONTEXT,
 	"to":      TOKEN_TO,
 }
 

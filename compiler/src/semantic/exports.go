@@ -64,7 +64,7 @@ func (a *Analyzer) analyzeExportFunc(decl *ast.ExportFuncDecl, seenPublicNames m
 		return
 	}
 
-	signature := a.funcTypeFromDecl(decl.Name, nil, nil, nil, nil, nil, nil, nil, nil, decl.Params, decl.ReturnType, false)
+	signature := a.funcTypeFromDecl(decl.Name, nil, nil, nil, nil, nil, nil, nil, nil, decl.Params, nil, nil, nil, decl.ReturnType, false)
 	if !isCABICompatibleFuncType(signature) {
 		a.errorf(decl.Pos(), "export func %q is not C-ABI-compatible", decl.Name)
 		return
@@ -78,6 +78,10 @@ func (a *Analyzer) analyzeExportFunc(decl *ast.ExportFuncDecl, seenPublicNames m
 	targetBase, ok := targetSym.Type.(*FuncType)
 	if !ok {
 		a.errorf(decl.Pos(), "export target %q is not a function", decl.TargetName)
+		return
+	}
+	if len(targetBase.ImplicitParamNames) != 0 {
+		a.errorf(decl.Pos(), "export target %q must not have implicit parameters in v1", decl.TargetName)
 		return
 	}
 
@@ -195,6 +199,8 @@ func specializeExportFuncType(a *Analyzer, base *FuncType, bindings map[string]T
 		HasTemperatureMode:     specialized.HasTemperatureMode,
 		Poststates:             cloneFuncPoststates(specialized.Poststates),
 		Params:                 append([]Type(nil), specialized.Params...),
+		ExplicitParamCount:     specialized.ExplicitParamCount,
+		ImplicitParamNames:     append([]string(nil), specialized.ImplicitParamNames...),
 		Return:                 specialized.Return,
 		Variadic:               specialized.Variadic,
 		SinkParams:             append([]bool(nil), specialized.SinkParams...),
@@ -208,8 +214,13 @@ func sameExportSignature(left *FuncType, right *FuncType) bool {
 	if left == nil || right == nil {
 		return left == right
 	}
-	if left.Variadic != right.Variadic || len(left.Params) != len(right.Params) {
+	if left.Variadic != right.Variadic || funcTypeExplicitParamCount(left) != funcTypeExplicitParamCount(right) || len(left.ImplicitParamNames) != len(right.ImplicitParamNames) || len(left.Params) != len(right.Params) {
 		return false
+	}
+	for i := range left.ImplicitParamNames {
+		if left.ImplicitParamNames[i] != right.ImplicitParamNames[i] {
+			return false
+		}
 	}
 	for i := range left.Params {
 		if !SameType(left.Params[i], right.Params[i]) {
@@ -232,7 +243,7 @@ func exportedNamedTypeAllowed(t Type) bool {
 }
 
 func isCABICompatibleFuncType(fn *FuncType) bool {
-	if fn == nil || fn.Variadic || len(genericParamsForFuncType(fn)) > 0 || len(fn.RegionParams) > 0 || len(fn.Permissions) > 0 {
+	if fn == nil || fn.Variadic || len(fn.ImplicitParamNames) > 0 || len(genericParamsForFuncType(fn)) > 0 || len(fn.RegionParams) > 0 || len(fn.Permissions) > 0 {
 		return false
 	}
 	for _, param := range fn.Params {

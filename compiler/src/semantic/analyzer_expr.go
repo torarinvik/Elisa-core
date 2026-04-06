@@ -4062,11 +4062,12 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	if expr.NamedArgCount() != 0 {
 		a.errorf(expr.Pos(), "named arguments are only supported for enum constructors")
 	}
-	if !ft.Variadic && len(expr.Args) != len(ft.Params) {
-		a.errorf(expr.Pos(), "function %q expects %d arguments, got %d", ft.Name, len(ft.Params), len(expr.Args))
+	explicitParamCount := funcTypeExplicitParamCount(ft)
+	if !ft.Variadic && len(expr.Args) != explicitParamCount {
+		a.errorf(expr.Pos(), "function %q expects %d arguments, got %d", ft.Name, explicitParamCount, len(expr.Args))
 	}
-	if ft.Variadic && len(expr.Args) < len(ft.Params) {
-		a.errorf(expr.Pos(), "variadic function %q expects at least %d arguments, got %d", ft.Name, len(ft.Params), len(expr.Args))
+	if ft.Variadic && len(expr.Args) < explicitParamCount {
+		a.errorf(expr.Pos(), "variadic function %q expects at least %d arguments, got %d", ft.Name, explicitParamCount, len(expr.Args))
 	}
 	bindings := map[string]Type{}
 	shapeBindings := map[string]Shape{}
@@ -4074,7 +4075,7 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	permissionBindings := map[string][]ast.PermissionRef{}
 	specializedParamTypes := map[int]Type{}
 	regionParams := regionParamSet(ft.RegionParams)
-	limit := len(ft.Params)
+	limit := explicitParamCount
 	if len(expr.Args) < limit {
 		limit = len(expr.Args)
 	}
@@ -4119,6 +4120,7 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 			a.validateAtomicRmwArg(ft.Name, expr.Args[i], argType)
 		}
 	}
+	a.resolveImplicitCallArgs(expr, ft, bindings, shapeBindings, regionBindings, permissionBindings)
 	for _, name := range ft.RegionParams {
 		if _, ok := regionBindings[name]; !ok {
 			a.errorf(expr.Pos(), "cannot infer region parameter %q for call to %q", name, ft.Name)
@@ -4188,12 +4190,18 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 		a.validateThreadTransferResultType(ft.Name, expr.Pos(), resultPayload)
 	}
 	originalTrackedByRoot := map[*Symbol]Type{}
-	for i := 0; i < limit; i++ {
+	loweredArgs := append([]ast.Expr(nil), expr.Args...)
+	loweredArgs = append(loweredArgs, expr.ResolvedImplicitArgs...)
+	poststateLimit := len(loweredArgs)
+	if len(appliedType.Params) < poststateLimit {
+		poststateLimit = len(appliedType.Params)
+	}
+	for i := 0; i < poststateLimit; i++ {
 		paramType := a.substituteType(ft.Params[i], bindings, shapeBindings, regionBindings, permissionBindings)
 		if specializedType, ok := specializedParamTypes[i]; ok {
 			paramType = specializedType
 		}
-		a.recordCallArgPoststates(expr.Args[i], paramType, funcPoststatesForParam(appliedType.Poststates, i), originalTrackedByRoot)
+		a.recordCallArgPoststates(loweredArgs[i], paramType, funcPoststatesForParam(appliedType.Poststates, i), originalTrackedByRoot)
 	}
 	a.rememberConditionalCallPoststates(expr, appliedType, originalTrackedByRoot)
 	switch ft.Name {

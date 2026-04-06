@@ -71,6 +71,13 @@ func (p *Parser) parseInterfaceMethodDecl() *ast.ExternFuncDecl {
 	params := p.parseParamList()
 	p.expect(lexer.TOKEN_RPAREN)
 
+	var implicitParams []ast.ParamDecl
+	var implicitBundles []string
+	var implicitItemOrder []ast.ImplicitSigItem
+	if p.peek() == lexer.TOKEN_WITH {
+		implicitParams, implicitBundles, implicitItemOrder = p.parseWithSignatureClause()
+	}
+
 	var retType ast.TypeExpr
 	if p.match(lexer.TOKEN_ARROW) {
 		retType = p.parseTypeExpr()
@@ -88,18 +95,21 @@ func (p *Parser) parseInterfaceMethodDecl() *ast.ExternFuncDecl {
 
 	p.expectNewline()
 	return &ast.ExternFuncDecl{
-		Position:         pos,
-		Name:             name,
-		TypeParams:       typeParams,
-		RefStorageParams: refStorageParams,
-		RefStateParams:   refStateParams,
-		PermissionParams: permissionParams,
-		GenericParams:    genericParams,
-		RegionParams:     regionParams,
-		Permissions:      permissions,
-		Ensures:          ensures,
-		Params:           params,
-		ReturnType:       retType,
+		Position:          pos,
+		Name:              name,
+		TypeParams:        typeParams,
+		RefStorageParams:  refStorageParams,
+		RefStateParams:    refStateParams,
+		PermissionParams:  permissionParams,
+		GenericParams:     genericParams,
+		RegionParams:      regionParams,
+		Permissions:       permissions,
+		Ensures:           ensures,
+		Params:            params,
+		ImplicitParams:    implicitParams,
+		ImplicitBundles:   implicitBundles,
+		ImplicitItemOrder: implicitItemOrder,
+		ReturnType:        retType,
 	}
 }
 
@@ -189,6 +199,13 @@ func (p *Parser) parseImplMethodDeclWithAnnotations(annotations []ast.Annotation
 	params := p.parseParamList()
 	p.expect(lexer.TOKEN_RPAREN)
 
+	var implicitParams []ast.ParamDecl
+	var implicitBundles []string
+	var implicitItemOrder []ast.ImplicitSigItem
+	if p.peek() == lexer.TOKEN_WITH {
+		implicitParams, implicitBundles, implicitItemOrder = p.parseWithSignatureClause()
+	}
+
 	var retType ast.TypeExpr
 	if p.match(lexer.TOKEN_ARROW) {
 		retType = p.parseTypeExpr()
@@ -207,8 +224,8 @@ func (p *Parser) parseImplMethodDeclWithAnnotations(annotations []ast.Annotation
 	if p.match(lexer.TOKEN_COLON) {
 		p.expectNewline()
 		body := p.parseBlock()
-		return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ReturnType: retType, Body: body}
+		return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Body: body}
 	}
 	p.expectNewline()
-	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ReturnType: retType}
+	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType}
 }

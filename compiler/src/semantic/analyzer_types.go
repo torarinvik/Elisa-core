@@ -58,7 +58,7 @@ func (a *Analyzer) defineLocalInScope(scope *Scope, sym *Symbol, pos lexer.Pos) 
 	a.recordSpecializedValueTypeBinding(sym, sym.Type)
 }
 
-func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorageParams []string, refStateParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
+func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorageParams []string, refStateParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, params []ast.ParamDecl, implicitParams []ast.ParamDecl, implicitBundles []string, implicitItemOrder []ast.ImplicitSigItem, ret ast.TypeExpr, variadic bool) *FuncType {
 	resolvedGenericParams := append([]ast.GenericParam(nil), genericParams...)
 	for i, param := range resolvedGenericParams {
 		if param.Kind != ast.GenericParamType || param.InterfaceBound == "" {
@@ -68,9 +68,11 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorage
 			resolvedGenericParams[i].InterfaceBound = iface.Name
 		}
 	}
+	expandedImplicitParams, implicitNames := a.expandImplicitParamDecls(params, implicitParams, implicitBundles, implicitItemOrder, name)
+	allParams := append(append([]ast.ParamDecl(nil), params...), expandedImplicitParams...)
 	ptypes := make([]Type, 0, len(params))
 	retType := a.namedTypes["void"]
-	shapeParams := a.collectImplicitShapeParams(params, ret)
+	shapeParams := a.collectImplicitShapeParams(allParams, ret)
 	var resolvedPermissionRefs []ast.PermissionRef
 	var permissions []string
 	var poststates []FuncPoststate
@@ -80,13 +82,13 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorage
 				resolvedPermissionRefs = a.resolvePermissionRefs(permissionRefs, true)
 				permissions = a.resolvePermissionFamilies(permissionRefs, true)
 				a.withShapeParams(shapeParams, func() {
-					for _, p := range params {
+					for _, p := range allParams {
 						ptypes = append(ptypes, a.resolveType(p.Type))
 					}
 					if ret != nil {
 						retType = a.resolveType(ret)
 					}
-					poststates = a.resolveFuncPoststates(name, params, ptypes, retType, ensures)
+					poststates = a.resolveFuncPoststates(name, allParams, ptypes, retType, ensures)
 				})
 			})
 		})
@@ -111,6 +113,8 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorage
 		TemperatureMode:        FuncTemperatureModeDefault,
 		Poststates:             poststates,
 		Params:                 ptypes,
+		ExplicitParamCount:     len(params),
+		ImplicitParamNames:     implicitNames,
 		Return:                 retType,
 		Variadic:               variadic,
 	}
@@ -469,6 +473,10 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		for _, param := range n.Params {
 			ptypes = append(ptypes, a.resolveType(param))
 		}
+		expandedImplicitParams, implicitNames := a.expandImplicitParamDecls(nil, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, "func")
+		for _, param := range expandedImplicitParams {
+			ptypes = append(ptypes, a.resolveType(param.Type))
+		}
 		retType := a.namedTypes["void"]
 		if n.Return != nil {
 			retType = a.resolveType(n.Return)
@@ -485,6 +493,8 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			PermissionRefs:         append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
 			Permissions:            permissions,
 			Params:                 ptypes,
+			ExplicitParamCount:     len(n.Params),
+			ImplicitParamNames:     implicitNames,
 			Return:                 retType,
 			Variadic:               n.Variadic,
 		}
@@ -1603,7 +1613,7 @@ func (a *Analyzer) substituteType(t Type, bindings map[string]Type, shapeBinding
 			params = append(params, a.substituteType(param, bindings, shapeBindings, regionBindings, permissionBindings))
 		}
 		declaredRefs, refs, usedPermissionParams := substitutePermissionRefs(n.DeclaredPermissionRefs, n.PermissionRefs, n.UsedPermissionParams, permissionBindings)
-		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), RefStorageParams: append([]string(nil), n.RefStorageParams...), RefStateParams: append([]string(nil), n.RefStateParams...), RegionParams: append([]string(nil), n.RegionParams...), PermissionParams: append([]string(nil), n.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), n.GenericParams...), UsedPermissionParams: usedPermissionParams, DeclaredPermissionRefs: declaredRefs, DeclaredPermissions: permissionFamiliesFromRefs(declaredRefs), PermissionRefs: refs, Permissions: permissionFamiliesFromRefs(refs), ShapeParams: append([]string(nil), n.ShapeParams...), FreshReturnShapeParams: append([]string(nil), n.FreshReturnShapeParams...), InlineMode: n.InlineMode, HasInlineMode: n.HasInlineMode, HasNoRecurse: n.HasNoRecurse, TemperatureMode: n.TemperatureMode, HasTemperatureMode: n.HasTemperatureMode, GuardEffects: cloneFuncGuardEffects(n.GuardEffects), Poststates: cloneFuncPoststates(n.Poststates), Params: params, Return: a.substituteType(n.Return, bindings, shapeBindings, regionBindings, permissionBindings), Variadic: n.Variadic, SinkParams: append([]bool(nil), n.SinkParams...), SinkParamsKnown: n.SinkParamsKnown, ReturnProvenance: cloneRegionRefState(n.ReturnProvenance), ReturnProvenanceKnown: n.ReturnProvenanceKnown, ReturnBorrowedOwnerRefs: cloneBorrowedOwnerRefSummary(n.ReturnBorrowedOwnerRefs), ReturnBorrowedOwnerRefsKnown: n.ReturnBorrowedOwnerRefsKnown, ReturnIsolation: n.ReturnIsolation, ReturnIsolationKnown: n.ReturnIsolationKnown}
+		return &FuncType{Name: n.Name, TypeParams: append([]string(nil), n.TypeParams...), RefStorageParams: append([]string(nil), n.RefStorageParams...), RefStateParams: append([]string(nil), n.RefStateParams...), RegionParams: append([]string(nil), n.RegionParams...), PermissionParams: append([]string(nil), n.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), n.GenericParams...), UsedPermissionParams: usedPermissionParams, DeclaredPermissionRefs: declaredRefs, DeclaredPermissions: permissionFamiliesFromRefs(declaredRefs), PermissionRefs: refs, Permissions: permissionFamiliesFromRefs(refs), ShapeParams: append([]string(nil), n.ShapeParams...), FreshReturnShapeParams: append([]string(nil), n.FreshReturnShapeParams...), InlineMode: n.InlineMode, HasInlineMode: n.HasInlineMode, HasNoRecurse: n.HasNoRecurse, TemperatureMode: n.TemperatureMode, HasTemperatureMode: n.HasTemperatureMode, GuardEffects: cloneFuncGuardEffects(n.GuardEffects), Poststates: cloneFuncPoststates(n.Poststates), Params: params, ExplicitParamCount: n.ExplicitParamCount, ImplicitParamNames: append([]string(nil), n.ImplicitParamNames...), Return: a.substituteType(n.Return, bindings, shapeBindings, regionBindings, permissionBindings), Variadic: n.Variadic, SinkParams: append([]bool(nil), n.SinkParams...), SinkParamsKnown: n.SinkParamsKnown, ReturnProvenance: cloneRegionRefState(n.ReturnProvenance), ReturnProvenanceKnown: n.ReturnProvenanceKnown, ReturnBorrowedOwnerRefs: cloneBorrowedOwnerRefSummary(n.ReturnBorrowedOwnerRefs), ReturnBorrowedOwnerRefsKnown: n.ReturnBorrowedOwnerRefsKnown, ReturnIsolation: n.ReturnIsolation, ReturnIsolationKnown: n.ReturnIsolationKnown}
 	default:
 		return t
 	}

@@ -335,7 +335,7 @@ def frontend_lookup_keyword(text: StringView) -> FrontendTokenKind:
         return frontend_lookup_keyword_bucket((&entries[0u]).cast[any FrontendKeywordEntry&], 5u, text)
 
     if text.len == 4:
-        entries: FrontendKeywordEntry[9] = [
+        entries: FrontendKeywordEntry[10] = [
             FrontendKeywordEntry("elif", FrontendTokenKind.Elif),
             FrontendKeywordEntry("else", FrontendTokenKind.Else),
             FrontendKeywordEntry("enum", FrontendTokenKind.Enum),
@@ -344,9 +344,10 @@ def frontend_lookup_keyword(text: StringView) -> FrontendTokenKind:
             FrontendKeywordEntry("pass", FrontendTokenKind.Pass),
             FrontendKeywordEntry("repr", FrontendTokenKind.Repr),
             FrontendKeywordEntry("tail", FrontendTokenKind.Tail),
-            FrontendKeywordEntry("true", FrontendTokenKind.True)
+            FrontendKeywordEntry("true", FrontendTokenKind.True),
+            FrontendKeywordEntry("with", FrontendTokenKind.With)
         ]
-        return frontend_lookup_keyword_bucket((&entries[0u]).cast[any FrontendKeywordEntry&], 9u, text)
+        return frontend_lookup_keyword_bucket((&entries[0u]).cast[any FrontendKeywordEntry&], 10u, text)
 
     if text.len == 5:
         entries: FrontendKeywordEntry[8] = [
@@ -376,11 +377,12 @@ def frontend_lookup_keyword(text: StringView) -> FrontendTokenKind:
         return frontend_lookup_keyword_bucket((&entries[0u]).cast[any FrontendKeywordEntry&], 9u, text)
 
     if text.len == 7:
-        entries: FrontendKeywordEntry[2] = [
+        entries: FrontendKeywordEntry[3] = [
             FrontendKeywordEntry("aligned", FrontendTokenKind.Aligned),
+            FrontendKeywordEntry("context", FrontendTokenKind.Context),
             FrontendKeywordEntry("mutable", FrontendTokenKind.Mutable)
         ]
-        return frontend_lookup_keyword_bucket((&entries[0u]).cast[any FrontendKeywordEntry&], 2u, text)
+        return frontend_lookup_keyword_bucket((&entries[0u]).cast[any FrontendKeywordEntry&], 3u, text)
 
     return FrontendTokenKind.Ident
 

@@ -4231,8 +4231,17 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if err != nil {
 		return nil, nil, err
 	}
-	args := make([]C.LLVMValueRef, 0, len(expr.Args))
-	for i, arg := range expr.Args {
+	if len(funcType.ImplicitParamNames) != 0 && !expr.ResolvedImplicitArgsValid {
+		if recovered, ok := s.recoverImplicitCallArgs(expr, funcType); ok {
+			expr.ResolvedImplicitArgs = recovered
+			expr.ResolvedImplicitArgsValid = true
+		} else {
+			return nil, nil, fmt.Errorf("call to %s is missing resolved implicit arguments", funcType.Name)
+		}
+	}
+	loweredArgs := expr.LoweredArgs()
+	args := make([]C.LLVMValueRef, 0, len(loweredArgs))
+	for i, arg := range loweredArgs {
 		var expected semantic.Type
 		if i < len(funcType.Params) {
 			expected = funcType.Params[i]
@@ -4278,6 +4287,100 @@ func (s *functionState) emitCallArg(arg ast.Expr, expected semantic.Type, fnType
 		return s.emitMovedValue(arg, expected)
 	}
 	return s.emitExpr(arg, expected)
+}
+
+func backendOrderedWithItems(bundles []ast.WithBundleUse, args []ast.WithArg, order []ast.WithItem) []ast.WithItem {
+	if len(order) != 0 {
+		return append([]ast.WithItem(nil), order...)
+	}
+	items := make([]ast.WithItem, 0, len(bundles)+len(args))
+	for _, bundle := range bundles {
+		items = append(items, ast.WithItem{Position: bundle.Position, Bundle: bundle, IsBundle: true})
+	}
+	for _, arg := range args {
+		items = append(items, ast.WithItem{Position: arg.Position, Arg: arg})
+	}
+	return items
+}
+
+func (s *functionState) lookupBackendContextBundle(name string) (*semantic.ContextBundle, bool) {
+	if s == nil || s.g == nil || s.g.result == nil {
+		return nil, false
+	}
+	if bundle, ok := s.g.result.ContextBundles[name]; ok && bundle != nil {
+		return bundle, true
+	}
+	var matched *semantic.ContextBundle
+	for qualifiedName, bundle := range s.g.result.ContextBundles {
+		if bundle == nil {
+			continue
+		}
+		if qualifiedName == name || strings.HasSuffix(qualifiedName, "."+name) {
+			if matched != nil && matched != bundle {
+				return nil, false
+			}
+			matched = bundle
+		}
+	}
+	return matched, matched != nil
+}
+
+func (s *functionState) lookupBackendImplicitExpr(name string, working map[string]ast.Expr) (ast.Expr, bool) {
+	if working != nil {
+		if expr, ok := working[name]; ok && expr != nil {
+			return expr, true
+		}
+	}
+	if _, ok := s.lookupBinding(name); ok {
+		return &ast.Ident{Name: name}, true
+	}
+	if s.g != nil && s.g.result != nil && s.g.result.GlobalScope != nil {
+		if _, ok := s.g.result.GlobalScope.Lookup(name); ok {
+			return &ast.Ident{Name: name}, true
+		}
+	}
+	return nil, false
+}
+
+func (s *functionState) recoverImplicitCallArgs(expr *ast.CallExpr, funcType *semantic.FuncType) ([]ast.Expr, bool) {
+	if s == nil || expr == nil || funcType == nil || len(funcType.ImplicitParamNames) == 0 {
+		return nil, false
+	}
+	working := map[string]ast.Expr{}
+	for _, item := range backendOrderedWithItems(expr.WithBundles, expr.WithArgs, expr.WithItemOrder) {
+		if item.IsBundle {
+			bundle, ok := s.lookupBackendContextBundle(item.Bundle.Name)
+			if !ok || bundle == nil {
+				return nil, false
+			}
+			explicitValues := make(map[string]ast.Expr, len(item.Bundle.Args))
+			for _, arg := range item.Bundle.Args {
+				explicitValues[arg.Name] = arg.Value
+			}
+			for _, field := range bundle.Fields {
+				if value, ok := explicitValues[field.Name]; ok {
+					working[field.Name] = value
+					continue
+				}
+				value, ok := s.lookupBackendImplicitExpr(field.Name, working)
+				if !ok {
+					return nil, false
+				}
+				working[field.Name] = value
+			}
+			continue
+		}
+		working[item.Arg.Name] = item.Arg.Value
+	}
+	resolved := make([]ast.Expr, 0, len(funcType.ImplicitParamNames))
+	for _, name := range funcType.ImplicitParamNames {
+		value, ok := s.lookupBackendImplicitExpr(name, working)
+		if !ok {
+			return nil, false
+		}
+		resolved = append(resolved, value)
+	}
+	return resolved, true
 }
 
 func backendExplicitMoveOperand(expr ast.Expr) (ast.Expr, bool) {
@@ -5061,12 +5164,15 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 			return value, specialized, err
 		}
 	}
-	calleeType, ok := s.exprType(expr.Func).(*semantic.FuncType)
+	callee, calleeType, err := s.emitExpr(expr.Func, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	fnType, ok := calleeType.(*semantic.FuncType)
 	if !ok {
 		return nil, nil, fmt.Errorf("call target does not have a function type")
 	}
-	callee, _, err := s.emitExpr(expr.Func, nil)
-	return callee, calleeType, err
+	return callee, fnType, nil
 }
 
 func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, error) {

@@ -144,6 +144,15 @@ func (a *Analyzer) lookupVisiblePermission(name string) (*PermissionSet, string,
 	return nil, "", false
 }
 
+func (a *Analyzer) lookupVisibleContextBundle(name string) (*ContextBundle, string, bool) {
+	for _, candidate := range a.visibleNameCandidates(name) {
+		if bundle, ok := a.contextBundles[candidate]; ok {
+			return bundle, candidate, true
+		}
+	}
+	return nil, "", false
+}
+
 func (a *Analyzer) lookupVisibleGlobal(name string) (*Symbol, string, bool) {
 	for _, candidate := range a.visibleNameCandidates(name) {
 		if sym, ok := a.globalScope.Lookup(candidate); ok {

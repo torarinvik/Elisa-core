@@ -109,6 +109,13 @@ func (p *Parser) parseFuncTypeExpr() ast.TypeExpr {
 	}
 	p.expect(lexer.TOKEN_RPAREN)
 
+	var implicitParams []ast.ParamDecl
+	var implicitBundles []string
+	var implicitItemOrder []ast.ImplicitSigItem
+	if p.peek() == lexer.TOKEN_WITH {
+		implicitParams, implicitBundles, implicitItemOrder = p.parseWithSignatureClause()
+	}
+
 	var retType ast.TypeExpr
 	if p.match(lexer.TOKEN_ARROW) {
 		retType = p.parseTypeExpr()
@@ -119,7 +126,7 @@ func (p *Parser) parseFuncTypeExpr() ast.TypeExpr {
 		permissions = p.parsePermissionRefs(true)
 	}
 
-	return &ast.FuncTypeExpr{Position: pos, Params: params, Return: retType, Permissions: permissions, Variadic: variadic}
+	return &ast.FuncTypeExpr{Position: pos, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, Return: retType, Permissions: permissions, Variadic: variadic}
 }
 
 func (p *Parser) parseErrorSetExpr() *ast.ErrorSetExpr {
@@ -1089,6 +1096,98 @@ func (p *Parser) parseCallArgs() ([]ast.Expr, []string) {
 	return args, argNames
 }
 
+func (p *Parser) parseWithBundleNamedArgs() []ast.WithArg {
+	args := make([]ast.WithArg, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
+	if p.peek() == lexer.TOKEN_RPAREN {
+		return nil
+	}
+	for {
+		pos := p.cur().Pos
+		name := p.expect(lexer.TOKEN_IDENT).Text
+		p.expect(lexer.TOKEN_ASSIGN)
+		args = append(args, ast.WithArg{Position: pos, Name: name, Value: p.parseExpr()})
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	return args
+}
+
+func (p *Parser) parseWithValueClause() ([]ast.WithArg, []ast.WithBundleUse, []ast.WithItem) {
+	p.expect(lexer.TOKEN_WITH)
+	args := make([]ast.WithArg, 0, 2)
+	bundles := make([]ast.WithBundleUse, 0, 1)
+	items := make([]ast.WithItem, 0, 2)
+	for {
+		pos := p.cur().Pos
+		name := p.expect(lexer.TOKEN_IDENT).Text
+		qualifiedName := name
+		hasDot := false
+		for p.match(lexer.TOKEN_DOT) {
+			hasDot = true
+			qualifiedName += "." + p.expect(lexer.TOKEN_IDENT).Text
+		}
+		switch {
+		case p.peek() == lexer.TOKEN_LPAREN:
+			p.advance()
+			bundleArgs := p.parseWithBundleNamedArgs()
+			p.expect(lexer.TOKEN_RPAREN)
+			bundle := ast.WithBundleUse{Position: pos, Name: qualifiedName, Args: bundleArgs}
+			bundles = append(bundles, bundle)
+			items = append(items, ast.WithItem{Position: pos, Bundle: bundle, IsBundle: true})
+		case !hasDot && p.match(lexer.TOKEN_ASSIGN):
+			arg := ast.WithArg{Position: pos, Name: name, Value: p.parseExpr()}
+			args = append(args, arg)
+			items = append(items, ast.WithItem{Position: pos, Arg: arg})
+		case !hasDot:
+			arg := ast.WithArg{Position: pos, Name: name, Value: &ast.Ident{Position: pos, Name: name}, Shorthand: true}
+			args = append(args, arg)
+			items = append(items, ast.WithItem{Position: pos, Arg: arg})
+		default:
+			p.errorf("context bundle use %q requires (...) in a with clause", qualifiedName)
+			bundle := ast.WithBundleUse{Position: pos, Name: qualifiedName}
+			bundles = append(bundles, bundle)
+			items = append(items, ast.WithItem{Position: pos, Bundle: bundle, IsBundle: true})
+		}
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	return args, bundles, items
+}
+
+func (p *Parser) attachOptionalCallWithClause(expr ast.Expr) ast.Expr {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok || p.peek() != lexer.TOKEN_WITH {
+		return expr
+	}
+	call.WithArgs, call.WithBundles, call.WithItemOrder = p.parseWithValueClause()
+	return call
+}
+
+func (p *Parser) peekPostfixGenericApplication() bool {
+	if p.peek() != lexer.TOKEN_LBRACKET {
+		return false
+	}
+	probe := *p
+	probe.errors = nil
+	probe.advance()
+	if probe.peek() == lexer.TOKEN_RBRACKET {
+		return false
+	}
+	for {
+		_ = probe.parseGenericTypeArgExpr()
+		if !probe.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	if probe.peek() != lexer.TOKEN_RBRACKET {
+		return false
+	}
+	probe.advance()
+	return probe.peek() == lexer.TOKEN_LPAREN
+}
+
 func (p *Parser) parsePostfix() ast.Expr {
 	expr := p.parsePrimary()
 	for {
@@ -1164,6 +1263,23 @@ func (p *Parser) parsePostfix() ast.Expr {
 
 		case lexer.TOKEN_LBRACKET:
 			pos := p.cur().Pos
+			if p.peekPostfixGenericApplication() {
+				p.advance()
+				typeArgs := make([]ast.TypeExpr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))
+				for {
+					typeArgs = append(typeArgs, p.parseGenericTypeArgExpr())
+					if !p.match(lexer.TOKEN_COMMA) {
+						break
+					}
+				}
+				p.expect(lexer.TOKEN_RBRACKET)
+				p.expect(lexer.TOKEN_LPAREN)
+				args, argNames := p.parseCallArgs()
+				p.expect(lexer.TOKEN_RPAREN)
+				expr = &ast.CallExpr{Position: pos, Func: &ast.SpecializeExpr{Position: pos, Operand: expr, TypeArgs: typeArgs}, Args: args, ArgNames: argNames}
+				expr = p.attachOptionalCallWithClause(expr)
+				continue
+			}
 			p.advance()
 			start := p.parseExpr()
 			if p.match(lexer.TOKEN_COLON) {
@@ -1187,6 +1303,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 			}
 			p.expect(lexer.TOKEN_RPAREN)
 			expr = &ast.CallExpr{Position: pos, Func: expr, Args: args, ArgNames: argNames}
+			expr = p.attachOptionalCallWithClause(expr)
 
 		case lexer.TOKEN_IF:
 			pos := p.cur().Pos

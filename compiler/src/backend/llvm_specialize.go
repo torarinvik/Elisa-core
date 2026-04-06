@@ -63,6 +63,7 @@ func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semanti
 		RefStorageParams:       nil,
 		RefStateParams:         nil,
 		RegionParams:           append([]string(nil), base.RegionParams...),
+		PermissionParams:       append([]string(nil), base.PermissionParams...),
 		GenericParams:          nil,
 		ShapeParams:            append([]string(nil), base.ShapeParams...),
 		FreshReturnShapeParams: append([]string(nil), base.FreshReturnShapeParams...),
@@ -72,8 +73,12 @@ func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semanti
 		TemperatureMode:        base.TemperatureMode,
 		HasTemperatureMode:     base.HasTemperatureMode,
 		Params:                 params,
+		ExplicitParamCount:     base.ExplicitParamCount,
+		ImplicitParamNames:     append([]string(nil), base.ImplicitParamNames...),
 		Return:                 substituteType(base.Return, typeBindings, impls),
 		Variadic:               base.Variadic,
+		SinkParams:             append([]bool(nil), base.SinkParams...),
+		SinkParamsKnown:        base.SinkParamsKnown,
 	}
 }
 
