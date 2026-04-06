@@ -300,6 +300,12 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 		err = g.noteType(tt.Errors)
 	case *semantic.OptionalType:
 		err = g.noteType(tt.Value)
+	case *semantic.TupleType:
+		for _, field := range tt.Fields {
+			if err = g.noteType(field.Type); err != nil {
+				break
+			}
+		}
 	case *semantic.SViewType:
 		if st, ok := g.lookupStructType("StringView"); ok {
 			_, err = g.ensureStructBody(st.Name, st)
