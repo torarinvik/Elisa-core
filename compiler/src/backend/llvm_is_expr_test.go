@@ -74,6 +74,42 @@ def is_rel(kind: Tok) -> bool:
 	}
 }
 
+func TestGenerateLLVMIRLowersStructFieldPatternsInIsAndMatch(t *testing.T) {
+	src := `const enum Tok of i32:
+	INTEGER = 1
+	FLOAT = 2
+
+struct Span:
+	start: i64
+	finish: i64
+
+struct Token:
+	kind: Tok
+	span: Span
+	value: i64
+
+def is_integer(tok: Token) -> bool:
+	return tok is Token(kind: .INTEGER)
+
+def score(tok: Token) -> i64:
+	return match tok:
+		Token(kind: .INTEGER, span: Span(start: start), value: value):
+			start + value
+		_:
+			0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_struct_pattern_match_is.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i1 @is_integer(", "define i64 @score(", "is.struct.result", "match.struct.field", "extractvalue"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected struct-pattern lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersTreeConstructorsAndIsExprPatterns(t *testing.T) {
 	src := `tree Lua:
 	common:

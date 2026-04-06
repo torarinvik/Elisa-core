@@ -448,6 +448,80 @@ func TestParseIsConditionWithAlternativeTargets(t *testing.T) {
 	}
 }
 
+func TestParseStructFieldMatchPattern(t *testing.T) {
+	file, errs := parseSourceFile(t, "const enum Tok of i32:\n    INTEGER = 1\n\nstruct Span:\n    start: int\n    finish: int\n\nstruct Token:\n    kind: Tok\n    span: Span\n    value: int\n\ndef score(tok: Token) -> int:\n    match tok:\n        Token(kind: .INTEGER, span: Span(start: start), value: value):\n            return start + value\n        _:\n            return 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[3].(*ast.FuncDecl)
+	matchStmt, ok := decl.Body[0].(*ast.MatchStmt)
+	if !ok {
+		t.Fatalf("expected match stmt, got %T", decl.Body[0])
+	}
+	pattern, ok := matchStmt.Arms[0].Pattern.(*ast.MatchStructPattern)
+	if !ok {
+		t.Fatalf("expected struct match pattern, got %T", matchStmt.Arms[0].Pattern)
+	}
+	if pattern.TypeName != "Token" || len(pattern.Args) != 3 {
+		t.Fatalf("unexpected top-level struct pattern %#v", pattern)
+	}
+	kindPattern, ok := pattern.Args[0].Pattern.(*ast.MatchLiteralPattern)
+	if !ok {
+		t.Fatalf("expected literal kind pattern, got %T", pattern.Args[0].Pattern)
+	}
+	if _, ok := kindPattern.Value.(*ast.ShorthandMemberExpr); !ok {
+		t.Fatalf("expected shorthand member kind pattern, got %T", kindPattern.Value)
+	}
+	spanPattern, ok := pattern.Args[1].Pattern.(*ast.MatchStructPattern)
+	if !ok {
+		t.Fatalf("expected nested span struct pattern, got %T", pattern.Args[1].Pattern)
+	}
+	if spanPattern.TypeName != "Span" || len(spanPattern.Args) != 1 || spanPattern.Args[0].Name != "start" {
+		t.Fatalf("unexpected nested span pattern %#v", spanPattern)
+	}
+	startBind, ok := spanPattern.Args[0].Pattern.(*ast.MatchBindPattern)
+	if !ok || startBind.Name != "start" {
+		t.Fatalf("expected start bind pattern, got %T %#v", spanPattern.Args[0].Pattern, spanPattern.Args[0].Pattern)
+	}
+	valueBind, ok := pattern.Args[2].Pattern.(*ast.MatchBindPattern)
+	if !ok || valueBind.Name != "value" {
+		t.Fatalf("expected value bind pattern, got %T %#v", pattern.Args[2].Pattern, pattern.Args[2].Pattern)
+	}
+}
+
+func TestParseStructPatternIsCondition(t *testing.T) {
+	file, errs := parseSourceFile(t, "const enum Tok of i32:\n    INTEGER = 1\n\nstruct Span:\n    start: int\n    finish: int\n\nstruct Token:\n    kind: Tok\n    span: Span\n\ndef is_integer(tok: Token) -> bool:\n    return tok is Token(kind: .INTEGER, span: Span(start: 1))\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[3].(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	cond, ok := ret.Value.(*ast.BinaryExpr)
+	if !ok || cond.Op != lexer.TOKEN_IS {
+		t.Fatalf("expected is-expression return, got %T %#v", ret.Value, ret.Value)
+	}
+	target, ok := cond.Right.(*ast.StructTestExpr)
+	if !ok {
+		t.Fatalf("expected struct test target, got %T", cond.Right)
+	}
+	if target.Pattern == nil || target.Pattern.TypeName != "Token" || len(target.Pattern.Args) != 2 {
+		t.Fatalf("unexpected struct is target %#v", target.Pattern)
+	}
+	if _, ok := target.Pattern.Args[0].Pattern.(*ast.MatchLiteralPattern); !ok {
+		t.Fatalf("expected literal kind field pattern, got %T", target.Pattern.Args[0].Pattern)
+	}
+	spanPattern, ok := target.Pattern.Args[1].Pattern.(*ast.MatchStructPattern)
+	if !ok || spanPattern.TypeName != "Span" {
+		t.Fatalf("expected nested span struct is-pattern, got %T %#v", target.Pattern.Args[1].Pattern, target.Pattern.Args[1].Pattern)
+	}
+	if len(spanPattern.Args) != 1 || spanPattern.Args[0].Name != "start" {
+		t.Fatalf("unexpected span field args %#v", spanPattern.Args)
+	}
+	if _, ok := spanPattern.Args[0].Pattern.(*ast.MatchLiteralPattern); !ok {
+		t.Fatalf("expected literal nested field pattern, got %T", spanPattern.Args[0].Pattern)
+	}
+}
+
 func TestParseVisitArmAlternativesAndGuard(t *testing.T) {
 	file, errs := parseSourceFile(t, "tree Lua:\n    @role(expr)\n    node Expr:\n        Int(value: i64)\n        Float(value: f64)\n\ndef score(node: Lua.Expr) -> i64:\n    return visit node:\n        Lua.Expr.Int(expr) | Lua.Expr.Float(expr) when expr.span > 0:\n            expr.span\n        _:\n            0\n")
 	if len(errs) != 0 {

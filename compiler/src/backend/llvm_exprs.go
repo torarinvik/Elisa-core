@@ -1112,6 +1112,8 @@ func (s *functionState) emitIsExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, semant
 		)
 		if treeType, variant, pattern, ok := s.treeIsTargetPattern(target); ok {
 			value, _, err = s.emitTreeIsTest(expr.Left, treeType, variant, pattern)
+		} else if pattern, ok := s.structIsTargetPattern(target); ok {
+			value, _, err = s.emitStructIsTest(expr.Left, pattern)
 		} else if enumType, variant, pattern, ok := s.enumIsTargetPattern(target); ok {
 			value, _, err = s.emitEnumIsTest(expr.Left, enumType, variant, pattern)
 		} else if base, cases, ok := s.namedStateIsTarget(target); ok {
@@ -1228,6 +1230,47 @@ func (s *functionState) emitEnumIsTest(leftExpr ast.Expr, enumType *semantic.Enu
 	}
 	cmp := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), tagValue, tagConst, cStringFree("istag"))
 	return cmp, s.g.result.NamedTypes["bool"], nil
+}
+
+func (s *functionState) structIsTargetPattern(expr ast.Expr) (*ast.MatchStructPattern, bool) {
+	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
+		return s.structIsTargetPattern(paren.Inner)
+	}
+	if testExpr, ok := expr.(*ast.StructTestExpr); ok && testExpr != nil && testExpr.Pattern != nil {
+		return testExpr.Pattern, true
+	}
+	return nil, false
+}
+
+func (s *functionState) emitStructIsTest(leftExpr ast.Expr, pattern *ast.MatchStructPattern) (C.LLVMValueRef, semantic.Type, error) {
+	leftType := s.exprType(leftExpr)
+	value, _, err := s.emitExpr(leftExpr, leftType)
+	if err != nil {
+		return nil, nil, err
+	}
+	successBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("is.struct.ok"))
+	failureBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("is.struct.fail"))
+	contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("is.struct.cont"))
+	if _, _, err := s.emitMatchPatternTest(pattern, value, nil, leftType, nil, leftExpr, nil, successBB, failureBB); err != nil {
+		return nil, nil, err
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, successBB)
+	successValue := C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 1, 0)
+	C.LLVMBuildBr(s.builder, contBB)
+	successEnd := C.LLVMGetInsertBlock(s.builder)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, failureBB)
+	failureValue := C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 0, 0)
+	C.LLVMBuildBr(s.builder, contBB)
+	failureEnd := C.LLVMGetInsertBlock(s.builder)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+	phi := C.LLVMBuildPhi(s.builder, C.LLVMInt1TypeInContext(s.g.context), cStringFree("is.struct.result"))
+	values := []C.LLVMValueRef{successValue, failureValue}
+	blocks := []C.LLVMBasicBlockRef{successEnd, failureEnd}
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	return phi, s.g.result.NamedTypes["bool"], nil
 }
 
 func (s *functionState) enumIsTargetPattern(expr ast.Expr) (*semantic.EnumType, *semantic.EnumVariant, *ast.MatchVariantPattern, bool) {

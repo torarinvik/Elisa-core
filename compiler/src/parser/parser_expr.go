@@ -688,6 +688,9 @@ func (p *Parser) parseSingleIsTestTargetExpr() ast.Expr {
 	if p.peekQualifiedVariantTargetWithPayload() {
 		return p.parseVariantIsTestExpr()
 	}
+	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LPAREN {
+		return p.parseStructIsTestExpr()
+	}
 	if p.peek() == lexer.TOKEN_DOT {
 		return p.parsePrimary()
 	}
@@ -744,6 +747,16 @@ func (p *Parser) parseVariantIsTestExpr() ast.Expr {
 	}
 	p.expect(lexer.TOKEN_RPAREN)
 	return &ast.VariantTestExpr{Position: pos, Pattern: &ast.MatchVariantPattern{Position: pos, EnumName: enumName, Variant: variant, Args: args}}
+}
+
+func (p *Parser) parseStructIsTestExpr() ast.Expr {
+	pos := p.cur().Pos
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	pattern, ok := p.parseMatchStructPatternAfterName(pos, name).(*ast.MatchStructPattern)
+	if !ok {
+		return &ast.StructTestExpr{Position: pos}
+	}
+	return &ast.StructTestExpr{Position: pos, Pattern: pattern}
 }
 
 func (p *Parser) parseBitwiseOr() ast.Expr {

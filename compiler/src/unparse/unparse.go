@@ -979,6 +979,11 @@ func formatExpr(expr ast.Expr) string {
 			return "<variant-test>"
 		}
 		return formatMatchPattern(n.Pattern)
+	case *ast.StructTestExpr:
+		if n.Pattern == nil {
+			return "<struct-test>"
+		}
+		return formatMatchPattern(n.Pattern)
 	case *ast.IsPatternExpr:
 		parts := make([]string, 0, len(n.Targets))
 		for _, target := range n.Targets {
@@ -1134,6 +1139,19 @@ func formatMatchPattern(pattern ast.MatchPattern) string {
 		return strconv.Quote(n.Value)
 	case *ast.MatchLiteralPattern:
 		return formatExpr(n.Value)
+	case *ast.MatchStructPattern:
+		parts := make([]string, 0, len(n.Args))
+		for _, arg := range n.Args {
+			part := formatMatchPattern(arg.Pattern)
+			if arg.Name != "" {
+				part = arg.Name + ": " + part
+			}
+			parts = append(parts, part)
+		}
+		if len(parts) == 0 {
+			return n.TypeName + "()"
+		}
+		return n.TypeName + "(" + strings.Join(parts, ", ") + ")"
 	case *ast.MatchVariantPattern:
 		parts := make([]string, 0, len(n.Args))
 		for _, arg := range n.Args {

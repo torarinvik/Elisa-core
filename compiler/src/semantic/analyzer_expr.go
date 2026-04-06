@@ -2533,6 +2533,10 @@ func (a *Analyzer) analyzeIsExpr(expr *ast.BinaryExpr) Type {
 			}
 			continue
 		}
+		if pattern, ok := a.structIsTargetPattern(target); ok && pattern != nil {
+			a.validateStructIsTargetPattern(pattern, left)
+			continue
+		}
 		if targetBase, _, ok := a.resolveNamedStateIsTarget(target); ok {
 			leftBase, ok := namedStateStructBase(left)
 			if !ok || leftBase == nil {
@@ -2547,6 +2551,32 @@ func (a *Analyzer) analyzeIsExpr(expr *ast.BinaryExpr) Type {
 		a.analyzeIsComparableTarget(left, target)
 	}
 	return a.namedTypes["bool"]
+}
+
+func (a *Analyzer) structIsTargetPattern(expr ast.Expr) (*ast.MatchStructPattern, bool) {
+	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
+		return a.structIsTargetPattern(paren.Inner)
+	}
+	if testExpr, ok := expr.(*ast.StructTestExpr); ok && testExpr != nil && testExpr.Pattern != nil {
+		return testExpr.Pattern, true
+	}
+	return nil, false
+}
+
+func (a *Analyzer) validateStructIsTargetPattern(pattern *ast.MatchStructPattern, actual Type) {
+	if pattern == nil {
+		return
+	}
+	fields, orderedArgs, ok := a.resolveMatchStructPattern(pattern, actual)
+	if !ok {
+		return
+	}
+	for i, arg := range orderedArgs {
+		if arg == nil {
+			continue
+		}
+		a.analyzeStructIsPayloadPattern(arg.Pattern, fields[i].Type)
+	}
 }
 
 func (a *Analyzer) enumVariantIsTargetPattern(expr ast.Expr, enumType *EnumType, variant *EnumVariant) (*ast.MatchVariantPattern, bool) {
@@ -2605,6 +2635,8 @@ func (a *Analyzer) analyzeVariantIsPayloadPattern(pattern ast.MatchPattern, expe
 		a.analyzeLiteralMatchPatternExpr(p.Pos(), &ast.StringLit{Position: p.Position, Value: p.Value}, expected, "variant is payload pattern")
 	case *ast.MatchLiteralPattern:
 		a.analyzeLiteralMatchPatternExpr(p.Pos(), p.Value, expected, "variant is payload pattern")
+	case *ast.MatchStructPattern:
+		a.analyzeStructIsPayloadPattern(p, expected)
 	case *ast.MatchVariantPattern:
 		switch target := expected.(type) {
 		case *EnumType:
@@ -2659,6 +2691,8 @@ func (a *Analyzer) analyzeEnumIsPayloadPattern(pattern ast.MatchPattern, expecte
 		a.analyzeLiteralMatchPatternExpr(p.Pos(), &ast.StringLit{Position: p.Position, Value: p.Value}, expected, "variant is payload pattern")
 	case *ast.MatchLiteralPattern:
 		a.analyzeLiteralMatchPatternExpr(p.Pos(), p.Value, expected, "variant is payload pattern")
+	case *ast.MatchStructPattern:
+		a.analyzeStructIsPayloadPattern(p, expected)
 	case *ast.MatchVariantPattern:
 		enumType, ok := expected.(*EnumType)
 		if !ok {
@@ -2683,6 +2717,34 @@ func (a *Analyzer) analyzeEnumIsPayloadPattern(pattern ast.MatchPattern, expecte
 		}
 	default:
 		a.errorf(pattern.Pos(), "unsupported variant is payload pattern %T", pattern)
+	}
+}
+
+func (a *Analyzer) analyzeStructIsPayloadPattern(pattern ast.MatchPattern, expected Type) {
+	switch p := pattern.(type) {
+	case *ast.MatchWildcardPattern:
+		return
+	case *ast.MatchBindPattern:
+		a.errorf(p.Pos(), "struct is tests do not support bind names; use match or if/open/view as to bind fields")
+	case *ast.MatchStringLiteralPattern:
+		a.analyzeLiteralMatchPatternExpr(p.Pos(), &ast.StringLit{Position: p.Position, Value: p.Value}, expected, "struct is field pattern")
+	case *ast.MatchLiteralPattern:
+		a.analyzeLiteralMatchPatternExpr(p.Pos(), p.Value, expected, "struct is field pattern")
+	case *ast.MatchVariantPattern:
+		a.analyzeVariantIsPayloadPattern(p, expected)
+	case *ast.MatchStructPattern:
+		fields, orderedArgs, ok := a.resolveMatchStructPattern(p, expected)
+		if !ok {
+			return
+		}
+		for i, arg := range orderedArgs {
+			if arg == nil {
+				continue
+			}
+			a.analyzeStructIsPayloadPattern(arg.Pattern, fields[i].Type)
+		}
+	default:
+		a.errorf(pattern.Pos(), "unsupported struct is field pattern %T", pattern)
 	}
 }
 

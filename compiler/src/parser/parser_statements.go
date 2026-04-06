@@ -579,29 +579,35 @@ func (p *Parser) parseTopLevelMatchPatterns() []ast.MatchPattern {
 func (p *Parser) parseMatchPattern() ast.MatchPattern {
 	pattern := p.parseNestedMatchPattern()
 	switch pattern.(type) {
-	case *ast.MatchWildcardPattern, *ast.MatchStringLiteralPattern, *ast.MatchVariantPattern:
+	case *ast.MatchWildcardPattern, *ast.MatchStringLiteralPattern, *ast.MatchVariantPattern, *ast.MatchStructPattern:
 		return pattern
 	default:
-		p.errorf("top-level match arm must use Enum.Variant(...), a string literal, or _")
+		p.errorf("top-level match arm must use Enum.Variant(...), Struct(...), a string literal, or _")
 		return pattern
 	}
 }
 
 func (p *Parser) parseNestedMatchPattern() ast.MatchPattern {
 	pos := p.cur().Pos
+	if p.peek() == lexer.TOKEN_DOT {
+		return &ast.MatchLiteralPattern{Position: pos, Value: p.parseMatchValuePatternExpr()}
+	}
 	if p.peek() == lexer.TOKEN_STRING_LIT {
 		return &ast.MatchStringLiteralPattern{Position: pos, Value: p.advance().Text}
 	}
 	if p.peek() == lexer.TOKEN_INT_LIT || p.peek() == lexer.TOKEN_FLOAT_LIT || p.peek() == lexer.TOKEN_HEX_LIT ||
 		p.peek() == lexer.TOKEN_CHAR_LIT || p.peek() == lexer.TOKEN_TRUE || p.peek() == lexer.TOKEN_FALSE ||
 		p.peek() == lexer.TOKEN_NULL || p.peek() == lexer.TOKEN_MINUS || p.peek() == lexer.TOKEN_LPAREN {
-		return &ast.MatchLiteralPattern{Position: pos, Value: p.parseMatchLiteralPatternExpr()}
+		return &ast.MatchLiteralPattern{Position: pos, Value: p.parseMatchValuePatternExpr()}
 	}
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_" {
 		p.advance()
 		return &ast.MatchWildcardPattern{Position: pos}
 	}
 	parts := []string{p.expect(lexer.TOKEN_IDENT).Text}
+	if p.peek() == lexer.TOKEN_LPAREN {
+		return p.parseMatchStructPatternAfterName(pos, parts[0])
+	}
 	if !p.match(lexer.TOKEN_DOT) {
 		return &ast.MatchBindPattern{Position: pos, Name: parts[0]}
 	}
@@ -626,7 +632,47 @@ func (p *Parser) parseNestedMatchPattern() ast.MatchPattern {
 	return &ast.MatchVariantPattern{Position: pos, EnumName: name, Variant: variant, Args: args}
 }
 
-func (p *Parser) parseMatchLiteralPatternExpr() ast.Expr {
+func buildQualifiedMatchValueExpr(pos lexer.Pos, parts []string) ast.Expr {
+	if len(parts) == 0 {
+		return &ast.Ident{Position: pos, Name: "<error>"}
+	}
+	var expr ast.Expr = &ast.Ident{Position: pos, Name: parts[0]}
+	for i := 1; i < len(parts); i++ {
+		expr = &ast.FieldExpr{Position: pos, Object: expr, Field: parts[i]}
+	}
+	return expr
+}
+
+func (p *Parser) parseMatchStructPatternAfterName(pos lexer.Pos, typeName string) ast.MatchPattern {
+	p.expect(lexer.TOKEN_LPAREN)
+	args := make([]ast.MatchPatternArg, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
+	if p.peek() != lexer.TOKEN_RPAREN {
+		for {
+			args = append(args, p.parseMatchStructPatternArg())
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+	return &ast.MatchStructPattern{Position: pos, TypeName: typeName, Args: args}
+}
+
+func (p *Parser) parseMatchStructPatternArg() ast.MatchPatternArg {
+	if p.peek() != lexer.TOKEN_IDENT || p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_COLON {
+		pos := p.cur().Pos
+		p.errorf("struct pattern fields must use name: pattern")
+		pattern := p.parseNestedMatchPattern()
+		return ast.MatchPatternArg{Position: pos, Pattern: pattern}
+	}
+	pos := p.cur().Pos
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_COLON)
+	pattern := p.parseNestedMatchPattern()
+	return ast.MatchPatternArg{Position: pos, Name: name, Pattern: pattern}
+}
+
+func (p *Parser) parseMatchValuePatternExpr() ast.Expr {
 	switch p.peek() {
 	case lexer.TOKEN_INT_LIT:
 		tok := p.advance()
@@ -649,18 +695,32 @@ func (p *Parser) parseMatchLiteralPatternExpr() ast.Expr {
 	case lexer.TOKEN_NULL:
 		tok := p.advance()
 		return &ast.NullLit{Position: tok.Pos}
+	case lexer.TOKEN_DOT:
+		return p.parsePrimary()
+	case lexer.TOKEN_IDENT:
+		pos := p.cur().Pos
+		parts := []string{p.expect(lexer.TOKEN_IDENT).Text}
+		if !p.match(lexer.TOKEN_DOT) {
+			p.errorf("value pattern expects a literal or qualified member")
+			return &ast.Ident{Position: pos, Name: parts[0]}
+		}
+		parts = append(parts, p.expect(lexer.TOKEN_IDENT).Text)
+		for p.match(lexer.TOKEN_DOT) {
+			parts = append(parts, p.expect(lexer.TOKEN_IDENT).Text)
+		}
+		return buildQualifiedMatchValueExpr(pos, parts)
 	case lexer.TOKEN_MINUS:
 		pos := p.cur().Pos
 		p.advance()
-		return &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_MINUS, Operand: p.parseMatchLiteralPatternExpr()}
+		return &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_MINUS, Operand: p.parseMatchValuePatternExpr()}
 	case lexer.TOKEN_LPAREN:
 		pos := p.cur().Pos
 		p.advance()
-		inner := p.parseMatchLiteralPatternExpr()
+		inner := p.parseMatchValuePatternExpr()
 		p.expect(lexer.TOKEN_RPAREN)
 		return &ast.ParenExpr{Position: pos, Inner: inner}
 	default:
-		p.errorf("variant payload literal pattern expects a literal")
+		p.errorf("match value pattern expects a literal or qualified member")
 		return &ast.IntLit{Position: p.cur().Pos, Value: "0"}
 	}
 }

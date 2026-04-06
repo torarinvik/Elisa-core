@@ -632,6 +632,11 @@ type VariantTestExpr struct {
 	Pattern  *MatchVariantPattern
 }
 
+type StructTestExpr struct {
+	Position lexer.Pos
+	Pattern  *MatchStructPattern
+}
+
 type IsPatternExpr struct {
 	Position lexer.Pos
 	Targets  []Expr
@@ -737,6 +742,13 @@ type MatchStringLiteralPattern struct {
 type MatchLiteralPattern struct {
 	Position lexer.Pos
 	Value    Expr
+}
+
+type MatchStructPattern struct {
+	Position     lexer.Pos
+	TypeName     string
+	Args         []MatchPatternArg
+	ResolvedArgs []*MatchPatternArg
 }
 
 type MatchVariantPattern struct {
@@ -1118,6 +1130,7 @@ func (n *SpecializeExpr) Pos() lexer.Pos  { return n.Position }
 func (n *StructLitExpr) Pos() lexer.Pos   { return n.Position }
 func (n *TupleExpr) Pos() lexer.Pos       { return n.Position }
 func (n *VariantTestExpr) Pos() lexer.Pos { return n.Position }
+func (n *StructTestExpr) Pos() lexer.Pos  { return n.Position }
 func (n *IsPatternExpr) Pos() lexer.Pos   { return n.Position }
 func (n *TypeExprExpr) Pos() lexer.Pos    { return n.Position }
 func (n *ParenExpr) Pos() lexer.Pos       { return n.Position }
@@ -1137,6 +1150,7 @@ func (n *MatchStringLiteralPattern) Pos() lexer.Pos {
 	return n.Position
 }
 func (n *MatchLiteralPattern) Pos() lexer.Pos { return n.Position }
+func (n *MatchStructPattern) Pos() lexer.Pos  { return n.Position }
 func (n *MatchVariantPattern) Pos() lexer.Pos { return n.Position }
 func (n *MoveBindNamePattern) Pos() lexer.Pos { return n.Position }
 func (n *MoveBindStructPattern) Pos() lexer.Pos {
@@ -1239,6 +1253,7 @@ func (*SpecializeExpr) nodeTag()            {}
 func (*StructLitExpr) nodeTag()             {}
 func (*TupleExpr) nodeTag()                 {}
 func (*VariantTestExpr) nodeTag()           {}
+func (*StructTestExpr) nodeTag()            {}
 func (*IsPatternExpr) nodeTag()             {}
 func (*TypeExprExpr) nodeTag()              {}
 func (*ParenExpr) nodeTag()                 {}
@@ -1254,6 +1269,7 @@ func (*MatchWildcardPattern) nodeTag()      {}
 func (*MatchBindPattern) nodeTag()          {}
 func (*MatchStringLiteralPattern) nodeTag() {}
 func (*MatchLiteralPattern) nodeTag()       {}
+func (*MatchStructPattern) nodeTag()        {}
 func (*MatchVariantPattern) nodeTag()       {}
 func (*MoveBindNamePattern) nodeTag()       {}
 func (*MoveBindStructPattern) nodeTag()     {}
@@ -1352,6 +1368,7 @@ func (*MatchWildcardPattern) matchPatternTag()      {}
 func (*MatchBindPattern) matchPatternTag()          {}
 func (*MatchStringLiteralPattern) matchPatternTag() {}
 func (*MatchLiteralPattern) matchPatternTag()       {}
+func (*MatchStructPattern) matchPatternTag()        {}
 func (*MatchVariantPattern) matchPatternTag()       {}
 func (*MoveBindNamePattern) moveBindPatternTag()    {}
 func (*MoveBindStructPattern) moveBindPatternTag()  {}
@@ -1365,6 +1382,7 @@ func (*SpecializeExpr) exprTag()                    {}
 func (*StructLitExpr) exprTag()                     {}
 func (*TupleExpr) exprTag()                         {}
 func (*VariantTestExpr) exprTag()                   {}
+func (*StructTestExpr) exprTag()                    {}
 func (*IsPatternExpr) exprTag()                     {}
 func (*TypeExprExpr) exprTag()                      {}
 func (*ParenExpr) exprTag()                         {}

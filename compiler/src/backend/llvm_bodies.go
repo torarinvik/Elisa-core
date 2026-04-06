@@ -3639,6 +3639,22 @@ func resolveMatchableEnumType(actual semantic.Type) (*semantic.EnumType, bool) {
 	}
 }
 
+func resolveMatchableStructTypeBackend(actual semantic.Type) bool {
+	switch tt := semantic.StripAggregateStateType(actual).(type) {
+	case *semantic.StructType:
+		return tt != nil && tt.Decl != nil
+	case *semantic.GenericInstanceType:
+		base, _ := tt.Base.(*semantic.StructType)
+		return base != nil && base.Decl != nil
+	case *semantic.TreeBlockType:
+		return tt != nil && tt.Decl != nil
+	case *semantic.TreeStructType:
+		return tt != nil && tt.Decl != nil
+	default:
+		return false
+	}
+}
+
 func runtimeStringLiteralType() semantic.Type {
 	return &semantic.RefType{Elem: &semantic.BuiltinType{Name: "u8"}, State: semantic.RefStateNonNull, Storage: semantic.RefStorageStatic, ExplicitStorage: true}
 }
@@ -3659,6 +3675,9 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 	}
 	if isStringMatchableType(s.exprType(stmt.Value)) {
 		return s.emitStringMatch(stmt)
+	}
+	if resolveMatchableStructTypeBackend(s.exprType(stmt.Value)) {
+		return s.emitStructMatch(stmt)
 	}
 	return fmt.Errorf("match requires an enum, tree-category, or string value")
 }
@@ -3921,6 +3940,9 @@ func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, sema
 	}
 	if isStringMatchableType(s.exprType(expr.Value)) {
 		return s.emitStringMatchExpr(expr, resultType)
+	}
+	if resolveMatchableStructTypeBackend(s.exprType(expr.Value)) {
+		return s.emitStructMatchExpr(expr, resultType)
 	}
 	return nil, nil, fmt.Errorf("match requires an enum, tree-category, or string value")
 }
@@ -4901,6 +4923,140 @@ func (s *functionState) emitStringMatchExpr(expr *ast.MatchExpr, resultType sema
 	return phi, resultType, nil
 }
 
+func (s *functionState) emitStructMatch(stmt *ast.MatchStmt) error {
+	if stmt.Store != nil {
+		return fmt.Errorf("struct match does not take an in-store clause")
+	}
+	actualType := s.exprType(stmt.Value)
+	value, _, err := s.emitExpr(stmt.Value, nil)
+	if err != nil {
+		return err
+	}
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.end"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.fail"))
+	allTerminated := true
+	for i, arm := range stmt.Arms {
+		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.arm"))
+		var nextBB C.LLVMBasicBlockRef
+		if i == len(stmt.Arms)-1 {
+			nextBB = failBB
+		} else {
+			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.next"))
+		}
+		if _, _, err := s.emitMatchPatternTest(arm.Pattern, value, nil, actualType, nil, stmt.Value, nil, bodyBB, nextBB); err != nil {
+			return err
+		}
+
+		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+		s.pushScope()
+		if err := s.emitBlockInCurrentScope(arm.Body); err != nil {
+			s.popScope()
+			return err
+		}
+		s.popScope()
+		if !s.currentBlockTerminated() {
+			allTerminated = false
+			C.LLVMBuildBr(s.builder, mergeBB)
+		}
+
+		if nextBB != mergeBB {
+			C.LLVMPositionBuilderAtEnd(s.builder, nextBB)
+		}
+	}
+
+	hasWildcard := matchHasWildcard(stmt.Arms)
+	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	if hasWildcard {
+		C.LLVMBuildUnreachable(s.builder)
+	} else {
+		C.LLVMBuildBr(s.builder, mergeBB)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	if allTerminated && hasWildcard {
+		C.LLVMBuildUnreachable(s.builder)
+	}
+	return nil
+}
+
+func (s *functionState) emitStructMatchExpr(expr *ast.MatchExpr, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+	if expr.Store != nil {
+		return nil, nil, fmt.Errorf("struct match does not take an in-store clause")
+	}
+	actualType := s.exprType(expr.Value)
+	value, _, err := s.emitExpr(expr.Value, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.end"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.fail"))
+	incomingValues := make([]C.LLVMValueRef, 0, len(expr.Arms)+1)
+	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(expr.Arms)+1)
+	for i, arm := range expr.Arms {
+		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.arm"))
+		var nextBB C.LLVMBasicBlockRef
+		if i == len(expr.Arms)-1 {
+			nextBB = failBB
+		} else {
+			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.next"))
+		}
+		if _, _, err := s.emitMatchPatternTest(arm.Pattern, value, nil, actualType, nil, expr.Value, nil, bodyBB, nextBB); err != nil {
+			return nil, nil, err
+		}
+
+		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+		s.pushScope()
+		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, resultType)
+		if err != nil {
+			s.popScope()
+			return nil, nil, err
+		}
+		if reachable && !s.currentBlockTerminated() {
+			armEnd := C.LLVMGetInsertBlock(s.builder)
+			incomingValues = append(incomingValues, armValue)
+			incomingBlocks = append(incomingBlocks, armEnd)
+			C.LLVMBuildBr(s.builder, mergeBB)
+		}
+		s.popScope()
+
+		if nextBB != mergeBB {
+			C.LLVMPositionBuilderAtEnd(s.builder, nextBB)
+		}
+	}
+
+	hasWildcard := matchHasWildcard(expr.Arms)
+	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	if hasWildcard || semantic.IsNeverType(resultType) {
+		C.LLVMBuildUnreachable(s.builder)
+	} else {
+		llvmType, err := s.g.lowerType(resultType)
+		if err != nil {
+			return nil, nil, err
+		}
+		undefValue := C.LLVMGetUndef(llvmType)
+		failEnd := C.LLVMGetInsertBlock(s.builder)
+		incomingValues = append(incomingValues, undefValue)
+		incomingBlocks = append(incomingBlocks, failEnd)
+		C.LLVMBuildBr(s.builder, mergeBB)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	if len(incomingValues) == 0 {
+		C.LLVMBuildUnreachable(s.builder)
+		return nil, resultType, nil
+	}
+	if len(incomingValues) == 1 || semantic.IsNeverType(resultType) {
+		return incomingValues[0], resultType, nil
+	}
+	llvmType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, err
+	}
+	phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree("match.expr.phi"))
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+	return phi, resultType, nil
+}
+
 func (s *functionState) emitMatchExprArmBody(body []ast.Stmt, resultType semantic.Type) (C.LLVMValueRef, bool, error) {
 	if len(body) == 0 {
 		return nil, false, fmt.Errorf("match expression arm must end with an expression")
@@ -4984,6 +5140,36 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 	case *ast.MatchStringLiteralPattern:
 		if err := s.emitLiteralMatchPatternTest(&ast.StringLit{Position: p.Position, Value: p.Value}, actualValue, actualType, successBB, failureBB); err != nil {
 			return nil, packedPayloadValueCache{}, err
+		}
+		return decodedActualValue, packedPayloadValueCache{}, nil
+	case *ast.MatchStructPattern:
+		fields, orderedArgs, err := s.resolveStructMatchPatternArgs(p, actualType)
+		if err != nil {
+			return nil, packedPayloadValueCache{}, err
+		}
+		matchedIndexes := make([]int, 0, len(orderedArgs))
+		for i, arg := range orderedArgs {
+			if arg != nil {
+				matchedIndexes = append(matchedIndexes, i)
+			}
+		}
+		if len(matchedIndexes) == 0 {
+			C.LLVMBuildBr(s.builder, successBB)
+			return decodedActualValue, packedPayloadValueCache{}, nil
+		}
+		for i, fieldIndex := range matchedIndexes {
+			arg := orderedArgs[fieldIndex]
+			fieldValue := C.LLVMBuildExtractValue(s.builder, actualValue, C.unsigned(fields[fieldIndex].Index), cStringFree("match.struct.field"))
+			nextSuccess := successBB
+			if i != len(matchedIndexes)-1 {
+				nextSuccess = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.struct.pattern.next"))
+			}
+			if _, _, err := s.emitMatchPatternTest(arg.Pattern, fieldValue, nil, fields[fieldIndex].Type, nil, nil, nil, nextSuccess, failureBB); err != nil {
+				return nil, packedPayloadValueCache{}, err
+			}
+			if i != len(matchedIndexes)-1 {
+				C.LLVMPositionBuilderAtEnd(s.builder, nextSuccess)
+			}
 		}
 		return decodedActualValue, packedPayloadValueCache{}, nil
 	case *ast.MatchVariantPattern:
@@ -5299,6 +5485,76 @@ func (s *functionState) emitStringMatchPatternTest(pattern ast.MatchPattern, act
 	default:
 		return fmt.Errorf("unsupported string match pattern %T", pattern)
 	}
+}
+
+func (s *functionState) resolveStructMatchPatternArgs(pattern *ast.MatchStructPattern, actualType semantic.Type) ([]structLiteralField, []*ast.MatchPatternArg, error) {
+	if pattern == nil {
+		return nil, nil, fmt.Errorf("missing struct match pattern")
+	}
+	fields, err := s.g.structLiteralFields(actualType)
+	if err != nil {
+		return nil, nil, err
+	}
+	switch tt := semantic.StripAggregateStateType(actualType).(type) {
+	case *semantic.StructType:
+		if tt == nil || tt.Name != pattern.TypeName || tt.Decl == nil {
+			got := "<invalid>"
+			if tt != nil {
+				got = tt.Name
+			}
+			return nil, nil, fmt.Errorf("struct pattern expects struct %s, got %s", pattern.TypeName, got)
+		}
+	case *semantic.GenericInstanceType:
+		base, _ := tt.Base.(*semantic.StructType)
+		if base == nil || base.Name != pattern.TypeName || base.Decl == nil {
+			got := semantic.StripAggregateStateType(actualType).String()
+			if base != nil {
+				got = base.Name
+			}
+			return nil, nil, fmt.Errorf("struct pattern expects struct %s, got %s", pattern.TypeName, got)
+		}
+	case *semantic.TreeBlockType:
+		if tt == nil || tt.Name != pattern.TypeName || tt.Decl == nil {
+			got := "<invalid>"
+			if tt != nil {
+				got = tt.Name
+			}
+			return nil, nil, fmt.Errorf("struct pattern expects struct %s, got %s", pattern.TypeName, got)
+		}
+	case *semantic.TreeStructType:
+		if tt == nil || tt.Name != pattern.TypeName || tt.Decl == nil {
+			got := "<invalid>"
+			if tt != nil {
+				got = tt.Name
+			}
+			return nil, nil, fmt.Errorf("struct pattern expects struct %s, got %s", pattern.TypeName, got)
+		}
+	default:
+		return nil, nil, fmt.Errorf("struct pattern %s requires a concrete struct value, got %s", pattern.TypeName, semantic.StripAggregateStateType(actualType).String())
+	}
+	if len(pattern.ResolvedArgs) == len(fields) {
+		return fields, pattern.ResolvedArgs, nil
+	}
+	ordered := make([]*ast.MatchPatternArg, len(fields))
+	fieldIndexes := make(map[string]int, len(fields))
+	for i := range fields {
+		fieldIndexes[fields[i].Decl.Name] = i
+	}
+	seen := make([]bool, len(fields))
+	for i := range pattern.Args {
+		arg := &pattern.Args[i]
+		index, ok := fieldIndexes[arg.Name]
+		if !ok {
+			return nil, nil, fmt.Errorf("struct %s has no field %s", pattern.TypeName, arg.Name)
+		}
+		if seen[index] {
+			return nil, nil, fmt.Errorf("struct %s matches field %s more than once", pattern.TypeName, arg.Name)
+		}
+		seen[index] = true
+		ordered[index] = arg
+	}
+	pattern.ResolvedArgs = ordered
+	return fields, ordered, nil
 }
 
 func (s *functionState) resolveMatchPatternArgs(pattern *ast.MatchVariantPattern, variant *semantic.EnumVariant) ([]*ast.MatchPatternArg, error) {
