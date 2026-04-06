@@ -202,13 +202,14 @@ func symbolAliasRoot(sym *Symbol) *Symbol {
 }
 
 type Scope struct {
-	Parent      *Scope
-	Symbols     map[string]*Symbol
-	Refinements map[string]Type
+	Parent                  *Scope
+	Symbols                 map[string]*Symbol
+	Refinements             map[string]Type
+	ConditionalBindingHints map[string]string
 }
 
 func NewScope(parent *Scope) *Scope {
-	return &Scope{Parent: parent, Symbols: map[string]*Symbol{}, Refinements: map[string]Type{}}
+	return &Scope{Parent: parent, Symbols: map[string]*Symbol{}, Refinements: map[string]Type{}, ConditionalBindingHints: map[string]string{}}
 }
 
 func (s *Scope) Define(sym *Symbol) (*Symbol, bool) {
@@ -235,4 +236,13 @@ func (s *Scope) LookupRefinement(key string) (Type, bool) {
 		}
 	}
 	return nil, false
+}
+
+func (s *Scope) LookupConditionalBindingHint(name string) (string, bool) {
+	for cur := s; cur != nil; cur = cur.Parent {
+		if hint, ok := cur.ConditionalBindingHints[name]; ok {
+			return hint, true
+		}
+	}
+	return "", false
 }

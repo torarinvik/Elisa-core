@@ -5796,10 +5796,117 @@ func (a *Analyzer) collectGuaranteedTruthyConditionBindingTypes(expr ast.Expr) m
 	return out
 }
 
+func (a *Analyzer) collectPossibleTruthyConditionBindingTypes(expr ast.Expr) map[string]Type {
+	if a == nil || expr == nil {
+		return nil
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return a.collectPossibleTruthyConditionBindingTypes(n.Inner)
+	case *ast.UnaryExpr:
+		return nil
+	case *ast.BinaryExpr:
+		switch n.Op {
+		case lexer.TOKEN_AND, lexer.TOKEN_OR:
+			left := a.collectPossibleTruthyConditionBindingTypes(n.Left)
+			right := a.collectPossibleTruthyConditionBindingTypes(n.Right)
+			if len(left) == 0 {
+				return right
+			}
+			if len(right) == 0 {
+				return left
+			}
+			out := make(map[string]Type, len(left)+len(right))
+			for name, typ := range left {
+				out[name] = typ
+			}
+			for name, typ := range right {
+				if _, ok := out[name]; !ok {
+					out[name] = typ
+				}
+			}
+			return out
+		}
+	}
+	_, valueExpr, pattern, ok := unwrapDirectStructIsCondition(expr)
+	if !ok || valueExpr == nil || pattern == nil {
+		return nil
+	}
+	valueType := a.exprTypes[valueExpr]
+	if valueType == nil {
+		valueType = a.analyzeExpr(valueExpr)
+	}
+	out := map[string]Type{}
+	a.collectConditionStructPatternBindingTypes(pattern, valueType, out)
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func (a *Analyzer) recordConditionalBindingHints(scope *Scope, expr ast.Expr, truthy bool) {
+	if a == nil || scope == nil || !truthy || expr == nil {
+		return
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		a.recordConditionalBindingHints(scope, n.Inner, truthy)
+		return
+	case *ast.UnaryExpr:
+		if n.Op == lexer.TOKEN_NOT {
+			a.recordConditionalBindingHints(scope, n.Operand, !truthy)
+		}
+		return
+	case *ast.BinaryExpr:
+		switch n.Op {
+		case lexer.TOKEN_AND:
+			a.recordConditionalBindingHints(scope, n.Left, true)
+			a.recordConditionalBindingHints(scope, n.Right, true)
+			return
+		case lexer.TOKEN_OR:
+			leftPossible := a.collectPossibleTruthyConditionBindingTypes(n.Left)
+			rightPossible := a.collectPossibleTruthyConditionBindingTypes(n.Right)
+			guaranteed := a.collectGuaranteedTruthyConditionBindingTypes(n)
+			allNames := map[string]bool{}
+			for name := range leftPossible {
+				allNames[name] = true
+			}
+			for name := range rightPossible {
+				allNames[name] = true
+			}
+			for name := range allNames {
+				if _, ok := guaranteed[name]; ok {
+					continue
+				}
+				leftType, leftOK := leftPossible[name]
+				rightType, rightOK := rightPossible[name]
+				hint := ""
+				switch {
+				case leftOK && rightOK && !SameType(leftType, rightType):
+					hint = fmt.Sprintf("identifier %q is not available here because truthy `or` branches do not agree on that binding: left branch binds it as %s, while right branch binds it as %s; use different bind names or restructure the condition", name, leftType.String(), rightType.String())
+				case leftOK && !rightOK:
+					hint = fmt.Sprintf("identifier %q is not available here because truthy `or` branches do not agree on that binding: left branch binds it as %s, while right branch does not bind it", name, leftType.String())
+				case !leftOK && rightOK:
+					hint = fmt.Sprintf("identifier %q is not available here because truthy `or` branches do not agree on that binding: left branch does not bind it, while right branch binds it as %s", name, rightType.String())
+				case leftOK || rightOK:
+					hint = fmt.Sprintf("identifier %q is not available here because truthy `or` condition bindings are only introduced when every successful branch binds that name", name)
+				}
+				if hint != "" {
+					scope.ConditionalBindingHints[name] = hint
+				}
+			}
+			a.recordConditionalBindingHints(scope, n.Left, true)
+			a.recordConditionalBindingHints(scope, n.Right, true)
+			return
+		}
+	}
+}
+
 func (a *Analyzer) bindConditionPatternLocals(scope *Scope, expr ast.Expr, truthy bool) {
 	if a == nil || scope == nil || !truthy {
 		return
 	}
+	a.recordConditionalBindingHints(scope, expr, truthy)
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
 		a.bindConditionPatternLocals(scope, n.Inner, truthy)

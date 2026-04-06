@@ -73,6 +73,13 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			result = promoteWritableRefType(sym.Type, sym.Mutable)
 			return
 		}
+		if a.currentScope != nil {
+			if hint, ok := a.currentScope.LookupConditionalBindingHint(n.Name); ok {
+				a.errorf(n.Pos(), "%s", hint)
+				result = invalidType
+				return
+			}
+		}
 		a.errorf(n.Pos(), "undefined identifier %q", n.Name)
 		result = invalidType
 		return

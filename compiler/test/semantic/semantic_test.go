@@ -5233,6 +5233,62 @@ def loop_value(tok: Token) -> i64:
 	requireNoWarnings(t, result)
 }
 
+func TestAnalyzeStructIsConditionBindingDiagnosticForTruthyOrMissingBranchBinding(t *testing.T) {
+	src := `const enum Tok of i32:
+	INTEGER = 1
+	FLOAT = 2
+
+struct Token:
+	kind: Tok
+	value: i64
+
+def score(tok: Token) -> i64:
+	if tok is Token(kind: .INTEGER, value: value) or tok is Token(kind: .FLOAT):
+		return value
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "struct_is_condition_binding_or_missing_branch_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatalf("expected composed-condition binding diagnostic")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "identifier \"value\" is not available here because truthy `or` branches do not agree on that binding: left branch binds it as i64, while right branch does not bind it") {
+		t.Fatalf("expected truthy-or missing-branch binding diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeStructIsConditionBindingDiagnosticForTruthyOrTypeMismatch(t *testing.T) {
+	src := `const enum Tok of i32:
+	INTEGER = 1
+	FLOAT = 2
+
+struct Span:
+	start: i64
+	finish: i64
+
+struct Token:
+	kind: Tok
+	value: i64
+	span: Span
+
+def score(tok: Token) -> i64:
+	if tok is Token(kind: .INTEGER, value: value) or tok is Token(kind: .FLOAT, span: value):
+		return value.start
+	return 0
+`
+	_, errs := parseAndAnalyze(t, "struct_is_condition_binding_or_type_mismatch_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatalf("expected composed-condition binding diagnostic")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "identifier \"value\" is not available here because truthy `or` branches do not agree on that binding: left branch binds it as i64, while right branch binds it as Span") {
+		t.Fatalf("expected truthy-or type-mismatch binding diagnostic, got:\n%s", all)
+	}
+	if strings.Contains(all, "undefined identifier \"value\"") {
+		t.Fatalf("expected specialized diagnostic instead of generic undefined identifier, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsRecursiveEnumPayloadByValue(t *testing.T) {
 	src := `enum Expr:
 	Int(int)
