@@ -143,3 +143,50 @@ func TestParseTreePayloadRelations(t *testing.T) {
 		}
 	}
 }
+
+func TestParseTreeOptionalPayloadFields(t *testing.T) {
+	file, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        IfStmt(child condition: Expr, child else_block?: Block)\n        NumericFor(child step?: Expr, children args?: darray[Expr])\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.TreeDecl)
+	if !ok {
+		t.Fatalf("expected tree decl, got %T", file.Decls[0])
+	}
+	member, ok := decl.Members[0].(*ast.TreeCategoryDecl)
+	if !ok {
+		t.Fatalf("expected tree category member, got %T", decl.Members[0])
+	}
+	if len(member.Variants) != 2 {
+		t.Fatalf("expected two variants, got %#v", member.Variants)
+	}
+	ifStmt := member.Variants[0]
+	if len(ifStmt.Payload) != 2 {
+		t.Fatalf("expected IfStmt payload arity 2, got %#v", ifStmt.Payload)
+	}
+	if ifStmt.Payload[1].Relation != ast.EnumPayloadRelationChild {
+		t.Fatalf("expected optional else_block payload to preserve child relation, got %#v", ifStmt.Payload[1])
+	}
+	if _, ok := ifStmt.Payload[1].Type.(*ast.OptionalTypeExpr); !ok {
+		t.Fatalf("expected else_block payload type to be optional, got %T", ifStmt.Payload[1].Type)
+	}
+	numericFor := member.Variants[1]
+	if len(numericFor.Payload) != 2 {
+		t.Fatalf("expected NumericFor payload arity 2, got %#v", numericFor.Payload)
+	}
+	if numericFor.Payload[0].Relation != ast.EnumPayloadRelationChild || numericFor.Payload[1].Relation != ast.EnumPayloadRelationChildren {
+		t.Fatalf("expected optional payload relations to be preserved, got %#v", numericFor.Payload)
+	}
+	if _, ok := numericFor.Payload[0].Type.(*ast.OptionalTypeExpr); !ok {
+		t.Fatalf("expected step payload type to be optional, got %T", numericFor.Payload[0].Type)
+	}
+	if _, ok := numericFor.Payload[1].Type.(*ast.OptionalTypeExpr); !ok {
+		t.Fatalf("expected args payload type to be optional, got %T", numericFor.Payload[1].Type)
+	}
+	formatted := unparse.FormatDecl(decl)
+	for _, want := range []string{"child else_block?: Block", "child step?: Expr", "children args?: darray[Expr]"} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted tree decl to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}

@@ -1365,6 +1365,14 @@ func IsOptionalType(t Type) (*OptionalType, bool) {
 	return opt, ok
 }
 
+func UnwrapOptionalType(t Type) (Type, bool) {
+	opt, ok := t.(*OptionalType)
+	if !ok || opt == nil || opt.Value == nil {
+		return t, false
+	}
+	return opt.Value, true
+}
+
 func (t *ErrorSetType) HasTag(name string) bool {
 	if t == nil {
 		return false
@@ -2033,6 +2041,9 @@ func TreeChildrenItemType(t Type) (Type, bool) {
 }
 
 func TreeStructuralSequenceElemType(t Type) (Type, bool) {
+	if inner, ok := UnwrapOptionalType(t); ok {
+		return TreeStructuralSequenceElemType(inner)
+	}
 	switch tt := t.(type) {
 	case *ArrayType:
 		return tt.Elem, true
@@ -2050,6 +2061,28 @@ func TreeStructuralSequenceElemType(t Type) (Type, bool) {
 	}
 }
 
+func TreeStructuralChildItemType(fieldType Type, relation ast.EnumPayloadRelation) (Type, bool) {
+	baseType, _ := UnwrapOptionalType(fieldType)
+	switch relation {
+	case ast.EnumPayloadRelationChild:
+		if baseType == nil {
+			return nil, false
+		}
+		return baseType, true
+	case ast.EnumPayloadRelationChildren:
+		return TreeStructuralSequenceElemType(baseType)
+	default:
+		return nil, false
+	}
+}
+
+func OptionalTreeFoldChildBindingType(resultType Type) Type {
+	if resultType == nil {
+		return nil
+	}
+	return &OptionalType{Value: resultType}
+}
+
 func TreeStructuralSequenceViewType(t Type) (*DArrayViewType, bool) {
 	darray, ok := t.(*DArrayType)
 	if !ok || darray == nil {
@@ -2058,12 +2091,30 @@ func TreeStructuralSequenceViewType(t Type) (*DArrayViewType, bool) {
 	return &DArrayViewType{Elem: darray.Elem, SurfaceName: "dview"}, true
 }
 
+func treeSurfaceSequenceType(t Type) (Type, bool) {
+	switch tt := t.(type) {
+	case *DArrayType:
+		return &DArrayViewType{Elem: tt.Elem, SurfaceName: "dview"}, true
+	case *OptionalType:
+		if tt == nil || tt.Value == nil {
+			return nil, false
+		}
+		inner, ok := treeSurfaceSequenceType(tt.Value)
+		if !ok {
+			return nil, false
+		}
+		return &OptionalType{Value: inner}, true
+	default:
+		return nil, false
+	}
+}
+
 func treeSurfaceSequenceField(field Field, relation ast.EnumPayloadRelation) Field {
 	if relation != ast.EnumPayloadRelationChildren {
 		return field
 	}
-	if viewType, ok := TreeStructuralSequenceViewType(field.Type); ok {
-		field.Type = viewType
+	if surfaceType, ok := treeSurfaceSequenceType(field.Type); ok {
+		field.Type = surfaceType
 	}
 	return field
 }
@@ -2213,13 +2264,14 @@ func TreeFieldStructuralRelation(family *TreeType, fieldType Type) ast.EnumPaylo
 	if family == nil || fieldType == nil {
 		return ast.EnumPayloadRelationNone
 	}
-	if memberFamily, ok := TreeFamilyForMemberType(fieldType); ok && memberFamily == family {
-		switch StripAggregateStateType(fieldType).(type) {
+	baseType, _ := UnwrapOptionalType(fieldType)
+	if memberFamily, ok := TreeFamilyForMemberType(baseType); ok && memberFamily == family {
+		switch StripAggregateStateType(baseType).(type) {
 		case *TreeCategoryType, *TreeVariantViewType, *TreeBlockType, *TreeStructType:
 			return ast.EnumPayloadRelationChild
 		}
 	}
-	if elemType, ok := TreeStructuralSequenceElemType(fieldType); ok {
+	if elemType, ok := TreeStructuralSequenceElemType(baseType); ok {
 		if memberFamily, ok := TreeFamilyForMemberType(elemType); ok && memberFamily == family {
 			switch StripAggregateStateType(elemType).(type) {
 			case *TreeCategoryType, *TreeVariantViewType, *TreeBlockType, *TreeStructType:

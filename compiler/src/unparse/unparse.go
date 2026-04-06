@@ -692,7 +692,11 @@ func formatEnumVariantDecl(variant ast.EnumVariantDecl) string {
 			part = string(payload.Relation) + " "
 		}
 		if payload.Name != "" {
-			part += payload.Name + ": " + formatTypeExpr(payload.Type)
+			if optionalType, ok := payload.Type.(*ast.OptionalTypeExpr); ok && optionalType != nil {
+				part += payload.Name + "?: " + formatTypeExpr(optionalType.Value)
+			} else {
+				part += payload.Name + ": " + formatTypeExpr(payload.Type)
+			}
 		} else {
 			part += formatTypeExpr(payload.Type)
 		}

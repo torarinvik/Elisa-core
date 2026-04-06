@@ -358,6 +358,59 @@ def elseif_total(stmt: Lua.Stmt.IfStmt) -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersOptionalTreeChildFields(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(stmt)
+	node Stmt:
+		ElseIf(child condition: Expr, child body: Block)
+		IfStmt(child condition: Expr, child then_block: Block, children elseifs: darray[Stmt], child else_block?: Block)
+		NumericFor(name_index: u32, child start: Expr, child limit: Expr, child step?: Expr, child body: Block)
+	@role(expr)
+	node Expr:
+		Name(name_index: u32)
+	block Block:
+		stmts: darray[Stmt]
+
+def optional_i64_value(value: i64?) -> i64:
+	return value if value != null else 0
+
+def has_else(stmt: Lua.Stmt.IfStmt) -> bool:
+	else_block: Lua.Block? = stmt.else_block
+	return else_block != null
+
+def count_children(stmt: Lua.Stmt) -> i64:
+	total: mutable i64 = 0
+	for child in children(stmt to Lua.Node):
+		total <- total + child.kind.i64()
+	return total
+
+def score(node: Lua.Stmt) -> i64:
+	return fold node as Lua.Node into i64:
+		Lua.Expr.Name(expr):
+			expr.name_index.i64() + expr.span
+		Lua.Block(block, children):
+			children.len.i64() + block.span
+		Lua.Stmt.ElseIf(stmt, condition, body):
+			condition + body + stmt.span
+		Lua.Stmt.IfStmt(stmt, condition, then_block, elseifs: elseif_values, else_block):
+			optional_i64_value(else_block) + condition + then_block + elseif_values.len.i64() + stmt.span
+		Lua.Stmt.NumericFor(stmt, start, limit, step, body):
+			optional_i64_value(step) + start + limit + body + stmt.name_index.i64()
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_optional_child_fields.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i1 @has_else(%Lua__TreeHandle ", "define i64 @count_children(%Lua__TreeHandle ", "define i64 @score(%Lua__TreeHandle ", "Optional__Lua_Block", "Optional__Lua_Expr", "Optional__i64", "optional.present", "fold.arm.named.else_block.value", "fold.arm.named.step.value", "fold.arm.child.edge.count"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected optional tree child lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersTreeVisitExpr(t *testing.T) {
 	src := `tree Lua:
 	common:

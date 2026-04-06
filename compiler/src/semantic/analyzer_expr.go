@@ -4314,15 +4314,9 @@ func appendTreeVariantStructuralChildCandidates(candidates *[]Type, variant *Enu
 		return
 	}
 	for payloadIndex, payloadType := range variant.Payload {
-		switch variant.PayloadRelation(payloadIndex) {
-		case ast.EnumPayloadRelationChild:
-			if payloadType != nil {
-				*candidates = append(*candidates, payloadType)
-			}
-		case ast.EnumPayloadRelationChildren:
-			if elemType, ok := TreeStructuralSequenceElemType(payloadType); ok && elemType != nil {
-				*candidates = append(*candidates, elemType)
-			}
+		relation := variant.PayloadRelation(payloadIndex)
+		if itemType, ok := TreeStructuralChildItemType(payloadType, relation); ok && itemType != nil {
+			*candidates = append(*candidates, itemType)
 		}
 	}
 }
@@ -4346,13 +4340,9 @@ func appendTreeExactStructuralChildCandidates(candidates *[]Type, exact Type) {
 		if !ok {
 			continue
 		}
-		switch TreeFieldStructuralRelation(family, field.Type) {
-		case ast.EnumPayloadRelationChild:
-			*candidates = append(*candidates, field.Type)
-		case ast.EnumPayloadRelationChildren:
-			if elemType, ok := TreeStructuralSequenceElemType(field.Type); ok && elemType != nil {
-				*candidates = append(*candidates, elemType)
-			}
+		relation := TreeFieldStructuralRelation(family, field.Type)
+		if itemType, ok := TreeStructuralChildItemType(field.Type, relation); ok && itemType != nil {
+			*candidates = append(*candidates, itemType)
 		}
 	}
 }

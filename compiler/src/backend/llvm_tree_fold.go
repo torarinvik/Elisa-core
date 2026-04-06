@@ -308,21 +308,33 @@ func (s *functionState) emitTreeFoldExactStructuralChildNodeValue(nodeValue C.LL
 		matchBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".match"))
 		continueBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".next"))
 		var condValue C.LLVMValueRef
-		var seqCount C.LLVMValueRef
+		edgeCount := one
+		matchValue := fieldValue
+		resolvedType := field.Type
 		if relation == ast.EnumPayloadRelationChild {
-			condValue = C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), remaining, zero, cStringFree(name+".eq"))
+			if optionalType, ok := field.Type.(*semantic.OptionalType); ok {
+				presentValue, err := s.extractOptionalPresent(fieldValue, optionalType)
+				if err != nil {
+					return nil, err
+				}
+				matchValue, err = s.extractOptionalPayload(fieldValue, optionalType)
+				if err != nil {
+					return nil, err
+				}
+				resolvedType = optionalType.Value
+				edgeCount = C.LLVMBuildSelect(s.builder, presentValue, one, zero, cStringFree(name+".edge.count"))
+			}
+			condValue = C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), remaining, edgeCount, cStringFree(name+".lt"))
 		} else {
-			seqCount, err = s.emitTreeStructuralSequenceCount(fieldValue, field.Type, name)
+			edgeCount, err = s.emitTreeStructuralSequenceCount(fieldValue, field.Type, name)
 			if err != nil {
 				return nil, err
 			}
-			condValue = C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), remaining, seqCount, cStringFree(name+".lt"))
+			condValue = C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), remaining, edgeCount, cStringFree(name+".lt"))
 		}
 		C.LLVMBuildCondBr(s.builder, condValue, matchBB, continueBB)
 
 		C.LLVMPositionBuilderAtEnd(s.builder, matchBB)
-		matchValue := fieldValue
-		resolvedType := field.Type
 		if relation == ast.EnumPayloadRelationChildren {
 			var valueType semantic.Type
 			matchValue, valueType, err = s.emitTreeStructuralSequenceItemValue(fieldValue, field.Type, remaining, name)
@@ -339,11 +351,7 @@ func (s *functionState) emitTreeFoldExactStructuralChildNodeValue(nodeValue C.LL
 		C.LLVMBuildBr(s.builder, resultBB)
 
 		C.LLVMPositionBuilderAtEnd(s.builder, continueBB)
-		if relation == ast.EnumPayloadRelationChild {
-			remaining = C.LLVMBuildSub(s.builder, remaining, one, cStringFree(name+".rem"))
-		} else {
-			remaining = C.LLVMBuildSub(s.builder, remaining, seqCount, cStringFree(name+".rem"))
-		}
+		remaining = C.LLVMBuildSub(s.builder, remaining, edgeCount, cStringFree(name+".rem"))
 	}
 	C.LLVMBuildBr(s.builder, failBB)
 	if err := s.emitTreeChildrenTrapBlock(failBB); err != nil {
@@ -487,6 +495,7 @@ func (s *functionState) emitTreeFoldNamedChildBindingLocals(helper *treeFoldHelp
 	if err != nil {
 		return err
 	}
+	zeroValue := C.LLVMConstInt(usizeLLVMType, 0, 0)
 	offsetValue := C.LLVMConstInt(usizeLLVMType, 0, 0)
 	oneValue := C.LLVMConstInt(usizeLLVMType, 1, 0)
 	boundFields := map[string]bool{}
@@ -494,17 +503,70 @@ func (s *functionState) emitTreeFoldNamedChildBindingLocals(helper *treeFoldHelp
 		bindName, wanted := requested[childBinding.Name]
 		switch childBinding.Relation {
 		case ast.EnumPayloadRelationChild:
-			if wanted {
-				childResult, err := s.emitTreeFoldChildResultAtIndex(childViewValue, helper.resultType, offsetValue, name+"."+childBinding.Name)
+			fieldValue, _, err := s.emitTreeExactFieldValueAtIndex(tablePtr, memberType, childBinding.Name, rowIndex, name+"."+childBinding.Name)
+			if err != nil {
+				return err
+			}
+			childCount := oneValue
+			presentValue := C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 1, 0)
+			optionalType, optionalChild := childBinding.Type.(*semantic.OptionalType)
+			if optionalChild {
+				presentValue, err = s.extractOptionalPresent(fieldValue, optionalType)
 				if err != nil {
 					return err
 				}
-				if err := s.emitMoveBindLocal(bindName, helper.resultType, childResult); err != nil {
-					return err
+				childCount = C.LLVMBuildSelect(s.builder, presentValue, oneValue, zeroValue, cStringFree(name+"."+childBinding.Name+".count"))
+			}
+			if wanted {
+				if optionalChild {
+					boundType := &semantic.OptionalType{Value: helper.resultType}
+					boundLLVMType, err := s.g.lowerType(boundType)
+					if err != nil {
+						return err
+					}
+					presentBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+"."+childBinding.Name+".some"))
+					absentBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+"."+childBinding.Name+".none"))
+					contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+"."+childBinding.Name+".cont"))
+					C.LLVMBuildCondBr(s.builder, presentValue, presentBB, absentBB)
+
+					C.LLVMPositionBuilderAtEnd(s.builder, presentBB)
+					childResult, err := s.emitTreeFoldChildResultAtIndex(childViewValue, helper.resultType, offsetValue, name+"."+childBinding.Name)
+					if err != nil {
+						return err
+					}
+					presentValue, err := s.buildOptionalSome(boundType, childResult)
+					if err != nil {
+						return err
+					}
+					presentEnd := C.LLVMGetInsertBlock(s.builder)
+					C.LLVMBuildBr(s.builder, contBB)
+
+					C.LLVMPositionBuilderAtEnd(s.builder, absentBB)
+					absentValue, err := s.buildOptionalNone(boundType)
+					if err != nil {
+						return err
+					}
+					absentEnd := C.LLVMGetInsertBlock(s.builder)
+					C.LLVMBuildBr(s.builder, contBB)
+
+					C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+					boundPhi := C.LLVMBuildPhi(s.builder, boundLLVMType, cStringFree(name+"."+childBinding.Name+".value"))
+					C.LLVMAddIncoming(boundPhi, llvmValueSlicePtr([]C.LLVMValueRef{presentValue, absentValue}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{presentEnd, absentEnd}), 2)
+					if err := s.emitMoveBindLocal(bindName, boundType, boundPhi); err != nil {
+						return err
+					}
+				} else {
+					childResult, err := s.emitTreeFoldChildResultAtIndex(childViewValue, helper.resultType, offsetValue, name+"."+childBinding.Name)
+					if err != nil {
+						return err
+					}
+					if err := s.emitMoveBindLocal(bindName, helper.resultType, childResult); err != nil {
+						return err
+					}
 				}
 				boundFields[childBinding.Name] = true
 			}
-			offsetValue = C.LLVMBuildAdd(s.builder, offsetValue, oneValue, cStringFree(name+"."+childBinding.Name+".offset.next"))
+			offsetValue = C.LLVMBuildAdd(s.builder, offsetValue, childCount, cStringFree(name+"."+childBinding.Name+".offset.next"))
 		case ast.EnumPayloadRelationChildren:
 			fieldValue, _, err := s.emitTreeExactFieldValueAtIndex(tablePtr, memberType, childBinding.Name, rowIndex, name+"."+childBinding.Name)
 			if err != nil {
@@ -519,8 +581,23 @@ func (s *functionState) emitTreeFoldNamedChildBindingLocals(helper *treeFoldHelp
 				if err != nil {
 					return err
 				}
-				if err := s.emitMoveBindLocal(bindName, subViewType, subViewValue); err != nil {
-					return err
+				if optionalType, ok := childBinding.Type.(*semantic.OptionalType); ok {
+					presentValue, err := s.extractOptionalPresent(fieldValue, optionalType)
+					if err != nil {
+						return err
+					}
+					boundType := &semantic.OptionalType{Value: subViewType}
+					boundValue, err := s.buildOptionalValue(boundType, presentValue, subViewValue)
+					if err != nil {
+						return err
+					}
+					if err := s.emitMoveBindLocal(bindName, boundType, boundValue); err != nil {
+						return err
+					}
+				} else {
+					if err := s.emitMoveBindLocal(bindName, subViewType, subViewValue); err != nil {
+						return err
+					}
 				}
 				boundFields[childBinding.Name] = true
 			}

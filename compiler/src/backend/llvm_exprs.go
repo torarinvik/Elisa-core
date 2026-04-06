@@ -1634,9 +1634,25 @@ func (s *functionState) emitOptionalCompareExpr(expr *ast.BinaryExpr, leftType s
 		}
 	}
 	if optionalType == nil {
+		if leftOptional, ok := leftType.(*semantic.OptionalType); ok {
+			if _, isNull := expr.Right.(*ast.NullLit); isNull {
+				optionalExpr = expr.Left
+				optionalType = leftOptional
+			}
+		}
+	}
+	if optionalType == nil {
 		if rightOptional, ok := rightType.(*semantic.OptionalType); ok && semantic.IsNullType(leftType) {
 			optionalExpr = expr.Right
 			optionalType = rightOptional
+		}
+	}
+	if optionalType == nil {
+		if rightOptional, ok := rightType.(*semantic.OptionalType); ok {
+			if _, isNull := expr.Left.(*ast.NullLit); isNull {
+				optionalExpr = expr.Right
+				optionalType = rightOptional
+			}
 		}
 	}
 	if optionalType == nil {
@@ -7094,6 +7110,29 @@ func (s *functionState) treeFieldSurfaceValue(value C.LLVMValueRef, rawType sema
 	}
 	if surfaceType == nil || semantic.SameType(rawType, surfaceType) {
 		return value, rawType, nil
+	}
+	if rawOptional, ok := rawType.(*semantic.OptionalType); ok {
+		surfaceOptional, ok := surfaceType.(*semantic.OptionalType)
+		if !ok || surfaceOptional == nil || rawOptional == nil || rawOptional.Value == nil || surfaceOptional.Value == nil {
+			return nil, nil, fmt.Errorf("unsupported tree field surface conversion from %s to %s", rawType.String(), surfaceType.String())
+		}
+		presentValue, err := s.extractOptionalPresent(value, rawOptional)
+		if err != nil {
+			return nil, nil, err
+		}
+		payloadValue, err := s.extractOptionalPayload(value, rawOptional)
+		if err != nil {
+			return nil, nil, err
+		}
+		surfacePayload, _, err := s.treeFieldSurfaceValue(payloadValue, rawOptional.Value, surfaceOptional.Value, name+".optional")
+		if err != nil {
+			return nil, nil, err
+		}
+		optionalValue, err := s.buildOptionalValue(surfaceOptional, presentValue, surfacePayload)
+		if err != nil {
+			return nil, nil, err
+		}
+		return optionalValue, surfaceOptional, nil
 	}
 	rawArray, ok := rawType.(*semantic.DArrayType)
 	if !ok || rawArray == nil {

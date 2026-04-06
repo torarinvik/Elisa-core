@@ -420,7 +420,7 @@ func (p *Parser) parseEnumVariantDecl() ast.EnumVariantDecl {
 }
 
 func (p *Parser) parseEnumPayloadDecl() ast.EnumPayloadDecl {
-	if p.peek() == lexer.TOKEN_IDENT && p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_COLON {
+	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
 		relationText := p.tokens[p.pos].Text
 		var relation ast.EnumPayloadRelation
 		switch relationText {
@@ -431,21 +431,42 @@ func (p *Parser) parseEnumPayloadDecl() ast.EnumPayloadDecl {
 		case string(ast.EnumPayloadRelationLink):
 			relation = ast.EnumPayloadRelationLink
 		}
-		if relation != ast.EnumPayloadRelationNone {
+		colonIndex := p.pos + 2
+		optionalNamed := false
+		if colonIndex < len(p.tokens) && p.tokens[colonIndex].Kind == lexer.TOKEN_QUESTION {
+			optionalNamed = true
+			colonIndex++
+		}
+		if relation != ast.EnumPayloadRelationNone && colonIndex < len(p.tokens) && p.tokens[colonIndex].Kind == lexer.TOKEN_COLON {
 			pos := p.cur().Pos
 			p.expect(lexer.TOKEN_IDENT)
-			name := p.expect(lexer.TOKEN_IDENT).Text
+			nameTok := p.expect(lexer.TOKEN_IDENT)
+			if optionalNamed {
+				p.expect(lexer.TOKEN_QUESTION)
+			}
 			p.expect(lexer.TOKEN_COLON)
 			typ := p.parseTypeExpr()
-			return ast.EnumPayloadDecl{Position: pos, Relation: relation, Name: name, Type: typ}
+			if optionalNamed {
+				typ = &ast.OptionalTypeExpr{Position: nameTok.Pos, Value: typ}
+			}
+			return ast.EnumPayloadDecl{Position: pos, Relation: relation, Name: nameTok.Text, Type: typ}
 		}
 	}
-	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
-		pos := p.cur().Pos
-		name := p.expect(lexer.TOKEN_IDENT).Text
-		p.expect(lexer.TOKEN_COLON)
-		typ := p.parseTypeExpr()
-		return ast.EnumPayloadDecl{Position: pos, Name: name, Type: typ}
+	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) {
+		optionalNamed := p.tokens[p.pos+1].Kind == lexer.TOKEN_QUESTION && p.pos+2 < len(p.tokens) && p.tokens[p.pos+2].Kind == lexer.TOKEN_COLON
+		if p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON || optionalNamed {
+			pos := p.cur().Pos
+			nameTok := p.expect(lexer.TOKEN_IDENT)
+			if optionalNamed {
+				p.expect(lexer.TOKEN_QUESTION)
+			}
+			p.expect(lexer.TOKEN_COLON)
+			typ := p.parseTypeExpr()
+			if optionalNamed {
+				typ = &ast.OptionalTypeExpr{Position: nameTok.Pos, Value: typ}
+			}
+			return ast.EnumPayloadDecl{Position: pos, Name: nameTok.Text, Type: typ}
+		}
 	}
 	typ := p.parseTypeExpr()
 	return ast.EnumPayloadDecl{Position: typ.Pos(), Type: typ}

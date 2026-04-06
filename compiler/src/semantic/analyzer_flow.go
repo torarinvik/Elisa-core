@@ -3370,9 +3370,17 @@ func treeFoldArmChildBindingTypes(bindType Type, resultType Type) map[string]Typ
 		}
 		switch binding.Relation {
 		case ast.EnumPayloadRelationChild:
-			out[binding.Name] = resultType
+			if _, optional := UnwrapOptionalType(binding.Type); optional {
+				out[binding.Name] = OptionalTreeFoldChildBindingType(resultType)
+			} else {
+				out[binding.Name] = resultType
+			}
 		case ast.EnumPayloadRelationChildren:
-			out[binding.Name] = childViewType
+			if _, optional := UnwrapOptionalType(binding.Type); optional {
+				out[binding.Name] = &OptionalType{Value: childViewType}
+			} else {
+				out[binding.Name] = childViewType
+			}
 		}
 	}
 	return out
@@ -3515,13 +3523,9 @@ func treeExactStructuralChildTypes(exact Type) []Type {
 		if !ok {
 			continue
 		}
-		switch TreeFieldStructuralRelation(family, field.Type) {
-		case ast.EnumPayloadRelationChild:
-			out = append(out, field.Type)
-		case ast.EnumPayloadRelationChildren:
-			if elemType, ok := TreeStructuralSequenceElemType(field.Type); ok {
-				out = append(out, elemType)
-			}
+		relation := TreeFieldStructuralRelation(family, field.Type)
+		if itemType, ok := TreeStructuralChildItemType(field.Type, relation); ok && itemType != nil {
+			out = append(out, itemType)
 		}
 	}
 	return out
@@ -3536,13 +3540,9 @@ func treeVisitRootStructuralChildTypes(root treeVisitRootInfo) []Type {
 		out := make([]Type, 0)
 		for _, variant := range root.Category.Variants {
 			for i, payloadType := range variant.Payload {
-				switch variant.PayloadRelation(i) {
-				case ast.EnumPayloadRelationChild:
-					out = append(out, payloadType)
-				case ast.EnumPayloadRelationChildren:
-					if elemType, ok := TreeStructuralSequenceElemType(payloadType); ok {
-						out = append(out, elemType)
-					}
+				relation := variant.PayloadRelation(i)
+				if itemType, ok := TreeStructuralChildItemType(payloadType, relation); ok && itemType != nil {
+					out = append(out, itemType)
 				}
 			}
 		}
@@ -3561,13 +3561,9 @@ func treeVisitRootStructuralChildTypes(root treeVisitRootInfo) []Type {
 					continue
 				}
 				for i, payloadType := range tt.Variant.Payload {
-					switch tt.Variant.PayloadRelation(i) {
-					case ast.EnumPayloadRelationChild:
-						out = append(out, payloadType)
-					case ast.EnumPayloadRelationChildren:
-						if elemType, ok := TreeStructuralSequenceElemType(payloadType); ok {
-							out = append(out, elemType)
-						}
+					relation := tt.Variant.PayloadRelation(i)
+					if itemType, ok := TreeStructuralChildItemType(payloadType, relation); ok && itemType != nil {
+						out = append(out, itemType)
 					}
 				}
 			default:

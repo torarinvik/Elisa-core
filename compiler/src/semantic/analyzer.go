@@ -1206,6 +1206,9 @@ func (a *Analyzer) validateTreePayloadRelation(category *TreeCategoryType, varia
 		return
 	}
 	targetType := payloadType
+	if unwrapped, ok := UnwrapOptionalType(targetType); ok {
+		targetType = unwrapped
+	}
 	if payloadDecl.Relation == ast.EnumPayloadRelationChildren {
 		elemType, ok := TreeStructuralSequenceElemType(payloadType)
 		if !ok {

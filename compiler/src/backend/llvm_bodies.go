@@ -1443,6 +1443,26 @@ func (s *functionState) emitTreeChildrenTrapBlock(block C.LLVMBasicBlockRef) err
 }
 
 func (s *functionState) emitTreeStructuralSequenceCount(payloadValue C.LLVMValueRef, payloadType semantic.Type, name string) (C.LLVMValueRef, error) {
+	if optionalType, ok := payloadType.(*semantic.OptionalType); ok {
+		presentValue, err := s.extractOptionalPresent(payloadValue, optionalType)
+		if err != nil {
+			return nil, err
+		}
+		innerValue, err := s.extractOptionalPayload(payloadValue, optionalType)
+		if err != nil {
+			return nil, err
+		}
+		seqCount, err := s.emitTreeStructuralSequenceCount(innerValue, optionalType.Value, name+".optional")
+		if err != nil {
+			return nil, err
+		}
+		usizeLLVMType, err := s.g.lowerType(s.g.result.NamedTypes["usize"])
+		if err != nil {
+			return nil, err
+		}
+		zeroValue := C.LLVMConstInt(usizeLLVMType, 0, 0)
+		return C.LLVMBuildSelect(s.builder, presentValue, seqCount, zeroValue, cStringFree(name+".tree.children.seq.count")), nil
+	}
 	tempAlloca, err := s.emitStackTempValue(payloadValue, payloadType, name+".tree.children.seq")
 	if err != nil {
 		return nil, err
@@ -1451,6 +1471,13 @@ func (s *functionState) emitTreeStructuralSequenceCount(payloadValue C.LLVMValue
 }
 
 func (s *functionState) emitTreeStructuralSequenceItemValue(payloadValue C.LLVMValueRef, payloadType semantic.Type, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, semantic.Type, error) {
+	if optionalType, ok := payloadType.(*semantic.OptionalType); ok {
+		innerValue, err := s.extractOptionalPayload(payloadValue, optionalType)
+		if err != nil {
+			return nil, nil, err
+		}
+		return s.emitTreeStructuralSequenceItemValue(innerValue, optionalType.Value, indexValue, name+".optional")
+	}
 	tempAlloca, err := s.emitStackTempValue(payloadValue, payloadType, name+".tree.children.seq")
 	if err != nil {
 		return nil, nil, err
@@ -1485,7 +1512,16 @@ func (s *functionState) emitTreeVariantStructuralChildCount(nodeValue C.LLVMValu
 	for payloadIndex, payloadType := range variant.Payload {
 		switch variant.PayloadRelation(payloadIndex) {
 		case ast.EnumPayloadRelationChild:
-			total = C.LLVMBuildAdd(s.builder, total, C.LLVMConstInt(usizeLLVMType, 1, 0), cStringFree(name+".tree.children.count"))
+			childCount := C.LLVMConstInt(usizeLLVMType, 1, 0)
+			if optionalType, ok := payloadType.(*semantic.OptionalType); ok {
+				presentValue, err := s.extractOptionalPresent(payloadValues[payloadIndex], optionalType)
+				if err != nil {
+					return nil, err
+				}
+				zeroValue := C.LLVMConstInt(usizeLLVMType, 0, 0)
+				childCount = C.LLVMBuildSelect(s.builder, presentValue, childCount, zeroValue, cStringFree(name+".tree.children.count"))
+			}
+			total = C.LLVMBuildAdd(s.builder, total, childCount, cStringFree(name+".tree.children.count"))
 		case ast.EnumPayloadRelationChildren:
 			seqCount, err := s.emitTreeStructuralSequenceCount(payloadValues[payloadIndex], payloadType, name)
 			if err != nil {
@@ -1529,30 +1565,43 @@ func (s *functionState) emitTreeVariantStructuralChildValue(nodeValue C.LLVMValu
 		if relation != ast.EnumPayloadRelationChild && relation != ast.EnumPayloadRelationChildren {
 			continue
 		}
+		payloadValue := payloadValues[payloadIndex]
 		matchBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".tree.children.match"))
 		continueBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".tree.children.next"))
 		var condValue C.LLVMValueRef
-		var seqCount C.LLVMValueRef
+		edgeCount := one
+		resolvedType := payloadType
+		matchValue := payloadValue
 		if relation == ast.EnumPayloadRelationChild {
-			condValue = C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), remaining, zero, cStringFree(name+".tree.children.eq"))
+			if optionalType, ok := payloadType.(*semantic.OptionalType); ok {
+				presentValue, err := s.extractOptionalPresent(payloadValue, optionalType)
+				if err != nil {
+					return nil, err
+				}
+				matchValue, err = s.extractOptionalPayload(payloadValue, optionalType)
+				if err != nil {
+					return nil, err
+				}
+				resolvedType = optionalType.Value
+				edgeCount = C.LLVMBuildSelect(s.builder, presentValue, one, zero, cStringFree(name+".tree.children.edge.count"))
+			}
+			condValue = C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), remaining, edgeCount, cStringFree(name+".tree.children.lt"))
 		} else {
 			var err error
-			seqCount, err = s.emitTreeStructuralSequenceCount(payloadValues[payloadIndex], payloadType, name)
+			edgeCount, err = s.emitTreeStructuralSequenceCount(payloadValue, payloadType, name)
 			if err != nil {
 				return nil, err
 			}
-			condValue = C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), remaining, seqCount, cStringFree(name+".tree.children.lt"))
+			condValue = C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), remaining, edgeCount, cStringFree(name+".tree.children.lt"))
 		}
 		C.LLVMBuildCondBr(s.builder, condValue, matchBB, continueBB)
 
 		C.LLVMPositionBuilderAtEnd(s.builder, matchBB)
-		var matchValue C.LLVMValueRef
-		resolvedType := payloadType
 		if relation == ast.EnumPayloadRelationChild {
-			matchValue = payloadValues[payloadIndex]
+			// matchValue and resolvedType are already set above.
 		} else {
 			var value C.LLVMValueRef
-			value, resolvedType, err = s.emitTreeStructuralSequenceItemValue(payloadValues[payloadIndex], payloadType, remaining, name)
+			value, resolvedType, err = s.emitTreeStructuralSequenceItemValue(payloadValue, payloadType, remaining, name)
 			if err != nil {
 				return nil, err
 			}
@@ -1567,11 +1616,7 @@ func (s *functionState) emitTreeVariantStructuralChildValue(nodeValue C.LLVMValu
 		C.LLVMBuildBr(s.builder, resultBB)
 
 		C.LLVMPositionBuilderAtEnd(s.builder, continueBB)
-		if relation == ast.EnumPayloadRelationChild {
-			remaining = C.LLVMBuildSub(s.builder, remaining, one, cStringFree(name+".tree.children.rem"))
-		} else {
-			remaining = C.LLVMBuildSub(s.builder, remaining, seqCount, cStringFree(name+".tree.children.rem"))
-		}
+		remaining = C.LLVMBuildSub(s.builder, remaining, edgeCount, cStringFree(name+".tree.children.rem"))
 	}
 	C.LLVMBuildBr(s.builder, failBB)
 	if err := s.emitTreeChildrenTrapBlock(failBB); err != nil {
@@ -1611,7 +1656,20 @@ func (s *functionState) emitTreeExactStructuralChildCount(nodeValue C.LLVMValueR
 		relation := semantic.TreeFieldStructuralRelation(family, field.Type)
 		switch relation {
 		case ast.EnumPayloadRelationChild:
-			total = C.LLVMBuildAdd(s.builder, total, C.LLVMConstInt(usizeLLVMType, 1, 0), cStringFree(name+".count"))
+			fieldValue, _, err := s.emitTreeExactFieldValueAtIndex(tablePtr, memberType, fieldDecl.Name, rowIndex, name)
+			if err != nil {
+				return nil, err
+			}
+			childCount := C.LLVMConstInt(usizeLLVMType, 1, 0)
+			if optionalType, ok := field.Type.(*semantic.OptionalType); ok {
+				presentValue, err := s.extractOptionalPresent(fieldValue, optionalType)
+				if err != nil {
+					return nil, err
+				}
+				zeroValue := C.LLVMConstInt(usizeLLVMType, 0, 0)
+				childCount = C.LLVMBuildSelect(s.builder, presentValue, childCount, zeroValue, cStringFree(name+".count"))
+			}
+			total = C.LLVMBuildAdd(s.builder, total, childCount, cStringFree(name+".count"))
 		case ast.EnumPayloadRelationChildren:
 			fieldValue, _, err := s.emitTreeExactFieldValueAtIndex(tablePtr, memberType, fieldDecl.Name, rowIndex, name)
 			if err != nil {
@@ -1673,23 +1731,35 @@ func (s *functionState) emitTreeExactStructuralChildValue(nodeValue C.LLVMValueR
 		matchBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".match"))
 		continueBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".next"))
 		var condValue C.LLVMValueRef
-		var seqCount C.LLVMValueRef
+		edgeCount := one
+		resolvedType := field.Type
+		matchValue := fieldValue
 		if relation == ast.EnumPayloadRelationChild {
-			condValue = C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), remaining, zero, cStringFree(name+".eq"))
+			if optionalType, ok := field.Type.(*semantic.OptionalType); ok {
+				presentValue, err := s.extractOptionalPresent(fieldValue, optionalType)
+				if err != nil {
+					return nil, err
+				}
+				matchValue, err = s.extractOptionalPayload(fieldValue, optionalType)
+				if err != nil {
+					return nil, err
+				}
+				resolvedType = optionalType.Value
+				edgeCount = C.LLVMBuildSelect(s.builder, presentValue, one, zero, cStringFree(name+".edge.count"))
+			}
+			condValue = C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), remaining, edgeCount, cStringFree(name+".lt"))
 		} else {
-			seqCount, err = s.emitTreeStructuralSequenceCount(fieldValue, field.Type, name)
+			edgeCount, err = s.emitTreeStructuralSequenceCount(fieldValue, field.Type, name)
 			if err != nil {
 				return nil, err
 			}
-			condValue = C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), remaining, seqCount, cStringFree(name+".lt"))
+			condValue = C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), remaining, edgeCount, cStringFree(name+".lt"))
 		}
 		C.LLVMBuildCondBr(s.builder, condValue, matchBB, continueBB)
 
 		C.LLVMPositionBuilderAtEnd(s.builder, matchBB)
-		var matchValue C.LLVMValueRef
-		resolvedType := field.Type
 		if relation == ast.EnumPayloadRelationChild {
-			matchValue = fieldValue
+			// matchValue and resolvedType are already set above.
 		} else {
 			var value C.LLVMValueRef
 			value, resolvedType, err = s.emitTreeStructuralSequenceItemValue(fieldValue, field.Type, remaining, name)
@@ -1707,11 +1777,7 @@ func (s *functionState) emitTreeExactStructuralChildValue(nodeValue C.LLVMValueR
 		C.LLVMBuildBr(s.builder, resultBB)
 
 		C.LLVMPositionBuilderAtEnd(s.builder, continueBB)
-		if relation == ast.EnumPayloadRelationChild {
-			remaining = C.LLVMBuildSub(s.builder, remaining, one, cStringFree(name+".rem"))
-		} else {
-			remaining = C.LLVMBuildSub(s.builder, remaining, seqCount, cStringFree(name+".rem"))
-		}
+		remaining = C.LLVMBuildSub(s.builder, remaining, edgeCount, cStringFree(name+".rem"))
 	}
 	C.LLVMBuildBr(s.builder, failBB)
 	if err := s.emitTreeChildrenTrapBlock(failBB); err != nil {
