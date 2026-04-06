@@ -828,6 +828,11 @@ type MoveBindStructPattern struct {
 	Args     []MoveBindArg
 }
 
+type MoveBindTuplePattern struct {
+	Position lexer.Pos
+	Args     []MoveBindArg
+}
+
 type MoveBindVariantPattern struct {
 	Position lexer.Pos
 	EnumName string
@@ -1212,6 +1217,7 @@ func (n *MoveBindNamePattern) Pos() lexer.Pos { return n.Position }
 func (n *MoveBindStructPattern) Pos() lexer.Pos {
 	return n.Position
 }
+func (n *MoveBindTuplePattern) Pos() lexer.Pos   { return n.Position }
 func (n *MoveBindVariantPattern) Pos() lexer.Pos { return n.Position }
 func (n *ViewBindPattern) Pos() lexer.Pos        { return n.Position }
 func (n *AssignStmt) Pos() lexer.Pos             { return n.Position }
@@ -1331,6 +1337,7 @@ func (*MatchStructPattern) nodeTag()        {}
 func (*MatchVariantPattern) nodeTag()       {}
 func (*MoveBindNamePattern) nodeTag()       {}
 func (*MoveBindStructPattern) nodeTag()     {}
+func (*MoveBindTuplePattern) nodeTag()      {}
 func (*MoveBindVariantPattern) nodeTag()    {}
 func (*ViewBindPattern) nodeTag()           {}
 func (*AssignStmt) nodeTag()                {}
@@ -1432,6 +1439,7 @@ func (*MatchStructPattern) matchPatternTag()        {}
 func (*MatchVariantPattern) matchPatternTag()       {}
 func (*MoveBindNamePattern) moveBindPatternTag()    {}
 func (*MoveBindStructPattern) moveBindPatternTag()  {}
+func (*MoveBindTuplePattern) moveBindPatternTag()   {}
 func (*MoveBindVariantPattern) moveBindPatternTag() {}
 func (*ListLitExpr) exprTag()                       {}
 func (*CastExpr) exprTag()                          {}

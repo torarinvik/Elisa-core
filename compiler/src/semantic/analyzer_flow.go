@@ -1892,6 +1892,9 @@ func (a *Analyzer) resolveIterLoopSourceInfo(sourceExpr ast.Expr, sourceType Typ
 	case *SViewType:
 		return iterLoopSourceInfo{ItemType: a.namedTypes["char"]}, true
 	case *GenericInstanceType:
+		if itemType, ok := EnumerateViewItemType(tt); ok {
+			return iterLoopSourceInfo{ItemType: itemType}, true
+		}
 		if itemType, ok := TreeChildrenItemType(tt); ok {
 			return iterLoopSourceInfo{ItemType: itemType}, true
 		}
@@ -1974,6 +1977,32 @@ func (a *Analyzer) bindIterLoopPattern(scope *Scope, pattern ast.MoveBindPattern
 			a.defineLocal(sym, arg.Position)
 		}
 		return true
+	case *ast.MoveBindTuplePattern:
+		tupleType, ok := StripAggregateStateType(itemType).(*TupleType)
+		if !ok || tupleType == nil {
+			a.errorf(p.Pos(), "iterable for tuple pattern requires a tuple item, got %s", itemType.String())
+			return false
+		}
+		if len(p.Args) != len(tupleType.Fields) {
+			a.errorf(p.Pos(), "iterable tuple pattern expects %d bindings, got %d", len(tupleType.Fields), len(p.Args))
+		}
+		limit := len(p.Args)
+		if len(tupleType.Fields) < limit {
+			limit = len(tupleType.Fields)
+		}
+		for i := 0; i < limit; i++ {
+			arg := p.Args[i]
+			if arg.Name == "_" {
+				continue
+			}
+			fieldName := tupleType.Fields[i].Name
+			if fieldName == "" {
+				fieldName = fmt.Sprintf("_%d", i)
+			}
+			sym := &Symbol{Name: arg.Name, Kind: SymbolLocal, Type: bindingTypeFor(arg.Position, fieldName, tupleType.Fields[i].Type, false), Node: p, Mutable: false}
+			a.defineLocal(sym, arg.Position)
+		}
+		return true
 	case *ast.MoveBindVariantPattern:
 		a.errorf(p.Pos(), "iterable for loop pattern must be irrefutable; variant patterns are not supported here")
 		return false
@@ -1987,7 +2016,7 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	sourceType := a.analyzeExpr(stmt.Source)
 	info, ok := a.resolveIterLoopSourceInfo(stmt.Source, sourceType)
 	if !ok {
-		a.errorf(stmt.Source.Pos(), "iterable for loop currently requires an array, dynamic array, view, string-like iterable, ChunksExactView, or children(node), got %s", sourceType.String())
+		a.errorf(stmt.Source.Pos(), "iterable for loop currently requires an array, dynamic array, view, string-like iterable, ChunksExactView, enumerate(source), or children(node), got %s", sourceType.String())
 		info.ItemType = invalidType
 	}
 	if stmt.Mode == ast.IterBindValue && a.containsAffineHandleValues(info.ItemType, map[string]bool{}) {
@@ -2842,6 +2871,14 @@ func parallelForMoveBindNames(pattern ast.MoveBindPattern) []string {
 	case *ast.MoveBindNamePattern:
 		return []string{p.Name}
 	case *ast.MoveBindStructPattern:
+		var out []string
+		for _, arg := range p.Args {
+			if arg.Name != "" {
+				out = append(out, arg.Name)
+			}
+		}
+		return out
+	case *ast.MoveBindTuplePattern:
 		var out []string
 		for _, arg := range p.Args {
 			if arg.Name != "" {

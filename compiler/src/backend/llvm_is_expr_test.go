@@ -444,6 +444,25 @@ def count_nodes(node: Lua.Expr) -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersEnumerateTupleLoops(t *testing.T) {
+	src := `def sum_pairs(items: darray[usize]) -> usize:
+	total: mutable usize = 0u
+	for index, value in enumerate(items):
+		total <- total + index + value
+	return total
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_enumerate_tuple_loop.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i64 @sum_pairs(", "enumerate.source.insert", "enumerate.item.index.insert", "enumerate.item.value.insert", "iter.tuple.field"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected enumerate tuple loop lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersMixedTreeChildrenToRootLoops(t *testing.T) {
 	src := `tree Lua:
 	common:

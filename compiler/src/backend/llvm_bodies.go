@@ -2583,11 +2583,73 @@ func (s *functionState) emitIterLoopPatternBindings(pattern ast.MoveBindPattern,
 			}
 		}
 		return nil
+	case *ast.MoveBindTuplePattern:
+		fields, err := s.g.structLiteralFields(itemType)
+		if err != nil {
+			return err
+		}
+		limit := len(p.Args)
+		if len(fields) < limit {
+			limit = len(fields)
+		}
+		if mode == ast.IterBindValue {
+			for i := 0; i < limit; i++ {
+				if p.Args[i].Name == "_" {
+					continue
+				}
+				fieldValue := C.LLVMBuildExtractValue(s.builder, itemValue, C.unsigned(fields[i].Index), cStringFree(p.Args[i].Name+".iter.tuple.field"))
+				if err := s.emitMoveBindLocal(p.Args[i].Name, fields[i].Type, fieldValue); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		containerLLVMType, err := s.g.lowerType(semantic.StripAggregateStateType(itemType))
+		if err != nil {
+			return err
+		}
+		for i := 0; i < limit; i++ {
+			if p.Args[i].Name == "_" {
+				continue
+			}
+			fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, itemPtr, C.unsigned(fields[i].Index), cStringFree(p.Args[i].Name+".iter.tuple.field.ptr"))
+			refType := &semantic.RefType{Elem: fields[i].Type, Mutable: mode == ast.IterBindMutableRef, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny}
+			if err := s.emitIterLoopRefLocal(p.Args[i].Name, refType, fieldPtr); err != nil {
+				return err
+			}
+		}
+		return nil
 	case *ast.MoveBindVariantPattern:
 		return fmt.Errorf("iterable loop lowering requires an irrefutable pattern, got variant pattern %s.%s", p.EnumName, p.Variant)
 	default:
 		return fmt.Errorf("unsupported iterable loop pattern %T", pattern)
 	}
+}
+
+func (s *functionState) buildEnumerateItemValue(tupleType semantic.Type, indexValue C.LLVMValueRef, itemValue C.LLVMValueRef, itemActualType semantic.Type, name string) (C.LLVMValueRef, error) {
+	tuple, ok := semantic.StripAggregateStateType(tupleType).(*semantic.TupleType)
+	if !ok || tuple == nil || len(tuple.Fields) != 2 {
+		return nil, fmt.Errorf("enumerate loop item requires a 2-field tuple type")
+	}
+	tupleLLVMType, err := s.g.lowerType(tuple)
+	if err != nil {
+		return nil, err
+	}
+	indexCoerced, err := s.coerceValue(indexValue, s.g.result.NamedTypes["usize"], tuple.Fields[0].Type)
+	if err != nil {
+		return nil, err
+	}
+	if itemActualType == nil {
+		itemActualType = tuple.Fields[1].Type
+	}
+	itemCoerced, err := s.coerceValue(itemValue, itemActualType, tuple.Fields[1].Type)
+	if err != nil {
+		return nil, err
+	}
+	value := C.LLVMGetUndef(tupleLLVMType)
+	value = C.LLVMBuildInsertValue(s.builder, value, indexCoerced, 0, cStringFree(name+".enumerate.item.index.insert"))
+	value = C.LLVMBuildInsertValue(s.builder, value, itemCoerced, 1, cStringFree(name+".enumerate.item.value.insert"))
+	return value, nil
 }
 
 func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
@@ -2606,7 +2668,31 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 	}
 	C.LLVMBuildStore(s.builder, sourceValue, sourceAlloca)
 
-	countValue, err := s.emitIterLoopCount(sourceAlloca, sourceType, sourceName)
+	iterSourceAlloca := sourceAlloca
+	iterSourceType := sourceType
+	var enumerateItemType semantic.Type
+	if carrierType, ok := semantic.EnumerateViewInstance(sourceType); ok {
+		innerSourceType, ok := semantic.EnumerateViewSourceType(carrierType)
+		if !ok || innerSourceType == nil {
+			return fmt.Errorf("enumerate carrier is missing its source type")
+		}
+		enumerateItemType, ok = semantic.EnumerateViewItemType(carrierType)
+		if !ok || enumerateItemType == nil {
+			return fmt.Errorf("enumerate carrier is missing its tuple item type")
+		}
+		if stmt.Mode != ast.IterBindValue {
+			return fmt.Errorf("iterable loop does not support ref binding for %s", sourceType.String())
+		}
+		iterSourceAlloca, err = s.createEntryAlloca(sourceName+".enumerate.source", innerSourceType)
+		if err != nil {
+			return err
+		}
+		innerSourceValue := C.LLVMBuildExtractValue(s.builder, sourceValue, 0, cStringFree(sourceName+".enumerate.source.extract"))
+		C.LLVMBuildStore(s.builder, innerSourceValue, iterSourceAlloca)
+		iterSourceType = innerSourceType
+	}
+
+	countValue, err := s.emitIterLoopCount(iterSourceAlloca, iterSourceType, sourceName)
 	if err != nil {
 		return err
 	}
@@ -2635,17 +2721,26 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 	condValue := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, countValue, cStringFree("iter.cmp"))
 	C.LLVMBuildCondBr(s.builder, condValue, bodyBB, exitBB)
 
-	itemType, ok := iterLoopItemTypeBackend(sourceType)
+	itemType, ok := iterLoopItemTypeBackend(iterSourceType)
 	if !ok && stmt.Mode != ast.IterBindValue {
-		return fmt.Errorf("iterable loop ref binding requires an addressable array-like source, got %s", sourceType.String())
+		return fmt.Errorf("iterable loop ref binding requires an addressable array-like source, got %s", iterSourceType.String())
 	}
 	C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 	s.pushScope()
 	if stmt.Mode == ast.IterBindValue {
-		itemValue, resolvedItemType, err := s.emitIterLoopElementValue(sourceAlloca, sourceType, indexValue, sourceName)
+		itemValue, resolvedItemType, err := s.emitIterLoopElementValue(iterSourceAlloca, iterSourceType, indexValue, sourceName)
 		if err != nil {
 			s.popScope()
 			return err
+		}
+		if enumerateItemType != nil {
+			itemValue, err = s.buildEnumerateItemValue(enumerateItemType, indexValue, itemValue, resolvedItemType, sourceName)
+			if err != nil {
+				s.popScope()
+				return err
+			}
+			resolvedItemType = enumerateItemType
+			itemType = resolvedItemType
 		}
 		if itemType == nil {
 			itemType = resolvedItemType
@@ -2655,7 +2750,7 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 			return err
 		}
 	} else {
-		itemPtr, resolvedItemType, err := s.emitIterLoopElementAddress(sourceAlloca, sourceType, indexValue, sourceName)
+		itemPtr, resolvedItemType, err := s.emitIterLoopElementAddress(iterSourceAlloca, iterSourceType, indexValue, sourceName)
 		if err != nil {
 			s.popScope()
 			return err

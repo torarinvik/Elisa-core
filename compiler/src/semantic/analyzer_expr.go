@@ -4426,6 +4426,8 @@ func (a *Analyzer) funcParamAllowsImplicitSink(funcExpr ast.Expr, fnType *FuncTy
 
 func (a *Analyzer) analyzeProofCarryingViewHelperCall(expr *ast.CallExpr) (Type, bool) {
 	switch callIdentName(expr) {
+	case "enumerate":
+		return a.analyzeEnumerateHelperCall(expr), true
 	case "readonly":
 		return a.analyzeReadonlyHelperCall(expr), true
 	case "split_at":
@@ -4439,6 +4441,33 @@ func (a *Analyzer) analyzeProofCarryingViewHelperCall(expr *ast.CallExpr) (Type,
 	default:
 		return nil, false
 	}
+}
+
+func (a *Analyzer) analyzeEnumerateHelperCall(expr *ast.CallExpr) Type {
+	if len(expr.Args) != 1 {
+		a.errorf(expr.Pos(), "enumerate expects 1 argument, got %d", len(expr.Args))
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return invalidType
+	}
+	sourceType := a.analyzeExpr(expr.Args[0])
+	info, ok := a.resolveIterLoopSourceInfo(expr.Args[0], sourceType)
+	if !ok {
+		a.errorf(expr.Args[0].Pos(), "enumerate expects an iterable source, got %s", sourceType.String())
+		return invalidType
+	}
+	base, ok := a.namedTypes["EnumerateView"].(*StructType)
+	if !ok || base == nil {
+		a.errorf(expr.Pos(), "missing builtin EnumerateView carrier type")
+		return invalidType
+	}
+	itemType := EnumerateTupleType(info.ItemType)
+	if itemType == nil {
+		a.errorf(expr.Pos(), "enumerate requires a concrete iterable item type")
+		return invalidType
+	}
+	return &GenericInstanceType{Name: "EnumerateView", Base: base, Args: []Type{sourceType, itemType}}
 }
 
 type treeChildrenSourceKind int

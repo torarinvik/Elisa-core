@@ -1375,6 +1375,39 @@ func TestParseIterableForStatementWithMutableRefBinder(t *testing.T) {
 	}
 }
 
+func TestParseIterableForStatementWithEnumerateTuplePattern(t *testing.T) {
+	file, errs := parseSourceFile(t, "def walk(items: darray[int]) -> void:\n    for index, value in enumerate(items):\n        pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	iterStmt, ok := decl.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
+	}
+	if iterStmt.Mode != ast.IterBindValue {
+		t.Fatalf("expected value bind mode, got %v", iterStmt.Mode)
+	}
+	pattern, ok := iterStmt.Pattern.(*ast.MoveBindTuplePattern)
+	if !ok {
+		t.Fatalf("expected tuple bind pattern, got %T", iterStmt.Pattern)
+	}
+	if len(pattern.Args) != 2 || pattern.Args[0].Name != "index" || pattern.Args[1].Name != "value" {
+		t.Fatalf("unexpected tuple bind args: %#v", pattern.Args)
+	}
+	call, ok := iterStmt.Source.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected enumerate call source, got %T", iterStmt.Source)
+	}
+	callee, ok := call.Func.(*ast.Ident)
+	if !ok || callee.Name != "enumerate" {
+		t.Fatalf("expected enumerate callee, got %T %#v", call.Func, call.Func)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for index, value in enumerate(items):") {
+		t.Fatalf("expected formatter to preserve enumerate tuple loop syntax, got:\n%s", formatted)
+	}
+}
+
 func TestParseChildrenToOverrideExpr(t *testing.T) {
 	file, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        BreakStmt\n\ndef keep(stmt: Lua.Stmt) -> Lua.Node:\n    return children(stmt to Lua.Node).node\n")
 	if len(errs) != 0 {

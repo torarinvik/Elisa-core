@@ -1263,6 +1263,12 @@ func formatMoveBindPattern(pattern ast.MoveBindPattern) string {
 			parts = append(parts, arg.Name)
 		}
 		return n.TypeName + "(" + strings.Join(parts, ", ") + ")"
+	case *ast.MoveBindTuplePattern:
+		parts := make([]string, 0, len(n.Args))
+		for _, arg := range n.Args {
+			parts = append(parts, arg.Name)
+		}
+		return strings.Join(parts, ", ")
 	case *ast.MoveBindVariantPattern:
 		return formatMoveBindVariantPattern(n)
 	default:

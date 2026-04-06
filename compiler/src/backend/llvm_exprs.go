@@ -4396,6 +4396,8 @@ func backendExplicitMoveOperand(expr ast.Expr) (ast.Expr, bool) {
 
 func (s *functionState) emitProofCarryingViewHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	switch callIdentName(expr) {
+	case "enumerate":
+		return s.emitEnumerateHelperCall(expr)
 	case "readonly":
 		return s.emitReadonlyHelperCall(expr)
 	case "split_at":
@@ -4409,6 +4411,31 @@ func (s *functionState) emitProofCarryingViewHelperCall(expr *ast.CallExpr) (C.L
 	default:
 		return nil, nil, false, nil
 	}
+}
+
+func (s *functionState) emitEnumerateHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if len(expr.Args) != 1 {
+		return nil, nil, true, fmt.Errorf("enumerate expects 1 argument, got %d", len(expr.Args))
+	}
+	sourceType := s.exprType(expr.Args[0])
+	if sourceType == nil {
+		return nil, nil, true, fmt.Errorf("enumerate source is missing a semantic type")
+	}
+	resultType := s.exprType(expr)
+	if resultType == nil {
+		return nil, nil, true, fmt.Errorf("enumerate result is missing a semantic type")
+	}
+	sourceValue, _, err := s.emitExpr(expr.Args[0], sourceType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	resultLLVMType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	resultValue := C.LLVMGetUndef(resultLLVMType)
+	resultValue = C.LLVMBuildInsertValue(s.builder, resultValue, sourceValue, 0, cStringFree("enumerate.source.insert"))
+	return resultValue, resultType, true, nil
 }
 
 func (s *functionState) emitTreeTraversalHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {

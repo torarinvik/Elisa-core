@@ -351,7 +351,7 @@ func (p *Parser) parseForStmt() ast.Stmt {
 	pos := p.cur().Pos
 	p.expectIdentText("for")
 	mode := p.parseIterBindMode()
-	pattern := p.parseMoveBindPattern()
+	pattern := p.parseIterLoopPattern()
 	p.expect(lexer.TOKEN_IN)
 	startOrSource := p.parseExpr()
 	if p.peek() == lexer.TOKEN_RANGE || p.peek() == lexer.TOKEN_RANGE_LT || p.peek() == lexer.TOKEN_RANGE_GT {
@@ -378,6 +378,22 @@ func (p *Parser) parseForStmt() ast.Stmt {
 	p.expectNewline()
 	body := p.parseBlock()
 	return &ast.IterForStmt{Position: pos, Pattern: pattern, Mode: mode, Source: startOrSource, Body: body}
+}
+
+func (p *Parser) parseIterLoopPattern() ast.MoveBindPattern {
+	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COMMA {
+		pos := p.cur().Pos
+		args := make([]ast.MoveBindArg, 0, 4)
+		for {
+			tok := p.expect(lexer.TOKEN_IDENT)
+			args = append(args, ast.MoveBindArg{Position: tok.Pos, Name: tok.Text})
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+		return &ast.MoveBindTuplePattern{Position: pos, Args: args}
+	}
+	return p.parseMoveBindPattern()
 }
 
 func (p *Parser) parseWaitAllStmt() ast.Stmt {
