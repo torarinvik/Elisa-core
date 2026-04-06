@@ -2725,7 +2725,7 @@ func (a *Analyzer) analyzeStructIsPayloadPattern(pattern ast.MatchPattern, expec
 	case *ast.MatchWildcardPattern:
 		return
 	case *ast.MatchBindPattern:
-		a.errorf(p.Pos(), "struct is tests do not support bind names; use match or if/open/view as to bind fields")
+		return
 	case *ast.MatchStringLiteralPattern:
 		a.analyzeLiteralMatchPatternExpr(p.Pos(), &ast.StringLit{Position: p.Position, Value: p.Value}, expected, "struct is field pattern")
 	case *ast.MatchLiteralPattern:

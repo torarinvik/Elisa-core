@@ -522,6 +522,32 @@ func TestParseStructPatternIsCondition(t *testing.T) {
 	}
 }
 
+func TestParseStructPatternIsConditionWithBindings(t *testing.T) {
+	file, errs := parseSourceFile(t, "const enum Tok of i32:\n    INTEGER = 1\n\nstruct Span:\n    start: int\n    finish: int\n\nstruct Token:\n    kind: Tok\n    span: Span\n    value: int\n\ndef score(tok: Token) -> int:\n    if tok is Token(kind: .INTEGER, span: Span(start: start), value: value):\n        return start + value\n    return 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[3].(*ast.FuncDecl)
+	ifStmt := decl.Body[0].(*ast.IfStmt)
+	cond := ifStmt.Cond.(*ast.BinaryExpr)
+	target, ok := cond.Right.(*ast.StructTestExpr)
+	if !ok || target.Pattern == nil {
+		t.Fatalf("expected struct test condition, got %T %#v", cond.Right, cond.Right)
+	}
+	spanPattern, ok := target.Pattern.Args[1].Pattern.(*ast.MatchStructPattern)
+	if !ok {
+		t.Fatalf("expected nested span pattern, got %T", target.Pattern.Args[1].Pattern)
+	}
+	startBind, ok := spanPattern.Args[0].Pattern.(*ast.MatchBindPattern)
+	if !ok || startBind.Name != "start" {
+		t.Fatalf("expected nested start bind, got %T %#v", spanPattern.Args[0].Pattern, spanPattern.Args[0].Pattern)
+	}
+	valueBind, ok := target.Pattern.Args[2].Pattern.(*ast.MatchBindPattern)
+	if !ok || valueBind.Name != "value" {
+		t.Fatalf("expected value bind, got %T %#v", target.Pattern.Args[2].Pattern, target.Pattern.Args[2].Pattern)
+	}
+}
+
 func TestParseVisitArmAlternativesAndGuard(t *testing.T) {
 	file, errs := parseSourceFile(t, "tree Lua:\n    @role(expr)\n    node Expr:\n        Int(value: i64)\n        Float(value: f64)\n\ndef score(node: Lua.Expr) -> i64:\n    return visit node:\n        Lua.Expr.Int(expr) | Lua.Expr.Float(expr) when expr.span > 0:\n            expr.span\n        _:\n            0\n")
 	if len(errs) != 0 {

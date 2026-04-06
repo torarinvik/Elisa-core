@@ -5156,6 +5156,35 @@ def classify(text: StringView) -> int:
 	}
 }
 
+func TestAnalyzeStructIsConditionBindsFieldsInIfAndWhile(t *testing.T) {
+	src := `const enum Tok of i32:
+	INTEGER = 1
+	FLOAT = 2
+
+struct Span:
+	start: i64
+	finish: i64
+
+struct Token:
+	kind: Tok
+	span: Span
+	value: i64
+
+def score(tok: Token) -> i64:
+	if tok is Token(kind: .INTEGER, span: Span(start: start), value: value):
+		return start + value
+	return 0
+
+def loop_value(tok: Token) -> i64:
+	while tok is Token(kind: .INTEGER, value: value):
+		return value
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "struct_is_condition_bindings_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
+
 func TestAnalyzeRejectsRecursiveEnumPayloadByValue(t *testing.T) {
 	src := `enum Expr:
 	Int(int)

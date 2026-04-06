@@ -2825,6 +2825,8 @@ func parallelForMatchArmPatternNames(pattern ast.MatchPattern) []string {
 	switch p := pattern.(type) {
 	case *ast.MatchBindPattern:
 		return []string{p.Name}
+	case *ast.MatchStructPattern:
+		return parallelForMatchPatternNames(p.Args)
 	case *ast.MatchVariantPattern:
 		return parallelForMatchPatternNames(p.Args)
 	default:
@@ -5646,7 +5648,109 @@ func (a *Analyzer) analyzeBlockWithConditionAffineClone(stmts []ast.Stmt, parent
 	scope := a.refinedScopeForCondition(parent, cond, truthy)
 	return a.analyzeBlockWithAffineClonePrepared(stmts, scope, func() {
 		a.applyConditionRefinementsInternal(scope, cond, truthy, true)
+		a.bindConditionPatternLocals(scope, cond, truthy)
 	})
+}
+
+func unwrapDirectStructIsCondition(expr ast.Expr) (*ast.BinaryExpr, ast.Expr, *ast.MatchStructPattern, bool) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return unwrapDirectStructIsCondition(n.Inner)
+	case *ast.BinaryExpr:
+		if n.Op != lexer.TOKEN_IS {
+			return nil, nil, nil, false
+		}
+		testExpr, ok := n.Right.(*ast.StructTestExpr)
+		if !ok || testExpr == nil || testExpr.Pattern == nil {
+			return nil, nil, nil, false
+		}
+		return n, n.Left, testExpr.Pattern, true
+	default:
+		return nil, nil, nil, false
+	}
+}
+
+func (a *Analyzer) bindConditionPatternLocals(scope *Scope, expr ast.Expr, truthy bool) {
+	if a == nil || scope == nil || !truthy {
+		return
+	}
+	_, valueExpr, pattern, ok := unwrapDirectStructIsCondition(expr)
+	if !ok || valueExpr == nil || pattern == nil {
+		return
+	}
+	valueType := a.exprTypes[valueExpr]
+	if valueType == nil {
+		valueType = a.analyzeExprInScope(valueExpr, scope)
+	}
+	a.bindConditionStructPatternLocals(scope, pattern, valueType, valueExpr)
+}
+
+func (a *Analyzer) bindConditionStructPatternLocals(scope *Scope, pattern ast.MatchPattern, expected Type, valueExpr ast.Expr) {
+	if a == nil || scope == nil || pattern == nil || expected == nil || valueExpr == nil {
+		return
+	}
+	switch p := pattern.(type) {
+	case *ast.MatchWildcardPattern, *ast.MatchStringLiteralPattern, *ast.MatchLiteralPattern:
+		return
+	case *ast.MatchBindPattern:
+		if p.Name == "_" {
+			return
+		}
+		sym := &Symbol{Name: p.Name, Kind: SymbolLocal, Type: expected, Node: p, Mutable: false}
+		a.defineLocalInScope(scope, sym, p.Pos())
+		a.recordValueBinding(sym, valueExpr)
+		a.recordBorrowedOwnerRefBinding(sym, valueExpr)
+		a.recordFunctionValueBinding(sym, valueExpr)
+		a.recordImmutableSymbolOptimizationFacts(sym, valueExpr)
+		a.recordRegionRefBinding(sym, valueExpr)
+	case *ast.MatchStructPattern:
+		fields, orderedArgs, ok := a.resolveMatchStructPattern(p, expected)
+		if !ok {
+			return
+		}
+		for i, arg := range orderedArgs {
+			if arg == nil {
+				continue
+			}
+			fieldExpr := &ast.FieldExpr{Position: arg.Position, Object: valueExpr, Field: fields[i].Name}
+			a.bindConditionStructPatternLocals(scope, arg.Pattern, fields[i].Type, fieldExpr)
+		}
+	case *ast.MatchVariantPattern:
+		switch variantBase := expected.(type) {
+		case *EnumType:
+			variant, ok := variantBase.Variant(p.Variant)
+			if !ok {
+				return
+			}
+			orderedArgs := a.resolveMatchPatternArgs(p, variant, variantBase.Name+"."+variant.Name, true)
+			for i, arg := range orderedArgs {
+				if arg == nil {
+					continue
+				}
+				payloadExpr, ok := a.resolveMatchVariantPayloadValueExpr(valueExpr, p, moveBindVariantFieldKey(variant, i))
+				if !ok || payloadExpr == nil {
+					continue
+				}
+				a.bindConditionStructPatternLocals(scope, arg.Pattern, variant.Payload[i], payloadExpr)
+			}
+		case *TreeCategoryType:
+			variant, ok := variantBase.Variant(p.Variant)
+			if !ok {
+				return
+			}
+			orderedArgs := a.resolveMatchPatternArgs(p, variant, variantBase.Name+"."+variant.Name, true)
+			for i, arg := range orderedArgs {
+				if arg == nil {
+					continue
+				}
+				payloadExpr, ok := a.resolveMatchVariantPayloadValueExpr(valueExpr, p, moveBindVariantFieldKey(variant, i))
+				if !ok || payloadExpr == nil {
+					continue
+				}
+				a.bindConditionStructPatternLocals(scope, arg.Pattern, variant.Payload[i], payloadExpr)
+			}
+		}
+	}
 }
 
 func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *Scope, prepare func()) affineFlowSnapshot {

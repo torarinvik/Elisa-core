@@ -110,6 +110,42 @@ def score(tok: Token) -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersStructIsConditionBindingsInIfAndWhile(t *testing.T) {
+	src := `const enum Tok of i32:
+	INTEGER = 1
+	FLOAT = 2
+
+struct Span:
+	start: i64
+	finish: i64
+
+struct Token:
+	kind: Tok
+	span: Span
+	value: i64
+
+def score(tok: Token) -> i64:
+	if tok is Token(kind: .INTEGER, span: Span(start: start), value: value):
+		return start + value
+	return 0
+
+def loop_value(tok: Token) -> i64:
+	while tok is Token(kind: .INTEGER, value: value):
+		return value
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_struct_if_while_bindings.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i64 @score(", "define i64 @loop_value(", "if.struct.result", "while.struct.result", "cond.struct.field"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected struct condition binding lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersTreeConstructorsAndIsExprPatterns(t *testing.T) {
 	src := `tree Lua:
 	common:
