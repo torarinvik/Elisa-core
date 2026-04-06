@@ -3372,11 +3372,9 @@ func (s *functionState) directStructIsCondition(expr ast.Expr) (ast.Expr, *ast.M
 }
 
 func (s *functionState) collectTruthyConditionBindings(expr ast.Expr) ([]conditionBindingInfo, error) {
-	seen := map[string]semantic.Type{}
-	out := make([]conditionBindingInfo, 0, 4)
-	var collectPattern func(pattern ast.MatchPattern, expected semantic.Type) error
-	collectPattern = func(pattern ast.MatchPattern, expected semantic.Type) error {
-		if pattern == nil || expected == nil {
+	var collectPattern func(pattern ast.MatchPattern, expected semantic.Type, out map[string]semantic.Type) error
+	collectPattern = func(pattern ast.MatchPattern, expected semantic.Type, out map[string]semantic.Type) error {
+		if pattern == nil || expected == nil || out == nil {
 			return nil
 		}
 		switch p := pattern.(type) {
@@ -3384,14 +3382,10 @@ func (s *functionState) collectTruthyConditionBindings(expr ast.Expr) ([]conditi
 			if p.Name == "" || p.Name == "_" {
 				return nil
 			}
-			if prev, ok := seen[p.Name]; ok {
-				if !semantic.SameType(prev, expected) {
-					return fmt.Errorf("condition binding %q has inconsistent types %s and %s", p.Name, prev.String(), expected.String())
-				}
-				return nil
+			if prev, ok := out[p.Name]; ok && !semantic.SameType(prev, expected) {
+				return fmt.Errorf("condition binding %q has inconsistent types %s and %s", p.Name, prev.String(), expected.String())
 			}
-			seen[p.Name] = expected
-			out = append(out, conditionBindingInfo{name: p.Name, typ: expected})
+			out[p.Name] = expected
 			return nil
 		case *ast.MatchStructPattern:
 			fields, orderedArgs, err := s.resolveStructMatchPatternArgs(p, expected)
@@ -3402,7 +3396,7 @@ func (s *functionState) collectTruthyConditionBindings(expr ast.Expr) ([]conditi
 				if arg == nil {
 					continue
 				}
-				if err := collectPattern(arg.Pattern, fields[i].Type); err != nil {
+				if err := collectPattern(arg.Pattern, fields[i].Type, out); err != nil {
 					return err
 				}
 			}
@@ -3422,7 +3416,7 @@ func (s *functionState) collectTruthyConditionBindings(expr ast.Expr) ([]conditi
 					if arg == nil {
 						continue
 					}
-					if err := collectPattern(arg.Pattern, variant.Payload[i]); err != nil {
+					if err := collectPattern(arg.Pattern, variant.Payload[i], out); err != nil {
 						return err
 					}
 				}
@@ -3439,7 +3433,7 @@ func (s *functionState) collectTruthyConditionBindings(expr ast.Expr) ([]conditi
 					if arg == nil {
 						continue
 					}
-					if err := collectPattern(arg.Pattern, variant.Payload[i]); err != nil {
+					if err := collectPattern(arg.Pattern, variant.Payload[i], out); err != nil {
 						return err
 					}
 				}
@@ -3447,38 +3441,98 @@ func (s *functionState) collectTruthyConditionBindings(expr ast.Expr) ([]conditi
 		}
 		return nil
 	}
-	var collectExpr func(expr ast.Expr, truthy bool) error
-	collectExpr = func(expr ast.Expr, truthy bool) error {
+	var collectExpr func(expr ast.Expr, truthy bool) (map[string]semantic.Type, error)
+	collectExpr = func(expr ast.Expr, truthy bool) (map[string]semantic.Type, error) {
 		if expr == nil || !truthy {
-			return nil
+			return nil, nil
 		}
 		switch n := expr.(type) {
 		case *ast.ParenExpr:
 			return collectExpr(n.Inner, truthy)
 		case *ast.UnaryExpr:
-			if n.Op == lexer.TOKEN_NOT {
-				return collectExpr(n.Operand, !truthy)
-			}
-			return nil
+			return nil, nil
 		case *ast.BinaryExpr:
 			switch n.Op {
 			case lexer.TOKEN_AND:
-				if err := collectExpr(n.Left, true); err != nil {
-					return err
+				left, err := collectExpr(n.Left, true)
+				if err != nil {
+					return nil, err
 				}
-				return collectExpr(n.Right, true)
+				right, err := collectExpr(n.Right, true)
+				if err != nil {
+					return nil, err
+				}
+				if len(left) == 0 {
+					return right, nil
+				}
+				if len(right) == 0 {
+					return left, nil
+				}
+				out := make(map[string]semantic.Type, len(left)+len(right))
+				for name, typ := range left {
+					out[name] = typ
+				}
+				for name, typ := range right {
+					if prev, ok := out[name]; ok && !semantic.SameType(prev, typ) {
+						return nil, fmt.Errorf("condition binding %q has inconsistent types %s and %s", name, prev.String(), typ.String())
+					}
+					out[name] = typ
+				}
+				return out, nil
 			case lexer.TOKEN_OR:
-				return nil
+				left, err := collectExpr(n.Left, true)
+				if err != nil {
+					return nil, err
+				}
+				right, err := collectExpr(n.Right, true)
+				if err != nil {
+					return nil, err
+				}
+				if len(left) == 0 || len(right) == 0 {
+					return nil, nil
+				}
+				out := map[string]semantic.Type{}
+				for name, leftType := range left {
+					rightType, ok := right[name]
+					if !ok || !semantic.SameType(leftType, rightType) {
+						continue
+					}
+					out[name] = leftType
+				}
+				if len(out) == 0 {
+					return nil, nil
+				}
+				return out, nil
 			}
 		}
 		leftExpr, pattern, ok := s.directStructIsCondition(expr)
 		if !ok || leftExpr == nil || pattern == nil {
-			return nil
+			return nil, nil
 		}
-		return collectPattern(pattern, s.exprType(leftExpr))
+		out := map[string]semantic.Type{}
+		if err := collectPattern(pattern, s.exprType(leftExpr), out); err != nil {
+			return nil, err
+		}
+		if len(out) == 0 {
+			return nil, nil
+		}
+		return out, nil
 	}
-	if err := collectExpr(expr, true); err != nil {
+	collected, err := collectExpr(expr, true)
+	if err != nil {
 		return nil, err
+	}
+	if len(collected) == 0 {
+		return nil, nil
+	}
+	names := make([]string, 0, len(collected))
+	for name := range collected {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]conditionBindingInfo, 0, len(names))
+	for _, name := range names {
+		out = append(out, conditionBindingInfo{name: name, typ: collected[name]})
 	}
 	return out, nil
 }

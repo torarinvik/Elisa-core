@@ -5669,6 +5669,133 @@ func unwrapDirectStructIsCondition(expr ast.Expr) (*ast.BinaryExpr, ast.Expr, *a
 	}
 }
 
+func (a *Analyzer) collectConditionStructPatternBindingTypes(pattern ast.MatchPattern, expected Type, out map[string]Type) {
+	if a == nil || pattern == nil || expected == nil || out == nil {
+		return
+	}
+	switch p := pattern.(type) {
+	case *ast.MatchWildcardPattern, *ast.MatchStringLiteralPattern, *ast.MatchLiteralPattern:
+		return
+	case *ast.MatchBindPattern:
+		if p.Name == "" || p.Name == "_" {
+			return
+		}
+		if prev, ok := out[p.Name]; ok {
+			if !SameType(prev, expected) {
+				a.errorf(p.Pos(), "condition binding %q has inconsistent types %s and %s", p.Name, prev.String(), expected.String())
+			}
+			return
+		}
+		out[p.Name] = expected
+	case *ast.MatchStructPattern:
+		fields, orderedArgs, ok := a.resolveMatchStructPattern(p, expected)
+		if !ok {
+			return
+		}
+		for i, arg := range orderedArgs {
+			if arg == nil {
+				continue
+			}
+			a.collectConditionStructPatternBindingTypes(arg.Pattern, fields[i].Type, out)
+		}
+	case *ast.MatchVariantPattern:
+		switch variantBase := expected.(type) {
+		case *EnumType:
+			variant, ok := variantBase.Variant(p.Variant)
+			if !ok {
+				return
+			}
+			orderedArgs := a.resolveMatchPatternArgs(p, variant, variantBase.Name+"."+variant.Name, true)
+			for i, arg := range orderedArgs {
+				if arg == nil {
+					continue
+				}
+				a.collectConditionStructPatternBindingTypes(arg.Pattern, variant.Payload[i], out)
+			}
+		case *TreeCategoryType:
+			variant, ok := variantBase.Variant(p.Variant)
+			if !ok {
+				return
+			}
+			orderedArgs := a.resolveMatchPatternArgs(p, variant, variantBase.Name+"."+variant.Name, true)
+			for i, arg := range orderedArgs {
+				if arg == nil {
+					continue
+				}
+				a.collectConditionStructPatternBindingTypes(arg.Pattern, variant.Payload[i], out)
+			}
+		}
+	}
+}
+
+func (a *Analyzer) collectGuaranteedTruthyConditionBindingTypes(expr ast.Expr) map[string]Type {
+	if a == nil || expr == nil {
+		return nil
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return a.collectGuaranteedTruthyConditionBindingTypes(n.Inner)
+	case *ast.UnaryExpr:
+		return nil
+	case *ast.BinaryExpr:
+		switch n.Op {
+		case lexer.TOKEN_AND:
+			left := a.collectGuaranteedTruthyConditionBindingTypes(n.Left)
+			right := a.collectGuaranteedTruthyConditionBindingTypes(n.Right)
+			if len(left) == 0 {
+				return right
+			}
+			if len(right) == 0 {
+				return left
+			}
+			out := make(map[string]Type, len(left)+len(right))
+			for name, typ := range left {
+				out[name] = typ
+			}
+			for name, typ := range right {
+				if prev, ok := out[name]; ok && !SameType(prev, typ) {
+					a.errorf(n.Pos(), "condition binding %q has inconsistent types %s and %s", name, prev.String(), typ.String())
+					continue
+				}
+				out[name] = typ
+			}
+			return out
+		case lexer.TOKEN_OR:
+			left := a.collectGuaranteedTruthyConditionBindingTypes(n.Left)
+			right := a.collectGuaranteedTruthyConditionBindingTypes(n.Right)
+			if len(left) == 0 || len(right) == 0 {
+				return nil
+			}
+			out := map[string]Type{}
+			for name, leftType := range left {
+				rightType, ok := right[name]
+				if !ok || !SameType(leftType, rightType) {
+					continue
+				}
+				out[name] = leftType
+			}
+			if len(out) == 0 {
+				return nil
+			}
+			return out
+		}
+	}
+	_, valueExpr, pattern, ok := unwrapDirectStructIsCondition(expr)
+	if !ok || valueExpr == nil || pattern == nil {
+		return nil
+	}
+	valueType := a.exprTypes[valueExpr]
+	if valueType == nil {
+		valueType = a.analyzeExpr(valueExpr)
+	}
+	out := map[string]Type{}
+	a.collectConditionStructPatternBindingTypes(pattern, valueType, out)
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func (a *Analyzer) bindConditionPatternLocals(scope *Scope, expr ast.Expr, truthy bool) {
 	if a == nil || scope == nil || !truthy {
 		return
@@ -5689,6 +5816,10 @@ func (a *Analyzer) bindConditionPatternLocals(scope *Scope, expr ast.Expr, truth
 			a.bindConditionPatternLocals(scope, n.Right, true)
 			return
 		case lexer.TOKEN_OR:
+			for name, typ := range a.collectGuaranteedTruthyConditionBindingTypes(n) {
+				sym := &Symbol{Name: name, Kind: SymbolLocal, Type: typ, Node: n, Mutable: false}
+				a.defineLocalInScope(scope, sym, n.Pos())
+			}
 			return
 		}
 	}

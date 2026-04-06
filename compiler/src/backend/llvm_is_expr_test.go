@@ -177,6 +177,37 @@ def loop_value(tok: Token) -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersStructIsConditionBindingsThroughTruthyOr(t *testing.T) {
+	src := `const enum Tok of i32:
+	INTEGER = 1
+	FLOAT = 2
+
+struct Token:
+	kind: Tok
+	value: i64
+
+def score(tok: Token) -> i64:
+	if tok is Token(kind: .INTEGER, value: value) or tok is Token(kind: .FLOAT, value: value):
+		return value
+	return 0
+
+def loop_value(tok: Token) -> i64:
+	while tok is Token(kind: .INTEGER, value: value) or tok is Token(kind: .FLOAT, value: value):
+		return value
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_struct_if_while_bindings_or.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i64 @score(", "define i64 @loop_value(", "cond.or.rhs", "cond.struct.field", "load i64"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected truthy-or struct condition binding lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersTreeConstructorsAndIsExprPatterns(t *testing.T) {
 	src := `tree Lua:
 	common:
