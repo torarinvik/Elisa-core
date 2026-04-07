@@ -81,7 +81,7 @@ int main(int argc, char **argv) {
     if (mode[0] == 's') {
         warmup_checksum = lua_frontend_sample_checksum();
     } else {
-        warmup_checksum = lua_frontend_parse_checksum(input);
+        warmup_checksum = lua_frontend_parse_checksum_with_len(input, input_len);
         if (warmup_checksum < 0) {
             fprintf(stderr, "parser rejected %s\n", path);
             free(input);
@@ -98,7 +98,7 @@ int main(int argc, char **argv) {
         if (mode[0] == 's') {
             checksum_acc += lua_frontend_sample_checksum();
         } else {
-            checksum_acc += lua_frontend_parse_checksum(input);
+            checksum_acc += lua_frontend_parse_checksum_with_len(input, input_len);
         }
     }
 
