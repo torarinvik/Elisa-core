@@ -20,8 +20,11 @@ func TestGenerateLLVMIRLowersDArrayBuilderSugar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	if !strings.Contains(output, "@arena_da_append") {
-		t.Fatalf("expected darray push sugar to lower to arena_da_append, got:\n%s", output)
+	if !strings.Contains(output, "@arena_alloc") {
+		t.Fatalf("expected darray push sugar to lower through arena allocation, got:\n%s", output)
+	}
+	if !strings.Contains(output, "darray.push.slot") {
+		t.Fatalf("expected darray push sugar to compute an element slot, got:\n%s", output)
 	}
 	if !strings.Contains(output, "@arena_alloc") {
 		t.Fatalf("expected non-empty darray literal to lower through arena_alloc, got:\n%s", output)
@@ -42,8 +45,11 @@ func TestGenerateLLVMIRLowersDArrayExtendSugar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	if !strings.Contains(output, "@arena_da_append_many") {
-		t.Fatalf("expected darray extend sugar to lower to arena_da_append_many, got:\n%s", output)
+	if !strings.Contains(output, "@arena_memcpy") {
+		t.Fatalf("expected darray extend sugar to lower to arena_memcpy, got:\n%s", output)
+	}
+	if !strings.Contains(output, "darray.extend.memcpy") {
+		t.Fatalf("expected darray extend sugar to emit a memcpy call site, got:\n%s", output)
 	}
 }
 
@@ -61,8 +67,11 @@ func TestGenerateLLVMIRLowersDArrayReserveSugar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	if !strings.Contains(output, "@arena_da_reserve") {
-		t.Fatalf("expected darray reserve sugar to lower to arena_da_reserve, got:\n%s", output)
+	if !strings.Contains(output, "@arena_alloc") {
+		t.Fatalf("expected darray reserve sugar to lower through arena allocation, got:\n%s", output)
+	}
+	if !strings.Contains(output, "darray.capacity.ptr") {
+		t.Fatalf("expected darray reserve sugar to address the capacity field, got:\n%s", output)
 	}
 }
 
@@ -86,5 +95,25 @@ func TestGenerateLLVMIRLowersDArrayClearAndTruncateSugar(t *testing.T) {
 	}
 	if !strings.Contains(output, "darray.count.ptr") {
 		t.Fatalf("expected clear/truncate lowering to address the darray count field, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRLowersDArrayBuilderSugarAcrossElementTypes(t *testing.T) {
+	src := `def build(owner: Arena) -> usize:
+    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    in alloc:
+        ints: mutable darray[i64] = []
+        names: mutable darray[u32] = []
+        ints.push(1)
+        names.push(7u32)
+        return ints.count + names.count
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_darray_builder_multi_type.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "darray.push.slot") {
+		t.Fatalf("expected multi-type darray builder lowering to emit push slots, got:\n%s", output)
 	}
 }
