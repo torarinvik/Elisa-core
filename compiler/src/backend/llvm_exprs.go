@@ -936,37 +936,117 @@ func (s *functionState) emitCharLiteral(expr *ast.CharLit) (C.LLVMValueRef, sema
 }
 
 func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
-	arrayType, err := s.listLiteralTargetType(expr, expected)
-	if err != nil {
+	if arrayType, ok, err := s.listLiteralTargetArrayType(expr, expected); err != nil {
 		return nil, nil, err
-	}
-	if arrayType.HasConstSize && arrayType.ConstSize != int64(len(expr.Elems)) {
-		return nil, nil, fmt.Errorf("array literal resolved to %s but has %d elements", arrayType.String(), len(expr.Elems))
-	}
-	llvmType, err := s.g.lowerType(arrayType)
-	if err != nil {
-		return nil, nil, err
-	}
-	current := C.LLVMGetUndef(llvmType)
-	for i, elem := range expr.Elems {
-		elemValue, _, err := s.emitExpr(elem, arrayType.Elem)
+	} else if ok {
+		if arrayType.HasConstSize && arrayType.ConstSize != int64(len(expr.Elems)) {
+			return nil, nil, fmt.Errorf("array literal resolved to %s but has %d elements", arrayType.String(), len(expr.Elems))
+		}
+		llvmType, err := s.g.lowerType(arrayType)
 		if err != nil {
 			return nil, nil, err
 		}
-		current = C.LLVMBuildInsertValue(s.builder, current, elemValue, C.unsigned(i), cStringFree("arraylit.elem"))
+		current := C.LLVMGetUndef(llvmType)
+		for i, elem := range expr.Elems {
+			elemValue, _, err := s.emitExpr(elem, arrayType.Elem)
+			if err != nil {
+				return nil, nil, err
+			}
+			current = C.LLVMBuildInsertValue(s.builder, current, elemValue, C.unsigned(i), cStringFree("arraylit.elem"))
+		}
+		return current, arrayType, nil
 	}
-	return current, arrayType, nil
+	darrayType, err := s.listLiteralTargetDArrayType(expr, expected)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(expr.Elems) == 0 {
+		zero, err := s.zeroValue(darrayType)
+		if err != nil {
+			return nil, nil, err
+		}
+		return zero, darrayType, nil
+	}
+	owner, ok := s.lookupTreeAllocOwner()
+	if !ok || owner.arenaRef == nil {
+		return nil, nil, fmt.Errorf("darray literal requires an active in <arena>: scope")
+	}
+	llvmType, err := s.g.lowerType(darrayType)
+	if err != nil {
+		return nil, nil, err
+	}
+	elemLLVMType, err := s.g.lowerType(darrayType.Elem)
+	if err != nil {
+		return nil, nil, err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, nil, err
+	}
+	elemSize, err := s.sizeOfType(darrayType.Elem)
+	if err != nil {
+		return nil, nil, err
+	}
+	byteCount := C.LLVMConstInt(usizeLLVMType, C.ulonglong(uint64(len(expr.Elems))*elemSize), 0)
+	arenaType := s.g.result.NamedTypes["Arena"]
+	voidType := s.g.result.NamedTypes["void"]
+	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	allocType := s.g.cachedRuntimeHelperType("arena_alloc", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
+	})
+	allocCallee, err := s.g.ensureFunctionDeclared("arena_alloc", allocType)
+	if err != nil {
+		return nil, nil, err
+	}
+	allocLLVMType, err := s.g.lowerFunctionType(allocType)
+	if err != nil {
+		return nil, nil, err
+	}
+	allocPtr := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{owner.arenaRef, byteCount}, "darray.literal.alloc")
+	indexLLVMType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return nil, nil, err
+	}
+	for i, elem := range expr.Elems {
+		elemValue, _, err := s.emitExpr(elem, darrayType.Elem)
+		if err != nil {
+			return nil, nil, err
+		}
+		indexValue := C.LLVMConstInt(indexLLVMType, C.ulonglong(i), 0)
+		indices := []C.LLVMValueRef{indexValue}
+		elemPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, allocPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("darray.literal.elem.ptr"))
+		C.LLVMBuildStore(s.builder, elemValue, elemPtr)
+	}
+	countValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(len(expr.Elems)), 0)
+	current := C.LLVMGetUndef(llvmType)
+	current = C.LLVMBuildInsertValue(s.builder, current, allocPtr, 0, cStringFree("darray.literal.items"))
+	current = C.LLVMBuildInsertValue(s.builder, current, countValue, 1, cStringFree("darray.literal.count"))
+	current = C.LLVMBuildInsertValue(s.builder, current, countValue, 2, cStringFree("darray.literal.capacity"))
+	return current, darrayType, nil
 }
 
-func (s *functionState) listLiteralTargetType(expr *ast.ListLitExpr, expected semantic.Type) (*semantic.ArrayType, error) {
+func (s *functionState) listLiteralTargetArrayType(expr *ast.ListLitExpr, expected semantic.Type) (*semantic.ArrayType, bool, error) {
 	if expectedArray, ok := expected.(*semantic.ArrayType); ok {
-		return expectedArray, nil
+		return expectedArray, true, nil
 	}
 	actualArray, ok := s.exprType(expr).(*semantic.ArrayType)
 	if !ok {
-		return nil, fmt.Errorf("array literal did not resolve to a fixed array type")
+		return nil, false, nil
 	}
-	return actualArray, nil
+	return actualArray, true, nil
+}
+
+func (s *functionState) listLiteralTargetDArrayType(expr *ast.ListLitExpr, expected semantic.Type) (*semantic.DArrayType, error) {
+	if expectedDArray, ok := expected.(*semantic.DArrayType); ok {
+		return expectedDArray, nil
+	}
+	actualDArray, ok := s.exprType(expr).(*semantic.DArrayType)
+	if !ok {
+		return nil, fmt.Errorf("list literal did not resolve to a fixed array or darray type")
+	}
+	return actualDArray, nil
 }
 
 func (s *functionState) emitStackTempZeroed(t semantic.Type, name string) (C.LLVMValueRef, error) {
@@ -4217,6 +4297,21 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if value, actualType, handled, err := s.emitSpecializedArenaViewFillCall(expr); handled {
 		return value, actualType, err
 	}
+	if value, actualType, handled, err := s.emitBuiltinDArrayPushCall(expr); handled {
+		return value, actualType, err
+	}
+	if value, actualType, handled, err := s.emitBuiltinDArrayExtendCall(expr); handled {
+		return value, actualType, err
+	}
+	if value, actualType, handled, err := s.emitBuiltinDArrayReserveCall(expr); handled {
+		return value, actualType, err
+	}
+	if value, actualType, handled, err := s.emitBuiltinDArrayClearCall(expr); handled {
+		return value, actualType, err
+	}
+	if value, actualType, handled, err := s.emitBuiltinDArrayTruncateCall(expr); handled {
+		return value, actualType, err
+	}
 	if value, actualType, handled, err := s.emitSpecializedMemcpyCall(expr); handled {
 		return value, actualType, err
 	}
@@ -4277,6 +4372,417 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	}
 	call := s.buildCall(llvmFnType, callee, args, callName)
 	return call, funcType.Return, nil
+}
+
+func builtinDArrayPushReceiverType(t semantic.Type) (*semantic.DArrayType, *semantic.RefType, bool) {
+	if t == nil {
+		return nil, nil, false
+	}
+	if darrayType, ok := t.(*semantic.DArrayType); ok && darrayType != nil {
+		return darrayType, nil, true
+	}
+	refType, ok := t.(*semantic.RefType)
+	if !ok || refType == nil {
+		return nil, nil, false
+	}
+	darrayType, ok := refType.Elem.(*semantic.DArrayType)
+	if !ok || darrayType == nil {
+		return nil, nil, false
+	}
+	return darrayType, refType, true
+}
+
+func builtinDArrayExtendSourceType(t semantic.Type) (semantic.Type, bool) {
+	if t == nil {
+		return nil, false
+	}
+	switch tt := t.(type) {
+	case *semantic.DArrayType, *semantic.DArrayViewType, *semantic.ArrayType:
+		return t, true
+	case *semantic.RefType:
+		switch tt.Elem.(type) {
+		case *semantic.DArrayType, *semantic.DArrayViewType, *semantic.ArrayType:
+			return tt.Elem, true
+		}
+	}
+	return nil, false
+}
+
+func (s *functionState) emitBuiltinDArrayPushCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if expr == nil {
+		return nil, nil, false, nil
+	}
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "push" || fieldExpr.Object == nil {
+		return nil, nil, false, nil
+	}
+	receiverType := s.exprType(fieldExpr.Object)
+	darrayType, receiverRefType, ok := builtinDArrayPushReceiverType(receiverType)
+	if !ok || darrayType == nil {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 1 {
+		return nil, nil, true, fmt.Errorf("darray push expects 1 argument, got %d", len(expr.Args))
+	}
+	owner, ok := s.lookupTreeAllocOwner()
+	if !ok || owner.arenaRef == nil {
+		return nil, nil, true, fmt.Errorf("darray push requires an active in <arena>: scope")
+	}
+	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	darrayRefType := &semantic.RefType{Elem: darrayType, Mutable: true, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	helperType := s.g.cachedRuntimeHelperType("arena_da_append", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "arena_da_append", Params: []semantic.Type{arenaRefType, darrayRefType, darrayType.Elem}, Return: darrayRefType}
+	})
+	callee, err := s.g.ensureFunctionDeclared("arena_da_append", helperType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	var darrayPtr C.LLVMValueRef
+	if receiverRefType != nil {
+		darrayPtr, _, err = s.emitExpr(fieldExpr.Object, receiverRefType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+	} else {
+		darrayPtr, _, err = s.emitAddress(fieldExpr.Object)
+		if err != nil {
+			return nil, nil, true, err
+		}
+	}
+	itemValue, _, err := s.emitExpr(expr.Args[0], darrayType.Elem)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	call := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{owner.arenaRef, darrayPtr, itemValue}, "darray.push")
+	return call, s.exprType(expr), true, nil
+}
+
+func (s *functionState) emitBuiltinDArrayExtendCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if expr == nil {
+		return nil, nil, false, nil
+	}
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "extend" || fieldExpr.Object == nil {
+		return nil, nil, false, nil
+	}
+	receiverType := s.exprType(fieldExpr.Object)
+	darrayType, receiverRefType, ok := builtinDArrayPushReceiverType(receiverType)
+	if !ok || darrayType == nil {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 1 {
+		return nil, nil, true, fmt.Errorf("darray extend expects 1 argument, got %d", len(expr.Args))
+	}
+	owner, ok := s.lookupTreeAllocOwner()
+	if !ok || owner.arenaRef == nil {
+		return nil, nil, true, fmt.Errorf("darray extend requires an active in <arena>: scope")
+	}
+	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	darrayRefType := &semantic.RefType{Elem: darrayType, Mutable: true, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	itemRefType := &semantic.RefType{Elem: darrayType.Elem, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	helperType := s.g.cachedRuntimeHelperType("arena_da_append_many", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "arena_da_append_many", Params: []semantic.Type{arenaRefType, darrayRefType, itemRefType, s.g.result.NamedTypes["usize"]}, Return: darrayRefType}
+	})
+	callee, err := s.g.ensureFunctionDeclared("arena_da_append_many", helperType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	var darrayPtr C.LLVMValueRef
+	if receiverRefType != nil {
+		darrayPtr, _, err = s.emitExpr(fieldExpr.Object, receiverRefType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+	} else {
+		darrayPtr, _, err = s.emitAddress(fieldExpr.Object)
+		if err != nil {
+			return nil, nil, true, err
+		}
+	}
+	sourceData, sourceCount, err := s.emitBuiltinDArrayExtendSource(expr.Args[0], darrayType.Elem)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	zeroCount := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	isZero := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), sourceCount, zeroCount, cStringFree("darray.extend.count.zero"))
+	entryBlock := C.LLVMGetInsertBlock(s.builder)
+	callBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("darray.extend.call"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("darray.extend.merge"))
+	C.LLVMBuildCondBr(s.builder, isZero, mergeBB, callBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, callBB)
+	call := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{owner.arenaRef, darrayPtr, sourceData, sourceCount}, "darray.extend")
+	callEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	refLLVMType, err := s.g.lowerType(darrayRefType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	result := C.LLVMBuildPhi(s.builder, refLLVMType, cStringFree("darray.extend.result"))
+	phiValues := []C.LLVMValueRef{darrayPtr, call}
+	phiBlocks := []C.LLVMBasicBlockRef{entryBlock, callEnd}
+	C.LLVMAddIncoming(result, llvmValueSlicePtr(phiValues), llvmBlockSlicePtr(phiBlocks), C.unsigned(len(phiValues)))
+	return result, s.exprType(expr), true, nil
+}
+
+func (s *functionState) emitBuiltinDArrayExtendSource(arg ast.Expr, elemType semantic.Type) (C.LLVMValueRef, C.LLVMValueRef, error) {
+	sourceType := s.exprType(arg)
+	baseType, ok := builtinDArrayExtendSourceType(sourceType)
+	if !ok || baseType == nil {
+		return nil, nil, fmt.Errorf("darray extend expects a compatible darray, dview, or array source")
+	}
+	switch tt := baseType.(type) {
+	case *semantic.DArrayType:
+		var arrayValue C.LLVMValueRef
+		if refType, ok := sourceType.(*semantic.RefType); ok && refType != nil {
+			ptr, _, err := s.emitExpr(arg, sourceType)
+			if err != nil {
+				return nil, nil, err
+			}
+			arrayValue, err = s.loadValue(ptr, tt, "darray.extend.src.darray")
+			if err != nil {
+				return nil, nil, err
+			}
+		} else {
+			var err error
+			arrayValue, _, err = s.emitExpr(arg, tt)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		data := C.LLVMBuildExtractValue(s.builder, arrayValue, 0, cStringFree("darray.extend.src.data"))
+		count := C.LLVMBuildExtractValue(s.builder, arrayValue, 1, cStringFree("darray.extend.src.count"))
+		return data, count, nil
+	case *semantic.DArrayViewType:
+		var viewValue C.LLVMValueRef
+		if refType, ok := sourceType.(*semantic.RefType); ok && refType != nil {
+			ptr, _, err := s.emitExpr(arg, sourceType)
+			if err != nil {
+				return nil, nil, err
+			}
+			viewValue, err = s.loadValue(ptr, tt, "darray.extend.src.view")
+			if err != nil {
+				return nil, nil, err
+			}
+		} else {
+			var err error
+			viewValue, _, err = s.emitExpr(arg, tt)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		data := C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree("darray.extend.src.data"))
+		count := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree("darray.extend.src.len"))
+		return data, count, nil
+	case *semantic.ArrayType:
+		arrayType, arrayPtr, ok, err := s.fixedArraySliceBase(arg)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !ok || arrayType == nil {
+			return nil, nil, fmt.Errorf("darray extend could not materialize fixed array source")
+		}
+		usizeType := s.g.result.NamedTypes["usize"]
+		usizeLLVMType, err := s.g.lowerType(usizeType)
+		if err != nil {
+			return nil, nil, err
+		}
+		count := C.LLVMConstInt(usizeLLVMType, C.ulonglong(arrayType.ConstSize), 0)
+		elemRefType := &semantic.RefType{Elem: elemType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+		elemRefLLVMType, err := s.g.lowerType(elemRefType)
+		if err != nil {
+			return nil, nil, err
+		}
+		if arrayType.ConstSize == 0 {
+			return C.LLVMConstNull(elemRefLLVMType), count, nil
+		}
+		arrayLLVMType, err := s.g.lowerType(arrayType)
+		if err != nil {
+			return nil, nil, err
+		}
+		zeroIndex := C.LLVMConstInt(usizeLLVMType, 0, 0)
+		indices := []C.LLVMValueRef{zeroIndex, zeroIndex}
+		data := C.LLVMBuildGEP2(s.builder, arrayLLVMType, arrayPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("darray.extend.src.array.data"))
+		return data, count, nil
+	default:
+		return nil, nil, fmt.Errorf("unsupported darray extend source %T", baseType)
+	}
+}
+
+func (s *functionState) emitBuiltinDArrayReserveCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if expr == nil {
+		return nil, nil, false, nil
+	}
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "reserve" || fieldExpr.Object == nil {
+		return nil, nil, false, nil
+	}
+	receiverType := s.exprType(fieldExpr.Object)
+	darrayType, receiverRefType, ok := builtinDArrayPushReceiverType(receiverType)
+	if !ok || darrayType == nil {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 1 {
+		return nil, nil, true, fmt.Errorf("darray reserve expects 1 argument, got %d", len(expr.Args))
+	}
+	owner, ok := s.lookupTreeAllocOwner()
+	if !ok || owner.arenaRef == nil {
+		return nil, nil, true, fmt.Errorf("darray reserve requires an active in <arena>: scope")
+	}
+	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	darrayRefType := &semantic.RefType{Elem: darrayType, Mutable: true, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	helperType := s.g.cachedRuntimeHelperType("arena_da_reserve", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "arena_da_reserve", Params: []semantic.Type{arenaRefType, darrayRefType, s.g.result.NamedTypes["usize"]}, Return: darrayRefType}
+	})
+	callee, err := s.g.ensureFunctionDeclared("arena_da_reserve", helperType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	var darrayPtr C.LLVMValueRef
+	if receiverRefType != nil {
+		darrayPtr, _, err = s.emitExpr(fieldExpr.Object, receiverRefType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+	} else {
+		darrayPtr, _, err = s.emitAddress(fieldExpr.Object)
+		if err != nil {
+			return nil, nil, true, err
+		}
+	}
+	neededValue, _, err := s.emitExpr(expr.Args[0], s.g.result.NamedTypes["usize"])
+	if err != nil {
+		return nil, nil, true, err
+	}
+	call := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{owner.arenaRef, darrayPtr, neededValue}, "darray.reserve")
+	return call, s.exprType(expr), true, nil
+}
+
+func (s *functionState) emitBuiltinDArrayClearCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if expr == nil {
+		return nil, nil, false, nil
+	}
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "clear" || fieldExpr.Object == nil {
+		return nil, nil, false, nil
+	}
+	receiverType := s.exprType(fieldExpr.Object)
+	darrayType, receiverRefType, ok := builtinDArrayPushReceiverType(receiverType)
+	if !ok || darrayType == nil {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 0 {
+		return nil, nil, true, fmt.Errorf("darray clear expects 0 arguments, got %d", len(expr.Args))
+	}
+	darrayPtr, resultType, err := s.emitBuiltinDArrayReceiverPtr(fieldExpr.Object, receiverRefType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	countPtr, usizeType, err := s.emitBuiltinDArrayCountPtr(darrayPtr, darrayType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	C.LLVMBuildStore(s.builder, C.LLVMConstInt(usizeLLVMType, 0, 0), countPtr)
+	return darrayPtr, resultType, true, nil
+}
+
+func (s *functionState) emitBuiltinDArrayTruncateCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if expr == nil {
+		return nil, nil, false, nil
+	}
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "truncate" || fieldExpr.Object == nil {
+		return nil, nil, false, nil
+	}
+	receiverType := s.exprType(fieldExpr.Object)
+	darrayType, receiverRefType, ok := builtinDArrayPushReceiverType(receiverType)
+	if !ok || darrayType == nil {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 1 {
+		return nil, nil, true, fmt.Errorf("darray truncate expects 1 argument, got %d", len(expr.Args))
+	}
+	darrayPtr, resultType, err := s.emitBuiltinDArrayReceiverPtr(fieldExpr.Object, receiverRefType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	countPtr, usizeType, err := s.emitBuiltinDArrayCountPtr(darrayPtr, darrayType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	currentCount := C.LLVMBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("darray.truncate.count"))
+	limitValue, _, err := s.emitExpr(expr.Args[0], usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	shouldStore := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), limitValue, currentCount, cStringFree("darray.truncate.lt"))
+	entryBlock := C.LLVMGetInsertBlock(s.builder)
+	storeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("darray.truncate.store"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("darray.truncate.merge"))
+	C.LLVMBuildCondBr(s.builder, shouldStore, storeBB, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, storeBB)
+	C.LLVMBuildStore(s.builder, limitValue, countPtr)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	_ = entryBlock
+	return darrayPtr, resultType, true, nil
+}
+
+func (s *functionState) emitBuiltinDArrayReceiverPtr(receiver ast.Expr, receiverRefType *semantic.RefType) (C.LLVMValueRef, semantic.Type, error) {
+	if receiverRefType != nil {
+		ptr, _, err := s.emitExpr(receiver, receiverRefType)
+		return ptr, receiverRefType, err
+	}
+	ptr, _, err := s.emitAddress(receiver)
+	if err != nil {
+		return nil, nil, err
+	}
+	resultType := &semantic.RefType{Elem: s.exprType(receiver), Mutable: true, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	return ptr, resultType, nil
+}
+
+func (s *functionState) emitBuiltinDArrayCountPtr(darrayPtr C.LLVMValueRef, darrayType *semantic.DArrayType) (C.LLVMValueRef, semantic.Type, error) {
+	if darrayType == nil {
+		return nil, nil, fmt.Errorf("missing darray type")
+	}
+	containerType, err := s.g.lowerType(darrayType)
+	if err != nil {
+		return nil, nil, err
+	}
+	countPtr := C.LLVMBuildStructGEP2(s.builder, containerType, darrayPtr, 1, cStringFree("darray.count.ptr"))
+	return countPtr, s.g.result.NamedTypes["usize"], nil
 }
 
 func (s *functionState) emitCallArg(arg ast.Expr, expected semantic.Type, fnType *semantic.FuncType, index int) (C.LLVMValueRef, semantic.Type, error) {

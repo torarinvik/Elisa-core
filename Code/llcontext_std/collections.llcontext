@@ -166,7 +166,8 @@ def arena_da_from_view[T](a: mutable any Arena&, view: dview[T]) -> darray[T, sh
     return out
 
 def arena_da_append[T](a: mutable any Arena&, da: mutable any darray[T, shape_in]&, item: T) -> mutable any darray[T, shape_out]& can[Memory.Allocate, Abort.Panic]:
-    _ = arena_da_reserve(a, da, da.count + 1u)
+    in a:
+        _ = da.reserve(da.count + 1u)
 
     assert da.items != null
 
@@ -219,7 +220,8 @@ def arena_sb_append_cstr(a: mutable any Arena&, sb: mutable any darray[u8, shape
     return arena_da_append_many(a, sb, cstr, n)
 
 def arena_sb_append_null(a: mutable any Arena&, sb: mutable any darray[u8, shape_in]&) -> mutable any darray[u8, shape_out]& can[Memory.Allocate, Abort.Panic]:
-    return arena_da_append(a, sb, 0u8)
+    in a:
+        return sb.extend([0u8])
 
 # ------------------------------------------------------------
 # Dictionary helpers

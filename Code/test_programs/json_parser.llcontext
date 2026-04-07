@@ -1014,90 +1014,92 @@ def json_parse_value_node_after_ws(cursor: mutable any JsonCursor&, arena: mutab
 
 
 def json_parse_array_node(cursor: mutable any JsonCursor&, arena: mutable any Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
-    items: mutable darray[JsonNode] = zeroed
-    done: mutable bool = false
-    items_checksum: mutable i64 = 0
-    if json_advance_char(cursor) != JSON_CH_LBRACKET:
-        return json_parse_node_result(invalid_node, -1)
-
-    json_skip_ws(cursor)
-    if json_cur_char(cursor) == JSON_CH_RBRACKET:
-        _ = json_advance_char(cursor)
-        return json_parse_node_result(JsonNode.Array(items_ptr: null, item_count: 0u), 43)
-
-    while not done:
-        value_result: JsonParseNodeResult = json_parse_value_node_after_ws(cursor, arena, store, invalid_node)
-        if value_result.checksum < 0:
-            return value_result
-
-        _ = arena_da_append(arena, (&items).cast[any darray[JsonNode]&], value_result.node)
-        items_checksum <- items_checksum + value_result.checksum
-
-        json_skip_ws(cursor)
-        ch: i64 = json_cur_char(cursor)
-        if likely ch == JSON_CH_COMMA:
-            _ = json_advance_char(cursor)
-            json_skip_ws(cursor)
-        elif ch == JSON_CH_RBRACKET:
-            _ = json_advance_char(cursor)
-            done <- true
-        else:
+    in arena:
+        items: mutable darray[JsonNode] = []
+        done: mutable bool = false
+        items_checksum: mutable i64 = 0
+        if json_advance_char(cursor) != JSON_CH_LBRACKET:
             return json_parse_node_result(invalid_node, -1)
 
-    return json_parse_node_result(JsonNode.Array(items_ptr: items.items, item_count: items.count), 43 + items_checksum)
+        json_skip_ws(cursor)
+        if json_cur_char(cursor) == JSON_CH_RBRACKET:
+            _ = json_advance_char(cursor)
+            return json_parse_node_result(JsonNode.Array(items_ptr: null, item_count: 0u), 43)
+
+        while not done:
+            value_result: JsonParseNodeResult = json_parse_value_node_after_ws(cursor, arena, store, invalid_node)
+            if value_result.checksum < 0:
+                return value_result
+
+            items.push(value_result.node)
+            items_checksum <- items_checksum + value_result.checksum
+
+            json_skip_ws(cursor)
+            ch: i64 = json_cur_char(cursor)
+            if likely ch == JSON_CH_COMMA:
+                _ = json_advance_char(cursor)
+                json_skip_ws(cursor)
+            elif ch == JSON_CH_RBRACKET:
+                _ = json_advance_char(cursor)
+                done <- true
+            else:
+                return json_parse_node_result(invalid_node, -1)
+
+        return json_parse_node_result(JsonNode.Array(items_ptr: items.items, item_count: items.count), 43 + items_checksum)
 
 
 def json_parse_object_node(cursor: mutable any JsonCursor&, arena: mutable any Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
-    fields: mutable darray[JsonField] = zeroed
-    done: mutable bool = false
-    fields_checksum: mutable i64 = 0
-    key_lexeme: mutable JsonLexemeResult = zeroed
-    key_checksum: mutable i64 = 0
-    key_node: mutable JsonNode = zeroed
-    field_value: mutable JsonNode = zeroed
-    field_entry: mutable JsonField = zeroed
-    if json_advance_char(cursor) != JSON_CH_LBRACE:
-        return json_parse_node_result(invalid_node, -1)
-
-    json_skip_ws(cursor)
-    if json_cur_char(cursor) == JSON_CH_RBRACE:
-        _ = json_advance_char(cursor)
-        return json_parse_node_result(JsonNode.Object(fields_ptr: null, field_count: 0u), 47)
-
-    while not done:
-        key_lexeme <- json_parse_string_lexeme(cursor)
-        key_checksum <- key_lexeme.checksum
-        if key_checksum < 0:
-            return JsonParseNodeResult(invalid_node, -1)
-
-        key_node <- JsonNode.Text(source_offset: key_lexeme.source_offset.u32())
+    in arena:
+        fields: mutable darray[JsonField] = []
+        done: mutable bool = false
+        fields_checksum: mutable i64 = 0
+        key_lexeme: mutable JsonLexemeResult = zeroed
+        key_checksum: mutable i64 = 0
+        key_node: mutable JsonNode = zeroed
+        field_value: mutable JsonNode = zeroed
+        field_entry: mutable JsonField = zeroed
+        if json_advance_char(cursor) != JSON_CH_LBRACE:
+            return json_parse_node_result(invalid_node, -1)
 
         json_skip_ws(cursor)
-        if json_advance_char(cursor) != JSON_CH_COLON:
-            return JsonParseNodeResult(invalid_node, -1)
-        json_skip_ws(cursor)
-
-        value_result: JsonParseNodeResult = json_parse_value_node_after_ws(cursor, arena, store, invalid_node)
-        if value_result.checksum < 0:
-            return value_result
-
-        field_value <- value_result.node
-        field_entry <- JsonField(key_node, field_value)
-        _ = arena_da_append(arena, (&fields).cast[any darray[JsonField]&], field_entry)
-        fields_checksum <- fields_checksum + key_checksum + value_result.checksum
-
-        json_skip_ws(cursor)
-        ch: i64 = json_cur_char(cursor)
-        if likely ch == JSON_CH_COMMA:
+        if json_cur_char(cursor) == JSON_CH_RBRACE:
             _ = json_advance_char(cursor)
+            return json_parse_node_result(JsonNode.Object(fields_ptr: null, field_count: 0u), 47)
+
+        while not done:
+            key_lexeme <- json_parse_string_lexeme(cursor)
+            key_checksum <- key_lexeme.checksum
+            if key_checksum < 0:
+                return JsonParseNodeResult(invalid_node, -1)
+
+            key_node <- JsonNode.Text(source_offset: key_lexeme.source_offset.u32())
+
             json_skip_ws(cursor)
-        elif ch == JSON_CH_RBRACE:
-            _ = json_advance_char(cursor)
-            done <- true
-        else:
-            return JsonParseNodeResult(invalid_node, -1)
+            if json_advance_char(cursor) != JSON_CH_COLON:
+                return JsonParseNodeResult(invalid_node, -1)
+            json_skip_ws(cursor)
 
-    return json_parse_node_result(JsonNode.Object(fields_ptr: fields.items, field_count: fields.count), 47 + fields_checksum)
+            value_result: JsonParseNodeResult = json_parse_value_node_after_ws(cursor, arena, store, invalid_node)
+            if value_result.checksum < 0:
+                return value_result
+
+            field_value <- value_result.node
+            field_entry <- JsonField(key_node, field_value)
+            fields.push(field_entry)
+            fields_checksum <- fields_checksum + key_checksum + value_result.checksum
+
+            json_skip_ws(cursor)
+            ch: i64 = json_cur_char(cursor)
+            if likely ch == JSON_CH_COMMA:
+                _ = json_advance_char(cursor)
+                json_skip_ws(cursor)
+            elif ch == JSON_CH_RBRACE:
+                _ = json_advance_char(cursor)
+                done <- true
+            else:
+                return JsonParseNodeResult(invalid_node, -1)
+
+        return json_parse_node_result(JsonNode.Object(fields_ptr: fields.items, field_count: fields.count), 47 + fields_checksum)
 
 
 def json_parse_value_node(cursor: mutable any JsonCursor&, arena: mutable any Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:

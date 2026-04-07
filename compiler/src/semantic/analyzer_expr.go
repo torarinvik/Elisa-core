@@ -3975,6 +3975,21 @@ func (a *Analyzer) specializeCallbackCarryingTypeFromExpr(expected Type, actualE
 }
 
 func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
+	if resultType, ok := a.analyzeBuiltinDarrayPushCall(expr); ok {
+		return resultType
+	}
+	if resultType, ok := a.analyzeBuiltinDarrayExtendCall(expr); ok {
+		return resultType
+	}
+	if resultType, ok := a.analyzeBuiltinDarrayReserveCall(expr); ok {
+		return resultType
+	}
+	if resultType, ok := a.analyzeBuiltinDarrayClearCall(expr); ok {
+		return resultType
+	}
+	if resultType, ok := a.analyzeBuiltinDarrayTruncateCall(expr); ok {
+		return resultType
+	}
 	switch a.rewriteExtensionMethodCall(expr) {
 	case extensionMethodCallRewriteInvalid:
 		return invalidType
@@ -4230,6 +4245,317 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	}
 	a.bindFreshReturnShapes(appliedType, shapeBindings)
 	return a.substituteType(appliedType.Return, bindings, shapeBindings, regionBindings, permissionBindings)
+}
+
+func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool) {
+	if a == nil || expr == nil {
+		return nil, false
+	}
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "push" || fieldExpr.Object == nil {
+		return nil, false
+	}
+	if a.exprResolvesToTypePath(fieldExpr.Object) {
+		return nil, false
+	}
+	receiverType := a.analyzeExpr(fieldExpr.Object)
+	darrayType, receiverRefType, ok := builtinDArrayPushReceiverType(receiverType)
+	if !ok || darrayType == nil {
+		return nil, false
+	}
+	if len(expr.Args) != 1 {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "darray push expects 1 argument, got %d", len(expr.Args))
+		a.exprTypes[expr] = invalidType
+		return invalidType, true
+	}
+	if expr.NamedArgCount() != 0 {
+		a.errorf(expr.Pos(), "darray push does not support named arguments")
+	}
+	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
+		a.errorf(fieldExpr.Object.Pos(), "darray push requires a mutable darray receiver")
+	}
+	if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
+		a.errorf(expr.Pos(), "darray push requires an active in <arena>: scope")
+	}
+	argType := a.analyzeValueExpr(expr.Args[0], darrayType.Elem)
+	if !AssignableTo(darrayType.Elem, argType) {
+		a.errorf(expr.Args[0].Pos(), "darray push expects %s, got %s", darrayType.Elem.String(), argType.String())
+	}
+	a.consumeAffineValueExpr(expr.Args[0], darrayType.Elem, "move into darray push")
+	resultType := receiverRefType
+	if resultType == nil {
+		resultType = &RefType{
+			Elem:            darrayType,
+			Mutable:         true,
+			State:           RefStateNonNull,
+			Storage:         RefStorageAny,
+			ExplicitStorage: true,
+		}
+	}
+	a.exprTypes[expr.Func] = &FuncType{
+		Name:   "darray.push",
+		Params: []Type{resultType, darrayType.Elem},
+		Return: resultType,
+	}
+	a.exprTypes[expr] = resultType
+	return resultType, true
+}
+
+func (a *Analyzer) analyzeBuiltinDarrayExtendCall(expr *ast.CallExpr) (Type, bool) {
+	if a == nil || expr == nil {
+		return nil, false
+	}
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "extend" || fieldExpr.Object == nil {
+		return nil, false
+	}
+	if a.exprResolvesToTypePath(fieldExpr.Object) {
+		return nil, false
+	}
+	receiverType := a.analyzeExpr(fieldExpr.Object)
+	darrayType, receiverRefType, ok := builtinDArrayPushReceiverType(receiverType)
+	if !ok || darrayType == nil {
+		return nil, false
+	}
+	if len(expr.Args) != 1 {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "darray extend expects 1 argument, got %d", len(expr.Args))
+		a.exprTypes[expr] = invalidType
+		return invalidType, true
+	}
+	if expr.NamedArgCount() != 0 {
+		a.errorf(expr.Pos(), "darray extend does not support named arguments")
+	}
+	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
+		a.errorf(fieldExpr.Object.Pos(), "darray extend requires a mutable darray receiver")
+	}
+	if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
+		a.errorf(expr.Pos(), "darray extend requires an active in <arena>: scope")
+	}
+	sourceType := a.analyzeValueExpr(expr.Args[0], nil)
+	if !builtinDArrayExtendSourceCompatible(darrayType.Elem, sourceType) {
+		a.errorf(expr.Args[0].Pos(), "darray extend expects a compatible darray, dview, or array source of %s, got %s", darrayType.Elem.String(), sourceType.String())
+	}
+	resultType := receiverRefType
+	if resultType == nil {
+		resultType = &RefType{
+			Elem:            darrayType,
+			Mutable:         true,
+			State:           RefStateNonNull,
+			Storage:         RefStorageAny,
+			ExplicitStorage: true,
+		}
+	}
+	a.exprTypes[expr.Func] = &FuncType{
+		Name:   "darray.extend",
+		Params: []Type{resultType, sourceType},
+		Return: resultType,
+	}
+	a.exprTypes[expr] = resultType
+	return resultType, true
+}
+
+func (a *Analyzer) analyzeBuiltinDarrayReserveCall(expr *ast.CallExpr) (Type, bool) {
+	if a == nil || expr == nil {
+		return nil, false
+	}
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "reserve" || fieldExpr.Object == nil {
+		return nil, false
+	}
+	if a.exprResolvesToTypePath(fieldExpr.Object) {
+		return nil, false
+	}
+	receiverType := a.analyzeExpr(fieldExpr.Object)
+	darrayType, receiverRefType, ok := builtinDArrayPushReceiverType(receiverType)
+	if !ok || darrayType == nil {
+		return nil, false
+	}
+	if len(expr.Args) != 1 {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "darray reserve expects 1 argument, got %d", len(expr.Args))
+		a.exprTypes[expr] = invalidType
+		return invalidType, true
+	}
+	if expr.NamedArgCount() != 0 {
+		a.errorf(expr.Pos(), "darray reserve does not support named arguments")
+	}
+	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
+		a.errorf(fieldExpr.Object.Pos(), "darray reserve requires a mutable darray receiver")
+	}
+	if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
+		a.errorf(expr.Pos(), "darray reserve requires an active in <arena>: scope")
+	}
+	usizeType := a.namedTypes["usize"]
+	argType := a.analyzeValueExpr(expr.Args[0], usizeType)
+	if !AssignableTo(usizeType, argType) {
+		a.errorf(expr.Args[0].Pos(), "darray reserve expects %s, got %s", usizeType.String(), argType.String())
+	}
+	resultType := receiverRefType
+	if resultType == nil {
+		resultType = &RefType{
+			Elem:            darrayType,
+			Mutable:         true,
+			State:           RefStateNonNull,
+			Storage:         RefStorageAny,
+			ExplicitStorage: true,
+		}
+	}
+	a.exprTypes[expr.Func] = &FuncType{
+		Name:   "darray.reserve",
+		Params: []Type{resultType, usizeType},
+		Return: resultType,
+	}
+	a.exprTypes[expr] = resultType
+	return resultType, true
+}
+
+func (a *Analyzer) analyzeBuiltinDarrayClearCall(expr *ast.CallExpr) (Type, bool) {
+	if a == nil || expr == nil {
+		return nil, false
+	}
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "clear" || fieldExpr.Object == nil {
+		return nil, false
+	}
+	if a.exprResolvesToTypePath(fieldExpr.Object) {
+		return nil, false
+	}
+	receiverType := a.analyzeExpr(fieldExpr.Object)
+	darrayType, receiverRefType, ok := builtinDArrayPushReceiverType(receiverType)
+	if !ok || darrayType == nil {
+		return nil, false
+	}
+	if len(expr.Args) != 0 {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "darray clear expects 0 arguments, got %d", len(expr.Args))
+		a.exprTypes[expr] = invalidType
+		return invalidType, true
+	}
+	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
+		a.errorf(fieldExpr.Object.Pos(), "darray clear requires a mutable darray receiver")
+	}
+	resultType := receiverRefType
+	if resultType == nil {
+		resultType = &RefType{
+			Elem:            darrayType,
+			Mutable:         true,
+			State:           RefStateNonNull,
+			Storage:         RefStorageAny,
+			ExplicitStorage: true,
+		}
+	}
+	a.exprTypes[expr.Func] = &FuncType{Name: "darray.clear", Params: []Type{resultType}, Return: resultType}
+	a.exprTypes[expr] = resultType
+	return resultType, true
+}
+
+func (a *Analyzer) analyzeBuiltinDarrayTruncateCall(expr *ast.CallExpr) (Type, bool) {
+	if a == nil || expr == nil {
+		return nil, false
+	}
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "truncate" || fieldExpr.Object == nil {
+		return nil, false
+	}
+	if a.exprResolvesToTypePath(fieldExpr.Object) {
+		return nil, false
+	}
+	receiverType := a.analyzeExpr(fieldExpr.Object)
+	darrayType, receiverRefType, ok := builtinDArrayPushReceiverType(receiverType)
+	if !ok || darrayType == nil {
+		return nil, false
+	}
+	if len(expr.Args) != 1 {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "darray truncate expects 1 argument, got %d", len(expr.Args))
+		a.exprTypes[expr] = invalidType
+		return invalidType, true
+	}
+	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
+		a.errorf(fieldExpr.Object.Pos(), "darray truncate requires a mutable darray receiver")
+	}
+	usizeType := a.namedTypes["usize"]
+	argType := a.analyzeValueExpr(expr.Args[0], usizeType)
+	if !AssignableTo(usizeType, argType) {
+		a.errorf(expr.Args[0].Pos(), "darray truncate expects %s, got %s", usizeType.String(), argType.String())
+	}
+	resultType := receiverRefType
+	if resultType == nil {
+		resultType = &RefType{
+			Elem:            darrayType,
+			Mutable:         true,
+			State:           RefStateNonNull,
+			Storage:         RefStorageAny,
+			ExplicitStorage: true,
+		}
+	}
+	a.exprTypes[expr.Func] = &FuncType{Name: "darray.truncate", Params: []Type{resultType, usizeType}, Return: resultType}
+	a.exprTypes[expr] = resultType
+	return resultType, true
+}
+
+func builtinDArrayPushReceiverType(t Type) (*DArrayType, *RefType, bool) {
+	if t == nil {
+		return nil, nil, false
+	}
+	if darrayType, ok := t.(*DArrayType); ok && darrayType != nil {
+		return darrayType, nil, true
+	}
+	refType, ok := t.(*RefType)
+	if !ok || refType == nil {
+		return nil, nil, false
+	}
+	darrayType, ok := refType.Elem.(*DArrayType)
+	if !ok || darrayType == nil {
+		return nil, nil, false
+	}
+	return darrayType, refType, true
+}
+
+func builtinDArrayPushReceiverWritable(a *Analyzer, receiver ast.Expr, receiverType Type, receiverRefType *RefType) bool {
+	if receiverRefType != nil {
+		return receiverRefType.Mutable
+	}
+	return a != nil && a.exprCanYieldWritableRef(receiver)
+}
+
+func builtinDArrayExtendSourceCompatible(elemType Type, sourceType Type) bool {
+	if elemType == nil || sourceType == nil {
+		return false
+	}
+	switch tt := sourceType.(type) {
+	case *DArrayType:
+		return SameType(elemType, tt.Elem)
+	case *DArrayViewType:
+		return SameType(elemType, tt.Elem)
+	case *ArrayType:
+		return SameType(elemType, tt.Elem)
+	case *RefType:
+		if tt == nil || tt.Elem == nil {
+			return false
+		}
+		switch inner := tt.Elem.(type) {
+		case *DArrayType:
+			return SameType(elemType, inner.Elem)
+		case *DArrayViewType:
+			return SameType(elemType, inner.Elem)
+		case *ArrayType:
+			return SameType(elemType, inner.Elem)
+		}
+	}
+	return false
 }
 
 type extensionMethodCallRewriteStatus int
@@ -6654,35 +6980,49 @@ func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expecte
 	if expr == nil {
 		return invalidType
 	}
-	expectedArray, useExpected := contextualArrayLiteralType(expected)
+	expectedArray, useExpectedArray := contextualArrayLiteralType(expected)
+	expectedDArray, useExpectedDArray := contextualDArrayLiteralType(expected)
 	if len(expr.Elems) == 0 {
-		if useExpected {
+		switch {
+		case useExpectedArray:
 			if expectedArray.HasConstSize && expectedArray.ConstSize != 0 {
 				a.errorf(expr.Pos(), "array literal expects %d elements, got 0", expectedArray.ConstSize)
 			}
 			a.exprTypes[expr] = expectedArray
 			return expectedArray
+		case useExpectedDArray:
+			a.exprTypes[expr] = expectedDArray
+			return expectedDArray
 		}
-		a.errorf(expr.Pos(), "empty array literal requires an expected array type")
+		a.errorf(expr.Pos(), "empty list literal requires an expected array or darray type")
 		a.exprTypes[expr] = invalidType
 		return invalidType
 	}
 
 	var elemType Type
-	if useExpected {
+	if useExpectedArray {
 		elemType = expectedArray.Elem
 		if expectedArray.HasConstSize && expectedArray.ConstSize != int64(len(expr.Elems)) {
 			a.errorf(expr.Pos(), "array literal expects %d elements, got %d", expectedArray.ConstSize, len(expr.Elems))
 		}
+	} else if useExpectedDArray {
+		elemType = expectedDArray.Elem
 	}
 
 	for _, elem := range expr.Elems {
 		itemType := a.analyzeValueExpr(elem, elemType)
-		if useExpected {
+		if useExpectedArray {
 			if !AssignableTo(expectedArray.Elem, itemType) {
 				a.errorf(elem.Pos(), "array literal element expects %s, got %s", expectedArray.Elem.String(), itemType.String())
 			}
 			a.consumeAffineValueExpr(elem, expectedArray.Elem, "move into array literal element")
+			continue
+		}
+		if useExpectedDArray {
+			if !AssignableTo(expectedDArray.Elem, itemType) {
+				a.errorf(elem.Pos(), "darray literal element expects %s, got %s", expectedDArray.Elem.String(), itemType.String())
+			}
+			a.consumeAffineValueExpr(elem, expectedDArray.Elem, "move into darray literal element")
 			continue
 		}
 		a.consumeAffineValueExpr(elem, itemType, "move into array literal element")
@@ -6699,9 +7039,13 @@ func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expecte
 		elemType = merged
 	}
 
-	if useExpected {
+	if useExpectedArray {
 		a.exprTypes[expr] = expectedArray
 		return expectedArray
+	}
+	if useExpectedDArray {
+		a.exprTypes[expr] = expectedDArray
+		return expectedDArray
 	}
 	if elemType == nil || IsInvalidType(elemType) {
 		a.exprTypes[expr] = invalidType
@@ -6718,6 +7062,14 @@ func contextualArrayLiteralType(expected Type) (*ArrayType, bool) {
 		return nil, false
 	}
 	return arrayType, true
+}
+
+func contextualDArrayLiteralType(expected Type) (*DArrayType, bool) {
+	darrayType, ok := expected.(*DArrayType)
+	if !ok {
+		return nil, false
+	}
+	return darrayType, true
 }
 
 func (a *Analyzer) variantConstructorMoveReason(kind string, containerName string, variant *EnumVariant, index int) string {

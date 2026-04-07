@@ -38,7 +38,8 @@ def frontend_new_lexer_with_len(a: mutable any Arena&, filename: any u8&, source
     out.col <- 1
     out.at_line_start <- true
     out.paren_depth <- 0
-    _ = arena_da_append(a, (&out.indent_stack).cast[mutable any darray[usize]&], 0u)
+    in a:
+        out.indent_stack.push(0u)
     return out
 
 
@@ -153,12 +154,13 @@ def frontend_indent_top(lexer: any FrontendLexer&) -> usize:
 
 
 def frontend_push_indent(lexer: mutable any FrontendLexer&, value: usize) can[Memory.Allocate, Abort.Panic]:
-    _ = arena_da_append(frontend_require_arena(lexer), (&lexer.indent_stack).cast[mutable any darray[usize]&], value)
+    in frontend_require_arena(lexer):
+        lexer.indent_stack.push(value)
 
 
 def frontend_pop_indent(lexer: mutable any FrontendLexer&):
     if lexer.indent_stack.count > 0u:
-        lexer.indent_stack.count <- lexer.indent_stack.count - 1u
+        _ = lexer.indent_stack.truncate(lexer.indent_stack.count - 1u)
 
 
 def frontend_handle_indentation(lexer: mutable any FrontendLexer&) can[Memory.Allocate, Abort.Panic]:
@@ -970,13 +972,14 @@ def frontend_tokenize(a: mutable any Arena&, filename: any u8&, source: any u8&)
 
 def frontend_tokenize_with_len(a: mutable any Arena&, filename: any u8&, source: any u8&, source_len: usize) -> darray[FrontendToken] can[Memory.Allocate, Abort.Panic]:
     lexer: mutable FrontendLexer = frontend_new_lexer_with_len(a, filename, source, source_len)
-    tokens: mutable darray[FrontendToken] = zeroed
+    in a:
+        tokens: mutable darray[FrontendToken] = []
 
-    while true:
-        token: FrontendToken = frontend_next_token((&lexer).cast[mutable any FrontendLexer&])
-        _ = arena_da_append(a, (&tokens).cast[mutable any darray[FrontendToken]&], token)
-        match token.kind:
-            FrontendTokenKind.Eof:
-                return tokens
+        while true:
+            token: FrontendToken = frontend_next_token((&lexer).cast[mutable any FrontendLexer&])
+            tokens.push(token)
+            match token.kind:
+                FrontendTokenKind.Eof:
+                    return tokens
 
-    return tokens
+        return tokens
