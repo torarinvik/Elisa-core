@@ -63,3 +63,20 @@ def build(owner: Arena) -> usize:
 		t.Fatalf("expected dict entry get_or_insert lowering, got:\n%s", output)
 	}
 }
+
+func TestGenerateLLVMIRForDoExprBlock(t *testing.T) {
+	src := `def build() -> i64:
+    value = do:
+        base = 5
+        base + 7
+    return value
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_do_expr_block.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "store i64 5") {
+		t.Fatalf("expected do expression setup statements to lower into IR, got:\n%s", output)
+	}
+}

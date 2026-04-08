@@ -1514,6 +1514,63 @@ func TestParseGetOrInsertBlockSugarWithSetupStatements(t *testing.T) {
 	}
 }
 
+func TestParseDoExprBlock(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep() -> i64:\n    value = do:\n        base = 40\n        base + 2\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok || len(fn.Body) != 1 {
+		t.Fatalf("expected single function body stmt, got %#v", file.Decls[0])
+	}
+	decl, ok := fn.Body[0].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected var decl stmt, got %T", fn.Body[0])
+	}
+	block, ok := decl.Value.(*ast.ExprBlock)
+	if !ok {
+		t.Fatalf("expected expr block value, got %T", decl.Value)
+	}
+	if len(block.Stmts) != 1 {
+		t.Fatalf("expected one setup stmt in expr block, got %d", len(block.Stmts))
+	}
+	formatted := unparse.FormatStmt(fn.Body[0])
+	if !strings.Contains(formatted, "do:") {
+		t.Fatalf("expected formatter to preserve do expression block syntax, got:\n%s", formatted)
+	}
+}
+
+func TestFormatCallWithDoExprBlockArg(t *testing.T) {
+	stmt := &ast.VarDeclStmt{
+		Name: "value",
+		Value: &ast.CallExpr{
+			Func: &ast.Ident{Name: "consume"},
+			Args: []ast.Expr{
+				&ast.ExprBlock{
+					Stmts: []ast.Stmt{
+						&ast.VarDeclStmt{
+							Name:  "base",
+							Value: &ast.IntLit{Value: "40"},
+						},
+					},
+					Value: &ast.BinaryExpr{
+						Op:    lexer.TOKEN_PLUS,
+						Left:  &ast.Ident{Name: "base"},
+						Right: &ast.IntLit{Value: "2"},
+					},
+				},
+			},
+		},
+	}
+	formatted := unparse.FormatStmt(stmt)
+	if !strings.Contains(formatted, "consume(\n") {
+		t.Fatalf("expected multiline call formatting, got:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "do:\n") {
+		t.Fatalf("expected nested do expression to be preserved, got:\n%s", formatted)
+	}
+}
+
 func TestParseChildrenToOverrideExpr(t *testing.T) {
 	file, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        BreakStmt\n\ndef keep(stmt: Lua.Stmt) -> Lua.Node:\n    return children(stmt to Lua.Node).node\n")
 	if len(errs) != 0 {

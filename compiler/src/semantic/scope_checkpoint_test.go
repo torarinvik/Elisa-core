@@ -91,3 +91,15 @@ def build(owner: Arena, key: dstr[key_shape]) -> usize:
 		t.Fatalf("unexpected semantic errors: %v", errs)
 	}
 }
+
+func TestAnalyzeDoExprBlock(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "do_expr_block.llcontext", `def build() -> i64:
+    value = do:
+        base = 9
+        base + 4
+    return value
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}

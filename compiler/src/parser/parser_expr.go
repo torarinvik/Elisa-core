@@ -1390,6 +1390,11 @@ func (p *Parser) parsePrimary() ast.Expr {
 	case lexer.TOKEN_MATCH:
 		return p.parseMatchExpr()
 	case lexer.TOKEN_IDENT:
+		if p.cur().Text == "do" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
+			pos := p.cur().Pos
+			p.advance()
+			return p.parseExprBlockValue(pos, false)
+		}
 		if p.cur().Text == "visit" && !(p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LPAREN) {
 			return p.parseVisitExpr()
 		}
@@ -1445,6 +1450,26 @@ func (p *Parser) parsePrimary() ast.Expr {
 	}
 }
 
+func (p *Parser) parseExprBlockValue(pos lexer.Pos, flattenSingle bool) ast.Expr {
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	body := p.parseBlock()
+	if len(body) == 0 {
+		p.errorf("expression block requires a final expression statement in the block")
+		return &ast.NullLit{Position: pos}
+	}
+	exprStmt, ok := body[len(body)-1].(*ast.ExprStmt)
+	if !ok || exprStmt == nil || exprStmt.Expr == nil {
+		p.errorf("expression block requires a final expression statement in the block")
+		return &ast.NullLit{Position: pos}
+	}
+	if flattenSingle && len(body) == 1 {
+		return exprStmt.Expr
+	}
+	stmts := append([]ast.Stmt(nil), body[:len(body)-1]...)
+	return &ast.ExprBlock{Position: pos, Stmts: stmts, Value: exprStmt.Expr}
+}
+
 func (p *Parser) peekStructLiteralTypeArgCall() bool {
 	if p.peek() != lexer.TOKEN_LBRACKET {
 		return false
@@ -1487,4 +1512,11 @@ func (p *Parser) expectNewline() {
 	} else {
 		p.errorf("expected newline, got %s", p.cur())
 	}
+}
+
+func (p *Parser) expectNewlineAfterValueExpr(expr ast.Expr) {
+	if _, ok := expr.(*ast.ExprBlock); ok {
+		return
+	}
+	p.expectNewline()
 }

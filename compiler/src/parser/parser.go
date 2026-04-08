@@ -687,7 +687,7 @@ func (p *Parser) parseConstDecl() *ast.ConstDecl {
 
 	p.expect(lexer.TOKEN_ASSIGN)
 	value := p.parseExpr()
-	p.expectNewline()
+	p.expectNewlineAfterValueExpr(value)
 
 	return &ast.ConstDecl{Position: pos, Name: name, Type: typ, Value: value}
 }
@@ -723,7 +723,7 @@ func (p *Parser) parseConstEnumMemberDecl() ast.ConstEnumMemberDecl {
 	if p.match(lexer.TOKEN_ASSIGN) {
 		value = p.parseExpr()
 	}
-	p.expectNewline()
+	p.expectNewlineAfterValueExpr(value)
 	return ast.ConstEnumMemberDecl{Position: pos, Name: name, Value: value}
 }
 
@@ -739,7 +739,7 @@ func (p *Parser) parseGlobalDecl() *ast.GlobalDecl {
 	if p.match(lexer.TOKEN_ASSIGN) {
 		value = p.parseExpr()
 	}
-	p.expectNewline()
+	p.expectNewlineAfterValueExpr(value)
 
 	return &ast.GlobalDecl{Position: pos, Mutable: mutable, Name: name, Type: typ, Value: value}
 }

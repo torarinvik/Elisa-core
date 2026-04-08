@@ -915,7 +915,7 @@ func (p *Parser) parseReturn() *ast.ReturnStmt {
 	if p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_EOF && p.peek() != lexer.TOKEN_DEDENT {
 		value = p.parseValueExprAllowTuple()
 	}
-	p.expectNewline()
+	p.expectNewlineAfterValueExpr(value)
 	return &ast.ReturnStmt{Position: pos, Value: value}
 }
 
@@ -1247,7 +1247,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 			if p.match(lexer.TOKEN_ASSIGN) {
 				value = p.parseValueExprAllowTuple()
 			}
-			p.expectNewline()
+			p.expectNewlineAfterValueExpr(value)
 			return &ast.VarDeclStmt{Position: pos, Name: name, Mutable: mutable, Type: typ, Value: value}
 		}
 	}
@@ -1263,7 +1263,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 			usedBlockDefault = true
 		}
 		if !usedBlockDefault {
-			p.expectNewline()
+			p.expectNewlineAfterValueExpr(value)
 		}
 		return &ast.VarDeclStmt{Position: pos, Name: name, Value: value}
 	}
@@ -1299,7 +1299,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 			usedBlockDefault = true
 		}
 		if !usedBlockDefault {
-			p.expectNewline()
+			p.expectNewlineAfterValueExpr(value)
 		}
 		return &ast.AssignStmt{Position: pos, Target: expr, Value: value}
 
@@ -1308,7 +1308,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		lexer.TOKEN_LSHIFTEQ, lexer.TOKEN_RSHIFTEQ:
 		op := p.advance()
 		value := p.parseExpr()
-		p.expectNewline()
+		p.expectNewlineAfterValueExpr(value)
 		return &ast.AugAssignStmt{Position: pos, Op: op.Kind, Target: expr, Value: value}
 
 	case lexer.TOKEN_AS:
@@ -1321,7 +1321,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		}
 		p.expect(lexer.TOKEN_LARROW)
 		value := p.parseValueExprAllowTuple()
-		p.expectNewline()
+		p.expectNewlineAfterValueExpr(value)
 		return &ast.AsRefAssignStmt{Position: pos, Target: expr, AsKind: asKind, Value: value}
 	}
 
@@ -1370,21 +1370,5 @@ func (p *Parser) rewriteGetOrInsertBlockValue(pos lexer.Pos, value ast.Expr) ast
 
 func (p *Parser) parseSingleExprBlockValue() ast.Expr {
 	pos := p.cur().Pos
-	p.expect(lexer.TOKEN_COLON)
-	p.expectNewline()
-	body := p.parseBlock()
-	if len(body) == 0 {
-		p.errorf("block default syntax requires a final expression statement in the block")
-		return &ast.NullLit{Position: pos}
-	}
-	exprStmt, ok := body[len(body)-1].(*ast.ExprStmt)
-	if !ok || exprStmt == nil || exprStmt.Expr == nil {
-		p.errorf("block default syntax requires a final expression statement in the block")
-		return &ast.NullLit{Position: pos}
-	}
-	if len(body) == 1 {
-		return exprStmt.Expr
-	}
-	stmts := append([]ast.Stmt(nil), body[:len(body)-1]...)
-	return &ast.ExprBlock{Position: pos, Stmts: stmts, Value: exprStmt.Expr}
+	return p.parseExprBlockValue(pos, true)
 }

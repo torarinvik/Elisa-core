@@ -83,6 +83,21 @@ func (f *formatter) writePrefixedMultiline(level int, prefix string, text string
 	}
 }
 
+func indentMultilineText(text string, prefix string) string {
+	if text == "" {
+		return prefix
+	}
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if i == len(lines)-1 && line == "" {
+			lines = lines[:len(lines)-1]
+			break
+		}
+		lines[i] = prefix + line
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (f *formatter) writeAnnotations(level int, annotations []ast.Annotation) {
 	for _, annotation := range annotations {
 		f.writeLine(level, formatAnnotation(annotation))
@@ -1024,15 +1039,27 @@ func formatExpr(expr ast.Expr) string {
 	case *ast.MoveExpr:
 		return "move " + formatExpr(n.Operand)
 	case *ast.CallExpr:
+		funcText := formatExpr(n.Func)
 		parts := make([]string, 0, len(n.Args))
+		multiline := strings.Contains(funcText, "\n")
 		for i, arg := range n.Args {
+			argText := formatExpr(arg)
+			if strings.Contains(argText, "\n") {
+				multiline = true
+				argText = indentMultilineText(argText, indentUnit)
+			}
 			if name := n.ArgName(i); name != "" {
-				parts = append(parts, name+": "+formatExpr(arg))
+				parts = append(parts, name+": "+argText)
 			} else {
-				parts = append(parts, formatExpr(arg))
+				parts = append(parts, argText)
 			}
 		}
-		line := formatExpr(n.Func) + "(" + strings.Join(parts, ", ") + ")"
+		line := ""
+		if multiline {
+			line = funcText + "(\n" + strings.Join(parts, ",\n") + "\n)"
+		} else {
+			line = funcText + "(" + strings.Join(parts, ", ") + ")"
+		}
 		if len(n.WithArgs) != 0 || len(n.WithBundles) != 0 {
 			line += " with " + formatWithValueClause(n.WithBundles, n.WithArgs, n.WithItemOrder)
 		}
@@ -1085,6 +1112,18 @@ func formatExpr(expr ast.Expr) string {
 			parts = append(parts, formatExpr(elem))
 		}
 		return "(" + strings.Join(parts, ", ") + ")"
+	case *ast.ExprBlock:
+		lines := []string{"do:"}
+		for _, stmt := range n.Stmts {
+			formatted := strings.TrimRight(FormatStmt(stmt), "\n")
+			for _, line := range strings.Split(formatted, "\n") {
+				lines = append(lines, indentUnit+line)
+			}
+		}
+		for _, line := range strings.Split(strings.TrimRight(formatExpr(n.Value), "\n"), "\n") {
+			lines = append(lines, indentUnit+line)
+		}
+		return strings.Join(lines, "\n")
 	case *ast.VariantTestExpr:
 		if n.Pattern == nil {
 			return "<variant-test>"
