@@ -200,6 +200,7 @@ func specializeExportFuncType(a *Analyzer, base *FuncType, bindings map[string]T
 		Poststates:             cloneFuncPoststates(specialized.Poststates),
 		Params:                 append([]Type(nil), specialized.Params...),
 		ExplicitParamCount:     specialized.ExplicitParamCount,
+		ExplicitParamNames:     append([]string(nil), specialized.ExplicitParamNames...),
 		ImplicitParamNames:     append([]string(nil), specialized.ImplicitParamNames...),
 		Return:                 specialized.Return,
 		Variadic:               specialized.Variadic,
@@ -214,7 +215,15 @@ func sameExportSignature(left *FuncType, right *FuncType) bool {
 	if left == nil || right == nil {
 		return left == right
 	}
-	if left.Variadic != right.Variadic || funcTypeExplicitParamCount(left) != funcTypeExplicitParamCount(right) || len(left.ImplicitParamNames) != len(right.ImplicitParamNames) || len(left.Params) != len(right.Params) {
+	if left.Variadic != right.Variadic || funcTypeExplicitParamCount(left) != funcTypeExplicitParamCount(right) || len(left.ExplicitParamNames) != len(right.ExplicitParamNames) || len(left.ImplicitParamNames) != len(right.ImplicitParamNames) || len(left.Params) != len(right.Params) {
+		return false
+	}
+	for i := range left.ExplicitParamNames {
+		if left.ExplicitParamNames[i] != right.ExplicitParamNames[i] {
+			return false
+		}
+	}
+	if len(left.ImplicitParamNames) != len(right.ImplicitParamNames) {
 		return false
 	}
 	for i := range left.ImplicitParamNames {

@@ -121,3 +121,56 @@ def read(box: CallbackBox) -> i64:
 		t.Fatalf("expected no receiver rewriting for real field function call, got %d args", len(call.Args))
 	}
 }
+
+func TestAnalyzeExtensionMethodNamedArgsAndDoBlock(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "extension_method_named_args.llcontext", `
+struct Box:
+    value: i64
+
+impl Box:
+    def adjust(self: Box, delta: i64, scale: i64) -> i64:
+        return self.value + delta * scale
+
+def read(box: Box) -> i64:
+    return box.adjust(scale: 3, delta: do:
+        seed = 4
+        seed
+    )
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+
+	funcSym, ok := result.GlobalScope.Lookup("read")
+	if !ok {
+		t.Fatal("expected read symbol")
+	}
+	decl, ok := funcSym.Node.(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected read decl, got %T", funcSym.Node)
+	}
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	call, ok := ret.Value.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected rewritten call, got %T", ret.Value)
+	}
+	callee, ok := call.Func.(*ast.Ident)
+	if !ok || !strings.HasPrefix(callee.Name, "__ext__") {
+		t.Fatalf("expected mangled extension callee, got %T %#v", call.Func, call.Func)
+	}
+	if len(call.LoweredArgs()) != 3 {
+		t.Fatalf("expected receiver plus two ordered explicit args, got %d", len(call.LoweredArgs()))
+	}
+	if receiver, ok := call.LoweredArgs()[0].(*ast.Ident); !ok || receiver.Name != "box" {
+		t.Fatalf("expected lowered receiver arg box, got %T %#v", call.LoweredArgs()[0], call.LoweredArgs()[0])
+	}
+	if _, ok := call.LoweredArgs()[1].(*ast.ExprBlock); !ok {
+		t.Fatalf("expected reordered delta arg to be do block, got %T", call.LoweredArgs()[1])
+	}
+	if lit, ok := call.LoweredArgs()[2].(*ast.IntLit); !ok || lit.Value != "3" {
+		t.Fatalf("expected reordered scale arg 3, got %T %#v", call.LoweredArgs()[2], call.LoweredArgs()[2])
+	}
+}

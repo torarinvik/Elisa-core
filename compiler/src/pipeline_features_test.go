@@ -61,6 +61,47 @@ func TestRunCLIInterpretsSimpleProgram(t *testing.T) {
 	}
 }
 
+func TestRunCLIInterpretsNamedRuntimeFunctionCalls(t *testing.T) {
+	fixtureDir := t.TempDir()
+	sourcePath := filepath.Join(fixtureDir, "interpret_named_runtime_call.llcontext")
+	src := "extern puts(text: any u8&) -> int\nextern assert(cond: bool) -> void\n\ndef main() -> int:\n    printed: int = puts(text: do:\n        prefix: static u8& = \"hi\"\n        prefix.cast[any u8&]\n    )\n    assert(cond: printed == 2)\n    return printed\n"
+	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write named-runtime interpreter fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "interpret", sourcePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected interpreter named-runtime fixture to succeed, stderr:\n%s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "hi") {
+		t.Fatalf("expected interpreter output to include runtime puts text, got:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "[ result   ] 2") {
+		t.Fatalf("expected interpreter output to report result 2, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunCLIRejectsBadNamedRuntimeFunctionCall(t *testing.T) {
+	fixtureDir := t.TempDir()
+	sourcePath := filepath.Join(fixtureDir, "interpret_bad_named_runtime_call.llcontext")
+	src := "extern assert(cond: bool) -> void\n\ndef main() -> int:\n    assert(value: true)\n    return 0\n"
+	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write bad named-runtime interpreter fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "interpret", sourcePath}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected interpreter named-runtime fixture to fail")
+	}
+	if !strings.Contains(stderr.String(), `unknown argument "value"`) {
+		t.Fatalf("expected semantic rejection for unknown named runtime arg, got:\n%s", stderr.String())
+	}
+}
+
 func TestCompileServerRequestSupportsIRInterpretAndLLVM(t *testing.T) {
 	src := "def add_twice(x: i64) -> i64:\n    return x + x\n\ndef main() -> i64:\n    return add_twice(21)\n"
 	buildResp, status := executeCompileServerRequest(compileServerRequest{

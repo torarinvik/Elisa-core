@@ -58,6 +58,11 @@ type StructValue struct {
 
 type runtimeFunc func([]Value) (Value, error)
 
+type runtimeFuncInfo struct {
+	fn     runtimeFunc
+	params []ast.ParamDecl
+}
+
 type Interpreter struct {
 	result       *semantic.Result
 	stdout       io.Writer
@@ -65,11 +70,12 @@ type Interpreter struct {
 	structs      map[string]*ast.StructDecl
 	consts       map[string]Value
 	globals      map[string]Value
-	runtimeFuncs map[string]runtimeFunc
+	runtimeFuncs map[string]runtimeFuncInfo
 }
 
 type frame struct {
 	locals map[string]Value
+	parent *frame
 }
 
 type signalKind int
@@ -106,10 +112,19 @@ func Execute(result *semantic.Result, options Options) (*Result, error) {
 		consts:    map[string]Value{},
 		globals:   map[string]Value{},
 	}
-	interp.runtimeFuncs = map[string]runtimeFunc{
-		"puts":    interp.runtimePuts,
-		"rt_puts": interp.runtimePuts,
-		"assert":  interp.runtimeAssert,
+	interp.runtimeFuncs = map[string]runtimeFuncInfo{
+		"puts": {
+			fn:     interp.runtimePuts,
+			params: []ast.ParamDecl{{Name: "text"}},
+		},
+		"rt_puts": {
+			fn:     interp.runtimePuts,
+			params: []ast.ParamDecl{{Name: "text"}},
+		},
+		"assert": {
+			fn:     interp.runtimeAssert,
+			params: []ast.ParamDecl{{Name: "cond"}},
+		},
 	}
 	if err := interp.bootstrap(); err != nil {
 		return nil, err
@@ -335,7 +350,7 @@ func stringifyValue(value Value) (string, error) {
 
 func (i *Interpreter) callFunctionByName(name string, args []Value) (Value, error) {
 	if runtimeFn, ok := i.runtimeFuncs[name]; ok {
-		return runtimeFn(cloneArgs(args))
+		return runtimeFn.fn(cloneArgs(args))
 	}
 	fn, ok := i.functions[name]
 	if !ok || fn == nil {
@@ -383,6 +398,10 @@ func (i *Interpreter) callFunction(fn *ast.FuncDecl, positional []Value, named m
 		return VoidValue(), nil
 	}
 	return VoidValue(), fmt.Errorf("%s: reached end of function %q without return", fn.Pos(), fn.Name)
+}
+
+func childFrame(parent *frame) *frame {
+	return &frame{locals: map[string]Value{}, parent: parent}
 }
 
 func bindCallArgs(dst map[string]Value, params []ast.ParamDecl, positional []Value, named map[string]Value) error {
@@ -761,6 +780,18 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 			return VoidValue(), err
 		}
 		return FunctionValue(name), nil
+	case *ast.ExprBlock:
+		blockFrame := childFrame(frame)
+		for _, stmt := range n.Stmts {
+			signal, err := i.execStmt(blockFrame, stmt)
+			if err != nil {
+				return VoidValue(), err
+			}
+			if signal.kind != signalNone {
+				return VoidValue(), fmt.Errorf("expression block does not support control transfer")
+			}
+		}
+		return i.evalExpr(blockFrame, n.Value)
 	case *ast.CanExpr:
 		return i.evalExpr(frame, n.Expr)
 	default:
@@ -986,10 +1017,18 @@ func (i *Interpreter) evalCallExpr(frame *frame, expr *ast.CallExpr) (Value, err
 		}
 	}
 	if runtimeFn, ok := i.runtimeFuncs[name]; ok {
-		if len(named) != 0 {
-			return VoidValue(), fmt.Errorf("runtime function %q does not support named arguments", name)
+		if len(named) == 0 {
+			return runtimeFn.fn(positional)
 		}
-		return runtimeFn(positional)
+		bound := map[string]Value{}
+		if err := bindCallArgs(bound, runtimeFn.params, positional, named); err != nil {
+			return VoidValue(), fmt.Errorf("%s: %w", expr.Pos(), err)
+		}
+		ordered := make([]Value, 0, len(runtimeFn.params))
+		for _, param := range runtimeFn.params {
+			ordered = append(ordered, bound[param.Name].Clone())
+		}
+		return runtimeFn.fn(ordered)
 	}
 	if decl, ok := i.functions[name]; ok && decl != nil {
 		return i.callFunction(decl, positional, named)
@@ -1067,8 +1106,8 @@ func (i *Interpreter) constructStruct(decl *ast.StructDecl, positional []Value, 
 }
 
 func (i *Interpreter) lookupValue(frame *frame, name string) (Value, error) {
-	if frame != nil {
-		if value, ok := frame.locals[name]; ok {
+	for current := frame; current != nil; current = current.parent {
+		if value, ok := current.locals[name]; ok {
 			return value.Clone(), nil
 		}
 	}
@@ -1091,12 +1130,13 @@ func (i *Interpreter) resolveSlot(frame *frame, expr ast.Expr) (*valueSlot, erro
 	switch n := expr.(type) {
 	case *ast.Ident:
 		name := n.Name
-		if frame != nil {
-			if _, ok := frame.locals[name]; ok {
+		for current := frame; current != nil; current = current.parent {
+			if _, ok := current.locals[name]; ok {
+				scopeFrame := current
 				return &valueSlot{
-					get: func() Value { return frame.locals[name].Clone() },
+					get: func() Value { return scopeFrame.locals[name].Clone() },
 					set: func(value Value) error {
-						frame.locals[name] = value.Clone()
+						scopeFrame.locals[name] = value.Clone()
 						return nil
 					},
 				}, nil

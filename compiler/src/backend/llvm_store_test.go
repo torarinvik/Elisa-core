@@ -150,3 +150,47 @@ def build() -> i64:
 		t.Fatalf("expected named do expression arg setup statements to lower into IR, got:\n%s", output)
 	}
 }
+
+func TestGenerateLLVMIRForNamedGenericFunctionCallArgs(t *testing.T) {
+	src := `def pick_second[T](first: T, second: T) -> T:
+    return second
+
+def build() -> i64:
+    return pick_second[i64](second: 7, first: do:
+        seed = 3
+        seed + 1
+    )
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_named_generic_function_call_args.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "store i64 3") {
+		t.Fatalf("expected named generic do expression arg setup statements to lower into IR, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRForNamedExtensionMethodCallArgs(t *testing.T) {
+	src := `struct Box:
+    value: i64
+
+impl Box:
+    def adjust(self: Box, delta: i64, scale: i64) -> i64:
+        return self.value + delta * scale
+
+def build(box: Box) -> i64:
+    return box.adjust(scale: 3, delta: do:
+        seed = 4
+        seed
+    )
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_named_extension_method_call_args.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "__ext__") {
+		t.Fatalf("expected named extension method call to lower through mangled extension symbol, got:\n%s", output)
+	}
+}
