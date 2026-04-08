@@ -103,3 +103,18 @@ func TestAnalyzeDoExprBlock(t *testing.T) {
 		t.Fatalf("unexpected semantic errors: %v", errs)
 	}
 }
+
+func TestAnalyzeCallWithDoExprBlockArg(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "do_expr_block_call.llcontext", `extern consume(x: i64) -> i64
+
+def build() -> i64:
+    value = consume(do:
+        base = 9
+        base + 4
+    )
+    return value
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}

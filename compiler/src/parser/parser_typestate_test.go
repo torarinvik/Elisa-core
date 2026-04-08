@@ -1571,6 +1571,28 @@ func TestFormatCallWithDoExprBlockArg(t *testing.T) {
 	}
 }
 
+func TestParseCallWithDoExprBlockArg(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep() -> i64:\n    value = consume(do:\n        base = 40\n        base + 2\n    )\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok || len(fn.Body) != 1 {
+		t.Fatalf("expected single function body stmt, got %#v", file.Decls[0])
+	}
+	decl, ok := fn.Body[0].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected var decl stmt, got %T", fn.Body[0])
+	}
+	call, ok := decl.Value.(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 {
+		t.Fatalf("expected call expr with one arg, got %#v", decl.Value)
+	}
+	if _, ok := call.Args[0].(*ast.ExprBlock); !ok {
+		t.Fatalf("expected do block arg, got %T", call.Args[0])
+	}
+}
+
 func TestParseChildrenToOverrideExpr(t *testing.T) {
 	file, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        BreakStmt\n\ndef keep(stmt: Lua.Stmt) -> Lua.Node:\n    return children(stmt to Lua.Node).node\n")
 	if len(errs) != 0 {

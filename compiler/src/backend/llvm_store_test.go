@@ -80,3 +80,23 @@ func TestGenerateLLVMIRForDoExprBlock(t *testing.T) {
 		t.Fatalf("expected do expression setup statements to lower into IR, got:\n%s", output)
 	}
 }
+
+func TestGenerateLLVMIRForCallWithDoExprBlockArg(t *testing.T) {
+	src := `extern consume(x: i64) -> i64
+
+def build() -> i64:
+    value = consume(do:
+        base = 5
+        base + 7
+    )
+    return value
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_do_expr_block_call.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "@consume") {
+		t.Fatalf("expected do expression call arg lowering to call consume, got:\n%s", output)
+	}
+}
