@@ -4119,15 +4119,16 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 		}
 		return invalidType
 	}
-	if expr.NamedArgCount() != 0 {
-		a.errorf(expr.Pos(), "named arguments are only supported for enum constructors")
-	}
 	explicitParamCount := funcTypeExplicitParamCount(ft)
-	if !ft.Variadic && len(expr.Args) != explicitParamCount {
-		a.errorf(expr.Pos(), "function %q expects %d arguments, got %d", ft.Name, explicitParamCount, len(expr.Args))
+	orderedArgs, orderedOK := a.resolveFunctionCallArgs(expr, ft)
+	if !orderedOK {
+		return invalidType
 	}
-	if ft.Variadic && len(expr.Args) < explicitParamCount {
-		a.errorf(expr.Pos(), "variadic function %q expects at least %d arguments, got %d", ft.Name, explicitParamCount, len(expr.Args))
+	if !ft.Variadic && len(orderedArgs) != explicitParamCount {
+		a.errorf(expr.Pos(), "function %q expects %d arguments, got %d", ft.Name, explicitParamCount, len(orderedArgs))
+	}
+	if ft.Variadic && len(orderedArgs) < explicitParamCount {
+		a.errorf(expr.Pos(), "variadic function %q expects at least %d arguments, got %d", ft.Name, explicitParamCount, len(orderedArgs))
 	}
 	bindings := map[string]Type{}
 	shapeBindings := map[string]Shape{}
@@ -4136,20 +4137,20 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	specializedParamTypes := map[int]Type{}
 	regionParams := regionParamSet(ft.RegionParams)
 	limit := explicitParamCount
-	if len(expr.Args) < limit {
-		limit = len(expr.Args)
+	if len(orderedArgs) < limit {
+		limit = len(orderedArgs)
 	}
-	for i := 0; i < len(expr.Args); i++ {
+	for i := 0; i < len(orderedArgs); i++ {
 		var argType Type
 		if i < limit {
 			expectedType := a.substituteType(ft.Params[i], bindings, shapeBindings, regionBindings, permissionBindings)
-			argType = a.analyzeValueExpr(expr.Args[i], expectedType)
+			argType = a.analyzeValueExpr(orderedArgs[i], expectedType)
 			if actualFuncType, ok := argType.(*FuncType); ok {
 				if !actualFuncType.ReturnProvenanceKnown {
-					a.inferFuncReturnProvenanceForExpr(expr.Args[i], actualFuncType)
+					a.inferFuncReturnProvenanceForExpr(orderedArgs[i], actualFuncType)
 				}
 				if !actualFuncType.ReturnBorrowedOwnerRefsKnown {
-					a.inferFuncReturnBorrowedOwnerRefsForExpr(expr.Args[i], actualFuncType)
+					a.inferFuncReturnBorrowedOwnerRefsForExpr(orderedArgs[i], actualFuncType)
 				}
 			}
 			a.collectTypeBindings(ft.Params[i], argType, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
@@ -4158,26 +4159,26 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 				expectedType = specializedType
 				specializedParamTypes[i] = specializedType
 			}
-			if specializedType, ok := a.specializeCallbackCarryingTypeFromExpr(expectedType, expr.Args[i]); ok {
+			if specializedType, ok := a.specializeCallbackCarryingTypeFromExpr(expectedType, orderedArgs[i]); ok {
 				expectedType = specializedType
 				specializedParamTypes[i] = specializedType
 			}
 			if !AssignableTo(expectedType, argType) {
-				a.errorf(expr.Args[i].Pos(), "argument %d to %q expects %s, got %s", i+1, ft.Name, expectedType.String(), argType.String())
-				a.reportMutableRefArgumentNote(expr.Args[i].Pos(), expectedType, argType)
-				a.reportShapeMismatchNotes(expr.Args[i].Pos(), expectedType, argType)
+				a.errorf(orderedArgs[i].Pos(), "argument %d to %q expects %s, got %s", i+1, ft.Name, expectedType.String(), argType.String())
+				a.reportMutableRefArgumentNote(orderedArgs[i].Pos(), expectedType, argType)
+				a.reportShapeMismatchNotes(orderedArgs[i].Pos(), expectedType, argType)
 			}
-			if !a.tryConsumeSinkCallArg(expr.Func, ft, i, expr.Args[i], expectedType) {
-				a.consumeAffineValueExpr(expr.Args[i], expectedType, "argument to call "+strconv.Quote(ft.Name))
+			if !a.tryConsumeSinkCallArg(expr.Func, ft, i, orderedArgs[i], expectedType) {
+				a.consumeAffineValueExpr(orderedArgs[i], expectedType, "argument to call "+strconv.Quote(ft.Name))
 			}
 		} else {
-			argType = a.analyzeExpr(expr.Args[i])
+			argType = a.analyzeExpr(orderedArgs[i])
 		}
 		if (ft.Name == "spawn1" && i == 1) || (ft.Name == "pool_submit1" && i == 2) {
-			a.validateThreadTransferArg(ft.Name, expr.Args[i], argType)
+			a.validateThreadTransferArg(ft.Name, orderedArgs[i], argType)
 		}
 		if isAtomicRmwCallName(ft.Name) && i == 0 {
-			a.validateAtomicRmwArg(ft.Name, expr.Args[i], argType)
+			a.validateAtomicRmwArg(ft.Name, orderedArgs[i], argType)
 		}
 	}
 	a.resolveImplicitCallArgs(expr, ft, bindings, shapeBindings, regionBindings, permissionBindings)
@@ -5037,6 +5038,102 @@ func (a *Analyzer) analyzeBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) (T
 	a.exprTypes[expr.Func] = &FuncType{Name: "dict.entry.get_or_insert", Params: []Type{receiverType, entryType.Dict.Value}, Return: valueRefType}
 	a.exprTypes[expr] = valueRefType
 	return valueRefType, true
+}
+
+func (a *Analyzer) resolveFunctionCallArgs(expr *ast.CallExpr, ft *FuncType) ([]ast.Expr, bool) {
+	if expr == nil || ft == nil {
+		return nil, false
+	}
+	explicitParamCount := funcTypeExplicitParamCount(ft)
+	if expr.ResolvedArgsValid && len(expr.ResolvedArgs) == len(expr.Args) && expr.ResolvedCommonArgs == nil {
+		return expr.ResolvedArgs, true
+	}
+	if expr.NamedArgCount() == 0 {
+		expr.ResolvedArgsValid = true
+		expr.ResolvedArgs = expr.Args
+		expr.ResolvedCommonArgs = nil
+		return expr.Args, true
+	}
+	if ft.Variadic {
+		a.errorf(expr.Pos(), "named arguments are not supported for variadic function %q", ft.Name)
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return nil, false
+	}
+	if len(ft.ExplicitParamNames) != explicitParamCount {
+		a.errorf(expr.Pos(), "function %q does not expose parameter names for named argument calls", ft.Name)
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return nil, false
+	}
+	nameToIndex := make(map[string]int, len(ft.ExplicitParamNames))
+	for i, name := range ft.ExplicitParamNames {
+		if name == "" {
+			a.errorf(expr.Pos(), "function %q does not expose parameter names for named argument calls", ft.Name)
+			for _, arg := range expr.Args {
+				a.analyzeExpr(arg)
+			}
+			return nil, false
+		}
+		nameToIndex[name] = i
+	}
+	ordered := make([]ast.Expr, explicitParamCount)
+	filled := make([]bool, explicitParamCount)
+	sawNamed := false
+	nextPositional := 0
+	ok := true
+	for i, arg := range expr.Args {
+		name := expr.ArgName(i)
+		if name == "" {
+			if sawNamed {
+				a.errorf(arg.Pos(), "function %q cannot use positional arguments after named arguments", ft.Name)
+				a.analyzeExpr(arg)
+				ok = false
+				continue
+			}
+			if nextPositional >= explicitParamCount {
+				a.errorf(arg.Pos(), "function %q expects %d arguments, got %d", ft.Name, explicitParamCount, len(expr.Args))
+				a.analyzeExpr(arg)
+				ok = false
+				continue
+			}
+			ordered[nextPositional] = arg
+			filled[nextPositional] = true
+			nextPositional++
+			continue
+		}
+		sawNamed = true
+		index, found := nameToIndex[name]
+		if !found {
+			a.errorf(arg.Pos(), "function %q has no parameter %q", ft.Name, name)
+			a.analyzeExpr(arg)
+			ok = false
+			continue
+		}
+		if filled[index] {
+			a.errorf(arg.Pos(), "function %q parameter %q is specified more than once", ft.Name, name)
+			a.analyzeExpr(arg)
+			ok = false
+			continue
+		}
+		ordered[index] = arg
+		filled[index] = true
+	}
+	for i, wasFilled := range filled {
+		if !wasFilled {
+			a.errorf(expr.Pos(), "function %q is missing argument for parameter %q", ft.Name, ft.ExplicitParamNames[i])
+			ok = false
+		}
+	}
+	if !ok {
+		return nil, false
+	}
+	expr.ResolvedArgsValid = true
+	expr.ResolvedArgs = ordered
+	expr.ResolvedCommonArgs = nil
+	return ordered, true
 }
 
 type extensionMethodCallRewriteStatus int

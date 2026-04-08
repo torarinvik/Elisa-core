@@ -1568,11 +1568,15 @@ func (n *CallExpr) LoweredArgs() []Expr {
 	if n == nil {
 		return nil
 	}
-	if !n.ResolvedImplicitArgsValid || len(n.ResolvedImplicitArgs) == 0 {
-		return n.Args
+	explicitArgs := n.Args
+	if n.ResolvedArgsValid && len(n.ResolvedArgs) == len(n.Args) && n.ResolvedCommonArgs == nil {
+		explicitArgs = n.ResolvedArgs
 	}
-	out := make([]Expr, 0, len(n.Args)+len(n.ResolvedImplicitArgs))
-	out = append(out, n.Args...)
+	if !n.ResolvedImplicitArgsValid || len(n.ResolvedImplicitArgs) == 0 {
+		return explicitArgs
+	}
+	out := make([]Expr, 0, len(explicitArgs)+len(n.ResolvedImplicitArgs))
+	out = append(out, explicitArgs...)
 	out = append(out, n.ResolvedImplicitArgs...)
 	return out
 }

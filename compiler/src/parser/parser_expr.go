@@ -1073,7 +1073,7 @@ func (p *Parser) parseCallArgs() ([]ast.Expr, []string) {
 	}
 	for {
 		name := ""
-		if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON && !p.peekDoExprBlockStart() {
+		if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON && !p.peekImmediateGroupedBlockExprStart() {
 			name = p.advance().Text
 			p.expect(lexer.TOKEN_COLON)
 		}
@@ -1096,12 +1096,21 @@ func (p *Parser) parseCallArgs() ([]ast.Expr, []string) {
 	return args, argNames
 }
 
-func (p *Parser) peekDoExprBlockStart() bool {
+func (p *Parser) peekImmediateGroupedBlockExprStart() bool {
 	return p.peek() == lexer.TOKEN_IDENT &&
-		p.cur().Text == "do" &&
+		p.isImmediateGroupedBlockExprName(p.cur().Text) &&
 		p.pos+2 < len(p.tokens) &&
 		p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON &&
 		p.tokens[p.pos+2].Kind == lexer.TOKEN_NEWLINE
+}
+
+func (p *Parser) isImmediateGroupedBlockExprName(name string) bool {
+	switch name {
+	case "do":
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *Parser) parseWithBundleNamedArgs() []ast.WithArg {

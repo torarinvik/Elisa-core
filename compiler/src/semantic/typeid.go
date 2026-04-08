@@ -253,6 +253,7 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 		appendKeyTag(b, "func")
 		appendKeyBool(b, tt.Variadic)
 		appendKeyInt(b, funcTypeExplicitParamCount(tt))
+		appendKeyStringSlice(b, tt.ExplicitParamNames)
 		appendKeyStringSlice(b, tt.ImplicitParamNames)
 		appendGenericParamSlice(b, tt.GenericParams)
 		appendKeyStringSlice(b, tt.TypeParams)

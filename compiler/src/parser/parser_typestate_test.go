@@ -1593,6 +1593,78 @@ func TestParseCallWithDoExprBlockArg(t *testing.T) {
 	}
 }
 
+func TestParseCallNamedArgDoStillWorks(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep() -> i64:\n    value = consume(do: 3)\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok || len(fn.Body) != 1 {
+		t.Fatalf("expected single function body stmt, got %#v", file.Decls[0])
+	}
+	decl, ok := fn.Body[0].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected var decl stmt, got %T", fn.Body[0])
+	}
+	call, ok := decl.Value.(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 {
+		t.Fatalf("expected call expr with one arg, got %#v", decl.Value)
+	}
+	if call.ArgName(0) != "do" {
+		t.Fatalf("expected named arg 'do', got %q", call.ArgName(0))
+	}
+	if _, ok := call.Args[0].(*ast.IntLit); !ok {
+		t.Fatalf("expected int literal named arg value, got %T", call.Args[0])
+	}
+}
+
+func TestParseCallNamedArgWithDoExprBlock(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep() -> i64:\n    value = consume(x: do:\n        base = 40\n        base + 2\n    )\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok || len(fn.Body) != 1 {
+		t.Fatalf("expected single function body stmt, got %#v", file.Decls[0])
+	}
+	decl, ok := fn.Body[0].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected var decl stmt, got %T", fn.Body[0])
+	}
+	call, ok := decl.Value.(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 {
+		t.Fatalf("expected call expr with one arg, got %#v", decl.Value)
+	}
+	if call.ArgName(0) != "x" {
+		t.Fatalf("expected named arg 'x', got %q", call.ArgName(0))
+	}
+	if _, ok := call.Args[0].(*ast.ExprBlock); !ok {
+		t.Fatalf("expected do block named arg value, got %T", call.Args[0])
+	}
+}
+
+func TestParseListWithDoExprBlockElem(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep() -> void:\n    values: i64[2] = [do:\n        base = 40\n        base + 2\n    , 7]\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok || len(fn.Body) != 1 {
+		t.Fatalf("expected single function body stmt, got %#v", file.Decls[0])
+	}
+	decl, ok := fn.Body[0].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected var decl stmt, got %T", fn.Body[0])
+	}
+	list, ok := decl.Value.(*ast.ListLitExpr)
+	if !ok || len(list.Elems) != 2 {
+		t.Fatalf("expected list literal with two elems, got %#v", decl.Value)
+	}
+	if _, ok := list.Elems[0].(*ast.ExprBlock); !ok {
+		t.Fatalf("expected first list elem to be do block, got %T", list.Elems[0])
+	}
+}
+
 func TestParseChildrenToOverrideExpr(t *testing.T) {
 	file, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        BreakStmt\n\ndef keep(stmt: Lua.Stmt) -> Lua.Node:\n    return children(stmt to Lua.Node).node\n")
 	if len(errs) != 0 {

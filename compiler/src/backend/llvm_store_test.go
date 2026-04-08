@@ -100,3 +100,53 @@ def build() -> i64:
 		t.Fatalf("expected do expression call arg lowering to call consume, got:\n%s", output)
 	}
 }
+
+func TestGenerateLLVMIRForGroupedDoExprBlockForms(t *testing.T) {
+	src := `extern consume(x: i64, y: i64) -> i64
+
+def build() -> i64:
+    values: i64[2] = [do:
+        base = 5
+        base + 7
+    , 9]
+    value = consume(do:
+        seed = 3
+        seed + 1
+    , values[1])
+    return value
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_do_expr_block_grouped_forms.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "@consume") {
+		t.Fatalf("expected grouped do expression forms to lower into consume call, got:\n%s", output)
+	}
+	if !strings.Contains(output, "store i64 5") {
+		t.Fatalf("expected list do expression setup statements to lower into IR, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRForNamedFunctionCallArgs(t *testing.T) {
+	src := `extern consume(x: i64, y: i64) -> i64
+
+def build() -> i64:
+    value = consume(y: 7, x: do:
+        seed = 3
+        seed + 1
+    )
+    return value
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_named_function_call_args.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "@consume") {
+		t.Fatalf("expected named function call args to lower into consume call, got:\n%s", output)
+	}
+	if !strings.Contains(output, "store i64 3") {
+		t.Fatalf("expected named do expression arg setup statements to lower into IR, got:\n%s", output)
+	}
+}

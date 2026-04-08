@@ -443,6 +443,7 @@ type FuncType struct {
 	Poststates                   []FuncPoststate
 	Params                       []Type
 	ExplicitParamCount           int
+	ExplicitParamNames           []string
 	ImplicitParamNames           []string
 	Return                       Type
 	Variadic                     bool
@@ -1232,7 +1233,7 @@ func funcTypeExplicitParamCount(t *FuncType) int {
 	if t == nil {
 		return 0
 	}
-	if t.ExplicitParamCount != 0 || len(t.ImplicitParamNames) != 0 {
+	if t.ExplicitParamCount != 0 || len(t.ExplicitParamNames) != 0 || len(t.ImplicitParamNames) != 0 {
 		return t.ExplicitParamCount
 	}
 	return len(t.Params)

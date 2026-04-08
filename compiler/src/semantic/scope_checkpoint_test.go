@@ -118,3 +118,37 @@ def build() -> i64:
 		t.Fatalf("unexpected semantic errors: %v", errs)
 	}
 }
+
+func TestAnalyzeGroupedDoExprBlockForms(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "do_expr_block_grouped_forms.llcontext", `extern consume(x: i64, y: i64) -> i64
+
+def build() -> i64:
+    values: i64[2] = [do:
+        base = 9
+        base + 4
+    , 7]
+    value = consume(do:
+        seed = 3
+        seed + 1
+    , values[1])
+    return value
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}
+
+func TestAnalyzeNamedFunctionCallArgs(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "named_function_call_args.llcontext", `extern consume(x: i64, y: i64) -> i64
+
+def build() -> i64:
+    value = consume(y: 7, x: do:
+        seed = 3
+        seed + 1
+    )
+    return value
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}

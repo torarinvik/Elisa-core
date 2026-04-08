@@ -21,13 +21,13 @@ type Lexer struct {
 	pendingToks []Token
 
 	// Track paren/bracket depth to suppress INDENT/DEDENT inside groupings
-	parenDepth      int
-	pendingDoBlock  bool
-	groupedDoBlocks []groupedDoBlock
-	errors          []string
+	parenDepth           int
+	pendingGroupedBlock  bool
+	groupedBlockContexts []groupedBlockContext
+	errors               []string
 }
 
-type groupedDoBlock struct {
+type groupedBlockContext struct {
 	ParenDepth int
 	BaseIndent int
 }
@@ -44,21 +44,30 @@ func New(filename string, src []byte) *Lexer {
 	}
 }
 
-func (l *Lexer) activeGroupedDoBlock() bool {
-	if len(l.groupedDoBlocks) == 0 {
+func isImmediateGroupedBlockIntroducer(text string) bool {
+	switch text {
+	case "do":
+		return true
+	default:
 		return false
 	}
-	return l.parenDepth >= l.groupedDoBlocks[len(l.groupedDoBlocks)-1].ParenDepth
 }
 
-func (l *Lexer) trimFinishedGroupedDoBlocks() {
-	for len(l.groupedDoBlocks) > 0 {
-		top := l.groupedDoBlocks[len(l.groupedDoBlocks)-1]
+func (l *Lexer) activeGroupedBlockContext() bool {
+	if len(l.groupedBlockContexts) == 0 {
+		return false
+	}
+	return l.parenDepth >= l.groupedBlockContexts[len(l.groupedBlockContexts)-1].ParenDepth
+}
+
+func (l *Lexer) trimFinishedGroupedBlockContexts() {
+	for len(l.groupedBlockContexts) > 0 {
+		top := l.groupedBlockContexts[len(l.groupedBlockContexts)-1]
 		currentIndent := l.indentStack[len(l.indentStack)-1]
 		if currentIndent > top.BaseIndent {
 			return
 		}
-		l.groupedDoBlocks = l.groupedDoBlocks[:len(l.groupedDoBlocks)-1]
+		l.groupedBlockContexts = l.groupedBlockContexts[:len(l.groupedBlockContexts)-1]
 	}
 }
 
@@ -569,7 +578,7 @@ func (l *Lexer) readIdent() Token {
 	}
 	text := bytesToStringView(l.src[start:l.pos])
 	kind := LookupKeyword(text)
-	l.pendingDoBlock = kind == TOKEN_IDENT && text == "do"
+	l.pendingGroupedBlock = kind == TOKEN_IDENT && isImmediateGroupedBlockIntroducer(text)
 	return l.finishToken(Token{Kind: kind, Text: text, Pos: p})
 }
 
@@ -582,12 +591,12 @@ func (l *Lexer) NextToken() Token {
 		return tok
 	}
 
-	// At line start, handle indentation outside groupings, and also for grouped do: blocks.
+	// At line start, handle indentation outside groupings, and also for grouped block expressions.
 	if l.atLineStart {
 		l.atLineStart = false
-		if l.parenDepth == 0 || l.activeGroupedDoBlock() {
+		if l.parenDepth == 0 || l.activeGroupedBlockContext() {
 			l.handleIndentation()
-			l.trimFinishedGroupedDoBlocks()
+			l.trimFinishedGroupedBlockContexts()
 			if len(l.pendingToks) > 0 {
 				tok := l.pendingToks[0]
 				l.pendingToks = l.pendingToks[1:]
@@ -611,8 +620,8 @@ func (l *Lexer) NextToken() Token {
 	}
 
 	ch := l.peek()
-	if l.pendingDoBlock && ch != ':' {
-		l.pendingDoBlock = false
+	if l.pendingGroupedBlock && ch != ':' {
+		l.pendingGroupedBlock = false
 	}
 
 	// Newlines
@@ -624,7 +633,7 @@ func (l *Lexer) NextToken() Token {
 		for l.pos < len(l.src) && l.peek() == '\n' {
 			l.advance()
 		}
-		if l.parenDepth > 0 && !l.activeGroupedDoBlock() {
+		if l.parenDepth > 0 && !l.activeGroupedBlockContext() {
 			// Inside ordinary grouped expressions, skip newlines silently.
 			return l.NextToken()
 		}
@@ -785,13 +794,13 @@ func (l *Lexer) NextToken() Token {
 
 	case ':':
 		l.advance()
-		if l.pendingDoBlock && l.parenDepth > 0 {
-			l.groupedDoBlocks = append(l.groupedDoBlocks, groupedDoBlock{
+		if l.pendingGroupedBlock && l.parenDepth > 0 {
+			l.groupedBlockContexts = append(l.groupedBlockContexts, groupedBlockContext{
 				ParenDepth: l.parenDepth,
 				BaseIndent: l.indentStack[len(l.indentStack)-1],
 			})
 		}
-		l.pendingDoBlock = false
+		l.pendingGroupedBlock = false
 		return l.finishToken(Token{Kind: TOKEN_COLON, Text: ":", Pos: p})
 
 	case ',':
@@ -801,7 +810,7 @@ func (l *Lexer) NextToken() Token {
 	case '(':
 		l.advance()
 		l.parenDepth++
-		l.pendingDoBlock = false
+		l.pendingGroupedBlock = false
 		return l.finishToken(Token{Kind: TOKEN_LPAREN, Text: "(", Pos: p})
 
 	case ')':
@@ -809,13 +818,13 @@ func (l *Lexer) NextToken() Token {
 		if l.parenDepth > 0 {
 			l.parenDepth--
 		}
-		l.pendingDoBlock = false
+		l.pendingGroupedBlock = false
 		return l.finishToken(Token{Kind: TOKEN_RPAREN, Text: ")", Pos: p})
 
 	case '[':
 		l.advance()
 		l.parenDepth++
-		l.pendingDoBlock = false
+		l.pendingGroupedBlock = false
 		return l.finishToken(Token{Kind: TOKEN_LBRACKET, Text: "[", Pos: p})
 
 	case ']':
@@ -823,7 +832,7 @@ func (l *Lexer) NextToken() Token {
 		if l.parenDepth > 0 {
 			l.parenDepth--
 		}
-		l.pendingDoBlock = false
+		l.pendingGroupedBlock = false
 		return l.finishToken(Token{Kind: TOKEN_RBRACKET, Text: "]", Pos: p})
 
 	case '?':
