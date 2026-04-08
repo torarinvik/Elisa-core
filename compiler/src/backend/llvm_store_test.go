@@ -10,6 +10,12 @@ func TestGenerateLLVMIRLowersStoreSugar(t *testing.T) {
     name_key: u32
     depth: u32
 
+def arena_dict_get[T](m: any dict[dstr[key_shape], T]&, key: dstr[key_shape]) -> mutable any T&?:
+    return null
+
+def arena_dict_put[T](a: mutable any Arena&, m: mutable any dict[dstr[key_shape], T]&, key: dstr[key_shape], value: T) -> mutable any T&?:
+    return null
+
 def build(owner: Arena) -> usize:
     alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
     in alloc:
@@ -19,6 +25,10 @@ def build(owner: Arena) -> usize:
         pending.push(3u32, 4u32)
         pending.truncate(1u)
         pending.clear()
+        values: mutable dict[dstr[key_shape], i64] = zeroed
+        _ = values.entry("name").found
+        _ = values.entry("name").value
+        _ = values.entry("name").insert(7)
         return pending.name_key.count + pending.depth.count
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_store.llcontext", src)
@@ -34,5 +44,11 @@ def build(owner: Arena) -> usize:
 	}
 	if !strings.Contains(output, "store.name_key.truncate.count") {
 		t.Fatalf("expected store truncate lowering for first column, got:\n%s", output)
+	}
+	if !strings.Contains(output, "dict.entry.get") {
+		t.Fatalf("expected dict entry lookup lowering, got:\n%s", output)
+	}
+	if !strings.Contains(output, "dict.entry.insert.result") {
+		t.Fatalf("expected dict entry insert lowering, got:\n%s", output)
 	}
 }

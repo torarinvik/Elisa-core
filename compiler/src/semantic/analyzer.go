@@ -2552,6 +2552,8 @@ func (a *Analyzer) containsAffineHandleValues(t Type, seen map[string]bool) bool
 		return a.containsAffineHandleValues(tt.Value, seen)
 	case *DictType:
 		return a.containsAffineHandleValues(tt.Key, seen) || a.containsAffineHandleValues(tt.Value, seen)
+	case *DictEntryType:
+		return a.containsAffineHandleValues(tt.Dict, seen)
 	case *PackedVariantViewType:
 		for _, field := range tt.Enum.Common {
 			if a.containsAffineHandleValues(field.Type, seen) {

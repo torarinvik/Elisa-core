@@ -3982,6 +3982,12 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	if a.rewriteBuiltinDictMethodCall(expr) {
 		return a.analyzeCallExpr(expr)
 	}
+	if resultType, ok := a.analyzeBuiltinDictEntryCall(expr); ok {
+		return resultType
+	}
+	if resultType, ok := a.analyzeBuiltinDictEntryInsertCall(expr); ok {
+		return resultType
+	}
 	if resultType, ok := a.analyzeBuiltinDarrayPushCall(expr); ok {
 		return resultType
 	}
@@ -4737,6 +4743,31 @@ func builtinStoreReceiverType(t Type) (*StructType, *RefType, bool) {
 	return st, refType, true
 }
 
+func builtinDictEntryValueRefType(dictType *DictType) *RefType {
+	if dictType == nil {
+		return &RefType{Elem: invalidType, Mutable: true, State: RefStateNullable, Storage: RefStorageAny, ExplicitStorage: true}
+	}
+	return &RefType{Elem: dictType.Value, Mutable: true, State: RefStateNullable, Storage: RefStorageAny, ExplicitStorage: true}
+}
+
+func builtinDictEntryReceiverType(t Type) (*DictEntryType, *RefType, bool) {
+	if t == nil {
+		return nil, nil, false
+	}
+	if entryType, ok := StripAggregateStateType(t).(*DictEntryType); ok && entryType != nil {
+		return entryType, nil, true
+	}
+	refType, ok := t.(*RefType)
+	if !ok || refType == nil || refType.Elem == nil {
+		return nil, nil, false
+	}
+	entryType, ok := StripAggregateStateType(refType.Elem).(*DictEntryType)
+	if !ok || entryType == nil {
+		return nil, nil, false
+	}
+	return entryType, refType, true
+}
+
 func builtinDictReceiverType(t Type) (*DictType, *RefType, bool) {
 	if t == nil {
 		return nil, nil, false
@@ -4882,6 +4913,75 @@ func (a *Analyzer) rewriteBuiltinDictMethodCall(expr *ast.CallExpr) bool {
 	expr.Args = rewrittenArgs
 	expr.ArgNames = nil
 	return true
+}
+
+func (a *Analyzer) analyzeBuiltinDictEntryCall(expr *ast.CallExpr) (Type, bool) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "entry" || fieldExpr.Object == nil {
+		return nil, false
+	}
+	receiverType := a.analyzeExpr(fieldExpr.Object)
+	dictType, receiverRefType, ok := builtinDictReceiverType(receiverType)
+	if !ok || dictType == nil {
+		return nil, false
+	}
+	if len(expr.Args) != 1 {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "dict entry expects 1 argument, got %d", len(expr.Args))
+	}
+	if len(expr.Args) >= 1 {
+		keyType := a.analyzeValueExpr(expr.Args[0], dictType.Key)
+		if !AssignableTo(dictType.Key, keyType) {
+			a.errorf(expr.Args[0].Pos(), "dict entry expects key of type %s, got %s", dictType.Key.String(), keyType.String())
+		}
+	}
+	mutable := false
+	if receiverRefType != nil {
+		mutable = receiverRefType.Mutable
+	} else {
+		mutable = a.exprCanYieldWritableRef(fieldExpr.Object)
+	}
+	resultType := &DictEntryType{Dict: dictType, Mutable: mutable}
+	a.exprTypes[expr.Func] = &FuncType{Name: "dict.entry", Params: []Type{receiverType, dictType.Key}, Return: resultType}
+	a.exprTypes[expr] = resultType
+	return resultType, true
+}
+
+func (a *Analyzer) analyzeBuiltinDictEntryInsertCall(expr *ast.CallExpr) (Type, bool) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "insert" || fieldExpr.Object == nil {
+		return nil, false
+	}
+	receiverType := a.analyzeExpr(fieldExpr.Object)
+	entryType, _, ok := builtinDictEntryReceiverType(receiverType)
+	if !ok || entryType == nil || entryType.Dict == nil {
+		return nil, false
+	}
+	if !entryType.Mutable {
+		a.errorf(fieldExpr.Object.Pos(), "dict entry insert requires an entry created from a mutable dict receiver")
+	}
+	if a.currentAllocExpr == nil {
+		a.errorf(expr.Pos(), "dict entry insert requires an active in <arena>: scope")
+	}
+	if len(expr.Args) != 1 {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "dict entry insert expects 1 argument, got %d", len(expr.Args))
+	}
+	if len(expr.Args) >= 1 {
+		argType := a.analyzeValueExpr(expr.Args[0], entryType.Dict.Value)
+		if !AssignableTo(entryType.Dict.Value, argType) {
+			a.errorf(expr.Args[0].Pos(), "dict entry insert expects %s, got %s", entryType.Dict.Value.String(), argType.String())
+		}
+		a.consumeAffineValueExpr(expr.Args[0], entryType.Dict.Value, "move into dict entry insert")
+	}
+	valueRefType := builtinDictEntryValueRefType(entryType.Dict)
+	a.exprTypes[expr.Func] = &FuncType{Name: "dict.entry.insert", Params: []Type{receiverType, entryType.Dict.Value}, Return: valueRefType}
+	a.exprTypes[expr] = valueRefType
+	return valueRefType, true
 }
 
 type extensionMethodCallRewriteStatus int
@@ -7821,6 +7921,9 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 	if field, ok := dstrSyntheticField(objType, fieldName); ok {
 		return field, true
 	}
+	if field, ok := dictEntrySyntheticField(objType, fieldName); ok {
+		return field, true
+	}
 	if ref, ok := objType.(*RefType); ok {
 		if ref.State != RefStateNonNull {
 			if emitDiagnostics {
@@ -8063,6 +8166,21 @@ func dstrSyntheticField(t Type, fieldName string) (Field, bool) {
 		return Field{Name: "len", Type: builtinI64Type(), Mutable: false}, true
 	}
 	return Field{}, false
+}
+
+func dictEntrySyntheticField(t Type, fieldName string) (Field, bool) {
+	entryType, _, ok := builtinDictEntryReceiverType(t)
+	if !ok || entryType == nil || entryType.Dict == nil {
+		return Field{}, false
+	}
+	switch fieldName {
+	case "found":
+		return Field{Name: "found", Type: &BuiltinType{Name: "bool"}, Mutable: false}, true
+	case "value":
+		return Field{Name: "value", Type: builtinDictEntryValueRefType(entryType.Dict), Mutable: false}, true
+	default:
+		return Field{}, false
+	}
 }
 
 func packedStoreSyntheticField(t Type, fieldName string) (Field, bool) {

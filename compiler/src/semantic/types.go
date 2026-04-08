@@ -191,6 +191,11 @@ type DictType struct {
 	SurfaceName string
 }
 
+type DictEntryType struct {
+	Dict    *DictType
+	Mutable bool
+}
+
 type SViewType struct {
 	Begin string
 	End   string
@@ -474,6 +479,7 @@ func (*ViewType) isType()              {}
 func (*DArrayViewType) isType()        {}
 func (*DStrType) isType()              {}
 func (*DictType) isType()              {}
+func (*DictEntryType) isType()         {}
 func (*SViewType) isType()             {}
 func (*PackedEnumStoreType) isType()   {}
 func (*TreeStoreType) isType()         {}
@@ -784,6 +790,15 @@ func (t *DictType) String() string {
 		return "<invalid-dict>"
 	}
 	return fmt.Sprintf("dict[%s, %s]", t.Key.String(), t.Value.String())
+}
+func (t *DictEntryType) String() string {
+	if t == nil || t.Dict == nil {
+		return "<invalid-dict-entry>"
+	}
+	if t.Mutable {
+		return fmt.Sprintf("dict.entry[mutable %s, %s]", t.Dict.Key.String(), t.Dict.Value.String())
+	}
+	return fmt.Sprintf("dict.entry[%s, %s]", t.Dict.Key.String(), t.Dict.Value.String())
 }
 func (t *SViewType) String() string {
 	return fmt.Sprintf("sview[%s, %s]", t.Begin, t.End)

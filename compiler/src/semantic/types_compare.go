@@ -159,6 +159,9 @@ func SameType(a, b Type) bool {
 	case *DictType:
 		tb, ok := b.(*DictType)
 		return ok && SameType(ta.Key, tb.Key) && SameType(ta.Value, tb.Value)
+	case *DictEntryType:
+		tb, ok := b.(*DictEntryType)
+		return ok && ta.Mutable == tb.Mutable && SameType(ta.Dict, tb.Dict)
 	case *SViewType:
 		_, ok := b.(*SViewType)
 		return ok
@@ -537,6 +540,9 @@ func matchTypePattern(pattern, actual Type) bool {
 	case *DictType:
 		a, ok := actual.(*DictType)
 		return ok && matchTypePattern(p.Key, a.Key) && matchTypePattern(p.Value, a.Value)
+	case *DictEntryType:
+		a, ok := actual.(*DictEntryType)
+		return ok && p.Mutable == a.Mutable && matchTypePattern(p.Dict, a.Dict)
 	case *SViewType:
 		_, ok := actual.(*SViewType)
 		return ok
