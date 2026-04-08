@@ -440,6 +440,12 @@ def arena_dict_put[T](a: mutable any Arena&, m: mutable any dict[dstr[key_shape]
     m.count <- m.count + 1
     return &bucket.value
 
+def arena_dict_get_or_insert[T](a: mutable any Arena&, m: mutable any dict[dstr[key_shape], T]&, key: dstr[key_shape], value: T) -> mutable any T&? error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
+    existing: mutable any T&? = arena_dict_get(m, key)
+    if existing != null:
+        return existing
+    return try arena_dict_put(a, m, key, value)
+
 def arena_dict_contains[T](m: any dict[dstr[key_shape], T]&, key: dstr[key_shape]) -> bool:
     return arena_dict_get(m, key) != null
 
@@ -570,6 +576,12 @@ def arena_dict_put__i64(a: mutable any Arena&, m: mutable any DynDict[i64]&, key
     bucket.value <- value
     m.count <- m.count + 1
     return &bucket.value
+
+def arena_dict_get_or_insert__i64(a: mutable any Arena&, m: mutable any DynDict[i64]&, key: any u8&, value: i64) -> mutable any i64&? error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
+    existing: mutable any i64&? = arena_dict_get__i64(m, key)
+    if existing != null:
+        return existing
+    return try arena_dict_put__i64(a, m, key, value)
 
 def arena_dict_contains__i64(m: any DynDict[i64]&, key: any u8&) -> bool:
     return arena_dict_get__i64(m, key) != null

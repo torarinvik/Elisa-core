@@ -131,6 +131,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("tree") {
 		return p.parseTreeDecl()
 	}
+	if p.peekIdentText("store") {
+		return p.parseStoreDecl()
+	}
 	if p.peekIdentText("affine") {
 		return p.parseStructDecl()
 	}
@@ -141,6 +144,9 @@ func (p *Parser) parseDecl() ast.Decl {
 		}
 		if p.peekIdentText("tree") {
 			return p.parseTreeDeclWithAnnotations(annotations)
+		}
+		if p.peekIdentText("store") {
+			return p.parseStoreDeclWithAnnotations(annotations)
 		}
 		if p.peekIdentText("affine") {
 			return p.parseStructDeclWithAnnotations(annotations)
@@ -156,14 +162,14 @@ func (p *Parser) parseDecl() ast.Decl {
 			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ENUM {
 				return p.parsePackedEnumDeclWithAnnotations(annotations)
 			}
-			p.errorf("declaration annotations must be followed by def, extern, struct, tree, enum, packed enum, or impl, got %s", p.cur())
+			p.errorf("declaration annotations must be followed by def, extern, struct, store, tree, enum, packed enum, or impl, got %s", p.cur())
 			return nil
 		case lexer.TOKEN_ENUM:
 			return p.parseEnumDeclWithAnnotations(annotations)
 		case lexer.TOKEN_STRUCT:
 			return p.parseStructDeclWithAnnotations(annotations)
 		default:
-			p.errorf("declaration annotations must be followed by def, extern, struct, tree, enum, packed enum, or impl, got %s", p.cur())
+			p.errorf("declaration annotations must be followed by def, extern, struct, store, tree, enum, packed enum, or impl, got %s", p.cur())
 			return nil
 		}
 	}
@@ -201,6 +207,29 @@ func (p *Parser) parseDecl() ast.Decl {
 		p.advance()
 		return nil
 	}
+}
+
+func (p *Parser) parseStoreDecl() *ast.StoreDecl {
+	return p.parseStoreDeclWithAnnotations(nil)
+}
+
+func (p *Parser) parseStoreDeclWithAnnotations(annotations []ast.Annotation) *ast.StoreDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("store")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+	fields := make([]ast.FieldDecl, 0, p.estimateIndentedItemCount())
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		fields = append(fields, p.parseFieldDecl())
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	return &ast.StoreDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Fields: fields}
 }
 
 func (p *Parser) parseAnnotations() []ast.Annotation {

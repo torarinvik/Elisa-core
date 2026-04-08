@@ -3011,10 +3011,17 @@ func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
 	savedPackedStoreResolutions := a.currentPackedStoreResolutions
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedTreeAllocOwner := a.currentTreeAllocOwner
+	savedAllocExpr := a.currentAllocExpr
 	if owner, _, ok := a.classifyTreeAllocOwnerExpr(stmt.Store); ok {
 		a.currentTreeAllocOwner = owner
+		if owner.Kind == treeAllocOwnerArena || owner.Kind == treeAllocOwnerRegion {
+			a.currentAllocExpr = stmt.Store
+		} else {
+			a.currentAllocExpr = nil
+		}
 		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
 		a.currentTreeAllocOwner = savedTreeAllocOwner
+		a.currentAllocExpr = savedAllocExpr
 		a.currentPackedVariantViews = savedPackedVariantViews
 		a.currentPackedStores = savedPackedStores
 		a.currentPackedStoreResolutions = savedPackedStoreResolutions
@@ -3026,8 +3033,10 @@ func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
 	}
 	if treeStore, ok := storeType.(*TreeStoreType); ok {
 		a.currentTreeAllocOwner = treeAllocOwnerBinding{Kind: treeAllocOwnerStore, StoreFamily: treeStore.Family}
+		a.currentAllocExpr = nil
 		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
 		a.currentTreeAllocOwner = savedTreeAllocOwner
+		a.currentAllocExpr = savedAllocExpr
 		a.currentPackedVariantViews = savedPackedVariantViews
 		a.currentPackedStores = savedPackedStores
 		a.currentPackedStoreResolutions = savedPackedStoreResolutions
@@ -3038,6 +3047,7 @@ func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
 		a.errorf(stmt.Store.Pos(), "in-block requires a tree store, packed enum store, perm, an Arena value, or an Arena reference, got %s", storeType.String())
 		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
 		a.currentTreeAllocOwner = savedTreeAllocOwner
+		a.currentAllocExpr = savedAllocExpr
 		a.currentPackedVariantViews = savedPackedVariantViews
 		a.currentPackedStores = savedPackedStores
 		a.currentPackedStoreResolutions = savedPackedStoreResolutions
@@ -3051,6 +3061,7 @@ func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
 	a.currentPackedStores[packedStore.Enum.Name] = packedStore
 	a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
 	a.currentTreeAllocOwner = savedTreeAllocOwner
+	a.currentAllocExpr = savedAllocExpr
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
 	a.currentPackedStoreResolutions = savedPackedStoreResolutions

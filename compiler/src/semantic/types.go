@@ -332,6 +332,9 @@ type StructType struct {
 	Alignment        int
 	HasAlignment     bool
 	Decl             *ast.StructDecl
+	StoreDecl        *ast.StoreDecl
+	Store            bool
+	StoreFieldOrder  []string
 	Builtin          bool
 }
 
@@ -753,6 +756,9 @@ func (t *ArrayType) String() string {
 	return fmt.Sprintf("%s[%s]", t.Elem.String(), t.Size)
 }
 func (t *DArrayType) String() string {
+	if t == nil || t.Elem == nil {
+		return "<invalid-darray>"
+	}
 	if isWildcardShape(t.Shape) {
 		return fmt.Sprintf("darray[%s]", t.Elem.String())
 	}

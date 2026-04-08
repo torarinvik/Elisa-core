@@ -119,6 +119,7 @@ type Analyzer struct {
 	currentPackedStores               map[string]*PackedEnumStoreType
 	currentPackedStoreResolutions     map[*Symbol]packedStoreResolution
 	currentTreeAllocOwner             treeAllocOwnerBinding
+	currentAllocExpr                  ast.Expr
 	currentPoolScopes                 []poolScopeState
 	currentFunctionUsedPermissions    map[string]bool
 	currentFunctionUsedPermissionRefs []ast.PermissionRef
@@ -163,10 +164,10 @@ const (
 )
 
 type checkpointState struct {
-	Kind         checkpointKind
-	Target       ast.Expr
-	TargetType   Type
-	Valid        bool
+	Kind          checkpointKind
+	Target        ast.Expr
+	TargetType    Type
+	Valid         bool
 	InvalidatedBy string
 }
 
@@ -704,6 +705,36 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					Affine:           n.Affine,
 					ReprC:            n.ReprC,
 					Decl:             n,
+				}
+				a.namedTypes[qualifiedName] = st
+			case *ast.StoreDecl:
+				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
+				if _, exists := a.namedTypes[qualifiedName]; exists {
+					a.errorf(n.Pos(), "duplicate type %q", qualifiedName)
+					return
+				}
+				storeFields := make([]ast.FieldDecl, 0, len(n.Fields))
+				for _, field := range n.Fields {
+					storeFields = append(storeFields, ast.FieldDecl{
+						Position:    field.Position,
+						Annotations: append([]ast.Annotation(nil), field.Annotations...),
+						Name:        field.Name,
+						Mutable:     true,
+						Type: &ast.GenericType{
+							Position: field.Position,
+							Name:     "darray",
+							Args:     []ast.TypeExpr{field.Type},
+						},
+					})
+				}
+				st := &StructType{
+					Name:            qualifiedName,
+					Fields:          map[string]Field{},
+					Decl:            &ast.StructDecl{Position: n.Position, Annotations: append([]ast.Annotation(nil), n.Annotations...), Name: n.Name, ReprC: true, Fields: storeFields},
+					StoreDecl:       n,
+					Store:           true,
+					StoreFieldOrder: make([]string, 0, len(n.Fields)),
+					ReprC:           true,
 				}
 				a.namedTypes[qualifiedName] = st
 			case *ast.ConstEnumDecl:
@@ -1332,18 +1363,46 @@ func (a *Analyzer) populateTreeStructDecl(treeType *TreeType, structDecl *ast.Tr
 
 func (a *Analyzer) populateStructFields(decls []scopedDecl) {
 	for _, scoped := range decls {
-		stDecl, ok := scoped.Decl.(*ast.StructDecl)
-		if !ok {
+		var stDecl *ast.StructDecl
+		var storeDecl *ast.StoreDecl
+		switch decl := scoped.Decl.(type) {
+		case *ast.StructDecl:
+			stDecl = decl
+		case *ast.StoreDecl:
+			storeDecl = decl
+		default:
 			continue
 		}
-		st, _ := a.namedTypes[joinQualifiedName(scoped.Namespace, stDecl.Name)].(*StructType)
+		typeName := ""
+		if stDecl != nil {
+			typeName = stDecl.Name
+		} else {
+			typeName = storeDecl.Name
+		}
+		st, _ := a.namedTypes[joinQualifiedName(scoped.Namespace, typeName)].(*StructType)
 		if st == nil {
 			continue
 		}
-		if st.Builtin && isBuiltinRuntimeStructName(stDecl.Name) {
+		if stDecl != nil && st.Builtin && isBuiltinRuntimeStructName(stDecl.Name) {
 			continue
 		}
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+			if storeDecl != nil {
+				for _, field := range storeDecl.Fields {
+					if _, exists := st.Fields[field.Name]; exists {
+						a.errorf(field.Position, "duplicate field %q in store %q", field.Name, storeDecl.Name)
+						continue
+					}
+					fieldType := a.resolveType(field.Type)
+					st.Fields[field.Name] = Field{
+						Name:    field.Name,
+						Type:    &DArrayType{Elem: fieldType, Shape: &WildcardShape{}, SurfaceName: "darray"},
+						Mutable: true,
+					}
+					st.StoreFieldOrder = append(st.StoreFieldOrder, field.Name)
+				}
+				return
+			}
 			a.analyzeStructAnnotations(stDecl, st)
 			a.withGenericParams(stDecl.GenericParams, nil, func() {
 				for _, field := range stDecl.Fields {

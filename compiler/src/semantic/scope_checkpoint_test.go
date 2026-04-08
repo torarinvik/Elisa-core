@@ -35,3 +35,52 @@ func TestAnalyzeRejectsReverseRangeForNow(t *testing.T) {
 		t.Fatalf("expected reverse range diagnostic, got:\n%s", all)
 	}
 }
+
+func TestAnalyzeStoreAndDictSugar(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "store_dict_sugar.llcontext", `
+store PendingGotoStore:
+    name_key: u32
+    depth: u32
+
+def arena_dict_get[T](m: any dict[dstr[key_shape], T]&, key: dstr[key_shape]) -> mutable any T&?:
+    return null
+
+def arena_dict_contains[T](m: any dict[dstr[key_shape], T]&, key: dstr[key_shape]) -> bool:
+    return false
+
+def arena_dict_remove[T](m: mutable any dict[dstr[key_shape], T]&, key: dstr[key_shape]) -> bool:
+    return false
+
+def arena_dict_clear[T](m: mutable any dict[dstr[key_shape], T]&):
+    pass
+
+def arena_dict_reserve[T](a: mutable any Arena&, m: mutable any dict[dstr[key_shape], T]&, min_capacity: usize) -> void:
+    pass
+
+def arena_dict_put[T](a: mutable any Arena&, m: mutable any dict[dstr[key_shape], T]&, key: dstr[key_shape], value: T) -> mutable any T&?:
+    return null
+
+def arena_dict_get_or_insert[T](a: mutable any Arena&, m: mutable any dict[dstr[key_shape], T]&, key: dstr[key_shape], value: T) -> mutable any T&?:
+    return null
+
+def build(owner: Arena, key: dstr[key_shape]) -> usize:
+    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    in alloc:
+        pending: mutable PendingGotoStore = zeroed
+        pending.reserve(8u)
+        pending.push(1u32, 2u32)
+        pending.truncate(1u)
+        pending.clear()
+        values: mutable dict[dstr[key_shape], i64] = zeroed
+        _ = values.put(key, 7)
+        _ = values.get_or_insert(key, 9)
+        _ = values.get(key)
+        _ = values.contains(key)
+        _ = values.remove(key)
+        values.clear()
+        return pending.name_key.count + values.count
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}

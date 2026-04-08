@@ -340,6 +340,12 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 		return nil
 	case *ast.ContextDecl:
 		return nil
+	case *ast.StoreDecl:
+		if st, ok := g.lookupStructType(n.Name); ok {
+			_, err := g.ensureStructBody(n.Name, st)
+			return err
+		}
+		return nil
 	case *ast.ErrorDecl:
 		return nil
 	case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
@@ -449,6 +455,12 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 	case *ast.PermissionDecl:
 		return nil
 	case *ast.ContextDecl:
+		return nil
+	case *ast.StoreDecl:
+		if st, ok := g.lookupStructType(n.Name); ok {
+			_, err := g.ensureStructBody(n.Name, st)
+			return err
+		}
 		return nil
 	case *ast.ErrorDecl:
 		return nil

@@ -150,6 +150,13 @@ type StructDecl struct {
 	Fields           []FieldDecl
 }
 
+type StoreDecl struct {
+	Position    lexer.Pos
+	Annotations []Annotation
+	Name        string
+	Fields      []FieldDecl
+}
+
 type GenericParamKind int
 
 const (
@@ -1150,6 +1157,7 @@ func (n *TreeStructDecl) Pos() lexer.Pos   { return n.Position }
 
 func (n *GlobalDecl) Pos() lexer.Pos     { return n.Position }
 func (n *StructDecl) Pos() lexer.Pos     { return n.Position }
+func (n *StoreDecl) Pos() lexer.Pos      { return n.Position }
 func (n *FuncDecl) Pos() lexer.Pos       { return n.Position }
 func (n *ExternFuncDecl) Pos() lexer.Pos { return n.Position }
 func (n *ExternVarDecl) Pos() lexer.Pos  { return n.Position }
@@ -1291,6 +1299,7 @@ func (*TreeBlockDecl) nodeTag()             {}
 func (*TreeStructDecl) nodeTag()            {}
 func (*GlobalDecl) nodeTag()                {}
 func (*StructDecl) nodeTag()                {}
+func (*StoreDecl) nodeTag()                 {}
 func (*FuncDecl) nodeTag()                  {}
 func (*ExternFuncDecl) nodeTag()            {}
 func (*ExternVarDecl) nodeTag()             {}
@@ -1410,6 +1419,7 @@ func (*EnumDecl) declTag()         {}
 func (*TreeDecl) declTag()         {}
 func (*GlobalDecl) declTag()       {}
 func (*StructDecl) declTag()       {}
+func (*StoreDecl) declTag()        {}
 func (*FuncDecl) declTag()         {}
 func (*ExternFuncDecl) declTag()   {}
 func (*ExternVarDecl) declTag()    {}
@@ -1490,40 +1500,40 @@ func (*UnwrapElseExpr) exprTag()                    {}
 func (*AllocExpr) exprTag()                         {}
 func (*CanExpr) exprTag()                           {}
 
-func (*AssignStmt) stmtTag()      {}
-func (*AugAssignStmt) stmtTag()   {}
-func (*AsRefAssignStmt) stmtTag() {}
-func (*VarDeclStmt) stmtTag()     {}
-func (*TupleBindStmt) stmtTag()   {}
-func (*MoveBindStmt) stmtTag()    {}
-func (*OpenStmt) stmtTag()        {}
-func (*ViewStmt) stmtTag()        {}
-func (*DeferStmt) stmtTag()       {}
-func (*ReturnStmt) stmtTag()      {}
-func (*IfStmt) stmtTag()          {}
-func (*WhileStmt) stmtTag()       {}
-func (*ForStmt) stmtTag()         {}
-func (*IterForStmt) stmtTag()     {}
-func (*ParallelForStmt) stmtTag() {}
-func (*InStoreStmt) stmtTag()     {}
-func (*CanStmt) stmtTag()         {}
-func (*WithStmt) stmtTag()        {}
-func (*ScopeStmt) stmtTag()       {}
-func (*PoolStmt) stmtTag()        {}
-func (*LockStmt) stmtTag()        {}
-func (*PassStmt) stmtTag()        {}
-func (*PanicStmt) stmtTag()       {}
-func (*ExprStmt) stmtTag()        {}
-func (*StaticIfStmt) stmtTag()    {}
-func (*StaticErrorStmt) stmtTag() {}
-func (*DiscardStmt) stmtTag()     {}
-func (*RegionStmt) stmtTag()      {}
-func (*DestroyStmt) stmtTag()     {}
-func (*MarkStmt) stmtTag()        {}
-func (*CheckpointStmt) stmtTag()  {}
-func (*RestoreStmt) stmtTag()     {}
+func (*AssignStmt) stmtTag()            {}
+func (*AugAssignStmt) stmtTag()         {}
+func (*AsRefAssignStmt) stmtTag()       {}
+func (*VarDeclStmt) stmtTag()           {}
+func (*TupleBindStmt) stmtTag()         {}
+func (*MoveBindStmt) stmtTag()          {}
+func (*OpenStmt) stmtTag()              {}
+func (*ViewStmt) stmtTag()              {}
+func (*DeferStmt) stmtTag()             {}
+func (*ReturnStmt) stmtTag()            {}
+func (*IfStmt) stmtTag()                {}
+func (*WhileStmt) stmtTag()             {}
+func (*ForStmt) stmtTag()               {}
+func (*IterForStmt) stmtTag()           {}
+func (*ParallelForStmt) stmtTag()       {}
+func (*InStoreStmt) stmtTag()           {}
+func (*CanStmt) stmtTag()               {}
+func (*WithStmt) stmtTag()              {}
+func (*ScopeStmt) stmtTag()             {}
+func (*PoolStmt) stmtTag()              {}
+func (*LockStmt) stmtTag()              {}
+func (*PassStmt) stmtTag()              {}
+func (*PanicStmt) stmtTag()             {}
+func (*ExprStmt) stmtTag()              {}
+func (*StaticIfStmt) stmtTag()          {}
+func (*StaticErrorStmt) stmtTag()       {}
+func (*DiscardStmt) stmtTag()           {}
+func (*RegionStmt) stmtTag()            {}
+func (*DestroyStmt) stmtTag()           {}
+func (*MarkStmt) stmtTag()              {}
+func (*CheckpointStmt) stmtTag()        {}
+func (*RestoreStmt) stmtTag()           {}
 func (*RestoreCheckpointStmt) stmtTag() {}
-func (*ResetStmt) stmtTag()       {}
+func (*ResetStmt) stmtTag()             {}
 
 func (n *CallExpr) ArgName(index int) string {
 	if n == nil || index < 0 || index >= len(n.ArgNames) {

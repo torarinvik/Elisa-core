@@ -1439,6 +1439,26 @@ func TestParseReverseIterableForScopeAndCheckpointStatements(t *testing.T) {
 	}
 }
 
+func TestParseStoreDecl(t *testing.T) {
+	file, errs := parseSourceFile(t, "store PendingGotoStore:\n    name_key: u32\n    depth: u32\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	storeDecl, ok := file.Decls[0].(*ast.StoreDecl)
+	if !ok {
+		t.Fatalf("expected store decl, got %T", file.Decls[0])
+	}
+	if storeDecl.Name != "PendingGotoStore" {
+		t.Fatalf("expected store name PendingGotoStore, got %q", storeDecl.Name)
+	}
+	if len(storeDecl.Fields) != 2 || storeDecl.Fields[0].Name != "name_key" || storeDecl.Fields[1].Name != "depth" {
+		t.Fatalf("unexpected store fields: %#v", storeDecl.Fields)
+	}
+	if formatted := unparse.FormatDecl(storeDecl); !strings.Contains(formatted, "store PendingGotoStore:") {
+		t.Fatalf("expected formatter to preserve store syntax, got:\n%s", formatted)
+	}
+}
+
 func TestParseChildrenToOverrideExpr(t *testing.T) {
 	file, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        BreakStmt\n\ndef keep(stmt: Lua.Stmt) -> Lua.Node:\n    return children(stmt to Lua.Node).node\n")
 	if len(errs) != 0 {

@@ -3979,6 +3979,9 @@ func (a *Analyzer) specializeCallbackCarryingTypeFromExpr(expected Type, actualE
 }
 
 func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
+	if a.rewriteBuiltinDictMethodCall(expr) {
+		return a.analyzeCallExpr(expr)
+	}
 	if resultType, ok := a.analyzeBuiltinDarrayPushCall(expr); ok {
 		return resultType
 	}
@@ -3992,6 +3995,18 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 		return resultType
 	}
 	if resultType, ok := a.analyzeBuiltinDarrayTruncateCall(expr); ok {
+		return resultType
+	}
+	if resultType, ok := a.analyzeBuiltinStorePushCall(expr); ok {
+		return resultType
+	}
+	if resultType, ok := a.analyzeBuiltinStoreReserveCall(expr); ok {
+		return resultType
+	}
+	if resultType, ok := a.analyzeBuiltinStoreClearCall(expr); ok {
+		return resultType
+	}
+	if resultType, ok := a.analyzeBuiltinStoreTruncateCall(expr); ok {
 		return resultType
 	}
 	switch a.rewriteExtensionMethodCall(expr) {
@@ -4510,6 +4525,148 @@ func (a *Analyzer) analyzeBuiltinDarrayTruncateCall(expr *ast.CallExpr) (Type, b
 	return resultType, true
 }
 
+func builtinStoreResultRefType(storeType *StructType, receiverRefType *RefType) *RefType {
+	if receiverRefType != nil {
+		return receiverRefType
+	}
+	return &RefType{Elem: storeType, Mutable: true, State: RefStateNonNull, Storage: RefStorageAny, ExplicitStorage: true}
+}
+
+func (a *Analyzer) analyzeBuiltinStorePushCall(expr *ast.CallExpr) (Type, bool) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "push" || fieldExpr.Object == nil {
+		return nil, false
+	}
+	receiverType := a.analyzeExpr(fieldExpr.Object)
+	storeType, receiverRefType, ok := builtinStoreReceiverType(receiverType)
+	if !ok || storeType == nil {
+		return nil, false
+	}
+	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
+		a.errorf(fieldExpr.Object.Pos(), "store push requires a mutable store receiver")
+	}
+	if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
+		a.errorf(expr.Pos(), "store push requires an active in <arena>: scope")
+	}
+	if len(expr.Args) != len(storeType.StoreFieldOrder) {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "store push expects %d arguments, got %d", len(storeType.StoreFieldOrder), len(expr.Args))
+		resultType := builtinStoreResultRefType(storeType, receiverRefType)
+		a.exprTypes[expr] = resultType
+		return resultType, true
+	}
+	for i, name := range storeType.StoreFieldOrder {
+		field := storeType.Fields[name]
+		darrayField, ok := field.Type.(*DArrayType)
+		if !ok || darrayField == nil {
+			continue
+		}
+		argType := a.analyzeValueExpr(expr.Args[i], darrayField.Elem)
+		if !AssignableTo(darrayField.Elem, argType) {
+			a.errorf(expr.Args[i].Pos(), "store push argument %d (%s) expects %s, got %s", i+1, name, darrayField.Elem.String(), argType.String())
+		}
+		a.consumeAffineValueExpr(expr.Args[i], darrayField.Elem, "move into store push")
+	}
+	resultType := builtinStoreResultRefType(storeType, receiverRefType)
+	a.exprTypes[expr.Func] = &FuncType{Name: "store.push", Params: []Type{resultType}, Return: resultType}
+	a.exprTypes[expr] = resultType
+	return resultType, true
+}
+
+func (a *Analyzer) analyzeBuiltinStoreReserveCall(expr *ast.CallExpr) (Type, bool) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "reserve" || fieldExpr.Object == nil {
+		return nil, false
+	}
+	receiverType := a.analyzeExpr(fieldExpr.Object)
+	storeType, receiverRefType, ok := builtinStoreReceiverType(receiverType)
+	if !ok || storeType == nil {
+		return nil, false
+	}
+	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
+		a.errorf(fieldExpr.Object.Pos(), "store reserve requires a mutable store receiver")
+	}
+	if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
+		a.errorf(expr.Pos(), "store reserve requires an active in <arena>: scope")
+	}
+	if len(expr.Args) != 1 {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "store reserve expects 1 argument, got %d", len(expr.Args))
+	}
+	usizeType := a.namedTypes["usize"]
+	if len(expr.Args) >= 1 {
+		argType := a.analyzeValueExpr(expr.Args[0], usizeType)
+		if !AssignableTo(usizeType, argType) {
+			a.errorf(expr.Args[0].Pos(), "store reserve expects %s, got %s", usizeType.String(), argType.String())
+		}
+	}
+	resultType := builtinStoreResultRefType(storeType, receiverRefType)
+	a.exprTypes[expr.Func] = &FuncType{Name: "store.reserve", Params: []Type{resultType, usizeType}, Return: resultType}
+	a.exprTypes[expr] = resultType
+	return resultType, true
+}
+
+func (a *Analyzer) analyzeBuiltinStoreClearCall(expr *ast.CallExpr) (Type, bool) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "clear" || fieldExpr.Object == nil {
+		return nil, false
+	}
+	receiverType := a.analyzeExpr(fieldExpr.Object)
+	storeType, receiverRefType, ok := builtinStoreReceiverType(receiverType)
+	if !ok || storeType == nil {
+		return nil, false
+	}
+	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
+		a.errorf(fieldExpr.Object.Pos(), "store clear requires a mutable store receiver")
+	}
+	if len(expr.Args) != 0 {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "store clear expects 0 arguments, got %d", len(expr.Args))
+	}
+	resultType := builtinStoreResultRefType(storeType, receiverRefType)
+	a.exprTypes[expr.Func] = &FuncType{Name: "store.clear", Params: []Type{resultType}, Return: resultType}
+	a.exprTypes[expr] = resultType
+	return resultType, true
+}
+
+func (a *Analyzer) analyzeBuiltinStoreTruncateCall(expr *ast.CallExpr) (Type, bool) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "truncate" || fieldExpr.Object == nil {
+		return nil, false
+	}
+	receiverType := a.analyzeExpr(fieldExpr.Object)
+	storeType, receiverRefType, ok := builtinStoreReceiverType(receiverType)
+	if !ok || storeType == nil {
+		return nil, false
+	}
+	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
+		a.errorf(fieldExpr.Object.Pos(), "store truncate requires a mutable store receiver")
+	}
+	if len(expr.Args) != 1 {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "store truncate expects 1 argument, got %d", len(expr.Args))
+	}
+	usizeType := a.namedTypes["usize"]
+	if len(expr.Args) >= 1 {
+		argType := a.analyzeValueExpr(expr.Args[0], usizeType)
+		if !AssignableTo(usizeType, argType) {
+			a.errorf(expr.Args[0].Pos(), "store truncate expects %s, got %s", usizeType.String(), argType.String())
+		}
+	}
+	resultType := builtinStoreResultRefType(storeType, receiverRefType)
+	a.exprTypes[expr.Func] = &FuncType{Name: "store.truncate", Params: []Type{resultType, usizeType}, Return: resultType}
+	a.exprTypes[expr] = resultType
+	return resultType, true
+}
+
 func builtinDArrayPushReceiverType(t Type) (*DArrayType, *RefType, bool) {
 	if t == nil {
 		return nil, nil, false
@@ -4560,6 +4717,171 @@ func builtinDArrayExtendSourceCompatible(elemType Type, sourceType Type) bool {
 		}
 	}
 	return false
+}
+
+func builtinStoreReceiverType(t Type) (*StructType, *RefType, bool) {
+	if t == nil {
+		return nil, nil, false
+	}
+	if st, ok := StripAggregateStateType(t).(*StructType); ok && st != nil && st.Store {
+		return st, nil, true
+	}
+	refType, ok := t.(*RefType)
+	if !ok || refType == nil || refType.Elem == nil {
+		return nil, nil, false
+	}
+	st, ok := StripAggregateStateType(refType.Elem).(*StructType)
+	if !ok || st == nil || !st.Store {
+		return nil, nil, false
+	}
+	return st, refType, true
+}
+
+func builtinDictReceiverType(t Type) (*DictType, *RefType, bool) {
+	if t == nil {
+		return nil, nil, false
+	}
+	if dictType, ok := t.(*DictType); ok && dictType != nil {
+		return dictType, nil, true
+	}
+	refType, ok := t.(*RefType)
+	if !ok || refType == nil || refType.Elem == nil {
+		return nil, nil, false
+	}
+	dictType, ok := refType.Elem.(*DictType)
+	if !ok || dictType == nil {
+		return nil, nil, false
+	}
+	return dictType, refType, true
+}
+
+func builtinDictReceiverTypeExpr(pos lexer.Pos, dictType *DictType, mutable bool) ast.TypeExpr {
+	if dictType == nil {
+		return refToTypeExprWithStorage(&ast.NamedType{Position: pos, Name: "void"}, false, ast.RefStorageAny)
+	}
+	keyExpr := astTypeExprForBuiltinMethodRewrite(pos, dictType.Key)
+	valueExpr := astTypeExprForBuiltinMethodRewrite(pos, dictType.Value)
+	elem := &ast.BuiltinTypeExpr{
+		Position: pos,
+		Name:     "dict",
+		TypeArgs: []ast.TypeExpr{keyExpr, valueExpr},
+	}
+	if mutable {
+		elem = &ast.BuiltinTypeExpr{
+			Position: pos,
+			Name:     "dict",
+			TypeArgs: []ast.TypeExpr{keyExpr, valueExpr},
+		}
+		return refToTypeExprWithStorage(&ast.MutableType{Position: pos, Elem: elem}, false, ast.RefStorageAny)
+	}
+	return refToTypeExprWithStorage(elem, false, ast.RefStorageAny)
+}
+
+func astTypeExprForBuiltinMethodRewrite(pos lexer.Pos, typ Type) ast.TypeExpr {
+	switch t := StripAggregateStateType(typ).(type) {
+	case *BuiltinType:
+		return &ast.NamedType{Position: pos, Name: t.Name}
+	case *DStrType:
+		if isWildcardShape(t.Shape) {
+			return &ast.BuiltinTypeExpr{Position: pos, Name: "dstr"}
+		}
+		return &ast.BuiltinTypeExpr{Position: pos, Name: "dstr", ValueArgs: []ast.Expr{&ast.Ident{Position: pos, Name: t.Shape.String()}}}
+	case *DictType:
+		return &ast.BuiltinTypeExpr{
+			Position: pos,
+			Name:     "dict",
+			TypeArgs: []ast.TypeExpr{
+				astTypeExprForBuiltinMethodRewrite(pos, t.Key),
+				astTypeExprForBuiltinMethodRewrite(pos, t.Value),
+			},
+		}
+	default:
+		return &ast.NamedType{Position: pos, Name: typ.String()}
+	}
+}
+
+func dictMethodReceiverExpr(receiver ast.Expr, receiverType Type, mutable bool) ast.Expr {
+	if _, ok := receiverType.(*RefType); ok {
+		return receiver
+	}
+	dictType, _, ok := builtinDictReceiverType(receiverType)
+	if !ok || dictType == nil {
+		return &ast.AddrOfExpr{Position: receiver.Pos(), Operand: receiver}
+	}
+	return &ast.CastExpr{
+		Position: receiver.Pos(),
+		Operand:  &ast.AddrOfExpr{Position: receiver.Pos(), Operand: receiver},
+		Target:   builtinDictReceiverTypeExpr(receiver.Pos(), dictType, mutable),
+		Origin:   ast.CastExprOriginGeneral,
+	}
+}
+
+func (a *Analyzer) rewriteBuiltinDictMethodCall(expr *ast.CallExpr) bool {
+	if a == nil || expr == nil {
+		return false
+	}
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Object == nil {
+		return false
+	}
+	if a.exprResolvesToTypePath(fieldExpr.Object) {
+		return false
+	}
+	receiverType := a.analyzeExpr(fieldExpr.Object)
+	dictType, receiverRefType, ok := builtinDictReceiverType(receiverType)
+	if !ok || dictType == nil {
+		return false
+	}
+	method := fieldExpr.Field
+	helperName := ""
+	mutates := false
+	needsAlloc := false
+	switch method {
+	case "get":
+		helperName = "arena_dict_get"
+	case "contains":
+		helperName = "arena_dict_contains"
+	case "remove":
+		helperName = "arena_dict_remove"
+		mutates = true
+	case "clear":
+		helperName = "arena_dict_clear"
+		mutates = true
+	case "reserve":
+		helperName = "arena_dict_reserve"
+		mutates = true
+		needsAlloc = true
+	case "put":
+		helperName = "arena_dict_put"
+		mutates = true
+		needsAlloc = true
+	case "get_or_insert":
+		helperName = "arena_dict_get_or_insert"
+		mutates = true
+		needsAlloc = true
+	default:
+		return false
+	}
+	if mutates && receiverRefType == nil && !a.exprCanYieldWritableRef(fieldExpr.Object) {
+		a.errorf(fieldExpr.Object.Pos(), "dict %s requires a mutable dict receiver", method)
+		return true
+	}
+	if needsAlloc {
+		if a.currentAllocExpr == nil {
+			a.errorf(expr.Pos(), "dict %s requires an active in <arena>: scope", method)
+			return true
+		}
+	}
+	rewrittenArgs := make([]ast.Expr, 0, len(expr.Args)+2)
+	if needsAlloc {
+		rewrittenArgs = append(rewrittenArgs, a.currentAllocExpr)
+	}
+	rewrittenArgs = append(rewrittenArgs, dictMethodReceiverExpr(fieldExpr.Object, receiverType, mutates))
+	rewrittenArgs = append(rewrittenArgs, expr.Args...)
+	expr.Func = &ast.Ident{Position: fieldExpr.Position, Name: helperName}
+	expr.Args = rewrittenArgs
+	expr.ArgNames = nil
+	return true
 }
 
 type extensionMethodCallRewriteStatus int

@@ -4312,6 +4312,18 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if value, actualType, handled, err := s.emitBuiltinDArrayTruncateCall(expr); handled {
 		return value, actualType, err
 	}
+	if value, actualType, handled, err := s.emitBuiltinStorePushCall(expr); handled {
+		return value, actualType, err
+	}
+	if value, actualType, handled, err := s.emitBuiltinStoreReserveCall(expr); handled {
+		return value, actualType, err
+	}
+	if value, actualType, handled, err := s.emitBuiltinStoreClearCall(expr); handled {
+		return value, actualType, err
+	}
+	if value, actualType, handled, err := s.emitBuiltinStoreTruncateCall(expr); handled {
+		return value, actualType, err
+	}
 	if value, actualType, handled, err := s.emitSpecializedMemcpyCall(expr); handled {
 		return value, actualType, err
 	}
@@ -4406,6 +4418,24 @@ func builtinDArrayExtendSourceType(t semantic.Type) (semantic.Type, bool) {
 		}
 	}
 	return nil, false
+}
+
+func builtinStoreReceiverType(t semantic.Type) (*semantic.StructType, *semantic.RefType, bool) {
+	if t == nil {
+		return nil, nil, false
+	}
+	if st, ok := semantic.StripAggregateStateType(t).(*semantic.StructType); ok && st != nil && st.Store {
+		return st, nil, true
+	}
+	refType, ok := t.(*semantic.RefType)
+	if !ok || refType == nil || refType.Elem == nil {
+		return nil, nil, false
+	}
+	st, ok := semantic.StripAggregateStateType(refType.Elem).(*semantic.StructType)
+	if !ok || st == nil || !st.Store {
+		return nil, nil, false
+	}
+	return st, refType, true
 }
 
 func (s *functionState) emitBuiltinDArrayPushCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
@@ -4796,6 +4826,35 @@ func (s *functionState) emitBuiltinDArrayCapacityPtr(darrayPtr C.LLVMValueRef, d
 	return capacityPtr, s.g.result.NamedTypes["usize"], nil
 }
 
+func (s *functionState) emitBuiltinStoreReceiverPtr(receiver ast.Expr, receiverRefType *semantic.RefType) (C.LLVMValueRef, semantic.Type, error) {
+	if receiverRefType != nil {
+		ptr, _, err := s.emitExpr(receiver, receiverRefType)
+		return ptr, receiverRefType.Elem, err
+	}
+	ptr, _, err := s.emitAddress(receiver)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ptr, s.exprType(receiver), nil
+}
+
+func (s *functionState) emitBuiltinStoreFieldDArrayPtr(storePtr C.LLVMValueRef, storeType semantic.Type, fieldName string) (C.LLVMValueRef, *semantic.DArrayType, error) {
+	fieldType, index, _, _, err := s.g.fieldInfo(storeType, fieldName)
+	if err != nil {
+		return nil, nil, err
+	}
+	darrayType, ok := fieldType.(*semantic.DArrayType)
+	if !ok || darrayType == nil {
+		return nil, nil, fmt.Errorf("store field %q is not a darray column", fieldName)
+	}
+	containerType, err := s.g.lowerType(storeType)
+	if err != nil {
+		return nil, nil, err
+	}
+	fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerType, storePtr, C.unsigned(index), cStringFree("store."+fieldName+".ptr"))
+	return fieldPtr, darrayType, nil
+}
+
 func (s *functionState) emitBuiltinDArrayEnsureCapacity(darrayPtr C.LLVMValueRef, darrayType *semantic.DArrayType, arenaRef C.LLVMValueRef, neededValue C.LLVMValueRef, name string) error {
 	if darrayType == nil {
 		return fmt.Errorf("missing darray type")
@@ -4896,6 +4955,189 @@ func (s *functionState) emitBuiltinDArrayEnsureCapacity(darrayPtr C.LLVMValueRef
 
 	C.LLVMPositionBuilderAtEnd(s.builder, contBB)
 	return nil
+}
+
+func builtinStoreResultRefType(storeType *semantic.StructType) *semantic.RefType {
+	return &semantic.RefType{Elem: storeType, Mutable: true, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+}
+
+func (s *functionState) emitBuiltinStorePushCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "push" || fieldExpr.Object == nil {
+		return nil, nil, false, nil
+	}
+	receiverType := s.exprType(fieldExpr.Object)
+	storeType, receiverRefType, ok := builtinStoreReceiverType(receiverType)
+	if !ok || storeType == nil {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != len(storeType.StoreFieldOrder) {
+		return nil, nil, true, fmt.Errorf("store push expects %d arguments, got %d", len(storeType.StoreFieldOrder), len(expr.Args))
+	}
+	owner, ok := s.lookupTreeAllocOwner()
+	if !ok || owner.arenaRef == nil {
+		return nil, nil, true, fmt.Errorf("store push requires an active in <arena>: scope")
+	}
+	storePtr, loweredStoreType, err := s.emitBuiltinStoreReceiverPtr(fieldExpr.Object, receiverRefType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	for i, name := range storeType.StoreFieldOrder {
+		fieldPtr, darrayType, err := s.emitBuiltinStoreFieldDArrayPtr(storePtr, loweredStoreType, name)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		itemValue, _, err := s.emitExpr(expr.Args[i], darrayType.Elem)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		countPtr, usizeType, err := s.emitBuiltinDArrayCountPtr(fieldPtr, darrayType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		usizeLLVMType, err := s.g.lowerType(usizeType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		currentCount := C.LLVMBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("store."+name+".push.count"))
+		neededValue := C.LLVMBuildAdd(s.builder, currentCount, C.LLVMConstInt(usizeLLVMType, 1, 0), cStringFree("store."+name+".push.needed"))
+		if err := s.emitBuiltinDArrayEnsureCapacity(fieldPtr, darrayType, owner.arenaRef, neededValue, "store."+name+".push"); err != nil {
+			return nil, nil, true, err
+		}
+		itemsPtr, err := s.emitBuiltinDArrayItemsPtr(fieldPtr, darrayType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		voidPtrType := C.LLVMPointerTypeInContext(s.g.context, 0)
+		itemsValue := C.LLVMBuildLoad2(s.builder, voidPtrType, itemsPtr, cStringFree("store."+name+".push.items"))
+		elemLLVMType, err := s.g.lowerType(darrayType.Elem)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		slotPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, itemsValue, llvmValueSlicePtr([]C.LLVMValueRef{currentCount}), 1, cStringFree("store."+name+".push.slot"))
+		C.LLVMBuildStore(s.builder, itemValue, slotPtr)
+		C.LLVMBuildStore(s.builder, neededValue, countPtr)
+	}
+	return storePtr, builtinStoreResultRefType(storeType), true, nil
+}
+
+func (s *functionState) emitBuiltinStoreReserveCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "reserve" || fieldExpr.Object == nil {
+		return nil, nil, false, nil
+	}
+	receiverType := s.exprType(fieldExpr.Object)
+	storeType, receiverRefType, ok := builtinStoreReceiverType(receiverType)
+	if !ok || storeType == nil {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 1 {
+		return nil, nil, true, fmt.Errorf("store reserve expects 1 argument, got %d", len(expr.Args))
+	}
+	owner, ok := s.lookupTreeAllocOwner()
+	if !ok || owner.arenaRef == nil {
+		return nil, nil, true, fmt.Errorf("store reserve requires an active in <arena>: scope")
+	}
+	storePtr, loweredStoreType, err := s.emitBuiltinStoreReceiverPtr(fieldExpr.Object, receiverRefType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	neededValue, _, err := s.emitExpr(expr.Args[0], s.g.result.NamedTypes["usize"])
+	if err != nil {
+		return nil, nil, true, err
+	}
+	for _, name := range storeType.StoreFieldOrder {
+		fieldPtr, darrayType, err := s.emitBuiltinStoreFieldDArrayPtr(storePtr, loweredStoreType, name)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		if err := s.emitBuiltinDArrayEnsureCapacity(fieldPtr, darrayType, owner.arenaRef, neededValue, "store."+name+".reserve"); err != nil {
+			return nil, nil, true, err
+		}
+	}
+	return storePtr, builtinStoreResultRefType(storeType), true, nil
+}
+
+func (s *functionState) emitBuiltinStoreClearCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "clear" || fieldExpr.Object == nil {
+		return nil, nil, false, nil
+	}
+	receiverType := s.exprType(fieldExpr.Object)
+	storeType, receiverRefType, ok := builtinStoreReceiverType(receiverType)
+	if !ok || storeType == nil {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 0 {
+		return nil, nil, true, fmt.Errorf("store clear expects 0 arguments, got %d", len(expr.Args))
+	}
+	storePtr, loweredStoreType, err := s.emitBuiltinStoreReceiverPtr(fieldExpr.Object, receiverRefType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	for _, name := range storeType.StoreFieldOrder {
+		fieldPtr, darrayType, err := s.emitBuiltinStoreFieldDArrayPtr(storePtr, loweredStoreType, name)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		countPtr, usizeType, err := s.emitBuiltinDArrayCountPtr(fieldPtr, darrayType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		usizeLLVMType, err := s.g.lowerType(usizeType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		C.LLVMBuildStore(s.builder, C.LLVMConstInt(usizeLLVMType, 0, 0), countPtr)
+	}
+	return storePtr, builtinStoreResultRefType(storeType), true, nil
+}
+
+func (s *functionState) emitBuiltinStoreTruncateCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "truncate" || fieldExpr.Object == nil {
+		return nil, nil, false, nil
+	}
+	receiverType := s.exprType(fieldExpr.Object)
+	storeType, receiverRefType, ok := builtinStoreReceiverType(receiverType)
+	if !ok || storeType == nil {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 1 {
+		return nil, nil, true, fmt.Errorf("store truncate expects 1 argument, got %d", len(expr.Args))
+	}
+	storePtr, loweredStoreType, err := s.emitBuiltinStoreReceiverPtr(fieldExpr.Object, receiverRefType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	limitValue, _, err := s.emitExpr(expr.Args[0], s.g.result.NamedTypes["usize"])
+	if err != nil {
+		return nil, nil, true, err
+	}
+	for _, name := range storeType.StoreFieldOrder {
+		fieldPtr, darrayType, err := s.emitBuiltinStoreFieldDArrayPtr(storePtr, loweredStoreType, name)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		countPtr, usizeType, err := s.emitBuiltinDArrayCountPtr(fieldPtr, darrayType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		usizeLLVMType, err := s.g.lowerType(usizeType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		currentCount := C.LLVMBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("store."+name+".truncate.count"))
+		shouldStore := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), limitValue, currentCount, cStringFree("store."+name+".truncate.lt"))
+		storeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("store."+name+".truncate.store"))
+		mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("store."+name+".truncate.merge"))
+		C.LLVMBuildCondBr(s.builder, shouldStore, storeBB, mergeBB)
+		C.LLVMPositionBuilderAtEnd(s.builder, storeBB)
+		C.LLVMBuildStore(s.builder, limitValue, countPtr)
+		C.LLVMBuildBr(s.builder, mergeBB)
+		C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	}
+	return storePtr, builtinStoreResultRefType(storeType), true, nil
 }
 
 func (s *functionState) emitCallArg(arg ast.Expr, expected semantic.Type, fnType *semantic.FuncType, index int) (C.LLVMValueRef, semantic.Type, error) {

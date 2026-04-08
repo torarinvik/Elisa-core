@@ -188,6 +188,12 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		for _, field := range n.Fields {
 			f.writeField(level+1, field)
 		}
+	case *ast.StoreDecl:
+		f.writeAnnotations(level, n.Annotations)
+		f.writeLine(level, "store "+n.Name+":")
+		for _, field := range n.Fields {
+			f.writeField(level+1, field)
+		}
 	case *ast.InterfaceDecl:
 		f.writeLine(level, "interface "+n.Name+":")
 		for _, member := range n.Members {
