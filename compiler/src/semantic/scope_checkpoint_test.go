@@ -191,3 +191,56 @@ def build() -> i64:
 		t.Fatalf("unexpected semantic errors: %v", errs)
 	}
 }
+
+func TestAnalyzeNamedFunctionCallArgsThroughLocalAlias(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "named_function_call_args_local_alias.llcontext", `def add(x: i64, y: i64) -> i64:
+    return x + y
+
+def build() -> i64:
+    f = add
+    return f(y: 7, x: do:
+        seed = 3
+        seed
+    )
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}
+
+func TestAnalyzeNamedFunctionCallArgsThroughGlobalAlias(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "named_function_call_args_global_alias.llcontext", `def add(x: i64, y: i64) -> i64:
+    return x + y
+
+global runner: func(i64, i64) -> i64 = add
+
+def build() -> i64:
+    return runner(y: 7, x: do:
+        seed = 3
+        seed
+    )
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}
+
+func TestAnalyzeNamedFunctionCallArgsThroughGlobalFieldAlias(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "named_function_call_args_global_field_alias.llcontext", `struct CallbackBox:
+    run: func(i64, i64) -> i64
+
+def add(x: i64, y: i64) -> i64:
+    return x + y
+
+global BOX: CallbackBox = CallbackBox(add)
+
+def build() -> i64:
+    return BOX.run(y: 7, x: do:
+        seed = 3
+        seed
+    )
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}

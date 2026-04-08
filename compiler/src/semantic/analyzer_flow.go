@@ -9669,6 +9669,60 @@ func (a *Analyzer) functionValueTypeForExpr(expr ast.Expr) (*FuncType, bool) {
 	if expr == nil {
 		return nil, false
 	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return a.functionValueTypeForExpr(n.Inner)
+	case *ast.MoveExpr:
+		return a.functionValueTypeForExpr(n.Operand)
+	case *ast.CanExpr:
+		return a.functionValueTypeForExpr(n.Expr)
+	case *ast.FieldExpr:
+		if valueExpr, ok := a.resolveProjectedFieldValueExpr(n.Object, n.Field); ok && valueExpr != nil {
+			return a.functionValueTypeForExpr(valueExpr)
+		}
+	case *ast.Ident:
+		if a.currentScope != nil {
+			if sym, ok := a.currentScope.Lookup(n.Name); ok {
+				if fnType, ok := a.lookupCurrentFunctionValueType(sym); ok {
+					return fnType, true
+				}
+				if valueExpr, ok := a.immutableValueExprForSymbol(sym); ok && valueExpr != nil {
+					return a.functionValueTypeForExpr(valueExpr)
+				}
+				if fnType, ok := sym.Type.(*FuncType); ok {
+					cloned := a.cloneFunctionValueType(fnType)
+					if cloned == nil {
+						return nil, false
+					}
+					if !cloned.ReturnProvenanceKnown {
+						a.inferFuncReturnProvenanceForExpr(expr, cloned)
+					}
+					if !cloned.ReturnBorrowedOwnerRefsKnown {
+						a.inferFuncReturnBorrowedOwnerRefsForExpr(expr, cloned)
+					}
+					return cloned, true
+				}
+			}
+		}
+		if sym, _, ok := a.lookupVisibleGlobal(n.Name); ok {
+			if valueExpr, ok := a.immutableValueExprForSymbol(sym); ok && valueExpr != nil {
+				return a.functionValueTypeForExpr(valueExpr)
+			}
+			if fnType, ok := sym.Type.(*FuncType); ok {
+				cloned := a.cloneFunctionValueType(fnType)
+				if cloned == nil {
+					return nil, false
+				}
+				if !cloned.ReturnProvenanceKnown {
+					a.inferFuncReturnProvenanceForExpr(expr, cloned)
+				}
+				if !cloned.ReturnBorrowedOwnerRefsKnown {
+					a.inferFuncReturnBorrowedOwnerRefsForExpr(expr, cloned)
+				}
+				return cloned, true
+			}
+		}
+	}
 	valueType := a.exprTypes[expr]
 	if valueType == nil {
 		valueType = a.analyzeExpr(expr)

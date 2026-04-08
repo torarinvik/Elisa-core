@@ -171,6 +171,57 @@ def build() -> i64:
 	}
 }
 
+func TestGenerateLLVMIRForNamedLocalFunctionAliasCallArgs(t *testing.T) {
+	src := `def add(x: i64, y: i64) -> i64:
+    return x + y
+
+def build() -> i64:
+    runner: func(i64, i64) -> i64 = add
+    return runner(y: 7, x: do:
+        seed = 3
+        seed
+    )
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_named_local_function_alias_call_args.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "@add") {
+		t.Fatalf("expected named local function alias call to lower into add call, got:\n%s", output)
+	}
+	if !strings.Contains(output, "store i64 3") {
+		t.Fatalf("expected named local alias do expression arg setup statements to lower into IR, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRForNamedLocalFieldFunctionAliasCallArgs(t *testing.T) {
+	src := `struct CallbackBox:
+    run: func(i64, i64) -> i64
+
+def add(x: i64, y: i64) -> i64:
+    return x + y
+
+def build() -> i64:
+    box: CallbackBox = CallbackBox(add)
+    return box.run(y: 7, x: do:
+        seed = 3
+        seed
+    )
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_named_local_field_function_alias_call_args.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "@add") {
+		t.Fatalf("expected named local field function alias call to lower into add call, got:\n%s", output)
+	}
+	if !strings.Contains(output, "store i64 3") {
+		t.Fatalf("expected named local field alias do expression arg setup statements to lower into IR, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRForNamedExtensionMethodCallArgs(t *testing.T) {
 	src := `struct Box:
     value: i64

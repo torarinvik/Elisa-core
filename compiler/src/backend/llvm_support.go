@@ -2367,16 +2367,60 @@ func resolveBackendDictType(keyType semantic.Type, valueType semantic.Type, surf
 	return &semantic.DictType{Key: keyType, Value: valueType, SurfaceName: surfaceName}, nil
 }
 
+func preferBackendLiveIdentType(cached semantic.Type, live semantic.Type) semantic.Type {
+	if live == nil {
+		return cached
+	}
+	if cached == nil {
+		return live
+	}
+	if semantic.SameType(cached, live) {
+		return cached
+	}
+	strippedCached := semantic.StripAggregateStateType(cached)
+	strippedLive := semantic.StripAggregateStateType(live)
+	if cachedView, ok := strippedCached.(*semantic.TreeVariantViewType); ok && cachedView != nil && cachedView.Category != nil {
+		if liveCategory, ok := strippedLive.(*semantic.TreeCategoryType); ok && liveCategory != nil && cachedView.Category.Name == liveCategory.Name {
+			return cached
+		}
+	}
+	if cachedView, ok := strippedCached.(*semantic.PackedVariantViewType); ok && cachedView != nil && cachedView.Enum != nil {
+		if liveEnum, ok := strippedLive.(*semantic.EnumType); ok && liveEnum != nil && cachedView.Enum.Name == liveEnum.Name {
+			return cached
+		}
+	}
+	liveAcceptsCached := semantic.AssignableTo(live, cached)
+	cachedAcceptsLive := semantic.AssignableTo(cached, live)
+	switch {
+	case liveAcceptsCached && !cachedAcceptsLive:
+		return cached
+	case cachedAcceptsLive && !liveAcceptsCached:
+		return live
+	case !liveAcceptsCached && !cachedAcceptsLive:
+		return live
+	default:
+		return cached
+	}
+}
+
 func (s *functionState) exprType(expr ast.Expr) semantic.Type {
 	t := s.g.exprType(expr)
+	switch n := expr.(type) {
+	case *ast.Ident:
+		var live semantic.Type
+		if binding, ok := s.lookupBinding(n.Name); ok {
+			live = binding.typ
+		} else if s.g != nil && s.g.result != nil && s.g.result.GlobalScope != nil {
+			if sym, ok := s.g.result.GlobalScope.Lookup(n.Name); ok {
+				live = sym.Type
+			}
+		}
+		t = preferBackendLiveIdentType(t, live)
+	case *ast.ParenExpr:
+		return s.exprType(n.Inner)
+	}
 	if t == nil {
 		switch n := expr.(type) {
-		case *ast.Ident:
-			if binding, ok := s.lookupBinding(n.Name); ok {
-				t = binding.typ
-			} else if sym, ok := s.g.result.GlobalScope.Lookup(n.Name); ok {
-				t = sym.Type
-			}
 		case *ast.FieldExpr:
 			if fieldType, ok := dstrSyntheticFieldType(s.exprType(n.Object), n.Field); ok {
 				t = fieldType
@@ -2415,8 +2459,6 @@ func (s *functionState) exprType(expr ast.Expr) semantic.Type {
 			}
 		case *ast.SpecializeExpr:
 			t = s.g.exprType(n)
-		case *ast.ParenExpr:
-			return s.exprType(n.Inner)
 		}
 	}
 	if t == nil || len(s.typeMap) == 0 {

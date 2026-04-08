@@ -606,12 +606,17 @@ func matchTypePattern(pattern, actual Type) bool {
 		return matchTypePattern(p.Base, a.Base)
 	case *FuncType:
 		a, ok := actual.(*FuncType)
-		if !ok || p.Variadic != a.Variadic || funcTypeExplicitParamCount(p) != funcTypeExplicitParamCount(a) || len(p.ExplicitParamNames) != len(a.ExplicitParamNames) || len(p.ImplicitParamNames) != len(a.ImplicitParamNames) || len(p.RegionParams) != len(a.RegionParams) || len(p.ShapeParams) != len(a.ShapeParams) || len(p.FreshReturnShapeParams) != len(a.FreshReturnShapeParams) || len(p.Params) != len(a.Params) {
+		if !ok || p.Variadic != a.Variadic || funcTypeExplicitParamCount(p) != funcTypeExplicitParamCount(a) || len(p.ImplicitParamNames) != len(a.ImplicitParamNames) || len(p.RegionParams) != len(a.RegionParams) || len(p.ShapeParams) != len(a.ShapeParams) || len(p.FreshReturnShapeParams) != len(a.FreshReturnShapeParams) || len(p.Params) != len(a.Params) {
 			return false
 		}
-		for i := range p.ExplicitParamNames {
-			if p.ExplicitParamNames[i] != a.ExplicitParamNames[i] {
+		if len(p.ExplicitParamNames) != 0 {
+			if len(p.ExplicitParamNames) != len(a.ExplicitParamNames) {
 				return false
+			}
+			for i := range p.ExplicitParamNames {
+				if p.ExplicitParamNames[i] != a.ExplicitParamNames[i] {
+					return false
+				}
 			}
 		}
 		for i := range p.ImplicitParamNames {

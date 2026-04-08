@@ -4990,20 +4990,16 @@ def make_pair() -> PairOrInt:
 	}
 }
 
-func TestAnalyzeRejectsNamedArgumentsForNonEnumCalls(t *testing.T) {
+func TestAnalyzeAcceptsNamedArgumentsForFunctionCalls(t *testing.T) {
 	src := `extern add(left: int, right: int) -> int
 
 def bad() -> int:
 	return add(left: 1, right: 2)
 `
-	_, errs := parseAndAnalyze(t, "named_args_non_enum_call_reject.llcontext", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
-	}
-	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "named arguments are only supported for enum constructors") {
-		t.Fatalf("expected non-enum named-argument diagnostic, got:\n%s", all)
-	}
+	result, errs := parseAndAnalyze(t, "named_args_function_call.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "bad", "int")
 }
 
 func TestAnalyzeRejectsShadowedStatementMatchArms(t *testing.T) {
@@ -9299,7 +9295,7 @@ func TestAnalyzeRejectsEmptyArrayLiteralWithoutContext(t *testing.T) {
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "empty array literal requires an expected array type") {
+	if !strings.Contains(strings.Join(errs, "\n"), "empty list literal requires an expected array or darray type") {
 		t.Fatalf("expected empty-array context diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }

@@ -287,6 +287,25 @@ func missingPermissionFamilies(declared []string, used []string) []string {
 	return missing
 }
 
+func funcTypeUsesPermissionRowParam(fnType *FuncType) bool {
+	return fnType != nil && len(fnType.PermissionParams) != 0
+}
+
+func (a *Analyzer) grantedIncludesPermissionParam(granted map[string]bool) bool {
+	if a != nil && a.currentFuncType != nil && len(a.currentFuncType.PermissionParams) != 0 {
+		return true
+	}
+	if a == nil || len(granted) == 0 {
+		return false
+	}
+	for name := range granted {
+		if a.lookupPermissionParam(name) {
+			return true
+		}
+	}
+	return false
+}
+
 func cloneGrantedPermissionFamilies(granted map[string]bool) map[string]bool {
 	if len(granted) == 0 {
 		return map[string]bool{}
@@ -381,6 +400,9 @@ func (a *Analyzer) warnOnImplicitFunctionPermissions(decls []scopedDecl) {
 			}
 			fnType, ok := sym.Type.(*FuncType)
 			if !ok || fnType == nil {
+				return
+			}
+			if funcTypeUsesPermissionRowParam(fnType) {
 				return
 			}
 			missing := missingPermissionFamilies(fnType.DeclaredPermissions, fnType.Permissions)
@@ -667,8 +689,11 @@ func (a *Analyzer) validatePermissionUsage(decls []scopedDecl) {
 
 func (a *Analyzer) validateFunctionPermissionUsage(fn *ast.FuncDecl) {
 	granted := map[string]bool{}
+	savedFuncType := a.currentFuncType
+	defer func() { a.currentFuncType = savedFuncType }()
 	if sym, ok := a.symbolForFuncDecl(fn); ok {
 		if fnType, ok := sym.Type.(*FuncType); ok && fnType != nil {
+			a.currentFuncType = fnType
 			for _, family := range fnType.DeclaredPermissions {
 				granted[family] = true
 			}
@@ -905,6 +930,9 @@ func (a *Analyzer) validateCallPermissions(pos lexer.Pos, fnExpr ast.Expr, grant
 
 func (a *Analyzer) validateRequiredPermissions(pos lexer.Pos, fnType *FuncType, granted map[string]bool) {
 	if fnType == nil || len(fnType.Permissions) == 0 {
+		return
+	}
+	if a.grantedIncludesPermissionParam(granted) {
 		return
 	}
 	missing := make([]string, 0)

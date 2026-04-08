@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"llcontext/src/ast"
 	"llcontext/src/lexer"
 	"llcontext/src/parser"
 	"llcontext/src/semantic"
@@ -219,6 +220,47 @@ def helper[T](value: T) -> T:
 	}
 	if !specialized.HasTemperatureMode || specialized.TemperatureMode != semantic.FuncTemperatureModeHot {
 		t.Fatalf("expected specialized helper temperature metadata to be preserved, got %+v", specialized)
+	}
+}
+
+func TestInferTypeBindingsFromFuncTypesPrefersSpecializedCalleeSignature(t *testing.T) {
+	sharedGate := &semantic.StructType{Name: "SharedGate"}
+	i64Type := &semantic.BuiltinType{Name: "i64"}
+	voidType := &semantic.BuiltinType{Name: "void"}
+	base := &semantic.FuncType{
+		Name: "ctx_concurrency_work1_new",
+		GenericParams: []ast.GenericParam{
+			{Kind: ast.GenericParamType, Name: "A"},
+			{Kind: ast.GenericParamType, Name: "R"},
+		},
+		Params: []semantic.Type{
+			&semantic.FuncType{
+				Name:   "func",
+				Params: []semantic.Type{&semantic.TypeParamType{Name: "A"}},
+				Return: &semantic.TypeParamType{Name: "R"},
+			},
+			&semantic.TypeParamType{Name: "A"},
+		},
+		Return: voidType,
+	}
+	actual := &semantic.FuncType{
+		Name: "ctx_concurrency_work1_new",
+		Params: []semantic.Type{
+			&semantic.FuncType{
+				Name:   "runtime_carrier_worker",
+				Params: []semantic.Type{sharedGate},
+				Return: i64Type,
+			},
+			sharedGate,
+		},
+		Return: voidType,
+	}
+	bindings := inferTypeBindingsFromFuncTypes(base, actual)
+	if got := bindings["A"]; got == nil || !semantic.SameType(got, sharedGate) {
+		t.Fatalf("expected A to bind to SharedGate, got %#v", got)
+	}
+	if got := bindings["R"]; got == nil || !semantic.SameType(got, i64Type) {
+		t.Fatalf("expected R to bind to i64, got %#v", got)
 	}
 }
 

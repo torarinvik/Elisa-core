@@ -55,6 +55,12 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 					result = fnType
 					return
 				}
+				if valueExpr, ok := a.immutableValueExprForSymbol(sym); ok {
+					if fnType, ok := a.functionValueTypeForExpr(valueExpr); ok {
+						result = promoteWritableRefType(fnType, sym.Mutable)
+						return
+					}
+				}
 				if specializedType, ok := a.lookupCurrentSpecializedValueType(sym); ok {
 					result = promoteWritableRefType(specializedType, sym.Mutable)
 				}
@@ -75,6 +81,12 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		}
 		if sym, _, ok := a.lookupVisibleGlobal(n.Name); ok {
 			result = promoteWritableRefType(sym.Type, sym.Mutable)
+			if valueExpr, ok := a.immutableValueExprForSymbol(sym); ok {
+				if fnType, ok := a.functionValueTypeForExpr(valueExpr); ok {
+					result = promoteWritableRefType(fnType, sym.Mutable)
+					return
+				}
+			}
 			return
 		}
 		if a.currentScope != nil {
@@ -3786,6 +3798,18 @@ func (a *Analyzer) specializeFunctionValueType(expected Type, actual Type) (Type
 		return expected, false
 	}
 	changed := false
+	if len(specialized.ExplicitParamNames) == 0 && len(actualFunc.ExplicitParamNames) != 0 {
+		specialized.ExplicitParamNames = append([]string(nil), actualFunc.ExplicitParamNames...)
+		changed = true
+	}
+	if len(specialized.ImplicitParamNames) == 0 && len(actualFunc.ImplicitParamNames) != 0 {
+		specialized.ImplicitParamNames = append([]string(nil), actualFunc.ImplicitParamNames...)
+		changed = true
+	}
+	if specialized.Name == "func" && actualFunc.Name != "" && actualFunc.Name != specialized.Name {
+		specialized.Name = actualFunc.Name
+		changed = true
+	}
 	limit := len(specialized.Params)
 	if len(actualFunc.Params) < limit {
 		limit = len(actualFunc.Params)
@@ -6536,35 +6560,36 @@ func (a *Analyzer) resolveProjectedFieldValueExprAtPath(objectExpr ast.Expr, pat
 		combinedPath = append(combinedPath, path[1:]...)
 		return a.resolveProjectedFieldValueExprAtPath(n.Object, combinedPath)
 	case *ast.Ident:
-		if a.currentScope == nil {
-			return nil, false
+		if a.currentScope != nil {
+			if sym, ok := a.currentScope.Lookup(n.Name); ok {
+				if sym.Mutable {
+					return nil, false
+				}
+				if a.currentValueBindings != nil {
+					if valueExpr, ok := a.currentValueBindings[sym]; ok && valueExpr != nil {
+						return a.resolveProjectedFieldValueExprAtPath(valueExpr, path)
+					}
+					if root := symbolAliasRoot(sym); root != nil && root != sym {
+						if valueExpr, ok := a.currentValueBindings[root]; ok && valueExpr != nil {
+							return a.resolveProjectedFieldValueExprAtPath(valueExpr, path)
+						}
+					}
+				}
+				if valueExpr, ok := a.immutableValueExprForSymbol(sym); ok {
+					return a.resolveProjectedFieldValueExprAtPath(valueExpr, path)
+				}
+				return nil, false
+			}
 		}
-		sym, ok := a.currentScope.Lookup(n.Name)
+		sym, _, ok := a.lookupVisibleGlobal(n.Name)
 		if !ok || sym.Mutable {
 			return nil, false
 		}
-		if a.currentValueBindings != nil {
-			if valueExpr, ok := a.currentValueBindings[sym]; ok && valueExpr != nil {
-				return a.resolveProjectedFieldValueExprAtPath(valueExpr, path)
-			}
-			if root := symbolAliasRoot(sym); root != nil && root != sym {
-				if valueExpr, ok := a.currentValueBindings[root]; ok && valueExpr != nil {
-					return a.resolveProjectedFieldValueExprAtPath(valueExpr, path)
-				}
-			}
-		}
-		declSym := sym
-		if root := symbolAliasRoot(sym); root != nil {
-			declSym = root
-		}
-		if declSym.Kind != SymbolLocal {
+		valueExpr, ok := a.immutableValueExprForSymbol(sym)
+		if !ok {
 			return nil, false
 		}
-		decl, ok := declSym.Node.(*ast.VarDeclStmt)
-		if !ok || decl.Value == nil {
-			return nil, false
-		}
-		return a.resolveProjectedFieldValueExprAtPath(decl.Value, path)
+		return a.resolveProjectedFieldValueExprAtPath(valueExpr, path)
 	case *ast.ListLitExpr:
 		step := path[0]
 		if step.Index == nil || step.Field != "" || step.Wildcard {
@@ -6975,6 +7000,35 @@ func resolveProjectedFieldCallArgByParamName(call *ast.CallExpr, decl *ast.Exter
 		return nil, false
 	}
 	return nil, false
+}
+
+func (a *Analyzer) immutableValueExprForSymbol(sym *Symbol) (ast.Expr, bool) {
+	if sym == nil || sym.Mutable {
+		return nil, false
+	}
+	declSym := sym
+	if root := symbolAliasRoot(sym); root != nil {
+		declSym = root
+	}
+	switch decl := declSym.Node.(type) {
+	case *ast.VarDeclStmt:
+		if decl == nil || decl.Value == nil {
+			return nil, false
+		}
+		return decl.Value, true
+	case *ast.ConstDecl:
+		if decl == nil || decl.Value == nil {
+			return nil, false
+		}
+		return decl.Value, true
+	case *ast.GlobalDecl:
+		if decl == nil || decl.Value == nil {
+			return nil, false
+		}
+		return decl.Value, true
+	default:
+		return nil, false
+	}
 }
 
 func (a *Analyzer) specializeProjectedFunctionFieldType(expr *ast.FieldExpr, declared Type) Type {

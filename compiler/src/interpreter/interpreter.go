@@ -759,7 +759,7 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 		}
 		return i.evalExpr(frame, n.Alt)
 	case *ast.StructLitExpr:
-		decl, ok := i.structs[n.Name]
+		decl, ok := i.lookupStructDecl(n.Name)
 		if !ok || decl == nil {
 			return VoidValue(), fmt.Errorf("unknown struct %q", n.Name)
 		}
@@ -991,17 +991,14 @@ func interpreterDerivedStateSelfPath(expr ast.Expr) ([]string, bool) {
 }
 
 func (i *Interpreter) evalCallExpr(frame *frame, expr *ast.CallExpr) (Value, error) {
-	name, err := callableName(expr.Func)
+	calleeValue, err := i.evalExpr(frame, expr.Func)
 	if err != nil {
-		calleeValue, valueErr := i.evalExpr(frame, expr.Func)
-		if valueErr != nil {
-			return VoidValue(), err
-		}
-		if calleeValue.kind != valueFunction {
-			return VoidValue(), err
-		}
-		name = calleeValue.funcName
+		return VoidValue(), err
 	}
+	if calleeValue.kind != valueFunction {
+		return VoidValue(), fmt.Errorf("cannot call non-function value %s", calleeValue.String())
+	}
+	name := calleeValue.funcName
 	loweredArgs := expr.LoweredArgs()
 	positional := make([]Value, 0, len(loweredArgs))
 	named := map[string]Value{}
@@ -1033,7 +1030,7 @@ func (i *Interpreter) evalCallExpr(frame *frame, expr *ast.CallExpr) (Value, err
 	if decl, ok := i.functions[name]; ok && decl != nil {
 		return i.callFunction(decl, positional, named)
 	}
-	if decl, ok := i.structs[name]; ok && decl != nil {
+	if decl, ok := i.lookupStructDecl(name); ok && decl != nil {
 		if len(named) != 0 {
 			return i.constructStruct(decl, positional, named)
 		}
@@ -1051,6 +1048,40 @@ func callableName(expr ast.Expr) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported callable %T", expr)
 	}
+}
+
+func (i *Interpreter) lookupStructDecl(name string) (*ast.StructDecl, bool) {
+	if i == nil || name == "" {
+		return nil, false
+	}
+	if decl, ok := i.structs[name]; ok && decl != nil {
+		return decl, true
+	}
+	if i.result == nil || i.result.File == nil {
+		return nil, false
+	}
+	var search func([]ast.Decl) (*ast.StructDecl, bool)
+	search = func(decls []ast.Decl) (*ast.StructDecl, bool) {
+		for _, decl := range decls {
+			switch n := decl.(type) {
+			case *ast.StructDecl:
+				if n != nil && n.Name == name {
+					return n, true
+				}
+			case *ast.NamespaceDecl:
+				if found, ok := search(n.Decls); ok {
+					return found, true
+				}
+			}
+		}
+		return nil, false
+	}
+	decl, ok := search(i.result.File.Decls)
+	if !ok || decl == nil {
+		return nil, false
+	}
+	i.structs[name] = decl
+	return decl, true
 }
 
 func (i *Interpreter) constructStruct(decl *ast.StructDecl, positional []Value, named map[string]Value) (Value, error) {
@@ -1117,10 +1148,13 @@ func (i *Interpreter) lookupValue(frame *frame, name string) (Value, error) {
 	if value, ok := i.consts[name]; ok {
 		return value.Clone(), nil
 	}
+	if _, ok := i.runtimeFuncs[name]; ok {
+		return FunctionValue(name), nil
+	}
 	if _, ok := i.functions[name]; ok {
 		return FunctionValue(name), nil
 	}
-	if _, ok := i.structs[name]; ok {
+	if _, ok := i.lookupStructDecl(name); ok {
 		return FunctionValue(name), nil
 	}
 	return VoidValue(), fmt.Errorf("undefined name %q", name)
@@ -1231,7 +1265,7 @@ func (i *Interpreter) zeroValueForType(typ ast.TypeExpr) (Value, error) {
 		case "char", "int", "i8", "i16", "i32", "i64", "isize", "u8", "u16", "u32", "u64", "usize", "uintptr":
 			return IntValue(0), nil
 		default:
-			if decl, ok := i.structs[n.Name]; ok && decl != nil {
+			if decl, ok := i.lookupStructDecl(n.Name); ok && decl != nil {
 				fields := make(map[string]Value, len(decl.Fields))
 				order := make([]string, 0, len(decl.Fields))
 				for _, field := range decl.Fields {

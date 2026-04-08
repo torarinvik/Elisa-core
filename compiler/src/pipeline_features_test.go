@@ -102,6 +102,63 @@ func TestRunCLIRejectsBadNamedRuntimeFunctionCall(t *testing.T) {
 	}
 }
 
+func TestRunCLIInterpretsNamedLocalFunctionAliasCall(t *testing.T) {
+	fixtureDir := t.TempDir()
+	sourcePath := filepath.Join(fixtureDir, "interpret_named_local_function_alias.llcontext")
+	src := "def add(x: int, y: int) -> int:\n    return x + y\n\ndef main() -> int:\n    f = add\n    return f(y: 7, x: do:\n        seed = 3\n        seed\n    )\n"
+	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write named local alias interpreter fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "interpret", sourcePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected interpreter local-function-alias fixture to succeed, stderr:\n%s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "[ result   ] 10") {
+		t.Fatalf("expected interpreter output to report result 10, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunCLIInterpretsNamedGlobalFunctionAliasCall(t *testing.T) {
+	fixtureDir := t.TempDir()
+	sourcePath := filepath.Join(fixtureDir, "interpret_named_global_function_alias.llcontext")
+	src := "def add(x: int, y: int) -> int:\n    return x + y\n\nglobal runner: func(int, int) -> int = add\n\ndef main() -> int:\n    return runner(y: 7, x: do:\n        seed = 3\n        seed\n    )\n"
+	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write named global alias interpreter fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "interpret", sourcePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected interpreter global-function-alias fixture to succeed, stderr:\n%s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "[ result   ] 10") {
+		t.Fatalf("expected interpreter output to report result 10, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunCLIInterpretsNamedGlobalFieldFunctionAliasCall(t *testing.T) {
+	fixtureDir := t.TempDir()
+	sourcePath := filepath.Join(fixtureDir, "interpret_named_global_field_function_alias.llcontext")
+	src := "struct CallbackBox:\n    run: func(int, int) -> int\n\ndef add(x: int, y: int) -> int:\n    return x + y\n\nglobal BOX: CallbackBox = CallbackBox(add)\n\ndef main() -> int:\n    return BOX.run(y: 7, x: do:\n        seed = 3\n        seed\n    )\n"
+	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write named global-field alias interpreter fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "interpret", sourcePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected interpreter global-field-alias fixture to succeed, stderr:\n%s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "[ result   ] 10") {
+		t.Fatalf("expected interpreter output to report result 10, got:\n%s", stdout.String())
+	}
+}
+
 func TestCompileServerRequestSupportsIRInterpretAndLLVM(t *testing.T) {
 	src := "def add_twice(x: i64) -> i64:\n    return x + x\n\ndef main() -> i64:\n    return add_twice(21)\n"
 	buildResp, status := executeCompileServerRequest(compileServerRequest{

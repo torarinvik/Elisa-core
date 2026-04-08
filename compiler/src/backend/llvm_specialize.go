@@ -98,6 +98,36 @@ func inferTypeBindingsFromCall(fn *semantic.FuncType, args []ast.Expr, argTypes 
 	return bindings
 }
 
+func inferTypeBindingsFromFuncTypes(pattern *semantic.FuncType, actual *semantic.FuncType) map[string]semantic.Type {
+	bindings := map[string]semantic.Type{}
+	if pattern == nil || actual == nil {
+		return bindings
+	}
+	collectSpecializationBindings(pattern, actual, bindings)
+	return bindings
+}
+
+func mergeTypeBindings(dst map[string]semantic.Type, src map[string]semantic.Type) map[string]semantic.Type {
+	if len(src) == 0 {
+		if dst == nil {
+			return map[string]semantic.Type{}
+		}
+		return dst
+	}
+	if dst == nil {
+		dst = make(map[string]semantic.Type, len(src))
+	}
+	for name, typ := range src {
+		if typ == nil {
+			continue
+		}
+		if _, exists := dst[name]; !exists {
+			dst[name] = typ
+		}
+	}
+	return dst
+}
+
 func dynDictRuntimeInstance(t semantic.Type) (*semantic.GenericInstanceType, bool) {
 	gi, ok := t.(*semantic.GenericInstanceType)
 	if !ok || gi.Name != "DynDict" || len(gi.Args) != 1 {
