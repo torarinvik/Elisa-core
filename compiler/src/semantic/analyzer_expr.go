@@ -131,6 +131,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	case *ast.ZeroedLit:
 		result = invalidType
 		return
+	case *ast.ExprBlock:
+		result = a.analyzeExprBlock(n)
+		return
 	case *ast.ListLitExpr:
 		result = a.analyzeListLitExprWithExpected(n, nil)
 		return
@@ -414,6 +417,20 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = invalidType
 		return
 	}
+}
+
+func (a *Analyzer) analyzeExprBlock(expr *ast.ExprBlock) Type {
+	if expr == nil || expr.Value == nil {
+		return invalidType
+	}
+	savedScope := a.currentScope
+	a.currentScope = NewScope(savedScope)
+	for _, stmt := range expr.Stmts {
+		a.analyzeStmt(stmt)
+	}
+	result := a.analyzeExpr(expr.Value)
+	a.currentScope = savedScope
+	return result
 }
 
 func (a *Analyzer) analyzeSpecializeExpr(expr *ast.SpecializeExpr) Type {
@@ -3988,6 +4005,9 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	if resultType, ok := a.analyzeBuiltinDictEntryInsertCall(expr); ok {
 		return resultType
 	}
+	if resultType, ok := a.analyzeBuiltinDictEntryGetOrInsertCall(expr); ok {
+		return resultType
+	}
 	if resultType, ok := a.analyzeBuiltinDarrayPushCall(expr); ok {
 		return resultType
 	}
@@ -4980,6 +5000,41 @@ func (a *Analyzer) analyzeBuiltinDictEntryInsertCall(expr *ast.CallExpr) (Type, 
 	}
 	valueRefType := builtinDictEntryValueRefType(entryType.Dict)
 	a.exprTypes[expr.Func] = &FuncType{Name: "dict.entry.insert", Params: []Type{receiverType, entryType.Dict.Value}, Return: valueRefType}
+	a.exprTypes[expr] = valueRefType
+	return valueRefType, true
+}
+
+func (a *Analyzer) analyzeBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) (Type, bool) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "get_or_insert" || fieldExpr.Object == nil {
+		return nil, false
+	}
+	receiverType := a.analyzeExpr(fieldExpr.Object)
+	entryType, _, ok := builtinDictEntryReceiverType(receiverType)
+	if !ok || entryType == nil || entryType.Dict == nil {
+		return nil, false
+	}
+	if !entryType.Mutable {
+		a.errorf(fieldExpr.Object.Pos(), "dict entry get_or_insert requires an entry created from a mutable dict receiver")
+	}
+	if a.currentAllocExpr == nil {
+		a.errorf(expr.Pos(), "dict entry get_or_insert requires an active in <arena>: scope")
+	}
+	if len(expr.Args) != 1 {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "dict entry get_or_insert expects 1 argument, got %d", len(expr.Args))
+	}
+	if len(expr.Args) >= 1 {
+		argType := a.analyzeValueExpr(expr.Args[0], entryType.Dict.Value)
+		if !AssignableTo(entryType.Dict.Value, argType) {
+			a.errorf(expr.Args[0].Pos(), "dict entry get_or_insert expects %s, got %s", entryType.Dict.Value.String(), argType.String())
+		}
+		a.consumeAffineValueExpr(expr.Args[0], entryType.Dict.Value, "move into dict entry get_or_insert")
+	}
+	valueRefType := builtinDictEntryValueRefType(entryType.Dict)
+	a.exprTypes[expr.Func] = &FuncType{Name: "dict.entry.get_or_insert", Params: []Type{receiverType, entryType.Dict.Value}, Return: valueRefType}
 	a.exprTypes[expr] = valueRefType
 	return valueRefType, true
 }

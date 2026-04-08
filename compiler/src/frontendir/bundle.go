@@ -106,6 +106,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.BoolLit{})
 		gob.Register(&ast.NullLit{})
 		gob.Register(&ast.ZeroedLit{})
+		gob.Register(&ast.ExprBlock{})
 		gob.Register(&ast.BinaryExpr{})
 		gob.Register(&ast.UnaryExpr{})
 		gob.Register(&ast.MoveExpr{})

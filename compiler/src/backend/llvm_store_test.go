@@ -16,6 +16,9 @@ def arena_dict_get[T](m: any dict[dstr[key_shape], T]&, key: dstr[key_shape]) ->
 def arena_dict_put[T](a: mutable any Arena&, m: mutable any dict[dstr[key_shape], T]&, key: dstr[key_shape], value: T) -> mutable any T&?:
     return null
 
+def arena_dict_get_or_insert[T](a: mutable any Arena&, m: mutable any dict[dstr[key_shape], T]&, key: dstr[key_shape], value: T) -> mutable any T&?:
+    return null
+
 def build(owner: Arena) -> usize:
     alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
     in alloc:
@@ -26,9 +29,14 @@ def build(owner: Arena) -> usize:
         pending.truncate(1u)
         pending.clear()
         values: mutable dict[dstr[key_shape], i64] = zeroed
+        slot = values.get_or_insert("seed"):
+            base = 5
+            base
+        _ = slot
         _ = values.entry("name").found
         _ = values.entry("name").value
         _ = values.entry("name").insert(7)
+        _ = values.entry("name").get_or_insert(9)
         return pending.name_key.count + pending.depth.count
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_store.llcontext", src)
@@ -50,5 +58,8 @@ def build(owner: Arena) -> usize:
 	}
 	if !strings.Contains(output, "dict.entry.insert.result") {
 		t.Fatalf("expected dict entry insert lowering, got:\n%s", output)
+	}
+	if !strings.Contains(output, "dict.entry.get_or_insert.result") {
+		t.Fatalf("expected dict entry get_or_insert lowering, got:\n%s", output)
 	}
 }

@@ -214,6 +214,8 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, actualType, err = s.emitNullLiteral()
 	case *ast.ZeroedLit:
 		return nil, nil, fmt.Errorf("zeroed requires an expected destination type")
+	case *ast.ExprBlock:
+		value, actualType, err = s.emitExprBlock(n, expected)
 	case *ast.ListLitExpr:
 		value, actualType, err = s.emitListLitExpr(n, expected)
 	case *ast.BinaryExpr:
@@ -293,6 +295,47 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 			return nil, nil, err
 		}
 		return coerced, expected, nil
+	}
+	return value, actualType, nil
+}
+
+func (s *functionState) emitExprBlock(expr *ast.ExprBlock, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+	if expr == nil || expr.Value == nil {
+		return nil, nil, fmt.Errorf("invalid expression block")
+	}
+	savedPackedStores := s.packedStores
+	s.packedStores = s.clonePackedStores()
+	s.pushScope()
+	scope := s.scope
+	defer func() {
+		s.popScope()
+		s.packedStores = savedPackedStores
+	}()
+	for _, stmt := range expr.Stmts {
+		if s.currentBlockTerminated() {
+			s.discardScopeCleanups(scope)
+			return nil, nil, fmt.Errorf("expression block setup statements terminated control flow")
+		}
+		if err := s.emitStmt(stmt); err != nil {
+			s.discardScopeCleanups(scope)
+			return nil, nil, err
+		}
+	}
+	if s.currentBlockTerminated() {
+		s.discardScopeCleanups(scope)
+		return nil, nil, fmt.Errorf("expression block setup statements terminated control flow")
+	}
+	value, actualType, err := s.emitExpr(expr.Value, expected)
+	if err != nil {
+		s.discardScopeCleanups(scope)
+		return nil, nil, err
+	}
+	if s.currentBlockTerminated() {
+		s.discardScopeCleanups(scope)
+		return value, actualType, nil
+	}
+	if err := s.emitScopeCleanups(scope); err != nil {
+		return nil, nil, err
 	}
 	return value, actualType, nil
 }
@@ -4330,6 +4373,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if value, actualType, handled, err := s.emitBuiltinDictEntryInsertCall(expr); handled {
 		return value, actualType, err
 	}
+	if value, actualType, handled, err := s.emitBuiltinDictEntryGetOrInsertCall(expr); handled {
+		return value, actualType, err
+	}
 	if value, actualType, handled, err := s.emitSpecializedMemcpyCall(expr); handled {
 		return value, actualType, err
 	}
@@ -5358,6 +5404,103 @@ func (s *functionState) emitBuiltinDictEntryInsertCall(expr *ast.CallExpr) (C.LL
 	phi := C.LLVMBuildPhi(s.builder, valueRefLLVMType, cStringFree("dict.entry.insert.phi"))
 	C.LLVMAddIncoming(phi, llvmValueSlicePtr([]C.LLVMValueRef{cachedValue, insertedValue}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{nonNullEnd, insertEnd}), 2)
 	_ = currentBB
+	return phi, valueRefType, true, nil
+}
+
+func (s *functionState) emitBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "get_or_insert" || fieldExpr.Object == nil {
+		return nil, nil, false, nil
+	}
+	entryType, receiverRefType, ok := builtinDictEntryReceiverType(s.exprType(fieldExpr.Object))
+	if !ok || entryType == nil || entryType.Dict == nil {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 1 {
+		return nil, nil, true, fmt.Errorf("dict entry get_or_insert expects 1 argument, got %d", len(expr.Args))
+	}
+	owner, ok := s.lookupTreeAllocOwner()
+	if !ok || owner.arenaRef == nil {
+		return nil, nil, true, fmt.Errorf("dict entry get_or_insert requires an active in <arena>: scope")
+	}
+	var entryPtr C.LLVMValueRef
+	var err error
+	if receiverRefType != nil {
+		entryPtr, _, err = s.emitExpr(fieldExpr.Object, receiverRefType)
+	} else {
+		entryPtr, _, err = s.emitAddress(fieldExpr.Object)
+		if err != nil {
+			entryPtr = nil
+			err = nil
+		}
+	}
+	entryLLVMType, err := s.g.lowerType(entryType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	dictRefType := &semantic.RefType{Elem: entryType.Dict, Mutable: true, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	dictRefLLVMType, err := s.g.lowerType(dictRefType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	keyLLVMType, err := s.g.lowerType(entryType.Dict.Key)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	valueRefType := builtinDictEntryValueRefType(entryType.Dict)
+	valueRefLLVMType, err := s.g.lowerType(valueRefType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	var dictValue, keyValue, cachedValue C.LLVMValueRef
+	var valuePtrPtr C.LLVMValueRef
+	if entryPtr != nil {
+		dictPtr := C.LLVMBuildStructGEP2(s.builder, entryLLVMType, entryPtr, 0, cStringFree("dict.entry.get_or_insert.dict.ptr"))
+		keyPtr := C.LLVMBuildStructGEP2(s.builder, entryLLVMType, entryPtr, 1, cStringFree("dict.entry.get_or_insert.key.ptr"))
+		valuePtrPtr = C.LLVMBuildStructGEP2(s.builder, entryLLVMType, entryPtr, 2, cStringFree("dict.entry.get_or_insert.value.ptr"))
+		dictValue = C.LLVMBuildLoad2(s.builder, dictRefLLVMType, dictPtr, cStringFree("dict.entry.get_or_insert.dict"))
+		keyValue = C.LLVMBuildLoad2(s.builder, keyLLVMType, keyPtr, cStringFree("dict.entry.get_or_insert.key"))
+		cachedValue = C.LLVMBuildLoad2(s.builder, valueRefLLVMType, valuePtrPtr, cStringFree("dict.entry.get_or_insert.cached"))
+	} else {
+		entryValue, err := s.emitBuiltinDictEntryValue(fieldExpr.Object, entryType, receiverRefType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		dictValue = C.LLVMBuildExtractValue(s.builder, entryValue, 0, cStringFree("dict.entry.get_or_insert.dict"))
+		keyValue = C.LLVMBuildExtractValue(s.builder, entryValue, 1, cStringFree("dict.entry.get_or_insert.key"))
+		cachedValue = C.LLVMBuildExtractValue(s.builder, entryValue, 2, cStringFree("dict.entry.get_or_insert.cached"))
+	}
+	nullValue := C.LLVMConstNull(valueRefLLVMType)
+	hasCached := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), cachedValue, nullValue, cStringFree("dict.entry.get_or_insert.has"))
+	nonNullBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dict.entry.get_or_insert.nonnull"))
+	insertBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dict.entry.get_or_insert.insert"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("dict.entry.get_or_insert.merge"))
+	C.LLVMBuildCondBr(s.builder, hasCached, nonNullBB, insertBB)
+	C.LLVMPositionBuilderAtEnd(s.builder, nonNullBB)
+	C.LLVMBuildBr(s.builder, mergeBB)
+	nonNullEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMPositionBuilderAtEnd(s.builder, insertBB)
+	insertedArg, _, err := s.emitExpr(expr.Args[0], entryType.Dict.Value)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	getOrInsertCallee, getOrInsertType, err := s.ensureRuntimeFunction("arena_dict_get_or_insert", map[string]semantic.Type{"T": entryType.Dict.Value})
+	if err != nil {
+		return nil, nil, true, err
+	}
+	getOrInsertLLVMType, err := s.g.lowerFunctionType(getOrInsertType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	insertedValue := s.buildCall(getOrInsertLLVMType, getOrInsertCallee, []C.LLVMValueRef{owner.arenaRef, dictValue, keyValue, insertedArg}, "dict.entry.get_or_insert.result")
+	if valuePtrPtr != nil {
+		C.LLVMBuildStore(s.builder, insertedValue, valuePtrPtr)
+	}
+	C.LLVMBuildBr(s.builder, mergeBB)
+	insertEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	phi := C.LLVMBuildPhi(s.builder, valueRefLLVMType, cStringFree("dict.entry.get_or_insert.phi"))
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr([]C.LLVMValueRef{cachedValue, insertedValue}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{nonNullEnd, insertEnd}), 2)
 	return phi, valueRefType, true, nil
 }
 

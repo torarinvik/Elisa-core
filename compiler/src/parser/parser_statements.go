@@ -1257,7 +1257,14 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		p.advance()
 		p.advance()
 		value := p.parseValueExprAllowTuple()
-		p.expectNewline()
+		usedBlockDefault := false
+		if p.peek() == lexer.TOKEN_COLON {
+			value = p.rewriteGetOrInsertBlockValue(pos, value)
+			usedBlockDefault = true
+		}
+		if !usedBlockDefault {
+			p.expectNewline()
+		}
 		return &ast.VarDeclStmt{Position: pos, Name: name, Value: value}
 	}
 
@@ -1286,7 +1293,14 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 	case lexer.TOKEN_LARROW:
 		p.advance()
 		value := p.parseValueExprAllowTuple()
-		p.expectNewline()
+		usedBlockDefault := false
+		if p.peek() == lexer.TOKEN_COLON {
+			value = p.rewriteGetOrInsertBlockValue(pos, value)
+			usedBlockDefault = true
+		}
+		if !usedBlockDefault {
+			p.expectNewline()
+		}
 		return &ast.AssignStmt{Position: pos, Target: expr, Value: value}
 
 	case lexer.TOKEN_PLUSEQ, lexer.TOKEN_MINUSEQ, lexer.TOKEN_STAREQ, lexer.TOKEN_SLASHEQ, lexer.TOKEN_PERCENTEQ,
@@ -1323,4 +1337,54 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 
 	p.expectNewline()
 	return &ast.ExprStmt{Position: pos, Expr: expr}
+}
+
+func (p *Parser) rewriteGetOrInsertBlockValue(pos lexer.Pos, value ast.Expr) ast.Expr {
+	call, ok := value.(*ast.CallExpr)
+	if !ok || call == nil {
+		p.errorf("block default syntax requires a call expression before ':'")
+		p.expect(lexer.TOKEN_COLON)
+		p.expectNewline()
+		_ = p.parseBlock()
+		return value
+	}
+	fieldExpr, ok := call.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "get_or_insert" {
+		p.errorf("block default syntax currently requires a .get_or_insert(...) call before ':'")
+		p.expect(lexer.TOKEN_COLON)
+		p.expectNewline()
+		_ = p.parseBlock()
+		return value
+	}
+	if len(call.Args) != 1 {
+		p.errorf("block default syntax requires get_or_insert with exactly one explicit key argument")
+		p.expect(lexer.TOKEN_COLON)
+		p.expectNewline()
+		_ = p.parseBlock()
+		return value
+	}
+	defaultExpr := p.parseSingleExprBlockValue()
+	call.Args = append(call.Args, defaultExpr)
+	return call
+}
+
+func (p *Parser) parseSingleExprBlockValue() ast.Expr {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	body := p.parseBlock()
+	if len(body) == 0 {
+		p.errorf("block default syntax requires a final expression statement in the block")
+		return &ast.NullLit{Position: pos}
+	}
+	exprStmt, ok := body[len(body)-1].(*ast.ExprStmt)
+	if !ok || exprStmt == nil || exprStmt.Expr == nil {
+		p.errorf("block default syntax requires a final expression statement in the block")
+		return &ast.NullLit{Position: pos}
+	}
+	if len(body) == 1 {
+		return exprStmt.Expr
+	}
+	stmts := append([]ast.Stmt(nil), body[:len(body)-1]...)
+	return &ast.ExprBlock{Position: pos, Stmts: stmts, Value: exprStmt.Expr}
 }

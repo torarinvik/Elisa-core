@@ -73,10 +73,14 @@ def build(owner: Arena, key: dstr[key_shape]) -> usize:
         pending.clear()
         values: mutable dict[dstr[key_shape], i64] = zeroed
         _ = values.put(key, 7)
-        _ = values.get_or_insert(key, 9)
+        slot = values.get_or_insert(key):
+            base = 9
+            base
+        _ = slot
         if values.entry(key).found == false:
             _ = values.entry(key).insert(11)
         _ = values.entry(key).value
+        _ = values.entry(key).get_or_insert(13)
         _ = values.get(key)
         _ = values.contains(key)
         _ = values.remove(key)

@@ -567,6 +567,12 @@ type ZeroedLit struct {
 	Position lexer.Pos
 }
 
+type ExprBlock struct {
+	Position lexer.Pos
+	Stmts    []Stmt
+	Value    Expr
+}
+
 type BinaryExpr struct {
 	Position lexer.Pos
 	Op       lexer.TokenKind
@@ -1200,6 +1206,7 @@ func (n *CharLit) Pos() lexer.Pos          { return n.Position }
 func (n *BoolLit) Pos() lexer.Pos          { return n.Position }
 func (n *NullLit) Pos() lexer.Pos          { return n.Position }
 func (n *ZeroedLit) Pos() lexer.Pos        { return n.Position }
+func (n *ExprBlock) Pos() lexer.Pos        { return n.Position }
 func (n *BinaryExpr) Pos() lexer.Pos       { return n.Position }
 func (n *UnaryExpr) Pos() lexer.Pos        { return n.Position }
 func (n *MoveExpr) Pos() lexer.Pos         { return n.Position }
@@ -1332,6 +1339,7 @@ func (*CharLit) nodeTag()                   {}
 func (*BoolLit) nodeTag()                   {}
 func (*NullLit) nodeTag()                   {}
 func (*ZeroedLit) nodeTag()                 {}
+func (*ExprBlock) nodeTag()                 {}
 func (*BinaryExpr) nodeTag()                {}
 func (*UnaryExpr) nodeTag()                 {}
 func (*MoveExpr) nodeTag()                  {}
@@ -1458,6 +1466,7 @@ func (*CharLit) exprTag()             {}
 func (*BoolLit) exprTag()             {}
 func (*NullLit) exprTag()             {}
 func (*ZeroedLit) exprTag()           {}
+func (*ExprBlock) exprTag()           {}
 func (*BinaryExpr) exprTag()          {}
 func (*UnaryExpr) exprTag()           {}
 func (*MoveExpr) exprTag()            {}

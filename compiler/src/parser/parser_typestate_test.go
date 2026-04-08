@@ -1459,6 +1459,61 @@ func TestParseStoreDecl(t *testing.T) {
 	}
 }
 
+func TestParseGetOrInsertBlockSugar(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(values: dict[dstr[key_shape], i64], key: dstr[key_shape]):\n    slot = values.get_or_insert(key):\n        42\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok || len(fn.Body) != 1 {
+		t.Fatalf("expected single function body stmt, got %#v", file.Decls[0])
+	}
+	decl, ok := fn.Body[0].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected var decl stmt, got %T", fn.Body[0])
+	}
+	call, ok := decl.Value.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected rewritten call value, got %T", decl.Value)
+	}
+	callee, ok := call.Func.(*ast.FieldExpr)
+	if !ok || callee.Field != "get_or_insert" {
+		t.Fatalf("expected get_or_insert field call, got %#v", call.Func)
+	}
+	if len(call.Args) != 2 {
+		t.Fatalf("expected rewritten get_or_insert call to have key and default args, got %d", len(call.Args))
+	}
+	if _, ok := call.Args[1].(*ast.IntLit); !ok {
+		t.Fatalf("expected block expression to become second call arg, got %T", call.Args[1])
+	}
+}
+
+func TestParseGetOrInsertBlockSugarWithSetupStatements(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(values: dict[dstr[key_shape], i64], key: dstr[key_shape]):\n    slot = values.get_or_insert(key):\n        base = 40\n        base + 2\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok || len(fn.Body) != 1 {
+		t.Fatalf("expected single function body stmt, got %#v", file.Decls[0])
+	}
+	decl, ok := fn.Body[0].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected var decl stmt, got %T", fn.Body[0])
+	}
+	call, ok := decl.Value.(*ast.CallExpr)
+	if !ok || len(call.Args) != 2 {
+		t.Fatalf("expected rewritten get_or_insert call, got %#v", decl.Value)
+	}
+	block, ok := call.Args[1].(*ast.ExprBlock)
+	if !ok {
+		t.Fatalf("expected second arg to be expr block, got %T", call.Args[1])
+	}
+	if len(block.Stmts) != 1 {
+		t.Fatalf("expected one setup stmt in expr block, got %d", len(block.Stmts))
+	}
+}
+
 func TestParseChildrenToOverrideExpr(t *testing.T) {
 	file, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        BreakStmt\n\ndef keep(stmt: Lua.Stmt) -> Lua.Node:\n    return children(stmt to Lua.Node).node\n")
 	if len(errs) != 0 {
