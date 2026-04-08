@@ -1408,6 +1408,37 @@ func TestParseIterableForStatementWithEnumerateTuplePattern(t *testing.T) {
 	}
 }
 
+func TestParseReverseIterableForScopeAndCheckpointStatements(t *testing.T) {
+	file, errs := parseSourceFile(t, "extern pool_new(workers: usize) -> ThreadPool can[Pool.Create]\n\ndef walk(items: darray[int]) -> void:\n    for rev value in items:\n        pass\n    scope pool_new(2u):\n        pass\n    checkpoint mark = items:\n        pass\n    restore mark\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	iterStmt, ok := decl.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
+	}
+	if !iterStmt.Reverse {
+		t.Fatal("expected iterable loop to preserve reverse flag")
+	}
+	if _, ok := decl.Body[1].(*ast.ScopeStmt); !ok {
+		t.Fatalf("expected scope statement, got %T", decl.Body[1])
+	}
+	checkpointStmt, ok := decl.Body[2].(*ast.CheckpointStmt)
+	if !ok {
+		t.Fatalf("expected checkpoint statement, got %T", decl.Body[2])
+	}
+	if checkpointStmt.Name != "mark" {
+		t.Fatalf("expected checkpoint name mark, got %q", checkpointStmt.Name)
+	}
+	if _, ok := decl.Body[3].(*ast.RestoreCheckpointStmt); !ok {
+		t.Fatalf("expected restore checkpoint statement, got %T", decl.Body[3])
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for rev value in items:") || !strings.Contains(formatted, "scope pool_new(2u):") || !strings.Contains(formatted, "checkpoint mark = items:") || !strings.Contains(formatted, "restore mark") {
+		t.Fatalf("expected formatter to preserve reverse/scope/checkpoint syntax, got:\n%s", formatted)
+	}
+}
+
 func TestParseChildrenToOverrideExpr(t *testing.T) {
 	file, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        BreakStmt\n\ndef keep(stmt: Lua.Stmt) -> Lua.Node:\n    return children(stmt to Lua.Node).node\n")
 	if len(errs) != 0 {

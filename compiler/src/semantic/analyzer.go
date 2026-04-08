@@ -108,6 +108,7 @@ type Analyzer struct {
 	currentFuncType                   *FuncType
 	currentRegions                    map[*Symbol]regionState
 	currentRegionMarks                map[*Symbol]regionMarkState
+	currentCheckpoints                map[*Symbol]checkpointState
 	currentRegionRefs                 map[*Symbol]regionRefState
 	currentAffineValues               map[affineValueKey]affineValueState
 	currentBorrowedOwnerRefs          map[*Symbol]borrowedOwnerRefState
@@ -152,6 +153,20 @@ type regionMarkState struct {
 	Region        *Symbol
 	Generation    int
 	Valid         bool
+	InvalidatedBy string
+}
+
+type checkpointKind int
+
+const (
+	checkpointKindDArray checkpointKind = iota
+)
+
+type checkpointState struct {
+	Kind         checkpointKind
+	Target       ast.Expr
+	TargetType   Type
+	Valid        bool
 	InvalidatedBy string
 }
 

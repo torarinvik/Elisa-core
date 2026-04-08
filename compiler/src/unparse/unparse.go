@@ -420,7 +420,11 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 			f.writeStmt(level+1, stmt)
 		}
 	case *ast.ForStmt:
-		line := "for " + n.Name + " in " + formatExpr(n.Start) + " " + lexer.TokenName(n.Op) + " " + formatExpr(n.End)
+		line := "for "
+		if n.Reverse {
+			line += "rev "
+		}
+		line += n.Name + " in " + formatExpr(n.Start) + " " + lexer.TokenName(n.Op) + " " + formatExpr(n.End)
 		if n.Step != nil {
 			line += " .. " + formatExpr(n.Step)
 		}
@@ -431,6 +435,9 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 		}
 	case *ast.IterForStmt:
 		line := "for "
+		if n.Reverse {
+			line += "rev "
+		}
 		switch n.Mode {
 		case ast.IterBindRef:
 			line += "ref "
@@ -467,6 +474,11 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 		}
 	case *ast.WithStmt:
 		f.writeLine(level, "with "+formatWithValueClause(n.Bundles, n.Args, n.WithItemOrder)+":")
+		for _, stmt := range n.Body {
+			f.writeStmt(level+1, stmt)
+		}
+	case *ast.ScopeStmt:
+		f.writeLine(level, "scope "+formatExpr(n.Guard)+":")
 		for _, stmt := range n.Body {
 			f.writeStmt(level+1, stmt)
 		}
@@ -517,8 +529,19 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 		f.writeLine(level, "destroy "+n.Name)
 	case *ast.MarkStmt:
 		f.writeLine(level, "mark "+n.RegionName+" as "+n.Name)
+	case *ast.CheckpointStmt:
+		line := "checkpoint " + n.Name + " = " + formatExpr(n.Target)
+		if len(n.Body) != 0 {
+			line += ":"
+		}
+		f.writeLine(level, line)
+		for _, stmt := range n.Body {
+			f.writeStmt(level+1, stmt)
+		}
 	case *ast.RestoreStmt:
 		f.writeLine(level, "restore "+n.RegionName+" from "+n.MarkName)
+	case *ast.RestoreCheckpointStmt:
+		f.writeLine(level, "restore "+n.Name)
 	case *ast.ResetStmt:
 		f.writeLine(level, "reset "+n.Name)
 	}

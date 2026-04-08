@@ -957,6 +957,7 @@ type WhileStmt struct {
 
 type ForStmt struct {
 	Position lexer.Pos
+	Reverse  bool
 	Name     string
 	Start    Expr
 	End      Expr
@@ -975,6 +976,7 @@ const (
 
 type IterForStmt struct {
 	Position lexer.Pos
+	Reverse  bool
 	Pattern  MoveBindPattern
 	Mode     IterBindMode
 	Source   Expr
@@ -1014,6 +1016,12 @@ type WithStmt struct {
 	Bundles       []WithBundleUse
 	WithItemOrder []WithItem
 	Body          []Stmt
+}
+
+type ScopeStmt struct {
+	Position lexer.Pos
+	Guard    Expr
+	Body     []Stmt
 }
 
 type PoolStmt struct {
@@ -1085,10 +1093,22 @@ type MarkStmt struct {
 	Name       string
 }
 
+type CheckpointStmt struct {
+	Position lexer.Pos
+	Name     string
+	Target   Expr
+	Body     []Stmt
+}
+
 type RestoreStmt struct {
 	Position   lexer.Pos
 	RegionName string
 	MarkName   string
+}
+
+type RestoreCheckpointStmt struct {
+	Position lexer.Pos
+	Name     string
 }
 
 type ResetStmt struct {
@@ -1250,8 +1270,11 @@ func (n *DiscardStmt) Pos() lexer.Pos            { return n.Position }
 func (n *RegionStmt) Pos() lexer.Pos             { return n.Position }
 func (n *DestroyStmt) Pos() lexer.Pos            { return n.Position }
 func (n *MarkStmt) Pos() lexer.Pos               { return n.Position }
+func (n *CheckpointStmt) Pos() lexer.Pos         { return n.Position }
 func (n *RestoreStmt) Pos() lexer.Pos            { return n.Position }
+func (n *RestoreCheckpointStmt) Pos() lexer.Pos  { return n.Position }
 func (n *ResetStmt) Pos() lexer.Pos              { return n.Position }
+func (n *ScopeStmt) Pos() lexer.Pos              { return n.Position }
 
 func (*ConstDecl) nodeTag()                 {}
 func (*ConstEnumDecl) nodeTag()             {}
@@ -1359,6 +1382,7 @@ func (*MatchStmt) nodeTag()                 {}
 func (*InStoreStmt) nodeTag()               {}
 func (*CanStmt) nodeTag()                   {}
 func (*WithStmt) nodeTag()                  {}
+func (*ScopeStmt) nodeTag()                 {}
 func (*PoolStmt) nodeTag()                  {}
 func (*LockStmt) nodeTag()                  {}
 func (*PassStmt) nodeTag()                  {}
@@ -1370,7 +1394,9 @@ func (*DiscardStmt) nodeTag()               {}
 func (*RegionStmt) nodeTag()                {}
 func (*DestroyStmt) nodeTag()               {}
 func (*MarkStmt) nodeTag()                  {}
+func (*CheckpointStmt) nodeTag()            {}
 func (*RestoreStmt) nodeTag()               {}
+func (*RestoreCheckpointStmt) nodeTag()     {}
 func (*ResetStmt) nodeTag()                 {}
 
 func (*ConstDecl) declTag()        {}
@@ -1482,6 +1508,7 @@ func (*ParallelForStmt) stmtTag() {}
 func (*InStoreStmt) stmtTag()     {}
 func (*CanStmt) stmtTag()         {}
 func (*WithStmt) stmtTag()        {}
+func (*ScopeStmt) stmtTag()       {}
 func (*PoolStmt) stmtTag()        {}
 func (*LockStmt) stmtTag()        {}
 func (*PassStmt) stmtTag()        {}
@@ -1493,7 +1520,9 @@ func (*DiscardStmt) stmtTag()     {}
 func (*RegionStmt) stmtTag()      {}
 func (*DestroyStmt) stmtTag()     {}
 func (*MarkStmt) stmtTag()        {}
+func (*CheckpointStmt) stmtTag()  {}
 func (*RestoreStmt) stmtTag()     {}
+func (*RestoreCheckpointStmt) stmtTag() {}
 func (*ResetStmt) stmtTag()       {}
 
 func (n *CallExpr) ArgName(index int) string {

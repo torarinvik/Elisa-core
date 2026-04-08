@@ -79,6 +79,7 @@ type functionState struct {
 	packedDirectFieldReads       map[packedDirectFieldReadCacheKey]C.LLVMValueRef
 	packedVariantPayloadReads    map[packedVariantPayloadReadCacheKey][]C.LLVMValueRef
 	scopedCleanups               []scopedCleanupBinding
+	checkpoints                  map[string]checkpointBinding
 	poolScopes                   []activePoolBinding
 	cleanupDepth                 int
 	scopePool                    []*codegenScope
@@ -90,6 +91,7 @@ const (
 	scopedCleanupLockGuard scopedCleanupKind = iota
 	scopedCleanupThreadPool
 	scopedCleanupDeferBody
+	scopedCleanupValue
 )
 
 type scopedCleanupBinding struct {
@@ -110,6 +112,22 @@ type regionBinding struct {
 	name string
 	ptr  C.LLVMValueRef
 	typ  semantic.Type
+}
+
+type checkpointBindingKind int
+
+const (
+	checkpointBindingRegion checkpointBindingKind = iota
+	checkpointBindingDArray
+)
+
+type checkpointBinding struct {
+	kind      checkpointBindingKind
+	name      string
+	targetPtr C.LLVMValueRef
+	targetType semantic.Type
+	markPtr   C.LLVMValueRef
+	markType  semantic.Type
 }
 
 type packedStoreBinding struct {
@@ -850,6 +868,8 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		return s.emitViewStmt(n)
 	case *ast.DeferStmt:
 		return s.emitDeferStmt(n)
+	case *ast.ScopeStmt:
+		return s.emitScopeStmt(n)
 	case *ast.RegionStmt:
 		arenaType := s.g.result.NamedTypes["Arena"]
 		if arenaType == nil {
@@ -887,6 +907,8 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		C.LLVMBuildStore(s.builder, markValue, alloca)
 		s.defineBinding(n.Name, valueBinding{ptr: alloca, typ: markType})
 		return nil
+	case *ast.CheckpointStmt:
+		return s.emitCheckpointStmt(n)
 	case *ast.RestoreStmt:
 		regionBinding, ok := s.lookupBinding(n.RegionName)
 		if !ok {
@@ -901,6 +923,8 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			return err
 		}
 		return s.emitArenaRewind(regionBinding.ptr, regionBinding.typ, markValue, markBinding.typ)
+	case *ast.RestoreCheckpointStmt:
+		return s.emitRestoreCheckpointStmt(n)
 	case *ast.ResetStmt:
 		regionBinding, ok := s.lookupBinding(n.Name)
 		if !ok {
@@ -1482,6 +1506,160 @@ func (s *functionState) emitDeferStmt(stmt *ast.DeferStmt) error {
 	}
 	s.registerScopedCleanup(binding)
 	return nil
+}
+
+func (s *functionState) emitScopeStmt(stmt *ast.ScopeStmt) error {
+	if stmt == nil {
+		return nil
+	}
+	guardType := s.exprType(stmt.Guard)
+	if guardType == nil {
+		return fmt.Errorf("missing semantic type for scope guard")
+	}
+	guardValue, _, err := s.emitExpr(stmt.Guard, guardType)
+	if err != nil {
+		return err
+	}
+	tempName := s.g.nextSyntheticName("scope.guard.")
+	guardAlloca, err := s.createEntryAlloca(tempName, guardType)
+	if err != nil {
+		return err
+	}
+	C.LLVMBuildStore(s.builder, guardValue, guardAlloca)
+	s.pushScope()
+	scope := s.scope
+	defer s.popScope()
+	s.registerScopedCleanup(scopedCleanupBinding{kind: scopedCleanupValue, name: tempName, ptr: guardAlloca, typ: guardType})
+	if err := s.emitBlock(stmt.Body, false); err != nil {
+		s.discardScopeCleanups(scope)
+		return err
+	}
+	if s.currentBlockTerminated() {
+		s.discardScopeCleanups(scope)
+		return nil
+	}
+	return s.emitScopeCleanups(scope)
+}
+
+func (s *functionState) emitBuiltinCheckpointDArray(target ast.Expr, targetType semantic.Type, name string) (checkpointBinding, error) {
+	darrayType, receiverRefType, ok := builtinDArrayPushReceiverType(targetType)
+	if !ok || darrayType == nil {
+		return checkpointBinding{}, fmt.Errorf("checkpoint %q requires region or darray target", name)
+	}
+	darrayPtr, _, err := s.emitBuiltinDArrayReceiverPtr(target, receiverRefType)
+	if err != nil {
+		return checkpointBinding{}, err
+	}
+	countPtr, usizeType, err := s.emitBuiltinDArrayCountPtr(darrayPtr, darrayType)
+	if err != nil {
+		return checkpointBinding{}, err
+	}
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return checkpointBinding{}, err
+	}
+	countValue := C.LLVMBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree(name+".checkpoint.count"))
+	markAlloca, err := s.createEntryAlloca(name+".checkpoint.mark", usizeType)
+	if err != nil {
+		return checkpointBinding{}, err
+	}
+	C.LLVMBuildStore(s.builder, countValue, markAlloca)
+	return checkpointBinding{kind: checkpointBindingDArray, name: name, targetPtr: darrayPtr, targetType: darrayType, markPtr: markAlloca, markType: usizeType}, nil
+}
+
+func (s *functionState) emitRestoreCheckpointBinding(binding checkpointBinding) error {
+	switch binding.kind {
+	case checkpointBindingRegion:
+		markValue, err := s.loadValue(binding.markPtr, binding.markType, binding.name)
+		if err != nil {
+			return err
+		}
+		return s.emitArenaRewind(binding.targetPtr, binding.targetType, markValue, binding.markType)
+	case checkpointBindingDArray:
+		darrayType, ok := binding.targetType.(*semantic.DArrayType)
+		if !ok || darrayType == nil {
+			return fmt.Errorf("checkpoint %q is not bound to a darray", binding.name)
+		}
+		countPtr, _, err := s.emitBuiltinDArrayCountPtr(binding.targetPtr, darrayType)
+		if err != nil {
+			return err
+		}
+		markValue, err := s.loadValue(binding.markPtr, binding.markType, binding.name)
+		if err != nil {
+			return err
+		}
+		C.LLVMBuildStore(s.builder, markValue, countPtr)
+		return nil
+	default:
+		return fmt.Errorf("unsupported checkpoint kind %d", binding.kind)
+	}
+}
+
+func (s *functionState) emitCheckpointStmt(stmt *ast.CheckpointStmt) error {
+	if stmt == nil {
+		return nil
+	}
+	if s.checkpoints == nil {
+		s.checkpoints = map[string]checkpointBinding{}
+	}
+	name := stmt.Name
+	targetType := s.exprType(stmt.Target)
+	var binding checkpointBinding
+	if ident, ok := stmt.Target.(*ast.Ident); ok {
+		if regionBinding, ok := s.lookupBinding(ident.Name); ok && regionBinding.typ != nil && regionBinding.typ.String() == "Arena" {
+			markType := s.g.result.NamedTypes["ArenaMark"]
+			if markType == nil {
+				return fmt.Errorf("missing builtin ArenaMark type for region checkpoints")
+			}
+			markAlloca, err := s.createEntryAlloca(name+".checkpoint.mark", markType)
+			if err != nil {
+				return err
+			}
+			markValue, err := s.emitArenaSnapshot(regionBinding.ptr, regionBinding.typ)
+			if err != nil {
+				return err
+			}
+			C.LLVMBuildStore(s.builder, markValue, markAlloca)
+			binding = checkpointBinding{kind: checkpointBindingRegion, name: name, targetPtr: regionBinding.ptr, targetType: regionBinding.typ, markPtr: markAlloca, markType: markType}
+		}
+	}
+	if binding.markPtr == nil {
+		var err error
+		binding, err = s.emitBuiltinCheckpointDArray(stmt.Target, targetType, name)
+		if err != nil {
+			return err
+		}
+	}
+	saved, hadSaved := s.checkpoints[name]
+	s.checkpoints[name] = binding
+	defer func() {
+		if hadSaved {
+			s.checkpoints[name] = saved
+		} else {
+			delete(s.checkpoints, name)
+		}
+	}()
+	if len(stmt.Body) == 0 {
+		return nil
+	}
+	if err := s.emitBlock(stmt.Body, true); err != nil {
+		return err
+	}
+	if s.currentBlockTerminated() {
+		return nil
+	}
+	return s.emitRestoreCheckpointBinding(binding)
+}
+
+func (s *functionState) emitRestoreCheckpointStmt(stmt *ast.RestoreCheckpointStmt) error {
+	if stmt == nil {
+		return nil
+	}
+	binding, ok := s.checkpoints[stmt.Name]
+	if !ok {
+		return fmt.Errorf("unknown checkpoint %q during LLVM lowering", stmt.Name)
+	}
+	return s.emitRestoreCheckpointBinding(binding)
 }
 
 func (s *functionState) emitMoveBindLocal(name string, typ semantic.Type, value C.LLVMValueRef) error {
@@ -2727,14 +2905,19 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 	}
 	C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 	s.pushScope()
+	iterIndexValue := indexValue
+	if stmt.Reverse {
+		lastIndex := C.LLVMBuildSub(s.builder, countValue, C.LLVMConstInt(usizeLLVMType, 1, 0), cStringFree("iter.rev.last"))
+		iterIndexValue = C.LLVMBuildSub(s.builder, lastIndex, indexValue, cStringFree("iter.rev.index"))
+	}
 	if stmt.Mode == ast.IterBindValue {
-		itemValue, resolvedItemType, err := s.emitIterLoopElementValue(iterSourceAlloca, iterSourceType, indexValue, sourceName)
+		itemValue, resolvedItemType, err := s.emitIterLoopElementValue(iterSourceAlloca, iterSourceType, iterIndexValue, sourceName)
 		if err != nil {
 			s.popScope()
 			return err
 		}
 		if enumerateItemType != nil {
-			itemValue, err = s.buildEnumerateItemValue(enumerateItemType, indexValue, itemValue, resolvedItemType, sourceName)
+			itemValue, err = s.buildEnumerateItemValue(enumerateItemType, iterIndexValue, itemValue, resolvedItemType, sourceName)
 			if err != nil {
 				s.popScope()
 				return err
@@ -2750,7 +2933,7 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 			return err
 		}
 	} else {
-		itemPtr, resolvedItemType, err := s.emitIterLoopElementAddress(iterSourceAlloca, iterSourceType, indexValue, sourceName)
+		itemPtr, resolvedItemType, err := s.emitIterLoopElementAddress(iterSourceAlloca, iterSourceType, iterIndexValue, sourceName)
 		if err != nil {
 			s.popScope()
 			return err

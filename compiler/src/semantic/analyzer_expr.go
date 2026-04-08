@@ -25,6 +25,10 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 					a.errorf(n.Pos(), "checkpoint %q can only be used in restore <region> from %q", n.Name, n.Name)
 					return
 				}
+				if sym.Kind == SymbolCheckpoint {
+					a.errorf(n.Pos(), "checkpoint %q can only be used in restore %q", n.Name, n.Name)
+					return
+				}
 				if refState, ok := a.currentRegionRefs[sym]; ok {
 					if _, dep, invalid := firstInvalidRegionDependency(refState); invalid {
 						label := "value"

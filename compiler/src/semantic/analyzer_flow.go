@@ -146,6 +146,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.analyzeViewStmt(n)
 	case *ast.DeferStmt:
 		a.analyzeDeferStmt(n)
+	case *ast.ScopeStmt:
+		a.analyzeScopeStmt(n)
 	case *ast.RegionStmt:
 		if n.Capacity != nil {
 			capacityType := a.analyzeExpr(n.Capacity)
@@ -165,8 +167,12 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 	case *ast.MarkStmt:
 		a.analyzeMarkStmt(n)
+	case *ast.CheckpointStmt:
+		a.analyzeCheckpointStmt(n)
 	case *ast.RestoreStmt:
 		a.analyzeRestoreStmt(n)
+	case *ast.RestoreCheckpointStmt:
+		a.analyzeRestoreCheckpointStmt(n)
 	case *ast.ResetStmt:
 		a.analyzeResetStmt(n)
 	case *ast.DestroyStmt:
@@ -707,6 +713,32 @@ func (a *Analyzer) analyzeDeferStmt(stmt *ast.DeferStmt) {
 		a.deferInfo = map[*ast.DeferStmt]*DeferInfo{}
 	}
 	a.deferInfo[stmt] = &DeferInfo{Mode: stmt.Mode, Captures: append([]string(nil), collector.captureOrder...)}
+}
+
+func (a *Analyzer) analyzeScopeStmt(stmt *ast.ScopeStmt) {
+	if stmt == nil {
+		return
+	}
+	guardType := a.analyzeExpr(stmt.Guard)
+	if !IsInvalidType(guardType) && len(CreateTypeBoundOps(guardType)) == 0 {
+		a.errorf(stmt.Guard.Pos(), "scope guard requires a value with synthesized cleanup behavior, got %s", guardType.String())
+	}
+	a.analyzeBlockWithAffineClone(stmt.Body, NewScope(a.currentScope))
+}
+
+func checkpointDArraySourceType(t Type) (*DArrayType, bool) {
+	switch tt := t.(type) {
+	case *DArrayType:
+		return tt, true
+	case *RefType:
+		if tt == nil || tt.Elem == nil || tt.State != RefStateNonNull {
+			return nil, false
+		}
+		darrayType, ok := tt.Elem.(*DArrayType)
+		return darrayType, ok
+	default:
+		return nil, false
+	}
 }
 
 func (a *Analyzer) currentNonGlobalScopeDepth() int {
@@ -1770,6 +1802,7 @@ func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
 	savedScope := a.currentScope
 	savedRegions := a.currentRegions
 	savedRegionMarks := a.currentRegionMarks
+	savedCheckpoints := a.currentCheckpoints
 	savedRegionRefs := a.currentRegionRefs
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
@@ -1778,6 +1811,7 @@ func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
 	a.currentScope = NewScope(savedScope)
 	a.currentRegions = a.cloneRegionStates()
 	a.currentRegionMarks = a.cloneRegionMarkStates()
+	a.currentCheckpoints = a.cloneCheckpointStates()
 	a.currentRegionRefs = a.cloneRegionRefStates()
 	a.currentPackedVariantViews = a.clonePackedVariantViewBindings()
 	a.currentPackedStores = a.clonePackedStores()
@@ -1790,6 +1824,7 @@ func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
 	a.currentScope = savedScope
 	a.currentRegions = savedRegions
 	a.currentRegionMarks = savedRegionMarks
+	a.currentCheckpoints = savedCheckpoints
 	a.currentRegionRefs = savedRegionRefs
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
@@ -1798,6 +1833,9 @@ func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
 }
 
 func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
+	if stmt.Reverse {
+		a.errorf(stmt.Pos(), "reverse range for loops are not supported yet; reverse iterable loops are")
+	}
 	startType := a.analyzeExpr(stmt.Start)
 	endType := a.analyzeExpr(stmt.End)
 	loopType := CommonNumericType(startType, endType)
@@ -2933,6 +2971,7 @@ func (a *Analyzer) analyzeLockStmt(stmt *ast.LockStmt) {
 	savedScope := a.currentScope
 	savedRegions := a.currentRegions
 	savedRegionMarks := a.currentRegionMarks
+	savedCheckpoints := a.currentCheckpoints
 	savedRegionRefs := a.currentRegionRefs
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
@@ -2941,6 +2980,7 @@ func (a *Analyzer) analyzeLockStmt(stmt *ast.LockStmt) {
 	a.currentScope = NewScope(savedScope)
 	a.currentRegions = a.cloneRegionStates()
 	a.currentRegionMarks = a.cloneRegionMarkStates()
+	a.currentCheckpoints = a.cloneCheckpointStates()
 	a.currentRegionRefs = a.cloneRegionRefStates()
 	a.currentPackedVariantViews = a.clonePackedVariantViewBindings()
 	a.currentPackedStores = a.clonePackedStores()
@@ -2959,6 +2999,7 @@ func (a *Analyzer) analyzeLockStmt(stmt *ast.LockStmt) {
 	a.currentScope = savedScope
 	a.currentRegions = savedRegions
 	a.currentRegionMarks = savedRegionMarks
+	a.currentCheckpoints = savedCheckpoints
 	a.currentRegionRefs = savedRegionRefs
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
@@ -3040,6 +3081,89 @@ func (a *Analyzer) analyzeMarkStmt(stmt *ast.MarkStmt) {
 	a.currentRegionMarks[markSym] = regionMarkState{Region: regionSym, Generation: state.Generation, Valid: true}
 }
 
+func (a *Analyzer) restoreFromRegionCheckpoint(pos lexer.Pos, regionSym *Symbol, markSym *Symbol, markState regionMarkState) {
+	state, ok := a.currentRegions[regionSym]
+	if !ok {
+		return
+	}
+	if !markState.Valid {
+		a.errorf(pos, "checkpoint %q is invalid after %s", markSym.Name, markState.InvalidatedBy)
+		return
+	}
+	reason := fmt.Sprintf("restore of region %q from checkpoint %q", regionSym.Name, markSym.Name)
+	a.invalidateRegionRefs(regionSym, func(dep regionDependencyState) bool {
+		return dep.Generation >= markState.Generation
+	}, reason)
+	a.invalidateRegionMarks(regionSym, func(other regionMarkState) bool {
+		return other.Generation > markState.Generation
+	}, reason)
+	state.Generation = markState.Generation
+	a.currentRegions[regionSym] = state
+	if saved, ok := a.currentRegionMarks[markSym]; ok {
+		saved.Valid = true
+		saved.InvalidatedBy = ""
+		a.currentRegionMarks[markSym] = saved
+	}
+}
+
+func (a *Analyzer) analyzeCheckpointStmt(stmt *ast.CheckpointStmt) {
+	if stmt == nil {
+		return
+	}
+	targetType := a.analyzeExpr(stmt.Target)
+	if ident, ok := stmt.Target.(*ast.Ident); ok {
+		if regionSym, state := a.lookupRegionState(ident.Name); regionSym != nil {
+			if state.Destroyed {
+				a.errorf(stmt.Pos(), "region %q has already been destroyed", ident.Name)
+				return
+			}
+			markType, ok := a.namedTypes["ArenaMark"]
+			if !ok {
+				a.errorf(stmt.Pos(), "missing builtin ArenaMark type for region checkpoints")
+				markType = invalidType
+			}
+			scope := a.currentScope
+			if len(stmt.Body) != 0 {
+				scope = NewScope(a.currentScope)
+			}
+			markSym := &Symbol{Name: stmt.Name, Kind: SymbolRegionMark, Type: markType, Node: stmt, Mutable: false}
+			a.defineLocalInScope(scope, markSym, stmt.Pos())
+			state.Generation++
+			a.currentRegions[regionSym] = state
+			if a.currentRegionMarks == nil {
+				a.currentRegionMarks = map[*Symbol]regionMarkState{}
+			}
+			markState := regionMarkState{Region: regionSym, Generation: state.Generation, Valid: true}
+			a.currentRegionMarks[markSym] = markState
+			if len(stmt.Body) != 0 {
+				a.analyzeBlockWithAffineClone(stmt.Body, scope)
+				a.restoreFromRegionCheckpoint(stmt.Pos(), regionSym, markSym, markState)
+			}
+			return
+		}
+	}
+	if _, ok := checkpointDArraySourceType(targetType); !ok {
+		a.errorf(stmt.Target.Pos(), "checkpoint requires a region or mutable darray value, got %s", targetType.String())
+		if len(stmt.Body) != 0 {
+			a.analyzeBlockWithAffineClone(stmt.Body, NewScope(a.currentScope))
+		}
+		return
+	}
+	scope := a.currentScope
+	if len(stmt.Body) != 0 {
+		scope = NewScope(a.currentScope)
+	}
+	markSym := &Symbol{Name: stmt.Name, Kind: SymbolCheckpoint, Type: a.namedTypes["usize"], Node: stmt, Mutable: false}
+	a.defineLocalInScope(scope, markSym, stmt.Pos())
+	if a.currentCheckpoints == nil {
+		a.currentCheckpoints = map[*Symbol]checkpointState{}
+	}
+	a.currentCheckpoints[markSym] = checkpointState{Kind: checkpointKindDArray, Target: stmt.Target, TargetType: targetType, Valid: true}
+	if len(stmt.Body) != 0 {
+		a.analyzeBlockWithAffineClone(stmt.Body, scope)
+	}
+}
+
 func (a *Analyzer) analyzeRestoreStmt(stmt *ast.RestoreStmt) {
 	regionSym, state := a.lookupRegionState(stmt.RegionName)
 	if regionSym == nil {
@@ -3063,19 +3187,24 @@ func (a *Analyzer) analyzeRestoreStmt(stmt *ast.RestoreStmt) {
 		a.errorf(stmt.Pos(), "checkpoint %q is invalid after %s", stmt.MarkName, markState.InvalidatedBy)
 		return
 	}
-	reason := fmt.Sprintf("restore of region %q from checkpoint %q", stmt.RegionName, stmt.MarkName)
-	a.invalidateRegionRefs(regionSym, func(dep regionDependencyState) bool {
-		return dep.Generation >= markState.Generation
-	}, reason)
-	a.invalidateRegionMarks(regionSym, func(other regionMarkState) bool {
-		return other.Generation > markState.Generation
-	}, reason)
-	state.Generation = markState.Generation
-	a.currentRegions[regionSym] = state
-	if saved, ok := a.currentRegionMarks[markSym]; ok {
-		saved.Valid = true
-		saved.InvalidatedBy = ""
-		a.currentRegionMarks[markSym] = saved
+	a.restoreFromRegionCheckpoint(stmt.Pos(), regionSym, markSym, markState)
+}
+
+func (a *Analyzer) analyzeRestoreCheckpointStmt(stmt *ast.RestoreCheckpointStmt) {
+	if stmt == nil {
+		return
+	}
+	if markSym, markState := a.lookupRegionMark(stmt.Name); markSym != nil {
+		a.restoreFromRegionCheckpoint(stmt.Pos(), markState.Region, markSym, markState)
+		return
+	}
+	markSym, state := a.lookupCheckpoint(stmt.Name)
+	if markSym == nil {
+		a.errorf(stmt.Pos(), "undefined checkpoint %q", stmt.Name)
+		return
+	}
+	if !state.Valid {
+		a.errorf(stmt.Pos(), "checkpoint %q is invalid after %s", stmt.Name, state.InvalidatedBy)
 	}
 }
 
@@ -5642,12 +5771,14 @@ func (a *Analyzer) analyzeBlockInScope(stmts []ast.Stmt, scope *Scope) {
 func (a *Analyzer) analyzeBlockWithRegionClone(stmts []ast.Stmt, scope *Scope) {
 	savedRegions := a.currentRegions
 	savedRegionMarks := a.currentRegionMarks
+	savedCheckpoints := a.currentCheckpoints
 	savedRegionRefs := a.currentRegionRefs
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
 	savedPackedStoreResolutions := a.currentPackedStoreResolutions
 	a.currentRegions = a.cloneRegionStates()
 	a.currentRegionMarks = a.cloneRegionMarkStates()
+	a.currentCheckpoints = a.cloneCheckpointStates()
 	a.currentRegionRefs = a.cloneRegionRefStates()
 	a.currentPackedVariantViews = a.clonePackedVariantViewBindings()
 	a.currentPackedStores = a.clonePackedStores()
@@ -5655,6 +5786,7 @@ func (a *Analyzer) analyzeBlockWithRegionClone(stmts []ast.Stmt, scope *Scope) {
 	a.analyzeBlockInScope(stmts, scope)
 	a.currentRegions = savedRegions
 	a.currentRegionMarks = savedRegionMarks
+	a.currentCheckpoints = savedCheckpoints
 	a.currentRegionRefs = savedRegionRefs
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
@@ -6092,6 +6224,17 @@ func (a *Analyzer) cloneRegionMarkStates() map[*Symbol]regionMarkState {
 	}
 	cloned := make(map[*Symbol]regionMarkState, len(a.currentRegionMarks))
 	for sym, state := range a.currentRegionMarks {
+		cloned[sym] = state
+	}
+	return cloned
+}
+
+func (a *Analyzer) cloneCheckpointStates() map[*Symbol]checkpointState {
+	if a.currentCheckpoints == nil {
+		return nil
+	}
+	cloned := make(map[*Symbol]checkpointState, len(a.currentCheckpoints))
+	for sym, state := range a.currentCheckpoints {
 		cloned[sym] = state
 	}
 	return cloned
@@ -10386,6 +10529,21 @@ func (a *Analyzer) lookupRegionMark(name string) (*Symbol, regionMarkState) {
 	state, ok := a.currentRegionMarks[sym]
 	if !ok {
 		return nil, regionMarkState{}
+	}
+	return sym, state
+}
+
+func (a *Analyzer) lookupCheckpoint(name string) (*Symbol, checkpointState) {
+	if a.currentScope == nil {
+		return nil, checkpointState{}
+	}
+	sym, ok := a.currentScope.Lookup(name)
+	if !ok || sym.Kind != SymbolCheckpoint {
+		return nil, checkpointState{}
+	}
+	state, ok := a.currentCheckpoints[sym]
+	if !ok {
+		return nil, checkpointState{}
 	}
 	return sym, state
 }

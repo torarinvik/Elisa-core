@@ -183,6 +183,7 @@ const (
 	SymbolLocal      SymbolKind = "local"
 	SymbolRegion     SymbolKind = "region"
 	SymbolRegionMark SymbolKind = "region-mark"
+	SymbolCheckpoint SymbolKind = "checkpoint"
 )
 
 type Symbol struct {

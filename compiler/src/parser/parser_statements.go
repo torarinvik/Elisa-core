@@ -53,6 +53,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikeForStmt() {
 				return p.parseForStmt()
 			}
+		case "scope":
+			if p.looksLikeScopeStmt() {
+				return p.parseScopeStmt()
+			}
 		case "parallel":
 			if p.looksLikeParallelForStmt() {
 				return p.parseParallelForStmt()
@@ -81,9 +85,16 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.pos+3 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_AS && p.tokens[p.pos+3].Kind == lexer.TOKEN_IDENT {
 				return p.parseMark()
 			}
+		case "checkpoint":
+			if p.looksLikeCheckpointStmt() {
+				return p.parseCheckpointStmt()
+			}
 		case "restore":
 			if p.pos+3 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Text == "from" && p.tokens[p.pos+3].Kind == lexer.TOKEN_IDENT {
 				return p.parseRestore()
+			}
+			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+				return p.parseRestoreCheckpointStmt()
 			}
 		case "reset":
 			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
@@ -194,6 +205,52 @@ func (p *Parser) looksLikeParallelForStmt() bool {
 		}
 	}
 	return false
+}
+
+func (p *Parser) looksLikeScopeStmt() bool {
+	if p.pos+2 >= len(p.tokens) {
+		return false
+	}
+	depth := 0
+	for i := p.pos + 1; i < len(p.tokens); i++ {
+		tok := p.tokens[i]
+		switch tok.Kind {
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
+			depth++
+		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET:
+			if depth > 0 {
+				depth--
+			}
+		case lexer.TOKEN_COLON:
+			return depth == 0
+		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
+			return false
+		}
+	}
+	return false
+}
+
+func (p *Parser) looksLikeCheckpointStmt() bool {
+	if p.pos+3 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT || p.tokens[p.pos+2].Kind != lexer.TOKEN_ASSIGN {
+		return false
+	}
+	depth := 0
+	for i := p.pos + 3; i < len(p.tokens); i++ {
+		tok := p.tokens[i]
+		switch tok.Kind {
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
+			depth++
+		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET:
+			if depth > 0 {
+				depth--
+			}
+		case lexer.TOKEN_COLON:
+			return depth == 0
+		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
+			return true
+		}
+	}
+	return true
 }
 
 func (p *Parser) looksLikeForStmt() bool {
@@ -350,6 +407,11 @@ func (p *Parser) parseParallelForStmt() *ast.ParallelForStmt {
 func (p *Parser) parseForStmt() ast.Stmt {
 	pos := p.cur().Pos
 	p.expectIdentText("for")
+	reverse := false
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "rev" {
+		reverse = true
+		p.advance()
+	}
 	mode := p.parseIterBindMode()
 	pattern := p.parseIterLoopPattern()
 	p.expect(lexer.TOKEN_IN)
@@ -372,12 +434,12 @@ func (p *Parser) parseForStmt() ast.Stmt {
 		p.expect(lexer.TOKEN_COLON)
 		p.expectNewline()
 		body := p.parseBlock()
-		return &ast.ForStmt{Position: pos, Name: namePattern.Name, Start: startOrSource, End: end, Step: step, Op: op.Kind, Body: body}
+		return &ast.ForStmt{Position: pos, Reverse: reverse, Name: namePattern.Name, Start: startOrSource, End: end, Step: step, Op: op.Kind, Body: body}
 	}
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	body := p.parseBlock()
-	return &ast.IterForStmt{Position: pos, Pattern: pattern, Mode: mode, Source: startOrSource, Body: body}
+	return &ast.IterForStmt{Position: pos, Reverse: reverse, Pattern: pattern, Mode: mode, Source: startOrSource, Body: body}
 }
 
 func (p *Parser) parseIterLoopPattern() ast.MoveBindPattern {
@@ -777,6 +839,15 @@ func (p *Parser) parseRegion() *ast.RegionStmt {
 	return &ast.RegionStmt{Position: pos, Name: name, Capacity: capacity}
 }
 
+func (p *Parser) parseScopeStmt() *ast.ScopeStmt {
+	pos := p.cur().Pos
+	p.expectIdentText("scope")
+	guard := p.parseExpr()
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	return &ast.ScopeStmt{Position: pos, Guard: guard, Body: p.parseBlock()}
+}
+
 func (p *Parser) parseDestroy() *ast.DestroyStmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_IDENT)
@@ -795,6 +866,22 @@ func (p *Parser) parseMark() *ast.MarkStmt {
 	return &ast.MarkStmt{Position: pos, RegionName: regionName, Name: name}
 }
 
+func (p *Parser) parseCheckpointStmt() *ast.CheckpointStmt {
+	pos := p.cur().Pos
+	p.expectIdentText("checkpoint")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_ASSIGN)
+	target := p.parseExpr()
+	var body []ast.Stmt
+	if p.match(lexer.TOKEN_COLON) {
+		p.expectNewline()
+		body = p.parseBlock()
+	} else {
+		p.expectNewline()
+	}
+	return &ast.CheckpointStmt{Position: pos, Name: name, Target: target, Body: body}
+}
+
 func (p *Parser) parseRestore() *ast.RestoreStmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_IDENT)
@@ -803,6 +890,14 @@ func (p *Parser) parseRestore() *ast.RestoreStmt {
 	markName := p.expect(lexer.TOKEN_IDENT).Text
 	p.expectNewline()
 	return &ast.RestoreStmt{Position: pos, RegionName: regionName, MarkName: markName}
+}
+
+func (p *Parser) parseRestoreCheckpointStmt() *ast.RestoreCheckpointStmt {
+	pos := p.cur().Pos
+	p.expectIdentText("restore")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expectNewline()
+	return &ast.RestoreCheckpointStmt{Position: pos, Name: name}
 }
 
 func (p *Parser) parseReset() *ast.ResetStmt {
