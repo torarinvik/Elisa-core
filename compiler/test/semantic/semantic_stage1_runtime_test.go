@@ -37,10 +37,10 @@ def arena_da_view_get[T](view: dview[T], index: usize) -> T:
 	return zeroed
 
 def use(values: any darray[i32, row]&) -> i32:
-	view: dview[i32] = arena_da_view(values, 0u, values.count)
-	sub: dview[i32] = arena_da_view_slice(view, 0u, 1u)
-	if arena_da_view_len(sub) > 0u:
-		return arena_da_view_get(sub, 0u)
+	view: dview[i32] = arena_da_view(values, 0, values.count)
+	sub: dview[i32] = arena_da_view_slice(view, 0, 1)
+	if arena_da_view_len(sub) > 0:
+		return arena_da_view_get(sub, 0)
 	return 0
 `
 	_, errs := parseAndAnalyze(t, "arena_array_view_helpers.llcontext", src)
@@ -75,7 +75,7 @@ def arena_da_from_view[T](a: any Arena&, view: dview[T]) -> darray[T, shape_out]
 	return zeroed
 
 def bad(a: any Arena&, values: any darray[i32, row]&) -> darray[i32, row]:
-	view: dview[i32] = arena_da_view(values, 0u, values.count)
+	view: dview[i32] = arena_da_view(values, 0, values.count)
 	return arena_da_from_view(a, view)
 `
 	_, errs := parseAndAnalyze(t, "arena_array_from_view_fresh_shape.llcontext", src)

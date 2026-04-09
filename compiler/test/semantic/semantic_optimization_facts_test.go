@@ -141,10 +141,10 @@ func TestAnalyzeCollectsOptimizationFactsForShapeBackedCollections(t *testing.T)
 
 func TestAnalyzeMarksFreshRegionAllocationsAsExclusive(t *testing.T) {
 	src := `def inspect(seed: i32) -> i32:
-	region scratch(1024u)
+	region scratch(1024)
 	slot: any i32& = new[scratch] seed
 	alias: any i32& = slot
-	return alias[0u]
+	return alias[0]
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_region_alloc_exclusive.llcontext", src)
 	requireNoErrors(t, errs)
@@ -317,12 +317,12 @@ def inspect(owner: Arena) -> i32:
 		_ = new Expr.Add(span: 5, left: left, right: right)
 
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	node: Expr = frozen[2u]
+	node: Expr = frozen[2]
 	key: NodeKey[Expr] = dense_key(node, frozen)
 	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, frozen, -1)
 	table[key] <- 0
 	values: dview[i32] = table.values
-	nodes: dview[Expr] = frozen[0u:frozen.count]
+	nodes: dview[Expr] = frozen[0:frozen.count]
 	if values.len == nodes.len:
 		return values[0]
 	return -1
@@ -385,12 +385,12 @@ def make_box(owner: Arena) -> FrozenBox:
 
 def inspect(owner: Arena) -> i32:
 	box: FrozenBox = make_box(owner)
-	node: Expr = box.store[2u]
+	node: Expr = box.store[2]
 	key: NodeKey[Expr] = dense_key(node, box.store)
 	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, box.store, -1)
 	table[key] <- 0
 	values: dview[i32] = table.values
-	nodes: dview[Expr] = box.store[0u:box.store.count]
+	nodes: dview[Expr] = box.store[0:box.store.count]
 	if values.len == nodes.len:
 		return values[0]
 	return -1

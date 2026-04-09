@@ -1238,7 +1238,7 @@ func TestAnalyzeRejectsDroppedThreadPoolRequiringShutdownAtScopeExit(t *testing.
 	src := `extern pool_new(workers: usize) -> ThreadPool
 
 def bad() -> void:
-	pool: ThreadPool = pool_new(2u)
+	pool: ThreadPool = pool_new(2)
 `
 	_, errs := parseAndAnalyze(t, "drop_thread_pool_scope_exit_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -1257,7 +1257,7 @@ repr(c) struct Holder:
 	pool: mutable ThreadPool
 
 def bad(holder: mutable Holder) -> void:
-	holder.pool <- pool_new(2u)
+	holder.pool <- pool_new(2)
 `
 	_, errs := parseAndAnalyze(t, "drop_thread_pool_holder_scope_exit_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -1274,7 +1274,7 @@ func TestAnalyzeAcceptsPoolShutdownAfterPoolNew(t *testing.T) {
 extern pool_shutdown(pool: any ThreadPool&) -> void
 
 def ok() -> void:
-	pool: ThreadPool = pool_new(2u)
+	pool: ThreadPool = pool_new(2)
 	pool_shutdown((&pool).cast[any ThreadPool&])
 `
 	result, errs := parseAndAnalyze(t, "pool_shutdown_after_pool_new_ok.llcontext", src)
@@ -1295,7 +1295,7 @@ def work(value: i64) -> i64:
 	return value + 1
 
 def bad() -> void:
-	pool: ThreadPool = pool_new(2u)
+	pool: ThreadPool = pool_new(2)
 	pool_shutdown((&pool).cast[any ThreadPool&])
 	_ = pool_submit1((&pool).cast[any ThreadPool&], work, 1)
 `
@@ -1321,7 +1321,7 @@ def work(value: i64) -> i64:
 	return value + 1
 
 def bad() -> void:
-	pool: ThreadPool = pool_new(2u)
+	pool: ThreadPool = pool_new(2)
 	pool_ref: any ThreadPool& = (&pool).cast[any ThreadPool&]
 	pool_shutdown(pool_ref)
 	_ = pool_submit1((&pool).cast[any ThreadPool&], work, 1)
@@ -1375,7 +1375,7 @@ def work(value: i64) -> i64:
 	return value + 1
 
 def bad() -> void:
-	pool: ThreadPool = pool_new(2u)
+	pool: ThreadPool = pool_new(2)
 	holder: PoolHolder = PoolHolder((&pool).cast[any ThreadPool&])
 	pool_shutdown(holder.pool_ref)
 	_ = pool_submit1((&pool).cast[any ThreadPool&], work, 1)
@@ -2903,7 +2903,7 @@ func TestAnalyzeAcceptsPoolScopeSyntax(t *testing.T) {
 extern pool_shutdown(pool: any ThreadPool&) -> void
 
 def ok() -> bool can[Pool.Create, Pool.Shutdown]:
-	pool workers(2u):
+	pool workers(2):
 		return workers.handle != null
 `
 	result, errs := parseAndAnalyze(t, "pool_scope_ok.llcontext", src)
@@ -2925,7 +2925,7 @@ def work(value: i64) -> i64:
 	return value + 1
 
 def ok() -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.Await]:
-	pool workers(2u):
+	pool workers(2):
 		task: Task[i64, Pending] = submit work(7)
 		return await task
 `
@@ -8724,7 +8724,7 @@ func TestAnalyzeRejectsUsingReferenceInvalidatedByReset(t *testing.T) {
 	region scratch
 	value: any i32& = new[scratch] 1
 	reset scratch
-	return value[0u]
+	return value[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_reset_invalid_ref.llcontext", src)
 	if len(errs) == 0 {

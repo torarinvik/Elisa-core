@@ -126,10 +126,10 @@ def alias_flow(seed: i32, box: heap Box&?) -> i32:
 	region scratch(1024u)
 	left: mutable scratch i32& = new[scratch] seed
 	alias: mutable scratch i32& = left
-	alias[0u] <- seed
+	alias[0] <- seed
 	if box == null:
-		return left[0u]
-	return left[0u] + box.value
+		return left[0]
+	return left[0] + box.value
 `
 	result, errs := parseAndAnalyze(t, "function_analysis_cfg_alias.llcontext", src)
 	requireNoErrors(t, errs)
