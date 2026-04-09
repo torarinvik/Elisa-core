@@ -1,7 +1,7 @@
 # include "../llcontext_std/contextlang_runtime.llcontext"
 
-const ML_AST_PARALLEL_MAX_WORKERS = 128u
-const ML_AST_FOREST_ROUNDS = 18u
+const ML_AST_PARALLEL_MAX_WORKERS = 128
+const ML_AST_FOREST_ROUNDS = 18
 
 @packed_profile(retained_reads)
 packed enum TypeExpr:
@@ -256,104 +256,104 @@ def checksum_root_range(start: usize, end: usize, forest: any FrozenMlAstForest&
 
 def build_seed_type(seed: usize, current: TypeExpr, previous: TypeExpr, store: TypeExpr.Store[Local]) -> TypeExpr:
     seed_i64: i64 = seed.i64()
-    if seed % 4u == 0u:
+    if seed % 4 == 0:
         pair: TypeExpr = new[store] TypeExpr.Tuple(span: 100 + seed_i64, weight: 7 + seed_i64, left: current, right: previous)
         return new[store] TypeExpr.Record(span: 101 + seed_i64, weight: 11 + seed_i64, label: 400 + seed_i64, field_ty: pair, rest: current)
-    if seed % 4u == 1u:
+    if seed % 4 == 1:
         arrow: TypeExpr = new[store] TypeExpr.Arrow(span: 102 + seed_i64, weight: 13 + seed_i64, param: previous, result: current)
         return new[store] TypeExpr.App(span: 103 + seed_i64, weight: 17 + seed_i64, callee: arrow, arg: current)
-    if seed % 4u == 2u:
+    if seed % 4 == 2:
         row: TypeExpr = new[store] TypeExpr.Record(span: 104 + seed_i64, weight: 19 + seed_i64, label: 500 + seed_i64, field_ty: previous, rest: current)
         return new[store] TypeExpr.Effect(span: 105 + seed_i64, weight: 23 + seed_i64, label: 600 + seed_i64, carrier: row)
     return new[store] TypeExpr.Tuple(span: 106 + seed_i64, weight: 29 + seed_i64, left: current, right: previous)
 
 def build_seed_pattern(seed: usize, current: Pattern, previous: Pattern, guard: Expr, ann: TypeExpr, store: Pattern.Store[Local]) -> Pattern:
     seed_i64: i64 = seed.i64()
-    if seed % 5u == 0u:
+    if seed % 5 == 0:
         binding: Pattern = new[store] Pattern.Bind(span: 200 + seed_i64, weight: 3 + seed_i64, symbol: 1000 + seed_i64, ann: ann)
         return new[store] Pattern.Alias(span: 201 + seed_i64, weight: 5 + seed_i64, alias_symbol: 1100 + seed_i64, inner: binding)
-    if seed % 5u == 1u:
+    if seed % 5 == 1:
         wildcard: Pattern = new[store] Pattern.Wildcard(span: 202 + seed_i64, weight: 7 + seed_i64)
         return new[store] Pattern.Tuple(span: 203 + seed_i64, weight: 11 + seed_i64, left: wildcard, right: current)
-    if seed % 5u == 2u:
+    if seed % 5 == 2:
         nil_pat: Pattern = new[store] Pattern.ListNil(span: 204 + seed_i64, weight: 13 + seed_i64)
         cons: Pattern = new[store] Pattern.ListCons(span: 205 + seed_i64, weight: 17 + seed_i64, head: current, rest: nil_pat)
         return new[store] Pattern.Ctor(span: 206 + seed_i64, weight: 19 + seed_i64, label: 1200 + seed_i64, arg: cons, ann: ann)
-    if seed % 5u == 3u:
-        lit_bool: Pattern = new[store] Pattern.LiteralBool(span: 207 + seed_i64, weight: 23 + seed_i64, value: seed % 2u == 0u)
+    if seed % 5 == 3:
+        lit_bool: Pattern = new[store] Pattern.LiteralBool(span: 207 + seed_i64, weight: 23 + seed_i64, value: seed % 2 == 0)
         return new[store] Pattern.Or(span: 208 + seed_i64, weight: 29 + seed_i64, left: current, right: lit_bool)
     alias_inner: Pattern = new[store] Pattern.Alias(span: 209 + seed_i64, weight: 31 + seed_i64, alias_symbol: 1300 + seed_i64, inner: previous)
     return new[store] Pattern.Guarded(span: 210 + seed_i64, weight: 37 + seed_i64, inner: alias_inner, guard: guard)
 
 def build_seed_clause(seed: usize, pattern: Pattern, body: Expr, alternative: Expr, current: Clause, store: Clause.Store[Local]) -> Clause:
     seed_i64: i64 = seed.i64()
-    if seed % 3u == 0u:
+    if seed % 3 == 0:
         return new[store] Clause.Terminal(span: 300 + seed_i64, weight: 5 + seed_i64, pattern: pattern, body: body)
-    if seed % 3u == 1u:
+    if seed % 3 == 1:
         return new[store] Clause.Guarded(span: 301 + seed_i64, weight: 7 + seed_i64, pattern: pattern, guard: body, body: alternative, next: current)
     return new[store] Clause.Chain(span: 302 + seed_i64, weight: 11 + seed_i64, pattern: pattern, body: body, next: current)
 
 def build_seed_expr(seed: usize, pattern: Pattern, current: Expr, alternative: Expr, clause: Clause, ty: TypeExpr, store: Expr.Store[Local]) -> Expr:
     seed_i64: i64 = seed.i64()
-    if seed % 8u == 0u:
+    if seed % 8 == 0:
         return new[store] Expr.Lambda(span: 400 + seed_i64, cost: 3 + seed_i64, param: pattern, body: current, ty: ty)
-    if seed % 8u == 1u:
+    if seed % 8 == 1:
         lambda_expr: Expr = new[store] Expr.Lambda(span: 401 + seed_i64, cost: 5 + seed_i64, param: pattern, body: current, ty: ty)
         return new[store] Expr.Apply(span: 402 + seed_i64, cost: 7 + seed_i64, callee: lambda_expr, arg: alternative, ty: ty)
-    if seed % 8u == 2u:
+    if seed % 8 == 2:
         return new[store] Expr.Let(span: 403 + seed_i64, cost: 11 + seed_i64, pattern: pattern, value: alternative, body: current, ty: ty)
-    if seed % 8u == 3u:
+    if seed % 8 == 3:
         return new[store] Expr.Match(span: 404 + seed_i64, cost: 13 + seed_i64, scrutinee: current, clauses: clause, ty: ty)
-    if seed % 8u == 4u:
+    if seed % 8 == 4:
         return new[store] Expr.Ctor(span: 405 + seed_i64, cost: 17 + seed_i64, label: 1400 + seed_i64, arg: current, ty: ty)
-    if seed % 8u == 5u:
+    if seed % 8 == 5:
         return new[store] Expr.Record(span: 406 + seed_i64, cost: 19 + seed_i64, label: 1500 + seed_i64, field_value: current, rest: alternative, ty: ty)
-    if seed % 8u == 6u:
+    if seed % 8 == 6:
         record_expr: Expr = new[store] Expr.Record(span: 407 + seed_i64, cost: 23 + seed_i64, label: 1600 + seed_i64, field_value: current, rest: alternative, ty: ty)
         return new[store] Expr.Project(span: 408 + seed_i64, cost: 29 + seed_i64, base: record_expr, label: 1700 + seed_i64, ty: ty)
-    cond_expr: Expr = new[store] Expr.LiteralBool(span: 409 + seed_i64, cost: 31 + seed_i64, value: seed % 2u == 0u)
+    cond_expr: Expr = new[store] Expr.LiteralBool(span: 409 + seed_i64, cost: 31 + seed_i64, value: seed % 2 == 0)
     return new[store] Expr.If(span: 410 + seed_i64, cost: 37 + seed_i64, cond: cond_expr, then_branch: current, else_branch: alternative, ty: ty)
 
 def build_seed_stmt(seed: usize, pattern: Pattern, value: Expr, alternative: Expr, clause: Clause, current: Stmt, ann: TypeExpr, store: Stmt.Store[Local]) -> Stmt:
     seed_i64: i64 = seed.i64()
-    if seed % 4u == 0u:
+    if seed % 4 == 0:
         return new[store] Stmt.Let(span: 500 + seed_i64, effect: 3 + seed_i64, pattern: pattern, ann: ann, value: value, next: current)
-    if seed % 4u == 1u:
+    if seed % 4 == 1:
         return new[store] Stmt.Match(span: 501 + seed_i64, effect: 5 + seed_i64, scrutinee: value, clauses: clause, next: current)
-    if seed % 4u == 2u:
+    if seed % 4 == 2:
         trailing_stmt: Stmt = new[store] Stmt.Return(span: 502 + seed_i64, effect: 7 + seed_i64, value: alternative)
         return new[store] Stmt.Block(span: 503 + seed_i64, effect: 11 + seed_i64, first: current, second: trailing_stmt, result_expr: value)
     return new[store] Stmt.Return(span: 504 + seed_i64, effect: 13 + seed_i64, value: value)
 
 def build_seed_decl(seed: usize, pattern: Pattern, value: Expr, stmt: Stmt, ann: TypeExpr, current: Decl, store: Decl.Store[Local]) -> Decl:
     seed_i64: i64 = seed.i64()
-    if seed % 6u == 0u:
+    if seed % 6 == 0:
         return new[store] Decl.Function(span: 600 + seed_i64, phase: 3 + seed_i64, name: 1800 + seed_i64, param: pattern, signature: ann, body: stmt)
-    if seed % 6u == 1u:
+    if seed % 6 == 1:
         return new[store] Decl.TypeAlias(span: 601 + seed_i64, phase: 5 + seed_i64, name: 1900 + seed_i64, target: ann)
-    if seed % 6u == 2u:
+    if seed % 6 == 2:
         return new[store] Decl.Value(span: 602 + seed_i64, phase: 7 + seed_i64, name: 2000 + seed_i64, pattern: pattern, value: value)
-    if seed % 6u == 3u:
+    if seed % 6 == 3:
         return new[store] Decl.Data(span: 603 + seed_i64, phase: 11 + seed_i64, name: 2100 + seed_i64, payload: ann, ctor_pattern: pattern)
-    if seed % 6u == 4u:
+    if seed % 6 == 4:
         return new[store] Decl.Script(span: 604 + seed_i64, phase: 13 + seed_i64, name: 2200 + seed_i64, body: stmt, result: value)
     side_decl: Decl = new[store] Decl.Value(span: 605 + seed_i64, phase: 17 + seed_i64, name: 2300 + seed_i64, pattern: pattern, value: value)
     return new[store] Decl.Group(span: 606 + seed_i64, phase: 19 + seed_i64, left: current, right: side_decl)
 
 def build_seed_module(seed: usize, primary: Decl, fallback: Decl, script: Stmt, summary: Expr, current: Module, store: Module.Store[Local]) -> Module:
     seed_i64: i64 = seed.i64()
-    if seed % 3u == 0u:
+    if seed % 3 == 0:
         return new[store] Module.Unit(span: 700 + seed_i64, weight: 3 + seed_i64, name: 2400 + seed_i64, primary: primary, bootstrap: script, summary: summary)
-    if seed % 3u == 1u:
+    if seed % 3 == 1:
         return new[store] Module.Nested(span: 701 + seed_i64, weight: 5 + seed_i64, name: 2500 + seed_i64, primary: primary, fallback: fallback, script: script, summary: summary)
     side_module: Module = new[store] Module.Unit(span: 702 + seed_i64, weight: 7 + seed_i64, name: 2600 + seed_i64, primary: primary, bootstrap: script, summary: summary)
     return new[store] Module.Bundle(span: 703 + seed_i64, weight: 11 + seed_i64, left: current, right: side_module)
 
 def build_seed_root(seed: usize, module: Module, expr: Expr, stmt: Stmt, witness: Pattern, store: Root.Store[Local]) -> Root:
     seed_i64: i64 = seed.i64()
-    if seed % 3u == 0u:
+    if seed % 3 == 0:
         return new[store] Root.ModuleRoot(span: 800 + seed_i64, phase: 3 + seed_i64, module: module, witness: witness)
-    if seed % 3u == 1u:
+    if seed % 3 == 1:
         return new[store] Root.Script(span: 801 + seed_i64, phase: 5 + seed_i64, script: stmt, result: expr, witness: witness)
     return new[store] Root.Eval(span: 802 + seed_i64, phase: 7 + seed_i64, module: module, expr: expr, witness: witness)
 
@@ -434,7 +434,7 @@ def build_ml_ast_forest(
     current_decl: mutable Decl = group_decl
     current_module: mutable Module = bundle_module
 
-    for seed in 0u..<ML_AST_FOREST_ROUNDS:
+    for seed in 0..<ML_AST_FOREST_ROUNDS:
         next_type: TypeExpr = build_seed_type(seed, current_type, previous_type, type_store)
         next_pattern: Pattern = build_seed_pattern(seed, current_pattern, previous_pattern, current_expr, next_type, pattern_store)
         next_clause: Clause = build_seed_clause(seed, next_pattern, current_expr, previous_expr, current_clause, clause_store)
@@ -467,12 +467,12 @@ def build_ml_ast_forest(
     return FrozenMlAstForest(frozen_types, frozen_patterns, frozen_exprs, frozen_clauses, frozen_stmts, frozen_decls, frozen_modules, frozen_roots)
 
 def packed_ml_ast_checksum_impl() -> i64:
-    return packed_ml_ast_repeated_checksum_impl(1u)
+    return packed_ml_ast_repeated_checksum_impl(1)
 
 def packed_ml_ast_repeated_checksum_impl(iterations: usize) -> i64:
-    if iterations == 0u:
+    if iterations == 0:
         return -1
-    region scratch(262144u)
+    region scratch(262144)
     type_store: TypeExpr.Store[Local] = TypeExpr.Store(scratch)
     pattern_store: Pattern.Store[Local] = Pattern.Store(scratch)
     expr_store: Expr.Store[Local] = Expr.Store(scratch)
@@ -483,27 +483,27 @@ def packed_ml_ast_repeated_checksum_impl(iterations: usize) -> i64:
     root_store: Root.Store[Local] = Root.Store(scratch)
     forest: FrozenMlAstForest = build_ml_ast_forest(type_store, pattern_store, expr_store, clause_store, stmt_store, decl_store, module_store, root_store)
     total: mutable i64 = 0
-    for iteration in 0u..<iterations:
-        total <- total + checksum_root_range(0u, forest.roots.count, (&forest).cast[any FrozenMlAstForest&])
+    for iteration in 0..<iterations:
+        total <- total + checksum_root_range(0, forest.roots.count, (&forest).cast[any FrozenMlAstForest&])
     return total
 
 def ml_ast_parallel_worker(job: MlAstParallelJob) -> i64:
     forest: any FrozenMlAstForest& = job.forest_bits.cast[any FrozenMlAstForest&]
     result_slot: mutable any i64& = job.result_bits.cast[mutable any i64&]
     total: mutable i64 = 0
-    for iteration in 0u..<job.repeats:
+    for iteration in 0..<job.repeats:
         total <- total + checksum_root_range(job.start, job.end, forest)
-    result_slot[0u] <- total
+    result_slot[0] <- total
     return total
 
 def packed_ml_ast_parallel_max_workers_impl() -> i64:
     return ML_AST_PARALLEL_MAX_WORKERS.i64()
 
 def packed_ml_ast_parallel_checksum_impl(worker_count: usize, iterations: usize) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
-    if worker_count == 0u or iterations == 0u or worker_count > ML_AST_PARALLEL_MAX_WORKERS:
+    if worker_count == 0 or iterations == 0 or worker_count > ML_AST_PARALLEL_MAX_WORKERS:
         return -1
 
-    region scratch(262144u)
+    region scratch(262144)
     type_store: TypeExpr.Store[Local] = TypeExpr.Store(scratch)
     pattern_store: Pattern.Store[Local] = Pattern.Store(scratch)
     expr_store: Expr.Store[Local] = Expr.Store(scratch)
@@ -517,7 +517,7 @@ def packed_ml_ast_parallel_checksum_impl(worker_count: usize, iterations: usize)
     worker_total: mutable usize = worker_count
     if worker_total > forest.roots.count:
         worker_total <- forest.roots.count
-    if worker_total == 0u:
+    if worker_total == 0:
         return -1
 
     partials: i64[128] = zeroed
@@ -526,11 +526,11 @@ def packed_ml_ast_parallel_checksum_impl(worker_count: usize, iterations: usize)
 
     pool workers(worker_total):
         group: TaskGroup = task_group_new()
-        start: mutable usize = 0u
-        for slot in 0u..<worker_total:
+        start: mutable usize = 0
+        for slot in 0..<worker_total:
             span: mutable usize = base_roots
             if slot < extra_roots:
-                span <- span + 1u
+                span <- span + 1
 
             end: usize = start + span
             forest_bits: uintptr = (&forest).cast[any FrozenMlAstForest&].uintptr()
@@ -543,7 +543,7 @@ def packed_ml_ast_parallel_checksum_impl(worker_count: usize, iterations: usize)
         wait all group
 
     total: mutable i64 = 0
-    for slot in 0u..<worker_total:
+    for slot in 0..<worker_total:
         total <- total + partials[slot]
     return total
 
