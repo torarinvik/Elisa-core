@@ -2679,9 +2679,9 @@ repr(c) struct GroupHolder:
 extern sub_items(items: view[GroupHolder], start: usize, end: usize) -> view[GroupHolder]
 
 def ok(items: view[GroupHolder], task: Task[i64, Pending]) -> void:
-	sub: view[GroupHolder] = sub_items(items, 1u, 2u)
-	task_group_add(sub[0u].group_ref, move task)
-	wait all items[1u].group_ref
+	sub: view[GroupHolder] = sub_items(items, 1, 2)
+	task_group_add(sub[0].group_ref, move task)
+	wait all items[1].group_ref
 `
 	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_extern_rebased_aggregate_alias_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -2703,9 +2703,9 @@ repr(c) struct GroupWindow:
 extern wrap_sub(src: view[GroupHolder], start: usize, end: usize) -> GroupWindow
 
 def ok(items: view[GroupHolder], task: Task[i64, Pending]) -> void:
-	window: GroupWindow = wrap_sub(items, 1u, 2u)
-	task_group_add(window.items[0u].group_ref, move task)
-	wait all items[1u].group_ref
+	window: GroupWindow = wrap_sub(items, 1, 2)
+	task_group_add(window.items[0].group_ref, move task)
+	wait all items[1].group_ref
 `
 	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_extern_field_rebased_aggregate_alias_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -2718,7 +2718,7 @@ func TestAnalyzeRejectsDoubleThreadPoolShutdown(t *testing.T) {
 extern pool_shutdown(pool: any ThreadPool&) -> void
 
 def bad() -> void:
-	pool: ThreadPool = pool_new(2u)
+	pool: ThreadPool = pool_new(2)
 	pool_shutdown((&pool).cast[any ThreadPool&])
 	pool_shutdown((&pool).cast[any ThreadPool&])
 `
@@ -2737,9 +2737,9 @@ func TestAnalyzeAcceptsReinitializingThreadPoolAfterShutdown(t *testing.T) {
 extern pool_shutdown(pool: any ThreadPool&) -> void
 
 def ok() -> void:
-	pool: mutable ThreadPool = pool_new(2u)
+	pool: mutable ThreadPool = pool_new(2)
 	pool_shutdown((&pool).cast[any ThreadPool&])
-	pool <- pool_new(1u)
+	pool <- pool_new(1)
 	pool_shutdown((&pool).cast[any ThreadPool&])
 `
 	result, errs := parseAndAnalyze(t, "thread_pool_reinitialize_after_shutdown_ok.llcontext", src)
@@ -3889,11 +3889,11 @@ func TestAnalyzeAcceptsBuiltinSurfaceCollectionTypes(t *testing.T) {
 	src := `extern take_array(values: array[i32, 4]) -> void
 extern take_darray(values: darray[i32, row]) -> void
 extern take_dstr(text: dstr[row]) -> void
-extern take_view(values: view[i32, 0u, 2u]) -> void
+extern take_view(values: view[i32, 0, 2]) -> void
 extern take_sview(text: sview[1, 4]) -> void
 
 def use(values: array[i32, 4], dyn: darray[i32, row], text: str[5], dyn_text: dstr[row]) -> char:
-	sub_array: view[i32, 0u, 2u] = values[0u:2u]
+	sub_array: view[i32, 0, 2] = values[0:2]
 	sub_text: sview[1, 4] = text[1:4]
 	dyn_sub: sview[0, 1] = dyn_text[0:1]
 	take_array(values)
@@ -4506,9 +4506,9 @@ def rewind(ptr: any u8&, offset: usize) -> any u8&:
 
 func TestAnalyzeAcceptsManualRegions(t *testing.T) {
 	src := `def sum_region(seed: i32) -> i32:
-	region scratch(1024u)
+	region scratch(1024)
 	value: any i32& = new[scratch] seed + 1
-	return value[0u]
+	return value[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -4516,10 +4516,10 @@ func TestAnalyzeAcceptsManualRegions(t *testing.T) {
 
 func TestAnalyzeAcceptsExplicitRegionQualifiedRefs(t *testing.T) {
 	src := `def sum_region(seed: i32) -> i32:
-	region scratch(1024u)
+	region scratch(1024)
 	value: scratch i32& = new[scratch] seed + 1
 	alias: scratch i32& = value
-	return value[0u] + alias[0u]
+	return value[0] + alias[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_explicit_ref_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -4531,10 +4531,10 @@ func TestAnalyzeAcceptsExplicitRegionParamsOnFunctions(t *testing.T) {
 	return alias
 
 def use(seed: i32) -> i32:
-	region scratch(1024u)
+	region scratch(1024)
 	value: scratch i32& = new[scratch] seed + 1
 	alias: scratch i32& = id(value)
-	return alias[0u]
+	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "function_region_params_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -4544,10 +4544,10 @@ func TestAnalyzeAcceptsExplicitRegionParamsOnExternFunctions(t *testing.T) {
 	src := `extern borrow[region r](value: r i32&) -> r i32&
 
 def use(seed: i32) -> i32:
-	region scratch(1024u)
+	region scratch(1024)
 	value: scratch i32& = new[scratch] seed + 1
 	alias: scratch i32& = borrow(value)
-	return alias[0u]
+	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "extern_function_region_params_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -4850,11 +4850,11 @@ def use(value: any i32&) -> any i32&:
 
 func TestAnalyzeRejectsMismatchedRegionQualifiedRefs(t *testing.T) {
 	src := `def bad() -> i32:
-	region left(1024u)
-	region right(1024u)
+	region left(1024)
+	region right(1024)
 	value: left i32& = new[left] 1
 	other: right i32& = value
-	return other[0u]
+	return other[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_mismatched_ref_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -4880,7 +4880,7 @@ func TestAnalyzeRejectsUnknownRegionQualifiedRef(t *testing.T) {
 
 func TestAnalyzeRejectsReturningReferenceAllocatedFromLocalRegion(t *testing.T) {
 	src := `def bad() -> any i32&:
-	region scratch(1024u)
+	region scratch(1024)
 	value: any i32& = new[scratch] 1
 	return value
 `
@@ -4895,7 +4895,7 @@ func TestAnalyzeRejectsReturningReferenceAllocatedFromLocalRegion(t *testing.T) 
 
 func TestAnalyzeRejectsReturningCastedReferenceAllocatedFromLocalRegion(t *testing.T) {
 	src := `def bad() -> any i32&:
-	region scratch(1024u)
+	region scratch(1024)
 	value: any i32& = new[scratch] 1
 	return value.cast[any i32&]
 `
@@ -4910,15 +4910,15 @@ func TestAnalyzeRejectsReturningCastedReferenceAllocatedFromLocalRegion(t *testi
 
 func TestAnalyzeAcceptsRegionCheckpoints(t *testing.T) {
 	src := `def sum_region(seed: i32) -> i32:
-	region scratch(1024u)
+	region scratch(1024)
 	mark scratch as cp
 	temp: any i32& = new[scratch] seed + 1
 	restore scratch from cp
 	reused: any i32& = new[scratch] seed + 2
-	value: i32 = reused[0u]
+	value: i32 = reused[0]
 	reset scratch
 	final: any i32& = new[scratch] seed + 3
-	return value + final[0u]
+	return value + final[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_checkpoints_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -4926,18 +4926,18 @@ func TestAnalyzeAcceptsRegionCheckpoints(t *testing.T) {
 
 func TestAnalyzeAcceptsNestedRegionCheckpoints(t *testing.T) {
 	src := `def sum_region(seed: i32) -> i32:
-	region scratch(1024u)
+	region scratch(1024)
 	base: any i32& = new[scratch] seed
-	baseline: i32 = base[0u]
+	baseline: i32 = base[0]
 	mark scratch as outer
 	stable: any i32& = new[scratch] seed + 1
 	mark scratch as inner
 	temp: any i32& = new[scratch] seed + 2
 	restore scratch from inner
-	kept: i32 = stable[0u]
+	kept: i32 = stable[0]
 	restore scratch from outer
 	final: any i32& = new[scratch] seed + 3
-	return baseline + kept + final[0u]
+	return baseline + kept + final[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_nested_checkpoints_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -5390,7 +5390,7 @@ func TestAnalyzeAcceptsRecursiveEnumPayloadByReference(t *testing.T) {
 	Add(left: any Expr&, right: any Expr&)
 
 def eval(node: any Expr&) -> int:
-	return match node[0u]:
+	return match node[0]:
 		Expr.Int(value: value):
 			value
 		Expr.Add(left: left, right: right):
@@ -5455,14 +5455,14 @@ func TestAnalyzeAcceptsPackedEnumTailPayloadsAsDynamicViews(t *testing.T) {
 	Block(count: usize, items: tail int)
 
 def build() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
-	node: Expr = new[store] Expr.Block(count: 3u, items: [1, 2, 3])
+	node: Expr = new[store] Expr.Block(count: 3, items: [1, 2, 3])
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	return match node in frozen:
 		Expr.Block(count: count, items: items):
 			if items.len == count:
-				items[0u] + items[2u]
+				items[0] + items[2]
 			0
 `
 	result, errs := parseAndAnalyze(t, "packed_enum_tail_payload_dview_ok.llcontext", src)
@@ -5511,14 +5511,14 @@ func TestAnalyzeAcceptsNonFinalPackedEnumTailPayloads(t *testing.T) {
 	Block(items: tail int, count: usize)
 
 def build() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
-	node: Expr = new[store] Expr.Block(items: [1, 2, 3], count: 3u)
+	node: Expr = new[store] Expr.Block(items: [1, 2, 3], count: 3)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	return match node in frozen:
 		Expr.Block(items: items, count: count):
 			if items.len == count:
-				items[1u]
+				items[1]
 			0
 `
 	result, errs := parseAndAnalyze(t, "packed_enum_tail_payload_not_final_ok.llcontext", src)
@@ -5709,7 +5709,7 @@ def make_box(owner: Arena) -> Box:
 
 def read(owner: Arena) -> int:
 	box: Box = make_box(owner)
-	return match box.store[0u]:
+	return match box.store[0]:
 		Expr.Int(value: value):
 			value
 `
@@ -6284,7 +6284,7 @@ def make_box(owner: Arena) -> Box:
 
 def read(owner: Arena) -> int:
 	box: Box = make_box(owner)
-	node: Expr = box.store[0u]
+	node: Expr = box.store[0]
 	alias: Expr = node
 	open alias as Expr.Int(value: value):
 		return value
@@ -6380,12 +6380,12 @@ def walk(owner: Arena) -> int:
 
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	total: mutable int = 0
-	index: mutable usize = 0u
+	index: mutable usize = 0
 	while index < frozen.count:
 		node: Expr = frozen[index]
 		if node in frozen as Expr.Int(value: value):
 			total <- total + value + node.span
-		index <- index + 1u
+		index <- index + 1
 	return total
 `
 	result, errs := parseAndAnalyze(t, "packed_store_count_and_index_ok.llcontext", src)
@@ -6409,7 +6409,7 @@ def inspect(owner: Arena) -> i32:
 		_ = new Expr.Add(span: 5i32, left: left, right: right)
 
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	node: Expr = frozen[2u]
+	node: Expr = frozen[2]
 	key: NodeKey[Expr] = dense_key(node, frozen)
 	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, frozen, -1i32)
 	table[key] <- 0i32
@@ -6491,7 +6491,7 @@ def make_box(owner: Arena) -> FrozenBox:
 
 def inspect(owner: Arena) -> i32:
 	box: FrozenBox = make_box(owner)
-	node: Expr = box.store[2u]
+	node: Expr = box.store[2]
 	key: NodeKey[Expr] = dense_key(node, box.store)
 	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, box.store, -1i32)
 	table[key] <- 0i32
@@ -6542,7 +6542,7 @@ def bad(owner: Arena) -> Expr:
 		_ = new Expr.Lit(value: 2)
 	right_frozen: Expr.Store[Frozen] = freeze(move right_store)
 
-	node: Expr = left_frozen[0u]
+	node: Expr = left_frozen[0]
 	key: NodeKey[Expr] = dense_key(node, left_frozen)
 	return right_frozen[key]
 `
@@ -6578,7 +6578,7 @@ def make_pair(owner: Arena) -> FrozenPair:
 
 def bad(owner: Arena) -> Expr:
 	pair: FrozenPair = make_pair(owner)
-	node: Expr = pair.left[0u]
+	node: Expr = pair.left[0]
 	key: NodeKey[Expr] = dense_key(node, pair.left)
 	return pair.right[key]
 `
@@ -6597,7 +6597,7 @@ func TestAnalyzeRejectsAssigningPackedStoreIndexResult(t *testing.T) {
 	Int(value: int)
 
 def bad(store: Expr.Store[Frozen], node: Expr) -> void:
-	store[0u] <- node
+	store[0] <- node
 `
 	_, errs := parseAndAnalyze(t, "packed_store_index_assign_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -6624,14 +6624,14 @@ def walk(owner: Arena) -> int:
 		_ = new Expr.Add(span: 3, left: left, right: right)
 
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	chunk: dview[Expr] = frozen[1u:frozen.count]
+	chunk: dview[Expr] = frozen[1:frozen.count]
 	total: mutable int = 0
-	index: mutable usize = 0u
+	index: mutable usize = 0
 	while index < chunk.len:
 		node: Expr = chunk[index]
 		if node in frozen as Expr.Int(value: value):
 			total <- total + value + node.span
-		index <- index + 1u
+		index <- index + 1
 	return total
 `
 	result, errs := parseAndAnalyze(t, "packed_store_slice_ok.llcontext", src)
@@ -6710,8 +6710,8 @@ func TestAnalyzeAcceptsIterableForLoopOverChunksExactView(t *testing.T) {
 	return value + bias
 
 def run(values: darray[i64, 4], bias: i64) -> i64:
-	base: dview[i64] = values[0u:4u]
-	chunks: ChunksExactView[i64] = chunks_exact(readonly(base), 2u)
+	base: dview[i64] = values[0:4]
+	chunks: ChunksExactView[i64] = chunks_exact(readonly(base), 2)
 	total: mutable i64 = 0
 	for chunk in chunks:
 		total <- total + reduce_sum(chunk, add_bias, bias)
@@ -6725,8 +6725,8 @@ def run(values: darray[i64, 4], bias: i64) -> i64:
 
 func TestAnalyzeRejectsIterableForLoopRefOverChunksExactView(t *testing.T) {
 	src := `def bad(values: darray[i32, 4]) -> void:
-	base: dview[i32] = values[0u:4u]
-	chunks: ChunksExactView[i32] = chunks_exact(readonly(base), 2u)
+	base: dview[i32] = values[0:4]
+	chunks: ChunksExactView[i32] = chunks_exact(readonly(base), 2)
 	for ref chunk in chunks:
 		_ = chunk
 `
@@ -6784,7 +6784,7 @@ def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool
 		_ = new Expr.Int(span: 1, value: 3)
 		_ = new Expr.Int(span: 2, value: 4)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	pool workers(2u):
+	pool workers(2):
 		parallel for node in frozen:
 			if node in frozen as Expr.Int(value: value):
 				_ = value + node.span
@@ -6810,7 +6810,7 @@ def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool
 		_ = new Expr.Add(left: left, right: right)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	tags: dview[Expr.Tag] = frozen.tags
-	pool workers(2u):
+	pool workers(2):
 		parallel for tag at i in tags:
 			_ = i
 			if tag == Expr.Tag.Add:
@@ -6849,7 +6849,7 @@ packed enum Expr:
 
 def bad(store: Expr.Store[Frozen]) -> void can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
 	total: mutable int = 0
-	pool workers(2u):
+	pool workers(2):
 		parallel for node in store:
 			total <- total + 1
 `
@@ -6866,11 +6866,11 @@ def bad(store: Expr.Store[Frozen]) -> void can[Pool.Create, Pool.Shutdown, Pool.
 func TestAnalyzeAcceptsParallelForOverReadonlyChunksExactView(t *testing.T) {
 	src := parallelForConcurrencyPrelude + `
 def visit(values: darray[i32, 4]) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
-	full: dview[i32] = values[0u:4u]
-	chunks: ChunksExactView[i32] = chunks_exact(readonly(full), 2u)
-	pool workers(2u):
+	full: dview[i32] = values[0:4]
+	chunks: ChunksExactView[i32] = chunks_exact(readonly(full), 2)
+	pool workers(2):
 		parallel for chunk in chunks:
-			_ = chunk[0u] + chunk[1u]
+			_ = chunk[0] + chunk[1]
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "parallel_for_chunks_exact_ok.llcontext", src)
@@ -6882,8 +6882,8 @@ def visit(values: darray[i32, 4]) -> int can[Pool.Create, Pool.Shutdown, Pool.Su
 func TestAnalyzeRejectsAssigningReadonlyViewIndexResult(t *testing.T) {
 	src := `def bad() -> void:
 	buf: mutable array[i32, 4] = [1, 2, 3, 4]
-	ro: view[i32, 0u, 2u] = readonly(buf[0u:2u])
-	ro[0u] <- 7
+	ro: view[i32, 0, 2] = readonly(buf[0:2])
+	ro[0] <- 7
 `
 	_, errs := parseAndAnalyze(t, "readonly_index_assign_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -6901,9 +6901,9 @@ func TestAnalyzeRejectsZipMapWithoutReadonlySources(t *testing.T) {
 
 def bad() -> void:
 	buf: mutable array[i32, 6] = [0, 0, 1, 2, 3, 4]
-	dst: view[i32, 0u, 2u] = buf[0u:2u]
-	src1: view[i32, 2u, 4u] = buf[2u:4u]
-	src2: view[i32, 4u, 6u] = buf[4u:6u]
+	dst: view[i32, 0, 2] = buf[0:2]
+	src1: view[i32, 2, 4] = buf[2:4]
+	src2: view[i32, 4, 6] = buf[4:6]
 	zip_map(dst, src1, src2, add_pair)
 `
 	_, errs := parseAndAnalyze(t, "zip_map_requires_readonly_sources_reject.llcontext", src)
@@ -6921,7 +6921,7 @@ func TestAnalyzeAcceptsReduceSumWithReadonlySourceAndExtraArgs(t *testing.T) {
 	return value + bias
 
 def run(values: darray[i64, 4], bias: i64) -> i64:
-	base: dview[i64] = values[0u:4u]
+	base: dview[i64] = values[0:4]
 	return reduce_sum(readonly(base), add_bias, bias)
 `
 	result, errs := parseAndAnalyze(t, "reduce_sum_ok.llcontext", src)
@@ -6935,7 +6935,7 @@ func TestAnalyzeRejectsReduceSumNonNumericCallbackResult(t *testing.T) {
 	return value > 0
 
 def bad(values: darray[i64, 4]) -> i64:
-	base: dview[i64] = values[0u:4u]
+	base: dview[i64] = values[0:4]
 	return reduce_sum(readonly(base), is_positive)
 `
 	_, errs := parseAndAnalyze(t, "reduce_sum_bool_callback_reject.llcontext", src)
@@ -6953,8 +6953,8 @@ func TestAnalyzeRejectsAssigningPackedStoreSliceIndexResult(t *testing.T) {
 	Int(value: int)
 
 def bad(store: Expr.Store[Frozen], node: Expr) -> void:
-	chunk: dview[Expr] = store[0u:store.count]
-	chunk[0u] <- node
+	chunk: dview[Expr] = store[0:store.count]
+	chunk[0] <- node
 `
 	_, errs := parseAndAnalyze(t, "packed_store_slice_index_assign_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -6972,7 +6972,7 @@ func TestAnalyzeRejectsAssigningPackedStoreTagViewIndexResult(t *testing.T) {
 
 def bad(store: Expr.Store[Frozen]) -> void:
 	tags: dview[Expr.Tag] = store.tags
-	tags[0u] <- Expr.Tag.Int
+	tags[0] <- Expr.Tag.Int
 `
 	_, errs := parseAndAnalyze(t, "packed_store_tag_view_index_assign_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -7232,7 +7232,7 @@ def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
 	return zeroed
 
 def worker(cell: static i32&) -> i64:
-	return cell[0u].i64()
+	return cell[0].i64()
 
 def ok() -> Thread[i64, Joinable]:
 	return spawn1(worker, shared_cell())
@@ -7250,7 +7250,7 @@ def pool_submit1[A, R](pool: any ThreadPool&, fn: func(A) -> R, arg: A) -> Task[
 	return zeroed
 
 def worker(cell: any i32&) -> i64:
-	return cell[0u].i64()
+	return cell[0].i64()
 
 def bad(pool: any ThreadPool&, cell: any i32&) -> i64:
 	_ = spawn1(worker, cell)
@@ -7433,7 +7433,7 @@ def bad(owner: Arena) -> Thread[i64, Joinable]:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	node: Expr = new[store] Expr.Int(value: 1)
 	items: array[Box, 1] = [wrap_node(node)]
-	return spawn1(worker, items[0u:1u])
+	return spawn1(worker, items[0:1])
 `
 	_, errs := parseAndAnalyze(t, "spawn1_nested_view_unpublished_store_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -7468,7 +7468,7 @@ def ok(owner: Arena) -> Thread[i64, Joinable]:
 	items: array[Box, 1] = [wrap_node(node)]
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	_ = frozen
-	return spawn1(worker, items[0u:1u])
+	return spawn1(worker, items[0:1])
 `
 	result, errs := parseAndAnalyze(t, "spawn1_nested_view_frozen_store_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -9099,7 +9099,7 @@ func TestAnalyzeAcceptsDStrLenField(t *testing.T) {
 
 func TestAnalyzeAcceptsViewAliasForArraySlices(t *testing.T) {
 	src := `def middle(values: i32[4]) -> view[i32]:
-	part: view[i32] = values[1u:3u]
+	part: view[i32] = values[1:3]
 	return part
 `
 	_, errs := parseAndAnalyze(t, "view_alias_and_slice.llcontext", src)
@@ -9108,9 +9108,9 @@ func TestAnalyzeAcceptsViewAliasForArraySlices(t *testing.T) {
 
 func TestAnalyzeAcceptsArrayAndArrayViewSliceSyntax(t *testing.T) {
 	src := `def middle(values: darray[i32, row], view: dview[i32]) -> i32:
-	part: dview[i32] = values[1u:3u]
-	sub: dview[i32] = view[0u:1u]
-	return part[0u] + sub[0u]
+	part: dview[i32] = values[1:3]
+	sub: dview[i32] = view[0:1]
+	return part[0] + sub[0]
 `
 	_, errs := parseAndAnalyze(t, "array_and_array_view_slice.llcontext", src)
 	requireNoErrors(t, errs)
@@ -9118,9 +9118,9 @@ func TestAnalyzeAcceptsArrayAndArrayViewSliceSyntax(t *testing.T) {
 
 func TestAnalyzeAcceptsFixedArraySliceSyntax(t *testing.T) {
 	src := `def middle(values: i32[4], view: any i32[4]&) -> i32:
-	part: view[i32] = values[1u:3u]
-	sub: view[i32] = view[0u:2u]
-	return part[0u] + sub[1u]
+	part: view[i32] = values[1:3]
+	sub: view[i32] = view[0:2]
+	return part[0] + sub[1]
 `
 	_, errs := parseAndAnalyze(t, "fixed_array_slice.llcontext", src)
 	requireNoErrors(t, errs)
@@ -9131,13 +9131,13 @@ func TestAnalyzeAcceptsNestedCollectionAccessOnReturnedValues(t *testing.T) {
 extern make_array_view() -> dview[i32]
 
 def read_array_index() -> i32:
-	return make_array()[1u]
+	return make_array()[1]
 
 def read_array_slice_index() -> i32:
-	return make_array()[1u:3u][0u]
+	return make_array()[1:3][0]
 
 def read_array_view_index() -> i32:
-	return make_array_view()[0u]
+	return make_array_view()[0]
 `
 	_, errs := parseAndAnalyze(t, "nested_collection_access_returns.llcontext", src)
 	requireNoErrors(t, errs)
@@ -9180,7 +9180,7 @@ def from_local_field() -> int:
 
 def from_local_array_elem() -> int:
 		values: ScratchPair[2] = [ScratchPair(1, 2), ScratchPair(5, 6)]
-		return try checked_pair(&values[1u]) else 0
+		return try checked_pair(&values[1]) else 0
 `
 	_, errs := parseAndAnalyze(t, "stack_storage_local_subobjects.llcontext", src)
 	requireNoErrors(t, errs)
@@ -9623,7 +9623,7 @@ def bad_list_view(view: DListView[i32]) -> void:
 
 func TestAnalyzeDArrayViewUsesDynArrayViewRuntimeFields(t *testing.T) {
 	src := `def non_empty[T](view: dview[T]) -> bool:
-	return view.len > 0u and view.elem_size > 0u
+	return view.len > 0 and view.elem_size > 0
 `
 	_, errs := parseAndAnalyze(t, "darray_view_runtime_field_access.llcontext", src)
 	requireNoErrors(t, errs)
