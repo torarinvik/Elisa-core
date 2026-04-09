@@ -26,12 +26,12 @@ const packedLoweringBenchmarkSource = `packed enum Expr:
 
 def checksum(frozen: Expr.Store[Frozen]) -> i64:
     total: mutable i64 = 0
-    i: mutable usize = 0u
+    i: mutable usize = 0
     while i < frozen.count:
         node: Expr = frozen[i]
         total <- total + node.span + node.span
         total <- total + node.depth.i64() + node.depth.i64()
-        i <- i + 1u
+        i <- i + 1
     return total
 `
 
@@ -45,12 +45,12 @@ packed enum Expr:
 
 def checksum(frozen: Expr.Store[Frozen]) -> i64:
     total: mutable i64 = 0
-    i: mutable usize = 0u
+    i: mutable usize = 0
     while i < frozen.count:
         node: Expr = frozen[i]
         total <- total + node.span + node.span
         total <- total + node.depth.i64() + node.depth.i64()
-        i <- i + 1u
+        i <- i + 1
     return total
 `
 
@@ -64,11 +64,11 @@ packed enum Expr:
 
 def checksum(frozen: Expr.Store[Frozen]) -> i64:
     total: mutable i64 = 0
-    i: mutable usize = 0u
+    i: mutable usize = 0
     while i < frozen.count:
         node: Expr = frozen[i]
         total <- total + node.span + node.span
-        i <- i + 1u
+        i <- i + 1
     return total
 `
 
@@ -167,14 +167,14 @@ def score_decl(node: Decl, frozen: Decl.Store[Frozen], stmts: Stmt.Store[Frozen]
 
 def checksum_language_ast(decls: Decl.Store[Frozen], stmts: Stmt.Store[Frozen], exprs: Expr.Store[Frozen], patterns: Pattern.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
     total: mutable i64 = 0
-    i: mutable usize = 0u
+    i: mutable usize = 0
     while i < decls.count:
         total <- total + score_decl(decls[i], decls, stmts, exprs, patterns, types)
-        i <- i + 1u
+        i <- i + 1
     return total
 
 def build_and_checksum() -> i64:
-    region scratch(4096u)
+    region scratch(4096)
     type_store: TypeExpr.Store[Local] = TypeExpr.Store(scratch)
     pattern_store: Pattern.Store[Local] = Pattern.Store(scratch)
     expr_store: Expr.Store[Local] = Expr.Store(scratch)
@@ -330,14 +330,14 @@ def score_decl(node: Decl, frozen: Decl.Store[Frozen], stmts: Stmt.Store[Frozen]
 
 def checksum_language_ast(decls: Decl.Store[Frozen], stmts: Stmt.Store[Frozen], exprs: Expr.Store[Frozen], patterns: Pattern.Store[Frozen], types: TypeExpr.Store[Frozen]) -> i64:
     total: mutable i64 = 0
-    i: mutable usize = 0u
+    i: mutable usize = 0
     while i < decls.count:
         total <- total + score_decl(decls[i], decls, stmts, exprs, patterns, types)
-        i <- i + 1u
+        i <- i + 1
     return total
 
 def build_and_checksum_mega() -> i64:
-    region scratch(20480u)
+    region scratch(20480)
     type_store: TypeExpr.Store[Local] = TypeExpr.Store(scratch)
     pattern_store: Pattern.Store[Local] = Pattern.Store(scratch)
     expr_store: Expr.Store[Local] = Expr.Store(scratch)
