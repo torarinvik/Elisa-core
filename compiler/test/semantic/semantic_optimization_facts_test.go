@@ -542,7 +542,7 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
-	return DynArrayView(null, 0u, sizeof(T))
+	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_view_prefix[T](view: dview[T], end: usize) -> dview[T]:
 	_ = end
@@ -977,7 +977,7 @@ def maybe_take(node: Expr, fail: bool) -> Expr error[ProbeError]:
 	return node
 
 def inspect(owner: Arena) -> int error[ProbeError]:
-	region scratch(1024u)
+	region scratch(1024)
 	store: Expr.Store[Local] = Expr.Store(owner)
 	node: Expr = new[store] Expr.Int(value: 1)
 	local_ref: scratch i32& = new[scratch] 7
@@ -1061,7 +1061,7 @@ func TestAnalyzePreservesFrozenPackedStoreProvenanceThroughUnwrapElseExpressions
 	Hold(value: any i32&)
 
 def inspect(owner: Arena) -> int:
-	region scratch(1024u)
+	region scratch(1024)
 	store: Expr.Store[Local] = Expr.Store(owner)
 	node: Expr = new[store] Expr.Int(value: 1)
 	other: Expr = new[store] Expr.Int(value: 2)
@@ -1141,7 +1141,7 @@ func TestAnalyzePreservesFrozenPackedStoreProvenanceThroughTernaryExpressions(t 
 	Hold(value: any i32&)
 
 def inspect(owner: Arena, pick_left: bool) -> int:
-	region scratch(1024u)
+	region scratch(1024)
 	store: Expr.Store[Local] = Expr.Store(owner)
 	left_node: Expr = new[store] Expr.Int(value: 1)
 	right_node: Expr = new[store] Expr.Int(value: 2)
@@ -1251,7 +1251,7 @@ func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedMoveAsDestructure(t
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	child: Expr = new[store] Expr.Int(value: 1)
-	node: Expr = new[store] Expr.HoldViews(left: buf[0u:2u], right: buf[2u:4u], child: child)
+	node: Expr = new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	move node in frozen as Expr.HoldViews(left, right, child_alias)
 	left_copy: view[i32] = left
@@ -1311,7 +1311,7 @@ func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedMatchBinders(t *tes
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	child: Expr = new[store] Expr.Int(value: 1)
-	node: Expr = new[store] Expr.HoldViews(left: buf[0u:2u], right: buf[2u:4u], child: child)
+	node: Expr = new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	match node in frozen:
 		Expr.HoldViews(left: left, right: right, child: child_alias):
@@ -1369,7 +1369,7 @@ func TestAnalyzePreservesMixedFrozenPackedStoreDepsThroughPackedMatchBinders(t *
 	Wrap(child: Expr)
 
 def inspect(owner: Arena) -> int:
-	region scratch(1024u)
+	region scratch(1024)
 	store: Expr.Store[Local] = Expr.Store(owner)
 	local_ref: scratch i32& = new[scratch] 7
 	held: Expr = new[store] Expr.Hold(span: 5, value: local_ref)
@@ -1436,7 +1436,7 @@ repr(c) struct Box:
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	child: Expr = new[store] Expr.Int(value: 1)
-	boxed: Box = Box(new[store] Expr.HoldViews(left: buf[0u:2u], right: buf[2u:4u], child: child))
+	boxed: Box = Box(new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child))
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	match boxed.node in frozen:
 		Expr.HoldViews(left: left, right: right, child: child_alias):
@@ -1499,7 +1499,7 @@ extern wrap_node(node: Expr) -> Box
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	child: Expr = new[store] Expr.Int(value: 1)
-	node: Expr = new[store] Expr.HoldViews(left: buf[0u:2u], right: buf[2u:4u], child: child)
+	node: Expr = new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child)
 	boxed: Box = wrap_node(node)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	match boxed.node in frozen:
@@ -1567,10 +1567,10 @@ extern wrap_indexed_node(node: Expr) -> BoxHolder
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	child: Expr = new[store] Expr.Int(value: 1)
-	node: Expr = new[store] Expr.HoldViews(left: buf[0u:2u], right: buf[2u:4u], child: child)
+	node: Expr = new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child)
 	wrapped: BoxHolder = wrap_indexed_node(node)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	match wrapped.items[0u].node in frozen:
+	match wrapped.items[0].node in frozen:
 		Expr.HoldViews(left: left, right: right, child: child_alias):
 			left_copy: view[i32] = left
 			right_copy: view[i32] = right
@@ -1637,14 +1637,14 @@ repr(c) struct BoxHolder:
 extern wrap_indexed_node(node: Expr) -> BoxHolder
 
 def inspect(owner: Arena) -> int:
-	region scratch(1024u)
+	region scratch(1024)
 	store: Expr.Store[Local] = Expr.Store(owner)
 	local_ref: scratch i32& = new[scratch] 7
 	held: Expr = new[store] Expr.Hold(span: 5, value: local_ref)
 	node: Expr = new[store] Expr.Wrap(span: 9, child: held)
 	wrapped: BoxHolder = wrap_indexed_node(node)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	match wrapped.items[0u].node in frozen:
+	match wrapped.items[0].node in frozen:
 		Expr.Wrap(child: child_alias):
 			child_copy: Expr = child_alias
 			_ = wrapped
@@ -1701,8 +1701,8 @@ func TestAnalyzePreservesOptimizationFactsThroughAllocatedFieldProjectionExpress
 	right: view[i32]
 
 def inspect(buf: array[i32, 4]) -> int:
-	region scratch(1024u)
-	boxed: scratch Views& = new[scratch] Views(buf[0u:2u], buf[2u:4u])
+	region scratch(1024)
+	boxed: scratch Views& = new[scratch] Views(buf[0:2], buf[2:4])
 	left_alloc: view[i32] = boxed.left
 	right_alloc: view[i32] = boxed.right
 	return 0
@@ -1741,10 +1741,10 @@ repr(c) struct Box:
 	node: Expr
 
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
-	region scratch(1024u)
+	region scratch(1024)
 	store: Expr.Store[Local] = Expr.Store(owner)
 	child: Expr = new[store] Expr.Int(value: 1)
-	boxed: scratch Box& = new[scratch] Box(new[store] Expr.HoldViews(left: buf[0u:2u], right: buf[2u:4u], child: child))
+	boxed: scratch Box& = new[scratch] Box(new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child))
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	move boxed.node in frozen as Expr.HoldViews(left, right, child_alias)
 	left_copy: view[i32] = left
@@ -1863,7 +1863,7 @@ func TestAnalyzePreservesFrozenPackedStoreProvenanceThroughDirectIndexedExpressi
 	Hold(value: any i32&)
 
 def inspect(owner: Arena) -> int:
-	region scratch(1024u)
+	region scratch(1024)
 	store: Expr.Store[Local] = Expr.Store(owner)
 	node: Expr = new[store] Expr.Int(value: 1)
 	local_ref: scratch i32& = new[scratch] 7
@@ -1942,9 +1942,9 @@ repr(c) struct ViewHolder:
 extern wrap_indexed_views(left: view[i32], right: view[i32]) -> ViewHolder
 
 def inspect(buf: array[i32, 4]) -> int:
-	wrapped: ViewHolder = wrap_indexed_views(buf[0u:2u], buf[2u:4u])
-	left_indexed: view[i32] = wrapped.items[0u].left
-	right_indexed: view[i32] = wrapped.items[0u].right
+	wrapped: ViewHolder = wrap_indexed_views(buf[0:2], buf[2:4])
+	left_indexed: view[i32] = wrapped.items[0].left
+	right_indexed: view[i32] = wrapped.items[0].right
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_helper_indexed_field_projection.llcontext", src)
@@ -1987,9 +1987,9 @@ repr(c) struct NestedHolder:
 extern wrap_nested_indexed_views(left: view[i32], right: view[i32]) -> NestedHolder
 
 def inspect(buf: array[i32, 4]) -> int:
-	wrapped: NestedHolder = wrap_nested_indexed_views(buf[0u:2u], buf[2u:4u])
-	left_indexed: view[i32] = wrapped.holder.items[0u].left
-	right_indexed: view[i32] = wrapped.holder.items[0u].right
+	wrapped: NestedHolder = wrap_nested_indexed_views(buf[0:2], buf[2:4])
+	left_indexed: view[i32] = wrapped.holder.items[0].left
+	right_indexed: view[i32] = wrapped.holder.items[0].right
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_nested_helper_indexed_field_projection.llcontext", src)
@@ -2029,10 +2029,10 @@ repr(c) struct ViewWindow:
 extern wrap_sub(src: view[Views], start: usize, end: usize) -> ViewWindow
 
 def inspect(values: array[i32, 4]) -> int:
-	items: array[Views, 2] = [Views(values[0u:1u], values[1u:2u]), Views(values[2u:3u], values[3u:4u])]
-	wrapped: ViewWindow = wrap_sub(items[1u:2u], 0u, 1u)
-	left_indexed: view[i32] = wrapped.items[0u].left
-	right_indexed: view[i32] = wrapped.items[0u].right
+	items: array[Views, 2] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4])]
+	wrapped: ViewWindow = wrap_sub(items[1:2], 0, 1)
+	left_indexed: view[i32] = wrapped.items[0].left
+	right_indexed: view[i32] = wrapped.items[0].right
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_rebased_helper_indexed_field_projection.llcontext", src)
@@ -2072,10 +2072,10 @@ repr(c) struct ViewWindow:
 extern wrap_sub_wild(src: view[Views], start: usize, end: usize) -> ViewWindow
 
 def inspect(values: array[i32, 8]) -> int:
-	items: array[Views, 4] = [Views(values[0u:1u], values[1u:2u]), Views(values[2u:3u], values[3u:4u]), Views(values[4u:5u], values[5u:6u]), Views(values[6u:7u], values[7u:8u])]
-	wrapped: ViewWindow = wrap_sub_wild(items[1u:3u], 0u, 2u)
-	left_indexed: view[i32] = wrapped.items[0u].left
-	right_indexed: view[i32] = wrapped.items[0u].right
+	items: array[Views, 4] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4]), Views(values[4:5], values[5:6]), Views(values[6:7], values[7:8])]
+	wrapped: ViewWindow = wrap_sub_wild(items[1:3], 0, 2)
+	left_indexed: view[i32] = wrapped.items[0].left
+	right_indexed: view[i32] = wrapped.items[0].right
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_wildcard_rebased_helper_indexed_field_projection.llcontext", src)
@@ -2115,10 +2115,10 @@ repr(c) struct ViewWindow:
 extern wrap_sub_wild(src: view[Views], start: usize, end: usize) -> ViewWindow
 
 def inspect(values: array[i32, 8]) -> int:
-	items: array[Views, 2] = [Views(values[0u:3u], values[1u:4u]), Views(values[4u:7u], values[5u:8u])]
-	wrapped: ViewWindow = wrap_sub_wild(items[0u:1u], 0u, 1u)
-	left_overlap: view[i32] = wrapped.items[0u].left
-	right_overlap: view[i32] = wrapped.items[0u].right
+	items: array[Views, 2] = [Views(values[0:3], values[1:4]), Views(values[4:7], values[5:8])]
+	wrapped: ViewWindow = wrap_sub_wild(items[0:1], 0, 1)
+	left_overlap: view[i32] = wrapped.items[0].left
+	right_overlap: view[i32] = wrapped.items[0].right
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_wildcard_rebased_helper_indexed_overlap_guardrails.llcontext", src)
@@ -2161,10 +2161,10 @@ repr(c) struct Wrapper:
 extern wrap_submeta_wild(src: view[Views], start: usize, end: usize) -> Wrapper
 
 def inspect(values: array[i32, 8]) -> int:
-	items: array[Views, 4] = [Views(values[0u:1u], values[1u:2u]), Views(values[2u:3u], values[3u:4u]), Views(values[4u:5u], values[5u:6u]), Views(values[6u:7u], values[7u:8u])]
-	wrapped: Wrapper = wrap_submeta_wild(items[1u:3u], 0u, 2u)
-	left_indexed: view[i32] = wrapped.meta.items[0u].left
-	right_indexed: view[i32] = wrapped.meta.items[0u].right
+	items: array[Views, 4] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4]), Views(values[4:5], values[5:6]), Views(values[6:7], values[7:8])]
+	wrapped: Wrapper = wrap_submeta_wild(items[1:3], 0, 2)
+	left_indexed: view[i32] = wrapped.meta.items[0].left
+	right_indexed: view[i32] = wrapped.meta.items[0].right
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_nested_wildcard_rebased_helper_indexed_field_projection.llcontext", src)
@@ -2207,10 +2207,10 @@ repr(c) struct Wrapper:
 extern wrap_submeta_wild(src: view[Views], start: usize, end: usize) -> Wrapper
 
 def inspect(values: array[i32, 8]) -> int:
-	items: array[Views, 2] = [Views(values[0u:3u], values[1u:4u]), Views(values[4u:7u], values[5u:8u])]
-	wrapped: Wrapper = wrap_submeta_wild(items[0u:1u], 0u, 1u)
-	left_overlap: view[i32] = wrapped.meta.items[0u].left
-	right_overlap: view[i32] = wrapped.meta.items[0u].right
+	items: array[Views, 2] = [Views(values[0:3], values[1:4]), Views(values[4:7], values[5:8])]
+	wrapped: Wrapper = wrap_submeta_wild(items[0:1], 0, 1)
+	left_overlap: view[i32] = wrapped.meta.items[0].left
+	right_overlap: view[i32] = wrapped.meta.items[0].right
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_nested_wildcard_rebased_helper_indexed_overlap_guardrails.llcontext", src)
@@ -2253,10 +2253,10 @@ repr(c) struct Wrapper:
 extern wrap_submeta(src: view[Views], start: usize, end: usize) -> Wrapper
 
 def inspect(values: array[i32, 4]) -> int:
-	items: array[Views, 2] = [Views(values[0u:1u], values[1u:2u]), Views(values[2u:3u], values[3u:4u])]
-	wrapped: Wrapper = wrap_submeta(items[1u:2u], 0u, 1u)
-	left_indexed: view[i32] = wrapped.meta.items[0u].left
-	right_indexed: view[i32] = wrapped.meta.items[0u].right
+	items: array[Views, 2] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4])]
+	wrapped: Wrapper = wrap_submeta(items[1:2], 0, 1)
+	left_indexed: view[i32] = wrapped.meta.items[0].left
+	right_indexed: view[i32] = wrapped.meta.items[0].right
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_nested_rebased_helper_indexed_field_projection.llcontext", src)
@@ -2304,10 +2304,10 @@ extern wrap_submeta(src: view[Box], start: usize, end: usize) -> Wrapper
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	child: Expr = new[store] Expr.Int(value: 1)
-	items: array[Box, 2] = [Box(new[store] Expr.Int(value: 2)), Box(new[store] Expr.HoldViews(left: buf[0u:2u], right: buf[2u:4u], child: child))]
-	wrapped: Wrapper = wrap_submeta(items[1u:2u], 0u, 1u)
+	items: array[Box, 2] = [Box(new[store] Expr.Int(value: 2)), Box(new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child))]
+	wrapped: Wrapper = wrap_submeta(items[1:2], 0, 1)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	move wrapped.meta.items[0u].node in frozen as Expr.HoldViews(left, right, child_alias)
+	move wrapped.meta.items[0].node in frozen as Expr.HoldViews(left, right, child_alias)
 	left_copy: view[i32] = left
 	right_copy: view[i32] = right
 	child_copy: Expr = child_alias
@@ -2367,10 +2367,10 @@ extern wrap_nodes_wild(src: view[Box], start: usize, end: usize) -> BoxWindow
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	child: Expr = new[store] Expr.Int(value: 1)
-	items: array[Box, 2] = [Box(new[store] Expr.Int(value: 2)), Box(new[store] Expr.HoldViews(left: buf[0u:2u], right: buf[2u:4u], child: child))]
-	wrapped: BoxWindow = wrap_nodes_wild(items[1u:2u], 0u, 1u)
+	items: array[Box, 2] = [Box(new[store] Expr.Int(value: 2)), Box(new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child))]
+	wrapped: BoxWindow = wrap_nodes_wild(items[1:2], 0, 1)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	move wrapped.items[0u].node in frozen as Expr.HoldViews(left, right, child_alias)
+	move wrapped.items[0].node in frozen as Expr.HoldViews(left, right, child_alias)
 	left_copy: view[i32] = left
 	right_copy: view[i32] = right
 	child_copy: Expr = child_alias
@@ -2433,10 +2433,10 @@ extern wrap_submeta_nodes_wild(src: view[Box], start: usize, end: usize) -> Wrap
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	child: Expr = new[store] Expr.Int(value: 1)
-	items: array[Box, 2] = [Box(new[store] Expr.Int(value: 2)), Box(new[store] Expr.HoldViews(left: buf[0u:2u], right: buf[2u:4u], child: child))]
-	wrapped: Wrapper = wrap_submeta_nodes_wild(items[1u:2u], 0u, 1u)
+	items: array[Box, 2] = [Box(new[store] Expr.Int(value: 2)), Box(new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child))]
+	wrapped: Wrapper = wrap_submeta_nodes_wild(items[1:2], 0, 1)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	move wrapped.meta.items[0u].node in frozen as Expr.HoldViews(left, right, child_alias)
+	move wrapped.meta.items[0].node in frozen as Expr.HoldViews(left, right, child_alias)
 	left_copy: view[i32] = left
 	right_copy: view[i32] = right
 	child_copy: Expr = child_alias
@@ -2481,13 +2481,13 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 
 func TestAnalyzeCollectsOptimizationFactsForProofCarryingViewHelpers(t *testing.T) {
 	src := `def inspect(values: darray[i32, 4]) -> int:
-	whole: dview[i32] = values[0u:4u]
+	whole: dview[i32] = values[0:4]
 	readonly_whole: dview[i32] = readonly(whole)
-	halves: SplitView[i32] = split_at(whole, 2u)
+	halves: SplitView[i32] = split_at(whole, 2)
 	left: dview[i32] = halves.left
 	right: dview[i32] = halves.right
-	chunks: ChunksExactView[i32] = chunks_exact(readonly_whole, 2u)
-	first_chunk: dview[i32] = chunks[0u]
+	chunks: ChunksExactView[i32] = chunks_exact(readonly_whole, 2)
+	first_chunk: dview[i32] = chunks[0]
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_proof_carrying_view_helpers.llcontext", src)
@@ -2556,10 +2556,10 @@ extern wrap_submeta(src: view[Box], start: usize, end: usize) -> Wrapper
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	child: Expr = new[store] Expr.Int(value: 1)
-	items: array[Box, 2] = [Box(new[store] Expr.Int(value: 2)), Box(new[store] Expr.HoldViews(left: buf[0u:2u], right: buf[2u:4u], child: child))]
-	wrapped: Wrapper = wrap_submeta(items[1u:2u], 0u, 1u)
+	items: array[Box, 2] = [Box(new[store] Expr.Int(value: 2)), Box(new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child))]
+	wrapped: Wrapper = wrap_submeta(items[1:2], 0, 1)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	match wrapped.meta.items[0u].node in frozen:
+	match wrapped.meta.items[0].node in frozen:
 		Expr.HoldViews(left: left, right: right, child: child_alias):
 			left_copy: view[i32] = left
 			right_copy: view[i32] = right
@@ -2627,10 +2627,10 @@ extern wrap_submeta_nodes_wild(src: view[Box], start: usize, end: usize) -> Wrap
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	child: Expr = new[store] Expr.Int(value: 1)
-	items: array[Box, 2] = [Box(new[store] Expr.Int(value: 2)), Box(new[store] Expr.HoldViews(left: buf[0u:2u], right: buf[2u:4u], child: child))]
-	wrapped: Wrapper = wrap_submeta_nodes_wild(items[1u:2u], 0u, 1u)
+	items: array[Box, 2] = [Box(new[store] Expr.Int(value: 2)), Box(new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child))]
+	wrapped: Wrapper = wrap_submeta_nodes_wild(items[1:2], 0, 1)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	match wrapped.meta.items[0u].node in frozen:
+	match wrapped.meta.items[0].node in frozen:
 		Expr.HoldViews(left: left, right: right, child: child_alias):
 			left_copy: view[i32] = left
 			right_copy: view[i32] = right
@@ -2689,9 +2689,9 @@ repr(c) struct Box:
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	child: Expr = new[store] Expr.Int(value: 1)
-	items: array[Box, 1] = [Box(new[store] Expr.HoldViews(left: buf[0u:2u], right: buf[2u:4u], child: child))]
+	items: array[Box, 1] = [Box(new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child))]
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	move items[0u].node in frozen as Expr.HoldViews(left, right, child_alias)
+	move items[0].node in frozen as Expr.HoldViews(left, right, child_alias)
 	left_copy: view[i32] = left
 	right_copy: view[i32] = right
 	child_copy: Expr = child_alias
@@ -2751,10 +2751,10 @@ extern wrap_indexed_node(node: Expr) -> BoxHolder
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	child: Expr = new[store] Expr.Int(value: 1)
-	node: Expr = new[store] Expr.HoldViews(left: buf[0u:2u], right: buf[2u:4u], child: child)
+	node: Expr = new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child)
 	wrapped: BoxHolder = wrap_indexed_node(node)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	move wrapped.items[0u].node in frozen as Expr.HoldViews(left, right, child_alias)
+	move wrapped.items[0].node in frozen as Expr.HoldViews(left, right, child_alias)
 	left_copy: view[i32] = left
 	right_copy: view[i32] = right
 	child_copy: Expr = child_alias
@@ -2806,8 +2806,8 @@ func TestAnalyzePreservesOptimizationFactsThroughDirectFieldProjectionExpression
 extern wrap_views(left: view[i32], right: view[i32]) -> Views
 
 def inspect(buf: array[i32, 4]) -> int:
-	boxed: Views = Views(buf[0u:2u], buf[2u:4u])
-	wrapped: Views = wrap_views(buf[0u:2u], buf[2u:4u])
+	boxed: Views = Views(buf[0:2], buf[2:4])
+	wrapped: Views = wrap_views(buf[0:2], buf[2:4])
 	left_direct: view[i32] = boxed.left
 	right_direct: view[i32] = boxed.right
 	left_wrapped: view[i32] = wrapped.left
@@ -2867,8 +2867,8 @@ repr(c) struct NestedViews:
 extern wrap_nested_views(left: view[i32], right: view[i32]) -> NestedViews
 
 def inspect(buf: array[i32, 4]) -> int:
-	direct: NestedViews = NestedViews(Views(buf[0u:2u], buf[2u:4u]))
-	wrapped: NestedViews = wrap_nested_views(buf[0u:2u], buf[2u:4u])
+	direct: NestedViews = NestedViews(Views(buf[0:2], buf[2:4]))
+	wrapped: NestedViews = wrap_nested_views(buf[0:2], buf[2:4])
 	left_direct: view[i32] = direct.inner.left
 	right_direct: view[i32] = direct.inner.right
 	left_wrapped: view[i32] = wrapped.inner.left

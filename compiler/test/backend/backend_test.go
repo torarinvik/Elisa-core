@@ -425,12 +425,12 @@ extern mutex_lock(mu: any Mutex&) -> MutexGuard[Held]
 extern mutex_unlock(g: MutexGuard[Held]) -> void
 
 def pool_then_return(mu: mutable Mutex) -> i64:
-	pool workers(4u):
+	pool workers(4):
 		lock mu as g:
 			return 7
 
 def pool_then_fallthrough(mu: mutable Mutex) -> void:
-	pool workers(2u):
+	pool workers(2):
 		lock mu as g:
 			pass
 `
@@ -565,7 +565,7 @@ def work(value: i64) -> i64:
 	return value + 1
 
 def submit_then_await() -> i64:
-	pool workers(2u):
+	pool workers(2):
 		task: Task[i64, Pending] = submit work(7)
 		return await task
 `
@@ -1024,9 +1024,9 @@ repr(c) struct Holder:
 
 global base: Pair = Pair(1, 2)
 global table: Pair[2] = [base, Pair(3, 4)]
-global picked: Pair = table[1u]
-global wrapped: Holder = Holder(table[0u])
-global first_left: i32 = table[0u].left
+global picked: Pair = table[1]
+global wrapped: Holder = Holder(table[0])
+global first_left: i32 = table[0].left
 `
 	result := parseAndAnalyze(t, "backend_global_aggregate_refs.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -1640,7 +1640,7 @@ func TestGenerateLLVMIRLowersVariadicExternCalls(t *testing.T) {
 	src := `extern snprintf(buffer: any u8&?, buffer_size: usize, format: any u8&, ...) -> int
 
 def format_len(format: any u8&) -> int:
-	return snprintf(null, 0u, format, 7, 9)
+	return snprintf(null, 0, format, 7, 9)
 `
 	result := parseAndAnalyze(t, "backend_variadic_call.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -1927,9 +1927,9 @@ def rewind(ptr: any u8&, offset: usize) -> any u8&:
 
 func TestGenerateLLVMIRLowersManualRegions(t *testing.T) {
 	src := `def region_value(seed: i32) -> i32:
-	region scratch(1024u)
+	region scratch(1024)
 	value: any i32& = new[scratch] seed + 1
-	return value[0u]
+	return value[0]
 `
 	result := parseAndAnalyze(t, "backend_manual_regions.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -1955,15 +1955,15 @@ func TestGenerateLLVMIRLowersManualRegions(t *testing.T) {
 
 func TestGenerateLLVMIRLowersRegionCheckpoints(t *testing.T) {
 	src := `def region_value(seed: i32) -> i32:
-	region scratch(1024u)
+	region scratch(1024)
 	mark scratch as cp
 	temp: any i32& = new[scratch] seed + 1
 	restore scratch from cp
 	reused: any i32& = new[scratch] seed + 2
-	value: i32 = reused[0u]
+	value: i32 = reused[0]
 	reset scratch
 	final: any i32& = new[scratch] seed + 3
-	return value + final[0u]
+	return value + final[0]
 `
 	result := parseAndAnalyze(t, "backend_region_checkpoints.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -1989,17 +1989,17 @@ func TestGenerateLLVMIRLowersRegionCheckpoints(t *testing.T) {
 
 func TestGenerateLLVMIRLowersNestedRegionCheckpoints(t *testing.T) {
 	src := `def region_value(seed: i32) -> i32:
-	region scratch(1024u)
+	region scratch(1024)
 	mark scratch as outer
 	stable: any i32& = new[scratch] seed + 1
 	mark scratch as inner
 	temp: any i32& = new[scratch] seed + 2
 	restore scratch from inner
-	kept: i32 = stable[0u]
+	kept: i32 = stable[0]
 	restore scratch from outer
 	reset scratch
 	fresh: any i32& = new[scratch] seed + 3
-	return kept + fresh[0u]
+	return kept + fresh[0]
 `
 	result := parseAndAnalyze(t, "backend_nested_region_checkpoints.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -2410,7 +2410,7 @@ func TestGenerateLLVMIRLowersPackedEnumStoresAllocationsAndMatches(t *testing.T)
 	Add(Expr, Expr)
 
 def fold() -> int:
-	region scratch(1024u)
+	region scratch(1024)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	left: Expr = new[store] Expr.Lit(3)
 	right: Expr = new[store] Expr.Lit(4)
@@ -2459,7 +2459,7 @@ def make_box(owner: Arena) -> Box:
 
 def read(owner: Arena) -> int:
 	box: Box = make_box(owner)
-	if box.store[0u] as Expr.Int(value: value):
+	if box.store[0] as Expr.Int(value: value):
 		return value
 	return 0
 `
@@ -2496,7 +2496,7 @@ def inspect(owner: Arena) -> i32:
 		_ = new Expr.Add(span: 5, left: left, right: right)
 
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	node: Expr = frozen[2u]
+	node: Expr = frozen[2]
 	key: NodeKey[Expr] = dense_key(node, frozen)
 	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, frozen, -1)
 	table[key] <- 0
@@ -2558,7 +2558,7 @@ def make_box(owner: Arena) -> FrozenBox:
 
 def inspect(owner: Arena) -> i32:
 	box: FrozenBox = make_box(owner)
-	node: Expr = box.store[2u]
+	node: Expr = box.store[2]
 	key: NodeKey[Expr] = dense_key(node, box.store)
 	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, box.store, -1)
 	table[key] <- 7
@@ -2727,7 +2727,7 @@ func TestGenerateLLVMIRLowersPackedInStoreBlockSugar(t *testing.T) {
 	Add(left: Expr, right: Expr)
 
 def fold() -> int:
-	region scratch(1024u)
+	region scratch(1024)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	in store:
 		left: Expr = new Expr.Lit(span: 1, value: 3)
@@ -2844,7 +2844,7 @@ func TestGenerateLLVMIRLowersPackedCommonFieldInitialization(t *testing.T) {
 	Int(value: int)
 
 def build() -> Expr:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	return new[store] Expr.Int(span: 9, value: 5)
 `
@@ -2874,7 +2874,7 @@ func TestGenerateLLVMIRLowersPayloadlessPackedCommonFieldInitialization(t *testi
 	Region
 
 def build() -> Token:
-	region scratch(256u)
+	region scratch(256)
 	store: Token.Store[Local] = Token.Store(scratch)
 	return new[store] Token.Region(span: 4)
 `
@@ -2899,7 +2899,7 @@ func TestGenerateLLVMIRLowersPayloadlessPackedAllocationFromQualifiedConstructor
 	Region
 
 def build() -> Token:
-	region scratch(256u)
+	region scratch(256)
 	store: Token.Store[Local] = Token.Store(scratch)
 	return new[store] Token.Region
 `
@@ -2929,7 +2929,7 @@ func TestGenerateLLVMIRLowersBarePayloadlessPackedConstructorWithActiveStore(t *
 	Region
 
 def build() -> Token:
-	region scratch(256u)
+	region scratch(256)
 	store: Token.Store[Local] = Token.Store(scratch)
 	return Token.Region
 `
@@ -3567,8 +3567,8 @@ def same_bounds_view(left: dstr[row], right: dstr[col]) -> bool:
 	return left_view == right_view
 
 def fresh_disjoint_raw_views() -> bool:
-	region scratch(1024u)
-	return string_view(new[scratch] 1u8, 0, 1) == string_view(new[scratch] 2u8, 0, 1)
+	region scratch(1024)
+	return string_view(new[scratch] 1, 0, 1) == string_view(new[scratch] 2, 0, 1)
 
 def split_disjoint_views(text: dstr[row]) -> bool:
 	base: StringView = ctx_string_view(text, 0, 4)
@@ -4002,8 +4002,8 @@ def arena_da_view_suffix[T](view: dview[T], start: usize) -> dview[T]:
 	return view
 
 def split_copy(view: dview[i32]) -> any void&?:
-	prefix: dview[i32] = arena_da_view_prefix(view, 2u)
-	suffix: dview[i32] = arena_da_view_suffix(view, 2u)
+	prefix: dview[i32] = arena_da_view_prefix(view, 2)
+	suffix: dview[i32] = arena_da_view_suffix(view, 2)
 	return arena_memcpy(prefix.data, suffix.data, prefix.len * prefix.elem_size)
 `
 	result := parseAndAnalyze(t, "backend_dview_split_memcpy.llcontext", src)
@@ -4039,7 +4039,7 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
-	return DynArrayView(null, 0u, sizeof(T))
+	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
 	if dst.len != src.len:
@@ -4048,27 +4048,27 @@ def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
 	_ = src
 
 def copy_split(values: any darray[i32, 4]&) -> void:
-	base: dview[i32] = arena_da_view(values, 0u, 4u)
-	left: dview[i32] = base[0u:2u]
-	right: dview[i32] = base[2u:4u]
+	base: dview[i32] = arena_da_view(values, 0, 4)
+	left: dview[i32] = base[0:2]
+	right: dview[i32] = base[2:4]
 	arena_da_copy_exact(left, right)
 
 def copy_overlap(values: any darray[i32, 4]&) -> void:
-	base: dview[i32] = arena_da_view(values, 0u, 4u)
-	left: dview[i32] = base[0u:3u]
-	right: dview[i32] = base[1u:4u]
+	base: dview[i32] = arena_da_view(values, 0, 4)
+	left: dview[i32] = base[0:3]
+	right: dview[i32] = base[1:4]
 	arena_da_copy_exact(left, right)
 
 def copy_overlap_backward(values: any darray[i32, 4]&) -> void:
-	base: dview[i32] = arena_da_view(values, 0u, 4u)
-	left: dview[i32] = base[1u:4u]
-	right: dview[i32] = base[0u:3u]
+	base: dview[i32] = arena_da_view(values, 0, 4)
+	left: dview[i32] = base[1:4]
+	right: dview[i32] = base[0:3]
 	arena_da_copy_exact(left, right)
 
 def copy_overlap_unknown(values: any darray[i32, shape_in]&) -> void:
-	base: dview[i32] = arena_da_view(values, 0u, values.count)
-	left: dview[i32] = base[0u:values.count - 1u]
-	right: dview[i32] = base[1u:values.count]
+	base: dview[i32] = arena_da_view(values, 0, values.count)
+	left: dview[i32] = base[0:values.count - 1]
+	right: dview[i32] = base[1:values.count]
 	arena_da_copy_exact(left, right)
 `
 	result := parseAndAnalyze(t, "backend_dview_copy_exact.llcontext", src)
@@ -4139,11 +4139,11 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = src
 
 def copy_struct(values: array[i32, 4]) -> void:
-	boxed: Views = Views(values[0u:2u], values[2u:4u])
+	boxed: Views = Views(values[0:2], values[2:4])
 	arena_da_copy_exact(boxed.left, boxed.right)
 
 def copy_helper(values: array[i32, 4]) -> void:
-	boxed: Views = wrap_views(values[0u:2u], values[2u:4u])
+	boxed: Views = wrap_views(values[0:2], values[2:4])
 	arena_da_copy_exact(boxed.left, boxed.right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_copy_exact_field_projection.llcontext", src)
@@ -4182,8 +4182,8 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = src
 
 def copy_indexed(values: array[i32, 4]) -> void:
-	items: array[Views, 1] = [Views(values[0u:2u], values[2u:4u])]
-	arena_da_copy_exact(items[0u].left, items[0u].right)
+	items: array[Views, 1] = [Views(values[0:2], values[2:4])]
+	arena_da_copy_exact(items[0].left, items[0].right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_copy_exact_indexed_field_projection.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -4221,9 +4221,9 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = src
 
 def copy_helper_view_slice(values: array[i32, 8]) -> void:
-	items: array[Views, 2] = [Views(values[0u:2u], values[2u:4u]), Views(values[4u:6u], values[6u:8u])]
-	window: view[Views] = arena_da_view_slice(items[1u:2u], 0u, 1u)
-	arena_da_copy_exact(window[0u].left, window[0u].right)
+	items: array[Views, 2] = [Views(values[0:2], values[2:4]), Views(values[4:6], values[6:8])]
+	window: view[Views] = arena_da_view_slice(items[1:2], 0, 1)
+	arena_da_copy_exact(window[0].left, window[0].right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_copy_exact_standard_view_slice_helper_field_projection.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -4257,8 +4257,8 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = src
 
 def copy_helper_indexed(values: array[i32, 4]) -> void:
-	wrapped: ViewHolder = wrap_indexed_views(values[0u:2u], values[2u:4u])
-	arena_da_copy_exact(wrapped.items[0u].left, wrapped.items[0u].right)
+	wrapped: ViewHolder = wrap_indexed_views(values[0:2], values[2:4])
+	arena_da_copy_exact(wrapped.items[0].left, wrapped.items[0].right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_copy_exact_helper_indexed_field_projection.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -4295,8 +4295,8 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = src
 
 def copy_nested_helper_indexed(values: array[i32, 4]) -> void:
-	wrapped: NestedHolder = wrap_nested_indexed_views(values[0u:2u], values[2u:4u])
-	arena_da_copy_exact(wrapped.holder.items[0u].left, wrapped.holder.items[0u].right)
+	wrapped: NestedHolder = wrap_nested_indexed_views(values[0:2], values[2:4])
+	arena_da_copy_exact(wrapped.holder.items[0].left, wrapped.holder.items[0].right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_copy_exact_nested_helper_indexed_field_projection.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -4330,9 +4330,9 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = src
 
 def copy_rebased_helper_indexed(values: array[i32, 4]) -> void:
-	items: array[Views, 2] = [Views(values[0u:1u], values[1u:2u]), Views(values[2u:3u], values[3u:4u])]
-	wrapped: ViewWindow = wrap_sub(items[1u:2u], 0u, 1u)
-	arena_da_copy_exact(wrapped.items[0u].left, wrapped.items[0u].right)
+	items: array[Views, 2] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4])]
+	wrapped: ViewWindow = wrap_sub(items[1:2], 0, 1)
+	arena_da_copy_exact(wrapped.items[0].left, wrapped.items[0].right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_copy_exact_rebased_helper_indexed_field_projection.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -4366,9 +4366,9 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = src
 
 def copy_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> void:
-	items: array[Views, 4] = [Views(values[0u:1u], values[1u:2u]), Views(values[2u:3u], values[3u:4u]), Views(values[4u:5u], values[5u:6u]), Views(values[6u:7u], values[7u:8u])]
-	wrapped: ViewWindow = wrap_sub_wild(items[1u:3u], 0u, 2u)
-	arena_da_copy_exact(wrapped.items[0u].left, wrapped.items[0u].right)
+	items: array[Views, 4] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4]), Views(values[4:5], values[5:6]), Views(values[6:7], values[7:8])]
+	wrapped: ViewWindow = wrap_sub_wild(items[1:3], 0, 2)
+	arena_da_copy_exact(wrapped.items[0].left, wrapped.items[0].right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_copy_exact_wildcard_rebased_helper_indexed_field_projection.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -4405,9 +4405,9 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = src
 
 def copy_nested_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> void:
-	items: array[Views, 4] = [Views(values[0u:1u], values[1u:2u]), Views(values[2u:3u], values[3u:4u]), Views(values[4u:5u], values[5u:6u]), Views(values[6u:7u], values[7u:8u])]
-	wrapped: Wrapper = wrap_submeta_wild(items[1u:3u], 0u, 2u)
-	arena_da_copy_exact(wrapped.meta.items[0u].left, wrapped.meta.items[0u].right)
+	items: array[Views, 4] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4]), Views(values[4:5], values[5:6]), Views(values[6:7], values[7:8])]
+	wrapped: Wrapper = wrap_submeta_wild(items[1:3], 0, 2)
+	arena_da_copy_exact(wrapped.meta.items[0].left, wrapped.meta.items[0].right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_copy_exact_nested_wildcard_rebased_helper_indexed_field_projection.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -4441,9 +4441,9 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = src
 
 def copy_wildcard_rebased_overlap(values: array[i32, 8]) -> void:
-	items: array[Views, 2] = [Views(values[0u:3u], values[1u:4u]), Views(values[4u:7u], values[5u:8u])]
-	wrapped: ViewWindow = wrap_sub_wild(items[0u:1u], 0u, 1u)
-	arena_da_copy_exact(wrapped.items[0u].left, wrapped.items[0u].right)
+	items: array[Views, 2] = [Views(values[0:3], values[1:4]), Views(values[4:7], values[5:8])]
+	wrapped: ViewWindow = wrap_sub_wild(items[0:1], 0, 1)
+	arena_da_copy_exact(wrapped.items[0].left, wrapped.items[0].right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_copy_exact_wildcard_rebased_helper_indexed_overlap_guardrails.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -4485,9 +4485,9 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = src
 
 def copy_nested_wildcard_rebased_overlap(values: array[i32, 8]) -> void:
-	items: array[Views, 2] = [Views(values[0u:3u], values[1u:4u]), Views(values[4u:7u], values[5u:8u])]
-	wrapped: Wrapper = wrap_submeta_wild(items[0u:1u], 0u, 1u)
-	arena_da_copy_exact(wrapped.meta.items[0u].left, wrapped.meta.items[0u].right)
+	items: array[Views, 2] = [Views(values[0:3], values[1:4]), Views(values[4:7], values[5:8])]
+	wrapped: Wrapper = wrap_submeta_wild(items[0:1], 0, 1)
+	arena_da_copy_exact(wrapped.meta.items[0].left, wrapped.meta.items[0].right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_copy_exact_nested_wildcard_rebased_helper_indexed_overlap_guardrails.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -4529,9 +4529,9 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = src
 
 def copy_nested_rebased_helper_indexed(values: array[i32, 4]) -> void:
-	items: array[Views, 2] = [Views(values[0u:1u], values[1u:2u]), Views(values[2u:3u], values[3u:4u])]
-	wrapped: Wrapper = wrap_submeta(items[1u:2u], 0u, 1u)
-	arena_da_copy_exact(wrapped.meta.items[0u].left, wrapped.meta.items[0u].right)
+	items: array[Views, 2] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4])]
+	wrapped: Wrapper = wrap_submeta(items[1:2], 0, 1)
+	arena_da_copy_exact(wrapped.meta.items[0].left, wrapped.meta.items[0].right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_copy_exact_nested_rebased_helper_indexed_field_projection.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -4565,11 +4565,11 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = src
 
 def copy_nested_struct(values: array[i32, 4]) -> void:
-	boxed: NestedViews = NestedViews(Views(values[0u:2u], values[2u:4u]))
+	boxed: NestedViews = NestedViews(Views(values[0:2], values[2:4]))
 	arena_da_copy_exact(boxed.inner.left, boxed.inner.right)
 
 def copy_nested_helper(values: array[i32, 4]) -> void:
-	boxed: NestedViews = wrap_nested_views(values[0u:2u], values[2u:4u])
+	boxed: NestedViews = wrap_nested_views(values[0:2], values[2:4])
 	arena_da_copy_exact(boxed.inner.left, boxed.inner.right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_copy_exact_nested_field_projection.llcontext", src)
@@ -4613,20 +4613,20 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
-	return DynArrayView(null, 0u, sizeof(T))
+	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_fill[T](dst: dview[T], value: T):
 	_ = dst
 	_ = value
 
 def zero_split(values: any darray[i32, 4]&) -> void:
-	base: dview[i32] = arena_da_view(values, 0u, 4u)
-	left: dview[i32] = base[0u:2u]
+	base: dview[i32] = arena_da_view(values, 0, 4)
+	left: dview[i32] = base[0:2]
 	arena_da_fill(left, 0)
 
 def fill_split(values: any darray[i32, 4]&) -> void:
-	base: dview[i32] = arena_da_view(values, 0u, 4u)
-	left: dview[i32] = base[0u:2u]
+	base: dview[i32] = arena_da_view(values, 0, 4)
+	left: dview[i32] = base[0:2]
 	arena_da_fill(left, 7)
 
 def fill_unknown(view: dview[i32]) -> void:
@@ -4691,25 +4691,25 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
-	return DynArrayView(null, 0u, sizeof(T))
+	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_fill[T](dst: dview[T], value: T):
 	_ = dst
 	_ = value
 
 def fill_bytes(values: any darray[u8, 4]&) -> void:
-	base: dview[u8] = arena_da_view(values, 0u, 4u)
-	left: dview[u8] = base[0u:2u]
-	arena_da_fill(left, 7u8)
+	base: dview[u8] = arena_da_view(values, 0, 4)
+	left: dview[u8] = base[0:2]
+	arena_da_fill(left, 7)
 
 def fill_all_ones(values: any darray[i32, 4]&) -> void:
-	base: dview[i32] = arena_da_view(values, 0u, 4u)
-	left: dview[i32] = base[0u:2u]
+	base: dview[i32] = arena_da_view(values, 0, 4)
+	left: dview[i32] = base[0:2]
 	arena_da_fill(left, -1)
 
 def fill_nonuniform(values: any darray[i32, 4]&) -> void:
-	base: dview[i32] = arena_da_view(values, 0u, 4u)
-	left: dview[i32] = base[0u:2u]
+	base: dview[i32] = arena_da_view(values, 0, 4)
+	left: dview[i32] = base[0:2]
 	arena_da_fill(left, 7)
 
 def fill_nonuniform_unknown(view: dview[i32]) -> void:
@@ -4788,20 +4788,20 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
-	return DynArrayView(null, 0u, sizeof(T))
+	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_fill[T](dst: dview[T], value: T):
 	_ = dst
 	_ = value
 
 def fill_runtime_byte(values: any darray[u8, 4]&, value: u8) -> void:
-	base: dview[u8] = arena_da_view(values, 0u, 4u)
-	left: dview[u8] = base[0u:2u]
+	base: dview[u8] = arena_da_view(values, 0, 4)
+	left: dview[u8] = base[0:2]
 	arena_da_fill(left, value)
 
 def fill_runtime_wide(values: any darray[i32, 4]&, value: i32) -> void:
-	base: dview[i32] = arena_da_view(values, 0u, 4u)
-	left: dview[i32] = base[0u:2u]
+	base: dview[i32] = arena_da_view(values, 0, 4)
+	left: dview[i32] = base[0:2]
 	arena_da_fill(left, value)
 
 def fill_runtime_wide_unknown(view: dview[i32], value: i32) -> void:
@@ -4866,20 +4866,20 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
-	return DynArrayView(null, 0u, sizeof(T))
+	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_fill[T](dst: dview[T], value: T):
 	_ = dst
 	_ = value
 
 def fill_literal_int_to_bytes(values: any darray[u8, 4]&) -> void:
-	base: dview[u8] = arena_da_view(values, 0u, 4u)
-	left: dview[u8] = base[0u:2u]
+	base: dview[u8] = arena_da_view(values, 0, 4)
+	left: dview[u8] = base[0:2]
 	arena_da_fill(left, 7)
 
 def fill_runtime_int_to_bytes(values: any darray[u8, 4]&, value: int) -> void:
-	base: dview[u8] = arena_da_view(values, 0u, 4u)
-	left: dview[u8] = base[0u:2u]
+	base: dview[u8] = arena_da_view(values, 0, 4)
+	left: dview[u8] = base[0:2]
 	arena_da_fill(left, value)
 `
 	result := parseAndAnalyze(t, "backend_dview_fill_coerced_byte.llcontext", src)
@@ -4933,15 +4933,15 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
-	return DynArrayView(null, 0u, sizeof(T))
+	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_fill[T](dst: dview[T], value: T):
 	_ = dst
 	_ = value
 
 def fill_runtime_byte(values: any darray[u8, 4]&, value: u8) -> void:
-	base: dview[u8] = arena_da_view(values, 0u, 4u)
-	left: dview[u8] = base[0u:2u]
+	base: dview[u8] = arena_da_view(values, 0, 4)
+	left: dview[u8] = base[0:2]
 	arena_da_fill(left, value)
 `
 	result := parseAndAnalyze(t, "backend_dview_fill_dynamic_byte_optimized.llcontext", src)
@@ -4975,15 +4975,15 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
-	return DynArrayView(null, 0u, sizeof(T))
+	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_fill[T](dst: dview[T], value: T):
 	_ = dst
 	_ = value
 
 def fill_runtime_byte(values: any darray[u8, 4]&, value: u8) -> void:
-	base: dview[u8] = arena_da_view(values, 0u, 4u)
-	left: dview[u8] = base[0u:2u]
+	base: dview[u8] = arena_da_view(values, 0, 4)
+	left: dview[u8] = base[0:2]
 	arena_da_fill(left, value)
 `
 	result := parseAndAnalyze(t, "backend_dview_fill_dynamic_byte_object.llcontext", src)
@@ -5024,7 +5024,7 @@ packed enum Node:
 	Byte(u8)
 
 def build() -> Node:
-	region scratch(256u)
+	region scratch(256)
 	store: Node.Store[Local] = Node.Store(scratch)
 	return new[store] Node.Empty(zeroed)
 `
@@ -5066,7 +5066,7 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
-	return DynArrayView(null, 0u, sizeof(T))
+	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool:
 	_ = left
@@ -5074,25 +5074,25 @@ def arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool:
 	return false
 
 def eq_split(values: any darray[i32, 4]&) -> bool:
-	base: dview[i32] = arena_da_view(values, 0u, 4u)
-	left: dview[i32] = base[0u:2u]
-	right: dview[i32] = base[2u:4u]
+	base: dview[i32] = arena_da_view(values, 0, 4)
+	left: dview[i32] = base[0:2]
+	right: dview[i32] = base[2:4]
 	return arena_da_eq_exact(left, right)
 
 def eq_overlap(values: any darray[i32, 4]&) -> bool:
-	base: dview[i32] = arena_da_view(values, 0u, 4u)
-	left: dview[i32] = base[0u:3u]
-	right: dview[i32] = base[1u:4u]
+	base: dview[i32] = arena_da_view(values, 0, 4)
+	left: dview[i32] = base[0:3]
+	right: dview[i32] = base[1:4]
 	return arena_da_eq_exact(left, right)
 
 def eq_same(values: any darray[i32, 4]&) -> bool:
-	base: dview[i32] = arena_da_view(values, 0u, 4u)
+	base: dview[i32] = arena_da_view(values, 0, 4)
 	return arena_da_eq_exact(base, base)
 
 def eq_diff_extent(values: any darray[i32, 4]&) -> bool:
-	base: dview[i32] = arena_da_view(values, 0u, 4u)
-	left: dview[i32] = base[0u:1u]
-	right: dview[i32] = base[2u:4u]
+	base: dview[i32] = arena_da_view(values, 0, 4)
+	left: dview[i32] = base[0:1]
+	right: dview[i32] = base[2:4]
 	return arena_da_eq_exact(left, right)
 `
 	result := parseAndAnalyze(t, "backend_dview_eq_exact.llcontext", src)
@@ -5154,11 +5154,11 @@ def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	return false
 
 def eq_struct(values: array[i32, 4]) -> bool:
-	boxed: Views = Views(values[0u:2u], values[2u:4u])
+	boxed: Views = Views(values[0:2], values[2:4])
 	return arena_da_eq_exact(boxed.left, boxed.right)
 
 def eq_helper(values: array[i32, 4]) -> bool:
-	boxed: Views = wrap_views(values[0u:2u], values[2u:4u])
+	boxed: Views = wrap_views(values[0:2], values[2:4])
 	return arena_da_eq_exact(boxed.left, boxed.right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_eq_exact_field_projection.llcontext", src)
@@ -5198,8 +5198,8 @@ def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	return false
 
 def eq_indexed(values: array[i32, 4]) -> bool:
-	items: array[Views, 1] = [Views(values[0u:2u], values[2u:4u])]
-	return arena_da_eq_exact(items[0u].left, items[0u].right)
+	items: array[Views, 1] = [Views(values[0:2], values[2:4])]
+	return arena_da_eq_exact(items[0].left, items[0].right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_eq_exact_indexed_field_projection.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -5234,8 +5234,8 @@ def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	return false
 
 def eq_helper_indexed(values: array[i32, 4]) -> bool:
-	wrapped: ViewHolder = wrap_indexed_views(values[0u:2u], values[2u:4u])
-	return arena_da_eq_exact(wrapped.items[0u].left, wrapped.items[0u].right)
+	wrapped: ViewHolder = wrap_indexed_views(values[0:2], values[2:4])
+	return arena_da_eq_exact(wrapped.items[0].left, wrapped.items[0].right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_eq_exact_helper_indexed_field_projection.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -5273,8 +5273,8 @@ def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	return false
 
 def eq_nested_helper_indexed(values: array[i32, 4]) -> bool:
-	wrapped: NestedHolder = wrap_nested_indexed_views(values[0u:2u], values[2u:4u])
-	return arena_da_eq_exact(wrapped.holder.items[0u].left, wrapped.holder.items[0u].right)
+	wrapped: NestedHolder = wrap_nested_indexed_views(values[0:2], values[2:4])
+	return arena_da_eq_exact(wrapped.holder.items[0].left, wrapped.holder.items[0].right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_eq_exact_nested_helper_indexed_field_projection.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -5309,9 +5309,9 @@ def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	return false
 
 def eq_rebased_helper_indexed(values: array[i32, 4]) -> bool:
-	items: array[Views, 2] = [Views(values[0u:1u], values[1u:2u]), Views(values[2u:3u], values[3u:4u])]
-	wrapped: ViewWindow = wrap_sub(items[1u:2u], 0u, 1u)
-	return arena_da_eq_exact(wrapped.items[0u].left, wrapped.items[0u].right)
+	items: array[Views, 2] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4])]
+	wrapped: ViewWindow = wrap_sub(items[1:2], 0, 1)
+	return arena_da_eq_exact(wrapped.items[0].left, wrapped.items[0].right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_eq_exact_rebased_helper_indexed_field_projection.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -5346,9 +5346,9 @@ def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	return false
 
 def eq_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> bool:
-	items: array[Views, 4] = [Views(values[0u:1u], values[1u:2u]), Views(values[2u:3u], values[3u:4u]), Views(values[4u:5u], values[5u:6u]), Views(values[6u:7u], values[7u:8u])]
-	wrapped: ViewWindow = wrap_sub_wild(items[1u:3u], 0u, 2u)
-	return arena_da_eq_exact(wrapped.items[0u].left, wrapped.items[0u].right)
+	items: array[Views, 4] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4]), Views(values[4:5], values[5:6]), Views(values[6:7], values[7:8])]
+	wrapped: ViewWindow = wrap_sub_wild(items[1:3], 0, 2)
+	return arena_da_eq_exact(wrapped.items[0].left, wrapped.items[0].right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_eq_exact_wildcard_rebased_helper_indexed_field_projection.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -5383,9 +5383,9 @@ def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	return false
 
 def eq_wildcard_rebased_overlap(values: array[i32, 8]) -> bool:
-	items: array[Views, 2] = [Views(values[0u:3u], values[1u:4u]), Views(values[4u:7u], values[5u:8u])]
-	wrapped: ViewWindow = wrap_sub_wild(items[0u:1u], 0u, 1u)
-	return arena_da_eq_exact(wrapped.items[0u].left, wrapped.items[0u].right)
+	items: array[Views, 2] = [Views(values[0:3], values[1:4]), Views(values[4:7], values[5:8])]
+	wrapped: ViewWindow = wrap_sub_wild(items[0:1], 0, 1)
+	return arena_da_eq_exact(wrapped.items[0].left, wrapped.items[0].right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_eq_exact_wildcard_rebased_helper_indexed_overlap_guardrails.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -5423,9 +5423,9 @@ def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	return false
 
 def eq_nested_wildcard_rebased_overlap(values: array[i32, 8]) -> bool:
-	items: array[Views, 2] = [Views(values[0u:3u], values[1u:4u]), Views(values[4u:7u], values[5u:8u])]
-	wrapped: Wrapper = wrap_submeta_wild(items[0u:1u], 0u, 1u)
-	return arena_da_eq_exact(wrapped.meta.items[0u].left, wrapped.meta.items[0u].right)
+	items: array[Views, 2] = [Views(values[0:3], values[1:4]), Views(values[4:7], values[5:8])]
+	wrapped: Wrapper = wrap_submeta_wild(items[0:1], 0, 1)
+	return arena_da_eq_exact(wrapped.meta.items[0].left, wrapped.meta.items[0].right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_eq_exact_nested_wildcard_rebased_helper_indexed_overlap_guardrails.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -5463,9 +5463,9 @@ def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	return false
 
 def eq_nested_rebased_helper_indexed(values: array[i32, 4]) -> bool:
-	items: array[Views, 2] = [Views(values[0u:1u], values[1u:2u]), Views(values[2u:3u], values[3u:4u])]
-	wrapped: Wrapper = wrap_submeta(items[1u:2u], 0u, 1u)
-	return arena_da_eq_exact(wrapped.meta.items[0u].left, wrapped.meta.items[0u].right)
+	items: array[Views, 2] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4])]
+	wrapped: Wrapper = wrap_submeta(items[1:2], 0, 1)
+	return arena_da_eq_exact(wrapped.meta.items[0].left, wrapped.meta.items[0].right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_eq_exact_nested_rebased_helper_indexed_field_projection.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -5503,9 +5503,9 @@ def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	return false
 
 def eq_nested_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> bool:
-	items: array[Views, 4] = [Views(values[0u:1u], values[1u:2u]), Views(values[2u:3u], values[3u:4u]), Views(values[4u:5u], values[5u:6u]), Views(values[6u:7u], values[7u:8u])]
-	wrapped: Wrapper = wrap_submeta_wild(items[1u:3u], 0u, 2u)
-	return arena_da_eq_exact(wrapped.meta.items[0u].left, wrapped.meta.items[0u].right)
+	items: array[Views, 4] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4]), Views(values[4:5], values[5:6]), Views(values[6:7], values[7:8])]
+	wrapped: Wrapper = wrap_submeta_wild(items[1:3], 0, 2)
+	return arena_da_eq_exact(wrapped.meta.items[0].left, wrapped.meta.items[0].right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_eq_exact_nested_wildcard_rebased_helper_indexed_field_projection.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -5540,11 +5540,11 @@ def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	return false
 
 def eq_nested_struct(values: array[i32, 4]) -> bool:
-	boxed: NestedViews = NestedViews(Views(values[0u:2u], values[2u:4u]))
+	boxed: NestedViews = NestedViews(Views(values[0:2], values[2:4]))
 	return arena_da_eq_exact(boxed.inner.left, boxed.inner.right)
 
 def eq_nested_helper(values: array[i32, 4]) -> bool:
-	boxed: NestedViews = wrap_nested_views(values[0u:2u], values[2u:4u])
+	boxed: NestedViews = wrap_nested_views(values[0:2], values[2:4])
 	return arena_da_eq_exact(boxed.inner.left, boxed.inner.right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_eq_exact_nested_field_projection.llcontext", src)
@@ -5593,7 +5593,7 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
-	return DynArrayView(null, 0u, sizeof(T))
+	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_from_view[T](a: any Arena&, view: dview[T]) -> darray[T, shape_out]:
 	_ = a
@@ -5602,8 +5602,8 @@ def arena_da_from_view[T](a: any Arena&, view: dview[T]) -> darray[T, shape_out]
 	return out
 
 def materialize_split(a: any Arena&, values: any darray[i32, 4]&) -> darray[i32]:
-	base: dview[i32] = arena_da_view(values, 0u, 4u)
-	left: dview[i32] = base[0u:2u]
+	base: dview[i32] = arena_da_view(values, 0, 4)
+	left: dview[i32] = base[0:2]
 	return arena_da_from_view(a, left)
 
 def materialize_unknown(a: any Arena&, view: dview[i32]) -> darray[i32]:
@@ -5653,7 +5653,7 @@ def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
 
 def string_view_copy(view: StringView) -> heap u8&:
 	_ = view
-	return intern_small_string("".cast[any u8&], 0u)
+	return intern_small_string("".cast[any u8&], 0)
 
 def ctx_string_from_view(view: StringView) -> dstr[shape_out]:
 	return string_view_copy(view)
@@ -5782,7 +5782,7 @@ func TestGenerateLLVMIRLowersDStrLenFieldViaRuntimeHelper(t *testing.T) {
 
 func TestGenerateLLVMIRLowersDArrayViewRuntimeFields(t *testing.T) {
 	src := `def non_empty[T](view: dview[T]) -> bool:
-	return view.len > 0u and view.elem_size > 0u
+	return view.len > 0 and view.elem_size > 0
 
 def probe(view: dview[i64]) -> bool:
 	return non_empty(view)
@@ -5809,21 +5809,21 @@ def probe(view: dview[i64]) -> bool:
 func TestGenerateLLVMIRLowersArraySliceSyntaxViaRuntimeHelpers(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
 	items: mutable any T&?
-    count: mutable usize
-    capacity: mutable usize
+	count: mutable usize
+	capacity: mutable usize
 
 repr(c) struct DynArrayView:
 	data: mutable any void&?
-    len: mutable usize
-    elem_size: mutable usize
+	len: mutable usize
+	elem_size: mutable usize
 
 def head_owned(values: darray[i32, row]) -> i32:
-	part: dview[i32] = values[1u:3u]
-    return part[0u]
+	part: dview[i32] = values[1:3]
+	return part[0]
 
 def head_view(view: dview[i32]) -> i32:
-	part: dview[i32] = view[0u:1u]
-    return part[0u]
+	part: dview[i32] = view[0:1]
+	return part[0]
 `
 	result := parseAndAnalyze(t, "backend_array_slice_syntax.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -5856,10 +5856,10 @@ func TestGenerateLLVMIRLowersFixedArraySliceSyntaxWithoutRuntimeHelpers(t *testi
 	elem_size: mutable usize
 
 def slice_owned(values: i32[4]) -> view[i32]:
-	return values[1u:3u]
+	return values[1:3]
 
 def head_ref(values: any i32[4]&) -> i32:
-	return values[1u:3u][0u]
+	return values[1:3][0]
 `
 	result := parseAndAnalyze(t, "backend_fixed_array_slice.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -5888,25 +5888,25 @@ def head_ref(values: any i32[4]&) -> i32:
 func TestGenerateLLVMIRLowersNestedCollectionAccessOnReturnedValues(t *testing.T) {
 	src := `repr(c) struct DynArray[T]:
 	items: mutable any T&?
-    count: mutable usize
-    capacity: mutable usize
+	count: mutable usize
+	capacity: mutable usize
 
 repr(c) struct DynArrayView:
 	data: mutable any void&?
-    len: mutable usize
-    elem_size: mutable usize
+	len: mutable usize
+	elem_size: mutable usize
 
 extern make_array() -> darray[i32, row]
 extern make_array_view() -> dview[i32]
 
 def read_array_index() -> i32:
-    return make_array()[1u]
+	return make_array()[1]
 
 def read_array_slice_index() -> i32:
-    return make_array()[1u:3u][0u]
+	return make_array()[1:3][0]
 
 def read_array_view_index() -> i32:
-    return make_array_view()[0u]
+	return make_array_view()[0]
 `
 	result := parseAndAnalyze(t, "backend_nested_collection_access_returns.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -6230,11 +6230,11 @@ func TestGenerateLLVMIRLowersIterableForLoopOverDynamicString(t *testing.T) {
 
 func TestGenerateLLVMIRLowersIterableForLoopOverChunksExactView(t *testing.T) {
 	src := `def checksum(values: darray[i32, 4]) -> i32:
-	base: dview[i32] = values[0u:4u]
-	chunks: ChunksExactView[i32] = chunks_exact(readonly(base), 2u)
+	base: dview[i32] = values[0:4]
+	chunks: ChunksExactView[i32] = chunks_exact(readonly(base), 2)
 	total: mutable i32 = 0
 	for chunk in chunks:
-		total <- total + chunk[0u] + chunk[1u]
+		total <- total + chunk[0] + chunk[1]
 	return total
 `
 	result := parseAndAnalyze(t, "backend_iterable_for_chunks_exact.llcontext", src)
@@ -6264,11 +6264,11 @@ func TestGenerateLLVMIRLowersIterableForLoopOverChunksExactView(t *testing.T) {
 
 func TestGenerateLLVMIRLowersProofCarryingViewHelpers(t *testing.T) {
 	src := `def run(values: darray[i32, 4]) -> void:
-	base: dview[i32] = values[0u:4u]
-	halves: SplitView[i32] = split_at(base, 2u)
+	base: dview[i32] = values[0:4]
+	halves: SplitView[i32] = split_at(base, 2)
 	left: dview[i32] = halves.left
-	chunks: ChunksExactView[i32] = chunks_exact(readonly(base), 2u)
-	first: dview[i32] = chunks[0u]
+	chunks: ChunksExactView[i32] = chunks_exact(readonly(base), 2)
+	first: dview[i32] = chunks[0]
 	_ = left
 	_ = first
 `
@@ -6298,7 +6298,7 @@ func TestGenerateLLVMIRLowersReduceSumHelper(t *testing.T) {
 	return value + bias
 
 def run(values: darray[i64, 4], bias: i64) -> i64:
-	base: dview[i64] = values[0u:4u]
+	base: dview[i64] = values[0:4]
 	return reduce_sum(readonly(base), add_bias, bias)
 `
 	result := parseAndAnalyze(t, "backend_reduce_sum_helper.llcontext", src)
