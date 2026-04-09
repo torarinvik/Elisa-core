@@ -1,7 +1,7 @@
 # include "../llcontext_std/contextlang_runtime.llcontext"
 
-const ML_AST_PARALLEL_MAX_WORKERS = 128u
-const ML_AST_FOREST_ROUNDS = 6u
+const ML_AST_PARALLEL_MAX_WORKERS = 128
+const ML_AST_FOREST_ROUNDS = 6
 
 @packed_profile(retained_reads)
 packed enum TypeExpr:
@@ -329,12 +329,12 @@ def build_ml_ast_forest(
     return FrozenMlAstForest(frozen_types, frozen_patterns, frozen_exprs, frozen_clauses, frozen_stmts, frozen_decls, frozen_modules, frozen_roots)
 
 def packed_ml_ast_checksum_impl() -> i64:
-    return packed_ml_ast_repeated_checksum_impl(1u)
+    return packed_ml_ast_repeated_checksum_impl(1)
 
 def packed_ml_ast_repeated_checksum_impl(iterations: usize) -> i64:
-    if iterations == 0u:
+    if iterations == 0:
         return -1
-    region scratch(131072u)
+    region scratch(131072)
     type_store: TypeExpr.Store[Local] = TypeExpr.Store(scratch)
     pattern_store: Pattern.Store[Local] = Pattern.Store(scratch)
     expr_store: Expr.Store[Local] = Expr.Store(scratch)
@@ -345,27 +345,27 @@ def packed_ml_ast_repeated_checksum_impl(iterations: usize) -> i64:
     root_store: Root.Store[Local] = Root.Store(scratch)
     forest: FrozenMlAstForest = build_ml_ast_forest(type_store, pattern_store, expr_store, clause_store, stmt_store, decl_store, module_store, root_store)
     total: mutable i64 = 0
-    for iteration in 0u..<iterations:
-        total <- total + checksum_root_range(0u, forest.roots.count, (&forest).cast[any FrozenMlAstForest&])
+    for iteration in 0..<iterations:
+        total <- total + checksum_root_range(0, forest.roots.count, (&forest).cast[any FrozenMlAstForest&])
     return total
 
 def ml_ast_parallel_worker(job: MlAstParallelJob) -> i64:
     forest: any FrozenMlAstForest& = job.forest_bits.cast[any FrozenMlAstForest&]
     result_slot: mutable any i64& = job.result_bits.cast[mutable any i64&]
     total: mutable i64 = 0
-    for iteration in 0u..<job.repeats:
+    for iteration in 0..<job.repeats:
         total <- total + checksum_root_range(job.start, job.end, forest)
-    result_slot[0u] <- total
+    result_slot[0] <- total
     return total
 
 def packed_ml_ast_parallel_max_workers_impl() -> i64:
     return ML_AST_PARALLEL_MAX_WORKERS.i64()
 
 def packed_ml_ast_parallel_checksum_impl(worker_count: usize, iterations: usize) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
-    if worker_count == 0u or iterations == 0u or worker_count > ML_AST_PARALLEL_MAX_WORKERS:
+    if worker_count == 0 or iterations == 0 or worker_count > ML_AST_PARALLEL_MAX_WORKERS:
         return -1
 
-    region scratch(131072u)
+    region scratch(131072)
     type_store: TypeExpr.Store[Local] = TypeExpr.Store(scratch)
     pattern_store: Pattern.Store[Local] = Pattern.Store(scratch)
     expr_store: Expr.Store[Local] = Expr.Store(scratch)
@@ -379,7 +379,7 @@ def packed_ml_ast_parallel_checksum_impl(worker_count: usize, iterations: usize)
     worker_total: mutable usize = worker_count
     if worker_total > forest.roots.count:
         worker_total <- forest.roots.count
-    if worker_total == 0u:
+    if worker_total == 0:
         return -1
 
     partials: i64[128] = zeroed
@@ -388,11 +388,11 @@ def packed_ml_ast_parallel_checksum_impl(worker_count: usize, iterations: usize)
 
     pool workers(worker_total):
         group: mutable TaskGroup = task_group_new()
-        start: mutable usize = 0u
-        for slot in 0u..<worker_total:
+        start: mutable usize = 0
+        for slot in 0..<worker_total:
             span: mutable usize = base_roots
             if slot < extra_roots:
-                span <- span + 1u
+                span <- span + 1
 
             end: usize = start + span
             forest_bits: uintptr = (&forest).cast[any FrozenMlAstForest&].uintptr()
@@ -405,7 +405,7 @@ def packed_ml_ast_parallel_checksum_impl(worker_count: usize, iterations: usize)
         wait all group
 
     total: mutable i64 = 0
-    for slot in 0u..<worker_total:
+    for slot in 0..<worker_total:
         total <- total + partials[slot]
     return total
 

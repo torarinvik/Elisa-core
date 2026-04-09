@@ -1,6 +1,6 @@
 # include "../llcontext_std/contextlang_runtime.llcontext"
 
-const RETAINED_TYPE_ROUNDS = 24u
+const RETAINED_TYPE_ROUNDS = 24
 
 @packed_profile(retained_reads)
 packed enum TypeExpr:
@@ -24,22 +24,22 @@ def score_type(node: TypeExpr, frozen: TypeExpr.Store[Frozen]) -> i64:
 
 def build_type(seed: usize, current: TypeExpr, previous: TypeExpr, store: TypeExpr.Store[Local]) -> TypeExpr:
     seed_i64: i64 = seed.i64()
-    if seed % 3u == 0u:
+    if seed % 3 == 0:
         pair: TypeExpr = new[store] TypeExpr.Tuple(span: 100 + seed_i64, weight: 7 + seed_i64, left: current, right: previous)
         return new[store] TypeExpr.Record(span: 101 + seed_i64, weight: 11 + seed_i64, label: 400 + seed_i64, field_ty: pair, rest: current)
-    if seed % 3u == 1u:
+    if seed % 3 == 1:
         return new[store] TypeExpr.Tuple(span: 102 + seed_i64, weight: 13 + seed_i64, left: previous, right: current)
     return new[store] TypeExpr.Record(span: 103 + seed_i64, weight: 17 + seed_i64, label: 500 + seed_i64, field_ty: previous, rest: current)
 
 def retained_nested_type_repro_impl() -> i64:
-    region scratch(32768u)
+    region scratch(32768)
     store: TypeExpr.Store[Local] = TypeExpr.Store(scratch)
     int_ty: TypeExpr = new[store] TypeExpr.Var(span: 1, weight: 1, symbol: 11)
     bool_ty: TypeExpr = new[store] TypeExpr.Var(span: 2, weight: 1, symbol: 12)
     current: mutable TypeExpr = new[store] TypeExpr.Tuple(span: 3, weight: 2, left: int_ty, right: bool_ty)
     previous: mutable TypeExpr = bool_ty
 
-    for seed in 0u..<RETAINED_TYPE_ROUNDS:
+    for seed in 0..<RETAINED_TYPE_ROUNDS:
         next: TypeExpr = build_type(seed, current, previous, store)
         previous <- current
         current <- next

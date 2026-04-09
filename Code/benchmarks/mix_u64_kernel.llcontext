@@ -1,8 +1,8 @@
 def mix_u64_impl(data: any u64&, len: usize, rounds: usize, seed: u64) -> u64:
     acc: mutable u64 = seed
 
-    for round in 0u..<rounds:
-        for i in 0u..<len:
+    for round in 0..<rounds:
+        for i in 0..<len:
             value: mutable u64 = data[i]
             value ^= (value >> 33)
             value *= 6364136223846793005u64

@@ -1,9 +1,9 @@
 def reduce_sum_u64_impl(data: any u64&, len: usize, rounds: usize, bias: u64) -> u64:
     acc: mutable u64 = bias
 
-    for round in 0u..<rounds:
+    for round in 0..<rounds:
         partial: mutable u64 = round.u64()
-        for i in 0u..<len:
+        for i in 0..<len:
             partial += data[i]
         acc += partial
 
