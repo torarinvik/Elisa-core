@@ -189,7 +189,7 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
-	return DynArrayView(null, 0u, sizeof(T))
+	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
 	_ = start
@@ -464,7 +464,7 @@ def inspect(text: dstr[row], buf: array[i32, 8]) -> int:
 	suffix: StringView = ctx_string_view_suffix(base, 2)
 	full_prefix: StringView = ctx_string_view_prefix(base, base.len)
 	full_suffix: StringView = ctx_string_view_suffix(base, 0)
-	region scratch(1024u)
+	region scratch(1024)
 	fresh_view_a: StringView = string_view(new[scratch] 3u8, 0, 1)
 	fresh_view_b: StringView = string_view(new[scratch] 4u8, 0, 1)
 	alloc_a: scratch i32& = new[scratch] 1
@@ -553,11 +553,11 @@ def arena_da_view_suffix[T](view: dview[T], start: usize) -> dview[T]:
 	return view
 
 def inspect(values: any darray[i32, row]&) -> int:
-	base: dview[i32] = arena_da_view(values, 0u, values.count)
-	prefix: dview[i32] = arena_da_view_prefix(base, 2u)
-	suffix: dview[i32] = arena_da_view_suffix(base, 2u)
+	base: dview[i32] = arena_da_view(values, 0, values.count)
+	prefix: dview[i32] = arena_da_view_prefix(base, 2)
+	suffix: dview[i32] = arena_da_view_suffix(base, 2)
 	full_prefix: dview[i32] = arena_da_view_prefix(base, base.len)
-	full_suffix: dview[i32] = arena_da_view_suffix(base, 0u)
+	full_suffix: dview[i32] = arena_da_view_suffix(base, 0)
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_dview_split_helpers.llcontext", src)
@@ -598,7 +598,7 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
-	return DynArrayView(null, 0u, sizeof(T))
+	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
 	_ = start
@@ -606,9 +606,9 @@ def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]
 	return view
 
 def inspect(values: any darray[i32, 4]&) -> int:
-	base: dview[i32] = arena_da_view(values, 0u, 4u)
-	left: dview[i32] = arena_da_view_slice(base, 0u, 2u)
-	right: dview[i32] = arena_da_view_slice(base, 2u, 4u)
+	base: dview[i32] = arena_da_view(values, 0, 4)
+	left: dview[i32] = arena_da_view_slice(base, 0, 2)
+	right: dview[i32] = arena_da_view_slice(base, 2, 4)
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_equal_extent_size.llcontext", src)
@@ -646,13 +646,13 @@ def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize)
 	_ = end
 	if values.items != null:
 		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
-	return DynArrayView(null, 0u, sizeof(T))
+	return DynArrayView(null, 0, sizeof(T))
 
 def inspect(values: any darray[i32, 4]&) -> int:
-	base: dview[i32] = arena_da_view(values, 0u, 4u)
-	left: dview[i32] = base[0u:2u]
-	right: dview[i32] = base[2u:4u]
-	full: dview[i32] = base[0u:base.len]
+	base: dview[i32] = arena_da_view(values, 0, 4)
+	left: dview[i32] = base[0:2]
+	right: dview[i32] = base[2:4]
+	full: dview[i32] = base[0:base.len]
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_direct_dview_slice_syntax.llcontext", src)
@@ -699,10 +699,10 @@ def arena_da_view_slice(input: view[Views], start: usize, end: usize) -> view[Vi
 	return input
 
 def inspect(values: array[i32, 8]) -> int:
-	items: array[Views, 2] = [Views(values[0u:2u], values[2u:4u]), Views(values[4u:6u], values[6u:8u])]
-	window: view[Views] = arena_da_view_slice(items[1u:2u], 0u, 1u)
-	left_projected: view[i32] = window[0u].left
-	right_projected: view[i32] = window[0u].right
+	items: array[Views, 2] = [Views(values[0:2], values[2:4]), Views(values[4:6], values[6:8])]
+	window: view[Views] = arena_da_view_slice(items[1:2], 0, 1)
+	left_projected: view[i32] = window[0].left
+	right_projected: view[i32] = window[0].right
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_standard_view_slice_helper_field_projection.llcontext", src)
@@ -753,8 +753,8 @@ def inspect(owner: Arena) -> int:
 	node1: Expr = new[store] Expr.Int(value: 1)
 	items: array[Box, 2] = [Box(node0), Box(node1)]
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	window: view[Box] = arena_da_view_slice(items[1u:2u], 0u, 1u)
-	projected: Expr = window[0u].node
+	window: view[Box] = arena_da_view_slice(items[1:2], 0, 1)
+	projected: Expr = window[0].node
 	_ = frozen
 	return 0
 `
@@ -793,7 +793,7 @@ repr(c) struct Box:
 extern wrap_node(node: Expr) -> Box
 
 def inspect(owner: Arena) -> int:
-	region scratch(1024u)
+	region scratch(1024)
 	store: Expr.Store[Local] = Expr.Store(owner)
 	node: Expr = new[store] Expr.Int(value: 1)
 	box: Box = wrap_node(node)
@@ -805,7 +805,7 @@ def inspect(owner: Arena) -> int:
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	after_freeze: Expr = node
 	wrapped_after_freeze: Box = wrap_node(node)
-	view_after_freeze: view[Box, 0u, 1u] = items[0u:1u]
+	view_after_freeze: view[Box, 0, 1] = items[0:1]
 	held_after_freeze: Expr = held
 	_ = box
 	_ = held_before_freeze
@@ -928,9 +928,9 @@ def inspect(owner: Arena) -> int:
 		_ = new Expr.Add(left: left, right: right)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	tags_view: dview[Expr.Tag] = frozen.tags
-	full_span: dview[Expr.Tag] = frozen.tags[0u:frozen.count]
-	prefix: dview[Expr.Tag] = frozen.tags[0u:1u]
-	suffix: dview[Expr.Tag] = frozen.tags[1u:frozen.count]
+	full_span: dview[Expr.Tag] = frozen.tags[0:frozen.count]
+	prefix: dview[Expr.Tag] = frozen.tags[0:1]
+	suffix: dview[Expr.Tag] = frozen.tags[1:frozen.count]
 	_ = tags_view
 	_ = full_span
 	_ = prefix
@@ -1795,9 +1795,9 @@ func TestAnalyzePreservesOptimizationFactsThroughIndexedFieldProjectionExpressio
 	right: view[i32]
 
 def inspect(buf: array[i32, 4]) -> int:
-	items: array[Views, 1] = [Views(buf[0u:2u], buf[2u:4u])]
-	left_indexed: view[i32] = items[0u].left
-	right_indexed: view[i32] = items[0u].right
+	items: array[Views, 1] = [Views(buf[0:2], buf[2:4])]
+	left_indexed: view[i32] = items[0].left
+	right_indexed: view[i32] = items[0].right
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_indexed_field_projection.llcontext", src)
@@ -1827,9 +1827,9 @@ def inspect(buf: array[i32, 4]) -> int:
 
 func TestAnalyzePreservesOptimizationFactsThroughDirectIndexedExpressions(t *testing.T) {
 	src := `def inspect(buf: array[i32, 4]) -> int:
-	items: array[view[i32], 2] = [buf[0u:2u], buf[2u:4u]]
-	left_indexed: view[i32] = items[0u]
-	right_indexed: view[i32] = items[1u]
+	items: array[view[i32], 2] = [buf[0:2], buf[2:4]]
+	left_indexed: view[i32] = items[0]
+	right_indexed: view[i32] = items[1]
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_direct_indexed_values.llcontext", src)
@@ -1870,8 +1870,8 @@ def inspect(owner: Arena) -> int:
 	held: Expr = new[store] Expr.Hold(value: local_ref)
 	items: array[Expr, 2] = [node, held]
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	pure_indexed: Expr = items[0u]
-	mixed_indexed: Expr = items[1u]
+	pure_indexed: Expr = items[0]
+	mixed_indexed: Expr = items[1]
 	_ = frozen
 	return 0
 `
