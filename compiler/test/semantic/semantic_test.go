@@ -7640,7 +7640,7 @@ func TestAnalyzeRejectsUsingReferenceInvalidatedByRestore(t *testing.T) {
 	mark scratch as cp
 	value: any i32& = new[scratch] 1
 	restore scratch from cp
-	return value[0u]
+	return value[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_ref.llcontext", src)
 	if len(errs) == 0 {
@@ -7658,7 +7658,7 @@ func TestAnalyzeRejectsUsingMoveBoundReferenceInvalidatedByRestore(t *testing.T)
 	value: any i32& = new[scratch] 1
 	move value as alias
 	restore scratch from cp
-	return alias[0u]
+	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_alias.llcontext", src)
 	if len(errs) == 0 {
@@ -7955,7 +7955,7 @@ def copy_count(holder: Holder) -> Holder:
 def ok() -> i32:
 	region scratch
 	mark scratch as cp
-	holder: Holder = Holder(new[scratch] 1i32, 7i32)
+	holder: Holder = Holder(new[scratch] 1, 7)
 	copy: Holder = copy_count(holder)
 	restore scratch from cp
 	return copy.count
@@ -7975,10 +7975,10 @@ extern borrow_value(holder: Holder) -> any i32&
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
-	holder: Holder = Holder(new[scratch] 1i32, 7i32)
+	holder: Holder = Holder(new[scratch] 1, 7)
 	alias: any i32& = borrow_value(holder)
 	restore scratch from cp
-	return alias[0u]
+	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_borrowed_ref_invalid.llcontext", src)
 	if len(errs) == 0 {
@@ -8478,7 +8478,7 @@ def bad(owner: Arena) -> i32:
 	region scratch
 	mark scratch as cp
 	store: Expr.Store[Local] = Expr.Store(owner)
-	node: Expr = new[store] Expr.Hold(value: new[scratch] 1i32, count: 7i32)
+	node: Expr = new[store] Expr.Hold(value: new[scratch] 1, count: 7)
 	move node in store as Expr.Hold(alias, count)
 	restore scratch from cp
 	return alias[0]
@@ -8500,7 +8500,7 @@ def ok(owner: Arena) -> i32:
 	region scratch
 	mark scratch as cp
 	store: Expr.Store[Local] = Expr.Store(owner)
-	node: Expr = new[store] Expr.Hold(value: new[scratch] 1i32, count: 7i32)
+	node: Expr = new[store] Expr.Hold(value: new[scratch] 1, count: 7)
 	move node in store as Expr.Hold(alias, count)
 	restore scratch from cp
 	return count
@@ -8517,7 +8517,7 @@ func TestAnalyzeRejectsUsingIndexedStructFieldAliasInvalidatedByRestore(t *testi
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
 	alias: any i32& = items[0].value
 	restore scratch from cp
 	return alias[0]
@@ -8539,7 +8539,7 @@ func TestAnalyzeAcceptsIndexedStructScalarAfterRestore(t *testing.T) {
 def ok() -> i32:
 	region scratch
 	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
 	count: i32 = items[0].count
 	restore scratch from cp
 	return count
@@ -8556,7 +8556,7 @@ func TestAnalyzeRejectsUsingSlicedViewAliasInvalidatedByRestore(t *testing.T) {
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
 	window: view[Holder] = items[0:2]
 	alias: any i32& = window[0].value
 	restore scratch from cp
@@ -8579,7 +8579,7 @@ func TestAnalyzeAcceptsSlicedViewScalarAfterRestore(t *testing.T) {
 def ok() -> i32:
 	region scratch
 	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
 	window: view[Holder] = items[0:2]
 	count: i32 = window[0].count
 	restore scratch from cp
@@ -8600,7 +8600,7 @@ repr(c) struct Window:
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
 	window: Window = Window(items[0:2])
 	which: usize = 1
 	alias: any i32& = window.items[which].value
@@ -8627,7 +8627,7 @@ repr(c) struct Window:
 def ok() -> i32:
 	region scratch
 	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
+	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
 	window: Window = Window(items[0:2])
 	which: usize = 1
 	count: i32 = window.items[which].count
@@ -8649,7 +8649,7 @@ enum Bucket:
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
-	value: Bucket = Bucket.Keep([Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)])
+	value: Bucket = Bucket.Keep([Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)])
 	move value as Bucket.Keep(items)
 	which: usize = 1
 	alias: any i32& = items[which].value
@@ -8676,7 +8676,7 @@ enum Bucket:
 def ok() -> i32:
 	region scratch
 	mark scratch as cp
-	value: Bucket = Bucket.Keep([Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)])
+	value: Bucket = Bucket.Keep([Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)])
 	move value as Bucket.Keep(items)
 	which: usize = 1
 	count: i32 = items[which].count
