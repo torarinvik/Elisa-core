@@ -644,13 +644,13 @@ def block_total(block: Lua.Block) -> i64:
 	total: mutable i64 = block.stmts.len.i64()
 	for stmt in block.stmts:
 		total <- total + stmt.kind.i64()
-	return total + block.stmts[0u].kind.i64()
+	return total + block.stmts[0].kind.i64()
 
 def elseif_total(stmt: Lua.Stmt.IfStmt) -> i64:
 	total: mutable i64 = stmt.elseifs.len.i64()
 	for branch in stmt.elseifs:
 		total <- total + branch.kind.i64()
-	return total + stmt.elseifs[0u].kind.i64()
+	return total + stmt.elseifs[0].kind.i64()
 `)
 }
 

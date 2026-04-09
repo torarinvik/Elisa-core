@@ -245,7 +245,7 @@ def arena_realloc(a: mutable any Arena&, oldptr: mutable any void&, oldsz: usize
     newptr_bytes: heap u8& = newptr.cast[heap u8&]
     oldptr_bytes: any u8& = oldptr.cast[any u8&]
 
-    for i in 0u..<oldsz:
+    for i in 0..<oldsz:
         newptr_bytes[i] <- oldptr_bytes[i]
 
     return newptr
@@ -264,7 +264,7 @@ def arena_memcpy(dest: mutable any void&, src: any void&, n: usize) -> mutable a
     d: any u8& = dest.cast[any u8&]
     s: any u8& = src.cast[any u8&]
 
-	for i in 0u..<n:
+    for i in 0..<n:
         d[i] <- s[i]
 
     return dest
@@ -273,7 +273,7 @@ def arena_memeq(lhs: any void&, rhs: any void&, n: usize) -> bool:
     left: any u8& = lhs.cast[any u8&]
     right: any u8& = rhs.cast[any u8&]
 
-    for i in 0u..<n:
+    for i in 0..<n:
         if left[i] != right[i]:
             return false
 

@@ -110,10 +110,10 @@ func TestOptimizationFactsMarkConstantChunksExactItemsDisjoint(t *testing.T) {
 	file, result := parseAndAnalyzeOptimizationFactsTest(t, "chunks_exact_disjoint.llcontext", `
 def kernel(buf: dview[i32]) -> void:
 	ro: dview[i32] = readonly(buf)
-	chunks: ChunksExactView[i32] = chunks_exact(ro, 4u)
-	first: dview[i32] = chunks[0u]
-	second: dview[i32] = chunks[1u]
-	third: dview[i32] = chunks[2u]
+	chunks: ChunksExactView[i32] = chunks_exact(ro, 4)
+	first: dview[i32] = chunks[0]
+	second: dview[i32] = chunks[1]
+	third: dview[i32] = chunks[2]
 	pass
 `)
 	if errs := result.Errors(); len(errs) > 0 {
@@ -159,9 +159,9 @@ def add(left: i32, right: i32) -> i32:
 
 def kernel(buf: dview[i32]) -> void:
 	ro: dview[i32] = readonly(buf)
-	ro_chunks: ChunksExactView[i32] = chunks_exact(ro, 4u)
-	rw_chunks: ChunksExactView[i32] = chunks_exact(buf, 4u)
-	zip_map(rw_chunks[0u], ro_chunks[1u], ro_chunks[2u], add)
+	ro_chunks: ChunksExactView[i32] = chunks_exact(ro, 4)
+	rw_chunks: ChunksExactView[i32] = chunks_exact(buf, 4)
+	zip_map(rw_chunks[0], ro_chunks[1], ro_chunks[2], add)
 `)
 	if errs := result.Errors(); len(errs) > 0 {
 		t.Fatalf("expected zip_map over disjoint chunk items to analyze cleanly, got:\n%s", strings.Join(errs, "\n"))
@@ -188,15 +188,15 @@ def kernel(buf: dview[i32]) -> void:
 func TestOptimizationFactsComposeSplitAtAndChunksExactItemOffsets(t *testing.T) {
 	file, result := parseAndAnalyzeOptimizationFactsTest(t, "split_chunks_exact_offsets.llcontext", `
 def kernel(buf: dview[i32]) -> void:
-	whole: dview[i32] = buf[0u:16u]
-	parts: SplitView[i32] = split_at(whole, 8u)
+	whole: dview[i32] = buf[0:16]
+	parts: SplitView[i32] = split_at(whole, 8)
 	left_ro: dview[i32] = readonly(parts.left)
 	right_ro: dview[i32] = readonly(parts.right)
-	left_chunks: ChunksExactView[i32] = chunks_exact(left_ro, 4u)
-	right_chunks: ChunksExactView[i32] = chunks_exact(right_ro, 4u)
-	left0: dview[i32] = left_chunks[0u]
-	right0: dview[i32] = right_chunks[0u]
-	right1: dview[i32] = right_chunks[1u]
+	left_chunks: ChunksExactView[i32] = chunks_exact(left_ro, 4)
+	right_chunks: ChunksExactView[i32] = chunks_exact(right_ro, 4)
+	left0: dview[i32] = left_chunks[0]
+	right0: dview[i32] = right_chunks[0]
+	right1: dview[i32] = right_chunks[1]
 	pass
 `)
 	if errs := result.Errors(); len(errs) > 0 {
@@ -239,12 +239,12 @@ def add(left: i32, right: i32) -> i32:
 	return left + right
 
 def kernel(buf: dview[i32]) -> void:
-	whole: dview[i32] = buf[0u:16u]
-	parts: SplitView[i32] = split_at(whole, 8u)
-	left_chunks: ChunksExactView[i32] = chunks_exact(parts.left, 4u)
+	whole: dview[i32] = buf[0:16]
+	parts: SplitView[i32] = split_at(whole, 8)
+	left_chunks: ChunksExactView[i32] = chunks_exact(parts.left, 4)
 	right_ro: dview[i32] = readonly(parts.right)
-	right_chunks: ChunksExactView[i32] = chunks_exact(right_ro, 4u)
-	zip_map(left_chunks[0u], right_chunks[0u], right_chunks[1u], add)
+	right_chunks: ChunksExactView[i32] = chunks_exact(right_ro, 4)
+	zip_map(left_chunks[0], right_chunks[0], right_chunks[1], add)
 `)
 	if errs := result.Errors(); len(errs) > 0 {
 		t.Fatalf("expected composed split/chunks zip_map to analyze cleanly, got:\n%s", strings.Join(errs, "\n"))
@@ -268,15 +268,15 @@ def kernel(buf: dview[i32]) -> void:
 func TestOptimizationFactsSupportAffineSplitChunkComposition(t *testing.T) {
 	file, result := parseAndAnalyzeOptimizationFactsTest(t, "affine_split_chunks_exact_offsets.llcontext", `
 def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
-	limit: usize = start + (4u * chunk)
+	limit: usize = start + (4 * chunk)
 	whole: dview[i32] = buf[start:limit]
-	parts: SplitView[i32] = split_at(whole, (2u * chunk))
+	parts: SplitView[i32] = split_at(whole, (2 * chunk))
 	left_chunks: ChunksExactView[i32] = chunks_exact(parts.left, chunk)
 	right_ro: dview[i32] = readonly(parts.right)
 	right_chunks: ChunksExactView[i32] = chunks_exact(right_ro, chunk)
-	left0: dview[i32] = left_chunks[0u]
-	right0: dview[i32] = right_chunks[0u]
-	right1: dview[i32] = right_chunks[1u]
+	left0: dview[i32] = left_chunks[0]
+	right0: dview[i32] = right_chunks[0]
+	right1: dview[i32] = right_chunks[1]
 	pass
 `)
 	if errs := result.Errors(); len(errs) > 0 {
@@ -331,13 +331,13 @@ def add(left: i32, right: i32) -> i32:
 	return left + right
 
 def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
-	limit: usize = start + (4u * chunk)
+	limit: usize = start + (4 * chunk)
 	whole: dview[i32] = buf[start:limit]
-	parts: SplitView[i32] = split_at(whole, (2u * chunk))
+	parts: SplitView[i32] = split_at(whole, (2 * chunk))
 	left_chunks: ChunksExactView[i32] = chunks_exact(parts.left, chunk)
 	right_ro: dview[i32] = readonly(parts.right)
 	right_chunks: ChunksExactView[i32] = chunks_exact(right_ro, chunk)
-	zip_map(left_chunks[0u], right_chunks[0u], right_chunks[1u], add)
+	zip_map(left_chunks[0], right_chunks[0], right_chunks[1], add)
 `)
 	if errs := result.Errors(); len(errs) > 0 {
 		t.Fatalf("expected affine split/chunk zip_map to analyze cleanly, got:\n%s", strings.Join(errs, "\n"))
@@ -364,12 +364,12 @@ def add(left: i32, right: i32) -> i32:
 	return left + right
 
 def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
-	limit: usize = start + (3u * chunk)
+	limit: usize = start + (3 * chunk)
 	whole: dview[i32] = buf[start:limit]
 	ro: dview[i32] = readonly(whole)
-	dst: dview[i32] = whole[0u:chunk]
-	src1: dview[i32] = ro[chunk:(2u * chunk)]
-	src2: dview[i32] = ro[(2u * chunk):(3u * chunk)]
+	dst: dview[i32] = whole[0:chunk]
+	src1: dview[i32] = ro[chunk:(2 * chunk)]
+	src2: dview[i32] = ro[(2 * chunk):(3 * chunk)]
 	zip_map(dst, src1, src2, add)
 `)
 	if errs := result.Errors(); len(errs) > 0 {
@@ -420,11 +420,11 @@ def arena_da_view_suffix[T](view: dview[T], start: usize) -> dview[T]:
 	return arena_da_view_slice(view, start, view.len)
 
 def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
-	limit: usize = start + (3u * chunk)
+	limit: usize = start + (3 * chunk)
 	whole: dview[i32] = buf[start:limit]
 	rest_view: dview[i32] = arena_da_view_suffix(whole, chunk)
-	first: dview[i32] = arena_da_view_slice(rest_view, 0u, chunk)
-	second: dview[i32] = arena_da_view_slice(rest_view, chunk, (2u * chunk))
+	first: dview[i32] = arena_da_view_slice(rest_view, 0, chunk)
+	second: dview[i32] = arena_da_view_slice(rest_view, chunk, (2 * chunk))
 	pass
 `)
 	if errs := result.Errors(); len(errs) > 0 {
@@ -462,12 +462,12 @@ def add(left: i32, right: i32) -> i32:
 	return left + right
 
 def kernel(buf: dview[i32], start: usize, chunk: usize) -> void:
-	limit: usize = start + (3u * chunk)
+	limit: usize = start + (3 * chunk)
 	whole: dview[i32] = buf[start:limit]
 	ro: dview[i32] = readonly(whole)
-	dst: dview[i32] = arena_da_view_slice(whole, 0u, chunk)
-	src1: dview[i32] = arena_da_view_slice(ro, chunk, (2u * chunk))
-	src2: dview[i32] = arena_da_view_slice(ro, (2u * chunk), (3u * chunk))
+	dst: dview[i32] = arena_da_view_slice(whole, 0, chunk)
+	src1: dview[i32] = arena_da_view_slice(ro, chunk, (2 * chunk))
+	src2: dview[i32] = arena_da_view_slice(ro, (2 * chunk), (3 * chunk))
 	zip_map(dst, src1, src2, add)
 `)
 	if errs := result.Errors(); len(errs) > 0 {
@@ -521,7 +521,7 @@ def sum_one(value: i32) -> i32:
 	return value
 
 def kernel(buf: dview[i32], start: usize, chunk: usize) -> i32:
-	limit: usize = start + (2u * chunk)
+	limit: usize = start + (2 * chunk)
 	whole: dview[i32] = buf[start:limit]
 	ro: dview[i32] = readonly(whole)
 	rest_view: dview[i32] = arena_da_view_suffix(ro, chunk)
@@ -538,8 +538,8 @@ def sum_one(value: i32) -> i32:
 	return value
 
 def kernel(buf: dview[i32], cond: bool, chunk: usize) -> i32:
-	whole: dview[i32] = readonly(buf[0u:(2u * chunk)])
-	picked: dview[i32] = whole[0u:chunk] if cond else whole[chunk:(2u * chunk)]
+	whole: dview[i32] = readonly(buf[0:(2 * chunk)])
+	picked: dview[i32] = whole[0:chunk] if cond else whole[chunk:(2 * chunk)]
 	return reduce_sum(picked, sum_one)
 `)
 	if errs := result.Errors(); len(errs) > 0 {
@@ -569,8 +569,8 @@ def sum_one(value: i32) -> i32:
 	return value
 
 def kernel(buf: dview[i32], cond: bool, chunk: usize) -> i32:
-	whole: dview[i32] = readonly(buf[0u:(2u * chunk)])
-	picked: dview[i32] = arena_da_view_slice(whole, 0u, chunk) if cond else arena_da_view_slice(whole, chunk, (2u * chunk))
+	whole: dview[i32] = readonly(buf[0:(2 * chunk)])
+	picked: dview[i32] = arena_da_view_slice(whole, 0, chunk) if cond else arena_da_view_slice(whole, chunk, (2 * chunk))
 	return reduce_sum(picked, sum_one)
 `)
 	if errs := result.Errors(); len(errs) > 0 {

@@ -10,10 +10,10 @@ func TestAnalyzeScopeCheckpointAndReverseIterableLoop(t *testing.T) {
 
 def build(owner: Arena, items: darray[int]) -> usize:
     alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
-    total: mutable usize = 0u
+    total: mutable usize = 0
     for rev value in items:
-        total <- total + 1u
-    scope pool_new(2u):
+        total <- total + 1
+    scope pool_new(2):
         pass
     in alloc:
         xs: mutable darray[int] = [1, 2, 3]
@@ -67,9 +67,9 @@ def build(owner: Arena, key: dstr[key_shape]) -> usize:
     alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
     in alloc:
         pending: mutable PendingGotoStore = zeroed
-        pending.reserve(8u)
+        pending.reserve(8)
         pending.push(1u32, 2u32)
-        pending.truncate(1u)
+        pending.truncate(1)
         pending.clear()
         values: mutable dict[dstr[key_shape], i64] = zeroed
         _ = values.put(key, 7)
