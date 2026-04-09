@@ -3758,6 +3758,90 @@ def plain_range() -> int:
 	requireExprTypeString(t, result, idxDecl.Value, "int")
 }
 
+func TestAnalyzeContextualIntLiteralI32Sites(t *testing.T) {
+	src := `extern passthrough(value: i32) -> i32
+
+repr(c) struct Pair:
+	left: i32
+	right: i32
+
+def contextual_local() -> i32:
+	value: i32 = 1
+	return value
+
+def contextual_call() -> i32:
+	return passthrough(2)
+
+def contextual_struct() -> Pair:
+	return Pair(3, 4)
+
+def contextual_array() -> i32[2]:
+	return [5, 6]
+
+def contextual_unary() -> i32:
+	return -7
+`
+	result, errs := parseAndAnalyze(t, "contextual_int_literals_i32_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	localDecl := requireFuncDecl(t, result, "contextual_local")
+	localInit, ok := localDecl.Body[0].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected contextual_local to start with a local declaration, got %T", localDecl.Body[0])
+	}
+	requireExprTypeString(t, result, localInit.Value, "i32")
+
+	callDecl := requireFuncDecl(t, result, "contextual_call")
+	callReturn, ok := callDecl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected contextual_call to contain a return statement, got %T", callDecl.Body[0])
+	}
+	callExpr, ok := callReturn.Value.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected contextual_call to return a function call, got %T", callReturn.Value)
+	}
+	requireExprTypeString(t, result, callExpr.Args[0], "i32")
+
+	structDecl := requireFuncDecl(t, result, "contextual_struct")
+	structReturn, ok := structDecl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected contextual_struct to contain a return statement, got %T", structDecl.Body[0])
+	}
+	structLit, ok := structReturn.Value.(*ast.StructLitExpr)
+	if !ok {
+		t.Fatalf("expected contextual_struct to return a struct literal, got %T", structReturn.Value)
+	}
+	for _, arg := range structLit.Args {
+		requireExprTypeString(t, result, arg, "i32")
+	}
+
+	arrayDecl := requireFuncDecl(t, result, "contextual_array")
+	arrayReturn, ok := arrayDecl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected contextual_array to contain a return statement, got %T", arrayDecl.Body[0])
+	}
+	arrayLit, ok := arrayReturn.Value.(*ast.ListLitExpr)
+	if !ok {
+		t.Fatalf("expected contextual_array to return an array literal, got %T", arrayReturn.Value)
+	}
+	for _, elem := range arrayLit.Elems {
+		requireExprTypeString(t, result, elem, "i32")
+	}
+
+	unaryDecl := requireFuncDecl(t, result, "contextual_unary")
+	unaryReturn, ok := unaryDecl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected contextual_unary to contain a return statement, got %T", unaryDecl.Body[0])
+	}
+	unaryExpr, ok := unaryReturn.Value.(*ast.UnaryExpr)
+	if !ok {
+		t.Fatalf("expected contextual_unary to return a unary expression, got %T", unaryReturn.Value)
+	}
+	requireExprTypeString(t, result, unaryExpr, "i32")
+	requireExprTypeString(t, result, unaryExpr.Operand, "i32")
+}
+
 func TestAnalyzeExplicitIntLiteralSuffixOverridesUsizeContext(t *testing.T) {
 	src := `def ok() -> usize:
 	which: usize = 1i32
@@ -6404,20 +6488,20 @@ func TestAnalyzeAcceptsDenseNodeKeysAndNodeTablesForFrozenPackedStores(t *testin
 def inspect(owner: Arena) -> i32:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	in store:
-		left: Expr = new Expr.Lit(span: 1i32, value: 3i32)
-		right: Expr = new Expr.Lit(span: 2i32, value: 4i32)
-		_ = new Expr.Add(span: 5i32, left: left, right: right)
+		left: Expr = new Expr.Lit(span: 1, value: 3)
+		right: Expr = new Expr.Lit(span: 2, value: 4)
+		_ = new Expr.Add(span: 5, left: left, right: right)
 
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	node: Expr = frozen[2]
 	key: NodeKey[Expr] = dense_key(node, frozen)
-	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, frozen, -1i32)
-	table[key] <- 0i32
+	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, frozen, -1)
+	table[key] <- 0
 	again: Expr = frozen[key]
 	values: dview[i32] = table.values
 	if values.len == frozen.count:
 		return again.span
-	return 0i32
+	return 0
 `
 	result, errs := parseAndAnalyze(t, "packed_store_dense_node_key_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -6483,9 +6567,9 @@ struct FrozenBox:
 def make_box(owner: Arena) -> FrozenBox:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	in store:
-		left: Expr = new Expr.Lit(span: 1i32, value: 3i32)
-		right: Expr = new Expr.Lit(span: 2i32, value: 4i32)
-		_ = new Expr.Add(span: 5i32, left: left, right: right)
+		left: Expr = new Expr.Lit(span: 1, value: 3)
+		right: Expr = new Expr.Lit(span: 2, value: 4)
+		_ = new Expr.Add(span: 5, left: left, right: right)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	return FrozenBox(frozen)
 
@@ -6493,13 +6577,13 @@ def inspect(owner: Arena) -> i32:
 	box: FrozenBox = make_box(owner)
 	node: Expr = box.store[2]
 	key: NodeKey[Expr] = dense_key(node, box.store)
-	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, box.store, -1i32)
-	table[key] <- 0i32
+	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, box.store, -1)
+	table[key] <- 0
 	again: Expr = box.store[key]
 	values: dview[i32] = table.values
 	if values.len == box.store.count:
 		return again.span
-	return 0i32
+	return 0
 `
 	result, errs := parseAndAnalyze(t, "packed_store_dense_node_key_hidden_frozen_field_root_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -7571,7 +7655,7 @@ func TestAnalyzeRejectsUsingMoveBoundReferenceInvalidatedByRestore(t *testing.T)
 	src := `def bad() -> i32:
 	region scratch
 	mark scratch as cp
-	value: any i32& = new[scratch] 1i32
+	value: any i32& = new[scratch] 1
 	move value as alias
 	restore scratch from cp
 	return alias[0u]
@@ -7593,10 +7677,10 @@ func TestAnalyzeRejectsUsingStructFieldAliasInvalidatedByRestore(t *testing.T) {
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
-	holder: Holder = Holder(new[scratch] 1i32, 7i32)
+	holder: Holder = Holder(new[scratch] 1, 7)
 	alias: any i32& = holder.value
 	restore scratch from cp
-	return alias[0u]
+	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_struct_field_alias.llcontext", src)
 	if len(errs) == 0 {
@@ -7615,10 +7699,10 @@ func TestAnalyzeRejectsUsingMoveAsStructBoundReferenceInvalidatedByRestore(t *te
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
-	holder: Holder = Holder(new[scratch] 1i32, 7i32)
+	holder: Holder = Holder(new[scratch] 1, 7)
 	move holder as Holder(alias, count)
 	restore scratch from cp
-	return alias[0u]
+	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_struct_alias.llcontext", src)
 	if len(errs) == 0 {
@@ -7637,7 +7721,7 @@ func TestAnalyzeAcceptsMoveAsStructScalarAfterRestore(t *testing.T) {
 def ok() -> i32:
 	region scratch
 	mark scratch as cp
-	holder: Holder = Holder(new[scratch] 1i32, 7i32)
+	holder: Holder = Holder(new[scratch] 1, 7)
 	move holder as Holder(alias, count)
 	restore scratch from cp
 	return count
@@ -7755,10 +7839,10 @@ func TestAnalyzeRejectsUsingMoveAsEnumBoundReferenceInvalidatedByRestore(t *test
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
-	value: Holder = Holder.Keep(new[scratch] 1i32, 7i32)
+	value: Holder = Holder.Keep(new[scratch] 1, 7)
 	move value as Holder.Keep(alias, count)
 	restore scratch from cp
-	return alias[0u]
+	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_enum_alias.llcontext", src)
 	if len(errs) == 0 {
@@ -7776,7 +7860,7 @@ func TestAnalyzeAcceptsMoveAsEnumScalarAfterRestore(t *testing.T) {
 def ok() -> i32:
 	region scratch
 	mark scratch as cp
-	value: Holder = Holder.Keep(new[scratch] 1i32, 7i32)
+	value: Holder = Holder.Keep(new[scratch] 1, 7)
 	move value as Holder.Keep(alias, count)
 	restore scratch from cp
 	return count
@@ -7796,10 +7880,10 @@ def borrow_value(holder: Holder) -> any i32&:
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
-	holder: Holder = Holder(new[scratch] 1i32, 7i32)
+	holder: Holder = Holder(new[scratch] 1, 7)
 	alias: any i32& = borrow_value(holder)
 	restore scratch from cp
-	return alias[0u]
+	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_helper_returned_ref_invalid.llcontext", src)
 	if len(errs) == 0 {
@@ -7821,7 +7905,7 @@ def borrow_count(holder: Holder) -> i32:
 def ok() -> i32:
 	region scratch
 	mark scratch as cp
-	holder: Holder = Holder(new[scratch] 1i32, 7i32)
+	holder: Holder = Holder(new[scratch] 1, 7)
 	count: i32 = borrow_count(holder)
 	restore scratch from cp
 	return count
@@ -7844,12 +7928,12 @@ def keep_window(window: Window) -> Window:
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
-	window: Window = keep_window(Window(items[0u:2u]))
-	which: usize = 1u
+	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
+	window: Window = keep_window(Window(items[0:2]))
+	which: usize = 1
 	alias: any i32& = window.items[which].value
 	restore scratch from cp
-	return alias[0u]
+	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_helper_nested_view_alias_invalid.llcontext", src)
 	if len(errs) == 0 {
@@ -7919,12 +8003,12 @@ extern keep_window(window: Window) -> Window
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
-	window: Window = keep_window(Window(items[0u:2u]))
-	which: usize = 1u
+	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
+	window: Window = keep_window(Window(items[0:2]))
+	which: usize = 1
 	alias: any i32& = window.items[which].value
 	restore scratch from cp
-	return alias[0u]
+	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_borrowed_nested_view_invalid.llcontext", src)
 	if len(errs) == 0 {
@@ -7950,13 +8034,13 @@ extern get_items(window: Window) -> view[Holder]
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
-	window: Window = Window(items[0u:2u], 9i32)
+	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
+	window: Window = Window(items[0:2], 9)
 	selected: view[Holder] = get_items(window)
-	which: usize = 1u
+	which: usize = 1
 	alias: any i32& = selected[which].value
 	restore scratch from cp
-	return alias[0u]
+	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_path_borrowed_view_invalid.llcontext", src)
 	if len(errs) == 0 {
@@ -7982,10 +8066,10 @@ extern get_items(window: Window) -> view[Holder]
 def ok() -> i32:
 	region scratch
 	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
-	window: Window = Window(items[0u:2u], 9i32)
+	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
+	window: Window = Window(items[0:2], 9)
 	selected: view[Holder] = get_items(window)
-	which: usize = 1u
+	which: usize = 1
 	count: i32 = selected[which].count
 	restore scratch from cp
 	return count
@@ -8009,13 +8093,13 @@ extern get_items(window: any Window&) -> view[Holder]
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
-	window: Window = Window(items[0u:2u], 9i32)
+	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
+	window: Window = Window(items[0:2], 9)
 	selected: view[Holder] = get_items((&window).cast[any Window&])
-	which: usize = 1u
+	which: usize = 1
 	alias: any i32& = selected[which].value
 	restore scratch from cp
-	return alias[0u]
+	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_ref_param_view_invalid.llcontext", src)
 	if len(errs) == 0 {
@@ -8041,13 +8125,13 @@ extern get_item(window: any Window&, which: usize) -> Holder
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
-	window: Window = Window(items[0u:2u], 9i32)
-	which: usize = 1u
+	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
+	window: Window = Window(items[0:2], 9)
+	which: usize = 1
 	item: Holder = get_item((&window).cast[any Window&], which)
 	alias: any i32& = item.value
 	restore scratch from cp
-	return alias[0u]
+	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_ref_param_elem_invalid.llcontext", src)
 	if len(errs) == 0 {
@@ -8074,11 +8158,11 @@ def bad() -> i32:
 	region right_r
 	mark left_r as left_cp
 	mark right_r as right_cp
-	left_box: Box = Box(new[left_r] 1i32)
-	right_box: Box = Box(new[right_r] 2i32)
+	left_box: Box = Box(new[left_r] 1)
+	right_box: Box = Box(new[right_r] 2)
 	pair: Pair = pair_refs(left_box, right_box)
 	restore left_r from left_cp
-	return pair.left[0u]
+	return pair.left[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_field_borrow_left_invalid.llcontext", src)
 	if len(errs) == 0 {
@@ -8105,11 +8189,11 @@ def ok() -> i32:
 	region right_r
 	mark left_r as left_cp
 	mark right_r as right_cp
-	left_box: Box = Box(new[left_r] 1i32)
-	right_box: Box = Box(new[right_r] 2i32)
+	left_box: Box = Box(new[left_r] 1)
+	right_box: Box = Box(new[right_r] 2)
 	pair: Pair = pair_refs(left_box, right_box)
 	restore left_r from left_cp
-	return pair.right[0u]
+	return pair.right[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_field_borrow_right_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -8126,12 +8210,12 @@ extern sub_items(items: view[Holder], start: usize, end: usize) -> view[Holder]
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
-	view: view[Holder] = items[0u:2u]
-	sub: view[Holder] = sub_items(view, 1u, 2u)
-	alias: any i32& = sub[0u].value
+	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
+	view: view[Holder] = items[0:2]
+	sub: view[Holder] = sub_items(view, 1, 2)
+	alias: any i32& = sub[0].value
 	restore scratch from cp
-	return alias[0u]
+	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_rebased_subview_invalid.llcontext", src)
 	if len(errs) == 0 {
@@ -8153,10 +8237,10 @@ extern sub_items(items: view[Holder], start: usize, end: usize) -> view[Holder]
 def ok() -> i32:
 	region scratch
 	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
-	view: view[Holder] = items[0u:2u]
-	sub: view[Holder] = sub_items(view, 1u, 2u)
-	count: i32 = sub[0u].count
+	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
+	view: view[Holder] = items[0:2]
+	sub: view[Holder] = sub_items(view, 1, 2)
+	count: i32 = sub[0].count
 	restore scratch from cp
 	return count
 `
@@ -8179,12 +8263,12 @@ extern slice_pair(src: view[Holder], start: usize, end: usize, total: i32) -> Sl
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
-	view: view[Holder] = items[0u:2u]
-	pair: SlicePair = slice_pair(view, 1u, 2u, 9i32)
-	alias: any i32& = pair.items[0u].value
+	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
+	view: view[Holder] = items[0:2]
+	pair: SlicePair = slice_pair(view, 1, 2, 9)
+	alias: any i32& = pair.items[0].value
 	restore scratch from cp
-	return alias[0u]
+	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_field_rebased_invalid.llcontext", src)
 	if len(errs) == 0 {
@@ -8210,9 +8294,9 @@ extern slice_pair(src: view[Holder], start: usize, end: usize, total: i32) -> Sl
 def ok() -> i32:
 	region scratch
 	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
-	view: view[Holder] = items[0u:2u]
-	pair: SlicePair = slice_pair(view, 1u, 2u, 9i32)
+	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
+	view: view[Holder] = items[0:2]
+	pair: SlicePair = slice_pair(view, 1, 2, 9)
 	restore scratch from cp
 	return pair.total
 `
@@ -8252,12 +8336,12 @@ extern wrap_meta(src: view[Holder], total: i32, tag: i32) -> Wrapper
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
-	view: view[Holder] = items[0u:2u]
-	wrapped: Wrapper = wrap_meta(view, 9i32, 5i32)
-	alias: any i32& = wrapped.meta.items[0u].value
+	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
+	view: view[Holder] = items[0:2]
+	wrapped: Wrapper = wrap_meta(view, 9, 5)
+	alias: any i32& = wrapped.meta.items[0].value
 	restore scratch from cp
-	return alias[0u]
+	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_nested_field_invalid.llcontext", src)
 	if len(errs) == 0 {
@@ -8287,9 +8371,9 @@ extern wrap_meta(src: view[Holder], total: i32, tag: i32) -> Wrapper
 def ok() -> i32:
 	region scratch
 	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
-	view: view[Holder] = items[0u:2u]
-	wrapped: Wrapper = wrap_meta(view, 9i32, 5i32)
+	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
+	view: view[Holder] = items[0:2]
+	wrapped: Wrapper = wrap_meta(view, 9, 5)
 	restore scratch from cp
 	return wrapped.meta.total + wrapped.tag
 `
@@ -8316,12 +8400,12 @@ extern wrap_submeta(src: view[Holder], start: usize, end: usize, total: i32, tag
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
-	view: view[Holder] = items[0u:2u]
-	wrapped: Wrapper = wrap_submeta(view, 1u, 2u, 9i32, 5i32)
-	alias: any i32& = wrapped.meta.items[0u].value
+	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
+	view: view[Holder] = items[0:2]
+	wrapped: Wrapper = wrap_submeta(view, 1, 2, 9, 5)
+	alias: any i32& = wrapped.meta.items[0].value
 	restore scratch from cp
-	return alias[0u]
+	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_nested_field_rebased_invalid.llcontext", src)
 	if len(errs) == 0 {
@@ -8351,9 +8435,9 @@ extern wrap_submeta(src: view[Holder], start: usize, end: usize, total: i32, tag
 def ok() -> i32:
 	region scratch
 	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
-	view: view[Holder] = items[0u:2u]
-	wrapped: Wrapper = wrap_submeta(view, 1u, 2u, 9i32, 5i32)
+	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
+	view: view[Holder] = items[0:2]
+	wrapped: Wrapper = wrap_submeta(view, 1, 2, 9, 5)
 	restore scratch from cp
 	return wrapped.meta.total + wrapped.tag
 `
@@ -8397,7 +8481,7 @@ def bad(owner: Arena) -> i32:
 	node: Expr = new[store] Expr.Hold(value: new[scratch] 1i32, count: 7i32)
 	move node in store as Expr.Hold(alias, count)
 	restore scratch from cp
-	return alias[0u]
+	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_packed_alias.llcontext", src)
 	if len(errs) == 0 {
@@ -8434,9 +8518,9 @@ def bad() -> i32:
 	region scratch
 	mark scratch as cp
 	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
-	alias: any i32& = items[0u].value
+	alias: any i32& = items[0].value
 	restore scratch from cp
-	return alias[0u]
+	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_indexed_struct_alias.llcontext", src)
 	if len(errs) == 0 {
@@ -8456,7 +8540,7 @@ def ok() -> i32:
 	region scratch
 	mark scratch as cp
 	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
-	count: i32 = items[0u].count
+	count: i32 = items[0].count
 	restore scratch from cp
 	return count
 `
@@ -8473,10 +8557,10 @@ def bad() -> i32:
 	region scratch
 	mark scratch as cp
 	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
-	window: view[Holder] = items[0u:2u]
-	alias: any i32& = window[0u].value
+	window: view[Holder] = items[0:2]
+	alias: any i32& = window[0].value
 	restore scratch from cp
-	return alias[0u]
+	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_sliced_view_alias.llcontext", src)
 	if len(errs) == 0 {
@@ -8496,8 +8580,8 @@ def ok() -> i32:
 	region scratch
 	mark scratch as cp
 	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
-	window: view[Holder] = items[0u:2u]
-	count: i32 = window[0u].count
+	window: view[Holder] = items[0:2]
+	count: i32 = window[0].count
 	restore scratch from cp
 	return count
 `
@@ -8517,11 +8601,11 @@ def bad() -> i32:
 	region scratch
 	mark scratch as cp
 	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
-	window: Window = Window(items[0u:2u])
-	which: usize = 1u
+	window: Window = Window(items[0:2])
+	which: usize = 1
 	alias: any i32& = window.items[which].value
 	restore scratch from cp
-	return alias[0u]
+	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_nested_struct_view_alias.llcontext", src)
 	if len(errs) == 0 {
@@ -8544,8 +8628,8 @@ def ok() -> i32:
 	region scratch
 	mark scratch as cp
 	items: array[Holder, 2] = [Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)]
-	window: Window = Window(items[0u:2u])
-	which: usize = 1u
+	window: Window = Window(items[0:2])
+	which: usize = 1
 	count: i32 = window.items[which].count
 	restore scratch from cp
 	return count
@@ -8567,10 +8651,10 @@ def bad() -> i32:
 	mark scratch as cp
 	value: Bucket = Bucket.Keep([Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)])
 	move value as Bucket.Keep(items)
-	which: usize = 1u
+	which: usize = 1
 	alias: any i32& = items[which].value
 	restore scratch from cp
-	return alias[0u]
+	return alias[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_enum_indexed_alias.llcontext", src)
 	if len(errs) == 0 {
@@ -8594,7 +8678,7 @@ def ok() -> i32:
 	mark scratch as cp
 	value: Bucket = Bucket.Keep([Holder(new[scratch] 1i32, 7i32), Holder(new[scratch] 2i32, 8i32)])
 	move value as Bucket.Keep(items)
-	which: usize = 1u
+	which: usize = 1
 	count: i32 = items[which].count
 	restore scratch from cp
 	return count

@@ -583,6 +583,18 @@ func (a *Analyzer) analyzeCanExpr(expr *ast.CanExpr) Type {
 }
 
 func (a *Analyzer) analyzeAllocExpr(expr *ast.AllocExpr) Type {
+	return a.analyzeAllocExprWithExpected(expr, nil)
+}
+
+func allocValueExpectedType(expected Type) Type {
+	refExpected, ok := expected.(*RefType)
+	if !ok || refExpected == nil {
+		return nil
+	}
+	return refExpected.Elem
+}
+
+func (a *Analyzer) analyzeAllocExprWithExpected(expr *ast.AllocExpr, expected Type) Type {
 	if expr == nil {
 		return invalidType
 	}
@@ -654,7 +666,7 @@ func (a *Analyzer) analyzeAllocExpr(expr *ast.AllocExpr) Type {
 		a.errorf(expr.Pos(), "cannot allocate from destroyed region %q", ident.Name)
 		return invalidType
 	}
-	valueType := a.analyzeExpr(expr.Value)
+	valueType := a.analyzeValueExpr(expr.Value, allocValueExpectedType(expected))
 	return &RefType{Elem: valueType, State: RefStateNonNull, Storage: RefStorageAny, Region: ident.Name, ExplicitStorage: true}
 }
 
@@ -7410,6 +7422,11 @@ func (a *Analyzer) analyzeTupleExprWithExpected(expr *ast.TupleExpr, expected Ty
 func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 	if shorthandType, ok := a.analyzeContextualShorthandValueExpr(expr, expected); ok {
 		return shorthandType
+	}
+	if alloc, ok := expr.(*ast.AllocExpr); ok {
+		result := a.analyzeAllocExprWithExpected(alloc, expected)
+		a.recordAnalyzedExprType(alloc, result)
+		return result
 	}
 	if lit, ok := expr.(*ast.StructLitExpr); ok {
 		result := a.analyzeStructLiteralExpr(lit, expected)
