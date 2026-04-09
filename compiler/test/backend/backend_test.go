@@ -1865,8 +1865,8 @@ def rem_signed(left: i32, right: i32) -> i32:
     return left % right
 
 def rem_unsigned() -> u32:
-    value: mutable u32 = 10u32
-    value %= 4u32
+	value: mutable u32 = 10
+	value %= 4
     return value
 `
 	result := parseAndAnalyze(t, "backend_modulo.llcontext", src)
@@ -2491,19 +2491,19 @@ func TestGenerateLLVMIRLowersDenseNodeTablesDirectly(t *testing.T) {
 def inspect(owner: Arena) -> i32:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	in store:
-		left: Expr = new Expr.Lit(span: 1i32, value: 3i32)
-		right: Expr = new Expr.Lit(span: 2i32, value: 4i32)
-		_ = new Expr.Add(span: 5i32, left: left, right: right)
+		left: Expr = new Expr.Lit(span: 1, value: 3)
+		right: Expr = new Expr.Lit(span: 2, value: 4)
+		_ = new Expr.Add(span: 5, left: left, right: right)
 
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	node: Expr = frozen[2u]
 	key: NodeKey[Expr] = dense_key(node, frozen)
-	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, frozen, -1i32)
-	table[key] <- 0i32
+	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, frozen, -1)
+	table[key] <- 0
 	values: dview[i32] = table.values
 	if values.len == frozen.count:
 		return frozen[key].span
-	return 0i32
+	return 0
 `
 	result := parseAndAnalyze(t, "backend_dense_node_table.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -2550,9 +2550,9 @@ struct FrozenBox:
 def make_box(owner: Arena) -> FrozenBox:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	in store:
-		left: Expr = new Expr.Lit(span: 1i32, value: 3i32)
-		right: Expr = new Expr.Lit(span: 2i32, value: 4i32)
-		_ = new Expr.Add(span: 5i32, left: left, right: right)
+		left: Expr = new Expr.Lit(span: 1, value: 3)
+		right: Expr = new Expr.Lit(span: 2, value: 4)
+		_ = new Expr.Add(span: 5, left: left, right: right)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	return FrozenBox(frozen)
 
@@ -2560,8 +2560,8 @@ def inspect(owner: Arena) -> i32:
 	box: FrozenBox = make_box(owner)
 	node: Expr = box.store[2u]
 	key: NodeKey[Expr] = dense_key(node, box.store)
-	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, box.store, -1i32)
-	table[key] <- 7i32
+	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, box.store, -1)
+	table[key] <- 7
 	return table[key]
 `
 	result := parseAndAnalyze(t, "backend_dense_node_table_hidden_frozen_field_root.llcontext", src)

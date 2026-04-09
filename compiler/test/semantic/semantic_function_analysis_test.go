@@ -95,7 +95,7 @@ def run(flag: bool, thread: Thread[i64, Joinable]) -> i64:
 
 func TestAnalyzeRecordsReturnIsolationSummary(t *testing.T) {
 	src := `def borrow_ref(slot: mutable any i32&) -> mutable any i32&:
-	slot[0u] <- 3i32
+	slot[0u] <- 3
 	return slot
 `
 	result, errs := parseAndAnalyze(t, "return_isolation_summary.llcontext", src)

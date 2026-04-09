@@ -72,7 +72,7 @@ func TestAnalyzeCollectsOptimizationFactsForShapeBackedCollections(t *testing.T)
 	same_b: darray[i32, row] = other
 	text_copy: dstr[row] = text
 	wildcard_copy: darray[i32] = any_values
-	slice: view[i32, 0u, 2u] = buf[0u:2u]
+	slice: view[i32, 0, 2] = buf[0:2]
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_shape_backed.llcontext", src)
@@ -230,10 +230,10 @@ def ctx_string_slice(value: dstr[shape_in], start: i64, end: i64) -> dstr[shape_
 	return value
 
 def inspect(a: any Arena&, values: any darray[i32, row]&, other: any darray[i32, row]&, text: dstr[row]) -> int:
-	whole_a: dview[i32] = arena_da_view(values, 0u, values.count)
-	whole_b: dview[i32] = arena_da_view(other, 0u, other.count)
-	sub_a: dview[i32] = arena_da_view_slice(whole_a, 1u, 3u)
-	sub_b: dview[i32] = arena_da_view_slice(whole_b, 1u, 3u)
+	whole_a: dview[i32] = arena_da_view(values, 0, values.count)
+	whole_b: dview[i32] = arena_da_view(other, 0, other.count)
+	sub_a: dview[i32] = arena_da_view_slice(whole_a, 1, 3)
+	sub_b: dview[i32] = arena_da_view_slice(whole_b, 1, 3)
 	copied: darray[i32] = arena_da_from_view(a, sub_a)
 	text_view: StringView = ctx_string_view(text, 1, 3)
 	text_sub: StringView = ctx_string_view_slice(text_view, 0, text_view.len)
@@ -312,20 +312,20 @@ func TestAnalyzeInfersDenseWritableFactsForNodeTableValues(t *testing.T) {
 def inspect(owner: Arena) -> i32:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	in store:
-		left: Expr = new Expr.Lit(span: 1i32, value: 3i32)
-		right: Expr = new Expr.Lit(span: 2i32, value: 4i32)
-		_ = new Expr.Add(span: 5i32, left: left, right: right)
+		left: Expr = new Expr.Lit(span: 1, value: 3)
+		right: Expr = new Expr.Lit(span: 2, value: 4)
+		_ = new Expr.Add(span: 5, left: left, right: right)
 
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	node: Expr = frozen[2u]
 	key: NodeKey[Expr] = dense_key(node, frozen)
-	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, frozen, -1i32)
-	table[key] <- 0i32
+	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, frozen, -1)
+	table[key] <- 0
 	values: dview[i32] = table.values
 	nodes: dview[Expr] = frozen[0u:frozen.count]
 	if values.len == nodes.len:
-		return values[0u]
-	return -1i32
+		return values[0]
+	return -1
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_node_table_values.llcontext", src)
 	requireNoErrors(t, errs)
@@ -377,9 +377,9 @@ struct FrozenBox:
 def make_box(owner: Arena) -> FrozenBox:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	in store:
-		left: Expr = new Expr.Lit(span: 1i32, value: 3i32)
-		right: Expr = new Expr.Lit(span: 2i32, value: 4i32)
-		_ = new Expr.Add(span: 5i32, left: left, right: right)
+		left: Expr = new Expr.Lit(span: 1, value: 3)
+		right: Expr = new Expr.Lit(span: 2, value: 4)
+		_ = new Expr.Add(span: 5, left: left, right: right)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	return FrozenBox(frozen)
 
@@ -387,13 +387,13 @@ def inspect(owner: Arena) -> i32:
 	box: FrozenBox = make_box(owner)
 	node: Expr = box.store[2u]
 	key: NodeKey[Expr] = dense_key(node, box.store)
-	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, box.store, -1i32)
-	table[key] <- 0i32
+	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, box.store, -1)
+	table[key] <- 0
 	values: dview[i32] = table.values
 	nodes: dview[Expr] = box.store[0u:box.store.count]
 	if values.len == nodes.len:
-		return values[0u]
-	return -1i32
+		return values[0]
+	return -1
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_node_table_values_hidden_frozen_field_root.llcontext", src)
 	requireNoErrors(t, errs)
@@ -453,9 +453,9 @@ def ctx_string_view_suffix(view: StringView, start: i64) -> StringView:
 	return string_view(view.data, start, view.len)
 
 def inspect(text: dstr[row], buf: array[i32, 8]) -> int:
-	left: view[i32, 0u, 2u] = buf[0u:2u]
-	right: view[i32, 2u, 4u] = buf[2u:4u]
-	overlap: view[i32, 1u, 3u] = buf[1u:3u]
+	left: view[i32, 0, 2] = buf[0:2]
+	right: view[i32, 2, 4] = buf[2:4]
+	overlap: view[i32, 1, 3] = buf[1:3]
 	base: StringView = ctx_string_view(text, 0, 4)
 	first: StringView = ctx_string_view(text, 0, 2)
 	second: StringView = ctx_string_view(text, 2, 4)
@@ -467,8 +467,8 @@ def inspect(text: dstr[row], buf: array[i32, 8]) -> int:
 	region scratch(1024u)
 	fresh_view_a: StringView = string_view(new[scratch] 3u8, 0, 1)
 	fresh_view_b: StringView = string_view(new[scratch] 4u8, 0, 1)
-	alloc_a: scratch i32& = new[scratch] 1i32
-	alloc_b: scratch i32& = new[scratch] 2i32
+	alloc_a: scratch i32& = new[scratch] 1
+	alloc_b: scratch i32& = new[scratch] 2
 	alloc_alias: scratch i32& = alloc_a
 	return 0
 `
@@ -799,7 +799,7 @@ def inspect(owner: Arena) -> int:
 	box: Box = wrap_node(node)
 	items: array[Box, 1] = [box]
 	before_freeze: Expr = node
-	local_ref: scratch i32& = new[scratch] 7i32
+	local_ref: scratch i32& = new[scratch] 7
 	held: Expr = new[store] Expr.Hold(value: local_ref)
 	held_before_freeze: Expr = held
 	frozen: Expr.Store[Frozen] = freeze(move store)
@@ -980,7 +980,7 @@ def inspect(owner: Arena) -> int error[ProbeError]:
 	region scratch(1024u)
 	store: Expr.Store[Local] = Expr.Store(owner)
 	node: Expr = new[store] Expr.Int(value: 1)
-	local_ref: scratch i32& = new[scratch] 7i32
+	local_ref: scratch i32& = new[scratch] 7
 	held: Expr = new[store] Expr.Hold(value: local_ref)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	held_after_freeze: Expr = held
@@ -1065,7 +1065,7 @@ def inspect(owner: Arena) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	node: Expr = new[store] Expr.Int(value: 1)
 	other: Expr = new[store] Expr.Int(value: 2)
-	local_ref: scratch i32& = new[scratch] 7i32
+	local_ref: scratch i32& = new[scratch] 7
 	held: Expr = new[store] Expr.Hold(value: local_ref)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	node_after_freeze: Expr = node
@@ -1145,7 +1145,7 @@ def inspect(owner: Arena, pick_left: bool) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	left_node: Expr = new[store] Expr.Int(value: 1)
 	right_node: Expr = new[store] Expr.Int(value: 2)
-	local_ref: scratch i32& = new[scratch] 7i32
+	local_ref: scratch i32& = new[scratch] 7
 	held: Expr = new[store] Expr.Hold(value: local_ref)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	left_after_freeze: Expr = left_node
@@ -1371,7 +1371,7 @@ func TestAnalyzePreservesMixedFrozenPackedStoreDepsThroughPackedMatchBinders(t *
 def inspect(owner: Arena) -> int:
 	region scratch(1024u)
 	store: Expr.Store[Local] = Expr.Store(owner)
-	local_ref: scratch i32& = new[scratch] 7i32
+	local_ref: scratch i32& = new[scratch] 7
 	held: Expr = new[store] Expr.Hold(span: 5, value: local_ref)
 	node: Expr = new[store] Expr.Wrap(span: 9, child: held)
 	frozen: Expr.Store[Frozen] = freeze(move store)
@@ -1639,7 +1639,7 @@ extern wrap_indexed_node(node: Expr) -> BoxHolder
 def inspect(owner: Arena) -> int:
 	region scratch(1024u)
 	store: Expr.Store[Local] = Expr.Store(owner)
-	local_ref: scratch i32& = new[scratch] 7i32
+	local_ref: scratch i32& = new[scratch] 7
 	held: Expr = new[store] Expr.Hold(span: 5, value: local_ref)
 	node: Expr = new[store] Expr.Wrap(span: 9, child: held)
 	wrapped: BoxHolder = wrap_indexed_node(node)
@@ -1866,7 +1866,7 @@ def inspect(owner: Arena) -> int:
 	region scratch(1024u)
 	store: Expr.Store[Local] = Expr.Store(owner)
 	node: Expr = new[store] Expr.Int(value: 1)
-	local_ref: scratch i32& = new[scratch] 7i32
+	local_ref: scratch i32& = new[scratch] 7
 	held: Expr = new[store] Expr.Hold(value: local_ref)
 	items: array[Expr, 2] = [node, held]
 	frozen: Expr.Store[Frozen] = freeze(move store)
