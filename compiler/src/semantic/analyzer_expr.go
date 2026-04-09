@@ -7061,7 +7061,11 @@ func (a *Analyzer) specializeProjectedFunctionFieldType(expr *ast.FieldExpr, dec
 
 func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	objType := a.analyzeExpr(expr.Object)
-	indexType := a.analyzeExpr(expr.Index)
+	indexExpected := a.namedTypes["usize"]
+	if indexExpected == nil {
+		indexExpected = builtinUsizeType()
+	}
+	indexType := a.analyzeValueExpr(expr.Index, indexExpected)
 	if _, ok := NodeKeyEnumType(indexType); !ok {
 		if !IsNumericType(indexType) {
 			a.errorf(expr.Index.Pos(), "index must be numeric, got %s", indexType.String())
@@ -7272,8 +7276,12 @@ func (a *Analyzer) reportBorrowedOwnerRefUseAfterConsume(expr ast.Expr, valueTyp
 
 func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 	objType := a.analyzeExpr(expr.Object)
-	startType := a.analyzeExpr(expr.Start)
-	endType := a.analyzeExpr(expr.End)
+	indexExpected := a.namedTypes["usize"]
+	if indexExpected == nil {
+		indexExpected = builtinUsizeType()
+	}
+	startType := a.analyzeValueExpr(expr.Start, indexExpected)
+	endType := a.analyzeValueExpr(expr.End, indexExpected)
 	if !IsNumericType(startType) {
 		a.errorf(expr.Start.Pos(), "slice start must be numeric, got %s", startType.String())
 	} else if !IsIntegralStorageType(startType) {
@@ -7414,6 +7422,11 @@ func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 	if tuple, ok := expr.(*ast.TupleExpr); ok {
 		return a.analyzeTupleExprWithExpected(tuple, expected)
 	}
+	if contextualExpected, ok := contextualIntLiteralType(expected); ok {
+		if contextualType, ok := a.analyzeContextualIntValueExpr(expr, contextualExpected); ok {
+			return contextualType
+		}
+	}
 	if contextualExpected, ok := contextualFloatLiteralType(expected); ok {
 		if contextualType, ok := a.analyzeContextualFloatValueExpr(expr, contextualExpected); ok {
 			return contextualType
@@ -7460,6 +7473,50 @@ func (a *Analyzer) recordExprOptimizationFacts(expr ast.Expr, result Type) {
 		return
 	}
 	delete(a.exprFacts, expr)
+}
+
+func contextualIntLiteralType(expected Type) (Type, bool) {
+	if expected == nil || !IsIntegralStorageType(expected) {
+		return nil, false
+	}
+	return expected, true
+}
+
+func (a *Analyzer) analyzeContextualIntValueExpr(expr ast.Expr, expected Type) (Type, bool) {
+	switch n := expr.(type) {
+	case *ast.IntLit:
+		if n.Suffix != "" {
+			return nil, false
+		}
+		a.recordAnalyzedExprType(n, expected)
+		return expected, true
+	case *ast.ParenExpr:
+		innerType, ok := a.analyzeContextualIntValueExpr(n.Inner, expected)
+		if !ok {
+			return nil, false
+		}
+		a.recordAnalyzedExprType(n, innerType)
+		return innerType, true
+	case *ast.UnaryExpr:
+		if n.Op != lexer.TOKEN_MINUS {
+			return nil, false
+		}
+		operandType, ok := a.analyzeContextualIntValueExpr(n.Operand, expected)
+		if !ok {
+			return nil, false
+		}
+		if !IsNumericType(operandType) {
+			a.errorf(n.Pos(), "unary operator requires numeric operand")
+			a.recordAnalyzedExprType(n, invalidType)
+			return invalidType, true
+		}
+		a.recordAnalyzedExprType(n, operandType)
+		return operandType, true
+	case *ast.TernaryExpr:
+		return a.analyzeContextualIntTernaryExpr(n, expected), true
+	default:
+		return nil, false
+	}
 }
 
 func contextualFloatLiteralType(expected Type) (Type, bool) {
@@ -7577,6 +7634,35 @@ func (a *Analyzer) analyzeValueExprInAffineScopePrepared(expr ast.Expr, expected
 	a.currentSpecializedValueTypes = savedSpecializedValueTypes
 	a.currentValueBindings = savedValueBindings
 	return result, snapshot
+}
+
+func (a *Analyzer) analyzeContextualIntTernaryExpr(expr *ast.TernaryExpr, expected Type) Type {
+	if expr == nil {
+		return invalidType
+	}
+	condType := a.analyzeCondExpr(expr.Cond)
+	if !IsBoolType(condType) {
+		a.errorf(expr.Pos(), "ternary condition must be bool, got %s", condType.String())
+	}
+	mergedAffine := a.cloneAffineValueStates()
+	mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
+	left, leftSnapshot := a.analyzeValueExprInConditionAffineScope(expr.Value, expected, a.currentScope, expr.Cond, true)
+	right, rightSnapshot := a.analyzeValueExprInConditionAffineScope(expr.Alt, expected, a.currentScope, expr.Cond, false)
+	mergedAffine = mergeAffineValueStates(mergedAffine, leftSnapshot.Affine)
+	mergedAffine = mergeAffineValueStates(mergedAffine, rightSnapshot.Affine)
+	mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, leftSnapshot.BorrowedOwnerRefs)
+	mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, rightSnapshot.BorrowedOwnerRefs)
+	a.currentAffineValues = mergedAffine
+	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
+	if mergedFunctionValues, ok := a.intersectFunctionValueFlows(leftSnapshot.FunctionValues, rightSnapshot.FunctionValues); ok {
+		a.currentFunctionValues = mergedFunctionValues
+	}
+	merged := MergeTypes(left, right)
+	if IsInvalidType(merged) {
+		a.errorf(expr.Pos(), "ternary branches are incompatible: %s and %s", left.String(), right.String())
+	}
+	a.recordAnalyzedExprType(expr, merged)
+	return merged
 }
 
 func (a *Analyzer) analyzeContextualFloatTernaryExpr(expr *ast.TernaryExpr, expected Type) Type {

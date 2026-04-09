@@ -3691,6 +3691,90 @@ global g_values: f32[2] = [13.25 + 14.25, 15.25 + 16.25]
 	}
 }
 
+func TestAnalyzeContextualIntLiteralUsizeSites(t *testing.T) {
+	src := `def contextual_local() -> usize:
+	which: usize = 1
+	return which
+
+def contextual_index(items: i32[4]) -> i32:
+	return items[0]
+
+def contextual_slice(items: dview[i32]) -> dview[i32]:
+	window: dview[i32] = items[1:3]
+	return window
+
+def plain_range() -> int:
+	total: mutable int = 0
+	for i in 0..<4:
+		idx: int = i
+		total <- total + idx
+	return total
+`
+	result, errs := parseAndAnalyze(t, "contextual_int_literals_usize_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	localDecl := requireFuncDecl(t, result, "contextual_local")
+	localInit, ok := localDecl.Body[0].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected contextual_local to start with a local declaration, got %T", localDecl.Body[0])
+	}
+	requireExprTypeString(t, result, localInit.Value, "usize")
+
+	indexDecl := requireFuncDecl(t, result, "contextual_index")
+	indexReturn, ok := indexDecl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected contextual_index to contain a return statement, got %T", indexDecl.Body[0])
+	}
+	indexExpr, ok := indexReturn.Value.(*ast.IndexExpr)
+	if !ok {
+		t.Fatalf("expected contextual_index to return an index expression, got %T", indexReturn.Value)
+	}
+	requireExprTypeString(t, result, indexExpr.Index, "usize")
+
+	sliceDecl := requireFuncDecl(t, result, "contextual_slice")
+	sliceInit, ok := sliceDecl.Body[0].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected contextual_slice to start with a local declaration, got %T", sliceDecl.Body[0])
+	}
+	sliceExpr, ok := sliceInit.Value.(*ast.SliceExpr)
+	if !ok {
+		t.Fatalf("expected contextual_slice initializer to be a slice expression, got %T", sliceInit.Value)
+	}
+	requireExprTypeString(t, result, sliceExpr.Start, "usize")
+	requireExprTypeString(t, result, sliceExpr.End, "usize")
+
+	rangeDecl := requireFuncDecl(t, result, "plain_range")
+	forStmt, ok := rangeDecl.Body[1].(*ast.ForStmt)
+	if !ok {
+		t.Fatalf("expected plain_range second statement to be a for loop, got %T", rangeDecl.Body[1])
+	}
+	requireExprTypeString(t, result, forStmt.Start, "int")
+	requireExprTypeString(t, result, forStmt.End, "int")
+	idxDecl, ok := forStmt.Body[0].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected plain_range loop body to start with a local declaration, got %T", forStmt.Body[0])
+	}
+	requireExprTypeString(t, result, idxDecl.Value, "int")
+}
+
+func TestAnalyzeExplicitIntLiteralSuffixOverridesUsizeContext(t *testing.T) {
+	src := `def ok() -> usize:
+	which: usize = 1i32
+	return which
+`
+	result, errs := parseAndAnalyze(t, "contextual_int_literal_suffix_override_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireFuncDecl(t, result, "ok")
+	localInit, ok := fn.Body[0].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected ok to start with a local declaration, got %T", fn.Body[0])
+	}
+	requireExprTypeString(t, result, localInit.Value, "i32")
+}
+
 func TestAnalyzeRejectsNullIntoNonNullRef(t *testing.T) {
 	src := `repr(c) struct Box:
     value: int
