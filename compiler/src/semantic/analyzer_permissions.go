@@ -306,6 +306,13 @@ func (a *Analyzer) grantedIncludesPermissionParam(granted map[string]bool) bool 
 	return false
 }
 
+// permissionWarningsSuppressedByGenericContext reports whether permission-effect
+// warnings should stay quiet because the current contract is intentionally
+// abstract over permission families (for example `can[P]`).
+func (a *Analyzer) permissionWarningsSuppressedByGenericContext(fnType *FuncType, granted map[string]bool) bool {
+	return funcTypeUsesPermissionRowParam(fnType) || a.grantedIncludesPermissionParam(granted)
+}
+
 func cloneGrantedPermissionFamilies(granted map[string]bool) map[string]bool {
 	if len(granted) == 0 {
 		return map[string]bool{}
@@ -402,7 +409,7 @@ func (a *Analyzer) warnOnImplicitFunctionPermissions(decls []scopedDecl) {
 			if !ok || fnType == nil {
 				return
 			}
-			if funcTypeUsesPermissionRowParam(fnType) {
+			if a.permissionWarningsSuppressedByGenericContext(fnType, nil) {
 				return
 			}
 			missing := missingPermissionFamilies(fnType.DeclaredPermissions, fnType.Permissions)
@@ -932,7 +939,7 @@ func (a *Analyzer) validateRequiredPermissions(pos lexer.Pos, fnType *FuncType, 
 	if fnType == nil || len(fnType.Permissions) == 0 {
 		return
 	}
-	if a.grantedIncludesPermissionParam(granted) {
+	if a.permissionWarningsSuppressedByGenericContext(fnType, granted) {
 		return
 	}
 	missing := make([]string, 0)

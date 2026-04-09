@@ -2367,6 +2367,16 @@ func resolveBackendDictType(keyType semantic.Type, valueType semantic.Type, surf
 	return &semantic.DictType{Key: keyType, Value: valueType, SurfaceName: surfaceName}, nil
 }
 
+// preferBackendLiveIdentType reconciles two valid-but-different views of an
+// identifier's type during lowering:
+//   - cached semantic expr types, which can carry flow-sensitive refinements
+//     such as TreeVariantViewType or non-null optional payload types
+//   - live backend bindings, which can carry the current generic
+//     specialization for a function body instantiation
+//
+// We prefer the narrower cached refinement when it is compatible with the live
+// binding, but fall back to the live type when the cached type is stale from a
+// different specialization.
 func preferBackendLiveIdentType(cached semantic.Type, live semantic.Type) semantic.Type {
 	if live == nil {
 		return cached

@@ -543,7 +543,7 @@ def packed_ml_ast_repeated_checksum_impl(iterations: usize) -> i64:
 
 def ml_ast_parallel_worker(job: MlAstParallelJob) -> i64:
     forest: any FrozenMlAstForest& = job.forest_bits.cast[any FrozenMlAstForest&]
-    result_slot: any i64& = job.result_bits.cast[any i64&]
+    result_slot: mutable any i64& = job.result_bits.cast[mutable any i64&]
     total: mutable i64 = 0
     for iteration in 0u..<job.repeats:
         total <- total + checksum_root_range(job.start, job.end, forest)
