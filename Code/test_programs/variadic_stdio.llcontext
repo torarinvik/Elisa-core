@@ -4,7 +4,7 @@ error FormatError:
 extern snprintf(buffer: any u8&?, buffer_size: usize, format: static u8&, ...) -> int can[Console.Format]
 
 def checked_format_len(format: static u8&) -> int error[FormatError] can[Console.Format]:
-    written: int = snprintf(null, 0u, format, 7, 9) can Console.Format
+    written: int = snprintf(null, 0, format, 7, 9) can Console.Format
     if written < 0:
         raise FormatError.WriteFailed
     return written

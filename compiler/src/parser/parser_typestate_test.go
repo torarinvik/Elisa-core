@@ -1234,7 +1234,7 @@ func TestParseConditionalEnsuresRequiresBoolLiteralBranch(t *testing.T) {
 }
 
 func TestParseParallelForStatement(t *testing.T) {
-	file, errs := parseSourceFile(t, "packed enum Expr:\n    Int(value: int)\n\ndef walk(frozen: Expr.Store[Frozen]) -> void:\n    pool workers(4u):\n        parallel for node in frozen:\n            pass\n")
+	file, errs := parseSourceFile(t, "packed enum Expr:\n    Int(value: int)\n\ndef walk(frozen: Expr.Store[Frozen]) -> void:\n    pool workers(4):\n        parallel for node in frozen:\n            pass\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -1263,7 +1263,7 @@ func TestParseParallelForStatement(t *testing.T) {
 }
 
 func TestParseParallelForStatementWithIndexBinder(t *testing.T) {
-	file, errs := parseSourceFile(t, "packed enum Expr:\n    Int(value: int)\n\ndef walk(frozen: Expr.Store[Frozen]) -> void:\n    pool workers(4u):\n        parallel for tag at i in frozen.tags:\n            pass\n")
+	file, errs := parseSourceFile(t, "packed enum Expr:\n    Int(value: int)\n\ndef walk(frozen: Expr.Store[Frozen]) -> void:\n    pool workers(4):\n        parallel for tag at i in frozen.tags:\n            pass\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -1409,7 +1409,7 @@ func TestParseIterableForStatementWithEnumerateTuplePattern(t *testing.T) {
 }
 
 func TestParseReverseIterableForScopeAndCheckpointStatements(t *testing.T) {
-	file, errs := parseSourceFile(t, "extern pool_new(workers: usize) -> ThreadPool can[Pool.Create]\n\ndef walk(items: darray[int]) -> void:\n    for rev value in items:\n        pass\n    scope pool_new(2u):\n        pass\n    checkpoint mark = items:\n        pass\n    restore mark\n")
+	file, errs := parseSourceFile(t, "extern pool_new(workers: usize) -> ThreadPool can[Pool.Create]\n\ndef walk(items: darray[int]) -> void:\n    for rev value in items:\n        pass\n    scope pool_new(2):\n        pass\n    checkpoint mark = items:\n        pass\n    restore mark\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -1434,7 +1434,7 @@ func TestParseReverseIterableForScopeAndCheckpointStatements(t *testing.T) {
 	if _, ok := decl.Body[3].(*ast.RestoreCheckpointStmt); !ok {
 		t.Fatalf("expected restore checkpoint statement, got %T", decl.Body[3])
 	}
-	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for rev value in items:") || !strings.Contains(formatted, "scope pool_new(2u):") || !strings.Contains(formatted, "checkpoint mark = items:") || !strings.Contains(formatted, "restore mark") {
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for rev value in items:") || !strings.Contains(formatted, "scope pool_new(2):") || !strings.Contains(formatted, "checkpoint mark = items:") || !strings.Contains(formatted, "restore mark") {
 		t.Fatalf("expected formatter to preserve reverse/scope/checkpoint syntax, got:\n%s", formatted)
 	}
 }

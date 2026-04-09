@@ -2,10 +2,10 @@ extern make_array() -> darray[i32, row]
 extern make_array_view() -> dview[i32]
 
 def read_array_index() -> i32:
-    return make_array()[1u]
+    return make_array()[1]
 
 def read_array_slice_index() -> i32:
-    return make_array()[1u:3u][0u]
+    return make_array()[1:3][0]
 
 def read_array_view_index() -> i32:
-    return make_array_view()[0u]
+    return make_array_view()[0]

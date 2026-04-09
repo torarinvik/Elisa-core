@@ -4,7 +4,7 @@ struct RegionNode:
 
 
 def region_ref_sum(seed: i32) -> i32:
-    region scratch(1024u)
+    region scratch(1024)
     first: scratch RegionNode& = new[scratch] RegionNode(null, seed)
     second: scratch RegionNode& = new[scratch] RegionNode(first.cast[any RegionNode&?], seed + 1)
     alias: any RegionNode& = second

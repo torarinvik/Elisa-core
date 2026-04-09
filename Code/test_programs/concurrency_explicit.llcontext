@@ -79,7 +79,7 @@ def typed_group_waitall(pool: mutable any ThreadPool&, value: i64) can[Pool.Subm
 	wait all group
 
 def typed_pool_scope(value: i64) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
-	pool workers(2u):
+	pool workers(2):
 		task: Task[i64, Pending] = submit thread_worker(value)
 		return await task
 

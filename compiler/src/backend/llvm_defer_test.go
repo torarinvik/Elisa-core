@@ -73,7 +73,7 @@ func TestGenerateLLVMIRBlockDeferRunsBeforePoolShutdown(t *testing.T) {
 extern observe(pool: stack ThreadPool&) -> void
 
 def keep() -> void:
-	pool workers(1u):
+	pool workers(1):
 		defer block:
 			observe(&workers)
 `)

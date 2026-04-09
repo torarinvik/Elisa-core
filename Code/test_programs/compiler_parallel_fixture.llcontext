@@ -43,7 +43,7 @@ def expr_depth(graph: FrozenExprGraph) -> i64:
 	return 0
 
 def compiler_parallel_fixture(pool: mutable any ThreadPool&) -> i64 can[Thread.Spawn, Thread.Join, Pool.Submit, Pool.Await, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
-	region scratch(4096u)
+	region scratch(4096)
 	graph: FrozenExprGraph = build_frozen_expr_graph(scratch)
 	thread: Thread[i64, Joinable] = spawn1(expr_sum, graph)
 	awaited: Task[i64, Pending] = pool_submit1(pool, expr_depth, graph)

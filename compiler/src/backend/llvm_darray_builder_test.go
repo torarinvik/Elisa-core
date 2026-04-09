@@ -59,7 +59,7 @@ func TestGenerateLLVMIRLowersDArrayReserveSugar(t *testing.T) {
     in alloc:
         xs: mutable darray[i64] = []
         xr: mutable any darray[i64]& = (&xs).cast[mutable any darray[i64]&]
-        xr.reserve(8u)
+		xr.reserve(8)
         return xs.capacity
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_darray_reserve.llcontext", src)
@@ -81,7 +81,7 @@ func TestGenerateLLVMIRLowersDArrayClearAndTruncateSugar(t *testing.T) {
     in alloc:
         xs: mutable darray[int] = [1, 2, 3]
         xr: mutable any darray[int]& = (&xs).cast[mutable any darray[int]&]
-        xr.truncate(2u)
+		xr.truncate(2)
         xr.clear()
         return xs.count
 `

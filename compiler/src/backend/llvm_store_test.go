@@ -23,10 +23,10 @@ def build(owner: Arena) -> usize:
     alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
     in alloc:
         pending: mutable PendingGotoStore = zeroed
-        pending.reserve(8u)
+		pending.reserve(8)
         pending.push(1u32, 2u32)
         pending.push(3u32, 4u32)
-        pending.truncate(1u)
+		pending.truncate(1)
         pending.clear()
         values: mutable dict[dstr[key_shape], i64] = zeroed
         slot = values.get_or_insert("seed"):

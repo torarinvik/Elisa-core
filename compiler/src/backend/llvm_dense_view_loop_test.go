@@ -29,7 +29,7 @@ def sum_one(value: i32) -> i32:
 	return value
 
 def kernel(buf: dview[i32]) -> i32:
-	source: dview[i32] = readonly(buf[0u:16u])
+	source: dview[i32] = readonly(buf[0:16])
 	return reduce_sum(source, sum_one)
 `)
 	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
@@ -69,9 +69,9 @@ def add(left: i32, right: i32) -> i32:
 	return left + right
 
 def kernel(buf: dview[i32]) -> void:
-	whole: dview[i32] = buf[0u:12u]
+	whole: dview[i32] = buf[0:12]
 	ro: dview[i32] = readonly(whole)
-	zip_map(whole[0u:4u], ro[4u:8u], ro[8u:12u], add)
+	zip_map(whole[0:4], ro[4:8], ro[8:12], add)
 `)
 	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
 	if err != nil {
@@ -116,9 +116,9 @@ def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
 	return
 
 def kernel(buf: dview[i32]) -> void:
-	whole: dview[i32] = buf[0u:8u]
+	whole: dview[i32] = buf[0:8]
 	ro: dview[i32] = readonly(whole)
-	arena_da_copy_exact(whole[0u:4u], ro[4u:8u])
+	arena_da_copy_exact(whole[0:4], ro[4:8])
 `)
 	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
 	if err != nil {
@@ -140,9 +140,9 @@ def arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool:
 	return false
 
 def kernel(buf: dview[i32]) -> bool:
-	whole: dview[i32] = buf[0u:8u]
+	whole: dview[i32] = buf[0:8]
 	ro: dview[i32] = readonly(whole)
-	return arena_da_eq_exact(whole[0u:4u], ro[4u:8u])
+	return arena_da_eq_exact(whole[0:4], ro[4:8])
 `)
 	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
 	if err != nil {
@@ -168,9 +168,9 @@ def arena_da_from_view[T](a: any Arena&, view: dview[T]) -> darray[T]:
 
 def kernel(buf: dview[i32]) -> darray[i32]:
 	arena: Arena = zeroed
-	whole: dview[i32] = buf[0u:8u]
+	whole: dview[i32] = buf[0:8]
 	ro: dview[i32] = readonly(whole)
-	return arena_da_from_view((&arena).cast[any Arena&], ro[4u:8u])
+	return arena_da_from_view((&arena).cast[any Arena&], ro[4:8])
 `)
 	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
 	if err != nil {
@@ -195,8 +195,8 @@ def arena_da_fill[T](dst: dview[T], value: T):
 	return
 
 def kernel(buf: dview[u8]) -> void:
-	whole: dview[u8] = buf[0u:8u]
-	arena_da_fill(whole[0u:4u], 7u8)
+	whole: dview[u8] = buf[0:8]
+	arena_da_fill(whole[0:4], 7u8)
 `)
 	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
 	if err != nil {
