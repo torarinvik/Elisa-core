@@ -117,16 +117,16 @@ def alloc_and_format_heap_buffer() -> int error[MemoryError, FormatError] can[Me
                 can Memory.Release:
                     buffer as ! <- sfree_bytes(buffer)
 
-        raw: heap u8&? = alloc_bytes(32u)
+        raw: heap u8&? = alloc_bytes(32)
         buffer_live: heap u8& = raw else raise MemoryError.OutOfMemory
         buffer <- buffer_live
-        written: int = try checked_write_into_heap(buffer_live, 32u, "num=%d")
+        written: int = try checked_write_into_heap(buffer_live, 32, "num=%d")
         return written
 
 
 def stack_buffer_format() -> int error[FormatError] can[Console.Format]:
     buffer: u8[32] = zeroed
-    return try checked_write_into_stack(&buffer[0u], 32u, "stack=%d")
+    return try checked_write_into_stack(&buffer[0], 32, "stack=%d")
 
 
 def recursive_format_or_fallback(depth: int) -> int can[Memory.Allocate, Memory.Release, Console.Format]:

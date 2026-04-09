@@ -5,14 +5,14 @@ def mix_u64_impl(data: any u64&, len: usize, rounds: usize, seed: u64) -> u64:
         for i in 0..<len:
             value: mutable u64 = data[i]
             value ^= (value >> 33)
-            value *= 6364136223846793005u64
+            value *= 6364136223846793005
             value ^= (value >> 29)
-            value += acc + i.u64() + round.u64() + 1442695040888963407u64
+            value += acc + i.u64() + round.u64() + 1442695040888963407
             data[i] <- value
 
             acc ^= value
-            acc *= 1442695040888963407u64
-            acc += 1u64
+            acc *= 1442695040888963407
+            acc += 1
 
     return acc
 

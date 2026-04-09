@@ -56,16 +56,16 @@ def arena_dict_contains__Symbol(m: any dict[dstr, Symbol]&, key: dstr) -> bool:
     return arena_dict_get__Symbol(m, key) != null
 
 def parser_peek(state: any ParserState&) -> TokenKind:
-    if state.cursor == 0u:
-        return state.tokens[0u].kind
-    if state.cursor == 1u:
-        return state.tokens[1u].kind
+    if state.cursor == 0:
+        return state.tokens[0].kind
+    if state.cursor == 1:
+        return state.tokens[1].kind
     return TokenKind.Eof
 
 def parser_advance(state: mutable any ParserState&) -> TokenKind:
     head: TokenKind = parser_peek(state)
-    if state.cursor < 2u:
-        state.cursor <- state.cursor + 1u
+    if state.cursor < 2:
+        state.cursor <- state.cursor + 1
     return head
 
 def scope_define(a: any Arena&, scope: mutable any Scope&, name: dstr, kind: SymbolKind, first_kind: TokenKind) -> bool error[RuntimeError]:
@@ -83,22 +83,22 @@ def scope_contains(scope: any Scope&, name: dstr) -> bool:
 
 def make_tokens() -> view[Token]:
     values: Token[2] = [Token(TokenKind.Def, SourceSpan(1, 1), "def"), Token(TokenKind.Ident, SourceSpan(1, 5), "parse_file")]
-    return values[0u:2u]
+    return values[0:2]
 
 def frontend_scope_stress(tokens: view[Token], local_name: dstr) -> bool error[RuntimeError]:
-    region parse(4096u)
+    region parse(4096)
     parse_arena: any Arena& = (&parse).cast[any Arena&]
 
-    root: mutable parse Scope& = new[parse] Scope(null, arena_dict_new__Symbol(parse_arena, 8u), 0)
-    child: mutable parse Scope& = new[parse] Scope(root.cast[any Scope&?], arena_dict_new__Symbol(parse_arena, 8u), root.depth + 1)
-    parser: mutable parse ParserState& = new[parse] ParserState(tokens, 0u, child.cast[any Scope&?])
+    root: mutable parse Scope& = new[parse] Scope(null, arena_dict_new__Symbol(parse_arena, 8), 0)
+    child: mutable parse Scope& = new[parse] Scope(root.cast[any Scope&?], arena_dict_new__Symbol(parse_arena, 8), root.depth + 1)
+    parser: mutable parse ParserState& = new[parse] ParserState(tokens, 0, child.cast[any Scope&?])
 
     match parser_peek(parser.cast[any ParserState&]):
         TokenKind.Eof:
             return false
 
     first_kind: TokenKind = parser_advance(parser.cast[mutable any ParserState&])
-    try arena_dict_reserve__Symbol(parse_arena, (&root.symbols).cast[any dict[dstr, Symbol]&], 16u)
+    try arena_dict_reserve__Symbol(parse_arena, (&root.symbols).cast[any dict[dstr, Symbol]&], 16)
 
     global_ok: bool = try scope_define(parse_arena, root.cast[mutable any Scope&], "parse_file", SymbolKind.Func, TokenKind.Def)
     local_ok: bool = try scope_define(parse_arena, child.cast[mutable any Scope&], local_name, SymbolKind.Local, first_kind)
@@ -106,7 +106,7 @@ def frontend_scope_stress(tokens: view[Token], local_name: dstr) -> bool error[R
     return global_ok and local_ok and scope_contains(child.cast[any Scope&], "parse_file") and scope_contains(child.cast[any Scope&], local_name)
 
 def frontend_region_token(line: int, column: int) -> int:
-    region scratch(2048u)
+    region scratch(2048)
     token: scratch Token& = new[scratch] Token(TokenKind.Ident, SourceSpan(line, column), "token")
     return token.span.column
 

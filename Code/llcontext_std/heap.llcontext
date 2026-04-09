@@ -20,14 +20,14 @@ struct MemoryPool[T]:
     free_list: mutable heap MemoryPoolFreeNode&?
 
 def fixed_buffer_allocator_init(buffer: any u8&, size: usize) -> FixedBufferAllocator:
-    return FixedBufferAllocator(buffer, size, 0u)
+    return FixedBufferAllocator(buffer, size, 0)
 
 def fixed_buffer_align_forward(value: usize, alignment: usize) -> usize:
-    if alignment <= 1u:
+    if alignment <= 1:
         return value
 
     remainder: usize = value % alignment
-    if remainder == 0u:
+    if remainder == 0:
         return value
 
     return value + (alignment - remainder)
@@ -68,7 +68,7 @@ def fixed_buffer_rewind(a: mutable any FixedBufferAllocator&, mark: FixedBufferM
     a.end_index <- mark.end_index
 
 def fixed_buffer_reset(a: mutable any FixedBufferAllocator&):
-    a.end_index <- 0u
+    a.end_index <- 0
 
 def fixed_buffer_alloc_align(a: mutable any FixedBufferAllocator&, size_bytes: usize, alignment: usize) -> mutable any void&?:
     if a.data == null:
@@ -138,7 +138,7 @@ def memory_pool_add_capacity[T](pool: mutable any MemoryPool[T]&, count: usize) 
     if item_size < sizeof(MemoryPoolFreeNode):
         item_size <- sizeof(MemoryPoolFreeNode)
 
-    for i in 0u..<count:
+    for i in 0..<count:
         raw: heap void& = arena_alloc((&pool.arena).cast[any Arena&], item_size)
         node: heap MemoryPoolFreeNode& = raw.cast[heap MemoryPoolFreeNode&]
         node.next <- pool.free_list
@@ -149,7 +149,7 @@ def memory_pool_create[T](pool: mutable any MemoryPool[T]&) -> mutable heap T& c
         node: heap MemoryPoolFreeNode& = pool.free_list
         pool.free_list <- node.next
         item: heap T& = node.cast[heap T&]
-        item[0u] <- zeroed
+        item[0] <- zeroed
         return item
 
     item_size: mutable usize = sizeof(T)
@@ -158,11 +158,11 @@ def memory_pool_create[T](pool: mutable any MemoryPool[T]&) -> mutable heap T& c
 
     raw: heap void& = arena_alloc((&pool.arena).cast[any Arena&], item_size)
     item: heap T& = raw.cast[heap T&]
-    item[0u] <- zeroed
+    item[0] <- zeroed
     return item
 
 def memory_pool_destroy[T](pool: mutable any MemoryPool[T]&, ptr: mutable heap T&):
-    ptr[0u] <- zeroed
+    ptr[0] <- zeroed
     node: heap MemoryPoolFreeNode& = ptr.cast[heap MemoryPoolFreeNode&]
     node.next <- pool.free_list
     pool.free_list as & <- node

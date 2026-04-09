@@ -17,7 +17,7 @@ def fixed_buffer_allocator_smoke() -> void can[Abort.Panic]:
 
     mark: FixedBufferMark = fixed_buffer_snapshot((&alloc).cast[any FixedBufferAllocator&])
     aligned_ptr: any void& = fixed_buffer_alloc_align_or_panic((&alloc).cast[any FixedBufferAllocator&], 4, 16)
-    assert_eq(aligned_ptr.cast[any u8&].uintptr() % 16u64.uintptr(), 0u64.uintptr())
+    assert_eq(aligned_ptr.cast[any u8&].uintptr() % 16.uintptr(), 0.uintptr())
     fixed_buffer_rewind((&alloc).cast[any FixedBufferAllocator&], mark)
     rewinded: any void& = fixed_buffer_alloc_align_or_panic((&alloc).cast[any FixedBufferAllocator&], 4, 16)
     assert_eq(rewinded.cast[any u8&].uintptr(), aligned_ptr.cast[any u8&].uintptr())

@@ -3,8 +3,8 @@
 
 global mutable frontend_lexer_bench_arena: Arena = zeroed
 
-const FRONTEND_TOKEN_HASH_OFFSET = 1469598103934665603u64
-const FRONTEND_TOKEN_HASH_PRIME = 1099511628211u64
+const FRONTEND_TOKEN_HASH_OFFSET = 1469598103934665603
+const FRONTEND_TOKEN_HASH_PRIME = 1099511628211
 
 
 def frontend_expect_token_count(tokens: darray[FrontendToken], expected: usize) -> bool:
@@ -36,212 +36,212 @@ def frontend_expect_suffix(tokens: darray[FrontendToken], index: usize, expected
 def frontend_token_kind_code(kind: FrontendTokenKind) -> u64:
     match kind:
         FrontendTokenKind.Eof:
-            return 1u64
+            return 1
         FrontendTokenKind.Newline:
-            return 2u64
+            return 2
         FrontendTokenKind.Indent:
-            return 3u64
+            return 3
         FrontendTokenKind.Dedent:
-            return 4u64
+            return 4
         FrontendTokenKind.Ident:
-            return 5u64
+            return 5
         FrontendTokenKind.IntLit:
-            return 6u64
+            return 6
         FrontendTokenKind.FloatLit:
-            return 7u64
+            return 7
         FrontendTokenKind.HexLit:
-            return 8u64
+            return 8
         FrontendTokenKind.StringLit:
-            return 9u64
+            return 9
         FrontendTokenKind.Def:
-            return 10u64
+            return 10
         FrontendTokenKind.Error:
-            return 11u64
+            return 11
         FrontendTokenKind.Enum:
-            return 12u64
+            return 12
         FrontendTokenKind.Struct:
-            return 13u64
+            return 13
         FrontendTokenKind.Const:
-            return 14u64
+            return 14
         FrontendTokenKind.Global:
-            return 15u64
+            return 15
         FrontendTokenKind.Extern:
-            return 16u64
+            return 16
         FrontendTokenKind.Export:
-            return 17u64
+            return 17
         FrontendTokenKind.If:
-            return 18u64
+            return 18
         FrontendTokenKind.Match:
-            return 19u64
+            return 19
         FrontendTokenKind.Elif:
-            return 20u64
+            return 20
         FrontendTokenKind.Else:
-            return 21u64
+            return 21
         FrontendTokenKind.While:
-            return 22u64
+            return 22
         FrontendTokenKind.Return:
-            return 23u64
+            return 23
         FrontendTokenKind.Any:
-            return 24u64
+            return 24
         FrontendTokenKind.Heap:
-            return 25u64
+            return 25
         FrontendTokenKind.Stack:
-            return 26u64
+            return 26
         FrontendTokenKind.Static:
-            return 27u64
+            return 27
         FrontendTokenKind.Mutable:
-            return 28u64
+            return 28
         FrontendTokenKind.Repr:
-            return 29u64
+            return 29
         FrontendTokenKind.Packed:
-            return 30u64
+            return 30
         FrontendTokenKind.Aligned:
-            return 31u64
+            return 31
         FrontendTokenKind.Pass:
-            return 32u64
+            return 32
         FrontendTokenKind.Panic:
-            return 33u64
+            return 33
         FrontendTokenKind.Not:
-            return 34u64
+            return 34
         FrontendTokenKind.And:
-            return 35u64
+            return 35
         FrontendTokenKind.Or:
-            return 36u64
+            return 36
         FrontendTokenKind.Null:
-            return 37u64
+            return 37
         FrontendTokenKind.True:
-            return 38u64
+            return 38
         FrontendTokenKind.False:
-            return 39u64
+            return 39
         FrontendTokenKind.Zeroed:
-            return 40u64
+            return 40
         FrontendTokenKind.Sizeof:
-            return 41u64
+            return 41
         FrontendTokenKind.Tail:
-            return 42u64
+            return 42
         FrontendTokenKind.Try:
-            return 43u64
+            return 43
         FrontendTokenKind.Raise:
-            return 44u64
+            return 44
         FrontendTokenKind.Region:
-            return 45u64
+            return 45
         FrontendTokenKind.Destroy:
-            return 46u64
+            return 46
         FrontendTokenKind.New:
-            return 47u64
+            return 47
         FrontendTokenKind.As:
-            return 48u64
+            return 48
         FrontendTokenKind.In:
-            return 49u64
+            return 49
         FrontendTokenKind.With:
-            return 50u64
+            return 50
         FrontendTokenKind.Context:
-            return 51u64
+            return 51
         FrontendTokenKind.Colon:
-            return 52u64
+            return 52
         FrontendTokenKind.Arrow:
-            return 53u64
+            return 53
         FrontendTokenKind.Dot:
-            return 54u64
+            return 54
         FrontendTokenKind.Range:
-            return 55u64
+            return 55
         FrontendTokenKind.RangeLt:
-            return 56u64
+            return 56
         FrontendTokenKind.RangeGt:
-            return 57u64
+            return 57
         FrontendTokenKind.Comma:
-            return 58u64
+            return 58
         FrontendTokenKind.LParen:
-            return 59u64
+            return 59
         FrontendTokenKind.RParen:
-            return 60u64
+            return 60
         FrontendTokenKind.LBracket:
-            return 61u64
+            return 61
         FrontendTokenKind.RBracket:
-            return 62u64
+            return 62
         FrontendTokenKind.Hash:
-            return 63u64
+            return 63
         FrontendTokenKind.Ampersand:
-            return 64u64
+            return 64
         FrontendTokenKind.Question:
-            return 65u64
+            return 65
         FrontendTokenKind.Bang:
-            return 66u64
+            return 66
         FrontendTokenKind.At:
-            return 67u64
+            return 67
         FrontendTokenKind.Ellipsis:
-            return 68u64
+            return 68
         FrontendTokenKind.LArrow:
-            return 69u64
+            return 69
         FrontendTokenKind.PlusEq:
-            return 70u64
+            return 70
         FrontendTokenKind.MinusEq:
-            return 71u64
+            return 71
         FrontendTokenKind.StarEq:
-            return 72u64
+            return 72
         FrontendTokenKind.SlashEq:
-            return 73u64
+            return 73
         FrontendTokenKind.PercentEq:
-            return 74u64
+            return 74
         FrontendTokenKind.CaretEq:
-            return 75u64
+            return 75
         FrontendTokenKind.PipeEq:
-            return 76u64
+            return 76
         FrontendTokenKind.AmpEq:
-            return 77u64
+            return 77
         FrontendTokenKind.LShiftEq:
-            return 78u64
+            return 78
         FrontendTokenKind.RShiftEq:
-            return 79u64
+            return 79
         FrontendTokenKind.Assign:
-            return 80u64
+            return 80
         FrontendTokenKind.EqEq:
-            return 81u64
+            return 81
         FrontendTokenKind.BangEq:
-            return 82u64
+            return 82
         FrontendTokenKind.Lt:
-            return 83u64
+            return 83
         FrontendTokenKind.Gt:
-            return 84u64
+            return 84
         FrontendTokenKind.LtEq:
-            return 85u64
+            return 85
         FrontendTokenKind.GtEq:
-            return 86u64
+            return 86
         FrontendTokenKind.Plus:
-            return 87u64
+            return 87
         FrontendTokenKind.Minus:
-            return 88u64
+            return 88
         FrontendTokenKind.Star:
-            return 89u64
+            return 89
         FrontendTokenKind.Slash:
-            return 90u64
+            return 90
         FrontendTokenKind.Percent:
-            return 91u64
+            return 91
         FrontendTokenKind.Pipe:
-            return 92u64
+            return 92
         FrontendTokenKind.Caret:
-            return 93u64
+            return 93
         FrontendTokenKind.LShift:
-            return 94u64
+            return 94
         FrontendTokenKind.RShift:
-            return 95u64
+            return 95
         FrontendTokenKind.Tilde:
-            return 96u64
+            return 96
         FrontendTokenKind.CharLit:
-            return 97u64
+            return 97
         FrontendTokenKind.Is:
-            return 98u64
+            return 98
         FrontendTokenKind.FatArrow:
-            return 99u64
+            return 99
         FrontendTokenKind.To:
-            return 100u64
-    return 0u64
+            return 100
+    return 0
 
 
 def frontend_case_char_literals() -> bool can[Memory.Allocate, Abort.Panic]:
     region scratch(4096)
     a: mutable any Arena& = (&scratch).cast[mutable any Arena&]
-    bytes: u8[26] = [39u8, 97u8, 39u8, 32u8, 39u8, 92u8, 110u8, 39u8, 32u8, 39u8, 92u8, 120u8, 52u8, 49u8, 39u8, 32u8, 39u8, 92u8, 117u8, 48u8, 48u8, 52u8, 49u8, 39u8, 10u8, 0u8]
+    bytes: u8[26] = [39, 97, 39, 32, 39, 92, 110, 39, 32, 39, 92, 120, 52, 49, 39, 32, 39, 92, 117, 48, 48, 52, 49, 39, 10, 0]
     tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, (&bytes[0]).cast[any u8&])
     if not frontend_expect_token_count(tokens, 6):
         return false
@@ -283,7 +283,7 @@ def frontend_expect_lookup_keyword_entries(entries: any FrontendKeywordEntry&, c
 def frontend_case_simple_ident() -> bool can[Memory.Allocate, Abort.Panic]:
     region scratch(4096)
     a: mutable any Arena& = (&scratch).cast[mutable any Arena&]
-    bytes: u8[7] = [104u8, 101u8, 108u8, 108u8, 111u8, 10u8, 0u8]
+    bytes: u8[7] = [104, 101, 108, 108, 111, 10, 0]
     tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, (&bytes[0]).cast[any u8&])
     if not frontend_expect_token_count(tokens, 3):
         return false
@@ -301,7 +301,7 @@ def frontend_case_simple_ident() -> bool can[Memory.Allocate, Abort.Panic]:
 def frontend_case_arrow_ops() -> bool can[Memory.Allocate, Abort.Panic]:
     region scratch(4096)
     a: mutable any Arena& = (&scratch).cast[mutable any Arena&]
-    bytes: u8[14] = [120u8, 32u8, 60u8, 45u8, 32u8, 121u8, 32u8, 45u8, 62u8, 32u8, 122u8, 10u8, 0u8, 0u8]
+    bytes: u8[14] = [120, 32, 60, 45, 32, 121, 32, 45, 62, 32, 122, 10, 0, 0]
     tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, (&bytes[0]).cast[any u8&])
     if not frontend_expect_token_count(tokens, 7):
         return false
@@ -311,7 +311,7 @@ def frontend_case_arrow_ops() -> bool can[Memory.Allocate, Abort.Panic]:
 def frontend_case_number_literals() -> bool can[Memory.Allocate, Abort.Panic]:
     region scratch(4096)
     a: mutable any Arena& = (&scratch).cast[mutable any Arena&]
-    bytes: u8[25] = [52u8, 50u8, 32u8, 48u8, 120u8, 102u8, 102u8, 32u8, 49u8, 50u8, 51u8, 117u8, 54u8, 52u8, 32u8, 48u8, 120u8, 65u8, 66u8, 105u8, 51u8, 50u8, 10u8, 0u8, 0u8]
+    bytes: u8[25] = [52, 50, 32, 48, 120, 102, 102, 32, 49, 50, 51, 117, 54, 52, 32, 48, 120, 65, 66, 105, 51, 50, 10, 0, 0]
     tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, (&bytes[0]).cast[any u8&])
     if not frontend_expect_token_count(tokens, 6):
         return false
@@ -339,7 +339,7 @@ def frontend_case_number_literals() -> bool can[Memory.Allocate, Abort.Panic]:
 def frontend_case_indent_dedent() -> bool can[Memory.Allocate, Abort.Panic]:
     region scratch(4096)
     a: mutable any Arena& = (&scratch).cast[mutable any Arena&]
-    bytes: u8[39] = [100u8, 101u8, 102u8, 32u8, 102u8, 111u8, 111u8, 58u8, 10u8, 32u8, 32u8, 32u8, 32u8, 120u8, 32u8, 60u8, 45u8, 32u8, 49u8, 10u8, 32u8, 32u8, 32u8, 32u8, 121u8, 32u8, 60u8, 45u8, 32u8, 50u8, 10u8, 122u8, 32u8, 60u8, 45u8, 32u8, 51u8, 10u8, 0u8]
+    bytes: u8[39] = [100, 101, 102, 32, 102, 111, 111, 58, 10, 32, 32, 32, 32, 120, 32, 60, 45, 32, 49, 10, 32, 32, 32, 32, 121, 32, 60, 45, 32, 50, 10, 122, 32, 60, 45, 32, 51, 10, 0]
     tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, (&bytes[0]).cast[any u8&])
     if not frontend_expect_token_count(tokens, 19):
         return false
@@ -349,7 +349,7 @@ def frontend_case_indent_dedent() -> bool can[Memory.Allocate, Abort.Panic]:
 def frontend_case_comment_and_ellipsis() -> bool can[Memory.Allocate, Abort.Panic]:
     region scratch(4096)
     a: mutable any Arena& = (&scratch).cast[mutable any Arena&]
-    bytes: u8[9] = [35u8, 120u8, 10u8, 46u8, 46u8, 46u8, 10u8, 0u8, 0u8]
+    bytes: u8[9] = [35, 120, 10, 46, 46, 46, 10, 0, 0]
     tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, (&bytes[0]).cast[any u8&])
     if not frontend_expect_token_count(tokens, 3):
         return false
@@ -359,7 +359,7 @@ def frontend_case_comment_and_ellipsis() -> bool can[Memory.Allocate, Abort.Pani
 def frontend_case_shift_ops() -> bool can[Memory.Allocate, Abort.Panic]:
     region scratch(4096)
     a: mutable any Arena& = (&scratch).cast[mutable any Arena&]
-    bytes: u8[13] = [120u8, 32u8, 60u8, 60u8, 32u8, 51u8, 32u8, 62u8, 62u8, 32u8, 50u8, 10u8, 0u8]
+    bytes: u8[13] = [120, 32, 60, 60, 32, 51, 32, 62, 62, 32, 50, 10, 0]
     tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, (&bytes[0]).cast[any u8&])
     if not frontend_expect_token_count(tokens, 7):
         return false
@@ -369,7 +369,7 @@ def frontend_case_shift_ops() -> bool can[Memory.Allocate, Abort.Panic]:
 def frontend_case_paren_suppresses_newline() -> bool can[Memory.Allocate, Abort.Panic]:
     region scratch(4096)
     a: mutable any Arena& = (&scratch).cast[mutable any Arena&]
-    bytes: u8[15] = [102u8, 111u8, 111u8, 40u8, 97u8, 44u8, 10u8, 32u8, 32u8, 32u8, 32u8, 98u8, 41u8, 10u8, 0u8]
+    bytes: u8[15] = [102, 111, 111, 40, 97, 44, 10, 32, 32, 32, 32, 98, 41, 10, 0]
     tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, (&bytes[0]).cast[any u8&])
     if not frontend_expect_token_count(tokens, 8):
         return false
@@ -379,7 +379,7 @@ def frontend_case_paren_suppresses_newline() -> bool can[Memory.Allocate, Abort.
 def frontend_case_region_alloc_syntax() -> bool can[Memory.Allocate, Abort.Panic]:
     region scratch(4096)
     a: mutable any Arena& = (&scratch).cast[mutable any Arena&]
-    bytes: u8[59] = [114u8, 101u8, 103u8, 105u8, 111u8, 110u8, 32u8, 112u8, 97u8, 114u8, 115u8, 101u8, 10u8, 118u8, 97u8, 108u8, 117u8, 101u8, 58u8, 32u8, 97u8, 110u8, 121u8, 32u8, 105u8, 51u8, 50u8, 38u8, 32u8, 61u8, 32u8, 110u8, 101u8, 119u8, 91u8, 112u8, 97u8, 114u8, 115u8, 101u8, 93u8, 32u8, 49u8, 10u8, 100u8, 101u8, 115u8, 116u8, 114u8, 111u8, 121u8, 32u8, 112u8, 97u8, 114u8, 115u8, 101u8, 10u8, 0u8]
+    bytes: u8[59] = [114, 101, 103, 105, 111, 110, 32, 112, 97, 114, 115, 101, 10, 118, 97, 108, 117, 101, 58, 32, 97, 110, 121, 32, 105, 51, 50, 38, 32, 61, 32, 110, 101, 119, 91, 112, 97, 114, 115, 101, 93, 32, 49, 10, 100, 101, 115, 116, 114, 111, 121, 32, 112, 97, 114, 115, 101, 10, 0]
     tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, (&bytes[0]).cast[any u8&])
     ok: bool = frontend_expect_token_count(tokens, 19) and frontend_expect_kind(tokens, 0, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 1, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 2, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 3, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 4, FrontendTokenKind.Colon) and frontend_expect_kind(tokens, 5, FrontendTokenKind.Any) and frontend_expect_kind(tokens, 6, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 7, FrontendTokenKind.Ampersand) and frontend_expect_kind(tokens, 8, FrontendTokenKind.Assign) and frontend_expect_kind(tokens, 9, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 10, FrontendTokenKind.LBracket) and frontend_expect_kind(tokens, 11, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 12, FrontendTokenKind.RBracket) and frontend_expect_kind(tokens, 13, FrontendTokenKind.IntLit) and frontend_expect_kind(tokens, 14, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 15, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 16, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 17, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 18, FrontendTokenKind.Eof)
     destroy scratch
@@ -438,7 +438,7 @@ def frontend_case_lookup_keyword_table() -> bool:
 def frontend_case_kind_only_keyword_path() -> bool can[Memory.Allocate, Abort.Panic]:
     region scratch(4096)
     a: mutable any Arena& = (&scratch).cast[mutable any Arena&]
-    bytes: u8[53] = [102u8, 97u8, 108u8, 115u8, 101u8, 32u8, 116u8, 114u8, 117u8, 101u8, 32u8, 122u8, 101u8, 114u8, 111u8, 101u8, 100u8, 32u8, 114u8, 101u8, 103u8, 105u8, 111u8, 110u8, 32u8, 110u8, 101u8, 119u8, 32u8, 100u8, 101u8, 115u8, 116u8, 114u8, 111u8, 121u8, 32u8, 49u8, 50u8, 51u8, 117u8, 54u8, 52u8, 32u8, 48u8, 120u8, 65u8, 66u8, 105u8, 51u8, 50u8, 10u8, 0u8]
+    bytes: u8[53] = [102, 97, 108, 115, 101, 32, 116, 114, 117, 101, 32, 122, 101, 114, 111, 101, 100, 32, 114, 101, 103, 105, 111, 110, 32, 110, 101, 119, 32, 100, 101, 115, 116, 114, 111, 121, 32, 49, 50, 51, 117, 54, 52, 32, 48, 120, 65, 66, 105, 51, 50, 10, 0]
     lexer: mutable FrontendLexer = frontend_new_lexer(a, "frontend_kind_only_test.llcontext".cast[any u8&], (&bytes[0]).cast[any u8&])
 
     if not frontend_kind_eq(frontend_next_token_kind((&lexer).cast[mutable any FrontendLexer&]), FrontendTokenKind.False):
@@ -536,7 +536,7 @@ def frontend_lexer_token_kind_at_with_len_impl(source: any u8&, source_len: usiz
     arena_reset(arena)
     tokens: darray[FrontendToken] = frontend_tokenize_with_len(arena, "frontend_lexer_bench.llcontext".cast[any u8&], source, source_len)
     if index >= tokens.count:
-        return 0u64
+        return 0
     return frontend_token_kind_code(tokens[index].kind)
 
 

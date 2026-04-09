@@ -25,7 +25,7 @@ def eval(node: Expr, store: Expr.Store[Local]) -> int:
 				node.span + eval(left, store) + eval(right, store)
 
 def packed_demo() -> int:
-	region scratch(1024u)
+	region scratch(1024)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	token_store: Token.Store[Local] = Token.Store(scratch)
 	root: Expr = build_expr(scratch)

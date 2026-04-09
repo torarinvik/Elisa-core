@@ -3,14 +3,14 @@ enum Expr:
 	Add(left: any Expr&, right: any Expr&)
 
 def eval(node: any Expr&) -> int:
-	return match node[0u]:
+	return match node[0]:
 		Expr.Int(value):
 			value
 		Expr.Add(left, right):
 			eval(left) + eval(right)
 
 def make_sum() -> int:
-	region scratch(1024u)
+	region scratch(1024)
 	one: scratch Expr& = new[scratch] Expr.Int(1)
 	two: scratch Expr& = new[scratch] Expr.Int(2)
 	tree: scratch Expr& = new[scratch] Expr.Add(one.cast[any Expr&], two.cast[any Expr&])

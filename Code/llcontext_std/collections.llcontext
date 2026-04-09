@@ -5,9 +5,9 @@
 # include "./deque.llcontext"
 
 const ARENA_DA_INIT_CAP: usize = 256
-const DICT_BUCKET_EMPTY: u8 = 0u8
-const DICT_BUCKET_FULL: u8 = 1u8
-const DICT_BUCKET_TOMBSTONE: u8 = 2u8
+const DICT_BUCKET_EMPTY: u8 = 0
+const DICT_BUCKET_FULL: u8 = 1
+const DICT_BUCKET_TOMBSTONE: u8 = 2
 const DICT_INIT_CAP: usize = 8
 
 struct DynArray[T]:
@@ -47,11 +47,11 @@ def arena_da_reserve[T](a: mutable any Arena&, da: mutable any darray[T, shape_i
         return da
 
     new_capacity: mutable usize = da.capacity
-    if new_capacity == 0u:
+    if new_capacity == 0:
         new_capacity <- ARENA_DA_INIT_CAP
 
     while needed > new_capacity:
-        new_capacity <- new_capacity * 2u
+        new_capacity <- new_capacity * 2
 
     old_size: usize = da.capacity * sizeof(T)
     new_size: usize = new_capacity * sizeof(T)
@@ -103,7 +103,7 @@ def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]
     return DynArrayView((view.data.cast[any u8&] + offset).cast[any void&], hi - lo, view.elem_size)
 
 def arena_da_view_prefix[T](view: dview[T], end: usize) -> dview[T]:
-    return arena_da_view_slice(view, 0u, end)
+    return arena_da_view_slice(view, 0, end)
 
 def arena_da_view_suffix[T](view: dview[T], start: usize) -> dview[T]:
     return arena_da_view_slice(view, start, view.len)
@@ -123,7 +123,7 @@ def arena_da_fill[T](dst: dview[T], value: T):
 	assert dst.data != null
 
     out: any T& = dst.data.cast[any T&]
-    for i in 0u..<dst.len:
+    for i in 0..<dst.len:
 		out[i] <- value
 
 def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
@@ -136,7 +136,7 @@ def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
 
     out: any T& = dst.data.cast[any T&]
     src_items: any T& = src.data.cast[any T&]
-    for i in 0u..<dst.len:
+    for i in 0..<dst.len:
         out[i] <- src_items[i]
 
 def arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool:
@@ -167,7 +167,7 @@ def arena_da_from_view[T](a: mutable any Arena&, view: dview[T]) -> darray[T, sh
 
 def arena_da_append[T](a: mutable any Arena&, da: mutable any darray[T, shape_in]&, item: T) -> mutable any darray[T, shape_out]& can[Memory.Allocate, Abort.Panic]:
     in a:
-        _ = da.reserve(da.count + 1u)
+        _ = da.reserve(da.count + 1)
 
     assert da.items != null
 
@@ -237,12 +237,12 @@ def arena_dict_next_capacity(min_capacity: usize) -> usize:
     return cap
 
 def arena_dict_hash_dstr(key: dstr[key_shape]) -> u64:
-    hash: mutable u64 = 1469598103934665603u64
+    hash: mutable u64 = 1469598103934665603
     key_len: usize = arena_strlen(key)
 
-    for i in 0u..<key_len:
+    for i in 0..<key_len:
         hash ^= key[i].u64()
-        hash *= 1099511628211u64
+        hash *= 1099511628211
 
     return hash
 
@@ -275,7 +275,7 @@ def arena_dict_probe_slot[T](m: any dict[dstr[key_shape], T]&, key: dstr[key_sha
     index: mutable usize = (hash & mask.u64()).usize()
     first_tombstone: mutable usize = 0
     have_tombstone: mutable bool = false
-    for probes in 0u..<m.capacity:
+    for probes in 0..<m.capacity:
         bucket: any DictBucket[T]& = &items[index]
 
         if bucket.state == DICT_BUCKET_EMPTY:
@@ -378,7 +378,7 @@ def arena_dict_reserve[T](a: mutable any Arena&, m: mutable any dict[dstr[key_sh
 
     if m.items != null:
         old_items: mutable any DictBucket[T]& = m.items
-        for i in 0u..<m.capacity:
+        for i in 0..<m.capacity:
             if old_items[i].state == DICT_BUCKET_FULL:
                 _ = arena_dict_insert_existing_bucket((&rebuilt).cast[any dict[dstr[key_shape], T]&], old_items[i])
 
@@ -462,7 +462,7 @@ def arena_dict_remove[T](m: mutable any dict[dstr[key_shape], T]&, key: dstr[key
     items: mutable any DictBucket[T]& = m.items
     bucket: any DictBucket[T]& = &items[probe.index]
     bucket.state <- DICT_BUCKET_TOMBSTONE
-    bucket.hash <- 0u64
+    bucket.hash <- 0
     bucket.key_data <- null
     bucket.key_len <- 0
     bucket.value <- zeroed
@@ -515,7 +515,7 @@ def arena_dict_reserve__i64(a: mutable any Arena&, m: mutable any DynDict[i64]&,
 
     if m.items != null:
         old_items: mutable any DictBucket[i64]& = m.items
-        for i in 0u..<m.capacity:
+        for i in 0..<m.capacity:
             if old_items[i].state == DICT_BUCKET_FULL:
                 _ = arena_dict_insert_existing_bucket((&rebuilt).cast[any DynDict[i64]&], old_items[i])
 
@@ -599,7 +599,7 @@ def arena_dict_remove__i64(m: mutable any DynDict[i64]&, key: any u8&) -> bool:
     items: mutable any DictBucket[i64]& = m.items
     bucket: any DictBucket[i64]& = &items[probe.index]
     bucket.state <- DICT_BUCKET_TOMBSTONE
-    bucket.hash <- 0u64
+    bucket.hash <- 0
     bucket.key_data <- null
     bucket.key_len <- 0
     bucket.value <- zeroed

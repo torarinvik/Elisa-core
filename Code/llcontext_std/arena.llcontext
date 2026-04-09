@@ -175,7 +175,7 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
     return r
 
 def new_region(capacity: usize) -> mutable heap Region& can[Memory.Allocate, Abort.Panic]:
-    return new_region_with_owner(capacity, 0u64.uintptr())
+    return new_region_with_owner(capacity, 0.uintptr())
 
 def free_region(r: heap Region&) can[Memory.Release, Abort.Panic]:
     static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
@@ -215,11 +215,11 @@ def arena_alloc(a: mutable any Arena&, size_bytes: usize) -> mutable heap void& 
 
     assert a.end != null
 
-    while (a.end.owner_tag != 0u64.uintptr() or a.end.count + size > a.end.capacity) and a.end.next != null:
+    while (a.end.owner_tag != 0.uintptr() or a.end.count + size > a.end.capacity) and a.end.next != null:
         a.end <- a.end.next
         a.end_index <- a.end_index + 1
 
-    if a.end.owner_tag != 0u64.uintptr() or a.end.count + size > a.end.capacity:
+    if a.end.owner_tag != 0.uintptr() or a.end.count + size > a.end.capacity:
         assert a.end.next == null
 
         capacity:mutable usize = ARENA_REGION_DEFAULT_CAPACITY
