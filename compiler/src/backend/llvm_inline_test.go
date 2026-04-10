@@ -223,6 +223,30 @@ def helper[T](value: T) -> T:
 	}
 }
 
+func TestSpecializeFuncTypePreservesExplicitParamNames(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "explicit_param_names_specialization.llcontext", `def helper[T](value: T, fallback: T) -> T:
+	return fallback
+`)
+	sym, ok := result.GlobalScope.Lookup("helper")
+	if !ok {
+		t.Fatal("expected helper to be defined")
+	}
+	fnType, ok := sym.Type.(*semantic.FuncType)
+	if !ok || fnType == nil {
+		t.Fatalf("expected helper to resolve to semantic.FuncType, got %#v", sym.Type)
+	}
+	specialized := specializeFuncType(fnType, map[string]semantic.Type{"T": result.NamedTypes["int"]}, nil)
+	if specialized == nil {
+		t.Fatal("expected specializeFuncType to produce a function type")
+	}
+	if specialized.ExplicitParamCount != 2 {
+		t.Fatalf("expected specialized helper to keep explicit param count 2, got %d", specialized.ExplicitParamCount)
+	}
+	if len(specialized.ExplicitParamNames) != 2 || specialized.ExplicitParamNames[0] != "value" || specialized.ExplicitParamNames[1] != "fallback" {
+		t.Fatalf("expected specialized helper to preserve explicit param names, got %#v", specialized.ExplicitParamNames)
+	}
+}
+
 func TestInferTypeBindingsFromFuncTypesPrefersSpecializedCalleeSignature(t *testing.T) {
 	sharedGate := &semantic.StructType{Name: "SharedGate"}
 	i64Type := &semantic.BuiltinType{Name: "i64"}

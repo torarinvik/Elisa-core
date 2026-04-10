@@ -283,6 +283,48 @@ def run() -> int:
 	requireFunctionReturnTypeString(t, result, "run", "int")
 }
 
+func TestAnalyzeRejectsAssigningFunctionWithNarrowerParamType(t *testing.T) {
+	src := `repr(c) struct Box:
+	value: int
+
+def only_nonnull(box: any Box&) -> int:
+	return box.value
+
+def bad() -> int:
+	wider: func(any Box&?) -> int = only_nonnull
+	return wider(null)
+`
+	_, errs := parseAndAnalyze(t, "function_param_contravariance_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, `variable "wider" expects`) || !strings.Contains(all, `func(any Box&?) -> int`) || !strings.Contains(all, `func(any Box&) -> int`) {
+		t.Fatalf("expected contravariant function assignment diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsAssigningFunctionWithBroaderParamType(t *testing.T) {
+	src := `repr(c) struct Box:
+	value: int
+
+def allow_null(box: any Box&?) -> int:
+	if box == null:
+		return 0
+	return box.value
+
+def ok() -> int:
+	region scratch(256)
+	box: any Box& = new[scratch] Box(7)
+	narrower: func(any Box&) -> int = allow_null
+	return narrower(box)
+`
+	result, errs := parseAndAnalyze(t, "function_param_contravariance_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "int")
+}
+
 func TestAnalyzeAcceptsAggregateStateStructTypes(t *testing.T) {
 	src := `struct Holder[?]:
     value: i32
@@ -2484,6 +2526,129 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "void")
+}
+
+func TestAnalyzeRejectsReusingHigherOrderHelperReturnedBorrowedThreadPoolAliasAfterBranchMergedCallbackWithDifferentParamNames(t *testing.T) {
+	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+
+def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	task: Task[i64, Pending] = zeroed
+	return move task
+
+repr(c) struct PoolHolder:
+	pool_ref: any ThreadPool&
+
+def apply_getter(flag: bool, primary: func(PoolHolder) -> any ThreadPool&, fallback: func(PoolHolder) -> any ThreadPool&, holder: PoolHolder) -> any ThreadPool&:
+	local_fn: mutable func(PoolHolder) -> any ThreadPool& = fallback
+	if flag:
+		local_fn <- primary
+	else:
+		local_fn <- fallback
+	return local_fn(holder)
+
+def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+	return holder.pool_ref
+
+def get_pool_ref_alias(box: PoolHolder) -> any ThreadPool&:
+	return box.pool_ref
+
+def work(value: i64) -> i64:
+	return value + 1
+
+def bad(holder: PoolHolder) -> void:
+	pool_ref: any ThreadPool& = apply_getter(true, get_pool_ref, get_pool_ref_alias, holder)
+	pool_shutdown(pool_ref)
+	_ = pool_submit1(holder.pool_ref, work, 1)
+`
+	_, errs := parseAndAnalyze(t, "thread_pool_higher_order_helper_branch_merged_callback_different_param_names_shutdown_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "thread pool owner \"holder.pool_ref\" cannot be used after argument to call \"pool_shutdown\"") {
+		t.Fatalf("expected differing-param-name branch-merged callback shutdown diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaBranchMergedCallbacksWithDifferentParamNames(t *testing.T) {
+	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: any TaskGroup&) -> void
+
+repr(c) struct GroupHolder:
+	group_ref: any TaskGroup&
+
+def apply_getter(flag: bool, primary: func(GroupHolder) -> any TaskGroup&, fallback: func(GroupHolder) -> any TaskGroup&, holder: GroupHolder) -> any TaskGroup&:
+	local_fn: mutable func(GroupHolder) -> any TaskGroup& = fallback
+	if flag:
+		local_fn <- primary
+	else:
+		local_fn <- fallback
+	return local_fn(holder)
+
+def get_group_ref(holder: GroupHolder) -> any TaskGroup&:
+	return holder.group_ref
+
+def get_group_ref_alias(box: GroupHolder) -> any TaskGroup&:
+	return box.group_ref
+
+def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
+	group_ref: any TaskGroup& = apply_getter(true, get_group_ref, get_group_ref_alias, holder)
+	task_group_add(group_ref, move task)
+	wait all holder.group_ref
+`
+	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_branch_merged_callback_different_param_names_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "void")
+}
+
+func TestAnalyzeAcceptsNamedArgsThroughBranchMergedCallbackWhenParamNamesAgree(t *testing.T) {
+	src := `def add(x: i64, y: i64) -> i64:
+	return x + y
+
+def sub(x: i64, y: i64) -> i64:
+	return x - y
+
+def run(flag: bool) -> i64:
+	local_fn: mutable func(i64, i64) -> i64 = sub
+	if flag:
+		local_fn <- add
+	else:
+		local_fn <- sub
+	return local_fn(y: 7, x: do:
+		seed = 3
+		seed
+	)
+`
+	result, errs := parseAndAnalyze(t, "named_args_branch_merged_callback_same_names_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "run", "i64")
+}
+
+func TestAnalyzeRejectsNamedArgsThroughBranchMergedCallbackWhenParamNamesDiffer(t *testing.T) {
+	src := `def add(x: i64, y: i64) -> i64:
+	return x + y
+
+def mix(left: i64, right: i64) -> i64:
+	return left + right
+
+def bad(flag: bool) -> i64:
+	local_fn: mutable func(i64, i64) -> i64 = mix
+	if flag:
+		local_fn <- add
+	else:
+		local_fn <- mix
+	return local_fn(y: 7, x: 3)
+`
+	_, errs := parseAndAnalyze(t, "named_args_branch_merged_callback_different_names_reject.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, `function "func" does not expose parameter names for named argument calls`) {
+		t.Fatalf("expected differing-name branch-merged callback named-arg diagnostic, got:\n%s", all)
+	}
 }
 
 func TestAnalyzeAcceptsPackedCommonFieldStorageAnnotations(t *testing.T) {
@@ -4848,6 +5013,35 @@ def bad() -> void:
 	}
 	if !strings.Contains(warns, "call to \"emit\" requires can[Console]") {
 		t.Fatalf("expected missing-permission warning, got:\n%s", warns)
+	}
+}
+
+func TestAnalyzeWarnsWithUnionOfBranchMergedCallbackPermissionRefs(t *testing.T) {
+	src := `def do_submit() -> void can[Pool.Submit]:
+	pass
+
+def do_wait() -> void can[Pool.WaitAll]:
+	pass
+
+def bad(flag: bool) -> void:
+	local_fn: mutable func() -> void can[Pool] = do_wait
+	if flag:
+		local_fn <- do_submit
+	else:
+		local_fn <- do_wait
+	local_fn()
+`
+	result, errs := parseAndAnalyze(t, "permissions_branch_merged_callback_union_warn.llcontext", src)
+	requireNoErrors(t, errs)
+	warns := strings.Join(result.Warnings(), "\n")
+	if warns == "" {
+		t.Fatal("expected semantic warning, got none")
+	}
+	if !strings.Contains(warns, `call to "func" requires can[Pool]`) {
+		t.Fatalf("expected branch-merged callback warning, got:\n%s", warns)
+	}
+	if !strings.Contains(warns, `can[Pool.Submit, Pool.WaitAll]`) {
+		t.Fatalf("expected branch-merged callback warning to include both permission refs, got:\n%s", warns)
 	}
 }
 

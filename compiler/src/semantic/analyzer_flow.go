@@ -7572,13 +7572,104 @@ func intersectRegionRefSummary(dst regionRefState, src regionRefState) (regionRe
 	return merged, true
 }
 
+func functionValueMergeName(dst string, src string) string {
+	if dst == src {
+		return dst
+	}
+	if dst == "" && src == "" {
+		return ""
+	}
+	return "func"
+}
+
+func mergeFunctionValueExplicitParamNames(dst []string, src []string) []string {
+	if len(dst) == 0 || len(dst) != len(src) {
+		return nil
+	}
+	for i := range dst {
+		if dst[i] != src[i] {
+			return nil
+		}
+	}
+	return append([]string(nil), dst...)
+}
+
+func sameFuncGuardEffects(left []FuncGuardEffect, right []FuncGuardEffect) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func sameFuncPoststates(left []FuncPoststate, right []FuncPoststate) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i].Condition != right[i].Condition || left[i].ParamIndex != right[i].ParamIndex || left[i].Kind != right[i].Kind || left[i].RefState != right[i].RefState {
+			return false
+		}
+		if !sameStringSlice(left[i].StateCases, right[i].StateCases) {
+			return false
+		}
+		if !borrowReturnAnnotationPathEqual(left[i].Path, right[i].Path) {
+			return false
+		}
+	}
+	return true
+}
+
+func functionValueMergeCompatible(dst *FuncType, src *FuncType) bool {
+	if dst == nil || src == nil {
+		return false
+	}
+	if dst.Variadic != src.Variadic || funcTypeExplicitParamCount(dst) != funcTypeExplicitParamCount(src) || len(dst.ImplicitParamNames) != len(src.ImplicitParamNames) || len(dst.GenericParams) != len(src.GenericParams) || len(dst.TypeParams) != len(src.TypeParams) || len(dst.RefStorageParams) != len(src.RefStorageParams) || len(dst.RefStateParams) != len(src.RefStateParams) || len(dst.RegionParams) != len(src.RegionParams) || len(dst.PermissionParams) != len(src.PermissionParams) || len(dst.UsedPermissionParams) != len(src.UsedPermissionParams) || len(dst.ShapeParams) != len(src.ShapeParams) || len(dst.FreshReturnShapeParams) != len(src.FreshReturnShapeParams) || len(dst.Params) != len(src.Params) || !SameType(dst.Return, src.Return) {
+		return false
+	}
+	if !sameStringSlice(dst.ImplicitParamNames, src.ImplicitParamNames) || !sameStringSlice(dst.TypeParams, src.TypeParams) || !sameStringSlice(dst.RefStorageParams, src.RefStorageParams) || !sameStringSlice(dst.RefStateParams, src.RefStateParams) || !sameStringSlice(dst.RegionParams, src.RegionParams) || !sameStringSlice(dst.PermissionParams, src.PermissionParams) || !sameStringSlice(dst.UsedPermissionParams, src.UsedPermissionParams) || !sameStringSlice(dst.ShapeParams, src.ShapeParams) || !sameStringSlice(dst.FreshReturnShapeParams, src.FreshReturnShapeParams) {
+		return false
+	}
+	for i := range dst.GenericParams {
+		if !sameGenericParam(dst.GenericParams[i], src.GenericParams[i]) {
+			return false
+		}
+	}
+	for i := range dst.Params {
+		if !SameType(dst.Params[i], src.Params[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 func (a *Analyzer) mergeFunctionValueTypes(dst *FuncType, src *FuncType) (*FuncType, bool) {
-	if dst == nil || src == nil || !SameType(dst, src) {
+	if !functionValueMergeCompatible(dst, src) {
 		return nil, false
 	}
 	merged := a.cloneFunctionValueType(dst)
 	if merged == nil {
 		return nil, false
+	}
+	merged.Name = functionValueMergeName(dst.Name, src.Name)
+	merged.ExplicitParamNames = mergeFunctionValueExplicitParamNames(dst.ExplicitParamNames, src.ExplicitParamNames)
+	merged.DeclaredPermissionRefs = mergePermissionRefs(dst.DeclaredPermissionRefs, src.DeclaredPermissionRefs)
+	merged.DeclaredPermissions = mergePermissionFamilies(dst.DeclaredPermissions, src.DeclaredPermissions)
+	merged.PermissionRefs = mergePermissionRefs(dst.PermissionRefs, src.PermissionRefs)
+	merged.Permissions = mergePermissionFamilies(dst.Permissions, src.Permissions)
+	if sameFuncGuardEffects(dst.GuardEffects, src.GuardEffects) {
+		merged.GuardEffects = cloneFuncGuardEffects(dst.GuardEffects)
+	} else {
+		merged.GuardEffects = nil
+	}
+	if sameFuncPoststates(dst.Poststates, src.Poststates) {
+		merged.Poststates = cloneFuncPoststates(dst.Poststates)
+	} else {
+		merged.Poststates = nil
 	}
 	merged.ReturnProvenance = regionRefState{}
 	merged.ReturnProvenanceKnown = dst.ReturnProvenanceKnown && src.ReturnProvenanceKnown

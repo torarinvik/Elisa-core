@@ -645,7 +645,7 @@ func matchTypePattern(pattern, actual Type) bool {
 			}
 		}
 		for i := range p.Params {
-			if !matchTypePattern(p.Params[i], a.Params[i]) {
+			if !matchTypePattern(a.Params[i], p.Params[i]) {
 				return false
 			}
 		}
