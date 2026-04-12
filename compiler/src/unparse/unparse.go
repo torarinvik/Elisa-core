@@ -456,16 +456,17 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 		}
 	case *ast.IterForStmt:
 		line := "for "
-		if n.Reverse {
-			line += "rev "
-		}
 		switch n.Mode {
 		case ast.IterBindRef:
 			line += "ref "
 		case ast.IterBindMutableRef:
 			line += "mutable ref "
 		}
-		line += formatMoveBindPattern(n.Pattern) + " in " + formatExpr(n.Source) + ":"
+		sourceText := formatExpr(n.Source)
+		if n.Reverse {
+			sourceText = "rev(" + sourceText + ")"
+		}
+		line += formatMoveBindPattern(n.Pattern) + " in " + sourceText + ":"
 		f.writeLine(level, line)
 		for _, stmt := range n.Body {
 			f.writeStmt(level+1, stmt)

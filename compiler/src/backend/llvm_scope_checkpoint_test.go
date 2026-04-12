@@ -11,8 +11,8 @@ func TestGenerateLLVMIRLowersReverseIterableScopeAndCheckpoint(t *testing.T) {
 def build(owner: Arena, items: darray[int]) -> usize:
     alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
 	total: mutable usize = 0
-    for rev value in items:
-		total <- total + 1
+    for value in rev(items):
+			total <- total + 1
 	scope pool_new(2):
         pass
     in alloc:

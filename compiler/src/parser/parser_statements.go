@@ -408,14 +408,24 @@ func (p *Parser) parseForStmt() ast.Stmt {
 	pos := p.cur().Pos
 	p.expectIdentText("for")
 	reverse := false
-	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "rev" {
-		reverse = true
-		p.advance()
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "rev" && p.pos+1 < len(p.tokens) {
+		nextKind := p.tokens[p.pos+1].Kind
+		if nextKind == lexer.TOKEN_IDENT || nextKind == lexer.TOKEN_MUTABLE {
+			reverse = true
+			p.advance()
+		}
 	}
 	mode := p.parseIterBindMode()
 	pattern := p.parseIterLoopPattern()
 	p.expect(lexer.TOKEN_IN)
 	startOrSource := p.parseExpr()
+	if iterSource, sourceReverse := unwrapReverseIterableSource(startOrSource); sourceReverse {
+		if reverse {
+			p.errorf("reverse iterable loop specified twice; use either `for rev ... in ...:` or `for ... in rev(...):`")
+		}
+		reverse = true
+		startOrSource = iterSource
+	}
 	if p.peek() == lexer.TOKEN_RANGE || p.peek() == lexer.TOKEN_RANGE_LT || p.peek() == lexer.TOKEN_RANGE_GT {
 		namePattern, ok := pattern.(*ast.MoveBindNamePattern)
 		if !ok {
@@ -440,6 +450,24 @@ func (p *Parser) parseForStmt() ast.Stmt {
 	p.expectNewline()
 	body := p.parseBlock()
 	return &ast.IterForStmt{Position: pos, Reverse: reverse, Pattern: pattern, Mode: mode, Source: startOrSource, Body: body}
+}
+
+func unwrapReverseIterableSource(expr ast.Expr) (ast.Expr, bool) {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok || call == nil {
+		return expr, false
+	}
+	if len(call.Args) != 1 || len(call.WithArgs) != 0 || len(call.WithBundles) != 0 || len(call.WithItemOrder) != 0 {
+		return expr, false
+	}
+	if call.ArgName(0) != "" {
+		return expr, false
+	}
+	ident, ok := call.Func.(*ast.Ident)
+	if !ok || ident == nil || ident.Name != "rev" {
+		return expr, false
+	}
+	return call.Args[0], true
 }
 
 func (p *Parser) parseIterLoopPattern() ast.MoveBindPattern {

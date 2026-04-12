@@ -1409,7 +1409,7 @@ func TestParseIterableForStatementWithEnumerateTuplePattern(t *testing.T) {
 }
 
 func TestParseReverseIterableForScopeAndCheckpointStatements(t *testing.T) {
-	file, errs := parseSourceFile(t, "extern pool_new(workers: usize) -> ThreadPool can[Pool.Create]\n\ndef walk(items: darray[int]) -> void:\n    for rev value in items:\n        pass\n    scope pool_new(2):\n        pass\n    checkpoint mark = items:\n        pass\n    restore mark\n")
+	file, errs := parseSourceFile(t, "extern pool_new(workers: usize) -> ThreadPool can[Pool.Create]\n\ndef walk(items: darray[int]) -> void:\n    for value in rev(items):\n        pass\n    scope pool_new(2):\n        pass\n    checkpoint mark = items:\n        pass\n    restore mark\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -1434,8 +1434,48 @@ func TestParseReverseIterableForScopeAndCheckpointStatements(t *testing.T) {
 	if _, ok := decl.Body[3].(*ast.RestoreCheckpointStmt); !ok {
 		t.Fatalf("expected restore checkpoint statement, got %T", decl.Body[3])
 	}
-	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for rev value in items:") || !strings.Contains(formatted, "scope pool_new(2):") || !strings.Contains(formatted, "checkpoint mark = items:") || !strings.Contains(formatted, "restore mark") {
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for value in rev(items):") || !strings.Contains(formatted, "scope pool_new(2):") || !strings.Contains(formatted, "checkpoint mark = items:") || !strings.Contains(formatted, "restore mark") {
 		t.Fatalf("expected formatter to preserve reverse/scope/checkpoint syntax, got:\n%s", formatted)
+	}
+}
+
+func TestParseRevLoopVariableNameWithoutReverseCompatCollision(t *testing.T) {
+	file, errs := parseSourceFile(t, "def walk(items: darray[int]) -> void:\n    for rev in items:\n        pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	iterStmt, ok := decl.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
+	}
+	if iterStmt.Reverse {
+		t.Fatal("expected `rev` to be parsed as the loop variable name, not the reverse compat prefix")
+	}
+	namePattern, ok := iterStmt.Pattern.(*ast.MoveBindNamePattern)
+	if !ok {
+		t.Fatalf("expected simple loop pattern, got %T", iterStmt.Pattern)
+	}
+	if namePattern.Name != "rev" {
+		t.Fatalf("expected loop variable name `rev`, got %q", namePattern.Name)
+	}
+}
+
+func TestParseLegacyReverseIterableLoopStillAcceptedAndFormatsCanonically(t *testing.T) {
+	file, errs := parseSourceFile(t, "def walk(items: darray[int]) -> void:\n    for rev value in items:\n        pass\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	iterStmt, ok := decl.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
+	}
+	if !iterStmt.Reverse {
+		t.Fatal("expected legacy reverse iterable syntax to preserve reverse flag")
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for value in rev(items):") {
+		t.Fatalf("expected formatter to normalize legacy reverse iterable syntax, got:\n%s", formatted)
 	}
 }
 
