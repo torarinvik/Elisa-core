@@ -7783,8 +7783,8 @@ def bad(owner: Arena, pool: any ThreadPool&) -> Task[i64, Pending]:
 }
 
 func TestAnalyzeAcceptsDictSurfaceTypesAndRuntimeBridge(t *testing.T) {
-	src := `extern take_runtime(values: DynDict[i32]) -> void
-extern make_runtime() -> DynDict[i32]
+	src := `extern take_runtime(values: DynDict[dstr[row], i32]) -> void
+extern make_runtime() -> DynDict[dstr[row], i32]
 
 def id[V](values: dict[dstr, V]) -> dict[dstr, V]:
 	return values
@@ -7792,7 +7792,7 @@ def id[V](values: dict[dstr, V]) -> dict[dstr, V]:
 def keep(values: dict[dstr, i32]) -> dict[dstr, i32]:
 	return id(values)
 
-def use(values: dict[dstr[row], i32]) -> dict[dstr, i32]:
+def use(values: dict[dstr[row], i32]) -> dict[dstr[row], i32]:
 	take_runtime(values)
 	return make_runtime()
 `
@@ -7800,17 +7800,16 @@ def use(values: dict[dstr[row], i32]) -> dict[dstr, i32]:
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeRejectsUnsupportedDictKeyTypes(t *testing.T) {
-	src := `def bad(values: dict[i32, i32]) -> void:
+func TestAnalyzeAcceptsGenericDictKeyTypes(t *testing.T) {
+	src := `struct Pair:
+	left: i32
+	right: i32
+
+def ok(values: dict[i32, i32], keyed: dict[Pair, i32]) -> void:
 	pass
 `
-	_, errs := parseAndAnalyze(t, "dict_bad_key.llcontext", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
-	}
-	if !strings.Contains(strings.Join(errs, "\n"), "dict currently only supports dstr keys") {
-		t.Fatalf("expected dict-key diagnostic, got:\n%s", strings.Join(errs, "\n"))
-	}
+	_, errs := parseAndAnalyze(t, "dict_generic_keys_ok.llcontext", src)
+	requireNoErrors(t, errs)
 }
 
 func TestAnalyzeRejectsAllocatingFromDestroyedRegion(t *testing.T) {
@@ -9508,13 +9507,14 @@ func TestAnalyzePinsArenaHeapPointerContracts(t *testing.T) {
 	requireFunctionReturnTypeString(t, result, "arena_vsprintf", "heap mutable u8&")
 }
 
-func TestAnalyzePinsCollectionsHeapPointerContracts(t *testing.T) {
+func TestAnalyzePinsCollectionsDictContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
 	src := loadSourceWithIncludes(t, filepath.Join(repoRoot, "Code", "llcontext_std", "collections.llcontext"), map[string]bool{})
 	result, errs := parseAndAnalyze(t, "collections.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
-	requireFunctionReturnTypeString(t, result, "arena_dict_copy_key", "heap mutable u8&")
+	requireFunctionReturnTypeString(t, result, "arena_dict_new__i64", "DynDict[dstr[key_shape], i64]")
+	requireFunctionReturnTypeString(t, result, "arena_dict_get__i64", "any mutable i64&?")
 }
 
 func TestAnalyzePinsStoresHeapPointerContracts(t *testing.T) {

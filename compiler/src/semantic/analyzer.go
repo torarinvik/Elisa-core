@@ -460,15 +460,12 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 	a.registerBuiltinStructType("NodeTable", []string{"N", "T"}, false, []builtinFieldSpec{
 		{name: "values", typ: genericTypeExpr("dview", namedTypeExpr("T", false)), mutable: false},
 	})
-	a.registerBuiltinStructType("DictBucket", []string{"T"}, false, []builtinFieldSpec{
-		{name: "state", typ: namedTypeExpr("u8", false), mutable: true},
-		{name: "hash", typ: namedTypeExpr("u64", false), mutable: true},
-		{name: "key_data", typ: refTypeExpr("u8", true), mutable: true},
-		{name: "key_len", typ: namedTypeExpr("i64", false), mutable: true},
+	a.registerBuiltinStructType("DictBucket", []string{"K", "T"}, false, []builtinFieldSpec{
+		{name: "key", typ: namedTypeExpr("K", false), mutable: true},
 		{name: "value", typ: namedTypeExpr("T", false), mutable: true},
 	})
-	a.registerBuiltinStructType("DynDict", []string{"T"}, false, []builtinFieldSpec{
-		{name: "items", typ: refToTypeExpr(genericTypeExpr("DictBucket", namedTypeExpr("T", false)), true), mutable: true},
+	a.registerBuiltinStructType("DynDict", []string{"K", "T"}, false, []builtinFieldSpec{
+		{name: "items", typ: refToTypeExpr(genericTypeExpr("DictBucket", namedTypeExpr("K", false), namedTypeExpr("T", false)), true), mutable: true},
 		{name: "count", typ: namedTypeExpr("usize", false), mutable: true},
 		{name: "used", typ: namedTypeExpr("usize", false), mutable: true},
 		{name: "capacity", typ: namedTypeExpr("usize", false), mutable: true},

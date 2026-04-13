@@ -37,6 +37,9 @@ def build(owner: Arena) -> usize:
         _ = values.entry("name").value
         _ = values.entry("name").insert(7)
         _ = values.entry("name").get_or_insert(9)
+		entry_slot = values.entry("other").get_or_insert():
+			11
+		_ = entry_slot
         return pending.name_key.count + pending.depth.count
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_store.llcontext", src)
@@ -61,6 +64,44 @@ def build(owner: Arena) -> usize:
 	}
 	if !strings.Contains(output, "dict.entry.get_or_insert.result") {
 		t.Fatalf("expected dict entry get_or_insert lowering, got:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRLowersGenericDictKeys(t *testing.T) {
+	src := `def arena_dict_get[K, T](m: any dict[K, T]&, key: K) -> mutable any T&?:
+    return null
+
+def arena_dict_put[K, T](a: mutable any Arena&, m: mutable any dict[K, T]&, key: K, value: T) -> mutable any T&?:
+    return null
+
+def arena_dict_get_or_insert[K, T](a: mutable any Arena&, m: mutable any dict[K, T]&, key: K, value: T) -> mutable any T&?:
+    return null
+
+def build(owner: Arena, key: u32) -> usize:
+    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    in alloc:
+        values: mutable dict[u32, i64] = zeroed
+        _ = values.get(key)
+        slot = values.get_or_insert(key):
+            5
+        _ = slot
+        _ = values.entry(key).found
+        _ = values.entry(key).get_or_insert(7)
+        return values.count
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_generic_dict.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "DynDict__u32__i64") {
+		t.Fatalf("expected generic dict runtime carrier for u32 keys, got:\n%s", output)
+	}
+	if !strings.Contains(output, "arena_dict_get__u32__i64") {
+		t.Fatalf("expected generic dict helper specialization for u32 keys, got:\n%s", output)
+	}
+	if !strings.Contains(output, "dict.entry.get") {
+		t.Fatalf("expected dict entry lookup lowering for generic key dict, got:\n%s", output)
 	}
 }
 

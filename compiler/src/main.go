@@ -78,7 +78,7 @@ func analyzeProgram(filename string, src []byte, stderr io.Writer) (*ast.File, *
 	result := semantic.Analyze(file)
 	if warns := result.Warnings(); len(warns) > 0 {
 		for _, w := range warns {
-			if suppressDeprecatedWarningsForTests() && strings.Contains(w, legacyCastDeprecationNotice) {
+			if shouldSuppressDeprecatedWarningForTests(w) {
 				continue
 			}
 			fmt.Fprintf(stderr, "%s\n", w)
@@ -104,7 +104,7 @@ func emitSemanticWarningsIfNoErrors(file *ast.File, stderr io.Writer) {
 	}
 	if warns := result.Warnings(); len(warns) > 0 {
 		for _, w := range warns {
-			if suppressDeprecatedWarningsForTests() && strings.Contains(w, legacyCastDeprecationNotice) {
+			if shouldSuppressDeprecatedWarningForTests(w) {
 				continue
 			}
 			fmt.Fprintf(stderr, "%s\n", w)
@@ -113,9 +113,17 @@ func emitSemanticWarningsIfNoErrors(file *ast.File, stderr io.Writer) {
 }
 
 const legacyCastDeprecationNotice = "legacy cast syntax `.cast[T]()` is deprecated"
+const legacyReverseIterableLoopDeprecationNotice = "legacy reverse iterable loop syntax `for rev ... in ...:` is deprecated"
 
 func suppressDeprecatedWarningsForTests() bool {
 	return os.Getenv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS") == "1"
+}
+
+func shouldSuppressDeprecatedWarningForTests(warning string) bool {
+	if !suppressDeprecatedWarningsForTests() {
+		return false
+	}
+	return strings.Contains(warning, legacyCastDeprecationNotice) || strings.Contains(warning, legacyReverseIterableLoopDeprecationNotice)
 }
 
 const (

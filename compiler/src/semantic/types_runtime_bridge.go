@@ -10,7 +10,7 @@ func dynArrayRuntimeInstance(t Type) (*GenericInstanceType, bool) {
 
 func dynDictRuntimeInstance(t Type) (*GenericInstanceType, bool) {
 	gi, ok := t.(*GenericInstanceType)
-	if !ok || gi.Name != "DynDict" || len(gi.Args) != 1 {
+	if !ok || gi.Name != "DynDict" || len(gi.Args) != 2 {
 		return nil, false
 	}
 	return gi, true
@@ -109,12 +109,12 @@ func classifyRuntimeBridge(a, b Type) (runtimeBridgeMatch, bool) {
 			return runtimeBridgeMatch{Kind: runtimeBridgeDStrU8Ref, DStr: dstr, U8Ref: u8Ref}, true
 		}
 	}
-	if dict, ok := a.(*DictType); ok && isDictRuntimeKeyType(dict.Key) {
+	if dict, ok := a.(*DictType); ok {
 		if dynDict, ok := dynDictRuntimeInstance(b); ok {
 			return runtimeBridgeMatch{Kind: runtimeBridgeDictDynDict, Dict: dict, DynDict: dynDict}, true
 		}
 	}
-	if dict, ok := b.(*DictType); ok && isDictRuntimeKeyType(dict.Key) {
+	if dict, ok := b.(*DictType); ok {
 		if dynDict, ok := dynDictRuntimeInstance(a); ok {
 			return runtimeBridgeMatch{Kind: runtimeBridgeDictDynDict, Dict: dict, DynDict: dynDict}, true
 		}
@@ -141,7 +141,7 @@ func sameTypeRuntimeCompatible(a, b Type) bool {
 	case runtimeBridgeDArrayDynArray:
 		return SameType(bridge.DArray.Elem, bridge.DynArray.Args[0])
 	case runtimeBridgeDictDynDict:
-		return SameType(bridge.Dict.Value, bridge.DynDict.Args[0])
+		return SameType(bridge.Dict.Key, bridge.DynDict.Args[0]) && SameType(bridge.Dict.Value, bridge.DynDict.Args[1])
 	case runtimeBridgeSViewStringView:
 		return true
 	default:
@@ -158,7 +158,7 @@ func assignableRuntimeCompatible(dst, src Type) bool {
 	case runtimeBridgeDArrayDynArray:
 		return SameType(bridge.DArray.Elem, bridge.DynArray.Args[0])
 	case runtimeBridgeDictDynDict:
-		return SameType(bridge.Dict.Value, bridge.DynDict.Args[0])
+		return SameType(bridge.Dict.Key, bridge.DynDict.Args[0]) && SameType(bridge.Dict.Value, bridge.DynDict.Args[1])
 	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeDStrU8Ref, runtimeBridgeSViewStringView:
 		return true
 	default:
@@ -182,10 +182,10 @@ func patternRuntimeCompatible(pattern, actual Type) bool {
 		return false
 	case runtimeBridgeDictDynDict:
 		if patternDict, ok := pattern.(*DictType); ok {
-			return matchTypePattern(patternDict.Value, bridge.DynDict.Args[0])
+			return matchTypePattern(patternDict.Key, bridge.DynDict.Args[0]) && matchTypePattern(patternDict.Value, bridge.DynDict.Args[1])
 		}
 		if patternDynDict, ok := dynDictRuntimeInstance(pattern); ok {
-			return matchTypePattern(patternDynDict.Args[0], bridge.Dict.Value)
+			return matchTypePattern(patternDynDict.Args[0], bridge.Dict.Key) && matchTypePattern(patternDynDict.Args[1], bridge.Dict.Value)
 		}
 		return false
 	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeDStrU8Ref, runtimeBridgeSViewStringView:

@@ -9,3 +9,6 @@ Code/benchmarks/lua_frontend_benchmark_corpus/control_flow.lua
 Code/benchmarks/lua_frontend_benchmark_corpus/labels_gotos.lua
 Code/benchmarks/lua_frontend_benchmark_corpus/closures_globals.lua
 Code/benchmarks/lua_frontend_benchmark_corpus/locals_recursion.lua
+Code/benchmarks/lua_frontend_benchmark_corpus/closure_pipeline.lua
+Code/benchmarks/lua_frontend_benchmark_corpus/control_label_matrix.lua
+Code/benchmarks/lua_frontend_benchmark_corpus/lexer_stress.lua

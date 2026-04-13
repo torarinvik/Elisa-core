@@ -100,7 +100,7 @@ python3 ./compiler/scripts/run_lua_frontend_storage_benchmark.py --json-out /tmp
 
 Useful options:
 
-- `--modes parse,checksum,env,closure,label,analysis`
+- `--modes parse,checksum,lexer,env,closure,label,analysis`
 - `--parse-iterations 20`
 - `--sample-iterations 5000`
 - `--repeats 3`
@@ -111,6 +111,7 @@ Supported modes:
 
 - `parse`
 - `checksum`
+- `lexer`
 - `sample`
 - `env`
 - `closure`
@@ -132,6 +133,9 @@ Notes:
 - With `--json-out`, it also writes a structured report with run metadata,
   per-input/per-mode measurements, aggregate summaries, and skipped-run
   reasons.
+- The profile and baseline bundle wrappers now include `checksum` in their
+  default benchmark sweeps. `lexer` mode is available explicitly with
+  `--modes lexer` or as part of a custom comma-separated mode list.
 
 ## Profile Bundle
 
@@ -338,6 +342,22 @@ Bundle comparison JSON also includes `component_summary`, which records:
 
 This makes it easier for tooling to answer questions like "was this bundle only
 metadata drift?" without walking every nested component manually.
+
+Bundle comparison JSON also includes `action_summary`, which records the current
+policy-aware view of the bundle:
+
+- `actionable_component_count`
+- `actionable_components`
+- `non_actionable_changed_component_count`
+- `non_actionable_changed_components`
+- `missing_component_count`
+- `missing_components`
+- `failing_component_count`
+- `failing_components`
+
+This makes it easy to tell which components would actually matter under the
+current comparison flags, including whether metadata drift is being ignored or
+counted.
 
 ## Analysis Entry Points
 

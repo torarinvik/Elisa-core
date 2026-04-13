@@ -71,7 +71,7 @@ fi
 
 echo "lua_frontend_baseline_out=$OUT_DIR"
 
-BENCH_ARGS="--opt-level=$OPT_LEVEL --parse-iterations $PARSE_ITERATIONS --sample-iterations $SAMPLE_ITERATIONS --repeats $REPEATS --modes parse,env,closure,label,analysis"
+BENCH_ARGS="--opt-level=$OPT_LEVEL --parse-iterations $PARSE_ITERATIONS --sample-iterations $SAMPLE_ITERATIONS --repeats $REPEATS --modes parse,checksum,env,closure,label,analysis"
 KEEP_TEMP_ARGS=""
 if [ -n "$OPT_LEVELS" ]; then
     BENCH_ARGS="$BENCH_ARGS --opt-levels=$OPT_LEVELS"

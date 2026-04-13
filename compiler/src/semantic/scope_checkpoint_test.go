@@ -26,6 +26,16 @@ def build(owner: Arena, items: darray[int]) -> usize:
 	}
 }
 
+func TestAnalyzeWarnsOnLegacyReverseIterableLoopSyntax(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "legacy_reverse_iter_warning.llcontext", `def build(items: darray[int]) -> void:
+    for rev value in items:
+        pass
+`)
+	if all := strings.Join(result.Warnings(), "\n"); !strings.Contains(all, "legacy reverse iterable loop syntax `for rev ... in ...:` is deprecated") {
+		t.Fatalf("expected legacy reverse iterable warning, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsReverseRangeForNow(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "reverse_range_rejected.llcontext", `def build() -> void:
     for rev i in 0..<10:
@@ -81,11 +91,64 @@ def build(owner: Arena, key: dstr[key_shape]) -> usize:
             _ = values.entry(key).insert(11)
         _ = values.entry(key).value
         _ = values.entry(key).get_or_insert(13)
+        entry_slot = values.entry(key).get_or_insert():
+            17
+        _ = entry_slot
         _ = values.get(key)
         _ = values.contains(key)
         _ = values.remove(key)
         values.clear()
         return pending.name_key.count + values.count
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}
+
+func TestAnalyzeGenericKeyDictSugar(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "generic_key_dict_sugar.llcontext", `
+struct Key:
+    id: u32
+
+def arena_dict_get[K, T](m: any dict[K, T]&, key: K) -> mutable any T&?:
+    return null
+
+def arena_dict_contains[K, T](m: any dict[K, T]&, key: K) -> bool:
+    return false
+
+def arena_dict_remove[K, T](m: mutable any dict[K, T]&, key: K) -> bool:
+    return false
+
+def arena_dict_clear[K, T](m: mutable any dict[K, T]&):
+    pass
+
+def arena_dict_reserve[K, T](a: mutable any Arena&, m: mutable any dict[K, T]&, min_capacity: usize) -> void:
+    pass
+
+def arena_dict_put[K, T](a: mutable any Arena&, m: mutable any dict[K, T]&, key: K, value: T) -> mutable any T&?:
+    return null
+
+def arena_dict_get_or_insert[K, T](a: mutable any Arena&, m: mutable any dict[K, T]&, key: K, value: T) -> mutable any T&?:
+    return null
+
+def build(owner: Arena, key: Key, id: u32) -> usize:
+    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    in alloc:
+        counts: mutable dict[u32, i64] = zeroed
+        keyed: mutable dict[Key, i64] = zeroed
+        _ = counts.put(id, 7)
+        count_slot = counts.get_or_insert(id):
+            9
+        _ = count_slot
+        _ = keyed.get(key)
+        _ = keyed.contains(key)
+        if keyed.entry(key).found == false:
+            _ = keyed.entry(key).insert(11)
+        _ = keyed.entry(key).value
+        _ = keyed.entry(key).get_or_insert(13)
+        _ = keyed.remove(key)
+        keyed.clear()
+        return counts.count + keyed.count
 `)
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected semantic errors: %v", errs)

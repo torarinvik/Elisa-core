@@ -408,10 +408,12 @@ func (p *Parser) parseForStmt() ast.Stmt {
 	pos := p.cur().Pos
 	p.expectIdentText("for")
 	reverse := false
+	legacyReverseSyntax := false
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "rev" && p.pos+1 < len(p.tokens) {
 		nextKind := p.tokens[p.pos+1].Kind
 		if nextKind == lexer.TOKEN_IDENT || nextKind == lexer.TOKEN_MUTABLE {
 			reverse = true
+			legacyReverseSyntax = true
 			p.advance()
 		}
 	}
@@ -449,7 +451,7 @@ func (p *Parser) parseForStmt() ast.Stmt {
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	body := p.parseBlock()
-	return &ast.IterForStmt{Position: pos, Reverse: reverse, Pattern: pattern, Mode: mode, Source: startOrSource, Body: body}
+	return &ast.IterForStmt{Position: pos, Reverse: reverse, LegacySyntax: legacyReverseSyntax, Pattern: pattern, Mode: mode, Source: startOrSource, Body: body}
 }
 
 func unwrapReverseIterableSource(expr ast.Expr) (ast.Expr, bool) {
@@ -1384,8 +1386,10 @@ func (p *Parser) rewriteGetOrInsertBlockValue(pos lexer.Pos, value ast.Expr) ast
 		_ = p.parseBlock()
 		return value
 	}
-	if len(call.Args) != 1 {
-		p.errorf("block default syntax requires get_or_insert with exactly one explicit key argument")
+	directDictCall := len(call.Args) == 1
+	entryDictCall := len(call.Args) == 0 && isDictEntryCallExpr(fieldExpr.Object)
+	if !directDictCall && !entryDictCall {
+		p.errorf("block default syntax requires either dict.get_or_insert(key) or dict.entry(key).get_or_insert() before ':'")
 		p.expect(lexer.TOKEN_COLON)
 		p.expectNewline()
 		_ = p.parseBlock()
@@ -1394,6 +1398,15 @@ func (p *Parser) rewriteGetOrInsertBlockValue(pos lexer.Pos, value ast.Expr) ast
 	defaultExpr := p.parseSingleExprBlockValue()
 	call.Args = append(call.Args, defaultExpr)
 	return call
+}
+
+func isDictEntryCallExpr(expr ast.Expr) bool {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok || call == nil {
+		return false
+	}
+	fieldExpr, ok := call.Func.(*ast.FieldExpr)
+	return ok && fieldExpr != nil && fieldExpr.Field == "entry"
 }
 
 func (p *Parser) parseSingleExprBlockValue() ast.Expr {

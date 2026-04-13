@@ -963,8 +963,8 @@ func (a *Analyzer) resolveDictType(keyExpr ast.TypeExpr, valueExpr ast.TypeExpr,
 	if IsInvalidType(keyType) || IsInvalidType(valueType) {
 		return invalidType
 	}
-	if !isDictRuntimeKeyType(keyType) {
-		a.errorf(keyExpr.Pos(), "dict currently only supports dstr keys in the first runtime-backed slice, got %s", keyType.String())
+	if a.containsAffineHandleValues(keyType, map[string]bool{}) {
+		a.errorf(keyExpr.Pos(), "dict keys cannot contain affine handles, got %s", keyType.String())
 		return invalidType
 	}
 	return &DictType{Key: keyType, Value: valueType, SurfaceName: surfaceName}

@@ -138,7 +138,7 @@ func (a *Analyzer) hostABILayoutForType(t Type, seen map[string]bool) (hostABILa
 		if !ok || base == nil {
 			return hostABILayout{}, false
 		}
-		instance := &GenericInstanceType{Name: "DynDict", Base: base, Args: []Type{tt.Value}}
+		instance := &GenericInstanceType{Name: "DynDict", Base: base, Args: []Type{tt.Key, tt.Value}}
 		return a.hostABILayoutForType(instance, seen)
 	case *PackedEnumStoreType, *PackedVariantViewType, *EnumType, *OptionalType, *ErrorUnionType:
 		return hostABILayout{}, false

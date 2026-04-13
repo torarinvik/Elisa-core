@@ -6286,11 +6286,13 @@ func (a *Analyzer) collectRuntimeBridgeBindings(pattern, actual Type, bindings m
 		return true
 	case runtimeBridgeDictDynDict:
 		if patternDict, ok := pattern.(*DictType); ok {
-			a.collectTypeBindings(patternDict.Value, bridge.DynDict.Args[0], bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
+			a.collectTypeBindings(patternDict.Key, bridge.DynDict.Args[0], bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
+			a.collectTypeBindings(patternDict.Value, bridge.DynDict.Args[1], bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
 			return true
 		}
 		if patternDynDict, ok := dynDictRuntimeInstance(pattern); ok {
-			a.collectTypeBindings(patternDynDict.Args[0], bridge.Dict.Value, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
+			a.collectTypeBindings(patternDynDict.Args[0], bridge.Dict.Key, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
+			a.collectTypeBindings(patternDynDict.Args[1], bridge.Dict.Value, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
 			return true
 		}
 		return true
@@ -8377,7 +8379,7 @@ func (a *Analyzer) runtimeBackedStructType(t Type) Type {
 		if !ok {
 			return nil
 		}
-		return &GenericInstanceType{Name: "DynDict", Base: base, Args: []Type{dict.Value}}
+		return &GenericInstanceType{Name: "DynDict", Base: base, Args: []Type{dict.Key, dict.Value}}
 	}
 	darray, ok := t.(*DArrayType)
 	if !ok {

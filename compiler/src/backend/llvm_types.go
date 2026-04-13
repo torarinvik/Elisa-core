@@ -334,7 +334,7 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 			err = fmt.Errorf("missing runtime struct DynDict")
 			break
 		}
-		_, err = g.ensureGenericInstanceStruct(&semantic.GenericInstanceType{Name: "DynDict", Base: base, Args: []semantic.Type{tt.Value}})
+		_, err = g.ensureGenericInstanceStruct(&semantic.GenericInstanceType{Name: "DynDict", Base: base, Args: []semantic.Type{tt.Key, tt.Value}})
 	case *semantic.EnumType:
 		if tt.Decl != nil {
 			for _, fieldDecl := range tt.Decl.Common {
@@ -803,7 +803,7 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		if !ok {
 			return nil, fmt.Errorf("missing runtime struct DynDict")
 		}
-		return g.ensureGenericInstanceStruct(&semantic.GenericInstanceType{Name: "DynDict", Base: base, Args: []semantic.Type{tt.Value}})
+		return g.ensureGenericInstanceStruct(&semantic.GenericInstanceType{Name: "DynDict", Base: base, Args: []semantic.Type{tt.Key, tt.Value}})
 	case *semantic.DictEntryType:
 		dictRefType, err := g.lowerType(&semantic.RefType{Elem: tt.Dict, Mutable: true, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true})
 		if err != nil {

@@ -5288,7 +5288,7 @@ func (s *functionState) emitBuiltinDictEntryCall(expr *ast.CallExpr) (C.LLVMValu
 	if err != nil {
 		return nil, nil, true, err
 	}
-	getCallee, getType, err := s.ensureRuntimeFunction("arena_dict_get", map[string]semantic.Type{"T": dictType.Value})
+	getCallee, getType, err := s.ensureRuntimeFunction("arena_dict_get", map[string]semantic.Type{"K": dictType.Key, "T": dictType.Value})
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -5386,7 +5386,7 @@ func (s *functionState) emitBuiltinDictEntryInsertCall(expr *ast.CallExpr) (C.LL
 	if err != nil {
 		return nil, nil, true, err
 	}
-	putCallee, putType, err := s.ensureRuntimeFunction("arena_dict_put", map[string]semantic.Type{"T": entryType.Dict.Value})
+	putCallee, putType, err := s.ensureRuntimeFunction("arena_dict_put", map[string]semantic.Type{"K": entryType.Dict.Key, "T": entryType.Dict.Value})
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -5484,7 +5484,7 @@ func (s *functionState) emitBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) 
 	if err != nil {
 		return nil, nil, true, err
 	}
-	getOrInsertCallee, getOrInsertType, err := s.ensureRuntimeFunction("arena_dict_get_or_insert", map[string]semantic.Type{"T": entryType.Dict.Value})
+	getOrInsertCallee, getOrInsertType, err := s.ensureRuntimeFunction("arena_dict_get_or_insert", map[string]semantic.Type{"K": entryType.Dict.Key, "T": entryType.Dict.Value})
 	if err != nil {
 		return nil, nil, true, err
 	}

@@ -131,7 +131,7 @@ func mergeTypeBindings(dst map[string]semantic.Type, src map[string]semantic.Typ
 
 func dynDictRuntimeInstance(t semantic.Type) (*semantic.GenericInstanceType, bool) {
 	gi, ok := t.(*semantic.GenericInstanceType)
-	if !ok || gi.Name != "DynDict" || len(gi.Args) != 1 {
+	if !ok || gi.Name != "DynDict" || len(gi.Args) != 2 {
 		return nil, false
 	}
 	return gi, true
@@ -143,13 +143,15 @@ func collectSpecializationBindings(pattern semantic.Type, actual semantic.Type, 
 	}
 	if patternDynDict, ok := dynDictRuntimeInstance(pattern); ok {
 		if actualDict, ok := actual.(*semantic.DictType); ok {
-			collectSpecializationBindings(patternDynDict.Args[0], actualDict.Value, bindings)
+			collectSpecializationBindings(patternDynDict.Args[0], actualDict.Key, bindings)
+			collectSpecializationBindings(patternDynDict.Args[1], actualDict.Value, bindings)
 			return
 		}
 	}
 	if patternDict, ok := pattern.(*semantic.DictType); ok {
 		if actualDynDict, ok := dynDictRuntimeInstance(actual); ok {
-			collectSpecializationBindings(patternDict.Value, actualDynDict.Args[0], bindings)
+			collectSpecializationBindings(patternDict.Key, actualDynDict.Args[0], bindings)
+			collectSpecializationBindings(patternDict.Value, actualDynDict.Args[1], bindings)
 			return
 		}
 	}

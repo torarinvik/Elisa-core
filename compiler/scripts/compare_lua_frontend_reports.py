@@ -172,6 +172,46 @@ def attach_bundle_summary(comparison: dict[str, Any]) -> None:
         "components_by_verdict": components_by_verdict,
     }
 
+
+def attach_bundle_action_summary(
+    comparison: dict[str, Any],
+    *,
+    fail_on_changes: bool,
+    fail_on_metadata_change: bool,
+) -> None:
+    if comparison["tool"] != "bundle_directory":
+        return
+
+    actionable_components: list[str] = []
+    non_actionable_changed_components: list[str] = []
+
+    for component_name, nested in comparison["components"].items():
+        if comparison_has_actionable_changes(nested, fail_on_metadata_change=fail_on_metadata_change):
+            actionable_components.append(component_name)
+        elif nested.get("overall_verdict") != "clean":
+            non_actionable_changed_components.append(component_name)
+
+    missing_component_names = [entry["component"] for entry in comparison["missing_components"]]
+    failing_components = []
+    if fail_on_changes:
+        failing_components.extend(actionable_components)
+        failing_components.extend(missing_component_names)
+
+    comparison["action_summary"] = {
+        "policy": {
+            "fail_on_changes": fail_on_changes,
+            "fail_on_metadata_change": fail_on_metadata_change,
+        },
+        "actionable_component_count": len(actionable_components),
+        "actionable_components": actionable_components,
+        "non_actionable_changed_component_count": len(non_actionable_changed_components),
+        "non_actionable_changed_components": non_actionable_changed_components,
+        "missing_component_count": len(missing_component_names),
+        "missing_components": missing_component_names,
+        "failing_component_count": len(failing_components),
+        "failing_components": failing_components,
+    }
+
 def comparison_has_actionable_changes(comparison: dict[str, Any], *, fail_on_metadata_change: bool) -> bool:
     tool = comparison["tool"]
     if tool == "run_lua_frontend_differential.py":
@@ -791,6 +831,15 @@ def print_comparison(comparison: dict[str, Any]) -> None:
                 f"changed={verdict_counts.get('changed', 0)} "
                 f"metadata-drift={verdict_counts.get('metadata-drift', 0)}"
             )
+        action_summary = comparison.get("action_summary")
+        if action_summary is not None:
+            print(
+                "ACTION_SUMMARY "
+                f"actionable={action_summary['actionable_component_count']} "
+                f"ignored={action_summary['non_actionable_changed_component_count']} "
+                f"missing={action_summary['missing_component_count']} "
+                f"failing={action_summary['failing_component_count']}"
+            )
         for entry in comparison["missing_components"]:
             print(
                 f"MISSING component={entry['component']} "
@@ -884,6 +933,11 @@ def main() -> int:
     annotate_verdicts(comparison)
     attach_bundle_summary(comparison)
     attach_comparison_policy(comparison, policy)
+    attach_bundle_action_summary(
+        comparison,
+        fail_on_changes=policy["fail_on_changes"],
+        fail_on_metadata_change=policy["fail_on_metadata_change"],
+    )
     attach_exit_evaluation(
         comparison,
         fail_on_changes=policy["fail_on_changes"],

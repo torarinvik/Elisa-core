@@ -1421,6 +1421,9 @@ func TestParseReverseIterableForScopeAndCheckpointStatements(t *testing.T) {
 	if !iterStmt.Reverse {
 		t.Fatal("expected iterable loop to preserve reverse flag")
 	}
+	if iterStmt.LegacySyntax {
+		t.Fatal("expected canonical rev(items) syntax not to set legacy reverse syntax marker")
+	}
 	if _, ok := decl.Body[1].(*ast.ScopeStmt); !ok {
 		t.Fatalf("expected scope statement, got %T", decl.Body[1])
 	}
@@ -1452,6 +1455,9 @@ func TestParseRevLoopVariableNameWithoutReverseCompatCollision(t *testing.T) {
 	if iterStmt.Reverse {
 		t.Fatal("expected `rev` to be parsed as the loop variable name, not the reverse compat prefix")
 	}
+	if iterStmt.LegacySyntax {
+		t.Fatal("expected `rev` loop variable spelling not to set legacy reverse syntax marker")
+	}
 	namePattern, ok := iterStmt.Pattern.(*ast.MoveBindNamePattern)
 	if !ok {
 		t.Fatalf("expected simple loop pattern, got %T", iterStmt.Pattern)
@@ -1473,6 +1479,9 @@ func TestParseLegacyReverseIterableLoopStillAcceptedAndFormatsCanonically(t *tes
 	}
 	if !iterStmt.Reverse {
 		t.Fatal("expected legacy reverse iterable syntax to preserve reverse flag")
+	}
+	if !iterStmt.LegacySyntax {
+		t.Fatal("expected legacy reverse iterable syntax to set legacy syntax marker")
 	}
 	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for value in rev(items):") {
 		t.Fatalf("expected formatter to normalize legacy reverse iterable syntax, got:\n%s", formatted)
@@ -1551,6 +1560,78 @@ func TestParseGetOrInsertBlockSugarWithSetupStatements(t *testing.T) {
 	}
 	if len(block.Stmts) != 1 {
 		t.Fatalf("expected one setup stmt in expr block, got %d", len(block.Stmts))
+	}
+}
+
+func TestParseDictEntryGetOrInsertBlockSugar(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(values: dict[dstr[key_shape], i64], key: dstr[key_shape]):\n    slot = values.entry(key).get_or_insert():\n        42\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok || len(fn.Body) != 1 {
+		t.Fatalf("expected single function body stmt, got %#v", file.Decls[0])
+	}
+	decl, ok := fn.Body[0].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected var decl stmt, got %T", fn.Body[0])
+	}
+	call, ok := decl.Value.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected rewritten call value, got %T", decl.Value)
+	}
+	callee, ok := call.Func.(*ast.FieldExpr)
+	if !ok || callee.Field != "get_or_insert" {
+		t.Fatalf("expected get_or_insert field call, got %#v", call.Func)
+	}
+	if len(call.Args) != 1 {
+		t.Fatalf("expected rewritten entry get_or_insert call to have one default arg, got %d", len(call.Args))
+	}
+	entryCall, ok := callee.Object.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected get_or_insert receiver to stay an entry call, got %T", callee.Object)
+	}
+	entryField, ok := entryCall.Func.(*ast.FieldExpr)
+	if !ok || entryField.Field != "entry" {
+		t.Fatalf("expected entry receiver field call, got %#v", entryCall.Func)
+	}
+	if len(entryCall.Args) != 1 {
+		t.Fatalf("expected entry call to keep one key arg, got %d", len(entryCall.Args))
+	}
+	if _, ok := call.Args[0].(*ast.IntLit); !ok {
+		t.Fatalf("expected block expression to become get_or_insert default arg, got %T", call.Args[0])
+	}
+}
+
+func TestParseGetOrInsertBlockSugarWithGenericDictKey(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(values: dict[u32, i64], key: u32):\n    slot = values.get_or_insert(key):\n        42\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok || len(fn.Body) != 1 {
+		t.Fatalf("expected single function body stmt, got %#v", file.Decls[0])
+	}
+	decl, ok := fn.Body[0].(*ast.VarDeclStmt)
+	if !ok {
+		t.Fatalf("expected var decl stmt, got %T", fn.Body[0])
+	}
+	call, ok := decl.Value.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected rewritten call value, got %T", decl.Value)
+	}
+	callee, ok := call.Func.(*ast.FieldExpr)
+	if !ok || callee.Field != "get_or_insert" {
+		t.Fatalf("expected get_or_insert field call, got %#v", call.Func)
+	}
+	if len(call.Args) != 2 {
+		t.Fatalf("expected rewritten get_or_insert call to have key and default args, got %d", len(call.Args))
+	}
+	if _, ok := call.Args[0].(*ast.Ident); !ok {
+		t.Fatalf("expected first arg to stay the key ident, got %T", call.Args[0])
+	}
+	if _, ok := call.Args[1].(*ast.IntLit); !ok {
+		t.Fatalf("expected block expression to become second call arg, got %T", call.Args[1])
 	}
 }
 

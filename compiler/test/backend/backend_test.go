@@ -2953,8 +2953,8 @@ def build() -> Token:
 }
 
 func TestGenerateLLVMIRLowersDictSurfaceTypesViaDynDictCarrier(t *testing.T) {
-	src := `extern take_runtime(values: DynDict[i32]) -> void
-extern make_runtime() -> DynDict[i32]
+	src := `extern take_runtime(values: DynDict[dstr, i32]) -> void
+extern make_runtime() -> DynDict[dstr, i32]
 
 def id[V](values: dict[dstr, V]) -> dict[dstr, V]:
 	return values
@@ -2975,16 +2975,16 @@ def from_runtime() -> dict[dstr, i32]:
 	}
 
 	checks := []string{
-		"%DynDict__i32 = type { ptr, i64, i64, i64, ptr }",
-		"declare void @take_runtime(%DynDict__i32)",
-		"declare %DynDict__i32 @make_runtime()",
-		"define %DynDict__i32 @id__i32(%DynDict__i32",
-		"define %DynDict__i32 @keep(%DynDict__i32",
-		"call %DynDict__i32 @id__i32(%DynDict__i32",
-		"define void @pass_runtime(%DynDict__i32",
-		"call void @take_runtime(%DynDict__i32",
-		"define %DynDict__i32 @from_runtime()",
-		"call %DynDict__i32 @make_runtime()",
+		"%DynDict__dstr__i32 = type { ptr, i64, i64, i64, ptr }",
+		"declare void @take_runtime(%DynDict__dstr__i32)",
+		"declare %DynDict__dstr__i32 @make_runtime()",
+		"define %DynDict__dstr__i32 @id__i32(%DynDict__dstr__i32",
+		"define %DynDict__dstr__i32 @keep(%DynDict__dstr__i32",
+		"call %DynDict__dstr__i32 @id__i32(%DynDict__dstr__i32",
+		"define void @pass_runtime(%DynDict__dstr__i32",
+		"call void @take_runtime(%DynDict__dstr__i32",
+		"define %DynDict__dstr__i32 @from_runtime()",
+		"call %DynDict__dstr__i32 @make_runtime()",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -3042,14 +3042,14 @@ func TestGenerateLLVMIRLowersFrontendStressFixture(t *testing.T) {
 	checks := []string{
 		"%SourceSpan = type { i64, i64 }",
 		"%Token = type { i32, %SourceSpan, ptr }",
-		"%DynDict__Symbol = type { ptr, i64, i64, i64, ptr }",
-		"%Scope = type { ptr, %DynDict__Symbol, i64 }",
+		"%DynDict__dstr__Symbol = type { ptr, i64, i64, i64, ptr }",
+		"%Scope = type { ptr, %DynDict__dstr__Symbol, i64 }",
 		"%ParserState = type { %DynArrayView, i64, ptr }",
 		"define %DynArrayView @make_tokens()",
 		"define i32 @frontend_scope_stress(ptr",
 		"define i64 @frontend_region_token(i64",
 		"define i32 @frontend_smoke(ptr",
-		"define %DynDict__Symbol @arena_dict_new__Symbol(ptr",
+		"define %DynDict__dstr__Symbol @arena_dict_new__Symbol(ptr",
 		"define i32 @arena_dict_put__Symbol(ptr",
 		"define i1 @arena_dict_contains__Symbol(ptr",
 		"call ptr @new_region(i64 2048)",
