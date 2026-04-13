@@ -176,7 +176,7 @@ go test ./test/benchmarks -run '^$' -bench '^BenchmarkEncodingJSONParseSynthetic
 There is also now a Lua frontend storage-layout benchmark lane for comparing the checked-in side-table packed-span layout against a temporary inline-control variant:
 
 - `../Code/llcontext_lua/src/lua_ast.llcontext` uses `@storage(side_table)` on `LuaNode.common.span`
-- `../Code/benchmarks/lua_frontend_bench.c` benchmarks exported parse/sample checksum entry points
+- `../Code/benchmarks/lua_frontend_bench.c` benchmarks exported parse/checksum/sample entry points plus the semantic analysis modes
 - `./scripts/run_lua_frontend_storage_benchmark.py` builds both layouts, generates valid Lua input, runs repeated parse/sample measurements, and summarizes throughput deltas
 
 One way to run it is:

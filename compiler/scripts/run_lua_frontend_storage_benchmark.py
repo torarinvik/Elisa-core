@@ -11,6 +11,7 @@ records a skip instead of failing the whole sweep.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import statistics
 import subprocess
@@ -20,7 +21,7 @@ from pathlib import Path
 from typing import Iterable
 
 
-VALID_MODES = ("parse", "sample", "env", "closure", "label", "analysis")
+VALID_MODES = ("parse", "checksum", "sample", "env", "closure", "label", "analysis")
 MIB_PER_SECOND_RE = re.compile(r"MiB/s=([0-9]+(?:\.[0-9]+)?)")
 
 
@@ -34,7 +35,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--corpus-manifest", default=None, help="Optional manifest of real-Lua corpus files relative to the repo root")
     parser.add_argument("--skip-real-corpus", action="store_true", help="Only benchmark the synthetic generated input")
     parser.add_argument("--opt-level", default="-O3", help="Compiler/clang optimization flag")
+    parser.add_argument("--opt-levels", default=None, help="Optional comma-separated optimization flags to benchmark in one run (for example: -O0,-O2,-O3)")
     parser.add_argument("--keep-temp", action="store_true", help="Keep temporary build artifacts and inline-control files")
+    parser.add_argument("--json-out", default=None, help="Write a machine-readable JSON benchmark report to this path")
     return parser.parse_args()
 
 
@@ -56,6 +59,15 @@ def parse_modes(text: str) -> list[str]:
     if invalid:
         raise SystemExit(f"unsupported benchmark mode(s): {', '.join(invalid)}")
     return modes
+
+
+def parse_opt_levels(opt_level: str, opt_levels: str | None) -> list[str]:
+    if opt_levels is None:
+        return [opt_level]
+    levels = [part.strip() for part in opt_levels.split(",") if part.strip()]
+    if not levels:
+        raise SystemExit("at least one optimization level is required when --opt-levels is provided")
+    return levels
 
 
 def iterations_for_mode(args: argparse.Namespace, mode: str) -> int:
@@ -140,10 +152,29 @@ def build_frontend(
     header_path = out_dir / "lua_frontend.h"
     object_path = out_dir / "lua_frontend.o"
     bench_path = out_dir / "lua_frontend_bench"
+    benchmarks_dir = harness_path.parent
+    runtime_shims_path = benchmarks_dir / "json_parser_runtime_shims.c"
+    concurrency_runtime_path = benchmarks_dir / "json_parser_concurrency_runtime.c"
 
     run(["go", "run", "./src", opt_level, "-emit", "header", "-o", str(header_path), str(source_path)], cwd=compiler_dir)
     run(["go", "run", "./src", opt_level, "-emit", "obj", "-o", str(object_path), str(source_path)], cwd=compiler_dir)
-    run(["clang", opt_level, "-I", str(out_dir), str(harness_path), str(object_path), "-o", str(bench_path)], cwd=compiler_dir)
+    run(
+        [
+            "clang",
+            opt_level,
+            "-pthread",
+            "-Wl,-undefined,dynamic_lookup",
+            "-I",
+            str(out_dir),
+            str(harness_path),
+            str(runtime_shims_path),
+            str(concurrency_runtime_path),
+            str(object_path),
+            "-o",
+            str(bench_path),
+        ],
+        cwd=compiler_dir,
+    )
     return bench_path
 
 
@@ -192,6 +223,70 @@ def delta_percent(current: float, inline: float) -> float:
     return ((current - inline) / inline) * 100.0
 
 
+def write_json_report(
+    out_path: Path,
+    *,
+    repo_root: Path,
+    manifest_path: Path,
+    modes: list[str],
+    opt_levels: list[str],
+    temp_root: Path,
+    keep_temp: bool,
+    default_opt_level: str,
+    stmt_count: int,
+    parse_iterations: int,
+    sample_iterations: int,
+    repeats: int,
+    skip_real_corpus: bool,
+    current_benches_by_opt: dict[str, Path],
+    inline_benches_by_opt: dict[str, Path],
+    inline_ast_path: Path | None,
+    inline_frontend_path: Path | None,
+    inputs: list[tuple[str, Path]],
+    runs: list[dict[str, object]],
+    aggregate_summaries: list[dict[str, object]],
+    skipped: list[dict[str, str]],
+) -> None:
+    report = {
+        "tool": "run_lua_frontend_storage_benchmark.py",
+        "repo_root": str(repo_root),
+        "manifest_path": str(manifest_path),
+        "modes": modes,
+        "opt_levels": opt_levels,
+        "temp_root": str(temp_root),
+        "keep_temp": keep_temp,
+        "opt_level": default_opt_level,
+        "stmt_count": stmt_count,
+        "parse_iterations": parse_iterations,
+        "sample_iterations": sample_iterations,
+        "repeats": repeats,
+        "skip_real_corpus": skip_real_corpus,
+        "current_bench": str(current_benches_by_opt[opt_levels[0]]),
+        "inline_bench": None if opt_levels[0] not in inline_benches_by_opt else str(inline_benches_by_opt[opt_levels[0]]),
+        "current_benches_by_opt_level": {
+            opt_level: str(path) for opt_level, path in sorted(current_benches_by_opt.items())
+        },
+        "inline_benches_by_opt_level": {
+            opt_level: str(path) for opt_level, path in sorted(inline_benches_by_opt.items())
+        },
+        "inline_ast": None if inline_ast_path is None else str(inline_ast_path),
+        "inline_frontend": None if inline_frontend_path is None else str(inline_frontend_path),
+        "inputs": [{"label": label, "path": str(path)} for label, path in inputs],
+        "runs": runs,
+        "aggregate_summaries": aggregate_summaries,
+        "skipped": skipped,
+        "summary": {
+            "run_count": len(runs),
+            "aggregate_count": len(aggregate_summaries),
+            "skipped_count": len(skipped),
+            "inline_available": len(inline_benches_by_opt) > 0,
+            "opt_level_count": len(opt_levels),
+        },
+    }
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def main() -> int:
     args = parse_args()
     if args.stmt_count <= 0 or args.parse_iterations <= 0 or args.sample_iterations <= 0 or args.repeats <= 0:
@@ -203,38 +298,41 @@ def main() -> int:
     harness_path = repo_root / "Code" / "benchmarks" / "lua_frontend_bench.c"
     manifest_path = Path(args.corpus_manifest) if args.corpus_manifest else repo_root / "Code" / "benchmarks" / "lua_frontend_corpus_manifest.txt"
     modes = parse_modes(args.modes)
+    opt_levels = parse_opt_levels(args.opt_level, args.opt_levels)
 
     temp_root_obj = tempfile.TemporaryDirectory(prefix="lua_frontend_storage_bench.")
     temp_root = Path(temp_root_obj.name)
     input_path = temp_root / "synthetic_bench.lua"
-    current_out = temp_root / "current"
-    inline_out = temp_root / "inline"
-    current_out.mkdir(parents=True, exist_ok=True)
-    inline_out.mkdir(parents=True, exist_ok=True)
-
     inline_ast_path: Path | None = None
     inline_frontend_path: Path | None = None
+    current_bench_by_opt: dict[str, Path] = {}
+    inline_bench_by_opt: dict[str, Path] = {}
 
     try:
         build_valid_input(input_path, args.stmt_count)
         inline_ast_path, inline_frontend_path = make_inline_control(lua_src_dir, args.keep_temp)
 
-        current_bench = build_frontend(
-            compiler_dir=compiler_dir,
-            source_path=lua_src_dir / "lua_frontend.llcontext",
-            out_dir=current_out,
-            opt_level=args.opt_level,
-            harness_path=harness_path,
-        )
-        inline_bench: Path | None = None
-        if inline_frontend_path is not None:
-            inline_bench = build_frontend(
+        for opt_level in opt_levels:
+            opt_tag = opt_level.replace("-", "opt_").replace("+", "plus").replace(".", "_")
+            current_out = temp_root / f"current_{opt_tag}"
+            inline_out = temp_root / f"inline_{opt_tag}"
+            current_out.mkdir(parents=True, exist_ok=True)
+            inline_out.mkdir(parents=True, exist_ok=True)
+            current_bench_by_opt[opt_level] = build_frontend(
                 compiler_dir=compiler_dir,
-                source_path=inline_frontend_path,
-                out_dir=inline_out,
-                opt_level=args.opt_level,
+                source_path=lua_src_dir / "lua_frontend.llcontext",
+                out_dir=current_out,
+                opt_level=opt_level,
                 harness_path=harness_path,
             )
+            if inline_frontend_path is not None:
+                inline_bench_by_opt[opt_level] = build_frontend(
+                    compiler_dir=compiler_dir,
+                    source_path=inline_frontend_path,
+                    out_dir=inline_out,
+                    opt_level=opt_level,
+                    harness_path=harness_path,
+                )
 
         inputs: list[tuple[str, Path]] = [("synthetic", input_path)]
         if not args.skip_real_corpus:
@@ -245,58 +343,177 @@ def main() -> int:
         else:
             print(f"temp_root={temp_root} (temporary)")
 
-        current_mode_averages: dict[str, list[float]] = {}
-        inline_mode_averages: dict[str, list[float]] = {}
+        current_mode_averages: dict[tuple[str, str], list[float]] = {}
+        inline_mode_averages: dict[tuple[str, str], list[float]] = {}
         skipped_labels: list[str] = []
+        skipped_entries: list[dict[str, str]] = []
+        run_entries: list[dict[str, object]] = []
+        aggregate_entries: list[dict[str, object]] = []
 
-        for input_label, bench_input in inputs:
-            for mode in modes:
-                iterations = iterations_for_mode(args, mode)
-                try:
-                    current_values = run_suite(
-                        current_bench,
-                        bench_input,
-                        iterations,
-                        args.repeats,
-                        mode,
-                        f"CURRENT_{input_label}_{mode}".upper(),
-                    )
-                except RuntimeError as exc:
-                    if input_label == "synthetic":
-                        raise
-                    print(f"SKIP label=current_{input_label}_{mode} reason={exc}")
-                    skipped_labels.append(f"current_{input_label}_{mode}")
-                    continue
-                current_avg = summarize(f"current_{input_label}_{mode}", current_values)
-                current_mode_averages.setdefault(mode, []).append(current_avg)
-                if inline_bench is not None:
+        for opt_level in opt_levels:
+            current_bench = current_bench_by_opt[opt_level]
+            inline_bench = inline_bench_by_opt.get(opt_level)
+            for input_label, bench_input in inputs:
+                for mode in modes:
+                    iterations = iterations_for_mode(args, mode)
                     try:
-                        inline_values = run_suite(
-                            inline_bench,
+                        current_values = run_suite(
+                            current_bench,
                             bench_input,
                             iterations,
                             args.repeats,
                             mode,
-                            f"INLINE_{input_label}_{mode}".upper(),
+                            f"CURRENT_{opt_level}_{input_label}_{mode}".upper(),
                         )
                     except RuntimeError as exc:
-                        print(f"SKIP label=inline_{input_label}_{mode} reason={exc}")
-                        skipped_labels.append(f"inline_{input_label}_{mode}")
+                        if input_label == "synthetic":
+                            raise
+                        print(f"SKIP label=current_{opt_level}_{input_label}_{mode} reason={exc}")
+                        skipped_labels.append(f"current_{opt_level}_{input_label}_{mode}")
+                        skipped_entries.append({"variant": "current", "opt_level": opt_level, "input": input_label, "mode": mode, "label": f"current_{opt_level}_{input_label}_{mode}", "reason": str(exc)})
                         continue
-                    inline_avg = summarize(f"inline_{input_label}_{mode}", inline_values)
-                    inline_mode_averages.setdefault(mode, []).append(inline_avg)
-                    print(f"SUMMARY label={input_label}_{mode}_delta current_vs_inline_pct={delta_percent(current_avg, inline_avg):+.2f}")
+                    current_avg = summarize(f"current_{opt_level}_{input_label}_{mode}", current_values)
+                    current_mode_averages.setdefault((opt_level, mode), []).append(current_avg)
+                    run_entries.append(
+                        {
+                            "variant": "current",
+                            "opt_level": opt_level,
+                            "input": input_label,
+                            "input_path": str(bench_input),
+                            "mode": mode,
+                            "iterations": iterations,
+                            "repeats": args.repeats,
+                            "values_MiB_s": current_values,
+                            "avg_MiB_s": current_avg,
+                            "min_MiB_s": min(current_values),
+                            "max_MiB_s": max(current_values),
+                        }
+                    )
+                    if inline_bench is not None:
+                        try:
+                            inline_values = run_suite(
+                                inline_bench,
+                                bench_input,
+                                iterations,
+                                args.repeats,
+                                mode,
+                                f"INLINE_{opt_level}_{input_label}_{mode}".upper(),
+                            )
+                        except RuntimeError as exc:
+                            print(f"SKIP label=inline_{opt_level}_{input_label}_{mode} reason={exc}")
+                            skipped_labels.append(f"inline_{opt_level}_{input_label}_{mode}")
+                            skipped_entries.append({"variant": "inline", "opt_level": opt_level, "input": input_label, "mode": mode, "label": f"inline_{opt_level}_{input_label}_{mode}", "reason": str(exc)})
+                            continue
+                        inline_avg = summarize(f"inline_{opt_level}_{input_label}_{mode}", inline_values)
+                        inline_mode_averages.setdefault((opt_level, mode), []).append(inline_avg)
+                        run_entries.append(
+                            {
+                                "variant": "inline",
+                                "opt_level": opt_level,
+                                "input": input_label,
+                                "input_path": str(bench_input),
+                                "mode": mode,
+                                "iterations": iterations,
+                                "repeats": args.repeats,
+                                "values_MiB_s": inline_values,
+                                "avg_MiB_s": inline_avg,
+                                "min_MiB_s": min(inline_values),
+                                "max_MiB_s": max(inline_values),
+                            }
+                        )
+                        per_input_delta = delta_percent(current_avg, inline_avg)
+                        print(f"SUMMARY label={opt_level}_{input_label}_{mode}_delta current_vs_inline_pct={per_input_delta:+.2f}")
+                        aggregate_entries.append(
+                            {
+                                "kind": "per_input_delta",
+                                "opt_level": opt_level,
+                                "input": input_label,
+                                "mode": mode,
+                                "current_avg_MiB_s": current_avg,
+                                "inline_avg_MiB_s": inline_avg,
+                                "current_vs_inline_pct": per_input_delta,
+                            }
+                        )
 
-        for mode in modes:
-            if current_mode_averages.get(mode):
-                current_avg = summarize(f"aggregate_current_{mode}", current_mode_averages[mode])
-            else:
-                print(f"SUMMARY label=aggregate_current_{mode} skipped=1 no_successful_inputs=1")
-                continue
-            if inline_mode_averages.get(mode):
-                inline_avg = summarize(f"aggregate_inline_{mode}", inline_mode_averages[mode])
-                print(f"SUMMARY label=aggregate_{mode}_delta current_vs_inline_pct={delta_percent(current_avg, inline_avg):+.2f}")
+        for opt_level in opt_levels:
+            for mode in modes:
+                aggregate_key = (opt_level, mode)
+                if current_mode_averages.get(aggregate_key):
+                    current_avg = summarize(f"aggregate_current_{opt_level}_{mode}", current_mode_averages[aggregate_key])
+                    aggregate_entries.append(
+                        {
+                            "kind": "aggregate_current",
+                            "opt_level": opt_level,
+                            "mode": mode,
+                            "avg_MiB_s": current_avg,
+                            "min_MiB_s": min(current_mode_averages[aggregate_key]),
+                            "max_MiB_s": max(current_mode_averages[aggregate_key]),
+                            "input_count": len(current_mode_averages[aggregate_key]),
+                        }
+                    )
+                else:
+                    print(f"SUMMARY label=aggregate_current_{opt_level}_{mode} skipped=1 no_successful_inputs=1")
+                    aggregate_entries.append(
+                        {
+                            "kind": "aggregate_current",
+                            "opt_level": opt_level,
+                            "mode": mode,
+                            "skipped": True,
+                            "no_successful_inputs": True,
+                        }
+                    )
+                    continue
+                if inline_mode_averages.get(aggregate_key):
+                    inline_avg = summarize(f"aggregate_inline_{opt_level}_{mode}", inline_mode_averages[aggregate_key])
+                    aggregate_entries.append(
+                        {
+                            "kind": "aggregate_inline",
+                            "opt_level": opt_level,
+                            "mode": mode,
+                            "avg_MiB_s": inline_avg,
+                            "min_MiB_s": min(inline_mode_averages[aggregate_key]),
+                            "max_MiB_s": max(inline_mode_averages[aggregate_key]),
+                            "input_count": len(inline_mode_averages[aggregate_key]),
+                        }
+                    )
+                    aggregate_delta = delta_percent(current_avg, inline_avg)
+                    print(f"SUMMARY label=aggregate_{opt_level}_{mode}_delta current_vs_inline_pct={aggregate_delta:+.2f}")
+                    aggregate_entries.append(
+                        {
+                            "kind": "aggregate_delta",
+                            "opt_level": opt_level,
+                            "mode": mode,
+                            "current_avg_MiB_s": current_avg,
+                            "inline_avg_MiB_s": inline_avg,
+                            "current_vs_inline_pct": aggregate_delta,
+                        }
+                    )
         print(f"SUMMARY skipped_labels={len(skipped_labels)}")
+
+        if args.json_out:
+            write_json_report(
+                Path(args.json_out),
+                repo_root=repo_root,
+                manifest_path=manifest_path,
+                modes=modes,
+                opt_levels=opt_levels,
+                temp_root=temp_root,
+                keep_temp=args.keep_temp,
+                default_opt_level=args.opt_level,
+                stmt_count=args.stmt_count,
+                parse_iterations=args.parse_iterations,
+                sample_iterations=args.sample_iterations,
+                repeats=args.repeats,
+                skip_real_corpus=args.skip_real_corpus,
+                current_benches_by_opt=current_bench_by_opt,
+                inline_benches_by_opt=inline_bench_by_opt,
+                inline_ast_path=inline_ast_path,
+                inline_frontend_path=inline_frontend_path,
+                inputs=inputs,
+                runs=run_entries,
+                aggregate_summaries=aggregate_entries,
+                skipped=skipped_entries,
+            )
     finally:
         if not args.keep_temp:
             for path in (inline_frontend_path, inline_ast_path):

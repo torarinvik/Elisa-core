@@ -10,6 +10,7 @@ PARSE_ITERATIONS="20"
 SAMPLE_ITERATIONS="5000"
 REPEATS="3"
 SKIP_DIFFERENTIAL="0"
+SKIP_BENCHMARK="0"
 SKIP_REAL_CORPUS="0"
 KEEP_TEMP="0"
 
@@ -43,6 +44,10 @@ while [ "$#" -gt 0 ]; do
             SKIP_DIFFERENTIAL="1"
             shift 1
             ;;
+        --skip-benchmark)
+            SKIP_BENCHMARK="1"
+            shift 1
+            ;;
         --skip-real-corpus)
             SKIP_REAL_CORPUS="1"
             shift 1
@@ -59,12 +64,12 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ -z "$OUT_DIR" ]; then
-    OUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/llcontext-lua-profile.XXXXXX")"
+    OUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/llcontext-lua-baseline.XXXXXX")"
 else
     mkdir -p "$OUT_DIR"
 fi
 
-echo "lua_frontend_profile_out=$OUT_DIR"
+echo "lua_frontend_baseline_out=$OUT_DIR"
 
 BENCH_ARGS="--opt-level=$OPT_LEVEL --parse-iterations $PARSE_ITERATIONS --sample-iterations $SAMPLE_ITERATIONS --repeats $REPEATS --modes parse,env,closure,label,analysis"
 KEEP_TEMP_ARGS=""
@@ -80,20 +85,23 @@ if [ "$KEEP_TEMP" = "1" ]; then
 fi
 
 BENCH_COMMAND="python3 $SCRIPT_DIR/run_lua_frontend_storage_benchmark.py $BENCH_ARGS --json-out $OUT_DIR/benchmark.json"
-DIFF_COMMAND="python3 $SCRIPT_DIR/run_lua_frontend_differential.py --json-out $OUT_DIR/differential.json"
+DIFF_COMMAND="python3 $SCRIPT_DIR/run_lua_frontend_differential.py --strict --json-out $OUT_DIR/differential.json"
 if [ "$KEEP_TEMP" = "1" ]; then
     DIFF_COMMAND="$DIFF_COMMAND --keep-temp"
 fi
 
-# shellcheck disable=SC2086
-python3 "$SCRIPT_DIR/run_lua_frontend_storage_benchmark.py" \
-    $BENCH_ARGS \
-    --json-out "$OUT_DIR/benchmark.json" \
-    > "$OUT_DIR/benchmark.log" 2>&1
+if [ "$SKIP_BENCHMARK" != "1" ]; then
+    # shellcheck disable=SC2086
+    python3 "$SCRIPT_DIR/run_lua_frontend_storage_benchmark.py" \
+        $BENCH_ARGS \
+        --json-out "$OUT_DIR/benchmark.json" \
+        > "$OUT_DIR/benchmark.log" 2>&1
+fi
 
 if [ "$SKIP_DIFFERENTIAL" != "1" ]; then
     # shellcheck disable=SC2086
     python3 "$SCRIPT_DIR/run_lua_frontend_differential.py" \
+        --strict \
         $KEEP_TEMP_ARGS \
         --json-out "$OUT_DIR/differential.json" \
         > "$OUT_DIR/differential.log" 2>&1
@@ -101,7 +109,7 @@ fi
 
 python3 "$SCRIPT_DIR/write_lua_bundle_metadata.py" \
     --output "$OUT_DIR/metadata.json" \
-    --bundle-type profile \
+    --bundle-type baseline \
     --repo-root "$REPO_ROOT" \
     --out-dir "$OUT_DIR" \
     --setting "opt_level=$OPT_LEVEL" \
@@ -110,26 +118,29 @@ python3 "$SCRIPT_DIR/write_lua_bundle_metadata.py" \
     --setting "sample_iterations=$SAMPLE_ITERATIONS" \
     --setting "repeats=$REPEATS" \
     --setting "skip_real_corpus=$SKIP_REAL_CORPUS" \
+    --setting "skip_benchmark=$SKIP_BENCHMARK" \
     --setting "skip_differential=$SKIP_DIFFERENTIAL" \
     --setting "keep_temp=$KEEP_TEMP" \
     --command "benchmark=$BENCH_COMMAND" \
     --command "differential=$DIFF_COMMAND"
 
 cat > "$OUT_DIR/README.txt" <<EOF2
-Lua frontend profiling bundle
-=============================
+Lua frontend baseline bundle
+===========================
 
+Files
+-----
 benchmark.log
-  Synthetic + real-corpus benchmark sweep across parse/env/closure/label/analysis.
+  Human-readable benchmark sweep output.
 
 benchmark.json
-    Structured benchmark results including per-run measurements and aggregate summaries.
+  Structured benchmark results when benchmark capture is enabled.
 
 differential.log
-  Curated accept/reject comparison against the C reference parser.
+  Human-readable strict differential sweep output.
 
 differential.json
-    Structured differential results including per-case statuses and mismatch summaries.
+  Structured differential results when differential capture is enabled.
 
 metadata.json
     Bundle metadata: timestamp, repo/git state, host info, settings, and command lines.
@@ -142,6 +153,8 @@ parse_iterations: $PARSE_ITERATIONS
 sample_iterations: $SAMPLE_ITERATIONS
 repeats: $REPEATS
 skip_real_corpus: $SKIP_REAL_CORPUS
+skip_benchmark: $SKIP_BENCHMARK
 skip_differential: $SKIP_DIFFERENTIAL
 keep_temp: $KEEP_TEMP
+repo_root: $REPO_ROOT
 EOF2
