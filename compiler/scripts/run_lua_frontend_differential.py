@@ -5,9 +5,9 @@ This tool compares curated corpus cases against:
 - the llcontext Lua frontend (via the native benchmark harness in parse mode)
 - the C reference parser (via luaL_loadbufferx linked from onelua.c)
 
-It reports accept/reject mismatches clearly and, for closure/env/label-heavy
-families, also prints llcontext-only fingerprints to make semantic shape easier
-to inspect during parity work.
+It reports accept/reject mismatches clearly and, for accepted families with
+semantic-shape annotations, also prints llcontext-only fingerprints to make
+semantic shape easier to inspect during parity work.
 """
 
 from __future__ import annotations
@@ -120,15 +120,22 @@ def iter_cases(corpus_root: Path) -> list[tuple[str, Path, bool]]:
             expect_accept = False
         else:
             raise RuntimeError(f"corpus file must start with accept_ or reject_: {source_path}")
-        cases.append((source_path.parent.name, source_path, expect_accept, parse_expected_fingerprints(source_path)))
+        family = source_path.parent.name
+        expected_fingerprints = parse_expected_fingerprints(source_path)
+        validate_expected_fingerprints(family, source_path, expect_accept, expected_fingerprints)
+        cases.append((family, source_path, expect_accept, expected_fingerprints))
     return cases
 
 
-def extra_modes_for_family(family: str) -> list[str]:
+def required_modes_for_case(family: str, expected_accept: bool) -> list[str]:
+    if not expected_accept:
+        return []
     if family == "labels_gotos":
         return ["label", "analysis"]
     if family in ("functions_closures", "globals"):
         return ["env", "closure", "analysis"]
+    if family in ("control_flow", "numerics", "operators", "strings_comments", "tables_calls"):
+        return ["analysis"]
     return []
 
 
@@ -156,6 +163,13 @@ def parse_expected_fingerprints(source_path: Path) -> dict[str, int]:
             raise RuntimeError(f"unsupported llcontext fingerprint annotation mode {mode!r} in {source_path}")
         expected[mode] = int(value_text.strip())
     return expected
+
+
+def validate_expected_fingerprints(family: str, source_path: Path, expected_accept: bool, expected: dict[str, int]) -> None:
+    required_modes = required_modes_for_case(family, expected_accept)
+    missing = [mode for mode in required_modes if mode not in expected]
+    if missing:
+        raise RuntimeError(f"accepted differential case is missing required annotations {missing!r}: {source_path}")
 
 
 def evaluate_case(result: CaseResult) -> dict[str, object]:
@@ -258,7 +272,7 @@ def main() -> int:
             ref_accept = reference_accepts(ref_exe, source_path)
             fingerprints = {
                 mode: llcontext_fingerprint(ll_exe, source_path, mode)
-                for mode in extra_modes_for_family(family)
+                for mode in required_modes_for_case(family, expected_accept)
             }
             results.append(CaseResult(family, source_path, expected_accept, expected_fingerprints, ll_accept, ref_accept, fingerprints))
 

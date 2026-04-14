@@ -60,13 +60,14 @@ static double elapsed_seconds(struct timespec start, struct timespec end) {
 typedef enum BenchmarkMode {
     BENCH_PARSE = 0,
     BENCH_CHECKSUM = 1,
-    BENCH_SAMPLE = 2,
-    BENCH_ENV = 3,
-    BENCH_CLOSURE = 4,
-    BENCH_LABEL = 5,
-    BENCH_ANALYSIS = 6,
-    BENCH_CONTROL = 7,
-    BENCH_CHECKED = 8,
+    BENCH_LEXER = 2,
+    BENCH_SAMPLE = 3,
+    BENCH_ENV = 4,
+    BENCH_CLOSURE = 5,
+    BENCH_LABEL = 6,
+    BENCH_ANALYSIS = 7,
+    BENCH_CONTROL = 8,
+    BENCH_CHECKED = 9,
 } BenchmarkMode;
 
 static const char *benchmark_mode_name(BenchmarkMode mode) {
@@ -75,6 +76,8 @@ static const char *benchmark_mode_name(BenchmarkMode mode) {
         return "parse";
     case BENCH_CHECKSUM:
         return "checksum";
+    case BENCH_LEXER:
+        return "lexer";
     case BENCH_SAMPLE:
         return "sample";
     case BENCH_ENV:
@@ -100,6 +103,10 @@ static int parse_benchmark_mode(const char *text, BenchmarkMode *out_mode) {
     }
     if (strcmp(text, "checksum") == 0) {
         *out_mode = BENCH_CHECKSUM;
+        return 1;
+    }
+    if (strcmp(text, "lexer") == 0) {
+        *out_mode = BENCH_LEXER;
         return 1;
     }
     if (strcmp(text, "sample") == 0) {
@@ -138,6 +145,8 @@ static int64_t run_mode(BenchmarkMode mode, const uint8_t *input, size_t input_l
     case BENCH_PARSE:
     case BENCH_CHECKSUM:
         return lua_frontend_parse_checksum_with_len((uint8_t *)input, input_len);
+    case BENCH_LEXER:
+        return lua_frontend_lexer_checksum_with_len((uint8_t *)input, input_len);
     case BENCH_SAMPLE:
         return lua_frontend_sample_checksum();
     case BENCH_ENV:
@@ -159,7 +168,7 @@ static int64_t run_mode(BenchmarkMode mode, const uint8_t *input, size_t input_l
 int main(int argc, char **argv) {
     if (argc < 3) {
         fprintf(stderr, "usage: %s <lua-file> <iterations> [mode]\n", argv[0]);
-        fprintf(stderr, "modes: parse (default), checksum, sample, env, closure, label, analysis, control, checked\n");
+        fprintf(stderr, "modes: parse (default), checksum, lexer, sample, env, closure, label, analysis, control, checked\n");
         return 1;
     }
 
@@ -172,7 +181,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     if (!parse_benchmark_mode(mode_text, &mode)) {
-        fprintf(stderr, "unknown benchmark mode '%s' (expected parse, checksum, sample, env, closure, label, analysis, control, or checked)\n", mode_text);
+        fprintf(stderr, "unknown benchmark mode '%s' (expected parse, checksum, lexer, sample, env, closure, label, analysis, control, or checked)\n", mode_text);
         return 1;
     }
 
@@ -183,7 +192,7 @@ int main(int argc, char **argv) {
     }
 
     int64_t warmup_checksum = run_mode(mode, input, input_len);
-    if ((mode == BENCH_PARSE || mode == BENCH_CHECKSUM || mode == BENCH_ENV || mode == BENCH_CLOSURE || mode == BENCH_LABEL || mode == BENCH_ANALYSIS) && warmup_checksum < 0) {
+    if ((mode == BENCH_PARSE || mode == BENCH_CHECKSUM || mode == BENCH_LEXER || mode == BENCH_ENV || mode == BENCH_CLOSURE || mode == BENCH_LABEL || mode == BENCH_ANALYSIS) && warmup_checksum < 0) {
         fprintf(stderr, "%s parser rejected %s\n", benchmark_mode_name(mode), path);
         free(input);
         return 1;

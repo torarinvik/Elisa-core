@@ -56,6 +56,11 @@ Notes:
   - the llcontext frontend
   - the C reference harness built from `onelua.c`
 - It prints extra llcontext fingerprints for closure/env/label-heavy families.
+- Accepted corpus annotation policy is intentionally family-specific:
+  - control-flow accepts require `llcontext-analysis-fp`, plus `llcontext-label-fp` when labels or gotos are involved
+  - closure/global accepts require `llcontext-env-fp`, `llcontext-closure-fp`, and `llcontext-analysis-fp`
+  - lexical/numeric/operator/table-call accepts require `llcontext-analysis-fp` only
+  - reject cases remain accept/reject parity checks with no fingerprint requirement
 - With `--json-out`, it also writes a structured report with run metadata,
   per-case statuses, llcontext/reference outcomes, expected fingerprints,
   observed llcontext fingerprints, and mismatch summaries.
@@ -133,9 +138,10 @@ Notes:
 - With `--json-out`, it also writes a structured report with run metadata,
   per-input/per-mode measurements, aggregate summaries, and skipped-run
   reasons.
-- The profile and baseline bundle wrappers now include `checksum` in their
-  default benchmark sweeps. `lexer` mode is available explicitly with
-  `--modes lexer` or as part of a custom comma-separated mode list.
+- The default benchmark/profile/baseline mode set is
+  `parse,checksum,lexer,env,closure,label,analysis`.
+- `sample` remains available explicitly with `--modes sample` or as part of a
+  custom comma-separated mode list.
 
 ## Profile Bundle
 
