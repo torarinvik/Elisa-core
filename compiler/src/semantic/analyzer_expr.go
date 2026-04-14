@@ -4032,8 +4032,11 @@ func (a *Analyzer) specializeCallbackCarryingTypeFromExpr(expected Type, actualE
 }
 
 func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
-	if a.rewriteBuiltinDictMethodCall(expr) {
+	switch a.rewriteBuiltinDictMethodCall(expr) {
+	case builtinDictMethodRewriteApplied:
 		return a.analyzeCallExpr(expr)
+	case builtinDictMethodRewriteInvalid:
+		return invalidType
 	}
 	if resultType, ok := a.analyzeBuiltinDictEntryCall(expr); ok {
 		return resultType
@@ -4888,6 +4891,29 @@ func astTypeExprForBuiltinMethodRewrite(pos lexer.Pos, typ Type) ast.TypeExpr {
 	}
 }
 
+func runtimeBackedDictSupportDiagnostic(dictType *DictType) string {
+	if dictType == nil {
+		return "runtime-backed dict operations currently support only dict[dstr, V]"
+	}
+	return fmt.Sprintf("runtime-backed dict operations currently support only dict[dstr, V], got %s", dictType.String())
+}
+
+func (a *Analyzer) ensureRuntimeBackedDictSupported(pos lexer.Pos, dictType *DictType) bool {
+	if dictSupportsRuntimeBackedOps(dictType) {
+		return true
+	}
+	a.errorf(pos, "%s", runtimeBackedDictSupportDiagnostic(dictType))
+	return false
+}
+
+type builtinDictMethodRewriteStatus int
+
+const (
+	builtinDictMethodRewriteNone builtinDictMethodRewriteStatus = iota
+	builtinDictMethodRewriteApplied
+	builtinDictMethodRewriteInvalid
+)
+
 func dictMethodReceiverExpr(receiver ast.Expr, receiverType Type, mutable bool) ast.Expr {
 	if _, ok := receiverType.(*RefType); ok {
 		return receiver
@@ -4904,21 +4930,24 @@ func dictMethodReceiverExpr(receiver ast.Expr, receiverType Type, mutable bool) 
 	}
 }
 
-func (a *Analyzer) rewriteBuiltinDictMethodCall(expr *ast.CallExpr) bool {
+func (a *Analyzer) rewriteBuiltinDictMethodCall(expr *ast.CallExpr) builtinDictMethodRewriteStatus {
 	if a == nil || expr == nil {
-		return false
+		return builtinDictMethodRewriteNone
 	}
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
 	if !ok || fieldExpr == nil || fieldExpr.Object == nil {
-		return false
+		return builtinDictMethodRewriteNone
 	}
 	if a.exprResolvesToTypePath(fieldExpr.Object) {
-		return false
+		return builtinDictMethodRewriteNone
 	}
 	receiverType := a.analyzeExpr(fieldExpr.Object)
 	dictType, receiverRefType, ok := builtinDictReceiverType(receiverType)
 	if !ok || dictType == nil {
-		return false
+		return builtinDictMethodRewriteNone
+	}
+	if !a.ensureRuntimeBackedDictSupported(fieldExpr.Object.Pos(), dictType) {
+		return builtinDictMethodRewriteInvalid
 	}
 	method := fieldExpr.Field
 	helperName := ""
@@ -4948,16 +4977,16 @@ func (a *Analyzer) rewriteBuiltinDictMethodCall(expr *ast.CallExpr) bool {
 		mutates = true
 		needsAlloc = true
 	default:
-		return false
+		return builtinDictMethodRewriteNone
 	}
 	if mutates && receiverRefType == nil && !a.exprCanYieldWritableRef(fieldExpr.Object) {
 		a.errorf(fieldExpr.Object.Pos(), "dict %s requires a mutable dict receiver", method)
-		return true
+		return builtinDictMethodRewriteInvalid
 	}
 	if needsAlloc {
 		if a.currentAllocExpr == nil {
 			a.errorf(expr.Pos(), "dict %s requires an active in <arena>: scope", method)
-			return true
+			return builtinDictMethodRewriteInvalid
 		}
 	}
 	rewrittenArgs := make([]ast.Expr, 0, len(expr.Args)+2)
@@ -4969,7 +4998,7 @@ func (a *Analyzer) rewriteBuiltinDictMethodCall(expr *ast.CallExpr) bool {
 	expr.Func = &ast.Ident{Position: fieldExpr.Position, Name: helperName}
 	expr.Args = rewrittenArgs
 	expr.ArgNames = nil
-	return true
+	return builtinDictMethodRewriteApplied
 }
 
 func (a *Analyzer) analyzeBuiltinDictEntryCall(expr *ast.CallExpr) (Type, bool) {
@@ -4981,6 +5010,10 @@ func (a *Analyzer) analyzeBuiltinDictEntryCall(expr *ast.CallExpr) (Type, bool) 
 	dictType, receiverRefType, ok := builtinDictReceiverType(receiverType)
 	if !ok || dictType == nil {
 		return nil, false
+	}
+	if !a.ensureRuntimeBackedDictSupported(fieldExpr.Object.Pos(), dictType) {
+		a.exprTypes[expr] = invalidType
+		return invalidType, true
 	}
 	if len(expr.Args) != 1 {
 		for _, arg := range expr.Args {
@@ -5016,6 +5049,10 @@ func (a *Analyzer) analyzeBuiltinDictEntryInsertCall(expr *ast.CallExpr) (Type, 
 	if !ok || entryType == nil || entryType.Dict == nil {
 		return nil, false
 	}
+	if !a.ensureRuntimeBackedDictSupported(fieldExpr.Object.Pos(), entryType.Dict) {
+		a.exprTypes[expr] = invalidType
+		return invalidType, true
+	}
 	if !entryType.Mutable {
 		a.errorf(fieldExpr.Object.Pos(), "dict entry insert requires an entry created from a mutable dict receiver")
 	}
@@ -5050,6 +5087,10 @@ func (a *Analyzer) analyzeBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) (T
 	entryType, _, ok := builtinDictEntryReceiverType(receiverType)
 	if !ok || entryType == nil || entryType.Dict == nil {
 		return nil, false
+	}
+	if !a.ensureRuntimeBackedDictSupported(fieldExpr.Object.Pos(), entryType.Dict) {
+		a.exprTypes[expr] = invalidType
+		return invalidType, true
 	}
 	if !entryType.Mutable {
 		a.errorf(fieldExpr.Object.Pos(), "dict entry get_or_insert requires an entry created from a mutable dict receiver")
@@ -7422,6 +7463,16 @@ func (a *Analyzer) analyzeTupleExprWithExpected(expr *ast.TupleExpr, expected Ty
 }
 
 func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
+	if _, ok := expr.(*ast.ZeroedLit); ok && expected != nil {
+		if dictType, ok := StripAggregateStateType(expected).(*DictType); ok {
+			if !a.ensureRuntimeBackedDictSupported(expr.Pos(), dictType) {
+				a.recordAnalyzedExprType(expr, invalidType)
+				return invalidType
+			}
+		}
+		a.recordAnalyzedExprType(expr, expected)
+		return expected
+	}
 	if shorthandType, ok := a.analyzeContextualShorthandValueExpr(expr, expected); ok {
 		return shorthandType
 	}
@@ -8245,6 +8296,12 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 		objType = ref.Elem
 	}
 	objType = StripAggregateStateType(objType)
+	if dictType, ok := objType.(*DictType); ok && !dictSupportsRuntimeBackedOps(dictType) {
+		if emitDiagnostics {
+			a.errorf(pos, "%s", runtimeBackedDictSupportDiagnostic(dictType))
+		}
+		return Field{}, false
+	}
 	if field, ok := packedStoreSyntheticField(objType, fieldName); ok {
 		return field, true
 	}
@@ -8375,6 +8432,9 @@ func (a *Analyzer) runtimeBackedStructType(t Type) Type {
 		return base
 	}
 	if dict, ok := t.(*DictType); ok {
+		if !dictSupportsRuntimeBackedOps(dict) {
+			return nil
+		}
 		base, ok := a.namedTypes["DynDict"]
 		if !ok {
 			return nil

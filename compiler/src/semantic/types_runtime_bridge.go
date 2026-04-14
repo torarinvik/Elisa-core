@@ -110,12 +110,12 @@ func classifyRuntimeBridge(a, b Type) (runtimeBridgeMatch, bool) {
 		}
 	}
 	if dict, ok := a.(*DictType); ok {
-		if dynDict, ok := dynDictRuntimeInstance(b); ok {
+		if dynDict, ok := dynDictRuntimeInstance(b); ok && dictSupportsRuntimeBackedOps(dict) {
 			return runtimeBridgeMatch{Kind: runtimeBridgeDictDynDict, Dict: dict, DynDict: dynDict}, true
 		}
 	}
 	if dict, ok := b.(*DictType); ok {
-		if dynDict, ok := dynDictRuntimeInstance(a); ok {
+		if dynDict, ok := dynDictRuntimeInstance(a); ok && dictSupportsRuntimeBackedOps(dict) {
 			return runtimeBridgeMatch{Kind: runtimeBridgeDictDynDict, Dict: dict, DynDict: dynDict}, true
 		}
 	}

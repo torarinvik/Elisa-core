@@ -2993,6 +2993,31 @@ def from_runtime() -> dict[dstr, i32]:
 	}
 }
 
+func TestGenerateLLVMIRRejectsGenericDictRuntimeBridge(t *testing.T) {
+	src := `extern take_runtime(values: DynDict[u32, i32]) -> void
+extern make_runtime() -> DynDict[u32, i32]
+
+def use(values: dict[u32, i32]) -> dict[u32, i32]:
+	take_runtime(values)
+	return make_runtime()
+`
+	l := lexer.New("backend_dict_runtime_bridge_reject.llcontext", []byte(src))
+	tokens := l.Tokenize()
+	if errs := l.Errors(); len(errs) > 0 {
+		t.Fatalf("lexer errors:\n%s", strings.Join(errs, "\n"))
+	}
+	p := parser.New(tokens)
+	file := p.ParseFile("backend_dict_runtime_bridge_reject.llcontext")
+	if errs := p.Errors(); len(errs) > 0 {
+		t.Fatalf("parse errors:\n%s", strings.Join(errs, "\n"))
+	}
+	result := semantic.Analyze(file)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "expects DynDict[u32, i32], got dict[u32, i32]") {
+		t.Fatalf("expected generic-key runtime bridge mismatch diagnostic, got:\n%s", all)
+	}
+}
+
 func TestGenerateLLVMIRSpecializesDictHelperStyleFunctions(t *testing.T) {
 	src := `error RuntimeError:
 	OutOfMemory

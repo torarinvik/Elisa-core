@@ -1534,6 +1534,25 @@ func TestRunCLIRejectsInvalidCharLiteral(t *testing.T) {
 	}
 }
 
+func TestRunCLIRejectsGenericKeyRuntimeBackedDictSugar(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "generic_key_dict_runtime_reject.llcontext")
+	src := "def arena_dict_get[K, T](m: any dict[K, T]&, key: K) -> mutable any T&?:\n    return null\n\ndef bad(values: dict[u32, i64], key: u32) -> mutable any i64&?:\n    return values.get(key)\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write generic-key dict runtime rejection fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", fixturePath}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected runCLI to fail, got stdout:\n%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "runtime-backed dict operations currently support only dict[dstr, V]") {
+		t.Fatalf("expected generic-key runtime-backed dict diagnostic, got:\n%s", stderr.String())
+	}
+}
+
 func TestRunCLIExecutesCharLiteralSmokeProgram(t *testing.T) {
 	clangPath, err := exec.LookPath("clang")
 	if err != nil {

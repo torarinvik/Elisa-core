@@ -105,8 +105,8 @@ def build(owner: Arena, key: dstr[key_shape]) -> usize:
 	}
 }
 
-func TestAnalyzeGenericKeyDictSugar(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "generic_key_dict_sugar.llcontext", `
+func TestAnalyzeRejectsGenericKeyRuntimeBackedDictSugar(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "generic_key_dict_sugar.llcontext", `
 struct Key:
     id: u32
 
@@ -150,8 +150,9 @@ def build(owner: Arena, key: Key, id: u32) -> usize:
         keyed.clear()
         return counts.count + keyed.count
 `)
-	if errs := result.Errors(); len(errs) != 0 {
-		t.Fatalf("unexpected semantic errors: %v", errs)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "runtime-backed dict operations currently support only dict[dstr, V]") {
+		t.Fatalf("expected runtime-backed dict restriction diagnostic, got:\n%s", all)
 	}
 }
 

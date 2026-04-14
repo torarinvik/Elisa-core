@@ -3,6 +3,10 @@ package backend
 import (
 	"strings"
 	"testing"
+
+	"llcontext/src/lexer"
+	"llcontext/src/parser"
+	"llcontext/src/semantic"
 )
 
 func TestGenerateLLVMIRLowersStoreSugar(t *testing.T) {
@@ -67,7 +71,7 @@ def build(owner: Arena) -> usize:
 	}
 }
 
-func TestGenerateLLVMIRLowersGenericDictKeys(t *testing.T) {
+func TestGenerateLLVMIRRejectsGenericKeyRuntimeBackedDictSugar(t *testing.T) {
 	src := `def arena_dict_get[K, T](m: any dict[K, T]&, key: K) -> mutable any T&?:
     return null
 
@@ -89,19 +93,20 @@ def build(owner: Arena, key: u32) -> usize:
         _ = values.entry(key).get_or_insert(7)
         return values.count
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_generic_dict.llcontext", src)
-	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
-	if err != nil {
-		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	l := lexer.New("backend_generic_dict.llcontext", []byte(src))
+	tokens := l.Tokenize()
+	if errs := l.Errors(); len(errs) > 0 {
+		t.Fatalf("lexer errors:\n%s", strings.Join(errs, "\n"))
 	}
-	if !strings.Contains(output, "DynDict__u32__i64") {
-		t.Fatalf("expected generic dict runtime carrier for u32 keys, got:\n%s", output)
+	p := parser.New(tokens)
+	file := p.ParseFile("backend_generic_dict.llcontext")
+	if errs := p.Errors(); len(errs) > 0 {
+		t.Fatalf("parse errors:\n%s", strings.Join(errs, "\n"))
 	}
-	if !strings.Contains(output, "arena_dict_get__u32__i64") {
-		t.Fatalf("expected generic dict helper specialization for u32 keys, got:\n%s", output)
-	}
-	if !strings.Contains(output, "dict.entry.get") {
-		t.Fatalf("expected dict entry lookup lowering for generic key dict, got:\n%s", output)
+	result := semantic.Analyze(file)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "runtime-backed dict operations currently support only dict[dstr, V]") {
+		t.Fatalf("expected runtime-backed dict restriction diagnostic, got:\n%s", all)
 	}
 }
 

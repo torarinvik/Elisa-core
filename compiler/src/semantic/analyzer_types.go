@@ -970,6 +970,19 @@ func (a *Analyzer) resolveDictType(keyExpr ast.TypeExpr, valueExpr ast.TypeExpr,
 	return &DictType{Key: keyType, Value: valueType, SurfaceName: surfaceName}
 }
 
+func dictRuntimeBackedKeyType(keyType Type) bool {
+	switch StripAggregateStateType(keyType).(type) {
+	case *DStrType, *TypeParamType:
+		return true
+	default:
+		return false
+	}
+}
+
+func dictSupportsRuntimeBackedOps(dictType *DictType) bool {
+	return dictType != nil && dictRuntimeBackedKeyType(dictType.Key)
+}
+
 func (a *Analyzer) resolveShapeArg(expr ast.TypeExpr) Shape {
 	name, ok := shapeNameFromTypeExpr(expr)
 	if !ok {
