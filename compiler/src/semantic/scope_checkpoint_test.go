@@ -26,6 +26,33 @@ def build(owner: Arena, items: darray[int]) -> usize:
 	}
 }
 
+func TestAnalyzeGroupedCheckpointStmt(t *testing.T) {
+    result := analyzeFunctionAnalysisTestSource(t, "grouped_scope_checkpoint.llcontext", `def build(owner: Arena) -> usize:
+    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    in alloc:
+        xs: mutable darray[int] = [1, 2]
+        ys: mutable darray[int] = [3, 4]
+        checkpoint xs, ys:
+            xs.push(5)
+            ys.push(6)
+        return xs.count + ys.count
+`)
+    if errs := result.Errors(); len(errs) != 0 {
+        t.Fatalf("unexpected semantic errors: %v", errs)
+    }
+}
+
+func TestAnalyzeRejectsInvalidGroupedCheckpointTarget(t *testing.T) {
+    result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "grouped_scope_checkpoint_invalid.llcontext", `def build(value: i64) -> void:
+    checkpoint value, value:
+        pass
+`)
+    all := strings.Join(result.Errors(), "\n")
+    if !strings.Contains(all, "checkpoint requires a region or mutable darray value") {
+        t.Fatalf("expected grouped checkpoint target diagnostic, got:\n%s", all)
+    }
+}
+
 func TestAnalyzeWarnsOnLegacyReverseIterableLoopSyntax(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "legacy_reverse_iter_warning.llcontext", `def build(items: darray[int]) -> void:
     for rev value in items:

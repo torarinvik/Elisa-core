@@ -299,6 +299,7 @@ type ParamDecl struct {
 	Name     string
 	Mutable  bool
 	Type     TypeExpr
+	DefaultValue Expr
 }
 
 type ExternFuncDecl struct {
@@ -1114,6 +1115,12 @@ type CheckpointStmt struct {
 	Body     []Stmt
 }
 
+type GroupedCheckpointStmt struct {
+	Position lexer.Pos
+	Targets  []Expr
+	Body     []Stmt
+}
+
 type RestoreStmt struct {
 	Position   lexer.Pos
 	RegionName string
@@ -1287,6 +1294,7 @@ func (n *RegionStmt) Pos() lexer.Pos             { return n.Position }
 func (n *DestroyStmt) Pos() lexer.Pos            { return n.Position }
 func (n *MarkStmt) Pos() lexer.Pos               { return n.Position }
 func (n *CheckpointStmt) Pos() lexer.Pos         { return n.Position }
+func (n *GroupedCheckpointStmt) Pos() lexer.Pos  { return n.Position }
 func (n *RestoreStmt) Pos() lexer.Pos            { return n.Position }
 func (n *RestoreCheckpointStmt) Pos() lexer.Pos  { return n.Position }
 func (n *ResetStmt) Pos() lexer.Pos              { return n.Position }
@@ -1413,6 +1421,7 @@ func (*RegionStmt) nodeTag()                {}
 func (*DestroyStmt) nodeTag()               {}
 func (*MarkStmt) nodeTag()                  {}
 func (*CheckpointStmt) nodeTag()            {}
+func (*GroupedCheckpointStmt) nodeTag()     {}
 func (*RestoreStmt) nodeTag()               {}
 func (*RestoreCheckpointStmt) nodeTag()     {}
 func (*ResetStmt) nodeTag()                 {}
@@ -1541,6 +1550,7 @@ func (*RegionStmt) stmtTag()            {}
 func (*DestroyStmt) stmtTag()           {}
 func (*MarkStmt) stmtTag()              {}
 func (*CheckpointStmt) stmtTag()        {}
+func (*GroupedCheckpointStmt) stmtTag() {}
 func (*RestoreStmt) stmtTag()           {}
 func (*RestoreCheckpointStmt) stmtTag() {}
 func (*ResetStmt) stmtTag()             {}
@@ -1570,7 +1580,7 @@ func (n *CallExpr) LoweredArgs() []Expr {
 		return nil
 	}
 	explicitArgs := n.Args
-	if n.ResolvedArgsValid && len(n.ResolvedArgs) == len(n.Args) && n.ResolvedCommonArgs == nil {
+	if n.ResolvedArgsValid && n.ResolvedCommonArgs == nil {
 		explicitArgs = n.ResolvedArgs
 	}
 	if !n.ResolvedImplicitArgsValid || len(n.ResolvedImplicitArgs) == 0 {

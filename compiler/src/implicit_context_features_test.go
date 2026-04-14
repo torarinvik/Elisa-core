@@ -27,10 +27,13 @@ def add_offset(x: i64) with MathCtx -> i64:
 def generic_id[T](value: T) with MathCtx -> T:
     return value
 
+def add_twice(x: i64) with MathCtx -> i64:
+	return add_offset(add_offset(x))
+
 def main() -> i64:
     offset: i64 = 10
     with MathCtx():
-        base: i64 = add_offset(5)
+		base: i64 = add_twice(5)
         return generic_id[i64](base)
 `)
 
@@ -40,8 +43,8 @@ def main() -> i64:
 	if exitCode != 0 {
 		t.Fatalf("expected implicit-context interpret fixture to succeed, stderr:\n%s", stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "[ result   ] 15") {
-		t.Fatalf("expected interpreter output to report result 15, got:\n%s", stdout.String())
+	if !strings.Contains(stdout.String(), "[ result   ] 25") {
+		t.Fatalf("expected interpreter output to report result 25, got:\n%s", stdout.String())
 	}
 }
 

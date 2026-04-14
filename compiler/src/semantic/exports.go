@@ -201,6 +201,8 @@ func specializeExportFuncType(a *Analyzer, base *FuncType, bindings map[string]T
 		Params:                 append([]Type(nil), specialized.Params...),
 		ExplicitParamCount:     specialized.ExplicitParamCount,
 		ExplicitParamNames:     append([]string(nil), specialized.ExplicitParamNames...),
+		ExplicitParamDefaultExprs: append([]ast.Expr(nil), specialized.ExplicitParamDefaultExprs...),
+		ExplicitParamHasDefault:   append([]bool(nil), specialized.ExplicitParamHasDefault...),
 		ImplicitParamNames:     append([]string(nil), specialized.ImplicitParamNames...),
 		Return:                 specialized.Return,
 		Variadic:               specialized.Variadic,

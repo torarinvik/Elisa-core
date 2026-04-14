@@ -909,6 +909,8 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		return nil
 	case *ast.CheckpointStmt:
 		return s.emitCheckpointStmt(n)
+	case *ast.GroupedCheckpointStmt:
+		return s.emitGroupedCheckpointStmt(n)
 	case *ast.RestoreStmt:
 		regionBinding, ok := s.lookupBinding(n.RegionName)
 		if !ok {
@@ -1595,6 +1597,36 @@ func (s *functionState) emitRestoreCheckpointBinding(binding checkpointBinding) 
 	}
 }
 
+func (s *functionState) emitCheckpointBindingFromTarget(name string, target ast.Expr, targetType semantic.Type) (checkpointBinding, error) {
+	var binding checkpointBinding
+	if ident, ok := target.(*ast.Ident); ok {
+		if regionBinding, ok := s.lookupBinding(ident.Name); ok && regionBinding.typ != nil && regionBinding.typ.String() == "Arena" {
+			markType := s.g.result.NamedTypes["ArenaMark"]
+			if markType == nil {
+				return checkpointBinding{}, fmt.Errorf("missing builtin ArenaMark type for region checkpoints")
+			}
+			markAlloca, err := s.createEntryAlloca(name+".checkpoint.mark", markType)
+			if err != nil {
+				return checkpointBinding{}, err
+			}
+			markValue, err := s.emitArenaSnapshot(regionBinding.ptr, regionBinding.typ)
+			if err != nil {
+				return checkpointBinding{}, err
+			}
+			C.LLVMBuildStore(s.builder, markValue, markAlloca)
+			binding = checkpointBinding{kind: checkpointBindingRegion, name: name, targetPtr: regionBinding.ptr, targetType: regionBinding.typ, markPtr: markAlloca, markType: markType}
+		}
+	}
+	if binding.markPtr == nil {
+		var err error
+		binding, err = s.emitBuiltinCheckpointDArray(target, targetType, name)
+		if err != nil {
+			return checkpointBinding{}, err
+		}
+	}
+	return binding, nil
+}
+
 func (s *functionState) emitCheckpointStmt(stmt *ast.CheckpointStmt) error {
 	if stmt == nil {
 		return nil
@@ -1604,31 +1636,9 @@ func (s *functionState) emitCheckpointStmt(stmt *ast.CheckpointStmt) error {
 	}
 	name := stmt.Name
 	targetType := s.exprType(stmt.Target)
-	var binding checkpointBinding
-	if ident, ok := stmt.Target.(*ast.Ident); ok {
-		if regionBinding, ok := s.lookupBinding(ident.Name); ok && regionBinding.typ != nil && regionBinding.typ.String() == "Arena" {
-			markType := s.g.result.NamedTypes["ArenaMark"]
-			if markType == nil {
-				return fmt.Errorf("missing builtin ArenaMark type for region checkpoints")
-			}
-			markAlloca, err := s.createEntryAlloca(name+".checkpoint.mark", markType)
-			if err != nil {
-				return err
-			}
-			markValue, err := s.emitArenaSnapshot(regionBinding.ptr, regionBinding.typ)
-			if err != nil {
-				return err
-			}
-			C.LLVMBuildStore(s.builder, markValue, markAlloca)
-			binding = checkpointBinding{kind: checkpointBindingRegion, name: name, targetPtr: regionBinding.ptr, targetType: regionBinding.typ, markPtr: markAlloca, markType: markType}
-		}
-	}
-	if binding.markPtr == nil {
-		var err error
-		binding, err = s.emitBuiltinCheckpointDArray(stmt.Target, targetType, name)
-		if err != nil {
-			return err
-		}
+	binding, err := s.emitCheckpointBindingFromTarget(name, stmt.Target, targetType)
+	if err != nil {
+		return err
 	}
 	saved, hadSaved := s.checkpoints[name]
 	s.checkpoints[name] = binding
@@ -1649,6 +1659,33 @@ func (s *functionState) emitCheckpointStmt(stmt *ast.CheckpointStmt) error {
 		return nil
 	}
 	return s.emitRestoreCheckpointBinding(binding)
+}
+
+func (s *functionState) emitGroupedCheckpointStmt(stmt *ast.GroupedCheckpointStmt) error {
+	if stmt == nil {
+		return nil
+	}
+	bindings := make([]checkpointBinding, 0, len(stmt.Targets))
+	for i, target := range stmt.Targets {
+		name := fmt.Sprintf("__grouped_checkpoint_%d_%d_%d", stmt.Position.Line, stmt.Position.Col, i)
+		binding, err := s.emitCheckpointBindingFromTarget(name, target, s.exprType(target))
+		if err != nil {
+			return err
+		}
+		bindings = append(bindings, binding)
+	}
+	if err := s.emitBlock(stmt.Body, true); err != nil {
+		return err
+	}
+	if s.currentBlockTerminated() {
+		return nil
+	}
+	for i := len(bindings) - 1; i >= 0; i-- {
+		if err := s.emitRestoreCheckpointBinding(bindings[i]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *functionState) emitRestoreCheckpointStmt(stmt *ast.RestoreCheckpointStmt) error {

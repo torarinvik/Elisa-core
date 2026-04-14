@@ -169,6 +169,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.analyzeMarkStmt(n)
 	case *ast.CheckpointStmt:
 		a.analyzeCheckpointStmt(n)
+	case *ast.GroupedCheckpointStmt:
+		a.analyzeGroupedCheckpointStmt(n)
 	case *ast.RestoreStmt:
 		a.analyzeRestoreStmt(n)
 	case *ast.RestoreCheckpointStmt:
@@ -3124,24 +3126,51 @@ func (a *Analyzer) analyzeCheckpointStmt(stmt *ast.CheckpointStmt) {
 	if stmt == nil {
 		return
 	}
-	targetType := a.analyzeExpr(stmt.Target)
-	if ident, ok := stmt.Target.(*ast.Ident); ok {
+	scope := a.currentScope
+	if len(stmt.Body) != 0 {
+		scope = NewScope(a.currentScope)
+	}
+	binding, ok := a.bindCheckpointTarget(stmt.Pos(), stmt.Name, stmt.Target, scope, stmt)
+	if !ok {
+		if len(stmt.Body) != 0 {
+			a.analyzeBlockWithAffineClone(stmt.Body, NewScope(a.currentScope))
+		}
+		return
+	}
+	if len(stmt.Body) != 0 {
+		a.analyzeBlockWithAffineClone(stmt.Body, scope)
+		if binding.regionSym != nil {
+			a.restoreFromRegionCheckpoint(stmt.Pos(), binding.regionSym, binding.markSym, binding.regionMarkState)
+		}
+	}
+}
+
+type checkpointBindingHandle struct {
+	markSym         *Symbol
+	regionSym       *Symbol
+	regionMarkState regionMarkState
+}
+
+func (a *Analyzer) bindCheckpointTarget(pos lexer.Pos, name string, target ast.Expr, scope *Scope, node ast.Node) (checkpointBindingHandle, bool) {
+	if target == nil {
+		return checkpointBindingHandle{}, false
+	}
+	targetType := a.analyzeExpr(target)
+	if ident, ok := target.(*ast.Ident); ok {
 		if regionSym, state := a.lookupRegionState(ident.Name); regionSym != nil {
 			if state.Destroyed {
-				a.errorf(stmt.Pos(), "region %q has already been destroyed", ident.Name)
-				return
+				a.errorf(pos, "region %q has already been destroyed", ident.Name)
+				return checkpointBindingHandle{}, false
 			}
 			markType, ok := a.namedTypes["ArenaMark"]
 			if !ok {
-				a.errorf(stmt.Pos(), "missing builtin ArenaMark type for region checkpoints")
+				a.errorf(pos, "missing builtin ArenaMark type for region checkpoints")
 				markType = invalidType
 			}
-			scope := a.currentScope
-			if len(stmt.Body) != 0 {
-				scope = NewScope(a.currentScope)
+			markSym := &Symbol{Name: name, Kind: SymbolRegionMark, Type: markType, Node: node, Mutable: false}
+			if scope != nil {
+				a.defineLocalInScope(scope, markSym, pos)
 			}
-			markSym := &Symbol{Name: stmt.Name, Kind: SymbolRegionMark, Type: markType, Node: stmt, Mutable: false}
-			a.defineLocalInScope(scope, markSym, stmt.Pos())
 			state.Generation++
 			a.currentRegions[regionSym] = state
 			if a.currentRegionMarks == nil {
@@ -3149,32 +3178,46 @@ func (a *Analyzer) analyzeCheckpointStmt(stmt *ast.CheckpointStmt) {
 			}
 			markState := regionMarkState{Region: regionSym, Generation: state.Generation, Valid: true}
 			a.currentRegionMarks[markSym] = markState
-			if len(stmt.Body) != 0 {
-				a.analyzeBlockWithAffineClone(stmt.Body, scope)
-				a.restoreFromRegionCheckpoint(stmt.Pos(), regionSym, markSym, markState)
-			}
-			return
+			return checkpointBindingHandle{markSym: markSym, regionSym: regionSym, regionMarkState: markState}, true
 		}
 	}
 	if _, ok := checkpointDArraySourceType(targetType); !ok {
-		a.errorf(stmt.Target.Pos(), "checkpoint requires a region or mutable darray value, got %s", targetType.String())
-		if len(stmt.Body) != 0 {
-			a.analyzeBlockWithAffineClone(stmt.Body, NewScope(a.currentScope))
-		}
-		return
+		a.errorf(target.Pos(), "checkpoint requires a region or mutable darray value, got %s", targetType.String())
+		return checkpointBindingHandle{}, false
 	}
-	scope := a.currentScope
-	if len(stmt.Body) != 0 {
-		scope = NewScope(a.currentScope)
+	markSym := &Symbol{Name: name, Kind: SymbolCheckpoint, Type: a.namedTypes["usize"], Node: node, Mutable: false}
+	if scope != nil {
+		a.defineLocalInScope(scope, markSym, pos)
 	}
-	markSym := &Symbol{Name: stmt.Name, Kind: SymbolCheckpoint, Type: a.namedTypes["usize"], Node: stmt, Mutable: false}
-	a.defineLocalInScope(scope, markSym, stmt.Pos())
 	if a.currentCheckpoints == nil {
 		a.currentCheckpoints = map[*Symbol]checkpointState{}
 	}
-	a.currentCheckpoints[markSym] = checkpointState{Kind: checkpointKindDArray, Target: stmt.Target, TargetType: targetType, Valid: true}
-	if len(stmt.Body) != 0 {
-		a.analyzeBlockWithAffineClone(stmt.Body, scope)
+	a.currentCheckpoints[markSym] = checkpointState{Kind: checkpointKindDArray, Target: target, TargetType: targetType, Valid: true}
+	return checkpointBindingHandle{markSym: markSym}, true
+}
+
+func anonymousCheckpointName(pos lexer.Pos, index int) string {
+	return fmt.Sprintf("__anon_checkpoint_%d_%d_%d", pos.Line, pos.Col, index)
+}
+
+func (a *Analyzer) analyzeGroupedCheckpointStmt(stmt *ast.GroupedCheckpointStmt) {
+	if stmt == nil {
+		return
+	}
+	regionRestores := make([]checkpointBindingHandle, 0, len(stmt.Targets))
+	for i, target := range stmt.Targets {
+		binding, ok := a.bindCheckpointTarget(stmt.Pos(), anonymousCheckpointName(stmt.Pos(), i), target, nil, stmt)
+		if !ok {
+			continue
+		}
+		if binding.regionSym != nil {
+			regionRestores = append(regionRestores, binding)
+		}
+	}
+	a.analyzeBlockWithAffineClone(stmt.Body, NewScope(a.currentScope))
+	for i := len(regionRestores) - 1; i >= 0; i-- {
+		binding := regionRestores[i]
+		a.restoreFromRegionCheckpoint(stmt.Pos(), binding.regionSym, binding.markSym, binding.regionMarkState)
 	}
 }
 

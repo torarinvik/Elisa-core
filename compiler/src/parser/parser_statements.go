@@ -231,11 +231,11 @@ func (p *Parser) looksLikeScopeStmt() bool {
 }
 
 func (p *Parser) looksLikeCheckpointStmt() bool {
-	if p.pos+3 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT || p.tokens[p.pos+2].Kind != lexer.TOKEN_ASSIGN {
-		return false
+	if p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_ASSIGN {
+		return true
 	}
 	depth := 0
-	for i := p.pos + 3; i < len(p.tokens); i++ {
+	for i := p.pos + 1; i < len(p.tokens); i++ {
 		tok := p.tokens[i]
 		switch tok.Kind {
 		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
@@ -247,10 +247,10 @@ func (p *Parser) looksLikeCheckpointStmt() bool {
 		case lexer.TOKEN_COLON:
 			return depth == 0
 		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
-			return true
+			return false
 		}
 	}
-	return true
+	return false
 }
 
 func (p *Parser) looksLikeForStmt() bool {
@@ -896,20 +896,37 @@ func (p *Parser) parseMark() *ast.MarkStmt {
 	return &ast.MarkStmt{Position: pos, RegionName: regionName, Name: name}
 }
 
-func (p *Parser) parseCheckpointStmt() *ast.CheckpointStmt {
+func (p *Parser) parseCheckpointStmt() ast.Stmt {
 	pos := p.cur().Pos
 	p.expectIdentText("checkpoint")
-	name := p.expect(lexer.TOKEN_IDENT).Text
-	p.expect(lexer.TOKEN_ASSIGN)
-	target := p.parseExpr()
-	var body []ast.Stmt
-	if p.match(lexer.TOKEN_COLON) {
-		p.expectNewline()
-		body = p.parseBlock()
-	} else {
-		p.expectNewline()
+	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ASSIGN {
+		name := p.expect(lexer.TOKEN_IDENT).Text
+		p.expect(lexer.TOKEN_ASSIGN)
+		target := p.parseExpr()
+		var body []ast.Stmt
+		if p.match(lexer.TOKEN_COLON) {
+			p.expectNewline()
+			body = p.parseBlock()
+		} else {
+			p.expectNewline()
+		}
+		return &ast.CheckpointStmt{Position: pos, Name: name, Target: target, Body: body}
 	}
-	return &ast.CheckpointStmt{Position: pos, Name: name, Target: target, Body: body}
+	firstTarget := p.parseExpr()
+	targets := []ast.Expr{firstTarget}
+	if !p.match(lexer.TOKEN_COMMA) {
+		p.errorf("grouped checkpoint requires at least 2 targets")
+		p.expect(lexer.TOKEN_COLON)
+		p.expectNewline()
+		return &ast.GroupedCheckpointStmt{Position: pos, Targets: targets, Body: p.parseBlock()}
+	}
+	targets = append(targets, p.parseExpr())
+	for p.match(lexer.TOKEN_COMMA) {
+		targets = append(targets, p.parseExpr())
+	}
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	return &ast.GroupedCheckpointStmt{Position: pos, Targets: targets, Body: p.parseBlock()}
 }
 
 func (p *Parser) parseRestore() *ast.RestoreStmt {

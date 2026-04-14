@@ -1197,6 +1197,8 @@ func (s *functionState) specializeFunctionType(base *semantic.FuncType) *semanti
 	if specialized != nil {
 		specialized.ExplicitParamCount = base.ExplicitParamCount
 		specialized.ExplicitParamNames = append([]string(nil), base.ExplicitParamNames...)
+		specialized.ExplicitParamDefaultExprs = append([]ast.Expr(nil), base.ExplicitParamDefaultExprs...)
+		specialized.ExplicitParamHasDefault = append([]bool(nil), base.ExplicitParamHasDefault...)
 		specialized.ImplicitParamNames = append([]string(nil), base.ImplicitParamNames...)
 	}
 	s.specializedFuncTypes[base] = specialized

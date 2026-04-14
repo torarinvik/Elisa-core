@@ -36,3 +36,24 @@ def build(owner: Arena, items: darray[int]) -> usize:
 		t.Fatalf("expected darray checkpoint lowering to snapshot the count field, got:\n%s", output)
 	}
 }
+
+func TestGenerateLLVMIRLowersGroupedCheckpoint(t *testing.T) {
+	src := `def build(owner: Arena) -> usize:
+    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    in alloc:
+        xs: mutable darray[int] = [1, 2]
+        ys: mutable darray[int] = [3, 4]
+        checkpoint xs, ys:
+            xs.push(5)
+            ys.push(6)
+        return xs.count + ys.count
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_grouped_scope_checkpoint.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if count := strings.Count(output, ".checkpoint.count"); count < 2 {
+		t.Fatalf("expected grouped checkpoint lowering to snapshot both darray counts, got %d occurrences:\n%s", count, output)
+	}
+}

@@ -3814,6 +3814,11 @@ func (a *Analyzer) specializeFunctionValueType(expected Type, actual Type) (Type
 		specialized.ExplicitParamNames = append([]string(nil), actualFunc.ExplicitParamNames...)
 		changed = true
 	}
+	if !funcTypeHasAnyExplicitDefault(specialized) && funcTypeHasAnyExplicitDefault(actualFunc) {
+		specialized.ExplicitParamDefaultExprs = append([]ast.Expr(nil), actualFunc.ExplicitParamDefaultExprs...)
+		specialized.ExplicitParamHasDefault = append([]bool(nil), actualFunc.ExplicitParamHasDefault...)
+		changed = true
+	}
 	if len(specialized.ImplicitParamNames) == 0 && len(actualFunc.ImplicitParamNames) != 0 {
 		specialized.ImplicitParamNames = append([]string(nil), actualFunc.ImplicitParamNames...)
 		changed = true
@@ -4290,7 +4295,7 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 		a.validateThreadTransferResultType(ft.Name, expr.Pos(), resultPayload)
 	}
 	originalTrackedByRoot := map[*Symbol]Type{}
-	loweredArgs := append([]ast.Expr(nil), expr.Args...)
+	loweredArgs := append([]ast.Expr(nil), orderedArgs...)
 	loweredArgs = append(loweredArgs, expr.ResolvedImplicitArgs...)
 	poststateLimit := len(loweredArgs)
 	if len(appliedType.Params) < poststateLimit {
@@ -5122,14 +5127,29 @@ func (a *Analyzer) resolveFunctionCallArgs(expr *ast.CallExpr, ft *FuncType) ([]
 		return nil, false
 	}
 	explicitParamCount := funcTypeExplicitParamCount(ft)
-	if expr.ResolvedArgsValid && len(expr.ResolvedArgs) == len(expr.Args) && expr.ResolvedCommonArgs == nil {
+	if expr.ResolvedArgsValid && expr.ResolvedCommonArgs == nil {
 		return expr.ResolvedArgs, true
 	}
 	if expr.NamedArgCount() == 0 {
+		if len(expr.Args) > explicitParamCount {
+			expr.ResolvedArgsValid = true
+			expr.ResolvedArgs = expr.Args
+			expr.ResolvedCommonArgs = nil
+			return expr.Args, true
+		}
+		ordered := make([]ast.Expr, explicitParamCount)
+		copy(ordered, expr.Args)
+		filled := make([]bool, explicitParamCount)
+		for i := range expr.Args {
+			filled[i] = true
+		}
+		if !a.fillMissingDefaultCallArgs(expr, ft, ordered, filled, true) {
+			return nil, false
+		}
 		expr.ResolvedArgsValid = true
-		expr.ResolvedArgs = expr.Args
+		expr.ResolvedArgs = ordered
 		expr.ResolvedCommonArgs = nil
-		return expr.Args, true
+		return ordered, true
 	}
 	if ft.Variadic {
 		a.errorf(expr.Pos(), "named arguments are not supported for variadic function %q", ft.Name)
@@ -5198,11 +5218,8 @@ func (a *Analyzer) resolveFunctionCallArgs(expr *ast.CallExpr, ft *FuncType) ([]
 		ordered[index] = arg
 		filled[index] = true
 	}
-	for i, wasFilled := range filled {
-		if !wasFilled {
-			a.errorf(expr.Pos(), "function %q is missing argument for parameter %q", ft.Name, ft.ExplicitParamNames[i])
-			ok = false
-		}
+	if !a.fillMissingDefaultCallArgs(expr, ft, ordered, filled, false) {
+		ok = false
 	}
 	if !ok {
 		return nil, false
@@ -5211,6 +5228,46 @@ func (a *Analyzer) resolveFunctionCallArgs(expr *ast.CallExpr, ft *FuncType) ([]
 	expr.ResolvedArgs = ordered
 	expr.ResolvedCommonArgs = nil
 	return ordered, true
+}
+
+func (a *Analyzer) fillMissingDefaultCallArgs(expr *ast.CallExpr, ft *FuncType, ordered []ast.Expr, filled []bool, preferGenericMissing bool) bool {
+	if expr == nil || ft == nil {
+		return false
+	}
+	explicitParamCount := funcTypeExplicitParamCount(ft)
+	ok := true
+	reportedGenericMissing := false
+	for i := 0; i < explicitParamCount; i++ {
+		if i < len(filled) && filled[i] {
+			continue
+		}
+		if funcTypeExplicitParamHasDefault(ft, i) {
+			defaultExpr := cloneDefaultArgExpr(funcTypeExplicitParamDefaultExpr(ft, i))
+			if defaultExpr == nil {
+				a.errorf(expr.Pos(), "internal error: unable to clone default argument for parameter %d on %q", i+1, ft.Name)
+				ok = false
+				continue
+			}
+			ordered[i] = defaultExpr
+			if i < len(filled) {
+				filled[i] = true
+			}
+			continue
+		}
+		if preferGenericMissing {
+			if !reportedGenericMissing {
+				a.errorf(expr.Pos(), "function %q expects %d arguments, got %d", ft.Name, explicitParamCount, len(expr.Args))
+				reportedGenericMissing = true
+			}
+		} else if i < len(ft.ExplicitParamNames) && ft.ExplicitParamNames[i] != "" {
+			a.errorf(expr.Pos(), "function %q is missing argument for parameter %q", ft.Name, ft.ExplicitParamNames[i])
+		} else if !reportedGenericMissing {
+			a.errorf(expr.Pos(), "function %q expects %d arguments, got %d", ft.Name, explicitParamCount, len(expr.Args))
+			reportedGenericMissing = true
+		}
+		ok = false
+	}
+	return ok
 }
 
 type extensionMethodCallRewriteStatus int

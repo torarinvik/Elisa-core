@@ -33,6 +33,27 @@ func cloneImplicitBindings(src map[string]ast.Expr) map[string]ast.Expr {
 	return out
 }
 
+func (a *Analyzer) implicitBindingsForCurrentFunction(ft *FuncType) map[string]ast.Expr {
+	if a == nil || ft == nil || len(ft.ImplicitParamNames) == 0 || a.currentScope == nil {
+		return nil
+	}
+	bindings := make(map[string]ast.Expr, len(ft.ImplicitParamNames))
+	for _, name := range ft.ImplicitParamNames {
+		if name == "" {
+			continue
+		}
+		sym, ok := a.currentScope.Lookup(name)
+		if !ok || sym == nil || sym.Kind != SymbolParam {
+			continue
+		}
+		bindings[name] = &ast.Ident{Position: lexer.Pos{}, Name: name}
+	}
+	if len(bindings) == 0 {
+		return nil
+	}
+	return bindings
+}
+
 func (a *Analyzer) combinedImplicitBindings() map[string]ast.Expr {
 	merged := map[string]ast.Expr{}
 	for _, scope := range a.currentImplicitScopes {

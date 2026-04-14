@@ -3618,6 +3618,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	savedPackedStoreResolutions := a.currentPackedStoreResolutions
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
+	savedImplicitScopes := a.currentImplicitScopes
 	savedReturnProvenance := a.currentReturnProvenance
 	savedReturnBorrowedOwnerRefs := a.currentReturnBorrowedOwnerRefs
 	savedConservativeCallWidenings := a.currentConservativeCallWidenings
@@ -3672,9 +3673,14 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 							a.recordResolvedRegionRefBinding(sym, state)
 						}
 					}
+					savedBodyImplicitScopes := a.currentImplicitScopes
+					if bindings := a.implicitBindingsForCurrentFunction(fnType); len(bindings) != 0 {
+						a.currentImplicitScopes = append(append([]map[string]ast.Expr(nil), savedBodyImplicitScopes...), cloneImplicitBindings(bindings))
+					}
 					for _, stmt := range fn.Body {
 						a.analyzeStmt(stmt)
 					}
+					a.currentImplicitScopes = savedBodyImplicitScopes
 				})
 			})
 		})
@@ -3721,6 +3727,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentPackedStoreResolutions = savedPackedStoreResolutions
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
+	a.currentImplicitScopes = savedImplicitScopes
 	a.currentReturnProvenance = savedReturnProvenance
 	a.currentReturnBorrowedOwnerRefs = savedReturnBorrowedOwnerRefs
 	a.currentConservativeCallWidenings = savedConservativeCallWidenings

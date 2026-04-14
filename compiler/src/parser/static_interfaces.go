@@ -68,7 +68,7 @@ func (p *Parser) parseInterfaceMethodDecl() *ast.ExternFuncDecl {
 	typeParams, refStorageParams, refStateParams, regionParams, permissionParams, genericParams := p.parseFuncGenericParams()
 
 	p.expect(lexer.TOKEN_LPAREN)
-	params := p.parseParamList()
+	params := p.parseParamList(true)
 	p.expect(lexer.TOKEN_RPAREN)
 
 	var implicitParams []ast.ParamDecl
@@ -196,7 +196,7 @@ func (p *Parser) parseImplMethodDeclWithAnnotations(annotations []ast.Annotation
 	typeParams, refStorageParams, refStateParams, regionParams, permissionParams, genericParams := p.parseFuncGenericParams()
 
 	p.expect(lexer.TOKEN_LPAREN)
-	params := p.parseParamList()
+	params := p.parseParamList(true)
 	p.expect(lexer.TOKEN_RPAREN)
 
 	var implicitParams []ast.ParamDecl

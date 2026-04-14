@@ -75,6 +75,8 @@ func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semanti
 		Params:                 params,
 		ExplicitParamCount:     base.ExplicitParamCount,
 		ExplicitParamNames:     append([]string(nil), base.ExplicitParamNames...),
+		ExplicitParamDefaultExprs: append([]ast.Expr(nil), base.ExplicitParamDefaultExprs...),
+		ExplicitParamHasDefault:   append([]bool(nil), base.ExplicitParamHasDefault...),
 		ImplicitParamNames:     append([]string(nil), base.ImplicitParamNames...),
 		Return:                 substituteType(base.Return, typeBindings, impls),
 		Variadic:               base.Variadic,

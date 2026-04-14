@@ -382,7 +382,7 @@ func (p *Parser) parseContextDecl() *ast.ContextDecl {
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
 		}
-		fields = append(fields, p.parseParam())
+		fields = append(fields, p.parseParam(false))
 		p.expectNewline()
 	}
 	p.expect(lexer.TOKEN_DEDENT)
@@ -1118,7 +1118,7 @@ func (p *Parser) parseFuncDeclWithAnnotations(annotations []ast.Annotation) *ast
 	typeParams, refStorageParams, refStateParams, regionParams, permissionParams, genericParams := p.parseFuncGenericParams()
 
 	p.expect(lexer.TOKEN_LPAREN)
-	params := p.parseParamList()
+	params := p.parseParamList(true)
 	p.expect(lexer.TOKEN_RPAREN)
 
 	var implicitParams []ast.ParamDecl
@@ -1150,13 +1150,13 @@ func (p *Parser) parseFuncDeclWithAnnotations(annotations []ast.Annotation) *ast
 	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Body: body}
 }
 
-func (p *Parser) parseParamList() []ast.ParamDecl {
+func (p *Parser) parseParamList(allowDefault bool) []ast.ParamDecl {
 	params := make([]ast.ParamDecl, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 	if p.peek() == lexer.TOKEN_RPAREN {
 		return params
 	}
 	for {
-		params = append(params, p.parseParam())
+		params = append(params, p.parseParam(allowDefault))
 		if !p.match(lexer.TOKEN_COMMA) {
 			break
 		}
@@ -1164,7 +1164,7 @@ func (p *Parser) parseParamList() []ast.ParamDecl {
 	return params
 }
 
-func (p *Parser) parseParam() ast.ParamDecl {
+func (p *Parser) parseParam(allowDefault bool) ast.ParamDecl {
 	pos := p.cur().Pos
 	mutable := false
 	if p.match(lexer.TOKEN_MUTABLE) {
@@ -1173,7 +1173,16 @@ func (p *Parser) parseParam() ast.ParamDecl {
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_COLON)
 	typ := p.parseTypeExpr()
-	return ast.ParamDecl{Position: pos, Name: name, Mutable: mutable, Type: typ}
+	var defaultValue ast.Expr
+	if p.match(lexer.TOKEN_ASSIGN) {
+		if !allowDefault {
+			p.errorf("parameter defaults are not allowed here")
+			_ = p.parseExpr()
+			return ast.ParamDecl{Position: pos, Name: name, Mutable: mutable, Type: typ}
+		}
+		defaultValue = p.parseExpr()
+	}
+	return ast.ParamDecl{Position: pos, Name: name, Mutable: mutable, Type: typ, DefaultValue: defaultValue}
 }
 
 func (p *Parser) lookaheadParamDecl() bool {
@@ -1198,7 +1207,7 @@ func (p *Parser) parseWithSignatureClause() ([]ast.ParamDecl, []string, []ast.Im
 	implicitItemOrder := make([]ast.ImplicitSigItem, 0, 2)
 	for {
 		if p.lookaheadParamDecl() {
-			param := p.parseParam()
+			param := p.parseParam(false)
 			implicitParams = append(implicitParams, param)
 			implicitItemOrder = append(implicitItemOrder, ast.ImplicitSigItem{Position: param.Position, Param: param})
 		} else {
@@ -1256,7 +1265,7 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 				variadic = true
 				break
 			}
-			params = append(params, p.parseParam())
+			params = append(params, p.parseParam(true))
 			if !p.match(lexer.TOKEN_COMMA) {
 				break
 			}
@@ -1313,7 +1322,7 @@ func (p *Parser) parseExportDecl() ast.Decl {
 	case "func":
 		name := p.expect(lexer.TOKEN_IDENT).Text
 		p.expect(lexer.TOKEN_LPAREN)
-		params := p.parseParamList()
+		params := p.parseParamList(false)
 		p.expect(lexer.TOKEN_RPAREN)
 
 		var retType ast.TypeExpr

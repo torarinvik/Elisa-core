@@ -560,6 +560,15 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 		for _, stmt := range n.Body {
 			f.writeStmt(level+1, stmt)
 		}
+	case *ast.GroupedCheckpointStmt:
+		parts := make([]string, 0, len(n.Targets))
+		for _, target := range n.Targets {
+			parts = append(parts, formatExpr(target))
+		}
+		f.writeLine(level, "checkpoint "+strings.Join(parts, ", ")+":")
+		for _, stmt := range n.Body {
+			f.writeStmt(level+1, stmt)
+		}
 	case *ast.RestoreStmt:
 		f.writeLine(level, "restore "+n.RegionName+" from "+n.MarkName)
 	case *ast.RestoreCheckpointStmt:
@@ -707,6 +716,9 @@ func formatParamDecl(param ast.ParamDecl) string {
 		line += "mutable "
 	}
 	line += param.Name + ": " + formatTypeExpr(param.Type)
+	if param.DefaultValue != nil {
+		line += " = " + formatExpr(param.DefaultValue)
+	}
 	return line
 }
 

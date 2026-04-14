@@ -444,6 +444,8 @@ type FuncType struct {
 	Params                       []Type
 	ExplicitParamCount           int
 	ExplicitParamNames           []string
+	ExplicitParamDefaultExprs    []ast.Expr
+	ExplicitParamHasDefault      []bool
 	ImplicitParamNames           []string
 	Return                       Type
 	Variadic                     bool
@@ -1237,6 +1239,38 @@ func funcTypeExplicitParamCount(t *FuncType) int {
 		return t.ExplicitParamCount
 	}
 	return len(t.Params)
+}
+
+func funcTypeExplicitParamHasDefault(t *FuncType, index int) bool {
+	if t == nil || index < 0 || index >= funcTypeExplicitParamCount(t) {
+		return false
+	}
+	if index >= len(t.ExplicitParamHasDefault) {
+		return false
+	}
+	return t.ExplicitParamHasDefault[index]
+}
+
+func funcTypeExplicitParamDefaultExpr(t *FuncType, index int) ast.Expr {
+	if !funcTypeExplicitParamHasDefault(t, index) {
+		return nil
+	}
+	if index >= len(t.ExplicitParamDefaultExprs) {
+		return nil
+	}
+	return t.ExplicitParamDefaultExprs[index]
+}
+
+func funcTypeHasAnyExplicitDefault(t *FuncType) bool {
+	if t == nil {
+		return false
+	}
+	for i := 0; i < funcTypeExplicitParamCount(t); i++ {
+		if funcTypeExplicitParamHasDefault(t, i) {
+			return true
+		}
+	}
+	return false
 }
 
 func funcTypeImplicitParamTypes(t *FuncType) []Type {

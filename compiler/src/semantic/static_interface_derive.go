@@ -231,7 +231,7 @@ func (a *Analyzer) instantiateDerivedMethodSignature(method *ast.ExternFuncDecl,
 	params := make([]ast.ParamDecl, 0, len(method.Params))
 	resolvedParams := make([]Type, 0, len(method.Params))
 	for _, param := range method.Params {
-		cloned := ast.ParamDecl{Position: param.Position, Name: param.Name, Mutable: param.Mutable, Type: substituteAssocTypeExpr(param.Type, assocExprs)}
+		cloned := ast.ParamDecl{Position: param.Position, Name: param.Name, Mutable: param.Mutable, Type: substituteAssocTypeExpr(param.Type, assocExprs), DefaultValue: param.DefaultValue}
 		params = append(params, cloned)
 	}
 	returnType := substituteAssocTypeExpr(method.ReturnType, assocExprs)
