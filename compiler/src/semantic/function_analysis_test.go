@@ -62,6 +62,31 @@ def take(thread: Thread[i64, Joinable]) -> i64:
 	}
 }
 
+func TestAnalyzeVariantAndLetConditionBindings(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "variant_let_bindings.llcontext", `enum Expr:
+	Int(value: i64)
+	Pair(left: i64, right: i64)
+
+def score(node: Expr, maybe: i64?, enabled: bool) -> i64:
+	guard enabled else return 0
+	if let value = maybe and node is Expr.Pair(left, right):
+		return value + left + right
+	return 0
+`)
+}
+
+func TestAnalyzeLetConditionRejectsNonOptionalValue(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "let_bind_non_optional.llcontext", `def bad(value: i64) -> bool:
+	return let item = value
+`)
+	if len(result.Errors()) == 0 {
+		t.Fatal("expected semantic error for let-binding a non-optional value")
+	}
+	if !strings.Contains(result.Errors()[0], "let condition requires an optional or nullable reference") {
+		t.Fatalf("expected let-condition diagnostic, got %v", result.Errors())
+	}
+}
+
 func TestGuardFactSetProveLEAndCheckFieldAccess(t *testing.T) {
 	start := &ast.Ident{Name: "start"}
 	mid := &ast.Ident{Name: "mid"}

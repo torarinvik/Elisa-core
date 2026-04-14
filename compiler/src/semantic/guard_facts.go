@@ -267,6 +267,12 @@ func (g *GuardFactSet) addCondition(expr ast.Expr, truthy bool) {
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
 		g.addCondition(n.Inner, truthy)
+	case *ast.OptionalBindExpr:
+		if truthy {
+			g.AddNonNull(n.Value)
+		} else {
+			g.AddNull(n.Value)
+		}
 	case *ast.UnaryExpr:
 		if n.Op == lexer.TOKEN_NOT {
 			g.addCondition(n.Operand, !truthy)

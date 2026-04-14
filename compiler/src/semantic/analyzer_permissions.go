@@ -651,6 +651,8 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 	case *ast.UnwrapElseExpr:
 		c.collectExpr(n.Value)
 		c.collectExpr(n.Fallback)
+	case *ast.OptionalBindExpr:
+		c.collectExpr(n.Value)
 	case *ast.AllocExpr:
 		c.collectExpr(n.Owner)
 		c.collectExpr(n.Value)
@@ -892,6 +894,8 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 	case *ast.UnwrapElseExpr:
 		a.validatePermissionExpr(n.Value, granted)
 		a.validatePermissionExpr(n.Fallback, granted)
+	case *ast.OptionalBindExpr:
+		a.validatePermissionExpr(n.Value, granted)
 	case *ast.AllocExpr:
 		if n.Owner != nil {
 			a.validatePermissionExpr(n.Owner, granted)

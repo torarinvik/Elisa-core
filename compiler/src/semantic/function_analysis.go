@@ -247,6 +247,8 @@ func appendBasicFlowExprInstrs(block *CFGBlock, expr ast.Expr) {
 	case *ast.UnwrapElseExpr:
 		appendBasicFlowExprInstrs(block, n.Value)
 		appendBasicFlowExprInstrs(block, n.Fallback)
+	case *ast.OptionalBindExpr:
+		appendBasicFlowExprInstrs(block, n.Value)
 	case *ast.TernaryExpr:
 		appendBasicFlowExprInstrs(block, n.Cond)
 		appendBasicFlowExprInstrs(block, n.Value)
@@ -678,6 +680,8 @@ func (a *Analyzer) appendImplicitSinkFlowInstrsForExpr(block *CFGBlock, expr ast
 	case *ast.UnwrapElseExpr:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Value)
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Fallback)
+	case *ast.OptionalBindExpr:
+		a.appendImplicitSinkFlowInstrsForExpr(block, n.Value)
 	case *ast.TernaryExpr:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Cond)
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Value)

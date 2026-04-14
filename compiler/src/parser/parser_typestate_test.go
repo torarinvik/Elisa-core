@@ -548,6 +548,84 @@ func TestParseStructPatternIsConditionWithBindings(t *testing.T) {
 	}
 }
 
+func TestParseVariantPatternIsConditionWithBindings(t *testing.T) {
+	file, errs := parseSourceFile(t, "enum Expr:\n    Int(value: i64)\n    Pair(left: i64, right: i64)\n\ndef score(node: Expr) -> i64:\n    if node is Expr.Pair(left, right):\n        return left + right\n    return 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	ifStmt := decl.Body[0].(*ast.IfStmt)
+	cond := ifStmt.Cond.(*ast.BinaryExpr)
+	target, ok := cond.Right.(*ast.VariantTestExpr)
+	if !ok || target.Pattern == nil {
+		t.Fatalf("expected variant test condition, got %T %#v", cond.Right, cond.Right)
+	}
+	leftBind, ok := target.Pattern.Args[0].Pattern.(*ast.MatchBindPattern)
+	if !ok || leftBind.Name != "left" {
+		t.Fatalf("expected left bind, got %T %#v", target.Pattern.Args[0].Pattern, target.Pattern.Args[0].Pattern)
+	}
+	rightBind, ok := target.Pattern.Args[1].Pattern.(*ast.MatchBindPattern)
+	if !ok || rightBind.Name != "right" {
+		t.Fatalf("expected right bind, got %T %#v", target.Pattern.Args[1].Pattern, target.Pattern.Args[1].Pattern)
+	}
+}
+
+func TestParseIfLetCondition(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(maybe: i64?) -> i64:\n    if let value = maybe and value > 0:\n        return value\n    return 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	ifStmt := decl.Body[0].(*ast.IfStmt)
+	cond, ok := ifStmt.Cond.(*ast.BinaryExpr)
+	if !ok || cond.Op != lexer.TOKEN_AND {
+		t.Fatalf("expected and-condition, got %T %#v", ifStmt.Cond, ifStmt.Cond)
+	}
+	letExpr, ok := cond.Left.(*ast.OptionalBindExpr)
+	if !ok || letExpr.Name != "value" {
+		t.Fatalf("expected let-bind condition on left, got %T %#v", cond.Left, cond.Left)
+	}
+}
+
+func TestParseGuardElseStatement(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(maybe: i64?) -> i64:\n    guard maybe != null else return 0\n    return 1\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	ifStmt, ok := decl.Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected lowered if stmt, got %T", decl.Body[0])
+	}
+	cond, ok := ifStmt.Cond.(*ast.UnaryExpr)
+	if !ok || cond.Op != lexer.TOKEN_NOT {
+		t.Fatalf("expected inverted guard condition, got %T %#v", ifStmt.Cond, ifStmt.Cond)
+	}
+	if _, ok := ifStmt.Then[0].(*ast.ReturnStmt); !ok {
+		t.Fatalf("expected guard else branch to lower to return, got %T", ifStmt.Then[0])
+	}
+}
+
+func TestParseWithBundleSpread(t *testing.T) {
+	file, errs := parseSourceFile(t, "context ParseCtx:\n    offset: i64\n\ndef inner() with ParseCtx -> i64:\n    return offset\n\ndef keep() -> i64:\n    offset: i64 = 7\n    return inner() with ParseCtx(.., offset = offset)\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[2].(*ast.FuncDecl)
+	ret := decl.Body[1].(*ast.ReturnStmt)
+	call, ok := ret.Value.(*ast.CallExpr)
+	if !ok || len(call.WithBundles) != 1 {
+		t.Fatalf("expected call with one bundle, got %T %#v", ret.Value, ret.Value)
+	}
+	bundle := call.WithBundles[0]
+	if !bundle.Spread {
+		t.Fatalf("expected ParseCtx bundle to record spread marker, got %#v", bundle)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "ParseCtx(.., offset = offset)") {
+		t.Fatalf("expected unparse output to preserve bundle spread, got:\n%s", formatted)
+	}
+}
+
 func TestParseVisitArmAlternativesAndGuard(t *testing.T) {
 	file, errs := parseSourceFile(t, "tree Lua:\n    @role(expr)\n    node Expr:\n        Int(value: i64)\n        Float(value: f64)\n\ndef score(node: Lua.Expr) -> i64:\n    return visit node:\n        Lua.Expr.Int(expr) | Lua.Expr.Float(expr) when expr.span > 0:\n            expr.span\n        _:\n            0\n")
 	if len(errs) != 0 {

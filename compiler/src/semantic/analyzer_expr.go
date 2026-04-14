@@ -318,6 +318,24 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		}
 		result = resultType
 		return
+	case *ast.OptionalBindExpr:
+		valueType := a.analyzeExpr(n.Value)
+		if a.optionalBindSourceTypes != nil {
+			if existing, ok := a.optionalBindSourceTypes[n]; !ok {
+				a.optionalBindSourceTypes[n] = valueType
+			} else if _, existingOK := conditionOptionalBindType(existing); !existingOK {
+				if _, valueOK := conditionOptionalBindType(valueType); valueOK {
+					a.optionalBindSourceTypes[n] = valueType
+				}
+			}
+		}
+		if _, ok := conditionOptionalBindType(valueType); !ok {
+			a.errorf(n.Pos(), "let condition requires an optional or nullable reference, got %s", valueType.String())
+			result = invalidType
+			return
+		}
+		result = a.namedTypes["bool"]
+		return
 	case *ast.AllocExpr:
 		result = a.analyzeAllocExpr(n)
 		return
@@ -2682,7 +2700,7 @@ func (a *Analyzer) analyzeVariantIsPayloadPattern(pattern ast.MatchPattern, expe
 	case *ast.MatchWildcardPattern:
 		return
 	case *ast.MatchBindPattern:
-		a.errorf(p.Pos(), "variant is tests do not support bind names; use match or if/open/view as to bind payloads")
+		return
 	case *ast.MatchStringLiteralPattern:
 		a.analyzeLiteralMatchPatternExpr(p.Pos(), &ast.StringLit{Position: p.Position, Value: p.Value}, expected, "variant is payload pattern")
 	case *ast.MatchLiteralPattern:
@@ -2738,7 +2756,7 @@ func (a *Analyzer) analyzeEnumIsPayloadPattern(pattern ast.MatchPattern, expecte
 	case *ast.MatchWildcardPattern:
 		return
 	case *ast.MatchBindPattern:
-		a.errorf(p.Pos(), "variant is tests do not support bind names; use match or if/open/view as to bind payloads")
+		return
 	case *ast.MatchStringLiteralPattern:
 		a.analyzeLiteralMatchPatternExpr(p.Pos(), &ast.StringLit{Position: p.Position, Value: p.Value}, expected, "variant is payload pattern")
 	case *ast.MatchLiteralPattern:

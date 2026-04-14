@@ -28,29 +28,30 @@ func (d Diagnostic) String() string {
 }
 
 type Result struct {
-	File                *ast.File
-	GlobalScope         *Scope
-	NamedTypes          map[string]Type
-	StaticInterfaces    map[string]*StaticInterface
-	StaticImpls         map[string]*StaticImpl
-	ContextBundles      map[string]*ContextBundle
-	ConstValues         map[string]ConstValue
-	ExprTypes           map[ast.Expr]Type
-	InterfaceMethodRefs map[*ast.FieldExpr]*InterfaceMethodRef
-	ExprFacts           map[ast.Expr]OptimizationFacts
-	CastHooks           map[ast.Expr]*Symbol
-	DenseNodeKeys       map[ast.Expr]DenseNodeKeyInfo
-	NodeTables          map[ast.Expr]NodeTableInfo
-	PackedLowering      PackedLoweringMetadata
-	ParallelFor         map[*ast.ParallelForStmt]*ParallelForInfo
-	Defer               map[*ast.DeferStmt]*DeferInfo
-	Fold                map[*ast.FoldExpr]*FoldInfo
-	FunctionAnalyses    map[*ast.FuncDecl]*FunctionAnalysis
-	AnnotatedFuncs      []*AnnotatedFunc
-	ExportedTypes       []*ExportedType
-	ExportedFuncs       []*ExportedFunc
-	ExportedGlobals     []*ExportedGlobal
-	Diagnostics         []Diagnostic
+	File                    *ast.File
+	GlobalScope             *Scope
+	NamedTypes              map[string]Type
+	StaticInterfaces        map[string]*StaticInterface
+	StaticImpls             map[string]*StaticImpl
+	ContextBundles          map[string]*ContextBundle
+	ConstValues             map[string]ConstValue
+	ExprTypes               map[ast.Expr]Type
+	OptionalBindSourceTypes map[*ast.OptionalBindExpr]Type
+	InterfaceMethodRefs     map[*ast.FieldExpr]*InterfaceMethodRef
+	ExprFacts               map[ast.Expr]OptimizationFacts
+	CastHooks               map[ast.Expr]*Symbol
+	DenseNodeKeys           map[ast.Expr]DenseNodeKeyInfo
+	NodeTables              map[ast.Expr]NodeTableInfo
+	PackedLowering          PackedLoweringMetadata
+	ParallelFor             map[*ast.ParallelForStmt]*ParallelForInfo
+	Defer                   map[*ast.DeferStmt]*DeferInfo
+	Fold                    map[*ast.FoldExpr]*FoldInfo
+	FunctionAnalyses        map[*ast.FuncDecl]*FunctionAnalysis
+	AnnotatedFuncs          []*AnnotatedFunc
+	ExportedTypes           []*ExportedType
+	ExportedFuncs           []*ExportedFunc
+	ExportedGlobals         []*ExportedGlobal
+	Diagnostics             []Diagnostic
 }
 
 type ParallelForInfo struct {

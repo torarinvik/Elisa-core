@@ -954,6 +954,10 @@ func (a *Analyzer) inferExprOptimizationFactsWithBase(expr ast.Expr, t Type, fac
 		facts = a.inferRecoveredExprOptimizationFacts(n.Value, n.Fallback, facts)
 	case *ast.UnwrapElseExpr:
 		facts = a.inferRecoveredExprOptimizationFacts(n.Value, n.Fallback, facts)
+	case *ast.OptionalBindExpr:
+		if valueFacts, ok := a.lookupOptimizationFactsForExpr(n.Value); ok {
+			facts = overlayOptimizationFacts(facts, valueFacts)
+		}
 	}
 	if typeMayCarryRegionProvenanceForOptimization(t) {
 		if provenance, ok := a.exprPackedStoreProvenance(expr); ok {
@@ -1400,6 +1404,8 @@ func (a *Analyzer) optimizationBaseForExpr(expr ast.Expr) string {
 			return a.optimizationBaseForExpr(n.Value)
 		}
 		return a.sharedOptimizationBaseForExprs(n.Value, n.Fallback)
+	case *ast.OptionalBindExpr:
+		return a.optimizationBaseForExpr(n.Value)
 	}
 	if a != nil && a.exprFacts != nil {
 		if facts, ok := a.exprFacts[stripped]; ok && facts.base != "" {
@@ -1778,6 +1784,8 @@ func optimizationExprString(expr ast.Expr) string {
 		return fmt.Sprintf("(try %s else %s)", optimizationExprString(n.Value), optimizationExprString(n.Fallback))
 	case *ast.UnwrapElseExpr:
 		return fmt.Sprintf("(%s else %s)", optimizationExprString(n.Value), optimizationExprString(n.Fallback))
+	case *ast.OptionalBindExpr:
+		return fmt.Sprintf("(let %s = %s)", n.Name, optimizationExprString(n.Value))
 	default:
 		return ""
 	}

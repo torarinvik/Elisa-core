@@ -157,6 +157,12 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 			return nil
 		}
 		return &ast.UnwrapElseExpr{Position: n.Position, Value: value, Fallback: fallback}
+	case *ast.OptionalBindExpr:
+		value := cloneDefaultArgExpr(n.Value)
+		if n.Value != nil && value == nil {
+			return nil
+		}
+		return &ast.OptionalBindExpr{Position: n.Position, Name: n.Name, Value: value}
 	case *ast.AllocExpr:
 		owner := cloneDefaultArgExpr(n.Owner)
 		value := cloneDefaultArgExpr(n.Value)
@@ -215,7 +221,7 @@ func cloneDefaultWithBundles(bundles []ast.WithBundleUse) []ast.WithBundleUse {
 		if len(bundle.Args) != 0 && args == nil {
 			return nil
 		}
-		cloned = append(cloned, ast.WithBundleUse{Position: bundle.Position, Name: bundle.Name, Args: args})
+		cloned = append(cloned, ast.WithBundleUse{Position: bundle.Position, Name: bundle.Name, Args: args, Spread: bundle.Spread})
 	}
 	return cloned
 }

@@ -45,6 +45,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikePoolStmt() {
 				return p.parsePoolStmt()
 			}
+		case "guard", "require":
+			if p.looksLikeGuardStmt() {
+				return p.parseGuardStmt()
+			}
 		case "defer":
 			if p.looksLikeDeferStmt() {
 				return p.parseDeferStmt()
@@ -142,6 +146,28 @@ func (p *Parser) looksLikePoolStmt() bool {
 			}
 		case lexer.TOKEN_COLON:
 			return depth == 0
+		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
+			return false
+		}
+	}
+	return false
+}
+
+func (p *Parser) looksLikeGuardStmt() bool {
+	depth := 0
+	for i := p.pos + 1; i < len(p.tokens); i++ {
+		tok := p.tokens[i]
+		switch tok.Kind {
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
+			depth++
+		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET:
+			if depth > 0 {
+				depth--
+			}
+		case lexer.TOKEN_ELSE:
+			if depth == 0 {
+				return true
+			}
 		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
 			return false
 		}
@@ -1108,6 +1134,114 @@ func (p *Parser) parseIfClause(isElif bool) ifClause {
 	p.expectNewline()
 	body := p.parseBlock()
 	return ifClause{Position: pos, Hint: hint, Cond: head, Body: body}
+}
+
+func (p *Parser) parseGuardConditionExpr() ast.Expr {
+	depth := 0
+	start := p.pos
+	end := start
+	for end < len(p.tokens) {
+		tok := p.tokens[end]
+		switch tok.Kind {
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
+			depth++
+		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET:
+			if depth > 0 {
+				depth--
+			}
+		case lexer.TOKEN_ELSE:
+			if depth == 0 {
+				goto parse
+			}
+		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
+			goto parse
+		}
+		end++
+	}
+
+parse:
+	if end == start {
+		p.errorf("guard requires a condition before else")
+		return &ast.BoolLit{Position: p.cur().Pos, Value: false}
+	}
+	slice := append([]lexer.Token(nil), p.tokens[start:end]...)
+	eofPos := slice[len(slice)-1].Pos
+	slice = append(slice, lexer.Token{Kind: lexer.TOKEN_EOF, Pos: eofPos})
+	sub := New(slice)
+	sub.poolScopes = append([]string(nil), p.poolScopes...)
+	expr := sub.parseExpr()
+	p.errors = append(p.errors, sub.Errors()...)
+	p.pos = end
+	return expr
+}
+
+func guardConditionIntroducesBindings(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.OptionalBindExpr:
+		return true
+	case *ast.ParenExpr:
+		return guardConditionIntroducesBindings(n.Inner)
+	case *ast.UnaryExpr:
+		return guardConditionIntroducesBindings(n.Operand)
+	case *ast.BinaryExpr:
+		if n.Op == lexer.TOKEN_AND || n.Op == lexer.TOKEN_OR {
+			return guardConditionIntroducesBindings(n.Left) || guardConditionIntroducesBindings(n.Right)
+		}
+		if n.Op != lexer.TOKEN_IS {
+			return false
+		}
+		switch test := n.Right.(type) {
+		case *ast.StructTestExpr:
+			return matchPatternContainsBindNames(test.Pattern)
+		case *ast.VariantTestExpr:
+			return matchPatternContainsBindNames(test.Pattern)
+		default:
+			return false
+		}
+	default:
+		return false
+	}
+}
+
+func matchPatternContainsBindNames(pattern ast.MatchPattern) bool {
+	switch p := pattern.(type) {
+	case nil, *ast.MatchWildcardPattern, *ast.MatchStringLiteralPattern, *ast.MatchLiteralPattern:
+		return false
+	case *ast.MatchBindPattern:
+		return p.Name != "" && p.Name != "_"
+	case *ast.MatchStructPattern:
+		for _, arg := range p.Args {
+			if matchPatternContainsBindNames(arg.Pattern) {
+				return true
+			}
+		}
+		return false
+	case *ast.MatchVariantPattern:
+		for _, arg := range p.Args {
+			if matchPatternContainsBindNames(arg.Pattern) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+func (p *Parser) parseGuardStmt() ast.Stmt {
+	pos := p.cur().Pos
+	p.advance()
+	cond := p.parseGuardConditionExpr()
+	if guardConditionIntroducesBindings(cond) {
+		p.errorf("guard conditions do not support bindings; use `if let ...` or `if ... is Variant(bind)` directly")
+	}
+	p.expect(lexer.TOKEN_ELSE)
+	elseStmt := p.parseStmt()
+	return &ast.IfStmt{
+		Position: pos,
+		Cond:     &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_NOT, Operand: cond},
+		Then:     []ast.Stmt{elseStmt},
+	}
 }
 
 func lowerIfClauses(clauses []ifClause, elseBlock []ast.Stmt) ast.Stmt {

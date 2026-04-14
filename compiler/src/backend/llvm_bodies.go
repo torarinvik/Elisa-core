@@ -122,12 +122,12 @@ const (
 )
 
 type checkpointBinding struct {
-	kind      checkpointBindingKind
-	name      string
-	targetPtr C.LLVMValueRef
+	kind       checkpointBindingKind
+	name       string
+	targetPtr  C.LLVMValueRef
 	targetType semantic.Type
-	markPtr   C.LLVMValueRef
-	markType  semantic.Type
+	markPtr    C.LLVMValueRef
+	markType   semantic.Type
 }
 
 type packedStoreBinding struct {
@@ -3695,19 +3695,50 @@ func (s *functionState) buildCondBrWithHint(condValue C.LLVMValueRef, trueBB C.L
 	s.attachBranchHintMetadata(branch, hint)
 }
 
-func (s *functionState) directStructIsCondition(expr ast.Expr) (ast.Expr, *ast.MatchStructPattern, bool) {
+func backendConditionOptionalBindType(valueType semantic.Type) (semantic.Type, bool) {
+	switch t := valueType.(type) {
+	case *semantic.OptionalType:
+		if t == nil || t.Value == nil {
+			return nil, false
+		}
+		return t.Value, true
+	case *semantic.RefType:
+		if t == nil || t.State != semantic.RefStateNullable {
+			return nil, false
+		}
+		cloned := *t
+		cloned.State = semantic.RefStateNonNull
+		return &cloned, true
+	default:
+		return nil, false
+	}
+}
+
+func (s *functionState) conditionTargetPattern(expr ast.Expr) (ast.MatchPattern, bool) {
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
-		return s.directStructIsCondition(n.Inner)
+		return s.conditionTargetPattern(n.Inner)
+	case *ast.StructTestExpr:
+		if n != nil && n.Pattern != nil {
+			return n.Pattern, true
+		}
+	case *ast.VariantTestExpr:
+		if n != nil && n.Pattern != nil {
+			return n.Pattern, true
+		}
+	}
+	return nil, false
+}
+
+func (s *functionState) directConditionPattern(expr ast.Expr) (ast.Expr, ast.MatchPattern, bool) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return s.directConditionPattern(n.Inner)
 	case *ast.BinaryExpr:
 		if n.Op != lexer.TOKEN_IS {
 			return nil, nil, false
 		}
-		targets := flattenIsTargetExprsBackend(n.Right)
-		if len(targets) != 1 {
-			return nil, nil, false
-		}
-		pattern, ok := s.structIsTargetPattern(targets[0])
+		pattern, ok := s.conditionTargetPattern(n.Right)
 		if !ok || pattern == nil {
 			return nil, nil, false
 		}
@@ -3715,6 +3746,78 @@ func (s *functionState) directStructIsCondition(expr ast.Expr) (ast.Expr, *ast.M
 	default:
 		return nil, nil, false
 	}
+}
+
+func (s *functionState) optionalBindSourceType(expr *ast.OptionalBindExpr) semantic.Type {
+	if expr == nil {
+		return nil
+	}
+	if s.g != nil && s.g.result != nil && s.g.result.OptionalBindSourceTypes != nil {
+		if valueType, ok := s.g.result.OptionalBindSourceTypes[expr]; ok && valueType != nil {
+			return valueType
+		}
+	}
+	return s.exprType(expr.Value)
+}
+
+func (s *functionState) emitOptionalBindTest(expr *ast.OptionalBindExpr) (C.LLVMValueRef, C.LLVMValueRef, semantic.Type, error) {
+	if expr == nil || expr.Value == nil {
+		return nil, nil, nil, fmt.Errorf("invalid let condition")
+	}
+	valueType := s.optionalBindSourceType(expr)
+	if optionalType, ok := valueType.(*semantic.OptionalType); ok {
+		fallibleValue, _, err := s.emitExpr(expr.Value, valueType)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		presentValue, err := s.extractOptionalPresent(fallibleValue, optionalType)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		payloadValue, err := s.extractOptionalPayload(fallibleValue, optionalType)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return presentValue, payloadValue, optionalType.Value, nil
+	}
+	if refType, ok := valueType.(*semantic.RefType); ok && refType.State == semantic.RefStateNullable {
+		refValue, _, err := s.emitExpr(expr.Value, valueType)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		nullValue := C.LLVMConstNull(C.LLVMTypeOf(refValue))
+		presentValue := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), refValue, nullValue, cStringFree("cond.let.present"))
+		boundType, _ := backendConditionOptionalBindType(valueType)
+		return presentValue, refValue, boundType, nil
+	}
+	return nil, nil, nil, fmt.Errorf("let condition requires an optional or nullable reference")
+}
+
+func (s *functionState) emitOptionalBindExpr(expr *ast.OptionalBindExpr) (C.LLVMValueRef, semantic.Type, error) {
+	presentValue, _, _, err := s.emitOptionalBindTest(expr)
+	if err != nil {
+		return nil, nil, err
+	}
+	return presentValue, s.g.result.NamedTypes["bool"], nil
+}
+
+func (s *functionState) emitOptionalBindCondition(expr *ast.OptionalBindExpr, trueBB C.LLVMBasicBlockRef, falseBB C.LLVMBasicBlockRef, hint ast.BranchHint) error {
+	presentValue, boundValue, _, err := s.emitOptionalBindTest(expr)
+	if err != nil {
+		return err
+	}
+	if expr.Name == "" || expr.Name == "_" {
+		s.buildCondBrWithHint(presentValue, trueBB, falseBB, hint)
+		return nil
+	}
+	bindBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("cond.let.bind"))
+	s.buildCondBrWithHint(presentValue, bindBB, falseBB, hint)
+	C.LLVMPositionBuilderAtEnd(s.builder, bindBB)
+	if binding, ok := s.lookupBinding(expr.Name); ok && binding.ptr != nil {
+		C.LLVMBuildStore(s.builder, boundValue, binding.ptr)
+	}
+	C.LLVMBuildBr(s.builder, trueBB)
+	return nil
 }
 
 func (s *functionState) collectTruthyConditionBindings(expr ast.Expr) ([]conditionBindingInfo, error) {
@@ -3795,6 +3898,15 @@ func (s *functionState) collectTruthyConditionBindings(expr ast.Expr) ([]conditi
 		switch n := expr.(type) {
 		case *ast.ParenExpr:
 			return collectExpr(n.Inner, truthy)
+		case *ast.OptionalBindExpr:
+			if n.Name == "" || n.Name == "_" {
+				return nil, nil
+			}
+			boundType, ok := backendConditionOptionalBindType(s.optionalBindSourceType(n))
+			if !ok {
+				return nil, nil
+			}
+			return map[string]semantic.Type{n.Name: boundType}, nil
 		case *ast.UnaryExpr:
 			return nil, nil
 		case *ast.BinaryExpr:
@@ -3851,7 +3963,7 @@ func (s *functionState) collectTruthyConditionBindings(expr ast.Expr) ([]conditi
 				return out, nil
 			}
 		}
-		leftExpr, pattern, ok := s.directStructIsCondition(expr)
+		leftExpr, pattern, ok := s.directConditionPattern(expr)
 		if !ok || leftExpr == nil || pattern == nil {
 			return nil, nil
 		}
@@ -3975,6 +4087,8 @@ func (s *functionState) emitConditionBranchWithBindings(expr ast.Expr, trueBB C.
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
 		return s.emitConditionBranchWithBindings(n.Inner, trueBB, falseBB, hint)
+	case *ast.OptionalBindExpr:
+		return s.emitOptionalBindCondition(n, trueBB, falseBB, hint)
 	case *ast.UnaryExpr:
 		if n.Op == lexer.TOKEN_NOT {
 			return s.emitConditionBranchWithBindings(n.Operand, falseBB, trueBB, invertBranchHint(hint))
@@ -3997,7 +4111,7 @@ func (s *functionState) emitConditionBranchWithBindings(expr ast.Expr, trueBB C.
 			return s.emitConditionBranchWithBindings(n.Right, trueBB, falseBB, ast.BranchHintNone)
 		}
 	}
-	if leftExpr, pattern, ok := s.directStructIsCondition(expr); ok {
+	if leftExpr, pattern, ok := s.directConditionPattern(expr); ok {
 		leftType := s.exprType(leftExpr)
 		leftValue, _, err := s.emitExpr(leftExpr, leftType)
 		if err != nil {
@@ -6923,6 +7037,8 @@ func exprReadsMatchedValueField(name string, expr ast.Expr) bool {
 		return exprReadsMatchedValueField(name, n.Value) || exprReadsMatchedValueField(name, n.Fallback)
 	case *ast.UnwrapElseExpr:
 		return exprReadsMatchedValueField(name, n.Value) || exprReadsMatchedValueField(name, n.Fallback)
+	case *ast.OptionalBindExpr:
+		return exprReadsMatchedValueField(name, n.Value)
 	case *ast.AllocExpr:
 		return exprReadsMatchedValueField(name, n.Owner) || exprReadsMatchedValueField(name, n.Value)
 	case *ast.MatchExpr:

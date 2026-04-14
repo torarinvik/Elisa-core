@@ -208,6 +208,34 @@ def loop_value(tok: Token) -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersVariantAndLetConditionBindings(t *testing.T) {
+	src := `enum Expr:
+	Int(value: i64)
+	Pair(left: i64, right: i64)
+
+def score(node: Expr, maybe: i64?, enabled: bool) -> i64:
+	guard enabled else return 0
+	if let value = maybe and node is Expr.Pair(left, right):
+		return value + left + right
+	return 0
+
+def fallback(maybe: i64?) -> i64:
+	if let value = maybe:
+		return value
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_variant_let_bindings.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i64 @score(", "define i64 @fallback(", "cond.and.rhs", "cond.let.bind", "store i64"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected variant/let condition lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersTreeConstructorsAndIsExprPatterns(t *testing.T) {
 	src := `tree Lua:
 	common:

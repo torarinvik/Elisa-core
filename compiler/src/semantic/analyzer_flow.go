@@ -903,6 +903,8 @@ func (a *Analyzer) validateDeferStmtBodyExpr(expr ast.Expr) {
 	case *ast.UnwrapElseExpr:
 		a.validateDeferStmtBodyExpr(n.Value)
 		a.validateDeferStmtBodyExpr(n.Fallback)
+	case *ast.OptionalBindExpr:
+		a.validateDeferStmtBodyExpr(n.Value)
 	case *ast.AllocExpr:
 		a.validateDeferStmtBodyExpr(n.Owner)
 		a.validateDeferStmtBodyExpr(n.Value)
@@ -2744,6 +2746,8 @@ func (c *deferCaptureCollector) collectExpr(expr ast.Expr, locals map[string]boo
 	case *ast.UnwrapElseExpr:
 		c.collectExpr(n.Value, locals)
 		c.collectExpr(n.Fallback, locals)
+	case *ast.OptionalBindExpr:
+		c.collectExpr(n.Value, locals)
 	case *ast.AllocExpr:
 		c.collectExpr(n.Owner, locals)
 		c.collectExpr(n.Value, locals)
@@ -2868,6 +2872,8 @@ func (c *parallelForCaptureCollector) collectExpr(expr ast.Expr, locals map[stri
 	case *ast.UnwrapElseExpr:
 		c.collectExpr(n.Value, locals)
 		c.collectExpr(n.Fallback, locals)
+	case *ast.OptionalBindExpr:
+		c.collectExpr(n.Value, locals)
 	case *ast.AllocExpr:
 		c.collectExpr(n.Owner, locals)
 		c.collectExpr(n.Value, locals)
@@ -5519,6 +5525,8 @@ func exprReferencesVariantFields(expr ast.Expr, name string) bool {
 		return exprReferencesVariantFields(n.Value, name) || exprReferencesVariantFields(n.Fallback, name)
 	case *ast.UnwrapElseExpr:
 		return exprReferencesVariantFields(n.Value, name) || exprReferencesVariantFields(n.Fallback, name)
+	case *ast.OptionalBindExpr:
+		return exprReferencesVariantFields(n.Value, name)
 	case *ast.AllocExpr:
 		return exprReferencesVariantFields(n.Owner, name) || exprReferencesVariantFields(n.Value, name)
 	case *ast.CanExpr:
@@ -5880,19 +5888,45 @@ func (a *Analyzer) analyzeBlockWithConditionAffineClone(stmts []ast.Stmt, parent
 	})
 }
 
-func unwrapDirectStructIsCondition(expr ast.Expr) (*ast.BinaryExpr, ast.Expr, *ast.MatchStructPattern, bool) {
+func conditionOptionalBindType(valueType Type) (Type, bool) {
+	switch t := valueType.(type) {
+	case *OptionalType:
+		if t == nil || t.Value == nil {
+			return nil, false
+		}
+		return t.Value, true
+	case *RefType:
+		if t == nil || t.State != RefStateNullable {
+			return nil, false
+		}
+		return cloneRefTypeWithState(t, RefStateNonNull), true
+	default:
+		return nil, false
+	}
+}
+
+func unwrapDirectConditionPattern(expr ast.Expr) (*ast.BinaryExpr, ast.Expr, ast.MatchPattern, bool) {
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
-		return unwrapDirectStructIsCondition(n.Inner)
+		return unwrapDirectConditionPattern(n.Inner)
 	case *ast.BinaryExpr:
 		if n.Op != lexer.TOKEN_IS {
 			return nil, nil, nil, false
 		}
-		testExpr, ok := n.Right.(*ast.StructTestExpr)
-		if !ok || testExpr == nil || testExpr.Pattern == nil {
+		switch testExpr := n.Right.(type) {
+		case *ast.StructTestExpr:
+			if testExpr == nil || testExpr.Pattern == nil {
+				return nil, nil, nil, false
+			}
+			return n, n.Left, testExpr.Pattern, true
+		case *ast.VariantTestExpr:
+			if testExpr == nil || testExpr.Pattern == nil {
+				return nil, nil, nil, false
+			}
+			return n, n.Left, testExpr.Pattern, true
+		default:
 			return nil, nil, nil, false
 		}
-		return n, n.Left, testExpr.Pattern, true
 	default:
 		return nil, nil, nil, false
 	}
@@ -5964,6 +5998,19 @@ func (a *Analyzer) collectGuaranteedTruthyConditionBindingTypes(expr ast.Expr) m
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
 		return a.collectGuaranteedTruthyConditionBindingTypes(n.Inner)
+	case *ast.OptionalBindExpr:
+		if n.Name == "" || n.Name == "_" {
+			return nil
+		}
+		valueType := a.exprTypes[n.Value]
+		if valueType == nil {
+			valueType = a.analyzeExpr(n.Value)
+		}
+		boundType, ok := conditionOptionalBindType(valueType)
+		if !ok {
+			return nil
+		}
+		return map[string]Type{n.Name: boundType}
 	case *ast.UnaryExpr:
 		return nil
 	case *ast.BinaryExpr:
@@ -6009,7 +6056,7 @@ func (a *Analyzer) collectGuaranteedTruthyConditionBindingTypes(expr ast.Expr) m
 			return out
 		}
 	}
-	_, valueExpr, pattern, ok := unwrapDirectStructIsCondition(expr)
+	_, valueExpr, pattern, ok := unwrapDirectConditionPattern(expr)
 	if !ok || valueExpr == nil || pattern == nil {
 		return nil
 	}
@@ -6032,6 +6079,19 @@ func (a *Analyzer) collectPossibleTruthyConditionBindingTypes(expr ast.Expr) map
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
 		return a.collectPossibleTruthyConditionBindingTypes(n.Inner)
+	case *ast.OptionalBindExpr:
+		if n.Name == "" || n.Name == "_" {
+			return nil
+		}
+		valueType := a.exprTypes[n.Value]
+		if valueType == nil {
+			valueType = a.analyzeExpr(n.Value)
+		}
+		boundType, ok := conditionOptionalBindType(valueType)
+		if !ok {
+			return nil
+		}
+		return map[string]Type{n.Name: boundType}
 	case *ast.UnaryExpr:
 		return nil
 	case *ast.BinaryExpr:
@@ -6057,7 +6117,7 @@ func (a *Analyzer) collectPossibleTruthyConditionBindingTypes(expr ast.Expr) map
 			return out
 		}
 	}
-	_, valueExpr, pattern, ok := unwrapDirectStructIsCondition(expr)
+	_, valueExpr, pattern, ok := unwrapDirectConditionPattern(expr)
 	if !ok || valueExpr == nil || pattern == nil {
 		return nil
 	}
@@ -6140,6 +6200,21 @@ func (a *Analyzer) bindConditionPatternLocals(scope *Scope, expr ast.Expr, truth
 	case *ast.ParenExpr:
 		a.bindConditionPatternLocals(scope, n.Inner, truthy)
 		return
+	case *ast.OptionalBindExpr:
+		if n.Name == "" || n.Name == "_" {
+			return
+		}
+		valueType := a.exprTypes[n.Value]
+		if valueType == nil {
+			valueType = a.analyzeExprInScope(n.Value, scope)
+		}
+		boundType, ok := conditionOptionalBindType(valueType)
+		if !ok {
+			return
+		}
+		sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: boundType, Node: n, Mutable: false}
+		a.defineLocalInScope(scope, sym, n.Pos())
+		return
 	case *ast.UnaryExpr:
 		if n.Op == lexer.TOKEN_NOT {
 			a.bindConditionPatternLocals(scope, n.Operand, !truthy)
@@ -6159,7 +6234,7 @@ func (a *Analyzer) bindConditionPatternLocals(scope *Scope, expr ast.Expr, truth
 			return
 		}
 	}
-	_, valueExpr, pattern, ok := unwrapDirectStructIsCondition(expr)
+	_, valueExpr, pattern, ok := unwrapDirectConditionPattern(expr)
 	if !ok || valueExpr == nil || pattern == nil {
 		return
 	}
@@ -6171,7 +6246,7 @@ func (a *Analyzer) bindConditionPatternLocals(scope *Scope, expr ast.Expr, truth
 }
 
 func (a *Analyzer) bindConditionStructPatternLocals(scope *Scope, pattern ast.MatchPattern, expected Type, valueExpr ast.Expr) {
-	if a == nil || scope == nil || pattern == nil || expected == nil || valueExpr == nil {
+	if a == nil || scope == nil || pattern == nil || expected == nil {
 		return
 	}
 	switch p := pattern.(type) {
@@ -6183,11 +6258,13 @@ func (a *Analyzer) bindConditionStructPatternLocals(scope *Scope, pattern ast.Ma
 		}
 		sym := &Symbol{Name: p.Name, Kind: SymbolLocal, Type: expected, Node: p, Mutable: false}
 		a.defineLocalInScope(scope, sym, p.Pos())
-		a.recordValueBinding(sym, valueExpr)
-		a.recordBorrowedOwnerRefBinding(sym, valueExpr)
-		a.recordFunctionValueBinding(sym, valueExpr)
-		a.recordImmutableSymbolOptimizationFacts(sym, valueExpr)
-		a.recordRegionRefBinding(sym, valueExpr)
+		if valueExpr != nil {
+			a.recordValueBinding(sym, valueExpr)
+			a.recordBorrowedOwnerRefBinding(sym, valueExpr)
+			a.recordFunctionValueBinding(sym, valueExpr)
+			a.recordImmutableSymbolOptimizationFacts(sym, valueExpr)
+			a.recordRegionRefBinding(sym, valueExpr)
+		}
 	case *ast.MatchStructPattern:
 		fields, orderedArgs, ok := a.resolveMatchStructPattern(p, expected)
 		if !ok {
@@ -6197,7 +6274,10 @@ func (a *Analyzer) bindConditionStructPatternLocals(scope *Scope, pattern ast.Ma
 			if arg == nil {
 				continue
 			}
-			fieldExpr := &ast.FieldExpr{Position: arg.Position, Object: valueExpr, Field: fields[i].Name}
+			var fieldExpr ast.Expr
+			if valueExpr != nil {
+				fieldExpr = &ast.FieldExpr{Position: arg.Position, Object: valueExpr, Field: fields[i].Name}
+			}
 			a.bindConditionStructPatternLocals(scope, arg.Pattern, fields[i].Type, fieldExpr)
 		}
 	case *ast.MatchVariantPattern:
@@ -6212,9 +6292,12 @@ func (a *Analyzer) bindConditionStructPatternLocals(scope *Scope, pattern ast.Ma
 				if arg == nil {
 					continue
 				}
-				payloadExpr, ok := a.resolveMatchVariantPayloadValueExpr(valueExpr, p, moveBindVariantFieldKey(variant, i))
-				if !ok || payloadExpr == nil {
-					continue
+				var payloadExpr ast.Expr
+				if valueExpr != nil {
+					resolvedExpr, ok := a.resolveMatchVariantPayloadValueExpr(valueExpr, p, moveBindVariantFieldKey(variant, i))
+					if ok {
+						payloadExpr = resolvedExpr
+					}
 				}
 				a.bindConditionStructPatternLocals(scope, arg.Pattern, variant.Payload[i], payloadExpr)
 			}
@@ -6228,9 +6311,12 @@ func (a *Analyzer) bindConditionStructPatternLocals(scope *Scope, pattern ast.Ma
 				if arg == nil {
 					continue
 				}
-				payloadExpr, ok := a.resolveMatchVariantPayloadValueExpr(valueExpr, p, moveBindVariantFieldKey(variant, i))
-				if !ok || payloadExpr == nil {
-					continue
+				var payloadExpr ast.Expr
+				if valueExpr != nil {
+					resolvedExpr, ok := a.resolveMatchVariantPayloadValueExpr(valueExpr, p, moveBindVariantFieldKey(variant, i))
+					if ok {
+						payloadExpr = resolvedExpr
+					}
 				}
 				a.bindConditionStructPatternLocals(scope, arg.Pattern, variant.Payload[i], payloadExpr)
 			}
@@ -10077,6 +10163,8 @@ func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRef
 		return a.borrowedOwnerRefStateForRecoveredExpr(n.Value, n.Fallback)
 	case *ast.UnwrapElseExpr:
 		return a.borrowedOwnerRefStateForRecoveredExpr(n.Value, n.Fallback)
+	case *ast.OptionalBindExpr:
+		return a.borrowedOwnerRefStateForExpr(n.Value)
 	case *ast.TernaryExpr:
 		left, leftOK := a.borrowedOwnerRefStateForExpr(n.Value)
 		right, rightOK := a.borrowedOwnerRefStateForExpr(n.Alt)
@@ -11042,6 +11130,8 @@ func (a *Analyzer) applyConditionRefinementsInternal(scope *Scope, expr ast.Expr
 				a.bindRefinedExprType(scope, targetExpr, refinedType)
 			}
 		}
+	case *ast.OptionalBindExpr:
+		a.shadowRefinedExpr(scope, n.Value, truthy)
 	case *ast.UnaryExpr:
 		if n.Op == lexer.TOKEN_NOT {
 			a.applyConditionRefinementsInternal(scope, n.Operand, !truthy, persistTracked)

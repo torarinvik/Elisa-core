@@ -257,6 +257,7 @@ type WithBundleUse struct {
 	Position lexer.Pos
 	Name     string
 	Args     []WithArg
+	Spread   bool
 }
 
 type ImplicitSigItem struct {
@@ -295,10 +296,10 @@ type FuncDecl struct {
 }
 
 type ParamDecl struct {
-	Position lexer.Pos
-	Name     string
-	Mutable  bool
-	Type     TypeExpr
+	Position     lexer.Pos
+	Name         string
+	Mutable      bool
+	Type         TypeExpr
 	DefaultValue Expr
 }
 
@@ -728,6 +729,12 @@ type UnwrapElseExpr struct {
 	Position lexer.Pos
 	Value    Expr
 	Fallback Expr
+}
+
+type OptionalBindExpr struct {
+	Position lexer.Pos
+	Name     string
+	Value    Expr
 }
 
 type AllocExpr struct {
@@ -1241,11 +1248,14 @@ func (n *ParenExpr) Pos() lexer.Pos       { return n.Position }
 func (n *RaiseExpr) Pos() lexer.Pos       { return n.Position }
 func (n *TryExpr) Pos() lexer.Pos         { return n.Position }
 func (n *UnwrapElseExpr) Pos() lexer.Pos  { return n.Position }
-func (n *AllocExpr) Pos() lexer.Pos       { return n.Position }
-func (n *CanExpr) Pos() lexer.Pos         { return n.Position }
-func (n *MatchExpr) Pos() lexer.Pos       { return n.Position }
-func (n *VisitExpr) Pos() lexer.Pos       { return n.Position }
-func (n *FoldExpr) Pos() lexer.Pos        { return n.Position }
+func (n *OptionalBindExpr) Pos() lexer.Pos {
+	return n.Position
+}
+func (n *AllocExpr) Pos() lexer.Pos { return n.Position }
+func (n *CanExpr) Pos() lexer.Pos   { return n.Position }
+func (n *MatchExpr) Pos() lexer.Pos { return n.Position }
+func (n *VisitExpr) Pos() lexer.Pos { return n.Position }
+func (n *FoldExpr) Pos() lexer.Pos  { return n.Position }
 func (n *MatchWildcardPattern) Pos() lexer.Pos {
 	return n.Position
 }
@@ -1373,6 +1383,7 @@ func (*ParenExpr) nodeTag()                 {}
 func (*RaiseExpr) nodeTag()                 {}
 func (*TryExpr) nodeTag()                   {}
 func (*UnwrapElseExpr) nodeTag()            {}
+func (*OptionalBindExpr) nodeTag()          {}
 func (*AllocExpr) nodeTag()                 {}
 func (*CanExpr) nodeTag()                   {}
 func (*MatchExpr) nodeTag()                 {}
@@ -1516,6 +1527,7 @@ func (*FoldExpr) exprTag()                          {}
 func (*MatchStmt) stmtTag()                         {}
 func (*TryExpr) exprTag()                           {}
 func (*UnwrapElseExpr) exprTag()                    {}
+func (*OptionalBindExpr) exprTag()                  {}
 func (*AllocExpr) exprTag()                         {}
 func (*CanExpr) exprTag()                           {}
 

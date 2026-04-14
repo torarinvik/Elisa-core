@@ -77,6 +77,7 @@ type Analyzer struct {
 	functionTypes                     map[string]*FuncType
 	constValues                       map[string]ConstValue
 	exprTypes                         map[ast.Expr]Type
+	optionalBindSourceTypes           map[*ast.OptionalBindExpr]Type
 	interfaceMethodRefs               map[*ast.FieldExpr]*InterfaceMethodRef
 	exprFacts                         map[ast.Expr]OptimizationFacts
 	treeConstructorCallees            map[ast.Expr]bool
@@ -269,6 +270,7 @@ func Analyze(file *ast.File) *Result {
 		functionTypes:                     map[string]*FuncType{},
 		constValues:                       map[string]ConstValue{},
 		exprTypes:                         make(map[ast.Expr]Type, exprCapacity),
+		optionalBindSourceTypes:           make(map[*ast.OptionalBindExpr]Type, exprCapacity/16+8),
 		interfaceMethodRefs:               make(map[*ast.FieldExpr]*InterfaceMethodRef, exprCapacity/16+8),
 		exprFacts:                         make(map[ast.Expr]OptimizationFacts, exprFactsCapacity),
 		treeConstructorCallees:            make(map[ast.Expr]bool, exprCapacity/16+8),
@@ -310,28 +312,29 @@ func Analyze(file *ast.File) *Result {
 	a.validatePermissionUsage(activeDecls)
 	a.analyzeExports(activeDecls)
 	return &Result{
-		File:                file,
-		GlobalScope:         a.globalScope,
-		NamedTypes:          a.namedTypes,
-		StaticInterfaces:    a.staticInterfaces,
-		StaticImpls:         a.staticImpls,
-		ContextBundles:      a.contextBundles,
-		ConstValues:         a.constValues,
-		ExprTypes:           a.exprTypes,
-		InterfaceMethodRefs: a.interfaceMethodRefs,
-		ExprFacts:           a.exprFacts,
-		CastHooks:           a.resolvedCastHooks,
-		DenseNodeKeys:       a.exprDenseNodeKeys,
-		NodeTables:          a.exprNodeTables,
-		ParallelFor:         a.parallelForInfo,
-		Defer:               a.deferInfo,
-		Fold:                a.foldInfo,
-		FunctionAnalyses:    a.functionAnalyses,
-		AnnotatedFuncs:      a.annotatedFuncs,
-		ExportedTypes:       a.exportedTypes,
-		ExportedFuncs:       a.exportedFuncs,
-		ExportedGlobals:     a.exportedGlobals,
-		Diagnostics:         a.diagnostics,
+		File:                    file,
+		GlobalScope:             a.globalScope,
+		NamedTypes:              a.namedTypes,
+		StaticInterfaces:        a.staticInterfaces,
+		StaticImpls:             a.staticImpls,
+		ContextBundles:          a.contextBundles,
+		ConstValues:             a.constValues,
+		ExprTypes:               a.exprTypes,
+		OptionalBindSourceTypes: a.optionalBindSourceTypes,
+		InterfaceMethodRefs:     a.interfaceMethodRefs,
+		ExprFacts:               a.exprFacts,
+		CastHooks:               a.resolvedCastHooks,
+		DenseNodeKeys:           a.exprDenseNodeKeys,
+		NodeTables:              a.exprNodeTables,
+		ParallelFor:             a.parallelForInfo,
+		Defer:                   a.deferInfo,
+		Fold:                    a.foldInfo,
+		FunctionAnalyses:        a.functionAnalyses,
+		AnnotatedFuncs:          a.annotatedFuncs,
+		ExportedTypes:           a.exportedTypes,
+		ExportedFuncs:           a.exportedFuncs,
+		ExportedGlobals:         a.exportedGlobals,
+		Diagnostics:             a.diagnostics,
 	}
 }
 

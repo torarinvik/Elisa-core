@@ -755,7 +755,10 @@ func formatWithArg(arg ast.WithArg) string {
 }
 
 func formatWithBundleUse(bundle ast.WithBundleUse) string {
-	parts := make([]string, 0, len(bundle.Args))
+	parts := make([]string, 0, len(bundle.Args)+1)
+	if bundle.Spread {
+		parts = append(parts, "..")
+	}
 	for _, arg := range bundle.Args {
 		parts = append(parts, arg.Name+" = "+formatExpr(arg.Value))
 	}
@@ -1165,6 +1168,8 @@ func formatExpr(expr ast.Expr) string {
 		return line
 	case *ast.UnwrapElseExpr:
 		return formatExpr(n.Value) + " else " + formatExpr(n.Fallback)
+	case *ast.OptionalBindExpr:
+		return "let " + n.Name + " = " + formatExpr(n.Value)
 	case *ast.AllocExpr:
 		if n.Owner != nil {
 			return "new[" + formatExpr(n.Owner) + "] " + formatExpr(n.Value)

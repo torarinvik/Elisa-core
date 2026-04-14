@@ -839,7 +839,10 @@ func formatMainWithSignatureClause(bundles []string, params []ast.ParamDecl) str
 func formatMainWithValueClause(bundles []ast.WithBundleUse, args []ast.WithArg) string {
 	parts := make([]string, 0, len(bundles)+len(args))
 	for _, bundle := range bundles {
-		bundleParts := make([]string, 0, len(bundle.Args))
+		bundleParts := make([]string, 0, len(bundle.Args)+1)
+		if bundle.Spread {
+			bundleParts = append(bundleParts, "..")
+		}
 		for _, arg := range bundle.Args {
 			bundleParts = append(bundleParts, arg.Name+" = "+exprStr(arg.Value))
 		}
@@ -948,6 +951,8 @@ func exprStr(e ast.Expr) string {
 		return fmt.Sprintf("%s(%s)", n.Name, strings.Join(args, ", "))
 	case *ast.ParenExpr:
 		return fmt.Sprintf("(%s)", exprStr(n.Inner))
+	case *ast.OptionalBindExpr:
+		return fmt.Sprintf("let %s = %s", n.Name, exprStr(n.Value))
 	case *ast.CanExpr:
 		return exprStr(n.Expr) + formatPermissionRefs(n.Permissions)
 	default:

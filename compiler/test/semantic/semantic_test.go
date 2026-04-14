@@ -6158,18 +6158,18 @@ def classify(node: Expr) -> int:
 	requireNoErrors(t, errs)
 }
 
-func TestAnalyzeRejectsEnumVariantIsConditionPayloadBindPattern(t *testing.T) {
+func TestAnalyzeAcceptsEnumVariantIsConditionPayloadBindPattern(t *testing.T) {
 	src := `enum Expr:
-	Float(PI: int)
+	Float(value: int)
 
-def bad(node: Expr) -> bool:
-	return node is Expr.Float(value)
+def unwrap(node: Expr) -> int:
+	if node is Expr.Float(value):
+		return value
+	return 0
 `
-	_, errs := parseAndAnalyze(t, "enum_variant_is_condition_payload_bind_pattern_bad.llcontext", src)
-	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "variant is tests do not support bind names") {
-		t.Fatalf("expected bind-pattern rejection, got:\n%s", all)
-	}
+	result, errs := parseAndAnalyze(t, "enum_variant_is_condition_payload_bind_pattern_ok.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
 }
 
 func TestAnalyzeAcceptsPackedEnumIsConditionRefiningScrutineeToPackedView(t *testing.T) {

@@ -655,6 +655,13 @@ func (p *Parser) parseNot() ast.Expr {
 		operand := p.parseNot()
 		return &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_NOT, Operand: operand}
 	}
+	if p.matchIdentText("let") {
+		pos := p.tokens[p.pos-1].Pos
+		name := p.expect(lexer.TOKEN_IDENT).Text
+		p.expect(lexer.TOKEN_ASSIGN)
+		value := p.parseNot()
+		return &ast.OptionalBindExpr{Position: pos, Name: name, Value: value}
+	}
 	return p.parseComparison()
 }
 
@@ -1113,21 +1120,32 @@ func (p *Parser) isImmediateGroupedBlockExprName(name string) bool {
 	}
 }
 
-func (p *Parser) parseWithBundleNamedArgs() []ast.WithArg {
+func (p *Parser) parseWithBundleNamedArgs() ([]ast.WithArg, bool) {
 	args := make([]ast.WithArg, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
+	spread := false
 	if p.peek() == lexer.TOKEN_RPAREN {
-		return nil
+		return nil, false
 	}
 	for {
-		pos := p.cur().Pos
-		name := p.expect(lexer.TOKEN_IDENT).Text
-		p.expect(lexer.TOKEN_ASSIGN)
-		args = append(args, ast.WithArg{Position: pos, Name: name, Value: p.parseExpr()})
+		if p.match(lexer.TOKEN_RANGE) {
+			if spread {
+				p.errorf("with bundle spread `..` can only appear once")
+			}
+			spread = true
+		} else {
+			pos := p.cur().Pos
+			name := p.expect(lexer.TOKEN_IDENT).Text
+			p.expect(lexer.TOKEN_ASSIGN)
+			args = append(args, ast.WithArg{Position: pos, Name: name, Value: p.parseExpr()})
+		}
 		if !p.match(lexer.TOKEN_COMMA) {
 			break
 		}
+		if p.peek() == lexer.TOKEN_RPAREN {
+			break
+		}
 	}
-	return args
+	return args, spread
 }
 
 func (p *Parser) parseWithValueClause() ([]ast.WithArg, []ast.WithBundleUse, []ast.WithItem) {
@@ -1147,9 +1165,9 @@ func (p *Parser) parseWithValueClause() ([]ast.WithArg, []ast.WithBundleUse, []a
 		switch {
 		case p.peek() == lexer.TOKEN_LPAREN:
 			p.advance()
-			bundleArgs := p.parseWithBundleNamedArgs()
+			bundleArgs, spread := p.parseWithBundleNamedArgs()
 			p.expect(lexer.TOKEN_RPAREN)
-			bundle := ast.WithBundleUse{Position: pos, Name: qualifiedName, Args: bundleArgs}
+			bundle := ast.WithBundleUse{Position: pos, Name: qualifiedName, Args: bundleArgs, Spread: spread}
 			bundles = append(bundles, bundle)
 			items = append(items, ast.WithItem{Position: pos, Bundle: bundle, IsBundle: true})
 		case !hasDot && p.match(lexer.TOKEN_ASSIGN):
