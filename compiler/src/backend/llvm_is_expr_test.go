@@ -236,6 +236,42 @@ def fallback(maybe: i64?) -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersNestedLetOverTreeConditionBoundOptional(t *testing.T) {
+	src := `tree Tiny:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		IntegerLit(value: i64)
+	@role(stmt)
+	node Stmt:
+		MaybeStep(child step?: Expr)
+
+def score(stmt: Tiny.Stmt) -> i64:
+	if stmt is Tiny.Stmt.MaybeStep(step):
+		if let step_expr = step:
+			if step_expr is Tiny.Expr.IntegerLit(value):
+				return value
+	return 0
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_nested_let_optional.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	body := output
+	for _, check := range []string{"load %Optional__Tiny_Expr", "optional.present", "cond.let.bind"} {
+		if !strings.Contains(body, check) {
+			t.Fatalf("expected nested tree let lowering to include %q, got:\n%s", check, body)
+		}
+	}
+	for _, bad := range []string{"br i1 false, label %cond.let.bind", "store %Tiny__TreeHandle zeroinitializer, ptr %step_expr.cond"} {
+		if strings.Contains(body, bad) {
+			t.Fatalf("expected nested tree let lowering to avoid %q, got:\n%s", bad, body)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersTreeConstructorsAndIsExprPatterns(t *testing.T) {
 	src := `tree Lua:
 	common:

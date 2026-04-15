@@ -3760,13 +3760,28 @@ func (s *functionState) optionalBindSourceType(expr *ast.OptionalBindExpr) seman
 	return s.exprType(expr.Value)
 }
 
+func (s *functionState) emitOptionalBindSourceValue(expr ast.Expr, sourceType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+	if expr == nil || sourceType == nil {
+		return nil, nil, fmt.Errorf("invalid let condition source")
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return s.emitOptionalBindSourceValue(n.Inner, sourceType)
+	}
+	if ptr, storedType, err := s.emitAddress(expr); err == nil && storedType != nil && semantic.SameType(storedType, sourceType) {
+		value, loadErr := s.loadValue(ptr, sourceType, "cond.let.source")
+		return value, sourceType, loadErr
+	}
+	return s.emitExpr(expr, sourceType)
+}
+
 func (s *functionState) emitOptionalBindTest(expr *ast.OptionalBindExpr) (C.LLVMValueRef, C.LLVMValueRef, semantic.Type, error) {
 	if expr == nil || expr.Value == nil {
 		return nil, nil, nil, fmt.Errorf("invalid let condition")
 	}
 	valueType := s.optionalBindSourceType(expr)
 	if optionalType, ok := valueType.(*semantic.OptionalType); ok {
-		fallibleValue, _, err := s.emitExpr(expr.Value, valueType)
+		fallibleValue, _, err := s.emitOptionalBindSourceValue(expr.Value, valueType)
 		if err != nil {
 			return nil, nil, nil, err
 		}
