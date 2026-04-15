@@ -986,10 +986,27 @@ func exprStr(e ast.Expr) string {
 		return fmt.Sprintf("%s[%s]", exprStr(n.Operand), strings.Join(typeArgs, ", "))
 	case *ast.StructLitExpr:
 		var args []string
-		for _, a := range n.Args {
-			args = append(args, exprStr(a))
+		for i, a := range n.Args {
+			part := exprStr(a)
+			if name := n.ArgName(i); name != "" {
+				part = fmt.Sprintf("%s: %s", name, part)
+			}
+			args = append(args, part)
+		}
+		if n.Brace {
+			return fmt.Sprintf("%s{%s}", n.Name, strings.Join(args, ", "))
 		}
 		return fmt.Sprintf("%s(%s)", n.Name, strings.Join(args, ", "))
+	case *ast.RecordUpdateExpr:
+		var args []string
+		for i, a := range n.Args {
+			part := exprStr(a)
+			if name := n.ArgName(i); name != "" {
+				part = fmt.Sprintf("%s = %s", name, part)
+			}
+			args = append(args, part)
+		}
+		return fmt.Sprintf("%s{%s}", exprStr(n.Base), strings.Join(args, ", "))
 	case *ast.ParenExpr:
 		return fmt.Sprintf("(%s)", exprStr(n.Inner))
 	case *ast.OptionalBindExpr:

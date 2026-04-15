@@ -86,3 +86,12 @@ func (g *llvmGenerator) structLiteralFields(t semantic.Type) ([]structLiteralFie
 		return nil, fmt.Errorf("struct literal requires a concrete struct type, got %s", t.String())
 	}
 }
+
+func lookupStructLiteralField(fields []structLiteralField, name string) (structLiteralField, bool) {
+	for _, field := range fields {
+		if field.Decl.Name == name {
+			return field, true
+		}
+	}
+	return structLiteralField{}, false
+}

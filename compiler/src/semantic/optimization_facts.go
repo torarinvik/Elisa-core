@@ -1777,10 +1777,27 @@ func optimizationExprString(expr ast.Expr) string {
 		return optimizationExprString(n.Operand) + ".specialize"
 	case *ast.StructLitExpr:
 		parts := make([]string, 0, len(n.Args))
-		for _, arg := range n.Args {
-			parts = append(parts, optimizationExprString(arg))
+		for i, arg := range n.Args {
+			part := optimizationExprString(arg)
+			if name := n.ArgName(i); name != "" {
+				part = fmt.Sprintf("%s: %s", name, part)
+			}
+			parts = append(parts, part)
+		}
+		if n.Brace {
+			return fmt.Sprintf("%s{%s}", n.Name, joinOptimizationStrings(parts))
 		}
 		return fmt.Sprintf("%s(%s)", n.Name, joinOptimizationStrings(parts))
+	case *ast.RecordUpdateExpr:
+		parts := make([]string, 0, len(n.Args))
+		for i, arg := range n.Args {
+			part := optimizationExprString(arg)
+			if name := n.ArgName(i); name != "" {
+				part = fmt.Sprintf("%s = %s", name, part)
+			}
+			parts = append(parts, part)
+		}
+		return fmt.Sprintf("%s{%s}", optimizationExprString(n.Base), joinOptimizationStrings(parts))
 	case *ast.ParenExpr:
 		return fmt.Sprintf("(%s)", optimizationExprString(n.Inner))
 	case *ast.AllocExpr:

@@ -858,10 +858,10 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 			}
 		}
 		return nil
-	case *ast.TupleBindStmt:
-		return s.emitTupleBindStmt(n)
 	case *ast.LetDestructureStmt:
 		return s.emitLetDestructureStmt(n)
+	case *ast.TupleBindStmt:
+		return s.emitTupleBindStmt(n)
 	case *ast.MoveBindStmt:
 		return s.emitMoveBindStmt(n)
 	case *ast.OpenStmt:
@@ -1136,38 +1136,35 @@ func (s *functionState) emitTupleBindStmt(stmt *ast.TupleBindStmt) error {
 	return nil
 }
 
+func moveBindFieldName(arg ast.MoveBindArg) string {
+	if arg.Field != "" {
+		return arg.Field
+	}
+	return arg.Name
+}
+
 func (s *functionState) emitLetDestructureStmt(stmt *ast.LetDestructureStmt) error {
-	if stmt == nil || stmt.Pattern == nil {
+	if stmt == nil || stmt.Pattern == nil || stmt.Value == nil {
 		return nil
 	}
-	valueType := s.exprType(stmt.Value)
-	if valueType == nil {
-		return fmt.Errorf("missing semantic type for let destructuring value")
-	}
-	value, _, err := s.emitExpr(stmt.Value, valueType)
+	value, valueType, err := s.emitExpr(stmt.Value, nil)
 	if err != nil {
 		return err
 	}
-	tempName := s.g.nextSyntheticName("let.destructure.")
-	tempAlloca, err := s.createEntryAlloca(tempName, valueType)
+	fields, err := s.g.structLiteralFields(valueType)
 	if err != nil {
 		return err
 	}
-	s.defineBinding(tempName, valueBinding{ptr: tempAlloca, typ: valueType, mutable: false})
-	C.LLVMBuildStore(s.builder, value, tempAlloca)
-	tempIdent := &ast.Ident{Position: stmt.Position, Name: tempName}
-	for _, field := range stmt.Pattern.Fields {
-		fieldExpr := &ast.FieldExpr{Position: field.Position, Object: tempIdent, Field: field.Field}
-		fieldValue, fieldType, err := s.emitExpr(fieldExpr, nil)
-		if err != nil {
+	for _, arg := range stmt.Pattern.Args {
+		fieldName := moveBindFieldName(arg)
+		field, ok := lookupStructLiteralField(fields, fieldName)
+		if !ok {
+			return fmt.Errorf("unknown field %q in let destructuring", fieldName)
+		}
+		fieldValue := C.LLVMBuildExtractValue(s.builder, value, C.unsigned(field.Index), cStringFree("let.field"))
+		if err := s.emitMoveBindLocal(arg.Name, field.Type, fieldValue); err != nil {
 			return err
 		}
-		alloca, err := s.createEntryAlloca(field.Name, fieldType)
-		if err != nil {
-			return err
-		}
-		s.defineBinding(field.Name, valueBinding{ptr: alloca, typ: fieldType, mutable: false})
-		C.LLVMBuildStore(s.builder, fieldValue, alloca)
 	}
 	return nil
 }
@@ -1199,6 +1196,20 @@ func (s *functionState) emitMoveBindStmt(stmt *ast.MoveBindStmt) error {
 		fields, err := s.g.structLiteralFields(valueType)
 		if err != nil {
 			return err
+		}
+		if p.Brace {
+			for _, arg := range p.Args {
+				fieldName := moveBindFieldName(arg)
+				field, ok := lookupStructLiteralField(fields, fieldName)
+				if !ok {
+					return fmt.Errorf("unknown field %q in move-as destructuring", fieldName)
+				}
+				fieldValue := C.LLVMBuildExtractValue(s.builder, value, C.unsigned(field.Index), cStringFree("move.as.field"))
+				if err := s.emitMoveBindLocal(arg.Name, field.Type, fieldValue); err != nil {
+					return err
+				}
+			}
+			return nil
 		}
 		limit := len(p.Args)
 		if len(fields) < limit {
@@ -2897,6 +2908,45 @@ func (s *functionState) emitIterLoopPatternBindings(pattern ast.MoveBindPattern,
 		if err != nil {
 			return err
 		}
+		if p.Brace {
+			if mode == ast.IterBindValue {
+				for _, arg := range p.Args {
+					if arg.Name == "_" {
+						continue
+					}
+					fieldName := moveBindFieldName(arg)
+					field, ok := lookupStructLiteralField(fields, fieldName)
+					if !ok {
+						return fmt.Errorf("unknown field %q in iterable destructuring", fieldName)
+					}
+					fieldValue := C.LLVMBuildExtractValue(s.builder, itemValue, C.unsigned(field.Index), cStringFree(arg.Name+".iter.field"))
+					if err := s.emitMoveBindLocal(arg.Name, field.Type, fieldValue); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+			containerLLVMType, err := s.g.lowerType(semantic.StripAggregateStateType(itemType))
+			if err != nil {
+				return err
+			}
+			for _, arg := range p.Args {
+				if arg.Name == "_" {
+					continue
+				}
+				fieldName := moveBindFieldName(arg)
+				field, ok := lookupStructLiteralField(fields, fieldName)
+				if !ok {
+					return fmt.Errorf("unknown field %q in iterable destructuring", fieldName)
+				}
+				fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, itemPtr, C.unsigned(field.Index), cStringFree(arg.Name+".iter.field.ptr"))
+				refType := &semantic.RefType{Elem: field.Type, Mutable: mode == ast.IterBindMutableRef, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny}
+				if err := s.emitIterLoopRefLocal(arg.Name, refType, fieldPtr); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
 		limit := len(p.Args)
 		if len(fields) < limit {
 			limit = len(fields)
@@ -2924,68 +2974,6 @@ func (s *functionState) emitIterLoopPatternBindings(pattern ast.MoveBindPattern,
 			fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, itemPtr, C.unsigned(fields[i].Index), cStringFree(p.Args[i].Name+".iter.field.ptr"))
 			refType := &semantic.RefType{Elem: fields[i].Type, Mutable: mode == ast.IterBindMutableRef, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny}
 			if err := s.emitIterLoopRefLocal(p.Args[i].Name, refType, fieldPtr); err != nil {
-				return err
-			}
-		}
-		return nil
-	case *ast.StructDestructurePattern:
-		if _, ok := semantic.StripAggregateStateType(itemType).(*semantic.StoreRowViewType); ok {
-			if mode != ast.IterBindValue {
-				return fmt.Errorf("iterable loop does not support ref binding for %s", itemType.String())
-			}
-			tempName := s.g.nextSyntheticName("iter.destructure.row.")
-			tempAlloca, err := s.createEntryAlloca(tempName, itemType)
-			if err != nil {
-				return err
-			}
-			s.defineBinding(tempName, valueBinding{ptr: tempAlloca, typ: itemType, mutable: false})
-			C.LLVMBuildStore(s.builder, itemValue, tempAlloca)
-			tempIdent := &ast.Ident{Position: p.Position, Name: tempName}
-			for _, entry := range p.Fields {
-				fieldExpr := &ast.FieldExpr{Position: entry.Position, Object: tempIdent, Field: entry.Field}
-				fieldValue, fieldType, err := s.emitExpr(fieldExpr, nil)
-				if err != nil {
-					return err
-				}
-				if err := s.emitMoveBindLocal(entry.Name, fieldType, fieldValue); err != nil {
-					return err
-				}
-			}
-			return nil
-		}
-		fields, err := s.g.structLiteralFields(itemType)
-		if err != nil {
-			return err
-		}
-		fieldByName := make(map[string]structLiteralField, len(fields))
-		for _, field := range fields {
-			fieldByName[field.Decl.Name] = field
-		}
-		if mode == ast.IterBindValue {
-			for _, entry := range p.Fields {
-				field, ok := fieldByName[entry.Field]
-				if !ok {
-					return fmt.Errorf("struct destructuring field %q does not exist on %s", entry.Field, itemType.String())
-				}
-				fieldValue := C.LLVMBuildExtractValue(s.builder, itemValue, C.unsigned(field.Index), cStringFree(entry.Name+".iter.field"))
-				if err := s.emitMoveBindLocal(entry.Name, field.Type, fieldValue); err != nil {
-					return err
-				}
-			}
-			return nil
-		}
-		containerLLVMType, err := s.g.lowerType(semantic.StripAggregateStateType(itemType))
-		if err != nil {
-			return err
-		}
-		for _, entry := range p.Fields {
-			field, ok := fieldByName[entry.Field]
-			if !ok {
-				return fmt.Errorf("struct destructuring field %q does not exist on %s", entry.Field, itemType.String())
-			}
-			fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, itemPtr, C.unsigned(field.Index), cStringFree(entry.Name+".iter.field.ptr"))
-			refType := &semantic.RefType{Elem: field.Type, Mutable: mode == ast.IterBindMutableRef, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny}
-			if err := s.emitIterLoopRefLocal(entry.Name, refType, fieldPtr); err != nil {
 				return err
 			}
 		}
@@ -3117,6 +3105,7 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 
 	condBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.cond"))
 	bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.body"))
+	stepBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.step"))
 	exitBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.end"))
 	C.LLVMBuildBr(s.builder, condBB)
 
@@ -3175,11 +3164,31 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 			return err
 		}
 	}
+	if stmt.Filter != nil {
+		filterValue, filterType, err := s.emitExpr(stmt.Filter, nil)
+		if err != nil {
+			s.popScope()
+			return err
+		}
+		filterBool, err := s.coerceValue(filterValue, filterType, s.g.result.NamedTypes["bool"])
+		if err != nil {
+			s.popScope()
+			return err
+		}
+		filterBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.filter.body"))
+		C.LLVMBuildCondBr(s.builder, filterBool, filterBodyBB, stepBB)
+		C.LLVMPositionBuilderAtEnd(s.builder, filterBodyBB)
+	}
 	if err := s.emitBlock(stmt.Body, true); err != nil {
 		s.popScope()
 		return err
 	}
 	s.popScope()
+	if !s.currentBlockTerminated() {
+		C.LLVMBuildBr(s.builder, stepBB)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, stepBB)
 	if !s.currentBlockTerminated() {
 		nextValue := C.LLVMBuildAdd(s.builder, indexValue, C.LLVMConstInt(usizeLLVMType, 1, 0), cStringFree("iter.next"))
 		C.LLVMBuildStore(s.builder, nextValue, indexAlloca)
@@ -3234,13 +3243,17 @@ func (s *functionState) bindPackedStoreOriginsForExprPath(path string, expr ast.
 	}
 	sourceExpr := unwrapPackedStoreOriginExpr(expr)
 	if lit, ok := sourceExpr.(*ast.StructLitExpr); ok {
+		args := lit.LoweredArgs()
 		limit := len(fields)
-		if len(lit.Args) < limit {
-			limit = len(lit.Args)
+		if len(args) < limit {
+			limit = len(args)
 		}
 		for i := 0; i < limit; i++ {
+			if args[i] == nil {
+				continue
+			}
 			childPath := path + "." + fields[i].Decl.Name
-			if err := s.bindPackedStoreOriginsForExprPath(childPath, lit.Args[i], fields[i].Type); err != nil {
+			if err := s.bindPackedStoreOriginsForExprPath(childPath, args[i], fields[i].Type); err != nil {
 				return err
 			}
 		}

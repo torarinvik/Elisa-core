@@ -54,7 +54,7 @@ func (p *Parser) estimateCommaSeparatedCount(close lexer.TokenKind) int {
 	depth := 0
 	for i := p.pos; i < len(p.tokens); i++ {
 		switch p.tokens[i].Kind {
-		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
 			depth++
 		case lexer.TOKEN_RPAREN:
 			if close == lexer.TOKEN_RPAREN {
@@ -67,6 +67,15 @@ func (p *Parser) estimateCommaSeparatedCount(close lexer.TokenKind) int {
 			}
 		case lexer.TOKEN_RBRACKET:
 			if close == lexer.TOKEN_RBRACKET {
+				if depth == 0 {
+					return count
+				}
+				depth--
+			} else if depth > 0 {
+				depth--
+			}
+		case lexer.TOKEN_RBRACE:
+			if close == lexer.TOKEN_RBRACE {
 				if depth == 0 {
 					return count
 				}

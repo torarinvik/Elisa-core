@@ -447,6 +447,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	case *ast.StructLitExpr:
 		result = a.analyzeStructLiteralExpr(n, nil)
 		return
+	case *ast.RecordUpdateExpr:
+		result = a.analyzeRecordUpdateExpr(n)
+		return
 	case *ast.TupleExpr:
 		result = a.analyzeTupleExprWithExpected(n, nil)
 		return
@@ -1034,14 +1037,48 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		if !ok {
 			return regionRefState{}, false
 		}
+		args := n.LoweredArgs()
 		fieldStates := map[string]regionRefState{}
 		unionStates := make([]regionRefState, 0, len(fields))
 		for i, field := range fields {
-			if i >= len(n.Args) {
+			if i >= len(args) {
 				break
 			}
-			fieldState, ok := a.regionRefStateForExpr(n.Args[i])
+			if args[i] == nil {
+				continue
+			}
+			fieldState, ok := a.regionRefStateForExpr(args[i])
 			if !ok || !hasRegionProvenance(fieldState) {
+				continue
+			}
+			fieldStates[field.Name] = fieldState
+			unionStates = append(unionStates, fieldState)
+		}
+		if len(unionStates) == 0 {
+			return regionRefState{}, false
+		}
+		return mergeRegionRefStatesWithExplicitFields(unionStates, fieldStates)
+	case *ast.RecordUpdateExpr:
+		actual := a.exprTypes[n]
+		fields, ok := a.resolvedStructFields(actual)
+		if !ok {
+			return regionRefState{}, false
+		}
+		baseState, hasBaseState := a.regionRefStateForExpr(n.Base)
+		args := n.LoweredArgs()
+		fieldStates := map[string]regionRefState{}
+		unionStates := make([]regionRefState, 0, len(fields))
+		for i, field := range fields {
+			var (
+				fieldState regionRefState
+				hasState   bool
+			)
+			if i < len(args) && args[i] != nil {
+				fieldState, hasState = a.regionRefStateForExpr(args[i])
+			} else if hasBaseState {
+				fieldState, hasState = projectRegionFieldState(baseState, field.Name)
+			}
+			if !hasState || !hasRegionProvenance(fieldState) {
 				continue
 			}
 			fieldStates[field.Name] = fieldState
@@ -1600,6 +1637,77 @@ func (a *Analyzer) analyzeStructLiteralExpr(expr *ast.StructLitExpr, expected Ty
 	return targetType
 }
 
+func (a *Analyzer) analyzeRecordUpdateExpr(expr *ast.RecordUpdateExpr) Type {
+	if expr == nil || expr.Base == nil {
+		return invalidType
+	}
+	baseType := a.analyzeExpr(expr.Base)
+	stripped := StripAggregateStateType(baseType)
+	switch stripped.(type) {
+	case *StructType, *GenericInstanceType, *TreeBlockType, *TreeStructType:
+	default:
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		if !IsInvalidType(baseType) {
+			a.errorf(expr.Pos(), "record update requires a concrete struct or store-row value, got %s", baseType.String())
+		}
+		return invalidType
+	}
+	fields, ok := a.resolvedStructFields(baseType)
+	if !ok {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "record update requires a concrete struct or store-row value, got %s", baseType.String())
+		return invalidType
+	}
+	if expr.NamedArgCount() != len(expr.Args) {
+		a.errorf(expr.Pos(), "record update cannot mix positional and named fields")
+		for i := range expr.Args {
+			expr.Args[i], _ = a.analyzeCallLikeValueExpr(expr.Args[i], nil)
+		}
+		return baseType
+	}
+	ordered := make([]ast.Expr, len(fields))
+	fieldIndexes := make(map[string]int, len(fields))
+	for i := range fields {
+		fieldIndexes[fields[i].Name] = i
+	}
+	seen := map[int]lexer.Pos{}
+	ok = true
+	for i := range expr.Args {
+		name := expr.ArgName(i)
+		index, exists := fieldIndexes[name]
+		if !exists {
+			a.errorf(expr.Args[i].Pos(), "record update has no field %q", name)
+			expr.Args[i], _ = a.analyzeCallLikeValueExpr(expr.Args[i], nil)
+			ok = false
+			continue
+		}
+		expected := fields[index].Type
+		arg, actual := a.analyzeCallLikeValueExpr(expr.Args[i], expected)
+		expr.Args[i] = arg
+		if !AssignableTo(expected, actual) {
+			a.errorf(expr.Args[i].Pos(), "record update field %q expects %s, got %s", name, expected.String(), actual.String())
+		}
+		a.consumeAffineValueExpr(expr.Args[i], expected, "move into record update field "+strconv.Quote(name))
+		if prev, exists := seen[index]; exists {
+			a.errorf(expr.Args[i].Pos(), "record update field %q is specified more than once (first at %s:%d:%d)", name, prev.File, prev.Line, prev.Col)
+			ok = false
+			continue
+		}
+		seen[index] = expr.Args[i].Pos()
+		ordered[index] = expr.Args[i]
+	}
+	if ok {
+		expr.ResolvedArgsValid = true
+		expr.ResolvedArgs = ordered
+	}
+	a.consumeAffineValueExpr(expr.Base, baseType, "record update")
+	return baseType
+}
+
 func (a *Analyzer) structLiteralTargetType(expr *ast.StructLitExpr, expected Type) Type {
 	if expr == nil {
 		return invalidType
@@ -1722,12 +1830,16 @@ func (a *Analyzer) proveStructLiteralNamedState(expr *ast.StructLitExpr, base *S
 }
 
 func structLiteralFieldValues(expr *ast.StructLitExpr, base *StructType) (map[string]ast.Expr, bool) {
-	if expr == nil || base == nil || base.Decl == nil || len(expr.Args) != len(base.Decl.Fields) {
+	args := expr.LoweredArgs()
+	if expr == nil || base == nil || base.Decl == nil || len(args) != len(base.Decl.Fields) {
 		return nil, false
 	}
 	fieldValues := make(map[string]ast.Expr, len(base.Decl.Fields))
 	for i, fieldDecl := range base.Decl.Fields {
-		fieldValues[fieldDecl.Name] = expr.Args[i]
+		if args[i] == nil {
+			return nil, false
+		}
+		fieldValues[fieldDecl.Name] = args[i]
 	}
 	return fieldValues, true
 }
@@ -1857,6 +1969,70 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 		}
 		return
 	}
+	if expr.NamedArgCount() != 0 {
+		if expr.NamedArgCount() != len(expr.Args) {
+			a.errorf(expr.Pos(), "struct literal %q cannot mix positional and named fields", expr.Name)
+			for i := range expr.Args {
+				expr.Args[i], _ = a.analyzeCallLikeValueExpr(expr.Args[i], nil)
+			}
+			return
+		}
+		ordered := make([]ast.Expr, len(base.Decl.Fields))
+		fieldIndexes := make(map[string]int, len(base.Decl.Fields))
+		for i, fieldDecl := range base.Decl.Fields {
+			fieldIndexes[fieldDecl.Name] = i
+		}
+		seen := map[int]lexer.Pos{}
+		ok := true
+		for i := range expr.Args {
+			name := expr.ArgName(i)
+			index, exists := fieldIndexes[name]
+			if !exists {
+				a.errorf(expr.Args[i].Pos(), "struct literal %q has no field %q", expr.Name, name)
+				expr.Args[i], _ = a.analyzeCallLikeValueExpr(expr.Args[i], nil)
+				ok = false
+				continue
+			}
+			fieldDecl := base.Decl.Fields[index]
+			field, exists := base.Fields[fieldDecl.Name]
+			if !exists {
+				expr.Args[i], _ = a.analyzeCallLikeValueExpr(expr.Args[i], nil)
+				ok = false
+				continue
+			}
+			expected := field.Type
+			if len(bindings) > 0 {
+				expected = a.substituteType(expected, bindings, nil, nil, nil)
+			}
+			arg, actual := a.analyzeCallLikeValueExpr(expr.Args[i], expected)
+			expr.Args[i] = arg
+			if !AssignableTo(expected, actual) {
+				a.errorf(expr.Args[i].Pos(), "struct literal field %q expects %s, got %s", fieldDecl.Name, expected.String(), actual.String())
+			}
+			a.consumeAffineValueExpr(expr.Args[i], expected, "move into struct literal field "+strconv.Quote(fieldDecl.Name))
+			if prev, exists := seen[index]; exists {
+				a.errorf(expr.Args[i].Pos(), "struct literal %q field %q is specified more than once (first at %s:%d:%d)", expr.Name, fieldDecl.Name, prev.File, prev.Line, prev.Col)
+				ok = false
+				continue
+			}
+			seen[index] = expr.Args[i].Pos()
+			ordered[index] = expr.Args[i]
+		}
+		for i, fieldDecl := range base.Decl.Fields {
+			if _, exists := seen[i]; exists {
+				continue
+			}
+			a.errorf(expr.Pos(), "struct literal %q is missing field %q", expr.Name, fieldDecl.Name)
+			ok = false
+		}
+		if ok {
+			expr.ResolvedArgsValid = true
+			expr.ResolvedArgs = ordered
+		}
+		return
+	}
+	expr.ResolvedArgsValid = true
+	expr.ResolvedArgs = expr.Args
 	if len(expr.Args) != len(base.Decl.Fields) {
 		a.errorf(expr.Pos(), "struct literal %q expects %d arguments, got %d", expr.Name, len(base.Decl.Fields), len(expr.Args))
 	}
@@ -7205,6 +7381,7 @@ func (a *Analyzer) resolveProjectedFieldValueExprAtPath(objectExpr ast.Expr, pat
 		if !ok {
 			return nil, false
 		}
+		args := n.LoweredArgs()
 		step := path[0]
 		if step.Field == "" {
 			return nil, false
@@ -7213,10 +7390,34 @@ func (a *Analyzer) resolveProjectedFieldValueExprAtPath(objectExpr ast.Expr, pat
 			if resolved.Name != step.Field {
 				continue
 			}
-			if i >= len(n.Args) {
+			if i >= len(args) || args[i] == nil {
 				return nil, false
 			}
-			return a.resolveProjectedFieldValueExprAtPath(n.Args[i], path[1:])
+			return a.resolveProjectedFieldValueExprAtPath(args[i], path[1:])
+		}
+		return nil, false
+	case *ast.RecordUpdateExpr:
+		actual := a.exprTypes[n]
+		if actual == nil {
+			actual = a.analyzeExpr(n)
+		}
+		fields, ok := a.resolvedStructFields(actual)
+		if !ok {
+			return nil, false
+		}
+		step := path[0]
+		if step.Field == "" {
+			return nil, false
+		}
+		args := n.LoweredArgs()
+		for i, resolved := range fields {
+			if resolved.Name != step.Field {
+				continue
+			}
+			if i < len(args) && args[i] != nil {
+				return a.resolveProjectedFieldValueExprAtPath(args[i], path[1:])
+			}
+			return a.resolveProjectedFieldValueExprAtPath(&ast.FieldExpr{Position: n.Position, Object: n.Base, Field: resolved.Name}, path[1:])
 		}
 		return nil, false
 	case *ast.TupleExpr:

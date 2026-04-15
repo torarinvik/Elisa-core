@@ -279,6 +279,8 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, actualType, err = s.emitSpecializeExpr(n)
 	case *ast.StructLitExpr:
 		value, actualType, err = s.emitStructLitExpr(n)
+	case *ast.RecordUpdateExpr:
+		value, actualType, err = s.emitRecordUpdateExpr(n)
 	case *ast.TupleExpr:
 		value, actualType, err = s.emitTupleExpr(n)
 	case *ast.ParenExpr:
@@ -8171,9 +8173,13 @@ func (s *functionState) emitStructLitExpr(expr *ast.StructLitExpr) (C.LLVMValueR
 		return nil, nil, err
 	}
 	value := C.LLVMGetUndef(llvmType)
-	for i, arg := range expr.Args {
+	args := expr.LoweredArgs()
+	for i, arg := range args {
 		if i >= len(fields) {
 			break
+		}
+		if arg == nil {
+			return nil, nil, fmt.Errorf("struct literal field %d was not resolved", i)
 		}
 		fieldValue, _, err := s.emitExpr(arg, fields[i].Type)
 		if err != nil {
@@ -8182,6 +8188,33 @@ func (s *functionState) emitStructLitExpr(expr *ast.StructLitExpr) (C.LLVMValueR
 		value = C.LLVMBuildInsertValue(s.builder, value, fieldValue, C.unsigned(i), cStringFree("ins"))
 	}
 	return value, structType, nil
+}
+
+func (s *functionState) emitRecordUpdateExpr(expr *ast.RecordUpdateExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if expr == nil || expr.Base == nil {
+		return nil, nil, fmt.Errorf("invalid record update")
+	}
+	baseValue, baseType, err := s.emitExpr(expr.Base, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	fields, err := s.g.structLiteralFields(baseType)
+	if err != nil {
+		return nil, nil, err
+	}
+	value := baseValue
+	args := expr.LoweredArgs()
+	for i, field := range fields {
+		if i >= len(args) || args[i] == nil {
+			continue
+		}
+		fieldValue, _, err := s.emitExpr(args[i], field.Type)
+		if err != nil {
+			return nil, nil, err
+		}
+		value = C.LLVMBuildInsertValue(s.builder, value, fieldValue, C.unsigned(field.Index), cStringFree("record.update"))
+	}
+	return value, baseType, nil
 }
 
 func (s *functionState) emitTupleExpr(expr *ast.TupleExpr) (C.LLVMValueRef, semantic.Type, error) {

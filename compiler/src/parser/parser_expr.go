@@ -718,7 +718,8 @@ func (p *Parser) parseSingleIsTestTargetExpr() ast.Expr {
 	if p.peekQualifiedVariantTargetWithPayload() {
 		return p.parseVariantIsTestExpr()
 	}
-	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LPAREN {
+	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) &&
+		(p.tokens[p.pos+1].Kind == lexer.TOKEN_LPAREN || p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACE) {
 		return p.parseStructIsTestExpr()
 	}
 	if p.peek() == lexer.TOKEN_DOT {
@@ -1424,6 +1425,13 @@ func (p *Parser) parsePostfix() ast.Expr {
 			target := p.parseTypeExpr()
 			expr = &ast.CastExpr{Position: pos, Operand: expr, Target: target}
 
+		case lexer.TOKEN_LBRACE:
+			pos := p.cur().Pos
+			p.advance()
+			args, argNames := p.parseRecordUpdateFields()
+			p.expect(lexer.TOKEN_RBRACE)
+			expr = &ast.RecordUpdateExpr{Position: pos, Base: expr, Args: args, ArgNames: argNames}
+
 		case lexer.TOKEN_LBRACKET:
 			pos := p.cur().Pos
 			if p.peekPostfixGenericApplication() {
@@ -1602,7 +1610,7 @@ func (p *Parser) parsePrimary() ast.Expr {
 			return p.parseFoldExpr()
 		}
 		tok := p.advance()
-		if len(tok.Text) > 0 && tok.Text[0] >= 'A' && tok.Text[0] <= 'Z' && p.peekStructLiteralTypeArgCall() {
+		if len(tok.Text) > 0 && tok.Text[0] >= 'A' && tok.Text[0] <= 'Z' && p.peekStructLiteralTypeArgsFollowedBy(lexer.TOKEN_LPAREN) {
 			typeArgs := p.parseStructLiteralTypeArgs()
 			p.expect(lexer.TOKEN_LPAREN)
 			args := make([]ast.Expr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
@@ -1617,6 +1625,13 @@ func (p *Parser) parsePrimary() ast.Expr {
 			p.expect(lexer.TOKEN_RPAREN)
 			return &ast.StructLitExpr{Position: tok.Pos, Name: tok.Text, TypeArgs: typeArgs, Args: args}
 		}
+		if len(tok.Text) > 0 && tok.Text[0] >= 'A' && tok.Text[0] <= 'Z' && p.peekStructLiteralTypeArgsFollowedBy(lexer.TOKEN_LBRACE) {
+			typeArgs := p.parseStructLiteralTypeArgs()
+			p.expect(lexer.TOKEN_LBRACE)
+			args, argNames := p.parseStructLiteralBraceFields()
+			p.expect(lexer.TOKEN_RBRACE)
+			return &ast.StructLitExpr{Position: tok.Pos, Name: tok.Text, TypeArgs: typeArgs, Args: args, ArgNames: argNames, Brace: true}
+		}
 		if p.peek() == lexer.TOKEN_LPAREN && len(tok.Text) > 0 && tok.Text[0] >= 'A' && tok.Text[0] <= 'Z' {
 			p.advance()
 			args := make([]ast.Expr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
@@ -1630,6 +1645,12 @@ func (p *Parser) parsePrimary() ast.Expr {
 			}
 			p.expect(lexer.TOKEN_RPAREN)
 			return &ast.StructLitExpr{Position: tok.Pos, Name: tok.Text, Args: args}
+		}
+		if p.peek() == lexer.TOKEN_LBRACE && len(tok.Text) > 0 && tok.Text[0] >= 'A' && tok.Text[0] <= 'Z' {
+			p.advance()
+			args, argNames := p.parseStructLiteralBraceFields()
+			p.expect(lexer.TOKEN_RBRACE)
+			return &ast.StructLitExpr{Position: tok.Pos, Name: tok.Text, Args: args, ArgNames: argNames, Brace: true}
 		}
 		return &ast.Ident{Position: tok.Pos, Name: tok.Text}
 	case lexer.TOKEN_LPAREN:
@@ -1670,7 +1691,7 @@ func (p *Parser) parseExprBlockValue(pos lexer.Pos, flattenSingle bool) ast.Expr
 	return &ast.ExprBlock{Position: pos, Stmts: stmts, Value: exprStmt.Expr}
 }
 
-func (p *Parser) peekStructLiteralTypeArgCall() bool {
+func (p *Parser) peekStructLiteralTypeArgsFollowedBy(close lexer.TokenKind) bool {
 	if p.peek() != lexer.TOKEN_LBRACKET {
 		return false
 	}
@@ -1682,7 +1703,7 @@ func (p *Parser) peekStructLiteralTypeArgCall() bool {
 		case lexer.TOKEN_RBRACKET:
 			depth--
 			if depth == 0 {
-				return i+1 < len(p.tokens) && p.tokens[i+1].Kind == lexer.TOKEN_LPAREN
+				return i+1 < len(p.tokens) && p.tokens[i+1].Kind == close
 			}
 		}
 	}
@@ -1702,6 +1723,56 @@ func (p *Parser) parseStructLiteralTypeArgs() []ast.TypeExpr {
 	}
 	p.expect(lexer.TOKEN_RBRACKET)
 	return args
+}
+
+func (p *Parser) parseStructLiteralBraceFields() ([]ast.Expr, []string) {
+	args := make([]ast.Expr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACE))
+	argNames := make([]string, 0, cap(args))
+	if p.peek() == lexer.TOKEN_RBRACE {
+		return args, argNames
+	}
+	for {
+		pos := p.cur().Pos
+		name := p.expect(lexer.TOKEN_IDENT).Text
+		value := ast.Expr(&ast.Ident{Position: pos, Name: name})
+		if p.match(lexer.TOKEN_COLON) {
+			value = p.parseExpr()
+		}
+		args = append(args, value)
+		argNames = append(argNames, name)
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+		if p.peek() == lexer.TOKEN_RBRACE {
+			break
+		}
+	}
+	return args, argNames
+}
+
+func (p *Parser) parseRecordUpdateFields() ([]ast.Expr, []string) {
+	args := make([]ast.Expr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACE))
+	argNames := make([]string, 0, cap(args))
+	if p.peek() == lexer.TOKEN_RBRACE {
+		return args, argNames
+	}
+	for {
+		pos := p.cur().Pos
+		name := p.expect(lexer.TOKEN_IDENT).Text
+		value := ast.Expr(&ast.Ident{Position: pos, Name: name})
+		if p.match(lexer.TOKEN_ASSIGN) {
+			value = p.parseExpr()
+		}
+		args = append(args, value)
+		argNames = append(argNames, name)
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+		if p.peek() == lexer.TOKEN_RBRACE {
+			break
+		}
+	}
+	return args, argNames
 }
 
 func (p *Parser) expectNewline() {

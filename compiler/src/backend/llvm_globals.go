@@ -133,9 +133,13 @@ func (g *llvmGenerator) constExprValue(expr ast.Expr, expected semantic.Type) (C
 			return nil, err
 		}
 		values := make([]C.LLVMValueRef, 0, len(fields))
-		for i, arg := range n.Args {
+		args := n.LoweredArgs()
+		for i, arg := range args {
 			if i >= len(fields) {
 				break
+			}
+			if arg == nil {
+				return nil, fmt.Errorf("global struct literal field %d was not resolved", i)
 			}
 			fieldValue, err := g.constExprValue(arg, fields[i].Type)
 			if err != nil {
@@ -297,10 +301,14 @@ func (g *llvmGenerator) resolveConstAggregateExpr(expr ast.Expr) (ast.Expr, sema
 			if err != nil {
 				return nil, nil, false, err
 			}
-			if index < 0 || index >= len(obj.Args) {
+			args := obj.LoweredArgs()
+			if index < 0 || index >= len(args) {
 				return nil, nil, false, fmt.Errorf("global initializer field index %d out of bounds", index)
 			}
-			selected := obj.Args[index]
+			selected := args[index]
+			if selected == nil {
+				return nil, nil, false, fmt.Errorf("global initializer field %d was not resolved", index)
+			}
 			if resolved, resolvedType, changed, err := g.resolveConstAggregateExpr(selected); err != nil {
 				return nil, nil, false, err
 			} else if changed {

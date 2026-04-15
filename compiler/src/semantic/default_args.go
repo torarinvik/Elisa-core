@@ -151,7 +151,26 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 		if len(n.Args) != 0 && args == nil {
 			return nil
 		}
-		return &ast.StructLitExpr{Position: n.Position, Name: n.Name, TypeArgs: append([]ast.TypeExpr(nil), n.TypeArgs...), Args: args}
+		return &ast.StructLitExpr{
+			Position: n.Position,
+			Name:     n.Name,
+			TypeArgs: append([]ast.TypeExpr(nil), n.TypeArgs...),
+			Args:     args,
+			ArgNames: append([]string(nil), n.ArgNames...),
+			Brace:    n.Brace,
+		}
+	case *ast.RecordUpdateExpr:
+		base := cloneDefaultArgExpr(n.Base)
+		args := cloneDefaultArgExprs(n.Args)
+		if (n.Base != nil && base == nil) || (len(n.Args) != 0 && args == nil) {
+			return nil
+		}
+		return &ast.RecordUpdateExpr{
+			Position: n.Position,
+			Base:     base,
+			Args:     args,
+			ArgNames: append([]string(nil), n.ArgNames...),
+		}
 	case *ast.TupleExpr:
 		elems := cloneDefaultArgExprs(n.Elems)
 		if len(n.Elems) != 0 && elems == nil {

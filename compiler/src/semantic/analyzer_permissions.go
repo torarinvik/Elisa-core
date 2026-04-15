@@ -484,9 +484,9 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		if n.Value != nil {
 			c.collectExpr(n.Value)
 		}
-	case *ast.TupleBindStmt:
-		c.collectExpr(n.Value)
 	case *ast.LetDestructureStmt:
+		c.collectExpr(n.Value)
+	case *ast.TupleBindStmt:
 		c.collectExpr(n.Value)
 	case *ast.MoveBindStmt:
 		c.collectExpr(n.Value)
@@ -568,6 +568,7 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		c.collectStmts(n.Body)
 	case *ast.IterForStmt:
 		c.collectExpr(n.Source)
+		c.collectExpr(n.Filter)
 		c.collectStmts(n.Body)
 	case *ast.ParallelForStmt:
 		c.collectExpr(n.Source)
@@ -647,6 +648,11 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 	case *ast.SpecializeExpr:
 		c.collectExpr(n.Operand)
 	case *ast.StructLitExpr:
+		for _, arg := range n.Args {
+			c.collectExpr(arg)
+		}
+	case *ast.RecordUpdateExpr:
+		c.collectExpr(n.Base)
 		for _, arg := range n.Args {
 			c.collectExpr(arg)
 		}
@@ -736,9 +742,9 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		if n.Value != nil {
 			a.validatePermissionExpr(n.Value, granted)
 		}
-	case *ast.TupleBindStmt:
-		a.validatePermissionExpr(n.Value, granted)
 	case *ast.LetDestructureStmt:
+		a.validatePermissionExpr(n.Value, granted)
+	case *ast.TupleBindStmt:
 		a.validatePermissionExpr(n.Value, granted)
 	case *ast.MoveBindStmt:
 		a.validatePermissionExpr(n.Value, granted)
@@ -830,6 +836,7 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.IterForStmt:
 		a.validatePermissionExpr(n.Source, granted)
+		a.validatePermissionExpr(n.Filter, granted)
 		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.ParallelForStmt:
 		a.validatePermissionExpr(n.Source, granted)
@@ -901,6 +908,11 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 	case *ast.SpecializeExpr:
 		a.validatePermissionExpr(n.Operand, granted)
 	case *ast.StructLitExpr:
+		for _, arg := range n.Args {
+			a.validatePermissionExpr(arg, granted)
+		}
+	case *ast.RecordUpdateExpr:
+		a.validatePermissionExpr(n.Base, granted)
 		for _, arg := range n.Args {
 			a.validatePermissionExpr(arg, granted)
 		}

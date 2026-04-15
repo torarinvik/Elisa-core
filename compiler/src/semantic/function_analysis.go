@@ -191,6 +191,7 @@ func appendBasicFlowInstrsForNode(block *CFGBlock, node ast.Node) {
 		appendBasicFlowExprInstrs(block, n.Step)
 	case *ast.IterForStmt:
 		appendBasicFlowExprInstrs(block, n.Source)
+		appendBasicFlowExprInstrs(block, n.Filter)
 	case *ast.ParallelForStmt:
 		appendBasicFlowExprInstrs(block, n.Source)
 	case *ast.IfStmt:
@@ -242,6 +243,11 @@ func appendBasicFlowExprInstrs(block *CFGBlock, expr ast.Expr) {
 		appendBasicFlowExprInstrs(block, n.Start)
 		appendBasicFlowExprInstrs(block, n.End)
 	case *ast.StructLitExpr:
+		for _, arg := range n.Args {
+			appendBasicFlowExprInstrs(block, arg)
+		}
+	case *ast.RecordUpdateExpr:
+		appendBasicFlowExprInstrs(block, n.Base)
 		for _, arg := range n.Args {
 			appendBasicFlowExprInstrs(block, arg)
 		}
@@ -624,6 +630,8 @@ func (a *Analyzer) appendImplicitSinkFlowInstrsForNode(block *CFGBlock, node ast
 	case *ast.MoveBindStmt:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Value)
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Store)
+	case *ast.LetDestructureStmt:
+		a.appendImplicitSinkFlowInstrsForExpr(block, n.Value)
 	case *ast.InStoreStmt:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Store)
 	case *ast.ForStmt:
@@ -632,6 +640,7 @@ func (a *Analyzer) appendImplicitSinkFlowInstrsForNode(block *CFGBlock, node ast
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Step)
 	case *ast.IterForStmt:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Source)
+		a.appendImplicitSinkFlowInstrsForExpr(block, n.Filter)
 	case *ast.ParallelForStmt:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Source)
 	case *ast.IfStmt:
@@ -677,6 +686,11 @@ func (a *Analyzer) appendImplicitSinkFlowInstrsForExpr(block *CFGBlock, expr ast
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Start)
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.End)
 	case *ast.StructLitExpr:
+		for _, arg := range n.Args {
+			a.appendImplicitSinkFlowInstrsForExpr(block, arg)
+		}
+	case *ast.RecordUpdateExpr:
+		a.appendImplicitSinkFlowInstrsForExpr(block, n.Base)
 		for _, arg := range n.Args {
 			a.appendImplicitSinkFlowInstrsForExpr(block, arg)
 		}

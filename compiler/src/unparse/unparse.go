@@ -375,6 +375,8 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 			line += " = " + formatExpr(n.Value)
 		}
 		f.writePrefixedMultiline(level, "", line)
+	case *ast.LetDestructureStmt:
+		f.writePrefixedMultiline(level, "", "let "+formatMoveBindPattern(n.Pattern)+" = "+formatExpr(n.Value))
 	case *ast.TupleBindStmt:
 		names := make([]string, 0, len(n.Names))
 		for _, name := range n.Names {
@@ -480,7 +482,11 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 		if n.Reverse {
 			sourceText = "rev(" + sourceText + ")"
 		}
-		line += formatMoveBindPattern(n.Pattern) + " in " + sourceText + ":"
+		line += formatMoveBindPattern(n.Pattern) + " in " + sourceText
+		if n.Filter != nil {
+			line += " if " + formatExpr(n.Filter)
+		}
+		line += ":"
 		f.writeLine(level, line)
 		for _, stmt := range n.Body {
 			f.writeStmt(level+1, stmt)
@@ -1260,11 +1266,25 @@ func formatExpr(expr ast.Expr) string {
 		}
 		return formatExpr(n.Operand) + "[" + strings.Join(parts, ", ") + "]"
 	case *ast.StructLitExpr:
+		typeName := formatStructLiteralTypeName(n.Name, n.TypeArgs)
+		if n.Brace {
+			parts := make([]string, 0, len(n.Args))
+			for i, arg := range n.Args {
+				parts = append(parts, formatNamedExprField(n.ArgName(i), arg, ": "))
+			}
+			return typeName + "{" + strings.Join(parts, ", ") + "}"
+		}
 		parts := make([]string, 0, len(n.Args))
 		for _, arg := range n.Args {
 			parts = append(parts, formatExpr(arg))
 		}
-		return n.Name + "(" + strings.Join(parts, ", ") + ")"
+		return typeName + "(" + strings.Join(parts, ", ") + ")"
+	case *ast.RecordUpdateExpr:
+		parts := make([]string, 0, len(n.Args))
+		for i, arg := range n.Args {
+			parts = append(parts, formatNamedExprField(n.ArgName(i), arg, " = "))
+		}
+		return formatExpr(n.Base) + "{" + strings.Join(parts, ", ") + "}"
 	case *ast.TupleExpr:
 		parts := make([]string, 0, len(n.Elems))
 		for _, elem := range n.Elems {
@@ -1332,6 +1352,39 @@ func formatExpr(expr ast.Expr) string {
 	default:
 		return "<expr>"
 	}
+}
+
+func formatStructLiteralTypeName(name string, typeArgs []ast.TypeExpr) string {
+	if len(typeArgs) == 0 {
+		return name
+	}
+	parts := make([]string, 0, len(typeArgs))
+	for _, arg := range typeArgs {
+		parts = append(parts, formatTypeExpr(arg))
+	}
+	return name + "[" + strings.Join(parts, ", ") + "]"
+}
+
+func formatNamedExprField(name string, value ast.Expr, separator string) string {
+	if name == "" {
+		return formatExpr(value)
+	}
+	if ident, ok := value.(*ast.Ident); ok && ident != nil && ident.Name == name {
+		return name
+	}
+	return name + separator + formatExpr(value)
+}
+
+func formatMatchPatternField(arg ast.MatchPatternArg, brace bool) string {
+	if arg.Name == "" {
+		return ""
+	}
+	if brace {
+		if bind, ok := arg.Pattern.(*ast.MatchBindPattern); ok && bind != nil && bind.Name == arg.Name {
+			return arg.Name
+		}
+	}
+	return arg.Name + ": " + formatMatchPattern(arg.Pattern)
 }
 
 func formatMatchExpr(expr *ast.MatchExpr) string {
@@ -1456,11 +1509,14 @@ func formatMatchPattern(pattern ast.MatchPattern) string {
 	case *ast.MatchStructPattern:
 		parts := make([]string, 0, len(n.Args))
 		for _, arg := range n.Args {
-			part := formatMatchPattern(arg.Pattern)
-			if arg.Name != "" {
-				part = arg.Name + ": " + part
+			part := formatMatchPatternField(arg, n.Brace)
+			if part == "" {
+				part = formatMatchPattern(arg.Pattern)
 			}
 			parts = append(parts, part)
+		}
+		if n.Brace {
+			return n.TypeName + "{" + strings.Join(parts, ", ") + "}"
 		}
 		if len(parts) == 0 {
 			return n.TypeName + "()"
@@ -1492,7 +1548,24 @@ func formatMoveBindPattern(pattern ast.MoveBindPattern) string {
 	case *ast.MoveBindStructPattern:
 		parts := make([]string, 0, len(n.Args))
 		for _, arg := range n.Args {
+			if n.Brace {
+				part := arg.Field
+				if part == "" {
+					part = arg.Name
+				}
+				if arg.Name != "" && arg.Name != part {
+					part += ": " + arg.Name
+				}
+				parts = append(parts, part)
+				continue
+			}
 			parts = append(parts, arg.Name)
+		}
+		if n.Brace {
+			if n.TypeName == "" {
+				return "{" + strings.Join(parts, ", ") + "}"
+			}
+			return n.TypeName + "{" + strings.Join(parts, ", ") + "}"
 		}
 		return n.TypeName + "(" + strings.Join(parts, ", ") + ")"
 	case *ast.StructDestructurePattern:

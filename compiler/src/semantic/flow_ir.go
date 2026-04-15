@@ -90,7 +90,7 @@ func (b *cfgBuilder) buildStmtList(exits []int, stmts []ast.Stmt) []int {
 		case *ast.ForStmt:
 			current = b.buildLoopBody(current, n.Body)
 		case *ast.IterForStmt:
-			current = b.buildLoopBody(current, n.Body)
+			current = b.buildIterLoopBody(current, n.Filter, n.Body)
 		case *ast.ParallelForStmt:
 			current = b.buildLoopBody(current, n.Body)
 		case *ast.PoolStmt:
@@ -193,6 +193,30 @@ func (b *cfgBuilder) buildLoopBody(exits []int, body []ast.Stmt) []int {
 		for _, bodyExit := range bodyExits {
 			b.addEdge(bodyExit, loopEntry, GuardFactSet{})
 		}
+		out = append(out, afterBlock)
+	}
+	return dedupeCFGBlockIDs(out)
+}
+
+func (b *cfgBuilder) buildIterLoopBody(exits []int, filter ast.Expr, body []ast.Stmt) []int {
+	if filter == nil {
+		return b.buildLoopBody(exits, body)
+	}
+	out := make([]int, 0, len(exits))
+	for _, exit := range exits {
+		loopEntry := b.newBlock()
+		bodyEntry := b.newBlock()
+		skipBody := b.newBlock()
+		afterBlock := b.newBlock()
+		b.addEdge(exit, loopEntry, GuardFactSet{})
+		b.addEdge(exit, afterBlock, GuardFactSet{})
+		b.addEdge(loopEntry, bodyEntry, b.conditionGuardFacts(filter, true))
+		b.addEdge(loopEntry, skipBody, b.conditionGuardFacts(filter, false))
+		bodyExits := b.buildStmtList([]int{bodyEntry}, body)
+		for _, bodyExit := range bodyExits {
+			b.addEdge(bodyExit, loopEntry, GuardFactSet{})
+		}
+		b.addEdge(skipBody, loopEntry, GuardFactSet{})
 		out = append(out, afterBlock)
 	}
 	return dedupeCFGBlockIDs(out)

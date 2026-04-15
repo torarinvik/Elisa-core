@@ -72,9 +72,9 @@ func (c *analyzerASTCensus) countStmt(stmt ast.Stmt) {
 		c.countExpr(n.Value)
 	case *ast.VarDeclStmt:
 		c.countExpr(n.Value)
-	case *ast.TupleBindStmt:
-		c.countExpr(n.Value)
 	case *ast.LetDestructureStmt:
+		c.countExpr(n.Value)
+	case *ast.TupleBindStmt:
 		c.countExpr(n.Value)
 	case *ast.MoveBindStmt:
 		c.countExpr(n.Value)
@@ -122,6 +122,7 @@ func (c *analyzerASTCensus) countStmt(stmt ast.Stmt) {
 		c.countStmts(n.Body)
 	case *ast.IterForStmt:
 		c.countExpr(n.Source)
+		c.countExpr(n.Filter)
 		c.countMoveBindPattern(n.Pattern)
 		c.countStmts(n.Body)
 	case *ast.ParallelForStmt:
@@ -221,6 +222,11 @@ func (c *analyzerASTCensus) countExpr(expr ast.Expr) {
 	case *ast.SpecializeExpr:
 		c.countExpr(n.Operand)
 	case *ast.StructLitExpr:
+		for _, arg := range n.Args {
+			c.countExpr(arg)
+		}
+	case *ast.RecordUpdateExpr:
+		c.countExpr(n.Base)
 		for _, arg := range n.Args {
 			c.countExpr(arg)
 		}
