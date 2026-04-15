@@ -156,11 +156,12 @@ There is also now a self-hosted parser fixture at `../Code/test_programs/json_pa
 - `../Code/benchmarks/json_parser_parallel_bench.c` is a pool-driven parallel batch benchmark over the same parser exports
 - `../Code/benchmarks/json_parser_concurrency_runtime.c` provides a small pthread-backed implementation of the raw pool/task-group runtime seam used by the parallel benchmark path
 - `test/benchmarks/cmd/gen_synthetic_json` writes the same deterministic corpus family to disk for external benchmarking
+- `scripts/ensure_json_parser_bench_input.sh` creates the default large synthetic corpus on demand and prints the path, which keeps ignored local task runners usable without hand-creating `/tmp/zimdjson-dom-large.json`
 
 One way to compare both self-hosted paths against the Go baseline is:
 
 ```text
-go run ./test/benchmarks/cmd/gen_synthetic_json -case large -o /tmp/llcontext-large.json
+bash ./scripts/ensure_json_parser_bench_input.sh /tmp/llcontext-large.json
 go run ./src -O3 -emit header -o /tmp/json_parser.h ../Code/test_programs/json_parser.llcontext
 go run ./src -O3 -emit obj -o /tmp/json_parser.o ../Code/test_programs/json_parser.llcontext
 clang -O3 -Wl,-undefined,dynamic_lookup -I /tmp ../Code/benchmarks/json_parser_bench.c ../Code/benchmarks/json_parser_runtime_shims.c /tmp/json_parser.o -o /tmp/json_parser_bench
