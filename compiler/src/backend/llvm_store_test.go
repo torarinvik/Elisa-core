@@ -103,6 +103,25 @@ def build(owner: Arena) -> usize:
 	}
 }
 
+func TestGenerateLLVMIRIgnoresEffectsDeclarations(t *testing.T) {
+	src := `effects FrontendEffects = error[Error] can[Abort.Panic, Memory.Allocate]
+
+error Error:
+    Bad
+
+def build() -> i64 effects FrontendEffects:
+    return 42
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_effects_decl.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "@build") {
+		t.Fatalf("expected LLVM output for build, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRRejectsGenericKeyRuntimeBackedDictSugar(t *testing.T) {
 	src := `def arena_dict_get[K, T](m: any dict[K, T]&, key: K) -> mutable any T&?:
     return null
