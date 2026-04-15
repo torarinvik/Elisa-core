@@ -361,6 +361,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	case *ast.FoldExpr:
 		result = a.analyzeFoldExpr(n)
 		return
+	case *ast.LambdaExpr:
+		result = a.analyzeLambdaExpr(n, nil)
+		return
 	case *ast.IndexExpr:
 		result = a.analyzeIndexExpr(n)
 		return
@@ -4319,6 +4322,9 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	if expr != nil && expr.Safe {
 		return a.analyzeSafeCallExpr(expr)
 	}
+	if lambda, ok := unwrapLambdaExpr(expr.Func); ok && lambdaHasUntypedParams(lambda) {
+		return a.analyzeDirectLambdaCallExpr(expr, lambda)
+	}
 	switch a.rewriteBuiltinDictMethodCall(expr) {
 	case builtinDictMethodRewriteApplied:
 		return a.analyzeCallExpr(expr)
@@ -8228,6 +8234,11 @@ func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 	}
 	if tuple, ok := expr.(*ast.TupleExpr); ok {
 		return a.analyzeTupleExprWithExpected(tuple, expected)
+	}
+	if lambda, ok := expr.(*ast.LambdaExpr); ok {
+		result := a.analyzeLambdaExpr(lambda, expected)
+		a.recordAnalyzedExprType(lambda, result)
+		return result
 	}
 	if contextualExpected, ok := contextualIntLiteralType(expected); ok {
 		if contextualType, ok := a.analyzeContextualIntValueExpr(expr, contextualExpected); ok {

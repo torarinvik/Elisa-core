@@ -89,6 +89,7 @@ type Analyzer struct {
 	exprNodeTables                    map[ast.Expr]NodeTableInfo
 	deferInfo                         map[*ast.DeferStmt]*DeferInfo
 	foldInfo                          map[*ast.FoldExpr]*FoldInfo
+	lambdaInfo                        map[*ast.LambdaExpr]*LambdaInfo
 	symbolFacts                       map[*Symbol]OptimizationFacts
 	funcDeclSymbols                   map[*ast.FuncDecl]*Symbol
 	castHooksByName                   map[string]map[castHookSignature]*Symbol
@@ -287,6 +288,7 @@ func Analyze(file *ast.File) *Result {
 		exprNodeTables:                    make(map[ast.Expr]NodeTableInfo, denseNodeCapacity),
 		deferInfo:                         map[*ast.DeferStmt]*DeferInfo{},
 		foldInfo:                          map[*ast.FoldExpr]*FoldInfo{},
+		lambdaInfo:                        map[*ast.LambdaExpr]*LambdaInfo{},
 		parallelForInfo:                   make(map[*ast.ParallelForStmt]*ParallelForInfo, parallelForCapacity),
 		symbolFacts:                       map[*Symbol]OptimizationFacts{},
 		funcDeclSymbols:                   make(map[*ast.FuncDecl]*Symbol, funcDeclCapacity),
@@ -341,6 +343,7 @@ func Analyze(file *ast.File) *Result {
 		ParallelFor:             a.parallelForInfo,
 		Defer:                   a.deferInfo,
 		Fold:                    a.foldInfo,
+		Lambdas:                 a.lambdaInfo,
 		FunctionAnalyses:        a.functionAnalyses,
 		AnnotatedFuncs:          a.annotatedFuncs,
 		ExportedTypes:           a.exportedTypes,

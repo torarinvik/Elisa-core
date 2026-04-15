@@ -8,14 +8,15 @@ import (
 )
 
 type Parser struct {
-	tokens     []lexer.Token
-	pos        int
-	errors     []string
-	poolScopes []string
+	tokens      []lexer.Token
+	pos         int
+	errors      []string
+	poolScopes  []string
+	allowAsCast bool
 }
 
 func New(tokens []lexer.Token) *Parser {
-	return &Parser{tokens: tokens}
+	return &Parser{tokens: tokens, allowAsCast: true}
 }
 
 func (p *Parser) Errors() []string { return p.errors }
@@ -60,6 +61,26 @@ func (p *Parser) match(kind lexer.TokenKind) bool {
 		return true
 	}
 	return false
+}
+
+func (p *Parser) withAsCastDisabled(parse func() ast.Expr) ast.Expr {
+	saved := p.allowAsCast
+	p.allowAsCast = false
+	defer func() {
+		p.allowAsCast = saved
+	}()
+	return parse()
+}
+
+func tokenCanStartTypeExpr(tok lexer.Token) bool {
+	switch tok.Kind {
+	case lexer.TOKEN_IDENT, lexer.TOKEN_MUTABLE, lexer.TOKEN_TAIL,
+		lexer.TOKEN_LPAREN, lexer.TOKEN_ANY, lexer.TOKEN_HEAP,
+		lexer.TOKEN_STACK, lexer.TOKEN_STATIC:
+		return true
+	default:
+		return false
+	}
 }
 
 func (p *Parser) peekIdentText(text string) bool {

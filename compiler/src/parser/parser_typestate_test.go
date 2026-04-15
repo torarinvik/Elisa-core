@@ -1967,6 +1967,71 @@ func TestParsePostfixCastWithMutableAnyRefTarget(t *testing.T) {
 	}
 }
 
+func TestParseAsCastExprPreservesSyntax(t *testing.T) {
+	file, errs := parseSourceFile(t, "struct Arena:\n    value: i64\n\ndef keep(owner: Arena) -> mutable any Arena&:\n    return &owner as mutable any Arena&\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	cast, ok := ret.Value.(*ast.CastExpr)
+	if !ok {
+		t.Fatalf("expected cast expr, got %T", ret.Value)
+	}
+	if cast.Origin != ast.CastExprOriginAsSyntax {
+		t.Fatalf("expected as-syntax cast origin, got %v", cast.Origin)
+	}
+	if _, ok := cast.Operand.(*ast.AddrOfExpr); !ok {
+		t.Fatalf("expected address-of operand, got %T", cast.Operand)
+	}
+	if _, ok := cast.Target.(*ast.MutableType); !ok {
+		t.Fatalf("expected mutable cast target, got %T", cast.Target)
+	}
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "&owner as mutable any Arena&") {
+		t.Fatalf("expected unparse to preserve as cast syntax, got:\n%s", formatted)
+	}
+}
+
+func TestParseAsRefAssignmentRemainsStatementSyntax(t *testing.T) {
+	file, errs := parseSourceFile(t, "struct Arena:\n    end: any Arena!\n\ndef keep(a: mutable any Arena&) -> void:\n    a.end as & <- zeroed\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	assign, ok := decl.Body[0].(*ast.AsRefAssignStmt)
+	if !ok {
+		t.Fatalf("expected as-ref assignment stmt, got %T", decl.Body[0])
+	}
+	if assign.AsKind != "&" {
+		t.Fatalf("expected as-ref assignment kind &, got %q", assign.AsKind)
+	}
+	if got := unparse.FormatStmt(assign); !strings.Contains(got, "a.end as & <- zeroed") {
+		t.Fatalf("expected unparse to preserve as-ref assignment, got:\n%s", got)
+	}
+}
+
+func TestParseMoveAsStructPatternRemainsStatementSyntax(t *testing.T) {
+	file, errs := parseSourceFile(t, "struct Worker:\n    value: i64\n\ndef keep(worker: Worker) -> i64:\n    move worker as Worker(value)\n    return value\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[1].(*ast.FuncDecl)
+	stmt, ok := decl.Body[0].(*ast.MoveBindStmt)
+	if !ok {
+		t.Fatalf("expected move bind stmt, got %T", decl.Body[0])
+	}
+	pattern, ok := stmt.Pattern.(*ast.MoveBindStructPattern)
+	if !ok {
+		t.Fatalf("expected struct move bind pattern, got %T", stmt.Pattern)
+	}
+	if pattern.TypeName != "Worker" || len(pattern.Args) != 1 || pattern.Args[0].Name != "value" {
+		t.Fatalf("unexpected move bind pattern %#v", pattern)
+	}
+}
+
 func TestParseForRemainsContextualIdentifier(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep() -> int:\n    for_value: int = 1\n    for(for_value)\n    return for_value\n")
 	if len(errs) != 0 {

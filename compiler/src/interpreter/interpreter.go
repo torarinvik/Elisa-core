@@ -48,12 +48,19 @@ type Value struct {
 	listVal   []Value
 	structVal *StructValue
 	funcName  string
+	lambdaVal *lambdaValue
 }
 
 type StructValue struct {
 	Name       string
 	FieldOrder []string
 	Fields     map[string]Value
+}
+
+type lambdaValue struct {
+	id       int
+	expr     *ast.LambdaExpr
+	captures map[string]Value
 }
 
 type runtimeFunc func([]Value) (Value, error)
@@ -71,6 +78,7 @@ type Interpreter struct {
 	consts       map[string]Value
 	globals      map[string]Value
 	runtimeFuncs map[string]runtimeFuncInfo
+	nextLambdaID int
 }
 
 type frame struct {
@@ -181,6 +189,9 @@ func (v Value) String() string {
 		}
 		return v.structVal.Name + "(" + strings.Join(parts, ", ") + ")"
 	case valueFunction:
+		if v.lambdaVal != nil {
+			return "<func lambda>"
+		}
 		return "<func " + v.funcName + ">"
 	default:
 		return "<value>"
@@ -207,6 +218,14 @@ func (v Value) Clone() Value {
 				Fields:     fields,
 			}
 		}
+	case valueFunction:
+		if v.lambdaVal != nil {
+			captures := make(map[string]Value, len(v.lambdaVal.captures))
+			for name, value := range v.lambdaVal.captures {
+				captures[name] = value.Clone()
+			}
+			cloned.lambdaVal = &lambdaValue{id: v.lambdaVal.id, expr: v.lambdaVal.expr, captures: captures}
+		}
 	}
 	return cloned
 }
@@ -218,6 +237,13 @@ func FloatValue(v float64) Value      { return Value{kind: valueFloat, floatVal:
 func BoolValue(v bool) Value          { return Value{kind: valueBool, boolVal: v} }
 func StringValue(v string) Value      { return Value{kind: valueString, strVal: v} }
 func FunctionValue(name string) Value { return Value{kind: valueFunction, funcName: name} }
+func LambdaFunctionValue(id int, expr *ast.LambdaExpr, captures map[string]Value) Value {
+	cloned := make(map[string]Value, len(captures))
+	for name, value := range captures {
+		cloned[name] = value.Clone()
+	}
+	return Value{kind: valueFunction, lambdaVal: &lambdaValue{id: id, expr: expr, captures: cloned}}
+}
 
 func ListValue(values []Value) Value {
 	cloned := make([]Value, len(values))
@@ -797,6 +823,21 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 		return i.constructStruct(decl, args, nil)
 	case *ast.ParenExpr:
 		return i.evalExpr(frame, n.Inner)
+	case *ast.LambdaExpr:
+		captures := map[string]Value{}
+		if i != nil && i.result != nil && i.result.Lambdas != nil {
+			if info, ok := i.result.Lambdas[n]; ok && info != nil {
+				for _, name := range info.Captures {
+					value, err := i.lookupValue(frame, name)
+					if err != nil {
+						return VoidValue(), err
+					}
+					captures[name] = value
+				}
+			}
+		}
+		i.nextLambdaID++
+		return LambdaFunctionValue(i.nextLambdaID, n, captures), nil
 	case *ast.SpecializeExpr:
 		name, err := callableName(n.Operand)
 		if err != nil {
@@ -1064,6 +1105,9 @@ func (i *Interpreter) invokeCallValue(frame *frame, expr *ast.CallExpr, calleeVa
 	if calleeValue.kind != valueFunction {
 		return VoidValue(), fmt.Errorf("cannot call non-function value %s", calleeValue.String())
 	}
+	if calleeValue.lambdaVal != nil {
+		return i.callLambda(calleeValue.lambdaVal, expr, frame, argExprs, prependNamed)
+	}
 	name := calleeValue.funcName
 	positional := make([]Value, 0, len(argExprs))
 	named := map[string]Value{}
@@ -1110,6 +1154,65 @@ func (i *Interpreter) invokeCallValue(frame *frame, expr *ast.CallExpr, calleeVa
 		return i.constructStruct(decl, positional, nil)
 	}
 	return VoidValue(), fmt.Errorf("unknown callable %q", name)
+}
+
+func (i *Interpreter) callLambda(lambda *lambdaValue, expr *ast.CallExpr, callerFrame *frame, argExprs []ast.Expr, prependNamed bool) (Value, error) {
+	if lambda == nil || lambda.expr == nil {
+		return VoidValue(), fmt.Errorf("missing lambda value")
+	}
+	positional := make([]Value, 0, len(argExprs))
+	named := map[string]Value{}
+	for index, argExpr := range argExprs {
+		value, err := i.evalExpr(callerFrame, argExpr)
+		if err != nil {
+			return VoidValue(), err
+		}
+		if !prependNamed {
+			if name := expr.ArgName(index); name != "" {
+				named[name] = value
+			} else {
+				positional = append(positional, value)
+			}
+			continue
+		}
+		if name := expr.ArgName(index + 1); name != "" {
+			named[name] = value
+		} else {
+			positional = append(positional, value)
+		}
+	}
+	callFrame := &frame{locals: map[string]Value{}}
+	for name, value := range lambda.captures {
+		callFrame.locals[name] = value.Clone()
+	}
+	if err := bindCallArgs(callFrame.locals, lambda.expr.Params, positional, named); err != nil {
+		return VoidValue(), fmt.Errorf("%s: %w", lambda.expr.Pos(), err)
+	}
+	if lambda.expr.BodyExpr != nil {
+		return i.evalExpr(callFrame, lambda.expr.BodyExpr)
+	}
+	signal, err := i.execBlock(callFrame, lambda.expr.Body)
+	if err != nil {
+		return VoidValue(), err
+	}
+	if signal.kind == signalReturn {
+		return signal.value, nil
+	}
+	if i.lambdaReturnsVoid(lambda.expr) {
+		return VoidValue(), nil
+	}
+	return VoidValue(), fmt.Errorf("%s: reached end of lambda without return", lambda.expr.Pos())
+}
+
+func (i *Interpreter) lambdaReturnsVoid(expr *ast.LambdaExpr) bool {
+	if expr == nil || i == nil || i.result == nil || i.result.ExprTypes == nil {
+		return false
+	}
+	fnType, ok := i.result.ExprTypes[expr].(*semantic.FuncType)
+	if !ok || fnType == nil {
+		return false
+	}
+	return semantic.SameType(fnType.Return, i.result.NamedTypes["void"])
 }
 
 func interpreterFieldValue(obj Value, field string) (Value, error) {
@@ -1829,6 +1932,9 @@ func valuesEqual(left, right Value) bool {
 		}
 		return true
 	case valueFunction:
+		if left.lambdaVal != nil || right.lambdaVal != nil {
+			return left.lambdaVal != nil && right.lambdaVal != nil && left.lambdaVal.id == right.lambdaVal.id
+		}
 		return left.funcName == right.funcName
 	default:
 		return false

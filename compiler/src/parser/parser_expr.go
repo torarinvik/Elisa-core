@@ -682,7 +682,7 @@ func (p *Parser) parseNot() ast.Expr {
 }
 
 func (p *Parser) parseComparison() ast.Expr {
-	left := p.parseBitwiseOr()
+	left := p.parseAs()
 	for p.peek() == lexer.TOKEN_EQEQ || p.peek() == lexer.TOKEN_BANGEQ ||
 		p.peek() == lexer.TOKEN_LT || p.peek() == lexer.TOKEN_GT ||
 		p.peek() == lexer.TOKEN_LTEQ || p.peek() == lexer.TOKEN_GTEQ ||
@@ -693,9 +693,23 @@ func (p *Parser) parseComparison() ast.Expr {
 		if op.Kind == lexer.TOKEN_IS {
 			right = p.parseIsTestExpr()
 		} else {
-			right = p.parseBitwiseOr()
+			right = p.parseAs()
 		}
 		left = &ast.BinaryExpr{Position: pos, Op: op.Kind, Left: left, Right: right}
+	}
+	return left
+}
+
+func (p *Parser) parseAs() ast.Expr {
+	left := p.parseBitwiseOr()
+	for p.allowAsCast && p.peek() == lexer.TOKEN_AS {
+		if p.pos+1 >= len(p.tokens) || !tokenCanStartTypeExpr(p.tokens[p.pos+1]) {
+			return left
+		}
+		pos := p.cur().Pos
+		p.advance()
+		target := p.parseTypeExpr()
+		left = &ast.CastExpr{Position: pos, Operand: left, Target: target, Origin: ast.CastExprOriginAsSyntax}
 	}
 	return left
 }
@@ -971,7 +985,7 @@ func (p *Parser) parseMatchExpr() ast.Expr {
 func (p *Parser) parseVisitExpr() ast.Expr {
 	pos := p.cur().Pos
 	p.expectIdentText("visit")
-	value := p.parseExpr()
+	value := p.withAsCastDisabled(p.parseExpr)
 	var root ast.TypeExpr
 	if p.match(lexer.TOKEN_AS) {
 		root = p.parseTypeExpr()
@@ -983,13 +997,65 @@ func (p *Parser) parseVisitExpr() ast.Expr {
 func (p *Parser) parseFoldExpr() ast.Expr {
 	pos := p.cur().Pos
 	p.expectIdentText("fold")
-	value := p.parseExpr()
+	value := p.withAsCastDisabled(p.parseExpr)
 	p.expect(lexer.TOKEN_AS)
 	root := p.parseTypeExpr()
 	p.expectIdentText("into")
 	resultType := p.parseTypeExpr()
 	arms := p.parseVisitArms()
 	return &ast.FoldExpr{Position: pos, Value: value, Root: root, ResultType: resultType, Arms: arms}
+}
+
+func (p *Parser) parseLambdaExpr() ast.Expr {
+	pos := p.cur().Pos
+	keyword := p.expect(lexer.TOKEN_IDENT).Text
+	params, shorthand := p.parseLambdaParams()
+	var retType ast.TypeExpr
+	if p.match(lexer.TOKEN_ARROW) {
+		retType = p.parseTypeExpr()
+	}
+	p.expect(lexer.TOKEN_COLON)
+	if p.match(lexer.TOKEN_NEWLINE) {
+		body := p.parseBlock()
+		return &ast.LambdaExpr{
+			Position:            pos,
+			Keyword:             keyword,
+			UsesShorthandParams: shorthand,
+			Params:              params,
+			ReturnType:          retType,
+			Body:                body,
+		}
+	}
+	bodyExpr := p.parseExpr()
+	return &ast.LambdaExpr{
+		Position:            pos,
+		Keyword:             keyword,
+		UsesShorthandParams: shorthand,
+		Params:              params,
+		ReturnType:          retType,
+		BodyExpr:            bodyExpr,
+	}
+}
+
+func (p *Parser) parseLambdaParams() ([]ast.ParamDecl, bool) {
+	if p.match(lexer.TOKEN_LPAREN) {
+		params := make([]ast.ParamDecl, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
+		if p.peek() != lexer.TOKEN_RPAREN {
+			for {
+				params = append(params, p.parseParam(false))
+				if !p.match(lexer.TOKEN_COMMA) {
+					break
+				}
+			}
+		}
+		p.expect(lexer.TOKEN_RPAREN)
+		return params, false
+	}
+	params := []ast.ParamDecl{{Position: p.cur().Pos, Name: p.expect(lexer.TOKEN_IDENT).Text}}
+	for p.match(lexer.TOKEN_COMMA) {
+		params = append(params, ast.ParamDecl{Position: p.cur().Pos, Name: p.expect(lexer.TOKEN_IDENT).Text})
+	}
+	return params, true
 }
 
 func (p *Parser) parseQualifiedTargetName() (string, lexer.Pos) {
@@ -1342,6 +1408,69 @@ func (p *Parser) peekPostfixGenericApplication() bool {
 	return probe.peek() == lexer.TOKEN_LPAREN
 }
 
+func (p *Parser) looksLikeCascadeExpr() bool {
+	if p.peek() != lexer.TOKEN_IDENT || p.cur().Text != "cascade" {
+		return false
+	}
+	probe := *p
+	probe.errors = nil
+	probe.advance()
+	_ = probe.parseExpr()
+	return probe.peek() == lexer.TOKEN_FATARROW
+}
+
+func (p *Parser) looksLikeLambdaExpr() bool {
+	if p.peek() != lexer.TOKEN_IDENT || (p.cur().Text != "lambda" && p.cur().Text != "λ") {
+		return false
+	}
+	probe := *p
+	probe.errors = nil
+	probe.advance()
+	if !probe.parseLambdaSignatureProbe() {
+		return false
+	}
+	return probe.peek() == lexer.TOKEN_COLON
+}
+
+func (p *Parser) parseLambdaSignatureProbe() bool {
+	if p.peek() == lexer.TOKEN_LPAREN {
+		p.advance()
+		if p.peek() != lexer.TOKEN_RPAREN {
+			for {
+				p.match(lexer.TOKEN_MUTABLE)
+				if p.peek() != lexer.TOKEN_IDENT {
+					return false
+				}
+				p.advance()
+				if !p.match(lexer.TOKEN_COLON) {
+					return false
+				}
+				_ = p.parseTypeExpr()
+				if !p.match(lexer.TOKEN_COMMA) {
+					break
+				}
+			}
+		}
+		if !p.match(lexer.TOKEN_RPAREN) {
+			return false
+		}
+	} else if p.peek() == lexer.TOKEN_IDENT {
+		p.advance()
+		for p.match(lexer.TOKEN_COMMA) {
+			if p.peek() != lexer.TOKEN_IDENT {
+				return false
+			}
+			p.advance()
+		}
+	} else {
+		return false
+	}
+	if p.match(lexer.TOKEN_ARROW) {
+		_ = p.parseTypeExpr()
+	}
+	return true
+}
+
 func (p *Parser) parsePostfix() ast.Expr {
 	expr := p.parsePrimary()
 	for {
@@ -1602,6 +1731,17 @@ func (p *Parser) parsePrimary() ast.Expr {
 			pos := p.cur().Pos
 			p.advance()
 			return p.parseExprBlockValue(pos, false)
+		}
+		if (p.cur().Text == "lambda" || p.cur().Text == "λ") && p.looksLikeLambdaExpr() {
+			return p.parseLambdaExpr()
+		}
+		if p.cur().Text == "cascade" && p.looksLikeCascadeExpr() {
+			pos := p.cur().Pos
+			p.advance()
+			target := p.parseExpr()
+			p.expect(lexer.TOKEN_FATARROW)
+			value := p.parseExpr()
+			return &ast.CascadeExpr{Position: pos, Target: target, Value: value}
 		}
 		if p.cur().Text == "visit" && !(p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LPAREN) {
 			return p.parseVisitExpr()

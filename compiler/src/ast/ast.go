@@ -694,6 +694,7 @@ type CastExprOrigin int
 const (
 	CastExprOriginGeneral CastExprOrigin = iota
 	CastExprOriginToSyntax
+	CastExprOriginAsSyntax
 	CastExprOriginPostfixShorthand
 )
 
@@ -703,6 +704,22 @@ type CastExpr struct {
 	Target       TypeExpr
 	Origin       CastExprOrigin
 	LegacySyntax bool
+}
+
+type CascadeExpr struct {
+	Position lexer.Pos
+	Target   Expr
+	Value    Expr
+}
+
+type LambdaExpr struct {
+	Position            lexer.Pos
+	Keyword             string
+	UsesShorthandParams bool
+	Params              []ParamDecl
+	ReturnType          TypeExpr
+	Body                []Stmt
+	BodyExpr            Expr
 }
 
 type SizeofExpr struct {
@@ -1334,6 +1351,8 @@ func (n *IndexExpr) Pos() lexer.Pos       { return n.Position }
 func (n *SliceExpr) Pos() lexer.Pos       { return n.Position }
 func (n *ListLitExpr) Pos() lexer.Pos     { return n.Position }
 func (n *CastExpr) Pos() lexer.Pos        { return n.Position }
+func (n *CascadeExpr) Pos() lexer.Pos     { return n.Position }
+func (n *LambdaExpr) Pos() lexer.Pos      { return n.Position }
 func (n *SizeofExpr) Pos() lexer.Pos      { return n.Position }
 func (n *TernaryExpr) Pos() lexer.Pos     { return n.Position }
 func (n *AddrOfExpr) Pos() lexer.Pos      { return n.Position }
@@ -1477,6 +1496,8 @@ func (*IndexExpr) nodeTag()                 {}
 func (*SliceExpr) nodeTag()                 {}
 func (*ListLitExpr) nodeTag()               {}
 func (*CastExpr) nodeTag()                  {}
+func (*CascadeExpr) nodeTag()               {}
+func (*LambdaExpr) nodeTag()                {}
 func (*SizeofExpr) nodeTag()                {}
 func (*TernaryExpr) nodeTag()               {}
 func (*AddrOfExpr) nodeTag()                {}
@@ -1623,6 +1644,8 @@ func (*MoveBindTuplePattern) moveBindPatternTag()   {}
 func (*MoveBindVariantPattern) moveBindPatternTag() {}
 func (*ListLitExpr) exprTag()                       {}
 func (*CastExpr) exprTag()                          {}
+func (*CascadeExpr) exprTag()                       {}
+func (*LambdaExpr) exprTag()                        {}
 func (*SizeofExpr) exprTag()                        {}
 func (*TernaryExpr) exprTag()                       {}
 func (*AddrOfExpr) exprTag()                        {}

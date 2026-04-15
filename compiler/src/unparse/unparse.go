@@ -98,6 +98,65 @@ func indentMultilineText(text string, prefix string) string {
 	return strings.Join(lines, "\n")
 }
 
+func formatCascadeExprValue(expr ast.Expr) string {
+	text := formatExpr(expr)
+	switch expr.(type) {
+	case *ast.BinaryExpr, *ast.UnaryExpr, *ast.TernaryExpr:
+		if len(text) >= 2 && text[0] == '(' && text[len(text)-1] == ')' {
+			return text[1 : len(text)-1]
+		}
+	}
+	return text
+}
+
+func formatLambdaExpr(expr *ast.LambdaExpr) string {
+	if expr == nil {
+		return "lambda"
+	}
+	keyword := expr.Keyword
+	if keyword == "" {
+		keyword = "lambda"
+	}
+	params := make([]string, 0, len(expr.Params))
+	if expr.UsesShorthandParams {
+		for _, param := range expr.Params {
+			params = append(params, param.Name)
+		}
+	} else {
+		for _, param := range expr.Params {
+			part := ""
+			if param.Mutable {
+				part += "mutable "
+			}
+			part += param.Name + ": " + formatTypeExpr(param.Type)
+			params = append(params, part)
+		}
+	}
+	line := keyword + " "
+	if expr.UsesShorthandParams {
+		line += strings.Join(params, ", ")
+	} else {
+		line += "(" + strings.Join(params, ", ") + ")"
+	}
+	if expr.ReturnType != nil {
+		line += " -> " + formatTypeExpr(expr.ReturnType)
+	}
+	if expr.BodyExpr != nil {
+		return line + ": " + formatExpr(expr.BodyExpr)
+	}
+	lines := []string{line + ":"}
+	for _, stmt := range expr.Body {
+		lines = append(lines, indentMultilineText(formatStmtText(stmt), "    "))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatStmtText(stmt ast.Stmt) string {
+	var f formatter
+	f.writeStmt(0, stmt)
+	return strings.TrimSuffix(f.builder.String(), "\n")
+}
+
 func (f *formatter) writeAnnotations(level int, annotations []ast.Annotation) {
 	for _, annotation := range annotations {
 		f.writeLine(level, formatAnnotation(annotation))
@@ -1247,12 +1306,19 @@ func formatExpr(expr ast.Expr) string {
 		if n.Origin == ast.CastExprOriginToSyntax {
 			return formatExpr(n.Operand) + " to " + formatTypeExpr(n.Target)
 		}
+		if n.Origin == ast.CastExprOriginAsSyntax {
+			return formatExpr(n.Operand) + " as " + formatTypeExpr(n.Target)
+		}
 		if n.Origin == ast.CastExprOriginPostfixShorthand && !n.LegacySyntax {
 			if named, ok := n.Target.(*ast.NamedType); ok {
 				return formatExpr(n.Operand) + "." + named.Name + "()"
 			}
 		}
 		return formatExpr(n.Operand) + ".cast[" + formatTypeExpr(n.Target) + "]"
+	case *ast.CascadeExpr:
+		return "cascade " + formatExpr(n.Target) + " => " + formatCascadeExprValue(n.Value)
+	case *ast.LambdaExpr:
+		return formatLambdaExpr(n)
 	case *ast.SizeofExpr:
 		return "sizeof(" + formatTypeExpr(n.Type) + ")"
 	case *ast.TernaryExpr:

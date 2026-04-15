@@ -2899,6 +2899,20 @@ func (c *deferCaptureCollector) collectExpr(expr ast.Expr, locals map[string]boo
 				c.collectStmt(innerStmt, armLocals)
 			}
 		}
+	case *ast.LambdaExpr:
+		lambdaLocals := cloneParallelForLocals(locals)
+		for _, param := range n.Params {
+			if param.Name != "" {
+				lambdaLocals[param.Name] = true
+			}
+		}
+		if n.BodyExpr != nil {
+			c.collectExpr(n.BodyExpr, lambdaLocals)
+		} else {
+			for _, innerStmt := range n.Body {
+				c.collectStmt(innerStmt, lambdaLocals)
+			}
+		}
 	}
 }
 
@@ -3006,6 +3020,20 @@ func (c *parallelForCaptureCollector) collectExpr(expr ast.Expr, locals map[stri
 			}
 			for _, innerStmt := range arm.Body {
 				c.collectStmt(innerStmt, armLocals)
+			}
+		}
+	case *ast.LambdaExpr:
+		lambdaLocals := cloneParallelForLocals(locals)
+		for _, param := range n.Params {
+			if param.Name != "" {
+				lambdaLocals[param.Name] = true
+			}
+		}
+		if n.BodyExpr != nil {
+			c.collectExpr(n.BodyExpr, lambdaLocals)
+		} else {
+			for _, innerStmt := range n.Body {
+				c.collectStmt(innerStmt, lambdaLocals)
 			}
 		}
 	}

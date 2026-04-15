@@ -166,6 +166,33 @@ func requireExprTypeString(t *testing.T, result *semantic.Result, expr ast.Expr,
 	}
 }
 
+func TestAnalyzeAsCastUsesExistingCastSemantics(t *testing.T) {
+	src := `struct Arena:
+    value: i64
+
+def keep(owner: Arena) -> mutable any Arena&:
+    return &owner as mutable any Arena&
+`
+
+	result, errs := parseAndAnalyze(t, "as_cast.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	decl := requireFuncDecl(t, result, "keep")
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	cast, ok := ret.Value.(*ast.CastExpr)
+	if !ok {
+		t.Fatalf("expected cast expr, got %T", ret.Value)
+	}
+	if cast.Origin != ast.CastExprOriginAsSyntax {
+		t.Fatalf("expected as-syntax origin, got %v", cast.Origin)
+	}
+	requireExprTypeString(t, result, cast, "any mutable Arena&")
+}
+
 func repoRootFromTestFile(t *testing.T) string {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)

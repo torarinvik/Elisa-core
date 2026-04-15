@@ -48,6 +48,7 @@ type Result struct {
 	ParallelFor             map[*ast.ParallelForStmt]*ParallelForInfo
 	Defer                   map[*ast.DeferStmt]*DeferInfo
 	Fold                    map[*ast.FoldExpr]*FoldInfo
+	Lambdas                 map[*ast.LambdaExpr]*LambdaInfo
 	FunctionAnalyses        map[*ast.FuncDecl]*FunctionAnalysis
 	AnnotatedFuncs          []*AnnotatedFunc
 	ExportedTypes           []*ExportedType
@@ -73,6 +74,10 @@ type DeferInfo struct {
 }
 
 type FoldInfo struct {
+	Captures []string
+}
+
+type LambdaInfo struct {
 	Captures []string
 }
 

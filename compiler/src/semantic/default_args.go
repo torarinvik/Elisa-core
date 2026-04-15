@@ -124,6 +124,41 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 			return nil
 		}
 		return &ast.CastExpr{Position: n.Position, Operand: operand, Target: n.Target, Origin: n.Origin, LegacySyntax: n.LegacySyntax}
+	case *ast.CascadeExpr:
+		target := cloneDefaultArgExpr(n.Target)
+		value := cloneDefaultArgExpr(n.Value)
+		if (n.Target != nil && target == nil) || (n.Value != nil && value == nil) {
+			return nil
+		}
+		return &ast.CascadeExpr{Position: n.Position, Target: target, Value: value}
+	case *ast.LambdaExpr:
+		bodyExpr := cloneDefaultArgExpr(n.BodyExpr)
+		if n.BodyExpr != nil && bodyExpr == nil {
+			return nil
+		}
+		body := cloneDefaultArgStmts(n.Body)
+		if len(n.Body) != 0 && body == nil {
+			return nil
+		}
+		params := append([]ast.ParamDecl(nil), n.Params...)
+		for i := range params {
+			if params[i].DefaultValue == nil {
+				continue
+			}
+			params[i].DefaultValue = cloneDefaultArgExpr(params[i].DefaultValue)
+			if params[i].DefaultValue == nil {
+				return nil
+			}
+		}
+		return &ast.LambdaExpr{
+			Position:            n.Position,
+			Keyword:             n.Keyword,
+			UsesShorthandParams: n.UsesShorthandParams,
+			Params:              params,
+			ReturnType:          n.ReturnType,
+			Body:                body,
+			BodyExpr:            bodyExpr,
+		}
 	case *ast.SizeofExpr:
 		return &ast.SizeofExpr{Position: n.Position, Type: n.Type}
 	case *ast.TernaryExpr:
@@ -236,6 +271,46 @@ func cloneDefaultArgExprs(exprs []ast.Expr) []ast.Expr {
 		cloned = append(cloned, next)
 	}
 	return cloned
+}
+
+func cloneDefaultArgStmts(stmts []ast.Stmt) []ast.Stmt {
+	if len(stmts) == 0 {
+		return nil
+	}
+	cloned := make([]ast.Stmt, 0, len(stmts))
+	for _, stmt := range stmts {
+		next := cloneDefaultArgStmt(stmt)
+		if next == nil {
+			return nil
+		}
+		cloned = append(cloned, next)
+	}
+	return cloned
+}
+
+func cloneDefaultArgStmt(stmt ast.Stmt) ast.Stmt {
+	switch n := stmt.(type) {
+	case *ast.ReturnStmt:
+		value := cloneDefaultArgExpr(n.Value)
+		if n.Value != nil && value == nil {
+			return nil
+		}
+		return &ast.ReturnStmt{Position: n.Position, Value: value}
+	case *ast.ExprStmt:
+		expr := cloneDefaultArgExpr(n.Expr)
+		if n.Expr != nil && expr == nil {
+			return nil
+		}
+		return &ast.ExprStmt{Position: n.Position, Expr: expr}
+	case *ast.VarDeclStmt:
+		value := cloneDefaultArgExpr(n.Value)
+		if n.Value != nil && value == nil {
+			return nil
+		}
+		return &ast.VarDeclStmt{Position: n.Position, Name: n.Name, Mutable: n.Mutable, Type: n.Type, Value: value}
+	default:
+		return nil
+	}
 }
 
 func cloneDefaultWithArgs(args []ast.WithArg) []ast.WithArg {

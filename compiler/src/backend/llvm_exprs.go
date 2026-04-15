@@ -281,6 +281,8 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, actualType, err = s.emitStructLitExpr(n)
 	case *ast.RecordUpdateExpr:
 		value, actualType, err = s.emitRecordUpdateExpr(n)
+	case *ast.LambdaExpr:
+		value, actualType, err = s.emitLambdaExpr(n)
 	case *ast.TupleExpr:
 		value, actualType, err = s.emitTupleExpr(n)
 	case *ast.ParenExpr:
@@ -4426,7 +4428,15 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 		callArgs := make([]C.LLVMValueRef, 0, len(args)+1)
 		callArgs = append(callArgs, resultSlot)
 		callArgs = append(callArgs, args...)
-		call := s.buildCall(llvmFnType, callee, callArgs, "calltmp")
+		var call C.LLVMValueRef
+		if s.directCallTarget(expr.Func) {
+			call = s.buildCall(llvmFnType, callee, callArgs, "calltmp")
+		} else {
+			call, err = s.emitFunctionValueCall(callee, funcType, callArgs, "calltmp")
+			if err != nil {
+				return nil, nil, err
+			}
+		}
 		payload, err := s.loadValue(resultSlot, retUnion.Value, "call.payload")
 		if err != nil {
 			return nil, nil, err
@@ -4441,7 +4451,15 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if !isVoidType(funcType.Return) {
 		callName = "calltmp"
 	}
-	call := s.buildCall(llvmFnType, callee, args, callName)
+	var call C.LLVMValueRef
+	if s.directCallTarget(expr.Func) {
+		call = s.buildCall(llvmFnType, callee, args, callName)
+	} else {
+		call, err = s.emitFunctionValueCall(callee, funcType, args, "calltmp")
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 	return call, funcType.Return, nil
 }
 
@@ -5952,14 +5970,13 @@ func (s *functionState) emitReduceSumHelperCall(expr *ast.CallExpr) (C.LLVMValue
 	if err != nil {
 		return nil, nil, true, err
 	}
-	callbackLLVMType, err := s.g.lowerFunctionType(callbackType)
-	if err != nil {
-		return nil, nil, true, err
-	}
 	callArgs := make([]C.LLVMValueRef, 0, len(extraArgs)+1)
 	callArgs = append(callArgs, srcElem)
 	callArgs = append(callArgs, extraArgs...)
-	mappedValue := s.buildCall(callbackLLVMType, callbackValue, callArgs, "reduce_sum.call")
+	mappedValue, err := s.emitFunctionValueCall(callbackValue, callbackType, callArgs, "reduce_sum.call")
+	if err != nil {
+		return nil, nil, true, err
+	}
 	coercedValue, err := s.coerceValue(mappedValue, callbackType.Return, resultType)
 	if err != nil {
 		return nil, nil, true, err
@@ -6108,11 +6125,10 @@ func (s *functionState) emitZipMapHelperCall(expr *ast.CallExpr) (C.LLVMValueRef
 		}
 		s.attachAliasScopeMetadataWithNames(src2Elem, domainName, src2ScopeName, noAliasScopes)
 	}
-	callbackLLVMType, err := s.g.lowerFunctionType(callbackType)
+	resultValue, err := s.emitFunctionValueCall(callbackValue, callbackType, []C.LLVMValueRef{src1Elem, src2Elem}, "zip_map.call")
 	if err != nil {
 		return nil, nil, true, err
 	}
-	resultValue := s.buildCall(callbackLLVMType, callbackValue, []C.LLVMValueRef{src1Elem, src2Elem}, "zip_map.call")
 	coerced, err := s.coerceValue(resultValue, callbackType.Return, dstElemType)
 	if err != nil {
 		return nil, nil, true, err
@@ -6514,6 +6530,22 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 		return nil, nil, fmt.Errorf("call target does not have a function type")
 	}
 	return callee, fnType, nil
+}
+
+func (s *functionState) directCallTarget(expr ast.Expr) bool {
+	if fieldExpr, ok := expr.(*ast.FieldExpr); ok {
+		_, _, handled, err := s.resolveStaticInterfaceMethod(fieldExpr)
+		return handled && err == nil
+	}
+	ident, ok := expr.(*ast.Ident)
+	if !ok || s == nil || s.g == nil || s.g.result == nil {
+		return false
+	}
+	sym, ok := s.g.result.GlobalScope.Lookup(ident.Name)
+	if !ok {
+		return false
+	}
+	return sym.Kind == semantic.SymbolFunc || sym.Kind == semantic.SymbolExternFunc
 }
 
 func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, error) {

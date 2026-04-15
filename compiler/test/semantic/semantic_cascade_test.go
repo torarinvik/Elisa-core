@@ -65,3 +65,60 @@ def build(report: mutable any Report&, delta: int) -> int:
 		t.Fatalf("expected nested cascade target to lower to report.inner.value, got %q", got)
 	}
 }
+
+func TestAnalyzeCascadeExprLowersToOrdinaryExpr(t *testing.T) {
+	src := `struct Row:
+    ref_count: int
+
+def nonzero(row: Row) -> bool:
+    return cascade row => .ref_count != 0
+`
+
+	result, errs := parseAndAnalyze(t, "cascade_expr.llcontext", src)
+	requireNoErrors(t, errs)
+	decl := requireFuncDecl(t, result, "nonzero")
+
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	if _, ok := ret.Value.(*ast.CascadeExpr); ok {
+		t.Fatalf("expected cascade expr to be lowered away, got %T", ret.Value)
+	}
+	binary, ok := ret.Value.(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected lowered binary expr, got %T", ret.Value)
+	}
+	if got := unparse.FormatExpr(binary.Left); got != "row.ref_count" {
+		t.Fatalf("expected left side to lower to row.ref_count, got %q", got)
+	}
+}
+
+func TestAnalyzeNestedCascadeExprInsideCascadeStmtUsesOuterTarget(t *testing.T) {
+	src := `struct Inner:
+    value: int
+
+struct Report:
+    inner: Inner
+
+def nonzero(report: Report) -> bool:
+    cascade report:
+        return cascade .inner => .value != 0
+`
+
+	result, errs := parseAndAnalyze(t, "cascade_nested_expr.llcontext", src)
+	requireNoErrors(t, errs)
+	decl := requireFuncDecl(t, result, "nonzero")
+
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	binary, ok := ret.Value.(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected lowered binary expr, got %T", ret.Value)
+	}
+	if got := unparse.FormatExpr(binary.Left); got != "report.inner.value" {
+		t.Fatalf("expected nested cascade expr to lower to report.inner.value, got %q", got)
+	}
+}

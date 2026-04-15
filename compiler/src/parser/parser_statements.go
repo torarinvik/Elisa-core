@@ -647,7 +647,7 @@ func (p *Parser) parseNotifyStmt() ast.Stmt {
 func (p *Parser) parseLockStmt() *ast.LockStmt {
 	pos := p.cur().Pos
 	p.expectIdentText("lock")
-	mutex := p.parseExpr()
+	mutex := p.withAsCastDisabled(p.parseExpr)
 	p.expect(lexer.TOKEN_AS)
 	guardName := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_COLON)
@@ -681,10 +681,10 @@ func (p *Parser) parseInStore() *ast.InStoreStmt {
 func (p *Parser) parseOpenStmt() *ast.OpenStmt {
 	pos := p.cur().Pos
 	p.expectIdentText("open")
-	value := p.parseExpr()
+	value := p.withAsCastDisabled(p.parseExpr)
 	var store ast.Expr
 	if p.match(lexer.TOKEN_IN) {
-		store = p.parseExpr()
+		store = p.withAsCastDisabled(p.parseExpr)
 	}
 	p.expect(lexer.TOKEN_AS)
 	pattern := p.parseMoveBindPattern()
@@ -702,10 +702,10 @@ func (p *Parser) parseOpenStmt() *ast.OpenStmt {
 func (p *Parser) parseViewStmt() *ast.ViewStmt {
 	pos := p.cur().Pos
 	p.expectIdentText("view")
-	value := p.parseExpr()
+	value := p.withAsCastDisabled(p.parseExpr)
 	var store ast.Expr
 	if p.match(lexer.TOKEN_IN) {
-		store = p.parseExpr()
+		store = p.withAsCastDisabled(p.parseExpr)
 	}
 	p.expect(lexer.TOKEN_AS)
 	pattern := p.parseViewBindPattern()
@@ -1306,7 +1306,7 @@ func (p *Parser) parseIf() ast.Stmt {
 func (p *Parser) parseIfClause(isElif bool) ifClause {
 	pos := p.cur().Pos
 	hint := p.parseBranchHint()
-	head := p.parseExpr()
+	head := p.withAsCastDisabled(p.parseExpr)
 	if p.match(lexer.TOKEN_AS) {
 		if hint != ast.BranchHintNone {
 			if isElif {
@@ -1329,7 +1329,7 @@ func (p *Parser) parseIfClause(isElif bool) ifClause {
 				p.errorf("if likely/unlikely hint cannot be combined with pattern binders")
 			}
 		}
-		store := p.parseExpr()
+		store := p.withAsCastDisabled(p.parseExpr)
 		if p.match(lexer.TOKEN_AS) {
 			patterns := p.parseTopLevelMatchPatterns()
 			p.expect(lexer.TOKEN_COLON)
@@ -1707,13 +1707,18 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		return &ast.VarDeclStmt{Position: pos, Name: name, Value: value}
 	}
 
-	expr := p.parseExpr()
+	var expr ast.Expr
+	if p.peekIdentText("move") {
+		expr = p.withAsCastDisabled(p.parseExpr)
+	} else {
+		expr = p.parseExpr()
+	}
 
 	if _, ok := expr.(*ast.MoveExpr); ok {
 		var store ast.Expr
 		if p.peek() == lexer.TOKEN_IN {
 			p.advance()
-			store = p.parseExpr()
+			store = p.withAsCastDisabled(p.parseExpr)
 		}
 		if p.peek() == lexer.TOKEN_AS {
 			p.advance()

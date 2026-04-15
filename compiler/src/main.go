@@ -964,12 +964,50 @@ func exprStr(e ast.Expr) string {
 	case *ast.SliceExpr:
 		return fmt.Sprintf("%s[%s:%s]", exprStr(n.Object), exprStr(n.Start), exprStr(n.End))
 	case *ast.CastExpr:
+		if n.Origin == ast.CastExprOriginAsSyntax {
+			return fmt.Sprintf("%s as %s", exprStr(n.Operand), typeStr(n.Target))
+		}
 		if n.Origin == ast.CastExprOriginPostfixShorthand && !n.LegacySyntax {
 			if named, ok := n.Target.(*ast.NamedType); ok {
 				return fmt.Sprintf("%s.%s()", exprStr(n.Operand), named.Name)
 			}
 		}
 		return fmt.Sprintf("%s.cast[%s]", exprStr(n.Operand), typeStr(n.Target))
+	case *ast.CascadeExpr:
+		return fmt.Sprintf("cascade %s => %s", exprStr(n.Target), exprStr(n.Value))
+	case *ast.LambdaExpr:
+		keyword := n.Keyword
+		if keyword == "" {
+			keyword = "lambda"
+		}
+		params := make([]string, 0, len(n.Params))
+		if n.UsesShorthandParams {
+			for _, param := range n.Params {
+				params = append(params, param.Name)
+			}
+		} else {
+			for _, param := range n.Params {
+				part := ""
+				if param.Mutable {
+					part += "mutable "
+				}
+				part += param.Name + ": " + typeStr(param.Type)
+				params = append(params, part)
+			}
+		}
+		line := keyword + " "
+		if n.UsesShorthandParams {
+			line += strings.Join(params, ", ")
+		} else {
+			line += "(" + strings.Join(params, ", ") + ")"
+		}
+		if n.ReturnType != nil {
+			line += " -> " + typeStr(n.ReturnType)
+		}
+		if n.BodyExpr != nil {
+			return line + ": " + exprStr(n.BodyExpr)
+		}
+		return line + ": ..."
 	case *ast.SizeofExpr:
 		return fmt.Sprintf("sizeof(%s)", typeStr(n.Type))
 	case *ast.TernaryExpr:
