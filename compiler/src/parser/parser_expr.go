@@ -1256,6 +1256,16 @@ func (p *Parser) parsePostfix() ast.Expr {
 	expr := p.parsePrimary()
 	for {
 		switch p.peek() {
+		case lexer.TOKEN_QUESTION:
+			if p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_DOT {
+				return expr
+			}
+			pos := p.cur().Pos
+			p.advance()
+			p.expect(lexer.TOKEN_DOT)
+			field := p.expect(lexer.TOKEN_IDENT).Text
+			expr = &ast.FieldExpr{Position: pos, Object: expr, Field: field, Safe: true}
+
 		case lexer.TOKEN_DOT:
 			pos := p.cur().Pos
 			p.advance()
@@ -1368,7 +1378,21 @@ func (p *Parser) parsePostfix() ast.Expr {
 				args, argNames, hasArgForward, argForwardPos = p.parseCallArgs()
 			}
 			p.expect(lexer.TOKEN_RPAREN)
-			expr = &ast.CallExpr{Position: pos, Func: expr, HasArgForward: hasArgForward, ArgForwardPos: argForwardPos, Args: args, ArgNames: argNames}
+			safe := false
+			callFunc := expr
+			if fieldExpr, ok := expr.(*ast.FieldExpr); ok && fieldExpr != nil && fieldExpr.Safe {
+				callFunc = &ast.FieldExpr{Position: fieldExpr.Position, Object: fieldExpr.Object, Field: fieldExpr.Field}
+				safe = true
+			}
+			expr = &ast.CallExpr{
+				Position:      pos,
+				Func:          callFunc,
+				HasArgForward: hasArgForward,
+				ArgForwardPos: argForwardPos,
+				Args:          args,
+				ArgNames:      argNames,
+				Safe:          safe,
+			}
 			expr = p.attachOptionalCallWithClause(expr)
 
 		case lexer.TOKEN_IF:

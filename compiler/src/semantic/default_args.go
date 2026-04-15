@@ -52,7 +52,7 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 		if n.Object != nil && object == nil {
 			return nil
 		}
-		return &ast.FieldExpr{Position: n.Position, Object: object, Field: n.Field}
+		return &ast.FieldExpr{Position: n.Position, Object: object, Field: n.Field, Safe: n.Safe}
 	case *ast.ShorthandMemberExpr:
 		return &ast.ShorthandMemberExpr{Position: n.Position, Parts: append([]string(nil), n.Parts...)}
 	case *ast.IndexExpr:
@@ -94,7 +94,18 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 		if len(n.WithItemOrder) != 0 && withItems == nil {
 			return nil
 		}
-		return &ast.CallExpr{Position: n.Position, Func: fn, HasArgForward: n.HasArgForward, ArgForwardPos: n.ArgForwardPos, Args: args, ArgNames: append([]string(nil), n.ArgNames...), WithArgs: withArgs, WithBundles: withBundles, WithItemOrder: withItems}
+		return &ast.CallExpr{
+			Position:      n.Position,
+			Func:          fn,
+			HasArgForward: n.HasArgForward,
+			ArgForwardPos: n.ArgForwardPos,
+			Args:          args,
+			ArgNames:      append([]string(nil), n.ArgNames...),
+			Safe:          n.Safe,
+			WithArgs:      withArgs,
+			WithBundles:   withBundles,
+			WithItemOrder: withItems,
+		}
 	case *ast.CastExpr:
 		operand := cloneDefaultArgExpr(n.Operand)
 		if n.Operand != nil && operand == nil {

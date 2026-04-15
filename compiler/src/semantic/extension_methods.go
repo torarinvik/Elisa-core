@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"fmt"
+	"strings"
 
 	"llcontext/src/ast"
 )
@@ -80,4 +81,47 @@ func (a *Analyzer) lookupVisibleExtensionMethod(name string, actualReceiver Type
 		}
 	}
 	return nil, false, nil
+}
+
+func (a *Analyzer) lookupVisibleUFCSFunction(name string, actualReceiver Type) (*Symbol, bool, error) {
+	if a == nil || name == "" || actualReceiver == nil || a.globalScope == nil {
+		return nil, false, nil
+	}
+	var (
+		matched        *Symbol
+		matchedName    string
+		ambiguousNames []string
+	)
+	for _, candidate := range a.visibleNameCandidates(name) {
+		sym, ok := a.globalScope.Lookup(candidate)
+		if !ok || sym == nil {
+			continue
+		}
+		if sym.Kind != SymbolFunc && sym.Kind != SymbolExternFunc {
+			continue
+		}
+		fnType, ok := sym.Type.(*FuncType)
+		if !ok || fnType == nil || len(fnType.Params) == 0 {
+			continue
+		}
+		if !AssignableTo(fnType.Params[0], actualReceiver) {
+			continue
+		}
+		if matched != nil {
+			if len(ambiguousNames) == 0 {
+				ambiguousNames = append(ambiguousNames, matchedName)
+			}
+			ambiguousNames = append(ambiguousNames, candidate)
+			continue
+		}
+		matched = sym
+		matchedName = candidate
+	}
+	if len(ambiguousNames) != 0 {
+		return nil, false, fmt.Errorf("UFCS call %q on %s is ambiguous: %s", name, actualReceiver.String(), strings.Join(ambiguousNames, ", "))
+	}
+	if matched == nil {
+		return nil, false, nil
+	}
+	return matched, true, nil
 }

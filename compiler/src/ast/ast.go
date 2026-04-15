@@ -600,6 +600,7 @@ type CallExpr struct {
 	ArgForwardPos lexer.Pos
 	Args          []Expr
 	ArgNames      []string
+	Safe          bool
 	WithArgs      []WithArg
 	WithBundles   []WithBundleUse
 	WithItemOrder []WithItem
@@ -615,6 +616,7 @@ type FieldExpr struct {
 	Position lexer.Pos
 	Object   Expr
 	Field    string
+	Safe     bool
 }
 
 type ShorthandMemberExpr struct {

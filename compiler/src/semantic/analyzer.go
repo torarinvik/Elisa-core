@@ -79,6 +79,7 @@ type Analyzer struct {
 	exprTypes                         map[ast.Expr]Type
 	optionalBindSourceTypes           map[*ast.OptionalBindExpr]Type
 	interfaceMethodRefs               map[*ast.FieldExpr]*InterfaceMethodRef
+	safeCalls                         map[*ast.CallExpr]*SafeCallInfo
 	exprFacts                         map[ast.Expr]OptimizationFacts
 	treeConstructorCallees            map[ast.Expr]bool
 	resolvedCastHooks                 map[ast.Expr]*Symbol
@@ -272,6 +273,7 @@ func Analyze(file *ast.File) *Result {
 		exprTypes:                         make(map[ast.Expr]Type, exprCapacity),
 		optionalBindSourceTypes:           make(map[*ast.OptionalBindExpr]Type, exprCapacity/16+8),
 		interfaceMethodRefs:               make(map[*ast.FieldExpr]*InterfaceMethodRef, exprCapacity/16+8),
+		safeCalls:                         make(map[*ast.CallExpr]*SafeCallInfo, exprCapacity/32+8),
 		exprFacts:                         make(map[ast.Expr]OptimizationFacts, exprFactsCapacity),
 		treeConstructorCallees:            make(map[ast.Expr]bool, exprCapacity/16+8),
 		resolvedCastHooks:                 make(map[ast.Expr]*Symbol, resolvedCastHookCapacity),
@@ -322,6 +324,7 @@ func Analyze(file *ast.File) *Result {
 		ExprTypes:               a.exprTypes,
 		OptionalBindSourceTypes: a.optionalBindSourceTypes,
 		InterfaceMethodRefs:     a.interfaceMethodRefs,
+		SafeCalls:               a.safeCalls,
 		ExprFacts:               a.exprFacts,
 		CastHooks:               a.resolvedCastHooks,
 		DenseNodeKeys:           a.exprDenseNodeKeys,

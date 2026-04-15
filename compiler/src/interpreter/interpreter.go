@@ -681,6 +681,20 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 	case *ast.CallExpr:
 		return i.evalCallExpr(frame, n)
 	case *ast.FieldExpr:
+		if n.Safe {
+			obj, err := i.evalExpr(frame, n.Object)
+			if err != nil {
+				return VoidValue(), err
+			}
+			if obj.IsNull() {
+				return NullValue(), nil
+			}
+			value, err := interpreterFieldValue(obj, n.Field)
+			if err != nil {
+				return VoidValue(), err
+			}
+			return value.Clone(), nil
+		}
 		obj, err := i.evalExpr(frame, n.Object)
 		if err != nil {
 			return VoidValue(), err
@@ -991,23 +1005,73 @@ func interpreterDerivedStateSelfPath(expr ast.Expr) ([]string, bool) {
 }
 
 func (i *Interpreter) evalCallExpr(frame *frame, expr *ast.CallExpr) (Value, error) {
+	if expr != nil && expr.Safe {
+		return i.evalSafeCallExpr(frame, expr)
+	}
 	calleeValue, err := i.evalExpr(frame, expr.Func)
 	if err != nil {
 		return VoidValue(), err
 	}
+	return i.invokeCallValue(frame, expr, calleeValue, expr.LoweredArgs(), false)
+}
+
+func (i *Interpreter) evalSafeCallExpr(frame *frame, expr *ast.CallExpr) (Value, error) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Object == nil {
+		return VoidValue(), fmt.Errorf("optional call requires member-call syntax")
+	}
+	receiverValue, err := i.evalExpr(frame, fieldExpr.Object)
+	if err != nil {
+		return VoidValue(), err
+	}
+	if receiverValue.IsNull() {
+		if i.safeCallReturnsVoid(expr) {
+			return VoidValue(), nil
+		}
+		return NullValue(), nil
+	}
+	if i != nil && i.result != nil && i.result.SafeCalls != nil {
+		if info, ok := i.result.SafeCalls[expr]; ok && info != nil && info.ResolvedFuncName != "" {
+			args := make([]Value, 0, len(info.TailArgs)+1)
+			args = append(args, receiverValue.Clone())
+			for _, argExpr := range info.TailArgs {
+				value, err := i.evalExpr(frame, argExpr)
+				if err != nil {
+					return VoidValue(), err
+				}
+				args = append(args, value)
+			}
+			return i.callFunctionByName(info.ResolvedFuncName, args)
+		}
+	}
+	calleeValue, err := interpreterFieldValue(receiverValue, fieldExpr.Field)
+	if err != nil {
+		return VoidValue(), err
+	}
+	return i.invokeCallValue(frame, expr, calleeValue, expr.LoweredArgs(), false)
+}
+
+func (i *Interpreter) invokeCallValue(frame *frame, expr *ast.CallExpr, calleeValue Value, argExprs []ast.Expr, prependNamed bool) (Value, error) {
 	if calleeValue.kind != valueFunction {
 		return VoidValue(), fmt.Errorf("cannot call non-function value %s", calleeValue.String())
 	}
 	name := calleeValue.funcName
-	loweredArgs := expr.LoweredArgs()
-	positional := make([]Value, 0, len(loweredArgs))
+	positional := make([]Value, 0, len(argExprs))
 	named := map[string]Value{}
-	for index, argExpr := range loweredArgs {
+	for index, argExpr := range argExprs {
 		value, err := i.evalExpr(frame, argExpr)
 		if err != nil {
 			return VoidValue(), err
 		}
-		if name := expr.ArgName(index); name != "" {
+		if !prependNamed {
+			if name := expr.ArgName(index); name != "" {
+				named[name] = value
+			} else {
+				positional = append(positional, value)
+			}
+			continue
+		}
+		if name := expr.ArgName(index + 1); name != "" {
 			named[name] = value
 		} else {
 			positional = append(positional, value)
@@ -1037,6 +1101,24 @@ func (i *Interpreter) evalCallExpr(frame *frame, expr *ast.CallExpr) (Value, err
 		return i.constructStruct(decl, positional, nil)
 	}
 	return VoidValue(), fmt.Errorf("unknown callable %q", name)
+}
+
+func interpreterFieldValue(obj Value, field string) (Value, error) {
+	if obj.kind != valueStruct || obj.structVal == nil {
+		return VoidValue(), fmt.Errorf("field access requires a struct, got %s", obj.String())
+	}
+	value, ok := obj.structVal.Fields[field]
+	if !ok {
+		return VoidValue(), fmt.Errorf("struct %s has no field %q", obj.structVal.Name, field)
+	}
+	return value, nil
+}
+
+func (i *Interpreter) safeCallReturnsVoid(expr *ast.CallExpr) bool {
+	if i == nil || i.result == nil || i.result.ExprTypes == nil || expr == nil {
+		return false
+	}
+	return semantic.SameType(i.result.ExprTypes[expr], i.result.NamedTypes["void"])
 }
 
 func callableName(expr ast.Expr) (string, error) {

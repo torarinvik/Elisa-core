@@ -542,6 +542,9 @@ func (a *Analyzer) fieldExprProvidesWritableRef(expr *ast.FieldExpr) bool {
 	if expr == nil {
 		return false
 	}
+	if expr.Safe {
+		return false
+	}
 	field, ok := a.lookupField(a.analyzeExpr(expr.Object), expr.Field, expr.Pos())
 	if !ok {
 		return false
@@ -576,6 +579,9 @@ func (a *Analyzer) exprCanYieldWritableRef(expr ast.Expr) bool {
 		}
 		return sym.Mutable
 	case *ast.FieldExpr:
+		if n.Safe {
+			return false
+		}
 		field, ok := a.lookupField(a.analyzeExpr(n.Object), n.Field, n.Pos())
 		if !ok || !field.Mutable {
 			return false
@@ -4112,6 +4118,9 @@ func (a *Analyzer) specializeCallbackCarryingTypeFromExpr(expected Type, actualE
 }
 
 func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
+	if expr != nil && expr.Safe {
+		return a.analyzeSafeCallExpr(expr)
+	}
 	switch a.rewriteBuiltinDictMethodCall(expr) {
 	case builtinDictMethodRewriteApplied:
 		return a.analyzeCallExpr(expr)
@@ -4239,11 +4248,18 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 		}
 		return invalidType
 	}
-	explicitParamCount := funcTypeExplicitParamCount(ft)
 	orderedArgs, orderedOK := a.resolveFunctionCallArgs(expr, ft)
 	if !orderedOK {
 		return invalidType
 	}
+	return a.analyzeResolvedCallExpr(expr, ft, orderedArgs)
+}
+
+func (a *Analyzer) analyzeResolvedCallExpr(expr *ast.CallExpr, ft *FuncType, orderedArgs []ast.Expr) Type {
+	if expr == nil || ft == nil {
+		return invalidType
+	}
+	explicitParamCount := funcTypeExplicitParamCount(ft)
 	if !ft.Variadic && len(orderedArgs) != explicitParamCount {
 		a.errorf(expr.Pos(), "function %q expects %d arguments, got %d", ft.Name, explicitParamCount, len(orderedArgs))
 	}
@@ -4411,6 +4427,149 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	}
 	a.bindFreshReturnShapes(appliedType, shapeBindings)
 	return a.substituteType(appliedType.Return, bindings, shapeBindings, regionBindings, permissionBindings)
+}
+
+func (a *Analyzer) safeChainReceiverType(receiverType Type) (Type, bool) {
+	if receiverType == nil {
+		return nil, false
+	}
+	if opt, ok := receiverType.(*OptionalType); ok && opt != nil && opt.Value != nil {
+		return opt.Value, true
+	}
+	if ref, ok := receiverType.(*RefType); ok && ref != nil && ref.State != RefStateNonNull {
+		return cloneRefTypeWithState(ref, RefStateNonNull), true
+	}
+	return nil, false
+}
+
+func optionalizeSafeChainResult(result Type) Type {
+	if result == nil || IsInvalidType(result) || IsNeverType(result) {
+		return result
+	}
+	return &OptionalType{Value: result}
+}
+
+func (a *Analyzer) analyzeSafeFieldExpr(expr *ast.FieldExpr) Type {
+	if a == nil || expr == nil || expr.Object == nil || expr.Field == "" {
+		return invalidType
+	}
+	receiverType := a.analyzeExpr(expr.Object)
+	baseReceiverType, ok := a.safeChainReceiverType(receiverType)
+	if !ok {
+		a.errorf(expr.Pos(), "optional chaining requires an optional or nullable reference receiver, got %s", receiverType.String())
+		return invalidType
+	}
+	if field, ok := dstrSyntheticField(baseReceiverType, expr.Field); ok {
+		field.Type = a.specializeProjectedFunctionFieldType(expr, field.Type)
+		return optionalizeSafeChainResult(field.Type)
+	}
+	field, ok := a.lookupField(baseReceiverType, expr.Field, expr.Pos())
+	if !ok {
+		return invalidType
+	}
+	field.Type = a.specializeProjectedFunctionFieldType(expr, field.Type)
+	return optionalizeSafeChainResult(field.Type)
+}
+
+func (a *Analyzer) analyzeSafeCallExpr(expr *ast.CallExpr) Type {
+	if a == nil || expr == nil {
+		return invalidType
+	}
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Object == nil || fieldExpr.Field == "" {
+		a.errorf(expr.Pos(), "optional call requires member-call syntax")
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return invalidType
+	}
+	receiverType := a.analyzeExpr(fieldExpr.Object)
+	baseReceiverType, ok := a.safeChainReceiverType(receiverType)
+	if !ok {
+		a.errorf(expr.Pos(), "optional chaining requires an optional or nullable reference receiver, got %s", receiverType.String())
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return invalidType
+	}
+	if field, ok := a.lookupFieldNoError(baseReceiverType, fieldExpr.Field); ok {
+		field.Type = a.specializeProjectedFunctionFieldType(fieldExpr, field.Type)
+		ft, ok := field.Type.(*FuncType)
+		if !ok {
+			a.errorf(expr.Pos(), "cannot call non-function value of type %s", field.Type.String())
+			for _, arg := range expr.Args {
+				a.analyzeExpr(arg)
+			}
+			return invalidType
+		}
+		orderedArgs, orderedOK := a.resolveFunctionCallArgs(expr, ft)
+		if !orderedOK {
+			return invalidType
+		}
+		resultType := a.analyzeResolvedCallExpr(expr, ft, orderedArgs)
+		if ft.Return == nil || isVoidType(resultType) {
+			return a.namedTypes["void"]
+		}
+		return optionalizeSafeChainResult(resultType)
+	}
+	method, methodOK, err := a.lookupVisibleExtensionMethod(fieldExpr.Field, baseReceiverType)
+	if err != nil {
+		a.errorf(expr.Pos(), "%s", err.Error())
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return invalidType
+	}
+	var resolvedSym *Symbol
+	if methodOK && method != nil {
+		resolvedSym = method.Symbol
+	} else {
+		resolvedSym, methodOK, err = a.lookupVisibleUFCSFunction(fieldExpr.Field, baseReceiverType)
+		if err != nil {
+			a.errorf(expr.Pos(), "%s", err.Error())
+			for _, arg := range expr.Args {
+				a.analyzeExpr(arg)
+			}
+			return invalidType
+		}
+		if !methodOK || resolvedSym == nil {
+			a.errorf(expr.Pos(), "optional call receiver %s has no member or UFCS function %q", receiverType.String(), fieldExpr.Field)
+			for _, arg := range expr.Args {
+				a.analyzeExpr(arg)
+			}
+			return invalidType
+		}
+	}
+	ft, ok := resolvedSym.Type.(*FuncType)
+	if !ok || ft == nil {
+		a.errorf(expr.Pos(), "cannot call non-function value of type %s", resolvedSym.Type.String())
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return invalidType
+	}
+	synthetic := &ast.CallExpr{
+		Position:      expr.Position,
+		Func:          &ast.Ident{Position: fieldExpr.Position, Name: resolvedSym.Name},
+		Args:          append([]ast.Expr{&ast.ZeroedLit{Position: fieldExpr.Object.Pos()}}, expr.Args...),
+		ArgNames:      append([]string{""}, expr.ArgNames...),
+		WithArgs:      append([]ast.WithArg(nil), expr.WithArgs...),
+		WithBundles:   append([]ast.WithBundleUse(nil), expr.WithBundles...),
+		WithItemOrder: append([]ast.WithItem(nil), expr.WithItemOrder...),
+	}
+	orderedArgs, orderedOK := a.resolveFunctionCallArgs(synthetic, ft)
+	if !orderedOK {
+		return invalidType
+	}
+	resultType := a.analyzeResolvedCallExpr(synthetic, ft, orderedArgs)
+	a.safeCalls[expr] = &SafeCallInfo{
+		ResolvedFuncName: resolvedSym.Name,
+		TailArgs:         append([]ast.Expr(nil), orderedArgs[1:]...),
+	}
+	if ft.Return == nil || isVoidType(resultType) {
+		return a.namedTypes["void"]
+	}
+	return optionalizeSafeChainResult(resultType)
 }
 
 func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool) {
@@ -4953,6 +5112,14 @@ func astTypeExprForBuiltinMethodRewrite(pos lexer.Pos, typ Type) ast.TypeExpr {
 	switch t := StripAggregateStateType(typ).(type) {
 	case *BuiltinType:
 		return &ast.NamedType{Position: pos, Name: t.Name}
+	case *OptionalType:
+		return &ast.OptionalTypeExpr{Position: pos, Value: astTypeExprForBuiltinMethodRewrite(pos, t.Value)}
+	case *RefType:
+		elem := astTypeExprForBuiltinMethodRewrite(pos, t.Elem)
+		if t.Mutable {
+			elem = &ast.MutableType{Position: pos, Elem: elem}
+		}
+		return refToTypeExprWithStorage(elem, t.State != RefStateNonNull, ast.RefStorage(t.Storage))
 	case *DStrType:
 		if isWildcardShape(t.Shape) {
 			return &ast.BuiltinTypeExpr{Position: pos, Name: "dstr"}
@@ -5429,7 +5596,29 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 		return extensionMethodCallRewriteInvalid
 	}
 	if !ok || method == nil || method.Symbol == nil {
-		return extensionMethodCallRewriteNone
+		ufcsSym, ufcsOK, ufcsErr := a.lookupVisibleUFCSFunction(fieldExpr.Field, receiverType)
+		if ufcsErr != nil {
+			a.errorf(expr.Pos(), "%s", ufcsErr.Error())
+			for _, arg := range expr.Args {
+				a.analyzeExpr(arg)
+			}
+			return extensionMethodCallRewriteInvalid
+		}
+		if !ufcsOK || ufcsSym == nil {
+			return extensionMethodCallRewriteNone
+		}
+		prependedArgs := make([]ast.Expr, 0, len(expr.Args)+1)
+		prependedArgs = append(prependedArgs, fieldExpr.Object)
+		prependedArgs = append(prependedArgs, expr.Args...)
+		expr.Args = prependedArgs
+		if len(expr.ArgNames) != 0 {
+			prependedNames := make([]string, 0, len(expr.ArgNames)+1)
+			prependedNames = append(prependedNames, "")
+			prependedNames = append(prependedNames, expr.ArgNames...)
+			expr.ArgNames = prependedNames
+		}
+		expr.Func = &ast.Ident{Position: fieldExpr.Position, Name: ufcsSym.Name}
+		return extensionMethodCallRewriteApplied
 	}
 	prependedArgs := make([]ast.Expr, 0, len(expr.Args)+1)
 	prependedArgs = append(prependedArgs, fieldExpr.Object)
@@ -6705,6 +6894,9 @@ func (a *Analyzer) bindFreshShape(shape Shape, origin string, bindings map[strin
 }
 
 func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
+	if expr != nil && expr.Safe {
+		return a.analyzeSafeFieldExpr(expr)
+	}
 	if viewType, ok := a.lookupRefinedPackedVariantView(expr.Object); ok {
 		if field, ok := viewType.Field(expr.Field); ok {
 			field.Type = a.specializeProjectedFunctionFieldType(expr, field.Type)
@@ -8212,6 +8404,10 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 		}
 		return sym.Type
 	case *ast.FieldExpr:
+		if n.Safe {
+			a.errorf(n.Pos(), "optional chaining cannot be used as an assignment target")
+			return invalidType
+		}
 		field, ok := a.lookupField(a.analyzeExpr(n.Object), n.Field, n.Pos())
 		if !ok {
 			return invalidType
@@ -8391,6 +8587,9 @@ func (a *Analyzer) refExprAllowsMutation(expr ast.Expr, ref *RefType) bool {
 		}
 		return sym.Mutable
 	case *ast.FieldExpr:
+		if n.Safe {
+			return false
+		}
 		field, ok := a.lookupField(a.analyzeExpr(n.Object), n.Field, n.Pos())
 		if !ok {
 			return false
@@ -8431,6 +8630,10 @@ func (a *Analyzer) asRefTargetType(expr ast.Expr, asKind string) Type {
 		}
 		return a.refTypeWithAsKind(sym.Type, asKind)
 	case *ast.FieldExpr:
+		if n.Safe {
+			a.errorf(n.Pos(), "optional chaining cannot be used as a reference target")
+			return invalidType
+		}
 		field, ok := a.lookupField(a.analyzeExpr(n.Object), n.Field, n.Pos())
 		if !ok {
 			return invalidType

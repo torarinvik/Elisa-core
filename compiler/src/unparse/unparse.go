@@ -1056,6 +1056,11 @@ func formatExpr(expr ast.Expr) string {
 		return "move " + formatExpr(n.Operand)
 	case *ast.CallExpr:
 		funcText := formatExpr(n.Func)
+		if n.Safe {
+			if fieldExpr, ok := n.Func.(*ast.FieldExpr); ok && fieldExpr != nil {
+				funcText = formatExpr(fieldExpr.Object) + "?." + fieldExpr.Field
+			}
+		}
 		partCapacity := len(n.Args)
 		if n.HasArgForward {
 			partCapacity++
@@ -1088,6 +1093,9 @@ func formatExpr(expr ast.Expr) string {
 		}
 		return line
 	case *ast.FieldExpr:
+		if n.Safe {
+			return formatExpr(n.Object) + "?." + n.Field
+		}
 		return formatExpr(n.Object) + "." + n.Field
 	case *ast.ShorthandMemberExpr:
 		return "." + strings.Join(n.Parts, ".")

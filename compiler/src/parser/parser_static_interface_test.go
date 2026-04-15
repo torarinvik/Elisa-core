@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"llcontext/src/ast"
+	"llcontext/src/unparse"
 )
 
 func TestParseStaticInterfaceImplAndBoundedGeneric(t *testing.T) {
@@ -184,6 +185,51 @@ def read(tok: Tok) -> i64:
 	}
 	if len(call.Args) != 0 {
 		t.Fatalf("expected zero explicit call args, got %d", len(call.Args))
+	}
+}
+
+func TestParseUFCSAndOptionalChaining(t *testing.T) {
+	file, errs := parseSourceFile(t, `
+struct Box:
+    value: int
+
+def read(maybe_box: Box?, maybe_ref: any Box&?) -> int:
+    _ = maybe_box?.value
+    _ = maybe_box?.scale(2)
+    return maybe_ref?.value else 0
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	funcDecl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[1])
+	}
+	firstDiscard, ok := funcDecl.Body[0].(*ast.DiscardStmt)
+	if !ok {
+		t.Fatalf("expected first discard stmt, got %T", funcDecl.Body[0])
+	}
+	safeField, ok := firstDiscard.Value.(*ast.FieldExpr)
+	if !ok || !safeField.Safe {
+		t.Fatalf("expected safe field expr, got %T %#v", firstDiscard.Value, firstDiscard.Value)
+	}
+	secondDiscard, ok := funcDecl.Body[1].(*ast.DiscardStmt)
+	if !ok {
+		t.Fatalf("expected second discard stmt, got %T", funcDecl.Body[1])
+	}
+	safeCall, ok := secondDiscard.Value.(*ast.CallExpr)
+	if !ok || !safeCall.Safe {
+		t.Fatalf("expected safe call expr, got %T %#v", secondDiscard.Value, secondDiscard.Value)
+	}
+	callee, ok := safeCall.Func.(*ast.FieldExpr)
+	if !ok || callee.Safe || callee.Field != "scale" {
+		t.Fatalf("expected safe call callee field scale, got %T %#v", safeCall.Func, safeCall.Func)
+	}
+	if got := unparse.FormatExpr(safeField); got != "maybe_box?.value" {
+		t.Fatalf("expected safe field to unparse canonically, got %q", got)
+	}
+	if got := unparse.FormatExpr(safeCall); got != "maybe_box?.scale(2)" {
+		t.Fatalf("expected safe call to unparse canonically, got %q", got)
 	}
 }
 

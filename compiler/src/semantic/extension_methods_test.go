@@ -174,3 +174,96 @@ def read(box: Box) -> i64:
 		t.Fatalf("expected reordered scale arg 3, got %T %#v", call.LoweredArgs()[2], call.LoweredArgs()[2])
 	}
 }
+
+func TestAnalyzeUFCSFreeFunctionRewrite(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ufcs_free_function.llcontext", `
+struct Box:
+    value: i64
+
+def scale(box: Box, delta: i64) -> i64:
+    return box.value + delta
+
+def read(box: Box) -> i64:
+    return box.scale(5)
+`)
+
+	funcSym, ok := result.GlobalScope.Lookup("read")
+	if !ok {
+		t.Fatal("expected read symbol")
+	}
+	decl := funcSym.Node.(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	call, ok := ret.Value.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected rewritten call, got %T", ret.Value)
+	}
+	callee, ok := call.Func.(*ast.Ident)
+	if !ok || callee.Name != "scale" {
+		t.Fatalf("expected UFCS callee scale, got %T %#v", call.Func, call.Func)
+	}
+	if len(call.LoweredArgs()) != 2 {
+		t.Fatalf("expected receiver plus one arg, got %d", len(call.LoweredArgs()))
+	}
+	if receiver, ok := call.LoweredArgs()[0].(*ast.Ident); !ok || receiver.Name != "box" {
+		t.Fatalf("expected inserted receiver arg box, got %T %#v", call.LoweredArgs()[0], call.LoweredArgs()[0])
+	}
+}
+
+func TestAnalyzeUFCSAmbiguityReportsCandidates(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ufcs_ambiguous.llcontext", `
+namespace left:
+    struct Box:
+        value: i64
+
+    def score(box: Box) -> i64:
+        return box.value
+
+namespace right:
+    def score(box: left.Box) -> i64:
+        return box.value + 1
+
+using left
+using right
+
+def read(box: Box) -> i64:
+    return box.score()
+`)
+	if len(result.Errors()) == 0 {
+		t.Fatal("expected UFCS ambiguity error")
+	}
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `UFCS call "score"`) || !strings.Contains(all, "left.score") || !strings.Contains(all, "right.score") {
+		t.Fatalf("expected UFCS ambiguity diagnostic with candidates, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeOptionalChainingOnOptionalAndNullableReceivers(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "optional_chaining.llcontext", `
+struct Box:
+    value: i64
+
+def score(box: Box, delta: i64 = 1) -> i64:
+    return box.value + delta
+
+def score_ref(box: any Box&, delta: i64 = 1) -> i64:
+    return box.value + delta
+
+def read(maybe_box: Box?, maybe_ref: any Box&?) -> void:
+    _ = maybe_box?.value
+    _ = maybe_box?.score()
+    _ = maybe_ref?.score_ref(2)
+`)
+	fn := result.File.Decls[3].(*ast.FuncDecl)
+	first := fn.Body[0].(*ast.DiscardStmt).Value
+	second := fn.Body[1].(*ast.DiscardStmt).Value
+	third := fn.Body[2].(*ast.DiscardStmt).Value
+	if got := result.ExprTypes[first].String(); got != "i64?" {
+		t.Fatalf("expected optional safe-field type i64?, got %s", got)
+	}
+	if got := result.ExprTypes[second].String(); got != "i64?" {
+		t.Fatalf("expected optional safe-call type i64?, got %s", got)
+	}
+	if got := result.ExprTypes[third].String(); got != "i64?" {
+		t.Fatalf("expected nullable-ref safe-call type i64?, got %s", got)
+	}
+}

@@ -38,6 +38,7 @@ type Result struct {
 	ExprTypes               map[ast.Expr]Type
 	OptionalBindSourceTypes map[*ast.OptionalBindExpr]Type
 	InterfaceMethodRefs     map[*ast.FieldExpr]*InterfaceMethodRef
+	SafeCalls               map[*ast.CallExpr]*SafeCallInfo
 	ExprFacts               map[ast.Expr]OptimizationFacts
 	CastHooks               map[ast.Expr]*Symbol
 	DenseNodeKeys           map[ast.Expr]DenseNodeKeyInfo
@@ -52,6 +53,11 @@ type Result struct {
 	ExportedFuncs           []*ExportedFunc
 	ExportedGlobals         []*ExportedGlobal
 	Diagnostics             []Diagnostic
+}
+
+type SafeCallInfo struct {
+	ResolvedFuncName string
+	TailArgs         []ast.Expr
 }
 
 type ParallelForInfo struct {
