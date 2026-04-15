@@ -174,6 +174,7 @@ func (c *analyzerASTCensus) countExpr(expr ast.Expr) {
 	case *ast.IndexExpr:
 		c.countExpr(n.Object)
 		c.countExpr(n.Index)
+		c.countExpr(n.Fallback)
 	case *ast.SliceExpr:
 		c.countExpr(n.Object)
 		c.countExpr(n.Start)

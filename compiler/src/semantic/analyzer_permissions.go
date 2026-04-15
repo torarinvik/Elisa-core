@@ -608,6 +608,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 	case *ast.IndexExpr:
 		c.collectExpr(n.Object)
 		c.collectExpr(n.Index)
+		c.collectExpr(n.Fallback)
 	case *ast.SliceExpr:
 		c.collectExpr(n.Object)
 		c.collectExpr(n.Start)
@@ -849,6 +850,7 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 	case *ast.IndexExpr:
 		a.validatePermissionExpr(n.Object, granted)
 		a.validatePermissionExpr(n.Index, granted)
+		a.validatePermissionExpr(n.Fallback, granted)
 	case *ast.SliceExpr:
 		a.validatePermissionExpr(n.Object, granted)
 		a.validatePermissionExpr(n.Start, granted)

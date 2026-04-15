@@ -300,6 +300,9 @@ func flowLocationForExpr(expr ast.Expr) string {
 		}
 		return base + "." + n.Field
 	case *ast.IndexExpr:
+		if n.Fallback != nil {
+			return ""
+		}
 		base := flowLocationForExpr(n.Object)
 		if base == "" {
 			return ""

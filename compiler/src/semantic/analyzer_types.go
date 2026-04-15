@@ -1329,7 +1329,14 @@ func (a *Analyzer) exprSummary(expr ast.Expr) string {
 		if object == "?" || index == "?" {
 			return "?"
 		}
-		return fmt.Sprintf("%s[%s]", object, index)
+		if n.Fallback == nil {
+			return fmt.Sprintf("%s[%s]", object, index)
+		}
+		fallback := a.exprSummary(n.Fallback)
+		if fallback == "?" {
+			return "?"
+		}
+		return fmt.Sprintf("%s[%s] else %s", object, index, fallback)
 	case *ast.BinaryExpr:
 		return fmt.Sprintf("%s%s%s", a.exprSummary(n.Left), lexer.TokenName(n.Op), a.exprSummary(n.Right))
 	case *ast.ParenExpr:

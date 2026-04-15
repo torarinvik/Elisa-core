@@ -865,6 +865,7 @@ func (a *Analyzer) validateDeferStmtBodyExpr(expr ast.Expr) {
 	case *ast.IndexExpr:
 		a.validateDeferStmtBodyExpr(n.Object)
 		a.validateDeferStmtBodyExpr(n.Index)
+		a.validateDeferStmtBodyExpr(n.Fallback)
 	case *ast.SliceExpr:
 		a.validateDeferStmtBodyExpr(n.Object)
 		a.validateDeferStmtBodyExpr(n.Start)
@@ -1729,6 +1730,9 @@ func (a *Analyzer) valueHasExactPackedStoreIndexRoot(expr ast.Expr, enumType *En
 		}
 		return false
 	case *ast.IndexExpr:
+		if n.Fallback != nil {
+			return false
+		}
 		return a.exprIsExactPackedStoreRoot(n.Object, enumType)
 	default:
 		return false
@@ -2714,6 +2718,7 @@ func (c *deferCaptureCollector) collectExpr(expr ast.Expr, locals map[string]boo
 	case *ast.IndexExpr:
 		c.collectExpr(n.Object, locals)
 		c.collectExpr(n.Index, locals)
+		c.collectExpr(n.Fallback, locals)
 	case *ast.SliceExpr:
 		c.collectExpr(n.Object, locals)
 		c.collectExpr(n.Start, locals)
@@ -2840,6 +2845,7 @@ func (c *parallelForCaptureCollector) collectExpr(expr ast.Expr, locals map[stri
 	case *ast.IndexExpr:
 		c.collectExpr(n.Object, locals)
 		c.collectExpr(n.Index, locals)
+		c.collectExpr(n.Fallback, locals)
 	case *ast.SliceExpr:
 		c.collectExpr(n.Object, locals)
 		c.collectExpr(n.Start, locals)
@@ -5494,7 +5500,7 @@ func exprReferencesVariantFields(expr ast.Expr, name string) bool {
 			}
 		}
 	case *ast.IndexExpr:
-		return exprReferencesVariantFields(n.Object, name) || exprReferencesVariantFields(n.Index, name)
+		return exprReferencesVariantFields(n.Object, name) || exprReferencesVariantFields(n.Index, name) || exprReferencesVariantFields(n.Fallback, name)
 	case *ast.SliceExpr:
 		return exprReferencesVariantFields(n.Object, name) || exprReferencesVariantFields(n.Start, name) || exprReferencesVariantFields(n.End, name)
 	case *ast.ListLitExpr:
@@ -10134,6 +10140,9 @@ func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRef
 		}
 		return projectBorrowedOwnerRefFieldState(state, n.Field)
 	case *ast.IndexExpr:
+		if n.Fallback != nil {
+			return a.borrowedOwnerRefStateForRecoveredExpr(&ast.IndexExpr{Position: n.Position, Object: n.Object, Index: n.Index}, n.Fallback)
+		}
 		state, ok := a.borrowedOwnerRefStateForExpr(n.Object)
 		if !ok {
 			return borrowedOwnerRefState{}, false
@@ -10253,6 +10262,9 @@ func (a *Analyzer) lookupBorrowedOwnerRefTargetPath(expr ast.Expr) (*Symbol, []b
 		}
 		return root, append(steps, borrowReturnAnnotationStep{Field: n.Field}), true
 	case *ast.IndexExpr:
+		if n.Fallback != nil {
+			return nil, nil, false
+		}
 		root, steps, ok := a.lookupBorrowedOwnerRefTargetPath(n.Object)
 		if !ok {
 			return nil, nil, false
@@ -11900,6 +11912,9 @@ func (a *Analyzer) lookupAffineValueKey(expr ast.Expr) (affineValueKey, bool) {
 		}
 		return base, true
 	case *ast.IndexExpr:
+		if n.Fallback != nil {
+			return affineValueKey{}, false
+		}
 		base, ok := a.lookupAffineValueKey(n.Object)
 		if !ok {
 			return affineValueKey{}, false

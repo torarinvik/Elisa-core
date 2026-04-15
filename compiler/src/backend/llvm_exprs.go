@@ -6760,6 +6760,9 @@ func packedVariantViewName(expr ast.Expr) (string, bool) {
 		}
 		return base + "." + n.Field, true
 	case *ast.IndexExpr:
+		if n.Fallback != nil {
+			return "", false
+		}
 		base, ok := packedVariantViewName(n.Object)
 		if !ok || base == "" {
 			return "", false
@@ -7462,6 +7465,9 @@ func (s *functionState) emitRuntimeStringLenExpr(object ast.Expr, fieldType sema
 }
 
 func (s *functionState) emitIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if expr != nil && expr.Fallback != nil {
+		return s.emitIndexFallbackExpr(expr)
+	}
 	if value, actualType, handled, err := s.emitPackedStoreIndexExpr(expr); handled {
 		return value, actualType, err
 	}
@@ -7480,6 +7486,254 @@ func (s *functionState) emitIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, sema
 	}
 	value, err := s.loadValue(ptr, elemType, "idx")
 	return value, elemType, err
+}
+
+func (s *functionState) emitIndexFallbackExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if expr == nil || expr.Fallback == nil {
+		return nil, nil, fmt.Errorf("missing safe index fallback expression")
+	}
+	resultType := s.exprType(expr)
+	if resultType == nil {
+		return nil, nil, fmt.Errorf("missing semantic type for safe index fallback result")
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	indexValue, _, err := s.emitExpr(expr.Index, usizeType)
+	if err != nil {
+		return nil, nil, err
+	}
+	countValue, loadValue, err := s.prepareSafeIndexFallback(expr, indexValue)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	condValue := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, countValue, cStringFree("safe.index.in.range"))
+	inRangeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.index.in_range"))
+	fallbackBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.index.fallback"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.index.end"))
+	C.LLVMBuildCondBr(s.builder, condValue, inRangeBB, fallbackBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, inRangeBB)
+	inRangeValue, actualType, err := loadValue()
+	if err != nil {
+		return nil, nil, err
+	}
+	if !semantic.SameType(actualType, resultType) {
+		inRangeValue, err = s.coerceValue(inRangeValue, actualType, resultType)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	inRangeEnd := C.LLVMGetInsertBlock(s.builder)
+	if C.LLVMGetBasicBlockTerminator(inRangeEnd) == nil {
+		C.LLVMBuildBr(s.builder, mergeBB)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, fallbackBB)
+	fallbackValue, _, err := s.emitExpr(expr.Fallback, resultType)
+	if err != nil {
+		return nil, nil, err
+	}
+	fallbackEnd := C.LLVMGetInsertBlock(s.builder)
+	if C.LLVMGetBasicBlockTerminator(fallbackEnd) == nil {
+		C.LLVMBuildBr(s.builder, mergeBB)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	phiType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, err
+	}
+	phi := C.LLVMBuildPhi(s.builder, phiType, cStringFree("safe.index.result"))
+	values := []C.LLVMValueRef{inRangeValue, fallbackValue}
+	blocks := []C.LLVMBasicBlockRef{inRangeEnd, fallbackEnd}
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	return phi, resultType, nil
+}
+
+func (s *functionState) prepareSafeIndexFallback(expr *ast.IndexExpr, indexValue C.LLVMValueRef) (C.LLVMValueRef, func() (C.LLVMValueRef, semantic.Type, error), error) {
+	objectType := s.exprType(expr.Object)
+	if objectType == nil {
+		return nil, nil, fmt.Errorf("missing semantic type for safe index operand")
+	}
+	if storeType, ok := packedStoreOperandType(objectType); ok {
+		storeValue, _, err := s.emitPackedStoreValueFromExpr(expr.Object)
+		if err != nil {
+			return nil, nil, err
+		}
+		countValue, err := s.emitPackedStoreCountValue(storeValue, storeType, "safe.index.count")
+		if err != nil {
+			return nil, nil, err
+		}
+		ops := &packedStoreOps{s: s, storeValue: storeValue, storeType: storeType}
+		return countValue, func() (C.LLVMValueRef, semantic.Type, error) {
+			return ops.storeValueAt(indexValue, "safe.index.value")
+		}, nil
+	}
+	switch t := objectType.(type) {
+	case *semantic.ArrayType:
+		arrayPtr, _, err := s.emitAddressOrTemp(expr.Object)
+		if err != nil {
+			return nil, nil, err
+		}
+		countValue, err := s.safeIndexArrayCountValue(t)
+		if err != nil {
+			return nil, nil, err
+		}
+		return countValue, func() (C.LLVMValueRef, semantic.Type, error) {
+			return s.loadArrayIndexValue(arrayPtr, t, indexValue, "safe.index.value")
+		}, nil
+	case *semantic.DArrayType:
+		containerPtr, _, err := s.emitAddressOrTemp(expr.Object)
+		if err != nil {
+			return nil, nil, err
+		}
+		countValue, err := s.emitContainerCountValue(containerPtr, t, "safe.index.count")
+		if err != nil {
+			return nil, nil, err
+		}
+		return countValue, func() (C.LLVMValueRef, semantic.Type, error) {
+			ptr, elemType, err := s.emitRuntimeIndexedAddress(containerPtr, t, t.Elem, indexValue)
+			if err != nil {
+				return nil, nil, err
+			}
+			value, err := s.loadValue(ptr, elemType, "safe.index.value")
+			return value, elemType, err
+		}, nil
+	case *semantic.ViewType:
+		containerPtr, _, err := s.emitAddressOrTemp(expr.Object)
+		if err != nil {
+			return nil, nil, err
+		}
+		countValue, err := s.emitContainerCountValue(containerPtr, t, "safe.index.count")
+		if err != nil {
+			return nil, nil, err
+		}
+		return countValue, func() (C.LLVMValueRef, semantic.Type, error) {
+			ptr, elemType, err := s.emitRuntimeIndexedAddress(containerPtr, t, t.Elem, indexValue)
+			if err != nil {
+				return nil, nil, err
+			}
+			value, err := s.loadValue(ptr, elemType, "safe.index.value")
+			return value, elemType, err
+		}, nil
+	case *semantic.DArrayViewType:
+		containerPtr, _, err := s.emitAddressOrTemp(expr.Object)
+		if err != nil {
+			return nil, nil, err
+		}
+		countValue, err := s.emitContainerCountValue(containerPtr, t, "safe.index.count")
+		if err != nil {
+			return nil, nil, err
+		}
+		return countValue, func() (C.LLVMValueRef, semantic.Type, error) {
+			ptr, elemType, err := s.emitRuntimeIndexedAddress(containerPtr, t, t.Elem, indexValue)
+			if err != nil {
+				return nil, nil, err
+			}
+			value, err := s.loadValue(ptr, elemType, "safe.index.value")
+			return value, elemType, err
+		}, nil
+	case *semantic.RefType:
+		switch elem := t.Elem.(type) {
+		case *semantic.ArrayType:
+			arrayPtr, _, err := s.emitExpr(expr.Object, objectType)
+			if err != nil {
+				return nil, nil, err
+			}
+			countValue, err := s.safeIndexArrayCountValue(elem)
+			if err != nil {
+				return nil, nil, err
+			}
+			return countValue, func() (C.LLVMValueRef, semantic.Type, error) {
+				return s.loadArrayIndexValue(arrayPtr, elem, indexValue, "safe.index.value")
+			}, nil
+		case *semantic.DArrayType:
+			containerPtr, _, err := s.emitExpr(expr.Object, objectType)
+			if err != nil {
+				return nil, nil, err
+			}
+			countValue, err := s.emitContainerCountValue(containerPtr, elem, "safe.index.count")
+			if err != nil {
+				return nil, nil, err
+			}
+			return countValue, func() (C.LLVMValueRef, semantic.Type, error) {
+				ptr, elemType, err := s.emitRuntimeIndexedAddress(containerPtr, elem, elem.Elem, indexValue)
+				if err != nil {
+					return nil, nil, err
+				}
+				value, err := s.loadValue(ptr, elemType, "safe.index.value")
+				return value, elemType, err
+			}, nil
+		case *semantic.ViewType:
+			containerPtr, _, err := s.emitExpr(expr.Object, objectType)
+			if err != nil {
+				return nil, nil, err
+			}
+			countValue, err := s.emitContainerCountValue(containerPtr, elem, "safe.index.count")
+			if err != nil {
+				return nil, nil, err
+			}
+			return countValue, func() (C.LLVMValueRef, semantic.Type, error) {
+				ptr, elemType, err := s.emitRuntimeIndexedAddress(containerPtr, elem, elem.Elem, indexValue)
+				if err != nil {
+					return nil, nil, err
+				}
+				value, err := s.loadValue(ptr, elemType, "safe.index.value")
+				return value, elemType, err
+			}, nil
+		case *semantic.DArrayViewType:
+			containerPtr, _, err := s.emitExpr(expr.Object, objectType)
+			if err != nil {
+				return nil, nil, err
+			}
+			countValue, err := s.emitContainerCountValue(containerPtr, elem, "safe.index.count")
+			if err != nil {
+				return nil, nil, err
+			}
+			return countValue, func() (C.LLVMValueRef, semantic.Type, error) {
+				ptr, elemType, err := s.emitRuntimeIndexedAddress(containerPtr, elem, elem.Elem, indexValue)
+				if err != nil {
+					return nil, nil, err
+				}
+				value, err := s.loadValue(ptr, elemType, "safe.index.value")
+				return value, elemType, err
+			}, nil
+		}
+	}
+	return nil, nil, fmt.Errorf("safe index fallback is not implemented for %s", objectType.String())
+}
+
+func (s *functionState) safeIndexArrayCountValue(arrayType *semantic.ArrayType) (C.LLVMValueRef, error) {
+	if arrayType == nil || !arrayType.HasConstSize || arrayType.ConstSize < 0 {
+		return nil, fmt.Errorf("safe index fallback requires a concrete array bound")
+	}
+	usizeLLVMType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return nil, err
+	}
+	return C.LLVMConstInt(usizeLLVMType, C.ulonglong(arrayType.ConstSize), 0), nil
+}
+
+func (s *functionState) loadArrayIndexValue(arrayPtr C.LLVMValueRef, arrayType *semantic.ArrayType, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, semantic.Type, error) {
+	arrayLLVMType, err := s.g.lowerType(arrayType)
+	if err != nil {
+		return nil, nil, err
+	}
+	zero := C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), 0, 0)
+	indices := []C.LLVMValueRef{zero, indexValue}
+	ptr := C.LLVMBuildGEP2(s.builder, arrayLLVMType, arrayPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree(name+".ptr"))
+	value, err := s.loadValue(ptr, arrayType.Elem, name)
+	return value, arrayType.Elem, err
+}
+
+func (s *functionState) emitContainerCountValue(containerPtr C.LLVMValueRef, containerType semantic.Type, name string) (C.LLVMValueRef, error) {
+	containerLLVMType, err := s.g.lowerType(containerType)
+	if err != nil {
+		return nil, err
+	}
+	countPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, containerPtr, 1, cStringFree(name+".ptr"))
+	usizeType := s.g.result.NamedTypes["usize"]
+	return s.loadValue(countPtr, usizeType, name)
 }
 
 func (s *functionState) emitChunksExactIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, bool, error) {

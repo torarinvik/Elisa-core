@@ -641,6 +641,7 @@ type IndexExpr struct {
 	Position lexer.Pos
 	Object   Expr
 	Index    Expr
+	Fallback Expr
 }
 
 type SliceExpr struct {

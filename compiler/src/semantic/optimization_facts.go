@@ -860,6 +860,9 @@ func (a *Analyzer) inferExprOptimizationFactsWithBase(expr ast.Expr, t Type, fac
 		if chunkFacts, ok := a.inferChunksExactItemOptimizationFacts(n); ok {
 			facts = overlayOptimizationFacts(facts, chunkFacts)
 		}
+		if n.Fallback != nil {
+			facts = a.inferRecoveredExprOptimizationFacts(&ast.IndexExpr{Position: n.Position, Object: n.Object, Index: n.Index}, n.Fallback, facts)
+		}
 	case *ast.FieldExpr:
 		if resolved, ok := a.resolveProjectedFieldValueExpr(n.Object, n.Field); ok {
 			if resolvedFacts, ok := a.exprFacts[resolved]; ok {
@@ -1385,6 +1388,12 @@ func (a *Analyzer) optimizationBaseForExpr(expr ast.Expr) string {
 	case *ast.AllocExpr:
 		return optimizationExprIdentity(n)
 	case *ast.IndexExpr:
+		if n.Fallback != nil {
+			if a.exprDefinitelyNever(n.Fallback) {
+				return a.optimizationBaseForExpr(&ast.IndexExpr{Position: n.Position, Object: n.Object, Index: n.Index})
+			}
+			return a.sharedOptimizationBaseForExprs(&ast.IndexExpr{Position: n.Position, Object: n.Object, Index: n.Index}, n.Fallback)
+		}
 		if resolved, ok := a.resolveIndexedValueExpr(n.Object, n.Index); ok {
 			return a.optimizationBaseForExpr(resolved)
 		}
@@ -1743,7 +1752,11 @@ func optimizationExprString(expr ast.Expr) string {
 	case *ast.FieldExpr:
 		return fmt.Sprintf("%s.%s", optimizationExprString(n.Object), n.Field)
 	case *ast.IndexExpr:
-		return fmt.Sprintf("%s[%s]", optimizationExprString(n.Object), optimizationExprString(n.Index))
+		line := fmt.Sprintf("%s[%s]", optimizationExprString(n.Object), optimizationExprString(n.Index))
+		if n.Fallback != nil {
+			line += " else " + optimizationExprString(n.Fallback)
+		}
+		return line
 	case *ast.SliceExpr:
 		return fmt.Sprintf("%s[%s:%s]", optimizationExprString(n.Object), optimizationExprString(n.Start), optimizationExprString(n.End))
 	case *ast.ListLitExpr:

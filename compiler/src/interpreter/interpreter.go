@@ -720,6 +720,15 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 		if err != nil {
 			return VoidValue(), err
 		}
+		if n.Fallback != nil {
+			inRange, err := indexInRange(obj, idx)
+			if err != nil {
+				return VoidValue(), err
+			}
+			if !inRange {
+				return i.evalExpr(frame, n.Fallback)
+			}
+		}
 		return indexValue(obj, idx)
 	case *ast.SliceExpr:
 		obj, err := i.evalExpr(frame, n.Object)
@@ -1295,6 +1304,9 @@ func (i *Interpreter) resolveSlot(frame *frame, expr ast.Expr) (*valueSlot, erro
 			},
 		}, nil
 	case *ast.IndexExpr:
+		if n.Fallback != nil {
+			return nil, fmt.Errorf("safe index fallback cannot be used as an assignment target")
+		}
 		parent, err := i.resolveSlot(frame, n.Object)
 		if err != nil {
 			return nil, err
@@ -1710,6 +1722,20 @@ func numericAsFloat(value Value) (float64, error) {
 
 func indexValue(value Value, index int64) (Value, error) {
 	return indexValueAt(value, index)
+}
+
+func indexInRange(value Value, index int64) (bool, error) {
+	if index < 0 {
+		return false, nil
+	}
+	switch value.kind {
+	case valueList:
+		return int(index) < len(value.listVal), nil
+	case valueString:
+		return int(index) < len(value.strVal), nil
+	default:
+		return false, fmt.Errorf("indexing requires list or string, got %s", value.String())
+	}
 }
 
 func indexValueAt(value Value, index int64) (Value, error) {

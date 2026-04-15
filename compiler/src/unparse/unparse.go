@@ -1128,7 +1128,11 @@ func formatExpr(expr ast.Expr) string {
 	case *ast.ShorthandMemberExpr:
 		return "." + strings.Join(n.Parts, ".")
 	case *ast.IndexExpr:
-		return formatExpr(n.Object) + "[" + formatExpr(n.Index) + "]"
+		line := formatExpr(n.Object) + "[" + formatExpr(n.Index) + "]"
+		if n.Fallback != nil {
+			line += " else " + formatExpr(n.Fallback)
+		}
+		return line
 	case *ast.SliceExpr:
 		return formatExpr(n.Object) + "[" + formatExpr(n.Start) + ":" + formatExpr(n.End) + "]"
 	case *ast.ListLitExpr:

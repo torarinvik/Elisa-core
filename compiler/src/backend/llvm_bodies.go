@@ -7109,7 +7109,7 @@ func exprReadsMatchedValueField(name string, expr ast.Expr) bool {
 		}
 		return exprReadsMatchedValueField(name, n.Object)
 	case *ast.IndexExpr:
-		return exprReadsMatchedValueField(name, n.Object) || exprReadsMatchedValueField(name, n.Index)
+		return exprReadsMatchedValueField(name, n.Object) || exprReadsMatchedValueField(name, n.Index) || exprReadsMatchedValueField(name, n.Fallback)
 	case *ast.SliceExpr:
 		return exprReadsMatchedValueField(name, n.Object) || exprReadsMatchedValueField(name, n.Start) || exprReadsMatchedValueField(name, n.End)
 	case *ast.ListLitExpr:
@@ -7354,6 +7354,9 @@ func (s *functionState) resolvePackedNodeStoreBinding(expr ast.Expr, enumType *s
 	case *ast.CanExpr:
 		return s.resolvePackedNodeStoreBinding(n.Expr, enumType)
 	case *ast.IndexExpr:
+		if n.Fallback != nil {
+			return nil, false, nil
+		}
 		return s.resolvePackedStoreBindingExpr(n.Object, enumType)
 	default:
 		return nil, false, nil

@@ -225,6 +225,7 @@ func appendBasicFlowExprInstrs(block *CFGBlock, expr ast.Expr) {
 	case *ast.IndexExpr:
 		appendBasicFlowExprInstrs(block, n.Object)
 		appendBasicFlowExprInstrs(block, n.Index)
+		appendBasicFlowExprInstrs(block, n.Fallback)
 	case *ast.SliceExpr:
 		appendBasicFlowExprInstrs(block, n.Object)
 		appendBasicFlowExprInstrs(block, n.Start)
@@ -658,6 +659,7 @@ func (a *Analyzer) appendImplicitSinkFlowInstrsForExpr(block *CFGBlock, expr ast
 	case *ast.IndexExpr:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Object)
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Index)
+		a.appendImplicitSinkFlowInstrsForExpr(block, n.Fallback)
 	case *ast.SliceExpr:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Object)
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Start)

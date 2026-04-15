@@ -1380,6 +1380,10 @@ func (p *Parser) parsePostfix() ast.Expr {
 			}
 			p.expect(lexer.TOKEN_RBRACKET)
 			expr = &ast.IndexExpr{Position: pos, Object: expr, Index: start}
+			if p.peek() == lexer.TOKEN_ELSE {
+				p.advance()
+				expr.(*ast.IndexExpr).Fallback = p.parseOr()
+			}
 
 		case lexer.TOKEN_LPAREN:
 			pos := p.cur().Pos

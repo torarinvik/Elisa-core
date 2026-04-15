@@ -956,7 +956,11 @@ func exprStr(e ast.Expr) string {
 	case *ast.FieldExpr:
 		return fmt.Sprintf("%s.%s", exprStr(n.Object), n.Field)
 	case *ast.IndexExpr:
-		return fmt.Sprintf("%s[%s]", exprStr(n.Object), exprStr(n.Index))
+		line := fmt.Sprintf("%s[%s]", exprStr(n.Object), exprStr(n.Index))
+		if n.Fallback != nil {
+			line += " else " + exprStr(n.Fallback)
+		}
+		return line
 	case *ast.SliceExpr:
 		return fmt.Sprintf("%s[%s:%s]", exprStr(n.Object), exprStr(n.Start), exprStr(n.End))
 	case *ast.CastExpr:

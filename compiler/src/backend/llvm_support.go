@@ -380,6 +380,9 @@ func (s *functionState) emitNodeTableIndexAddress(expr *ast.IndexExpr) (C.LLVMVa
 }
 
 func (s *functionState) emitIndexAddress(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if expr != nil && expr.Fallback != nil {
+		return nil, nil, fmt.Errorf("safe index fallback is not addressable")
+	}
 	if ptr, elemType, handled, err := s.emitNodeTableIndexAddress(expr); handled {
 		return ptr, elemType, err
 	}
@@ -1278,6 +1281,9 @@ func (s *functionState) packedEnumStoragePath(expr ast.Expr) (string, bool) {
 		}
 		return base + "." + n.Field, true
 	case *ast.IndexExpr:
+		if n.Fallback != nil {
+			return "", false
+		}
 		base, ok := s.packedEnumStoragePath(n.Object)
 		if !ok || base == "" {
 			return "", false
@@ -1334,6 +1340,9 @@ func (s *functionState) packedReadOriginKey(expr ast.Expr) (packedReadOriginKey,
 		}
 		return packedReadOriginKey{root: origin.root, path: origin.path + "." + n.Field}, true, nil
 	case *ast.IndexExpr:
+		if n.Fallback != nil {
+			return packedReadOriginKey{}, false, nil
+		}
 		origin, ok, err := s.packedReadOriginKey(n.Object)
 		if err != nil || !ok {
 			return packedReadOriginKey{}, ok, err

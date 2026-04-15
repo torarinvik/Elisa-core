@@ -598,6 +598,9 @@ func (a *Analyzer) exprCanYieldWritableRef(expr ast.Expr) bool {
 		}
 		return a.mutationPathWritable(n.Object)
 	case *ast.IndexExpr:
+		if n.Fallback != nil {
+			return false
+		}
 		if facts, ok := a.exprFacts[n.Object]; ok && facts.ReadOnly {
 			return false
 		}
@@ -645,6 +648,9 @@ func (a *Analyzer) exprCanYieldAddressableValue(expr ast.Expr) bool {
 		}
 		return a.exprCanYieldAddressableValue(n.Object)
 	case *ast.IndexExpr:
+		if n.Fallback != nil {
+			return false
+		}
 		objType := a.analyzeExpr(n.Object)
 		if _, ok := objType.(*RefType); ok {
 			return true
@@ -1082,6 +1088,9 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		}
 		return projectRegionFieldState(state, n.Field)
 	case *ast.IndexExpr:
+		if n.Fallback != nil {
+			return a.regionRefStateForRecoveredExpr(&ast.IndexExpr{Position: n.Position, Object: n.Object, Index: n.Index}, n.Fallback)
+		}
 		if viewType, ok := a.exprTypes[n.Object].(*DArrayViewType); ok && viewType.SurfaceName == "packedtags" {
 			return a.regionRefStateForExpr(n.Object)
 		}
@@ -3407,6 +3416,9 @@ func (a *Analyzer) resolvePackedNodeStoreRootWithSeen(expr ast.Expr, enumType *E
 			return a.resolvePackedNodeStoreRootWithSeen(decl.Value, enumType, seen)
 		}
 	case *ast.IndexExpr:
+		if n.Fallback != nil {
+			break
+		}
 		if root, path, storeType, ok := a.resolvePackedStoreRootPathWithSeen(n.Object, seen); ok {
 			if storeType.Enum == enumType {
 				return root, path, true
@@ -7021,6 +7033,9 @@ func (a *Analyzer) resolveProjectedFieldValueExprAtPath(objectExpr ast.Expr, pat
 	case *ast.CanExpr:
 		return a.resolveProjectedFieldValueExprAtPath(n.Expr, path)
 	case *ast.IndexExpr:
+		if n.Fallback != nil {
+			return nil, false
+		}
 		step, ok := a.resolveProjectedFieldIndexStep(n.Index)
 		if !ok {
 			return nil, false
@@ -7462,6 +7477,9 @@ func (a *Analyzer) extractProjectedBorrowSourcePath(expr ast.Expr) (ast.Expr, []
 		path = append(path, borrowReturnAnnotationStep{Field: n.Field})
 		return root, path, true
 	case *ast.IndexExpr:
+		if n.Fallback != nil {
+			return nil, nil, false
+		}
 		step, ok := a.resolveProjectedFieldIndexStep(n.Index)
 		if !ok {
 			return nil, nil, false
@@ -7557,6 +7575,24 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		indexExpected = builtinUsizeType()
 	}
 	indexType := a.analyzeValueExpr(expr.Index, indexExpected)
+	finish := func(result Type) Type {
+		if expr.Fallback != nil {
+			if !safeIndexFallbackOperandType(objType) {
+				a.errorf(expr.Pos(), "index fallback requires an array, darray, view, packed store, or a proven non-null reference to one, got %s", objType.String())
+			}
+			if _, ok := NodeKeyEnumType(indexType); ok {
+				a.errorf(expr.Index.Pos(), "index fallback does not support dense node-key indices")
+			}
+			fallbackType := a.analyzeValueExpr(expr.Fallback, result)
+			if result != nil && !IsInvalidType(result) && !IsNeverType(fallbackType) && !AssignableTo(result, fallbackType) {
+				a.errorf(expr.Pos(), "index fallback expects %s, got %s", result.String(), fallbackType.String())
+				a.reportShapeMismatchNotes(expr.Pos(), result, fallbackType)
+			}
+		}
+		a.reportInvalidRegionUse(expr, result)
+		a.reportBorrowedOwnerRefUseAfterConsume(expr, result)
+		return result
+	}
 	if _, ok := NodeKeyEnumType(indexType); !ok {
 		if !IsNumericType(indexType) {
 			a.errorf(expr.Index.Pos(), "index must be numeric, got %s", indexType.String())
@@ -7566,120 +7602,94 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	}
 	if keyEnum, ok := NodeKeyEnumType(indexType); ok {
 		if result, handled := a.analyzeDenseNodeKeyIndexExpr(expr, objType, keyEnum); handled {
-			a.reportInvalidRegionUse(expr, result)
-			a.reportBorrowedOwnerRefUseAfterConsume(expr, result)
-			return result
+			return finish(result)
 		}
 	}
 	if arr, ok := objType.(*ArrayType); ok {
-		a.checkConstantArrayIndexBounds(arr, expr.Index)
-		if isStringArrayType(arr) {
-			result := a.namedTypes["char"]
-			a.reportInvalidRegionUse(expr, result)
-			a.reportBorrowedOwnerRefUseAfterConsume(expr, result)
-			return result
+		if expr.Fallback == nil {
+			a.checkConstantArrayIndexBounds(arr, expr.Index)
 		}
-		a.reportInvalidRegionUse(expr, arr.Elem)
-		a.reportBorrowedOwnerRefUseAfterConsume(expr, arr.Elem)
-		return arr.Elem
+		if isStringArrayType(arr) {
+			return finish(a.namedTypes["char"])
+		}
+		return finish(arr.Elem)
 	}
 	if darray, ok := objType.(*DArrayType); ok {
-		a.reportInvalidRegionUse(expr, darray.Elem)
-		a.reportBorrowedOwnerRefUseAfterConsume(expr, darray.Elem)
-		return darray.Elem
+		return finish(darray.Elem)
 	}
 	if view, ok := objType.(*ViewType); ok {
-		a.reportInvalidRegionUse(expr, view.Elem)
-		a.reportBorrowedOwnerRefUseAfterConsume(expr, view.Elem)
-		return view.Elem
+		return finish(view.Elem)
 	}
 	if view, ok := objType.(*DArrayViewType); ok {
-		a.reportInvalidRegionUse(expr, view.Elem)
-		a.reportBorrowedOwnerRefUseAfterConsume(expr, view.Elem)
-		return view.Elem
+		return finish(view.Elem)
 	}
 	if itemType, ok := ChunksExactViewItemType(objType); ok {
-		a.reportInvalidRegionUse(expr, itemType)
-		a.reportBorrowedOwnerRefUseAfterConsume(expr, itemType)
-		return itemType
+		return finish(itemType)
 	}
 	if storeType, ok := objType.(*PackedEnumStoreType); ok && storeType.Enum != nil {
-		a.reportInvalidRegionUse(expr, storeType.Enum)
-		a.reportBorrowedOwnerRefUseAfterConsume(expr, storeType.Enum)
-		return storeType.Enum
+		return finish(storeType.Enum)
 	}
 	if _, ok := objType.(*DStrType); ok {
-		result := a.namedTypes["char"]
-		a.reportInvalidRegionUse(expr, result)
-		a.reportBorrowedOwnerRefUseAfterConsume(expr, result)
-		return result
+		return finish(a.namedTypes["char"])
 	}
 	if isStringViewType(objType) {
-		result := a.namedTypes["char"]
-		a.reportInvalidRegionUse(expr, result)
-		a.reportBorrowedOwnerRefUseAfterConsume(expr, result)
-		return result
+		return finish(a.namedTypes["char"])
 	}
 	if ref, ok := objType.(*RefType); ok {
 		if ref.State != RefStateNonNull {
 			a.errorf(expr.Pos(), "indexing requires proven non-null reference, got %s", objType.String())
-			return invalidType
+			return finish(invalidType)
 		}
 		if arr, ok := ref.Elem.(*ArrayType); ok {
-			a.checkConstantArrayIndexBounds(arr, expr.Index)
-			if isStringArrayType(arr) {
-				result := a.namedTypes["char"]
-				a.reportInvalidRegionUse(expr, result)
-				a.reportBorrowedOwnerRefUseAfterConsume(expr, result)
-				return result
+			if expr.Fallback == nil {
+				a.checkConstantArrayIndexBounds(arr, expr.Index)
 			}
-			a.reportInvalidRegionUse(expr, arr.Elem)
-			a.reportBorrowedOwnerRefUseAfterConsume(expr, arr.Elem)
-			return arr.Elem
+			if isStringArrayType(arr) {
+				return finish(a.namedTypes["char"])
+			}
+			return finish(arr.Elem)
 		}
 		if darray, ok := ref.Elem.(*DArrayType); ok {
-			a.reportInvalidRegionUse(expr, darray.Elem)
-			a.reportBorrowedOwnerRefUseAfterConsume(expr, darray.Elem)
-			return darray.Elem
+			return finish(darray.Elem)
 		}
 		if view, ok := ref.Elem.(*ViewType); ok {
-			a.reportInvalidRegionUse(expr, view.Elem)
-			a.reportBorrowedOwnerRefUseAfterConsume(expr, view.Elem)
-			return view.Elem
+			return finish(view.Elem)
 		}
 		if view, ok := ref.Elem.(*DArrayViewType); ok {
-			a.reportInvalidRegionUse(expr, view.Elem)
-			a.reportBorrowedOwnerRefUseAfterConsume(expr, view.Elem)
-			return view.Elem
+			return finish(view.Elem)
 		}
 		if itemType, ok := ChunksExactViewItemType(ref.Elem); ok {
-			a.reportInvalidRegionUse(expr, itemType)
-			a.reportBorrowedOwnerRefUseAfterConsume(expr, itemType)
-			return itemType
+			return finish(itemType)
 		}
 		if storeType, ok := ref.Elem.(*PackedEnumStoreType); ok && storeType.Enum != nil {
-			a.reportInvalidRegionUse(expr, storeType.Enum)
-			a.reportBorrowedOwnerRefUseAfterConsume(expr, storeType.Enum)
-			return storeType.Enum
+			return finish(storeType.Enum)
 		}
 		if _, ok := ref.Elem.(*DStrType); ok {
-			result := a.namedTypes["char"]
-			a.reportInvalidRegionUse(expr, result)
-			a.reportBorrowedOwnerRefUseAfterConsume(expr, result)
-			return result
+			return finish(a.namedTypes["char"])
 		}
 		if isStringViewType(ref.Elem) {
-			result := a.namedTypes["char"]
-			a.reportInvalidRegionUse(expr, result)
-			a.reportBorrowedOwnerRefUseAfterConsume(expr, result)
-			return result
+			return finish(a.namedTypes["char"])
 		}
-		a.reportInvalidRegionUse(expr, ref.Elem)
-		a.reportBorrowedOwnerRefUseAfterConsume(expr, ref.Elem)
-		return ref.Elem
+		return finish(ref.Elem)
 	}
 	a.errorf(expr.Pos(), "indexing requires string, array, view, packed store, or reference type, got %s", objType.String())
-	return invalidType
+	return finish(invalidType)
+}
+
+func safeIndexFallbackOperandType(t Type) bool {
+	switch tt := StripAggregateStateType(t).(type) {
+	case *ArrayType, *DArrayType, *ViewType, *DArrayViewType, *PackedEnumStoreType:
+		return true
+	case *RefType:
+		if tt.State != RefStateNonNull {
+			return false
+		}
+		switch StripAggregateStateType(tt.Elem).(type) {
+		case *ArrayType, *DArrayType, *ViewType, *DArrayViewType, *PackedEnumStoreType:
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Analyzer) analyzeDenseNodeKeyIndexExpr(expr *ast.IndexExpr, objType Type, keyEnum *EnumType) (Type, bool) {
@@ -8478,6 +8488,10 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 		a.requireWritableMutationPath(n.Object)
 		return field.Type
 	case *ast.IndexExpr:
+		if n.Fallback != nil {
+			a.errorf(n.Pos(), "safe index fallback cannot be used as an assignment target")
+			return invalidType
+		}
 		targetType := a.analyzeIndexExpr(n)
 		if kind, ok := valueOnlyIndexKind(a.exprTypes[n.Object]); ok {
 			a.errorf(n.Pos(), "cannot assign to %s", kind)
@@ -8591,6 +8605,9 @@ func (a *Analyzer) writableRefSuggestionForExpr(expr ast.Expr) (string, bool) {
 	case *ast.FieldExpr:
 		return a.writableRefSuggestionForExpr(n.Object)
 	case *ast.IndexExpr:
+		if n.Fallback != nil {
+			return "", false
+		}
 		return a.writableRefSuggestionForExpr(n.Object)
 	case *ast.SliceExpr:
 		return a.writableRefSuggestionForExpr(n.Object)
@@ -8656,6 +8673,9 @@ func (a *Analyzer) refExprAllowsMutation(expr ast.Expr, ref *RefType) bool {
 		}
 		return field.Mutable
 	case *ast.IndexExpr:
+		if n.Fallback != nil {
+			return false
+		}
 		return a.mutationPathWritable(n.Object)
 	default:
 		return false
@@ -8704,6 +8724,10 @@ func (a *Analyzer) asRefTargetType(expr ast.Expr, asKind string) Type {
 		a.requireWritableMutationPath(n.Object)
 		return a.refTypeWithAsKind(field.Type, asKind)
 	case *ast.IndexExpr:
+		if n.Fallback != nil {
+			a.errorf(n.Pos(), "cannot take a reference to a safe index fallback expression")
+			return invalidType
+		}
 		targetType := a.analyzeIndexExpr(n)
 		if kind, ok := valueOnlyIndexKind(a.exprTypes[n.Object]); ok {
 			a.errorf(n.Pos(), "cannot take a reference to %s", kind)
