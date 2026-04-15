@@ -68,7 +68,7 @@ func (p *Parser) parseInterfaceMethodDecl() *ast.ExternFuncDecl {
 	typeParams, refStorageParams, refStateParams, regionParams, permissionParams, genericParams := p.parseFuncGenericParams()
 
 	p.expect(lexer.TOKEN_LPAREN)
-	params := p.parseParamList(true)
+	params, paramPacks, paramItemOrder, _ := p.parseExplicitSignatureParamList(true, false)
 	p.expect(lexer.TOKEN_RPAREN)
 
 	var implicitParams []ast.ParamDecl
@@ -124,6 +124,8 @@ func (p *Parser) parseInterfaceMethodDecl() *ast.ExternFuncDecl {
 		Permissions:       permissions,
 		Ensures:           ensures,
 		Params:            params,
+		ParamPacks:        paramPacks,
+		ParamItemOrder:    paramItemOrder,
 		ImplicitParams:    implicitParams,
 		ImplicitBundles:   implicitBundles,
 		ImplicitItemOrder: implicitItemOrder,
@@ -214,7 +216,7 @@ func (p *Parser) parseImplMethodDeclWithAnnotations(annotations []ast.Annotation
 	typeParams, refStorageParams, refStateParams, regionParams, permissionParams, genericParams := p.parseFuncGenericParams()
 
 	p.expect(lexer.TOKEN_LPAREN)
-	params := p.parseParamList(true)
+	params, paramPacks, paramItemOrder, _ := p.parseExplicitSignatureParamList(true, false)
 	p.expect(lexer.TOKEN_RPAREN)
 
 	var implicitParams []ast.ParamDecl
@@ -258,8 +260,8 @@ func (p *Parser) parseImplMethodDeclWithAnnotations(annotations []ast.Annotation
 	if p.match(lexer.TOKEN_COLON) {
 		p.expectNewline()
 		body := p.parseBlock()
-		return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Permissions: permissions, Ensures: ensures, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Body: body}
+		return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Permissions: permissions, Ensures: ensures, Params: params, ParamPacks: paramPacks, ParamItemOrder: paramItemOrder, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Body: body}
 	}
 	p.expectNewline()
-	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Permissions: permissions, Ensures: ensures, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType}
+	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Permissions: permissions, Ensures: ensures, Params: params, ParamPacks: paramPacks, ParamItemOrder: paramItemOrder, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType}
 }

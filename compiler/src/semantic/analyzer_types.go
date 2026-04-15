@@ -58,7 +58,7 @@ func (a *Analyzer) defineLocalInScope(scope *Scope, sym *Symbol, pos lexer.Pos) 
 	a.recordSpecializedValueTypeBinding(sym, sym.Type)
 }
 
-func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorageParams []string, refStateParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, effectAliasPos lexer.Pos, effectAlias string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, params []ast.ParamDecl, implicitParams []ast.ParamDecl, implicitBundles []string, implicitItemOrder []ast.ImplicitSigItem, ret ast.TypeExpr, variadic bool) *FuncType {
+func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorageParams []string, refStateParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, effectAliasPos lexer.Pos, effectAlias string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, params []ast.ParamDecl, paramPacks []ast.ParamPackUse, paramItemOrder []ast.ParamSigItem, implicitParams []ast.ParamDecl, implicitBundles []string, implicitItemOrder []ast.ImplicitSigItem, ret ast.TypeExpr, variadic bool) *FuncType {
 	resolvedGenericParams := append([]ast.GenericParam(nil), genericParams...)
 	for i, param := range resolvedGenericParams {
 		if param.Kind != ast.GenericParamType || param.InterfaceBound == "" {
@@ -68,20 +68,22 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorage
 			resolvedGenericParams[i].InterfaceBound = iface.Name
 		}
 	}
-	expandedImplicitParams, implicitNames := a.expandImplicitParamDecls(params, implicitParams, implicitBundles, implicitItemOrder, name)
-	allParams := append(append([]ast.ParamDecl(nil), params...), expandedImplicitParams...)
-	explicitNames := make([]string, 0, len(params))
-	for _, p := range params {
+	explicitSpecs := a.expandExplicitParamSpecs(params, paramPacks, paramItemOrder, name)
+	expandedExplicitParams := explicitParamDeclsFromSpecs(explicitSpecs)
+	expandedImplicitParams, implicitNames := a.expandImplicitParamDecls(expandedExplicitParams, implicitParams, implicitBundles, implicitItemOrder, name)
+	allParams := append(append([]ast.ParamDecl(nil), expandedExplicitParams...), expandedImplicitParams...)
+	explicitNames := make([]string, 0, len(expandedExplicitParams))
+	for _, p := range expandedExplicitParams {
 		explicitNames = append(explicitNames, p.Name)
 	}
-	ptypes := make([]Type, 0, len(params))
+	ptypes := make([]Type, 0, len(allParams))
 	retType := a.namedTypes["void"]
 	shapeParams := a.collectImplicitShapeParams(allParams, ret)
 	var resolvedPermissionRefs []ast.PermissionRef
 	var permissions []string
 	var poststates []FuncPoststate
-	defaultExprs := make([]ast.Expr, len(params))
-	hasDefaults := make([]bool, len(params))
+	defaultExprs := make([]ast.Expr, len(expandedExplicitParams))
+	hasDefaults := make([]bool, len(expandedExplicitParams))
 	a.withGenericParams(resolvedGenericParams, nil, func() {
 		a.withRegionParams(regionParams, func() {
 			a.withPermissionParams(permissionParams, func() {
@@ -89,14 +91,21 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorage
 				resolvedPermissionRefs = a.resolvePermissionRefs(permissionRefs, true)
 				permissions = a.resolvePermissionFamilies(permissionRefs, true)
 				a.withShapeParams(shapeParams, func() {
-					for _, p := range allParams {
+					for _, spec := range explicitSpecs {
+						if spec.HasResolvedType {
+							ptypes = append(ptypes, spec.ResolvedType)
+							continue
+						}
+						ptypes = append(ptypes, a.resolveType(spec.Decl.Type))
+					}
+					for _, p := range expandedImplicitParams {
 						ptypes = append(ptypes, a.resolveType(p.Type))
 					}
 					if ret != nil {
 						retType = a.resolveType(ret)
 					}
 					poststates = a.resolveFuncPoststates(name, allParams, ptypes, retType, ensures)
-					defaultExprs, hasDefaults = a.validateFuncParamDefaults(name, params, ptypes[:len(params)])
+					defaultExprs, hasDefaults = a.validateExpandedFuncParamDefaults(name, explicitSpecs, ptypes[:len(expandedExplicitParams)])
 				})
 			})
 		})
@@ -121,7 +130,7 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorage
 		TemperatureMode:           FuncTemperatureModeDefault,
 		Poststates:                poststates,
 		Params:                    ptypes,
-		ExplicitParamCount:        len(params),
+		ExplicitParamCount:        len(expandedExplicitParams),
 		ExplicitParamNames:        explicitNames,
 		ExplicitParamDefaultExprs: append([]ast.Expr(nil), defaultExprs...),
 		ExplicitParamHasDefault:   append([]bool(nil), hasDefaults...),

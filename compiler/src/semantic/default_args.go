@@ -83,6 +83,14 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 		if (n.Func != nil && fn == nil) || (len(n.Args) != 0 && args == nil) {
 			return nil
 		}
+		paramPacks := cloneDefaultParamPackUses(n.ParamPacks)
+		if len(n.ParamPacks) != 0 && paramPacks == nil {
+			return nil
+		}
+		argItems := cloneDefaultCallArgItems(n.ArgItemOrder)
+		if len(n.ArgItemOrder) != 0 && argItems == nil {
+			return nil
+		}
 		withArgs := cloneDefaultWithArgs(n.WithArgs)
 		if len(n.WithArgs) != 0 && withArgs == nil {
 			return nil
@@ -102,6 +110,9 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 			ArgForwardPos: n.ArgForwardPos,
 			Args:          args,
 			ArgNames:      append([]string(nil), n.ArgNames...),
+			ArgShorthand:  append([]bool(nil), n.ArgShorthand...),
+			ParamPacks:    paramPacks,
+			ArgItemOrder:  argItems,
 			Safe:          n.Safe,
 			WithArgs:      withArgs,
 			WithBundles:   withBundles,
@@ -238,6 +249,40 @@ func cloneDefaultWithBundles(bundles []ast.WithBundleUse) []ast.WithBundleUse {
 	return cloned
 }
 
+func cloneDefaultParamPackUses(packs []ast.ParamPackUse) []ast.ParamPackUse {
+	if len(packs) == 0 {
+		return nil
+	}
+	cloned := make([]ast.ParamPackUse, 0, len(packs))
+	for _, pack := range packs {
+		args := cloneDefaultWithArgs(pack.Args)
+		if len(pack.Args) != 0 && args == nil {
+			return nil
+		}
+		cloned = append(cloned, ast.ParamPackUse{Position: pack.Position, Name: pack.Name, Args: args})
+	}
+	return cloned
+}
+
+func cloneDefaultCallArgItems(items []ast.CallArgItem) []ast.CallArgItem {
+	if len(items) == 0 {
+		return nil
+	}
+	cloned := make([]ast.CallArgItem, 0, len(items))
+	for _, item := range items {
+		next := ast.CallArgItem{Position: item.Position, ArgIndex: item.ArgIndex, IsPack: item.IsPack}
+		if item.IsPack {
+			packs := cloneDefaultParamPackUses([]ast.ParamPackUse{item.Pack})
+			if packs == nil {
+				return nil
+			}
+			next.Pack = packs[0]
+		}
+		cloned = append(cloned, next)
+	}
+	return cloned
+}
+
 func cloneDefaultWithItems(items []ast.WithItem) []ast.WithItem {
 	if len(items) == 0 {
 		return nil
@@ -263,14 +308,15 @@ func cloneDefaultWithItems(items []ast.WithItem) []ast.WithItem {
 	return cloned
 }
 
-func (a *Analyzer) validateFuncParamDefaults(name string, params []ast.ParamDecl, paramTypes []Type) ([]ast.Expr, []bool) {
-	if len(params) == 0 {
+func (a *Analyzer) validateExpandedFuncParamDefaults(name string, specs []explicitParamSpec, paramTypes []Type) ([]ast.Expr, []bool) {
+	if len(specs) == 0 {
 		return nil, nil
 	}
-	defaultExprs := make([]ast.Expr, len(params))
-	hasDefaults := make([]bool, len(params))
+	defaultExprs := make([]ast.Expr, len(specs))
+	hasDefaults := make([]bool, len(specs))
 	sawDefault := false
-	for i, param := range params {
+	for i, spec := range specs {
+		param := spec.Decl
 		if param.DefaultValue == nil {
 			if sawDefault {
 				a.errorf(param.Position, "parameter %q on function %q must declare a default because it follows a defaulted parameter", param.Name, name)
@@ -285,14 +331,35 @@ func (a *Analyzer) validateFuncParamDefaults(name string, params []ast.ParamDecl
 		var expectedType Type = invalidType
 		if i < len(paramTypes) && paramTypes[i] != nil {
 			expectedType = paramTypes[i]
+		} else if spec.HasResolvedType && spec.ResolvedType != nil {
+			expectedType = spec.ResolvedType
 		}
-		if !a.validateParamDefaultExpr(param.DefaultValue, expectedType) {
+		valid := false
+		if spec.DefaultNamespace != "" || len(spec.DefaultUsings) != 0 {
+			a.withResolutionContext(spec.DefaultNamespace, spec.DefaultUsings, func() {
+				valid = a.validateParamDefaultExpr(param.DefaultValue, expectedType)
+			})
+		} else {
+			valid = a.validateParamDefaultExpr(param.DefaultValue, expectedType)
+		}
+		if !valid {
 			continue
 		}
 		defaultExprs[i] = param.DefaultValue
 		hasDefaults[i] = true
 	}
 	return defaultExprs, hasDefaults
+}
+
+func (a *Analyzer) validateFuncParamDefaults(name string, params []ast.ParamDecl, paramTypes []Type) ([]ast.Expr, []bool) {
+	if len(params) == 0 {
+		return nil, nil
+	}
+	specs := make([]explicitParamSpec, 0, len(params))
+	for _, param := range params {
+		specs = append(specs, explicitParamSpec{Decl: param})
+	}
+	return a.validateExpandedFuncParamDefaults(name, specs, paramTypes)
 }
 
 func (a *Analyzer) validateParamDefaultExpr(expr ast.Expr, expected Type) bool {

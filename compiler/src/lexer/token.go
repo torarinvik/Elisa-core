@@ -122,6 +122,8 @@ const (
 	TOKEN_IS       // is
 	TOKEN_FATARROW // =>
 	TOKEN_TO       // to
+	TOKEN_LBRACE   // {
+	TOKEN_RBRACE   // }
 )
 
 var tokenNames = map[TokenKind]string{
@@ -194,6 +196,8 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_RPAREN:    ")",
 	TOKEN_LBRACKET:  "[",
 	TOKEN_RBRACKET:  "]",
+	TOKEN_LBRACE:    "{",
+	TOKEN_RBRACE:    "}",
 	TOKEN_HASH:      "#",
 	TOKEN_AMPERSAND: "&",
 	TOKEN_QUESTION:  "?",

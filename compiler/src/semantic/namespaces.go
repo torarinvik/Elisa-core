@@ -153,6 +153,15 @@ func (a *Analyzer) lookupVisibleContextBundle(name string) (*ContextBundle, stri
 	return nil, "", false
 }
 
+func (a *Analyzer) lookupVisibleParamPack(name string) (*ParamPack, string, bool) {
+	for _, candidate := range a.visibleNameCandidates(name) {
+		if pack, ok := a.paramPacks[candidate]; ok {
+			return pack, candidate, true
+		}
+	}
+	return nil, "", false
+}
+
 func (a *Analyzer) lookupVisibleGlobal(name string) (*Symbol, string, bool) {
 	for _, candidate := range a.visibleNameCandidates(name) {
 		if sym, ok := a.globalScope.Lookup(candidate); ok {

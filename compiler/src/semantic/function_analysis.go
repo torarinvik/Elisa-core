@@ -138,6 +138,8 @@ func appendBasicFlowInstrsForNode(block *CFGBlock, node ast.Node) {
 		appendBasicFlowExprInstrs(block, n.Value)
 	case *ast.TupleBindStmt:
 		appendBasicFlowExprInstrs(block, n.Value)
+	case *ast.LetDestructureStmt:
+		appendBasicFlowExprInstrs(block, n.Value)
 	case *ast.AssignStmt:
 		appendMutationFlowInstr(block, flowLocationForExpr(n.Target), "assign")
 		appendBasicFlowExprInstrs(block, n.Value)
@@ -168,6 +170,15 @@ func appendBasicFlowInstrsForNode(block *CFGBlock, node ast.Node) {
 	case *ast.ViewStmt:
 		appendBasicFlowExprInstrs(block, n.Value)
 		appendBasicFlowExprInstrs(block, n.Store)
+	case *ast.ArgsScopeStmt:
+		for _, arg := range n.Args {
+			appendBasicFlowExprInstrs(block, arg.Value)
+		}
+		for _, pack := range n.ParamPacks {
+			for _, arg := range pack.Args {
+				appendBasicFlowExprInstrs(block, arg.Value)
+			}
+		}
 	case *ast.MoveBindStmt:
 		appendBasicFlowExprInstrs(block, n.Value)
 		appendBasicFlowExprInstrs(block, n.Store)
@@ -553,6 +564,7 @@ func (a *Analyzer) inferFuncSinkParams(fn *ast.FuncDecl, fnType *FuncType) {
 	defer delete(a.sinkParamInferenceInProgress, fn)
 
 	cfg := a.constructCFG(fn)
+	configureCFGParamLocations(cfg, fnType)
 	populateBasicFlowInstrs(cfg)
 	a.addImplicitSinkFlowInstrs(cfg)
 	fnType.SinkParams = inferSinkParamsFromCFG(cfg)
@@ -810,6 +822,7 @@ func (a *Analyzer) finalizeFunctionAnalysis(fn *ast.FuncDecl, fnType *FuncType) 
 		a.inferFuncSinkParams(fn, fnType)
 	}
 	cfg := a.constructCFG(fn)
+	configureCFGParamLocations(cfg, fnType)
 	populateBasicFlowInstrs(cfg)
 	a.addImplicitSinkFlowInstrs(cfg)
 	partitions := computeGraphPartitionsFromCFG(cfg)
@@ -827,6 +840,20 @@ func (a *Analyzer) finalizeFunctionAnalysis(fn *ast.FuncDecl, fnType *FuncType) 
 	a.functionAnalyses[fn] = analysis
 }
 
+func configureCFGParamLocations(cfg *CFG, fnType *FuncType) {
+	if cfg == nil || fnType == nil {
+		return
+	}
+	cfg.ParamLocations = cfg.ParamLocations[:0]
+	for i := range fnType.Params {
+		name := functionParamName(fnType, i)
+		if name == "" {
+			name = "<param>"
+		}
+		cfg.ParamLocations = append(cfg.ParamLocations, name)
+	}
+}
+
 func summarizeReturnIsolation(fn *ast.FuncDecl, fnType *FuncType, partitions *GraphPartitions) ReturnIsolationSummary {
 	summary := ReturnIsolationSummary{Known: true}
 	if fn == nil || fnType == nil {
@@ -834,11 +861,11 @@ func summarizeReturnIsolation(fn *ast.FuncDecl, fnType *FuncType, partitions *Gr
 	}
 	aliasLocations := map[string]bool{}
 	forEachRegionParamDep(fnType.ReturnProvenance, func(index int) {
-		if name := functionParamName(fn, index); name != "" {
+		if name := functionParamName(fnType, index); name != "" {
 			aliasLocations[name] = true
 		}
 	})
-	collectBorrowedOwnerAliasLocations(fn, fnType.ReturnBorrowedOwnerRefs, aliasLocations)
+	collectBorrowedOwnerAliasLocations(fnType, fnType.ReturnBorrowedOwnerRefs, aliasLocations)
 	if len(aliasLocations) == 0 {
 		summary.Isolated = true
 		return summary
@@ -849,7 +876,7 @@ func summarizeReturnIsolation(fn *ast.FuncDecl, fnType *FuncType, partitions *Gr
 	for location := range aliasLocations {
 		summary.AliasLocations = append(summary.AliasLocations, location)
 		root := flowLocationRoot(location)
-		index := functionParamIndex(fn, root)
+		index := functionParamIndex(fnType, root)
 		if index >= 0 {
 			paramAliases[index] = true
 			if partitions != nil && partitions.ClassMutated(location) {
@@ -869,22 +896,22 @@ func summarizeReturnIsolation(fn *ast.FuncDecl, fnType *FuncType, partitions *Gr
 	return summary
 }
 
-func collectBorrowedOwnerAliasLocations(fn *ast.FuncDecl, summary borrowedOwnerRefSummary, out map[string]bool) {
-	if fn == nil || out == nil {
+func collectBorrowedOwnerAliasLocations(fnType *FuncType, summary borrowedOwnerRefSummary, out map[string]bool) {
+	if fnType == nil || out == nil {
 		return
 	}
 	if summary.HasDirect {
-		if location := borrowedOwnerAliasLocation(fn, summary.Direct); location != "" {
+		if location := borrowedOwnerAliasLocation(fnType, summary.Direct); location != "" {
 			out[location] = true
 		}
 	}
 	for _, child := range summary.Fields {
-		collectBorrowedOwnerAliasLocations(fn, child, out)
+		collectBorrowedOwnerAliasLocations(fnType, child, out)
 	}
 }
 
-func borrowedOwnerAliasLocation(fn *ast.FuncDecl, target borrowedOwnerRefSummaryTarget) string {
-	base := functionParamName(fn, target.ParamIndex)
+func borrowedOwnerAliasLocation(fnType *FuncType, target borrowedOwnerRefSummaryTarget) string {
+	base := functionParamName(fnType, target.ParamIndex)
 	if base == "" {
 		return ""
 	}
@@ -912,20 +939,32 @@ func borrowAnnotationPathSuffix(path []borrowReturnAnnotationStep) string {
 	return builder.String()
 }
 
-func functionParamName(fn *ast.FuncDecl, index int) string {
-	if fn == nil || index < 0 || index >= len(fn.Params) {
+func functionParamName(fnType *FuncType, index int) string {
+	if fnType == nil || index < 0 || index >= len(fnType.Params) {
 		return ""
 	}
-	return fn.Params[index].Name
+	if index < len(fnType.ExplicitParamNames) {
+		return fnType.ExplicitParamNames[index]
+	}
+	implicitIndex := index - len(fnType.ExplicitParamNames)
+	if implicitIndex >= 0 && implicitIndex < len(fnType.ImplicitParamNames) {
+		return fnType.ImplicitParamNames[implicitIndex]
+	}
+	return ""
 }
 
-func functionParamIndex(fn *ast.FuncDecl, name string) int {
-	if fn == nil || name == "" {
+func functionParamIndex(fnType *FuncType, name string) int {
+	if fnType == nil || name == "" {
 		return -1
 	}
-	for i, param := range fn.Params {
-		if param.Name == name {
+	for i, paramName := range fnType.ExplicitParamNames {
+		if paramName == name {
 			return i
+		}
+	}
+	for i, paramName := range fnType.ImplicitParamNames {
+		if paramName == name {
+			return len(fnType.ExplicitParamNames) + i
 		}
 	}
 	return -1

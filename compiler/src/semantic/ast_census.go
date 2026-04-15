@@ -31,6 +31,10 @@ func (c *analyzerASTCensus) countDecl(decl ast.Decl) {
 		for _, member := range n.Members {
 			c.countExpr(member.Value)
 		}
+	case *ast.ParamsDecl:
+		for _, param := range n.Params {
+			c.countExpr(param.DefaultValue)
+		}
 	case *ast.NamespaceDecl:
 		c.countDecls(n.Decls)
 	case *ast.GlobalDecl:
@@ -70,6 +74,8 @@ func (c *analyzerASTCensus) countStmt(stmt ast.Stmt) {
 		c.countExpr(n.Value)
 	case *ast.TupleBindStmt:
 		c.countExpr(n.Value)
+	case *ast.LetDestructureStmt:
+		c.countExpr(n.Value)
 	case *ast.MoveBindStmt:
 		c.countExpr(n.Value)
 		c.countExpr(n.Store)
@@ -83,6 +89,16 @@ func (c *analyzerASTCensus) countStmt(stmt ast.Stmt) {
 		c.countExpr(n.Value)
 		c.countExpr(n.Store)
 		c.countViewBindPattern(n.Pattern)
+		c.countStmts(n.Body)
+	case *ast.ArgsScopeStmt:
+		for _, arg := range n.Args {
+			c.countExpr(arg.Value)
+		}
+		for _, pack := range n.ParamPacks {
+			for _, arg := range pack.Args {
+				c.countExpr(arg.Value)
+			}
+		}
 		c.countStmts(n.Body)
 	case *ast.DeferStmt:
 		c.countStmts(n.Body)
@@ -168,6 +184,19 @@ func (c *analyzerASTCensus) countExpr(expr ast.Expr) {
 		c.countExpr(n.Func)
 		for _, arg := range n.Args {
 			c.countExpr(arg)
+		}
+		for _, pack := range n.ParamPacks {
+			for _, arg := range pack.Args {
+				c.countExpr(arg.Value)
+			}
+		}
+		for _, arg := range n.WithArgs {
+			c.countExpr(arg.Value)
+		}
+		for _, bundle := range n.WithBundles {
+			for _, arg := range bundle.Args {
+				c.countExpr(arg.Value)
+			}
 		}
 	case *ast.FieldExpr:
 		c.countExpr(n.Object)

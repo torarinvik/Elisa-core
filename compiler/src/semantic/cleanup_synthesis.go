@@ -60,15 +60,16 @@ func SynthesizeParamCleanupPlan(fn *ast.FuncDecl, fnType *FuncType) CleanupPlan 
 		return CleanupPlan{}
 	}
 	plan := CleanupPlan{}
-	for i, param := range fn.Params {
-		if i >= len(fnType.Params) {
-			break
+	for i := range fnType.Params {
+		name := functionParamName(fnType, i)
+		if name == "" {
+			continue
 		}
 		ops := CreateTypeBoundOps(fnType.Params[i])
 		if len(ops) == 0 {
 			continue
 		}
-		plan.Bindings = append(plan.Bindings, CleanupBindingPlan{Name: param.Name, Ops: ops})
+		plan.Bindings = append(plan.Bindings, CleanupBindingPlan{Name: name, Ops: ops})
 	}
 	return plan
 }

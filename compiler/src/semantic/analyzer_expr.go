@@ -5445,7 +5445,7 @@ func (a *Analyzer) resolveFunctionCallArgs(expr *ast.CallExpr, ft *FuncType) ([]
 	if expr.ResolvedArgsValid && expr.ResolvedCommonArgs == nil {
 		return expr.ResolvedArgs, true
 	}
-	if !expr.HasArgForward && expr.NamedArgCount() == 0 {
+	if !expr.HasArgForward && len(expr.ParamPacks) == 0 && expr.NamedArgCount() == 0 {
 		if len(expr.Args) > explicitParamCount {
 			expr.ResolvedArgsValid = true
 			expr.ResolvedArgs = expr.Args
@@ -5470,7 +5470,7 @@ func (a *Analyzer) resolveFunctionCallArgs(expr *ast.CallExpr, ft *FuncType) ([]
 		if expr.HasArgForward {
 			a.errorf(expr.ArgForwardPos, "call argument forwarding `..` is not supported for variadic function %q", ft.Name)
 		} else {
-			a.errorf(expr.Pos(), "named arguments are not supported for variadic function %q", ft.Name)
+			a.errorf(expr.Pos(), "named arguments and parameter-pack applications are not supported for variadic function %q", ft.Name)
 		}
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)
@@ -5497,20 +5497,65 @@ func (a *Analyzer) resolveFunctionCallArgs(expr *ast.CallExpr, ft *FuncType) ([]
 	}
 	ordered := make([]ast.Expr, explicitParamCount)
 	filled := make([]bool, explicitParamCount)
-	filledExplicit := make([]bool, explicitParamCount)
+	sources := make([]callArgSource, explicitParamCount)
 	if expr.HasArgForward {
 		for i, name := range ft.ExplicitParamNames {
 			if arg, ok := a.lookupCallForwardValueExpr(name); ok {
 				ordered[i] = arg
 				filled[i] = true
+				sources[i] = callArgSourceForward
 			}
 		}
 	}
 	sawNamed := false
+	sawPack := false
 	nextPositional := 0
 	ok := true
-	for i, arg := range expr.Args {
-		name := expr.ArgName(i)
+	for _, item := range orderedCallArgItems(expr) {
+		if item.IsPack {
+			if sawPack {
+				a.errorf(item.Position, "call may specify at most one parameter-pack application")
+				ok = false
+			}
+			if sawNamed {
+				a.errorf(item.Position, "parameter-pack application must come before ordinary named arguments")
+				ok = false
+			}
+			sawPack = true
+			pack, values := a.expandParamPackUseValues(item.Pack, "argument")
+			if pack == nil {
+				ok = false
+				continue
+			}
+			for _, field := range pack.Fields {
+				valueExpr, exists := values[field.Name]
+				if !exists || valueExpr == nil {
+					continue
+				}
+				index, found := nameToIndex[field.Name]
+				if !found {
+					a.errorf(item.Pack.Position, "function %q has no parameter %q", ft.Name, field.Name)
+					ok = false
+					continue
+				}
+				switch sources[index] {
+				case callArgSourceExplicit:
+					a.errorf(item.Pack.Position, "function %q parameter %q is specified more than once", ft.Name, field.Name)
+					ok = false
+					continue
+				case callArgSourcePack:
+					a.errorf(item.Pack.Position, "function %q parameter %q is specified more than once", ft.Name, field.Name)
+					ok = false
+					continue
+				}
+				ordered[index] = valueExpr
+				filled[index] = true
+				sources[index] = callArgSourcePack
+			}
+			continue
+		}
+		arg := expr.Args[item.ArgIndex]
+		name := expr.ArgName(item.ArgIndex)
 		if name == "" {
 			if expr.HasArgForward {
 				a.errorf(arg.Pos(), "call argument forwarding `..` only supports named arguments")
@@ -5518,7 +5563,7 @@ func (a *Analyzer) resolveFunctionCallArgs(expr *ast.CallExpr, ft *FuncType) ([]
 				ok = false
 				continue
 			}
-			if sawNamed {
+			if sawNamed || sawPack {
 				a.errorf(arg.Pos(), "function %q cannot use positional arguments after named arguments", ft.Name)
 				a.analyzeExpr(arg)
 				ok = false
@@ -5530,9 +5575,15 @@ func (a *Analyzer) resolveFunctionCallArgs(expr *ast.CallExpr, ft *FuncType) ([]
 				ok = false
 				continue
 			}
+			if sources[nextPositional] == callArgSourceExplicit || sources[nextPositional] == callArgSourcePack {
+				a.errorf(arg.Pos(), "function %q parameter %q is specified more than once", ft.Name, ft.ExplicitParamNames[nextPositional])
+				a.analyzeExpr(arg)
+				ok = false
+				continue
+			}
 			ordered[nextPositional] = arg
 			filled[nextPositional] = true
-			filledExplicit[nextPositional] = true
+			sources[nextPositional] = callArgSourceExplicit
 			nextPositional++
 			continue
 		}
@@ -5544,16 +5595,17 @@ func (a *Analyzer) resolveFunctionCallArgs(expr *ast.CallExpr, ft *FuncType) ([]
 			ok = false
 			continue
 		}
-		if filledExplicit[index] {
+		if sources[index] == callArgSourceExplicit {
 			a.errorf(arg.Pos(), "function %q parameter %q is specified more than once", ft.Name, name)
 			a.analyzeExpr(arg)
 			ok = false
 			continue
 		}
-		ordered[index] = arg
+		ordered[index] = a.resolveCallArgValueExpr(expr, item.ArgIndex, "argument")
 		filled[index] = true
-		filledExplicit[index] = true
+		sources[index] = callArgSourceExplicit
 	}
+	a.fillMissingAmbientExplicitCallArgs(ft, ordered, filled)
 	if !a.fillMissingDefaultCallArgs(expr, ft, ordered, filled, false) {
 		ok = false
 	}
@@ -5689,6 +5741,25 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 			prependedNames = append(prependedNames, expr.ArgNames...)
 			expr.ArgNames = prependedNames
 		}
+		if len(expr.ArgShorthand) != 0 {
+			prependedShorthand := make([]bool, 0, len(expr.ArgShorthand)+1)
+			prependedShorthand = append(prependedShorthand, false)
+			prependedShorthand = append(prependedShorthand, expr.ArgShorthand...)
+			expr.ArgShorthand = prependedShorthand
+		}
+		if len(expr.ArgItemOrder) != 0 {
+			prependedItems := make([]ast.CallArgItem, 0, len(expr.ArgItemOrder)+1)
+			prependedItems = append(prependedItems, ast.CallArgItem{Position: fieldExpr.Object.Pos(), ArgIndex: 0})
+			for _, item := range expr.ArgItemOrder {
+				if item.IsPack {
+					prependedItems = append(prependedItems, item)
+					continue
+				}
+				item.ArgIndex++
+				prependedItems = append(prependedItems, item)
+			}
+			expr.ArgItemOrder = prependedItems
+		}
 		expr.Func = &ast.Ident{Position: fieldExpr.Position, Name: ufcsSym.Name}
 		return extensionMethodCallRewriteApplied
 	}
@@ -5701,6 +5772,25 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 		prependedNames = append(prependedNames, "")
 		prependedNames = append(prependedNames, expr.ArgNames...)
 		expr.ArgNames = prependedNames
+	}
+	if len(expr.ArgShorthand) != 0 {
+		prependedShorthand := make([]bool, 0, len(expr.ArgShorthand)+1)
+		prependedShorthand = append(prependedShorthand, false)
+		prependedShorthand = append(prependedShorthand, expr.ArgShorthand...)
+		expr.ArgShorthand = prependedShorthand
+	}
+	if len(expr.ArgItemOrder) != 0 {
+		prependedItems := make([]ast.CallArgItem, 0, len(expr.ArgItemOrder)+1)
+		prependedItems = append(prependedItems, ast.CallArgItem{Position: fieldExpr.Object.Pos(), ArgIndex: 0})
+		for _, item := range expr.ArgItemOrder {
+			if item.IsPack {
+				prependedItems = append(prependedItems, item)
+				continue
+			}
+			item.ArgIndex++
+			prependedItems = append(prependedItems, item)
+		}
+		expr.ArgItemOrder = prependedItems
 	}
 	expr.Func = &ast.Ident{Position: fieldExpr.Position, Name: method.Symbol.Name}
 	return extensionMethodCallRewriteApplied

@@ -860,6 +860,8 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		return nil
 	case *ast.TupleBindStmt:
 		return s.emitTupleBindStmt(n)
+	case *ast.LetDestructureStmt:
+		return s.emitLetDestructureStmt(n)
 	case *ast.MoveBindStmt:
 		return s.emitMoveBindStmt(n)
 	case *ast.OpenStmt:
@@ -1041,6 +1043,8 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		return s.emitBlock(n.Body, true)
 	case *ast.WithStmt:
 		return s.emitBlock(n.Body, true)
+	case *ast.ArgsScopeStmt:
+		return s.emitBlock(n.Body, true)
 	case *ast.PoolStmt:
 		return s.emitPoolStmt(n)
 	case *ast.LockStmt:
@@ -1128,6 +1132,42 @@ func (s *functionState) emitTupleBindStmt(stmt *ast.TupleBindStmt) error {
 		C.LLVMBuildStore(s.builder, coerced, binding.ptr)
 		s.bindPackedStoreValue(binding.typ, coerced)
 		s.invalidatePackedReadCaches()
+	}
+	return nil
+}
+
+func (s *functionState) emitLetDestructureStmt(stmt *ast.LetDestructureStmt) error {
+	if stmt == nil || stmt.Pattern == nil {
+		return nil
+	}
+	valueType := s.exprType(stmt.Value)
+	if valueType == nil {
+		return fmt.Errorf("missing semantic type for let destructuring value")
+	}
+	value, _, err := s.emitExpr(stmt.Value, valueType)
+	if err != nil {
+		return err
+	}
+	tempName := s.g.nextSyntheticName("let.destructure.")
+	tempAlloca, err := s.createEntryAlloca(tempName, valueType)
+	if err != nil {
+		return err
+	}
+	s.defineBinding(tempName, valueBinding{ptr: tempAlloca, typ: valueType, mutable: false})
+	C.LLVMBuildStore(s.builder, value, tempAlloca)
+	tempIdent := &ast.Ident{Position: stmt.Position, Name: tempName}
+	for _, field := range stmt.Pattern.Fields {
+		fieldExpr := &ast.FieldExpr{Position: field.Position, Object: tempIdent, Field: field.Field}
+		fieldValue, fieldType, err := s.emitExpr(fieldExpr, nil)
+		if err != nil {
+			return err
+		}
+		alloca, err := s.createEntryAlloca(field.Name, fieldType)
+		if err != nil {
+			return err
+		}
+		s.defineBinding(field.Name, valueBinding{ptr: alloca, typ: fieldType, mutable: false})
+		C.LLVMBuildStore(s.builder, fieldValue, alloca)
 	}
 	return nil
 }
@@ -2884,6 +2924,68 @@ func (s *functionState) emitIterLoopPatternBindings(pattern ast.MoveBindPattern,
 			fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, itemPtr, C.unsigned(fields[i].Index), cStringFree(p.Args[i].Name+".iter.field.ptr"))
 			refType := &semantic.RefType{Elem: fields[i].Type, Mutable: mode == ast.IterBindMutableRef, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny}
 			if err := s.emitIterLoopRefLocal(p.Args[i].Name, refType, fieldPtr); err != nil {
+				return err
+			}
+		}
+		return nil
+	case *ast.StructDestructurePattern:
+		if _, ok := semantic.StripAggregateStateType(itemType).(*semantic.StoreRowViewType); ok {
+			if mode != ast.IterBindValue {
+				return fmt.Errorf("iterable loop does not support ref binding for %s", itemType.String())
+			}
+			tempName := s.g.nextSyntheticName("iter.destructure.row.")
+			tempAlloca, err := s.createEntryAlloca(tempName, itemType)
+			if err != nil {
+				return err
+			}
+			s.defineBinding(tempName, valueBinding{ptr: tempAlloca, typ: itemType, mutable: false})
+			C.LLVMBuildStore(s.builder, itemValue, tempAlloca)
+			tempIdent := &ast.Ident{Position: p.Position, Name: tempName}
+			for _, entry := range p.Fields {
+				fieldExpr := &ast.FieldExpr{Position: entry.Position, Object: tempIdent, Field: entry.Field}
+				fieldValue, fieldType, err := s.emitExpr(fieldExpr, nil)
+				if err != nil {
+					return err
+				}
+				if err := s.emitMoveBindLocal(entry.Name, fieldType, fieldValue); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		fields, err := s.g.structLiteralFields(itemType)
+		if err != nil {
+			return err
+		}
+		fieldByName := make(map[string]structLiteralField, len(fields))
+		for _, field := range fields {
+			fieldByName[field.Decl.Name] = field
+		}
+		if mode == ast.IterBindValue {
+			for _, entry := range p.Fields {
+				field, ok := fieldByName[entry.Field]
+				if !ok {
+					return fmt.Errorf("struct destructuring field %q does not exist on %s", entry.Field, itemType.String())
+				}
+				fieldValue := C.LLVMBuildExtractValue(s.builder, itemValue, C.unsigned(field.Index), cStringFree(entry.Name+".iter.field"))
+				if err := s.emitMoveBindLocal(entry.Name, field.Type, fieldValue); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		containerLLVMType, err := s.g.lowerType(semantic.StripAggregateStateType(itemType))
+		if err != nil {
+			return err
+		}
+		for _, entry := range p.Fields {
+			field, ok := fieldByName[entry.Field]
+			if !ok {
+				return fmt.Errorf("struct destructuring field %q does not exist on %s", entry.Field, itemType.String())
+			}
+			fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, itemPtr, C.unsigned(field.Index), cStringFree(entry.Name+".iter.field.ptr"))
+			refType := &semantic.RefType{Elem: field.Type, Mutable: mode == ast.IterBindMutableRef, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny}
+			if err := s.emitIterLoopRefLocal(entry.Name, refType, fieldPtr); err != nil {
 				return err
 			}
 		}

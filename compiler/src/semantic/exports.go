@@ -67,7 +67,7 @@ func (a *Analyzer) analyzeExportFunc(decl *ast.ExportFuncDecl, seenPublicNames m
 		return
 	}
 
-	signature := a.funcTypeFromDecl(decl.Name, nil, nil, nil, nil, nil, nil, lexer.Pos{}, "", nil, nil, decl.Params, nil, nil, nil, decl.ReturnType, false)
+	signature := a.funcTypeFromDecl(decl.Name, nil, nil, nil, nil, nil, nil, lexer.Pos{}, "", nil, nil, decl.Params, nil, nil, nil, nil, nil, decl.ReturnType, false)
 	if !isCABICompatibleFuncType(signature) {
 		a.errorf(decl.Pos(), "export func %q is not C-ABI-compatible", decl.Name)
 		return

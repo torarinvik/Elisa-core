@@ -57,6 +57,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikeForStmt() {
 				return p.parseForStmt()
 			}
+		case "let":
+			if p.looksLikeLetDestructureStmt() {
+				return p.parseLetDestructureStmt()
+			}
 		case "scope":
 			if p.looksLikeScopeStmt() {
 				return p.parseScopeStmt()
@@ -124,6 +128,9 @@ func (p *Parser) parseStmt() ast.Stmt {
 	case lexer.TOKEN_IN:
 		return p.parseInStore()
 	case lexer.TOKEN_WITH:
+		if p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "args" && p.tokens[p.pos+2].Kind == lexer.TOKEN_LPAREN {
+			return p.parseArgsScopeStmt()
+		}
 		return p.parseWithStmt()
 	case lexer.TOKEN_WHILE:
 		return p.parseWhile()
@@ -287,7 +294,9 @@ func (p *Parser) looksLikeForStmt() bool {
 	if p.pos+2 >= len(p.tokens) {
 		return false
 	}
-	if p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT && p.tokens[p.pos+1].Kind != lexer.TOKEN_MUTABLE {
+	switch p.tokens[p.pos+1].Kind {
+	case lexer.TOKEN_IDENT, lexer.TOKEN_MUTABLE, lexer.TOKEN_LBRACE:
+	default:
 		return false
 	}
 	depth := 0
@@ -295,9 +304,9 @@ func (p *Parser) looksLikeForStmt() bool {
 	for i := p.pos + 1; i < len(p.tokens); i++ {
 		tok := p.tokens[i]
 		switch tok.Kind {
-		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
 			depth++
-		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET:
+		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_RBRACE:
 			if depth > 0 {
 				depth--
 			}
@@ -515,7 +524,28 @@ func (p *Parser) parseIterLoopPattern() ast.MoveBindPattern {
 		}
 		return &ast.MoveBindTuplePattern{Position: pos, Args: args}
 	}
+	if p.peek() == lexer.TOKEN_LBRACE || p.peekQualifiedStructDestructurePattern() {
+		return p.parseStructDestructurePattern()
+	}
 	return p.parseMoveBindPattern()
+}
+
+func (p *Parser) looksLikeLetDestructureStmt() bool {
+	if p.peek() != lexer.TOKEN_IDENT || p.cur().Text != "let" || p.pos+1 >= len(p.tokens) {
+		return false
+	}
+	switch p.tokens[p.pos+1].Kind {
+	case lexer.TOKEN_LBRACE:
+		return true
+	case lexer.TOKEN_IDENT:
+		i := p.pos + 2
+		for i+1 < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_DOT && p.tokens[i+1].Kind == lexer.TOKEN_IDENT {
+			i += 2
+		}
+		return i < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_LBRACE
+	default:
+		return false
+	}
 }
 
 func (p *Parser) parseWaitAllStmt() ast.Stmt {
@@ -675,6 +705,76 @@ func (p *Parser) parseCanStmt() *ast.CanStmt {
 	p.expectNewline()
 	body := p.parseBlock()
 	return &ast.CanStmt{Position: pos, Permissions: permissions, Body: body}
+}
+
+func (p *Parser) parseArgsScopeItems() ([]ast.WithArg, []ast.ParamPackUse, []ast.ArgsScopeItem) {
+	args := make([]ast.WithArg, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
+	packs := make([]ast.ParamPackUse, 0, 1)
+	items := make([]ast.ArgsScopeItem, 0, cap(args))
+	if p.peek() == lexer.TOKEN_RPAREN {
+		return nil, nil, nil
+	}
+	sawPack := false
+	sawArg := false
+	for {
+		if p.matchIdentText("use") {
+			if sawPack {
+				p.errorf("args-scope parameter-pack application may appear at most once")
+			}
+			if sawArg {
+				p.errorf("args-scope parameter-pack application must appear before ordinary named arguments")
+			}
+			pack := p.parseParamPackUseWithArgs()
+			packs = append(packs, pack)
+			items = append(items, ast.ArgsScopeItem{Position: pack.Position, Pack: pack, IsPack: true})
+			sawPack = true
+		} else {
+			pos := p.cur().Pos
+			name := p.expect(lexer.TOKEN_IDENT).Text
+			arg := ast.WithArg{Position: pos, Name: name}
+			switch {
+			case p.match(lexer.TOKEN_ASSIGN):
+				arg.Value = p.parseExpr()
+			case p.match(lexer.TOKEN_COLON):
+				if p.peek() == lexer.TOKEN_COMMA || p.peek() == lexer.TOKEN_RPAREN {
+					arg.Value = &ast.Ident{Position: pos, Name: name}
+					arg.Shorthand = true
+				} else {
+					arg.Value = p.parseExpr()
+				}
+			default:
+				p.errorf("expected `:` or `=` after args-scope binding %q", name)
+				arg.Value = &ast.Ident{Position: pos, Name: name}
+				arg.Shorthand = true
+			}
+			args = append(args, arg)
+			items = append(items, ast.ArgsScopeItem{Position: pos, Arg: arg})
+			sawArg = true
+		}
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+		if p.peek() == lexer.TOKEN_RPAREN {
+			break
+		}
+	}
+	if len(packs) == 0 {
+		items = nil
+	}
+	return args, packs, items
+}
+
+func (p *Parser) parseArgsScopeStmt() *ast.ArgsScopeStmt {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_WITH)
+	p.expectIdentText("args")
+	p.expect(lexer.TOKEN_LPAREN)
+	args, packs, items := p.parseArgsScopeItems()
+	p.expect(lexer.TOKEN_RPAREN)
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	body := p.parseBlock()
+	return &ast.ArgsScopeStmt{Position: pos, Args: args, ParamPacks: packs, ItemOrder: items, Body: body}
 }
 
 func (p *Parser) parseWithStmt() *ast.WithStmt {
@@ -1382,6 +1482,53 @@ func (p *Parser) parseMoveBindPattern() ast.MoveBindPattern {
 	}
 	p.expect(lexer.TOKEN_RPAREN)
 	return &ast.MoveBindStructPattern{Position: pos, TypeName: name, Args: args}
+}
+
+func (p *Parser) peekQualifiedStructDestructurePattern() bool {
+	if p.peek() != lexer.TOKEN_IDENT {
+		return false
+	}
+	i := p.pos + 1
+	for i+1 < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_DOT && p.tokens[i+1].Kind == lexer.TOKEN_IDENT {
+		i += 2
+	}
+	return i < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_LBRACE
+}
+
+func (p *Parser) parseStructDestructurePattern() *ast.StructDestructurePattern {
+	pos := p.cur().Pos
+	typeName := ""
+	if p.peekQualifiedStructDestructurePattern() {
+		typeName = p.parseQualifiedDeclName()
+	}
+	p.expect(lexer.TOKEN_LBRACE)
+	fields := make([]ast.DestructureField, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACE))
+	if p.peek() != lexer.TOKEN_RBRACE {
+		for {
+			fieldPos := p.cur().Pos
+			fieldName := p.expect(lexer.TOKEN_IDENT).Text
+			bindName := fieldName
+			if p.match(lexer.TOKEN_COLON) {
+				bindName = p.expect(lexer.TOKEN_IDENT).Text
+			}
+			fields = append(fields, ast.DestructureField{Position: fieldPos, Field: fieldName, Name: bindName})
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+	}
+	p.expect(lexer.TOKEN_RBRACE)
+	return &ast.StructDestructurePattern{Position: pos, TypeName: typeName, Fields: fields}
+}
+
+func (p *Parser) parseLetDestructureStmt() *ast.LetDestructureStmt {
+	pos := p.cur().Pos
+	p.expectIdentText("let")
+	pattern := p.parseStructDestructurePattern()
+	p.expect(lexer.TOKEN_ASSIGN)
+	value := p.parseValueExprAllowTuple()
+	p.expectNewlineAfterValueExpr(value)
+	return &ast.LetDestructureStmt{Position: pos, Pattern: pattern, Value: value}
 }
 
 func (p *Parser) parseMoveBindVariantArg() ast.MatchPatternArg {

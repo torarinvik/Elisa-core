@@ -35,6 +35,21 @@ type ContextBundle struct {
 	Decl   *ast.ContextDecl
 }
 
+type ParamPackField struct {
+	Name    string
+	Type    Type
+	Mutable bool
+	Decl    ast.ParamDecl
+}
+
+type ParamPack struct {
+	Name      string
+	Fields    []ParamPackField
+	Decl      *ast.ParamsDecl
+	Namespace string
+	Usings    []string
+}
+
 type Shape interface {
 	String() string
 	isShape()

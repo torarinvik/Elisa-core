@@ -253,11 +253,23 @@ type ContextDecl struct {
 	Fields   []ParamDecl
 }
 
+type ParamsDecl struct {
+	Position lexer.Pos
+	Name     string
+	Params   []ParamDecl
+}
+
 type WithArg struct {
 	Position  lexer.Pos
 	Name      string
 	Value     Expr
 	Shorthand bool
+}
+
+type ParamPackUse struct {
+	Position lexer.Pos
+	Name     string
+	Args     []WithArg
 }
 
 type WithBundleUse struct {
@@ -281,6 +293,13 @@ type WithItem struct {
 	IsBundle bool
 }
 
+type ParamSigItem struct {
+	Position lexer.Pos
+	Param    ParamDecl
+	Pack     ParamPackUse
+	IsPack   bool
+}
+
 type FuncDecl struct {
 	Position          lexer.Pos
 	Annotations       []Annotation
@@ -297,6 +316,8 @@ type FuncDecl struct {
 	Permissions       []PermissionRef
 	Ensures           []EnsuresClause
 	Params            []ParamDecl
+	ParamPacks        []ParamPackUse
+	ParamItemOrder    []ParamSigItem
 	ImplicitParams    []ParamDecl
 	ImplicitBundles   []string
 	ImplicitItemOrder []ImplicitSigItem
@@ -328,6 +349,8 @@ type ExternFuncDecl struct {
 	Permissions       []PermissionRef
 	Ensures           []EnsuresClause
 	Params            []ParamDecl
+	ParamPacks        []ParamPackUse
+	ParamItemOrder    []ParamSigItem
 	ImplicitParams    []ParamDecl
 	ImplicitBundles   []string
 	ImplicitItemOrder []ImplicitSigItem
@@ -613,6 +636,9 @@ type CallExpr struct {
 	ArgForwardPos lexer.Pos
 	Args          []Expr
 	ArgNames      []string
+	ArgShorthand  []bool
+	ParamPacks    []ParamPackUse
+	ArgItemOrder  []CallArgItem
 	Safe          bool
 	WithArgs      []WithArg
 	WithBundles   []WithBundleUse
@@ -630,6 +656,13 @@ type FieldExpr struct {
 	Object   Expr
 	Field    string
 	Safe     bool
+}
+
+type CallArgItem struct {
+	Position lexer.Pos
+	ArgIndex int
+	Pack     ParamPackUse
+	IsPack   bool
 }
 
 type ShorthandMemberExpr struct {
@@ -868,6 +901,18 @@ type MoveBindStructPattern struct {
 	Args     []MoveBindArg
 }
 
+type DestructureField struct {
+	Position lexer.Pos
+	Field    string
+	Name     string
+}
+
+type StructDestructurePattern struct {
+	Position lexer.Pos
+	TypeName string
+	Fields   []DestructureField
+}
+
 type MoveBindTuplePattern struct {
 	Position lexer.Pos
 	Args     []MoveBindArg
@@ -935,6 +980,12 @@ type TupleBindStmt struct {
 	Position lexer.Pos
 	Names    []TupleBindName
 	Declare  bool
+	Value    Expr
+}
+
+type LetDestructureStmt struct {
+	Position lexer.Pos
+	Pattern  *StructDestructurePattern
 	Value    Expr
 }
 
@@ -1057,6 +1108,21 @@ type WithStmt struct {
 	Bundles       []WithBundleUse
 	WithItemOrder []WithItem
 	Body          []Stmt
+}
+
+type ArgsScopeItem struct {
+	Position lexer.Pos
+	Arg      WithArg
+	Pack     ParamPackUse
+	IsPack   bool
+}
+
+type ArgsScopeStmt struct {
+	Position  lexer.Pos
+	Args      []WithArg
+	ParamPacks []ParamPackUse
+	ItemOrder []ArgsScopeItem
+	Body      []Stmt
 }
 
 type CascadeStmt struct {
@@ -1193,6 +1259,7 @@ func (n *ErrorDecl) Pos() lexer.Pos      { return n.Position }
 func (n *EffectsDecl) Pos() lexer.Pos    { return n.Position }
 func (n *PermissionDecl) Pos() lexer.Pos { return n.Position }
 func (n *ContextDecl) Pos() lexer.Pos    { return n.Position }
+func (n *ParamsDecl) Pos() lexer.Pos     { return n.Position }
 func (n *NamespaceDecl) Pos() lexer.Pos  { return n.Position }
 func (n *UsingDecl) Pos() lexer.Pos      { return n.Position }
 func (n *EnumDecl) Pos() lexer.Pos       { return n.Position }
@@ -1296,6 +1363,7 @@ func (n *MoveBindNamePattern) Pos() lexer.Pos { return n.Position }
 func (n *MoveBindStructPattern) Pos() lexer.Pos {
 	return n.Position
 }
+func (n *StructDestructurePattern) Pos() lexer.Pos { return n.Position }
 func (n *MoveBindTuplePattern) Pos() lexer.Pos   { return n.Position }
 func (n *MoveBindVariantPattern) Pos() lexer.Pos { return n.Position }
 func (n *ViewBindPattern) Pos() lexer.Pos        { return n.Position }
@@ -1304,6 +1372,7 @@ func (n *AugAssignStmt) Pos() lexer.Pos          { return n.Position }
 func (n *AsRefAssignStmt) Pos() lexer.Pos        { return n.Position }
 func (n *VarDeclStmt) Pos() lexer.Pos            { return n.Position }
 func (n *TupleBindStmt) Pos() lexer.Pos          { return n.Position }
+func (n *LetDestructureStmt) Pos() lexer.Pos     { return n.Position }
 func (n *MoveBindStmt) Pos() lexer.Pos           { return n.Position }
 func (n *OpenStmt) Pos() lexer.Pos               { return n.Position }
 func (n *ViewStmt) Pos() lexer.Pos               { return n.Position }
@@ -1318,6 +1387,7 @@ func (n *MatchStmt) Pos() lexer.Pos              { return n.Position }
 func (n *InStoreStmt) Pos() lexer.Pos            { return n.Position }
 func (n *CanStmt) Pos() lexer.Pos                { return n.Position }
 func (n *WithStmt) Pos() lexer.Pos               { return n.Position }
+func (n *ArgsScopeStmt) Pos() lexer.Pos          { return n.Position }
 func (n *CascadeStmt) Pos() lexer.Pos            { return n.Position }
 func (n *PoolStmt) Pos() lexer.Pos               { return n.Position }
 func (n *LockStmt) Pos() lexer.Pos               { return n.Position }
@@ -1344,6 +1414,7 @@ func (*ErrorDecl) nodeTag()                 {}
 func (*EffectsDecl) nodeTag()               {}
 func (*PermissionDecl) nodeTag()            {}
 func (*ContextDecl) nodeTag()               {}
+func (*ParamsDecl) nodeTag()                {}
 func (*NamespaceDecl) nodeTag()             {}
 func (*UsingDecl) nodeTag()                 {}
 func (*EnumDecl) nodeTag()                  {}
@@ -1425,6 +1496,7 @@ func (*MatchStructPattern) nodeTag()        {}
 func (*MatchVariantPattern) nodeTag()       {}
 func (*MoveBindNamePattern) nodeTag()       {}
 func (*MoveBindStructPattern) nodeTag()     {}
+func (*StructDestructurePattern) nodeTag()  {}
 func (*MoveBindTuplePattern) nodeTag()      {}
 func (*MoveBindVariantPattern) nodeTag()    {}
 func (*ViewBindPattern) nodeTag()           {}
@@ -1433,6 +1505,7 @@ func (*AugAssignStmt) nodeTag()             {}
 func (*AsRefAssignStmt) nodeTag()           {}
 func (*VarDeclStmt) nodeTag()               {}
 func (*TupleBindStmt) nodeTag()             {}
+func (*LetDestructureStmt) nodeTag()        {}
 func (*MoveBindStmt) nodeTag()              {}
 func (*OpenStmt) nodeTag()                  {}
 func (*ViewStmt) nodeTag()                  {}
@@ -1447,6 +1520,7 @@ func (*MatchStmt) nodeTag()                 {}
 func (*InStoreStmt) nodeTag()               {}
 func (*CanStmt) nodeTag()                   {}
 func (*WithStmt) nodeTag()                  {}
+func (*ArgsScopeStmt) nodeTag()             {}
 func (*CascadeStmt) nodeTag()               {}
 func (*ScopeStmt) nodeTag()                 {}
 func (*PoolStmt) nodeTag()                  {}
@@ -1472,6 +1546,7 @@ func (*ErrorDecl) declTag()        {}
 func (*EffectsDecl) declTag()      {}
 func (*PermissionDecl) declTag()   {}
 func (*ContextDecl) declTag()      {}
+func (*ParamsDecl) declTag()       {}
 func (*NamespaceDecl) declTag()    {}
 func (*UsingDecl) declTag()        {}
 func (*EnumDecl) declTag()         {}
@@ -1535,6 +1610,7 @@ func (*MatchStructPattern) matchPatternTag()        {}
 func (*MatchVariantPattern) matchPatternTag()       {}
 func (*MoveBindNamePattern) moveBindPatternTag()    {}
 func (*MoveBindStructPattern) moveBindPatternTag()  {}
+func (*StructDestructurePattern) moveBindPatternTag() {}
 func (*MoveBindTuplePattern) moveBindPatternTag()   {}
 func (*MoveBindVariantPattern) moveBindPatternTag() {}
 func (*ListLitExpr) exprTag()                       {}
@@ -1566,6 +1642,7 @@ func (*AugAssignStmt) stmtTag()         {}
 func (*AsRefAssignStmt) stmtTag()       {}
 func (*VarDeclStmt) stmtTag()           {}
 func (*TupleBindStmt) stmtTag()         {}
+func (*LetDestructureStmt) stmtTag()    {}
 func (*MoveBindStmt) stmtTag()          {}
 func (*OpenStmt) stmtTag()              {}
 func (*ViewStmt) stmtTag()              {}
@@ -1579,6 +1656,7 @@ func (*ParallelForStmt) stmtTag()       {}
 func (*InStoreStmt) stmtTag()           {}
 func (*CanStmt) stmtTag()               {}
 func (*WithStmt) stmtTag()              {}
+func (*ArgsScopeStmt) stmtTag()         {}
 func (*CascadeStmt) stmtTag()           {}
 func (*ScopeStmt) stmtTag()             {}
 func (*PoolStmt) stmtTag()              {}
@@ -1603,6 +1681,13 @@ func (n *CallExpr) ArgName(index int) string {
 		return ""
 	}
 	return n.ArgNames[index]
+}
+
+func (n *CallExpr) ArgIsShorthand(index int) bool {
+	if n == nil || index < 0 || index >= len(n.ArgShorthand) {
+		return false
+	}
+	return n.ArgShorthand[index]
 }
 
 func (n *CallExpr) NamedArgCount() int {

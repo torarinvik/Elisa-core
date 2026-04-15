@@ -34,6 +34,7 @@ type Result struct {
 	StaticInterfaces        map[string]*StaticInterface
 	StaticImpls             map[string]*StaticImpl
 	ContextBundles          map[string]*ContextBundle
+	ParamPacks              map[string]*ParamPack
 	ConstValues             map[string]ConstValue
 	ExprTypes               map[ast.Expr]Type
 	OptionalBindSourceTypes map[*ast.OptionalBindExpr]Type

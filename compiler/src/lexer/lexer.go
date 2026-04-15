@@ -835,6 +835,20 @@ func (l *Lexer) NextToken() Token {
 		l.pendingGroupedBlock = false
 		return l.finishToken(Token{Kind: TOKEN_RBRACKET, Text: "]", Pos: p})
 
+	case '{':
+		l.advance()
+		l.parenDepth++
+		l.pendingGroupedBlock = false
+		return l.finishToken(Token{Kind: TOKEN_LBRACE, Text: "{", Pos: p})
+
+	case '}':
+		l.advance()
+		if l.parenDepth > 0 {
+			l.parenDepth--
+		}
+		l.pendingGroupedBlock = false
+		return l.finishToken(Token{Kind: TOKEN_RBRACE, Text: "}", Pos: p})
+
 	case '?':
 		l.advance()
 		return l.finishToken(Token{Kind: TOKEN_QUESTION, Text: "?", Pos: p})

@@ -139,19 +139,25 @@ func (a *Analyzer) analyzeWithStmt(stmt *ast.WithStmt) {
 		if item.IsBundle {
 			explicitValues := make(map[string]ast.Expr, len(item.Bundle.Args))
 			for _, arg := range item.Bundle.Args {
+				valueExpr := a.resolveWithArgValueExpr(arg, "argument")
+				if arg.Shorthand {
+					explicitValues[arg.Name] = valueExpr
+					continue
+				}
 				tempName := a.nextImplicitTempName(arg.Name)
-				tempStmts = append(tempStmts, &ast.VarDeclStmt{Position: arg.Position, Name: tempName, Value: arg.Value})
+				tempStmts = append(tempStmts, &ast.VarDeclStmt{Position: arg.Position, Name: tempName, Value: valueExpr})
 				explicitValues[arg.Name] = &ast.Ident{Position: arg.Position, Name: tempName}
 			}
 			a.applyWithBundleBindings(item.Position, item.Bundle, working, explicitValues)
 			continue
 		}
 		if item.Arg.Shorthand {
-			working[item.Arg.Name] = item.Arg.Value
+			working[item.Arg.Name] = a.resolveWithArgValueExpr(item.Arg, "argument")
 			continue
 		}
+		valueExpr := a.resolveWithArgValueExpr(item.Arg, "argument")
 		tempName := a.nextImplicitTempName(item.Arg.Name)
-		tempStmts = append(tempStmts, &ast.VarDeclStmt{Position: item.Arg.Position, Name: tempName, Value: item.Arg.Value})
+		tempStmts = append(tempStmts, &ast.VarDeclStmt{Position: item.Arg.Position, Name: tempName, Value: valueExpr})
 		working[item.Arg.Name] = &ast.Ident{Position: item.Arg.Position, Name: tempName}
 	}
 	if len(tempStmts) != 0 {
@@ -190,12 +196,12 @@ func (a *Analyzer) resolveImplicitCallArgs(expr *ast.CallExpr, ft *FuncType, bin
 		if item.IsBundle {
 			explicitValues := make(map[string]ast.Expr, len(item.Bundle.Args))
 			for _, arg := range item.Bundle.Args {
-				explicitValues[arg.Name] = arg.Value
+				explicitValues[arg.Name] = a.resolveWithArgValueExpr(arg, "argument")
 			}
 			a.applyWithBundleBindings(item.Position, item.Bundle, working, explicitValues)
 			continue
 		}
-		working[item.Arg.Name] = item.Arg.Value
+		working[item.Arg.Name] = a.resolveWithArgValueExpr(item.Arg, "argument")
 		explicitSources[item.Arg.Name] = true
 	}
 	resolved := make([]ast.Expr, 0, len(ft.ImplicitParamNames))

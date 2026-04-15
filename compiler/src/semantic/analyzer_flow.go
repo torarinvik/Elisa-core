@@ -138,6 +138,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			}
 			a.consumeAffineValueExpr(fieldExpr, targetType, "assignment")
 		}
+	case *ast.LetDestructureStmt:
+		a.analyzeLetDestructureStmt(n)
 	case *ast.MoveBindStmt:
 		a.analyzeMoveBindStmt(n)
 	case *ast.OpenStmt:
@@ -367,6 +369,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.analyzeCanStmt(n)
 	case *ast.WithStmt:
 		a.analyzeWithStmt(n)
+	case *ast.ArgsScopeStmt:
+		a.analyzeArgsScopeStmt(n)
 
 	case *ast.PoolStmt:
 		a.analyzePoolStmt(n)
@@ -1135,6 +1139,19 @@ func (a *Analyzer) resolvedStructFields(actual Type) ([]moveBindResolvedField, b
 			fields = append(fields, moveBindResolvedField{Name: field.Name, Type: field.Type, Mutable: false})
 		}
 		return fields, true
+	case *StoreRowViewType:
+		if tt == nil || tt.Store == nil || tt.Store.Decl == nil {
+			return nil, false
+		}
+		fields := make([]moveBindResolvedField, 0, len(tt.Store.Decl.Fields))
+		for _, fieldDecl := range tt.Store.Decl.Fields {
+			field, ok := storeRowViewField(tt, fieldDecl.Name)
+			if !ok {
+				continue
+			}
+			fields = append(fields, moveBindResolvedField{Name: fieldDecl.Name, Type: field.Type, Mutable: field.Mutable})
+		}
+		return fields, true
 	case *GenericInstanceType:
 		structBase, ok := tt.Base.(*StructType)
 		if !ok {
@@ -1213,6 +1230,98 @@ func (a *Analyzer) resolveMoveBindStructPattern(pattern *ast.MoveBindStructPatte
 		limit = len(fields)
 	}
 	return fields[:limit], true
+}
+
+func (a *Analyzer) resolveStructDestructurePattern(pattern *ast.StructDestructurePattern, actual Type) ([]moveBindResolvedField, []ast.DestructureField, bool) {
+	if pattern == nil {
+		return nil, nil, false
+	}
+	actual = StripAggregateStateType(actual)
+	fields, ok := a.resolvedStructFields(actual)
+	if !ok {
+		a.errorf(pattern.Pos(), "destructuring requires a struct or store-row value, got %s", actual.String())
+		return nil, nil, false
+	}
+	switch tt := actual.(type) {
+	case *StructType:
+		if pattern.TypeName != "" {
+			if tt.Name != pattern.TypeName {
+				a.errorf(pattern.Pos(), "destructuring expects %q, got %q", pattern.TypeName, tt.Name)
+				return nil, nil, false
+			}
+			if tt.Decl == nil {
+				a.errorf(pattern.Pos(), "destructuring is not supported for builtin struct %q", tt.Name)
+				return nil, nil, false
+			}
+		}
+	case *GenericInstanceType:
+		base, _ := tt.Base.(*StructType)
+		if pattern.TypeName != "" {
+			if base == nil || base.Name != pattern.TypeName {
+				got := actual.String()
+				if base != nil {
+					got = base.Name
+				}
+				a.errorf(pattern.Pos(), "destructuring expects %q, got %q", pattern.TypeName, got)
+				return nil, nil, false
+			}
+			if base.Decl == nil {
+				a.errorf(pattern.Pos(), "destructuring is not supported for builtin struct %q", base.Name)
+				return nil, nil, false
+			}
+		}
+	case *StoreRowViewType:
+		if pattern.TypeName != "" && tt != nil && tt.Store != nil && tt.Store.Name != pattern.TypeName {
+			a.errorf(pattern.Pos(), "destructuring expects %q, got %q", pattern.TypeName, tt.Store.Name)
+			return nil, nil, false
+		}
+	case *TupleType:
+		a.errorf(pattern.Pos(), "destructuring requires a struct or store-row value, got %s", actual.String())
+		return nil, nil, false
+	}
+	fieldByName := make(map[string]moveBindResolvedField, len(fields))
+	for _, field := range fields {
+		fieldByName[field.Name] = field
+	}
+	resolved := make([]moveBindResolvedField, 0, len(pattern.Fields))
+	matched := make([]ast.DestructureField, 0, len(pattern.Fields))
+	for _, entry := range pattern.Fields {
+		field, ok := fieldByName[entry.Field]
+		if !ok {
+			a.errorf(entry.Position, "destructuring field %q does not exist on %s", entry.Field, actual.String())
+			continue
+		}
+		resolved = append(resolved, field)
+		matched = append(matched, entry)
+	}
+	if len(resolved) != len(pattern.Fields) {
+		return nil, nil, false
+	}
+	return resolved, matched, true
+}
+
+func (a *Analyzer) analyzeLetDestructureStmt(stmt *ast.LetDestructureStmt) {
+	if stmt == nil || stmt.Pattern == nil {
+		return
+	}
+	valueType := a.analyzeValueExpr(stmt.Value, nil)
+	fields, matched, ok := a.resolveStructDestructurePattern(stmt.Pattern, valueType)
+	if !ok {
+		return
+	}
+	for i := range fields {
+		binding := matched[i]
+		field := fields[i]
+		fieldExpr := &ast.FieldExpr{Position: binding.Position, Object: stmt.Value, Field: field.Name}
+		a.recordAnalyzedExprType(fieldExpr, field.Type)
+		sym := &Symbol{Name: binding.Name, Kind: SymbolLocal, Type: field.Type, Node: stmt, Mutable: false}
+		a.defineLocal(sym, binding.Position)
+		a.recordValueBinding(sym, fieldExpr)
+		a.recordFunctionValueBinding(sym, fieldExpr)
+		a.recordImmutableSymbolOptimizationFacts(sym, fieldExpr)
+		a.recordBorrowedOwnerRefBinding(sym, fieldExpr)
+		a.recordRegionRefBinding(sym, fieldExpr)
+	}
 }
 
 func (a *Analyzer) resolveMatchStructPattern(pattern *ast.MatchStructPattern, actual Type) ([]moveBindResolvedField, []*ast.MatchPatternArg, bool) {
@@ -2023,6 +2132,17 @@ func (a *Analyzer) bindIterLoopPattern(scope *Scope, pattern ast.MoveBindPattern
 			}
 			sym := &Symbol{Name: arg.Name, Kind: SymbolLocal, Type: bindingTypeFor(arg.Position, fields[i].Name, fields[i].Type, fields[i].Mutable), Node: p, Mutable: false}
 			a.defineLocal(sym, arg.Position)
+		}
+		return true
+	case *ast.StructDestructurePattern:
+		fields, matched, ok := a.resolveStructDestructurePattern(p, itemType)
+		if !ok {
+			return false
+		}
+		for i := range matched {
+			entry := matched[i]
+			sym := &Symbol{Name: entry.Name, Kind: SymbolLocal, Type: bindingTypeFor(entry.Position, fields[i].Name, fields[i].Type, fields[i].Mutable), Node: p, Mutable: false}
+			a.defineLocal(sym, entry.Position)
 		}
 		return true
 	case *ast.MoveBindTuplePattern:

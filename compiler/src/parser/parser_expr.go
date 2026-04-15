@@ -1087,15 +1087,71 @@ func (p *Parser) finishVisitArmChildBinding(nameTok lexer.Token) ast.VisitArmChi
 	return binding
 }
 
-func (p *Parser) parseCallArgs() ([]ast.Expr, []string, bool, lexer.Pos) {
+func (p *Parser) parseNamedArgList(endToken lexer.TokenKind, allowSpread bool) ([]ast.WithArg, bool) {
+	args := make([]ast.WithArg, 0, p.estimateCommaSeparatedCount(endToken))
+	spread := false
+	if p.peek() == endToken {
+		return nil, false
+	}
+	for {
+		if allowSpread && p.match(lexer.TOKEN_RANGE) {
+			if spread {
+				p.errorf("with bundle spread `..` can only appear once")
+			}
+			spread = true
+		} else {
+			pos := p.cur().Pos
+			name := p.expect(lexer.TOKEN_IDENT).Text
+			arg := ast.WithArg{Position: pos, Name: name}
+			switch {
+			case p.match(lexer.TOKEN_ASSIGN):
+				arg.Value = p.parseExpr()
+			case p.match(lexer.TOKEN_COLON):
+				if p.peek() == endToken || p.peek() == lexer.TOKEN_COMMA {
+					arg.Value = &ast.Ident{Position: pos, Name: name}
+					arg.Shorthand = true
+				} else {
+					arg.Value = p.parseExpr()
+				}
+			default:
+				p.errorf("expected `=` or `:` after named argument %q", name)
+				arg.Value = &ast.Ident{Position: pos, Name: name}
+				arg.Shorthand = true
+			}
+			args = append(args, arg)
+		}
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+		if p.peek() == endToken {
+			break
+		}
+	}
+	return args, spread
+}
+
+func (p *Parser) parseParamPackUseWithArgs() ast.ParamPackUse {
+	pos := p.tokens[p.pos-1].Pos
+	pack := ast.ParamPackUse{Position: pos, Name: p.parseQualifiedDeclName()}
+	p.expect(lexer.TOKEN_LPAREN)
+	pack.Args, _ = p.parseNamedArgList(lexer.TOKEN_RPAREN, false)
+	p.expect(lexer.TOKEN_RPAREN)
+	return pack
+}
+
+func (p *Parser) parseCallArgs() ([]ast.Expr, []string, []bool, []ast.ParamPackUse, []ast.CallArgItem, bool, lexer.Pos) {
 	argCapacity := p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN)
 	args := make([]ast.Expr, 0, argCapacity)
 	argNames := make([]string, 0, argCapacity)
+	argShorthand := make([]bool, 0, argCapacity)
+	packs := make([]ast.ParamPackUse, 0, 1)
+	items := make([]ast.CallArgItem, 0, argCapacity)
 	hasArgForward := false
 	argForwardPos := lexer.Pos{}
 	if p.peek() == lexer.TOKEN_RPAREN {
-		return nil, nil, false, lexer.Pos{}
+		return nil, nil, nil, nil, nil, false, lexer.Pos{}
 	}
+	sawPack := false
 	for {
 		if p.peek() == lexer.TOKEN_RANGE {
 			pos := p.cur().Pos
@@ -1106,8 +1162,31 @@ func (p *Parser) parseCallArgs() ([]ast.Expr, []string, bool, lexer.Pos) {
 			if len(args) != 0 {
 				p.errorf("call argument forwarding `..` must appear before other call arguments")
 			}
-			hasArgForward = true
-			argForwardPos = pos
+			hasArgForward, argForwardPos = true, pos
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+			if p.peek() == lexer.TOKEN_RPAREN {
+				break
+			}
+			continue
+		}
+		if p.matchIdentText("use") {
+			if sawPack {
+				p.errorf("call parameter-pack application may appear at most once")
+			}
+			if len(argNames) != 0 {
+				for _, name := range argNames {
+					if name != "" {
+						p.errorf("call parameter-pack application must appear before ordinary named arguments")
+						break
+					}
+				}
+			}
+			pack := p.parseParamPackUseWithArgs()
+			packs = append(packs, pack)
+			items = append(items, ast.CallArgItem{Position: pack.Position, Pack: pack, IsPack: true})
+			sawPack = true
 			if !p.match(lexer.TOKEN_COMMA) {
 				break
 			}
@@ -1117,12 +1196,30 @@ func (p *Parser) parseCallArgs() ([]ast.Expr, []string, bool, lexer.Pos) {
 			continue
 		}
 		name := ""
+		namePos := lexer.Pos{}
+		shorthand := false
 		if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON && !p.peekImmediateGroupedBlockExprStart() {
-			name = p.advance().Text
+			tok := p.advance()
+			name = tok.Text
+			namePos = tok.Pos
 			p.expect(lexer.TOKEN_COLON)
+			if p.peek() == lexer.TOKEN_COMMA || p.peek() == lexer.TOKEN_RPAREN {
+				shorthand = true
+			}
 		}
-		args = append(args, p.parseExpr())
+		var arg ast.Expr
+		if shorthand {
+			arg = &ast.Ident{Position: namePos, Name: name}
+		} else {
+			arg = p.parseExpr()
+		}
+		if name == "" && sawPack {
+			p.errorf("call parameter-pack application must come after all positional arguments")
+		}
+		args = append(args, arg)
 		argNames = append(argNames, name)
+		argShorthand = append(argShorthand, shorthand)
+		items = append(items, ast.CallArgItem{Position: arg.Pos(), ArgIndex: len(args) - 1})
 		if !p.match(lexer.TOKEN_COMMA) {
 			break
 		}
@@ -1142,10 +1239,10 @@ func (p *Parser) parseCallArgs() ([]ast.Expr, []string, bool, lexer.Pos) {
 			}
 		}
 	}
-	if !hasNamed {
-		return args, nil, hasArgForward, argForwardPos
+	if !hasNamed && len(packs) == 0 {
+		return args, nil, nil, nil, nil, hasArgForward, argForwardPos
 	}
-	return args, argNames, hasArgForward, argForwardPos
+	return args, argNames, argShorthand, packs, items, hasArgForward, argForwardPos
 }
 
 func (p *Parser) peekImmediateGroupedBlockExprStart() bool {
@@ -1166,31 +1263,7 @@ func (p *Parser) isImmediateGroupedBlockExprName(name string) bool {
 }
 
 func (p *Parser) parseWithBundleNamedArgs() ([]ast.WithArg, bool) {
-	args := make([]ast.WithArg, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
-	spread := false
-	if p.peek() == lexer.TOKEN_RPAREN {
-		return nil, false
-	}
-	for {
-		if p.match(lexer.TOKEN_RANGE) {
-			if spread {
-				p.errorf("with bundle spread `..` can only appear once")
-			}
-			spread = true
-		} else {
-			pos := p.cur().Pos
-			name := p.expect(lexer.TOKEN_IDENT).Text
-			p.expect(lexer.TOKEN_ASSIGN)
-			args = append(args, ast.WithArg{Position: pos, Name: name, Value: p.parseExpr()})
-		}
-		if !p.match(lexer.TOKEN_COMMA) {
-			break
-		}
-		if p.peek() == lexer.TOKEN_RPAREN {
-			break
-		}
-	}
-	return args, spread
+	return p.parseNamedArgList(lexer.TOKEN_RPAREN, true)
 }
 
 func (p *Parser) parseWithValueClause() ([]ast.WithArg, []ast.WithBundleUse, []ast.WithItem) {
@@ -1364,9 +1437,9 @@ func (p *Parser) parsePostfix() ast.Expr {
 				}
 				p.expect(lexer.TOKEN_RBRACKET)
 				p.expect(lexer.TOKEN_LPAREN)
-				args, argNames, hasArgForward, argForwardPos := p.parseCallArgs()
+				args, argNames, argShorthand, paramPacks, argItems, hasArgForward, argForwardPos := p.parseCallArgs()
 				p.expect(lexer.TOKEN_RPAREN)
-				expr = &ast.CallExpr{Position: pos, Func: &ast.SpecializeExpr{Position: pos, Operand: expr, TypeArgs: typeArgs}, HasArgForward: hasArgForward, ArgForwardPos: argForwardPos, Args: args, ArgNames: argNames}
+				expr = &ast.CallExpr{Position: pos, Func: &ast.SpecializeExpr{Position: pos, Operand: expr, TypeArgs: typeArgs}, HasArgForward: hasArgForward, ArgForwardPos: argForwardPos, Args: args, ArgNames: argNames, ArgShorthand: argShorthand, ParamPacks: paramPacks, ArgItemOrder: argItems}
 				expr = p.attachOptionalCallWithClause(expr)
 				continue
 			}
@@ -1390,12 +1463,15 @@ func (p *Parser) parsePostfix() ast.Expr {
 			p.advance()
 			var args []ast.Expr
 			var argNames []string
+			var argShorthand []bool
+			var paramPacks []ast.ParamPackUse
+			var argItems []ast.CallArgItem
 			var hasArgForward bool
 			var argForwardPos lexer.Pos
 			if ident, ok := expr.(*ast.Ident); ok && ident.Name == "children" {
 				args, argNames = p.parseChildrenCallArgs()
 			} else {
-				args, argNames, hasArgForward, argForwardPos = p.parseCallArgs()
+				args, argNames, argShorthand, paramPacks, argItems, hasArgForward, argForwardPos = p.parseCallArgs()
 			}
 			p.expect(lexer.TOKEN_RPAREN)
 			safe := false
@@ -1411,6 +1487,9 @@ func (p *Parser) parsePostfix() ast.Expr {
 				ArgForwardPos: argForwardPos,
 				Args:          args,
 				ArgNames:      argNames,
+				ArgShorthand:  argShorthand,
+				ParamPacks:    paramPacks,
+				ArgItemOrder:  argItems,
 				Safe:          safe,
 			}
 			expr = p.attachOptionalCallWithClause(expr)

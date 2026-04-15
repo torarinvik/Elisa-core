@@ -486,6 +486,8 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		}
 	case *ast.TupleBindStmt:
 		c.collectExpr(n.Value)
+	case *ast.LetDestructureStmt:
+		c.collectExpr(n.Value)
 	case *ast.MoveBindStmt:
 		c.collectExpr(n.Value)
 		if n.Store != nil {
@@ -501,6 +503,16 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		c.collectExpr(n.Value)
 		if n.Store != nil {
 			c.collectExpr(n.Store)
+		}
+		c.collectStmts(n.Body)
+	case *ast.ArgsScopeStmt:
+		for _, arg := range n.Args {
+			c.collectExpr(arg.Value)
+		}
+		for _, pack := range n.ParamPacks {
+			for _, arg := range pack.Args {
+				c.collectExpr(arg.Value)
+			}
 		}
 		c.collectStmts(n.Body)
 	case *ast.DeferStmt:
@@ -726,6 +738,8 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		}
 	case *ast.TupleBindStmt:
 		a.validatePermissionExpr(n.Value, granted)
+	case *ast.LetDestructureStmt:
+		a.validatePermissionExpr(n.Value, granted)
 	case *ast.MoveBindStmt:
 		a.validatePermissionExpr(n.Value, granted)
 		if n.Store != nil {
@@ -741,6 +755,16 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		a.validatePermissionExpr(n.Value, granted)
 		if n.Store != nil {
 			a.validatePermissionExpr(n.Store, granted)
+		}
+		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
+	case *ast.ArgsScopeStmt:
+		for _, arg := range n.Args {
+			a.validatePermissionExpr(arg.Value, granted)
+		}
+		for _, pack := range n.ParamPacks {
+			for _, arg := range pack.Args {
+				a.validatePermissionExpr(arg.Value, granted)
+			}
 		}
 		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.DeferStmt:
