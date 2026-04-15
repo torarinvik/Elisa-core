@@ -1151,6 +1151,27 @@ func (s *functionState) emitLetDestructureStmt(stmt *ast.LetDestructureStmt) err
 	if err != nil {
 		return err
 	}
+	if _, ok := semantic.StripAggregateStateType(valueType).(*semantic.StoreRowViewType); ok {
+		tempName := s.g.nextSyntheticName("let.destructure.")
+		tempAlloca, err := s.createEntryAlloca(tempName, valueType)
+		if err != nil {
+			return err
+		}
+		s.defineBinding(tempName, valueBinding{ptr: tempAlloca, typ: valueType, mutable: false})
+		C.LLVMBuildStore(s.builder, value, tempAlloca)
+		tempIdent := &ast.Ident{Position: stmt.Position, Name: tempName}
+		for _, arg := range stmt.Pattern.Args {
+			fieldExpr := &ast.FieldExpr{Position: arg.Position, Object: tempIdent, Field: moveBindFieldName(arg)}
+			fieldValue, fieldType, err := s.emitExpr(fieldExpr, nil)
+			if err != nil {
+				return err
+			}
+			if err := s.emitMoveBindLocal(arg.Name, fieldType, fieldValue); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	fields, err := s.g.structLiteralFields(valueType)
 	if err != nil {
 		return err
@@ -2904,6 +2925,35 @@ func (s *functionState) emitIterLoopPatternBindings(pattern ast.MoveBindPattern,
 		}
 		return s.emitIterLoopRefLocal(p.Name, &semantic.RefType{Elem: itemType, Mutable: mode == ast.IterBindMutableRef, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny}, itemPtr)
 	case *ast.MoveBindStructPattern:
+		if p.Brace {
+			if _, ok := semantic.StripAggregateStateType(itemType).(*semantic.StoreRowViewType); ok {
+				if mode != ast.IterBindValue {
+					return fmt.Errorf("iterable loop does not support ref binding for %s", itemType.String())
+				}
+				tempName := s.g.nextSyntheticName("iter.destructure.row.")
+				tempAlloca, err := s.createEntryAlloca(tempName, itemType)
+				if err != nil {
+					return err
+				}
+				s.defineBinding(tempName, valueBinding{ptr: tempAlloca, typ: itemType, mutable: false})
+				C.LLVMBuildStore(s.builder, itemValue, tempAlloca)
+				tempIdent := &ast.Ident{Position: p.Position, Name: tempName}
+				for _, arg := range p.Args {
+					if arg.Name == "_" {
+						continue
+					}
+					fieldExpr := &ast.FieldExpr{Position: arg.Position, Object: tempIdent, Field: moveBindFieldName(arg)}
+					fieldValue, fieldType, err := s.emitExpr(fieldExpr, nil)
+					if err != nil {
+						return err
+					}
+					if err := s.emitMoveBindLocal(arg.Name, fieldType, fieldValue); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+		}
 		fields, err := s.g.structLiteralFields(itemType)
 		if err != nil {
 			return err

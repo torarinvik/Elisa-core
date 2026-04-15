@@ -446,8 +446,6 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 			op = " = "
 		}
 		f.writePrefixedMultiline(level, "", strings.Join(names, ", ")+op+formatExpr(n.Value))
-	case *ast.LetDestructureStmt:
-		f.writePrefixedMultiline(level, "", "let "+formatStructDestructurePattern(n.Pattern)+" = "+formatExpr(n.Value))
 	case *ast.MoveBindStmt:
 		line := formatExpr(n.Value)
 		if _, ok := n.Value.(*ast.MoveExpr); !ok {
@@ -1634,8 +1632,6 @@ func formatMoveBindPattern(pattern ast.MoveBindPattern) string {
 			return n.TypeName + "{" + strings.Join(parts, ", ") + "}"
 		}
 		return n.TypeName + "(" + strings.Join(parts, ", ") + ")"
-	case *ast.StructDestructurePattern:
-		return formatStructDestructurePattern(n)
 	case *ast.MoveBindTuplePattern:
 		parts := make([]string, 0, len(n.Args))
 		for _, arg := range n.Args {
@@ -1647,24 +1643,6 @@ func formatMoveBindPattern(pattern ast.MoveBindPattern) string {
 	default:
 		return "<move-pattern>"
 	}
-}
-
-func formatStructDestructurePattern(pattern *ast.StructDestructurePattern) string {
-	if pattern == nil {
-		return "<destructure-pattern>"
-	}
-	parts := make([]string, 0, len(pattern.Fields))
-	for _, field := range pattern.Fields {
-		if field.Field == field.Name {
-			parts = append(parts, field.Field)
-			continue
-		}
-		parts = append(parts, field.Field+": "+field.Name)
-	}
-	if pattern.TypeName != "" {
-		return pattern.TypeName + "{" + strings.Join(parts, ", ") + "}"
-	}
-	return "{" + strings.Join(parts, ", ") + "}"
 }
 
 func formatMoveBindVariantPattern(pattern *ast.MoveBindVariantPattern) string {

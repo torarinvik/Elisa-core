@@ -110,7 +110,7 @@ def build(pair: PairRow) -> i64:
     return 0
 `)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, `destructuring field "third" does not exist on PairRow`) {
+	if !strings.Contains(all, `struct "PairRow" has no field "third"`) {
 		t.Fatalf("expected missing destructure field diagnostic, got:\n%s", all)
 	}
 }
