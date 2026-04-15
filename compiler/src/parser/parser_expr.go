@@ -1071,14 +1071,35 @@ func (p *Parser) finishVisitArmChildBinding(nameTok lexer.Token) ast.VisitArmChi
 	return binding
 }
 
-func (p *Parser) parseCallArgs() ([]ast.Expr, []string) {
+func (p *Parser) parseCallArgs() ([]ast.Expr, []string, bool, lexer.Pos) {
 	argCapacity := p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN)
 	args := make([]ast.Expr, 0, argCapacity)
 	argNames := make([]string, 0, argCapacity)
+	hasArgForward := false
+	argForwardPos := lexer.Pos{}
 	if p.peek() == lexer.TOKEN_RPAREN {
-		return nil, nil
+		return nil, nil, false, lexer.Pos{}
 	}
 	for {
+		if p.peek() == lexer.TOKEN_RANGE {
+			pos := p.cur().Pos
+			p.advance()
+			if hasArgForward {
+				p.errorf("call argument forwarding `..` can only appear once")
+			}
+			if len(args) != 0 {
+				p.errorf("call argument forwarding `..` must appear before other call arguments")
+			}
+			hasArgForward = true
+			argForwardPos = pos
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+			if p.peek() == lexer.TOKEN_RPAREN {
+				break
+			}
+			continue
+		}
 		name := ""
 		if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON && !p.peekImmediateGroupedBlockExprStart() {
 			name = p.advance().Text
@@ -1097,10 +1118,18 @@ func (p *Parser) parseCallArgs() ([]ast.Expr, []string) {
 			break
 		}
 	}
-	if !hasNamed {
-		return args, nil
+	if hasArgForward {
+		for _, name := range argNames {
+			if name == "" {
+				p.errorf("call argument forwarding `..` only supports named arguments")
+				break
+			}
+		}
 	}
-	return args, argNames
+	if !hasNamed {
+		return args, nil, hasArgForward, argForwardPos
+	}
+	return args, argNames, hasArgForward, argForwardPos
 }
 
 func (p *Parser) peekImmediateGroupedBlockExprStart() bool {
@@ -1309,9 +1338,9 @@ func (p *Parser) parsePostfix() ast.Expr {
 				}
 				p.expect(lexer.TOKEN_RBRACKET)
 				p.expect(lexer.TOKEN_LPAREN)
-				args, argNames := p.parseCallArgs()
+				args, argNames, hasArgForward, argForwardPos := p.parseCallArgs()
 				p.expect(lexer.TOKEN_RPAREN)
-				expr = &ast.CallExpr{Position: pos, Func: &ast.SpecializeExpr{Position: pos, Operand: expr, TypeArgs: typeArgs}, Args: args, ArgNames: argNames}
+				expr = &ast.CallExpr{Position: pos, Func: &ast.SpecializeExpr{Position: pos, Operand: expr, TypeArgs: typeArgs}, HasArgForward: hasArgForward, ArgForwardPos: argForwardPos, Args: args, ArgNames: argNames}
 				expr = p.attachOptionalCallWithClause(expr)
 				continue
 			}
@@ -1331,13 +1360,15 @@ func (p *Parser) parsePostfix() ast.Expr {
 			p.advance()
 			var args []ast.Expr
 			var argNames []string
+			var hasArgForward bool
+			var argForwardPos lexer.Pos
 			if ident, ok := expr.(*ast.Ident); ok && ident.Name == "children" {
 				args, argNames = p.parseChildrenCallArgs()
 			} else {
-				args, argNames = p.parseCallArgs()
+				args, argNames, hasArgForward, argForwardPos = p.parseCallArgs()
 			}
 			p.expect(lexer.TOKEN_RPAREN)
-			expr = &ast.CallExpr{Position: pos, Func: expr, Args: args, ArgNames: argNames}
+			expr = &ast.CallExpr{Position: pos, Func: expr, HasArgForward: hasArgForward, ArgForwardPos: argForwardPos, Args: args, ArgNames: argNames}
 			expr = p.attachOptionalCallWithClause(expr)
 
 		case lexer.TOKEN_IF:

@@ -65,3 +65,67 @@ func TestParseRejectsDefaultsInDisallowedPositions(t *testing.T) {
 		})
 	}
 }
+
+func TestParseFunctionCallArgForwarding(t *testing.T) {
+	file, errs := parseSourceFile(t, "def consume(parser: i64, offset: i64, width: i64 = 0) -> i64:\n    return parser + offset + width\n\ndef build(parser: i64, offset: i64) -> i64:\n    return consume(.., width: 9)\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	buildDecl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[1])
+	}
+	ret, ok := buildDecl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return statement, got %T", buildDecl.Body[0])
+	}
+	call, ok := ret.Value.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected call expression, got %T", ret.Value)
+	}
+	if !call.HasArgForward {
+		t.Fatal("expected call argument forwarding to be recorded")
+	}
+	if len(call.Args) != 1 || len(call.ArgNames) != 1 || call.ArgNames[0] != "width" {
+		t.Fatalf("expected one named explicit arg after forwarding, got args=%d names=%v", len(call.Args), call.ArgNames)
+	}
+	formatted := unparse.FormatDecl(buildDecl)
+	if !strings.Contains(formatted, "consume(.., width: 9)") {
+		t.Fatalf("expected formatted output to preserve call forwarding, got:\n%s", formatted)
+	}
+}
+
+func TestParseRejectsInvalidFunctionCallArgForwarding(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{
+			name: "duplicate",
+			src:  "def consume(x: i64) -> i64:\n    return x\n\ndef build(x: i64) -> i64:\n    return consume(.., ..)\n",
+			want: "call argument forwarding `..` can only appear once",
+		},
+		{
+			name: "not first",
+			src:  "def consume(x: i64, y: i64) -> i64:\n    return x + y\n\ndef build(x: i64, y: i64) -> i64:\n    return consume(y: y, ..)\n",
+			want: "call argument forwarding `..` must appear before other call arguments",
+		},
+		{
+			name: "positional explicit arg",
+			src:  "def consume(x: i64, y: i64) -> i64:\n    return x + y\n\ndef build(x: i64, y: i64) -> i64:\n    return consume(.., y)\n",
+			want: "call argument forwarding `..` only supports named arguments",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, errs := parseSourceFile(t, tc.src)
+			if len(errs) == 0 {
+				t.Fatalf("expected parser errors for %s", tc.name)
+			}
+			if !strings.Contains(strings.Join(errs, "\n"), tc.want) {
+				t.Fatalf("expected %q, got %v", tc.want, errs)
+			}
+		})
+	}
+}

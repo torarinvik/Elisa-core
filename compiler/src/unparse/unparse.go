@@ -1056,8 +1056,15 @@ func formatExpr(expr ast.Expr) string {
 		return "move " + formatExpr(n.Operand)
 	case *ast.CallExpr:
 		funcText := formatExpr(n.Func)
-		parts := make([]string, 0, len(n.Args))
+		partCapacity := len(n.Args)
+		if n.HasArgForward {
+			partCapacity++
+		}
+		parts := make([]string, 0, partCapacity)
 		multiline := strings.Contains(funcText, "\n")
+		if n.HasArgForward {
+			parts = append(parts, "..")
+		}
 		for i, arg := range n.Args {
 			argText := formatExpr(arg)
 			if strings.Contains(argText, "\n") {

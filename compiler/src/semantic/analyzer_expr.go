@@ -5148,7 +5148,7 @@ func (a *Analyzer) resolveFunctionCallArgs(expr *ast.CallExpr, ft *FuncType) ([]
 	if expr.ResolvedArgsValid && expr.ResolvedCommonArgs == nil {
 		return expr.ResolvedArgs, true
 	}
-	if expr.NamedArgCount() == 0 {
+	if !expr.HasArgForward && expr.NamedArgCount() == 0 {
 		if len(expr.Args) > explicitParamCount {
 			expr.ResolvedArgsValid = true
 			expr.ResolvedArgs = expr.Args
@@ -5170,7 +5170,11 @@ func (a *Analyzer) resolveFunctionCallArgs(expr *ast.CallExpr, ft *FuncType) ([]
 		return ordered, true
 	}
 	if ft.Variadic {
-		a.errorf(expr.Pos(), "named arguments are not supported for variadic function %q", ft.Name)
+		if expr.HasArgForward {
+			a.errorf(expr.ArgForwardPos, "call argument forwarding `..` is not supported for variadic function %q", ft.Name)
+		} else {
+			a.errorf(expr.Pos(), "named arguments are not supported for variadic function %q", ft.Name)
+		}
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)
 		}
@@ -5196,12 +5200,27 @@ func (a *Analyzer) resolveFunctionCallArgs(expr *ast.CallExpr, ft *FuncType) ([]
 	}
 	ordered := make([]ast.Expr, explicitParamCount)
 	filled := make([]bool, explicitParamCount)
+	filledExplicit := make([]bool, explicitParamCount)
+	if expr.HasArgForward {
+		for i, name := range ft.ExplicitParamNames {
+			if arg, ok := a.lookupCallForwardValueExpr(name); ok {
+				ordered[i] = arg
+				filled[i] = true
+			}
+		}
+	}
 	sawNamed := false
 	nextPositional := 0
 	ok := true
 	for i, arg := range expr.Args {
 		name := expr.ArgName(i)
 		if name == "" {
+			if expr.HasArgForward {
+				a.errorf(arg.Pos(), "call argument forwarding `..` only supports named arguments")
+				a.analyzeExpr(arg)
+				ok = false
+				continue
+			}
 			if sawNamed {
 				a.errorf(arg.Pos(), "function %q cannot use positional arguments after named arguments", ft.Name)
 				a.analyzeExpr(arg)
@@ -5216,6 +5235,7 @@ func (a *Analyzer) resolveFunctionCallArgs(expr *ast.CallExpr, ft *FuncType) ([]
 			}
 			ordered[nextPositional] = arg
 			filled[nextPositional] = true
+			filledExplicit[nextPositional] = true
 			nextPositional++
 			continue
 		}
@@ -5227,7 +5247,7 @@ func (a *Analyzer) resolveFunctionCallArgs(expr *ast.CallExpr, ft *FuncType) ([]
 			ok = false
 			continue
 		}
-		if filled[index] {
+		if filledExplicit[index] {
 			a.errorf(arg.Pos(), "function %q parameter %q is specified more than once", ft.Name, name)
 			a.analyzeExpr(arg)
 			ok = false
@@ -5235,6 +5255,7 @@ func (a *Analyzer) resolveFunctionCallArgs(expr *ast.CallExpr, ft *FuncType) ([]
 		}
 		ordered[index] = arg
 		filled[index] = true
+		filledExplicit[index] = true
 	}
 	if !a.fillMissingDefaultCallArgs(expr, ft, ordered, filled, false) {
 		ok = false
@@ -5246,6 +5267,33 @@ func (a *Analyzer) resolveFunctionCallArgs(expr *ast.CallExpr, ft *FuncType) ([]
 	expr.ResolvedArgs = ordered
 	expr.ResolvedCommonArgs = nil
 	return ordered, true
+}
+
+func (a *Analyzer) lookupCallForwardValueExpr(name string) (ast.Expr, bool) {
+	if a == nil || name == "" || a.currentScope == nil {
+		return nil, false
+	}
+	for scope := a.currentScope; scope != nil; scope = scope.Parent {
+		if scope == a.globalScope {
+			if sym, ok := scope.Symbols[name]; ok && sym != nil {
+				return nil, false
+			}
+			break
+		}
+		sym, ok := scope.Symbols[name]
+		if !ok || sym == nil {
+			continue
+		}
+		root := symbolAliasRoot(sym)
+		if root == nil {
+			root = sym
+		}
+		if root.Kind != SymbolLocal && root.Kind != SymbolParam {
+			return nil, false
+		}
+		return &ast.Ident{Position: lexer.Pos{}, Name: name}, true
+	}
+	return nil, false
 }
 
 func (a *Analyzer) fillMissingDefaultCallArgs(expr *ast.CallExpr, ft *FuncType, ordered []ast.Expr, filled []bool, preferGenericMissing bool) bool {

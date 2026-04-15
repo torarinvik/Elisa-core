@@ -85,6 +85,75 @@ def build() -> i64:
 	}
 }
 
+func TestAnalyzeCallArgForwardingFillsSameNameParams(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "call_arg_forwarding_basic.llcontext", `def consume(parser: i64, offset: i64, width: i64 = 9) -> i64:
+    return parser + offset + width
+
+def build(parser: i64, offset: i64) -> i64:
+    return consume(..)
+`)
+	buildSym, _ := result.GlobalScope.Lookup("build")
+	buildDecl := buildSym.Node.(*ast.FuncDecl)
+	ret := buildDecl.Body[0].(*ast.ReturnStmt)
+	call := ret.Value.(*ast.CallExpr)
+	if !call.ResolvedArgsValid || len(call.ResolvedArgs) != 3 {
+		t.Fatalf("expected 3 resolved args, got %#v", call.ResolvedArgs)
+	}
+	if ident, ok := call.ResolvedArgs[0].(*ast.Ident); !ok || ident.Name != "parser" {
+		t.Fatalf("expected forwarded parser arg, got %T %#v", call.ResolvedArgs[0], call.ResolvedArgs[0])
+	}
+	if ident, ok := call.ResolvedArgs[1].(*ast.Ident); !ok || ident.Name != "offset" {
+		t.Fatalf("expected forwarded offset arg, got %T %#v", call.ResolvedArgs[1], call.ResolvedArgs[1])
+	}
+	if lit, ok := call.ResolvedArgs[2].(*ast.IntLit); !ok || lit.Value != "9" {
+		t.Fatalf("expected trailing default arg 9, got %T %#v", call.ResolvedArgs[2], call.ResolvedArgs[2])
+	}
+}
+
+func TestAnalyzeCallArgForwardingExplicitArgsOverrideForwardedOnes(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "call_arg_forwarding_override.llcontext", `def consume(parser: i64, offset: i64, width: i64 = 9) -> i64:
+    return parser + offset + width
+
+def build(parser: i64, offset: i64) -> i64:
+    return consume(.., offset: 5)
+`)
+	buildSym, _ := result.GlobalScope.Lookup("build")
+	buildDecl := buildSym.Node.(*ast.FuncDecl)
+	ret := buildDecl.Body[0].(*ast.ReturnStmt)
+	call := ret.Value.(*ast.CallExpr)
+	if lit, ok := call.ResolvedArgs[1].(*ast.IntLit); !ok || lit.Value != "5" {
+		t.Fatalf("expected explicit offset arg to override forwarded one, got %T %#v", call.ResolvedArgs[1], call.ResolvedArgs[1])
+	}
+}
+
+func TestAnalyzeCallArgForwardingIgnoresNonValueSymbols(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "call_arg_forwarding_non_value_ignored.llcontext", `struct value:
+    inner: i64
+
+def consume(value: i64) -> i64:
+    return value
+
+def build() -> i64:
+    return consume(..)
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `function "consume" is missing argument for parameter "value"`) {
+		t.Fatalf("expected missing argument diagnostic after ignoring non-value symbol, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeCallArgForwardingRejectsVariadicCalls(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "call_arg_forwarding_variadic_rejected.llcontext", `extern consume(fmt: i64, ...) -> void
+
+def build(fmt: i64) -> void:
+    consume(..)
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "call argument forwarding `..` is not supported for variadic function") {
+		t.Fatalf("expected variadic forwarding diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeNamedDefaultArgsFillTrailingSubset(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "default_args_named_subset.llcontext", `def sum3(x: i64, y: i64 = 1, z: i64 = 2) -> i64:
     return x + y + z

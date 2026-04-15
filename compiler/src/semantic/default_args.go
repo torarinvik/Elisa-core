@@ -94,7 +94,7 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 		if len(n.WithItemOrder) != 0 && withItems == nil {
 			return nil
 		}
-		return &ast.CallExpr{Position: n.Position, Func: fn, Args: args, ArgNames: append([]string(nil), n.ArgNames...), WithArgs: withArgs, WithBundles: withBundles, WithItemOrder: withItems}
+		return &ast.CallExpr{Position: n.Position, Func: fn, HasArgForward: n.HasArgForward, ArgForwardPos: n.ArgForwardPos, Args: args, ArgNames: append([]string(nil), n.ArgNames...), WithArgs: withArgs, WithBundles: withBundles, WithItemOrder: withItems}
 	case *ast.CastExpr:
 		operand := cloneDefaultArgExpr(n.Operand)
 		if n.Operand != nil && operand == nil {

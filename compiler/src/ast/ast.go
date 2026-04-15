@@ -596,6 +596,8 @@ type MoveExpr struct {
 type CallExpr struct {
 	Position      lexer.Pos
 	Func          Expr
+	HasArgForward bool
+	ArgForwardPos lexer.Pos
 	Args          []Expr
 	ArgNames      []string
 	WithArgs      []WithArg
