@@ -32,7 +32,7 @@ def add_twice(x: i64) with MathCtx -> i64:
 
 def main() -> i64:
     offset: i64 = 10
-    with MathCtx():
+    with MathCtx(..):
 		base: i64 = add_twice(5)
         return generic_id[i64](base)
 `)
@@ -57,7 +57,7 @@ def generic_id[T](value: T) with MathCtx -> T:
 
 def main() -> i64:
     offset: i64 = 35
-    return generic_id.specialize[i64]()(offset) with MathCtx()
+    return generic_id.specialize[i64]()(offset) with MathCtx(..)
 `)
 
 	var stdout bytes.Buffer
@@ -70,7 +70,7 @@ def main() -> i64:
 	if strings.Contains(formatted, ".specialize[") {
 		t.Fatalf("expected formatted output to normalize legacy specialize syntax, got:\n%s", formatted)
 	}
-	if !strings.Contains(formatted, "generic_id[i64](offset) with MathCtx()") {
+	if !strings.Contains(formatted, "generic_id[i64](offset) with MathCtx(..)") {
 		t.Fatalf("expected formatted output to contain normalized generic call with trailing bundle, got:\n%s", formatted)
 	}
 }

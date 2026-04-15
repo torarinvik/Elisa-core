@@ -591,6 +591,59 @@ func (a *Analyzer) exprCanYieldWritableRef(expr ast.Expr) bool {
 	}
 }
 
+func (a *Analyzer) exprCanYieldAddressableValue(expr ast.Expr) bool {
+	stripped := stripMutationTargetExpr(expr)
+	if stripped == nil {
+		return false
+	}
+	switch n := stripped.(type) {
+	case *ast.Ident:
+		var (
+			sym *Symbol
+			ok  bool
+		)
+		if a.currentScope != nil {
+			sym, ok = a.currentScope.Lookup(n.Name)
+		}
+		if !ok {
+			sym, _, ok = a.lookupVisibleGlobal(n.Name)
+		}
+		if !ok || sym == nil {
+			return false
+		}
+		switch sym.Kind {
+		case SymbolLocal, SymbolParam, SymbolGlobal, SymbolConst, SymbolExternVar:
+			return true
+		default:
+			return false
+		}
+	case *ast.FieldExpr:
+		if _, ok := a.lookupFieldNoError(a.analyzeExpr(n.Object), n.Field); !ok {
+			return false
+		}
+		if _, ok := a.exprTypes[n.Object].(*RefType); ok {
+			return true
+		}
+		if _, ok := a.analyzeExpr(n.Object).(*RefType); ok {
+			return true
+		}
+		return a.exprCanYieldAddressableValue(n.Object)
+	case *ast.IndexExpr:
+		objType := a.analyzeExpr(n.Object)
+		if _, ok := objType.(*RefType); ok {
+			return true
+		}
+		switch StripAggregateStateType(objType).(type) {
+		case *ArrayType, *DArrayType, *DArrayViewType, *ViewType:
+			return a.exprCanYieldAddressableValue(n.Object)
+		default:
+			return false
+		}
+	default:
+		return false
+	}
+}
+
 func (a *Analyzer) analyzeCanExpr(expr *ast.CanExpr) Type {
 	if expr == nil {
 		return invalidType
@@ -1398,7 +1451,8 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 	}
 	for i := 0; i < len(orderedArgs); i++ {
 		if i < limit {
-			actual, ok := a.analyzePackedEnumConstructorArg(orderedArgs[i], variant, i, enumType.Name)
+			var actual Type
+			orderedArgs[i], actual, ok = a.analyzePackedEnumConstructorArg(orderedArgs[i], variant, i, enumType.Name)
 			if !ok {
 				label := variant.PayloadLabel(i)
 				if label != "" {
@@ -1421,30 +1475,32 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 			a.analyzeExpr(arg)
 			continue
 		}
-		actual := a.analyzeValueExpr(arg, field.Type)
+		var actual Type
+		commonArgs[commonDecl.Name], actual = a.analyzeCallLikeValueExpr(arg, field.Type)
 		if !AssignableTo(field.Type, actual) {
-			a.errorf(arg.Pos(), "packed enum common field %q for %q expects %s, got %s", commonDecl.Name, enumType.Name+"."+variant.Name, field.Type.String(), actual.String())
+			a.errorf(commonArgs[commonDecl.Name].Pos(), "packed enum common field %q for %q expects %s, got %s", commonDecl.Name, enumType.Name+"."+variant.Name, field.Type.String(), actual.String())
 		}
-		a.consumeAffineValueExpr(arg, field.Type, "move into enum common field "+strconv.Quote(commonDecl.Name))
+		a.consumeAffineValueExpr(commonArgs[commonDecl.Name], field.Type, "move into enum common field "+strconv.Quote(commonDecl.Name))
 	}
 	return enumType
 }
 
-func (a *Analyzer) analyzePackedEnumConstructorArg(expr ast.Expr, variant *EnumVariant, index int, enumName string) (Type, bool) {
+func (a *Analyzer) analyzePackedEnumConstructorArg(expr ast.Expr, variant *EnumVariant, index int, enumName string) (ast.Expr, Type, bool) {
 	if variant == nil || index < 0 || index >= len(variant.Payload) {
 		actual := a.analyzeExpr(expr)
-		return actual, false
+		return expr, actual, false
 	}
 	expected := variant.Payload[index]
 	if tailIndex, ok := variant.TailPayloadIndex(); ok && tailIndex == index {
 		if expectedView, ok := expected.(*DArrayViewType); ok {
-			return a.analyzePackedEnumTailPayloadArg(expr, expectedView, a.enumConstructorMoveReason(enumName, variant, index))
+			actual, ok := a.analyzePackedEnumTailPayloadArg(expr, expectedView, a.enumConstructorMoveReason(enumName, variant, index))
+			return expr, actual, ok
 		}
 	}
-	actual := a.analyzeValueExpr(expr, expected)
+	rewritten, actual := a.analyzeCallLikeValueExpr(expr, expected)
 	ok := AssignableTo(expected, actual)
-	a.consumeAffineValueExpr(expr, expected, a.enumConstructorMoveReason(enumName, variant, index))
-	return actual, ok
+	a.consumeAffineValueExpr(rewritten, expected, a.enumConstructorMoveReason(enumName, variant, index))
+	return rewritten, actual, ok
 }
 
 func (a *Analyzer) analyzePackedEnumTailPayloadArg(expr ast.Expr, expected *DArrayViewType, moveReason string) (Type, bool) {
@@ -1794,7 +1850,8 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 		if len(bindings) > 0 {
 			expected = a.substituteType(expected, bindings, nil, nil, nil)
 		}
-		actual := a.analyzeValueExpr(expr.Args[i], expected)
+		var actual Type
+		expr.Args[i], actual = a.analyzeCallLikeValueExpr(expr.Args[i], expected)
 		if !AssignableTo(expected, actual) {
 			a.errorf(expr.Args[i].Pos(), "struct literal field %q expects %s, got %s", fieldDecl.Name, expected.String(), actual.String())
 		}
@@ -4144,7 +4201,8 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 		}
 		for i := 0; i < len(orderedArgs); i++ {
 			if i < limit {
-				actual := a.analyzeValueExpr(orderedArgs[i], variant.Payload[i])
+				var actual Type
+				orderedArgs[i], actual = a.analyzeCallLikeValueExpr(orderedArgs[i], variant.Payload[i])
 				if !AssignableTo(variant.Payload[i], actual) {
 					label := variant.PayloadLabel(i)
 					if label != "" {
@@ -4206,7 +4264,7 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 		var argType Type
 		if i < limit {
 			expectedType := a.substituteType(ft.Params[i], bindings, shapeBindings, regionBindings, permissionBindings)
-			argType = a.analyzeValueExpr(orderedArgs[i], expectedType)
+			orderedArgs[i], argType = a.analyzeCallLikeValueExpr(orderedArgs[i], expectedType)
 			if actualFuncType, ok := argType.(*FuncType); ok {
 				if !actualFuncType.ReturnProvenanceKnown {
 					a.inferFuncReturnProvenanceForExpr(orderedArgs[i], actualFuncType)
@@ -5425,7 +5483,8 @@ func (a *Analyzer) analyzeTreeConstructorCallExpr(expr *ast.CallExpr, treeType *
 	}
 	for i := 0; i < len(orderedArgs); i++ {
 		if i < limit {
-			actual := a.analyzeValueExpr(orderedArgs[i], variant.Payload[i])
+			var actual Type
+			orderedArgs[i], actual = a.analyzeCallLikeValueExpr(orderedArgs[i], variant.Payload[i])
 			if !AssignableTo(variant.Payload[i], actual) {
 				label := variant.PayloadLabel(i)
 				if label != "" {
@@ -5444,11 +5503,12 @@ func (a *Analyzer) analyzeTreeConstructorCallExpr(expr *ast.CallExpr, treeType *
 		if !ok {
 			continue
 		}
-		actual := a.analyzeValueExpr(arg, field.Type)
+		var actual Type
+		commonArgs[commonName], actual = a.analyzeCallLikeValueExpr(arg, field.Type)
 		if !AssignableTo(field.Type, actual) {
-			a.errorf(arg.Pos(), "tree common field %q for %q expects %s, got %s", commonName, treeType.Name+"."+variant.Name, field.Type.String(), actual.String())
+			a.errorf(commonArgs[commonName].Pos(), "tree common field %q for %q expects %s, got %s", commonName, treeType.Name+"."+variant.Name, field.Type.String(), actual.String())
 		}
-		a.consumeAffineValueExpr(arg, field.Type, "move into tree common field "+strconv.Quote(commonName))
+		a.consumeAffineValueExpr(commonArgs[commonName], field.Type, "move into tree common field "+strconv.Quote(commonName))
 	}
 	return treeType
 }
@@ -5479,7 +5539,8 @@ func (a *Analyzer) analyzeTreeExactMemberConstructorCallExpr(expr *ast.CallExpr,
 			a.analyzeExpr(orderedArgs[i])
 			continue
 		}
-		actual := a.analyzeValueExpr(orderedArgs[i], field.Type)
+		var actual Type
+		orderedArgs[i], actual = a.analyzeCallLikeValueExpr(orderedArgs[i], field.Type)
 		if !AssignableTo(field.Type, actual) {
 			a.errorf(orderedArgs[i].Pos(), "tree constructor field %q for %q expects %s, got %s", fieldDecls[i].Name, memberType.String(), field.Type.String(), actual.String())
 		}
@@ -7637,6 +7698,61 @@ func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 		}
 	}
 	return result
+}
+
+func implicitCallLikeRefUpcastType(expected *RefType, actual Type) (Type, bool) {
+	if expected == nil {
+		return nil, false
+	}
+	actualRef, ok := actual.(*RefType)
+	if !ok || actualRef == nil {
+		return nil, false
+	}
+	if expected.StateParam != "" || expected.StorageParam != "" || actualRef.StateParam != "" || actualRef.StorageParam != "" {
+		return nil, false
+	}
+	if expected.Storage != RefStorageAny || actualRef.Storage == RefStorageAny {
+		return nil, false
+	}
+	if expected.Mutable && !actualRef.Mutable {
+		return nil, false
+	}
+	if expected.State != actualRef.State || expected.Region != actualRef.Region {
+		return nil, false
+	}
+	if !AssignableTo(expected.Elem, actualRef.Elem) {
+		return nil, false
+	}
+	coerced := cloneRefType(actualRef)
+	coerced.Storage = RefStorageAny
+	coerced.ExplicitStorage = expected.ExplicitStorage
+	return coerced, true
+}
+
+func (a *Analyzer) analyzeCallLikeValueExpr(expr ast.Expr, expected Type) (ast.Expr, Type) {
+	actual := a.analyzeValueExpr(expr, expected)
+	if expected == nil || AssignableTo(expected, actual) {
+		return expr, actual
+	}
+	expectedRef, ok := expected.(*RefType)
+	if !ok || expectedRef == nil {
+		return expr, actual
+	}
+	if upcastType, ok := implicitCallLikeRefUpcastType(expectedRef, actual); ok {
+		return expr, upcastType
+	}
+	if !a.exprCanYieldAddressableValue(expr) || !AssignableTo(expectedRef.Elem, actual) {
+		return expr, actual
+	}
+	autoref := &ast.AddrOfExpr{Position: expr.Pos(), Operand: expr}
+	autorefType := a.analyzeExpr(autoref)
+	if AssignableTo(expected, autorefType) {
+		return autoref, autorefType
+	}
+	if upcastType, ok := implicitCallLikeRefUpcastType(expectedRef, autorefType); ok {
+		return autoref, upcastType
+	}
+	return expr, actual
 }
 
 func (a *Analyzer) recordAnalyzedExprType(expr ast.Expr, result Type) {

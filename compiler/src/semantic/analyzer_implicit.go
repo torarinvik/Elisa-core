@@ -104,6 +104,29 @@ func (a *Analyzer) nextImplicitTempName(base string) string {
 	return "__with_" + sanitizeImplicitTempBase(base) + "_" + strconv.Itoa(a.implicitTempCounter)
 }
 
+func (a *Analyzer) applyWithBundleBindings(position lexer.Pos, bundleUse ast.WithBundleUse, working map[string]ast.Expr, explicitValues map[string]ast.Expr) {
+	bundle, _, ok := a.lookupVisibleContextBundle(bundleUse.Name)
+	if !ok || bundle == nil {
+		a.errorf(position, "unknown context bundle %q", bundleUse.Name)
+		return
+	}
+	for _, field := range bundle.Fields {
+		if expr, ok := explicitValues[field.Name]; ok {
+			working[field.Name] = expr
+			continue
+		}
+		if bundleUse.Spread {
+			if expr, ok := a.lookupSameNameImplicitExpr(field.Name, working); ok {
+				working[field.Name] = expr
+				continue
+			}
+			a.errorf(position, "missing same-name ambient value for %q in context bundle %q", field.Name, bundleUse.Name)
+			continue
+		}
+		a.errorf(position, "missing explicit value for %q in context bundle %q; add `..` to spread ambient bindings", field.Name, bundleUse.Name)
+	}
+}
+
 func (a *Analyzer) analyzeWithStmt(stmt *ast.WithStmt) {
 	if a == nil || stmt == nil {
 		return
@@ -114,28 +137,13 @@ func (a *Analyzer) analyzeWithStmt(stmt *ast.WithStmt) {
 	originalBody := append([]ast.Stmt(nil), stmt.Body...)
 	for _, item := range items {
 		if item.IsBundle {
-			bundle, _, ok := a.lookupVisibleContextBundle(item.Bundle.Name)
-			if !ok || bundle == nil {
-				a.errorf(item.Position, "unknown context bundle %q", item.Bundle.Name)
-				continue
-			}
 			explicitValues := make(map[string]ast.Expr, len(item.Bundle.Args))
 			for _, arg := range item.Bundle.Args {
 				tempName := a.nextImplicitTempName(arg.Name)
 				tempStmts = append(tempStmts, &ast.VarDeclStmt{Position: arg.Position, Name: tempName, Value: arg.Value})
 				explicitValues[arg.Name] = &ast.Ident{Position: arg.Position, Name: tempName}
 			}
-			for _, field := range bundle.Fields {
-				if expr, ok := explicitValues[field.Name]; ok {
-					working[field.Name] = expr
-					continue
-				}
-				if expr, ok := a.lookupSameNameImplicitExpr(field.Name, working); ok {
-					working[field.Name] = expr
-					continue
-				}
-				a.errorf(item.Position, "missing same-name ambient value for %q in context bundle %q", field.Name, item.Bundle.Name)
-			}
+			a.applyWithBundleBindings(item.Position, item.Bundle, working, explicitValues)
 			continue
 		}
 		if item.Arg.Shorthand {
@@ -180,28 +188,11 @@ func (a *Analyzer) resolveImplicitCallArgs(expr *ast.CallExpr, ft *FuncType, bin
 	explicitSources := map[string]bool{}
 	for _, item := range orderedWithItems(expr.WithBundles, expr.WithArgs, expr.WithItemOrder) {
 		if item.IsBundle {
-			bundle, _, ok := a.lookupVisibleContextBundle(item.Bundle.Name)
-			if !ok || bundle == nil {
-				a.errorf(item.Position, "unknown context bundle %q", item.Bundle.Name)
-				continue
-			}
 			explicitValues := make(map[string]ast.Expr, len(item.Bundle.Args))
 			for _, arg := range item.Bundle.Args {
 				explicitValues[arg.Name] = arg.Value
 			}
-			for _, field := range bundle.Fields {
-				if value, ok := explicitValues[field.Name]; ok {
-					working[field.Name] = value
-					explicitSources[field.Name] = false
-					continue
-				}
-				if value, ok := a.lookupSameNameImplicitExpr(field.Name, working); ok {
-					working[field.Name] = value
-					explicitSources[field.Name] = false
-					continue
-				}
-				a.errorf(item.Position, "missing same-name ambient value for %q in context bundle %q", field.Name, item.Bundle.Name)
-			}
+			a.applyWithBundleBindings(item.Position, item.Bundle, working, explicitValues)
 			continue
 		}
 		working[item.Arg.Name] = item.Arg.Value
@@ -221,7 +212,8 @@ func (a *Analyzer) resolveImplicitCallArgs(expr *ast.CallExpr, ft *FuncType, bin
 			continue
 		}
 		expectedType := a.substituteType(ft.Params[paramIndex], bindings, shapeBindings, regionBindings, permissionBindings)
-		actualType := a.analyzeValueExpr(argExpr, expectedType)
+		var actualType Type
+		argExpr, actualType = a.analyzeCallLikeValueExpr(argExpr, expectedType)
 		if !AssignableTo(expectedType, actualType) {
 			a.errorf(argExpr.Pos(), "implicit argument %q to %q expects %s, got %s", name, ft.Name, expectedType.String(), actualType.String())
 			a.reportMutableRefArgumentNote(argExpr.Pos(), expectedType, actualType)
