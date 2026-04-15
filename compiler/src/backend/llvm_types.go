@@ -796,6 +796,18 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		return g.ensureRuntimeDynArrayView()
 	case *semantic.DArrayViewType:
 		return g.ensureRuntimeDynArrayView()
+	case *semantic.StoreRowsViewType:
+		storePtrType := C.LLVMPointerTypeInContext(g.context, 0)
+		fields := []C.LLVMTypeRef{storePtrType}
+		return C.LLVMStructTypeInContext(g.context, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0), nil
+	case *semantic.StoreRowViewType:
+		usizeType, err := g.lowerType(g.result.NamedTypes["usize"])
+		if err != nil {
+			return nil, err
+		}
+		storePtrType := C.LLVMPointerTypeInContext(g.context, 0)
+		fields := []C.LLVMTypeRef{storePtrType, usizeType}
+		return C.LLVMStructTypeInContext(g.context, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0), nil
 	case *semantic.DStrType:
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	case *semantic.DictType:

@@ -106,6 +106,9 @@ func (s *functionState) refinedOptionalPayloadAddress(ptr C.LLVMValueRef, stored
 }
 
 func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if ptr, fieldType, handled, err := s.emitStoreRowFieldAddress(expr); handled {
+		return ptr, fieldType, err
+	}
 	if ptr, fieldType, handled, err := s.emitTreeFieldAddress(expr); handled {
 		return ptr, fieldType, err
 	}
@@ -161,6 +164,9 @@ func (s *functionState) emitFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, s
 }
 
 func (s *functionState) emitReadableFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if ptr, fieldType, handled, err := s.emitStoreRowFieldAddress(expr); handled {
+		return ptr, fieldType, err
+	}
 	if ptr, fieldType, handled, err := s.emitTreeFieldAddress(expr); handled {
 		if err != nil {
 			return nil, nil, err
@@ -216,6 +222,62 @@ func (s *functionState) emitReadableFieldAddress(expr *ast.FieldExpr) (C.LLVMVal
 	}
 	fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, objPtr, C.unsigned(index), cStringFree(expr.Field))
 	return s.refinedOptionalPayloadAddress(fieldPtr, fieldType, s.exprType(expr), expr.Field)
+}
+
+func (s *functionState) emitStoreRowFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if expr == nil || expr.Object == nil {
+		return nil, nil, false, nil
+	}
+	objType := s.exprType(expr.Object)
+	if objType == nil {
+		return nil, nil, false, nil
+	}
+	rowType, rowValue, handled, err := s.emitStoreRowCarrierValue(expr.Object, objType, expr.Field)
+	if err != nil || !handled {
+		return nil, nil, handled, err
+	}
+	storePtr := C.LLVMBuildExtractValue(s.builder, rowValue, 0, cStringFree(expr.Field+".row.store"))
+	indexValue := C.LLVMBuildExtractValue(s.builder, rowValue, 1, cStringFree(expr.Field+".row.index"))
+	columnPtr, darrayType, err := s.emitBuiltinStoreFieldDArrayPtr(storePtr, rowType.Store, expr.Field)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	elemPtr, elemType, err := s.emitRuntimePointerIndexedAddressWithType(columnPtr, mustLowerType(s, darrayType), darrayType.Elem, indexValue)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	return elemPtr, elemType, true, nil
+}
+
+func (s *functionState) emitStoreRowCarrierValue(expr ast.Expr, objType semantic.Type, fieldName string) (*semantic.StoreRowViewType, C.LLVMValueRef, bool, error) {
+	switch tt := objType.(type) {
+	case *semantic.StoreRowViewType:
+		rowValue, _, err := s.emitExpr(expr, tt)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		return tt, rowValue, true, nil
+	case *semantic.RefType:
+		rowType, ok := tt.Elem.(*semantic.StoreRowViewType)
+		if !ok || rowType == nil {
+			return nil, nil, false, nil
+		}
+		if tt.State != semantic.RefStateNonNull {
+			return nil, nil, true, fmt.Errorf("field access requires proven non-null reference, got %s", objType.String())
+		}
+		rowPtr, _, err := s.emitExpr(expr, tt)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		rowLLVMType, err := s.g.lowerType(rowType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		rowValue := C.LLVMBuildLoad2(s.builder, rowLLVMType, rowPtr, cStringFree(fieldName+".row.load"))
+		return rowType, rowValue, true, nil
+	default:
+		return nil, nil, false, nil
+	}
 }
 
 func (s *functionState) emitTreeFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {

@@ -61,6 +61,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikeScopeStmt() {
 				return p.parseScopeStmt()
 			}
+		case "cascade":
+			if p.looksLikeScopeStmt() {
+				return p.parseCascadeStmt()
+			}
 		case "parallel":
 			if p.looksLikeParallelForStmt() {
 				return p.parseParallelForStmt()
@@ -680,6 +684,16 @@ func (p *Parser) parseWithStmt() *ast.WithStmt {
 	p.expectNewline()
 	body := p.parseBlock()
 	return &ast.WithStmt{Position: pos, Args: args, Bundles: bundles, WithItemOrder: items, Body: body}
+}
+
+func (p *Parser) parseCascadeStmt() *ast.CascadeStmt {
+	pos := p.cur().Pos
+	p.expectIdentText("cascade")
+	target := p.parseExpr()
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	body := p.parseBlock()
+	return &ast.CascadeStmt{Position: pos, Target: target, Body: body}
 }
 
 func (p *Parser) parseMatchArms() []ast.MatchArm {

@@ -121,6 +121,9 @@ func (c *analyzerASTCensus) countStmt(stmt ast.Stmt) {
 		c.countStmts(n.Body)
 	case *ast.CanStmt:
 		c.countStmts(n.Body)
+	case *ast.CascadeStmt:
+		c.countExpr(n.Target)
+		c.countStmts(n.Body)
 	case *ast.PoolStmt:
 		c.countExpr(n.Workers)
 		c.countStmts(n.Body)

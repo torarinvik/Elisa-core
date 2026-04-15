@@ -43,6 +43,13 @@ type ErrorDecl struct {
 	Tags     []string
 }
 
+type EffectsDecl struct {
+	Position     lexer.Pos
+	Name         string
+	ErrorEffects *ErrorSetExpr
+	Permissions  []PermissionRef
+}
+
 type PermissionDecl struct {
 	Position lexer.Pos
 	Name     string
@@ -285,6 +292,8 @@ type FuncDecl struct {
 	RegionParams      []string
 	PermissionParams  []string
 	GenericParams     []GenericParam
+	EffectAliasPos    lexer.Pos
+	EffectAlias       string
 	Permissions       []PermissionRef
 	Ensures           []EnsuresClause
 	Params            []ParamDecl
@@ -314,6 +323,8 @@ type ExternFuncDecl struct {
 	PermissionParams  []string
 	GenericParams     []GenericParam
 	RegionParams      []string
+	EffectAliasPos    lexer.Pos
+	EffectAlias       string
 	Permissions       []PermissionRef
 	Ensures           []EnsuresClause
 	Params            []ParamDecl
@@ -474,6 +485,8 @@ type FuncTypeExpr struct {
 	ImplicitBundles   []string
 	ImplicitItemOrder []ImplicitSigItem
 	Return            TypeExpr
+	EffectAliasPos    lexer.Pos
+	EffectAlias       string
 	Permissions       []PermissionRef
 	Variadic          bool
 }
@@ -724,9 +737,10 @@ type RaiseExpr struct {
 }
 
 type TryExpr struct {
-	Position lexer.Pos
-	Value    Expr
-	Fallback Expr
+	Position                 lexer.Pos
+	Value                    Expr
+	Fallback                 Expr
+	UsesDefaultShorthandForm bool
 }
 
 type UnwrapElseExpr struct {
@@ -1044,6 +1058,12 @@ type WithStmt struct {
 	Body          []Stmt
 }
 
+type CascadeStmt struct {
+	Position lexer.Pos
+	Target   Expr
+	Body     []Stmt
+}
+
 type ScopeStmt struct {
 	Position lexer.Pos
 	Guard    Expr
@@ -1169,6 +1189,7 @@ func (n *ConstEnumMemberDecl) Pos() lexer.Pos {
 	return n.Position
 }
 func (n *ErrorDecl) Pos() lexer.Pos      { return n.Position }
+func (n *EffectsDecl) Pos() lexer.Pos    { return n.Position }
 func (n *PermissionDecl) Pos() lexer.Pos { return n.Position }
 func (n *ContextDecl) Pos() lexer.Pos    { return n.Position }
 func (n *NamespaceDecl) Pos() lexer.Pos  { return n.Position }
@@ -1296,6 +1317,7 @@ func (n *MatchStmt) Pos() lexer.Pos              { return n.Position }
 func (n *InStoreStmt) Pos() lexer.Pos            { return n.Position }
 func (n *CanStmt) Pos() lexer.Pos                { return n.Position }
 func (n *WithStmt) Pos() lexer.Pos               { return n.Position }
+func (n *CascadeStmt) Pos() lexer.Pos            { return n.Position }
 func (n *PoolStmt) Pos() lexer.Pos               { return n.Position }
 func (n *LockStmt) Pos() lexer.Pos               { return n.Position }
 func (n *PassStmt) Pos() lexer.Pos               { return n.Position }
@@ -1318,6 +1340,7 @@ func (*ConstDecl) nodeTag()                 {}
 func (*ConstEnumDecl) nodeTag()             {}
 func (*ConstEnumMemberDecl) nodeTag()       {}
 func (*ErrorDecl) nodeTag()                 {}
+func (*EffectsDecl) nodeTag()               {}
 func (*PermissionDecl) nodeTag()            {}
 func (*ContextDecl) nodeTag()               {}
 func (*NamespaceDecl) nodeTag()             {}
@@ -1423,6 +1446,7 @@ func (*MatchStmt) nodeTag()                 {}
 func (*InStoreStmt) nodeTag()               {}
 func (*CanStmt) nodeTag()                   {}
 func (*WithStmt) nodeTag()                  {}
+func (*CascadeStmt) nodeTag()               {}
 func (*ScopeStmt) nodeTag()                 {}
 func (*PoolStmt) nodeTag()                  {}
 func (*LockStmt) nodeTag()                  {}
@@ -1444,6 +1468,7 @@ func (*ResetStmt) nodeTag()                 {}
 func (*ConstDecl) declTag()        {}
 func (*ConstEnumDecl) declTag()    {}
 func (*ErrorDecl) declTag()        {}
+func (*EffectsDecl) declTag()      {}
 func (*PermissionDecl) declTag()   {}
 func (*ContextDecl) declTag()      {}
 func (*NamespaceDecl) declTag()    {}
@@ -1553,6 +1578,7 @@ func (*ParallelForStmt) stmtTag()       {}
 func (*InStoreStmt) stmtTag()           {}
 func (*CanStmt) stmtTag()               {}
 func (*WithStmt) stmtTag()              {}
+func (*CascadeStmt) stmtTag()           {}
 func (*ScopeStmt) stmtTag()             {}
 func (*PoolStmt) stmtTag()              {}
 func (*LockStmt) stmtTag()              {}

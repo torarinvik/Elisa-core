@@ -52,6 +52,8 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 			PermissionParams: append([]string(nil), n.PermissionParams...),
 			GenericParams:    append([]ast.GenericParam(nil), n.GenericParams...),
 			RegionParams:     append([]string(nil), n.RegionParams...),
+			EffectAliasPos:   n.EffectAliasPos,
+			EffectAlias:      n.EffectAlias,
 			Permissions:      append([]ast.PermissionRef(nil), n.Permissions...),
 			Ensures:          append([]ast.EnsuresClause(nil), n.Ensures...),
 			Params:           append([]ast.ParamDecl(nil), n.Params...),
@@ -64,7 +66,7 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 			case *ast.AssociatedTypeDecl:
 				members = append(members, &ast.AssociatedTypeDecl{Position: m.Position, Name: m.Name})
 			case *ast.ExternFuncDecl:
-				members = append(members, &ast.ExternFuncDecl{Position: m.Position, Annotations: append([]ast.Annotation(nil), m.Annotations...), Name: m.Name, TypeParams: append([]string(nil), m.TypeParams...), RefStorageParams: append([]string(nil), m.RefStorageParams...), RefStateParams: append([]string(nil), m.RefStateParams...), PermissionParams: append([]string(nil), m.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), m.GenericParams...), RegionParams: append([]string(nil), m.RegionParams...), Permissions: append([]ast.PermissionRef(nil), m.Permissions...), Ensures: append([]ast.EnsuresClause(nil), m.Ensures...), Params: append([]ast.ParamDecl(nil), m.Params...), ReturnType: m.ReturnType, Variadic: m.Variadic})
+				members = append(members, &ast.ExternFuncDecl{Position: m.Position, Annotations: append([]ast.Annotation(nil), m.Annotations...), Name: m.Name, TypeParams: append([]string(nil), m.TypeParams...), RefStorageParams: append([]string(nil), m.RefStorageParams...), RefStateParams: append([]string(nil), m.RefStateParams...), PermissionParams: append([]string(nil), m.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), m.GenericParams...), RegionParams: append([]string(nil), m.RegionParams...), EffectAliasPos: m.EffectAliasPos, EffectAlias: m.EffectAlias, Permissions: append([]ast.PermissionRef(nil), m.Permissions...), Ensures: append([]ast.EnsuresClause(nil), m.Ensures...), Params: append([]ast.ParamDecl(nil), m.Params...), ReturnType: m.ReturnType, Variadic: m.Variadic})
 			}
 		}
 		return &ast.InterfaceDecl{Position: n.Position, Name: n.Name, Members: members}
@@ -75,9 +77,9 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 			case *ast.ImplAssociatedTypeDecl:
 				members = append(members, &ast.ImplAssociatedTypeDecl{Position: m.Position, Name: m.Name, Type: m.Type})
 			case *ast.FuncDecl:
-				members = append(members, &ast.ExternFuncDecl{Position: m.Position, Annotations: append([]ast.Annotation(nil), m.Annotations...), Override: m.Override, Name: m.Name, TypeParams: append([]string(nil), m.TypeParams...), RefStorageParams: append([]string(nil), m.RefStorageParams...), RefStateParams: append([]string(nil), m.RefStateParams...), PermissionParams: append([]string(nil), m.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), m.GenericParams...), RegionParams: append([]string(nil), m.RegionParams...), Permissions: append([]ast.PermissionRef(nil), m.Permissions...), Ensures: append([]ast.EnsuresClause(nil), m.Ensures...), Params: append([]ast.ParamDecl(nil), m.Params...), ReturnType: m.ReturnType})
+				members = append(members, &ast.ExternFuncDecl{Position: m.Position, Annotations: append([]ast.Annotation(nil), m.Annotations...), Override: m.Override, Name: m.Name, TypeParams: append([]string(nil), m.TypeParams...), RefStorageParams: append([]string(nil), m.RefStorageParams...), RefStateParams: append([]string(nil), m.RefStateParams...), PermissionParams: append([]string(nil), m.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), m.GenericParams...), RegionParams: append([]string(nil), m.RegionParams...), EffectAliasPos: m.EffectAliasPos, EffectAlias: m.EffectAlias, Permissions: append([]ast.PermissionRef(nil), m.Permissions...), Ensures: append([]ast.EnsuresClause(nil), m.Ensures...), Params: append([]ast.ParamDecl(nil), m.Params...), ReturnType: m.ReturnType})
 			case *ast.ExternFuncDecl:
-				members = append(members, &ast.ExternFuncDecl{Position: m.Position, Annotations: append([]ast.Annotation(nil), m.Annotations...), Override: m.Override, Name: m.Name, TypeParams: append([]string(nil), m.TypeParams...), RefStorageParams: append([]string(nil), m.RefStorageParams...), RefStateParams: append([]string(nil), m.RefStateParams...), PermissionParams: append([]string(nil), m.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), m.GenericParams...), RegionParams: append([]string(nil), m.RegionParams...), Permissions: append([]ast.PermissionRef(nil), m.Permissions...), Ensures: append([]ast.EnsuresClause(nil), m.Ensures...), Params: append([]ast.ParamDecl(nil), m.Params...), ReturnType: m.ReturnType, Variadic: m.Variadic})
+				members = append(members, &ast.ExternFuncDecl{Position: m.Position, Annotations: append([]ast.Annotation(nil), m.Annotations...), Override: m.Override, Name: m.Name, TypeParams: append([]string(nil), m.TypeParams...), RefStorageParams: append([]string(nil), m.RefStorageParams...), RefStateParams: append([]string(nil), m.RefStateParams...), PermissionParams: append([]string(nil), m.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), m.GenericParams...), RegionParams: append([]string(nil), m.RegionParams...), EffectAliasPos: m.EffectAliasPos, EffectAlias: m.EffectAlias, Permissions: append([]ast.PermissionRef(nil), m.Permissions...), Ensures: append([]ast.EnsuresClause(nil), m.Ensures...), Params: append([]ast.ParamDecl(nil), m.Params...), ReturnType: m.ReturnType, Variadic: m.Variadic})
 			}
 		}
 		return &ast.ImplDecl{Position: n.Position, Annotations: append([]ast.Annotation(nil), n.Annotations...), InterfaceName: n.InterfaceName, ForType: n.ForType, Members: members}

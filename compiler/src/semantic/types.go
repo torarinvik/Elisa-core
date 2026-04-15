@@ -180,6 +180,14 @@ type DArrayViewType struct {
 	SurfaceName string
 }
 
+type StoreRowsViewType struct {
+	Store *StructType
+}
+
+type StoreRowViewType struct {
+	Store *StructType
+}
+
 type DStrType struct {
 	Shape       Shape
 	SurfaceName string
@@ -480,6 +488,8 @@ func (*ArrayType) isType()             {}
 func (*DArrayType) isType()            {}
 func (*ViewType) isType()              {}
 func (*DArrayViewType) isType()        {}
+func (*StoreRowsViewType) isType()     {}
+func (*StoreRowViewType) isType()      {}
 func (*DStrType) isType()              {}
 func (*DictType) isType()              {}
 func (*DictEntryType) isType()         {}
@@ -781,6 +791,18 @@ func (t *ViewType) String() string {
 }
 func (t *DArrayViewType) String() string {
 	return fmt.Sprintf("dview[%s]", t.Elem.String())
+}
+func (t *StoreRowsViewType) String() string {
+	if t == nil || t.Store == nil {
+		return "<invalid-store-rows>"
+	}
+	return t.Store.String() + ".rows()"
+}
+func (t *StoreRowViewType) String() string {
+	if t == nil || t.Store == nil {
+		return "<invalid-store-row>"
+	}
+	return t.Store.String() + ".row"
 }
 func (t *DStrType) String() string {
 	if isWildcardShape(t.Shape) {
@@ -2185,6 +2207,16 @@ func EnumerateTupleType(item Type) *TupleType {
 		return nil
 	}
 	return &TupleType{Fields: []TupleField{{Name: "index", Type: &BuiltinType{Name: "usize"}}, {Name: "value", Type: item}}}
+}
+
+func StoreRowsViewInstance(t Type) (*StoreRowsViewType, bool) {
+	rowsType, ok := t.(*StoreRowsViewType)
+	return rowsType, ok && rowsType != nil && rowsType.Store != nil
+}
+
+func StoreRowViewInstance(t Type) (*StoreRowViewType, bool) {
+	rowType, ok := t.(*StoreRowViewType)
+	return rowType, ok && rowType != nil && rowType.Store != nil
 }
 
 func TreeChildrenInstance(t Type) (*GenericInstanceType, bool) {

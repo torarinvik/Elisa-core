@@ -285,6 +285,16 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			result = unionType.Value
 			return
 		}
+		if n.UsesDefaultShorthandForm {
+			a.analyzeExpr(n.Fallback)
+			a.errorf(n.Pos(), "try? ... default requires an error union, got %s", valueType.String())
+			if optionalType, ok := valueType.(*OptionalType); ok {
+				result = optionalType.Value
+			} else {
+				result = invalidType
+			}
+			return
+		}
 		if optionalType, ok := valueType.(*OptionalType); ok {
 			if n.Fallback == nil {
 				a.errorf(n.Pos(), "try without else requires an error union, got %s", valueType.String())
@@ -4163,6 +4173,9 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	if resultType, ok := a.analyzeBuiltinStoreTruncateCall(expr); ok {
 		return resultType
 	}
+	if resultType, ok := a.analyzeBuiltinStoreRowsCall(expr); ok {
+		return resultType
+	}
 	switch a.rewriteExtensionMethodCall(expr) {
 	case extensionMethodCallRewriteInvalid:
 		return invalidType
@@ -4973,6 +4986,37 @@ func (a *Analyzer) analyzeBuiltinStoreTruncateCall(expr *ast.CallExpr) (Type, bo
 	return resultType, true
 }
 
+func (a *Analyzer) analyzeBuiltinStoreRowsCall(expr *ast.CallExpr) (Type, bool) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "rows" || fieldExpr.Object == nil {
+		return nil, false
+	}
+	receiverType := a.analyzeExpr(fieldExpr.Object)
+	storeType, _, ok := builtinStoreReceiverType(receiverType)
+	if !ok || storeType == nil {
+		return nil, false
+	}
+	if len(expr.Args) != 0 {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "store rows expects 0 arguments, got %d", len(expr.Args))
+		a.exprTypes[expr] = invalidType
+		return invalidType, true
+	}
+	if expr.NamedArgCount() != 0 {
+		a.errorf(expr.Pos(), "store rows does not support named arguments")
+	}
+	resultType := &StoreRowsViewType{Store: storeType}
+	a.exprTypes[expr.Func] = &FuncType{
+		Name:   "store.rows",
+		Params: []Type{receiverType},
+		Return: resultType,
+	}
+	a.exprTypes[expr] = resultType
+	return resultType, true
+}
+
 func builtinDArrayPushReceiverType(t Type) (*DArrayType, *RefType, bool) {
 	if t == nil {
 		return nil, nil, false
@@ -5041,6 +5085,22 @@ func builtinStoreReceiverType(t Type) (*StructType, *RefType, bool) {
 		return nil, nil, false
 	}
 	return st, refType, true
+}
+
+func storeRowViewField(t Type, fieldName string) (Field, bool) {
+	rowType, ok := t.(*StoreRowViewType)
+	if !ok || rowType == nil || rowType.Store == nil {
+		return Field{}, false
+	}
+	field, ok := rowType.Store.Fields[fieldName]
+	if !ok {
+		return Field{}, false
+	}
+	darrayType, ok := field.Type.(*DArrayType)
+	if !ok || darrayType == nil {
+		return Field{}, false
+	}
+	return Field{Name: fieldName, Type: darrayType.Elem, Mutable: false}, true
 }
 
 func builtinDictEntryValueRefType(dictType *DictType) *RefType {
@@ -8738,6 +8798,9 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 		objType = ref.Elem
 	}
 	objType = StripAggregateStateType(objType)
+	if field, ok := storeRowViewField(objType, fieldName); ok {
+		return field, true
+	}
 	if dictType, ok := objType.(*DictType); ok && !dictSupportsRuntimeBackedOps(dictType) {
 		if emitDiagnostics {
 			a.errorf(pos, "%s", runtimeBackedDictSupportDiagnostic(dictType))

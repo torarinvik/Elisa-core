@@ -27,6 +27,8 @@ type derivedMethodSignature struct {
 	ReturnType     ast.TypeExpr
 	ResolvedReturn Type
 	GenericParams  []ast.GenericParam
+	EffectAliasPos lexer.Pos
+	EffectAlias    string
 	Permissions    []ast.PermissionRef
 	Ensures        []ast.EnsuresClause
 }
@@ -107,6 +109,8 @@ func (a *Analyzer) synthesizeDerivedImplMembers(decls []scopedDecl) {
 					RegionParams:     append([]string(nil), methodDecl.RegionParams...),
 					PermissionParams: append([]string(nil), methodDecl.PermissionParams...),
 					GenericParams:    append([]ast.GenericParam(nil), sig.GenericParams...),
+					EffectAliasPos:   sig.EffectAliasPos,
+					EffectAlias:      sig.EffectAlias,
 					Permissions:      append([]ast.PermissionRef(nil), sig.Permissions...),
 					Ensures:          append([]ast.EnsuresClause(nil), sig.Ensures...),
 					Params:           append([]ast.ParamDecl(nil), sig.Params...),
@@ -251,6 +255,8 @@ func (a *Analyzer) instantiateDerivedMethodSignature(method *ast.ExternFuncDecl,
 		ReturnType:     returnType,
 		ResolvedReturn: resolvedReturn,
 		GenericParams:  genericParams,
+		EffectAliasPos: method.EffectAliasPos,
+		EffectAlias:    method.EffectAlias,
 		Permissions:    append([]ast.PermissionRef(nil), method.Permissions...),
 		Ensures:        append([]ast.EnsuresClause(nil), method.Ensures...),
 	}
@@ -299,7 +305,7 @@ func substituteAssocTypeExpr(expr ast.TypeExpr, assocExprs map[string]ast.TypeEx
 		for _, param := range n.Params {
 			params = append(params, substituteAssocTypeExpr(param, assocExprs))
 		}
-		return &ast.FuncTypeExpr{Position: n.Position, Params: params, Return: substituteAssocTypeExpr(n.Return, assocExprs), Permissions: append([]ast.PermissionRef(nil), n.Permissions...), Variadic: n.Variadic}
+		return &ast.FuncTypeExpr{Position: n.Position, Params: params, Return: substituteAssocTypeExpr(n.Return, assocExprs), EffectAliasPos: n.EffectAliasPos, EffectAlias: n.EffectAlias, Permissions: append([]ast.PermissionRef(nil), n.Permissions...), Variadic: n.Variadic}
 	case *ast.ErrorSetExpr:
 		tags := make([]ast.ErrorTagExpr, 0, len(n.Tags))
 		for _, tag := range n.Tags {

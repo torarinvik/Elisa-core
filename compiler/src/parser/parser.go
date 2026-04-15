@@ -119,6 +119,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("permission") {
 		return p.parsePermissionDecl()
 	}
+	if p.peekIdentText("effects") {
+		return p.parseEffectsDecl()
+	}
 	if p.peek() == lexer.TOKEN_CONTEXT {
 		return p.parseContextDecl()
 	}
@@ -344,6 +347,16 @@ func (p *Parser) parseErrorDecl() *ast.ErrorDecl {
 	p.expect(lexer.TOKEN_DEDENT)
 
 	return &ast.ErrorDecl{Position: pos, Name: name, Tags: tags}
+}
+
+func (p *Parser) parseEffectsDecl() *ast.EffectsDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("effects")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_ASSIGN)
+	errorEffects, permissions := p.parseEffectsSpec()
+	p.expectNewline()
+	return &ast.EffectsDecl{Position: pos, Name: name, ErrorEffects: errorEffects, Permissions: permissions}
 }
 
 func (p *Parser) parsePermissionDecl() *ast.PermissionDecl {
@@ -1019,6 +1032,32 @@ func (p *Parser) parsePermissionRef() ast.PermissionRef {
 	return ast.PermissionRef{Position: pos, Name: name, Member: member}
 }
 
+func (p *Parser) parseEffectsSpec() (*ast.ErrorSetExpr, []ast.PermissionRef) {
+	var errorEffects *ast.ErrorSetExpr
+	var permissions []ast.PermissionRef
+	switch {
+	case p.peek() == lexer.TOKEN_ERROR:
+		errorEffects = p.parseErrorSetExpr()
+		if p.matchIdentText("can") {
+			permissions = p.parsePermissionRefs(true)
+		}
+	case p.peekIdentText("can"):
+		p.advance()
+		permissions = p.parsePermissionRefs(true)
+		if p.peek() == lexer.TOKEN_ERROR {
+			errorEffects = p.parseErrorSetExpr()
+		}
+	default:
+		p.errorf("effects declaration requires error[...] and/or can[...]")
+	}
+	return errorEffects, permissions
+}
+
+func signatureHasExplicitErrorEffects(retType ast.TypeExpr) bool {
+	_, ok := retType.(*ast.ErrorUnionTypeExpr)
+	return ok
+}
+
 func (p *Parser) parsePermissionRefs(bracketed bool) []ast.PermissionRef {
 	if bracketed {
 		p.expect(lexer.TOKEN_LBRACKET)
@@ -1133,9 +1172,25 @@ func (p *Parser) parseFuncDeclWithAnnotations(annotations []ast.Annotation) *ast
 		retType = p.parseTypeExpr()
 	}
 
+	effectAliasPos := lexer.Pos{}
+	effectAlias := ""
+	if p.matchIdentText("effects") {
+		effectAliasPos = p.tokens[p.pos-1].Pos
+		effectAlias = p.parseQualifiedDeclName()
+	}
+
 	var permissions []ast.PermissionRef
 	if p.matchIdentText("can") {
 		permissions = p.parsePermissionRefs(true)
+	}
+
+	if effectAlias != "" {
+		if signatureHasExplicitErrorEffects(retType) {
+			p.errorf("effects alias cannot be combined with an explicit error[...] clause")
+		}
+		if len(permissions) != 0 {
+			p.errorf("effects alias cannot be combined with an explicit can[...] clause")
+		}
 	}
 
 	var ensures []ast.EnsuresClause
@@ -1147,7 +1202,7 @@ func (p *Parser) parseFuncDeclWithAnnotations(annotations []ast.Annotation) *ast
 	p.expectNewline()
 
 	body := p.parseBlock()
-	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Body: body}
+	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Permissions: permissions, Ensures: ensures, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Body: body}
 }
 
 func (p *Parser) parseParamList(allowDefault bool) []ast.ParamDecl {
@@ -1284,9 +1339,23 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 	if p.match(lexer.TOKEN_ARROW) {
 		retType = p.parseTypeExpr()
 	}
+	effectAliasPos := lexer.Pos{}
+	effectAlias := ""
+	if p.matchIdentText("effects") {
+		effectAliasPos = p.tokens[p.pos-1].Pos
+		effectAlias = p.parseQualifiedDeclName()
+	}
 	var permissions []ast.PermissionRef
 	if p.matchIdentText("can") {
 		permissions = p.parsePermissionRefs(true)
+	}
+	if effectAlias != "" {
+		if signatureHasExplicitErrorEffects(retType) {
+			p.errorf("effects alias cannot be combined with an explicit error[...] clause")
+		}
+		if len(permissions) != 0 {
+			p.errorf("effects alias cannot be combined with an explicit can[...] clause")
+		}
 	}
 	var ensures []ast.EnsuresClause
 	if p.matchIdentText("ensures") {
@@ -1294,7 +1363,7 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 	}
 	p.expectNewline()
 
-	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, PermissionParams: permissionParams, GenericParams: genericParams, RegionParams: regionParams, Permissions: permissions, Ensures: ensures, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Variadic: variadic}
+	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, PermissionParams: permissionParams, GenericParams: genericParams, RegionParams: regionParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Permissions: permissions, Ensures: ensures, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Variadic: variadic}
 }
 
 func (p *Parser) parseExportDecl() ast.Decl {

@@ -58,7 +58,7 @@ func (a *Analyzer) defineLocalInScope(scope *Scope, sym *Symbol, pos lexer.Pos) 
 	a.recordSpecializedValueTypeBinding(sym, sym.Type)
 }
 
-func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorageParams []string, refStateParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, params []ast.ParamDecl, implicitParams []ast.ParamDecl, implicitBundles []string, implicitItemOrder []ast.ImplicitSigItem, ret ast.TypeExpr, variadic bool) *FuncType {
+func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorageParams []string, refStateParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, effectAliasPos lexer.Pos, effectAlias string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, params []ast.ParamDecl, implicitParams []ast.ParamDecl, implicitBundles []string, implicitItemOrder []ast.ImplicitSigItem, ret ast.TypeExpr, variadic bool) *FuncType {
 	resolvedGenericParams := append([]ast.GenericParam(nil), genericParams...)
 	for i, param := range resolvedGenericParams {
 		if param.Kind != ast.GenericParamType || param.InterfaceBound == "" {
@@ -85,6 +85,7 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorage
 	a.withGenericParams(resolvedGenericParams, nil, func() {
 		a.withRegionParams(regionParams, func() {
 			a.withPermissionParams(permissionParams, func() {
+				ret, permissionRefs = a.expandEffectAlias(ret, permissionRefs, effectAlias, effectAliasPos)
 				resolvedPermissionRefs = a.resolvePermissionRefs(permissionRefs, true)
 				permissions = a.resolvePermissionFamilies(permissionRefs, true)
 				a.withShapeParams(shapeParams, func() {
@@ -101,32 +102,32 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, refStorage
 		})
 	})
 	return &FuncType{
-		Name:                   name,
-		TypeParams:             append([]string(nil), typeParams...),
-		RefStorageParams:       append([]string(nil), refStorageParams...),
-		RefStateParams:         append([]string(nil), refStateParams...),
-		RegionParams:           append([]string(nil), regionParams...),
-		PermissionParams:       append([]string(nil), permissionParams...),
-		GenericParams:          append([]ast.GenericParam(nil), resolvedGenericParams...),
-		UsedPermissionParams:   append([]string(nil), a.permissionParamsInRefs(permissionRefs)...),
-		DeclaredPermissionRefs: append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
-		DeclaredPermissions:    append([]string(nil), permissions...),
-		PermissionRefs:         append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
-		Permissions:            permissions,
-		ShapeParams:            shapeParams,
-		FreshReturnShapeParams: knownFreshReturnShapeParams(name, retType),
-		InlineMode:             FuncInlineModeDefault,
-		HasNoRecurse:           false,
-		TemperatureMode:        FuncTemperatureModeDefault,
-		Poststates:             poststates,
-		Params:                 ptypes,
-		ExplicitParamCount:     len(params),
-		ExplicitParamNames:     explicitNames,
+		Name:                      name,
+		TypeParams:                append([]string(nil), typeParams...),
+		RefStorageParams:          append([]string(nil), refStorageParams...),
+		RefStateParams:            append([]string(nil), refStateParams...),
+		RegionParams:              append([]string(nil), regionParams...),
+		PermissionParams:          append([]string(nil), permissionParams...),
+		GenericParams:             append([]ast.GenericParam(nil), resolvedGenericParams...),
+		UsedPermissionParams:      append([]string(nil), a.permissionParamsInRefs(permissionRefs)...),
+		DeclaredPermissionRefs:    append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
+		DeclaredPermissions:       append([]string(nil), permissions...),
+		PermissionRefs:            append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
+		Permissions:               permissions,
+		ShapeParams:               shapeParams,
+		FreshReturnShapeParams:    knownFreshReturnShapeParams(name, retType),
+		InlineMode:                FuncInlineModeDefault,
+		HasNoRecurse:              false,
+		TemperatureMode:           FuncTemperatureModeDefault,
+		Poststates:                poststates,
+		Params:                    ptypes,
+		ExplicitParamCount:        len(params),
+		ExplicitParamNames:        explicitNames,
 		ExplicitParamDefaultExprs: append([]ast.Expr(nil), defaultExprs...),
 		ExplicitParamHasDefault:   append([]bool(nil), hasDefaults...),
-		ImplicitParamNames:     implicitNames,
-		Return:                 retType,
-		Variadic:               variadic,
+		ImplicitParamNames:        implicitNames,
+		Return:                    retType,
+		Variadic:                  variadic,
 	}
 }
 
@@ -487,29 +488,30 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		for _, param := range expandedImplicitParams {
 			ptypes = append(ptypes, a.resolveType(param.Type))
 		}
+		retExpr, permissionRefs := a.expandEffectAlias(n.Return, n.Permissions, n.EffectAlias, n.EffectAliasPos)
+		resolvedPermissionRefs := a.resolvePermissionRefs(permissionRefs, true)
+		permissions := a.resolvePermissionFamilies(permissionRefs, true)
 		retType := a.namedTypes["void"]
-		if n.Return != nil {
-			retType = a.resolveType(n.Return)
+		if retExpr != nil {
+			retType = a.resolveType(retExpr)
 		}
-		resolvedPermissionRefs := a.resolvePermissionRefs(n.Permissions, true)
-		permissions := a.resolvePermissionFamilies(n.Permissions, true)
 		return &FuncType{
-			Name:                   "func",
-			RefStorageParams:       nil,
-			RefStateParams:         nil,
-			UsedPermissionParams:   append([]string(nil), a.permissionParamsInRefs(n.Permissions)...),
-			DeclaredPermissionRefs: append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
-			DeclaredPermissions:    append([]string(nil), permissions...),
-			PermissionRefs:         append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
-			Permissions:            permissions,
-			Params:                 ptypes,
-			ExplicitParamCount:     len(n.Params),
-			ExplicitParamNames:     nil,
+			Name:                      "func",
+			RefStorageParams:          nil,
+			RefStateParams:            nil,
+			UsedPermissionParams:      append([]string(nil), a.permissionParamsInRefs(permissionRefs)...),
+			DeclaredPermissionRefs:    append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
+			DeclaredPermissions:       append([]string(nil), permissions...),
+			PermissionRefs:            append([]ast.PermissionRef(nil), resolvedPermissionRefs...),
+			Permissions:               permissions,
+			Params:                    ptypes,
+			ExplicitParamCount:        len(n.Params),
+			ExplicitParamNames:        nil,
 			ExplicitParamDefaultExprs: make([]ast.Expr, len(n.Params)),
 			ExplicitParamHasDefault:   make([]bool, len(n.Params)),
-			ImplicitParamNames:     implicitNames,
-			Return:                 retType,
-			Variadic:               n.Variadic,
+			ImplicitParamNames:        implicitNames,
+			Return:                    retType,
+			Variadic:                  n.Variadic,
 		}
 	case *ast.MutableType:
 		elemType := a.resolveType(n.Elem)

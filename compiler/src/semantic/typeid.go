@@ -165,6 +165,22 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 		if !appendTypeIDKey(b, tt.Elem, active, nextCycleID) {
 			return false
 		}
+	case *StoreRowsViewType:
+		if tt == nil || tt.Store == nil {
+			return false
+		}
+		appendKeyTag(b, "storerows")
+		if !appendTypeIDKey(b, tt.Store, active, nextCycleID) {
+			return false
+		}
+	case *StoreRowViewType:
+		if tt == nil || tt.Store == nil {
+			return false
+		}
+		appendKeyTag(b, "storerow")
+		if !appendTypeIDKey(b, tt.Store, active, nextCycleID) {
+			return false
+		}
 	case *DStrType:
 		appendKeyTag(b, "dstr")
 		if !appendShapeIDKey(b, tt.Shape) {

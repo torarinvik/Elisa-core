@@ -71,6 +71,38 @@ def build(owner: Arena) -> usize:
 	}
 }
 
+func TestGenerateLLVMIRLowersStoreRowsIteration(t *testing.T) {
+	src := `store PendingGotoStore:
+    name_key: usize
+    depth: usize
+
+def build(owner: Arena) -> usize:
+    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    in alloc:
+        pending: mutable PendingGotoStore = zeroed
+        pending.push(1usize, 2usize)
+        pending.push(3usize, 4usize)
+        total: mutable usize = 0usize
+        for row in pending.rows():
+            total <- total + row.name_key + row.depth
+        for index, row in enumerate(pending.rows()):
+            total <- total + index + row.name_key
+        for row in rev(pending.rows()):
+            total <- total + row.depth
+        return total
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_store_rows.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"store.rows.store", "name_key.row.index", "depth.row.index", "enumerate.item.value.insert"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected store rows lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRRejectsGenericKeyRuntimeBackedDictSugar(t *testing.T) {
 	src := `def arena_dict_get[K, T](m: any dict[K, T]&, key: K) -> mutable any T&?:
     return null

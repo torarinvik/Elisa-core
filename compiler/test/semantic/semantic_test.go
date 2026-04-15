@@ -9623,6 +9623,40 @@ def fallback_value(flag: bool) -> int:
 	requireFunctionReturnTypeString(t, result, "fallback_value", "int")
 }
 
+func TestAnalyzeAcceptsErrorUnionTryDefaultShorthand(t *testing.T) {
+	src := `error FileError:
+	NotFound
+
+extern read_value(flag: bool) -> int error[FileError]
+
+def fallback_value(flag: bool) -> int:
+	return try? read_value(flag) default 11
+`
+	result, errs := parseAndAnalyze(t, "error_union_try_default.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "fallback_value", "int")
+}
+
+func TestAnalyzeRejectsOptionalTryDefaultShorthand(t *testing.T) {
+	src := `def maybe_value(flag: bool) -> int?:
+	if flag:
+		return 7
+	return null
+
+
+def bad(flag: bool) -> int:
+	return try? maybe_value(flag) default 11
+`
+	_, errs := parseAndAnalyze(t, "optional_try_default.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "try? ... default requires an error union") {
+		t.Fatalf("expected try default shorthand diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 func TestAnalyzeRejectsTryOptionalWithoutElse(t *testing.T) {
 	src := `def maybe_value(flag: bool) -> int?:
 	if flag:

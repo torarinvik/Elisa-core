@@ -83,9 +83,25 @@ func (p *Parser) parseInterfaceMethodDecl() *ast.ExternFuncDecl {
 		retType = p.parseTypeExpr()
 	}
 
+	effectAliasPos := lexer.Pos{}
+	effectAlias := ""
+	if p.matchIdentText("effects") {
+		effectAliasPos = p.tokens[p.pos-1].Pos
+		effectAlias = p.parseQualifiedDeclName()
+	}
+
 	var permissions []ast.PermissionRef
 	if p.matchIdentText("can") {
 		permissions = p.parsePermissionRefs(true)
+	}
+
+	if effectAlias != "" {
+		if signatureHasExplicitErrorEffects(retType) {
+			p.errorf("effects alias cannot be combined with an explicit error[...] clause")
+		}
+		if len(permissions) != 0 {
+			p.errorf("effects alias cannot be combined with an explicit can[...] clause")
+		}
 	}
 
 	var ensures []ast.EnsuresClause
@@ -103,6 +119,8 @@ func (p *Parser) parseInterfaceMethodDecl() *ast.ExternFuncDecl {
 		PermissionParams:  permissionParams,
 		GenericParams:     genericParams,
 		RegionParams:      regionParams,
+		EffectAliasPos:    effectAliasPos,
+		EffectAlias:       effectAlias,
 		Permissions:       permissions,
 		Ensures:           ensures,
 		Params:            params,
@@ -211,9 +229,25 @@ func (p *Parser) parseImplMethodDeclWithAnnotations(annotations []ast.Annotation
 		retType = p.parseTypeExpr()
 	}
 
+	effectAliasPos := lexer.Pos{}
+	effectAlias := ""
+	if p.matchIdentText("effects") {
+		effectAliasPos = p.tokens[p.pos-1].Pos
+		effectAlias = p.parseQualifiedDeclName()
+	}
+
 	var permissions []ast.PermissionRef
 	if p.matchIdentText("can") {
 		permissions = p.parsePermissionRefs(true)
+	}
+
+	if effectAlias != "" {
+		if signatureHasExplicitErrorEffects(retType) {
+			p.errorf("effects alias cannot be combined with an explicit error[...] clause")
+		}
+		if len(permissions) != 0 {
+			p.errorf("effects alias cannot be combined with an explicit can[...] clause")
+		}
 	}
 
 	var ensures []ast.EnsuresClause
@@ -224,8 +258,8 @@ func (p *Parser) parseImplMethodDeclWithAnnotations(annotations []ast.Annotation
 	if p.match(lexer.TOKEN_COLON) {
 		p.expectNewline()
 		body := p.parseBlock()
-		return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Body: body}
+		return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Permissions: permissions, Ensures: ensures, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Body: body}
 	}
 	p.expectNewline()
-	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType}
+	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RefStorageParams: refStorageParams, RefStateParams: refStateParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Permissions: permissions, Ensures: ensures, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType}
 }

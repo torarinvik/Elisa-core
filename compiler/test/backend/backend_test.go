@@ -3148,6 +3148,10 @@ def load_text(path: any u8&) -> dstr[file_text] error[IoError.NotFound, ...]:
 def load_with_fallback(path: any u8&) -> any u8&:
 	text: any u8& = try read_file(path) else "".cast[any u8&]
 	return text
+
+def load_with_default(path: any u8&) -> any u8&:
+	text: any u8& = try? read_file(path) default "".cast[any u8&]
+	return text
 `
 	result := parseAndAnalyze(t, "backend_error_handling.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -3163,6 +3167,7 @@ def load_with_fallback(path: any u8&) -> any u8&:
 		"define i32 @checked_alloc(ptr ",
 		"define i32 @load_text(ptr ",
 		"define ptr @load_with_fallback(ptr ",
+		"define ptr @load_with_default(ptr ",
 		"extractvalue %ErrUnion__IoError__dstr_file_text",
 		"insertvalue %ErrUnion__IoError__dstr_file_text",
 		"icmp eq i32",

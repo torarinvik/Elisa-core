@@ -233,6 +233,42 @@ def read(maybe_box: Box?, maybe_ref: any Box&?) -> int:
 	}
 }
 
+func TestParseTryDefaultShorthand(t *testing.T) {
+	file, errs := parseSourceFile(t, `
+error FileError:
+    NotFound
+
+extern read_value(flag: bool) -> int error[FileError]
+
+def fallback_value(flag: bool) -> int:
+    return try? read_value(flag) default 11
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	funcDecl, ok := file.Decls[2].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[2])
+	}
+	ret, ok := funcDecl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", funcDecl.Body[0])
+	}
+	tryExpr, ok := ret.Value.(*ast.TryExpr)
+	if !ok {
+		t.Fatalf("expected try expression, got %T", ret.Value)
+	}
+	if !tryExpr.UsesDefaultShorthandForm {
+		t.Fatal("expected try expression to preserve default shorthand form")
+	}
+	if tryExpr.Fallback == nil {
+		t.Fatal("expected try shorthand to record fallback")
+	}
+	if got := unparse.FormatExpr(tryExpr); got != "try? read_value(flag) default 11" {
+		t.Fatalf("expected try shorthand to unparse canonically, got %q", got)
+	}
+}
+
 func TestParseDerivedImplAnnotationAndOverrideMethod(t *testing.T) {
 	file, errs := parseSourceFile(t, `
 struct BuilderTag:

@@ -2310,6 +2310,8 @@ func iterLoopItemTypeBackend(t semantic.Type) (semantic.Type, bool) {
 			return nil, false
 		}
 		return tt.Elem, true
+	case *semantic.StoreRowsViewType:
+		return &semantic.StoreRowViewType{Store: tt.Store}, true
 	case *semantic.GenericInstanceType:
 		if itemType, ok := semantic.TreeChildrenItemType(tt); ok {
 			return itemType, true
@@ -2331,6 +2333,82 @@ func iterLoopItemTypeBackend(t semantic.Type) (semantic.Type, bool) {
 func isIterLoopRuntimeStringViewType(t semantic.Type) bool {
 	st, ok := t.(*semantic.StructType)
 	return ok && st != nil && st.Name == "StringView"
+}
+
+func (s *functionState) emitStoreRowsCarrierStorePtr(sourceAlloca C.LLVMValueRef, sourceType semantic.Type, sourceName string) (*semantic.StoreRowsViewType, C.LLVMValueRef, error) {
+	switch tt := sourceType.(type) {
+	case *semantic.StoreRowsViewType:
+		carrierValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".rows")
+		if err != nil {
+			return nil, nil, err
+		}
+		storePtr := C.LLVMBuildExtractValue(s.builder, carrierValue, 0, cStringFree(sourceName+".rows.store"))
+		return tt, storePtr, nil
+	case *semantic.RefType:
+		rowsType, ok := tt.Elem.(*semantic.StoreRowsViewType)
+		if !ok || rowsType == nil {
+			return nil, nil, fmt.Errorf("unsupported store rows carrier %s", sourceType.String())
+		}
+		if tt.State != semantic.RefStateNonNull {
+			return nil, nil, fmt.Errorf("iterable loop requires a non-null reference source, got %s", sourceType.String())
+		}
+		carrierPtr, err := s.loadValue(sourceAlloca, sourceType, sourceName+".rows.ref")
+		if err != nil {
+			return nil, nil, err
+		}
+		rowsLLVMType, err := s.g.lowerType(rowsType)
+		if err != nil {
+			return nil, nil, err
+		}
+		storeFieldPtr := C.LLVMBuildStructGEP2(s.builder, rowsLLVMType, carrierPtr, 0, cStringFree(sourceName+".rows.store.ptr"))
+		storePtr, err := s.loadValue(storeFieldPtr, &semantic.RefType{Elem: rowsType.Store, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}, sourceName+".rows.store")
+		if err != nil {
+			return nil, nil, err
+		}
+		return rowsType, storePtr, nil
+	default:
+		return nil, nil, fmt.Errorf("unsupported store rows carrier %s", sourceType.String())
+	}
+}
+
+func (s *functionState) emitStoreRowsCount(sourceAlloca C.LLVMValueRef, sourceType semantic.Type, sourceName string) (C.LLVMValueRef, error) {
+	rowsType, storePtr, err := s.emitStoreRowsCarrierStorePtr(sourceAlloca, sourceType, sourceName)
+	if err != nil {
+		return nil, err
+	}
+	if rowsType.Store == nil || len(rowsType.Store.StoreFieldOrder) == 0 {
+		usizeType, err := s.g.lowerType(s.g.result.NamedTypes["usize"])
+		if err != nil {
+			return nil, err
+		}
+		return C.LLVMConstInt(usizeType, 0, 0), nil
+	}
+	firstField := rowsType.Store.StoreFieldOrder[0]
+	columnPtr, darrayType, err := s.emitBuiltinStoreFieldDArrayPtr(storePtr, rowsType.Store, firstField)
+	if err != nil {
+		return nil, err
+	}
+	countPtr, usizeType, err := s.emitBuiltinDArrayCountPtr(columnPtr, darrayType)
+	if err != nil {
+		return nil, err
+	}
+	return s.loadValue(countPtr, usizeType, sourceName+".rows.count")
+}
+
+func (s *functionState) emitStoreRowItemValue(sourceAlloca C.LLVMValueRef, sourceType semantic.Type, indexValue C.LLVMValueRef, sourceName string) (C.LLVMValueRef, semantic.Type, error) {
+	rowsType, storePtr, err := s.emitStoreRowsCarrierStorePtr(sourceAlloca, sourceType, sourceName)
+	if err != nil {
+		return nil, nil, err
+	}
+	rowType := &semantic.StoreRowViewType{Store: rowsType.Store}
+	rowLLVMType, err := s.g.lowerType(rowType)
+	if err != nil {
+		return nil, nil, err
+	}
+	rowValue := C.LLVMGetUndef(rowLLVMType)
+	rowValue = C.LLVMBuildInsertValue(s.builder, rowValue, storePtr, 0, cStringFree(sourceName+".row.store"))
+	rowValue = C.LLVMBuildInsertValue(s.builder, rowValue, indexValue, 1, cStringFree(sourceName+".row.index"))
+	return rowValue, rowType, nil
 }
 
 func (s *functionState) emitIterLoopChunksExactItemValue(carrierValue C.LLVMValueRef, carrierType *semantic.GenericInstanceType, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, semantic.Type, error) {
@@ -2372,6 +2450,8 @@ func (s *functionState) emitIterLoopCount(sourceAlloca C.LLVMValueRef, sourceTyp
 			return nil, err
 		}
 		return lenValue, nil
+	case *semantic.StoreRowsViewType:
+		return s.emitStoreRowsCount(sourceAlloca, sourceType, sourceName)
 	case *semantic.DStrType:
 		sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.source")
 		if err != nil {
@@ -2454,6 +2534,8 @@ func (s *functionState) emitIterLoopCount(sourceAlloca C.LLVMValueRef, sourceTyp
 				return nil, err
 			}
 			return lenValue, nil
+		case *semantic.StoreRowsViewType:
+			return s.emitStoreRowsCount(sourceAlloca, sourceType, sourceName)
 		case *semantic.DStrType:
 			lenValue, err := s.emitRuntimeStringLengthValue(sourceValue, tt.Elem, s.g.result.NamedTypes["i64"], sourceName+".iter.len")
 			if err != nil {
@@ -2524,6 +2606,8 @@ func (s *functionState) emitIterLoopElementAddress(sourceAlloca C.LLVMValueRef, 
 		return s.emitRuntimePointerIndexedAddressWithType(sourceAlloca, mustLowerType(s, tt), tt.Elem, indexValue)
 	case *semantic.DArrayViewType:
 		return s.emitRuntimePointerIndexedAddressWithType(sourceAlloca, mustLowerType(s, tt), tt.Elem, indexValue)
+	case *semantic.StoreRowsViewType:
+		return nil, nil, fmt.Errorf("iterable loop does not support ref binding for %s", sourceType.String())
 	case *semantic.GenericInstanceType:
 		if _, ok := semantic.TreeChildrenItemType(tt); ok {
 			return nil, nil, fmt.Errorf("iterable loop does not support ref binding for %s", sourceType.String())
@@ -2564,6 +2648,8 @@ func (s *functionState) emitIterLoopElementAddress(sourceAlloca C.LLVMValueRef, 
 				return nil, nil, err
 			}
 			return s.emitRuntimePointerIndexedAddressWithType(sourceValue, containerLLVMType, elem.Elem, indexValue)
+		case *semantic.StoreRowsViewType:
+			return nil, nil, fmt.Errorf("iterable loop does not support ref binding for %s", sourceType.String())
 		default:
 			return nil, nil, fmt.Errorf("iterable loop does not support ref binding for %s", sourceType.String())
 		}
@@ -2635,6 +2721,8 @@ func (s *functionState) emitIterLoopElementValue(sourceAlloca C.LLVMValueRef, so
 		}
 		value, err := s.loadValue(ptr, elemType, sourceName+".iter.value")
 		return value, elemType, err
+	case *semantic.StoreRowsViewType:
+		return s.emitStoreRowItemValue(sourceAlloca, sourceType, indexValue, sourceName)
 	case *semantic.DStrType, *semantic.SViewType:
 		sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.source")
 		if err != nil {
@@ -2695,6 +2783,8 @@ func (s *functionState) emitIterLoopElementValue(sourceAlloca C.LLVMValueRef, so
 			}
 			value, err := s.loadValue(ptr, elemType, sourceName+".iter.value")
 			return value, elemType, err
+		case *semantic.StoreRowsViewType:
+			return s.emitStoreRowItemValue(sourceAlloca, sourceType, indexValue, sourceName)
 		case *semantic.DStrType, *semantic.SViewType:
 			sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.ref")
 			if err != nil {

@@ -121,12 +121,28 @@ func (p *Parser) parseFuncTypeExpr() ast.TypeExpr {
 		retType = p.parseTypeExpr()
 	}
 
+	effectAliasPos := lexer.Pos{}
+	effectAlias := ""
+	if p.matchIdentText("effects") {
+		effectAliasPos = p.tokens[p.pos-1].Pos
+		effectAlias = p.parseQualifiedDeclName()
+	}
+
 	var permissions []ast.PermissionRef
 	if p.matchIdentText("can") {
 		permissions = p.parsePermissionRefs(true)
 	}
 
-	return &ast.FuncTypeExpr{Position: pos, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, Return: retType, Permissions: permissions, Variadic: variadic}
+	if effectAlias != "" {
+		if signatureHasExplicitErrorEffects(retType) {
+			p.errorf("effects alias cannot be combined with an explicit error[...] clause")
+		}
+		if len(permissions) != 0 {
+			p.errorf("effects alias cannot be combined with an explicit can[...] clause")
+		}
+	}
+
+	return &ast.FuncTypeExpr{Position: pos, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, Return: retType, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Permissions: permissions, Variadic: variadic}
 }
 
 func (p *Parser) parseErrorSetExpr() *ast.ErrorSetExpr {
@@ -185,7 +201,7 @@ func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string, strin
 		tok := p.advance()
 		return ast.RefStorageStatic, true, tok.Text, "", ""
 	default:
-		if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text != "can" && p.tokens[p.pos+1].Text != "ensures" {
+		if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text != "can" && p.tokens[p.pos+1].Text != "effects" && p.tokens[p.pos+1].Text != "ensures" {
 			name := p.advance().Text
 			return ast.RefStorageAny, true, name, "", name
 		}
@@ -1470,6 +1486,17 @@ func (p *Parser) parsePrimary() ast.Expr {
 	case lexer.TOKEN_TRY:
 		pos := p.cur().Pos
 		p.advance()
+		if p.match(lexer.TOKEN_QUESTION) {
+			value := p.parseOr()
+			p.expectIdentText("default")
+			fallback := p.parseExpr()
+			return &ast.TryExpr{
+				Position:                 pos,
+				Value:                    value,
+				Fallback:                 fallback,
+				UsesDefaultShorthandForm: true,
+			}
+		}
 		value := p.parseOr()
 		return &ast.TryExpr{Position: pos, Value: value}
 	case lexer.TOKEN_RAISE:

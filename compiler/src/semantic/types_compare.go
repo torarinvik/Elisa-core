@@ -153,6 +153,12 @@ func SameType(a, b Type) bool {
 	case *DArrayViewType:
 		tb, ok := b.(*DArrayViewType)
 		return ok && SameType(ta.Elem, tb.Elem)
+	case *StoreRowsViewType:
+		tb, ok := b.(*StoreRowsViewType)
+		return ok && SameType(ta.Store, tb.Store)
+	case *StoreRowViewType:
+		tb, ok := b.(*StoreRowViewType)
+		return ok && SameType(ta.Store, tb.Store)
 	case *DStrType:
 		tb, ok := b.(*DStrType)
 		return ok && SameShape(ta.Shape, tb.Shape)

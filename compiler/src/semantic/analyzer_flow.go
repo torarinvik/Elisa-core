@@ -1929,6 +1929,8 @@ func (a *Analyzer) resolveIterLoopSourceInfo(sourceExpr ast.Expr, sourceType Typ
 			return iterLoopSourceInfo{}, false
 		}
 		return iterLoopSourceInfo{ItemType: tt.Elem, AllowRef: true, AllowMutableRef: !readOnly}, true
+	case *StoreRowsViewType:
+		return iterLoopSourceInfo{ItemType: &StoreRowViewType{Store: tt.Store}}, true
 	case *DStrType:
 		return iterLoopSourceInfo{ItemType: a.namedTypes["char"]}, true
 	case *SViewType:
@@ -2061,7 +2063,7 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	sourceType := a.analyzeExpr(stmt.Source)
 	info, ok := a.resolveIterLoopSourceInfo(stmt.Source, sourceType)
 	if !ok {
-		a.errorf(stmt.Source.Pos(), "iterable for loop currently requires an array, dynamic array, view, string-like iterable, ChunksExactView, enumerate(source), or children(node), got %s", sourceType.String())
+		a.errorf(stmt.Source.Pos(), "iterable for loop currently requires an array, dynamic array, view, store.rows(), string-like iterable, ChunksExactView, enumerate(source), or children(node), got %s", sourceType.String())
 		info.ItemType = invalidType
 	}
 	if stmt.Mode == ast.IterBindValue && a.containsAffineHandleValues(info.ItemType, map[string]bool{}) {

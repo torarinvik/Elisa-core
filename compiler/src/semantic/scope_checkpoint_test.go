@@ -27,7 +27,7 @@ def build(owner: Arena, items: darray[int]) -> usize:
 }
 
 func TestAnalyzeGroupedCheckpointStmt(t *testing.T) {
-    result := analyzeFunctionAnalysisTestSource(t, "grouped_scope_checkpoint.llcontext", `def build(owner: Arena) -> usize:
+	result := analyzeFunctionAnalysisTestSource(t, "grouped_scope_checkpoint.llcontext", `def build(owner: Arena) -> usize:
     alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
     in alloc:
         xs: mutable darray[int] = [1, 2]
@@ -37,20 +37,20 @@ func TestAnalyzeGroupedCheckpointStmt(t *testing.T) {
             ys.push(6)
         return xs.count + ys.count
 `)
-    if errs := result.Errors(); len(errs) != 0 {
-        t.Fatalf("unexpected semantic errors: %v", errs)
-    }
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
 }
 
 func TestAnalyzeRejectsInvalidGroupedCheckpointTarget(t *testing.T) {
-    result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "grouped_scope_checkpoint_invalid.llcontext", `def build(value: i64) -> void:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "grouped_scope_checkpoint_invalid.llcontext", `def build(value: i64) -> void:
     checkpoint value, value:
         pass
 `)
-    all := strings.Join(result.Errors(), "\n")
-    if !strings.Contains(all, "checkpoint requires a region or mutable darray value") {
-        t.Fatalf("expected grouped checkpoint target diagnostic, got:\n%s", all)
-    }
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "checkpoint requires a region or mutable darray value") {
+		t.Fatalf("expected grouped checkpoint target diagnostic, got:\n%s", all)
+	}
 }
 
 func TestAnalyzeWarnsOnLegacyReverseIterableLoopSyntax(t *testing.T) {
@@ -129,6 +129,57 @@ def build(owner: Arena, key: dstr[key_shape]) -> usize:
 `)
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}
+
+func TestAnalyzeStoreRowsIteration(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "store_rows_iteration.llcontext", `
+store PendingGotoStore:
+    name_key: usize
+    depth: usize
+
+def build(owner: Arena) -> usize:
+    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    in alloc:
+        pending: mutable PendingGotoStore = zeroed
+        pending.push(1usize, 2usize)
+        pending.push(3usize, 4usize)
+        total: mutable usize = 0usize
+        for row in pending.rows():
+            total <- total + row.name_key + row.depth
+        for index, row in enumerate(pending.rows()):
+            total <- total + index + row.name_key
+        for row in rev(pending.rows()):
+            total <- total + row.depth
+        return total
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+}
+
+func TestAnalyzeRejectsStoreRowMutationAndRefBinding(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "store_rows_readonly.llcontext", `
+store PendingGotoStore:
+    name_key: usize
+    depth: usize
+
+def build(owner: Arena) -> void:
+    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    in alloc:
+        pending: mutable PendingGotoStore = zeroed
+        pending.push(1usize, 2usize)
+        for row in pending.rows():
+            row.name_key <- 9usize
+        for ref row in pending.rows():
+            pass
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `field "name_key" is immutable`) {
+		t.Fatalf("expected readonly row field diagnostic, got:\n%s", all)
+	}
+	if !strings.Contains(all, "for ref requires an addressable array-like iterable") {
+		t.Fatalf("expected store rows ref-binding diagnostic, got:\n%s", all)
 	}
 }
 

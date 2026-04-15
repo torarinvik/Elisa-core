@@ -72,6 +72,7 @@ type Analyzer struct {
 	staticImpls                       map[string]*StaticImpl
 	extensionMethodsByName            map[string][]*ExtensionMethod
 	permissions                       map[string]*PermissionSet
+	effectAliases                     map[string]*EffectAlias
 	contextBundles                    map[string]*ContextBundle
 	globalScope                       *Scope
 	functionTypes                     map[string]*FuncType
@@ -237,6 +238,7 @@ type poolScopeState struct {
 }
 
 func Analyze(file *ast.File) *Result {
+	normalizeCascadeStmts(file)
 	census := analyzeASTCensus(file)
 	exprCapacity := census.exprs
 	exprFactsCapacity := census.exprs / 8
@@ -266,6 +268,7 @@ func Analyze(file *ast.File) *Result {
 		staticImpls:                       map[string]*StaticImpl{},
 		extensionMethodsByName:            map[string][]*ExtensionMethod{},
 		permissions:                       map[string]*PermissionSet{},
+		effectAliases:                     map[string]*EffectAlias{},
 		contextBundles:                    map[string]*ContextBundle{},
 		globalScope:                       NewScope(nil),
 		functionTypes:                     map[string]*FuncType{},
@@ -297,6 +300,7 @@ func Analyze(file *ast.File) *Result {
 	a.collectConstValues(activeDecls)
 	a.collectPermissionDecls(activeDecls)
 	a.collectNamedTypes(activeDecls)
+	a.collectEffectAliases(activeDecls)
 	a.collectContextBundles(activeDecls)
 	a.collectStaticInterfaces(activeDecls)
 	a.populateConstEnumMembers(activeDecls)
@@ -1568,7 +1572,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolGlobal, Type: declType, Node: n, Mutable: n.Mutable}, n.Pos())
 			case *ast.FuncDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
-				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Ensures, n.Params, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, false)
+				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.EffectAliasPos, n.EffectAlias, n.Permissions, n.Ensures, n.Params, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, false)
 				symbolName := qualifiedName
 				if n.Name == "__cast__" {
 					symbolName = castHookSymbolName(qualifiedName, fnType, n.Pos())
@@ -1592,7 +1596,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 						case *ast.FuncDecl:
 							visibleName := joinQualifiedName(scoped.Namespace, fnDecl.Name)
 							qualifiedName := ExtensionMethodSymbolName(visibleName, receiver, fnDecl.Name)
-							fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, false)
+							fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.EffectAliasPos, fnDecl.EffectAlias, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, false)
 							sym := &Symbol{Name: qualifiedName, Kind: SymbolFunc, Type: fnType, Node: fnDecl, Mutable: false}
 							a.functionTypes[qualifiedName] = fnType
 							a.funcDeclSymbols[fnDecl] = sym
@@ -1601,7 +1605,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 						case *ast.ExternFuncDecl:
 							visibleName := joinQualifiedName(scoped.Namespace, fnDecl.Name)
 							qualifiedName := ExtensionMethodSymbolName(visibleName, receiver, fnDecl.Name)
-							fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, fnDecl.Variadic)
+							fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.EffectAliasPos, fnDecl.EffectAlias, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, fnDecl.Variadic)
 							sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: fnDecl, Mutable: false}
 							a.functionTypes[qualifiedName] = fnType
 							a.defineGlobal(sym, fnDecl.Pos())
@@ -1618,14 +1622,14 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 					switch fnDecl := member.(type) {
 					case *ast.FuncDecl:
 						qualifiedName := StaticImplMethodSymbolName(interfaceName, receiver, fnDecl.Name)
-						fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, false)
+						fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.EffectAliasPos, fnDecl.EffectAlias, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, false)
 						sym := &Symbol{Name: qualifiedName, Kind: SymbolFunc, Type: fnType, Node: fnDecl, Mutable: false}
 						a.functionTypes[qualifiedName] = fnType
 						a.funcDeclSymbols[fnDecl] = sym
 						a.defineGlobal(sym, fnDecl.Pos())
 					case *ast.ExternFuncDecl:
 						qualifiedName := StaticImplMethodSymbolName(interfaceName, receiver, fnDecl.Name)
-						fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, fnDecl.Variadic)
+						fnType := a.funcTypeFromDecl(qualifiedName, fnDecl.TypeParams, fnDecl.RefStorageParams, fnDecl.RefStateParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.EffectAliasPos, fnDecl.EffectAlias, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ImplicitParams, fnDecl.ImplicitBundles, fnDecl.ImplicitItemOrder, fnDecl.ReturnType, fnDecl.Variadic)
 						sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: fnDecl, Mutable: false}
 						a.functionTypes[qualifiedName] = fnType
 						a.defineGlobal(sym, fnDecl.Pos())
@@ -1633,7 +1637,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				}
 			case *ast.ExternFuncDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
-				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Ensures, n.Params, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, n.Variadic)
+				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.EffectAliasPos, n.EffectAlias, n.Permissions, n.Ensures, n.Params, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, n.Variadic)
 				a.applyExternFuncAnnotations(n, fnType)
 				if !fnType.ReturnProvenanceKnown {
 					fnType.ReturnProvenanceKnown = true
@@ -1653,6 +1657,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 			case *ast.TreeDecl:
 			case *ast.EnumDecl:
 			case *ast.ErrorDecl:
+			case *ast.EffectsDecl:
 			case *ast.PermissionDecl:
 			case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			}

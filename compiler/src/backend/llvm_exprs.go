@@ -4369,6 +4369,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if value, actualType, handled, err := s.emitBuiltinStoreTruncateCall(expr); handled {
 		return value, actualType, err
 	}
+	if value, actualType, handled, err := s.emitBuiltinStoreRowsCall(expr); handled {
+		return value, actualType, err
+	}
 	if value, actualType, handled, err := s.emitBuiltinDictEntryCall(expr); handled {
 		return value, actualType, err
 	}
@@ -5239,6 +5242,57 @@ func (s *functionState) emitBuiltinStoreTruncateCall(expr *ast.CallExpr) (C.LLVM
 		C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
 	}
 	return storePtr, builtinStoreResultRefType(storeType), true, nil
+}
+
+func (s *functionState) emitBuiltinStoreRowsCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "rows" || fieldExpr.Object == nil {
+		return nil, nil, false, nil
+	}
+	receiverType := s.exprType(fieldExpr.Object)
+	storeType, receiverRefType, ok := builtinStoreReceiverType(receiverType)
+	if !ok || storeType == nil {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 0 {
+		return nil, nil, true, fmt.Errorf("store rows expects 0 arguments, got %d", len(expr.Args))
+	}
+	storePtr, err := s.emitReadableStoreReceiverPtr(fieldExpr.Object, receiverType, receiverRefType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	resultType, ok := s.exprType(expr).(*semantic.StoreRowsViewType)
+	if !ok || resultType == nil {
+		resultType = &semantic.StoreRowsViewType{Store: storeType}
+	}
+	rowViewLLVMType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	value := C.LLVMGetUndef(rowViewLLVMType)
+	value = C.LLVMBuildInsertValue(s.builder, value, storePtr, 0, cStringFree("store.rows.store"))
+	return value, resultType, true, nil
+}
+
+func (s *functionState) emitReadableStoreReceiverPtr(receiver ast.Expr, receiverType semantic.Type, receiverRefType *semantic.RefType) (C.LLVMValueRef, error) {
+	if receiverRefType != nil {
+		ptr, _, err := s.emitExpr(receiver, receiverRefType)
+		return ptr, err
+	}
+	if ptr, _, err := s.emitValueAddress(receiver); err == nil {
+		return ptr, nil
+	}
+	value, _, err := s.emitExpr(receiver, receiverType)
+	if err != nil {
+		return nil, err
+	}
+	tempName := s.g.nextSyntheticName("store.rows.tmp.")
+	tempAlloca, err := s.createEntryAlloca(tempName, receiverType)
+	if err != nil {
+		return nil, err
+	}
+	C.LLVMBuildStore(s.builder, value, tempAlloca)
+	return tempAlloca, nil
 }
 
 func (s *functionState) emitBuiltinDictReceiverValue(receiver ast.Expr, receiverType semantic.Type) (C.LLVMValueRef, *semantic.DictType, error) {
