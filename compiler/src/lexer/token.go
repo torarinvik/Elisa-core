@@ -77,6 +77,7 @@ const (
 	TOKEN_HASH      // #
 	TOKEN_AMPERSAND // &
 	TOKEN_QUESTION  // ?
+	TOKEN_QASSIGN   // ?=
 	TOKEN_BANG      // !
 	TOKEN_AT        // @
 	TOKEN_ELLIPSIS  // ...
@@ -201,6 +202,7 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_HASH:      "#",
 	TOKEN_AMPERSAND: "&",
 	TOKEN_QUESTION:  "?",
+	TOKEN_QASSIGN:   "?=",
 	TOKEN_BANG:      "!",
 	TOKEN_AT:        "@",
 	TOKEN_ELLIPSIS:  "...",

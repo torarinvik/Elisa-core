@@ -499,6 +499,12 @@ func (i *Interpreter) execStmt(frame *frame, stmt ast.Stmt) (controlSignal, erro
 		frame.locals[n.Name] = value
 		return controlSignal{}, nil
 	case *ast.AssignStmt:
+		if n.Optional {
+			if err := i.execOptionalAssignStmt(frame, n); err != nil {
+				return controlSignal{}, annotateRuntimeError(n.Pos(), err)
+			}
+			return controlSignal{}, nil
+		}
 		value, err := i.evalExpr(frame, n.Value)
 		if err != nil {
 			return controlSignal{}, annotateRuntimeError(n.Pos(), err)
@@ -1086,9 +1092,16 @@ func (i *Interpreter) evalSafeCallExpr(frame *frame, expr *ast.CallExpr) (Value,
 	}
 	if i != nil && i.result != nil && i.result.SafeCalls != nil {
 		if info, ok := i.result.SafeCalls[expr]; ok && info != nil && info.ResolvedFuncName != "" {
-			args := make([]Value, 0, len(info.TailArgs)+1)
+			args := make([]Value, 0, 1+len(info.TailArgs)+len(info.ImplicitArgs))
 			args = append(args, receiverValue.Clone())
 			for _, argExpr := range info.TailArgs {
+				value, err := i.evalExpr(frame, argExpr)
+				if err != nil {
+					return VoidValue(), err
+				}
+				args = append(args, value)
+			}
+			for _, argExpr := range info.ImplicitArgs {
 				value, err := i.evalExpr(frame, argExpr)
 				if err != nil {
 					return VoidValue(), err
@@ -1446,6 +1459,63 @@ func (i *Interpreter) resolveSlot(frame *frame, expr ast.Expr) (*valueSlot, erro
 		}, nil
 	default:
 		return nil, fmt.Errorf("unsupported assignment target %T", expr)
+	}
+}
+
+func stripOptionalAssignInterpreterTarget(expr ast.Expr) ast.Expr {
+	for {
+		paren, ok := expr.(*ast.ParenExpr)
+		if !ok || paren == nil {
+			return expr
+		}
+		expr = paren.Inner
+	}
+}
+
+func (i *Interpreter) execOptionalAssignStmt(frame *frame, stmt *ast.AssignStmt) error {
+	if stmt == nil || stmt.Target == nil || stmt.Value == nil {
+		return fmt.Errorf("invalid ?= statement")
+	}
+	value, err := i.evalExpr(frame, stmt.Value)
+	if err != nil {
+		return err
+	}
+	switch target := stripOptionalAssignInterpreterTarget(stmt.Target).(type) {
+	case *ast.Ident:
+		slot, err := i.resolveSlot(frame, target)
+		if err != nil {
+			return err
+		}
+		if slot.get().IsNull() {
+			return nil
+		}
+		return slot.set(value)
+	case *ast.FieldExpr:
+		if !target.Safe {
+			return fmt.Errorf("?= requires optional chaining on field targets")
+		}
+		parentValue, err := i.evalExpr(frame, target.Object)
+		if err != nil {
+			return err
+		}
+		if parentValue.IsNull() {
+			return nil
+		}
+		if parentValue.kind != valueStruct || parentValue.structVal == nil {
+			return fmt.Errorf("field assignment requires a struct")
+		}
+		if _, ok := parentValue.structVal.Fields[target.Field]; !ok {
+			return fmt.Errorf("struct %s has no field %q", parentValue.structVal.Name, target.Field)
+		}
+		parentSlot, err := i.resolveSlot(frame, target.Object)
+		if err != nil {
+			return err
+		}
+		updated := parentValue.Clone()
+		updated.structVal.Fields[target.Field] = value.Clone()
+		return parentSlot.set(updated)
+	default:
+		return fmt.Errorf("invalid ?= target")
 	}
 }
 

@@ -977,6 +977,7 @@ type AssignStmt struct {
 	Position lexer.Pos
 	Target   Expr
 	Value    Expr
+	Optional bool
 }
 
 type AugAssignStmt struct {

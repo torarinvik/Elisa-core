@@ -233,6 +233,34 @@ def read(maybe_box: Box?, maybe_ref: any Box&?) -> int:
 	}
 }
 
+func TestParseNullableAssignStmt(t *testing.T) {
+	file, errs := parseSourceFile(t, `
+struct Box:
+    value: int
+
+def write(maybe_ref: any Box&?) -> void:
+    maybe_ref?.value ?= 7
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	funcDecl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[1])
+	}
+	assign, ok := funcDecl.Body[0].(*ast.AssignStmt)
+	if !ok || !assign.Optional {
+		t.Fatalf("expected optional assign stmt, got %T %#v", funcDecl.Body[0], funcDecl.Body[0])
+	}
+	target, ok := assign.Target.(*ast.FieldExpr)
+	if !ok || !target.Safe || target.Field != "value" {
+		t.Fatalf("expected safe field target, got %T %#v", assign.Target, assign.Target)
+	}
+	if got := unparse.FormatStmt(funcDecl.Body[0]); got != "maybe_ref?.value ?= 7" {
+		t.Fatalf("expected nullable assign to unparse canonically, got %q", got)
+	}
+}
+
 func TestParseTryDefaultShorthand(t *testing.T) {
 	file, errs := parseSourceFile(t, `
 error FileError:

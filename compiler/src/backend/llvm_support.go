@@ -224,6 +224,169 @@ func (s *functionState) emitReadableFieldAddress(expr *ast.FieldExpr) (C.LLVMVal
 	return s.refinedOptionalPayloadAddress(fieldPtr, fieldType, s.exprType(expr), expr.Field)
 }
 
+func backendSafeChainReceiverType(receiverType semantic.Type) (semantic.Type, bool) {
+	if receiverType == nil {
+		return nil, false
+	}
+	if optionalType, ok := receiverType.(*semantic.OptionalType); ok && optionalType != nil && optionalType.Value != nil {
+		return optionalType.Value, true
+	}
+	if refType, ok := receiverType.(*semantic.RefType); ok && refType != nil && refType.State != semantic.RefStateNonNull {
+		cloned := *refType
+		cloned.State = semantic.RefStateNonNull
+		return &cloned, true
+	}
+	return nil, false
+}
+
+func backendImplicitCallLikeRefUpcastType(expected *semantic.RefType, actual semantic.Type) (semantic.Type, bool) {
+	if expected == nil {
+		return nil, false
+	}
+	actualRef, ok := actual.(*semantic.RefType)
+	if !ok || actualRef == nil {
+		return nil, false
+	}
+	if expected.StateParam != "" || expected.StorageParam != "" || actualRef.StateParam != "" || actualRef.StorageParam != "" {
+		return nil, false
+	}
+	if expected.Storage != semantic.RefStorageAny || actualRef.Storage == semantic.RefStorageAny {
+		return nil, false
+	}
+	if expected.Mutable && !actualRef.Mutable {
+		return nil, false
+	}
+	if expected.State != actualRef.State || expected.Region != actualRef.Region {
+		return nil, false
+	}
+	if !semantic.AssignableTo(expected.Elem, actualRef.Elem) {
+		return nil, false
+	}
+	coerced := *actualRef
+	coerced.Storage = semantic.RefStorageAny
+	coerced.ExplicitStorage = expected.ExplicitStorage
+	return &coerced, true
+}
+
+func (s *functionState) emitSafeChainReceiverValue(receiver ast.Expr) (C.LLVMValueRef, C.LLVMValueRef, semantic.Type, error) {
+	if receiver == nil {
+		return nil, nil, nil, fmt.Errorf("optional chaining requires a receiver")
+	}
+	sourceType := s.exprType(receiver)
+	baseReceiverType, ok := backendSafeChainReceiverType(sourceType)
+	if !ok {
+		return nil, nil, nil, fmt.Errorf("optional chaining requires an optional or nullable reference receiver, got %s", sourceType.String())
+	}
+	if optionalType, ok := sourceType.(*semantic.OptionalType); ok && optionalType != nil {
+		fallibleValue, _, err := s.emitExpr(receiver, sourceType)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		presentValue, err := s.extractOptionalPresent(fallibleValue, optionalType)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		payloadValue, err := s.extractOptionalPayload(fallibleValue, optionalType)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return presentValue, payloadValue, baseReceiverType, nil
+	}
+	refValue, _, err := s.emitExpr(receiver, sourceType)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	nullValue := C.LLVMConstNull(C.LLVMTypeOf(refValue))
+	presentValue := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), refValue, nullValue, cStringFree("safe.receiver.present"))
+	return presentValue, refValue, baseReceiverType, nil
+}
+
+func (s *functionState) emitFieldAddressFromObjectValue(objValue C.LLVMValueRef, objType semantic.Type, fieldName string, name string) (C.LLVMValueRef, semantic.Type, error) {
+	if objType == nil {
+		return nil, nil, fmt.Errorf("missing semantic type for field %q", fieldName)
+	}
+	fieldType, index, containerType, pointerLike, err := s.g.fieldInfo(objType, fieldName)
+	if err != nil {
+		return nil, nil, err
+	}
+	var containerLLVMType C.LLVMTypeRef
+	if enumType, ok := containerType.(*semantic.EnumType); ok && enumType.Packed {
+		containerLLVMType, err = s.loweredEnumStorageType(enumType)
+	} else {
+		containerLLVMType, err = s.g.lowerType(containerType)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	objPtr := objValue
+	if !pointerLike {
+		objPtr, err = s.emitStackTempValue(objValue, objType, name+".obj")
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	if enumType, ok := containerType.(*semantic.EnumType); ok && enumType.Packed {
+		var activeStore *packedStoreBinding
+		if binding, ok := s.lookupPackedStore(enumType); ok {
+			activeStore = &binding
+		}
+		objPtr, err = s.packedEnumStoragePtrFromExprValue(objPtr, objType, enumType, activeStore)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	fieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, objPtr, C.unsigned(index), cStringFree(name+"."+fieldName))
+	return fieldPtr, fieldType, nil
+}
+
+func (s *functionState) emitFieldValueFromObjectValue(objValue C.LLVMValueRef, objType semantic.Type, fieldName string, name string) (C.LLVMValueRef, semantic.Type, error) {
+	if fieldType, ok := dstrSyntheticFieldType(objType, fieldName); ok {
+		value, err := s.emitRuntimeStringLengthValue(objValue, objType, fieldType, name+"."+fieldName)
+		return value, fieldType, err
+	}
+	fieldPtr, fieldType, err := s.emitFieldAddressFromObjectValue(objValue, objType, fieldName, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	value, err := s.loadValue(fieldPtr, fieldType, name+"."+fieldName)
+	if err != nil {
+		return nil, nil, err
+	}
+	return value, fieldType, nil
+}
+
+func (s *functionState) emitPreparedUFCSReceiverValue(receiverValue C.LLVMValueRef, actualType semantic.Type, expectedType semantic.Type, name string) (C.LLVMValueRef, semantic.Type, error) {
+	if actualType == nil || expectedType == nil {
+		return receiverValue, actualType, nil
+	}
+	if semantic.AssignableTo(expectedType, actualType) {
+		coerced, err := s.coerceValue(receiverValue, actualType, expectedType)
+		if err != nil {
+			return receiverValue, actualType, nil
+		}
+		return coerced, expectedType, nil
+	}
+	expectedRef, ok := expectedType.(*semantic.RefType)
+	if !ok || expectedRef == nil {
+		return nil, nil, fmt.Errorf("UFCS receiver expects %s, got %s", expectedType.String(), actualType.String())
+	}
+	if upcastType, ok := backendImplicitCallLikeRefUpcastType(expectedRef, actualType); ok {
+		coerced, err := s.coerceValue(receiverValue, actualType, upcastType)
+		if err != nil {
+			return nil, nil, err
+		}
+		return coerced, upcastType, nil
+	}
+	if !semantic.AssignableTo(expectedRef.Elem, actualType) {
+		return nil, nil, fmt.Errorf("UFCS receiver expects %s, got %s", expectedType.String(), actualType.String())
+	}
+	ptr, err := s.emitStackTempValue(receiverValue, actualType, name+".autoref")
+	if err != nil {
+		return nil, nil, err
+	}
+	return ptr, expectedType, nil
+}
+
 func (s *functionState) emitStoreRowFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	if expr == nil || expr.Object == nil {
 		return nil, nil, false, nil

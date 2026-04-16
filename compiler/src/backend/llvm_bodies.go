@@ -942,6 +942,9 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		}
 		return s.emitArenaFree(binding.ptr, binding.typ)
 	case *ast.AssignStmt:
+		if n.Optional {
+			return s.emitOptionalAssignStmt(n)
+		}
 		ptr, targetType, err := s.emitAddress(n.Target)
 		if err != nil {
 			return err
@@ -4092,6 +4095,90 @@ func (s *functionState) emitOptionalBindCondition(expr *ast.OptionalBindExpr, tr
 	}
 	C.LLVMBuildBr(s.builder, trueBB)
 	return nil
+}
+
+func stripOptionalAssignTargetExpr(expr ast.Expr) ast.Expr {
+	for {
+		paren, ok := expr.(*ast.ParenExpr)
+		if !ok || paren == nil {
+			return expr
+		}
+		expr = paren.Inner
+	}
+}
+
+func (s *functionState) emitOptionalAssignThroughNullableRef(refValue C.LLVMValueRef, elemType semantic.Type, valueExpr ast.Expr, name string) error {
+	if refValue == nil || elemType == nil {
+		return fmt.Errorf("invalid ?= target")
+	}
+	nullValue := C.LLVMConstNull(C.LLVMTypeOf(refValue))
+	presentValue := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), refValue, nullValue, cStringFree(name+".present"))
+	assignBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".assign"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".merge"))
+	C.LLVMBuildCondBr(s.builder, presentValue, assignBB, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, assignBB)
+	value, _, err := s.emitExpr(valueExpr, elemType)
+	if err != nil {
+		return err
+	}
+	C.LLVMBuildStore(s.builder, value, refValue)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	return nil
+}
+
+func (s *functionState) emitOptionalAssignStmt(stmt *ast.AssignStmt) error {
+	if stmt == nil || stmt.Target == nil || stmt.Value == nil {
+		return fmt.Errorf("invalid ?= statement")
+	}
+	s.invalidatePackedEnumStorageExpr(stmt.Target)
+	s.invalidatePackedEnumStoreOriginExpr(stmt.Target)
+	s.invalidatePackedCommonFieldValuesExpr(stmt.Target)
+	s.invalidatePackedVariantViewExpr(stmt.Target)
+	s.invalidatePackedReadCaches()
+	switch target := stripOptionalAssignTargetExpr(stmt.Target).(type) {
+	case *ast.Ident:
+		targetType := s.exprType(target)
+		refType, ok := targetType.(*semantic.RefType)
+		if !ok || refType == nil || refType.State != semantic.RefStateNullable {
+			return fmt.Errorf("?= requires a nullable reference target")
+		}
+		refValue, _, err := s.emitExpr(target, targetType)
+		if err != nil {
+			return err
+		}
+		return s.emitOptionalAssignThroughNullableRef(refValue, refType.Elem, stmt.Value, "opt.assign.ident")
+	case *ast.FieldExpr:
+		if !target.Safe {
+			return fmt.Errorf("?= requires optional chaining on field targets")
+		}
+		presentValue, receiverValue, receiverType, err := s.emitSafeChainReceiverValue(target.Object)
+		if err != nil {
+			return err
+		}
+		assignBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("opt.assign.field.assign"))
+		mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("opt.assign.field.merge"))
+		C.LLVMBuildCondBr(s.builder, presentValue, assignBB, mergeBB)
+
+		C.LLVMPositionBuilderAtEnd(s.builder, assignBB)
+		fieldPtr, fieldType, err := s.emitFieldAddressFromObjectValue(receiverValue, receiverType, target.Field, "opt.assign.field")
+		if err != nil {
+			return err
+		}
+		value, _, err := s.emitExpr(stmt.Value, fieldType)
+		if err != nil {
+			return err
+		}
+		C.LLVMBuildStore(s.builder, value, fieldPtr)
+		C.LLVMBuildBr(s.builder, mergeBB)
+
+		C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+		return nil
+	default:
+		return fmt.Errorf("invalid ?= target")
+	}
 }
 
 func (s *functionState) collectTruthyConditionBindings(expr ast.Expr) ([]conditionBindingInfo, error) {

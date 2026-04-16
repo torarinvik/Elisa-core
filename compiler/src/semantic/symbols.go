@@ -59,7 +59,10 @@ type Result struct {
 
 type SafeCallInfo struct {
 	ResolvedFuncName string
+	ResolvedFuncType *FuncType
+	ReceiverArgType  Type
 	TailArgs         []ast.Expr
+	ImplicitArgs     []ast.Expr
 }
 
 type ParallelForInfo struct {

@@ -223,9 +223,15 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 	case *ast.UnaryExpr:
 		value, actualType, err = s.emitUnaryExpr(n)
 	case *ast.CallExpr:
-		value, actualType, err = s.emitCallExpr(n)
+		if n.Safe {
+			value, actualType, err = s.emitSafeCallExpr(n)
+		} else {
+			value, actualType, err = s.emitCallExpr(n)
+		}
 	case *ast.FieldExpr:
-		if errorType, _, ok := s.errorTagInfo(n); ok {
+		if n.Safe {
+			value, actualType, err = s.emitSafeFieldExpr(n)
+		} else if errorType, _, ok := s.errorTagInfo(n); ok {
 			value, actualType, err = s.emitErrorTagExpr(n, errorType)
 		} else if constEnumType, member, ok := s.constEnumMemberInfo(n); ok {
 			value, actualType, err = s.emitConstEnumMemberExpr(constEnumType, member)
@@ -4277,6 +4283,282 @@ func (s *functionState) emitNodeTableFillHelperCall(expr *ast.CallExpr) (C.LLVMV
 	return phi, resultType, true, nil
 }
 
+func (s *functionState) emitResolvedCall(callee C.LLVMValueRef, funcType *semantic.FuncType, direct bool, args []C.LLVMValueRef) (C.LLVMValueRef, semantic.Type, error) {
+	if funcType == nil {
+		return nil, nil, fmt.Errorf("call target does not have a function type")
+	}
+	llvmFnType, err := s.g.lowerFunctionType(funcType)
+	if err != nil {
+		return nil, nil, err
+	}
+	if retUnion, ok := nonVoidErrorUnion(funcType.Return); ok {
+		resultSlot, err := s.emitStackTempZeroed(retUnion.Value, "call.result")
+		if err != nil {
+			return nil, nil, err
+		}
+		callArgs := make([]C.LLVMValueRef, 0, len(args)+1)
+		callArgs = append(callArgs, resultSlot)
+		callArgs = append(callArgs, args...)
+		var call C.LLVMValueRef
+		if direct {
+			call = s.buildCall(llvmFnType, callee, callArgs, "calltmp")
+		} else {
+			call, err = s.emitFunctionValueCall(callee, funcType, callArgs, "calltmp")
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		payload, err := s.loadValue(resultSlot, retUnion.Value, "call.payload")
+		if err != nil {
+			return nil, nil, err
+		}
+		unionValue, err := s.buildErrorUnionValue(retUnion, call, payload)
+		if err != nil {
+			return nil, nil, err
+		}
+		return unionValue, funcType.Return, nil
+	}
+	callName := ""
+	if !isVoidType(funcType.Return) {
+		callName = "calltmp"
+	}
+	var call C.LLVMValueRef
+	if direct {
+		call = s.buildCall(llvmFnType, callee, args, callName)
+	} else {
+		call, err = s.emitFunctionValueCall(callee, funcType, args, "calltmp")
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	return call, funcType.Return, nil
+}
+
+func (s *functionState) emitSafeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if expr == nil || expr.Object == nil {
+		return nil, nil, fmt.Errorf("optional field access requires a receiver")
+	}
+	resultType := s.exprType(expr)
+	optionalType, ok := resultType.(*semantic.OptionalType)
+	if !ok || optionalType == nil || optionalType.Value == nil {
+		return nil, nil, fmt.Errorf("optional field access requires an optional result type")
+	}
+	presentValue, receiverValue, receiverType, err := s.emitSafeChainReceiverValue(expr.Object)
+	if err != nil {
+		return nil, nil, err
+	}
+	presentBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.field.present"))
+	noneBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.field.none"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.field.merge"))
+	C.LLVMBuildCondBr(s.builder, presentValue, presentBB, noneBB)
+
+	var (
+		someValue  C.LLVMValueRef
+		noneValue  C.LLVMValueRef
+		presentEnd C.LLVMBasicBlockRef
+		noneEnd    C.LLVMBasicBlockRef
+	)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, presentBB)
+	payloadValue, payloadType, err := s.emitFieldValueFromObjectValue(receiverValue, receiverType, expr.Field, "safe.field")
+	if err != nil {
+		return nil, nil, err
+	}
+	payloadValue, err = s.coerceValue(payloadValue, payloadType, optionalType.Value)
+	if err != nil {
+		return nil, nil, err
+	}
+	someValue, err = s.buildOptionalSome(optionalType, payloadValue)
+	if err != nil {
+		return nil, nil, err
+	}
+	presentEnd = C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, noneBB)
+	noneValue, err = s.buildOptionalNone(optionalType)
+	if err != nil {
+		return nil, nil, err
+	}
+	noneEnd = C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	resultLLVMType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, err
+	}
+	phi := C.LLVMBuildPhi(s.builder, resultLLVMType, cStringFree("valuephi"))
+	values := []C.LLVMValueRef{someValue, noneValue}
+	blocks := []C.LLVMBasicBlockRef{presentEnd, noneEnd}
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	return phi, resultType, nil
+}
+
+func (s *functionState) emitSafeCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, error) {
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Object == nil {
+		return nil, nil, fmt.Errorf("optional call requires member-call syntax")
+	}
+	resultType := s.exprType(expr)
+	presentValue, receiverValue, receiverType, err := s.emitSafeChainReceiverValue(fieldExpr.Object)
+	if err != nil {
+		return nil, nil, err
+	}
+	presentBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.call.present"))
+	noneBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.call.none"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("safe.call.merge"))
+	C.LLVMBuildCondBr(s.builder, presentValue, presentBB, noneBB)
+
+	var (
+		wrappedValue C.LLVMValueRef
+		noneValue    C.LLVMValueRef
+		presentEnd   C.LLVMBasicBlockRef
+		noneEnd      C.LLVMBasicBlockRef
+	)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, presentBB)
+	info := (*semantic.SafeCallInfo)(nil)
+	if s != nil && s.g != nil && s.g.result != nil && s.g.result.SafeCalls != nil {
+		info = s.g.result.SafeCalls[expr]
+	}
+	var (
+		callValue C.LLVMValueRef
+		callType  semantic.Type
+	)
+	if info != nil && info.ResolvedFuncName != "" {
+		receiverArgType := info.ReceiverArgType
+		if receiverArgType == nil {
+			receiverArgType = receiverType
+		}
+		fakeReceiver := &ast.ZeroedLit{Position: fieldExpr.Object.Pos()}
+		synthetic := &ast.CallExpr{
+			Position:                  expr.Position,
+			Func:                      &ast.Ident{Position: fieldExpr.Position, Name: info.ResolvedFuncName},
+			Args:                      append([]ast.Expr{fakeReceiver}, info.TailArgs...),
+			ResolvedImplicitArgsValid: len(info.ImplicitArgs) != 0,
+			ResolvedImplicitArgs:      append([]ast.Expr(nil), info.ImplicitArgs...),
+		}
+		if s.g.result.ExprTypes != nil {
+			s.g.result.ExprTypes[fakeReceiver] = receiverArgType
+			defer delete(s.g.result.ExprTypes, fakeReceiver)
+		}
+		callee, funcType, err := s.resolveCallTarget(synthetic)
+		if err != nil {
+			return nil, nil, err
+		}
+		expectedReceiverType := receiverArgType
+		if len(funcType.Params) != 0 {
+			expectedReceiverType = funcType.Params[0]
+		}
+		receiverArg, _, err := s.emitPreparedUFCSReceiverValue(receiverValue, receiverType, expectedReceiverType, "safe.call.receiver")
+		if err != nil {
+			return nil, nil, err
+		}
+		args := make([]C.LLVMValueRef, 0, 1+len(info.TailArgs)+len(info.ImplicitArgs))
+		args = append(args, receiverArg)
+		for i, arg := range info.TailArgs {
+			paramIndex := i + 1
+			var expected semantic.Type
+			if paramIndex < len(funcType.Params) {
+				expected = funcType.Params[paramIndex]
+			}
+			value, _, err := s.emitCallArg(arg, expected, funcType, paramIndex)
+			if err != nil {
+				return nil, nil, err
+			}
+			args = append(args, value)
+		}
+		implicitStart := 1 + len(info.TailArgs)
+		for i, arg := range info.ImplicitArgs {
+			paramIndex := implicitStart + i
+			var expected semantic.Type
+			if paramIndex < len(funcType.Params) {
+				expected = funcType.Params[paramIndex]
+			}
+			value, _, err := s.emitCallArg(arg, expected, funcType, paramIndex)
+			if err != nil {
+				return nil, nil, err
+			}
+			args = append(args, value)
+		}
+		callValue, callType, err = s.emitResolvedCall(callee, funcType, true, args)
+		if err != nil {
+			return nil, nil, err
+		}
+	} else {
+		calleeValue, calleeType, err := s.emitFieldValueFromObjectValue(receiverValue, receiverType, fieldExpr.Field, "safe.call.callee")
+		if err != nil {
+			return nil, nil, err
+		}
+		funcType, ok := calleeType.(*semantic.FuncType)
+		if !ok || funcType == nil {
+			return nil, nil, fmt.Errorf("cannot call non-function value of type %s", calleeType.String())
+		}
+		loweredArgs := expr.LoweredArgs()
+		args := make([]C.LLVMValueRef, 0, len(loweredArgs))
+		for i, arg := range loweredArgs {
+			var expected semantic.Type
+			if i < len(funcType.Params) {
+				expected = funcType.Params[i]
+			}
+			value, _, err := s.emitCallArg(arg, expected, funcType, i)
+			if err != nil {
+				return nil, nil, err
+			}
+			args = append(args, value)
+		}
+		callValue, callType, err = s.emitResolvedCall(calleeValue, funcType, false, args)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	if isVoidType(resultType) {
+		presentEnd = C.LLVMGetInsertBlock(s.builder)
+		C.LLVMBuildBr(s.builder, mergeBB)
+	} else {
+		optionalType, ok := resultType.(*semantic.OptionalType)
+		if !ok || optionalType == nil || optionalType.Value == nil {
+			return nil, nil, fmt.Errorf("optional call requires an optional result type")
+		}
+		callValue, err = s.coerceValue(callValue, callType, optionalType.Value)
+		if err != nil {
+			return nil, nil, err
+		}
+		wrappedValue, err = s.buildOptionalSome(optionalType, callValue)
+		if err != nil {
+			return nil, nil, err
+		}
+		presentEnd = C.LLVMGetInsertBlock(s.builder)
+		C.LLVMBuildBr(s.builder, mergeBB)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, noneBB)
+	if !isVoidType(resultType) {
+		optionalType := resultType.(*semantic.OptionalType)
+		noneValue, err = s.buildOptionalNone(optionalType)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	noneEnd = C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	if isVoidType(resultType) {
+		return nil, resultType, nil
+	}
+	resultLLVMType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, err
+	}
+	phi := C.LLVMBuildPhi(s.builder, resultLLVMType, cStringFree("safe.call.result"))
+	values := []C.LLVMValueRef{wrappedValue, noneValue}
+	blocks := []C.LLVMBasicBlockRef{presentEnd, noneEnd}
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	return phi, resultType, nil
+}
+
 func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, error) {
 	if storeType, ok := s.packedStoreConstructorCall(expr); ok {
 		return s.emitPackedStoreConstructorValue(expr, storeType)
@@ -4395,10 +4677,6 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if funcType == nil {
 		return nil, nil, fmt.Errorf("call target does not have a function type")
 	}
-	llvmFnType, err := s.g.lowerFunctionType(funcType)
-	if err != nil {
-		return nil, nil, err
-	}
 	if len(funcType.ImplicitParamNames) != 0 && !expr.ResolvedImplicitArgsValid {
 		if recovered, ok := s.recoverImplicitCallArgs(expr, funcType); ok {
 			expr.ResolvedImplicitArgs = recovered
@@ -4420,47 +4698,7 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 		}
 		args = append(args, value)
 	}
-	if retUnion, ok := nonVoidErrorUnion(funcType.Return); ok {
-		resultSlot, err := s.emitStackTempZeroed(retUnion.Value, "call.result")
-		if err != nil {
-			return nil, nil, err
-		}
-		callArgs := make([]C.LLVMValueRef, 0, len(args)+1)
-		callArgs = append(callArgs, resultSlot)
-		callArgs = append(callArgs, args...)
-		var call C.LLVMValueRef
-		if s.directCallTarget(expr.Func) {
-			call = s.buildCall(llvmFnType, callee, callArgs, "calltmp")
-		} else {
-			call, err = s.emitFunctionValueCall(callee, funcType, callArgs, "calltmp")
-			if err != nil {
-				return nil, nil, err
-			}
-		}
-		payload, err := s.loadValue(resultSlot, retUnion.Value, "call.payload")
-		if err != nil {
-			return nil, nil, err
-		}
-		unionValue, err := s.buildErrorUnionValue(retUnion, call, payload)
-		if err != nil {
-			return nil, nil, err
-		}
-		return unionValue, funcType.Return, nil
-	}
-	callName := ""
-	if !isVoidType(funcType.Return) {
-		callName = "calltmp"
-	}
-	var call C.LLVMValueRef
-	if s.directCallTarget(expr.Func) {
-		call = s.buildCall(llvmFnType, callee, args, callName)
-	} else {
-		call, err = s.emitFunctionValueCall(callee, funcType, args, "calltmp")
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-	return call, funcType.Return, nil
+	return s.emitResolvedCall(callee, funcType, s.directCallTarget(expr.Func), args)
 }
 
 func builtinDArrayPushReceiverType(t semantic.Type) (*semantic.DArrayType, *semantic.RefType, bool) {

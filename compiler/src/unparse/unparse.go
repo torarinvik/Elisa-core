@@ -419,7 +419,11 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 	}
 	switch n := stmt.(type) {
 	case *ast.AssignStmt:
-		f.writePrefixedMultiline(level, "", formatExpr(n.Target)+" <- "+formatExpr(n.Value))
+		op := " <- "
+		if n.Optional {
+			op = " ?= "
+		}
+		f.writePrefixedMultiline(level, "", formatExpr(n.Target)+op+formatExpr(n.Value))
 	case *ast.AugAssignStmt:
 		f.writePrefixedMultiline(level, "", formatExpr(n.Target)+" "+lexer.TokenName(n.Op)+" "+formatExpr(n.Value))
 	case *ast.AsRefAssignStmt:

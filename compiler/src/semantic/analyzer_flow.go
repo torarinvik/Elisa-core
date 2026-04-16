@@ -196,15 +196,22 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.invalidateRegionRefs(sym, func(regionDependencyState) bool { return true }, fmt.Sprintf("destroy of region %q", n.Name))
 		a.invalidateRegionMarks(sym, func(regionMarkState) bool { return true }, fmt.Sprintf("destroy of region %q", n.Name))
 	case *ast.AssignStmt:
-		targetType := a.assignmentTargetType(n.Target)
+		var targetType Type
+		if n.Optional {
+			targetType = a.optionalAssignmentTargetType(n.Target)
+		} else {
+			targetType = a.assignmentTargetType(n.Target)
+		}
 		a.clearPackedVariantViewExpr(n.Target)
 		valueType := a.analyzeValueExpr(n.Value, targetType)
 		if !AssignableTo(targetType, valueType) {
 			a.errorf(n.Pos(), "cannot assign %s to %s", valueType.String(), targetType.String())
 			a.reportShapeMismatchNotes(n.Pos(), targetType, valueType)
 		}
-		a.recordAssignmentRefinement(n.Target, targetType, valueType)
-		a.recordRegionRefAssignment(n.Target, n.Value)
+		if !n.Optional {
+			a.recordAssignmentRefinement(n.Target, targetType, valueType)
+			a.recordRegionRefAssignment(n.Target, n.Value)
+		}
 		if ident, ok := n.Target.(*ast.Ident); ok && a.currentScope != nil {
 			if targetSym, ok := a.currentScope.Lookup(ident.Name); ok {
 				if from, fromType, ok := a.freezeMovedPackedStoreSource(n.Value); ok {
@@ -213,12 +220,14 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			}
 		}
 		a.recordSpecializedValueTypeTarget(n.Target, valueType)
-		a.recordNamedStateAssignmentTarget(n.Target, n.Value, valueType)
-		a.clearAffineValueTarget(n.Target)
-		a.trackAffineValueTarget(n.Target, targetType)
-		a.markCreatedProtocolTarget(n.Target, n.Value, targetType)
-		a.recordBorrowedOwnerRefTarget(n.Target, targetType, n.Value)
-		a.recordFunctionValueTarget(n.Target, n.Value)
+		if !n.Optional {
+			a.recordNamedStateAssignmentTarget(n.Target, n.Value, valueType)
+			a.clearAffineValueTarget(n.Target)
+			a.trackAffineValueTarget(n.Target, targetType)
+			a.markCreatedProtocolTarget(n.Target, n.Value, targetType)
+			a.recordBorrowedOwnerRefTarget(n.Target, targetType, n.Value)
+			a.recordFunctionValueTarget(n.Target, n.Value)
+		}
 		if AssignableTo(targetType, valueType) {
 			a.bindActivePackedStoreType(targetType)
 		}

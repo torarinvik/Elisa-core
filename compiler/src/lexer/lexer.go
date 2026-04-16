@@ -851,6 +851,10 @@ func (l *Lexer) NextToken() Token {
 
 	case '?':
 		l.advance()
+		if l.peek() == '=' {
+			l.advance()
+			return l.finishToken(Token{Kind: TOKEN_QASSIGN, Text: "?=", Pos: p})
+		}
 		return l.finishToken(Token{Kind: TOKEN_QUESTION, Text: "?", Pos: p})
 
 	case '~':

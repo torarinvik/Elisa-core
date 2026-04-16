@@ -4772,9 +4772,20 @@ func (a *Analyzer) analyzeSafeCallExpr(expr *ast.CallExpr) Type {
 		return invalidType
 	}
 	resultType := a.analyzeResolvedCallExpr(synthetic, ft, orderedArgs)
+	resolvedFuncType := ft
+	if analyzedType, ok := a.exprTypes[synthetic.Func].(*FuncType); ok && analyzedType != nil {
+		resolvedFuncType = analyzedType
+	}
+	receiverArgType := baseReceiverType
+	if resolvedFuncType != nil && len(resolvedFuncType.Params) != 0 {
+		receiverArgType = ufcsPreparedReceiverType(baseReceiverType, resolvedFuncType.Params[0])
+	}
 	a.safeCalls[expr] = &SafeCallInfo{
 		ResolvedFuncName: resolvedSym.Name,
+		ResolvedFuncType: resolvedFuncType,
+		ReceiverArgType:  receiverArgType,
 		TailArgs:         append([]ast.Expr(nil), orderedArgs[1:]...),
+		ImplicitArgs:     append([]ast.Expr(nil), synthetic.ResolvedImplicitArgs...),
 	}
 	if ft.Return == nil || isVoidType(resultType) {
 		return a.namedTypes["void"]
@@ -5916,8 +5927,13 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 		if !ufcsOK || ufcsSym == nil {
 			return extensionMethodCallRewriteNone
 		}
+		ufcsType, _ := ufcsSym.Type.(*FuncType)
+		receiverArg := fieldExpr.Object
+		if ufcsType != nil && len(ufcsType.Params) != 0 {
+			receiverArg = a.prepareUFCSReceiverArg(fieldExpr.Object, receiverType, ufcsType.Params[0])
+		}
 		prependedArgs := make([]ast.Expr, 0, len(expr.Args)+1)
-		prependedArgs = append(prependedArgs, fieldExpr.Object)
+		prependedArgs = append(prependedArgs, receiverArg)
 		prependedArgs = append(prependedArgs, expr.Args...)
 		expr.Args = prependedArgs
 		if len(expr.ArgNames) != 0 {
@@ -5934,7 +5950,7 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 		}
 		if len(expr.ArgItemOrder) != 0 {
 			prependedItems := make([]ast.CallArgItem, 0, len(expr.ArgItemOrder)+1)
-			prependedItems = append(prependedItems, ast.CallArgItem{Position: fieldExpr.Object.Pos(), ArgIndex: 0})
+			prependedItems = append(prependedItems, ast.CallArgItem{Position: receiverArg.Pos(), ArgIndex: 0})
 			for _, item := range expr.ArgItemOrder {
 				if item.IsPack {
 					prependedItems = append(prependedItems, item)
@@ -5979,6 +5995,55 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 	}
 	expr.Func = &ast.Ident{Position: fieldExpr.Position, Name: method.Symbol.Name}
 	return extensionMethodCallRewriteApplied
+}
+
+func (a *Analyzer) prepareUFCSReceiverArg(receiver ast.Expr, receiverType Type, expected Type) ast.Expr {
+	if a == nil || receiver == nil || receiverType == nil || expected == nil {
+		return receiver
+	}
+	if AssignableTo(expected, receiverType) {
+		return receiver
+	}
+	expectedRef, ok := expected.(*RefType)
+	if !ok || expectedRef == nil {
+		return receiver
+	}
+	if _, ok := implicitCallLikeRefUpcastType(expectedRef, receiverType); ok {
+		return receiver
+	}
+	if !AssignableTo(expectedRef.Elem, receiverType) {
+		return receiver
+	}
+	autoref := ast.Expr(&ast.AddrOfExpr{Position: receiver.Pos(), Operand: receiver})
+	if expectedRef.State == RefStateNonNull {
+		return autoref
+	}
+	return &ast.CastExpr{
+		Position: receiver.Pos(),
+		Operand:  autoref,
+		Target:   astTypeExprForBuiltinMethodRewrite(receiver.Pos(), expectedRef),
+		Origin:   ast.CastExprOriginGeneral,
+	}
+}
+
+func ufcsPreparedReceiverType(actual Type, expected Type) Type {
+	if actual == nil || expected == nil {
+		return actual
+	}
+	if AssignableTo(expected, actual) {
+		return actual
+	}
+	expectedRef, ok := expected.(*RefType)
+	if !ok || expectedRef == nil {
+		return actual
+	}
+	if upcastType, ok := implicitCallLikeRefUpcastType(expectedRef, actual); ok {
+		return upcastType
+	}
+	if AssignableTo(expectedRef.Elem, actual) {
+		return expected
+	}
+	return actual
 }
 
 func (a *Analyzer) exprResolvesToTypePath(expr ast.Expr) bool {
@@ -8744,6 +8809,8 @@ func containsTypeParam(t Type) bool {
 
 func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return a.assignmentTargetType(n.Inner)
 	case *ast.Ident:
 		var (
 			sym *Symbol
@@ -8810,6 +8877,57 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 		return targetType
 	default:
 		a.errorf(expr.Pos(), "invalid assignment target")
+		return invalidType
+	}
+}
+
+func (a *Analyzer) optionalAssignmentTargetType(expr ast.Expr) Type {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return a.optionalAssignmentTargetType(n.Inner)
+	case *ast.Ident:
+		valueType := a.analyzeExpr(n)
+		boundType, ok := conditionOptionalBindType(valueType)
+		if !ok {
+			a.errorf(n.Pos(), "?= requires a nullable reference target, got %s", valueType.String())
+			return invalidType
+		}
+		refType, ok := boundType.(*RefType)
+		if !ok || refType == nil {
+			a.errorf(n.Pos(), "?= requires a nullable reference target, got %s", valueType.String())
+			return invalidType
+		}
+		if !a.requireWritableMutationPath(n) {
+			return invalidType
+		}
+		return refType.Elem
+	case *ast.FieldExpr:
+		if !n.Safe {
+			a.errorf(n.Pos(), "?= requires a nullable reference target; use <- for ordinary assignment")
+			return invalidType
+		}
+		receiverType := a.analyzeExpr(n.Object)
+		boundType, ok := conditionOptionalBindType(receiverType)
+		if !ok {
+			a.errorf(n.Pos(), "?= requires a nullable reference receiver, got %s", receiverType.String())
+			return invalidType
+		}
+		refType, ok := boundType.(*RefType)
+		if !ok || refType == nil {
+			a.errorf(n.Pos(), "?= requires a nullable reference receiver, got %s", receiverType.String())
+			return invalidType
+		}
+		field, ok := a.lookupField(refType, n.Field, n.Pos())
+		if !ok {
+			return invalidType
+		}
+		if !field.Mutable {
+			a.errorf(n.Pos(), "field %q is immutable", n.Field)
+		}
+		a.requireWritableMutationPath(n.Object)
+		return field.Type
+	default:
+		a.errorf(expr.Pos(), "invalid ?= target")
 		return invalidType
 	}
 }

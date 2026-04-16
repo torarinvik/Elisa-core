@@ -104,7 +104,7 @@ func (a *Analyzer) lookupVisibleUFCSFunction(name string, actualReceiver Type) (
 		if !ok || fnType == nil || len(fnType.Params) == 0 {
 			continue
 		}
-		if !AssignableTo(fnType.Params[0], actualReceiver) {
+		if !a.ufcsReceiverAssignableTo(fnType.Params[0], actualReceiver) {
 			continue
 		}
 		if matched != nil {
@@ -124,4 +124,24 @@ func (a *Analyzer) lookupVisibleUFCSFunction(name string, actualReceiver Type) (
 		return nil, false, nil
 	}
 	return matched, true, nil
+}
+
+func (a *Analyzer) ufcsReceiverAssignableTo(expected Type, actual Type) bool {
+	if a == nil || expected == nil || actual == nil {
+		return false
+	}
+	if AssignableTo(expected, actual) {
+		return true
+	}
+	expectedRef, ok := expected.(*RefType)
+	if !ok || expectedRef == nil {
+		return false
+	}
+	if _, ok := implicitCallLikeRefUpcastType(expectedRef, actual); ok {
+		return true
+	}
+	if !AssignableTo(expectedRef.Elem, actual) {
+		return false
+	}
+	return expectedRef.State == RefStateNonNull || expectedRef.State == RefStateNullable
 }

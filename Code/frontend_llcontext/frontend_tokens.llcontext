@@ -68,6 +68,7 @@ enum FrontendTokenKind:
     Hash
     Ampersand
     Question
+    QAssign
     Bang
     At
     Ellipsis

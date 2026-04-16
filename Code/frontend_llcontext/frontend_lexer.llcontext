@@ -756,6 +756,8 @@ def frontend_next_token_kind(lexer: mutable any FrontendLexer&) -> FrontendToken
 
     if ch == FRONTEND_CH_QUESTION:
         _ = frontend_advance_char(lexer)
+        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+            return FrontendTokenKind.QAssign
         return FrontendTokenKind.Question
 
     if ch == FRONTEND_CH_TILDE:
@@ -950,6 +952,8 @@ def frontend_next_token(lexer: mutable any FrontendLexer&) -> FrontendToken can[
 
     if ch == FRONTEND_CH_QUESTION:
         _ = frontend_advance_char(lexer)
+        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+            return frontend_make_token(FrontendTokenKind.QAssign, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
         return frontend_make_token(FrontendTokenKind.Question, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
 
     if ch == FRONTEND_CH_TILDE:
