@@ -72,3 +72,38 @@ def parse() -> int effects MissingEffects:
 		t.Fatalf("expected unknown alias error, got %v", result.Errors())
 	}
 }
+
+func TestEffectDeclAndSignalInferPermissions(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "effect_signal.llcontext", `
+effect FooEffect: pass
+effect ConsoleEffect:
+    Write
+    Flush
+
+def run() -> void:
+    signal FooEffect
+    signal ConsoleEffect.Write
+`)
+	sym, ok := result.GlobalScope.Lookup("run")
+	if !ok {
+		t.Fatal("expected run symbol")
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected function type, got %T", sym.Type)
+	}
+	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[ConsoleEffect.Write, FooEffect]" {
+		t.Fatalf("unexpected inferred permissions: %q", got)
+	}
+}
+
+func TestSignalUnknownEffectErrors(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "effect_signal_unknown.llcontext", `
+def run() -> void:
+    signal MissingEffect
+`)
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, `unknown permission "MissingEffect"`) {
+		t.Fatalf("expected unknown signal effect error, got %v", result.Errors())
+	}
+}

@@ -406,6 +406,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.analyzeParallelForStmt(n)
 	case *ast.PassStmt:
 		return
+	case *ast.SignalStmt:
+		refs := a.resolvePermissionRefs(n.Permissions, true)
+		a.recordFunctionPermissionRefs(refs)
+		return
 	case *ast.PanicStmt:
 		a.analyzeExpr(n.Message)
 	case *ast.ExprStmt:
@@ -846,7 +850,7 @@ func (a *Analyzer) validateDeferStmtBodyStmt(stmt ast.Stmt) {
 		a.validateDeferStmtBodyExpr(n.Value)
 	case *ast.RegionStmt:
 		a.validateDeferStmtBodyExpr(n.Capacity)
-	case *ast.PassStmt, *ast.MarkStmt, *ast.RestoreStmt, *ast.ResetStmt, *ast.DestroyStmt:
+	case *ast.PassStmt, *ast.SignalStmt, *ast.MarkStmt, *ast.RestoreStmt, *ast.ResetStmt, *ast.DestroyStmt:
 		return
 	}
 }
@@ -2796,7 +2800,7 @@ func (c *deferCaptureCollector) collectStmt(stmt ast.Stmt, locals map[string]boo
 		locals[n.Name] = true
 	case *ast.MarkStmt:
 		locals[n.Name] = true
-	case *ast.RestoreStmt, *ast.ResetStmt, *ast.DestroyStmt, *ast.PassStmt:
+	case *ast.RestoreStmt, *ast.ResetStmt, *ast.DestroyStmt, *ast.PassStmt, *ast.SignalStmt:
 		return
 	}
 }

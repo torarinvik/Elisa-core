@@ -878,6 +878,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 				}
 				a.namedTypes[qualifiedName] = &ErrorSetType{Name: qualifiedName, Tags: resolvedTags}
 			case *ast.PermissionDecl:
+			case *ast.EffectDecl:
 			case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			}
 		})
@@ -1667,6 +1668,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 			case *ast.EnumDecl:
 			case *ast.ErrorDecl:
 			case *ast.EffectsDecl:
+			case *ast.EffectDecl:
 			case *ast.PermissionDecl:
 			case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			}
@@ -3095,6 +3097,7 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 			case *ast.ConstEnumDecl:
 			case *ast.EnumDecl:
 			case *ast.ErrorDecl:
+			case *ast.EffectDecl:
 			case *ast.PermissionDecl:
 			case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			}
@@ -3443,15 +3446,19 @@ func annotationAllowsDeclaredPermissions(annotationName string, signature *FuncT
 	if signature == nil || len(signature.Permissions) == 0 {
 		return true
 	}
-	if annotationName != "test" {
+	return annotationName == "test"
+}
+
+func funcHasAnnotation(fn *ast.FuncDecl, name string) bool {
+	if fn == nil || name == "" {
 		return false
 	}
-	for _, ref := range signature.PermissionRefs {
-		if ref.Name != "Abort" {
-			return false
+	for _, annotation := range fn.Annotations {
+		if annotation.Name == name {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 func isSupportedFunctionAnnotation(name string) bool {

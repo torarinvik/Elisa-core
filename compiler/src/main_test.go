@@ -2424,6 +2424,39 @@ func TestRunCLIExecutesSelectedTests(t *testing.T) {
 	}
 }
 
+func TestRunCLIExecutesEffectfulSelectedTests(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "execute_effectful_tests_fixture.llcontext")
+	src := "@test\ndef memory_case() -> void can[Memory.Allocate, Abort.Panic]:\n    can Memory.Allocate:\n        values: i64[4] = zeroed\n        values[0] <- 7\n        if values[0] != 7:\n            panic(\"expected initialized value\")\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write effectful execute-tests fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected effectful test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] memory_case",
+		"[       OK ] memory_case",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected effectful test execution output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunCLIExecutesPoolBackedSelectedTests(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")

@@ -85,3 +85,65 @@ extern register(callback: func() -> void effects FrontendEffects) -> void
 		t.Fatalf("unexpected unparse output:\n%s", got)
 	}
 }
+
+func TestParseEffectDeclAndSignalStmt(t *testing.T) {
+	src := `effect FooEffect: pass
+effect ConsoleEffect: Write Flush
+
+def run() -> void can[FooEffect, ConsoleEffect.Write]:
+    signal FooEffect
+    signal ConsoleEffect.Write
+`
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	first, ok := file.Decls[0].(*ast.EffectDecl)
+	if !ok {
+		t.Fatalf("expected effect decl, got %T", file.Decls[0])
+	}
+	if first.Name != "FooEffect" || len(first.Members) != 0 {
+		t.Fatalf("unexpected marker effect decl: %#v", first)
+	}
+	second, ok := file.Decls[1].(*ast.EffectDecl)
+	if !ok {
+		t.Fatalf("expected second effect decl, got %T", file.Decls[1])
+	}
+	if len(second.Members) != 2 || second.Members[0] != "Write" || second.Members[1] != "Flush" {
+		t.Fatalf("unexpected members: %#v", second.Members)
+	}
+	fn := file.Decls[2].(*ast.FuncDecl)
+	firstSignal, ok := fn.Body[0].(*ast.SignalStmt)
+	if !ok {
+		t.Fatalf("expected signal stmt, got %T", fn.Body[0])
+	}
+	if got := firstSignal.Permissions[0]; got.Name != "FooEffect" || got.Member != "" {
+		t.Fatalf("unexpected first signal permission: %#v", got)
+	}
+	secondSignal := fn.Body[1].(*ast.SignalStmt)
+	if got := secondSignal.Permissions[0]; got.Name != "ConsoleEffect" || got.Member != "Write" {
+		t.Fatalf("unexpected second signal permission: %#v", got)
+	}
+}
+
+func TestUnparseEffectDeclAndSignalStmt(t *testing.T) {
+	src := `effect FooEffect:
+    pass
+
+effect ConsoleEffect:
+    Write
+    Flush
+
+def run() -> void can[FooEffect, ConsoleEffect.Write]:
+    signal FooEffect
+    signal ConsoleEffect.Write
+`
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	got := strings.TrimSpace(unparse.FormatFile(file))
+	if got != strings.TrimSpace(src) {
+		t.Fatalf("unexpected unparse output:\n%s", got)
+	}
+}

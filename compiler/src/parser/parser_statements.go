@@ -33,6 +33,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.pos+1 < len(p.tokens) && (p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT || p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACKET) {
 				return p.parseCanStmt()
 			}
+		case "signal":
+			if p.looksLikeSignalStmt() {
+				return p.parseSignalStmt()
+			}
 		case "wait":
 			if p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "all" {
 				return p.parseWaitAllStmt()
@@ -143,6 +147,29 @@ func (p *Parser) parseStmt() ast.Stmt {
 	default:
 		return p.parseExprOrAssignStmt()
 	}
+}
+
+func (p *Parser) looksLikeSignalStmt() bool {
+	if p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT {
+		return false
+	}
+	depth := 0
+	for i := p.pos + 1; i < len(p.tokens); i++ {
+		tok := p.tokens[i]
+		switch tok.Kind {
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
+			depth++
+		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET:
+			if depth > 0 {
+				depth--
+			}
+		case lexer.TOKEN_NEWLINE:
+			return depth == 0
+		case lexer.TOKEN_EOF:
+			return true
+		}
+	}
+	return true
 }
 
 func (p *Parser) looksLikeLocalParamsStmt() bool {
@@ -1267,6 +1294,14 @@ func (p *Parser) parsePass() *ast.PassStmt {
 	p.expect(lexer.TOKEN_PASS)
 	p.expectNewline()
 	return &ast.PassStmt{Position: pos}
+}
+
+func (p *Parser) parseSignalStmt() *ast.SignalStmt {
+	pos := p.cur().Pos
+	p.expectIdentText("signal")
+	ref := p.parsePermissionRef()
+	p.expectNewline()
+	return &ast.SignalStmt{Position: pos, Permissions: []ast.PermissionRef{ref}}
 }
 
 func (p *Parser) parsePanic() *ast.PanicStmt {

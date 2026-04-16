@@ -50,6 +50,12 @@ type EffectsDecl struct {
 	Permissions  []PermissionRef
 }
 
+type EffectDecl struct {
+	Position lexer.Pos
+	Name     string
+	Members  []string
+}
+
 type PermissionDecl struct {
 	Position lexer.Pos
 	Name     string
@@ -1192,6 +1198,11 @@ type PassStmt struct {
 	Position lexer.Pos
 }
 
+type SignalStmt struct {
+	Position    lexer.Pos
+	Permissions []PermissionRef
+}
+
 type PanicStmt struct {
 	Position lexer.Pos
 	Message  Expr
@@ -1288,6 +1299,7 @@ func (n *ConstEnumMemberDecl) Pos() lexer.Pos {
 }
 func (n *ErrorDecl) Pos() lexer.Pos      { return n.Position }
 func (n *EffectsDecl) Pos() lexer.Pos    { return n.Position }
+func (n *EffectDecl) Pos() lexer.Pos     { return n.Position }
 func (n *PermissionDecl) Pos() lexer.Pos { return n.Position }
 func (n *ContextDecl) Pos() lexer.Pos    { return n.Position }
 func (n *ParamsDecl) Pos() lexer.Pos     { return n.Position }
@@ -1428,6 +1440,7 @@ func (n *CascadeStmt) Pos() lexer.Pos            { return n.Position }
 func (n *PoolStmt) Pos() lexer.Pos               { return n.Position }
 func (n *LockStmt) Pos() lexer.Pos               { return n.Position }
 func (n *PassStmt) Pos() lexer.Pos               { return n.Position }
+func (n *SignalStmt) Pos() lexer.Pos             { return n.Position }
 func (n *PanicStmt) Pos() lexer.Pos              { return n.Position }
 func (n *ExprStmt) Pos() lexer.Pos               { return n.Position }
 func (n *StaticIfStmt) Pos() lexer.Pos           { return n.Position }
@@ -1448,6 +1461,7 @@ func (*ConstEnumDecl) nodeTag()             {}
 func (*ConstEnumMemberDecl) nodeTag()       {}
 func (*ErrorDecl) nodeTag()                 {}
 func (*EffectsDecl) nodeTag()               {}
+func (*EffectDecl) nodeTag()                {}
 func (*PermissionDecl) nodeTag()            {}
 func (*ContextDecl) nodeTag()               {}
 func (*ParamsDecl) nodeTag()                {}
@@ -1565,6 +1579,7 @@ func (*ScopeStmt) nodeTag()                 {}
 func (*PoolStmt) nodeTag()                  {}
 func (*LockStmt) nodeTag()                  {}
 func (*PassStmt) nodeTag()                  {}
+func (*SignalStmt) nodeTag()                {}
 func (*PanicStmt) nodeTag()                 {}
 func (*ExprStmt) nodeTag()                  {}
 func (*StaticIfStmt) nodeTag()              {}
@@ -1583,6 +1598,7 @@ func (*ConstDecl) declTag()        {}
 func (*ConstEnumDecl) declTag()    {}
 func (*ErrorDecl) declTag()        {}
 func (*EffectsDecl) declTag()      {}
+func (*EffectDecl) declTag()       {}
 func (*PermissionDecl) declTag()   {}
 func (*ContextDecl) declTag()      {}
 func (*ParamsDecl) declTag()       {}
@@ -1704,6 +1720,7 @@ func (*ScopeStmt) stmtTag()             {}
 func (*PoolStmt) stmtTag()              {}
 func (*LockStmt) stmtTag()              {}
 func (*PassStmt) stmtTag()              {}
+func (*SignalStmt) stmtTag()            {}
 func (*PanicStmt) stmtTag()             {}
 func (*ExprStmt) stmtTag()              {}
 func (*StaticIfStmt) stmtTag()          {}

@@ -4473,17 +4473,21 @@ def sample_case() -> void can[Abort.Panic]:
 	}
 }
 
-func TestAnalyzeRejectsTestFunctionNonAbortPermission(t *testing.T) {
+func TestAnalyzeAllowsTestFunctionNonAbortPermission(t *testing.T) {
 	src := `@test
 def sample_case() -> void can[Console.Write]:
 	pass
 `
-	_, errs := parseAndAnalyze(t, "function_annotations_test_console_permission.llcontext", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
+	result, errs := parseAndAnalyze(t, "function_annotations_test_console_permission.llcontext", src)
+	if len(errs) != 0 {
+		t.Fatalf("expected no semantic errors, got:\n%s", strings.Join(errs, "\n"))
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "@test function \"sample_case\" must not require permissions") {
-		t.Fatalf("expected test-permission diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	if result == nil || len(result.AnnotatedFuncs) != 1 {
+		t.Fatalf("expected one discovered annotated function, got %#v", result)
+	}
+	refs := result.AnnotatedFuncs[0].Signature.PermissionRefs
+	if len(refs) != 1 || refs[0].Name != "Console" || refs[0].Member != "Write" {
+		t.Fatalf("expected discovered @test signature to keep Console.Write permission ref, got %#v", refs)
 	}
 }
 

@@ -168,6 +168,15 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		return
 	}
 	switch n := decl.(type) {
+	case *ast.EffectDecl:
+		f.writeLine(level, "effect "+n.Name+":")
+		if len(n.Members) == 0 {
+			f.writeLine(level+1, "pass")
+			return
+		}
+		for _, member := range n.Members {
+			f.writeLine(level+1, member)
+		}
 	case *ast.PermissionDecl:
 		f.writeLine(level, "permission "+n.Name+":")
 		for _, member := range n.Members {
@@ -608,6 +617,12 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 		}
 	case *ast.PassStmt:
 		f.writeLine(level, "pass")
+	case *ast.SignalStmt:
+		text := formatPermissionRefs(n.Permissions)
+		if strings.HasPrefix(text, " can[") && strings.HasSuffix(text, "]") {
+			text = text[len(" can[") : len(text)-1]
+		}
+		f.writeLine(level, "signal "+text)
 	case *ast.PanicStmt:
 		f.writePrefixedMultiline(level, "", "panic("+formatExpr(n.Message)+")")
 	case *ast.ExprStmt:

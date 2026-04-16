@@ -10,7 +10,7 @@ The current unreleased highlights include:
 
 - postfix shorthand cast hooks, so exact `__cast__` helpers can back method-like conversions such as `op.i64()`
 - side-table storage for packed-enum `common:` fields via `@storage(side_table)`
-- `Abort.*` permissions on `@test` functions
+- first-class `effect` declarations plus explicit `signal` statements for effect tracking
 - the earlier `refstorage` / `refstate` generic work across parsing, semantics, specialization, lowering, and generated C headers
 
 For a compile-checked end-to-end example, see `../Code/test_programs/ref_qualifier_generics.llcontext`.
@@ -28,7 +28,7 @@ For current annotations and compile-time hints, see `../docs/useful_language_fea
 That reference covers the currently implemented syntax for:
 
 - default and named arguments, including `..` forwarding
-- effects aliases and implicit contexts
+- effect declarations, `signal`, effects aliases, and implicit contexts
 - explicit argument packs via `params` and ambient `with args(...)` scopes
 - brace destructuring, field punning, record updates, and filtered iterable loops
 - `do:` blocks, `defer`, index fallback, store/dict sugar, char literals, and explicit `parallel for`
@@ -41,6 +41,8 @@ The current commonly used surface fits into a few recurring patterns:
 
 ```text
 return consume(value:, ..)
+effect FooEffect: pass
+signal ConsoleEffect.Write
 effects FrontendEffects = error[ParseErr] can[Abort.Panic]
 context ParseCtx:
 with ParseCtx(.., alloc = scratch_alloc):
@@ -114,7 +116,7 @@ Current rules:
 - `@fixture` marks a helper fixture surface
 - `@bench` marks a benchmark case
 - `@skip(reason)` and `@ignore(reason)` skip an annotated test case while preserving it in listing and runner output
-- `@test` functions may declare `can[Abort.Panic]`, which keeps panic-heavy test fixtures valid without allowing unrelated declared permission families
+- `@test` functions may declare and infer ordinary `can[...]` effects, and the generated test runner carries the selected tests' required permissions into its wrapper surface
 
 Current test-oriented emit modes:
 

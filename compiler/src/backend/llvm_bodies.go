@@ -1061,6 +1061,8 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		return s.emitParallelForStmt(n)
 	case *ast.PassStmt:
 		return nil
+	case *ast.SignalStmt:
+		return nil
 	case *ast.PanicStmt:
 		return s.emitPanicWithBacktrace(n.Pos(), n.Message)
 	case *ast.ExprStmt:

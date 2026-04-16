@@ -588,6 +588,8 @@ func (i *Interpreter) execStmt(frame *frame, stmt ast.Stmt) (controlSignal, erro
 		return controlSignal{}, annotateRuntimeError(n.Pos(), fmt.Errorf("loop iteration limit exceeded (%d)", maxLoopIterations))
 	case *ast.PassStmt:
 		return controlSignal{}, nil
+	case *ast.SignalStmt:
+		return controlSignal{}, nil
 	case *ast.PanicStmt:
 		message, err := i.evalExpr(frame, n.Message)
 		if err != nil {

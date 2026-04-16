@@ -9,33 +9,52 @@ import (
 
 func (a *Analyzer) collectPermissionDecls(decls []scopedDecl) {
 	for _, scoped := range decls {
-		permissionDecl, ok := scoped.Decl.(*ast.PermissionDecl)
-		if !ok {
+		var (
+			name    string
+			members []string
+			pos     lexer.Pos
+		)
+		switch decl := scoped.Decl.(type) {
+		case *ast.PermissionDecl:
+			if decl == nil {
+				continue
+			}
+			name = decl.Name
+			members = decl.Members
+			pos = decl.Pos()
+		case *ast.EffectDecl:
+			if decl == nil {
+				continue
+			}
+			name = decl.Name
+			members = decl.Members
+			pos = decl.Pos()
+		default:
 			continue
 		}
-		qualifiedName := joinQualifiedName(scoped.Namespace, permissionDecl.Name)
-		members := make([]string, 0, len(permissionDecl.Members))
-		memberSet := make(map[string]bool, len(permissionDecl.Members))
-		for _, member := range permissionDecl.Members {
+		qualifiedName := joinQualifiedName(scoped.Namespace, name)
+		resolvedMembers := make([]string, 0, len(members))
+		memberSet := make(map[string]bool, len(members))
+		for _, member := range members {
 			if memberSet[member] {
-				a.errorf(permissionDecl.Pos(), "duplicate permission member %q in %q", member, permissionDecl.Name)
+				a.errorf(pos, "duplicate permission member %q in %q", member, name)
 				continue
 			}
 			memberSet[member] = true
-			members = append(members, member)
+			resolvedMembers = append(resolvedMembers, member)
 		}
 		if existing, exists := a.permissions[qualifiedName]; exists {
-			if existing.Builtin && permissionMembersMatch(existing, members) {
+			if existing.Builtin && permissionMembersMatch(existing, resolvedMembers) {
 				continue
 			}
 			if existing.Builtin {
-				a.errorf(permissionDecl.Pos(), "permission %q conflicts with the builtin members %q", qualifiedName, existing.Members)
+				a.errorf(pos, "permission %q conflicts with the builtin members %q", qualifiedName, existing.Members)
 				continue
 			}
-			a.errorf(permissionDecl.Pos(), "duplicate permission %q", qualifiedName)
+			a.errorf(pos, "duplicate permission %q", qualifiedName)
 			continue
 		}
-		a.permissions[qualifiedName] = &PermissionSet{Name: qualifiedName, Members: members, MemberSet: memberSet, Decl: permissionDecl}
+		a.permissions[qualifiedName] = &PermissionSet{Name: qualifiedName, Members: resolvedMembers, MemberSet: memberSet}
 	}
 }
 
@@ -416,6 +435,9 @@ func (a *Analyzer) warnOnImplicitFunctionPermissions(decls []scopedDecl) {
 			if len(missing) == 0 {
 				return
 			}
+			if funcHasAnnotation(fn, "test") {
+				return
+			}
 			if !functionAnnotationsAllowDeclaredPermissionFamilies(fn, fnType, missing) {
 				return
 			}
@@ -548,6 +570,8 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 	case *ast.CanStmt:
 		c.addRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false))
 		c.collectStmts(n.Body)
+	case *ast.SignalStmt:
+		c.addRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false))
 	case *ast.PoolStmt:
 		c.collectExpr(n.Workers)
 		c.addRefs([]ast.PermissionRef{{Position: n.Position, Name: "Pool", Member: "Create"}, {Position: n.Position, Name: "Pool", Member: "Shutdown"}})
@@ -810,6 +834,18 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 	case *ast.CanStmt:
 		families := a.resolvePermissionFamilies(n.Permissions, false)
 		a.validatePermissionStmts(n.Body, extendGrantedPermissionFamilies(granted, families))
+	case *ast.SignalStmt:
+		refs := a.resolvePermissionRefs(n.Permissions, false)
+		families := permissionFamiliesFromRefs(refs)
+		missing := make([]string, 0, len(families))
+		for _, family := range families {
+			if !granted[family] {
+				missing = append(missing, family)
+			}
+		}
+		if len(missing) != 0 {
+			a.warnf(n.Pos(), "signal requires%s and has no explicit local effect grant; add %s or a surrounding can ...: block", permissionFamiliesString(missing), permissionGrantHint(refs, missing))
+		}
 	case *ast.PoolStmt:
 		a.validatePermissionExpr(n.Workers, granted)
 		if !granted["Pool"] {

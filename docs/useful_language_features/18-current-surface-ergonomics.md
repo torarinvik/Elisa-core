@@ -30,9 +30,36 @@ Current rules:
 
 If a shorthand named argument such as `missing:` has no in-scope value named `missing`, semantic analysis reports that directly.
 
-## Effects aliases
+## Effect declarations, aliases, and `signal`
 
-Top-level `effects` declarations package an error-set clause and a permission clause into one reusable alias.
+Top-level `effect` declarations introduce named effect families directly in source. An effect with members behaves like a permission family with explicit members; `pass` declares a marker effect with no members.
+
+```context
+effect FooEffect:
+    pass
+
+effect ConsoleEffect:
+    Write
+    Flush
+
+def run() -> void can[FooEffect, ConsoleEffect.Write]:
+    signal FooEffect
+    signal ConsoleEffect.Write
+```
+
+`signal` is a zero-runtime statement. It does not emit a runtime trap or object; it exists to make effect usage explicit so the surrounding function contract still records and checks the effect.
+
+Current rules for `effect` and `signal`:
+
+- `effect Name:` declares a family directly
+- `effect Name: pass` is the marker-effect form with no members
+- indented names such as `Write` and `Flush` declare members of that family
+- `signal Name` records use of a whole-family effect
+- `signal Name.Member` records use of one concrete member
+- `signal` participates in the same effect inference and local-grant checking as calls to effectful functions
+- family-level grants such as `can[ConsoleEffect]` satisfy member signals and calls from the same family
+
+Top-level `effects` declarations still package an error-set clause and a permission clause into one reusable alias.
 
 ```context
 effects FrontendEffects = error[ParseErr] can[Abort.Panic, Memory.Allocate]
@@ -50,6 +77,7 @@ Current rules:
 - aliases may be used on function declarations and function types
 - aliases may bundle `error[...]`, `can[...]`, or both
 - a signature that uses `effects SomeAlias` must not also spell out explicit `error[...]` or `can[...]` clauses on the same surface
+- `effect` declarations and `effects` aliases are compile-time surface only; both lower into the existing semantic effect model rather than a runtime object
 
 ## Implicit contexts
 
