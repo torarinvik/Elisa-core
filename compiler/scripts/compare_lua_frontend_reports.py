@@ -291,18 +291,22 @@ def differential_case_key(case: dict[str, Any]) -> tuple[str, str]:
     return str(case.get("family", "")), str(case.get("case", ""))
 
 
-def benchmark_run_key(entry: dict[str, Any]) -> tuple[str, str, str, str]:
+def benchmark_run_key(entry: dict[str, Any]) -> tuple[str, str, int, str, str, str]:
     return (
         str(entry.get("variant", "")),
+        str(entry.get("execution", "serial")),
+        int(entry.get("worker_count", 0) or 0),
         str(entry.get("opt_level", "")),
         str(entry.get("input", "")),
         str(entry.get("mode", "")),
     )
 
 
-def benchmark_aggregate_key(entry: dict[str, Any]) -> tuple[str, str, str, str]:
+def benchmark_aggregate_key(entry: dict[str, Any]) -> tuple[str, str, int, str, str, str]:
     return (
         str(entry.get("kind", "")),
+        str(entry.get("execution", "serial")),
+        int(entry.get("worker_count", 0) or 0),
         str(entry.get("opt_level", "")),
         str(entry.get("mode", "")),
         str(entry.get("input", "")),
@@ -491,6 +495,8 @@ def compare_benchmark_reports(
         candidate,
         fields=(
             "modes",
+            "parallel_workers",
+            "parallel_modes",
             "opt_level",
             "opt_levels",
             "stmt_count",
@@ -519,9 +525,11 @@ def compare_benchmark_reports(
             total_changed_runs += 1
             entry = {
                 "variant": key[0],
-                "opt_level": key[1],
-                "input": key[2],
-                "mode": key[3],
+                "execution": key[1],
+                "worker_count": key[2],
+                "opt_level": key[3],
+                "input": key[4],
+                "mode": key[5],
                 "baseline_avg_MiB_s": before_avg,
                 "candidate_avg_MiB_s": after_avg,
                 "delta_MiB_s": after_avg - before_avg,
@@ -547,9 +555,11 @@ def compare_benchmark_reports(
             continue
         entry: dict[str, Any] = {
             "kind": key[0],
-            "opt_level": key[1],
-            "mode": key[2],
-            "input": key[3],
+            "execution": key[1],
+            "worker_count": key[2],
+            "opt_level": key[3],
+            "mode": key[4],
+            "input": key[5],
             "fields": {},
         }
         for field in (
@@ -581,7 +591,7 @@ def compare_benchmark_reports(
     summary_delta: dict[str, int] = {}
     baseline_summary = baseline.get("summary", {})
     candidate_summary = candidate.get("summary", {})
-    for field in ("run_count", "aggregate_count", "skipped_count", "opt_level_count"):
+    for field in ("run_count", "aggregate_count", "skipped_count", "opt_level_count", "parallel_worker_count", "parallel_mode_count"):
         summary_delta[field] = int(candidate_summary.get(field, 0)) - int(baseline_summary.get(field, 0))
 
     path_key_mismatches: list[dict[str, Any]] = []
@@ -605,6 +615,26 @@ def compare_benchmark_reports(
                 "candidate": candidate_inline_keys,
             }
         )
+    baseline_current_parallel_keys = sorted(baseline.get("current_parallel_benches_by_opt_level", {}).keys())
+    candidate_current_parallel_keys = sorted(candidate.get("current_parallel_benches_by_opt_level", {}).keys())
+    if baseline_current_parallel_keys != candidate_current_parallel_keys:
+        path_key_mismatches.append(
+            {
+                "field": "current_parallel_benches_by_opt_level.keys",
+                "baseline": baseline_current_parallel_keys,
+                "candidate": candidate_current_parallel_keys,
+            }
+        )
+    baseline_inline_parallel_keys = sorted(baseline.get("inline_parallel_benches_by_opt_level", {}).keys())
+    candidate_inline_parallel_keys = sorted(candidate.get("inline_parallel_benches_by_opt_level", {}).keys())
+    if baseline_inline_parallel_keys != candidate_inline_parallel_keys:
+        path_key_mismatches.append(
+            {
+                "field": "inline_parallel_benches_by_opt_level.keys",
+                "baseline": baseline_inline_parallel_keys,
+                "candidate": candidate_inline_parallel_keys,
+            }
+        )
 
     aggregate_configuration_mismatches: list[dict[str, Any]] = []
     if baseline_summary.get("inline_available") != candidate_summary.get("inline_available"):
@@ -613,6 +643,14 @@ def compare_benchmark_reports(
                 "field": "summary.inline_available",
                 "baseline": baseline_summary.get("inline_available"),
                 "candidate": candidate_summary.get("inline_available"),
+            }
+        )
+    if baseline_summary.get("parallel_enabled", False) != candidate_summary.get("parallel_enabled", False):
+        aggregate_configuration_mismatches.append(
+            {
+                "field": "summary.parallel_enabled",
+                "baseline": baseline_summary.get("parallel_enabled", False),
+                "candidate": candidate_summary.get("parallel_enabled", False),
             }
         )
 
@@ -634,22 +672,50 @@ def compare_benchmark_reports(
         "total_changed_runs": total_changed_runs,
         "filtered_out_runs": total_changed_runs - len(changed_runs),
         "added_runs": [
-            {"variant": key[0], "opt_level": key[1], "input": key[2], "mode": key[3]}
+            {
+                "variant": key[0],
+                "execution": key[1],
+                "worker_count": key[2],
+                "opt_level": key[3],
+                "input": key[4],
+                "mode": key[5],
+            }
             for key in added_runs
         ],
         "removed_runs": [
-            {"variant": key[0], "opt_level": key[1], "input": key[2], "mode": key[3]}
+            {
+                "variant": key[0],
+                "execution": key[1],
+                "worker_count": key[2],
+                "opt_level": key[3],
+                "input": key[4],
+                "mode": key[5],
+            }
             for key in removed_runs
         ],
         "changed_runs": changed_runs,
         "total_changed_aggregates": total_changed_aggregates,
         "filtered_out_aggregates": total_changed_aggregates - len(changed_aggregates),
         "added_aggregates": [
-            {"kind": key[0], "opt_level": key[1], "mode": key[2], "input": key[3]}
+            {
+                "kind": key[0],
+                "execution": key[1],
+                "worker_count": key[2],
+                "opt_level": key[3],
+                "mode": key[4],
+                "input": key[5],
+            }
             for key in added_aggregates
         ],
         "removed_aggregates": [
-            {"kind": key[0], "opt_level": key[1], "mode": key[2], "input": key[3]}
+            {
+                "kind": key[0],
+                "execution": key[1],
+                "worker_count": key[2],
+                "opt_level": key[3],
+                "mode": key[4],
+                "input": key[5],
+            }
             for key in removed_aggregates
         ],
         "changed_aggregates": changed_aggregates,
@@ -728,7 +794,9 @@ def print_benchmark_comparison(comparison: dict[str, Any]) -> None:
         f"run_count={summary['run_count']} "
         f"aggregate_count={summary['aggregate_count']} "
         f"skipped_count={summary['skipped_count']} "
-        f"opt_level_count={summary['opt_level_count']}"
+        f"opt_level_count={summary['opt_level_count']} "
+        f"parallel_worker_count={summary['parallel_worker_count']} "
+        f"parallel_mode_count={summary['parallel_mode_count']}"
     )
     print(
         "RUN_COUNTS "
@@ -740,8 +808,11 @@ def print_benchmark_comparison(comparison: dict[str, Any]) -> None:
     )
     for run in comparison["changed_runs"][:10]:
         delta_pct = "n/a" if run["delta_pct"] is None else f"{run['delta_pct']:+.2f}%"
+        execution_text = f" execution={run['execution']}"
+        if run["worker_count"]:
+            execution_text += f" worker_count={run['worker_count']}"
         print(
-            f"CHANGED variant={run['variant']} opt_level={run['opt_level']} input={run['input']} mode={run['mode']} "
+            f"CHANGED variant={run['variant']}{execution_text} opt_level={run['opt_level']} input={run['input']} mode={run['mode']} "
             f"baseline_avg={run['baseline_avg_MiB_s']:.2f} candidate_avg={run['candidate_avg_MiB_s']:.2f} delta_pct={delta_pct}"
         )
     print(
@@ -756,13 +827,19 @@ def print_benchmark_comparison(comparison: dict[str, Any]) -> None:
         delta_pct = entry.get("delta_pct")
         if delta_pct is None:
             changed_fields = ", ".join(sorted(entry["fields"].keys()))
+            execution_text = f" execution={entry['execution']}"
+            if entry["worker_count"]:
+                execution_text += f" worker_count={entry['worker_count']}"
             print(
-                f"CHANGED_AGGREGATE kind={entry['kind']} opt_level={entry['opt_level']} mode={entry['mode']} input={entry['input']} "
+                f"CHANGED_AGGREGATE kind={entry['kind']}{execution_text} opt_level={entry['opt_level']} mode={entry['mode']} input={entry['input']} "
                 f"fields={changed_fields}"
             )
         else:
+            execution_text = f" execution={entry['execution']}"
+            if entry["worker_count"]:
+                execution_text += f" worker_count={entry['worker_count']}"
             print(
-                f"CHANGED_AGGREGATE kind={entry['kind']} opt_level={entry['opt_level']} mode={entry['mode']} input={entry['input']} "
+                f"CHANGED_AGGREGATE kind={entry['kind']}{execution_text} opt_level={entry['opt_level']} mode={entry['mode']} input={entry['input']} "
                 f"delta_pct={delta_pct:+.2f}"
             )
 

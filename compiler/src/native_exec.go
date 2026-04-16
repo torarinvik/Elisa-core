@@ -40,6 +40,11 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	if result == nil {
 		return "", func() {}, nativeBuildTiming{}, fmt.Errorf("semantic result is nil")
 	}
+	resolvedForeignFiles, err := withDefaultNativeRuntimeForeignFiles(foreignFiles)
+	if err != nil {
+		return "", func() {}, nativeBuildTiming{}, err
+	}
+	foreignFiles = resolvedForeignFiles
 	tempDir, err := os.MkdirTemp("", "llcontext-native-run-*")
 	if err != nil {
 		return "", func() {}, nativeBuildTiming{}, err
@@ -80,8 +85,11 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	}
 	timing.HeaderWrite = time.Since(headerWriteStart)
 
-	linkArgs := make([]string, 0, 4+len(foreignFiles))
+	linkArgs := make([]string, 0, 5+len(foreignFiles))
 	linkArgs = append(linkArgs, "-I", tempDir)
+	if nativeExecutableNeedsPThread(foreignFiles) && runtime.GOOS != "windows" {
+		linkArgs = append(linkArgs, "-pthread")
+	}
 	if runtime.GOOS == "darwin" {
 		linkArgs = append(linkArgs, "-Wl,-undefined,dynamic_lookup")
 	}
@@ -99,6 +107,45 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	}
 	timing.Link = time.Since(linkStart)
 	return exePath, cleanup, timing, nil
+}
+
+func withDefaultNativeRuntimeForeignFiles(foreignFiles []string) ([]string, error) {
+	resolved := dedupeStrings(append([]string(nil), foreignFiles...))
+	if hasConcurrencyRuntimeForeignFile(resolved) {
+		return resolved, nil
+	}
+	repoRoot, err := compilerRepoRootForNativeExec()
+	if err != nil {
+		return nil, err
+	}
+	defaultConcurrencyRuntime := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_concurrency_runtime.c")
+	if _, err := os.Stat(defaultConcurrencyRuntime); err != nil {
+		return nil, fmt.Errorf("failed to locate default concurrency runtime shim %s: %w", defaultConcurrencyRuntime, err)
+	}
+	resolved = append(resolved, defaultConcurrencyRuntime)
+	return dedupeStrings(resolved), nil
+}
+
+func compilerRepoRootForNativeExec() (string, error) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		return "", fmt.Errorf("failed to locate compiler source root")
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..")), nil
+}
+
+func hasConcurrencyRuntimeForeignFile(foreignFiles []string) bool {
+	for _, foreignFile := range foreignFiles {
+		base := filepath.Base(strings.TrimSpace(foreignFile))
+		if strings.HasSuffix(base, "_concurrency_runtime.c") {
+			return true
+		}
+	}
+	return false
+}
+
+func nativeExecutableNeedsPThread(foreignFiles []string) bool {
+	return hasConcurrencyRuntimeForeignFile(foreignFiles)
 }
 
 func runNativeExecutable(exePath string, stdout io.Writer, stderr io.Writer) error {

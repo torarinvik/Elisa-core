@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2419,6 +2420,72 @@ func TestRunCLIExecutesSelectedTests(t *testing.T) {
 	} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected direct test execution output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestRunCLIExecutesPoolBackedSelectedTests(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "execute_pool_tests_fixture.llcontext")
+	runtimePath := filepath.Join(repoRoot, "Code", "llcontext_std", "contextlang_runtime.llcontext")
+	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
+	if err != nil {
+		t.Fatalf("failed to compute runtime include path: %v", err)
+	}
+	runtimeInclude = filepath.ToSlash(runtimeInclude)
+	src := fmt.Sprintf(`# include %q
+
+struct WriteJob:
+	slot_bits: uintptr
+	value: i64
+
+def write_slot(job: WriteJob) -> i64:
+	slot: mutable any i64& = job.slot_bits.cast[mutable any i64&]
+	slot[0] <- job.value
+	return job.value
+
+@test
+def pool_backed_case() -> void can[Abort.Panic]:
+	can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Atomics.Load, Atomics.CompareExchange:
+		partials: i64[2] = zeroed
+		pool workers(2):
+			group: mutable TaskGroup = task_group_new()
+			first_bits: uintptr = (&partials[0]).cast[any i64&].uintptr()
+			second_bits: uintptr = (&partials[1]).cast[any i64&].uintptr()
+			first: Task[i64, Pending] = submit write_slot(WriteJob(first_bits, 1))
+			second: Task[i64, Pending] = submit write_slot(WriteJob(second_bits, 2))
+			task_group_add((&group).cast[any TaskGroup&], move first)
+			task_group_add((&group).cast[any TaskGroup&], move second)
+			wait all group
+		assert_eq(partials[0], 1)
+		assert_eq(partials[1], 2)
+`, runtimeInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write pool execute-tests fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected pool-backed test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] pool_backed_case",
+		"[       OK ] pool_backed_case",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected pool-backed execution output to contain %q, got:\n%s", check, output)
 		}
 	}
 }

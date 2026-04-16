@@ -4,6 +4,7 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 OUT_DIR=""
 KEEP_TEMP="0"
+PARALLEL_WORKERS=""
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 while [ "$#" -gt 0 ]; do
@@ -15,6 +16,10 @@ while [ "$#" -gt 0 ]; do
         --keep-temp)
             KEEP_TEMP="1"
             shift 1
+            ;;
+        --parallel-workers)
+            PARALLEL_WORKERS="${2:?missing value for --parallel-workers}"
+            shift 2
             ;;
         *)
             echo "unknown option: $1" >&2
@@ -33,8 +38,12 @@ echo "lua_frontend_reports_smoke_out=$OUT_DIR"
 
 COMMON_ARGS="--skip-real-corpus --parse-iterations 1 --sample-iterations 1 --repeats 1"
 KEEP_TEMP_ARGS=""
+BENCH_PARALLEL_ARGS=""
 if [ "$KEEP_TEMP" = "1" ]; then
     KEEP_TEMP_ARGS="--keep-temp"
+fi
+if [ -n "$PARALLEL_WORKERS" ]; then
+    BENCH_PARALLEL_ARGS="--parallel-workers $PARALLEL_WORKERS"
 fi
 
 BENCH_JSON="$OUT_DIR/bench_multi.json"
@@ -46,6 +55,7 @@ BASELINE_DIR="$OUT_DIR/baseline"
 # shellcheck disable=SC2086
 "$PYTHON_BIN" "$SCRIPT_DIR/run_lua_frontend_storage_benchmark.py" \
     --opt-levels=-O0,-O2 \
+    $BENCH_PARALLEL_ARGS \
     --modes parse \
     $COMMON_ARGS \
     $KEEP_TEMP_ARGS \

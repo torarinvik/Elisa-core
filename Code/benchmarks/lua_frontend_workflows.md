@@ -20,10 +20,17 @@ bundle capture, and bundle comparison tooling:
 bash ./compiler/scripts/smoke_lua_frontend_reports.sh
 ```
 
+To include the parallel sweep in that smoke pass, opt in explicitly:
+
+```bash
+bash ./compiler/scripts/smoke_lua_frontend_reports.sh --parallel-workers 4
+```
+
 This smoke run intentionally uses tiny iteration counts and `--skip-real-corpus`
 for fast validation, while still exercising:
 
 - `run_lua_frontend_storage_benchmark.py`
+- `smoke_lua_frontend_parallel.sh`
 - `run_lua_frontend_differential.py`
 - `profile_lua_frontend.sh`
 - `capture_lua_frontend_baseline.sh`
@@ -31,6 +38,17 @@ for fast validation, while still exercising:
 
 In VS Code, the same path is available as the `lua frontend reporting smoke`
 task.
+
+For the exported pool-backed parallel surface specifically, run:
+
+```bash
+bash ./compiler/scripts/smoke_lua_frontend_parallel.sh
+```
+
+That script builds `Code/llcontext_lua/src/lua_frontend.llcontext`, links a tiny
+C probe against the generated object, and verifies that the parallel parse,
+metrics, lexer, and analysis entrypoints match repeated serial results for the
+same input while also rejecting invalid worker/iteration requests.
 
 ## Differential Sweep
 
@@ -106,6 +124,7 @@ python3 ./compiler/scripts/run_lua_frontend_storage_benchmark.py --json-out /tmp
 Useful options:
 
 - `--modes parse,metrics,checksum,lexer,env,closure,label,analysis`
+- `--parallel-workers 4`
 - `--parse-iterations 20`
 - `--sample-iterations 5000`
 - `--repeats 3`
@@ -129,6 +148,11 @@ Notes:
 - The script always includes a synthetic benchmark input.
 - Real-corpus inputs are treated as developer tooling. Unsupported inputs are
   reported as skips instead of failing the entire sweep.
+- With `--parallel-workers`, the same sweep also builds the exported pool-backed
+  harness and records extra `execution=parallel` runs for the selected
+  `parse`, `metrics`, `lexer`, and `analysis` modes.
+- Parallel benchmarking stays opt-in. If `--parallel-workers` is omitted, the
+  checked-in benchmark, profile, baseline, and smoke flows remain serial-only.
 - When the older inline-control AST variant is not available, the script
   degrades cleanly and benchmarks only the checked-in frontend.
 - With `--opt-levels`, the script benchmarks each listed optimization level in
@@ -136,6 +160,10 @@ Notes:
 - The benchmark JSON also records per-opt-level benchmark executable paths under
   `current_benches_by_opt_level` and `inline_benches_by_opt_level` so downstream
   tooling can correlate each run with the binary that produced it.
+- When parallel benchmarking is enabled, the JSON also records
+  `parallel_workers`, `parallel_modes`, `current_parallel_benches_by_opt_level`,
+  and `inline_parallel_benches_by_opt_level`, and each run/aggregate entry is
+  tagged with `execution` plus `worker_count`.
 - With `--json-out`, it also writes a structured report with run metadata,
   per-input/per-mode measurements, aggregate summaries, and skipped-run
   reasons.
@@ -143,6 +171,25 @@ Notes:
   `parse,metrics,checksum,lexer,env,closure,label,analysis`.
 - `sample` remains available explicitly with `--modes sample` or as part of a
   custom comma-separated mode list.
+
+There is also a direct pool-backed benchmark harness for the exported parallel
+frontend surface:
+
+- `Code/benchmarks/lua_frontend_parallel_bench.c`
+
+One low-cost validation path is:
+
+```bash
+bash ./compiler/scripts/smoke_lua_frontend_parallel.sh
+```
+
+For manual timing runs, build `Code/llcontext_lua/src/lua_frontend.llcontext`
+to a header/object pair and link `Code/benchmarks/lua_frontend_parallel_bench.c`.
+The harness accepts:
+
+```text
+<lua-file> <iterations> <workers> [parse|metrics|lexer|analysis]
+```
 
 `metrics` runs the syntax parser with the null-builder path, so it still pays
 for lexing and parser control flow but avoids tree AST materialization. That

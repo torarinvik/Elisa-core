@@ -6,6 +6,7 @@ REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 OUT_DIR=""
 OPT_LEVEL="-O3"
 OPT_LEVELS=""
+PARALLEL_WORKERS=""
 PARSE_ITERATIONS="20"
 SAMPLE_ITERATIONS="5000"
 REPEATS="3"
@@ -25,6 +26,10 @@ while [ "$#" -gt 0 ]; do
             ;;
         --opt-levels)
             OPT_LEVELS="${2:?missing value for --opt-levels}"
+            shift 2
+            ;;
+        --parallel-workers)
+            PARALLEL_WORKERS="${2:?missing value for --parallel-workers}"
             shift 2
             ;;
         --parse-iterations)
@@ -71,6 +76,9 @@ KEEP_TEMP_ARGS=""
 if [ -n "$OPT_LEVELS" ]; then
     BENCH_ARGS="$BENCH_ARGS --opt-levels=$OPT_LEVELS"
 fi
+if [ -n "$PARALLEL_WORKERS" ]; then
+    BENCH_ARGS="$BENCH_ARGS --parallel-workers=$PARALLEL_WORKERS"
+fi
 if [ "$SKIP_REAL_CORPUS" = "1" ]; then
     BENCH_ARGS="$BENCH_ARGS --skip-real-corpus"
 fi
@@ -106,6 +114,7 @@ python3 "$SCRIPT_DIR/write_lua_bundle_metadata.py" \
     --out-dir "$OUT_DIR" \
     --setting "opt_level=$OPT_LEVEL" \
     --setting "opt_levels=$OPT_LEVELS" \
+    --setting "parallel_workers=$PARALLEL_WORKERS" \
     --setting "parse_iterations=$PARSE_ITERATIONS" \
     --setting "sample_iterations=$SAMPLE_ITERATIONS" \
     --setting "repeats=$REPEATS" \
@@ -138,6 +147,7 @@ Settings
 --------
 opt_level: $OPT_LEVEL
 opt_levels: ${OPT_LEVELS:-<default-single-opt-level>}
+parallel_workers: ${PARALLEL_WORKERS:-<disabled>}
 parse_iterations: $PARSE_ITERATIONS
 sample_iterations: $SAMPLE_ITERATIONS
 repeats: $REPEATS
