@@ -80,6 +80,9 @@ All notable changes to this repository should be documented in this file.
 ### Documentation
 
 - `compiler/README.md` now documents the latest postfix cast-hook surface and the Lua frontend storage benchmark harness.
+- Added `docs/useful_language_features/18-current-surface-ergonomics.md` as the implemented reference for default and named arguments, `..` forwarding, effects aliases, implicit contexts, `params` / `with args`, brace destructuring and record updates, filtered loops, cascades, lambda literals, and postfix cast hooks.
+- Added `docs/useful_language_features/19-static-interfaces-extension-methods-and-ufcs.md` as the implemented reference for static interfaces, extension methods, UFCS rewriting, safe call chaining, and the preferred generic specialization surface.
+- Expanded `compiler/README.md` with a compact syntax cheat sheet plus current `.llcontexti`, `project.json`, and `.llctxlib/manifest.json` workflow documentation.
 - `Code/llcontext_lua/README.md` now reflects the current parser/export surface, side-table packed-span layout, and benchmark entry points.
 - Expanded pointer typestate documentation in:
   - `docs/useful_language_features/02-pointer-typestate-practical.md`

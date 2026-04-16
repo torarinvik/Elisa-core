@@ -21,6 +21,8 @@ This document is now a landing page for the split design notes in `docs/useful_l
 15. [`15-typestate-practical-cheat-sheet.md`](docs/useful_language_features/15-typestate-practical-cheat-sheet.md) — short practical companion with motivating examples, widening expectations, and guidance on when to re-prove with `is`.
 16. [`16-ref-parameter-poststate-ensures.md`](docs/useful_language_features/16-ref-parameter-poststate-ensures.md) — concrete proposal for unified `ensures`-based call poststate summaries covering both named typestates and pointer/refstates such as `ensures node => !`.
 17. [`17-iterators-and-for-in-mini-spec.md`](docs/useful_language_features/17-iterators-and-for-in-mini-spec.md) — proposal for builtin iterable categories, `for in` over values/refs/mutable refs, loop destructuring, explicit tree child iteration, and a parallel-friendly iteration model.
+18. [`18-current-surface-ergonomics.md`](docs/useful_language_features/18-current-surface-ergonomics.md) — implemented reference for current surface features such as default and named arguments, `..` forwarding, effects aliases, implicit contexts, `params` / `with args`, brace destructuring and updates, filtered loops, cascades, lambdas, and shorthand cast hooks.
+19. [`19-static-interfaces-extension-methods-and-ufcs.md`](docs/useful_language_features/19-static-interfaces-extension-methods-and-ufcs.md) — implemented reference for static interfaces, associated types, receiver-scoped extension impls, UFCS rewriting, safe call chaining, and the preferred generic specialization surface.
 
 ## Notes
 
@@ -29,6 +31,8 @@ This document is now a landing page for the split design notes in `docs/useful_l
 - The newer typestate notes in sections 14 and 15 are a good current entry point if you care about proof-carrying state, mutation, and protocol-style APIs.
 - If you want the likely next typestate feature rather than the current model, section 16 is the design note to read next.
 - If you care about ergonomic traversal, tree-friendly iteration, and future parallel-loop foundations, section 17 is the new iterator design note to read next.
+- If you want the implemented surface syntax that landed more recently than many of the older proposal docs, section 18 is the practical reference to read next.
+- If you want the companion reference for static dispatch and receiver-style calls, section 19 covers static interfaces, extension methods, and UFCS.
 
 ## Current reference mutability rule
 

@@ -15,6 +15,60 @@ The current unreleased highlights include:
 
 For a compile-checked end-to-end example, see `../Code/test_programs/ref_qualifier_generics.llcontext`.
 
+## Current syntax reference
+
+For the newer source-language surface that is easy to miss in older design notes, see `../docs/useful_language_features/18-current-surface-ergonomics.md`.
+
+For compile-time interfaces and receiver-style dispatch, see `../docs/useful_language_features/19-static-interfaces-extension-methods-and-ufcs.md`.
+
+That reference covers the currently implemented syntax for:
+
+- default and named arguments, including `..` forwarding
+- effects aliases and implicit contexts
+- explicit argument packs via `params` and ambient `with args(...)` scopes
+- brace destructuring, field punning, record updates, and filtered iterable loops
+- cascade blocks and expressions, lambda literals, and postfix cast hooks
+- static interfaces, associated types, extension methods, UFCS rewriting, safe call chaining, and the preferred generic specialization surface
+
+## Syntax cheat sheet
+
+The current commonly used surface fits into a few recurring patterns:
+
+```text
+return consume(value:, ..)
+effects FrontendEffects = error[ParseErr] can[Abort.Panic]
+context ParseCtx:
+with ParseCtx(.., alloc = scratch_alloc):
+params Pair:
+with args(use Pair(left:), width:):
+```
+
+```text
+let {left: first, right} = row
+built: Row = Row{left: first, right, flag}
+next: Row = built{flag, right = first}
+for {left, right: value} in items if left != 0:
+```
+
+```text
+cascade report:
+  .inner.value <- value
+return lambda (value: i64) -> i64:
+  return value + 1
+```
+
+```text
+impl Tok:
+  def score(self: Tok) -> i64:
+    return 7
+
+interface Builder:
+  type Node
+  def make(value: int) -> Node
+```
+
+Use the two reference docs above for the exact rules and edge cases.
+
 ## Error handling syntax
 
 The frontend now supports lightweight typed error handling with compile-time error sets and explicit propagation/recovery syntax:
@@ -211,6 +265,90 @@ And one way to run the milestone validation pass is:
 ```text
 ./scripts/run_ml_ast_perf_loop.sh --benchtime 1x --mega
 ```
+
+## Module interfaces and project manifests
+
+The compiler now has a small project and library workflow around `.llcontext`, `.llcontexti`, `project.json`, and `manifest.json`.
+
+Module interface emission:
+
+```text
+llcontext -emit iface -o mathcore.llcontexti mathcore.llcontext
+```
+
+Current interface-emission behavior:
+
+- emitted `.llcontexti` files stay valid llcontext source
+- type declarations are preserved
+- globals become `extern` declarations rather than exported initialized definitions
+- function bodies are stripped and replaced by `extern` signatures
+- namespaces are preserved, so nested exported surface stays structured
+
+Current project scaffold commands:
+
+```text
+llcontext init demo --path /tmp
+llcontext init-lib mathcore --path /tmp/demo/lib
+llcontext build app --project /tmp/demo
+llcontext run app --project /tmp/demo
+llcontext test tests --project /tmp/demo
+llcontext bench benches --project /tmp/demo
+llcontext project view app --project /tmp/demo
+llcontext project deps app --project /tmp/demo --json
+```
+
+Project file shape:
+
+```json
+{
+  "version": "0.1.0",
+  "dependency-search-paths": ["lib"],
+  "dependencies": ["mathcore"],
+  "include-dirs": ["shared"],
+  "foreign": ["native/app_runtime.c"],
+  "exec": [],
+  "targets": {
+    "app": {
+      "entry": "src/main.llcontext",
+      "emit": "llvm",
+      "run-emit": "interpret",
+      "output": "build/app.ll",
+      "dependencies": [],
+      "include-dirs": [],
+      "foreign": [],
+      "exec": [],
+      "opt": "O0",
+      "packed-abi": ""
+    }
+  }
+}
+```
+
+Library manifest shape:
+
+```json
+{
+  "provides": "mathcore",
+  "entry": "src/mathcore.llcontext",
+  "interface": "src/mathcore.llcontexti",
+  "dependencies": [],
+  "include-dirs": ["shared"],
+  "foreign": ["native/mathcore_runtime.c"],
+  "exec": []
+}
+```
+
+Current rules:
+
+- `project.json` is the top-level project file
+- `.llctxlib/manifest.json` is the dependency manifest format
+- dependency search paths default to `lib` when the project does not override them
+- project targets currently require an `entry` that is a `.llcontext` or `.llcontexti` source file
+- manifests may provide an `entry`, an `interface`, or both; dependency loading prefers `entry` when present and falls back to `interface` otherwise
+- project-wide and target-specific `include-dirs`, `foreign`, and `dependencies` merge with dependency-provided include dirs and foreign files
+- `project view` reports resolved targets and the selected target configuration
+- `project deps` reports the combined source set, dependency interfaces or entries, include dirs, and foreign sources
+- `exec` hooks exist at the project, target, and dependency-manifest level, but current execution requires `--trust=full`
 
 ## Layout
 
