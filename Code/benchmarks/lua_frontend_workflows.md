@@ -171,8 +171,10 @@ Notes:
 - This comparison is intentionally parse-only. The llcontext-only semantic
   modes `env`, `closure`, `label`, and `analysis` do not have direct C
   equivalents.
-- The script benchmarks the same synthetic input and curated real-Lua corpus
-  manifest used by the llcontext storage benchmark.
+- The script benchmarks the same generated mixed-Lua synthetic input and
+  curated real-Lua corpus manifest used by the llcontext storage benchmark.
+- `--stmt-count` controls the approximate statement budget of that generated
+  synthetic workload rather than emitting one flat list of local assignments.
 - Aggregate output is reported over inputs that both implementations accept in
   parse mode, so unsupported llcontext parse inputs are recorded as skips.
 

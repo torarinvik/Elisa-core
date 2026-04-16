@@ -20,6 +20,8 @@ import tempfile
 from pathlib import Path
 from typing import Iterable
 
+from lua_frontend_benchmark_input import build_synthetic_lua_benchmark_input
+
 
 VALID_MODES = ("parse", "checksum", "lexer", "sample", "env", "closure", "label", "analysis")
 MIB_PER_SECOND_RE = re.compile(r"MiB/s=([0-9]+(?:\.[0-9]+)?)")
@@ -27,7 +29,7 @@ MIB_PER_SECOND_RE = re.compile(r"MiB/s=([0-9]+(?:\.[0-9]+)?)")
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stmt-count", type=int, default=4000, help="Number of local assignment statements to generate for the synthetic input")
+    parser.add_argument("--stmt-count", type=int, default=4000, help="Approximate statement budget for the generated mixed-Lua synthetic input")
     parser.add_argument("--parse-iterations", type=int, default=20, help="Iterations per parse-like benchmark run")
     parser.add_argument("--sample-iterations", type=int, default=5000, help="Iterations per sample benchmark run")
     parser.add_argument("--repeats", type=int, default=3, help="Number of repeated runs per benchmark mode")
@@ -72,12 +74,6 @@ def parse_opt_levels(opt_level: str, opt_levels: str | None) -> list[str]:
 
 def iterations_for_mode(args: argparse.Namespace, mode: str) -> int:
     return args.sample_iterations if mode == "sample" else args.parse_iterations
-
-
-def build_valid_input(path: Path, stmt_count: int) -> None:
-    lines = [f"local x{i} = {i} + {i + 1}" for i in range(1, stmt_count + 1)]
-    lines.append(f"return x{stmt_count}")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def load_corpus_manifest(repo_root: Path, manifest_path: Path | None) -> list[tuple[str, Path]]:
@@ -242,6 +238,7 @@ def write_json_report(
     inline_benches_by_opt: dict[str, Path],
     inline_ast_path: Path | None,
     inline_frontend_path: Path | None,
+    synthetic_input: dict[str, object],
     inputs: list[tuple[str, Path]],
     runs: list[dict[str, object]],
     aggregate_summaries: list[dict[str, object]],
@@ -271,6 +268,7 @@ def write_json_report(
         },
         "inline_ast": None if inline_ast_path is None else str(inline_ast_path),
         "inline_frontend": None if inline_frontend_path is None else str(inline_frontend_path),
+        "synthetic_input": synthetic_input,
         "inputs": [{"label": label, "path": str(path)} for label, path in inputs],
         "runs": runs,
         "aggregate_summaries": aggregate_summaries,
@@ -309,7 +307,7 @@ def main() -> int:
     inline_bench_by_opt: dict[str, Path] = {}
 
     try:
-        build_valid_input(input_path, args.stmt_count)
+        synthetic_input = build_synthetic_lua_benchmark_input(input_path, args.stmt_count)
         inline_ast_path, inline_frontend_path = make_inline_control(lua_src_dir, args.keep_temp)
 
         for opt_level in opt_levels:
@@ -342,6 +340,13 @@ def main() -> int:
             print(f"temp_root={temp_root}")
         else:
             print(f"temp_root={temp_root} (temporary)")
+        print(
+            "SYNTHETIC "
+            f"kind={synthetic_input['kind']} "
+            f"chunks={synthetic_input['chunk_count']} "
+            f"approx_stmt_count={synthetic_input['approx_stmt_count']} "
+            f"bytes={synthetic_input['bytes']}"
+        )
 
         current_mode_averages: dict[tuple[str, str], list[float]] = {}
         inline_mode_averages: dict[tuple[str, str], list[float]] = {}
@@ -509,6 +514,7 @@ def main() -> int:
                 inline_benches_by_opt=inline_bench_by_opt,
                 inline_ast_path=inline_ast_path,
                 inline_frontend_path=inline_frontend_path,
+                synthetic_input=synthetic_input,
                 inputs=inputs,
                 runs=run_entries,
                 aggregate_summaries=aggregate_entries,

@@ -144,8 +144,7 @@ static int64_t run_mode(BenchmarkMode mode, const uint8_t *input, size_t input_l
     switch (mode) {
     case BENCH_PARSE:
     case BENCH_CHECKSUM:
-        (void)input_len;
-        return lua_frontend_parse_checksum((uint8_t *)input);
+        return lua_frontend_parse_checksum_with_len((uint8_t *)input, input_len);
     case BENCH_LEXER:
         return lua_frontend_lexer_checksum_with_len((uint8_t *)input, input_len);
     case BENCH_SAMPLE:
@@ -172,13 +171,15 @@ static int mode_accepts(BenchmarkMode mode, const uint8_t *input, size_t input_l
         return 1;
     case BENCH_PARSE:
     case BENCH_CHECKSUM:
-        return input_len == 0 || lua_frontend_parse_stmt_count((uint8_t *)input) > 0;
+        return lua_frontend_parse_status_with_len((uint8_t *)input, input_len) == 0;
     case BENCH_LEXER:
+        return lua_frontend_lexer_status_with_len((uint8_t *)input, input_len) == 0;
     case BENCH_ENV:
     case BENCH_CLOSURE:
     case BENCH_LABEL:
     case BENCH_ANALYSIS:
-        return warmup_value >= 0;
+        (void)warmup_value;
+        return lua_frontend_checked_status((uint8_t *)input) == 0;
     case BENCH_CONTROL:
     case BENCH_CHECKED:
         return 1;

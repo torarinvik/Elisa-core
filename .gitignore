@@ -22,3 +22,4 @@ docs/useful_language_features/12-nim-orthogonal-language-and-compiler-ideas.md
 docs/useful_language_features/13-v-orthogonal-language-and-compiler-ideas.md
 compiler/.backend-test.log
 compiler/.semantic-test.log
+/compiler/scripts/__pycache__

@@ -17,13 +17,15 @@ import sys
 import tempfile
 from pathlib import Path
 
+from lua_frontend_benchmark_input import build_synthetic_lua_benchmark_input
+
 
 MIB_PER_SECOND_RE = re.compile(r"MiB/s=([0-9]+(?:\.[0-9]+)?)")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stmt-count", type=int, default=4000, help="Number of local assignment statements to generate for the synthetic input")
+    parser.add_argument("--stmt-count", type=int, default=4000, help="Approximate statement budget for the generated mixed-Lua synthetic input")
     parser.add_argument("--parse-iterations", type=int, default=20, help="Iterations per benchmark run")
     parser.add_argument("--repeats", type=int, default=3, help="Number of repeated runs per input")
     parser.add_argument("--corpus-manifest", default=None, help="Optional manifest of real-Lua corpus files relative to the repo root")
@@ -42,14 +44,6 @@ def run(cmd: list[str], cwd: Path | None = None, capture_output: bool = False) -
         text=True,
         capture_output=capture_output,
     )
-
-
-def build_valid_input(path: Path, stmt_count: int) -> None:
-    lines = ["local acc = 0"]
-    for i in range(1, stmt_count + 1):
-        lines.append(f"acc = acc + {i} + {i + 1}")
-    lines.append("return acc")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def load_corpus_manifest(repo_root: Path, manifest_path: Path | None) -> list[tuple[str, Path]]:
@@ -166,6 +160,7 @@ def write_json_report(
     skip_real_corpus: bool,
     llcontext_bench: Path,
     reference_bench: Path,
+    synthetic_input: dict[str, object],
     inputs: list[tuple[str, Path]],
     runs: list[dict[str, object]],
     skipped: list[dict[str, str]],
@@ -185,6 +180,7 @@ def write_json_report(
         "skip_real_corpus": skip_real_corpus,
         "llcontext_bench": str(llcontext_bench),
         "reference_bench": str(reference_bench),
+        "synthetic_input": synthetic_input,
         "inputs": [{"label": label, "path": str(path)} for label, path in inputs],
         "runs": runs,
         "skipped": skipped,
@@ -220,7 +216,7 @@ def main() -> int:
     ref_out.mkdir(parents=True, exist_ok=True)
 
     try:
-        build_valid_input(input_path, args.stmt_count)
+        synthetic_input = build_synthetic_lua_benchmark_input(input_path, args.stmt_count)
         llcontext_bench = build_llcontext_harness(compiler_dir, frontend_path, llcontext_harness, ll_out, args.opt_level)
         reference_bench = build_reference_harness(reference_harness, ref_out, args.opt_level)
 
@@ -232,6 +228,13 @@ def main() -> int:
             print(f"temp_root={temp_root}")
         else:
             print(f"temp_root={temp_root} (temporary)")
+        print(
+            "SYNTHETIC "
+            f"kind={synthetic_input['kind']} "
+            f"chunks={synthetic_input['chunk_count']} "
+            f"approx_stmt_count={synthetic_input['approx_stmt_count']} "
+            f"bytes={synthetic_input['bytes']}"
+        )
 
         runs: list[dict[str, object]] = []
         skipped: list[dict[str, str]] = []
@@ -354,6 +357,7 @@ def main() -> int:
                 skip_real_corpus=args.skip_real_corpus,
                 llcontext_bench=llcontext_bench,
                 reference_bench=reference_bench,
+                synthetic_input=synthetic_input,
                 inputs=inputs,
                 runs=runs,
                 skipped=skipped,
