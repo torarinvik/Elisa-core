@@ -50,6 +50,24 @@ func testTimingJSONEnabled() bool {
 	return mode == "json" || mode == "jsonl"
 }
 
+func testPhaseDebugEnabled() bool {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("LLCONTEXT_TEST_PHASE_DEBUG")))
+	return mode != "" && mode != "0" && mode != "false" && mode != "off"
+}
+
+func writeTestPhaseLine(w io.Writer, phase string, detail string) {
+	if w == nil || !testPhaseDebugEnabled() {
+		return
+	}
+	phase = strings.TrimSpace(phase)
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		fmt.Fprintf(w, "[ phase    ] %s\n", phase)
+		return
+	}
+	fmt.Fprintf(w, "[ phase    ] %s %s\n", phase, detail)
+}
+
 func durationTimingField(key string, value time.Duration) timingField {
 	return timingField{
 		textKey:   key,
@@ -348,7 +366,7 @@ func buildDispatchTestRunnerSource(source []byte, cases []selectedTestCase) stri
 func testRunnerDispatchShimSource(cases []selectedTestCase) string {
 	var out strings.Builder
 	out.WriteString(testRunnerRuntimeShimSource())
-	out.WriteString("\nextern int strcmp(const char* lhs, const char* rhs);\n\n")
+	out.WriteString("\n#include <stdio.h>\n\nextern int strcmp(const char* lhs, const char* rhs);\n\n")
 	for index, testCase := range cases {
 		if testCase.Func == nil || testCase.skipped() {
 			continue
@@ -362,6 +380,8 @@ func testRunnerDispatchShimSource(cases []selectedTestCase) string {
 	out.WriteString("        return 2;\n")
 	out.WriteString("    }\n")
 	out.WriteString("    const char *test_name = argv[1];\n")
+	out.WriteString("    fprintf(stderr, \"[ ACTIVE   ] %s\\n\", test_name);\n")
+	out.WriteString("    fflush(stderr);\n")
 	for index, testCase := range cases {
 		if testCase.Func == nil || testCase.skipped() {
 			continue
@@ -392,11 +412,13 @@ func runnableTestCases(cases []selectedTestCase) []selectedTestCase {
 
 func executeSelectedTests(inputFile string, result *semantic.Result, filter string, foreignFiles []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, stdout io.Writer, stderr io.Writer) int {
 	suiteStart := time.Now()
+	writeTestPhaseLine(stderr, "selected_tests", "read_source")
 	source, err := readSourceWithIncludes(inputFile, map[string]bool{})
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %s\n", err)
 		return 1
 	}
+	writeTestPhaseLine(stderr, "selected_tests", "select_cases")
 	testCases := selectTestCases(result, filter)
 	if len(testCases) == 0 {
 		fmt.Fprintf(stdout, "[ NO TESTS ] no @test functions matched filter %q\n", strings.TrimSpace(filter))
@@ -428,6 +450,7 @@ func executeSelectedTests(inputFile string, result *semantic.Result, filter stri
 	cleanup := func() {}
 	if len(runnableCases) > 0 {
 		compileStarted = true
+		writeTestPhaseLine(stderr, "selected_tests", "compile_dispatch")
 		runnerSourceStart := time.Now()
 		runnerSource := buildDispatchTestRunnerSource(source, runnableCases)
 		runnerSourceElapsed := time.Since(runnerSourceStart)
@@ -448,6 +471,7 @@ func executeSelectedTests(inputFile string, result *semantic.Result, filter stri
 		cacheHit = nativeTiming.CacheHit
 		if err != nil {
 			cleanup()
+			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
 		}
 		writeTestTimingLine(stderr, "compile",
@@ -465,6 +489,7 @@ func executeSelectedTests(inputFile string, result *semantic.Result, filter stri
 		)
 		defer cleanup()
 	}
+	writeTestPhaseLine(stderr, "selected_tests", "run_cases")
 	for _, testCase := range testCases {
 		if testCase.Func == nil {
 			continue

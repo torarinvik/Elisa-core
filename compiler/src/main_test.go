@@ -2523,6 +2523,41 @@ def pool_backed_case() -> void can[Abort.Panic]:
 	}
 }
 
+func TestRunCLIEmitsSelectedTestPhaseDebug(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	t.Setenv("LLCONTEXT_TEST_PHASE_DEBUG", "1")
+
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "execute_tests_phase_debug_fixture.llcontext")
+	src := "@test\ndef alpha_case() -> void:\n    pass\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write phase-debug execute-tests fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected phase-debug test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	for _, check := range []string{
+		"[ phase    ] emit_test selected_test_execution",
+		"[ phase    ] selected_tests read_source",
+		"[ phase    ] selected_tests select_cases",
+		"[ phase    ] selected_tests compile_dispatch",
+		"[ phase    ] selected_tests run_cases",
+	} {
+		if !strings.Contains(stderr.String(), check) {
+			t.Fatalf("expected selected-test phase debug output to contain %q, got:\n%s", check, stderr.String())
+		}
+	}
+	if !strings.Contains(stdout.String(), "[       OK ] alpha_case") {
+		t.Fatalf("expected successful test output, got:\n%s", stdout.String())
+	}
+}
+
 func TestRunCLIExecutesFilteredSelectedTests(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
@@ -2620,6 +2655,7 @@ func TestRunCLIContinuesAfterFailingAndSkippedTests(t *testing.T) {
 	for _, check := range []string{
 		"[ RUN      ] alpha_case",
 		"PANIC",
+		"[ ACTIVE   ] alpha_case",
 		"alpha_case",
 		"panic at ",
 		"backtrace:",
