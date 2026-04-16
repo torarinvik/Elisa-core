@@ -60,14 +60,15 @@ static double elapsed_seconds(struct timespec start, struct timespec end) {
 typedef enum BenchmarkMode {
     BENCH_PARSE = 0,
     BENCH_CHECKSUM = 1,
-    BENCH_LEXER = 2,
-    BENCH_SAMPLE = 3,
-    BENCH_ENV = 4,
-    BENCH_CLOSURE = 5,
-    BENCH_LABEL = 6,
-    BENCH_ANALYSIS = 7,
-    BENCH_CONTROL = 8,
-    BENCH_CHECKED = 9,
+    BENCH_METRICS = 2,
+    BENCH_LEXER = 3,
+    BENCH_SAMPLE = 4,
+    BENCH_ENV = 5,
+    BENCH_CLOSURE = 6,
+    BENCH_LABEL = 7,
+    BENCH_ANALYSIS = 8,
+    BENCH_CONTROL = 9,
+    BENCH_CHECKED = 10,
 } BenchmarkMode;
 
 static const char *benchmark_mode_name(BenchmarkMode mode) {
@@ -76,6 +77,8 @@ static const char *benchmark_mode_name(BenchmarkMode mode) {
         return "parse";
     case BENCH_CHECKSUM:
         return "checksum";
+    case BENCH_METRICS:
+        return "metrics";
     case BENCH_LEXER:
         return "lexer";
     case BENCH_SAMPLE:
@@ -103,6 +106,10 @@ static int parse_benchmark_mode(const char *text, BenchmarkMode *out_mode) {
     }
     if (strcmp(text, "checksum") == 0) {
         *out_mode = BENCH_CHECKSUM;
+        return 1;
+    }
+    if (strcmp(text, "metrics") == 0) {
+        *out_mode = BENCH_METRICS;
         return 1;
     }
     if (strcmp(text, "lexer") == 0) {
@@ -145,6 +152,8 @@ static int64_t run_mode(BenchmarkMode mode, const uint8_t *input, size_t input_l
     case BENCH_PARSE:
     case BENCH_CHECKSUM:
         return lua_frontend_parse_checksum_with_len((uint8_t *)input, input_len);
+    case BENCH_METRICS:
+        return lua_frontend_parse_metrics_checksum_with_len((uint8_t *)input, input_len);
     case BENCH_LEXER:
         return lua_frontend_lexer_checksum_with_len((uint8_t *)input, input_len);
     case BENCH_SAMPLE:
@@ -172,6 +181,8 @@ static int mode_accepts(BenchmarkMode mode, const uint8_t *input, size_t input_l
     case BENCH_PARSE:
     case BENCH_CHECKSUM:
         return lua_frontend_parse_status_with_len((uint8_t *)input, input_len) == 0;
+    case BENCH_METRICS:
+        return lua_frontend_parse_metrics_status_with_len((uint8_t *)input, input_len) == 0;
     case BENCH_LEXER:
         return lua_frontend_lexer_status_with_len((uint8_t *)input, input_len) == 0;
     case BENCH_ENV:
@@ -190,7 +201,7 @@ static int mode_accepts(BenchmarkMode mode, const uint8_t *input, size_t input_l
 int main(int argc, char **argv) {
     if (argc < 3) {
         fprintf(stderr, "usage: %s <lua-file> <iterations> [mode]\n", argv[0]);
-        fprintf(stderr, "modes: parse (default), checksum, lexer, sample, env, closure, label, analysis, control, checked\n");
+        fprintf(stderr, "modes: parse (default), checksum, metrics, lexer, sample, env, closure, label, analysis, control, checked\n");
         return 1;
     }
 
@@ -203,7 +214,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     if (!parse_benchmark_mode(mode_text, &mode)) {
-        fprintf(stderr, "unknown benchmark mode '%s' (expected parse, checksum, lexer, sample, env, closure, label, analysis, control, or checked)\n", mode_text);
+        fprintf(stderr, "unknown benchmark mode '%s' (expected parse, checksum, metrics, lexer, sample, env, closure, label, analysis, control, or checked)\n", mode_text);
         return 1;
     }
 

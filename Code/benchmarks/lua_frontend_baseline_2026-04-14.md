@@ -32,7 +32,8 @@ python3 ./compiler/scripts/run_lua_frontend_differential.py --strict
 ## Corpus And Modes
 
 - Manifest: `Code/benchmarks/lua_frontend_corpus_manifest.txt`
-- Default mode list: `parse,checksum,lexer,env,closure,label,analysis`
+- Capture mode list: `parse,checksum,lexer,env,closure,label,analysis`
+- Current default mode list: `parse,metrics,checksum,lexer,env,closure,label,analysis`
 - Inputs in benchmark bundle: 11 total
   - 1 synthetic input
   - 10 manifest-driven corpus inputs

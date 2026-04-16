@@ -105,7 +105,7 @@ python3 ./compiler/scripts/run_lua_frontend_storage_benchmark.py --json-out /tmp
 
 Useful options:
 
-- `--modes parse,checksum,lexer,env,closure,label,analysis`
+- `--modes parse,metrics,checksum,lexer,env,closure,label,analysis`
 - `--parse-iterations 20`
 - `--sample-iterations 5000`
 - `--repeats 3`
@@ -115,6 +115,7 @@ Useful options:
 Supported modes:
 
 - `parse`
+- `metrics`
 - `checksum`
 - `lexer`
 - `sample`
@@ -139,9 +140,14 @@ Notes:
   per-input/per-mode measurements, aggregate summaries, and skipped-run
   reasons.
 - The default benchmark/profile/baseline mode set is
-  `parse,checksum,lexer,env,closure,label,analysis`.
+  `parse,metrics,checksum,lexer,env,closure,label,analysis`.
 - `sample` remains available explicitly with `--modes sample` or as part of a
   custom comma-separated mode list.
+
+`metrics` runs the syntax parser with the null-builder path, so it still pays
+for lexing and parser control flow but avoids tree AST materialization. That
+gives a direct midpoint between `lexer` and full `parse` when profiling parser
+overhead.
 
 ## Reference Parse Comparison
 

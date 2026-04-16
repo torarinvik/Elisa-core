@@ -23,7 +23,7 @@ from typing import Iterable
 from lua_frontend_benchmark_input import build_synthetic_lua_benchmark_input
 
 
-VALID_MODES = ("parse", "checksum", "lexer", "sample", "env", "closure", "label", "analysis")
+VALID_MODES = ("parse", "checksum", "metrics", "lexer", "sample", "env", "closure", "label", "analysis")
 MIB_PER_SECOND_RE = re.compile(r"MiB/s=([0-9]+(?:\.[0-9]+)?)")
 
 
@@ -33,7 +33,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--parse-iterations", type=int, default=20, help="Iterations per parse-like benchmark run")
     parser.add_argument("--sample-iterations", type=int, default=5000, help="Iterations per sample benchmark run")
     parser.add_argument("--repeats", type=int, default=3, help="Number of repeated runs per benchmark mode")
-    parser.add_argument("--modes", default="parse,checksum,lexer,env,closure,label,analysis", help="Comma-separated benchmark modes to run")
+    parser.add_argument("--modes", default="parse,metrics,checksum,lexer,env,closure,label,analysis", help="Comma-separated benchmark modes to run")
     parser.add_argument("--corpus-manifest", default=None, help="Optional manifest of real-Lua corpus files relative to the repo root")
     parser.add_argument("--skip-real-corpus", action="store_true", help="Only benchmark the synthetic generated input")
     parser.add_argument("--opt-level", default="-O3", help="Compiler/clang optimization flag")

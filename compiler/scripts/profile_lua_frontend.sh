@@ -66,7 +66,7 @@ fi
 
 echo "lua_frontend_profile_out=$OUT_DIR"
 
-BENCH_ARGS="--opt-level=$OPT_LEVEL --parse-iterations $PARSE_ITERATIONS --sample-iterations $SAMPLE_ITERATIONS --repeats $REPEATS --modes parse,checksum,lexer,env,closure,label,analysis"
+BENCH_ARGS="--opt-level=$OPT_LEVEL --parse-iterations $PARSE_ITERATIONS --sample-iterations $SAMPLE_ITERATIONS --repeats $REPEATS --modes parse,metrics,checksum,lexer,env,closure,label,analysis"
 KEEP_TEMP_ARGS=""
 if [ -n "$OPT_LEVELS" ]; then
     BENCH_ARGS="$BENCH_ARGS --opt-levels=$OPT_LEVELS"
@@ -120,7 +120,7 @@ Lua frontend profiling bundle
 =============================
 
 benchmark.log
-    Synthetic + real-corpus benchmark sweep across parse/checksum/lexer/env/closure/label/analysis.
+    Synthetic + real-corpus benchmark sweep across parse/metrics/checksum/lexer/env/closure/label/analysis.
 
 benchmark.json
     Structured benchmark results including per-run measurements and aggregate summaries.
