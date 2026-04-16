@@ -21,12 +21,17 @@ For the newer source-language surface that is easy to miss in older design notes
 
 For compile-time interfaces and receiver-style dispatch, see `../docs/useful_language_features/19-static-interfaces-extension-methods-and-ufcs.md`.
 
+For scope/checkpoint rollback blocks, see `../docs/useful_language_features/08-region-checkpoints.md`.
+
+For current annotations and compile-time hints, see `../docs/useful_language_features/20-annotations-and-compile-time-hints.md`.
+
 That reference covers the currently implemented syntax for:
 
 - default and named arguments, including `..` forwarding
 - effects aliases and implicit contexts
 - explicit argument packs via `params` and ambient `with args(...)` scopes
 - brace destructuring, field punning, record updates, and filtered iterable loops
+- `do:` blocks, `defer`, index fallback, store/dict sugar, char literals, and explicit `parallel for`
 - cascade blocks and expressions, lambda literals, and postfix cast hooks
 - static interfaces, associated types, extension methods, UFCS rewriting, safe call chaining, and the preferred generic specialization surface
 
@@ -58,6 +63,17 @@ return lambda (value: i64) -> i64:
 ```
 
 ```text
+value = do:
+  base = 40
+  base + 2
+defer block:
+  cleanup()
+pool workers(2u):
+  parallel for node in frozen:
+    pass
+```
+
+```text
 impl Tok:
   def score(self: Tok) -> i64:
     return 7
@@ -68,6 +84,63 @@ interface Builder:
 ```
 
 Use the two reference docs above for the exact rules and edge cases.
+
+## Test annotations and runner emits
+
+The source surface includes lightweight test and benchmark annotations:
+
+```text
+@test
+def alpha_case() -> void:
+  pass
+
+@fixture
+def shared_seed() -> int:
+  return 7
+
+@bench
+def bench_hot_loop() -> void:
+  pass
+
+@skip(todo)
+@test
+def beta_case() -> void:
+  pass
+```
+
+Current rules:
+
+- `@test` marks a test case
+- `@fixture` marks a helper fixture surface
+- `@bench` marks a benchmark case
+- `@skip(reason)` and `@ignore(reason)` skip an annotated test case while preserving it in listing and runner output
+- `@test` functions may declare `can[Abort.Panic]`, which keeps panic-heavy test fixtures valid without allowing unrelated declared permission families
+
+Current test-oriented emit modes:
+
+- `-emit tests`, `-emit benches`, and `-emit fixtures` list matching annotated functions
+- `-emit test-runner` emits generated `.llcontext` runner source rather than executing it directly
+- `-emit test` compiles and runs the selected tests through the native harness path
+- `-filter` is only supported for `tests`, `benches`, `fixtures`, `test-runner`, and `test`
+- filters are case-insensitive and accept substring matches, glob patterns such as `*beta*`, and comma-separated OR combinations
+
+## Emit mode quick reference
+
+In addition to the core `llvm`, `header`, `iface`, and project commands, the CLI also exposes several smaller helper emit modes:
+
+- `-emit ast` prints the parsed AST
+- `-emit fmt` prints canonical formatted source
+- `-emit doc` emits reference docs for the current file
+- `-emit deps` prints the expanded source dependency list
+- `-emit deps-json` emits the same dependency information as JSON with `root` and `files` fields
+- `-emit ir` emits the frontend IR bundle form
+- `-emit packed` emits packed-lowering inspection output
+- `-emit serve` starts the compile server on `-addr`, which defaults to `127.0.0.1:8080`
+
+Optimization defaults:
+
+- `-emit bc` and `-emit obj` default to `-O3` unless an explicit `-O0`, `-O2`, or `-O3` flag is supplied
+- the other emit modes default to `-O0`
 
 ## Error handling syntax
 

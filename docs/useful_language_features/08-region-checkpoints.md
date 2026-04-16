@@ -1,6 +1,10 @@
-# Region checkpoints
+# Region checkpoints, scope statements, and rollback blocks
 
-The language now supports statement-form region checkpoints on top of the existing `region`, `new[...]`, and `destroy` operations.
+The current compiler supports two related statement families on top of the
+existing `region`, `new[...]`, and `destroy` operations:
+
+- region-local `mark` / `restore ... from ...` / `reset`
+- statement-form `scope`, named checkpoints, grouped checkpoints, and `restore name`
 
 ## Syntax
 
@@ -15,13 +19,74 @@ reset scratch
 destroy scratch
 ```
 
+```context
+scope pool_new(2):
+    pass
+
+checkpoint mark = items:
+    items.push(4)
+
+checkpoint xs, ys:
+    xs.push(5)
+    ys.push(6)
+
+restore mark
+```
+
 Supported forms:
 
+- `scope <expr>:`
+- `checkpoint <name> = <target>:`
+- `checkpoint <target1>, <target2>, ...:`
+- `restore <checkpoint-name>`
 - `mark <region> as <checkpoint>`
 - `restore <region> from <checkpoint>`
 - `reset <region>`
 
 All three are statements, not expressions.
+
+## Scope statements
+
+`scope expr:` evaluates a scoped resource expression and runs the nested body
+with the compiler's ordinary scoped-cleanup machinery.
+
+```context
+scope pool_new(2):
+    pass
+```
+
+This is the current explicit block form for surfaces such as thread-pool
+acquisition. The body is still an ordinary statement block; `scope` is about
+resource lifetime and cleanup, not a new expression form.
+
+## Named and grouped checkpoints
+
+Named checkpoints snapshot rollback state for a checkpointable target and bind
+that snapshot to a name.
+
+```context
+checkpoint mark = items:
+    items.push(4)
+
+restore mark
+```
+
+Grouped checkpoints create an anonymous rollback block over more than one
+target.
+
+```context
+checkpoint xs, ys:
+    xs.push(5)
+    ys.push(6)
+```
+
+Current rules:
+
+- named checkpoints use `checkpoint name = target:`
+- anonymous grouped checkpoints require at least two targets
+- current checkpoint targets are regions and mutable `darray` values
+- `restore name` rewinds the named checkpoint bound earlier in the same scope
+- the formatter normalizes related loop syntax such as `for rev value in items:` to the canonical `for value in rev(items):`
 
 ## Operational meaning
 
@@ -99,6 +164,10 @@ def nested(seed: i32) -> i32:
 
 Restoring an older checkpoint invalidates newer checkpoints from the same region.
 
+The same conservative invalidation idea also applies to the statement-form
+checkpoint surface: rewinding a checkpoint invalidates state derived from the
+rewound portion of the target.
+
 ## Lowering model
 
 The implementation lowers directly to runtime helpers that already exist in `arena.llcontext`:
@@ -108,3 +177,7 @@ The implementation lowers directly to runtime helpers that already exist in `are
 - `reset` → `arena_reset(...)`
 
 Internally, checkpoints use the runtime `ArenaMark` struct, but the source-language surface remains statement-oriented.
+
+The broader `scope` and general checkpoint statements reuse the same existing
+cleanup and rollback planning machinery that the compiler already uses for
+scoped resources and count-based rewinds.

@@ -80,9 +80,13 @@ All notable changes to this repository should be documented in this file.
 ### Documentation
 
 - `compiler/README.md` now documents the latest postfix cast-hook surface and the Lua frontend storage benchmark harness.
-- Added `docs/useful_language_features/18-current-surface-ergonomics.md` as the implemented reference for default and named arguments, `..` forwarding, effects aliases, implicit contexts, `params` / `with args`, brace destructuring and record updates, filtered loops, cascades, lambda literals, and postfix cast hooks.
+- Expanded `docs/useful_language_features/18-current-surface-ergonomics.md` with the current implemented surfaces for `do:` blocks, `defer`, index fallback, store/dict sugar, explicit `parallel for`, char literals, and the newer loop/control-flow ergonomics.
 - Added `docs/useful_language_features/19-static-interfaces-extension-methods-and-ufcs.md` as the implemented reference for static interfaces, extension methods, UFCS rewriting, safe call chaining, and the preferred generic specialization surface.
+- Added `docs/useful_language_features/20-annotations-and-compile-time-hints.md` as the implemented reference for current layout annotations, packed-layout annotations, function codegen hints, guard annotations, and branch hints.
+- Expanded `docs/useful_language_features/08-region-checkpoints.md` to cover the current `scope`, named checkpoint, grouped checkpoint, and rollback-block statement surface in addition to region-local checkpoints.
+- Updated `docs/useful_language_features/17-iterators-and-for-in-mini-spec.md` so it no longer reads as if the current explicit `parallel for` feature is still purely deferred.
 - Expanded `compiler/README.md` with a compact syntax cheat sheet plus current `.llcontexti`, `project.json`, and `.llctxlib/manifest.json` workflow documentation.
+- Expanded `compiler/README.md` with current test annotation, test-runner, filter, and helper emit-mode documentation, including `deps-json` and the distinction between listing, runner-generation, and direct test execution modes.
 - `Code/llcontext_lua/README.md` now reflects the current parser/export surface, side-table packed-span layout, and benchmark entry points.
 - Expanded pointer typestate documentation in:
   - `docs/useful_language_features/02-pointer-typestate-practical.md`

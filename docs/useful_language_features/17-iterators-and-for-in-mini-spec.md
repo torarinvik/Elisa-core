@@ -3,6 +3,12 @@
 This document proposes the first general iterable surface for Contextlang /
 `llcontext`.
 
+It is still mainly a design note for the broader sequential iterable model.
+Since it was written, the compiler has also shipped companion implemented
+surfaces such as filtered iterable loops, canonical `rev(items)` syntax, and
+the explicit pool-scoped `parallel for` feature. Those currently accepted
+surfaces are documented in `18-current-surface-ergonomics.md`.
+
 The goal is **not** to start with generators, lazy pipelines, or user-authored
 iterator traits.
 
@@ -46,7 +52,7 @@ Still intentionally deferred in the first slice:
 - expression-heavy lazy iterator chains as a core feature
 - implicit recursive traversal of a bare tree value
 - hidden filtering patterns in loop headers
-- auto-parallelization or a `parallel for` surface in this document
+- auto-parallelization or a broader parallel-iterator surface in this document
 - consuming iteration of affine containers in the first slice
 - dict / ordered-map iteration before the container surface stabilizes
 
@@ -68,7 +74,7 @@ This matters especially for two already-established design pressures:
 So the rule is:
 
 > plain `for` is sequential syntax over builtin iterable categories now, and
-> future parallel forms should reuse that same iterable model rather than
+> further parallel forms should reuse that same iterable model rather than
 > inventing a second traversal dialect.
 
 ## Surface Syntax
@@ -438,11 +444,13 @@ model, but they are not secretly linear buffers.
 
 That is exactly why tree iteration must be explicit about traversal shape.
 
-## Future Parallel Forms Must Reuse This Model
+## Further Parallel Forms Must Reuse This Model
 
-When the language later adds a restricted `parallel for` or chunk kernel form,
-it should be defined over the same iterable categories and helper-produced
-facts.
+The current compiler already has an explicit pool-scoped `parallel for`
+surface over frozen packed stores and readonly exact-extent views. If the
+language later adds more general chunked, zipped, or iterator-oriented
+parallel forms, they should still be defined over the same iterable
+categories and helper-produced facts.
 
 Recommended later helper surfaces:
 

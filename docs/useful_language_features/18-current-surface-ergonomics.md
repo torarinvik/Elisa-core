@@ -180,6 +180,117 @@ Current rules:
 - the loop binder may be a simple name or an irrefutable brace destructure pattern
 - this works over ordinary iterable sources and store-row iterators such as `rows()`
 
+## `do:` expression blocks
+
+`do:` introduces an expression-valued block with setup statements followed by a final value expression.
+
+```context
+def keep() -> i64:
+    value = do:
+        base = 40
+        base + 2
+    return value
+
+def call() -> i64:
+    return consume(x: do:
+        seed = 3
+        seed + 1
+    )
+```
+
+Current rules:
+
+- `do:` may appear anywhere an ordinary expression is accepted
+- the body may contain setup statements, but the final line must still be a value expression
+- the same surface works in direct assignments, call arguments, named arguments, and list elements
+- `do` remains contextual, so `consume(do: 3)` still parses as a named argument rather than a block expression
+
+## Index fallback
+
+Index fallback adds an explicit recovery expression to an index operation.
+
+```context
+def read(xs: darray[int], i: usize) -> int:
+    return xs[i] else 0
+```
+
+Current rules:
+
+- `source[index] else fallback` keeps the ordinary indexing semantics on success and yields `fallback` on the miss path
+- the fallback expression must match the indexed element type
+- the fallback surface is for value reads only; it is not an assignment target or a ref-binding surface
+
+## `defer` statements
+
+The current compiler accepts two explicit defer modes.
+
+```context
+def keep() -> int:
+    defer block:
+        pass
+    defer function:
+        pass
+    return 0
+```
+
+Current rules:
+
+- `defer block:` runs when the current block scope exits
+- `defer function:` runs on function exit rather than the nearest nested block exit
+- defer bodies are ordinary statement blocks and may capture surrounding locals
+- `defer` is contextual, so ordinary identifiers like `defer_value` and calls like `defer(x)` still parse normally outside defer position
+
+## Stores, rows, and dict defaulting sugar
+
+The current surface includes compact syntax for row-oriented stores and defaulting dictionary helpers.
+
+```context
+store PendingGotoStore:
+    name_key: u32
+    depth: u32
+
+def build(values: mutable dict[dstr[key_shape], i64]&, key: dstr[key_shape]) -> i64:
+    slot = values.get_or_insert(key):
+        42
+    for {name_key, depth} in pending.rows():
+        return name_key.i64() + depth.i64()
+    return slot[0u]
+```
+
+Current rules:
+
+- `store Name:` declares a row-oriented storage surface with named fields
+- `rows()` yields readonly row values that work with ordinary field access and brace destructuring
+- `values.get_or_insert(key): ...` rewrites the trailing block into the default-value argument for `get_or_insert`
+- `values.entry(key).get_or_insert(): ...` does the same thing for the entry API surface
+- the generic syntax parses for more than one key family, but the current runtime-backed helper surface is primarily validated for `dict[dstr[key_shape], V]` unless matching helper overloads are supplied
+
+## Pool scopes and `parallel for`
+
+The current explicit parallel loop surface is pool-scoped rather than implicit.
+
+```context
+def visit(frozen: Expr.Store[Frozen]) -> void can[Pool.Submit, Pool.WaitAll]:
+    pool workers(2u):
+        parallel for node in frozen:
+            pass
+
+def walk_tags(tags: dview[Expr.Tag]) -> void can[Pool.Submit, Pool.WaitAll]:
+    pool workers(2u):
+        parallel for tag at i in tags:
+            if tag == Expr.Tag.Add:
+                _ = i
+```
+
+Current rules:
+
+- `pool workers(count):` introduces the required enclosing pool scope
+- `parallel for item in source:` is the basic form
+- `parallel for item at index in source:` adds an explicit index binder
+- current sources must be either frozen packed stores or readonly contiguous exact-extent views
+- captured outer values must still satisfy the compiler's existing thread-transfer checks
+- this is the current implemented parallel loop feature, not just a proposal placeholder
+
 ## Cascade blocks and cascade expressions
 
 Receiver-oriented shorthand is available in both statement and expression form.
@@ -221,6 +332,21 @@ Current rules:
 - shorthand parameter forms like `λ value: ...` rely on the expected function type to provide parameter typing
 - lambdas capture surrounding locals and may return closures
 - `lambda` is contextual, so a parameter or local named `lambda` still parses as an identifier outside lambda position
+
+## Char literals
+
+Single-quoted character literals are now part of the accepted surface.
+
+```context
+const NEWLINE: char = '\n'
+const LETTER: char = 'A'
+```
+
+Current rules:
+
+- a char literal must decode to exactly one code unit
+- the usual escape forms such as `\n`, `\t`, `\r`, `\0`, `\xNN`, and `\uNNNN` are accepted
+- the builtin `char` type participates in the normal conversion surface, including helper-backed postfix forms such as `.i64()` when available
 
 ## Ordinary casts and postfix cast hooks
 
