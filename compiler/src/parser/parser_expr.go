@@ -1197,9 +1197,13 @@ func (p *Parser) parseNamedArgList(endToken lexer.TokenKind, allowSpread bool) (
 	return args, spread
 }
 
-func (p *Parser) parseParamPackUseWithArgs() ast.ParamPackUse {
+func (p *Parser) parseValueParamPackUse() ast.ParamPackUse {
 	pos := p.tokens[p.pos-1].Pos
 	pack := ast.ParamPackUse{Position: pos, Name: p.parseQualifiedDeclName()}
+	if p.peek() != lexer.TOKEN_LPAREN {
+		pack.Bare = true
+		return pack
+	}
 	p.expect(lexer.TOKEN_LPAREN)
 	pack.Args, _ = p.parseNamedArgList(lexer.TOKEN_RPAREN, false)
 	p.expect(lexer.TOKEN_RPAREN)
@@ -1250,7 +1254,7 @@ func (p *Parser) parseCallArgs() ([]ast.Expr, []string, []bool, []ast.ParamPackU
 					}
 				}
 			}
-			pack := p.parseParamPackUseWithArgs()
+			pack := p.parseValueParamPackUse()
 			packs = append(packs, pack)
 			items = append(items, ast.CallArgItem{Position: pack.Position, Pack: pack, IsPack: true})
 			sawPack = true

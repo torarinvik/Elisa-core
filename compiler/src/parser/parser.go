@@ -430,6 +430,11 @@ func (p *Parser) parseParamsDecl() *ast.ParamsDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("params")
 	name := p.parseQualifiedDeclName()
+	params := p.parseParamDeclBlock(true)
+	return &ast.ParamsDecl{Position: pos, Name: name, Params: params}
+}
+
+func (p *Parser) parseParamDeclBlock(allowDefaults bool) []ast.ParamDecl {
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
@@ -440,11 +445,11 @@ func (p *Parser) parseParamsDecl() *ast.ParamsDecl {
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
 		}
-		params = append(params, p.parseParam(true))
+		params = append(params, p.parseParam(allowDefaults))
 		p.expectNewline()
 	}
 	p.expect(lexer.TOKEN_DEDENT)
-	return &ast.ParamsDecl{Position: pos, Name: name, Params: params}
+	return params
 }
 
 func (p *Parser) parseQualifiedDeclName() string {

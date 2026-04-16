@@ -1006,6 +1006,8 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 		s.invalidatePackedCommonFieldValuesExpr(n.Target)
 		s.invalidatePackedReadCaches()
 		return nil
+	case *ast.LocalParamsStmt:
+		return nil
 	case *ast.ReturnStmt:
 		if n.Value == nil {
 			if err := s.emitActiveScopedCleanup(); err != nil {

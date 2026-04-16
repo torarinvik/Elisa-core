@@ -173,9 +173,11 @@ func (a *Analyzer) analyzeWithStmt(stmt *ast.WithStmt) {
 	savedImplicitScopes := a.currentImplicitScopes
 	a.currentImplicitScopes = append(append([]map[string]ast.Expr(nil), savedImplicitScopes...), cloneImplicitBindings(working))
 	a.currentScope = scope
-	for _, bodyStmt := range originalBody {
-		a.analyzeStmt(bodyStmt)
-	}
+	a.withLocalParamPackFrame(func() {
+		for _, bodyStmt := range originalBody {
+			a.analyzeStmt(bodyStmt)
+		}
+	})
 	a.currentScope = savedScope
 	a.currentImplicitScopes = savedImplicitScopes
 }

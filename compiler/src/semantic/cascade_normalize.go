@@ -87,6 +87,8 @@ func normalizeCascadeStmt(stmt ast.Stmt, target ast.Expr) []ast.Stmt {
 		n.Value = normalizeCascadeExpr(n.Value, target, false)
 		n.Store = normalizeCascadeExpr(n.Store, target, false)
 		n.Body = normalizeCascadeStmtList(n.Body, target)
+	case *ast.LocalParamsStmt:
+		normalizeCascadeParams(n.Params)
 	case *ast.ViewStmt:
 		n.Value = normalizeCascadeExpr(n.Value, target, false)
 		n.Store = normalizeCascadeExpr(n.Store, target, false)

@@ -529,6 +529,8 @@ func (i *Interpreter) execStmt(frame *frame, stmt ast.Stmt) (controlSignal, erro
 			return controlSignal{}, annotateRuntimeError(n.Pos(), err)
 		}
 		return controlSignal{}, nil
+	case *ast.LocalParamsStmt:
+		return controlSignal{}, nil
 	case *ast.ReturnStmt:
 		if n.Value == nil {
 			return controlSignal{kind: signalReturn, value: VoidValue()}, nil

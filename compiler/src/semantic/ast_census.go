@@ -72,6 +72,10 @@ func (c *analyzerASTCensus) countStmt(stmt ast.Stmt) {
 		c.countExpr(n.Value)
 	case *ast.VarDeclStmt:
 		c.countExpr(n.Value)
+	case *ast.LocalParamsStmt:
+		for _, param := range n.Params {
+			c.countExpr(param.DefaultValue)
+		}
 	case *ast.LetDestructureStmt:
 		c.countExpr(n.Value)
 	case *ast.TupleBindStmt:

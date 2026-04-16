@@ -143,6 +143,7 @@ type Analyzer struct {
 	currentUsings                     []string
 	currentImplicitScopes             []map[string]ast.Expr
 	currentExplicitArgScopes          []map[string]ast.Expr
+	currentLocalParamPackScopes       []map[string]*ParamPack
 	implicitTempCounter               int
 }
 
@@ -330,7 +331,7 @@ func Analyze(file *ast.File) *Result {
 		StaticInterfaces:        a.staticInterfaces,
 		StaticImpls:             a.staticImpls,
 		ContextBundles:          a.contextBundles,
-		ParamPacks:             a.paramPacks,
+		ParamPacks:              a.paramPacks,
 		ConstValues:             a.constValues,
 		ExprTypes:               a.exprTypes,
 		OptionalBindSourceTypes: a.optionalBindSourceTypes,
@@ -3697,9 +3698,11 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 					if bindings := a.implicitBindingsForCurrentFunction(fnType); len(bindings) != 0 {
 						a.currentImplicitScopes = append(append([]map[string]ast.Expr(nil), savedBodyImplicitScopes...), cloneImplicitBindings(bindings))
 					}
-					for _, stmt := range fn.Body {
-						a.analyzeStmt(stmt)
-					}
+					a.withLocalParamPackFrame(func() {
+						for _, stmt := range fn.Body {
+							a.analyzeStmt(stmt)
+						}
+					})
 					a.currentImplicitScopes = savedBodyImplicitScopes
 				})
 			})
@@ -3833,9 +3836,11 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 							a.recordResolvedRegionRefBinding(sym, state)
 						}
 					}
-					for _, stmt := range fn.Body {
-						a.analyzeStmt(stmt)
-					}
+					a.withLocalParamPackFrame(func() {
+						for _, stmt := range fn.Body {
+							a.analyzeStmt(stmt)
+						}
+					})
 				})
 			})
 		})
@@ -3958,9 +3963,11 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 							a.recordResolvedRegionRefBinding(sym, state)
 						}
 					}
-					for _, stmt := range fn.Body {
-						a.analyzeStmt(stmt)
-					}
+					a.withLocalParamPackFrame(func() {
+						for _, stmt := range fn.Body {
+							a.analyzeStmt(stmt)
+						}
+					})
 				})
 			})
 		})

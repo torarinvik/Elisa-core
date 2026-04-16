@@ -87,6 +87,104 @@ def build(left: i64) -> i64:
 	}
 }
 
+func TestAnalyzeLocalParamPackShadowsGlobalWithinSameBlock(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_local_pack_shadow.llcontext", `params Pair:
+    left: i64 = 1
+    right: i64 = 2
+
+def consume(left: i64, right: i64) -> i64:
+    return left + right
+
+def build(left: i64) -> i64:
+    params Pair:
+        left: i64 = left
+        right: i64 = 9
+    return consume(use Pair)
+`)
+	buildSym, _ := result.GlobalScope.Lookup("build")
+	buildDecl := buildSym.Node.(*ast.FuncDecl)
+	ret := buildDecl.Body[len(buildDecl.Body)-1].(*ast.ReturnStmt)
+	call := ret.Value.(*ast.CallExpr)
+	if !call.ResolvedArgsValid || len(call.ResolvedArgs) != 2 {
+		t.Fatalf("expected 2 resolved args, got %#v", call.ResolvedArgs)
+	}
+	if len(call.ParamPacks) != 1 || !call.ParamPacks[0].Bare {
+		t.Fatalf("expected bare pack syntax to be preserved, got %#v", call.ParamPacks)
+	}
+	if ident, ok := call.ResolvedArgs[0].(*ast.Ident); !ok || ident.Name != "left" {
+		t.Fatalf("expected local default left arg, got %T %#v", call.ResolvedArgs[0], call.ResolvedArgs[0])
+	}
+	if lit, ok := call.ResolvedArgs[1].(*ast.IntLit); !ok || lit.Value != "9" {
+		t.Fatalf("expected local default right arg, got %T %#v", call.ResolvedArgs[1], call.ResolvedArgs[1])
+	}
+}
+
+func TestAnalyzeBareArgsScopeParamPackUse(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_bare_args_scope_pack.llcontext", `params Shared:
+	value: i64 = 7
+	width: i64 = 9
+
+def consume(value: i64, width: i64) -> i64:
+    return value + width
+
+def build() -> i64:
+	with args(use Shared):
+        return consume(use Shared)
+`)
+	buildSym, _ := result.GlobalScope.Lookup("build")
+	buildDecl := buildSym.Node.(*ast.FuncDecl)
+	argsScope := buildDecl.Body[0].(*ast.ArgsScopeStmt)
+	if len(argsScope.ParamPacks) != 1 || !argsScope.ParamPacks[0].Bare {
+		t.Fatalf("expected bare args-scope pack syntax, got %#v", argsScope.ParamPacks)
+	}
+	ret := argsScope.Body[len(argsScope.Body)-1].(*ast.ReturnStmt)
+	call := ret.Value.(*ast.CallExpr)
+	if !call.ResolvedArgsValid || len(call.ResolvedArgs) != 2 {
+		t.Fatalf("expected 2 resolved args, got %#v", call.ResolvedArgs)
+	}
+	if lit, ok := call.ResolvedArgs[0].(*ast.IntLit); !ok || lit.Value != "7" {
+		t.Fatalf("expected defaulted value arg, got %T %#v", call.ResolvedArgs[0], call.ResolvedArgs[0])
+	}
+	if lit, ok := call.ResolvedArgs[1].(*ast.IntLit); !ok || lit.Value != "9" {
+		t.Fatalf("expected defaulted width arg, got %T %#v", call.ResolvedArgs[1], call.ResolvedArgs[1])
+	}
+}
+
+func TestAnalyzeRejectsLocalParamPackUseBeforeDeclaration(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_local_pack_use_before_decl.llcontext", `def consume(left: i64, right: i64) -> i64:
+    return left + right
+
+def build(left: i64) -> i64:
+    value: i64 = consume(use Pair())
+    params Pair:
+        left: i64 = left
+        right: i64 = 9
+    return value
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `unknown parameter pack "Pair"`) {
+		t.Fatalf("expected missing local parameter pack diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsLocalParamPackFromNestedBlock(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_local_pack_nested_block.llcontext", `def consume(left: i64, right: i64) -> i64:
+    return left + right
+
+def build(left: i64) -> i64:
+    params Pair:
+        left: i64 = left
+        right: i64 = 9
+    if true:
+        return consume(use Pair())
+    return 0
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `unknown parameter pack "Pair"`) {
+		t.Fatalf("expected nested-block visibility diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsMissingShorthandValue(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_missing_shorthand.llcontext", `def consume(missing: i64) -> i64:
     return missing

@@ -154,6 +154,12 @@ func (a *Analyzer) lookupVisibleContextBundle(name string) (*ContextBundle, stri
 }
 
 func (a *Analyzer) lookupVisibleParamPack(name string) (*ParamPack, string, bool) {
+	if a != nil && !strings.Contains(name, ".") && len(a.currentLocalParamPackScopes) != 0 {
+		frame := a.currentLocalParamPackScopes[len(a.currentLocalParamPackScopes)-1]
+		if pack, ok := frame[name]; ok {
+			return pack, name, true
+		}
+	}
 	for _, candidate := range a.visibleNameCandidates(name) {
 		if pack, ok := a.paramPacks[candidate]; ok {
 			return pack, candidate, true

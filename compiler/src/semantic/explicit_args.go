@@ -261,9 +261,11 @@ func (a *Analyzer) analyzeArgsScopeStmt(stmt *ast.ArgsScopeStmt) {
 	savedExplicitScopes := a.currentExplicitArgScopes
 	a.currentExplicitArgScopes = append(append([]map[string]ast.Expr(nil), savedExplicitScopes...), cloneExplicitBindings(working))
 	a.currentScope = scope
-	for _, bodyStmt := range originalBody {
-		a.analyzeStmt(bodyStmt)
-	}
+	a.withLocalParamPackFrame(func() {
+		for _, bodyStmt := range originalBody {
+			a.analyzeStmt(bodyStmt)
+		}
+	})
 	a.currentScope = savedScope
 	a.currentExplicitArgScopes = savedExplicitScopes
 }

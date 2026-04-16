@@ -114,6 +114,90 @@ def build(left: i64, width: i64, pair: PairRow, rows: darray[PairRow]) -> i64:
 	}
 }
 
+func TestParseLocalParamsStmt(t *testing.T) {
+	file, errs := parseSourceFile(t, `def build(left: i64) -> i64:
+    params Pair:
+        value: i64 = left
+        width: i64 = 7
+    return consume(use Pair(), width: left)
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	buildDecl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[0])
+	}
+	localParams, ok := buildDecl.Body[0].(*ast.LocalParamsStmt)
+	if !ok {
+		t.Fatalf("expected local params stmt, got %T", buildDecl.Body[0])
+	}
+	if localParams.Name != "Pair" || len(localParams.Params) != 2 {
+		t.Fatalf("expected Pair local params with two fields, got %#v", localParams)
+	}
+	if localParams.Params[0].DefaultValue == nil || localParams.Params[1].DefaultValue == nil {
+		t.Fatalf("expected local params defaults, got %#v", localParams.Params)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"params Pair:",
+		"value: i64 = left",
+		"width: i64 = 7",
+		"return consume(use Pair(), width: left)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestParseBareValueParamPackUse(t *testing.T) {
+	file, errs := parseSourceFile(t, `params Pair:
+    left: i64
+
+def add(use Pair) -> i64:
+    return left
+
+def build(left: i64) -> i64:
+    with args(use Pair, width: left):
+        return add(use Pair)
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	buildDecl, ok := file.Decls[2].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[2])
+	}
+	argsScope, ok := buildDecl.Body[0].(*ast.ArgsScopeStmt)
+	if !ok {
+		t.Fatalf("expected args scope stmt, got %T", buildDecl.Body[0])
+	}
+	if len(argsScope.ParamPacks) != 1 || !argsScope.ParamPacks[0].Bare || len(argsScope.ParamPacks[0].Args) != 0 {
+		t.Fatalf("expected bare args-scope pack use, got %#v", argsScope.ParamPacks)
+	}
+	ret, ok := argsScope.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", argsScope.Body[0])
+	}
+	call, ok := ret.Value.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected call expr, got %T", ret.Value)
+	}
+	if len(call.ParamPacks) != 1 || !call.ParamPacks[0].Bare || len(call.ParamPacks[0].Args) != 0 {
+		t.Fatalf("expected bare call pack use, got %#v", call.ParamPacks)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"with args(use Pair, width: left):",
+		"return add(use Pair)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestParseBraceStructForms(t *testing.T) {
 	file, errs := parseSourceFile(t, `struct Row:
     left: int

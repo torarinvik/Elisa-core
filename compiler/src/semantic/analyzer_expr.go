@@ -471,10 +471,13 @@ func (a *Analyzer) analyzeExprBlock(expr *ast.ExprBlock) Type {
 	}
 	savedScope := a.currentScope
 	a.currentScope = NewScope(savedScope)
-	for _, stmt := range expr.Stmts {
-		a.analyzeStmt(stmt)
-	}
-	result := a.analyzeExpr(expr.Value)
+	var result Type
+	a.withLocalParamPackFrame(func() {
+		for _, stmt := range expr.Stmts {
+			a.analyzeStmt(stmt)
+		}
+		result = a.analyzeExpr(expr.Value)
+	})
 	a.currentScope = savedScope
 	return result
 }

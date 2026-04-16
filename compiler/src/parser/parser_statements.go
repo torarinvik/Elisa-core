@@ -73,6 +73,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikeParallelForStmt() {
 				return p.parseParallelForStmt()
 			}
+		case "params":
+			if p.looksLikeLocalParamsStmt() {
+				return p.parseLocalParamsStmt()
+			}
 		case "open":
 			if p.looksLikeOpenOrViewStmt() {
 				return p.parseOpenStmt()
@@ -139,6 +143,18 @@ func (p *Parser) parseStmt() ast.Stmt {
 	default:
 		return p.parseExprOrAssignStmt()
 	}
+}
+
+func (p *Parser) looksLikeLocalParamsStmt() bool {
+	return p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_COLON
+}
+
+func (p *Parser) parseLocalParamsStmt() *ast.LocalParamsStmt {
+	pos := p.cur().Pos
+	p.expectIdentText("params")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	params := p.parseParamDeclBlock(true)
+	return &ast.LocalParamsStmt{Position: pos, Name: name, Params: params}
 }
 
 func (p *Parser) looksLikePoolStmt() bool {
@@ -764,7 +780,7 @@ func (p *Parser) parseArgsScopeItems() ([]ast.WithArg, []ast.ParamPackUse, []ast
 			if sawArg {
 				p.errorf("args-scope parameter-pack application must appear before ordinary named arguments")
 			}
-			pack := p.parseParamPackUseWithArgs()
+			pack := p.parseValueParamPackUse()
 			packs = append(packs, pack)
 			items = append(items, ast.ArgsScopeItem{Position: pack.Position, Pack: pack, IsPack: true})
 			sawPack = true

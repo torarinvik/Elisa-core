@@ -434,6 +434,11 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 			line += " = " + formatExpr(n.Value)
 		}
 		f.writePrefixedMultiline(level, "", line)
+	case *ast.LocalParamsStmt:
+		f.writeLine(level, "params "+n.Name+":")
+		for _, param := range n.Params {
+			f.writeLine(level+1, formatParamDecl(param))
+		}
 	case *ast.LetDestructureStmt:
 		f.writePrefixedMultiline(level, "", "let "+formatMoveBindPattern(n.Pattern)+" = "+formatExpr(n.Value))
 	case *ast.TupleBindStmt:
@@ -879,6 +884,9 @@ func formatSignatureParamPackUse(pack ast.ParamPackUse) string {
 }
 
 func formatValueParamPackUse(pack ast.ParamPackUse) string {
+	if pack.Bare && len(pack.Args) == 0 {
+		return "use " + pack.Name
+	}
 	parts := make([]string, 0, len(pack.Args))
 	for _, arg := range pack.Args {
 		parts = append(parts, formatNamedArg(arg))

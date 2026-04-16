@@ -1885,6 +1885,32 @@ func TestRunCLIPrintsPostfixCastHookSyntaxInAST(t *testing.T) {
 	}
 }
 
+func TestRunCLICompilesBuiltinPostfixCastWithoutHook(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "builtin_postfix_cast_llvm.llcontext")
+	src := "def via_postfix() -> i64:\n    return 21.i64()\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write builtin postfix cast fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "define i64 @via_postfix(") {
+		t.Fatalf("expected LLVM output to contain via_postfix definition, got:\n%s", output)
+	}
+	if strings.Contains(output, "call i64 @cast__") {
+		t.Fatalf("expected builtin postfix cast to avoid __cast__ hook lowering, got:\n%s", output)
+	}
+}
+
 func TestRunCLICompilesPostfixCastHookToHookCall(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "postfix_cast_hook_llvm.llcontext")
@@ -1960,6 +1986,63 @@ func TestRunCLIRejectsArrowCastWhenOnlyPostfixHookExists(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "invalid cast from Op to i64") {
 		t.Fatalf("expected explicit cast diagnostic, got:\n%s", stderr.String())
+	}
+}
+
+func TestRunCLIRejectsDotCastSyntaxWhenOnlyPostfixHookExists(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "postfix_cast_hook_reject_dot_cast.llcontext")
+	src := "enum Op:\n    Add\n\ndef __cast__(op: Op) -> i64:\n    return 10\n\ndef bad(op: Op) -> i64:\n    return op.cast[i64]\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write dot-cast rejection fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", fixturePath}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected runCLI to fail, got stdout:\n%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "invalid cast from Op to i64") {
+		t.Fatalf("expected explicit .cast[T] diagnostic, got:\n%s", stderr.String())
+	}
+}
+
+func TestRunCLIRejectsDuplicatePostfixCastHooksForSamePair(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "duplicate_postfix_cast_hooks.llcontext")
+	src := "enum Op:\n    Add\n\ndef __cast__(op: Op) -> i64:\n    return 10\n\ndef __cast__(op: Op) -> i64:\n    return 20\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write duplicate cast-hook fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", fixturePath}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected runCLI to fail, got stdout:\n%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "duplicate __cast__ hook for Op -> i64") {
+		t.Fatalf("expected duplicate cast-hook diagnostic, got:\n%s", stderr.String())
+	}
+}
+
+func TestRunCLIRejectsPostfixCastHookWithWrongArity(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "invalid_postfix_cast_hook_arity.llcontext")
+	src := "enum Op:\n    Add\n\ndef __cast__(op: Op, extra: i64) -> i64:\n    return extra\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write invalid cast-hook fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", fixturePath}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected runCLI to fail, got stdout:\n%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "must take exactly 1 parameter, got 2") {
+		t.Fatalf("expected cast-hook arity diagnostic, got:\n%s", stderr.String())
 	}
 }
 

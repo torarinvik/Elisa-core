@@ -61,6 +61,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.bindActivePackedStoreType(bindingType)
 		}
 		a.consumeAffineValueExpr(n.Value, bindingType, "move into local "+strconvQuote(n.Name))
+	case *ast.LocalParamsStmt:
+		a.analyzeLocalParamsStmt(n)
 	case *ast.LetDestructureStmt:
 		a.analyzeLetDestructureStmt(n)
 	case *ast.TupleBindStmt:
@@ -5962,19 +5964,17 @@ func (a *Analyzer) reportNonExhaustiveStringMatchExpr(pos lexer.Pos, hasWildcard
 
 func (a *Analyzer) analyzeBlock(stmts []ast.Stmt) {
 	saved := a.currentScope
-	a.currentScope = NewScope(saved)
-	for _, stmt := range stmts {
-		a.analyzeStmt(stmt)
-	}
-	a.currentScope = saved
+	a.analyzeBlockInScope(stmts, NewScope(saved))
 }
 
 func (a *Analyzer) analyzeBlockInScope(stmts []ast.Stmt, scope *Scope) {
 	saved := a.currentScope
 	a.currentScope = scope
-	for _, stmt := range stmts {
-		a.analyzeStmt(stmt)
-	}
+	a.withLocalParamPackFrame(func() {
+		for _, stmt := range stmts {
+			a.analyzeStmt(stmt)
+		}
+	})
 	a.currentScope = saved
 }
 

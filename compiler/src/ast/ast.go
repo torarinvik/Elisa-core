@@ -270,6 +270,7 @@ type ParamPackUse struct {
 	Position lexer.Pos
 	Name     string
 	Args     []WithArg
+	Bare     bool
 }
 
 type WithBundleUse struct {
@@ -994,6 +995,12 @@ type VarDeclStmt struct {
 	Value    Expr
 }
 
+type LocalParamsStmt struct {
+	Position lexer.Pos
+	Name     string
+	Params   []ParamDecl
+}
+
 type LetDestructureStmt struct {
 	Position lexer.Pos
 	Pattern  *MoveBindStructPattern
@@ -1142,11 +1149,11 @@ type ArgsScopeItem struct {
 }
 
 type ArgsScopeStmt struct {
-	Position  lexer.Pos
-	Args      []WithArg
+	Position   lexer.Pos
+	Args       []WithArg
 	ParamPacks []ParamPackUse
-	ItemOrder []ArgsScopeItem
-	Body      []Stmt
+	ItemOrder  []ArgsScopeItem
+	Body       []Stmt
 }
 
 type CascadeStmt struct {
@@ -1347,17 +1354,17 @@ func (n *FieldExpr) Pos() lexer.Pos        { return n.Position }
 func (n *ShorthandMemberExpr) Pos() lexer.Pos {
 	return n.Position
 }
-func (n *IndexExpr) Pos() lexer.Pos       { return n.Position }
-func (n *SliceExpr) Pos() lexer.Pos       { return n.Position }
-func (n *ListLitExpr) Pos() lexer.Pos     { return n.Position }
-func (n *CastExpr) Pos() lexer.Pos        { return n.Position }
-func (n *CascadeExpr) Pos() lexer.Pos     { return n.Position }
-func (n *LambdaExpr) Pos() lexer.Pos      { return n.Position }
-func (n *SizeofExpr) Pos() lexer.Pos      { return n.Position }
-func (n *TernaryExpr) Pos() lexer.Pos     { return n.Position }
-func (n *AddrOfExpr) Pos() lexer.Pos      { return n.Position }
-func (n *SpecializeExpr) Pos() lexer.Pos  { return n.Position }
-func (n *StructLitExpr) Pos() lexer.Pos   { return n.Position }
+func (n *IndexExpr) Pos() lexer.Pos      { return n.Position }
+func (n *SliceExpr) Pos() lexer.Pos      { return n.Position }
+func (n *ListLitExpr) Pos() lexer.Pos    { return n.Position }
+func (n *CastExpr) Pos() lexer.Pos       { return n.Position }
+func (n *CascadeExpr) Pos() lexer.Pos    { return n.Position }
+func (n *LambdaExpr) Pos() lexer.Pos     { return n.Position }
+func (n *SizeofExpr) Pos() lexer.Pos     { return n.Position }
+func (n *TernaryExpr) Pos() lexer.Pos    { return n.Position }
+func (n *AddrOfExpr) Pos() lexer.Pos     { return n.Position }
+func (n *SpecializeExpr) Pos() lexer.Pos { return n.Position }
+func (n *StructLitExpr) Pos() lexer.Pos  { return n.Position }
 func (n *RecordUpdateExpr) Pos() lexer.Pos {
 	return n.Position
 }
@@ -1399,6 +1406,7 @@ func (n *AssignStmt) Pos() lexer.Pos             { return n.Position }
 func (n *AugAssignStmt) Pos() lexer.Pos          { return n.Position }
 func (n *AsRefAssignStmt) Pos() lexer.Pos        { return n.Position }
 func (n *VarDeclStmt) Pos() lexer.Pos            { return n.Position }
+func (n *LocalParamsStmt) Pos() lexer.Pos        { return n.Position }
 func (n *LetDestructureStmt) Pos() lexer.Pos     { return n.Position }
 func (n *TupleBindStmt) Pos() lexer.Pos          { return n.Position }
 func (n *MoveBindStmt) Pos() lexer.Pos           { return n.Position }
@@ -1534,6 +1542,7 @@ func (*AssignStmt) nodeTag()                {}
 func (*AugAssignStmt) nodeTag()             {}
 func (*AsRefAssignStmt) nodeTag()           {}
 func (*VarDeclStmt) nodeTag()               {}
+func (*LocalParamsStmt) nodeTag()           {}
 func (*LetDestructureStmt) nodeTag()        {}
 func (*TupleBindStmt) nodeTag()             {}
 func (*MoveBindStmt) nodeTag()              {}
@@ -1673,6 +1682,7 @@ func (*AssignStmt) stmtTag()            {}
 func (*AugAssignStmt) stmtTag()         {}
 func (*AsRefAssignStmt) stmtTag()       {}
 func (*VarDeclStmt) stmtTag()           {}
+func (*LocalParamsStmt) stmtTag()       {}
 func (*LetDestructureStmt) stmtTag()    {}
 func (*TupleBindStmt) stmtTag()         {}
 func (*MoveBindStmt) stmtTag()          {}

@@ -45,6 +45,64 @@ func (a *Analyzer) collectParamPacks(decls []scopedDecl) {
 	}
 }
 
+func (a *Analyzer) currentLocalParamPackFrame() map[string]*ParamPack {
+	if a == nil || len(a.currentLocalParamPackScopes) == 0 {
+		return nil
+	}
+	return a.currentLocalParamPackScopes[len(a.currentLocalParamPackScopes)-1]
+}
+
+func (a *Analyzer) withLocalParamPackFrame(fn func()) {
+	if a == nil {
+		if fn != nil {
+			fn()
+		}
+		return
+	}
+	savedLen := len(a.currentLocalParamPackScopes)
+	a.currentLocalParamPackScopes = append(a.currentLocalParamPackScopes, map[string]*ParamPack{})
+	defer func() {
+		a.currentLocalParamPackScopes = a.currentLocalParamPackScopes[:savedLen]
+	}()
+	if fn != nil {
+		fn()
+	}
+}
+
+func (a *Analyzer) analyzeLocalParamsStmt(stmt *ast.LocalParamsStmt) {
+	if a == nil || stmt == nil {
+		return
+	}
+	frame := a.currentLocalParamPackFrame()
+	if frame == nil {
+		return
+	}
+	if _, exists := frame[stmt.Name]; exists {
+		a.errorf(stmt.Position, "duplicate local parameter pack %q in the same block", stmt.Name)
+		return
+	}
+	pack := &ParamPack{
+		Name:      stmt.Name,
+		Namespace: a.currentNamespace,
+		Usings:    append([]string(nil), a.currentUsings...),
+		Fields:    make([]ParamPackField, 0, len(stmt.Params)),
+	}
+	seen := map[string]bool{}
+	for _, param := range stmt.Params {
+		resolvedType := a.resolveType(param.Type)
+		if seen[param.Name] {
+			a.errorf(param.Position, "duplicate parameter %q in local parameter pack %q", param.Name, stmt.Name)
+			continue
+		}
+		seen[param.Name] = true
+		if param.DefaultValue != nil && cloneDefaultArgExpr(param.DefaultValue) == nil {
+			a.errorf(param.DefaultValue.Pos(), "default value for parameter %q on local parameter pack %q uses unsupported syntax in v1", param.Name, stmt.Name)
+		}
+		pack.Fields = append(pack.Fields, ParamPackField{Name: param.Name, Type: resolvedType, Mutable: param.Mutable, Decl: param})
+	}
+	frame[stmt.Name] = pack
+}
+
 func orderedExplicitSigItems(packs []ast.ParamPackUse, params []ast.ParamDecl, order []ast.ParamSigItem) []ast.ParamSigItem {
 	if len(order) != 0 {
 		return append([]ast.ParamSigItem(nil), order...)

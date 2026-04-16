@@ -208,9 +208,11 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 			a.errorf(expr.BodyExpr.Pos(), "return type expects %s, got %s", a.matchReturnType(bodyType).String(), bodyType.String())
 		}
 	} else {
-		for _, stmt := range expr.Body {
-			a.analyzeStmt(stmt)
-		}
+		a.withLocalParamPackFrame(func() {
+			for _, stmt := range expr.Body {
+				a.analyzeStmt(stmt)
+			}
+		})
 		if !isVoidType(fnType.Return) && !blockDefinitelyExits(expr.Body) {
 			a.errorf(expr.Pos(), "lambda body may reach the end without returning %s", fnType.Return.String())
 		}

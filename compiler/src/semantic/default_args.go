@@ -308,6 +308,18 @@ func cloneDefaultArgStmt(stmt ast.Stmt) ast.Stmt {
 			return nil
 		}
 		return &ast.VarDeclStmt{Position: n.Position, Name: n.Name, Mutable: n.Mutable, Type: n.Type, Value: value}
+	case *ast.LocalParamsStmt:
+		params := append([]ast.ParamDecl(nil), n.Params...)
+		for i := range params {
+			if params[i].DefaultValue == nil {
+				continue
+			}
+			params[i].DefaultValue = cloneDefaultArgExpr(params[i].DefaultValue)
+			if params[i].DefaultValue == nil {
+				return nil
+			}
+		}
+		return &ast.LocalParamsStmt{Position: n.Position, Name: n.Name, Params: params}
 	default:
 		return nil
 	}
@@ -353,7 +365,7 @@ func cloneDefaultParamPackUses(packs []ast.ParamPackUse) []ast.ParamPackUse {
 		if len(pack.Args) != 0 && args == nil {
 			return nil
 		}
-		cloned = append(cloned, ast.ParamPackUse{Position: pack.Position, Name: pack.Name, Args: args})
+		cloned = append(cloned, ast.ParamPackUse{Position: pack.Position, Name: pack.Name, Args: args, Bare: pack.Bare})
 	}
 	return cloned
 }
