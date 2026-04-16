@@ -143,6 +143,39 @@ Notes:
 - `sample` remains available explicitly with `--modes sample` or as part of a
   custom comma-separated mode list.
 
+## Reference Parse Comparison
+
+To compare llcontext parse throughput against the checked-in C reference parser
+backed by `onelua.c`, run:
+
+```bash
+python3 ./compiler/scripts/run_lua_frontend_reference_benchmark.py
+```
+
+To also write a machine-readable report:
+
+```bash
+python3 ./compiler/scripts/run_lua_frontend_reference_benchmark.py --json-out /tmp/lua-reference-benchmark.json
+```
+
+Useful options:
+
+- `--parse-iterations 20`
+- `--repeats 3`
+- `--skip-real-corpus`
+- `--opt-level -O3`
+- `--keep-temp`
+
+Notes:
+
+- This comparison is intentionally parse-only. The llcontext-only semantic
+  modes `env`, `closure`, `label`, and `analysis` do not have direct C
+  equivalents.
+- The script benchmarks the same synthetic input and curated real-Lua corpus
+  manifest used by the llcontext storage benchmark.
+- Aggregate output is reported over inputs that both implementations accept in
+  parse mode, so unsupported llcontext parse inputs are recorded as skips.
+
 ## Profile Bundle
 
 To generate a profiling bundle with benchmark logs and, optionally,

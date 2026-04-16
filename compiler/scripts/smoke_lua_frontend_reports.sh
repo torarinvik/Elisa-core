@@ -39,6 +39,7 @@ fi
 
 BENCH_JSON="$OUT_DIR/bench_multi.json"
 DIFF_JSON="$OUT_DIR/diff.json"
+REFERENCE_JSON="$OUT_DIR/reference_bench.json"
 PROFILE_DIR="$OUT_DIR/profile"
 BASELINE_DIR="$OUT_DIR/baseline"
 
@@ -56,6 +57,15 @@ BASELINE_DIR="$OUT_DIR/baseline"
     $KEEP_TEMP_ARGS \
     --json-out "$DIFF_JSON" \
     > "$OUT_DIR/diff.log" 2>&1
+
+# shellcheck disable=SC2086
+"$PYTHON_BIN" "$SCRIPT_DIR/run_lua_frontend_reference_benchmark.py" \
+    --skip-real-corpus \
+    --parse-iterations 1 \
+    --repeats 1 \
+    $KEEP_TEMP_ARGS \
+    --json-out "$REFERENCE_JSON" \
+    > "$OUT_DIR/reference_bench.log" 2>&1
 
 # shellcheck disable=SC2086
 bash "$SCRIPT_DIR/profile_lua_frontend.sh" \
@@ -87,6 +97,7 @@ bash "$SCRIPT_DIR/capture_lua_frontend_baseline.sh" \
 for required in \
     "$BENCH_JSON" \
     "$DIFF_JSON" \
+    "$REFERENCE_JSON" \
     "$PROFILE_DIR/benchmark.json" \
     "$PROFILE_DIR/differential.json" \
     "$PROFILE_DIR/metadata.json" \
@@ -104,5 +115,6 @@ done
 
 echo "smoke_benchmark_json=$BENCH_JSON"
 echo "smoke_differential_json=$DIFF_JSON"
+echo "smoke_reference_benchmark_json=$REFERENCE_JSON"
 echo "smoke_profile_dir=$PROFILE_DIR"
 echo "smoke_baseline_dir=$BASELINE_DIR"

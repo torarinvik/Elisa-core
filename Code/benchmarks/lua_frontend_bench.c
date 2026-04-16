@@ -144,7 +144,8 @@ static int64_t run_mode(BenchmarkMode mode, const uint8_t *input, size_t input_l
     switch (mode) {
     case BENCH_PARSE:
     case BENCH_CHECKSUM:
-        return lua_frontend_parse_checksum_with_len((uint8_t *)input, input_len);
+        (void)input_len;
+        return lua_frontend_parse_checksum((uint8_t *)input);
     case BENCH_LEXER:
         return lua_frontend_lexer_checksum_with_len((uint8_t *)input, input_len);
     case BENCH_SAMPLE:
@@ -163,6 +164,26 @@ static int64_t run_mode(BenchmarkMode mode, const uint8_t *input, size_t input_l
         return lua_frontend_checked_status((uint8_t *)input);
     }
     return -1;
+}
+
+static int mode_accepts(BenchmarkMode mode, const uint8_t *input, size_t input_len, int64_t warmup_value) {
+    switch (mode) {
+    case BENCH_SAMPLE:
+        return 1;
+    case BENCH_PARSE:
+    case BENCH_CHECKSUM:
+        return input_len == 0 || lua_frontend_parse_stmt_count((uint8_t *)input) > 0;
+    case BENCH_LEXER:
+    case BENCH_ENV:
+    case BENCH_CLOSURE:
+    case BENCH_LABEL:
+    case BENCH_ANALYSIS:
+        return warmup_value >= 0;
+    case BENCH_CONTROL:
+    case BENCH_CHECKED:
+        return 1;
+    }
+    return 0;
 }
 
 int main(int argc, char **argv) {
@@ -192,7 +213,7 @@ int main(int argc, char **argv) {
     }
 
     int64_t warmup_checksum = run_mode(mode, input, input_len);
-    if ((mode == BENCH_PARSE || mode == BENCH_CHECKSUM || mode == BENCH_LEXER || mode == BENCH_ENV || mode == BENCH_CLOSURE || mode == BENCH_LABEL || mode == BENCH_ANALYSIS) && warmup_checksum < 0) {
+    if (!mode_accepts(mode, input, input_len, warmup_checksum)) {
         fprintf(stderr, "%s parser rejected %s\n", benchmark_mode_name(mode), path);
         free(input);
         return 1;
