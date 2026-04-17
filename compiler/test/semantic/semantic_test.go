@@ -10131,6 +10131,74 @@ func TestAnalyzeFormatsSafeChainDViewUsingSurfaceNames(t *testing.T) {
 	}
 }
 
+func TestAnalyzeFormatsConstEnumStorageSViewUsingSurfaceNames(t *testing.T) {
+	src := `const enum Tok of sview:
+	Value = 1
+`
+	_, errs := parseAndAnalyze(t, "const_enum_sview_storage_surface_diagnostic.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "const enum \"Tok\" storage type must be an explicit integer type, got sview") {
+		t.Fatalf("expected surface sview const-enum storage diagnostic, got:\n%s", all)
+	}
+	if strings.Contains(all, "StringView") {
+		t.Fatalf("expected StringView to stay out of user-facing analyzer diagnostics, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeFormatsGuardNonnullSViewUsingSurfaceNames(t *testing.T) {
+	src := `@guard_nonnull(text)
+def has_text(text: sview) -> bool:
+	return true
+`
+	_, errs := parseAndAnalyze(t, "guard_nonnull_sview_surface_diagnostic.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "@guard_nonnull on function \"has_text\" requires a nullable reference or optional parameter, got sview") {
+		t.Fatalf("expected surface sview guard_nonnull diagnostic, got:\n%s", all)
+	}
+	if strings.Contains(all, "StringView") {
+		t.Fatalf("expected StringView to stay out of user-facing annotation diagnostics, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeFormatsInterfaceBoundTypeArgSViewUsingSurfaceNames(t *testing.T) {
+	src := `struct BuilderTag:
+	tag: int
+
+interface Builder:
+	type State
+	def state() -> State
+
+impl Builder for BuilderTag:
+	type State = int
+
+	def state() -> int:
+		return 1
+
+def build[B: Builder]() -> B.State:
+	return B.state()
+
+def bad() -> int:
+	return build[sview]()
+`
+	_, errs := parseAndAnalyze(t, "interface_bound_sview_type_arg_surface_diagnostic.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "type argument \"sview\" does not implement interface \"Builder\"") {
+		t.Fatalf("expected surface sview interface-bound diagnostic, got:\n%s", all)
+	}
+	if strings.Contains(all, "StringView") {
+		t.Fatalf("expected StringView to stay out of user-facing generic diagnostics, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeDStrRuntimeBridgeWorksBothDirections(t *testing.T) {
 	src := `def take_raw(text: any u8&) -> void:
 	pass

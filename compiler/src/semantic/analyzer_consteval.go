@@ -35,7 +35,7 @@ func (a *Analyzer) checkConstantArrayIndexBounds(arr *ArrayType, indexExpr ast.E
 		return
 	}
 	if value.Int < 0 || value.Int >= arr.ConstSize {
-		a.errorf(indexExpr.Pos(), "constant index %d out of bounds for %s", value.Int, arr.String())
+		a.errorf(indexExpr.Pos(), "constant index %d out of bounds for %s", value.Int, arr)
 	}
 }
 

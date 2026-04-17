@@ -446,7 +446,7 @@ def json_string_matches_literal(source: any u8&, source_offset: usize, source_le
     if source_len < 2:
         return false
     if not json_string_has_escape(source, source_offset, source_len):
-        return StringView(source + source_offset + 1, (source_len - 2).i64()) == literal
+        return string_view(source + source_offset + 1, 0, (source_len - 2).i64()) == literal
 
     literal_len: usize = runtime_strlen(literal)
     pos: mutable usize = source_offset + 1
@@ -1117,8 +1117,8 @@ def json_parse_value(cursor: mutable any JsonCursor&) -> i64:
     return json_parse_value_after_ws(cursor)
 
 
-def json_empty_view() -> StringView:
-    return StringView("".cast[any u8&], 0)
+def json_empty_view() -> sview:
+    return string_view("".cast[any u8&], 0, 0)
 
 
 def json_invalid_number_value() -> JsonNumberValue:
@@ -1234,30 +1234,33 @@ def json_ast_number_kind_code(kind: JsonNumberKind) -> i64:
     return -1
 
 
-def json_ast_source_view_with_len(source: any u8&, source_len: usize, node: JsonNode, store: JsonNode.Store[Local]) -> StringView:
+def json_ast_source_view_with_len(source: any u8&, source_len: usize, node: JsonNode, store: JsonNode.Store[Local]) -> sview:
     text_lexeme: JsonLexemeResult = json_ast_text_lexeme(source, source_len, node, store)
     if text_lexeme.checksum >= 0:
-        return StringView(source + text_lexeme.source_offset, text_lexeme.source_len.i64())
+        start: i64 = text_lexeme.source_offset.i64()
+        return string_view(source, start, start + text_lexeme.source_len.i64())
     number_lexeme: JsonLexemeResult = json_ast_number_lexeme(source, source_len, node, store)
     if number_lexeme.checksum >= 0:
-        return StringView(source + number_lexeme.source_offset, number_lexeme.source_len.i64())
+        start: i64 = number_lexeme.source_offset.i64()
+        return string_view(source, start, start + number_lexeme.source_len.i64())
     return json_empty_view()
 
 
-def json_ast_source_view(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> StringView:
+def json_ast_source_view(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> sview:
     return json_ast_source_view_with_len(source, runtime_strlen(source), node, store)
 
 
-def json_ast_string_view_with_len(source: any u8&, source_len: usize, node: JsonNode, store: JsonNode.Store[Local]) -> StringView:
+def json_ast_string_view_with_len(source: any u8&, source_len: usize, node: JsonNode, store: JsonNode.Store[Local]) -> sview:
     lexeme: JsonLexemeResult = json_ast_text_lexeme(source, source_len, node, store)
     if lexeme.checksum >= 0:
         if lexeme.source_len < 2:
             return json_empty_view()
-        return StringView(source + lexeme.source_offset + 1, (lexeme.source_len - 2).i64())
+        start: i64 = lexeme.source_offset.i64() + 1
+        return string_view(source, start, start + (lexeme.source_len - 2).i64())
     return json_empty_view()
 
 
-def json_ast_string_view(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> StringView:
+def json_ast_string_view(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> sview:
     return json_ast_string_view_with_len(source, runtime_strlen(source), node, store)
 
 
@@ -1327,14 +1330,15 @@ def json_ast_string_copy(source: any u8&, node: JsonNode, out: any u8&, capacity
     return json_ast_string_copy_with_len(source, runtime_strlen(source), node, out, capacity, store)
 
 
-def json_ast_number_view_with_len(source: any u8&, source_len: usize, node: JsonNode, store: JsonNode.Store[Local]) -> StringView:
+def json_ast_number_view_with_len(source: any u8&, source_len: usize, node: JsonNode, store: JsonNode.Store[Local]) -> sview:
     lexeme: JsonLexemeResult = json_ast_number_lexeme(source, source_len, node, store)
     if lexeme.checksum >= 0:
-        return StringView(source + lexeme.source_offset, lexeme.source_len.i64())
+        start: i64 = lexeme.source_offset.i64()
+        return string_view(source, start, start + lexeme.source_len.i64())
     return json_empty_view()
 
 
-def json_ast_number_view(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> StringView:
+def json_ast_number_view(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> sview:
     return json_ast_number_view_with_len(source, runtime_strlen(source), node, store)
 
 

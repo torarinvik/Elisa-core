@@ -272,8 +272,7 @@ def frontend_tokenize_test_source(a: mutable any Arena&, source: any u8&) -> dar
 
 
 def frontend_expect_lookup_keyword(text: static u8&, expected: FrontendTokenKind) -> bool:
-    view: StringView = StringView(text.cast[any u8&], runtime_strlen(text.cast[any u8&]).i64())
-    return frontend_kind_eq(frontend_lookup_keyword(view), expected)
+    return frontend_kind_eq(frontend_lookup_keyword(string_view(text.cast[any u8&], 0, runtime_strlen(text.cast[any u8&]).i64())), expected)
 
 
 def frontend_expect_lookup_keyword_entries(entries: any FrontendKeywordEntry&, count: usize) -> bool:

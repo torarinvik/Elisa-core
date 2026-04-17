@@ -898,7 +898,7 @@ func (a *Analyzer) populateConstEnumMembers(decls []scopedDecl) {
 		storageType := a.resolveType(constEnumDecl.Storage)
 		constEnumType.Storage = storageType
 		if !IsIntegralStorageType(storageType) {
-			a.errorf(constEnumDecl.Storage.Pos(), "const enum %q storage type must be an explicit integer type, got %s", constEnumDecl.Name, storageType.String())
+			a.errorf(constEnumDecl.Storage.Pos(), "const enum %q storage type must be an explicit integer type, got %s", constEnumDecl.Name, storageType)
 		}
 		members := make([]*ConstEnumMember, 0, len(constEnumDecl.Members))
 		nextValue := int64(0)
@@ -1492,7 +1492,7 @@ func (a *Analyzer) validateStructDerivedStates(stDecl *ast.StructDecl, st *Struc
 		}
 		condType := a.analyzeExpr(derived.Condition)
 		if !IsBoolType(condType) {
-			a.errorf(derived.Condition.Pos(), "derived state rule for %q must evaluate to bool, got %s", derived.StateName, condType.String())
+			a.errorf(derived.Condition.Pos(), "derived state rule for %q must evaluate to bool, got %s", derived.StateName, condType)
 			continue
 		}
 		st.DerivedStates = append(st.DerivedStates, StructDerivedState{Name: derived.StateName, Condition: derived.Condition})
@@ -1577,7 +1577,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				declType := a.resolveType(n.Type)
 				if a.containsAffineHandleValues(declType, map[string]bool{}) {
-					a.errorf(n.Pos(), "global %q cannot store affine handle values of type %s", n.Name, declType.String())
+					a.errorf(n.Pos(), "global %q cannot store affine handle values of type %s", n.Name, declType)
 				}
 				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolGlobal, Type: declType, Node: n, Mutable: n.Mutable}, n.Pos())
 			case *ast.FuncDecl:
@@ -1661,7 +1661,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				declType := a.resolveType(n.Type)
 				if a.containsAffineHandleValues(declType, map[string]bool{}) {
-					a.errorf(n.Pos(), "extern var %q cannot store affine handle values of type %s", n.Name, declType.String())
+					a.errorf(n.Pos(), "extern var %q cannot store affine handle values of type %s", n.Name, declType)
 				}
 				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolExternVar, Type: declType, Node: n, Mutable: true}, n.Pos())
 			case *ast.TreeDecl:
@@ -1756,7 +1756,7 @@ func (a *Analyzer) registerCastHook(namespace string, decl *ast.FuncDecl, fnType
 		a.castHooksByName[qualifiedName] = hooks
 	}
 	if existing, ok := hooks[key]; ok {
-		a.errorf(decl.Pos(), "duplicate __cast__ hook for %s -> %s (already defined as %q)", fnType.Params[0].String(), fnType.Return.String(), existing.Name)
+		a.errorf(decl.Pos(), "duplicate __cast__ hook for %s -> %s (already defined as %q)", fnType.Params[0], fnType.Return, existing.Name)
 		return
 	}
 	hooks[key] = sym
@@ -2186,7 +2186,7 @@ func (a *Analyzer) applyExternBorrowsReturnFieldAnnotation(fn *ast.ExternFuncDec
 		return
 	}
 	if _, ok := a.resolvedStructFields(fnType.Return); !ok {
-		a.errorf(annotation.Position, "@borrows_return_field on extern function %q requires a concrete struct return type, got %s", fn.Name, fnType.Return.String())
+		a.errorf(annotation.Position, "@borrows_return_field on extern function %q requires a concrete struct return type, got %s", fn.Name, fnType.Return)
 		return
 	}
 	for i := 0; i < len(annotation.Args); i += 2 {
@@ -2258,7 +2258,7 @@ func (a *Analyzer) applyExternBorrowsReturnFieldRebasedAnnotation(fn *ast.Extern
 		return
 	}
 	if _, ok := a.resolvedStructFields(fnType.Return); !ok {
-		a.errorf(annotation.Position, "@borrows_return_field_rebased on extern function %q requires a concrete struct return type, got %s", fn.Name, fnType.Return.String())
+		a.errorf(annotation.Position, "@borrows_return_field_rebased on extern function %q requires a concrete struct return type, got %s", fn.Name, fnType.Return)
 		return
 	}
 	for i := 0; i < len(annotation.Args); i += 2 {
@@ -3277,11 +3277,11 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 		return true
 	}
 	if len(signature.TypeParams) > 0 || len(signature.RegionParams) > 0 || len(signature.ShapeParams) > 0 {
-		a.errorf(annotation.Position, "@%s function %q must not have type or shape parameters; got %s", annotation.Name, fn.Name, signature.String())
+		a.errorf(annotation.Position, "@%s function %q must not have type or shape parameters; got %s", annotation.Name, fn.Name, signature)
 		return false
 	}
 	if !annotationAllowsDeclaredPermissions(annotation.Name, signature) {
-		a.errorf(annotation.Position, "@%s function %q must not require permissions; got %s", annotation.Name, fn.Name, signature.String())
+		a.errorf(annotation.Position, "@%s function %q must not require permissions; got %s", annotation.Name, fn.Name, signature)
 		return false
 	}
 	if signature.Variadic {
@@ -3289,13 +3289,13 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 		return false
 	}
 	if len(signature.Params) > 0 {
-		a.errorf(annotation.Position, "@%s function %q must not take parameters; got %s", annotation.Name, fn.Name, signature.String())
+		a.errorf(annotation.Position, "@%s function %q must not take parameters; got %s", annotation.Name, fn.Name, signature)
 		return false
 	}
 	switch annotation.Name {
 	case "test", "bench":
 		if !isVoidType(signature.Return) {
-			a.errorf(annotation.Position, "@%s function %q must return void, got %s", annotation.Name, fn.Name, signature.Return.String())
+			a.errorf(annotation.Position, "@%s function %q must return void, got %s", annotation.Name, fn.Name, signature.Return)
 			return false
 		}
 	}
@@ -3304,7 +3304,7 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 
 func (a *Analyzer) validateFunctionGuardSignature(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) bool {
 	if signature.Return == nil || !IsBoolType(signature.Return) {
-		a.errorf(annotation.Position, "@%s function %q must return bool, got %s", annotation.Name, fn.Name, signature.Return.String())
+		a.errorf(annotation.Position, "@%s function %q must return bool, got %s", annotation.Name, fn.Name, signature.Return)
 		return false
 	}
 	if signature.Variadic {
@@ -3312,7 +3312,7 @@ func (a *Analyzer) validateFunctionGuardSignature(annotation ast.Annotation, fn 
 		return false
 	}
 	if len(signature.Permissions) != 0 {
-		a.errorf(annotation.Position, "@%s function %q must not require permissions; got %s", annotation.Name, fn.Name, signature.String())
+		a.errorf(annotation.Position, "@%s function %q must not require permissions; got %s", annotation.Name, fn.Name, signature)
 		return false
 	}
 	return true
@@ -3332,7 +3332,7 @@ func (a *Analyzer) validateFunctionGuardNonNullAnnotation(annotation ast.Annotat
 		return false
 	}
 	if !guardNonNullParamType(signature.Params[paramIndex]) {
-		a.errorf(annotation.Position, "@guard_nonnull on function %q requires a nullable reference or optional parameter, got %s", fn.Name, signature.Params[paramIndex].String())
+		a.errorf(annotation.Position, "@guard_nonnull on function %q requires a nullable reference or optional parameter, got %s", fn.Name, signature.Params[paramIndex])
 		return false
 	}
 	return true
@@ -3376,7 +3376,7 @@ func (a *Analyzer) validateFunctionGuardVariantAnnotation(annotation ast.Annotat
 		}
 		paramEnum, _, ok := resolveMatchableEnumType(signature.Params[paramIndex])
 		if !ok || paramEnum == nil || !paramEnum.Packed {
-			a.errorf(annotation.Position, "@guard_variant on function %q requires a packed enum or tree-category parameter, got %s", fn.Name, signature.Params[paramIndex].String())
+			a.errorf(annotation.Position, "@guard_variant on function %q requires a packed enum or tree-category parameter, got %s", fn.Name, signature.Params[paramIndex])
 			return false
 		}
 		if paramEnum.Name != variantBase.Name {
@@ -3393,7 +3393,7 @@ func (a *Analyzer) validateFunctionGuardVariantAnnotation(annotation ast.Annotat
 		}
 		paramTree, _, ok := resolveMatchableTreeCategoryType(signature.Params[paramIndex])
 		if !ok || paramTree == nil {
-			a.errorf(annotation.Position, "@guard_variant on function %q requires a packed enum or tree-category parameter, got %s", fn.Name, signature.Params[paramIndex].String())
+			a.errorf(annotation.Position, "@guard_variant on function %q requires a packed enum or tree-category parameter, got %s", fn.Name, signature.Params[paramIndex])
 			return false
 		}
 		if paramTree.Name != variantBase.Name {
@@ -3581,7 +3581,7 @@ func (a *Analyzer) validateCurrentFuncPoststate(poststate FuncPoststate) {
 			return
 		}
 		if !SameType(currentTarget, originalTarget) {
-			a.errorf(poststate.Position, "cannot prove ensures %s => preserve on function %q; current poststate is %s", targetName, a.currentFuncDecl.Name, currentTarget.String())
+			a.errorf(poststate.Position, "cannot prove ensures %s => preserve on function %q; current poststate is %s", targetName, a.currentFuncDecl.Name, currentTarget)
 		}
 	case FuncPoststateKindNamedState:
 		actualTarget, ok := poststateNamedStateCurrentType(currentTarget)
@@ -3597,7 +3597,7 @@ func (a *Analyzer) validateCurrentFuncPoststate(poststate FuncPoststate) {
 		desired := newNamedStateType(base.Name, base.NamedStateCases, poststate.StateCases)
 		actualState, ok := namedStateCurrentArg(actualTarget)
 		if desired == nil || !ok || actualState == nil || !namedStateTypeAssignable(desired, actualState) {
-			a.errorf(poststate.Position, "cannot prove ensures %s => %s on function %q; current poststate is %s", targetName, strings.Join(poststate.StateCases, " | "), a.currentFuncDecl.Name, actualTarget.String())
+			a.errorf(poststate.Position, "cannot prove ensures %s => %s on function %q; current poststate is %s", targetName, strings.Join(poststate.StateCases, " | "), a.currentFuncDecl.Name, actualTarget)
 		}
 	case FuncPoststateKindRefState:
 		actualRef, ok := poststateRefTargetType(currentTarget)
@@ -3606,7 +3606,7 @@ func (a *Analyzer) validateCurrentFuncPoststate(poststate FuncPoststate) {
 			return
 		}
 		if !refStateAssignable(poststate.RefState, actualRef.State) {
-			a.errorf(poststate.Position, "cannot prove ensures %s => %s on function %q; current poststate is %s", targetName, ast.RefStateMarker(ast.RefState(poststate.RefState)), a.currentFuncDecl.Name, currentTarget.String())
+			a.errorf(poststate.Position, "cannot prove ensures %s => %s on function %q; current poststate is %s", targetName, ast.RefStateMarker(ast.RefState(poststate.RefState)), a.currentFuncDecl.Name, currentTarget)
 		}
 	}
 }
