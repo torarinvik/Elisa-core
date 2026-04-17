@@ -16,7 +16,7 @@ def assert_deque_i64_value(d: any Deque[i64]&, index: usize, expected: i64) can[
 def deque_basic_smoke() -> void can[Memory.Allocate, Memory.Release, Abort.Panic]:
     arena: mutable Arena = zeroed
     defer block:
-        arena_free((&arena).cast[any Arena&]) can Memory.Release
+        arena_free((&arena).cast[any Arena&]) can Memory.Release, Abort.Panic
 
     d: mutable Deque[i64] = deque_i64_make_with_capacity((&arena).cast[any Arena&], 2)
 
@@ -89,7 +89,7 @@ def deque_wraparound_smoke() -> void can[Abort.Panic]:
 def deque_resize_smoke() -> void can[Memory.Allocate, Memory.Release, Abort.Panic]:
     arena: mutable Arena = zeroed
     defer block:
-        arena_free((&arena).cast[any Arena&]) can Memory.Release
+        arena_free((&arena).cast[any Arena&]) can Memory.Release, Abort.Panic
 
     buffer: i64[4] = zeroed
     d: mutable Deque[i64] = deque_i64_make_buffer((&buffer[0]).cast[any i64&], 4)

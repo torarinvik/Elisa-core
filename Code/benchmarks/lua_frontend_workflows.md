@@ -123,7 +123,7 @@ python3 ./compiler/scripts/run_lua_frontend_storage_benchmark.py --json-out /tmp
 
 Useful options:
 
-- `--modes parse,metrics,checksum,lexer,env,closure,label,analysis`
+- `--modes parse,metrics,checksum,lexer,env,closure,label,analysis,checked`
 - `--parallel-workers 4`
 - `--parse-iterations 20`
 - `--sample-iterations 5000`
@@ -142,6 +142,7 @@ Supported modes:
 - `closure`
 - `label`
 - `analysis`
+- `checked`
 
 Notes:
 
@@ -169,8 +170,46 @@ Notes:
   reasons.
 - The default benchmark/profile/baseline mode set is
   `parse,metrics,checksum,lexer,env,closure,label,analysis`.
+- `checked` is available explicitly when you want to measure the full checked-status validation path rather than the broader analysis fingerprint path.
 - `sample` remains available explicitly with `--modes sample` or as part of a
   custom comma-separated mode list.
+
+## Execution Benchmark
+
+The curated execution-oriented benchmark corpus lives under:
+
+- `Code/benchmarks/lua_frontend_benchmark_corpus/`
+
+and is listed by:
+
+- `Code/benchmarks/lua_frontend_execution_corpus_manifest.txt`
+
+Run the llcontext-vs-reference execution sweep with:
+
+```bash
+python3 ./compiler/scripts/run_lua_frontend_execution_benchmark.py
+```
+
+To also write a machine-readable report:
+
+```bash
+python3 ./compiler/scripts/run_lua_frontend_execution_benchmark.py --json-out /tmp/lua-execution-benchmark.json
+```
+
+Useful options:
+
+- `--iterations 5000`
+- `--repeats 3`
+- `--opt-level -O3`
+- `--keep-temp`
+
+Notes:
+
+- This sweep uses the execution-focused subset corpus rather than the broader parse benchmark corpus.
+- The llcontext side builds `Code/benchmarks/lua_frontend_execute_bench.c` against `Code/llcontext_lua/src/lua_frontend.llcontext`.
+- The reference side builds `Code/benchmarks/lua_reference_execute_bench.c`.
+- The current llcontext harness validates `lua_frontend_execute_status_with_len(...) == 0` before timing repeated execute checksum runs.
+- The JSON report records both per-input throughput and the aggregate llcontext-over-reference ratio.
 
 There is also a direct pool-backed benchmark harness for the exported parallel
 frontend surface:

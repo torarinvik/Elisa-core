@@ -30,7 +30,7 @@ def fixed_buffer_allocator_smoke() -> void can[Abort.Panic]:
 def memory_pool_smoke() -> void can[Memory.Allocate, Memory.Release, Abort.Panic]:
     pool: mutable MemoryPool[PoolPair] = zeroed
     defer block:
-        memory_pool_deinit((&pool).cast[any MemoryPool[PoolPair]&]) can Memory.Release
+        memory_pool_deinit((&pool).cast[any MemoryPool[PoolPair]&]) can Memory.Release, Abort.Panic
 
     memory_pool_add_capacity((&pool).cast[any MemoryPool[PoolPair]&], 2)
 

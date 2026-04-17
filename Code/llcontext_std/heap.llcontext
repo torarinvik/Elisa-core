@@ -172,6 +172,6 @@ def memory_pool_reset[T](pool: mutable any MemoryPool[T]&):
     pool.free_list <- null
 
 def memory_pool_deinit[T](pool: mutable any MemoryPool[T]&) can[Memory.Release, Abort.Panic]:
-    arena_free((&pool.arena).cast[any Arena&]) can Memory.Release
+    arena_free((&pool.arena).cast[any Arena&]) can Memory.Release, Abort.Panic
     pool.arena <- zeroed
     pool.free_list <- null

@@ -754,6 +754,36 @@ func (a *Analyzer) validateFunctionPermissionUsage(fn *ast.FuncDecl) {
 	a.validatePermissionStmts(fn.Body, granted)
 }
 
+func grantedPermissionFamilies(families []string) map[string]bool {
+	granted := make(map[string]bool, len(families))
+	for _, family := range families {
+		granted[family] = true
+	}
+	return granted
+}
+
+func missingGrantedPermissionFamilies(refs []ast.PermissionRef, granted map[string]bool) []string {
+	families := permissionFamiliesFromRefs(refs)
+	if len(families) == 0 {
+		return nil
+	}
+	missing := make([]string, 0, len(families))
+	for _, family := range families {
+		if !granted[family] {
+			missing = append(missing, family)
+		}
+	}
+	return missing
+}
+
+func (a *Analyzer) warnOnMissingLocalGrant(pos lexer.Pos, label string, refs []ast.PermissionRef, granted map[string]bool) {
+	missing := missingGrantedPermissionFamilies(refs, granted)
+	if len(missing) == 0 {
+		return
+	}
+	a.warnf(pos, "%s requires%s and has no explicit local effect grant; add %s or a surrounding can ...: block", label, permissionFamiliesString(missing), permissionGrantHint(refs, missing))
+}
+
 func (a *Analyzer) validatePermissionStmts(stmts []ast.Stmt, granted map[string]bool) {
 	for _, stmt := range stmts {
 		a.validatePermissionStmt(stmt, granted)
@@ -833,31 +863,22 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.CanStmt:
 		families := a.resolvePermissionFamilies(n.Permissions, false)
-		a.validatePermissionStmts(n.Body, extendGrantedPermissionFamilies(granted, families))
+		a.validatePermissionStmts(n.Body, grantedPermissionFamilies(families))
 	case *ast.SignalStmt:
 		refs := a.resolvePermissionRefs(n.Permissions, false)
-		families := permissionFamiliesFromRefs(refs)
-		missing := make([]string, 0, len(families))
-		for _, family := range families {
-			if !granted[family] {
-				missing = append(missing, family)
-			}
-		}
-		if len(missing) != 0 {
-			a.warnf(n.Pos(), "signal requires%s and has no explicit local effect grant; add %s or a surrounding can ...: block", permissionFamiliesString(missing), permissionGrantHint(refs, missing))
-		}
+		a.warnOnMissingLocalGrant(n.Pos(), "signal", refs, granted)
 	case *ast.PoolStmt:
 		a.validatePermissionExpr(n.Workers, granted)
 		if !granted["Pool"] {
 			refs := []ast.PermissionRef{{Position: n.Position, Name: "Pool", Member: "Create"}, {Position: n.Position, Name: "Pool", Member: "Shutdown"}}
-			a.warnf(n.Pos(), "pool scope requires%s and has no explicit local effect grant; add %s or a surrounding can ...: block", permissionFamiliesString([]string{"Pool"}), permissionGrantHint(refs, []string{"Pool"}))
+			a.warnOnMissingLocalGrant(n.Pos(), "pool scope", refs, granted)
 		}
 		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.LockStmt:
 		a.validatePermissionExpr(n.Mutex, granted)
 		if !granted["Sync"] {
 			refs := []ast.PermissionRef{{Position: n.Position, Name: "Sync", Member: "Lock"}, {Position: n.Position, Name: "Sync", Member: "Unlock"}}
-			a.warnf(n.Pos(), "lock scope requires%s and has no explicit local effect grant; add %s or a surrounding can ...: block", permissionFamiliesString([]string{"Sync"}), permissionGrantHint(refs, []string{"Sync"}))
+			a.warnOnMissingLocalGrant(n.Pos(), "lock scope", refs, granted)
 		}
 		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.WhileStmt:
@@ -878,10 +899,11 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		a.validatePermissionExpr(n.Source, granted)
 		if !granted["Pool"] {
 			refs := []ast.PermissionRef{{Position: n.Position, Name: "Pool", Member: "Submit"}, {Position: n.Position, Name: "Pool", Member: "WaitAll"}}
-			a.warnf(n.Pos(), "parallel for requires%s and has no explicit local effect grant; add %s or a surrounding can ...: block", permissionFamiliesString([]string{"Pool"}), permissionGrantHint(refs, []string{"Pool"}))
+			a.warnOnMissingLocalGrant(n.Pos(), "parallel for", refs, granted)
 		}
 		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.PanicStmt:
+		a.warnOnMissingLocalGrant(n.Pos(), "panic", []ast.PermissionRef{{Position: n.Position, Name: "Abort", Member: "Panic"}}, granted)
 		a.validatePermissionExpr(n.Message, granted)
 	case *ast.ExprStmt:
 		a.validatePermissionExpr(n.Expr, granted)
@@ -977,7 +999,7 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		a.validatePermissionExpr(n.Value, granted)
 	case *ast.CanExpr:
 		families := a.resolvePermissionFamilies(n.Permissions, false)
-		a.validatePermissionExpr(n.Expr, extendGrantedPermissionFamilies(granted, families))
+		a.validatePermissionExpr(n.Expr, grantedPermissionFamilies(families))
 	case *ast.MatchExpr:
 		a.validatePermissionExpr(n.Value, granted)
 		if n.Store != nil {

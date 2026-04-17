@@ -2442,7 +2442,7 @@ func TestRunCLIExecutesEffectfulSelectedTests(t *testing.T) {
 
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "execute_effectful_tests_fixture.llcontext")
-	src := "@test\ndef memory_case() -> void can[Memory.Allocate, Abort.Panic]:\n    can Memory.Allocate:\n        values: i64[4] = zeroed\n        values[0] <- 7\n        if values[0] != 7:\n            panic(\"expected initialized value\")\n"
+	src := "@test\ndef memory_case() -> void can[Memory.Allocate, Abort.Panic]:\n    can Memory.Allocate, Abort.Panic:\n        values: i64[4] = zeroed\n        values[0] <- 7\n        if values[0] != 7:\n            panic(\"expected initialized value\")\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write effectful execute-tests fixture: %v", err)
 	}
@@ -2495,7 +2495,7 @@ def write_slot(job: WriteJob) -> i64:
 
 @test
 def pool_backed_case() -> void can[Abort.Panic]:
-	can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Atomics.Load, Atomics.CompareExchange:
+	can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
 		partials: i64[2] = zeroed
 		pool workers(2):
 			group: mutable TaskGroup = task_group_new()

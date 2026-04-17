@@ -23,7 +23,7 @@ from typing import Iterable
 from lua_frontend_benchmark_input import build_synthetic_lua_benchmark_input
 
 
-VALID_MODES = ("parse", "checksum", "metrics", "lexer", "sample", "env", "closure", "label", "analysis")
+VALID_MODES = ("parse", "checksum", "metrics", "lexer", "sample", "env", "closure", "label", "analysis", "checked")
 PARALLEL_CAPABLE_MODES = ("parse", "metrics", "lexer", "analysis")
 MIB_PER_SECOND_RE = re.compile(r"MiB/s=([0-9]+(?:\.[0-9]+)?)")
 
