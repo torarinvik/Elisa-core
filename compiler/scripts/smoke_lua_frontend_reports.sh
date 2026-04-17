@@ -80,6 +80,8 @@ BASELINE_DIR="$OUT_DIR/baseline"
 # shellcheck disable=SC2086
 bash "$SCRIPT_DIR/profile_lua_frontend.sh" \
     --out "$PROFILE_DIR" \
+    --modes parse \
+    --skip-differential \
     $COMMON_ARGS \
     $KEEP_TEMP_ARGS \
     > "$OUT_DIR/profile.stdout" 2>&1
@@ -87,9 +89,16 @@ bash "$SCRIPT_DIR/profile_lua_frontend.sh" \
 # shellcheck disable=SC2086
 bash "$SCRIPT_DIR/capture_lua_frontend_baseline.sh" \
     --out "$BASELINE_DIR" \
+    --modes parse \
+    --skip-differential \
     $COMMON_ARGS \
     $KEEP_TEMP_ARGS \
     > "$OUT_DIR/baseline.stdout" 2>&1
+
+cp "$DIFF_JSON" "$PROFILE_DIR/differential.json"
+cp "$DIFF_JSON" "$BASELINE_DIR/differential.json"
+cp "$OUT_DIR/diff.log" "$PROFILE_DIR/differential.log"
+cp "$OUT_DIR/diff.log" "$BASELINE_DIR/differential.log"
 
 "$PYTHON_BIN" "$SCRIPT_DIR/compare_lua_frontend_reports.py" \
     "$PROFILE_DIR" \

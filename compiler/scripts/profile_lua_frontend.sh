@@ -10,6 +10,7 @@ PARALLEL_WORKERS=""
 PARSE_ITERATIONS="20"
 SAMPLE_ITERATIONS="5000"
 REPEATS="3"
+MODES="parse,metrics,checksum,lexer,env,closure,label,analysis"
 SKIP_DIFFERENTIAL="0"
 SKIP_REAL_CORPUS="0"
 KEEP_TEMP="0"
@@ -44,6 +45,10 @@ while [ "$#" -gt 0 ]; do
             REPEATS="${2:?missing value for --repeats}"
             shift 2
             ;;
+        --modes)
+            MODES="${2:?missing value for --modes}"
+            shift 2
+            ;;
         --skip-differential)
             SKIP_DIFFERENTIAL="1"
             shift 1
@@ -71,7 +76,7 @@ fi
 
 echo "lua_frontend_profile_out=$OUT_DIR"
 
-BENCH_ARGS="--opt-level=$OPT_LEVEL --parse-iterations $PARSE_ITERATIONS --sample-iterations $SAMPLE_ITERATIONS --repeats $REPEATS --modes parse,metrics,checksum,lexer,env,closure,label,analysis"
+BENCH_ARGS="--opt-level=$OPT_LEVEL --parse-iterations $PARSE_ITERATIONS --sample-iterations $SAMPLE_ITERATIONS --repeats $REPEATS --modes $MODES"
 KEEP_TEMP_ARGS=""
 if [ -n "$OPT_LEVELS" ]; then
     BENCH_ARGS="$BENCH_ARGS --opt-levels=$OPT_LEVELS"
@@ -118,6 +123,7 @@ python3 "$SCRIPT_DIR/write_lua_bundle_metadata.py" \
     --setting "parse_iterations=$PARSE_ITERATIONS" \
     --setting "sample_iterations=$SAMPLE_ITERATIONS" \
     --setting "repeats=$REPEATS" \
+    --setting "modes=$MODES" \
     --setting "skip_real_corpus=$SKIP_REAL_CORPUS" \
     --setting "skip_differential=$SKIP_DIFFERENTIAL" \
     --setting "keep_temp=$KEEP_TEMP" \
@@ -151,6 +157,7 @@ parallel_workers: ${PARALLEL_WORKERS:-<disabled>}
 parse_iterations: $PARSE_ITERATIONS
 sample_iterations: $SAMPLE_ITERATIONS
 repeats: $REPEATS
+modes: $MODES
 skip_real_corpus: $SKIP_REAL_CORPUS
 skip_differential: $SKIP_DIFFERENTIAL
 keep_temp: $KEEP_TEMP
