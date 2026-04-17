@@ -1516,8 +1516,7 @@ def json_ast_string_value_with_len(source: any u8&, source_len: usize, node: Jso
 
 
 def json_ast_string_value(source: any u8&, node: JsonNode, store: JsonNode.Store[Local]) -> heap u8& can[Memory.Allocate, Abort.Panic]:
-    can Memory.Allocate, Abort.Panic:
-        return json_ast_string_value_with_len(source, runtime_strlen(source), node, store)
+    return json_ast_string_value_with_len(source, runtime_strlen(source), node, store) can Memory.Allocate, Abort.Panic
 
 
 def json_ast_string_eq_literal_with_len(source: any u8&, source_len: usize, node: JsonNode, literal: any u8&, store: JsonNode.Store[Local]) -> bool:
@@ -1716,8 +1715,7 @@ def json_parse_document_node_with_len(source: any u8&, source_len: usize, arena:
 
 
 def json_parse_document_node(source: any u8&, arena: mutable any Arena&, store: JsonNode.Store[Local]) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
-    can Memory.Allocate, Abort.Panic:
-        return json_parse_document_node_with_len(source, runtime_strlen(source), arena, store)
+    return json_parse_document_node_with_len(source, runtime_strlen(source), arena, store) can Memory.Allocate, Abort.Panic
 
 
 def json_ast_scratch_capacity(source_len: usize) -> usize:
@@ -1925,8 +1923,7 @@ def json_parser_document_parse_with_len_impl(source: any u8&, source_len: usize,
 
 
 def json_parser_document_parse_impl(source: any u8&, out: mutable any JsonParserDocument&) -> i64 can[Memory.Allocate, Memory.Release, Abort.Panic]:
-    can Memory.Allocate, Memory.Release, Abort.Panic:
-        return json_parser_document_parse_with_len_impl(source, runtime_strlen(source), out)
+    return json_parser_document_parse_with_len_impl(source, runtime_strlen(source), out) can Memory.Allocate, Memory.Release, Abort.Panic
 
 
 def json_parser_document_destroy_impl(doc: mutable any JsonParserDocument&) can[Memory.Release, Abort.Panic]:
@@ -4616,13 +4613,11 @@ def json_expect_invalid(source: static u8&) -> bool:
 
 
 def json_expect_ast_checksum(source: static u8&, expected: i64) -> bool can[Memory.Allocate, Abort.Panic]:
-    can Memory.Allocate, Abort.Panic:
-        return json_parser_ast_checksum_impl(source.cast[any u8&]) == expected
+    return json_parser_ast_checksum_impl(source.cast[any u8&]) == expected can Memory.Allocate, Abort.Panic
 
 
 def json_expect_invalid_ast(source: static u8&) -> bool can[Memory.Allocate, Abort.Panic]:
-    can Memory.Allocate, Abort.Panic:
-        return json_parser_ast_checksum_impl(source.cast[any u8&]) < 0
+    return json_parser_ast_checksum_impl(source.cast[any u8&]) < 0 can Memory.Allocate, Abort.Panic
 
 
 def json_parser_parity_suite_impl() -> int can[Memory.Allocate, Abort.Panic]:
@@ -4858,18 +4853,15 @@ def json_parallel_checksum_impl(source: any u8&, worker_count: usize, iterations
 
 
 def json_parser_parallel_checksum_impl(source: any u8&, worker_count: usize, iterations: usize) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
-    can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
-        return json_parallel_checksum_impl(source, worker_count, iterations, JSON_PARALLEL_MODE_CHECKSUM)
+    return json_parallel_checksum_impl(source, worker_count, iterations, JSON_PARALLEL_MODE_CHECKSUM) can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange
 
 
 def json_parser_parallel_ast_checksum_impl(source: any u8&, worker_count: usize, iterations: usize) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
-    can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
-        return json_parallel_checksum_impl(source, worker_count, iterations, JSON_PARALLEL_MODE_AST)
+    return json_parallel_checksum_impl(source, worker_count, iterations, JSON_PARALLEL_MODE_AST) can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange
 
 
 def json_parser_parallel_ast_cached_checksum_impl(source: any u8&, worker_count: usize, iterations: usize) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
-    can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
-        return json_parallel_checksum_impl(source, worker_count, iterations, JSON_PARALLEL_MODE_AST_CACHED)
+    return json_parallel_checksum_impl(source, worker_count, iterations, JSON_PARALLEL_MODE_AST_CACHED) can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange
 
 
 export func json_parser_parity_suite() -> int = json_parser_parity_suite_impl

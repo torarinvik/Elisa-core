@@ -28,7 +28,7 @@ For current annotations and compile-time hints, see `../docs/useful_language_fea
 That reference covers the currently implemented syntax for:
 
 - default and named arguments, including `..` forwarding
-- effect declarations, `signal`, effects aliases, and implicit contexts
+- effect declarations, `signal`, local `can` grants, effects aliases, and implicit contexts
 - explicit argument packs via `params` and ambient `with args(...)` scopes
 - brace destructuring, field punning, record updates, and filtered iterable loops
 - `do:` blocks, `defer`, index fallback, store/dict sugar, char literals, and explicit `parallel for`
@@ -42,7 +42,9 @@ The current commonly used surface fits into a few recurring patterns:
 ```text
 return consume(value:, ..)
 effect FooEffect: pass
-signal ConsoleEffect.Write
+return puts(text) can Console.Write
+can ConsoleEffect.Write:
+  signal ConsoleEffect.Write
 effects FrontendEffects = error[ParseErr] can[Abort.Panic]
 context ParseCtx:
 with ParseCtx(.., alloc = scratch_alloc):
@@ -131,7 +133,7 @@ Current test-oriented emit modes:
 In addition to the core `llvm`, `header`, `iface`, and project commands, the CLI also exposes several smaller helper emit modes:
 
 - `-emit ast` prints the parsed AST
-- `-emit fmt` prints canonical formatted source
+- `-emit fmt` prints canonical formatted source and normalizes local grants into surface `can Name` / `can Name.Member` form, conservatively inlining simple one-statement `can ...:` blocks when safe
 - `-emit doc` emits reference docs for the current file
 - `-emit deps` prints the expanded source dependency list
 - `-emit deps-json` emits the same dependency information as JSON with `root` and `files` fields

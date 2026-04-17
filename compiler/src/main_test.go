@@ -1931,6 +1931,84 @@ func TestRunCLIFmtKeepsPanicGrantBlocksInSurfaceSyntax(t *testing.T) {
 	}
 }
 
+func TestRunCLIFmtKeepsSignalSurfaceSyntax(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "grant_fmt_signal.llcontext")
+	src := "effect FooEffect:\n    pass\n\neffect ConsoleEffect:\n    Write\n\ndef run() -> void can[FooEffect, ConsoleEffect.Write]:\n    can FooEffect, ConsoleEffect.Write:\n        signal FooEffect\n        signal ConsoleEffect.Write\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write signal grant fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "fmt", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected formatter to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	formatted := stdout.String()
+	for _, check := range []string{"signal FooEffect", "signal ConsoleEffect.Write"} {
+		if !strings.Contains(formatted, check) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", check, formatted)
+		}
+	}
+	if strings.Contains(formatted, "signal can[") {
+		t.Fatalf("expected signal statements to stay in surface syntax, got:\n%s", formatted)
+	}
+	if err := os.WriteFile(fixturePath, []byte(formatted), 0o644); err != nil {
+		t.Fatalf("failed to rewrite signal fixture with formatted output: %v", err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = runCLI([]string{"-emit", "fmt", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected formatted signal output to round-trip, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output on signal round-trip, got:\n%s", stderr.String())
+	}
+}
+
+func TestRunCLIFmtRoundTripsTryReturnGrantBlocks(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "grant_fmt_try_return.llcontext")
+	src := "error FormatError:\n    WriteFailed\n\nextern checked() -> int error[FormatError] can[Console.Format]\n\ndef run() -> int can[Console.Format]:\n    can Console.Format:\n        return try checked() else 1\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write try-return grant fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "fmt", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected formatter to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	formatted := stdout.String()
+	if !strings.Contains(formatted, "return (try checked() else 1) can Console.Format") {
+		t.Fatalf("expected formatter to inline try-return grant block, got:\n%s", formatted)
+	}
+	if err := os.WriteFile(fixturePath, []byte(formatted), 0o644); err != nil {
+		t.Fatalf("failed to rewrite try-return fixture with formatted output: %v", err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	exitCode = runCLI([]string{"-emit", "fmt", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected formatted try-return output to round-trip, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output on try-return round-trip, got:\n%s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "return (try checked() else 1) can Console.Format") {
+		t.Fatalf("expected round-tripped formatter output to preserve inlined try-return grant, got:\n%s", stdout.String())
+	}
+}
+
 func TestRunCLIPrintsPostfixCastHookSyntaxInAST(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "postfix_cast_hook_ast.llcontext")

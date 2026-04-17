@@ -418,7 +418,12 @@ func formatExprWithSurfacePermissions(expr ast.Expr, permissions []ast.Permissio
 	if permissionText == "" {
 		return formatExpr(expr)
 	}
-	return formatExpr(expr) + " can " + permissionText
+	exprText := formatExpr(expr)
+	switch expr.(type) {
+	case *ast.TryExpr, *ast.UnwrapElseExpr:
+		exprText = "(" + exprText + ")"
+	}
+	return exprText + " can " + permissionText
 }
 
 func formatInlineCanStmt(stmt ast.Stmt, permissions []ast.PermissionRef) (string, bool) {
