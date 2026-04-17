@@ -6,54 +6,57 @@ struct PoolPair:
     right: mutable i64
 
 def fixed_buffer_allocator_smoke() -> void can[Abort.Panic]:
-    buffer: u8[64] = zeroed
-    alloc: mutable FixedBufferAllocator = fixed_buffer_allocator_init((&buffer[0]).cast[any u8&], 64)
+    can Abort.Panic:
+        buffer: u8[64] = zeroed
+        alloc: mutable FixedBufferAllocator = fixed_buffer_allocator_init((&buffer[0]).cast[any u8&], 64)
 
-    first: any void& = fixed_buffer_alloc_or_panic((&alloc).cast[any FixedBufferAllocator&], 8)
-    second: any void& = fixed_buffer_alloc_or_panic((&alloc).cast[any FixedBufferAllocator&], 8)
-    fixed_buffer_release((&alloc).cast[any FixedBufferAllocator&], second, 8)
-    third: any void& = fixed_buffer_alloc_or_panic((&alloc).cast[any FixedBufferAllocator&], 8)
-    assert_eq(third.cast[any u8&].uintptr(), second.cast[any u8&].uintptr())
+        first: any void& = fixed_buffer_alloc_or_panic((&alloc).cast[any FixedBufferAllocator&], 8)
+        second: any void& = fixed_buffer_alloc_or_panic((&alloc).cast[any FixedBufferAllocator&], 8)
+        fixed_buffer_release((&alloc).cast[any FixedBufferAllocator&], second, 8)
+        third: any void& = fixed_buffer_alloc_or_panic((&alloc).cast[any FixedBufferAllocator&], 8)
+        assert_eq(third.cast[any u8&].uintptr(), second.cast[any u8&].uintptr())
 
-    mark: FixedBufferMark = fixed_buffer_snapshot((&alloc).cast[any FixedBufferAllocator&])
-    aligned_ptr: any void& = fixed_buffer_alloc_align_or_panic((&alloc).cast[any FixedBufferAllocator&], 4, 16)
-    assert_eq(aligned_ptr.cast[any u8&].uintptr() % 16.uintptr(), 0.uintptr())
-    fixed_buffer_rewind((&alloc).cast[any FixedBufferAllocator&], mark)
-    rewinded: any void& = fixed_buffer_alloc_align_or_panic((&alloc).cast[any FixedBufferAllocator&], 4, 16)
-    assert_eq(rewinded.cast[any u8&].uintptr(), aligned_ptr.cast[any u8&].uintptr())
+        mark: FixedBufferMark = fixed_buffer_snapshot((&alloc).cast[any FixedBufferAllocator&])
+        aligned_ptr: any void& = fixed_buffer_alloc_align_or_panic((&alloc).cast[any FixedBufferAllocator&], 4, 16)
+        assert_eq(aligned_ptr.cast[any u8&].uintptr() % 16.uintptr(), 0.uintptr())
+        fixed_buffer_rewind((&alloc).cast[any FixedBufferAllocator&], mark)
+        rewinded: any void& = fixed_buffer_alloc_align_or_panic((&alloc).cast[any FixedBufferAllocator&], 4, 16)
+        assert_eq(rewinded.cast[any u8&].uintptr(), aligned_ptr.cast[any u8&].uintptr())
 
-    assert fixed_buffer_resize((&alloc).cast[any FixedBufferAllocator&], rewinded, 4, 12)
-    fixed_buffer_reset((&alloc).cast[any FixedBufferAllocator&])
-    reset_ptr: any void& = fixed_buffer_alloc_or_panic((&alloc).cast[any FixedBufferAllocator&], 8)
-    assert_eq(reset_ptr.cast[any u8&].uintptr(), first.cast[any u8&].uintptr())
+        assert fixed_buffer_resize((&alloc).cast[any FixedBufferAllocator&], rewinded, 4, 12)
+        fixed_buffer_reset((&alloc).cast[any FixedBufferAllocator&])
+        reset_ptr: any void& = fixed_buffer_alloc_or_panic((&alloc).cast[any FixedBufferAllocator&], 8)
+        assert_eq(reset_ptr.cast[any u8&].uintptr(), first.cast[any u8&].uintptr())
 
 def memory_pool_smoke() -> void can[Memory.Allocate, Memory.Release, Abort.Panic]:
-    pool: mutable MemoryPool[PoolPair] = zeroed
-    defer block:
-        memory_pool_deinit((&pool).cast[any MemoryPool[PoolPair]&]) can Memory.Release, Abort.Panic
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        pool: mutable MemoryPool[PoolPair] = zeroed
+        defer block:
+            memory_pool_deinit((&pool).cast[any MemoryPool[PoolPair]&]) can Memory.Release, Abort.Panic
 
-    memory_pool_add_capacity((&pool).cast[any MemoryPool[PoolPair]&], 2)
+        memory_pool_add_capacity((&pool).cast[any MemoryPool[PoolPair]&], 2)
 
-    first: heap PoolPair& = memory_pool_create((&pool).cast[any MemoryPool[PoolPair]&])
-    second: heap PoolPair& = memory_pool_create((&pool).cast[any MemoryPool[PoolPair]&])
-    first.left <- 11
-    first.right <- 12
-    second.left <- 13
-    second.right <- 14
+        first: heap PoolPair& = memory_pool_create((&pool).cast[any MemoryPool[PoolPair]&])
+        second: heap PoolPair& = memory_pool_create((&pool).cast[any MemoryPool[PoolPair]&])
+        first.left <- 11
+        first.right <- 12
+        second.left <- 13
+        second.right <- 14
 
-    memory_pool_destroy((&pool).cast[any MemoryPool[PoolPair]&], first)
-    reused: heap PoolPair& = memory_pool_create((&pool).cast[any MemoryPool[PoolPair]&])
-    assert_eq(reused.cast[any u8&].uintptr(), first.cast[any u8&].uintptr())
-    assert_eq(reused.left, 0)
-    assert_eq(reused.right, 0)
+        memory_pool_destroy((&pool).cast[any MemoryPool[PoolPair]&], first)
+        reused: heap PoolPair& = memory_pool_create((&pool).cast[any MemoryPool[PoolPair]&])
+        assert_eq(reused.cast[any u8&].uintptr(), first.cast[any u8&].uintptr())
+        assert_eq(reused.left, 0)
+        assert_eq(reused.right, 0)
 
-    memory_pool_reset((&pool).cast[any MemoryPool[PoolPair]&])
-    after_reset: heap PoolPair& = memory_pool_create((&pool).cast[any MemoryPool[PoolPair]&])
-    assert_eq(after_reset.cast[any u8&].uintptr(), second.cast[any u8&].uintptr())
+        memory_pool_reset((&pool).cast[any MemoryPool[PoolPair]&])
+        after_reset: heap PoolPair& = memory_pool_create((&pool).cast[any MemoryPool[PoolPair]&])
+        assert_eq(after_reset.cast[any u8&].uintptr(), second.cast[any u8&].uintptr())
 
 def allocator_ports_main_impl() -> int can[Memory.Allocate, Memory.Release, Abort.Panic]:
-    fixed_buffer_allocator_smoke()
-    memory_pool_smoke()
-    return 0
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        fixed_buffer_allocator_smoke()
+        memory_pool_smoke()
+        return 0
 
 export func main() -> int = allocator_ports_main_impl

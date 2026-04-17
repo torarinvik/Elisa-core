@@ -26,5 +26,4 @@ def make_node_value_or_zero() -> int can[Memory.Allocate]:
 
 def release_node(node: mutable heap Node&?) can[Memory.Release]:
     if node != null:
-        can Memory.Release:
-            node as ! <- sfree_node(node)
+        node as ! <- (sfree_node(node) can Memory.Release)

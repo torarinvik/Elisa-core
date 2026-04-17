@@ -1,41 +1,43 @@
 # include "../llcontext_std/contextlang_runtime.llcontext"
 
 def atomic_roundtrip() -> i64 can[Atomics.Load, Atomics.Store, Atomics.Exchange, Atomics.CompareExchange, Atomics.Rmw, Atomics.Fence]:
-	slot: atomic[i64] = zeroed
-	slot_ref: mutable any atomic[i64]& = (&slot).cast[any atomic[i64]&]
+	can Atomics.Load, Atomics.Store, Atomics.Exchange, Atomics.CompareExchange, Atomics.Rmw, Atomics.Fence:
+		slot: atomic[i64] = zeroed
+		slot_ref: mutable any atomic[i64]& = (&slot).cast[any atomic[i64]&]
 
-	store(slot_ref, 41, MemoryOrder.Release)
-	prior_add: i64 = fetch_add(slot_ref, 1, MemoryOrder.AcqRel)
-	updated: bool = compare_exchange(slot_ref, 42, 43, MemoryOrder.AcqRel, MemoryOrder.Acquire)
-	if updated:
-		fence(MemoryOrder.SeqCst)
+		store(slot_ref, 41, MemoryOrder.Release)
+		prior_add: i64 = fetch_add(slot_ref, 1, MemoryOrder.AcqRel)
+		updated: bool = compare_exchange(slot_ref, 42, 43, MemoryOrder.AcqRel, MemoryOrder.Acquire)
+		if updated:
+			fence(MemoryOrder.SeqCst)
 
-	prior_xor: i64 = fetch_xor(slot_ref, 1, MemoryOrder.AcqRel)
-	prior_or: i64 = fetch_or(slot_ref, 4, MemoryOrder.AcqRel)
-	prior_and: i64 = fetch_and(slot_ref, 15, MemoryOrder.AcqRel)
-	prior_sub: i64 = fetch_sub(slot_ref, 7, MemoryOrder.AcqRel)
-	previous: i64 = exchange(slot_ref, 7, MemoryOrder.SeqCst)
-	current: i64 = load(slot_ref, MemoryOrder.SeqCst)
-	return prior_add + prior_xor + prior_or + prior_and + prior_sub + previous + current
+		prior_xor: i64 = fetch_xor(slot_ref, 1, MemoryOrder.AcqRel)
+		prior_or: i64 = fetch_or(slot_ref, 4, MemoryOrder.AcqRel)
+		prior_and: i64 = fetch_and(slot_ref, 15, MemoryOrder.AcqRel)
+		prior_sub: i64 = fetch_sub(slot_ref, 7, MemoryOrder.AcqRel)
+		previous: i64 = exchange(slot_ref, 7, MemoryOrder.SeqCst)
+		current: i64 = load(slot_ref, MemoryOrder.SeqCst)
+		return prior_add + prior_xor + prior_or + prior_and + prior_sub + previous + current
 
 def concurrency_handles(thread: Thread[i64, Joinable], task: Task[i64, Pending], pool: ThreadPool, group: mutable TaskGroup, mu: Mutex, guard: MutexGuard[Held], cv: CondVar) -> bool can[Thread.Detach, Pool.WaitAll, Sync.Unlock, Abort.Panic, Atomics.CompareExchange, Atomics.Load, Memory.Allocate, Memory.Release]:
-	result: bool = (
-		thread.handle == 0 and
-		thread.state == null and
-		task.handle == 0 and
-		task.state == null and
-		pool.handle == null and
-		group.handle == null and
-		group.cleanup == null and
-		mu.handle == null and
-		guard.handle == null and
-		cv.handle == null
-	)
-	detach(move thread)
-	mutex_unlock(move guard)
-	task_group_add((&group).cast[any TaskGroup&], move task)
-	wait all group
-	return result
+	can Thread.Detach, Pool.WaitAll, Sync.Unlock, Abort.Panic, Atomics.CompareExchange, Atomics.Load, Memory.Allocate, Memory.Release:
+		result: bool = (
+			thread.handle == 0 and
+			thread.state == null and
+			task.handle == 0 and
+			task.state == null and
+			pool.handle == null and
+			group.handle == null and
+			group.cleanup == null and
+			mu.handle == null and
+			guard.handle == null and
+			cv.handle == null
+		)
+		detach(move thread)
+		mutex_unlock(move guard)
+		task_group_add((&group).cast[any TaskGroup&], move task)
+		wait all group
+		return result
 
 def thread_worker(value: i64) -> i64:
 	return value + 1
@@ -56,47 +58,54 @@ def runtime_carrier_worker(gate: SharedGate) -> i64:
 	return 1
 
 def typed_thread_spawn(value: i64) -> Thread[i64, Joinable] can[Thread.Spawn, Memory.Allocate, Abort.Panic]:
-	return spawn1(thread_worker, value)
+	return spawn1(thread_worker, value) can Thread.Spawn, Memory.Allocate, Abort.Panic
 
 def typed_thread_spawn_permissioned(value: i64) -> Thread[i64, Joinable] can[Thread.Spawn, Memory.Allocate, Abort.Panic]:
-	return spawn1(permissioned_thread_worker, value)
+	return spawn1(permissioned_thread_worker, value) can Thread.Spawn, Memory.Allocate, Abort.Panic
 
 def typed_thread_join(thread: Thread[i64, Joinable]) -> i64 can[Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
-	return join(move thread)
+	return join(move thread) can Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange
 
 def typed_thread_detach_permissioned(value: i64) can[Thread.Spawn, Thread.Detach, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
-	thread: Thread[i64, Joinable] = spawn1(permissioned_thread_worker, value)
-	detach(move thread)
+	can Thread.Spawn, Thread.Detach, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+		thread: Thread[i64, Joinable] = spawn1(permissioned_thread_worker, value)
+		detach(move thread)
 
 def typed_pool_roundtrip(pool: mutable any ThreadPool&, value: i64) -> i64 can[Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
-	task: Task[i64, Pending] = submit[pool] thread_worker(value)
-	return await task
-
-def typed_group_waitall(pool: mutable any ThreadPool&, value: i64) can[Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
-	group: mutable TaskGroup = task_group_new()
-	task: Task[i64, Pending] = pool_submit1(pool, thread_worker, value)
-	task_group_add((&group).cast[any TaskGroup&], move task)
-	wait all group
-
-def typed_pool_scope(value: i64) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
-	pool workers(2):
-		task: Task[i64, Pending] = submit thread_worker(value)
+	can Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+		task: Task[i64, Pending] = submit[pool] thread_worker(value)
 		return await task
 
+def typed_group_waitall(pool: mutable any ThreadPool&, value: i64) can[Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+	can Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+		group: mutable TaskGroup = task_group_new()
+		task: Task[i64, Pending] = pool_submit1(pool, thread_worker, value)
+		task_group_add((&group).cast[any TaskGroup&], move task)
+		wait all group
+
+def typed_pool_scope(value: i64) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+	can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+		pool workers(2):
+			task: Task[i64, Pending] = submit thread_worker(value)
+			return await task
+
 def typed_runtime_carrier_transfer(pool: mutable any ThreadPool&, mu: Mutex, cv: CondVar) -> i64 can[Thread.Spawn, Thread.Join, Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
-	gate: SharedGate = SharedGate(mu, cv)
-	thread: Thread[i64, Joinable] = spawn1(runtime_carrier_worker, gate)
-	task: Task[i64, Pending] = pool_submit1(pool, runtime_carrier_worker, gate)
-	return join(move thread) + await task
+	can Thread.Spawn, Thread.Join, Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+		gate: SharedGate = SharedGate(mu, cv)
+		thread: Thread[i64, Joinable] = spawn1(runtime_carrier_worker, gate)
+		task: Task[i64, Pending] = pool_submit1(pool, runtime_carrier_worker, gate)
+		return join(move thread) + await task
 
 def typed_lock_scope(mu: mutable Mutex, cv: mutable CondVar, ready: bool) -> bool can[Sync.Lock, Sync.Unlock, Sync.Wait]:
-	lock mu as g:
-		while not ready:
-			g <- cond_wait((&cv).cast[any CondVar&], move g)
-		return g.handle != null
+	can Sync.Lock, Sync.Unlock, Sync.Wait:
+		lock mu as g:
+			while not ready:
+				g <- cond_wait((&cv).cast[any CondVar&], move g)
+			return g.handle != null
 
 def typed_notify_scope(cv: mutable CondVar, broadcast: bool) can[Sync.Notify]:
-	if broadcast:
-		notify all cv
-	else:
-		notify one cv
+	can Sync.Notify:
+		if broadcast:
+			notify all cv
+		else:
+			notify one cv

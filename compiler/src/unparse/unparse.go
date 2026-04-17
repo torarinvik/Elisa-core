@@ -413,6 +413,80 @@ func (f *formatter) writeField(level int, field ast.FieldDecl) {
 	f.writeLine(level, line)
 }
 
+func formatExprWithSurfacePermissions(expr ast.Expr, permissions []ast.PermissionRef) string {
+	permissionText := formatPermissionRefSurfaceList(permissions)
+	if permissionText == "" {
+		return formatExpr(expr)
+	}
+	return formatExpr(expr) + " can " + permissionText
+}
+
+func formatInlineCanStmt(stmt ast.Stmt, permissions []ast.PermissionRef) (string, bool) {
+	if stmt == nil || len(permissions) == 0 {
+		return "", false
+	}
+	wrapExpr := func(expr ast.Expr) string {
+		return formatExprWithSurfacePermissions(expr, permissions)
+	}
+	switch n := stmt.(type) {
+	case *ast.AssignStmt:
+		op := " <- "
+		if n.Optional {
+			op = " ?= "
+		}
+		return formatExpr(n.Target) + op + wrapExpr(n.Value), true
+	case *ast.AsRefAssignStmt:
+		line := formatExpr(n.Target) + " as"
+		if n.AsKind != "" {
+			line += " " + n.AsKind
+		}
+		line += " <- " + wrapExpr(n.Value)
+		return line, true
+	case *ast.VarDeclStmt:
+		if n.Value == nil {
+			return "", false
+		}
+		if n.Type == nil {
+			return n.Name + " = " + wrapExpr(n.Value), true
+		}
+		line := n.Name + ": "
+		if n.Mutable {
+			line += "mutable "
+		}
+		line += formatTypeExpr(n.Type)
+		line += " = " + wrapExpr(n.Value)
+		return line, true
+	case *ast.TupleBindStmt:
+		names := make([]string, 0, len(n.Names))
+		for _, name := range n.Names {
+			names = append(names, name.Name)
+		}
+		op := " <- "
+		if n.Declare {
+			op = " = "
+		}
+		return strings.Join(names, ", ") + op + wrapExpr(n.Value), true
+	case *ast.ReturnStmt:
+		if n.Value == nil {
+			return "", false
+		}
+		return "return " + wrapExpr(n.Value), true
+	case *ast.ExprStmt:
+		return wrapExpr(n.Expr), true
+	case *ast.DiscardStmt:
+		return "_ = " + wrapExpr(n.Value), true
+	default:
+		return "", false
+	}
+}
+
+func formatSingleStmtCanBlock(stmt *ast.CanStmt) (string, bool) {
+	if stmt == nil || len(stmt.Body) != 1 {
+		return "", false
+	}
+	return formatInlineCanStmt(stmt.Body[0], stmt.Permissions)
+}
+
 func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 	if stmt == nil {
 		return
@@ -585,7 +659,11 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 			f.writeStmt(level+1, stmt)
 		}
 	case *ast.CanStmt:
-		f.writeLine(level, "can"+formatPermissionRefs(n.Permissions)+":")
+		if line, ok := formatSingleStmtCanBlock(n); ok {
+			f.writePrefixedMultiline(level, "", line)
+			return
+		}
+		f.writeLine(level, "can "+formatPermissionRefSurfaceList(n.Permissions)+":")
 		for _, stmt := range n.Body {
 			f.writeStmt(level+1, stmt)
 		}
@@ -622,11 +700,7 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 	case *ast.PassStmt:
 		f.writeLine(level, "pass")
 	case *ast.SignalStmt:
-		text := formatPermissionRefs(n.Permissions)
-		if strings.HasPrefix(text, " can[") && strings.HasSuffix(text, "]") {
-			text = text[len(" can[") : len(text)-1]
-		}
-		f.writeLine(level, "signal "+text)
+		f.writeLine(level, "signal "+formatPermissionRefSurfaceList(n.Permissions))
 	case *ast.PanicStmt:
 		f.writePrefixedMultiline(level, "", "panic("+formatExpr(n.Message)+")")
 	case *ast.ExprStmt:
@@ -983,6 +1057,21 @@ func formatPermissionRefs(refs []ast.PermissionRef) string {
 		}
 	}
 	return " can[" + strings.Join(parts, ", ") + "]"
+}
+
+func formatPermissionRefSurfaceList(refs []ast.PermissionRef) string {
+	if len(refs) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if ref.Member != "" {
+			parts = append(parts, ref.Name+"."+ref.Member)
+		} else {
+			parts = append(parts, ref.Name)
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 func formatEnsuresClauses(clauses []ast.EnsuresClause) string {
@@ -1433,7 +1522,7 @@ func formatExpr(expr ast.Expr) string {
 		}
 		return "new " + formatExpr(n.Value)
 	case *ast.CanExpr:
-		return formatExpr(n.Expr) + formatPermissionRefs(n.Permissions)
+		return formatExprWithSurfacePermissions(n.Expr, n.Permissions)
 	case *ast.MatchExpr:
 		return formatMatchExpr(n)
 	case *ast.VisitExpr:

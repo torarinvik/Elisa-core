@@ -97,8 +97,9 @@ static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
 # ------------------------------------------------------------
 
 def assert(condition: bool) can[Abort.Panic]:
-    if not condition:
-        panic("assert failed")
+    can Abort.Panic:
+        if not condition:
+            panic("assert failed")
 
 def max(a: usize, b: usize) -> usize:
     return a if a > b else b
@@ -111,7 +112,7 @@ def inv_handle(ptr: heap void&?) -> bool:
 # ------------------------------------------------------------
 
 def sfree[T](ptr: heap T&) -> heap T! can[Memory.Release]:
-    free(ptr.cast[heap void&])
+    free(ptr.cast[heap void&]) can Memory.Release
     return null
 
 # ------------------------------------------------------------
@@ -119,136 +120,140 @@ def sfree[T](ptr: heap T&) -> heap T! can[Memory.Release]:
 # ------------------------------------------------------------
 
 def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap Region& can[Memory.Allocate, Abort.Panic]:
-    size_bytes: usize = sizeof(Region) + sizeof(uintptr) * capacity
+    can Memory.Allocate, Abort.Panic:
+        size_bytes: usize = sizeof(Region) + sizeof(uintptr) * capacity
 
-    static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
-        raw: heap void&? = malloc(size_bytes)
-        assert raw != null
-        r: heap Region& = raw.cast[heap Region&]
+        static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
+            raw: heap void&? = malloc(size_bytes)
+            assert raw != null
+            r: heap Region& = raw.cast[heap Region&]
 
-    static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
-        raw: heap void&? = mmap(
-            null,
-            size_bytes,
-            PROT_READ | PROT_WRITE,
-            MAP_ANONYMOUS | MAP_PRIVATE,
-            -1,
-            0
-        )
-        assert raw != MAP_FAILED()
-        r: heap Region& = raw.cast[heap Region&]
+        static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
+            raw: heap void&? = mmap(
+                null,
+                size_bytes,
+                PROT_READ | PROT_WRITE,
+                MAP_ANONYMOUS | MAP_PRIVATE,
+                -1,
+                0
+            )
+            assert raw != MAP_FAILED()
+            r: heap Region& = raw.cast[heap Region&]
 
-    static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
-        raw: heap void&? = VirtualAllocEx(
-            GetCurrentProcess(),
-            null,
-            size_bytes,
-            MEM_COMMIT | MEM_RESERVE,
-            PAGE_READWRITE
-        )
-        assert not inv_handle(raw)
-        r: heap Region& = raw.cast[heap Region&]
+        static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
+            raw: heap void&? = VirtualAllocEx(
+                GetCurrentProcess(),
+                null,
+                size_bytes,
+                MEM_COMMIT | MEM_RESERVE,
+                PAGE_READWRITE
+            )
+            assert not inv_handle(raw)
+            r: heap Region& = raw.cast[heap Region&]
 
-    static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
-        r: heap Region& = bump_pointer.cast[heap Region&]
-        current_memory_size: usize = ARENA_WASM_PAGE_SIZE * wasm_memory_size(0).usize()
-        desired_memory_size: usize = bump_pointer.usize() + size_bytes
+        static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
+            r: heap Region& = bump_pointer.cast[heap Region&]
+            current_memory_size: usize = ARENA_WASM_PAGE_SIZE * wasm_memory_size(0).usize()
+            desired_memory_size: usize = bump_pointer.usize() + size_bytes
 
-        if desired_memory_size > current_memory_size:
-            delta_bytes: usize = desired_memory_size - current_memory_size
-            delta_pages: usize = (delta_bytes + (ARENA_WASM_PAGE_SIZE - 1)) / ARENA_WASM_PAGE_SIZE
+            if desired_memory_size > current_memory_size:
+                delta_bytes: usize = desired_memory_size - current_memory_size
+                delta_pages: usize = (delta_bytes + (ARENA_WASM_PAGE_SIZE - 1)) / ARENA_WASM_PAGE_SIZE
 
-            grow_result: int = wasm_memory_grow(0, delta_pages)
-            assert grow_result >= 0
+                grow_result: int = wasm_memory_grow(0, delta_pages)
+                assert grow_result >= 0
 
-        bump_pointer <- bump_pointer + size_bytes
+            bump_pointer <- bump_pointer + size_bytes
 
-    static else:
-        static error("Unknown arena backend")
+        static else:
+            static error("Unknown arena backend")
 
-    r.next <- null
-    r.count <- 0
-    r.capacity <- capacity
-    r.owner_tag <- owner_tag
-    r.owner_next <- null
-    r.global_index <- 0
-    return r
+        r.next <- null
+        r.count <- 0
+        r.capacity <- capacity
+        r.owner_tag <- owner_tag
+        r.owner_next <- null
+        r.global_index <- 0
+        return r
 
 def new_region(capacity: usize) -> mutable heap Region& can[Memory.Allocate, Abort.Panic]:
-    return new_region_with_owner(capacity, 0.uintptr())
+    return new_region_with_owner(capacity, 0.uintptr()) can Memory.Allocate, Abort.Panic
 
 def free_region(r: heap Region&) can[Memory.Release, Abort.Panic]:
-    static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
-        free(r.cast[heap void&])
+    can Memory.Release, Abort.Panic:
+        static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
+            free(r.cast[heap void&])
 
-    static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
-        size_bytes: usize = sizeof(Region) + sizeof(uintptr) * r.capacity
-        ret: int = munmap(r.cast[heap void&], size_bytes)
-        assert ret == 0
+        static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
+            size_bytes: usize = sizeof(Region) + sizeof(uintptr) * r.capacity
+            ret: int = munmap(r.cast[heap void&], size_bytes)
+            assert ret == 0
 
-    static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
-        ok: bool = VirtualFreeEx(
-            GetCurrentProcess(),
-            r.cast[heap void&],
-            0,
-            MEM_RELEASE
-        )
-        assert ok
+        static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
+            ok: bool = VirtualFreeEx(
+                GetCurrentProcess(),
+                r.cast[heap void&],
+                0,
+                MEM_RELEASE
+            )
+            assert ok
 
-    static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
-        pass
+        static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
+            pass
 
 def arena_alloc(a: mutable any Arena&, size_bytes: usize) -> mutable heap void& can[Memory.Allocate, Abort.Panic]:
-    size: usize = (size_bytes + sizeof(uintptr) - 1) / sizeof(uintptr)
+    can Memory.Allocate, Abort.Panic:
+        size: usize = (size_bytes + sizeof(uintptr) - 1) / sizeof(uintptr)
 
-    if a.end == null:
-        assert a.begin == null
+        if a.end == null:
+            assert a.begin == null
 
-        capacity:mutable usize = ARENA_REGION_DEFAULT_CAPACITY
-        if capacity < size:
-            capacity <- size
+            capacity:mutable usize = ARENA_REGION_DEFAULT_CAPACITY
+            if capacity < size:
+                capacity <- size
 
-        a.end as & <- new_region(capacity)
-        a.begin <- a.end
-        a.end_index <- 0
-        a.end.global_index <- 0
+            a.end as & <- new_region(capacity)
+            a.begin <- a.end
+            a.end_index <- 0
+            a.end.global_index <- 0
 
-    assert a.end != null
+        assert a.end != null
 
-    while (a.end.owner_tag != 0.uintptr() or a.end.count + size > a.end.capacity) and a.end.next != null:
-        a.end <- a.end.next
-        a.end_index <- a.end_index + 1
+        while (a.end.owner_tag != 0.uintptr() or a.end.count + size > a.end.capacity) and a.end.next != null:
+            a.end <- a.end.next
+            a.end_index <- a.end_index + 1
 
-    if a.end.owner_tag != 0.uintptr() or a.end.count + size > a.end.capacity:
-        assert a.end.next == null
+        if a.end.owner_tag != 0.uintptr() or a.end.count + size > a.end.capacity:
+            assert a.end.next == null
 
-        capacity:mutable usize = ARENA_REGION_DEFAULT_CAPACITY
-        if capacity < size:
-            capacity <- size
+            capacity:mutable usize = ARENA_REGION_DEFAULT_CAPACITY
+            if capacity < size:
+                capacity <- size
 
-        a.end.next as & <- new_region(capacity)
-        a.end <- a.end.next
-        a.end_index <- a.end_index + 1
-        a.end.global_index <- a.end_index
+            a.end.next as & <- new_region(capacity)
+            a.end <- a.end.next
+            a.end_index <- a.end_index + 1
+            a.end.global_index <- a.end_index
 
-    data_base: heap u8& = (a.end.cast[heap u8&] + sizeof(Region)).cast[heap u8&]
-    offset_bytes: usize = a.end.count * sizeof(uintptr)
-    result: heap void& = (data_base + offset_bytes).cast[heap void&]
-    a.end.count <- a.end.count + size
-    return result
+        data_base: heap u8& = (a.end.cast[heap u8&] + sizeof(Region)).cast[heap u8&]
+        offset_bytes: usize = a.end.count * sizeof(uintptr)
+        result: heap void& = (data_base + offset_bytes).cast[heap void&]
+        a.end.count <- a.end.count + size
+        return result
 
 def arena_realloc(a: mutable any Arena&, oldptr: mutable any void&, oldsz: usize, newsz: usize) -> mutable heap void& can[Memory.Allocate, Abort.Panic]:
-    if newsz <= oldsz:
-        return oldptr.cast[heap void&]
+    can Memory.Allocate, Abort.Panic:
+        if newsz <= oldsz:
+            return oldptr.cast[heap void&]
 
-    newptr: heap void& = arena_alloc(a, newsz)
-    newptr_bytes: heap u8& = newptr.cast[heap u8&]
-    oldptr_bytes: any u8& = oldptr.cast[any u8&]
+        newptr: heap void& = arena_alloc(a, newsz)
+        newptr_bytes: heap u8& = newptr.cast[heap u8&]
+        oldptr_bytes: any u8& = oldptr.cast[any u8&]
 
-    for i in 0..<oldsz:
-        newptr_bytes[i] <- oldptr_bytes[i]
+        for i in 0..<oldsz:
+            newptr_bytes[i] <- oldptr_bytes[i]
 
-    return newptr
+        return newptr
 
 # ------------------------------------------------------------
 # Memory/string helpers
@@ -281,13 +286,13 @@ def arena_memeq(lhs: any void&, rhs: any void&, n: usize) -> bool:
 
 def arena_strdup(a: mutable any Arena&, cstr: any u8&) -> mutable heap u8& can[Memory.Allocate, Abort.Panic]:
     n: usize = arena_strlen(cstr)
-    dup: heap u8& = arena_alloc(a, n + 1).cast[heap u8&]
+    dup: mutable heap u8& = arena_alloc(a, n + 1).cast[mutable heap u8&] can Memory.Allocate, Abort.Panic
     arena_memcpy(dup.cast[mutable any void&], cstr.cast[any void&], n)
     dup[n] <- 0
     return dup
 
 def arena_memdup(a: mutable any Arena&, data: any void&, size: usize) -> mutable heap void& can[Memory.Allocate, Abort.Panic]:
-    dup: heap void& = arena_alloc(a, size)
+    dup: mutable heap void& = arena_alloc(a, size) can Memory.Allocate, Abort.Panic
     _ = arena_memcpy(dup.cast[mutable any void&], data, size)
     return dup
 
@@ -336,28 +341,30 @@ def arena_rewind(a: mutable any Arena&, m: ArenaMark):
     a.end_index <- region_index
 
 def arena_free(a: mutable any Arena&) can[Memory.Release, Abort.Panic]:
-    r: mutable heap Region&? = a.begin
+    can Memory.Release, Abort.Panic:
+        r: mutable heap Region&? = a.begin
 
-    while r != null:
-        r0: mutable heap Region& = r
-        r <- r.next
-        free_region(r0)
+        while r != null:
+            r0: mutable heap Region& = r
+            r <- r.next
+            free_region(r0)
 
-    a.begin as ! <- null
-    a.end as ! <- null
-    a.end_index <- 0
+        a.begin as ! <- null
+        a.end as ! <- null
+        a.end_index <- 0
 
 def arena_trim(a: mutable any Arena&) can[Memory.Release, Abort.Panic]:
-    if a.end == null:
-        return
+    can Memory.Release, Abort.Panic:
+        if a.end == null:
+            return
 
-    r: mutable heap Region&? = a.end.next
-    while r != null:
-        r0: mutable heap Region& = r
-        r <- r.next
-        free_region(r0)
+        r: mutable heap Region&? = a.end.next
+        while r != null:
+            r0: mutable heap Region& = r
+            r <- r.next
+            free_region(r0)
 
-    a.end.next as ! <- null
+        a.end.next as ! <- null
 
 # ------------------------------------------------------------
 # Optional stdio formatting stubs
@@ -375,12 +382,13 @@ extern vsnprintf(
 ) -> int
 
 def arena_vsprintf(a: mutable any Arena&, format: any u8&, args: va_list) -> mutable heap u8& can[Memory.Allocate, Console.Format, Abort.Panic]:
-    args_copy: va_list = va_copy(args)
-    n: int = vsnprintf(null, 0, format, args_copy)
-    va_end(args_copy)
+    can Memory.Allocate, Console.Format, Abort.Panic:
+        args_copy: va_list = va_copy(args)
+        n: int = vsnprintf(null, 0, format, args_copy)
+        va_end(args_copy)
 
-    assert n >= 0
+        assert n >= 0
 
-    result: heap u8& = arena_alloc(a, n.usize() + 1).cast[heap u8&]
-    _ = vsnprintf(result.cast[any u8&?], n.usize() + 1, format, args)
-    return result
+        result: heap u8& = arena_alloc(a, n.usize() + 1).cast[heap u8&]
+        _ = vsnprintf(result.cast[any u8&?], n.usize() + 1, format, args)
+        return result

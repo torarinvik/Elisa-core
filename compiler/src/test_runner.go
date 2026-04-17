@@ -140,6 +140,17 @@ func selectedTestPermissionRefs(tests []*semantic.AnnotatedFunc) []ast.Permissio
 	return refs
 }
 
+func permissionGrantString(refs []ast.PermissionRef) string {
+	if len(refs) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		parts = append(parts, semantic.PermissionRefString(ref))
+	}
+	return strings.Join(parts, ", ")
+}
+
 type selectedTestCase struct {
 	Func       *semantic.AnnotatedFunc
 	SkipReason string
@@ -233,6 +244,9 @@ func generateTestRunnerSource(inputFile string, result *semantic.Result, filter 
 func buildTestRunnerSource(source []byte, cases []selectedTestCase, filter string) string {
 	runnable := runnableTests(cases)
 	skipped := countSkippedTests(cases)
+	permissionRefs := selectedTestPermissionRefs(runnable)
+	grant := permissionGrantString(permissionRefs)
+	bodyIndent := "\t"
 
 	var out strings.Builder
 	out.Write(source)
@@ -244,15 +258,23 @@ func buildTestRunnerSource(source []byte, cases []selectedTestCase, filter strin
 		out.WriteString("extern puts(text: any u8&) -> int can[Console.Write]\n\n")
 	}
 	out.WriteString("def ctx_test_main() -> int")
-	out.WriteString(semantic.PermissionRefsString(selectedTestPermissionRefs(runnable)))
+	out.WriteString(semantic.PermissionRefsString(permissionRefs))
 	out.WriteString(":\n")
+	if grant != "" && len(cases) != 0 {
+		out.WriteString("\tcan ")
+		out.WriteString(grant)
+		out.WriteString(":\n")
+		bodyIndent = "\t\t"
+	}
 
 	if len(cases) == 0 {
 		message := llcontextStringLiteral(fmt.Sprintf("[ NO TESTS ] no @test functions matched filter %q", strings.TrimSpace(filter)))
-		out.WriteString("\tputs(")
+		out.WriteString(bodyIndent)
+		out.WriteString("puts(")
 		out.WriteString(message)
-		out.WriteString(" -> any u8&)\n")
-		out.WriteString("\treturn 1\n\n")
+		out.WriteString(" -> any u8&) can Console.Write\n")
+		out.WriteString(bodyIndent)
+		out.WriteString("return 1\n\n")
 		out.WriteString("export func main() -> int = ctx_test_main\n")
 		return out.String()
 	}
@@ -270,27 +292,34 @@ func buildTestRunnerSource(source []byte, cases []selectedTestCase, filter strin
 		}
 		runLine := llcontextStringLiteral(formatTestLine("RUN", testCase.Func.Name, ""))
 		okLine := llcontextStringLiteral(formatTestLine("OK", testCase.Func.Name, ""))
-		out.WriteString("\tputs(")
+		out.WriteString(bodyIndent)
+		out.WriteString("puts(")
 		out.WriteString(runLine)
 		out.WriteString(" -> any u8&)\n")
-		out.WriteString("\t")
+		out.WriteString(bodyIndent)
 		out.WriteString(testCase.Func.Name)
 		out.WriteString("()\n")
-		out.WriteString("\tputs(")
+		out.WriteString(bodyIndent)
+		out.WriteString("puts(")
 		out.WriteString(okLine)
 		out.WriteString(" -> any u8&)\n")
 	}
 
 	summaryLine := llcontextStringLiteral(fmt.Sprintf("[ SUMMARY  ] %d test(s) selected; runnable=%d skipped=%d failed=0", len(cases), len(runnable), skipped))
-	out.WriteString("\tputs(")
+	out.WriteString(bodyIndent)
+	out.WriteString("puts(")
 	out.WriteString(summaryLine)
 	out.WriteString(" -> any u8&)\n")
-	out.WriteString("\treturn 0\n\n")
+	out.WriteString(bodyIndent)
+	out.WriteString("return 0\n\n")
 	out.WriteString("export func main() -> int = ctx_test_main\n")
 	return out.String()
 }
 
 func buildIsolatedTestRunnerSource(source []byte, testCase selectedTestCase) string {
+	permissionRefs := testCasePermissionRefs(testCase.Func)
+	grant := permissionGrantString(permissionRefs)
+
 	var out strings.Builder
 	out.Write(source)
 	if len(source) == 0 || source[len(source)-1] != '\n' {
@@ -298,14 +327,20 @@ func buildIsolatedTestRunnerSource(source []byte, testCase selectedTestCase) str
 	}
 	out.WriteByte('\n')
 	out.WriteString("def ctx_test_main() -> int")
-	out.WriteString(semantic.PermissionRefsString(selectedTestPermissionRefs([]*semantic.AnnotatedFunc{testCase.Func})))
+	out.WriteString(semantic.PermissionRefsString(permissionRefs))
 	out.WriteString(":\n")
 	if testCase.Func != nil {
 		out.WriteString("\t")
 		out.WriteString(testCase.Func.Name)
-		out.WriteString("()\n")
+		out.WriteString("()")
+		if grant != "" {
+			out.WriteString(" can ")
+			out.WriteString(grant)
+		}
+		out.WriteString("\n")
 	}
-	out.WriteString("\treturn 0\n\n")
+	out.WriteString("\t")
+	out.WriteString("return 0\n\n")
 	out.WriteString("export func main() -> int = ctx_test_main\n")
 	return out.String()
 }
@@ -345,15 +380,23 @@ func buildDispatchTestRunnerSource(source []byte, cases []selectedTestCase) stri
 		}
 		exportName := testCaseExportName(index)
 		internalName := testCaseInternalName(index)
+		permissionRefs := testCasePermissionRefs(testCase.Func)
+		grant := permissionGrantString(permissionRefs)
 		out.WriteString("def ")
 		out.WriteString(internalName)
 		out.WriteString("() -> int")
-		out.WriteString(semantic.PermissionRefsString(testCasePermissionRefs(testCase.Func)))
+		out.WriteString(semantic.PermissionRefsString(permissionRefs))
 		out.WriteString(":\n")
 		out.WriteString("\t")
 		out.WriteString(testCase.Func.Name)
-		out.WriteString("()\n")
-		out.WriteString("\treturn 0\n\n")
+		out.WriteString("()")
+		if grant != "" {
+			out.WriteString(" can ")
+			out.WriteString(grant)
+		}
+		out.WriteString("\n")
+		out.WriteString("\t")
+		out.WriteString("return 0\n\n")
 		out.WriteString("export func ")
 		out.WriteString(exportName)
 		out.WriteString("() -> int = ")

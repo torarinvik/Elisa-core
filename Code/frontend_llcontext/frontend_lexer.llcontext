@@ -4,8 +4,9 @@
 
 
 def frontend_require_arena(lexer: mutable any FrontendLexer&) -> mutable any Arena& can[Abort.Panic]:
-    assert lexer.arena != null
-    return lexer.arena
+    can Abort.Panic:
+        assert lexer.arena != null
+        return lexer.arena
 
 
 @inline(always)
@@ -16,15 +17,16 @@ def frontend_pending_is_empty(lexer: any FrontendLexer&) -> bool:
 
 def frontend_pending_push_back(lexer: mutable any FrontendLexer&, token: FrontendToken) can[Memory.Allocate, Abort.Panic]:
     push_back: func(mutable any Arena&, mutable any Deque[FrontendToken]&, FrontendToken) -> mutable any Deque[FrontendToken]& can[Memory.Allocate, Abort.Panic] = arena_deque_push_back.specialize[FrontendToken]()
-    _ = push_back(frontend_require_arena(lexer), (&lexer.pending_tokens).cast[mutable any Deque[FrontendToken]&], token)
+    _ = push_back(frontend_require_arena(lexer), (&lexer.pending_tokens).cast[mutable any Deque[FrontendToken]&], token) can Memory.Allocate, Abort.Panic
 
 
 def frontend_pending_pop_front(lexer: mutable any FrontendLexer&) -> FrontendToken can[Abort.Panic]:
-    pop_front: func(mutable any Deque[FrontendToken]&, mutable any FrontendToken&) -> bool can[Abort.Panic] = arena_deque_pop_front.specialize[FrontendToken]()
-    token: mutable FrontendToken = zeroed
-    ok: bool = pop_front((&lexer.pending_tokens).cast[mutable any Deque[FrontendToken]&], (&token).cast[mutable any FrontendToken&])
-    assert ok
-    return token
+    can Abort.Panic:
+        pop_front: func(mutable any Deque[FrontendToken]&, mutable any FrontendToken&) -> bool can[Abort.Panic] = arena_deque_pop_front.specialize[FrontendToken]()
+        token: mutable FrontendToken = zeroed
+        ok: bool = pop_front((&lexer.pending_tokens).cast[mutable any Deque[FrontendToken]&], (&token).cast[mutable any FrontendToken&])
+        assert ok
+        return token
 
 
 def frontend_new_lexer_with_len(a: mutable any Arena&, filename: any u8&, source: any u8&, source_len: usize) -> FrontendLexer can[Memory.Allocate, Abort.Panic]:
@@ -39,12 +41,13 @@ def frontend_new_lexer_with_len(a: mutable any Arena&, filename: any u8&, source
     out.at_line_start <- true
     out.paren_depth <- 0
     in a:
-        out.indent_stack.push(0)
+        out.indent_stack.push(0) can Memory.Allocate, Abort.Panic
     return out
 
 
 def frontend_new_lexer(a: mutable any Arena&, filename: any u8&, source: any u8&) -> FrontendLexer can[Memory.Allocate, Abort.Panic]:
-    return frontend_new_lexer_with_len(a, filename, source, runtime_strlen(source))
+    lexer: FrontendLexer = frontend_new_lexer_with_len(a, filename, source, runtime_strlen(source)) can Memory.Allocate, Abort.Panic
+    return lexer
 
 
 @inline(always)
@@ -115,16 +118,17 @@ def frontend_pending_has_tokens(lexer: any FrontendLexer&) -> bool:
 
 
 def frontend_push_pending(lexer: mutable any FrontendLexer&, token: FrontendToken) can[Memory.Allocate, Abort.Panic]:
-    frontend_pending_push_back(lexer, token)
+    frontend_pending_push_back(lexer, token) can Memory.Allocate, Abort.Panic
 
 
 def frontend_pop_pending(lexer: mutable any FrontendLexer&) -> FrontendToken can[Abort.Panic]:
-    return frontend_pending_pop_front(lexer)
+    token: FrontendToken = frontend_pending_pop_front(lexer) can Abort.Panic
+    return token
 
 
 def frontend_emit_pending_token(lexer: mutable any FrontendLexer&, kind: FrontendTokenKind) can[Memory.Allocate, Abort.Panic]:
     token: FrontendToken = frontend_make_token(kind, frontend_cur_pos(lexer), frontend_empty_view(), frontend_empty_view())
-    frontend_push_pending(lexer, token)
+    frontend_push_pending(lexer, token) can Memory.Allocate, Abort.Panic
 
 
 def frontend_skip_line_comment(lexer: mutable any FrontendLexer&):
@@ -154,8 +158,9 @@ def frontend_indent_top(lexer: any FrontendLexer&) -> usize:
 
 
 def frontend_push_indent(lexer: mutable any FrontendLexer&, value: usize) can[Memory.Allocate, Abort.Panic]:
-    in frontend_require_arena(lexer):
-        lexer.indent_stack.push(value)
+    can Memory.Allocate, Abort.Panic:
+        in frontend_require_arena(lexer):
+            lexer.indent_stack.push(value)
 
 
 def frontend_pop_indent(lexer: mutable any FrontendLexer&):
@@ -164,36 +169,37 @@ def frontend_pop_indent(lexer: mutable any FrontendLexer&):
 
 
 def frontend_handle_indentation(lexer: mutable any FrontendLexer&) can[Memory.Allocate, Abort.Panic]:
-    indent: mutable usize = frontend_measure_indent(lexer)
+    can Memory.Allocate, Abort.Panic:
+        indent: mutable usize = frontend_measure_indent(lexer)
 
-    scanning: mutable bool = true
-    while scanning:
-        if frontend_is_eof(lexer) or frontend_cur_char(lexer) == FRONTEND_CH_NL:
+        scanning: mutable bool = true
+        while scanning:
+            if frontend_is_eof(lexer) or frontend_cur_char(lexer) == FRONTEND_CH_NL:
+                return
+
+            if frontend_cur_char(lexer) == FRONTEND_CH_HASH:
+                frontend_skip_line_comment(lexer)
+                if not frontend_is_eof(lexer) and frontend_cur_char(lexer) == FRONTEND_CH_NL:
+                    _ = frontend_advance_char(lexer)
+                    while not frontend_is_eof(lexer) and frontend_cur_char(lexer) == FRONTEND_CH_NL:
+                        _ = frontend_advance_char(lexer)
+                indent <- frontend_measure_indent(lexer)
+            else:
+                scanning <- false
+
+        current: usize = frontend_indent_top(lexer)
+        if indent > current:
+            frontend_push_indent(lexer, indent)
+            frontend_emit_pending_token(lexer, FrontendTokenKind.Indent)
             return
 
-        if frontend_cur_char(lexer) == FRONTEND_CH_HASH:
-            frontend_skip_line_comment(lexer)
-            if not frontend_is_eof(lexer) and frontend_cur_char(lexer) == FRONTEND_CH_NL:
-                _ = frontend_advance_char(lexer)
-                while not frontend_is_eof(lexer) and frontend_cur_char(lexer) == FRONTEND_CH_NL:
-                    _ = frontend_advance_char(lexer)
-            indent <- frontend_measure_indent(lexer)
-        else:
-            scanning <- false
+        if indent < current:
+            while lexer.indent_stack.count > 1 and frontend_indent_top(lexer) > indent:
+                frontend_pop_indent(lexer)
+                frontend_emit_pending_token(lexer, FrontendTokenKind.Dedent)
 
-    current: usize = frontend_indent_top(lexer)
-    if indent > current:
-        frontend_push_indent(lexer, indent)
-        frontend_emit_pending_token(lexer, FrontendTokenKind.Indent)
-        return
-
-    if indent < current:
-        while lexer.indent_stack.count > 1 and frontend_indent_top(lexer) > indent:
-            frontend_pop_indent(lexer)
-            frontend_emit_pending_token(lexer, FrontendTokenKind.Dedent)
-
-        if frontend_indent_top(lexer) != indent:
-            frontend_emit_pending_token(lexer, FrontendTokenKind.Dedent)
+            if frontend_indent_top(lexer) != indent:
+                frontend_emit_pending_token(lexer, FrontendTokenKind.Dedent)
 
 
 @inline(always)
@@ -585,405 +591,409 @@ def frontend_read_ident_kind(lexer: mutable any FrontendLexer&) -> FrontendToken
 
 @inline(always)
 def frontend_next_token_kind(lexer: mutable any FrontendLexer&) -> FrontendTokenKind can[Memory.Allocate, Abort.Panic]:
-    if frontend_pending_has_tokens(lexer):
-        token: FrontendToken = frontend_pop_pending(lexer)
-        return token.kind
+    can Memory.Allocate, Abort.Panic:
+        if frontend_pending_has_tokens(lexer):
+            token: FrontendToken = frontend_pop_pending(lexer)
+            return token.kind
 
-    if lexer.at_line_start:
-        lexer.at_line_start <- false
-        if lexer.paren_depth == 0:
-            frontend_handle_indentation(lexer)
-            if frontend_pending_has_tokens(lexer):
-                token: FrontendToken = frontend_pop_pending(lexer)
-                return token.kind
+        if lexer.at_line_start:
+            lexer.at_line_start <- false
+            if lexer.paren_depth == 0:
+                frontend_handle_indentation(lexer)
+                if frontend_pending_has_tokens(lexer):
+                    token: FrontendToken = frontend_pop_pending(lexer)
+                    return token.kind
 
-    frontend_skip_spaces(lexer)
+        frontend_skip_spaces(lexer)
 
-    if frontend_is_eof(lexer):
-        if lexer.indent_stack.count > 1:
-            frontend_pop_indent(lexer)
-            return FrontendTokenKind.Dedent
-        return FrontendTokenKind.Eof
+        if frontend_is_eof(lexer):
+            if lexer.indent_stack.count > 1:
+                frontend_pop_indent(lexer)
+                return FrontendTokenKind.Dedent
+            return FrontendTokenKind.Eof
 
-    ch: i64 = frontend_cur_char(lexer)
-    if ch == FRONTEND_CH_NL:
-        _ = frontend_advance_char(lexer)
-        lexer.at_line_start <- true
-        while not frontend_is_eof(lexer) and frontend_cur_char(lexer) == FRONTEND_CH_NL:
+        ch: i64 = frontend_cur_char(lexer)
+        if ch == FRONTEND_CH_NL:
             _ = frontend_advance_char(lexer)
-        if lexer.paren_depth > 0:
+            lexer.at_line_start <- true
+            while not frontend_is_eof(lexer) and frontend_cur_char(lexer) == FRONTEND_CH_NL:
+                _ = frontend_advance_char(lexer)
+            if lexer.paren_depth > 0:
+                return frontend_next_token_kind(lexer)
+            return FrontendTokenKind.Newline
+
+        if ch == FRONTEND_CH_HASH:
+            frontend_skip_line_comment(lexer)
             return frontend_next_token_kind(lexer)
-        return FrontendTokenKind.Newline
 
-    if ch == FRONTEND_CH_HASH:
-        frontend_skip_line_comment(lexer)
-        return frontend_next_token_kind(lexer)
+        if ch == FRONTEND_CH_DQUOTE:
+            return frontend_skip_string_kind(lexer)
 
-    if ch == FRONTEND_CH_DQUOTE:
-        return frontend_skip_string_kind(lexer)
+        if ch == FRONTEND_CH_SQUOTE:
+            return frontend_skip_char_kind(lexer)
 
-    if ch == FRONTEND_CH_SQUOTE:
-        return frontend_skip_char_kind(lexer)
+        if frontend_is_digit(ch):
+            return frontend_read_number_kind(lexer)
 
-    if frontend_is_digit(ch):
-        return frontend_read_number_kind(lexer)
+        if frontend_is_ident_start(ch):
+            return frontend_read_ident_kind(lexer)
 
-    if frontend_is_ident_start(ch):
-        return frontend_read_ident_kind(lexer)
-
-    if ch == FRONTEND_CH_LT:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_MINUS):
-            return FrontendTokenKind.LArrow
-        if frontend_match_char(lexer, FRONTEND_CH_LT):
-            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-                return FrontendTokenKind.LShiftEq
-            return FrontendTokenKind.LShift
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return FrontendTokenKind.LtEq
-        return FrontendTokenKind.Lt
-
-    if ch == FRONTEND_CH_GT:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_GT):
-            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-                return FrontendTokenKind.RShiftEq
-            return FrontendTokenKind.RShift
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return FrontendTokenKind.GtEq
-        return FrontendTokenKind.Gt
-
-    if ch == FRONTEND_CH_ASSIGN:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return FrontendTokenKind.EqEq
-        return FrontendTokenKind.Assign
-
-    if ch == FRONTEND_CH_BANG:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return FrontendTokenKind.BangEq
-        return FrontendTokenKind.Bang
-
-    if ch == FRONTEND_CH_MINUS:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_GT):
-            return FrontendTokenKind.Arrow
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return FrontendTokenKind.MinusEq
-        return FrontendTokenKind.Minus
-
-    if ch == FRONTEND_CH_STAR:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return FrontendTokenKind.StarEq
-        return FrontendTokenKind.Star
-
-    if ch == FRONTEND_CH_SLASH:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return FrontendTokenKind.SlashEq
-        return FrontendTokenKind.Slash
-
-    if ch == FRONTEND_CH_PERCENT:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return FrontendTokenKind.PercentEq
-        return FrontendTokenKind.Percent
-
-    if ch == FRONTEND_CH_CARET:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return FrontendTokenKind.CaretEq
-        return FrontendTokenKind.Caret
-
-    if ch == 124:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return FrontendTokenKind.PipeEq
-        return FrontendTokenKind.Pipe
-
-    if ch == FRONTEND_CH_AMP:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return FrontendTokenKind.AmpEq
-        return FrontendTokenKind.Ampersand
-
-    if ch == FRONTEND_CH_DOT:
-        _ = frontend_advance_char(lexer)
-        if frontend_cur_char(lexer) == FRONTEND_CH_DOT:
-            if frontend_peek_char_at(lexer, 1) == FRONTEND_CH_DOT:
-                _ = frontend_advance_char(lexer)
-                _ = frontend_advance_char(lexer)
-                return FrontendTokenKind.Ellipsis
+        if ch == FRONTEND_CH_LT:
             _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_MINUS):
+                return FrontendTokenKind.LArrow
             if frontend_match_char(lexer, FRONTEND_CH_LT):
-                return FrontendTokenKind.RangeLt
+                if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                    return FrontendTokenKind.LShiftEq
+                return FrontendTokenKind.LShift
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return FrontendTokenKind.LtEq
+            return FrontendTokenKind.Lt
+
+        if ch == FRONTEND_CH_GT:
+            _ = frontend_advance_char(lexer)
             if frontend_match_char(lexer, FRONTEND_CH_GT):
-                return FrontendTokenKind.RangeGt
-            return FrontendTokenKind.Range
-        return FrontendTokenKind.Dot
+                if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                    return FrontendTokenKind.RShiftEq
+                return FrontendTokenKind.RShift
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return FrontendTokenKind.GtEq
+            return FrontendTokenKind.Gt
 
-    if ch == FRONTEND_CH_COLON:
+        if ch == FRONTEND_CH_ASSIGN:
+            _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return FrontendTokenKind.EqEq
+            return FrontendTokenKind.Assign
+
+        if ch == FRONTEND_CH_BANG:
+            _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return FrontendTokenKind.BangEq
+            return FrontendTokenKind.Bang
+
+        if ch == FRONTEND_CH_MINUS:
+            _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_GT):
+                return FrontendTokenKind.Arrow
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return FrontendTokenKind.MinusEq
+            return FrontendTokenKind.Minus
+
+        if ch == FRONTEND_CH_STAR:
+            _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return FrontendTokenKind.StarEq
+            return FrontendTokenKind.Star
+
+        if ch == FRONTEND_CH_SLASH:
+            _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return FrontendTokenKind.SlashEq
+            return FrontendTokenKind.Slash
+
+        if ch == FRONTEND_CH_PERCENT:
+            _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return FrontendTokenKind.PercentEq
+            return FrontendTokenKind.Percent
+
+        if ch == FRONTEND_CH_CARET:
+            _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return FrontendTokenKind.CaretEq
+            return FrontendTokenKind.Caret
+
+        if ch == 124:
+            _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return FrontendTokenKind.PipeEq
+            return FrontendTokenKind.Pipe
+
+        if ch == FRONTEND_CH_AMP:
+            _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return FrontendTokenKind.AmpEq
+            return FrontendTokenKind.Ampersand
+
+        if ch == FRONTEND_CH_DOT:
+            _ = frontend_advance_char(lexer)
+            if frontend_cur_char(lexer) == FRONTEND_CH_DOT:
+                if frontend_peek_char_at(lexer, 1) == FRONTEND_CH_DOT:
+                    _ = frontend_advance_char(lexer)
+                    _ = frontend_advance_char(lexer)
+                    return FrontendTokenKind.Ellipsis
+                _ = frontend_advance_char(lexer)
+                if frontend_match_char(lexer, FRONTEND_CH_LT):
+                    return FrontendTokenKind.RangeLt
+                if frontend_match_char(lexer, FRONTEND_CH_GT):
+                    return FrontendTokenKind.RangeGt
+                return FrontendTokenKind.Range
+            return FrontendTokenKind.Dot
+
+        if ch == FRONTEND_CH_COLON:
+            _ = frontend_advance_char(lexer)
+            return FrontendTokenKind.Colon
+
+        if ch == FRONTEND_CH_COMMA:
+            _ = frontend_advance_char(lexer)
+            return FrontendTokenKind.Comma
+
+        if ch == FRONTEND_CH_LPAREN:
+            _ = frontend_advance_char(lexer)
+            lexer.paren_depth <- lexer.paren_depth + 1
+            return FrontendTokenKind.LParen
+
+        if ch == FRONTEND_CH_RPAREN:
+            _ = frontend_advance_char(lexer)
+            if lexer.paren_depth > 0:
+                lexer.paren_depth <- lexer.paren_depth - 1
+            return FrontendTokenKind.RParen
+
+        if ch == FRONTEND_CH_LBRACKET:
+            _ = frontend_advance_char(lexer)
+            lexer.paren_depth <- lexer.paren_depth + 1
+            return FrontendTokenKind.LBracket
+
+        if ch == FRONTEND_CH_RBRACKET:
+            _ = frontend_advance_char(lexer)
+            if lexer.paren_depth > 0:
+                lexer.paren_depth <- lexer.paren_depth - 1
+            return FrontendTokenKind.RBracket
+
+        if ch == FRONTEND_CH_QUESTION:
+            _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return FrontendTokenKind.QAssign
+            return FrontendTokenKind.Question
+
+        if ch == FRONTEND_CH_TILDE:
+            _ = frontend_advance_char(lexer)
+            return FrontendTokenKind.Tilde
+
+        if ch == FRONTEND_CH_AT:
+            _ = frontend_advance_char(lexer)
+            return FrontendTokenKind.At
+
         _ = frontend_advance_char(lexer)
-        return FrontendTokenKind.Colon
-
-    if ch == FRONTEND_CH_COMMA:
-        _ = frontend_advance_char(lexer)
-        return FrontendTokenKind.Comma
-
-    if ch == FRONTEND_CH_LPAREN:
-        _ = frontend_advance_char(lexer)
-        lexer.paren_depth <- lexer.paren_depth + 1
-        return FrontendTokenKind.LParen
-
-    if ch == FRONTEND_CH_RPAREN:
-        _ = frontend_advance_char(lexer)
-        if lexer.paren_depth > 0:
-            lexer.paren_depth <- lexer.paren_depth - 1
-        return FrontendTokenKind.RParen
-
-    if ch == FRONTEND_CH_LBRACKET:
-        _ = frontend_advance_char(lexer)
-        lexer.paren_depth <- lexer.paren_depth + 1
-        return FrontendTokenKind.LBracket
-
-    if ch == FRONTEND_CH_RBRACKET:
-        _ = frontend_advance_char(lexer)
-        if lexer.paren_depth > 0:
-            lexer.paren_depth <- lexer.paren_depth - 1
-        return FrontendTokenKind.RBracket
-
-    if ch == FRONTEND_CH_QUESTION:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return FrontendTokenKind.QAssign
-        return FrontendTokenKind.Question
-
-    if ch == FRONTEND_CH_TILDE:
-        _ = frontend_advance_char(lexer)
-        return FrontendTokenKind.Tilde
-
-    if ch == FRONTEND_CH_AT:
-        _ = frontend_advance_char(lexer)
-        return FrontendTokenKind.At
-
-    _ = frontend_advance_char(lexer)
-    return FrontendTokenKind.Ident
+        return FrontendTokenKind.Ident
 
 
 def frontend_next_token(lexer: mutable any FrontendLexer&) -> FrontendToken can[Memory.Allocate, Abort.Panic]:
-    if frontend_pending_has_tokens(lexer):
-        return frontend_pop_pending(lexer)
+    can Memory.Allocate, Abort.Panic:
+        if frontend_pending_has_tokens(lexer):
+            return frontend_pop_pending(lexer)
 
-    if lexer.at_line_start:
-        lexer.at_line_start <- false
-        if lexer.paren_depth == 0:
-            frontend_handle_indentation(lexer)
-            if frontend_pending_has_tokens(lexer):
-                return frontend_pop_pending(lexer)
+        if lexer.at_line_start:
+            lexer.at_line_start <- false
+            if lexer.paren_depth == 0:
+                frontend_handle_indentation(lexer)
+                if frontend_pending_has_tokens(lexer):
+                    return frontend_pop_pending(lexer)
 
-    frontend_skip_spaces(lexer)
+        frontend_skip_spaces(lexer)
 
-    if frontend_is_eof(lexer):
-        if lexer.indent_stack.count > 1:
-            frontend_pop_indent(lexer)
-            return frontend_make_token(FrontendTokenKind.Dedent, frontend_cur_pos(lexer), frontend_empty_view(), frontend_empty_view())
-        return frontend_make_token(FrontendTokenKind.Eof, frontend_cur_pos(lexer), frontend_empty_view(), frontend_empty_view())
+        if frontend_is_eof(lexer):
+            if lexer.indent_stack.count > 1:
+                frontend_pop_indent(lexer)
+                return frontend_make_token(FrontendTokenKind.Dedent, frontend_cur_pos(lexer), frontend_empty_view(), frontend_empty_view())
+            return frontend_make_token(FrontendTokenKind.Eof, frontend_cur_pos(lexer), frontend_empty_view(), frontend_empty_view())
 
-    ch: i64 = frontend_cur_char(lexer)
-    if ch == FRONTEND_CH_NL:
-        pos: FrontendPos = frontend_cur_pos(lexer)
-        _ = frontend_advance_char(lexer)
-        lexer.at_line_start <- true
-        while not frontend_is_eof(lexer) and frontend_cur_char(lexer) == FRONTEND_CH_NL:
+        ch: i64 = frontend_cur_char(lexer)
+        if ch == FRONTEND_CH_NL:
+            pos: FrontendPos = frontend_cur_pos(lexer)
             _ = frontend_advance_char(lexer)
-        if lexer.paren_depth > 0:
+            lexer.at_line_start <- true
+            while not frontend_is_eof(lexer) and frontend_cur_char(lexer) == FRONTEND_CH_NL:
+                _ = frontend_advance_char(lexer)
+            if lexer.paren_depth > 0:
+                return frontend_next_token(lexer)
+            return frontend_make_token(FrontendTokenKind.Newline, pos, frontend_empty_view(), frontend_empty_view())
+
+        if ch == FRONTEND_CH_HASH:
+            frontend_skip_line_comment(lexer)
             return frontend_next_token(lexer)
-        return frontend_make_token(FrontendTokenKind.Newline, pos, frontend_empty_view(), frontend_empty_view())
 
-    if ch == FRONTEND_CH_HASH:
-        frontend_skip_line_comment(lexer)
-        return frontend_next_token(lexer)
+        if ch == FRONTEND_CH_DQUOTE:
+            return frontend_read_string(lexer)
 
-    if ch == FRONTEND_CH_DQUOTE:
-        return frontend_read_string(lexer)
+        if ch == FRONTEND_CH_SQUOTE:
+            return frontend_read_char(lexer)
 
-    if ch == FRONTEND_CH_SQUOTE:
-        return frontend_read_char(lexer)
+        if frontend_is_digit(ch):
+            return frontend_read_number(lexer)
 
-    if frontend_is_digit(ch):
-        return frontend_read_number(lexer)
+        if frontend_is_ident_start(ch):
+            return frontend_read_ident(lexer)
 
-    if frontend_is_ident_start(ch):
-        return frontend_read_ident(lexer)
+        pos: FrontendPos = frontend_cur_pos(lexer)
+        start: usize = lexer.pos
 
-    pos: FrontendPos = frontend_cur_pos(lexer)
-    start: usize = lexer.pos
-
-    if ch == FRONTEND_CH_LT:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_MINUS):
-            return frontend_make_token(FrontendTokenKind.LArrow, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-        if frontend_match_char(lexer, FRONTEND_CH_LT):
-            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-                return frontend_make_token(FrontendTokenKind.LShiftEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-            return frontend_make_token(FrontendTokenKind.LShift, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return frontend_make_token(FrontendTokenKind.LtEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-        return frontend_make_token(FrontendTokenKind.Lt, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-
-    if ch == FRONTEND_CH_GT:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_GT):
-            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-                return frontend_make_token(FrontendTokenKind.RShiftEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-            return frontend_make_token(FrontendTokenKind.RShift, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return frontend_make_token(FrontendTokenKind.GtEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-        return frontend_make_token(FrontendTokenKind.Gt, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-
-    if ch == FRONTEND_CH_ASSIGN:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return frontend_make_token(FrontendTokenKind.EqEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-        return frontend_make_token(FrontendTokenKind.Assign, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-
-    if ch == FRONTEND_CH_BANG:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return frontend_make_token(FrontendTokenKind.BangEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-        return frontend_make_token(FrontendTokenKind.Bang, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-
-    if ch == FRONTEND_CH_PLUS:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return frontend_make_token(FrontendTokenKind.PlusEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-        return frontend_make_token(FrontendTokenKind.Plus, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-
-    if ch == FRONTEND_CH_MINUS:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_GT):
-            return frontend_make_token(FrontendTokenKind.Arrow, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return frontend_make_token(FrontendTokenKind.MinusEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-        return frontend_make_token(FrontendTokenKind.Minus, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-
-    if ch == FRONTEND_CH_STAR:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return frontend_make_token(FrontendTokenKind.StarEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-        return frontend_make_token(FrontendTokenKind.Star, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-
-    if ch == FRONTEND_CH_SLASH:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return frontend_make_token(FrontendTokenKind.SlashEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-        return frontend_make_token(FrontendTokenKind.Slash, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-
-    if ch == FRONTEND_CH_PERCENT:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return frontend_make_token(FrontendTokenKind.PercentEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-        return frontend_make_token(FrontendTokenKind.Percent, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-
-    if ch == FRONTEND_CH_CARET:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return frontend_make_token(FrontendTokenKind.CaretEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-        return frontend_make_token(FrontendTokenKind.Caret, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-
-    if ch == 124:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return frontend_make_token(FrontendTokenKind.PipeEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-        return frontend_make_token(FrontendTokenKind.Pipe, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-
-    if ch == FRONTEND_CH_AMP:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return frontend_make_token(FrontendTokenKind.AmpEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-        return frontend_make_token(FrontendTokenKind.Ampersand, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-
-    if ch == FRONTEND_CH_DOT:
-        _ = frontend_advance_char(lexer)
-        if frontend_cur_char(lexer) == FRONTEND_CH_DOT:
-            if frontend_peek_char_at(lexer, 1) == FRONTEND_CH_DOT:
-                _ = frontend_advance_char(lexer)
-                _ = frontend_advance_char(lexer)
-                return frontend_make_token(FrontendTokenKind.Ellipsis, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+        if ch == FRONTEND_CH_LT:
             _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_MINUS):
+                return frontend_make_token(FrontendTokenKind.LArrow, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
             if frontend_match_char(lexer, FRONTEND_CH_LT):
-                return frontend_make_token(FrontendTokenKind.RangeLt, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+                if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                    return frontend_make_token(FrontendTokenKind.LShiftEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+                return frontend_make_token(FrontendTokenKind.LShift, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return frontend_make_token(FrontendTokenKind.LtEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+            return frontend_make_token(FrontendTokenKind.Lt, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+
+        if ch == FRONTEND_CH_GT:
+            _ = frontend_advance_char(lexer)
             if frontend_match_char(lexer, FRONTEND_CH_GT):
-                return frontend_make_token(FrontendTokenKind.RangeGt, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-            return frontend_make_token(FrontendTokenKind.Range, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-        return frontend_make_token(FrontendTokenKind.Dot, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+                if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                    return frontend_make_token(FrontendTokenKind.RShiftEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+                return frontend_make_token(FrontendTokenKind.RShift, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return frontend_make_token(FrontendTokenKind.GtEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+            return frontend_make_token(FrontendTokenKind.Gt, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
 
-    if ch == FRONTEND_CH_COLON:
+        if ch == FRONTEND_CH_ASSIGN:
+            _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return frontend_make_token(FrontendTokenKind.EqEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+            return frontend_make_token(FrontendTokenKind.Assign, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+
+        if ch == FRONTEND_CH_BANG:
+            _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return frontend_make_token(FrontendTokenKind.BangEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+            return frontend_make_token(FrontendTokenKind.Bang, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+
+        if ch == FRONTEND_CH_PLUS:
+            _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return frontend_make_token(FrontendTokenKind.PlusEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+            return frontend_make_token(FrontendTokenKind.Plus, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+
+        if ch == FRONTEND_CH_MINUS:
+            _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_GT):
+                return frontend_make_token(FrontendTokenKind.Arrow, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return frontend_make_token(FrontendTokenKind.MinusEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+            return frontend_make_token(FrontendTokenKind.Minus, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+
+        if ch == FRONTEND_CH_STAR:
+            _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return frontend_make_token(FrontendTokenKind.StarEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+            return frontend_make_token(FrontendTokenKind.Star, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+
+        if ch == FRONTEND_CH_SLASH:
+            _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return frontend_make_token(FrontendTokenKind.SlashEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+            return frontend_make_token(FrontendTokenKind.Slash, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+
+        if ch == FRONTEND_CH_PERCENT:
+            _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return frontend_make_token(FrontendTokenKind.PercentEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+            return frontend_make_token(FrontendTokenKind.Percent, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+
+        if ch == FRONTEND_CH_CARET:
+            _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return frontend_make_token(FrontendTokenKind.CaretEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+            return frontend_make_token(FrontendTokenKind.Caret, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+
+        if ch == 124:
+            _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return frontend_make_token(FrontendTokenKind.PipeEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+            return frontend_make_token(FrontendTokenKind.Pipe, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+
+        if ch == FRONTEND_CH_AMP:
+            _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return frontend_make_token(FrontendTokenKind.AmpEq, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+            return frontend_make_token(FrontendTokenKind.Ampersand, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+
+        if ch == FRONTEND_CH_DOT:
+            _ = frontend_advance_char(lexer)
+            if frontend_cur_char(lexer) == FRONTEND_CH_DOT:
+                if frontend_peek_char_at(lexer, 1) == FRONTEND_CH_DOT:
+                    _ = frontend_advance_char(lexer)
+                    _ = frontend_advance_char(lexer)
+                    return frontend_make_token(FrontendTokenKind.Ellipsis, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+                _ = frontend_advance_char(lexer)
+                if frontend_match_char(lexer, FRONTEND_CH_LT):
+                    return frontend_make_token(FrontendTokenKind.RangeLt, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+                if frontend_match_char(lexer, FRONTEND_CH_GT):
+                    return frontend_make_token(FrontendTokenKind.RangeGt, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+                return frontend_make_token(FrontendTokenKind.Range, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+            return frontend_make_token(FrontendTokenKind.Dot, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+
+        if ch == FRONTEND_CH_COLON:
+            _ = frontend_advance_char(lexer)
+            return frontend_make_token(FrontendTokenKind.Colon, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+
+        if ch == FRONTEND_CH_COMMA:
+            _ = frontend_advance_char(lexer)
+            return frontend_make_token(FrontendTokenKind.Comma, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+
+        if ch == FRONTEND_CH_LPAREN:
+            _ = frontend_advance_char(lexer)
+            lexer.paren_depth <- lexer.paren_depth + 1
+            return frontend_make_token(FrontendTokenKind.LParen, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+
+        if ch == FRONTEND_CH_RPAREN:
+            _ = frontend_advance_char(lexer)
+            if lexer.paren_depth > 0:
+                lexer.paren_depth <- lexer.paren_depth - 1
+            return frontend_make_token(FrontendTokenKind.RParen, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+
+        if ch == FRONTEND_CH_LBRACKET:
+            _ = frontend_advance_char(lexer)
+            lexer.paren_depth <- lexer.paren_depth + 1
+            return frontend_make_token(FrontendTokenKind.LBracket, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+
+        if ch == FRONTEND_CH_RBRACKET:
+            _ = frontend_advance_char(lexer)
+            if lexer.paren_depth > 0:
+                lexer.paren_depth <- lexer.paren_depth - 1
+            return frontend_make_token(FrontendTokenKind.RBracket, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+
+        if ch == FRONTEND_CH_QUESTION:
+            _ = frontend_advance_char(lexer)
+            if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                return frontend_make_token(FrontendTokenKind.QAssign, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+            return frontend_make_token(FrontendTokenKind.Question, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+
+        if ch == FRONTEND_CH_TILDE:
+            _ = frontend_advance_char(lexer)
+            return frontend_make_token(FrontendTokenKind.Tilde, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+
+        if ch == FRONTEND_CH_AT:
+            _ = frontend_advance_char(lexer)
+            return frontend_make_token(FrontendTokenKind.At, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+
         _ = frontend_advance_char(lexer)
-        return frontend_make_token(FrontendTokenKind.Colon, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+        return frontend_make_token(FrontendTokenKind.Ident, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
 
-    if ch == FRONTEND_CH_COMMA:
-        _ = frontend_advance_char(lexer)
-        return frontend_make_token(FrontendTokenKind.Comma, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-
-    if ch == FRONTEND_CH_LPAREN:
-        _ = frontend_advance_char(lexer)
-        lexer.paren_depth <- lexer.paren_depth + 1
-        return frontend_make_token(FrontendTokenKind.LParen, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-
-    if ch == FRONTEND_CH_RPAREN:
-        _ = frontend_advance_char(lexer)
-        if lexer.paren_depth > 0:
-            lexer.paren_depth <- lexer.paren_depth - 1
-        return frontend_make_token(FrontendTokenKind.RParen, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-
-    if ch == FRONTEND_CH_LBRACKET:
-        _ = frontend_advance_char(lexer)
-        lexer.paren_depth <- lexer.paren_depth + 1
-        return frontend_make_token(FrontendTokenKind.LBracket, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-
-    if ch == FRONTEND_CH_RBRACKET:
-        _ = frontend_advance_char(lexer)
-        if lexer.paren_depth > 0:
-            lexer.paren_depth <- lexer.paren_depth - 1
-        return frontend_make_token(FrontendTokenKind.RBracket, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-
-    if ch == FRONTEND_CH_QUESTION:
-        _ = frontend_advance_char(lexer)
-        if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
-            return frontend_make_token(FrontendTokenKind.QAssign, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-        return frontend_make_token(FrontendTokenKind.Question, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-
-    if ch == FRONTEND_CH_TILDE:
-        _ = frontend_advance_char(lexer)
-        return frontend_make_token(FrontendTokenKind.Tilde, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-
-    if ch == FRONTEND_CH_AT:
-        _ = frontend_advance_char(lexer)
-        return frontend_make_token(FrontendTokenKind.At, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-
-    _ = frontend_advance_char(lexer)
-    return frontend_make_token(FrontendTokenKind.Ident, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
-
-    return frontend_make_token(FrontendTokenKind.Eof, frontend_cur_pos(lexer), frontend_empty_view(), frontend_empty_view())
+        return frontend_make_token(FrontendTokenKind.Eof, frontend_cur_pos(lexer), frontend_empty_view(), frontend_empty_view())
 
 
 def frontend_tokenize(a: mutable any Arena&, filename: any u8&, source: any u8&) -> darray[FrontendToken] can[Memory.Allocate, Abort.Panic]:
-    return frontend_tokenize_with_len(a, filename, source, runtime_strlen(source))
+    tokens: darray[FrontendToken] = frontend_tokenize_with_len(a, filename, source, runtime_strlen(source)) can Memory.Allocate, Abort.Panic
+    return tokens
 
 
 def frontend_tokenize_with_len(a: mutable any Arena&, filename: any u8&, source: any u8&, source_len: usize) -> darray[FrontendToken] can[Memory.Allocate, Abort.Panic]:
-    lexer: mutable FrontendLexer = frontend_new_lexer_with_len(a, filename, source, source_len)
-    in a:
-        tokens: mutable darray[FrontendToken] = []
+    can Memory.Allocate, Abort.Panic:
+        lexer: mutable FrontendLexer = frontend_new_lexer_with_len(a, filename, source, source_len)
+        in a:
+            tokens: mutable darray[FrontendToken] = []
 
-        while true:
-            token: FrontendToken = frontend_next_token((&lexer).cast[mutable any FrontendLexer&])
-            tokens.push(token)
-            match token.kind:
-                FrontendTokenKind.Eof:
-                    return tokens
+            while true:
+                token: FrontendToken = frontend_next_token((&lexer).cast[mutable any FrontendLexer&])
+                tokens.push(token)
+                match token.kind:
+                    FrontendTokenKind.Eof:
+                        return tokens
 
-        return tokens
+            return tokens

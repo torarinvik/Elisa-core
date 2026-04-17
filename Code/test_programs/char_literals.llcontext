@@ -19,10 +19,11 @@ def char_array_checksum() -> i64:
     return values[0].i64() + values[1].i64() + values[2].i64() + values[3].i64()
 
 def char_literals_main_impl() -> int can[Abort.Panic]:
-    assert_eq(char_code(), 65)
-    assert_eq(escaped_char_code(), 10)
-    assert_eq(char_compare(), true)
-    assert_eq(char_array_checksum(), 208)
-    return 0
+    can Abort.Panic:
+        assert_eq(char_code(), 65)
+        assert_eq(escaped_char_code(), 10)
+        assert_eq(char_compare(), true)
+        assert_eq(char_array_checksum(), 208)
+        return 0
 
 export func main() -> int = char_literals_main_impl

@@ -39,18 +39,21 @@ func TestAnalyzeInfersSinkParamsAndAllowsImplicitSinkCalls(t *testing.T) {
 
 
 def take(thread: Thread[i64, Joinable]) -> i64 can[Thread.Join]:
-	return join(move thread)
+	can Thread.Join:
+		return join(move thread)
 
 
 def branch_take(flag: bool, thread: Thread[i64, Joinable]) -> i64 can[Thread.Join]:
-	if flag:
+	can Thread.Join:
+		if flag:
+			return take(thread)
 		return take(thread)
-	return take(thread)
 
 
 def run(flag: bool, thread: Thread[i64, Joinable]) -> i64 can[Thread.Join]:
-	result: i64 = branch_take(flag, thread)
-	return result
+	can Thread.Join:
+		result: i64 = branch_take(flag, thread)
+		return result
 `
 	result, errs := parseAndAnalyze(t, "sink_inference_ok.llcontext", src)
 	requireNoErrors(t, errs)

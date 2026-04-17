@@ -1872,6 +1872,65 @@ func TestRunCLIWarnsOnLegacyReverseIterableLoopSyntax(t *testing.T) {
 	}
 }
 
+func TestRunCLIFmtNormalizesSingleStatementGrantBlocks(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "grant_fmt_single_use.llcontext")
+	src := "def write_once(text: any u8&) -> int can[Console.Write]:\n    can Console.Write:\n        return puts(text)\n\ndef assign_once(target: mutable any i64&) can[Memory.Allocate]:\n    can Memory.Allocate:\n        target <- alloc_value()\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write single-use grant fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "fmt", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected formatter to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	formatted := stdout.String()
+	for _, check := range []string{
+		"return puts(text) can Console.Write",
+		"target <- alloc_value() can Memory.Allocate",
+	} {
+		if !strings.Contains(formatted, check) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", check, formatted)
+		}
+	}
+	for _, forbidden := range []string{"can Console.Write:", "can Memory.Allocate:"} {
+		if strings.Contains(formatted, forbidden) {
+			t.Fatalf("expected formatter to inline %q, got:\n%s", forbidden, formatted)
+		}
+	}
+}
+
+func TestRunCLIFmtKeepsPanicGrantBlocksInSurfaceSyntax(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "grant_fmt_panic.llcontext")
+	src := "def boom() can[Abort.Panic]:\n    can Abort.Panic:\n        panic(\"boom\")\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write panic grant fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "fmt", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected formatter to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	formatted := stdout.String()
+	if !strings.Contains(formatted, "can Abort.Panic:\n        panic(\"boom\")") {
+		t.Fatalf("expected formatter to preserve the panic grant block, got:\n%s", formatted)
+	}
+	if strings.Contains(formatted, "can can[") || strings.Contains(formatted, "panic(\"boom\") can Abort.Panic") {
+		t.Fatalf("expected formatter to keep surface grant syntax for panic blocks, got:\n%s", formatted)
+	}
+}
+
 func TestRunCLIPrintsPostfixCastHookSyntaxInAST(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "postfix_cast_hook_ast.llcontext")
@@ -2648,7 +2707,7 @@ func TestRunCLIContinuesAfterFailingAndSkippedTests(t *testing.T) {
 
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "execute_fail_skip_fixture.llcontext")
-	src := "@test\ndef alpha_case() -> void can[Abort.Panic]:\n    panic(\"boom\")\n\n@skip(todo)\n@test\ndef beta_case() -> void:\n    pass\n\n@test\ndef gamma_case() -> void:\n    pass\n"
+	src := "@test\ndef alpha_case() -> void can[Abort.Panic]:\n    can Abort.Panic:\n        panic(\"boom\")\n\n@skip(todo)\n@test\ndef beta_case() -> void:\n    pass\n\n@test\ndef gamma_case() -> void:\n    pass\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write fail/skip execute-tests fixture: %v", err)
 	}
@@ -2684,7 +2743,7 @@ func TestRunCLIContinuesAfterFailingAndSkippedTests(t *testing.T) {
 func TestRunCLICompilesPanicToBacktraceAwareLLVM(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "panic_backtrace_fixture.llcontext")
-	src := "def main() -> int can[Abort.Panic]:\n    panic(\"boom\")\n"
+	src := "def main() -> int can[Abort.Panic]:\n    can Abort.Panic:\n        panic(\"boom\")\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write panic backtrace fixture: %v", err)
 	}

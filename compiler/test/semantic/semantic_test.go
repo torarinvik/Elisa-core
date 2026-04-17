@@ -3012,13 +3012,14 @@ extern fetch_and(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 
 extern fetch_xor(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
 
 def ok(slot: mutable atomic[i64]) -> i64 can[Atomics.Rmw]:
-	slot_ref: any atomic[i64]& = (&slot).cast[any atomic[i64]&]
-	add: i64 = fetch_add(slot_ref, 1, MemoryOrder.AcqRel)
-	sub: i64 = fetch_sub(slot_ref, 2, MemoryOrder.AcqRel)
-	or_bits: i64 = fetch_or(slot_ref, 4, MemoryOrder.AcqRel)
-	and_bits: i64 = fetch_and(slot_ref, 8, MemoryOrder.AcqRel)
-	xor_bits: i64 = fetch_xor(slot_ref, 16, MemoryOrder.AcqRel)
-	return add + sub + or_bits + and_bits + xor_bits
+	can Atomics.Rmw:
+		slot_ref: any atomic[i64]& = (&slot).cast[any atomic[i64]&]
+		add: i64 = fetch_add(slot_ref, 1, MemoryOrder.AcqRel)
+		sub: i64 = fetch_sub(slot_ref, 2, MemoryOrder.AcqRel)
+		or_bits: i64 = fetch_or(slot_ref, 4, MemoryOrder.AcqRel)
+		and_bits: i64 = fetch_and(slot_ref, 8, MemoryOrder.AcqRel)
+		xor_bits: i64 = fetch_xor(slot_ref, 16, MemoryOrder.AcqRel)
+		return add + sub + or_bits + and_bits + xor_bits
 `
 	result, errs := parseAndAnalyze(t, "atomic_rmw_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -3080,9 +3081,10 @@ extern mutex_unlock(g: MutexGuard[Held]) -> void
 extern cond_wait(cv: any CondVar&, g: MutexGuard[Held]) -> MutexGuard[Held]
 
 def ok(mu: mutable Mutex, cv: mutable CondVar, ready: bool) -> void can[Sync.Lock, Sync.Unlock, Sync.Wait]:
-    lock mu as g:
-        while not ready:
-			g <- cond_wait((&cv).cast[any CondVar&], move g)
+	can Sync.Lock, Sync.Unlock, Sync.Wait:
+		lock mu as g:
+			while not ready:
+				g <- cond_wait((&cv).cast[any CondVar&], move g)
 `
 	result, errs := parseAndAnalyze(t, "lock_scope_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -3095,8 +3097,9 @@ func TestAnalyzeAcceptsPoolScopeSyntax(t *testing.T) {
 extern pool_shutdown(pool: any ThreadPool&) -> void
 
 def ok() -> bool can[Pool.Create, Pool.Shutdown]:
-	pool workers(2):
-		return workers.handle != null
+	can Pool.Create, Pool.Shutdown:
+		pool workers(2):
+			return workers.handle != null
 `
 	result, errs := parseAndAnalyze(t, "pool_scope_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -3117,9 +3120,10 @@ def work(value: i64) -> i64:
 	return value + 1
 
 def ok() -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.Await]:
-	pool workers(2):
-		task: Task[i64, Pending] = submit work(7)
-		return await task
+	can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.Await:
+		pool workers(2):
+			task: Task[i64, Pending] = submit work(7)
+			return await task
 `
 	result, errs := parseAndAnalyze(t, "submit_syntax_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -7088,16 +7092,17 @@ packed enum Expr:
 	Add(left: Expr, right: Expr)
 
 def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
-	store: Expr.Store[Local] = Expr.Store(owner)
-	in store:
-		_ = new Expr.Int(span: 1, value: 3)
-		_ = new Expr.Int(span: 2, value: 4)
-	frozen: Expr.Store[Frozen] = freeze(move store)
-	pool workers(2):
-		parallel for node in frozen:
-			if node in frozen as Expr.Int(value: value):
-				_ = value + node.span
-	return 0
+	can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+		store: Expr.Store[Local] = Expr.Store(owner)
+		in store:
+			_ = new Expr.Int(span: 1, value: 3)
+			_ = new Expr.Int(span: 2, value: 4)
+		frozen: Expr.Store[Frozen] = freeze(move store)
+		pool workers(2):
+			parallel for node in frozen:
+				if node in frozen as Expr.Int(value: value):
+					_ = value + node.span
+		return 0
 `
 	result, errs := parseAndAnalyze(t, "parallel_for_frozen_store_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -7112,19 +7117,20 @@ packed enum Expr:
 	Add(left: Expr, right: Expr)
 
 def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
-	store: Expr.Store[Local] = Expr.Store(owner)
-	in store:
-		left: Expr = new Expr.Int(value: 1)
-		right: Expr = new Expr.Int(value: 2)
-		_ = new Expr.Add(left: left, right: right)
-	frozen: Expr.Store[Frozen] = freeze(move store)
-	tags: dview[Expr.Tag] = frozen.tags
-	pool workers(2):
-		parallel for tag at i in tags:
-			_ = i
-			if tag == Expr.Tag.Add:
+	can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+		store: Expr.Store[Local] = Expr.Store(owner)
+		in store:
+			left: Expr = new Expr.Int(value: 1)
+			right: Expr = new Expr.Int(value: 2)
+			_ = new Expr.Add(left: left, right: right)
+		frozen: Expr.Store[Frozen] = freeze(move store)
+		tags: dview[Expr.Tag] = frozen.tags
+		pool workers(2):
+			parallel for tag at i in tags:
 				_ = i
-	return 0
+				if tag == Expr.Tag.Add:
+					_ = i
+		return 0
 `
 	result, errs := parseAndAnalyze(t, "parallel_for_packed_tags_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -7175,12 +7181,13 @@ def bad(store: Expr.Store[Frozen]) -> void can[Pool.Create, Pool.Shutdown, Pool.
 func TestAnalyzeAcceptsParallelForOverReadonlyChunksExactView(t *testing.T) {
 	src := parallelForConcurrencyPrelude + `
 def visit(values: darray[i32, 4]) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
-	full: dview[i32] = values[0:4]
-	chunks: ChunksExactView[i32] = chunks_exact(readonly(full), 2)
-	pool workers(2):
-		parallel for chunk in chunks:
-			_ = chunk[0] + chunk[1]
-	return 0
+	can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+		full: dview[i32] = values[0:4]
+		chunks: ChunksExactView[i32] = chunks_exact(readonly(full), 2)
+		pool workers(2):
+			parallel for chunk in chunks:
+				_ = chunk[0] + chunk[1]
+		return 0
 `
 	result, errs := parseAndAnalyze(t, "parallel_for_chunks_exact_ok.llcontext", src)
 	requireNoErrors(t, errs)

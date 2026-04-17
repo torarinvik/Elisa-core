@@ -746,9 +746,6 @@ func (a *Analyzer) validateFunctionPermissionUsage(fn *ast.FuncDecl) {
 	if sym, ok := a.symbolForFuncDecl(fn); ok {
 		if fnType, ok := sym.Type.(*FuncType); ok && fnType != nil {
 			a.currentFuncType = fnType
-			for _, family := range fnType.DeclaredPermissions {
-				granted[family] = true
-			}
 		}
 	}
 	a.validatePermissionStmts(fn.Body, granted)
@@ -863,7 +860,7 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.CanStmt:
 		families := a.resolvePermissionFamilies(n.Permissions, false)
-		a.validatePermissionStmts(n.Body, grantedPermissionFamilies(families))
+		a.validatePermissionStmts(n.Body, extendGrantedPermissionFamilies(granted, families))
 	case *ast.SignalStmt:
 		refs := a.resolvePermissionRefs(n.Permissions, false)
 		a.warnOnMissingLocalGrant(n.Pos(), "signal", refs, granted)
@@ -999,7 +996,7 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		a.validatePermissionExpr(n.Value, granted)
 	case *ast.CanExpr:
 		families := a.resolvePermissionFamilies(n.Permissions, false)
-		a.validatePermissionExpr(n.Expr, grantedPermissionFamilies(families))
+		a.validatePermissionExpr(n.Expr, extendGrantedPermissionFamilies(granted, families))
 	case *ast.MatchExpr:
 		a.validatePermissionExpr(n.Value, granted)
 		if n.Store != nil {
