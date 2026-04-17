@@ -167,6 +167,39 @@ When propagating fallible results, a function may return a broader error set tha
 
 Current lowering in the backend uses integer error codes at runtime; `void | ErrorSet` lowers directly to an error code, while value-carrying fallible functions now return that code plus a hidden payload out-parameter. Inside expressions and locals, the backend still materializes compact `{err, value}` LLVM structs when it needs a first-class error-union value.
 
+## Regular enums
+
+Regular `enum` values are inline tagged values. Constructors like `Expr.Int(1)` produce an `Expr` directly, so locals, returns, arrays, and optionals can store them without `new[...]`.
+
+```text
+enum Small:
+  Int(value: i64)
+  Pair(left: i64, right: i64)
+  Done
+
+def make_node(value: i64) -> Small:
+  return Small.Int(value)
+
+def score(node: Small) -> i64:
+  return match node:
+    Small.Int(value):
+      value
+    Small.Pair(left, right):
+      left + right
+    Small.Done:
+      0
+
+def total(seed: i64) -> i64:
+  items: array[Small, 3] = [Small.Int(1), make_node(seed), Small.Done]
+  maybe: Small? = Small.Pair(2, 3)
+  total: i64 = score(items[0]) + score(items[1]) + score(items[2])
+  if let node = maybe:
+    total = total + score(node)
+  return total
+```
+
+Use `new[region]` only when you need a reference to a regular enum value, such as a recursive structure whose payloads store `any Expr&` handles. For compile-checked examples, see `../Code/test_programs/regular_enum_values.llcontext` for by-value usage and `../Code/test_programs/recursive_enum.llcontext` for recursive references.
+
 ## Packed enums
 
 The frontend also supports explicit-store packed enums for arena-backed ADTs:

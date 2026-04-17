@@ -256,6 +256,17 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			},
 		},
 		{
+			name: "regular_enum_values",
+			path: filepath.Join(repoRoot, "Code", "test_programs", "regular_enum_values.llcontext"),
+			checks: []string{
+				"%Small = type { i32, [2 x i64] }",
+				"define %Small @make_node(i64",
+				"define i64 @score(%Small",
+				"define i64 @total(i64",
+				"define i64 @main()",
+			},
+		},
+		{
 			name: "region_checkpoints",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "region_checkpoints.llcontext"),
 			checks: []string{

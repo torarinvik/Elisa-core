@@ -1,0 +1,27 @@
+enum Small:
+    Int(value: i64)
+    Pair(left: i64, right: i64)
+    Done
+
+def make_node(value: i64) -> Small:
+    return Small.Int(value)
+
+def score(node: Small) -> i64:
+    return match node:
+        Small.Int(value):
+            value
+        Small.Pair(left, right):
+            left + right
+        Small.Done:
+            0
+
+def total(seed: i64) -> i64:
+    items: array[Small, 3] = [Small.Int(1), make_node(seed), Small.Done]
+    maybe: Small? = Small.Pair(2, 3)
+    total: i64 = score(items[0]) + score(items[1]) + score(items[2])
+    if let node = maybe:
+        total = total + score(node)
+    return total
+
+def main() -> i64:
+    return total(7)
