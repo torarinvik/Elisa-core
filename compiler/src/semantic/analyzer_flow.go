@@ -390,7 +390,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 	case *ast.WhileStmt:
 		condType := a.analyzeCondExpr(n.Cond)
 		if !IsBoolType(condType) {
-			a.errorf(n.Pos(), "while condition must be bool, got %s", condType.String())
+			a.errorf(n.Pos(), "while condition must be bool, got %s", condType)
 		}
 		mergedAffine := a.cloneAffineValueStates()
 		mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
@@ -425,7 +425,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if cond, ok := assertedCondition(n.Expr); ok {
 			condType := a.analyzeCondExpr(cond)
 			if !IsBoolType(condType) {
-				a.errorf(n.Pos(), "assert condition must be bool, got %s", condType.String())
+				a.errorf(n.Pos(), "assert condition must be bool, got %s", condType)
 			}
 			a.applyConditionRefinements(a.currentScope, cond, true)
 			return
@@ -559,7 +559,7 @@ func (a *Analyzer) analyzeOpenStmt(stmt *ast.OpenStmt) {
 		a.analyzeTreeOpenStmt(stmt, treeType)
 		return
 	}
-	a.errorf(stmt.Pos(), "open requires a packed enum or tree-category value, got %s", valueType.String())
+	a.errorf(stmt.Pos(), "open requires a packed enum or tree-category value, got %s", valueType)
 	a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
 }
 
@@ -694,7 +694,7 @@ func (a *Analyzer) resolveViewBindType(stmt *ast.ViewStmt, actual Type) (*Packed
 	}
 	enumType, _, ok := resolveMatchableEnumType(actual)
 	if !ok {
-		a.errorf(stmt.Pos(), "view requires a packed enum or tree-category value, got %s", actual.String())
+		a.errorf(stmt.Pos(), "view requires a packed enum or tree-category value, got %s", actual)
 		return nil, false
 	}
 	if !enumType.Packed {
@@ -742,7 +742,7 @@ func (a *Analyzer) analyzeScopeStmt(stmt *ast.ScopeStmt) {
 	}
 	guardType := a.analyzeExpr(stmt.Guard)
 	if !IsInvalidType(guardType) && len(CreateTypeBoundOps(guardType)) == 0 {
-		a.errorf(stmt.Guard.Pos(), "scope guard requires a value with synthesized cleanup behavior, got %s", guardType.String())
+		a.errorf(stmt.Guard.Pos(), "scope guard requires a value with synthesized cleanup behavior, got %s", guardType)
 	}
 	a.analyzeBlockWithAffineClone(stmt.Body, NewScope(a.currentScope))
 }
@@ -1208,9 +1208,9 @@ func (a *Analyzer) resolveMoveBindStructPattern(pattern *ast.MoveBindStructPatte
 	fields, ok := a.resolvedStructFields(actual)
 	if !ok {
 		if pattern.TypeName == "" {
-			a.errorf(pattern.Pos(), "destructuring pattern requires a concrete struct or store-row value, got %s", actual.String())
+			a.errorf(pattern.Pos(), "destructuring pattern requires a concrete struct or store-row value, got %s", actual)
 		} else {
-			a.errorf(pattern.Pos(), "move-as pattern %q requires a concrete struct value, got %s", pattern.TypeName, actual.String())
+			a.errorf(pattern.Pos(), "move-as pattern %q requires a concrete struct value, got %s", pattern.TypeName, actual)
 		}
 		return nil, false
 	}
@@ -1250,9 +1250,9 @@ func (a *Analyzer) resolveMoveBindStructPattern(pattern *ast.MoveBindStructPatte
 		}
 	case *TupleType:
 		if pattern.TypeName == "" {
-			a.errorf(pattern.Pos(), "destructuring pattern requires a concrete struct or store-row value, got %s", actual.String())
+			a.errorf(pattern.Pos(), "destructuring pattern requires a concrete struct or store-row value, got %s", actual)
 		} else {
-			a.errorf(pattern.Pos(), "move-as pattern %q requires a concrete struct value, got %s", pattern.TypeName, actual.String())
+			a.errorf(pattern.Pos(), "move-as pattern %q requires a concrete struct value, got %s", pattern.TypeName, actual)
 		}
 		return nil, false
 	}
@@ -1306,7 +1306,7 @@ func (a *Analyzer) resolveMatchStructPattern(pattern *ast.MatchStructPattern, ac
 	actual = StripAggregateStateType(actual)
 	fields, ok := a.resolvedStructFields(actual)
 	if !ok {
-		a.errorf(pattern.Pos(), "struct pattern %q requires a concrete struct value, got %s", pattern.TypeName, actual.String())
+		a.errorf(pattern.Pos(), "struct pattern %q requires a concrete struct value, got %s", pattern.TypeName, actual)
 		return nil, nil, false
 	}
 	switch tt := actual.(type) {
@@ -1344,7 +1344,7 @@ func (a *Analyzer) resolveMatchStructPattern(pattern *ast.MatchStructPattern, ac
 			return nil, nil, false
 		}
 	case *TupleType:
-		a.errorf(pattern.Pos(), "struct pattern %q requires a concrete struct value, got %s", pattern.TypeName, actual.String())
+		a.errorf(pattern.Pos(), "struct pattern %q requires a concrete struct value, got %s", pattern.TypeName, actual)
 		return nil, nil, false
 	}
 	ordered := make([]*ast.MatchPatternArg, len(fields))
@@ -1398,7 +1398,7 @@ func (a *Analyzer) resolveMoveBindVariantPattern(stmt *ast.MoveBindStmt, pattern
 	}
 	enumType, _, ok := resolveMatchableEnumType(actual)
 	if !ok {
-		a.errorf(pattern.Pos(), "move-as variant pattern %q.%q requires an enum value, got %s", pattern.EnumName, pattern.Variant, actual.String())
+		a.errorf(pattern.Pos(), "move-as variant pattern %q.%q requires an enum value, got %s", pattern.EnumName, pattern.Variant, actual)
 		return nil, nil, nil, false
 	}
 	if enumType.Name != pattern.EnumName {
@@ -1510,7 +1510,7 @@ func (a *Analyzer) collectMoveBindVariantBindings(pattern ast.MatchPattern, expe
 		}
 		treeType, _, treeOK := resolveMatchableTreeCategoryType(expected)
 		if !treeOK || treeType == nil {
-			a.errorf(p.Pos(), "nested move-as pattern %q requires an enum or tree-category payload, got %s", p.EnumName+"."+p.Variant, expected.String())
+			a.errorf(p.Pos(), "nested move-as pattern %q requires an enum or tree-category payload, got %s", p.EnumName+"."+p.Variant, expected)
 			return fields
 		}
 		if p.EnumName != treeType.Name {
@@ -1870,11 +1870,11 @@ func (a *Analyzer) validateMoveBindStore(pos lexer.Pos, valueExpr ast.Expr, actu
 	storeType := a.analyzeExpr(storeExpr)
 	packedStore, ok := storeType.(*PackedEnumStoreType)
 	if !ok {
-		a.errorf(storeExpr.Pos(), "packed enum move-as over %q requires store type %q, got %s", enumType.Name, packedEnumStoreTypeName(enumType.Name), storeType.String())
+		a.errorf(storeExpr.Pos(), "packed enum move-as over %q requires store type %q, got %s", enumType.Name, packedEnumStoreTypeName(enumType.Name), storeType)
 		return
 	}
 	if packedStore.Enum != enumType {
-		a.errorf(storeExpr.Pos(), "packed enum move-as over %q requires store type %q, got %s", enumType.Name, packedEnumStoreTypeName(enumType.Name), storeType.String())
+		a.errorf(storeExpr.Pos(), "packed enum move-as over %q requires store type %q, got %s", enumType.Name, packedEnumStoreTypeName(enumType.Name), storeType)
 	}
 }
 
@@ -1932,14 +1932,14 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 	endType := a.analyzeExpr(stmt.End)
 	loopType := CommonNumericType(startType, endType)
 	if !IsIntegralType(loopType) {
-		a.errorf(stmt.Pos(), "for loop range requires integral bounds, got %s and %s", startType.String(), endType.String())
+		a.errorf(stmt.Pos(), "for loop range requires integral bounds, got %s and %s", startType, endType)
 		loopType = invalidType
 	}
 	if stmt.Step != nil {
 		stepType := a.analyzeExpr(stmt.Step)
 		loopType = CommonNumericType(loopType, stepType)
 		if !IsIntegralType(stepType) || !IsIntegralType(loopType) {
-			a.errorf(stmt.Step.Pos(), "for loop range step must be integral, got %s", stepType.String())
+			a.errorf(stmt.Step.Pos(), "for loop range step must be integral, got %s", stepType)
 			loopType = invalidType
 		}
 		if value, ok := a.evalConstExpr(stmt.Step); ok && value.Kind == ConstInt && value.Int == 0 {
@@ -2046,7 +2046,7 @@ func (a *Analyzer) resolveIterLoopSourceInfo(sourceExpr ast.Expr, sourceType Typ
 		return iterLoopSourceInfo{}, false
 	case *RefType:
 		if tt.State != RefStateNonNull {
-			a.errorf(sourceExpr.Pos(), "iterable for loop requires a proven non-null reference source, got %s", sourceType.String())
+			a.errorf(sourceExpr.Pos(), "iterable for loop requires a proven non-null reference source, got %s", sourceType)
 			return iterLoopSourceInfo{}, false
 		}
 		info, ok := a.resolveIterLoopSourceInfo(sourceExpr, tt.Elem)
@@ -2112,7 +2112,7 @@ func (a *Analyzer) bindIterLoopPattern(scope *Scope, pattern ast.MoveBindPattern
 	case *ast.MoveBindTuplePattern:
 		tupleType, ok := StripAggregateStateType(itemType).(*TupleType)
 		if !ok || tupleType == nil {
-			a.errorf(p.Pos(), "iterable for tuple pattern requires a tuple item, got %s", itemType.String())
+			a.errorf(p.Pos(), "iterable for tuple pattern requires a tuple item, got %s", itemType)
 			return false
 		}
 		if len(p.Args) != len(tupleType.Fields) {
@@ -2151,23 +2151,23 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	sourceType := a.analyzeExpr(stmt.Source)
 	info, ok := a.resolveIterLoopSourceInfo(stmt.Source, sourceType)
 	if !ok {
-		a.errorf(stmt.Source.Pos(), "iterable for loop currently requires an array, dynamic array, view, store.rows(), string-like iterable, ChunksExactView, enumerate(source), or children(node), got %s", sourceType.String())
+		a.errorf(stmt.Source.Pos(), "iterable for loop currently requires an array, dynamic array, view, store.rows(), string-like iterable, ChunksExactView, enumerate(source), or children(node), got %s", sourceType)
 		info.ItemType = invalidType
 	}
 	if stmt.Mode == ast.IterBindValue && a.containsAffineHandleValues(info.ItemType, map[string]bool{}) {
-		a.errorf(stmt.Pos(), "for value iteration does not support affine element type %s; use ref or mutable ref", info.ItemType.String())
+		a.errorf(stmt.Pos(), "for value iteration does not support affine element type %s; use ref or mutable ref", info.ItemType)
 	}
 	if stmt.Mode != ast.IterBindValue && a.containsAffineHandleValues(info.ItemType, map[string]bool{}) && !isBorrowableAffineOwnerType(info.ItemType) {
-		a.errorf(stmt.Pos(), "references to values containing affine handles are not supported; got %s&", info.ItemType.String())
+		a.errorf(stmt.Pos(), "references to values containing affine handles are not supported; got %s&", info.ItemType)
 	}
 	switch stmt.Mode {
 	case ast.IterBindRef:
 		if !info.AllowRef {
-			a.errorf(stmt.Pos(), "for ref requires an addressable array-like iterable, got %s", sourceType.String())
+			a.errorf(stmt.Pos(), "for ref requires an addressable array-like iterable, got %s", sourceType)
 		}
 	case ast.IterBindMutableRef:
 		if !info.AllowMutableRef {
-			a.errorf(stmt.Pos(), "for mutable ref requires a writable addressable array-like iterable, got %s", sourceType.String())
+			a.errorf(stmt.Pos(), "for mutable ref requires a writable addressable array-like iterable, got %s", sourceType)
 		}
 	}
 
@@ -2176,7 +2176,7 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	if stmt.Filter != nil {
 		condType := a.analyzeCondExprInScope(stmt.Filter, loopScope)
 		if !IsBoolType(condType) {
-			a.errorf(stmt.Filter.Pos(), "for filter must be bool, got %s", condType.String())
+			a.errorf(stmt.Filter.Pos(), "for filter must be bool, got %s", condType)
 		}
 	}
 
@@ -2235,18 +2235,18 @@ func (a *Analyzer) analyzeParallelForStmt(stmt *ast.ParallelForStmt) {
 	sourceType := a.analyzeExpr(stmt.Source)
 	itemType, ok := parallelForItemType(sourceType)
 	if !ok {
-		a.errorf(stmt.Source.Pos(), "parallel for requires a frozen packed store or readonly dense view, got %s", sourceType.String())
+		a.errorf(stmt.Source.Pos(), "parallel for requires a frozen packed store or readonly dense view, got %s", sourceType)
 		itemType = invalidType
 	}
 	if ok {
 		if storeType, isStore := sourceType.(*PackedEnumStoreType); isStore {
 			if !IsFrozenPackedEnumStoreType(storeType) {
-				a.errorf(stmt.Source.Pos(), "parallel for requires a frozen packed store or readonly dense view, got %s", sourceType.String())
+				a.errorf(stmt.Source.Pos(), "parallel for requires a frozen packed store or readonly dense view, got %s", sourceType)
 			}
 		} else {
 			facts, hasFacts := a.exprFacts[stmt.Source]
 			if !hasFacts || !facts.ReadOnly || !facts.Contiguous || !facts.UnitStride || !facts.HasExactExtent() {
-				a.errorf(stmt.Source.Pos(), "parallel for requires a readonly contiguous exact-extent view, got %s", sourceType.String())
+				a.errorf(stmt.Source.Pos(), "parallel for requires a readonly contiguous exact-extent view, got %s", sourceType)
 			}
 		}
 	}
@@ -2279,7 +2279,7 @@ func (a *Analyzer) analyzeParallelForStmt(stmt *ast.ParallelForStmt) {
 			continue
 		}
 		if !a.parallelForCaptureTypeAllowed(sym.Type, map[string]bool{}) {
-			a.errorf(stmt.Pos(), "parallel for capture %q has unsupported shared type %s", name, sym.Type.String())
+			a.errorf(stmt.Pos(), "parallel for capture %q has unsupported shared type %s", name, sym.Type)
 			continue
 		}
 		if bindingExpr, ok := a.currentValueBindings[sym]; ok && bindingExpr != nil {
@@ -3215,7 +3215,7 @@ func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
 	}
 	packedStore, ok := storeType.(*PackedEnumStoreType)
 	if !ok {
-		a.errorf(stmt.Store.Pos(), "in-block requires a tree store, packed enum store, perm, an Arena value, or an Arena reference, got %s", storeType.String())
+		a.errorf(stmt.Store.Pos(), "in-block requires a tree store, packed enum store, perm, an Arena value, or an Arena reference, got %s", storeType)
 		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
 		a.currentTreeAllocOwner = savedTreeAllocOwner
 		a.currentAllocExpr = savedAllocExpr
@@ -3348,7 +3348,7 @@ func (a *Analyzer) bindCheckpointTarget(pos lexer.Pos, name string, target ast.E
 		}
 	}
 	if _, ok := checkpointDArraySourceType(targetType); !ok {
-		a.errorf(target.Pos(), "checkpoint requires a region or mutable darray value, got %s", targetType.String())
+		a.errorf(target.Pos(), "checkpoint requires a region or mutable darray value, got %s", targetType)
 		return checkpointBindingHandle{}, false
 	}
 	markSym := &Symbol{Name: name, Kind: SymbolCheckpoint, Type: a.namedTypes["usize"], Node: node, Mutable: false}
@@ -3468,7 +3468,7 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 		a.analyzeStructMatchStmt(stmt, valueType)
 		return
 	}
-	a.errorf(stmt.Pos(), "match requires an enum, tree-category, or string value, got %s", valueType.String())
+	a.errorf(stmt.Pos(), "match requires an enum, tree-category, or string value, got %s", valueType)
 	for _, arm := range stmt.Arms {
 		a.analyzeBlockWithRegionClone(arm.Body, NewScope(a.currentScope))
 	}
@@ -3632,7 +3632,7 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 	if _, ok := a.resolvedStructFields(valueType); ok {
 		return a.analyzeStructMatchExpr(expr, valueType)
 	}
-	a.errorf(expr.Pos(), "match requires an enum, tree-category, or string value, got %s", valueType.String())
+	a.errorf(expr.Pos(), "match requires an enum, tree-category, or string value, got %s", valueType)
 	for _, arm := range expr.Arms {
 		a.analyzeMatchExprArmBody(arm.Body, NewScope(a.currentScope))
 	}
@@ -3777,7 +3777,7 @@ func (a *Analyzer) reportNonExhaustiveVisit(pos lexer.Pos, root treeVisitRootInf
 func (a *Analyzer) resolveVisitRootInfo(valueType Type, rootExpr ast.TypeExpr, pos lexer.Pos) (treeVisitRootInfo, bool) {
 	sourceMember, sourceFamily, ok := resolveTreeVisitSourceType(valueType)
 	if !ok || sourceFamily == nil {
-		a.errorf(pos, "visit/fold expects a tree node source, got %s", valueType.String())
+		a.errorf(pos, "visit/fold expects a tree node source, got %s", valueType)
 		return treeVisitRootInfo{}, false
 	}
 	if rootExpr == nil {
@@ -3790,7 +3790,7 @@ func (a *Analyzer) resolveVisitRootInfo(valueType Type, rootExpr ast.TypeExpr, p
 		case *TreeStructType:
 			return treeVisitRootInfo{Kind: treeVisitRootKindExact, Family: tt.Family, Exact: tt}, true
 		default:
-			a.errorf(pos, "visit/fold requires an explicit `as Family.Node` root for %s", valueType.String())
+			a.errorf(pos, "visit/fold requires an explicit `as Family.Node` root for %s", valueType)
 			return treeVisitRootInfo{}, false
 		}
 	}
@@ -3801,31 +3801,31 @@ func (a *Analyzer) resolveVisitRootInfo(valueType Type, rootExpr ast.TypeExpr, p
 			break
 		}
 		if sourceFamily != tt.Family {
-			a.errorf(rootExpr.Pos(), "visit/fold root %s does not match source family %s", tt.String(), sourceFamily.Name)
+			a.errorf(rootExpr.Pos(), "visit/fold root %s does not match source family %s", tt, sourceFamily.Name)
 			return treeVisitRootInfo{}, false
 		}
 		return treeVisitRootInfo{Kind: treeVisitRootKindFamily, Family: tt.Family}, true
 	case *TreeCategoryType:
 		category, _, matchable := resolveMatchableTreeCategoryType(valueType)
 		if !matchable || category != tt {
-			a.errorf(rootExpr.Pos(), "visit/fold root %s requires a %s source, got %s", tt.String(), tt.String(), valueType.String())
+			a.errorf(rootExpr.Pos(), "visit/fold root %s requires a %s source, got %s", tt, tt, valueType)
 			return treeVisitRootInfo{}, false
 		}
 		return treeVisitRootInfo{Kind: treeVisitRootKindCategory, Family: tt.Family, Category: tt}, true
 	case *TreeBlockType:
 		if !SameType(sourceMember, tt) {
-			a.errorf(rootExpr.Pos(), "visit/fold root %s requires a %s source, got %s", tt.String(), tt.String(), valueType.String())
+			a.errorf(rootExpr.Pos(), "visit/fold root %s requires a %s source, got %s", tt, tt, valueType)
 			return treeVisitRootInfo{}, false
 		}
 		return treeVisitRootInfo{Kind: treeVisitRootKindExact, Family: tt.Family, Exact: tt}, true
 	case *TreeStructType:
 		if !SameType(sourceMember, tt) {
-			a.errorf(rootExpr.Pos(), "visit/fold root %s requires a %s source, got %s", tt.String(), tt.String(), valueType.String())
+			a.errorf(rootExpr.Pos(), "visit/fold root %s requires a %s source, got %s", tt, tt, valueType)
 			return treeVisitRootInfo{}, false
 		}
 		return treeVisitRootInfo{Kind: treeVisitRootKindExact, Family: tt.Family, Exact: tt}, true
 	}
-	a.errorf(rootExpr.Pos(), "visit/fold root expects a tree category, tree member, or Family.Node type, got %s", rootType.String())
+	a.errorf(rootExpr.Pos(), "visit/fold root expects a tree category, tree member, or Family.Node type, got %s", rootType)
 	return treeVisitRootInfo{}, false
 }
 
@@ -3838,16 +3838,16 @@ func (a *Analyzer) resolveVisitArmInfo(root treeVisitRootInfo, arm ast.VisitArm)
 		switch root.Kind {
 		case treeVisitRootKindCategory:
 			if category != root.Category {
-				a.errorf(arm.Position, "visit arm %q is outside the %s visit domain", arm.TargetName, root.Category.String())
+				a.errorf(arm.Position, "visit arm %q is outside the %s visit domain", arm.TargetName, root.Category)
 				return treeVisitArmInfo{}, false
 			}
 		case treeVisitRootKindFamily:
 			if category == nil || category.Family != root.Family {
-				a.errorf(arm.Position, "visit arm %q is outside the %s visit domain", arm.TargetName, root.Family.NodeType.String())
+				a.errorf(arm.Position, "visit arm %q is outside the %s visit domain", arm.TargetName, root.Family.NodeType)
 				return treeVisitArmInfo{}, false
 			}
 		default:
-			a.errorf(arm.Position, "visit arm %q cannot appear when visiting exact member %s", arm.TargetName, root.Exact.String())
+			a.errorf(arm.Position, "visit arm %q cannot appear when visiting exact member %s", arm.TargetName, root.Exact)
 			return treeVisitArmInfo{}, false
 		}
 		viewType := category.VariantViewType(variant)
@@ -3863,16 +3863,16 @@ func (a *Analyzer) resolveVisitArmInfo(root treeVisitRootInfo, arm ast.VisitArm)
 		switch root.Kind {
 		case treeVisitRootKindFamily:
 			if tt.Family != root.Family {
-				a.errorf(arm.Position, "visit arm %q is outside the %s visit domain", arm.TargetName, root.Family.NodeType.String())
+				a.errorf(arm.Position, "visit arm %q is outside the %s visit domain", arm.TargetName, root.Family.NodeType)
 				return treeVisitArmInfo{}, false
 			}
 		case treeVisitRootKindExact:
 			if !SameType(tt, root.Exact) {
-				a.errorf(arm.Position, "visit arm %q is outside the %s visit domain", arm.TargetName, root.Exact.String())
+				a.errorf(arm.Position, "visit arm %q is outside the %s visit domain", arm.TargetName, root.Exact)
 				return treeVisitArmInfo{}, false
 			}
 		default:
-			a.errorf(arm.Position, "visit arm %q cannot appear in a %s visit", arm.TargetName, root.Category.String())
+			a.errorf(arm.Position, "visit arm %q cannot appear in a %s visit", arm.TargetName, root.Category)
 			return treeVisitArmInfo{}, false
 		}
 		return treeVisitArmInfo{Arm: arm, Key: tt.String(), BindType: tt, Exact: tt}, true
@@ -3880,16 +3880,16 @@ func (a *Analyzer) resolveVisitArmInfo(root treeVisitRootInfo, arm ast.VisitArm)
 		switch root.Kind {
 		case treeVisitRootKindFamily:
 			if tt.Family != root.Family {
-				a.errorf(arm.Position, "visit arm %q is outside the %s visit domain", arm.TargetName, root.Family.NodeType.String())
+				a.errorf(arm.Position, "visit arm %q is outside the %s visit domain", arm.TargetName, root.Family.NodeType)
 				return treeVisitArmInfo{}, false
 			}
 		case treeVisitRootKindExact:
 			if !SameType(tt, root.Exact) {
-				a.errorf(arm.Position, "visit arm %q is outside the %s visit domain", arm.TargetName, root.Exact.String())
+				a.errorf(arm.Position, "visit arm %q is outside the %s visit domain", arm.TargetName, root.Exact)
 				return treeVisitArmInfo{}, false
 			}
 		default:
-			a.errorf(arm.Position, "visit arm %q cannot appear in a %s visit", arm.TargetName, root.Category.String())
+			a.errorf(arm.Position, "visit arm %q cannot appear in a %s visit", arm.TargetName, root.Category)
 			return treeVisitArmInfo{}, false
 		}
 		return treeVisitArmInfo{Arm: arm, Key: tt.String(), BindType: tt, Exact: tt}, true
@@ -3940,7 +3940,7 @@ func (a *Analyzer) analyzeVisitArmBody(armInfo treeVisitArmInfo, resultType Type
 	if hasGuard {
 		guardType, guardSnapshot := a.analyzeExprInAffineScope(armInfo.Arm.Guard, scope)
 		if !IsBoolType(guardType) {
-			a.errorf(armInfo.Arm.Guard.Pos(), "visit arm guard must be bool, got %s", guardType.String())
+			a.errorf(armInfo.Arm.Guard.Pos(), "visit arm guard must be bool, got %s", guardType)
 		}
 		guardFallthrough = guardSnapshot
 		bodyScope = a.refinedScopeForCondition(scope, armInfo.Arm.Guard, true)
@@ -4064,7 +4064,7 @@ func (a *Analyzer) analyzeVisitExpr(expr *ast.VisitExpr) Type {
 		}
 		merged := MergeTypes(resultType, armType)
 		if IsInvalidType(merged) {
-			a.errorf(arm.Position, "visit expression arms are incompatible: %s and %s", resultType.String(), armType.String())
+			a.errorf(arm.Position, "visit expression arms are incompatible: %s and %s", resultType, armType)
 			resultType = invalidType
 			continue
 		}
@@ -4199,7 +4199,7 @@ func (a *Analyzer) validateFoldRecursionRoot(pos lexer.Pos, root treeVisitRootIn
 			if root.Family != nil && root.Family.NodeType != nil {
 				familyLabel = root.Family.NodeType.String()
 			}
-			a.errorf(pos, "fold over %s requires an explicit `as %s` root because structural children include %s", rootType.String(), familyLabel, childType.String())
+			a.errorf(pos, "fold over %s requires an explicit `as %s` root because structural children include %s", rootType, familyLabel, childType)
 			return
 		}
 	}
@@ -4281,7 +4281,7 @@ func (a *Analyzer) analyzeFoldExpr(expr *ast.FoldExpr) Type {
 		scope := NewScope(a.currentScope)
 		armType, armSnapshot, armCanFallthrough := a.analyzeVisitArmBody(armInfo, resultType, scope, true)
 		if !IsNeverType(armType) && !AssignableTo(resultType, armType) {
-			a.errorf(arm.Position, "fold arm %q expects %s, got %s", arm.TargetName, resultType.String(), armType.String())
+			a.errorf(arm.Position, "fold arm %q expects %s, got %s", arm.TargetName, resultType, armType)
 			a.reportShapeMismatchNotes(arm.Position, resultType, armType)
 		}
 		if armCanFallthrough {
@@ -4378,7 +4378,7 @@ func (a *Analyzer) analyzeEnumMatchExpr(expr *ast.MatchExpr, valueType Type, enu
 		}
 		merged := MergeTypes(resultType, armType)
 		if IsInvalidType(merged) {
-			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType.String(), armType.String())
+			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType, armType)
 			resultType = invalidType
 			priorPatterns = append(priorPatterns, arm.Pattern)
 			continue
@@ -4468,7 +4468,7 @@ func (a *Analyzer) analyzeTreeMatchExpr(expr *ast.MatchExpr, treeType *TreeCateg
 		}
 		merged := MergeTypes(resultType, armType)
 		if IsInvalidType(merged) {
-			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType.String(), armType.String())
+			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType, armType)
 			resultType = invalidType
 			priorPatterns = append(priorPatterns, arm.Pattern)
 			continue
@@ -4629,7 +4629,7 @@ func (a *Analyzer) analyzeStringMatchExpr(expr *ast.MatchExpr, valueType Type) T
 		}
 		merged := MergeTypes(resultType, armType)
 		if IsInvalidType(merged) {
-			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType.String(), armType.String())
+			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType, armType)
 			resultType = invalidType
 			priorPatterns = append(priorPatterns, arm.Pattern)
 			continue
@@ -4790,7 +4790,7 @@ func (a *Analyzer) analyzeStructMatchExpr(expr *ast.MatchExpr, valueType Type) T
 		}
 		merged := MergeTypes(resultType, armType)
 		if IsInvalidType(merged) {
-			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType.String(), armType.String())
+			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType, armType)
 			resultType = invalidType
 			priorPatterns = append(priorPatterns, arm.Pattern)
 			continue
@@ -4871,11 +4871,11 @@ func (a *Analyzer) validateMatchStore(pos lexer.Pos, valueExpr ast.Expr, actual 
 	storeType := a.analyzeExpr(storeExpr)
 	packedStore, ok := storeType.(*PackedEnumStoreType)
 	if !ok {
-		a.errorf(storeExpr.Pos(), "packed enum match over %q requires store type %q, got %s", enumType.Name, packedEnumStoreTypeName(enumType.Name), storeType.String())
+		a.errorf(storeExpr.Pos(), "packed enum match over %q requires store type %q, got %s", enumType.Name, packedEnumStoreTypeName(enumType.Name), storeType)
 		return
 	}
 	if packedStore.Enum != enumType {
-		a.errorf(storeExpr.Pos(), "packed enum match over %q requires store type %q, got %s", enumType.Name, packedEnumStoreTypeName(enumType.Name), storeType.String())
+		a.errorf(storeExpr.Pos(), "packed enum match over %q requires store type %q, got %s", enumType.Name, packedEnumStoreTypeName(enumType.Name), storeType)
 	}
 }
 
@@ -5359,7 +5359,7 @@ func (a *Analyzer) analyzeTopLevelStringMatchPattern(pattern ast.MatchPattern, v
 		return true
 	case *ast.MatchStringLiteralPattern:
 		if !isStringMatchableType(valueType) {
-			a.errorf(p.Pos(), "match arm expects a string value, got %s", valueType.String())
+			a.errorf(p.Pos(), "match arm expects a string value, got %s", valueType)
 		}
 		return false
 	case *ast.MatchBindPattern:
@@ -5782,7 +5782,7 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 				a.analyzeNestedMatchPattern(arg.Pattern, variant.Payload[i], payloadExpr, scope)
 			}
 		default:
-			a.errorf(p.Pos(), "nested variant pattern %q requires an enum or tree-category payload, got %s", p.EnumName+"."+p.Variant, expected.String())
+			a.errorf(p.Pos(), "nested variant pattern %q requires an enum or tree-category payload, got %s", p.EnumName+"."+p.Variant, expected)
 		}
 	case *ast.MatchStringLiteralPattern:
 		a.analyzeLiteralMatchPatternExpr(p.Pos(), &ast.StringLit{Position: p.Position, Value: p.Value}, expected, "nested literal match pattern")
@@ -5825,7 +5825,7 @@ func (a *Analyzer) analyzeLiteralMatchPatternExpr(pos lexer.Pos, literalExpr ast
 	if AssignableTo(expected, actual) || AssignableTo(actual, expected) || refsComparableIgnoringMutability(expected, actual) {
 		return
 	}
-	a.errorf(pos, "%s cannot compare %s against %s", context, actual.String(), expected.String())
+	a.errorf(pos, "%s cannot compare %s against %s", context, actual, expected)
 }
 
 func (a *Analyzer) resolveMatchPatternArgs(pattern *ast.MatchVariantPattern, variant *EnumVariant, qualified string, nested bool) []*ast.MatchPatternArg {
@@ -6103,7 +6103,7 @@ func (a *Analyzer) collectConditionStructPatternBindingTypes(pattern ast.MatchPa
 		}
 		if prev, ok := out[p.Name]; ok {
 			if !SameType(prev, expected) {
-				a.errorf(p.Pos(), "condition binding %q has inconsistent types %s and %s", p.Name, prev.String(), expected.String())
+				a.errorf(p.Pos(), "condition binding %q has inconsistent types %s and %s", p.Name, prev, expected)
 			}
 			return
 		}
@@ -6188,7 +6188,7 @@ func (a *Analyzer) collectGuaranteedTruthyConditionBindingTypes(expr ast.Expr) m
 			}
 			for name, typ := range right {
 				if prev, ok := out[name]; ok && !SameType(prev, typ) {
-					a.errorf(n.Pos(), "condition binding %q has inconsistent types %s and %s", name, prev.String(), typ.String())
+					a.errorf(n.Pos(), "condition binding %q has inconsistent types %s and %s", name, prev, typ)
 					continue
 				}
 				out[name] = typ

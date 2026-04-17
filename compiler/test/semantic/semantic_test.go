@@ -9998,6 +9998,18 @@ def erase_explicit(text: dstr[row]) -> dstr:
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsShapeErasingSViewShorthand(t *testing.T) {
+	src := `def keep_surface(text: sview) -> sview:
+	return text
+
+def slice_prefix(text: dstr[row]) -> sview:
+	prefix: sview = text[0:1]
+	return prefix
+`
+	_, errs := parseAndAnalyze(t, "sview_shorthand_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeRejectsRecoveringExplicitShapeFromDStrShorthand(t *testing.T) {
 	src := `def bad(text: dstr) -> dstr[row]:
 	return text
@@ -10008,6 +10020,60 @@ func TestAnalyzeRejectsRecoveringExplicitShapeFromDStrShorthand(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(errs, "\n"), "return type expects dstr[row], got dstr") {
 		t.Fatalf("expected omitted-shape DStr to explicit-shape rejection, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeFormatsBareSViewShorthandInDiagnostics(t *testing.T) {
+	src := `def bad() -> void:
+	text: sview = 1
+`
+	_, errs := parseAndAnalyze(t, "sview_shorthand_mismatch.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, `variable "text" expects sview, got int`) {
+		t.Fatalf("expected bare sview diagnostic, got:\n%s", all)
+	}
+	if strings.Contains(all, "sview[") {
+		t.Fatalf("expected erased sview diagnostic spelling, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeFormatsWhileConditionSViewUsingSurfaceNames(t *testing.T) {
+	src := `def bad(text: dstr[row]) -> void:
+	while text[0:1]:
+		pass
+`
+	_, errs := parseAndAnalyze(t, "while_sview_surface_diagnostic.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "while condition must be bool, got sview[0, 1]") {
+		t.Fatalf("expected surface sview while diagnostic, got:\n%s", all)
+	}
+	if strings.Contains(all, "StringView") {
+		t.Fatalf("expected StringView to stay out of user-facing flow diagnostics, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeFormatsMatchDViewUsingSurfaceNames(t *testing.T) {
+	src := `def bad(values: dview[i32]) -> int:
+	return match values:
+		_:
+			0
+`
+	_, errs := parseAndAnalyze(t, "match_dview_surface_diagnostic.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "match requires an enum, tree-category, or string value, got dview[i32]") {
+		t.Fatalf("expected surface dview match diagnostic, got:\n%s", all)
+	}
+	if strings.Contains(all, "DynArrayView") {
+		t.Fatalf("expected DynArrayView to stay out of user-facing flow diagnostics, got:\n%s", all)
 	}
 }
 

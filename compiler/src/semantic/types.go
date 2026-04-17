@@ -841,6 +841,12 @@ func (t *DictEntryType) String() string {
 	return fmt.Sprintf("dict.entry[%s, %s]", t.Dict.Key.String(), t.Dict.Value.String())
 }
 func (t *SViewType) String() string {
+	if t == nil {
+		return "<invalid-sview>"
+	}
+	if t.Begin == "" && t.End == "" {
+		return "sview"
+	}
 	return fmt.Sprintf("sview[%s, %s]", t.Begin, t.End)
 }
 func (t *PackedEnumStoreType) String() string {

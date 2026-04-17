@@ -195,9 +195,9 @@ Internally, the runtime representation can still stay equivalent to a simple low
 
 ### Dynamic string representation
 
-User-facing code should talk in terms of `str[N]`, `dstr[shape]`, and `sview[begin, end]` when it wants explicit shape relationships, or use bare `dstr` as shape-erasing shorthand when it only cares that a value is a dynamic string.
+User-facing code should talk in terms of `str[N]`, `dstr[shape]`, and `sview[begin, end]` when it wants explicit shape relationships, or use bare `dstr` and bare `sview` as shape-erasing shorthand when it only cares that a value is a dynamic string or string subview.
 
-As with `darray[T]`, bare `dstr` means “some logical string shape exists here, but this API is not naming or preserving it”.
+As with `darray[T]`, bare `dstr` means “some logical string shape exists here, but this API is not naming or preserving it”. Bare `sview` means the same thing for a non-owning string subview: some exact slice bounds exist, but this API is intentionally not exposing them.
 
 Internally, the runtime representation can still stay equivalent to a simple low-level byte-buffer carrier.
 

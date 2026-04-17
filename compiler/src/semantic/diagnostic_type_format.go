@@ -155,6 +155,14 @@ func diagnosticTypeString(t Type) string {
 			return fmt.Sprintf("dict.entry[mutable %s, %s]", diagnosticTypeString(tt.Dict.Key), diagnosticTypeString(tt.Dict.Value))
 		}
 		return fmt.Sprintf("dict.entry[%s, %s]", diagnosticTypeString(tt.Dict.Key), diagnosticTypeString(tt.Dict.Value))
+	case *SViewType:
+		if tt == nil {
+			return "<invalid-sview>"
+		}
+		if tt.Begin == "" && tt.End == "" {
+			return "sview"
+		}
+		return fmt.Sprintf("sview[%s, %s]", tt.Begin, tt.End)
 	case *AssociatedTypeProjection:
 		if tt == nil || tt.Receiver == nil {
 			return "<invalid-associated-type>"

@@ -385,6 +385,8 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		switch n.Name {
 		case "dstr":
 			return &DStrType{Shape: &WildcardShape{}, SurfaceName: "dstr"}
+		case "sview":
+			return &SViewType{}
 		case "DStr":
 			a.errorLegacyBuiltinReplacement(n.Pos(), "DStr", "dstr")
 			return invalidType

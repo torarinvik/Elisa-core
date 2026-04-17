@@ -91,7 +91,7 @@ This phase should focus on:
 
 not on complicated inference.
 
-Status: complete for `darray[T, shape]`, `dstr[shape]`, `view[T, begin, end]`, and `dview[T]` under the current lightweight shape-witness model. The compiler accepts lowercase shape-erasing shorthand such as `darray[T]`, bare `dstr`, and `dview[T]` when code does not need to preserve an explicit logical shape relationship. The older `DList` / `DListView` surface has been removed from the language.
+Status: complete for `darray[T, shape]`, `dstr[shape]`, `view[T, begin, end]`, `dview[T]`, and `sview[begin, end]` under the current lightweight shape-witness model. The compiler accepts lowercase shape-erasing shorthand such as `darray[T]`, bare `dstr`, bare `sview`, and `dview[T]` when code does not need to preserve an explicit logical shape relationship. The older `DList` / `DListView` surface has been removed from the language.
 
 ### Phase 3 — teach shape-changing APIs to produce fresh post-state shapes
 
