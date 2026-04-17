@@ -230,7 +230,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 					a.requireActiveTreeFamilyConstructorOwner(n.Pos(), family, memberType.String())
 				}
 				if len(treeExactMemberFieldDecls(memberType)) != 0 {
-					a.errorf(n.Pos(), "tree constructor %q requires explicit constructor arguments", memberType.String())
+					a.errorf(n.Pos(), "tree constructor %q requires explicit constructor arguments", memberType)
 					result = invalidType
 				} else {
 					result = memberType
@@ -505,7 +505,7 @@ func (a *Analyzer) analyzeSpecializeExpr(expr *ast.SpecializeExpr) Type {
 	}
 	fnType, ok := sym.Type.(*FuncType)
 	if !ok {
-		a.errorf(expr.Pos(), "specialize expects a function, got %s", sym.Type.String())
+		a.errorf(expr.Pos(), "specialize expects a function, got %s", sym.Type)
 		for _, arg := range expr.TypeArgs {
 			a.resolveType(arg)
 		}
@@ -706,15 +706,15 @@ func (a *Analyzer) analyzeAllocExprWithExpected(expr *ast.AllocExpr, expected Ty
 	if treeType, variant, callExpr, ok := a.treeAllocConstructorInfo(expr.Value); ok {
 		owner, ownerType, ownerOK := a.classifyTreeAllocOwnerExpr(expr.Owner)
 		if !ownerOK {
-			ownerLabel := "<invalid>"
 			if ownerType != nil {
-				ownerLabel = ownerType.String()
+				a.errorf(allocOwnerPos(expr), "tree allocation owner must be perm, a tree store, an Arena value, or an Arena reference, got %s", ownerType)
+			} else {
+				a.errorf(allocOwnerPos(expr), "tree allocation owner must be perm, a tree store, an Arena value, or an Arena reference, got %s", "<invalid>")
 			}
-			a.errorf(allocOwnerPos(expr), "tree allocation owner must be perm, a tree store, an Arena value, or an Arena reference, got %s", ownerLabel)
 			return a.analyzeTreeAllocExpr(expr, treeType, variant, callExpr)
 		}
 		if owner.Kind == treeAllocOwnerStore && owner.StoreFamily != nil && treeType.Family != owner.StoreFamily {
-			a.errorf(allocOwnerPos(expr), "tree constructor %q requires store %q, got %q", treeType.Name+"."+variant.Name, treeType.Family.StoreType.String(), ownerType.String())
+			a.errorf(allocOwnerPos(expr), "tree constructor %q requires store %q, got %q", treeType.Name+"."+variant.Name, treeType.Family.StoreType, ownerType)
 		}
 		return a.analyzeTreeAllocExpr(expr, treeType, variant, callExpr)
 	}
@@ -722,21 +722,21 @@ func (a *Analyzer) analyzeAllocExprWithExpected(expr *ast.AllocExpr, expected Ty
 		owner, ownerType, ownerOK := a.classifyTreeAllocOwnerExpr(expr.Owner)
 		family, _ := TreeFamilyForMemberType(memberType)
 		if !ownerOK {
-			ownerLabel := "<invalid>"
 			if ownerType != nil {
-				ownerLabel = ownerType.String()
+				a.errorf(allocOwnerPos(expr), "tree allocation owner must be perm, a tree store, an Arena value, or an Arena reference, got %s", ownerType)
+			} else {
+				a.errorf(allocOwnerPos(expr), "tree allocation owner must be perm, a tree store, an Arena value, or an Arena reference, got %s", "<invalid>")
 			}
-			a.errorf(allocOwnerPos(expr), "tree allocation owner must be perm, a tree store, an Arena value, or an Arena reference, got %s", ownerLabel)
 			return a.analyzeTreeExactAllocExpr(expr, memberType, callExpr)
 		}
 		if owner.Kind == treeAllocOwnerStore && owner.StoreFamily != nil && family != owner.StoreFamily {
-			a.errorf(allocOwnerPos(expr), "tree constructor %q requires store %q, got %q", memberType.String(), family.StoreType.String(), ownerType.String())
+			a.errorf(allocOwnerPos(expr), "tree constructor %q requires store %q, got %q", memberType, family.StoreType, ownerType)
 		}
 		return a.analyzeTreeExactAllocExpr(expr, memberType, callExpr)
 	}
 	if isTreeAllocPermExpr(expr.Owner) {
 		valueType := a.analyzeExpr(expr.Value)
-		a.errorf(expr.Value.Pos(), "new[perm] expects a tree constructor, got %s", valueType.String())
+		a.errorf(expr.Value.Pos(), "new[perm] expects a tree constructor, got %s", valueType)
 		return invalidType
 	}
 	ownerType := a.analyzeExpr(expr.Owner)
@@ -745,12 +745,12 @@ func (a *Analyzer) analyzeAllocExprWithExpected(expr *ast.AllocExpr, expected Ty
 	}
 	if _, ok := ownerType.(*TreeStoreType); ok {
 		valueType := a.analyzeExpr(expr.Value)
-		a.errorf(expr.Value.Pos(), "new[%s] expects a tree constructor, got %s", ownerType.String(), valueType.String())
+		a.errorf(expr.Value.Pos(), "new[%s] expects a tree constructor, got %s", ownerType, valueType)
 		return invalidType
 	}
 	ident, ok := expr.Owner.(*ast.Ident)
 	if !ok {
-		a.errorf(expr.Pos(), "new[...] owner must be a region name, tree store, or packed enum store, got %s", ownerType.String())
+		a.errorf(expr.Pos(), "new[...] owner must be a region name, tree store, or packed enum store, got %s", ownerType)
 		a.analyzeExpr(expr.Value)
 		return invalidType
 	}
@@ -760,7 +760,7 @@ func (a *Analyzer) analyzeAllocExprWithExpected(expr *ast.AllocExpr, expected Ty
 		return invalidType
 	}
 	if sym, ok := a.currentScope.Lookup(ident.Name); !ok || sym.Kind != SymbolRegion {
-		a.errorf(expr.Pos(), "new[...] owner must be a region name, tree store, or packed enum store, got %s", ownerType.String())
+		a.errorf(expr.Pos(), "new[...] owner must be a region name, tree store, or packed enum store, got %s", ownerType)
 		a.analyzeExpr(expr.Value)
 		return invalidType
 	}
@@ -844,7 +844,7 @@ func (a *Analyzer) requireActiveTreeFamilyConstructorOwner(pos lexer.Pos, family
 		return true
 	case treeAllocOwnerStore:
 		if a.currentTreeAllocOwner.StoreFamily != nil && family != a.currentTreeAllocOwner.StoreFamily {
-			a.errorf(pos, "tree constructor %q requires active store %q, got active store for %q", constructorName, family.StoreType.String(), a.currentTreeAllocOwner.StoreFamily.Name)
+			a.errorf(pos, "tree constructor %q requires active store %q, got active store for %q", constructorName, family.StoreType, a.currentTreeAllocOwner.StoreFamily.Name)
 			return false
 		}
 		return true
@@ -929,7 +929,7 @@ func (a *Analyzer) analyzeTreeExactAllocExpr(expr *ast.AllocExpr, memberType Typ
 	}
 	if callExpr == nil {
 		if len(treeExactMemberFieldDecls(memberType)) != 0 {
-			a.errorf(expr.Pos(), "tree constructor %q requires explicit constructor arguments", memberType.String())
+			a.errorf(expr.Pos(), "tree constructor %q requires explicit constructor arguments", memberType)
 			return invalidType
 		}
 		return memberType
@@ -1451,7 +1451,7 @@ func (a *Analyzer) analyzeScopedPackedAllocExpr(expr *ast.AllocExpr) Type {
 	enumType, variant, ok := a.packedAllocConstructorInfo(expr.Value)
 	if !ok || enumType == nil || variant == nil || !enumType.Packed {
 		valueType := a.analyzeExpr(expr.Value)
-		a.errorf(expr.Pos(), "new without [...] expects a packed enum constructor inside an in-store block, got %s", valueType.String())
+		a.errorf(expr.Pos(), "new without [...] expects a packed enum constructor inside an in-store block, got %s", valueType)
 		return invalidType
 	}
 	storeType, ok := a.lookupPackedStore(enumType)
@@ -1471,7 +1471,7 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 		return invalidType
 	}
 	if !IsLocalPackedEnumStoreType(storeType) {
-		a.errorf(allocOwnerPos(expr), "packed enum allocation requires local store type %q, got %s", PackedEnumStoreWithState(storeType, a.namedTypes["Local"]).String(), storeType.String())
+		a.errorf(allocOwnerPos(expr), "packed enum allocation requires local store type %q, got %s", PackedEnumStoreWithState(storeType, a.namedTypes["Local"]), storeType)
 	}
 	if fieldExpr, ok := expr.Value.(*ast.FieldExpr); ok {
 		ident, ok := fieldExpr.Object.(*ast.Ident)
@@ -1483,7 +1483,7 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 					variant, ok := enumType.Variant(fieldExpr.Field)
 					if ok && enumType.Packed && len(variant.Payload) == 0 {
 						if storeType.Enum != enumType {
-							a.errorf(allocOwnerPos(expr), "packed enum constructor %q requires store %q, got %q", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name), storeType.String())
+							a.errorf(allocOwnerPos(expr), "packed enum constructor %q requires store %q, got %q", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name), storeType)
 						}
 						return enumType
 					}
@@ -1494,17 +1494,17 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 	callExpr, ok := expr.Value.(*ast.CallExpr)
 	if !ok {
 		valueType := a.analyzeExpr(expr.Value)
-		a.errorf(expr.Value.Pos(), "new[%s] expects a packed enum constructor call, got %s", storeType.String(), valueType.String())
+		a.errorf(expr.Value.Pos(), "new[%s] expects a packed enum constructor call, got %s", storeType, valueType)
 		return invalidType
 	}
 	enumType, variant, ok := a.enumConstructorCall(callExpr)
 	if !ok || enumType == nil || variant == nil || !enumType.Packed {
 		valueType := a.analyzeExpr(expr.Value)
-		a.errorf(expr.Value.Pos(), "new[%s] expects a packed enum constructor call, got %s", storeType.String(), valueType.String())
+		a.errorf(expr.Value.Pos(), "new[%s] expects a packed enum constructor call, got %s", storeType, valueType)
 		return invalidType
 	}
 	if storeType.Enum != enumType {
-		a.errorf(allocOwnerPos(expr), "packed enum constructor %q requires store %q, got %q", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name), storeType.String())
+		a.errorf(allocOwnerPos(expr), "packed enum constructor %q requires store %q, got %q", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name), storeType)
 	}
 	orderedArgs, commonArgs, ok := a.resolvePackedEnumConstructorArgs(callExpr, enumType, variant)
 	if !ok {
@@ -1580,7 +1580,7 @@ func (a *Analyzer) analyzePackedEnumTailPayloadArg(expr ast.Expr, expected *DArr
 		for _, elem := range list.Elems {
 			actualElem := a.analyzeValueExpr(elem, expected.Elem)
 			if !AssignableTo(expected.Elem, actualElem) {
-				a.errorf(elem.Pos(), "tail payload element expects %s, got %s", expected.Elem.String(), actualElem.String())
+				a.errorf(elem.Pos(), "tail payload element expects %s, got %s", expected.Elem, actualElem)
 			}
 			a.consumeAffineValueExpr(elem, expected.Elem, moveReason)
 		}
@@ -1615,7 +1615,7 @@ func (a *Analyzer) analyzeStructLiteralExpr(expr *ast.StructLitExpr, expected Ty
 			a.analyzeExpr(arg)
 		}
 		if !IsInvalidType(targetType) {
-			a.errorf(expr.Pos(), "type %q is not a struct", targetType.String())
+			a.errorf(expr.Pos(), "type %q is not a struct", targetType)
 		} else {
 			a.errorf(expr.Pos(), "unknown struct %q", expr.Name)
 		}
@@ -1638,7 +1638,7 @@ func (a *Analyzer) analyzeStructLiteralExpr(expr *ast.StructLitExpr, expected Ty
 		return targetType
 	}
 	if !a.proveStructLiteralNamedState(expr, base, desiredState) {
-		a.errorf(expr.Pos(), "struct literal %q does not satisfy derived state %s", expr.Name, desiredState.String())
+		a.errorf(expr.Pos(), "struct literal %q does not satisfy derived state %s", expr.Name, desiredState)
 	}
 	return targetType
 }
@@ -2504,7 +2504,7 @@ func (a *Analyzer) treeStoreConstructorCall(expr *ast.CallExpr) (*TreeStoreType,
 		return nil, false
 	}
 	if len(expr.Args) != 1 {
-		a.errorf(expr.Pos(), "store constructor %q expects 1 argument, got %d", storeType.String(), len(expr.Args))
+		a.errorf(expr.Pos(), "store constructor %q expects 1 argument, got %d", storeType, len(expr.Args))
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)
 		}
@@ -2513,7 +2513,7 @@ func (a *Analyzer) treeStoreConstructorCall(expr *ast.CallExpr) (*TreeStoreType,
 	if arenaType, ok := a.namedTypes["Arena"]; ok {
 		actual := a.analyzeValueExpr(expr.Args[0], arenaType)
 		if !AssignableTo(arenaType, actual) {
-			a.errorf(expr.Args[0].Pos(), "store constructor %q expects %s, got %s", storeType.String(), arenaType.String(), actual.String())
+			a.errorf(expr.Args[0].Pos(), "store constructor %q expects %s, got %s", storeType, arenaType, actual)
 		}
 	} else {
 		a.analyzeExpr(expr.Args[0])
@@ -2544,7 +2544,7 @@ func (a *Analyzer) packedStoreConstructorCall(expr *ast.CallExpr) (*PackedEnumSt
 		return nil, false
 	}
 	if len(expr.Args) != 1 {
-		a.errorf(expr.Pos(), "store constructor %q expects 1 argument, got %d", storeType.String(), len(expr.Args))
+		a.errorf(expr.Pos(), "store constructor %q expects 1 argument, got %d", storeType, len(expr.Args))
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)
 		}
@@ -2553,7 +2553,7 @@ func (a *Analyzer) packedStoreConstructorCall(expr *ast.CallExpr) (*PackedEnumSt
 	if arenaType, ok := a.namedTypes["Arena"]; ok {
 		actual := a.analyzeValueExpr(expr.Args[0], arenaType)
 		if !AssignableTo(arenaType, actual) {
-			a.errorf(expr.Args[0].Pos(), "store constructor %q expects %s, got %s", storeType.String(), arenaType.String(), actual.String())
+			a.errorf(expr.Args[0].Pos(), "store constructor %q expects %s, got %s", storeType, arenaType, actual)
 		}
 	} else {
 		a.analyzeExpr(expr.Args[0])
@@ -2712,7 +2712,7 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 			return a.namedTypes["bool"]
 		}
 		if !(AssignableTo(left, right) || AssignableTo(right, left) || refsComparableIgnoringMutability(left, right) || (IsNullType(left) && isRefLike(right)) || (IsNullType(right) && isRefLike(left))) {
-			a.errorf(expr.Pos(), "cannot compare %s and %s", left.String(), right.String())
+			a.errorf(expr.Pos(), "cannot compare %s and %s", left, right)
 		}
 		return a.namedTypes["bool"]
 	case lexer.TOKEN_LT, lexer.TOKEN_GT, lexer.TOKEN_LTEQ, lexer.TOKEN_GTEQ:
@@ -2813,7 +2813,7 @@ func (a *Analyzer) analyzeIsComparableTarget(left Type, target ast.Expr) bool {
 		right = a.analyzeExpr(target)
 	}
 	if !isComparableValueTarget(left, right) {
-		a.errorf(target.Pos(), "is expects a comparable value alternative, got %s", right.String())
+		a.errorf(target.Pos(), "is expects a comparable value alternative, got %s", right)
 		return false
 	}
 	return true
@@ -2825,7 +2825,7 @@ func (a *Analyzer) analyzeIsExpr(expr *ast.BinaryExpr) Type {
 	for _, target := range targets {
 		if enumType, variant, ok := a.resolveEnumVariantIsTarget(target); ok {
 			if _, _, ok := resolveMatchableEnumType(left); !ok {
-				a.errorf(expr.Left.Pos(), "is requires an enum value for variant tests, got %s", left.String())
+				a.errorf(expr.Left.Pos(), "is requires an enum value for variant tests, got %s", left)
 				continue
 			}
 			matchableEnum, _, _ := resolveMatchableEnumType(left)
@@ -2847,7 +2847,7 @@ func (a *Analyzer) analyzeIsExpr(expr *ast.BinaryExpr) Type {
 		}
 		if treeType, variant, ok := a.resolveTreeVariantIsTarget(target); ok {
 			if _, _, ok := resolveMatchableTreeCategoryType(left); !ok {
-				a.errorf(expr.Left.Pos(), "is requires an enum or tree-category value for variant tests, got %s", left.String())
+				a.errorf(expr.Left.Pos(), "is requires an enum or tree-category value for variant tests, got %s", left)
 				continue
 			}
 			matchableTree, _, _ := resolveMatchableTreeCategoryType(left)
@@ -2874,7 +2874,7 @@ func (a *Analyzer) analyzeIsExpr(expr *ast.BinaryExpr) Type {
 		if targetBase, _, ok := a.resolveNamedStateIsTarget(target); ok {
 			leftBase, ok := namedStateStructBase(left)
 			if !ok || leftBase == nil {
-				a.errorf(expr.Left.Pos(), "is requires a named-state struct value for type-state tests, got %s", left.String())
+				a.errorf(expr.Left.Pos(), "is requires a named-state struct value for type-state tests, got %s", left)
 				continue
 			}
 			if leftBase.Name != targetBase.Name {
@@ -3008,7 +3008,7 @@ func (a *Analyzer) analyzeVariantIsPayloadPattern(pattern ast.MatchPattern, expe
 				a.analyzeVariantIsPayloadPattern(arg.Pattern, variant.Payload[i])
 			}
 		default:
-			a.errorf(p.Pos(), "nested variant is pattern %q requires an enum or tree-category payload, got %s", p.EnumName+"."+p.Variant, expected.String())
+			a.errorf(p.Pos(), "nested variant is pattern %q requires an enum or tree-category payload, got %s", p.EnumName+"."+p.Variant, expected)
 		}
 	default:
 		a.errorf(pattern.Pos(), "unsupported variant is payload pattern %T", pattern)
@@ -3030,7 +3030,7 @@ func (a *Analyzer) analyzeEnumIsPayloadPattern(pattern ast.MatchPattern, expecte
 	case *ast.MatchVariantPattern:
 		enumType, ok := expected.(*EnumType)
 		if !ok {
-			a.errorf(p.Pos(), "nested variant is pattern %q requires an enum payload, got %s", p.EnumName+"."+p.Variant, expected.String())
+			a.errorf(p.Pos(), "nested variant is pattern %q requires an enum payload, got %s", p.EnumName+"."+p.Variant, expected)
 			return
 		}
 		if p.EnumName != enumType.Name {
@@ -3369,11 +3369,11 @@ func (a *Analyzer) analyzeFreezeCallExpr(expr *ast.CallExpr) Type {
 	storeType := a.analyzeExpr(expr.Args[0])
 	packedStore, ok := storeType.(*PackedEnumStoreType)
 	if !ok {
-		a.errorf(expr.Args[0].Pos(), "freeze expects a packed enum store, got %s", storeType.String())
+		a.errorf(expr.Args[0].Pos(), "freeze expects a packed enum store, got %s", storeType)
 		return invalidType
 	}
 	if !IsLocalPackedEnumStoreType(packedStore) {
-		a.errorf(expr.Args[0].Pos(), "freeze expects local store type %q, got %s", PackedEnumStoreWithState(packedStore, a.namedTypes["Local"]).String(), packedStore.String())
+		a.errorf(expr.Args[0].Pos(), "freeze expects local store type %q, got %s", PackedEnumStoreWithState(packedStore, a.namedTypes["Local"]), packedStore)
 		return invalidType
 	}
 	if _, ok := explicitMoveOperand(expr.Args[0]); !ok {
@@ -3816,7 +3816,7 @@ func (a *Analyzer) analyzeDenseKeyHelperCall(expr *ast.CallExpr) Type {
 	frozenType := a.analyzeExpr(expr.Args[1])
 	enumType, ok := denseKeySourceEnumType(nodeType)
 	if !ok || enumType == nil {
-		a.errorf(expr.Args[0].Pos(), "dense_key expects a packed enum value or packedview, got %s", nodeType.String())
+		a.errorf(expr.Args[0].Pos(), "dense_key expects a packed enum value or packedview, got %s", nodeType)
 		return invalidType
 	}
 	frozenRoot, frozenPath, frozenStoreType, ok := a.resolveFrozenPackedStoreRootPath(expr.Args[1])
@@ -3825,7 +3825,7 @@ func (a *Analyzer) analyzeDenseKeyHelperCall(expr *ast.CallExpr) Type {
 		return invalidType
 	}
 	if _, ok := frozenType.(*PackedEnumStoreType); !ok {
-		a.errorf(expr.Args[1].Pos(), "dense_key expects a frozen packed enum store, got %s", frozenType.String())
+		a.errorf(expr.Args[1].Pos(), "dense_key expects a frozen packed enum store, got %s", frozenType)
 		return invalidType
 	}
 	if frozenStoreType.Enum != enumType {
@@ -3868,7 +3868,7 @@ func (a *Analyzer) analyzeNodeTableFillHelperCall(expr *ast.CallExpr) Type {
 		return invalidType
 	}
 	if !isArenaValueOrRefType(arenaType) {
-		a.errorf(expr.Args[0].Pos(), "node_table_fill expects an Arena or proven non-null Arena reference, got %s", arenaType.String())
+		a.errorf(expr.Args[0].Pos(), "node_table_fill expects an Arena or proven non-null Arena reference, got %s", arenaType)
 	}
 	frozenRoot, frozenPath, frozenStoreType, rootOK := a.resolveFrozenPackedStoreRootPath(expr.Args[1])
 	if !rootOK || frozenStoreType == nil || frozenStoreType.Enum == nil {
@@ -3877,7 +3877,7 @@ func (a *Analyzer) analyzeNodeTableFillHelperCall(expr *ast.CallExpr) Type {
 		return invalidType
 	}
 	if _, ok := frozenType.(*PackedEnumStoreType); !ok {
-		a.errorf(expr.Args[1].Pos(), "node_table_fill expects a frozen packed enum store, got %s", frozenType.String())
+		a.errorf(expr.Args[1].Pos(), "node_table_fill expects a frozen packed enum store, got %s", frozenType)
 		_ = a.analyzeValueExpr(expr.Args[2], elemType)
 		return invalidType
 	}
@@ -3888,7 +3888,7 @@ func (a *Analyzer) analyzeNodeTableFillHelperCall(expr *ast.CallExpr) Type {
 	}
 	initType := a.analyzeValueExpr(expr.Args[2], elemType)
 	if !AssignableTo(elemType, initType) {
-		a.errorf(expr.Args[2].Pos(), "node_table_fill initializer expects %s, got %s", elemType.String(), initType.String())
+		a.errorf(expr.Args[2].Pos(), "node_table_fill initializer expects %s, got %s", elemType, initType)
 	}
 	result := a.nodeTableType(enumType, elemType)
 	a.exprNodeTables[expr] = NodeTableInfo{
@@ -4042,7 +4042,7 @@ func isAtomicRmwCallName(name string) bool {
 
 func (a *Analyzer) validateThreadTransferArg(callName string, arg ast.Expr, argType Type) {
 	if !a.typeStructurallyThreadShareable(argType, map[string]bool{}) {
-		a.errorf(arg.Pos(), "argument to %q is not structurally shareable across threads: %s", callName, argType.String())
+		a.errorf(arg.Pos(), "argument to %q is not structurally shareable across threads: %s", callName, argType)
 		return
 	}
 	state, ok := a.regionRefStateForExpr(arg)
@@ -4067,7 +4067,7 @@ func (a *Analyzer) validateThreadTransferArg(callName string, arg ast.Expr, argT
 
 func (a *Analyzer) validateThreadTransferResultType(callName string, pos lexer.Pos, resultType Type) {
 	if !a.typeStructurallyThreadShareable(resultType, map[string]bool{}) {
-		a.errorf(pos, "result of %q is not structurally shareable across threads: %s", callName, resultType.String())
+		a.errorf(pos, "result of %q is not structurally shareable across threads: %s", callName, resultType)
 	}
 }
 
@@ -4077,7 +4077,7 @@ func (a *Analyzer) validateAtomicRmwArg(callName string, arg ast.Expr, argType T
 		return
 	}
 	if !IsNumericType(payloadType) {
-		a.errorf(arg.Pos(), "argument to %q requires atomic_numeric(T), got atomic[%s]", callName, payloadType.String())
+		a.errorf(arg.Pos(), "argument to %q requires atomic_numeric(T), got atomic[%s]", callName, payloadType)
 	}
 }
 
@@ -4666,7 +4666,7 @@ func (a *Analyzer) analyzeSafeFieldExpr(expr *ast.FieldExpr) Type {
 	receiverType := a.analyzeExpr(expr.Object)
 	baseReceiverType, ok := a.safeChainReceiverType(receiverType)
 	if !ok {
-		a.errorf(expr.Pos(), "optional chaining requires an optional or nullable reference receiver, got %s", receiverType.String())
+		a.errorf(expr.Pos(), "optional chaining requires an optional or nullable reference receiver, got %s", receiverType)
 		return invalidType
 	}
 	if field, ok := dstrSyntheticField(baseReceiverType, expr.Field); ok {
@@ -4696,7 +4696,7 @@ func (a *Analyzer) analyzeSafeCallExpr(expr *ast.CallExpr) Type {
 	receiverType := a.analyzeExpr(fieldExpr.Object)
 	baseReceiverType, ok := a.safeChainReceiverType(receiverType)
 	if !ok {
-		a.errorf(expr.Pos(), "optional chaining requires an optional or nullable reference receiver, got %s", receiverType.String())
+		a.errorf(expr.Pos(), "optional chaining requires an optional or nullable reference receiver, got %s", receiverType)
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)
 		}
@@ -4706,7 +4706,7 @@ func (a *Analyzer) analyzeSafeCallExpr(expr *ast.CallExpr) Type {
 		field.Type = a.specializeProjectedFunctionFieldType(fieldExpr, field.Type)
 		ft, ok := field.Type.(*FuncType)
 		if !ok {
-			a.errorf(expr.Pos(), "cannot call non-function value of type %s", field.Type.String())
+			a.errorf(expr.Pos(), "cannot call non-function value of type %s", field.Type)
 			for _, arg := range expr.Args {
 				a.analyzeExpr(arg)
 			}
@@ -4743,7 +4743,7 @@ func (a *Analyzer) analyzeSafeCallExpr(expr *ast.CallExpr) Type {
 			return invalidType
 		}
 		if !methodOK || resolvedSym == nil {
-			a.errorf(expr.Pos(), "optional call receiver %s has no member or UFCS function %q", receiverType.String(), fieldExpr.Field)
+			a.errorf(expr.Pos(), "optional call receiver %s has no member or UFCS function %q", receiverType, fieldExpr.Field)
 			for _, arg := range expr.Args {
 				a.analyzeExpr(arg)
 			}
@@ -4752,7 +4752,7 @@ func (a *Analyzer) analyzeSafeCallExpr(expr *ast.CallExpr) Type {
 	}
 	ft, ok := resolvedSym.Type.(*FuncType)
 	if !ok || ft == nil {
-		a.errorf(expr.Pos(), "cannot call non-function value of type %s", resolvedSym.Type.String())
+		a.errorf(expr.Pos(), "cannot call non-function value of type %s", resolvedSym.Type)
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)
 		}
@@ -4942,7 +4942,7 @@ func (a *Analyzer) analyzeBuiltinDarrayReserveCall(expr *ast.CallExpr) (Type, bo
 	usizeType := a.namedTypes["usize"]
 	argType := a.analyzeValueExpr(expr.Args[0], usizeType)
 	if !AssignableTo(usizeType, argType) {
-		a.errorf(expr.Args[0].Pos(), "darray reserve expects %s, got %s", usizeType.String(), argType.String())
+		a.errorf(expr.Args[0].Pos(), "darray reserve expects %s, got %s", usizeType, argType)
 	}
 	resultType := receiverRefType
 	if resultType == nil {
@@ -5035,7 +5035,7 @@ func (a *Analyzer) analyzeBuiltinDarrayTruncateCall(expr *ast.CallExpr) (Type, b
 	usizeType := a.namedTypes["usize"]
 	argType := a.analyzeValueExpr(expr.Args[0], usizeType)
 	if !AssignableTo(usizeType, argType) {
-		a.errorf(expr.Args[0].Pos(), "darray truncate expects %s, got %s", usizeType.String(), argType.String())
+		a.errorf(expr.Args[0].Pos(), "darray truncate expects %s, got %s", usizeType, argType)
 	}
 	resultType := receiverRefType
 	if resultType == nil {
@@ -5092,7 +5092,7 @@ func (a *Analyzer) analyzeBuiltinStorePushCall(expr *ast.CallExpr) (Type, bool) 
 		}
 		argType := a.analyzeValueExpr(expr.Args[i], darrayField.Elem)
 		if !AssignableTo(darrayField.Elem, argType) {
-			a.errorf(expr.Args[i].Pos(), "store push argument %d (%s) expects %s, got %s", i+1, name, darrayField.Elem.String(), argType.String())
+			a.errorf(expr.Args[i].Pos(), "store push argument %d (%s) expects %s, got %s", i+1, name, darrayField.Elem, argType)
 		}
 		a.consumeAffineValueExpr(expr.Args[i], darrayField.Elem, "move into store push")
 	}
@@ -5128,7 +5128,7 @@ func (a *Analyzer) analyzeBuiltinStoreReserveCall(expr *ast.CallExpr) (Type, boo
 	if len(expr.Args) >= 1 {
 		argType := a.analyzeValueExpr(expr.Args[0], usizeType)
 		if !AssignableTo(usizeType, argType) {
-			a.errorf(expr.Args[0].Pos(), "store reserve expects %s, got %s", usizeType.String(), argType.String())
+			a.errorf(expr.Args[0].Pos(), "store reserve expects %s, got %s", usizeType, argType)
 		}
 	}
 	resultType := builtinStoreResultRefType(storeType, receiverRefType)
@@ -5185,7 +5185,7 @@ func (a *Analyzer) analyzeBuiltinStoreTruncateCall(expr *ast.CallExpr) (Type, bo
 	if len(expr.Args) >= 1 {
 		argType := a.analyzeValueExpr(expr.Args[0], usizeType)
 		if !AssignableTo(usizeType, argType) {
-			a.errorf(expr.Args[0].Pos(), "store truncate expects %s, got %s", usizeType.String(), argType.String())
+			a.errorf(expr.Args[0].Pos(), "store truncate expects %s, got %s", usizeType, argType)
 		}
 	}
 	resultType := builtinStoreResultRefType(storeType, receiverRefType)
@@ -6124,7 +6124,7 @@ func (a *Analyzer) analyzeTreeExactMemberConstructorCallExpr(expr *ast.CallExpr,
 		return memberType
 	}
 	if len(orderedArgs) != len(fieldDecls) {
-		a.errorf(expr.Pos(), "tree constructor %q expects %d arguments, got %d", memberType.String(), len(fieldDecls), len(expr.Args))
+		a.errorf(expr.Pos(), "tree constructor %q expects %d arguments, got %d", memberType, len(fieldDecls), len(expr.Args))
 	}
 	limit := len(orderedArgs)
 	if len(fieldDecls) < limit {
@@ -6220,7 +6220,7 @@ func (a *Analyzer) analyzeEnumerateHelperCall(expr *ast.CallExpr) Type {
 	sourceType := a.analyzeExpr(expr.Args[0])
 	info, ok := a.resolveIterLoopSourceInfo(expr.Args[0], sourceType)
 	if !ok {
-		a.errorf(expr.Args[0].Pos(), "enumerate expects an iterable source, got %s", sourceType.String())
+		a.errorf(expr.Args[0].Pos(), "enumerate expects an iterable source, got %s", sourceType)
 		return invalidType
 	}
 	base, ok := a.namedTypes["EnumerateView"].(*StructType)
@@ -6465,7 +6465,7 @@ func (a *Analyzer) analyzeChildrenHelperCall(expr *ast.CallExpr) Type {
 	}
 	sourceInfo, ok := resolveTreeChildrenSourceInfo(carrierSourceType)
 	if !ok {
-		a.errorf(expr.Args[0].Pos(), "children expects a tree node, refined tree view, exact tree member, or Family.Node value, got %s", carrierSourceType.String())
+		a.errorf(expr.Args[0].Pos(), "children expects a tree node, refined tree view, exact tree member, or Family.Node value, got %s", carrierSourceType)
 		return invalidType
 	}
 	itemType, ok := treeChildrenCandidateItemType(carrierSourceType)
@@ -6524,7 +6524,7 @@ func (a *Analyzer) analyzeReadonlyHelperCall(expr *ast.CallExpr) Type {
 	}
 	argType := a.analyzeExpr(expr.Args[0])
 	if !proofCarryingViewType(argType) {
-		a.errorf(expr.Args[0].Pos(), "readonly expects a view-like argument, got %s", argType.String())
+		a.errorf(expr.Args[0].Pos(), "readonly expects a view-like argument, got %s", argType)
 		return invalidType
 	}
 	return argType
@@ -7046,7 +7046,7 @@ func (a *Analyzer) resolveTreeExactMemberConstructorArgs(expr *ast.CallExpr, mem
 		return expr.Args, true
 	}
 	if namedCount != len(expr.Args) {
-		a.errorf(expr.Pos(), "tree constructor %q cannot mix positional and named arguments", memberType.String())
+		a.errorf(expr.Pos(), "tree constructor %q cannot mix positional and named arguments", memberType)
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)
 		}
@@ -7065,13 +7065,13 @@ func (a *Analyzer) resolveTreeExactMemberConstructorArgs(expr *ast.CallExpr, mem
 			}
 		}
 		if fieldIndex < 0 {
-			a.errorf(arg.Pos(), "tree constructor %q has no field %q", memberType.String(), name)
+			a.errorf(arg.Pos(), "tree constructor %q has no field %q", memberType, name)
 			a.analyzeExpr(arg)
 			ok = false
 			continue
 		}
 		if seen[fieldIndex] {
-			a.errorf(arg.Pos(), "tree constructor %q field %q is specified more than once", memberType.String(), name)
+			a.errorf(arg.Pos(), "tree constructor %q field %q is specified more than once", memberType, name)
 			a.analyzeExpr(arg)
 			ok = false
 			continue
@@ -7081,7 +7081,7 @@ func (a *Analyzer) resolveTreeExactMemberConstructorArgs(expr *ast.CallExpr, mem
 	}
 	for i, wasSeen := range seen {
 		if !wasSeen {
-			a.errorf(expr.Pos(), "tree constructor %q is missing field %q", memberType.String(), fieldDecls[i].Name)
+			a.errorf(expr.Pos(), "tree constructor %q is missing field %q", memberType, fieldDecls[i].Name)
 			ok = false
 		}
 	}
@@ -8103,7 +8103,7 @@ func (a *Analyzer) analyzeDenseNodeKeyIndexExpr(expr *ast.IndexExpr, objType Typ
 			return invalidType, true
 		}
 	}
-	a.errorf(expr.Pos(), "node-key indexing requires Expr.Store[Frozen] or NodeTable[Expr, T], got %s", objType.String())
+	a.errorf(expr.Pos(), "node-key indexing requires Expr.Store[Frozen] or NodeTable[Expr, T], got %s", objType)
 	return invalidType, true
 }
 
@@ -8149,14 +8149,14 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 	startType := a.analyzeValueExpr(expr.Start, indexExpected)
 	endType := a.analyzeValueExpr(expr.End, indexExpected)
 	if !IsNumericType(startType) {
-		a.errorf(expr.Start.Pos(), "slice start must be numeric, got %s", startType.String())
+		a.errorf(expr.Start.Pos(), "slice start must be numeric, got %s", startType)
 	} else if !IsIntegralStorageType(startType) {
-		a.errorf(expr.Start.Pos(), "slice start must be integral, got %s", startType.String())
+		a.errorf(expr.Start.Pos(), "slice start must be integral, got %s", startType)
 	}
 	if !IsNumericType(endType) {
-		a.errorf(expr.End.Pos(), "slice end must be numeric, got %s", endType.String())
+		a.errorf(expr.End.Pos(), "slice end must be numeric, got %s", endType)
 	} else if !IsIntegralStorageType(endType) {
-		a.errorf(expr.End.Pos(), "slice end must be integral, got %s", endType.String())
+		a.errorf(expr.End.Pos(), "slice end must be integral, got %s", endType)
 	}
 	if array, ok := objType.(*ArrayType); ok {
 		if isStringArrayType(array) {
@@ -8185,7 +8185,7 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 	}
 	if ref, ok := objType.(*RefType); ok {
 		if ref.State != RefStateNonNull {
-			a.errorf(expr.Pos(), "slicing requires proven non-null reference, got %s", objType.String())
+			a.errorf(expr.Pos(), "slicing requires proven non-null reference, got %s", objType)
 			return invalidType
 		}
 		if array, ok := ref.Elem.(*ArrayType); ok {
@@ -8213,7 +8213,7 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 			return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
 		}
 	}
-	a.errorf(expr.Pos(), "slicing requires string, array, view, or packed store type, got %s", objType.String())
+	a.errorf(expr.Pos(), "slicing requires string, array, view, or packed store type, got %s", objType)
 	return invalidType
 }
 
@@ -8253,7 +8253,7 @@ func (a *Analyzer) analyzeTupleExprWithExpected(expr *ast.TupleExpr, expected Ty
 		if expectedElem != nil {
 			moveType = expectedElem
 			if !AssignableTo(expectedElem, itemType) {
-				a.errorf(elem.Pos(), "tuple element %d (%s) expects %s, got %s", i+1, fieldName, expectedElem.String(), itemType.String())
+				a.errorf(elem.Pos(), "tuple element %d (%s) expects %s, got %s", i+1, fieldName, expectedElem, itemType)
 				a.reportShapeMismatchNotes(elem.Pos(), expectedElem, itemType)
 			}
 		}
@@ -8583,7 +8583,7 @@ func (a *Analyzer) analyzeContextualIntTernaryExpr(expr *ast.TernaryExpr, expect
 	}
 	condType := a.analyzeCondExpr(expr.Cond)
 	if !IsBoolType(condType) {
-		a.errorf(expr.Pos(), "ternary condition must be bool, got %s", condType.String())
+		a.errorf(expr.Pos(), "ternary condition must be bool, got %s", condType)
 	}
 	mergedAffine := a.cloneAffineValueStates()
 	mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
@@ -8600,7 +8600,7 @@ func (a *Analyzer) analyzeContextualIntTernaryExpr(expr *ast.TernaryExpr, expect
 	}
 	merged := MergeTypes(left, right)
 	if IsInvalidType(merged) {
-		a.errorf(expr.Pos(), "ternary branches are incompatible: %s and %s", left.String(), right.String())
+		a.errorf(expr.Pos(), "ternary branches are incompatible: %s and %s", left, right)
 	}
 	a.recordAnalyzedExprType(expr, merged)
 	return merged
@@ -8612,7 +8612,7 @@ func (a *Analyzer) analyzeContextualFloatTernaryExpr(expr *ast.TernaryExpr, expe
 	}
 	condType := a.analyzeCondExpr(expr.Cond)
 	if !IsBoolType(condType) {
-		a.errorf(expr.Pos(), "ternary condition must be bool, got %s", condType.String())
+		a.errorf(expr.Pos(), "ternary condition must be bool, got %s", condType)
 	}
 	mergedAffine := a.cloneAffineValueStates()
 	mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
@@ -8629,7 +8629,7 @@ func (a *Analyzer) analyzeContextualFloatTernaryExpr(expr *ast.TernaryExpr, expe
 	}
 	merged := MergeTypes(left, right)
 	if IsInvalidType(merged) {
-		a.errorf(expr.Pos(), "ternary branches are incompatible: %s and %s", left.String(), right.String())
+		a.errorf(expr.Pos(), "ternary branches are incompatible: %s and %s", left, right)
 	}
 	a.recordAnalyzedExprType(expr, merged)
 	return merged
@@ -8672,14 +8672,14 @@ func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expecte
 		itemType := a.analyzeValueExpr(elem, elemType)
 		if useExpectedArray {
 			if !AssignableTo(expectedArray.Elem, itemType) {
-				a.errorf(elem.Pos(), "array literal element expects %s, got %s", expectedArray.Elem.String(), itemType.String())
+				a.errorf(elem.Pos(), "array literal element expects %s, got %s", expectedArray.Elem, itemType)
 			}
 			a.consumeAffineValueExpr(elem, expectedArray.Elem, "move into array literal element")
 			continue
 		}
 		if useExpectedDArray {
 			if !AssignableTo(expectedDArray.Elem, itemType) {
-				a.errorf(elem.Pos(), "darray literal element expects %s, got %s", expectedDArray.Elem.String(), itemType.String())
+				a.errorf(elem.Pos(), "darray literal element expects %s, got %s", expectedDArray.Elem, itemType)
 			}
 			a.consumeAffineValueExpr(elem, expectedDArray.Elem, "move into darray literal element")
 			continue
@@ -8691,7 +8691,7 @@ func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expecte
 		}
 		merged := MergeTypes(elemType, itemType)
 		if IsInvalidType(merged) {
-			a.errorf(elem.Pos(), "array literal elements are incompatible: %s and %s", elemType.String(), itemType.String())
+			a.errorf(elem.Pos(), "array literal elements are incompatible: %s and %s", elemType, itemType)
 			a.exprTypes[expr] = invalidType
 			return invalidType
 		}
@@ -8889,12 +8889,12 @@ func (a *Analyzer) optionalAssignmentTargetType(expr ast.Expr) Type {
 		valueType := a.analyzeExpr(n)
 		boundType, ok := conditionOptionalBindType(valueType)
 		if !ok {
-			a.errorf(n.Pos(), "?= requires a nullable reference target, got %s", valueType.String())
+			a.errorf(n.Pos(), "?= requires a nullable reference target, got %s", valueType)
 			return invalidType
 		}
 		refType, ok := boundType.(*RefType)
 		if !ok || refType == nil {
-			a.errorf(n.Pos(), "?= requires a nullable reference target, got %s", valueType.String())
+			a.errorf(n.Pos(), "?= requires a nullable reference target, got %s", valueType)
 			return invalidType
 		}
 		if !a.requireWritableMutationPath(n) {
@@ -8909,12 +8909,12 @@ func (a *Analyzer) optionalAssignmentTargetType(expr ast.Expr) Type {
 		receiverType := a.analyzeExpr(n.Object)
 		boundType, ok := conditionOptionalBindType(receiverType)
 		if !ok {
-			a.errorf(n.Pos(), "?= requires a nullable reference receiver, got %s", receiverType.String())
+			a.errorf(n.Pos(), "?= requires a nullable reference receiver, got %s", receiverType)
 			return invalidType
 		}
 		refType, ok := boundType.(*RefType)
 		if !ok || refType == nil {
-			a.errorf(n.Pos(), "?= requires a nullable reference receiver, got %s", receiverType.String())
+			a.errorf(n.Pos(), "?= requires a nullable reference receiver, got %s", receiverType)
 			return invalidType
 		}
 		field, ok := a.lookupField(refType, n.Field, n.Pos())
@@ -9238,7 +9238,7 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 	if ref, ok := objType.(*RefType); ok {
 		if ref.State != RefStateNonNull {
 			if emitDiagnostics {
-				a.errorf(pos, "field access requires proven non-null reference, got %s", objType.String())
+				a.errorf(pos, "field access requires proven non-null reference, got %s", objType)
 			}
 			return Field{}, false
 		}
@@ -9264,7 +9264,7 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 		field, ok := viewType.Field(fieldName)
 		if !ok {
 			if emitDiagnostics {
-				a.errorf(pos, "%s has no field %q", viewType.String(), fieldName)
+				a.errorf(pos, "%s has no field %q", viewType, fieldName)
 			}
 			return Field{}, false
 		}
@@ -9274,7 +9274,7 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 		field, ok := TreeVariantSurfaceFieldInfo(viewType, fieldName)
 		if !ok {
 			if emitDiagnostics {
-				a.errorf(pos, "%s has no field %q", viewType.String(), fieldName)
+				a.errorf(pos, "%s has no field %q", viewType, fieldName)
 			}
 			return Field{}, false
 		}
@@ -9311,7 +9311,7 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 			}
 		}
 		if emitDiagnostics {
-			a.errorf(pos, "tuple %s has no field %q", t.String(), fieldName)
+			a.errorf(pos, "tuple %s has no field %q", t, fieldName)
 		}
 		return Field{}, false
 	case *StructType:
@@ -9345,7 +9345,7 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 		baseStruct, ok := t.Base.(*StructType)
 		if !ok {
 			if emitDiagnostics {
-				a.errorf(pos, "field access requires struct type, got %s", objType.String())
+				a.errorf(pos, "field access requires struct type, got %s", objType)
 			}
 			return Field{}, false
 		}
@@ -9361,7 +9361,7 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 		return field, true
 	default:
 		if emitDiagnostics {
-			a.errorf(pos, "field access requires struct type, got %s", objType.String())
+			a.errorf(pos, "field access requires struct type, got %s", objType)
 		}
 		return Field{}, false
 	}

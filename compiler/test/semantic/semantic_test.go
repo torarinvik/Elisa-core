@@ -10077,6 +10077,60 @@ func TestAnalyzeFormatsMatchDViewUsingSurfaceNames(t *testing.T) {
 	}
 }
 
+func TestAnalyzeFormatsCompareSViewUsingSurfaceNames(t *testing.T) {
+	src := `def bad(text: dstr[row]) -> bool:
+	return text[0:1] == 1
+`
+	_, errs := parseAndAnalyze(t, "compare_sview_surface_diagnostic.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "cannot compare sview[0, 1] and int") {
+		t.Fatalf("expected surface sview compare diagnostic, got:\n%s", all)
+	}
+	if strings.Contains(all, "StringView") {
+		t.Fatalf("expected StringView to stay out of user-facing expression diagnostics, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeFormatsIsVariantSViewUsingSurfaceNames(t *testing.T) {
+	src := `enum Flag:
+	On
+
+def bad(text: dstr[row]) -> bool:
+	return text[0:1] is Flag.On
+`
+	_, errs := parseAndAnalyze(t, "is_variant_sview_surface_diagnostic.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "is requires an enum value for variant tests, got sview[0, 1]") {
+		t.Fatalf("expected surface sview is-variant diagnostic, got:\n%s", all)
+	}
+	if strings.Contains(all, "StringView") {
+		t.Fatalf("expected StringView to stay out of user-facing expression diagnostics, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeFormatsSafeChainDViewUsingSurfaceNames(t *testing.T) {
+	src := `def bad(values: darray[i32, 4]) -> void:
+	_ = values[0:4]?.count
+`
+	_, errs := parseAndAnalyze(t, "safe_chain_dview_surface_diagnostic.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "optional chaining requires an optional or nullable reference receiver, got dview[i32]") {
+		t.Fatalf("expected surface dview safe-chain diagnostic, got:\n%s", all)
+	}
+	if strings.Contains(all, "DynArrayView") {
+		t.Fatalf("expected DynArrayView to stay out of user-facing expression diagnostics, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeDStrRuntimeBridgeWorksBothDirections(t *testing.T) {
 	src := `def take_raw(text: any u8&) -> void:
 	pass
