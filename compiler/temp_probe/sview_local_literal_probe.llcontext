@@ -1,0 +1,5 @@
+# include "../../Code/llcontext_std/contextlang_runtime.llcontext"
+
+def local_view(text: sview) -> i64:
+    prefix: sview = text
+    return prefix.len

@@ -2124,6 +2124,8 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 		switch n.Name {
 		case "dstr":
 			return &semantic.DStrType{Shape: &semantic.WildcardShape{}, SurfaceName: "dstr"}, nil
+		case "sview":
+			return &semantic.SViewType{}, nil
 		case "dstring":
 			return nil, legacyBuiltinReplacementError("dstring", "dstr")
 		case "DStr":

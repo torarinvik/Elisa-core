@@ -2709,6 +2709,86 @@ def pool_backed_case() -> void can[Abort.Panic]:
 	}
 }
 
+func TestRunCLIAcceptsBareSViewLocalAnnotationInObjectBuild(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "sview_local_obj_fixture.llcontext")
+	runtimePath := filepath.Join(repoRoot, "Code", "llcontext_std", "contextlang_runtime.llcontext")
+	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
+	if err != nil {
+		t.Fatalf("failed to compute runtime include path: %v", err)
+	}
+	runtimeInclude = filepath.ToSlash(runtimeInclude)
+	src := fmt.Sprintf(`# include %q
+
+def local_view(src: any u8&) -> i64:
+	text: sview = string_view(src, 0, 1)
+	return text.len
+`, runtimeInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write sview local object fixture: %v", err)
+	}
+
+	objectPath := filepath.Join(t.TempDir(), "sview_local_obj_fixture.o")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "obj", "-O0", "-o", objectPath, fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected bare sview local annotation object build to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(objectPath); err != nil {
+		t.Fatalf("expected object file to be produced: %v", err)
+	}
+}
+
+func TestRunCLIAcceptsSurfaceRuntimeBackedLocalAnnotationsInObjectBuild(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "surface_runtime_locals_obj_fixture.llcontext")
+	runtimePath := filepath.Join(repoRoot, "Code", "llcontext_std", "contextlang_runtime.llcontext")
+	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
+	if err != nil {
+		t.Fatalf("failed to compute runtime include path: %v", err)
+	}
+	runtimeInclude = filepath.ToSlash(runtimeInclude)
+	src := fmt.Sprintf(`# include %q
+
+extern make_text() -> dstr
+extern make_bytes() -> darray[u8]
+extern make_window() -> dview[u8]
+extern make_table() -> dict[dstr, i64]
+
+def local_runtime_locals() -> usize:
+	text: dstr = make_text()
+	bytes: darray[u8] = make_bytes()
+	window: dview[u8] = make_window()
+	table: dict[dstr, i64] = make_table()
+	return text.len + bytes.count + window.len + table.count
+`, runtimeInclude)
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write surface-runtime locals object fixture: %v", err)
+	}
+
+	objectPath := filepath.Join(t.TempDir(), "surface_runtime_locals_obj_fixture.o")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "obj", "-O0", "-o", objectPath, fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected surface runtime-backed local annotations object build to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(objectPath); err != nil {
+		t.Fatalf("expected object file to be produced: %v", err)
+	}
+}
+
 func TestRunCLIEmitsSelectedTestPhaseDebug(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
