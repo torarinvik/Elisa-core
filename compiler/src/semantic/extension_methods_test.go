@@ -209,6 +209,47 @@ def read(box: Box) -> i64:
 	}
 }
 
+func TestAnalyzeUFCSFreeFunctionAutorefRewrite(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ufcs_free_function_autoref.llcontext", `
+struct Box:
+    value: i64
+
+def score_ref(box: any Box&, delta: i64 = 1) -> i64:
+    return box.value + delta
+
+def read(box: Box) -> i64:
+    return box.score_ref(5)
+`)
+
+	funcSym, ok := result.GlobalScope.Lookup("read")
+	if !ok {
+		t.Fatal("expected read symbol")
+	}
+	decl := funcSym.Node.(*ast.FuncDecl)
+	ret := decl.Body[0].(*ast.ReturnStmt)
+	call, ok := ret.Value.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected rewritten call, got %T", ret.Value)
+	}
+	callee, ok := call.Func.(*ast.Ident)
+	if !ok || callee.Name != "score_ref" {
+		t.Fatalf("expected UFCS callee score_ref, got %T %#v", call.Func, call.Func)
+	}
+	if len(call.LoweredArgs()) != 2 {
+		t.Fatalf("expected receiver plus one lowered arg, got %d", len(call.LoweredArgs()))
+	}
+	addr, ok := call.LoweredArgs()[0].(*ast.AddrOfExpr)
+	if !ok {
+		t.Fatalf("expected UFCS receiver autoref, got %T", call.LoweredArgs()[0])
+	}
+	if ident, ok := addr.Operand.(*ast.Ident); !ok || ident.Name != "box" {
+		t.Fatalf("expected UFCS autoref operand box, got %T %#v", addr.Operand, addr.Operand)
+	}
+	if lit, ok := call.LoweredArgs()[1].(*ast.IntLit); !ok || lit.Value != "5" {
+		t.Fatalf("expected UFCS delta arg 5, got %T %#v", call.LoweredArgs()[1], call.LoweredArgs()[1])
+	}
+}
+
 func TestAnalyzeUFCSAmbiguityReportsCandidates(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ufcs_ambiguous.llcontext", `
 namespace left:

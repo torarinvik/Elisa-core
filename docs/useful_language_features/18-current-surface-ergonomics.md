@@ -443,3 +443,70 @@ Current rules:
 - the postfix hook surface is intentionally exact-source/exact-target rather than a broad overload search
 
 That distinction matters when reading code: `value as T` is an explicit cast, while `value.T()` is a hook-backed conversion shorthand.
+
+## Checked `ensures` clauses
+
+Function and extern declarations may carry checked poststate summaries for ref-visible paths.
+
+```context
+struct ParseJob[state Pending | Ready | Failed]:
+    stage: mutable int
+
+    derive state:
+        Pending when self.stage == 0
+        Ready when self.stage == 1
+        Failed when self.stage == 2
+
+def finish_ok(mutable job: any ParseJob[Pending]&) -> void ensures job => Ready:
+    job.stage <- 1
+
+repr(c) struct HeapPairNode:
+    value: i32
+
+extern sfree_heap_pair_node(node: heap HeapPairNode&) -> void ensures node => !
+```
+
+Current rules:
+
+- ordinary functions and `extern` declarations may carry `ensures` clauses
+- supported effects are named-state poststates, refstate poststates such as `!`, `&`, and `&?`, and `preserve`
+- targets use parameter-rooted field paths such as `job`, `team.player`, or `holder.slot`
+- bool-returning functions may use branch-sensitive forms like `ensures return true => job => Ready`
+- ordinary function bodies must prove every applicable `ensures` clause on each normal return path
+- call analysis applies the declared poststate to the caller-visible tracked type after the call when the target argument path is known
+- `ensures` is static effect typing, not a runtime contract/assertion feature
+
+## Conservative call-site auto-borrow
+
+The compiler may insert a borrow automatically at call sites when the callee expects a compatible ref and the argument is an obvious addressable lvalue.
+
+```context
+struct ScratchArena:
+    value: i64
+
+struct Holder:
+    arena: ScratchArena
+
+struct Box:
+    value: i64
+
+def read_ref(alloc: any ScratchArena&) -> i64:
+    return alloc.value
+
+def score_ref(box: any Box&, delta: i64 = 1) -> i64:
+    return box.value + delta
+
+def read(box: Box, holder: mutable Holder) -> i64:
+    left = read_ref(holder.arena)
+    right = box.score_ref(5)
+    return left + right
+```
+
+Current rules:
+
+- ordinary calls may autoref addressable identifiers, field projections, and supported index projections when a compatible non-null ref is expected
+- the same conservative autoref path is used by struct-literal argument resolution, implicit-context argument resolution, and receiver-style extension or UFCS rewriting
+- existing refs may upcast storage to `any` automatically when pointee type, refstate, region, and mutability are otherwise already compatible
+- mutable ref parameters still require a writable argument path; immutable locals, immutable fields, constants, and other readonly paths are rejected
+- nullable ref parameters are not implicit autoref targets
+- the compiler does not silently perform broader storage-changing or state-changing coercions beyond that conservative borrow/upcast surface; use explicit `&` and `as` when the intended conversion is not obvious from the lvalue itself

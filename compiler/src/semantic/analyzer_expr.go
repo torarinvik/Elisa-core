@@ -593,8 +593,8 @@ func (a *Analyzer) exprCanYieldWritableRef(expr ast.Expr) bool {
 				return false
 			}
 		}
-		if _, isRef := sym.Type.(*RefType); !isRef {
-			return true
+		if ref, isRef := sym.Type.(*RefType); isRef {
+			return sym.Mutable || ref.Mutable
 		}
 		return sym.Mutable
 	case *ast.FieldExpr:

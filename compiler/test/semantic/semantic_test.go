@@ -3109,10 +3109,10 @@ def ok() -> bool can[Pool.Create, Pool.Shutdown]:
 
 func TestAnalyzeAcceptsSubmitSyntaxInsidePoolScope(t *testing.T) {
 	src := `extern pool_new(workers: usize) -> ThreadPool
-extern pool_shutdown(pool: any ThreadPool&) -> void
+extern pool_shutdown(pool: mutable any ThreadPool&) -> void
 extern pool_await(task: Task[i64, Pending]) -> i64
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: mutable any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -3134,14 +3134,14 @@ def ok() -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.Await]:
 func TestAnalyzeAcceptsExplicitSubmitSyntaxOutsidePoolScope(t *testing.T) {
 	src := `extern pool_await(task: Task[i64, Pending]) -> i64
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: mutable any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 def work(value: i64) -> i64:
 	return value + 1
 
-def ok(pool: any ThreadPool&) -> i64 can[Pool.Submit, Pool.Await]:
+def ok(pool: mutable any ThreadPool&) -> i64 can[Pool.Submit, Pool.Await]:
 	task: Task[i64, Pending] = submit[pool] work(7)
 	return await task
 `
@@ -5445,6 +5445,58 @@ def unwrap(value: MaybeInt) -> int:
 	}
 }
 
+func TestAnalyzeAcceptsConstEnumMatchStatementsAndExpressions(t *testing.T) {
+	src := `const enum Op of i32:
+	ADD = 1
+	SUB = 2
+	MUL = 3
+
+def score_stmt(op: Op) -> int:
+	match op:
+		Op.ADD:
+			return 10
+		Op.SUB:
+			return 20
+		_:
+			return 30
+	return 0
+
+def score_expr(op: Op) -> int:
+	return match op:
+		Op.ADD:
+			10
+		Op.SUB:
+			20
+		Op.MUL:
+			30
+`
+	_, errs := parseAndAnalyze(t, "const_enum_match_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
+func TestAnalyzeRejectsNonExhaustiveConstEnumMatchExpressions(t *testing.T) {
+	src := `const enum Op of i32:
+	ADD = 1
+	SUB = 2
+	MUL = 3
+
+def score_expr(op: Op) -> int:
+	return match op:
+		Op.ADD:
+			10
+		Op.SUB:
+			20
+`
+	_, errs := parseAndAnalyze(t, "const_enum_match_non_exhaustive.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "non-exhaustive match over \"Op\"; missing members: Op.MUL") {
+		t.Fatalf("expected non-exhaustive const-enum match diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeAcceptsStringLiteralMatchStatement(t *testing.T) {
 	src := `def classify(text: StringView) -> int:
 	match text:
@@ -5523,7 +5575,7 @@ func TestAnalyzeRejectsStringMatchOverNonStringValue(t *testing.T) {
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "match requires an enum, tree-category, or string value, got int") {
+	if !strings.Contains(all, "match requires an enum, const enum, tree-category, or string value, got int") {
 		t.Fatalf("expected non-string match diagnostic, got:\n%s", all)
 	}
 }
@@ -10069,7 +10121,7 @@ func TestAnalyzeFormatsMatchDViewUsingSurfaceNames(t *testing.T) {
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "match requires an enum, tree-category, or string value, got dview[i32]") {
+	if !strings.Contains(all, "match requires an enum, const enum, tree-category, or string value, got dview[i32]") {
 		t.Fatalf("expected surface dview match diagnostic, got:\n%s", all)
 	}
 	if strings.Contains(all, "DynArrayView") {

@@ -110,6 +110,42 @@ def score(tok: Token) -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersConstEnumMatchStatementsAndExpressions(t *testing.T) {
+	src := `const enum Op of i32:
+	ADD = 1
+	SUB = 2
+	MUL = 3
+
+def apply_stmt(op: Op) -> i64:
+	match op:
+		Op.ADD:
+			return 10
+		Op.SUB:
+			return 20
+		_:
+			return 30
+
+def apply_expr(op: Op) -> i64:
+	return match op:
+		Op.ADD:
+			10
+		Op.SUB:
+			20
+		Op.MUL:
+			30
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_const_enum_match.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i64 @apply_stmt(i32 ", "define i64 @apply_expr(i32 ", "match.tag", "match.expr.phi"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected const-enum match lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersStructIsConditionBindingsInIfAndWhile(t *testing.T) {
 	src := `const enum Tok of i32:
 	INTEGER = 1

@@ -106,12 +106,9 @@ Current rules:
 
 - if ordinary member lookup and extension-method lookup do not win first, the compiler may rewrite `value.func(args...)` into `func(value, args...)`
 - this rewrite is based on the first parameter's type, so it is intentionally conservative rather than a broad “search anything named func” rule
+- if the rewritten first parameter expects a compatible non-null ref, UFCS may autoref an addressable receiver into that ref parameter
+- mutable ref receivers still require a writable receiver path, and broader coercions remain explicit
 - ambiguity across candidates is rejected with a diagnostic that lists the visible candidate names
-
-Current limitation:
-
-- UFCS does not currently autoref a value or optional value into a ref-only helper such as `def score_ref(counter: any Counter&, ...)`
-- when a helper really requires a reference receiver, call it explicitly with the reference expression you want to pass
 
 ## Safe field and safe call chaining
 
@@ -132,4 +129,4 @@ Current rules:
 - `expr?.field` is the safe field form
 - `expr?.call(...)` is the safe call form
 - successful type propagation yields an optional result, for example `i64?`
-- safe call chaining only works when the underlying dispatch path is otherwise valid; it does not bypass the current UFCS autoref limitation for ref-only helpers
+- safe call chaining only works when the underlying dispatch path is otherwise valid and follows the same conservative receiver-autoref rules as ordinary receiver calls

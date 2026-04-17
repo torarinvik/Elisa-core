@@ -3013,7 +3013,7 @@ def use(values: dict[u32, i32]) -> dict[u32, i32]:
 	}
 	result := semantic.Analyze(file)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, "expects DynDict[u32, i32], got dict[u32, i32]") {
+	if !strings.Contains(all, "expects dict[u32, i32] (runtime carrier), got dict[u32, i32]") {
 		t.Fatalf("expected generic-key runtime bridge mismatch diagnostic, got:\n%s", all)
 	}
 }
