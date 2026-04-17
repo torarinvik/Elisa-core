@@ -30,6 +30,8 @@ Implemented today:
 
 The user-facing built-in spellings are lowercase only: use `str[...]` and `dstr[...]`, not legacy aliases like `string[...]` or `dstring[...]`.
 
+The same rule applies to the runtime-backed container/view family: `darray[...]`, `dview[...]`, and `sview[...]` are the canonical source-level spellings, while `DynArray[...]`, `DynArrayView`, and `StringView` are internal runtime carrier names.
+
 Still deferred:
 
 - symbolic arithmetic equality over shape expressions such as `a + b` or `j - i`
@@ -378,6 +380,8 @@ Current status:
 - `view[T, begin, end]` is the preferred surface for fixed-array slice results
 - `dview[T]` is the preferred surface for dynamic-array slices and runtime-backed array views
 - `sview[begin, end]` is the preferred surface for string slices and runtime-backed string views
+
+CamelCase carrier names remain useful for runtime/interop implementation details, but ordinary user-facing code should prefer the lowercase surface types.
 
 So I agree with your instinct as an implementation priority:
 

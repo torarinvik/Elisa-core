@@ -23,11 +23,11 @@ func (a *Analyzer) validateExtensionMethodSignature(visibleName string, receiver
 		return false
 	}
 	if len(fnType.Params) == 0 {
-		a.errorf(decl.Pos(), "extension method %q on %s must take the receiver as its first parameter", visibleName, receiver.String())
+		a.errorf(decl.Pos(), "extension method %q on %s must take the receiver as its first parameter", visibleName, receiver)
 		return false
 	}
 	if !SameType(fnType.Params[0], receiver) {
-		a.errorf(decl.Pos(), "extension method %q on %s must take %s as its first parameter, got %s", visibleName, receiver.String(), receiver.String(), fnType.Params[0].String())
+		a.errorf(decl.Pos(), "extension method %q on %s must take %s as its first parameter, got %s", visibleName, receiver, receiver, fnType.Params[0])
 		return false
 	}
 	return true
@@ -46,7 +46,7 @@ func (a *Analyzer) registerExtensionMethod(visibleName string, receiver Type, sy
 			continue
 		}
 		if SameType(existing.Receiver, receiver) {
-			a.errorf(decl.Pos(), "duplicate extension method %q on %s", visibleName, receiver.String())
+			a.errorf(decl.Pos(), "duplicate extension method %q on %s", visibleName, receiver)
 			return
 		}
 	}
@@ -72,7 +72,7 @@ func (a *Analyzer) lookupVisibleExtensionMethod(name string, actualReceiver Type
 				continue
 			}
 			if matched != nil {
-				return nil, false, fmt.Errorf("extension method %q on %s is ambiguous", name, actualReceiver.String())
+				return nil, false, fmt.Errorf("extension method %q on %s is ambiguous", name, diagnosticTypeString(actualReceiver))
 			}
 			matched = method
 		}
@@ -118,7 +118,7 @@ func (a *Analyzer) lookupVisibleUFCSFunction(name string, actualReceiver Type) (
 		matchedName = candidate
 	}
 	if len(ambiguousNames) != 0 {
-		return nil, false, fmt.Errorf("UFCS call %q on %s is ambiguous: %s", name, actualReceiver.String(), strings.Join(ambiguousNames, ", "))
+		return nil, false, fmt.Errorf("UFCS call %q on %s is ambiguous: %s", name, diagnosticTypeString(actualReceiver), strings.Join(ambiguousNames, ", "))
 	}
 	if matched == nil {
 		return nil, false, nil

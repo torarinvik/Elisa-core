@@ -221,6 +221,8 @@ Reason:
 
 These are language-level logical/container abstractions, not simple C ABI contracts.
 
+The same guideline applies to the internal CamelCase runtime carriers such as `DynArray`, `DynArrayView`, and `StringView`: they are implementation details, not the preferred public ABI contract.
+
 If code needs to cross the ABI boundary with container-like data, it should do so through explicit C-facing bridge types such as:
 
 ```context

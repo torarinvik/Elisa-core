@@ -277,7 +277,7 @@ func (a *Analyzer) resolveFuncPoststates(name string, params []ast.ParamDecl, pa
 	for _, clause := range ensures {
 		condition := funcPoststateConditionFromAST(clause.Condition)
 		if condition.Kind == FuncPoststateConditionReturnBool && !IsBoolType(returnType) {
-			a.errorf(clause.Position, "ensures %s on function %q requires a bool return type, got %s", funcPoststateConditionLabel(condition), name, returnType.String())
+			a.errorf(clause.Position, "ensures %s on function %q requires a bool return type, got %s", funcPoststateConditionLabel(condition), name, returnType)
 			continue
 		}
 		paramIndex := -1
@@ -327,7 +327,7 @@ func (a *Analyzer) resolveFuncPoststates(name string, params []ast.ParamDecl, pa
 		case ast.EnsuresKindNamedState:
 			base, ok := poststateNamedStateTargetBase(targetType)
 			if !ok || base == nil {
-				a.errorf(clause.Position, "ensures on function %q requires %q to resolve to a named-state-bearing target, got %s", name, clause.Target.Root+borrowAnnotationPathSuffix(steps), targetType.String())
+				a.errorf(clause.Position, "ensures on function %q requires %q to resolve to a named-state-bearing target, got %s", name, clause.Target.Root+borrowAnnotationPathSuffix(steps), targetType)
 				continue
 			}
 			seenCases := map[string]bool{}
@@ -359,14 +359,14 @@ func (a *Analyzer) resolveFuncPoststates(name string, params []ast.ParamDecl, pa
 			poststate.StateCases = canonicalizeNamedStateCases(base.NamedStateCases, stateCases)
 		case ast.EnsuresKindRefState:
 			if _, ok := poststateRefTargetType(targetType); !ok {
-				a.errorf(clause.Position, "ensures on function %q requires %q to resolve to a ref target for refstate effects, got %s", name, clause.Target.Root+borrowAnnotationPathSuffix(steps), targetType.String())
+				a.errorf(clause.Position, "ensures on function %q requires %q to resolve to a ref target for refstate effects, got %s", name, clause.Target.Root+borrowAnnotationPathSuffix(steps), targetType)
 				continue
 			}
 			poststate.Kind = FuncPoststateKindRefState
 			poststate.RefState = RefState(clause.RefState)
 		case ast.EnsuresKindPreserve:
 			if !poststateTargetTrackable(targetType) {
-				a.errorf(clause.Position, "ensures on function %q requires %q to resolve to a trackable poststate target, got %s", name, clause.Target.Root+borrowAnnotationPathSuffix(steps), targetType.String())
+				a.errorf(clause.Position, "ensures on function %q requires %q to resolve to a trackable poststate target, got %s", name, clause.Target.Root+borrowAnnotationPathSuffix(steps), targetType)
 				continue
 			}
 			poststate.Kind = FuncPoststateKindPreserve
@@ -392,6 +392,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			a.errorLegacyBuiltinReplacement(n.Pos(), "dstring", "dstr")
 			return invalidType
 		}
+		a.maybeWarnOnRuntimeCarrierTypeUse(n.Pos(), n.Name)
 		if t, ok := a.lookupTypeParam(n.Name); ok {
 			return t
 		}
@@ -416,12 +417,12 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		baseType := StripAggregateStateType(a.resolveType(n.Base))
 		count := AggregateStateParamCount(baseType)
 		if count == 0 {
-			a.errorf(n.Pos(), "type %q does not declare an aggregate state parameter", baseType.String())
+			a.errorf(n.Pos(), "type %q does not declare an aggregate state parameter", baseType)
 			return invalidType
 		}
 		states := astAggregateStates(n)
 		if len(states) != count {
-			a.errorf(n.Pos(), "type %q expects %d aggregate state arguments, got %d", baseType.String(), count, len(states))
+			a.errorf(n.Pos(), "type %q expects %d aggregate state arguments, got %d", baseType, count, len(states))
 			return invalidType
 		}
 		return cloneAggregateStateWithBase(baseType, states)
@@ -436,7 +437,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		errorType := a.resolveType(n.Errors)
 		errSet, ok := errorType.(*ErrorSetType)
 		if !ok {
-			a.errorf(n.Pos(), "error union expects an error set on the right-hand side, got %s", errorType.String())
+			a.errorf(n.Pos(), "error union expects an error set on the right-hand side, got %s", errorType)
 			return invalidType
 		}
 		return &ErrorUnionType{Value: valueType, Errors: errSet}
@@ -447,7 +448,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			return invalidType
 		}
 		if _, ok := valueType.(*RefType); ok {
-			a.errorf(n.Pos(), "value optionals cannot wrap references; use &? instead of %s?", valueType.String())
+			a.errorf(n.Pos(), "value optionals cannot wrap references; use &? instead of %s?", valueType)
 			return invalidType
 		}
 		return &OptionalType{Value: valueType}
@@ -481,7 +482,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		}
 		elemType := a.resolveType(n.Elem)
 		if a.containsAffineHandleValues(elemType, map[string]bool{}) && !isBorrowableAffineOwnerType(elemType) {
-			a.errorf(n.Pos(), "references to values containing affine handles are not supported; got %s&", elemType.String())
+			a.errorf(n.Pos(), "references to values containing affine handles are not supported; got %s&", elemType)
 		}
 		return &RefType{Elem: elemType, State: RefState(n.State), StateParam: stateParam, Storage: RefStorage(n.Storage), StorageParam: storageParam, Region: region, ExplicitStorage: n.Explicit}
 	case *ast.ArrayType:
@@ -533,7 +534,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 	case *ast.TailType:
 		elemType := a.resolveType(n.Elem)
 		if a.containsAffineHandleValues(elemType, map[string]bool{}) && !isBorrowableAffineOwnerType(elemType) {
-			a.errorf(n.Pos(), "references to values containing affine handles are not supported; got %s&", elemType.String())
+			a.errorf(n.Pos(), "references to values containing affine handles are not supported; got %s&", elemType)
 		}
 		return &RefType{Elem: elemType, State: RefStateNonNull, Storage: RefStorageAny}
 	case *ast.GenericType:
@@ -543,6 +544,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		if arrayExpr, ok := a.genericTypeAsArrayType(n); ok {
 			return a.resolveArrayType(arrayExpr)
 		}
+		a.maybeWarnOnRuntimeCarrierTypeUse(n.Pos(), n.Name)
 		args := make([]Type, 0, len(n.Args))
 		base, _, ok := a.lookupVisibleType(n.Name)
 		if !ok {
@@ -575,7 +577,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			}
 			if base.Builtin && base.Name == "atomic" && len(args) == 1 {
 				if !a.typeStructurallyAtomicSafe(args[0], map[string]bool{}) {
-					a.errorf(n.Pos(), "atomic payload type must satisfy atomic_safe(T), got %s", args[0].String())
+					a.errorf(n.Pos(), "atomic payload type must satisfy atomic_safe(T), got %s", args[0])
 					return invalidType
 				}
 			}

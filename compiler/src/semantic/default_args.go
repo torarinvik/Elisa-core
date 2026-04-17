@@ -489,7 +489,7 @@ func (a *Analyzer) validateParamDefaultExpr(expr ast.Expr, expected Type) bool {
 	a.currentFuncType = savedFuncType
 	a.currentImplicitScopes = savedImplicitScopes
 	if !AssignableTo(expected, actualType) {
-		a.errorf(expr.Pos(), "default argument expects %s, got %s", expected.String(), actualType.String())
+		a.errorf(expr.Pos(), "default argument expects %s, got %s", expected, actualType)
 		a.reportShapeMismatchNotes(expr.Pos(), expected, actualType)
 		return false
 	}

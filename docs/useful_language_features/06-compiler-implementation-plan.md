@@ -492,6 +492,8 @@ More concretely, the current semantic bridge is intentionally narrow and wrapper
 - `dview[T]` is allowed to flow across the runtime boundary as `DynArrayView`
 - `sview[begin, end]` / `StringView` is allowed to flow across the runtime boundary as the raw string-view carrier
 
+Naming policy: lowercase forms are the canonical user-facing spellings, while CamelCase forms such as `DynArray`, `DynArrayView`, `StringView`, and `DynDict` are runtime carrier types that should stay confined to runtime/interop code.
+
 Legacy raw list wrappers and carriers have been removed entirely. The older typed `DList` / `DListView` surface is also gone; dynamic collection work now goes through lowercase `darray`, compile-time `view`, and runtime `dview` only.
 
 That means the typechecker can track logical shape states at the wrapper/API level while still reusing the existing low-level runtime layouts internally, and the public wrappers can expose typed `error[...]` returns when allocation or growth may fail.
@@ -592,7 +594,7 @@ This matches the current style where:
 - `dstr[shape]` bridges to raw `u8&`
 - `sview[begin, end]` bridges to `StringView`
 
-The important idea is that the user-facing type stays general even if the first runtime bridge is intentionally narrow.
+The important idea is that the user-facing type stays general even if the first runtime bridge is intentionally narrow, and that source-level code should prefer the lowercase spellings while the CamelCase carriers stay internal.
 
 ### Runtime carrier shape
 

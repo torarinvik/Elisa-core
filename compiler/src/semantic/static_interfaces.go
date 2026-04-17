@@ -431,19 +431,19 @@ func (a *Analyzer) collectStaticImpls(decls []scopedDecl) {
 				}
 				expectedSig := a.specializeInterfaceMethodSignature(methodInfo.Signature, receiver)
 				if !SameType(expectedSig, actualSig) {
-					a.errorf(pos.Pos(), "impl method %q for interface %q expects %s, got %s", name, interfaceName, expectedSig.String(), actualSig.String())
+					a.errorf(pos.Pos(), "impl method %q for interface %q expects %s, got %s", name, interfaceName, expectedSig, actualSig)
 					continue
 				}
 				impl.Methods[name] = sym
 			}
 			for name := range iface.AssociatedTypes {
 				if _, ok := impl.AssociatedTypes[name]; !ok {
-					a.errorf(decl.Pos(), "impl of interface %q for %s is missing associated type %q", interfaceName, receiver.String(), name)
+					a.errorf(decl.Pos(), "impl of interface %q for %s is missing associated type %q", interfaceName, receiver, name)
 				}
 			}
 			for name := range iface.Methods {
 				if _, ok := impl.Methods[name]; !ok {
-					a.errorf(decl.Pos(), "impl of interface %q for %s is missing method %q", interfaceName, receiver.String(), name)
+					a.errorf(decl.Pos(), "impl of interface %q for %s is missing method %q", interfaceName, receiver, name)
 				}
 			}
 		})

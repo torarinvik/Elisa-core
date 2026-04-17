@@ -205,7 +205,7 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 		}
 		a.recordLambdaReturnExpr(expr.BodyExpr, bodyType)
 		if !AssignableTo(a.matchReturnType(bodyType), bodyType) {
-			a.errorf(expr.BodyExpr.Pos(), "return type expects %s, got %s", a.matchReturnType(bodyType).String(), bodyType.String())
+			a.errorf(expr.BodyExpr.Pos(), "return type expects %s, got %s", a.matchReturnType(bodyType), bodyType)
 		}
 	} else {
 		a.withLocalParamPackFrame(func() {
@@ -214,7 +214,7 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 			}
 		})
 		if !isVoidType(fnType.Return) && !blockDefinitelyExits(expr.Body) {
-			a.errorf(expr.Pos(), "lambda body may reach the end without returning %s", fnType.Return.String())
+			a.errorf(expr.Pos(), "lambda body may reach the end without returning %s", fnType.Return)
 		}
 	}
 

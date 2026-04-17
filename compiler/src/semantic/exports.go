@@ -119,7 +119,7 @@ func (a *Analyzer) analyzeExportFunc(decl *ast.ExportFuncDecl, seenPublicNames m
 	}
 
 	if !sameExportSignature(signature, targetSpecialized) {
-		a.errorf(decl.Pos(), "export func %q signature %s does not match target %q as %s", decl.Name, signature.String(), decl.TargetName, targetSpecialized.String())
+		a.errorf(decl.Pos(), "export func %q signature %s does not match target %q as %s", decl.Name, signature, decl.TargetName, targetSpecialized)
 		return
 	}
 

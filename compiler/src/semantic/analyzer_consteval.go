@@ -304,14 +304,14 @@ func (a *Analyzer) errorf(pos lexer.Pos, format string, args ...interface{}) {
 	if a.suppressDiagnostics {
 		return
 	}
-	a.diagnostics = append(a.diagnostics, Diagnostic{Pos: pos, Severity: DiagnosticSeverityError, Message: fmt.Sprintf(format, args...)})
+	a.diagnostics = append(a.diagnostics, Diagnostic{Pos: pos, Severity: DiagnosticSeverityError, Message: fmt.Sprintf(format, formatDiagnosticArgs(args)...)})
 }
 
 func (a *Analyzer) warnf(pos lexer.Pos, format string, args ...interface{}) {
 	if a.suppressDiagnostics {
 		return
 	}
-	a.diagnostics = append(a.diagnostics, Diagnostic{Pos: pos, Severity: DiagnosticSeverityWarning, Message: fmt.Sprintf(format, args...)})
+	a.diagnostics = append(a.diagnostics, Diagnostic{Pos: pos, Severity: DiagnosticSeverityWarning, Message: fmt.Sprintf(format, formatDiagnosticArgs(args)...)})
 }
 
 func isNullableRef(t Type) bool {

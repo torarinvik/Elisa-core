@@ -22,7 +22,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			if declType == nil {
 				declType = valueType
 			} else if !AssignableTo(declType, valueType) {
-				a.errorf(n.Pos(), "variable %q expects %s, got %s", n.Name, declType.String(), valueType.String())
+				a.errorf(n.Pos(), "variable %q expects %s, got %s", n.Name, declType, valueType)
 				a.reportShapeMismatchNotes(n.Pos(), declType, valueType)
 			}
 		} else if declType == nil {
@@ -84,11 +84,11 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		valueType := a.analyzeValueExpr(n.Value, expectedTuple)
 		fields, ok := a.resolvedStructFields(valueType)
 		if !ok {
-			a.errorf(n.Pos(), "tuple destructuring requires a tuple value, got %s", valueType.String())
+			a.errorf(n.Pos(), "tuple destructuring requires a tuple value, got %s", valueType)
 			return
 		}
 		if _, isTuple := StripAggregateStateType(valueType).(*TupleType); !isTuple {
-			a.errorf(n.Pos(), "tuple destructuring requires a tuple value, got %s", valueType.String())
+			a.errorf(n.Pos(), "tuple destructuring requires a tuple value, got %s", valueType)
 			return
 		}
 		if len(n.Names) != len(fields) {
@@ -125,7 +125,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			}
 			a.clearPackedVariantViewExpr(target)
 			if !AssignableTo(targetType, fields[i].Type) {
-				a.errorf(binding.Position, "cannot assign %s to %s", fields[i].Type.String(), targetType.String())
+				a.errorf(binding.Position, "cannot assign %s to %s", fields[i].Type, targetType)
 				a.reportShapeMismatchNotes(binding.Position, targetType, fields[i].Type)
 			}
 			a.recordAssignmentRefinement(target, targetType, fields[i].Type)
@@ -156,7 +156,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if n.Capacity != nil {
 			capacityType := a.analyzeExpr(n.Capacity)
 			if !IsNumericType(capacityType) {
-				a.errorf(n.Capacity.Pos(), "region capacity must be numeric, got %s", capacityType.String())
+				a.errorf(n.Capacity.Pos(), "region capacity must be numeric, got %s", capacityType)
 			}
 		}
 		arenaType, ok := a.namedTypes["Arena"]
@@ -205,7 +205,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.clearPackedVariantViewExpr(n.Target)
 		valueType := a.analyzeValueExpr(n.Value, targetType)
 		if !AssignableTo(targetType, valueType) {
-			a.errorf(n.Pos(), "cannot assign %s to %s", valueType.String(), targetType.String())
+			a.errorf(n.Pos(), "cannot assign %s to %s", valueType, targetType)
 			a.reportShapeMismatchNotes(n.Pos(), targetType, valueType)
 		}
 		if !n.Optional {
@@ -244,7 +244,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.clearPackedVariantViewExpr(n.Target)
 		valueType := a.analyzeValueExpr(n.Value, targetType)
 		if !AssignableTo(targetType, valueType) {
-			a.errorf(n.Pos(), "cannot assign %s to %s", valueType.String(), targetType.String())
+			a.errorf(n.Pos(), "cannot assign %s to %s", valueType, targetType)
 			a.reportShapeMismatchNotes(n.Pos(), targetType, valueType)
 		}
 		a.recordAssignmentRefinement(n.Target, targetType, targetType)
@@ -264,13 +264,13 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if n.Value == nil {
 			if currentUnion, ok := a.currentReturn.(*ErrorUnionType); ok {
 				if !SameType(currentUnion.Value, a.namedTypes["void"]) {
-					a.errorf(n.Pos(), "return value required for %s", a.currentReturn.String())
+					a.errorf(n.Pos(), "return value required for %s", a.currentReturn)
 				}
 				a.validateCurrentFuncPoststates()
 				return
 			}
 			if a.currentReturn != nil && !SameType(a.currentReturn, a.namedTypes["void"]) {
-				a.errorf(n.Pos(), "return value required for %s", a.currentReturn.String())
+				a.errorf(n.Pos(), "return value required for %s", a.currentReturn)
 			}
 			a.validateCurrentFuncPoststates()
 			return
@@ -308,7 +308,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.recordFreshReturnBindings(valueType)
 		expectedReturn := a.matchReturnType(valueType)
 		if !AssignableTo(expectedReturn, valueType) {
-			a.errorf(n.Pos(), "return type expects %s, got %s", expectedReturn.String(), valueType.String())
+			a.errorf(n.Pos(), "return type expects %s, got %s", expectedReturn, valueType)
 			a.reportShapeMismatchNotes(n.Pos(), expectedReturn, valueType)
 		}
 		a.validateCurrentFuncPoststatesForReturnValue(n.Value)
@@ -316,7 +316,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 	case *ast.IfStmt:
 		condType := a.analyzeCondExpr(n.Cond)
 		if !IsBoolType(condType) {
-			a.errorf(n.Pos(), "if condition must be bool, got %s", condType.String())
+			a.errorf(n.Pos(), "if condition must be bool, got %s", condType)
 		}
 		mergedAffine := a.cloneAffineValueStates()
 		mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
@@ -332,7 +332,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		for _, elif := range n.Elifs {
 			elifType := a.analyzeExpr(elif.Cond)
 			if !IsBoolType(elifType) {
-				a.errorf(elif.Position, "elif condition must be bool, got %s", elifType.String())
+				a.errorf(elif.Position, "elif condition must be bool, got %s", elifType)
 			}
 			elifSnapshot := a.analyzeBlockWithConditionAffineClone(elif.Body, a.currentScope, elif.Cond, true)
 			if !blockDefinitelyExits(elif.Body) {

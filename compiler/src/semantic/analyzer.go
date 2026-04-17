@@ -1291,18 +1291,18 @@ func (a *Analyzer) validateTreePayloadRelation(category *TreeCategoryType, varia
 	if payloadDecl.Relation == ast.EnumPayloadRelationChildren {
 		elemType, ok := TreeStructuralSequenceElemType(payloadType)
 		if !ok {
-			a.errorf(payloadDecl.Position, "tree node payload relation %q on %q.%q expects an array-like payload, got %s", string(payloadDecl.Relation), category.Name, variantDecl.Name, payloadType.String())
+			a.errorf(payloadDecl.Position, "tree node payload relation %q on %q.%q expects an array-like payload, got %s", string(payloadDecl.Relation), category.Name, variantDecl.Name, payloadType)
 			return
 		}
 		targetType = elemType
 	}
 	memberType, family, ok := treePayloadTargetMemberType(targetType)
 	if !ok {
-		a.errorf(payloadDecl.Position, "tree node payload relation %q on %q.%q expects a tree member type, got %s", string(payloadDecl.Relation), category.Name, variantDecl.Name, targetType.String())
+		a.errorf(payloadDecl.Position, "tree node payload relation %q on %q.%q expects a tree member type, got %s", string(payloadDecl.Relation), category.Name, variantDecl.Name, targetType)
 		return
 	}
 	if family != category.Family {
-		a.errorf(payloadDecl.Position, "tree node payload relation %q on %q.%q must stay within tree family %q, got %s", string(payloadDecl.Relation), category.Name, variantDecl.Name, category.Family.Name, memberType.String())
+		a.errorf(payloadDecl.Position, "tree node payload relation %q on %q.%q must stay within tree family %q, got %s", string(payloadDecl.Relation), category.Name, variantDecl.Name, category.Family.Name, memberType)
 		return
 	}
 	if payloadDecl.Relation == ast.EnumPayloadRelationLink && payloadIndex < len(variantDecl.Payload) && payloadDecl.Name == "" {
@@ -3063,12 +3063,12 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 				if sym, ok := a.globalScope.Lookup(joinQualifiedName(scoped.Namespace, n.Name)); ok {
 					valueType := a.analyzeValueExprInScope(n.Value, sym.Type, a.globalScope)
 					if !AssignableTo(sym.Type, valueType) {
-						a.errorf(n.Pos(), "const %q expects %s, got %s", n.Name, sym.Type.String(), valueType.String())
+						a.errorf(n.Pos(), "const %q expects %s, got %s", n.Name, sym.Type, valueType)
 					}
 					if value, ok := a.evalConstExpr(n.Value); ok {
 						a.constValues[joinQualifiedName(scoped.Namespace, n.Name)] = value
 					} else {
-						a.errorf(n.Value.Pos(), "const %q initializer must be a compile-time %s value", n.Name, sym.Type.String())
+						a.errorf(n.Value.Pos(), "const %q initializer must be a compile-time %s value", n.Name, sym.Type)
 					}
 				}
 			case *ast.GlobalDecl:
@@ -3076,7 +3076,7 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 					if sym, ok := a.globalScope.Lookup(joinQualifiedName(scoped.Namespace, n.Name)); ok {
 						valueType := a.analyzeValueExprInScope(n.Value, sym.Type, a.globalScope)
 						if !AssignableTo(sym.Type, valueType) {
-							a.errorf(n.Pos(), "global %q expects %s, got %s", n.Name, sym.Type.String(), valueType.String())
+							a.errorf(n.Pos(), "global %q expects %s, got %s", n.Name, sym.Type, valueType)
 						}
 					}
 				}

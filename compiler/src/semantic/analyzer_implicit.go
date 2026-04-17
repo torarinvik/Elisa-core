@@ -223,7 +223,7 @@ func (a *Analyzer) resolveImplicitCallArgs(expr *ast.CallExpr, ft *FuncType, bin
 		var actualType Type
 		argExpr, actualType = a.analyzeCallLikeValueExpr(argExpr, expectedType)
 		if !AssignableTo(expectedType, actualType) {
-			a.errorf(argExpr.Pos(), "implicit argument %q to %q expects %s, got %s", name, ft.Name, expectedType.String(), actualType.String())
+			a.errorf(argExpr.Pos(), "implicit argument %q to %q expects %s, got %s", name, ft.Name, expectedType, actualType)
 			a.reportMutableRefArgumentNote(argExpr.Pos(), expectedType, actualType)
 			a.reportShapeMismatchNotes(argExpr.Pos(), expectedType, actualType)
 		}

@@ -654,7 +654,7 @@ func ErrorTypeDiagnosticName(t Type) string {
 	case *ErrorSetType:
 		return ErrorSetDiagnosticName(tt)
 	default:
-		return t.String()
+		return diagnosticTypeString(t)
 	}
 }
 

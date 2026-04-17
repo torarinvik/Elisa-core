@@ -1872,6 +1872,44 @@ func TestRunCLIWarnsOnLegacyReverseIterableLoopSyntax(t *testing.T) {
 	}
 }
 
+func TestRunCLIWarnsOnInternalRuntimeCarrierTypes(t *testing.T) {
+	prev, hadPrev := os.LookupEnv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS")
+	_ = os.Unsetenv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS")
+	defer func() {
+		if hadPrev {
+			_ = os.Setenv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS", prev)
+		} else {
+			_ = os.Unsetenv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS")
+		}
+	}()
+
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "runtime_carrier_warning.llcontext")
+	src := "extern take_view(view: StringView) -> void\nextern take_raw[T](values: DynArray[T]) -> void\nextern take_window(view: DynArrayView) -> void\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write runtime carrier warning fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "ast", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to succeed, stderr:\n%s", stderr.String())
+	}
+	for _, want := range []string{
+		`internal runtime carrier type "StringView" is deprecated in user-facing code; use "sview[...]" instead`,
+		`internal runtime carrier type "DynArray" is deprecated in user-facing code; use "darray[T, shape]" instead`,
+		`internal runtime carrier type "DynArrayView" is deprecated in user-facing code; use "dview[T]" instead`,
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("expected runtime carrier warning %q, got:\n%s", want, stderr.String())
+		}
+	}
+	if !strings.Contains(stdout.String(), "extern take_view") {
+		t.Fatalf("expected AST output for runtime carrier warning fixture, got:\n%s", stdout.String())
+	}
+}
+
 func TestRunCLIFmtNormalizesSingleStatementGrantBlocks(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "grant_fmt_single_use.llcontext")

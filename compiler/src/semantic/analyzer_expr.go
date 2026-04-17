@@ -279,7 +279,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			}
 			fallbackType := a.analyzeExpr(n.Fallback)
 			if !IsNeverType(fallbackType) && !AssignableTo(unionType.Value, fallbackType) {
-				a.errorf(n.Pos(), "try fallback expects %s, got %s", unionType.Value.String(), fallbackType.String())
+				a.errorf(n.Pos(), "try fallback expects %s, got %s", unionType.Value, fallbackType)
 				a.reportShapeMismatchNotes(n.Pos(), unionType.Value, fallbackType)
 			}
 			result = unionType.Value
@@ -287,7 +287,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		}
 		if n.UsesDefaultShorthandForm {
 			a.analyzeExpr(n.Fallback)
-			a.errorf(n.Pos(), "try? ... default requires an error union, got %s", valueType.String())
+			a.errorf(n.Pos(), "try? ... default requires an error union, got %s", valueType)
 			if optionalType, ok := valueType.(*OptionalType); ok {
 				result = optionalType.Value
 			} else {
@@ -297,33 +297,33 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		}
 		if optionalType, ok := valueType.(*OptionalType); ok {
 			if n.Fallback == nil {
-				a.errorf(n.Pos(), "try without else requires an error union, got %s", valueType.String())
+				a.errorf(n.Pos(), "try without else requires an error union, got %s", valueType)
 				result = optionalType.Value
 				return
 			}
 			fallbackType := a.analyzeExpr(n.Fallback)
 			if !IsNeverType(fallbackType) && !AssignableTo(optionalType.Value, fallbackType) {
-				a.errorf(n.Pos(), "try fallback expects %s, got %s", optionalType.Value.String(), fallbackType.String())
+				a.errorf(n.Pos(), "try fallback expects %s, got %s", optionalType.Value, fallbackType)
 				a.reportShapeMismatchNotes(n.Pos(), optionalType.Value, fallbackType)
 			}
 			result = optionalType.Value
 			return
 		}
-		a.errorf(n.Pos(), "try requires a fallible expression, got %s", valueType.String())
+		a.errorf(n.Pos(), "try requires a fallible expression, got %s", valueType)
 		result = invalidType
 		return
 	case *ast.UnwrapElseExpr:
 		valueType := a.analyzeExpr(n.Value)
 		refType, ok := valueType.(*RefType)
 		if !ok || refType.State == RefStateNonNull {
-			a.errorf(n.Pos(), "else recovery requires a nullable reference, got %s", valueType.String())
+			a.errorf(n.Pos(), "else recovery requires a nullable reference, got %s", valueType)
 			result = invalidType
 			return
 		}
 		resultType := cloneRefTypeWithState(refType, RefStateNonNull)
 		fallbackType := a.analyzeExpr(n.Fallback)
 		if !IsNeverType(fallbackType) && !AssignableTo(resultType, fallbackType) {
-			a.errorf(n.Pos(), "else fallback expects %s, got %s", resultType.String(), fallbackType.String())
+			a.errorf(n.Pos(), "else fallback expects %s, got %s", resultType, fallbackType)
 			a.reportShapeMismatchNotes(n.Pos(), resultType, fallbackType)
 		}
 		result = resultType
@@ -340,7 +340,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			}
 		}
 		if _, ok := conditionOptionalBindType(valueType); !ok {
-			a.errorf(n.Pos(), "let condition requires an optional or nullable reference, got %s", valueType.String())
+			a.errorf(n.Pos(), "let condition requires an optional or nullable reference, got %s", valueType)
 			result = invalidType
 			return
 		}
@@ -387,7 +387,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			}
 		}
 		if !a.validCast(src, dst) {
-			a.errorf(n.Pos(), "invalid cast from %s to %s", src.String(), dst.String())
+			a.errorf(n.Pos(), "invalid cast from %s to %s", src, dst)
 		}
 		if srcRef, ok := src.(*RefType); ok {
 			if dstRef, ok := dst.(*RefType); ok && srcRef.Mutable && !dstRef.Mutable {
@@ -405,7 +405,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	case *ast.TernaryExpr:
 		condType := a.analyzeCondExpr(n.Cond)
 		if !IsBoolType(condType) {
-			a.errorf(n.Pos(), "ternary condition must be bool, got %s", condType.String())
+			a.errorf(n.Pos(), "ternary condition must be bool, got %s", condType)
 		}
 		mergedAffine := a.cloneAffineValueStates()
 		mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
@@ -422,7 +422,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		}
 		merged := MergeTypes(left, right)
 		if IsInvalidType(merged) {
-			a.errorf(n.Pos(), "ternary branches are incompatible: %s and %s", left.String(), right.String())
+			a.errorf(n.Pos(), "ternary branches are incompatible: %s and %s", left, right)
 		}
 		result = merged
 		return
@@ -1524,9 +1524,9 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 			if !ok {
 				label := variant.PayloadLabel(i)
 				if label != "" {
-					a.errorf(orderedArgs[i].Pos(), "enum constructor argument %d (%s) to %q expects %s, got %s", i+1, label, enumType.Name+"."+variant.Name, variant.Payload[i].String(), actual.String())
+					a.errorf(orderedArgs[i].Pos(), "enum constructor argument %d (%s) to %q expects %s, got %s", i+1, label, enumType.Name+"."+variant.Name, variant.Payload[i], actual)
 				} else {
-					a.errorf(orderedArgs[i].Pos(), "enum constructor argument %d to %q expects %s, got %s", i+1, enumType.Name+"."+variant.Name, variant.Payload[i].String(), actual.String())
+					a.errorf(orderedArgs[i].Pos(), "enum constructor argument %d to %q expects %s, got %s", i+1, enumType.Name+"."+variant.Name, variant.Payload[i], actual)
 				}
 			}
 		} else {
@@ -1546,7 +1546,7 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 		var actual Type
 		commonArgs[commonDecl.Name], actual = a.analyzeCallLikeValueExpr(arg, field.Type)
 		if !AssignableTo(field.Type, actual) {
-			a.errorf(commonArgs[commonDecl.Name].Pos(), "packed enum common field %q for %q expects %s, got %s", commonDecl.Name, enumType.Name+"."+variant.Name, field.Type.String(), actual.String())
+			a.errorf(commonArgs[commonDecl.Name].Pos(), "packed enum common field %q for %q expects %s, got %s", commonDecl.Name, enumType.Name+"."+variant.Name, field.Type, actual)
 		}
 		a.consumeAffineValueExpr(commonArgs[commonDecl.Name], field.Type, "move into enum common field "+strconv.Quote(commonDecl.Name))
 	}
@@ -1656,7 +1656,7 @@ func (a *Analyzer) analyzeRecordUpdateExpr(expr *ast.RecordUpdateExpr) Type {
 			a.analyzeExpr(arg)
 		}
 		if !IsInvalidType(baseType) {
-			a.errorf(expr.Pos(), "record update requires a concrete struct or store-row value, got %s", baseType.String())
+			a.errorf(expr.Pos(), "record update requires a concrete struct or store-row value, got %s", baseType)
 		}
 		return invalidType
 	}
@@ -1665,7 +1665,7 @@ func (a *Analyzer) analyzeRecordUpdateExpr(expr *ast.RecordUpdateExpr) Type {
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)
 		}
-		a.errorf(expr.Pos(), "record update requires a concrete struct or store-row value, got %s", baseType.String())
+		a.errorf(expr.Pos(), "record update requires a concrete struct or store-row value, got %s", baseType)
 		return invalidType
 	}
 	if expr.NamedArgCount() != len(expr.Args) {
@@ -1695,7 +1695,7 @@ func (a *Analyzer) analyzeRecordUpdateExpr(expr *ast.RecordUpdateExpr) Type {
 		arg, actual := a.analyzeCallLikeValueExpr(expr.Args[i], expected)
 		expr.Args[i] = arg
 		if !AssignableTo(expected, actual) {
-			a.errorf(expr.Args[i].Pos(), "record update field %q expects %s, got %s", name, expected.String(), actual.String())
+			a.errorf(expr.Args[i].Pos(), "record update field %q expects %s, got %s", name, expected, actual)
 		}
 		a.consumeAffineValueExpr(expr.Args[i], expected, "move into record update field "+strconv.Quote(name))
 		if prev, exists := seen[index]; exists {
@@ -2013,7 +2013,7 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 			arg, actual := a.analyzeCallLikeValueExpr(expr.Args[i], expected)
 			expr.Args[i] = arg
 			if !AssignableTo(expected, actual) {
-				a.errorf(expr.Args[i].Pos(), "struct literal field %q expects %s, got %s", fieldDecl.Name, expected.String(), actual.String())
+				a.errorf(expr.Args[i].Pos(), "struct literal field %q expects %s, got %s", fieldDecl.Name, expected, actual)
 			}
 			a.consumeAffineValueExpr(expr.Args[i], expected, "move into struct literal field "+strconv.Quote(fieldDecl.Name))
 			if prev, exists := seen[index]; exists {
@@ -2060,7 +2060,7 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 		var actual Type
 		expr.Args[i], actual = a.analyzeCallLikeValueExpr(expr.Args[i], expected)
 		if !AssignableTo(expected, actual) {
-			a.errorf(expr.Args[i].Pos(), "struct literal field %q expects %s, got %s", fieldDecl.Name, expected.String(), actual.String())
+			a.errorf(expr.Args[i].Pos(), "struct literal field %q expects %s, got %s", fieldDecl.Name, expected, actual)
 		}
 		a.consumeAffineValueExpr(expr.Args[i], expected, "move into struct literal field "+strconv.Quote(fieldDecl.Name))
 	}
@@ -4425,9 +4425,9 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 				if !AssignableTo(variant.Payload[i], actual) {
 					label := variant.PayloadLabel(i)
 					if label != "" {
-						a.errorf(orderedArgs[i].Pos(), "enum constructor argument %d (%s) to %q expects %s, got %s", i+1, label, enumType.Name+"."+variant.Name, variant.Payload[i].String(), actual.String())
+						a.errorf(orderedArgs[i].Pos(), "enum constructor argument %d (%s) to %q expects %s, got %s", i+1, label, enumType.Name+"."+variant.Name, variant.Payload[i], actual)
 					} else {
-						a.errorf(orderedArgs[i].Pos(), "enum constructor argument %d to %q expects %s, got %s", i+1, enumType.Name+"."+variant.Name, variant.Payload[i].String(), actual.String())
+						a.errorf(orderedArgs[i].Pos(), "enum constructor argument %d to %q expects %s, got %s", i+1, enumType.Name+"."+variant.Name, variant.Payload[i], actual)
 					}
 				}
 				a.consumeAffineValueExpr(orderedArgs[i], variant.Payload[i], a.enumConstructorMoveReason(enumType.Name, variant, i))
@@ -4452,7 +4452,7 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	fnType := a.analyzeExpr(expr.Func)
 	ft, ok := fnType.(*FuncType)
 	if !ok {
-		a.errorf(expr.Pos(), "cannot call non-function value of type %s", fnType.String())
+		a.errorf(expr.Pos(), "cannot call non-function value of type %s", fnType)
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)
 		}
@@ -4510,7 +4510,7 @@ func (a *Analyzer) analyzeResolvedCallExpr(expr *ast.CallExpr, ft *FuncType, ord
 				specializedParamTypes[i] = specializedType
 			}
 			if !AssignableTo(expectedType, argType) {
-				a.errorf(orderedArgs[i].Pos(), "argument %d to %q expects %s, got %s", i+1, ft.Name, expectedType.String(), argType.String())
+				a.errorf(orderedArgs[i].Pos(), "argument %d to %q expects %s, got %s", i+1, ft.Name, expectedType, argType)
 				a.reportMutableRefArgumentNote(orderedArgs[i].Pos(), expectedType, argType)
 				a.reportShapeMismatchNotes(orderedArgs[i].Pos(), expectedType, argType)
 			}
@@ -4552,7 +4552,7 @@ func (a *Analyzer) analyzeResolvedCallExpr(expr *ast.CallExpr, ft *FuncType, ord
 			}
 		}
 		if !a.typeSatisfiesStaticInterface(bound, iface) {
-			a.errorf(expr.Pos(), "type %q does not implement interface %q for call to %q", bound.String(), iface.Name, ft.Name)
+			a.errorf(expr.Pos(), "type %q does not implement interface %q for call to %q", bound, iface.Name, ft.Name)
 		}
 	}
 	for _, name := range ft.RefStorageParams {
@@ -4828,7 +4828,7 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 	}
 	argType := a.analyzeValueExpr(expr.Args[0], darrayType.Elem)
 	if !AssignableTo(darrayType.Elem, argType) {
-		a.errorf(expr.Args[0].Pos(), "darray push expects %s, got %s", darrayType.Elem.String(), argType.String())
+		a.errorf(expr.Args[0].Pos(), "darray push expects %s, got %s", darrayType.Elem, argType)
 	}
 	a.consumeAffineValueExpr(expr.Args[0], darrayType.Elem, "move into darray push")
 	resultType := receiverRefType
@@ -4885,7 +4885,7 @@ func (a *Analyzer) analyzeBuiltinDarrayExtendCall(expr *ast.CallExpr) (Type, boo
 	}
 	sourceType := a.analyzeValueExpr(expr.Args[0], nil)
 	if !builtinDArrayExtendSourceCompatible(darrayType.Elem, sourceType) {
-		a.errorf(expr.Args[0].Pos(), "darray extend expects a compatible darray, dview, or array source of %s, got %s", darrayType.Elem.String(), sourceType.String())
+		a.errorf(expr.Args[0].Pos(), "darray extend expects a compatible darray, dview, or array source of %s, got %s", darrayType.Elem, sourceType)
 	}
 	resultType := receiverRefType
 	if resultType == nil {
@@ -5411,7 +5411,7 @@ func runtimeBackedDictSupportDiagnostic(dictType *DictType) string {
 	if dictType == nil {
 		return "runtime-backed dict operations currently support only dict[dstr, V]"
 	}
-	return fmt.Sprintf("runtime-backed dict operations currently support only dict[dstr, V], got %s", dictType.String())
+	return fmt.Sprintf("runtime-backed dict operations currently support only dict[dstr, V], got %s", diagnosticTypeString(dictType))
 }
 
 func (a *Analyzer) ensureRuntimeBackedDictSupported(pos lexer.Pos, dictType *DictType) bool {
@@ -5540,7 +5540,7 @@ func (a *Analyzer) analyzeBuiltinDictEntryCall(expr *ast.CallExpr) (Type, bool) 
 	if len(expr.Args) >= 1 {
 		keyType := a.analyzeValueExpr(expr.Args[0], dictType.Key)
 		if !AssignableTo(dictType.Key, keyType) {
-			a.errorf(expr.Args[0].Pos(), "dict entry expects key of type %s, got %s", dictType.Key.String(), keyType.String())
+			a.errorf(expr.Args[0].Pos(), "dict entry expects key of type %s, got %s", dictType.Key, keyType)
 		}
 	}
 	mutable := false
@@ -5584,7 +5584,7 @@ func (a *Analyzer) analyzeBuiltinDictEntryInsertCall(expr *ast.CallExpr) (Type, 
 	if len(expr.Args) >= 1 {
 		argType := a.analyzeValueExpr(expr.Args[0], entryType.Dict.Value)
 		if !AssignableTo(entryType.Dict.Value, argType) {
-			a.errorf(expr.Args[0].Pos(), "dict entry insert expects %s, got %s", entryType.Dict.Value.String(), argType.String())
+			a.errorf(expr.Args[0].Pos(), "dict entry insert expects %s, got %s", entryType.Dict.Value, argType)
 		}
 		a.consumeAffineValueExpr(expr.Args[0], entryType.Dict.Value, "move into dict entry insert")
 	}
@@ -5623,7 +5623,7 @@ func (a *Analyzer) analyzeBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) (T
 	if len(expr.Args) >= 1 {
 		argType := a.analyzeValueExpr(expr.Args[0], entryType.Dict.Value)
 		if !AssignableTo(entryType.Dict.Value, argType) {
-			a.errorf(expr.Args[0].Pos(), "dict entry get_or_insert expects %s, got %s", entryType.Dict.Value.String(), argType.String())
+			a.errorf(expr.Args[0].Pos(), "dict entry get_or_insert expects %s, got %s", entryType.Dict.Value, argType)
 		}
 		a.consumeAffineValueExpr(expr.Args[0], entryType.Dict.Value, "move into dict entry get_or_insert")
 	}
@@ -6089,9 +6089,9 @@ func (a *Analyzer) analyzeTreeConstructorCallExpr(expr *ast.CallExpr, treeType *
 			if !AssignableTo(variant.Payload[i], actual) {
 				label := variant.PayloadLabel(i)
 				if label != "" {
-					a.errorf(orderedArgs[i].Pos(), "tree constructor argument %d (%s) to %q expects %s, got %s", i+1, label, treeType.Name+"."+variant.Name, variant.Payload[i].String(), actual.String())
+					a.errorf(orderedArgs[i].Pos(), "tree constructor argument %d (%s) to %q expects %s, got %s", i+1, label, treeType.Name+"."+variant.Name, variant.Payload[i], actual)
 				} else {
-					a.errorf(orderedArgs[i].Pos(), "tree constructor argument %d to %q expects %s, got %s", i+1, treeType.Name+"."+variant.Name, variant.Payload[i].String(), actual.String())
+					a.errorf(orderedArgs[i].Pos(), "tree constructor argument %d to %q expects %s, got %s", i+1, treeType.Name+"."+variant.Name, variant.Payload[i], actual)
 				}
 			}
 			a.consumeAffineValueExpr(orderedArgs[i], variant.Payload[i], a.variantConstructorMoveReason("tree", treeType.Name, variant, i))
@@ -6107,7 +6107,7 @@ func (a *Analyzer) analyzeTreeConstructorCallExpr(expr *ast.CallExpr, treeType *
 		var actual Type
 		commonArgs[commonName], actual = a.analyzeCallLikeValueExpr(arg, field.Type)
 		if !AssignableTo(field.Type, actual) {
-			a.errorf(commonArgs[commonName].Pos(), "tree common field %q for %q expects %s, got %s", commonName, treeType.Name+"."+variant.Name, field.Type.String(), actual.String())
+			a.errorf(commonArgs[commonName].Pos(), "tree common field %q for %q expects %s, got %s", commonName, treeType.Name+"."+variant.Name, field.Type, actual)
 		}
 		a.consumeAffineValueExpr(commonArgs[commonName], field.Type, "move into tree common field "+strconv.Quote(commonName))
 	}
@@ -6143,7 +6143,7 @@ func (a *Analyzer) analyzeTreeExactMemberConstructorCallExpr(expr *ast.CallExpr,
 		var actual Type
 		orderedArgs[i], actual = a.analyzeCallLikeValueExpr(orderedArgs[i], field.Type)
 		if !AssignableTo(field.Type, actual) {
-			a.errorf(orderedArgs[i].Pos(), "tree constructor field %q for %q expects %s, got %s", fieldDecls[i].Name, memberType.String(), field.Type.String(), actual.String())
+			a.errorf(orderedArgs[i].Pos(), "tree constructor field %q for %q expects %s, got %s", fieldDecls[i].Name, memberType, field.Type, actual)
 		}
 		a.consumeAffineValueExpr(orderedArgs[i], field.Type, "move into tree constructor field "+strconv.Quote(fieldDecls[i].Name))
 	}
@@ -6544,14 +6544,14 @@ func (a *Analyzer) analyzeSplitAtHelperCall(expr *ast.CallExpr) Type {
 		if actual == nil {
 			actual = invalidType
 		}
-		a.errorf(expr.Args[0].Pos(), "split_at expects a dense dview[T], got %s", actual.String())
+		a.errorf(expr.Args[0].Pos(), "split_at expects a dense dview[T], got %s", actual)
 		return invalidType
 	}
 	indexType := a.analyzeValueExpr(expr.Args[1], a.namedTypes["usize"])
 	if !IsNumericType(indexType) {
-		a.errorf(expr.Args[1].Pos(), "split_at index must be numeric, got %s", indexType.String())
+		a.errorf(expr.Args[1].Pos(), "split_at index must be numeric, got %s", indexType)
 	} else if !IsIntegralStorageType(indexType) {
-		a.errorf(expr.Args[1].Pos(), "split_at index must be integral, got %s", indexType.String())
+		a.errorf(expr.Args[1].Pos(), "split_at index must be integral, got %s", indexType)
 	}
 	base, ok := a.namedTypes["SplitView"].(*StructType)
 	if !ok || base == nil {
@@ -6575,14 +6575,14 @@ func (a *Analyzer) analyzeChunksExactHelperCall(expr *ast.CallExpr) Type {
 		if actual == nil {
 			actual = invalidType
 		}
-		a.errorf(expr.Args[0].Pos(), "chunks_exact expects a dense dview[T], got %s", actual.String())
+		a.errorf(expr.Args[0].Pos(), "chunks_exact expects a dense dview[T], got %s", actual)
 		return invalidType
 	}
 	chunkSizeType := a.analyzeValueExpr(expr.Args[1], a.namedTypes["usize"])
 	if !IsNumericType(chunkSizeType) {
-		a.errorf(expr.Args[1].Pos(), "chunks_exact chunk size must be numeric, got %s", chunkSizeType.String())
+		a.errorf(expr.Args[1].Pos(), "chunks_exact chunk size must be numeric, got %s", chunkSizeType)
 	} else if !IsIntegralStorageType(chunkSizeType) {
-		a.errorf(expr.Args[1].Pos(), "chunks_exact chunk size must be integral, got %s", chunkSizeType.String())
+		a.errorf(expr.Args[1].Pos(), "chunks_exact chunk size must be integral, got %s", chunkSizeType)
 	}
 	if value, ok := a.evalConstExpr(expr.Args[1]); ok && value.Kind == ConstInt && value.Int == 0 {
 		a.errorf(expr.Args[1].Pos(), "chunks_exact chunk size cannot be zero")
@@ -6615,16 +6615,16 @@ func (a *Analyzer) analyzeReduceSumHelperCall(expr *ast.CallExpr) Type {
 		if actual == nil {
 			actual = invalidType
 		}
-		a.errorf(expr.Args[0].Pos(), "reduce_sum source expects a dense view[T], got %s", actual.String())
+		a.errorf(expr.Args[0].Pos(), "reduce_sum source expects a dense view[T], got %s", actual)
 		return invalidType
 	}
 	if !a.exprSupportsReadonlyDenseView(expr.Args[0]) {
-		a.errorf(expr.Args[0].Pos(), "reduce_sum requires source to be a readonly contiguous exact-extent view, got %s", srcViewType.String())
+		a.errorf(expr.Args[0].Pos(), "reduce_sum requires source to be a readonly contiguous exact-extent view, got %s", srcViewType)
 	}
 
 	callbackFn, ok := callbackType.(*FuncType)
 	if !ok {
-		a.errorf(expr.Args[1].Pos(), "reduce_sum callback expects a function value, got %s", callbackType.String())
+		a.errorf(expr.Args[1].Pos(), "reduce_sum callback expects a function value, got %s", callbackType)
 		return invalidType
 	}
 	if callbackFn.Variadic || len(callbackFn.Params) != len(extraArgTypes)+1 {
@@ -6643,15 +6643,15 @@ func (a *Analyzer) analyzeReduceSumHelperCall(expr *ast.CallExpr) Type {
 		return invalidType
 	}
 	if !IsNumericType(callbackFn.Return) {
-		a.errorf(expr.Args[1].Pos(), "reduce_sum callback must return a numeric accumulator, got %s", callbackFn.Return.String())
+		a.errorf(expr.Args[1].Pos(), "reduce_sum callback must return a numeric accumulator, got %s", callbackFn.Return)
 		return invalidType
 	}
 	if !AssignableTo(callbackFn.Params[0], srcElemType) {
-		a.errorf(expr.Args[1].Pos(), "reduce_sum callback first parameter expects %s, got %s", callbackFn.Params[0].String(), srcElemType.String())
+		a.errorf(expr.Args[1].Pos(), "reduce_sum callback first parameter expects %s, got %s", callbackFn.Params[0], srcElemType)
 	}
 	for i, argType := range extraArgTypes {
 		if !AssignableTo(callbackFn.Params[i+1], argType) {
-			a.errorf(expr.Args[1].Pos(), "reduce_sum callback parameter %d expects %s, got %s", i+2, callbackFn.Params[i+1].String(), argType.String())
+			a.errorf(expr.Args[1].Pos(), "reduce_sum callback parameter %d expects %s, got %s", i+2, callbackFn.Params[i+1], argType)
 		}
 	}
 	return callbackFn.Return
@@ -6675,34 +6675,34 @@ func (a *Analyzer) analyzeZipMapHelperCall(expr *ast.CallExpr) Type {
 		if actual == nil {
 			actual = invalidType
 		}
-		a.errorf(expr.Args[0].Pos(), "zip_map destination expects a dense view[T], got %s", actual.String())
+		a.errorf(expr.Args[0].Pos(), "zip_map destination expects a dense view[T], got %s", actual)
 	}
 	if !src1OK {
 		actual := a.exprTypes[expr.Args[1]]
 		if actual == nil {
 			actual = invalidType
 		}
-		a.errorf(expr.Args[1].Pos(), "zip_map source 1 expects a dense view[T], got %s", actual.String())
+		a.errorf(expr.Args[1].Pos(), "zip_map source 1 expects a dense view[T], got %s", actual)
 	}
 	if !src2OK {
 		actual := a.exprTypes[expr.Args[2]]
 		if actual == nil {
 			actual = invalidType
 		}
-		a.errorf(expr.Args[2].Pos(), "zip_map source 2 expects a dense view[T], got %s", actual.String())
+		a.errorf(expr.Args[2].Pos(), "zip_map source 2 expects a dense view[T], got %s", actual)
 	}
 	if !dstOK || !src1OK || !src2OK {
 		return a.namedTypes["void"]
 	}
 
 	if !a.exprSupportsDenseWrite(expr.Args[0]) {
-		a.errorf(expr.Args[0].Pos(), "zip_map requires a writable dense destination view, got %s", dstViewType.String())
+		a.errorf(expr.Args[0].Pos(), "zip_map requires a writable dense destination view, got %s", dstViewType)
 	}
 	if !a.exprSupportsReadonlyDenseView(expr.Args[1]) {
-		a.errorf(expr.Args[1].Pos(), "zip_map requires source 1 to be a readonly contiguous exact-extent view, got %s", src1ViewType.String())
+		a.errorf(expr.Args[1].Pos(), "zip_map requires source 1 to be a readonly contiguous exact-extent view, got %s", src1ViewType)
 	}
 	if !a.exprSupportsReadonlyDenseView(expr.Args[2]) {
-		a.errorf(expr.Args[2].Pos(), "zip_map requires source 2 to be a readonly contiguous exact-extent view, got %s", src2ViewType.String())
+		a.errorf(expr.Args[2].Pos(), "zip_map requires source 2 to be a readonly contiguous exact-extent view, got %s", src2ViewType)
 	}
 	if !a.exprsHaveEqualExtentSize(expr.Args[0], expr.Args[1]) {
 		a.errorf(expr.Pos(), "zip_map requires destination and source 1 to have equal extents")
@@ -6719,7 +6719,7 @@ func (a *Analyzer) analyzeZipMapHelperCall(expr *ast.CallExpr) Type {
 
 	callbackFn, ok := callbackType.(*FuncType)
 	if !ok {
-		a.errorf(expr.Args[3].Pos(), "zip_map callback expects a function value, got %s", callbackType.String())
+		a.errorf(expr.Args[3].Pos(), "zip_map callback expects a function value, got %s", callbackType)
 		return a.namedTypes["void"]
 	}
 	if callbackFn.Variadic || len(callbackFn.Params) != 2 {
@@ -6730,20 +6730,20 @@ func (a *Analyzer) analyzeZipMapHelperCall(expr *ast.CallExpr) Type {
 		a.errorf(expr.Args[3].Pos(), "zip_map callback must not declare effect permissions")
 	}
 	if callbackFn.Return == nil || isVoidType(callbackFn.Return) {
-		a.errorf(expr.Args[3].Pos(), "zip_map callback must return a value assignable to %s", dstElemType.String())
+		a.errorf(expr.Args[3].Pos(), "zip_map callback must return a value assignable to %s", dstElemType)
 		return a.namedTypes["void"]
 	}
 	if _, ok := callbackFn.Return.(*ErrorUnionType); ok {
 		a.errorf(expr.Args[3].Pos(), "zip_map callback must not return an error union")
 	}
 	if !AssignableTo(callbackFn.Params[0], src1ElemType) {
-		a.errorf(expr.Args[3].Pos(), "zip_map callback first parameter expects %s, got %s", callbackFn.Params[0].String(), src1ElemType.String())
+		a.errorf(expr.Args[3].Pos(), "zip_map callback first parameter expects %s, got %s", callbackFn.Params[0], src1ElemType)
 	}
 	if !AssignableTo(callbackFn.Params[1], src2ElemType) {
-		a.errorf(expr.Args[3].Pos(), "zip_map callback second parameter expects %s, got %s", callbackFn.Params[1].String(), src2ElemType.String())
+		a.errorf(expr.Args[3].Pos(), "zip_map callback second parameter expects %s, got %s", callbackFn.Params[1], src2ElemType)
 	}
 	if !AssignableTo(dstElemType, callbackFn.Return) {
-		a.errorf(expr.Args[3].Pos(), "zip_map callback result expects %s, got %s", dstElemType.String(), callbackFn.Return.String())
+		a.errorf(expr.Args[3].Pos(), "zip_map callback result expects %s, got %s", dstElemType, callbackFn.Return)
 	}
 	return a.namedTypes["void"]
 }
@@ -7943,14 +7943,14 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	finish := func(result Type) Type {
 		if expr.Fallback != nil {
 			if !safeIndexFallbackOperandType(objType) {
-				a.errorf(expr.Pos(), "index fallback requires an array, darray, view, packed store, or a proven non-null reference to one, got %s", objType.String())
+				a.errorf(expr.Pos(), "index fallback requires an array, darray, view, packed store, or a proven non-null reference to one, got %s", objType)
 			}
 			if _, ok := NodeKeyEnumType(indexType); ok {
 				a.errorf(expr.Index.Pos(), "index fallback does not support dense node-key indices")
 			}
 			fallbackType := a.analyzeValueExpr(expr.Fallback, result)
 			if result != nil && !IsInvalidType(result) && !IsNeverType(fallbackType) && !AssignableTo(result, fallbackType) {
-				a.errorf(expr.Pos(), "index fallback expects %s, got %s", result.String(), fallbackType.String())
+				a.errorf(expr.Pos(), "index fallback expects %s, got %s", result, fallbackType)
 				a.reportShapeMismatchNotes(expr.Pos(), result, fallbackType)
 			}
 		}
@@ -7960,9 +7960,9 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	}
 	if _, ok := NodeKeyEnumType(indexType); !ok {
 		if !IsNumericType(indexType) {
-			a.errorf(expr.Index.Pos(), "index must be numeric, got %s", indexType.String())
+			a.errorf(expr.Index.Pos(), "index must be numeric, got %s", indexType)
 		} else if !IsIntegralStorageType(indexType) {
-			a.errorf(expr.Index.Pos(), "index must be integral, got %s", indexType.String())
+			a.errorf(expr.Index.Pos(), "index must be integral, got %s", indexType)
 		}
 	}
 	if keyEnum, ok := NodeKeyEnumType(indexType); ok {
@@ -8002,7 +8002,7 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	}
 	if ref, ok := objType.(*RefType); ok {
 		if ref.State != RefStateNonNull {
-			a.errorf(expr.Pos(), "indexing requires proven non-null reference, got %s", objType.String())
+			a.errorf(expr.Pos(), "indexing requires proven non-null reference, got %s", objType)
 			return finish(invalidType)
 		}
 		if arr, ok := ref.Elem.(*ArrayType); ok {
@@ -8037,7 +8037,7 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		}
 		return finish(ref.Elem)
 	}
-	a.errorf(expr.Pos(), "indexing requires string, array, view, packed store, or reference type, got %s", objType.String())
+	a.errorf(expr.Pos(), "indexing requires string, array, view, packed store, or reference type, got %s", objType)
 	return finish(invalidType)
 }
 
