@@ -1,7 +1,13 @@
 # Curated execution-oriented benchmark corpus for reference load-plus-execute runs.
-# These files intentionally avoid tables, closures, and library dependencies so
-# they can serve as the first shared execution corpus for future llcontext VM work.
+# These files stay library-free, but now intentionally cover the richer execution
+# slice: numeric control flow, labels/gotos, local recursion and closures, table
+# field/index updates plus method calls, and float-returning workloads.
 
 Code/benchmarks/lua_frontend_benchmark_corpus/execution_arithmetic.lua
 Code/benchmarks/lua_frontend_benchmark_corpus/execution_branch_loop.lua
+Code/benchmarks/lua_frontend_benchmark_corpus/control_flow.lua
+Code/benchmarks/lua_frontend_benchmark_corpus/labels_gotos.lua
 Code/benchmarks/lua_frontend_benchmark_corpus/execution_repeat_while.lua
+Code/benchmarks/lua_frontend_benchmark_corpus/execution_local_closures.lua
+Code/benchmarks/lua_frontend_benchmark_corpus/execution_tables_calls.lua
+Code/benchmarks/lua_frontend_benchmark_corpus/execution_float_result.lua
