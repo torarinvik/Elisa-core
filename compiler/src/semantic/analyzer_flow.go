@@ -7792,8 +7792,16 @@ func (a *Analyzer) cloneTrackedValueType(t Type) Type {
 }
 
 func (a *Analyzer) cloneTrackedValueTypeWithSeen(t Type, seen map[Type]Type) Type {
+	return a.cloneTrackedValueTypeWithSeenDepth(t, seen, 0)
+}
+
+func (a *Analyzer) cloneTrackedValueTypeWithSeenDepth(t Type, seen map[Type]Type, depth int) Type {
 	if t == nil {
 		return nil
+	}
+	if depth > semanticCloneDepthLimit {
+		a.reportSemanticDepthLimit("tracked-type clone", semanticCloneDepthLimit)
+		return invalidType
 	}
 	if cloned, ok := seen[t]; ok {
 		return cloned
@@ -7805,7 +7813,11 @@ func (a *Analyzer) cloneTrackedValueTypeWithSeen(t Type, seen map[Type]Type) Typ
 		clonedPtr := &cloned
 		seen[t] = clonedPtr
 		for name, field := range tt.Fields {
-			field.Type = a.cloneTrackedValueTypeWithSeen(field.Type, seen)
+			field.Type = a.cloneTrackedValueTypeWithSeenDepth(field.Type, seen, depth+1)
+			if IsInvalidType(field.Type) {
+				seen[t] = invalidType
+				return invalidType
+			}
 			cloned.Fields[name] = field
 		}
 		return clonedPtr
@@ -7814,45 +7826,85 @@ func (a *Analyzer) cloneTrackedValueTypeWithSeen(t Type, seen map[Type]Type) Typ
 		cloned.Args = make([]Type, len(tt.Args))
 		seen[t] = &cloned
 		for i, arg := range tt.Args {
-			cloned.Args[i] = a.cloneTrackedValueTypeWithSeen(arg, seen)
+			cloned.Args[i] = a.cloneTrackedValueTypeWithSeenDepth(arg, seen, depth+1)
+			if IsInvalidType(cloned.Args[i]) {
+				seen[t] = invalidType
+				return invalidType
+			}
 		}
-		cloned.Base = a.cloneTrackedValueTypeWithSeen(tt.Base, seen)
+		cloned.Base = a.cloneTrackedValueTypeWithSeenDepth(tt.Base, seen, depth+1)
+		if IsInvalidType(cloned.Base) {
+			seen[t] = invalidType
+			return invalidType
+		}
 		return &cloned
 	case *RefType:
 		cloned := *tt
 		seen[t] = &cloned
-		cloned.Elem = a.cloneTrackedValueTypeWithSeen(tt.Elem, seen)
+		cloned.Elem = a.cloneTrackedValueTypeWithSeenDepth(tt.Elem, seen, depth+1)
+		if IsInvalidType(cloned.Elem) {
+			seen[t] = invalidType
+			return invalidType
+		}
 		return &cloned
 	case *ArrayType:
 		cloned := *tt
 		seen[t] = &cloned
-		cloned.Elem = a.cloneTrackedValueTypeWithSeen(tt.Elem, seen)
+		cloned.Elem = a.cloneTrackedValueTypeWithSeenDepth(tt.Elem, seen, depth+1)
+		if IsInvalidType(cloned.Elem) {
+			seen[t] = invalidType
+			return invalidType
+		}
 		return &cloned
 	case *DArrayType:
 		cloned := *tt
 		seen[t] = &cloned
-		cloned.Elem = a.cloneTrackedValueTypeWithSeen(tt.Elem, seen)
+		cloned.Elem = a.cloneTrackedValueTypeWithSeenDepth(tt.Elem, seen, depth+1)
+		if IsInvalidType(cloned.Elem) {
+			seen[t] = invalidType
+			return invalidType
+		}
 		return &cloned
 	case *OptionalType:
 		cloned := *tt
 		seen[t] = &cloned
-		cloned.Value = a.cloneTrackedValueTypeWithSeen(tt.Value, seen)
+		cloned.Value = a.cloneTrackedValueTypeWithSeenDepth(tt.Value, seen, depth+1)
+		if IsInvalidType(cloned.Value) {
+			seen[t] = invalidType
+			return invalidType
+		}
 		return &cloned
 	case *ViewType:
 		cloned := *tt
 		seen[t] = &cloned
-		cloned.Elem = a.cloneTrackedValueTypeWithSeen(tt.Elem, seen)
+		cloned.Elem = a.cloneTrackedValueTypeWithSeenDepth(tt.Elem, seen, depth+1)
+		if IsInvalidType(cloned.Elem) {
+			seen[t] = invalidType
+			return invalidType
+		}
 		return &cloned
 	case *DArrayViewType:
 		cloned := *tt
 		seen[t] = &cloned
-		cloned.Elem = a.cloneTrackedValueTypeWithSeen(tt.Elem, seen)
+		cloned.Elem = a.cloneTrackedValueTypeWithSeenDepth(tt.Elem, seen, depth+1)
+		if IsInvalidType(cloned.Elem) {
+			seen[t] = invalidType
+			return invalidType
+		}
 		return &cloned
 	case *DictType:
 		cloned := *tt
 		seen[t] = &cloned
-		cloned.Key = a.cloneTrackedValueTypeWithSeen(tt.Key, seen)
-		cloned.Value = a.cloneTrackedValueTypeWithSeen(tt.Value, seen)
+		cloned.Key = a.cloneTrackedValueTypeWithSeenDepth(tt.Key, seen, depth+1)
+		if IsInvalidType(cloned.Key) {
+			seen[t] = invalidType
+			return invalidType
+		}
+		cloned.Value = a.cloneTrackedValueTypeWithSeenDepth(tt.Value, seen, depth+1)
+		if IsInvalidType(cloned.Value) {
+			seen[t] = invalidType
+			return invalidType
+		}
 		return &cloned
 	case *FuncType:
 		cloned, _ := a.substituteType(tt, nil, nil, nil, nil).(*FuncType)
@@ -7864,12 +7916,20 @@ func (a *Analyzer) cloneTrackedValueTypeWithSeen(t Type, seen map[Type]Type) Typ
 	case *ErrorUnionType:
 		cloned := *tt
 		seen[t] = &cloned
-		cloned.Value = a.cloneTrackedValueTypeWithSeen(tt.Value, seen)
+		cloned.Value = a.cloneTrackedValueTypeWithSeenDepth(tt.Value, seen, depth+1)
+		if IsInvalidType(cloned.Value) {
+			seen[t] = invalidType
+			return invalidType
+		}
 		return &cloned
 	case *PackedEnumStoreType:
 		cloned := *tt
 		seen[t] = &cloned
-		cloned.State = a.cloneTrackedValueTypeWithSeen(tt.State, seen)
+		cloned.State = a.cloneTrackedValueTypeWithSeenDepth(tt.State, seen, depth+1)
+		if IsInvalidType(cloned.State) {
+			seen[t] = invalidType
+			return invalidType
+		}
 		return &cloned
 	case *DStrType:
 		cloned := *tt
@@ -7884,6 +7944,10 @@ func (a *Analyzer) cloneTrackedValueTypeWithSeen(t Type, seen map[Type]Type) Typ
 		return t
 	default:
 		cloned := a.substituteType(t, nil, nil, nil, nil)
+		if IsInvalidType(cloned) {
+			seen[t] = invalidType
+			return invalidType
+		}
 		seen[t] = cloned
 		return cloned
 	}
@@ -8521,51 +8585,58 @@ func borrowableOwnerRefElemType(t Type) (Type, bool) {
 }
 
 func (a *Analyzer) containsBorrowedOwnerRefValues(t Type, seen map[string]bool) bool {
+	return a.containsBorrowedOwnerRefValuesWithSeen(t, map[Type]bool{}, 0)
+}
+
+func (a *Analyzer) containsBorrowedOwnerRefValuesWithSeen(t Type, seen map[Type]bool, depth int) bool {
 	if t == nil {
+		return false
+	}
+	if depth > semanticTraversalDepthLimit {
+		a.reportSemanticDepthLimit("borrowed-owner traversal", semanticTraversalDepthLimit)
 		return false
 	}
 	if _, ok := borrowableOwnerRefElemType(t); ok {
 		return true
 	}
-	key := t.String()
-	if seen[key] {
+	if seen[t] {
 		return false
 	}
-	seen[key] = true
+	seen[t] = true
 	switch tt := t.(type) {
 	case *ArrayType:
-		return a.containsBorrowedOwnerRefValues(tt.Elem, seen)
+		return a.containsBorrowedOwnerRefValuesWithSeen(tt.Elem, seen, depth+1)
 	case *DArrayType:
-		return a.containsBorrowedOwnerRefValues(tt.Elem, seen)
+		return a.containsBorrowedOwnerRefValuesWithSeen(tt.Elem, seen, depth+1)
 	case *OptionalType:
-		return a.containsBorrowedOwnerRefValues(tt.Value, seen)
+		return a.containsBorrowedOwnerRefValuesWithSeen(tt.Value, seen, depth+1)
 	case *ViewType:
-		return a.containsBorrowedOwnerRefValues(tt.Elem, seen)
+		return a.containsBorrowedOwnerRefValuesWithSeen(tt.Elem, seen, depth+1)
 	case *DArrayViewType:
-		return a.containsBorrowedOwnerRefValues(tt.Elem, seen)
+		return a.containsBorrowedOwnerRefValuesWithSeen(tt.Elem, seen, depth+1)
 	case *DictType:
-		return a.containsBorrowedOwnerRefValues(tt.Key, seen) || a.containsBorrowedOwnerRefValues(tt.Value, seen)
+		return a.containsBorrowedOwnerRefValuesWithSeen(tt.Key, seen, depth+1) || a.containsBorrowedOwnerRefValuesWithSeen(tt.Value, seen, depth+1)
 	case *PackedVariantViewType:
 		for _, field := range tt.Enum.Common {
-			if a.containsBorrowedOwnerRefValues(field.Type, seen) {
+			if a.containsBorrowedOwnerRefValuesWithSeen(field.Type, seen, depth+1) {
 				return true
 			}
 		}
 		for _, payloadType := range tt.Variant.Payload {
-			if a.containsBorrowedOwnerRefValues(payloadType, seen) {
+			if a.containsBorrowedOwnerRefValuesWithSeen(payloadType, seen, depth+1) {
 				return true
 			}
 		}
 		return false
 	case *EnumType:
 		for _, field := range tt.Common {
-			if a.containsBorrowedOwnerRefValues(field.Type, seen) {
+			if a.containsBorrowedOwnerRefValuesWithSeen(field.Type, seen, depth+1) {
 				return true
 			}
 		}
 		for _, variant := range tt.Variants {
 			for _, payloadType := range variant.Payload {
-				if a.containsBorrowedOwnerRefValues(payloadType, seen) {
+				if a.containsBorrowedOwnerRefValuesWithSeen(payloadType, seen, depth+1) {
 					return true
 				}
 			}
@@ -8573,7 +8644,7 @@ func (a *Analyzer) containsBorrowedOwnerRefValues(t Type, seen map[string]bool) 
 		return false
 	case *StructType:
 		for _, field := range tt.Fields {
-			if a.containsBorrowedOwnerRefValues(field.Type, seen) {
+			if a.containsBorrowedOwnerRefValuesWithSeen(field.Type, seen, depth+1) {
 				return true
 			}
 		}
@@ -8591,18 +8662,18 @@ func (a *Analyzer) containsBorrowedOwnerRefValues(t Type, seen map[string]bool) 
 				if len(bindings) != 0 {
 					fieldType = a.substituteType(fieldType, bindings, nil, nil, nil)
 				}
-				if a.containsBorrowedOwnerRefValues(fieldType, seen) {
+				if a.containsBorrowedOwnerRefValuesWithSeen(fieldType, seen, depth+1) {
 					return true
 				}
 			}
 			return false
 		}
 		for _, arg := range tt.Args {
-			if a.containsBorrowedOwnerRefValues(arg, seen) {
+			if a.containsBorrowedOwnerRefValuesWithSeen(arg, seen, depth+1) {
 				return true
 			}
 		}
-		return a.containsBorrowedOwnerRefValues(tt.Base, seen)
+		return a.containsBorrowedOwnerRefValuesWithSeen(tt.Base, seen, depth+1)
 	default:
 		return false
 	}

@@ -374,29 +374,29 @@ def arena_dict_clear[K, T](m: mutable any dict[K, T]&):
     m.count <- 0
     m.used <- 0
 
-def arena_dict_new__i64(a: mutable any Arena&, initial_capacity: usize) -> DynDict[dstr[key_shape], i64] can[Memory.Allocate, Abort.Panic]:
+def arena_dict_new__i64(a: mutable any Arena&, initial_capacity: usize) -> dict[dstr[key_shape], i64] can[Memory.Allocate, Abort.Panic]:
     return arena_dict_new[dstr[key_shape], i64](a, initial_capacity) can Memory.Allocate, Abort.Panic
 
-def arena_dict_reserve__i64(a: mutable any Arena&, m: mutable any DynDict[dstr[key_shape], i64]&, min_capacity: usize) -> void error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
+def arena_dict_reserve__i64(a: mutable any Arena&, m: mutable any dict[dstr[key_shape], i64]&, min_capacity: usize) -> void error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
     can Memory.Allocate, Abort.Panic:
         try arena_dict_reserve[dstr[key_shape], i64](a, m, min_capacity)
 
-def arena_dict_get__i64(m: any DynDict[dstr[key_shape], i64]&, key: dstr[key_shape]) -> mutable any i64&?:
+def arena_dict_get__i64(m: any dict[dstr[key_shape], i64]&, key: dstr[key_shape]) -> mutable any i64&?:
     return arena_dict_get[dstr[key_shape], i64](m, key)
 
-def arena_dict_put__i64(a: mutable any Arena&, m: mutable any DynDict[dstr[key_shape], i64]&, key: dstr[key_shape], value: i64) -> mutable any i64&? error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
+def arena_dict_put__i64(a: mutable any Arena&, m: mutable any dict[dstr[key_shape], i64]&, key: dstr[key_shape], value: i64) -> mutable any i64&? error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
     can Memory.Allocate, Abort.Panic:
         return try arena_dict_put[dstr[key_shape], i64](a, m, key, value)
 
-def arena_dict_get_or_insert__i64(a: mutable any Arena&, m: mutable any DynDict[dstr[key_shape], i64]&, key: dstr[key_shape], value: i64) -> mutable any i64&? error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
+def arena_dict_get_or_insert__i64(a: mutable any Arena&, m: mutable any dict[dstr[key_shape], i64]&, key: dstr[key_shape], value: i64) -> mutable any i64&? error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
     can Memory.Allocate, Abort.Panic:
         return try arena_dict_get_or_insert[dstr[key_shape], i64](a, m, key, value)
 
-def arena_dict_contains__i64(m: any DynDict[dstr[key_shape], i64]&, key: dstr[key_shape]) -> bool:
+def arena_dict_contains__i64(m: any dict[dstr[key_shape], i64]&, key: dstr[key_shape]) -> bool:
     return arena_dict_contains[dstr[key_shape], i64](m, key)
 
-def arena_dict_remove__i64(m: mutable any DynDict[dstr[key_shape], i64]&, key: dstr[key_shape]) -> bool:
+def arena_dict_remove__i64(m: mutable any dict[dstr[key_shape], i64]&, key: dstr[key_shape]) -> bool:
     return arena_dict_remove[dstr[key_shape], i64](m, key)
 
-def arena_dict_clear__i64(m: mutable any DynDict[dstr[key_shape], i64]&):
+def arena_dict_clear__i64(m: mutable any dict[dstr[key_shape], i64]&):
     arena_dict_clear[dstr[key_shape], i64](m)

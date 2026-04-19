@@ -198,7 +198,7 @@ def string_slice(value: any u8&?, start: i64, end: i64) -> any u8& can[Memory.Al
         register_perm_string_len(out, out_len)
         return out
 
-def string_view(value: any u8&?, start: i64, end: i64) -> StringView:
+def string_view(value: any u8&?, start: i64, end: i64) -> sview:
     src: any u8& = value if value != null else "".cast[any u8&]
     len: usize = runtime_strlen(src)
 
@@ -220,10 +220,10 @@ def string_view(value: any u8&?, start: i64, end: i64) -> StringView:
 
     return StringView(src + lo, (hi - lo).i64())
 
-def string_view_len(view: StringView) -> i64:
+def string_view_len(view: sview) -> i64:
     return view.len
 
-def string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
+def string_view_slice(view: sview, start: i64, end: i64) -> sview:
     lo: mutable i64 = start if start > 0 else 0
     hi: mutable i64 = end if end >= 0 else view.len
 
@@ -236,19 +236,19 @@ def string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
 
     return StringView(view.data + lo.usize(), hi - lo)
 
-def string_view_prefix(view: StringView, end: i64) -> StringView:
+def string_view_prefix(view: sview, end: i64) -> sview:
     return string_view_slice(view, 0, end)
 
-def string_view_suffix(view: StringView, start: i64) -> StringView:
+def string_view_suffix(view: sview, start: i64) -> sview:
     return string_view_slice(view, start, view.len)
 
-def string_view_index(view: StringView, index: i64) -> i64:
+def string_view_index(view: sview, index: i64) -> i64:
     if index < 0 or index >= view.len:
         return -1
 
     return view.data[index.usize()].i64()
 
-def string_view_eq(view: StringView, other: any u8&?) -> int:
+def string_view_eq(view: sview, other: any u8&?) -> int:
     rhs: any u8& = other if other != null else "".cast[any u8&]
     rhs_len: usize = runtime_strlen(rhs)
 
@@ -261,7 +261,7 @@ def string_view_eq(view: StringView, other: any u8&?) -> int:
 
     return 1 if memcmp(view.data.cast[any void&], rhs.cast[any void&], view.len.usize()) == 0 else 0
 
-def string_views_eq(lhs: StringView, rhs: StringView) -> int:
+def string_views_eq(lhs: sview, rhs: sview) -> int:
     if lhs.len != rhs.len:
         return 0
     if lhs.len == 0:
@@ -271,7 +271,7 @@ def string_views_eq(lhs: StringView, rhs: StringView) -> int:
 
     return 1 if memcmp(lhs.data.cast[any void&], rhs.data.cast[any void&], lhs.len.usize()) == 0 else 0
 
-def string_view_copy(view: StringView) -> heap u8& can[Memory.Allocate, Abort.Panic]:
+def string_view_copy(view: sview) -> heap u8& can[Memory.Allocate, Abort.Panic]:
     can Memory.Allocate, Abort.Panic:
         if view.len <= 0:
             return intern_small_string("".cast[any u8&], 0)

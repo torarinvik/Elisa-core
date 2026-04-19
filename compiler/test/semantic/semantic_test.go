@@ -9725,7 +9725,7 @@ func TestAnalyzePinsCollectionsDictContracts(t *testing.T) {
 	result, errs := parseAndAnalyze(t, "collections.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
-	requireFunctionReturnTypeString(t, result, "arena_dict_new__i64", "DynDict[dstr[key_shape], i64]")
+	requireFunctionReturnTypeString(t, result, "arena_dict_new__i64", "dict[dstr[key_shape], i64]")
 	requireFunctionReturnTypeString(t, result, "arena_dict_get__i64", "any mutable i64&?")
 }
 

@@ -95,31 +95,31 @@ def ctx_string_index(value: dstr[shape_in], index: i64) -> i64:
 def ctx_string_slice(value: dstr[shape_in], start: i64, end: i64) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
     return string_slice(value, start, end) can Memory.Allocate, Abort.Panic
 
-def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
+def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> sview:
     return string_view(value, start, end)
 
-def ctx_string_view_len(view: StringView) -> i64:
+def ctx_string_view_len(view: sview) -> i64:
     return string_view_len(view)
 
-def ctx_string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
+def ctx_string_view_slice(view: sview, start: i64, end: i64) -> sview:
     return string_view_slice(view, start, end)
 
-def ctx_string_view_prefix(view: StringView, end: i64) -> StringView:
+def ctx_string_view_prefix(view: sview, end: i64) -> sview:
     return string_view_prefix(view, end)
 
-def ctx_string_view_suffix(view: StringView, start: i64) -> StringView:
+def ctx_string_view_suffix(view: sview, start: i64) -> sview:
     return string_view_suffix(view, start)
 
-def ctx_string_view_index(view: StringView, index: i64) -> i64:
+def ctx_string_view_index(view: sview, index: i64) -> i64:
     return string_view_index(view, index)
 
-def ctx_string_view_eq(view: StringView, other: dstr[shape_other]) -> int:
+def ctx_string_view_eq(view: sview, other: dstr[shape_other]) -> int:
     return string_view_eq(view, other)
 
-def ctx_string_views_eq(lhs: StringView, rhs: StringView) -> int:
+def ctx_string_views_eq(lhs: sview, rhs: sview) -> int:
     return string_views_eq(lhs, rhs)
 
-def ctx_string_from_view(view: StringView) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
+def ctx_string_from_view(view: sview) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
     return string_view_copy(view).cast[any u8&] can Memory.Allocate, Abort.Panic
 
 def rt_reset_scratch():

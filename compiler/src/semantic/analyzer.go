@@ -20,6 +20,12 @@ const (
 	ConstString
 )
 
+const (
+	semanticTraversalDepthLimit    = 256
+	semanticSubstitutionDepthLimit = 512
+	semanticCloneDepthLimit        = 512
+)
+
 type ConstValue struct {
 	Kind   ConstValueKind
 	Int    int64
@@ -145,6 +151,7 @@ type Analyzer struct {
 	currentExplicitArgScopes          []map[string]ast.Expr
 	currentLocalParamPackScopes       []map[string]*ParamPack
 	implicitTempCounter               int
+	semanticLimitDiagnostics          map[string]bool
 }
 
 type castHookSignature struct {
@@ -2546,66 +2553,105 @@ func (a *Analyzer) errorExternBorrowAnnotationPathError(fn *ast.ExternFuncDecl, 
 	}
 }
 
+func (a *Analyzer) semanticLimitPos() lexer.Pos {
+	if a.currentFuncDecl != nil {
+		return a.currentFuncDecl.Pos()
+	}
+	if a.file != nil {
+		if len(a.file.Decls) != 0 {
+			return a.file.Decls[0].Pos()
+		}
+		return lexer.Pos{File: a.file.Filename}
+	}
+	return lexer.Pos{}
+}
+
+func (a *Analyzer) reportSemanticDepthLimit(operation string, limit int) {
+	if a.semanticLimitDiagnostics == nil {
+		a.semanticLimitDiagnostics = map[string]bool{}
+	}
+	key := operation
+	if a.currentFuncDecl != nil {
+		key += ":" + a.currentFuncDecl.Name
+	}
+	if a.semanticLimitDiagnostics[key] {
+		return
+	}
+	a.semanticLimitDiagnostics[key] = true
+	context := "while analyzing top-level declarations"
+	if a.currentFuncDecl != nil {
+		context = fmt.Sprintf("while analyzing function %q", a.currentFuncDecl.Name)
+	}
+	a.errorf(a.semanticLimitPos(), "semantic analysis exceeded %s recursion limit (%d) %s", operation, limit, context)
+}
+
 func (a *Analyzer) containsAffineHandleValues(t Type, seen map[string]bool) bool {
+	return a.containsAffineHandleValuesWithSeen(t, map[Type]bool{}, 0)
+}
+
+func (a *Analyzer) containsAffineHandleValuesWithSeen(t Type, seen map[Type]bool, depth int) bool {
 	if t == nil {
+		return false
+	}
+	if depth > semanticTraversalDepthLimit {
+		a.reportSemanticDepthLimit("affine-handle traversal", semanticTraversalDepthLimit)
 		return false
 	}
 	if isAffineHandleType(t) {
 		return true
 	}
-	key := t.String()
-	if seen[key] {
+	if seen[t] {
 		return false
 	}
-	seen[key] = true
+	seen[t] = true
 	switch tt := t.(type) {
 	case *ArrayType:
-		return a.containsAffineHandleValues(tt.Elem, seen)
+		return a.containsAffineHandleValuesWithSeen(tt.Elem, seen, depth+1)
 	case *DArrayType:
-		return a.containsAffineHandleValues(tt.Elem, seen)
+		return a.containsAffineHandleValuesWithSeen(tt.Elem, seen, depth+1)
 	case *ViewType:
-		return a.containsAffineHandleValues(tt.Elem, seen)
+		return a.containsAffineHandleValuesWithSeen(tt.Elem, seen, depth+1)
 	case *DArrayViewType:
-		return a.containsAffineHandleValues(tt.Elem, seen)
+		return a.containsAffineHandleValuesWithSeen(tt.Elem, seen, depth+1)
 	case *OptionalType:
-		return a.containsAffineHandleValues(tt.Value, seen)
+		return a.containsAffineHandleValuesWithSeen(tt.Value, seen, depth+1)
 	case *DictType:
-		return a.containsAffineHandleValues(tt.Key, seen) || a.containsAffineHandleValues(tt.Value, seen)
+		return a.containsAffineHandleValuesWithSeen(tt.Key, seen, depth+1) || a.containsAffineHandleValuesWithSeen(tt.Value, seen, depth+1)
 	case *DictEntryType:
-		return a.containsAffineHandleValues(tt.Dict, seen)
+		return a.containsAffineHandleValuesWithSeen(tt.Dict, seen, depth+1)
 	case *PackedVariantViewType:
 		for _, field := range tt.Enum.Common {
-			if a.containsAffineHandleValues(field.Type, seen) {
+			if a.containsAffineHandleValuesWithSeen(field.Type, seen, depth+1) {
 				return true
 			}
 		}
 		for _, payloadType := range tt.Variant.Payload {
-			if a.containsAffineHandleValues(payloadType, seen) {
+			if a.containsAffineHandleValuesWithSeen(payloadType, seen, depth+1) {
 				return true
 			}
 		}
 		return false
 	case *TreeVariantViewType:
 		for _, field := range tt.Category.Common {
-			if a.containsAffineHandleValues(field.Type, seen) {
+			if a.containsAffineHandleValuesWithSeen(field.Type, seen, depth+1) {
 				return true
 			}
 		}
 		for _, payloadType := range tt.Variant.Payload {
-			if a.containsAffineHandleValues(payloadType, seen) {
+			if a.containsAffineHandleValuesWithSeen(payloadType, seen, depth+1) {
 				return true
 			}
 		}
 		return false
 	case *EnumType:
 		for _, field := range tt.Common {
-			if a.containsAffineHandleValues(field.Type, seen) {
+			if a.containsAffineHandleValuesWithSeen(field.Type, seen, depth+1) {
 				return true
 			}
 		}
 		for _, variant := range tt.Variants {
 			for _, payloadType := range variant.Payload {
-				if a.containsAffineHandleValues(payloadType, seen) {
+				if a.containsAffineHandleValuesWithSeen(payloadType, seen, depth+1) {
 					return true
 				}
 			}
@@ -2613,13 +2659,13 @@ func (a *Analyzer) containsAffineHandleValues(t Type, seen map[string]bool) bool
 		return false
 	case *TreeCategoryType:
 		for _, field := range tt.Common {
-			if a.containsAffineHandleValues(field.Type, seen) {
+			if a.containsAffineHandleValuesWithSeen(field.Type, seen, depth+1) {
 				return true
 			}
 		}
 		for _, variant := range tt.Variants {
 			for _, payloadType := range variant.Payload {
-				if a.containsAffineHandleValues(payloadType, seen) {
+				if a.containsAffineHandleValuesWithSeen(payloadType, seen, depth+1) {
 					return true
 				}
 			}
@@ -2627,14 +2673,14 @@ func (a *Analyzer) containsAffineHandleValues(t Type, seen map[string]bool) bool
 		return false
 	case *TreeBlockType:
 		for _, field := range tt.Fields {
-			if a.containsAffineHandleValues(field.Type, seen) {
+			if a.containsAffineHandleValuesWithSeen(field.Type, seen, depth+1) {
 				return true
 			}
 		}
 		return false
 	case *TreeStructType:
 		for _, field := range tt.Fields {
-			if a.containsAffineHandleValues(field.Type, seen) {
+			if a.containsAffineHandleValuesWithSeen(field.Type, seen, depth+1) {
 				return true
 			}
 		}
@@ -2652,21 +2698,21 @@ func (a *Analyzer) containsAffineHandleValues(t Type, seen map[string]bool) bool
 				if len(bindings) != 0 {
 					fieldType = a.substituteType(fieldType, bindings, nil, nil, nil)
 				}
-				if a.containsAffineHandleValues(fieldType, seen) {
+				if a.containsAffineHandleValuesWithSeen(fieldType, seen, depth+1) {
 					return true
 				}
 			}
 			return false
 		}
 		for _, arg := range tt.Args {
-			if a.containsAffineHandleValues(arg, seen) {
+			if a.containsAffineHandleValuesWithSeen(arg, seen, depth+1) {
 				return true
 			}
 		}
-		return a.containsAffineHandleValues(tt.Base, seen)
+		return a.containsAffineHandleValuesWithSeen(tt.Base, seen, depth+1)
 	case *StructType:
 		for _, field := range tt.Fields {
-			if a.containsAffineHandleValues(field.Type, seen) {
+			if a.containsAffineHandleValuesWithSeen(field.Type, seen, depth+1) {
 				return true
 			}
 		}
