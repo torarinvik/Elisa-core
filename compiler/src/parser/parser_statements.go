@@ -702,7 +702,7 @@ func (p *Parser) parseLockStmt() *ast.LockStmt {
 func (p *Parser) parseMatch() *ast.MatchStmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_MATCH)
-	value := p.parseExpr()
+	value := p.withInMembershipDisabled(p.parseExpr)
 	var store ast.Expr
 	if p.match(lexer.TOKEN_IN) {
 		store = p.parseExpr()
@@ -724,7 +724,7 @@ func (p *Parser) parseInStore() *ast.InStoreStmt {
 func (p *Parser) parseOpenStmt() *ast.OpenStmt {
 	pos := p.cur().Pos
 	p.expectIdentText("open")
-	value := p.withAsCastDisabled(p.parseExpr)
+	value := p.withInMembershipDisabled(func() ast.Expr { return p.withAsCastDisabled(p.parseExpr) })
 	var store ast.Expr
 	if p.match(lexer.TOKEN_IN) {
 		store = p.withAsCastDisabled(p.parseExpr)
@@ -745,7 +745,7 @@ func (p *Parser) parseOpenStmt() *ast.OpenStmt {
 func (p *Parser) parseViewStmt() *ast.ViewStmt {
 	pos := p.cur().Pos
 	p.expectIdentText("view")
-	value := p.withAsCastDisabled(p.parseExpr)
+	value := p.withInMembershipDisabled(func() ast.Expr { return p.withAsCastDisabled(p.parseExpr) })
 	var store ast.Expr
 	if p.match(lexer.TOKEN_IN) {
 		store = p.withAsCastDisabled(p.parseExpr)
@@ -1357,7 +1357,16 @@ func (p *Parser) parseIf() ast.Stmt {
 func (p *Parser) parseIfClause(isElif bool) ifClause {
 	pos := p.cur().Pos
 	hint := p.parseBranchHint()
-	head := p.withAsCastDisabled(p.parseExpr)
+	headStart := p.pos
+	head := p.withInMembershipDisabled(func() ast.Expr { return p.withAsCastDisabled(p.parseExpr) })
+	if p.peek() == lexer.TOKEN_IN && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACKET {
+		p.pos = headStart
+		cond := p.withAsCastDisabled(p.parseExpr)
+		p.expect(lexer.TOKEN_COLON)
+		p.expectNewline()
+		body := p.parseBlock()
+		return ifClause{Position: pos, Hint: hint, Cond: cond, Body: body}
+	}
 	if p.match(lexer.TOKEN_AS) {
 		if hint != ast.BranchHintNone {
 			if isElif {
@@ -1760,7 +1769,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 
 	var expr ast.Expr
 	if p.peekIdentText("move") {
-		expr = p.withAsCastDisabled(p.parseExpr)
+		expr = p.withInMembershipDisabled(func() ast.Expr { return p.withAsCastDisabled(p.parseExpr) })
 	} else {
 		expr = p.parseExpr()
 	}

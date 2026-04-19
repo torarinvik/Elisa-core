@@ -1142,6 +1142,9 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 	if expr.Op == lexer.TOKEN_IS {
 		return s.emitIsExpr(expr)
 	}
+	if expr.Op == lexer.TOKEN_IN {
+		return s.emitMembershipExpr(expr)
+	}
 	if expr.Op == lexer.TOKEN_AND || expr.Op == lexer.TOKEN_OR {
 		return s.emitLogicalExpr(expr)
 	}
@@ -1232,6 +1235,172 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 	default:
 		return nil, nil, fmt.Errorf("unsupported binary operator %s", lexer.TokenName(expr.Op))
 	}
+}
+
+func (s *functionState) emitMembershipExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, semantic.Type, error) {
+	list, ok := expr.Right.(*ast.ListLitExpr)
+	if !ok || list == nil {
+		return nil, nil, fmt.Errorf("membership operator requires a list literal on the right-hand side")
+	}
+	resultType := s.g.result.NamedTypes["bool"]
+	boolLLVMType := C.LLVMInt1TypeInContext(s.g.context)
+	if len(list.Elems) == 0 {
+		return C.LLVMConstInt(boolLLVMType, 0, 0), resultType, nil
+	}
+	leftType := s.exprType(expr.Left)
+	leftValue, _, err := s.emitExpr(expr.Left, leftType)
+	if err != nil {
+		return nil, nil, err
+	}
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("membership.merge"))
+	incomingValues := make([]C.LLVMValueRef, 0, len(list.Elems))
+	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(list.Elems))
+	for i, elem := range list.Elems {
+		currentBlock := C.LLVMGetInsertBlock(s.builder)
+		cmp, err := s.emitMembershipCompareValueAndExpr(leftValue, leftType, elem)
+		if err != nil {
+			return nil, nil, err
+		}
+		if i == len(list.Elems)-1 {
+			C.LLVMBuildBr(s.builder, mergeBB)
+			incomingValues = append(incomingValues, cmp)
+			incomingBlocks = append(incomingBlocks, currentBlock)
+			break
+		}
+		nextBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(fmt.Sprintf("membership.next.%d", i)))
+		C.LLVMBuildCondBr(s.builder, cmp, mergeBB, nextBB)
+		incomingValues = append(incomingValues, C.LLVMConstInt(boolLLVMType, 1, 0))
+		incomingBlocks = append(incomingBlocks, currentBlock)
+		C.LLVMPositionBuilderAtEnd(s.builder, nextBB)
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	phi := C.LLVMBuildPhi(s.builder, boolLLVMType, cStringFree("membership.result"))
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+	return phi, resultType, nil
+}
+
+func (s *functionState) emitMembershipCompareValueAndExpr(leftValue C.LLVMValueRef, leftType semantic.Type, rightExpr ast.Expr) (C.LLVMValueRef, error) {
+	rightType := s.exprType(rightExpr)
+	resultType := s.g.result.NamedTypes["bool"]
+	if helperName, firstType, secondType, swap, ok := runtimeStringCompareInfo(leftType, rightType); ok {
+		return s.emitRuntimeStringCompareValues(lexer.TOKEN_EQEQ, leftValue, leftType, rightExpr, helperName, firstType, secondType, swap)
+	}
+	if value, handled, err := s.emitMembershipOptionalCompareValueAndExpr(leftValue, leftType, rightExpr, rightType, resultType); handled {
+		return value, err
+	}
+	if value, handled, err := s.emitMembershipPointerCompareValueAndExpr(leftValue, leftType, rightExpr, rightType, resultType); handled {
+		return value, err
+	}
+	operandType := s.binaryOperandType(lexer.TOKEN_EQEQ, leftType, rightType)
+	coercedLeft, err := s.coerceValue(leftValue, leftType, operandType)
+	if err != nil {
+		return nil, err
+	}
+	rightValue, _, err := s.emitExpr(rightExpr, operandType)
+	if err != nil {
+		return nil, err
+	}
+	if enumType, ok := operandType.(*semantic.EnumType); ok {
+		cmp, _, err := s.emitEnumCompareExpr(lexer.TOKEN_EQEQ, enumType, coercedLeft, rightValue, resultType)
+		return cmp, err
+	}
+	if isFloatType(operandType) {
+		return C.LLVMBuildFCmp(s.builder, C.LLVMRealOEQ, coercedLeft, rightValue, cStringFree("membership.eq")), nil
+	}
+	return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), coercedLeft, rightValue, cStringFree("membership.eq")), nil
+}
+
+func (s *functionState) emitMembershipPointerCompareValueAndExpr(leftValue C.LLVMValueRef, leftType semantic.Type, rightExpr ast.Expr, rightType semantic.Type, resultType semantic.Type) (C.LLVMValueRef, bool, error) {
+	leftPointerish := isPointerLikeType(leftType) || semantic.IsNullType(leftType)
+	rightPointerish := isPointerLikeType(rightType) || semantic.IsNullType(rightType)
+	if !leftPointerish || !rightPointerish {
+		return nil, false, nil
+	}
+	operandType := s.binaryOperandType(lexer.TOKEN_EQEQ, leftType, rightType)
+	coercedLeft, err := s.coerceValue(leftValue, leftType, operandType)
+	if err != nil {
+		return nil, true, err
+	}
+	rightValue, _, err := s.emitExpr(rightExpr, operandType)
+	if err != nil {
+		return nil, true, err
+	}
+	cmp := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), coercedLeft, rightValue, cStringFree("membership.ptr.eq"))
+	return cmp, resultType != nil, nil
+}
+
+func (s *functionState) emitMembershipOptionalCompareValueAndExpr(leftValue C.LLVMValueRef, leftType semantic.Type, rightExpr ast.Expr, rightType semantic.Type, resultType semantic.Type) (C.LLVMValueRef, bool, error) {
+	if leftOptional, ok := leftType.(*semantic.OptionalType); ok && semantic.IsNullType(rightType) {
+		presentValue, err := s.extractOptionalPresent(leftValue, leftOptional)
+		if err != nil {
+			return nil, true, err
+		}
+		return C.LLVMBuildNot(s.builder, presentValue, cStringFree("membership.optional.isnull")), resultType != nil, nil
+	}
+	if rightOptional, ok := rightType.(*semantic.OptionalType); ok && semantic.IsNullType(leftType) {
+		rightValue, _, err := s.emitExpr(rightExpr, rightOptional)
+		if err != nil {
+			return nil, true, err
+		}
+		presentValue, err := s.extractOptionalPresent(rightValue, rightOptional)
+		if err != nil {
+			return nil, true, err
+		}
+		return C.LLVMBuildNot(s.builder, presentValue, cStringFree("membership.optional.isnull")), resultType != nil, nil
+	}
+	return nil, false, nil
+}
+
+func (s *functionState) emitRuntimeStringCompareValues(op lexer.TokenKind, leftValue C.LLVMValueRef, leftType semantic.Type, rightExpr ast.Expr, helperName string, firstType semantic.Type, secondType semantic.Type, swap bool) (C.LLVMValueRef, error) {
+	var (
+		firstValue  C.LLVMValueRef
+		secondValue C.LLVMValueRef
+		err         error
+	)
+	if swap {
+		firstValue, _, err = s.emitExpr(rightExpr, firstType)
+		if err != nil {
+			return nil, err
+		}
+		secondValue, err = s.coerceValue(leftValue, leftType, secondType)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		firstValue, err = s.coerceValue(leftValue, leftType, firstType)
+		if err != nil {
+			return nil, err
+		}
+		secondValue, _, err = s.emitExpr(rightExpr, secondType)
+		if err != nil {
+			return nil, err
+		}
+	}
+	helperReturn := s.g.result.NamedTypes["int"]
+	helperType := &semantic.FuncType{
+		Name:   helperName,
+		Params: []semantic.Type{firstType, secondType},
+		Return: helperReturn,
+	}
+	callee, err := s.g.ensureFunctionDeclared(helperName, helperType)
+	if err != nil {
+		return nil, err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(helperType)
+	if err != nil {
+		return nil, err
+	}
+	call := s.buildCall(llvmFnType, callee, []C.LLVMValueRef{firstValue, secondValue}, "membership.strcmp")
+	helperLLVMType, err := s.g.lowerType(helperReturn)
+	if err != nil {
+		return nil, err
+	}
+	zero := C.LLVMConstInt(helperLLVMType, 0, 0)
+	pred := C.LLVMIntPredicate(C.LLVMIntNE)
+	if op == lexer.TOKEN_BANGEQ {
+		pred = C.LLVMIntPredicate(C.LLVMIntEQ)
+	}
+	return C.LLVMBuildICmp(s.builder, pred, call, zero, cStringFree("membership.strcmp.eq")), nil
 }
 
 func (s *functionState) emitIsExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, semantic.Type, error) {

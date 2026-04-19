@@ -2675,6 +2675,9 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 	if expr.Op == lexer.TOKEN_IS {
 		return a.analyzeIsExpr(expr)
 	}
+	if expr.Op == lexer.TOKEN_IN {
+		return a.analyzeMembershipExpr(expr)
+	}
 	leftShorthand, leftIsShorthand := contextualShorthandExpr(expr.Left)
 	rightShorthand, rightIsShorthand := contextualShorthandExpr(expr.Right)
 	var left Type
@@ -2705,13 +2708,7 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 		}
 		return a.namedTypes["bool"]
 	case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
-		if runtimeStringComparable(left, right) {
-			return a.namedTypes["bool"]
-		}
-		if IsNumericType(left) && IsNumericType(right) {
-			return a.namedTypes["bool"]
-		}
-		if !(AssignableTo(left, right) || AssignableTo(right, left) || refsComparableIgnoringMutability(left, right) || (IsNullType(left) && isRefLike(right)) || (IsNullType(right) && isRefLike(left))) {
+		if !typesComparableForEquality(left, right) {
 			a.errorf(expr.Pos(), "cannot compare %s and %s", left, right)
 		}
 		return a.namedTypes["bool"]
@@ -2750,6 +2747,53 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 	default:
 		return invalidType
 	}
+}
+
+func (a *Analyzer) analyzeMembershipExpr(expr *ast.BinaryExpr) Type {
+	left := a.analyzeExpr(expr.Left)
+	resultType := a.namedTypes["bool"]
+	list, ok := expr.Right.(*ast.ListLitExpr)
+	if !ok || list == nil {
+		right := a.analyzeExpr(expr.Right)
+		a.errorf(expr.Right.Pos(), "membership operator currently requires a list literal on the right-hand side, got %s", right)
+		return resultType
+	}
+
+	var elemType Type
+	for _, elem := range list.Elems {
+		itemType := a.analyzeValueExpr(elem, left)
+		if !typesComparableForEquality(left, itemType) {
+			a.errorf(elem.Pos(), "cannot compare %s against membership candidate %s", left, itemType)
+			continue
+		}
+		a.consumeAffineValueExpr(elem, itemType, "move into membership candidate")
+		if elemType == nil {
+			elemType = itemType
+			continue
+		}
+		merged := MergeTypes(elemType, itemType)
+		if IsInvalidType(merged) {
+			merged = left
+		}
+		if !IsInvalidType(merged) {
+			elemType = merged
+		}
+	}
+	if elemType == nil {
+		elemType = left
+	}
+	a.recordAnalyzedExprType(list, &ArrayType{Elem: elemType, Size: strconv.Itoa(len(list.Elems)), HasConstSize: true, ConstSize: int64(len(list.Elems))})
+	return resultType
+}
+
+func typesComparableForEquality(left Type, right Type) bool {
+	if runtimeStringComparable(left, right) {
+		return true
+	}
+	if IsNumericType(left) && IsNumericType(right) {
+		return true
+	}
+	return AssignableTo(left, right) || AssignableTo(right, left) || refsComparableIgnoringMutability(left, right) || (IsNullType(left) && isRefLike(right)) || (IsNullType(right) && isRefLike(left))
 }
 
 func refsComparableIgnoringMutability(left Type, right Type) bool {

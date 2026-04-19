@@ -686,7 +686,7 @@ func (p *Parser) parseComparison() ast.Expr {
 	for p.peek() == lexer.TOKEN_EQEQ || p.peek() == lexer.TOKEN_BANGEQ ||
 		p.peek() == lexer.TOKEN_LT || p.peek() == lexer.TOKEN_GT ||
 		p.peek() == lexer.TOKEN_LTEQ || p.peek() == lexer.TOKEN_GTEQ ||
-		p.peek() == lexer.TOKEN_IS {
+		p.peek() == lexer.TOKEN_IS || p.membershipLiteralAhead() {
 		pos := p.cur().Pos
 		op := p.advance()
 		var right ast.Expr
@@ -698,6 +698,10 @@ func (p *Parser) parseComparison() ast.Expr {
 		left = &ast.BinaryExpr{Position: pos, Op: op.Kind, Left: left, Right: right}
 	}
 	return left
+}
+
+func (p *Parser) membershipLiteralAhead() bool {
+	return p.allowInMembership && p.peek() == lexer.TOKEN_IN
 }
 
 func (p *Parser) parseAs() ast.Expr {
@@ -973,7 +977,7 @@ func (p *Parser) parseAllocExpr() ast.Expr {
 func (p *Parser) parseMatchExpr() ast.Expr {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_MATCH)
-	value := p.parseExpr()
+	value := p.withInMembershipDisabled(p.parseExpr)
 	var store ast.Expr
 	if p.match(lexer.TOKEN_IN) {
 		store = p.parseExpr()

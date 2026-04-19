@@ -146,6 +146,26 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 		if !ok {
 			return ConstValue{}, false
 		}
+		if n.Op == lexer.TOKEN_IN {
+			list, ok := n.Right.(*ast.ListLitExpr)
+			if !ok || list == nil {
+				return ConstValue{}, false
+			}
+			for _, elem := range list.Elems {
+				candidate, ok := a.evalConstExpr(elem)
+				if !ok {
+					return ConstValue{}, false
+				}
+				matched, ok := a.evalConstEquality(left, candidate, true)
+				if !ok {
+					return ConstValue{}, false
+				}
+				if matched.Bool {
+					return matched, true
+				}
+			}
+			return ConstValue{Kind: ConstBool, Bool: false}, true
+		}
 		right, ok := a.evalConstExpr(n.Right)
 		if !ok {
 			return ConstValue{}, false

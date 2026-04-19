@@ -211,6 +211,38 @@ Notes:
 - The current llcontext harness validates `lua_frontend_execute_status_with_len(...) == 0` before timing repeated execute checksum runs.
 - The JSON report records both per-input throughput and the aggregate llcontext-over-reference ratio.
 
+## Execution Profile Bundle
+
+To capture an execution-oriented profiling bundle with both the llcontext and
+PUC Lua sweeps in one stable folder:
+
+```bash
+bash ./compiler/scripts/profile_lua_frontend_execution.sh --out /tmp/llcontext-lua-execution-profile
+```
+
+Useful options:
+
+- `--opt-level -O3`
+- `--iterations 5000`
+- `--repeats 3`
+- `--corpus-manifest Code/benchmarks/lua_frontend_execution_corpus_manifest.txt`
+- `--keep-temp`
+
+This writes:
+
+- `execution_benchmark.log`
+- `execution_benchmark.json`
+- `reference_execution_benchmark.log`
+- `reference_execution_benchmark.json`
+- `metadata.json`
+- `README.txt`
+
+Notes:
+
+- This bundle is the execution-side companion to the existing parse/analysis profile bundle produced by `profile_lua_frontend.sh`.
+- It reuses the deterministic execution corpus and keeps both the llcontext and reference runs together for manual investigation.
+- The wrapper is aimed at execution-path performance work rather than parser parity or baseline-comparison automation.
+
 There is also a direct pool-backed benchmark harness for the exported parallel
 frontend surface:
 

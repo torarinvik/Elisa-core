@@ -8,15 +8,16 @@ import (
 )
 
 type Parser struct {
-	tokens      []lexer.Token
-	pos         int
-	errors      []string
-	poolScopes  []string
-	allowAsCast bool
+	tokens            []lexer.Token
+	pos               int
+	errors            []string
+	poolScopes        []string
+	allowAsCast       bool
+	allowInMembership bool
 }
 
 func New(tokens []lexer.Token) *Parser {
-	return &Parser{tokens: tokens, allowAsCast: true}
+	return &Parser{tokens: tokens, allowAsCast: true, allowInMembership: true}
 }
 
 func (p *Parser) Errors() []string { return p.errors }
@@ -68,6 +69,15 @@ func (p *Parser) withAsCastDisabled(parse func() ast.Expr) ast.Expr {
 	p.allowAsCast = false
 	defer func() {
 		p.allowAsCast = saved
+	}()
+	return parse()
+}
+
+func (p *Parser) withInMembershipDisabled(parse func() ast.Expr) ast.Expr {
+	saved := p.allowInMembership
+	p.allowInMembership = false
+	defer func() {
+		p.allowInMembership = saved
 	}()
 	return parse()
 }

@@ -699,6 +699,9 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 		if n.Op == lexer.TOKEN_IS {
 			return i.evalIsExpr(frame, n)
 		}
+		if n.Op == lexer.TOKEN_IN {
+			return i.evalMembershipExpr(frame, n)
+		}
 		left, err := i.evalExpr(frame, n.Left)
 		if err != nil {
 			return VoidValue(), err
@@ -911,6 +914,30 @@ func (i *Interpreter) evalIsExpr(frame *frame, expr *ast.BinaryExpr) (Value, err
 			if truth {
 				return BoolValue(true), nil
 			}
+		}
+	}
+	return BoolValue(false), nil
+}
+
+func (i *Interpreter) evalMembershipExpr(frame *frame, expr *ast.BinaryExpr) (Value, error) {
+	if expr == nil {
+		return VoidValue(), fmt.Errorf("membership expression is nil")
+	}
+	list, ok := expr.Right.(*ast.ListLitExpr)
+	if !ok || list == nil {
+		return VoidValue(), fmt.Errorf("membership operator requires a list literal on the right-hand side")
+	}
+	leftValue, err := i.evalExpr(frame, expr.Left)
+	if err != nil {
+		return VoidValue(), err
+	}
+	for _, elem := range list.Elems {
+		candidate, err := i.evalExpr(frame, elem)
+		if err != nil {
+			return VoidValue(), err
+		}
+		if valuesEqual(leftValue, candidate) {
+			return BoolValue(true), nil
 		}
 	}
 	return BoolValue(false), nil
