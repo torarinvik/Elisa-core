@@ -1088,7 +1088,7 @@ func summarizePackedStoreProvenance(state regionRefState) PackedStoreProvenance 
 		return state.PackedStoreSummary
 	}
 	var out PackedStoreProvenance
-	summarizePackedStoreProvenanceInto(&out, state)
+	summarizePackedStoreProvenanceIntoSeen(&out, state, map[uintptr]struct{}{})
 	return out
 }
 
@@ -1103,6 +1103,10 @@ func mergePackedStoreProvenanceInto(dst *PackedStoreProvenance, src PackedStoreP
 }
 
 func summarizePackedStoreProvenanceInto(out *PackedStoreProvenance, state regionRefState) {
+	summarizePackedStoreProvenanceIntoSeen(out, state, map[uintptr]struct{}{})
+}
+
+func summarizePackedStoreProvenanceIntoSeen(out *PackedStoreProvenance, state regionRefState, seen map[uintptr]struct{}) {
 	if out == nil {
 		return
 	}
@@ -1121,8 +1125,16 @@ func summarizePackedStoreProvenanceInto(out *PackedStoreProvenance, state region
 		}
 		out.HasNonFrozenPackedStoreDeps = true
 	}
+	fieldsID := regionRefFieldsIdentity(state.Fields)
+	if fieldsID != 0 {
+		if _, ok := seen[fieldsID]; ok {
+			return
+		}
+		seen[fieldsID] = struct{}{}
+		defer delete(seen, fieldsID)
+	}
 	for _, fieldState := range state.Fields {
-		summarizePackedStoreProvenanceInto(out, fieldState)
+		summarizePackedStoreProvenanceIntoSeen(out, fieldState, seen)
 	}
 }
 
@@ -1146,6 +1158,10 @@ func (a *Analyzer) exprDependsOnlyOnFrozenPackedStores(expr ast.Expr) bool {
 }
 
 func regionRefStateDependsOnlyOnFrozenPackedStores(state regionRefState) (bool, bool) {
+	return regionRefStateDependsOnlyOnFrozenPackedStoresWithSeen(state, map[uintptr]struct{}{})
+}
+
+func regionRefStateDependsOnlyOnFrozenPackedStoresWithSeen(state regionRefState, seen map[uintptr]struct{}) (bool, bool) {
 	if state.PackedStoreSummaryKnown {
 		summary := state.PackedStoreSummary
 		return summary.DependsOnlyOnFrozenPackedStores() || (!summary.HasAnyPackedStoreProvenance() && !summary.HasNonStoreProvenance), summary.DependsOnFrozenPackedStores()
@@ -1160,8 +1176,16 @@ func regionRefStateDependsOnlyOnFrozenPackedStores(state regionRefState) (bool, 
 		}
 		hasFrozen = true
 	}
+	fieldsID := regionRefFieldsIdentity(state.Fields)
+	if fieldsID != 0 {
+		if _, ok := seen[fieldsID]; ok {
+			return true, false
+		}
+		seen[fieldsID] = struct{}{}
+		defer delete(seen, fieldsID)
+	}
 	for _, fieldState := range state.Fields {
-		fieldOnlyFrozen, fieldHasFrozen := regionRefStateDependsOnlyOnFrozenPackedStores(fieldState)
+		fieldOnlyFrozen, fieldHasFrozen := regionRefStateDependsOnlyOnFrozenPackedStoresWithSeen(fieldState, seen)
 		if !fieldOnlyFrozen {
 			return false, false
 		}

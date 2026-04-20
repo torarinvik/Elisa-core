@@ -323,11 +323,11 @@ func (a *Analyzer) recordLambdaReturnExpr(value ast.Expr, valueType Type) {
 				a.errorf(value.Pos(), "cannot return value depending on local region %q", region.Name)
 			}
 		}
-		if summary, ok := abstractParamOnlyRegionRefState(refState); ok {
-			if merged, ok := mergeRegionRefStates(a.currentReturnProvenance, summary); ok {
+		if hasRegionProvenance(refState) {
+			if merged, ok := mergeRegionRefStates(a.currentReturnProvenance, refState); ok {
 				a.currentReturnProvenance = merged
 			} else if !hasRegionProvenance(a.currentReturnProvenance) {
-				a.currentReturnProvenance = summary
+				a.currentReturnProvenance = cloneRegionRefState(refState)
 			}
 		}
 	}

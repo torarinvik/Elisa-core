@@ -1244,6 +1244,9 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		}
 		if fnType != nil {
 			if !fnType.ReturnProvenanceKnown {
+				if a.suppressLazyFuncSummaryInference {
+					return regionRefState{}, false
+				}
 				a.inferFuncReturnProvenanceForExpr(n.Func, fnType)
 			}
 			if fnType.ReturnProvenanceKnown {
@@ -1347,6 +1350,14 @@ func (a *Analyzer) inferFuncReturnProvenanceForExpr(expr ast.Expr, fnType *FuncT
 		if !ok {
 			return
 		}
+		if sourceType, ok := sym.Type.(*FuncType); ok && sourceType != fnType {
+			a.ensureFunctionValueTypeSummaries(n, sourceType)
+			if sourceType.ReturnProvenanceKnown {
+				fnType.ReturnProvenance = cloneRegionRefState(sourceType.ReturnProvenance)
+				fnType.ReturnProvenanceKnown = true
+				return
+			}
+		}
 		fnDecl, _ := sym.Node.(*ast.FuncDecl)
 		if fnDecl == nil {
 			return
@@ -1365,6 +1376,18 @@ func (a *Analyzer) inferFuncReturnProvenanceForLocalIdent(ident *ast.Ident, fnTy
 	if !ok {
 		return false
 	}
+	if sourceType, ok := a.currentFunctionValueTypeRef(sym); ok && sourceType != fnType {
+		if !sourceType.ReturnProvenanceKnown {
+			if valueExpr, ok := a.immutableValueExprForSymbol(sym); ok && valueExpr != nil {
+				a.ensureFunctionValueTypeSummaries(valueExpr, sourceType)
+			}
+		}
+		if sourceType.ReturnProvenanceKnown {
+			fnType.ReturnProvenance = cloneRegionRefState(sourceType.ReturnProvenance)
+			fnType.ReturnProvenanceKnown = true
+			return true
+		}
+	}
 	if sourceType, ok := a.lookupCurrentFunctionValueType(sym); ok && sourceType != fnType && hasRegionProvenance(sourceType.ReturnProvenance) {
 		fnType.ReturnProvenance = cloneRegionRefState(sourceType.ReturnProvenance)
 		fnType.ReturnProvenanceKnown = true
@@ -1382,6 +1405,14 @@ func (a *Analyzer) inferFuncReturnProvenanceForLocalIdent(ident *ast.Ident, fnTy
 	if !ok || decl.Value == nil {
 		return false
 	}
+	if a.returnProvenanceLocalInProgress == nil {
+		a.returnProvenanceLocalInProgress = map[*Symbol]bool{}
+	}
+	if a.returnProvenanceLocalInProgress[sym] {
+		return false
+	}
+	a.returnProvenanceLocalInProgress[sym] = true
+	defer delete(a.returnProvenanceLocalInProgress, sym)
 	a.inferFuncReturnProvenanceForExpr(decl.Value, fnType)
 	return fnType.ReturnProvenanceKnown
 }
@@ -1443,6 +1474,14 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefsForLocalIdent(ident *ast.Iden
 	if !ok || decl.Value == nil {
 		return false
 	}
+	if a.returnBorrowedOwnerLocalProgress == nil {
+		a.returnBorrowedOwnerLocalProgress = map[*Symbol]bool{}
+	}
+	if a.returnBorrowedOwnerLocalProgress[sym] {
+		return false
+	}
+	a.returnBorrowedOwnerLocalProgress[sym] = true
+	defer delete(a.returnBorrowedOwnerLocalProgress, sym)
 	a.inferFuncReturnBorrowedOwnerRefsForExpr(decl.Value, fnType)
 	return fnType.ReturnBorrowedOwnerRefsKnown
 }
@@ -8440,7 +8479,7 @@ func (a *Analyzer) recordAnalyzedExprType(expr ast.Expr, result Type) {
 }
 
 func (a *Analyzer) recordExprOptimizationFacts(expr ast.Expr, result Type) {
-	if a == nil || expr == nil || a.exprFacts == nil {
+	if a == nil || expr == nil || a.exprFacts == nil || a.suppressOptimizationFacts {
 		return
 	}
 	baseFacts := optimizationFactsForType(result)
@@ -8452,6 +8491,11 @@ func (a *Analyzer) recordExprOptimizationFacts(expr ast.Expr, result Type) {
 		delete(a.exprFacts, expr)
 		return
 	}
+	savedSuppressLazyFuncSummaryInference := a.suppressLazyFuncSummaryInference
+	a.suppressLazyFuncSummaryInference = true
+	defer func() {
+		a.suppressLazyFuncSummaryInference = savedSuppressLazyFuncSummaryInference
+	}()
 	facts := a.inferExprOptimizationFactsWithBase(expr, result, baseFacts)
 	if facts.HasAnyFacts() {
 		a.exprFacts[expr] = facts

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"llcontext/src/ast"
 	"llcontext/src/lexer"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -292,7 +293,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				if merged, ok := mergeRegionRefStates(a.currentReturnProvenance, summary); ok {
 					a.currentReturnProvenance = merged
 				} else if !hasRegionProvenance(a.currentReturnProvenance) {
-					a.currentReturnProvenance = summary
+					a.currentReturnProvenance = cloneRegionRefState(summary)
 				}
 			}
 		}
@@ -6846,6 +6847,43 @@ func regionRefStateHasParamDep(state regionRefState, index int) bool {
 	return state.ParamDeps.Contains(index)
 }
 
+func sameRegionParamDeps(left IntBitSet, right IntBitSet) bool {
+	if left.inline != right.inline {
+		return false
+	}
+	if len(left.extra) != len(right.extra) {
+		return false
+	}
+	for i, word := range left.extra {
+		if right.extra[i] != word {
+			return false
+		}
+	}
+	return true
+}
+
+func sameParamOnlyRegionRefSummary(left regionRefState, right regionRefState) bool {
+	if !left.ParamOnlySummary || !right.ParamOnlySummary {
+		return false
+	}
+	if left.DirectParamDep != right.DirectParamDep || left.HasDirectParamDep != right.HasDirectParamDep {
+		return false
+	}
+	if !sameRegionParamDeps(left.ParamDeps, right.ParamDeps) {
+		return false
+	}
+	if regionRefFieldsIdentity(left.Fields) != regionRefFieldsIdentity(right.Fields) {
+		return false
+	}
+	if left.PackedStoreSummaryKnown != right.PackedStoreSummaryKnown {
+		return false
+	}
+	if left.PackedStoreSummaryKnown && left.PackedStoreSummary != right.PackedStoreSummary {
+		return false
+	}
+	return true
+}
+
 func regionRefStateParamDepCount(state regionRefState) int {
 	if !state.HasDirectParamDep {
 		return state.ParamDeps.Count()
@@ -6854,6 +6892,20 @@ func regionRefStateParamDepCount(state regionRefState) int {
 		return state.ParamDeps.Count() + 1
 	}
 	return state.ParamDeps.Count()
+}
+
+func singleRegionParamDepIndex(state regionRefState) (int, bool) {
+	if regionRefStateParamDepCount(state) != 1 {
+		return 0, false
+	}
+	if state.HasDirectParamDep {
+		return state.DirectParamDep, true
+	}
+	index := 0
+	state.ParamDeps.ForEach(func(value int) {
+		index = value
+	})
+	return index, true
 }
 
 func forEachRegionParamDep(state regionRefState, fn func(int)) {
@@ -6911,6 +6963,7 @@ func cloneRegionRefState(state regionRefState) regionRefState {
 		Fields:                  cloneRegionRefFields(state.Fields),
 		PackedStoreSummary:      state.PackedStoreSummary,
 		PackedStoreSummaryKnown: state.PackedStoreSummaryKnown,
+		ParamOnlySummary:        state.ParamOnlySummary,
 	}
 }
 
@@ -6924,6 +6977,7 @@ func cloneRegionRefStateSharedFields(state regionRefState) regionRefState {
 		Fields:                  state.Fields,
 		PackedStoreSummary:      state.PackedStoreSummary,
 		PackedStoreSummaryKnown: state.PackedStoreSummaryKnown,
+		ParamOnlySummary:        state.ParamOnlySummary,
 	}
 }
 
@@ -6934,6 +6988,7 @@ func cloneRegionRefStateShallowFields(state regionRefState) regionRefState {
 		DirectParamDep:    state.DirectParamDep,
 		HasDirectParamDep: state.HasDirectParamDep,
 		ParamDeps:         state.ParamDeps,
+		ParamOnlySummary:  len(state.Deps) == 0 && len(state.StoreDeps) == 0,
 	})
 }
 
@@ -6986,15 +7041,17 @@ func regionRefStateFromParamDependency(index int) regionRefState {
 	return withPackedStoreProvenanceSummary(regionRefState{
 		DirectParamDep:    index,
 		HasDirectParamDep: true,
+		ParamOnlySummary:  true,
 	})
 }
 
 func mergeRegionRefStates(states ...regionRefState) (regionRefState, bool) {
-	merged := regionRefState{PackedStoreSummaryKnown: true}
+	merged := regionRefState{PackedStoreSummaryKnown: true, ParamOnlySummary: true}
 	for _, state := range states {
 		if !hasRegionProvenance(state) {
 			continue
 		}
+		merged.ParamOnlySummary = merged.ParamOnlySummary && state.ParamOnlySummary
 		mergePackedStoreProvenanceInto(&merged.PackedStoreSummary, summarizePackedStoreProvenance(state))
 		if len(state.Deps) != 0 {
 			if merged.Deps == nil {
@@ -7056,6 +7113,9 @@ func mergeRegionRefStates(states ...regionRefState) (regionRefState, bool) {
 }
 
 func mergeFlatRegionRefStates(left regionRefState, right regionRefState) (regionRefState, bool) {
+	if sameParamOnlyRegionRefSummary(left, right) {
+		return cloneRegionRefStateSharedFields(left), true
+	}
 	if len(left.Fields) != 0 || len(right.Fields) != 0 {
 		return mergeRegionRefStates(left, right)
 	}
@@ -7069,7 +7129,7 @@ func mergeFlatRegionRefStates(left regionRefState, right regionRefState) (region
 		return cloneRegionRefStateSharedFields(left), true
 	}
 
-	merged := regionRefState{PackedStoreSummaryKnown: true}
+	merged := regionRefState{PackedStoreSummaryKnown: true, ParamOnlySummary: left.ParamOnlySummary && right.ParamOnlySummary}
 	mergePackedStoreProvenanceInto(&merged.PackedStoreSummary, summarizePackedStoreProvenance(left))
 	mergePackedStoreProvenanceInto(&merged.PackedStoreSummary, summarizePackedStoreProvenance(right))
 
@@ -7118,13 +7178,14 @@ func mergeFlatRegionRefStates(left regionRefState, right regionRefState) (region
 }
 
 func mergeRegionRefStatesWithExplicitFields(states []regionRefState, fieldStates map[string]regionRefState) (regionRefState, bool) {
-	merged := regionRefState{PackedStoreSummaryKnown: true}
+	merged := regionRefState{PackedStoreSummaryKnown: true, ParamOnlySummary: true}
 	found := false
 	for _, state := range states {
 		if !hasRegionProvenance(state) {
 			continue
 		}
 		found = true
+		merged.ParamOnlySummary = merged.ParamOnlySummary && state.ParamOnlySummary
 		mergePackedStoreProvenanceInto(&merged.PackedStoreSummary, summarizePackedStoreProvenance(state))
 		if len(state.Deps) != 0 {
 			if merged.Deps == nil {
@@ -7164,6 +7225,9 @@ func mergeRegionRefStatesWithExplicitFields(states []regionRefState, fieldStates
 		})
 	}
 	if len(fieldStates) != 0 {
+		for _, fieldState := range fieldStates {
+			merged.ParamOnlySummary = merged.ParamOnlySummary && fieldState.ParamOnlySummary
+		}
 		merged.Fields = fieldStates
 		found = true
 		merged.PackedStoreSummaryKnown = false
@@ -7266,59 +7330,89 @@ func firstInvalidRegionDependency(state regionRefState) (*Symbol, regionDependen
 	return nil, regionDependencyState{}, false
 }
 
+func regionRefFieldsIdentity(fields map[string]regionRefState) uintptr {
+	if len(fields) == 0 {
+		return 0
+	}
+	return reflect.ValueOf(fields).Pointer()
+}
+
 func abstractParamOnlyRegionRefState(state regionRefState) (regionRefState, bool) {
-	if !hasRegionProvenance(state) {
+	if state.ParamOnlySummary {
+		return cloneRegionRefState(state), true
+	}
+	filtered, ok, _ := abstractParamOnlyRegionRefStateWithSeen(state, map[uintptr]struct{}{})
+	if !ok {
 		return regionRefState{}, false
 	}
-	out := regionRefState{}
-	out.DirectParamDep = state.DirectParamDep
-	out.HasDirectParamDep = state.HasDirectParamDep
-	out.ParamDeps = cloneRegionParamDeps(state.ParamDeps)
+	return filtered, true
+}
+
+func abstractParamOnlyRegionRefStateWithSeen(state regionRefState, seen map[uintptr]struct{}) (regionRefState, bool, bool) {
+	if !hasRegionProvenance(state) {
+		return regionRefState{}, false, false
+	}
+	out := state
+	changed := len(state.Deps) != 0 || len(state.StoreDeps) != 0 || !state.PackedStoreSummaryKnown || !state.ParamOnlySummary
+	if len(state.Deps) != 0 {
+		out.Deps = nil
+	}
+	if len(state.StoreDeps) != 0 {
+		out.StoreDeps = nil
+	}
 	if len(state.Fields) != 0 {
+		fieldsID := regionRefFieldsIdentity(state.Fields)
+		if fieldsID != 0 {
+			if _, ok := seen[fieldsID]; ok {
+				out.Fields = nil
+				if !hasRegionProvenance(out) {
+					return regionRefState{}, false, false
+				}
+				out.PackedStoreSummaryKnown = false
+				out.ParamOnlySummary = true
+				return withPackedStoreProvenanceSummary(out), true, false
+			}
+			seen[fieldsID] = struct{}{}
+			defer delete(seen, fieldsID)
+		}
+		fieldsCloned := false
 		for name, fieldState := range state.Fields {
-			filtered, ok := abstractParamOnlyRegionRefState(fieldState)
-			if !ok {
+			filtered, ok, unchanged := abstractParamOnlyRegionRefStateWithSeen(fieldState, seen)
+			if ok && unchanged {
 				continue
 			}
-			if out.Fields == nil {
-				out.Fields = map[string]regionRefState{}
+			if !fieldsCloned {
+				out.Fields = cloneRegionRefFields(state.Fields)
+				fieldsCloned = true
+			}
+			changed = true
+			if !ok {
+				delete(out.Fields, name)
+				continue
 			}
 			out.Fields[name] = filtered
 		}
+		if fieldsCloned && len(out.Fields) == 0 {
+			out.Fields = nil
+		}
 	}
 	if !hasRegionProvenance(out) {
-		return regionRefState{}, false
+		return regionRefState{}, false, false
 	}
-	return withPackedStoreProvenanceSummary(out), true
+	if !changed {
+		return state, true, true
+	}
+	out.PackedStoreSummaryKnown = false
+	out.ParamOnlySummary = true
+	return withPackedStoreProvenanceSummary(out), true, false
 }
 
-func (a *Analyzer) instantiateReturnProvenance(state regionRefState, args []ast.Expr) (regionRefState, bool) {
-	if !hasRegionProvenance(state) {
-		return regionRefState{}, false
-	}
-	argStates := make([]regionRefState, 0, regionRefStateParamDepCount(state))
-	forEachRegionParamDep(state, func(index int) {
-		if index < 0 || index >= len(args) {
-			return
+func instantiateReturnProvenanceArgsOnly(argStates []regionRefState) (regionRefState, bool) {
+	if len(argStates) == 1 {
+		if !hasRegionProvenance(argStates[0]) {
+			return regionRefState{}, false
 		}
-		argState, ok := a.regionRefStateForExpr(args[index])
-		if !ok {
-			return
-		}
-		argStates = append(argStates, argState)
-	})
-	fieldStates := map[string]regionRefState{}
-	if len(state.Fields) != 0 {
-		for name, fieldState := range state.Fields {
-			instField, ok := a.instantiateReturnProvenance(fieldState, args)
-			if !ok {
-				continue
-			}
-			fieldStates[name] = instField
-		}
-	}
-	if len(fieldStates) != 0 {
-		return mergeRegionRefStatesWithExplicitFields(argStates, fieldStates)
+		return cloneRegionRefState(argStates[0]), true
 	}
 	instantiated := regionRefState{}
 	if mergedArgs, ok := mergeRegionRefStates(argStates...); ok {
@@ -7329,6 +7423,87 @@ func (a *Analyzer) instantiateReturnProvenance(state regionRefState, args []ast.
 	}
 	instantiated.PackedStoreSummaryKnown = false
 	return withPackedStoreProvenanceSummary(instantiated), true
+}
+
+type instantiateReturnProvenanceArgResult struct {
+	state    regionRefState
+	ok       bool
+	computed bool
+}
+
+type instantiateReturnProvenanceContext struct {
+	seen      map[uintptr]struct{}
+	argStates map[int]instantiateReturnProvenanceArgResult
+}
+
+func (a *Analyzer) instantiateReturnProvenance(state regionRefState, args []ast.Expr) (regionRefState, bool) {
+	return a.instantiateReturnProvenanceWithContext(state, args, &instantiateReturnProvenanceContext{
+		seen:      map[uintptr]struct{}{},
+		argStates: map[int]instantiateReturnProvenanceArgResult{},
+	})
+}
+
+func (a *Analyzer) instantiateReturnProvenanceArgState(index int, args []ast.Expr, ctx *instantiateReturnProvenanceContext) (regionRefState, bool) {
+	if index < 0 || index >= len(args) {
+		return regionRefState{}, false
+	}
+	if ctx != nil {
+		if cached, ok := ctx.argStates[index]; ok && cached.computed {
+			return cached.state, cached.ok
+		}
+	}
+	argState, ok := a.regionRefStateForExpr(args[index])
+	if ctx != nil {
+		ctx.argStates[index] = instantiateReturnProvenanceArgResult{state: argState, ok: ok, computed: true}
+	}
+	return argState, ok
+}
+
+func (a *Analyzer) instantiateReturnProvenanceWithContext(state regionRefState, args []ast.Expr, ctx *instantiateReturnProvenanceContext) (regionRefState, bool) {
+	if !hasRegionProvenance(state) {
+		return regionRefState{}, false
+	}
+	if state.ParamOnlySummary {
+		if index, ok := singleRegionParamDepIndex(state); ok {
+			argState, argOK := a.instantiateReturnProvenanceArgState(index, args, ctx)
+			if argOK && argState.ParamOnlySummary {
+				return cloneRegionRefState(argState), true
+			}
+		}
+	}
+	var argStates []regionRefState
+	forEachRegionParamDep(state, func(index int) {
+		argState, ok := a.instantiateReturnProvenanceArgState(index, args, ctx)
+		if !ok {
+			return
+		}
+		argStates = append(argStates, argState)
+	})
+	var fieldStates map[string]regionRefState
+	if len(state.Fields) != 0 {
+		fieldsID := regionRefFieldsIdentity(state.Fields)
+		if fieldsID != 0 {
+			if _, ok := ctx.seen[fieldsID]; ok {
+				return instantiateReturnProvenanceArgsOnly(argStates)
+			}
+			ctx.seen[fieldsID] = struct{}{}
+			defer delete(ctx.seen, fieldsID)
+		}
+		for name, fieldState := range state.Fields {
+			instField, ok := a.instantiateReturnProvenanceWithContext(fieldState, args, ctx)
+			if !ok {
+				continue
+			}
+			if fieldStates == nil {
+				fieldStates = map[string]regionRefState{}
+			}
+			fieldStates[name] = instField
+		}
+	}
+	if len(fieldStates) != 0 {
+		return mergeRegionRefStatesWithExplicitFields(argStates, fieldStates)
+	}
+	return instantiateReturnProvenanceArgsOnly(argStates)
 }
 
 func firstLiveRegionDependency(state regionRefState) (*Symbol, regionDependencyState, bool) {
@@ -10374,6 +10549,18 @@ func (a *Analyzer) recordFunctionValueTarget(target ast.Expr, value ast.Expr) {
 	a.recordFunctionValueBinding(sym, value)
 }
 
+func (a *Analyzer) ensureFunctionValueTypeSummaries(expr ast.Expr, fnType *FuncType) {
+	if a == nil || fnType == nil {
+		return
+	}
+	if !fnType.ReturnProvenanceKnown {
+		a.inferFuncReturnProvenanceForExpr(expr, fnType)
+	}
+	if !fnType.ReturnBorrowedOwnerRefsKnown {
+		a.inferFuncReturnBorrowedOwnerRefsForExpr(expr, fnType)
+	}
+}
+
 func (a *Analyzer) functionValueTypeForExpr(expr ast.Expr) (*FuncType, bool) {
 	if expr == nil {
 		return nil, false
@@ -10402,15 +10589,10 @@ func (a *Analyzer) functionValueTypeForExpr(expr ast.Expr) (*FuncType, bool) {
 					return a.functionValueTypeForExpr(valueExpr)
 				}
 				if fnType, ok := sym.Type.(*FuncType); ok {
+					a.ensureFunctionValueTypeSummaries(expr, fnType)
 					cloned := a.cloneFunctionValueType(fnType)
 					if cloned == nil {
 						return nil, false
-					}
-					if !cloned.ReturnProvenanceKnown {
-						a.inferFuncReturnProvenanceForExpr(expr, cloned)
-					}
-					if !cloned.ReturnBorrowedOwnerRefsKnown {
-						a.inferFuncReturnBorrowedOwnerRefsForExpr(expr, cloned)
 					}
 					return cloned, true
 				}
@@ -10421,15 +10603,10 @@ func (a *Analyzer) functionValueTypeForExpr(expr ast.Expr) (*FuncType, bool) {
 				return a.functionValueTypeForExpr(valueExpr)
 			}
 			if fnType, ok := sym.Type.(*FuncType); ok {
+				a.ensureFunctionValueTypeSummaries(expr, fnType)
 				cloned := a.cloneFunctionValueType(fnType)
 				if cloned == nil {
 					return nil, false
-				}
-				if !cloned.ReturnProvenanceKnown {
-					a.inferFuncReturnProvenanceForExpr(expr, cloned)
-				}
-				if !cloned.ReturnBorrowedOwnerRefsKnown {
-					a.inferFuncReturnBorrowedOwnerRefsForExpr(expr, cloned)
 				}
 				return cloned, true
 			}
@@ -10443,15 +10620,10 @@ func (a *Analyzer) functionValueTypeForExpr(expr ast.Expr) (*FuncType, bool) {
 	if !ok {
 		return nil, false
 	}
+	a.ensureFunctionValueTypeSummaries(expr, fnType)
 	cloned := a.cloneFunctionValueType(fnType)
 	if cloned == nil {
 		return nil, false
-	}
-	if !cloned.ReturnProvenanceKnown {
-		a.inferFuncReturnProvenanceForExpr(expr, cloned)
-	}
-	if !cloned.ReturnBorrowedOwnerRefsKnown {
-		a.inferFuncReturnBorrowedOwnerRefsForExpr(expr, cloned)
 	}
 	return cloned, true
 }
@@ -10464,7 +10636,21 @@ func (a *Analyzer) lookupCurrentFunctionValueType(sym *Symbol) (*FuncType, bool)
 	if !ok || fnType == nil {
 		return nil, false
 	}
+	if valueExpr, ok := a.immutableValueExprForSymbol(sym); ok && valueExpr != nil {
+		a.ensureFunctionValueTypeSummaries(valueExpr, fnType)
+	}
 	return a.cloneFunctionValueType(fnType), true
+}
+
+func (a *Analyzer) currentFunctionValueTypeRef(sym *Symbol) (*FuncType, bool) {
+	if a == nil || a.currentFunctionValues == nil || sym == nil {
+		return nil, false
+	}
+	fnType, ok := a.currentFunctionValues[sym]
+	if !ok || fnType == nil {
+		return nil, false
+	}
+	return fnType, true
 }
 
 func (a *Analyzer) lookupCurrentSpecializedValueType(sym *Symbol) (Type, bool) {

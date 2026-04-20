@@ -139,8 +139,12 @@ type Analyzer struct {
 	currentConservativeCallWidenings  map[*Symbol][][]borrowReturnAnnotationStep
 	conditionalCallPoststateOriginals map[*ast.CallExpr]map[*Symbol]Type
 	suppressDiagnostics               bool
+	suppressOptimizationFacts         bool
+	suppressLazyFuncSummaryInference  bool
 	returnProvenanceInProgress        map[*ast.FuncDecl]bool
+	returnProvenanceLocalInProgress   map[*Symbol]bool
 	returnBorrowedOwnerRefInProgress  map[*ast.FuncDecl]bool
+	returnBorrowedOwnerLocalProgress  map[*Symbol]bool
 	sinkParamInferenceInProgress      map[*ast.FuncDecl]bool
 	parallelForInfo                   map[*ast.ParallelForStmt]*ParallelForInfo
 	functionAnalyses                  map[*ast.FuncDecl]*FunctionAnalysis
@@ -225,6 +229,7 @@ type regionRefState struct {
 	Fields                  map[string]regionRefState
 	PackedStoreSummary      PackedStoreProvenance
 	PackedStoreSummaryKnown bool
+	ParamOnlySummary        bool
 }
 
 type borrowedOwnerRefState struct {
@@ -304,7 +309,9 @@ func Analyze(file *ast.File) *Result {
 		loweredWithStmts:                  map[*ast.WithStmt]bool{},
 		castHooksByName:                   map[string]map[castHookSignature]*Symbol{},
 		returnProvenanceInProgress:        map[*ast.FuncDecl]bool{},
+		returnProvenanceLocalInProgress:   map[*Symbol]bool{},
 		returnBorrowedOwnerRefInProgress:  map[*ast.FuncDecl]bool{},
+		returnBorrowedOwnerLocalProgress:  map[*Symbol]bool{},
 		sinkParamInferenceInProgress:      map[*ast.FuncDecl]bool{},
 		conditionalCallPoststateOriginals: make(map[*ast.CallExpr]map[*Symbol]Type, exprCapacity/16+8),
 	}
@@ -3841,6 +3848,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	savedReturnBorrowedOwnerRefs := a.currentReturnBorrowedOwnerRefs
 	savedConservativeCallWidenings := a.currentConservativeCallWidenings
 	savedSuppressDiagnostics := a.suppressDiagnostics
+	savedSuppressOptimizationFacts := a.suppressOptimizationFacts
 
 	a.currentScope = NewScope(a.globalScope)
 	a.currentReturn = fnType.Return
@@ -3864,6 +3872,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
 	a.currentConservativeCallWidenings = nil
 	a.suppressDiagnostics = true
+	a.suppressOptimizationFacts = true
 
 	a.withGenericParams(fn.GenericParams, nil, func() {
 		a.withRegionParams(fn.RegionParams, func() {
@@ -3899,8 +3908,8 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 		})
 	})
 
-	if summary, ok := abstractParamOnlyRegionRefState(a.currentReturnProvenance); ok {
-		fnType.ReturnProvenance = summary
+	if hasRegionProvenance(a.currentReturnProvenance) {
+		fnType.ReturnProvenance = cloneRegionRefState(a.currentReturnProvenance)
 	} else {
 		fnType.ReturnProvenance = regionRefState{}
 	}
@@ -3934,6 +3943,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentReturnBorrowedOwnerRefs = savedReturnBorrowedOwnerRefs
 	a.currentConservativeCallWidenings = savedConservativeCallWidenings
 	a.suppressDiagnostics = savedSuppressDiagnostics
+	a.suppressOptimizationFacts = savedSuppressOptimizationFacts
 }
 
 func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *FuncType) {
@@ -3968,6 +3978,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	savedReturnBorrowedOwnerRefs := a.currentReturnBorrowedOwnerRefs
 	savedConservativeCallWidenings := a.currentConservativeCallWidenings
 	savedSuppressDiagnostics := a.suppressDiagnostics
+	savedSuppressOptimizationFacts := a.suppressOptimizationFacts
 
 	a.currentScope = NewScope(a.globalScope)
 	a.currentReturn = fnType.Return
@@ -3991,6 +4002,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
 	a.currentConservativeCallWidenings = nil
 	a.suppressDiagnostics = true
+	a.suppressOptimizationFacts = true
 
 	a.withGenericParams(fn.GenericParams, nil, func() {
 		a.withRegionParams(fn.RegionParams, func() {
@@ -4055,4 +4067,5 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentReturnBorrowedOwnerRefs = savedReturnBorrowedOwnerRefs
 	a.currentConservativeCallWidenings = savedConservativeCallWidenings
 	a.suppressDiagnostics = savedSuppressDiagnostics
+	a.suppressOptimizationFacts = savedSuppressOptimizationFacts
 }

@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"reflect"
 	"testing"
 
 	"llcontext/src/ast"
@@ -360,6 +361,97 @@ func TestInstantiateReturnProvenanceKeepsOverlayMutationLocal(t *testing.T) {
 	}
 }
 
+func TestInstantiateReturnProvenanceHandlesFieldCycles(t *testing.T) {
+	arg := &Symbol{Name: "arg", Kind: SymbolLocal}
+	scope := NewScope(nil)
+	scope.Define(arg)
+
+	a := &Analyzer{
+		currentScope: scope,
+		currentRegionRefs: map[*Symbol]regionRefState{
+			arg: {
+				ParamDeps: intBitSetOf(9),
+			},
+		},
+	}
+
+	cyclicFields := map[string]regionRefState{}
+	cyclicSummary := regionRefState{
+		DirectParamDep:    0,
+		HasDirectParamDep: true,
+		Fields:            cyclicFields,
+	}
+	cyclicFields["self"] = cyclicSummary
+
+	instantiated, ok := a.instantiateReturnProvenance(cyclicSummary, []ast.Expr{
+		&ast.Ident{Name: "arg"},
+	})
+	if !ok {
+		t.Fatalf("expected instantiateReturnProvenance to preserve cyclic argument provenance")
+	}
+	if !regionRefStateHasParamDep(instantiated, 9) {
+		t.Fatalf("expected instantiated provenance to include the argument dependency")
+	}
+	self, ok := instantiated.Fields["self"]
+	if !ok {
+		t.Fatalf("expected instantiated provenance to keep a truncated self edge")
+	}
+	if len(self.Fields) != 0 {
+		t.Fatalf("expected cycle guard to truncate recursive instantiateReturnProvenance field expansion")
+	}
+	if !regionRefStateHasParamDep(self, 9) {
+		t.Fatalf("expected truncated self edge to preserve the instantiated argument dependency")
+	}
+}
+
+func TestInstantiateReturnProvenanceReusesSingleParamSummaryArgState(t *testing.T) {
+	arg := &Symbol{Name: "arg", Kind: SymbolLocal}
+	scope := NewScope(nil)
+	scope.Define(arg)
+
+	a := &Analyzer{
+		currentScope:      scope,
+		currentRegionRefs: map[*Symbol]regionRefState{},
+	}
+
+	argState, ok := abstractParamOnlyRegionRefState(regionRefState{
+		DirectParamDep:    9,
+		HasDirectParamDep: true,
+		Fields: map[string]regionRefState{
+			"inner": {
+				DirectParamDep:    9,
+				HasDirectParamDep: true,
+			},
+		},
+	})
+	if !ok {
+		t.Fatal("expected argument state abstraction to succeed")
+	}
+	a.currentRegionRefs[arg] = argState
+
+	summary, ok := abstractParamOnlyRegionRefState(regionRefState{
+		DirectParamDep:    0,
+		HasDirectParamDep: true,
+		Fields: map[string]regionRefState{
+			"inner": {
+				DirectParamDep:    0,
+				HasDirectParamDep: true,
+			},
+		},
+	})
+	if !ok {
+		t.Fatal("expected return summary abstraction to succeed")
+	}
+
+	instantiated, ok := a.instantiateReturnProvenance(summary, []ast.Expr{&ast.Ident{Name: "arg"}})
+	if !ok {
+		t.Fatal("expected instantiateReturnProvenance to reuse the param-only argument state")
+	}
+	if !reflect.DeepEqual(instantiated, argState) {
+		t.Fatalf("expected single-param instantiation to reuse the argument state\ninstantiated=%#v\narg=%#v", instantiated, argState)
+	}
+}
+
 func TestRecordResolvedRegionRefBindingKeepsNestedFieldMutationLocal(t *testing.T) {
 	src := &Symbol{Name: "src", Kind: SymbolLocal}
 	dst := &Symbol{Name: "dst", Kind: SymbolLocal}
@@ -391,5 +483,133 @@ func TestRecordResolvedRegionRefBindingKeepsNestedFieldMutationLocal(t *testing.
 	}
 	if _, ok := a.currentRegionRefs[dst].Fields["right"]; !ok {
 		t.Fatalf("expected rebound field map to gain the inserted field")
+	}
+}
+
+func TestAbstractParamOnlyRegionRefStateHandlesFieldCycles(t *testing.T) {
+	cyclicFields := map[string]regionRefState{}
+	cyclicState := regionRefState{
+		DirectParamDep:    1,
+		HasDirectParamDep: true,
+		Fields:            cyclicFields,
+	}
+	cyclicFields["self"] = cyclicState
+
+	state := regionRefState{
+		DirectParamDep:    0,
+		HasDirectParamDep: true,
+		Fields: map[string]regionRefState{
+			"loop": cyclicState,
+		},
+	}
+
+	filtered, ok := abstractParamOnlyRegionRefState(state)
+	if !ok {
+		t.Fatalf("expected abstractParamOnlyRegionRefState to preserve parameter provenance")
+	}
+	if !regionRefStateHasParamDep(filtered, 0) {
+		t.Fatalf("expected outer parameter provenance to be preserved")
+	}
+	loop, ok := filtered.Fields["loop"]
+	if !ok {
+		t.Fatalf("expected filtered state to retain the cyclic child field")
+	}
+	if !regionRefStateHasParamDep(loop, 1) {
+		t.Fatalf("expected cyclic child parameter provenance to be preserved")
+	}
+	self, ok := loop.Fields["self"]
+	if !ok {
+		t.Fatalf("expected filtered cyclic child to retain a truncated self edge")
+	}
+	if len(self.Fields) != 0 {
+		t.Fatalf("expected cycle guard to truncate recursive field expansion")
+	}
+	if !regionRefStateHasParamDep(self, 1) {
+		t.Fatalf("expected truncated self edge to keep shallow parameter provenance")
+	}
+}
+
+func TestPackedStoreProvenanceHelpersHandleFieldCycles(t *testing.T) {
+	store := &Symbol{Name: "store", Kind: SymbolLocal}
+	frozenState := &BuiltinType{Name: "Frozen"}
+	enumType := &EnumType{Name: "Expr", Packed: true}
+	storeType := &PackedEnumStoreType{Enum: enumType, State: frozenState}
+
+	cyclicFields := map[string]regionRefState{}
+	cyclicState := regionRefState{
+		StoreDeps: map[*Symbol]packedStoreDependencyState{
+			store: {Type: storeType},
+		},
+		Fields: cyclicFields,
+	}
+	cyclicFields["self"] = cyclicState
+
+	summary := summarizePackedStoreProvenance(cyclicState)
+	if !summary.HasPackedStoreDeps || !summary.HasFrozenPackedStoreDeps || summary.HasNonFrozenPackedStoreDeps {
+		t.Fatalf("expected cyclic packed-store summary to preserve frozen store provenance, got %#v", summary)
+	}
+	if onlyFrozen, hasFrozen := regionRefStateDependsOnlyOnFrozenPackedStores(cyclicState); !onlyFrozen || !hasFrozen {
+		t.Fatalf("expected cyclic packed-store helper to preserve frozen-only result, got onlyFrozen=%v hasFrozen=%v", onlyFrozen, hasFrozen)
+	}
+}
+
+func TestAbstractParamOnlyRegionRefStateMatchesReturnAccumulationMerge(t *testing.T) {
+	region := &Symbol{Name: "scratch", Kind: SymbolRegion}
+	store := &Symbol{Name: "store", Kind: SymbolLocal}
+	frozenState := &BuiltinType{Name: "Frozen"}
+	enumType := &EnumType{Name: "Expr", Packed: true}
+	storeType := &PackedEnumStoreType{Enum: enumType, State: frozenState}
+
+	left := regionRefState{
+		Deps: map[*Symbol]regionDependencyState{
+			region: {Generation: 1, Valid: true},
+		},
+		Fields: map[string]regionRefState{
+			"value": {
+				DirectParamDep:    0,
+				HasDirectParamDep: true,
+			},
+		},
+	}
+	right := regionRefState{
+		StoreDeps: map[*Symbol]packedStoreDependencyState{
+			store: {Type: storeType},
+		},
+		Fields: map[string]regionRefState{
+			"value": {
+				Fields: map[string]regionRefState{
+					"nested": {
+						DirectParamDep:    1,
+						HasDirectParamDep: true,
+					},
+				},
+			},
+		},
+	}
+
+	mergedRaw, ok := mergeRegionRefStates(left, right)
+	if !ok {
+		t.Fatal("expected raw return provenance merge to succeed")
+	}
+	mergedRawSummary, ok := abstractParamOnlyRegionRefState(mergedRaw)
+	if !ok {
+		t.Fatal("expected abstractParamOnlyRegionRefState to preserve merged parameter provenance")
+	}
+
+	leftSummary, ok := abstractParamOnlyRegionRefState(left)
+	if !ok {
+		t.Fatal("expected left summary to preserve parameter provenance")
+	}
+	rightSummary, ok := abstractParamOnlyRegionRefState(right)
+	if !ok {
+		t.Fatal("expected right summary to preserve parameter provenance")
+	}
+	mergedSummary, ok := mergeRegionRefStates(leftSummary, rightSummary)
+	if !ok {
+		t.Fatal("expected summary merge to succeed")
+	}
+
+	if !reflect.DeepEqual(mergedRawSummary, mergedSummary) {
+		t.Fatalf("expected merge-then-abstract to match abstract-then-merge\nraw=%#v\nsummary=%#v", mergedRawSummary, mergedSummary)
 	}
 }

@@ -73,3 +73,151 @@ func TestContainsBorrowedOwnerRefValuesReportsRecursionLimit(t *testing.T) {
 	}
 	requireSemanticHardeningError(t, analyzer, "borrowed-owner traversal recursion limit")
 }
+
+func TestInferFuncReturnProvenanceForLocalIdentHandlesSelfAliasCycle(t *testing.T) {
+	analyzer := newSemanticHardeningTestAnalyzer()
+	analyzer.currentScope = NewScope(nil)
+	analyzer.returnProvenanceLocalInProgress = map[*Symbol]bool{}
+
+	fnType := &FuncType{Name: "self_alias", Return: &BuiltinType{Name: "i64"}}
+	decl := &ast.VarDeclStmt{Name: "self_alias", Value: &ast.Ident{Name: "self_alias"}}
+	sym := &Symbol{Name: "self_alias", Kind: SymbolLocal, Type: fnType, Node: decl}
+	analyzer.currentScope.Define(sym)
+
+	if analyzer.inferFuncReturnProvenanceForLocalIdent(&ast.Ident{Name: "self_alias"}, fnType) {
+		t.Fatal("expected recursive local function alias provenance inference to stop conservatively")
+	}
+	if fnType.ReturnProvenanceKnown {
+		t.Fatal("expected recursive local function alias to leave return provenance unknown")
+	}
+	if len(analyzer.returnProvenanceLocalInProgress) != 0 {
+		t.Fatal("expected local provenance recursion guard to be cleared after inference")
+	}
+}
+
+func TestFunctionValueTypeForExprCachesCanonicalReturnProvenance(t *testing.T) {
+	paramType := &RefType{Elem: &BuiltinType{Name: "i64"}, State: RefStateNonNull}
+	fnDecl := &ast.FuncDecl{
+		Name:   "id_ref",
+		Params: []ast.ParamDecl{{Name: "value"}},
+		Body: []ast.Stmt{
+			&ast.ReturnStmt{Value: &ast.Ident{Name: "value"}},
+		},
+	}
+	fnType := &FuncType{
+		Name:               "id_ref",
+		Params:             []Type{paramType},
+		ExplicitParamCount: 1,
+		Return:             paramType,
+	}
+	globalScope := NewScope(nil)
+	if _, ok := globalScope.Define(&Symbol{Name: "id_ref", Kind: SymbolFunc, Type: fnType, Node: fnDecl}); !ok {
+		t.Fatal("expected global function symbol definition to succeed")
+	}
+
+	analyzer := &Analyzer{
+		globalScope:                      globalScope,
+		currentScope:                     NewScope(globalScope),
+		namedTypes:                       map[string]Type{},
+		exprTypes:                        map[ast.Expr]Type{},
+		returnProvenanceInProgress:       map[*ast.FuncDecl]bool{},
+		returnProvenanceLocalInProgress:  map[*Symbol]bool{},
+		returnBorrowedOwnerRefInProgress: map[*ast.FuncDecl]bool{},
+		returnBorrowedOwnerLocalProgress: map[*Symbol]bool{},
+		sinkParamInferenceInProgress:     map[*ast.FuncDecl]bool{},
+		currentRegionRefs:                map[*Symbol]regionRefState{},
+		currentAffineValues:              map[affineValueKey]affineValueState{},
+		currentBorrowedOwnerRefs:         map[*Symbol]borrowedOwnerRefState{},
+		currentFunctionValues:            map[*Symbol]*FuncType{},
+		currentSpecializedValueTypes:     map[*Symbol]Type{},
+		currentValueBindings:             map[*Symbol]ast.Expr{},
+		currentPackedVariantViews:        map[*Symbol]*PackedVariantViewType{},
+		currentPackedStores:              map[string]*PackedEnumStoreType{},
+		currentPackedStoreResolutions:    map[*Symbol]packedStoreResolution{},
+		currentFunctionUsedPermissions:   map[string]bool{},
+		functionAnalyses:                 map[*ast.FuncDecl]*FunctionAnalysis{},
+		suppressOptimizationFacts:        true,
+	}
+
+	resolved, ok := analyzer.functionValueTypeForExpr(&ast.Ident{Name: "id_ref"})
+	if !ok || resolved == nil {
+		t.Fatal("expected functionValueTypeForExpr to resolve the function symbol")
+	}
+	if !resolved.ReturnProvenanceKnown {
+		t.Fatal("expected resolved function value type to know return provenance")
+	}
+	if !regionRefStateHasParamDep(resolved.ReturnProvenance, 0) {
+		t.Fatalf("expected resolved function value type to carry parameter return provenance, got %#v", resolved.ReturnProvenance)
+	}
+	if !fnType.ReturnProvenanceKnown {
+		t.Fatal("expected canonical function type to cache inferred return provenance")
+	}
+	if !regionRefStateHasParamDep(fnType.ReturnProvenance, 0) {
+		t.Fatalf("expected canonical function type to store parameter return provenance, got %#v", fnType.ReturnProvenance)
+	}
+}
+
+func TestInferFuncReturnProvenanceForExprCachesCanonicalGlobalType(t *testing.T) {
+	paramType := &RefType{Elem: &BuiltinType{Name: "i64"}, State: RefStateNonNull}
+	fnDecl := &ast.FuncDecl{
+		Name:   "id_ref",
+		Params: []ast.ParamDecl{{Name: "value"}},
+		Body: []ast.Stmt{
+			&ast.ReturnStmt{Value: &ast.Ident{Name: "value"}},
+		},
+	}
+	canonical := &FuncType{
+		Name:               "id_ref",
+		Params:             []Type{paramType},
+		ExplicitParamCount: 1,
+		Return:             paramType,
+	}
+	globalScope := NewScope(nil)
+	if _, ok := globalScope.Define(&Symbol{Name: "id_ref", Kind: SymbolFunc, Type: canonical, Node: fnDecl}); !ok {
+		t.Fatal("expected global function symbol definition to succeed")
+	}
+
+	analyzer := &Analyzer{
+		globalScope:                      globalScope,
+		namedTypes:                       map[string]Type{},
+		exprTypes:                        map[ast.Expr]Type{},
+		returnProvenanceInProgress:       map[*ast.FuncDecl]bool{},
+		returnProvenanceLocalInProgress:  map[*Symbol]bool{},
+		returnBorrowedOwnerRefInProgress: map[*ast.FuncDecl]bool{},
+		returnBorrowedOwnerLocalProgress: map[*Symbol]bool{},
+		sinkParamInferenceInProgress:     map[*ast.FuncDecl]bool{},
+		currentRegionRefs:                map[*Symbol]regionRefState{},
+		currentAffineValues:              map[affineValueKey]affineValueState{},
+		currentBorrowedOwnerRefs:         map[*Symbol]borrowedOwnerRefState{},
+		currentFunctionValues:            map[*Symbol]*FuncType{},
+		currentSpecializedValueTypes:     map[*Symbol]Type{},
+		currentValueBindings:             map[*Symbol]ast.Expr{},
+		currentPackedVariantViews:        map[*Symbol]*PackedVariantViewType{},
+		currentPackedStores:              map[string]*PackedEnumStoreType{},
+		currentPackedStoreResolutions:    map[*Symbol]packedStoreResolution{},
+		currentFunctionUsedPermissions:   map[string]bool{},
+		functionAnalyses:                 map[*ast.FuncDecl]*FunctionAnalysis{},
+		suppressOptimizationFacts:        true,
+	}
+	transient := &FuncType{
+		Name:               canonical.Name,
+		Params:             []Type{paramType},
+		ExplicitParamCount: 1,
+		Return:             paramType,
+	}
+
+	analyzer.inferFuncReturnProvenanceForExpr(&ast.Ident{Name: "id_ref"}, transient)
+
+	if !transient.ReturnProvenanceKnown {
+		t.Fatal("expected transient function type to receive inferred return provenance")
+	}
+	if !regionRefStateHasParamDep(transient.ReturnProvenance, 0) {
+		t.Fatalf("expected transient function type to carry parameter return provenance, got %#v", transient.ReturnProvenance)
+	}
+	if !canonical.ReturnProvenanceKnown {
+		t.Fatal("expected canonical global function type to cache inferred return provenance")
+	}
+	if !regionRefStateHasParamDep(canonical.ReturnProvenance, 0) {
+		t.Fatalf("expected canonical global function type to store parameter return provenance, got %#v", canonical.ReturnProvenance)
+	}
+}
