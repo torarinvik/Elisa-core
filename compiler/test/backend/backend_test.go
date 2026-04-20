@@ -3263,6 +3263,39 @@ def bubble_network() -> int error[FileError, NetworkError]:
 	}
 }
 
+func TestGenerateLLVMIRLowersCatchExprOverErrorUnion(t *testing.T) {
+	src := `error FileError:
+	NotFound
+	Busy
+
+extern read_value(flag: bool) -> int error[FileError]
+
+def load(flag: bool) -> int:
+	return catch read_value(flag):
+		value:
+			value
+		NotFound:
+			1
+		Busy:
+			2
+`
+	result := parseAndAnalyze(t, "backend_catch_expr.llcontext", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+	body := functionIR(output, "load")
+	for _, check := range []string{
+		"extractvalue %ErrUnion__FileError__int",
+		"switch i32",
+		"catchphi = phi i64",
+	} {
+		if !strings.Contains(body, check) {
+			t.Fatalf("expected catch-lowered function to contain %q, got:\n%s", check, body)
+		}
+	}
+}
+
 func TestGenerateLLVMIRExpandsMixedRowStyleFamilies(t *testing.T) {
 	src := `error FileError:
 	NotFound

@@ -1517,6 +1517,8 @@ func formatExpr(expr ast.Expr) string {
 			line += " else " + formatExpr(n.Fallback)
 		}
 		return line
+	case *ast.CatchExpr:
+		return formatCatchExpr(n)
 	case *ast.UnwrapElseExpr:
 		return formatExpr(n.Value) + " else " + formatExpr(n.Fallback)
 	case *ast.OptionalBindExpr:
@@ -1588,6 +1590,32 @@ func formatMatchExpr(expr *ast.MatchExpr) string {
 			stmtText := indentMultiline(FormatStmt(stmt), 2)
 			builder.WriteString(strings.TrimRight(stmtText, "\n"))
 		}
+	}
+	return builder.String()
+}
+
+func formatCatchExpr(expr *ast.CatchExpr) string {
+	if expr == nil {
+		return "catch <nil>:"
+	}
+	var builder strings.Builder
+	builder.WriteString("catch ")
+	builder.WriteString(formatExpr(expr.Value))
+	builder.WriteString(":")
+	writeArm := func(arm ast.CatchArm) {
+		builder.WriteByte('\n')
+		builder.WriteString(indentUnit)
+		builder.WriteString(arm.Name)
+		builder.WriteString(":")
+		for _, stmt := range arm.Body {
+			builder.WriteByte('\n')
+			stmtText := indentMultiline(FormatStmt(stmt), 2)
+			builder.WriteString(strings.TrimRight(stmtText, "\n"))
+		}
+	}
+	writeArm(expr.Success)
+	for _, arm := range expr.Arms {
+		writeArm(arm)
 	}
 	return builder.String()
 }

@@ -53,6 +53,7 @@ const (
 	TOKEN_SIZEOF
 	TOKEN_TAIL
 	TOKEN_TRY
+	TOKEN_CATCH
 	TOKEN_RAISE
 	TOKEN_REGION
 	TOKEN_DESTROY
@@ -174,6 +175,7 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_SIZEOF:  "sizeof",
 	TOKEN_TAIL:    "tail",
 	TOKEN_TRY:     "try",
+	TOKEN_CATCH:   "catch",
 	TOKEN_RAISE:   "raise",
 	TOKEN_REGION:  "region",
 	TOKEN_DESTROY: "destroy",
@@ -275,6 +277,7 @@ var keywords = map[string]TokenKind{
 	"sizeof":  TOKEN_SIZEOF,
 	"tail":    TOKEN_TAIL,
 	"try":     TOKEN_TRY,
+	"catch":   TOKEN_CATCH,
 	"raise":   TOKEN_RAISE,
 	"is":      TOKEN_IS,
 	"as":      TOKEN_AS,

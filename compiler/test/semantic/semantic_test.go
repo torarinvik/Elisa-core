@@ -193,6 +193,64 @@ def keep(owner: Arena) -> mutable any Arena&:
 	requireExprTypeString(t, result, cast, "any mutable Arena&")
 }
 
+func TestAnalyzeCatchExprOverErrorUnion(t *testing.T) {
+	src := `error FileError:
+	NotFound
+	Busy
+
+extern read_value(flag: bool) -> i64 error[FileError]
+
+def load(flag: bool) -> i64:
+	return catch read_value(flag):
+		value:
+			value
+		NotFound:
+			1
+		Busy:
+			2
+`
+
+	result, errs := parseAndAnalyze(t, "catch_expr.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	decl := requireFuncDecl(t, result, "load")
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	catchExpr, ok := ret.Value.(*ast.CatchExpr)
+	if !ok {
+		t.Fatalf("expected catch expr, got %T", ret.Value)
+	}
+	requireExprTypeString(t, result, catchExpr, "i64")
+}
+
+func TestAnalyzeCatchExprRequiresExhaustiveErrorArms(t *testing.T) {
+	src := `error FileError:
+	NotFound
+	Busy
+
+extern read_value(flag: bool) -> i64 error[FileError]
+
+def load(flag: bool) -> i64:
+	return catch read_value(flag):
+		value:
+			value
+		NotFound:
+			1
+`
+
+	_, errs := parseAndAnalyze(t, "catch_non_exhaustive.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error for non-exhaustive catch")
+	}
+	joined := strings.Join(errs, "\n")
+	if !strings.Contains(joined, "non-exhaustive catch") || !strings.Contains(joined, "Busy") {
+		t.Fatalf("expected non-exhaustive catch error mentioning Busy, got:\n%s", joined)
+	}
+}
+
 func repoRootFromTestFile(t *testing.T) string {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)

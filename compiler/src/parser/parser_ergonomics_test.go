@@ -297,6 +297,57 @@ def run(row: Row, flag: bool) -> int:
 	}
 }
 
+func TestParseCatchExpr(t *testing.T) {
+	file, errs := parseSourceFile(t, `error FileError:
+	NotFound
+	Busy
+
+extern read_value(flag: bool) -> i64 error[FileError]
+
+def load(flag: bool) -> i64:
+	return catch read_value(flag):
+		value: value
+		NotFound:
+			1
+		FileError.Busy:
+			2
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	loadDecl, ok := file.Decls[2].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[2])
+	}
+	ret, ok := loadDecl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", loadDecl.Body[0])
+	}
+	catchExpr, ok := ret.Value.(*ast.CatchExpr)
+	if !ok {
+		t.Fatalf("expected catch expr, got %T", ret.Value)
+	}
+	if catchExpr.Success.Name != "value" || len(catchExpr.Success.Body) != 1 {
+		t.Fatalf("unexpected catch success arm %#v", catchExpr.Success)
+	}
+	if len(catchExpr.Arms) != 2 {
+		t.Fatalf("expected two error arms, got %#v", catchExpr.Arms)
+	}
+	if catchExpr.Arms[0].Name != "NotFound" || catchExpr.Arms[1].Name != "FileError.Busy" {
+		t.Fatalf("unexpected catch arm names %#v", catchExpr.Arms)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"catch read_value(flag):",
+		"value:",
+		"FileError.Busy:",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestParseFilteredIterableForBraceDestructure(t *testing.T) {
 	file, errs := parseSourceFile(t, `struct Row:
     left: int

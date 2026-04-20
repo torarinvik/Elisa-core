@@ -312,6 +312,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		a.errorf(n.Pos(), "try requires a fallible expression, got %s", valueType)
 		result = invalidType
 		return
+	case *ast.CatchExpr:
+		result = a.analyzeCatchExpr(n)
+		return
 	case *ast.UnwrapElseExpr:
 		valueType := a.analyzeExpr(n.Value)
 		refType, ok := valueType.(*RefType)
@@ -1166,6 +1169,8 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		return summarizeRegionIndexStates(state)
 	case *ast.TryExpr:
 		return a.regionRefStateForRecoveredExpr(n.Value, n.Fallback)
+	case *ast.CatchExpr:
+		return regionRefState{}, false
 	case *ast.UnwrapElseExpr:
 		return a.regionRefStateForRecoveredExpr(n.Value, n.Fallback)
 	case *ast.TernaryExpr:

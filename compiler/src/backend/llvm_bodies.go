@@ -7584,6 +7584,19 @@ func exprReadsMatchedValueField(name string, expr ast.Expr) bool {
 		return exprReadsMatchedValueField(name, n.Error)
 	case *ast.TryExpr:
 		return exprReadsMatchedValueField(name, n.Value) || exprReadsMatchedValueField(name, n.Fallback)
+	case *ast.CatchExpr:
+		if exprReadsMatchedValueField(name, n.Value) {
+			return true
+		}
+		if stmtsReadMatchedValueField(name, n.Success.Body) {
+			return true
+		}
+		for _, arm := range n.Arms {
+			if stmtsReadMatchedValueField(name, arm.Body) {
+				return true
+			}
+		}
+		return false
 	case *ast.UnwrapElseExpr:
 		return exprReadsMatchedValueField(name, n.Value) || exprReadsMatchedValueField(name, n.Fallback)
 	case *ast.OptionalBindExpr:

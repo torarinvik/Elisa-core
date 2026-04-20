@@ -816,6 +816,19 @@ type TryExpr struct {
 	UsesDefaultShorthandForm bool
 }
 
+type CatchArm struct {
+	Position lexer.Pos
+	Name     string
+	Body     []Stmt
+}
+
+type CatchExpr struct {
+	Position lexer.Pos
+	Value    Expr
+	Success  CatchArm
+	Arms     []CatchArm
+}
+
 type UnwrapElseExpr struct {
 	Position lexer.Pos
 	Value    Expr
@@ -1389,6 +1402,7 @@ func (n *TypeExprExpr) Pos() lexer.Pos    { return n.Position }
 func (n *ParenExpr) Pos() lexer.Pos       { return n.Position }
 func (n *RaiseExpr) Pos() lexer.Pos       { return n.Position }
 func (n *TryExpr) Pos() lexer.Pos         { return n.Position }
+func (n *CatchExpr) Pos() lexer.Pos       { return n.Position }
 func (n *UnwrapElseExpr) Pos() lexer.Pos  { return n.Position }
 func (n *OptionalBindExpr) Pos() lexer.Pos {
 	return n.Position
@@ -1535,6 +1549,7 @@ func (*TypeExprExpr) nodeTag()              {}
 func (*ParenExpr) nodeTag()                 {}
 func (*RaiseExpr) nodeTag()                 {}
 func (*TryExpr) nodeTag()                   {}
+func (*CatchExpr) nodeTag()                 {}
 func (*UnwrapElseExpr) nodeTag()            {}
 func (*OptionalBindExpr) nodeTag()          {}
 func (*AllocExpr) nodeTag()                 {}
@@ -1690,6 +1705,7 @@ func (*VisitExpr) exprTag()                         {}
 func (*FoldExpr) exprTag()                          {}
 func (*MatchStmt) stmtTag()                         {}
 func (*TryExpr) exprTag()                           {}
+func (*CatchExpr) exprTag()                         {}
 func (*UnwrapElseExpr) exprTag()                    {}
 func (*OptionalBindExpr) exprTag()                  {}
 func (*AllocExpr) exprTag()                         {}

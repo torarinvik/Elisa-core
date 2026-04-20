@@ -255,6 +255,8 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, actualType, err = s.emitRaiseExpr(n)
 	case *ast.TryExpr:
 		value, actualType, err = s.emitTryExpr(n)
+	case *ast.CatchExpr:
+		value, actualType, err = s.emitCatchExpr(n)
 	case *ast.UnwrapElseExpr:
 		value, actualType, err = s.emitUnwrapElseExpr(n)
 	case *ast.OptionalBindExpr:
@@ -868,6 +870,139 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 		return nil, nil, err
 	}
 	phi := C.LLVMBuildPhi(s.builder, phiType, cStringFree("tryphi"))
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+	return phi, resultType, nil
+}
+
+func (s *functionState) emitCatchExpr(expr *ast.CatchExpr) (C.LLVMValueRef, semantic.Type, error) {
+	resultType := s.exprType(expr)
+	unionType, ok := s.exprType(expr.Value).(*semantic.ErrorUnionType)
+	if !ok {
+		return nil, nil, fmt.Errorf("catch requires an error-union operand")
+	}
+	fallibleValue, _, err := s.emitExpr(expr.Value, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	errorCode, err := s.extractErrorUnionCode(fallibleValue, unionType)
+	if err != nil {
+		return nil, nil, err
+	}
+	zeroCode, err := s.errorCodeConstant(0)
+	if err != nil {
+		return nil, nil, err
+	}
+	successCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), errorCode, zeroCode, cStringFree("catch.ok"))
+	successBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("catch.value"))
+	dispatchBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("catch.dispatch"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("catch.merge"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("catch.fail"))
+	C.LLVMBuildCondBr(s.builder, successCond, successBB, dispatchBB)
+
+	incomingValues := make([]C.LLVMValueRef, 0, len(expr.Arms)+1)
+	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(expr.Arms)+1)
+	covered := map[string]bool{}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, successBB)
+	successValue, err := s.extractErrorUnionPayload(fallibleValue, unionType)
+	if err != nil {
+		return nil, nil, err
+	}
+	s.pushScope()
+	if !isVoidType(unionType.Value) {
+		successPtr, err := s.emitStackTempValue(successValue, unionType.Value, "catch.value")
+		if err != nil {
+			s.popScope()
+			return nil, nil, err
+		}
+		s.defineBinding(expr.Success.Name, valueBinding{ptr: successPtr, typ: unionType.Value, mutable: false})
+	}
+	armValue, reachable, err := s.emitMatchExprArmBody(expr.Success.Body, resultType)
+	if err != nil {
+		s.popScope()
+		return nil, nil, err
+	}
+	if reachable && !s.currentBlockTerminated() {
+		armEnd := C.LLVMGetInsertBlock(s.builder)
+		incomingBlocks = append(incomingBlocks, armEnd)
+		if !isVoidType(resultType) {
+			incomingValues = append(incomingValues, armValue)
+		}
+		C.LLVMBuildBr(s.builder, mergeBB)
+	}
+	s.popScope()
+
+	C.LLVMPositionBuilderAtEnd(s.builder, dispatchBB)
+	switchInst := C.LLVMBuildSwitch(s.builder, errorCode, failBB, C.unsigned(len(expr.Arms)))
+	for _, arm := range expr.Arms {
+		matchedTag, ok := semantic.MatchErrorTag(unionType.Errors, arm.Name)
+		if !ok {
+			return nil, nil, fmt.Errorf("catch arm %q does not match %s", arm.Name, semantic.ErrorSetDiagnosticName(unionType.Errors))
+		}
+		if covered[matchedTag] {
+			continue
+		}
+		covered[matchedTag] = true
+		code, ok := unionType.Errors.TagCode(matchedTag)
+		if !ok {
+			return nil, nil, fmt.Errorf("missing error tag code for %s", matchedTag)
+		}
+		tagConst, err := s.errorCodeConstant(code)
+		if err != nil {
+			return nil, nil, err
+		}
+		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("catch.arm"))
+		C.LLVMAddCase(switchInst, tagConst, bodyBB)
+		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+		s.pushScope()
+		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, resultType)
+		if err != nil {
+			s.popScope()
+			return nil, nil, err
+		}
+		if reachable && !s.currentBlockTerminated() {
+			armEnd := C.LLVMGetInsertBlock(s.builder)
+			incomingBlocks = append(incomingBlocks, armEnd)
+			if !isVoidType(resultType) {
+				incomingValues = append(incomingValues, armValue)
+			}
+			C.LLVMBuildBr(s.builder, mergeBB)
+		}
+		s.popScope()
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	if len(covered) == len(unionType.Errors.Tags) || semantic.IsNeverType(resultType) {
+		C.LLVMBuildUnreachable(s.builder)
+	} else {
+		failEnd := C.LLVMGetInsertBlock(s.builder)
+		incomingBlocks = append(incomingBlocks, failEnd)
+		if !isVoidType(resultType) {
+			llvmType, err := s.g.lowerType(resultType)
+			if err != nil {
+				return nil, nil, err
+			}
+			incomingValues = append(incomingValues, C.LLVMGetUndef(llvmType))
+		}
+		C.LLVMBuildBr(s.builder, mergeBB)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	if len(incomingBlocks) == 0 {
+		C.LLVMBuildUnreachable(s.builder)
+		return nil, resultType, nil
+	}
+	if isVoidType(resultType) {
+		return nil, resultType, nil
+	}
+	if len(incomingValues) == 1 || semantic.IsNeverType(resultType) {
+		return incomingValues[0], resultType, nil
+	}
+	phiType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, err
+	}
+	phi := C.LLVMBuildPhi(s.builder, phiType, cStringFree("catchphi"))
 	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
 	return phi, resultType, nil
 }

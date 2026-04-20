@@ -358,7 +358,8 @@ def frontend_lookup_keyword(text: sview) -> FrontendTokenKind:
         return frontend_lookup_keyword_bucket((&entries[0]).cast[any FrontendKeywordEntry&], 10, text)
 
     if text.len == 5:
-        entries: FrontendKeywordEntry[8] = [
+        entries: FrontendKeywordEntry[9] = [
+            FrontendKeywordEntry("catch", FrontendTokenKind.Catch),
             FrontendKeywordEntry("const", FrontendTokenKind.Const),
             FrontendKeywordEntry("error", FrontendTokenKind.Error),
             FrontendKeywordEntry("false", FrontendTokenKind.False),
@@ -368,7 +369,7 @@ def frontend_lookup_keyword(text: sview) -> FrontendTokenKind:
             FrontendKeywordEntry("stack", FrontendTokenKind.Stack),
             FrontendKeywordEntry("while", FrontendTokenKind.While)
         ]
-        return frontend_lookup_keyword_bucket((&entries[0]).cast[any FrontendKeywordEntry&], 8, text)
+        return frontend_lookup_keyword_bucket((&entries[0]).cast[any FrontendKeywordEntry&], 9, text)
 
     if text.len == 6:
         entries: FrontendKeywordEntry[9] = [

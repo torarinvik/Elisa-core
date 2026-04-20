@@ -9,6 +9,7 @@ import (
 	"llcontext/src/lexer"
 	"llcontext/src/parser"
 	"llcontext/src/semantic"
+	"llcontext/src/unparse"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -975,6 +976,19 @@ func exprStr(e ast.Expr) string {
 		return fmt.Sprintf("%s.cast[%s]", exprStr(n.Operand), typeStr(n.Target))
 	case *ast.CascadeExpr:
 		return fmt.Sprintf("cascade %s => %s", exprStr(n.Target), exprStr(n.Value))
+	case *ast.CatchExpr:
+		lines := []string{fmt.Sprintf("catch %s:", exprStr(n.Value))}
+		formatArm := func(arm ast.CatchArm) {
+			lines = append(lines, "    "+arm.Name+":")
+			for _, stmt := range arm.Body {
+				lines = append(lines, "        "+strings.ReplaceAll(unparse.FormatStmt(stmt), "\n", "\n        "))
+			}
+		}
+		formatArm(n.Success)
+		for _, arm := range n.Arms {
+			formatArm(arm)
+		}
+		return strings.Join(lines, "\n")
 	case *ast.LambdaExpr:
 		keyword := n.Keyword
 		if keyword == "" {

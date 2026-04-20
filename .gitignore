@@ -26,3 +26,4 @@ compiler/.semantic-test.log
 Code/llcontext_atpl/
 /compiler
 Code/Pascal-P5
+bin/atpl

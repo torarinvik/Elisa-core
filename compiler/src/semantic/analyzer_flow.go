@@ -921,6 +921,12 @@ func (a *Analyzer) validateDeferStmtBodyExpr(expr ast.Expr) {
 		}
 		a.validateDeferStmtBodyExpr(n.Value)
 		a.validateDeferStmtBodyExpr(n.Fallback)
+	case *ast.CatchExpr:
+		a.validateDeferStmtBodyExpr(n.Value)
+		a.validateDeferStmtBody(n.Success.Body)
+		for _, arm := range n.Arms {
+			a.validateDeferStmtBody(arm.Body)
+		}
 	case *ast.UnwrapElseExpr:
 		a.validateDeferStmtBodyExpr(n.Value)
 		a.validateDeferStmtBodyExpr(n.Fallback)
@@ -2875,6 +2881,19 @@ func (c *deferCaptureCollector) collectExpr(expr ast.Expr, locals map[string]boo
 	case *ast.TryExpr:
 		c.collectExpr(n.Value, locals)
 		c.collectExpr(n.Fallback, locals)
+	case *ast.CatchExpr:
+		c.collectExpr(n.Value, locals)
+		successLocals := cloneParallelForLocals(locals)
+		successLocals[n.Success.Name] = true
+		for _, innerStmt := range n.Success.Body {
+			c.collectStmt(innerStmt, successLocals)
+		}
+		for _, arm := range n.Arms {
+			armLocals := cloneParallelForLocals(locals)
+			for _, innerStmt := range arm.Body {
+				c.collectStmt(innerStmt, armLocals)
+			}
+		}
 	case *ast.UnwrapElseExpr:
 		c.collectExpr(n.Value, locals)
 		c.collectExpr(n.Fallback, locals)
@@ -3016,6 +3035,19 @@ func (c *parallelForCaptureCollector) collectExpr(expr ast.Expr, locals map[stri
 	case *ast.TryExpr:
 		c.collectExpr(n.Value, locals)
 		c.collectExpr(n.Fallback, locals)
+	case *ast.CatchExpr:
+		c.collectExpr(n.Value, locals)
+		successLocals := cloneParallelForLocals(locals)
+		successLocals[n.Success.Name] = true
+		for _, innerStmt := range n.Success.Body {
+			c.collectStmt(innerStmt, successLocals)
+		}
+		for _, arm := range n.Arms {
+			armLocals := cloneParallelForLocals(locals)
+			for _, innerStmt := range arm.Body {
+				c.collectStmt(innerStmt, armLocals)
+			}
+		}
 	case *ast.UnwrapElseExpr:
 		c.collectExpr(n.Value, locals)
 		c.collectExpr(n.Fallback, locals)
@@ -3648,6 +3680,128 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 	}
 	return invalidType
 
+}
+
+func (a *Analyzer) analyzeCatchExpr(expr *ast.CatchExpr) Type {
+	valueType := a.analyzeExpr(expr.Value)
+	unionType, ok := valueType.(*ErrorUnionType)
+	if !ok {
+		a.errorf(expr.Pos(), "catch requires an error union, got %s", valueType)
+		successScope := NewScope(a.currentScope)
+		a.defineLocalInScope(successScope, &Symbol{Name: expr.Success.Name, Kind: SymbolLocal, Type: invalidType, Mutable: false}, expr.Success.Position)
+		a.analyzeMatchExprArmBody(expr.Success.Body, successScope)
+		for _, arm := range expr.Arms {
+			a.analyzeMatchExprArmBody(arm.Body, NewScope(a.currentScope))
+		}
+		return invalidType
+	}
+	if expr.Success.Name != "value" {
+		a.errorf(expr.Success.Position, "catch success arm must be `value:`")
+	}
+	if len(expr.Arms) == 0 {
+		a.errorf(expr.Pos(), "catch requires at least one error arm")
+	}
+	resultType := Type(nil)
+	baselineCloned := false
+	var baselineAffine map[affineValueKey]affineValueState
+	var baselineBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
+	var baselineFunctionValues map[*Symbol]*FuncType
+	var baselineSpecializedValueTypes map[*Symbol]Type
+	cloneBaseline := func() {
+		if baselineCloned {
+			return
+		}
+		baselineAffine = a.cloneAffineValueStates()
+		baselineBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
+		baselineFunctionValues = a.cloneFunctionValueBindings()
+		baselineSpecializedValueTypes = a.cloneSpecializedValueTypeBindings()
+		baselineCloned = true
+	}
+	var mergedAffine map[affineValueKey]affineValueState
+	var mergedBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
+	var mergedFunctionValues map[*Symbol]*FuncType
+	var mergedSpecializedValueTypes map[*Symbol]Type
+	hasFallthrough := false
+	mergeArm := func(pos lexer.Pos, body []ast.Stmt, scope *Scope) {
+		armType, armSnapshot := a.analyzeMatchExprArmBodyWithAffineSnapshot(body, scope)
+		if !blockDefinitelyExits(body) {
+			if !hasFallthrough {
+				mergedAffine = armSnapshot.Affine
+				mergedBorrowedOwnerRefs = armSnapshot.BorrowedOwnerRefs
+				mergedFunctionValues = armSnapshot.FunctionValues
+				mergedSpecializedValueTypes = armSnapshot.SpecializedValueTypes
+				hasFallthrough = true
+			} else {
+				mergedAffine = mergeAffineValueStates(mergedAffine, armSnapshot.Affine)
+				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, armSnapshot.BorrowedOwnerRefs)
+				mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, armSnapshot.FunctionValues)
+				mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, armSnapshot.SpecializedValueTypes)
+			}
+		}
+		if resultType == nil {
+			resultType = armType
+			return
+		}
+		merged := MergeTypes(resultType, armType)
+		if IsInvalidType(merged) {
+			a.errorf(pos, "catch expression arms are incompatible: %s and %s", resultType, armType)
+			resultType = invalidType
+			return
+		}
+		resultType = merged
+	}
+	successScope := NewScope(a.currentScope)
+	valueSym := &Symbol{Name: expr.Success.Name, Kind: SymbolLocal, Type: unionType.Value, Mutable: false}
+	a.defineLocalInScope(successScope, valueSym, expr.Success.Position)
+	savedValueBindings := a.currentValueBindings
+	a.currentValueBindings = a.cloneValueBindings()
+	a.recordValueBinding(valueSym, expr.Value)
+	mergeArm(expr.Success.Position, expr.Success.Body, successScope)
+	a.currentValueBindings = savedValueBindings
+	covered := map[string]bool{}
+	for _, arm := range expr.Arms {
+		matchedTag, ok := MatchErrorTag(unionType.Errors, arm.Name)
+		if !ok {
+			a.errorf(arm.Position, "catch arm %q does not match %s", arm.Name, ErrorSetDiagnosticName(unionType.Errors))
+			mergeArm(arm.Position, arm.Body, NewScope(a.currentScope))
+			continue
+		}
+		if covered[matchedTag] {
+			a.errorf(arm.Position, "catch arm %q is unreachable because an earlier arm already matches it", arm.Name)
+		}
+		covered[matchedTag] = true
+		mergeArm(arm.Position, arm.Body, NewScope(a.currentScope))
+	}
+	if len(covered) != len(unionType.Errors.Tags) {
+		missing := make([]string, 0, len(unionType.Errors.Tags))
+		for _, tag := range unionType.Errors.Tags {
+			if !covered[tag] {
+				missing = append(missing, ErrorTagDiagnosticName(tag))
+			}
+		}
+		sort.Strings(missing)
+		a.errorf(expr.Pos(), "non-exhaustive catch over %s; missing %s", ErrorSetDiagnosticName(unionType.Errors), strings.Join(missing, ", "))
+		cloneBaseline()
+		if !hasFallthrough {
+			mergedAffine = baselineAffine
+			mergedBorrowedOwnerRefs = baselineBorrowedOwnerRefs
+			mergedFunctionValues = baselineFunctionValues
+			mergedSpecializedValueTypes = baselineSpecializedValueTypes
+		} else {
+			mergedAffine = mergeAffineValueStates(mergedAffine, baselineAffine)
+			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, baselineBorrowedOwnerRefs)
+			mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, baselineFunctionValues)
+			mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, baselineSpecializedValueTypes)
+		}
+	}
+	a.currentAffineValues = mergedAffine
+	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
+	a.currentFunctionValues = mergedFunctionValues
+	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+	if resultType == nil {
+		return neverType
+	}
+	return resultType
 }
 
 type treeVisitRootKind int
@@ -5905,6 +6059,23 @@ func exprReferencesVariantFields(expr ast.Expr, name string) bool {
 		return exprReferencesVariantFields(n.Error, name)
 	case *ast.TryExpr:
 		return exprReferencesVariantFields(n.Value, name) || exprReferencesVariantFields(n.Fallback, name)
+	case *ast.CatchExpr:
+		if exprReferencesVariantFields(n.Value, name) {
+			return true
+		}
+		for _, stmt := range n.Success.Body {
+			if stmtReferencesVariantFields(stmt, name) {
+				return true
+			}
+		}
+		for _, arm := range n.Arms {
+			for _, inner := range arm.Body {
+				if stmtReferencesVariantFields(inner, name) {
+					return true
+				}
+			}
+		}
+		return false
 	case *ast.UnwrapElseExpr:
 		return exprReferencesVariantFields(n.Value, name) || exprReferencesVariantFields(n.Fallback, name)
 	case *ast.OptionalBindExpr:
@@ -10871,6 +11042,8 @@ func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRef
 		return borrowedOwnerRefState{}, false
 	case *ast.TryExpr:
 		return a.borrowedOwnerRefStateForRecoveredExpr(n.Value, n.Fallback)
+	case *ast.CatchExpr:
+		return borrowedOwnerRefState{}, false
 	case *ast.UnwrapElseExpr:
 		return a.borrowedOwnerRefStateForRecoveredExpr(n.Value, n.Fallback)
 	case *ast.OptionalBindExpr:

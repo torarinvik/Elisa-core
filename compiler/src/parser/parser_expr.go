@@ -986,6 +986,55 @@ func (p *Parser) parseMatchExpr() ast.Expr {
 	return &ast.MatchExpr{Position: pos, Value: value, Store: store, Arms: arms}
 }
 
+func (p *Parser) parseCatchExpr() ast.Expr {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_CATCH)
+	value := p.withInMembershipDisabled(p.parseExpr)
+	success, arms := p.parseCatchArms()
+	return &ast.CatchExpr{Position: pos, Value: value, Success: success, Arms: arms}
+}
+
+func (p *Parser) parseCatchArms() (ast.CatchArm, []ast.CatchArm) {
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+	p.skipNewlines()
+	if p.peek() == lexer.TOKEN_DEDENT || p.peek() == lexer.TOKEN_EOF {
+		p.errorf("catch expression requires a `value:` success arm")
+		p.expect(lexer.TOKEN_DEDENT)
+		return ast.CatchArm{}, nil
+	}
+	success := p.parseCatchArm()
+	if success.Name != "value" {
+		p.errorf("catch expression must start with a `value:` success arm")
+	}
+	var arms []ast.CatchArm
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		arms = append(arms, p.parseCatchArm())
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	return success, arms
+}
+
+func (p *Parser) parseCatchArm() ast.CatchArm {
+	name, pos := p.parseQualifiedTargetName()
+	p.expect(lexer.TOKEN_COLON)
+	body := p.parseCatchArmBody(pos)
+	return ast.CatchArm{Position: pos, Name: name, Body: body}
+}
+
+func (p *Parser) parseCatchArmBody(pos lexer.Pos) []ast.Stmt {
+	if p.match(lexer.TOKEN_NEWLINE) {
+		return p.parseBlock()
+	}
+	value := p.parseExpr()
+	return []ast.Stmt{&ast.ExprStmt{Position: pos, Expr: value}}
+}
+
 func (p *Parser) parseVisitExpr() ast.Expr {
 	pos := p.cur().Pos
 	p.expectIdentText("visit")
@@ -1727,6 +1776,8 @@ func (p *Parser) parsePrimary() ast.Expr {
 		}
 		value := p.parseOr()
 		return &ast.TryExpr{Position: pos, Value: value}
+	case lexer.TOKEN_CATCH:
+		return p.parseCatchExpr()
 	case lexer.TOKEN_RAISE:
 		pos := p.cur().Pos
 		p.advance()
