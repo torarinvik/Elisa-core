@@ -1,4 +1,4 @@
-def stream_axpy_u64_impl(dst: any u64&, src: any u64&, len: usize, rounds: usize, scale: u64) -> u64:
+def stream_axpy_u64_impl(dst: u64&, src: u64&, len: usize, rounds: usize, scale: u64) -> u64:
     acc: mutable u64 = scale ^ 0x9e3779b97f4a7c15u64
 
     for round in 0..<rounds:
@@ -9,4 +9,4 @@ def stream_axpy_u64_impl(dst: any u64&, src: any u64&, len: usize, rounds: usize
 
     return acc
 
-export func llctx_stream_axpy_u64(dst: any u64&, src: any u64&, len: usize, rounds: usize, scale: u64) -> u64 = stream_axpy_u64_impl
+export func llctx_stream_axpy_u64(dst: u64&, src: u64&, len: usize, rounds: usize, scale: u64) -> u64 = stream_axpy_u64_impl

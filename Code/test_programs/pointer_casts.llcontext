@@ -1,10 +1,10 @@
-def ptr_bits(ptr: any u8&) -> uintptr:
+def ptr_bits(ptr: u8&) -> uintptr:
     return ptr.uintptr()
 
 
-def bits_ptr(bits: uintptr) -> any u8&:
-    return bits.cast[any u8&]
+def bits_ptr(bits: uintptr) -> u8&:
+    return bits.cast[u8&]
 
 
-def advance_raw(ptr: any void&, offset: usize) -> any void&:
-    return (ptr.cast[any u8&] + offset).cast[any void&]
+def advance_raw(ptr: void&, offset: usize) -> void&:
+    return (ptr.cast[u8&] + offset).cast[void&]

@@ -8,12 +8,12 @@ const ARENA_DA_INIT_CAP: usize = 256
 const DICT_INIT_CAP: usize = 8
 
 struct DynArray[T]:
-    items: mutable any T&?
+    items: mutable T&?
     count: mutable usize
     capacity: mutable usize
 
 struct DynArrayView:
-    data: mutable any void&?
+    data: mutable void&?
     len: mutable usize
     elem_size: mutable usize
 
@@ -22,11 +22,11 @@ struct DictBucket[K, T]:
     value: mutable T
 
 struct DynDict[K, T]:
-    items: mutable any DictBucket[K, T]&?
+    items: mutable DictBucket[K, T]&?
     count: mutable usize
     used: mutable usize
     capacity: mutable usize
-    arena: mutable any Arena&?
+    arena: mutable Arena&?
 
 struct DictProbeResult:
     index: mutable usize
@@ -36,7 +36,7 @@ struct DictProbeResult:
 # Dynamic array helpers (replacement for C macros)
 # ------------------------------------------------------------
 
-def arena_da_reserve[T](a: mutable any Arena&, da: mutable any darray[T, shape_in]&, needed: usize) -> mutable any darray[T, shape_out]& can[Memory.Allocate, Abort.Panic]:
+def arena_da_reserve[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, needed: usize) -> mutable darray[T, shape_out]& can[Memory.Allocate, Abort.Panic]:
     can Memory.Allocate, Abort.Panic:
         if needed <= da.capacity:
             return da
@@ -52,19 +52,19 @@ def arena_da_reserve[T](a: mutable any Arena&, da: mutable any darray[T, shape_i
         new_size: usize = new_capacity * sizeof(T)
 
         if da.items == null:
-            da.items as & <- arena_alloc(a, new_size).cast[any T&]
+            da.items as & <- arena_alloc(a, new_size).cast[T&]
         else:
             da.items as & <- arena_realloc(
                 a,
-                da.items.cast[mutable any void&],
+                da.items.cast[mutable void&],
                 old_size,
                 new_size
-            ).cast[any T&]
+            ).cast[T&]
 
         da.capacity <- new_capacity
         return da
 
-def arena_da_view[T](da: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](da: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
     elem_size: usize = sizeof(T)
     if da.items == null or da.count == 0:
         return DynArrayView(null, 0, elem_size)
@@ -77,7 +77,7 @@ def arena_da_view[T](da: any darray[T, shape_in]&, start: usize, end: usize) -> 
     if hi == lo:
         return DynArrayView(null, 0, elem_size)
 
-    return DynArrayView((da.items + lo).cast[any void&], hi - lo, elem_size)
+    return DynArrayView((da.items + lo).cast[void&], hi - lo, elem_size)
 
 def arena_da_view_len[T](view: dview[T]) -> usize:
     return view.len
@@ -95,7 +95,7 @@ def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]
         return DynArrayView(null, 0, view.elem_size)
 
     offset: usize = lo * view.elem_size
-    return DynArrayView((view.data.cast[any u8&] + offset).cast[any void&], hi - lo, view.elem_size)
+    return DynArrayView((view.data.cast[u8&] + offset).cast[void&], hi - lo, view.elem_size)
 
 def arena_da_view_prefix[T](view: dview[T], end: usize) -> dview[T]:
     return arena_da_view_slice(view, 0, end)
@@ -108,7 +108,7 @@ def arena_da_view_get[T](view: dview[T], index: usize) -> T:
     assert view.data != null
 
     offset: usize = index * view.elem_size
-    base: any T& = (view.data.cast[any u8&] + offset).cast[any T&]
+    base: T& = (view.data.cast[u8&] + offset).cast[T&]
     return base[0]
 
 def arena_da_fill[T](dst: dview[T], value: T):
@@ -117,7 +117,7 @@ def arena_da_fill[T](dst: dview[T], value: T):
 
 	assert dst.data != null
 
-    out: any T& = dst.data.cast[any T&]
+    out: T& = dst.data.cast[T&]
     for i in 0..<dst.len:
 		out[i] <- value
 
@@ -129,8 +129,8 @@ def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
     assert dst.data != null
     assert src.data != null
 
-    out: any T& = dst.data.cast[any T&]
-    src_items: any T& = src.data.cast[any T&]
+    out: T& = dst.data.cast[T&]
+    src_items: T& = src.data.cast[T&]
     for i in 0..<dst.len:
         out[i] <- src_items[i]
 
@@ -144,16 +144,16 @@ def arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool:
     assert right.data != null
 
     byte_count: usize = left.len * left.elem_size
-    return arena_memeq(left.data.cast[any void&], right.data.cast[any void&], byte_count)
+    return arena_memeq(left.data.cast[void&], right.data.cast[void&], byte_count)
 
-def arena_da_from_view[T](a: mutable any Arena&, view: dview[T]) -> darray[T, shape_out] can[Memory.Allocate, Abort.Panic]:
+def arena_da_from_view[T](a: mutable Arena&, view: dview[T]) -> darray[T, shape_out] can[Memory.Allocate, Abort.Panic]:
     can Memory.Allocate, Abort.Panic:
         if view.len == 0:
             return zeroed
 
-        items: any T& = arena_alloc(a, view.len * sizeof(T)).cast[any T&]
+        items: T& = arena_alloc(a, view.len * sizeof(T)).cast[T&]
         assert view.data != null
-        arena_memcpy(items.cast[mutable any void&], view.data.cast[any void&], view.len * view.elem_size)
+        arena_memcpy(items.cast[mutable void&], view.data.cast[void&], view.len * view.elem_size)
 
         out: mutable darray[T, shape_out] = zeroed
         out.items as & <- items
@@ -161,7 +161,7 @@ def arena_da_from_view[T](a: mutable any Arena&, view: dview[T]) -> darray[T, sh
         out.capacity <- view.len
         return out
 
-def arena_da_append[T](a: mutable any Arena&, da: mutable any darray[T, shape_in]&, item: T) -> mutable any darray[T, shape_out]& can[Memory.Allocate, Abort.Panic]:
+def arena_da_append[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, item: T) -> mutable darray[T, shape_out]& can[Memory.Allocate, Abort.Panic]:
     can Memory.Allocate, Abort.Panic:
         in a:
             _ = da.reserve(da.count + 1)
@@ -172,7 +172,7 @@ def arena_da_append[T](a: mutable any Arena&, da: mutable any darray[T, shape_in
         da.count <- da.count + 1
         return da
 
-def arena_da_append_many[T](a: mutable any Arena&, da: mutable any darray[T, shape_in]&, new_items: any T&, new_items_count: usize) -> mutable any darray[T, shape_out]& can[Memory.Allocate, Abort.Panic]:
+def arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, new_items: T&, new_items_count: usize) -> mutable darray[T, shape_out]& can[Memory.Allocate, Abort.Panic]:
     can Memory.Allocate, Abort.Panic:
         needed: usize = da.count + new_items_count
 
@@ -188,36 +188,36 @@ def arena_da_append_many[T](a: mutable any Arena&, da: mutable any darray[T, sha
             new_size: usize = new_capacity * sizeof(T)
 
             if da.items == null:
-                da.items as & <- arena_alloc(a, new_size).cast[any T&]
+                da.items as & <- arena_alloc(a, new_size).cast[T&]
             else:
                 da.items as & <- arena_realloc(
                     a,
-                    da.items.cast[mutable any void&],
+                    da.items.cast[mutable void&],
                     old_size,
                     new_size
-                ).cast[any T&]
+                ).cast[T&]
 
             da.capacity <- new_capacity
 
         assert da.items != null
 
         arena_memcpy(
-            (da.items + da.count).cast[mutable any void&],
-            new_items.cast[any void&],
+            (da.items + da.count).cast[mutable void&],
+            new_items.cast[void&],
             new_items_count * sizeof(T)
         )
 
         da.count <- da.count + new_items_count
         return da
 
-def arena_sb_append_buf(a: mutable any Arena&, sb: mutable any darray[u8, shape_in]&, buf: any u8&, n: usize) -> mutable any darray[u8, shape_out]& can[Memory.Allocate, Abort.Panic]:
+def arena_sb_append_buf(a: mutable Arena&, sb: mutable darray[u8, shape_in]&, buf: u8&, n: usize) -> mutable darray[u8, shape_out]& can[Memory.Allocate, Abort.Panic]:
     return arena_da_append_many(a, sb, buf, n) can Memory.Allocate, Abort.Panic
 
-def arena_sb_append_cstr(a: mutable any Arena&, sb: mutable any darray[u8, shape_in]&, cstr: any u8&) -> mutable any darray[u8, shape_out]& can[Memory.Allocate, Abort.Panic]:
+def arena_sb_append_cstr(a: mutable Arena&, sb: mutable darray[u8, shape_in]&, cstr: u8&) -> mutable darray[u8, shape_out]& can[Memory.Allocate, Abort.Panic]:
     n: usize = arena_strlen(cstr)
     return arena_da_append_many(a, sb, cstr, n) can Memory.Allocate, Abort.Panic
 
-def arena_sb_append_null(a: mutable any Arena&, sb: mutable any darray[u8, shape_in]&) -> mutable any darray[u8, shape_out]& can[Memory.Allocate, Abort.Panic]:
+def arena_sb_append_null(a: mutable Arena&, sb: mutable darray[u8, shape_in]&) -> mutable darray[u8, shape_out]& can[Memory.Allocate, Abort.Panic]:
     can Memory.Allocate, Abort.Panic:
         in a:
             return sb.extend([0u8])
@@ -235,23 +235,23 @@ def arena_dict_next_capacity(min_capacity: usize) -> usize:
         cap <- cap * 2
     return cap
 
-def arena_dict_find_index[K, T](m: any dict[K, T]&, key: K) -> DictProbeResult:
+def arena_dict_find_index[K, T](m: dict[K, T]&, key: K) -> DictProbeResult:
     if m.count == 0 or m.items == null:
         return DictProbeResult(0, false)
 
     assert m.items != null
-    items: any DictBucket[K, T]& = m.items
+    items: DictBucket[K, T]& = m.items
     for index in 0..<m.count:
         if items[index].key == key:
             return DictProbeResult(index, true)
 
     return DictProbeResult(m.count, false)
 
-def arena_dict_zero_buckets[K, T](items: mutable any DictBucket[K, T]&, capacity: usize):
-    view: dview[DictBucket[K, T]] = DynArrayView(items.cast[any void&], capacity, sizeof(DictBucket[K, T]))
+def arena_dict_zero_buckets[K, T](items: mutable DictBucket[K, T]&, capacity: usize):
+    view: dview[DictBucket[K, T]] = DynArrayView(items.cast[void&], capacity, sizeof(DictBucket[K, T]))
     arena_da_fill(view, zeroed)
 
-def arena_dict_new[K, T](a: mutable any Arena&, initial_capacity: usize) -> dict[K, T] can[Memory.Allocate, Abort.Panic]:
+def arena_dict_new[K, T](a: mutable Arena&, initial_capacity: usize) -> dict[K, T] can[Memory.Allocate, Abort.Panic]:
     can Memory.Allocate, Abort.Panic:
         out: mutable dict[K, T] = zeroed
         out.arena as & <- a
@@ -260,14 +260,14 @@ def arena_dict_new[K, T](a: mutable any Arena&, initial_capacity: usize) -> dict
         if capacity == 0:
             return out
 
-        items: mutable any DictBucket[K, T]& = arena_alloc(a, capacity * sizeof(DictBucket[K, T])).cast[any DictBucket[K, T]&]
+        items: mutable DictBucket[K, T]& = arena_alloc(a, capacity * sizeof(DictBucket[K, T])).cast[DictBucket[K, T]&]
         arena_dict_zero_buckets(items, capacity)
 
         out.items as & <- items
         out.capacity <- capacity
         return out
 
-def arena_dict_reserve[K, T](a: mutable any Arena&, m: mutable any dict[K, T]&, min_capacity: usize) -> void error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
+def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capacity: usize) -> void error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
     can Memory.Allocate, Abort.Panic:
         target_capacity: usize = arena_dict_next_capacity(min_capacity)
         if target_capacity == 0:
@@ -276,13 +276,13 @@ def arena_dict_reserve[K, T](a: mutable any Arena&, m: mutable any dict[K, T]&, 
         if target_capacity <= m.capacity:
             return
 
-        owner: mutable any Arena& = m.arena if m.arena != null else a
-        new_items: any DictBucket[K, T]& = arena_alloc(owner, target_capacity * sizeof(DictBucket[K, T])).cast[any DictBucket[K, T]&]
+        owner: mutable Arena& = m.arena if m.arena != null else a
+        new_items: DictBucket[K, T]& = arena_alloc(owner, target_capacity * sizeof(DictBucket[K, T])).cast[DictBucket[K, T]&]
         arena_dict_zero_buckets(new_items, target_capacity)
 
         if m.items != null and m.count > 0:
             assert m.items != null
-            old_items: mutable any DictBucket[K, T]& = m.items
+            old_items: mutable DictBucket[K, T]& = m.items
             for i in 0..<m.count:
                 new_items[i] <- old_items[i]
 
@@ -292,7 +292,7 @@ def arena_dict_reserve[K, T](a: mutable any Arena&, m: mutable any dict[K, T]&, 
         m.arena as & <- owner
         return
 
-def arena_dict_get[K, T](m: any dict[K, T]&, key: K) -> mutable any T&?:
+def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?:
     if m.count == 0 or m.items == null:
         return null
 
@@ -301,19 +301,19 @@ def arena_dict_get[K, T](m: any dict[K, T]&, key: K) -> mutable any T&?:
         return null
 
     assert m.items != null
-    items: mutable any DictBucket[K, T]& = m.items
+    items: mutable DictBucket[K, T]& = m.items
     return &items[probe.index].value
 
-def arena_dict_put[K, T](a: mutable any Arena&, m: mutable any dict[K, T]&, key: K, value: T) -> mutable any T&? error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
+def arena_dict_put[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&? error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
     can Memory.Allocate, Abort.Panic:
-        owner: mutable any Arena& = m.arena if m.arena != null else a
+        owner: mutable Arena& = m.arena if m.arena != null else a
         if m.arena == null:
             m.arena as & <- owner
 
         probe: DictProbeResult = arena_dict_find_index(m, key)
         if probe.found:
             assert m.items != null
-            items: mutable any DictBucket[K, T]& = m.items
+            items: mutable DictBucket[K, T]& = m.items
             items[probe.index].value <- value
             return &items[probe.index].value
 
@@ -326,7 +326,7 @@ def arena_dict_put[K, T](a: mutable any Arena&, m: mutable any dict[K, T]&, key:
         assert m.items != null
         assert m.capacity > 0
 
-        items: mutable any DictBucket[K, T]& = m.items
+        items: mutable DictBucket[K, T]& = m.items
         insert_index: usize = m.count
         items[insert_index].key <- key
         items[insert_index].value <- value
@@ -334,17 +334,17 @@ def arena_dict_put[K, T](a: mutable any Arena&, m: mutable any dict[K, T]&, key:
         m.used <- m.count
         return &items[insert_index].value
 
-def arena_dict_get_or_insert[K, T](a: mutable any Arena&, m: mutable any dict[K, T]&, key: K, value: T) -> mutable any T&? error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
+def arena_dict_get_or_insert[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&? error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
     can Memory.Allocate, Abort.Panic:
-        existing: mutable any T&? = arena_dict_get(m, key)
+        existing: mutable T&? = arena_dict_get(m, key)
         if existing != null:
             return existing
         return try arena_dict_put(a, m, key, value)
 
-def arena_dict_contains[K, T](m: any dict[K, T]&, key: K) -> bool:
+def arena_dict_contains[K, T](m: dict[K, T]&, key: K) -> bool:
     return arena_dict_get(m, key) != null
 
-def arena_dict_remove[K, T](m: mutable any dict[K, T]&, key: K) -> bool:
+def arena_dict_remove[K, T](m: mutable dict[K, T]&, key: K) -> bool:
     if m.count == 0 or m.items == null:
         return false
 
@@ -353,7 +353,7 @@ def arena_dict_remove[K, T](m: mutable any dict[K, T]&, key: K) -> bool:
         return false
 
     assert m.items != null
-    items: mutable any DictBucket[K, T]& = m.items
+    items: mutable DictBucket[K, T]& = m.items
     last_index: usize = m.count - 1
     if probe.index != last_index:
         items[probe.index] <- items[last_index]
@@ -362,41 +362,41 @@ def arena_dict_remove[K, T](m: mutable any dict[K, T]&, key: K) -> bool:
     m.used <- m.count
     return true
 
-def arena_dict_clear[K, T](m: mutable any dict[K, T]&):
+def arena_dict_clear[K, T](m: mutable dict[K, T]&):
     if m.items == null or m.capacity == 0:
         m.count <- 0
         m.used <- 0
         return
 
     assert m.items != null
-    items: any DictBucket[K, T]& = m.items
+    items: DictBucket[K, T]& = m.items
     arena_dict_zero_buckets(items, m.capacity)
     m.count <- 0
     m.used <- 0
 
-def arena_dict_new__i64(a: mutable any Arena&, initial_capacity: usize) -> dict[dstr[key_shape], i64] can[Memory.Allocate, Abort.Panic]:
+def arena_dict_new__i64(a: mutable Arena&, initial_capacity: usize) -> dict[dstr[key_shape], i64] can[Memory.Allocate, Abort.Panic]:
     return arena_dict_new[dstr[key_shape], i64](a, initial_capacity) can Memory.Allocate, Abort.Panic
 
-def arena_dict_reserve__i64(a: mutable any Arena&, m: mutable any dict[dstr[key_shape], i64]&, min_capacity: usize) -> void error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
+def arena_dict_reserve__i64(a: mutable Arena&, m: mutable dict[dstr[key_shape], i64]&, min_capacity: usize) -> void error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
     can Memory.Allocate, Abort.Panic:
         try arena_dict_reserve[dstr[key_shape], i64](a, m, min_capacity)
 
-def arena_dict_get__i64(m: any dict[dstr[key_shape], i64]&, key: dstr[key_shape]) -> mutable any i64&?:
+def arena_dict_get__i64(m: dict[dstr[key_shape], i64]&, key: dstr[key_shape]) -> mutable i64&?:
     return arena_dict_get[dstr[key_shape], i64](m, key)
 
-def arena_dict_put__i64(a: mutable any Arena&, m: mutable any dict[dstr[key_shape], i64]&, key: dstr[key_shape], value: i64) -> mutable any i64&? error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
+def arena_dict_put__i64(a: mutable Arena&, m: mutable dict[dstr[key_shape], i64]&, key: dstr[key_shape], value: i64) -> mutable i64&? error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
     can Memory.Allocate, Abort.Panic:
         return try arena_dict_put[dstr[key_shape], i64](a, m, key, value)
 
-def arena_dict_get_or_insert__i64(a: mutable any Arena&, m: mutable any dict[dstr[key_shape], i64]&, key: dstr[key_shape], value: i64) -> mutable any i64&? error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
+def arena_dict_get_or_insert__i64(a: mutable Arena&, m: mutable dict[dstr[key_shape], i64]&, key: dstr[key_shape], value: i64) -> mutable i64&? error[RuntimeError] can[Memory.Allocate, Abort.Panic]:
     can Memory.Allocate, Abort.Panic:
         return try arena_dict_get_or_insert[dstr[key_shape], i64](a, m, key, value)
 
-def arena_dict_contains__i64(m: any dict[dstr[key_shape], i64]&, key: dstr[key_shape]) -> bool:
+def arena_dict_contains__i64(m: dict[dstr[key_shape], i64]&, key: dstr[key_shape]) -> bool:
     return arena_dict_contains[dstr[key_shape], i64](m, key)
 
-def arena_dict_remove__i64(m: mutable any dict[dstr[key_shape], i64]&, key: dstr[key_shape]) -> bool:
+def arena_dict_remove__i64(m: mutable dict[dstr[key_shape], i64]&, key: dstr[key_shape]) -> bool:
     return arena_dict_remove[dstr[key_shape], i64](m, key)
 
-def arena_dict_clear__i64(m: mutable any dict[dstr[key_shape], i64]&):
+def arena_dict_clear__i64(m: mutable dict[dstr[key_shape], i64]&):
     arena_dict_clear[dstr[key_shape], i64](m)

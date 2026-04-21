@@ -3,7 +3,7 @@
 def atomic_roundtrip() -> i64 can[Atomics.Load, Atomics.Store, Atomics.Exchange, Atomics.CompareExchange, Atomics.Rmw, Atomics.Fence]:
 	can Atomics.Load, Atomics.Store, Atomics.Exchange, Atomics.CompareExchange, Atomics.Rmw, Atomics.Fence:
 		slot: atomic[i64] = zeroed
-		slot_ref: mutable any atomic[i64]& = (&slot).cast[any atomic[i64]&]
+		slot_ref: mutable atomic[i64]& = slot.ref[atomic[i64]&]
 
 		store(slot_ref, 41, MemoryOrder.Release)
 		prior_add: i64 = fetch_add(slot_ref, 1, MemoryOrder.AcqRel)
@@ -35,7 +35,7 @@ def concurrency_handles(thread: Thread[i64, Joinable], task: Task[i64, Pending],
 		)
 		detach(move thread)
 		mutex_unlock(move guard)
-		task_group_add((&group).cast[any TaskGroup&], move task)
+		task_group_add(group.ref[TaskGroup&], move task)
 		wait all group
 		return result
 
@@ -43,7 +43,7 @@ def thread_worker(value: i64) -> i64:
 	return value + 1
 
 def permissioned_thread_worker(value: i64) -> i64 can[Console.Write]:
-	puts("worker".cast[any u8&]) can Console.Write
+	puts("worker".cast[u8&]) can Console.Write
 	return value + 2
 
 struct SharedGate:
@@ -71,16 +71,16 @@ def typed_thread_detach_permissioned(value: i64) can[Thread.Spawn, Thread.Detach
 		thread: Thread[i64, Joinable] = spawn1(permissioned_thread_worker, value)
 		detach(move thread)
 
-def typed_pool_roundtrip(pool: mutable any ThreadPool&, value: i64) -> i64 can[Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+def typed_pool_roundtrip(pool: mutable ThreadPool&, value: i64) -> i64 can[Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
 	can Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
 		task: Task[i64, Pending] = submit[pool] thread_worker(value)
 		return await task
 
-def typed_group_waitall(pool: mutable any ThreadPool&, value: i64) can[Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+def typed_group_waitall(pool: mutable ThreadPool&, value: i64) can[Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
 	can Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
 		group: mutable TaskGroup = task_group_new()
 		task: Task[i64, Pending] = pool_submit1(pool, thread_worker, value)
-		task_group_add((&group).cast[any TaskGroup&], move task)
+		task_group_add(group.ref[TaskGroup&], move task)
 		wait all group
 
 def typed_pool_scope(value: i64) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
@@ -89,7 +89,7 @@ def typed_pool_scope(value: i64) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Sub
 			task: Task[i64, Pending] = submit thread_worker(value)
 			return await task
 
-def typed_runtime_carrier_transfer(pool: mutable any ThreadPool&, mu: Mutex, cv: CondVar) -> i64 can[Thread.Spawn, Thread.Join, Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+def typed_runtime_carrier_transfer(pool: mutable ThreadPool&, mu: Mutex, cv: CondVar) -> i64 can[Thread.Spawn, Thread.Join, Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
 	can Thread.Spawn, Thread.Join, Pool.Submit, Pool.Await, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
 		gate: SharedGate = SharedGate(mu, cv)
 		thread: Thread[i64, Joinable] = spawn1(runtime_carrier_worker, gate)
@@ -100,7 +100,7 @@ def typed_lock_scope(mu: mutable Mutex, cv: mutable CondVar, ready: bool) -> boo
 	can Sync.Lock, Sync.Unlock, Sync.Wait:
 		lock mu as g:
 			while not ready:
-				g <- cond_wait((&cv).cast[any CondVar&], move g)
+				g <- cond_wait(cv.ref[CondVar&], move g)
 			return g.handle != null
 
 def typed_notify_scope(cv: mutable CondVar, broadcast: bool) can[Sync.Notify]:

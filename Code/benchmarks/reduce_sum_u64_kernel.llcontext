@@ -1,4 +1,4 @@
-def reduce_sum_u64_impl(data: any u64&, len: usize, rounds: usize, bias: u64) -> u64:
+def reduce_sum_u64_impl(data: u64&, len: usize, rounds: usize, bias: u64) -> u64:
     acc: mutable u64 = bias
 
     for round in 0..<rounds:
@@ -9,4 +9,4 @@ def reduce_sum_u64_impl(data: any u64&, len: usize, rounds: usize, bias: u64) ->
 
     return acc
 
-export func llctx_reduce_sum_u64(data: any u64&, len: usize, rounds: usize, bias: u64) -> u64 = reduce_sum_u64_impl
+export func llctx_reduce_sum_u64(data: u64&, len: usize, rounds: usize, bias: u64) -> u64 = reduce_sum_u64_impl

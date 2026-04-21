@@ -128,7 +128,7 @@ def bool_score(value: bool, when_true: i64, when_false: i64) -> i64:
         return when_true
     return when_false
 
-def score_type(node: TypeExpr, forest: any FrozenMlAstForest&) -> i64:
+def score_type(node: TypeExpr, forest: FrozenMlAstForest&) -> i64:
     return match node in forest.types:
         TypeExpr.Var(symbol: symbol):
             node.span + node.weight + symbol + node.span + 3
@@ -155,7 +155,7 @@ def score_type(node: TypeExpr, forest: any FrozenMlAstForest&) -> i64:
         TypeExpr.Merge(left: left, middle: middle, right: right):
             node.span + node.weight + score_type(left, forest) + score_type(middle, forest) + score_type(right, forest) + 31
 
-def score_pattern(node: Pattern, forest: any FrozenMlAstForest&) -> i64:
+def score_pattern(node: Pattern, forest: FrozenMlAstForest&) -> i64:
     return match node in forest.patterns:
         Pattern.Wildcard:
             node.span + node.weight + 43
@@ -182,7 +182,7 @@ def score_pattern(node: Pattern, forest: any FrozenMlAstForest&) -> i64:
         Pattern.Annotated(inner: inner, ann: ann, fallback: fallback):
             node.span + node.weight + score_pattern(inner, forest) + score_type(ann, forest) + score_pattern(fallback, forest) + 103
 
-def score_expr(node: Expr, forest: any FrozenMlAstForest&) -> i64:
+def score_expr(node: Expr, forest: FrozenMlAstForest&) -> i64:
     return match node in forest.exprs:
         Expr.LiteralInt(value: value):
             node.span + node.cost + value + 131
@@ -209,7 +209,7 @@ def score_expr(node: Expr, forest: any FrozenMlAstForest&) -> i64:
         Expr.Sequence(first: first, second: second, third: third, ty: ty):
             node.span + node.cost + score_expr(first, forest) + score_expr(second, forest) + score_expr(third, forest) + score_type(ty, forest) + 199
 
-def score_clause(node: Clause, forest: any FrozenMlAstForest&) -> i64:
+def score_clause(node: Clause, forest: FrozenMlAstForest&) -> i64:
     return match node in forest.clauses:
         Clause.Terminal(pattern: pattern, body: body):
             node.span + node.weight + score_pattern(pattern, forest) + score_expr(body, forest) + 211
@@ -220,7 +220,7 @@ def score_clause(node: Clause, forest: any FrozenMlAstForest&) -> i64:
         Clause.Fanout(pattern: pattern, primary: primary, alternate: alternate, next: next):
             node.span + node.weight + score_pattern(pattern, forest) + score_expr(primary, forest) + score_expr(alternate, forest) + score_clause(next, forest) + 229
 
-def score_stmt(node: Stmt, forest: any FrozenMlAstForest&) -> i64:
+def score_stmt(node: Stmt, forest: FrozenMlAstForest&) -> i64:
     return match node in forest.stmts:
         Stmt.Let(pattern: pattern, ann: ann, value: value, next: next):
             node.span + node.effect + score_pattern(pattern, forest) + score_type(ann, forest) + score_expr(value, forest) + score_stmt(next, forest) + 239
@@ -233,7 +233,7 @@ def score_stmt(node: Stmt, forest: any FrozenMlAstForest&) -> i64:
         Stmt.Pipeline(first: first, second: second, third: third, result_expr: result_expr):
             node.span + node.effect + score_stmt(first, forest) + score_stmt(second, forest) + score_stmt(third, forest) + score_expr(result_expr, forest) + 269
 
-def score_decl(node: Decl, forest: any FrozenMlAstForest&) -> i64:
+def score_decl(node: Decl, forest: FrozenMlAstForest&) -> i64:
     return match node in forest.decls:
         Decl.Function(name: name, param: param, signature: signature, body: body):
             node.span + node.phase + name + score_pattern(param, forest) + score_type(signature, forest) + score_stmt(body, forest) + 277
@@ -250,7 +250,7 @@ def score_decl(node: Decl, forest: any FrozenMlAstForest&) -> i64:
         Decl.Instance(name: name, signature: signature, witness: witness, body: body):
             node.span + node.phase + name + score_type(signature, forest) + score_pattern(witness, forest) + score_expr(body, forest) + 317
 
-def score_module(node: Module, forest: any FrozenMlAstForest&) -> i64:
+def score_module(node: Module, forest: FrozenMlAstForest&) -> i64:
     return match node in forest.modules:
         Module.Unit(name: name, primary: primary, bootstrap: bootstrap, summary: summary):
             node.span + node.weight + name + score_decl(primary, forest) + score_stmt(bootstrap, forest) + score_expr(summary, forest) + 331
@@ -261,7 +261,7 @@ def score_module(node: Module, forest: any FrozenMlAstForest&) -> i64:
         Module.Overlay(base: base, extension: extension, bootstrap: bootstrap, summary: summary):
             node.span + node.weight + score_module(base, forest) + score_decl(extension, forest) + score_stmt(bootstrap, forest) + score_expr(summary, forest) + 353
 
-def score_root(node: Root, forest: any FrozenMlAstForest&) -> i64:
+def score_root(node: Root, forest: FrozenMlAstForest&) -> i64:
     return match node in forest.roots:
         Root.ModuleRoot(module: module, witness: witness):
             node.span + node.phase + score_module(module, forest) + score_pattern(witness, forest) + 359
@@ -272,7 +272,7 @@ def score_root(node: Root, forest: any FrozenMlAstForest&) -> i64:
         Root.Batch(module: module, script: script, expr: expr, witness: witness):
             node.span + node.phase + score_module(module, forest) + score_stmt(script, forest) + score_expr(expr, forest) + score_pattern(witness, forest) + 383
 
-def checksum_root_range(start: usize, end: usize, forest: any FrozenMlAstForest&) -> i64:
+def checksum_root_range(start: usize, end: usize, forest: FrozenMlAstForest&) -> i64:
     total: mutable i64 = 0
     for i in start..<end:
         total <- total + score_root(forest.roots[i], forest)
@@ -538,12 +538,12 @@ def packed_ml_ast_repeated_checksum_impl(iterations: usize) -> i64:
     forest: FrozenMlAstForest = build_ml_ast_forest(type_store, pattern_store, expr_store, clause_store, stmt_store, decl_store, module_store, root_store)
     total: mutable i64 = 0
     for iteration in 0..<iterations:
-        total <- total + checksum_root_range(0, forest.roots.count, (&forest).cast[any FrozenMlAstForest&])
+        total <- total + checksum_root_range(0, forest.roots.count, forest.ref[FrozenMlAstForest&])
     return total
 
 def ml_ast_parallel_worker(job: MlAstParallelJob) -> i64:
-    forest: any FrozenMlAstForest& = job.forest_bits.cast[any FrozenMlAstForest&]
-    result_slot: mutable any i64& = job.result_bits.cast[mutable any i64&]
+    forest: FrozenMlAstForest& = job.forest_bits.cast[FrozenMlAstForest&]
+    result_slot: mutable i64& = job.result_bits.cast[mutable i64&]
     total: mutable i64 = 0
     for iteration in 0..<job.repeats:
         total <- total + checksum_root_range(job.start, job.end, forest)
@@ -588,11 +588,11 @@ def packed_ml_ast_parallel_checksum_impl(worker_count: usize, iterations: usize)
                     span <- span + 1
 
                 end: usize = start + span
-                forest_bits: uintptr = (&forest).cast[any FrozenMlAstForest&].uintptr()
-                result_bits: uintptr = (&partials[slot]).cast[any i64&].uintptr()
+                forest_bits: uintptr = forest.ref[FrozenMlAstForest&].uintptr()
+                result_bits: uintptr = partials[slot].ref[i64&].uintptr()
                 job: MlAstParallelJob = MlAstParallelJob(forest_bits, start, end, iterations, result_bits)
                 task: Task[i64, Pending] = submit ml_ast_parallel_worker(job)
-                task_group_add((&group).cast[any TaskGroup&], move task)
+                task_group_add(group.ref[TaskGroup&], move task)
                 start <- end
 
             wait all group

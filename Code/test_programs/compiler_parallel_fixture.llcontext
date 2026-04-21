@@ -42,7 +42,7 @@ def expr_depth(graph: FrozenExprGraph) -> i64:
 			return 1 + max(left_depth, right_depth)
 	return 0
 
-def compiler_parallel_fixture(pool: mutable any ThreadPool&) -> i64 can[Thread.Spawn, Thread.Join, Pool.Submit, Pool.Await, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+def compiler_parallel_fixture(pool: mutable ThreadPool&) -> i64 can[Thread.Spawn, Thread.Join, Pool.Submit, Pool.Await, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
 	can Thread.Spawn, Thread.Join, Pool.Submit, Pool.Await, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
 		region scratch(4096)
 		graph: FrozenExprGraph = build_frozen_expr_graph(scratch)
@@ -51,7 +51,7 @@ def compiler_parallel_fixture(pool: mutable any ThreadPool&) -> i64 can[Thread.S
 
 		group: mutable TaskGroup = task_group_new()
 		grouped: Task[i64, Pending] = pool_submit1(pool, expr_sum, graph)
-		task_group_add((&group).cast[any TaskGroup&], move grouped)
+		task_group_add(group.ref[TaskGroup&], move grouped)
 		wait all group
 
 		return join(move thread) + await awaited

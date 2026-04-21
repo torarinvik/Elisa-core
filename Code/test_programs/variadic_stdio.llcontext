@@ -1,7 +1,7 @@
 error FormatError:
     WriteFailed
 
-extern snprintf(buffer: any u8&?, buffer_size: usize, format: static u8&, ...) -> int can[Console.Format]
+extern snprintf(buffer: u8&?, buffer_size: usize, format: static u8&, ...) -> int can[Console.Format]
 
 def checked_format_len(format: static u8&) -> int error[FormatError] can[Console.Format]:
     written: int = snprintf(null, 0, format, 7, 9) can Console.Format
@@ -14,23 +14,23 @@ def format_len(format: static u8&) -> int can[Console.Format]:
         return try checked_format_len(format) else -1
 
 def checked_write_into_stack(buffer: stack u8&, size: usize, format: static u8&) -> int error[FormatError] can[Console.Format]:
-    written: int = snprintf(buffer.cast[any u8&?], size, format, 11) can Console.Format
+    written: int = snprintf(buffer.cast[u8&?], size, format, 11) can Console.Format
     if written < 0:
         raise FormatError.WriteFailed
     return written
 
 def checked_write_into_heap(buffer: heap u8&, size: usize, format: static u8&) -> int error[FormatError] can[Console.Format]:
-    written: int = snprintf(buffer.cast[any u8&?], size, format, 11) can Console.Format
+    written: int = snprintf(buffer.cast[u8&?], size, format, 11) can Console.Format
     if written < 0:
         raise FormatError.WriteFailed
     return written
 
-def checked_write_into(buffer: any u8&, size: usize, format: static u8&) -> int error[FormatError] can[Console.Format]:
+def checked_write_into(buffer: u8&, size: usize, format: static u8&) -> int error[FormatError] can[Console.Format]:
     written: int = snprintf(buffer, size, format, 11) can Console.Format
     if written < 0:
         raise FormatError.WriteFailed
     return written
 
-def write_into(buffer: any u8&, size: usize, format: static u8&) -> int can[Console.Format]:
+def write_into(buffer: u8&, size: usize, format: static u8&) -> int can[Console.Format]:
     can Console.Format:
         return try checked_write_into(buffer, size, format) else -1

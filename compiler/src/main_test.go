@@ -176,7 +176,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			path: filepath.Join(repoRoot, "Code", "test_programs", "dict_runtime.llcontext"),
 			checks: []string{
 				"%DynDict__dstr_key_shape__i32 = type { ptr, i64, i64, i64, ptr }",
-				"%ErrUnion__RuntimeError__any_i32 = type { i32, ptr }",
+				"%ErrUnion__RuntimeError__i32 = type { i32, ptr }",
 				"define %DynDict__dstr_key_shape__i32 @arena_dict_new__i32(",
 				"define i32 @arena_dict_reserve__i32(",
 				"define ptr @arena_dict_get__i32(",

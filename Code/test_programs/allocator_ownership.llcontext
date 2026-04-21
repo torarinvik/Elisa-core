@@ -25,7 +25,7 @@ extern alloc_heap_pair_node() -> mutable heap HeapPairNode&? can[Memory.Allocate
 extern sfree_heap_pair_node(node: heap HeapPairNode&) -> heap HeapPairNode! can[Memory.Release]
 extern alloc_bytes(size: usize) -> mutable heap u8&? can[Memory.Allocate]
 extern sfree_bytes(ptr: heap u8&) -> heap u8! can[Memory.Release]
-extern snprintf(buffer: mutable any u8&?, buffer_size: usize, format: static u8&, ...) -> int can[Console.Format]
+extern snprintf(buffer: mutable u8&?, buffer_size: usize, format: static u8&, ...) -> int can[Console.Format]
 
 
 def require_heap_pair_node() -> mutable heap HeapPairNode& error[MemoryError] can[Memory.Allocate]:
@@ -95,14 +95,14 @@ def borrow_then_release_single_pair() -> int error[MemoryError, DiskError, NetEr
 
 
 def checked_write_into_heap(buffer: mutable heap u8&, size: usize, format: static u8&) -> int error[FormatError] can[Console.Format]:
-    written: int = snprintf(buffer.cast[any u8&?], size, format, 11) can Console.Format
+    written: int = snprintf(buffer.cast[u8&?], size, format, 11) can Console.Format
     if written < 0:
         raise FormatError.WriteFailed
     return written
 
 
 def checked_write_into_stack(buffer: mutable stack u8&, size: usize, format: static u8&) -> int error[FormatError] can[Console.Format]:
-    written: int = snprintf(buffer.cast[any u8&?], size, format, 11) can Console.Format
+    written: int = snprintf(buffer.cast[u8&?], size, format, 11) can Console.Format
     if written < 0:
         raise FormatError.WriteFailed
     return written

@@ -1,8 +1,8 @@
 enum Expr:
 	Int(value: int)
-	Add(left: any Expr&, right: any Expr&)
+	Add(left: Expr&, right: Expr&)
 
-def eval(node: any Expr&) -> int:
+def eval(node: Expr&) -> int:
 	return match node[0]:
 		Expr.Int(value):
 			value
@@ -15,5 +15,5 @@ def make_sum() -> int:
 	two_value: Expr = Expr.Int(2)
 	one: scratch Expr& = new[scratch] one_value
 	two: scratch Expr& = new[scratch] two_value
-	tree: scratch Expr& = new[scratch] Expr.Add(one.cast[any Expr&], two.cast[any Expr&])
-	return eval(tree.cast[any Expr&])
+	tree: scratch Expr& = new[scratch] Expr.Add(one.cast[Expr&], two.cast[Expr&])
+	return eval(tree.cast[Expr&])

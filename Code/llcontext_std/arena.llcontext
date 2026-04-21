@@ -69,9 +69,9 @@ static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
     const MEM_RELEASE = 0x8000
     const PAGE_READWRITE = 0x04
 
-    extern GetCurrentProcess() -> any void&
+    extern GetCurrentProcess() -> void&
     extern VirtualAllocEx(
-        process: any void&,
+        process: void&,
         address: mutable heap void&?,
         size: usize,
         alloc_type: int,
@@ -79,7 +79,7 @@ static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
     ) -> mutable heap void&?
 
     extern VirtualFreeEx(
-        process: any void&,
+        process: void&,
         address: heap void&,
         size: usize,
         free_type: int
@@ -201,7 +201,7 @@ def free_region(r: heap Region&) can[Memory.Release, Abort.Panic]:
         static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
             pass
 
-def arena_alloc(a: mutable any Arena&, size_bytes: usize) -> mutable heap void& can[Memory.Allocate, Abort.Panic]:
+def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void& can[Memory.Allocate, Abort.Panic]:
     can Memory.Allocate, Abort.Panic:
         size: usize = (size_bytes + sizeof(uintptr) - 1) / sizeof(uintptr)
 
@@ -241,14 +241,14 @@ def arena_alloc(a: mutable any Arena&, size_bytes: usize) -> mutable heap void& 
         a.end.count <- a.end.count + size
         return result
 
-def arena_realloc(a: mutable any Arena&, oldptr: mutable any void&, oldsz: usize, newsz: usize) -> mutable heap void& can[Memory.Allocate, Abort.Panic]:
+def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz: usize) -> mutable heap void& can[Memory.Allocate, Abort.Panic]:
     can Memory.Allocate, Abort.Panic:
         if newsz <= oldsz:
             return oldptr.cast[heap void&]
 
         newptr: heap void& = arena_alloc(a, newsz)
         newptr_bytes: heap u8& = newptr.cast[heap u8&]
-        oldptr_bytes: any u8& = oldptr.cast[any u8&]
+        oldptr_bytes: u8& = oldptr.cast[u8&]
 
         for i in 0..<oldsz:
             newptr_bytes[i] <- oldptr_bytes[i]
@@ -259,24 +259,24 @@ def arena_realloc(a: mutable any Arena&, oldptr: mutable any void&, oldsz: usize
 # Memory/string helpers
 # ------------------------------------------------------------
 
-def arena_strlen(s: any u8&) -> usize:
+def arena_strlen(s: u8&) -> usize:
     n:mutable usize = 0
     while s[n] != 0:
         n <- n + 1
     return n
 
-def arena_memcpy(dest: mutable any void&, src: any void&, n: usize) -> mutable any void&:
-    d: any u8& = dest.cast[any u8&]
-    s: any u8& = src.cast[any u8&]
+def arena_memcpy(dest: mutable void&, src: void&, n: usize) -> mutable void&:
+    d: u8& = dest.cast[u8&]
+    s: u8& = src.cast[u8&]
 
     for i in 0..<n:
         d[i] <- s[i]
 
     return dest
 
-def arena_memeq(lhs: any void&, rhs: any void&, n: usize) -> bool:
-    left: any u8& = lhs.cast[any u8&]
-    right: any u8& = rhs.cast[any u8&]
+def arena_memeq(lhs: void&, rhs: void&, n: usize) -> bool:
+    left: u8& = lhs.cast[u8&]
+    right: u8& = rhs.cast[u8&]
 
     for i in 0..<n:
         if left[i] != right[i]:
@@ -284,30 +284,30 @@ def arena_memeq(lhs: any void&, rhs: any void&, n: usize) -> bool:
 
     return true
 
-def arena_strdup(a: mutable any Arena&, cstr: any u8&) -> mutable heap u8& can[Memory.Allocate, Abort.Panic]:
+def arena_strdup(a: mutable Arena&, cstr: u8&) -> mutable heap u8& can[Memory.Allocate, Abort.Panic]:
     n: usize = arena_strlen(cstr)
     dup: mutable heap u8& = arena_alloc(a, n + 1).cast[mutable heap u8&] can Memory.Allocate, Abort.Panic
-    arena_memcpy(dup.cast[mutable any void&], cstr.cast[any void&], n)
+    arena_memcpy(dup.cast[mutable void&], cstr.cast[void&], n)
     dup[n] <- 0
     return dup
 
-def arena_memdup(a: mutable any Arena&, data: any void&, size: usize) -> mutable heap void& can[Memory.Allocate, Abort.Panic]:
+def arena_memdup(a: mutable Arena&, data: void&, size: usize) -> mutable heap void& can[Memory.Allocate, Abort.Panic]:
     dup: mutable heap void& = arena_alloc(a, size) can Memory.Allocate, Abort.Panic
-    _ = arena_memcpy(dup.cast[mutable any void&], data, size)
+    _ = arena_memcpy(dup.cast[mutable void&], data, size)
     return dup
 
 # ------------------------------------------------------------
 # Snapshot / rewind / reset / free / trim
 # ------------------------------------------------------------
 
-def arena_snapshot(a: any Arena&) -> ArenaMark:
+def arena_snapshot(a: Arena&) -> ArenaMark:
     if a.end == null:
         assert a.begin == null
         return ArenaMark(null, 0)
 
     return ArenaMark(a.end, a.end.count)
 
-def arena_reset(a: mutable any Arena&):
+def arena_reset(a: mutable Arena&):
     r: mutable heap Region&? = a.begin
     while r != null:
         r.count <- 0
@@ -316,7 +316,7 @@ def arena_reset(a: mutable any Arena&):
     a.end <- a.begin
     a.end_index <- 0
 
-def arena_rewind(a: mutable any Arena&, m: ArenaMark):
+def arena_rewind(a: mutable Arena&, m: ArenaMark):
     if m.region == null:
         arena_reset(a)
         return
@@ -340,7 +340,7 @@ def arena_rewind(a: mutable any Arena&, m: ArenaMark):
     assert current != null
     a.end_index <- region_index
 
-def arena_free(a: mutable any Arena&) can[Memory.Release, Abort.Panic]:
+def arena_free(a: mutable Arena&) can[Memory.Release, Abort.Panic]:
     can Memory.Release, Abort.Panic:
         r: mutable heap Region&? = a.begin
 
@@ -353,7 +353,7 @@ def arena_free(a: mutable any Arena&) can[Memory.Release, Abort.Panic]:
         a.end as ! <- null
         a.end_index <- 0
 
-def arena_trim(a: mutable any Arena&) can[Memory.Release, Abort.Panic]:
+def arena_trim(a: mutable Arena&) can[Memory.Release, Abort.Panic]:
     can Memory.Release, Abort.Panic:
         if a.end == null:
             return
@@ -375,13 +375,13 @@ extern va_copy(args: va_list) -> va_list
 extern va_end(args: va_list)
 
 extern vsnprintf(
-    buffer: any u8&?,
+    buffer: u8&?,
     buffer_size: usize,
-    format: any u8&,
+    format: u8&,
     args: va_list
 ) -> int
 
-def arena_vsprintf(a: mutable any Arena&, format: any u8&, args: va_list) -> mutable heap u8& can[Memory.Allocate, Console.Format, Abort.Panic]:
+def arena_vsprintf(a: mutable Arena&, format: u8&, args: va_list) -> mutable heap u8& can[Memory.Allocate, Console.Format, Abort.Panic]:
     can Memory.Allocate, Console.Format, Abort.Panic:
         args_copy: va_list = va_copy(args)
         n: int = vsnprintf(null, 0, format, args_copy)
@@ -390,5 +390,5 @@ def arena_vsprintf(a: mutable any Arena&, format: any u8&, args: va_list) -> mut
         assert n >= 0
 
         result: heap u8& = arena_alloc(a, n.usize() + 1).cast[heap u8&]
-        _ = vsnprintf(result.cast[any u8&?], n.usize() + 1, format, args)
+        _ = vsnprintf(result.cast[u8&?], n.usize() + 1, format, args)
         return result
