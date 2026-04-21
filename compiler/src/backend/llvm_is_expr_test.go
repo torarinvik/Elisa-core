@@ -903,6 +903,38 @@ def simplify(node: Lua.Expr) -> Lua.Expr:
 	}
 }
 
+func TestGenerateLLVMIRLowersHeterogeneousTreeRewriteExpr(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Function(child body: Block)
+	block Block:
+		items: darray[Expr]
+
+def clone_expr(node: Lua.Expr) -> Lua.Expr:
+	return rewrite node as Lua.Node:
+		Lua.Expr.Int(expr):
+			new[perm] Lua.Expr.Int(span: expr.span, value: expr.value)
+		Lua.Expr.Function(expr, body: body):
+			new[perm] Lua.Expr.Function(span: expr.span, body: body)
+		Lua.Block(block, items: items):
+			block
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_rewrite_heterogeneous_expr.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define %Lua__TreeHandle @clone_expr(%Lua__TreeHandle ", "define private %Lua__TreeHandle @tree_fold_", "call %Lua__TreeHandle @tree_fold_", "fold.arm.named.body.value", "fold.arm.named.items.sub.view.len"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected heterogeneous tree rewrite lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersGuardedTreeFoldExpr(t *testing.T) {
 	src := `tree Lua:
 	common:

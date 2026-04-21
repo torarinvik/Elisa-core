@@ -992,17 +992,17 @@ func (t *TreeVariantViewType) Field(name string) (Field, bool) {
 	if t == nil || t.Category == nil || t.Variant == nil {
 		return Field{}, false
 	}
-	if name == "kind" {
-		return TreeKindFieldInfo(t)
-	}
 	if field, ok := t.Category.Common[name]; ok {
 		return field, true
 	}
 	index, ok := t.Variant.PayloadIndex(name)
-	if !ok || index < 0 || index >= len(t.Variant.Payload) {
-		return Field{}, false
+	if ok && index >= 0 && index < len(t.Variant.Payload) {
+		return Field{Name: name, Type: t.Variant.Payload[index], Mutable: false}, true
 	}
-	return Field{Name: name, Type: t.Variant.Payload[index], Mutable: false}, true
+	if name == "kind" {
+		return TreeKindFieldInfo(t)
+	}
+	return Field{}, false
 }
 
 func (t *TreeVariantViewType) HasNamedPayloadFields() bool {
@@ -2295,6 +2295,45 @@ func TreeStructuralChildItemType(fieldType Type, relation ast.EnumPayloadRelatio
 		return baseType, true
 	case ast.EnumPayloadRelationChildren:
 		return TreeStructuralSequenceElemType(baseType)
+	default:
+		return nil, false
+	}
+}
+
+func TreeRewriteResultTypeForValue(t Type) Type {
+	switch tt := StripAggregateStateType(t).(type) {
+	case *TreeVariantViewType:
+		if tt != nil {
+			return tt.Category
+		}
+	case *TreeCategoryType, *TreeBlockType, *TreeStructType, *TreeNodeType:
+		return tt
+	}
+	return t
+}
+
+func TreeRewriteChildBindingType(fieldType Type, relation ast.EnumPayloadRelation) (Type, bool) {
+	itemType, ok := TreeStructuralChildItemType(fieldType, relation)
+	if !ok || itemType == nil {
+		return nil, false
+	}
+	resultType := TreeRewriteResultTypeForValue(itemType)
+	if resultType == nil {
+		return nil, false
+	}
+	_, optional := UnwrapOptionalType(fieldType)
+	switch relation {
+	case ast.EnumPayloadRelationChild:
+		if optional {
+			return &OptionalType{Value: resultType}, true
+		}
+		return resultType, true
+	case ast.EnumPayloadRelationChildren:
+		viewType := &DArrayViewType{Elem: resultType, SurfaceName: "dview"}
+		if optional {
+			return &OptionalType{Value: viewType}, true
+		}
+		return viewType, true
 	default:
 		return nil, false
 	}

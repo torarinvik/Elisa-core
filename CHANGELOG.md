@@ -7,7 +7,7 @@ All notable changes to this repository should be documented in this file.
 ### Highlights
 
 - Postfix shorthand casts like `value.i64()` now dispatch to visible `__cast__` hooks when an exact source-to-target hook exists, with permission-aware semantic analysis and LLVM lowering.
-- Tree `rewrite value as Root:` expressions now provide a transform-oriented spelling for bottom-up tree folds whose result type is the traversal root.
+- Tree `rewrite value as Root:` expressions now provide a transform-oriented spelling for bottom-up tree reconstruction, including exact type preservation across heterogeneous tree families.
 - Packed-enum `common:` fields can now opt into side-table storage via `@storage(side_table)`, including end-to-end runtime/backend support and ABI validation.
 - `@test` functions may now declare `Abort.*` permissions, which keeps panic/assert-heavy compiler fixtures valid without opening the door to unrelated declared permissions.
 - The Lua frontend experiment now ships with a storage-layout benchmark harness that compares the checked-in side-table layout against a temporary inline-control variant.
@@ -20,7 +20,7 @@ All notable changes to this repository should be documented in this file.
 ### Added
 
 - Postfix shorthand cast-hook resolution for `expr.TargetType()` syntax when a visible `def __cast__(value: Source) -> Target` hook matches exactly.
-- Tree `rewrite` expressions, backed by existing fold analysis and LLVM helper lowering.
+- Tree `rewrite` expressions, backed by existing fold analysis and LLVM helper lowering, with named child bindings typed as the corresponding rewritten child edge.
 - Side-table packed common-field storage via `@storage(side_table)` on `packed enum` `common:` fields.
 - Lua frontend storage benchmark tooling:
   - `Code/benchmarks/lua_frontend_bench.c`

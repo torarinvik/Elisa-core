@@ -4069,12 +4069,16 @@ func (a *Analyzer) resolveVisitArmInfo(root treeVisitRootInfo, arm ast.VisitArm)
 	}
 }
 
-func (a *Analyzer) analyzeVisitArmBody(armInfo treeVisitArmInfo, resultType Type, scope *Scope, forFold bool, foldKeyword string) (Type, affineFlowSnapshot, bool) {
+func (a *Analyzer) analyzeVisitArmBody(armInfo treeVisitArmInfo, resultType Type, scope *Scope, forFold bool, foldKeyword string, forRewrite bool, childResultsElemType Type) (Type, affineFlowSnapshot, bool) {
 	if armInfo.Arm.BindName != "" && armInfo.BindType != nil {
 		a.defineLocalInScope(scope, &Symbol{Name: armInfo.Arm.BindName, Kind: SymbolLocal, Type: armInfo.BindType, Mutable: false}, armInfo.Arm.Position)
 	}
 	if forFold && armInfo.Arm.ChildResultsName != "" && resultType != nil {
-		childViewType := &DArrayViewType{Elem: resultType, SurfaceName: "dview"}
+		elemType := resultType
+		if forRewrite && childResultsElemType != nil {
+			elemType = childResultsElemType
+		}
+		childViewType := &DArrayViewType{Elem: elemType, SurfaceName: "dview"}
 		a.defineLocalInScope(scope, &Symbol{Name: armInfo.Arm.ChildResultsName, Kind: SymbolLocal, Type: childViewType, Mutable: false}, armInfo.Arm.Position)
 	}
 	if len(armInfo.Arm.ChildBindings) != 0 {
@@ -4085,6 +4089,9 @@ func (a *Analyzer) analyzeVisitArmBody(armInfo treeVisitArmInfo, resultType Type
 				foldKeyword = "fold"
 			}
 			bindingTypes := treeFoldArmChildBindingTypes(armInfo.BindType, resultType)
+			if forRewrite {
+				bindingTypes = treeRewriteArmChildBindingTypes(armInfo.BindType)
+			}
 			seenFields := map[string]bool{}
 			for _, binding := range armInfo.Arm.ChildBindings {
 				if binding.FieldName == "" || binding.BindName == "" {
@@ -4127,6 +4134,22 @@ func (a *Analyzer) analyzeVisitArmBody(armInfo treeVisitArmInfo, resultType Type
 		bodySnapshot.SpecializedValueTypes = a.mergeSpecializedValueTypeBindings(bodySnapshot.SpecializedValueTypes, guardFallthrough.SpecializedValueTypes)
 	}
 	return bodyType, bodySnapshot, canFallthrough
+}
+
+func treeRewriteArmChildBindingTypes(bindType Type) map[string]Type {
+	if bindType == nil {
+		return nil
+	}
+	out := make(map[string]Type)
+	for _, binding := range TreeStructuralChildBindings(bindType) {
+		if binding.Name == "" {
+			continue
+		}
+		if bindingType, ok := TreeRewriteChildBindingType(binding.Type, binding.Relation); ok {
+			out[binding.Name] = bindingType
+		}
+	}
+	return out
 }
 
 func treeFoldArmChildBindingTypes(bindType Type, resultType Type) map[string]Type {
@@ -4213,7 +4236,7 @@ func (a *Analyzer) analyzeVisitExpr(expr *ast.VisitExpr) Type {
 			}
 		}
 		scope := NewScope(a.currentScope)
-		armType, armSnapshot, armCanFallthrough := a.analyzeVisitArmBody(armInfo, nil, scope, false, "")
+		armType, armSnapshot, armCanFallthrough := a.analyzeVisitArmBody(armInfo, nil, scope, false, "", false, nil)
 		if armCanFallthrough {
 			if !hasFallthrough {
 				mergedAffine = armSnapshot.Affine
@@ -4352,9 +4375,12 @@ func treeVisitRootStructuralChildTypes(root treeVisitRootInfo) []Type {
 	}
 }
 
-func (a *Analyzer) validateFoldRecursionRoot(pos lexer.Pos, root treeVisitRootInfo) {
+func (a *Analyzer) validateFoldRecursionRoot(pos lexer.Pos, root treeVisitRootInfo, keyword string) {
 	if a == nil || root.Kind == treeVisitRootKindFamily {
 		return
+	}
+	if keyword == "" {
+		keyword = "fold"
 	}
 	rootType := treeVisitRootBindType(root)
 	if rootType == nil {
@@ -4369,7 +4395,7 @@ func (a *Analyzer) validateFoldRecursionRoot(pos lexer.Pos, root treeVisitRootIn
 			if root.Family != nil && root.Family.NodeType != nil {
 				familyLabel = root.Family.NodeType.String()
 			}
-			a.errorf(pos, "fold over %s requires an explicit `as %s` root because structural children include %s", rootType, familyLabel, childType)
+			a.errorf(pos, "%s over %s requires an explicit `as %s` root because structural children include %s", keyword, rootType, familyLabel, childType)
 			return
 		}
 	}
@@ -4400,12 +4426,23 @@ func (a *Analyzer) analyzeFoldExpr(expr *ast.FoldExpr) Type {
 		}
 		return invalidType
 	}
-	a.validateFoldRecursionRoot(expr.Pos(), root)
-	a.recordFoldExprInfo(expr)
-	resultType := a.resolveType(expr.ResultType)
 	keyword := expr.Keyword
 	if keyword == "" {
 		keyword = "fold"
+	}
+	a.validateFoldRecursionRoot(expr.Pos(), root, keyword)
+	a.recordFoldExprInfo(expr)
+	resultType := a.resolveType(expr.ResultType)
+	forRewrite := keyword == "rewrite"
+	if forRewrite {
+		resultType = TreeRewriteResultTypeForValue(valueType)
+		if resultType == nil {
+			resultType = invalidType
+		}
+	}
+	childResultsElemType := Type(nil)
+	if forRewrite {
+		childResultsElemType = treeVisitRootBindType(root)
 	}
 	covered := map[string]bool{}
 	priorKeys := map[string]bool{}
@@ -4453,10 +4490,21 @@ func (a *Analyzer) analyzeFoldExpr(expr *ast.FoldExpr) Type {
 			}
 		}
 		scope := NewScope(a.currentScope)
-		armType, armSnapshot, armCanFallthrough := a.analyzeVisitArmBody(armInfo, resultType, scope, true, keyword)
-		if !IsNeverType(armType) && !AssignableTo(resultType, armType) {
-			a.errorf(arm.Position, "%s arm %q expects %s, got %s", keyword, arm.TargetName, resultType, armType)
-			a.reportShapeMismatchNotes(arm.Position, resultType, armType)
+		armExpectedType := resultType
+		if forRewrite {
+			if armInfo.Arm.Wildcard {
+				armExpectedType = childResultsElemType
+			} else if armInfo.BindType != nil {
+				armExpectedType = TreeRewriteResultTypeForValue(armInfo.BindType)
+			}
+			if armExpectedType == nil {
+				armExpectedType = invalidType
+			}
+		}
+		armType, armSnapshot, armCanFallthrough := a.analyzeVisitArmBody(armInfo, armExpectedType, scope, true, keyword, forRewrite, childResultsElemType)
+		if !IsNeverType(armType) && !AssignableTo(armExpectedType, armType) {
+			a.errorf(arm.Position, "%s arm %q expects %s, got %s", keyword, arm.TargetName, armExpectedType, armType)
+			a.reportShapeMismatchNotes(arm.Position, armExpectedType, armType)
 		}
 		if armCanFallthrough {
 			if !hasFallthrough {

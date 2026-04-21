@@ -9350,11 +9350,8 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 	if field, ok := packedStoreSyntheticField(objType, fieldName); ok {
 		return field, true
 	}
-	if field, ok := TreeKindFieldInfo(objType); ok && fieldName == field.Name {
-		return field, true
-	}
-	if viewType, ok := objType.(*PackedVariantViewType); ok {
-		field, ok := viewType.Field(fieldName)
+	if viewType, ok := objType.(*TreeVariantViewType); ok {
+		field, ok := TreeVariantSurfaceFieldInfo(viewType, fieldName)
 		if !ok {
 			if emitDiagnostics {
 				a.errorf(pos, "%s has no field %q", viewType, fieldName)
@@ -9363,8 +9360,11 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 		}
 		return field, true
 	}
-	if viewType, ok := objType.(*TreeVariantViewType); ok {
-		field, ok := TreeVariantSurfaceFieldInfo(viewType, fieldName)
+	if field, ok := TreeKindFieldInfo(objType); ok && fieldName == field.Name {
+		return field, true
+	}
+	if viewType, ok := objType.(*PackedVariantViewType); ok {
+		field, ok := viewType.Field(fieldName)
 		if !ok {
 			if emitDiagnostics {
 				a.errorf(pos, "%s has no field %q", viewType, fieldName)

@@ -398,7 +398,7 @@ Current rules:
 
 ## Tree `rewrite`
 
-`rewrite` is the tree-transform spelling for a bottom-up fold whose result type is the traversal root.
+`rewrite` is the tree-transform spelling for bottom-up tree reconstruction. It uses the selected traversal root for recursion, while preserving the static type of the source expression and each named child binding.
 
 ```context
 def simplify(node: Expr) -> Expr:
@@ -411,10 +411,10 @@ def simplify(node: Expr) -> Expr:
 
 Current rules:
 
-- `rewrite value as Root:` is equivalent to `fold value as Root into Root:` during analysis and lowering
+- `rewrite value as Root:` is fold-backed, but it specializes child-result bindings to the original child edge types instead of forcing every rewritten child to have one uniform result type
 - arm heads, guards, exact tree targets, variant targets, wildcard arms, and named child-result bindings follow the existing `fold` arm rules
 - named child bindings such as `left` and `right` are the already-rewritten child results
-- because the first implementation uses the existing fold machinery, all structural children must be assignable to the selected rewrite root
+- use a family root such as `Lua.Node` or `ATPLSyntax.Node` when a category has heterogeneous structural children such as expressions, statements, and blocks
 - `rewrite` is contextual, so an ordinary function or local named `rewrite` still parses normally in call position such as `rewrite(value)`
 
 ## Char literals

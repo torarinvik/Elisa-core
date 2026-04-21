@@ -9386,19 +9386,17 @@ func (s *functionState) emitTreeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, 
 	}
 	switch tt := baseType.(type) {
 	case *semantic.TreeVariantViewType:
-		if expr.Field == "kind" {
-			kindType, ok := semantic.TreeKindType(tt)
-			if !ok || kindType == nil {
-				return nil, nil, true, fmt.Errorf("%s has no kind", tt.String())
-			}
-			llvmType, err := s.g.lowerType(kindType)
-			if err != nil {
-				return nil, nil, true, err
-			}
-			value := C.LLVMConstInt(llvmType, C.ulonglong(tt.Variant.Tag), 0)
-			return value, kindType, true, nil
-		}
 		if field, ok := semantic.TreeVariantSurfaceFieldInfo(tt, expr.Field); ok {
+			if expr.Field == "kind" {
+				if kindType, ok := semantic.TreeKindType(tt); ok && kindType != nil && semantic.SameType(field.Type, kindType) {
+					llvmType, err := s.g.lowerType(kindType)
+					if err != nil {
+						return nil, nil, true, err
+					}
+					value := C.LLVMConstInt(llvmType, C.ulonglong(tt.Variant.Tag), 0)
+					return value, kindType, true, nil
+				}
+			}
 			stateValue := s.emitTreeHandleStateValue(handleValue, "tree.field")
 			rowIndex, err := s.emitTreeHandleIndexValue(handleValue, "tree.field")
 			if err != nil {

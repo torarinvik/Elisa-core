@@ -60,6 +60,7 @@ type treeFoldHelperInfo struct {
 	envStruct   C.LLVMTypeRef
 	captures    []treeFoldCapture
 	hasEnvParam bool
+	rewrite     bool
 }
 
 func resolveTreeVisitSourceTypeBackend(actual semantic.Type) (semantic.Type, *semantic.TreeType, bool) {
@@ -175,7 +176,7 @@ func (s *functionState) buildTreeFoldEnv(captures []treeFoldCapture, name string
 	return envAlloca, envType, nil
 }
 
-func (s *functionState) newTreeFoldHelper(expr *ast.FoldExpr, root treeFoldRootInfo, resultType semantic.Type, captures []treeFoldCapture, envStruct C.LLVMTypeRef) (*treeFoldHelperInfo, error) {
+func (s *functionState) newTreeFoldHelper(expr *ast.FoldExpr, root treeFoldRootInfo, resultType semantic.Type, captures []treeFoldCapture, envStruct C.LLVMTypeRef, rewrite bool) (*treeFoldHelperInfo, error) {
 	rootBindType := root.bindType()
 	if rootBindType == nil {
 		return nil, fmt.Errorf("missing fold root bind type")
@@ -205,6 +206,7 @@ func (s *functionState) newTreeFoldHelper(expr *ast.FoldExpr, root treeFoldRootI
 		envStruct:   envStruct,
 		captures:    captures,
 		hasEnvParam: hasEnv,
+		rewrite:     rewrite,
 	}, nil
 }
 
@@ -237,6 +239,32 @@ func (s *functionState) emitTreeFoldHelperCall(helper *treeFoldHelperInfo, nodeV
 		callName = ""
 	}
 	return s.buildCall(helper.llvmFnType, helper.fnValue, args, callName), nil
+}
+
+func (helper *treeFoldHelperInfo) childResultsElemType() semantic.Type {
+	if helper == nil {
+		return nil
+	}
+	if helper.rewrite {
+		return helper.root.bindType()
+	}
+	return helper.resultType
+}
+
+func (helper *treeFoldHelperInfo) armResultType(memberType semantic.Type, arm ast.VisitArm) semantic.Type {
+	if helper == nil {
+		return nil
+	}
+	if !helper.rewrite {
+		return helper.resultType
+	}
+	if arm.Wildcard {
+		return helper.root.bindType()
+	}
+	if resultType := semantic.TreeRewriteResultTypeForValue(memberType); resultType != nil {
+		return resultType
+	}
+	return helper.resultType
 }
 
 func (s *functionState) treeVisitRelevantCategoryExactArms(categoryType *semantic.TreeCategoryType, arms []ast.VisitArm) ([]treeVisitExactArm, bool, error) {
@@ -509,6 +537,16 @@ func (s *functionState) emitTreeFoldNamedChildBindingLocals(helper *treeFoldHelp
 		bindName, wanted := requested[childBinding.Name]
 		switch childBinding.Relation {
 		case ast.EnumPayloadRelationChild:
+			childResultType := helper.resultType
+			if helper.rewrite {
+				if bindingType, ok := semantic.TreeRewriteChildBindingType(childBinding.Type, childBinding.Relation); ok {
+					if optionalBinding, ok := bindingType.(*semantic.OptionalType); ok {
+						childResultType = optionalBinding.Value
+					} else {
+						childResultType = bindingType
+					}
+				}
+			}
 			fieldValue, _, err := s.emitTreeExactFieldValueAtIndex(tablePtr, memberType, childBinding.Name, rowIndex, name+"."+childBinding.Name)
 			if err != nil {
 				return err
@@ -525,7 +563,7 @@ func (s *functionState) emitTreeFoldNamedChildBindingLocals(helper *treeFoldHelp
 			}
 			if wanted {
 				if optionalChild {
-					boundType := &semantic.OptionalType{Value: helper.resultType}
+					boundType := &semantic.OptionalType{Value: childResultType}
 					boundLLVMType, err := s.g.lowerType(boundType)
 					if err != nil {
 						return err
@@ -536,7 +574,7 @@ func (s *functionState) emitTreeFoldNamedChildBindingLocals(helper *treeFoldHelp
 					C.LLVMBuildCondBr(s.builder, presentValue, presentBB, absentBB)
 
 					C.LLVMPositionBuilderAtEnd(s.builder, presentBB)
-					childResult, err := s.emitTreeFoldChildResultAtIndex(childViewValue, helper.resultType, offsetValue, name+"."+childBinding.Name)
+					childResult, err := s.emitTreeFoldChildResultAtIndex(childViewValue, childResultType, offsetValue, name+"."+childBinding.Name)
 					if err != nil {
 						return err
 					}
@@ -562,11 +600,11 @@ func (s *functionState) emitTreeFoldNamedChildBindingLocals(helper *treeFoldHelp
 						return err
 					}
 				} else {
-					childResult, err := s.emitTreeFoldChildResultAtIndex(childViewValue, helper.resultType, offsetValue, name+"."+childBinding.Name)
+					childResult, err := s.emitTreeFoldChildResultAtIndex(childViewValue, childResultType, offsetValue, name+"."+childBinding.Name)
 					if err != nil {
 						return err
 					}
-					if err := s.emitMoveBindLocal(bindName, helper.resultType, childResult); err != nil {
+					if err := s.emitMoveBindLocal(bindName, childResultType, childResult); err != nil {
 						return err
 					}
 				}
@@ -574,6 +612,18 @@ func (s *functionState) emitTreeFoldNamedChildBindingLocals(helper *treeFoldHelp
 			}
 			offsetValue = C.LLVMBuildAdd(s.builder, offsetValue, childCount, cStringFree(name+"."+childBinding.Name+".offset.next"))
 		case ast.EnumPayloadRelationChildren:
+			childResultType := helper.resultType
+			if helper.rewrite {
+				if bindingType, ok := semantic.TreeRewriteChildBindingType(childBinding.Type, childBinding.Relation); ok {
+					if optionalBinding, ok := bindingType.(*semantic.OptionalType); ok {
+						if viewType, ok := optionalBinding.Value.(*semantic.DArrayViewType); ok {
+							childResultType = viewType.Elem
+						}
+					} else if viewType, ok := bindingType.(*semantic.DArrayViewType); ok {
+						childResultType = viewType.Elem
+					}
+				}
+			}
 			fieldValue, _, err := s.emitTreeExactFieldValueAtIndex(tablePtr, memberType, childBinding.Name, rowIndex, name+"."+childBinding.Name)
 			if err != nil {
 				return err
@@ -583,7 +633,7 @@ func (s *functionState) emitTreeFoldNamedChildBindingLocals(helper *treeFoldHelp
 				return err
 			}
 			if wanted {
-				subViewValue, subViewType, err := s.emitTreeFoldChildResultsSubview(childViewValue, helper.resultType, offsetValue, countValue, name+"."+childBinding.Name)
+				subViewValue, subViewType, err := s.emitTreeFoldChildResultsSubview(childViewValue, childResultType, offsetValue, countValue, name+"."+childBinding.Name)
 				if err != nil {
 					return err
 				}
@@ -631,7 +681,7 @@ func (s *functionState) emitTreeFoldArmValue(helper *treeFoldHelperInfo, envValu
 		}
 	}
 	if arm.ChildResultsName != "" && arm.ChildResultsName != "_" {
-		childViewType := &semantic.DArrayViewType{Elem: helper.resultType, SurfaceName: "dview"}
+		childViewType := &semantic.DArrayViewType{Elem: helper.childResultsElemType(), SurfaceName: "dview"}
 		if err := s.emitMoveBindLocal(arm.ChildResultsName, childViewType, childViewValue); err != nil {
 			s.popScope()
 			return nil, false, err
@@ -641,7 +691,7 @@ func (s *functionState) emitTreeFoldArmValue(helper *treeFoldHelperInfo, envValu
 		s.popScope()
 		return nil, false, err
 	}
-	armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, helper.resultType)
+	armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, helper.armResultType(memberType, arm))
 	s.popScope()
 	return armValue, reachable, err
 }
@@ -684,7 +734,7 @@ func (s *functionState) emitTreeFoldArmSequence(helper *treeFoldHelperInfo, envV
 			}
 		}
 		if arm.ChildResultsName != "" && arm.ChildResultsName != "_" {
-			childViewType := &semantic.DArrayViewType{Elem: helper.resultType, SurfaceName: "dview"}
+			childViewType := &semantic.DArrayViewType{Elem: helper.childResultsElemType(), SurfaceName: "dview"}
 			if err := s.emitMoveBindLocal(arm.ChildResultsName, childViewType, childViewValue); err != nil {
 				s.popScope()
 				return nil, false, err
@@ -704,7 +754,7 @@ func (s *functionState) emitTreeFoldArmSequence(helper *treeFoldHelperInfo, envV
 			C.LLVMBuildCondBr(s.builder, guardValue, guardBodyBB, nextBB)
 			C.LLVMPositionBuilderAtEnd(s.builder, guardBodyBB)
 		}
-		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, helper.resultType)
+		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, helper.armResultType(memberType, arm))
 		if err != nil {
 			s.popScope()
 			return nil, false, err
@@ -1017,7 +1067,12 @@ func (s *functionState) emitFoldExpr(expr *ast.FoldExpr) (C.LLVMValueRef, semant
 	if err != nil {
 		return nil, nil, err
 	}
-	helper, err := s.newTreeFoldHelper(expr, root, resultType, captures, envStruct)
+	helperResultType := resultType
+	rewrite := expr.Keyword == "rewrite"
+	if rewrite {
+		helperResultType = root.bindType()
+	}
+	helper, err := s.newTreeFoldHelper(expr, root, helperResultType, captures, envStruct, rewrite)
 	if err != nil {
 		return nil, nil, err
 	}

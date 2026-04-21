@@ -739,6 +739,49 @@ def simplify(node: Lua.Expr) -> Lua.Expr:
 `)
 }
 
+func TestAnalyzeTreeRewriteExprPreservesHeterogeneousChildTypes(t *testing.T) {
+	analyzeTreeTestSource(t, "tree_rewrite_heterogeneous_surface.llcontext", `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Function(child body: Block)
+	block Block:
+		items: darray[Expr]
+
+def clone_expr(node: Lua.Expr) -> Lua.Expr:
+	return rewrite node as Lua.Node:
+		Lua.Expr.Int(expr):
+			new[perm] Lua.Expr.Int(span: expr.span, value: expr.value)
+		Lua.Expr.Function(expr, body: body):
+			new[perm] Lua.Expr.Function(span: expr.span, body: body)
+		Lua.Block(block, items: items):
+			block
+
+def clone_block(block: Lua.Block) -> Lua.Block:
+	return rewrite block as Lua.Node:
+		Lua.Expr.Int(expr):
+			new[perm] Lua.Expr.Int(span: expr.span, value: expr.value)
+		Lua.Expr.Function(expr, body: body):
+			new[perm] Lua.Expr.Function(span: expr.span, body: body)
+		Lua.Block(block, items: items):
+			block
+`)
+}
+
+func TestAnalyzeTreeVariantPayloadKindShadowsSyntheticKind(t *testing.T) {
+	analyzeTreeTestSource(t, "tree_variant_payload_kind_shadow.llcontext", `tree Syntax:
+	node Form:
+		Atom(kind: bool)
+
+def payload_kind(form: Syntax.Form) -> bool:
+	return visit form as Syntax.Form:
+		Syntax.Form.Atom(node):
+			node.kind
+`)
+}
+
 func TestAnalyzeRejectsChildrenOnMixedStructuralItemTypes(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_children_mixed.llcontext", `tree Lua:
 	@role(stmt)
