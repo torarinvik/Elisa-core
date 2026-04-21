@@ -753,7 +753,7 @@ func typeStr(t ast.TypeExpr) string {
 			prefix = n.StorageParam + " "
 		} else if n.Region != "" {
 			prefix = n.Region + " "
-		} else if n.Explicit || n.Storage != ast.RefStorageAny {
+		} else if n.Storage != ast.RefStorageAny {
 			switch n.Storage {
 			case ast.RefStorageHeap:
 				prefix = "heap "
@@ -761,8 +761,6 @@ func typeStr(t ast.TypeExpr) string {
 				prefix = "stack "
 			case ast.RefStorageStatic:
 				prefix = "static "
-			default:
-				prefix = "any "
 			}
 		}
 		switch n.State {

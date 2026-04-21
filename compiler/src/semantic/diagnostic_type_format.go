@@ -78,7 +78,7 @@ func diagnosticTypeString(t Type) string {
 			s = tt.StorageParam + " " + s
 		} else if tt.Region != "" {
 			s = tt.Region + " " + s
-		} else if tt.ExplicitStorage || tt.Storage != RefStorageAny {
+		} else if tt.Storage != RefStorageAny {
 			s = RefStorageName(tt.Storage) + " " + s
 		}
 		if tt.StateParam != "" {

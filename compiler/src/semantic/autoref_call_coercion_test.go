@@ -84,7 +84,7 @@ def build() -> i64:
 `)
 
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, `argument 1 to "bump" expects any mutable ScratchArena&`) {
+	if !strings.Contains(all, `argument 1 to "bump" expects mutable ScratchArena&`) {
 		t.Fatalf("expected mutable-local rejection diagnostic, got:\n%s", all)
 	}
 }
@@ -144,7 +144,7 @@ def build() -> i64:
 `)
 
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, `argument 1 to "bump" expects any mutable ScratchArena&`) {
+	if !strings.Contains(all, `argument 1 to "bump" expects mutable ScratchArena&`) {
 		t.Fatalf("expected immutable-field rejection diagnostic, got:\n%s", all)
 	}
 }

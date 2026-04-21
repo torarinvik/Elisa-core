@@ -384,7 +384,7 @@ def bad() -> int:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, `variable "wider" expects`) || !strings.Contains(all, `func(any Box&?) -> int`) || !strings.Contains(all, `func(any Box&) -> int`) {
+	if !strings.Contains(all, `variable "wider" expects`) || !strings.Contains(all, `func(Box&?) -> int`) || !strings.Contains(all, `func(Box&) -> int`) {
 		t.Fatalf("expected contravariant function assignment diagnostic, got:\n%s", all)
 	}
 }
@@ -784,7 +784,7 @@ def bad(job: any ParseJob&) -> void:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "argument 1 to \"finish_ok\" expects any mutable ParseJob&, got any ParseJob&") {
+	if !strings.Contains(all, "argument 1 to \"finish_ok\" expects mutable ParseJob&, got ParseJob&") {
 		t.Fatalf("expected mutable-ref call diagnostic, got:\n%s", all)
 	}
 	if !strings.Contains(all, "note: use any mutable ParseJob& here if the callee should be allowed to write through it") {
@@ -3128,7 +3128,7 @@ def bad(slot: mutable atomic[any u8&], value: any u8&) -> any u8& can[Atomics.Rm
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "argument to \"fetch_xor\" requires atomic_numeric(T), got atomic[any u8&]") {
+	if !strings.Contains(all, "argument to \"fetch_xor\" requires atomic_numeric(T), got atomic[u8&]") {
 		t.Fatalf("expected atomic_numeric pointer diagnostic, got:\n%s", all)
 	}
 }
@@ -4124,7 +4124,7 @@ def bad() -> void:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "expects any Box&, got null") {
+	if !strings.Contains(strings.Join(errs, "\n"), "expects Box&, got null") {
 		t.Fatalf("expected non-null ref rejection, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -4647,7 +4647,7 @@ def bad() -> any Box&:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "invalid cast from any Box&? to any Box&") {
+	if !strings.Contains(strings.Join(errs, "\n"), "invalid cast from Box&? to Box&") {
 		t.Fatalf("expected invalid cast diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -4671,20 +4671,16 @@ def same_box(left: any Box&, right: any Box&) -> bool:
 	requireNoErrors(t, errs)
 }
 
-func TestParseRejectsBareReferenceTypeSyntax(t *testing.T) {
+func TestAnalyzeAcceptsBareReferenceTypeSyntax(t *testing.T) {
 	src := `repr(c) struct Box:
 	value: int
 
 def read(box: Box&) -> int:
-	return box.value
+	ptr: u8& = "hello".cast[u8&]
+	return box.value + ptr[0].cast[int]
 `
-	_, errs := parseAndAnalyze(t, "bare_reference_type_parse_reject.llcontext", src)
-	if len(errs) == 0 {
-		t.Fatal("expected parse error, got none")
-	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference types require an explicit storage qualifier") {
-		t.Fatalf("expected explicit-storage parse diagnostic, got:\n%s", strings.Join(errs, "\n"))
-	}
+	_, errs := parseAndAnalyze(t, "bare_reference_type_accept.llcontext", src)
+	requireNoErrors(t, errs)
 }
 
 func TestParseRejectsLegacyDotReferenceCastSyntax(t *testing.T) {
@@ -4706,19 +4702,43 @@ func TestAnalyzeAcceptsStorageQualifiedPointersAndCastSyntax(t *testing.T) {
 
 extern maybe_heap_box() -> heap Box&?
 
-def widen(box: heap Box&?) -> any Box&?:
-	return box.cast[any Box&?]
+def widen(box: heap Box&?) -> Box&?:
+	return box.cast[Box&?]
 
 def keep_heap(box: heap Box&?) -> heap Box&?:
-	return box.cast[any Box&?].cast[heap Box&?]
+	return box.cast[Box&?].cast[heap Box&?]
 
-def coerce_text() -> any u8&:
-	return "hello".cast[any u8&]
+def coerce_text() -> u8&:
+	return "hello".cast[u8&]
 
-def use_source() -> any Box&?:
-	return maybe_heap_box().cast[any Box&?]
+def use_source() -> Box&?:
+	return maybe_heap_box().cast[Box&?]
+
+def explicit_any_still_works(box: heap Box&?) -> Box&?:
+	return box.cast[any Box&?]
 `
 	result, errs := parseAndAnalyze(t, "storage_cast_syntax.llcontext", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
+
+func TestAnalyzeRefSugarAddressCast(t *testing.T) {
+	src := `repr(c) struct Box:
+	value: int
+
+def widen_local() -> Box&:
+	box: Box = zeroed
+	return box.ref[Box&]
+
+def bytes_local() -> u8&:
+	buf: u8[4] = zeroed
+	return buf.ref[u8&]
+
+def keep_explicit_stack() -> stack Box&:
+	box: Box = zeroed
+	return box.ref[stack Box&]
+`
+	result, errs := parseAndAnalyze(t, "ref_sugar_address_cast.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
@@ -4738,21 +4758,15 @@ def widen(box: heap Box&?) -> any Box&?:
 	}
 }
 
-func TestAnalyzeRejectsImplicitStorageMismatchWithoutCast(t *testing.T) {
+func TestAnalyzeAcceptsImplicitAnyStorageWithoutCast(t *testing.T) {
 	src := `repr(c) struct Box:
 	value: int
 
-def bad(box: heap Box&) -> any Box&:
+def ok(box: heap Box&) -> Box&:
 	return box
 `
-	_, errs := parseAndAnalyze(t, "storage_mismatch_without_cast.llcontext", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
-	}
-	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "return type expects any Box&, got heap Box&") {
-		t.Fatalf("expected storage-mismatch diagnostic, got:\n%s", all)
-	}
+	_, errs := parseAndAnalyze(t, "implicit_any_storage_without_cast.llcontext", src)
+	requireNoErrors(t, errs)
 }
 
 func TestAnalyzeAcceptsEquivalentConstArrayShapes(t *testing.T) {
@@ -7688,10 +7702,10 @@ def bad(pool: any ThreadPool&, cell: any i32&) -> i64:
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "argument to \"spawn1\" is not structurally shareable across threads: any i32&") {
+	if !strings.Contains(all, "argument to \"spawn1\" is not structurally shareable across threads: i32&") {
 		t.Fatalf("expected non-static-ref spawn diagnostic, got:\n%s", all)
 	}
-	if !strings.Contains(all, "argument to \"pool_submit1\" is not structurally shareable across threads: any i32&") {
+	if !strings.Contains(all, "argument to \"pool_submit1\" is not structurally shareable across threads: i32&") {
 		t.Fatalf("expected non-static-ref pool diagnostic, got:\n%s", all)
 	}
 }
@@ -7767,10 +7781,10 @@ def bad(pool: any ThreadPool&) -> i64:
 		t.Fatal("expected semantic errors, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "result of \"spawn1\" is not structurally shareable across threads: any i32&") {
+	if !strings.Contains(all, "result of \"spawn1\" is not structurally shareable across threads: i32&") {
 		t.Fatalf("expected non-static-ref spawn-result diagnostic, got:\n%s", all)
 	}
-	if !strings.Contains(all, "result of \"pool_submit1\" is not structurally shareable across threads: any i32&") {
+	if !strings.Contains(all, "result of \"pool_submit1\" is not structurally shareable across threads: i32&") {
 		t.Fatalf("expected non-static-ref pool-result diagnostic, got:\n%s", all)
 	}
 }
@@ -8678,7 +8692,7 @@ extern bad(source: any i32&) -> any i32&
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "@borrows_return_field_rebased on extern function \"bad\" requires a concrete struct return type, got any i32&") {
+	if !strings.Contains(strings.Join(errs, "\n"), "@borrows_return_field_rebased on extern function \"bad\" requires a concrete struct return type, got i32&") {
 		t.Fatalf("expected field-rebased non-struct diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }

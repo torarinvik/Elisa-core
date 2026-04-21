@@ -461,9 +461,6 @@ func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label stri
 
 	refCount := 0
 	typ, refCount = p.parseRefTypeSuffixes(typ, pos, storage, explicit, region, storageParam)
-	if !explicit && refCount > 0 {
-		p.errorf("reference types require an explicit storage qualifier like \"any\", \"heap\", \"stack\", or \"static\"")
-	}
 	if explicit && refCount == 0 {
 		if region != "" {
 			p.errorf("region qualifier %q requires a pointer type", label)
@@ -1568,6 +1565,18 @@ func (p *Parser) parsePostfix() ast.Expr {
 					legacySyntax = true
 				}
 				expr = &ast.CastExpr{Position: pos, Operand: expr, Target: target, LegacySyntax: legacySyntax}
+				continue
+			}
+
+			if field == "ref" && p.peek() == lexer.TOKEN_LBRACKET {
+				p.advance()
+				target := p.parseTypeExpr()
+				p.expect(lexer.TOKEN_RBRACKET)
+				expr = &ast.CastExpr{
+					Position: pos,
+					Operand:  &ast.AddrOfExpr{Position: pos, Operand: expr},
+					Target:   target,
+				}
 				continue
 			}
 

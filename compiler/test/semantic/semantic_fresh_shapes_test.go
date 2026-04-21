@@ -230,7 +230,7 @@ def bad(a: any Arena&, da: any darray[i32, row]&) -> any darray[i32, row]&:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "return type expects any darray[i32, row]&, got any darray[i32, shape_out#") || !strings.Contains(all, "note: arena_da_append returns a fresh logical shape for shape_out") {
+	if !strings.Contains(all, "return type expects darray[i32, row]&, got darray[i32, shape_out#") || !strings.Contains(all, "note: arena_da_append returns a fresh logical shape for shape_out") {
 		t.Fatalf("expected fresh arena append diagnostic, got:\n%s", all)
 	}
 }
