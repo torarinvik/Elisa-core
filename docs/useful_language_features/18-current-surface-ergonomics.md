@@ -396,6 +396,27 @@ Current rules:
 - lambdas capture surrounding locals and may return closures
 - `lambda` is contextual, so a parameter or local named `lambda` still parses as an identifier outside lambda position
 
+## Tree `rewrite`
+
+`rewrite` is the tree-transform spelling for a bottom-up fold whose result type is the traversal root.
+
+```context
+def simplify(node: Expr) -> Expr:
+    return rewrite node as Expr:
+        Expr.Int(expr):
+            new[perm] Expr.Int(span: expr.span, value: expr.value)
+        Expr.Add(expr, left, right):
+            new[perm] Expr.Add(span: expr.span, left: left, right: right)
+```
+
+Current rules:
+
+- `rewrite value as Root:` is equivalent to `fold value as Root into Root:` during analysis and lowering
+- arm heads, guards, exact tree targets, variant targets, wildcard arms, and named child-result bindings follow the existing `fold` arm rules
+- named child bindings such as `left` and `right` are the already-rewritten child results
+- because the first implementation uses the existing fold machinery, all structural children must be assignable to the selected rewrite root
+- `rewrite` is contextual, so an ordinary function or local named `rewrite` still parses normally in call position such as `rewrite(value)`
+
 ## Char literals
 
 Single-quoted character literals are now part of the accepted surface.

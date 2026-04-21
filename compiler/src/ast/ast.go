@@ -869,6 +869,7 @@ type VisitExpr struct {
 
 type FoldExpr struct {
 	Position   lexer.Pos
+	Keyword    string
 	Value      Expr
 	Root       TypeExpr
 	ResultType TypeExpr

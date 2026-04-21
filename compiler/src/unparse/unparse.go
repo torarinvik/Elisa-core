@@ -1640,13 +1640,20 @@ func formatFoldExpr(expr *ast.FoldExpr) string {
 	if expr == nil {
 		return "fold <nil> as <type> into <type>:"
 	}
+	keyword := expr.Keyword
+	if keyword == "" {
+		keyword = "fold"
+	}
 	var builder strings.Builder
-	builder.WriteString("fold ")
+	builder.WriteString(keyword)
+	builder.WriteByte(' ')
 	builder.WriteString(formatExpr(expr.Value))
 	builder.WriteString(" as ")
 	builder.WriteString(formatTypeExpr(expr.Root))
-	builder.WriteString(" into ")
-	builder.WriteString(formatTypeExpr(expr.ResultType))
+	if keyword != "rewrite" {
+		builder.WriteString(" into ")
+		builder.WriteString(formatTypeExpr(expr.ResultType))
+	}
 	builder.WriteString(":")
 	formatVisitArmsInto(&builder, expr.Arms)
 	return builder.String()

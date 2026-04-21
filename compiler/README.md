@@ -32,7 +32,7 @@ That reference covers the currently implemented syntax for:
 - explicit argument packs via `params` and ambient `with args(...)` scopes
 - brace destructuring, field punning, record updates, and filtered iterable loops
 - `do:` blocks, `defer`, index fallback, store/dict sugar, char literals, and explicit `parallel for`
-- cascade blocks and expressions, lambda literals, and postfix cast hooks
+- cascade blocks and expressions, lambda literals, tree `rewrite`, and postfix cast hooks
 - static interfaces, associated types, extension methods, UFCS rewriting, safe call chaining, and the preferred generic specialization surface
 
 ## Syntax cheat sheet
@@ -64,6 +64,11 @@ cascade report:
   .inner.value <- value
 return lambda (value: i64) -> i64:
   return value + 1
+return rewrite node as Expr:
+  Expr.Int(expr):
+    new[perm] Expr.Int(span: expr.span, value: expr.value)
+  Expr.Add(expr, left, right):
+    new[perm] Expr.Add(span: expr.span, left: left, right: right)
 ```
 
 ```text

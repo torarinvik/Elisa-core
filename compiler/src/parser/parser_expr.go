@@ -1059,6 +1059,16 @@ func (p *Parser) parseFoldExpr() ast.Expr {
 	return &ast.FoldExpr{Position: pos, Value: value, Root: root, ResultType: resultType, Arms: arms}
 }
 
+func (p *Parser) parseRewriteExpr() ast.Expr {
+	pos := p.cur().Pos
+	p.expectIdentText("rewrite")
+	value := p.withAsCastDisabled(p.parseExpr)
+	p.expect(lexer.TOKEN_AS)
+	root := p.parseTypeExpr()
+	arms := p.parseVisitArms()
+	return &ast.FoldExpr{Position: pos, Keyword: "rewrite", Value: value, Root: root, ResultType: root, Arms: arms}
+}
+
 func (p *Parser) parseLambdaExpr() ast.Expr {
 	pos := p.cur().Pos
 	keyword := p.expect(lexer.TOKEN_IDENT).Text
@@ -1807,6 +1817,9 @@ func (p *Parser) parsePrimary() ast.Expr {
 		}
 		if p.cur().Text == "fold" && !(p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LPAREN) {
 			return p.parseFoldExpr()
+		}
+		if p.cur().Text == "rewrite" && !(p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LPAREN) {
+			return p.parseRewriteExpr()
 		}
 		tok := p.advance()
 		if len(tok.Text) > 0 && tok.Text[0] >= 'A' && tok.Text[0] <= 'Z' && p.peekStructLiteralTypeArgsFollowedBy(lexer.TOKEN_LPAREN) {

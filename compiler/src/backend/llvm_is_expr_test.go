@@ -875,6 +875,34 @@ def score(node: Lua.Expr) -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersTreeRewriteExpr(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Binary(child left: Expr, child right: Expr)
+
+def simplify(node: Lua.Expr) -> Lua.Expr:
+	return rewrite node as Lua.Expr:
+		Lua.Expr.Int(expr):
+			new[perm] Lua.Expr.Int(span: expr.span, value: expr.value)
+		Lua.Expr.Binary(expr, left, right):
+			new[perm] Lua.Expr.Binary(span: expr.span, left: left, right: right)
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_rewrite_expr.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define %Lua__TreeHandle @simplify(%Lua__TreeHandle ", "define private %Lua__TreeHandle @tree_fold_", "call %Lua__TreeHandle @tree_fold_", "fold.arm.named.left.value", "fold.arm.named.right.value"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected tree rewrite lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersGuardedTreeFoldExpr(t *testing.T) {
 	src := `tree Lua:
 	common:

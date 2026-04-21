@@ -3906,9 +3906,12 @@ func visitDomainKeys(root treeVisitRootInfo) []string {
 	}
 }
 
-func (a *Analyzer) reportNonExhaustiveVisit(pos lexer.Pos, root treeVisitRootInfo, covered map[string]bool, hasWildcard bool) {
+func (a *Analyzer) reportNonExhaustiveVisit(pos lexer.Pos, root treeVisitRootInfo, covered map[string]bool, hasWildcard bool, keyword string) {
 	if hasWildcard {
 		return
+	}
+	if keyword == "" {
+		keyword = "visit"
 	}
 	missing := make([]string, 0)
 	for _, key := range visitDomainKeys(root) {
@@ -3935,13 +3938,13 @@ func (a *Analyzer) reportNonExhaustiveVisit(pos lexer.Pos, root treeVisitRootInf
 			label = root.Family.NodeType.String()
 		}
 	}
-	a.errorf(pos, "non-exhaustive visit over %s; missing %s", label, strings.Join(missing, ", "))
+	a.errorf(pos, "non-exhaustive %s over %s; missing %s", keyword, label, strings.Join(missing, ", "))
 }
 
 func (a *Analyzer) resolveVisitRootInfo(valueType Type, rootExpr ast.TypeExpr, pos lexer.Pos) (treeVisitRootInfo, bool) {
 	sourceMember, sourceFamily, ok := resolveTreeVisitSourceType(valueType)
 	if !ok || sourceFamily == nil {
-		a.errorf(pos, "visit/fold expects a tree node source, got %s", valueType)
+		a.errorf(pos, "visit/fold/rewrite expects a tree node source, got %s", valueType)
 		return treeVisitRootInfo{}, false
 	}
 	if rootExpr == nil {
@@ -4066,7 +4069,7 @@ func (a *Analyzer) resolveVisitArmInfo(root treeVisitRootInfo, arm ast.VisitArm)
 	}
 }
 
-func (a *Analyzer) analyzeVisitArmBody(armInfo treeVisitArmInfo, resultType Type, scope *Scope, forFold bool) (Type, affineFlowSnapshot, bool) {
+func (a *Analyzer) analyzeVisitArmBody(armInfo treeVisitArmInfo, resultType Type, scope *Scope, forFold bool, foldKeyword string) (Type, affineFlowSnapshot, bool) {
 	if armInfo.Arm.BindName != "" && armInfo.BindType != nil {
 		a.defineLocalInScope(scope, &Symbol{Name: armInfo.Arm.BindName, Kind: SymbolLocal, Type: armInfo.BindType, Mutable: false}, armInfo.Arm.Position)
 	}
@@ -4078,6 +4081,9 @@ func (a *Analyzer) analyzeVisitArmBody(armInfo treeVisitArmInfo, resultType Type
 		if !forFold {
 			a.errorf(armInfo.Arm.Position, "visit arm %q cannot bind fold child results", armInfo.Arm.TargetName)
 		} else {
+			if foldKeyword == "" {
+				foldKeyword = "fold"
+			}
 			bindingTypes := treeFoldArmChildBindingTypes(armInfo.BindType, resultType)
 			seenFields := map[string]bool{}
 			for _, binding := range armInfo.Arm.ChildBindings {
@@ -4085,13 +4091,13 @@ func (a *Analyzer) analyzeVisitArmBody(armInfo treeVisitArmInfo, resultType Type
 					continue
 				}
 				if seenFields[binding.FieldName] {
-					a.errorf(binding.Position, "fold arm %q binds child result %q more than once", armInfo.Arm.TargetName, binding.FieldName)
+					a.errorf(binding.Position, "%s arm %q binds child result %q more than once", foldKeyword, armInfo.Arm.TargetName, binding.FieldName)
 					continue
 				}
 				seenFields[binding.FieldName] = true
 				bindingType, ok := bindingTypes[binding.FieldName]
 				if !ok {
-					a.errorf(binding.Position, "fold arm %q has no structural child result named %q", armInfo.Arm.TargetName, binding.FieldName)
+					a.errorf(binding.Position, "%s arm %q has no structural child result named %q", foldKeyword, armInfo.Arm.TargetName, binding.FieldName)
 					continue
 				}
 				a.defineLocalInScope(scope, &Symbol{Name: binding.BindName, Kind: SymbolLocal, Type: bindingType, Mutable: false}, binding.Position)
@@ -4207,7 +4213,7 @@ func (a *Analyzer) analyzeVisitExpr(expr *ast.VisitExpr) Type {
 			}
 		}
 		scope := NewScope(a.currentScope)
-		armType, armSnapshot, armCanFallthrough := a.analyzeVisitArmBody(armInfo, nil, scope, false)
+		armType, armSnapshot, armCanFallthrough := a.analyzeVisitArmBody(armInfo, nil, scope, false, "")
 		if armCanFallthrough {
 			if !hasFallthrough {
 				mergedAffine = armSnapshot.Affine
@@ -4252,7 +4258,7 @@ func (a *Analyzer) analyzeVisitExpr(expr *ast.VisitExpr) Type {
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 	a.currentFunctionValues = mergedFunctionValues
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
-	a.reportNonExhaustiveVisit(expr.Pos(), root, covered, hasWildcard)
+	a.reportNonExhaustiveVisit(expr.Pos(), root, covered, hasWildcard, "visit")
 	if resultType == nil {
 		return neverType
 	}
@@ -4397,6 +4403,10 @@ func (a *Analyzer) analyzeFoldExpr(expr *ast.FoldExpr) Type {
 	a.validateFoldRecursionRoot(expr.Pos(), root)
 	a.recordFoldExprInfo(expr)
 	resultType := a.resolveType(expr.ResultType)
+	keyword := expr.Keyword
+	if keyword == "" {
+		keyword = "fold"
+	}
 	covered := map[string]bool{}
 	priorKeys := map[string]bool{}
 	hasWildcard := false
@@ -4425,17 +4435,17 @@ func (a *Analyzer) analyzeFoldExpr(expr *ast.FoldExpr) Type {
 		guarded := arm.Guard != nil
 		if armInfo.Arm.Wildcard {
 			if hasWildcard {
-				a.errorf(arm.Position, "fold wildcard arm is unreachable because an earlier wildcard already matches")
+				a.errorf(arm.Position, "%s wildcard arm is unreachable because an earlier wildcard already matches", keyword)
 			}
 			if !guarded {
 				hasWildcard = true
 			}
 		} else if armOK {
 			if hasWildcard {
-				a.errorf(arm.Position, "fold arm %q is unreachable because an earlier wildcard already matches", arm.TargetName)
+				a.errorf(arm.Position, "%s arm %q is unreachable because an earlier wildcard already matches", keyword, arm.TargetName)
 			}
 			if priorKeys[armInfo.Key] {
-				a.errorf(arm.Position, "fold arm %q is unreachable because an earlier arm already matches it", arm.TargetName)
+				a.errorf(arm.Position, "%s arm %q is unreachable because an earlier arm already matches it", keyword, arm.TargetName)
 			}
 			if !guarded {
 				priorKeys[armInfo.Key] = true
@@ -4443,9 +4453,9 @@ func (a *Analyzer) analyzeFoldExpr(expr *ast.FoldExpr) Type {
 			}
 		}
 		scope := NewScope(a.currentScope)
-		armType, armSnapshot, armCanFallthrough := a.analyzeVisitArmBody(armInfo, resultType, scope, true)
+		armType, armSnapshot, armCanFallthrough := a.analyzeVisitArmBody(armInfo, resultType, scope, true, keyword)
 		if !IsNeverType(armType) && !AssignableTo(resultType, armType) {
-			a.errorf(arm.Position, "fold arm %q expects %s, got %s", arm.TargetName, resultType, armType)
+			a.errorf(arm.Position, "%s arm %q expects %s, got %s", keyword, arm.TargetName, resultType, armType)
 			a.reportShapeMismatchNotes(arm.Position, resultType, armType)
 		}
 		if armCanFallthrough {
@@ -4481,7 +4491,7 @@ func (a *Analyzer) analyzeFoldExpr(expr *ast.FoldExpr) Type {
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 	a.currentFunctionValues = mergedFunctionValues
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
-	a.reportNonExhaustiveVisit(expr.Pos(), root, covered, hasWildcard)
+	a.reportNonExhaustiveVisit(expr.Pos(), root, covered, hasWildcard, keyword)
 	return resultType
 }
 

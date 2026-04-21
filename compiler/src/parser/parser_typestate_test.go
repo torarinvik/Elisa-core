@@ -1175,6 +1175,42 @@ func TestParseTreeVisitAndFoldExprs(t *testing.T) {
 	}
 }
 
+func TestParseTreeRewriteExpr(t *testing.T) {
+	file, errs := parseSourceFile(t, "tree Lua:\n    common:\n        span: i64\n    @role(expr)\n    node Expr:\n        Int(value: i64)\n        Binary(child left: Expr, child right: Expr)\n\ndef simplify(node: Lua.Expr) -> Lua.Expr:\n    return rewrite node as Lua.Expr:\n        Lua.Expr.Int(expr):\n            new[perm] Lua.Expr.Int(span: expr.span, value: expr.value)\n        Lua.Expr.Binary(expr, left, right):\n            new[perm] Lua.Expr.Binary(span: expr.span, left: left, right: right)\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[1])
+	}
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+	}
+	rewriteExpr, ok := ret.Value.(*ast.FoldExpr)
+	if !ok {
+		t.Fatalf("expected rewrite to parse as fold-backed expr, got %T", ret.Value)
+	}
+	if rewriteExpr.Keyword != "rewrite" {
+		t.Fatalf("expected rewrite keyword marker, got %q", rewriteExpr.Keyword)
+	}
+	rootType, ok := rewriteExpr.Root.(*ast.NamedType)
+	if !ok || rootType.Name != "Lua.Expr" {
+		t.Fatalf("expected rewrite root Lua.Expr, got %#v", rewriteExpr.Root)
+	}
+	resultType, ok := rewriteExpr.ResultType.(*ast.NamedType)
+	if !ok || resultType.Name != "Lua.Expr" {
+		t.Fatalf("expected rewrite result Lua.Expr, got %#v", rewriteExpr.ResultType)
+	}
+	if len(rewriteExpr.Arms) != 2 || len(rewriteExpr.Arms[1].ChildBindings) != 2 {
+		t.Fatalf("unexpected rewrite arms: %#v", rewriteExpr.Arms)
+	}
+	if got := unparse.FormatExpr(rewriteExpr); !strings.HasPrefix(got, "rewrite node as Lua.Expr:") {
+		t.Fatalf("expected unparse to preserve rewrite spelling, got:\n%s", got)
+	}
+}
+
 func TestParseDeferStatements(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep() -> int:\n    defer block:\n        pass\n    defer function:\n        pass\n    return 0\n")
 	if len(errs) != 0 {
