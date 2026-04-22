@@ -2481,8 +2481,35 @@ func TreeStructFieldDeclsWithCommon(structType *TreeStructType) []ast.FieldDecl 
 	return out
 }
 
+func TreeVariantFieldDeclsWithCommon(viewType *TreeVariantViewType) []ast.FieldDecl {
+	if viewType == nil || viewType.Category == nil || viewType.Variant == nil {
+		return nil
+	}
+	out := append([]ast.FieldDecl(nil), TreeCommonFieldDeclsForFamily(viewType.Category.Family)...)
+	for i := range viewType.Variant.Payload {
+		name := viewType.Variant.PayloadLabel(i)
+		if name == "" {
+			name = fmt.Sprintf("payload%d", i)
+		}
+		out = append(out, ast.FieldDecl{Name: name})
+	}
+	return out
+}
+
 func TreeExactFieldInfo(member Type, fieldName string) (Field, bool) {
 	switch tt := StripAggregateStateType(member).(type) {
+	case *TreeVariantViewType:
+		if tt == nil || tt.Category == nil || tt.Variant == nil {
+			return Field{}, false
+		}
+		if field, ok := tt.Category.Common[fieldName]; ok {
+			return field, true
+		}
+		index, ok := tt.Variant.PayloadIndex(fieldName)
+		if !ok || index < 0 || index >= len(tt.Variant.Payload) {
+			return Field{}, false
+		}
+		return Field{Type: tt.Variant.Payload[index]}, true
 	case *TreeBlockType:
 		if tt == nil {
 			return Field{}, false
@@ -2508,6 +2535,11 @@ func TreeExactFieldInfo(member Type, fieldName string) (Field, bool) {
 
 func TreeExactTag(t Type) (uint32, bool) {
 	switch tt := StripAggregateStateType(t).(type) {
+	case *TreeVariantViewType:
+		if tt == nil || tt.Variant == nil {
+			return 0, false
+		}
+		return tt.Variant.Tag, true
 	case *TreeBlockType:
 		if tt == nil {
 			return 0, false

@@ -9798,7 +9798,7 @@ func TestAnalyzePinsCollectionsDictContracts(t *testing.T) {
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "arena_dict_new__i64", "dict[dstr[key_shape], i64]")
-	requireFunctionReturnTypeString(t, result, "arena_dict_get__i64", "any mutable i64&?")
+	requireFunctionReturnTypeString(t, result, "arena_dict_get__i64", "mutable i64&?")
 }
 
 func TestAnalyzePinsStoresHeapPointerContracts(t *testing.T) {

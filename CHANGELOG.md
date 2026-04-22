@@ -8,6 +8,7 @@ All notable changes to this repository should be documented in this file.
 
 - Postfix shorthand casts like `value.i64()` now dispatch to visible `__cast__` hooks when an exact source-to-target hook exists, with permission-aware semantic analysis and LLVM lowering.
 - Tree `rewrite value as Root:` expressions now provide a transform-oriented spelling for bottom-up tree reconstruction, including exact type preservation across heterogeneous tree families.
+- Exact tree members now support record-update syntax like `node{left, right}` plus contextual `default` inside exact `rewrite` arms, so common tree edits can reuse the same surface as ordinary records.
 - Packed-enum `common:` fields can now opt into side-table storage via `@storage(side_table)`, including end-to-end runtime/backend support and ABI validation.
 - `@test` functions may now declare `Abort.*` permissions, which keeps panic/assert-heavy compiler fixtures valid without opening the door to unrelated declared permissions.
 - The Lua frontend experiment now ships with a storage-layout benchmark harness that compares the checked-in side-table layout against a temporary inline-control variant.
@@ -21,6 +22,8 @@ All notable changes to this repository should be documented in this file.
 
 - Postfix shorthand cast-hook resolution for `expr.TargetType()` syntax when a visible `def __cast__(value: Source) -> Target` hook matches exactly.
 - Tree `rewrite` expressions, backed by existing fold analysis and LLVM helper lowering, with named child bindings typed as the corresponding rewritten child edge.
+- Exact tree-member record updates via existing brace-update syntax, including explicit-owner forms like `new[owner] node{...}`.
+- Contextual `default` expressions inside exact tree `rewrite` arms, including rebuilds for scalar, child, and `children` fields.
 - Side-table packed common-field storage via `@storage(side_table)` on `packed enum` `common:` fields.
 - Lua frontend storage benchmark tooling:
   - `Code/benchmarks/lua_frontend_bench.c`
@@ -83,6 +86,7 @@ All notable changes to this repository should be documented in this file.
 
 - `compiler/README.md` now documents the latest postfix cast-hook surface and the Lua frontend storage benchmark harness.
 - Expanded `docs/useful_language_features/18-current-surface-ergonomics.md` with the current implemented surfaces for `do:` blocks, `defer`, index fallback, store/dict sugar, explicit `parallel for`, char literals, and the newer loop/control-flow ergonomics.
+- Expanded `docs/useful_language_features/18-current-surface-ergonomics.md` with tree exact-update syntax and contextual `rewrite ... default` examples.
 - Documented tree `rewrite` as the transform-oriented spelling for same-root bottom-up tree folds.
 - Added `docs/useful_language_features/19-static-interfaces-extension-methods-and-ufcs.md` as the implemented reference for static interfaces, extension methods, UFCS rewriting, safe call chaining, and the preferred generic specialization surface.
 - Added `docs/useful_language_features/20-annotations-and-compile-time-hints.md` as the implemented reference for current layout annotations, packed-layout annotations, function codegen hints, guard annotations, and branch hints.

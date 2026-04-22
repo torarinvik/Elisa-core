@@ -37,6 +37,7 @@ type Result struct {
 	ParamPacks              map[string]*ParamPack
 	ConstValues             map[string]ConstValue
 	ExprTypes               map[ast.Expr]Type
+	RewriteDefaults         map[*ast.Ident]bool
 	OptionalBindSourceTypes map[*ast.OptionalBindExpr]Type
 	InterfaceMethodRefs     map[*ast.FieldExpr]*InterfaceMethodRef
 	SafeCalls               map[*ast.CallExpr]*SafeCallInfo

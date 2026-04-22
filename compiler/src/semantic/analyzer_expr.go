@@ -96,6 +96,10 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 				return
 			}
 		}
+		if rewriteDefaultType, ok := a.analyzeRewriteDefaultIdent(n); ok {
+			result = rewriteDefaultType
+			return
+		}
 		a.errorf(n.Pos(), "undefined identifier %q", n.Name)
 		result = invalidType
 		return
@@ -468,6 +472,28 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	}
 }
 
+func (a *Analyzer) analyzeRewriteDefaultIdent(expr *ast.Ident) (Type, bool) {
+	if expr == nil || expr.Name != "default" {
+		return nil, false
+	}
+	if a.currentRewriteDefault == nil {
+		a.errorf(expr.Pos(), "default is only allowed inside a rewrite arm body")
+		return invalidType, true
+	}
+	if !a.currentRewriteDefault.Allowed || a.currentRewriteDefault.ResultType == nil {
+		message := a.currentRewriteDefault.Message
+		if message == "" {
+			message = "default is only allowed inside an exact tree rewrite arm"
+		}
+		a.errorf(expr.Pos(), "%s", message)
+		return invalidType, true
+	}
+	if a.rewriteDefaults != nil {
+		a.rewriteDefaults[expr] = true
+	}
+	return a.currentRewriteDefault.ResultType, true
+}
+
 func (a *Analyzer) analyzeExprBlock(expr *ast.ExprBlock) Type {
 	if expr == nil || expr.Value == nil {
 		return invalidType
@@ -705,6 +731,25 @@ func (a *Analyzer) analyzeAllocExprWithExpected(expr *ast.AllocExpr, expected Ty
 	}
 	if expr.Owner == nil {
 		return a.analyzeScopedPackedAllocExpr(expr)
+	}
+	if updateExpr, ok := expr.Value.(*ast.RecordUpdateExpr); ok && updateExpr != nil {
+		baseType := a.analyzeExpr(updateExpr.Base)
+		if _, exact := TreeExactTag(baseType); exact {
+			owner, ownerType, ownerOK := a.classifyTreeAllocOwnerExpr(expr.Owner)
+			family, _ := TreeFamilyForMemberType(baseType)
+			if !ownerOK {
+				if ownerType != nil {
+					a.errorf(allocOwnerPos(expr), "tree allocation owner must be perm, a tree store, an Arena value, or an Arena reference, got %s", ownerType)
+				} else {
+					a.errorf(allocOwnerPos(expr), "tree allocation owner must be perm, a tree store, an Arena value, or an Arena reference, got %s", "<invalid>")
+				}
+				return a.analyzeRecordUpdateExprWithTreeOwnerRequirement(updateExpr, false)
+			}
+			if owner.Kind == treeAllocOwnerStore && owner.StoreFamily != nil && family != owner.StoreFamily {
+				a.errorf(allocOwnerPos(expr), "tree update of %q requires store %q, got %q", baseType, family.StoreType, ownerType)
+			}
+			return a.analyzeRecordUpdateExprWithTreeOwnerRequirement(updateExpr, false)
+		}
 	}
 	if treeType, variant, callExpr, ok := a.treeAllocConstructorInfo(expr.Value); ok {
 		owner, ownerType, ownerOK := a.classifyTreeAllocOwnerExpr(expr.Owner)
@@ -1688,13 +1733,17 @@ func (a *Analyzer) analyzeStructLiteralExpr(expr *ast.StructLitExpr, expected Ty
 }
 
 func (a *Analyzer) analyzeRecordUpdateExpr(expr *ast.RecordUpdateExpr) Type {
+	return a.analyzeRecordUpdateExprWithTreeOwnerRequirement(expr, true)
+}
+
+func (a *Analyzer) analyzeRecordUpdateExprWithTreeOwnerRequirement(expr *ast.RecordUpdateExpr, requireTreeOwner bool) Type {
 	if expr == nil || expr.Base == nil {
 		return invalidType
 	}
 	baseType := a.analyzeExpr(expr.Base)
 	stripped := StripAggregateStateType(baseType)
 	switch stripped.(type) {
-	case *StructType, *GenericInstanceType, *TreeBlockType, *TreeStructType:
+	case *StructType, *GenericInstanceType, *TreeVariantViewType, *TreeBlockType, *TreeStructType:
 	default:
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)
@@ -1703,6 +1752,11 @@ func (a *Analyzer) analyzeRecordUpdateExpr(expr *ast.RecordUpdateExpr) Type {
 			a.errorf(expr.Pos(), "record update requires a concrete struct or store-row value, got %s", baseType)
 		}
 		return invalidType
+	}
+	if requireTreeOwner {
+		if _, exact := TreeExactTag(stripped); exact {
+			a.requireActiveTreeUpdateOwner(expr.Pos(), stripped)
+		}
 	}
 	fields, ok := a.resolvedStructFields(baseType)
 	if !ok {
@@ -1756,6 +1810,34 @@ func (a *Analyzer) analyzeRecordUpdateExpr(expr *ast.RecordUpdateExpr) Type {
 	}
 	a.consumeAffineValueExpr(expr.Base, baseType, "record update")
 	return baseType
+}
+
+func (a *Analyzer) requireActiveTreeUpdateOwner(pos lexer.Pos, memberType Type) bool {
+	family, ok := TreeFamilyForMemberType(memberType)
+	if !ok || family == nil {
+		return false
+	}
+	switch a.currentTreeAllocOwner.Kind {
+	case treeAllocOwnerPerm, treeAllocOwnerArena:
+		return true
+	case treeAllocOwnerRegion:
+		if a.currentTreeAllocOwner.RegionName != "" {
+			if regionSym, state := a.lookupRegionState(a.currentTreeAllocOwner.RegionName); regionSym == nil || state.Destroyed {
+				a.errorf(pos, "tree update of %q cannot allocate from destroyed region %q", memberType.String(), a.currentTreeAllocOwner.RegionName)
+				return false
+			}
+		}
+		return true
+	case treeAllocOwnerStore:
+		if a.currentTreeAllocOwner.StoreFamily != nil && family != a.currentTreeAllocOwner.StoreFamily {
+			a.errorf(pos, "tree update of %q requires active store %q, got active store for %q", memberType.String(), family.StoreType, a.currentTreeAllocOwner.StoreFamily.Name)
+			return false
+		}
+		return true
+	default:
+		a.errorf(pos, "tree update of %q requires an active in <owner>: scope or explicit new[owner]", memberType.String())
+		return false
+	}
 }
 
 func (a *Analyzer) structLiteralTargetType(expr *ast.StructLitExpr, expected Type) Type {
@@ -2435,6 +2517,8 @@ func (a *Analyzer) treeVariantExprType(expr *ast.FieldExpr) (*TreeCategoryType, 
 
 func treeExactMemberFieldDecls(memberType Type) []ast.FieldDecl {
 	switch tt := StripAggregateStateType(memberType).(type) {
+	case *TreeVariantViewType:
+		return TreeVariantFieldDeclsWithCommon(tt)
 	case *TreeBlockType:
 		return TreeBlockFieldDeclsWithCommon(tt)
 	case *TreeStructType:

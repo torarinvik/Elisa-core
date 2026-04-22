@@ -770,6 +770,83 @@ def clone_block(block: Lua.Block) -> Lua.Block:
 `)
 }
 
+func TestAnalyzeTreeExactRecordUpdateExpr(t *testing.T) {
+	analyzeTreeTestSource(t, "tree_exact_update_surface.llcontext", `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Binary(child left: Expr, child right: Expr)
+
+def rewrite_binary(node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr.Binary:
+	in perm:
+		return node{left, right}
+
+def rewrite_binary_explicit(owner: Arena, node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr.Binary:
+	alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+	return new[alloc] node{left, right}
+`)
+}
+
+func TestAnalyzeTreeExactRecordUpdateRequiresOwner(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_exact_update_owner_required.llcontext", `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Binary(child left: Expr, child right: Expr)
+
+def rewrite_binary(node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr.Binary:
+	return node{left, right}
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `tree update of "Lua.Expr.Binary" requires an active in <owner>: scope or explicit new[owner]`) {
+		t.Fatalf("expected tree update owner diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeTreeRewriteDefaultExpr(t *testing.T) {
+	analyzeTreeTestSource(t, "tree_rewrite_default_surface.llcontext", `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Binary(child left: Expr, child right: Expr)
+
+def simplify(node: Lua.Expr) -> Lua.Expr:
+	in perm:
+		return rewrite node as Lua.Expr:
+			Lua.Expr.Int(expr):
+				default
+			Lua.Expr.Binary(expr, left, right):
+				default
+`)
+}
+
+func TestAnalyzeTreeRewriteDefaultRequiresExactArm(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_rewrite_default_requires_exact.llcontext", `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Binary(child left: Expr, child right: Expr)
+
+def simplify(node: Lua.Expr) -> Lua.Expr:
+	in perm:
+		return rewrite node as Lua.Node:
+			_:
+				default
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `default is only allowed inside an exact tree rewrite arm`) {
+		t.Fatalf("expected exact rewrite default diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeTreeVariantPayloadKindShadowsSyntheticKind(t *testing.T) {
 	analyzeTreeTestSource(t, "tree_variant_payload_kind_shadow.llcontext", `tree Syntax:
 	node Form:

@@ -1127,30 +1127,46 @@ func (a *Analyzer) resolvedStructFields(actual Type) ([]moveBindResolvedField, b
 	switch tt := actual.(type) {
 	case *StructType:
 		base = tt
+	case *TreeVariantViewType:
+		if tt == nil {
+			return nil, false
+		}
+		fieldDecls := treeExactMemberFieldDecls(tt)
+		fields := make([]moveBindResolvedField, 0, len(fieldDecls))
+		for i, fieldDecl := range fieldDecls {
+			resolved, ok := TreeExactFieldInfo(tt, fieldDecl.Name)
+			if !ok {
+				continue
+			}
+			fields = append(fields, moveBindResolvedField{Name: fieldDecl.Name, Type: resolved.Type, Mutable: resolved.Mutable, Index: i})
+		}
+		return fields, true
 	case *TreeBlockType:
 		if tt == nil {
 			return nil, false
 		}
-		fields := make([]moveBindResolvedField, 0, len(tt.Fields))
-		for i, field := range tt.Decl.Fields {
-			resolved, ok := tt.Fields[field.Name]
+		fieldDecls := treeExactMemberFieldDecls(tt)
+		fields := make([]moveBindResolvedField, 0, len(fieldDecls))
+		for i, fieldDecl := range fieldDecls {
+			resolved, ok := TreeExactFieldInfo(tt, fieldDecl.Name)
 			if !ok {
 				continue
 			}
-			fields = append(fields, moveBindResolvedField{Name: field.Name, Type: resolved.Type, Mutable: resolved.Mutable, Index: i})
+			fields = append(fields, moveBindResolvedField{Name: fieldDecl.Name, Type: resolved.Type, Mutable: resolved.Mutable, Index: i})
 		}
 		return fields, true
 	case *TreeStructType:
 		if tt == nil {
 			return nil, false
 		}
-		fields := make([]moveBindResolvedField, 0, len(tt.Fields))
-		for i, field := range tt.Decl.Fields {
-			resolved, ok := tt.Fields[field.Name]
+		fieldDecls := treeExactMemberFieldDecls(tt)
+		fields := make([]moveBindResolvedField, 0, len(fieldDecls))
+		for i, fieldDecl := range fieldDecls {
+			resolved, ok := TreeExactFieldInfo(tt, fieldDecl.Name)
 			if !ok {
 				continue
 			}
-			fields = append(fields, moveBindResolvedField{Name: field.Name, Type: resolved.Type, Mutable: resolved.Mutable, Index: i})
+			fields = append(fields, moveBindResolvedField{Name: fieldDecl.Name, Type: resolved.Type, Mutable: resolved.Mutable, Index: i})
 		}
 		return fields, true
 	case *TupleType:
@@ -4070,6 +4086,18 @@ func (a *Analyzer) resolveVisitArmInfo(root treeVisitRootInfo, arm ast.VisitArm)
 }
 
 func (a *Analyzer) analyzeVisitArmBody(armInfo treeVisitArmInfo, resultType Type, scope *Scope, forFold bool, foldKeyword string, forRewrite bool, childResultsElemType Type) (Type, affineFlowSnapshot, bool) {
+	savedRewriteDefault := a.currentRewriteDefault
+	if forRewrite {
+		ctx := &rewriteDefaultContext{Message: "default is only allowed inside an exact tree rewrite arm"}
+		if _, exact := TreeExactTag(armInfo.BindType); exact {
+			ctx.Allowed = true
+			ctx.ResultType = TreeRewriteResultTypeForValue(armInfo.BindType)
+		}
+		a.currentRewriteDefault = ctx
+		defer func() {
+			a.currentRewriteDefault = savedRewriteDefault
+		}()
+	}
 	if armInfo.Arm.BindName != "" && armInfo.BindType != nil {
 		a.defineLocalInScope(scope, &Symbol{Name: armInfo.Arm.BindName, Kind: SymbolLocal, Type: armInfo.BindType, Mutable: false}, armInfo.Arm.Position)
 	}

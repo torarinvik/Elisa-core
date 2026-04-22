@@ -85,6 +85,7 @@ type Analyzer struct {
 	functionTypes                     map[string]*FuncType
 	constValues                       map[string]ConstValue
 	exprTypes                         map[ast.Expr]Type
+	rewriteDefaults                   map[*ast.Ident]bool
 	optionalBindSourceTypes           map[*ast.OptionalBindExpr]Type
 	interfaceMethodRefs               map[*ast.FieldExpr]*InterfaceMethodRef
 	safeCalls                         map[*ast.CallExpr]*SafeCallInfo
@@ -130,6 +131,7 @@ type Analyzer struct {
 	currentPackedStores               map[string]*PackedEnumStoreType
 	currentPackedStoreResolutions     map[*Symbol]packedStoreResolution
 	currentTreeAllocOwner             treeAllocOwnerBinding
+	currentRewriteDefault             *rewriteDefaultContext
 	currentAllocExpr                  ast.Expr
 	currentPoolScopes                 []poolScopeState
 	currentFunctionUsedPermissions    map[string]bool
@@ -220,6 +222,12 @@ type treeAllocOwnerBinding struct {
 	StoreFamily *TreeType
 }
 
+type rewriteDefaultContext struct {
+	Allowed    bool
+	ResultType Type
+	Message    string
+}
+
 type regionRefState struct {
 	Deps                    map[*Symbol]regionDependencyState
 	StoreDeps               map[*Symbol]packedStoreDependencyState
@@ -291,6 +299,7 @@ func Analyze(file *ast.File) *Result {
 		functionTypes:                     map[string]*FuncType{},
 		constValues:                       map[string]ConstValue{},
 		exprTypes:                         make(map[ast.Expr]Type, exprCapacity),
+		rewriteDefaults:                   make(map[*ast.Ident]bool, exprCapacity/128+4),
 		optionalBindSourceTypes:           make(map[*ast.OptionalBindExpr]Type, exprCapacity/16+8),
 		interfaceMethodRefs:               make(map[*ast.FieldExpr]*InterfaceMethodRef, exprCapacity/16+8),
 		safeCalls:                         make(map[*ast.CallExpr]*SafeCallInfo, exprCapacity/32+8),
@@ -348,6 +357,7 @@ func Analyze(file *ast.File) *Result {
 		ParamPacks:              a.paramPacks,
 		ConstValues:             a.constValues,
 		ExprTypes:               a.exprTypes,
+		RewriteDefaults:         a.rewriteDefaults,
 		OptionalBindSourceTypes: a.optionalBindSourceTypes,
 		InterfaceMethodRefs:     a.interfaceMethodRefs,
 		SafeCalls:               a.safeCalls,

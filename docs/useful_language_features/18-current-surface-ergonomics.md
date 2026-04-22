@@ -228,6 +228,50 @@ for {name_key, depth} in pending.rows():
     total <- total + name_key + depth
 ```
 
+## Tree exact updates and `rewrite ... default`
+
+Exact tree members reuse the same brace-update surface as structs.
+
+```context
+tree Lua:
+    common:
+        span: i64
+    @role(expr)
+    node Expr:
+        Int(value: i64)
+        Binary(child left: Expr, child right: Expr)
+    block Block:
+        items: darray[Expr]
+
+def rotate(node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr.Binary:
+    in perm:
+        return node{left, right}
+
+def rotate_into(owner: Arena, node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr.Binary:
+    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    return new[alloc] node{left, right}
+
+def simplify(node: Lua.Node) -> Lua.Node:
+    in perm:
+        return rewrite node as Lua.Node:
+            Lua.Expr.Int(expr):
+                default
+            Lua.Expr.Binary(expr, left, right):
+                expr{left, right}
+            Lua.Block(block, items: items):
+                default
+```
+
+Current rules:
+
+- `member{field, other = value}` works for exact tree members such as nodes, blocks, structs, and exact variants
+- tree exact updates preserve the exact member tag and copy every unchanged field from the source handle
+- bare tree exact updates still require an active tree owner such as `in perm:` or `in owner:` because the result is a fresh tree value
+- `new[owner] member{...}` is the explicit-owner form when no active owner scope should be used
+- inside an exact `rewrite` arm, `default` rebuilds the current exact member using the already rewritten child results
+- `default` is contextual rather than a new global keyword; outside an exact `rewrite` arm it is rejected
+- `default` also rebuilds `children` sequence fields, materializing fresh arrays in the active tree owner when needed
+
 ## Filtered iterable `for`
 
 Iterable loops may now include an inline filter after the source expression.

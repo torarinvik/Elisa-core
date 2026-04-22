@@ -62,6 +62,7 @@ type functionState struct {
 	regions                      []regionBinding
 	packedStores                 map[string]packedStoreBinding
 	treeAllocOwner               treeAllocOwnerBinding
+	treeRewriteDefault           *treeRewriteDefaultContext
 	treeImplicitStores           map[treeImplicitStoreCacheKey]treeImplicitStoreSlot
 	packedStoreValueKey1         packedStoreExtractCacheKey
 	packedStoreValue1            C.LLVMValueRef
@@ -140,6 +141,12 @@ type treeAllocOwnerBinding struct {
 	arenaRef   C.LLVMValueRef
 	storeValue C.LLVMValueRef
 	storeType  *semantic.TreeStoreType
+}
+
+type treeRewriteDefaultContext struct {
+	memberType     semantic.Type
+	nodeValue      C.LLVMValueRef
+	childViewValue C.LLVMValueRef
 }
 
 type treeImplicitStoreCacheKey struct {

@@ -193,7 +193,11 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 
 	switch n := expr.(type) {
 	case *ast.Ident:
-		value, actualType, err = s.emitIdent(n)
+		if s.g != nil && s.g.result != nil && s.g.result.RewriteDefaults[n] {
+			value, actualType, err = s.emitTreeRewriteDefaultExpr(n)
+		} else {
+			value, actualType, err = s.emitIdent(n)
+		}
 	case *ast.IntLit:
 		value, actualType, err = s.emitIntLiteral(n)
 	case *ast.FloatLit:
@@ -4228,6 +4232,19 @@ func (s *functionState) emitUnaryExpr(expr *ast.UnaryExpr) (C.LLVMValueRef, sema
 func (s *functionState) emitAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, semantic.Type, error) {
 	if expr.Owner == nil {
 		return s.emitScopedPackedAllocExpr(expr)
+	}
+	if updateExpr, ok := expr.Value.(*ast.RecordUpdateExpr); ok && updateExpr != nil {
+		memberType := semantic.StripAggregateStateType(s.exprType(updateExpr.Base))
+		if _, exact := semantic.TreeExactTag(memberType); exact {
+			owner, ownerOK, err := s.classifyTreeAllocOwnerExpr(expr.Owner)
+			if err != nil {
+				return nil, nil, err
+			}
+			if !ownerOK {
+				return nil, nil, fmt.Errorf("tree allocation owner must be perm, a tree store, an Arena value, or an Arena reference")
+			}
+			return s.emitTreeExactMemberUpdateExpr(updateExpr, memberType, &owner)
+		}
 	}
 	if callExpr, ok := expr.Value.(*ast.CallExpr); ok {
 		if memberType, ok := s.treeExactMemberConstructorCall(callExpr); ok {
@@ -8768,6 +8785,10 @@ func (s *functionState) emitRecordUpdateExpr(expr *ast.RecordUpdateExpr) (C.LLVM
 	if expr == nil || expr.Base == nil {
 		return nil, nil, fmt.Errorf("invalid record update")
 	}
+	memberType := semantic.StripAggregateStateType(s.exprType(expr.Base))
+	if _, exact := semantic.TreeExactTag(memberType); exact {
+		return s.emitTreeExactMemberUpdateExpr(expr, memberType, nil)
+	}
 	baseValue, baseType, err := s.emitExpr(expr.Base, nil)
 	if err != nil {
 		return nil, nil, err
@@ -8789,6 +8810,410 @@ func (s *functionState) emitRecordUpdateExpr(expr *ast.RecordUpdateExpr) (C.LLVM
 		value = C.LLVMBuildInsertValue(s.builder, value, fieldValue, C.unsigned(field.Index), cStringFree("record.update"))
 	}
 	return value, baseType, nil
+}
+
+func (s *functionState) emitTreeExactMemberUpdateExpr(expr *ast.RecordUpdateExpr, memberType semantic.Type, owner *treeAllocOwnerBinding) (C.LLVMValueRef, semantic.Type, error) {
+	if expr == nil || expr.Base == nil {
+		return nil, nil, fmt.Errorf("invalid tree update")
+	}
+	memberType = semantic.StripAggregateStateType(memberType)
+	family := treeExactMemberFamily(memberType)
+	if family == nil {
+		return nil, nil, fmt.Errorf("missing tree family metadata for update %s", memberType.String())
+	}
+	tag, ok := treeExactMemberTag(memberType)
+	if !ok {
+		return nil, nil, fmt.Errorf("missing exact tree member tag for update %s", memberType.String())
+	}
+	handleValue, baseType, err := s.emitTreeHandleValue(expr.Base, s.exprType(expr.Base))
+	if err != nil {
+		return nil, nil, err
+	}
+	if handleValue == nil || baseType == nil {
+		return nil, nil, fmt.Errorf("tree update requires an exact tree member base")
+	}
+	memberType = baseType
+	resolvedOwner := treeAllocOwnerBinding{}
+	if owner != nil {
+		resolvedOwner = *owner
+	} else {
+		activeOwner, ok := s.lookupTreeAllocOwner()
+		if !ok {
+			return nil, nil, fmt.Errorf("tree update of %s requires an active in <owner>: scope or explicit new[owner]", memberType.String())
+		}
+		resolvedOwner = activeOwner
+	}
+	fieldDecls := treeExactFieldDecls(memberType)
+	orderedArgs := expr.LoweredArgs()
+	if len(orderedArgs) == 0 {
+		orderedArgs = make([]ast.Expr, len(fieldDecls))
+	}
+	storeValue, _, err := s.ensureTreeOwnerStoreValue(resolvedOwner, family)
+	if err != nil {
+		return nil, nil, err
+	}
+	sourceStateValue := s.emitTreeHandleStateValue(handleValue, "tree.update.src.state")
+	sourceRowIndex, err := s.emitTreeHandleIndexValue(handleValue, "tree.update.src.index")
+	if err != nil {
+		return nil, nil, err
+	}
+	sourceTablePtr, err := s.emitTreeStateTablePtr(sourceStateValue, family, memberType, "tree.update.src")
+	if err != nil {
+		return nil, nil, err
+	}
+	arenaValue := s.emitTreeStoreArenaValueNamed(storeValue, "tree.update.store.arena")
+	stateValue := s.emitTreeStoreStateValueNamed(storeValue, "tree.update.store.state")
+	tablePtr, err := s.emitTreeStateTablePtr(stateValue, family, memberType, "tree.update")
+	if err != nil {
+		return nil, nil, err
+	}
+	rowIndex, err := s.emitTreeTableCountValue(tablePtr, memberType, "tree.update")
+	if err != nil {
+		return nil, nil, err
+	}
+	usizeType, err := s.g.lowerBuiltin("usize")
+	if err != nil {
+		return nil, nil, err
+	}
+	neededCount := C.LLVMBuildAdd(s.builder, rowIndex, C.LLVMConstInt(usizeType, 1, 0), cStringFree("tree.update.needed"))
+	if err := s.emitTreeEnsureTableCapacity(arenaValue, tablePtr, memberType, neededCount, "tree.update"); err != nil {
+		return nil, nil, err
+	}
+	for i, fieldDecl := range fieldDecls {
+		field, ok := treeExactFieldInfo(memberType, fieldDecl.Name)
+		if !ok {
+			return nil, nil, fmt.Errorf("missing exact tree field %s.%s", memberType.String(), fieldDecl.Name)
+		}
+		var fieldValue C.LLVMValueRef
+		if i < len(orderedArgs) && orderedArgs[i] != nil {
+			fieldValue, _, err = s.emitExpr(orderedArgs[i], field.Type)
+		} else {
+			fieldValue, _, err = s.emitTreeExactFieldValueAtIndex(sourceTablePtr, memberType, fieldDecl.Name, sourceRowIndex, "tree.update.src")
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := s.emitTreeStoreExactFieldValueAtIndex(tablePtr, memberType, fieldDecl.Name, rowIndex, fieldValue, "tree.update"); err != nil {
+			return nil, nil, err
+		}
+	}
+	if err := s.emitTreeTableSetCount(tablePtr, memberType, neededCount, "tree.update"); err != nil {
+		return nil, nil, err
+	}
+	keyValue, err := s.buildTreeHandleKey(tag, rowIndex, "tree.update")
+	if err != nil {
+		return nil, nil, err
+	}
+	handleValue, err = s.buildTreeHandleValue(family, stateValue, keyValue, "tree.update")
+	if err != nil {
+		return nil, nil, err
+	}
+	return handleValue, memberType, nil
+}
+
+func (s *functionState) emitTreeRewriteDefaultExpr(expr *ast.Ident) (C.LLVMValueRef, semantic.Type, error) {
+	if expr == nil {
+		return nil, nil, fmt.Errorf("invalid rewrite default expression")
+	}
+	ctx := s.treeRewriteDefault
+	if ctx == nil || ctx.memberType == nil {
+		return nil, nil, fmt.Errorf("default is only available while lowering a rewrite arm")
+	}
+	memberType := semantic.StripAggregateStateType(ctx.memberType)
+	family := treeExactMemberFamily(memberType)
+	if family == nil {
+		return nil, nil, fmt.Errorf("rewrite default requires an exact tree member")
+	}
+	tag, ok := treeExactMemberTag(memberType)
+	if !ok {
+		return nil, nil, fmt.Errorf("rewrite default is missing an exact tree tag for %s", memberType.String())
+	}
+	owner, ok := s.lookupTreeAllocOwner()
+	if !ok {
+		return nil, nil, fmt.Errorf("default requires an active in <owner>: scope")
+	}
+	sourceStateValue := s.emitTreeHandleStateValue(ctx.nodeValue, "tree.default.src.state")
+	sourceRowIndex, err := s.emitTreeHandleIndexValue(ctx.nodeValue, "tree.default.src.index")
+	if err != nil {
+		return nil, nil, err
+	}
+	sourceTablePtr, err := s.emitTreeStateTablePtr(sourceStateValue, family, memberType, "tree.default.src")
+	if err != nil {
+		return nil, nil, err
+	}
+	storeValue, _, err := s.ensureTreeOwnerStoreValue(owner, family)
+	if err != nil {
+		return nil, nil, err
+	}
+	arenaValue := s.emitTreeStoreArenaValueNamed(storeValue, "tree.default.store.arena")
+	stateValue := s.emitTreeStoreStateValueNamed(storeValue, "tree.default.store.state")
+	tablePtr, err := s.emitTreeStateTablePtr(stateValue, family, memberType, "tree.default")
+	if err != nil {
+		return nil, nil, err
+	}
+	rowIndex, err := s.emitTreeTableCountValue(tablePtr, memberType, "tree.default")
+	if err != nil {
+		return nil, nil, err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, nil, err
+	}
+	zeroValue := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	oneValue := C.LLVMConstInt(usizeLLVMType, 1, 0)
+	neededCount := C.LLVMBuildAdd(s.builder, rowIndex, oneValue, cStringFree("tree.default.needed"))
+	if err := s.emitTreeEnsureTableCapacity(arenaValue, tablePtr, memberType, neededCount, "tree.default"); err != nil {
+		return nil, nil, err
+	}
+	offsetValue := zeroValue
+	for _, fieldDecl := range treeExactFieldDecls(memberType) {
+		field, ok := treeExactFieldInfo(memberType, fieldDecl.Name)
+		if !ok {
+			return nil, nil, fmt.Errorf("missing exact tree field %s.%s", memberType.String(), fieldDecl.Name)
+		}
+		sourceFieldValue, _, err := s.emitTreeExactFieldValueAtIndex(sourceTablePtr, memberType, fieldDecl.Name, sourceRowIndex, "tree.default.src")
+		if err != nil {
+			return nil, nil, err
+		}
+		fieldValue := sourceFieldValue
+		relation := semantic.TreeFieldStructuralRelation(family, field.Type)
+		switch relation {
+		case ast.EnumPayloadRelationChild:
+			bindingType, ok := semantic.TreeRewriteChildBindingType(field.Type, relation)
+			if !ok {
+				return nil, nil, fmt.Errorf("rewrite default could not determine child result type for %s.%s", memberType.String(), fieldDecl.Name)
+			}
+			childResultType := bindingType
+			if optionalBinding, ok := bindingType.(*semantic.OptionalType); ok {
+				childResultType = optionalBinding.Value
+			}
+			if optionalFieldType, ok := field.Type.(*semantic.OptionalType); ok {
+				presentValue, err := s.extractOptionalPresent(sourceFieldValue, optionalFieldType)
+				if err != nil {
+					return nil, nil, err
+				}
+				childCount := C.LLVMBuildSelect(s.builder, presentValue, oneValue, zeroValue, cStringFree("tree.default.child.count"))
+				payloadLLVMType, err := s.g.lowerType(optionalFieldType.Value)
+				if err != nil {
+					return nil, nil, err
+				}
+				presentBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("tree.default.child.some"))
+				absentBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("tree.default.child.none"))
+				contBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("tree.default.child.cont"))
+				C.LLVMBuildCondBr(s.builder, presentValue, presentBB, absentBB)
+
+				C.LLVMPositionBuilderAtEnd(s.builder, presentBB)
+				presentPayload, err := s.emitTreeFoldChildResultAtIndex(ctx.childViewValue, childResultType, offsetValue, "tree.default.child")
+				if err != nil {
+					return nil, nil, err
+				}
+				presentEnd := C.LLVMGetInsertBlock(s.builder)
+				C.LLVMBuildBr(s.builder, contBB)
+
+				C.LLVMPositionBuilderAtEnd(s.builder, absentBB)
+				absentPayload, err := s.zeroValue(optionalFieldType.Value)
+				if err != nil {
+					return nil, nil, err
+				}
+				absentEnd := C.LLVMGetInsertBlock(s.builder)
+				C.LLVMBuildBr(s.builder, contBB)
+
+				C.LLVMPositionBuilderAtEnd(s.builder, contBB)
+				payloadPhi := C.LLVMBuildPhi(s.builder, payloadLLVMType, cStringFree("tree.default.child.payload"))
+				C.LLVMAddIncoming(payloadPhi, llvmValueSlicePtr([]C.LLVMValueRef{presentPayload, absentPayload}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{presentEnd, absentEnd}), 2)
+				fieldValue, err = s.buildOptionalValue(optionalFieldType, presentValue, payloadPhi)
+				if err != nil {
+					return nil, nil, err
+				}
+				offsetValue = C.LLVMBuildAdd(s.builder, offsetValue, childCount, cStringFree("tree.default.child.offset.next"))
+			} else {
+				fieldValue, err = s.emitTreeFoldChildResultAtIndex(ctx.childViewValue, childResultType, offsetValue, "tree.default.child")
+				if err != nil {
+					return nil, nil, err
+				}
+				offsetValue = C.LLVMBuildAdd(s.builder, offsetValue, oneValue, cStringFree("tree.default.child.offset.next"))
+			}
+		case ast.EnumPayloadRelationChildren:
+			bindingType, ok := semantic.TreeRewriteChildBindingType(field.Type, relation)
+			if !ok {
+				return nil, nil, fmt.Errorf("rewrite default could not determine children result type for %s.%s", memberType.String(), fieldDecl.Name)
+			}
+			childElemType := field.Type
+			if optionalBinding, ok := bindingType.(*semantic.OptionalType); ok {
+				if viewType, ok := optionalBinding.Value.(*semantic.DArrayViewType); ok {
+					childElemType = viewType.Elem
+				}
+			} else if viewType, ok := bindingType.(*semantic.DArrayViewType); ok {
+				childElemType = viewType.Elem
+			}
+			countValue, err := s.emitTreeStructuralSequenceCount(sourceFieldValue, field.Type, "tree.default.children.count")
+			if err != nil {
+				return nil, nil, err
+			}
+			subViewValue, subViewType, err := s.emitTreeFoldChildResultsSubview(ctx.childViewValue, childElemType, offsetValue, countValue, "tree.default.children")
+			if err != nil {
+				return nil, nil, err
+			}
+			fieldValue, err = s.coerceTreeRewriteSequenceFieldValue(subViewValue, subViewType, field.Type, owner, "tree.default.children")
+			if err != nil {
+				return nil, nil, err
+			}
+			offsetValue = C.LLVMBuildAdd(s.builder, offsetValue, countValue, cStringFree("tree.default.children.offset.next"))
+		}
+		if err := s.emitTreeStoreExactFieldValueAtIndex(tablePtr, memberType, fieldDecl.Name, rowIndex, fieldValue, "tree.default"); err != nil {
+			return nil, nil, err
+		}
+	}
+	if err := s.emitTreeTableSetCount(tablePtr, memberType, neededCount, "tree.default"); err != nil {
+		return nil, nil, err
+	}
+	keyValue, err := s.buildTreeHandleKey(tag, rowIndex, "tree.default")
+	if err != nil {
+		return nil, nil, err
+	}
+	handleValue, err := s.buildTreeHandleValue(family, stateValue, keyValue, "tree.default")
+	if err != nil {
+		return nil, nil, err
+	}
+	return handleValue, s.exprType(expr), nil
+}
+
+func (s *functionState) coerceTreeRewriteSequenceFieldValue(viewValue C.LLVMValueRef, viewType semantic.Type, targetType semantic.Type, owner treeAllocOwnerBinding, name string) (C.LLVMValueRef, error) {
+	if optionalType, ok := targetType.(*semantic.OptionalType); ok {
+		payloadValue, err := s.coerceTreeRewriteSequenceFieldValue(viewValue, viewType, optionalType.Value, owner, name+".payload")
+		if err != nil {
+			return nil, err
+		}
+		presentValue := C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 1, 0)
+		return s.buildOptionalValue(optionalType, presentValue, payloadValue)
+	}
+	view, ok := viewType.(*semantic.DArrayViewType)
+	if !ok || view == nil {
+		return nil, fmt.Errorf("rewrite default expected dview child results, got %s", viewType.String())
+	}
+	switch tt := targetType.(type) {
+	case *semantic.DArrayViewType:
+		return viewValue, nil
+	case *semantic.DArrayType:
+		return s.materializeTreeOwnerDArrayFromView(viewValue, view, tt, owner, name)
+	default:
+		return nil, fmt.Errorf("rewrite default does not know how to rebuild sequence field %s from %s", targetType.String(), viewType.String())
+	}
+}
+
+func (s *functionState) emitTreeOwnerAllocBytes(owner treeAllocOwnerBinding, byteCount C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
+	usizeType := s.g.result.NamedTypes["usize"]
+	if !owner.isPerm {
+		if owner.arenaRef == nil && owner.storeValue != nil && owner.storeType != nil {
+			arenaRef, err := s.emitTreeStoreArenaValue(owner.storeValue, owner.storeType)
+			if err != nil {
+				return nil, err
+			}
+			owner.arenaRef = arenaRef
+		}
+		if owner.arenaRef == nil {
+			return nil, fmt.Errorf("missing Arena owner for tree rewrite default materialization")
+		}
+		arenaType := s.g.result.NamedTypes["Arena"]
+		arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+		voidType := s.g.result.NamedTypes["void"]
+		voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+		allocType := s.g.cachedRuntimeHelperType("arena_alloc", func() *semantic.FuncType {
+			return &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
+		})
+		allocCallee, err := s.g.ensureFunctionDeclared("arena_alloc", allocType)
+		if err != nil {
+			return nil, err
+		}
+		allocLLVMType, err := s.g.lowerFunctionType(allocType)
+		if err != nil {
+			return nil, err
+		}
+		return s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{owner.arenaRef, byteCount}, name+".alloc"), nil
+	}
+	i64Type := s.g.result.NamedTypes["i64"]
+	sizeValue, err := s.coerceValue(byteCount, usizeType, i64Type)
+	if err != nil {
+		return nil, err
+	}
+	heapVoidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageHeap, ExplicitStorage: true}
+	allocType := s.g.cachedRuntimeHelperType("alloc_perm", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "alloc_perm", Params: []semantic.Type{i64Type}, Return: heapVoidRefType}
+	})
+	allocCallee, err := s.g.ensureFunctionDeclared("alloc_perm", allocType)
+	if err != nil {
+		return nil, err
+	}
+	allocLLVMType, err := s.g.lowerFunctionType(allocType)
+	if err != nil {
+		return nil, err
+	}
+	return s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{sizeValue}, name+".alloc"), nil
+}
+
+func (s *functionState) materializeTreeOwnerDArrayFromView(viewValue C.LLVMValueRef, viewType *semantic.DArrayViewType, resultType *semantic.DArrayType, owner treeAllocOwnerBinding, name string) (C.LLVMValueRef, error) {
+	if viewType == nil || resultType == nil {
+		return nil, fmt.Errorf("missing dview materialization metadata")
+	}
+	llvmResultType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, err
+	}
+	zeroResult, err := s.zeroValue(resultType)
+	if err != nil {
+		return nil, err
+	}
+	viewData := C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree(name+".src.data"))
+	viewLen := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree(name+".src.len"))
+	viewElemSize := C.LLVMBuildExtractValue(s.builder, viewValue, 2, cStringFree(name+".src.elem_size"))
+	byteCount := C.LLVMBuildMul(s.builder, viewLen, viewElemSize, cStringFree(name+".bytes"))
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, err
+	}
+	zeroBytes := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	zeroCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), byteCount, zeroBytes, cStringFree(name+".bytes.zero"))
+	entryBlock := C.LLVMGetInsertBlock(s.builder)
+	allocBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".alloc"))
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".merge"))
+	C.LLVMBuildCondBr(s.builder, zeroCond, mergeBB, allocBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, allocBB)
+	allocPtr, err := s.emitTreeOwnerAllocBytes(owner, byteCount, name)
+	if err != nil {
+		return nil, err
+	}
+	voidType := s.g.result.NamedTypes["void"]
+	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	memcpyType := s.g.cachedRuntimeHelperType("arena_memcpy", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "arena_memcpy", Params: []semantic.Type{voidRefType, voidRefType, usizeType}, Return: voidRefType}
+	})
+	memcpyCallee, err := s.g.ensureFunctionDeclared("arena_memcpy", memcpyType)
+	if err != nil {
+		return nil, err
+	}
+	memcpyLLVMType, err := s.g.lowerFunctionType(memcpyType)
+	if err != nil {
+		return nil, err
+	}
+	memcpyCall := s.buildCall(memcpyLLVMType, memcpyCallee, []C.LLVMValueRef{allocPtr, viewData, byteCount}, name+".memcpy")
+	s.addCallSiteEnumAttribute(memcpyCall, C.uint(1), "noalias")
+	s.addCallSiteEnumAttribute(memcpyCall, C.uint(2), "noalias")
+	materialized := C.LLVMGetUndef(llvmResultType)
+	materialized = C.LLVMBuildInsertValue(s.builder, materialized, allocPtr, 0, cStringFree(name+".items"))
+	materialized = C.LLVMBuildInsertValue(s.builder, materialized, viewLen, 1, cStringFree(name+".count"))
+	materialized = C.LLVMBuildInsertValue(s.builder, materialized, viewLen, 2, cStringFree(name+".capacity"))
+	allocEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, mergeBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	phi := C.LLVMBuildPhi(s.builder, llvmResultType, cStringFree(name+".result"))
+	values := []C.LLVMValueRef{zeroResult, materialized}
+	blocks := []C.LLVMBasicBlockRef{entryBlock, allocEnd}
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+	return phi, nil
 }
 
 func (s *functionState) emitTupleExpr(expr *ast.TupleExpr) (C.LLVMValueRef, semantic.Type, error) {

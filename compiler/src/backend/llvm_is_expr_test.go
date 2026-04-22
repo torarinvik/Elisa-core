@@ -903,6 +903,94 @@ def simplify(node: Lua.Expr) -> Lua.Expr:
 	}
 }
 
+func TestGenerateLLVMIRLowersExactTreeRecordUpdates(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Binary(child left: Expr, child right: Expr)
+
+def rewrite_binary(node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr.Binary:
+	in perm:
+		return node{left, right}
+
+def rewrite_binary_explicit(owner: Arena, node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr.Binary:
+	alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+	return new[alloc] node{left, right}
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_exact_update.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define %Lua__TreeHandle @rewrite_binary(%Lua__TreeHandle ", "define %Lua__TreeHandle @rewrite_binary_explicit(%Arena ", "tree.update.src", "tree.update.store.state"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected exact tree update lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersTreeRewriteDefaultExpr(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Binary(child left: Expr, child right: Expr)
+
+def simplify(node: Lua.Expr) -> Lua.Expr:
+	in perm:
+		return rewrite node as Lua.Expr:
+			Lua.Expr.Int(expr):
+				default
+			Lua.Expr.Binary(expr, left, right):
+				default
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_rewrite_default.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define %Lua__TreeHandle @simplify(%Lua__TreeHandle ", "tree.default.src", "tree.default.store.state"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected tree rewrite default lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersTreeRewriteDefaultExprWithChildren(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+	block Block:
+		items: darray[Expr]
+
+def simplify(block: Lua.Block) -> Lua.Block:
+	in perm:
+		return rewrite block as Lua.Node:
+			Lua.Expr.Int(expr):
+				default
+			Lua.Block(block, items: items):
+				default
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_rewrite_default_children.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"tree.default.children", "tree.default.children.memcpy", "@alloc_perm"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected tree rewrite default children lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersHeterogeneousTreeRewriteExpr(t *testing.T) {
 	src := `tree Lua:
 	common:

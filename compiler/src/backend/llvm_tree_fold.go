@@ -50,17 +50,23 @@ type treeFoldCapture struct {
 	binding valueBinding
 }
 
+const (
+	treeRewriteOwnerArenaCaptureName = "__llctx_rewrite_owner_arena"
+	treeRewriteOwnerStoreCaptureName = "__llctx_rewrite_owner_store"
+)
+
 type treeFoldHelperInfo struct {
-	name        string
-	root        treeFoldRootInfo
-	resultType  semantic.Type
-	funcType    *semantic.FuncType
-	fnValue     C.LLVMValueRef
-	llvmFnType  C.LLVMTypeRef
-	envStruct   C.LLVMTypeRef
-	captures    []treeFoldCapture
-	hasEnvParam bool
-	rewrite     bool
+	name             string
+	root             treeFoldRootInfo
+	resultType       semantic.Type
+	funcType         *semantic.FuncType
+	fnValue          C.LLVMValueRef
+	llvmFnType       C.LLVMTypeRef
+	envStruct        C.LLVMTypeRef
+	captures         []treeFoldCapture
+	hasEnvParam      bool
+	rewrite          bool
+	rewriteOwnerPerm bool
 }
 
 func resolveTreeVisitSourceTypeBackend(actual semantic.Type) (semantic.Type, *semantic.TreeType, bool) {
@@ -155,6 +161,24 @@ func (s *functionState) collectTreeFoldCaptures(expr *ast.FoldExpr) []treeFoldCa
 		}
 		out = append(out, treeFoldCapture{name: name, binding: binding})
 	}
+	if expr.Keyword == "rewrite" {
+		if s.treeAllocOwner.storeValue != nil && s.treeAllocOwner.storeType != nil && !seen[treeRewriteOwnerStoreCaptureName] {
+			storePtr, err := s.createEntryAlloca(treeRewriteOwnerStoreCaptureName, s.treeAllocOwner.storeType)
+			if err == nil {
+				s.emitEntryStore(storePtr, s.treeAllocOwner.storeValue)
+				out = append(out, treeFoldCapture{name: treeRewriteOwnerStoreCaptureName, binding: valueBinding{ptr: storePtr, typ: s.treeAllocOwner.storeType, mutable: false}})
+				seen[treeRewriteOwnerStoreCaptureName] = true
+			}
+		} else if s.treeAllocOwner.arenaRef != nil && !seen[treeRewriteOwnerArenaCaptureName] {
+			arenaRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["Arena"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+			arenaPtr, err := s.createEntryAlloca(treeRewriteOwnerArenaCaptureName, arenaRefType)
+			if err == nil {
+				s.emitEntryStore(arenaPtr, s.treeAllocOwner.arenaRef)
+				out = append(out, treeFoldCapture{name: treeRewriteOwnerArenaCaptureName, binding: valueBinding{ptr: arenaPtr, typ: arenaRefType, mutable: false}})
+				seen[treeRewriteOwnerArenaCaptureName] = true
+			}
+		}
+	}
 	return out
 }
 
@@ -197,16 +221,17 @@ func (s *functionState) newTreeFoldHelper(expr *ast.FoldExpr, root treeFoldRootI
 	fnValue := C.LLVMAddFunction(s.g.module, nameC, llvmFnType)
 	C.LLVMSetLinkage(fnValue, C.LLVMPrivateLinkage)
 	return &treeFoldHelperInfo{
-		name:        name,
-		root:        root,
-		resultType:  resultType,
-		funcType:    funcType,
-		fnValue:     fnValue,
-		llvmFnType:  llvmFnType,
-		envStruct:   envStruct,
-		captures:    captures,
-		hasEnvParam: hasEnv,
-		rewrite:     rewrite,
+		name:             name,
+		root:             root,
+		resultType:       resultType,
+		funcType:         funcType,
+		fnValue:          fnValue,
+		llvmFnType:       llvmFnType,
+		envStruct:        envStruct,
+		captures:         captures,
+		hasEnvParam:      hasEnv,
+		rewrite:          rewrite,
+		rewriteOwnerPerm: rewrite && s.treeAllocOwner.isPerm,
 	}, nil
 }
 
@@ -691,7 +716,16 @@ func (s *functionState) emitTreeFoldArmValue(helper *treeFoldHelperInfo, envValu
 		s.popScope()
 		return nil, false, err
 	}
+	savedRewriteDefault := s.treeRewriteDefault
+	if helper.rewrite {
+		if _, exact := semantic.TreeExactTag(memberType); exact {
+			s.treeRewriteDefault = &treeRewriteDefaultContext{memberType: memberType, nodeValue: nodeValue, childViewValue: childViewValue}
+		} else {
+			s.treeRewriteDefault = nil
+		}
+	}
 	armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, helper.armResultType(memberType, arm))
+	s.treeRewriteDefault = savedRewriteDefault
 	s.popScope()
 	return armValue, reachable, err
 }
@@ -754,7 +788,16 @@ func (s *functionState) emitTreeFoldArmSequence(helper *treeFoldHelperInfo, envV
 			C.LLVMBuildCondBr(s.builder, guardValue, guardBodyBB, nextBB)
 			C.LLVMPositionBuilderAtEnd(s.builder, guardBodyBB)
 		}
+		savedRewriteDefault := s.treeRewriteDefault
+		if helper.rewrite {
+			if _, exact := semantic.TreeExactTag(memberType); exact {
+				s.treeRewriteDefault = &treeRewriteDefaultContext{memberType: memberType, nodeValue: nodeValue, childViewValue: childViewValue}
+			} else {
+				s.treeRewriteDefault = nil
+			}
+		}
 		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, helper.armResultType(memberType, arm))
+		s.treeRewriteDefault = savedRewriteDefault
 		if err != nil {
 			s.popScope()
 			return nil, false, err
@@ -955,11 +998,34 @@ func (s *functionState) emitTreeFoldGuardedSwitchDispatch(helper *treeFoldHelper
 }
 
 func (s *functionState) emitTreeFoldHelperBody(expr *ast.FoldExpr, helper *treeFoldHelperInfo, nodeParam C.LLVMValueRef, envParam C.LLVMValueRef) error {
+	savedTreeOwner := s.treeAllocOwner
+	defer func() {
+		s.treeAllocOwner = savedTreeOwner
+	}()
 	if helper.hasEnvParam && helper.envStruct != nil {
 		for i, capture := range helper.captures {
 			fieldPtr := C.LLVMBuildStructGEP2(s.builder, helper.envStruct, envParam, C.unsigned(i), cStringFree(helper.name+".env.field"))
 			fieldValue := C.LLVMBuildLoad2(s.builder, C.LLVMPointerTypeInContext(s.g.context, 0), fieldPtr, cStringFree(helper.name+".env.value"))
 			s.defineBinding(capture.name, valueBinding{ptr: fieldValue, typ: capture.binding.typ, mutable: capture.binding.mutable})
+		}
+	}
+	if helper.rewrite {
+		s.treeAllocOwner = treeAllocOwnerBinding{isPerm: helper.rewriteOwnerPerm}
+		if binding, ok := s.lookupBinding(treeRewriteOwnerStoreCaptureName); ok {
+			storeType, _ := binding.typ.(*semantic.TreeStoreType)
+			if storeType != nil {
+				storeValue, err := s.loadValue(binding.ptr, binding.typ, helper.name+".rewrite.owner.store")
+				if err != nil {
+					return err
+				}
+				s.treeAllocOwner = treeAllocOwnerBinding{storeValue: storeValue, storeType: storeType}
+			}
+		} else if binding, ok := s.lookupBinding(treeRewriteOwnerArenaCaptureName); ok {
+			arenaRef, err := s.loadValue(binding.ptr, binding.typ, helper.name+".rewrite.owner.arena")
+			if err != nil {
+				return err
+			}
+			s.treeAllocOwner = treeAllocOwnerBinding{arenaRef: arenaRef}
 		}
 	}
 
