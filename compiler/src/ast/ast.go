@@ -90,6 +90,14 @@ type TreeDecl struct {
 	Members     []TreeMemberDecl
 }
 
+type AttributeDecl struct {
+	Position   lexer.Pos
+	Receiver   TypeExpr
+	Name       string
+	ReturnType TypeExpr
+	Arms       []VisitArm
+}
+
 type TreeMemberDecl interface {
 	Node
 	treeMemberDeclTag()
@@ -1328,6 +1336,7 @@ func (n *NamespaceDecl) Pos() lexer.Pos  { return n.Position }
 func (n *UsingDecl) Pos() lexer.Pos      { return n.Position }
 func (n *EnumDecl) Pos() lexer.Pos       { return n.Position }
 func (n *TreeDecl) Pos() lexer.Pos       { return n.Position }
+func (n *AttributeDecl) Pos() lexer.Pos  { return n.Position }
 
 func (n *TreeCategoryDecl) Pos() lexer.Pos { return n.Position }
 func (n *TreeBlockDecl) Pos() lexer.Pos    { return n.Position }
@@ -1492,6 +1501,7 @@ func (*NamespaceDecl) nodeTag()             {}
 func (*UsingDecl) nodeTag()                 {}
 func (*EnumDecl) nodeTag()                  {}
 func (*TreeDecl) nodeTag()                  {}
+func (*AttributeDecl) nodeTag()             {}
 func (*TreeCategoryDecl) nodeTag()          {}
 func (*TreeBlockDecl) nodeTag()             {}
 func (*TreeStructDecl) nodeTag()            {}
@@ -1631,6 +1641,7 @@ func (*NamespaceDecl) declTag()    {}
 func (*UsingDecl) declTag()        {}
 func (*EnumDecl) declTag()         {}
 func (*TreeDecl) declTag()         {}
+func (*AttributeDecl) declTag()    {}
 func (*GlobalDecl) declTag()       {}
 func (*StructDecl) declTag()       {}
 func (*StoreDecl) declTag()        {}

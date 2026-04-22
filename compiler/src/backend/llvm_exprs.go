@@ -7122,6 +7122,9 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, sema
 	if value, fieldType, handled, err := s.emitPackedVariantViewFieldExpr(expr); handled {
 		return value, fieldType, err
 	}
+	if value, fieldType, handled, err := s.emitTreeAttributeFieldExpr(expr); handled {
+		return value, fieldType, err
+	}
 	if value, fieldType, handled, err := s.emitTreeFieldExpr(expr); handled {
 		return value, fieldType, err
 	}

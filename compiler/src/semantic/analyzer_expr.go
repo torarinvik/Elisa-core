@@ -639,7 +639,7 @@ func (a *Analyzer) fieldExprProvidesWritableRef(expr *ast.FieldExpr) bool {
 	if expr.Safe {
 		return false
 	}
-	field, ok := a.lookupField(a.analyzeExpr(expr.Object), expr.Field, expr.Pos())
+	field, ok := a.lookupFieldNoError(a.analyzeExpr(expr.Object), expr.Field)
 	if !ok {
 		return false
 	}
@@ -676,7 +676,7 @@ func (a *Analyzer) exprCanYieldWritableRef(expr ast.Expr) bool {
 		if n.Safe {
 			return false
 		}
-		field, ok := a.lookupField(a.analyzeExpr(n.Object), n.Field, n.Pos())
+		field, ok := a.lookupFieldNoError(a.analyzeExpr(n.Object), n.Field)
 		if !ok || !field.Mutable {
 			return false
 		}
@@ -7686,6 +7686,7 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 	if expr != nil && expr.Safe {
 		return a.analyzeSafeFieldExpr(expr)
 	}
+	objType := a.analyzeExpr(expr.Object)
 	if viewType, ok := a.lookupRefinedPackedVariantView(expr.Object); ok {
 		if field, ok := viewType.Field(expr.Field); ok {
 			field.Type = a.specializeProjectedFunctionFieldType(expr, field.Type)
@@ -7697,7 +7698,7 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 			return field.Type
 		}
 	}
-	if field, ok := dstrSyntheticField(a.analyzeExpr(expr.Object), expr.Field); ok {
+	if field, ok := dstrSyntheticField(objType, expr.Field); ok {
 		field.Type = a.specializeProjectedFunctionFieldType(expr, field.Type)
 		a.reportInvalidRegionUse(expr, field.Type)
 		if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(field.Type, map[string]bool{}) {
@@ -7706,17 +7707,34 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 		a.reportBorrowedOwnerRefUseAfterConsume(expr, field.Type)
 		return field.Type
 	}
-	field, ok := a.lookupField(a.analyzeExpr(expr.Object), expr.Field, expr.Pos())
-	if !ok {
-		return invalidType
+	if attr, ok := a.lookupTreeAttribute(objType, expr.Field); ok {
+		a.attributeFieldRefs[expr] = &AttributeFieldRef{Attribute: attr}
+		attrType := a.specializeProjectedFunctionFieldType(expr, attr.ReturnType)
+		a.reportInvalidRegionUse(expr, attrType)
+		if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(attrType, map[string]bool{}) {
+			a.errorf(expr.Pos(), "%s %q cannot be used after %s", affineHandleKind(attrType), affineValueDisplayName(expr), state.ConsumedBy)
+		}
+		a.reportBorrowedOwnerRefUseAfterConsume(expr, attrType)
+		return attrType
 	}
-	field.Type = a.specializeProjectedFunctionFieldType(expr, field.Type)
-	a.reportInvalidRegionUse(expr, field.Type)
-	if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(field.Type, map[string]bool{}) {
-		a.errorf(expr.Pos(), "%s %q cannot be used after %s", affineHandleKind(field.Type), affineValueDisplayName(expr), state.ConsumedBy)
+	field, ok := a.lookupFieldWithDiagnostics(objType, expr.Field, expr.Pos(), false)
+	if ok {
+		field.Type = a.specializeProjectedFunctionFieldType(expr, field.Type)
+		a.reportInvalidRegionUse(expr, field.Type)
+		if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(field.Type, map[string]bool{}) {
+			a.errorf(expr.Pos(), "%s %q cannot be used after %s", affineHandleKind(field.Type), affineValueDisplayName(expr), state.ConsumedBy)
+		}
+		a.reportBorrowedOwnerRefUseAfterConsume(expr, field.Type)
+		return field.Type
 	}
-	a.reportBorrowedOwnerRefUseAfterConsume(expr, field.Type)
-	return field.Type
+	if projectedType, attr, ok := a.lookupProjectedTreeAttributeSequence(objType, expr.Field); ok {
+		a.attributeFieldRefs[expr] = &AttributeFieldRef{Attribute: attr}
+		a.reportInvalidRegionUse(expr, projectedType)
+		a.reportBorrowedOwnerRefUseAfterConsume(expr, projectedType)
+		return projectedType
+	}
+	a.lookupFieldWithDiagnostics(objType, expr.Field, expr.Pos(), true)
+	return invalidType
 }
 
 func (a *Analyzer) resolveProjectedFieldValueExpr(objectExpr ast.Expr, field string) (ast.Expr, bool) {
@@ -9472,7 +9490,7 @@ func (a *Analyzer) refExprAllowsMutation(expr ast.Expr, ref *RefType) bool {
 		if n.Safe {
 			return false
 		}
-		field, ok := a.lookupField(a.analyzeExpr(n.Object), n.Field, n.Pos())
+		field, ok := a.lookupFieldNoError(a.analyzeExpr(n.Object), n.Field)
 		if !ok {
 			return false
 		}
@@ -9638,6 +9656,9 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 	}
 	if field, ok := packedStoreSyntheticField(objType, fieldName); ok {
 		return field, true
+	}
+	if attr, ok := a.lookupTreeAttribute(objType, fieldName); ok {
+		return Field{Name: fieldName, Type: attr.ReturnType, Mutable: false}, true
 	}
 	if viewType, ok := objType.(*TreeVariantViewType); ok {
 		field, ok := TreeVariantSurfaceFieldInfo(viewType, fieldName)

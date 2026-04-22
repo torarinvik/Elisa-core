@@ -875,6 +875,65 @@ def score(node: Lua.Expr) -> i64:
 	}
 }
 
+func TestGenerateLLVMIRLowersDirectTreeAttributeReads(t *testing.T) {
+	src := `tree Lua:
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Binary(child left: Expr, child right: Expr)
+
+attribute Lua.Expr.checksum -> i64:
+	Lua.Expr.Int(expr):
+		return expr.value
+	Lua.Expr.Binary(expr, left, right):
+		return left.checksum + right.checksum
+
+def checksum_of(node: Lua.Expr) -> i64:
+	return node.checksum
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_attribute_direct.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i64 @checksum_of(%Lua__TreeHandle ", "define private i64 @tree_attr_", "tree.attr.call", "add i64"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected direct tree attribute lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
+func TestGenerateLLVMIRLowersProjectedTreeAttributeReads(t *testing.T) {
+	src := `tree Lua:
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Binary(child left: Expr, child right: Expr)
+
+attribute Lua.Expr.node_count -> usize:
+	Lua.Expr.Int(_):
+		return 1u
+	Lua.Expr.Binary(expr, left, right):
+		total: mutable usize = 1u
+		for child_count in children.node_count:
+			total <- total + child_count
+		return total
+
+def count_of(node: Lua.Expr) -> usize:
+	return node.node_count
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_attribute_projected.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i64 @count_of(%Lua__TreeHandle ", "define private i64 @tree_attr_", "TreeAttributeSeq", "call i64 @tree_attr_"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected projected tree attribute lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersTreeRewriteExpr(t *testing.T) {
 	src := `tree Lua:
 	common:

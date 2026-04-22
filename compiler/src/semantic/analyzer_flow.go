@@ -2053,6 +2053,9 @@ func (a *Analyzer) resolveIterLoopSourceInfo(sourceExpr ast.Expr, sourceType Typ
 		if itemType, ok := TreeChildrenItemType(tt); ok {
 			return iterLoopSourceInfo{ItemType: itemType}, true
 		}
+		if itemType, ok := TreeAttributeSequenceItemType(tt); ok {
+			return iterLoopSourceInfo{ItemType: itemType}, true
+		}
 		if itemType, ok := ChunksExactViewItemType(tt); ok {
 			info := iterLoopSourceInfo{ItemType: itemType}
 			if itemFacts, ok := a.inferIterLoopItemOptimizationFacts(sourceExpr, sourceType); ok {
@@ -2171,7 +2174,7 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	sourceType := a.analyzeExpr(stmt.Source)
 	info, ok := a.resolveIterLoopSourceInfo(stmt.Source, sourceType)
 	if !ok {
-		a.errorf(stmt.Source.Pos(), "iterable for loop currently requires an array, dynamic array, view, store.rows(), string-like iterable, ChunksExactView, enumerate(source), or children(node), got %s", sourceType)
+		a.errorf(stmt.Source.Pos(), "iterable for loop currently requires an array, dynamic array, view, store.rows(), string-like iterable, ChunksExactView, enumerate(source), children(node), or a projected tree attribute sequence, got %s", sourceType)
 		info.ItemType = invalidType
 	}
 	if stmt.Mode == ast.IterBindValue && a.containsAffineHandleValues(info.ItemType, map[string]bool{}) {

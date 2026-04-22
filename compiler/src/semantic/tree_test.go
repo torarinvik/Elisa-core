@@ -318,6 +318,76 @@ def cond_span(branch: Lua.ElseIf) -> i64:
 `)
 }
 
+func TestAnalyzeTreeAttributeFieldAccess(t *testing.T) {
+	result := analyzeTreeTestSource(t, "tree_attribute_field_access.llcontext", `tree Lua:
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Binary(child left: Expr, child right: Expr)
+
+attribute Lua.Expr.checksum -> i64:
+	Lua.Expr.Int(expr):
+		return expr.value
+	Lua.Expr.Binary(expr, left, right):
+		return left.checksum + right.checksum
+
+def checksum_of(node: Lua.Expr) -> i64:
+	return node.checksum
+`)
+
+	if len(result.TreeAttributes) == 0 {
+		t.Fatalf("expected registered tree attributes")
+	}
+	if len(result.AttributeFieldRefs) < 3 {
+		t.Fatalf("expected attribute field refs for recursive and surface accesses, got %d", len(result.AttributeFieldRefs))
+	}
+	attrs, ok := result.TreeAttributes[TypeIdentityKey(result.NamedTypes["Lua.Expr"])]
+	if !ok || attrs["checksum"] == nil {
+		t.Fatalf("expected Lua.Expr.checksum attribute registration, got %#v", attrs)
+	}
+}
+
+func TestAnalyzeProjectedTreeAttributeFieldAccess(t *testing.T) {
+	result := analyzeTreeTestSource(t, "tree_attribute_projected_field_access.llcontext", `tree Lua:
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Binary(child left: Expr, child right: Expr)
+
+attribute Lua.Expr.node_count -> usize:
+	Lua.Expr.Int(_):
+		return 1u
+	Lua.Expr.Binary(expr, left, right):
+		total: mutable usize = 1u
+		for child_count in children.node_count:
+			total <- total + child_count
+		return total
+
+def count_of(node: Lua.Expr) -> usize:
+	return node.node_count
+`)
+
+	if len(result.TreeAttributes) == 0 {
+		t.Fatalf("expected registered tree attributes")
+	}
+	if len(result.AttributeFieldRefs) < 2 {
+		t.Fatalf("expected projected and surface attribute field refs, got %d", len(result.AttributeFieldRefs))
+	}
+	attrs, ok := result.TreeAttributes[TypeIdentityKey(result.NamedTypes["Lua.Expr"])]
+	if !ok || attrs["node_count"] == nil {
+		t.Fatalf("expected Lua.Expr.node_count attribute registration, got %#v", attrs)
+	}
+	projectedCount := 0
+	for expr := range result.AttributeFieldRefs {
+		if expr != nil && expr.Field == "node_count" {
+			projectedCount++
+		}
+	}
+	if projectedCount < 2 {
+		t.Fatalf("expected projected and direct node_count field expressions, got %d", projectedCount)
+	}
+}
+
 func TestAnalyzeTreeVariantConstructorsAndIsExpr(t *testing.T) {
 	analyzeTreeTestSource(t, "tree_variant_behaviors.llcontext", `tree Lua:
 	common:

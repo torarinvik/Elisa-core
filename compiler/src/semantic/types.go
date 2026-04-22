@@ -2264,6 +2264,30 @@ func TreeChildrenItemType(t Type) (Type, bool) {
 	return gi.Args[1], true
 }
 
+func TreeAttributeSequenceInstance(t Type) (*GenericInstanceType, bool) {
+	gi, ok := t.(*GenericInstanceType)
+	if !ok || gi == nil || gi.Name != "TreeAttributeSeq" || len(gi.Args) != 2 {
+		return nil, false
+	}
+	return gi, true
+}
+
+func TreeAttributeSequenceSourceType(t Type) (Type, bool) {
+	gi, ok := TreeAttributeSequenceInstance(t)
+	if !ok {
+		return nil, false
+	}
+	return gi.Args[0], true
+}
+
+func TreeAttributeSequenceItemType(t Type) (Type, bool) {
+	gi, ok := TreeAttributeSequenceInstance(t)
+	if !ok {
+		return nil, false
+	}
+	return gi.Args[1], true
+}
+
 func TreeStructuralSequenceElemType(t Type) (Type, bool) {
 	if inner, ok := UnwrapOptionalType(t); ok {
 		return TreeStructuralSequenceElemType(inner)

@@ -31,12 +31,14 @@ type Result struct {
 	File                    *ast.File
 	GlobalScope             *Scope
 	NamedTypes              map[string]Type
+	TreeAttributes          map[string]map[string]*TreeAttribute
 	StaticInterfaces        map[string]*StaticInterface
 	StaticImpls             map[string]*StaticImpl
 	ContextBundles          map[string]*ContextBundle
 	ParamPacks              map[string]*ParamPack
 	ConstValues             map[string]ConstValue
 	ExprTypes               map[ast.Expr]Type
+	AttributeFieldRefs      map[*ast.FieldExpr]*AttributeFieldRef
 	RewriteDefaults         map[*ast.Ident]bool
 	OptionalBindSourceTypes map[*ast.OptionalBindExpr]Type
 	InterfaceMethodRefs     map[*ast.FieldExpr]*InterfaceMethodRef
@@ -56,6 +58,17 @@ type Result struct {
 	ExportedFuncs           []*ExportedFunc
 	ExportedGlobals         []*ExportedGlobal
 	Diagnostics             []Diagnostic
+}
+
+type TreeAttribute struct {
+	Name       string
+	Receiver   Type
+	ReturnType Type
+	Decl       *ast.AttributeDecl
+}
+
+type AttributeFieldRef struct {
+	Attribute *TreeAttribute
 }
 
 type SafeCallInfo struct {

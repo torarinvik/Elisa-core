@@ -168,6 +168,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("using") {
 		return p.parseUsingDecl()
 	}
+	if p.peekIdentText("attribute") {
+		return p.parseAttributeDecl()
+	}
 	if p.peekIdentText("tree") {
 		return p.parseTreeDecl()
 	}
@@ -529,6 +532,27 @@ func (p *Parser) parseUsingDecl() *ast.UsingDecl {
 	name := p.parseQualifiedDeclName()
 	p.expectNewline()
 	return &ast.UsingDecl{Position: pos, Name: name}
+}
+
+func (p *Parser) parseAttributeDecl() *ast.AttributeDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("attribute")
+	target := p.parseQualifiedDeclName()
+	dot := strings.LastIndex(target, ".")
+	var receiver ast.TypeExpr
+	name := target
+	if dot <= 0 || dot == len(target)-1 {
+		p.errorf("attribute declaration expects receiver.name, got %q", target)
+	} else {
+		receiver = &ast.NamedType{Position: pos, Name: target[:dot]}
+		name = target[dot+1:]
+	}
+	var retType ast.TypeExpr
+	if p.match(lexer.TOKEN_ARROW) {
+		retType = p.parseTypeExpr()
+	}
+	arms := p.parseVisitArms()
+	return &ast.AttributeDecl{Position: pos, Receiver: receiver, Name: name, ReturnType: retType, Arms: arms}
 }
 
 func (p *Parser) parseEnumDecl() *ast.EnumDecl {

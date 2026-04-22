@@ -1867,7 +1867,7 @@ func (s *functionState) emitTreeStructuralSequenceCount(payloadValue C.LLVMValue
 	if err != nil {
 		return nil, err
 	}
-	return s.emitIterLoopCount(tempAlloca, payloadType, name+".tree.children.seq")
+	return s.emitIterLoopCount(nil, tempAlloca, payloadType, name+".tree.children.seq")
 }
 
 func (s *functionState) emitTreeStructuralSequenceItemValue(payloadValue C.LLVMValueRef, payloadType semantic.Type, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, semantic.Type, error) {
@@ -1882,7 +1882,7 @@ func (s *functionState) emitTreeStructuralSequenceItemValue(payloadValue C.LLVMV
 	if err != nil {
 		return nil, nil, err
 	}
-	return s.emitIterLoopElementValue(tempAlloca, payloadType, indexValue, name+".tree.children.seq")
+	return s.emitIterLoopElementValue(nil, tempAlloca, payloadType, indexValue, name+".tree.children.seq")
 }
 
 func (s *functionState) coerceTreeChildrenItemValue(value C.LLVMValueRef, actualType semantic.Type, itemType semantic.Type) (C.LLVMValueRef, error) {
@@ -2403,6 +2403,9 @@ func iterLoopItemTypeBackend(t semantic.Type) (semantic.Type, bool) {
 		if itemType, ok := semantic.TreeChildrenItemType(tt); ok {
 			return itemType, true
 		}
+		if itemType, ok := semantic.TreeAttributeSequenceItemType(tt); ok {
+			return itemType, true
+		}
 		if itemType, ok := semantic.ChunksExactViewItemType(tt); ok {
 			return itemType, true
 		}
@@ -2514,7 +2517,7 @@ func (s *functionState) emitIterLoopChunksExactItemValue(carrierValue C.LLVMValu
 	return value, chunkType, nil
 }
 
-func (s *functionState) emitIterLoopCount(sourceAlloca C.LLVMValueRef, sourceType semantic.Type, sourceName string) (C.LLVMValueRef, error) {
+func (s *functionState) emitIterLoopCount(sourceExpr ast.Expr, sourceAlloca C.LLVMValueRef, sourceType semantic.Type, sourceName string) (C.LLVMValueRef, error) {
 	usizeType := s.g.result.NamedTypes["usize"]
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
@@ -2568,6 +2571,24 @@ func (s *functionState) emitIterLoopCount(sourceAlloca C.LLVMValueRef, sourceTyp
 			}
 			nodeValue := C.LLVMBuildExtractValue(s.builder, sourceValue, 0, cStringFree(sourceName+".iter.tree.children.node"))
 			return s.emitTreeChildrenCount(sourceNodeType, nodeValue, sourceName)
+		}
+		if projectedSourceType, ok := semantic.TreeAttributeSequenceSourceType(tt); ok {
+			sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.projected.source")
+			if err != nil {
+				return nil, err
+			}
+			projectedLLVMType, err := s.g.lowerType(sourceType)
+			if err != nil {
+				return nil, err
+			}
+			innerSourceAlloca, err := s.createEntryAlloca(sourceName+".iter.projected.inner", projectedSourceType)
+			if err != nil {
+				return nil, err
+			}
+			innerSourceValue := C.LLVMBuildExtractValue(s.builder, sourceValue, 0, cStringFree(sourceName+".iter.projected.inner.extract"))
+			_ = projectedLLVMType
+			C.LLVMBuildStore(s.builder, innerSourceValue, innerSourceAlloca)
+			return s.emitIterLoopCount(nil, innerSourceAlloca, projectedSourceType, sourceName+".iter.projected")
 		}
 		if _, ok := semantic.ChunksExactViewItemType(tt); !ok {
 			return nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
@@ -2781,7 +2802,7 @@ func (s *functionState) emitIterLoopStringIndexValue(stringValue C.LLVMValueRef,
 	return call, resultType, nil
 }
 
-func (s *functionState) emitIterLoopElementValue(sourceAlloca C.LLVMValueRef, sourceType semantic.Type, indexValue C.LLVMValueRef, sourceName string) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitIterLoopElementValue(sourceExpr ast.Expr, sourceAlloca C.LLVMValueRef, sourceType semantic.Type, indexValue C.LLVMValueRef, sourceName string) (C.LLVMValueRef, semantic.Type, error) {
 	switch tt := sourceType.(type) {
 	case *semantic.ArrayType:
 		ptr, elemType, err := s.emitIterLoopElementAddress(sourceAlloca, sourceType, indexValue, sourceName)
@@ -2832,6 +2853,35 @@ func (s *functionState) emitIterLoopElementValue(sourceAlloca C.LLVMValueRef, so
 				return nil, nil, err
 			}
 			return value, itemType, nil
+		}
+		if projectedSourceType, ok := semantic.TreeAttributeSequenceSourceType(tt); ok {
+			attrRef := treeAttributeFieldRefForExpr(s.g.result, sourceExpr)
+			if attrRef == nil || attrRef.Attribute == nil {
+				return nil, nil, fmt.Errorf("missing projected tree attribute metadata for iterable source")
+			}
+			sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.projected.source")
+			if err != nil {
+				return nil, nil, err
+			}
+			innerSourceAlloca, err := s.createEntryAlloca(sourceName+".iter.projected.inner", projectedSourceType)
+			if err != nil {
+				return nil, nil, err
+			}
+			innerSourceValue := C.LLVMBuildExtractValue(s.builder, sourceValue, 0, cStringFree(sourceName+".iter.projected.inner.extract"))
+			C.LLVMBuildStore(s.builder, innerSourceValue, innerSourceAlloca)
+			itemValue, _, err := s.emitIterLoopElementValue(nil, innerSourceAlloca, projectedSourceType, indexValue, sourceName+".iter.projected")
+			if err != nil {
+				return nil, nil, err
+			}
+			helper, err := s.ensureTreeAttributeHelper(attrRef.Attribute)
+			if err != nil {
+				return nil, nil, err
+			}
+			projectedValue, err := s.emitTreeAttributeHelperCall(helper, itemValue, sourceName+".iter.projected.attr")
+			if err != nil {
+				return nil, nil, err
+			}
+			return projectedValue, attrRef.Attribute.ReturnType, nil
 		}
 		if _, ok := semantic.ChunksExactViewItemType(tt); !ok {
 			return nil, nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
@@ -3152,7 +3202,11 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 		iterSourceType = innerSourceType
 	}
 
-	countValue, err := s.emitIterLoopCount(iterSourceAlloca, iterSourceType, sourceName)
+	iterSourceExpr := stmt.Source
+	if enumerateCall, ok := stmt.Source.(*ast.CallExpr); ok && callIdentName(enumerateCall) == "enumerate" && len(enumerateCall.Args) == 1 {
+		iterSourceExpr = enumerateCall.Args[0]
+	}
+	countValue, err := s.emitIterLoopCount(iterSourceExpr, iterSourceAlloca, iterSourceType, sourceName)
 	if err != nil {
 		return err
 	}
@@ -3194,7 +3248,7 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 		iterIndexValue = C.LLVMBuildSub(s.builder, lastIndex, indexValue, cStringFree("iter.rev.index"))
 	}
 	if stmt.Mode == ast.IterBindValue {
-		itemValue, resolvedItemType, err := s.emitIterLoopElementValue(iterSourceAlloca, iterSourceType, iterIndexValue, sourceName)
+		itemValue, resolvedItemType, err := s.emitIterLoopElementValue(iterSourceExpr, iterSourceAlloca, iterSourceType, iterIndexValue, sourceName)
 		if err != nil {
 			s.popScope()
 			return err

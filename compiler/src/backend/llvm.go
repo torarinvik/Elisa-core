@@ -94,6 +94,7 @@ type llvmGenerator struct {
 	packedVariantPayloadTypes map[*semantic.EnumVariant]C.LLVMTypeRef
 	commonFieldLayouts        map[packedEnumCommonFieldLayoutCacheKey]*packedEnumCommonFieldLayout
 	specializedFuncTypes      map[string]*semantic.FuncType
+	treeAttributeHelpers      map[*semantic.TreeAttribute]*treeAttributeHelperInfo
 	functions                 map[string]C.LLVMValueRef
 	globals                   map[string]C.LLVMValueRef
 	noteTypeInProgress        map[typeMemoKey]bool
@@ -139,6 +140,7 @@ func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
 		packedVariantPayloadTypes: map[*semantic.EnumVariant]C.LLVMTypeRef{},
 		commonFieldLayouts:        map[packedEnumCommonFieldLayoutCacheKey]*packedEnumCommonFieldLayout{},
 		specializedFuncTypes:      map[string]*semantic.FuncType{},
+		treeAttributeHelpers:      map[*semantic.TreeAttribute]*treeAttributeHelperInfo{},
 		functions:                 map[string]C.LLVMValueRef{},
 		globals:                   map[string]C.LLVMValueRef{},
 		noteTypeInProgress:        map[typeMemoKey]bool{},
@@ -326,7 +328,7 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 			}
 		}
 		return nil
-	case *ast.ConstDecl, *ast.ConstEnumDecl, *ast.StaticIfDecl:
+	case *ast.ConstDecl, *ast.ConstEnumDecl, *ast.StaticIfDecl, *ast.AttributeDecl:
 		return nil
 	case *ast.PermissionDecl:
 		return nil
@@ -446,7 +448,7 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 			}
 		}
 		return nil
-	case *ast.ExternTypeDecl, *ast.StaticIfDecl:
+	case *ast.ExternTypeDecl, *ast.StaticIfDecl, *ast.AttributeDecl:
 		return nil
 	case *ast.PermissionDecl:
 		return nil

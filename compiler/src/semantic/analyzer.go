@@ -85,6 +85,8 @@ type Analyzer struct {
 	functionTypes                     map[string]*FuncType
 	constValues                       map[string]ConstValue
 	exprTypes                         map[ast.Expr]Type
+	treeAttributes                    map[string]map[string]*TreeAttribute
+	attributeFieldRefs                map[*ast.FieldExpr]*AttributeFieldRef
 	rewriteDefaults                   map[*ast.Ident]bool
 	optionalBindSourceTypes           map[*ast.OptionalBindExpr]Type
 	interfaceMethodRefs               map[*ast.FieldExpr]*InterfaceMethodRef
@@ -306,6 +308,8 @@ func Analyze(file *ast.File) *Result {
 		functionTypes:                     map[string]*FuncType{},
 		constValues:                       map[string]ConstValue{},
 		exprTypes:                         make(map[ast.Expr]Type, exprCapacity),
+		treeAttributes:                    map[string]map[string]*TreeAttribute{},
+		attributeFieldRefs:                make(map[*ast.FieldExpr]*AttributeFieldRef, exprCapacity/32+8),
 		rewriteDefaults:                   make(map[*ast.Ident]bool, exprCapacity/128+4),
 		optionalBindSourceTypes:           make(map[*ast.OptionalBindExpr]Type, exprCapacity/16+8),
 		interfaceMethodRefs:               make(map[*ast.FieldExpr]*InterfaceMethodRef, exprCapacity/16+8),
@@ -344,6 +348,7 @@ func Analyze(file *ast.File) *Result {
 	a.populateStructFields(activeDecls)
 	a.populateEnumVariants(activeDecls)
 	a.populateTreeMembers(activeDecls)
+	a.collectTreeAttributes(activeDecls)
 	a.synthesizeDerivedImplMembers(activeDecls)
 	a.warnOnAvoidableStructPadding(activeDecls)
 	a.collectExportTypeAliases(activeDecls)
@@ -357,12 +362,14 @@ func Analyze(file *ast.File) *Result {
 		File:                    file,
 		GlobalScope:             a.globalScope,
 		NamedTypes:              a.namedTypes,
+		TreeAttributes:          a.treeAttributes,
 		StaticInterfaces:        a.staticInterfaces,
 		StaticImpls:             a.staticImpls,
 		ContextBundles:          a.contextBundles,
 		ParamPacks:              a.paramPacks,
 		ConstValues:             a.constValues,
 		ExprTypes:               a.exprTypes,
+		AttributeFieldRefs:      a.attributeFieldRefs,
 		RewriteDefaults:         a.rewriteDefaults,
 		OptionalBindSourceTypes: a.optionalBindSourceTypes,
 		InterfaceMethodRefs:     a.interfaceMethodRefs,
@@ -502,6 +509,9 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 	})
 	a.registerBuiltinStructType("TreeChildren", []string{"N", "T"}, false, []builtinFieldSpec{
 		{name: "node", typ: namedTypeExpr("N", false), mutable: false},
+	})
+	a.registerBuiltinStructType("TreeAttributeSeq", []string{"S", "T"}, false, []builtinFieldSpec{
+		{name: "source", typ: namedTypeExpr("S", false), mutable: false},
 	})
 	a.registerBuiltinStructType("NodeKey", []string{"T"}, false, []builtinFieldSpec{
 		{name: "index", typ: namedTypeExpr("u32", false), mutable: false},
@@ -1624,6 +1634,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				if n.Name == "__cast__" {
 					a.registerCastHook(scoped.Namespace, n, fnType, sym)
 				}
+			case *ast.AttributeDecl:
 			case *ast.InterfaceDecl:
 			case *ast.ImplDecl:
 				receiver := a.resolveType(n.ForType)
@@ -3085,6 +3096,8 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 			case *ast.FuncDecl:
 				a.analyzeFunctionAnnotations(n)
 				a.analyzeFunc(n)
+			case *ast.AttributeDecl:
+				a.analyzeAttributeDecl(n)
 			case *ast.InterfaceDecl:
 			case *ast.ImplDecl:
 				for _, member := range n.Members {

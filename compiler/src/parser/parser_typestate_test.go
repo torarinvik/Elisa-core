@@ -1202,6 +1202,48 @@ func TestParseTreeRewriteExpr(t *testing.T) {
 	}
 }
 
+func TestParseTreeAttributeDecl(t *testing.T) {
+	file, errs := parseSourceFile(t, "tree Lua:\n    common:\n        span: i64\n    @role(expr)\n    node Expr:\n        Nil\n        Binary(child left: Expr, child right: Expr)\n\nattribute Lua.Node.checksum -> i64 error[LuaFrontendError]:\n    Lua.Expr.Binary(node, left, right):\n        lua_binary_checksum(node.span, left.checksum, right.checksum)\n    _:\n        0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.AttributeDecl)
+	if !ok {
+		t.Fatalf("expected attribute decl, got %T", file.Decls[1])
+	}
+	receiver, ok := decl.Receiver.(*ast.NamedType)
+	if !ok || receiver.Name != "Lua.Node" {
+		t.Fatalf("expected receiver Lua.Node, got %#v", decl.Receiver)
+	}
+	if decl.Name != "checksum" {
+		t.Fatalf("expected attribute name checksum, got %q", decl.Name)
+	}
+	retType, ok := decl.ReturnType.(*ast.ErrorUnionTypeExpr)
+	if !ok {
+		t.Fatalf("expected fallible return type, got %#v", decl.ReturnType)
+	}
+	valueType, ok := retType.Value.(*ast.NamedType)
+	if !ok || valueType.Name != "i64" {
+		t.Fatalf("expected return value type i64, got %#v", retType.Value)
+	}
+	errorType, ok := retType.Errors.(*ast.ErrorSetExpr)
+	if !ok || len(errorType.Tags) != 1 || errorType.Tags[0].SetName != "LuaFrontendError" || errorType.Tags[0].Tag != "" {
+		t.Fatalf("expected error set LuaFrontendError, got %#v", retType.Errors)
+	}
+	if len(decl.Arms) != 2 {
+		t.Fatalf("expected two attribute arms, got %#v", decl.Arms)
+	}
+	if decl.Arms[0].TargetName != "Lua.Expr.Binary" || decl.Arms[0].BindName != "node" {
+		t.Fatalf("unexpected first attribute arm: %#v", decl.Arms[0])
+	}
+	if len(decl.Arms[0].ChildBindings) != 2 || decl.Arms[0].ChildBindings[0].FieldName != "left" || decl.Arms[0].ChildBindings[1].FieldName != "right" {
+		t.Fatalf("unexpected child bindings: %#v", decl.Arms[0].ChildBindings)
+	}
+	if !decl.Arms[1].Wildcard {
+		t.Fatalf("expected wildcard fallback arm, got %#v", decl.Arms[1])
+	}
+}
+
 func TestParseSequenceRewriteExpr(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep_non_zero(owner: mutable Arena&, items: dview[u32]) -> darray[u32]:\n    can Abort.Panic, Memory.Allocate:\n        in owner:\n            return rewrite items as sequence[u32]:\n                item when item != 0u32:\n                    emit item\n")
 	if len(errs) != 0 {

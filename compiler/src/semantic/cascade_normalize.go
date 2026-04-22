@@ -49,6 +49,11 @@ func normalizeCascadeDecls(decls []ast.Decl) {
 			normalizeCascadeParams(n.Params)
 			normalizeCascadeParams(n.ImplicitParams)
 			n.Body = normalizeCascadeStmtList(n.Body, nil)
+		case *ast.AttributeDecl:
+			for i := range n.Arms {
+				n.Arms[i].Guard = normalizeCascadeExpr(n.Arms[i].Guard, nil, false)
+				n.Arms[i].Body = normalizeCascadeStmtList(n.Arms[i].Body, nil)
+			}
 		case *ast.ExternFuncDecl:
 			normalizeCascadeParams(n.Params)
 			normalizeCascadeParams(n.ImplicitParams)

@@ -42,6 +42,11 @@ func (c *analyzerASTCensus) countDecl(decl ast.Decl) {
 	case *ast.FuncDecl:
 		c.funcDecls++
 		c.countStmts(n.Body)
+	case *ast.AttributeDecl:
+		for _, arm := range n.Arms {
+			c.countExpr(arm.Guard)
+			c.countStmts(arm.Body)
+		}
 	case *ast.StaticIfDecl:
 		c.countExpr(n.Cond)
 		c.countDecls(n.Then)
