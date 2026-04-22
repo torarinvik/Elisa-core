@@ -491,6 +491,20 @@ func (a *Analyzer) analyzeRewriteDefaultIdent(expr *ast.Ident) (Type, bool) {
 	return a.currentRewriteDefault.ResultType, true
 }
 
+func (a *Analyzer) rewriteDefaultExactType(expr ast.Expr) (Type, bool) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		if n.Name != "default" || a.currentRewriteDefault == nil || !a.currentRewriteDefault.Allowed || a.currentRewriteDefault.ExactType == nil {
+			return nil, false
+		}
+		return a.currentRewriteDefault.ExactType, true
+	case *ast.ParenExpr:
+		return a.rewriteDefaultExactType(n.Inner)
+	default:
+		return nil, false
+	}
+}
+
 func (a *Analyzer) analyzeExprBlock(expr *ast.ExprBlock) Type {
 	if expr == nil || expr.Value == nil {
 		return invalidType
@@ -1738,15 +1752,20 @@ func (a *Analyzer) analyzeRecordUpdateExprWithTreeOwnerRequirement(expr *ast.Rec
 		return invalidType
 	}
 	baseType := a.analyzeExpr(expr.Base)
-	stripped := StripAggregateStateType(baseType)
+	resultType := baseType
+	resolvedBaseType := baseType
+	if exactType, ok := a.rewriteDefaultExactType(expr.Base); ok {
+		resolvedBaseType = exactType
+	}
+	stripped := StripAggregateStateType(resolvedBaseType)
 	switch stripped.(type) {
 	case *StructType, *GenericInstanceType, *TreeVariantViewType, *TreeBlockType, *TreeStructType:
 	default:
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)
 		}
-		if !IsInvalidType(baseType) {
-			a.errorf(expr.Pos(), "record update requires a concrete struct or store-row value, got %s", baseType)
+		if !IsInvalidType(resolvedBaseType) {
+			a.errorf(expr.Pos(), "record update requires a concrete struct or store-row value, got %s", resolvedBaseType)
 		}
 		return invalidType
 	}
@@ -1755,12 +1774,12 @@ func (a *Analyzer) analyzeRecordUpdateExprWithTreeOwnerRequirement(expr *ast.Rec
 			a.requireActiveTreeUpdateOwner(expr.Pos(), stripped)
 		}
 	}
-	fields, ok := a.resolvedStructFields(baseType)
+	fields, ok := a.resolvedStructFields(resolvedBaseType)
 	if !ok {
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)
 		}
-		a.errorf(expr.Pos(), "record update requires a concrete struct or store-row value, got %s", baseType)
+		a.errorf(expr.Pos(), "record update requires a concrete struct or store-row value, got %s", resolvedBaseType)
 		return invalidType
 	}
 	if expr.NamedArgCount() != len(expr.Args) {
@@ -1768,7 +1787,7 @@ func (a *Analyzer) analyzeRecordUpdateExprWithTreeOwnerRequirement(expr *ast.Rec
 		for i := range expr.Args {
 			expr.Args[i], _ = a.analyzeCallLikeValueExpr(expr.Args[i], nil)
 		}
-		return baseType
+		return resultType
 	}
 	ordered := make([]ast.Expr, len(fields))
 	fieldIndexes := make(map[string]int, len(fields))
@@ -1805,8 +1824,8 @@ func (a *Analyzer) analyzeRecordUpdateExprWithTreeOwnerRequirement(expr *ast.Rec
 		expr.ResolvedArgsValid = true
 		expr.ResolvedArgs = ordered
 	}
-	a.consumeAffineValueExpr(expr.Base, baseType, "record update")
-	return baseType
+	a.consumeAffineValueExpr(expr.Base, resolvedBaseType, "record update")
+	return resultType
 }
 
 func (a *Analyzer) requireActiveTreeUpdateOwner(pos lexer.Pos, memberType Type) bool {
@@ -3973,6 +3992,157 @@ func (a *Analyzer) nodeTableFillTypeArgs(expr *ast.CallExpr) (*EnumType, Type, b
 	return enumType, elemType, true
 }
 
+func (a *Analyzer) cloneBuiltinTargetType(expr *ast.CallExpr) (Type, bool) {
+	if a == nil || expr == nil || callSpecializedIdentName(expr) != "clone" {
+		return nil, false
+	}
+	_, specialize, ok := callSpecializedIdent(expr.Func)
+	if !ok || specialize == nil || len(specialize.TypeArgs) != 1 {
+		return nil, false
+	}
+	targetType := a.resolveType(specialize.TypeArgs[0])
+	if targetType == nil || IsInvalidType(targetType) {
+		return invalidType, true
+	}
+	return targetType, true
+}
+
+func cloneBuiltinTreeTargetCompatible(target Type, source Type) bool {
+	target = StripAggregateStateType(target)
+	sourceMember, sourceFamily, ok := resolveTreeVisitSourceType(source)
+	if !ok || sourceFamily == nil {
+		return false
+	}
+	switch tt := target.(type) {
+	case *TreeNodeType:
+		return tt != nil && tt.Family == sourceFamily
+	case *TreeCategoryType:
+		category, _, ok := resolveMatchableTreeCategoryType(source)
+		return ok && category == tt
+	case *TreeBlockType:
+		sourceBlock, ok := sourceMember.(*TreeBlockType)
+		return ok && SameType(sourceBlock, tt)
+	case *TreeStructType:
+		sourceStruct, ok := sourceMember.(*TreeStructType)
+		return ok && SameType(sourceStruct, tt)
+	default:
+		return false
+	}
+}
+
+func (a *Analyzer) cloneBuiltinCompatible(target Type, source Type, seen map[string]bool) (bool, bool) {
+	if target == nil || source == nil {
+		return false, false
+	}
+	target = StripAggregateStateType(target)
+	source = StripAggregateStateType(source)
+	if IsInvalidType(target) || IsInvalidType(source) {
+		return false, true
+	}
+	if a.containsAffineHandleValues(target, nil) || a.containsAffineHandleValues(source, nil) {
+		return false, false
+	}
+	key := target.String() + " <- " + source.String()
+	if seen[key] {
+		return false, true
+	}
+	seen[key] = true
+	switch tt := target.(type) {
+	case *BuiltinType, *ConstEnumType, *ErrorSetType, *NullType, *DStrType, *SViewType:
+		return false, SameType(target, source)
+	case *TypeParamType, *RefType, *FuncType, *ViewType, *DArrayViewType, *PackedVariantViewType, *StoreRowsViewType, *StoreRowViewType, *DictType, *DictEntryType:
+		return false, false
+	case *TreeVariantViewType:
+		return false, false
+	case *TreeNodeType, *TreeCategoryType, *TreeBlockType, *TreeStructType:
+		return true, cloneBuiltinTreeTargetCompatible(target, source)
+	case *ArrayType:
+		sourceArray, ok := source.(*ArrayType)
+		if !ok || !arraySizesEqual(tt, sourceArray) {
+			return false, false
+		}
+		needsOwner, ok := a.cloneBuiltinCompatible(tt.Elem, sourceArray.Elem, seen)
+		return needsOwner, ok
+	case *DArrayType:
+		var sourceElem Type
+		switch ss := source.(type) {
+		case *DArrayType:
+			sourceElem = ss.Elem
+		case *DArrayViewType:
+			sourceElem = ss.Elem
+		case *ArrayType:
+			sourceElem = ss.Elem
+		default:
+			return false, false
+		}
+		_, ok := a.cloneBuiltinCompatible(tt.Elem, sourceElem, seen)
+		return true, ok
+	case *OptionalType:
+		sourceOptional, ok := source.(*OptionalType)
+		if !ok || sourceOptional == nil {
+			return false, false
+		}
+		return a.cloneBuiltinCompatible(tt.Value, sourceOptional.Value, seen)
+	case *ErrorUnionType:
+		sourceUnion, ok := source.(*ErrorUnionType)
+		if !ok || sourceUnion == nil || !SameType(tt.Errors, sourceUnion.Errors) {
+			return false, false
+		}
+		return a.cloneBuiltinCompatible(tt.Value, sourceUnion.Value, seen)
+	case *TupleType, *StructType, *GenericInstanceType:
+		if !SameType(target, source) {
+			return false, false
+		}
+		fields, ok := a.resolvedStructFields(target)
+		if !ok {
+			return false, false
+		}
+		needsOwner := false
+		for _, field := range fields {
+			fieldNeedsOwner, fieldOK := a.cloneBuiltinCompatible(field.Type, field.Type, seen)
+			if !fieldOK {
+				return false, false
+			}
+			needsOwner = needsOwner || fieldNeedsOwner
+		}
+		return needsOwner, true
+	default:
+		return false, false
+	}
+}
+
+func (a *Analyzer) analyzeCloneBuiltinCall(expr *ast.CallExpr) (Type, bool) {
+	if expr == nil || callSpecializedIdentName(expr) != "clone" {
+		return nil, false
+	}
+	targetType, ok := a.cloneBuiltinTargetType(expr)
+	if !ok {
+		return nil, false
+	}
+	if len(expr.Args) != 1 {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "clone expects 1 argument, got %d", len(expr.Args))
+		return invalidType, true
+	}
+	sourceType := a.analyzeExpr(expr.Args[0])
+	if targetType == nil || IsInvalidType(targetType) || IsInvalidType(sourceType) {
+		return invalidType, true
+	}
+	needsOwner, compatible := a.cloneBuiltinCompatible(targetType, sourceType, map[string]bool{})
+	if !compatible {
+		a.errorf(expr.Pos(), "clone cannot clone %s into %s in v1", sourceType, targetType)
+		return invalidType, true
+	}
+	if needsOwner && a.currentTreeAllocOwner.Kind == treeAllocOwnerNone {
+		a.errorf(expr.Pos(), "clone of %q requires an active in <owner>: scope", targetType.String())
+		return invalidType, true
+	}
+	a.recordBuiltinHelperFuncType(expr, "clone", targetType)
+	return targetType, true
+}
+
 func (a *Analyzer) analyzeDenseKeyHelperCall(expr *ast.CallExpr) Type {
 	if len(expr.Args) != 2 {
 		for _, arg := range expr.Args {
@@ -4510,6 +4680,9 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 		return resultType
 	}
 	if resultType, ok := a.analyzeBuiltinDictEntryGetOrInsertCall(expr); ok {
+		return resultType
+	}
+	if resultType, ok := a.analyzeCloneBuiltinCall(expr); ok {
 		return resultType
 	}
 	if resultType, ok := a.analyzeBuiltinDarrayPushCall(expr); ok {

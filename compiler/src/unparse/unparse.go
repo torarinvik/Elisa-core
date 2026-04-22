@@ -1650,7 +1650,11 @@ func formatFoldExpr(expr *ast.FoldExpr) string {
 	builder.WriteString(formatExpr(expr.Value))
 	builder.WriteString(" as ")
 	builder.WriteString(formatTypeExpr(expr.Root))
-	if keyword != "rewrite" {
+	if keyword == "rewrite" {
+		if expr.RewriteDefault {
+			builder.WriteString(" default")
+		}
+	} else {
 		builder.WriteString(" into ")
 		builder.WriteString(formatTypeExpr(expr.ResultType))
 	}

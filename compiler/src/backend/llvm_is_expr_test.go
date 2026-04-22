@@ -992,6 +992,33 @@ def simplify(block: Lua.Block) -> Lua.Block:
 	}
 }
 
+func TestGenerateLLVMIRLowersTreeRewriteImplicitDefaultRecordUpdate(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Binary(child left: Expr, child right: Expr)
+
+def simplify(node: Lua.Expr) -> Lua.Expr:
+	in perm:
+		return rewrite node as Lua.Expr default:
+			Lua.Expr.Binary(expr, left, right):
+				default{span = expr.span, left, right}
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_rewrite_implicit_default_update.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define %Lua__TreeHandle @simplify(%Lua__TreeHandle ", "tree.default.src", "tree.update.src", "category.default.arm"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected implicit rewrite default lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersHeterogeneousTreeRewriteExpr(t *testing.T) {
 	src := `tree Lua:
 	common:

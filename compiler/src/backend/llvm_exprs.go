@@ -4875,6 +4875,9 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if value, actualType, handled, err := s.emitNodeTableFillHelperCall(expr); handled {
 		return value, actualType, err
 	}
+	if value, actualType, handled, err := s.emitBuiltinCloneCall(expr); handled {
+		return value, actualType, err
+	}
 	if enumType, variant, ok := s.enumConstructorInfo(expr); ok {
 		if variant == nil {
 			return nil, nil, fmt.Errorf("unknown enum constructor")
@@ -8751,8 +8754,12 @@ func (s *functionState) emitRecordUpdateExpr(expr *ast.RecordUpdateExpr) (C.LLVM
 		return nil, nil, fmt.Errorf("invalid record update")
 	}
 	memberType := semantic.StripAggregateStateType(s.exprType(expr.Base))
+	if exactType, ok := s.rewriteDefaultExactMemberType(expr.Base); ok {
+		memberType = exactType
+	}
 	if _, exact := semantic.TreeExactTag(memberType); exact {
-		return s.emitTreeExactMemberUpdateExpr(expr, memberType, nil)
+		value, _, err := s.emitTreeExactMemberUpdateExpr(expr, memberType, nil)
+		return value, s.exprType(expr), err
 	}
 	baseValue, baseType, err := s.emitExpr(expr.Base, nil)
 	if err != nil {
@@ -8777,6 +8784,20 @@ func (s *functionState) emitRecordUpdateExpr(expr *ast.RecordUpdateExpr) (C.LLVM
 	return value, baseType, nil
 }
 
+func (s *functionState) rewriteDefaultExactMemberType(expr ast.Expr) (semantic.Type, bool) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		if n.Name != "default" || s.treeRewriteDefault == nil || s.treeRewriteDefault.memberType == nil {
+			return nil, false
+		}
+		return semantic.StripAggregateStateType(s.treeRewriteDefault.memberType), true
+	case *ast.ParenExpr:
+		return s.rewriteDefaultExactMemberType(n.Inner)
+	default:
+		return nil, false
+	}
+}
+
 func (s *functionState) emitTreeExactMemberUpdateExpr(expr *ast.RecordUpdateExpr, memberType semantic.Type, owner *treeAllocOwnerBinding) (C.LLVMValueRef, semantic.Type, error) {
 	if expr == nil || expr.Base == nil {
 		return nil, nil, fmt.Errorf("invalid tree update")
@@ -8797,7 +8818,11 @@ func (s *functionState) emitTreeExactMemberUpdateExpr(expr *ast.RecordUpdateExpr
 	if handleValue == nil || baseType == nil {
 		return nil, nil, fmt.Errorf("tree update requires an exact tree member base")
 	}
-	memberType = baseType
+	if resolvedBaseType := semantic.StripAggregateStateType(baseType); resolvedBaseType != nil {
+		if _, exact := semantic.TreeExactTag(resolvedBaseType); exact {
+			memberType = resolvedBaseType
+		}
+	}
 	resolvedOwner := treeAllocOwnerBinding{}
 	if owner != nil {
 		resolvedOwner = *owner
@@ -8876,13 +8901,12 @@ func (s *functionState) emitTreeExactMemberUpdateExpr(expr *ast.RecordUpdateExpr
 	return handleValue, memberType, nil
 }
 
-func (s *functionState) emitTreeRewriteDefaultExpr(expr *ast.Ident) (C.LLVMValueRef, semantic.Type, error) {
-	if expr == nil {
-		return nil, nil, fmt.Errorf("invalid rewrite default expression")
-	}
-	ctx := s.treeRewriteDefault
+func (s *functionState) emitTreeRewriteDefaultValue(ctx *treeRewriteDefaultContext, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
 	if ctx == nil || ctx.memberType == nil {
 		return nil, nil, fmt.Errorf("default is only available while lowering a rewrite arm")
+	}
+	if resultType == nil {
+		resultType = semantic.TreeRewriteResultTypeForValue(ctx.memberType)
 	}
 	memberType := semantic.StripAggregateStateType(ctx.memberType)
 	family := treeExactMemberFamily(memberType)
@@ -9041,7 +9065,14 @@ func (s *functionState) emitTreeRewriteDefaultExpr(expr *ast.Ident) (C.LLVMValue
 	if err != nil {
 		return nil, nil, err
 	}
-	return handleValue, s.exprType(expr), nil
+	return handleValue, resultType, nil
+}
+
+func (s *functionState) emitTreeRewriteDefaultExpr(expr *ast.Ident) (C.LLVMValueRef, semantic.Type, error) {
+	if expr == nil {
+		return nil, nil, fmt.Errorf("invalid rewrite default expression")
+	}
+	return s.emitTreeRewriteDefaultValue(s.treeRewriteDefault, s.exprType(expr))
 }
 
 func (s *functionState) coerceTreeRewriteSequenceFieldValue(viewValue C.LLVMValueRef, viewType semantic.Type, targetType semantic.Type, owner treeAllocOwnerBinding, name string) (C.LLVMValueRef, error) {

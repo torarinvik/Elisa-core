@@ -1062,8 +1062,9 @@ func (p *Parser) parseRewriteExpr() ast.Expr {
 	value := p.withAsCastDisabled(p.parseExpr)
 	p.expect(lexer.TOKEN_AS)
 	root := p.parseTypeExpr()
+	rewriteDefault := p.matchIdentText("default")
 	arms := p.parseVisitArms()
-	return &ast.FoldExpr{Position: pos, Keyword: "rewrite", Value: value, Root: root, ResultType: root, Arms: arms}
+	return &ast.FoldExpr{Position: pos, Keyword: "rewrite", Value: value, Root: root, ResultType: root, RewriteDefault: rewriteDefault, Arms: arms}
 }
 
 func (p *Parser) parseLambdaExpr() ast.Expr {

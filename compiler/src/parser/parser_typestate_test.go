@@ -1136,7 +1136,7 @@ func TestParseTreeVisitAndFoldExprs(t *testing.T) {
 }
 
 func TestParseTreeRewriteExpr(t *testing.T) {
-	file, errs := parseSourceFile(t, "tree Lua:\n    common:\n        span: i64\n    @role(expr)\n    node Expr:\n        Int(value: i64)\n        Binary(child left: Expr, child right: Expr)\n\ndef simplify(node: Lua.Expr) -> Lua.Expr:\n    in perm:\n        return rewrite node as Lua.Expr:\n            Lua.Expr.Int(expr):\n                default\n            Lua.Expr.Binary(expr, left, right):\n                default\n")
+	file, errs := parseSourceFile(t, "tree Lua:\n    common:\n        span: i64\n    @role(expr)\n    node Expr:\n        Int(value: i64)\n        Binary(child left: Expr, child right: Expr)\n\ndef simplify(node: Lua.Expr) -> Lua.Expr:\n    in perm:\n        return rewrite node as Lua.Expr default:\n            Lua.Expr.Binary(expr, left, right):\n                default{span = expr.span, left, right}\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -1170,10 +1170,34 @@ func TestParseTreeRewriteExpr(t *testing.T) {
 	if !ok || resultType.Name != "Lua.Expr" {
 		t.Fatalf("expected rewrite result Lua.Expr, got %#v", rewriteExpr.ResultType)
 	}
-	if len(rewriteExpr.Arms) != 2 || len(rewriteExpr.Arms[1].ChildBindings) != 2 {
+	if !rewriteExpr.RewriteDefault {
+		t.Fatalf("expected rewrite default flag, got %#v", rewriteExpr)
+	}
+	if len(rewriteExpr.Arms) != 1 || len(rewriteExpr.Arms[0].ChildBindings) != 2 {
 		t.Fatalf("unexpected rewrite arms: %#v", rewriteExpr.Arms)
 	}
-	if got := unparse.FormatExpr(rewriteExpr); !strings.HasPrefix(got, "rewrite node as Lua.Expr:") {
+	stmt, ok := rewriteExpr.Arms[0].Body[0].(*ast.ExprStmt)
+	if !ok {
+		t.Fatalf("expected expr stmt arm body, got %T", rewriteExpr.Arms[0].Body[0])
+	}
+	update, ok := stmt.Expr.(*ast.RecordUpdateExpr)
+	if !ok {
+		t.Fatalf("expected rewrite default update, got %T", stmt.Expr)
+	}
+	baseIdent, ok := update.Base.(*ast.Ident)
+	if !ok || baseIdent.Name != "default" {
+		t.Fatalf("expected default base for rewrite update, got %#v", update.Base)
+	}
+	if got := update.ArgName(0); got != "span" {
+		t.Fatalf("expected first record update field to be span, got %q", got)
+	}
+	if got := update.ArgName(1); got != "left" {
+		t.Fatalf("expected second record update field to be left, got %q", got)
+	}
+	if got := update.ArgName(2); got != "right" {
+		t.Fatalf("expected third record update field to be right, got %q", got)
+	}
+	if got := unparse.FormatExpr(rewriteExpr); !strings.HasPrefix(got, "rewrite node as Lua.Expr default:") {
 		t.Fatalf("expected unparse to preserve rewrite spelling, got:\n%s", got)
 	}
 }

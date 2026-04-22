@@ -4088,6 +4088,7 @@ func (a *Analyzer) analyzeVisitArmBody(armInfo treeVisitArmInfo, resultType Type
 		ctx := &rewriteDefaultContext{Message: "default is only allowed inside an exact tree rewrite arm"}
 		if _, exact := TreeExactTag(armInfo.BindType); exact {
 			ctx.Allowed = true
+			ctx.ExactType = armInfo.BindType
 			ctx.ResultType = TreeRewriteResultTypeForValue(armInfo.BindType)
 		}
 		a.currentRewriteDefault = ctx
@@ -4564,7 +4565,9 @@ func (a *Analyzer) analyzeFoldExpr(expr *ast.FoldExpr) Type {
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 	a.currentFunctionValues = mergedFunctionValues
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
-	a.reportNonExhaustiveVisit(expr.Pos(), root, covered, hasWildcard, keyword)
+	if !(forRewrite && expr.RewriteDefault) {
+		a.reportNonExhaustiveVisit(expr.Pos(), root, covered, hasWildcard, keyword)
+	}
 	return resultType
 }
 

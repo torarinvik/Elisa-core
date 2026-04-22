@@ -66,6 +66,7 @@ type treeFoldHelperInfo struct {
 	captures         []treeFoldCapture
 	hasEnvParam      bool
 	rewrite          bool
+	implicitDefault  bool
 	rewriteOwnerPerm bool
 }
 
@@ -144,22 +145,20 @@ func (s *functionState) collectTreeFoldCaptures(expr *ast.FoldExpr) []treeFoldCa
 	if s == nil || s.g == nil || s.g.result == nil || expr == nil {
 		return nil
 	}
-	info := s.g.result.Fold[expr]
-	if info == nil || len(info.Captures) == 0 {
-		return nil
-	}
 	seen := map[string]bool{}
-	out := make([]treeFoldCapture, 0, len(info.Captures))
-	for _, name := range info.Captures {
-		if name == "" || seen[name] {
-			continue
+	out := make([]treeFoldCapture, 0, 4)
+	if info := s.g.result.Fold[expr]; info != nil {
+		for _, name := range info.Captures {
+			if name == "" || seen[name] {
+				continue
+			}
+			seen[name] = true
+			binding, ok := s.lookupBinding(name)
+			if !ok || binding.ptr == nil || binding.typ == nil {
+				continue
+			}
+			out = append(out, treeFoldCapture{name: name, binding: binding})
 		}
-		seen[name] = true
-		binding, ok := s.lookupBinding(name)
-		if !ok || binding.ptr == nil || binding.typ == nil {
-			continue
-		}
-		out = append(out, treeFoldCapture{name: name, binding: binding})
 	}
 	if expr.Keyword == "rewrite" {
 		if s.treeAllocOwner.storeValue != nil && s.treeAllocOwner.storeType != nil && !seen[treeRewriteOwnerStoreCaptureName] {
@@ -176,6 +175,9 @@ func (s *functionState) collectTreeFoldCaptures(expr *ast.FoldExpr) []treeFoldCa
 				seen[treeRewriteOwnerArenaCaptureName] = true
 			}
 		}
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }
@@ -243,6 +245,7 @@ func (s *functionState) newTreeFoldHelper(expr *ast.FoldExpr, root treeFoldRootI
 		captures:         captures,
 		hasEnvParam:      hasEnv,
 		rewrite:          rewrite,
+		implicitDefault:  rewrite && expr != nil && expr.RewriteDefault,
 		rewriteOwnerPerm: rewrite && s.treeAllocOwner.isPerm,
 	}, nil
 }
@@ -302,6 +305,82 @@ func (helper *treeFoldHelperInfo) armResultType(memberType semantic.Type, arm as
 		return resultType
 	}
 	return helper.resultType
+}
+
+func (helper *treeFoldHelperInfo) hasImplicitRewriteDefault() bool {
+	return helper != nil && helper.rewrite && helper.implicitDefault
+}
+
+func (helper *treeFoldHelperInfo) exactMembersInTagOrder() []semantic.Type {
+	if helper == nil {
+		return nil
+	}
+	switch helper.root.kind {
+	case treeFoldRootFamily:
+		return semantic.TreeFamilyExactMembersInTagOrder(helper.root.family)
+	case treeFoldRootCategory:
+		return treeCategoryMembersInTagOrder(helper.root.category)
+	case treeFoldRootExact:
+		if helper.root.exact != nil {
+			return []semantic.Type{helper.root.exact}
+		}
+	}
+	return nil
+}
+
+func (s *functionState) emitTreeFoldImplicitRewriteDefault(helper *treeFoldHelperInfo, envValue C.LLVMValueRef, nodeValue C.LLVMValueRef, memberType semantic.Type, name string) (C.LLVMValueRef, error) {
+	if helper == nil || !helper.hasImplicitRewriteDefault() {
+		return nil, fmt.Errorf("missing implicit rewrite default")
+	}
+	childViewValue, err := s.emitTreeFoldChildResultsView(helper, envValue, nodeValue, memberType, name+".children")
+	if err != nil {
+		return nil, err
+	}
+	value, _, err := s.emitTreeRewriteDefaultValue(&treeRewriteDefaultContext{memberType: memberType, nodeValue: nodeValue, childViewValue: childViewValue}, semantic.TreeRewriteResultTypeForValue(memberType))
+	return value, err
+}
+
+func (s *functionState) emitTreeFoldImplicitRewriteDefaultSwitch(helper *treeFoldHelperInfo, envValue C.LLVMValueRef, nodeValue C.LLVMValueRef, tagValue C.LLVMValueRef, covered map[string]bool, mergeBB C.LLVMBasicBlockRef, incomingValues *[]C.LLVMValueRef, incomingBlocks *[]C.LLVMBasicBlockRef, name string) error {
+	if helper == nil || !helper.hasImplicitRewriteDefault() {
+		return fmt.Errorf("missing implicit rewrite default switch")
+	}
+	missing := make([]semantic.Type, 0)
+	for _, member := range helper.exactMembersInTagOrder() {
+		memberName := treeExactMemberSurfaceName(member)
+		if covered[memberName] {
+			continue
+		}
+		missing = append(missing, member)
+	}
+	if len(missing) == 0 {
+		C.LLVMBuildUnreachable(s.builder)
+		return nil
+	}
+	missingFailBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".fail.unmatched"))
+	switchInst := C.LLVMBuildSwitch(s.builder, tagValue, missingFailBB, C.unsigned(len(missing)))
+	for _, member := range missing {
+		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".default.arm"))
+		tag, ok := treeExactMemberTag(member)
+		if !ok {
+			return fmt.Errorf("missing exact tag for %s", treeExactMemberSurfaceName(member))
+		}
+		tagConst, err := s.enumTagConstant(tag)
+		if err != nil {
+			return err
+		}
+		C.LLVMAddCase(switchInst, tagConst, bodyBB)
+		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+		value, err := s.emitTreeFoldImplicitRewriteDefault(helper, envValue, nodeValue, member, name+".default")
+		if err != nil {
+			return err
+		}
+		*incomingValues = append(*incomingValues, value)
+		*incomingBlocks = append(*incomingBlocks, C.LLVMGetInsertBlock(s.builder))
+		C.LLVMBuildBr(s.builder, mergeBB)
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, missingFailBB)
+	C.LLVMBuildUnreachable(s.builder)
+	return nil
 }
 
 func (s *functionState) treeVisitRelevantCategoryExactArms(categoryType *semantic.TreeCategoryType, arms []ast.VisitArm) ([]treeVisitExactArm, bool, error) {
@@ -744,6 +823,10 @@ func (s *functionState) emitTreeFoldArmValue(helper *treeFoldHelperInfo, envValu
 
 func (s *functionState) emitTreeFoldArmSequence(helper *treeFoldHelperInfo, envValue C.LLVMValueRef, nodeValue C.LLVMValueRef, memberType semantic.Type, arms []ast.VisitArm, failUnreachable bool, name string) (C.LLVMValueRef, bool, error) {
 	if len(arms) == 0 {
+		if helper != nil && helper.hasImplicitRewriteDefault() {
+			value, err := s.emitTreeFoldImplicitRewriteDefault(helper, envValue, nodeValue, memberType, name)
+			return value, false, err
+		}
 		if semantic.IsNeverType(helper.resultType) || failUnreachable {
 			C.LLVMBuildUnreachable(s.builder)
 			return nil, true, nil
@@ -823,7 +906,16 @@ func (s *functionState) emitTreeFoldArmSequence(helper *treeFoldHelperInfo, envV
 		s.popScope()
 		C.LLVMPositionBuilderAtEnd(s.builder, nextBB)
 	}
-	if semantic.IsNeverType(helper.resultType) || failUnreachable {
+	if helper != nil && helper.hasImplicitRewriteDefault() {
+		value, err := s.emitTreeFoldImplicitRewriteDefault(helper, envValue, nodeValue, memberType, name)
+		if err != nil {
+			return nil, false, err
+		}
+		inBlock := C.LLVMGetInsertBlock(s.builder)
+		incomingValues = append(incomingValues, value)
+		incomingBlocks = append(incomingBlocks, inBlock)
+		C.LLVMBuildBr(s.builder, mergeBB)
+	} else if semantic.IsNeverType(helper.resultType) || failUnreachable {
 		C.LLVMBuildUnreachable(s.builder)
 	} else {
 		llvmType, err := s.g.lowerType(helper.resultType)
@@ -859,6 +951,10 @@ func (s *functionState) emitTreeFoldExactDispatch(helper *treeFoldHelperInfo, en
 	}
 	arm, ok, _ := exactTreeVisitArm(treeExactMemberSurfaceName(memberType), arms)
 	if !ok {
+		if helper != nil && helper.hasImplicitRewriteDefault() {
+			value, err := s.emitTreeFoldImplicitRewriteDefault(helper, envValue, nodeValue, memberType, "fold.exact")
+			return value, false, err
+		}
 		if semantic.IsNeverType(helper.resultType) {
 			C.LLVMBuildUnreachable(s.builder)
 			return nil, true, nil
@@ -874,7 +970,7 @@ func (s *functionState) emitTreeFoldExactDispatch(helper *treeFoldHelperInfo, en
 }
 
 func (s *functionState) emitTreeFoldSwitchDispatch(helper *treeFoldHelperInfo, envValue C.LLVMValueRef, nodeValue C.LLVMValueRef, relevant []treeVisitExactArm, exhaustive bool, name string) (C.LLVMValueRef, bool, error) {
-	if len(relevant) == 0 {
+	if len(relevant) == 0 && (helper == nil || !helper.hasImplicitRewriteDefault()) {
 		return nil, false, fmt.Errorf("fold over %s has no relevant arms", helper.root.bindType().String())
 	}
 	tagValue, err := s.emitTreeHandleTagValue(nodeValue, name+".tag")
@@ -886,10 +982,12 @@ func (s *functionState) emitTreeFoldSwitchDispatch(helper *treeFoldHelperInfo, e
 	switchInst := C.LLVMBuildSwitch(s.builder, tagValue, failBB, C.unsigned(len(relevant)))
 	incomingValues := make([]C.LLVMValueRef, 0, len(relevant)+1)
 	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(relevant)+1)
+	coveredMembers := make(map[string]bool, len(relevant))
 	for _, armInfo := range relevant {
 		if armInfo.member == nil {
 			continue
 		}
+		coveredMembers[treeExactMemberSurfaceName(armInfo.member)] = true
 		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".arm"))
 		tag, ok := treeExactMemberTag(armInfo.member)
 		if !ok {
@@ -912,7 +1010,11 @@ func (s *functionState) emitTreeFoldSwitchDispatch(helper *treeFoldHelperInfo, e
 		}
 	}
 	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
-	if semantic.IsNeverType(helper.resultType) || exhaustive {
+	if helper != nil && helper.hasImplicitRewriteDefault() && !exhaustive {
+		if err := s.emitTreeFoldImplicitRewriteDefaultSwitch(helper, envValue, nodeValue, tagValue, coveredMembers, mergeBB, &incomingValues, &incomingBlocks, name); err != nil {
+			return nil, false, err
+		}
+	} else if semantic.IsNeverType(helper.resultType) || exhaustive {
 		C.LLVMBuildUnreachable(s.builder)
 	} else {
 		llvmType, err := s.g.lowerType(helper.resultType)
@@ -953,12 +1055,14 @@ func (s *functionState) emitTreeFoldGuardedSwitchDispatch(helper *treeFoldHelper
 	switchInst := C.LLVMBuildSwitch(s.builder, tagValue, failBB, C.unsigned(len(members)))
 	incomingValues := make([]C.LLVMValueRef, 0, len(members)+1)
 	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(members)+1)
+	coveredMembers := make(map[string]bool, len(members))
 	for _, member := range members {
 		memberName := treeExactMemberSurfaceName(member)
 		memberArms := exactTreeVisitArms(memberName, arms)
 		if len(memberArms) == 0 {
 			continue
 		}
+		coveredMembers[memberName] = true
 		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".arm"))
 		tag, ok := treeExactMemberTag(member)
 		if !ok {
@@ -981,7 +1085,11 @@ func (s *functionState) emitTreeFoldGuardedSwitchDispatch(helper *treeFoldHelper
 		}
 	}
 	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
-	if semantic.IsNeverType(helper.resultType) || exhaustive {
+	if helper != nil && helper.hasImplicitRewriteDefault() && !exhaustive {
+		if err := s.emitTreeFoldImplicitRewriteDefaultSwitch(helper, envValue, nodeValue, tagValue, coveredMembers, mergeBB, &incomingValues, &incomingBlocks, name); err != nil {
+			return nil, false, err
+		}
+	} else if semantic.IsNeverType(helper.resultType) || exhaustive {
 		C.LLVMBuildUnreachable(s.builder)
 	} else {
 		llvmType, err := s.g.lowerType(helper.resultType)

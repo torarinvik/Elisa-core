@@ -867,12 +867,13 @@ type VisitExpr struct {
 }
 
 type FoldExpr struct {
-	Position   lexer.Pos
-	Keyword    string
-	Value      Expr
-	Root       TypeExpr
-	ResultType TypeExpr
-	Arms       []VisitArm
+	Position       lexer.Pos
+	Keyword        string
+	Value          Expr
+	Root           TypeExpr
+	ResultType     TypeExpr
+	RewriteDefault bool
+	Arms           []VisitArm
 }
 
 type VisitArmChildBinding struct {

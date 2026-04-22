@@ -224,6 +224,7 @@ type treeAllocOwnerBinding struct {
 
 type rewriteDefaultContext struct {
 	Allowed    bool
+	ExactType  Type
 	ResultType Type
 	Message    string
 }

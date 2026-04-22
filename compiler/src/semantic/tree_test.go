@@ -829,6 +829,44 @@ def simplify(node: Lua.Expr) -> Lua.Expr:
 `)
 }
 
+func TestAnalyzeTreeRewriteImplicitDefaultExpr(t *testing.T) {
+	analyzeTreeTestSource(t, "tree_rewrite_implicit_default_surface.llcontext", `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Binary(child left: Expr, child right: Expr)
+
+def simplify(node: Lua.Expr) -> Lua.Expr:
+	in perm:
+		return rewrite node as Lua.Expr default:
+			Lua.Expr.Binary(expr, left, right):
+				default{span = expr.span, left, right}
+`)
+}
+
+func TestAnalyzeTreeRewriteRemainsExhaustiveWithoutImplicitDefault(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_rewrite_requires_exhaustive.llcontext", `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Binary(child left: Expr, child right: Expr)
+
+def simplify(node: Lua.Expr) -> Lua.Expr:
+	in perm:
+		return rewrite node as Lua.Expr:
+			Lua.Expr.Binary(expr, left, right):
+				default{span = expr.span, left, right}
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `non-exhaustive rewrite over Lua.Expr; missing Lua.Expr.Int`) {
+		t.Fatalf("expected non-exhaustive rewrite diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeTreeRewriteDefaultRequiresExactArm(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_rewrite_default_requires_exact.llcontext", `tree Lua:
 	common:
