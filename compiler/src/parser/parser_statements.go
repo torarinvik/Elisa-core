@@ -492,12 +492,11 @@ func (p *Parser) parseForStmt() ast.Stmt {
 	pos := p.cur().Pos
 	p.expectIdentText("for")
 	reverse := false
-	legacyReverseSyntax := false
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "rev" && p.pos+1 < len(p.tokens) {
 		nextKind := p.tokens[p.pos+1].Kind
 		if nextKind == lexer.TOKEN_IDENT || nextKind == lexer.TOKEN_MUTABLE {
+			p.errorf("legacy reverse iterable loop syntax `for rev ... in ...:` is no longer supported; use `for ... in rev(...):` instead")
 			reverse = true
-			legacyReverseSyntax = true
 			p.advance()
 		}
 	}
@@ -539,7 +538,7 @@ func (p *Parser) parseForStmt() ast.Stmt {
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	body := p.parseBlock()
-	return &ast.IterForStmt{Position: pos, Reverse: reverse, LegacySyntax: legacyReverseSyntax, Pattern: pattern, Mode: mode, Source: startOrSource, Filter: filter, Body: body}
+	return &ast.IterForStmt{Position: pos, Reverse: reverse, Pattern: pattern, Mode: mode, Source: startOrSource, Filter: filter, Body: body}
 }
 
 func (p *Parser) parseForHeaderExpr() ast.Expr {

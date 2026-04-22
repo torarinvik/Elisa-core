@@ -1542,9 +1542,6 @@ func TestParseReverseIterableForScopeAndCheckpointStatements(t *testing.T) {
 	if !iterStmt.Reverse {
 		t.Fatal("expected iterable loop to preserve reverse flag")
 	}
-	if iterStmt.LegacySyntax {
-		t.Fatal("expected canonical rev(items) syntax not to set legacy reverse syntax marker")
-	}
 	if _, ok := decl.Body[1].(*ast.ScopeStmt); !ok {
 		t.Fatalf("expected scope statement, got %T", decl.Body[1])
 	}
@@ -1604,9 +1601,6 @@ func TestParseRevLoopVariableNameWithoutReverseCompatCollision(t *testing.T) {
 	if iterStmt.Reverse {
 		t.Fatal("expected `rev` to be parsed as the loop variable name, not the reverse compat prefix")
 	}
-	if iterStmt.LegacySyntax {
-		t.Fatal("expected `rev` loop variable spelling not to set legacy reverse syntax marker")
-	}
 	namePattern, ok := iterStmt.Pattern.(*ast.MoveBindNamePattern)
 	if !ok {
 		t.Fatalf("expected simple loop pattern, got %T", iterStmt.Pattern)
@@ -1616,24 +1610,13 @@ func TestParseRevLoopVariableNameWithoutReverseCompatCollision(t *testing.T) {
 	}
 }
 
-func TestParseLegacyReverseIterableLoopStillAcceptedAndFormatsCanonically(t *testing.T) {
-	file, errs := parseSourceFile(t, "def walk(items: darray[int]) -> void:\n    for rev value in items:\n        pass\n")
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
+func TestParseRejectsLegacyReverseIterableLoopSyntax(t *testing.T) {
+	_, errs := parseSourceFile(t, "def walk(items: darray[int]) -> void:\n    for rev value in items:\n        pass\n")
+	if len(errs) == 0 {
+		t.Fatal("expected parser error, got none")
 	}
-	decl := file.Decls[0].(*ast.FuncDecl)
-	iterStmt, ok := decl.Body[0].(*ast.IterForStmt)
-	if !ok {
-		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
-	}
-	if !iterStmt.Reverse {
-		t.Fatal("expected legacy reverse iterable syntax to preserve reverse flag")
-	}
-	if !iterStmt.LegacySyntax {
-		t.Fatal("expected legacy reverse iterable syntax to set legacy syntax marker")
-	}
-	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for value in rev(items):") {
-		t.Fatalf("expected formatter to normalize legacy reverse iterable syntax, got:\n%s", formatted)
+	if !strings.Contains(strings.Join(errs, "\n"), "legacy reverse iterable loop syntax `for rev ... in ...:` is no longer supported") {
+		t.Fatalf("expected legacy reverse iterable loop parser diagnostic, got: %v", errs)
 	}
 }
 

@@ -209,10 +209,10 @@ def bad_clear(array: darray[i32, row]) -> darray[i32, row]:
 }
 
 func TestAnalyzeArenaAppendReturnsFreshShape(t *testing.T) {
-	src := `repr(c) struct Arena:
+	src := `struct Arena:
 	dummy: usize
 
-repr(c) struct DynArray[T]:
+struct DynArray[T]:
 	items: mutable any T&?
 	count: mutable usize
 	capacity: mutable usize

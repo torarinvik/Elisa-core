@@ -62,7 +62,7 @@ def bad_finish(mutable job: any ParseJob[Pending]&) -> void can[Abort] ensures j
 }
 
 func TestSemanticEnsuresRefStateCallRecovery(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "ensures_refstate.llcontext", `repr(c) struct HeapPairNode:
+	result := analyzeFunctionAnalysisTestSource(t, "ensures_refstate.llcontext", `struct HeapPairNode:
 	value: i32
 
 def expect_null(node: heap HeapPairNode!) -> void:
@@ -88,7 +88,7 @@ def use(node: heap HeapPairNode&) -> void can[Abort]:
 }
 
 func TestSemanticEnsuresDefRefStateProofAndCallRecovery(t *testing.T) {
-	analyzeFunctionAnalysisTestSource(t, "ensures_require_non_null.llcontext", `repr(c) struct HeapPairNode:
+	analyzeFunctionAnalysisTestSource(t, "ensures_require_non_null.llcontext", `struct HeapPairNode:
 	value: i32
 
 def expect_non_null(node: heap HeapPairNode&) -> void:
@@ -143,7 +143,7 @@ def bad_preserve(mutable player: any Player[Alive]&) -> void can[Abort] ensures 
 }
 
 func TestSemanticEnsuresNestedFieldCallRecovery(t *testing.T) {
-	analyzeFunctionAnalysisTestSource(t, "ensures_nested_fields.llcontext", `repr(c) struct HeapPairNode:
+	analyzeFunctionAnalysisTestSource(t, "ensures_nested_fields.llcontext", `struct HeapPairNode:
 	value: i32
 
 struct Player[state Alive | Dead]:
@@ -154,7 +154,7 @@ struct Player[state Alive | Dead]:
 		Alive when self.health > 0
 		Dead when self.health <= 0
 
-repr(c) struct Team:
+struct Team:
 	player: mutable Player[Alive]
 	slot: mutable heap HeapPairNode&?
 

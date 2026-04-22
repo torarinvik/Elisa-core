@@ -380,9 +380,6 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	case *ast.CastExpr:
 		src := a.analyzeExpr(n.Operand)
 		dst := a.resolveType(n.Target)
-		if n.LegacySyntax {
-			a.warnf(n.Pos(), "legacy cast syntax `.cast[T]()` is deprecated; use `.cast[T]` instead")
-		}
 		if n.Origin == ast.CastExprOriginPostfixShorthand {
 			if hookSym, ok := a.lookupVisibleCastHook(src, dst); ok {
 				a.resolvedCastHooks[n] = hookSym

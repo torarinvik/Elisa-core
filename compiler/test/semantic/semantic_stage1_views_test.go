@@ -8,7 +8,7 @@ import (
 )
 
 func TestAnalyzeStage1StringViewWrappersSupportBoundedViews(t *testing.T) {
-	src := `repr(c) struct StringView:
+	src := `struct StringView:
 	data: mutable any u8&
 	len: mutable i64
 
@@ -56,7 +56,7 @@ def bad(text: dstr[row]) -> dstr[row]:
 }
 
 func TestAnalyzeStage1StringViewHelpersAcceptSubviewAndEquality(t *testing.T) {
-	src := `repr(c) struct StringView:
+	src := `struct StringView:
 	data: mutable any u8&
 	len: mutable i64
 

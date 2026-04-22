@@ -6,12 +6,12 @@ import (
 )
 
 func TestAnalyzeArenaArrayViewHelpersCarryElementTypes(t *testing.T) {
-	src := `repr(c) struct DynArray[T]:
+	src := `struct DynArray[T]:
 	items: mutable any T&?
 	count: mutable usize
 	capacity: mutable usize
 
-repr(c) struct DynArrayView:
+struct DynArrayView:
 	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
@@ -48,16 +48,16 @@ def use(values: any darray[i32, row]&) -> i32:
 }
 
 func TestAnalyzeArenaArrayFromViewReturnsFreshShape(t *testing.T) {
-	src := `repr(c) struct Arena:
+	src := `struct Arena:
 	begin: mutable any void&?
 	end: mutable any void&?
 
-repr(c) struct DynArray[T]:
+struct DynArray[T]:
 	items: mutable any T&?
 	count: mutable usize
 	capacity: mutable usize
 
-repr(c) struct DynArrayView:
+struct DynArrayView:
 	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize

@@ -45,7 +45,7 @@ struct Foo:
 
 **Syntax meaning:**
 Uses the default field order and layout, which currently follows C-compatible rules.
-The old `repr(c) struct` spelling remains accepted as a compatibility alias.
+The old `repr(c) struct` spelling is no longer supported; use `struct` directly.
 
 ---
 

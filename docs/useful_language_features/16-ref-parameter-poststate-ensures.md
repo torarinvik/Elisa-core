@@ -519,7 +519,7 @@ def bump_score(player: any Player[Alive]&) -> void ensures player => preserve:
 ### 8.6 Nested path
 
 ```context
-repr(c) struct Team:
+struct Team:
     player: mutable Player[Alive]
     slot: mutable heap HeapPairNode&?
 
@@ -1232,7 +1232,7 @@ def bump_score(player: any Player[Alive]&) -> void:
 ### 7.4 Nested path
 
 ```context
-repr(c) struct Team:
+struct Team:
     player: mutable Player[Alive]
 
 def kill_team(team: any Team&) -> void:

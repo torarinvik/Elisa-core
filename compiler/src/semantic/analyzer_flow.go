@@ -2168,9 +2168,6 @@ func (a *Analyzer) bindIterLoopPattern(scope *Scope, pattern ast.MoveBindPattern
 }
 
 func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
-	if stmt.LegacySyntax {
-		a.warnf(stmt.Pos(), "legacy reverse iterable loop syntax `for rev ... in ...:` is deprecated; use `for ... in rev(...):` instead")
-	}
 	sourceType := a.analyzeExpr(stmt.Source)
 	info, ok := a.resolveIterLoopSourceInfo(stmt.Source, sourceType)
 	if !ok {

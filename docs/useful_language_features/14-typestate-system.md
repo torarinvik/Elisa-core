@@ -537,7 +537,7 @@ If a typestated value is nested inside another tracked value, mutation still upd
 Example:
 
 ```context
-repr(c) struct Team:
+struct Team:
     player: mutable Player[Alive]
 
 def bad(team: mutable Team) -> int:
@@ -623,7 +623,7 @@ For calls with reference arguments, the compiler conservatively widens named-sta
 That includes wrapper cases such as:
 
 ```context
-repr(c) struct Team:
+struct Team:
     player: mutable Player[Alive]
 
 def kill_team(team: any Team&) -> void:

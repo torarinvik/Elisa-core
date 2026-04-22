@@ -3,6 +3,9 @@ package semantic
 import (
 	"strings"
 	"testing"
+
+	"llcontext/src/lexer"
+	"llcontext/src/parser"
 )
 
 func TestAnalyzeScopeCheckpointAndReverseIterableLoop(t *testing.T) {
@@ -53,23 +56,35 @@ func TestAnalyzeRejectsInvalidGroupedCheckpointTarget(t *testing.T) {
 	}
 }
 
-func TestAnalyzeWarnsOnLegacyReverseIterableLoopSyntax(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "legacy_reverse_iter_warning.llcontext", `def build(items: darray[int]) -> void:
+func TestAnalyzeRejectsLegacyReverseIterableLoopSyntax(t *testing.T) {
+	l := lexer.New("legacy_reverse_iter_error.llcontext", []byte(`def build(items: darray[int]) -> void:
     for rev value in items:
         pass
-`)
-	if all := strings.Join(result.Warnings(), "\n"); !strings.Contains(all, "legacy reverse iterable loop syntax `for rev ... in ...:` is deprecated") {
-		t.Fatalf("expected legacy reverse iterable warning, got:\n%s", all)
+`))
+	tokens := l.Tokenize()
+	if errs := l.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected lex errors: %v", errs)
+	}
+	p := parser.New(tokens)
+	_ = p.ParseFile("legacy_reverse_iter_error.llcontext")
+	if all := strings.Join(p.Errors(), "\n"); !strings.Contains(all, "legacy reverse iterable loop syntax `for rev ... in ...:` is no longer supported") {
+		t.Fatalf("expected legacy reverse iterable parser diagnostic, got:\n%s", all)
 	}
 }
 
-func TestAnalyzeRejectsReverseRangeForNow(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "reverse_range_rejected.llcontext", `def build() -> void:
+func TestParseRejectsLegacyReverseRangeLoopSyntax(t *testing.T) {
+	l := lexer.New("reverse_range_rejected.llcontext", []byte(`def build() -> void:
     for rev i in 0..<10:
         pass
-`)
-	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "reverse range for loops are not supported yet") {
-		t.Fatalf("expected reverse range diagnostic, got:\n%s", all)
+    `))
+	tokens := l.Tokenize()
+	if errs := l.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected lex errors: %v", errs)
+	}
+	p := parser.New(tokens)
+	_ = p.ParseFile("reverse_range_rejected.llcontext")
+	if all := strings.Join(p.Errors(), "\n"); !strings.Contains(all, "legacy reverse iterable loop syntax `for rev ... in ...:` is no longer supported") {
+		t.Fatalf("expected legacy reverse range parser diagnostic, got:\n%s", all)
 	}
 }
 

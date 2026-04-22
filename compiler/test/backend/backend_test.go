@@ -130,7 +130,7 @@ func requireTinyExactDViewMaterializeBody(t *testing.T, body string) {
 }
 
 func TestGenerateLLVMIRDefinesSimpleFunctionBody(t *testing.T) {
-	src := `repr(c) struct Box:
+	src := `struct Box:
     value: i32
 
 extern alloc_box() -> any Box&
@@ -164,12 +164,12 @@ def read_box(box: any Box&) -> i32:
 }
 
 func TestGenerateLLVMIRLowersNestedStructLiterals(t *testing.T) {
-	src := `repr(c) struct ScratchPair:
+	src := `struct ScratchPair:
 	left: mutable int
 	right: mutable int
 
 
-repr(c) struct ScratchHolder:
+struct ScratchHolder:
 	pair: mutable ScratchPair
 
 
@@ -256,7 +256,7 @@ def read(value: Holder[!, &]) -> i32:
 }
 
 func TestGenerateLLVMIRLowersMoveAsStructDestructure(t *testing.T) {
-	src := `repr(c) struct Pair:
+	src := `struct Pair:
     left: mutable i64
     right: mutable i64
 
@@ -921,7 +921,7 @@ def bump(ch: char) -> i64:
 }
 
 func TestGenerateLLVMIRLowersReferenceComparisons(t *testing.T) {
-	src := `repr(c) struct Box:
+	src := `struct Box:
     value: i32
 
 extern maybe_box() -> any Box&?
@@ -979,7 +979,7 @@ func TestGenerateLLVMIRTernaryUsesPhi(t *testing.T) {
 }
 
 func TestGenerateLLVMIRDefinesGlobalsWithInitializers(t *testing.T) {
-	src := `repr(c) struct Pair:
+	src := `struct Pair:
     left: i32
     right: i32
 
@@ -1015,11 +1015,11 @@ global flags: i32[4] = zeroed
 }
 
 func TestGenerateLLVMIRAllowsAggregateGlobalReferencesInInitializers(t *testing.T) {
-	src := `repr(c) struct Pair:
+	src := `struct Pair:
 	left: i32
 	right: i32
 
-repr(c) struct Holder:
+struct Holder:
 	pair: Pair
 
 global base: Pair = Pair(1, 2)
@@ -1078,7 +1078,7 @@ def use_identity(value: i32) -> i32:
 }
 
 func TestGenerateLLVMIRSpecializesRefQualifierGenericFunctions(t *testing.T) {
-	src := `repr(c) struct Node:
+	src := `struct Node:
 	value: mutable i32
 
 struct Handle[refstorage Store, refstate State]:
@@ -1205,10 +1205,10 @@ export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[
 }
 
 func TestGenerateCHeaderForConcreteRefQualifierExports(t *testing.T) {
-	src := `repr(c) struct Node:
+	src := `struct Node:
 	value: mutable i32
 
-repr(c) struct Handle[refstorage Store, refstate State]:
+struct Handle[refstorage Store, refstate State]:
 	ptr: Store Node&[State]
 
 export type Node as CtxNode
@@ -1290,7 +1290,7 @@ def narrow(value: f64) -> f32:
 }
 
 func TestGenerateCHeaderUsesFloatBuiltinMappings(t *testing.T) {
-	src := `repr(c) struct Metrics:
+	src := `struct Metrics:
 	ratio: f32
 	total: f64
 
@@ -1456,7 +1456,7 @@ global g_f32: f32 = F32_FROM_U64
 func TestGenerateLLVMIRLowersContextualFloatLiteralSitesAndGlobals(t *testing.T) {
 	src := `extern passthrough(value: f32) -> f32
 
-repr(c) struct FloatPair:
+struct FloatPair:
 	left: f32
 	right: f32
 
@@ -1555,7 +1555,7 @@ def local_and_call() -> f32:
 }
 
 func TestGenerateLLVMIRLowersContextualFloatLiteralArithmeticTopLevelSites(t *testing.T) {
-	src := `repr(c) struct FloatPair:
+	src := `struct FloatPair:
 	left: f32
 	right: f32
 
@@ -1601,11 +1601,11 @@ def total() -> f64:
 }
 
 func TestGenerateCHeaderOrdersAggregateDefinitionsByValueDependencies(t *testing.T) {
-	src := `repr(c) struct Node:
+	src := `struct Node:
 	value: mutable i32
 	next: mutable any Node&?
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	node: mutable Node
 	next_ref: mutable any Node&?
 
@@ -1689,10 +1689,10 @@ def bits_ptr(bits: uintptr) -> any u8&:
 }
 
 func TestGenerateLLVMIRLowersNestedFieldAccessOnReturnedStructValues(t *testing.T) {
-	src := `repr(c) struct Inner:
+	src := `struct Inner:
 	value: i32
 
-repr(c) struct Outer:
+struct Outer:
 	inner: Inner
 
 extern make_outer() -> Outer
@@ -1722,12 +1722,12 @@ def read_nested_return() -> i32:
 }
 
 func TestGenerateLLVMIRLowerRuntimeBackedTypes(t *testing.T) {
-	src := `repr(c) struct DynArray[T]:
+	src := `struct DynArray[T]:
 	items: mutable any T&?
     count: mutable usize
     capacity: mutable usize
 
-repr(c) struct DynArrayView:
+struct DynArrayView:
 	items: mutable any void&?
     count: mutable usize
 
@@ -1827,7 +1827,7 @@ func TestWriteLLVMObjectFile(t *testing.T) {
 }
 
 func TestGenerateLLVMIRUsesABISizeofForPaddedStructs(t *testing.T) {
-	src := `repr(c) struct Padded:
+	src := `struct Padded:
     tag: i8
     value: i32
 
@@ -3423,7 +3423,7 @@ def fallback_value(flag: bool) -> int:
 }
 
 func TestGenerateLLVMIRLowersOptionalNullChecksAndSmartCastUse(t *testing.T) {
-	src := `repr(c) struct Box:
+	src := `struct Box:
 	value: i32
 
 
@@ -3460,12 +3460,12 @@ def unwrap_or(flag: bool) -> i32:
 }
 
 func TestGenerateLLVMIRIndexesRuntimeBackedArraysAndViews(t *testing.T) {
-	src := `repr(c) struct DynArray[T]:
+	src := `struct DynArray[T]:
 	items: mutable any T&?
     count: mutable usize
     capacity: mutable usize
 
-repr(c) struct DynArrayView:
+struct DynArrayView:
 	items: mutable any void&?
     count: mutable usize
 
@@ -3603,7 +3603,7 @@ def different_views(left: StringView, right: StringView) -> bool:
 }
 
 func TestGenerateLLVMIRSpecializesSameExtentRuntimeStringEquality(t *testing.T) {
-	src := `repr(c) struct StringView:
+	src := `struct StringView:
 	data: mutable any u8&
 	len: mutable i64
 
@@ -3711,7 +3711,7 @@ def different_bounds_view(left: dstr[row], right: dstr[col]) -> bool:
 }
 
 func TestGenerateLLVMIRSpecializesDirectRuntimeStringEqualityHelpers(t *testing.T) {
-	src := `repr(c) struct StringView:
+	src := `struct StringView:
 	data: mutable any u8&
 	len: mutable i64
 
@@ -4049,7 +4049,7 @@ def same_long(view: StringView) -> bool:
 }
 
 func TestGenerateLLVMIRMarksDisjointDViewMemcpyCallsNoAlias(t *testing.T) {
-	src := `repr(c) struct DynArrayView:
+	src := `struct DynArrayView:
 	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
@@ -4085,12 +4085,12 @@ def split_copy(view: dview[i32]) -> any void&?:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExact(t *testing.T) {
-	src := `repr(c) struct DynArray[T]:
+	src := `struct DynArray[T]:
 	items: mutable any T&?
 	count: mutable usize
 	capacity: mutable usize
 
-repr(c) struct DynArrayView:
+struct DynArrayView:
 	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
@@ -4190,7 +4190,7 @@ def copy_overlap_unknown(values: any darray[i32, shape_in]&) -> void:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughFieldProjection(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
@@ -4236,7 +4236,7 @@ def copy_helper(values: array[i32, 4]) -> void:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughIndexedFieldProjection(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
@@ -4265,12 +4265,12 @@ def copy_indexed(values: array[i32, 4]) -> void:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughStandardViewSliceHelperFieldProjection(t *testing.T) {
-	src := `repr(c) struct DynArrayView:
+	src := `struct DynArrayView:
 	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
 
-repr(c) struct Views:
+struct Views:
 	left: view[i32]
 	right: view[i32]
 
@@ -4305,11 +4305,11 @@ def copy_helper_view_slice(values: array[i32, 8]) -> void:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughHelperReturnedIndexedFieldProjection(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct ViewHolder:
+struct ViewHolder:
 	items: array[Views, 1]
 
 @borrows_return_field(items[0].left, left, items[0].right, right)
@@ -4340,14 +4340,14 @@ def copy_helper_indexed(values: array[i32, 4]) -> void:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughNestedHelperReturnedIndexedFieldProjection(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct ViewHolder:
+struct ViewHolder:
 	items: array[Views, 1]
 
-repr(c) struct NestedHolder:
+struct NestedHolder:
 	holder: ViewHolder
 
 @borrows_return_field(holder.items[0].left, left, holder.items[0].right, right)
@@ -4378,11 +4378,11 @@ def copy_nested_helper_indexed(values: array[i32, 4]) -> void:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct ViewWindow:
+struct ViewWindow:
 	items: view[Views]
 
 @borrows_return_field_rebased(items, src)
@@ -4414,11 +4414,11 @@ def copy_rebased_helper_indexed(values: array[i32, 4]) -> void:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughWildcardRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct ViewWindow:
+struct ViewWindow:
 	items: view[Views]
 
 @borrows_return_field_rebased(items[*].left, src[*].left, items[*].right, src[*].right)
@@ -4450,14 +4450,14 @@ def copy_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> void:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughNestedWildcardRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Views]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items[*].left, src[*].left, meta.items[*].right, src[*].right)
@@ -4489,11 +4489,11 @@ def copy_nested_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> void:
 }
 
 func TestGenerateLLVMIRKeepsCopyOverlapGuardrailsThroughWildcardRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct ViewWindow:
+struct ViewWindow:
 	items: view[Views]
 
 @borrows_return_field_rebased(items[*].left, src[*].left, items[*].right, src[*].right)
@@ -4530,14 +4530,14 @@ def copy_wildcard_rebased_overlap(values: array[i32, 8]) -> void:
 }
 
 func TestGenerateLLVMIRKeepsCopyOverlapGuardrailsThroughNestedWildcardRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Views]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items[*].left, src[*].left, meta.items[*].right, src[*].right)
@@ -4574,14 +4574,14 @@ def copy_nested_wildcard_rebased_overlap(values: array[i32, 8]) -> void:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughNestedRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Views]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items, src)
@@ -4613,11 +4613,11 @@ def copy_nested_rebased_helper_indexed(values: array[i32, 4]) -> void:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughNestedFieldProjection(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct NestedViews:
+struct NestedViews:
 	inner: Views
 
 @borrows_return_field(inner.left, left, inner.right, right)
@@ -4661,12 +4661,12 @@ def copy_nested_helper(values: array[i32, 4]) -> void:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewZeroFill(t *testing.T) {
-	src := `repr(c) struct DynArray[T]:
+	src := `struct DynArray[T]:
 	items: mutable any T&?
 	count: mutable usize
 	capacity: mutable usize
 
-repr(c) struct DynArrayView:
+struct DynArrayView:
 	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
@@ -4739,12 +4739,12 @@ def fill_unknown(view: dview[i32]) -> void:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewRepeatedByteFill(t *testing.T) {
-	src := `repr(c) struct DynArray[T]:
+	src := `struct DynArray[T]:
 	items: mutable any T&?
 	count: mutable usize
 	capacity: mutable usize
 
-repr(c) struct DynArrayView:
+struct DynArrayView:
 	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
@@ -4836,12 +4836,12 @@ def fill_nonuniform_unknown(view: dview[i32]) -> void:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewDynamicByteFill(t *testing.T) {
-	src := `repr(c) struct DynArray[T]:
+	src := `struct DynArray[T]:
 	items: mutable any T&?
 	count: mutable usize
 	capacity: mutable usize
 
-repr(c) struct DynArrayView:
+struct DynArrayView:
 	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
@@ -4914,12 +4914,12 @@ def fill_runtime_wide_unknown(view: dview[i32], value: i32) -> void:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewCoercedByteFill(t *testing.T) {
-	src := `repr(c) struct DynArray[T]:
+	src := `struct DynArray[T]:
 	items: mutable any T&?
 	count: mutable usize
 	capacity: mutable usize
 
-repr(c) struct DynArrayView:
+struct DynArrayView:
 	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
@@ -4981,12 +4981,12 @@ def fill_runtime_int_to_bytes(values: any darray[u8, 4]&, value: int) -> void:
 }
 
 func TestGenerateOptimizedLLVMIRSupportsArenaDViewByteFillMemsetFastPath(t *testing.T) {
-	src := `repr(c) struct DynArray[T]:
+	src := `struct DynArray[T]:
 	items: mutable any T&?
 	count: mutable usize
 	capacity: mutable usize
 
-repr(c) struct DynArrayView:
+struct DynArrayView:
 	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
@@ -5023,12 +5023,12 @@ def fill_runtime_byte(values: any darray[u8, 4]&, value: u8) -> void:
 func TestGenerateOptimizedLLVMObjectFileSupportsArenaDViewByteFillWithRuntimeMemsetDecl(t *testing.T) {
 	src := `extern memset(dest: any void&, val: int, n: usize) -> any void&
 
-repr(c) struct DynArray[T]:
+struct DynArray[T]:
 	items: mutable any T&?
 	count: mutable usize
 	capacity: mutable usize
 
-repr(c) struct DynArrayView:
+struct DynArrayView:
 	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
@@ -5078,7 +5078,7 @@ def fill_runtime_byte(values: any darray[u8, 4]&, value: u8) -> void:
 }
 
 func TestGenerateOptimizedLLVMObjectFileSkipsRedundantPackedZeroPayloadStores(t *testing.T) {
-	src := `repr(c) struct Payload:
+	src := `struct Payload:
 	data: mutable any u8&?
 	len: mutable i32
 
@@ -5114,12 +5114,12 @@ def build() -> Node:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewEqExact(t *testing.T) {
-	src := `repr(c) struct DynArray[T]:
+	src := `struct DynArray[T]:
 	items: mutable any T&?
 	count: mutable usize
 	capacity: mutable usize
 
-repr(c) struct DynArrayView:
+struct DynArrayView:
 	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
@@ -5204,7 +5204,7 @@ def eq_diff_extent(values: any darray[i32, 4]&) -> bool:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughFieldProjection(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
@@ -5251,7 +5251,7 @@ def eq_helper(values: array[i32, 4]) -> bool:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughIndexedFieldProjection(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
@@ -5281,11 +5281,11 @@ def eq_indexed(values: array[i32, 4]) -> bool:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughHelperReturnedIndexedFieldProjection(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct ViewHolder:
+struct ViewHolder:
 	items: array[Views, 1]
 
 @borrows_return_field(items[0].left, left, items[0].right, right)
@@ -5317,14 +5317,14 @@ def eq_helper_indexed(values: array[i32, 4]) -> bool:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughNestedHelperReturnedIndexedFieldProjection(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct ViewHolder:
+struct ViewHolder:
 	items: array[Views, 1]
 
-repr(c) struct NestedHolder:
+struct NestedHolder:
 	holder: ViewHolder
 
 @borrows_return_field(holder.items[0].left, left, holder.items[0].right, right)
@@ -5356,11 +5356,11 @@ def eq_nested_helper_indexed(values: array[i32, 4]) -> bool:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct ViewWindow:
+struct ViewWindow:
 	items: view[Views]
 
 @borrows_return_field_rebased(items, src)
@@ -5393,11 +5393,11 @@ def eq_rebased_helper_indexed(values: array[i32, 4]) -> bool:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughWildcardRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct ViewWindow:
+struct ViewWindow:
 	items: view[Views]
 
 @borrows_return_field_rebased(items[*].left, src[*].left, items[*].right, src[*].right)
@@ -5430,11 +5430,11 @@ def eq_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> bool:
 }
 
 func TestGenerateLLVMIRKeepsOverlapGuardrailsThroughWildcardRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct ViewWindow:
+struct ViewWindow:
 	items: view[Views]
 
 @borrows_return_field_rebased(items[*].left, src[*].left, items[*].right, src[*].right)
@@ -5467,14 +5467,14 @@ def eq_wildcard_rebased_overlap(values: array[i32, 8]) -> bool:
 }
 
 func TestGenerateLLVMIRKeepsOverlapGuardrailsThroughNestedWildcardRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Views]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items[*].left, src[*].left, meta.items[*].right, src[*].right)
@@ -5507,14 +5507,14 @@ def eq_nested_wildcard_rebased_overlap(values: array[i32, 8]) -> bool:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughNestedRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Views]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items, src)
@@ -5547,14 +5547,14 @@ def eq_nested_rebased_helper_indexed(values: array[i32, 4]) -> bool:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughNestedWildcardRebasedHelperReturnedIndexedFieldProjection(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Views]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items[*].left, src[*].left, meta.items[*].right, src[*].right)
@@ -5587,11 +5587,11 @@ def eq_nested_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> bool:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughNestedFieldProjection(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct NestedViews:
+struct NestedViews:
 	inner: Views
 
 @borrows_return_field(inner.left, left, inner.right, right)
@@ -5636,17 +5636,17 @@ def eq_nested_helper(values: array[i32, 4]) -> bool:
 }
 
 func TestGenerateLLVMIRSpecializesArenaDViewMaterialize(t *testing.T) {
-	src := `repr(c) struct Arena:
+	src := `struct Arena:
 	begin: mutable heap void&?
 	end: mutable heap void&?
 	end_index: mutable usize
 
-repr(c) struct DynArray[T]:
+struct DynArray[T]:
 	items: mutable any T&?
 	count: mutable usize
 	capacity: mutable usize
 
-repr(c) struct DynArrayView:
+struct DynArrayView:
 	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
@@ -5697,7 +5697,7 @@ def materialize_unknown(a: any Arena&, view: dview[i32]) -> darray[i32]:
 }
 
 func TestGenerateLLVMIRSpecializesStringViewMaterialize(t *testing.T) {
-	src := `repr(c) struct StringView:
+	src := `struct StringView:
 	data: mutable any u8&
 	len: mutable i64
 
@@ -5870,12 +5870,12 @@ def probe(view: dview[i64]) -> bool:
 }
 
 func TestGenerateLLVMIRLowersArraySliceSyntaxViaRuntimeHelpers(t *testing.T) {
-	src := `repr(c) struct DynArray[T]:
+	src := `struct DynArray[T]:
 	items: mutable any T&?
 	count: mutable usize
 	capacity: mutable usize
 
-repr(c) struct DynArrayView:
+struct DynArrayView:
 	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
@@ -5913,7 +5913,7 @@ def head_view(view: dview[i32]) -> i32:
 }
 
 func TestGenerateLLVMIRLowersFixedArraySliceSyntaxWithoutRuntimeHelpers(t *testing.T) {
-	src := `repr(c) struct DynArrayView:
+	src := `struct DynArrayView:
 	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
@@ -5949,12 +5949,12 @@ def head_ref(values: any i32[4]&) -> i32:
 }
 
 func TestGenerateLLVMIRLowersNestedCollectionAccessOnReturnedValues(t *testing.T) {
-	src := `repr(c) struct DynArray[T]:
+	src := `struct DynArray[T]:
 	items: mutable any T&?
 	count: mutable usize
 	capacity: mutable usize
 
-repr(c) struct DynArrayView:
+struct DynArrayView:
 	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
@@ -6023,7 +6023,7 @@ func TestGenerateLLVMIRLowersArrayLiteralAndInferredLocalViaFixedArrayLowering(t
 }
 
 func TestGenerateLLVMIRLowersStringSliceSyntaxViaRuntimeHelpers(t *testing.T) {
-	src := `repr(c) struct StringView:
+	src := `struct StringView:
 	data: mutable any u8&
     len: mutable i64
 

@@ -123,7 +123,7 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 		if n.Operand != nil && operand == nil {
 			return nil
 		}
-		return &ast.CastExpr{Position: n.Position, Operand: operand, Target: n.Target, Origin: n.Origin, LegacySyntax: n.LegacySyntax}
+		return &ast.CastExpr{Position: n.Position, Operand: operand, Target: n.Target, Origin: n.Origin}
 	case *ast.CascadeExpr:
 		target := cloneDefaultArgExpr(n.Target)
 		value := cloneDefaultArgExpr(n.Value)

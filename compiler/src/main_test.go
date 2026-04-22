@@ -1728,7 +1728,7 @@ func TestRunCLIPrintsAnnotatedFunctionsInAST(t *testing.T) {
 func TestRunCLIPrintsAnnotatedExternFunctionsInAST(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "annotated_extern.llcontext")
-	src := "repr(c) struct Holder:\n    value: any i32&\n\nrepr(c) struct Window:\n    items: view[Holder]\n\n@borrows_return(window.items[*])\nextern borrow_value(window: Window) -> view[Holder]\n"
+	src := "struct Holder:\n    value: any i32&\n\nstruct Window:\n    items: view[Holder]\n\n@borrows_return(window.items[*])\nextern borrow_value(window: Window) -> view[Holder]\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write annotated extern fixture: %v", err)
 	}
@@ -1750,11 +1750,8 @@ func TestRunCLIPrintsAnnotatedExternFunctionsInAST(t *testing.T) {
 	}
 	for _, check := range []string{"struct Holder (1 fields)", "struct Window (1 fields)"} {
 		if !strings.Contains(output, check) {
-			t.Fatalf("expected AST output to normalize repr(c) syntax as %q, got:\n%s", check, output)
+			t.Fatalf("expected AST output to contain %q, got:\n%s", check, output)
 		}
-	}
-	if strings.Contains(output, "repr(c)") {
-		t.Fatalf("expected AST output to omit redundant repr(c) spelling, got:\n%s", output)
 	}
 }
 
@@ -1808,19 +1805,9 @@ func TestRunCLICompilesConstEnumSourceToLLVM(t *testing.T) {
 	}
 }
 
-func TestRunCLIWarnsOnLegacyCastSyntax(t *testing.T) {
-	prev, hadPrev := os.LookupEnv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS")
-	_ = os.Unsetenv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS")
-	defer func() {
-		if hadPrev {
-			_ = os.Setenv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS", prev)
-		} else {
-			_ = os.Unsetenv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS")
-		}
-	}()
-
+func TestRunCLIRejectsLegacyCastSyntax(t *testing.T) {
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "legacy_cast_warning.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "legacy_cast_error.llcontext")
 	src := "const VALUE: i64 = 1.cast[i64]()\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write legacy cast fixture: %v", err)
@@ -1829,30 +1816,17 @@ func TestRunCLIWarnsOnLegacyCastSyntax(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	exitCode := runCLI([]string{"-emit", "ast", fixturePath}, &stdout, &stderr)
-	if exitCode != 0 {
-		t.Fatalf("expected runCLI to succeed, stderr:\n%s", stderr.String())
+	if exitCode == 0 {
+		t.Fatalf("expected runCLI to fail for legacy cast syntax, stdout:\n%s", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "legacy cast syntax `.cast[T]()` is deprecated") {
-		t.Fatalf("expected legacy cast warning on stderr, got:\n%s", stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "const VALUE = 1.cast[i64]") {
-		t.Fatalf("expected AST output to normalize to .cast[T] syntax, got:\n%s", stdout.String())
+	if !strings.Contains(stderr.String(), "legacy cast syntax `.cast[T]()` is no longer supported") {
+		t.Fatalf("expected legacy cast parser error on stderr, got:\n%s", stderr.String())
 	}
 }
 
-func TestRunCLIWarnsOnLegacyReverseIterableLoopSyntax(t *testing.T) {
-	prev, hadPrev := os.LookupEnv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS")
-	_ = os.Unsetenv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS")
-	defer func() {
-		if hadPrev {
-			_ = os.Setenv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS", prev)
-		} else {
-			_ = os.Unsetenv("LLCONTEXT_SUPPRESS_DEPRECATED_WARNINGS")
-		}
-	}()
-
+func TestRunCLIRejectsLegacyReverseIterableLoopSyntax(t *testing.T) {
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "legacy_reverse_iter_warning.llcontext")
+	fixturePath := filepath.Join(fixtureDir, "legacy_reverse_iter_error.llcontext")
 	src := "def walk(items: darray[int]) -> void:\n    for rev value in items:\n        pass\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write legacy reverse iterable fixture: %v", err)
@@ -1861,14 +1835,33 @@ func TestRunCLIWarnsOnLegacyReverseIterableLoopSyntax(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	exitCode := runCLI([]string{"-emit", "fmt", fixturePath}, &stdout, &stderr)
-	if exitCode != 0 {
-		t.Fatalf("expected runCLI to succeed, stderr:\n%s", stderr.String())
+	if exitCode == 0 {
+		t.Fatalf("expected runCLI to fail for legacy reverse iterable syntax, stdout:\n%s", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), legacyReverseIterableLoopDeprecationNotice) {
-		t.Fatalf("expected legacy reverse iterable warning on stderr, got:\n%s", stderr.String())
+	if !strings.Contains(stderr.String(), "legacy reverse iterable loop syntax `for rev ... in ...:` is no longer supported") {
+		t.Fatalf("expected legacy reverse iterable parser error on stderr, got:\n%s", stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "for value in rev(items):") {
-		t.Fatalf("expected formatter output to normalize legacy reverse iterable syntax, got:\n%s", stdout.String())
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no formatter output on parser failure, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunCLIRejectsLegacyReprCStructSyntax(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "legacy_repr_c_struct_error.llcontext")
+	src := "repr(c) struct Holder:\n    value: any i32&\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write legacy repr(c) fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "ast", fixturePath}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected runCLI to fail for legacy repr(c) syntax, stdout:\n%s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "legacy `repr(c) struct` syntax is no longer supported") {
+		t.Fatalf("expected legacy repr(c) parser error on stderr, got:\n%s", stderr.String())
 	}
 }
 

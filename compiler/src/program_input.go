@@ -79,7 +79,7 @@ func analyzeLoadedProgram(program *loadedProgram, stderr io.Writer) (*ast.File, 
 		result := semantic.Analyze(program.file)
 		if warns := result.Warnings(); len(warns) > 0 {
 			for _, w := range warns {
-				if shouldSuppressDeprecatedWarningForTests(w) {
+				if shouldSuppressDeprecatedWarningsForTests(w) {
 					continue
 				}
 				fmt.Fprintf(stderr, "%s\n", w)

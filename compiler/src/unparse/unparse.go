@@ -1428,7 +1428,7 @@ func formatExpr(expr ast.Expr) string {
 		if n.Origin == ast.CastExprOriginAsSyntax {
 			return formatExpr(n.Operand) + " as " + formatTypeExpr(n.Target)
 		}
-		if n.Origin == ast.CastExprOriginPostfixShorthand && !n.LegacySyntax {
+		if n.Origin == ast.CastExprOriginPostfixShorthand {
 			if named, ok := n.Target.(*ast.NamedType); ok {
 				return formatExpr(n.Operand) + "." + named.Name + "()"
 			}

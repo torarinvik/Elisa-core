@@ -166,21 +166,21 @@ func TestAnalyzeMarksFreshRegionAllocationsAsExclusive(t *testing.T) {
 }
 
 func TestAnalyzePreservesOptimizationFactsThroughRuntimeViewHelpers(t *testing.T) {
-	src := `repr(c) struct Arena:
+	src := `struct Arena:
 	begin: mutable any void&?
 	end: mutable any void&?
 
-repr(c) struct DynArray[T]:
+struct DynArray[T]:
 	items: mutable any T&?
 	count: mutable usize
 	capacity: mutable usize
 
-repr(c) struct DynArrayView:
+struct DynArrayView:
 	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
 
-repr(c) struct StringView:
+struct StringView:
 	data: mutable any u8&
 	len: mutable i64
 
@@ -433,7 +433,7 @@ def inspect(owner: Arena) -> i32:
 }
 
 func TestAnalyzeInfersDisjointnessForNonOverlappingViewsAndFreshAllocations(t *testing.T) {
-	src := `repr(c) struct StringView:
+	src := `struct StringView:
 	data: mutable any u8&
 	len: mutable i64
 
@@ -527,12 +527,12 @@ def inspect(text: dstr[row], buf: array[i32, 8]) -> int:
 }
 
 func TestAnalyzeInfersDisjointnessForDViewSplitHelpers(t *testing.T) {
-	src := `repr(c) struct DynArray[T]:
+	src := `struct DynArray[T]:
 	items: mutable any T&?
 	count: mutable usize
 	capacity: mutable usize
 
-repr(c) struct DynArrayView:
+struct DynArrayView:
 	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
@@ -583,12 +583,12 @@ def inspect(values: any darray[i32, row]&) -> int:
 }
 
 func TestAnalyzeInfersEqualExtentSizeForSplitDViews(t *testing.T) {
-	src := `repr(c) struct DynArray[T]:
+	src := `struct DynArray[T]:
 	items: mutable any T&?
 	count: mutable usize
 	capacity: mutable usize
 
-repr(c) struct DynArrayView:
+struct DynArrayView:
 	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
@@ -631,12 +631,12 @@ def inspect(values: any darray[i32, 4]&) -> int:
 }
 
 func TestAnalyzeInfersFactsForDirectDViewSliceSyntax(t *testing.T) {
-	src := `repr(c) struct DynArray[T]:
+	src := `struct DynArray[T]:
 	items: mutable any T&?
 	count: mutable usize
 	capacity: mutable usize
 
-repr(c) struct DynArrayView:
+struct DynArrayView:
 	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
@@ -684,12 +684,12 @@ def inspect(values: any darray[i32, 4]&) -> int:
 }
 
 func TestAnalyzePreservesOptimizationFactsThroughStandardViewSliceHelperFieldProjectionExpressions(t *testing.T) {
-	src := `repr(c) struct DynArrayView:
+	src := `struct DynArrayView:
 	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
 
-repr(c) struct Views:
+struct Views:
 	left: view[i32]
 	right: view[i32]
 
@@ -731,7 +731,7 @@ def inspect(values: array[i32, 8]) -> int:
 }
 
 func TestAnalyzePreservesFrozenPackedStoreProvenanceThroughStandardViewSliceHelperFieldProjectionExpressions(t *testing.T) {
-	src := `repr(c) struct DynArrayView:
+	src := `struct DynArrayView:
 	data: mutable any void&?
 	len: mutable usize
 	elem_size: mutable usize
@@ -739,7 +739,7 @@ func TestAnalyzePreservesFrozenPackedStoreProvenanceThroughStandardViewSliceHelp
 packed enum Expr:
 	Int(value: int)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
 def arena_da_view_slice(input: view[Box], start: usize, end: usize) -> view[Box]:
@@ -786,7 +786,7 @@ func TestAnalyzeMarksValuesDependingOnlyOnFrozenPackedStores(t *testing.T) {
 	Int(value: int)
 	Hold(value: any i32&)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
 @borrows_return_field(node, node)
@@ -1430,7 +1430,7 @@ func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedFieldMatchBinders(t
 	Int(value: int)
 	HoldViews(left: view[i32], right: view[i32], child: Expr)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
@@ -1490,7 +1490,7 @@ func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedHelperFieldMatchBin
 	Int(value: int)
 	HoldViews(left: view[i32], right: view[i32], child: Expr)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
 @borrows_return_field(node, node)
@@ -1555,10 +1555,10 @@ func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedHelperIndexedFieldM
 	Int(value: int)
 	HoldViews(left: view[i32], right: view[i32], child: Expr)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
-repr(c) struct BoxHolder:
+struct BoxHolder:
 	items: array[Box, 1]
 
 @borrows_return_field(items[0].node, node)
@@ -1627,10 +1627,10 @@ func TestAnalyzePreservesMixedFrozenPackedStoreDepsThroughHelperIndexedFieldMatc
 	Wrap(child: Expr)
 
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
-repr(c) struct BoxHolder:
+struct BoxHolder:
 	items: array[Box, 1]
 
 @borrows_return_field(items[0].node, node)
@@ -1696,7 +1696,7 @@ def inspect(owner: Arena) -> int:
 }
 
 func TestAnalyzePreservesOptimizationFactsThroughAllocatedFieldProjectionExpressions(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
@@ -1737,7 +1737,7 @@ func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedAllocatedFieldMoveA
 	Int(value: int)
 	HoldViews(left: view[i32], right: view[i32], child: Expr)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
@@ -1790,7 +1790,7 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 }
 
 func TestAnalyzePreservesOptimizationFactsThroughIndexedFieldProjectionExpressions(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
@@ -1931,11 +1931,11 @@ def inspect(owner: Arena) -> int:
 }
 
 func TestAnalyzePreservesOptimizationFactsThroughHelperReturnedIndexedFieldProjectionExpressions(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct ViewHolder:
+struct ViewHolder:
 	items: array[Views, 1]
 
 @borrows_return_field(items[0].left, left, items[0].right, right)
@@ -1973,14 +1973,14 @@ def inspect(buf: array[i32, 4]) -> int:
 }
 
 func TestAnalyzePreservesOptimizationFactsThroughNestedHelperReturnedIndexedFieldProjectionExpressions(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct ViewHolder:
+struct ViewHolder:
 	items: array[Views, 1]
 
-repr(c) struct NestedHolder:
+struct NestedHolder:
 	holder: ViewHolder
 
 @borrows_return_field(holder.items[0].left, left, holder.items[0].right, right)
@@ -2018,11 +2018,11 @@ def inspect(buf: array[i32, 4]) -> int:
 }
 
 func TestAnalyzePreservesOptimizationFactsThroughRebasedHelperReturnedIndexedFieldProjectionExpressions(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct ViewWindow:
+struct ViewWindow:
 	items: view[Views]
 
 @borrows_return_field_rebased(items, src)
@@ -2061,11 +2061,11 @@ def inspect(values: array[i32, 4]) -> int:
 }
 
 func TestAnalyzePreservesOptimizationFactsThroughWildcardRebasedHelperReturnedIndexedFieldProjectionExpressions(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct ViewWindow:
+struct ViewWindow:
 	items: view[Views]
 
 @borrows_return_field_rebased(items[*].left, src[*].left, items[*].right, src[*].right)
@@ -2104,11 +2104,11 @@ def inspect(values: array[i32, 8]) -> int:
 }
 
 func TestAnalyzeKeepsOverlapGuardrailsThroughWildcardRebasedHelperReturnedIndexedFieldProjectionExpressions(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct ViewWindow:
+struct ViewWindow:
 	items: view[Views]
 
 @borrows_return_field_rebased(items[*].left, src[*].left, items[*].right, src[*].right)
@@ -2147,14 +2147,14 @@ def inspect(values: array[i32, 8]) -> int:
 }
 
 func TestAnalyzePreservesOptimizationFactsThroughNestedWildcardRebasedHelperReturnedIndexedFieldProjectionExpressions(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Views]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items[*].left, src[*].left, meta.items[*].right, src[*].right)
@@ -2193,14 +2193,14 @@ def inspect(values: array[i32, 8]) -> int:
 }
 
 func TestAnalyzeKeepsOverlapGuardrailsThroughNestedWildcardRebasedHelperReturnedIndexedFieldProjectionExpressions(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Views]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items[*].left, src[*].left, meta.items[*].right, src[*].right)
@@ -2239,14 +2239,14 @@ def inspect(values: array[i32, 8]) -> int:
 }
 
 func TestAnalyzePreservesOptimizationFactsThroughNestedRebasedHelperReturnedIndexedFieldProjectionExpressions(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Views]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items, src)
@@ -2289,13 +2289,13 @@ func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedNestedRebasedHelper
 	Int(value: int)
 	HoldViews(left: view[i32], right: view[i32], child: Expr)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Box]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items, src)
@@ -2355,10 +2355,10 @@ func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedWildcardRebasedHelp
 	Int(value: int)
 	HoldViews(left: view[i32], right: view[i32], child: Expr)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
-repr(c) struct BoxWindow:
+struct BoxWindow:
 	items: view[Box]
 
 @borrows_return_field_rebased(items[*].node, src[*].node)
@@ -2418,13 +2418,13 @@ func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedNestedWildcardRebas
 	Int(value: int)
 	HoldViews(left: view[i32], right: view[i32], child: Expr)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Box]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items[*].node, src[*].node)
@@ -2541,13 +2541,13 @@ func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedNestedRebasedHelper
 	Int(value: int)
 	HoldViews(left: view[i32], right: view[i32], child: Expr)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Box]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items, src)
@@ -2612,13 +2612,13 @@ func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedNestedWildcardRebas
 	Int(value: int)
 	HoldViews(left: view[i32], right: view[i32], child: Expr)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Box]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items[*].node, src[*].node)
@@ -2683,7 +2683,7 @@ func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedIndexedFieldMoveAs(
 	Int(value: int)
 	HoldViews(left: view[i32], right: view[i32], child: Expr)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
@@ -2739,10 +2739,10 @@ func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedHelperIndexedFieldM
 	Int(value: int)
 	HoldViews(left: view[i32], right: view[i32], child: Expr)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
-repr(c) struct BoxHolder:
+struct BoxHolder:
 	items: array[Box, 1]
 
 @borrows_return_field(items[0].node, node)
@@ -2798,7 +2798,7 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 }
 
 func TestAnalyzePreservesOptimizationFactsThroughDirectFieldProjectionExpressions(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
@@ -2856,11 +2856,11 @@ def inspect(buf: array[i32, 4]) -> int:
 }
 
 func TestAnalyzePreservesOptimizationFactsThroughNestedFieldProjectionExpressions(t *testing.T) {
-	src := `repr(c) struct Views:
+	src := `struct Views:
 	left: view[i32]
 	right: view[i32]
 
-repr(c) struct NestedViews:
+struct NestedViews:
 	inner: Views
 
 @borrows_return_field(inner.left, left, inner.right, right)

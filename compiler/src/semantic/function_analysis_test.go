@@ -188,7 +188,7 @@ func TestGuardFactsForConditionRecordsIsVariantProof(t *testing.T) {
 }
 
 func TestAnalyzeFunctionAnalysisCFGRecordsGuardNonnullCallFacts(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "guard_nonnull_cfg.llcontext", `repr(c) struct Box:
+	result := analyzeFunctionAnalysisTestSource(t, "guard_nonnull_cfg.llcontext", `struct Box:
 	value: i32
 
 @guard_nonnull(box)

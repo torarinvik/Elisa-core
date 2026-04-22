@@ -121,7 +121,7 @@ func TestAnalyzeRecordsReturnIsolationSummary(t *testing.T) {
 }
 
 func TestAnalyzeRecordsAliasPartitionsAndGuardedCFGEdges(t *testing.T) {
-	src := `repr(c) struct Box:
+	src := `struct Box:
 	value: i32
 
 

@@ -1558,13 +1558,12 @@ func (p *Parser) parsePostfix() ast.Expr {
 				p.advance()
 				target := p.parseTypeExpr()
 				p.expect(lexer.TOKEN_RBRACKET)
-				legacySyntax := false
 				if p.peek() == lexer.TOKEN_LPAREN && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_RPAREN {
+					p.errorf("legacy cast syntax `.cast[T]()` is no longer supported; use `.cast[T]` instead")
 					p.advance()
 					p.advance()
-					legacySyntax = true
 				}
-				expr = &ast.CastExpr{Position: pos, Operand: expr, Target: target, LegacySyntax: legacySyntax}
+				expr = &ast.CastExpr{Position: pos, Operand: expr, Target: target}
 				continue
 			}
 

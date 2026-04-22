@@ -706,11 +706,10 @@ const (
 )
 
 type CastExpr struct {
-	Position     lexer.Pos
-	Operand      Expr
-	Target       TypeExpr
-	Origin       CastExprOrigin
-	LegacySyntax bool
+	Position lexer.Pos
+	Operand  Expr
+	Target   TypeExpr
+	Origin   CastExprOrigin
 }
 
 type CascadeExpr struct {
@@ -1117,14 +1116,13 @@ const (
 )
 
 type IterForStmt struct {
-	Position     lexer.Pos
-	Reverse      bool
-	LegacySyntax bool
-	Pattern      MoveBindPattern
-	Mode         IterBindMode
-	Source       Expr
-	Filter       Expr
-	Body         []Stmt
+	Position lexer.Pos
+	Reverse  bool
+	Pattern  MoveBindPattern
+	Mode     IterBindMode
+	Source   Expr
+	Filter   Expr
+	Body     []Stmt
 }
 
 type ParallelForStmt struct {

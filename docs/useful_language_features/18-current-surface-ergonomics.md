@@ -526,7 +526,7 @@ struct ParseJob[state Pending | Ready | Failed]:
 def finish_ok(mutable job: any ParseJob[Pending]&) -> void ensures job => Ready:
     job.stage <- 1
 
-repr(c) struct HeapPairNode:
+struct HeapPairNode:
     value: i32
 
 extern sfree_heap_pair_node(node: heap HeapPairNode&) -> void ensures node => !

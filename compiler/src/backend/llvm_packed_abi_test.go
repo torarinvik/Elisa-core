@@ -1649,7 +1649,7 @@ func TestGenerateLLVMIRUsesSingleDecodeForFrozenHelperWrappedRepeatedCommonField
 		span: int
 	Lit(value: int)
 
-repr(c) struct Box:
+struct Box:
 	node: mutable Expr
 
 @borrows_return_field(node, node)
@@ -1698,7 +1698,7 @@ func TestGenerateLLVMIRUsesIndexWordReadForFrozenHelperWrappedRepeatedCommonFiel
 		span: int
 	Lit(value: int)
 
-repr(c) struct Box:
+struct Box:
 	node: mutable Expr
 
 @borrows_return_field(node, node)
@@ -1733,10 +1733,10 @@ func TestGenerateLLVMIRUsesSingleDecodeForHelperIndexedFrozenRepeatedCommonField
 		span: int
 	Lit(value: int)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
-repr(c) struct BoxHolder:
+struct BoxHolder:
 	items: array[Box, 1]
 
 @borrows_return_field(items[0].node, node)
@@ -1785,10 +1785,10 @@ func TestGenerateLLVMIRUsesIndexWordReadForHelperIndexedFrozenRepeatedCommonFiel
 		span: int
 	Lit(value: int)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
-repr(c) struct BoxHolder:
+struct BoxHolder:
 	items: array[Box, 1]
 
 @borrows_return_field(items[0].node, node)
@@ -1824,7 +1824,7 @@ func TestGenerateLLVMIRUsesSideWordReadForFrozenHelperWrappedRepeatedSideTableCo
 		span: int
 	Lit(value: int)
 
-repr(c) struct Box:
+struct Box:
 	node: mutable Expr
 
 @borrows_return_field(node, node)
@@ -1863,10 +1863,10 @@ func TestGenerateLLVMIRUsesSideWordReadForHelperIndexedFrozenRepeatedSideTableCo
 		span: int
 	Lit(value: int)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
-repr(c) struct BoxHolder:
+struct BoxHolder:
 	items: array[Box, 1]
 
 @borrows_return_field(items[0].node, node)
@@ -1904,7 +1904,7 @@ func TestGenerateLLVMIRInvalidatesFrozenHelperWrappedDecodeCacheAfterFieldAssign
 		span: int
 	Lit(value: int)
 
-repr(c) struct Box:
+struct Box:
 	node: mutable Expr
 
 def fold_common_frozen_wrapped_reassign() -> int:
@@ -1951,7 +1951,7 @@ func TestGenerateLLVMIRAvoidsDecodeForFrozenHelperWrappedCommonFieldReadsAfterFi
 		span: int
 	Lit(value: int)
 
-repr(c) struct Box:
+struct Box:
 	node: mutable Expr
 
 def fold_common_frozen_wrapped_reassign() -> int:
@@ -1986,10 +1986,10 @@ func TestGenerateLLVMIRInvalidatesFrozenHelperIndexedDecodeCacheAfterFieldAssign
 		span: int
 	Lit(value: int)
 
-repr(c) struct Box:
+struct Box:
 	node: mutable Expr
 
-repr(c) struct BoxHolder:
+struct BoxHolder:
 	items: array[Box, 1]
 
 @borrows_return_field(items[0].node, node)
@@ -2040,10 +2040,10 @@ func TestGenerateLLVMIRAvoidsDecodeForFrozenHelperIndexedCommonFieldReadsAfterFi
 		span: int
 	Lit(value: int)
 
-repr(c) struct Box:
+struct Box:
 	node: mutable Expr
 
-repr(c) struct BoxHolder:
+struct BoxHolder:
 	items: array[Box, 1]
 
 @borrows_return_field(items[0].node, node)
@@ -2082,13 +2082,13 @@ func TestGenerateLLVMIRUsesSingleDecodeForNestedRebasedHelperIndexedFrozenRepeat
 		span: int
 	Lit(value: int)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Box]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items, src)
@@ -2127,13 +2127,13 @@ func TestGenerateLLVMIRUsesIndexWordReadForNestedRebasedHelperIndexedFrozenRepea
 		span: int
 	Lit(value: int)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Box]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items, src)
@@ -2168,13 +2168,13 @@ func TestGenerateLLVMIRUsesSingleDecodeForNestedWildcardRebasedHelperIndexedFroz
 		span: int
 	Lit(value: int)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Box]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items[*].node, src[*].node)
@@ -2226,13 +2226,13 @@ func TestGenerateLLVMIRUsesIndexWordReadForNestedWildcardRebasedHelperIndexedFro
 		span: int
 	Lit(value: int)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Box]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items[*].node, src[*].node)
@@ -2267,13 +2267,13 @@ func TestGenerateLLVMIRInvalidatesNestedWildcardRebasedHelperIndexedFrozenDecode
 		span: int
 	Lit(value: int)
 
-repr(c) struct Box:
+struct Box:
 	node: mutable Expr
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Box]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items[*].node, src[*].node)
@@ -2324,13 +2324,13 @@ func TestGenerateLLVMIRAvoidsDecodeForNestedWildcardRebasedHelperIndexedFrozenCo
 		span: int
 	Lit(value: int)
 
-repr(c) struct Box:
+struct Box:
 	node: mutable Expr
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Box]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items[*].node, src[*].node)
@@ -2369,13 +2369,13 @@ func TestGenerateLLVMIRInvalidatesNestedRebasedHelperIndexedFrozenDecodeCacheAft
 		span: int
 	Lit(value: int)
 
-repr(c) struct Box:
+struct Box:
 	node: mutable Expr
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Box]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items, src)
@@ -2426,13 +2426,13 @@ func TestGenerateLLVMIRAvoidsDecodeForNestedRebasedHelperIndexedFrozenCommonFiel
 		span: int
 	Lit(value: int)
 
-repr(c) struct Box:
+struct Box:
 	node: mutable Expr
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Box]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items, src)
@@ -2759,10 +2759,10 @@ func TestGenerateLLVMIRUsesSingleDecodeForHelperIndexedFrozenMatchedPayloadRepea
 	Hold(value: any i32&)
 	Wrap(child: Expr)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
-repr(c) struct BoxHolder:
+struct BoxHolder:
 	items: array[Box, 1]
 
 @borrows_return_field(items[0].node, node)
@@ -2811,13 +2811,13 @@ func TestGenerateLLVMIRUsesSingleDecodeForNestedRebasedHelperIndexedFrozenMatche
 	Hold(value: any i32&)
 	Wrap(child: Expr)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Box]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items, src)
@@ -2866,10 +2866,10 @@ func TestGenerateLLVMIRUsesIndexReadHelpersForHelperIndexedFrozenMatchedPayloadR
 	Hold(value: any i32&)
 	Wrap(child: Expr)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
-repr(c) struct BoxHolder:
+struct BoxHolder:
 	items: array[Box, 1]
 
 @borrows_return_field(items[0].node, node)
@@ -2917,13 +2917,13 @@ func TestGenerateLLVMIRUsesIndexReadHelpersForNestedRebasedHelperIndexedFrozenMa
 	Hold(value: any i32&)
 	Wrap(child: Expr)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Box]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items, src)
@@ -2971,13 +2971,13 @@ func TestGenerateLLVMIRUsesSingleDecodeForNestedWildcardRebasedHelperIndexedFroz
 	Hold(value: any i32&)
 	Wrap(child: Expr)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Box]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items[*].node, src[*].node)
@@ -3026,13 +3026,13 @@ func TestGenerateLLVMIRUsesIndexReadHelpersForNestedWildcardRebasedHelperIndexed
 	Hold(value: any i32&)
 	Wrap(child: Expr)
 
-repr(c) struct Box:
+struct Box:
 	node: Expr
 
-repr(c) struct Meta:
+struct Meta:
 	items: view[Box]
 
-repr(c) struct Wrapper:
+struct Wrapper:
 	meta: Meta
 
 @borrows_return_field_rebased(meta.items[*].node, src[*].node)

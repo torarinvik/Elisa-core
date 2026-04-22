@@ -869,6 +869,7 @@ func (p *Parser) parseStructDeclWithAnnotations(annotations []ast.Annotation) *a
 	affine := p.matchIdentText("affine")
 	reprC := true
 	if p.peek() == lexer.TOKEN_REPR {
+		p.errorf("legacy `repr(c) struct` syntax is no longer supported; use `struct` instead")
 		p.advance()
 		p.expect(lexer.TOKEN_LPAREN)
 		p.expect(lexer.TOKEN_IDENT) // "c"
