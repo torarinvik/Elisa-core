@@ -151,6 +151,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.GrammarOptionalTerm{})
 		gob.Register(&ast.GrammarListTerm{})
 		gob.Register(&ast.GrammarBindTerm{})
+		gob.Register(&ast.GrammarReturnTerm{})
 
 		// Patterns.
 		gob.Register(&ast.MatchWildcardPattern{})

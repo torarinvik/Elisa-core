@@ -450,6 +450,8 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 		return "list(" + strings.Join(parts, ", ") + ")"
 	case *ast.GrammarBindTerm:
 		return n.Name + " = " + formatGrammarTerm(n.Term)
+	case *ast.GrammarReturnTerm:
+		return "return " + formatExpr(n.Value)
 	default:
 		return "<grammar-term>"
 	}

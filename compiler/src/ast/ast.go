@@ -152,6 +152,11 @@ type GrammarBindTerm struct {
 	Term     GrammarTerm
 }
 
+type GrammarReturnTerm struct {
+	Position lexer.Pos
+	Value    Expr
+}
+
 type AttributeDecl struct {
 	Position   lexer.Pos
 	Receiver   TypeExpr
@@ -1419,7 +1424,10 @@ func (n *GrammarOptionalTerm) Pos() lexer.Pos {
 }
 func (n *GrammarListTerm) Pos() lexer.Pos { return n.Position }
 func (n *GrammarBindTerm) Pos() lexer.Pos { return n.Position }
-func (n *AttributeDecl) Pos() lexer.Pos   { return n.Position }
+func (n *GrammarReturnTerm) Pos() lexer.Pos {
+	return n.Position
+}
+func (n *AttributeDecl) Pos() lexer.Pos { return n.Position }
 
 func (n *TreeCategoryDecl) Pos() lexer.Pos { return n.Position }
 func (n *TreeBlockDecl) Pos() lexer.Pos    { return n.Position }
@@ -1594,6 +1602,7 @@ func (*GrammarChoiceTerm) nodeTag()         {}
 func (*GrammarOptionalTerm) nodeTag()       {}
 func (*GrammarListTerm) nodeTag()           {}
 func (*GrammarBindTerm) nodeTag()           {}
+func (*GrammarReturnTerm) nodeTag()         {}
 func (*AttributeDecl) nodeTag()             {}
 func (*TreeCategoryDecl) nodeTag()          {}
 func (*TreeBlockDecl) nodeTag()             {}
@@ -1762,6 +1771,7 @@ func (*GrammarChoiceTerm) grammarTermTag()   {}
 func (*GrammarOptionalTerm) grammarTermTag() {}
 func (*GrammarListTerm) grammarTermTag()     {}
 func (*GrammarBindTerm) grammarTermTag()     {}
+func (*GrammarReturnTerm) grammarTermTag()   {}
 
 func (*NamedType) typeExprTag()                 {}
 func (*RefType) typeExprTag()                   {}
