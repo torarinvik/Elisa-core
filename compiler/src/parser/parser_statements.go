@@ -49,6 +49,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikePoolStmt() {
 				return p.parsePoolStmt()
 			}
+		case "emit":
+			if p.looksLikeSequenceEmitStmt() {
+				return p.parseEmitStmt()
+			}
 		case "guard", "require":
 			if p.looksLikeGuardStmt() {
 				return p.parseGuardStmt()
@@ -146,6 +150,31 @@ func (p *Parser) parseStmt() ast.Stmt {
 		return p.parseStaticStmt()
 	default:
 		return p.parseExprOrAssignStmt()
+	}
+}
+
+func (p *Parser) parseEmitStmt() ast.Stmt {
+	pos := p.cur().Pos
+	p.expectIdentText("emit")
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "nothing" {
+		p.advance()
+		p.expectNewline()
+		return &ast.ExprStmt{Position: pos, Expr: &ast.EmitExpr{Position: pos, Nothing: true}}
+	}
+	value := p.parseExpr()
+	p.expectNewline()
+	return &ast.ExprStmt{Position: pos, Expr: &ast.EmitExpr{Position: pos, Value: value}}
+}
+
+func (p *Parser) looksLikeSequenceEmitStmt() bool {
+	if p.pos+1 >= len(p.tokens) {
+		return true
+	}
+	switch p.tokens[p.pos+1].Kind {
+	case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_DOT:
+		return false
+	default:
+		return true
 	}
 }
 

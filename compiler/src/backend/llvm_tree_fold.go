@@ -1238,6 +1238,11 @@ func (s *functionState) emitFoldExpr(expr *ast.FoldExpr) (C.LLVMValueRef, semant
 	if expr == nil {
 		return nil, nil, fmt.Errorf("missing fold expression")
 	}
+	if expr.Keyword == "rewrite" {
+		if _, ok := sequenceRewriteTargetTypeExprBackend(expr.Root); ok {
+			return s.emitSequenceRewriteExpr(expr)
+		}
+	}
 	actualType := s.exprType(expr.Value)
 	resultType := s.exprType(expr)
 	root, err := s.resolveTreeFoldRootInfo(actualType, expr.Root)

@@ -63,6 +63,7 @@ type functionState struct {
 	packedStores                 map[string]packedStoreBinding
 	treeAllocOwner               treeAllocOwnerBinding
 	treeRewriteDefault           *treeRewriteDefaultContext
+	currentSequenceRewrite       *sequenceRewriteCodegenContext
 	treeImplicitStores           map[treeImplicitStoreCacheKey]treeImplicitStoreSlot
 	packedStoreValueKey1         packedStoreExtractCacheKey
 	packedStoreValue1            C.LLVMValueRef

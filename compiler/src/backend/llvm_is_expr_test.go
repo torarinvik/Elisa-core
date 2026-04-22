@@ -1019,6 +1019,26 @@ def simplify(node: Lua.Expr) -> Lua.Expr:
 	}
 }
 
+func TestGenerateLLVMIRLowersSequenceRewriteExpr(t *testing.T) {
+	src := `def keep_non_zero(owner: mutable Arena&, items: dview[u32]) -> darray[u32]:
+	can Abort.Panic, Memory.Allocate:
+		in owner:
+			return rewrite items as sequence[u32]:
+				item when item != 0u32:
+					emit item
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_sequence_rewrite_expr.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define %DynArray__u32 @keep_non_zero", "sequence.rewrite.loop", "sequence.emit.slot"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected sequence rewrite lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersHeterogeneousTreeRewriteExpr(t *testing.T) {
 	src := `tree Lua:
 	common:

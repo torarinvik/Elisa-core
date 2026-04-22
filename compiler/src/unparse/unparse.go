@@ -1536,6 +1536,11 @@ func formatExpr(expr ast.Expr) string {
 		return formatVisitExpr(n)
 	case *ast.FoldExpr:
 		return formatFoldExpr(n)
+	case *ast.EmitExpr:
+		if n.Nothing || n.Value == nil {
+			return "emit nothing"
+		}
+		return "emit " + formatExpr(n.Value)
 	default:
 		return "<expr>"
 	}

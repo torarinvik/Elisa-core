@@ -4206,6 +4206,169 @@ func treeFoldArmChildBindingTypes(bindType Type, resultType Type) map[string]Typ
 	return out
 }
 
+func sequenceRewriteTargetTypeExpr(rootExpr ast.TypeExpr) (ast.TypeExpr, bool) {
+	generic, ok := rootExpr.(*ast.GenericType)
+	if !ok || generic == nil || generic.Name != "sequence" || len(generic.Args) != 1 {
+		return nil, false
+	}
+	return generic.Args[0], true
+}
+
+func sequenceRewriteCarrierElemType(t Type) (Type, bool) {
+	switch tt := StripAggregateStateType(t).(type) {
+	case *DArrayType:
+		return tt.Elem, true
+	case *DArrayViewType:
+		if tt.SurfaceName != "" && tt.SurfaceName != "dview" {
+			return nil, false
+		}
+		return tt.Elem, true
+	default:
+		return nil, false
+	}
+}
+
+func sequenceRewriteArmBindName(arm ast.VisitArm) (string, bool) {
+	if arm.Wildcard {
+		return "", true
+	}
+	if arm.TargetName != "" && !strings.Contains(arm.TargetName, ".") && arm.BindName == "" && arm.ChildResultsName == "" && len(arm.ChildBindings) == 0 {
+		return arm.TargetName, true
+	}
+	return "", false
+}
+
+func (a *Analyzer) analyzeSequenceRewriteArmBody(body []ast.Stmt, scope *Scope) {
+	savedScope := a.currentScope
+	savedRegions := a.currentRegions
+	savedPackedVariantViews := a.currentPackedVariantViews
+	savedPackedStores := a.currentPackedStores
+	savedPackedStoreResolutions := a.currentPackedStoreResolutions
+	a.currentScope = scope
+	a.currentRegions = a.cloneRegionStates()
+	a.currentPackedVariantViews = a.clonePackedVariantViewBindings()
+	a.currentPackedStores = a.clonePackedStores()
+	a.currentPackedStoreResolutions = a.clonePackedStoreResolutions()
+	defer func() {
+		a.currentScope = savedScope
+		a.currentRegions = savedRegions
+		a.currentPackedVariantViews = savedPackedVariantViews
+		a.currentPackedStores = savedPackedStores
+		a.currentPackedStoreResolutions = savedPackedStoreResolutions
+	}()
+	for _, stmt := range body {
+		a.analyzeStmt(stmt)
+		if stmtDefinitelyExits(stmt) {
+			return
+		}
+	}
+}
+
+func (a *Analyzer) analyzeSequenceRewriteArmBodyWithAffineSnapshot(body []ast.Stmt, scope *Scope) affineFlowSnapshot {
+	savedAffine := a.currentAffineValues
+	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
+	savedFunctionValues := a.currentFunctionValues
+	savedSpecializedValueTypes := a.currentSpecializedValueTypes
+	savedValueBindings := a.currentValueBindings
+	a.currentAffineValues = a.cloneAffineValueStates()
+	a.currentBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
+	a.currentFunctionValues = a.cloneFunctionValueBindings()
+	a.currentSpecializedValueTypes = a.cloneSpecializedValueTypeBindings()
+	a.currentValueBindings = a.cloneValueBindings()
+	a.analyzeSequenceRewriteArmBody(body, scope)
+	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), ValueBindings: a.cloneValueBindings()}
+	a.currentAffineValues = savedAffine
+	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
+	a.currentFunctionValues = savedFunctionValues
+	a.currentSpecializedValueTypes = savedSpecializedValueTypes
+	a.currentValueBindings = savedValueBindings
+	return snapshot
+}
+
+func (a *Analyzer) analyzeSequenceRewriteExpr(expr *ast.FoldExpr) Type {
+	valueType := a.analyzeExpr(expr.Value)
+	elemType, ok := sequenceRewriteCarrierElemType(valueType)
+	if !ok || elemType == nil {
+		a.errorf(expr.Pos(), "sequence rewrite expects a darray or dview source, got %s", valueType)
+		for _, arm := range expr.Arms {
+			a.analyzeSequenceRewriteArmBody(arm.Body, NewScope(a.currentScope))
+		}
+		return invalidType
+	}
+	targetTypeExpr, ok := sequenceRewriteTargetTypeExpr(expr.Root)
+	if !ok {
+		a.errorf(expr.Pos(), "sequence rewrite expects `as sequence[T]`")
+		for _, arm := range expr.Arms {
+			a.analyzeSequenceRewriteArmBody(arm.Body, NewScope(a.currentScope))
+		}
+		return invalidType
+	}
+	outputElemType := a.resolveType(targetTypeExpr)
+	if outputElemType == nil || IsInvalidType(outputElemType) {
+		for _, arm := range expr.Arms {
+			a.analyzeSequenceRewriteArmBody(arm.Body, NewScope(a.currentScope))
+		}
+		return invalidType
+	}
+	resultType := &DArrayType{Elem: outputElemType, Shape: &WildcardShape{}, SurfaceName: "darray"}
+	if a.currentTreeAllocOwner.Kind == treeAllocOwnerNone {
+		a.errorf(expr.Pos(), "sequence rewrite requires an active in <owner>: scope")
+	}
+	baselineAffine := a.cloneAffineValueStates()
+	baselineBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
+	baselineFunctionValues := a.cloneFunctionValueBindings()
+	baselineSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
+	mergedAffine := baselineAffine
+	mergedBorrowedOwnerRefs := baselineBorrowedOwnerRefs
+	mergedFunctionValues := baselineFunctionValues
+	mergedSpecializedValueTypes := baselineSpecializedValueTypes
+	hasUnconditional := false
+	for _, arm := range expr.Arms {
+		if hasUnconditional {
+			a.errorf(arm.Position, "sequence rewrite arm is unreachable because an earlier unguarded arm already matches")
+		}
+		bindName, bindOK := sequenceRewriteArmBindName(arm)
+		if !bindOK {
+			a.errorf(arm.Position, "sequence rewrite arms currently support only `_` or a bare element binding name")
+		}
+		scope := NewScope(a.currentScope)
+		if bindOK && bindName != "" {
+			a.defineLocalInScope(scope, &Symbol{Name: bindName, Kind: SymbolLocal, Type: elemType, Mutable: false}, arm.Position)
+		}
+		bodyScope := scope
+		guardFallthrough := affineFlowSnapshot{}
+		if arm.Guard != nil {
+			guardType, guardSnapshot := a.analyzeExprInAffineScope(arm.Guard, scope)
+			if !IsBoolType(guardType) {
+				a.errorf(arm.Guard.Pos(), "sequence rewrite arm guard must be bool, got %s", guardType)
+			}
+			guardFallthrough = guardSnapshot
+			bodyScope = a.refinedScopeForCondition(scope, arm.Guard, true)
+		}
+		savedSeq := a.currentSequenceRewrite
+		a.currentSequenceRewrite = &sequenceRewriteContext{ElemType: elemType, OutputElem: outputElemType}
+		bodySnapshot := a.analyzeSequenceRewriteArmBodyWithAffineSnapshot(arm.Body, bodyScope)
+		a.currentSequenceRewrite = savedSeq
+		if arm.Guard != nil {
+			bodySnapshot.Affine = mergeAffineValueStates(bodySnapshot.Affine, guardFallthrough.Affine)
+			bodySnapshot.BorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(bodySnapshot.BorrowedOwnerRefs, guardFallthrough.BorrowedOwnerRefs)
+			bodySnapshot.FunctionValues = a.mergeFunctionValueBindings(bodySnapshot.FunctionValues, guardFallthrough.FunctionValues)
+			bodySnapshot.SpecializedValueTypes = a.mergeSpecializedValueTypeBindings(bodySnapshot.SpecializedValueTypes, guardFallthrough.SpecializedValueTypes)
+		} else {
+			hasUnconditional = true
+		}
+		mergedAffine = mergeAffineValueStates(mergedAffine, bodySnapshot.Affine)
+		mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, bodySnapshot.BorrowedOwnerRefs)
+		mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, bodySnapshot.FunctionValues)
+		mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, bodySnapshot.SpecializedValueTypes)
+	}
+	a.currentAffineValues = mergedAffine
+	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
+	a.currentFunctionValues = mergedFunctionValues
+	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+	return resultType
+}
+
 func (a *Analyzer) analyzeVisitExpr(expr *ast.VisitExpr) Type {
 	valueType := a.analyzeExpr(expr.Value)
 	root, ok := a.resolveVisitRootInfo(valueType, expr.Root, expr.Pos())
@@ -4444,6 +4607,11 @@ func (a *Analyzer) recordFoldExprInfo(expr *ast.FoldExpr) {
 }
 
 func (a *Analyzer) analyzeFoldExpr(expr *ast.FoldExpr) Type {
+	if expr != nil && expr.Keyword == "rewrite" {
+		if _, ok := sequenceRewriteTargetTypeExpr(expr.Root); ok {
+			return a.analyzeSequenceRewriteExpr(expr)
+		}
+	}
 	valueType := a.analyzeExpr(expr.Value)
 	root, ok := a.resolveVisitRootInfo(valueType, expr.Root, expr.Pos())
 	if !ok {

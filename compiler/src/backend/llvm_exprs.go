@@ -273,6 +273,8 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, actualType, err = s.emitVisitExpr(n)
 	case *ast.FoldExpr:
 		value, actualType, err = s.emitFoldExpr(n)
+	case *ast.EmitExpr:
+		value, actualType, err = s.emitSequenceRewriteEmitExpr(n)
 	case *ast.IndexExpr:
 		value, actualType, err = s.emitIndexExpr(n)
 	case *ast.SliceExpr:

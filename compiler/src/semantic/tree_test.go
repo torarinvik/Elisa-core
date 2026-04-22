@@ -846,6 +846,16 @@ def simplify(node: Lua.Expr) -> Lua.Expr:
 `)
 }
 
+func TestAnalyzeSequenceRewriteExpr(t *testing.T) {
+	analyzeTreeTestSource(t, "sequence_rewrite_surface.llcontext", `def keep_non_zero(owner: mutable Arena&, items: dview[u32]) -> darray[u32]:
+	can Abort.Panic, Memory.Allocate:
+		in owner:
+			return rewrite items as sequence[u32]:
+				item when item != 0u32:
+					emit item
+`)
+}
+
 func TestAnalyzeTreeRewriteRemainsExhaustiveWithoutImplicitDefault(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_rewrite_requires_exhaustive.llcontext", `tree Lua:
 	common:

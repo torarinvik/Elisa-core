@@ -132,6 +132,7 @@ type Analyzer struct {
 	currentPackedStoreResolutions     map[*Symbol]packedStoreResolution
 	currentTreeAllocOwner             treeAllocOwnerBinding
 	currentRewriteDefault             *rewriteDefaultContext
+	currentSequenceRewrite            *sequenceRewriteContext
 	currentAllocExpr                  ast.Expr
 	currentPoolScopes                 []poolScopeState
 	currentFunctionUsedPermissions    map[string]bool
@@ -227,6 +228,11 @@ type rewriteDefaultContext struct {
 	ExactType  Type
 	ResultType Type
 	Message    string
+}
+
+type sequenceRewriteContext struct {
+	ElemType   Type
+	OutputElem Type
 }
 
 type regionRefState struct {

@@ -368,6 +368,25 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	case *ast.FoldExpr:
 		result = a.analyzeFoldExpr(n)
 		return
+	case *ast.EmitExpr:
+		if a.currentSequenceRewrite == nil || a.currentSequenceRewrite.OutputElem == nil {
+			a.errorf(n.Pos(), "emit is only allowed inside sequence rewrite arms")
+			result = invalidType
+			return
+		}
+		if n.Nothing || n.Value == nil {
+			result = a.namedTypes["void"]
+			return
+		}
+		valueType := a.analyzeExpr(n.Value)
+		if !IsNeverType(valueType) && !AssignableTo(a.currentSequenceRewrite.OutputElem, valueType) {
+			a.errorf(n.Pos(), "emit expects %s, got %s", a.currentSequenceRewrite.OutputElem, valueType)
+			a.reportShapeMismatchNotes(n.Pos(), a.currentSequenceRewrite.OutputElem, valueType)
+			result = invalidType
+			return
+		}
+		result = a.namedTypes["void"]
+		return
 	case *ast.LambdaExpr:
 		result = a.analyzeLambdaExpr(n, nil)
 		return

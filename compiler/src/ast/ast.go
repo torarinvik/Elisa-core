@@ -876,6 +876,12 @@ type FoldExpr struct {
 	Arms           []VisitArm
 }
 
+type EmitExpr struct {
+	Position lexer.Pos
+	Value    Expr
+	Nothing  bool
+}
+
 type VisitArmChildBinding struct {
 	Position  lexer.Pos
 	FieldName string
@@ -1412,6 +1418,7 @@ func (n *CanExpr) Pos() lexer.Pos   { return n.Position }
 func (n *MatchExpr) Pos() lexer.Pos { return n.Position }
 func (n *VisitExpr) Pos() lexer.Pos { return n.Position }
 func (n *FoldExpr) Pos() lexer.Pos  { return n.Position }
+func (n *EmitExpr) Pos() lexer.Pos  { return n.Position }
 func (n *MatchWildcardPattern) Pos() lexer.Pos {
 	return n.Position
 }
@@ -1557,6 +1564,7 @@ func (*CanExpr) nodeTag()                   {}
 func (*MatchExpr) nodeTag()                 {}
 func (*VisitExpr) nodeTag()                 {}
 func (*FoldExpr) nodeTag()                  {}
+func (*EmitExpr) nodeTag()                  {}
 func (*MatchWildcardPattern) nodeTag()      {}
 func (*MatchBindPattern) nodeTag()          {}
 func (*MatchStringLiteralPattern) nodeTag() {}
@@ -1703,6 +1711,7 @@ func (*RaiseExpr) exprTag()                         {}
 func (*MatchExpr) exprTag()                         {}
 func (*VisitExpr) exprTag()                         {}
 func (*FoldExpr) exprTag()                          {}
+func (*EmitExpr) exprTag()                          {}
 func (*MatchStmt) stmtTag()                         {}
 func (*TryExpr) exprTag()                           {}
 func (*CatchExpr) exprTag()                         {}
