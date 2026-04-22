@@ -2110,15 +2110,12 @@ func (s *functionState) encodePackedEnumHandleWithStore(rowPtr C.LLVMValueRef, e
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum handle metadata")
 	}
-	if s.g.packedModeForEnum(enumType) == packedEnumABIRowHandle {
-		return rowPtr, nil
-	}
 	storeType := enumType.StoreType
 	if storeType == nil {
 		return nil, fmt.Errorf("packed enum %s is missing store metadata", enumType.Name)
 	}
 	if storeValue == nil {
-		return nil, fmt.Errorf("packed enum %s word-handle encode requires store context", enumType.Name)
+		return nil, fmt.Errorf("packed enum %s encode requires store context", enumType.Name)
 	}
 	return (&packedStoreOps{s: s, storeValue: storeValue, storeType: storeType}).encodeHandle(rowPtr, enumType, "packed.encode.store")
 }
@@ -2131,12 +2128,9 @@ func (s *functionState) decodePackedEnumHandleWithStore(handleValue C.LLVMValueR
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum handle metadata")
 	}
-	if s.g.packedModeForEnum(enumType) == packedEnumABIRowHandle {
-		return handleValue, nil
-	}
 	ops, ok := s.packedStoreOpsFromBinding(store)
 	if !ok {
-		return nil, fmt.Errorf("packed enum %s word-handle decode requires store context", enumType.Name)
+		return nil, fmt.Errorf("packed enum %s decode requires store context", enumType.Name)
 	}
 	return ops.decodeHandle(handleValue, enumType, "packed.decode.store")
 }
@@ -4429,7 +4423,7 @@ func (s *functionState) emitDenseKeyHelperCall(expr *ast.CallExpr) (C.LLVMValueR
 	if err != nil {
 		return nil, nil, true, err
 	}
-	storeValue, storeType, err := s.emitPackedStoreValueFromExpr(expr.Args[1])
+	_, storeType, err := s.emitPackedStoreValueFromExpr(expr.Args[1])
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -4461,29 +4455,10 @@ func (s *functionState) emitDenseKeyHelperCall(expr *ast.CallExpr) (C.LLVMValueR
 			}
 		}
 	}
-	ops := &packedStoreOps{s: s, storeValue: storeValue, storeType: storeType}
 	var indexValue C.LLVMValueRef
 	switch s.g.packedModeForEnum(sourceEnum) {
 	case packedEnumABIIndexSOA, packedEnumABIVariantSparse:
 		indexValue, err = s.coerceValue(handleValue, sourceEnum, s.g.result.NamedTypes["u32"])
-		if err != nil {
-			return nil, nil, true, err
-		}
-	case packedEnumABIRowHandle:
-		rowPtr, err := s.coerceValue(handleValue, sourceEnum, ops.voidRefType())
-		if err != nil {
-			return nil, nil, true, err
-		}
-		indexValue, err = ops.encodeDenseIndex(rowPtr, "nodekey.encode_index")
-		if err != nil {
-			return nil, nil, true, err
-		}
-	case packedEnumABIWordHandle:
-		rowPtr, err := ops.decodeHandle(handleValue, sourceEnum, "nodekey.decode")
-		if err != nil {
-			return nil, nil, true, err
-		}
-		indexValue, err = ops.encodeDenseIndex(rowPtr, "nodekey.encode_index")
 		if err != nil {
 			return nil, nil, true, err
 		}
@@ -7480,16 +7455,6 @@ func (s *functionState) emitPackedStoreValueAtDenseKey(ops *packedStoreOps, keyI
 			return nil, nil, err
 		}
 		return coerced, ops.storeType.Enum, nil
-	case packedEnumABIRowHandle, packedEnumABIWordHandle:
-		rowPtr, err := ops.decodeDenseIndex(keyIndex, name+".decode")
-		if err != nil {
-			return nil, nil, err
-		}
-		handleValue, err := ops.encodeHandle(rowPtr, ops.storeType.Enum, name+".encode")
-		if err != nil {
-			return nil, nil, err
-		}
-		return handleValue, ops.storeType.Enum, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported packed enum ABI mode %d", s.g.packedModeForEnum(ops.storeType.Enum))
 	}
@@ -7836,7 +7801,7 @@ func (s *functionState) packedEnumDirectFieldByteOffset(enumType *semantic.EnumT
 func (s *functionState) readPackedEnumWordWithStore(handleValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding, wordOffset C.LLVMValueRef) (C.LLVMValueRef, error) {
 	ops, ok := s.packedStoreOpsFromBinding(store)
 	if !ok {
-		return nil, fmt.Errorf("packed enum %s word-handle common-field read requires store context", enumType.Name)
+		return nil, fmt.Errorf("packed enum %s common-field read requires store context", enumType.Name)
 	}
 	return ops.loadPayloadWord(handleValue, enumType, wordOffset, "packed.common.store")
 }
@@ -10369,7 +10334,7 @@ func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, s
 		return nil, nil, err
 	}
 	mode := s.g.packedModeForEnum(enumType)
-	if mode != packedEnumABIVariantSparse && (tailPlan != nil || (mode != packedEnumABIWordHandle && mode != packedEnumABIIndexSOA)) {
+	if mode != packedEnumABIVariantSparse && tailPlan != nil {
 		if err := s.emitPackedStoreRecordTag(storeValue, enumType.StoreType, tagValue); err != nil {
 			return nil, nil, err
 		}
@@ -10378,7 +10343,7 @@ func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, s
 }
 
 func (s *functionState) canInlinePackedEnumVariant(enumType *semantic.EnumType, variant *semantic.EnumVariant) bool {
-	return s != nil && s.g != nil && s.g.packedModeForEnum(enumType) == packedEnumABIWordHandle && s.g.wordBits == 64 && variant != nil && variant.CanInlineWordHandle(enumType)
+	return false
 }
 
 func (s *functionState) buildInlinePackedEnumHandle(tagValue C.LLVMValueRef, payloadValue C.LLVMValueRef, payloadType semantic.Type) (C.LLVMValueRef, error) {

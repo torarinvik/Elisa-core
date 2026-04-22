@@ -59,7 +59,7 @@ func (p PackedLoweringProfile) canonicalPackedMode() packedEnumABIMode {
 
 func (p PackedLoweringProfile) packedModeForPackedEnum(enumType *semantic.EnumType) packedEnumABIMode {
 	if enumType == nil || !enumType.Packed {
-		return packedEnumABIRowHandle
+		return packedEnumABIVariantSparse
 	}
 	if p.hasExplicitMode {
 		return p.explicitMode

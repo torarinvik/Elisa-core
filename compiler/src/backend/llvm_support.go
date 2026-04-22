@@ -661,21 +661,6 @@ func (s *functionState) coercePackedEnumHandleValue(value C.LLVMValueRef, actual
 		return nil, false, nil
 	}
 	switch s.g.packedModeForEnum(expected) {
-	case packedEnumABIRowHandle:
-		if !isNumericCastType(actual) {
-			return nil, false, nil
-		}
-		expectedLLVM, err := s.g.lowerType(expected)
-		if err != nil {
-			return nil, true, err
-		}
-		return C.LLVMBuildIntToPtr(s.builder, value, expectedLLVM, cStringFree("inttoptr")), true, nil
-	case packedEnumABIWordHandle:
-		if !isNumericCastType(actual) {
-			return nil, false, nil
-		}
-		coerced, err := s.coerceNumericValue(value, actual, s.g.result.NamedTypes["uintptr"])
-		return coerced, true, err
 	case packedEnumABIIndexSOA, packedEnumABIVariantSparse:
 		if !isNumericCastType(actual) {
 			return nil, false, nil
@@ -2952,21 +2937,16 @@ func (s *functionState) materializePackedVariantViewValue(binding packedVariantV
 	}
 	handle := binding.handle
 	if handle == nil {
-		switch s.g.packedModeForEnum(binding.typ.Enum) {
-		case packedEnumABIRowHandle:
-			handle = binding.ptr
-		default:
-			if binding.ptr == nil {
-				return nil, nil, fmt.Errorf("packedview %s is missing both handle and decoded row", binding.typ.String())
-			}
-			if binding.store.typ == nil || binding.store.value == nil {
-				return nil, nil, fmt.Errorf("packedview %s requires store context for materialization", binding.typ.String())
-			}
-			var err error
-			handle, err = s.encodePackedEnumHandleWithStore(binding.ptr, binding.typ.Enum, binding.store.value)
-			if err != nil {
-				return nil, nil, err
-			}
+		if binding.ptr == nil {
+			return nil, nil, fmt.Errorf("packedview %s is missing both handle and decoded row", binding.typ.String())
+		}
+		if binding.store.typ == nil || binding.store.value == nil {
+			return nil, nil, fmt.Errorf("packedview %s requires store context for materialization", binding.typ.String())
+		}
+		var err error
+		handle, err = s.encodePackedEnumHandleWithStore(binding.ptr, binding.typ.Enum, binding.store.value)
+		if err != nil {
+			return nil, nil, err
 		}
 	}
 	value, err := s.buildPackedVariantViewValue(binding.typ, handle, &binding.store)
@@ -3024,9 +3004,6 @@ func (s *functionState) unpackPackedVariantViewValue(value C.LLVMValueRef, viewT
 	}
 	binding := packedVariantViewBinding{typ: viewType}
 	binding.handle = C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("packedview.handle.extract"))
-	if s.g.packedModeForEnum(viewType.Enum) == packedEnumABIRowHandle {
-		binding.ptr = binding.handle
-	}
 	if viewType.Enum.StoreType != nil {
 		binding.store = packedStoreBinding{
 			value: C.LLVMBuildExtractValue(s.builder, value, 1, cStringFree("packedview.store.extract")),

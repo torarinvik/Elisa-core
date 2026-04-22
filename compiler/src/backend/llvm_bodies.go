@@ -7309,7 +7309,7 @@ func (s *functionState) packedEnumVariantPayloadFieldByteOffset(enumType *semant
 func (s *functionState) readPackedEnumTagWithStore(handleValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding) (C.LLVMValueRef, error) {
 	ops, ok := s.packedStoreOpsFromBinding(store)
 	if !ok {
-		return nil, fmt.Errorf("packed enum %s word-handle tag read requires store context", enumType.Name)
+		return nil, fmt.Errorf("packed enum %s tag read requires store context", enumType.Name)
 	}
 	return ops.storeTagAt(handleValue, enumType, "packed.tag.store")
 }
@@ -7415,9 +7415,6 @@ func (s *functionState) preloadPackedMatchCommonFieldValues(enumType *semantic.E
 }
 
 func packedMatchShouldEagerDecode(result *semantic.Result, abi packedEnumABIMode, enumType *semantic.EnumType, matchValue ast.Expr, store *packedStoreBinding, arms []ast.MatchArm) bool {
-	if abi == packedEnumABIWordHandle && enumType != nil && enumType.HasInlineWordHandleVariant() {
-		return false
-	}
 	needsPayloadDecode := packedMatchNeedsEagerDecode(arms)
 	ident, ok := matchValue.(*ast.Ident)
 	readsMatchedValueField := ok && matchArmsReadMatchedValueField(ident.Name, arms)
@@ -7425,11 +7422,6 @@ func packedMatchShouldEagerDecode(result *semantic.Result, abi packedEnumABIMode
 		return false
 	}
 	if store != nil && store.typ != nil && semantic.IsFrozenPackedEnumStoreType(store.typ) && packedModeUsesDirectWordReads(abi) {
-		if abi == packedEnumABIWordHandle {
-			if readsMatchedValueField || packedMatchHasWidePayloadAccess(arms, 3) {
-				return true
-			}
-		}
 		return false
 	}
 	hasFrozenPackedStoreDeps := false

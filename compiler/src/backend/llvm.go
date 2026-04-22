@@ -156,14 +156,14 @@ func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
 
 func (g *llvmGenerator) packedModeForEnum(enumType *semantic.EnumType) packedEnumABIMode {
 	if g == nil {
-		return packedEnumABIRowHandle
+		return packedEnumABIVariantSparse
 	}
 	return g.packedProfile.packedModeForPackedEnum(enumType)
 }
 
 func (g *llvmGenerator) packedLoweringForStore(storeType *semantic.PackedEnumStoreType) packedEnumABIMode {
 	if g == nil {
-		return packedEnumABIRowHandle
+		return packedEnumABIVariantSparse
 	}
 	return g.packedProfile.packedModeForStore(storeType)
 }
