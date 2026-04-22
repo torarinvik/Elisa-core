@@ -50,14 +50,6 @@ func GenerateLLVMIRWithOptAndPackedLoweringProfile(result *semantic.Result, optL
 	return g.printModule(), nil
 }
 
-func GenerateLLVMIRWithOptAndPackedABI(result *semantic.Result, optLevel OptimizationLevel, packedABI PackedEnumABI) (string, error) {
-	profile, err := LegacyPackedLoweringProfile(packedABI)
-	if err != nil {
-		return "", err
-	}
-	return GenerateLLVMIRWithOptAndPackedLoweringProfile(result, optLevel, profile)
-}
-
 func compileLLVMModule(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile) (*llvmGenerator, error) {
 	g, err := newLLVMGenerator(result)
 	if err != nil {
@@ -192,7 +184,7 @@ func (g *llvmGenerator) usesCanonicalPackedLowering() bool {
 	if g == nil {
 		return false
 	}
-	return g.packedProfile.Contract() == PackedLoweringContractCanonicalCompilerGraph && !g.packedProfile.HasLegacyOverride()
+	return !g.packedProfile.hasExplicitMode
 }
 
 func (g *llvmGenerator) nextSyntheticName(prefix string) string {

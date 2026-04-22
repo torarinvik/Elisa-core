@@ -877,8 +877,8 @@ func TestParseArgsDefaultsPackedLoweringToCanonicalProfile(t *testing.T) {
 	if options.packedProfile.Contract() != backend.PackedLoweringContractCanonicalCompilerGraph {
 		t.Fatalf("expected canonical packed lowering profile by default, got %q", options.packedProfile.Contract())
 	}
-	if _, ok := options.packedProfile.LegacyOverride(); ok {
-		t.Fatal("expected canonical packed lowering default not to carry a legacy override")
+	if options.packedProfile.SelectionKey() != "canonical" {
+		t.Fatalf("expected canonical packed lowering selection by default, got %q", options.packedProfile.SelectionKey())
 	}
 }
 

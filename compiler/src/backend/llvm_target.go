@@ -94,14 +94,6 @@ func WriteLLVMBitcodeFileWithOptAndPackedLoweringProfile(result *semantic.Result
 	return g.writeBitcodeFile(outputPath)
 }
 
-func WriteLLVMBitcodeFileWithOptAndPackedABI(result *semantic.Result, outputPath string, optLevel OptimizationLevel, packedABI PackedEnumABI) error {
-	profile, err := LegacyPackedLoweringProfile(packedABI)
-	if err != nil {
-		return err
-	}
-	return WriteLLVMBitcodeFileWithOptAndPackedLoweringProfile(result, outputPath, optLevel, profile)
-}
-
 func WriteLLVMObjectFile(result *semantic.Result, outputPath string) error {
 	return WriteLLVMObjectFileWithOpt(result, outputPath, OptimizationLevel3)
 }
@@ -120,14 +112,6 @@ func WriteLLVMObjectFileWithOptAndPackedLoweringProfile(result *semantic.Result,
 	}
 	defer g.dispose()
 	return g.writeObjectFile(outputPath, optLevel)
-}
-
-func WriteLLVMObjectFileWithOptAndPackedABI(result *semantic.Result, outputPath string, optLevel OptimizationLevel, packedABI PackedEnumABI) error {
-	profile, err := LegacyPackedLoweringProfile(packedABI)
-	if err != nil {
-		return err
-	}
-	return WriteLLVMObjectFileWithOptAndPackedLoweringProfile(result, outputPath, optLevel, profile)
 }
 
 func (g *llvmGenerator) writeBitcodeFile(outputPath string) error {

@@ -62,18 +62,20 @@ func generateLLVMIRWithPackedABIForTest(result *semantic.Result, abi packedEnumA
 		return "", err
 	}
 	defer g.dispose()
+	var explicitABI PackedEnumABI
 	switch abi {
 	case packedEnumABIRowHandle:
-		g.packedProfile = mustLegacyPackedLoweringProfile(PackedEnumABIRowHandle)
+		explicitABI = PackedEnumABIRowHandle
 	case packedEnumABIWordHandle:
-		g.packedProfile = mustLegacyPackedLoweringProfile(PackedEnumABIWordHandle)
+		explicitABI = PackedEnumABIWordHandle
 	case packedEnumABIIndexSOA:
-		g.packedProfile = mustLegacyPackedLoweringProfile(PackedEnumABIIndexSOA)
+		explicitABI = PackedEnumABIIndexSOA
 	case packedEnumABIVariantSparse:
-		g.packedProfile = mustLegacyPackedLoweringProfile(PackedEnumABIVariantSparse)
+		explicitABI = PackedEnumABIVariantSparse
 	default:
 		return "", fmt.Errorf("unsupported packed enum ABI mode %d", abi)
 	}
+	g.packedProfile = mustExplicitPackedLoweringProfile(explicitABI)
 	g.packedEnumABI = abi
 	if err := g.emitModule(); err != nil {
 		return "", err
@@ -126,9 +128,6 @@ def fold() -> int:
 	if result.PackedLowering.CanonicalPackedLowering != string(PackedEnumABIVariantSparse) {
 		t.Fatalf("expected canonical packed lowering metadata to record %q, got %q", PackedEnumABIVariantSparse, result.PackedLowering.CanonicalPackedLowering)
 	}
-	if result.PackedLowering.UsesLegacyOverride {
-		t.Fatalf("expected canonical packed lowering metadata not to mark a legacy override, got %+v", result.PackedLowering)
-	}
 	if result.PackedLowering.PublicationReadonlyGateStoreState != "Frozen" {
 		t.Fatalf("expected frozen publication gate metadata, got %q", result.PackedLowering.PublicationReadonlyGateStoreState)
 	}
@@ -137,7 +136,7 @@ def fold() -> int:
 	}
 }
 
-func TestGenerateLLVMIRRecordsLegacyPackedLoweringMetadataForOverride(t *testing.T) {
+func TestGenerateLLVMIRExplicitPackedModeKeepsCanonicalPackedLoweringMetadata(t *testing.T) {
 	src := `packed enum Expr:
 	Lit(value: int)
 
@@ -151,17 +150,18 @@ def fold() -> int:
 				value
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_metadata_legacy.llcontext", src)
-	if _, err := GenerateLLVMIRWithOptAndPackedABI(result, OptimizationLevel0, PackedEnumABIWordHandle); err != nil {
-		t.Fatalf("GenerateLLVMIRWithOptAndPackedABI returned error: %v", err)
+	profile, err := ExplicitPackedLoweringProfile(PackedEnumABIWordHandle)
+	if err != nil {
+		t.Fatalf("ExplicitPackedLoweringProfile returned error: %v", err)
 	}
-	if result.PackedLowering.Contract != string(PackedLoweringContractLegacyOverride) {
-		t.Fatalf("expected legacy override packed lowering metadata, got %q", result.PackedLowering.Contract)
+	if _, err := GenerateLLVMIRWithOptAndPackedLoweringProfile(result, OptimizationLevel0, profile); err != nil {
+		t.Fatalf("GenerateLLVMIRWithOptAndPackedLoweringProfile returned error: %v", err)
 	}
-	if !result.PackedLowering.UsesLegacyOverride {
-		t.Fatalf("expected legacy override metadata to mark the override, got %+v", result.PackedLowering)
+	if result.PackedLowering.Contract != string(PackedLoweringContractCanonicalCompilerGraph) {
+		t.Fatalf("expected explicit packed mode to keep canonical metadata contract, got %q", result.PackedLowering.Contract)
 	}
-	if result.PackedLowering.LegacyOverride != string(PackedEnumABIWordHandle) {
-		t.Fatalf("expected legacy override metadata %q, got %q", PackedEnumABIWordHandle, result.PackedLowering.LegacyOverride)
+	if result.PackedLowering.CanonicalPackedLowering != string(PackedEnumABIVariantSparse) {
+		t.Fatalf("expected explicit packed mode to preserve canonical metadata baseline %q, got %q", PackedEnumABIVariantSparse, result.PackedLowering.CanonicalPackedLowering)
 	}
 }
 
@@ -203,9 +203,6 @@ def sum_pair() -> int:
 	}
 	if !enumType.HasPackedPrefixOverride || enumType.PackedPrefixOverride != "common-only" {
 		t.Fatalf("expected build-heavy packed profile to default to common-only prefix, got %+v", enumType)
-	}
-	if result.PackedLowering.UsesLegacyOverride {
-		t.Fatalf("expected enum-level packed profile not to mark result metadata as a legacy global override")
 	}
 }
 
@@ -3172,9 +3169,13 @@ def fold() -> int:
 export func fold_export() -> int = fold
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_word_handle_opt.llcontext", src)
-	output, err := GenerateLLVMIRWithOptAndPackedABI(result, OptimizationLevel3, PackedEnumABIWordHandle)
+	profile, err := ExplicitPackedLoweringProfile(PackedEnumABIWordHandle)
 	if err != nil {
-		t.Fatalf("GenerateLLVMIRWithOptAndPackedABI returned error: %v", err)
+		t.Fatalf("ExplicitPackedLoweringProfile returned error: %v", err)
+	}
+	output, err := GenerateLLVMIRWithOptAndPackedLoweringProfile(result, OptimizationLevel3, profile)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOptAndPackedLoweringProfile returned error: %v", err)
 	}
 
 	if !strings.Contains(output, "call %PackedStoreAllocResult @ctx_packed_store_alloc_fixed_tagged_result(") {
@@ -3200,9 +3201,13 @@ def fold_common_frozen() -> int:
 		return node.span + node.span
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_field_cache_frozen_index_soa_opt.llcontext", src)
-	output, err := GenerateLLVMIRWithOptAndPackedABI(result, OptimizationLevel3, PackedEnumABIIndexSOA)
+	profile, err := ExplicitPackedLoweringProfile(PackedEnumABIIndexSOA)
 	if err != nil {
-		t.Fatalf("GenerateLLVMIRWithOptAndPackedABI returned error: %v", err)
+		t.Fatalf("ExplicitPackedLoweringProfile returned error: %v", err)
+	}
+	output, err := GenerateLLVMIRWithOptAndPackedLoweringProfile(result, OptimizationLevel3, profile)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOptAndPackedLoweringProfile returned error: %v", err)
 	}
 
 	if strings.Contains(output, "call i64 @ctx_packed_store_read_index_word(") {
@@ -3233,9 +3238,13 @@ def fold_match_frozen() -> int:
 				0
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_match_frozen_index_soa_opt.llcontext", src)
-	output, err := GenerateLLVMIRWithOptAndPackedABI(result, OptimizationLevel3, PackedEnumABIIndexSOA)
+	profile, err := ExplicitPackedLoweringProfile(PackedEnumABIIndexSOA)
 	if err != nil {
-		t.Fatalf("GenerateLLVMIRWithOptAndPackedABI returned error: %v", err)
+		t.Fatalf("ExplicitPackedLoweringProfile returned error: %v", err)
+	}
+	output, err := GenerateLLVMIRWithOptAndPackedLoweringProfile(result, OptimizationLevel3, profile)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOptAndPackedLoweringProfile returned error: %v", err)
 	}
 
 	if strings.Contains(output, "call i32 @ctx_packed_store_read_index_tag(") {

@@ -102,8 +102,6 @@ type NodeTableInfo struct {
 type PackedLoweringMetadata struct {
 	Contract                          string
 	CanonicalPackedLowering           string
-	LegacyOverride                    string
-	UsesLegacyOverride                bool
 	OnePackedEnumOneHandleInvariant   bool
 	PublicationReadonlyGateStoreState string
 }

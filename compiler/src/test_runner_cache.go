@@ -96,10 +96,7 @@ func testRunnerCacheArtifactFor(runnerSource string, shimSource string, foreignF
 	testRunnerCacheWriteString(hash, "goarch="+runtime.GOARCH)
 	testRunnerCacheWriteString(hash, "goversion="+runtime.Version())
 	testRunnerCacheWriteString(hash, fmt.Sprintf("opt=%d", optLevel))
-	testRunnerCacheWriteString(hash, "packedContract="+string(packedProfile.Contract()))
-	if override, ok := packedProfile.LegacyOverride(); ok {
-		testRunnerCacheWriteString(hash, "packedOverride="+string(override))
-	}
+	testRunnerCacheWriteString(hash, "packedProfile="+packedProfile.SelectionKey())
 	clangPath, err := exec.LookPath("clang")
 	if err != nil {
 		return testRunnerCacheArtifact{}, err

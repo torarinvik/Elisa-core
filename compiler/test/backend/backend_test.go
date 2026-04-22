@@ -50,9 +50,13 @@ func loadFixtureSource(t *testing.T, relParts ...string) string {
 
 func generateLLVMIRWithPackedABIForTest(t *testing.T, result *semantic.Result, abi backend.PackedEnumABI) string {
 	t.Helper()
-	output, err := backend.GenerateLLVMIRWithOptAndPackedABI(result, backend.OptimizationLevel0, abi)
+	profile, err := backend.ExplicitPackedLoweringProfile(abi)
 	if err != nil {
-		t.Fatalf("GenerateLLVMIRWithOptAndPackedABI returned error: %v", err)
+		t.Fatalf("ExplicitPackedLoweringProfile returned error: %v", err)
+	}
+	output, err := backend.GenerateLLVMIRWithOptAndPackedLoweringProfile(result, backend.OptimizationLevel0, profile)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOptAndPackedLoweringProfile returned error: %v", err)
 	}
 	return output
 }

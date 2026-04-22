@@ -28,11 +28,6 @@ func DescribePackedLowering(result *semantic.Result, profile PackedLoweringProfi
 	builder.WriteString("packed lowering\n")
 	builder.WriteString(fmt.Sprintf("  contract: %s\n", meta.Contract))
 	builder.WriteString(fmt.Sprintf("  canonical: %s\n", meta.CanonicalPackedLowering))
-	if meta.UsesLegacyOverride {
-		builder.WriteString(fmt.Sprintf("  legacy override: %s\n", meta.LegacyOverride))
-	} else {
-		builder.WriteString("  legacy override: none\n")
-	}
 	builder.WriteString(fmt.Sprintf("  readonly publication gate: %s\n", meta.PublicationReadonlyGateStoreState))
 
 	packedEnums := make([]*semantic.EnumType, 0)

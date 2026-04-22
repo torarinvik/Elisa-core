@@ -207,9 +207,6 @@ func runProjectCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 		hasOptLevel:   target.hasOptLevel,
 		optLevel:      target.optLevel,
 	}
-	if cli.packedProfile.Contract() == "" {
-		cli.packedProfile = backend.DefaultPackedLoweringProfile()
-	}
 
 	switch options.command {
 	case projectCommandRun:

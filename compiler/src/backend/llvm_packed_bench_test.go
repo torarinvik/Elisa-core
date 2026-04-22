@@ -549,9 +549,9 @@ func BenchmarkGenerateLLVMIRPackedLoweringParserASTRetainedReads(b *testing.B) {
 }
 
 func BenchmarkGenerateLLVMIRPackedLoweringParserASTWordHandle(b *testing.B) {
-	profile, err := LegacyPackedLoweringProfile(PackedEnumABIWordHandle)
+	profile, err := ExplicitPackedLoweringProfile(PackedEnumABIWordHandle)
 	if err != nil {
-		b.Fatalf("LegacyPackedLoweringProfile returned error: %v", err)
+		b.Fatalf("ExplicitPackedLoweringProfile returned error: %v", err)
 	}
 	benchmarkPackedLowering(b, "packed_lowering_parser_ast_bench.llcontext", packedLoweringParserASTBenchmarkSource, profile)
 }
@@ -561,9 +561,9 @@ func BenchmarkGenerateLLVMIRPackedLoweringParserASTMegaRetainedReads(b *testing.
 }
 
 func BenchmarkGenerateLLVMIRPackedLoweringParserASTMegaWordHandle(b *testing.B) {
-	profile, err := LegacyPackedLoweringProfile(PackedEnumABIWordHandle)
+	profile, err := ExplicitPackedLoweringProfile(PackedEnumABIWordHandle)
 	if err != nil {
-		b.Fatalf("LegacyPackedLoweringProfile returned error: %v", err)
+		b.Fatalf("ExplicitPackedLoweringProfile returned error: %v", err)
 	}
 	benchmarkPackedLowering(b, "packed_lowering_parser_ast_mega_bench.llcontext", packedLoweringParserASTMegaBenchmarkSource, profile)
 }
@@ -573,17 +573,17 @@ func BenchmarkGenerateLLVMIRPackedLoweringParserASTMegaParallelRetainedReads(b *
 }
 
 func BenchmarkGenerateLLVMIRPackedLoweringParserASTMegaParallelWordHandle(b *testing.B) {
-	profile, err := LegacyPackedLoweringProfile(PackedEnumABIWordHandle)
+	profile, err := ExplicitPackedLoweringProfile(PackedEnumABIWordHandle)
 	if err != nil {
-		b.Fatalf("LegacyPackedLoweringProfile returned error: %v", err)
+		b.Fatalf("ExplicitPackedLoweringProfile returned error: %v", err)
 	}
 	benchmarkPackedLoweringParallel(b, "packed_lowering_parser_ast_mega_parallel_bench.llcontext", packedLoweringParserASTMegaBenchmarkSource, profile, packedLoweringParallelWorkerCount)
 }
 
 func BenchmarkGenerateLLVMIRPackedLoweringMLASTMegaRowHandle(b *testing.B) {
-	profile, err := LegacyPackedLoweringProfile(PackedEnumABIRowHandle)
+	profile, err := ExplicitPackedLoweringProfile(PackedEnumABIRowHandle)
 	if err != nil {
-		b.Fatalf("LegacyPackedLoweringProfile returned error: %v", err)
+		b.Fatalf("ExplicitPackedLoweringProfile returned error: %v", err)
 	}
 	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_mega_bench.llcontext"))
 	benchmarkPackedLowering(b, "packed_lowering_ml_ast_mega_bench.llcontext", src, profile)
@@ -605,9 +605,9 @@ func BenchmarkGenerateLLVMIRPackedLoweringMLASTUltraRetainedReads(b *testing.B) 
 }
 
 func BenchmarkGenerateLLVMIRPackedLoweringMLASTMegaWordHandle(b *testing.B) {
-	profile, err := LegacyPackedLoweringProfile(PackedEnumABIWordHandle)
+	profile, err := ExplicitPackedLoweringProfile(PackedEnumABIWordHandle)
 	if err != nil {
-		b.Fatalf("LegacyPackedLoweringProfile returned error: %v", err)
+		b.Fatalf("ExplicitPackedLoweringProfile returned error: %v", err)
 	}
 	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_mega_bench.llcontext"))
 	benchmarkPackedLowering(b, "packed_lowering_ml_ast_mega_bench.llcontext", src, profile)
@@ -619,9 +619,9 @@ func BenchmarkGenerateLLVMIRPackedLoweringMLASTMediumRetainedReads(b *testing.B)
 }
 
 func BenchmarkGenerateLLVMIRPackedLoweringMLASTMegaParallelRowHandle(b *testing.B) {
-	profile, err := LegacyPackedLoweringProfile(PackedEnumABIRowHandle)
+	profile, err := ExplicitPackedLoweringProfile(PackedEnumABIRowHandle)
 	if err != nil {
-		b.Fatalf("LegacyPackedLoweringProfile returned error: %v", err)
+		b.Fatalf("ExplicitPackedLoweringProfile returned error: %v", err)
 	}
 	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_mega_parallel_bench.llcontext"))
 	benchmarkPackedLoweringParallel(b, "packed_lowering_ml_ast_mega_parallel_bench.llcontext", src, profile, packedLoweringParallelWorkerCount)
@@ -648,18 +648,18 @@ func BenchmarkGenerateLLVMIRPackedLoweringMLASTUltraParallelRetainedReads(b *tes
 }
 
 func BenchmarkGenerateLLVMIRPackedLoweringMLASTMegaParallelWordHandle(b *testing.B) {
-	profile, err := LegacyPackedLoweringProfile(PackedEnumABIWordHandle)
+	profile, err := ExplicitPackedLoweringProfile(PackedEnumABIWordHandle)
 	if err != nil {
-		b.Fatalf("LegacyPackedLoweringProfile returned error: %v", err)
+		b.Fatalf("ExplicitPackedLoweringProfile returned error: %v", err)
 	}
 	src := loadPackedBenchSourceFromFile(b, filepath.Join("Code", "benchmarks", "packed_lowering_ml_ast_mega_parallel_bench.llcontext"))
 	benchmarkPackedLoweringParallel(b, "packed_lowering_ml_ast_mega_parallel_bench.llcontext", src, profile, packedLoweringParallelWorkerCount)
 }
 
 func BenchmarkGenerateLLVMIRPackedLoweringWordHandle(b *testing.B) {
-	profile, err := LegacyPackedLoweringProfile(PackedEnumABIWordHandle)
+	profile, err := ExplicitPackedLoweringProfile(PackedEnumABIWordHandle)
 	if err != nil {
-		b.Fatalf("LegacyPackedLoweringProfile returned error: %v", err)
+		b.Fatalf("ExplicitPackedLoweringProfile returned error: %v", err)
 	}
 	benchmarkPackedLowering(b, "packed_lowering_bench.llcontext", packedLoweringBenchmarkSource, profile)
 }

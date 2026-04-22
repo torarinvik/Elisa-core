@@ -25,14 +25,6 @@ func GenerateLLVMIRWithOptAndPackedLoweringProfile(result *semantic.Result, optL
 	return "", fmt.Errorf("LLVM backend requires cgo and LLVM development libraries")
 }
 
-func GenerateLLVMIRWithOptAndPackedABI(result *semantic.Result, optLevel OptimizationLevel, packedABI PackedEnumABI) (string, error) {
-	profile, err := LegacyPackedLoweringProfile(packedABI)
-	if err != nil {
-		return "", err
-	}
-	return GenerateLLVMIRWithOptAndPackedLoweringProfile(result, optLevel, profile)
-}
-
 func WriteLLVMBitcodeFile(result *semantic.Result, outputPath string) error {
 	return WriteLLVMBitcodeFileWithOpt(result, outputPath, OptimizationLevel3)
 }
@@ -51,14 +43,6 @@ func WriteLLVMBitcodeFileWithOptAndPackedLoweringProfile(result *semantic.Result
 	return fmt.Errorf("LLVM backend requires cgo and LLVM development libraries")
 }
 
-func WriteLLVMBitcodeFileWithOptAndPackedABI(result *semantic.Result, outputPath string, optLevel OptimizationLevel, packedABI PackedEnumABI) error {
-	profile, err := LegacyPackedLoweringProfile(packedABI)
-	if err != nil {
-		return err
-	}
-	return WriteLLVMBitcodeFileWithOptAndPackedLoweringProfile(result, outputPath, optLevel, profile)
-}
-
 func WriteLLVMObjectFile(result *semantic.Result, outputPath string) error {
 	return WriteLLVMObjectFileWithOpt(result, outputPath, OptimizationLevel3)
 }
@@ -75,12 +59,4 @@ func WriteLLVMObjectFileWithOptAndPackedLoweringProfile(result *semantic.Result,
 	_ = optLevel
 	_ = profile
 	return fmt.Errorf("LLVM backend requires cgo and LLVM development libraries")
-}
-
-func WriteLLVMObjectFileWithOptAndPackedABI(result *semantic.Result, outputPath string, optLevel OptimizationLevel, packedABI PackedEnumABI) error {
-	profile, err := LegacyPackedLoweringProfile(packedABI)
-	if err != nil {
-		return err
-	}
-	return WriteLLVMObjectFileWithOptAndPackedLoweringProfile(result, outputPath, optLevel, profile)
 }

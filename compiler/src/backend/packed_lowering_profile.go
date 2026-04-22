@@ -6,21 +6,19 @@ type PackedLoweringContract string
 
 const (
 	PackedLoweringContractCanonicalCompilerGraph PackedLoweringContract = "canonical-compiler-graph"
-	PackedLoweringContractLegacyOverride         PackedLoweringContract = "legacy-override"
 )
 
 type PackedLoweringProfile struct {
-	contract          PackedLoweringContract
-	legacyOverride    PackedEnumABI
-	hasLegacyOverride bool
-	legacyMode        packedEnumABIMode
+	explicitABI     PackedEnumABI
+	explicitMode    packedEnumABIMode
+	hasExplicitMode bool
 }
 
 func DefaultPackedLoweringProfile() PackedLoweringProfile {
-	return PackedLoweringProfile{contract: PackedLoweringContractCanonicalCompilerGraph}
+	return PackedLoweringProfile{}
 }
 
-func LegacyPackedLoweringProfile(abi PackedEnumABI) (PackedLoweringProfile, error) {
+func ExplicitPackedLoweringProfile(abi PackedEnumABI) (PackedLoweringProfile, error) {
 	normalized, err := ParsePackedEnumABI(string(abi))
 	if err != nil {
 		return PackedLoweringProfile{}, err
@@ -30,15 +28,14 @@ func LegacyPackedLoweringProfile(abi PackedEnumABI) (PackedLoweringProfile, erro
 		return PackedLoweringProfile{}, err
 	}
 	return PackedLoweringProfile{
-		contract:          PackedLoweringContractLegacyOverride,
-		legacyOverride:    normalized,
-		hasLegacyOverride: true,
-		legacyMode:        mode,
+		explicitABI:     normalized,
+		explicitMode:    mode,
+		hasExplicitMode: true,
 	}, nil
 }
 
-func mustLegacyPackedLoweringProfile(abi PackedEnumABI) PackedLoweringProfile {
-	profile, err := LegacyPackedLoweringProfile(abi)
+func mustExplicitPackedLoweringProfile(abi PackedEnumABI) PackedLoweringProfile {
+	profile, err := ExplicitPackedLoweringProfile(abi)
 	if err != nil {
 		panic(err)
 	}
@@ -46,21 +43,14 @@ func mustLegacyPackedLoweringProfile(abi PackedEnumABI) PackedLoweringProfile {
 }
 
 func (p PackedLoweringProfile) Contract() PackedLoweringContract {
-	if p.contract == "" {
-		return PackedLoweringContractCanonicalCompilerGraph
-	}
-	return p.contract
+	return PackedLoweringContractCanonicalCompilerGraph
 }
 
-func (p PackedLoweringProfile) HasLegacyOverride() bool {
-	return p.hasLegacyOverride
-}
-
-func (p PackedLoweringProfile) LegacyOverride() (PackedEnumABI, bool) {
-	if !p.hasLegacyOverride {
-		return "", false
+func (p PackedLoweringProfile) SelectionKey() string {
+	if !p.hasExplicitMode {
+		return "canonical"
 	}
-	return p.legacyOverride, true
+	return "explicit:" + string(p.explicitABI)
 }
 
 func (p PackedLoweringProfile) canonicalPackedMode() packedEnumABIMode {
@@ -71,8 +61,8 @@ func (p PackedLoweringProfile) packedModeForPackedEnum(enumType *semantic.EnumTy
 	if enumType == nil || !enumType.Packed {
 		return packedEnumABIRowHandle
 	}
-	if p.hasLegacyOverride {
-		return p.legacyMode
+	if p.hasExplicitMode {
+		return p.explicitMode
 	}
 	if enumType.HasPackedABIOverride {
 		if abi, err := ParsePackedEnumABI(enumType.PackedABIOverride); err == nil {
@@ -88,22 +78,16 @@ func (p PackedLoweringProfile) packedModeForStore(storeType *semantic.PackedEnum
 	if storeType != nil && storeType.Enum != nil {
 		return p.packedModeForPackedEnum(storeType.Enum)
 	}
-	if p.hasLegacyOverride {
-		return p.legacyMode
+	if p.hasExplicitMode {
+		return p.explicitMode
 	}
 	return p.canonicalPackedMode()
 }
 
 func (p PackedLoweringProfile) metadata() semantic.PackedLoweringMetadata {
-	legacyOverride := ""
-	if p.hasLegacyOverride {
-		legacyOverride = string(p.legacyOverride)
-	}
 	return semantic.PackedLoweringMetadata{
 		Contract:                          string(p.Contract()),
 		CanonicalPackedLowering:           string(PackedEnumABIVariantSparse),
-		LegacyOverride:                    legacyOverride,
-		UsesLegacyOverride:                p.hasLegacyOverride,
 		OnePackedEnumOneHandleInvariant:   true,
 		PublicationReadonlyGateStoreState: "Frozen",
 	}
