@@ -93,15 +93,15 @@ struct LuaAstBuilder:
 
 interface LuaBuilder:
     type ExprNode
-    def make_integer(alloc: mutable any Arena&, span: i64, value: i64) -> ExprNode
-    def make_binary(alloc: mutable any Arena&, span: i64, left: ExprNode, right: ExprNode) -> ExprNode
+    def make_integer(alloc: mutable Arena&, span: i64, value: i64) -> ExprNode
+    def make_binary(alloc: mutable Arena&, span: i64, left: ExprNode, right: ExprNode) -> ExprNode
 
 @derive(parse_builder tree Lua)
 impl LuaBuilder for LuaAstBuilder:
     type ExprNode = Lua.Expr
 
 def build(owner: Arena) -> Lua.Expr:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     left: Lua.Expr = LuaAstBuilder.make_integer(alloc, 1, 2)
     right: Lua.Expr = LuaAstBuilder.make_integer(alloc, 1, 3)
     return LuaAstBuilder.make_binary(alloc, 1, left, right)

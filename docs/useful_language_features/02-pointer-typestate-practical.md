@@ -334,7 +334,7 @@ Cursor[u8, any, ?]
 `[state]` attaches to the nearest preceding `&`.
 
 ```context
-any u8&&[state]
+u8&&[state]
 ```
 
 means “pointer to pointer”, where the **outer** reference carries `state`.

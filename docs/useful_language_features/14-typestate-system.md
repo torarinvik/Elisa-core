@@ -564,7 +564,7 @@ This is also important:
 
 ```context
 def bad(player: mutable Player[Alive]) -> int:
-    alias: any Player[Alive]& = (&player).cast[any Player[Alive]&]
+    alias: Player[Alive]& = (&player).cast[Player[Alive]&]
     alias.health <- 0
     return take_alive(player)
 ```
@@ -587,11 +587,11 @@ This is a crucial soundness rule.
 Consider:
 
 ```context
-def kill(player: any Player[Alive]&) -> void:
+def kill(player: Player[Alive]&) -> void:
     player.health <- 0
 
 def bad(player: mutable Player[Alive]) -> int:
-    kill((&player).cast[any Player[Alive]&])
+    kill((&player).cast[Player[Alive]&])
     return take_alive(player)
 ```
 
@@ -626,11 +626,11 @@ That includes wrapper cases such as:
 struct Team:
     player: mutable Player[Alive]
 
-def kill_team(team: any Team&) -> void:
+def kill_team(team: Team&) -> void:
     team.player.health <- 0
 
 def bad(team: mutable Team) -> int:
-    kill_team((&team).cast[any Team&])
+    kill_team((&team).cast[Team&])
     return take_alive(team.player)
 ```
 
@@ -725,7 +725,7 @@ These layers stack.
 Example:
 
 ```context
-player_ref: any Player[Alive]&?
+player_ref: Player[Alive]&?
 ```
 
 This carries two independent facts:
@@ -1046,11 +1046,11 @@ def bump_score(player: mutable Player[Alive]) -> int:
 ### Conservative widening after ref call
 
 ```context
-def poke(player: any Player[Alive]&) -> void:
+def poke(player: Player[Alive]&) -> void:
     player.health <- 0
 
 def use_after_call(player: mutable Player[Alive]) -> int:
-    poke((&player).cast[any Player[Alive]&])
+    poke((&player).cast[Player[Alive]&])
 
     # caller-visible state is widened conservatively
     if player is Player[Alive]:

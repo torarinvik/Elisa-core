@@ -88,10 +88,10 @@ Current rules:
 Function types and other body-less surfaces use declaration syntax such as `can[Console.Write]`. Function declarations with bodies can usually omit signature permissions because effect inference records them from local grants and effectful operations. Inside a body, effectful use sites still need an explicit local grant.
 
 ```context
-def write_once(text: any u8&) -> int:
+def write_once(text: u8&) -> int:
     return puts(text) can Console.Write
 
-def write_pair(left: any u8&, right: any u8&) -> int:
+def write_pair(left: u8&, right: u8&) -> int:
     can Console.Write:
         puts(left)
         return puts(right)
@@ -250,7 +250,7 @@ def rotate(node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr.B
         return node{left, right}
 
 def rotate_into(owner: Arena, node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr.Binary:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     return new[alloc] node{left, right}
 
 def simplify(node: Lua.Node) -> Lua.Node:
@@ -484,7 +484,7 @@ Current rules:
 The newer concise cast surface is `as`:
 
 ```context
-alloc: mutable any Arena& = &owner as mutable any Arena&
+alloc: mutable Arena& = &owner as mutable Arena&
 ```
 
 This remains separate from postfix cast hooks:
@@ -525,7 +525,7 @@ struct ParseJob[state Pending | Ready | Failed]:
         Ready when self.stage == 1
         Failed when self.stage == 2
 
-def finish_ok(mutable job: any ParseJob[Pending]&) -> void ensures job => Ready:
+def finish_ok(mutable job: ParseJob[Pending]&) -> void ensures job => Ready:
     job.stage <- 1
 
 struct HeapPairNode:
@@ -558,10 +558,10 @@ struct Holder:
 struct Box:
     value: i64
 
-def read_ref(alloc: any ScratchArena&) -> i64:
+def read_ref(alloc: ScratchArena&) -> i64:
     return alloc.value
 
-def score_ref(box: any Box&, delta: i64 = 1) -> i64:
+def score_ref(box:  Box&, delta: i64 = 1) -> i64:
     return box.value + delta
 
 def read(box: Box, holder: mutable Holder) -> i64:

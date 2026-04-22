@@ -11,7 +11,7 @@ func TestAnalyzeImplicitAutorefOnDirectCall(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "implicit_autoref_direct_call.llcontext", `struct ScratchArena:
     value: i64
 
-def read(alloc: any ScratchArena&) -> i64:
+def read(alloc: ScratchArena&) -> i64:
     return alloc.value
 
 def build() -> i64:
@@ -42,7 +42,7 @@ func TestAnalyzeImplicitAutorefAllowsMutableRefFromMutableLocal(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "implicit_autoref_mutable_local.llcontext", `struct ScratchArena:
 	value: mutable i64
 
-def bump(alloc: mutable any ScratchArena&) -> i64:
+def bump(alloc: mutable ScratchArena&) -> i64:
     alloc.value <- alloc.value + 1
     return alloc.value
 
@@ -74,7 +74,7 @@ func TestAnalyzeImplicitAutorefRejectsMutableRefFromImmutableLocal(t *testing.T)
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "implicit_autoref_mutable_local_rejected.llcontext", `struct ScratchArena:
 	value: mutable i64
 
-def bump(alloc: mutable any ScratchArena&) -> i64:
+def bump(alloc: mutable ScratchArena&) -> i64:
     alloc.value <- alloc.value + 1
     return alloc.value
 
@@ -96,7 +96,7 @@ func TestAnalyzeImplicitAutorefOnNestedFieldProjection(t *testing.T) {
 struct Holder:
     arena: ScratchArena
 
-def read(alloc: any ScratchArena&) -> i64:
+def read(alloc: ScratchArena&) -> i64:
     return alloc.value
 
 def build() -> i64:
@@ -134,7 +134,7 @@ func TestAnalyzeImplicitAutorefRejectsMutableRefFromImmutableField(t *testing.T)
 struct Holder:
     arena: ScratchArena
 
-def bump(alloc: mutable any ScratchArena&) -> i64:
+def bump(alloc: mutable ScratchArena&) -> i64:
     alloc.value <- alloc.value + 1
     return alloc.value
 
@@ -154,7 +154,7 @@ func TestAnalyzeImplicitAutorefOnExtensionMethodReceiver(t *testing.T) {
     value: i64
 
 impl Builder:
-    def read(self: Builder, other: any Builder&) -> i64:
+    def read(self: Builder, other: Builder&) -> i64:
         return self.value + other.value
 
 def build() -> i64:
@@ -191,7 +191,7 @@ func TestAnalyzeImplicitAutorefOnTrailingWithArgs(t *testing.T) {
     value: i64
 
 context ArenaCtx:
-    alloc: any ScratchArena&
+    alloc: ScratchArena&
 
 def read() with ArenaCtx -> i64:
     return alloc.value
@@ -224,7 +224,7 @@ func TestAnalyzeImplicitRefUpcastOnExistingRefArg(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "implicit_ref_upcast_existing_ref.llcontext", `struct ScratchArena:
     value: i64
 
-def read(alloc: any ScratchArena&) -> i64:
+def read(alloc: ScratchArena&) -> i64:
     return alloc.value
 
 def build() -> i64:
@@ -248,11 +248,11 @@ def build() -> i64:
 	}
 }
 
-func TestAnalyzeImplicitAutorefRejectsNullableRefTargets(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "implicit_autoref_nullable_target_rejected.llcontext", `struct ScratchArena:
+func TestAnalyzeImplicitAutorefAllowsNullableRefTargets(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_autoref_nullable_target.llcontext", `struct ScratchArena:
     value: i64
 
-def read(alloc: any ScratchArena&?) -> i64:
+def read(alloc: ScratchArena&?) -> i64:
     return 0
 
 def build() -> i64:
@@ -260,9 +260,22 @@ def build() -> i64:
     return read(owner)
 `)
 
-	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, `ScratchArena&?`) {
-		t.Fatalf("expected nullable-ref rejection diagnostic, got:\n%s", all)
+	buildSym, ok := result.GlobalScope.Lookup("build")
+	if !ok {
+		t.Fatal("expected build symbol")
+	}
+	buildDecl := buildSym.Node.(*ast.FuncDecl)
+	ret := buildDecl.Body[1].(*ast.ReturnStmt)
+	call := ret.Value.(*ast.CallExpr)
+	if !call.ResolvedArgsValid || len(call.ResolvedArgs) != 1 {
+		t.Fatalf("expected one resolved arg, got %#v", call.ResolvedArgs)
+	}
+	addr, ok := call.ResolvedArgs[0].(*ast.AddrOfExpr)
+	if !ok {
+		t.Fatalf("expected nullable-ref arg to autoref, got %T", call.ResolvedArgs[0])
+	}
+	if ident, ok := addr.Operand.(*ast.Ident); !ok || ident.Name != "owner" {
+		t.Fatalf("expected autoref operand owner, got %T %#v", addr.Operand, addr.Operand)
 	}
 }
 
@@ -271,7 +284,7 @@ func TestAnalyzeImplicitAutorefOnStructLiteralArgs(t *testing.T) {
     value: i64
 
 struct Holder:
-    arena: any ScratchArena&
+    arena: ScratchArena&
 
 def build() -> i64:
     owner: mutable ScratchArena = zeroed

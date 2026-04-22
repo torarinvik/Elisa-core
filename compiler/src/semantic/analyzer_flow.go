@@ -11032,7 +11032,7 @@ func (a *Analyzer) functionValueTypeForExpr(expr ast.Expr) (*FuncType, bool) {
 	case *ast.ParenExpr:
 		return a.functionValueTypeForExpr(n.Inner)
 		// Casts intentionally do not recurse here. A cast to a non-function carrier
-		// such as uintptr or any void& is an explicit erasure boundary and must stop
+		// such as uintptr or void& is an explicit erasure boundary and must stop
 		// function-value identity from propagating through later analysis.
 	case *ast.MoveExpr:
 		return a.functionValueTypeForExpr(n.Operand)

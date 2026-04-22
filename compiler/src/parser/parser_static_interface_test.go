@@ -193,7 +193,7 @@ func TestParseUFCSAndOptionalChaining(t *testing.T) {
 struct Box:
     value: int
 
-def read(maybe_box: Box?, maybe_ref: any Box&?) -> int:
+def read(maybe_box: Box?, maybe_ref: Box&?) -> int:
     _ = maybe_box?.value
     _ = maybe_box?.scale(2)
     return maybe_ref?.value else 0
@@ -238,7 +238,7 @@ func TestParseNullableAssignStmt(t *testing.T) {
 struct Box:
     value: int
 
-def write(maybe_ref: any Box&?) -> void:
+def write(maybe_ref: Box&?) -> void:
     maybe_ref?.value ?= 7
 `)
 	if len(errs) != 0 {

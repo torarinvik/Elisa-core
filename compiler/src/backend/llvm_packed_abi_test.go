@@ -14,9 +14,9 @@ import (
 )
 
 const parallelForConcurrencyPrelude = `extern pool_new(workers: usize) -> ThreadPool can[Pool.Create]
-extern pool_shutdown(pool: any ThreadPool&) -> void can[Pool.Shutdown]
+extern pool_shutdown(pool: ThreadPool&) -> void can[Pool.Shutdown]
 
-def pool_submit1[A, R](pool: any ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending] can[Pool.Submit, Memory.Allocate, Abort.Panic]:
+def pool_submit1[A, R](pool: ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending] can[Pool.Submit, Memory.Allocate, Abort.Panic]:
 	task: Task[R, Pending] = zeroed
 	return move task
 
@@ -24,10 +24,10 @@ def task_group_new() -> TaskGroup:
 	group: TaskGroup = zeroed
 	return move group
 
-def task_group_add[R](group: any TaskGroup&, task: Task[R, Pending]) -> void can[Memory.Allocate, Abort.Panic]:
+def task_group_add[R](group: TaskGroup&, task: Task[R, Pending]) -> void can[Memory.Allocate, Abort.Panic]:
 	_ = move task
 
-def task_group_wait_all(group: any TaskGroup&) -> void can[Pool.WaitAll]:
+def task_group_wait_all(group: TaskGroup&) -> void can[Pool.WaitAll]:
 	pass
 `
 
@@ -558,7 +558,7 @@ def fold_frozen() -> i64:
 
 func TestGenerateLLVMIRUsesIndexReadHelpersForMixedFrozenPackedPayloadMatchInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
-	Hold(value: any i32&)
+	Hold(value: i32&)
 	End
 
 def fold_frozen_mixed() -> int:
@@ -1505,7 +1505,7 @@ func TestGenerateLLVMIRUsesIndexReadHelpersForMixedFrozenRepeatedCommonFieldRead
 	src := `packed enum Expr:
 	common:
 		span: int
-	Hold(value: any i32&)
+	Hold(value: i32&)
 	End
 
 def fold_common_frozen_mixed() -> int:
@@ -1537,7 +1537,7 @@ func TestGenerateLLVMIRUsesIndexReadHelpersForMixedFrozenMatchedPayloadRepeatedC
 	common:
 		span: int
 	Int(value: int)
-	Hold(value: any i32&)
+	Hold(value: i32&)
 	Wrap(child: Expr)
 
 def fold_child_common_frozen_mixed() -> int:
@@ -1578,7 +1578,7 @@ func TestGenerateLLVMIRUsesIndexReadHelpersForHelperIndexedFrozenMatchedPayloadR
 	common:
 		span: int
 	Int(value: int)
-	Hold(value: any i32&)
+	Hold(value: i32&)
 	Wrap(child: Expr)
 
 struct Box:
@@ -1629,7 +1629,7 @@ func TestGenerateLLVMIRUsesIndexReadHelpersForNestedRebasedHelperIndexedFrozenMa
 	common:
 		span: int
 	Int(value: int)
-	Hold(value: any i32&)
+	Hold(value: i32&)
 	Wrap(child: Expr)
 
 struct Box:
@@ -1683,7 +1683,7 @@ func TestGenerateLLVMIRUsesIndexReadHelpersForNestedWildcardRebasedHelperIndexed
 	common:
 		span: int
 	Int(value: int)
-	Hold(value: any i32&)
+	Hold(value: i32&)
 	Wrap(child: Expr)
 
 struct Box:

@@ -188,9 +188,6 @@ func (p *Parser) parseErrorSetItem() ast.ErrorTagExpr {
 
 func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string, string, string) {
 	switch p.peek() {
-	case lexer.TOKEN_ANY:
-		tok := p.advance()
-		return ast.RefStorageAny, true, tok.Text, "", ""
 	case lexer.TOKEN_HEAP:
 		tok := p.advance()
 		return ast.RefStorageHeap, true, tok.Text, "", ""
@@ -201,7 +198,7 @@ func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string, strin
 		tok := p.advance()
 		return ast.RefStorageStatic, true, tok.Text, "", ""
 	default:
-		if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text != "can" && p.tokens[p.pos+1].Text != "effects" && p.tokens[p.pos+1].Text != "ensures" {
+		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text != "any" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text != "can" && p.tokens[p.pos+1].Text != "effects" && p.tokens[p.pos+1].Text != "ensures" {
 			name := p.advance().Text
 			return ast.RefStorageAny, true, name, "", name
 		}
@@ -271,7 +268,7 @@ func (p *Parser) parseGenericTypeArgExpr() ast.TypeExpr {
 		pos := p.cur().Pos
 		p.advance()
 		return &ast.RefStateLiteralTypeExpr{Position: pos, State: ast.RefStateNull}
-	case lexer.TOKEN_ANY, lexer.TOKEN_HEAP, lexer.TOKEN_STACK, lexer.TOKEN_STATIC:
+	case lexer.TOKEN_HEAP, lexer.TOKEN_STACK, lexer.TOKEN_STATIC:
 		if p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT {
 			pos := p.cur().Pos
 			switch p.advance().Kind {
@@ -1604,7 +1601,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 				var target ast.TypeExpr = &ast.NamedType{Position: castPos, Name: field}
 				target, _ = p.parseRefTypeSuffixes(target, castPos, ast.RefStorageAny, false, "", "")
 				if p.peek() == lexer.TOKEN_LPAREN {
-					p.errorf("legacy reference cast syntax is no longer supported; use .cast[any T&] with an explicit target type instead")
+					p.errorf("legacy reference cast syntax is no longer supported; use .cast[T&] with an explicit target type instead")
 					p.advance()
 					p.expect(lexer.TOKEN_RPAREN)
 					expr = &ast.CastExpr{Position: castPos, Operand: expr, Target: target}

@@ -392,9 +392,9 @@ def frontend_case_region_alloc_syntax() -> bool:
     can Memory.Allocate, Abort.Panic:
         region scratch(4096)
         a: mutable Arena& = scratch.ref[mutable Arena&]
-        bytes: u8[59] = [114, 101, 103, 105, 111, 110, 32, 112, 97, 114, 115, 101, 10, 118, 97, 108, 117, 101, 58, 32, 97, 110, 121, 32, 105, 51, 50, 38, 32, 61, 32, 110, 101, 119, 91, 112, 97, 114, 115, 101, 93, 32, 49, 10, 100, 101, 115, 116, 114, 111, 121, 32, 112, 97, 114, 115, 101, 10, 0]
+        bytes: u8[55] = [114, 101, 103, 105, 111, 110, 32, 112, 97, 114, 115, 101, 10, 118, 97, 108, 117, 101, 58, 32, 105, 51, 50, 38, 32, 61, 32, 110, 101, 119, 91, 112, 97, 114, 115, 101, 93, 32, 49, 10, 100, 101, 115, 116, 114, 111, 121, 32, 112, 97, 114, 115, 101, 10, 0]
         tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, bytes[0].ref[u8&])
-        ok: bool = frontend_expect_token_count(tokens, 19) and frontend_expect_kind(tokens, 0, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 1, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 2, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 3, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 4, FrontendTokenKind.Colon) and frontend_expect_kind(tokens, 5, FrontendTokenKind.Any) and frontend_expect_kind(tokens, 6, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 7, FrontendTokenKind.Ampersand) and frontend_expect_kind(tokens, 8, FrontendTokenKind.Assign) and frontend_expect_kind(tokens, 9, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 10, FrontendTokenKind.LBracket) and frontend_expect_kind(tokens, 11, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 12, FrontendTokenKind.RBracket) and frontend_expect_kind(tokens, 13, FrontendTokenKind.IntLit) and frontend_expect_kind(tokens, 14, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 15, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 16, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 17, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 18, FrontendTokenKind.Eof)
+        ok: bool = frontend_expect_token_count(tokens, 18) and frontend_expect_kind(tokens, 0, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 1, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 2, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 3, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 4, FrontendTokenKind.Colon) and frontend_expect_kind(tokens, 5, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 6, FrontendTokenKind.Ampersand) and frontend_expect_kind(tokens, 7, FrontendTokenKind.Assign) and frontend_expect_kind(tokens, 8, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 9, FrontendTokenKind.LBracket) and frontend_expect_kind(tokens, 10, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 11, FrontendTokenKind.RBracket) and frontend_expect_kind(tokens, 12, FrontendTokenKind.IntLit) and frontend_expect_kind(tokens, 13, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 14, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 15, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 16, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 17, FrontendTokenKind.Eof)
         destroy scratch
         return ok
 
@@ -411,14 +411,13 @@ def frontend_case_with_and_context_keywords() -> bool:
 
 
 def frontend_case_lookup_keyword_table() -> bool:
-    entries: FrontendKeywordEntry[46] = [
+    entries: FrontendKeywordEntry[45] = [
         FrontendKeywordEntry("as", FrontendTokenKind.As),
         FrontendKeywordEntry("if", FrontendTokenKind.If),
         FrontendKeywordEntry("in", FrontendTokenKind.In),
         FrontendKeywordEntry("or", FrontendTokenKind.Or),
         FrontendKeywordEntry("to", FrontendTokenKind.To),
         FrontendKeywordEntry("and", FrontendTokenKind.And),
-        FrontendKeywordEntry("any", FrontendTokenKind.Any),
         FrontendKeywordEntry("catch", FrontendTokenKind.Catch),
         FrontendKeywordEntry("def", FrontendTokenKind.Def),
         FrontendKeywordEntry("not", FrontendTokenKind.Not),
@@ -459,7 +458,7 @@ def frontend_case_lookup_keyword_table() -> bool:
         FrontendKeywordEntry("defin", FrontendTokenKind.Ident),
         FrontendKeywordEntry("truer", FrontendTokenKind.Ident)
     ]
-    return frontend_expect_lookup_keyword_entries(entries[0].ref[FrontendKeywordEntry&], 46)
+    return frontend_expect_lookup_keyword_entries(entries[0].ref[FrontendKeywordEntry&], 45)
 
 
 def frontend_case_kind_only_keyword_path() -> bool:

@@ -142,8 +142,8 @@ func TestAnalyzeCollectsOptimizationFactsForShapeBackedCollections(t *testing.T)
 func TestAnalyzeMarksFreshRegionAllocationsAsExclusive(t *testing.T) {
 	src := `def inspect(seed: i32) -> i32:
 	region scratch(1024)
-	slot: any i32& = new[scratch] seed
-	alias: any i32& = slot
+	slot: i32& = new[scratch] seed
+	alias: i32& = slot
 	return alias[0]
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_region_alloc_exclusive.llcontext", src)
@@ -167,28 +167,28 @@ func TestAnalyzeMarksFreshRegionAllocationsAsExclusive(t *testing.T) {
 
 func TestAnalyzePreservesOptimizationFactsThroughRuntimeViewHelpers(t *testing.T) {
 	src := `struct Arena:
-	begin: mutable any void&?
-	end: mutable any void&?
+	begin: mutable void&?
+	end: mutable void&?
 
 struct DynArray[T]:
-	items: mutable any T&?
+	items: mutable T&?
 	count: mutable usize
 	capacity: mutable usize
 
 struct DynArrayView:
-	data: mutable any void&?
+	data: mutable void&?
 	len: mutable usize
 	elem_size: mutable usize
 
 struct StringView:
-	data: mutable any u8&
+	data: mutable u8&
 	len: mutable i64
 
-def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
+		return DynArrayView(values.items.cast[void&], values.count, sizeof(T))
 	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
@@ -196,12 +196,12 @@ def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]
 	_ = end
 	return view
 
-def arena_da_from_view[T](a: any Arena&, view: dview[T]) -> darray[T, shape_out]:
+def arena_da_from_view[T](a: Arena&, view: dview[T]) -> darray[T, shape_out]:
 	_ = a
 	_ = view
 	return zeroed
 
-def string_view(value: any u8&?, start: i64, end: i64) -> StringView:
+def string_view(value: u8&?, start: i64, end: i64) -> StringView:
 	_ = value
 	_ = start
 	_ = end
@@ -212,7 +212,7 @@ def string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
 	_ = end
 	return view
 
-def string_view_copy(view: StringView) -> any u8&:
+def string_view_copy(view: StringView) -> u8&:
 	return view.data
 
 def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
@@ -229,7 +229,7 @@ def ctx_string_slice(value: dstr[shape_in], start: i64, end: i64) -> dstr[shape_
 	_ = end
 	return value
 
-def inspect(a: any Arena&, values: any darray[i32, row]&, other: any darray[i32, row]&, text: dstr[row]) -> int:
+def inspect(a: Arena&, values: darray[i32, row]&, other: darray[i32, row]&, text: dstr[row]) -> int:
 	whole_a: dview[i32] = arena_da_view(values, 0, values.count)
 	whole_b: dview[i32] = arena_da_view(other, 0, other.count)
 	sub_a: dview[i32] = arena_da_view_slice(whole_a, 1, 3)
@@ -434,10 +434,10 @@ def inspect(owner: Arena) -> i32:
 
 func TestAnalyzeInfersDisjointnessForNonOverlappingViewsAndFreshAllocations(t *testing.T) {
 	src := `struct StringView:
-	data: mutable any u8&
+	data: mutable u8&
 	len: mutable i64
 
-def string_view(value: any u8&?, start: i64, end: i64) -> StringView:
+def string_view(value: u8&?, start: i64, end: i64) -> StringView:
 	_ = value
 	_ = start
 	_ = end
@@ -528,20 +528,20 @@ def inspect(text: dstr[row], buf: array[i32, 8]) -> int:
 
 func TestAnalyzeInfersDisjointnessForDViewSplitHelpers(t *testing.T) {
 	src := `struct DynArray[T]:
-	items: mutable any T&?
+	items: mutable T&?
 	count: mutable usize
 	capacity: mutable usize
 
 struct DynArrayView:
-	data: mutable any void&?
+	data: mutable void&?
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
+		return DynArrayView(values.items.cast[void&], values.count, sizeof(T))
 	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_view_prefix[T](view: dview[T], end: usize) -> dview[T]:
@@ -552,7 +552,7 @@ def arena_da_view_suffix[T](view: dview[T], start: usize) -> dview[T]:
 	_ = start
 	return view
 
-def inspect(values: any darray[i32, row]&) -> int:
+def inspect(values: darray[i32, row]&) -> int:
 	base: dview[i32] = arena_da_view(values, 0, values.count)
 	prefix: dview[i32] = arena_da_view_prefix(base, 2)
 	suffix: dview[i32] = arena_da_view_suffix(base, 2)
@@ -584,20 +584,20 @@ def inspect(values: any darray[i32, row]&) -> int:
 
 func TestAnalyzeInfersEqualExtentSizeForSplitDViews(t *testing.T) {
 	src := `struct DynArray[T]:
-	items: mutable any T&?
+	items: mutable T&?
 	count: mutable usize
 	capacity: mutable usize
 
 struct DynArrayView:
-	data: mutable any void&?
+	data: mutable void&?
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
+		return DynArrayView(values.items.cast[void&], values.count, sizeof(T))
 	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]:
@@ -605,7 +605,7 @@ def arena_da_view_slice[T](view: dview[T], start: usize, end: usize) -> dview[T]
 	_ = end
 	return view
 
-def inspect(values: any darray[i32, 4]&) -> int:
+def inspect(values: darray[i32, 4]&) -> int:
 	base: dview[i32] = arena_da_view(values, 0, 4)
 	left: dview[i32] = arena_da_view_slice(base, 0, 2)
 	right: dview[i32] = arena_da_view_slice(base, 2, 4)
@@ -632,23 +632,23 @@ def inspect(values: any darray[i32, 4]&) -> int:
 
 func TestAnalyzeInfersFactsForDirectDViewSliceSyntax(t *testing.T) {
 	src := `struct DynArray[T]:
-	items: mutable any T&?
+	items: mutable T&?
 	count: mutable usize
 	capacity: mutable usize
 
 struct DynArrayView:
-	data: mutable any void&?
+	data: mutable void&?
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
+		return DynArrayView(values.items.cast[void&], values.count, sizeof(T))
 	return DynArrayView(null, 0, sizeof(T))
 
-def inspect(values: any darray[i32, 4]&) -> int:
+def inspect(values: darray[i32, 4]&) -> int:
 	base: dview[i32] = arena_da_view(values, 0, 4)
 	left: dview[i32] = base[0:2]
 	right: dview[i32] = base[2:4]
@@ -685,7 +685,7 @@ def inspect(values: any darray[i32, 4]&) -> int:
 
 func TestAnalyzePreservesOptimizationFactsThroughStandardViewSliceHelperFieldProjectionExpressions(t *testing.T) {
 	src := `struct DynArrayView:
-	data: mutable any void&?
+	data: mutable void&?
 	len: mutable usize
 	elem_size: mutable usize
 
@@ -732,7 +732,7 @@ def inspect(values: array[i32, 8]) -> int:
 
 func TestAnalyzePreservesFrozenPackedStoreProvenanceThroughStandardViewSliceHelperFieldProjectionExpressions(t *testing.T) {
 	src := `struct DynArrayView:
-	data: mutable any void&?
+	data: mutable void&?
 	len: mutable usize
 	elem_size: mutable usize
 
@@ -784,7 +784,7 @@ def inspect(owner: Arena) -> int:
 func TestAnalyzeMarksValuesDependingOnlyOnFrozenPackedStores(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)
-	Hold(value: any i32&)
+	Hold(value: i32&)
 
 struct Box:
 	node: Expr
@@ -969,7 +969,7 @@ func TestAnalyzePreservesFrozenPackedStoreProvenanceThroughTryExpressions(t *tes
 
 packed enum Expr:
 	Int(value: int)
-	Hold(value: any i32&)
+	Hold(value: i32&)
 
 def maybe_take(node: Expr, fail: bool) -> Expr error[ProbeError]:
 	if fail:
@@ -1058,7 +1058,7 @@ def inspect(owner: Arena) -> int error[ProbeError]:
 func TestAnalyzePreservesFrozenPackedStoreProvenanceThroughUnwrapElseExpressions(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)
-	Hold(value: any i32&)
+	Hold(value: i32&)
 
 def inspect(owner: Arena) -> int:
 	region scratch(1024)
@@ -1138,7 +1138,7 @@ def inspect(owner: Arena) -> int:
 func TestAnalyzePreservesFrozenPackedStoreProvenanceThroughTernaryExpressions(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)
-	Hold(value: any i32&)
+	Hold(value: i32&)
 
 def inspect(owner: Arena, pick_left: bool) -> int:
 	region scratch(1024)
@@ -1365,7 +1365,7 @@ func TestAnalyzePreservesMixedFrozenPackedStoreDepsThroughPackedMatchBinders(t *
 	common:
 		span: int
 	Int(value: int)
-	Hold(value: any i32&)
+	Hold(value: i32&)
 	Wrap(child: Expr)
 
 def inspect(owner: Arena) -> int:
@@ -1623,7 +1623,7 @@ func TestAnalyzePreservesMixedFrozenPackedStoreDepsThroughHelperIndexedFieldMatc
 	common:
 		span: int
 	Int(value: int)
-	Hold(value: any i32&)
+	Hold(value: i32&)
 	Wrap(child: Expr)
 
 
@@ -1860,7 +1860,7 @@ func TestAnalyzePreservesOptimizationFactsThroughDirectIndexedExpressions(t *tes
 func TestAnalyzePreservesFrozenPackedStoreProvenanceThroughDirectIndexedExpressions(t *testing.T) {
 	src := `packed enum Expr:
 	Int(value: int)
-	Hold(value: any i32&)
+	Hold(value: i32&)
 
 def inspect(owner: Arena) -> int:
 	region scratch(1024)

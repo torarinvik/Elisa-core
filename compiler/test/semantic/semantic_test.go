@@ -15,9 +15,9 @@ import (
 )
 
 const parallelForConcurrencyPrelude = `extern pool_new(workers: usize) -> ThreadPool can[Pool.Create]
-extern pool_shutdown(pool: any ThreadPool&) -> void can[Pool.Shutdown]
+extern pool_shutdown(pool: ThreadPool&) -> void can[Pool.Shutdown]
 
-def pool_submit1[A, R](pool: any ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending] can[Pool.Submit, Memory.Allocate, Abort.Panic]:
+def pool_submit1[A, R](pool: ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending] can[Pool.Submit, Memory.Allocate, Abort.Panic]:
 	task: Task[R, Pending] = zeroed
 	return move task
 
@@ -25,10 +25,10 @@ def task_group_new() -> TaskGroup:
 	group: TaskGroup = zeroed
 	return move group
 
-def task_group_add[R](group: any TaskGroup&, task: Task[R, Pending]) -> void can[Memory.Allocate, Abort.Panic]:
+def task_group_add[R](group: TaskGroup&, task: Task[R, Pending]) -> void can[Memory.Allocate, Abort.Panic]:
 	_ = move task
 
-def task_group_wait_all(group: any TaskGroup&) -> void can[Pool.WaitAll]:
+def task_group_wait_all(group: TaskGroup&) -> void can[Pool.WaitAll]:
 	pass
 `
 
@@ -175,8 +175,8 @@ func TestAnalyzeAsCastUsesExistingCastSemantics(t *testing.T) {
 	src := `struct Arena:
     value: i64
 
-def keep(owner: Arena) -> mutable any Arena&:
-    return &owner as mutable any Arena&
+def keep(owner: Arena) -> mutable Arena&:
+    return &owner as mutable Arena&
 `
 
 	result, errs := parseAndAnalyze(t, "as_cast.llcontext", src)
@@ -195,7 +195,7 @@ def keep(owner: Arena) -> mutable any Arena&:
 	if cast.Origin != ast.CastExprOriginAsSyntax {
 		t.Fatalf("expected as-syntax origin, got %v", cast.Origin)
 	}
-	requireExprTypeString(t, result, cast, "any mutable Arena&")
+	requireExprTypeString(t, result, cast, "mutable Arena&")
 }
 
 func TestAnalyzeCatchExprOverErrorUnion(t *testing.T) {
@@ -315,10 +315,10 @@ func TestAnalyzeValidInlineProgram(t *testing.T) {
 	src := `struct Box:
     value: mutable int
 
-extern make_box() -> any Box&?
+extern make_box() -> Box&?
 
 def read_box() -> int:
-	box: mutable any Box&? = make_box()
+	box: mutable Box&? = make_box()
     if box == null:
         return 0
     box.value <- 7
@@ -377,11 +377,11 @@ func TestAnalyzeRejectsAssigningFunctionWithNarrowerParamType(t *testing.T) {
 	src := `struct Box:
 	value: int
 
-def only_nonnull(box: any Box&) -> int:
+def only_nonnull(box: Box&) -> int:
 	return box.value
 
 def bad() -> int:
-	wider: func(any Box&?) -> int = only_nonnull
+	wider: func(Box&?) -> int = only_nonnull
 	return wider(null)
 `
 	_, errs := parseAndAnalyze(t, "function_param_contravariance_reject.llcontext", src)
@@ -398,15 +398,15 @@ func TestAnalyzeAcceptsAssigningFunctionWithBroaderParamType(t *testing.T) {
 	src := `struct Box:
 	value: int
 
-def allow_null(box: any Box&?) -> int:
+def allow_null(box: Box&?) -> int:
 	if box == null:
 		return 0
 	return box.value
 
 def ok() -> int:
 	region scratch(256)
-	box: any Box& = new[scratch] Box(7)
-	narrower: func(any Box&) -> int = allow_null
+	box: Box& = new[scratch] Box(7)
+	narrower: func(Box&) -> int = allow_null
 	return narrower(box)
 `
 	result, errs := parseAndAnalyze(t, "function_param_contravariance_ok.llcontext", src)
@@ -650,7 +650,7 @@ def take_alive(player: Player[Alive]) -> int:
 	return player.health
 
 def bad(player: mutable Player[Alive]) -> int:
-	alias: any Player[Alive]& = (&player).cast[any Player[Alive]&]
+	alias: Player[Alive]& = (&player).cast[Player[Alive]&]
 	alias.health <- 0
 	return take_alive(player)
 `
@@ -675,11 +675,11 @@ func TestAnalyzeRejectsUsingStaleDerivedStateAfterRefCallMutation(t *testing.T) 
 def take_alive(player: Player[Alive]) -> int:
 	return player.health
 
-def kill(player: any Player[Alive]& ) -> void:
+def kill(player: Player[Alive]& ) -> void:
 	player.health <- 0
 
 def bad(player: mutable Player[Alive]) -> int:
-	kill((&player).cast[any Player[Alive]&])
+	kill((&player).cast[Player[Alive]&])
 	return take_alive(player)
 `
 	_, errs := parseAndAnalyze(t, "derived_struct_state_ref_call_mutation_reject.llcontext", src)
@@ -706,11 +706,11 @@ struct Team:
 def take_alive(player: Player[Alive]) -> int:
 	return player.health
 
-def kill_team(team: any Team&) -> void:
+def kill_team(team: Team&) -> void:
 	team.player.health <- 0
 
 def bad(team: mutable Team) -> int:
-	kill_team((&team).cast[any Team&])
+	kill_team((&team).cast[Team&])
 	return take_alive(team.player)
 `
 	_, errs := parseAndAnalyze(t, "derived_struct_state_wrapper_ref_call_mutation_reject.llcontext", src)
@@ -757,7 +757,7 @@ func TestAnalyzeRejectsMutatingThroughReadonlyRefParam(t *testing.T) {
 		Ready when self.stage == 1
 		Failed when self.stage == 2
 
-def bad(job: any ParseJob[Pending]&) -> void:
+def bad(job: ParseJob[Pending]&) -> void:
 	job.checksum <- 7
 	job.stage <- 1
 `
@@ -769,7 +769,7 @@ def bad(job: any ParseJob[Pending]&) -> void:
 	if !strings.Contains(all, "cannot mutate through readonly ref") {
 		t.Fatalf("expected readonly ref mutation diagnostic, got:\n%s", all)
 	}
-	if !strings.Contains(all, "note: plain refs T& are readonly; use any mutable ParseJob[Pending]& if this reference should allow writes") {
+	if !strings.Contains(all, "note: plain refs T& are readonly; use mutable ParseJob[Pending]& if this reference should allow writes") {
 		t.Fatalf("expected readonly ref mutation hint, got:\n%s", all)
 	}
 }
@@ -778,10 +778,10 @@ func TestAnalyzeRejectsPassingReadonlyRefToMutableRefParamWithHint(t *testing.T)
 	src := `struct ParseJob:
 	stage: mutable int
 
-def finish_ok(job: mutable any ParseJob&) -> void:
+def finish_ok(job: mutable ParseJob&) -> void:
 	job.stage <- 1
 
-def bad(job: any ParseJob&) -> void:
+def bad(job: ParseJob&) -> void:
 	finish_ok(job)
 `
 	_, errs := parseAndAnalyze(t, "readonly_ref_arg_to_mutable_param_reject.llcontext", src)
@@ -792,7 +792,7 @@ def bad(job: any ParseJob&) -> void:
 	if !strings.Contains(all, "argument 1 to \"finish_ok\" expects mutable ParseJob&, got ParseJob&") {
 		t.Fatalf("expected mutable-ref call diagnostic, got:\n%s", all)
 	}
-	if !strings.Contains(all, "note: use any mutable ParseJob& here if the callee should be allowed to write through it") {
+	if !strings.Contains(all, "note: use mutable ParseJob& here if the callee should be allowed to write through it") {
 		t.Fatalf("expected mutable-ref call hint, got:\n%s", all)
 	}
 }
@@ -810,12 +810,12 @@ func TestAnalyzeRejectsUsingStaleReadyStateAfterParserRefCallMutation(t *testing
 def take_ready(job: ParseJob[Ready]) -> int:
 	return job.checksum
 
-def finish_ok(job: mutable any ParseJob[Pending]&) -> void:
+def finish_ok(job: mutable ParseJob[Pending]&) -> void:
 	job.checksum <- 7
 	job.stage <- 1
 
 def bad(job: mutable ParseJob[Pending]) -> int:
-	finish_ok((&job).cast[mutable any ParseJob[Pending]&])
+	finish_ok((&job).cast[mutable ParseJob[Pending]&])
 	return take_ready(job)
 `
 	_, errs := parseAndAnalyze(t, "derived_struct_state_parser_ref_call_mutation_reject.llcontext", src)
@@ -841,12 +841,12 @@ func TestAnalyzeAcceptsReprovingReadyStateAfterParserRefCallMutation(t *testing.
 def take_ready(job: ParseJob[Ready]) -> int:
 	return job.checksum
 
-def finish_ok(job: mutable any ParseJob[Pending]&) -> void:
+def finish_ok(job: mutable ParseJob[Pending]&) -> void:
 	job.checksum <- 7
 	job.stage <- 1
 
 def ok(job: mutable ParseJob[Pending]) -> int:
-	finish_ok((&job).cast[mutable any ParseJob[Pending]&])
+	finish_ok((&job).cast[mutable ParseJob[Pending]&])
 	if job is ParseJob[Ready]:
 		return take_ready(job)
 	return 0
@@ -869,11 +869,11 @@ func TestAnalyzeRejectsUsingStaleOpenStateAfterSocketCloseRefCall(t *testing.T) 
 def take_open(sock: Socket[Open]) -> int:
 	return sock.bytes_sent
 
-def close_socket(sock: mutable any Socket[Open]&) -> void:
+def close_socket(sock: mutable Socket[Open]&) -> void:
 	sock.fd <- -1
 
 def bad(sock: mutable Socket[Open]) -> int:
-	close_socket((&sock).cast[mutable any Socket[Open]&])
+	close_socket((&sock).cast[mutable Socket[Open]&])
 	return take_open(sock)
 `
 	_, errs := parseAndAnalyze(t, "derived_struct_state_socket_ref_call_mutation_reject.llcontext", src)
@@ -898,12 +898,12 @@ func TestAnalyzeRejectsUsingStaleInitializedStateAfterBufferInitRefCall(t *testi
 def take_initialized(buf: ScratchBuffer[Initialized]) -> int:
 	return buf.capacity - buf.used
 
-def init_buffer(buf: mutable any ScratchBuffer[Uninitialized]&) -> void:
+def init_buffer(buf: mutable ScratchBuffer[Uninitialized]&) -> void:
 	buf.capacity <- 64
 	buf.used <- 0
 
 def bad(buf: mutable ScratchBuffer[Uninitialized]) -> int:
-	init_buffer((&buf).cast[mutable any ScratchBuffer[Uninitialized]&])
+	init_buffer((&buf).cast[mutable ScratchBuffer[Uninitialized]&])
 	return take_initialized(buf)
 `
 	_, errs := parseAndAnalyze(t, "derived_struct_state_buffer_ref_call_mutation_reject.llcontext", src)
@@ -917,13 +917,13 @@ def bad(buf: mutable ScratchBuffer[Uninitialized]) -> int:
 }
 
 func TestAnalyzeFunctionTypePermissionsParticipateInMatching(t *testing.T) {
-	src := `extern puts(text: any u8&) -> int can[Console.Write]
+	src := `extern puts(text: u8&) -> int can[Console.Write]
 
-def invoke_writer(fn: func(any u8&) -> int can[Console.Write], text: any u8&) -> int can[Console.Write]:
+def invoke_writer(fn: func(u8&) -> int can[Console.Write], text: u8&) -> int can[Console.Write]:
     return fn(text)
 
 def run() -> int can[Console.Write]:
-	return invoke_writer(puts, "hello".cast[any u8&])
+	return invoke_writer(puts, "hello".cast[u8&])
 `
 	result, errs := parseAndAnalyze(t, "function_type_permissions.llcontext", src)
 	requireNoErrors(t, errs)
@@ -931,13 +931,13 @@ def run() -> int can[Console.Write]:
 }
 
 func TestAnalyzeAcceptsPermissionPolymorphicFunctionWrappers(t *testing.T) {
-	src := `extern puts(text: any u8&) -> int can[Console.Write]
+	src := `extern puts(text: u8&) -> int can[Console.Write]
 
-def invoke_writer[permission P](fn: func(any u8&) -> int can[P], text: any u8&) -> int can[P]:
+def invoke_writer[permission P](fn: func(u8&) -> int can[P], text: u8&) -> int can[P]:
     return fn(text)
 
 def run() -> int can[Console.Write]:
-	return invoke_writer(puts, "hello".cast[any u8&])
+	return invoke_writer(puts, "hello".cast[u8&])
 `
 	result, errs := parseAndAnalyze(t, "permission_polymorphic_function_wrapper.llcontext", src)
 	requireNoErrors(t, errs)
@@ -962,15 +962,15 @@ func TestAnalyzeAcceptsFunctionValueErasureCasts(t *testing.T) {
 	src := `def inc(value: i64) -> i64:
     return value + 1
 
-def call_erased(raw: any void&, value: i64) -> i64:
+def call_erased(raw: void&, value: i64) -> i64:
 	fn: func(i64) -> i64 = raw.cast[func(i64) -> i64]
     return fn(value)
 
 def run() -> i64:
-	raw: any void& = inc.cast[any void&]
+	raw: void& = inc.cast[void&]
 	bits: uintptr = raw.cast[uintptr]
 	fn: func(i64) -> i64 = bits.cast[func(i64) -> i64]
-	return call_erased(fn.cast[any void&], 40)
+	return call_erased(fn.cast[void&], 40)
 `
 	result, errs := parseAndAnalyze(t, "function_value_erasure_casts.llcontext", src)
 	requireNoErrors(t, errs)
@@ -1163,11 +1163,11 @@ def sum(value: MaybeInt) -> int:
 }
 
 func TestAnalyzeRejectsAwaitAfterTaskGroupTransfer(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
 extern pool_await(task: Task[i64, Pending]) -> i64
 
 def bad(group: mutable TaskGroup, task: Task[i64, Pending]) -> i64:
-	task_group_add((&group).cast[any TaskGroup&], move task)
+	task_group_add((&group).cast[TaskGroup&], move task)
     return await task
 `
 	_, errs := parseAndAnalyze(t, "consumed_task_handle_reject.llcontext", src)
@@ -1268,10 +1268,10 @@ def bad(holder: Holder) -> void:
 }
 
 func TestAnalyzeRejectsDroppedTaskGroupWithPendingTasksAtScopeExit(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
 
 def bad(group: mutable TaskGroup, task: Task[i64, Pending]) -> void:
-	task_group_add((&group).cast[any TaskGroup&], move task)
+	task_group_add((&group).cast[TaskGroup&], move task)
 `
 	_, errs := parseAndAnalyze(t, "drop_task_group_with_pending_tasks_scope_exit_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -1284,13 +1284,13 @@ def bad(group: mutable TaskGroup, task: Task[i64, Pending]) -> void:
 }
 
 func TestAnalyzeRejectsDroppedTaskGroupInsideAggregateWithPendingTasksAtScopeExit(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
 
 struct Holder:
     group: mutable TaskGroup
 
 def bad(holder: mutable Holder, task: Task[i64, Pending]) -> void:
-	task_group_add((&holder.group).cast[any TaskGroup&], move task)
+	task_group_add((&holder.group).cast[TaskGroup&], move task)
 `
 	_, errs := parseAndAnalyze(t, "drop_task_group_holder_with_pending_tasks_scope_exit_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -1303,11 +1303,11 @@ def bad(holder: mutable Holder, task: Task[i64, Pending]) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAdd(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 def ok(group: mutable TaskGroup, task: Task[i64, Pending]) -> void:
-	task_group_add((&group).cast[any TaskGroup&], move task)
+	task_group_add((&group).cast[TaskGroup&], move task)
     wait all group
 `
 	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_ok.llcontext", src)
@@ -1317,11 +1317,11 @@ def ok(group: mutable TaskGroup, task: Task[i64, Pending]) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaBorrowedAlias(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 def ok(group: mutable TaskGroup, task: Task[i64, Pending]) -> void:
-	group_ref: any TaskGroup& = (&group).cast[any TaskGroup&]
+	group_ref: TaskGroup& = (&group).cast[TaskGroup&]
 	task_group_add(group_ref, move task)
 	wait all group
 `
@@ -1332,14 +1332,14 @@ def ok(group: mutable TaskGroup, task: Task[i64, Pending]) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaProjectedBorrowedAlias(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 struct GroupHolder:
-	group_ref: any TaskGroup&
+	group_ref: TaskGroup&
 
 def ok(group: mutable TaskGroup, task: Task[i64, Pending]) -> void:
-	holder: GroupHolder = GroupHolder((&group).cast[any TaskGroup&])
+	holder: GroupHolder = GroupHolder((&group).cast[TaskGroup&])
 	task_group_add(holder.group_ref, move task)
 	wait all group
 `
@@ -1350,11 +1350,11 @@ def ok(group: mutable TaskGroup, task: Task[i64, Pending]) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaAggregateParamAlias(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 struct GroupHolder:
-	group_ref: any TaskGroup&
+	group_ref: TaskGroup&
 
 def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 	task_group_add(holder.group_ref, move task)
@@ -1403,11 +1403,11 @@ def bad(holder: mutable Holder) -> void:
 
 func TestAnalyzeAcceptsPoolShutdownAfterPoolNew(t *testing.T) {
 	src := `extern pool_new(workers: usize) -> ThreadPool
-extern pool_shutdown(pool: any ThreadPool&) -> void
+extern pool_shutdown(pool: ThreadPool&) -> void
 
 def ok() -> void:
 	pool: ThreadPool = pool_new(2)
-	pool_shutdown((&pool).cast[any ThreadPool&])
+	pool_shutdown((&pool).cast[ThreadPool&])
 `
 	result, errs := parseAndAnalyze(t, "pool_shutdown_after_pool_new_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -1417,9 +1417,9 @@ def ok() -> void:
 
 func TestAnalyzeRejectsSubmittingToThreadPoolAfterShutdown(t *testing.T) {
 	src := `extern pool_new(workers: usize) -> ThreadPool
-extern pool_shutdown(pool: any ThreadPool&) -> void
+extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -1428,8 +1428,8 @@ def work(value: i64) -> i64:
 
 def bad() -> void:
 	pool: ThreadPool = pool_new(2)
-	pool_shutdown((&pool).cast[any ThreadPool&])
-	_ = pool_submit1((&pool).cast[any ThreadPool&], work, 1)
+	pool_shutdown((&pool).cast[ThreadPool&])
+	_ = pool_submit1((&pool).cast[ThreadPool&], work, 1)
 `
 	_, errs := parseAndAnalyze(t, "thread_pool_submit_after_shutdown_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -1443,9 +1443,9 @@ def bad() -> void:
 
 func TestAnalyzeRejectsSubmittingToThreadPoolAfterShutdownViaBorrowedAlias(t *testing.T) {
 	src := `extern pool_new(workers: usize) -> ThreadPool
-extern pool_shutdown(pool: any ThreadPool&) -> void
+extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -1454,9 +1454,9 @@ def work(value: i64) -> i64:
 
 def bad() -> void:
 	pool: ThreadPool = pool_new(2)
-	pool_ref: any ThreadPool& = (&pool).cast[any ThreadPool&]
+	pool_ref: ThreadPool& = (&pool).cast[ThreadPool&]
 	pool_shutdown(pool_ref)
-	_ = pool_submit1((&pool).cast[any ThreadPool&], work, 1)
+	_ = pool_submit1((&pool).cast[ThreadPool&], work, 1)
 `
 	_, errs := parseAndAnalyze(t, "thread_pool_submit_after_alias_shutdown_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -1469,16 +1469,16 @@ def bad() -> void:
 }
 
 func TestAnalyzeRejectsReusingBorrowedThreadPoolParamAfterShutdown(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 def work(value: i64) -> i64:
 	return value + 1
 
-def bad(pool: any ThreadPool&) -> void:
+def bad(pool: ThreadPool&) -> void:
 	pool_shutdown(pool)
 	_ = pool_submit1(pool, work, 1)
 `
@@ -1494,23 +1494,23 @@ def bad(pool: any ThreadPool&) -> void:
 
 func TestAnalyzeRejectsSubmittingToThreadPoolAfterShutdownViaProjectedBorrowedAlias(t *testing.T) {
 	src := `extern pool_new(workers: usize) -> ThreadPool
-extern pool_shutdown(pool: any ThreadPool&) -> void
+extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: mutable any ThreadPool&
+	pool_ref: mutable ThreadPool&
 
 def work(value: i64) -> i64:
 	return value + 1
 
 def bad() -> void:
 	pool: ThreadPool = pool_new(2)
-	holder: PoolHolder = PoolHolder((&pool).cast[any ThreadPool&])
+	holder: PoolHolder = PoolHolder((&pool).cast[ThreadPool&])
 	pool_shutdown(holder.pool_ref)
-	_ = pool_submit1((&pool).cast[any ThreadPool&], work, 1)
+	_ = pool_submit1((&pool).cast[ThreadPool&], work, 1)
 `
 	_, errs := parseAndAnalyze(t, "thread_pool_submit_after_projected_alias_shutdown_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -1523,19 +1523,19 @@ def bad() -> void:
 }
 
 func TestAnalyzeRejectsReusingReassignedProjectedBorrowedThreadPoolAliasAfterShutdown(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: mutable any ThreadPool&
+	pool_ref: mutable ThreadPool&
 
 def work(value: i64) -> i64:
 	return value + 1
 
-def bad(left: any ThreadPool&, right: any ThreadPool&) -> void:
+def bad(left: ThreadPool&, right: ThreadPool&) -> void:
 	holder: mutable PoolHolder = PoolHolder(left)
 	holder.pool_ref <- right
 	_ = pool_submit1(left, work, 1)
@@ -1553,14 +1553,14 @@ def bad(left: any ThreadPool&, right: any ThreadPool&) -> void:
 }
 
 func TestAnalyzeRejectsReusingAggregateThreadPoolParamFieldAfterShutdown(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: any ThreadPool&
+	pool_ref: ThreadPool&
 
 def work(value: i64) -> i64:
 	return value + 1
@@ -1580,14 +1580,14 @@ def bad(holder: PoolHolder) -> void:
 }
 
 func TestAnalyzeRejectsReusingMoveBoundBorrowedThreadPoolAliasAfterShutdown(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: any ThreadPool&
+	pool_ref: ThreadPool&
 
 def work(value: i64) -> i64:
 	return value + 1
@@ -1608,23 +1608,23 @@ def bad(holder: PoolHolder) -> void:
 }
 
 func TestAnalyzeRejectsReusingHelperReturnedBorrowedThreadPoolAliasAfterShutdown(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: any ThreadPool&
+	pool_ref: ThreadPool&
 
-def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+def get_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.pool_ref
 
 def work(value: i64) -> i64:
 	return value + 1
 
 def bad(holder: PoolHolder) -> void:
-	pool_ref: any ThreadPool& = get_pool_ref(holder)
+	pool_ref: ThreadPool& = get_pool_ref(holder)
 	pool_shutdown(pool_ref)
 	_ = pool_submit1(holder.pool_ref, work, 1)
 `
@@ -1639,14 +1639,14 @@ def bad(holder: PoolHolder) -> void:
 }
 
 func TestAnalyzeRejectsReusingHelperReturnedAggregateBorrowedThreadPoolAliasAfterShutdown(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: any ThreadPool&
+	pool_ref: ThreadPool&
 
 def keep_holder(holder: PoolHolder) -> PoolHolder:
 	return holder
@@ -1670,11 +1670,11 @@ def bad(holder: PoolHolder) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaHelperReturnedAggregateAlias(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 struct GroupHolder:
-	group_ref: any TaskGroup&
+	group_ref: TaskGroup&
 
 def keep_holder(holder: GroupHolder) -> GroupHolder:
 	return holder
@@ -1691,26 +1691,26 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 }
 
 func TestAnalyzeRejectsReusingHigherOrderHelperReturnedBorrowedThreadPoolAliasAfterShutdown(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: any ThreadPool&
+	pool_ref: ThreadPool&
 
-def apply_getter(fn: func(PoolHolder) -> any ThreadPool&, holder: PoolHolder) -> any ThreadPool&:
+def apply_getter(fn: func(PoolHolder) -> ThreadPool&, holder: PoolHolder) -> ThreadPool&:
 	return fn(holder)
 
-def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+def get_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.pool_ref
 
 def work(value: i64) -> i64:
 	return value + 1
 
 def bad(holder: PoolHolder) -> void:
-	pool_ref: any ThreadPool& = apply_getter(get_pool_ref, holder)
+	pool_ref: ThreadPool& = apply_getter(get_pool_ref, holder)
 	pool_shutdown(pool_ref)
 	_ = pool_submit1(holder.pool_ref, work, 1)
 `
@@ -1725,11 +1725,11 @@ def bad(holder: PoolHolder) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaHigherOrderHelperReturnedAggregateAlias(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 struct GroupHolder:
-	group_ref: any TaskGroup&
+	group_ref: TaskGroup&
 
 def apply_keeper(fn: func(GroupHolder) -> GroupHolder, holder: GroupHolder) -> GroupHolder:
 	return fn(holder)
@@ -1749,27 +1749,27 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 }
 
 func TestAnalyzeRejectsReusingHigherOrderHelperReturnedBorrowedThreadPoolAliasAfterLocalCallbackBinding(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: any ThreadPool&
+	pool_ref: ThreadPool&
 
-def apply_getter(fn: func(PoolHolder) -> any ThreadPool&, holder: PoolHolder) -> any ThreadPool&:
-	local_fn: func(PoolHolder) -> any ThreadPool& = fn
+def apply_getter(fn: func(PoolHolder) -> ThreadPool&, holder: PoolHolder) -> ThreadPool&:
+	local_fn: func(PoolHolder) -> ThreadPool& = fn
 	return local_fn(holder)
 
-def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+def get_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.pool_ref
 
 def work(value: i64) -> i64:
 	return value + 1
 
 def bad(holder: PoolHolder) -> void:
-	pool_ref: any ThreadPool& = apply_getter(get_pool_ref, holder)
+	pool_ref: ThreadPool& = apply_getter(get_pool_ref, holder)
 	pool_shutdown(pool_ref)
 	_ = pool_submit1(holder.pool_ref, work, 1)
 `
@@ -1784,11 +1784,11 @@ def bad(holder: PoolHolder) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaHigherOrderHelperLocalCallbackBinding(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 struct GroupHolder:
-	group_ref: any TaskGroup&
+	group_ref: TaskGroup&
 
 def apply_keeper(fn: func(GroupHolder) -> GroupHolder, holder: GroupHolder) -> GroupHolder:
 	local_fn: func(GroupHolder) -> GroupHolder = fn
@@ -1809,19 +1809,19 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 }
 
 func TestAnalyzeRejectsReusingBorrowedThreadPoolAliasReturnedViaAggregateHeldCallbackAfterShutdown(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: any ThreadPool&
+	pool_ref: ThreadPool&
 
 struct PoolGetter:
-	fn: func(PoolHolder) -> any ThreadPool&
+	fn: func(PoolHolder) -> ThreadPool&
 
-def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+def get_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.pool_ref
 
 def work(value: i64) -> i64:
@@ -1829,7 +1829,7 @@ def work(value: i64) -> i64:
 
 def bad(holder: PoolHolder) -> void:
 	getter: PoolGetter = PoolGetter(get_pool_ref)
-	pool_ref: any ThreadPool& = getter.fn(holder)
+	pool_ref: ThreadPool& = getter.fn(holder)
 	pool_shutdown(pool_ref)
 	_ = pool_submit1(holder.pool_ref, work, 1)
 `
@@ -1844,11 +1844,11 @@ def bad(holder: PoolHolder) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaAggregateHeldCallback(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 struct GroupHolder:
-	group_ref: any TaskGroup&
+	group_ref: TaskGroup&
 
 struct GroupKeeper:
 	fn: func(GroupHolder) -> GroupHolder
@@ -1869,19 +1869,19 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 }
 
 func TestAnalyzeRejectsReusingBorrowedThreadPoolAliasReturnedViaMoveAsDestructuredCallbackAfterShutdown(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: any ThreadPool&
+	pool_ref: ThreadPool&
 
 struct PoolGetter:
-	fn: func(PoolHolder) -> any ThreadPool&
+	fn: func(PoolHolder) -> ThreadPool&
 
-def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+def get_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.pool_ref
 
 def work(value: i64) -> i64:
@@ -1890,7 +1890,7 @@ def work(value: i64) -> i64:
 def bad(holder: PoolHolder) -> void:
 	getter: PoolGetter = PoolGetter(get_pool_ref)
 	move getter as PoolGetter(callback_fn)
-	pool_ref: any ThreadPool& = callback_fn(holder)
+	pool_ref: ThreadPool& = callback_fn(holder)
 	pool_shutdown(pool_ref)
 	_ = pool_submit1(holder.pool_ref, work, 1)
 `
@@ -1905,11 +1905,11 @@ def bad(holder: PoolHolder) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaMoveAsDestructuredCallback(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 struct GroupHolder:
-	group_ref: any TaskGroup&
+	group_ref: TaskGroup&
 
 struct GroupKeeper:
 	fn: func(GroupHolder) -> GroupHolder
@@ -1931,19 +1931,19 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 }
 
 func TestAnalyzeRejectsReusingBorrowedThreadPoolAliasReturnedViaMoveAsVariantDestructuredCallbackAfterShutdown(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: any ThreadPool&
+	pool_ref: ThreadPool&
 
 enum PoolGetter:
-	Wrap(fn: func(PoolHolder) -> any ThreadPool&)
+	Wrap(fn: func(PoolHolder) -> ThreadPool&)
 
-def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+def get_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.pool_ref
 
 def work(value: i64) -> i64:
@@ -1952,7 +1952,7 @@ def work(value: i64) -> i64:
 def bad(holder: PoolHolder) -> void:
 	getter: PoolGetter = PoolGetter.Wrap(get_pool_ref)
 	move getter as PoolGetter.Wrap(callback_fn)
-	pool_ref: any ThreadPool& = callback_fn(holder)
+	pool_ref: ThreadPool& = callback_fn(holder)
 	pool_shutdown(pool_ref)
 	_ = pool_submit1(holder.pool_ref, work, 1)
 `
@@ -1967,11 +1967,11 @@ def bad(holder: PoolHolder) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaMoveAsVariantDestructuredCallback(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 struct GroupHolder:
-	group_ref: any TaskGroup&
+	group_ref: TaskGroup&
 
 enum GroupKeeper:
 	Wrap(fn: func(GroupHolder) -> GroupHolder)
@@ -1993,19 +1993,19 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 }
 
 func TestAnalyzeRejectsReusingBorrowedThreadPoolAliasReturnedViaEnumMatchBoundCallbackAfterShutdown(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: any ThreadPool&
+	pool_ref: ThreadPool&
 
 enum PoolGetter:
-	Wrap(fn: func(PoolHolder) -> any ThreadPool&)
+	Wrap(fn: func(PoolHolder) -> ThreadPool&)
 
-def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+def get_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.pool_ref
 
 def work(value: i64) -> i64:
@@ -2015,7 +2015,7 @@ def bad(holder: PoolHolder) -> void:
 	getter: PoolGetter = PoolGetter.Wrap(get_pool_ref)
 	match getter:
 		PoolGetter.Wrap(callback_fn):
-			pool_ref: any ThreadPool& = callback_fn(holder)
+			pool_ref: ThreadPool& = callback_fn(holder)
 			pool_shutdown(pool_ref)
 			_ = pool_submit1(holder.pool_ref, work, 1)
 `
@@ -2030,11 +2030,11 @@ def bad(holder: PoolHolder) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaEnumMatchBoundCallback(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 struct GroupHolder:
-	group_ref: any TaskGroup&
+	group_ref: TaskGroup&
 
 enum GroupKeeper:
 	Wrap(fn: func(GroupHolder) -> GroupHolder)
@@ -2057,19 +2057,19 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 }
 
 func TestAnalyzeRejectsReusingBorrowedThreadPoolAliasReturnedViaPackedEnumMatchBoundCallbackAfterShutdown(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: any ThreadPool&
+	pool_ref: ThreadPool&
 
 packed enum PoolGetter:
-	Wrap(fn: func(PoolHolder) -> any ThreadPool&)
+	Wrap(fn: func(PoolHolder) -> ThreadPool&)
 
-def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+def get_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.pool_ref
 
 def work(value: i64) -> i64:
@@ -2081,7 +2081,7 @@ def bad(holder: PoolHolder) -> void:
 	getter: PoolGetter = new[store] PoolGetter.Wrap(fn: get_pool_ref)
 	match getter in store:
 		PoolGetter.Wrap(callback_fn):
-			pool_ref: any ThreadPool& = callback_fn(holder)
+			pool_ref: ThreadPool& = callback_fn(holder)
 			pool_shutdown(pool_ref)
 			_ = pool_submit1(holder.pool_ref, work, 1)
 `
@@ -2096,11 +2096,11 @@ def bad(holder: PoolHolder) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaPackedEnumMatchBoundCallback(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 struct GroupHolder:
-	group_ref: any TaskGroup&
+	group_ref: TaskGroup&
 
 packed enum GroupKeeper:
 	Wrap(fn: func(GroupHolder) -> GroupHolder)
@@ -2125,22 +2125,22 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 }
 
 func TestAnalyzeRejectsReusingBorrowedThreadPoolAliasReturnedViaEnumMatchBoundAggregateProjectedCallbackAfterShutdown(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: any ThreadPool&
+	pool_ref: ThreadPool&
 
 struct PoolGetter:
-	fn: func(PoolHolder) -> any ThreadPool&
+	fn: func(PoolHolder) -> ThreadPool&
 
 enum GetterBox:
 	Wrap(getter: PoolGetter)
 
-def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+def get_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.pool_ref
 
 def work(value: i64) -> i64:
@@ -2150,7 +2150,7 @@ def bad(holder: PoolHolder) -> void:
 	boxed: GetterBox = GetterBox.Wrap(getter: PoolGetter(get_pool_ref))
 	match boxed:
 		GetterBox.Wrap(wrapper):
-			pool_ref: any ThreadPool& = wrapper.fn(holder)
+			pool_ref: ThreadPool& = wrapper.fn(holder)
 			pool_shutdown(pool_ref)
 			_ = pool_submit1(holder.pool_ref, work, 1)
 `
@@ -2165,11 +2165,11 @@ def bad(holder: PoolHolder) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaEnumMatchBoundAggregateProjectedCallback(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 struct GroupHolder:
-	group_ref: any TaskGroup&
+	group_ref: TaskGroup&
 
 struct GroupKeeper:
 	fn: func(GroupHolder) -> GroupHolder
@@ -2195,22 +2195,22 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 }
 
 func TestAnalyzeRejectsReusingBorrowedThreadPoolAliasReturnedViaPackedEnumMatchBoundAggregateProjectedCallbackAfterShutdown(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: any ThreadPool&
+	pool_ref: ThreadPool&
 
 struct PoolGetter:
-	fn: func(PoolHolder) -> any ThreadPool&
+	fn: func(PoolHolder) -> ThreadPool&
 
 packed enum GetterBox:
 	Wrap(getter: PoolGetter)
 
-def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+def get_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.pool_ref
 
 def work(value: i64) -> i64:
@@ -2222,7 +2222,7 @@ def bad(holder: PoolHolder) -> void:
 	boxed: GetterBox = new[store] GetterBox.Wrap(getter: PoolGetter(get_pool_ref))
 	match boxed in store:
 		GetterBox.Wrap(wrapper):
-			pool_ref: any ThreadPool& = wrapper.fn(holder)
+			pool_ref: ThreadPool& = wrapper.fn(holder)
 			pool_shutdown(pool_ref)
 			_ = pool_submit1(holder.pool_ref, work, 1)
 `
@@ -2237,11 +2237,11 @@ def bad(holder: PoolHolder) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaPackedEnumMatchBoundAggregateProjectedCallback(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 struct GroupHolder:
-	group_ref: any TaskGroup&
+	group_ref: TaskGroup&
 
 struct GroupKeeper:
 	fn: func(GroupHolder) -> GroupHolder
@@ -2269,29 +2269,29 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 }
 
 func TestAnalyzeRejectsReusingHigherOrderHelperReturnedBorrowedThreadPoolAliasAfterAggregateCallbackParamProjection(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: any ThreadPool&
+	pool_ref: ThreadPool&
 
 struct PoolGetter:
-	fn: func(PoolHolder) -> any ThreadPool&
+	fn: func(PoolHolder) -> ThreadPool&
 
-def apply_getter(wrapper: PoolGetter, holder: PoolHolder) -> any ThreadPool&:
+def apply_getter(wrapper: PoolGetter, holder: PoolHolder) -> ThreadPool&:
 	return wrapper.fn(holder)
 
-def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+def get_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.pool_ref
 
 def work(value: i64) -> i64:
 	return value + 1
 
 def bad(holder: PoolHolder) -> void:
-	pool_ref: any ThreadPool& = apply_getter(PoolGetter(get_pool_ref), holder)
+	pool_ref: ThreadPool& = apply_getter(PoolGetter(get_pool_ref), holder)
 	pool_shutdown(pool_ref)
 	_ = pool_submit1(holder.pool_ref, work, 1)
 `
@@ -2306,11 +2306,11 @@ def bad(holder: PoolHolder) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaAggregateCallbackParamProjection(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 struct GroupHolder:
-	group_ref: any TaskGroup&
+	group_ref: TaskGroup&
 
 struct GroupKeeper:
 	fn: func(GroupHolder) -> GroupHolder
@@ -2333,31 +2333,31 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 }
 
 func TestAnalyzeRejectsReusingHigherOrderHelperReturnedBorrowedThreadPoolAliasAfterAggregateCallbackParamLocalAliasProjection(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: any ThreadPool&
+	pool_ref: ThreadPool&
 
 struct PoolGetter:
-	fn: func(PoolHolder) -> any ThreadPool&
+	fn: func(PoolHolder) -> ThreadPool&
 
-def apply_getter(wrapper: PoolGetter, holder: PoolHolder) -> any ThreadPool&:
+def apply_getter(wrapper: PoolGetter, holder: PoolHolder) -> ThreadPool&:
 	local_wrapper: PoolGetter = wrapper
 	alias_wrapper: PoolGetter = local_wrapper
 	return alias_wrapper.fn(holder)
 
-def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+def get_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.pool_ref
 
 def work(value: i64) -> i64:
 	return value + 1
 
 def bad(holder: PoolHolder) -> void:
-	pool_ref: any ThreadPool& = apply_getter(PoolGetter(get_pool_ref), holder)
+	pool_ref: ThreadPool& = apply_getter(PoolGetter(get_pool_ref), holder)
 	pool_shutdown(pool_ref)
 	_ = pool_submit1(holder.pool_ref, work, 1)
 `
@@ -2372,11 +2372,11 @@ def bad(holder: PoolHolder) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaAggregateCallbackParamLocalAliasProjection(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 struct GroupHolder:
-	group_ref: any TaskGroup&
+	group_ref: TaskGroup&
 
 struct GroupKeeper:
 	fn: func(GroupHolder) -> GroupHolder
@@ -2401,34 +2401,34 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 }
 
 func TestAnalyzeRejectsReusingHigherOrderHelperReturnedBorrowedThreadPoolAliasAfterMutableAggregateCallbackWrapperRebinding(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: any ThreadPool&
+	pool_ref: ThreadPool&
 
 struct PoolGetter:
-	fn: func(PoolHolder) -> any ThreadPool&
+	fn: func(PoolHolder) -> ThreadPool&
 
-def apply_getter(primary: PoolGetter, fallback: PoolGetter, holder: PoolHolder) -> any ThreadPool&:
+def apply_getter(primary: PoolGetter, fallback: PoolGetter, holder: PoolHolder) -> ThreadPool&:
 	local_wrapper: mutable PoolGetter = fallback
 	local_wrapper <- primary
 	return local_wrapper.fn(holder)
 
-def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+def get_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.pool_ref
 
-def fallback_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+def fallback_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.pool_ref
 
 def work(value: i64) -> i64:
 	return value + 1
 
 def bad(holder: PoolHolder) -> void:
-	pool_ref: any ThreadPool& = apply_getter(PoolGetter(get_pool_ref), PoolGetter(fallback_pool_ref), holder)
+	pool_ref: ThreadPool& = apply_getter(PoolGetter(get_pool_ref), PoolGetter(fallback_pool_ref), holder)
 	pool_shutdown(pool_ref)
 	_ = pool_submit1(holder.pool_ref, work, 1)
 `
@@ -2443,11 +2443,11 @@ def bad(holder: PoolHolder) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaMutableAggregateCallbackWrapperRebinding(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 struct GroupHolder:
-	group_ref: any TaskGroup&
+	group_ref: TaskGroup&
 
 struct GroupKeeper:
 	fn: func(GroupHolder) -> GroupHolder
@@ -2475,31 +2475,31 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 }
 
 func TestAnalyzeRejectsReusingHigherOrderHelperReturnedBorrowedThreadPoolAliasAfterMutableCallbackRebinding(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: any ThreadPool&
+	pool_ref: ThreadPool&
 
-def apply_getter(primary: func(PoolHolder) -> any ThreadPool&, fallback: func(PoolHolder) -> any ThreadPool&, holder: PoolHolder) -> any ThreadPool&:
-	local_fn: mutable func(PoolHolder) -> any ThreadPool& = fallback
+def apply_getter(primary: func(PoolHolder) -> ThreadPool&, fallback: func(PoolHolder) -> ThreadPool&, holder: PoolHolder) -> ThreadPool&:
+	local_fn: mutable func(PoolHolder) -> ThreadPool& = fallback
 	local_fn <- primary
 	return local_fn(holder)
 
-def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+def get_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.pool_ref
 
-def get_pool_ref_fallback(holder: PoolHolder) -> any ThreadPool&:
+def get_pool_ref_fallback(holder: PoolHolder) -> ThreadPool&:
 	return holder.pool_ref
 
 def work(value: i64) -> i64:
 	return value + 1
 
 def bad(holder: PoolHolder) -> void:
-	pool_ref: any ThreadPool& = apply_getter(get_pool_ref, get_pool_ref_fallback, holder)
+	pool_ref: ThreadPool& = apply_getter(get_pool_ref, get_pool_ref_fallback, holder)
 	pool_shutdown(pool_ref)
 	_ = pool_submit1(holder.pool_ref, work, 1)
 `
@@ -2514,11 +2514,11 @@ def bad(holder: PoolHolder) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaHigherOrderHelperMutableCallbackRebinding(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 struct GroupHolder:
-	group_ref: any TaskGroup&
+	group_ref: TaskGroup&
 
 def apply_keeper(primary: func(GroupHolder) -> GroupHolder, fallback: func(GroupHolder) -> GroupHolder, holder: GroupHolder) -> GroupHolder:
 	local_fn: mutable func(GroupHolder) -> GroupHolder = fallback
@@ -2543,35 +2543,35 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 }
 
 func TestAnalyzeRejectsReusingHigherOrderHelperReturnedBorrowedThreadPoolAliasAfterBranchMergedCallbackRebinding(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	left_pool_ref: any ThreadPool&
-	right_pool_ref: any ThreadPool&
+	left_pool_ref: ThreadPool&
+	right_pool_ref: ThreadPool&
 
-def apply_getter(flag: bool, primary: func(PoolHolder) -> any ThreadPool&, fallback: func(PoolHolder) -> any ThreadPool&, holder: PoolHolder) -> any ThreadPool&:
-	local_fn: mutable func(PoolHolder) -> any ThreadPool& = fallback
+def apply_getter(flag: bool, primary: func(PoolHolder) -> ThreadPool&, fallback: func(PoolHolder) -> ThreadPool&, holder: PoolHolder) -> ThreadPool&:
+	local_fn: mutable func(PoolHolder) -> ThreadPool& = fallback
 	if flag:
 		local_fn <- primary
 	else:
 		local_fn <- primary
 	return local_fn(holder)
 
-def get_left_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+def get_left_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.left_pool_ref
 
-def get_right_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+def get_right_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.right_pool_ref
 
 def work(value: i64) -> i64:
 	return value + 1
 
 def bad(holder: PoolHolder) -> void:
-	pool_ref: any ThreadPool& = apply_getter(true, get_left_pool_ref, get_right_pool_ref, holder)
+	pool_ref: ThreadPool& = apply_getter(true, get_left_pool_ref, get_right_pool_ref, holder)
 	pool_shutdown(pool_ref)
 	_ = pool_submit1(holder.left_pool_ref, work, 1)
 `
@@ -2586,29 +2586,29 @@ def bad(holder: PoolHolder) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaHigherOrderHelperBranchMergedCallbackRebinding(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 struct GroupHolder:
-	primary_group_ref: any TaskGroup&
-	fallback_group_ref: any TaskGroup&
+	primary_group_ref: TaskGroup&
+	fallback_group_ref: TaskGroup&
 
-def apply_getter(flag: bool, primary: func(GroupHolder) -> any TaskGroup&, fallback: func(GroupHolder) -> any TaskGroup&, holder: GroupHolder) -> any TaskGroup&:
-	local_fn: mutable func(GroupHolder) -> any TaskGroup& = fallback
+def apply_getter(flag: bool, primary: func(GroupHolder) -> TaskGroup&, fallback: func(GroupHolder) -> TaskGroup&, holder: GroupHolder) -> TaskGroup&:
+	local_fn: mutable func(GroupHolder) -> TaskGroup& = fallback
 	if flag:
 		local_fn <- primary
 	else:
 		local_fn <- primary
 	return local_fn(holder)
 
-def get_primary_group_ref(holder: GroupHolder) -> any TaskGroup&:
+def get_primary_group_ref(holder: GroupHolder) -> TaskGroup&:
 	return holder.primary_group_ref
 
-def get_fallback_group_ref(holder: GroupHolder) -> any TaskGroup&:
+def get_fallback_group_ref(holder: GroupHolder) -> TaskGroup&:
 	return holder.fallback_group_ref
 
 def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
-	group_ref: any TaskGroup& = apply_getter(true, get_primary_group_ref, get_fallback_group_ref, holder)
+	group_ref: TaskGroup& = apply_getter(true, get_primary_group_ref, get_fallback_group_ref, holder)
 	task_group_add(group_ref, move task)
 	wait all holder.primary_group_ref
 `
@@ -2619,34 +2619,34 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 }
 
 func TestAnalyzeRejectsReusingHigherOrderHelperReturnedBorrowedThreadPoolAliasAfterBranchMergedCallbackWithDifferentParamNames(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: any ThreadPool&
+	pool_ref: ThreadPool&
 
-def apply_getter(flag: bool, primary: func(PoolHolder) -> any ThreadPool&, fallback: func(PoolHolder) -> any ThreadPool&, holder: PoolHolder) -> any ThreadPool&:
-	local_fn: mutable func(PoolHolder) -> any ThreadPool& = fallback
+def apply_getter(flag: bool, primary: func(PoolHolder) -> ThreadPool&, fallback: func(PoolHolder) -> ThreadPool&, holder: PoolHolder) -> ThreadPool&:
+	local_fn: mutable func(PoolHolder) -> ThreadPool& = fallback
 	if flag:
 		local_fn <- primary
 	else:
 		local_fn <- fallback
 	return local_fn(holder)
 
-def get_pool_ref(holder: PoolHolder) -> any ThreadPool&:
+def get_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.pool_ref
 
-def get_pool_ref_alias(box: PoolHolder) -> any ThreadPool&:
+def get_pool_ref_alias(box: PoolHolder) -> ThreadPool&:
 	return box.pool_ref
 
 def work(value: i64) -> i64:
 	return value + 1
 
 def bad(holder: PoolHolder) -> void:
-	pool_ref: any ThreadPool& = apply_getter(true, get_pool_ref, get_pool_ref_alias, holder)
+	pool_ref: ThreadPool& = apply_getter(true, get_pool_ref, get_pool_ref_alias, holder)
 	pool_shutdown(pool_ref)
 	_ = pool_submit1(holder.pool_ref, work, 1)
 `
@@ -2661,28 +2661,28 @@ def bad(holder: PoolHolder) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaBranchMergedCallbacksWithDifferentParamNames(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 struct GroupHolder:
-	group_ref: any TaskGroup&
+	group_ref: TaskGroup&
 
-def apply_getter(flag: bool, primary: func(GroupHolder) -> any TaskGroup&, fallback: func(GroupHolder) -> any TaskGroup&, holder: GroupHolder) -> any TaskGroup&:
-	local_fn: mutable func(GroupHolder) -> any TaskGroup& = fallback
+def apply_getter(flag: bool, primary: func(GroupHolder) -> TaskGroup&, fallback: func(GroupHolder) -> TaskGroup&, holder: GroupHolder) -> TaskGroup&:
+	local_fn: mutable func(GroupHolder) -> TaskGroup& = fallback
 	if flag:
 		local_fn <- primary
 	else:
 		local_fn <- fallback
 	return local_fn(holder)
 
-def get_group_ref(holder: GroupHolder) -> any TaskGroup&:
+def get_group_ref(holder: GroupHolder) -> TaskGroup&:
 	return holder.group_ref
 
-def get_group_ref_alias(box: GroupHolder) -> any TaskGroup&:
+def get_group_ref_alias(box: GroupHolder) -> TaskGroup&:
 	return box.group_ref
 
 def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
-	group_ref: any TaskGroup& = apply_getter(true, get_group_ref, get_group_ref_alias, holder)
+	group_ref: TaskGroup& = apply_getter(true, get_group_ref, get_group_ref_alias, holder)
 	task_group_add(group_ref, move task)
 	wait all holder.group_ref
 `
@@ -2839,23 +2839,23 @@ func TestAnalyzeRejectsInvalidPackedCommonFieldStorageMode(t *testing.T) {
 }
 
 func TestAnalyzeRejectsReusingExternReturnedBorrowedThreadPoolAliasAfterShutdown(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: any ThreadPool&
+	pool_ref: ThreadPool&
 
 @borrows_return(holder.pool_ref)
-extern get_pool_ref(holder: PoolHolder) -> any ThreadPool&
+extern get_pool_ref(holder: PoolHolder) -> ThreadPool&
 
 def work(value: i64) -> i64:
 	return value + 1
 
 def bad(holder: PoolHolder) -> void:
-	pool_ref: any ThreadPool& = get_pool_ref(holder)
+	pool_ref: ThreadPool& = get_pool_ref(holder)
 	pool_shutdown(pool_ref)
 	_ = pool_submit1(holder.pool_ref, work, 1)
 `
@@ -2870,14 +2870,14 @@ def bad(holder: PoolHolder) -> void:
 }
 
 func TestAnalyzeRejectsReusingExternReturnedAggregateBorrowedThreadPoolAliasAfterShutdown(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: any ThreadPool&
+	pool_ref: ThreadPool&
 
 @borrows_return(holder)
 extern keep_holder(holder: PoolHolder) -> PoolHolder
@@ -2901,14 +2901,14 @@ def bad(holder: PoolHolder) -> void:
 }
 
 func TestAnalyzeRejectsReusingExternReturnedNestedBorrowedThreadPoolFieldAfterShutdown(t *testing.T) {
-	src := `extern pool_shutdown(pool: any ThreadPool&) -> void
+	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
-	pool_ref: any ThreadPool&
+	pool_ref: ThreadPool&
 
 struct PoolWrapper:
 	inner: PoolHolder
@@ -2935,11 +2935,11 @@ def bad(holder: PoolHolder) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaExternReturnedAggregateAlias(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 struct GroupHolder:
-	group_ref: any TaskGroup&
+	group_ref: TaskGroup&
 
 @borrows_return(holder)
 extern keep_holder(holder: GroupHolder) -> GroupHolder
@@ -2956,11 +2956,11 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaExternRebasedReturnedAggregateAlias(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 struct GroupHolder:
-	group_ref: any TaskGroup&
+	group_ref: TaskGroup&
 
 @borrows_return_rebased(items)
 extern sub_items(items: view[GroupHolder], start: usize, end: usize) -> view[GroupHolder]
@@ -2977,11 +2977,11 @@ def ok(items: view[GroupHolder], task: Task[i64, Pending]) -> void:
 }
 
 func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaExternFieldRebasedReturnedAggregateAlias(t *testing.T) {
-	src := `extern task_group_add(group: any TaskGroup&, task: Task[i64, Pending]) -> void
-extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_add(group: TaskGroup&, task: Task[i64, Pending]) -> void
+extern task_group_wait_all(group: TaskGroup&) -> void
 
 struct GroupHolder:
-	group_ref: any TaskGroup&
+	group_ref: TaskGroup&
 
 struct GroupWindow:
 	items: view[GroupHolder]
@@ -3002,12 +3002,12 @@ def ok(items: view[GroupHolder], task: Task[i64, Pending]) -> void:
 
 func TestAnalyzeRejectsDoubleThreadPoolShutdown(t *testing.T) {
 	src := `extern pool_new(workers: usize) -> ThreadPool
-extern pool_shutdown(pool: any ThreadPool&) -> void
+extern pool_shutdown(pool: ThreadPool&) -> void
 
 def bad() -> void:
 	pool: ThreadPool = pool_new(2)
-	pool_shutdown((&pool).cast[any ThreadPool&])
-	pool_shutdown((&pool).cast[any ThreadPool&])
+	pool_shutdown((&pool).cast[ThreadPool&])
+	pool_shutdown((&pool).cast[ThreadPool&])
 `
 	_, errs := parseAndAnalyze(t, "thread_pool_double_shutdown_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -3021,13 +3021,13 @@ def bad() -> void:
 
 func TestAnalyzeAcceptsReinitializingThreadPoolAfterShutdown(t *testing.T) {
 	src := `extern pool_new(workers: usize) -> ThreadPool
-extern pool_shutdown(pool: any ThreadPool&) -> void
+extern pool_shutdown(pool: ThreadPool&) -> void
 
 def ok() -> void:
 	pool: mutable ThreadPool = pool_new(2)
-	pool_shutdown((&pool).cast[any ThreadPool&])
+	pool_shutdown((&pool).cast[ThreadPool&])
 	pool <- pool_new(1)
-	pool_shutdown((&pool).cast[any ThreadPool&])
+	pool_shutdown((&pool).cast[ThreadPool&])
 `
 	result, errs := parseAndAnalyze(t, "thread_pool_reinitialize_after_shutdown_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -3065,7 +3065,7 @@ func TestAnalyzeRejectsReusingMovedTaskGroupOwner(t *testing.T) {
 }
 
 func TestAnalyzeAcceptsWaitAllSyntax(t *testing.T) {
-	src := `extern task_group_wait_all(group: any TaskGroup&) -> void
+	src := `extern task_group_wait_all(group: TaskGroup&) -> void
 
 def ok(group: mutable TaskGroup) -> void:
     wait all group
@@ -3077,8 +3077,8 @@ def ok(group: mutable TaskGroup) -> void:
 }
 
 func TestAnalyzeAcceptsNotifySyntax(t *testing.T) {
-	src := `extern notify_one(cv: any CondVar&) -> void
-extern notify_all(cv: any CondVar&) -> void
+	src := `extern notify_one(cv: CondVar&) -> void
+extern notify_all(cv: CondVar&) -> void
 
 def ok(cv: mutable CondVar, broadcast: bool) -> void:
     if broadcast:
@@ -3100,15 +3100,15 @@ func TestAnalyzeAcceptsAtomicRmwBuiltins(t *testing.T) {
 	AcqRel
 	SeqCst
 
-extern fetch_add(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
-extern fetch_sub(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
-extern fetch_or(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
-extern fetch_and(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
-extern fetch_xor(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
+extern fetch_add(slot: atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
+extern fetch_sub(slot: atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
+extern fetch_or(slot: atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
+extern fetch_and(slot: atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
+extern fetch_xor(slot: atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
 
 def ok(slot: mutable atomic[i64]) -> i64:
 	can Atomics.Rmw:
-		slot_ref: any atomic[i64]& = (&slot).cast[any atomic[i64]&]
+		slot_ref: atomic[i64]& = (&slot).cast[atomic[i64]&]
 		add: i64 = fetch_add(slot_ref, 1, MemoryOrder.AcqRel)
 		sub: i64 = fetch_sub(slot_ref, 2, MemoryOrder.AcqRel)
 		or_bits: i64 = fetch_or(slot_ref, 4, MemoryOrder.AcqRel)
@@ -3130,10 +3130,10 @@ func TestAnalyzeRejectsAtomicRmwOnBoolPayload(t *testing.T) {
 	AcqRel
 	SeqCst
 
-extern fetch_or(slot: any atomic[bool]&, value: bool, order: MemoryOrder) -> bool can[Atomics.Rmw]
+extern fetch_or(slot: atomic[bool]&, value: bool, order: MemoryOrder) -> bool can[Atomics.Rmw]
 
 def bad(slot: mutable atomic[bool]) -> bool can[Atomics.Rmw]:
-	slot_ref: any atomic[bool]& = (&slot).cast[any atomic[bool]&]
+	slot_ref: atomic[bool]& = (&slot).cast[atomic[bool]&]
 	return fetch_or(slot_ref, true, MemoryOrder.AcqRel)
 `
 	_, errs := parseAndAnalyze(t, "atomic_rmw_bool_reject.llcontext", src)
@@ -3154,10 +3154,10 @@ func TestAnalyzeRejectsAtomicRmwOnPointerPayload(t *testing.T) {
 	AcqRel
 	SeqCst
 
-extern fetch_xor(slot: any atomic[any u8&]&, value: any u8&, order: MemoryOrder) -> any u8& can[Atomics.Rmw]
+extern fetch_xor(slot: atomic[u8&]&, value: u8&, order: MemoryOrder) -> u8& can[Atomics.Rmw]
 
-def bad(slot: mutable atomic[any u8&], value: any u8&) -> any u8& can[Atomics.Rmw]:
-	slot_ref: any atomic[any u8&]& = (&slot).cast[any atomic[any u8&]&]
+def bad(slot: mutable atomic[u8&], value: u8&) -> u8& can[Atomics.Rmw]:
+	slot_ref: atomic[u8&]& = (&slot).cast[atomic[u8&]&]
 	return fetch_xor(slot_ref, value, MemoryOrder.AcqRel)
 `
 	_, errs := parseAndAnalyze(t, "atomic_rmw_pointer_reject.llcontext", src)
@@ -3171,15 +3171,15 @@ def bad(slot: mutable atomic[any u8&], value: any u8&) -> any u8& can[Atomics.Rm
 }
 
 func TestAnalyzeAcceptsLockSyntax(t *testing.T) {
-	src := `extern mutex_lock(mu: any Mutex&) -> MutexGuard[Held]
+	src := `extern mutex_lock(mu: Mutex&) -> MutexGuard[Held]
 extern mutex_unlock(g: MutexGuard[Held]) -> void
-extern cond_wait(cv: any CondVar&, g: MutexGuard[Held]) -> MutexGuard[Held]
+extern cond_wait(cv: CondVar&, g: MutexGuard[Held]) -> MutexGuard[Held]
 
 def ok(mu: mutable Mutex, cv: mutable CondVar, ready: bool) -> void:
 	can Sync.Lock, Sync.Unlock, Sync.Wait:
 		lock mu as g:
 			while not ready:
-				g <- cond_wait((&cv).cast[any CondVar&], move g)
+				g <- cond_wait((&cv).cast[CondVar&], move g)
 `
 	result, errs := parseAndAnalyze(t, "lock_scope_ok.llcontext", src)
 	requireNoErrors(t, errs)
@@ -3189,7 +3189,7 @@ def ok(mu: mutable Mutex, cv: mutable CondVar, ready: bool) -> void:
 
 func TestAnalyzeAcceptsPoolScopeSyntax(t *testing.T) {
 	src := `extern pool_new(workers: usize) -> ThreadPool
-extern pool_shutdown(pool: any ThreadPool&) -> void
+extern pool_shutdown(pool: ThreadPool&) -> void
 
 def ok() -> bool:
 	can Pool.Create, Pool.Shutdown:
@@ -3204,10 +3204,10 @@ def ok() -> bool:
 
 func TestAnalyzeAcceptsSubmitSyntaxInsidePoolScope(t *testing.T) {
 	src := `extern pool_new(workers: usize) -> ThreadPool
-extern pool_shutdown(pool: mutable any ThreadPool&) -> void
+extern pool_shutdown(pool: mutable ThreadPool&) -> void
 extern pool_await(task: Task[i64, Pending]) -> i64
 
-def pool_submit1(pool: mutable any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: mutable ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -3229,14 +3229,14 @@ def ok() -> i64:
 func TestAnalyzeAcceptsExplicitSubmitSyntaxOutsidePoolScope(t *testing.T) {
 	src := `extern pool_await(task: Task[i64, Pending]) -> i64
 
-def pool_submit1(pool: mutable any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: mutable ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 def work(value: i64) -> i64:
 	return value + 1
 
-def ok(pool: mutable any ThreadPool&) -> i64 can[Pool.Submit, Pool.Await]:
+def ok(pool: mutable ThreadPool&) -> i64 can[Pool.Submit, Pool.Await]:
 	task: Task[i64, Pending] = submit[pool] work(7)
 	return await task
 `
@@ -3328,11 +3328,11 @@ func TestAnalyzeRejectsReferencesToAffineContainingValues(t *testing.T) {
 	src := `struct Holder:
     thread: mutable Thread[i64, Joinable]
 
-def bad_param(holder: any Holder&) -> void:
+def bad_param(holder: Holder&) -> void:
     pass
 
 def bad_local(holder: Holder) -> void:
-    alias: any Holder& = &holder
+    alias: Holder& = &holder
     _ = alias
 `
 	_, errs := parseAndAnalyze(t, "affine_handle_refs_reject.llcontext", src)
@@ -4155,7 +4155,7 @@ func TestAnalyzeRejectsNullIntoNonNullRef(t *testing.T) {
     value: int
 
 def bad() -> void:
-    box: any Box& = null
+    box: Box& = null
 `
 	_, errs := parseAndAnalyze(t, "nonnull_ref_rejects_null.llcontext", src)
 	if len(errs) == 0 {
@@ -4170,15 +4170,15 @@ func TestAnalyzePointerTypestateBranches(t *testing.T) {
 	src := `struct Box:
     value: mutable int
 
-extern alloc_box() -> any Box&?
-extern sfree_box(box: any Box&) -> any Box!
+extern alloc_box() -> Box&?
+extern sfree_box(box: Box&) -> Box!
 
 def release_box() -> void:
-	box: mutable any Box&? = alloc_box()
+	box: mutable Box&? = alloc_box()
     if box != null:
         box as ! <- sfree_box(box)
 
-def missing_box() -> any Box!:
+def missing_box() -> Box!:
     return null
 `
 	_, errs := parseAndAnalyze(t, "pointer_typestate.llcontext", src)
@@ -4189,10 +4189,10 @@ func TestAnalyzeRejectsNullableFieldAccessWithoutProof(t *testing.T) {
 	src := `struct Box:
     value: mutable int
 
-extern maybe_box() -> any Box&?
+extern maybe_box() -> Box&?
 
 def bad() -> int:
-	box: any Box&? = maybe_box()
+	box: Box&? = maybe_box()
     return box.value
 `
 	_, errs := parseAndAnalyze(t, "nullable_field_access.llcontext", src)
@@ -4208,10 +4208,10 @@ func TestAnalyzeGuardClauseRefinesAfterReturn(t *testing.T) {
 	src := `struct Box:
     value: mutable int
 
-extern maybe_box() -> any Box&?
+extern maybe_box() -> Box&?
 
 def read_box() -> int:
-	box: any Box&? = maybe_box()
+	box: Box&? = maybe_box()
     if box == null:
         return 0
     return box.value
@@ -4224,11 +4224,11 @@ func TestAnalyzeAliasGuardClauseRefinesRootAfterReturn(t *testing.T) {
 	src := `struct Box:
 	value: mutable int
 
-extern maybe_box() -> any Box&?
+extern maybe_box() -> Box&?
 
 def read_box() -> int:
-	box: any Box&? = maybe_box()
-	alias: any Box&? = box
+	box: Box&? = maybe_box()
+	alias: Box&? = box
 	if alias == null:
 		return 0
 	return box.value
@@ -4241,11 +4241,11 @@ func TestAnalyzeAliasRefinementInvalidatesAfterRootAssignment(t *testing.T) {
 	src := `struct Box:
 	value: mutable int
 
-extern maybe_box() -> any Box&?
+extern maybe_box() -> Box&?
 
 def bad_box() -> int:
-	box: mutable any Box&? = maybe_box()
-	alias: any Box&? = box
+	box: mutable Box&? = maybe_box()
+	alias: Box&? = box
 	if alias == null:
 		return 0
 	box <- null
@@ -4488,7 +4488,7 @@ def sample_case() -> int:
 
 func TestAnalyzeRejectsUnknownExternFunctionAnnotation(t *testing.T) {
 	src := `@smoke
-extern borrow_value(holder: any i32&) -> any i32&
+extern borrow_value(holder: i32&) -> i32&
 `
 	_, errs := parseAndAnalyze(t, "extern_function_annotations_unknown.llcontext", src)
 	if len(errs) == 0 {
@@ -4501,7 +4501,7 @@ extern borrow_value(holder: any i32&) -> any i32&
 
 func TestAnalyzeRejectsExternBorrowsReturnUnknownParam(t *testing.T) {
 	src := `@borrows_return(missing)
-extern borrow_value(holder: any i32&) -> any i32&
+extern borrow_value(holder: i32&) -> i32&
 `
 	_, errs := parseAndAnalyze(t, "extern_function_annotations_unknown_param.llcontext", src)
 	if len(errs) == 0 {
@@ -4514,7 +4514,7 @@ extern borrow_value(holder: any i32&) -> any i32&
 
 func TestAnalyzeRejectsExternBorrowsReturnOnNonProvenanceParam(t *testing.T) {
 	src := `@borrows_return(count)
-extern borrow_value(count: i32) -> any i32&
+extern borrow_value(count: i32) -> i32&
 `
 	_, errs := parseAndAnalyze(t, "extern_function_annotations_bad_param.llcontext", src)
 	if len(errs) == 0 {
@@ -4663,8 +4663,8 @@ export func pass_array_c(value: i32[4]) -> i32[4] = pass_array
 }
 
 func TestAnalyzeTernaryRefinesNullablePointerBranch(t *testing.T) {
-	src := `def choose_text(value: any u8&?) -> any u8&:
-	return value if value != null else "".cast[any u8&]
+	src := `def choose_text(value: u8&?) -> u8&:
+	return value if value != null else "".cast[u8&]
 `
 	_, errs := parseAndAnalyze(t, "ternary_refinement.llcontext", src)
 	requireNoErrors(t, errs)
@@ -4674,11 +4674,11 @@ func TestAnalyzeRejectsNullableToNonNullCastWithoutProof(t *testing.T) {
 	src := `struct Box:
     value: int
 
-extern maybe_box() -> any Box&?
+extern maybe_box() -> Box&?
 
-def bad() -> any Box&:
-    box: any Box&? = maybe_box()
-	return box.cast[any Box&]
+def bad() -> Box&:
+    box: Box&? = maybe_box()
+	return box.cast[Box&]
 `
 	_, errs := parseAndAnalyze(t, "nonnull_cast_rejection.llcontext", src)
 	if len(errs) == 0 {
@@ -4693,7 +4693,7 @@ func TestAnalyzeAcceptsReferenceComparisons(t *testing.T) {
 	src := `struct Box:
 	value: int
 
-extern maybe_box() -> any Box&?
+extern maybe_box() -> Box&?
 
 def is_missing() -> bool:
 	return maybe_box() == null
@@ -4701,7 +4701,7 @@ def is_missing() -> bool:
 def is_present() -> bool:
 	return maybe_box() != null
 
-def same_box(left: any Box&, right: any Box&) -> bool:
+def same_box(left: Box&, right: Box&) -> bool:
 	return left == right
 `
 	_, errs := parseAndAnalyze(t, "reference_comparisons.llcontext", src)
@@ -4721,7 +4721,7 @@ def read(box: Box&) -> int:
 }
 
 func TestParseRejectsLegacyDotReferenceCastSyntax(t *testing.T) {
-	src := `def bits_ptr(bits: uintptr) -> any u8&:
+	src := `def bits_ptr(bits: uintptr) -> u8&:
 	return bits.u8&()
 `
 	_, errs := parseAndAnalyze(t, "legacy_reference_cast_parse_reject.llcontext", src)
@@ -4752,7 +4752,7 @@ def use_source() -> Box&?:
 	return maybe_heap_box().cast[Box&?]
 
 def explicit_any_still_works(box: heap Box&?) -> Box&?:
-	return box.cast[any Box&?]
+	return box.cast[Box&?]
 `
 	result, errs := parseAndAnalyze(t, "storage_cast_syntax.llcontext", src)
 	requireNoErrors(t, errs)
@@ -4784,8 +4784,8 @@ func TestAnalyzeRejectsLegacyCastSyntax(t *testing.T) {
 	src := `struct Box:
 	value: int
 
-def widen(box: heap Box&?) -> any Box&?:
-	return box.cast[any Box&?]()
+def widen(box: heap Box&?) -> Box&?:
+	return box.cast[Box&?]()
 `
 	_, errs := parseAndAnalyze(t, "legacy_cast_error.llcontext", src)
 	if len(errs) == 0 {
@@ -4885,13 +4885,13 @@ def read_second() -> u8:
 }
 
 func TestAnalyzeAcceptsPointerArithmetic(t *testing.T) {
-	src := `def advance(ptr: any u8&, offset: usize) -> any u8&:
+	src := `def advance(ptr: u8&, offset: usize) -> u8&:
 	return ptr + offset
 
-def advance_commutative(offset: usize, ptr: any u8&) -> any u8&:
+def advance_commutative(offset: usize, ptr: u8&) -> u8&:
 	return offset + ptr
 
-def rewind(ptr: any u8&, offset: usize) -> any u8&:
+def rewind(ptr: u8&, offset: usize) -> u8&:
 	return ptr - offset
 `
 	_, errs := parseAndAnalyze(t, "pointer_arithmetic.llcontext", src)
@@ -4901,7 +4901,7 @@ def rewind(ptr: any u8&, offset: usize) -> any u8&:
 func TestAnalyzeAcceptsManualRegions(t *testing.T) {
 	src := `def sum_region(seed: i32) -> i32:
 	region scratch(1024)
-	value: any i32& = new[scratch] seed + 1
+	value: i32& = new[scratch] seed + 1
 	return value[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_ok.llcontext", src)
@@ -5038,7 +5038,7 @@ def touch(thread: Thread[i64, Joinable], task: Task[i64, Pending], pool: ThreadP
 }
 
 func TestAnalyzeAcceptsAtomicSafePayloadTypes(t *testing.T) {
-	src := `def touch(counter: atomic[i64], ready: atomic[bool], ptrs: atomic[any u8&]) -> void:
+	src := `def touch(counter: atomic[i64], ready: atomic[bool], ptrs: atomic[u8&]) -> void:
 	_ = counter.value
 	_ = ready.value
 	_ = ptrs.value
@@ -5115,7 +5115,7 @@ func TestAnalyzeRejectsReferencesToUserDeclaredAffineStruct(t *testing.T) {
 	raw: mutable uintptr
 
 def bad(handle: Handle) -> void:
-	borrow: any Handle& = &handle
+	borrow: Handle& = &handle
 	_ = borrow
 `
 	_, errs := parseAndAnalyze(t, "user_affine_ref_reject.llcontext", src)
@@ -5262,7 +5262,7 @@ func TestAnalyzeRejectsCallsWhenRegionParamCannotBeInferred(t *testing.T) {
 	src := `def id[region r](value: r i32&) -> r i32&:
 	return value
 
-def use(value: any i32&) -> any i32&:
+def use(value: i32&) -> i32&:
 	return id(value)
 `
 	_, errs := parseAndAnalyze(t, "function_region_params_inference_reject.llcontext", src)
@@ -5305,9 +5305,9 @@ func TestAnalyzeRejectsUnknownRegionQualifiedRef(t *testing.T) {
 }
 
 func TestAnalyzeRejectsReturningReferenceAllocatedFromLocalRegion(t *testing.T) {
-	src := `def bad() -> any i32&:
+	src := `def bad() -> i32&:
 	region scratch(1024)
-	value: any i32& = new[scratch] 1
+	value: i32& = new[scratch] 1
 	return value
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_return_ref_reject.llcontext", src)
@@ -5320,10 +5320,10 @@ func TestAnalyzeRejectsReturningReferenceAllocatedFromLocalRegion(t *testing.T) 
 }
 
 func TestAnalyzeRejectsReturningCastedReferenceAllocatedFromLocalRegion(t *testing.T) {
-	src := `def bad() -> any i32&:
+	src := `def bad() -> i32&:
 	region scratch(1024)
-	value: any i32& = new[scratch] 1
-	return value.cast[any i32&]
+	value: i32& = new[scratch] 1
+	return value.cast[i32&]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_return_cast_ref_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -5338,12 +5338,12 @@ func TestAnalyzeAcceptsRegionCheckpoints(t *testing.T) {
 	src := `def sum_region(seed: i32) -> i32:
 	region scratch(1024)
 	mark scratch as cp
-	temp: any i32& = new[scratch] seed + 1
+	temp: i32& = new[scratch] seed + 1
 	restore scratch from cp
-	reused: any i32& = new[scratch] seed + 2
+	reused: i32& = new[scratch] seed + 2
 	value: i32 = reused[0]
 	reset scratch
-	final: any i32& = new[scratch] seed + 3
+	final: i32& = new[scratch] seed + 3
 	return value + final[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_checkpoints_ok.llcontext", src)
@@ -5353,16 +5353,16 @@ func TestAnalyzeAcceptsRegionCheckpoints(t *testing.T) {
 func TestAnalyzeAcceptsNestedRegionCheckpoints(t *testing.T) {
 	src := `def sum_region(seed: i32) -> i32:
 	region scratch(1024)
-	base: any i32& = new[scratch] seed
+	base: i32& = new[scratch] seed
 	baseline: i32 = base[0]
 	mark scratch as outer
-	stable: any i32& = new[scratch] seed + 1
+	stable: i32& = new[scratch] seed + 1
 	mark scratch as inner
-	temp: any i32& = new[scratch] seed + 2
+	temp: i32& = new[scratch] seed + 2
 	restore scratch from inner
 	kept: i32 = stable[0]
 	restore scratch from outer
-	final: any i32& = new[scratch] seed + 3
+	final: i32& = new[scratch] seed + 3
 	return baseline + kept + final[0]
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_nested_checkpoints_ok.llcontext", src)
@@ -5865,9 +5865,9 @@ func TestAnalyzeRejectsRecursiveEnumPayloadByValue(t *testing.T) {
 func TestAnalyzeAcceptsRecursiveEnumPayloadByReference(t *testing.T) {
 	src := `enum Expr:
 	Int(value: int)
-	Add(left: any Expr&, right: any Expr&)
+	Add(left: Expr&, right: Expr&)
 
-def eval(node: any Expr&) -> int:
+def eval(node: Expr&) -> int:
 	return match node[0]:
 		Expr.Int(value: value):
 			value
@@ -6458,10 +6458,10 @@ func TestAnalyzeAcceptsGuardNonnullConditionRefiningReference(t *testing.T) {
 	value: int
 
 @guard_nonnull(box)
-def has_box(box: any Box&?) -> bool:
+def has_box(box: Box&?) -> bool:
 	return box != null
 
-def read(box: any Box&?) -> int:
+def read(box: Box&?) -> int:
 	if not has_box(box):
 		return 0
 	return box.value
@@ -7660,13 +7660,13 @@ packed enum Expr:
 def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
 	return zeroed
 
-def pool_submit1[A, R](pool: any ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
 def worker(node: Expr) -> i64:
 	return 0
 
-def ok(owner: Arena, pool: any ThreadPool&) -> i64:
+def ok(owner: Arena, pool: ThreadPool&) -> i64:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	node: Expr = new[store] Expr.Int(value: 1)
 	frozen: Expr.Store[Frozen] = freeze(move store)
@@ -7690,13 +7690,13 @@ func TestAnalyzeAcceptsThreadTransferOfBlessedRuntimeCarriers(t *testing.T) {
 def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
 	return zeroed
 
-def pool_submit1[A, R](pool: any ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
 def worker(gate: SharedGate) -> i64:
 	return 1
 
-def ok(pool_ref: any ThreadPool&, mu: Mutex, cv: CondVar) -> i64:
+def ok(pool_ref: ThreadPool&, mu: Mutex, cv: CondVar) -> i64:
 	_ = spawn1(worker, SharedGate(mu, cv))
 	_ = pool_submit1(pool_ref, worker, SharedGate(mu, cv))
 	return 0
@@ -7727,13 +7727,13 @@ func TestAnalyzeRejectsThreadTransferOfNonStaticRef(t *testing.T) {
 	src := `def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
 	return zeroed
 
-def pool_submit1[A, R](pool: any ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
-def worker(cell: any i32&) -> i64:
+def worker(cell: i32&) -> i64:
 	return cell[0].i64()
 
-def bad(pool: any ThreadPool&, cell: any i32&) -> i64:
+def bad(pool: ThreadPool&, cell: i32&) -> i64:
 	_ = spawn1(worker, cell)
 	_ = pool_submit1(pool, worker, cell)
 	return 0
@@ -7759,13 +7759,13 @@ func TestAnalyzeAcceptsThreadTransferOfBlessedRuntimeCarrierResults(t *testing.T
 def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
 	return zeroed
 
-def pool_submit1[A, R](pool: any ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
 def echo(gate: SharedGate) -> SharedGate:
 	return gate
 
-def ok(pool_ref: any ThreadPool&, mu: Mutex, cv: CondVar) -> i64:
+def ok(pool_ref: ThreadPool&, mu: Mutex, cv: CondVar) -> i64:
 	gate: SharedGate = SharedGate(mu, cv)
 	_ = spawn1(echo, gate)
 	_ = pool_submit1(pool_ref, echo, gate)
@@ -7782,14 +7782,14 @@ func TestAnalyzeAcceptsThreadTransferOfStaticRefResult(t *testing.T) {
 def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
 	return zeroed
 
-def pool_submit1[A, R](pool: any ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
 def worker(value: i64) -> static i32&:
 	_ = value
 	return shared_cell()
 
-def ok(pool: any ThreadPool&) -> i64:
+def ok(pool: ThreadPool&) -> i64:
 	_ = spawn1(worker, 0)
 	_ = pool_submit1(pool, worker, 0)
 	return 0
@@ -7800,19 +7800,19 @@ def ok(pool: any ThreadPool&) -> i64:
 }
 
 func TestAnalyzeRejectsThreadTransferOfNonStaticRefResult(t *testing.T) {
-	src := `extern borrowed_cell() -> any i32&
+	src := `extern borrowed_cell() -> i32&
 
 def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
 	return zeroed
 
-def pool_submit1[A, R](pool: any ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
-def worker(value: i64) -> any i32&:
+def worker(value: i64) -> i32&:
 	_ = value
 	return borrowed_cell()
 
-def bad(pool: any ThreadPool&) -> i64:
+def bad(pool: ThreadPool&) -> i64:
 	_ = spawn1(worker, 0)
 	_ = pool_submit1(pool, worker, 0)
 	return 0
@@ -7958,18 +7958,18 @@ def ok(owner: Arena) -> Thread[i64, Joinable]:
 
 func TestAnalyzeRejectsPoolTransferOfValueDependingOnLocalRegion(t *testing.T) {
 	src := `packed enum Expr:
-	Hold(value: any i32&)
+	Hold(value: i32&)
 
-def pool_submit1[A, R](pool: any ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
 def worker(node: Expr) -> i64:
 	return 0
 
-def bad(owner: Arena, pool: any ThreadPool&) -> Task[i64, Pending]:
+def bad(owner: Arena, pool: ThreadPool&) -> Task[i64, Pending]:
 	region scratch
 	store: Expr.Store[Local] = Expr.Store(owner)
-	cell: any i32& = new[scratch] 1
+	cell: i32& = new[scratch] 1
 	node: Expr = new[store] Expr.Hold(value: cell)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	_ = frozen
@@ -8019,7 +8019,7 @@ func TestAnalyzeRejectsGenericDictRuntimeBridgeAndSugar(t *testing.T) {
 	src := `extern take_runtime(values: DynDict[u32, i32]) -> void
 extern make_runtime() -> DynDict[u32, i32]
 
-def arena_dict_get[K, T](m: any dict[K, T]&, key: K) -> mutable any T&?:
+def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?:
 	return null
 
 def use(values: dict[u32, i32], key: u32) -> dict[u32, i32]:
@@ -8044,7 +8044,7 @@ func TestAnalyzeRejectsAllocatingFromDestroyedRegion(t *testing.T) {
 	src := `def bad() -> void:
 	region scratch
 	destroy scratch
-	value: any i32& = new[scratch] 1
+	value: i32& = new[scratch] 1
 `
 	_, errs := parseAndAnalyze(t, "manual_regions_destroyed_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -8059,7 +8059,7 @@ func TestAnalyzeRejectsUsingReferenceInvalidatedByRestore(t *testing.T) {
 	src := `def bad() -> i32:
 	region scratch
 	mark scratch as cp
-	value: any i32& = new[scratch] 1
+	value: i32& = new[scratch] 1
 	restore scratch from cp
 	return value[0]
 `
@@ -8076,7 +8076,7 @@ func TestAnalyzeRejectsUsingMoveBoundReferenceInvalidatedByRestore(t *testing.T)
 	src := `def bad() -> i32:
 	region scratch
 	mark scratch as cp
-	value: any i32& = new[scratch] 1
+	value: i32& = new[scratch] 1
 	move value as alias
 	restore scratch from cp
 	return alias[0]
@@ -8092,14 +8092,14 @@ func TestAnalyzeRejectsUsingMoveBoundReferenceInvalidatedByRestore(t *testing.T)
 
 func TestAnalyzeRejectsUsingStructFieldAliasInvalidatedByRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
 	holder: Holder = Holder(new[scratch] 1, 7)
-	alias: any i32& = holder.value
+	alias: i32& = holder.value
 	restore scratch from cp
 	return alias[0]
 `
@@ -8114,7 +8114,7 @@ def bad() -> i32:
 
 func TestAnalyzeRejectsUsingMoveAsStructBoundReferenceInvalidatedByRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 def bad() -> i32:
@@ -8136,7 +8136,7 @@ def bad() -> i32:
 
 func TestAnalyzeAcceptsMoveAsStructScalarAfterRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 def ok() -> i32:
@@ -8255,7 +8255,7 @@ def bad(node: Expr, store: Token.Store[Local]) -> int:
 
 func TestAnalyzeRejectsUsingMoveAsEnumBoundReferenceInvalidatedByRestore(t *testing.T) {
 	src := `enum Holder:
-	Keep(value: any i32&, count: i32)
+	Keep(value: i32&, count: i32)
 
 def bad() -> i32:
 	region scratch
@@ -8276,7 +8276,7 @@ def bad() -> i32:
 
 func TestAnalyzeAcceptsMoveAsEnumScalarAfterRestore(t *testing.T) {
 	src := `enum Holder:
-	Keep(value: any i32&, count: i32)
+	Keep(value: i32&, count: i32)
 
 def ok() -> i32:
 	region scratch
@@ -8292,17 +8292,17 @@ def ok() -> i32:
 
 func TestAnalyzeRejectsUsingHelperReturnedReferenceInvalidatedByRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
-def borrow_value(holder: Holder) -> any i32&:
+def borrow_value(holder: Holder) -> i32&:
 	return holder.value
 
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
 	holder: Holder = Holder(new[scratch] 1, 7)
-	alias: any i32& = borrow_value(holder)
+	alias: i32& = borrow_value(holder)
 	restore scratch from cp
 	return alias[0]
 `
@@ -8317,7 +8317,7 @@ def bad() -> i32:
 
 func TestAnalyzeAcceptsHelperReturnedScalarAfterRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 def borrow_count(holder: Holder) -> i32:
@@ -8337,7 +8337,7 @@ def ok() -> i32:
 
 func TestAnalyzeRejectsUsingHelperReturnedNestedViewAliasInvalidatedByRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 struct Window:
@@ -8352,7 +8352,7 @@ def bad() -> i32:
 	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
 	window: Window = keep_window(Window(items[0:2]))
 	which: usize = 1
-	alias: any i32& = window.items[which].value
+	alias: i32& = window.items[which].value
 	restore scratch from cp
 	return alias[0]
 `
@@ -8367,7 +8367,7 @@ def bad() -> i32:
 
 func TestAnalyzeAcceptsFreshHelperReturnAfterRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&?
+	value: i32&?
 	count: i32
 
 def copy_count(holder: Holder) -> Holder:
@@ -8387,17 +8387,17 @@ def ok() -> i32:
 
 func TestAnalyzeRejectsUsingExternBorrowReturnedReferenceInvalidatedByRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 @borrows_return(holder)
-extern borrow_value(holder: Holder) -> any i32&
+extern borrow_value(holder: Holder) -> i32&
 
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
 	holder: Holder = Holder(new[scratch] 1, 7)
-	alias: any i32& = borrow_value(holder)
+	alias: i32& = borrow_value(holder)
 	restore scratch from cp
 	return alias[0]
 `
@@ -8412,7 +8412,7 @@ def bad() -> i32:
 
 func TestAnalyzeRejectsUsingExternBorrowReturnedNestedViewAliasInvalidatedByRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 struct Window:
@@ -8427,7 +8427,7 @@ def bad() -> i32:
 	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
 	window: Window = keep_window(Window(items[0:2]))
 	which: usize = 1
-	alias: any i32& = window.items[which].value
+	alias: i32& = window.items[which].value
 	restore scratch from cp
 	return alias[0]
 `
@@ -8442,7 +8442,7 @@ def bad() -> i32:
 
 func TestAnalyzeRejectsUsingExternPathBorrowReturnedViewAliasInvalidatedByRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 struct Window:
@@ -8459,7 +8459,7 @@ def bad() -> i32:
 	window: Window = Window(items[0:2], 9)
 	selected: view[Holder] = get_items(window)
 	which: usize = 1
-	alias: any i32& = selected[which].value
+	alias: i32& = selected[which].value
 	restore scratch from cp
 	return alias[0]
 `
@@ -8474,7 +8474,7 @@ def bad() -> i32:
 
 func TestAnalyzeAcceptsExternPathBorrowReturnedViewScalarAfterRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 struct Window:
@@ -8501,7 +8501,7 @@ def ok() -> i32:
 
 func TestAnalyzeRejectsUsingExternRefParamBorrowReturnedViewAliasInvalidatedByRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 struct Window:
@@ -8509,16 +8509,16 @@ struct Window:
 	id: i32
 
 @borrows_return(window.items)
-extern get_items(window: any Window&) -> view[Holder]
+extern get_items(window: Window&) -> view[Holder]
 
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
 	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
 	window: Window = Window(items[0:2], 9)
-	selected: view[Holder] = get_items((&window).cast[any Window&])
+	selected: view[Holder] = get_items((&window).cast[Window&])
 	which: usize = 1
-	alias: any i32& = selected[which].value
+	alias: i32& = selected[which].value
 	restore scratch from cp
 	return alias[0]
 `
@@ -8533,7 +8533,7 @@ def bad() -> i32:
 
 func TestAnalyzeRejectsUsingExternRefParamBorrowReturnedElementAliasInvalidatedByRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 struct Window:
@@ -8541,7 +8541,7 @@ struct Window:
 	id: i32
 
 @borrows_return(window.items[*])
-extern get_item(window: any Window&, which: usize) -> Holder
+extern get_item(window: Window&, which: usize) -> Holder
 
 def bad() -> i32:
 	region scratch
@@ -8549,8 +8549,8 @@ def bad() -> i32:
 	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
 	window: Window = Window(items[0:2], 9)
 	which: usize = 1
-	item: Holder = get_item((&window).cast[any Window&], which)
-	alias: any i32& = item.value
+	item: Holder = get_item((&window).cast[Window&], which)
+	alias: i32& = item.value
 	restore scratch from cp
 	return alias[0]
 `
@@ -8565,11 +8565,11 @@ def bad() -> i32:
 
 func TestAnalyzeRejectsUsingExternFieldBorrowReturnedStructFieldInvalidatedByRestore(t *testing.T) {
 	src := `struct Box:
-	value: any i32&
+	value: i32&
 
 struct Pair:
-	left: any i32&
-	right: any i32&
+	left: i32&
+	right: i32&
 
 @borrows_return_field(left, left_src.value, right, right_src.value)
 extern pair_refs(left_src: Box, right_src: Box) -> Pair
@@ -8596,11 +8596,11 @@ def bad() -> i32:
 
 func TestAnalyzeAcceptsUsingExternFieldBorrowReturnedSiblingFieldAfterUnrelatedRestore(t *testing.T) {
 	src := `struct Box:
-	value: any i32&
+	value: i32&
 
 struct Pair:
-	left: any i32&
-	right: any i32&
+	left: i32&
+	right: i32&
 
 @borrows_return_field(left, left_src.value, right, right_src.value)
 extern pair_refs(left_src: Box, right_src: Box) -> Pair
@@ -8622,7 +8622,7 @@ def ok() -> i32:
 
 func TestAnalyzeRejectsUsingExternRebasedBorrowReturnedSubviewAliasInvalidatedByRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 @borrows_return_rebased(items)
@@ -8634,7 +8634,7 @@ def bad() -> i32:
 	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
 	view: view[Holder] = items[0:2]
 	sub: view[Holder] = sub_items(view, 1, 2)
-	alias: any i32& = sub[0].value
+	alias: i32& = sub[0].value
 	restore scratch from cp
 	return alias[0]
 `
@@ -8649,7 +8649,7 @@ def bad() -> i32:
 
 func TestAnalyzeAcceptsExternRebasedBorrowReturnedSubviewScalarAfterRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 @borrows_return_rebased(items)
@@ -8671,7 +8671,7 @@ def ok() -> i32:
 
 func TestAnalyzeRejectsUsingExternFieldRebasedBorrowReturnedStructFieldInvalidatedByRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 struct SlicePair:
@@ -8687,7 +8687,7 @@ def bad() -> i32:
 	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
 	view: view[Holder] = items[0:2]
 	pair: SlicePair = slice_pair(view, 1, 2, 9)
-	alias: any i32& = pair.items[0].value
+	alias: i32& = pair.items[0].value
 	restore scratch from cp
 	return alias[0]
 `
@@ -8702,7 +8702,7 @@ def bad() -> i32:
 
 func TestAnalyzeAcceptsExternFieldRebasedSiblingScalarAfterRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 struct SlicePair:
@@ -8727,7 +8727,7 @@ def ok() -> i32:
 
 func TestAnalyzeRejectsExternBorrowsReturnFieldRebasedOnNonStructReturn(t *testing.T) {
 	src := `@borrows_return_field_rebased(items, source)
-extern bad(source: any i32&) -> any i32&
+extern bad(source: i32&) -> i32&
 `
 	_, errs := parseAndAnalyze(t, "extern_function_field_rebased_non_struct_reject.llcontext", src)
 	if len(errs) == 0 {
@@ -8740,7 +8740,7 @@ extern bad(source: any i32&) -> any i32&
 
 func TestAnalyzeRejectsUsingExternNestedFieldBorrowReturnedAliasInvalidatedByRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 struct Meta:
@@ -8760,7 +8760,7 @@ def bad() -> i32:
 	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
 	view: view[Holder] = items[0:2]
 	wrapped: Wrapper = wrap_meta(view, 9, 5)
-	alias: any i32& = wrapped.meta.items[0].value
+	alias: i32& = wrapped.meta.items[0].value
 	restore scratch from cp
 	return alias[0]
 `
@@ -8775,7 +8775,7 @@ def bad() -> i32:
 
 func TestAnalyzeAcceptsExternNestedFieldBorrowReturnedSiblingScalarAfterRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 struct Meta:
@@ -8804,7 +8804,7 @@ def ok() -> i32:
 
 func TestAnalyzeRejectsUsingExternNestedFieldRebasedBorrowReturnedAliasInvalidatedByRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 struct Meta:
@@ -8824,7 +8824,7 @@ def bad() -> i32:
 	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
 	view: view[Holder] = items[0:2]
 	wrapped: Wrapper = wrap_submeta(view, 1, 2, 9, 5)
-	alias: any i32& = wrapped.meta.items[0].value
+	alias: i32& = wrapped.meta.items[0].value
 	restore scratch from cp
 	return alias[0]
 `
@@ -8839,7 +8839,7 @@ def bad() -> i32:
 
 func TestAnalyzeAcceptsExternNestedFieldRebasedSiblingScalarAfterRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 struct Meta:
@@ -8868,7 +8868,7 @@ def ok() -> i32:
 
 func TestAnalyzeRejectsExternBorrowsReturnFieldOnUnknownNestedReturnPath(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 struct Meta:
@@ -8893,7 +8893,7 @@ extern wrap_meta(src: view[Holder]) -> Wrapper
 
 func TestAnalyzeRejectsUsingMoveAsPackedVariantBoundReferenceInvalidatedByRestore(t *testing.T) {
 	src := `packed enum Expr:
-	Hold(value: any i32&, count: i32)
+	Hold(value: i32&, count: i32)
 
 def bad(owner: Arena) -> i32:
 	region scratch
@@ -8915,7 +8915,7 @@ def bad(owner: Arena) -> i32:
 
 func TestAnalyzeAcceptsMoveAsPackedVariantScalarAfterRestore(t *testing.T) {
 	src := `packed enum Expr:
-	Hold(value: any i32&, count: i32)
+	Hold(value: i32&, count: i32)
 
 def ok(owner: Arena) -> i32:
 	region scratch
@@ -8932,14 +8932,14 @@ def ok(owner: Arena) -> i32:
 
 func TestAnalyzeRejectsUsingIndexedStructFieldAliasInvalidatedByRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 def bad() -> i32:
 	region scratch
 	mark scratch as cp
 	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
-	alias: any i32& = items[0].value
+	alias: i32& = items[0].value
 	restore scratch from cp
 	return alias[0]
 `
@@ -8954,7 +8954,7 @@ def bad() -> i32:
 
 func TestAnalyzeAcceptsIndexedStructScalarAfterRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 def ok() -> i32:
@@ -8971,7 +8971,7 @@ def ok() -> i32:
 
 func TestAnalyzeRejectsUsingSlicedViewAliasInvalidatedByRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 def bad() -> i32:
@@ -8979,7 +8979,7 @@ def bad() -> i32:
 	mark scratch as cp
 	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
 	window: view[Holder] = items[0:2]
-	alias: any i32& = window[0].value
+	alias: i32& = window[0].value
 	restore scratch from cp
 	return alias[0]
 `
@@ -8994,7 +8994,7 @@ def bad() -> i32:
 
 func TestAnalyzeAcceptsSlicedViewScalarAfterRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 def ok() -> i32:
@@ -9012,7 +9012,7 @@ def ok() -> i32:
 
 func TestAnalyzeRejectsUsingNestedStructViewAliasInvalidatedByRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 struct Window:
@@ -9024,7 +9024,7 @@ def bad() -> i32:
 	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
 	window: Window = Window(items[0:2])
 	which: usize = 1
-	alias: any i32& = window.items[which].value
+	alias: i32& = window.items[which].value
 	restore scratch from cp
 	return alias[0]
 `
@@ -9039,7 +9039,7 @@ def bad() -> i32:
 
 func TestAnalyzeAcceptsNestedStructViewScalarAfterRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 struct Window:
@@ -9061,7 +9061,7 @@ def ok() -> i32:
 
 func TestAnalyzeRejectsUsingMoveAsEnumBoundIndexedAliasInvalidatedByRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 enum Bucket:
@@ -9073,7 +9073,7 @@ def bad() -> i32:
 	value: Bucket = Bucket.Keep([Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)])
 	move value as Bucket.Keep(items)
 	which: usize = 1
-	alias: any i32& = items[which].value
+	alias: i32& = items[which].value
 	restore scratch from cp
 	return alias[0]
 `
@@ -9088,7 +9088,7 @@ def bad() -> i32:
 
 func TestAnalyzeAcceptsMoveAsEnumBoundIndexedScalarAfterRestore(t *testing.T) {
 	src := `struct Holder:
-	value: any i32&
+	value: i32&
 	count: i32
 
 enum Bucket:
@@ -9143,7 +9143,7 @@ func TestAnalyzeRejectsRestoringResetCheckpoint(t *testing.T) {
 func TestAnalyzeRejectsUsingReferenceInvalidatedByReset(t *testing.T) {
 	src := `def bad() -> i32:
 	region scratch
-	value: any i32& = new[scratch] 1
+	value: i32& = new[scratch] 1
 	reset scratch
 	return value[0]
 `
@@ -9188,18 +9188,18 @@ error IoError:
 	NotFound
 
 extern alloc(size: usize) -> heap void&?
-extern read_file(path: any u8&) -> dstr[file_text] error[IoError.NotFound, ...]
+extern read_file(path: u8&) -> dstr[file_text] error[IoError.NotFound, ...]
 
 def checked_alloc(size: usize) -> heap void& error[MemoryError.OutOfMemory, ...]:
 	ptr: heap void& = alloc(size) else raise MemoryError.OutOfMemory
 	return ptr
 
-def load_text(path: any u8&) -> dstr[file_text] error[IoError.NotFound, ...]:
+def load_text(path: u8&) -> dstr[file_text] error[IoError.NotFound, ...]:
 	text: dstr[file_text] = try read_file(path)
 	return text
 
-def load_with_fallback(path: any u8&) -> any u8&:
-	text: any u8& = try read_file(path) else "".cast[any u8&]
+def load_with_fallback(path: u8&) -> u8&:
+	text: u8& = try read_file(path) else "".cast[u8&]
 	return text
 `
 	_, errs := parseAndAnalyze(t, "error_handling_ok.llcontext", src)
@@ -9461,7 +9461,7 @@ func TestAnalyzeRejectsLegacyPipeErrorSyntax(t *testing.T) {
 	src := `error IoError:
 	NotFound
 
-extern read_file(path: any u8&) -> int | IoError
+extern read_file(path: u8&) -> int | IoError
 `
 	_, errs := parseAndAnalyze(t, "legacy_pipe_error_syntax.llcontext", src)
 	if len(errs) == 0 {
@@ -9491,8 +9491,8 @@ func TestAnalyzeRejectsTryOnNonFallibleExpression(t *testing.T) {
 }
 
 func TestAnalyzeRejectsElseOnNonNullableReference(t *testing.T) {
-	src := `def bad(value: any u8&) -> any u8&:
-	return value else "".cast[any u8&]
+	src := `def bad(value: u8&) -> u8&:
+	return value else "".cast[u8&]
 `
 	_, errs := parseAndAnalyze(t, "else_on_nonnullable_ref.llcontext", src)
 	if len(errs) == 0 {
@@ -9505,12 +9505,12 @@ func TestAnalyzeRejectsElseOnNonNullableReference(t *testing.T) {
 
 func TestAnalyzeAcceptsRuntimeBackedArrayAndViewIndexing(t *testing.T) {
 	src := `struct DynArray[T]:
-	items: mutable any T&?
+	items: mutable T&?
 	count: mutable usize
 	capacity: mutable usize
 
 struct DynArrayView:
-	items: mutable any void&?
+	items: mutable void&?
 	count: mutable usize
 
 def read_array(values: darray[i32, row]) -> i32:
@@ -9644,7 +9644,7 @@ func TestAnalyzeAcceptsArrayAndArrayViewSliceSyntax(t *testing.T) {
 }
 
 func TestAnalyzeAcceptsFixedArraySliceSyntax(t *testing.T) {
-	src := `def middle(values: i32[4], view: any i32[4]&) -> i32:
+	src := `def middle(values: i32[4], view: i32[4]&) -> i32:
 	part: view[i32] = values[1:3]
 	sub: view[i32] = view[0:2]
 	return part[0] + sub[1]
@@ -10029,7 +10029,7 @@ func TestAnalyzeRejectsRecoveringExplicitShapeFromShorthand(t *testing.T) {
 }
 
 func TestAnalyzeDArrayUsesDynArrayRuntimeFields(t *testing.T) {
-	src := `def needs_grow[T](array: any darray[T, row]&) -> bool:
+	src := `def needs_grow[T](array: darray[T, row]&) -> bool:
 	return array.count >= array.capacity
 `
 	_, errs := parseAndAnalyze(t, "darray_runtime_field_access.llcontext", src)
@@ -10291,17 +10291,17 @@ def bad() -> int:
 }
 
 func TestAnalyzeDStrRuntimeBridgeWorksBothDirections(t *testing.T) {
-	src := `def take_raw(text: any u8&) -> void:
+	src := `def take_raw(text: u8&) -> void:
 	pass
 
 def take_logical(text: dstr[shape_text]) -> void:
 	pass
 
-def roundtrip(text: dstr[row], raw: any u8&) -> dstr[row]:
+def roundtrip(text: dstr[row], raw: u8&) -> dstr[row]:
 	take_raw(text)
 	take_logical(raw)
 	bridged: dstr[row] = raw
-	raw_value: any u8& = text
+	raw_value: u8& = text
 	return raw_value
 `
 	_, errs := parseAndAnalyze(t, "dstr_runtime_bridge_roundtrip.llcontext", src)

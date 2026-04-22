@@ -388,6 +388,53 @@ def count_of(node: Lua.Expr) -> usize:
 	}
 }
 
+func TestAnalyzeTreeAttributeAggregateHelpers(t *testing.T) {
+	result := analyzeTreeTestSource(t, "tree_attribute_aggregate_helpers.llcontext", `tree Lua:
+	@role(expr)
+	node Expr:
+		Nil
+		Binary(child left: Expr, child right: Expr)
+
+attribute Lua.Expr.is_leaf -> bool:
+	Lua.Expr.Nil(_):
+		return true
+	Lua.Expr.Binary(_):
+		return false
+
+attribute Lua.Expr.has_control_flow -> bool:
+	Lua.Expr.Nil(_):
+		return false
+	Lua.Expr.Binary(expr, left, right):
+		return any(children.has_control_flow)
+
+def has_control(node: Lua.Expr) -> bool:
+	return node.has_control_flow
+
+def all_children_leaf(node: Lua.Expr) -> bool:
+	return all(children(node).is_leaf)
+`)
+
+	if len(result.TreeAttributes) == 0 {
+		t.Fatalf("expected registered tree attributes")
+	}
+	attrs, ok := result.TreeAttributes[TypeIdentityKey(result.NamedTypes["Lua.Expr"])]
+	if !ok || attrs["has_control_flow"] == nil || attrs["is_leaf"] == nil {
+		t.Fatalf("expected aggregate helper attribute registration, got %#v", attrs)
+	}
+	aggregateRefs := 0
+	for expr := range result.AttributeFieldRefs {
+		if expr == nil {
+			continue
+		}
+		if expr.Field == "has_control_flow" || expr.Field == "is_leaf" {
+			aggregateRefs++
+		}
+	}
+	if aggregateRefs < 2 {
+		t.Fatalf("expected aggregate helper projected attribute refs, got %d", aggregateRefs)
+	}
+}
+
 func TestAnalyzeTreeVariantConstructorsAndIsExpr(t *testing.T) {
 	analyzeTreeTestSource(t, "tree_variant_behaviors.llcontext", `tree Lua:
 	common:
@@ -425,7 +472,7 @@ func TestAnalyzeTreeConstructorsSupportExplicitAndScopedOwners(t *testing.T) {
 		Binary(left: Expr, right: Expr)
 
 def build(owner: Arena) -> Lua.Expr:
-	alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+	alloc: mutable Arena& = (&owner).cast[mutable Arena&]
 	in alloc:
 		left: Lua.Expr = Lua.Expr.Nil(span: 1)
 		right: Lua.Expr = new[alloc] Lua.Expr.Nil(span: 2)
@@ -857,7 +904,7 @@ def rewrite_binary(node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lu
 		return node{left, right}
 
 def rewrite_binary_explicit(owner: Arena, node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr.Binary:
-	alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+	alloc: mutable Arena& = (&owner).cast[mutable Arena&]
 	return new[alloc] node{left, right}
 `)
 }

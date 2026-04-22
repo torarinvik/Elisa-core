@@ -333,14 +333,13 @@ def frontend_lookup_keyword(text: sview) -> FrontendTokenKind:
         return frontend_lookup_keyword_bucket(entries[0].ref[FrontendKeywordEntry&], 5, text)
 
     if text.len == 3:
-        entries: FrontendKeywordEntry[5] = [
+        entries: FrontendKeywordEntry[4] = [
             FrontendKeywordEntry("and", FrontendTokenKind.And),
-            FrontendKeywordEntry("any", FrontendTokenKind.Any),
             FrontendKeywordEntry("def", FrontendTokenKind.Def),
             FrontendKeywordEntry("not", FrontendTokenKind.Not),
             FrontendKeywordEntry("try", FrontendTokenKind.Try)
         ]
-        return frontend_lookup_keyword_bucket(entries[0].ref[FrontendKeywordEntry&], 5, text)
+        return frontend_lookup_keyword_bucket(entries[0].ref[FrontendKeywordEntry&], 4, text)
 
     if text.len == 4:
         entries: FrontendKeywordEntry[10] = [

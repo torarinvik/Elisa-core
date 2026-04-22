@@ -74,12 +74,12 @@ That gives you the practical rule of thumb:
 The biggest current precision loss is this pattern:
 
 ```context
-def finish_ok(job: any ParseJob[Pending]&) -> void:
+def finish_ok(job: ParseJob[Pending]&) -> void:
     job.checksum <- 7
     job.stage <- 1
 
 def bad(job: mutable ParseJob[Pending]) -> int:
-    finish_ok((&job).cast[any ParseJob[Pending]&])
+    finish_ok((&job).cast[ParseJob[Pending]&])
     return take_ready(job)
 ```
 
@@ -117,10 +117,10 @@ sock.fd <- -1
 ### Ref helper call widens today
 
 ```context
-def close_socket(sock: any Socket[Open]&) -> void:
+def close_socket(sock: Socket[Open]&) -> void:
     sock.fd <- -1
 
-close_socket((&sock).cast[any Socket[Open]&])
+close_socket((&sock).cast[Socket[Open]&])
 # caller now treats sock conservatively as Socket[Open | Closed]
 ```
 
@@ -149,11 +149,11 @@ struct ScratchBuffer[state Uninitialized | Initialized]:
 ### Current caveat
 
 ```context
-def init_buffer(buf: any ScratchBuffer[Uninitialized]&) -> void:
+def init_buffer(buf: ScratchBuffer[Uninitialized]&) -> void:
     buf.capacity <- 64
     buf.used <- 0
 
-init_buffer((&buf).cast[any ScratchBuffer[Uninitialized]&])
+init_buffer((&buf).cast[ScratchBuffer[Uninitialized]&])
 # caller currently gets ScratchBuffer[Uninitialized | Initialized]
 ```
 
@@ -187,7 +187,7 @@ return take_ready(job)
 ### Helper call currently forces the “re-prove” style
 
 ```context
-finish_ok((&job).cast[any ParseJob[Pending]&])
+finish_ok((&job).cast[ParseJob[Pending]&])
 
 if job is ParseJob[Ready]:
     return take_ready(job)
@@ -224,7 +224,7 @@ Use `is` when:
 Typical pattern:
 
 ```context
-helper((&value).cast[any SomeStatefulType[OldState]&])
+helper((&value).cast[SomeStatefulType[OldState]&])
 
 if value is SomeStatefulType[NewState]:
     return use_new_state(value)

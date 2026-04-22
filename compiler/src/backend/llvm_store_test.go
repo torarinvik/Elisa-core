@@ -14,17 +14,17 @@ func TestGenerateLLVMIRLowersStoreSugar(t *testing.T) {
     name_key: u32
     depth: u32
 
-def arena_dict_get[T](m: any dict[dstr[key_shape], T]&, key: dstr[key_shape]) -> mutable any T&?:
+def arena_dict_get[T](m: dict[dstr[key_shape], T]&, key: dstr[key_shape]) -> mutable T&?:
     return null
 
-def arena_dict_put[T](a: mutable any Arena&, m: mutable any dict[dstr[key_shape], T]&, key: dstr[key_shape], value: T) -> mutable any T&?:
+def arena_dict_put[T](a: mutable Arena&, m: mutable dict[dstr[key_shape], T]&, key: dstr[key_shape], value: T) -> mutable T&?:
     return null
 
-def arena_dict_get_or_insert[T](a: mutable any Arena&, m: mutable any dict[dstr[key_shape], T]&, key: dstr[key_shape], value: T) -> mutable any T&?:
+def arena_dict_get_or_insert[T](a: mutable Arena&, m: mutable dict[dstr[key_shape], T]&, key: dstr[key_shape], value: T) -> mutable T&?:
     return null
 
 def build(owner: Arena) -> usize:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         pending: mutable PendingGotoStore = zeroed
 		pending.reserve(8)
@@ -77,7 +77,7 @@ func TestGenerateLLVMIRLowersStoreRowsIteration(t *testing.T) {
     depth: usize
 
 def build(owner: Arena) -> usize:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         pending: mutable PendingGotoStore = zeroed
         pending.push(1usize, 2usize)
@@ -141,17 +141,17 @@ def entry(value: i64) -> i64:
 }
 
 func TestGenerateLLVMIRRejectsGenericKeyRuntimeBackedDictSugar(t *testing.T) {
-	src := `def arena_dict_get[K, T](m: any dict[K, T]&, key: K) -> mutable any T&?:
+	src := `def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?:
     return null
 
-def arena_dict_put[K, T](a: mutable any Arena&, m: mutable any dict[K, T]&, key: K, value: T) -> mutable any T&?:
+def arena_dict_put[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&?:
     return null
 
-def arena_dict_get_or_insert[K, T](a: mutable any Arena&, m: mutable any dict[K, T]&, key: K, value: T) -> mutable any T&?:
+def arena_dict_get_or_insert[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&?:
     return null
 
 def build(owner: Arena, key: u32) -> usize:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         values: mutable dict[u32, i64] = zeroed
         _ = values.get(key)

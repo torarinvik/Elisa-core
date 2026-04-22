@@ -12,7 +12,7 @@ func TestAnalyzeScopeCheckpointAndReverseIterableLoop(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "scope_checkpoint.llcontext", `extern pool_new(workers: usize) -> ThreadPool can[Pool.Create]
 
 def build(owner: Arena, items: darray[int]) -> usize:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     total: mutable usize = 0
     for value in rev(items):
         total <- total + 1
@@ -31,7 +31,7 @@ def build(owner: Arena, items: darray[int]) -> usize:
 
 func TestAnalyzeGroupedCheckpointStmt(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "grouped_scope_checkpoint.llcontext", `def build(owner: Arena) -> usize:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         xs: mutable darray[int] = [1, 2]
         ys: mutable darray[int] = [3, 4]
@@ -94,29 +94,29 @@ store PendingGotoStore:
     name_key: u32
     depth: u32
 
-def arena_dict_get[T](m: any dict[dstr[key_shape], T]&, key: dstr[key_shape]) -> mutable any T&?:
+def arena_dict_get[T](m: dict[dstr[key_shape], T]&, key: dstr[key_shape]) -> mutable T&?:
     return null
 
-def arena_dict_contains[T](m: any dict[dstr[key_shape], T]&, key: dstr[key_shape]) -> bool:
+def arena_dict_contains[T](m: dict[dstr[key_shape], T]&, key: dstr[key_shape]) -> bool:
     return false
 
-def arena_dict_remove[T](m: mutable any dict[dstr[key_shape], T]&, key: dstr[key_shape]) -> bool:
+def arena_dict_remove[T](m: mutable dict[dstr[key_shape], T]&, key: dstr[key_shape]) -> bool:
     return false
 
-def arena_dict_clear[T](m: mutable any dict[dstr[key_shape], T]&):
+def arena_dict_clear[T](m: mutable dict[dstr[key_shape], T]&):
     pass
 
-def arena_dict_reserve[T](a: mutable any Arena&, m: mutable any dict[dstr[key_shape], T]&, min_capacity: usize) -> void:
+def arena_dict_reserve[T](a: mutable Arena&, m: mutable dict[dstr[key_shape], T]&, min_capacity: usize) -> void:
     pass
 
-def arena_dict_put[T](a: mutable any Arena&, m: mutable any dict[dstr[key_shape], T]&, key: dstr[key_shape], value: T) -> mutable any T&?:
+def arena_dict_put[T](a: mutable Arena&, m: mutable dict[dstr[key_shape], T]&, key: dstr[key_shape], value: T) -> mutable T&?:
     return null
 
-def arena_dict_get_or_insert[T](a: mutable any Arena&, m: mutable any dict[dstr[key_shape], T]&, key: dstr[key_shape], value: T) -> mutable any T&?:
+def arena_dict_get_or_insert[T](a: mutable Arena&, m: mutable dict[dstr[key_shape], T]&, key: dstr[key_shape], value: T) -> mutable T&?:
     return null
 
 def build(owner: Arena, key: dstr[key_shape]) -> usize:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         pending: mutable PendingGotoStore = zeroed
         pending.reserve(8)
@@ -154,7 +154,7 @@ store PendingGotoStore:
     depth: usize
 
 def build(owner: Arena) -> usize:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         pending: mutable PendingGotoStore = zeroed
         pending.push(1usize, 2usize)
@@ -180,7 +180,7 @@ store PendingGotoStore:
     depth: usize
 
 def build(owner: Arena) -> void:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         pending: mutable PendingGotoStore = zeroed
         pending.push(1usize, 2usize)
@@ -203,29 +203,29 @@ func TestAnalyzeRejectsGenericKeyRuntimeBackedDictSugar(t *testing.T) {
 struct Key:
     id: u32
 
-def arena_dict_get[K, T](m: any dict[K, T]&, key: K) -> mutable any T&?:
+def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?:
     return null
 
-def arena_dict_contains[K, T](m: any dict[K, T]&, key: K) -> bool:
+def arena_dict_contains[K, T](m: dict[K, T]&, key: K) -> bool:
     return false
 
-def arena_dict_remove[K, T](m: mutable any dict[K, T]&, key: K) -> bool:
+def arena_dict_remove[K, T](m: mutable dict[K, T]&, key: K) -> bool:
     return false
 
-def arena_dict_clear[K, T](m: mutable any dict[K, T]&):
+def arena_dict_clear[K, T](m: mutable dict[K, T]&):
     pass
 
-def arena_dict_reserve[K, T](a: mutable any Arena&, m: mutable any dict[K, T]&, min_capacity: usize) -> void:
+def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capacity: usize) -> void:
     pass
 
-def arena_dict_put[K, T](a: mutable any Arena&, m: mutable any dict[K, T]&, key: K, value: T) -> mutable any T&?:
+def arena_dict_put[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&?:
     return null
 
-def arena_dict_get_or_insert[K, T](a: mutable any Arena&, m: mutable any dict[K, T]&, key: K, value: T) -> mutable any T&?:
+def arena_dict_get_or_insert[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&?:
     return null
 
 def build(owner: Arena, key: Key, id: u32) -> usize:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         counts: mutable dict[u32, i64] = zeroed
         keyed: mutable dict[Key, i64] = zeroed

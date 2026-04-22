@@ -14,7 +14,7 @@ func TestAnalyzeCascadeBlocksLowerToOrdinaryStatements(t *testing.T) {
 struct Report:
     inner: Inner
 
-def build(report: mutable any Report&, delta: int) -> int:
+def build(report: mutable Report&, delta: int) -> int:
     cascade report:
         .inner.value <- delta
         if delta > 0:

@@ -11,7 +11,7 @@ func TestGenerateLLVMIRLowersStoreRowDestructuring(t *testing.T) {
     depth: usize
 
 def build(owner: Arena) -> usize:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         pending: mutable PendingGotoStore = zeroed
         pending.push(1usize, 2usize)

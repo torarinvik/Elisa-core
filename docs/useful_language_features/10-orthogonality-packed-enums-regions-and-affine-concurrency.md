@@ -285,7 +285,7 @@ unified model wants structural propagation.
 Examples that should conceptually preserve region dependencies:
 
 ```context
-value: any Token&
+value: Token&
 holder: Holder = Holder(value, 1)
 move holder as Holder(alias, n)
 ```

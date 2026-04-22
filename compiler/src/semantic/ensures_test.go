@@ -15,14 +15,14 @@ func TestSemanticEnsuresNamedStateCallRecovery(t *testing.T) {
 		Ready when self.stage == 1
 		Failed when self.stage == 2
 
-def expect_ready(job: any ParseJob[Ready]&) -> void:
+def expect_ready(job: ParseJob[Ready]&) -> void:
 	pass
 
-def finish_ok(mutable job: any ParseJob[Pending]&) -> void can[Abort] ensures job => Ready:
+def finish_ok(mutable job: ParseJob[Pending]&) -> void can[Abort] ensures job => Ready:
 	job.checksum <- 7
 	job.stage <- 1
 
-def use(job: any ParseJob[Pending]&) -> void can[Abort]:
+def use(job: ParseJob[Pending]&) -> void can[Abort]:
 	finish_ok(job)
 	expect_ready(job)
 `)
@@ -52,7 +52,7 @@ func TestSemanticEnsuresRejectsWrongNamedStateProof(t *testing.T) {
 		Ready when self.stage == 1
 		Failed when self.stage == 2
 
-def bad_finish(mutable job: any ParseJob[Pending]&) -> void can[Abort] ensures job => Ready:
+def bad_finish(mutable job: ParseJob[Pending]&) -> void can[Abort] ensures job => Ready:
 	job.stage <- 2
 `)
 	errText := strings.Join(result.Errors(), "\n")
@@ -112,13 +112,13 @@ func TestSemanticEnsuresPreserveCallRecovery(t *testing.T) {
 		Alive when self.health > 0
 		Dead when self.health <= 0
 
-def expect_alive(player: any Player[Alive]&) -> void:
+def expect_alive(player: Player[Alive]&) -> void:
 	pass
 
-def bump_score(mutable player: any Player[Alive]&) -> void can[Abort] ensures player => preserve:
+def bump_score(mutable player: Player[Alive]&) -> void can[Abort] ensures player => preserve:
 	player.score <- player.score + 1
 
-def use(player: any Player[Alive]&) -> void can[Abort]:
+def use(player: Player[Alive]&) -> void can[Abort]:
 	bump_score(player)
 	expect_alive(player)
 `)
@@ -133,7 +133,7 @@ func TestSemanticEnsuresRejectsInvalidPreserveAfterRelevantMutation(t *testing.T
 		Alive when self.health > 0
 		Dead when self.health <= 0
 
-def bad_preserve(mutable player: any Player[Alive]&) -> void can[Abort] ensures player => preserve:
+def bad_preserve(mutable player: Player[Alive]&) -> void can[Abort] ensures player => preserve:
 	player.health <- 0
 `)
 	errText := strings.Join(result.Errors(), "\n")
@@ -164,13 +164,13 @@ def expect_dead(player: Player[Dead]) -> void:
 def expect_null(node: heap HeapPairNode!) -> void:
 	pass
 
-def kill_team(mutable team: any Team&) -> void can[Abort] ensures team.player => Dead:
+def kill_team(mutable team: Team&) -> void can[Abort] ensures team.player => Dead:
 	team.player.health <- 0
 
-def clear_slot(mutable team: any Team&) -> void can[Abort] ensures team.slot => !:
+def clear_slot(mutable team: Team&) -> void can[Abort] ensures team.slot => !:
 	team.slot <- null
 
-def use(team: any Team&) -> void can[Abort]:
+def use(team: Team&) -> void can[Abort]:
 	kill_team(team)
 	expect_dead(team.player)
 	clear_slot(team)
@@ -190,7 +190,7 @@ func TestSemanticEnsuresRejectsInvalidTargets(t *testing.T) {
 def bad_ref(count: int) -> void can[Abort] ensures count => !:
 	pass
 
-def bad_state(player: any Player[Alive]&) -> void can[Abort] ensures player => Closed:
+def bad_state(player: Player[Alive]&) -> void can[Abort] ensures player => Closed:
 	pass
 `)
 	errText := strings.Join(result.Errors(), "\n")
@@ -212,13 +212,13 @@ func TestSemanticConditionalEnsuresBranchRecovery(t *testing.T) {
 		Ready when self.stage == 1
 		Failed when self.stage == 2
 
-def expect_ready(job: any ParseJob[Ready]&) -> void:
+def expect_ready(job: ParseJob[Ready]&) -> void:
 	pass
 
-def expect_failed(job: any ParseJob[Failed]&) -> void:
+def expect_failed(job: ParseJob[Failed]&) -> void:
 	pass
 
-def finish(mutable job: any ParseJob[Pending]&, ok: bool) -> bool can[Abort] ensures return true => job => Ready, return false => job => Failed:
+def finish(mutable job: ParseJob[Pending]&, ok: bool) -> bool can[Abort] ensures return true => job => Ready, return false => job => Failed:
 	if ok:
 		job.stage <- 1
 		job.checksum <- 7
@@ -226,7 +226,7 @@ def finish(mutable job: any ParseJob[Pending]&, ok: bool) -> bool can[Abort] ens
 	job.stage <- 2
 	return false
 
-def use(mutable job: any ParseJob[Pending]&, ok: bool) -> void can[Abort]:
+def use(mutable job: ParseJob[Pending]&, ok: bool) -> void can[Abort]:
 	if finish(job, ok):
 		expect_ready(job)
 	else:
@@ -243,17 +243,17 @@ func TestSemanticConditionalEnsuresJoinOnPlainCall(t *testing.T) {
 		Ready when self.stage == 1
 		Failed when self.stage == 2
 
-def expect_done(job: any ParseJob[Ready | Failed]&) -> void:
+def expect_done(job: ParseJob[Ready | Failed]&) -> void:
 	pass
 
-def finish(mutable job: any ParseJob[Pending]&, ok: bool) -> bool can[Abort] ensures return true => job => Ready, return false => job => Failed:
+def finish(mutable job: ParseJob[Pending]&, ok: bool) -> bool can[Abort] ensures return true => job => Ready, return false => job => Failed:
 	if ok:
 		job.stage <- 1
 		return true
 	job.stage <- 2
 	return false
 
-def use(mutable job: any ParseJob[Pending]&, ok: bool) -> void can[Abort]:
+def use(mutable job: ParseJob[Pending]&, ok: bool) -> void can[Abort]:
 	finish(job, ok)
 	expect_done(job)
 `)
@@ -268,20 +268,20 @@ func TestSemanticConditionalEnsuresPreserveBranchRecovery(t *testing.T) {
 		Alive when self.health > 0
 		Dead when self.health <= 0
 
-def expect_alive(player: any Player[Alive]&) -> void:
+def expect_alive(player: Player[Alive]&) -> void:
 	pass
 
-def expect_dead(player: any Player[Dead]&) -> void:
+def expect_dead(player: Player[Dead]&) -> void:
 	pass
 
-def maybe_update(mutable player: any Player[Alive]&, ok: bool) -> bool can[Abort] ensures return true => player => preserve, return false => player => Dead:
+def maybe_update(mutable player: Player[Alive]&, ok: bool) -> bool can[Abort] ensures return true => player => preserve, return false => player => Dead:
 	if ok:
 		player.score <- player.score + 1
 		return true
 	player.health <- 0
 	return false
 
-def use(mutable player: any Player[Alive]&, ok: bool) -> void can[Abort]:
+def use(mutable player: Player[Alive]&, ok: bool) -> void can[Abort]:
 	if maybe_update(player, ok):
 		expect_alive(player)
 	else:
@@ -298,7 +298,7 @@ func TestSemanticConditionalEnsuresRejectWrongReturnBranchProof(t *testing.T) {
 		Ready when self.stage == 1
 		Failed when self.stage == 2
 
-def bad_finish(mutable job: any ParseJob[Pending]&, ok: bool) -> bool can[Abort] ensures return true => job => Ready, return false => job => Failed:
+def bad_finish(mutable job: ParseJob[Pending]&, ok: bool) -> bool can[Abort] ensures return true => job => Ready, return false => job => Failed:
 	if ok:
 		job.stage <- 1
 		return false
@@ -322,7 +322,7 @@ func TestSemanticConditionalEnsuresRejectNonBoolReturn(t *testing.T) {
 		Alive when self.health > 0
 		Dead when self.health <= 0
 
-def bad(player: any Player[Alive]&) -> void can[Abort] ensures return true => player => preserve:
+def bad(player: Player[Alive]&) -> void can[Abort] ensures return true => player => preserve:
 	pass
 `)
 	errText := strings.Join(result.Errors(), "\n")

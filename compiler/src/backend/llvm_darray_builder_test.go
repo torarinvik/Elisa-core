@@ -7,7 +7,7 @@ import (
 
 func TestGenerateLLVMIRLowersDArrayBuilderSugar(t *testing.T) {
 	src := `def build(owner: Arena) -> usize:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         xs: mutable darray[i64] = []
         xs.push(1)
@@ -33,10 +33,10 @@ func TestGenerateLLVMIRLowersDArrayBuilderSugar(t *testing.T) {
 
 func TestGenerateLLVMIRLowersDArrayExtendSugar(t *testing.T) {
 	src := `def build(owner: Arena) -> usize:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         xs: mutable darray[int] = []
-        xr: mutable any darray[int]& = (&xs).cast[mutable any darray[int]&]
+        xr: mutable darray[int]& = (&xs).cast[mutable darray[int]&]
         xr.extend([1, 2, 3])
         return xs.count
 `
@@ -55,10 +55,10 @@ func TestGenerateLLVMIRLowersDArrayExtendSugar(t *testing.T) {
 
 func TestGenerateLLVMIRLowersDArrayReserveSugar(t *testing.T) {
 	src := `def build(owner: Arena) -> usize:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         xs: mutable darray[i64] = []
-        xr: mutable any darray[i64]& = (&xs).cast[mutable any darray[i64]&]
+        xr: mutable darray[i64]& = (&xs).cast[mutable darray[i64]&]
 		xr.reserve(8)
         return xs.capacity
 `
@@ -77,10 +77,10 @@ func TestGenerateLLVMIRLowersDArrayReserveSugar(t *testing.T) {
 
 func TestGenerateLLVMIRLowersDArrayClearAndTruncateSugar(t *testing.T) {
 	src := `def build(owner: Arena) -> usize:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         xs: mutable darray[int] = [1, 2, 3]
-        xr: mutable any darray[int]& = (&xs).cast[mutable any darray[int]&]
+        xr: mutable darray[int]& = (&xs).cast[mutable darray[int]&]
 		xr.truncate(2)
         xr.clear()
         return xs.count
@@ -100,7 +100,7 @@ func TestGenerateLLVMIRLowersDArrayClearAndTruncateSugar(t *testing.T) {
 
 func TestGenerateLLVMIRLowersDArrayBuilderSugarAcrossElementTypes(t *testing.T) {
 	src := `def build(owner: Arena) -> usize:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         ints: mutable darray[i64] = []
         names: mutable darray[u32] = []

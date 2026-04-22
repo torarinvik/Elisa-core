@@ -6569,6 +6569,10 @@ func (a *Analyzer) funcParamAllowsImplicitSink(funcExpr ast.Expr, fnType *FuncTy
 
 func (a *Analyzer) analyzeProofCarryingViewHelperCall(expr *ast.CallExpr) (Type, bool) {
 	switch callIdentName(expr) {
+	case "any":
+		return a.analyzeIterableBoolAggregateHelperCall(expr, "any"), true
+	case "all":
+		return a.analyzeIterableBoolAggregateHelperCall(expr, "all"), true
 	case "enumerate":
 		return a.analyzeEnumerateHelperCall(expr), true
 	case "readonly":
@@ -6584,6 +6588,28 @@ func (a *Analyzer) analyzeProofCarryingViewHelperCall(expr *ast.CallExpr) (Type,
 	default:
 		return nil, false
 	}
+}
+
+func (a *Analyzer) analyzeIterableBoolAggregateHelperCall(expr *ast.CallExpr, helperName string) Type {
+	if len(expr.Args) != 1 {
+		a.errorf(expr.Pos(), "%s expects 1 argument, got %d", helperName, len(expr.Args))
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		return invalidType
+	}
+	sourceType := a.analyzeExpr(expr.Args[0])
+	info, ok := a.resolveIterLoopSourceInfo(expr.Args[0], sourceType)
+	if !ok {
+		a.errorf(expr.Args[0].Pos(), "%s expects an iterable source, got %s", helperName, sourceType)
+		return invalidType
+	}
+	boolType := a.namedTypes["bool"]
+	if !AssignableTo(boolType, info.ItemType) {
+		a.errorf(expr.Args[0].Pos(), "%s expects an iterable of bool, got %s", helperName, info.ItemType)
+		return invalidType
+	}
+	return boolType
 }
 
 func (a *Analyzer) analyzeEnumerateHelperCall(expr *ast.CallExpr) Type {

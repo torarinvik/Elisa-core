@@ -1470,7 +1470,7 @@ func TestRunCLICompilesStage1RuntimeToLLVM(t *testing.T) {
 func TestRunCLIRejectsInvalidStringEscape(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "invalid_escape.llcontext")
-	if err := os.WriteFile(fixturePath, []byte("def bad() -> any u8&:\n    return \"oops\\q\" -> any u8&\n"), 0o644); err != nil {
+	if err := os.WriteFile(fixturePath, []byte("def bad() -> u8&:\n    return \"oops\\q\" -> u8&\n"), 0o644); err != nil {
 		t.Fatalf("failed to write invalid fixture: %v", err)
 	}
 
@@ -1506,7 +1506,7 @@ func TestRunCLIRejectsInvalidCharLiteral(t *testing.T) {
 func TestRunCLIRejectsGenericKeyRuntimeBackedDictSugar(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "generic_key_dict_runtime_reject.llcontext")
-	src := "def arena_dict_get[K, T](m: any dict[K, T]&, key: K) -> mutable any T&?:\n    return null\n\ndef bad(values: dict[u32, i64], key: u32) -> mutable any i64&?:\n    return values.get(key)\n"
+	src := "def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?:\n    return null\n\ndef bad(values: dict[u32, i64], key: u32) -> mutable i64&?:\n    return values.get(key)\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write generic-key dict runtime rejection fixture: %v", err)
 	}
@@ -1685,7 +1685,7 @@ func TestRunCLIPrintsAnnotatedFunctionsInAST(t *testing.T) {
 func TestRunCLIPrintsAnnotatedExternFunctionsInAST(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "annotated_extern.llcontext")
-	src := "struct Holder:\n    value: any i32&\n\nstruct Window:\n    items: view[Holder]\n\n@borrows_return(window.items[*])\nextern borrow_value(window: Window) -> view[Holder]\n"
+	src := "struct Holder:\n    value: i32&\n\nstruct Window:\n    items: view[Holder]\n\n@borrows_return(window.items[*])\nextern borrow_value(window: Window) -> view[Holder]\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write annotated extern fixture: %v", err)
 	}
@@ -1806,7 +1806,7 @@ func TestRunCLIRejectsLegacyReverseIterableLoopSyntax(t *testing.T) {
 func TestRunCLIRejectsLegacyReprCStructSyntax(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "legacy_repr_c_struct_error.llcontext")
-	src := "repr(c) struct Holder:\n    value: any i32&\n"
+	src := "repr(c) struct Holder:\n    value: i32&\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write legacy repr(c) fixture: %v", err)
 	}
@@ -1863,7 +1863,7 @@ func TestRunCLIRejectsInternalRuntimeCarrierTypes(t *testing.T) {
 func TestRunCLIFmtNormalizesSingleStatementGrantBlocks(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "grant_fmt_single_use.llcontext")
-	src := "def write_once(text: any u8&) -> int:\n    can Console.Write:\n        return puts(text)\n\ndef assign_once(target: mutable any i64&):\n    can Memory.Allocate:\n        target <- alloc_value()\n"
+	src := "def write_once(text: u8&) -> int:\n    can Console.Write:\n        return puts(text)\n\ndef assign_once(target: mutable i64&):\n    can Memory.Allocate:\n        target <- alloc_value()\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write single-use grant fixture: %v", err)
 	}
@@ -2614,7 +2614,7 @@ struct WriteJob:
 	value: i64
 
 def write_slot(job: WriteJob) -> i64:
-	slot: mutable any i64& = job.slot_bits.cast[mutable any i64&]
+	slot: mutable i64& = job.slot_bits.cast[mutable i64&]
 	slot[0] <- job.value
 	return job.value
 
@@ -2624,12 +2624,12 @@ def pool_backed_case() -> void:
 		partials: i64[2] = zeroed
 		pool workers(2):
 			group: mutable TaskGroup = task_group_new()
-			first_bits: uintptr = (&partials[0]).cast[any i64&].uintptr()
-			second_bits: uintptr = (&partials[1]).cast[any i64&].uintptr()
+			first_bits: uintptr = (&partials[0]).cast[i64&].uintptr()
+			second_bits: uintptr = (&partials[1]).cast[i64&].uintptr()
 			first: Task[i64, Pending] = submit write_slot(WriteJob(first_bits, 1))
 			second: Task[i64, Pending] = submit write_slot(WriteJob(second_bits, 2))
-			task_group_add((&group).cast[any TaskGroup&], move first)
-			task_group_add((&group).cast[any TaskGroup&], move second)
+			task_group_add((&group).cast[TaskGroup&], move first)
+			task_group_add((&group).cast[TaskGroup&], move second)
 			wait all group
 		assert_eq(partials[0], 1)
 		assert_eq(partials[1], 2)
@@ -2675,7 +2675,7 @@ func TestRunCLIAcceptsBareSViewLocalAnnotationInObjectBuild(t *testing.T) {
 	runtimeInclude = filepath.ToSlash(runtimeInclude)
 	src := fmt.Sprintf(`# include %q
 
-def local_view(src: any u8&) -> i64:
+def local_view(src: u8&) -> i64:
 	text: sview = string_view(src, 0, 1)
 	return text.len
 `, runtimeInclude)

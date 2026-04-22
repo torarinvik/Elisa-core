@@ -6267,6 +6267,10 @@ func backendExplicitMoveOperand(expr ast.Expr) (ast.Expr, bool) {
 
 func (s *functionState) emitProofCarryingViewHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	switch callIdentName(expr) {
+	case "any":
+		return s.emitIterableBoolAggregateHelperCall(expr, "any", true)
+	case "all":
+		return s.emitIterableBoolAggregateHelperCall(expr, "all", false)
 	case "enumerate":
 		return s.emitEnumerateHelperCall(expr)
 	case "readonly":
@@ -6282,6 +6286,94 @@ func (s *functionState) emitProofCarryingViewHelperCall(expr *ast.CallExpr) (C.L
 	default:
 		return nil, nil, false, nil
 	}
+}
+
+func (s *functionState) emitIterableBoolAggregateHelperCall(expr *ast.CallExpr, helperName string, stopOnTrue bool) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if len(expr.Args) != 1 {
+		return nil, nil, true, fmt.Errorf("%s expects 1 argument, got %d", helperName, len(expr.Args))
+	}
+	sourceType := s.exprType(expr.Args[0])
+	if sourceType == nil {
+		return nil, nil, true, fmt.Errorf("%s source is missing a semantic type", helperName)
+	}
+	resultType := s.exprType(expr)
+	if resultType == nil {
+		resultType = s.g.result.NamedTypes["bool"]
+	}
+	sourceValue, _, err := s.emitExpr(expr.Args[0], sourceType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	sourceAlloca, err := s.emitStackTempValue(sourceValue, sourceType, helperName+".source")
+	if err != nil {
+		return nil, nil, true, err
+	}
+	countValue, err := s.emitIterLoopCount(expr.Args[0], sourceAlloca, sourceType, helperName)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	boolType := s.g.result.NamedTypes["bool"]
+	boolLLVMType, err := s.g.lowerType(boolType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	zeroIndex := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	one := C.LLVMConstInt(usizeLLVMType, 1, 0)
+	defaultBool := C.LLVMConstInt(boolLLVMType, 0, 0)
+	terminalBool := C.LLVMConstInt(boolLLVMType, 1, 0)
+	if !stopOnTrue {
+		defaultBool = C.LLVMConstInt(boolLLVMType, 1, 0)
+		terminalBool = C.LLVMConstInt(boolLLVMType, 0, 0)
+	}
+
+	entryBlock := C.LLVMGetInsertBlock(s.builder)
+	loopCondBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(helperName+".cond"))
+	loopBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(helperName+".body"))
+	loopContinueBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(helperName+".continue"))
+	loopShortCircuitBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(helperName+".short_circuit"))
+	loopEndBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(helperName+".end"))
+	C.LLVMBuildBr(s.builder, loopCondBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, loopCondBB)
+	indexValue := C.LLVMBuildPhi(s.builder, usizeLLVMType, cStringFree(helperName+".index"))
+	C.LLVMAddIncoming(indexValue, llvmValueSlicePtr([]C.LLVMValueRef{zeroIndex}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{entryBlock}), 1)
+	hasMore := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, countValue, cStringFree(helperName+".has_more"))
+	C.LLVMBuildCondBr(s.builder, hasMore, loopBodyBB, loopEndBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, loopBodyBB)
+	itemValue, itemType, err := s.emitIterLoopElementValue(expr.Args[0], sourceAlloca, sourceType, indexValue, helperName)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	itemBool, err := s.coerceValue(itemValue, itemType, boolType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if stopOnTrue {
+		C.LLVMBuildCondBr(s.builder, itemBool, loopShortCircuitBB, loopContinueBB)
+	} else {
+		C.LLVMBuildCondBr(s.builder, itemBool, loopContinueBB, loopShortCircuitBB)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, loopContinueBB)
+	nextIndex := C.LLVMBuildAdd(s.builder, indexValue, one, cStringFree(helperName+".index.next"))
+	continueEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, loopCondBB)
+	C.LLVMAddIncoming(indexValue, llvmValueSlicePtr([]C.LLVMValueRef{nextIndex}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{continueEnd}), 1)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, loopShortCircuitBB)
+	shortCircuitEnd := C.LLVMGetInsertBlock(s.builder)
+	C.LLVMBuildBr(s.builder, loopEndBB)
+
+	C.LLVMPositionBuilderAtEnd(s.builder, loopEndBB)
+	resultValue := C.LLVMBuildPhi(s.builder, boolLLVMType, cStringFree(helperName+".result"))
+	C.LLVMAddIncoming(resultValue, llvmValueSlicePtr([]C.LLVMValueRef{defaultBool, terminalBool}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{loopCondBB, shortCircuitEnd}), 2)
+	return resultValue, boolType, true, nil
 }
 
 func (s *functionState) emitEnumerateHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {

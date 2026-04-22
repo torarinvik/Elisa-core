@@ -9,7 +9,7 @@ import (
 
 func TestAnalyzeDArrayBuilderLiteralAndPushSugar(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "darray_builder_push.llcontext", `def build(owner: Arena) -> usize:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         xs: mutable darray[i64] = []
         xs.push(1)
@@ -82,10 +82,10 @@ func TestAnalyzeRejectsDArrayPushOutsideArenaScope(t *testing.T) {
 
 func TestAnalyzeDArrayPushSupportsMutableRefReceivers(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "darray_push_ref_receiver.llcontext", `def build(owner: Arena) -> usize:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         xs: mutable darray[i64] = []
-        xr: mutable any darray[i64]& = (&xs).cast[mutable any darray[i64]&]
+        xr: mutable darray[i64]& = (&xs).cast[mutable darray[i64]&]
         xr.push(1)
         return xs.count
 `)
@@ -123,10 +123,10 @@ func TestAnalyzeDArrayPushSupportsMutableRefReceivers(t *testing.T) {
 
 func TestAnalyzeDArrayExtendSupportsRefReceiversAndArraySources(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "darray_extend_ref_receiver.llcontext", `def build(owner: Arena) -> usize:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         xs: mutable darray[int] = []
-        xr: mutable any darray[int]& = (&xs).cast[mutable any darray[int]&]
+        xr: mutable darray[int]& = (&xs).cast[mutable darray[int]&]
         xr.extend([1, 2, 3])
         return xs.count
 `)
@@ -168,10 +168,10 @@ func TestAnalyzeDArrayExtendSupportsRefReceiversAndArraySources(t *testing.T) {
 
 func TestAnalyzeDArrayReserveSupportsRefReceivers(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "darray_reserve_ref_receiver.llcontext", `def build(owner: Arena) -> usize:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         xs: mutable darray[i64] = []
-        xr: mutable any darray[i64]& = (&xs).cast[mutable any darray[i64]&]
+        xr: mutable darray[i64]& = (&xs).cast[mutable darray[i64]&]
 		xr.reserve(8)
         return xs.capacity
 `)
@@ -206,10 +206,10 @@ func TestAnalyzeDArrayReserveSupportsRefReceivers(t *testing.T) {
 
 func TestAnalyzeDArrayClearAndTruncate(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "darray_clear_truncate.llcontext", `def build(owner: Arena) -> usize:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         xs: mutable darray[int] = [1, 2, 3]
-        xr: mutable any darray[int]& = (&xs).cast[mutable any darray[int]&]
+        xr: mutable darray[int]& = (&xs).cast[mutable darray[int]&]
 		xr.truncate(2)
         xr.clear()
         return xs.count

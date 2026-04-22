@@ -258,10 +258,10 @@ If `T` contains affine values structurally, reject:
 Examples:
 
 ```context
-def bad(arg: any Holder&) -> void:   # reject
+def bad(arg: Holder&) -> void:   # reject
     pass
 
-alias: any Holder& = &holder         # reject
+alias: Holder& = &holder         # reject
 ```
 
 ### 2. No affine global storage
@@ -516,7 +516,7 @@ are not yet source-visible generic constraints.
 
 - `stack T&`, `stack T&?`
 - named-region refs
-- plain `any T&`, `any T&?`
+- plain `T&`, `T&?`
 - mutable `heap T&`, `heap T&?`
 - values depending on `Store[Local]`
 - `MutexGuard[Held]`
@@ -761,7 +761,7 @@ def build_index(paths: static PathJob&, count: usize) -> void can[Pool.Submit, P
 struct Holder:
     thread: Thread[i64, Joinable]
 
-def bad(arg: any Holder&) -> void:
+def bad(arg: Holder&) -> void:
     pass
 ```
 

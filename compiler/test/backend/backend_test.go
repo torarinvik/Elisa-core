@@ -124,11 +124,11 @@ func TestGenerateLLVMIRDefinesSimpleFunctionBody(t *testing.T) {
 	src := `struct Box:
     value: i32
 
-extern alloc_box() -> any Box&
+extern alloc_box() -> Box&
 extern take_box(box: Box) -> void
 extern errno_value: i32
 
-def read_box(box: any Box&) -> i32:
+def read_box(box: Box&) -> i32:
     return box.value
 `
 	result := parseAndAnalyze(t, "backend_box.llcontext", src)
@@ -313,7 +313,7 @@ def countdown(start: i32) -> i32:
 }
 
 func TestGenerateLLVMIRLowersLockScopeCleanupOnReturnAndFallthrough(t *testing.T) {
-	src := `extern mutex_lock(mu: any Mutex&) -> MutexGuard[Held]
+	src := `extern mutex_lock(mu: Mutex&) -> MutexGuard[Held]
 extern mutex_unlock(g: MutexGuard[Held]) -> void
 
 def lock_then_return(mu: mutable Mutex) -> i64:
@@ -355,8 +355,8 @@ def lock_then_fallthrough(mu: mutable Mutex) -> void:
 
 func TestGenerateLLVMIRLowersPoolScopeCleanupInReverseNestingOrder(t *testing.T) {
 	src := `extern pool_new(workers: usize) -> ThreadPool
-extern pool_shutdown(pool: any ThreadPool&) -> void
-extern mutex_lock(mu: any Mutex&) -> MutexGuard[Held]
+extern pool_shutdown(pool: ThreadPool&) -> void
+extern mutex_lock(mu: Mutex&) -> MutexGuard[Held]
 extern mutex_unlock(g: MutexGuard[Held]) -> void
 
 def pool_then_return(mu: mutable Mutex) -> i64:
@@ -408,8 +408,8 @@ def pool_then_fallthrough(mu: mutable Mutex) -> void:
 }
 
 func TestGenerateLLVMIRLowersNotifySyntax(t *testing.T) {
-	src := `extern notify_one(cv: any CondVar&) -> void
-extern notify_all(cv: any CondVar&) -> void
+	src := `extern notify_one(cv: CondVar&) -> void
+extern notify_all(cv: CondVar&) -> void
 
 def wake(cv: mutable CondVar, broadcast: bool) -> void:
 	if broadcast:
@@ -445,14 +445,14 @@ func TestGenerateLLVMIRLowersAtomicRmwCalls(t *testing.T) {
 	AcqRel
 	SeqCst
 
-extern fetch_add(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
-extern fetch_sub(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
-extern fetch_or(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
-extern fetch_and(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
-extern fetch_xor(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
+extern fetch_add(slot: atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
+extern fetch_sub(slot: atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
+extern fetch_or(slot: atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
+extern fetch_and(slot: atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
+extern fetch_xor(slot: atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
 
 def bump(slot: mutable atomic[i64]) -> i64 can[Atomics.Rmw]:
-	slot_ref: any atomic[i64]& = (&slot).cast[any atomic[i64]&]
+	slot_ref: atomic[i64]& = (&slot).cast[atomic[i64]&]
 	add: i64 = fetch_add(slot_ref, 1, MemoryOrder.AcqRel)
 	sub: i64 = fetch_sub(slot_ref, 2, MemoryOrder.AcqRel)
 	or_bits: i64 = fetch_or(slot_ref, 4, MemoryOrder.AcqRel)
@@ -488,9 +488,9 @@ def bump(slot: mutable atomic[i64]) -> i64 can[Atomics.Rmw]:
 
 func TestGenerateLLVMIRLowersSubmitSyntaxInsidePoolScope(t *testing.T) {
 	src := `extern pool_new(workers: usize) -> ThreadPool
-extern pool_shutdown(pool: any ThreadPool&) -> void
+extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -530,7 +530,7 @@ def submit_then_await() -> i64:
 }
 
 func TestGenerateLLVMIRLowersExplicitSubmitSyntax(t *testing.T) {
-	src := `def pool_submit1(pool: any ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	src := `def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -539,7 +539,7 @@ extern pool_await(task: Task[i64, Pending]) -> i64
 def work(value: i64) -> i64:
 	return value + 1
 
-def submit_then_await(pool: any ThreadPool&) -> i64:
+def submit_then_await(pool: ThreadPool&) -> i64:
 	task: Task[i64, Pending] = submit[pool] work(7)
 	return await task
 `
@@ -795,14 +795,14 @@ def view_char(text: sview[0, 4]) -> char:
 }
 
 func TestGenerateLLVMIRLowersEscapedStringLiteralBytes(t *testing.T) {
-	src := `def newline_text() -> any u8&:
-	return "line\nbreak".cast[any u8&]
+	src := `def newline_text() -> u8&:
+	return "line\nbreak".cast[u8&]
 
-def quoted_text() -> any u8&:
-	return "quote: \" slash: \\ hex: \x41".cast[any u8&]
+def quoted_text() -> u8&:
+	return "quote: \" slash: \\ hex: \x41".cast[u8&]
 
-def unicode_text() -> any u8&:
-	return "\u263A".cast[any u8&]
+def unicode_text() -> u8&:
+	return "\u263A".cast[u8&]
 `
 	result := parseAndAnalyze(t, "backend_string_escapes.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -859,7 +859,7 @@ func TestGenerateLLVMIRLowersReferenceComparisons(t *testing.T) {
 	src := `struct Box:
     value: i32
 
-extern maybe_box() -> any Box&?
+extern maybe_box() -> Box&?
 
 def is_missing() -> bool:
     return maybe_box() == null
@@ -867,7 +867,7 @@ def is_missing() -> bool:
 def is_present() -> bool:
     return maybe_box() != null
 
-def same_box(left: any Box&, right: any Box&) -> bool:
+def same_box(left: Box&, right: Box&) -> bool:
     return left == right
 `
 	result := parseAndAnalyze(t, "backend_reference_comparisons.llcontext", src)
@@ -1538,11 +1538,11 @@ def total() -> f64:
 func TestGenerateCHeaderOrdersAggregateDefinitionsByValueDependencies(t *testing.T) {
 	src := `struct Node:
 	value: mutable i32
-	next: mutable any Node&?
+	next: mutable Node&?
 
 struct Wrapper:
 	node: mutable Node
-	next_ref: mutable any Node&?
+	next_ref: mutable Node&?
 
 export type Wrapper as CtxWrapper
 export type Node as CtxNode
@@ -1572,9 +1572,9 @@ export global root as ctx_root
 }
 
 func TestGenerateLLVMIRLowersVariadicExternCalls(t *testing.T) {
-	src := `extern snprintf(buffer: any u8&?, buffer_size: usize, format: any u8&, ...) -> int
+	src := `extern snprintf(buffer: u8&?, buffer_size: usize, format: u8&, ...) -> int
 
-def format_len(format: any u8&) -> int:
+def format_len(format: u8&) -> int:
 	return snprintf(null, 0, format, 7, 9)
 `
 	result := parseAndAnalyze(t, "backend_variadic_call.llcontext", src)
@@ -1598,11 +1598,11 @@ def format_len(format: any u8&) -> int:
 }
 
 func TestGenerateLLVMIRLowersPointerIntegerCasts(t *testing.T) {
-	src := `def ptr_bits(ptr: any u8&) -> uintptr:
+	src := `def ptr_bits(ptr: u8&) -> uintptr:
 	return ptr.uintptr()
 
-def bits_ptr(bits: uintptr) -> any u8&:
-	return bits.cast[any u8&]
+def bits_ptr(bits: uintptr) -> u8&:
+	return bits.cast[u8&]
 `
 	result := parseAndAnalyze(t, "backend_pointer_integer_casts.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -1658,12 +1658,12 @@ def read_nested_return() -> i32:
 
 func TestGenerateLLVMIRLowerRuntimeBackedTypes(t *testing.T) {
 	src := `struct DynArray[T]:
-	items: mutable any T&?
+	items: mutable T&?
     count: mutable usize
     capacity: mutable usize
 
 struct DynArrayView:
-	items: mutable any void&?
+	items: mutable void&?
     count: mutable usize
 
 extern take_array(values: darray[i32, row]) -> void
@@ -1828,13 +1828,13 @@ def rem_unsigned() -> u32:
 }
 
 func TestGenerateLLVMIRLowersPointerArithmetic(t *testing.T) {
-	src := `def advance(ptr: any u8&, offset: usize) -> any u8&:
+	src := `def advance(ptr: u8&, offset: usize) -> u8&:
     return ptr + offset
 
-def advance_commutative(offset: usize, ptr: any u8&) -> any u8&:
+def advance_commutative(offset: usize, ptr: u8&) -> u8&:
     return offset + ptr
 
-def rewind(ptr: any u8&, offset: usize) -> any u8&:
+def rewind(ptr: u8&, offset: usize) -> u8&:
     return ptr - offset
 `
 	result := parseAndAnalyze(t, "backend_pointer_arithmetic.llcontext", src)
@@ -1863,7 +1863,7 @@ def rewind(ptr: any u8&, offset: usize) -> any u8&:
 func TestGenerateLLVMIRLowersManualRegions(t *testing.T) {
 	src := `def region_value(seed: i32) -> i32:
 	region scratch(1024)
-	value: any i32& = new[scratch] seed + 1
+	value: i32& = new[scratch] seed + 1
 	return value[0]
 `
 	result := parseAndAnalyze(t, "backend_manual_regions.llcontext", src)
@@ -1892,12 +1892,12 @@ func TestGenerateLLVMIRLowersRegionCheckpoints(t *testing.T) {
 	src := `def region_value(seed: i32) -> i32:
 	region scratch(1024)
 	mark scratch as cp
-	temp: any i32& = new[scratch] seed + 1
+	temp: i32& = new[scratch] seed + 1
 	restore scratch from cp
-	reused: any i32& = new[scratch] seed + 2
+	reused: i32& = new[scratch] seed + 2
 	value: i32 = reused[0]
 	reset scratch
-	final: any i32& = new[scratch] seed + 3
+	final: i32& = new[scratch] seed + 3
 	return value + final[0]
 `
 	result := parseAndAnalyze(t, "backend_region_checkpoints.llcontext", src)
@@ -1926,14 +1926,14 @@ func TestGenerateLLVMIRLowersNestedRegionCheckpoints(t *testing.T) {
 	src := `def region_value(seed: i32) -> i32:
 	region scratch(1024)
 	mark scratch as outer
-	stable: any i32& = new[scratch] seed + 1
+	stable: i32& = new[scratch] seed + 1
 	mark scratch as inner
-	temp: any i32& = new[scratch] seed + 2
+	temp: i32& = new[scratch] seed + 2
 	restore scratch from inner
 	kept: i32 = stable[0]
 	restore scratch from outer
 	reset scratch
-	fresh: any i32& = new[scratch] seed + 3
+	fresh: i32& = new[scratch] seed + 3
 	return kept + fresh[0]
 `
 	result := parseAndAnalyze(t, "backend_nested_region_checkpoints.llcontext", src)
@@ -2513,17 +2513,17 @@ func TestGenerateLLVMIRSpecializesDictHelperStyleFunctions(t *testing.T) {
 	src := `error RuntimeError:
 	OutOfMemory
 
-def arena_dict_get[V](m: any dict[dstr, V]&, key: dstr) -> any V&?:
+def arena_dict_get[V](m: dict[dstr, V]&, key: dstr) -> V&?:
 	return null
 
-def arena_dict_put[V](a: any Arena&, m: any dict[dstr, V]&, key: dstr, value: V) -> any V&? error[RuntimeError]:
+def arena_dict_put[V](a: Arena&, m: dict[dstr, V]&, key: dstr, value: V) -> V&? error[RuntimeError]:
 	raise RuntimeError.OutOfMemory
 
-def touch(a: any Arena&, m: any dict[dstr, i32]&, key: dstr) -> bool:
-	slot: any i32&? = try arena_dict_put(a, m, key, 7) else null
+def touch(a: Arena&, m: dict[dstr, i32]&, key: dstr) -> bool:
+	slot: i32&? = try arena_dict_put(a, m, key, 7) else null
 	if slot == null:
 		return false
-	maybe_slot: any i32&? = arena_dict_get(m, key)
+	maybe_slot: i32&? = arena_dict_get(m, key)
 	return maybe_slot != null
 `
 	result := parseAndAnalyze(t, "backend_dict_helper_calls.llcontext", src)
@@ -2533,7 +2533,7 @@ def touch(a: any Arena&, m: any dict[dstr, i32]&, key: dstr) -> bool:
 	}
 
 	checks := []string{
-		"%ErrUnion__RuntimeError__any_i32 = type { i32, ptr }",
+		"%ErrUnion__RuntimeError__i32 = type { i32, ptr }",
 		"define ptr @arena_dict_get__i32(ptr",
 		"define i32 @arena_dict_put__i32(ptr",
 		"define i1 @touch(ptr %0, ptr %1, ptr %2)",
@@ -2626,22 +2626,22 @@ error IoError:
 	NotFound
 
 extern alloc(size: usize) -> heap void&?
-extern read_file(path: any u8&) -> dstr[file_text] error[IoError.NotFound, ...]
+extern read_file(path: u8&) -> dstr[file_text] error[IoError.NotFound, ...]
 
 def checked_alloc(size: usize) -> heap void& error[MemoryError.OutOfMemory, ...]:
 	ptr: heap void& = alloc(size) else raise MemoryError.OutOfMemory
 	return ptr
 
-def load_text(path: any u8&) -> dstr[file_text] error[IoError.NotFound, ...]:
+def load_text(path: u8&) -> dstr[file_text] error[IoError.NotFound, ...]:
 	text: dstr[file_text] = try read_file(path)
 	return text
 
-def load_with_fallback(path: any u8&) -> any u8&:
-	text: any u8& = try read_file(path) else "".cast[any u8&]
+def load_with_fallback(path: u8&) -> u8&:
+	text: u8& = try read_file(path) else "".cast[u8&]
 	return text
 
-def load_with_default(path: any u8&) -> any u8&:
-	text: any u8& = try? read_file(path) default "".cast[any u8&]
+def load_with_default(path: u8&) -> u8&:
+	text: u8& = try? read_file(path) default "".cast[u8&]
 	return text
 `
 	result := parseAndAnalyze(t, "backend_error_handling.llcontext", src)
@@ -2859,9 +2859,9 @@ func TestGenerateLLVMIRAcceptsBareFamilyErrorSetShorthand(t *testing.T) {
 	src := `error IoError:
 	NotFound
 
-extern read_file(path: any u8&) -> dstr[file_text] error[IoError]
+extern read_file(path: u8&) -> dstr[file_text] error[IoError]
 
-def load_text(path: any u8&) -> dstr[file_text] error[IoError, ...]:
+def load_text(path: u8&) -> dstr[file_text] error[IoError, ...]:
 	text: dstr[file_text] = try read_file(path)
 	return text
 `
@@ -2952,12 +2952,12 @@ def unwrap_or(flag: bool) -> i32:
 
 func TestGenerateLLVMIRIndexesRuntimeBackedArraysAndViews(t *testing.T) {
 	src := `struct DynArray[T]:
-	items: mutable any T&?
+	items: mutable T&?
     count: mutable usize
     capacity: mutable usize
 
 struct DynArrayView:
-	items: mutable any void&?
+	items: mutable void&?
     count: mutable usize
 
 def read_array(values: darray[i32, row]) -> i32:
@@ -3095,13 +3095,13 @@ def different_views(left: StringView, right: StringView) -> bool:
 
 func TestGenerateLLVMIRSpecializesSameExtentRuntimeStringEquality(t *testing.T) {
 	src := `struct StringView:
-	data: mutable any u8&
+	data: mutable u8&
 	len: mutable i64
 
-def string_view(value: any u8&?, start: i64, end: i64) -> StringView:
+def string_view(value: u8&?, start: i64, end: i64) -> StringView:
 	_ = value
 	_ = start
-	return StringView("".cast[any u8&], end - start)
+	return StringView("".cast[u8&], end - start)
 
 def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
 	return string_view(value, start, end)
@@ -3203,7 +3203,7 @@ def different_bounds_view(left: dstr[row], right: dstr[col]) -> bool:
 
 func TestGenerateLLVMIRSpecializesDirectRuntimeStringEqualityHelpers(t *testing.T) {
 	src := `struct StringView:
-	data: mutable any u8&
+	data: mutable u8&
 	len: mutable i64
 
 extern ctx_string_view(value: dstr[row], start: i64, end: i64) -> StringView
@@ -3511,10 +3511,10 @@ def differs_short(view: StringView) -> bool:
 }
 
 func TestGenerateLLVMIRSpecializesLongStringViewLiteralHelperCalls(t *testing.T) {
-	src := `extern string_view_eq(view: StringView, other: any u8&?) -> int
+	src := `extern string_view_eq(view: StringView, other: u8&?) -> int
 
 def same_long(view: StringView) -> bool:
-	return string_view_eq(view, "destroy_region".cast[any u8&]) != 0
+	return string_view_eq(view, "destroy_region".cast[u8&]) != 0
 `
 	result := parseAndAnalyze(t, "backend_runtime_string_literal_eq_long.llcontext", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -3541,11 +3541,11 @@ def same_long(view: StringView) -> bool:
 
 func TestGenerateLLVMIRMarksDisjointDViewMemcpyCallsNoAlias(t *testing.T) {
 	src := `struct DynArrayView:
-	data: mutable any void&?
+	data: mutable void&?
 	len: mutable usize
 	elem_size: mutable usize
 
-extern arena_memcpy(dest: any void&?, src: any void&?, n: usize) -> any void&?
+extern arena_memcpy(dest: void&?, src: void&?, n: usize) -> void&?
 
 def arena_da_view_prefix[T](view: dview[T], end: usize) -> dview[T]:
 	_ = end
@@ -3555,7 +3555,7 @@ def arena_da_view_suffix[T](view: dview[T], start: usize) -> dview[T]:
 	_ = start
 	return view
 
-def split_copy(view: dview[i32]) -> any void&?:
+def split_copy(view: dview[i32]) -> void&?:
 	prefix: dview[i32] = arena_da_view_prefix(view, 2)
 	suffix: dview[i32] = arena_da_view_suffix(view, 2)
 	return arena_memcpy(prefix.data, suffix.data, prefix.len * prefix.elem_size)
@@ -3577,22 +3577,22 @@ def split_copy(view: dview[i32]) -> any void&?:
 
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExact(t *testing.T) {
 	src := `struct DynArray[T]:
-	items: mutable any T&?
+	items: mutable T&?
 	count: mutable usize
 	capacity: mutable usize
 
 struct DynArrayView:
-	data: mutable any void&?
+	data: mutable void&?
 	len: mutable usize
 	elem_size: mutable usize
 
-extern arena_memcpy(dest: any void&?, src: any void&?, n: usize) -> any void&?
+extern arena_memcpy(dest: void&?, src: void&?, n: usize) -> void&?
 
-def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
+		return DynArrayView(values.items.cast[void&], values.count, sizeof(T))
 	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
@@ -3601,25 +3601,25 @@ def arena_da_copy_exact[T](dst: dview[T], src: dview[T]):
 	_ = dst
 	_ = src
 
-def copy_split(values: any darray[i32, 4]&) -> void:
+def copy_split(values: darray[i32, 4]&) -> void:
 	base: dview[i32] = arena_da_view(values, 0, 4)
 	left: dview[i32] = base[0:2]
 	right: dview[i32] = base[2:4]
 	arena_da_copy_exact(left, right)
 
-def copy_overlap(values: any darray[i32, 4]&) -> void:
+def copy_overlap(values: darray[i32, 4]&) -> void:
 	base: dview[i32] = arena_da_view(values, 0, 4)
 	left: dview[i32] = base[0:3]
 	right: dview[i32] = base[1:4]
 	arena_da_copy_exact(left, right)
 
-def copy_overlap_backward(values: any darray[i32, 4]&) -> void:
+def copy_overlap_backward(values: darray[i32, 4]&) -> void:
 	base: dview[i32] = arena_da_view(values, 0, 4)
 	left: dview[i32] = base[1:4]
 	right: dview[i32] = base[0:3]
 	arena_da_copy_exact(left, right)
 
-def copy_overlap_unknown(values: any darray[i32, shape_in]&) -> void:
+def copy_overlap_unknown(values: darray[i32, shape_in]&) -> void:
 	base: dview[i32] = arena_da_view(values, 0, values.count)
 	left: dview[i32] = base[0:values.count - 1]
 	right: dview[i32] = base[1:values.count]
@@ -3757,7 +3757,7 @@ def copy_indexed(values: array[i32, 4]) -> void:
 
 func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughStandardViewSliceHelperFieldProjection(t *testing.T) {
 	src := `struct DynArrayView:
-	data: mutable any void&?
+	data: mutable void&?
 	len: mutable usize
 	elem_size: mutable usize
 
@@ -4153,32 +4153,32 @@ def copy_nested_helper(values: array[i32, 4]) -> void:
 
 func TestGenerateLLVMIRSpecializesArenaDViewZeroFill(t *testing.T) {
 	src := `struct DynArray[T]:
-	items: mutable any T&?
+	items: mutable T&?
 	count: mutable usize
 	capacity: mutable usize
 
 struct DynArrayView:
-	data: mutable any void&?
+	data: mutable void&?
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
+		return DynArrayView(values.items.cast[void&], values.count, sizeof(T))
 	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_fill[T](dst: dview[T], value: T):
 	_ = dst
 	_ = value
 
-def zero_split(values: any darray[i32, 4]&) -> void:
+def zero_split(values: darray[i32, 4]&) -> void:
 	base: dview[i32] = arena_da_view(values, 0, 4)
 	left: dview[i32] = base[0:2]
 	arena_da_fill(left, 0)
 
-def fill_split(values: any darray[i32, 4]&) -> void:
+def fill_split(values: darray[i32, 4]&) -> void:
 	base: dview[i32] = arena_da_view(values, 0, 4)
 	left: dview[i32] = base[0:2]
 	arena_da_fill(left, 7)
@@ -4231,37 +4231,37 @@ def fill_unknown(view: dview[i32]) -> void:
 
 func TestGenerateLLVMIRSpecializesArenaDViewRepeatedByteFill(t *testing.T) {
 	src := `struct DynArray[T]:
-	items: mutable any T&?
+	items: mutable T&?
 	count: mutable usize
 	capacity: mutable usize
 
 struct DynArrayView:
-	data: mutable any void&?
+	data: mutable void&?
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
+		return DynArrayView(values.items.cast[void&], values.count, sizeof(T))
 	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_fill[T](dst: dview[T], value: T):
 	_ = dst
 	_ = value
 
-def fill_bytes(values: any darray[u8, 4]&) -> void:
+def fill_bytes(values: darray[u8, 4]&) -> void:
 	base: dview[u8] = arena_da_view(values, 0, 4)
 	left: dview[u8] = base[0:2]
 	arena_da_fill(left, 7)
 
-def fill_all_ones(values: any darray[i32, 4]&) -> void:
+def fill_all_ones(values: darray[i32, 4]&) -> void:
 	base: dview[i32] = arena_da_view(values, 0, 4)
 	left: dview[i32] = base[0:2]
 	arena_da_fill(left, -1)
 
-def fill_nonuniform(values: any darray[i32, 4]&) -> void:
+def fill_nonuniform(values: darray[i32, 4]&) -> void:
 	base: dview[i32] = arena_da_view(values, 0, 4)
 	left: dview[i32] = base[0:2]
 	arena_da_fill(left, 7)
@@ -4328,32 +4328,32 @@ def fill_nonuniform_unknown(view: dview[i32]) -> void:
 
 func TestGenerateLLVMIRSpecializesArenaDViewDynamicByteFill(t *testing.T) {
 	src := `struct DynArray[T]:
-	items: mutable any T&?
+	items: mutable T&?
 	count: mutable usize
 	capacity: mutable usize
 
 struct DynArrayView:
-	data: mutable any void&?
+	data: mutable void&?
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
+		return DynArrayView(values.items.cast[void&], values.count, sizeof(T))
 	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_fill[T](dst: dview[T], value: T):
 	_ = dst
 	_ = value
 
-def fill_runtime_byte(values: any darray[u8, 4]&, value: u8) -> void:
+def fill_runtime_byte(values: darray[u8, 4]&, value: u8) -> void:
 	base: dview[u8] = arena_da_view(values, 0, 4)
 	left: dview[u8] = base[0:2]
 	arena_da_fill(left, value)
 
-def fill_runtime_wide(values: any darray[i32, 4]&, value: i32) -> void:
+def fill_runtime_wide(values: darray[i32, 4]&, value: i32) -> void:
 	base: dview[i32] = arena_da_view(values, 0, 4)
 	left: dview[i32] = base[0:2]
 	arena_da_fill(left, value)
@@ -4406,32 +4406,32 @@ def fill_runtime_wide_unknown(view: dview[i32], value: i32) -> void:
 
 func TestGenerateLLVMIRSpecializesArenaDViewCoercedByteFill(t *testing.T) {
 	src := `struct DynArray[T]:
-	items: mutable any T&?
+	items: mutable T&?
 	count: mutable usize
 	capacity: mutable usize
 
 struct DynArrayView:
-	data: mutable any void&?
+	data: mutable void&?
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
+		return DynArrayView(values.items.cast[void&], values.count, sizeof(T))
 	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_fill[T](dst: dview[T], value: T):
 	_ = dst
 	_ = value
 
-def fill_literal_int_to_bytes(values: any darray[u8, 4]&) -> void:
+def fill_literal_int_to_bytes(values: darray[u8, 4]&) -> void:
 	base: dview[u8] = arena_da_view(values, 0, 4)
 	left: dview[u8] = base[0:2]
 	arena_da_fill(left, 7)
 
-def fill_runtime_int_to_bytes(values: any darray[u8, 4]&, value: int) -> void:
+def fill_runtime_int_to_bytes(values: darray[u8, 4]&, value: int) -> void:
 	base: dview[u8] = arena_da_view(values, 0, 4)
 	left: dview[u8] = base[0:2]
 	arena_da_fill(left, value)
@@ -4473,27 +4473,27 @@ def fill_runtime_int_to_bytes(values: any darray[u8, 4]&, value: int) -> void:
 
 func TestGenerateOptimizedLLVMIRSupportsArenaDViewByteFillMemsetFastPath(t *testing.T) {
 	src := `struct DynArray[T]:
-	items: mutable any T&?
+	items: mutable T&?
 	count: mutable usize
 	capacity: mutable usize
 
 struct DynArrayView:
-	data: mutable any void&?
+	data: mutable void&?
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
+		return DynArrayView(values.items.cast[void&], values.count, sizeof(T))
 	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_fill[T](dst: dview[T], value: T):
 	_ = dst
 	_ = value
 
-def fill_runtime_byte(values: any darray[u8, 4]&, value: u8) -> void:
+def fill_runtime_byte(values: darray[u8, 4]&, value: u8) -> void:
 	base: dview[u8] = arena_da_view(values, 0, 4)
 	left: dview[u8] = base[0:2]
 	arena_da_fill(left, value)
@@ -4512,30 +4512,30 @@ def fill_runtime_byte(values: any darray[u8, 4]&, value: u8) -> void:
 }
 
 func TestGenerateOptimizedLLVMObjectFileSupportsArenaDViewByteFillWithRuntimeMemsetDecl(t *testing.T) {
-	src := `extern memset(dest: any void&, val: int, n: usize) -> any void&
+	src := `extern memset(dest: void&, val: int, n: usize) -> void&
 
 struct DynArray[T]:
-	items: mutable any T&?
+	items: mutable T&?
 	count: mutable usize
 	capacity: mutable usize
 
 struct DynArrayView:
-	data: mutable any void&?
+	data: mutable void&?
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
+		return DynArrayView(values.items.cast[void&], values.count, sizeof(T))
 	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_fill[T](dst: dview[T], value: T):
 	_ = dst
 	_ = value
 
-def fill_runtime_byte(values: any darray[u8, 4]&, value: u8) -> void:
+def fill_runtime_byte(values: darray[u8, 4]&, value: u8) -> void:
 	base: dview[u8] = arena_da_view(values, 0, 4)
 	left: dview[u8] = base[0:2]
 	arena_da_fill(left, value)
@@ -4570,7 +4570,7 @@ def fill_runtime_byte(values: any darray[u8, 4]&, value: u8) -> void:
 
 func TestGenerateOptimizedLLVMObjectFileSkipsRedundantPackedZeroPayloadStores(t *testing.T) {
 	src := `struct Payload:
-	data: mutable any u8&?
+	data: mutable u8&?
 	len: mutable i32
 
 packed enum Node:
@@ -4606,20 +4606,20 @@ def build() -> Node:
 
 func TestGenerateLLVMIRSpecializesArenaDViewEqExact(t *testing.T) {
 	src := `struct DynArray[T]:
-	items: mutable any T&?
+	items: mutable T&?
 	count: mutable usize
 	capacity: mutable usize
 
 struct DynArrayView:
-	data: mutable any void&?
+	data: mutable void&?
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
+		return DynArrayView(values.items.cast[void&], values.count, sizeof(T))
 	return DynArrayView(null, 0, sizeof(T))
 
 def arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool:
@@ -4627,23 +4627,23 @@ def arena_da_eq_exact[T](left: dview[T], right: dview[T]) -> bool:
 	_ = right
 	return false
 
-def eq_split(values: any darray[i32, 4]&) -> bool:
+def eq_split(values: darray[i32, 4]&) -> bool:
 	base: dview[i32] = arena_da_view(values, 0, 4)
 	left: dview[i32] = base[0:2]
 	right: dview[i32] = base[2:4]
 	return arena_da_eq_exact(left, right)
 
-def eq_overlap(values: any darray[i32, 4]&) -> bool:
+def eq_overlap(values: darray[i32, 4]&) -> bool:
 	base: dview[i32] = arena_da_view(values, 0, 4)
 	left: dview[i32] = base[0:3]
 	right: dview[i32] = base[1:4]
 	return arena_da_eq_exact(left, right)
 
-def eq_same(values: any darray[i32, 4]&) -> bool:
+def eq_same(values: darray[i32, 4]&) -> bool:
 	base: dview[i32] = arena_da_view(values, 0, 4)
 	return arena_da_eq_exact(base, base)
 
-def eq_diff_extent(values: any darray[i32, 4]&) -> bool:
+def eq_diff_extent(values: darray[i32, 4]&) -> bool:
 	base: dview[i32] = arena_da_view(values, 0, 4)
 	left: dview[i32] = base[0:1]
 	right: dview[i32] = base[2:4]
@@ -5133,34 +5133,34 @@ func TestGenerateLLVMIRSpecializesArenaDViewMaterialize(t *testing.T) {
 	end_index: mutable usize
 
 struct DynArray[T]:
-	items: mutable any T&?
+	items: mutable T&?
 	count: mutable usize
 	capacity: mutable usize
 
 struct DynArrayView:
-	data: mutable any void&?
+	data: mutable void&?
 	len: mutable usize
 	elem_size: mutable usize
 
-def arena_da_view[T](values: any darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[any void&], values.count, sizeof(T))
+		return DynArrayView(values.items.cast[void&], values.count, sizeof(T))
 	return DynArrayView(null, 0, sizeof(T))
 
-def arena_da_from_view[T](a: any Arena&, view: dview[T]) -> darray[T, shape_out]:
+def arena_da_from_view[T](a: Arena&, view: dview[T]) -> darray[T, shape_out]:
 	_ = a
 	_ = view
 	out: darray[T, shape_out] = zeroed
 	return out
 
-def materialize_split(a: any Arena&, values: any darray[i32, 4]&) -> darray[i32]:
+def materialize_split(a: Arena&, values: darray[i32, 4]&) -> darray[i32]:
 	base: dview[i32] = arena_da_view(values, 0, 4)
 	left: dview[i32] = base[0:2]
 	return arena_da_from_view(a, left)
 
-def materialize_unknown(a: any Arena&, view: dview[i32]) -> darray[i32]:
+def materialize_unknown(a: Arena&, view: dview[i32]) -> darray[i32]:
 	return arena_da_from_view(a, view)
 `
 	result := parseAndAnalyze(t, "backend_dview_materialize.llcontext", src)
@@ -5189,16 +5189,16 @@ def materialize_unknown(a: any Arena&, view: dview[i32]) -> darray[i32]:
 
 func TestGenerateLLVMIRSpecializesStringViewMaterialize(t *testing.T) {
 	src := `struct StringView:
-	data: mutable any u8&
+	data: mutable u8&
 	len: mutable i64
 
-extern memcpy(dest: any void&?, src: any void&?, n: usize) -> any void&?
+extern memcpy(dest: void&?, src: void&?, n: usize) -> void&?
 extern alloc_perm(size: i64) -> heap void&
-extern register_perm_string_len(ptr: any u8&?, len: usize)
-extern intern_small_string(src: any u8&, len: usize) -> heap u8&
+extern register_perm_string_len(ptr: u8&?, len: usize)
+extern intern_small_string(src: u8&, len: usize) -> heap u8&
 
-def string_view(value: any u8&?, start: i64, end: i64) -> StringView:
-	src: any u8& = value if value != null else "".cast[any u8&]
+def string_view(value: u8&?, start: i64, end: i64) -> StringView:
+	src: u8& = value if value != null else "".cast[u8&]
 	_ = start
 	return StringView(src, end)
 
@@ -5207,7 +5207,7 @@ def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> StringView:
 
 def string_view_copy(view: StringView) -> heap u8&:
 	_ = view
-	return intern_small_string("".cast[any u8&], 0)
+	return intern_small_string("".cast[u8&], 0)
 
 def ctx_string_from_view(view: StringView) -> dstr[shape_out]:
 	return string_view_copy(view)
@@ -5278,10 +5278,10 @@ def copy_small_raw(text: dstr[row]) -> heap u8&:
 }
 
 func TestGenerateLLVMIRSpecializesStringViewLiteralWrapperCalls(t *testing.T) {
-	src := `extern string_view_eq(view: StringView, other: any u8&?) -> int
+	src := `extern string_view_eq(view: StringView, other: u8&?) -> int
 
 def frontend_sv_eq_literal(view: StringView, literal: static u8&) -> bool:
-	return string_view_eq(view, literal.cast[any u8&]) != 0
+	return string_view_eq(view, literal.cast[u8&]) != 0
 
 def same_short(view: StringView) -> bool:
 	return frontend_sv_eq_literal(view, "def")
@@ -5362,12 +5362,12 @@ def probe(view: dview[i64]) -> bool:
 
 func TestGenerateLLVMIRLowersArraySliceSyntaxViaRuntimeHelpers(t *testing.T) {
 	src := `struct DynArray[T]:
-	items: mutable any T&?
+	items: mutable T&?
 	count: mutable usize
 	capacity: mutable usize
 
 struct DynArrayView:
-	data: mutable any void&?
+	data: mutable void&?
 	len: mutable usize
 	elem_size: mutable usize
 
@@ -5405,14 +5405,14 @@ def head_view(view: dview[i32]) -> i32:
 
 func TestGenerateLLVMIRLowersFixedArraySliceSyntaxWithoutRuntimeHelpers(t *testing.T) {
 	src := `struct DynArrayView:
-	data: mutable any void&?
+	data: mutable void&?
 	len: mutable usize
 	elem_size: mutable usize
 
 def slice_owned(values: i32[4]) -> view[i32]:
 	return values[1:3]
 
-def head_ref(values: any i32[4]&) -> i32:
+def head_ref(values: i32[4]&) -> i32:
 	return values[1:3][0]
 `
 	result := parseAndAnalyze(t, "backend_fixed_array_slice.llcontext", src)
@@ -5441,12 +5441,12 @@ def head_ref(values: any i32[4]&) -> i32:
 
 func TestGenerateLLVMIRLowersNestedCollectionAccessOnReturnedValues(t *testing.T) {
 	src := `struct DynArray[T]:
-	items: mutable any T&?
+	items: mutable T&?
 	count: mutable usize
 	capacity: mutable usize
 
 struct DynArrayView:
-	data: mutable any void&?
+	data: mutable void&?
 	len: mutable usize
 	elem_size: mutable usize
 
@@ -5515,7 +5515,7 @@ func TestGenerateLLVMIRLowersArrayLiteralAndInferredLocalViaFixedArrayLowering(t
 
 func TestGenerateLLVMIRLowersStringSliceSyntaxViaRuntimeHelpers(t *testing.T) {
 	src := `struct StringView:
-	data: mutable any u8&
+	data: mutable u8&
     len: mutable i64
 
 def head_codepoint(text: dstr[row]) -> char:
@@ -5542,10 +5542,10 @@ def head_codepoint(text: dstr[row]) -> char:
 }
 
 func TestGenerateLLVMIRSpecializesExactStringSliceMaterialize(t *testing.T) {
-	src := `extern memcpy(dest: any void&?, src: any void&?, n: usize) -> any void&?
+	src := `extern memcpy(dest: void&?, src: void&?, n: usize) -> void&?
 extern alloc_perm(size: i64) -> heap void&
-extern register_perm_string_len(ptr: any u8&?, len: usize)
-extern intern_small_string(src: any u8&, len: usize) -> heap u8&
+extern register_perm_string_len(ptr: u8&?, len: usize)
+extern intern_small_string(src: u8&, len: usize) -> heap u8&
 extern ctx_strlen(value: dstr[shape_in]) -> i64
 extern ctx_string_slice(value: dstr[shape_in], start: i64, end: i64) -> dstr[shape_out]
 

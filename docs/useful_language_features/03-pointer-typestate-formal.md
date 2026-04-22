@@ -194,7 +194,7 @@ Ref(heap,   T, s) ≰ Ref(static, T, s)
 
 So storage is not an ordinary subtyping lattice in the way nullness is.
 
-This is why a `heap Box&` does not implicitly flow into an `any Box&` parameter or return type: if you want to erase storage provenance, that must be an explicit cast, not an incidental assignment.
+This is why a `heap Box&` does not implicitly flow into an `Box&` parameter or return type: if you want to erase storage provenance, that must be an explicit cast, not an incidental assignment.
 
 ### Use rules
 

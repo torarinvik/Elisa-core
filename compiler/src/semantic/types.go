@@ -751,7 +751,7 @@ func RefStorageName(storage RefStorage) string {
 	case RefStorageStatic:
 		return "static"
 	default:
-		return "any"
+		return ""
 	}
 }
 
@@ -764,7 +764,7 @@ func (t *RefType) String() string {
 		s = t.StorageParam + " " + s
 	} else if t.Region != "" {
 		s = t.Region + " " + s
-	} else if t.ExplicitStorage || t.Storage != RefStorageAny {
+	} else if t.Storage != RefStorageAny {
 		s = RefStorageName(t.Storage) + " " + s
 	}
 	if t.StateParam != "" {

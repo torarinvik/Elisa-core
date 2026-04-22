@@ -355,7 +355,7 @@ func TestGenerateLLVMIRLowersTreeConstructorsWithArenaOwners(t *testing.T) {
 		Binary(left: Expr, right: Expr)
 
 def build(owner: Arena) -> Lua.Expr:
-	alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+	alloc: mutable Arena& = (&owner).cast[mutable Arena&]
 	in alloc:
 		left: Lua.Expr = Lua.Expr.Nil(span: 1)
 		right: Lua.Expr = new[alloc] Lua.Expr.Nil(span: 2)
@@ -934,6 +934,43 @@ def count_of(node: Lua.Expr) -> usize:
 	}
 }
 
+func TestGenerateLLVMIRLowersTreeAttributeAggregateHelpers(t *testing.T) {
+	src := `tree Lua:
+	@role(expr)
+	node Expr:
+		Nil
+		Binary(child left: Expr, child right: Expr)
+
+attribute Lua.Expr.is_leaf -> bool:
+	Lua.Expr.Nil(_):
+		return true
+	Lua.Expr.Binary(_):
+		return false
+
+attribute Lua.Expr.has_control_flow -> bool:
+	Lua.Expr.Nil(_):
+		return false
+	Lua.Expr.Binary(expr, left, right):
+		return any(children.has_control_flow)
+
+def has_control(node: Lua.Expr) -> bool:
+	return node.has_control_flow
+
+def all_children_leaf(node: Lua.Expr) -> bool:
+	return all(children(node).is_leaf)
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_attribute_aggregate_helpers.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i1 @has_control(%Lua__TreeHandle ", "define i1 @all_children_leaf(%Lua__TreeHandle ", "any.cond", "all.cond", "TreeAttributeSeq", "call i1 @tree_attr_"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected tree attribute aggregate helper lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersTreeRewriteExpr(t *testing.T) {
 	src := `tree Lua:
 	common:
@@ -977,7 +1014,7 @@ def rewrite_binary(node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lu
 		return node{left, right}
 
 def rewrite_binary_explicit(owner: Arena, node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr.Binary:
-	alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+	alloc: mutable Arena& = (&owner).cast[mutable Arena&]
 	return new[alloc] node{left, right}
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_tree_exact_update.llcontext", src)

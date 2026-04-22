@@ -33,12 +33,12 @@ func TestRunCLICompilesExplicitRefHelperProbe(t *testing.T) {
 	sourcePath := writeImplicitContextFixture(t, "ufcs_explicit_ref_helper_probe.llcontext", `struct Counter:
     value: i64
 
-def score_ref(counter: any Counter&, delta: i64 = 1) -> i64:
+def score_ref(counter: Counter&, delta: i64 = 1) -> i64:
     return counter.value + delta
 
 def main() -> i64:
     counter: mutable Counter = Counter(40)
-    return score_ref((&counter).cast[any Counter&], 2)
+    return score_ref((&counter).cast[Counter&], 2)
 `)
 
 	var stdout bytes.Buffer
@@ -56,7 +56,7 @@ func TestRunCLICompilesUFCSAutorefRefReceiverProbe(t *testing.T) {
 	sourcePath := writeImplicitContextFixture(t, "ufcs_autoref_ref_receiver_probe.llcontext", `struct Counter:
     value: i64
 
-def score_ref(counter: any Counter&, delta: i64 = 1) -> i64:
+def score_ref(counter: Counter&, delta: i64 = 1) -> i64:
     return counter.value + delta
 
 def main() -> i64:
@@ -79,18 +79,18 @@ func TestRunCLICompilesOptionalUFCSRefReceiverProbe(t *testing.T) {
 	sourcePath := writeImplicitContextFixture(t, "ufcs_optional_ref_receiver_probe.llcontext", `struct Counter:
     value: i64
 
-def score_ref(counter: any Counter&, delta: i64 = 1) -> i64:
+def score_ref(counter: Counter&, delta: i64 = 1) -> i64:
     return counter.value + delta
 
-def read(maybe_counter: any Counter&?) -> i64:
+def read(maybe_counter: Counter&?) -> i64:
     if let scored = maybe_counter?.score_ref(2):
         return scored
     return 0
 
 def main() -> i64:
     counter: mutable Counter = Counter(40)
-    counter_ref: any Counter& = (&counter).cast[any Counter&]
-    maybe_counter: any Counter&? = counter_ref
+    counter_ref: Counter& = (&counter).cast[Counter&]
+    maybe_counter: Counter&? = counter_ref
     return read(maybe_counter)
 `)
 
@@ -151,7 +151,7 @@ func TestRunCLICompilesOptionalAssignProbe(t *testing.T) {
 	sourcePath := writeImplicitContextFixture(t, "optional_assign_probe.llcontext", `struct Counter:
     value: mutable i64
 
-def write(maybe_counter: mutable any Counter&?) -> i64:
+def write(maybe_counter: mutable Counter&?) -> i64:
     maybe_counter?.value ?= 7
     if let value = maybe_counter?.value:
         return value
@@ -159,8 +159,8 @@ def write(maybe_counter: mutable any Counter&?) -> i64:
 
 def main() -> i64:
     counter: mutable Counter = Counter(0)
-    counter_ref: mutable any Counter& = (&counter).cast[mutable any Counter&]
-    maybe_counter: mutable any Counter&? = counter_ref
+    counter_ref: mutable Counter& = (&counter).cast[mutable Counter&]
+    maybe_counter: mutable Counter&? = counter_ref
     return write(maybe_counter)
 `)
 

@@ -163,14 +163,14 @@ def kernel(buf: dview[i32]) -> bool:
 
 func TestGenerateLLVMIRArenaFromViewUsesUnrolledTinyExactFastPath(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_dview_materialize_unrolled_exact.llcontext", `
-def arena_da_from_view[T](a: any Arena&, view: dview[T]) -> darray[T]:
+def arena_da_from_view[T](a: Arena&, view: dview[T]) -> darray[T]:
 	return zeroed
 
 def kernel(buf: dview[i32]) -> darray[i32]:
 	arena: Arena = zeroed
 	whole: dview[i32] = buf[0:8]
 	ro: dview[i32] = readonly(whole)
-	return arena_da_from_view((&arena).cast[any Arena&], ro[4:8])
+	return arena_da_from_view((&arena).cast[Arena&], ro[4:8])
 `)
 	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
 	if err != nil {

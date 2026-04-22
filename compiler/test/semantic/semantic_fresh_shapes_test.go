@@ -213,16 +213,16 @@ func TestAnalyzeArenaAppendReturnsFreshShape(t *testing.T) {
 	dummy: usize
 
 struct DynArray[T]:
-	items: mutable any T&?
+	items: mutable T&?
 	count: mutable usize
 	capacity: mutable usize
 
-def arena_da_append[T](a: any Arena&, da: any darray[T, shape_in]&, item: T) -> any darray[T, shape_out]&:
+def arena_da_append[T](a: Arena&, da: darray[T, shape_in]&, item: T) -> darray[T, shape_out]&:
 	if da.count >= da.capacity:
 		pass
 	return da
 
-def bad(a: any Arena&, da: any darray[i32, row]&) -> any darray[i32, row]&:
+def bad(a: Arena&, da: darray[i32, row]&) -> darray[i32, row]&:
 	return arena_da_append(a, da, 1)
 `
 	_, errs := parseAndAnalyze(t, "arena_append_returns_fresh_shape.llcontext", src)
@@ -236,8 +236,8 @@ def bad(a: any Arena&, da: any darray[i32, row]&) -> any darray[i32, row]&:
 }
 
 func TestAnalyzeStage1StringConcatWrapperReturnsFreshShape(t *testing.T) {
-	src := `def concat2(lhs: any u8&?, rhs: any u8&?) -> any u8&:
-	return lhs if lhs != null else rhs.cast[any u8&]
+	src := `def concat2(lhs: u8&?, rhs: u8&?) -> u8&:
+	return lhs if lhs != null else rhs.cast[u8&]
 
 def rt_concat2(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[shape_result]:
 	return concat2(lhs, rhs)

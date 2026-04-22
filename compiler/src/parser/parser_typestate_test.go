@@ -43,7 +43,7 @@ func TestParseCharLiteralInConstDecl(t *testing.T) {
 }
 
 func TestParseStructDeclWithAggregateStateParam(t *testing.T) {
-	file, errs := parseSourceFile(t, "struct Holder[?]:\n    value: any i32&\n")
+	file, errs := parseSourceFile(t, "struct Holder[?]:\n    value: i32&\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -63,7 +63,7 @@ func TestParseStructDeclWithAggregateStateParam(t *testing.T) {
 }
 
 func TestParseStructDeclWithMultipleAggregateStateParams(t *testing.T) {
-	file, errs := parseSourceFile(t, "struct Holder[?, ?]:\n    value: any i32&\n")
+	file, errs := parseSourceFile(t, "struct Holder[?, ?]:\n    value: i32&\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -241,7 +241,7 @@ func TestParseStructDeclWithNamedRefQualifiers(t *testing.T) {
 }
 
 func TestParseNamedRefStateAttachesToNearestRef(t *testing.T) {
-	file, errs := parseSourceFile(t, "struct Holder[refstate s]:\n    value: any i32&&[s]\n")
+	file, errs := parseSourceFile(t, "struct Holder[refstate s]:\n    value: i32&&[s]\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -895,7 +895,7 @@ func TestParseHotFunctionAnnotation(t *testing.T) {
 }
 
 func TestParseGuardNonNullFunctionAnnotation(t *testing.T) {
-	file, errs := parseSourceFile(t, "@guard_nonnull(box)\ndef has_box(box: any Box&?) -> bool:\n    return box != null\n")
+	file, errs := parseSourceFile(t, "@guard_nonnull(box)\ndef has_box(box: Box&?) -> bool:\n    return box != null\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -1424,7 +1424,7 @@ func TestParseDeferRemainsContextualIdentifier(t *testing.T) {
 }
 
 func TestParseFunctionEnsuresClauses(t *testing.T) {
-	file, errs := parseSourceFile(t, "def finish(team: any Team&, node: heap HeapPairNode&, maybe: heap HeapPairNode&?, player: any Player&) -> void can[Memory.Release] ensures team.player => Dead, node => !, maybe => &?, player => preserve:\n    pass\n")
+	file, errs := parseSourceFile(t, "def finish(team: Team&, node: heap HeapPairNode&, maybe: heap HeapPairNode&?, player: Player&) -> void can[Memory.Release] ensures team.player => Dead, node => !, maybe => &?, player => preserve:\n    pass\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -1473,7 +1473,7 @@ func TestParseExternEnsuresClause(t *testing.T) {
 }
 
 func TestParseConditionalEnsuresClauses(t *testing.T) {
-	file, errs := parseSourceFile(t, "def finish(job: any ParseJob&, player: any Player&) -> bool ensures return true => job => Ready, return false => job => Failed, player => preserve:\n    return true\n")
+	file, errs := parseSourceFile(t, "def finish(job: ParseJob&, player: Player&) -> bool ensures return true => job => Ready, return false => job => Failed, player => preserve:\n    return true\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -1499,7 +1499,7 @@ func TestParseConditionalEnsuresClauses(t *testing.T) {
 }
 
 func TestParseConditionalEnsuresRequiresBoolLiteralBranch(t *testing.T) {
-	_, errs := parseSourceFile(t, "def finish(job: any ParseJob&) -> bool ensures return maybe => job => Ready:\n    return true\n")
+	_, errs := parseSourceFile(t, "def finish(job: ParseJob&) -> bool ensures return maybe => job => Ready:\n    return true\n")
 	if len(errs) == 0 {
 		t.Fatal("expected parser error for non-bool ensures return condition")
 	}
@@ -2103,7 +2103,7 @@ func TestParseChildrenToOverrideExpr(t *testing.T) {
 }
 
 func TestParsePostfixCastWithAnyRefTarget(t *testing.T) {
-	file, errs := parseSourceFile(t, "def keep() -> any u8&:\n    return \"hello\".cast[any u8&]\n")
+	file, errs := parseSourceFile(t, "def keep() -> u8&:\n    return \"hello\".cast[u8&]\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -2123,13 +2123,13 @@ func TestParsePostfixCastWithAnyRefTarget(t *testing.T) {
 	if target.Storage != ast.RefStorageAny || target.State != ast.RefStateNonNull {
 		t.Fatalf("unexpected cast target %#v", target)
 	}
-	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, ".cast[any u8&]") {
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, ".cast[u8&]") {
 		t.Fatalf("expected unparse to preserve postfix cast target, got:\n%s", formatted)
 	}
 }
 
 func TestParsePostfixCastWithMutableAnyRefTarget(t *testing.T) {
-	file, errs := parseSourceFile(t, "struct Cursor:\n    pos: i64\n\ndef keep(cursor: any Cursor&) -> mutable any Cursor&:\n    return cursor.cast[mutable any Cursor&]\n")
+	file, errs := parseSourceFile(t, "struct Cursor:\n    pos: i64\n\ndef keep(cursor: Cursor&) -> mutable Cursor&:\n    return cursor.cast[mutable Cursor&]\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -2148,7 +2148,7 @@ func TestParsePostfixCastWithMutableAnyRefTarget(t *testing.T) {
 }
 
 func TestParseAsCastExprPreservesSyntax(t *testing.T) {
-	file, errs := parseSourceFile(t, "struct Arena:\n    value: i64\n\ndef keep(owner: Arena) -> mutable any Arena&:\n    return &owner as mutable any Arena&\n")
+	file, errs := parseSourceFile(t, "struct Arena:\n    value: i64\n\ndef keep(owner: Arena) -> mutable Arena&:\n    return &owner as mutable Arena&\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -2170,13 +2170,13 @@ func TestParseAsCastExprPreservesSyntax(t *testing.T) {
 	if _, ok := cast.Target.(*ast.MutableType); !ok {
 		t.Fatalf("expected mutable cast target, got %T", cast.Target)
 	}
-	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "&owner as mutable any Arena&") {
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "&owner as mutable Arena&") {
 		t.Fatalf("expected unparse to preserve as cast syntax, got:\n%s", formatted)
 	}
 }
 
 func TestParseAsRefAssignmentRemainsStatementSyntax(t *testing.T) {
-	file, errs := parseSourceFile(t, "struct Arena:\n    end: any Arena!\n\ndef keep(a: mutable any Arena&) -> void:\n    a.end as & <- zeroed\n")
+	file, errs := parseSourceFile(t, "struct Arena:\n    end: Arena!\n\ndef keep(a: mutable Arena&) -> void:\n    a.end as & <- zeroed\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}

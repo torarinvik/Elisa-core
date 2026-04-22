@@ -205,7 +205,7 @@ def total(seed: i64) -> i64:
   return total
 ```
 
-Use `new[region]` only when you need a reference to a regular enum value, such as a recursive structure whose payloads store `any Expr&` handles. For compile-checked examples, see `../Code/test_programs/regular_enum_values.llcontext` for by-value usage and `../Code/test_programs/recursive_enum.llcontext` for recursive references.
+Use `new[region]` only when you need a reference to a regular enum value, such as a recursive structure whose payloads store `Expr&` handles. For compile-checked examples, see `../Code/test_programs/regular_enum_values.llcontext` for by-value usage and `../Code/test_programs/recursive_enum.llcontext` for recursive references.
 
 ## Packed enums
 

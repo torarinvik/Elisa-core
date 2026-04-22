@@ -43,7 +43,7 @@ struct ParseJob[state Pending | Ready | Failed]:
         Ready when self.stage == 1
         Failed when self.stage == 2
 
-def finish_ok(job: any ParseJob[Pending]&) -> void:
+def finish_ok(job: ParseJob[Pending]&) -> void:
     job.checksum <- 7
     job.stage <- 1
 ```
@@ -51,7 +51,7 @@ def finish_ok(job: any ParseJob[Pending]&) -> void:
 the caller currently loses precision after:
 
 ```context
-finish_ok((&job).cast[any ParseJob[Pending]&])
+finish_ok((&job).cast[ParseJob[Pending]&])
 ```
 
 because mutation crossed a ref-call boundary and the caller has no poststate summary for the callee.
@@ -108,7 +108,7 @@ That means:
 So if a function says:
 
 ```context
-def finish_ok(job: any ParseJob[Pending]&) -> void ensures job => Ready:
+def finish_ok(job: ParseJob[Pending]&) -> void ensures job => Ready:
     ...
 ```
 
@@ -158,7 +158,7 @@ The preferred source-language surface should be a single **`ensures` clause**.
 For named typestate:
 
 ```context
-def finish_ok(job: any ParseJob[Pending]&) -> void ensures job => Ready:
+def finish_ok(job: ParseJob[Pending]&) -> void ensures job => Ready:
     job.checksum <- 7
     job.stage <- 1
 ```
@@ -196,14 +196,14 @@ What is unified is the **user-facing poststate effect system**.
 ### 5.1 Exact named poststate
 
 ```context
-def finish_ok(job: any ParseJob[Pending]&) -> void ensures job => Ready:
+def finish_ok(job: ParseJob[Pending]&) -> void ensures job => Ready:
     ...
 ```
 
 ### 5.2 Exact named union poststate
 
 ```context
-def finish(job: any ParseJob[Pending]&) -> void ensures job => Ready | Failed:
+def finish(job: ParseJob[Pending]&) -> void ensures job => Ready | Failed:
     ...
 ```
 
@@ -246,7 +246,7 @@ So `ensures node => !` is shorthand for:
 ### 5.4 Preserve current caller-visible state
 
 ```context
-def bump_score(player: any Player[Alive]&) -> void ensures player => preserve:
+def bump_score(player: Player[Alive]&) -> void ensures player => preserve:
     ...
 ```
 
@@ -255,12 +255,12 @@ This means the call does not invalidate the caller-visible state for that path.
 ### 5.5 Nested path
 
 ```context
-def kill_team(team: any Team&) -> void ensures team.player => Dead:
+def kill_team(team: Team&) -> void ensures team.player => Dead:
     ...
 ```
 
 ```context
-def release_slot(holder: any Owner&) -> void ensures holder.node => !:
+def release_slot(holder: Owner&) -> void ensures holder.node => !:
     ...
 ```
 
@@ -269,14 +269,14 @@ def release_slot(holder: any Owner&) -> void ensures holder.node => !:
 Single-line form:
 
 ```context
-def kill_team(team: any Team&) -> void ensures team.player => Dead, team.armor => Destroyed:
+def kill_team(team: Team&) -> void ensures team.player => Dead, team.armor => Destroyed:
     ...
 ```
 
 Readable multiline form:
 
 ```context
-def process(team: any Team&, sock: any Socket&) -> void
+def process(team: Team&, sock: Socket&) -> void
     ensures team.player => Dead,
             sock => preserve:
     ...
@@ -418,7 +418,7 @@ If the call may invalidate other overlapping aliases, the compiler must handle t
 If the callee only guarantees a union:
 
 ```context
-def finish(job: any ParseJob[Pending]&) -> void ensures job => Ready | Failed:
+def finish(job: ParseJob[Pending]&) -> void ensures job => Ready | Failed:
     ...
 ```
 
@@ -453,7 +453,7 @@ struct ParseJob[state Pending | Ready | Failed]:
         Ready when self.stage == 1
         Failed when self.stage == 2
 
-def finish_ok(job: any ParseJob[Pending]&) -> void ensures job => Ready:
+def finish_ok(job: ParseJob[Pending]&) -> void ensures job => Ready:
     job.checksum <- 7
     job.stage <- 1
 ```
@@ -468,7 +468,7 @@ struct Socket[state Open | Closed]:
         Open when self.fd >= 0
         Closed when self.fd < 0
 
-def close_socket(sock: any Socket[Open]&) -> void ensures sock => Closed:
+def close_socket(sock: Socket[Open]&) -> void ensures sock => Closed:
     sock.fd <- -1
 ```
 
@@ -512,7 +512,7 @@ struct Player[state Alive | Dead]:
         Alive when self.health > 0
         Dead when self.health <= 0
 
-def bump_score(player: any Player[Alive]&) -> void ensures player => preserve:
+def bump_score(player: Player[Alive]&) -> void ensures player => preserve:
     player.score <- player.score + 1
 ```
 
@@ -523,10 +523,10 @@ struct Team:
     player: mutable Player[Alive]
     slot: mutable heap HeapPairNode&?
 
-def kill_team(team: any Team&) -> void ensures team.player => Dead:
+def kill_team(team: Team&) -> void ensures team.player => Dead:
     team.player.health <- 0
 
-def clear_slot(team: any Team&) -> void ensures team.slot => !:
+def clear_slot(team: Team&) -> void ensures team.slot => !:
     team.slot <- null
 ```
 
@@ -744,7 +744,7 @@ For APIs where the caller **must inspect an outcome**, the right extension is a 
 For example:
 
 ```context
-def try_finish(job: any ParseJob[Pending]&) -> bool
+def try_finish(job: ParseJob[Pending]&) -> bool
     ensures return true  => job => Ready,
             return false => job => Failed:
     ...
@@ -963,7 +963,7 @@ struct ParseJob[state Pending | Ready | Failed]:
         Ready when self.stage == 1
         Failed when self.stage == 2
 
-def finish_ok(job: any ParseJob[Pending]&) -> void:
+def finish_ok(job: ParseJob[Pending]&) -> void:
     job.checksum <- 7
     job.stage <- 1
 ```
@@ -971,7 +971,7 @@ def finish_ok(job: any ParseJob[Pending]&) -> void:
 the caller currently loses precision after:
 
 ```context
-finish_ok((&job).cast[any ParseJob[Pending]&])
+finish_ok((&job).cast[ParseJob[Pending]&])
 ```
 
 because mutation crossed a ref-call boundary and the caller has no poststate summary for the callee.
@@ -1013,7 +1013,7 @@ The entire point is to stay **sound-first, explicit-second, inference-later**.
 The preferred source-language surface should be an **`ensures` clause**:
 
 ```context
-def finish_ok(job: any ParseJob[Pending]&) -> void ensures job => Ready:
+def finish_ok(job: ParseJob[Pending]&) -> void ensures job => Ready:
     job.checksum <- 7
     job.stage <- 1
 ```
@@ -1073,14 +1073,14 @@ This means the summary applies to a field path rooted at a ref parameter, not ne
 Single-line form:
 
 ```context
-def kill_team(team: any Team&) -> void ensures team.player => Dead, team.armor => Destroyed:
+def kill_team(team: Team&) -> void ensures team.player => Dead, team.armor => Destroyed:
     ...
 ```
 
 Readable multiline form:
 
 ```context
-def kill_team(team: any Team&) -> void
+def kill_team(team: Team&) -> void
     ensures team.player => Dead,
             team.armor  => Destroyed:
     ...
@@ -1190,7 +1190,7 @@ struct ParseJob[state Pending | Ready | Failed]:
         Ready when self.stage == 1
         Failed when self.stage == 2
 
-def finish_ok(job: any ParseJob[Pending]&) -> void:
+def finish_ok(job: ParseJob[Pending]&) -> void:
     ensures job => Ready:
     job.checksum <- 7
     job.stage <- 1
@@ -1208,7 +1208,7 @@ struct Socket[state Open | Closed]:
         Open when self.fd >= 0
         Closed when self.fd < 0
 
-def close_socket(sock: any Socket[Open]&) -> void:
+def close_socket(sock: Socket[Open]&) -> void:
     ensures sock => Closed:
     sock.fd <- -1
 ```
@@ -1224,7 +1224,7 @@ struct Player[state Alive | Dead]:
         Alive when self.health > 0
         Dead when self.health <= 0
 
-def bump_score(player: any Player[Alive]&) -> void:
+def bump_score(player: Player[Alive]&) -> void:
     ensures player => preserve:
     player.score <- player.score + 1
 ```
@@ -1235,7 +1235,7 @@ def bump_score(player: any Player[Alive]&) -> void:
 struct Team:
     player: mutable Player[Alive]
 
-def kill_team(team: any Team&) -> void:
+def kill_team(team: Team&) -> void:
     ensures team.player => Dead:
     team.player.health <- 0
 ```
@@ -1315,7 +1315,7 @@ This is important.
 Unlike a whole-parameter inline transition syntax, `ensures` should naturally support **multiple target summaries**, because real functions may need more than one:
 
 ```context
-def process(team: any Team&, sock: any Socket&) -> void
+def process(team: Team&, sock: Socket&) -> void
     ensures team.player => Dead,
             sock => preserve:
     ...
@@ -1414,7 +1414,7 @@ At each normal return, the analyzer must be able to prove that the target path i
 So for:
 
 ```context
-def finish_ok(job: any ParseJob[Pending]&) -> void ensures job => Ready:
+def finish_ok(job: ParseJob[Pending]&) -> void ensures job => Ready:
     job.stage <- 1
 ```
 

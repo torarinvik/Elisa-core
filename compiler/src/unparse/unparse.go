@@ -1180,7 +1180,7 @@ func formatTypeExpr(typ ast.TypeExpr) string {
 			prefix = n.StorageParam + " "
 		case n.Region != "":
 			prefix = n.Region + " "
-		case n.Explicit:
+		case n.Explicit && n.Storage != ast.RefStorageAny:
 			prefix = formatRefStorage(n.Storage) + " "
 		}
 		suffix := "&"
@@ -1291,7 +1291,7 @@ func formatRefStorage(storage ast.RefStorage) string {
 	case ast.RefStorageStatic:
 		return "static"
 	default:
-		return "any"
+		return ""
 	}
 }
 

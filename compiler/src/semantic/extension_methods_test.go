@@ -214,7 +214,7 @@ func TestAnalyzeUFCSFreeFunctionAutorefRewrite(t *testing.T) {
 struct Box:
     value: i64
 
-def score_ref(box: any Box&, delta: i64 = 1) -> i64:
+def score_ref(box: Box&, delta: i64 = 1) -> i64:
     return box.value + delta
 
 def read(box: Box) -> i64:
@@ -286,10 +286,10 @@ struct Box:
 def score(box: Box, delta: i64 = 1) -> i64:
     return box.value + delta
 
-def score_ref(box: any Box&, delta: i64 = 1) -> i64:
+def score_ref(box: Box&, delta: i64 = 1) -> i64:
     return box.value + delta
 
-def read(maybe_box: Box?, maybe_ref: any Box&?) -> void:
+def read(maybe_box: Box?, maybe_ref: Box&?) -> void:
     _ = maybe_box?.value
     _ = maybe_box?.score()
     _ = maybe_ref?.score_ref(2)

@@ -604,11 +604,11 @@ Conceptually:
 
 ```text
 DynDict[V] {
-    items: any DictBucket[V]&?
+    items: DictBucket[V]&?
     count: usize
     used: usize
     capacity: usize
-    arena: any Arena&?
+    arena: Arena&?
 }
 ```
 
@@ -618,7 +618,7 @@ and:
 DictBucket[V] {
     state: u8          # 0 = empty, 1 = full, 2 = tombstone
     hash: u64
-    key_data: any u8&?
+    key_data: u8&?
     key_len: i64
     value: V
 }
@@ -714,7 +714,7 @@ For `dict[dstr, V]`, the required key operations are:
 
 ```text
 dict_hash_dstr(key: dstr) -> u64
-dict_eq_dstr(bucket_key_data: any u8&?, bucket_key_len: i64, probe_key: dstr) -> bool
+dict_eq_dstr(bucket_key_data: u8&?, bucket_key_len: i64, probe_key: dstr) -> bool
 ```
 
 Required semantics:
@@ -755,9 +755,9 @@ arena_dict_new[V](a: Arena&, initial_capacity: usize) -> dict[dstr, V]
 
 arena_dict_reserve[V](a: Arena&, m: dict[dstr, V]&, min_capacity: usize) -> void error[RuntimeError]
 
-arena_dict_get[V](m: dict[dstr, V]&, key: dstr) -> any V&?
+arena_dict_get[V](m: dict[dstr, V]&, key: dstr) -> V&?
 
-arena_dict_put[V](a: Arena&, m: dict[dstr, V]&, key: dstr, value: V) -> any V& error[RuntimeError]
+arena_dict_put[V](a: Arena&, m: dict[dstr, V]&, key: dstr, value: V) -> V& error[RuntimeError]
 
 arena_dict_contains[V](m: dict[dstr, V]&, key: dstr) -> bool
 

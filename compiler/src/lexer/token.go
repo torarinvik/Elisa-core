@@ -257,7 +257,6 @@ var keywords = map[string]TokenKind{
 	"else":    TOKEN_ELSE,
 	"while":   TOKEN_WHILE,
 	"return":  TOKEN_RETURN,
-	"any":     TOKEN_ANY,
 	"heap":    TOKEN_HEAP,
 	"stack":   TOKEN_STACK,
 	"static":  TOKEN_STATIC,

@@ -9,7 +9,7 @@ func TestGenerateLLVMIRLowersReverseIterableScopeAndCheckpoint(t *testing.T) {
 	src := `extern pool_new(workers: usize) -> ThreadPool can[Pool.Create]
 
 def build(owner: Arena, items: darray[int]) -> usize:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
 	total: mutable usize = 0
     for value in rev(items):
 			total <- total + 1
@@ -39,7 +39,7 @@ def build(owner: Arena, items: darray[int]) -> usize:
 
 func TestGenerateLLVMIRLowersGroupedCheckpoint(t *testing.T) {
 	src := `def build(owner: Arena) -> usize:
-    alloc: mutable any Arena& = (&owner).cast[mutable any Arena&]
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         xs: mutable darray[int] = [1, 2]
         ys: mutable darray[int] = [3, 4]

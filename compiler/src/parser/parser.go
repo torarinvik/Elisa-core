@@ -85,7 +85,7 @@ func (p *Parser) withInMembershipDisabled(parse func() ast.Expr) ast.Expr {
 func tokenCanStartTypeExpr(tok lexer.Token) bool {
 	switch tok.Kind {
 	case lexer.TOKEN_IDENT, lexer.TOKEN_MUTABLE, lexer.TOKEN_TAIL,
-		lexer.TOKEN_LPAREN, lexer.TOKEN_ANY, lexer.TOKEN_HEAP,
+		lexer.TOKEN_LPAREN, lexer.TOKEN_HEAP,
 		lexer.TOKEN_STACK, lexer.TOKEN_STATIC:
 		return true
 	default:
