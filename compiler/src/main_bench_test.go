@@ -179,8 +179,8 @@ func buildFrontendLexerBenchExecutableForBench(b *testing.B) string {
 		exePath := filepath.Join(outputDir, "frontend_lexer_bench")
 
 		for _, args := range [][]string{
-			{"-emit", "header", "-packed-abi", "row-handle", "-o", headerPath, fixturePath},
-			{"-emit", "obj", "-O3", "-packed-abi", "row-handle", "-o", objectPath, fixturePath},
+			{"-emit", "header", "-o", headerPath, fixturePath},
+			{"-emit", "obj", "-O3", "-o", objectPath, fixturePath},
 		} {
 			var stdout bytes.Buffer
 			var stderr bytes.Buffer

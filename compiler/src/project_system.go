@@ -700,15 +700,7 @@ func resolveProjectTarget(project *resolvedProject, options projectCLIOptions) (
 	}
 	packedProfile := backend.DefaultPackedLoweringProfile()
 	if strings.TrimSpace(definition.PackedABI) != "" {
-		abi, err := backend.ParsePackedEnumABI(definition.PackedABI)
-		if err != nil {
-			return nil, fmt.Errorf("project target %q has invalid packed-abi: %w", targetName, err)
-		}
-		profile, err := backend.LegacyPackedLoweringProfile(abi)
-		if err != nil {
-			return nil, err
-		}
-		packedProfile = profile
+		return nil, fmt.Errorf("project target %q uses removed packed-abi override; use canonical packed lowering or enum-level @packed_profile(...) instead", targetName)
 	}
 	optLevel, hasOptLevel, err := resolveProjectOptLevel(definition.Opt, options)
 	if err != nil {

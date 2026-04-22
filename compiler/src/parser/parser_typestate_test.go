@@ -774,26 +774,6 @@ func TestParsePackedViewPayloadDestructureStatement(t *testing.T) {
 	}
 }
 
-func TestParsePackedEnumAnnotation(t *testing.T) {
-	file, errs := parseSourceFile(t, "@packed_abi(dense_fixed)\npacked enum Expr:\n    Lit(value: int)\n")
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	decl, ok := file.Decls[0].(*ast.EnumDecl)
-	if !ok {
-		t.Fatalf("expected enum decl, got %T", file.Decls[0])
-	}
-	if len(decl.Annotations) != 1 {
-		t.Fatalf("expected one enum annotation, got %d", len(decl.Annotations))
-	}
-	if decl.Annotations[0].Name != "packed_abi" {
-		t.Fatalf("expected packed_abi annotation, got %q", decl.Annotations[0].Name)
-	}
-	if len(decl.Annotations[0].Args) != 1 || decl.Annotations[0].Args[0] != "dense_fixed" {
-		t.Fatalf("expected packed_abi(dense_fixed), got %#v", decl.Annotations[0].Args)
-	}
-}
-
 func TestParseAlignedStructAnnotation(t *testing.T) {
 	file, errs := parseSourceFile(t, "@align(32)\nstruct Vec4:\n    x: f32\n    y: f32\n    z: f32\n    w: f32\n")
 	if len(errs) != 0 {
@@ -831,26 +811,6 @@ func TestParseCachelineAlignedStructAnnotation(t *testing.T) {
 	}
 	if len(decl.Annotations[0].Args) != 0 {
 		t.Fatalf("expected cacheline_aligned to take no args, got %#v", decl.Annotations[0].Args)
-	}
-}
-
-func TestParsePackedEnumPrefixAnnotation(t *testing.T) {
-	file, errs := parseSourceFile(t, "@packed_abi(dense_fixed)\n@packed_prefix(common_only)\npacked enum Expr:\n    common:\n        span: int\n    Lit(value: int)\n")
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	decl, ok := file.Decls[0].(*ast.EnumDecl)
-	if !ok {
-		t.Fatalf("expected enum decl, got %T", file.Decls[0])
-	}
-	if len(decl.Annotations) != 2 {
-		t.Fatalf("expected two enum annotations, got %d", len(decl.Annotations))
-	}
-	if decl.Annotations[1].Name != "packed_prefix" {
-		t.Fatalf("expected packed_prefix annotation, got %q", decl.Annotations[1].Name)
-	}
-	if len(decl.Annotations[1].Args) != 1 || decl.Annotations[1].Args[0] != "common_only" {
-		t.Fatalf("expected packed_prefix(common_only), got %#v", decl.Annotations[1].Args)
 	}
 }
 

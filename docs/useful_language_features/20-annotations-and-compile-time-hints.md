@@ -38,13 +38,6 @@ Packed enums accept layout-selection annotations in addition to the ordinary
 `packed enum` syntax.
 
 ```context
-@packed_abi(dense_fixed)
-@packed_prefix(common_only)
-packed enum Expr:
-    common:
-        span: int
-    Lit(value: int)
-
 @packed_profile(build_heavy)
 packed enum Pair:
     common:
@@ -54,10 +47,8 @@ packed enum Pair:
 
 Current rules:
 
-- `@packed_abi(...)` pins a specific packed lowering ABI
-- `@packed_prefix(...)` selects a prefix-word layout policy such as `common_only`
 - `@packed_profile(...)` applies a named packed-layout profile such as `build_heavy`
-- explicit packed-ABI overrides still win over profile defaults when both are present
+- supported profiles currently include `canonical`, `retained_reads`, and `build_heavy`
 - these annotations apply to packed enums and related packed/tree lowering surfaces rather than ordinary structs
 
 ## Function codegen annotations

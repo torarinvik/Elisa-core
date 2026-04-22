@@ -2752,6 +2752,38 @@ func TestAnalyzeAcceptsPackedCommonFieldStorageAnnotations(t *testing.T) {
 	}
 }
 
+func TestAnalyzeRejectsRemovedPackedABIAnnotation(t *testing.T) {
+	src := `@packed_abi(dense_fixed)
+packed enum Expr:
+	Lit(value: int)
+`
+	_, errs := parseAndAnalyze(t, "packed_abi_removed.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "@packed_abi on enum \"Expr\" has been removed; use @packed_profile(canonical|retained_reads|build_heavy) instead") {
+		t.Fatalf("expected removed packed_abi diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsRemovedPackedPrefixAnnotation(t *testing.T) {
+	src := `@packed_prefix(common_only)
+packed enum Expr:
+	common:
+		span: int
+	Lit(value: int)
+`
+	_, errs := parseAndAnalyze(t, "packed_prefix_removed.llcontext", src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic error, got none")
+	}
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "@packed_prefix on enum \"Expr\" has been removed; use @packed_profile(canonical|retained_reads|build_heavy) instead") {
+		t.Fatalf("expected removed packed_prefix diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRejectsPackedFieldStorageAnnotationsOutsidePackedEnumCommonFields(t *testing.T) {
 	src := `struct Bad:
 	@storage(side_table)

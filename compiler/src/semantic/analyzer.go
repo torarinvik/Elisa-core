@@ -1825,34 +1825,6 @@ func isSupportedExternFunctionAnnotation(name string) bool {
 	}
 }
 
-func normalizePackedABIAnnotationArg(value string) (string, bool) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "row-handle", "row_handle", "row", "rowhandle":
-		return "row-handle", true
-	case "word-handle", "word_handle", "word", "wordhandle":
-		return "word-handle", true
-	case "dense-fixed", "dense_fixed", "densefixed", "fixed-dense", "fixed_dense":
-		return "dense-fixed", true
-	case "index-soa", "index_soa", "index", "soa", "indexsoa":
-		return "index-soa", true
-	case "variant-sparse", "variant_sparse", "variant", "variantsparse", "sparse":
-		return "variant-sparse", true
-	default:
-		return "", false
-	}
-}
-
-func normalizePackedPrefixAnnotationArg(value string) (string, bool) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "all", "all-words", "all_words", "allwords", "full", "full-row", "full_row", "row":
-		return "all-words", true
-	case "common", "common-only", "common_only", "commononly", "common-fields", "common_fields":
-		return "common-only", true
-	default:
-		return "", false
-	}
-}
-
 func normalizePackedProfileAnnotationArg(value string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "canonical", "default", "canon", "variant_sparse", "variant-sparse":
@@ -1930,7 +1902,7 @@ func packedProfileDefaults(profile string) (string, string, bool) {
 
 func isSupportedEnumAnnotation(name string) bool {
 	switch name {
-	case "packed_abi", "packed_prefix", "packed_profile":
+	case "packed_profile":
 		return true
 	default:
 		return false
@@ -1995,53 +1967,22 @@ func (a *Analyzer) analyzeEnumAnnotations(enumDecl *ast.EnumDecl, enumType *Enum
 	seen := make(map[string]lexer.Pos, len(enumDecl.Annotations))
 	profileOverride := ""
 	hasProfileOverride := false
-	abiOverride := ""
-	hasABIOverride := false
-	prefixOverride := ""
-	hasPrefixOverride := false
 	for _, annotation := range enumDecl.Annotations {
 		if prev, exists := seen[annotation.Name]; exists {
 			a.errorf(annotation.Position, "duplicate @%s annotation on enum %q (first seen at %s:%d:%d)", annotation.Name, enumDecl.Name, prev.File, prev.Line, prev.Col)
 			continue
 		}
 		seen[annotation.Name] = annotation.Position
+		switch annotation.Name {
+		case "packed_abi", "packed_prefix":
+			a.errorf(annotation.Position, "@%s on enum %q has been removed; use @packed_profile(canonical|retained_reads|build_heavy) instead", annotation.Name, enumDecl.Name)
+			continue
+		}
 		if !isSupportedEnumAnnotation(annotation.Name) {
 			a.errorf(annotation.Position, "unknown enum annotation @%s on %q", annotation.Name, enumDecl.Name)
 			continue
 		}
 		switch annotation.Name {
-		case "packed_abi":
-			if !enumDecl.Packed {
-				a.errorf(annotation.Position, "@packed_abi on enum %q requires a packed enum", enumDecl.Name)
-				continue
-			}
-			if len(annotation.Args) != 1 {
-				a.errorf(annotation.Position, "@packed_abi on enum %q expects exactly one ABI argument", enumDecl.Name)
-				continue
-			}
-			normalized, ok := normalizePackedABIAnnotationArg(annotation.Args[0])
-			if !ok {
-				a.errorf(annotation.Position, "@packed_abi on enum %q uses unsupported ABI %q (expected row_handle, word_handle, dense_fixed, index_soa, or variant_sparse)", enumDecl.Name, annotation.Args[0])
-				continue
-			}
-			abiOverride = normalized
-			hasABIOverride = true
-		case "packed_prefix":
-			if !enumDecl.Packed {
-				a.errorf(annotation.Position, "@packed_prefix on enum %q requires a packed enum", enumDecl.Name)
-				continue
-			}
-			if len(annotation.Args) != 1 {
-				a.errorf(annotation.Position, "@packed_prefix on enum %q expects exactly one prefix argument", enumDecl.Name)
-				continue
-			}
-			normalized, ok := normalizePackedPrefixAnnotationArg(annotation.Args[0])
-			if !ok {
-				a.errorf(annotation.Position, "@packed_prefix on enum %q uses unsupported prefix mode %q (expected all_words or common_only)", enumDecl.Name, annotation.Args[0])
-				continue
-			}
-			prefixOverride = normalized
-			hasPrefixOverride = true
 		case "packed_profile":
 			if !enumDecl.Packed {
 				a.errorf(annotation.Position, "@packed_profile on enum %q requires a packed enum", enumDecl.Name)
@@ -2073,14 +2014,6 @@ func (a *Analyzer) analyzeEnumAnnotations(enumDecl *ast.EnumDecl, enumType *Enum
 				enumType.HasPackedPrefixOverride = true
 			}
 		}
-	}
-	if hasABIOverride {
-		enumType.PackedABIOverride = abiOverride
-		enumType.HasPackedABIOverride = true
-	}
-	if hasPrefixOverride {
-		enumType.PackedPrefixOverride = prefixOverride
-		enumType.HasPackedPrefixOverride = true
 	}
 }
 
