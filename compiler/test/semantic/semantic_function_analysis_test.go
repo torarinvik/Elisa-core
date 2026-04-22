@@ -38,19 +38,19 @@ func TestAnalyzeInfersSinkParamsAndAllowsImplicitSinkCalls(t *testing.T) {
 	src := `extern join(thread: Thread[i64, Joinable]) -> i64 can[Thread.Join]
 
 
-def take(thread: Thread[i64, Joinable]) -> i64 can[Thread.Join]:
+def take(thread: Thread[i64, Joinable]) -> i64:
 	can Thread.Join:
 		return join(move thread)
 
 
-def branch_take(flag: bool, thread: Thread[i64, Joinable]) -> i64 can[Thread.Join]:
+def branch_take(flag: bool, thread: Thread[i64, Joinable]) -> i64:
 	can Thread.Join:
 		if flag:
 			return take(thread)
 		return take(thread)
 
 
-def run(flag: bool, thread: Thread[i64, Joinable]) -> i64 can[Thread.Join]:
+def run(flag: bool, thread: Thread[i64, Joinable]) -> i64:
 	can Thread.Join:
 		result: i64 = branch_take(flag, thread)
 		return result

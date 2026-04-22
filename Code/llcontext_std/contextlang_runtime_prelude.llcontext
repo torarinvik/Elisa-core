@@ -69,11 +69,11 @@ global mutable string_len_cache: heap StringLenCacheEntry&?[CTX_STRING_LEN_CACHE
 # Permanent / scratch arena allocation
 # ------------------------------------------------------------
 
-def alloc_perm(size: i64) -> mutable heap void& can[Memory.Allocate, Abort.Panic]:
+def alloc_perm(size: i64) -> mutable heap void&:
 	resolved: usize = size.usize() if size > 0 else 1
 	return arena_alloc(perm_arena.ref[Arena&], resolved) can Memory.Allocate, Abort.Panic
 
-def alloc_scratch(size: i64) -> mutable heap void& can[Memory.Allocate, Abort.Panic]:
+def alloc_scratch(size: i64) -> mutable heap void&:
 	resolved: usize = size.usize() if size > 0 else 1
 	return arena_alloc(scratch_arena.ref[Arena&], resolved) can Memory.Allocate, Abort.Panic
 
@@ -91,7 +91,7 @@ def string_len_bucket(ptr: u8&) -> usize:
 	bits ^= (bits >> 33)
 	return (bits & (CTX_STRING_LEN_CACHE_BUCKETS - 1).uintptr()).usize()
 
-def register_perm_string_len(ptr: u8&?, len: usize) can[Memory.Allocate, Abort.Panic]:
+def register_perm_string_len(ptr: u8&?, len: usize):
 	can Memory.Allocate, Abort.Panic:
 		if ptr == null or len == 0:
 			return
@@ -154,7 +154,7 @@ def runtime_strlen(value: u8&?) -> usize:
 # Small string interning
 # ------------------------------------------------------------
 
-def intern_small_string(src: u8&, len: usize) -> heap u8& can[Memory.Allocate, Abort.Panic]:
+def intern_small_string(src: u8&, len: usize) -> heap u8&:
 	can Memory.Allocate, Abort.Panic:
 		if len == 0:
 			empty: heap u8& = alloc_perm(1).cast[heap u8&]
@@ -193,7 +193,7 @@ def intern_small_string(src: u8&, len: usize) -> heap u8& can[Memory.Allocate, A
 # Integer / bool / char to string conversion
 # ------------------------------------------------------------
 
-def int_to_string_into(arena: mutable Arena&, value: i64) -> heap u8& can[Memory.Allocate, Console.Format, Abort.Panic]:
+def int_to_string_into(arena: mutable Arena&, value: i64) -> heap u8&:
 	can Memory.Allocate, Console.Format, Abort.Panic:
 		len: int = snprintf(null, 0, "%lld".cast[u8&], value)
 
@@ -214,7 +214,7 @@ def bool_to_string_into(arena: Arena&, value: int) -> u8&:
 	_ = arena
 	return "True".cast[u8&] if value != 0 else "False".cast[u8&]
 
-def char_to_string_into(arena: Arena&, value: i64) -> heap u8& can[Memory.Allocate, Abort.Panic]:
+def char_to_string_into(arena: Arena&, value: i64) -> heap u8&:
 	can Memory.Allocate, Abort.Panic:
 		_ = arena
 		text: u8[2]
@@ -232,7 +232,7 @@ def string_builder_next_cap(min_cap: i64) -> i64:
 		cap *= 2
 	return cap
 
-def string_builder_new(initial: u8&?) -> mutable heap StringBuilder& can[Memory.Allocate, Abort.Panic]:
+def string_builder_new(initial: u8&?) -> mutable heap StringBuilder&:
 	can Memory.Allocate, Abort.Panic:
 		src: u8& = initial if initial != null else "".cast[u8&]
 		len: usize = runtime_strlen(src)
@@ -248,7 +248,7 @@ def string_builder_new(initial: u8&?) -> mutable heap StringBuilder& can[Memory.
 		builder.data[len] <- 0
 		return builder
 
-def string_builder_append(builder: mutable heap StringBuilder&?, suffix: u8&?) -> mutable heap StringBuilder& can[Memory.Allocate, Abort.Panic]:
+def string_builder_append(builder: mutable heap StringBuilder&?, suffix: u8&?) -> mutable heap StringBuilder&:
 	can Memory.Allocate, Abort.Panic:
 		src: u8& = suffix if suffix != null else "".cast[u8&]
 		suffix_len: usize = runtime_strlen(src)
@@ -277,7 +277,7 @@ def string_builder_append(builder: mutable heap StringBuilder&?, suffix: u8&?) -
 		b.data[b.len.usize()] <- 0
 		return b
 
-def string_builder_finish(builder: heap StringBuilder&?) -> heap u8& can[Memory.Allocate, Abort.Panic]:
+def string_builder_finish(builder: heap StringBuilder&?) -> heap u8&:
 	can Memory.Allocate, Abort.Panic:
 		if builder == null:
 			return intern_small_string("".cast[u8&], 0)

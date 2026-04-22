@@ -344,7 +344,6 @@ func Analyze(file *ast.File) *Result {
 	a.collectStaticImpls(activeDecls)
 	a.analyzeDecls(activeDecls)
 	a.inferFunctionPermissionEffects(activeDecls)
-	a.warnOnImplicitFunctionPermissions(activeDecls)
 	a.validatePermissionUsage(activeDecls)
 	a.analyzeExports(activeDecls)
 	return &Result{

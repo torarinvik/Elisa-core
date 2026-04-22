@@ -42,7 +42,7 @@ effect ConsoleEffect:
     Write
     Flush
 
-def run() -> void can[FooEffect, ConsoleEffect.Write]:
+def run() -> void:
     can FooEffect, ConsoleEffect.Write:
         signal FooEffect
         signal ConsoleEffect.Write
@@ -59,7 +59,9 @@ Current rules for `effect` and `signal`:
 - `signal Name.Member` records use of one concrete member
 - `signal` participates in the same effect inference and local-grant checking as calls to effectful functions
 - family-level grants such as `can[ConsoleEffect]` satisfy member signals and calls from the same family
-- declared signature permissions such as `can[...]` describe the callable surface for callers, but they do not by themselves satisfy local-grant checking inside the body
+- function bodies infer their callable permission surface from effectful operations and local grants
+- explicit signature permissions still matter on surfaces without bodies, such as `extern` declarations and function types
+- explicit signature permissions do not by themselves satisfy local-grant checking inside the body
 
 Top-level `effects` declarations still package an error-set clause and a permission clause into one reusable alias.
 
@@ -83,18 +85,18 @@ Current rules:
 
 ### Local `can` grants and formatter normalization
 
-Signature and function-type permissions use declaration syntax such as `can[Console.Write]`. Inside a body, effectful use sites still need an explicit local grant.
+Function types and other body-less surfaces use declaration syntax such as `can[Console.Write]`. Function declarations with bodies can usually omit signature permissions because effect inference records them from local grants and effectful operations. Inside a body, effectful use sites still need an explicit local grant.
 
 ```context
-def write_once(text: any u8&) -> int can[Console.Write]:
+def write_once(text: any u8&) -> int:
     return puts(text) can Console.Write
 
-def write_pair(left: any u8&, right: any u8&) -> int can[Console.Write]:
+def write_pair(left: any u8&, right: any u8&) -> int:
     can Console.Write:
         puts(left)
         return puts(right)
 
-def checked_render() -> int can[Console.Format]:
+def checked_render() -> int:
     return (try checked() else 1) can Console.Format
 ```
 
@@ -103,7 +105,7 @@ Current rules for local grants:
 - local grants use surface syntax: inline `expr can Family.Member` or block `can Family, Family.Member:`
 - local grants are checked against the same effect families as effectful calls and `signal`
 - family grants such as `can ConsoleEffect` satisfy member uses such as `ConsoleEffect.Write`
-- declared surface permissions on the enclosing function or alias (`can[...]` or `effects SomeAlias`) do not replace an explicit local grant at the use site
+- inferred or explicit surface permissions on the enclosing function or alias (`can[...]` or `effects SomeAlias`) do not replace an explicit local grant at the use site
 - `-emit fmt` always prints local grants in surface syntax rather than declaration syntax
 - the formatter conservatively inlines simple one-statement grant blocks into `... can ...` form for returns, assignments, declarations, tuple binds, discards, `as` rebinds, and expression statements
 - the formatter keeps block form for multi-statement regions and for statements it cannot safely rewrite, including statement-position `panic(...)`

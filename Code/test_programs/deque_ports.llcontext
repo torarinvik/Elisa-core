@@ -1,7 +1,7 @@
 # include "../llcontext_std/test.llcontext"
 # include "../llcontext_std/heap.llcontext"
 
-def deque_i64_make_with_capacity(a: mutable Arena&, capacity: usize) -> Deque[i64] can[Memory.Allocate, Abort.Panic]:
+def deque_i64_make_with_capacity(a: mutable Arena&, capacity: usize) -> Deque[i64]:
     ctor: func(mutable Arena&, usize) -> Deque[i64] can[Memory.Allocate, Abort.Panic] = arena_deque_with_capacity.specialize[i64]()
     return ctor(a, capacity) can Memory.Allocate, Abort.Panic
 
@@ -9,12 +9,12 @@ def deque_i64_make_buffer(buffer: i64&, capacity: usize) -> Deque[i64]:
     ctor: func(i64&, usize) -> Deque[i64] = arena_deque_init_buffer.specialize[i64]()
     return ctor(buffer, capacity)
 
-def assert_deque_i64_value(d: Deque[i64]&, index: usize, expected: i64) can[Abort.Panic]:
+def assert_deque_i64_value(d: Deque[i64]&, index: usize, expected: i64):
     can Abort.Panic:
         slot: i64& = arena_deque_at(d, index)
         assert_eq(slot[0], expected)
 
-def deque_basic_smoke() -> void can[Memory.Allocate, Memory.Release, Abort.Panic]:
+def deque_basic_smoke() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         arena: mutable Arena = zeroed
         defer block:
@@ -56,7 +56,7 @@ def deque_basic_smoke() -> void can[Memory.Allocate, Memory.Release, Abort.Panic
         _ = arena_deque_push_back(arena.ref[Arena&], d.ref[Deque[i64]&], 9)
         assert_deque_i64_value(d.ref[Deque[i64]&], 0, 9)
 
-def deque_wraparound_smoke() -> void can[Abort.Panic]:
+def deque_wraparound_smoke() -> void:
     can Abort.Panic:
         buffer: i64[4] = zeroed
         d: mutable Deque[i64] = deque_i64_make_buffer(buffer[0].ref[i64&], 4)
@@ -89,7 +89,7 @@ def deque_wraparound_smoke() -> void can[Abort.Panic]:
         assert_eq(front_opt.cast[i64&][0], 2)
         assert_eq(back_opt.cast[i64&][0], 5)
 
-def deque_resize_smoke() -> void can[Memory.Allocate, Memory.Release, Abort.Panic]:
+def deque_resize_smoke() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         arena: mutable Arena = zeroed
         defer block:
@@ -120,7 +120,7 @@ def deque_resize_smoke() -> void can[Memory.Allocate, Memory.Release, Abort.Pani
         assert_deque_i64_value(d.ref[Deque[i64]&], 3, 14)
         assert_deque_i64_value(d.ref[Deque[i64]&], 4, 15)
 
-def deque_ports_main_impl() -> int can[Memory.Allocate, Memory.Release, Abort.Panic]:
+def deque_ports_main_impl() -> int:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         deque_basic_smoke()
         deque_wraparound_smoke()

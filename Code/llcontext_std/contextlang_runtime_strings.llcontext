@@ -6,7 +6,7 @@
 # String concatenation
 # ------------------------------------------------------------
 
-def concat2(lhs: u8&?, rhs: u8&?) -> u8& can[Memory.Allocate, Abort.Panic]:
+def concat2(lhs: u8&?, rhs: u8&?) -> u8&:
     can Memory.Allocate, Abort.Panic:
         left: u8& = lhs.cast[u8&] if lhs != null else "".cast[u8&]
         right: u8& = rhs.cast[u8&] if rhs != null else "".cast[u8&]
@@ -34,7 +34,7 @@ def concat2(lhs: u8&?, rhs: u8&?) -> u8& can[Memory.Allocate, Abort.Panic]:
         register_perm_string_len(out, left_len + right_len)
         return out
 
-def concat2_scratch(lhs: u8&?, rhs: u8&?) -> u8& can[Memory.Allocate, Abort.Panic]:
+def concat2_scratch(lhs: u8&?, rhs: u8&?) -> u8&:
     can Memory.Allocate, Abort.Panic:
         left: u8& = lhs.cast[u8&] if lhs != null else "".cast[u8&]
         right: u8& = rhs.cast[u8&] if rhs != null else "".cast[u8&]
@@ -160,7 +160,7 @@ def string_slices_eq(lhs: u8&?, lhs_start: i64, lhs_end: i64, rhs: u8&?, rhs_sta
 
     return 1 if memcmp((left + left_lo).cast[void&], (right + right_lo).cast[void&], left_slice_len) == 0 else 0
 
-def string_slice(value: u8&?, start: i64, end: i64) -> u8& can[Memory.Allocate, Abort.Panic]:
+def string_slice(value: u8&?, start: i64, end: i64) -> u8&:
     can Memory.Allocate, Abort.Panic:
         src: u8& = value if value != null else "".cast[u8&]
         len: usize = runtime_strlen(src)
@@ -271,7 +271,7 @@ def string_views_eq(lhs: sview, rhs: sview) -> int:
 
     return 1 if memcmp(lhs.data.cast[void&], rhs.data.cast[void&], lhs.len.usize()) == 0 else 0
 
-def string_view_copy(view: sview) -> heap u8& can[Memory.Allocate, Abort.Panic]:
+def string_view_copy(view: sview) -> heap u8&:
     can Memory.Allocate, Abort.Panic:
         if view.len <= 0:
             return intern_small_string("".cast[u8&], 0)

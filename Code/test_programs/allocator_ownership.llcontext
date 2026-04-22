@@ -28,13 +28,13 @@ extern sfree_bytes(ptr: heap u8&) -> heap u8! can[Memory.Release]
 extern snprintf(buffer: mutable u8&?, buffer_size: usize, format: static u8&, ...) -> int can[Console.Format]
 
 
-def require_heap_pair_node() -> mutable heap HeapPairNode& error[MemoryError] can[Memory.Allocate]:
+def require_heap_pair_node() -> mutable heap HeapPairNode& error[MemoryError]:
     raw: heap HeapPairNode&? = alloc_heap_pair_node() can Memory.Allocate
     node: heap HeapPairNode& = raw else raise MemoryError.OutOfMemory
     return node
 
 
-def release_heap_pair_node(node: mutable heap HeapPairNode&?) can[Memory.Release]:
+def release_heap_pair_node(node: mutable heap HeapPairNode&?):
     if node != null:
         node as ! <- (sfree_heap_pair_node(node) can Memory.Release)
 
@@ -55,7 +55,7 @@ def recursive_pair_node_sum(node: heap HeapPairNode&) -> int error[LogicError, D
     return value + (try recursive_pair_node_sum(next))
 
 
-def recursive_free_pair_chain(node: mutable heap HeapPairNode&?) -> void can[Memory.Release]:
+def recursive_free_pair_chain(node: mutable heap HeapPairNode&?) -> void:
     can Memory.Release:
         if node == null:
             return
@@ -65,7 +65,7 @@ def recursive_free_pair_chain(node: mutable heap HeapPairNode&?) -> void can[Mem
         recursive_free_pair_chain(next_node)
 
 
-def build_pair_chain_sum() -> int error[MemoryError, LogicError, DiskError, NetError] can[Memory.Allocate, Memory.Release]:
+def build_pair_chain_sum() -> int error[MemoryError, LogicError, DiskError, NetError]:
     can Memory.Allocate, Memory.Release:
         first: mutable heap HeapPairNode&? = null
         defer block:
@@ -81,7 +81,7 @@ def build_pair_chain_sum() -> int error[MemoryError, LogicError, DiskError, NetE
         return total
 
 
-def borrow_then_release_single_pair() -> int error[MemoryError, DiskError, NetError] can[Memory.Allocate, Memory.Release]:
+def borrow_then_release_single_pair() -> int error[MemoryError, DiskError, NetError]:
     can Memory.Allocate, Memory.Release:
         handle: mutable heap HeapPairNode&? = null
         defer block:
@@ -94,21 +94,21 @@ def borrow_then_release_single_pair() -> int error[MemoryError, DiskError, NetEr
         return total
 
 
-def checked_write_into_heap(buffer: mutable heap u8&, size: usize, format: static u8&) -> int error[FormatError] can[Console.Format]:
+def checked_write_into_heap(buffer: mutable heap u8&, size: usize, format: static u8&) -> int error[FormatError]:
     written: int = snprintf(buffer.cast[u8&?], size, format, 11) can Console.Format
     if written < 0:
         raise FormatError.WriteFailed
     return written
 
 
-def checked_write_into_stack(buffer: mutable stack u8&, size: usize, format: static u8&) -> int error[FormatError] can[Console.Format]:
+def checked_write_into_stack(buffer: mutable stack u8&, size: usize, format: static u8&) -> int error[FormatError]:
     written: int = snprintf(buffer.cast[u8&?], size, format, 11) can Console.Format
     if written < 0:
         raise FormatError.WriteFailed
     return written
 
 
-def alloc_and_format_heap_buffer() -> int error[MemoryError, FormatError] can[Memory.Allocate, Memory.Release, Console.Format]:
+def alloc_and_format_heap_buffer() -> int error[MemoryError, FormatError]:
     can Memory.Allocate, Memory.Release, Console.Format:
         buffer: mutable heap u8&? = null
         defer block:
@@ -122,20 +122,20 @@ def alloc_and_format_heap_buffer() -> int error[MemoryError, FormatError] can[Me
         return written
 
 
-def stack_buffer_format() -> int error[FormatError] can[Console.Format]:
+def stack_buffer_format() -> int error[FormatError]:
     can Console.Format:
         buffer: u8[32] = zeroed
         return try checked_write_into_stack(&buffer[0], 32, "stack=%d")
 
 
-def recursive_format_or_fallback(depth: int) -> int can[Memory.Allocate, Memory.Release, Console.Format]:
+def recursive_format_or_fallback(depth: int) -> int:
     can Memory.Allocate, Memory.Release, Console.Format:
         if depth <= 0:
             return try alloc_and_format_heap_buffer() else -1
         return (try alloc_and_format_heap_buffer() else -1) + recursive_format_or_fallback(depth - 1)
 
 
-def allocator_ownership_combo(depth: int) -> int can[Memory.Allocate, Memory.Release, Console.Format]:
+def allocator_ownership_combo(depth: int) -> int:
     can Memory.Allocate, Memory.Release, Console.Format:
         total: mutable int = try build_pair_chain_sum() else -1000
         total <- total + (try borrow_then_release_single_pair() else -1001)

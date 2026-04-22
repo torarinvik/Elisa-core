@@ -96,7 +96,7 @@ static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
 # Small utilities
 # ------------------------------------------------------------
 
-def assert(condition: bool) can[Abort.Panic]:
+def assert(condition: bool):
     can Abort.Panic:
         if not condition:
             panic("assert failed")
@@ -111,7 +111,7 @@ def inv_handle(ptr: heap void&?) -> bool:
 # Pointer-state helpers
 # ------------------------------------------------------------
 
-def sfree[T](ptr: heap T&) -> heap T! can[Memory.Release]:
+def sfree[T](ptr: heap T&) -> heap T!:
     free(ptr.cast[heap void&]) can Memory.Release
     return null
 
@@ -119,7 +119,7 @@ def sfree[T](ptr: heap T&) -> heap T! can[Memory.Release]:
 # Region allocation / freeing
 # ------------------------------------------------------------
 
-def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap Region& can[Memory.Allocate, Abort.Panic]:
+def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap Region&:
     can Memory.Allocate, Abort.Panic:
         size_bytes: usize = sizeof(Region) + sizeof(uintptr) * capacity
 
@@ -176,10 +176,10 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
         r.global_index <- 0
         return r
 
-def new_region(capacity: usize) -> mutable heap Region& can[Memory.Allocate, Abort.Panic]:
+def new_region(capacity: usize) -> mutable heap Region&:
     return new_region_with_owner(capacity, 0.uintptr()) can Memory.Allocate, Abort.Panic
 
-def free_region(r: heap Region&) can[Memory.Release, Abort.Panic]:
+def free_region(r: heap Region&):
     can Memory.Release, Abort.Panic:
         static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
             free(r.cast[heap void&])
@@ -201,7 +201,7 @@ def free_region(r: heap Region&) can[Memory.Release, Abort.Panic]:
         static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
             pass
 
-def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void& can[Memory.Allocate, Abort.Panic]:
+def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
     can Memory.Allocate, Abort.Panic:
         size: usize = (size_bytes + sizeof(uintptr) - 1) / sizeof(uintptr)
 
@@ -241,7 +241,7 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void& can[
         a.end.count <- a.end.count + size
         return result
 
-def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz: usize) -> mutable heap void& can[Memory.Allocate, Abort.Panic]:
+def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz: usize) -> mutable heap void&:
     can Memory.Allocate, Abort.Panic:
         if newsz <= oldsz:
             return oldptr.cast[heap void&]
@@ -284,14 +284,14 @@ def arena_memeq(lhs: void&, rhs: void&, n: usize) -> bool:
 
     return true
 
-def arena_strdup(a: mutable Arena&, cstr: u8&) -> mutable heap u8& can[Memory.Allocate, Abort.Panic]:
+def arena_strdup(a: mutable Arena&, cstr: u8&) -> mutable heap u8&:
     n: usize = arena_strlen(cstr)
     dup: mutable heap u8& = arena_alloc(a, n + 1).cast[mutable heap u8&] can Memory.Allocate, Abort.Panic
     arena_memcpy(dup.cast[mutable void&], cstr.cast[void&], n)
     dup[n] <- 0
     return dup
 
-def arena_memdup(a: mutable Arena&, data: void&, size: usize) -> mutable heap void& can[Memory.Allocate, Abort.Panic]:
+def arena_memdup(a: mutable Arena&, data: void&, size: usize) -> mutable heap void&:
     dup: mutable heap void& = arena_alloc(a, size) can Memory.Allocate, Abort.Panic
     _ = arena_memcpy(dup.cast[mutable void&], data, size)
     return dup
@@ -340,7 +340,7 @@ def arena_rewind(a: mutable Arena&, m: ArenaMark):
     assert current != null
     a.end_index <- region_index
 
-def arena_free(a: mutable Arena&) can[Memory.Release, Abort.Panic]:
+def arena_free(a: mutable Arena&):
     can Memory.Release, Abort.Panic:
         r: mutable heap Region&? = a.begin
 
@@ -353,7 +353,7 @@ def arena_free(a: mutable Arena&) can[Memory.Release, Abort.Panic]:
         a.end as ! <- null
         a.end_index <- 0
 
-def arena_trim(a: mutable Arena&) can[Memory.Release, Abort.Panic]:
+def arena_trim(a: mutable Arena&):
     can Memory.Release, Abort.Panic:
         if a.end == null:
             return
@@ -381,7 +381,7 @@ extern vsnprintf(
     args: va_list
 ) -> int
 
-def arena_vsprintf(a: mutable Arena&, format: u8&, args: va_list) -> mutable heap u8& can[Memory.Allocate, Console.Format, Abort.Panic]:
+def arena_vsprintf(a: mutable Arena&, format: u8&, args: va_list) -> mutable heap u8&:
     can Memory.Allocate, Console.Format, Abort.Panic:
         args_copy: va_list = va_copy(args)
         n: int = vsnprintf(null, 0, format, args_copy)

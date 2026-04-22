@@ -63,7 +63,7 @@ def fixed_buffer_is_last_allocation(a: FixedBufferAllocator&, ptr: void&, size_b
 def fixed_buffer_snapshot(a: FixedBufferAllocator&) -> FixedBufferMark:
     return FixedBufferMark(a.end_index)
 
-def fixed_buffer_rewind(a: mutable FixedBufferAllocator&, mark: FixedBufferMark) can[Abort.Panic]:
+def fixed_buffer_rewind(a: mutable FixedBufferAllocator&, mark: FixedBufferMark):
     can Abort.Panic:
         assert mark.end_index <= a.capacity
         a.end_index <- mark.end_index
@@ -90,13 +90,13 @@ def fixed_buffer_alloc_align(a: mutable FixedBufferAllocator&, size_bytes: usize
 def fixed_buffer_alloc(a: mutable FixedBufferAllocator&, size_bytes: usize) -> mutable void&?:
     return fixed_buffer_alloc_align(a, size_bytes, sizeof(uintptr))
 
-def fixed_buffer_alloc_align_or_panic(a: mutable FixedBufferAllocator&, size_bytes: usize, alignment: usize) -> mutable void& can[Abort.Panic]:
+def fixed_buffer_alloc_align_or_panic(a: mutable FixedBufferAllocator&, size_bytes: usize, alignment: usize) -> mutable void&:
     can Abort.Panic:
         raw: void&? = fixed_buffer_alloc_align(a, size_bytes, alignment)
         assert raw != null
         return raw.cast[void&]
 
-def fixed_buffer_alloc_or_panic(a: mutable FixedBufferAllocator&, size_bytes: usize) -> mutable void& can[Abort.Panic]:
+def fixed_buffer_alloc_or_panic(a: mutable FixedBufferAllocator&, size_bytes: usize) -> mutable void&:
     can Abort.Panic:
         raw: void&? = fixed_buffer_alloc(a, size_bytes)
         assert raw != null
@@ -131,12 +131,12 @@ def fixed_buffer_release(a: mutable FixedBufferAllocator&, ptr: void&, size_byte
 def memory_pool_init[T]() -> MemoryPool[T]:
     return zeroed
 
-def memory_pool_init_capacity[T](count: usize) -> MemoryPool[T] can[Memory.Allocate, Abort.Panic]:
+def memory_pool_init_capacity[T](count: usize) -> MemoryPool[T]:
     out: mutable MemoryPool[T] = zeroed
     memory_pool_add_capacity(out.ref[MemoryPool[T]&], count) can Memory.Allocate, Abort.Panic
     return out
 
-def memory_pool_add_capacity[T](pool: mutable MemoryPool[T]&, count: usize) can[Memory.Allocate, Abort.Panic]:
+def memory_pool_add_capacity[T](pool: mutable MemoryPool[T]&, count: usize):
     can Memory.Allocate, Abort.Panic:
         item_size: mutable usize = sizeof(T)
         if item_size < sizeof(MemoryPoolFreeNode):
@@ -148,7 +148,7 @@ def memory_pool_add_capacity[T](pool: mutable MemoryPool[T]&, count: usize) can[
             node.next <- pool.free_list
             pool.free_list as & <- node
 
-def memory_pool_create[T](pool: mutable MemoryPool[T]&) -> mutable heap T& can[Memory.Allocate, Abort.Panic]:
+def memory_pool_create[T](pool: mutable MemoryPool[T]&) -> mutable heap T&:
     can Memory.Allocate, Abort.Panic:
         if pool.free_list != null:
             node: heap MemoryPoolFreeNode& = pool.free_list
@@ -176,7 +176,7 @@ def memory_pool_reset[T](pool: mutable MemoryPool[T]&):
     arena_reset(pool.arena.ref[Arena&])
     pool.free_list <- null
 
-def memory_pool_deinit[T](pool: mutable MemoryPool[T]&) can[Memory.Release, Abort.Panic]:
+def memory_pool_deinit[T](pool: mutable MemoryPool[T]&):
     arena_free(pool.arena.ref[Arena&]) can Memory.Release, Abort.Panic
     pool.arena <- zeroed
     pool.free_list <- null

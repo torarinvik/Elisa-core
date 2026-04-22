@@ -199,14 +199,6 @@ func filterPermissionRefsByFamilies(refs []ast.PermissionRef, families []string)
 	return canonicalizePermissionRefs(out)
 }
 
-func permissionDeclHint(refs []ast.PermissionRef, families []string) string {
-	refs = filterPermissionRefsByFamilies(refs, families)
-	if hint := PermissionRefsString(refs); hint != "" {
-		return hint
-	}
-	return permissionFamiliesString(families)
-}
-
 func permissionGrantHint(refs []ast.PermissionRef, families []string) string {
 	refs = filterPermissionRefsByFamilies(refs, families)
 	if len(refs) == 0 {
@@ -287,23 +279,6 @@ func sortedPermissionFamilies(families map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func missingPermissionFamilies(declared []string, used []string) []string {
-	if len(used) == 0 {
-		return nil
-	}
-	declaredSet := make(map[string]bool, len(declared))
-	for _, family := range declared {
-		declaredSet[family] = true
-	}
-	missing := make([]string, 0)
-	for _, family := range used {
-		if !declaredSet[family] {
-			missing = append(missing, family)
-		}
-	}
-	return missing
 }
 
 func funcTypeUsesPermissionRowParam(fnType *FuncType) bool {
@@ -411,62 +386,6 @@ func (a *Analyzer) inferFunctionPermissionEffects(decls []scopedDecl) {
 			return
 		}
 	}
-}
-
-func (a *Analyzer) warnOnImplicitFunctionPermissions(decls []scopedDecl) {
-	for _, scoped := range decls {
-		fn, ok := scoped.Decl.(*ast.FuncDecl)
-		if !ok {
-			continue
-		}
-		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
-			sym, ok := a.symbolForFuncDecl(fn)
-			if !ok {
-				return
-			}
-			fnType, ok := sym.Type.(*FuncType)
-			if !ok || fnType == nil {
-				return
-			}
-			if a.permissionWarningsSuppressedByGenericContext(fnType, nil) {
-				return
-			}
-			missing := missingPermissionFamilies(fnType.DeclaredPermissions, fnType.Permissions)
-			if len(missing) == 0 {
-				return
-			}
-			if funcHasAnnotation(fn, "test") {
-				return
-			}
-			if !functionAnnotationsAllowDeclaredPermissionFamilies(fn, fnType, missing) {
-				return
-			}
-			hint := permissionDeclHint(functionPermissionRefs(fnType), missing)
-			if len(fnType.DeclaredPermissions) == 0 {
-				a.warnf(fn.Pos(), "function %q infers%s from its body; add explicit%s to make the effect contract visible", fn.Name, permissionFamiliesString(missing), hint)
-				return
-			}
-			a.warnf(fn.Pos(), "function %q declares%s but body also uses%s; add explicit%s to silence this warning", fn.Name, permissionFamiliesString(fnType.DeclaredPermissions), permissionFamiliesString(missing), hint)
-		})
-	}
-}
-
-func functionAnnotationsAllowDeclaredPermissionFamilies(fn *ast.FuncDecl, fnType *FuncType, families []string) bool {
-	if fn == nil || fnType == nil || len(families) == 0 {
-		return true
-	}
-	candidate := *fnType
-	candidate.Permissions = mergePermissionFamilies(fnType.DeclaredPermissions, families)
-	candidate.PermissionRefs = mergePermissionRefs(functionPermissionRefs(fnType), filterPermissionRefsByFamilies(functionPermissionRefs(fnType), families))
-	for _, annotation := range fn.Annotations {
-		if !isSupportedFunctionAnnotation(annotation.Name) {
-			continue
-		}
-		if !annotationAllowsDeclaredPermissions(annotation.Name, &candidate) {
-			return false
-		}
-	}
-	return true
 }
 
 func (a *Analyzer) collectFunctionPermissionRefs(fn *ast.FuncDecl) []ast.PermissionRef {

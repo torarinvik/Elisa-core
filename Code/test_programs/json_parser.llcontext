@@ -852,7 +852,7 @@ def json_node_store_state_bits(store: JsonNode.Store[Local]&) -> uintptr:
     return json_node_store_words(store)[2]
 
 
-def json_node_store_reserve(arena: mutable Arena&, store: JsonNode.Store[Local]&, needed_rows: usize) can[Memory.Allocate, Abort.Panic]:
+def json_node_store_reserve(arena: mutable Arena&, store: JsonNode.Store[Local]&, needed_rows: usize):
     can Memory.Allocate, Abort.Panic:
         state_bits: uintptr = json_node_store_state_bits(store)
         if state_bits == 0.uintptr():
@@ -995,7 +995,7 @@ def json_parse_null_node(cursor: mutable JsonCursor&, store: JsonNode.Store[Loca
     return json_parse_node_result(JsonNode.Null, checksum)
 
 
-def json_parse_value_node_after_ws(cursor: mutable JsonCursor&, arena: mutable Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
+def json_parse_value_node_after_ws(cursor: mutable JsonCursor&, arena: mutable Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult:
     can Memory.Allocate, Abort.Panic:
         ch: i64 = json_cur_char(cursor)
         if ch == JSON_CH_DQUOTE:
@@ -1015,7 +1015,7 @@ def json_parse_value_node_after_ws(cursor: mutable JsonCursor&, arena: mutable A
         return JsonParseNodeResult(invalid_node, -1)
 
 
-def json_parse_array_node(cursor: mutable JsonCursor&, arena: mutable Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
+def json_parse_array_node(cursor: mutable JsonCursor&, arena: mutable Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult:
     can Memory.Allocate, Abort.Panic:
         in arena:
             items: mutable darray[JsonNode] = []
@@ -1051,7 +1051,7 @@ def json_parse_array_node(cursor: mutable JsonCursor&, arena: mutable Arena&, st
             return json_parse_node_result(JsonNode.Array(items_ptr: items.items, item_count: items.count), 43 + items_checksum)
 
 
-def json_parse_object_node(cursor: mutable JsonCursor&, arena: mutable Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
+def json_parse_object_node(cursor: mutable JsonCursor&, arena: mutable Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult:
     can Memory.Allocate, Abort.Panic:
         in arena:
             fields: mutable darray[JsonField] = []
@@ -1106,7 +1106,7 @@ def json_parse_object_node(cursor: mutable JsonCursor&, arena: mutable Arena&, s
             return json_parse_node_result(JsonNode.Object(fields_ptr: fields.items, field_count: fields.count), 47 + fields_checksum)
 
 
-def json_parse_value_node(cursor: mutable JsonCursor&, arena: mutable Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
+def json_parse_value_node(cursor: mutable JsonCursor&, arena: mutable Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult:
     can Memory.Allocate, Abort.Panic:
         json_skip_ws(cursor)
         return json_parse_value_node_after_ws(cursor, arena, store, invalid_node)
@@ -1264,7 +1264,7 @@ def json_ast_string_view(source: u8&, node: JsonNode, store: JsonNode.Store[Loca
     return json_ast_string_view_with_len(source, runtime_strlen(source), node, store)
 
 
-def json_ast_string_value_from_span(source: u8&, source_offset: usize, source_len: usize) -> heap u8& can[Memory.Allocate, Abort.Panic]:
+def json_ast_string_value_from_span(source: u8&, source_offset: usize, source_len: usize) -> heap u8&:
     can Memory.Allocate, Abort.Panic:
         decoded_len: i64 = json_decoded_string_len(source, source_offset, source_len)
         if decoded_len < 0:
@@ -1511,7 +1511,7 @@ def json_node_can_materialize_float(source: u8&, node: JsonNode, store: JsonNode
     return false
 
 
-def json_ast_string_value_with_len(source: u8&, source_len: usize, node: JsonNode, store: JsonNode.Store[Local]) -> heap u8& can[Memory.Allocate, Abort.Panic]:
+def json_ast_string_value_with_len(source: u8&, source_len: usize, node: JsonNode, store: JsonNode.Store[Local]) -> heap u8&:
     can Memory.Allocate, Abort.Panic:
         lexeme: JsonLexemeResult = json_ast_text_lexeme(source, source_len, node, store)
         if lexeme.checksum >= 0:
@@ -1519,7 +1519,7 @@ def json_ast_string_value_with_len(source: u8&, source_len: usize, node: JsonNod
         return intern_small_string("".cast[u8&], 0)
 
 
-def json_ast_string_value(source: u8&, node: JsonNode, store: JsonNode.Store[Local]) -> heap u8& can[Memory.Allocate, Abort.Panic]:
+def json_ast_string_value(source: u8&, node: JsonNode, store: JsonNode.Store[Local]) -> heap u8&:
     return json_ast_string_value_with_len(source, runtime_strlen(source), node, store) can Memory.Allocate, Abort.Panic
 
 
@@ -1703,7 +1703,7 @@ def json_parser_checksum_impl(source: u8&) -> i64:
     return checksum
 
 
-def json_parse_document_node_with_len(source: u8&, source_len: usize, arena: mutable Arena&, store: JsonNode.Store[Local]) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
+def json_parse_document_node_with_len(source: u8&, source_len: usize, arena: mutable Arena&, store: JsonNode.Store[Local]) -> JsonParseNodeResult:
     can Memory.Allocate, Abort.Panic:
         invalid_node: JsonNode = json_node_invalid(store)
         if source_len > JSON_MAX_INLINE_SOURCE_OFFSET.usize():
@@ -1718,7 +1718,7 @@ def json_parse_document_node_with_len(source: u8&, source_len: usize, arena: mut
         return result
 
 
-def json_parse_document_node(source: u8&, arena: mutable Arena&, store: JsonNode.Store[Local]) -> JsonParseNodeResult can[Memory.Allocate, Abort.Panic]:
+def json_parse_document_node(source: u8&, arena: mutable Arena&, store: JsonNode.Store[Local]) -> JsonParseNodeResult:
     return json_parse_document_node_with_len(source, runtime_strlen(source), arena, store) can Memory.Allocate, Abort.Panic
 
 
@@ -1806,7 +1806,7 @@ def json_parser_value_node(value: JsonParserValue&) -> JsonNode:
     return move out
 
 
-def json_parser_value_from_node_ref(impl: heap JsonParserDocumentInternal&, node_ref: JsonNode&?) -> JsonParserValue can[Memory.Allocate, Abort.Panic]:
+def json_parser_value_from_node_ref(impl: heap JsonParserDocumentInternal&, node_ref: JsonNode&?) -> JsonParserValue:
     can Memory.Allocate, Abort.Panic:
         if node_ref == null:
             return json_parser_value_null()
@@ -1817,7 +1817,7 @@ def json_parser_value_from_node_ref(impl: heap JsonParserDocumentInternal&, node
         return move out
 
 
-def json_parser_array_iter_from_cursor(impl: heap JsonParserDocumentInternal&, cursor: JsonAstArrayIterCursor, store: JsonNode.Store[Local]) -> JsonParserArrayIter can[Memory.Allocate, Abort.Panic]:
+def json_parser_array_iter_from_cursor(impl: heap JsonParserDocumentInternal&, cursor: JsonAstArrayIterCursor, store: JsonNode.Store[Local]) -> JsonParserArrayIter:
     can Memory.Allocate, Abort.Panic:
         if not json_ast_array_iter_is_valid(cursor):
             return json_parser_array_iter_null()
@@ -1830,7 +1830,7 @@ def json_parser_array_iter_from_cursor(impl: heap JsonParserDocumentInternal&, c
         return move out
 
 
-def json_parser_object_iter_from_cursor(impl: heap JsonParserDocumentInternal&, cursor: JsonAstObjectIterCursor, store: JsonNode.Store[Local]) -> JsonParserObjectIter can[Memory.Allocate, Abort.Panic]:
+def json_parser_object_iter_from_cursor(impl: heap JsonParserDocumentInternal&, cursor: JsonAstObjectIterCursor, store: JsonNode.Store[Local]) -> JsonParserObjectIter:
     can Memory.Allocate, Abort.Panic:
         if not json_ast_object_iter_is_valid(cursor):
             return json_parser_object_iter_null()
@@ -1883,7 +1883,7 @@ def json_parser_document_array_item_node_at(impl: heap JsonParserDocumentInterna
     return json_ast_array_nth(impl.root, index, store)
 
 
-def json_parser_document_parse_with_len_impl(source: u8&, source_len: usize, out: mutable JsonParserDocument&) -> i64 can[Memory.Allocate, Memory.Release, Abort.Panic]:
+def json_parser_document_parse_with_len_impl(source: u8&, source_len: usize, out: mutable JsonParserDocument&) -> i64:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         if out[0].impl_bits != 0.uintptr():
             json_parser_document_destroy_impl(out)
@@ -1926,11 +1926,11 @@ def json_parser_document_parse_with_len_impl(source: u8&, source_len: usize, out
         return 1
 
 
-def json_parser_document_parse_impl(source: u8&, out: mutable JsonParserDocument&) -> i64 can[Memory.Allocate, Memory.Release, Abort.Panic]:
+def json_parser_document_parse_impl(source: u8&, out: mutable JsonParserDocument&) -> i64:
     return json_parser_document_parse_with_len_impl(source, runtime_strlen(source), out) can Memory.Allocate, Memory.Release, Abort.Panic
 
 
-def json_parser_document_destroy_impl(doc: mutable JsonParserDocument&) can[Memory.Release, Abort.Panic]:
+def json_parser_document_destroy_impl(doc: mutable JsonParserDocument&):
     can Memory.Release, Abort.Panic:
         impl_bits: uintptr = doc[0].impl_bits
         if impl_bits == 0.uintptr():
@@ -1942,7 +1942,7 @@ def json_parser_document_destroy_impl(doc: mutable JsonParserDocument&) can[Memo
         arena_free(arena_to_free.ref[mutable Arena&])
 
 
-def json_parser_document_destroy_handle_impl(doc_bits: uintptr) -> i64 can[Memory.Release, Abort.Panic]:
+def json_parser_document_destroy_handle_impl(doc_bits: uintptr) -> i64:
     can Memory.Release, Abort.Panic:
         if doc_bits == 0.uintptr():
             return 0
@@ -2363,7 +2363,7 @@ def json_parser_document_array_string_copy_at_impl(doc: JsonParserDocument&, ind
     return json_ast_string_copy(json_parser_document_source(impl), item_node, out, capacity, store)
 
 
-def json_parser_document_root_value_impl(doc: JsonParserDocument&, out: mutable JsonParserValue&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_document_root_value_impl(doc: JsonParserDocument&, out: mutable JsonParserValue&) -> i64:
     can Memory.Allocate, Abort.Panic:
         out[0] <- json_parser_value_null()
         if doc[0].impl_bits == 0.uintptr():
@@ -2402,7 +2402,7 @@ def json_parser_value_array_len_impl(value: JsonParserValue&) -> i64:
     return json_ast_array_len(json_parser_value_node(value), store)
 
 
-def json_parser_value_field_impl(value: JsonParserValue&, key: u8&, out: mutable JsonParserValue&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_value_field_impl(value: JsonParserValue&, key: u8&, out: mutable JsonParserValue&) -> i64:
     can Memory.Allocate, Abort.Panic:
         out[0] <- json_parser_value_null()
         if not json_parser_value_is_live(value):
@@ -2414,7 +2414,7 @@ def json_parser_value_field_impl(value: JsonParserValue&, key: u8&, out: mutable
         return 1 if out[0].impl_bits != 0.uintptr() else 0
 
 
-def json_parser_value_index_impl(value: JsonParserValue&, index: usize, out: mutable JsonParserValue&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_value_index_impl(value: JsonParserValue&, index: usize, out: mutable JsonParserValue&) -> i64:
     can Memory.Allocate, Abort.Panic:
         out[0] <- json_parser_value_null()
         if not json_parser_value_is_live(value):
@@ -2492,7 +2492,7 @@ def json_parser_object_iter_value_node(iter: JsonParserObjectIter&, store: JsonN
     return json_node_invalid(store)
 
 
-def json_parser_value_object_key_at_impl(value: JsonParserValue&, index: usize, out: mutable JsonParserValue&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_value_object_key_at_impl(value: JsonParserValue&, index: usize, out: mutable JsonParserValue&) -> i64:
     can Memory.Allocate, Abort.Panic:
         out[0] <- json_parser_value_null()
         if not json_parser_value_is_live(value):
@@ -2504,7 +2504,7 @@ def json_parser_value_object_key_at_impl(value: JsonParserValue&, index: usize, 
         return 1 if out[0].impl_bits != 0.uintptr() else 0
 
 
-def json_parser_value_object_value_at_impl(value: JsonParserValue&, index: usize, out: mutable JsonParserValue&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_value_object_value_at_impl(value: JsonParserValue&, index: usize, out: mutable JsonParserValue&) -> i64:
     can Memory.Allocate, Abort.Panic:
         out[0] <- json_parser_value_null()
         if not json_parser_value_is_live(value):
@@ -2963,7 +2963,7 @@ def json_parser_value_index_object_len_impl(value: JsonParserValue&, index: usiz
     return json_ast_object_len(child_node, store)
 
 
-def json_parser_value_array_iter_impl(value: JsonParserValue&, out: mutable JsonParserArrayIter&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_value_array_iter_impl(value: JsonParserValue&, out: mutable JsonParserArrayIter&) -> i64:
     can Memory.Allocate, Abort.Panic:
         out[0] <- json_parser_array_iter_null()
         if not json_parser_value_is_live(value):
@@ -2975,7 +2975,7 @@ def json_parser_value_array_iter_impl(value: JsonParserValue&, out: mutable Json
         return 1 if out[0].impl_bits != 0.uintptr() else 0
 
 
-def json_parser_value_object_iter_impl(value: JsonParserValue&, out: mutable JsonParserObjectIter&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_value_object_iter_impl(value: JsonParserValue&, out: mutable JsonParserObjectIter&) -> i64:
     can Memory.Allocate, Abort.Panic:
         out[0] <- json_parser_object_iter_null()
         if not json_parser_value_is_live(value):
@@ -3150,7 +3150,7 @@ def json_parser_array_iter_object_len_impl(iter: JsonParserArrayIter&) -> i64:
     return json_ast_object_len(value_node, store)
 
 
-def json_parser_array_iter_value_impl(iter: JsonParserArrayIter&, out: mutable JsonParserValue&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_array_iter_value_impl(iter: JsonParserArrayIter&, out: mutable JsonParserValue&) -> i64:
     can Memory.Allocate, Abort.Panic:
         out[0] <- json_parser_value_null()
         if not json_parser_array_iter_is_live(iter):
@@ -3162,7 +3162,7 @@ def json_parser_array_iter_value_impl(iter: JsonParserArrayIter&, out: mutable J
         return 1 if out[0].impl_bits != 0.uintptr() else 0
 
 
-def json_parser_array_iter_next_impl(iter: JsonParserArrayIter&, out: mutable JsonParserArrayIter&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_array_iter_next_impl(iter: JsonParserArrayIter&, out: mutable JsonParserArrayIter&) -> i64:
     can Memory.Allocate, Abort.Panic:
         out[0] <- json_parser_array_iter_null()
         if not json_parser_array_iter_is_live(iter):
@@ -3424,7 +3424,7 @@ def json_parser_object_iter_value_object_len_impl(iter: JsonParserObjectIter&) -
     return json_ast_object_len(value_node, store)
 
 
-def json_parser_object_iter_key_impl(iter: JsonParserObjectIter&, out: mutable JsonParserValue&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_object_iter_key_impl(iter: JsonParserObjectIter&, out: mutable JsonParserValue&) -> i64:
     can Memory.Allocate, Abort.Panic:
         out[0] <- json_parser_value_null()
         if not json_parser_object_iter_is_live(iter):
@@ -3436,7 +3436,7 @@ def json_parser_object_iter_key_impl(iter: JsonParserObjectIter&, out: mutable J
         return 1 if out[0].impl_bits != 0.uintptr() else 0
 
 
-def json_parser_object_iter_value_impl(iter: JsonParserObjectIter&, out: mutable JsonParserValue&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_object_iter_value_impl(iter: JsonParserObjectIter&, out: mutable JsonParserValue&) -> i64:
     can Memory.Allocate, Abort.Panic:
         out[0] <- json_parser_value_null()
         if not json_parser_object_iter_is_live(iter):
@@ -3448,7 +3448,7 @@ def json_parser_object_iter_value_impl(iter: JsonParserObjectIter&, out: mutable
         return 1 if out[0].impl_bits != 0.uintptr() else 0
 
 
-def json_parser_object_iter_next_impl(iter: JsonParserObjectIter&, out: mutable JsonParserObjectIter&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_object_iter_next_impl(iter: JsonParserObjectIter&, out: mutable JsonParserObjectIter&) -> i64:
     can Memory.Allocate, Abort.Panic:
         out[0] <- json_parser_object_iter_null()
         if not json_parser_object_iter_is_live(iter):
@@ -3460,7 +3460,7 @@ def json_parser_object_iter_next_impl(iter: JsonParserObjectIter&, out: mutable 
         return 1 if out[0].impl_bits != 0.uintptr() else 0
 
 
-def json_parser_ast_checksum_impl(source: u8&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_checksum_impl(source: u8&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3475,7 +3475,7 @@ def json_parser_ast_checksum_impl(source: u8&) -> i64 can[Memory.Allocate, Abort
         return checksum
 
 
-def json_parser_ast_cached_checksum_impl(source: u8&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_cached_checksum_impl(source: u8&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3490,7 +3490,7 @@ def json_parser_ast_cached_checksum_impl(source: u8&) -> i64 can[Memory.Allocate
         return checksum
 
 
-def json_parser_ast_node_count_impl(source: u8&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_node_count_impl(source: u8&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3505,7 +3505,7 @@ def json_parser_ast_node_count_impl(source: u8&) -> i64 can[Memory.Allocate, Abo
         return count
 
 
-def json_parser_ast_object_len_impl(source: u8&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_object_len_impl(source: u8&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3520,7 +3520,7 @@ def json_parser_ast_object_len_impl(source: u8&) -> i64 can[Memory.Allocate, Abo
         return length
 
 
-def json_parser_ast_field_string_eq_impl(source: u8&, key: u8&, literal: u8&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_field_string_eq_impl(source: u8&, key: u8&, literal: u8&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3539,7 +3539,7 @@ def json_parser_ast_field_string_eq_impl(source: u8&, key: u8&, literal: u8&) ->
         return out
 
 
-def json_parser_ast_field_bool_impl(source: u8&, key: u8&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_field_bool_impl(source: u8&, key: u8&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3558,7 +3558,7 @@ def json_parser_ast_field_bool_impl(source: u8&, key: u8&) -> i64 can[Memory.All
         return out
 
 
-def json_parser_ast_field_is_null_impl(source: u8&, key: u8&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_field_is_null_impl(source: u8&, key: u8&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3577,7 +3577,7 @@ def json_parser_ast_field_is_null_impl(source: u8&, key: u8&) -> i64 can[Memory.
         return out
 
 
-def json_parser_ast_field_kind_impl(source: u8&, key: u8&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_field_kind_impl(source: u8&, key: u8&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3596,7 +3596,7 @@ def json_parser_ast_field_kind_impl(source: u8&, key: u8&) -> i64 can[Memory.All
         return out
 
 
-def json_parser_ast_array_field_len_impl(source: u8&, key: u8&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_field_len_impl(source: u8&, key: u8&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3615,7 +3615,7 @@ def json_parser_ast_array_field_len_impl(source: u8&, key: u8&) -> i64 can[Memor
         return length
 
 
-def json_parser_ast_object_field_len_impl(source: u8&, key: u8&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_object_field_len_impl(source: u8&, key: u8&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3634,7 +3634,7 @@ def json_parser_ast_object_field_len_impl(source: u8&, key: u8&) -> i64 can[Memo
         return length
 
 
-def json_parser_ast_field_number_kind_impl(source: u8&, key: u8&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_field_number_kind_impl(source: u8&, key: u8&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3653,7 +3653,7 @@ def json_parser_ast_field_number_kind_impl(source: u8&, key: u8&) -> i64 can[Mem
         return out
 
 
-def json_parser_ast_field_string_len_impl(source: u8&, key: u8&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_field_string_len_impl(source: u8&, key: u8&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3672,7 +3672,7 @@ def json_parser_ast_field_string_len_impl(source: u8&, key: u8&) -> i64 can[Memo
         return out
 
 
-def json_parser_ast_field_string_copy_impl(source: u8&, key: u8&, out: u8&, capacity: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_field_string_copy_impl(source: u8&, key: u8&, out: u8&, capacity: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3691,7 +3691,7 @@ def json_parser_ast_field_string_copy_impl(source: u8&, key: u8&, out: u8&, capa
         return copied_len
 
 
-def json_parser_ast_field_i64_impl(source: u8&, key: u8&, out: mutable i64&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_field_i64_impl(source: u8&, key: u8&, out: mutable i64&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3714,7 +3714,7 @@ def json_parser_ast_field_i64_impl(source: u8&, key: u8&, out: mutable i64&) -> 
         return 1
 
 
-def json_parser_ast_field_u64_impl(source: u8&, key: u8&, out: mutable u64&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_field_u64_impl(source: u8&, key: u8&, out: mutable u64&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3737,7 +3737,7 @@ def json_parser_ast_field_u64_impl(source: u8&, key: u8&, out: mutable u64&) -> 
         return 1
 
 
-def json_parser_ast_field_f64_impl(source: u8&, key: u8&, out: mutable f64&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_field_f64_impl(source: u8&, key: u8&, out: mutable f64&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3760,7 +3760,7 @@ def json_parser_ast_field_f64_impl(source: u8&, key: u8&, out: mutable f64&) -> 
         return 1
 
 
-def json_parser_ast_field_f32_impl(source: u8&, key: u8&, out: mutable f32&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_field_f32_impl(source: u8&, key: u8&, out: mutable f32&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3783,7 +3783,7 @@ def json_parser_ast_field_f32_impl(source: u8&, key: u8&, out: mutable f32&) -> 
         return 1
 
 
-def json_parser_ast_array_field_i64_at_impl(source: u8&, key: u8&, index: usize, out: mutable i64&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_field_i64_at_impl(source: u8&, key: u8&, index: usize, out: mutable i64&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3810,7 +3810,7 @@ def json_parser_ast_array_field_i64_at_impl(source: u8&, key: u8&, index: usize,
         return 1
 
 
-def json_parser_ast_array_field_f64_at_impl(source: u8&, key: u8&, index: usize, out: mutable f64&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_field_f64_at_impl(source: u8&, key: u8&, index: usize, out: mutable f64&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3837,7 +3837,7 @@ def json_parser_ast_array_field_f64_at_impl(source: u8&, key: u8&, index: usize,
         return 1
 
 
-def json_parser_ast_array_field_f32_at_impl(source: u8&, key: u8&, index: usize, out: mutable f32&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_field_f32_at_impl(source: u8&, key: u8&, index: usize, out: mutable f32&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3864,7 +3864,7 @@ def json_parser_ast_array_field_f32_at_impl(source: u8&, key: u8&, index: usize,
         return 1
 
 
-def json_parser_ast_array_field_kind_at_impl(source: u8&, key: u8&, index: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_field_kind_at_impl(source: u8&, key: u8&, index: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3887,7 +3887,7 @@ def json_parser_ast_array_field_kind_at_impl(source: u8&, key: u8&, index: usize
         return out
 
 
-def json_parser_ast_array_field_string_eq_at_impl(source: u8&, key: u8&, index: usize, literal: u8&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_field_string_eq_at_impl(source: u8&, key: u8&, index: usize, literal: u8&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3910,7 +3910,7 @@ def json_parser_ast_array_field_string_eq_at_impl(source: u8&, key: u8&, index: 
         return out
 
 
-def json_parser_ast_array_field_bool_at_impl(source: u8&, key: u8&, index: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_field_bool_at_impl(source: u8&, key: u8&, index: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3933,7 +3933,7 @@ def json_parser_ast_array_field_bool_at_impl(source: u8&, key: u8&, index: usize
         return out
 
 
-def json_parser_ast_array_field_is_null_at_impl(source: u8&, key: u8&, index: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_field_is_null_at_impl(source: u8&, key: u8&, index: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3956,7 +3956,7 @@ def json_parser_ast_array_field_is_null_at_impl(source: u8&, key: u8&, index: us
         return out
 
 
-def json_parser_ast_array_field_array_len_at_impl(source: u8&, key: u8&, index: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_field_array_len_at_impl(source: u8&, key: u8&, index: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -3979,7 +3979,7 @@ def json_parser_ast_array_field_array_len_at_impl(source: u8&, key: u8&, index: 
         return out
 
 
-def json_parser_ast_array_field_object_len_at_impl(source: u8&, key: u8&, index: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_field_object_len_at_impl(source: u8&, key: u8&, index: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4002,7 +4002,7 @@ def json_parser_ast_array_field_object_len_at_impl(source: u8&, key: u8&, index:
         return out
 
 
-def json_parser_ast_array_field_number_kind_at_impl(source: u8&, key: u8&, index: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_field_number_kind_at_impl(source: u8&, key: u8&, index: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4025,7 +4025,7 @@ def json_parser_ast_array_field_number_kind_at_impl(source: u8&, key: u8&, index
         return out
 
 
-def json_parser_ast_array_field_string_len_at_impl(source: u8&, key: u8&, index: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_field_string_len_at_impl(source: u8&, key: u8&, index: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4048,7 +4048,7 @@ def json_parser_ast_array_field_string_len_at_impl(source: u8&, key: u8&, index:
         return out
 
 
-def json_parser_ast_array_field_string_copy_at_impl(source: u8&, key: u8&, index: usize, out: u8&, capacity: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_field_string_copy_at_impl(source: u8&, key: u8&, index: usize, out: u8&, capacity: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4071,7 +4071,7 @@ def json_parser_ast_array_field_string_copy_at_impl(source: u8&, key: u8&, index
         return copied_len
 
 
-def json_parser_ast_object_key_eq_at_impl(source: u8&, index: usize, literal: u8&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_object_key_eq_at_impl(source: u8&, index: usize, literal: u8&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4090,7 +4090,7 @@ def json_parser_ast_object_key_eq_at_impl(source: u8&, index: usize, literal: u8
         return out
 
 
-def json_parser_ast_object_key_len_at_impl(source: u8&, index: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_object_key_len_at_impl(source: u8&, index: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4109,7 +4109,7 @@ def json_parser_ast_object_key_len_at_impl(source: u8&, index: usize) -> i64 can
         return out
 
 
-def json_parser_ast_object_key_copy_at_impl(source: u8&, index: usize, out: u8&, capacity: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_object_key_copy_at_impl(source: u8&, index: usize, out: u8&, capacity: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4128,7 +4128,7 @@ def json_parser_ast_object_key_copy_at_impl(source: u8&, index: usize, out: u8&,
         return copied_len
 
 
-def json_parser_ast_object_field_i64_at_impl(source: u8&, index: usize, out: mutable i64&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_object_field_i64_at_impl(source: u8&, index: usize, out: mutable i64&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4151,7 +4151,7 @@ def json_parser_ast_object_field_i64_at_impl(source: u8&, index: usize, out: mut
         return 1
 
 
-def json_parser_ast_object_field_f64_at_impl(source: u8&, index: usize, out: mutable f64&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_object_field_f64_at_impl(source: u8&, index: usize, out: mutable f64&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4174,7 +4174,7 @@ def json_parser_ast_object_field_f64_at_impl(source: u8&, index: usize, out: mut
         return 1
 
 
-def json_parser_ast_object_field_f32_at_impl(source: u8&, index: usize, out: mutable f32&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_object_field_f32_at_impl(source: u8&, index: usize, out: mutable f32&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4197,7 +4197,7 @@ def json_parser_ast_object_field_f32_at_impl(source: u8&, index: usize, out: mut
         return 1
 
 
-def json_parser_ast_object_value_string_eq_at_impl(source: u8&, index: usize, literal: u8&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_object_value_string_eq_at_impl(source: u8&, index: usize, literal: u8&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4216,7 +4216,7 @@ def json_parser_ast_object_value_string_eq_at_impl(source: u8&, index: usize, li
         return out
 
 
-def json_parser_ast_object_field_bool_at_impl(source: u8&, index: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_object_field_bool_at_impl(source: u8&, index: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4235,7 +4235,7 @@ def json_parser_ast_object_field_bool_at_impl(source: u8&, index: usize) -> i64 
         return out
 
 
-def json_parser_ast_object_field_is_null_at_impl(source: u8&, index: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_object_field_is_null_at_impl(source: u8&, index: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4254,7 +4254,7 @@ def json_parser_ast_object_field_is_null_at_impl(source: u8&, index: usize) -> i
         return out
 
 
-def json_parser_ast_object_value_kind_at_impl(source: u8&, index: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_object_value_kind_at_impl(source: u8&, index: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4273,7 +4273,7 @@ def json_parser_ast_object_value_kind_at_impl(source: u8&, index: usize) -> i64 
         return out
 
 
-def json_parser_ast_object_value_array_len_at_impl(source: u8&, index: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_object_value_array_len_at_impl(source: u8&, index: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4292,7 +4292,7 @@ def json_parser_ast_object_value_array_len_at_impl(source: u8&, index: usize) ->
         return out
 
 
-def json_parser_ast_object_value_object_len_at_impl(source: u8&, index: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_object_value_object_len_at_impl(source: u8&, index: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4311,7 +4311,7 @@ def json_parser_ast_object_value_object_len_at_impl(source: u8&, index: usize) -
         return out
 
 
-def json_parser_ast_object_value_number_kind_at_impl(source: u8&, index: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_object_value_number_kind_at_impl(source: u8&, index: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4330,7 +4330,7 @@ def json_parser_ast_object_value_number_kind_at_impl(source: u8&, index: usize) 
         return out
 
 
-def json_parser_ast_object_value_string_len_at_impl(source: u8&, index: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_object_value_string_len_at_impl(source: u8&, index: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4349,7 +4349,7 @@ def json_parser_ast_object_value_string_len_at_impl(source: u8&, index: usize) -
         return out
 
 
-def json_parser_ast_object_value_string_copy_at_impl(source: u8&, index: usize, out: u8&, capacity: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_object_value_string_copy_at_impl(source: u8&, index: usize, out: u8&, capacity: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4368,7 +4368,7 @@ def json_parser_ast_object_value_string_copy_at_impl(source: u8&, index: usize, 
         return copied_len
 
 
-def json_parser_ast_array_i64_at_impl(source: u8&, index: usize, out: mutable i64&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_i64_at_impl(source: u8&, index: usize, out: mutable i64&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4391,7 +4391,7 @@ def json_parser_ast_array_i64_at_impl(source: u8&, index: usize, out: mutable i6
         return 1
 
 
-def json_parser_ast_array_f64_at_impl(source: u8&, index: usize, out: mutable f64&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_f64_at_impl(source: u8&, index: usize, out: mutable f64&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4414,7 +4414,7 @@ def json_parser_ast_array_f64_at_impl(source: u8&, index: usize, out: mutable f6
         return 1
 
 
-def json_parser_ast_array_f32_at_impl(source: u8&, index: usize, out: mutable f32&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_f32_at_impl(source: u8&, index: usize, out: mutable f32&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4437,7 +4437,7 @@ def json_parser_ast_array_f32_at_impl(source: u8&, index: usize, out: mutable f3
         return 1
 
 
-def json_parser_ast_array_kind_at_impl(source: u8&, index: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_kind_at_impl(source: u8&, index: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4456,7 +4456,7 @@ def json_parser_ast_array_kind_at_impl(source: u8&, index: usize) -> i64 can[Mem
         return out
 
 
-def json_parser_ast_array_array_len_at_impl(source: u8&, index: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_array_len_at_impl(source: u8&, index: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4475,7 +4475,7 @@ def json_parser_ast_array_array_len_at_impl(source: u8&, index: usize) -> i64 ca
         return out
 
 
-def json_parser_ast_array_object_len_at_impl(source: u8&, index: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_object_len_at_impl(source: u8&, index: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4494,7 +4494,7 @@ def json_parser_ast_array_object_len_at_impl(source: u8&, index: usize) -> i64 c
         return out
 
 
-def json_parser_ast_array_number_kind_at_impl(source: u8&, index: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_number_kind_at_impl(source: u8&, index: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4513,7 +4513,7 @@ def json_parser_ast_array_number_kind_at_impl(source: u8&, index: usize) -> i64 
         return out
 
 
-def json_parser_ast_array_string_len_at_impl(source: u8&, index: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_string_len_at_impl(source: u8&, index: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4532,7 +4532,7 @@ def json_parser_ast_array_string_len_at_impl(source: u8&, index: usize) -> i64 c
         return out
 
 
-def json_parser_ast_array_string_copy_at_impl(source: u8&, index: usize, out: u8&, capacity: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_string_copy_at_impl(source: u8&, index: usize, out: u8&, capacity: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4551,7 +4551,7 @@ def json_parser_ast_array_string_copy_at_impl(source: u8&, index: usize, out: u8
         return copied_len
 
 
-def json_parser_ast_array_string_eq_at_impl(source: u8&, index: usize, literal: u8&) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_string_eq_at_impl(source: u8&, index: usize, literal: u8&) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4570,7 +4570,7 @@ def json_parser_ast_array_string_eq_at_impl(source: u8&, index: usize, literal: 
         return out
 
 
-def json_parser_ast_array_bool_at_impl(source: u8&, index: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_bool_at_impl(source: u8&, index: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4589,7 +4589,7 @@ def json_parser_ast_array_bool_at_impl(source: u8&, index: usize) -> i64 can[Mem
         return out
 
 
-def json_parser_ast_array_is_null_at_impl(source: u8&, index: usize) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parser_ast_array_is_null_at_impl(source: u8&, index: usize) -> i64:
     can Memory.Allocate, Abort.Panic:
         source_len: usize = runtime_strlen(source)
         region scratch(json_ast_scratch_capacity(source_len))
@@ -4616,15 +4616,15 @@ def json_expect_invalid(source: static u8&) -> bool:
     return json_parser_checksum_impl(source.cast[u8&]) < 0
 
 
-def json_expect_ast_checksum(source: static u8&, expected: i64) -> bool can[Memory.Allocate, Abort.Panic]:
+def json_expect_ast_checksum(source: static u8&, expected: i64) -> bool:
     return json_parser_ast_checksum_impl(source.cast[u8&]) == expected can Memory.Allocate, Abort.Panic
 
 
-def json_expect_invalid_ast(source: static u8&) -> bool can[Memory.Allocate, Abort.Panic]:
+def json_expect_invalid_ast(source: static u8&) -> bool:
     return json_parser_ast_checksum_impl(source.cast[u8&]) < 0 can Memory.Allocate, Abort.Panic
 
 
-def json_parser_parity_suite_impl() -> int can[Memory.Allocate, Abort.Panic]:
+def json_parser_parity_suite_impl() -> int:
     can Memory.Allocate, Abort.Panic:
         if not json_expect_checksum("{}", 47):
             return 0
@@ -4790,7 +4790,7 @@ struct JsonParallelJob:
     mode: i64
 
 
-def json_parallel_parse_once(source: u8&, mode: i64) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parallel_parse_once(source: u8&, mode: i64) -> i64:
     can Memory.Allocate, Abort.Panic:
         if mode == JSON_PARALLEL_MODE_CHECKSUM:
             return json_parser_checksum_impl(source)
@@ -4801,7 +4801,7 @@ def json_parallel_parse_once(source: u8&, mode: i64) -> i64 can[Memory.Allocate,
         return -1
 
 
-def json_parallel_worker(job: JsonParallelJob) -> i64 can[Memory.Allocate, Abort.Panic]:
+def json_parallel_worker(job: JsonParallelJob) -> i64:
     can Memory.Allocate, Abort.Panic:
         source: u8& = job.source_bits.cast[u8&]
         result_slot: mutable i64& = job.result_bits.cast[mutable i64&]
@@ -4820,7 +4820,7 @@ def json_parser_parallel_max_workers_impl() -> i64:
     return JSON_PARALLEL_MAX_WORKERS.i64()
 
 
-def json_parallel_checksum_impl(source: u8&, worker_count: usize, iterations: usize, mode: i64) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+def json_parallel_checksum_impl(source: u8&, worker_count: usize, iterations: usize, mode: i64) -> i64:
     can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
         if worker_count == 0 or iterations == 0 or worker_count > JSON_PARALLEL_MAX_WORKERS:
             return -1
@@ -4856,15 +4856,15 @@ def json_parallel_checksum_impl(source: u8&, worker_count: usize, iterations: us
         return total
 
 
-def json_parser_parallel_checksum_impl(source: u8&, worker_count: usize, iterations: usize) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+def json_parser_parallel_checksum_impl(source: u8&, worker_count: usize, iterations: usize) -> i64:
     return json_parallel_checksum_impl(source, worker_count, iterations, JSON_PARALLEL_MODE_CHECKSUM) can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange
 
 
-def json_parser_parallel_ast_checksum_impl(source: u8&, worker_count: usize, iterations: usize) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+def json_parser_parallel_ast_checksum_impl(source: u8&, worker_count: usize, iterations: usize) -> i64:
     return json_parallel_checksum_impl(source, worker_count, iterations, JSON_PARALLEL_MODE_AST) can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange
 
 
-def json_parser_parallel_ast_cached_checksum_impl(source: u8&, worker_count: usize, iterations: usize) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+def json_parser_parallel_ast_cached_checksum_impl(source: u8&, worker_count: usize, iterations: usize) -> i64:
     return json_parallel_checksum_impl(source, worker_count, iterations, JSON_PARALLEL_MODE_AST_CACHED) can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange
 
 

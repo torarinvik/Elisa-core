@@ -84,6 +84,28 @@ func requireDeclaredFunctionPermissionRefs(t *testing.T, result *semantic.Result
 	}
 }
 
+func requireFunctionPermissionRefs(t *testing.T, result *semantic.Result, name string, expected ...string) {
+	t.Helper()
+	sym, ok := result.GlobalScope.Lookup(name)
+	if !ok {
+		t.Fatalf("expected %s symbol", name)
+	}
+	fn, ok := sym.Type.(*semantic.FuncType)
+	if !ok {
+		t.Fatalf("expected %s to be a function, got %T", name, sym.Type)
+	}
+	got := make([]string, 0, len(fn.PermissionRefs))
+	for _, ref := range fn.PermissionRefs {
+		got = append(got, semantic.PermissionRefString(ref))
+	}
+	want := append([]string(nil), expected...)
+	sort.Strings(got)
+	sort.Strings(want)
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("expected %s permissions %v, got %v", name, expected, got)
+	}
+}
+
 func requireFunctionReturnTypeString(t *testing.T, result *semantic.Result, name string, expected string) {
 	t.Helper()
 	sym, ok := result.GlobalScope.Lookup(name)
@@ -3084,7 +3106,7 @@ extern fetch_or(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 c
 extern fetch_and(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
 extern fetch_xor(slot: any atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
 
-def ok(slot: mutable atomic[i64]) -> i64 can[Atomics.Rmw]:
+def ok(slot: mutable atomic[i64]) -> i64:
 	can Atomics.Rmw:
 		slot_ref: any atomic[i64]& = (&slot).cast[any atomic[i64]&]
 		add: i64 = fetch_add(slot_ref, 1, MemoryOrder.AcqRel)
@@ -3153,7 +3175,7 @@ func TestAnalyzeAcceptsLockSyntax(t *testing.T) {
 extern mutex_unlock(g: MutexGuard[Held]) -> void
 extern cond_wait(cv: any CondVar&, g: MutexGuard[Held]) -> MutexGuard[Held]
 
-def ok(mu: mutable Mutex, cv: mutable CondVar, ready: bool) -> void can[Sync.Lock, Sync.Unlock, Sync.Wait]:
+def ok(mu: mutable Mutex, cv: mutable CondVar, ready: bool) -> void:
 	can Sync.Lock, Sync.Unlock, Sync.Wait:
 		lock mu as g:
 			while not ready:
@@ -3169,7 +3191,7 @@ func TestAnalyzeAcceptsPoolScopeSyntax(t *testing.T) {
 	src := `extern pool_new(workers: usize) -> ThreadPool
 extern pool_shutdown(pool: any ThreadPool&) -> void
 
-def ok() -> bool can[Pool.Create, Pool.Shutdown]:
+def ok() -> bool:
 	can Pool.Create, Pool.Shutdown:
 		pool workers(2):
 			return workers.handle != null
@@ -3192,7 +3214,7 @@ def pool_submit1(pool: mutable any ThreadPool&, fn: func(i64) -> i64, arg: i64) 
 def work(value: i64) -> i64:
 	return value + 1
 
-def ok() -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.Await]:
+def ok() -> i64:
 	can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.Await:
 		pool workers(2):
 			task: Task[i64, Pending] = submit work(7)
@@ -4928,7 +4950,7 @@ def use(seed: i32) -> i32:
 func TestAnalyzeAcceptsExplicitAndInferredPermissions(t *testing.T) {
 	src := `extern emit(value: int) -> void can[Console.Write]
 
-def explicit() -> void can[Console]:
+def explicit() -> void:
 	emit(1) can Console.Write
 
 def inferred() -> void:
@@ -4957,8 +4979,8 @@ def scoped() -> void:
 			t.Fatalf("expected %s to preserve permission refs, got none", name)
 		}
 	}
-	if warns := result.Warnings(); len(warns) == 0 {
-		t.Fatal("expected inferred-permission warnings, got none")
+	if warns := result.Warnings(); len(warns) != 0 {
+		t.Fatalf("expected no inferred-signature warnings, got:\n%s", strings.Join(warns, "\n"))
 	}
 }
 
@@ -5228,8 +5250,11 @@ func TestAnalyzeInfersBuiltinAbortPermissionFromPanic(t *testing.T) {
 		t.Fatalf("expected fail_fast to infer can[Abort], got %#v", fn.Permissions)
 	}
 	warns := strings.Join(result.Warnings(), "\n")
-	if !strings.Contains(warns, "function \"fail_fast\" infers can[Abort]") || !strings.Contains(warns, "can[Abort.Panic]") {
-		t.Fatalf("expected implicit-abort warning, got:\n%s", warns)
+	if strings.Contains(warns, "function \"fail_fast\" infers can[Abort]") {
+		t.Fatalf("expected implicit signature warning to be removed, got:\n%s", warns)
+	}
+	if !strings.Contains(warns, "panic requires can[Abort]") {
+		t.Fatalf("expected local grant warning to remain, got:\n%s", warns)
 	}
 }
 
@@ -7231,7 +7256,7 @@ packed enum Expr:
 	Int(value: int)
 	Add(left: Expr, right: Expr)
 
-def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+def visit(owner: Arena) -> int:
 	can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
 		store: Expr.Store[Local] = Expr.Store(owner)
 		in store:
@@ -7256,7 +7281,7 @@ packed enum Expr:
 	Int(value: int)
 	Add(left: Expr, right: Expr)
 
-def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+def visit(owner: Arena) -> int:
 	can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
 		store: Expr.Store[Local] = Expr.Store(owner)
 		in store:
@@ -7320,7 +7345,7 @@ def bad(store: Expr.Store[Frozen]) -> void can[Pool.Create, Pool.Shutdown, Pool.
 
 func TestAnalyzeAcceptsParallelForOverReadonlyChunksExactView(t *testing.T) {
 	src := parallelForConcurrencyPrelude + `
-def visit(values: darray[i32, 4]) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+def visit(values: darray[i32, 4]) -> int:
 	can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
 		full: dview[i32] = values[0:4]
 		chunks: ChunksExactView[i32] = chunks_exact(readonly(full), 2)
@@ -9703,16 +9728,16 @@ func TestAnalyzePinsArenaBuiltinPermissionContracts(t *testing.T) {
 	requireNoWarnings(t, result)
 	requireDeclaredFunctionPermissionRefs(t, result, "malloc", "Memory.Allocate")
 	requireDeclaredFunctionPermissionRefs(t, result, "free", "Memory.Release")
-	requireDeclaredFunctionPermissionRefs(t, result, "assert", "Abort.Panic")
-	requireDeclaredFunctionPermissionRefs(t, result, "sfree", "Memory.Release")
-	requireDeclaredFunctionPermissionRefs(t, result, "new_region_with_owner", "Memory.Allocate", "Abort.Panic")
-	requireDeclaredFunctionPermissionRefs(t, result, "new_region", "Memory.Allocate", "Abort.Panic")
-	requireDeclaredFunctionPermissionRefs(t, result, "free_region", "Memory.Release", "Abort.Panic")
-	requireDeclaredFunctionPermissionRefs(t, result, "arena_alloc", "Memory.Allocate", "Abort.Panic")
-	requireDeclaredFunctionPermissionRefs(t, result, "arena_realloc", "Memory.Allocate", "Abort.Panic")
-	requireDeclaredFunctionPermissionRefs(t, result, "arena_free", "Memory.Release", "Abort.Panic")
-	requireDeclaredFunctionPermissionRefs(t, result, "arena_trim", "Memory.Release", "Abort.Panic")
-	requireDeclaredFunctionPermissionRefs(t, result, "arena_vsprintf", "Memory.Allocate", "Console.Format", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "assert", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "sfree", "Memory.Release")
+	requireFunctionPermissionRefs(t, result, "new_region_with_owner", "Memory.Allocate", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "new_region", "Memory.Allocate", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "free_region", "Memory.Release", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "arena_alloc", "Memory.Allocate", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "arena_realloc", "Memory.Allocate", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "arena_free", "Memory.Release", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "arena_trim", "Memory.Release", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "arena_vsprintf", "Memory.Allocate", "Console.Format", "Abort.Panic")
 }
 
 func TestAnalyzePinsArenaHeapPointerContracts(t *testing.T) {
@@ -9785,17 +9810,17 @@ func TestAnalyzePinsRuntimeStage1BuiltinPermissionContracts(t *testing.T) {
 	result, errs := parseAndAnalyze(t, "contextlang_runtime.llcontext", src)
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
-	requireDeclaredFunctionPermissionRefs(t, result, "int_to_string", "Memory.Allocate", "Console.Format", "Abort.Panic")
-	requireDeclaredFunctionPermissionRefs(t, result, "int_to_string_scratch", "Memory.Allocate", "Console.Format", "Abort.Panic")
-	requireDeclaredFunctionPermissionRefs(t, result, "char_to_string", "Memory.Allocate", "Abort.Panic")
-	requireDeclaredFunctionPermissionRefs(t, result, "char_to_string_scratch", "Memory.Allocate", "Abort.Panic")
-	requireDeclaredFunctionPermissionRefs(t, result, "rt_concat2", "Memory.Allocate", "Abort.Panic")
-	requireDeclaredFunctionPermissionRefs(t, result, "rt_string_builder_new", "Memory.Allocate", "Abort.Panic")
-	requireDeclaredFunctionPermissionRefs(t, result, "rt_string_builder_append", "Memory.Allocate", "Abort.Panic")
-	requireDeclaredFunctionPermissionRefs(t, result, "rt_string_builder_finish", "Memory.Allocate", "Abort.Panic")
-	requireDeclaredFunctionPermissionRefs(t, result, "rt_int_to_string", "Memory.Allocate", "Console.Format", "Abort.Panic")
-	requireDeclaredFunctionPermissionRefs(t, result, "rt_char_to_string", "Memory.Allocate", "Abort.Panic")
-	requireDeclaredFunctionPermissionRefs(t, result, "rt_puts", "Console.Write")
+	requireFunctionPermissionRefs(t, result, "int_to_string", "Memory.Allocate", "Console.Format", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "int_to_string_scratch", "Memory.Allocate", "Console.Format", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "char_to_string", "Memory.Allocate", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "char_to_string_scratch", "Memory.Allocate", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "rt_concat2", "Memory.Allocate", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "rt_string_builder_new", "Memory.Allocate", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "rt_string_builder_append", "Memory.Allocate", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "rt_string_builder_finish", "Memory.Allocate", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "rt_int_to_string", "Memory.Allocate", "Console.Format", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "rt_char_to_string", "Memory.Allocate", "Abort.Panic")
+	requireFunctionPermissionRefs(t, result, "rt_puts", "Console.Write")
 	requireFunctionReturnTypeString(t, result, "int_to_string", "heap u8&")
 	requireFunctionReturnTypeString(t, result, "int_to_string_scratch", "heap u8&")
 	requireFunctionReturnTypeString(t, result, "char_to_string", "heap u8&")

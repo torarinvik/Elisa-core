@@ -6,10 +6,10 @@
 # Type-to-string public API
 # ------------------------------------------------------------
 
-def int_to_string(value: i64) -> heap u8& can[Memory.Allocate, Console.Format, Abort.Panic]:
+def int_to_string(value: i64) -> heap u8&:
     return int_to_string_into(perm_arena.ref[Arena&], value) can Memory.Allocate, Console.Format, Abort.Panic
 
-def int_to_string_scratch(value: i64) -> heap u8& can[Memory.Allocate, Console.Format, Abort.Panic]:
+def int_to_string_scratch(value: i64) -> heap u8&:
     return int_to_string_into(scratch_arena.ref[Arena&], value) can Memory.Allocate, Console.Format, Abort.Panic
 
 def bool_to_string(value: int) -> u8&:
@@ -18,10 +18,10 @@ def bool_to_string(value: int) -> u8&:
 def bool_to_string_scratch(value: int) -> u8&:
     return bool_to_string_into(scratch_arena.ref[Arena&], value)
 
-def char_to_string(value: i64) -> heap u8& can[Memory.Allocate, Abort.Panic]:
+def char_to_string(value: i64) -> heap u8&:
     return char_to_string_into(perm_arena.ref[Arena&], value) can Memory.Allocate, Abort.Panic
 
-def char_to_string_scratch(value: i64) -> heap u8& can[Memory.Allocate, Abort.Panic]:
+def char_to_string_scratch(value: i64) -> heap u8&:
     return char_to_string_into(scratch_arena.ref[Arena&], value) can Memory.Allocate, Abort.Panic
 
 # ------------------------------------------------------------
@@ -44,25 +44,25 @@ def streq(lhs: u8&?, rhs: u8&?) -> int:
 # Stage 1 runtime forwarding wrappers
 # ============================================================
 
-def rt_concat2(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[shape_result] can[Memory.Allocate, Abort.Panic]:
+def rt_concat2(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[shape_result]:
     return concat2(lhs, rhs) can Memory.Allocate, Abort.Panic
 
-def rt_concat2_scratch(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[shape_result] can[Memory.Allocate, Abort.Panic]:
+def rt_concat2_scratch(lhs: dstr[shape_left], rhs: dstr[shape_right]) -> dstr[shape_result]:
     return concat2_scratch(lhs, rhs) can Memory.Allocate, Abort.Panic
 
-def rt_string_builder_new(initial: u8&?) -> mutable heap StringBuilder& can[Memory.Allocate, Abort.Panic]:
+def rt_string_builder_new(initial: u8&?) -> mutable heap StringBuilder&:
     return string_builder_new(initial) can Memory.Allocate, Abort.Panic
 
-def rt_string_builder_append(builder: mutable heap StringBuilder&?, suffix: u8&?) -> mutable heap StringBuilder& can[Memory.Allocate, Abort.Panic]:
+def rt_string_builder_append(builder: mutable heap StringBuilder&?, suffix: u8&?) -> mutable heap StringBuilder&:
     return string_builder_append(builder, suffix) can Memory.Allocate, Abort.Panic
 
-def rt_string_builder_finish(builder: heap StringBuilder&?) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
+def rt_string_builder_finish(builder: heap StringBuilder&?) -> dstr[shape_out]:
     return string_builder_finish(builder).cast[u8&] can Memory.Allocate, Abort.Panic
 
-def rt_int_to_string(value: i64) -> dstr[shape_out] can[Memory.Allocate, Console.Format, Abort.Panic]:
+def rt_int_to_string(value: i64) -> dstr[shape_out]:
     return int_to_string(value) can Memory.Allocate, Console.Format, Abort.Panic
 
-def rt_int_to_string_scratch(value: i64) -> dstr[shape_out] can[Memory.Allocate, Console.Format, Abort.Panic]:
+def rt_int_to_string_scratch(value: i64) -> dstr[shape_out]:
     return int_to_string_scratch(value) can Memory.Allocate, Console.Format, Abort.Panic
 
 def rt_bool_to_string(value: int) -> dstr[shape_out]:
@@ -71,10 +71,10 @@ def rt_bool_to_string(value: int) -> dstr[shape_out]:
 def rt_bool_to_string_scratch(value: int) -> dstr[shape_out]:
     return bool_to_string_scratch(value)
 
-def rt_char_to_string(value: i64) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
+def rt_char_to_string(value: i64) -> dstr[shape_out]:
     return char_to_string(value) can Memory.Allocate, Abort.Panic
 
-def rt_char_to_string_scratch(value: i64) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
+def rt_char_to_string_scratch(value: i64) -> dstr[shape_out]:
     return char_to_string_scratch(value) can Memory.Allocate, Abort.Panic
 
 def ctx_strlen(value: dstr[shape_in]) -> i64:
@@ -92,7 +92,7 @@ def ctx_string_slices_eq(lhs: dstr[shape_left], lhs_start: i64, lhs_end: i64, rh
 def ctx_string_index(value: dstr[shape_in], index: i64) -> i64:
     return string_index(value, index)
 
-def ctx_string_slice(value: dstr[shape_in], start: i64, end: i64) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
+def ctx_string_slice(value: dstr[shape_in], start: i64, end: i64) -> dstr[shape_out]:
     return string_slice(value, start, end) can Memory.Allocate, Abort.Panic
 
 def ctx_string_view(value: dstr[shape_in], start: i64, end: i64) -> sview:
@@ -119,13 +119,13 @@ def ctx_string_view_eq(view: sview, other: dstr[shape_other]) -> int:
 def ctx_string_views_eq(lhs: sview, rhs: sview) -> int:
     return string_views_eq(lhs, rhs)
 
-def ctx_string_from_view(view: sview) -> dstr[shape_out] can[Memory.Allocate, Abort.Panic]:
+def ctx_string_from_view(view: sview) -> dstr[shape_out]:
     return string_view_copy(view).cast[u8&] can Memory.Allocate, Abort.Panic
 
 def rt_reset_scratch():
     reset_scratch()
 
-def rt_puts(value: u8&?) -> int can[Console.Write]:
+def rt_puts(value: u8&?) -> int:
     return puts(value if value != null else "".cast[u8&]) can Console.Write
 
 # ------------------------------------------------------------
@@ -133,7 +133,7 @@ def rt_puts(value: u8&?) -> int can[Console.Write]:
 # ------------------------------------------------------------
 
 # weak
-def ctx_llvm_codegen_fatal(msg: u8&?) can[Console, Abort.Exit]:
+def ctx_llvm_codegen_fatal(msg: u8&?):
     can Console, Abort.Exit:
         actual_msg: u8& = msg if msg != null else "<null>".cast[u8&]
         fprintf(stderr, "ctx_llvm_codegen_fatal: %s\n".cast[u8&], actual_msg)

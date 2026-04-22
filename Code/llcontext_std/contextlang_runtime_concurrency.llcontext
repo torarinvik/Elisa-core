@@ -95,7 +95,7 @@ extern notify_all(cv: mutable CondVar&) -> void can[Sync.Notify]
 # Typed wrapper helpers
 # ------------------------------------------------------------
 
-def ctx_concurrency_alloc(size: usize) -> mutable heap void& can[Memory.Allocate, Abort.Panic]:
+def ctx_concurrency_alloc(size: usize) -> mutable heap void&:
 	can Memory.Allocate, Abort.Panic:
 		raw: heap void&? = malloc(size) can Memory.Allocate
 		if raw == null:
@@ -103,13 +103,13 @@ def ctx_concurrency_alloc(size: usize) -> mutable heap void& can[Memory.Allocate
 		ptr: heap void& = raw.cast[heap void&]
 		return ptr
 
-def ctx_concurrency_box_new[T](value: T) -> mutable heap ConcurrencyBox[T]& can[Memory.Allocate, Abort.Panic]:
+def ctx_concurrency_box_new[T](value: T) -> mutable heap ConcurrencyBox[T]&:
 	raw: heap void& = ctx_concurrency_alloc(sizeof(ConcurrencyBox[T])) can Memory.Allocate, Abort.Panic
 	box: heap ConcurrencyBox[T]& = raw.cast[heap ConcurrencyBox[T]&]
 	box.value <- value
 	return box
 
-def ctx_concurrency_ref_release(slot: mutable atomic[i64]&) -> i64 can[Atomics.Load, Atomics.CompareExchange]:
+def ctx_concurrency_ref_release(slot: mutable atomic[i64]&) -> i64:
 	while true:
 		current: i64 = load(slot, MemoryOrder.Acquire) can Atomics.Load
 		next: i64 = current - 1
@@ -117,7 +117,7 @@ def ctx_concurrency_ref_release(slot: mutable atomic[i64]&) -> i64 can[Atomics.L
 			return next
 	return 0
 
-def ctx_concurrency_work1_release(state_bits: mutable void&?) can[Memory.Release, Atomics.Load, Atomics.CompareExchange]:
+def ctx_concurrency_work1_release(state_bits: mutable void&?):
 	can Memory.Release, Atomics.Load, Atomics.CompareExchange:
 		if state_bits == null:
 			return
@@ -129,7 +129,7 @@ def ctx_concurrency_work1_release(state_bits: mutable void&?) can[Memory.Release
 			free(state.result_bits.cast[heap void&]) can Memory.Release
 			free(state.cast[heap void&]) can Memory.Release
 
-def ctx_concurrency_work1_new[A, R, permission P](fn: func(A) -> R can[P], arg: A) -> mutable heap ConcurrencyWorkStart1& can[Memory.Allocate, Abort.Panic]:
+def ctx_concurrency_work1_new[A, R, permission P](fn: func(A) -> R can[P], arg: A) -> mutable heap ConcurrencyWorkStart1&:
 	can Memory.Allocate, Abort.Panic:
 		arg_box: heap ConcurrencyBox[A]& = ctx_concurrency_box_new(arg)
 		result_seed: R = zeroed
@@ -142,7 +142,7 @@ def ctx_concurrency_work1_new[A, R, permission P](fn: func(A) -> R can[P], arg: 
 		state.refs.value <- 2
 		return state
 
-def ctx_concurrency_work1_entry[A, R, permission P](state_bits: mutable void&) -> void& can[P, Memory.Release, Atomics.Load, Atomics.CompareExchange]:
+def ctx_concurrency_work1_entry[A, R, permission P](state_bits: mutable void&) -> void&:
 	can P, Memory.Release, Atomics.Load, Atomics.CompareExchange:
 		state: heap ConcurrencyWorkStart1& = state_bits.cast[heap ConcurrencyWorkStart1&]
 		fn: func(A) -> R can[P] = state.fn_bits.cast[func(A) -> R can[P]]
@@ -152,7 +152,7 @@ def ctx_concurrency_work1_entry[A, R, permission P](state_bits: mutable void&) -
 		ctx_concurrency_work1_release(state.cast[mutable void&])
 		return state.cast[void&]
 
-def ctx_concurrency_work1_take_result[R](state_bits: void&?) -> R can[Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+def ctx_concurrency_work1_take_result[R](state_bits: void&?) -> R:
 	can Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
 		if state_bits == null:
 			panic("concurrency work returned no state")
@@ -192,7 +192,7 @@ def task_group_new() -> TaskGroup:
 	group.cleanup <- null
 	return move group
 
-def ctx_task_group_push_state(group: mutable TaskGroup&, state_bits: void&?) can[Memory.Allocate, Abort.Panic]:
+def ctx_task_group_push_state(group: mutable TaskGroup&, state_bits: void&?):
 	can Memory.Allocate, Abort.Panic:
 		if state_bits == null:
 			return
@@ -205,7 +205,7 @@ def ctx_task_group_push_state(group: mutable TaskGroup&, state_bits: void&?) can
 		node.state_bits <- state_bits.cast[void&]
 		group.cleanup <- node.cast[void&]
 
-def ctx_task_group_release_all(group: mutable TaskGroup&) can[Memory.Release, Atomics.Load, Atomics.CompareExchange]:
+def ctx_task_group_release_all(group: mutable TaskGroup&):
 	can Memory.Release, Atomics.Load, Atomics.CompareExchange:
 		if group.cleanup == null:
 			return
@@ -217,7 +217,7 @@ def ctx_task_group_release_all(group: mutable TaskGroup&) can[Memory.Release, At
 			free(current.cast[heap void&]) can Memory.Release
 			current <- next
 
-def spawn1[A, R, permission P](fn: func(A) -> R can[P], arg: A) -> Thread[R, Joinable] can[Thread.Spawn, Memory.Allocate, Abort.Panic]:
+def spawn1[A, R, permission P](fn: func(A) -> R can[P], arg: A) -> Thread[R, Joinable]:
 	from_raw: func(Thread[void&?, Joinable]) -> Thread[R, Joinable] = ctx_thread_from_raw.specialize[R, Joinable]()
 	state: heap ConcurrencyWorkStart1& = ctx_concurrency_work1_new(fn, arg) can Memory.Allocate, Abort.Panic
 	raw: Thread[void&?, Joinable] = spawn_raw(
@@ -227,7 +227,7 @@ def spawn1[A, R, permission P](fn: func(A) -> R can[P], arg: A) -> Thread[R, Joi
 	raw.state <- state.cast[void&]
 	return from_raw(move raw)
 
-def join[R](thread: Thread[R, Joinable]) -> R can[Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+def join[R](thread: Thread[R, Joinable]) -> R:
 	take_result: func(void&?) -> R can[Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange] = ctx_concurrency_work1_take_result.specialize[R]()
 	state_bits: void&? = thread.state
 	raw: Thread[void&?, Joinable] = ctx_thread_to_raw(move thread)
@@ -235,13 +235,13 @@ def join[R](thread: Thread[R, Joinable]) -> R can[Thread.Join, Memory.Release, A
 	result: R = take_result(state_bits) can Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange
 	return result
 
-def detach[R](thread: Thread[R, Joinable]) can[Thread.Detach, Memory.Release, Atomics.Load, Atomics.CompareExchange]:
+def detach[R](thread: Thread[R, Joinable]):
 	state_bits: void&? = thread.state
 	raw: Thread[void&?, Joinable] = ctx_thread_to_raw(move thread)
 	detach_raw(move raw) can Thread.Detach
 	ctx_concurrency_work1_release(state_bits) can Memory.Release, Atomics.Load, Atomics.CompareExchange
 
-def pool_submit1[A, R, permission P](pool: mutable ThreadPool&, fn: func(A) -> R can[P], arg: A) -> Task[R, Pending] can[Pool.Submit, Memory.Allocate, Abort.Panic]:
+def pool_submit1[A, R, permission P](pool: mutable ThreadPool&, fn: func(A) -> R can[P], arg: A) -> Task[R, Pending]:
 	from_raw: func(Task[void&?, Pending]) -> Task[R, Pending] = ctx_task_from_raw.specialize[R, Pending]()
 	state: heap ConcurrencyWorkStart1& = ctx_concurrency_work1_new(fn, arg) can Memory.Allocate, Abort.Panic
 	raw: Task[void&?, Pending] = pool_submit_raw(
@@ -252,7 +252,7 @@ def pool_submit1[A, R, permission P](pool: mutable ThreadPool&, fn: func(A) -> R
 	raw.state <- state.cast[void&]
 	return from_raw(move raw)
 
-def pool_await[R](task: Task[R, Pending]) -> R can[Pool.Await, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+def pool_await[R](task: Task[R, Pending]) -> R:
 	take_result: func(void&?) -> R can[Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange] = ctx_concurrency_work1_take_result.specialize[R]()
 	state_bits: void&? = task.state
 	raw: Task[void&?, Pending] = ctx_task_to_raw(move task)
@@ -260,13 +260,13 @@ def pool_await[R](task: Task[R, Pending]) -> R can[Pool.Await, Memory.Release, A
 	result: R = take_result(state_bits) can Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange
 	return result
 
-def task_group_add[R](group: mutable TaskGroup&, task: Task[R, Pending]) can[Memory.Allocate, Abort.Panic]:
+def task_group_add[R](group: mutable TaskGroup&, task: Task[R, Pending]):
 	state_bits: void&? = task.state
 	raw: Task[void&?, Pending] = ctx_task_to_raw(move task)
 	task_group_add_raw(group, move raw)
 	ctx_task_group_push_state(group, state_bits) can Memory.Allocate, Abort.Panic
 
-def task_group_wait_all(group: mutable TaskGroup&) can[Pool.WaitAll, Memory.Release, Atomics.Load, Atomics.CompareExchange]:
+def task_group_wait_all(group: mutable TaskGroup&):
 	task_group_wait_all_raw(group) can Pool.WaitAll
 	ctx_task_group_release_all(group) can Memory.Release, Atomics.Load, Atomics.CompareExchange
 
@@ -274,24 +274,24 @@ def task_group_wait_all(group: mutable TaskGroup&) can[Pool.WaitAll, Memory.Rele
 # Generic atomic helpers
 # ------------------------------------------------------------
 
-def load[T](slot: atomic[T]&, order: MemoryOrder) -> T can[Atomics.Load]:
+def load[T](slot: atomic[T]&, order: MemoryOrder) -> T:
 	can Atomics.Load:
 		_ = order
 		return slot.value
 
-def store[T](slot: mutable atomic[T]&, value: T, order: MemoryOrder) can[Atomics.Store]:
+def store[T](slot: mutable atomic[T]&, value: T, order: MemoryOrder):
 	can Atomics.Store:
 		_ = order
 		slot.value <- value
 
-def exchange[T](slot: mutable atomic[T]&, value: T, order: MemoryOrder) -> T can[Atomics.Exchange]:
+def exchange[T](slot: mutable atomic[T]&, value: T, order: MemoryOrder) -> T:
 	can Atomics.Exchange:
 		_ = order
 		old_value: T = slot.value
 		slot.value <- value
 		return old_value
 
-def compare_exchange[T](slot: mutable atomic[T]&, expected: T, desired: T, success: MemoryOrder, failure: MemoryOrder) -> bool can[Atomics.CompareExchange]:
+def compare_exchange[T](slot: mutable atomic[T]&, expected: T, desired: T, success: MemoryOrder, failure: MemoryOrder) -> bool:
 	can Atomics.CompareExchange:
 		_ = success
 		_ = failure
@@ -300,41 +300,41 @@ def compare_exchange[T](slot: mutable atomic[T]&, expected: T, desired: T, succe
 			return true
 		return false
 
-def fetch_add(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]:
+def fetch_add(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
 	can Atomics.Rmw:
 		_ = order
 		old_value: i64 = slot.value
 		slot.value <- old_value + value
 		return old_value
 
-def fetch_sub(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]:
+def fetch_sub(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
 	can Atomics.Rmw:
 		_ = order
 		old_value: i64 = slot.value
 		slot.value <- old_value - value
 		return old_value
 
-def fetch_or(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]:
+def fetch_or(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
 	can Atomics.Rmw:
 		_ = order
 		old_value: i64 = slot.value
 		slot.value <- old_value | value
 		return old_value
 
-def fetch_and(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]:
+def fetch_and(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
 	can Atomics.Rmw:
 		_ = order
 		old_value: i64 = slot.value
 		slot.value <- old_value & value
 		return old_value
 
-def fetch_xor(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]:
+def fetch_xor(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
 	can Atomics.Rmw:
 		_ = order
 		old_value: i64 = slot.value
 		slot.value <- old_value ^ value
 		return old_value
 
-def fence(order: MemoryOrder) can[Atomics.Fence]:
+def fence(order: MemoryOrder):
 	can Atomics.Fence:
 		_ = order

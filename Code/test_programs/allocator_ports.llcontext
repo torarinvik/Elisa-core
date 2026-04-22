@@ -5,7 +5,7 @@ struct PoolPair:
     left: mutable i64
     right: mutable i64
 
-def fixed_buffer_allocator_smoke() -> void can[Abort.Panic]:
+def fixed_buffer_allocator_smoke() -> void:
     can Abort.Panic:
         buffer: u8[64] = zeroed
         alloc: mutable FixedBufferAllocator = fixed_buffer_allocator_init(buffer[0].ref[u8&], 64)
@@ -28,7 +28,7 @@ def fixed_buffer_allocator_smoke() -> void can[Abort.Panic]:
         reset_ptr: void& = fixed_buffer_alloc_or_panic(alloc.ref[FixedBufferAllocator&], 8)
         assert_eq(reset_ptr.cast[u8&].uintptr(), first.cast[u8&].uintptr())
 
-def memory_pool_smoke() -> void can[Memory.Allocate, Memory.Release, Abort.Panic]:
+def memory_pool_smoke() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         pool: mutable MemoryPool[PoolPair] = zeroed
         defer block:
@@ -53,7 +53,7 @@ def memory_pool_smoke() -> void can[Memory.Allocate, Memory.Release, Abort.Panic
         after_reset: heap PoolPair& = memory_pool_create(pool.ref[MemoryPool[PoolPair]&])
         assert_eq(after_reset.cast[u8&].uintptr(), second.cast[u8&].uintptr())
 
-def allocator_ports_main_impl() -> int can[Memory.Allocate, Memory.Release, Abort.Panic]:
+def allocator_ports_main_impl() -> int:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         fixed_buffer_allocator_smoke()
         memory_pool_smoke()

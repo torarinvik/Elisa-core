@@ -18,7 +18,7 @@ def char_array_checksum() -> i64:
     values: char[4] = ['A', '\n', '\x42', '\u0043']
     return values[0].i64() + values[1].i64() + values[2].i64() + values[3].i64()
 
-def char_literals_main_impl() -> int can[Abort.Panic]:
+def char_literals_main_impl() -> int:
     can Abort.Panic:
         assert_eq(char_code(), 65)
         assert_eq(escaped_char_code(), 10)

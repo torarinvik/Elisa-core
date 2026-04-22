@@ -1863,7 +1863,7 @@ func TestRunCLIRejectsInternalRuntimeCarrierTypes(t *testing.T) {
 func TestRunCLIFmtNormalizesSingleStatementGrantBlocks(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "grant_fmt_single_use.llcontext")
-	src := "def write_once(text: any u8&) -> int can[Console.Write]:\n    can Console.Write:\n        return puts(text)\n\ndef assign_once(target: mutable any i64&) can[Memory.Allocate]:\n    can Memory.Allocate:\n        target <- alloc_value()\n"
+	src := "def write_once(text: any u8&) -> int:\n    can Console.Write:\n        return puts(text)\n\ndef assign_once(target: mutable any i64&):\n    can Memory.Allocate:\n        target <- alloc_value()\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write single-use grant fixture: %v", err)
 	}
@@ -1896,7 +1896,7 @@ func TestRunCLIFmtNormalizesSingleStatementGrantBlocks(t *testing.T) {
 func TestRunCLIFmtKeepsPanicGrantBlocksInSurfaceSyntax(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "grant_fmt_panic.llcontext")
-	src := "def boom() can[Abort.Panic]:\n    can Abort.Panic:\n        panic(\"boom\")\n"
+	src := "def boom():\n    can Abort.Panic:\n        panic(\"boom\")\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write panic grant fixture: %v", err)
 	}
@@ -1922,7 +1922,7 @@ func TestRunCLIFmtKeepsPanicGrantBlocksInSurfaceSyntax(t *testing.T) {
 func TestRunCLIFmtKeepsSignalSurfaceSyntax(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "grant_fmt_signal.llcontext")
-	src := "effect FooEffect:\n    pass\n\neffect ConsoleEffect:\n    Write\n\ndef run() -> void can[FooEffect, ConsoleEffect.Write]:\n    can FooEffect, ConsoleEffect.Write:\n        signal FooEffect\n        signal ConsoleEffect.Write\n"
+	src := "effect FooEffect:\n    pass\n\neffect ConsoleEffect:\n    Write\n\ndef run() -> void:\n    can FooEffect, ConsoleEffect.Write:\n        signal FooEffect\n        signal ConsoleEffect.Write\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write signal grant fixture: %v", err)
 	}
@@ -1962,7 +1962,7 @@ func TestRunCLIFmtKeepsSignalSurfaceSyntax(t *testing.T) {
 func TestRunCLIFmtRoundTripsTryReturnGrantBlocks(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "grant_fmt_try_return.llcontext")
-	src := "error FormatError:\n    WriteFailed\n\nextern checked() -> int error[FormatError] can[Console.Format]\n\ndef run() -> int can[Console.Format]:\n    can Console.Format:\n        return try checked() else 1\n"
+	src := "error FormatError:\n    WriteFailed\n\nextern checked() -> int error[FormatError] can[Console.Format]\n\ndef run() -> int:\n    can Console.Format:\n        return try checked() else 1\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write try-return grant fixture: %v", err)
 	}
@@ -2567,7 +2567,7 @@ func TestRunCLIExecutesEffectfulSelectedTests(t *testing.T) {
 
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "execute_effectful_tests_fixture.llcontext")
-	src := "@test\ndef memory_case() -> void can[Memory.Allocate, Abort.Panic]:\n    can Memory.Allocate, Abort.Panic:\n        values: i64[4] = zeroed\n        values[0] <- 7\n        if values[0] != 7:\n            panic(\"expected initialized value\")\n"
+	src := "@test\ndef memory_case() -> void:\n    can Memory.Allocate, Abort.Panic:\n        values: i64[4] = zeroed\n        values[0] <- 7\n        if values[0] != 7:\n            panic(\"expected initialized value\")\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write effectful execute-tests fixture: %v", err)
 	}
@@ -2619,7 +2619,7 @@ def write_slot(job: WriteJob) -> i64:
 	return job.value
 
 @test
-def pool_backed_case() -> void can[Abort.Panic]:
+def pool_backed_case() -> void:
 	can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
 		partials: i64[2] = zeroed
 		pool workers(2):
@@ -2853,7 +2853,7 @@ func TestRunCLIContinuesAfterFailingAndSkippedTests(t *testing.T) {
 
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "execute_fail_skip_fixture.llcontext")
-	src := "@test\ndef alpha_case() -> void can[Abort.Panic]:\n    can Abort.Panic:\n        panic(\"boom\")\n\n@skip(todo)\n@test\ndef beta_case() -> void:\n    pass\n\n@test\ndef gamma_case() -> void:\n    pass\n"
+	src := "@test\ndef alpha_case() -> void:\n    can Abort.Panic:\n        panic(\"boom\")\n\n@skip(todo)\n@test\ndef beta_case() -> void:\n    pass\n\n@test\ndef gamma_case() -> void:\n    pass\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write fail/skip execute-tests fixture: %v", err)
 	}
@@ -2889,7 +2889,7 @@ func TestRunCLIContinuesAfterFailingAndSkippedTests(t *testing.T) {
 func TestRunCLICompilesPanicToBacktraceAwareLLVM(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "panic_backtrace_fixture.llcontext")
-	src := "def main() -> int can[Abort.Panic]:\n    can Abort.Panic:\n        panic(\"boom\")\n"
+	src := "def main() -> int:\n    can Abort.Panic:\n        panic(\"boom\")\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write panic backtrace fixture: %v", err)
 	}

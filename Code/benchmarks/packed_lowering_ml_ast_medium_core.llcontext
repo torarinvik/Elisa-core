@@ -361,7 +361,7 @@ def ml_ast_parallel_worker(job: MlAstParallelJob) -> i64:
 def packed_ml_ast_parallel_max_workers_impl() -> i64:
     return ML_AST_PARALLEL_MAX_WORKERS.i64()
 
-def packed_ml_ast_parallel_checksum_impl(worker_count: usize, iterations: usize) -> i64 can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange]:
+def packed_ml_ast_parallel_checksum_impl(worker_count: usize, iterations: usize) -> i64:
     can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
         if worker_count == 0 or iterations == 0 or worker_count > ML_AST_PARALLEL_MAX_WORKERS:
             return -1
