@@ -379,6 +379,22 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			return
 		}
 		valueType := a.analyzeExpr(n.Value)
+		if n.All {
+			elemType, ok := sequenceRewriteCarrierElemType(valueType)
+			if !ok || elemType == nil {
+				a.errorf(n.Pos(), "emit all expects a darray or dview source, got %s", valueType)
+				result = invalidType
+				return
+			}
+			if !IsNeverType(elemType) && !AssignableTo(a.currentSequenceRewrite.OutputElem, elemType) {
+				a.errorf(n.Pos(), "emit all expects elements assignable to %s, got %s", a.currentSequenceRewrite.OutputElem, elemType)
+				a.reportShapeMismatchNotes(n.Pos(), a.currentSequenceRewrite.OutputElem, elemType)
+				result = invalidType
+				return
+			}
+			result = a.namedTypes["void"]
+			return
+		}
 		if !IsNeverType(valueType) && !AssignableTo(a.currentSequenceRewrite.OutputElem, valueType) {
 			a.errorf(n.Pos(), "emit expects %s, got %s", a.currentSequenceRewrite.OutputElem, valueType)
 			a.reportShapeMismatchNotes(n.Pos(), a.currentSequenceRewrite.OutputElem, valueType)

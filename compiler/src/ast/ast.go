@@ -880,6 +880,7 @@ type EmitExpr struct {
 	Position lexer.Pos
 	Value    Expr
 	Nothing  bool
+	All      bool
 }
 
 type VisitArmChildBinding struct {

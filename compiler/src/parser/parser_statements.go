@@ -156,6 +156,12 @@ func (p *Parser) parseStmt() ast.Stmt {
 func (p *Parser) parseEmitStmt() ast.Stmt {
 	pos := p.cur().Pos
 	p.expectIdentText("emit")
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "all" {
+		p.advance()
+		value := p.parseExpr()
+		p.expectNewline()
+		return &ast.ExprStmt{Position: pos, Expr: &ast.EmitExpr{Position: pos, Value: value, All: true}}
+	}
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "nothing" {
 		p.advance()
 		p.expectNewline()

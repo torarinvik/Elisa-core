@@ -1292,6 +1292,44 @@ func TestParseTreeTargetSequenceRewriteExpr(t *testing.T) {
 	}
 }
 
+func TestParseSequenceRewriteEmitAllExpr(t *testing.T) {
+	file, errs := parseSourceFile(t, "def concat(owner: mutable Arena&, left: dview[u32], right: dview[u32]) -> darray[u32]:\n    can Abort.Panic, Memory.Allocate:\n        in owner:\n            segments: darray[dview[u32]] = [left, right]\n            return rewrite segments as sequence[u32]:\n                segment:\n                    emit all segment\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[0])
+	}
+	canStmt, ok := decl.Body[0].(*ast.CanStmt)
+	if !ok {
+		t.Fatalf("expected can stmt, got %T", decl.Body[0])
+	}
+	inStmt, ok := canStmt.Body[0].(*ast.InStoreStmt)
+	if !ok {
+		t.Fatalf("expected in stmt, got %T", canStmt.Body[0])
+	}
+	ret, ok := inStmt.Body[1].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", inStmt.Body[1])
+	}
+	rewriteExpr, ok := ret.Value.(*ast.FoldExpr)
+	if !ok {
+		t.Fatalf("expected fold-backed rewrite expr, got %T", ret.Value)
+	}
+	stmt, ok := rewriteExpr.Arms[0].Body[0].(*ast.ExprStmt)
+	if !ok {
+		t.Fatalf("expected expr stmt arm body, got %T", rewriteExpr.Arms[0].Body[0])
+	}
+	emitExpr, ok := stmt.Expr.(*ast.EmitExpr)
+	if !ok || !emitExpr.All || emitExpr.Value == nil {
+		t.Fatalf("expected emit-all expr, got %#v", stmt.Expr)
+	}
+	if got := unparse.FormatExpr(rewriteExpr); !strings.Contains(got, "emit all segment") {
+		t.Fatalf("expected unparse to preserve emit all, got:\n%s", got)
+	}
+}
+
 func TestParseDeferStatements(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep() -> int:\n    defer block:\n        pass\n    defer function:\n        pass\n    return 0\n")
 	if len(errs) != 0 {

@@ -1067,6 +1067,27 @@ def keep_positive_int_values(owner: mutable Arena&, items: dview[Lua.Expr]) -> d
 	}
 }
 
+func TestGenerateLLVMIRLowersSequenceRewriteEmitAllExpr(t *testing.T) {
+	src := `def concat(owner: mutable Arena&, left: dview[u32], right: dview[u32]) -> darray[u32]:
+	can Abort.Panic, Memory.Allocate:
+		in owner:
+			segments: darray[dview[u32]] = [left, right]
+			return rewrite segments as sequence[u32]:
+				segment:
+					emit all segment
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_sequence_rewrite_emit_all_expr.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define %DynArray__u32 @concat", "sequence.emit.all.loop", "sequence.emit.all.elem"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected emit-all lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersHeterogeneousTreeRewriteExpr(t *testing.T) {
 	src := `tree Lua:
 	common:

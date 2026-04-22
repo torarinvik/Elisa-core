@@ -1540,6 +1540,9 @@ func formatExpr(expr ast.Expr) string {
 		if n.Nothing || n.Value == nil {
 			return "emit nothing"
 		}
+		if n.All {
+			return "emit all " + formatExpr(n.Value)
+		}
 		return "emit " + formatExpr(n.Value)
 	default:
 		return "<expr>"
