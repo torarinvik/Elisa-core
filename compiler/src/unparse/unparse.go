@@ -352,6 +352,8 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		f.writeLine(level, "extern "+n.Name+": "+formatTypeExpr(n.Type))
 	case *ast.ExternTypeDecl:
 		f.writeLine(level, "extern "+n.Name)
+	case *ast.TypeAliasDecl:
+		f.writeLine(level, "type "+n.Name+" = "+formatTypeExpr(n.Target))
 	case *ast.ExportTypeDecl:
 		f.writeLine(level, "export type "+formatTypeExpr(n.ExportedType)+" as "+n.Alias)
 	case *ast.ExportFuncDecl:
@@ -432,6 +434,20 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 			args = append(args, formatExpr(arg))
 		}
 		return n.Name + "(" + strings.Join(args, ", ") + ")"
+	case *ast.GrammarChoiceTerm:
+		options := make([]string, 0, len(n.Options))
+		for _, option := range n.Options {
+			options = append(options, formatGrammarTerm(option))
+		}
+		return "choice(" + strings.Join(options, ", ") + ")"
+	case *ast.GrammarOptionalTerm:
+		return "optional(" + formatGrammarTerm(n.Term) + ")"
+	case *ast.GrammarListTerm:
+		parts := []string{formatGrammarTerm(n.Elem)}
+		if n.Separator != nil {
+			parts = append(parts, formatGrammarTerm(n.Separator))
+		}
+		return "list(" + strings.Join(parts, ", ") + ")"
 	case *ast.GrammarBindTerm:
 		return n.Name + " = " + formatGrammarTerm(n.Term)
 	default:
@@ -1516,13 +1532,13 @@ func formatExpr(expr ast.Expr) string {
 		if n.Brace {
 			parts := make([]string, 0, len(n.Args))
 			for i, arg := range n.Args {
-				parts = append(parts, formatNamedExprField(n.ArgName(i), arg, ": "))
+				parts = append(parts, formatStructLiteralField(n.ArgName(i), arg, true))
 			}
 			return typeName + "{" + strings.Join(parts, ", ") + "}"
 		}
 		parts := make([]string, 0, len(n.Args))
-		for _, arg := range n.Args {
-			parts = append(parts, formatExpr(arg))
+		for i, arg := range n.Args {
+			parts = append(parts, formatStructLiteralField(n.ArgName(i), arg, false))
 		}
 		return typeName + "(" + strings.Join(parts, ", ") + ")"
 	case *ast.RecordUpdateExpr:
@@ -1629,6 +1645,19 @@ func formatNamedExprField(name string, value ast.Expr, separator string) string 
 		return name
 	}
 	return name + separator + formatExpr(value)
+}
+
+func formatStructLiteralField(name string, value ast.Expr, brace bool) string {
+	if name == "" {
+		return formatExpr(value)
+	}
+	if ident, ok := value.(*ast.Ident); ok && ident != nil && ident.Name == name {
+		if brace {
+			return name
+		}
+		return name + ":"
+	}
+	return name + ": " + formatExpr(value)
 }
 
 func formatMatchPatternField(arg ast.MatchPatternArg, brace bool) string {

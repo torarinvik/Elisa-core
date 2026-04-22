@@ -662,6 +662,8 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		fmt.Fprintf(w, "%sextern %s: %s\n", prefix, n.Name, typeStr(n.Type))
 	case *ast.ExternTypeDecl:
 		fmt.Fprintf(w, "%sextern type %s\n", prefix, n.Name)
+	case *ast.TypeAliasDecl:
+		fmt.Fprintf(w, "%stype %s = %s\n", prefix, n.Name, typeStr(n.Target))
 	case *ast.ExportTypeDecl:
 		fmt.Fprintf(w, "%sexport type %s as %s\n", prefix, typeStr(n.ExportedType), n.Alias)
 	case *ast.ExportFuncDecl:

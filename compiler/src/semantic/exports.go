@@ -5,6 +5,31 @@ import (
 	"llcontext/src/lexer"
 )
 
+func (a *Analyzer) collectTypeAliases(decls []scopedDecl) {
+	for _, scoped := range decls {
+		aliasDecl, ok := scoped.Decl.(*ast.TypeAliasDecl)
+		if !ok {
+			continue
+		}
+		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+			qualifiedName := joinQualifiedName(scoped.Namespace, aliasDecl.Name)
+			if _, exists := a.namedTypes[qualifiedName]; exists {
+				a.errorf(aliasDecl.Pos(), "duplicate type %q", qualifiedName)
+				return
+			}
+			resolved := a.resolveType(aliasDecl.Target)
+			if IsInvalidType(resolved) {
+				return
+			}
+			if containsTypeParam(resolved) {
+				a.errorf(aliasDecl.Pos(), "type alias %q must resolve to a concrete type in v1", qualifiedName)
+				return
+			}
+			a.namedTypes[qualifiedName] = resolved
+		})
+	}
+}
+
 func (a *Analyzer) collectExportTypeAliases(decls []scopedDecl) {
 	for _, scoped := range decls {
 		exportDecl, ok := scoped.Decl.(*ast.ExportTypeDecl)

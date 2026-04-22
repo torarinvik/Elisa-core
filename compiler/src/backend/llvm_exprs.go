@@ -8698,7 +8698,11 @@ func (s *functionState) emitCastExpr(expr *ast.CastExpr) (C.LLVMValueRef, semant
 	if targetType == nil {
 		return nil, nil, fmt.Errorf("missing semantic type for cast target")
 	}
-	value, actualType, err := s.emitExpr(expr.Operand, nil)
+	operandExpected := semantic.Type(nil)
+	if _, ok := expr.Operand.(*ast.ZeroedLit); ok {
+		operandExpected = targetType
+	}
+	value, actualType, err := s.emitExpr(expr.Operand, operandExpected)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -8819,6 +8823,11 @@ func (s *functionState) emitSpecializeExpr(expr *ast.SpecializeExpr) (C.LLVMValu
 }
 
 func (s *functionState) emitStructLitExpr(expr *ast.StructLitExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if s != nil && s.g != nil && s.g.result != nil && s.g.result.InitCalls != nil {
+		if call, ok := s.g.result.InitCalls[expr]; ok && call != nil {
+			return s.emitExpr(call, s.exprType(expr))
+		}
+	}
 	structType := s.exprType(expr)
 	llvmType, err := s.g.lowerType(structType)
 	if err != nil {

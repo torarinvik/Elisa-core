@@ -111,12 +111,17 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 
 func withDefaultNativeRuntimeForeignFiles(foreignFiles []string) ([]string, error) {
 	resolved := dedupeStrings(append([]string(nil), foreignFiles...))
-	if hasConcurrencyRuntimeForeignFile(resolved) {
-		return resolved, nil
-	}
 	repoRoot, err := compilerRepoRootForNativeExec()
 	if err != nil {
 		return nil, err
+	}
+	defaultRuntimeSupport := filepath.Join(repoRoot, "compiler", "runtime", "native_runtime_support.c")
+	if _, err := os.Stat(defaultRuntimeSupport); err != nil {
+		return nil, fmt.Errorf("failed to locate default native runtime support %s: %w", defaultRuntimeSupport, err)
+	}
+	resolved = append(resolved, defaultRuntimeSupport)
+	if hasConcurrencyRuntimeForeignFile(resolved) {
+		return dedupeStrings(resolved), nil
 	}
 	defaultConcurrencyRuntime := filepath.Join(repoRoot, "Code", "benchmarks", "json_parser_concurrency_runtime.c")
 	if _, err := os.Stat(defaultConcurrencyRuntime); err != nil {

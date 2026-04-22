@@ -282,7 +282,7 @@ func (i *Interpreter) bootstrap() error {
 	for name, value := range i.result.ConstValues {
 		i.consts[name] = constValueToValue(value)
 	}
-	for _, decl := range i.result.File.Decls {
+	for _, decl := range i.result.ActiveFile().Decls {
 		if err := i.initializeGlobalsFromDecl(decl); err != nil {
 			return err
 		}
@@ -802,6 +802,9 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 		}
 		return ListValue(values), nil
 	case *ast.CastExpr:
+		if _, ok := n.Operand.(*ast.ZeroedLit); ok {
+			return i.zeroValueForType(n.Target)
+		}
 		value, err := i.evalExpr(frame, n.Operand)
 		if err != nil {
 			return VoidValue(), err
@@ -821,6 +824,11 @@ func (i *Interpreter) evalExpr(frame *frame, expr ast.Expr) (Value, error) {
 		}
 		return i.evalExpr(frame, n.Alt)
 	case *ast.StructLitExpr:
+		if i != nil && i.result != nil && i.result.InitCalls != nil {
+			if call, ok := i.result.InitCalls[n]; ok && call != nil {
+				return i.evalExpr(frame, call)
+			}
+		}
 		decl, ok := i.lookupStructDecl(n.Name)
 		if !ok || decl == nil {
 			return VoidValue(), fmt.Errorf("unknown struct %q", n.Name)
@@ -1295,7 +1303,8 @@ func (i *Interpreter) lookupStructDecl(name string) (*ast.StructDecl, bool) {
 	if decl, ok := i.structs[name]; ok && decl != nil {
 		return decl, true
 	}
-	if i.result == nil || i.result.File == nil {
+	activeFile := i.result.ActiveFile()
+	if i.result == nil || activeFile == nil {
 		return nil, false
 	}
 	var search func([]ast.Decl) (*ast.StructDecl, bool)
@@ -1314,7 +1323,7 @@ func (i *Interpreter) lookupStructDecl(name string) (*ast.StructDecl, bool) {
 		}
 		return nil, false
 	}
-	decl, ok := search(i.result.File.Decls)
+	decl, ok := search(activeFile.Decls)
 	if !ok || decl == nil {
 		return nil, false
 	}

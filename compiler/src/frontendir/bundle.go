@@ -68,6 +68,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.NamespaceDecl{})
 		gob.Register(&ast.UsingDecl{})
 		gob.Register(&ast.EnumDecl{})
+		gob.Register(&ast.GrammarDecl{})
 		gob.Register(&ast.GlobalDecl{})
 		gob.Register(&ast.StructDecl{})
 		gob.Register(&ast.InterfaceDecl{})
@@ -78,6 +79,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.ExternFuncDecl{})
 		gob.Register(&ast.ExternVarDecl{})
 		gob.Register(&ast.ExternTypeDecl{})
+		gob.Register(&ast.TypeAliasDecl{})
 		gob.Register(&ast.ExportTypeDecl{})
 		gob.Register(&ast.ExportFuncDecl{})
 		gob.Register(&ast.ExportGlobalDecl{})
@@ -140,6 +142,15 @@ func registerBundleTypes() {
 		gob.Register(&ast.MatchExpr{})
 		gob.Register(&ast.VisitExpr{})
 		gob.Register(&ast.FoldExpr{})
+
+		// Grammar terms.
+		gob.Register(&ast.GrammarPassTerm{})
+		gob.Register(&ast.GrammarTokenTerm{})
+		gob.Register(&ast.GrammarCallTerm{})
+		gob.Register(&ast.GrammarChoiceTerm{})
+		gob.Register(&ast.GrammarOptionalTerm{})
+		gob.Register(&ast.GrammarListTerm{})
+		gob.Register(&ast.GrammarBindTerm{})
 
 		// Patterns.
 		gob.Register(&ast.MatchWildcardPattern{})

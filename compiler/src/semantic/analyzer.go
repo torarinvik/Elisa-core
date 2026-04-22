@@ -3,6 +3,7 @@ package semantic
 import (
 	"fmt"
 	"llcontext/src/ast"
+	"llcontext/src/grammar"
 	"llcontext/src/lexer"
 	"math/bits"
 	"strconv"
@@ -94,6 +95,7 @@ type Analyzer struct {
 	exprFacts                         map[ast.Expr]OptimizationFacts
 	treeConstructorCallees            map[ast.Expr]bool
 	resolvedCastHooks                 map[ast.Expr]*Symbol
+	loweredInitCalls                  map[*ast.StructLitExpr]*ast.CallExpr
 	exprDenseNodeKeys                 map[ast.Expr]DenseNodeKeyInfo
 	exprNodeTables                    map[ast.Expr]NodeTableInfo
 	deferInfo                         map[*ast.DeferStmt]*DeferInfo
@@ -102,6 +104,7 @@ type Analyzer struct {
 	symbolFacts                       map[*Symbol]OptimizationFacts
 	funcDeclSymbols                   map[*ast.FuncDecl]*Symbol
 	castHooksByName                   map[string]map[castHookSignature]*Symbol
+	initHooksByName                   map[string]map[initHookSignature]*Symbol
 	typeParamScopes                   []map[string]Type
 	typeParamInterfaceScopes          []map[string]*StaticInterface
 	interfaceAssocTypeScopes          []map[string]Type
@@ -166,6 +169,11 @@ type Analyzer struct {
 type castHookSignature struct {
 	Source string
 	Target string
+}
+
+type initHookSignature struct {
+	Target string
+	Params string
 }
 
 type regionState struct {
@@ -272,7 +280,12 @@ type poolScopeState struct {
 
 func Analyze(file *ast.File) *Result {
 	normalizeCascadeStmts(file)
-	census := analyzeASTCensus(file)
+	loweredFile := grammar.LowerFile(file)
+	activeFile := loweredFile
+	if activeFile == nil {
+		activeFile = file
+	}
+	census := analyzeASTCensus(activeFile)
 	exprCapacity := census.exprs
 	exprFactsCapacity := census.exprs / 8
 	if exprFactsCapacity < 32 {
@@ -281,6 +294,10 @@ func Analyze(file *ast.File) *Result {
 	resolvedCastHookCapacity := census.exprs / 32
 	if resolvedCastHookCapacity < 8 {
 		resolvedCastHookCapacity = 8
+	}
+	resolvedInitCallCapacity := census.exprs / 32
+	if resolvedInitCallCapacity < 8 {
+		resolvedInitCallCapacity = 8
 	}
 	denseNodeCapacity := census.exprs / 64
 	if denseNodeCapacity < 8 {
@@ -317,6 +334,7 @@ func Analyze(file *ast.File) *Result {
 		exprFacts:                         make(map[ast.Expr]OptimizationFacts, exprFactsCapacity),
 		treeConstructorCallees:            make(map[ast.Expr]bool, exprCapacity/16+8),
 		resolvedCastHooks:                 make(map[ast.Expr]*Symbol, resolvedCastHookCapacity),
+		loweredInitCalls:                  make(map[*ast.StructLitExpr]*ast.CallExpr, resolvedInitCallCapacity),
 		exprDenseNodeKeys:                 make(map[ast.Expr]DenseNodeKeyInfo, denseNodeCapacity),
 		exprNodeTables:                    make(map[ast.Expr]NodeTableInfo, denseNodeCapacity),
 		deferInfo:                         map[*ast.DeferStmt]*DeferInfo{},
@@ -328,6 +346,7 @@ func Analyze(file *ast.File) *Result {
 		functionAnalyses:                  make(map[*ast.FuncDecl]*FunctionAnalysis, funcDeclCapacity),
 		loweredWithStmts:                  map[*ast.WithStmt]bool{},
 		castHooksByName:                   map[string]map[castHookSignature]*Symbol{},
+		initHooksByName:                   map[string]map[initHookSignature]*Symbol{},
 		returnProvenanceInProgress:        map[*ast.FuncDecl]bool{},
 		returnProvenanceLocalInProgress:   map[*Symbol]bool{},
 		returnBorrowedOwnerRefInProgress:  map[*ast.FuncDecl]bool{},
@@ -336,10 +355,11 @@ func Analyze(file *ast.File) *Result {
 		conditionalCallPoststateOriginals: make(map[*ast.CallExpr]map[*Symbol]Type, exprCapacity/16+8),
 	}
 	a.registerBuiltins()
-	activeDecls := a.flattenScopedDecls(file.Decls, "", nil)
+	activeDecls := a.flattenScopedDecls(activeFile.Decls, "", nil)
 	a.collectConstValues(activeDecls)
 	a.collectPermissionDecls(activeDecls)
 	a.collectNamedTypes(activeDecls)
+	a.collectTypeAliases(activeDecls)
 	a.collectEffectAliases(activeDecls)
 	a.collectContextBundles(activeDecls)
 	a.collectParamPacks(activeDecls)
@@ -360,6 +380,7 @@ func Analyze(file *ast.File) *Result {
 	a.analyzeExports(activeDecls)
 	return &Result{
 		File:                    file,
+		LoweredFile:             loweredFile,
 		GlobalScope:             a.globalScope,
 		NamedTypes:              a.namedTypes,
 		TreeAttributes:          a.treeAttributes,
@@ -376,6 +397,7 @@ func Analyze(file *ast.File) *Result {
 		SafeCalls:               a.safeCalls,
 		ExprFacts:               a.exprFacts,
 		CastHooks:               a.resolvedCastHooks,
+		InitCalls:               a.loweredInitCalls,
 		DenseNodeKeys:           a.exprDenseNodeKeys,
 		NodeTables:              a.exprNodeTables,
 		ParallelFor:             a.parallelForInfo,
@@ -919,7 +941,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 				a.namedTypes[qualifiedName] = &ErrorSetType{Name: qualifiedName, Tags: resolvedTags}
 			case *ast.PermissionDecl:
 			case *ast.EffectDecl:
-			case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
+			case *ast.TypeAliasDecl, *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			}
 		})
 	}
@@ -1623,16 +1645,31 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 			case *ast.FuncDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				fnType := a.funcTypeFromDecl(qualifiedName, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.EffectAliasPos, n.EffectAlias, n.Permissions, n.Ensures, n.Params, n.ParamPacks, n.ParamItemOrder, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, false)
+				initLookupName, constructorSugar := a.constructorDeclInitHookName(scoped.Namespace, n, fnType)
 				symbolName := qualifiedName
-				if n.Name == "__cast__" {
+				switch n.Name {
+				case "__cast__":
 					symbolName = castHookSymbolName(qualifiedName, fnType, n.Pos())
+				case "__init__":
+					symbolName = initHookSymbolName(qualifiedName, fnType, n.Pos())
+				default:
+					if constructorSugar {
+						symbolName = initHookSymbolName(qualifiedName, fnType, n.Pos())
+					}
 				}
 				sym := &Symbol{Name: symbolName, Kind: SymbolFunc, Type: fnType, Node: n, Mutable: false}
 				a.functionTypes[symbolName] = fnType
 				a.funcDeclSymbols[n] = sym
 				a.defineGlobal(sym, n.Pos())
-				if n.Name == "__cast__" {
+				switch n.Name {
+				case "__cast__":
 					a.registerCastHook(scoped.Namespace, n, fnType, sym)
+				case "__init__":
+					a.registerInitHook(scoped.Namespace, n, "__init__", fnType, sym)
+				default:
+					if constructorSugar {
+						a.registerInitHook(scoped.Namespace, n, initLookupName, fnType, sym)
+					}
 				}
 			case *ast.AttributeDecl:
 			case *ast.InterfaceDecl:
@@ -1711,7 +1748,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 			case *ast.EffectsDecl:
 			case *ast.EffectDecl:
 			case *ast.PermissionDecl:
-			case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
+			case *ast.TypeAliasDecl, *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			}
 		})
 	}
@@ -1726,6 +1763,27 @@ func exactTypeKey(t Type) string {
 
 func castHookKey(source Type, target Type) castHookSignature {
 	return castHookSignature{Source: exactTypeKey(source), Target: exactTypeKey(target)}
+}
+
+func initHookParamKey(fnType *FuncType) string {
+	if fnType == nil {
+		return "<invalid>"
+	}
+	explicitParamCount := funcTypeExplicitParamCount(fnType)
+	parts := make([]string, 0, explicitParamCount)
+	for i := 0; i < explicitParamCount; i++ {
+		name := ""
+		if i < len(fnType.ExplicitParamNames) {
+			name = fnType.ExplicitParamNames[i]
+		}
+		paramType := "<nil>"
+		if i < len(fnType.Params) && fnType.Params[i] != nil {
+			paramType = exactTypeKey(fnType.Params[i])
+		}
+		hasDefault := i < len(fnType.ExplicitParamHasDefault) && fnType.ExplicitParamHasDefault[i]
+		parts = append(parts, fmt.Sprintf("%s=%s=%t", name, paramType, hasDefault))
+	}
+	return strings.Join(parts, "|")
 }
 
 func sanitizeHookSymbolFragment(value string) string {
@@ -1763,6 +1821,40 @@ func castHookSymbolName(qualifiedName string, fnType *FuncType, pos lexer.Pos) s
 	}
 	base := sanitizeHookSymbolFragment(qualifiedName)
 	return fmt.Sprintf("%s__%s__to__%s__L%d_C%d", base, source, target, pos.Line, pos.Col)
+}
+
+func initHookSymbolName(qualifiedName string, fnType *FuncType, pos lexer.Pos) string {
+	target := "invalid_ctor"
+	if fnType != nil && fnType.Return != nil {
+		target = sanitizeHookSymbolFragment(fnType.Return.String())
+	}
+	base := sanitizeHookSymbolFragment(qualifiedName)
+	return fmt.Sprintf("%s__for__%s__L%d_C%d", base, target, pos.Line, pos.Col)
+}
+
+func (a *Analyzer) constructorDeclInitHookName(namespace string, decl *ast.FuncDecl, fnType *FuncType) (string, bool) {
+	if a == nil || decl == nil || fnType == nil || decl.Name == "" || decl.Name == "__cast__" || decl.Name == "__init__" {
+		return "", false
+	}
+	if fnType.Return == nil || isVoidType(fnType.Return) {
+		return "", false
+	}
+	targetType, _, ok := a.lookupVisibleType(decl.Name)
+	if !ok {
+		return "", false
+	}
+	targetBase, _, ok := structLiteralBaseAndBindings(targetType)
+	if !ok || targetBase == nil {
+		return "", false
+	}
+	returnBase, _, ok := structLiteralBaseAndBindings(fnType.Return)
+	if !ok || returnBase == nil {
+		return "", false
+	}
+	if targetBase.Name != returnBase.Name {
+		return "", false
+	}
+	return "__init__", true
 }
 
 func (a *Analyzer) registerCastHook(namespace string, decl *ast.FuncDecl, fnType *FuncType, sym *Symbol) {
@@ -1803,6 +1895,45 @@ func (a *Analyzer) registerCastHook(namespace string, decl *ast.FuncDecl, fnType
 	hooks[key] = sym
 }
 
+func (a *Analyzer) registerInitHook(namespace string, decl *ast.FuncDecl, lookupName string, fnType *FuncType, sym *Symbol) {
+	if a == nil || decl == nil || fnType == nil || sym == nil {
+		return
+	}
+	declName := joinQualifiedName(namespace, decl.Name)
+	qualifiedName := joinQualifiedName(namespace, lookupName)
+	if len(fnType.ImplicitParamNames) != 0 {
+		a.errorf(decl.Pos(), "__init__ hook %q must not declare implicit parameters in v1", declName)
+		return
+	}
+	if len(fnType.TypeParams) != 0 || len(fnType.RefStorageParams) != 0 || len(fnType.RefStateParams) != 0 || len(fnType.RegionParams) != 0 || len(fnType.PermissionParams) != 0 || len(fnType.GenericParams) != 0 {
+		a.errorf(decl.Pos(), "__init__ hook %q must not be generic in v1", declName)
+		return
+	}
+	if fnType.Variadic {
+		a.errorf(decl.Pos(), "__init__ hook %q must not be variadic", declName)
+		return
+	}
+	if fnType.Return == nil || isVoidType(fnType.Return) {
+		a.errorf(decl.Pos(), "__init__ hook %q must return a concrete struct type", declName)
+		return
+	}
+	if base, _, ok := structLiteralBaseAndBindings(fnType.Return); !ok || base == nil {
+		a.errorf(decl.Pos(), "__init__ hook %q must return a concrete struct type, got %s", declName, fnType.Return)
+		return
+	}
+	key := initHookSignature{Target: exactTypeKey(fnType.Return), Params: initHookParamKey(fnType)}
+	hooks := a.initHooksByName[qualifiedName]
+	if hooks == nil {
+		hooks = map[initHookSignature]*Symbol{}
+		a.initHooksByName[qualifiedName] = hooks
+	}
+	if existing, ok := hooks[key]; ok {
+		a.errorf(decl.Pos(), "duplicate __init__ hook for %s (already defined as %q)", fnType.Return, existing.Name)
+		return
+	}
+	hooks[key] = sym
+}
+
 func (a *Analyzer) lookupVisibleCastHook(source Type, target Type) (*Symbol, bool) {
 	if a == nil {
 		return nil, false
@@ -1818,6 +1949,26 @@ func (a *Analyzer) lookupVisibleCastHook(source Type, target Type) (*Symbol, boo
 		}
 	}
 	return nil, false
+}
+
+func (a *Analyzer) lookupVisibleInitHooks(target Type) []*Symbol {
+	if a == nil || target == nil {
+		return nil
+	}
+	key := exactTypeKey(target)
+	var hooks []*Symbol
+	for _, candidate := range a.visibleNameCandidates("__init__") {
+		registered := a.initHooksByName[candidate]
+		if len(registered) == 0 {
+			continue
+		}
+		for signature, sym := range registered {
+			if signature.Target == key && sym != nil {
+				hooks = append(hooks, sym)
+			}
+		}
+	}
+	return hooks
 }
 
 func (a *Analyzer) symbolForFuncDecl(fn *ast.FuncDecl) (*Symbol, bool) {
@@ -3114,7 +3265,7 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 			case *ast.ErrorDecl:
 			case *ast.EffectDecl:
 			case *ast.PermissionDecl:
-			case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
+			case *ast.TypeAliasDecl, *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 			}
 		})
 	}

@@ -118,11 +118,12 @@ func noteTypeKeyFor(t semantic.Type) typeMemoKey {
 }
 
 func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
-	if result == nil || result.File == nil || result.GlobalScope == nil {
+	activeFile := result.ActiveFile()
+	if result == nil || activeFile == nil || result.GlobalScope == nil {
 		return nil, fmt.Errorf("backend requires a semantic result with file and global scope")
 	}
 	ctx := C.LLVMContextCreate()
-	moduleName := cString(result.File.Filename)
+	moduleName := cString(activeFile.Filename)
 	defer C.free(unsafe.Pointer(moduleName))
 	mod := C.LLVMModuleCreateWithNameInContext(moduleName, ctx)
 	g := &llvmGenerator{
@@ -214,12 +215,12 @@ func (g *llvmGenerator) dispose() {
 }
 
 func (g *llvmGenerator) emitModule() error {
-	for _, decl := range g.result.File.Decls {
+	for _, decl := range g.result.ActiveFile().Decls {
 		if err := g.predeclareDeclTypes(decl); err != nil {
 			return err
 		}
 	}
-	for _, decl := range g.result.File.Decls {
+	for _, decl := range g.result.ActiveFile().Decls {
 		if err := g.emitDecl(decl); err != nil {
 			return err
 		}
@@ -346,6 +347,10 @@ func (g *llvmGenerator) predeclareDeclTypes(decl ast.Decl) error {
 		return nil
 	case *ast.ErrorDecl:
 		return nil
+	case *ast.GrammarDecl:
+		return nil
+	case *ast.TypeAliasDecl:
+		return nil
 	case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 		return nil
 	default:
@@ -465,6 +470,10 @@ func (g *llvmGenerator) emitDecl(decl ast.Decl) error {
 		}
 		return nil
 	case *ast.ErrorDecl:
+		return nil
+	case *ast.GrammarDecl:
+		return nil
+	case *ast.TypeAliasDecl:
 		return nil
 	case *ast.ExportTypeDecl, *ast.ExportFuncDecl, *ast.ExportGlobalDecl:
 		return nil

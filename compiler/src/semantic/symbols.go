@@ -29,6 +29,7 @@ func (d Diagnostic) String() string {
 
 type Result struct {
 	File                    *ast.File
+	LoweredFile             *ast.File
 	GlobalScope             *Scope
 	NamedTypes              map[string]Type
 	TreeAttributes          map[string]map[string]*TreeAttribute
@@ -45,6 +46,7 @@ type Result struct {
 	SafeCalls               map[*ast.CallExpr]*SafeCallInfo
 	ExprFacts               map[ast.Expr]OptimizationFacts
 	CastHooks               map[ast.Expr]*Symbol
+	InitCalls               map[*ast.StructLitExpr]*ast.CallExpr
 	DenseNodeKeys           map[ast.Expr]DenseNodeKeyInfo
 	NodeTables              map[ast.Expr]NodeTableInfo
 	PackedLowering          PackedLoweringMetadata
@@ -58,6 +60,16 @@ type Result struct {
 	ExportedFuncs           []*ExportedFunc
 	ExportedGlobals         []*ExportedGlobal
 	Diagnostics             []Diagnostic
+}
+
+func (r *Result) ActiveFile() *ast.File {
+	if r == nil {
+		return nil
+	}
+	if r.LoweredFile != nil {
+		return r.LoweredFile
+	}
+	return r.File
 }
 
 type TreeAttribute struct {

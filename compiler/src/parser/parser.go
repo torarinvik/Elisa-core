@@ -168,6 +168,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("using") {
 		return p.parseUsingDecl()
 	}
+	if p.peekIdentText("type") {
+		return p.parseTypeAliasDecl()
+	}
 	if p.peekIdentText("attribute") {
 		return p.parseAttributeDecl()
 	}
@@ -257,6 +260,16 @@ func (p *Parser) parseDecl() ast.Decl {
 
 func (p *Parser) parseStoreDecl() *ast.StoreDecl {
 	return p.parseStoreDeclWithAnnotations(nil)
+}
+
+func (p *Parser) parseTypeAliasDecl() ast.Decl {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_IDENT)
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_ASSIGN)
+	target := p.parseTypeExpr()
+	p.expectNewline()
+	return &ast.TypeAliasDecl{Position: pos, Name: name, Target: target}
 }
 
 func (p *Parser) parseStoreDeclWithAnnotations(annotations []ast.Annotation) *ast.StoreDecl {

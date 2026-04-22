@@ -297,6 +297,44 @@ def run(row: Row, flag: bool) -> int:
 	}
 }
 
+func TestParseParenStructLiteralNamedArgs(t *testing.T) {
+	file, errs := parseSourceFile(t, `struct Span:
+    start: i64
+    finish: i64
+
+def build(start: i64) -> Span:
+    return Span(start:, finish: start + 1)
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	buildDecl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected build function decl, got %T", file.Decls[1])
+	}
+	ret, ok := buildDecl.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", buildDecl.Body[0])
+	}
+	lit, ok := ret.Value.(*ast.StructLitExpr)
+	if !ok {
+		t.Fatalf("expected struct literal return value, got %T", ret.Value)
+	}
+	if lit.Brace {
+		t.Fatalf("expected paren struct literal, got %#v", lit)
+	}
+	if got := lit.ArgName(0); got != "start" {
+		t.Fatalf("expected first paren constructor arg to target start, got %q", got)
+	}
+	if got := lit.ArgName(1); got != "finish" {
+		t.Fatalf("expected second paren constructor arg to target finish, got %q", got)
+	}
+	formatted := unparse.FormatFile(file)
+	if !strings.Contains(formatted, "return Span(start:, finish: (start + 1))") {
+		t.Fatalf("expected formatted output to preserve paren constructor names, got:\n%s", formatted)
+	}
+}
+
 func TestParseCatchExpr(t *testing.T) {
 	file, errs := parseSourceFile(t, `error FileError:
 	NotFound

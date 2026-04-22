@@ -413,8 +413,13 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = a.analyzeSliceExpr(n)
 		return
 	case *ast.CastExpr:
-		src := a.analyzeExpr(n.Operand)
 		dst := a.resolveType(n.Target)
+		var src Type
+		if _, ok := n.Operand.(*ast.ZeroedLit); ok {
+			src = a.analyzeValueExpr(n.Operand, dst)
+		} else {
+			src = a.analyzeExpr(n.Operand)
+		}
 		if n.Origin == ast.CastExprOriginPostfixShorthand {
 			if hookSym, ok := a.lookupVisibleCastHook(src, dst); ok {
 				a.resolvedCastHooks[n] = hookSym
@@ -1756,6 +1761,11 @@ func (a *Analyzer) analyzeStructLiteralExpr(expr *ast.StructLitExpr, expected Ty
 		}
 		return invalidType
 	}
+	if !expr.Brace {
+		if resultType, handled := a.analyzeInitHookStructConstructor(expr, targetType); handled {
+			return resultType
+		}
+	}
 	a.analyzeStructLiteralArgs(expr, base, bindings)
 	if len(base.NamedStateCases) == 0 {
 		return targetType
@@ -1776,6 +1786,225 @@ func (a *Analyzer) analyzeStructLiteralExpr(expr *ast.StructLitExpr, expected Ty
 		a.errorf(expr.Pos(), "struct literal %q does not satisfy derived state %s", expr.Name, desiredState)
 	}
 	return targetType
+}
+
+func (a *Analyzer) analyzeInitHookStructConstructor(expr *ast.StructLitExpr, targetType Type) (Type, bool) {
+	hooks := a.lookupVisibleInitHooks(targetType)
+	if len(hooks) == 0 {
+		return nil, false
+	}
+	approxTypes := make([]Type, len(expr.Args))
+	knownTypes := make([]bool, len(expr.Args))
+	for i, arg := range expr.Args {
+		if approx := a.approximateInitHookArgType(arg); approx != nil && !IsInvalidType(approx) {
+			approxTypes[i] = approx
+			knownTypes[i] = true
+		}
+	}
+	type initHookMatch struct {
+		sym             *Symbol
+		orderedArgs     []ast.Expr
+		defaultsUsed    int
+		knownTypeChecks int
+	}
+	matches := make([]initHookMatch, 0, len(hooks))
+	for _, sym := range hooks {
+		fnType, ok := sym.Type.(*FuncType)
+		if !ok || fnType == nil {
+			continue
+		}
+		orderedArgs, sourceIndexes, defaultsUsed, ok := a.resolveInitHookArgs(expr, fnType)
+		if !ok {
+			continue
+		}
+		knownChecks := 0
+		valid := true
+		for paramIndex, sourceIndex := range sourceIndexes {
+			if sourceIndex < 0 || sourceIndex >= len(approxTypes) || !knownTypes[sourceIndex] {
+				continue
+			}
+			knownChecks++
+			if paramIndex >= len(fnType.Params) || !AssignableTo(fnType.Params[paramIndex], approxTypes[sourceIndex]) {
+				valid = false
+				break
+			}
+		}
+		if !valid {
+			continue
+		}
+		matches = append(matches, initHookMatch{sym: sym, orderedArgs: orderedArgs, defaultsUsed: defaultsUsed, knownTypeChecks: knownChecks})
+	}
+	if len(matches) == 0 {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "no matching __init__ overload for %s", targetType)
+		return targetType, true
+	}
+	bestDefaults := matches[0].defaultsUsed
+	for _, match := range matches[1:] {
+		if match.defaultsUsed < bestDefaults {
+			bestDefaults = match.defaultsUsed
+		}
+	}
+	filtered := matches[:0]
+	for _, match := range matches {
+		if match.defaultsUsed == bestDefaults {
+			filtered = append(filtered, match)
+		}
+	}
+	bestKnownChecks := filtered[0].knownTypeChecks
+	for _, match := range filtered[1:] {
+		if match.knownTypeChecks > bestKnownChecks {
+			bestKnownChecks = match.knownTypeChecks
+		}
+	}
+	best := filtered[:0]
+	for _, match := range filtered {
+		if match.knownTypeChecks == bestKnownChecks {
+			best = append(best, match)
+		}
+	}
+	if len(best) != 1 {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "ambiguous __init__ overload for %s", targetType)
+		return targetType, true
+	}
+	selected := best[0]
+	call := &ast.CallExpr{
+		Position:          expr.Pos(),
+		Func:              &ast.Ident{Position: expr.Pos(), Name: selected.sym.Name},
+		Args:              append([]ast.Expr(nil), expr.Args...),
+		ResolvedArgsValid: true,
+		ResolvedArgs:      append([]ast.Expr(nil), selected.orderedArgs...),
+	}
+	resultType := a.analyzeCallExpr(call)
+	a.exprTypes[call] = resultType
+	if a.loweredInitCalls != nil {
+		a.loweredInitCalls[expr] = call
+	}
+	return resultType, true
+}
+
+func (a *Analyzer) approximateInitHookArgType(expr ast.Expr) Type {
+	if expr == nil {
+		return nil
+	}
+	if actual, ok := a.exprTypes[expr]; ok && actual != nil && !IsInvalidType(actual) {
+		return actual
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return a.approximateInitHookArgType(n.Inner)
+	case *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.CharLit, *ast.BoolLit, *ast.NullLit, *ast.ZeroedLit:
+		return a.inferLiteralType(expr)
+	case *ast.Ident:
+		if a.currentScope != nil {
+			if sym, ok := a.currentScope.Lookup(n.Name); ok && sym != nil {
+				return sym.Type
+			}
+		}
+		if sym, _, ok := a.lookupVisibleGlobal(n.Name); ok && sym != nil {
+			return sym.Type
+		}
+	case *ast.CastExpr:
+		return a.resolveType(n.Target)
+	case *ast.StructLitExpr:
+		if t := a.structLiteralTargetType(n, nil); t != nil && !IsInvalidType(t) {
+			return t
+		}
+	case *ast.SpecializeExpr:
+		if ident, ok := n.Operand.(*ast.Ident); ok {
+			if sym, _, ok := a.lookupVisibleGlobal(ident.Name); ok && sym != nil {
+				return sym.Type
+			}
+		}
+	}
+	return nil
+}
+
+func (a *Analyzer) resolveInitHookArgs(expr *ast.StructLitExpr, ft *FuncType) ([]ast.Expr, []int, int, bool) {
+	if expr == nil || ft == nil {
+		return nil, nil, 0, false
+	}
+	explicitParamCount := funcTypeExplicitParamCount(ft)
+	ordered := make([]ast.Expr, explicitParamCount)
+	sourceIndexes := make([]int, explicitParamCount)
+	for i := range sourceIndexes {
+		sourceIndexes[i] = -1
+	}
+	if expr.NamedArgCount() == 0 {
+		if len(expr.Args) > explicitParamCount {
+			return nil, nil, 0, false
+		}
+		copy(ordered, expr.Args)
+		for i := range expr.Args {
+			sourceIndexes[i] = i
+		}
+		defaultsUsed := 0
+		for i := len(expr.Args); i < explicitParamCount; i++ {
+			if i >= len(ft.ExplicitParamHasDefault) || !ft.ExplicitParamHasDefault[i] || i >= len(ft.ExplicitParamDefaultExprs) {
+				return nil, nil, 0, false
+			}
+			ordered[i] = cloneDefaultArgExpr(ft.ExplicitParamDefaultExprs[i])
+			if ordered[i] == nil {
+				return nil, nil, 0, false
+			}
+			defaultsUsed++
+		}
+		return ordered, sourceIndexes, defaultsUsed, true
+	}
+	if len(ft.ExplicitParamNames) != explicitParamCount {
+		return nil, nil, 0, false
+	}
+	nameToIndex := make(map[string]int, len(ft.ExplicitParamNames))
+	for i, name := range ft.ExplicitParamNames {
+		if name == "" {
+			return nil, nil, 0, false
+		}
+		nameToIndex[name] = i
+	}
+	filled := make([]bool, explicitParamCount)
+	sawNamed := false
+	nextPositional := 0
+	for argIndex, arg := range expr.Args {
+		name := expr.ArgName(argIndex)
+		if name == "" {
+			if sawNamed || nextPositional >= explicitParamCount || filled[nextPositional] {
+				return nil, nil, 0, false
+			}
+			ordered[nextPositional] = arg
+			sourceIndexes[nextPositional] = argIndex
+			filled[nextPositional] = true
+			nextPositional++
+			continue
+		}
+		sawNamed = true
+		paramIndex, ok := nameToIndex[name]
+		if !ok || filled[paramIndex] {
+			return nil, nil, 0, false
+		}
+		ordered[paramIndex] = arg
+		sourceIndexes[paramIndex] = argIndex
+		filled[paramIndex] = true
+	}
+	defaultsUsed := 0
+	for i := 0; i < explicitParamCount; i++ {
+		if filled[i] {
+			continue
+		}
+		if i >= len(ft.ExplicitParamHasDefault) || !ft.ExplicitParamHasDefault[i] || i >= len(ft.ExplicitParamDefaultExprs) {
+			return nil, nil, 0, false
+		}
+		ordered[i] = cloneDefaultArgExpr(ft.ExplicitParamDefaultExprs[i])
+		if ordered[i] == nil {
+			return nil, nil, 0, false
+		}
+		defaultsUsed++
+	}
+	return ordered, sourceIndexes, defaultsUsed, true
 }
 
 func (a *Analyzer) analyzeRecordUpdateExpr(expr *ast.RecordUpdateExpr) Type {
@@ -4906,6 +5135,9 @@ func (a *Analyzer) analyzeResolvedCallExpr(expr *ast.CallExpr, ft *FuncType, ord
 	}
 	a.resolveImplicitCallArgs(expr, ft, bindings, shapeBindings, regionBindings, permissionBindings)
 	for _, name := range ft.RegionParams {
+		if _, ok := regionBindings[name]; !ok && a.lookupRegionParam(name) {
+			regionBindings[name] = name
+		}
 		if _, ok := regionBindings[name]; !ok {
 			a.errorf(expr.Pos(), "cannot infer region parameter %q for call to %q", name, ft.Name)
 		}

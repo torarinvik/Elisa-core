@@ -1831,17 +1831,9 @@ func (p *Parser) parsePrimary() ast.Expr {
 		if len(tok.Text) > 0 && tok.Text[0] >= 'A' && tok.Text[0] <= 'Z' && p.peekStructLiteralTypeArgsFollowedBy(lexer.TOKEN_LPAREN) {
 			typeArgs := p.parseStructLiteralTypeArgs()
 			p.expect(lexer.TOKEN_LPAREN)
-			args := make([]ast.Expr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
-			if p.peek() != lexer.TOKEN_RPAREN {
-				for {
-					args = append(args, p.parseExpr())
-					if !p.match(lexer.TOKEN_COMMA) {
-						break
-					}
-				}
-			}
+			args, argNames := p.parseStructLiteralParenArgs()
 			p.expect(lexer.TOKEN_RPAREN)
-			return &ast.StructLitExpr{Position: tok.Pos, Name: tok.Text, TypeArgs: typeArgs, Args: args}
+			return &ast.StructLitExpr{Position: tok.Pos, Name: tok.Text, TypeArgs: typeArgs, Args: args, ArgNames: argNames}
 		}
 		if len(tok.Text) > 0 && tok.Text[0] >= 'A' && tok.Text[0] <= 'Z' && p.peekStructLiteralTypeArgsFollowedBy(lexer.TOKEN_LBRACE) {
 			typeArgs := p.parseStructLiteralTypeArgs()
@@ -1852,17 +1844,9 @@ func (p *Parser) parsePrimary() ast.Expr {
 		}
 		if p.peek() == lexer.TOKEN_LPAREN && len(tok.Text) > 0 && tok.Text[0] >= 'A' && tok.Text[0] <= 'Z' {
 			p.advance()
-			args := make([]ast.Expr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
-			if p.peek() != lexer.TOKEN_RPAREN {
-				for {
-					args = append(args, p.parseExpr())
-					if !p.match(lexer.TOKEN_COMMA) {
-						break
-					}
-				}
-			}
+			args, argNames := p.parseStructLiteralParenArgs()
 			p.expect(lexer.TOKEN_RPAREN)
-			return &ast.StructLitExpr{Position: tok.Pos, Name: tok.Text, Args: args}
+			return &ast.StructLitExpr{Position: tok.Pos, Name: tok.Text, Args: args, ArgNames: argNames}
 		}
 		if p.peek() == lexer.TOKEN_LBRACE && len(tok.Text) > 0 && tok.Text[0] >= 'A' && tok.Text[0] <= 'Z' {
 			p.advance()
@@ -1964,6 +1948,17 @@ func (p *Parser) parseStructLiteralBraceFields() ([]ast.Expr, []string) {
 		if p.peek() == lexer.TOKEN_RBRACE {
 			break
 		}
+	}
+	return args, argNames
+}
+
+func (p *Parser) parseStructLiteralParenArgs() ([]ast.Expr, []string) {
+	args, argNames, _, packs, _, hasArgForward, _ := p.parseCallArgs()
+	if hasArgForward {
+		p.errorf("struct constructor arguments do not support call forwarding `..`")
+	}
+	for range packs {
+		p.errorf("struct constructor arguments do not support parameter-pack application")
 	}
 	return args, argNames
 }
