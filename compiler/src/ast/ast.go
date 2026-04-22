@@ -90,6 +90,52 @@ type TreeDecl struct {
 	Members     []TreeMemberDecl
 }
 
+type GrammarDecl struct {
+	Position         lexer.Pos
+	Name             string
+	TypeParams       []string
+	RefStorageParams []string
+	RefStateParams   []string
+	RegionParams     []string
+	PermissionParams []string
+	GenericParams    []GenericParam
+	Productions      []GrammarProductionDecl
+}
+
+type GrammarProductionDecl struct {
+	Position   lexer.Pos
+	Name       string
+	Params     []ParamDecl
+	ReturnType TypeExpr
+	Terms      []GrammarTerm
+}
+
+type GrammarTerm interface {
+	Node
+	grammarTermTag()
+}
+
+type GrammarPassTerm struct {
+	Position lexer.Pos
+}
+
+type GrammarTokenTerm struct {
+	Position lexer.Pos
+	Value    string
+}
+
+type GrammarCallTerm struct {
+	Position lexer.Pos
+	Name     string
+	Args     []Expr
+}
+
+type GrammarBindTerm struct {
+	Position lexer.Pos
+	Name     string
+	Term     GrammarTerm
+}
+
 type AttributeDecl struct {
 	Position   lexer.Pos
 	Receiver   TypeExpr
@@ -1336,7 +1382,15 @@ func (n *NamespaceDecl) Pos() lexer.Pos  { return n.Position }
 func (n *UsingDecl) Pos() lexer.Pos      { return n.Position }
 func (n *EnumDecl) Pos() lexer.Pos       { return n.Position }
 func (n *TreeDecl) Pos() lexer.Pos       { return n.Position }
-func (n *AttributeDecl) Pos() lexer.Pos  { return n.Position }
+func (n *GrammarDecl) Pos() lexer.Pos    { return n.Position }
+func (n *GrammarProductionDecl) Pos() lexer.Pos {
+	return n.Position
+}
+func (n *GrammarPassTerm) Pos() lexer.Pos  { return n.Position }
+func (n *GrammarTokenTerm) Pos() lexer.Pos { return n.Position }
+func (n *GrammarCallTerm) Pos() lexer.Pos  { return n.Position }
+func (n *GrammarBindTerm) Pos() lexer.Pos  { return n.Position }
+func (n *AttributeDecl) Pos() lexer.Pos    { return n.Position }
 
 func (n *TreeCategoryDecl) Pos() lexer.Pos { return n.Position }
 func (n *TreeBlockDecl) Pos() lexer.Pos    { return n.Position }
@@ -1501,6 +1555,12 @@ func (*NamespaceDecl) nodeTag()             {}
 func (*UsingDecl) nodeTag()                 {}
 func (*EnumDecl) nodeTag()                  {}
 func (*TreeDecl) nodeTag()                  {}
+func (*GrammarDecl) nodeTag()               {}
+func (*GrammarProductionDecl) nodeTag()     {}
+func (*GrammarPassTerm) nodeTag()           {}
+func (*GrammarTokenTerm) nodeTag()          {}
+func (*GrammarCallTerm) nodeTag()           {}
+func (*GrammarBindTerm) nodeTag()           {}
 func (*AttributeDecl) nodeTag()             {}
 func (*TreeCategoryDecl) nodeTag()          {}
 func (*TreeBlockDecl) nodeTag()             {}
@@ -1641,6 +1701,7 @@ func (*NamespaceDecl) declTag()    {}
 func (*UsingDecl) declTag()        {}
 func (*EnumDecl) declTag()         {}
 func (*TreeDecl) declTag()         {}
+func (*GrammarDecl) declTag()      {}
 func (*AttributeDecl) declTag()    {}
 func (*GlobalDecl) declTag()       {}
 func (*StructDecl) declTag()       {}
@@ -1657,6 +1718,11 @@ func (*StaticIfDecl) declTag()     {}
 func (*TreeCategoryDecl) treeMemberDeclTag() {}
 func (*TreeBlockDecl) treeMemberDeclTag()    {}
 func (*TreeStructDecl) treeMemberDeclTag()   {}
+
+func (*GrammarPassTerm) grammarTermTag()  {}
+func (*GrammarTokenTerm) grammarTermTag() {}
+func (*GrammarCallTerm) grammarTermTag()  {}
+func (*GrammarBindTerm) grammarTermTag()  {}
 
 func (*NamedType) typeExprTag()                 {}
 func (*RefType) typeExprTag()                   {}

@@ -171,6 +171,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("attribute") {
 		return p.parseAttributeDecl()
 	}
+	if p.peekIdentText("grammar") {
+		return p.parseGrammarDecl()
+	}
 	if p.peekIdentText("tree") {
 		return p.parseTreeDecl()
 	}

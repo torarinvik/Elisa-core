@@ -269,6 +269,14 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		for _, member := range n.Members {
 			f.writeTreeMember(level+1, member)
 		}
+	case *ast.GrammarDecl:
+		header := "grammar " + n.Name
+		header += formatGenericParams(n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams)
+		header += ":"
+		f.writeLine(level, header)
+		for _, production := range n.Productions {
+			f.writeGrammarProduction(level+1, production)
+		}
 	case *ast.StructDecl:
 		f.writeAnnotations(level, n.Annotations)
 		header := ""
@@ -397,6 +405,37 @@ func (f *formatter) writeTreeMember(level int, member ast.TreeMemberDecl) {
 		for _, field := range n.Fields {
 			f.writeField(level+1, field)
 		}
+	}
+}
+
+func (f *formatter) writeGrammarProduction(level int, production ast.GrammarProductionDecl) {
+	header := production.Name + "(" + formatParamList(production.Params) + ")"
+	if production.ReturnType != nil {
+		header += " -> " + formatTypeExpr(production.ReturnType)
+	}
+	header += ":"
+	f.writeLine(level, header)
+	for _, term := range production.Terms {
+		f.writeLine(level+1, formatGrammarTerm(term))
+	}
+}
+
+func formatGrammarTerm(term ast.GrammarTerm) string {
+	switch n := term.(type) {
+	case *ast.GrammarPassTerm:
+		return "pass"
+	case *ast.GrammarTokenTerm:
+		return strconv.Quote(n.Value)
+	case *ast.GrammarCallTerm:
+		args := make([]string, 0, len(n.Args))
+		for _, arg := range n.Args {
+			args = append(args, formatExpr(arg))
+		}
+		return n.Name + "(" + strings.Join(args, ", ") + ")"
+	case *ast.GrammarBindTerm:
+		return n.Name + " = " + formatGrammarTerm(n.Term)
+	default:
+		return "<grammar-term>"
 	}
 }
 
@@ -787,6 +826,8 @@ func formatAnnotation(annotation ast.Annotation) string {
 func formatGenericParams(genericParams []ast.GenericParam, typeParams []string, refStorageParams []string, refStateParams []string, regionParams []string, permissionParams []string) string {
 	parts := make([]string, 0, len(genericParams)+len(typeParams)+len(refStorageParams)+len(refStateParams)+len(regionParams)+len(permissionParams))
 	if len(genericParams) != 0 {
+		seenRegion := map[string]bool{}
+		seenPermission := map[string]bool{}
 		for _, param := range genericParams {
 			switch param.Kind {
 			case ast.GenericParamRefStorage:
@@ -794,8 +835,10 @@ func formatGenericParams(genericParams []ast.GenericParam, typeParams []string, 
 			case ast.GenericParamRefState:
 				parts = append(parts, "refstate "+param.Name)
 			case ast.GenericParamRegion:
+				seenRegion[param.Name] = true
 				parts = append(parts, "region "+param.Name)
 			case ast.GenericParamPermission:
+				seenPermission[param.Name] = true
 				parts = append(parts, "permission "+param.Name)
 			default:
 				if param.InterfaceBound != "" {
@@ -803,6 +846,16 @@ func formatGenericParams(genericParams []ast.GenericParam, typeParams []string, 
 				} else {
 					parts = append(parts, param.Name)
 				}
+			}
+		}
+		for _, name := range regionParams {
+			if !seenRegion[name] {
+				parts = append(parts, "region "+name)
+			}
+		}
+		for _, name := range permissionParams {
+			if !seenPermission[name] {
+				parts = append(parts, "permission "+name)
 			}
 		}
 	} else {
@@ -926,6 +979,14 @@ func formatParamDecl(param ast.ParamDecl) string {
 		line += " = " + formatExpr(param.DefaultValue)
 	}
 	return line
+}
+
+func formatParamList(params []ast.ParamDecl) string {
+	parts := make([]string, 0, len(params))
+	for _, param := range params {
+		parts = append(parts, formatParamDecl(param))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func formatEffectAlias(alias string) string {
