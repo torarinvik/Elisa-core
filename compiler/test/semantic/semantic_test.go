@@ -9498,8 +9498,8 @@ func TestAnalyzeRejectsAssigningToDStrIndex(t *testing.T) {
 	}
 }
 
-func TestAnalyzeAcceptsStringViewIndexingAsChar(t *testing.T) {
-	src := `def read_codepoint(view: StringView) -> char:
+func TestAnalyzeAcceptsSViewIndexingAsChar(t *testing.T) {
+	src := `def read_codepoint(view: sview) -> char:
 	return view[0]
 `
 	result, errs := parseAndAnalyze(t, "ctx_string_view_index.llcontext", src)
@@ -9517,114 +9517,39 @@ func TestAnalyzeAcceptsStringViewIndexingAsChar(t *testing.T) {
 	}
 }
 
-func TestAnalyzeWarnsOnInternalRuntimeCarrierTypesInUserFiles(t *testing.T) {
+func TestAnalyzeRejectsInternalRuntimeCarrierTypesInUserFiles(t *testing.T) {
 	fixturePath := filepath.Join(t.TempDir(), "runtime_carrier_warning.llcontext")
 	src := `extern take_view(view: StringView) -> void
 extern take_raw[T](values: DynArray[T]) -> void
 extern take_window(view: DynArrayView) -> void
 `
-	result, errs := parseAndAnalyze(t, fixturePath, src)
-	requireNoErrors(t, errs)
-	warns := strings.Join(result.Warnings(), "\n")
+	_, errs := parseAndAnalyze(t, fixturePath, src)
+	if len(errs) == 0 {
+		t.Fatal("expected semantic errors, got none")
+	}
+	all := strings.Join(errs, "\n")
 	for _, want := range []string{
-		`internal runtime carrier type "StringView" is deprecated in user-facing code; use "sview[...]" instead`,
-		`internal runtime carrier type "DynArray" is deprecated in user-facing code; use "darray[T, shape]" instead`,
-		`internal runtime carrier type "DynArrayView" is deprecated in user-facing code; use "dview[T]" instead`,
+		`internal runtime carrier type "StringView" is not supported in user-facing code; use "sview[...]" instead`,
+		`internal runtime carrier type "DynArray" is not supported in user-facing code; use "darray[T, shape]" instead`,
+		`internal runtime carrier type "DynArrayView" is not supported in user-facing code; use "dview[T]" instead`,
 	} {
-		if !strings.Contains(warns, want) {
-			t.Fatalf("expected warning %q, got:\n%s", want, warns)
+		if !strings.Contains(all, want) {
+			t.Fatalf("expected runtime carrier rejection %q, got:\n%s", want, all)
 		}
 	}
 }
 
-func TestAnalyzeFormatsRuntimeCarrierMismatchUsingSurfaceNames(t *testing.T) {
-	fixturePath := filepath.Join(t.TempDir(), "runtime_carrier_surface_mismatch.llcontext")
-	src := `def keep(view: StringView) -> void:
-	count: i64 = view
-`
-	_, errs := parseAndAnalyze(t, fixturePath, src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error")
-	}
-	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, `variable "count" expects i64, got sview[...]`) {
-		t.Fatalf("expected surface-form runtime carrier mismatch, got:\n%s", all)
-	}
-	if strings.Contains(all, "got StringView") {
-		t.Fatalf("expected diagnostic to avoid raw runtime carrier name, got:\n%s", all)
-	}
-}
-
-func TestAnalyzeFormatsNestedRuntimeCarrierFunctionTypesUsingSurfaceNames(t *testing.T) {
-	fixturePath := filepath.Join(t.TempDir(), "runtime_carrier_signature_surface_mismatch.llcontext")
-	src := `def bad(fn: func(StringView, DynArrayView) -> DynArray[i64]) -> void:
-	slot: func(i64) -> i64 = fn
-`
-	_, errs := parseAndAnalyze(t, fixturePath, src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error")
-	}
-	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, `variable "slot" expects func(i64) -> i64, got func(sview[...], dview[T]) -> darray[i64, shape]`) {
-		t.Fatalf("expected surface-form nested runtime carrier signature, got:\n%s", all)
-	}
-	for _, raw := range []string{"StringView", "DynArrayView", "DynArray[i64]"} {
-		if strings.Contains(all, raw) {
-			t.Fatalf("expected diagnostic to avoid raw runtime carrier name %q, got:\n%s", raw, all)
-		}
-	}
-}
-
-func TestAnalyzeFormatsEnumConstructorRuntimeCarrierPayloadUsingSurfaceNames(t *testing.T) {
-	fixturePath := filepath.Join(t.TempDir(), "runtime_carrier_enum_constructor_surface_mismatch.llcontext")
-	src := `enum Message:
-	Text(value: StringView)
-
-def bad() -> Message:
-	return Message.Text(123)
-`
-	_, errs := parseAndAnalyze(t, fixturePath, src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error")
-	}
-	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, `enum constructor argument 1 (value) to "Message.Text" expects sview[...]`) {
-		t.Fatalf("expected surface-form enum constructor payload diagnostic, got:\n%s", all)
-	}
-	if strings.Contains(all, "StringView") {
-		t.Fatalf("expected diagnostic to avoid raw runtime carrier name, got:\n%s", all)
-	}
-}
-
-func TestAnalyzeFormatsSplitAtRuntimeCarrierInputUsingSurfaceNames(t *testing.T) {
-	fixturePath := filepath.Join(t.TempDir(), "runtime_carrier_split_at_surface_mismatch.llcontext")
-	src := `def bad(view: StringView) -> void:
-	_ = split_at(view, 1)
-`
-	_, errs := parseAndAnalyze(t, fixturePath, src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error")
-	}
-	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, `split_at expects a dense dview[T], got sview[...]`) {
-		t.Fatalf("expected surface-form split_at diagnostic, got:\n%s", all)
-	}
-	if strings.Contains(all, "StringView") {
-		t.Fatalf("expected diagnostic to avoid raw runtime carrier name, got:\n%s", all)
-	}
-}
-
-func TestAnalyzeAcceptsRuntimeStringEqualityOperators(t *testing.T) {
+func TestAnalyzeAcceptsSViewAndDStrEqualityOperators(t *testing.T) {
 	src := `def same_text(left: dstr[row], right: dstr[col]) -> bool:
 	return left == right
 
-def same_view_text(view: StringView, text: dstr[row]) -> bool:
+def same_view_text(view: sview, text: dstr[row]) -> bool:
 	return view == text
 
-def same_text_view(text: dstr[row], view: StringView) -> bool:
+def same_text_view(text: dstr[row], view: sview) -> bool:
 	return text == view
 
-def different_views(left: StringView, right: StringView) -> bool:
+def different_views(left: sview, right: sview) -> bool:
 	return left != right
 
 def same_literal(text: dstr[row]) -> bool:
@@ -9978,7 +9903,7 @@ func TestAnalyzeRejectsMismatchedFixedArrayLiteralLength(t *testing.T) {
 }
 
 func TestAnalyzeAcceptsStringSliceSyntax(t *testing.T) {
-	src := `def middle(text: dstr[row]) -> StringView:
+	src := `def middle(text: dstr[row]) -> sview:
 	return text[1:3]
 `
 	_, errs := parseAndAnalyze(t, "string_slice_syntax.llcontext", src)
@@ -9998,8 +9923,8 @@ func TestAnalyzeRejectsAssigningToDStrLenField(t *testing.T) {
 	}
 }
 
-func TestAnalyzeRejectsAssigningToStringViewIndex(t *testing.T) {
-	src := `def bad(view: StringView) -> void:
+func TestAnalyzeRejectsAssigningToSViewIndex(t *testing.T) {
+	src := `def bad(view: sview) -> void:
 	view[0] <- 1
 `
 	_, errs := parseAndAnalyze(t, "ctx_string_view_index_assignment.llcontext", src)
@@ -10055,6 +9980,7 @@ func TestAnalyzeDArrayUsesDynArrayRuntimeFields(t *testing.T) {
 }
 
 func TestAnalyzeDynArrayRuntimeBridgeWorksBothDirections(t *testing.T) {
+	fixturePath := filepath.Join(repoRootFromTestFile(t), "Code", "llcontext_std", "dynarray_runtime_bridge_roundtrip.llcontext")
 	src := `def take_raw[T](values: DynArray[T]) -> void:
 	pass
 
@@ -10067,7 +9993,7 @@ def roundtrip(values: darray[i32, row], raw: DynArray[i32]) -> darray[i32, row]:
 	bridged: DynArray[i32] = values
 	return bridged
 `
-	_, errs := parseAndAnalyze(t, "dynarray_runtime_bridge_roundtrip.llcontext", src)
+	_, errs := parseAndAnalyze(t, fixturePath, src)
 	requireNoErrors(t, errs)
 }
 

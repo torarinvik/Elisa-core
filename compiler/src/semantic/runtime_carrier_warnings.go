@@ -23,26 +23,26 @@ func runtimeCarrierSurfaceReplacement(typeName string) (string, bool) {
 	}
 }
 
-func (a *Analyzer) maybeWarnOnRuntimeCarrierTypeUse(pos lexer.Pos, typeName string) {
+func (a *Analyzer) maybeRejectRuntimeCarrierTypeUse(pos lexer.Pos, typeName string) {
 	replacement, ok := runtimeCarrierSurfaceReplacement(typeName)
-	if !ok || !a.shouldWarnOnRuntimeCarrierTypeUse() {
+	if !ok || !a.shouldRejectRuntimeCarrierTypeUse() {
 		return
 	}
-	a.warnf(pos, "internal runtime carrier type %q is deprecated in user-facing code; use %q instead", typeName, replacement)
+	a.errorf(pos, "internal runtime carrier type %q is not supported in user-facing code; use %q instead", typeName, replacement)
 }
 
-func (a *Analyzer) shouldWarnOnRuntimeCarrierTypeUse() bool {
+func (a *Analyzer) shouldRejectRuntimeCarrierTypeUse() bool {
 	if a == nil || a.file == nil || a.file.Filename == "" {
 		return false
 	}
 	path := filepath.ToSlash(a.file.Filename)
-	if !runtimeCarrierWarningHasRealSourcePath(path) {
+	if !runtimeCarrierCarrierPathHasRealSourcePath(path) {
 		return false
 	}
-	return !runtimeCarrierWarningSuppressedPath(path)
+	return !runtimeCarrierCarrierPathIsInternal(path)
 }
 
-func runtimeCarrierWarningHasRealSourcePath(path string) bool {
+func runtimeCarrierCarrierPathHasRealSourcePath(path string) bool {
 	if path == "" {
 		return false
 	}
@@ -53,7 +53,7 @@ func runtimeCarrierWarningHasRealSourcePath(path string) bool {
 	return err == nil
 }
 
-func runtimeCarrierWarningSuppressedPath(path string) bool {
+func runtimeCarrierCarrierPathIsInternal(path string) bool {
 	normalized := filepath.ToSlash(path)
 	base := filepath.Base(normalized)
 	switch base {

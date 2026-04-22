@@ -394,7 +394,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			a.errorLegacyBuiltinReplacement(n.Pos(), "dstring", "dstr")
 			return invalidType
 		}
-		a.maybeWarnOnRuntimeCarrierTypeUse(n.Pos(), n.Name)
+		a.maybeRejectRuntimeCarrierTypeUse(n.Pos(), n.Name)
 		if t, ok := a.lookupTypeParam(n.Name); ok {
 			return t
 		}
@@ -546,7 +546,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		if arrayExpr, ok := a.genericTypeAsArrayType(n); ok {
 			return a.resolveArrayType(arrayExpr)
 		}
-		a.maybeWarnOnRuntimeCarrierTypeUse(n.Pos(), n.Name)
+		a.maybeRejectRuntimeCarrierTypeUse(n.Pos(), n.Name)
 		args := make([]Type, 0, len(n.Args))
 		base, _, ok := a.lookupVisibleType(n.Name)
 		if !ok {
