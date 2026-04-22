@@ -163,23 +163,35 @@ func (s *functionState) collectTreeFoldCaptures(expr *ast.FoldExpr) []treeFoldCa
 	}
 	if expr.Keyword == "rewrite" {
 		if s.treeAllocOwner.storeValue != nil && s.treeAllocOwner.storeType != nil && !seen[treeRewriteOwnerStoreCaptureName] {
-			storePtr, err := s.createEntryAlloca(treeRewriteOwnerStoreCaptureName, s.treeAllocOwner.storeType)
+			capture, err := s.spillTreeFoldCaptureValue(treeRewriteOwnerStoreCaptureName, s.treeAllocOwner.storeValue, s.treeAllocOwner.storeType)
 			if err == nil {
-				s.emitEntryStore(storePtr, s.treeAllocOwner.storeValue)
-				out = append(out, treeFoldCapture{name: treeRewriteOwnerStoreCaptureName, binding: valueBinding{ptr: storePtr, typ: s.treeAllocOwner.storeType, mutable: false}})
+				out = append(out, treeFoldCapture{name: treeRewriteOwnerStoreCaptureName, binding: capture})
 				seen[treeRewriteOwnerStoreCaptureName] = true
 			}
 		} else if s.treeAllocOwner.arenaRef != nil && !seen[treeRewriteOwnerArenaCaptureName] {
 			arenaRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["Arena"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-			arenaPtr, err := s.createEntryAlloca(treeRewriteOwnerArenaCaptureName, arenaRefType)
+			capture, err := s.spillTreeFoldCaptureValue(treeRewriteOwnerArenaCaptureName, s.treeAllocOwner.arenaRef, arenaRefType)
 			if err == nil {
-				s.emitEntryStore(arenaPtr, s.treeAllocOwner.arenaRef)
-				out = append(out, treeFoldCapture{name: treeRewriteOwnerArenaCaptureName, binding: valueBinding{ptr: arenaPtr, typ: arenaRefType, mutable: false}})
+				out = append(out, treeFoldCapture{name: treeRewriteOwnerArenaCaptureName, binding: capture})
 				seen[treeRewriteOwnerArenaCaptureName] = true
 			}
 		}
 	}
 	return out
+}
+
+func (s *functionState) spillTreeFoldCaptureValue(name string, value C.LLVMValueRef, typ semantic.Type) (valueBinding, error) {
+	if s == nil || value == nil || typ == nil {
+		return valueBinding{}, fmt.Errorf("missing fold capture value")
+	}
+	llvmType, err := s.g.lowerType(typ)
+	if err != nil {
+		return valueBinding{}, err
+	}
+	alloca := C.LLVMBuildAlloca(s.builder, llvmType, cStringFree(name))
+	s.g.applyTypeAlignment(alloca, typ)
+	C.LLVMBuildStore(s.builder, value, alloca)
+	return valueBinding{ptr: alloca, typ: typ, mutable: false}, nil
 }
 
 func (s *functionState) buildTreeFoldEnv(captures []treeFoldCapture, name string) (C.LLVMValueRef, C.LLVMTypeRef, error) {

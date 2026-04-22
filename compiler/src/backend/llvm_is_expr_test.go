@@ -885,11 +885,12 @@ func TestGenerateLLVMIRLowersTreeRewriteExpr(t *testing.T) {
 		Binary(child left: Expr, child right: Expr)
 
 def simplify(node: Lua.Expr) -> Lua.Expr:
-	return rewrite node as Lua.Expr:
-		Lua.Expr.Int(expr):
-			new[perm] Lua.Expr.Int(span: expr.span, value: expr.value)
-		Lua.Expr.Binary(expr, left, right):
-			new[perm] Lua.Expr.Binary(span: expr.span, left: left, right: right)
+	in perm:
+		return rewrite node as Lua.Expr:
+			Lua.Expr.Int(expr):
+				default
+			Lua.Expr.Binary(expr, left, right):
+				default
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_tree_rewrite_expr.llcontext", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
@@ -1003,13 +1004,14 @@ func TestGenerateLLVMIRLowersHeterogeneousTreeRewriteExpr(t *testing.T) {
 		items: darray[Expr]
 
 def clone_expr(node: Lua.Expr) -> Lua.Expr:
-	return rewrite node as Lua.Node:
-		Lua.Expr.Int(expr):
-			new[perm] Lua.Expr.Int(span: expr.span, value: expr.value)
-		Lua.Expr.Function(expr, body: body):
-			new[perm] Lua.Expr.Function(span: expr.span, body: body)
-		Lua.Block(block, items: items):
-			block
+	in perm:
+		return rewrite node as Lua.Node:
+			Lua.Expr.Int(expr):
+				default
+			Lua.Expr.Function(expr, body: body):
+				default
+			Lua.Block(block, items: items):
+				default
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_tree_rewrite_heterogeneous_expr.llcontext", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)

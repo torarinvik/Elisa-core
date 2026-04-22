@@ -1176,7 +1176,7 @@ func TestParseTreeVisitAndFoldExprs(t *testing.T) {
 }
 
 func TestParseTreeRewriteExpr(t *testing.T) {
-	file, errs := parseSourceFile(t, "tree Lua:\n    common:\n        span: i64\n    @role(expr)\n    node Expr:\n        Int(value: i64)\n        Binary(child left: Expr, child right: Expr)\n\ndef simplify(node: Lua.Expr) -> Lua.Expr:\n    return rewrite node as Lua.Expr:\n        Lua.Expr.Int(expr):\n            new[perm] Lua.Expr.Int(span: expr.span, value: expr.value)\n        Lua.Expr.Binary(expr, left, right):\n            new[perm] Lua.Expr.Binary(span: expr.span, left: left, right: right)\n")
+	file, errs := parseSourceFile(t, "tree Lua:\n    common:\n        span: i64\n    @role(expr)\n    node Expr:\n        Int(value: i64)\n        Binary(child left: Expr, child right: Expr)\n\ndef simplify(node: Lua.Expr) -> Lua.Expr:\n    in perm:\n        return rewrite node as Lua.Expr:\n            Lua.Expr.Int(expr):\n                default\n            Lua.Expr.Binary(expr, left, right):\n                default\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -1184,9 +1184,16 @@ func TestParseTreeRewriteExpr(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected func decl, got %T", file.Decls[1])
 	}
-	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	inStmt, ok := decl.Body[0].(*ast.InStoreStmt)
 	if !ok {
-		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+		t.Fatalf("expected in store stmt, got %T", decl.Body[0])
+	}
+	if len(inStmt.Body) != 1 {
+		t.Fatalf("expected in store body with one stmt, got %#v", inStmt.Body)
+	}
+	ret, ok := inStmt.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt inside in store, got %T", inStmt.Body[0])
 	}
 	rewriteExpr, ok := ret.Value.(*ast.FoldExpr)
 	if !ok {

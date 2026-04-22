@@ -446,11 +446,12 @@ Current rules:
 
 ```context
 def simplify(node: Expr) -> Expr:
-    return rewrite node as Expr:
-        Expr.Int(expr):
-            new[perm] Expr.Int(span: expr.span, value: expr.value)
-        Expr.Add(expr, left, right):
-            new[perm] Expr.Add(span: expr.span, left: left, right: right)
+    in perm:
+        return rewrite node as Expr:
+            Expr.Int(expr):
+                default
+            Expr.Add(expr, left, right):
+                default
 ```
 
 Current rules:
