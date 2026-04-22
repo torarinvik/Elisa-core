@@ -856,6 +856,24 @@ func TestAnalyzeSequenceRewriteExpr(t *testing.T) {
 `)
 }
 
+func TestAnalyzeTreeTargetSequenceRewriteExpr(t *testing.T) {
+	analyzeTreeTestSource(t, "sequence_rewrite_tree_target_surface.llcontext", `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Name(name: u32)
+
+def keep_positive_int_values(owner: mutable Arena&, items: dview[Lua.Expr]) -> darray[i64]:
+	can Abort.Panic, Memory.Allocate:
+		in owner:
+			return rewrite items as sequence[i64]:
+				Lua.Expr.Int(expr) when expr.value > 0:
+					emit expr.value
+`)
+}
+
 func TestAnalyzeTreeRewriteRemainsExhaustiveWithoutImplicitDefault(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_rewrite_requires_exhaustive.llcontext", `tree Lua:
 	common:

@@ -1254,6 +1254,44 @@ func TestParseSequenceRewriteExpr(t *testing.T) {
 	}
 }
 
+func TestParseTreeTargetSequenceRewriteExpr(t *testing.T) {
+	file, errs := parseSourceFile(t, "tree Lua:\n    common:\n        span: i64\n    @role(expr)\n    node Expr:\n        Int(value: i64)\n        Name(name: u32)\n\ndef keep_int_values(owner: mutable Arena&, items: dview[Lua.Expr]) -> darray[i64]:\n    can Abort.Panic, Memory.Allocate:\n        in owner:\n            return rewrite items as sequence[i64]:\n                Lua.Expr.Int(expr) when expr.value > 0:\n                    emit expr.value\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[1])
+	}
+	canStmt, ok := decl.Body[0].(*ast.CanStmt)
+	if !ok {
+		t.Fatalf("expected can stmt, got %T", decl.Body[0])
+	}
+	inStmt, ok := canStmt.Body[0].(*ast.InStoreStmt)
+	if !ok {
+		t.Fatalf("expected in stmt, got %T", canStmt.Body[0])
+	}
+	ret, ok := inStmt.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", inStmt.Body[0])
+	}
+	rewriteExpr, ok := ret.Value.(*ast.FoldExpr)
+	if !ok {
+		t.Fatalf("expected fold-backed rewrite expr, got %T", ret.Value)
+	}
+	if len(rewriteExpr.Arms) != 1 {
+		t.Fatalf("unexpected sequence rewrite arms: %#v", rewriteExpr.Arms)
+	}
+	arm := rewriteExpr.Arms[0]
+	if arm.TargetName != "Lua.Expr.Int" || arm.BindName != "expr" {
+		t.Fatalf("expected tree-target arm with explicit bind name, got %#v", arm)
+	}
+	got := unparse.FormatExpr(rewriteExpr)
+	if !strings.Contains(got, "Lua.Expr.Int(expr) when (expr.value > 0)") {
+		t.Fatalf("expected unparse to preserve tree-target sequence arm, got:\n%s", got)
+	}
+}
+
 func TestParseDeferStatements(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep() -> int:\n    defer block:\n        pass\n    defer function:\n        pass\n    return 0\n")
 	if len(errs) != 0 {

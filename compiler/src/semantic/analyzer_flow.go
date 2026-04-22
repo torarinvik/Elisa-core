@@ -4238,6 +4238,38 @@ func sequenceRewriteArmBindName(arm ast.VisitArm) (string, bool) {
 	return "", false
 }
 
+type sequenceRewriteArmInfo struct {
+	BindType      Type
+	BindName      string
+	AlwaysMatches bool
+}
+
+func (a *Analyzer) resolveSequenceRewriteArmInfo(elemType Type, arm ast.VisitArm) (sequenceRewriteArmInfo, bool) {
+	if arm.Wildcard {
+		return sequenceRewriteArmInfo{AlwaysMatches: true}, true
+	}
+	if bindName, ok := sequenceRewriteArmBindName(arm); ok {
+		return sequenceRewriteArmInfo{BindType: elemType, BindName: bindName, AlwaysMatches: true}, true
+	}
+	if arm.ChildResultsName != "" || len(arm.ChildBindings) != 0 {
+		a.errorf(arm.Position, "sequence rewrite tree-target arms do not support child result bindings")
+		return sequenceRewriteArmInfo{}, false
+	}
+	if _, _, ok := resolveTreeVisitSourceType(elemType); !ok {
+		a.errorf(arm.Position, "sequence rewrite arms currently support only `_`, a bare element binding name, or an exact tree target with an optional bind name")
+		return sequenceRewriteArmInfo{}, false
+	}
+	root, ok := a.resolveVisitRootInfo(elemType, nil, arm.Position)
+	if !ok {
+		return sequenceRewriteArmInfo{}, false
+	}
+	armInfo, ok := a.resolveVisitArmInfo(root, arm)
+	if !ok {
+		return sequenceRewriteArmInfo{}, false
+	}
+	return sequenceRewriteArmInfo{BindType: armInfo.BindType, BindName: arm.BindName, AlwaysMatches: root.Kind == treeVisitRootKindExact}, true
+}
+
 func (a *Analyzer) analyzeSequenceRewriteArmBody(body []ast.Stmt, scope *Scope) {
 	savedScope := a.currentScope
 	savedRegions := a.currentRegions
@@ -4327,13 +4359,10 @@ func (a *Analyzer) analyzeSequenceRewriteExpr(expr *ast.FoldExpr) Type {
 		if hasUnconditional {
 			a.errorf(arm.Position, "sequence rewrite arm is unreachable because an earlier unguarded arm already matches")
 		}
-		bindName, bindOK := sequenceRewriteArmBindName(arm)
-		if !bindOK {
-			a.errorf(arm.Position, "sequence rewrite arms currently support only `_` or a bare element binding name")
-		}
+		armInfo, armOK := a.resolveSequenceRewriteArmInfo(elemType, arm)
 		scope := NewScope(a.currentScope)
-		if bindOK && bindName != "" {
-			a.defineLocalInScope(scope, &Symbol{Name: bindName, Kind: SymbolLocal, Type: elemType, Mutable: false}, arm.Position)
+		if armOK && armInfo.BindName != "" && armInfo.BindType != nil {
+			a.defineLocalInScope(scope, &Symbol{Name: armInfo.BindName, Kind: SymbolLocal, Type: armInfo.BindType, Mutable: false}, arm.Position)
 		}
 		bodyScope := scope
 		guardFallthrough := affineFlowSnapshot{}
@@ -4354,7 +4383,13 @@ func (a *Analyzer) analyzeSequenceRewriteExpr(expr *ast.FoldExpr) Type {
 			bodySnapshot.BorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(bodySnapshot.BorrowedOwnerRefs, guardFallthrough.BorrowedOwnerRefs)
 			bodySnapshot.FunctionValues = a.mergeFunctionValueBindings(bodySnapshot.FunctionValues, guardFallthrough.FunctionValues)
 			bodySnapshot.SpecializedValueTypes = a.mergeSpecializedValueTypeBindings(bodySnapshot.SpecializedValueTypes, guardFallthrough.SpecializedValueTypes)
-		} else {
+		}
+		if !armInfo.AlwaysMatches {
+			bodySnapshot.Affine = mergeAffineValueStates(bodySnapshot.Affine, baselineAffine)
+			bodySnapshot.BorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(bodySnapshot.BorrowedOwnerRefs, baselineBorrowedOwnerRefs)
+			bodySnapshot.FunctionValues = a.mergeFunctionValueBindings(bodySnapshot.FunctionValues, baselineFunctionValues)
+			bodySnapshot.SpecializedValueTypes = a.mergeSpecializedValueTypeBindings(bodySnapshot.SpecializedValueTypes, baselineSpecializedValueTypes)
+		} else if arm.Guard == nil {
 			hasUnconditional = true
 		}
 		mergedAffine = mergeAffineValueStates(mergedAffine, bodySnapshot.Affine)

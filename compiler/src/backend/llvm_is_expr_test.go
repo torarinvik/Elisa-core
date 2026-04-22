@@ -1039,6 +1039,34 @@ func TestGenerateLLVMIRLowersSequenceRewriteExpr(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRLowersTreeTargetSequenceRewriteExpr(t *testing.T) {
+	src := `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Int(value: i64)
+		Name(name: u32)
+
+def keep_positive_int_values(owner: mutable Arena&, items: dview[Lua.Expr]) -> darray[i64]:
+	can Abort.Panic, Memory.Allocate:
+		in owner:
+			return rewrite items as sequence[i64]:
+				Lua.Expr.Int(expr) when expr.value > 0:
+					emit expr.value
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_tree_target_sequence_rewrite_expr.llcontext", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define %DynArray__i64 @keep_positive_int_values", "sequence.rewrite.arm.tree.tag", "sequence.emit.slot"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected tree-target sequence rewrite lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersHeterogeneousTreeRewriteExpr(t *testing.T) {
 	src := `tree Lua:
 	common:
