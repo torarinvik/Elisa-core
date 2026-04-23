@@ -482,6 +482,36 @@ func TestLowerFileStatefulInjectsHeaderArgsIntoRecoveredProductionCalls(t *testi
 	}
 }
 
+func TestLowerFileStatefulUsesClauseResolvesImportedProductionCalls(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalExprGrammar over Token using ParserState:
+    cursor state
+    alloc alloc
+    atom() -> Token:
+        .IDENT(tok)
+        return tok
+
+grammar PascalStmtGrammar over Token using ParserState uses PascalExprGrammar:
+    cursor state
+    alloc alloc
+    statement() -> Token:
+        value = atom()
+        return value
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"grammar PascalStmtGrammar over Token using ParserState uses PascalExprGrammar:",
+		"def atom(state: mutable ParserState&, alloc: mutable Arena&) -> Token:",
+		"def statement(state: mutable ParserState&, alloc: mutable Arena&) -> Token:",
+		"__grammar_try__PascalExprGrammar__atom(state, alloc)",
+		"return (true, value)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected uses-aware lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestLowerFileStatefulExposesTypedHeaderChannelDefaultsAsLocals(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
     cursor parser

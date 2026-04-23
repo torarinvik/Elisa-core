@@ -10,6 +10,12 @@ type lowerContext struct {
 	tokenReceiver string
 }
 
+type resolvedGrammarProduction struct {
+	GrammarName string
+	Production  ast.GrammarProductionDecl
+	TryName     string
+}
+
 type grammarStateReceiverInfo struct {
 	cursorReceiver string
 	cursorField    string
@@ -26,8 +32,7 @@ type statefulLowerContext struct {
 	allocExpr      ast.Expr
 	channels       []ast.GrammarChannelDecl
 	production     ast.GrammarProductionDecl
-	productionMap  map[string]ast.GrammarProductionDecl
-	tryNames       map[string]string
+	productionMap  map[string]resolvedGrammarProduction
 	tempCounter    int
 }
 
@@ -39,6 +44,10 @@ func LowerFile(file *ast.File) *ast.File {
 }
 
 func lowerDeclList(decls []ast.Decl) []ast.Decl {
+	return lowerDeclListInScope(decls, grammarDeclScope(decls))
+}
+
+func lowerDeclListInScope(decls []ast.Decl, grammarScope map[string]*ast.GrammarDecl) []ast.Decl {
 	if len(decls) == 0 {
 		return nil
 	}
@@ -47,9 +56,9 @@ func lowerDeclList(decls []ast.Decl) []ast.Decl {
 		switch n := decl.(type) {
 		case *ast.GrammarDecl:
 			lowered = append(lowered, n)
-			lowered = append(lowered, lowerGrammarDecls(n)...)
+			lowered = append(lowered, lowerGrammarDecls(n, grammarScope)...)
 		case *ast.NamespaceDecl:
-			cloned := &ast.NamespaceDecl{Position: n.Position, Name: n.Name, Decls: lowerDeclList(n.Decls)}
+			cloned := &ast.NamespaceDecl{Position: n.Position, Name: n.Name, Decls: lowerDeclListInScope(n.Decls, grammarDeclScope(n.Decls))}
 			lowered = append(lowered, cloned)
 		default:
 			lowered = append(lowered, decl)
@@ -58,7 +67,22 @@ func lowerDeclList(decls []ast.Decl) []ast.Decl {
 	return lowered
 }
 
-func lowerGrammarDecls(decl *ast.GrammarDecl) []ast.Decl {
+func grammarDeclScope(decls []ast.Decl) map[string]*ast.GrammarDecl {
+	if len(decls) == 0 {
+		return nil
+	}
+	scope := make(map[string]*ast.GrammarDecl)
+	for _, decl := range decls {
+		grammarDecl, ok := decl.(*ast.GrammarDecl)
+		if !ok || grammarDecl == nil || grammarDecl.Name == "" {
+			continue
+		}
+		scope[grammarDecl.Name] = grammarDecl
+	}
+	return scope
+}
+
+func lowerGrammarDecls(decl *ast.GrammarDecl, grammarScope map[string]*ast.GrammarDecl) []ast.Decl {
 	if decl == nil {
 		return nil
 	}
@@ -78,16 +102,7 @@ func lowerGrammarDecls(decl *ast.GrammarDecl) []ast.Decl {
 		rewrittenProductions = append(rewrittenProductions, rewritten)
 		helperProductions = append(helperProductions, helpers...)
 	}
-	productionMap := make(map[string]ast.GrammarProductionDecl, len(rewrittenProductions)+len(helperProductions))
-	tryNames := make(map[string]string, len(rewrittenProductions)+len(helperProductions))
-	for _, production := range rewrittenProductions {
-		productionMap[production.Name] = production
-		tryNames[production.Name] = grammarTryFuncName(normalizedDecl.Name, production.Name)
-	}
-	for _, production := range helperProductions {
-		productionMap[production.Name] = production
-		tryNames[production.Name] = grammarTryFuncName(normalizedDecl.Name, production.Name)
-	}
+	productionMap := reachableGrammarProductionMap(normalizedDecl, grammarScope, rewrittenProductions, helperProductions)
 	out := make([]ast.Decl, 0, len(rewrittenProductions)*3+len(helperProductions))
 	for _, production := range rewrittenProductions {
 		receiver := grammarReceiverInfoForProduction(normalizedDecl, production)
@@ -102,7 +117,6 @@ func lowerGrammarDecls(decl *ast.GrammarDecl) []ast.Decl {
 			channels:       append([]ast.GrammarChannelDecl(nil), normalizedDecl.Channels...),
 			production:     production,
 			productionMap:  productionMap,
-			tryNames:       tryNames,
 		}
 		out = append(out, lowerStatefulPublicProduction(normalizedDecl, ctx))
 		out = append(out, lowerStatefulPublicTryProduction(normalizedDecl, ctx))
@@ -121,11 +135,59 @@ func lowerGrammarDecls(decl *ast.GrammarDecl) []ast.Decl {
 			channels:       append([]ast.GrammarChannelDecl(nil), normalizedDecl.Channels...),
 			production:     production,
 			productionMap:  productionMap,
-			tryNames:       tryNames,
 		}
 		out = append(out, lowerStatefulTryProduction(normalizedDecl, ctx))
 	}
 	return out
+}
+
+func reachableGrammarProductionMap(grammarDecl *ast.GrammarDecl, grammarScope map[string]*ast.GrammarDecl, localProductions []ast.GrammarProductionDecl, helperProductions []ast.GrammarProductionDecl) map[string]resolvedGrammarProduction {
+	resolved := make(map[string]resolvedGrammarProduction, len(localProductions)+len(helperProductions))
+	for _, production := range localProductions {
+		resolved[production.Name] = resolvedGrammarProduction{GrammarName: grammarDecl.Name, Production: production, TryName: grammarTryFuncName(grammarDecl.Name, production.Name)}
+	}
+	for _, production := range helperProductions {
+		resolved[production.Name] = resolvedGrammarProduction{GrammarName: grammarDecl.Name, Production: production, TryName: grammarTryFuncName(grammarDecl.Name, production.Name)}
+	}
+	seen := map[string]bool{grammarDecl.Name: true}
+	appendUsedGrammarProductions(resolved, grammarDecl, grammarScope, seen)
+	return resolved
+}
+
+func appendUsedGrammarProductions(resolved map[string]resolvedGrammarProduction, grammarDecl *ast.GrammarDecl, grammarScope map[string]*ast.GrammarDecl, seen map[string]bool) {
+	if grammarDecl == nil || len(grammarDecl.Uses) == 0 || grammarScope == nil {
+		return
+	}
+	for _, used := range grammarDecl.Uses {
+		usedName := grammarUseName(used)
+		if usedName == "" || seen[usedName] {
+			continue
+		}
+		usedDecl, ok := grammarScope[usedName]
+		if !ok || usedDecl == nil {
+			continue
+		}
+		seen[usedName] = true
+		normalizedUsed := normalizeGrammarDeclForLowering(usedDecl)
+		for _, production := range normalizedUsed.Productions {
+			if _, exists := resolved[production.Name]; exists {
+				continue
+			}
+			resolved[production.Name] = resolvedGrammarProduction{GrammarName: normalizedUsed.Name, Production: production, TryName: grammarTryFuncName(normalizedUsed.Name, production.Name)}
+		}
+		appendUsedGrammarProductions(resolved, normalizedUsed, grammarScope, seen)
+	}
+}
+
+func grammarUseName(typ ast.TypeExpr) string {
+	switch n := typ.(type) {
+	case *ast.NamedType:
+		return n.Name
+	case *ast.GenericType:
+		return n.Name
+	default:
+		return ""
+	}
 }
 
 func normalizeGrammarDeclForLowering(decl *ast.GrammarDecl) *ast.GrammarDecl {
@@ -558,7 +620,7 @@ func lowerStatefulPublicProduction(grammarDecl *ast.GrammarDecl, ctx *statefulLo
 	valueName := ctx.fresh("value")
 	tryCall := &ast.CallExpr{
 		Position: ctx.production.Position,
-		Func:     &ast.Ident{Position: ctx.production.Position, Name: ctx.tryNames[ctx.production.Name]},
+		Func:     &ast.Ident{Position: ctx.production.Position, Name: grammarTryFuncName(ctx.grammarName, ctx.production.Name)},
 		Args:     callArgs,
 	}
 	body := []ast.Stmt{
@@ -614,7 +676,7 @@ func lowerStatefulPublicTryProduction(grammarDecl *ast.GrammarDecl, ctx *statefu
 				Position: ctx.production.Position,
 				Value: &ast.CallExpr{
 					Position: ctx.production.Position,
-					Func:     &ast.Ident{Position: ctx.production.Position, Name: ctx.tryNames[ctx.production.Name]},
+					Func:     &ast.Ident{Position: ctx.production.Position, Name: grammarTryFuncName(ctx.grammarName, ctx.production.Name)},
 					Args:     callArgs,
 				},
 			},
@@ -683,7 +745,7 @@ func lowerStatefulTryProduction(grammarDecl *ast.GrammarDecl, ctx *statefulLower
 	}
 	return &ast.FuncDecl{
 		Position:         ctx.production.Position,
-		Name:             ctx.tryNames[ctx.production.Name],
+		Name:             grammarTryFuncName(ctx.grammarName, ctx.production.Name),
 		TypeParams:       append([]string(nil), grammarDecl.TypeParams...),
 		RefStorageParams: append([]string(nil), grammarDecl.RefStorageParams...),
 		RefStateParams:   append([]string(nil), grammarDecl.RefStateParams...),
@@ -1682,18 +1744,18 @@ func (ctx *statefulLowerContext) resolveGrammarProductionInfo(term *ast.GrammarC
 	}
 	parts := strings.Split(term.Name, ".")
 	if len(parts) == 1 {
-		production, ok := ctx.productionMap[parts[0]]
+		resolved, ok := ctx.productionMap[parts[0]]
 		if !ok {
 			return "", ast.GrammarProductionDecl{}, false
 		}
-		return ctx.tryNames[parts[0]], production, true
+		return resolved.TryName, resolved.Production, true
 	}
 	if len(parts) == 2 && parts[0] == ctx.tokenReceiver {
-		production, ok := ctx.productionMap[parts[1]]
+		resolved, ok := ctx.productionMap[parts[1]]
 		if !ok {
 			return "", ast.GrammarProductionDecl{}, false
 		}
-		return ctx.tryNames[parts[1]], production, true
+		return resolved.TryName, resolved.Production, true
 	}
 	return "", ast.GrammarProductionDecl{}, false
 }
@@ -1704,18 +1766,18 @@ func (ctx *statefulLowerContext) resolveGrammarProductionCall(term *ast.GrammarC
 	}
 	parts := strings.Split(term.Name, ".")
 	if len(parts) == 1 {
-		production, ok := ctx.productionMap[parts[0]]
+		resolved, ok := ctx.productionMap[parts[0]]
 		if !ok {
 			return "", nil, false
 		}
-		return ctx.tryNames[parts[0]], grammarCallArgsWithImplicitHeaderArgs(ctx.cursorReceiver, ctx.allocName, production, term.Args, term.Position), true
+		return resolved.TryName, grammarCallArgsWithImplicitHeaderArgs(ctx.cursorReceiver, ctx.allocName, resolved.Production, term.Args, term.Position), true
 	}
 	if len(parts) == 2 && parts[0] == ctx.tokenReceiver {
-		production, ok := ctx.productionMap[parts[1]]
+		resolved, ok := ctx.productionMap[parts[1]]
 		if !ok {
 			return "", nil, false
 		}
-		return ctx.tryNames[parts[1]], grammarCallArgsWithImplicitHeaderArgs(parts[0], ctx.allocName, production, term.Args, term.Position), true
+		return resolved.TryName, grammarCallArgsWithImplicitHeaderArgs(parts[0], ctx.allocName, resolved.Production, term.Args, term.Position), true
 	}
 	return "", nil, false
 }
@@ -1726,18 +1788,18 @@ func (ctx *statefulLowerContext) resolveGrammarRecoveredPublicCall(term *ast.Gra
 	}
 	parts := strings.Split(term.Name, ".")
 	if len(parts) == 1 {
-		production, ok := ctx.productionMap[parts[0]]
+		resolved, ok := ctx.productionMap[parts[0]]
 		if !ok {
 			return "", nil, false
 		}
-		return production.Name, grammarCallArgsWithImplicitHeaderArgs(ctx.cursorReceiver, ctx.allocName, production, term.Args, term.Position), true
+		return resolved.Production.Name, grammarCallArgsWithImplicitHeaderArgs(ctx.cursorReceiver, ctx.allocName, resolved.Production, term.Args, term.Position), true
 	}
 	if len(parts) == 2 && parts[0] == ctx.tokenReceiver {
-		production, ok := ctx.productionMap[parts[1]]
+		resolved, ok := ctx.productionMap[parts[1]]
 		if !ok {
 			return "", nil, false
 		}
-		return production.Name, grammarCallArgsWithImplicitHeaderArgs(parts[0], ctx.allocName, production, term.Args, term.Position), true
+		return resolved.Production.Name, grammarCallArgsWithImplicitHeaderArgs(parts[0], ctx.allocName, resolved.Production, term.Args, term.Position), true
 	}
 	return "", nil, false
 }
