@@ -602,6 +602,56 @@ func TestParseGrammarProductionAllowsReturnlessRecoverClause(t *testing.T) {
 	}
 }
 
+func TestParseGrammarDeclAllowsTermLevelRecoverClause(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend over Token using ParserState:
+	cursor state
+	statement(state: mutable ParserState&) -> Pascal.Stmt:
+		stmt = state.statement_core() recover(ParseMessageKey.ExpectedStatement, until(";", token(TokenKind.EOF)), zeroed as Pascal.Stmt)
+		guard(state.current_token().kind == TokenKind.END) recover(ParseMessageKey.ExpectedStatement, until("end", token(TokenKind.EOF)))
+		return stmt
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	bind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected first term to be binding, got %T", decl.Productions[0].Terms[0])
+	}
+	recoveredBind, ok := bind.Term.(*ast.GrammarRecoverTerm)
+	if !ok {
+		t.Fatalf("expected binding term to be recover wrapper, got %T", bind.Term)
+	}
+	if _, ok := recoveredBind.Term.(*ast.GrammarCallTerm); !ok {
+		t.Fatalf("expected recovered binding inner term to be call, got %T", recoveredBind.Term)
+	}
+	if recoveredBind.RecoverValue == nil {
+		t.Fatal("expected recovered binding to keep fallback value")
+	}
+	recoveredGuard, ok := decl.Productions[0].Terms[1].(*ast.GrammarRecoverTerm)
+	if !ok {
+		t.Fatalf("expected second term to be recover wrapper, got %T", decl.Productions[0].Terms[1])
+	}
+	if _, ok := recoveredGuard.Term.(*ast.GrammarGuardTerm); !ok {
+		t.Fatalf("expected recovered guard inner term, got %T", recoveredGuard.Term)
+	}
+	if recoveredGuard.RecoverValue != nil {
+		t.Fatal("expected guard recover term to omit fallback value")
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"stmt = state.statement_core() recover(ParseMessageKey.ExpectedStatement, until(\";\", token(TokenKind.EOF)), zeroed as Pascal.Stmt)",
+		"guard((state.current_token().kind == TokenKind.END)) recover(ParseMessageKey.ExpectedStatement, until(\"end\", token(TokenKind.EOF)))",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestParseGrammarDeclAllowsPrecedenceTerm(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
     expression(state: mutable ParserState&) -> Pascal.Expr:

@@ -314,6 +314,28 @@ func TestLowerFileStatefulProductionWithRecoverFallbackReturnsFallbackValue(t *t
 	}
 }
 
+func TestLowerFileStatefulTermLevelRecoverClauseRecordsAndContinues(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+	    cursor state
+	    statement() -> Token:
+	        stmt = token(TokenKind.IDENT) recover(ParseMessageKey.ExpectedStatement, until(";", token(TokenKind.EOF)), zeroed as Token)
+	        return stmt
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.expect_kind(TokenKind.IDENT)",
+		"state.record_parse_error(ParseMessageKey.ExpectedStatement)",
+		"state.current_token().kind == token_kind_for_text(\";\")",
+		"state.advance_token()",
+		"zeroed as Token",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered term-level recover production to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestLowerFileStatefulReturnlessRecoverClauseUsesVoidTupleValue(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
 	    cursor state

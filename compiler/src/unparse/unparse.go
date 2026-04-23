@@ -458,15 +458,7 @@ func (f *formatter) writeGrammarProduction(level int, production ast.GrammarProd
 		header += " -> " + formatTypeExpr(production.ReturnType)
 	}
 	if production.RecoverMsg != nil && len(production.RecoverUntil) != 0 {
-		untilParts := make([]string, 0, len(production.RecoverUntil))
-		for _, stop := range production.RecoverUntil {
-			untilParts = append(untilParts, formatGrammarTerm(stop))
-		}
-		header += " recover(" + formatExpr(production.RecoverMsg) + ", until(" + strings.Join(untilParts, ", ") + ")"
-		if production.RecoverValue != nil {
-			header += ", " + formatExpr(production.RecoverValue)
-		}
-		header += ")"
+		header += formatGrammarRecoverClause(production.RecoverMsg, production.RecoverUntil, production.RecoverValue)
 	}
 	header += ":"
 	f.writeLine(level, header)
@@ -475,18 +467,30 @@ func (f *formatter) writeGrammarProduction(level int, production ast.GrammarProd
 	}
 }
 
+func formatGrammarRecoverClause(message ast.Expr, until []ast.GrammarTerm, fallback ast.Expr) string {
+	untilParts := make([]string, 0, len(until))
+	for _, stop := range until {
+		untilParts = append(untilParts, formatGrammarTerm(stop))
+	}
+	text := " recover(" + formatExpr(message) + ", until(" + strings.Join(untilParts, ", ") + ")"
+	if fallback != nil {
+		text += ", " + formatExpr(fallback)
+	}
+	return text + ")"
+}
+
 func (f *formatter) writeGrammarTerm(level int, term ast.GrammarTerm) {
 	if bind, ok := term.(*ast.GrammarBindTerm); ok {
 		if tokenKind, ok := bind.Term.(*ast.GrammarTokenKindTerm); ok {
 			f.writeLine(level, "."+tokenKind.Kind+"("+bind.Name+")")
 			return
 		}
-		if precedence, ok := bind.Term.(*ast.GrammarPrecedenceTerm); ok {
-			f.writeBoundPrecedenceTerm(level, bind.Name, precedence)
-			return
-		}
 		if postfix, ok := bind.Term.(*ast.GrammarPostfixTerm); ok {
 			f.writeBoundPostfixTerm(level, bind.Name, postfix)
+			return
+		}
+		if precedence, ok := bind.Term.(*ast.GrammarPrecedenceTerm); ok {
+			f.writeBoundPrecedenceTerm(level, bind.Name, precedence)
 			return
 		}
 	}
@@ -635,6 +639,8 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 		return "choice(" + strings.Join(options, ", ") + ")"
 	case *ast.GrammarExprTerm:
 		return "expr(" + formatExpr(n.Expr) + ")"
+	case *ast.GrammarRecoverTerm:
+		return formatGrammarTerm(n.Term) + formatGrammarRecoverClause(n.RecoverMsg, n.RecoverUntil, n.RecoverValue)
 	case *ast.GrammarGuardTerm:
 		return "guard(" + formatExpr(n.Cond) + ")"
 	case *ast.GrammarAttemptTerm:

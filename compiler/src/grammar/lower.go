@@ -811,40 +811,11 @@ func lowerStatefulPublicTryProduction(grammarDecl *ast.GrammarDecl, ctx *statefu
 }
 
 func (ctx *statefulLowerContext) lowerRecoveryClause(matchedName string) []ast.Stmt {
-	if ctx.tokenReceiver == "" || ctx.production.RecoverMsg == nil || len(ctx.production.RecoverUntil) == 0 {
+	recoverBody := ctx.lowerRecoverBody(ctx.production.Position, ctx.production.RecoverMsg, ctx.production.RecoverUntil)
+	if len(recoverBody) == 0 {
 		return nil
 	}
-	stopCond := ctx.lowerListUntilMatchExpr(ctx.production.Position, ctx.production.RecoverUntil)
-	if stopCond == nil {
-		return nil
-	}
-	thenBody := []ast.Stmt{
-		&ast.ExprStmt{
-			Position: ctx.production.Position,
-			Expr: &ast.CallExpr{
-				Position: ctx.production.Position,
-				Func:     &ast.FieldExpr{Position: ctx.production.Position, Object: &ast.Ident{Position: ctx.production.Position, Name: ctx.tokenReceiver}, Field: "record_parse_error"},
-				Args:     []ast.Expr{ctx.production.RecoverMsg},
-			},
-		},
-		&ast.WhileStmt{
-			Position: ctx.production.Position,
-			Cond: &ast.BinaryExpr{
-				Position: ctx.production.Position,
-				Op:       lexer.TOKEN_AND,
-				Left:     &ast.UnaryExpr{Position: ctx.production.Position, Op: lexer.TOKEN_NOT, Operand: stopCond},
-				Right: &ast.BinaryExpr{
-					Position: ctx.production.Position,
-					Op:       lexer.TOKEN_BANGEQ,
-					Left:     &ast.FieldExpr{Position: ctx.production.Position, Object: currentTokenExpr(ctx.tokenReceiver, ctx.production.Position), Field: "kind"},
-					Right:    &ast.FieldExpr{Position: ctx.production.Position, Object: &ast.Ident{Position: ctx.production.Position, Name: "TokenKind"}, Field: "EOF"},
-				},
-			},
-			Body: []ast.Stmt{
-				&ast.ExprStmt{Position: ctx.production.Position, Expr: &ast.CallExpr{Position: ctx.production.Position, Func: &ast.FieldExpr{Position: ctx.production.Position, Object: &ast.Ident{Position: ctx.production.Position, Name: ctx.tokenReceiver}, Field: "advance_token"}}},
-			},
-		},
-	}
+	thenBody := append([]ast.Stmt{}, recoverBody...)
 	if ctx.production.RecoverValue != nil && ctx.production.ReturnType != nil {
 		thenBody = append(thenBody, &ast.ReturnStmt{Position: ctx.production.Position, Value: ctx.production.RecoverValue})
 	}
@@ -853,6 +824,43 @@ func (ctx *statefulLowerContext) lowerRecoveryClause(matchedName string) []ast.S
 			Position: ctx.production.Position,
 			Cond:     &ast.UnaryExpr{Position: ctx.production.Position, Op: lexer.TOKEN_NOT, Operand: &ast.Ident{Position: ctx.production.Position, Name: matchedName}},
 			Then:     thenBody,
+		},
+	}
+}
+
+func (ctx *statefulLowerContext) lowerRecoverBody(pos lexer.Pos, message ast.Expr, until []ast.GrammarTerm) []ast.Stmt {
+	if ctx.tokenReceiver == "" || message == nil || len(until) == 0 {
+		return nil
+	}
+	stopCond := ctx.lowerListUntilMatchExpr(pos, until)
+	if stopCond == nil {
+		return nil
+	}
+	return []ast.Stmt{
+		&ast.ExprStmt{
+			Position: pos,
+			Expr: &ast.CallExpr{
+				Position: pos,
+				Func:     &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: ctx.tokenReceiver}, Field: "record_parse_error"},
+				Args:     []ast.Expr{message},
+			},
+		},
+		&ast.WhileStmt{
+			Position: pos,
+			Cond: &ast.BinaryExpr{
+				Position: pos,
+				Op:       lexer.TOKEN_AND,
+				Left:     &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_NOT, Operand: stopCond},
+				Right: &ast.BinaryExpr{
+					Position: pos,
+					Op:       lexer.TOKEN_BANGEQ,
+					Left:     &ast.FieldExpr{Position: pos, Object: currentTokenExpr(ctx.tokenReceiver, pos), Field: "kind"},
+					Right:    &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: "TokenKind"}, Field: "EOF"},
+				},
+			},
+			Body: []ast.Stmt{
+				&ast.ExprStmt{Position: pos, Expr: &ast.CallExpr{Position: pos, Func: &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: ctx.tokenReceiver}, Field: "advance_token"}}},
+			},
 		},
 	}
 }
@@ -1336,6 +1344,8 @@ func (ctx *statefulLowerContext) termCanFail(term ast.GrammarTerm) bool {
 		return false
 	case *ast.GrammarSeparatedTerm:
 		return false
+	case *ast.GrammarRecoverTerm:
+		return false
 	case *ast.GrammarPostfixTerm:
 		return ctx.termCanFail(n.Seed)
 	case *ast.GrammarPrecedenceTerm:
@@ -1461,6 +1471,8 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 			Committed: &ast.BoolLit{Position: n.Position, Value: false},
 			Value:     &ast.Ident{Position: n.Position, Name: valueName},
 		}
+	case *ast.GrammarRecoverTerm:
+		return ctx.lowerRecoveredAttempt(n)
 	case *ast.GrammarGuardTerm:
 		valueName := ctx.fresh("guard")
 		guardIdent := &ast.Ident{Position: n.Position, Name: valueName}
@@ -1510,6 +1522,42 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 	default:
 		return loweredAttempt{Matched: &ast.BoolLit{Position: term.Pos(), Value: true}, Committed: &ast.BoolLit{Position: term.Pos(), Value: false}, Value: &ast.ZeroedLit{Position: term.Pos()}}
 	}
+}
+
+func (ctx *statefulLowerContext) lowerRecoveredAttempt(term *ast.GrammarRecoverTerm) loweredAttempt {
+	if term == nil || ctx.tokenReceiver == "" || term.RecoverMsg == nil || len(term.RecoverUntil) == 0 {
+		if term == nil {
+			return loweredAttempt{Matched: &ast.BoolLit{Position: ctx.production.Position, Value: true}, Committed: &ast.BoolLit{Position: ctx.production.Position, Value: false}, Value: &ast.ZeroedLit{Position: ctx.production.Position}}
+		}
+		return ctx.lowerAttempt(term.Term)
+	}
+	inner := ctx.lowerAttempt(term.Term)
+	termType := ctx.inferTermType(term.Term)
+	if termType == nil {
+		termType = grammarResolvedValueTypeExpr(term.Position, ctx.production.ReturnType)
+	}
+	valueName := ctx.fresh("recover_value")
+	valueIdent := &ast.Ident{Position: term.Position, Name: valueName}
+	valueInit := zeroedCastExpr(term.Position, termType)
+	successValue := inner.Value
+	if successValue == nil {
+		successValue = zeroedCastExpr(term.Position, termType)
+	}
+	fallbackValue := term.RecoverValue
+	if fallbackValue == nil {
+		fallbackValue = zeroedCastExpr(term.Position, termType)
+	}
+	stmts := []ast.Stmt{
+		&ast.VarDeclStmt{Position: term.Position, Name: valueName, Mutable: true, Type: termType, Value: valueInit},
+	}
+	stmts = append(stmts, inner.Stmts...)
+	thenBranch := []ast.Stmt{
+		&ast.AssignStmt{Position: term.Position, Target: valueIdent, Value: successValue},
+	}
+	elseBranch := append([]ast.Stmt{}, ctx.lowerRecoverBody(term.Position, term.RecoverMsg, term.RecoverUntil)...)
+	elseBranch = append(elseBranch, &ast.AssignStmt{Position: term.Position, Target: valueIdent, Value: fallbackValue})
+	stmts = append(stmts, &ast.IfStmt{Position: term.Position, Cond: inner.Matched, Then: thenBranch, Else: elseBranch})
+	return loweredAttempt{Stmts: stmts, Matched: &ast.BoolLit{Position: term.Position, Value: true}, Committed: &ast.BoolLit{Position: term.Position, Value: false}, Value: valueIdent}
 }
 
 func (ctx *statefulLowerContext) lowerChoiceAttempt(term *ast.GrammarChoiceTerm) loweredAttempt {
@@ -1993,6 +2041,8 @@ func (ctx *statefulLowerContext) inferTermType(term ast.GrammarTerm) ast.TypeExp
 		}
 	case *ast.GrammarExprTerm:
 		return nil
+	case *ast.GrammarRecoverTerm:
+		return ctx.inferTermType(n.Term)
 	case *ast.GrammarGuardTerm:
 		return builtinTypeExpr(n.Position, "bool")
 	case *ast.GrammarAttemptTerm:
@@ -2237,6 +2287,8 @@ func lowerTermExpr(ctx lowerContext, term ast.GrammarTerm) ast.Expr {
 		return lowerChoiceExpr(ctx, n.Position, n.Options)
 	case *ast.GrammarExprTerm:
 		return n.Expr
+	case *ast.GrammarRecoverTerm:
+		return lowerTermExpr(ctx, n.Term)
 	case *ast.GrammarGuardTerm:
 		return n.Cond
 	case *ast.GrammarAttemptTerm:

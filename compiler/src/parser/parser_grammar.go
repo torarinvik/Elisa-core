@@ -199,6 +199,20 @@ func (p *Parser) parseGrammarRecoverClause() (ast.Expr, []ast.GrammarTerm, ast.E
 	return message, until, fallback
 }
 
+func (p *Parser) wrapGrammarRecoverTerm(term ast.GrammarTerm) ast.GrammarTerm {
+	if term == nil || !p.peekIdentText("recover") {
+		return term
+	}
+	message, until, fallback := p.parseGrammarRecoverClause()
+	return &ast.GrammarRecoverTerm{
+		Position:     term.Pos(),
+		Term:         term,
+		RecoverMsg:   message,
+		RecoverUntil: until,
+		RecoverValue: fallback,
+	}
+}
+
 func (p *Parser) parseGrammarTermBlock() []ast.GrammarTerm {
 	p.expect(lexer.TOKEN_INDENT)
 	terms := make([]ast.GrammarTerm, 0, p.estimateIndentedItemCount())
@@ -245,7 +259,7 @@ func (p *Parser) parseGrammarTerm() ast.GrammarTerm {
 		pos := p.cur().Pos
 		name := p.expect(lexer.TOKEN_IDENT).Text
 		p.expect(lexer.TOKEN_LARROW)
-		term := p.parseGrammarTermValue()
+		term := p.wrapGrammarRecoverTerm(p.parseGrammarTermValue())
 		if _, ok := term.(*ast.GrammarPrecedenceTerm); !ok {
 			if _, ok := term.(*ast.GrammarPostfixTerm); !ok {
 				p.expectNewline()
@@ -257,7 +271,7 @@ func (p *Parser) parseGrammarTerm() ast.GrammarTerm {
 		pos := p.cur().Pos
 		name := p.expect(lexer.TOKEN_IDENT).Text
 		p.expect(lexer.TOKEN_ASSIGN)
-		term := p.parseGrammarTermValue()
+		term := p.wrapGrammarRecoverTerm(p.parseGrammarTermValue())
 		if _, ok := term.(*ast.GrammarPrecedenceTerm); !ok {
 			if _, ok := term.(*ast.GrammarPostfixTerm); !ok {
 				p.expectNewline()
@@ -265,7 +279,7 @@ func (p *Parser) parseGrammarTerm() ast.GrammarTerm {
 		}
 		return &ast.GrammarBindTerm{Position: pos, Name: name, Term: term}
 	}
-	term := p.parseGrammarTermValue()
+	term := p.wrapGrammarRecoverTerm(p.parseGrammarTermValue())
 	p.expectNewline()
 	return term
 }

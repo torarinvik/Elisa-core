@@ -166,6 +166,14 @@ type GrammarOptionalTerm struct {
 	Term     GrammarTerm
 }
 
+type GrammarRecoverTerm struct {
+	Position     lexer.Pos
+	Term         GrammarTerm
+	RecoverMsg   Expr
+	RecoverUntil []GrammarTerm
+	RecoverValue Expr
+}
+
 type GrammarExprTerm struct {
 	Position lexer.Pos
 	Expr     Expr
@@ -1537,6 +1545,9 @@ func (n *GrammarChoiceTerm) Pos() lexer.Pos {
 func (n *GrammarOptionalTerm) Pos() lexer.Pos {
 	return n.Position
 }
+func (n *GrammarRecoverTerm) Pos() lexer.Pos {
+	return n.Position
+}
 func (n *GrammarExprTerm) Pos() lexer.Pos {
 	return n.Position
 }
@@ -1742,6 +1753,7 @@ func (*GrammarTokenKindTerm) nodeTag()      {}
 func (*GrammarCallTerm) nodeTag()           {}
 func (*GrammarChoiceTerm) nodeTag()         {}
 func (*GrammarOptionalTerm) nodeTag()       {}
+func (*GrammarRecoverTerm) nodeTag()        {}
 func (*GrammarExprTerm) nodeTag()           {}
 func (*GrammarGuardTerm) nodeTag()          {}
 func (*GrammarAttemptTerm) nodeTag()        {}
@@ -1922,6 +1934,7 @@ func (*GrammarTokenKindTerm) grammarTermTag()  {}
 func (*GrammarCallTerm) grammarTermTag()       {}
 func (*GrammarChoiceTerm) grammarTermTag()     {}
 func (*GrammarOptionalTerm) grammarTermTag()   {}
+func (*GrammarRecoverTerm) grammarTermTag()    {}
 func (*GrammarExprTerm) grammarTermTag()       {}
 func (*GrammarGuardTerm) grammarTermTag()      {}
 func (*GrammarAttemptTerm) grammarTermTag()    {}
