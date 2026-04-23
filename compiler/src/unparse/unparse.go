@@ -272,8 +272,40 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 	case *ast.GrammarDecl:
 		header := "grammar " + n.Name
 		header += formatGenericParams(n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams)
+		if n.OverType != nil {
+			header += " over " + formatTypeExpr(n.OverType)
+		}
+		if n.UsingType != nil {
+			header += " using " + formatTypeExpr(n.UsingType)
+		}
+		if len(n.Uses) != 0 {
+			parts := make([]string, 0, len(n.Uses))
+			for _, used := range n.Uses {
+				parts = append(parts, formatTypeExpr(used))
+			}
+			header += " uses " + strings.Join(parts, ", ")
+		}
 		header += ":"
 		f.writeLine(level, header)
+		if n.ErrorType != nil {
+			f.writeLine(level+1, "error "+formatTypeExpr(n.ErrorType))
+		}
+		if n.CursorExpr != nil {
+			f.writeLine(level+1, "cursor "+formatExpr(n.CursorExpr))
+		}
+		if n.AllocExpr != nil {
+			f.writeLine(level+1, "alloc "+formatExpr(n.AllocExpr))
+		}
+		for _, channel := range n.Channels {
+			line := "channel " + channel.Name
+			if channel.Type != nil {
+				line += ": " + formatTypeExpr(channel.Type)
+			}
+			if channel.Default != nil {
+				line += " = " + formatExpr(channel.Default)
+			}
+			f.writeLine(level+1, line)
+		}
 		for _, production := range n.Productions {
 			f.writeGrammarProduction(level+1, production)
 		}
@@ -411,7 +443,14 @@ func (f *formatter) writeTreeMember(level int, member ast.TreeMemberDecl) {
 }
 
 func (f *formatter) writeGrammarProduction(level int, production ast.GrammarProductionDecl) {
-	header := production.Name + "(" + formatParamList(production.Params) + ")"
+	header := ""
+	if production.Public {
+		header += "pub "
+	}
+	header += production.Name
+	if production.HasParamList || len(production.Params) != 0 {
+		header += "(" + formatParamList(production.Params) + ")"
+	}
 	if production.ReturnType != nil {
 		header += " -> " + formatTypeExpr(production.ReturnType)
 	}
@@ -431,6 +470,10 @@ func (f *formatter) writeGrammarProduction(level int, production ast.GrammarProd
 
 func (f *formatter) writeGrammarTerm(level int, term ast.GrammarTerm) {
 	if bind, ok := term.(*ast.GrammarBindTerm); ok {
+		if tokenKind, ok := bind.Term.(*ast.GrammarTokenKindTerm); ok {
+			f.writeLine(level, "."+tokenKind.Kind+"("+bind.Name+")")
+			return
+		}
 		if precedence, ok := bind.Term.(*ast.GrammarPrecedenceTerm); ok {
 			f.writeBoundPrecedenceTerm(level, bind.Name, precedence)
 			return
@@ -531,7 +574,7 @@ func (f *formatter) writePrecedenceArm(level int, arm ast.GrammarPrecedenceArm) 
 	}
 	parts := []string{opText}
 	for _, binding := range arm.Bindings {
-		parts = append(parts, binding.Name+" = "+formatGrammarTerm(binding.Term))
+		parts = append(parts, formatGrammarBinding(binding))
 	}
 	parts = append(parts, "-> "+formatExpr(arm.Value))
 	f.writeLine(level, strings.Join(parts, " "))
@@ -544,10 +587,20 @@ func (f *formatter) writePostfixArm(level int, arm ast.GrammarPostfixArm) {
 	}
 	parts := []string{opText}
 	for _, binding := range arm.Bindings {
-		parts = append(parts, binding.Name+" = "+formatGrammarTerm(binding.Term))
+		parts = append(parts, formatGrammarBinding(binding))
 	}
 	parts = append(parts, "-> "+formatExpr(arm.Value))
 	f.writeLine(level, strings.Join(parts, " "))
+}
+
+func formatGrammarBinding(binding *ast.GrammarBindTerm) string {
+	if binding == nil {
+		return "<invalid_grammar_binding>"
+	}
+	if tokenKind, ok := binding.Term.(*ast.GrammarTokenKindTerm); ok {
+		return "." + tokenKind.Kind + "(" + binding.Name + ")"
+	}
+	return binding.Name + " = " + formatGrammarTerm(binding.Term)
 }
 
 func formatGrammarTerm(term ast.GrammarTerm) string {
@@ -556,6 +609,8 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 		return "pass"
 	case *ast.GrammarTokenTerm:
 		return strconv.Quote(n.Value)
+	case *ast.GrammarTokenKindTerm:
+		return "." + n.Kind
 	case *ast.GrammarCallTerm:
 		if !n.Explicit && len(n.Args) == 0 {
 			return n.Name
@@ -598,7 +653,7 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 		}
 		return "precedence(" + n.LeftName + " = " + formatGrammarTerm(n.Seed) + "):"
 	case *ast.GrammarBindTerm:
-		return n.Name + " = " + formatGrammarTerm(n.Term)
+		return formatGrammarBinding(n)
 	case *ast.GrammarReturnTerm:
 		return "return " + formatExpr(n.Value)
 	default:

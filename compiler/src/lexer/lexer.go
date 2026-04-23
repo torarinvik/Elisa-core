@@ -904,19 +904,19 @@ func isAlpha(ch byte) bool {
 }
 
 func isIdentStart(ch byte) bool {
-	return ch == '_' || isAlpha(ch)
+	return ch == '_' || ch == '$' || isAlpha(ch)
 }
 
 func isIdentChar(ch byte) bool {
-	return ch == '_' || isAlpha(ch) || isDigit(ch)
+	return ch == '_' || ch == '$' || isAlpha(ch) || isDigit(ch)
 }
 
 func isIdentStartRune(r rune) bool {
-	return r == '_' || unicode.IsLetter(r)
+	return r == '_' || r == '$' || unicode.IsLetter(r)
 }
 
 func isIdentCharRune(r rune) bool {
-	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
+	return r == '_' || r == '$' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
 // Error helper

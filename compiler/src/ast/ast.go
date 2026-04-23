@@ -99,12 +99,28 @@ type GrammarDecl struct {
 	RegionParams     []string
 	PermissionParams []string
 	GenericParams    []GenericParam
+	OverType         TypeExpr
+	UsingType        TypeExpr
+	Uses             []TypeExpr
+	ErrorType        TypeExpr
+	CursorExpr       Expr
+	AllocExpr        Expr
+	Channels         []GrammarChannelDecl
 	Productions      []GrammarProductionDecl
+}
+
+type GrammarChannelDecl struct {
+	Position lexer.Pos
+	Name     string
+	Type     TypeExpr
+	Default  Expr
 }
 
 type GrammarProductionDecl struct {
 	Position     lexer.Pos
+	Public       bool
 	Name         string
+	HasParamList bool
 	Params       []ParamDecl
 	ReturnType   TypeExpr
 	RecoverMsg   Expr
@@ -124,6 +140,11 @@ type GrammarPassTerm struct {
 type GrammarTokenTerm struct {
 	Position lexer.Pos
 	Value    string
+}
+
+type GrammarTokenKindTerm struct {
+	Position lexer.Pos
+	Kind     string
 }
 
 type GrammarCallTerm struct {
@@ -1469,7 +1490,10 @@ func (n *GrammarProductionDecl) Pos() lexer.Pos {
 }
 func (n *GrammarPassTerm) Pos() lexer.Pos  { return n.Position }
 func (n *GrammarTokenTerm) Pos() lexer.Pos { return n.Position }
-func (n *GrammarCallTerm) Pos() lexer.Pos  { return n.Position }
+func (n *GrammarTokenKindTerm) Pos() lexer.Pos {
+	return n.Position
+}
+func (n *GrammarCallTerm) Pos() lexer.Pos { return n.Position }
 func (n *GrammarChoiceTerm) Pos() lexer.Pos {
 	return n.Position
 }
@@ -1663,6 +1687,7 @@ func (*GrammarDecl) nodeTag()               {}
 func (*GrammarProductionDecl) nodeTag()     {}
 func (*GrammarPassTerm) nodeTag()           {}
 func (*GrammarTokenTerm) nodeTag()          {}
+func (*GrammarTokenKindTerm) nodeTag()      {}
 func (*GrammarCallTerm) nodeTag()           {}
 func (*GrammarChoiceTerm) nodeTag()         {}
 func (*GrammarOptionalTerm) nodeTag()       {}
@@ -1836,6 +1861,7 @@ func (*TreeStructDecl) treeMemberDeclTag()   {}
 
 func (*GrammarPassTerm) grammarTermTag()       {}
 func (*GrammarTokenTerm) grammarTermTag()      {}
+func (*GrammarTokenKindTerm) grammarTermTag()  {}
 func (*GrammarCallTerm) grammarTermTag()       {}
 func (*GrammarChoiceTerm) grammarTermTag()     {}
 func (*GrammarOptionalTerm) grammarTermTag()   {}
