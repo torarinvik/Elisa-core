@@ -126,6 +126,8 @@ func shouldSuppressDeprecatedWarningsForTests(warning string) bool {
 
 const (
 	emitAST        = "ast"
+	emitLowered    = "lowered"
+	emitSemantic   = "semantic"
 	emitFmt        = "fmt"
 	emitDoc        = "doc"
 	emitInterface  = "iface"
@@ -249,7 +251,7 @@ func parseArgs(args []string) (cliOptions, error) {
 }
 
 func printUsage(w io.Writer) {
-	emitModes := []string{emitAST, emitFmt, emitDoc, emitInterface, emitDeps, emitDepsJSON, emitIR, emitInterpret, emitServe, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitHeader, emitBitcode, emitObject}
+	emitModes := []string{emitAST, emitLowered, emitSemantic, emitFmt, emitDoc, emitInterface, emitDeps, emitDepsJSON, emitIR, emitInterpret, emitServe, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitHeader, emitBitcode, emitObject}
 	fmt.Fprintf(w, "Usage: llcontext [-emit %s] [-addr <host:port>] [-filter <substring>] [-O0|-O2|-O3] [-o <output>] <file%s|file%s|file%s>\n", strings.Join(emitModes, "|"), sourceExtension, interfaceExtension, frontendIRExtension)
 	fmt.Fprintln(w, "       llcontext init <name> [--path <dir>]")
 	fmt.Fprintln(w, "       llcontext init-lib <name> [--path <dir>]")
@@ -287,6 +289,10 @@ func normalizeEmitMode(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case emitAST:
 		return emitAST
+	case emitLowered, "lower", "lowering", "grammar-lowered":
+		return emitLowered
+	case emitSemantic, "sema", "semantics", "lowered-semantic", "typed-report":
+		return emitSemantic
 	case emitFmt, "format", "formatter":
 		return emitFmt
 	case emitDoc, "docs", "reference":

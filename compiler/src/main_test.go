@@ -916,6 +916,97 @@ func TestParseArgsAcceptsPackedInspectEmitAlias(t *testing.T) {
 	}
 }
 
+func TestParseArgsAcceptsLoweredEmitAlias(t *testing.T) {
+	options, err := parseArgs([]string{"-emit", "lower", "fixture.llcontext"})
+	if err != nil {
+		t.Fatalf("parseArgs returned error: %v", err)
+	}
+	if options.emit != emitLowered {
+		t.Fatalf("expected lowered emit mode, got %q", options.emit)
+	}
+}
+
+func TestParseArgsAcceptsSemanticEmitAlias(t *testing.T) {
+	options, err := parseArgs([]string{"-emit", "sema", "fixture.llcontext"})
+	if err != nil {
+		t.Fatalf("parseArgs returned error: %v", err)
+	}
+	if options.emit != emitSemantic {
+		t.Fatalf("expected semantic emit mode, got %q", options.emit)
+	}
+}
+
+func TestRunCLIWritesLoweredGrammarSourceToDefaultPath(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "lowered_fixture.llcontext")
+	src := "grammar PascalFrontend:\n    expression(state: mutable ParserState&) -> Token:\n        token(TokenKind.IDENT)\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write lowered fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "lowered", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("expected no stdout output, got:\n%s", stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	outputPath := filepath.Join(fixtureDir, "lowered_fixture"+loweredExtension)
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read lowered output file: %v", err)
+	}
+	output := string(data)
+	for _, want := range []string{
+		"grammar PascalFrontend:",
+		"def expression(state: mutable ParserState&) -> Token:",
+		"state.expect_kind(TokenKind.IDENT)",
+		"return (true, zeroed.cast[Token])",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected lowered output to contain %q, got:\n%s", want, output)
+		}
+	}
+}
+
+func TestRunCLIEmitsSemanticReport(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "semantic_fixture.llcontext")
+	src := "const enum TokenKind of u32:\n    IDENT = 1\n\nstruct Token:\n    kind: TokenKind\n\nstruct ParserState:\n    cursor: mutable usize\n\nimpl mutable ParserState&:\n    def expect_kind(self: mutable ParserState&, kind: TokenKind) -> Token:\n        _ = kind\n        return Token{kind: TokenKind.IDENT}\n\ngrammar PascalFrontend:\n    expression(state: mutable ParserState&) -> Token:\n        token(TokenKind.IDENT)\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write semantic fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "semantic", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"=== lowered ===",
+		"def expression(state: mutable ParserState&) -> Token:",
+		"=== semantic ===",
+		"func expression",
+		"signature: func(mutable ParserState&) -> Token",
+		"func __grammar_try__PascalFrontend__expression",
+		"return_isolation:",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected semantic report to contain %q, got:\n%s", want, output)
+		}
+	}
+}
+
 func TestRunCLICompilesJSONParserWithEnumDenseFixedOverrideByDefault(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.llcontext")

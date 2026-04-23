@@ -9,6 +9,7 @@ import (
 
 	"llcontext/src/backend"
 	"llcontext/src/frontendir"
+	"llcontext/src/grammar"
 	"llcontext/src/interpreter"
 	"llcontext/src/unparse"
 )
@@ -31,6 +32,18 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			return 1
 		}
 		printFile(stdout, file)
+		return 0
+	case emitLowered:
+		file, ok := parseLoadedProgram(program, stderr)
+		if !ok {
+			return 1
+		}
+		lowered := unparse.FormatFile(grammar.LowerFile(file))
+		outputPath := outputPathForEmit(program.filename, options.output, loweredExtension)
+		if err := writeOutputFile(outputPath, []byte(lowered)); err != nil {
+			fmt.Fprintf(stderr, "error: %s\n", err)
+			return 1
+		}
 		return 0
 	case emitFmt:
 		file, ok := parseLoadedProgram(program, stderr)
@@ -108,6 +121,17 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 	}
 
 	switch options.emit {
+	case emitSemantic:
+		report := generateSemanticReport(result)
+		if options.output != "" {
+			if err := writeOutputFile(options.output, []byte(report)); err != nil {
+				fmt.Fprintf(stderr, "error: %s\n", err)
+				return 1
+			}
+		} else {
+			fmt.Fprint(stdout, report)
+		}
+		return 0
 	case emitInterface:
 		interfaceSource := generateModuleInterface(result.File)
 		if options.output != "" {

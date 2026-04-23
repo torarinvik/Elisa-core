@@ -415,11 +415,139 @@ func (f *formatter) writeGrammarProduction(level int, production ast.GrammarProd
 	if production.ReturnType != nil {
 		header += " -> " + formatTypeExpr(production.ReturnType)
 	}
+	if production.RecoverMsg != nil && len(production.RecoverUntil) != 0 {
+		untilParts := make([]string, 0, len(production.RecoverUntil))
+		for _, stop := range production.RecoverUntil {
+			untilParts = append(untilParts, formatGrammarTerm(stop))
+		}
+		header += " recover(" + formatExpr(production.RecoverMsg) + ", until(" + strings.Join(untilParts, ", ") + "))"
+	}
 	header += ":"
 	f.writeLine(level, header)
 	for _, term := range production.Terms {
-		f.writeLine(level+1, formatGrammarTerm(term))
+		f.writeGrammarTerm(level+1, term)
 	}
+}
+
+func (f *formatter) writeGrammarTerm(level int, term ast.GrammarTerm) {
+	if bind, ok := term.(*ast.GrammarBindTerm); ok {
+		if precedence, ok := bind.Term.(*ast.GrammarPrecedenceTerm); ok {
+			f.writeBoundPrecedenceTerm(level, bind.Name, precedence)
+			return
+		}
+		if postfix, ok := bind.Term.(*ast.GrammarPostfixTerm); ok {
+			f.writeBoundPostfixTerm(level, bind.Name, postfix)
+			return
+		}
+	}
+	if postfix, ok := term.(*ast.GrammarPostfixTerm); ok {
+		f.writePostfixTerm(level, postfix)
+		return
+	}
+	if precedence, ok := term.(*ast.GrammarPrecedenceTerm); ok {
+		f.writePrecedenceTerm(level, precedence)
+		return
+	}
+	f.writeLine(level, formatGrammarTerm(term))
+}
+
+func (f *formatter) writeBoundPostfixTerm(level int, name string, postfix *ast.GrammarPostfixTerm) {
+	if postfix == nil {
+		f.writeLine(level, name+" = <invalid_grammar_term>")
+		return
+	}
+	f.writeLine(level, name+" = postfix("+postfix.LeftName+" = "+formatGrammarTerm(postfix.Seed)+"):")
+	for _, arm := range postfix.Arms {
+		f.writePostfixArm(level+1, arm)
+	}
+}
+
+func (f *formatter) writePostfixTerm(level int, postfix *ast.GrammarPostfixTerm) {
+	if postfix == nil {
+		f.writeLine(level, "<invalid_grammar_term>")
+		return
+	}
+	f.writeLine(level, "postfix("+postfix.LeftName+" = "+formatGrammarTerm(postfix.Seed)+"):")
+	for _, arm := range postfix.Arms {
+		f.writePostfixArm(level+1, arm)
+	}
+}
+
+func (f *formatter) writeBoundPrecedenceTerm(level int, name string, precedence *ast.GrammarPrecedenceTerm) {
+	if precedence == nil {
+		f.writeLine(level, name+" = <invalid_grammar_term>")
+		return
+	}
+	if len(precedence.Levels) != 0 {
+		f.writeLine(level, name+" = precedence("+precedence.Result+"):")
+		for _, levelDecl := range precedence.Levels {
+			f.writeNamedPrecedenceLevel(level+1, levelDecl)
+		}
+		return
+	}
+	f.writeLine(level, name+" = precedence("+precedence.LeftName+" = "+formatGrammarTerm(precedence.Seed)+"):")
+	for _, arm := range precedence.Arms {
+		f.writePrecedenceArm(level+1, arm)
+	}
+}
+
+func (f *formatter) writePrecedenceTerm(level int, precedence *ast.GrammarPrecedenceTerm) {
+	if precedence == nil {
+		f.writeLine(level, "<invalid_grammar_term>")
+		return
+	}
+	if len(precedence.Levels) != 0 {
+		f.writeLine(level, "precedence("+precedence.Result+"):")
+		for _, levelDecl := range precedence.Levels {
+			f.writeNamedPrecedenceLevel(level+1, levelDecl)
+		}
+		return
+	}
+	f.writeLine(level, "precedence("+precedence.LeftName+" = "+formatGrammarTerm(precedence.Seed)+"):")
+	for _, arm := range precedence.Arms {
+		f.writePrecedenceArm(level+1, arm)
+	}
+}
+
+func (f *formatter) writeNamedPrecedenceLevel(level int, levelDecl ast.GrammarPrecedenceLevel) {
+	if levelDecl.LeftName == "" {
+		if nested, ok := levelDecl.Seed.(*ast.GrammarPrecedenceTerm); ok {
+			f.writeBoundPrecedenceTerm(level, levelDecl.Name, nested)
+			return
+		}
+		f.writeLine(level, levelDecl.Name+" = "+formatGrammarTerm(levelDecl.Seed))
+		return
+	}
+	f.writeLine(level, levelDecl.Name+"("+levelDecl.LeftName+" = "+formatGrammarTerm(levelDecl.Seed)+"):")
+	for _, arm := range levelDecl.Arms {
+		f.writePrecedenceArm(level+1, arm)
+	}
+}
+
+func (f *formatter) writePrecedenceArm(level int, arm ast.GrammarPrecedenceArm) {
+	opText := formatGrammarTerm(arm.Op)
+	if arm.OpName != "" {
+		opText = arm.OpName + " = " + opText
+	}
+	parts := []string{opText}
+	for _, binding := range arm.Bindings {
+		parts = append(parts, binding.Name+" = "+formatGrammarTerm(binding.Term))
+	}
+	parts = append(parts, "-> "+formatExpr(arm.Value))
+	f.writeLine(level, strings.Join(parts, " "))
+}
+
+func (f *formatter) writePostfixArm(level int, arm ast.GrammarPostfixArm) {
+	opText := formatGrammarTerm(arm.Op)
+	if arm.OpName != "" {
+		opText = arm.OpName + " = " + opText
+	}
+	parts := []string{opText}
+	for _, binding := range arm.Bindings {
+		parts = append(parts, binding.Name+" = "+formatGrammarTerm(binding.Term))
+	}
+	parts = append(parts, "-> "+formatExpr(arm.Value))
+	f.writeLine(level, strings.Join(parts, " "))
 }
 
 func formatGrammarTerm(term ast.GrammarTerm) string {
@@ -443,6 +571,10 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 			options = append(options, formatGrammarTerm(option))
 		}
 		return "choice(" + strings.Join(options, ", ") + ")"
+	case *ast.GrammarExprTerm:
+		return "expr(" + formatExpr(n.Expr) + ")"
+	case *ast.GrammarAttemptTerm:
+		return "attempt(" + formatExpr(n.Expr) + ")"
 	case *ast.GrammarOptionalTerm:
 		return "optional(" + formatGrammarTerm(n.Term) + ")"
 	case *ast.GrammarListTerm:
@@ -450,7 +582,21 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 		if n.Separator != nil {
 			parts = append(parts, formatGrammarTerm(n.Separator))
 		}
+		if len(n.Until) != 0 {
+			untilParts := make([]string, 0, len(n.Until))
+			for _, stop := range n.Until {
+				untilParts = append(untilParts, formatGrammarTerm(stop))
+			}
+			parts = append(parts, "until("+strings.Join(untilParts, ", ")+")")
+		}
 		return "list(" + strings.Join(parts, ", ") + ")"
+	case *ast.GrammarPostfixTerm:
+		return "postfix(" + n.LeftName + " = " + formatGrammarTerm(n.Seed) + "):"
+	case *ast.GrammarPrecedenceTerm:
+		if len(n.Levels) != 0 {
+			return "precedence(" + n.Result + "):"
+		}
+		return "precedence(" + n.LeftName + " = " + formatGrammarTerm(n.Seed) + "):"
 	case *ast.GrammarBindTerm:
 		return n.Name + " = " + formatGrammarTerm(n.Term)
 	case *ast.GrammarReturnTerm:

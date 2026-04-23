@@ -16,6 +16,7 @@ const (
 	sourceExtension     = ".llcontext"
 	interfaceExtension  = ".llcontexti"
 	frontendIRExtension = ".llctxir"
+	loweredExtension    = ".lowered.llcontext"
 )
 
 func isSurfaceSourcePath(path string) bool {

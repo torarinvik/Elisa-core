@@ -11,6 +11,7 @@ import (
 
 	"llcontext/src/backend"
 	"llcontext/src/frontendir"
+	"llcontext/src/grammar"
 	"llcontext/src/interpreter"
 	"llcontext/src/unparse"
 )
@@ -92,6 +93,18 @@ func executeCompileServerRequest(req compileServerRequest) (compileServerRespons
 		var out bytes.Buffer
 		printFile(&out, file)
 		response.Output = out.String()
+	case emitLowered:
+		file, ok := parseLoadedProgram(program, &stderr)
+		if !ok {
+			return compileServerResponse{OK: false, Error: "frontend parse failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
+		}
+		response.Output = unparse.FormatFile(grammar.LowerFile(file))
+	case emitSemantic:
+		_, result, ok := analyzeLoadedProgram(program, &stderr)
+		if !ok {
+			return compileServerResponse{OK: false, Error: "frontend analysis failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
+		}
+		response.Output = generateSemanticReport(result)
 	case emitFmt:
 		file, ok := parseLoadedProgram(program, &stderr)
 		if !ok {
