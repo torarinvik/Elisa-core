@@ -133,6 +133,15 @@ Current test-oriented emit modes:
 - `-filter` is only supported for `tests`, `benches`, `fixtures`, `test-runner`, and `test`
 - filters are case-insensitive and accept substring matches, glob patterns such as `*beta*`, and comma-separated OR combinations
 
+Canonical frontend wrapper commands from the repository root:
+
+- `bash Code/llcontext_lua/test/run_tests.sh` runs the Lua frontend suite
+- `bash Code/llcontext_pascal/test/run_tests.sh` runs the Pascal frontend suite
+- `bash Code/llcontext_atpl/test/run_tests.sh` runs the ATPL frontend, runtime, and CLI fixture suites
+- `bash run_frontend_suites.sh` runs the Lua, Pascal, and ATPL frontend suites together
+
+For the broader ATPL validation sweep, including compiler-side Go tests and example-golden coverage, run `bash compiler/scripts/run_atpl_suites.sh` from the repository root.
+
 ## Emit mode quick reference
 
 In addition to the core `llvm`, `header`, `iface`, and project commands, the CLI also exposes several smaller helper emit modes:

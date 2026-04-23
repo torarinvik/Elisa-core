@@ -103,7 +103,7 @@ def run() -> void:
     signal MissingEffect
 `)
 	joined := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(joined, `unknown permission "MissingEffect"`) {
+	if !strings.Contains(joined, UnknownPermissionMessage("MissingEffect")) {
 		t.Fatalf("expected unknown signal effect error, got %v", result.Errors())
 	}
 }

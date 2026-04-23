@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"llcontext/src/semantic"
 )
 
 type fakeEvalOutcome struct {
@@ -54,7 +56,7 @@ func TestRunPlainREPLMatchesReferenceTranscript(t *testing.T) {
 	evaluator := &fakeEvaluator{outcomes: map[string]fakeEvalOutcome{
 		"x = 40\n": {result: EvalResult{Text: "nil", Kind: EvalKindNil}},
 		"x + 2\n":  {result: EvalResult{Text: "42", Kind: EvalKindNumber}},
-		"x\n":      {result: EvalResult{Text: "name error at 1:1: undefined identifier \"x\"", Kind: EvalKindOther}, err: errors.New("name error at 1:1: undefined identifier \"x\"")},
+		"x\n":      {result: EvalResult{Text: "name error at 1:1: " + semantic.UndefinedIdentifierMessage("x"), Kind: EvalKindOther}, err: errors.New("name error at 1:1: " + semantic.UndefinedIdentifierMessage("x"))},
 	}}
 
 	var stdout bytes.Buffer
@@ -77,7 +79,7 @@ func TestRunPlainREPLMatchesReferenceTranscript(t *testing.T) {
 			t.Fatalf("expected stdout to contain %q, got:\n%s", check, stdout.String())
 		}
 	}
-	if !strings.Contains(stderr.String(), "name error at 1:1: undefined identifier \"x\"") {
+	if !strings.Contains(stderr.String(), "name error at 1:1: "+semantic.UndefinedIdentifierMessage("x")) {
 		t.Fatalf("expected stderr to contain detailed undefined identifier diagnostic, got:\n%s", stderr.String())
 	}
 }

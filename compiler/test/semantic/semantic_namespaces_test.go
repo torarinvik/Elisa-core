@@ -73,7 +73,7 @@ def run() -> int:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "undefined identifier \"inc\"") {
+	if !strings.Contains(all, semantic.UndefinedIdentifierMessage("inc")) {
 		t.Fatalf("expected undefined identifier diagnostic, got:\n%s", all)
 	}
 }

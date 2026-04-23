@@ -236,7 +236,7 @@ func (a *Analyzer) resolvePermissionRefs(refs []ast.PermissionRef, report bool) 
 		permission, _, ok := a.lookupVisiblePermission(ref.Name)
 		if !ok {
 			if report {
-				a.errorf(ref.Position, "unknown permission %q", ref.Name)
+				a.errorf(ref.Position, "%s", UnknownPermissionMessage(ref.Name))
 			}
 			continue
 		}

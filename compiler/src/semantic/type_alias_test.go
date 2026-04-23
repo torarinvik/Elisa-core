@@ -41,7 +41,17 @@ type NameId = u32
 type NameId = usize
 `)
 	joined := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(joined, `duplicate type "NameId"`) {
+	if !strings.Contains(joined, DuplicateTypeMessage("NameId")) {
 		t.Fatalf("expected duplicate type alias diagnostic, got:\n%s", joined)
+	}
+}
+
+func TestTypeAliasUnknownTargetTypeErrors(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "type_alias_unknown_target.llcontext", `
+type NameId = MissingType
+`)
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, UnknownTypeMessage("MissingType")) {
+		t.Fatalf("expected unknown type alias diagnostic, got:\n%s", joined)
 	}
 }

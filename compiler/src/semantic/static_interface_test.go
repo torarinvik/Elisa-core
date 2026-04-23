@@ -1,6 +1,9 @@
 package semantic
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestAnalyzeStaticInterfaceZeroArgMethodCall(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "static_interface_zero_arg.llcontext", `
@@ -184,5 +187,20 @@ def use_pair[B: Builder](value: int) -> B.Node:
 
 	if len(result.Errors()) != 0 {
 		t.Fatalf("unexpected semantic errors: %v", result.Errors())
+	}
+}
+
+func TestAnalyzeStaticInterfaceRejectsUnknownInterface(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "static_interface_unknown.llcontext", `
+struct BuilderTag:
+    tag: int
+
+impl MissingBuilder for BuilderTag:
+    def state() -> int:
+        return 1
+`)
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, UnknownInterfaceMessage("MissingBuilder")) {
+		t.Fatalf("expected unknown interface diagnostic, got:\n%s", joined)
 	}
 }

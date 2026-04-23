@@ -88,6 +88,29 @@ func TestParseRejectsLegacyReverseRangeLoopSyntax(t *testing.T) {
 	}
 }
 
+func TestAnalyzeRejectsDuplicateLocalBinding(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "duplicate_local_binding.llcontext", `def build() -> i64:
+    value: i64 = 1
+    value: i64 = 2
+    return value
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, DuplicateLocalMessage("value", SymbolLocal)) {
+		t.Fatalf("expected duplicate local diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeRejectsDuplicateGlobalDeclaration(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "duplicate_global_declaration.llcontext", `
+global answer: i64 = 1
+global answer: i64 = 2
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, DuplicateDeclarationMessage("answer", SymbolGlobal)) {
+		t.Fatalf("expected duplicate global diagnostic, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeStoreAndDictSugar(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "store_dict_sugar.llcontext", `
 store PendingGotoStore:

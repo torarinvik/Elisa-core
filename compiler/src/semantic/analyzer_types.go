@@ -30,7 +30,7 @@ func (a *Analyzer) errorLegacyBuiltinReplacement(pos lexer.Pos, oldName, replace
 
 func (a *Analyzer) defineGlobal(sym *Symbol, pos lexer.Pos) {
 	if existing, ok := a.globalScope.Define(sym); !ok {
-		a.errorf(pos, "duplicate declaration %q (already defined as %s)", existing.Name, existing.Kind)
+		a.errorf(pos, "%s", DuplicateDeclarationMessage(existing.Name, existing.Kind))
 	}
 }
 
@@ -39,7 +39,7 @@ func (a *Analyzer) defineLocal(sym *Symbol, pos lexer.Pos) {
 		return
 	}
 	if existing, ok := a.currentScope.Define(sym); !ok {
-		a.errorf(pos, "duplicate local %q (already defined as %s)", existing.Name, existing.Kind)
+		a.errorf(pos, "%s", DuplicateLocalMessage(existing.Name, existing.Kind))
 		return
 	}
 	a.trackAffineValueSymbol(sym)
@@ -51,7 +51,7 @@ func (a *Analyzer) defineLocalInScope(scope *Scope, sym *Symbol, pos lexer.Pos) 
 		return
 	}
 	if existing, ok := scope.Define(sym); !ok {
-		a.errorf(pos, "duplicate local %q (already defined as %s)", existing.Name, existing.Kind)
+		a.errorf(pos, "%s", DuplicateLocalMessage(existing.Name, existing.Kind))
 		return
 	}
 	a.trackAffineValueSymbol(sym)
@@ -410,7 +410,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		if t, ok := a.resolveNamedVariantWitnessType(n); ok {
 			return t
 		}
-		a.errorf(n.Pos(), "unknown type %q", n.Name)
+		a.errorf(n.Pos(), "%s", UnknownTypeMessage(n.Name))
 		return invalidType
 	case *ast.StateSetTypeExpr:
 		a.errorf(n.Pos(), "state unions like %q are only valid as named struct state arguments", strings.Join(n.Cases, " | "))
@@ -550,7 +550,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		args := make([]Type, 0, len(n.Args))
 		base, _, ok := a.lookupVisibleType(n.Name)
 		if !ok {
-			a.errorf(n.Pos(), "unknown type %q", n.Name)
+			a.errorf(n.Pos(), "%s", UnknownTypeMessage(n.Name))
 			return invalidType
 		}
 		switch base := base.(type) {
@@ -1181,7 +1181,7 @@ func (a *Analyzer) resolveGenericArgForParam(expr ast.TypeExpr, param ast.Generi
 				var ok bool
 				iface, _, ok = a.lookupVisibleStaticInterface(param.InterfaceBound)
 				if !ok || iface == nil {
-					a.errorf(expr.Pos(), "unknown interface %q", param.InterfaceBound)
+					a.errorf(expr.Pos(), "%s", UnknownInterfaceMessage(param.InterfaceBound))
 					return invalidType
 				}
 			}
@@ -1443,7 +1443,7 @@ func (a *Analyzer) withGenericParams(params []ast.GenericParam, args []Type, fn 
 			if param.InterfaceBound != "" {
 				iface, _, ok := a.lookupVisibleStaticInterface(param.InterfaceBound)
 				if !ok || iface == nil {
-					a.errorf(param.Position, "unknown interface %q", param.InterfaceBound)
+					a.errorf(param.Position, "%s", UnknownInterfaceMessage(param.InterfaceBound))
 				} else {
 					typeInterfaces[param.Name] = iface
 				}

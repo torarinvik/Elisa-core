@@ -100,7 +100,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			result = rewriteDefaultType
 			return
 		}
-		a.errorf(n.Pos(), "undefined identifier %q", n.Name)
+		a.errorf(n.Pos(), "%s", UndefinedIdentifierMessage(n.Name))
 		result = invalidType
 		return
 	case *ast.IntLit:
@@ -5158,7 +5158,7 @@ func (a *Analyzer) analyzeResolvedCallExpr(expr *ast.CallExpr, ft *FuncType, ord
 			var ok bool
 			iface, _, ok = a.lookupVisibleStaticInterface(param.InterfaceBound)
 			if !ok || iface == nil {
-				a.errorf(expr.Pos(), "unknown interface %q", param.InterfaceBound)
+				a.errorf(expr.Pos(), "%s", UnknownInterfaceMessage(param.InterfaceBound))
 				continue
 			}
 		}

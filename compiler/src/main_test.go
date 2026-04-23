@@ -2331,6 +2331,18 @@ func TestRunCLIListsAnnotatedFunctionsByKind(t *testing.T) {
 			contains: []string{"alpha_case\tfunc() -> void"},
 			omits:    []string{"bench_hot_loop", "shared_seed"},
 		},
+		{
+			name:     "benches filtered",
+			args:     []string{"-emit", "benches", "-filter", "hot", fixturePath},
+			contains: []string{"bench_hot_loop\tfunc() -> void"},
+			omits:    []string{"alpha_case", "shared_seed"},
+		},
+		{
+			name:     "fixtures filtered",
+			args:     []string{"-emit", "fixtures", "-filter", "seed", fixturePath},
+			contains: []string{"shared_seed\tfunc() -> int"},
+			omits:    []string{"alpha_case", "bench_hot_loop"},
+		},
 	}
 
 	for _, test := range tests {

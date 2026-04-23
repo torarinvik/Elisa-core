@@ -769,7 +769,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					if st, ok := existing.(*StructType); ok && st.Builtin && isBuiltinRuntimeStructName(n.Name) {
 						return
 					}
-					a.errorf(n.Pos(), "duplicate type %q", qualifiedName)
+					a.errorf(n.Pos(), "%s", DuplicateTypeMessage(qualifiedName))
 					return
 				}
 				st := &StructType{
@@ -788,7 +788,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 			case *ast.StoreDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				if _, exists := a.namedTypes[qualifiedName]; exists {
-					a.errorf(n.Pos(), "duplicate type %q", qualifiedName)
+					a.errorf(n.Pos(), "%s", DuplicateTypeMessage(qualifiedName))
 					return
 				}
 				storeFields := make([]ast.FieldDecl, 0, len(n.Fields))
@@ -818,14 +818,14 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 			case *ast.ConstEnumDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				if _, exists := a.namedTypes[qualifiedName]; exists {
-					a.errorf(n.Pos(), "duplicate type %q", qualifiedName)
+					a.errorf(n.Pos(), "%s", DuplicateTypeMessage(qualifiedName))
 					return
 				}
 				a.namedTypes[qualifiedName] = &ConstEnumType{Name: qualifiedName, MemberMap: map[string]*ConstEnumMember{}, Decl: n}
 			case *ast.EnumDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				if _, exists := a.namedTypes[qualifiedName]; exists {
-					a.errorf(n.Pos(), "duplicate type %q", qualifiedName)
+					a.errorf(n.Pos(), "%s", DuplicateTypeMessage(qualifiedName))
 					return
 				}
 				enumType := &EnumType{Name: qualifiedName, Packed: n.Packed, Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: n}
@@ -833,7 +833,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 				if n.Packed {
 					tagName := packedEnumTagTypeName(qualifiedName)
 					if _, exists := a.namedTypes[tagName]; exists {
-						a.errorf(n.Pos(), "duplicate type %q", tagName)
+						a.errorf(n.Pos(), "%s", DuplicateTypeMessage(tagName))
 						return
 					}
 					tagType := &ConstEnumType{Name: tagName, Storage: a.namedTypes["u32"], MemberMap: map[string]*ConstEnumMember{}}
@@ -841,7 +841,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					a.namedTypes[tagName] = tagType
 					storeName := packedEnumStoreTypeName(qualifiedName)
 					if _, exists := a.namedTypes[storeName]; exists {
-						a.errorf(n.Pos(), "duplicate type %q", storeName)
+						a.errorf(n.Pos(), "%s", DuplicateTypeMessage(storeName))
 						return
 					}
 					storeType := &PackedEnumStoreType{Name: storeName, Enum: enumType}
@@ -851,20 +851,20 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 			case *ast.TreeDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				if _, exists := a.namedTypes[qualifiedName]; exists {
-					a.errorf(n.Pos(), "duplicate type %q", qualifiedName)
+					a.errorf(n.Pos(), "%s", DuplicateTypeMessage(qualifiedName))
 					return
 				}
 				treeType := &TreeType{Name: qualifiedName, Common: map[string]Field{}, MemberTypes: map[string]Type{}, Decl: n}
 				a.namedTypes[qualifiedName] = treeType
 				nodeQualifiedName := treeMemberTypeName(qualifiedName, "Node")
 				if _, exists := a.namedTypes[nodeQualifiedName]; exists {
-					a.errorf(n.Pos(), "duplicate type %q", nodeQualifiedName)
+					a.errorf(n.Pos(), "%s", DuplicateTypeMessage(nodeQualifiedName))
 					return
 				}
 				nodeType := &TreeNodeType{Name: nodeQualifiedName, Family: treeType}
 				kindName := treeNodeKindTypeName(nodeQualifiedName)
 				if _, exists := a.namedTypes[kindName]; exists {
-					a.errorf(n.Pos(), "duplicate type %q", kindName)
+					a.errorf(n.Pos(), "%s", DuplicateTypeMessage(kindName))
 					return
 				}
 				kindType := &ConstEnumType{Name: kindName, Storage: a.namedTypes["u32"], MemberMap: map[string]*ConstEnumMember{}}
@@ -875,7 +875,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 				treeType.MemberTypes["Node"] = nodeType
 				storeName := treeStoreTypeName(qualifiedName)
 				if _, exists := a.namedTypes[storeName]; exists {
-					a.errorf(n.Pos(), "duplicate type %q", storeName)
+					a.errorf(n.Pos(), "%s", DuplicateTypeMessage(storeName))
 					return
 				}
 				storeType := &TreeStoreType{Name: storeName, Family: treeType}
@@ -889,7 +889,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					}
 					memberQualifiedName := treeMemberTypeName(qualifiedName, memberName)
 					if _, exists := a.namedTypes[memberQualifiedName]; exists {
-						a.errorf(member.Pos(), "duplicate type %q", memberQualifiedName)
+						a.errorf(member.Pos(), "%s", DuplicateTypeMessage(memberQualifiedName))
 						continue
 					}
 					var memberType Type
@@ -898,7 +898,7 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 						categoryType := &TreeCategoryType{Name: memberQualifiedName, Family: treeType, Role: a.treeCategoryRole(m), Common: map[string]Field{}, VariantMap: map[string]*EnumVariant{}, Decl: m}
 						kindName := treeCategoryKindTypeName(memberQualifiedName)
 						if _, exists := a.namedTypes[kindName]; exists {
-							a.errorf(member.Pos(), "duplicate type %q", kindName)
+							a.errorf(member.Pos(), "%s", DuplicateTypeMessage(kindName))
 							continue
 						}
 						kindType := &ConstEnumType{Name: kindName, Storage: a.namedTypes["u32"], MemberMap: map[string]*ConstEnumMember{}}
@@ -918,14 +918,14 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 			case *ast.ExternTypeDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				if _, exists := a.namedTypes[qualifiedName]; exists {
-					a.errorf(n.Pos(), "duplicate type %q", qualifiedName)
+					a.errorf(n.Pos(), "%s", DuplicateTypeMessage(qualifiedName))
 					return
 				}
 				a.namedTypes[qualifiedName] = &OpaqueType{Name: qualifiedName}
 			case *ast.ErrorDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				if _, exists := a.namedTypes[qualifiedName]; exists {
-					a.errorf(n.Pos(), "duplicate type %q", qualifiedName)
+					a.errorf(n.Pos(), "%s", DuplicateTypeMessage(qualifiedName))
 					return
 				}
 				seenTags := map[string]bool{}

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"fmt"
 	"io/fs"
+	"llcontext/src/semantic"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -133,7 +134,7 @@ func TestATPLCLIReplCommandsAndState(t *testing.T) {
 			t.Fatalf("expected REPL stdout to contain %q, got:\n%s", check, stdout)
 		}
 	}
-	if !strings.Contains(stderr, "name error at 1:1: undefined identifier \"x\"") {
+	if !strings.Contains(stderr, "name error at 1:1: "+semantic.UndefinedIdentifierMessage("x")) {
 		t.Fatalf("expected REPL stderr to contain detailed undefined identifier diagnostic after reset, got:\n%s", stderr)
 	}
 }
@@ -203,7 +204,7 @@ func TestATPLCLIReplReloadResetsLastLoadedFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ATPL REPL reload run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
-	if !strings.Contains(stderr, "name error at 1:1: undefined identifier \"scratch\"") {
+	if !strings.Contains(stderr, "name error at 1:1: "+semantic.UndefinedIdentifierMessage("scratch")) {
 		t.Fatalf("expected reload to clear scratch binding, got stderr:\n%s", stderr)
 	}
 	if strings.Count(stdout, "atpl> 40") < 2 {
@@ -222,7 +223,7 @@ func TestATPLCLIReportsDetailedSTDINErrors(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("expected no stdout output, got:\n%s", stdout)
 	}
-	if got := strings.TrimSpace(stderr); got != "name error at 1:1: undefined identifier \"x\"" {
+	if got := strings.TrimSpace(stderr); got != "name error at 1:1: "+semantic.UndefinedIdentifierMessage("x") {
 		t.Fatalf("expected detailed undefined identifier diagnostic, got %q", got)
 	}
 }

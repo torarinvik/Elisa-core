@@ -224,7 +224,7 @@ func TestAnalyzeRejectsParamReferencedInDefault(t *testing.T) {
     return x + y
 `)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, "undefined identifier \"x\"") {
+	if !strings.Contains(all, UndefinedIdentifierMessage("x")) {
 		t.Fatalf("expected undefined identifier diagnostic for param-referencing default, got:\n%s", all)
 	}
 }

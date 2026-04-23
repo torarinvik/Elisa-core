@@ -269,7 +269,7 @@ func TestAnalyzeRejectsDuplicateTreeMemberTypes(t *testing.T) {
         value: i64
 `)
 	errText := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(errText, `duplicate type "Lua.Expr"`) {
+	if !strings.Contains(errText, DuplicateTypeMessage("Lua.Expr")) {
 		t.Fatalf("expected duplicate tree member type diagnostic, got:\n%s", errText)
 	}
 }

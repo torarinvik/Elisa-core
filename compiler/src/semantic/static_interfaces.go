@@ -348,7 +348,7 @@ func (a *Analyzer) collectStaticImpls(decls []scopedDecl) {
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
 			iface, interfaceName, ok := a.lookupVisibleStaticInterface(decl.InterfaceName)
 			if !ok || iface == nil {
-				a.errorf(decl.Pos(), "unknown interface %q", decl.InterfaceName)
+				a.errorf(decl.Pos(), "%s", UnknownInterfaceMessage(decl.InterfaceName))
 				return
 			}
 			receiver := a.resolveType(decl.ForType)

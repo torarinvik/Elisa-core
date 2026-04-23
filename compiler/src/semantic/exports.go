@@ -14,7 +14,7 @@ func (a *Analyzer) collectTypeAliases(decls []scopedDecl) {
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
 			qualifiedName := joinQualifiedName(scoped.Namespace, aliasDecl.Name)
 			if _, exists := a.namedTypes[qualifiedName]; exists {
-				a.errorf(aliasDecl.Pos(), "duplicate type %q", qualifiedName)
+				a.errorf(aliasDecl.Pos(), "%s", DuplicateTypeMessage(qualifiedName))
 				return
 			}
 			resolved := a.resolveType(aliasDecl.Target)
@@ -38,7 +38,7 @@ func (a *Analyzer) collectExportTypeAliases(decls []scopedDecl) {
 		}
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
 			if _, exists := a.namedTypes[exportDecl.Alias]; exists {
-				a.errorf(exportDecl.Pos(), "duplicate type %q", exportDecl.Alias)
+				a.errorf(exportDecl.Pos(), "%s", DuplicateTypeMessage(exportDecl.Alias))
 				return
 			}
 			resolved := a.resolveType(exportDecl.ExportedType)
@@ -84,7 +84,7 @@ func (a *Analyzer) analyzeExports(decls []scopedDecl) {
 
 func (a *Analyzer) analyzeExportFunc(decl *ast.ExportFuncDecl, seenPublicNames map[string]bool) {
 	if seenPublicNames[decl.Name] {
-		a.errorf(decl.Pos(), "duplicate export name %q", decl.Name)
+		a.errorf(decl.Pos(), "%s", DuplicateExportNameMessage(decl.Name))
 		return
 	}
 	if existing, ok := a.globalScope.Lookup(decl.Name); ok {
@@ -100,7 +100,7 @@ func (a *Analyzer) analyzeExportFunc(decl *ast.ExportFuncDecl, seenPublicNames m
 
 	targetSym, _, ok := a.lookupVisibleGlobal(decl.TargetName)
 	if !ok {
-		a.errorf(decl.Pos(), "export target %q is undefined", decl.TargetName)
+		a.errorf(decl.Pos(), "%s", UndefinedExportTargetMessage(decl.TargetName))
 		return
 	}
 	targetBase, ok := targetSym.Type.(*FuncType)
@@ -167,7 +167,7 @@ func (a *Analyzer) analyzeExportGlobal(decl *ast.ExportGlobalDecl, seenPublicNam
 		publicName = decl.TargetName
 	}
 	if seenPublicNames[publicName] {
-		a.errorf(decl.Pos(), "duplicate export name %q", publicName)
+		a.errorf(decl.Pos(), "%s", DuplicateExportNameMessage(publicName))
 		return
 	}
 	if existing, ok := a.globalScope.Lookup(publicName); ok {
@@ -179,7 +179,7 @@ func (a *Analyzer) analyzeExportGlobal(decl *ast.ExportGlobalDecl, seenPublicNam
 
 	targetSym, _, ok := a.lookupVisibleGlobal(decl.TargetName)
 	if !ok {
-		a.errorf(decl.Pos(), "export target %q is undefined", decl.TargetName)
+		a.errorf(decl.Pos(), "%s", UndefinedExportTargetMessage(decl.TargetName))
 		return
 	}
 	if targetSym.Kind != SymbolGlobal {
