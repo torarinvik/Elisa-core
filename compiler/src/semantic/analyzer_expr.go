@@ -8446,7 +8446,7 @@ func (a *Analyzer) resolveProjectedFieldBorrowSourceExprFromCall(call *ast.CallE
 		case step.Field != "":
 			current = &ast.FieldExpr{Position: call.Position, Object: current, Field: step.Field}
 		case step.Index != nil:
-			current = &ast.IndexExpr{Position: call.Position, Object: current, Index: &ast.IntLit{Position: call.Position, Value: strconv.FormatInt(*step.Index, 10), Suffix: "u"}}
+			current = &ast.IndexExpr{Position: call.Position, Object: current, Index: &ast.IntLit{Position: call.Position, Value: strconv.FormatInt(*step.Index, 10)}}
 		default:
 			return nil, false
 		}

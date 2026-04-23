@@ -127,6 +127,7 @@ type GrammarTokenTerm struct {
 type GrammarCallTerm struct {
 	Position lexer.Pos
 	Name     string
+	Explicit bool
 	Args     []Expr
 }
 

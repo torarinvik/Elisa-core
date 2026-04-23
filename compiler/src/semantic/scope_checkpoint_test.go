@@ -157,9 +157,9 @@ def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         pending: mutable PendingGotoStore = zeroed
-        pending.push(1usize, 2usize)
-        pending.push(3usize, 4usize)
-        total: mutable usize = 0usize
+        pending.push(1, 2)
+        pending.push(3, 4)
+        total: mutable usize = 0
         for row in pending.rows():
             total <- total + row.name_key + row.depth
         for index, row in enumerate(pending.rows()):
@@ -183,9 +183,9 @@ def build(owner: Arena) -> void:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         pending: mutable PendingGotoStore = zeroed
-        pending.push(1usize, 2usize)
+        pending.push(1, 2)
         for row in pending.rows():
-            row.name_key <- 9usize
+            row.name_key <- 9
         for ref row in pending.rows():
             pass
 `)

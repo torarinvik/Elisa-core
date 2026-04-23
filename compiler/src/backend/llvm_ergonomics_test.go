@@ -14,9 +14,9 @@ def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         pending: mutable PendingGotoStore = zeroed
-        pending.push(1usize, 2usize)
-        pending.push(3usize, 4usize)
-        total: mutable usize = 0usize
+        pending.push(1, 2)
+        pending.push(3, 4)
+        total: mutable usize = 0
         for row in pending.rows():
             let {name_key, depth} = row
             total <- total + name_key + depth

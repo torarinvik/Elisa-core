@@ -28,8 +28,8 @@ def build(owner: Arena) -> usize:
     in alloc:
         pending: mutable PendingGotoStore = zeroed
 		pending.reserve(8)
-        pending.push(1u32, 2u32)
-        pending.push(3u32, 4u32)
+		pending.push(1, 2)
+		pending.push(3, 4)
 		pending.truncate(1)
         pending.clear()
         values: mutable dict[dstr[key_shape], i64] = zeroed
@@ -80,9 +80,9 @@ def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         pending: mutable PendingGotoStore = zeroed
-        pending.push(1usize, 2usize)
-        pending.push(3usize, 4usize)
-        total: mutable usize = 0usize
+		pending.push(1, 2)
+		pending.push(3, 4)
+		total: mutable usize = 0
         for row in pending.rows():
             total <- total + row.name_key + row.depth
         for index, row in enumerate(pending.rows()):

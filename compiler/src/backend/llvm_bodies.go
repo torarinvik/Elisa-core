@@ -3688,7 +3688,7 @@ func (s *functionState) emitParallelForWorkerFunction(stmt *ast.ParallelForStmt,
 		Position: stmt.Position,
 		Op:       lexer.TOKEN_PLUSEQ,
 		Target:   &ast.Ident{Position: stmt.Position, Name: indexLocalName},
-		Value:    &ast.IntLit{Position: stmt.Position, Value: "1", Suffix: "u"},
+		Value:    &ast.IntLit{Position: stmt.Position, Value: "1"},
 	})
 	body = append(body, &ast.WhileStmt{Position: stmt.Position, Hint: ast.BranchHintNone, Cond: condExpr, Body: loopBody})
 

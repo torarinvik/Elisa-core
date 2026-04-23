@@ -429,6 +429,9 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 	case *ast.GrammarTokenTerm:
 		return strconv.Quote(n.Value)
 	case *ast.GrammarCallTerm:
+		if !n.Explicit && len(n.Args) == 0 {
+			return n.Name
+		}
 		args := make([]string, 0, len(n.Args))
 		for _, arg := range n.Args {
 			args = append(args, formatExpr(arg))
