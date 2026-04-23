@@ -1346,6 +1346,8 @@ func (ctx *statefulLowerContext) termCanFail(term ast.GrammarTerm) bool {
 		return false
 	case *ast.GrammarSeparatedTerm:
 		return false
+	case *ast.GrammarSuffixTerm:
+		return ctx.termCanFail(n.Seed)
 	case *ast.GrammarRecoverTerm:
 		return false
 	case *ast.GrammarPostfixTerm:
@@ -1515,6 +1517,8 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 		return ctx.lowerListAttempt(repeatTermAsList(n))
 	case *ast.GrammarSeparatedTerm:
 		return ctx.lowerListAttempt(separatedTermAsList(n))
+	case *ast.GrammarSuffixTerm:
+		return ctx.lowerSuffixAttempt(n)
 	case *ast.GrammarPostfixTerm:
 		return ctx.lowerPostfixAttempt(n)
 	case *ast.GrammarPrecedenceTerm:
@@ -1608,6 +1612,32 @@ func (ctx *statefulLowerContext) lowerRecoveredAttempt(term *ast.GrammarRecoverT
 	elseBranch = append(elseBranch, &ast.AssignStmt{Position: term.Position, Target: valueIdent, Value: fallbackValue})
 	stmts = append(stmts, &ast.IfStmt{Position: term.Position, Cond: inner.Matched, Then: thenBranch, Else: elseBranch})
 	return loweredAttempt{Stmts: stmts, Matched: &ast.BoolLit{Position: term.Position, Value: true}, Committed: &ast.BoolLit{Position: term.Position, Value: false}, Value: valueIdent}
+}
+
+func (ctx *statefulLowerContext) lowerSuffixAttempt(term *ast.GrammarSuffixTerm) loweredAttempt {
+	seedAttempt := ctx.lowerAttempt(term.Seed)
+	leftType := ctx.inferTermType(term.Seed)
+	if leftType == nil {
+		leftType = grammarResolvedValueTypeExpr(term.Position, ctx.production.ReturnType)
+	}
+	stopName := ctx.fresh("suffix_stop")
+	matchedName := ctx.fresh("suffix_matched")
+	committedName := ctx.fresh("suffix_committed")
+	snapshotName := ctx.fresh("suffix_cursor")
+	leftName := term.LeftName
+	stmts := append([]ast.Stmt{}, seedAttempt.Stmts...)
+	stmts = append(stmts,
+		&ast.VarDeclStmt{Position: term.Position, Name: matchedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: seedAttempt.Matched},
+		&ast.VarDeclStmt{Position: term.Position, Name: committedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
+	)
+	stmts = append(stmts, markCommittedStmts(committedName, term.Position, seedAttempt.Committed)...)
+	stmts = append(stmts,
+		&ast.VarDeclStmt{Position: term.Position, Name: leftName, Mutable: true, Type: leftType, Value: seedAttempt.Value},
+		&ast.VarDeclStmt{Position: term.Position, Name: stopName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
+		&ast.VarDeclStmt{Position: term.Position, Name: snapshotName, Value: stateCursorExpr(ctx.cursorReceiver, ctx.cursorField, term.Position)},
+	)
+	stmts = append(stmts, ctx.lowerPostfixArms(term.Arms, snapshotName, stopName, matchedName, committedName, leftName)...)
+	return loweredAttempt{Stmts: stmts, Matched: &ast.Ident{Position: term.Position, Name: matchedName}, Committed: &ast.Ident{Position: term.Position, Name: committedName}, Value: &ast.Ident{Position: term.Position, Name: leftName}}
 }
 
 func (ctx *statefulLowerContext) lowerChoiceAttempt(term *ast.GrammarChoiceTerm) loweredAttempt {
@@ -2112,6 +2142,8 @@ func (ctx *statefulLowerContext) inferTermType(term ast.GrammarTerm) ast.TypeExp
 		return listTypeExpr(n.Position, ctx.inferTermType(n.Elem))
 	case *ast.GrammarSeparatedTerm:
 		return listTypeExpr(n.Position, ctx.inferTermType(n.Elem))
+	case *ast.GrammarSuffixTerm:
+		return ctx.inferTermType(n.Seed)
 	case *ast.GrammarPostfixTerm:
 		return ctx.inferTermType(n.Seed)
 	case *ast.GrammarPrecedenceTerm:
@@ -2377,6 +2409,8 @@ func lowerTermExpr(ctx lowerContext, term ast.GrammarTerm) ast.Expr {
 			args = append(args, lowerGrammarUntilExpr(n.Position, n.Until))
 		}
 		return &ast.CallExpr{Position: n.Position, Func: &ast.Ident{Position: n.Position, Name: "separated"}, Args: args}
+	case *ast.GrammarSuffixTerm:
+		return lowerTermExpr(ctx, n.Seed)
 	case *ast.GrammarPostfixTerm:
 		return lowerTermExpr(ctx, n.Seed)
 	case *ast.GrammarPrecedenceTerm:

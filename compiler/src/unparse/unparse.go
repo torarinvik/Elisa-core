@@ -485,6 +485,10 @@ func (f *formatter) writeGrammarTerm(level int, term ast.GrammarTerm) {
 			f.writeLine(level, "."+tokenKind.Kind+"("+bind.Name+")")
 			return
 		}
+		if suffix, ok := bind.Term.(*ast.GrammarSuffixTerm); ok {
+			f.writeBoundSuffixTerm(level, bind.Name, suffix)
+			return
+		}
 		if postfix, ok := bind.Term.(*ast.GrammarPostfixTerm); ok {
 			f.writeBoundPostfixTerm(level, bind.Name, postfix)
 			return
@@ -493,6 +497,10 @@ func (f *formatter) writeGrammarTerm(level int, term ast.GrammarTerm) {
 			f.writeBoundPrecedenceTerm(level, bind.Name, precedence)
 			return
 		}
+	}
+	if suffix, ok := term.(*ast.GrammarSuffixTerm); ok {
+		f.writeSuffixTerm(level, suffix)
+		return
 	}
 	if postfix, ok := term.(*ast.GrammarPostfixTerm); ok {
 		f.writePostfixTerm(level, postfix)
@@ -503,6 +511,28 @@ func (f *formatter) writeGrammarTerm(level int, term ast.GrammarTerm) {
 		return
 	}
 	f.writeLine(level, formatGrammarTerm(term))
+}
+
+func (f *formatter) writeBoundSuffixTerm(level int, name string, suffix *ast.GrammarSuffixTerm) {
+	if suffix == nil {
+		f.writeLine(level, name+" = <invalid_grammar_term>")
+		return
+	}
+	f.writeLine(level, name+" = suffix("+suffix.LeftName+" = "+formatGrammarTerm(suffix.Seed)+"):")
+	for _, arm := range suffix.Arms {
+		f.writePostfixArm(level+1, arm)
+	}
+}
+
+func (f *formatter) writeSuffixTerm(level int, suffix *ast.GrammarSuffixTerm) {
+	if suffix == nil {
+		f.writeLine(level, "<invalid_grammar_term>")
+		return
+	}
+	f.writeLine(level, "suffix("+suffix.LeftName+" = "+formatGrammarTerm(suffix.Seed)+"):")
+	for _, arm := range suffix.Arms {
+		f.writePostfixArm(level+1, arm)
+	}
 }
 
 func (f *formatter) writeBoundPostfixTerm(level int, name string, postfix *ast.GrammarPostfixTerm) {
@@ -684,6 +714,8 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 			parts = append(parts, "until("+strings.Join(untilParts, ", ")+")")
 		}
 		return "separated(" + strings.Join(parts, ", ") + ")"
+	case *ast.GrammarSuffixTerm:
+		return "suffix(" + n.LeftName + " = " + formatGrammarTerm(n.Seed) + "):"
 	case *ast.GrammarPostfixTerm:
 		return "postfix(" + n.LeftName + " = " + formatGrammarTerm(n.Seed) + "):"
 	case *ast.GrammarPrecedenceTerm:

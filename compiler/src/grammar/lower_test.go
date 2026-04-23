@@ -935,6 +935,33 @@ func TestLowerFileStatefulPostfixTermBuildsLoopAndBindings(t *testing.T) {
 	}
 }
 
+func TestLowerFileStatefulSuffixTermRunsArmsOnce(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend:
+    condition(state: mutable ParserState&) -> Token:
+        result = suffix(left = token(TokenKind.IDENT)):
+			op = choice("=", ">") right = token(TokenKind.IDENT) -> right
+        return result
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"left: mutable Token = __grammar_token_condition_PascalFrontend_token_",
+		"__grammar_suffix_cursor_condition_PascalFrontend_suffix_cursor_",
+		"state.expect(\"=\")",
+		"state.expect(\">\")",
+		"op = __grammar_choice_value_condition_PascalFrontend_choice_value_",
+		"right = __grammar_token_condition_PascalFrontend_token_",
+		"result = left",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered suffix production to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Contains(formatted, "while (not __grammar_suffix_stop_condition_PascalFrontend_suffix_stop_") {
+		t.Fatalf("expected suffix term to avoid postfix loop, got:\n%s", formatted)
+	}
+}
+
 func TestLowerFileStatefulExprTermEvaluatesHelperExpression(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend:
     expression(state: mutable ParserState&) -> Token:

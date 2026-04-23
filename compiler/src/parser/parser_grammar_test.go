@@ -775,6 +775,49 @@ func TestParseGrammarDeclAllowsPostfixTerm(t *testing.T) {
 	}
 }
 
+func TestParseGrammarDeclAllowsSuffixTerm(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend:
+    condition(state: mutable ParserState&) -> Pascal.Expr:
+        node = suffix(left = state.expression()):
+			op = choice("=", "<>", "<=", "<", ">=", ">") right = state.expression() -> build_condition(left, op, right)
+        return node
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	bind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected first term to be suffix binding, got %T", decl.Productions[0].Terms[0])
+	}
+	suffix, ok := bind.Term.(*ast.GrammarSuffixTerm)
+	if !ok {
+		t.Fatalf("expected bound term to be suffix, got %T", bind.Term)
+	}
+	if suffix.LeftName != "left" {
+		t.Fatalf("expected suffix left name left, got %q", suffix.LeftName)
+	}
+	if len(suffix.Arms) != 1 {
+		t.Fatalf("expected one suffix arm, got %d", len(suffix.Arms))
+	}
+	if suffix.Arms[0].OpName != "op" {
+		t.Fatalf("expected suffix arm to bind op, got %q", suffix.Arms[0].OpName)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"node = suffix(left = state.expression()):",
+		"op = choice(\"=\", \"<>\", \"<=\", \"<\", \">=\", \">\") right = state.expression() -> build_condition(left, op, right)",
+		"return node",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestParseGrammarDeclAllowsExprTerm(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
     expression(state: mutable ParserState&) -> Token:
