@@ -654,6 +654,8 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 		return "precedence(" + n.LeftName + " = " + formatGrammarTerm(n.Seed) + "):"
 	case *ast.GrammarBindTerm:
 		return formatGrammarBinding(n)
+	case *ast.GrammarAssignTerm:
+		return n.Name + " <- " + formatGrammarTerm(n.Term)
 	case *ast.GrammarReturnTerm:
 		return "return " + formatExpr(n.Value)
 	default:

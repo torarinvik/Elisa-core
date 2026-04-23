@@ -184,6 +184,52 @@ func TestParseGrammarDeclAllowsUsesClauseAndPublicShorthandProduction(t *testing
 	}
 }
 
+func TestParseGrammarDeclAllowsAssignmentTerm(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend over Token using ParserState:
+    cursor parser
+    channel span: Span = combine_span($start.span, $end.span)
+    ident_span() -> Span:
+        .IDENT(tok)
+		span <- expr(tok.span)
+        return span
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	if len(decl.Productions) != 1 || len(decl.Productions[0].Terms) != 3 {
+		t.Fatalf("expected one production with three terms, got %#v", decl.Productions)
+	}
+	assign, ok := decl.Productions[0].Terms[1].(*ast.GrammarAssignTerm)
+	if !ok {
+		t.Fatalf("expected second term to be an assignment, got %T", decl.Productions[0].Terms[1])
+	}
+	if assign.Name != "span" {
+		t.Fatalf("expected assignment target span, got %q", assign.Name)
+	}
+	exprTerm, ok := assign.Term.(*ast.GrammarExprTerm)
+	if !ok {
+		t.Fatalf("expected assignment term to be expr(...), got %T", assign.Term)
+	}
+	if got := formatExprForTest(t, exprTerm.Expr); got != "tok.span" {
+		t.Fatalf("expected assignment value tok.span, got %q", got)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"channel span: Span = combine_span($start.span, $end.span)",
+		".IDENT(tok)",
+		"span <- expr(tok.span)",
+		"return span",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestParseGrammarDeclAllowsPassProduction(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar Pascal:
     declarations() -> Pascal.Decls:

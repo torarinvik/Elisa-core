@@ -30,6 +30,17 @@ def build() -> i64:
 	if all := strings.Join(result.Warnings(), "\n"); strings.Contains(all, `alloc_value`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected outer explicit grant to satisfy nested call, got:\n%s", all)
 	}
+	sym, ok := result.GlobalScope.Lookup("build")
+	if !ok {
+		t.Fatal("expected build symbol")
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected build function type, got %T", sym.Type)
+	}
+	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[Abort.Panic, Memory.Allocate]" {
+		t.Fatalf("expected inferred build permissions, got %q", got)
+	}
 }
 
 func TestDeclaredCallPermissionWithLocalGrantIsQuiet(t *testing.T) {
@@ -76,6 +87,17 @@ def build() -> void:
 `)
 	if all := strings.Join(result.Warnings(), "\n"); strings.Contains(all, `panic requires`) || strings.Contains(all, `explicit local effect grant`) {
 		t.Fatalf("expected outer explicit grant to satisfy nested panic, got:\n%s", all)
+	}
+	sym, ok := result.GlobalScope.Lookup("build")
+	if !ok {
+		t.Fatal("expected build symbol")
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected build function type, got %T", sym.Type)
+	}
+	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[Abort.Panic, Memory.Allocate]" {
+		t.Fatalf("expected inferred build permissions, got %q", got)
 	}
 }
 

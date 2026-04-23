@@ -1903,8 +1903,23 @@ func (a *Analyzer) validateMoveBindStore(pos lexer.Pos, valueExpr ast.Expr, actu
 
 func (a *Analyzer) analyzeCanStmt(stmt *ast.CanStmt) {
 	refs := a.resolvePermissionRefs(stmt.Permissions, true)
-	a.recordFunctionPermissionRefs(refs)
+	if !stmt.SuppressPermissionInference {
+		a.recordFunctionPermissionRefs(refs)
+		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
+		return
+	}
+	granted := grantedPermissionFamilies(permissionFamiliesFromRefs(refs))
+	savedUsedPermissions := a.currentFunctionUsedPermissions
+	savedUsedRefs := a.currentFunctionUsedPermissionRefs
+	a.currentFunctionUsedPermissions = map[string]bool{}
+	a.currentFunctionUsedPermissionRefs = nil
 	a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
+	bodyRefs := canonicalizePermissionRefs(a.currentFunctionUsedPermissionRefs)
+	remainingFamilies := missingGrantedPermissionFamilies(bodyRefs, granted)
+	remainingRefs := filterPermissionRefsByFamilies(bodyRefs, remainingFamilies)
+	a.currentFunctionUsedPermissions = savedUsedPermissions
+	a.currentFunctionUsedPermissionRefs = savedUsedRefs
+	a.recordFunctionPermissionRefs(remainingRefs)
 }
 
 func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {

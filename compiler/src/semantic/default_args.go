@@ -252,7 +252,7 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 		if n.Expr != nil && exprClone == nil {
 			return nil
 		}
-		return &ast.CanExpr{Position: n.Position, Expr: exprClone, Permissions: append([]ast.PermissionRef(nil), n.Permissions...)}
+		return &ast.CanExpr{Position: n.Position, Expr: exprClone, Permissions: append([]ast.PermissionRef(nil), n.Permissions...), SuppressPermissionInference: n.SuppressPermissionInference}
 	default:
 		return nil
 	}

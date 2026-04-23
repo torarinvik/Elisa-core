@@ -735,7 +735,7 @@ func grammarCanBlock(pos lexer.Pos, body []ast.Stmt) []ast.Stmt {
 	if len(body) == 0 {
 		return nil
 	}
-	return []ast.Stmt{&ast.CanStmt{Position: pos, Permissions: grammarDefaultPermissions(pos), Body: body}}
+	return []ast.Stmt{&ast.CanStmt{Position: pos, Permissions: grammarDefaultPermissions(pos), Body: body, SuppressPermissionInference: true}}
 }
 
 func grammarDefaultPermissions(pos lexer.Pos) []ast.PermissionRef {
@@ -777,7 +777,7 @@ func (ctx *statefulLowerContext) lowerChannelPrelude() []ast.Stmt {
 	if len(ctx.channels) == 0 {
 		return nil
 	}
-	stmts := make([]ast.Stmt, 0, len(ctx.channels)+2)
+	stmts := make([]ast.Stmt, 0, len(ctx.channels)*2+2)
 	if ctx.tokenReceiver != "" {
 		startExpr := currentTokenExpr(ctx.tokenReceiver, ctx.production.Position)
 		stmts = append(stmts,
@@ -789,6 +789,9 @@ func (ctx *statefulLowerContext) lowerChannelPrelude() []ast.Stmt {
 		channelType, ok := ctx.channelType(channel)
 		if !ok {
 			continue
+		}
+		if flagName, ok := ctx.channelSetFlagName(channel.Name); ok {
+			stmts = append(stmts, &ast.VarDeclStmt{Position: channel.Position, Name: flagName, Mutable: true, Type: builtinTypeExpr(channel.Position, "bool"), Value: &ast.BoolLit{Position: channel.Position, Value: false}})
 		}
 		initValue := zeroedCastExpr(channel.Position, channelType)
 		if channel.Default != nil {
@@ -824,9 +827,22 @@ func (ctx *statefulLowerContext) lowerChannelFinalize(pos lexer.Pos) []ast.Stmt 
 		if _, ok := ctx.channelType(channel); !ok {
 			continue
 		}
-		stmts = append(stmts, &ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: channel.Name}, Value: channel.Default})
+		assign := ast.Stmt(&ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: channel.Name}, Value: channel.Default})
+		if flagName, ok := ctx.channelSetFlagName(channel.Name); ok {
+			assign = &ast.IfStmt{Position: pos, Cond: &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_NOT, Operand: &ast.Ident{Position: pos, Name: flagName}}, Then: []ast.Stmt{assign}}
+		}
+		stmts = append(stmts, assign)
 	}
 	return stmts
+}
+
+func (ctx *statefulLowerContext) channelSetFlagName(name string) (string, bool) {
+	for _, channel := range ctx.channels {
+		if channel.Name == name && channel.Default != nil {
+			return "__grammar_channel_set_" + sanitizeGrammarHelperName(name) + "_" + sanitizeGrammarHelperName(ctx.grammarName) + "_" + sanitizeGrammarHelperName(ctx.production.Name), true
+		}
+	}
+	return "", false
 }
 
 func (ctx *statefulLowerContext) successTupleReturnStmts(pos lexer.Pos, value ast.Expr) []ast.Stmt {
@@ -972,6 +988,17 @@ func (ctx *statefulLowerContext) lowerSequentialTerm(term ast.GrammarTerm, snaps
 		}
 		result = append(result, &ast.VarDeclStmt{Position: n.Position, Name: n.Name, Value: attempt.Value})
 		return result
+	case *ast.GrammarAssignTerm:
+		attempt := ctx.lowerAttempt(n.Term)
+		result := append([]ast.Stmt{}, attempt.Stmts...)
+		if ctx.termCanFail(n.Term) {
+			result = append(result, ctx.failureGuard(n.Term.Pos(), snapshotName, attempt.Matched)...)
+		}
+		result = append(result, &ast.AssignStmt{Position: n.Position, Target: &ast.Ident{Position: n.Position, Name: n.Name}, Value: attempt.Value})
+		if flagName, ok := ctx.channelSetFlagName(n.Name); ok {
+			result = append(result, &ast.AssignStmt{Position: n.Position, Target: &ast.Ident{Position: n.Position, Name: flagName}, Value: &ast.BoolLit{Position: n.Position, Value: true}})
+		}
+		return result
 	default:
 		attempt := ctx.lowerAttempt(term)
 		result := append([]ast.Stmt{}, attempt.Stmts...)
@@ -1078,6 +1105,9 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 		if _, production, ok := ctx.resolveGrammarProductionInfo(n); ok && production.RecoverMsg != nil && len(production.RecoverUntil) != 0 {
 			valueName := ctx.fresh("value")
 			valueExpr := lowerTermExpr(lowerContext{tokenReceiver: ctx.tokenReceiver}, n)
+			if callName, args, ok := ctx.resolveGrammarRecoveredPublicCall(n); ok {
+				valueExpr = &ast.CallExpr{Position: n.Position, Func: &ast.Ident{Position: n.Position, Name: callName}, Args: args}
+			}
 			return loweredAttempt{
 				Stmts:   []ast.Stmt{&ast.VarDeclStmt{Position: n.Position, Name: valueName, Value: valueExpr}},
 				Matched: &ast.BoolLit{Position: n.Position, Value: true},
@@ -1678,6 +1708,28 @@ func (ctx *statefulLowerContext) resolveGrammarProductionCall(term *ast.GrammarC
 	return "", nil, false
 }
 
+func (ctx *statefulLowerContext) resolveGrammarRecoveredPublicCall(term *ast.GrammarCallTerm) (string, []ast.Expr, bool) {
+	if term == nil {
+		return "", nil, false
+	}
+	parts := strings.Split(term.Name, ".")
+	if len(parts) == 1 {
+		production, ok := ctx.productionMap[parts[0]]
+		if !ok {
+			return "", nil, false
+		}
+		return production.Name, grammarCallArgsWithImplicitHeaderArgs(ctx.cursorReceiver, ctx.allocName, production, term.Args, term.Position), true
+	}
+	if len(parts) == 2 && parts[0] == ctx.tokenReceiver {
+		production, ok := ctx.productionMap[parts[1]]
+		if !ok {
+			return "", nil, false
+		}
+		return production.Name, grammarCallArgsWithImplicitHeaderArgs(parts[0], ctx.allocName, production, term.Args, term.Position), true
+	}
+	return "", nil, false
+}
+
 func grammarCallArgsWithImplicitHeaderArgs(receiverName string, allocName string, production ast.GrammarProductionDecl, args []ast.Expr, pos lexer.Pos) []ast.Expr {
 	cloned := append([]ast.Expr(nil), args...)
 	if len(production.Params) == 0 {
@@ -1781,6 +1833,8 @@ func lowerTermStmt(ctx lowerContext, term ast.GrammarTerm) ast.Stmt {
 		return &ast.PassStmt{Position: n.Position}
 	case *ast.GrammarBindTerm:
 		return &ast.VarDeclStmt{Position: n.Position, Name: n.Name, Value: lowerTermExpr(ctx, n.Term)}
+	case *ast.GrammarAssignTerm:
+		return &ast.AssignStmt{Position: n.Position, Target: &ast.Ident{Position: n.Position, Name: n.Name}, Value: lowerTermExpr(ctx, n.Term)}
 	case *ast.GrammarReturnTerm:
 		return &ast.ReturnStmt{Position: n.Position, Value: n.Value}
 	default:

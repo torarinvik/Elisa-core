@@ -231,6 +231,18 @@ func (p *Parser) parseGrammarTerm() ast.GrammarTerm {
 		p.expectNewline()
 		return binding
 	}
+	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LARROW {
+		pos := p.cur().Pos
+		name := p.expect(lexer.TOKEN_IDENT).Text
+		p.expect(lexer.TOKEN_LARROW)
+		term := p.parseGrammarTermValue()
+		if _, ok := term.(*ast.GrammarPrecedenceTerm); !ok {
+			if _, ok := term.(*ast.GrammarPostfixTerm); !ok {
+				p.expectNewline()
+			}
+		}
+		return &ast.GrammarAssignTerm{Position: pos, Name: name, Term: term}
+	}
 	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ASSIGN {
 		pos := p.cur().Pos
 		name := p.expect(lexer.TOKEN_IDENT).Text

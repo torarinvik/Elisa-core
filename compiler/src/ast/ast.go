@@ -227,6 +227,12 @@ type GrammarBindTerm struct {
 	Term     GrammarTerm
 }
 
+type GrammarAssignTerm struct {
+	Position lexer.Pos
+	Name     string
+	Term     GrammarTerm
+}
+
 type GrammarReturnTerm struct {
 	Position lexer.Pos
 	Value    Expr
@@ -1003,9 +1009,10 @@ type AllocExpr struct {
 }
 
 type CanExpr struct {
-	Position    lexer.Pos
-	Expr        Expr
-	Permissions []PermissionRef
+	Position                    lexer.Pos
+	Expr                        Expr
+	Permissions                 []PermissionRef
+	SuppressPermissionInference bool
 }
 
 type MatchExpr struct {
@@ -1311,9 +1318,10 @@ type InStoreStmt struct {
 }
 
 type CanStmt struct {
-	Position    lexer.Pos
-	Permissions []PermissionRef
-	Body        []Stmt
+	Position                    lexer.Pos
+	Permissions                 []PermissionRef
+	Body                        []Stmt
+	SuppressPermissionInference bool
 }
 
 type WithStmt struct {
@@ -1514,6 +1522,9 @@ func (n *GrammarPrecedenceTerm) Pos() lexer.Pos {
 	return n.Position
 }
 func (n *GrammarBindTerm) Pos() lexer.Pos { return n.Position }
+func (n *GrammarAssignTerm) Pos() lexer.Pos {
+	return n.Position
+}
 func (n *GrammarReturnTerm) Pos() lexer.Pos {
 	return n.Position
 }
@@ -1697,6 +1708,7 @@ func (*GrammarListTerm) nodeTag()           {}
 func (*GrammarPostfixTerm) nodeTag()        {}
 func (*GrammarPrecedenceTerm) nodeTag()     {}
 func (*GrammarBindTerm) nodeTag()           {}
+func (*GrammarAssignTerm) nodeTag()         {}
 func (*GrammarReturnTerm) nodeTag()         {}
 func (*AttributeDecl) nodeTag()             {}
 func (*TreeCategoryDecl) nodeTag()          {}
@@ -1871,6 +1883,7 @@ func (*GrammarListTerm) grammarTermTag()       {}
 func (*GrammarPostfixTerm) grammarTermTag()    {}
 func (*GrammarPrecedenceTerm) grammarTermTag() {}
 func (*GrammarBindTerm) grammarTermTag()       {}
+func (*GrammarAssignTerm) grammarTermTag()     {}
 func (*GrammarReturnTerm) grammarTermTag()     {}
 
 func (*NamedType) typeExprTag()                 {}

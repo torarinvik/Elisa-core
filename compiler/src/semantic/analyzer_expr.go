@@ -760,7 +760,9 @@ func (a *Analyzer) analyzeCanExpr(expr *ast.CanExpr) Type {
 		return invalidType
 	}
 	refs := a.resolvePermissionRefs(expr.Permissions, true)
-	a.recordFunctionPermissionRefs(refs)
+	if !expr.SuppressPermissionInference {
+		a.recordFunctionPermissionRefs(refs)
+	}
 	return a.analyzeExpr(expr.Expr)
 }
 

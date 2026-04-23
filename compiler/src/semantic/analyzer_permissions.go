@@ -413,6 +413,23 @@ func (c *permissionEffectCollector) addRefs(refs []ast.PermissionRef) {
 	c.seen = append(c.seen, refs...)
 }
 
+func (c *permissionEffectCollector) collectWithGrantedRefs(refs []ast.PermissionRef, collect func()) {
+	refs = canonicalizePermissionRefs(refs)
+	if len(refs) == 0 {
+		collect()
+		return
+	}
+	granted := grantedPermissionFamilies(permissionFamiliesFromRefs(refs))
+	savedSeen := c.seen
+	c.seen = nil
+	collect()
+	bodyRefs := canonicalizePermissionRefs(c.seen)
+	remainingFamilies := missingGrantedPermissionFamilies(bodyRefs, granted)
+	remainingRefs := filterPermissionRefsByFamilies(bodyRefs, remainingFamilies)
+	c.seen = savedSeen
+	c.addRefs(remainingRefs)
+}
+
 func (c *permissionEffectCollector) collectStmts(stmts []ast.Stmt) {
 	for _, stmt := range stmts {
 		c.collectStmt(stmt)
@@ -487,6 +504,12 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		c.collectExpr(n.Store)
 		c.collectStmts(n.Body)
 	case *ast.CanStmt:
+		if n.SuppressPermissionInference {
+			c.collectWithGrantedRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false), func() {
+				c.collectStmts(n.Body)
+			})
+			break
+		}
 		c.addRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false))
 		c.collectStmts(n.Body)
 	case *ast.SignalStmt:
@@ -623,6 +646,12 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.Owner)
 		c.collectExpr(n.Value)
 	case *ast.CanExpr:
+		if n.SuppressPermissionInference {
+			c.collectWithGrantedRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false), func() {
+				c.collectExpr(n.Expr)
+			})
+			break
+		}
 		c.addRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false))
 		c.collectExpr(n.Expr)
 	case *ast.MatchExpr:

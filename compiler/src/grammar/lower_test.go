@@ -346,6 +346,28 @@ func TestLowerFileStatefulAddsStablePublicTryWrapper(t *testing.T) {
 	}
 }
 
+func TestLowerFileStatefulUsesGrantOnlyCanBlocksForGeneratedPermissions(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend:
+    expression(state: mutable ParserState&) -> Token:
+        token(TokenKind.IDENT)
+`)
+	lowered := LowerFile(file)
+	fn, ok := lowered.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected first lowered decl after grammar to be func, got %T", lowered.Decls[1])
+	}
+	if len(fn.Body) != 1 {
+		t.Fatalf("expected generated public production to be wrapped in one can stmt, got %d statements", len(fn.Body))
+	}
+	canStmt, ok := fn.Body[0].(*ast.CanStmt)
+	if !ok {
+		t.Fatalf("expected generated production body to start with can stmt, got %T", fn.Body[0])
+	}
+	if !canStmt.SuppressPermissionInference {
+		t.Fatal("expected generated grammar can block to suppress outward permission inference")
+	}
+}
+
 func TestLowerFileStatefulUsesGrammarHeaderReceiverForParamlessProductions(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
     cursor parser
@@ -439,6 +461,27 @@ func TestLowerFileStatefulInjectsHeaderAllocIntoListsAndBareCalls(t *testing.T) 
 	}
 }
 
+func TestLowerFileStatefulInjectsHeaderArgsIntoRecoveredProductionCalls(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+    cursor parser
+    alloc alloc
+	statement() -> Pascal.Stmt recover(ParseMessageKey.ExpectedStatement, until(";", token(TokenKind.EOF))):
+        .IDENT(tok)
+		return zeroed as Pascal.Stmt
+	block() -> darray[Pascal.Stmt]:
+        items = list(statement(), ";", until(token(TokenKind.EOF)))
+        return items
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	if !strings.Contains(formatted, "statement(parser, alloc)") {
+		t.Fatalf("expected recovered production call to thread implicit header args through the public production path, got:\n%s", formatted)
+	}
+	if strings.Contains(formatted, "= statement()") {
+		t.Fatalf("expected recovered production call to avoid zero-arg public calls after header normalization, got:\n%s", formatted)
+	}
+}
+
 func TestLowerFileStatefulExposesTypedHeaderChannelDefaultsAsLocals(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
     cursor parser
@@ -483,6 +526,36 @@ func TestLowerFileStatefulSeedsBareHeaderChannelFromProductionReturnType(t *test
 	}
 	if !strings.Contains(formatted, "return (true, node)") {
 		t.Fatalf("expected explicit return to see synthesized channel locals, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulAssignmentTermUpdatesChannelAndGuardsDefaultRefresh(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+    cursor parser
+    channel span: Span = combine_span($start.span, $end.span)
+    ident_span() -> Span:
+        .IDENT(tok)
+		span <- expr(tok.span)
+        return span
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"__grammar_channel_set_span_PascalFrontend_ident_span: mutable bool = false",
+		"span <- __grammar_value_ident_span_PascalFrontend_value_",
+		"__grammar_channel_set_span_PascalFrontend_ident_span <- true",
+		"if (not __grammar_channel_set_span_PascalFrontend_ident_span):",
+		"span <- combine_span($start.span, $end.span)",
+		"return (true, span)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected assignment-aware channel lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	assignIndex := strings.Index(formatted, "span <- __grammar_value_ident_span_PascalFrontend_value_")
+	guardIndex := strings.Index(formatted, "if (not __grammar_channel_set_span_PascalFrontend_ident_span):")
+	if assignIndex < 0 || guardIndex < 0 || assignIndex > guardIndex {
+		t.Fatalf("expected explicit channel assignment before guarded default refresh, got:\n%s", formatted)
 	}
 }
 
