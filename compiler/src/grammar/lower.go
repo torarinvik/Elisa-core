@@ -21,8 +21,10 @@ type statefulLowerContext struct {
 	cursorReceiver string
 	cursorField    string
 	tokenReceiver  string
+	tokenType      ast.TypeExpr
 	allocName      string
 	allocExpr      ast.Expr
+	channels       []ast.GrammarChannelDecl
 	production     ast.GrammarProductionDecl
 	productionMap  map[string]ast.GrammarProductionDecl
 	tryNames       map[string]string
@@ -94,8 +96,10 @@ func lowerGrammarDecls(decl *ast.GrammarDecl) []ast.Decl {
 			cursorReceiver: receiver.cursorReceiver,
 			cursorField:    receiver.cursorField,
 			tokenReceiver:  receiver.tokenReceiver,
+			tokenType:      grammarDeclTokenType(normalizedDecl, production.Position),
 			allocName:      grammarAllocNameForProduction(normalizedDecl, production),
 			allocExpr:      grammarAllocExprForProduction(normalizedDecl, production, receiver, production.Position),
+			channels:       append([]ast.GrammarChannelDecl(nil), normalizedDecl.Channels...),
 			production:     production,
 			productionMap:  productionMap,
 			tryNames:       tryNames,
@@ -111,8 +115,10 @@ func lowerGrammarDecls(decl *ast.GrammarDecl) []ast.Decl {
 			cursorReceiver: receiver.cursorReceiver,
 			cursorField:    receiver.cursorField,
 			tokenReceiver:  receiver.tokenReceiver,
+			tokenType:      grammarDeclTokenType(normalizedDecl, production.Position),
 			allocName:      grammarAllocNameForProduction(normalizedDecl, production),
 			allocExpr:      grammarAllocExprForProduction(normalizedDecl, production, receiver, production.Position),
+			channels:       append([]ast.GrammarChannelDecl(nil), normalizedDecl.Channels...),
 			production:     production,
 			productionMap:  productionMap,
 			tryNames:       tryNames,
@@ -244,6 +250,13 @@ func grammarAllocExprForProduction(grammarDecl *ast.GrammarDecl, production ast.
 		return stateOwnerExpr(receiver.tokenReceiver, pos)
 	}
 	return nil
+}
+
+func grammarDeclTokenType(grammarDecl *ast.GrammarDecl, pos lexer.Pos) ast.TypeExpr {
+	if grammarDecl != nil && grammarDecl.OverType != nil {
+		return grammarDecl.OverType
+	}
+	return builtinTypeExpr(pos, "Token")
 }
 
 func desugarNamedPrecedenceProduction(grammarName string, production ast.GrammarProductionDecl) (ast.GrammarProductionDecl, []ast.GrammarProductionDecl) {
@@ -661,11 +674,12 @@ func lowerStatefulTryProduction(grammarDecl *ast.GrammarDecl, ctx *statefulLower
 			Value:    stateCursorExpr(ctx.cursorReceiver, ctx.cursorField, ctx.production.Position),
 		},
 	}
+	body = append(body, ctx.lowerChannelPrelude()...)
 	for _, term := range ctx.production.Terms {
 		body = append(body, ctx.lowerSequentialTerm(term, snapshotName)...)
 	}
 	if ctx.production.ReturnType != nil {
-		body = append(body, successTupleReturnStmt(ctx.production.Position, zeroedCastExpr(ctx.production.Position, grammarValueTypeExpr(ctx.production.ReturnType))))
+		body = append(body, ctx.successTupleReturnStmts(ctx.production.Position, zeroedCastExpr(ctx.production.Position, grammarValueTypeExpr(ctx.production.ReturnType)))...)
 	}
 	return &ast.FuncDecl{
 		Position:         ctx.production.Position,
@@ -757,6 +771,67 @@ func successTupleReturnStmt(pos lexer.Pos, value ast.Expr) ast.Stmt {
 			},
 		},
 	}
+}
+
+func (ctx *statefulLowerContext) lowerChannelPrelude() []ast.Stmt {
+	if len(ctx.channels) == 0 {
+		return nil
+	}
+	stmts := make([]ast.Stmt, 0, len(ctx.channels)+2)
+	if ctx.tokenReceiver != "" {
+		startExpr := currentTokenExpr(ctx.tokenReceiver, ctx.production.Position)
+		stmts = append(stmts,
+			&ast.VarDeclStmt{Position: ctx.production.Position, Name: "$start", Type: ctx.tokenType, Value: startExpr},
+			&ast.VarDeclStmt{Position: ctx.production.Position, Name: "$end", Mutable: true, Type: ctx.tokenType, Value: &ast.Ident{Position: ctx.production.Position, Name: "$start"}},
+		)
+	}
+	for _, channel := range ctx.channels {
+		channelType, ok := ctx.channelType(channel)
+		if !ok {
+			continue
+		}
+		initValue := zeroedCastExpr(channel.Position, channelType)
+		if channel.Default != nil {
+			initValue = channel.Default
+		}
+		stmts = append(stmts, &ast.VarDeclStmt{Position: channel.Position, Name: channel.Name, Mutable: true, Type: channelType, Value: initValue})
+	}
+	return stmts
+}
+
+func (ctx *statefulLowerContext) channelType(channel ast.GrammarChannelDecl) (ast.TypeExpr, bool) {
+	if channel.Type != nil {
+		return channel.Type, true
+	}
+	if channel.Default == nil && ctx.production.ReturnType != nil {
+		return grammarValueTypeExpr(ctx.production.ReturnType), true
+	}
+	return nil, false
+}
+
+func (ctx *statefulLowerContext) lowerChannelFinalize(pos lexer.Pos) []ast.Stmt {
+	if len(ctx.channels) == 0 {
+		return nil
+	}
+	stmts := make([]ast.Stmt, 0, len(ctx.channels)+1)
+	if ctx.tokenReceiver != "" {
+		stmts = append(stmts, &ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: "$end"}, Value: currentTokenExpr(ctx.tokenReceiver, pos)})
+	}
+	for _, channel := range ctx.channels {
+		if channel.Default == nil {
+			continue
+		}
+		if _, ok := ctx.channelType(channel); !ok {
+			continue
+		}
+		stmts = append(stmts, &ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: channel.Name}, Value: channel.Default})
+	}
+	return stmts
+}
+
+func (ctx *statefulLowerContext) successTupleReturnStmts(pos lexer.Pos, value ast.Expr) []ast.Stmt {
+	stmts := ctx.lowerChannelFinalize(pos)
+	return append(stmts, successTupleReturnStmt(pos, value))
 }
 
 func failureTupleReturnStmt(pos lexer.Pos, valueType ast.TypeExpr) ast.Stmt {
@@ -888,7 +963,7 @@ func (ctx *statefulLowerContext) lowerSequentialTerm(term ast.GrammarTerm, snaps
 	case *ast.GrammarPassTerm:
 		return nil
 	case *ast.GrammarReturnTerm:
-		return []ast.Stmt{successTupleReturnStmt(n.Position, n.Value)}
+		return ctx.successTupleReturnStmts(n.Position, n.Value)
 	case *ast.GrammarBindTerm:
 		attempt := ctx.lowerAttempt(n.Term)
 		result := append([]ast.Stmt{}, attempt.Stmts...)

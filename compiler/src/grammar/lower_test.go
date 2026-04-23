@@ -439,6 +439,53 @@ func TestLowerFileStatefulInjectsHeaderAllocIntoListsAndBareCalls(t *testing.T) 
 	}
 }
 
+func TestLowerFileStatefulExposesTypedHeaderChannelDefaultsAsLocals(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+    cursor parser
+    channel span: Span = combine_span($start.span, $end.span)
+    span_of_ident() -> Span:
+        .IDENT
+        return span
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"$start: Token = parser.current_token()",
+		"$end: mutable Token = $start",
+		"span: mutable Span = combine_span($start.span, $end.span)",
+		"$end <- parser.current_token()",
+		"span <- combine_span($start.span, $end.span)",
+		"return (true, span)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected header channel lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	assignIndex := strings.Index(formatted, "span <- combine_span($start.span, $end.span)")
+	returnIndex := strings.Index(formatted, "return (true, span)")
+	if assignIndex < 0 || returnIndex < 0 || assignIndex > returnIndex {
+		t.Fatalf("expected channel defaults to finalize before explicit success return, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulSeedsBareHeaderChannelFromProductionReturnType(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+    cursor parser
+    channel node
+    ident_expr() -> Token:
+        .IDENT
+        return node
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	if !strings.Contains(formatted, "node: mutable Token = zeroed.cast[Token]") {
+		t.Fatalf("expected bare header channel to seed from the production return type, got:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "return (true, node)") {
+		t.Fatalf("expected explicit return to see synthesized channel locals, got:\n%s", formatted)
+	}
+}
+
 func TestLowerFileStatefulTryWrapperCarriesProductionErrorUnion(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar ATPLFrontend:
     postfix_expr(self: mutable ATPLParser&, owner: mutable Arena&) -> ATPLExpr.Expr error[ATPLFrontendError]:
