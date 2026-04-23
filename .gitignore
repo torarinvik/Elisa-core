@@ -24,6 +24,9 @@ compiler/.backend-test.log
 compiler/.semantic-test.log
 /compiler/scripts/__pycache__
 Code/llcontext_atpl/
-/compiler
 Code/llcontext_pascal/
 bin/atpl
+/compiler/cmd/atpl
+compiler/llcontext-compiler
+/compiler/temp_probe
+/compiler/vendor
