@@ -171,27 +171,32 @@ func (p *Parser) parseGrammarProductionDecl() ast.GrammarProductionDecl {
 	var retType ast.TypeExpr
 	var recoverMsg ast.Expr
 	var recoverUntil []ast.GrammarTerm
+	var recoverValue ast.Expr
 	if p.match(lexer.TOKEN_ARROW) {
 		retType = p.parseTypeExpr()
 	}
 	if p.peekIdentText("recover") {
-		recoverMsg, recoverUntil = p.parseGrammarRecoverClause()
+		recoverMsg, recoverUntil, recoverValue = p.parseGrammarRecoverClause()
 	}
 
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	terms := p.parseGrammarTermBlock()
-	return ast.GrammarProductionDecl{Position: pos, Public: public, Name: name, HasParamList: hasParamList, Params: params, ReturnType: retType, RecoverMsg: recoverMsg, RecoverUntil: recoverUntil, Terms: terms}
+	return ast.GrammarProductionDecl{Position: pos, Public: public, Name: name, HasParamList: hasParamList, Params: params, ReturnType: retType, RecoverMsg: recoverMsg, RecoverUntil: recoverUntil, RecoverValue: recoverValue, Terms: terms}
 }
 
-func (p *Parser) parseGrammarRecoverClause() (ast.Expr, []ast.GrammarTerm) {
+func (p *Parser) parseGrammarRecoverClause() (ast.Expr, []ast.GrammarTerm, ast.Expr) {
 	p.expectIdentText("recover")
 	p.expect(lexer.TOKEN_LPAREN)
 	message := p.parseExpr()
 	p.expect(lexer.TOKEN_COMMA)
 	until := p.parseGrammarUntilClause()
+	var fallback ast.Expr
+	if p.match(lexer.TOKEN_COMMA) {
+		fallback = p.parseExpr()
+	}
 	p.expect(lexer.TOKEN_RPAREN)
-	return message, until
+	return message, until, fallback
 }
 
 func (p *Parser) parseGrammarTermBlock() []ast.GrammarTerm {

@@ -5621,6 +5621,18 @@ func TestAnalyzeAcceptsStringLiteralMatchStatement(t *testing.T) {
 	requireNoErrors(t, errs)
 }
 
+func TestAnalyzeAcceptsStringLiteralMatchExpressionOverSlice(t *testing.T) {
+	src := `def classify(text: dstr[row]) -> int:
+	return match text[0:2]:
+		"if":
+			1
+		_:
+			0
+`
+	_, errs := parseAndAnalyze(t, "string_match_expr_slice_ok.llcontext", src)
+	requireNoErrors(t, errs)
+}
+
 func TestAnalyzeRejectsNonExhaustiveStringMatchExpression(t *testing.T) {
 	src := `def classify(text: StringView) -> int:
 	return match text:
@@ -5688,7 +5700,7 @@ func TestAnalyzeRejectsStringMatchOverNonStringValue(t *testing.T) {
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "match requires an enum, const enum, tree-category, or string value, got int") {
+	if !strings.Contains(all, "match requires an enum, const enum, tree-category, string, tuple, or struct value, got int") {
 		t.Fatalf("expected non-string match diagnostic, got:\n%s", all)
 	}
 }
@@ -10160,7 +10172,7 @@ func TestAnalyzeFormatsMatchDViewUsingSurfaceNames(t *testing.T) {
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "match requires an enum, const enum, tree-category, or string value, got dview[i32]") {
+	if !strings.Contains(all, "match requires an enum, const enum, tree-category, string, tuple, or struct value, got dview[i32]") {
 		t.Fatalf("expected surface dview match diagnostic, got:\n%s", all)
 	}
 	if strings.Contains(all, "DynArrayView") {

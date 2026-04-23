@@ -1398,6 +1398,27 @@ func (a *Analyzer) resolveMatchStructPattern(pattern *ast.MatchStructPattern, ac
 	return fields, ordered, true
 }
 
+func (a *Analyzer) resolveMatchTuplePattern(pattern *ast.MatchTuplePattern, actual Type) ([]moveBindResolvedField, bool) {
+	if pattern == nil {
+		return nil, false
+	}
+	actual = StripAggregateStateType(actual)
+	tupleType, ok := actual.(*TupleType)
+	if !ok || tupleType == nil {
+		a.errorf(pattern.Pos(), "tuple pattern requires a tuple value, got %s", actual)
+		return nil, false
+	}
+	fields, ok := a.resolvedStructFields(actual)
+	if !ok {
+		a.errorf(pattern.Pos(), "tuple pattern requires a tuple value, got %s", actual)
+		return nil, false
+	}
+	if len(pattern.Elems) != len(fields) {
+		a.errorf(pattern.Pos(), "tuple pattern expects %d elements, got %d", len(fields), len(pattern.Elems))
+	}
+	return fields, true
+}
+
 func moveBindVariantAsMatchPattern(pattern *ast.MoveBindVariantPattern) *ast.MatchVariantPattern {
 	if pattern == nil {
 		return nil
@@ -1495,6 +1516,20 @@ func (a *Analyzer) collectMoveBindVariantBindings(pattern ast.MatchPattern, expe
 		return fields
 	case *ast.MatchLiteralPattern:
 		a.analyzeLiteralMatchPatternExpr(p.Pos(), p.Value, expected, "move-as nested pattern")
+		return fields
+	case *ast.MatchTuplePattern:
+		resolvedFields, ok := a.resolveMatchTuplePattern(p, expected)
+		if !ok {
+			return fields
+		}
+		limit := len(p.Elems)
+		if len(resolvedFields) < limit {
+			limit = len(resolvedFields)
+		}
+		for i := 0; i < limit; i++ {
+			childPath := append(append([]string(nil), path...), resolvedFields[i].Name)
+			fields = a.collectMoveBindVariantBindings(p.Elems[i], resolvedFields[i].Type, childPath, fields)
+		}
 		return fields
 	case *ast.MatchStructPattern:
 		resolvedFields, orderedArgs, ok := a.resolveMatchStructPattern(p, expected)
@@ -3533,11 +3568,15 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 		a.analyzeStringMatchStmt(stmt, valueType)
 		return
 	}
+	if _, ok := StripAggregateStateType(valueType).(*TupleType); ok {
+		a.analyzeTupleMatchStmt(stmt, valueType)
+		return
+	}
 	if _, ok := a.resolvedStructFields(valueType); ok {
 		a.analyzeStructMatchStmt(stmt, valueType)
 		return
 	}
-	a.errorf(stmt.Pos(), "match requires an enum, const enum, tree-category, or string value, got %s", valueType)
+	a.errorf(stmt.Pos(), "match requires an enum, const enum, tree-category, string, tuple, or struct value, got %s", valueType)
 	for _, arm := range stmt.Arms {
 		a.analyzeBlockWithRegionClone(arm.Body, NewScope(a.currentScope))
 	}
@@ -3702,10 +3741,13 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 	if isStringMatchableType(valueType) {
 		return a.analyzeStringMatchExpr(expr, valueType)
 	}
+	if _, ok := StripAggregateStateType(valueType).(*TupleType); ok {
+		return a.analyzeTupleMatchExpr(expr, valueType)
+	}
 	if _, ok := a.resolvedStructFields(valueType); ok {
 		return a.analyzeStructMatchExpr(expr, valueType)
 	}
-	a.errorf(expr.Pos(), "match requires an enum, const enum, tree-category, or string value, got %s", valueType)
+	a.errorf(expr.Pos(), "match requires an enum, const enum, tree-category, string, tuple, or struct value, got %s", valueType)
 	for _, arm := range expr.Arms {
 		a.analyzeMatchExprArmBody(arm.Body, NewScope(a.currentScope))
 	}
@@ -5204,6 +5246,77 @@ func (a *Analyzer) analyzeStructMatchStmt(stmt *ast.MatchStmt, valueType Type) {
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
 }
 
+func (a *Analyzer) analyzeTupleMatchStmt(stmt *ast.MatchStmt, valueType Type) {
+	if stmt.Store != nil {
+		a.errorf(stmt.Store.Pos(), "tuple match does not take an in-store clause")
+	}
+	baselineCloned := false
+	var baselineAffine map[affineValueKey]affineValueState
+	var baselineBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
+	var baselineFunctionValues map[*Symbol]*FuncType
+	var baselineSpecializedValueTypes map[*Symbol]Type
+	cloneBaseline := func() {
+		if baselineCloned {
+			return
+		}
+		baselineAffine = a.cloneAffineValueStates()
+		baselineBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
+		baselineFunctionValues = a.cloneFunctionValueBindings()
+		baselineSpecializedValueTypes = a.cloneSpecializedValueTypeBindings()
+		baselineCloned = true
+	}
+	var mergedAffine map[affineValueKey]affineValueState
+	var mergedBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
+	var mergedFunctionValues map[*Symbol]*FuncType
+	var mergedSpecializedValueTypes map[*Symbol]Type
+	hasFallthrough := false
+	priorPatterns := make([]ast.MatchPattern, 0, len(stmt.Arms))
+	hasWildcard := false
+	for i, arm := range stmt.Arms {
+		if a.matchPatternShadowedByPrevious(arm.Pattern, valueType, priorPatterns) {
+			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
+		}
+		scope := NewScope(a.currentScope)
+		if a.analyzeTopLevelTupleMatchPattern(arm.Pattern, valueType, stmt.Value, scope, i, len(stmt.Arms)) {
+			hasWildcard = true
+		}
+		armSnapshot := a.analyzeBlockWithAffineClone(arm.Body, scope)
+		if !blockDefinitelyExits(arm.Body) {
+			if !hasFallthrough {
+				mergedAffine = armSnapshot.Affine
+				mergedBorrowedOwnerRefs = armSnapshot.BorrowedOwnerRefs
+				mergedFunctionValues = armSnapshot.FunctionValues
+				mergedSpecializedValueTypes = armSnapshot.SpecializedValueTypes
+				hasFallthrough = true
+			} else {
+				mergedAffine = mergeAffineValueStates(mergedAffine, armSnapshot.Affine)
+				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, armSnapshot.BorrowedOwnerRefs)
+				mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, armSnapshot.FunctionValues)
+				mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, armSnapshot.SpecializedValueTypes)
+			}
+		}
+		priorPatterns = append(priorPatterns, arm.Pattern)
+	}
+	if !hasWildcard {
+		cloneBaseline()
+		if !hasFallthrough {
+			mergedAffine = baselineAffine
+			mergedBorrowedOwnerRefs = baselineBorrowedOwnerRefs
+			mergedFunctionValues = baselineFunctionValues
+			mergedSpecializedValueTypes = baselineSpecializedValueTypes
+		} else {
+			mergedAffine = mergeAffineValueStates(mergedAffine, baselineAffine)
+			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, baselineBorrowedOwnerRefs)
+			mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, baselineFunctionValues)
+			mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, baselineSpecializedValueTypes)
+		}
+	}
+	a.currentAffineValues = mergedAffine
+	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
+	a.currentFunctionValues = mergedFunctionValues
+	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+}
+
 func (a *Analyzer) analyzeStructMatchExpr(expr *ast.MatchExpr, valueType Type) Type {
 	if expr.Store != nil {
 		a.errorf(expr.Store.Pos(), "struct match does not take an in-store clause")
@@ -5288,6 +5401,96 @@ func (a *Analyzer) analyzeStructMatchExpr(expr *ast.MatchExpr, valueType Type) T
 	a.currentFunctionValues = mergedFunctionValues
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
 	a.reportNonExhaustiveStructMatchExpr(expr.Pos(), hasWildcard)
+	if resultType == nil {
+		return neverType
+	}
+	return resultType
+}
+
+func (a *Analyzer) analyzeTupleMatchExpr(expr *ast.MatchExpr, valueType Type) Type {
+	if expr.Store != nil {
+		a.errorf(expr.Store.Pos(), "tuple match does not take an in-store clause")
+	}
+	resultType := Type(nil)
+	baselineCloned := false
+	var baselineAffine map[affineValueKey]affineValueState
+	var baselineBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
+	var baselineFunctionValues map[*Symbol]*FuncType
+	var baselineSpecializedValueTypes map[*Symbol]Type
+	cloneBaseline := func() {
+		if baselineCloned {
+			return
+		}
+		baselineAffine = a.cloneAffineValueStates()
+		baselineBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
+		baselineFunctionValues = a.cloneFunctionValueBindings()
+		baselineSpecializedValueTypes = a.cloneSpecializedValueTypeBindings()
+		baselineCloned = true
+	}
+	var mergedAffine map[affineValueKey]affineValueState
+	var mergedBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
+	var mergedFunctionValues map[*Symbol]*FuncType
+	var mergedSpecializedValueTypes map[*Symbol]Type
+	hasFallthrough := false
+	priorPatterns := make([]ast.MatchPattern, 0, len(expr.Arms))
+	hasWildcard := false
+	for i, arm := range expr.Arms {
+		if a.matchPatternShadowedByPrevious(arm.Pattern, valueType, priorPatterns) {
+			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
+		}
+		scope := NewScope(a.currentScope)
+		if a.analyzeTopLevelTupleMatchPattern(arm.Pattern, valueType, expr.Value, scope, i, len(expr.Arms)) {
+			hasWildcard = true
+		}
+		armType, armSnapshot := a.analyzeMatchExprArmBodyWithAffineSnapshot(arm.Body, scope)
+		if !blockDefinitelyExits(arm.Body) {
+			if !hasFallthrough {
+				mergedAffine = armSnapshot.Affine
+				mergedBorrowedOwnerRefs = armSnapshot.BorrowedOwnerRefs
+				mergedFunctionValues = armSnapshot.FunctionValues
+				mergedSpecializedValueTypes = armSnapshot.SpecializedValueTypes
+				hasFallthrough = true
+			} else {
+				mergedAffine = mergeAffineValueStates(mergedAffine, armSnapshot.Affine)
+				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, armSnapshot.BorrowedOwnerRefs)
+				mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, armSnapshot.FunctionValues)
+				mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, armSnapshot.SpecializedValueTypes)
+			}
+		}
+		if resultType == nil {
+			resultType = armType
+			priorPatterns = append(priorPatterns, arm.Pattern)
+			continue
+		}
+		merged := MergeTypes(resultType, armType)
+		if IsInvalidType(merged) {
+			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType, armType)
+			resultType = invalidType
+			priorPatterns = append(priorPatterns, arm.Pattern)
+			continue
+		}
+		resultType = merged
+		priorPatterns = append(priorPatterns, arm.Pattern)
+	}
+	if !hasWildcard {
+		cloneBaseline()
+		if !hasFallthrough {
+			mergedAffine = baselineAffine
+			mergedBorrowedOwnerRefs = baselineBorrowedOwnerRefs
+			mergedFunctionValues = baselineFunctionValues
+			mergedSpecializedValueTypes = baselineSpecializedValueTypes
+		} else {
+			mergedAffine = mergeAffineValueStates(mergedAffine, baselineAffine)
+			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, baselineBorrowedOwnerRefs)
+			mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, baselineFunctionValues)
+			mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, baselineSpecializedValueTypes)
+		}
+	}
+	a.currentAffineValues = mergedAffine
+	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
+	a.currentFunctionValues = mergedFunctionValues
+	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+	a.reportNonExhaustiveTupleMatchExpr(expr.Pos(), hasWildcard)
 	if resultType == nil {
 		return neverType
 	}
@@ -5415,6 +5618,24 @@ func (a *Analyzer) matchPatternCovers(prev ast.MatchPattern, current ast.MatchPa
 		default:
 			return false
 		}
+	case *ast.MatchTuplePattern:
+		currTuple, ok := current.(*ast.MatchTuplePattern)
+		if !ok {
+			return false
+		}
+		tupleType, ok := StripAggregateStateType(expected).(*TupleType)
+		if !ok || tupleType == nil {
+			return false
+		}
+		if len(p.Elems) != len(tupleType.Fields) || len(currTuple.Elems) != len(tupleType.Fields) {
+			return false
+		}
+		for i := range tupleType.Fields {
+			if !a.matchPatternCovers(p.Elems[i], currTuple.Elems[i], tupleType.Fields[i].Type) {
+				return false
+			}
+		}
+		return true
 	case *ast.MatchVariantPattern:
 		currVariant, ok := current.(*ast.MatchVariantPattern)
 		if !ok {
@@ -5631,6 +5852,12 @@ func matchPatternSummary(pattern ast.MatchPattern) string {
 		return p.Value
 	case *ast.MatchLiteralPattern:
 		return matchLiteralPatternSummary(p.Value)
+	case *ast.MatchTuplePattern:
+		parts := make([]string, 0, len(p.Elems))
+		for _, elem := range p.Elems {
+			parts = append(parts, matchPatternSummary(elem))
+		}
+		return strings.Join(parts, ", ")
 	case *ast.MatchStructPattern:
 		parts := make([]string, 0, len(p.Args))
 		for _, arg := range p.Args {
@@ -6089,11 +6316,51 @@ func (a *Analyzer) analyzeTopLevelStructMatchPattern(pattern ast.MatchPattern, v
 	}
 }
 
+func (a *Analyzer) analyzeTopLevelTupleMatchPattern(pattern ast.MatchPattern, valueType Type, valueExpr ast.Expr, scope *Scope, index int, armCount int) bool {
+	savedScope := a.currentScope
+	a.currentScope = scope
+	defer func() { a.currentScope = savedScope }()
+	switch p := pattern.(type) {
+	case *ast.MatchWildcardPattern:
+		if index != armCount-1 {
+			a.errorf(p.Pos(), "wildcard match arm must be the final arm")
+		}
+		return true
+	case *ast.MatchTuplePattern:
+		fields, ok := a.resolveMatchTuplePattern(p, valueType)
+		if !ok {
+			return false
+		}
+		limit := len(p.Elems)
+		if len(fields) < limit {
+			limit = len(fields)
+		}
+		for i := 0; i < limit; i++ {
+			fieldExpr := &ast.FieldExpr{Position: p.Elems[i].Pos(), Object: valueExpr, Field: fields[i].Name}
+			a.analyzeNestedMatchPattern(p.Elems[i], fields[i].Type, fieldExpr, scope)
+		}
+		return false
+	case *ast.MatchBindPattern:
+		a.errorf(p.Pos(), "top-level tuple match arm must use a tuple pattern or _")
+		return false
+	default:
+		a.errorf(pattern.Pos(), "unsupported top-level tuple match pattern %T", pattern)
+		return false
+	}
+}
+
 func (a *Analyzer) reportNonExhaustiveStructMatchExpr(pos lexer.Pos, hasWildcard bool) {
 	if hasWildcard {
 		return
 	}
 	a.errorf(pos, "non-exhaustive struct match expression; add a final _ arm")
+}
+
+func (a *Analyzer) reportNonExhaustiveTupleMatchExpr(pos lexer.Pos, hasWildcard bool) {
+	if hasWildcard {
+		return
+	}
+	a.errorf(pos, "non-exhaustive tuple match expression; add a final _ arm")
 }
 
 func (a *Analyzer) bindPackedVariantViewAliasForBody(pattern ast.MatchPattern, enumType *EnumType, valueExpr ast.Expr, body []ast.Stmt, scope *Scope) {

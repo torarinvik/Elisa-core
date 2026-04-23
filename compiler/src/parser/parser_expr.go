@@ -971,7 +971,7 @@ func (p *Parser) parseAllocExpr() ast.Expr {
 func (p *Parser) parseMatchExpr() ast.Expr {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_MATCH)
-	value := p.withInMembershipDisabled(p.parseExpr)
+	value := p.parseMatchHeadExpr()
 	var store ast.Expr
 	if p.match(lexer.TOKEN_IN) {
 		store = p.parseExpr()

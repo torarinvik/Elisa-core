@@ -2977,6 +2977,39 @@ func TestRunCLIContinuesAfterFailingAndSkippedTests(t *testing.T) {
 	}
 }
 
+func TestRunCLIExecutesTupleMatchStatement(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "tuple_match_execute_fixture.llcontext")
+	src := "@test\ndef tuple_match_selects_literal_arm() -> void:\n    match 5, 'w', 'h', 'i', 'l', 'e':\n        5, 'w', 'h', 'i', 'l', 'e':\n            return\n        _:\n            can Abort.Panic:\n                panic(\"tuple match fallback\")\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write tuple match execute fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected tuple match test execution to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{
+		"[ RUN      ] tuple_match_selects_literal_arm",
+		"[       OK ] tuple_match_selects_literal_arm",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected tuple match execution output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunCLICompilesPanicToBacktraceAwareLLVM(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "panic_backtrace_fixture.llcontext")

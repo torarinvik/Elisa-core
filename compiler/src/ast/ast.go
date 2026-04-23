@@ -126,6 +126,7 @@ type GrammarProductionDecl struct {
 	ReturnType   TypeExpr
 	RecoverMsg   Expr
 	RecoverUntil []GrammarTerm
+	RecoverValue Expr
 	Terms        []GrammarTerm
 }
 
@@ -1110,6 +1111,11 @@ type MatchLiteralPattern struct {
 	Value    Expr
 }
 
+type MatchTuplePattern struct {
+	Position lexer.Pos
+	Elems    []MatchPattern
+}
+
 type MatchStructPattern struct {
 	Position     lexer.Pos
 	TypeName     string
@@ -1663,6 +1669,7 @@ func (n *MatchStringLiteralPattern) Pos() lexer.Pos {
 	return n.Position
 }
 func (n *MatchLiteralPattern) Pos() lexer.Pos { return n.Position }
+func (n *MatchTuplePattern) Pos() lexer.Pos   { return n.Position }
 func (n *MatchStructPattern) Pos() lexer.Pos  { return n.Position }
 func (n *MatchVariantPattern) Pos() lexer.Pos { return n.Position }
 func (n *MoveBindNamePattern) Pos() lexer.Pos { return n.Position }
@@ -1826,6 +1833,7 @@ func (*MatchWildcardPattern) nodeTag()      {}
 func (*MatchBindPattern) nodeTag()          {}
 func (*MatchStringLiteralPattern) nodeTag() {}
 func (*MatchLiteralPattern) nodeTag()       {}
+func (*MatchTuplePattern) nodeTag()         {}
 func (*MatchStructPattern) nodeTag()        {}
 func (*MatchVariantPattern) nodeTag()       {}
 func (*MoveBindNamePattern) nodeTag()       {}
@@ -1966,6 +1974,7 @@ func (*MatchWildcardPattern) matchPatternTag()      {}
 func (*MatchBindPattern) matchPatternTag()          {}
 func (*MatchStringLiteralPattern) matchPatternTag() {}
 func (*MatchLiteralPattern) matchPatternTag()       {}
+func (*MatchTuplePattern) matchPatternTag()         {}
 func (*MatchStructPattern) matchPatternTag()        {}
 func (*MatchVariantPattern) matchPatternTag()       {}
 func (*MoveBindNamePattern) moveBindPatternTag()    {}

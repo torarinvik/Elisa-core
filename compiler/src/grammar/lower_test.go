@@ -295,6 +295,75 @@ func TestLowerFileStatefulProductionWithRecoverClauseRecordsAndSynchronizes(t *t
 	}
 }
 
+func TestLowerFileStatefulProductionWithRecoverFallbackReturnsFallbackValue(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend:
+    statement(state: mutable ParserState&) -> Pascal.Stmt recover(ParseMessageKey.ExpectedStatement, until(";", token(TokenKind.EOF)), zeroed as Pascal.Stmt):
+		stmt = choice(state.assignment(), state.compound_statement())
+		return stmt
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.record_parse_error(ParseMessageKey.ExpectedStatement)",
+		"state.advance_token()",
+		"return zeroed as Pascal.Stmt",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered recover fallback production to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestLowerFileStatefulReturnlessRecoverClauseUsesVoidTupleValue(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+	    cursor state
+	    block_tail() recover(ParseMessageKey.ExpectedStatement, until("end", token(TokenKind.EOF))):
+	        guard(state.current_token().kind == TokenKind.END or state.current_token().kind == TokenKind.EOF)
+`)
+	lowered := LowerFile(file)
+	var publicFn *ast.FuncDecl
+	var publicTryFn *ast.FuncDecl
+	var internalTryFn *ast.FuncDecl
+	for _, decl := range lowered.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		switch fn.Name {
+		case "block_tail":
+			publicFn = fn
+		case "grammar_try_PascalFrontend_block_tail":
+			publicTryFn = fn
+		case "__grammar_try__PascalFrontend__block_tail":
+			internalTryFn = fn
+		}
+	}
+	if publicFn == nil || publicTryFn == nil || internalTryFn == nil {
+		t.Fatalf("expected lowered returnless recover helpers, got:\n%s", unparse.FormatFile(lowered))
+	}
+	for _, tc := range []struct {
+		name       string
+		fn         *ast.FuncDecl
+		wantReturn string
+		wantBody   string
+	}{
+		{name: "public", fn: publicFn, wantBody: "record_parse_error(ParseMessageKey.ExpectedStatement)"},
+		{name: "public try", fn: publicTryFn, wantReturn: "value: bool"},
+		{name: "internal try", fn: internalTryFn, wantReturn: "value: bool", wantBody: "zeroed.cast[bool]"},
+	} {
+		formatted := unparse.FormatDecl(tc.fn)
+		if tc.wantReturn != "" && !strings.Contains(formatted, tc.wantReturn) {
+			t.Fatalf("expected lowered %s helper to contain %q, got:\n%s", tc.name, tc.wantReturn, formatted)
+		}
+		if tc.wantBody != "" && !strings.Contains(formatted, tc.wantBody) {
+			t.Fatalf("expected lowered %s helper to contain %q, got:\n%s", tc.name, tc.wantBody, formatted)
+		}
+		if strings.Contains(formatted, "<invalid>") {
+			t.Fatalf("expected lowered %s helper to avoid invalid placeholder types, got:\n%s", tc.name, formatted)
+		}
+	}
+}
+
 func TestLowerFileStatefulListCallsRecoveredProductionDirectly(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend:
     statement(state: mutable ParserState&) -> Pascal.Stmt recover(ParseMessageKey.ExpectedStatement, until(";", "end", token(TokenKind.EOF))):

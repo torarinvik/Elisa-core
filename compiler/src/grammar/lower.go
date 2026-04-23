@@ -632,7 +632,7 @@ func grammarDeclIsStateful(decl *ast.GrammarDecl) bool {
 		return false
 	}
 	for _, production := range decl.Productions {
-		if grammarReceiverInfoForProduction(decl, production).cursorReceiver != "" && production.ReturnType != nil {
+		if grammarReceiverInfoForProduction(decl, production).cursorReceiver != "" {
 			return true
 		}
 	}
@@ -818,37 +818,41 @@ func (ctx *statefulLowerContext) lowerRecoveryClause(matchedName string) []ast.S
 	if stopCond == nil {
 		return nil
 	}
+	thenBody := []ast.Stmt{
+		&ast.ExprStmt{
+			Position: ctx.production.Position,
+			Expr: &ast.CallExpr{
+				Position: ctx.production.Position,
+				Func:     &ast.FieldExpr{Position: ctx.production.Position, Object: &ast.Ident{Position: ctx.production.Position, Name: ctx.tokenReceiver}, Field: "record_parse_error"},
+				Args:     []ast.Expr{ctx.production.RecoverMsg},
+			},
+		},
+		&ast.WhileStmt{
+			Position: ctx.production.Position,
+			Cond: &ast.BinaryExpr{
+				Position: ctx.production.Position,
+				Op:       lexer.TOKEN_AND,
+				Left:     &ast.UnaryExpr{Position: ctx.production.Position, Op: lexer.TOKEN_NOT, Operand: stopCond},
+				Right: &ast.BinaryExpr{
+					Position: ctx.production.Position,
+					Op:       lexer.TOKEN_BANGEQ,
+					Left:     &ast.FieldExpr{Position: ctx.production.Position, Object: currentTokenExpr(ctx.tokenReceiver, ctx.production.Position), Field: "kind"},
+					Right:    &ast.FieldExpr{Position: ctx.production.Position, Object: &ast.Ident{Position: ctx.production.Position, Name: "TokenKind"}, Field: "EOF"},
+				},
+			},
+			Body: []ast.Stmt{
+				&ast.ExprStmt{Position: ctx.production.Position, Expr: &ast.CallExpr{Position: ctx.production.Position, Func: &ast.FieldExpr{Position: ctx.production.Position, Object: &ast.Ident{Position: ctx.production.Position, Name: ctx.tokenReceiver}, Field: "advance_token"}}},
+			},
+		},
+	}
+	if ctx.production.RecoverValue != nil && ctx.production.ReturnType != nil {
+		thenBody = append(thenBody, &ast.ReturnStmt{Position: ctx.production.Position, Value: ctx.production.RecoverValue})
+	}
 	return []ast.Stmt{
 		&ast.IfStmt{
 			Position: ctx.production.Position,
 			Cond:     &ast.UnaryExpr{Position: ctx.production.Position, Op: lexer.TOKEN_NOT, Operand: &ast.Ident{Position: ctx.production.Position, Name: matchedName}},
-			Then: []ast.Stmt{
-				&ast.ExprStmt{
-					Position: ctx.production.Position,
-					Expr: &ast.CallExpr{
-						Position: ctx.production.Position,
-						Func:     &ast.FieldExpr{Position: ctx.production.Position, Object: &ast.Ident{Position: ctx.production.Position, Name: ctx.tokenReceiver}, Field: "record_parse_error"},
-						Args:     []ast.Expr{ctx.production.RecoverMsg},
-					},
-				},
-				&ast.WhileStmt{
-					Position: ctx.production.Position,
-					Cond: &ast.BinaryExpr{
-						Position: ctx.production.Position,
-						Op:       lexer.TOKEN_AND,
-						Left:     &ast.UnaryExpr{Position: ctx.production.Position, Op: lexer.TOKEN_NOT, Operand: stopCond},
-						Right: &ast.BinaryExpr{
-							Position: ctx.production.Position,
-							Op:       lexer.TOKEN_BANGEQ,
-							Left:     &ast.FieldExpr{Position: ctx.production.Position, Object: currentTokenExpr(ctx.tokenReceiver, ctx.production.Position), Field: "kind"},
-							Right:    &ast.FieldExpr{Position: ctx.production.Position, Object: &ast.Ident{Position: ctx.production.Position, Name: "TokenKind"}, Field: "EOF"},
-						},
-					},
-					Body: []ast.Stmt{
-						&ast.ExprStmt{Position: ctx.production.Position, Expr: &ast.CallExpr{Position: ctx.production.Position, Func: &ast.FieldExpr{Position: ctx.production.Position, Object: &ast.Ident{Position: ctx.production.Position, Name: ctx.tokenReceiver}, Field: "advance_token"}}},
-					},
-				},
-			},
+			Then:     thenBody,
 		},
 	}
 }
@@ -869,9 +873,7 @@ func lowerStatefulTryProduction(grammarDecl *ast.GrammarDecl, ctx *statefulLower
 	for _, term := range ctx.production.Terms {
 		body = append(body, ctx.lowerSequentialTerm(term, snapshotName)...)
 	}
-	if ctx.production.ReturnType != nil {
-		body = append(body, ctx.successTupleReturnStmts(ctx.production.Position, zeroedCastExpr(ctx.production.Position, grammarValueTypeExpr(ctx.production.ReturnType)))...)
-	}
+	body = append(body, ctx.successTupleReturnStmts(ctx.production.Position, zeroedCastExpr(ctx.production.Position, grammarResolvedValueTypeExpr(ctx.production.Position, ctx.production.ReturnType)))...)
 	return &ast.FuncDecl{
 		Position:         ctx.production.Position,
 		Name:             grammarTryFuncName(ctx.grammarName, ctx.production.Name),
@@ -893,7 +895,7 @@ func grammarInternalTryReturnTypeExpr(pos lexer.Pos, valueType ast.TypeExpr) ast
 		Fields: []ast.TupleTypeField{
 			{Position: pos, Name: "matched", Type: builtinTypeExpr(pos, "bool")},
 			{Position: pos, Name: "committed", Type: builtinTypeExpr(pos, "bool")},
-			{Position: pos, Name: "value", Type: grammarValueTypeExpr(valueType)},
+			{Position: pos, Name: "value", Type: grammarResolvedValueTypeExpr(pos, valueType)},
 		},
 	}
 	if errType := grammarErrorTypeExpr(valueType); errType != nil {
@@ -907,7 +909,7 @@ func grammarTryReturnTypeExpr(pos lexer.Pos, valueType ast.TypeExpr) ast.TypeExp
 		Position: pos,
 		Fields: []ast.TupleTypeField{
 			{Position: pos, Name: "matched", Type: builtinTypeExpr(pos, "bool")},
-			{Position: pos, Name: "value", Type: grammarValueTypeExpr(valueType)},
+			{Position: pos, Name: "value", Type: grammarResolvedValueTypeExpr(pos, valueType)},
 		},
 	}
 	if errType := grammarErrorTypeExpr(valueType); errType != nil {
@@ -921,6 +923,14 @@ func grammarValueTypeExpr(valueType ast.TypeExpr) ast.TypeExpr {
 		return errType.Value
 	}
 	return valueType
+}
+
+func grammarResolvedValueTypeExpr(pos lexer.Pos, valueType ast.TypeExpr) ast.TypeExpr {
+	resolved := grammarValueTypeExpr(valueType)
+	if resolved != nil {
+		return resolved
+	}
+	return builtinTypeExpr(pos, "bool")
 }
 
 func grammarErrorTypeExpr(valueType ast.TypeExpr) ast.TypeExpr {
@@ -1014,7 +1024,7 @@ func (ctx *statefulLowerContext) channelType(channel ast.GrammarChannelDecl) (as
 		return channel.Type, true
 	}
 	if channel.Default == nil && ctx.production.ReturnType != nil {
-		return grammarValueTypeExpr(ctx.production.ReturnType), true
+		return grammarResolvedValueTypeExpr(channel.Position, ctx.production.ReturnType), true
 	}
 	return nil, false
 }
@@ -1065,7 +1075,7 @@ func failureTupleReturnStmt(pos lexer.Pos, committed ast.Expr, valueType ast.Typ
 			Elems: []ast.Expr{
 				&ast.BoolLit{Position: pos, Value: false},
 				committed,
-				zeroedCastExpr(pos, valueType),
+				zeroedCastExpr(pos, grammarResolvedValueTypeExpr(pos, valueType)),
 			},
 		},
 	}
@@ -1259,11 +1269,25 @@ func (ctx *statefulLowerContext) lowerSequentialTerm(term ast.GrammarTerm, snaps
 		if ctx.termCanFail(term) {
 			result = append(result, ctx.failureGuard(term.Pos(), snapshotName, attempt.Matched)...)
 		}
-		if _, ok := term.(*ast.GrammarCallTerm); ok && !ctx.termCanFail(term) {
+		if call, ok := term.(*ast.GrammarCallTerm); ok && !ctx.termCanFail(term) && attempt.Value != nil && ctx.callTermReturnsValue(call) {
 			result = append(result, &ast.ExprStmt{Position: term.Pos(), Expr: attempt.Value})
 		}
 		return result
 	}
+}
+
+func (ctx *statefulLowerContext) callTermReturnsValue(term *ast.GrammarCallTerm) bool {
+	if term == nil {
+		return true
+	}
+	if _, ok := grammarTokenKindMatcher(term); ok {
+		return true
+	}
+	_, production, ok := ctx.resolveGrammarProductionInfo(term)
+	if !ok {
+		return true
+	}
+	return production.ReturnType != nil
 }
 
 func (ctx *statefulLowerContext) failureGuard(pos lexer.Pos, snapshotName string, matched ast.Expr) []ast.Stmt {
@@ -1273,7 +1297,7 @@ func (ctx *statefulLowerContext) failureGuard(pos lexer.Pos, snapshotName string
 			Cond:     &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_NOT, Operand: matched},
 			Then: []ast.Stmt{
 				restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, pos),
-				failureTupleReturnStmt(pos, ctx.currentCommittedExpr(pos), grammarValueTypeExpr(ctx.production.ReturnType)),
+				failureTupleReturnStmt(pos, ctx.currentCommittedExpr(pos), ctx.production.ReturnType),
 			},
 		},
 	}
@@ -1368,11 +1392,19 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 			}
 		}
 		if _, production, ok := ctx.resolveGrammarProductionInfo(n); ok && production.RecoverMsg != nil && len(production.RecoverUntil) != 0 {
-			valueName := ctx.fresh("value")
 			valueExpr := lowerTermExpr(lowerContext{tokenReceiver: ctx.tokenReceiver}, n)
 			if callName, args, ok := ctx.resolveGrammarRecoveredPublicCall(n); ok {
 				valueExpr = &ast.CallExpr{Position: n.Position, Func: &ast.Ident{Position: n.Position, Name: callName}, Args: args}
 			}
+			if production.ReturnType == nil {
+				return loweredAttempt{
+					Stmts:     []ast.Stmt{&ast.ExprStmt{Position: n.Position, Expr: valueExpr}},
+					Matched:   &ast.BoolLit{Position: n.Position, Value: true},
+					Committed: &ast.BoolLit{Position: n.Position, Value: false},
+					Value:     &ast.BoolLit{Position: n.Position, Value: true},
+				}
+			}
+			valueName := ctx.fresh("value")
 			return loweredAttempt{
 				Stmts:     []ast.Stmt{&ast.VarDeclStmt{Position: n.Position, Name: valueName, Value: valueExpr}},
 				Matched:   &ast.BoolLit{Position: n.Position, Value: true},
@@ -1472,7 +1504,7 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 	case *ast.GrammarPrecedenceTerm:
 		return ctx.lowerPrecedenceAttempt(n)
 	case *ast.GrammarPassTerm:
-		return loweredAttempt{Matched: &ast.BoolLit{Position: n.Position, Value: true}, Committed: &ast.BoolLit{Position: n.Position, Value: false}, Value: zeroedCastExpr(n.Position, grammarValueTypeExpr(ctx.production.ReturnType))}
+		return loweredAttempt{Matched: &ast.BoolLit{Position: n.Position, Value: true}, Committed: &ast.BoolLit{Position: n.Position, Value: false}, Value: zeroedCastExpr(n.Position, grammarResolvedValueTypeExpr(n.Position, ctx.production.ReturnType))}
 	case *ast.GrammarBindTerm:
 		return ctx.lowerAttempt(n.Term)
 	default:
@@ -1544,7 +1576,7 @@ func (ctx *statefulLowerContext) lowerPrecedenceAttempt(term *ast.GrammarPrecede
 	seedAttempt := ctx.lowerAttempt(term.Seed)
 	leftType := ctx.inferTermType(term.Seed)
 	if leftType == nil {
-		leftType = grammarValueTypeExpr(ctx.production.ReturnType)
+		leftType = grammarResolvedValueTypeExpr(term.Position, ctx.production.ReturnType)
 	}
 	stopName := ctx.fresh("precedence_stop")
 	matchedName := ctx.fresh("precedence_matched")
@@ -1575,7 +1607,7 @@ func (ctx *statefulLowerContext) lowerPostfixAttempt(term *ast.GrammarPostfixTer
 	seedAttempt := ctx.lowerAttempt(term.Seed)
 	leftType := ctx.inferTermType(term.Seed)
 	if leftType == nil {
-		leftType = grammarValueTypeExpr(ctx.production.ReturnType)
+		leftType = grammarResolvedValueTypeExpr(term.Position, ctx.production.ReturnType)
 	}
 	stopName := ctx.fresh("postfix_stop")
 	matchedName := ctx.fresh("postfix_matched")
@@ -1609,7 +1641,7 @@ func (ctx *statefulLowerContext) lowerNamedPrecedenceAttempt(term *ast.GrammarPr
 	}
 	top, ok := levels[term.Result]
 	if !ok {
-		return loweredAttempt{Matched: &ast.BoolLit{Position: term.Position, Value: false}, Committed: &ast.BoolLit{Position: term.Position, Value: false}, Value: zeroedCastExpr(term.Position, grammarValueTypeExpr(ctx.production.ReturnType))}
+		return loweredAttempt{Matched: &ast.BoolLit{Position: term.Position, Value: false}, Committed: &ast.BoolLit{Position: term.Position, Value: false}, Value: zeroedCastExpr(term.Position, grammarResolvedValueTypeExpr(term.Position, ctx.production.ReturnType))}
 	}
 	return ctx.lowerPrecedenceLevelAttempt(top, levels)
 }
@@ -1618,7 +1650,7 @@ func (ctx *statefulLowerContext) lowerPrecedenceLevelAttempt(level ast.GrammarPr
 	seedAttempt := ctx.lowerPrecedenceLevelOperandAttempt(level.Seed, levels)
 	leftType := ctx.inferPrecedenceOperandType(level.Seed, levels)
 	if leftType == nil {
-		leftType = grammarValueTypeExpr(ctx.production.ReturnType)
+		leftType = grammarResolvedValueTypeExpr(level.Position, ctx.production.ReturnType)
 	}
 	stopName := ctx.fresh("precedence_stop")
 	matchedName := ctx.fresh("precedence_matched")
@@ -1712,7 +1744,7 @@ func (ctx *statefulLowerContext) precedenceOperandCanFail(term ast.GrammarTerm, 
 func (ctx *statefulLowerContext) inferPrecedenceOperandType(term ast.GrammarTerm, levels map[string]ast.GrammarPrecedenceLevel) ast.TypeExpr {
 	if call, ok := term.(*ast.GrammarCallTerm); ok {
 		if _, ok := ctx.resolvePrecedenceLevelCall(call, levels); ok {
-			return grammarValueTypeExpr(ctx.production.ReturnType)
+			return grammarResolvedValueTypeExpr(call.Position, ctx.production.ReturnType)
 		}
 	}
 	return ctx.inferTermType(term)
@@ -1950,7 +1982,7 @@ func (ctx *statefulLowerContext) inferTermType(term ast.GrammarTerm) ast.TypeExp
 		}
 		_, production, ok := ctx.resolveGrammarProductionInfo(n)
 		if ok {
-			return grammarValueTypeExpr(production.ReturnType)
+			return grammarResolvedValueTypeExpr(n.Position, production.ReturnType)
 		}
 		return nil
 	case *ast.GrammarChoiceTerm:
@@ -1979,15 +2011,15 @@ func (ctx *statefulLowerContext) inferTermType(term ast.GrammarTerm) ast.TypeExp
 		return ctx.inferTermType(n.Seed)
 	case *ast.GrammarPrecedenceTerm:
 		if len(n.Levels) != 0 {
-			return grammarValueTypeExpr(ctx.production.ReturnType)
+			return grammarResolvedValueTypeExpr(n.Position, ctx.production.ReturnType)
 		}
 		return ctx.inferTermType(n.Seed)
 	case *ast.GrammarBindTerm:
 		return ctx.inferTermType(n.Term)
 	case *ast.GrammarPassTerm:
-		return grammarValueTypeExpr(ctx.production.ReturnType)
+		return grammarResolvedValueTypeExpr(n.Position, ctx.production.ReturnType)
 	}
-	return grammarValueTypeExpr(ctx.production.ReturnType)
+	return grammarResolvedValueTypeExpr(ctx.production.Position, ctx.production.ReturnType)
 }
 
 func (ctx *statefulLowerContext) resolveGrammarProductionInfo(term *ast.GrammarCallTerm) (string, ast.GrammarProductionDecl, bool) {

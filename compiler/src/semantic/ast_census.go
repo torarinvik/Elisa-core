@@ -299,6 +299,10 @@ func (c *analyzerASTCensus) countMatchPattern(pattern ast.MatchPattern) {
 	switch n := pattern.(type) {
 	case *ast.MatchLiteralPattern:
 		c.countExpr(n.Value)
+	case *ast.MatchTuplePattern:
+		for _, elem := range n.Elems {
+			c.countMatchPattern(elem)
+		}
 	case *ast.MatchStructPattern:
 		for _, arg := range n.Args {
 			c.countMatchPattern(arg.Pattern)

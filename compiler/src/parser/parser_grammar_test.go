@@ -545,6 +545,30 @@ func TestParseGrammarProductionAllowsRecoverClause(t *testing.T) {
 	}
 }
 
+func TestParseGrammarProductionAllowsRecoverFallbackValue(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend:
+	statement(state: mutable ParserState&) -> Pascal.Stmt recover(ParseMessageKey.ExpectedStatement, until(";", token(TokenKind.EOF)), zeroed as Pascal.Stmt):
+		stmt = state.assignment()
+		return stmt
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	production := decl.Productions[0]
+	if production.RecoverValue == nil {
+		t.Fatal("expected recover fallback expression")
+	}
+	formatted := unparse.FormatFile(file)
+	want := "statement(state: mutable ParserState&) -> Pascal.Stmt recover(ParseMessageKey.ExpectedStatement, until(\";\", token(TokenKind.EOF)), zeroed as Pascal.Stmt):"
+	if !strings.Contains(formatted, want) {
+		t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+	}
+}
+
 func TestParseGrammarDeclAllowsPrecedenceTerm(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
     expression(state: mutable ParserState&) -> Pascal.Expr:

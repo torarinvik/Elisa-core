@@ -736,13 +736,25 @@ func (p *Parser) parseLockStmt() *ast.LockStmt {
 func (p *Parser) parseMatch() *ast.MatchStmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_MATCH)
-	value := p.withInMembershipDisabled(p.parseExpr)
+	value := p.parseMatchHeadExpr()
 	var store ast.Expr
 	if p.match(lexer.TOKEN_IN) {
 		store = p.parseExpr()
 	}
 	arms := p.parseMatchArms()
 	return &ast.MatchStmt{Position: pos, Value: value, Store: store, Arms: arms}
+}
+
+func (p *Parser) parseMatchHeadExpr() ast.Expr {
+	first := p.withInMembershipDisabled(p.parseExpr)
+	if p.peek() != lexer.TOKEN_COMMA {
+		return first
+	}
+	elems := []ast.Expr{first}
+	for p.match(lexer.TOKEN_COMMA) {
+		elems = append(elems, p.withInMembershipDisabled(p.parseExpr))
+	}
+	return &ast.TupleExpr{Position: first.Pos(), Elems: elems}
 }
 
 func (p *Parser) parseInStore() *ast.InStoreStmt {
@@ -954,11 +966,18 @@ func (p *Parser) parseTopLevelMatchPatterns() []ast.MatchPattern {
 
 func (p *Parser) parseMatchPattern() ast.MatchPattern {
 	pattern := p.parseNestedMatchPattern()
+	if p.peek() == lexer.TOKEN_COMMA {
+		elems := []ast.MatchPattern{pattern}
+		for p.match(lexer.TOKEN_COMMA) {
+			elems = append(elems, p.parseNestedMatchPattern())
+		}
+		pattern = &ast.MatchTuplePattern{Position: pattern.Pos(), Elems: elems}
+	}
 	switch pattern.(type) {
-	case *ast.MatchWildcardPattern, *ast.MatchStringLiteralPattern, *ast.MatchVariantPattern, *ast.MatchStructPattern:
+	case *ast.MatchWildcardPattern, *ast.MatchStringLiteralPattern, *ast.MatchVariantPattern, *ast.MatchStructPattern, *ast.MatchTuplePattern:
 		return pattern
 	default:
-		p.errorf("top-level match arm must use Enum.Variant(...), Struct(...), a string literal, or _")
+		p.errorf("top-level match arm must use Enum.Variant(...), Struct(...), a string literal, a tuple pattern, or _")
 		return pattern
 	}
 }
@@ -1516,6 +1535,13 @@ func matchPatternContainsBindNames(pattern ast.MatchPattern) bool {
 		return false
 	case *ast.MatchBindPattern:
 		return p.Name != "" && p.Name != "_"
+	case *ast.MatchTuplePattern:
+		for _, elem := range p.Elems {
+			if matchPatternContainsBindNames(elem) {
+				return true
+			}
+		}
+		return false
 	case *ast.MatchStructPattern:
 		for _, arg := range p.Args {
 			if matchPatternContainsBindNames(arg.Pattern) {

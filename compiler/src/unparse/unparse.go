@@ -462,7 +462,11 @@ func (f *formatter) writeGrammarProduction(level int, production ast.GrammarProd
 		for _, stop := range production.RecoverUntil {
 			untilParts = append(untilParts, formatGrammarTerm(stop))
 		}
-		header += " recover(" + formatExpr(production.RecoverMsg) + ", until(" + strings.Join(untilParts, ", ") + "))"
+		header += " recover(" + formatExpr(production.RecoverMsg) + ", until(" + strings.Join(untilParts, ", ") + ")"
+		if production.RecoverValue != nil {
+			header += ", " + formatExpr(production.RecoverValue)
+		}
+		header += ")"
 	}
 	header += ":"
 	f.writeLine(level, header)
@@ -2063,6 +2067,12 @@ func formatMatchPattern(pattern ast.MatchPattern) string {
 		return strconv.Quote(n.Value)
 	case *ast.MatchLiteralPattern:
 		return formatExpr(n.Value)
+	case *ast.MatchTuplePattern:
+		parts := make([]string, 0, len(n.Elems))
+		for _, elem := range n.Elems {
+			parts = append(parts, formatMatchPattern(elem))
+		}
+		return strings.Join(parts, ", ")
 	case *ast.MatchStructPattern:
 		parts := make([]string, 0, len(n.Args))
 		for _, arg := range n.Args {

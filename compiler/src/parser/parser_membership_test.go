@@ -68,6 +68,41 @@ func TestParseMatchStoreRemainsTrailingIn(t *testing.T) {
 	}
 }
 
+func TestParseTupleMatchHeadAndPatterns(t *testing.T) {
+	file, errs := parseSourceFile(t, "def keep(length: int, source: dstr, start: usize) -> int:\n    match length, source[start], source[start + 1], source[start + 2], source[start + 3], source[start + 4]:\n        5, 'w', 'h', 'i', 'l', 'e':\n            return 1\n        _, _, _, _, _, _:\n            return 0\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	matchStmt, ok := decl.Body[0].(*ast.MatchStmt)
+	if !ok {
+		t.Fatalf("expected match stmt, got %T", decl.Body[0])
+	}
+	head, ok := matchStmt.Value.(*ast.TupleExpr)
+	if !ok || len(head.Elems) != 6 {
+		t.Fatalf("expected six-element tuple match head, got %#v", matchStmt.Value)
+	}
+	firstArm, ok := matchStmt.Arms[0].Pattern.(*ast.MatchTuplePattern)
+	if !ok || len(firstArm.Elems) != 6 {
+		t.Fatalf("expected six-element tuple match pattern, got %#v", matchStmt.Arms[0].Pattern)
+	}
+	if _, ok := firstArm.Elems[0].(*ast.MatchLiteralPattern); !ok {
+		t.Fatalf("expected literal first tuple pattern element, got %T", firstArm.Elems[0])
+	}
+	if _, ok := firstArm.Elems[1].(*ast.MatchLiteralPattern); !ok {
+		t.Fatalf("expected char literal tuple pattern element, got %T", firstArm.Elems[1])
+	}
+	secondArm, ok := matchStmt.Arms[1].Pattern.(*ast.MatchTuplePattern)
+	if !ok || len(secondArm.Elems) != 6 {
+		t.Fatalf("expected wildcard tuple match pattern, got %#v", matchStmt.Arms[1].Pattern)
+	}
+	for i, elem := range secondArm.Elems {
+		if _, ok := elem.(*ast.MatchWildcardPattern); !ok {
+			t.Fatalf("expected wildcard tuple element %d, got %T", i, elem)
+		}
+	}
+}
+
 func TestParseOpenStatementRemainsTrailingIn(t *testing.T) {
 	file, errs := parseSourceFile(t, "packed enum Expr:\n    Lit(value: int)\n\ndef keep(node: Expr, store: Expr.Store[Local]) -> int:\n    open node in store as Expr.Lit(value: value):\n        return value\n    return 0\n")
 	if len(errs) != 0 {

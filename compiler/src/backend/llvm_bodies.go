@@ -4949,6 +4949,11 @@ func resolveMatchableStructTypeBackend(actual semantic.Type) bool {
 	}
 }
 
+func resolveMatchableTupleTypeBackend(actual semantic.Type) bool {
+	tupleType, ok := semantic.StripAggregateStateType(actual).(*semantic.TupleType)
+	return ok && tupleType != nil
+}
+
 func runtimeStringLiteralType() semantic.Type {
 	return &semantic.RefType{Elem: &semantic.BuiltinType{Name: "u8"}, State: semantic.RefStateNonNull, Storage: semantic.RefStorageStatic, ExplicitStorage: true}
 }
@@ -4974,10 +4979,13 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 	if isStringMatchableType(s.exprType(stmt.Value)) {
 		return s.emitStringMatch(stmt)
 	}
+	if resolveMatchableTupleTypeBackend(s.exprType(stmt.Value)) {
+		return s.emitTupleMatch(stmt)
+	}
 	if resolveMatchableStructTypeBackend(s.exprType(stmt.Value)) {
 		return s.emitStructMatch(stmt)
 	}
-	return fmt.Errorf("match requires an enum, const enum, tree-category, or string value")
+	return fmt.Errorf("match requires an enum, const enum, tree-category, string, tuple, or struct value")
 }
 
 func (s *functionState) emitEnumMatch(stmt *ast.MatchStmt, enumType *semantic.EnumType) error {
@@ -5302,10 +5310,13 @@ func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, sema
 	if isStringMatchableType(s.exprType(expr.Value)) {
 		return s.emitStringMatchExpr(expr, resultType)
 	}
+	if resolveMatchableTupleTypeBackend(s.exprType(expr.Value)) {
+		return s.emitTupleMatchExpr(expr, resultType)
+	}
 	if resolveMatchableStructTypeBackend(s.exprType(expr.Value)) {
 		return s.emitStructMatchExpr(expr, resultType)
 	}
-	return nil, nil, fmt.Errorf("match requires an enum, const enum, tree-category, or string value")
+	return nil, nil, fmt.Errorf("match requires an enum, const enum, tree-category, string, tuple, or struct value")
 }
 
 func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semantic.Type, enumType *semantic.EnumType) (C.LLVMValueRef, semantic.Type, error) {
@@ -6421,9 +6432,143 @@ func (s *functionState) emitStructMatch(stmt *ast.MatchStmt) error {
 	return nil
 }
 
+func (s *functionState) emitTupleMatch(stmt *ast.MatchStmt) error {
+	if stmt.Store != nil {
+		return fmt.Errorf("tuple match does not take an in-store clause")
+	}
+	actualType := s.exprType(stmt.Value)
+	value, _, err := s.emitExpr(stmt.Value, nil)
+	if err != nil {
+		return err
+	}
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.end"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.fail"))
+	allTerminated := true
+	for i, arm := range stmt.Arms {
+		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.arm"))
+		var nextBB C.LLVMBasicBlockRef
+		if i == len(stmt.Arms)-1 {
+			nextBB = failBB
+		} else {
+			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.next"))
+		}
+		if _, _, err := s.emitMatchPatternTest(arm.Pattern, value, nil, actualType, nil, stmt.Value, nil, bodyBB, nextBB); err != nil {
+			return err
+		}
+
+		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+		s.pushScope()
+		if err := s.emitBlockInCurrentScope(arm.Body); err != nil {
+			s.popScope()
+			return err
+		}
+		s.popScope()
+		if !s.currentBlockTerminated() {
+			allTerminated = false
+			C.LLVMBuildBr(s.builder, mergeBB)
+		}
+
+		if nextBB != mergeBB {
+			C.LLVMPositionBuilderAtEnd(s.builder, nextBB)
+		}
+	}
+
+	hasWildcard := matchHasWildcard(stmt.Arms)
+	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	if hasWildcard {
+		C.LLVMBuildUnreachable(s.builder)
+	} else {
+		C.LLVMBuildBr(s.builder, mergeBB)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	if allTerminated && hasWildcard {
+		C.LLVMBuildUnreachable(s.builder)
+	}
+	return nil
+}
+
 func (s *functionState) emitStructMatchExpr(expr *ast.MatchExpr, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
 	if expr.Store != nil {
 		return nil, nil, fmt.Errorf("struct match does not take an in-store clause")
+	}
+	actualType := s.exprType(expr.Value)
+	value, _, err := s.emitExpr(expr.Value, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.end"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.fail"))
+	incomingValues := make([]C.LLVMValueRef, 0, len(expr.Arms)+1)
+	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(expr.Arms)+1)
+	for i, arm := range expr.Arms {
+		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.arm"))
+		var nextBB C.LLVMBasicBlockRef
+		if i == len(expr.Arms)-1 {
+			nextBB = failBB
+		} else {
+			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.next"))
+		}
+		if _, _, err := s.emitMatchPatternTest(arm.Pattern, value, nil, actualType, nil, expr.Value, nil, bodyBB, nextBB); err != nil {
+			return nil, nil, err
+		}
+
+		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+		s.pushScope()
+		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, resultType)
+		if err != nil {
+			s.popScope()
+			return nil, nil, err
+		}
+		if reachable && !s.currentBlockTerminated() {
+			armEnd := C.LLVMGetInsertBlock(s.builder)
+			incomingValues = append(incomingValues, armValue)
+			incomingBlocks = append(incomingBlocks, armEnd)
+			C.LLVMBuildBr(s.builder, mergeBB)
+		}
+		s.popScope()
+
+		if nextBB != mergeBB {
+			C.LLVMPositionBuilderAtEnd(s.builder, nextBB)
+		}
+	}
+
+	hasWildcard := matchHasWildcard(expr.Arms)
+	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	if hasWildcard || semantic.IsNeverType(resultType) {
+		C.LLVMBuildUnreachable(s.builder)
+	} else {
+		llvmType, err := s.g.lowerType(resultType)
+		if err != nil {
+			return nil, nil, err
+		}
+		undefValue := C.LLVMGetUndef(llvmType)
+		failEnd := C.LLVMGetInsertBlock(s.builder)
+		incomingValues = append(incomingValues, undefValue)
+		incomingBlocks = append(incomingBlocks, failEnd)
+		C.LLVMBuildBr(s.builder, mergeBB)
+	}
+
+	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
+	if len(incomingValues) == 0 {
+		C.LLVMBuildUnreachable(s.builder)
+		return nil, resultType, nil
+	}
+	if len(incomingValues) == 1 || semantic.IsNeverType(resultType) {
+		return incomingValues[0], resultType, nil
+	}
+	llvmType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, err
+	}
+	phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree("match.expr.phi"))
+	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
+	return phi, resultType, nil
+}
+
+func (s *functionState) emitTupleMatchExpr(expr *ast.MatchExpr, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+	if expr.Store != nil {
+		return nil, nil, fmt.Errorf("tuple match does not take an in-store clause")
 	}
 	actualType := s.exprType(expr.Value)
 	value, _, err := s.emitExpr(expr.Value, nil)
@@ -6582,6 +6727,29 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 	case *ast.MatchStringLiteralPattern:
 		if err := s.emitLiteralMatchPatternTest(&ast.StringLit{Position: p.Position, Value: p.Value}, actualValue, actualType, successBB, failureBB); err != nil {
 			return nil, packedPayloadValueCache{}, err
+		}
+		return decodedActualValue, packedPayloadValueCache{}, nil
+	case *ast.MatchTuplePattern:
+		fields, err := s.resolveTupleMatchPatternElems(p, actualType)
+		if err != nil {
+			return nil, packedPayloadValueCache{}, err
+		}
+		if len(p.Elems) == 0 {
+			C.LLVMBuildBr(s.builder, successBB)
+			return decodedActualValue, packedPayloadValueCache{}, nil
+		}
+		for i, elem := range p.Elems {
+			fieldValue := C.LLVMBuildExtractValue(s.builder, actualValue, C.unsigned(fields[i].Index), cStringFree("match.tuple.field"))
+			nextSuccess := successBB
+			if i != len(p.Elems)-1 {
+				nextSuccess = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.tuple.pattern.next"))
+			}
+			if _, _, err := s.emitMatchPatternTest(elem, fieldValue, nil, fields[i].Type, nil, nil, nil, nextSuccess, failureBB); err != nil {
+				return nil, packedPayloadValueCache{}, err
+			}
+			if i != len(p.Elems)-1 {
+				C.LLVMPositionBuilderAtEnd(s.builder, nextSuccess)
+			}
 		}
 		return decodedActualValue, packedPayloadValueCache{}, nil
 	case *ast.MatchStructPattern:
@@ -7074,6 +7242,24 @@ func (s *functionState) resolveMatchPatternArgs(pattern *ast.MatchVariantPattern
 	}
 	pattern.ResolvedArgs = ordered
 	return ordered, nil
+}
+
+func (s *functionState) resolveTupleMatchPatternElems(pattern *ast.MatchTuplePattern, actualType semantic.Type) ([]structLiteralField, error) {
+	if pattern == nil {
+		return nil, fmt.Errorf("missing tuple match pattern")
+	}
+	tupleType, ok := semantic.StripAggregateStateType(actualType).(*semantic.TupleType)
+	if !ok || tupleType == nil {
+		return nil, fmt.Errorf("tuple pattern requires a tuple value, got %s", semantic.StripAggregateStateType(actualType).String())
+	}
+	fields, err := s.g.structLiteralFields(actualType)
+	if err != nil {
+		return nil, err
+	}
+	if len(pattern.Elems) != len(fields) {
+		return nil, fmt.Errorf("tuple pattern expects %d elements, got %d", len(fields), len(pattern.Elems))
+	}
+	return fields, nil
 }
 
 func (s *functionState) extractEnumTagValue(enumValue C.LLVMValueRef, decodedEnumValue C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding) (C.LLVMValueRef, error) {
