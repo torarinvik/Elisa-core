@@ -569,6 +569,39 @@ func TestParseGrammarProductionAllowsRecoverFallbackValue(t *testing.T) {
 	}
 }
 
+func TestParseGrammarProductionAllowsReturnlessRecoverClause(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend over Token using ParserState:
+	cursor state
+	block_tail() recover(ParseMessageKey.ExpectedStatement, until("end", token(TokenKind.EOF))):
+		guard(state.current_token().kind == TokenKind.END or state.current_token().kind == TokenKind.EOF)
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	production := decl.Productions[0]
+	if production.ReturnType != nil {
+		t.Fatalf("expected returnless recover production, got return type %T", production.ReturnType)
+	}
+	if production.RecoverMsg == nil {
+		t.Fatal("expected recover message expression")
+	}
+	if len(production.RecoverUntil) != 2 {
+		t.Fatalf("expected two recover stop terms, got %d", len(production.RecoverUntil))
+	}
+	if production.RecoverValue != nil {
+		t.Fatal("expected no recover fallback expression")
+	}
+	formatted := unparse.FormatFile(file)
+	want := "block_tail() recover(ParseMessageKey.ExpectedStatement, until(\"end\", token(TokenKind.EOF))):"
+	if !strings.Contains(formatted, want) {
+		t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+	}
+}
+
 func TestParseGrammarDeclAllowsPrecedenceTerm(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
     expression(state: mutable ParserState&) -> Pascal.Expr:
