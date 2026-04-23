@@ -186,6 +186,22 @@ func TestLowerDeclRoutesBareTokenTermsThroughStateReceiverWhenPresent(t *testing
 	}
 }
 
+func TestLowerDeclPreservesWhenTermAsTernaryExpr(t *testing.T) {
+	decl := parseGrammarTestDecl(t, `grammar PascalFrontend:
+    body(flag: bool) -> Pascal.Stmt:
+        node = when(flag, expr(make_then()), expr(make_else()))
+        return node
+`)
+	funcs := LowerDecl(decl)
+	if len(funcs) != 1 {
+		t.Fatalf("expected one lowered function, got %d", len(funcs))
+	}
+	formatted := unparse.FormatDecl(funcs[0])
+	if !strings.Contains(formatted, "node = (make_then() if flag else make_else())") {
+		t.Fatalf("expected lowered when term to become ternary expr, got:\n%s", formatted)
+	}
+}
+
 func TestLowerDeclRoutesTokenKindMatcherThroughStateReceiverWhenPresent(t *testing.T) {
 	decl := parseGrammarTestDecl(t, `grammar PascalFrontend:
     assignment(state: mutable ParserState&) -> Pascal.Stmt:
@@ -310,6 +326,28 @@ func TestLowerFileStatefulProductionWithRecoverFallbackReturnsFallbackValue(t *t
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected lowered recover fallback production to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestLowerFileStatefulWhenTermBranchesWithoutRunningBothSides(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+	    cursor state
+	    body(flag: bool) -> Token:
+	        node = when(flag, token(TokenKind.IDENT), token(TokenKind.INTEGER))
+	        return node
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"__grammar_when_cond_",
+		"if __grammar_when_cond_",
+		"state.expect_kind(TokenKind.IDENT)",
+		"state.expect_kind(TokenKind.INTEGER)",
+		"mutable bool = false",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered when-term production to contain %q, got:\n%s", want, formatted)
 		}
 	}
 }

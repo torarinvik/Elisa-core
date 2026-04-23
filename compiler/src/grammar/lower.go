@@ -1328,6 +1328,8 @@ func (ctx *statefulLowerContext) termCanFail(term ast.GrammarTerm) bool {
 		return ok
 	case *ast.GrammarChoiceTerm:
 		return true
+	case *ast.GrammarWhenTerm:
+		return ctx.termCanFail(n.Then) || ctx.termCanFail(n.Else)
 	case *ast.GrammarExprTerm:
 		return false
 	case *ast.GrammarGuardTerm:
@@ -1463,6 +1465,8 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 		}
 	case *ast.GrammarChoiceTerm:
 		return ctx.lowerChoiceAttempt(n)
+	case *ast.GrammarWhenTerm:
+		return ctx.lowerWhenAttempt(n)
 	case *ast.GrammarExprTerm:
 		valueName := ctx.fresh("value")
 		return loweredAttempt{
@@ -1521,6 +1525,52 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 		return ctx.lowerAttempt(n.Term)
 	default:
 		return loweredAttempt{Matched: &ast.BoolLit{Position: term.Pos(), Value: true}, Committed: &ast.BoolLit{Position: term.Pos(), Value: false}, Value: &ast.ZeroedLit{Position: term.Pos()}}
+	}
+}
+
+func (ctx *statefulLowerContext) lowerWhenAttempt(term *ast.GrammarWhenTerm) loweredAttempt {
+	thenAttempt := ctx.lowerAttempt(term.Then)
+	elseAttempt := ctx.lowerAttempt(term.Else)
+	termType := ctx.inferTermType(term)
+	if termType == nil {
+		termType = grammarResolvedValueTypeExpr(term.Position, ctx.production.ReturnType)
+	}
+	condName := ctx.fresh("when_cond")
+	matchedName := ctx.fresh("when_matched")
+	committedName := ctx.fresh("when_committed")
+	valueName := ctx.fresh("when_value")
+	valueIdent := &ast.Ident{Position: term.Position, Name: valueName}
+	thenValue := thenAttempt.Value
+	if thenValue == nil {
+		thenValue = zeroedCastExpr(term.Position, termType)
+	}
+	elseValue := elseAttempt.Value
+	if elseValue == nil {
+		elseValue = zeroedCastExpr(term.Position, termType)
+	}
+	thenBranch := append([]ast.Stmt{}, thenAttempt.Stmts...)
+	thenBranch = append(thenBranch, markCommittedStmts(committedName, term.Position, thenAttempt.Committed)...)
+	thenBranch = append(thenBranch,
+		&ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: matchedName}, Value: thenAttempt.Matched},
+		&ast.AssignStmt{Position: term.Position, Target: valueIdent, Value: thenValue},
+	)
+	elseBranch := append([]ast.Stmt{}, elseAttempt.Stmts...)
+	elseBranch = append(elseBranch, markCommittedStmts(committedName, term.Position, elseAttempt.Committed)...)
+	elseBranch = append(elseBranch,
+		&ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: matchedName}, Value: elseAttempt.Matched},
+		&ast.AssignStmt{Position: term.Position, Target: valueIdent, Value: elseValue},
+	)
+	return loweredAttempt{
+		Stmts: []ast.Stmt{
+			&ast.VarDeclStmt{Position: term.Position, Name: condName, Value: term.Cond},
+			&ast.VarDeclStmt{Position: term.Position, Name: matchedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
+			&ast.VarDeclStmt{Position: term.Position, Name: committedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
+			&ast.VarDeclStmt{Position: term.Position, Name: valueName, Mutable: true, Type: termType, Value: zeroedCastExpr(term.Position, termType)},
+			&ast.IfStmt{Position: term.Position, Cond: &ast.Ident{Position: term.Position, Name: condName}, Then: thenBranch, Else: elseBranch},
+		},
+		Matched:   &ast.Ident{Position: term.Position, Name: matchedName},
+		Committed: &ast.Ident{Position: term.Position, Name: committedName},
+		Value:     valueIdent,
 	}
 }
 
@@ -2039,6 +2089,11 @@ func (ctx *statefulLowerContext) inferTermType(term ast.GrammarTerm) ast.TypeExp
 				return typ
 			}
 		}
+	case *ast.GrammarWhenTerm:
+		if typ := ctx.inferTermType(n.Then); typ != nil {
+			return typ
+		}
+		return ctx.inferTermType(n.Else)
 	case *ast.GrammarExprTerm:
 		return nil
 	case *ast.GrammarRecoverTerm:
@@ -2285,6 +2340,8 @@ func lowerTermExpr(ctx lowerContext, term ast.GrammarTerm) ast.Expr {
 		}
 	case *ast.GrammarChoiceTerm:
 		return lowerChoiceExpr(ctx, n.Position, n.Options)
+	case *ast.GrammarWhenTerm:
+		return &ast.TernaryExpr{Position: n.Position, Value: lowerTermExpr(ctx, n.Then), Cond: n.Cond, Alt: lowerTermExpr(ctx, n.Else)}
 	case *ast.GrammarExprTerm:
 		return n.Expr
 	case *ast.GrammarRecoverTerm:

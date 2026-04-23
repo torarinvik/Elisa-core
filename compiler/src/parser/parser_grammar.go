@@ -284,6 +284,10 @@ func (p *Parser) parseGrammarTerm() ast.GrammarTerm {
 	return term
 }
 
+func (p *Parser) parseGrammarRecoverableTermValue() ast.GrammarTerm {
+	return p.wrapGrammarRecoverTerm(p.parseGrammarTermValue())
+}
+
 func (p *Parser) parseGrammarTermValue() ast.GrammarTerm {
 	pos := p.cur().Pos
 	if p.peek() == lexer.TOKEN_STRING_LIT {
@@ -301,6 +305,9 @@ func (p *Parser) parseGrammarTermValue() ast.GrammarTerm {
 	}
 	if p.peekIdentText("choice") {
 		return p.parseGrammarChoiceTerm()
+	}
+	if p.peekIdentText("when") {
+		return p.parseGrammarWhenTerm()
 	}
 	if p.peekIdentText("expr") {
 		return p.parseGrammarExprTerm()
@@ -374,7 +381,7 @@ func (p *Parser) parseGrammarChoiceTerm() ast.GrammarTerm {
 	options := make([]ast.GrammarTerm, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 	if p.peek() != lexer.TOKEN_RPAREN {
 		for {
-			options = append(options, p.parseGrammarTermValue())
+			options = append(options, p.parseGrammarRecoverableTermValue())
 			if !p.match(lexer.TOKEN_COMMA) {
 				break
 			}
@@ -382,6 +389,19 @@ func (p *Parser) parseGrammarChoiceTerm() ast.GrammarTerm {
 	}
 	p.expect(lexer.TOKEN_RPAREN)
 	return &ast.GrammarChoiceTerm{Position: pos, Options: options}
+}
+
+func (p *Parser) parseGrammarWhenTerm() ast.GrammarTerm {
+	pos := p.cur().Pos
+	p.expectIdentText("when")
+	p.expect(lexer.TOKEN_LPAREN)
+	cond := p.parseExpr()
+	p.expect(lexer.TOKEN_COMMA)
+	thenTerm := p.parseGrammarRecoverableTermValue()
+	p.expect(lexer.TOKEN_COMMA)
+	elseTerm := p.parseGrammarRecoverableTermValue()
+	p.expect(lexer.TOKEN_RPAREN)
+	return &ast.GrammarWhenTerm{Position: pos, Cond: cond, Then: thenTerm, Else: elseTerm}
 }
 
 func (p *Parser) parseGrammarExprTerm() ast.GrammarTerm {
@@ -421,7 +441,7 @@ func (p *Parser) parseGrammarOptionalTerm() ast.GrammarTerm {
 	pos := p.cur().Pos
 	p.expectIdentText("optional")
 	p.expect(lexer.TOKEN_LPAREN)
-	term := p.parseGrammarTermValue()
+	term := p.parseGrammarRecoverableTermValue()
 	p.expect(lexer.TOKEN_RPAREN)
 	return &ast.GrammarOptionalTerm{Position: pos, Term: term}
 }
@@ -430,14 +450,14 @@ func (p *Parser) parseGrammarListTerm() ast.GrammarTerm {
 	pos := p.cur().Pos
 	p.expectIdentText("list")
 	p.expect(lexer.TOKEN_LPAREN)
-	elem := p.parseGrammarTermValue()
+	elem := p.parseGrammarRecoverableTermValue()
 	var separator ast.GrammarTerm
 	var until []ast.GrammarTerm
 	if p.match(lexer.TOKEN_COMMA) {
 		if p.peekIdentText("until") {
 			until = p.parseGrammarUntilClause()
 		} else {
-			separator = p.parseGrammarTermValue()
+			separator = p.parseGrammarRecoverableTermValue()
 			if p.match(lexer.TOKEN_COMMA) {
 				until = p.parseGrammarUntilClause()
 			}
@@ -451,7 +471,7 @@ func (p *Parser) parseGrammarRepeatTerm() ast.GrammarTerm {
 	pos := p.cur().Pos
 	p.expectIdentText("repeat")
 	p.expect(lexer.TOKEN_LPAREN)
-	elem := p.parseGrammarTermValue()
+	elem := p.parseGrammarRecoverableTermValue()
 	var until []ast.GrammarTerm
 	if p.match(lexer.TOKEN_COMMA) {
 		until = p.parseGrammarUntilClause()
@@ -464,9 +484,9 @@ func (p *Parser) parseGrammarSeparatedTerm() ast.GrammarTerm {
 	pos := p.cur().Pos
 	p.expectIdentText("separated")
 	p.expect(lexer.TOKEN_LPAREN)
-	elem := p.parseGrammarTermValue()
+	elem := p.parseGrammarRecoverableTermValue()
 	p.expect(lexer.TOKEN_COMMA)
-	separator := p.parseGrammarTermValue()
+	separator := p.parseGrammarRecoverableTermValue()
 	var until []ast.GrammarTerm
 	if p.match(lexer.TOKEN_COMMA) {
 		until = p.parseGrammarUntilClause()
@@ -481,7 +501,7 @@ func (p *Parser) parseGrammarUntilClause() []ast.GrammarTerm {
 	p.expect(lexer.TOKEN_LPAREN)
 	if p.peek() != lexer.TOKEN_RPAREN {
 		for {
-			terms = append(terms, p.parseGrammarTermValue())
+			terms = append(terms, p.parseGrammarRecoverableTermValue())
 			if !p.match(lexer.TOKEN_COMMA) {
 				break
 			}
@@ -497,7 +517,7 @@ func (p *Parser) parseGrammarPostfixTerm() ast.GrammarTerm {
 	p.expect(lexer.TOKEN_LPAREN)
 	leftName := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_ASSIGN)
-	seed := p.parseGrammarTermValue()
+	seed := p.parseGrammarRecoverableTermValue()
 	p.expect(lexer.TOKEN_RPAREN)
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
@@ -521,9 +541,9 @@ func (p *Parser) parseGrammarPostfixArm() ast.GrammarPostfixArm {
 	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ASSIGN {
 		opName = p.expect(lexer.TOKEN_IDENT).Text
 		p.expect(lexer.TOKEN_ASSIGN)
-		op = p.parseGrammarTermValue()
+		op = p.parseGrammarRecoverableTermValue()
 	} else {
-		op = p.parseGrammarTermValue()
+		op = p.parseGrammarRecoverableTermValue()
 	}
 	bindings := make([]*ast.GrammarBindTerm, 0, 2)
 	for {
@@ -531,7 +551,7 @@ func (p *Parser) parseGrammarPostfixArm() ast.GrammarPostfixArm {
 			bindPos := p.cur().Pos
 			name := p.expect(lexer.TOKEN_IDENT).Text
 			p.expect(lexer.TOKEN_ASSIGN)
-			term := p.parseGrammarTermValue()
+			term := p.parseGrammarRecoverableTermValue()
 			bindings = append(bindings, &ast.GrammarBindTerm{Position: bindPos, Name: name, Term: term})
 			continue
 		}
@@ -553,7 +573,7 @@ func (p *Parser) parseGrammarPrecedenceTerm() ast.GrammarTerm {
 	p.expect(lexer.TOKEN_LPAREN)
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	if p.match(lexer.TOKEN_ASSIGN) {
-		seed := p.parseGrammarTermValue()
+		seed := p.parseGrammarRecoverableTermValue()
 		p.expect(lexer.TOKEN_RPAREN)
 		p.expect(lexer.TOKEN_COLON)
 		p.expectNewline()
@@ -589,7 +609,7 @@ func (p *Parser) parseGrammarPrecedenceLevel() ast.GrammarPrecedenceLevel {
 	pos := p.cur().Pos
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	if p.match(lexer.TOKEN_ASSIGN) {
-		seed := p.parseGrammarTermValue()
+		seed := p.parseGrammarRecoverableTermValue()
 		if _, ok := seed.(*ast.GrammarPrecedenceTerm); !ok {
 			p.expectNewline()
 		}
@@ -598,7 +618,7 @@ func (p *Parser) parseGrammarPrecedenceLevel() ast.GrammarPrecedenceLevel {
 	p.expect(lexer.TOKEN_LPAREN)
 	leftName := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_ASSIGN)
-	seed := p.parseGrammarTermValue()
+	seed := p.parseGrammarRecoverableTermValue()
 	p.expect(lexer.TOKEN_RPAREN)
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
@@ -622,9 +642,9 @@ func (p *Parser) parseGrammarPrecedenceArm() ast.GrammarPrecedenceArm {
 	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ASSIGN {
 		opName = p.expect(lexer.TOKEN_IDENT).Text
 		p.expect(lexer.TOKEN_ASSIGN)
-		op = p.parseGrammarTermValue()
+		op = p.parseGrammarRecoverableTermValue()
 	} else {
-		op = p.parseGrammarTermValue()
+		op = p.parseGrammarRecoverableTermValue()
 	}
 	bindings := make([]*ast.GrammarBindTerm, 0, 2)
 	for {
@@ -632,7 +652,7 @@ func (p *Parser) parseGrammarPrecedenceArm() ast.GrammarPrecedenceArm {
 			bindPos := p.cur().Pos
 			name := p.expect(lexer.TOKEN_IDENT).Text
 			p.expect(lexer.TOKEN_ASSIGN)
-			term := p.parseGrammarTermValue()
+			term := p.parseGrammarRecoverableTermValue()
 			bindings = append(bindings, &ast.GrammarBindTerm{Position: bindPos, Name: name, Term: term})
 			continue
 		}

@@ -808,6 +808,44 @@ func TestParseGrammarDeclAllowsExprTerm(t *testing.T) {
 	}
 }
 
+func TestParseGrammarDeclAllowsWhenTerm(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend:
+    body(tok: Token, state: mutable ParserState&) -> Pascal.Stmt:
+        node = when(tok.kind == TokenKind.THEN, state.statement_core() recover(ParseMessageKey.ExpectedStatement, until(";", token(TokenKind.EOF)), zeroed as Pascal.Stmt), when(is_statement_start(state.current_token().kind), state.statement_core(), expr(zeroed as Pascal.Stmt)))
+        return node
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	bind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected first term to be binding, got %T", decl.Productions[0].Terms[0])
+	}
+	whenTerm, ok := bind.Term.(*ast.GrammarWhenTerm)
+	if !ok {
+		t.Fatalf("expected bound term to be when, got %T", bind.Term)
+	}
+	if _, ok := whenTerm.Then.(*ast.GrammarRecoverTerm); !ok {
+		t.Fatalf("expected then branch to be recovered term, got %T", whenTerm.Then)
+	}
+	if _, ok := whenTerm.Else.(*ast.GrammarWhenTerm); !ok {
+		t.Fatalf("expected else branch to be nested when, got %T", whenTerm.Else)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"node = when((tok.kind == TokenKind.THEN), state.statement_core() recover(ParseMessageKey.ExpectedStatement, until(\";\", token(TokenKind.EOF)), zeroed as Pascal.Stmt), when(is_statement_start(state.current_token().kind), state.statement_core(), expr(zeroed as Pascal.Stmt)))",
+		"return node",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestParseGrammarDeclAllowsTokenKindShorthandTerms(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
     atom() -> Token:

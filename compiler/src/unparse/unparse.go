@@ -637,6 +637,8 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 			options = append(options, formatGrammarTerm(option))
 		}
 		return "choice(" + strings.Join(options, ", ") + ")"
+	case *ast.GrammarWhenTerm:
+		return "when(" + formatExpr(n.Cond) + ", " + formatGrammarTerm(n.Then) + ", " + formatGrammarTerm(n.Else) + ")"
 	case *ast.GrammarExprTerm:
 		return "expr(" + formatExpr(n.Expr) + ")"
 	case *ast.GrammarRecoverTerm:
