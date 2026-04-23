@@ -271,6 +271,9 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 	case *ast.GrammarDecl:
 		header := "grammar " + n.Name
+		if n.Extend {
+			header = "extend grammar " + n.Name
+		}
 		header += formatGenericParams(n.GenericParams, n.TypeParams, n.RefStorageParams, n.RefStateParams, n.RegionParams, n.PermissionParams)
 		if n.OverType != nil {
 			header += " over " + formatTypeExpr(n.OverType)
@@ -632,6 +635,8 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 		return "guard(" + formatExpr(n.Cond) + ")"
 	case *ast.GrammarAttemptTerm:
 		return "attempt(" + formatExpr(n.Expr) + ")"
+	case *ast.GrammarCutTerm:
+		return "cut"
 	case *ast.GrammarOptionalTerm:
 		return "optional(" + formatGrammarTerm(n.Term) + ")"
 	case *ast.GrammarListTerm:

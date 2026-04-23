@@ -92,6 +92,7 @@ type TreeDecl struct {
 
 type GrammarDecl struct {
 	Position         lexer.Pos
+	Extend           bool
 	Name             string
 	TypeParams       []string
 	RefStorageParams []string
@@ -177,6 +178,10 @@ type GrammarGuardTerm struct {
 type GrammarAttemptTerm struct {
 	Position lexer.Pos
 	Expr     Expr
+}
+
+type GrammarCutTerm struct {
+	Position lexer.Pos
 }
 
 type GrammarListTerm struct {
@@ -1535,6 +1540,7 @@ func (n *GrammarGuardTerm) Pos() lexer.Pos {
 func (n *GrammarAttemptTerm) Pos() lexer.Pos {
 	return n.Position
 }
+func (n *GrammarCutTerm) Pos() lexer.Pos  { return n.Position }
 func (n *GrammarListTerm) Pos() lexer.Pos { return n.Position }
 func (n *GrammarRepeatTerm) Pos() lexer.Pos {
 	return n.Position
@@ -1732,6 +1738,7 @@ func (*GrammarOptionalTerm) nodeTag()       {}
 func (*GrammarExprTerm) nodeTag()           {}
 func (*GrammarGuardTerm) nodeTag()          {}
 func (*GrammarAttemptTerm) nodeTag()        {}
+func (*GrammarCutTerm) nodeTag()            {}
 func (*GrammarListTerm) nodeTag()           {}
 func (*GrammarRepeatTerm) nodeTag()         {}
 func (*GrammarSeparatedTerm) nodeTag()      {}
@@ -1910,6 +1917,7 @@ func (*GrammarOptionalTerm) grammarTermTag()   {}
 func (*GrammarExprTerm) grammarTermTag()       {}
 func (*GrammarGuardTerm) grammarTermTag()      {}
 func (*GrammarAttemptTerm) grammarTermTag()    {}
+func (*GrammarCutTerm) grammarTermTag()        {}
 func (*GrammarListTerm) grammarTermTag()       {}
 func (*GrammarRepeatTerm) grammarTermTag()     {}
 func (*GrammarSeparatedTerm) grammarTermTag()  {}

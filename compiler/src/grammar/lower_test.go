@@ -263,7 +263,7 @@ func TestLowerFileStatefulSeparatedTermBuildsListLoop(t *testing.T) {
 		"state.expect_kind(TokenKind.IDENT)",
 		"state.expect(\",\")",
 		"state.current_token().kind == token_kind_for_text(\")\")",
-		"return (true, values)",
+		"return (true, __grammar_committed_",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected lowered separated-term production to contain %q, got:\n%s", want, formatted)
@@ -378,8 +378,8 @@ func TestLowerFileStatefulAddsStablePublicTryWrapper(t *testing.T) {
 	for _, want := range []string{
 		"def expression(state: mutable ParserState&) -> Token:",
 		"def grammar_try_PascalFrontend_expression(state: mutable ParserState&) -> (matched: bool, value: Token):",
-		"return __grammar_try__PascalFrontend__expression(state)",
-		"def __grammar_try__PascalFrontend__expression(state: mutable ParserState&) -> (matched: bool, value: Token):",
+		"__grammar_committed_expression_PascalFrontend_committed_",
+		"def __grammar_try__PascalFrontend__expression(state: mutable ParserState&) -> (matched: bool, committed: bool, value: Token):",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected stable public try wrapper output to contain %q, got:\n%s", want, formatted)
@@ -421,7 +421,7 @@ func TestLowerFileStatefulUsesGrammarHeaderReceiverForParamlessProductions(t *te
 	for _, want := range []string{
 		"def ident_expr(parser: mutable ParserState&) -> Token:",
 		"def grammar_try_PascalFrontend_ident_expr(parser: mutable ParserState&) -> (matched: bool, value: Token):",
-		"def __grammar_try__PascalFrontend__ident_expr(parser: mutable ParserState&) -> (matched: bool, value: Token):",
+		"def __grammar_try__PascalFrontend__ident_expr(parser: mutable ParserState&) -> (matched: bool, committed: bool, value: Token):",
 		"parser.cursor",
 		"parser.expect_kind(TokenKind.IDENT)",
 	} {
@@ -448,6 +448,37 @@ func TestLowerFileStatefulInjectsHeaderReceiverIntoBareProductionCalls(t *testin
 	}
 }
 
+func TestLowerFileMergesExtendGrammarProductionsAndHeader(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+    cursor parser
+    atom() -> Token:
+        .IDENT(tok)
+        return tok
+
+extend grammar PascalFrontend:
+    expr() -> Token:
+        value = atom()
+        return value
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"def atom(parser: mutable ParserState&) -> Token:",
+		"def expr(parser: mutable ParserState&) -> Token:",
+		"__grammar_try__PascalFrontend__atom(parser)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected merged extend-grammar lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	if strings.Count(formatted, "def atom(parser: mutable ParserState&) -> Token:") != 1 {
+		t.Fatalf("expected merged grammar lowering to emit atom exactly once, got:\n%s", formatted)
+	}
+	if strings.Count(formatted, "def expr(parser: mutable ParserState&) -> Token:") != 1 {
+		t.Fatalf("expected merged grammar lowering to emit expr exactly once, got:\n%s", formatted)
+	}
+}
+
 func TestLowerFileStatefulAppliesHeaderErrorTypeToImplicitProductions(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
     cursor parser
@@ -464,7 +495,7 @@ func TestLowerFileStatefulAppliesHeaderErrorTypeToImplicitProductions(t *testing
 	for _, want := range []string{
 		"def atom(parser: mutable ParserState&) -> Token error[ParseError]:",
 		"def grammar_try_PascalFrontend_atom(parser: mutable ParserState&) -> (matched: bool, value: Token) error[ParseError]:",
-		"def __grammar_try__PascalFrontend__atom(parser: mutable ParserState&) -> (matched: bool, value: Token) error[ParseError]:",
+		"def __grammar_try__PascalFrontend__atom(parser: mutable ParserState&) -> (matched: bool, committed: bool, value: Token) error[ParseError]:",
 		"def expr(parser: mutable ParserState&) -> Token error[ParseError]:",
 		"try __grammar_try__PascalFrontend__atom(parser)",
 	} {
@@ -545,7 +576,7 @@ grammar PascalStmtGrammar over Token using ParserState uses PascalExprGrammar:
 		"def atom(state: mutable ParserState&, alloc: mutable Arena&) -> Token:",
 		"def statement(state: mutable ParserState&, alloc: mutable Arena&) -> Token:",
 		"__grammar_try__PascalExprGrammar__atom(state, alloc)",
-		"return (true, value)",
+		"return (true, __grammar_committed_",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected uses-aware lowering to contain %q, got:\n%s", want, formatted)
@@ -569,14 +600,14 @@ func TestLowerFileStatefulExposesTypedHeaderChannelDefaultsAsLocals(t *testing.T
 		"span: mutable Span = combine_span($start.span, $end.span)",
 		"$end <- parser.current_token()",
 		"span <- combine_span($start.span, $end.span)",
-		"return (true, span)",
+		"return (true, __grammar_committed_",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected header channel lowering to contain %q, got:\n%s", want, formatted)
 		}
 	}
 	assignIndex := strings.Index(formatted, "span <- combine_span($start.span, $end.span)")
-	returnIndex := strings.Index(formatted, "return (true, span)")
+	returnIndex := strings.Index(formatted, "return (true, __grammar_committed_")
 	if assignIndex < 0 || returnIndex < 0 || assignIndex > returnIndex {
 		t.Fatalf("expected channel defaults to finalize before explicit success return, got:\n%s", formatted)
 	}
@@ -595,7 +626,7 @@ func TestLowerFileStatefulSeedsBareHeaderChannelFromProductionReturnType(t *test
 	if !strings.Contains(formatted, "node: mutable Token = zeroed.cast[Token]") {
 		t.Fatalf("expected bare header channel to seed from the production return type, got:\n%s", formatted)
 	}
-	if !strings.Contains(formatted, "return (true, node)") {
+	if !strings.Contains(formatted, "return (true, __grammar_committed_") {
 		t.Fatalf("expected explicit return to see synthesized channel locals, got:\n%s", formatted)
 	}
 }
@@ -617,7 +648,7 @@ func TestLowerFileStatefulAssignmentTermUpdatesChannelAndGuardsDefaultRefresh(t 
 		"__grammar_channel_set_span_PascalFrontend_ident_span <- true",
 		"if (not __grammar_channel_set_span_PascalFrontend_ident_span):",
 		"span <- combine_span($start.span, $end.span)",
-		"return (true, span)",
+		"return (true, __grammar_committed_",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected assignment-aware channel lowering to contain %q, got:\n%s", want, formatted)
@@ -641,10 +672,10 @@ func TestLowerFileStatefulTryWrapperCarriesProductionErrorUnion(t *testing.T) {
 	for _, want := range []string{
 		"def postfix_expr(self: mutable ATPLParser&, owner: mutable Arena&) -> ATPLExpr.Expr error[ATPLFrontendError]:",
 		"def grammar_try_ATPLFrontend_postfix_expr(self: mutable ATPLParser&, owner: mutable Arena&) -> (matched: bool, value: ATPLExpr.Expr) error[ATPLFrontendError]:",
-		"def __grammar_try__ATPLFrontend__postfix_expr(self: mutable ATPLParser&, owner: mutable Arena&) -> (matched: bool, value: ATPLExpr.Expr) error[ATPLFrontendError]:",
+		"def __grammar_try__ATPLFrontend__postfix_expr(self: mutable ATPLParser&, owner: mutable Arena&) -> (matched: bool, committed: bool, value: ATPLExpr.Expr) error[ATPLFrontendError]:",
 		"try __grammar_try__ATPLFrontend__postfix_expr(self, owner)",
 		"try self.parse_primary(owner)",
-		"return (true, base)",
+		"return (true, __grammar_committed_",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected error-union stateful grammar lowering to contain %q, got:\n%s", want, formatted)
@@ -680,6 +711,7 @@ func TestLowerFileStatefulSupportsPosBasedReceiverForAttemptDrivenPostfix(t *tes
 	for _, want := range []string{
 		"def postfix_expr(self: mutable ATPLParser&, owner: mutable Arena&) -> Token:",
 		"def grammar_try_ATPLFrontend_postfix_expr(self: mutable ATPLParser&, owner: mutable Arena&) -> (matched: bool, value: Token):",
+		"def __grammar_try__ATPLFrontend__postfix_expr(self: mutable ATPLParser&, owner: mutable Arena&) -> (matched: bool, committed: bool, value: Token):",
 		"self.pos",
 		"= self.try_parse_primary(owner)",
 		"= self.try_parse_suffix(owner, left)",
@@ -695,6 +727,33 @@ func TestLowerFileStatefulSupportsPosBasedReceiverForAttemptDrivenPostfix(t *tes
 	} {
 		if strings.Contains(formatted, unwanted) {
 			t.Fatalf("expected pos-based receiver lowering to avoid %q, got:\n%s", unwanted, formatted)
+		}
+	}
+}
+
+func TestLowerFileStatefulCutPropagatesCommittedFailureThroughChoice(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend:
+    statement(state: mutable ParserState&) -> Token:
+        value = choice(if_statement(), ident_statement())
+        return value
+    if_statement(state: mutable ParserState&) -> Token:
+        "if"
+        cut
+        "then"
+        return zeroed as Token
+    ident_statement(state: mutable ParserState&) -> Token:
+        .IDENT(tok)
+        return tok
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"def __grammar_try__PascalFrontend__if_statement(state: mutable ParserState&) -> (matched: bool, committed: bool, value: Token):",
+		"choice_committed_statement_PascalFrontend",
+		"return (false, __grammar_committed_if_statement_PascalFrontend",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected cut-aware lowering to contain %q, got:\n%s", want, formatted)
 		}
 	}
 }
@@ -739,7 +798,7 @@ func TestLowerFileStatefulPostfixTermBuildsLoopAndBindings(t *testing.T) {
 		"close = __grammar_token_suffix_expr_LuaFrontend_token_",
 		"state.expect(\")\")",
 		"result = left",
-		"return (true, result)",
+		"return (true, __grammar_committed_",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected lowered postfix production to contain %q, got:\n%s", want, formatted)
@@ -761,7 +820,7 @@ func TestLowerFileStatefulExprTermEvaluatesHelperExpression(t *testing.T) {
 		"current = __grammar_value_expression_PascalFrontend_value_",
 		"parsed = __grammar_value_expression_PascalFrontend_value_",
 		"try state.expect_name_token(ParseMessageKey.ExpectedProgramName)",
-		"return (true, current)",
+		"return (true, __grammar_committed_",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected lowered expr-term production to contain %q, got:\n%s", want, formatted)
@@ -802,7 +861,7 @@ func TestLowerFileStatefulAttemptTermBuildsTupleBind(t *testing.T) {
 		"__grammar_value_expression_PascalFrontend_value_",
 		"= state.try_parse_suffix()",
 		"if (not __grammar_matched_expression_PascalFrontend_matched_",
-		"return (true, suffix)",
+		"return (true, __grammar_committed_",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected lowered attempt-term production to contain %q, got:\n%s", want, formatted)
@@ -823,7 +882,7 @@ func TestLowerFileStatefulGuardTermBuildsFailurePredicate(t *testing.T) {
 		"__grammar_guard_statement_PascalFrontend_guard_",
 		"state.lookahead_token(1).kind == TokenKind.ASSIGN",
 		"if (not __grammar_guard_statement_PascalFrontend_guard_",
-		"return (true, name_token)",
+		"return (true, __grammar_committed_",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected lowered guard-term production to contain %q, got:\n%s", want, formatted)
@@ -850,7 +909,7 @@ func TestLowerFileStatefulBoundPrecedenceLevelsBuildNestedLoops(t *testing.T) {
 		"op = __grammar_token_expression_PascalFrontend_token_",
 		"right = atom",
 		"right = term_level",
-		"return (true, expr_level)",
+		"return (true, __grammar_committed_",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected lowered bound precedence levels to contain %q, got:\n%s", want, formatted)
@@ -877,7 +936,7 @@ func TestLowerFileStatefulNamedPrecedenceLevelsCallLowerLevelsAsParsers(t *testi
 		"def __grammar_try__PascalFrontend____grammar_precedence_PascalFrontend_expression_1_additive(state: mutable ParserState&)",
 		"__grammar_try__PascalFrontend____grammar_precedence_PascalFrontend_expression_1_atom(state)",
 		"__grammar_try__PascalFrontend____grammar_precedence_PascalFrontend_expression_1_multiplicative(state)",
-		"return (true, __grammar_precedence_result___grammar_precedence_PascalFrontend_expression_1_additive)",
+		"return (true, __grammar_committed_",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected lowered named precedence levels to contain %q, got:\n%s", want, formatted)

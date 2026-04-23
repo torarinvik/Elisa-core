@@ -30,6 +30,7 @@ type statefulLowerContext struct {
 	tokenType      ast.TypeExpr
 	allocName      string
 	allocExpr      ast.Expr
+	committedName  string
 	channels       []ast.GrammarChannelDecl
 	production     ast.GrammarProductionDecl
 	productionMap  map[string]resolvedGrammarProduction
@@ -52,11 +53,20 @@ func lowerDeclListInScope(decls []ast.Decl, grammarScope map[string]*ast.Grammar
 		return nil
 	}
 	lowered := make([]ast.Decl, 0, len(decls))
+	loweredGrammarNames := make(map[string]bool)
 	for _, decl := range decls {
 		switch n := decl.(type) {
 		case *ast.GrammarDecl:
 			lowered = append(lowered, n)
-			lowered = append(lowered, lowerGrammarDecls(n, grammarScope)...)
+			if loweredGrammarNames[n.Name] {
+				continue
+			}
+			loweredGrammarNames[n.Name] = true
+			merged := grammarScope[n.Name]
+			if merged == nil {
+				merged = n
+			}
+			lowered = append(lowered, lowerGrammarDecls(merged, grammarScope)...)
 		case *ast.NamespaceDecl:
 			cloned := &ast.NamespaceDecl{Position: n.Position, Name: n.Name, Decls: lowerDeclListInScope(n.Decls, grammarDeclScope(n.Decls))}
 			lowered = append(lowered, cloned)
@@ -77,9 +87,77 @@ func grammarDeclScope(decls []ast.Decl) map[string]*ast.GrammarDecl {
 		if !ok || grammarDecl == nil || grammarDecl.Name == "" {
 			continue
 		}
-		scope[grammarDecl.Name] = grammarDecl
+		scope[grammarDecl.Name] = mergeGrammarDecls(scope[grammarDecl.Name], grammarDecl)
 	}
 	return scope
+}
+
+func cloneGrammarDecl(decl *ast.GrammarDecl) *ast.GrammarDecl {
+	if decl == nil {
+		return nil
+	}
+	cloned := *decl
+	cloned.TypeParams = append([]string(nil), decl.TypeParams...)
+	cloned.RefStorageParams = append([]string(nil), decl.RefStorageParams...)
+	cloned.RefStateParams = append([]string(nil), decl.RefStateParams...)
+	cloned.RegionParams = append([]string(nil), decl.RegionParams...)
+	cloned.PermissionParams = append([]string(nil), decl.PermissionParams...)
+	cloned.GenericParams = append([]ast.GenericParam(nil), decl.GenericParams...)
+	cloned.Uses = append([]ast.TypeExpr(nil), decl.Uses...)
+	cloned.Channels = append([]ast.GrammarChannelDecl(nil), decl.Channels...)
+	cloned.Productions = append([]ast.GrammarProductionDecl(nil), decl.Productions...)
+	return &cloned
+}
+
+func mergeGrammarDecls(base *ast.GrammarDecl, extra *ast.GrammarDecl) *ast.GrammarDecl {
+	if base == nil {
+		return cloneGrammarDecl(extra)
+	}
+	if extra == nil {
+		return cloneGrammarDecl(base)
+	}
+	merged := cloneGrammarDecl(base)
+	if merged.Name == "" {
+		merged.Name = extra.Name
+	}
+	if len(merged.TypeParams) == 0 {
+		merged.TypeParams = append([]string(nil), extra.TypeParams...)
+	}
+	if len(merged.RefStorageParams) == 0 {
+		merged.RefStorageParams = append([]string(nil), extra.RefStorageParams...)
+	}
+	if len(merged.RefStateParams) == 0 {
+		merged.RefStateParams = append([]string(nil), extra.RefStateParams...)
+	}
+	if len(merged.RegionParams) == 0 {
+		merged.RegionParams = append([]string(nil), extra.RegionParams...)
+	}
+	if len(merged.PermissionParams) == 0 {
+		merged.PermissionParams = append([]string(nil), extra.PermissionParams...)
+	}
+	if len(merged.GenericParams) == 0 {
+		merged.GenericParams = append([]ast.GenericParam(nil), extra.GenericParams...)
+	}
+	if merged.OverType == nil {
+		merged.OverType = extra.OverType
+	}
+	if merged.UsingType == nil {
+		merged.UsingType = extra.UsingType
+	}
+	merged.Uses = append(merged.Uses, extra.Uses...)
+	if merged.ErrorType == nil {
+		merged.ErrorType = extra.ErrorType
+	}
+	if merged.CursorExpr == nil {
+		merged.CursorExpr = extra.CursorExpr
+	}
+	if merged.AllocExpr == nil {
+		merged.AllocExpr = extra.AllocExpr
+	}
+	merged.Channels = append(merged.Channels, extra.Channels...)
+	merged.Productions = append(merged.Productions, extra.Productions...)
+	merged.Extend = false
+	return merged
 }
 
 func lowerGrammarDecls(decl *ast.GrammarDecl, grammarScope map[string]*ast.GrammarDecl) []ast.Decl {
@@ -649,6 +727,7 @@ func lowerStatefulPublicProduction(grammarDecl *ast.GrammarDecl, ctx *statefulLo
 		callArgs = append(callArgs, &ast.Ident{Position: param.Position, Name: param.Name})
 	}
 	matchedName := ctx.fresh("matched")
+	committedName := ctx.fresh("committed")
 	valueName := ctx.fresh("value")
 	tryCall := &ast.CallExpr{
 		Position: ctx.production.Position,
@@ -660,6 +739,7 @@ func lowerStatefulPublicProduction(grammarDecl *ast.GrammarDecl, ctx *statefulLo
 			Position: ctx.production.Position,
 			Names: []ast.TupleBindName{
 				{Position: ctx.production.Position, Name: matchedName},
+				{Position: ctx.production.Position, Name: committedName},
 				{Position: ctx.production.Position, Name: valueName},
 			},
 			Declare: true,
@@ -692,6 +772,17 @@ func lowerStatefulPublicTryProduction(grammarDecl *ast.GrammarDecl, ctx *statefu
 	for _, param := range ctx.production.Params {
 		callArgs = append(callArgs, &ast.Ident{Position: param.Position, Name: param.Name})
 	}
+	matchedName := ctx.fresh("matched")
+	committedName := ctx.fresh("committed")
+	valueName := ctx.fresh("value")
+	tryCall := ast.Expr(&ast.CallExpr{
+		Position: ctx.production.Position,
+		Func:     &ast.Ident{Position: ctx.production.Position, Name: grammarTryFuncName(ctx.grammarName, ctx.production.Name)},
+		Args:     callArgs,
+	})
+	if grammarErrorTypeExpr(ctx.production.ReturnType) != nil {
+		tryCall = grammarMaybeTryExpr(tryCall, ctx.production.ReturnType)
+	}
 	return &ast.FuncDecl{
 		Position:         ctx.production.Position,
 		Name:             grammarPublicTryFuncName(ctx.grammarName, ctx.production.Name),
@@ -704,14 +795,17 @@ func lowerStatefulPublicTryProduction(grammarDecl *ast.GrammarDecl, ctx *statefu
 		Params:           append([]ast.ParamDecl(nil), ctx.production.Params...),
 		ReturnType:       grammarTryReturnTypeExpr(ctx.production.Position, ctx.production.ReturnType),
 		Body: grammarCanBlock(ctx.production.Position, []ast.Stmt{
-			&ast.ReturnStmt{
+			&ast.TupleBindStmt{
 				Position: ctx.production.Position,
-				Value: &ast.CallExpr{
-					Position: ctx.production.Position,
-					Func:     &ast.Ident{Position: ctx.production.Position, Name: grammarTryFuncName(ctx.grammarName, ctx.production.Name)},
-					Args:     callArgs,
+				Names: []ast.TupleBindName{
+					{Position: ctx.production.Position, Name: matchedName},
+					{Position: ctx.production.Position, Name: committedName},
+					{Position: ctx.production.Position, Name: valueName},
 				},
+				Declare: true,
+				Value:   tryCall,
 			},
+			&ast.ReturnStmt{Position: ctx.production.Position, Value: &ast.TupleExpr{Position: ctx.production.Position, Elems: []ast.Expr{&ast.Ident{Position: ctx.production.Position, Name: matchedName}, &ast.Ident{Position: ctx.production.Position, Name: valueName}}}},
 		}),
 	}
 }
@@ -761,12 +855,15 @@ func (ctx *statefulLowerContext) lowerRecoveryClause(matchedName string) []ast.S
 
 func lowerStatefulTryProduction(grammarDecl *ast.GrammarDecl, ctx *statefulLowerContext) *ast.FuncDecl {
 	snapshotName := ctx.fresh("cursor_start")
+	committedName := ctx.fresh("committed")
+	ctx.committedName = committedName
 	body := []ast.Stmt{
 		&ast.VarDeclStmt{
 			Position: ctx.production.Position,
 			Name:     snapshotName,
 			Value:    stateCursorExpr(ctx.cursorReceiver, ctx.cursorField, ctx.production.Position),
 		},
+		&ast.VarDeclStmt{Position: ctx.production.Position, Name: committedName, Mutable: true, Type: builtinTypeExpr(ctx.production.Position, "bool"), Value: &ast.BoolLit{Position: ctx.production.Position, Value: false}},
 	}
 	body = append(body, ctx.lowerChannelPrelude()...)
 	for _, term := range ctx.production.Terms {
@@ -785,9 +882,24 @@ func lowerStatefulTryProduction(grammarDecl *ast.GrammarDecl, ctx *statefulLower
 		PermissionParams: append([]string(nil), grammarDecl.PermissionParams...),
 		GenericParams:    append([]ast.GenericParam(nil), grammarDecl.GenericParams...),
 		Params:           append([]ast.ParamDecl(nil), ctx.production.Params...),
-		ReturnType:       grammarTryReturnTypeExpr(ctx.production.Position, ctx.production.ReturnType),
+		ReturnType:       grammarInternalTryReturnTypeExpr(ctx.production.Position, ctx.production.ReturnType),
 		Body:             grammarCanBlock(ctx.production.Position, body),
 	}
+}
+
+func grammarInternalTryReturnTypeExpr(pos lexer.Pos, valueType ast.TypeExpr) ast.TypeExpr {
+	tupleType := &ast.TupleTypeExpr{
+		Position: pos,
+		Fields: []ast.TupleTypeField{
+			{Position: pos, Name: "matched", Type: builtinTypeExpr(pos, "bool")},
+			{Position: pos, Name: "committed", Type: builtinTypeExpr(pos, "bool")},
+			{Position: pos, Name: "value", Type: grammarValueTypeExpr(valueType)},
+		},
+	}
+	if errType := grammarErrorTypeExpr(valueType); errType != nil {
+		return &ast.ErrorUnionTypeExpr{Position: pos, Value: tupleType, Errors: errType}
+	}
+	return tupleType
 }
 
 func grammarTryReturnTypeExpr(pos lexer.Pos, valueType ast.TypeExpr) ast.TypeExpr {
@@ -854,13 +966,14 @@ func zeroedCastExpr(pos lexer.Pos, target ast.TypeExpr) ast.Expr {
 	return &ast.CastExpr{Position: pos, Operand: &ast.ZeroedLit{Position: pos}, Target: target}
 }
 
-func successTupleReturnStmt(pos lexer.Pos, value ast.Expr) ast.Stmt {
+func successTupleReturnStmt(pos lexer.Pos, committed ast.Expr, value ast.Expr) ast.Stmt {
 	return &ast.ReturnStmt{
 		Position: pos,
 		Value: &ast.TupleExpr{
 			Position: pos,
 			Elems: []ast.Expr{
 				&ast.BoolLit{Position: pos, Value: true},
+				committed,
 				value,
 			},
 		},
@@ -941,20 +1054,49 @@ func (ctx *statefulLowerContext) channelSetFlagName(name string) (string, bool) 
 
 func (ctx *statefulLowerContext) successTupleReturnStmts(pos lexer.Pos, value ast.Expr) []ast.Stmt {
 	stmts := ctx.lowerChannelFinalize(pos)
-	return append(stmts, successTupleReturnStmt(pos, value))
+	return append(stmts, successTupleReturnStmt(pos, ctx.currentCommittedExpr(pos), value))
 }
 
-func failureTupleReturnStmt(pos lexer.Pos, valueType ast.TypeExpr) ast.Stmt {
+func failureTupleReturnStmt(pos lexer.Pos, committed ast.Expr, valueType ast.TypeExpr) ast.Stmt {
 	return &ast.ReturnStmt{
 		Position: pos,
 		Value: &ast.TupleExpr{
 			Position: pos,
 			Elems: []ast.Expr{
 				&ast.BoolLit{Position: pos, Value: false},
+				committed,
 				zeroedCastExpr(pos, valueType),
 			},
 		},
 	}
+}
+
+func committedAssignTrueStmt(name string, pos lexer.Pos) ast.Stmt {
+	return &ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: name}, Value: &ast.BoolLit{Position: pos, Value: true}}
+}
+
+func markCommittedStmts(name string, pos lexer.Pos, committed ast.Expr) []ast.Stmt {
+	if name == "" || committed == nil {
+		return nil
+	}
+	if lit, ok := committed.(*ast.BoolLit); ok {
+		if !lit.Value {
+			return nil
+		}
+		return []ast.Stmt{committedAssignTrueStmt(name, pos)}
+	}
+	return []ast.Stmt{&ast.IfStmt{Position: pos, Cond: committed, Then: []ast.Stmt{committedAssignTrueStmt(name, pos)}}}
+}
+
+func (ctx *statefulLowerContext) currentCommittedExpr(pos lexer.Pos) ast.Expr {
+	if ctx.committedName == "" {
+		return &ast.BoolLit{Position: pos, Value: false}
+	}
+	return &ast.Ident{Position: pos, Name: ctx.committedName}
+}
+
+func (ctx *statefulLowerContext) markAttemptCommittedStmts(pos lexer.Pos, committed ast.Expr) []ast.Stmt {
+	return markCommittedStmts(ctx.committedName, pos, committed)
 }
 
 func stateCursorExpr(receiverName string, fieldName string, pos lexer.Pos) ast.Expr {
@@ -1077,9 +1219,10 @@ func itoa(value int) string {
 }
 
 type loweredAttempt struct {
-	Stmts   []ast.Stmt
-	Matched ast.Expr
-	Value   ast.Expr
+	Stmts     []ast.Stmt
+	Matched   ast.Expr
+	Committed ast.Expr
+	Value     ast.Expr
 }
 
 func (ctx *statefulLowerContext) lowerSequentialTerm(term ast.GrammarTerm, snapshotName string) []ast.Stmt {
@@ -1091,6 +1234,7 @@ func (ctx *statefulLowerContext) lowerSequentialTerm(term ast.GrammarTerm, snaps
 	case *ast.GrammarBindTerm:
 		attempt := ctx.lowerAttempt(n.Term)
 		result := append([]ast.Stmt{}, attempt.Stmts...)
+		result = append(result, ctx.markAttemptCommittedStmts(n.Term.Pos(), attempt.Committed)...)
 		if ctx.termCanFail(n.Term) {
 			result = append(result, ctx.failureGuard(n.Term.Pos(), snapshotName, attempt.Matched)...)
 		}
@@ -1099,6 +1243,7 @@ func (ctx *statefulLowerContext) lowerSequentialTerm(term ast.GrammarTerm, snaps
 	case *ast.GrammarAssignTerm:
 		attempt := ctx.lowerAttempt(n.Term)
 		result := append([]ast.Stmt{}, attempt.Stmts...)
+		result = append(result, ctx.markAttemptCommittedStmts(n.Term.Pos(), attempt.Committed)...)
 		if ctx.termCanFail(n.Term) {
 			result = append(result, ctx.failureGuard(n.Term.Pos(), snapshotName, attempt.Matched)...)
 		}
@@ -1110,6 +1255,7 @@ func (ctx *statefulLowerContext) lowerSequentialTerm(term ast.GrammarTerm, snaps
 	default:
 		attempt := ctx.lowerAttempt(term)
 		result := append([]ast.Stmt{}, attempt.Stmts...)
+		result = append(result, ctx.markAttemptCommittedStmts(term.Pos(), attempt.Committed)...)
 		if ctx.termCanFail(term) {
 			result = append(result, ctx.failureGuard(term.Pos(), snapshotName, attempt.Matched)...)
 		}
@@ -1127,7 +1273,7 @@ func (ctx *statefulLowerContext) failureGuard(pos lexer.Pos, snapshotName string
 			Cond:     &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_NOT, Operand: matched},
 			Then: []ast.Stmt{
 				restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, pos),
-				failureTupleReturnStmt(pos, grammarValueTypeExpr(ctx.production.ReturnType)),
+				failureTupleReturnStmt(pos, ctx.currentCommittedExpr(pos), grammarValueTypeExpr(ctx.production.ReturnType)),
 			},
 		},
 	}
@@ -1156,6 +1302,8 @@ func (ctx *statefulLowerContext) termCanFail(term ast.GrammarTerm) bool {
 		return true
 	case *ast.GrammarAttemptTerm:
 		return true
+	case *ast.GrammarCutTerm:
+		return false
 	case *ast.GrammarOptionalTerm:
 		return false
 	case *ast.GrammarListTerm:
@@ -1186,8 +1334,9 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 				&ast.VarDeclStmt{Position: n.Position, Name: valueName, Value: lowerTermExpr(lowerContext{tokenReceiver: ctx.tokenReceiver}, n)},
 				&ast.VarDeclStmt{Position: n.Position, Name: matchedName, Value: grammarTokenMatchExpr(n.Position, valueIdent, n.Value)},
 			},
-			Matched: &ast.Ident{Position: n.Position, Name: matchedName},
-			Value:   valueIdent,
+			Matched:   &ast.Ident{Position: n.Position, Name: matchedName},
+			Committed: &ast.BoolLit{Position: n.Position, Value: false},
+			Value:     valueIdent,
 		}
 	case *ast.GrammarTokenKindTerm:
 		valueName := ctx.fresh("token")
@@ -1199,8 +1348,9 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 				&ast.VarDeclStmt{Position: n.Position, Name: valueName, Value: lowerTermExpr(lowerContext{tokenReceiver: ctx.tokenReceiver}, n)},
 				&ast.VarDeclStmt{Position: n.Position, Name: matchedName, Value: grammarTokenKindMatchExpr(n.Position, valueIdent, kindExpr)},
 			},
-			Matched: &ast.Ident{Position: n.Position, Name: matchedName},
-			Value:   valueIdent,
+			Matched:   &ast.Ident{Position: n.Position, Name: matchedName},
+			Committed: &ast.BoolLit{Position: n.Position, Value: false},
+			Value:     valueIdent,
 		}
 	case *ast.GrammarCallTerm:
 		if kindExpr, ok := grammarTokenKindMatcher(n); ok {
@@ -1212,8 +1362,9 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 					&ast.VarDeclStmt{Position: n.Position, Name: valueName, Value: lowerTermExpr(lowerContext{tokenReceiver: ctx.tokenReceiver}, n)},
 					&ast.VarDeclStmt{Position: n.Position, Name: matchedName, Value: grammarTokenKindMatchExpr(n.Position, valueIdent, kindExpr)},
 				},
-				Matched: &ast.Ident{Position: n.Position, Name: matchedName},
-				Value:   valueIdent,
+				Matched:   &ast.Ident{Position: n.Position, Name: matchedName},
+				Committed: &ast.BoolLit{Position: n.Position, Value: false},
+				Value:     valueIdent,
 			}
 		}
 		if _, production, ok := ctx.resolveGrammarProductionInfo(n); ok && production.RecoverMsg != nil && len(production.RecoverUntil) != 0 {
@@ -1223,13 +1374,15 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 				valueExpr = &ast.CallExpr{Position: n.Position, Func: &ast.Ident{Position: n.Position, Name: callName}, Args: args}
 			}
 			return loweredAttempt{
-				Stmts:   []ast.Stmt{&ast.VarDeclStmt{Position: n.Position, Name: valueName, Value: valueExpr}},
-				Matched: &ast.BoolLit{Position: n.Position, Value: true},
-				Value:   &ast.Ident{Position: n.Position, Name: valueName},
+				Stmts:     []ast.Stmt{&ast.VarDeclStmt{Position: n.Position, Name: valueName, Value: valueExpr}},
+				Matched:   &ast.BoolLit{Position: n.Position, Value: true},
+				Committed: &ast.BoolLit{Position: n.Position, Value: false},
+				Value:     &ast.Ident{Position: n.Position, Name: valueName},
 			}
 		}
 		if tryName, args, ok := ctx.resolveGrammarProductionCall(n); ok {
 			matchedName := ctx.fresh("matched")
+			committedName := ctx.fresh("committed")
 			valueName := ctx.fresh("value")
 			_, production, _ := ctx.resolveGrammarProductionInfo(n)
 			tryCall := ast.Expr(&ast.CallExpr{
@@ -1246,39 +1399,44 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 						Position: n.Position,
 						Names: []ast.TupleBindName{
 							{Position: n.Position, Name: matchedName},
+							{Position: n.Position, Name: committedName},
 							{Position: n.Position, Name: valueName},
 						},
 						Declare: true,
 						Value:   tryCall,
 					},
 				},
-				Matched: &ast.Ident{Position: n.Position, Name: matchedName},
-				Value:   &ast.Ident{Position: n.Position, Name: valueName},
+				Matched:   &ast.Ident{Position: n.Position, Name: matchedName},
+				Committed: &ast.Ident{Position: n.Position, Name: committedName},
+				Value:     &ast.Ident{Position: n.Position, Name: valueName},
 			}
 		}
 		valueName := ctx.fresh("value")
 		valueExpr := lowerTermExpr(lowerContext{tokenReceiver: ctx.tokenReceiver}, n)
 		return loweredAttempt{
-			Stmts:   []ast.Stmt{&ast.VarDeclStmt{Position: n.Position, Name: valueName, Value: valueExpr}},
-			Matched: &ast.BoolLit{Position: n.Position, Value: true},
-			Value:   &ast.Ident{Position: n.Position, Name: valueName},
+			Stmts:     []ast.Stmt{&ast.VarDeclStmt{Position: n.Position, Name: valueName, Value: valueExpr}},
+			Matched:   &ast.BoolLit{Position: n.Position, Value: true},
+			Committed: &ast.BoolLit{Position: n.Position, Value: false},
+			Value:     &ast.Ident{Position: n.Position, Name: valueName},
 		}
 	case *ast.GrammarChoiceTerm:
 		return ctx.lowerChoiceAttempt(n)
 	case *ast.GrammarExprTerm:
 		valueName := ctx.fresh("value")
 		return loweredAttempt{
-			Stmts:   []ast.Stmt{&ast.VarDeclStmt{Position: n.Position, Name: valueName, Value: n.Expr}},
-			Matched: &ast.BoolLit{Position: n.Position, Value: true},
-			Value:   &ast.Ident{Position: n.Position, Name: valueName},
+			Stmts:     []ast.Stmt{&ast.VarDeclStmt{Position: n.Position, Name: valueName, Value: n.Expr}},
+			Matched:   &ast.BoolLit{Position: n.Position, Value: true},
+			Committed: &ast.BoolLit{Position: n.Position, Value: false},
+			Value:     &ast.Ident{Position: n.Position, Name: valueName},
 		}
 	case *ast.GrammarGuardTerm:
 		valueName := ctx.fresh("guard")
 		guardIdent := &ast.Ident{Position: n.Position, Name: valueName}
 		return loweredAttempt{
-			Stmts:   []ast.Stmt{&ast.VarDeclStmt{Position: n.Position, Name: valueName, Value: n.Cond}},
-			Matched: guardIdent,
-			Value:   guardIdent,
+			Stmts:     []ast.Stmt{&ast.VarDeclStmt{Position: n.Position, Name: valueName, Value: n.Cond}},
+			Matched:   guardIdent,
+			Committed: &ast.BoolLit{Position: n.Position, Value: false},
+			Value:     guardIdent,
 		}
 	case *ast.GrammarAttemptTerm:
 		matchedName := ctx.fresh("matched")
@@ -1295,9 +1453,12 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 					Value:   n.Expr,
 				},
 			},
-			Matched: &ast.Ident{Position: n.Position, Name: matchedName},
-			Value:   &ast.Ident{Position: n.Position, Name: valueName},
+			Matched:   &ast.Ident{Position: n.Position, Name: matchedName},
+			Committed: &ast.BoolLit{Position: n.Position, Value: false},
+			Value:     &ast.Ident{Position: n.Position, Name: valueName},
 		}
+	case *ast.GrammarCutTerm:
+		return loweredAttempt{Matched: &ast.BoolLit{Position: n.Position, Value: true}, Committed: &ast.BoolLit{Position: n.Position, Value: true}, Value: &ast.BoolLit{Position: n.Position, Value: true}}
 	case *ast.GrammarOptionalTerm:
 		return ctx.lowerOptionalAttempt(n)
 	case *ast.GrammarListTerm:
@@ -1311,46 +1472,45 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 	case *ast.GrammarPrecedenceTerm:
 		return ctx.lowerPrecedenceAttempt(n)
 	case *ast.GrammarPassTerm:
-		return loweredAttempt{Matched: &ast.BoolLit{Position: n.Position, Value: true}, Value: zeroedCastExpr(n.Position, grammarValueTypeExpr(ctx.production.ReturnType))}
+		return loweredAttempt{Matched: &ast.BoolLit{Position: n.Position, Value: true}, Committed: &ast.BoolLit{Position: n.Position, Value: false}, Value: zeroedCastExpr(n.Position, grammarValueTypeExpr(ctx.production.ReturnType))}
 	case *ast.GrammarBindTerm:
 		return ctx.lowerAttempt(n.Term)
 	default:
-		return loweredAttempt{Matched: &ast.BoolLit{Position: term.Pos(), Value: true}, Value: &ast.ZeroedLit{Position: term.Pos()}}
+		return loweredAttempt{Matched: &ast.BoolLit{Position: term.Pos(), Value: true}, Committed: &ast.BoolLit{Position: term.Pos(), Value: false}, Value: &ast.ZeroedLit{Position: term.Pos()}}
 	}
 }
 
 func (ctx *statefulLowerContext) lowerChoiceAttempt(term *ast.GrammarChoiceTerm) loweredAttempt {
 	termType := ctx.inferTermType(term)
 	matchedName := ctx.fresh("choice_matched")
+	committedName := ctx.fresh("choice_committed")
 	valueName := ctx.fresh("choice_value")
 	snapshotName := ctx.fresh("choice_cursor")
 	stmts := []ast.Stmt{
 		&ast.VarDeclStmt{Position: term.Position, Name: snapshotName, Value: stateCursorExpr(ctx.cursorReceiver, ctx.cursorField, term.Position)},
 		&ast.VarDeclStmt{Position: term.Position, Name: matchedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
+		&ast.VarDeclStmt{Position: term.Position, Name: committedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
 		&ast.VarDeclStmt{Position: term.Position, Name: valueName, Mutable: true, Type: termType, Value: zeroedCastExpr(term.Position, termType)},
 	}
-	stmts = append(stmts, ctx.lowerChoiceOptions(term.Options, snapshotName, matchedName, valueName)...)
-	return loweredAttempt{Stmts: stmts, Matched: &ast.Ident{Position: term.Position, Name: matchedName}, Value: &ast.Ident{Position: term.Position, Name: valueName}}
+	stmts = append(stmts, ctx.lowerChoiceOptions(term.Options, snapshotName, matchedName, committedName, valueName)...)
+	return loweredAttempt{Stmts: stmts, Matched: &ast.Ident{Position: term.Position, Name: matchedName}, Committed: &ast.Ident{Position: term.Position, Name: committedName}, Value: &ast.Ident{Position: term.Position, Name: valueName}}
 }
 
-func (ctx *statefulLowerContext) lowerChoiceOptions(options []ast.GrammarTerm, snapshotName string, matchedName string, valueName string) []ast.Stmt {
+func (ctx *statefulLowerContext) lowerChoiceOptions(options []ast.GrammarTerm, snapshotName string, matchedName string, committedName string, valueName string) []ast.Stmt {
 	if len(options) == 0 {
 		return []ast.Stmt{restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, ctx.production.Position)}
 	}
 	attempt := ctx.lowerAttempt(options[0])
-	thenBranch := []ast.Stmt{
+	thenBranch := append(markCommittedStmts(committedName, options[0].Pos(), attempt.Committed),
 		&ast.AssignStmt{Position: options[0].Pos(), Target: &ast.Ident{Position: options[0].Pos(), Name: matchedName}, Value: &ast.BoolLit{Position: options[0].Pos(), Value: true}},
 		&ast.AssignStmt{Position: options[0].Pos(), Target: &ast.Ident{Position: options[0].Pos(), Name: valueName}, Value: attempt.Value},
-	}
-	elseBranch := []ast.Stmt{}
+	)
+	fallback := []ast.Stmt{restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, options[0].Pos())}
 	if len(options) > 1 {
-		elseBranch = append(elseBranch, restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, options[0].Pos()))
-		elseBranch = append(elseBranch, ctx.lowerChoiceOptions(options[1:], snapshotName, matchedName, valueName)...)
-	} else {
-		elseBranch = append(elseBranch, restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, options[0].Pos()))
+		fallback = append(fallback, ctx.lowerChoiceOptions(options[1:], snapshotName, matchedName, committedName, valueName)...)
 	}
 	result := append([]ast.Stmt{}, attempt.Stmts...)
-	result = append(result, &ast.IfStmt{Position: options[0].Pos(), Cond: attempt.Matched, Then: thenBranch, Else: elseBranch})
+	result = append(result, &ast.IfStmt{Position: options[0].Pos(), Cond: attempt.Matched, Then: thenBranch, Else: []ast.Stmt{&ast.IfStmt{Position: options[0].Pos(), Cond: attempt.Committed, Then: []ast.Stmt{committedAssignTrueStmt(committedName, options[0].Pos())}, Else: fallback}}})
 	return result
 }
 
@@ -1358,13 +1518,22 @@ func (ctx *statefulLowerContext) lowerOptionalAttempt(term *ast.GrammarOptionalT
 	inner := ctx.lowerAttempt(term.Term)
 	snapshotName := ctx.fresh("optional_cursor")
 	termType := ctx.inferTermType(term.Term)
-	stmts := []ast.Stmt{&ast.VarDeclStmt{Position: term.Position, Name: snapshotName, Value: stateCursorExpr(ctx.cursorReceiver, ctx.cursorField, term.Position)}}
-	stmts = append(stmts, inner.Stmts...)
-	stmts = append(stmts, &ast.IfStmt{Position: term.Position, Cond: &ast.UnaryExpr{Position: term.Position, Op: lexer.TOKEN_NOT, Operand: inner.Matched}, Then: []ast.Stmt{restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, term.Position)}})
+	matchedName := ctx.fresh("optional_matched")
+	committedName := ctx.fresh("optional_committed")
+	valueName := ctx.fresh("optional_value")
+	stms := []ast.Stmt{
+		&ast.VarDeclStmt{Position: term.Position, Name: snapshotName, Value: stateCursorExpr(ctx.cursorReceiver, ctx.cursorField, term.Position)},
+		&ast.VarDeclStmt{Position: term.Position, Name: matchedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: true}},
+		&ast.VarDeclStmt{Position: term.Position, Name: committedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
+		&ast.VarDeclStmt{Position: term.Position, Name: valueName, Mutable: true, Type: termType, Value: zeroedCastExpr(term.Position, termType)},
+	}
+	stms = append(stms, inner.Stmts...)
+	stms = append(stms, &ast.IfStmt{Position: term.Position, Cond: inner.Matched, Then: append(markCommittedStmts(committedName, term.Position, inner.Committed), &ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: valueName}, Value: inner.Value}), Else: []ast.Stmt{&ast.IfStmt{Position: term.Position, Cond: inner.Committed, Then: []ast.Stmt{&ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: matchedName}, Value: &ast.BoolLit{Position: term.Position, Value: false}}, committedAssignTrueStmt(committedName, term.Position)}, Else: []ast.Stmt{restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, term.Position)}}}})
 	return loweredAttempt{
-		Stmts:   stmts,
-		Matched: &ast.BoolLit{Position: term.Position, Value: true},
-		Value:   &ast.TernaryExpr{Position: term.Position, Cond: inner.Matched, Value: inner.Value, Alt: zeroedCastExpr(term.Position, termType)},
+		Stmts:     stms,
+		Matched:   &ast.Ident{Position: term.Position, Name: matchedName},
+		Committed: &ast.Ident{Position: term.Position, Name: committedName},
+		Value:     &ast.Ident{Position: term.Position, Name: valueName},
 	}
 }
 
@@ -1378,9 +1547,16 @@ func (ctx *statefulLowerContext) lowerPrecedenceAttempt(term *ast.GrammarPrecede
 		leftType = grammarValueTypeExpr(ctx.production.ReturnType)
 	}
 	stopName := ctx.fresh("precedence_stop")
+	matchedName := ctx.fresh("precedence_matched")
+	committedName := ctx.fresh("precedence_committed")
 	snapshotName := ctx.fresh("precedence_cursor")
 	leftName := term.LeftName
 	stmts := append([]ast.Stmt{}, seedAttempt.Stmts...)
+	stmts = append(stmts,
+		&ast.VarDeclStmt{Position: term.Position, Name: matchedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: seedAttempt.Matched},
+		&ast.VarDeclStmt{Position: term.Position, Name: committedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
+	)
+	stmts = append(stmts, markCommittedStmts(committedName, term.Position, seedAttempt.Committed)...)
 	stmts = append(stmts,
 		&ast.VarDeclStmt{Position: term.Position, Name: leftName, Mutable: true, Type: leftType, Value: seedAttempt.Value},
 		&ast.VarDeclStmt{Position: term.Position, Name: stopName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
@@ -1389,10 +1565,10 @@ func (ctx *statefulLowerContext) lowerPrecedenceAttempt(term *ast.GrammarPrecede
 			Cond:     &ast.UnaryExpr{Position: term.Position, Op: lexer.TOKEN_NOT, Operand: &ast.Ident{Position: term.Position, Name: stopName}},
 			Body: append([]ast.Stmt{
 				&ast.VarDeclStmt{Position: term.Position, Name: snapshotName, Value: stateCursorExpr(ctx.cursorReceiver, ctx.cursorField, term.Position)},
-			}, ctx.lowerPrecedenceArms(term.Arms, snapshotName, stopName, leftName)...),
+			}, ctx.lowerPrecedenceArms(term.Arms, snapshotName, stopName, matchedName, committedName, leftName)...),
 		},
 	)
-	return loweredAttempt{Stmts: stmts, Matched: seedAttempt.Matched, Value: &ast.Ident{Position: term.Position, Name: leftName}}
+	return loweredAttempt{Stmts: stmts, Matched: &ast.Ident{Position: term.Position, Name: matchedName}, Committed: &ast.Ident{Position: term.Position, Name: committedName}, Value: &ast.Ident{Position: term.Position, Name: leftName}}
 }
 
 func (ctx *statefulLowerContext) lowerPostfixAttempt(term *ast.GrammarPostfixTerm) loweredAttempt {
@@ -1402,9 +1578,16 @@ func (ctx *statefulLowerContext) lowerPostfixAttempt(term *ast.GrammarPostfixTer
 		leftType = grammarValueTypeExpr(ctx.production.ReturnType)
 	}
 	stopName := ctx.fresh("postfix_stop")
+	matchedName := ctx.fresh("postfix_matched")
+	committedName := ctx.fresh("postfix_committed")
 	snapshotName := ctx.fresh("postfix_cursor")
 	leftName := term.LeftName
 	stmts := append([]ast.Stmt{}, seedAttempt.Stmts...)
+	stmts = append(stmts,
+		&ast.VarDeclStmt{Position: term.Position, Name: matchedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: seedAttempt.Matched},
+		&ast.VarDeclStmt{Position: term.Position, Name: committedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
+	)
+	stmts = append(stmts, markCommittedStmts(committedName, term.Position, seedAttempt.Committed)...)
 	stmts = append(stmts,
 		&ast.VarDeclStmt{Position: term.Position, Name: leftName, Mutable: true, Type: leftType, Value: seedAttempt.Value},
 		&ast.VarDeclStmt{Position: term.Position, Name: stopName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
@@ -1413,10 +1596,10 @@ func (ctx *statefulLowerContext) lowerPostfixAttempt(term *ast.GrammarPostfixTer
 			Cond:     &ast.UnaryExpr{Position: term.Position, Op: lexer.TOKEN_NOT, Operand: &ast.Ident{Position: term.Position, Name: stopName}},
 			Body: append([]ast.Stmt{
 				&ast.VarDeclStmt{Position: term.Position, Name: snapshotName, Value: stateCursorExpr(ctx.cursorReceiver, ctx.cursorField, term.Position)},
-			}, ctx.lowerPostfixArms(term.Arms, snapshotName, stopName, leftName)...),
+			}, ctx.lowerPostfixArms(term.Arms, snapshotName, stopName, matchedName, committedName, leftName)...),
 		},
 	)
-	return loweredAttempt{Stmts: stmts, Matched: seedAttempt.Matched, Value: &ast.Ident{Position: term.Position, Name: leftName}}
+	return loweredAttempt{Stmts: stmts, Matched: &ast.Ident{Position: term.Position, Name: matchedName}, Committed: &ast.Ident{Position: term.Position, Name: committedName}, Value: &ast.Ident{Position: term.Position, Name: leftName}}
 }
 
 func (ctx *statefulLowerContext) lowerNamedPrecedenceAttempt(term *ast.GrammarPrecedenceTerm) loweredAttempt {
@@ -1426,7 +1609,7 @@ func (ctx *statefulLowerContext) lowerNamedPrecedenceAttempt(term *ast.GrammarPr
 	}
 	top, ok := levels[term.Result]
 	if !ok {
-		return loweredAttempt{Matched: &ast.BoolLit{Position: term.Position, Value: false}, Value: zeroedCastExpr(term.Position, grammarValueTypeExpr(ctx.production.ReturnType))}
+		return loweredAttempt{Matched: &ast.BoolLit{Position: term.Position, Value: false}, Committed: &ast.BoolLit{Position: term.Position, Value: false}, Value: zeroedCastExpr(term.Position, grammarValueTypeExpr(ctx.production.ReturnType))}
 	}
 	return ctx.lowerPrecedenceLevelAttempt(top, levels)
 }
@@ -1438,9 +1621,16 @@ func (ctx *statefulLowerContext) lowerPrecedenceLevelAttempt(level ast.GrammarPr
 		leftType = grammarValueTypeExpr(ctx.production.ReturnType)
 	}
 	stopName := ctx.fresh("precedence_stop")
+	matchedName := ctx.fresh("precedence_matched")
+	committedName := ctx.fresh("precedence_committed")
 	snapshotName := ctx.fresh("precedence_cursor")
 	leftName := level.LeftName
 	stmts := append([]ast.Stmt{}, seedAttempt.Stmts...)
+	stmts = append(stmts,
+		&ast.VarDeclStmt{Position: level.Position, Name: matchedName, Mutable: true, Type: builtinTypeExpr(level.Position, "bool"), Value: seedAttempt.Matched},
+		&ast.VarDeclStmt{Position: level.Position, Name: committedName, Mutable: true, Type: builtinTypeExpr(level.Position, "bool"), Value: &ast.BoolLit{Position: level.Position, Value: false}},
+	)
+	stmts = append(stmts, markCommittedStmts(committedName, level.Position, seedAttempt.Committed)...)
 	stmts = append(stmts,
 		&ast.VarDeclStmt{Position: level.Position, Name: leftName, Mutable: true, Type: leftType, Value: seedAttempt.Value},
 		&ast.VarDeclStmt{Position: level.Position, Name: stopName, Mutable: true, Type: builtinTypeExpr(level.Position, "bool"), Value: &ast.BoolLit{Position: level.Position, Value: false}},
@@ -1449,13 +1639,13 @@ func (ctx *statefulLowerContext) lowerPrecedenceLevelAttempt(level ast.GrammarPr
 			Cond:     &ast.UnaryExpr{Position: level.Position, Op: lexer.TOKEN_NOT, Operand: &ast.Ident{Position: level.Position, Name: stopName}},
 			Body: append([]ast.Stmt{
 				&ast.VarDeclStmt{Position: level.Position, Name: snapshotName, Value: stateCursorExpr(ctx.cursorReceiver, ctx.cursorField, level.Position)},
-			}, ctx.lowerPrecedenceLevelArms(level.Arms, snapshotName, stopName, leftName, levels)...),
+			}, ctx.lowerPrecedenceLevelArms(level.Arms, snapshotName, stopName, matchedName, committedName, leftName, levels)...),
 		},
 	)
-	return loweredAttempt{Stmts: stmts, Matched: seedAttempt.Matched, Value: &ast.Ident{Position: level.Position, Name: leftName}}
+	return loweredAttempt{Stmts: stmts, Matched: &ast.Ident{Position: level.Position, Name: matchedName}, Committed: &ast.Ident{Position: level.Position, Name: committedName}, Value: &ast.Ident{Position: level.Position, Name: leftName}}
 }
 
-func (ctx *statefulLowerContext) lowerPrecedenceLevelArms(arms []ast.GrammarPrecedenceArm, snapshotName string, stopName string, leftName string, levels map[string]ast.GrammarPrecedenceLevel) []ast.Stmt {
+func (ctx *statefulLowerContext) lowerPrecedenceLevelArms(arms []ast.GrammarPrecedenceArm, snapshotName string, stopName string, matchedName string, committedName string, leftName string, levels map[string]ast.GrammarPrecedenceLevel) []ast.Stmt {
 	if len(arms) == 0 {
 		return []ast.Stmt{
 			restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, ctx.production.Position),
@@ -1465,26 +1655,28 @@ func (ctx *statefulLowerContext) lowerPrecedenceLevelArms(arms []ast.GrammarPrec
 	arm := arms[0]
 	opAttempt := ctx.lowerPrecedenceLevelOperandAttempt(arm.Op, levels)
 	thenBranch := make([]ast.Stmt, 0, len(arm.Bindings)+1)
+	thenBranch = append(thenBranch, markCommittedStmts(committedName, arm.Position, opAttempt.Committed)...)
 	if arm.OpName != "" {
 		thenBranch = append(thenBranch, &ast.VarDeclStmt{Position: arm.Position, Name: arm.OpName, Value: opAttempt.Value})
 	}
 	for _, binding := range arm.Bindings {
 		bindAttempt := ctx.lowerPrecedenceLevelOperandAttempt(binding.Term, levels)
 		thenBranch = append(thenBranch, bindAttempt.Stmts...)
+		thenBranch = append(thenBranch, markCommittedStmts(committedName, binding.Position, bindAttempt.Committed)...)
 		if ctx.precedenceOperandCanFail(binding.Term, levels) {
 			thenBranch = append(thenBranch, ctx.failureGuard(binding.Term.Pos(), snapshotName, bindAttempt.Matched)...)
 		}
 		thenBranch = append(thenBranch, &ast.VarDeclStmt{Position: binding.Position, Name: binding.Name, Value: bindAttempt.Value})
 	}
 	thenBranch = append(thenBranch, &ast.AssignStmt{Position: arm.Position, Target: &ast.Ident{Position: arm.Position, Name: leftName}, Value: arm.Value})
-	elseBranch := []ast.Stmt{restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, arm.Position)}
+	fallback := []ast.Stmt{restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, arm.Position)}
 	if len(arms) > 1 {
-		elseBranch = append(elseBranch, ctx.lowerPrecedenceLevelArms(arms[1:], snapshotName, stopName, leftName, levels)...)
+		fallback = append(fallback, ctx.lowerPrecedenceLevelArms(arms[1:], snapshotName, stopName, matchedName, committedName, leftName, levels)...)
 	} else {
-		elseBranch = append(elseBranch, &ast.AssignStmt{Position: arm.Position, Target: &ast.Ident{Position: arm.Position, Name: stopName}, Value: &ast.BoolLit{Position: arm.Position, Value: true}})
+		fallback = append(fallback, &ast.AssignStmt{Position: arm.Position, Target: &ast.Ident{Position: arm.Position, Name: stopName}, Value: &ast.BoolLit{Position: arm.Position, Value: true}})
 	}
 	result := append([]ast.Stmt{}, opAttempt.Stmts...)
-	result = append(result, &ast.IfStmt{Position: arm.Position, Cond: opAttempt.Matched, Then: thenBranch, Else: elseBranch})
+	result = append(result, &ast.IfStmt{Position: arm.Position, Cond: opAttempt.Matched, Then: thenBranch, Else: []ast.Stmt{&ast.IfStmt{Position: arm.Position, Cond: opAttempt.Committed, Then: []ast.Stmt{committedAssignTrueStmt(committedName, arm.Position), &ast.AssignStmt{Position: arm.Position, Target: &ast.Ident{Position: arm.Position, Name: matchedName}, Value: &ast.BoolLit{Position: arm.Position, Value: false}}, &ast.AssignStmt{Position: arm.Position, Target: &ast.Ident{Position: arm.Position, Name: stopName}, Value: &ast.BoolLit{Position: arm.Position, Value: true}}}, Else: fallback}}})
 	return result
 }
 
@@ -1526,7 +1718,7 @@ func (ctx *statefulLowerContext) inferPrecedenceOperandType(term ast.GrammarTerm
 	return ctx.inferTermType(term)
 }
 
-func (ctx *statefulLowerContext) lowerPrecedenceArms(arms []ast.GrammarPrecedenceArm, snapshotName string, stopName string, leftName string) []ast.Stmt {
+func (ctx *statefulLowerContext) lowerPrecedenceArms(arms []ast.GrammarPrecedenceArm, snapshotName string, stopName string, matchedName string, committedName string, leftName string) []ast.Stmt {
 	if len(arms) == 0 {
 		return []ast.Stmt{
 			restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, ctx.production.Position),
@@ -1536,30 +1728,32 @@ func (ctx *statefulLowerContext) lowerPrecedenceArms(arms []ast.GrammarPrecedenc
 	arm := arms[0]
 	opAttempt := ctx.lowerAttempt(arm.Op)
 	thenBranch := make([]ast.Stmt, 0, len(arm.Bindings)+1)
+	thenBranch = append(thenBranch, markCommittedStmts(committedName, arm.Position, opAttempt.Committed)...)
 	if arm.OpName != "" {
 		thenBranch = append(thenBranch, &ast.VarDeclStmt{Position: arm.Position, Name: arm.OpName, Value: opAttempt.Value})
 	}
 	for _, binding := range arm.Bindings {
 		bindAttempt := ctx.lowerAttempt(binding.Term)
 		thenBranch = append(thenBranch, bindAttempt.Stmts...)
+		thenBranch = append(thenBranch, markCommittedStmts(committedName, binding.Position, bindAttempt.Committed)...)
 		if ctx.termCanFail(binding.Term) {
 			thenBranch = append(thenBranch, ctx.failureGuard(binding.Term.Pos(), snapshotName, bindAttempt.Matched)...)
 		}
 		thenBranch = append(thenBranch, &ast.VarDeclStmt{Position: binding.Position, Name: binding.Name, Value: bindAttempt.Value})
 	}
 	thenBranch = append(thenBranch, &ast.AssignStmt{Position: arm.Position, Target: &ast.Ident{Position: arm.Position, Name: leftName}, Value: arm.Value})
-	elseBranch := []ast.Stmt{restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, arm.Position)}
+	fallback := []ast.Stmt{restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, arm.Position)}
 	if len(arms) > 1 {
-		elseBranch = append(elseBranch, ctx.lowerPrecedenceArms(arms[1:], snapshotName, stopName, leftName)...)
+		fallback = append(fallback, ctx.lowerPrecedenceArms(arms[1:], snapshotName, stopName, matchedName, committedName, leftName)...)
 	} else {
-		elseBranch = append(elseBranch, &ast.AssignStmt{Position: arm.Position, Target: &ast.Ident{Position: arm.Position, Name: stopName}, Value: &ast.BoolLit{Position: arm.Position, Value: true}})
+		fallback = append(fallback, &ast.AssignStmt{Position: arm.Position, Target: &ast.Ident{Position: arm.Position, Name: stopName}, Value: &ast.BoolLit{Position: arm.Position, Value: true}})
 	}
 	result := append([]ast.Stmt{}, opAttempt.Stmts...)
-	result = append(result, &ast.IfStmt{Position: arm.Position, Cond: opAttempt.Matched, Then: thenBranch, Else: elseBranch})
+	result = append(result, &ast.IfStmt{Position: arm.Position, Cond: opAttempt.Matched, Then: thenBranch, Else: []ast.Stmt{&ast.IfStmt{Position: arm.Position, Cond: opAttempt.Committed, Then: []ast.Stmt{committedAssignTrueStmt(committedName, arm.Position), &ast.AssignStmt{Position: arm.Position, Target: &ast.Ident{Position: arm.Position, Name: matchedName}, Value: &ast.BoolLit{Position: arm.Position, Value: false}}, &ast.AssignStmt{Position: arm.Position, Target: &ast.Ident{Position: arm.Position, Name: stopName}, Value: &ast.BoolLit{Position: arm.Position, Value: true}}}, Else: fallback}}})
 	return result
 }
 
-func (ctx *statefulLowerContext) lowerPostfixArms(arms []ast.GrammarPostfixArm, snapshotName string, stopName string, leftName string) []ast.Stmt {
+func (ctx *statefulLowerContext) lowerPostfixArms(arms []ast.GrammarPostfixArm, snapshotName string, stopName string, matchedName string, committedName string, leftName string) []ast.Stmt {
 	if len(arms) == 0 {
 		return []ast.Stmt{
 			restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, ctx.production.Position),
@@ -1569,26 +1763,28 @@ func (ctx *statefulLowerContext) lowerPostfixArms(arms []ast.GrammarPostfixArm, 
 	arm := arms[0]
 	opAttempt := ctx.lowerAttempt(arm.Op)
 	thenBranch := make([]ast.Stmt, 0, len(arm.Bindings)+1)
+	thenBranch = append(thenBranch, markCommittedStmts(committedName, arm.Position, opAttempt.Committed)...)
 	if arm.OpName != "" {
 		thenBranch = append(thenBranch, &ast.VarDeclStmt{Position: arm.Position, Name: arm.OpName, Value: opAttempt.Value})
 	}
 	for _, binding := range arm.Bindings {
 		bindAttempt := ctx.lowerAttempt(binding.Term)
 		thenBranch = append(thenBranch, bindAttempt.Stmts...)
+		thenBranch = append(thenBranch, markCommittedStmts(committedName, binding.Position, bindAttempt.Committed)...)
 		if ctx.termCanFail(binding.Term) {
 			thenBranch = append(thenBranch, ctx.failureGuard(binding.Term.Pos(), snapshotName, bindAttempt.Matched)...)
 		}
 		thenBranch = append(thenBranch, &ast.VarDeclStmt{Position: binding.Position, Name: binding.Name, Value: bindAttempt.Value})
 	}
 	thenBranch = append(thenBranch, &ast.AssignStmt{Position: arm.Position, Target: &ast.Ident{Position: arm.Position, Name: leftName}, Value: arm.Value})
-	elseBranch := []ast.Stmt{restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, arm.Position)}
+	fallback := []ast.Stmt{restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, arm.Position)}
 	if len(arms) > 1 {
-		elseBranch = append(elseBranch, ctx.lowerPostfixArms(arms[1:], snapshotName, stopName, leftName)...)
+		fallback = append(fallback, ctx.lowerPostfixArms(arms[1:], snapshotName, stopName, matchedName, committedName, leftName)...)
 	} else {
-		elseBranch = append(elseBranch, &ast.AssignStmt{Position: arm.Position, Target: &ast.Ident{Position: arm.Position, Name: stopName}, Value: &ast.BoolLit{Position: arm.Position, Value: true}})
+		fallback = append(fallback, &ast.AssignStmt{Position: arm.Position, Target: &ast.Ident{Position: arm.Position, Name: stopName}, Value: &ast.BoolLit{Position: arm.Position, Value: true}})
 	}
 	result := append([]ast.Stmt{}, opAttempt.Stmts...)
-	result = append(result, &ast.IfStmt{Position: arm.Position, Cond: opAttempt.Matched, Then: thenBranch, Else: elseBranch})
+	result = append(result, &ast.IfStmt{Position: arm.Position, Cond: opAttempt.Matched, Then: thenBranch, Else: []ast.Stmt{&ast.IfStmt{Position: arm.Position, Cond: opAttempt.Committed, Then: []ast.Stmt{committedAssignTrueStmt(committedName, arm.Position), &ast.AssignStmt{Position: arm.Position, Target: &ast.Ident{Position: arm.Position, Name: matchedName}, Value: &ast.BoolLit{Position: arm.Position, Value: false}}, &ast.AssignStmt{Position: arm.Position, Target: &ast.Ident{Position: arm.Position, Name: stopName}, Value: &ast.BoolLit{Position: arm.Position, Value: true}}}, Else: fallback}}})
 	return result
 }
 
@@ -1597,12 +1793,14 @@ func (ctx *statefulLowerContext) lowerListAttempt(term *ast.GrammarListTerm) low
 	resultType := listTypeExpr(term.Position, elemType)
 	resultName := ctx.fresh("list_value")
 	stopName := ctx.fresh("list_stop")
+	matchedName := ctx.fresh("list_matched")
+	committedName := ctx.fresh("list_committed")
 	itemSnapshot := ctx.fresh("item_cursor")
 	itemAttempt := ctx.lowerAttempt(term.Elem)
 	loop := &ast.WhileStmt{
 		Position: term.Position,
 		Cond:     &ast.UnaryExpr{Position: term.Position, Op: lexer.TOKEN_NOT, Operand: &ast.Ident{Position: term.Position, Name: stopName}},
-		Body:     ctx.lowerListLoopBody(term, itemSnapshot, resultName, stopName, itemAttempt),
+		Body:     ctx.lowerListLoopBody(term, itemSnapshot, resultName, stopName, matchedName, committedName, itemAttempt),
 	}
 	loopStmt := ast.Stmt(loop)
 	resultInit := ast.Expr(&ast.ListLitExpr{Position: term.Position})
@@ -1618,18 +1816,21 @@ func (ctx *statefulLowerContext) lowerListAttempt(term *ast.GrammarListTerm) low
 		}
 	}
 	body := []ast.Stmt{
+		&ast.VarDeclStmt{Position: term.Position, Name: matchedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: true}},
+		&ast.VarDeclStmt{Position: term.Position, Name: committedName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
 		&ast.VarDeclStmt{Position: term.Position, Name: resultName, Mutable: true, Type: resultType, Value: resultInit},
 		&ast.VarDeclStmt{Position: term.Position, Name: stopName, Mutable: true, Type: builtinTypeExpr(term.Position, "bool"), Value: &ast.BoolLit{Position: term.Position, Value: false}},
 		loopStmt,
 	}
-	return loweredAttempt{Stmts: body, Matched: &ast.BoolLit{Position: term.Position, Value: true}, Value: &ast.Ident{Position: term.Position, Name: resultName}}
+	return loweredAttempt{Stmts: body, Matched: &ast.Ident{Position: term.Position, Name: matchedName}, Committed: &ast.Ident{Position: term.Position, Name: committedName}, Value: &ast.Ident{Position: term.Position, Name: resultName}}
 }
 
-func (ctx *statefulLowerContext) lowerListLoopBody(term *ast.GrammarListTerm, itemSnapshot string, resultName string, stopName string, itemAttempt loweredAttempt) []ast.Stmt {
+func (ctx *statefulLowerContext) lowerListLoopBody(term *ast.GrammarListTerm, itemSnapshot string, resultName string, stopName string, matchedName string, committedName string, itemAttempt loweredAttempt) []ast.Stmt {
 	continueBody := []ast.Stmt{
 		&ast.VarDeclStmt{Position: term.Position, Name: itemSnapshot, Value: stateCursorExpr(ctx.cursorReceiver, ctx.cursorField, term.Position)},
 	}
 	continueBody = append(continueBody, itemAttempt.Stmts...)
+	continueBody = append(continueBody, markCommittedStmts(committedName, term.Position, itemAttempt.Committed)...)
 	if term.Separator == nil {
 		continueBody = append(continueBody, &ast.IfStmt{
 			Position: term.Position,
@@ -1637,10 +1838,7 @@ func (ctx *statefulLowerContext) lowerListLoopBody(term *ast.GrammarListTerm, it
 			Then: []ast.Stmt{
 				listPushStmt(term.Position, resultName, itemAttempt.Value),
 			},
-			Else: []ast.Stmt{
-				restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, itemSnapshot, term.Position),
-				&ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: stopName}, Value: &ast.BoolLit{Position: term.Position, Value: true}},
-			},
+			Else: []ast.Stmt{&ast.IfStmt{Position: term.Position, Cond: itemAttempt.Committed, Then: []ast.Stmt{&ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: matchedName}, Value: &ast.BoolLit{Position: term.Position, Value: false}}, &ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: stopName}, Value: &ast.BoolLit{Position: term.Position, Value: true}}}, Else: []ast.Stmt{restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, itemSnapshot, term.Position), &ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: stopName}, Value: &ast.BoolLit{Position: term.Position, Value: true}}}}},
 		})
 		if stopCond := ctx.lowerListUntilMatchExpr(term.Position, term.Until); stopCond != nil {
 			return []ast.Stmt{&ast.IfStmt{
@@ -1662,18 +1860,12 @@ func (ctx *statefulLowerContext) lowerListLoopBody(term *ast.GrammarListTerm, it
 		Then: append([]ast.Stmt{
 			listPushStmt(term.Position, resultName, itemAttempt.Value),
 			&ast.VarDeclStmt{Position: term.Position, Name: sepSnapshot, Value: stateCursorExpr(ctx.cursorReceiver, ctx.cursorField, term.Position)},
-		}, append(sepAttempt.Stmts, &ast.IfStmt{
+		}, append(append(sepAttempt.Stmts, markCommittedStmts(committedName, term.Position, sepAttempt.Committed)...), &ast.IfStmt{
 			Position: term.Position,
 			Cond:     &ast.UnaryExpr{Position: term.Position, Op: lexer.TOKEN_NOT, Operand: sepAttempt.Matched},
-			Then: []ast.Stmt{
-				restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, sepSnapshot, term.Position),
-				&ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: stopName}, Value: &ast.BoolLit{Position: term.Position, Value: true}},
-			},
+			Then:     []ast.Stmt{&ast.IfStmt{Position: term.Position, Cond: sepAttempt.Committed, Then: []ast.Stmt{&ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: matchedName}, Value: &ast.BoolLit{Position: term.Position, Value: false}}, &ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: stopName}, Value: &ast.BoolLit{Position: term.Position, Value: true}}}, Else: []ast.Stmt{restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, sepSnapshot, term.Position), &ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: stopName}, Value: &ast.BoolLit{Position: term.Position, Value: true}}}}},
 		})...),
-		Else: []ast.Stmt{
-			restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, itemSnapshot, term.Position),
-			&ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: stopName}, Value: &ast.BoolLit{Position: term.Position, Value: true}},
-		},
+		Else: []ast.Stmt{&ast.IfStmt{Position: term.Position, Cond: itemAttempt.Committed, Then: []ast.Stmt{&ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: matchedName}, Value: &ast.BoolLit{Position: term.Position, Value: false}}, &ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: stopName}, Value: &ast.BoolLit{Position: term.Position, Value: true}}}, Else: []ast.Stmt{restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, itemSnapshot, term.Position), &ast.AssignStmt{Position: term.Position, Target: &ast.Ident{Position: term.Position, Name: stopName}, Value: &ast.BoolLit{Position: term.Position, Value: true}}}}},
 	})
 	if stopCond := ctx.lowerListUntilMatchExpr(term.Position, term.Until); stopCond != nil {
 		return []ast.Stmt{&ast.IfStmt{
@@ -1773,6 +1965,8 @@ func (ctx *statefulLowerContext) inferTermType(term ast.GrammarTerm) ast.TypeExp
 		return builtinTypeExpr(n.Position, "bool")
 	case *ast.GrammarAttemptTerm:
 		return nil
+	case *ast.GrammarCutTerm:
+		return builtinTypeExpr(n.Position, "bool")
 	case *ast.GrammarOptionalTerm:
 		return ctx.inferTermType(n.Term)
 	case *ast.GrammarListTerm:
@@ -1967,6 +2161,8 @@ func lowerTermStmt(ctx lowerContext, term ast.GrammarTerm) ast.Stmt {
 		return &ast.VarDeclStmt{Position: n.Position, Name: n.Name, Value: lowerTermExpr(ctx, n.Term)}
 	case *ast.GrammarAssignTerm:
 		return &ast.AssignStmt{Position: n.Position, Target: &ast.Ident{Position: n.Position, Name: n.Name}, Value: lowerTermExpr(ctx, n.Term)}
+	case *ast.GrammarCutTerm:
+		return &ast.PassStmt{Position: n.Position}
 	case *ast.GrammarReturnTerm:
 		return &ast.ReturnStmt{Position: n.Position, Value: n.Value}
 	default:
@@ -2013,6 +2209,8 @@ func lowerTermExpr(ctx lowerContext, term ast.GrammarTerm) ast.Expr {
 		return n.Cond
 	case *ast.GrammarAttemptTerm:
 		return n.Expr
+	case *ast.GrammarCutTerm:
+		return &ast.BoolLit{Position: n.Position, Value: true}
 	case *ast.GrammarOptionalTerm:
 		return &ast.CallExpr{Position: n.Position, Func: &ast.Ident{Position: n.Position, Name: "optional"}, Args: []ast.Expr{lowerTermExpr(ctx, n.Term)}}
 	case *ast.GrammarListTerm:

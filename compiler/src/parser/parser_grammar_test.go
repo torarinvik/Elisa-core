@@ -184,6 +184,53 @@ func TestParseGrammarDeclAllowsUsesClauseAndPublicShorthandProduction(t *testing
 	}
 }
 
+func TestParseExtendGrammarDecl(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend over Token using ParserState:
+    cursor state
+    atom() -> Token:
+        .IDENT(tok)
+        return tok
+
+extend grammar PascalFrontend uses PascalExprGrammar:
+    expr() -> Token:
+        value = atom()
+        return value
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	if len(file.Decls) != 2 {
+		t.Fatalf("expected two grammar decls, got %d", len(file.Decls))
+	}
+	base, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected base grammar decl, got %T", file.Decls[0])
+	}
+	if base.Extend {
+		t.Fatal("expected base grammar not to be marked as extension")
+	}
+	ext, ok := file.Decls[1].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected extension grammar decl, got %T", file.Decls[1])
+	}
+	if !ext.Extend {
+		t.Fatal("expected extend grammar decl to be marked as extension")
+	}
+	if len(ext.Uses) != 1 || formatTypeExprForTest(t, ext.Uses[0]) != "PascalExprGrammar" {
+		t.Fatalf("expected extension to preserve uses clause, got %#v", ext.Uses)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"grammar PascalFrontend over Token using ParserState:",
+		"extend grammar PascalFrontend uses PascalExprGrammar:",
+		"expr() -> Token:",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestParseGrammarDeclAllowsAssignmentTerm(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend over Token using ParserState:
     cursor parser
@@ -251,6 +298,35 @@ func TestParseGrammarDeclAllowsPassProduction(t *testing.T) {
 	formatted := strings.TrimSpace(unparse.FormatFile(file))
 	if !strings.Contains(formatted, "pass") {
 		t.Fatalf("expected formatted output to contain pass, got:\n%s", formatted)
+	}
+}
+
+func TestParseGrammarDeclAllowsCutTerm(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar Pascal:
+    statement() -> Pascal.Stmt:
+        "if"
+        cut
+        "then"
+        return zeroed as Pascal.Stmt
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	if len(decl.Productions) != 1 || len(decl.Productions[0].Terms) != 4 {
+		t.Fatalf("expected one production with four terms, got %#v", decl.Productions)
+	}
+	if _, ok := decl.Productions[0].Terms[1].(*ast.GrammarCutTerm); !ok {
+		t.Fatalf("expected second term to be cut, got %T", decl.Productions[0].Terms[1])
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{"cut", "\"if\"", "\"then\""} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
 	}
 }
 

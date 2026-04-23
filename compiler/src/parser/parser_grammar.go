@@ -7,6 +7,10 @@ import (
 
 func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 	pos := p.cur().Pos
+	extend := p.peekIdentText("extend")
+	if extend {
+		p.expectIdentText("extend")
+	}
 	p.expectIdentText("grammar")
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	typeParams, refStorageParams, refStateParams, regionParams, permissionParams, genericParams := p.parseFuncGenericParams()
@@ -72,6 +76,7 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 
 	return &ast.GrammarDecl{
 		Position:         pos,
+		Extend:           extend,
 		Name:             name,
 		TypeParams:       typeParams,
 		RefStorageParams: refStorageParams,
@@ -287,6 +292,9 @@ func (p *Parser) parseGrammarTermValue() ast.GrammarTerm {
 	if p.peekIdentText("attempt") {
 		return p.parseGrammarAttemptTerm()
 	}
+	if p.peekIdentText("cut") {
+		return p.parseGrammarCutTerm()
+	}
 	if p.peekIdentText("optional") {
 		return p.parseGrammarOptionalTerm()
 	}
@@ -382,6 +390,12 @@ func (p *Parser) parseGrammarAttemptTerm() ast.GrammarTerm {
 	expr := p.parseExpr()
 	p.expect(lexer.TOKEN_RPAREN)
 	return &ast.GrammarAttemptTerm{Position: pos, Expr: expr}
+}
+
+func (p *Parser) parseGrammarCutTerm() ast.GrammarTerm {
+	pos := p.cur().Pos
+	p.expectIdentText("cut")
+	return &ast.GrammarCutTerm{Position: pos}
 }
 
 func (p *Parser) parseGrammarOptionalTerm() ast.GrammarTerm {

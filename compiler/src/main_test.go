@@ -966,7 +966,7 @@ func TestRunCLIWritesLoweredGrammarSourceToDefaultPath(t *testing.T) {
 		"grammar PascalFrontend:",
 		"def expression(state: mutable ParserState&) -> Token:",
 		"state.expect_kind(TokenKind.IDENT)",
-		"return (true, zeroed.cast[Token])",
+		"return (true, __grammar_committed_",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected lowered output to contain %q, got:\n%s", want, output)
