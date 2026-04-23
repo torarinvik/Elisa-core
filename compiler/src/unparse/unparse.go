@@ -647,6 +647,26 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 			parts = append(parts, "until("+strings.Join(untilParts, ", ")+")")
 		}
 		return "list(" + strings.Join(parts, ", ") + ")"
+	case *ast.GrammarRepeatTerm:
+		parts := []string{formatGrammarTerm(n.Elem)}
+		if len(n.Until) != 0 {
+			untilParts := make([]string, 0, len(n.Until))
+			for _, stop := range n.Until {
+				untilParts = append(untilParts, formatGrammarTerm(stop))
+			}
+			parts = append(parts, "until("+strings.Join(untilParts, ", ")+")")
+		}
+		return "repeat(" + strings.Join(parts, ", ") + ")"
+	case *ast.GrammarSeparatedTerm:
+		parts := []string{formatGrammarTerm(n.Elem), formatGrammarTerm(n.Separator)}
+		if len(n.Until) != 0 {
+			untilParts := make([]string, 0, len(n.Until))
+			for _, stop := range n.Until {
+				untilParts = append(untilParts, formatGrammarTerm(stop))
+			}
+			parts = append(parts, "until("+strings.Join(untilParts, ", ")+")")
+		}
+		return "separated(" + strings.Join(parts, ", ") + ")"
 	case *ast.GrammarPostfixTerm:
 		return "postfix(" + n.LeftName + " = " + formatGrammarTerm(n.Seed) + "):"
 	case *ast.GrammarPrecedenceTerm:

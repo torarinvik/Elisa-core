@@ -369,6 +369,26 @@ func desugarNamedPrecedenceTerm(grammarName string, production ast.GrammarProduc
 			helpers = append(helpers, extra...)
 		}
 		return &ast.GrammarListTerm{Position: n.Position, Elem: elem, Separator: separator, Until: until}, helpers
+	case *ast.GrammarRepeatTerm:
+		elem, helpers := desugarNamedPrecedenceTerm(grammarName, production, n.Elem, counter)
+		until := make([]ast.GrammarTerm, 0, len(n.Until))
+		for _, stop := range n.Until {
+			rewritten, extra := desugarNamedPrecedenceTerm(grammarName, production, stop, counter)
+			until = append(until, rewritten)
+			helpers = append(helpers, extra...)
+		}
+		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: elem, Until: until}, helpers
+	case *ast.GrammarSeparatedTerm:
+		elem, helpers := desugarNamedPrecedenceTerm(grammarName, production, n.Elem, counter)
+		separator, extra := desugarNamedPrecedenceTerm(grammarName, production, n.Separator, counter)
+		helpers = append(helpers, extra...)
+		until := make([]ast.GrammarTerm, 0, len(n.Until))
+		for _, stop := range n.Until {
+			rewritten, more := desugarNamedPrecedenceTerm(grammarName, production, stop, counter)
+			until = append(until, rewritten)
+			helpers = append(helpers, more...)
+		}
+		return &ast.GrammarSeparatedTerm{Position: n.Position, Elem: elem, Separator: separator, Until: until}, helpers
 	case *ast.GrammarPrecedenceTerm:
 		if len(n.Levels) != 0 {
 			return desugarNamedPrecedenceBlock(grammarName, production, n, counter)
@@ -503,6 +523,18 @@ func rewriteNamedPrecedenceHelperCalls(term ast.GrammarTerm, helperNames map[str
 			until = append(until, rewriteNamedPrecedenceHelperCalls(stop, helperNames, paramArgs))
 		}
 		return &ast.GrammarListTerm{Position: n.Position, Elem: rewriteNamedPrecedenceHelperCalls(n.Elem, helperNames, paramArgs), Separator: separator, Until: until}
+	case *ast.GrammarRepeatTerm:
+		until := make([]ast.GrammarTerm, 0, len(n.Until))
+		for _, stop := range n.Until {
+			until = append(until, rewriteNamedPrecedenceHelperCalls(stop, helperNames, paramArgs))
+		}
+		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: rewriteNamedPrecedenceHelperCalls(n.Elem, helperNames, paramArgs), Until: until}
+	case *ast.GrammarSeparatedTerm:
+		until := make([]ast.GrammarTerm, 0, len(n.Until))
+		for _, stop := range n.Until {
+			until = append(until, rewriteNamedPrecedenceHelperCalls(stop, helperNames, paramArgs))
+		}
+		return &ast.GrammarSeparatedTerm{Position: n.Position, Elem: rewriteNamedPrecedenceHelperCalls(n.Elem, helperNames, paramArgs), Separator: rewriteNamedPrecedenceHelperCalls(n.Separator, helperNames, paramArgs), Until: until}
 	case *ast.GrammarPrecedenceTerm:
 		if len(n.Levels) != 0 {
 			return n
@@ -952,6 +984,20 @@ func stateOwnerExpr(stateName string, pos lexer.Pos) ast.Expr {
 	return &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: stateName}, Field: "owner"}
 }
 
+func repeatTermAsList(term *ast.GrammarRepeatTerm) *ast.GrammarListTerm {
+	if term == nil {
+		return nil
+	}
+	return &ast.GrammarListTerm{Position: term.Position, Elem: term.Elem, Until: append([]ast.GrammarTerm(nil), term.Until...)}
+}
+
+func separatedTermAsList(term *ast.GrammarSeparatedTerm) *ast.GrammarListTerm {
+	if term == nil {
+		return nil
+	}
+	return &ast.GrammarListTerm{Position: term.Position, Elem: term.Elem, Separator: term.Separator, Until: append([]ast.GrammarTerm(nil), term.Until...)}
+}
+
 func listPushStmt(pos lexer.Pos, targetName string, value ast.Expr) ast.Stmt {
 	return &ast.ExprStmt{
 		Position: pos,
@@ -1114,6 +1160,10 @@ func (ctx *statefulLowerContext) termCanFail(term ast.GrammarTerm) bool {
 		return false
 	case *ast.GrammarListTerm:
 		return false
+	case *ast.GrammarRepeatTerm:
+		return false
+	case *ast.GrammarSeparatedTerm:
+		return false
 	case *ast.GrammarPostfixTerm:
 		return ctx.termCanFail(n.Seed)
 	case *ast.GrammarPrecedenceTerm:
@@ -1252,6 +1302,10 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 		return ctx.lowerOptionalAttempt(n)
 	case *ast.GrammarListTerm:
 		return ctx.lowerListAttempt(n)
+	case *ast.GrammarRepeatTerm:
+		return ctx.lowerListAttempt(repeatTermAsList(n))
+	case *ast.GrammarSeparatedTerm:
+		return ctx.lowerListAttempt(separatedTermAsList(n))
 	case *ast.GrammarPostfixTerm:
 		return ctx.lowerPostfixAttempt(n)
 	case *ast.GrammarPrecedenceTerm:
@@ -1723,6 +1777,10 @@ func (ctx *statefulLowerContext) inferTermType(term ast.GrammarTerm) ast.TypeExp
 		return ctx.inferTermType(n.Term)
 	case *ast.GrammarListTerm:
 		return listTypeExpr(n.Position, ctx.inferTermType(n.Elem))
+	case *ast.GrammarRepeatTerm:
+		return listTypeExpr(n.Position, ctx.inferTermType(n.Elem))
+	case *ast.GrammarSeparatedTerm:
+		return listTypeExpr(n.Position, ctx.inferTermType(n.Elem))
 	case *ast.GrammarPostfixTerm:
 		return ctx.inferTermType(n.Seed)
 	case *ast.GrammarPrecedenceTerm:
@@ -1968,6 +2026,18 @@ func lowerTermExpr(ctx lowerContext, term ast.GrammarTerm) ast.Expr {
 			args = append(args, lowerGrammarUntilExpr(n.Position, n.Until))
 		}
 		return &ast.CallExpr{Position: n.Position, Func: &ast.Ident{Position: n.Position, Name: "list"}, Args: args}
+	case *ast.GrammarRepeatTerm:
+		args := []ast.Expr{lowerTermExpr(ctx, n.Elem)}
+		if len(n.Until) != 0 {
+			args = append(args, lowerGrammarUntilExpr(n.Position, n.Until))
+		}
+		return &ast.CallExpr{Position: n.Position, Func: &ast.Ident{Position: n.Position, Name: "repeat"}, Args: args}
+	case *ast.GrammarSeparatedTerm:
+		args := []ast.Expr{lowerTermExpr(ctx, n.Elem), lowerTermExpr(ctx, n.Separator)}
+		if len(n.Until) != 0 {
+			args = append(args, lowerGrammarUntilExpr(n.Position, n.Until))
+		}
+		return &ast.CallExpr{Position: n.Position, Func: &ast.Ident{Position: n.Position, Name: "separated"}, Args: args}
 	case *ast.GrammarPostfixTerm:
 		return lowerTermExpr(ctx, n.Seed)
 	case *ast.GrammarPrecedenceTerm:

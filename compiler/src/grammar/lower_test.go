@@ -144,6 +144,27 @@ func TestLowerDeclPreservesListUntilStopSetAsOrdinaryCall(t *testing.T) {
 	}
 }
 
+func TestLowerDeclPreservesRepeatAndSeparatedAsOrdinaryCalls(t *testing.T) {
+	decl := parseGrammarTestDecl(t, `grammar PascalFrontend:
+    block() -> darray[Pascal.Stmt]:
+        items = repeat(statement(), until("end", token(TokenKind.EOF)))
+    args() -> darray[Pascal.Expr]:
+        values = separated(expression(), ",", until(")", token(TokenKind.EOF)))
+`)
+	funcs := LowerDecl(decl)
+	if len(funcs) != 2 {
+		t.Fatalf("expected two lowered functions, got %d", len(funcs))
+	}
+	blockFormatted := unparse.FormatDecl(funcs[0])
+	if !strings.Contains(blockFormatted, "items = repeat(statement(), until(\"end\", token(TokenKind.EOF)))") {
+		t.Fatalf("expected lowered repeat term to stay as ordinary call, got:\n%s", blockFormatted)
+	}
+	argsFormatted := unparse.FormatDecl(funcs[1])
+	if !strings.Contains(argsFormatted, "values = separated(expression(), expect(\",\"), until(\")\", token(TokenKind.EOF)))") {
+		t.Fatalf("expected lowered separated term to stay as ordinary call, got:\n%s", argsFormatted)
+	}
+}
+
 func TestLowerDeclRoutesBareTokenTermsThroughStateReceiverWhenPresent(t *testing.T) {
 	decl := parseGrammarTestDecl(t, `grammar PascalFrontend:
     expression_tail(state: mutable ParserState&) -> Pascal.Expr:
@@ -227,6 +248,26 @@ func TestLowerFileStatefulListChecksUntilStopSetBeforeParsingNextItem(t *testing
 	itemIndex := strings.Index(formatted, "state.expect_kind(TokenKind.IDENT)")
 	if endIndex < 0 || itemIndex < 0 || endIndex > itemIndex {
 		t.Fatalf("expected stop-set check before item parse, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulSeparatedTermBuildsListLoop(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend:
+    args(state: mutable ParserState&) -> darray[Token]:
+        values = separated(token(TokenKind.IDENT), ",", until(")", token(TokenKind.EOF)))
+        return values
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.expect_kind(TokenKind.IDENT)",
+		"state.expect(\",\")",
+		"state.current_token().kind == token_kind_for_text(\")\")",
+		"return (true, values)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered separated-term production to contain %q, got:\n%s", want, formatted)
+		}
 	}
 }
 

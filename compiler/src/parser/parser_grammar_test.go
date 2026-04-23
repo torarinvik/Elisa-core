@@ -403,6 +403,45 @@ func TestParseGrammarListTermAllowsUntilStopSets(t *testing.T) {
 	}
 }
 
+func TestParseGrammarRepeatAndSeparatedTerms(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend:
+    block(state: mutable ParserState&) -> darray[Pascal.Stmt]:
+        items = repeat(state.statement(), until("end", token(TokenKind.EOF)))
+    args(state: mutable ParserState&) -> darray[Pascal.Expr]:
+        values = separated(state.expression(), ",", until(")", token(TokenKind.EOF)))
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	repeatBind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected repeat binding, got %T", decl.Productions[0].Terms[0])
+	}
+	if _, ok := repeatBind.Term.(*ast.GrammarRepeatTerm); !ok {
+		t.Fatalf("expected repeat term, got %T", repeatBind.Term)
+	}
+	separatedBind, ok := decl.Productions[1].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected separated binding, got %T", decl.Productions[1].Terms[0])
+	}
+	if _, ok := separatedBind.Term.(*ast.GrammarSeparatedTerm); !ok {
+		t.Fatalf("expected separated term, got %T", separatedBind.Term)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"items = repeat(state.statement(), until(\"end\", token(TokenKind.EOF)))",
+		"values = separated(state.expression(), \",\", until(\")\", token(TokenKind.EOF)))",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestParseGrammarProductionAllowsRecoverClause(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
     statement(state: mutable ParserState&) -> Pascal.Stmt recover(ParseMessageKey.ExpectedStatement, until(";", "end", "else", token(TokenKind.EOF))):

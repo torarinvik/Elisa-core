@@ -293,6 +293,12 @@ func (p *Parser) parseGrammarTermValue() ast.GrammarTerm {
 	if p.peekIdentText("list") {
 		return p.parseGrammarListTerm()
 	}
+	if p.peekIdentText("repeat") {
+		return p.parseGrammarRepeatTerm()
+	}
+	if p.peekIdentText("separated") {
+		return p.parseGrammarSeparatedTerm()
+	}
 	name := p.parseQualifiedDeclName()
 	explicit := false
 	args := make([]ast.Expr, 0, 2)
@@ -406,6 +412,34 @@ func (p *Parser) parseGrammarListTerm() ast.GrammarTerm {
 	}
 	p.expect(lexer.TOKEN_RPAREN)
 	return &ast.GrammarListTerm{Position: pos, Elem: elem, Separator: separator, Until: until}
+}
+
+func (p *Parser) parseGrammarRepeatTerm() ast.GrammarTerm {
+	pos := p.cur().Pos
+	p.expectIdentText("repeat")
+	p.expect(lexer.TOKEN_LPAREN)
+	elem := p.parseGrammarTermValue()
+	var until []ast.GrammarTerm
+	if p.match(lexer.TOKEN_COMMA) {
+		until = p.parseGrammarUntilClause()
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+	return &ast.GrammarRepeatTerm{Position: pos, Elem: elem, Until: until}
+}
+
+func (p *Parser) parseGrammarSeparatedTerm() ast.GrammarTerm {
+	pos := p.cur().Pos
+	p.expectIdentText("separated")
+	p.expect(lexer.TOKEN_LPAREN)
+	elem := p.parseGrammarTermValue()
+	p.expect(lexer.TOKEN_COMMA)
+	separator := p.parseGrammarTermValue()
+	var until []ast.GrammarTerm
+	if p.match(lexer.TOKEN_COMMA) {
+		until = p.parseGrammarUntilClause()
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+	return &ast.GrammarSeparatedTerm{Position: pos, Elem: elem, Separator: separator, Until: until}
 }
 
 func (p *Parser) parseGrammarUntilClause() []ast.GrammarTerm {

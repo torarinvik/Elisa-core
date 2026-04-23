@@ -186,6 +186,19 @@ type GrammarListTerm struct {
 	Until     []GrammarTerm
 }
 
+type GrammarRepeatTerm struct {
+	Position lexer.Pos
+	Elem     GrammarTerm
+	Until    []GrammarTerm
+}
+
+type GrammarSeparatedTerm struct {
+	Position  lexer.Pos
+	Elem      GrammarTerm
+	Separator GrammarTerm
+	Until     []GrammarTerm
+}
+
 type GrammarPostfixArm struct {
 	Position lexer.Pos
 	OpName   string
@@ -1523,6 +1536,12 @@ func (n *GrammarAttemptTerm) Pos() lexer.Pos {
 	return n.Position
 }
 func (n *GrammarListTerm) Pos() lexer.Pos { return n.Position }
+func (n *GrammarRepeatTerm) Pos() lexer.Pos {
+	return n.Position
+}
+func (n *GrammarSeparatedTerm) Pos() lexer.Pos {
+	return n.Position
+}
 func (n *GrammarPostfixTerm) Pos() lexer.Pos {
 	return n.Position
 }
@@ -1714,6 +1733,8 @@ func (*GrammarExprTerm) nodeTag()           {}
 func (*GrammarGuardTerm) nodeTag()          {}
 func (*GrammarAttemptTerm) nodeTag()        {}
 func (*GrammarListTerm) nodeTag()           {}
+func (*GrammarRepeatTerm) nodeTag()         {}
+func (*GrammarSeparatedTerm) nodeTag()      {}
 func (*GrammarPostfixTerm) nodeTag()        {}
 func (*GrammarPrecedenceTerm) nodeTag()     {}
 func (*GrammarBindTerm) nodeTag()           {}
@@ -1890,6 +1911,8 @@ func (*GrammarExprTerm) grammarTermTag()       {}
 func (*GrammarGuardTerm) grammarTermTag()      {}
 func (*GrammarAttemptTerm) grammarTermTag()    {}
 func (*GrammarListTerm) grammarTermTag()       {}
+func (*GrammarRepeatTerm) grammarTermTag()     {}
+func (*GrammarSeparatedTerm) grammarTermTag()  {}
 func (*GrammarPostfixTerm) grammarTermTag()    {}
 func (*GrammarPrecedenceTerm) grammarTermTag() {}
 func (*GrammarBindTerm) grammarTermTag()       {}
