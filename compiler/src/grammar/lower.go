@@ -1044,6 +1044,8 @@ func (ctx *statefulLowerContext) termCanFail(term ast.GrammarTerm) bool {
 		return true
 	case *ast.GrammarExprTerm:
 		return false
+	case *ast.GrammarGuardTerm:
+		return true
 	case *ast.GrammarAttemptTerm:
 		return true
 	case *ast.GrammarOptionalTerm:
@@ -1157,6 +1159,14 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 			Stmts:   []ast.Stmt{&ast.VarDeclStmt{Position: n.Position, Name: valueName, Value: n.Expr}},
 			Matched: &ast.BoolLit{Position: n.Position, Value: true},
 			Value:   &ast.Ident{Position: n.Position, Name: valueName},
+		}
+	case *ast.GrammarGuardTerm:
+		valueName := ctx.fresh("guard")
+		guardIdent := &ast.Ident{Position: n.Position, Name: valueName}
+		return loweredAttempt{
+			Stmts:   []ast.Stmt{&ast.VarDeclStmt{Position: n.Position, Name: valueName, Value: n.Cond}},
+			Matched: guardIdent,
+			Value:   guardIdent,
 		}
 	case *ast.GrammarAttemptTerm:
 		matchedName := ctx.fresh("matched")
@@ -1643,6 +1653,8 @@ func (ctx *statefulLowerContext) inferTermType(term ast.GrammarTerm) ast.TypeExp
 		}
 	case *ast.GrammarExprTerm:
 		return nil
+	case *ast.GrammarGuardTerm:
+		return builtinTypeExpr(n.Position, "bool")
 	case *ast.GrammarAttemptTerm:
 		return nil
 	case *ast.GrammarOptionalTerm:
@@ -1877,6 +1889,8 @@ func lowerTermExpr(ctx lowerContext, term ast.GrammarTerm) ast.Expr {
 		return lowerChoiceExpr(ctx, n.Position, n.Options)
 	case *ast.GrammarExprTerm:
 		return n.Expr
+	case *ast.GrammarGuardTerm:
+		return n.Cond
 	case *ast.GrammarAttemptTerm:
 		return n.Expr
 	case *ast.GrammarOptionalTerm:

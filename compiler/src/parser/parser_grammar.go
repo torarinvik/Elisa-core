@@ -281,6 +281,9 @@ func (p *Parser) parseGrammarTermValue() ast.GrammarTerm {
 	if p.peekIdentText("expr") {
 		return p.parseGrammarExprTerm()
 	}
+	if p.peekIdentText("guard") {
+		return p.parseGrammarGuardTerm()
+	}
 	if p.peekIdentText("attempt") {
 		return p.parseGrammarAttemptTerm()
 	}
@@ -355,6 +358,15 @@ func (p *Parser) parseGrammarExprTerm() ast.GrammarTerm {
 	expr := p.parseExpr()
 	p.expect(lexer.TOKEN_RPAREN)
 	return &ast.GrammarExprTerm{Position: pos, Expr: expr}
+}
+
+func (p *Parser) parseGrammarGuardTerm() ast.GrammarTerm {
+	pos := p.cur().Pos
+	p.expectIdentText("guard")
+	p.expect(lexer.TOKEN_LPAREN)
+	cond := p.parseExpr()
+	p.expect(lexer.TOKEN_RPAREN)
+	return &ast.GrammarGuardTerm{Position: pos, Cond: cond}
 }
 
 func (p *Parser) parseGrammarAttemptTerm() ast.GrammarTerm {

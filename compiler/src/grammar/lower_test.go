@@ -739,6 +739,27 @@ func TestLowerFileStatefulAttemptTermBuildsTupleBind(t *testing.T) {
 	}
 }
 
+func TestLowerFileStatefulGuardTermBuildsFailurePredicate(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend:
+    statement(state: mutable ParserState&) -> Token:
+        .IDENT(name_token)
+        guard(state.lookahead_token(1).kind == TokenKind.ASSIGN)
+        return name_token
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"__grammar_guard_statement_PascalFrontend_guard_",
+		"state.lookahead_token(1).kind == TokenKind.ASSIGN",
+		"if (not __grammar_guard_statement_PascalFrontend_guard_",
+		"return (true, name_token)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered guard-term production to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestLowerFileStatefulBoundPrecedenceLevelsBuildNestedLoops(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend:
     expression(state: mutable ParserState&) -> Token:

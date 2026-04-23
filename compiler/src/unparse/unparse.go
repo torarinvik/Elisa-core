@@ -628,6 +628,8 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 		return "choice(" + strings.Join(options, ", ") + ")"
 	case *ast.GrammarExprTerm:
 		return "expr(" + formatExpr(n.Expr) + ")"
+	case *ast.GrammarGuardTerm:
+		return "guard(" + formatExpr(n.Cond) + ")"
 	case *ast.GrammarAttemptTerm:
 		return "attempt(" + formatExpr(n.Expr) + ")"
 	case *ast.GrammarOptionalTerm:

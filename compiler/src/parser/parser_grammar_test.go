@@ -668,6 +668,38 @@ func TestParseGrammarDeclAllowsAttemptTerm(t *testing.T) {
 	}
 }
 
+func TestParseGrammarDeclAllowsGuardTerm(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend:
+    statement(state: mutable ParserState&) -> Token:
+        .IDENT(name_token)
+        guard(state.lookahead_token(1).kind == TokenKind.ASSIGN)
+        return name_token
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	guard, ok := decl.Productions[0].Terms[1].(*ast.GrammarGuardTerm)
+	if !ok {
+		t.Fatalf("expected second term to be guard, got %T", decl.Productions[0].Terms[1])
+	}
+	if guard.Cond == nil {
+		t.Fatalf("expected guard to capture predicate expression")
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"guard((state.lookahead_token(1).kind == TokenKind.ASSIGN))",
+		"return name_token",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestParseGrammarDeclAllowsBoundPrecedenceLevel(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
     expression(state: mutable ParserState&) -> Pascal.Expr:
