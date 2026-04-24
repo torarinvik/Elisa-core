@@ -16,7 +16,7 @@ func (a *Analyzer) collectParamPacks(decls []scopedDecl) {
 		}
 		qualifiedName := joinQualifiedName(scoped.Namespace, decl.Name)
 		if _, exists := a.paramPacks[qualifiedName]; exists {
-			a.errorf(decl.Pos(), "duplicate parameter pack %q", qualifiedName)
+			a.errorf(decl.Pos(), "duplicate explicit bundle %q", qualifiedName)
 			continue
 		}
 		pack := &ParamPack{
@@ -33,7 +33,7 @@ func (a *Analyzer) collectParamPacks(decls []scopedDecl) {
 				resolvedType := a.resolveType(param.Type)
 				paramTypes = append(paramTypes, resolvedType)
 				if seen[param.Name] {
-					a.errorf(param.Position, "duplicate parameter %q in parameter pack %q", param.Name, qualifiedName)
+					a.errorf(param.Position, "duplicate field %q in explicit bundle %q", param.Name, qualifiedName)
 					continue
 				}
 				seen[param.Name] = true
@@ -78,7 +78,7 @@ func (a *Analyzer) analyzeLocalParamsStmt(stmt *ast.LocalParamsStmt) {
 		return
 	}
 	if _, exists := frame[stmt.Name]; exists {
-		a.errorf(stmt.Position, "duplicate local parameter pack %q in the same block", stmt.Name)
+		a.errorf(stmt.Position, "duplicate local explicit bundle %q in the same block", stmt.Name)
 		return
 	}
 	pack := &ParamPack{
@@ -91,12 +91,12 @@ func (a *Analyzer) analyzeLocalParamsStmt(stmt *ast.LocalParamsStmt) {
 	for _, param := range stmt.Params {
 		resolvedType := a.resolveType(param.Type)
 		if seen[param.Name] {
-			a.errorf(param.Position, "duplicate parameter %q in local parameter pack %q", param.Name, stmt.Name)
+			a.errorf(param.Position, "duplicate field %q in local explicit bundle %q", param.Name, stmt.Name)
 			continue
 		}
 		seen[param.Name] = true
 		if param.DefaultValue != nil && cloneDefaultArgExpr(param.DefaultValue) == nil {
-			a.errorf(param.DefaultValue.Pos(), "default value for parameter %q on local parameter pack %q uses unsupported syntax in v1", param.Name, stmt.Name)
+			a.errorf(param.DefaultValue.Pos(), "default value for field %q on local explicit bundle %q uses unsupported syntax in v1", param.Name, stmt.Name)
 		}
 		pack.Fields = append(pack.Fields, ParamPackField{Name: param.Name, Type: resolvedType, Mutable: param.Mutable, Decl: param})
 	}
@@ -147,7 +147,7 @@ func (a *Analyzer) expandExplicitParamSpecs(params []ast.ParamDecl, packs []ast.
 		if item.IsPack {
 			pack, _, ok := a.lookupVisibleParamPack(item.Pack.Name)
 			if !ok || pack == nil {
-				a.errorf(item.Position, "unknown parameter pack %q", item.Pack.Name)
+				a.errorf(item.Position, "unknown explicit bundle %q", item.Pack.Name)
 				continue
 			}
 			for _, field := range pack.Fields {

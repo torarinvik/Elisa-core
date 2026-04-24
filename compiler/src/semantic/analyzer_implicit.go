@@ -107,7 +107,7 @@ func (a *Analyzer) nextImplicitTempName(base string) string {
 func (a *Analyzer) applyWithBundleBindings(position lexer.Pos, bundleUse ast.WithBundleUse, working map[string]ast.Expr, explicitValues map[string]ast.Expr) {
 	bundle, _, ok := a.lookupVisibleContextBundle(bundleUse.Name)
 	if !ok || bundle == nil {
-		a.errorf(position, "unknown context bundle %q", bundleUse.Name)
+		a.errorf(position, "unknown implicit bundle %q", bundleUse.Name)
 		return
 	}
 	for _, field := range bundle.Fields {
@@ -120,10 +120,10 @@ func (a *Analyzer) applyWithBundleBindings(position lexer.Pos, bundleUse ast.Wit
 				working[field.Name] = expr
 				continue
 			}
-			a.errorf(position, "missing same-name ambient value for %q in context bundle %q", field.Name, bundleUse.Name)
+			a.errorf(position, "missing same-name ambient value for %q in implicit bundle %q", field.Name, bundleUse.Name)
 			continue
 		}
-		a.errorf(position, "missing explicit value for %q in context bundle %q; add `..` to spread ambient bindings", field.Name, bundleUse.Name)
+		a.errorf(position, "missing explicit value for %q in implicit bundle %q; add `..` to spread ambient bindings", field.Name, bundleUse.Name)
 	}
 }
 

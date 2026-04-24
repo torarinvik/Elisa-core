@@ -26,7 +26,7 @@ Current rules:
 - call forwarding `..` copies same-named value bindings from the current scope into matching parameters
 - `..` may appear at most once, must appear before other explicit call arguments, and only combines with named explicit arguments
 - forwarding is currently rejected for variadic callees
-- parameter defaults are not accepted in context declarations, implicit-context signatures, or export wrapper signatures
+- parameter defaults are not accepted in implicit bundle declarations, implicit bundle signatures, or export wrapper signatures
 
 If a shorthand named argument such as `missing:` has no in-scope value named `missing`, semantic analysis reports that directly.
 
@@ -119,28 +119,36 @@ Style guidance:
 - prefer an inline grant when one operation needs the permission once
 - prefer a `can ...:` block when multiple operations share the same grant or when keeping the grant as a block makes control flow or non-null narrowing clearer
 
-## Implicit contexts
+## Named bundles
 
-Implicit contexts let a function declare a named bundle of extra ambient parameters.
+Bundles are the canonical model for named groups of inputs. `implicit` bundles are ambient dependencies, while `explicit` bundles are reusable named argument packs.
 
 ```context
-context ParseCtx:
+bundle ParseCtx implicit:
     parser: i64
     alloc: i64
+
+bundle Pair explicit:
+    left: i64
+    right: i64 = 7
 
 def inner() with ParseCtx -> i64:
     return parser + alloc
 
+def add(use Pair) -> i64:
+    return left + right
+
 def outer() with ParseCtx -> i64:
     return inner()
 
-def drive() -> i64:
+def drive(width: i64) -> i64:
     parser: i64 = 7
     alloc: i64 = 9
-    return inner() with ParseCtx(..)
+    with args(use Pair(left:), width:):
+        return add(use Pair(right: 5, left:), right: width) + inner() with ParseCtx(..)
 ```
 
-There are two call-site surfaces:
+Implicit bundle values have two call-site surfaces:
 
 ```context
 with ParseCtx(.., alloc = override_alloc):
@@ -151,49 +159,31 @@ return inner() with ParseCtx(.., alloc = override_alloc)
 
 Current rules:
 
-- `context Name:` declares the bundle shape
-- `def f(...) with Name -> T` makes those bindings visible by field name inside the function body
+- `bundle Name implicit:` declares an ambient dependency bundle
+- `bundle Name explicit:` declares a reusable explicit argument pack
+- legacy `context Name:` and `params Name:` still parse, but the formatter emits canonical `bundle` declarations
+- `def f(...) with Name -> T` makes implicit bundle fields visible by field name inside the function body
+- `def f(use Name)` expands an explicit bundle into the function's explicit parameter set
+- `call(use Name(...), other: ...)` applies an explicit bundle at a call site
+- `with args(...)` installs ambient explicit arguments for nested calls inside a block
 - calls auto-forward when the caller already has the same implicit context in scope
 - `with Name(..)` spreads same-named ambient values into the bundle, and explicit overrides win over the spread values
-- the same bundle surface works as a statement block and as a trailing call bundle
-- context fields do not accept parameter defaults
+- the implicit bundle surface works as a statement block and as a trailing call bundle
+- implicit bundle fields do not accept parameter defaults
+- explicit bundle fields may declare defaults
 
 Current v1 restrictions:
 
 - exported wrappers must not target functions with implicit parameters
 - `__cast__` hooks must not declare implicit parameters
 
-## Explicit argument packs with `params` and `with args`
-
-Top-level `params` declarations define reusable explicit named-argument packs.
-
-```context
-params Pair:
-    left: i64
-    right: i64 = 7
-
-def add(use Pair) -> i64:
-    return left + right
-
-def build(left: i64, width: i64) -> i64:
-    with args(use Pair(left:), width:):
-        return add(use Pair(right: 5, left:), right: width)
-```
-
-The important surfaces are:
-
-- `params Name:` defines the pack shape and any defaults
-- `def f(use Name)` expands the pack into the function's explicit parameter set
-- `call(use Name(...), other: ...)` applies the pack at a call site
-- `with args(...)` installs ambient explicit arguments for nested calls inside a block
-
-Current rules:
+Explicit bundle call rules:
 
 - pack members participate in the same named-argument resolution as ordinary explicit parameters
 - shorthand forms like `left:` work inside pack application just like ordinary named calls
 - explicit named arguments outside the pack may override values supplied by pack defaults or ambient `with args(...)` state
 - ambient args are compile-time call-resolution sugar, not runtime objects
-- top-level `params` declarations are compile-time only and are ignored by code generation when emitting top-level declarations
+- top-level explicit bundle declarations are compile-time only and are ignored by code generation when emitting top-level declarations
 
 ## Brace destructuring, field punning, and record updates
 

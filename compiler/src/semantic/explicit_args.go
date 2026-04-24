@@ -142,7 +142,7 @@ func (a *Analyzer) resolveCallArgValueExpr(expr *ast.CallExpr, index int, contex
 func (a *Analyzer) expandParamPackUseValues(packUse ast.ParamPackUse, context string) (*ParamPack, map[string]ast.Expr) {
 	pack, _, ok := a.lookupVisibleParamPack(packUse.Name)
 	if !ok || pack == nil {
-		a.errorf(packUse.Position, "unknown parameter pack %q", packUse.Name)
+		a.errorf(packUse.Position, "unknown explicit bundle %q", packUse.Name)
 		return nil, nil
 	}
 	fieldByName := make(map[string]ParamPackField, len(pack.Fields))
@@ -154,12 +154,12 @@ func (a *Analyzer) expandParamPackUseValues(packUse ast.ParamPackUse, context st
 	for _, arg := range packUse.Args {
 		field, ok := fieldByName[arg.Name]
 		if !ok {
-			a.errorf(arg.Position, "parameter pack %q has no parameter %q", pack.Name, arg.Name)
+			a.errorf(arg.Position, "explicit bundle %q has no field %q", pack.Name, arg.Name)
 			continue
 		}
 		_ = field
 		if seen[arg.Name] {
-			a.errorf(arg.Position, "parameter pack %q parameter %q is specified more than once", pack.Name, arg.Name)
+			a.errorf(arg.Position, "explicit bundle %q field %q is specified more than once", pack.Name, arg.Name)
 			continue
 		}
 		seen[arg.Name] = true
@@ -174,7 +174,7 @@ func (a *Analyzer) expandParamPackUseValues(packUse ast.ParamPackUse, context st
 		}
 		defaultExpr := cloneDefaultArgExpr(field.Decl.DefaultValue)
 		if defaultExpr == nil {
-			a.errorf(field.Decl.Position, "default value for parameter %q on parameter pack %q uses unsupported syntax in v1", field.Name, pack.Name)
+			a.errorf(field.Decl.Position, "default value for field %q on explicit bundle %q uses unsupported syntax in v1", field.Name, pack.Name)
 			continue
 		}
 		values[field.Name] = defaultExpr

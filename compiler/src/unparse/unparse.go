@@ -183,12 +183,12 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			f.writeLine(level+1, member)
 		}
 	case *ast.ContextDecl:
-		f.writeLine(level, "context "+n.Name+":")
+		f.writeLine(level, "bundle "+n.Name+" implicit:")
 		for _, field := range n.Fields {
 			f.writeLine(level+1, formatParamDecl(field))
 		}
 	case *ast.ParamsDecl:
-		f.writeLine(level, "params "+n.Name+":")
+		f.writeLine(level, "bundle "+n.Name+" explicit:")
 		for _, param := range n.Params {
 			f.writeLine(level+1, formatParamDecl(param))
 		}
@@ -984,7 +984,7 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 		}
 		f.writePrefixedMultiline(level, "", line)
 	case *ast.LocalParamsStmt:
-		f.writeLine(level, "params "+n.Name+":")
+		f.writeLine(level, "bundle "+n.Name+" explicit:")
 		for _, param := range n.Params {
 			f.writeLine(level+1, formatParamDecl(param))
 		}

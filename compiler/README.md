@@ -28,8 +28,8 @@ For current annotations and compile-time hints, see `../docs/useful_language_fea
 That reference covers the currently implemented syntax for:
 
 - default and named arguments, including `..` forwarding
-- effect declarations, `signal`, local `can` grants, `effectalias` bundles, and implicit contexts
-- explicit argument packs via `params` and ambient `with args(...)` scopes
+- effect declarations, `signal`, local `can` grants, and `effectalias` bundles
+- named bundles via `bundle Name implicit:` and `bundle Name explicit:`
 - brace destructuring, field punning, record updates, and filtered iterable loops
 - grammar DSL parser features: `token:` blocks, `seq:` blocks, comma-free `seq(...)`, `prefix(...)`, readable list/repeat forms, recovery, lookahead/cut, and precedence/suffix/postfix helpers
 - `do:` blocks, `defer`, index fallback, store/dict sugar, char literals, and explicit `parallel for`
@@ -47,9 +47,9 @@ return puts(text) can Console.Write
 can ConsoleEffect.Write:
   signal ConsoleEffect.Write
 effectalias FrontendEffects = error[ParseErr] can[Abort.Panic]
-context ParseCtx:
+bundle ParseCtx implicit:
 with ParseCtx(.., alloc = scratch_alloc):
-params Pair:
+bundle Pair explicit:
 with args(use Pair(left:), width:):
 ```
 

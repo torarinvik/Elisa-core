@@ -19,7 +19,7 @@ func findImplicitContextTestFuncDecl(t *testing.T, result *Result, name string) 
 }
 
 func TestAnalyzeGenericCallResolvesImplicitContextArgs(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_generic.llcontext", `context ParseCtx:
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_generic.llcontext", `bundle ParseCtx implicit:
     parser: i64
     alloc: i64
 
@@ -69,7 +69,7 @@ def outer[T]() with ParseCtx -> i64:
 }
 
 func TestAnalyzeGenericCallAutoForwardsFunctionImplicitContextArgs(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_forward_function.llcontext", `context ParseCtx:
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_forward_function.llcontext", `bundle ParseCtx implicit:
     parser: i64
     alloc: i64
 
@@ -119,7 +119,7 @@ func TestAnalyzeTryWrappedGenericCallResolvesImplicitContextArgs(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_try_generic.llcontext", `error ParseErr:
     Bad
 
-context ParseCtx:
+bundle ParseCtx implicit:
     parser: i64
     alloc: i64
 
@@ -164,7 +164,7 @@ func TestAnalyzeTryWrappedGenericCallAutoForwardsFunctionImplicitContextArgs(t *
 	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_try_forward_function.llcontext", `error ParseErr:
     Bad
 
-context ParseCtx:
+bundle ParseCtx implicit:
     parser: i64
     alloc: i64
 
@@ -206,7 +206,7 @@ def outer[T]() with ParseCtx -> i64 error[ParseErr]:
 }
 
 func TestAnalyzeWithStmtBundleSpreadUsesAmbientBindings(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_with_stmt_spread.llcontext", `context ParseCtx:
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_with_stmt_spread.llcontext", `bundle ParseCtx implicit:
     parser: i64
     alloc: i64
 
@@ -248,7 +248,7 @@ def keep() -> i64:
 }
 
 func TestAnalyzeWithStmtBundleSpreadExplicitOverrideWins(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_with_stmt_override.llcontext", `context ParseCtx:
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_with_stmt_override.llcontext", `bundle ParseCtx implicit:
     parser: i64
     alloc: i64
 
@@ -297,7 +297,7 @@ def keep() -> i64:
 }
 
 func TestAnalyzeTrailingWithBundleSpreadExplicitOverrideWins(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_call_override.llcontext", `context ParseCtx:
+	result := analyzeFunctionAnalysisTestSource(t, "implicit_context_call_override.llcontext", `bundle ParseCtx implicit:
     parser: i64
     alloc: i64
 
@@ -334,7 +334,7 @@ def keep() -> i64:
 }
 
 func TestAnalyzeWithBundleWithoutSpreadRequiresAllFieldsExplicit(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "implicit_context_bundle_no_spread.llcontext", `context ParseCtx:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "implicit_context_bundle_no_spread.llcontext", `bundle ParseCtx implicit:
     parser: i64
     alloc: i64
 
@@ -351,13 +351,13 @@ def keep() -> i64:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error for bundle field missing without spread")
 	}
-	if !strings.Contains(errs[0], "missing explicit value for \"alloc\" in context bundle \"ParseCtx\"") {
+	if !strings.Contains(errs[0], "missing explicit value for \"alloc\" in implicit bundle \"ParseCtx\"") {
 		t.Fatalf("expected missing explicit bundle field error, got: %v", errs)
 	}
 }
 
 func TestAnalyzeWithBundleSpreadMissingAmbientFieldErrors(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "implicit_context_bundle_missing_ambient.llcontext", `context ParseCtx:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "implicit_context_bundle_missing_ambient.llcontext", `bundle ParseCtx implicit:
     parser: i64
     alloc: i64
 
@@ -373,7 +373,7 @@ def keep() -> i64:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error for missing ambient spread binding")
 	}
-	if !strings.Contains(errs[0], "missing same-name ambient value for \"alloc\" in context bundle \"ParseCtx\"") {
+	if !strings.Contains(errs[0], "missing same-name ambient value for \"alloc\" in implicit bundle \"ParseCtx\"") {
 		t.Fatalf("expected missing ambient bundle field error, got: %v", errs)
 	}
 }

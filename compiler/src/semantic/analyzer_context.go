@@ -16,7 +16,7 @@ func (a *Analyzer) collectContextBundles(decls []scopedDecl) {
 		}
 		qualifiedName := joinQualifiedName(scoped.Namespace, decl.Name)
 		if _, exists := a.contextBundles[qualifiedName]; exists {
-			a.errorf(decl.Pos(), "duplicate context bundle %q", qualifiedName)
+			a.errorf(decl.Pos(), "duplicate implicit bundle %q", qualifiedName)
 			continue
 		}
 		bundle := &ContextBundle{Name: qualifiedName, Decl: decl, Fields: make([]ContextBundleField, 0, len(decl.Fields))}
@@ -24,7 +24,7 @@ func (a *Analyzer) collectContextBundles(decls []scopedDecl) {
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
 			for _, field := range decl.Fields {
 				if seen[field.Name] {
-					a.errorf(field.Position, "duplicate context field %q in bundle %q", field.Name, qualifiedName)
+					a.errorf(field.Position, "duplicate field %q in implicit bundle %q", field.Name, qualifiedName)
 					continue
 				}
 				seen[field.Name] = true
@@ -63,7 +63,7 @@ func (a *Analyzer) expandImplicitParamDecls(explicitParams []ast.ParamDecl, impl
 	implicitNames := make([]string, 0, len(items))
 	appendParam := func(param ast.ParamDecl, pos lexer.Pos) {
 		if explicitNames[param.Name] || seenImplicit[param.Name] {
-			a.errorf(pos, "duplicate implicit parameter %q after context bundle expansion on %q", param.Name, ownerName)
+			a.errorf(pos, "duplicate implicit parameter %q after implicit bundle expansion on %q", param.Name, ownerName)
 			return
 		}
 		seenImplicit[param.Name] = true
@@ -74,7 +74,7 @@ func (a *Analyzer) expandImplicitParamDecls(explicitParams []ast.ParamDecl, impl
 		if item.IsBundle {
 			bundle, qualifiedName, ok := a.lookupVisibleContextBundle(item.Bundle)
 			if !ok || bundle == nil {
-				a.errorf(item.Position, "unknown context bundle %q", item.Bundle)
+				a.errorf(item.Position, "unknown implicit bundle %q", item.Bundle)
 				continue
 			}
 			for _, field := range bundle.Fields {

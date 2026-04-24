@@ -190,7 +190,7 @@ func TestAnalyzeImplicitAutorefOnTrailingWithArgs(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "implicit_autoref_trailing_with.llcontext", `struct ScratchArena:
     value: i64
 
-context ArenaCtx:
+bundle ArenaCtx implicit:
     alloc: ScratchArena&
 
 def read() with ArenaCtx -> i64:

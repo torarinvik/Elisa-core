@@ -9,7 +9,7 @@ import (
 )
 
 func TestParseExplicitArgErgonomicsAndDestructuring(t *testing.T) {
-	file, errs := parseSourceFile(t, `params Pair:
+	file, errs := parseSourceFile(t, `bundle Pair explicit:
     left: i64
     right: i64 = 7
 
@@ -35,7 +35,7 @@ def build(left: i64, width: i64, pair: PairRow, rows: darray[PairRow]) -> i64:
 		t.Fatalf("expected params decl, got %T", file.Decls[0])
 	}
 	if paramsDecl.Name != "Pair" || len(paramsDecl.Params) != 2 || paramsDecl.Params[1].DefaultValue == nil {
-		t.Fatalf("expected Pair params declaration with a defaulted field, got %#v", paramsDecl)
+		t.Fatalf("expected Pair explicit bundle declaration with a defaulted field, got %#v", paramsDecl)
 	}
 	addDecl, ok := file.Decls[2].(*ast.FuncDecl)
 	if !ok {
@@ -101,7 +101,7 @@ def build(left: i64, width: i64, pair: PairRow, rows: darray[PairRow]) -> i64:
 	}
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
-		"params Pair:",
+		"bundle Pair explicit:",
 		"def add(use Pair) -> i64:",
 		"with args(use Pair(left:), width:):",
 		"let PairRow{first: local_first, second} = pair",
@@ -116,7 +116,7 @@ def build(left: i64, width: i64, pair: PairRow, rows: darray[PairRow]) -> i64:
 
 func TestParseLocalParamsStmt(t *testing.T) {
 	file, errs := parseSourceFile(t, `def build(left: i64) -> i64:
-    params Pair:
+    bundle Pair explicit:
         value: i64 = left
         width: i64 = 7
     return consume(use Pair(), width: left)
@@ -140,7 +140,7 @@ func TestParseLocalParamsStmt(t *testing.T) {
 	}
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
-		"params Pair:",
+		"bundle Pair explicit:",
 		"value: i64 = left",
 		"width: i64 = 7",
 		"return consume(use Pair(), width: left)",
@@ -152,7 +152,7 @@ func TestParseLocalParamsStmt(t *testing.T) {
 }
 
 func TestParseBareValueParamPackUse(t *testing.T) {
-	file, errs := parseSourceFile(t, `params Pair:
+	file, errs := parseSourceFile(t, `bundle Pair explicit:
     left: i64
 
 def add(use Pair) -> i64:
@@ -191,6 +191,35 @@ def build(left: i64) -> i64:
 	for _, want := range []string{
 		"with args(use Pair, width: left):",
 		"return add(use Pair)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestParseLegacyContextAndParamsFormatAsBundles(t *testing.T) {
+	file, errs := parseSourceFile(t, `context ParseCtx:
+    parser: i64
+
+params Pair:
+    left: i64
+    right: i64 = 7
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	if _, ok := file.Decls[0].(*ast.ContextDecl); !ok {
+		t.Fatalf("expected legacy context declaration to parse as ContextDecl, got %T", file.Decls[0])
+	}
+	if _, ok := file.Decls[1].(*ast.ParamsDecl); !ok {
+		t.Fatalf("expected legacy params declaration to parse as ParamsDecl, got %T", file.Decls[1])
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"bundle ParseCtx implicit:",
+		"bundle Pair explicit:",
+		"right: i64 = 7",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)

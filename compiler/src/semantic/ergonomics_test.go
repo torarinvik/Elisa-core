@@ -8,7 +8,7 @@ import (
 )
 
 func TestAnalyzeParamPackCallExpansionAndAmbientArgs(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_param_pack_ambient.llcontext", `params SharedArgs:
+	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_param_pack_ambient.llcontext", `bundle SharedArgs explicit:
     value: i64
     width: i64 = 5
 
@@ -62,7 +62,7 @@ def build(value: i64, width: i64, extra: i64) -> i64:
 }
 
 func TestAnalyzeSignatureParamPackExpandsIntoFunctionBody(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_signature_pack.llcontext", `params Pair:
+	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_signature_pack.llcontext", `bundle Pair explicit:
     left: i64
     right: i64 = 7
 
@@ -88,7 +88,7 @@ def build(left: i64) -> i64:
 }
 
 func TestAnalyzeLocalParamPackShadowsGlobalWithinSameBlock(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_local_pack_shadow.llcontext", `params Pair:
+	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_local_pack_shadow.llcontext", `bundle Pair explicit:
     left: i64 = 1
     right: i64 = 2
 
@@ -96,7 +96,7 @@ def consume(left: i64, right: i64) -> i64:
     return left + right
 
 def build(left: i64) -> i64:
-    params Pair:
+    bundle Pair explicit:
         left: i64 = left
         right: i64 = 9
     return consume(use Pair)
@@ -120,7 +120,7 @@ def build(left: i64) -> i64:
 }
 
 func TestAnalyzeBareArgsScopeParamPackUse(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_bare_args_scope_pack.llcontext", `params Shared:
+	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_bare_args_scope_pack.llcontext", `bundle Shared explicit:
 	value: i64 = 7
 	width: i64 = 9
 
@@ -156,14 +156,14 @@ func TestAnalyzeRejectsLocalParamPackUseBeforeDeclaration(t *testing.T) {
 
 def build(left: i64) -> i64:
     value: i64 = consume(use Pair())
-    params Pair:
+    bundle Pair explicit:
         left: i64 = left
         right: i64 = 9
     return value
 `)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, `unknown parameter pack "Pair"`) {
-		t.Fatalf("expected missing local parameter pack diagnostic, got:\n%s", all)
+	if !strings.Contains(all, `unknown explicit bundle "Pair"`) {
+		t.Fatalf("expected missing local explicit bundle diagnostic, got:\n%s", all)
 	}
 }
 
@@ -172,7 +172,7 @@ func TestAnalyzeRejectsLocalParamPackFromNestedBlock(t *testing.T) {
     return left + right
 
 def build(left: i64) -> i64:
-    params Pair:
+    bundle Pair explicit:
         left: i64 = left
         right: i64 = 9
     if true:
@@ -180,7 +180,7 @@ def build(left: i64) -> i64:
     return 0
 `)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, `unknown parameter pack "Pair"`) {
+	if !strings.Contains(all, `unknown explicit bundle "Pair"`) {
 		t.Fatalf("expected nested-block visibility diagnostic, got:\n%s", all)
 	}
 }

@@ -41,8 +41,8 @@ func TestParseRejectsDefaultsInDisallowedPositions(t *testing.T) {
 		src  string
 	}{
 		{
-			name: "context field",
-			src:  "context ParseCtx:\n    parser: i64 = 1\n",
+			name: "implicit bundle field",
+			src:  "bundle ParseCtx implicit:\n    parser: i64 = 1\n",
 		},
 		{
 			name: "with signature",

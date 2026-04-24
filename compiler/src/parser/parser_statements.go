@@ -85,6 +85,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikeLocalParamsStmt() {
 				return p.parseLocalParamsStmt()
 			}
+		case "bundle":
+			if p.looksLikeLocalBundleStmt() {
+				return p.parseLocalBundleStmt()
+			}
 		case "open":
 			if p.looksLikeOpenOrViewStmt() {
 				return p.parseOpenStmt()
@@ -215,6 +219,25 @@ func (p *Parser) parseLocalParamsStmt() *ast.LocalParamsStmt {
 	pos := p.cur().Pos
 	p.expectIdentText("params")
 	name := p.expect(lexer.TOKEN_IDENT).Text
+	params := p.parseParamDeclBlock(true)
+	return &ast.LocalParamsStmt{Position: pos, Name: name, Params: params}
+}
+
+func (p *Parser) looksLikeLocalBundleStmt() bool {
+	return p.pos+3 < len(p.tokens) &&
+		p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT &&
+		p.tokens[p.pos+2].Kind == lexer.TOKEN_IDENT &&
+		p.tokens[p.pos+3].Kind == lexer.TOKEN_COLON
+}
+
+func (p *Parser) parseLocalBundleStmt() *ast.LocalParamsStmt {
+	pos := p.cur().Pos
+	p.expectIdentText("bundle")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	mode := p.expect(lexer.TOKEN_IDENT).Text
+	if mode != "explicit" {
+		p.errorf("local bundle declarations only support `explicit` mode, got %q", mode)
+	}
 	params := p.parseParamDeclBlock(true)
 	return &ast.LocalParamsStmt{Position: pos, Name: name, Params: params}
 }

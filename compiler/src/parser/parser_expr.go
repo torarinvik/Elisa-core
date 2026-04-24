@@ -1431,7 +1431,7 @@ func (p *Parser) parseWithValueClause() ([]ast.WithArg, []ast.WithBundleUse, []a
 			args = append(args, arg)
 			items = append(items, ast.WithItem{Position: pos, Arg: arg})
 		default:
-			p.errorf("context bundle use %q requires (...) in a with clause", qualifiedName)
+			p.errorf("implicit bundle use %q requires (...) in a with clause", qualifiedName)
 			bundle := ast.WithBundleUse{Position: pos, Name: qualifiedName}
 			bundles = append(bundles, bundle)
 			items = append(items, ast.WithItem{Position: pos, Bundle: bundle, IsBundle: true})

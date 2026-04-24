@@ -122,8 +122,8 @@ def build() -> i64 effects FrontendEffects:
 	}
 }
 
-func TestGenerateLLVMIRIgnoresParamsDeclarations(t *testing.T) {
-	src := `params SharedArgs:
+func TestGenerateLLVMIRIgnoresExplicitBundleDeclarations(t *testing.T) {
+	src := `bundle SharedArgs explicit:
     value: i64
     extra: i64 = 2
 

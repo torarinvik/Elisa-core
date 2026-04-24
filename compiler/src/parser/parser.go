@@ -162,6 +162,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("params") {
 		return p.parseParamsDecl()
 	}
+	if p.peekIdentText("bundle") {
+		return p.parseBundleDecl()
+	}
 	if p.peek() == lexer.TOKEN_CONTEXT {
 		return p.parseContextDecl()
 	}
@@ -514,6 +517,25 @@ func (p *Parser) parseParamsDecl() *ast.ParamsDecl {
 	name := p.parseQualifiedDeclName()
 	params := p.parseParamDeclBlock(true)
 	return &ast.ParamsDecl{Position: pos, Name: name, Params: params}
+}
+
+func (p *Parser) parseBundleDecl() ast.Decl {
+	pos := p.cur().Pos
+	p.expectIdentText("bundle")
+	name := p.parseQualifiedDeclName()
+	mode := p.expect(lexer.TOKEN_IDENT).Text
+	switch mode {
+	case "implicit":
+		fields := p.parseParamDeclBlock(false)
+		return &ast.ContextDecl{Position: pos, Name: name, Fields: fields}
+	case "explicit":
+		params := p.parseParamDeclBlock(true)
+		return &ast.ParamsDecl{Position: pos, Name: name, Params: params}
+	default:
+		p.errorf("expected bundle mode `implicit` or `explicit`, got %q", mode)
+		params := p.parseParamDeclBlock(true)
+		return &ast.ParamsDecl{Position: pos, Name: name, Params: params}
+	}
 }
 
 func (p *Parser) parseParamDeclBlock(allowDefaults bool) []ast.ParamDecl {

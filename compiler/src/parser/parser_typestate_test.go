@@ -607,7 +607,7 @@ func TestParseGuardElseStatement(t *testing.T) {
 }
 
 func TestParseWithBundleSpread(t *testing.T) {
-	file, errs := parseSourceFile(t, "context ParseCtx:\n    offset: i64\n\ndef inner() with ParseCtx -> i64:\n    return offset\n\ndef keep() -> i64:\n    offset: i64 = 7\n    return inner() with ParseCtx(.., offset = offset)\n")
+	file, errs := parseSourceFile(t, "bundle ParseCtx implicit:\n    offset: i64\n\ndef inner() with ParseCtx -> i64:\n    return offset\n\ndef keep() -> i64:\n    offset: i64 = 7\n    return inner() with ParseCtx(.., offset = offset)\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
