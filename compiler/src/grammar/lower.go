@@ -556,7 +556,7 @@ func resolveGrammarTermRecoveryPolicies(term ast.GrammarTerm, policies map[strin
 	case *ast.GrammarPostfixTerm:
 		return &ast.GrammarPostfixTerm{Position: n.Position, LeftName: n.LeftName, Seed: resolveGrammarTermRecoveryPolicies(n.Seed, policies), Arms: resolveGrammarPostfixArmsRecoveryPolicies(n.Arms, policies)}
 	case *ast.GrammarPrecedenceTerm:
-		return &ast.GrammarPrecedenceTerm{Position: n.Position, Result: n.Result, Levels: resolveGrammarPrecedenceLevelsRecoveryPolicies(n.Levels, policies), LeftName: n.LeftName, Seed: resolveGrammarTermRecoveryPolicies(n.Seed, policies), Arms: resolveGrammarPrecedenceArmsRecoveryPolicies(n.Arms, policies)}
+		return &ast.GrammarPrecedenceTerm{Position: n.Position, Assoc: n.Assoc, Result: n.Result, Levels: resolveGrammarPrecedenceLevelsRecoveryPolicies(n.Levels, policies), LeftName: n.LeftName, Seed: resolveGrammarTermRecoveryPolicies(n.Seed, policies), Arms: resolveGrammarPrecedenceArmsRecoveryPolicies(n.Arms, policies)}
 	default:
 		return term
 	}
@@ -602,7 +602,7 @@ func resolveGrammarTermInfixTables(term ast.GrammarTerm, tables map[string]ast.G
 	case *ast.GrammarPostfixTerm:
 		return &ast.GrammarPostfixTerm{Position: n.Position, LeftName: n.LeftName, Seed: resolveGrammarTermInfixTables(n.Seed, tables), Arms: resolveGrammarPostfixArmsInfixTables(n.Arms, tables)}
 	case *ast.GrammarPrecedenceTerm:
-		return &ast.GrammarPrecedenceTerm{Position: n.Position, Result: n.Result, Levels: resolveGrammarPrecedenceLevelsInfixTables(n.Levels, tables), LeftName: n.LeftName, Seed: resolveGrammarTermInfixTables(n.Seed, tables), Arms: resolveGrammarPrecedenceArmsInfixTables(n.Arms, tables)}
+		return &ast.GrammarPrecedenceTerm{Position: n.Position, Assoc: n.Assoc, Result: n.Result, Levels: resolveGrammarPrecedenceLevelsInfixTables(n.Levels, tables), LeftName: n.LeftName, Seed: resolveGrammarTermInfixTables(n.Seed, tables), Arms: resolveGrammarPrecedenceArmsInfixTables(n.Arms, tables)}
 	case *ast.GrammarInfixTableTerm:
 		table, ok := tables[n.TableName]
 		if !ok {
@@ -667,7 +667,7 @@ func resolveGrammarPrecedenceLevelsInfixTables(levels []ast.GrammarPrecedenceLev
 	}
 	resolved := make([]ast.GrammarPrecedenceLevel, 0, len(levels))
 	for _, level := range levels {
-		resolved = append(resolved, ast.GrammarPrecedenceLevel{Position: level.Position, Name: level.Name, LeftName: level.LeftName, Seed: resolveGrammarTermInfixTables(level.Seed, tables), Arms: resolveGrammarPrecedenceArmsInfixTables(level.Arms, tables)})
+		resolved = append(resolved, ast.GrammarPrecedenceLevel{Position: level.Position, Assoc: level.Assoc, Name: level.Name, LeftName: level.LeftName, Seed: resolveGrammarTermInfixTables(level.Seed, tables), Arms: resolveGrammarPrecedenceArmsInfixTables(level.Arms, tables)})
 	}
 	return resolved
 }
@@ -725,7 +725,7 @@ func resolveGrammarPrecedenceLevelsRecoveryPolicies(levels []ast.GrammarPreceden
 	}
 	resolved := make([]ast.GrammarPrecedenceLevel, 0, len(levels))
 	for _, level := range levels {
-		resolved = append(resolved, ast.GrammarPrecedenceLevel{Position: level.Position, Name: level.Name, LeftName: level.LeftName, Seed: resolveGrammarTermRecoveryPolicies(level.Seed, policies), Arms: resolveGrammarPrecedenceArmsRecoveryPolicies(level.Arms, policies)})
+		resolved = append(resolved, ast.GrammarPrecedenceLevel{Position: level.Position, Assoc: level.Assoc, Name: level.Name, LeftName: level.LeftName, Seed: resolveGrammarTermRecoveryPolicies(level.Seed, policies), Arms: resolveGrammarPrecedenceArmsRecoveryPolicies(level.Arms, policies)})
 	}
 	return resolved
 }
@@ -783,7 +783,7 @@ func rewriteGrammarPrecedenceLevelsTokenAliases(levels []ast.GrammarPrecedenceLe
 	}
 	rewritten := make([]ast.GrammarPrecedenceLevel, 0, len(levels))
 	for _, level := range levels {
-		rewritten = append(rewritten, ast.GrammarPrecedenceLevel{Position: level.Position, Name: level.Name, LeftName: level.LeftName, Seed: rewriteGrammarTermTokenAliases(level.Seed, aliases), Arms: rewriteGrammarPrecedenceArmsTokenAliases(level.Arms, aliases)})
+		rewritten = append(rewritten, ast.GrammarPrecedenceLevel{Position: level.Position, Assoc: level.Assoc, Name: level.Name, LeftName: level.LeftName, Seed: rewriteGrammarTermTokenAliases(level.Seed, aliases), Arms: rewriteGrammarPrecedenceArmsTokenAliases(level.Arms, aliases)})
 	}
 	return rewritten
 }
@@ -835,7 +835,7 @@ func rewriteGrammarTermTokenAliases(term ast.GrammarTerm, aliases map[string]str
 	case *ast.GrammarPostfixTerm:
 		return &ast.GrammarPostfixTerm{Position: n.Position, LeftName: n.LeftName, Seed: rewriteGrammarTermTokenAliases(n.Seed, aliases), Arms: rewriteGrammarPostfixArmsTokenAliases(n.Arms, aliases)}
 	case *ast.GrammarPrecedenceTerm:
-		return &ast.GrammarPrecedenceTerm{Position: n.Position, Result: n.Result, Levels: rewriteGrammarPrecedenceLevelsTokenAliases(n.Levels, aliases), LeftName: n.LeftName, Seed: rewriteGrammarTermTokenAliases(n.Seed, aliases), Arms: rewriteGrammarPrecedenceArmsTokenAliases(n.Arms, aliases)}
+		return &ast.GrammarPrecedenceTerm{Position: n.Position, Assoc: n.Assoc, Result: n.Result, Levels: rewriteGrammarPrecedenceLevelsTokenAliases(n.Levels, aliases), LeftName: n.LeftName, Seed: rewriteGrammarTermTokenAliases(n.Seed, aliases), Arms: rewriteGrammarPrecedenceArmsTokenAliases(n.Arms, aliases)}
 	default:
 		return term
 	}
@@ -1205,7 +1205,7 @@ func desugarNamedPrecedenceTerm(grammarName string, production ast.GrammarProduc
 			arms = append(arms, rewrittenArm)
 			helpers = append(helpers, extra...)
 		}
-		return &ast.GrammarPrecedenceTerm{Position: n.Position, LeftName: n.LeftName, Seed: seed, Arms: arms}, helpers
+		return &ast.GrammarPrecedenceTerm{Position: n.Position, Assoc: n.Assoc, LeftName: n.LeftName, Seed: seed, Arms: arms}, helpers
 	default:
 		return term, nil
 	}
@@ -1248,6 +1248,7 @@ func desugarNamedPrecedenceBlock(grammarName string, production ast.GrammarProdu
 			arms[i] = rewriteNamedPrecedenceArmCalls(arms[i], helperNames, paramArgs)
 		}
 		helperName := helperNames[level.Name]
+		arms = applyNamedPrecedenceAssociativity(level, helperName, paramArgs, seed, arms)
 		helpers = append(helpers, buildNamedPrecedenceHelperProduction(production, helperName, level, seed, arms))
 	}
 	topName := helperNames[term.Result]
@@ -1274,7 +1275,7 @@ func buildNamedPrecedenceHelperProduction(production ast.GrammarProductionDecl, 
 	resultName := grammarNamedPrecedenceResultName(helperName)
 	term := seed
 	if level.LeftName != "" {
-		term = &ast.GrammarPrecedenceTerm{Position: level.Position, LeftName: level.LeftName, Seed: seed, Arms: arms}
+		term = &ast.GrammarPrecedenceTerm{Position: level.Position, Assoc: level.Assoc, LeftName: level.LeftName, Seed: seed, Arms: arms}
 	}
 	return ast.GrammarProductionDecl{
 		Position:     level.Position,
@@ -1288,6 +1289,37 @@ func buildNamedPrecedenceHelperProduction(production ast.GrammarProductionDecl, 
 			&ast.GrammarReturnTerm{Position: level.Position, Value: &ast.Ident{Position: level.Position, Name: resultName}},
 		},
 	}
+}
+
+func applyNamedPrecedenceAssociativity(level ast.GrammarPrecedenceLevel, helperName string, paramArgs []ast.Expr, seed ast.GrammarTerm, arms []ast.GrammarPrecedenceArm) []ast.GrammarPrecedenceArm {
+	if level.Assoc == "" || level.LeftName == "" || len(arms) == 0 {
+		return arms
+	}
+	updated := make([]ast.GrammarPrecedenceArm, 0, len(arms))
+	for _, arm := range arms {
+		if grammarPrecedenceArmHasBinding(arm, "right") {
+			updated = append(updated, arm)
+			continue
+		}
+		rightTerm := seed
+		if level.Assoc == ast.GrammarAssociativityRight {
+			rightTerm = &ast.GrammarCallTerm{Position: arm.Position, Name: helperName, Explicit: true, Args: append([]ast.Expr(nil), paramArgs...)}
+		}
+		bindings := append([]*ast.GrammarBindTerm(nil), arm.Bindings...)
+		bindings = append(bindings, &ast.GrammarBindTerm{Position: arm.Position, Name: "right", Term: rightTerm})
+		arm.Bindings = bindings
+		updated = append(updated, arm)
+	}
+	return updated
+}
+
+func grammarPrecedenceArmHasBinding(arm ast.GrammarPrecedenceArm, name string) bool {
+	for _, binding := range arm.Bindings {
+		if binding != nil && binding.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func rewriteNamedPrecedenceArmCalls(arm ast.GrammarPrecedenceArm, helperNames map[string]string, paramArgs []ast.Expr) ast.GrammarPrecedenceArm {
@@ -1374,7 +1406,7 @@ func rewriteNamedPrecedenceHelperCalls(term ast.GrammarTerm, helperNames map[str
 		for _, arm := range n.Arms {
 			arms = append(arms, rewriteNamedPrecedenceArmCalls(arm, helperNames, paramArgs))
 		}
-		return &ast.GrammarPrecedenceTerm{Position: n.Position, LeftName: n.LeftName, Seed: rewriteNamedPrecedenceHelperCalls(n.Seed, helperNames, paramArgs), Arms: arms}
+		return &ast.GrammarPrecedenceTerm{Position: n.Position, Assoc: n.Assoc, LeftName: n.LeftName, Seed: rewriteNamedPrecedenceHelperCalls(n.Seed, helperNames, paramArgs), Arms: arms}
 	default:
 		return term
 	}
@@ -3092,7 +3124,7 @@ func (ctx *statefulLowerContext) lowerPrecedenceAttempt(term *ast.GrammarPrecede
 			Cond:     &ast.UnaryExpr{Position: term.Position, Op: lexer.TOKEN_NOT, Operand: &ast.Ident{Position: term.Position, Name: stopName}},
 			Body: append([]ast.Stmt{
 				&ast.VarDeclStmt{Position: term.Position, Name: snapshotName, Value: stateCursorExpr(ctx.cursorReceiver, ctx.cursorField, term.Position)},
-			}, ctx.lowerPrecedenceArms(term.Arms, snapshotName, stopName, matchedName, committedName, leftName)...),
+			}, ctx.lowerPrecedenceArms(term.Arms, snapshotName, stopName, matchedName, committedName, leftName, term.Assoc)...),
 		},
 	)
 	return loweredAttempt{Stmts: stmts, Matched: &ast.Ident{Position: term.Position, Name: matchedName}, Committed: &ast.Ident{Position: term.Position, Name: committedName}, Value: &ast.Ident{Position: term.Position, Name: leftName}}
@@ -3245,7 +3277,7 @@ func (ctx *statefulLowerContext) inferPrecedenceOperandType(term ast.GrammarTerm
 	return ctx.inferTermType(term)
 }
 
-func (ctx *statefulLowerContext) lowerPrecedenceArms(arms []ast.GrammarPrecedenceArm, snapshotName string, stopName string, matchedName string, committedName string, leftName string) []ast.Stmt {
+func (ctx *statefulLowerContext) lowerPrecedenceArms(arms []ast.GrammarPrecedenceArm, snapshotName string, stopName string, matchedName string, committedName string, leftName string, assoc string) []ast.Stmt {
 	if len(arms) == 0 {
 		return []ast.Stmt{
 			restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, ctx.production.Position),
@@ -3269,9 +3301,12 @@ func (ctx *statefulLowerContext) lowerPrecedenceArms(arms []ast.GrammarPrecedenc
 		thenBranch = append(thenBranch, &ast.VarDeclStmt{Position: binding.Position, Name: binding.Name, Value: bindAttempt.Value})
 	}
 	thenBranch = append(thenBranch, &ast.AssignStmt{Position: arm.Position, Target: &ast.Ident{Position: arm.Position, Name: leftName}, Value: arm.Value})
+	if assoc == ast.GrammarAssociativityRight || assoc == ast.GrammarAssociativityNonAssoc {
+		thenBranch = append(thenBranch, &ast.AssignStmt{Position: arm.Position, Target: &ast.Ident{Position: arm.Position, Name: stopName}, Value: &ast.BoolLit{Position: arm.Position, Value: true}})
+	}
 	fallback := []ast.Stmt{restoreCursorStmt(ctx.cursorReceiver, ctx.cursorField, snapshotName, arm.Position)}
 	if len(arms) > 1 {
-		fallback = append(fallback, ctx.lowerPrecedenceArms(arms[1:], snapshotName, stopName, matchedName, committedName, leftName)...)
+		fallback = append(fallback, ctx.lowerPrecedenceArms(arms[1:], snapshotName, stopName, matchedName, committedName, leftName, assoc)...)
 	} else {
 		fallback = append(fallback, &ast.AssignStmt{Position: arm.Position, Target: &ast.Ident{Position: arm.Position, Name: stopName}, Value: &ast.BoolLit{Position: arm.Position, Value: true}})
 	}

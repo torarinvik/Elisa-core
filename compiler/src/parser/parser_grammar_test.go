@@ -1183,10 +1183,10 @@ func TestParseGrammarDeclAllowsInfixTableDeclAndUse(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
     infix table ExprTable(additive):
         atom = state.factor()
-        multiplicative(left = atom()):
-            op = choice("*", "/") right = atom() -> build_binary(op, left, right)
-        additive(left = multiplicative()):
-            op = choice("+", "-") right = multiplicative() -> build_binary(op, left, right)
+		left multiplicative(left = atom()):
+			op = choice("*", "/") -> build_binary(op, left, right)
+		left additive(left = multiplicative()):
+			op = choice("+", "-") -> build_binary(op, left, right)
     expression(state: mutable ParserState&) -> Pascal.Expr:
         result = infix(ExprTable)
         return result
@@ -1211,6 +1211,9 @@ func TestParseGrammarDeclAllowsInfixTableDeclAndUse(t *testing.T) {
 	if len(table.Levels) != 3 {
 		t.Fatalf("expected three infix table levels, got %d", len(table.Levels))
 	}
+	if table.Levels[1].Assoc != ast.GrammarAssociativityLeft {
+		t.Fatalf("expected multiplicative level to be left-associative, got %q", table.Levels[1].Assoc)
+	}
 	bind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
 	if !ok {
 		t.Fatalf("expected first production term to be binding, got %T", decl.Productions[0].Terms[0])
@@ -1226,10 +1229,47 @@ func TestParseGrammarDeclAllowsInfixTableDeclAndUse(t *testing.T) {
 	for _, want := range []string{
 		"infix table ExprTable(additive):",
 		"atom = state.factor()",
-		"multiplicative(left = atom()):",
-		"op = choice(\"*\", \"/\") right = atom() -> build_binary(op, left, right)",
-		"additive(left = multiplicative()):",
+		"left multiplicative(left = atom()):",
+		"op = choice(\"*\", \"/\") -> build_binary(op, left, right)",
+		"left additive(left = multiplicative()):",
+		"op = choice(\"+\", \"-\") -> build_binary(op, left, right)",
 		"result = infix(ExprTable)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestParseGrammarDeclAllowsAssociativityAnnotatedInfixTableLevels(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend:
+    infix table ExprTable(compare):
+        atom = state.factor()
+        right power(left = atom()):
+            "^" -> build_power(left, right)
+        nonassoc compare(left = power()):
+            op = choice("<", ">") -> build_compare(op, left, right)
+    expression(state: mutable ParserState&) -> Pascal.Expr:
+        result = infix(ExprTable)
+        return result
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.GrammarDecl)
+	table := decl.InfixTables[0]
+	if table.Levels[1].Assoc != ast.GrammarAssociativityRight {
+		t.Fatalf("expected power level to be right-associative, got %q", table.Levels[1].Assoc)
+	}
+	if table.Levels[2].Assoc != ast.GrammarAssociativityNonAssoc {
+		t.Fatalf("expected compare level to be non-associative, got %q", table.Levels[2].Assoc)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"right power(left = atom()):",
+		"\"^\" -> build_power(left, right)",
+		"nonassoc compare(left = power()):",
+		"op = choice(\"<\", \">\") -> build_compare(op, left, right)",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
@@ -2023,10 +2063,10 @@ func TestParseGrammarDeclAllowsNamedPrecedenceLevels(t *testing.T) {
     expression(state: mutable ParserState&) -> Pascal.Expr:
 		result = precedence(additive):
 			atom = state.factor()
-			multiplicative(term_left = atom()):
-				op = choice("*", "/") right = atom() -> build_binary(op, term_left, right)
-			additive(expr_left = multiplicative()):
-				op = choice("+", "-") right = multiplicative() -> build_binary(op, expr_left, right)
+			left multiplicative(term_left = atom()):
+				op = choice("*", "/") -> build_binary(op, term_left, right)
+			left additive(expr_left = multiplicative()):
+				op = choice("+", "-") -> build_binary(op, expr_left, right)
 		return result
 `)
 	if len(errs) != 0 {
@@ -2053,15 +2093,18 @@ func TestParseGrammarDeclAllowsNamedPrecedenceLevels(t *testing.T) {
 	if precedence.Levels[0].Name != "atom" || precedence.Levels[0].LeftName != "" {
 		t.Fatalf("expected first named level to be helper atom, got %#v", precedence.Levels[0])
 	}
+	if precedence.Levels[1].Assoc != ast.GrammarAssociativityLeft {
+		t.Fatalf("expected multiplicative level to be left-associative, got %q", precedence.Levels[1].Assoc)
+	}
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
 		"result = precedence(additive):",
 		"atom = state.factor()",
 		"precedence(additive):",
-		"multiplicative(term_left = atom()):",
-		"op = choice(\"*\", \"/\") right = atom() -> build_binary(op, term_left, right)",
-		"additive(expr_left = multiplicative()):",
-		"op = choice(\"+\", \"-\") right = multiplicative() -> build_binary(op, expr_left, right)",
+		"left multiplicative(term_left = atom()):",
+		"op = choice(\"*\", \"/\") -> build_binary(op, term_left, right)",
+		"left additive(expr_left = multiplicative()):",
+		"op = choice(\"+\", \"-\") -> build_binary(op, expr_left, right)",
 		"return result",
 	} {
 		if !strings.Contains(formatted, want) {

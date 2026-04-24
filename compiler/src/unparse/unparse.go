@@ -759,15 +759,19 @@ func (f *formatter) writePrecedenceTerm(level int, precedence *ast.GrammarPreced
 }
 
 func (f *formatter) writeNamedPrecedenceLevel(level int, levelDecl ast.GrammarPrecedenceLevel) {
+	prefix := ""
+	if levelDecl.Assoc != "" {
+		prefix = levelDecl.Assoc + " "
+	}
 	if levelDecl.LeftName == "" {
 		if nested, ok := levelDecl.Seed.(*ast.GrammarPrecedenceTerm); ok {
 			f.writeBoundPrecedenceTerm(level, levelDecl.Name, nested)
 			return
 		}
-		f.writeLine(level, levelDecl.Name+" = "+formatGrammarTerm(levelDecl.Seed))
+		f.writeLine(level, prefix+levelDecl.Name+" = "+formatGrammarTerm(levelDecl.Seed))
 		return
 	}
-	f.writeLine(level, levelDecl.Name+"("+levelDecl.LeftName+" = "+formatGrammarTerm(levelDecl.Seed)+"):")
+	f.writeLine(level, prefix+levelDecl.Name+"("+levelDecl.LeftName+" = "+formatGrammarTerm(levelDecl.Seed)+"):")
 	for _, arm := range levelDecl.Arms {
 		f.writePrecedenceArm(level+1, arm)
 	}

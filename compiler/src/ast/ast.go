@@ -333,6 +333,7 @@ type GrammarPrecedenceArm struct {
 
 type GrammarPrecedenceLevel struct {
 	Position lexer.Pos
+	Assoc    string
 	Name     string
 	LeftName string
 	Seed     GrammarTerm
@@ -341,12 +342,19 @@ type GrammarPrecedenceLevel struct {
 
 type GrammarPrecedenceTerm struct {
 	Position lexer.Pos
+	Assoc    string
 	Result   string
 	Levels   []GrammarPrecedenceLevel
 	LeftName string
 	Seed     GrammarTerm
 	Arms     []GrammarPrecedenceArm
 }
+
+const (
+	GrammarAssociativityLeft     = "left"
+	GrammarAssociativityRight    = "right"
+	GrammarAssociativityNonAssoc = "nonassoc"
+)
 
 type GrammarInfixTableTerm struct {
 	Position  lexer.Pos

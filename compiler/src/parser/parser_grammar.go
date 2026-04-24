@@ -1203,13 +1203,25 @@ func (p *Parser) parseGrammarPrecedenceTerm() ast.GrammarTerm {
 
 func (p *Parser) parseGrammarPrecedenceLevel() ast.GrammarPrecedenceLevel {
 	pos := p.cur().Pos
+	assoc := ""
+	if p.peekIdentText(ast.GrammarAssociativityLeft) || p.peekIdentText(ast.GrammarAssociativityRight) || p.peekIdentText(ast.GrammarAssociativityNonAssoc) {
+		assoc = p.cur().Text
+		p.advance()
+		if p.peek() == lexer.TOKEN_IDENT {
+			pos = p.cur().Pos
+		}
+	}
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	if p.match(lexer.TOKEN_ASSIGN) {
+		if assoc != "" {
+			p.errorf("precedence associativity requires a looping level")
+			assoc = ""
+		}
 		seed := p.parseGrammarRecoverableTermValue()
 		if _, ok := seed.(*ast.GrammarPrecedenceTerm); !ok {
 			p.expectNewline()
 		}
-		return ast.GrammarPrecedenceLevel{Position: pos, Name: name, Seed: seed}
+		return ast.GrammarPrecedenceLevel{Position: pos, Assoc: assoc, Name: name, Seed: seed}
 	}
 	p.expect(lexer.TOKEN_LPAREN)
 	leftName := p.expect(lexer.TOKEN_IDENT).Text
@@ -1228,7 +1240,7 @@ func (p *Parser) parseGrammarPrecedenceLevel() ast.GrammarPrecedenceLevel {
 		arms = append(arms, p.parseGrammarPrecedenceArm())
 	}
 	p.expect(lexer.TOKEN_DEDENT)
-	return ast.GrammarPrecedenceLevel{Position: pos, Name: name, LeftName: leftName, Seed: seed, Arms: arms}
+	return ast.GrammarPrecedenceLevel{Position: pos, Assoc: assoc, Name: name, LeftName: leftName, Seed: seed, Arms: arms}
 }
 
 func (p *Parser) parseGrammarPrecedenceArm() ast.GrammarPrecedenceArm {

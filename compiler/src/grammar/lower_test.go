@@ -687,10 +687,10 @@ func TestLowerFileStatefulInfixTableUseBuildsLoopAndAssignsLeft(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend:
     infix table ExprTable(additive):
         atom = token(TokenKind.IDENT)
-        multiplicative(left = atom()):
-            op = choice("*", "/") right = atom() -> right
-        additive(left = multiplicative()):
-            op = choice("+", "-") right = multiplicative() -> right
+		left multiplicative(left = atom()):
+			op = choice("*", "/") -> right
+		left additive(left = multiplicative()):
+			op = choice("+", "-") -> right
     expression(state: mutable ParserState&) -> Token:
         result = infix(ExprTable)
         return result
@@ -710,6 +710,29 @@ func TestLowerFileStatefulInfixTableUseBuildsLoopAndAssignsLeft(t *testing.T) {
 	}
 	if !strings.Contains(formatted, "def __grammar_try__PascalFrontend____grammar_precedence_PascalFrontend_expression_1_additive") {
 		t.Fatalf("expected infix table use to lower through generated precedence helpers, got:\n%s", formatted)
+	}
+}
+
+func TestLowerFileStatefulAssociativityAnnotatedInfixTableSynthesizesRightBinding(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend:
+    infix table ExprTable(power):
+        atom = token(TokenKind.IDENT)
+        right power(left = atom()):
+            "^" -> right
+    expression(state: mutable ParserState&) -> Token:
+        result = infix(ExprTable)
+        return result
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"__grammar_try__PascalFrontend____grammar_precedence_PascalFrontend_expression_1_power(state)",
+		"right = __grammar_value___grammar_precedence_PascalFrontend_expression_1_power_PascalFrontend_value_",
+		"__grammar_precedence_stop___grammar_precedence_PascalFrontend_expression_1_power",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected lowered associative infix table to contain %q, got:\n%s", want, formatted)
+		}
 	}
 }
 

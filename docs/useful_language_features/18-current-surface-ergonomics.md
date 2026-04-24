@@ -644,29 +644,54 @@ Current list-family terms:
 - `delimited(open, body, close, MessageKey)` parses `open`, returns `body`, and requires `close`
 - `until(...)` accepts token aliases, literal tokens, explicit `token(...)` terms, or other recoverable terms
 
-### Precedence, suffix, and postfix
+### Infix, precedence, suffix, and postfix
 
-Named precedence blocks define a small expression parser without hand-writing loops.
+Grammar-scoped infix tables are the preferred surface for reusable expression ladders. They keep the grammar header readable and let productions opt into the shared ladder with a single `infix(Name)` use.
 
 ```context
+infix table ExprTable(additive):
+    atom = choice(integer(), name(), grouped())
+    left multiplicative(left = atom()):
+        op = .STAR | .SLASH -> make_binary_expr(alloc, left, op, right)
+    left additive(left = multiplicative()):
+        op = .PLUS | .MINUS -> make_binary_expr(alloc, left, op, right)
+
 expression() -> Pascal.Expr:
-    result = precedence(additive):
-        atom = choice(integer(), name(), grouped())
-        multiplicative(left = atom()):
-            op = .STAR | .SLASH right = atom() -> make_binary_expr(alloc, left, op, right)
-        additive(left = multiplicative()):
-            op = .PLUS | .MINUS right = multiplicative() -> make_binary_expr(alloc, left, op, right)
+    result = infix(ExprTable)
     return result
 ```
 
-Current precedence rules:
+Current infix/precedence rules:
 
-- the argument to `precedence(result_level)` names the level whose value is returned
+- `infix table Name(result_level):` defines a reusable named-precedence ladder in grammar header scope
+- `infix(Name)` expands through the existing precedence lowering machinery, so it is grammar sugar rather than a separate parser path
+- `left`, `right`, and `nonassoc` may prefix looping levels to synthesize the common `right` operand automatically and control whether the level chains, recurses once, or stops after one match
+- the argument to `precedence(result_level)` names the level whose value is returned when you want an inline one-off ladder instead of a reusable table
 - `level = seed` defines a seed/helper level
 - `level(left = lower_level()): ...` defines a left-associative looping level
 - each arm parses an operator term, optional right-side bindings, and a `-> result` expression
 - arms are attempted in declaration order
 - recursive calls to named levels are resolved inside the precedence block
+
+For a standalone non-frontend example, the same surface works well for tiny DSLs and calculator-style grammars:
+
+```context
+grammar Arithmetic over Token using ParserState:
+    cursor state
+
+    infix table Expr(compare):
+        atom = choice(integer_atom(), grouped_expr())
+        right power(left = atom()):
+            .CARET -> build_power(left, right)
+        left additive(left = power()):
+            op = .PLUS | .MINUS -> build_binary(left, op, right)
+        nonassoc compare(left = additive()):
+            op = .EQ | .LT | .GT -> build_compare(left, op, right)
+
+    expression() -> Expr:
+        result = infix(Expr)
+        return result
+```
 
 Suffix and postfix are related loop surfaces for expression tails and statement-like continuations:
 
