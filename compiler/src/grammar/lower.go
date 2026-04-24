@@ -233,7 +233,7 @@ func lowerGrammarDecls(decl *ast.GrammarDecl, grammarScope map[string]*ast.Gramm
 	if decl == nil {
 		return nil
 	}
-	normalizedDecl := normalizeGrammarDeclForLowering(decl)
+	normalizedDecl := normalizeGrammarDeclForLoweringInScope(decl, grammarScope)
 	if !grammarDeclIsStateful(normalizedDecl) {
 		public := LowerDecl(normalizedDecl)
 		out := make([]ast.Decl, 0, len(public))
@@ -333,7 +333,7 @@ func appendUsedGrammarProductions(resolved map[string]resolvedGrammarProduction,
 			continue
 		}
 		seen[usedName] = true
-		normalizedUsed := normalizeGrammarDeclForLowering(usedDecl)
+		normalizedUsed := normalizeGrammarDeclForLoweringInScope(usedDecl, grammarScope)
 		for _, production := range normalizedUsed.Productions {
 			if _, exists := resolved[production.Name]; exists {
 				continue
@@ -341,6 +341,27 @@ func appendUsedGrammarProductions(resolved map[string]resolvedGrammarProduction,
 			resolved[production.Name] = resolvedGrammarProduction{GrammarName: normalizedUsed.Name, Production: production, TryName: grammarTryFuncName(normalizedUsed.Name, production.Name)}
 		}
 		appendUsedGrammarProductions(resolved, normalizedUsed, grammarScope, seen)
+	}
+}
+
+func appendUsedGrammarSupportDecls(tokenAliases *[]ast.GrammarTokenAliasDecl, recoveryPolicies *[]ast.GrammarRecoveryDecl, infixTables *[]ast.GrammarInfixTableDecl, grammarDecl *ast.GrammarDecl, grammarScope map[string]*ast.GrammarDecl, seen map[string]bool) {
+	if grammarDecl == nil || len(grammarDecl.Uses) == 0 || grammarScope == nil {
+		return
+	}
+	for _, used := range grammarDecl.Uses {
+		usedName := grammarUseName(used)
+		if usedName == "" || seen[usedName] {
+			continue
+		}
+		usedDecl, ok := grammarScope[usedName]
+		if !ok || usedDecl == nil {
+			continue
+		}
+		seen[usedName] = true
+		appendUsedGrammarSupportDecls(tokenAliases, recoveryPolicies, infixTables, usedDecl, grammarScope, seen)
+		*tokenAliases = append(*tokenAliases, usedDecl.TokenAliases...)
+		*recoveryPolicies = append(*recoveryPolicies, usedDecl.RecoveryPolicies...)
+		*infixTables = append(*infixTables, usedDecl.InfixTables...)
 	}
 }
 
@@ -356,14 +377,27 @@ func grammarUseName(typ ast.TypeExpr) string {
 }
 
 func normalizeGrammarDeclForLowering(decl *ast.GrammarDecl) *ast.GrammarDecl {
+	return normalizeGrammarDeclForLoweringInScope(decl, nil)
+}
+
+func normalizeGrammarDeclForLoweringInScope(decl *ast.GrammarDecl, grammarScope map[string]*ast.GrammarDecl) *ast.GrammarDecl {
 	if decl == nil {
 		return nil
 	}
 	normalized := *decl
-	normalized.TokenAliases = append([]ast.GrammarTokenAliasDecl(nil), decl.TokenAliases...)
-	aliasByLiteral := grammarTokenAliasLiteralMap(decl.TokenAliases)
-	normalized.RecoveryPolicies = rewriteGrammarRecoveryPoliciesTokenAliases(decl.RecoveryPolicies, aliasByLiteral)
-	normalized.InfixTables = rewriteGrammarInfixTablesTokenAliases(decl.InfixTables, aliasByLiteral)
+	normalized.TokenAliases = nil
+	normalized.RecoveryPolicies = nil
+	normalized.InfixTables = nil
+	if len(decl.Uses) != 0 && grammarScope != nil {
+		seen := map[string]bool{decl.Name: true}
+		appendUsedGrammarSupportDecls(&normalized.TokenAliases, &normalized.RecoveryPolicies, &normalized.InfixTables, decl, grammarScope, seen)
+	}
+	normalized.TokenAliases = append(normalized.TokenAliases, decl.TokenAliases...)
+	normalized.RecoveryPolicies = append(normalized.RecoveryPolicies, decl.RecoveryPolicies...)
+	normalized.InfixTables = append(normalized.InfixTables, decl.InfixTables...)
+	aliasByLiteral := grammarTokenAliasLiteralMap(normalized.TokenAliases)
+	normalized.RecoveryPolicies = rewriteGrammarRecoveryPoliciesTokenAliases(normalized.RecoveryPolicies, aliasByLiteral)
+	normalized.InfixTables = rewriteGrammarInfixTablesTokenAliases(normalized.InfixTables, aliasByLiteral)
 	recoveryPolicies := grammarRecoveryPolicyMap(normalized.RecoveryPolicies)
 	infixTables := grammarInfixTableMap(normalized.InfixTables)
 	normalized.Productions = make([]ast.GrammarProductionDecl, 0, len(decl.Productions))

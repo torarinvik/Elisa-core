@@ -408,7 +408,7 @@ grammar SMLExprGrammar over SMLToken using SMLParserState:
     record_error record_parse_error
 ```
 - `flatmaplist[T](source, item, values)` maps an existing list expression into per-item lists and flattens them into one `darray[T]`; typed empty branches such as `else []` inherit the mapped list type
-- `uses OtherGrammar` imports productions and token aliases from another grammar
+- `uses OtherGrammar` imports productions and grammar-scoped helper declarations from another grammar, including token aliases, recovery policies, and infix tables
 
 Inside grammar sequence result positions, `+` is the canonical way to compose list-producing grammar values. Prefer it over tiny helper functions whose only job is to allocate, append the left list, append the right list, and return the merged result.
 

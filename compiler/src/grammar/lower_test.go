@@ -1123,6 +1123,68 @@ grammar PascalStmtGrammar over Token using ParserState uses PascalExprGrammar:
 	}
 }
 
+func TestLowerFileStatefulUsesClauseResolvesImportedInfixTables(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalExprGrammar over Token using ParserState:
+    cursor state
+    alloc alloc
+    token:
+        PLUS "+"
+    infix table ExprTable(additive):
+        atom = token(TokenKind.IDENT)
+        left additive(left = atom()):
+            .PLUS -> right
+
+grammar PascalStmtGrammar over Token using ParserState uses PascalExprGrammar:
+    cursor state
+    alloc alloc
+    statement() -> Token:
+        value = infix(ExprTable)
+        return value
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"grammar PascalStmtGrammar over Token using ParserState uses PascalExprGrammar:",
+		"def __grammar_try__PascalStmtGrammar____grammar_precedence_PascalStmtGrammar_statement_1_additive(state: mutable ParserState&, alloc: mutable Arena&)",
+		"state.expect_kind(TokenKind.PLUS)",
+		"state.expect_kind(TokenKind.IDENT)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected uses-imported infix table lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestLowerFileStatefulUsesClauseResolvesImportedRecoveryPolicies(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalExprGrammar over Token using ParserState:
+    cursor state
+    token:
+        SEMICOLON ";"
+    recovery StatementRecovery:
+        message ParseMessageKey.ExpectedStatement
+        until .SEMICOLON, token(TokenKind.EOF)
+        fallback zeroed as Token
+
+grammar PascalStmtGrammar over Token using ParserState uses PascalExprGrammar:
+    cursor state
+	statement() -> Token:
+		stmt = token(TokenKind.IDENT) recover StatementRecovery
+        return stmt
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"state.record_parse_error(ParseMessageKey.ExpectedStatement)",
+		"state.current_token().kind == TokenKind.SEMICOLON",
+		"state.current_token().kind != TokenKind.EOF",
+		"__grammar_recover_value_statement_PascalStmtGrammar_recover_value_11 <- zeroed as Token",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected uses-imported recovery policy lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
 func TestLowerFileStatefulExposesTypedHeaderChannelDefaultsAsLocals(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
     cursor parser
