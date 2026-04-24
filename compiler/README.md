@@ -87,11 +87,15 @@ grammar ExprGrammar over Token using ParserState:
     result = precedence(additive):
       atom = choice(
         prefix(.PLUS, .MINUS) atom() -> make_unary(alloc, op, operand),
-        seq(.INTEGER(token) expr(make_int(alloc, token)))
+        integer_atom()
       )
       additive(left = atom()):
         op = .PLUS | .MINUS right = atom() -> make_binary(alloc, left, op, right)
     return result
+  integer_atom() -> Expr:
+    seq:
+      .INTEGER(token)
+      expr(make_int(alloc, token))
 ```
 
 ```text

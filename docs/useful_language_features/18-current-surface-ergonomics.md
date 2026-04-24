@@ -313,15 +313,27 @@ grammar PascalExprGrammar over Token using ParserState:
             atom = choice(
                 prefix(.PLUS, .MINUS, .NOT) atom() -> make_unary_expr(alloc, op, operand),
                 delimited(.LPAREN, expression(), .RPAREN, ParseMessageKey.ExpectedRightParen),
-                seq(.IDENT(token) expr(make_name_expr(alloc, token))),
-                seq(.INTEGER(token) expr(make_integer_expr(alloc, token))),
-                seq(.STRING(token) expr(make_string_expr(alloc, token)))
+                name_atom(),
+                integer_atom(),
+                string_atom()
             )
             multiplicative(left = atom()):
                 op = .STAR | .SLASH | .DIV | .MOD | .AND right = atom() -> make_binary_expr(alloc, left, op, right)
             additive(left = multiplicative()):
                 op = .PLUS | .MINUS | .OR right = multiplicative() -> make_binary_expr(alloc, left, op, right)
         return result
+    name_atom() -> Pascal.Expr:
+        seq:
+            .IDENT(token)
+            expr(make_name_expr(alloc, token))
+    integer_atom() -> Pascal.Expr:
+        seq:
+            .INTEGER(token)
+            expr(make_integer_expr(alloc, token))
+    string_atom() -> Pascal.Expr:
+        seq:
+            .STRING(token)
+            expr(make_string_expr(alloc, token))
 ```
 
 ### Grammar headers
@@ -332,14 +344,13 @@ Current header declarations:
 
 - `cursor state` tells lowering which parser-state value owns the current cursor
 - `alloc alloc` supplies the active tree/arena owner expression used by generated parser helpers
-- `token .IDENT` declares a token alias for use as `.IDENT` inside the grammar
-- `token .LPAREN "("` declares a token alias and a literal surface for diagnostics and string-token matching
-- `token:` is the grouped form; entries may be bare (`IDENT`) or dotted (`.IDENT`) and may include an optional literal
+- `token:` declares token aliases for use as `.IDENT` inside the grammar
+- grouped token entries may be bare (`IDENT`) or dotted (`.IDENT`) and may include an optional literal such as `LPAREN "("`
 - `channel name` declares a generated mutable channel with inferred/default behavior
 - `channel span: Span = combine_span($start.span, $end.span)` declares a typed channel with a default expression
 - `uses OtherGrammar` imports productions and token aliases from another grammar
 
-`token:` is pure surface sugar for repeated token declarations:
+`token:` is the canonical style for token aliases:
 
 ```context
 token:
@@ -349,7 +360,7 @@ token:
     RPAREN ")"
 ```
 
-is equivalent to:
+The older repeated declaration form still parses for compatibility, but the formatter normalizes aliases back into the grouped block form:
 
 ```context
 token .IDENT
@@ -392,7 +403,7 @@ Current core terms:
 - `required(term, MessageKey)` records a parse error instead of failing when `term` is absent
 - `recover(MessageKey, until(...), fallback)` can be attached to terms or productions for synchronized error recovery
 
-### Choice, sequence, and prefix
+### Choice, Sequence, And Prefix
 
 Choices can be written either with `choice(...)` or token/term pipes:
 
@@ -401,11 +412,9 @@ op = .PLUS | .MINUS | .OR
 atom = choice(.IDENT(token), .INTEGER(token), grouped_expr())
 ```
 
-Sequences have three accepted surfaces:
+Sequences use block form as the canonical style:
 
 ```context
-pair = seq(.LPAREN, expression(), .RPAREN)
-pair = seq(.LPAREN expression() .RPAREN)
 pair = seq:
     .LPAREN
     value = expression()
@@ -415,9 +424,9 @@ pair = seq:
 
 Current sequence rules:
 
-- comma-separated `seq(a, b, c)` remains valid
-- comma-free `seq(a b c)` is accepted for grammar-term adjacency
-- block `seq:` is preferred when a sequence needs bindings, recovery, or multiple readable steps
+- block `seq:` is the formatter output wherever a term can own an indented block
+- comma-separated `seq(a, b, c)` and comma-free `seq(a b c)` remain accepted for compact nested positions
+- inline `seq(...)` is mainly for places where a block cannot syntactically appear, such as inside `choice(...)` arguments
 - the value of a sequence is the value of its final term
 - if any non-recovered term fails, the sequence restores the cursor snapshot and fails
 
@@ -438,25 +447,26 @@ seq:
 
 The generated names are currently `op` and `operand`; use those in the result expression.
 
-### Lists and delimiters
+### Lists And Delimiters
 
-The list-family helpers now have both function-style and readable DSL-style forms.
+The list-family helpers use readable DSL-style forms as the canonical style.
 
 ```context
 statements = separated statement() by .SEMICOLON until(.END, token(TokenKind.EOF))
 names = separated required(.IDENT, ParseMessageKey.ExpectedDeclName) by .COMMA until(.COLON, token(TokenKind.EOF))
 decls = flatrepeat variable_decl_group() until(.BEGIN, token(TokenKind.EOF))
 args = delimited(.LPAREN, separated expression() by .COMMA until(.RPAREN, token(TokenKind.EOF)), .RPAREN, ParseMessageKey.ExpectedRightParen)?
-maybe_name = optional .IDENT
+maybe_name = .IDENT?
 ```
 
 Current list-family terms:
 
-- `optional term` or `term?` succeeds with an optional result
+- `term?` succeeds with an optional result
+- `optional term` and `optional(term)` remain accepted for compatibility, but the formatter emits postfix `?`
 - `repeat term until(...)` parses zero or more items and returns the collected list
 - `flatrepeat term until(...)` parses zero or more list-producing items and flattens them
-- `list term separated by sep until(...)` is the general list form
-- `separated term by sep until(...)` is the compact separated-list form
+- `separated term by sep until(...)` is the canonical separated-list form
+- `list term separated by sep until(...)` and function-style `separated(term, sep, until(...))` remain accepted, but the formatter emits `separated term by sep until(...)`
 - `delimited(open, body, close, MessageKey)` parses `open`, returns `body`, and requires `close`
 - `until(...)` accepts token aliases, literal tokens, explicit `token(...)` terms, or other recoverable terms
 

@@ -139,8 +139,9 @@ func TestParseGrammarDeclAllowsStructuredHeaderMetadata(t *testing.T) {
 		"error PascalFrontendError",
 		"cursor parser",
 		"alloc arena",
-		"token .PROGRAM \"program\"",
-		"token .IDENT",
+		"token:",
+		"PROGRAM \"program\"",
+		"IDENT",
 		"channel node",
 		"channel span: PascalSpan = span($start, $end)",
 		"channel checksum: i64",
@@ -585,8 +586,8 @@ func TestParseGrammarChoiceOptionalAndListTerms(t *testing.T) {
 	}
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
-		"declarations = optional(variable_section())",
-		"statements = list(statement(), \";\")",
+		"declarations = variable_section()?",
+		"statements = separated statement() by \";\"",
 		"choice(assignment(), compound_statement(), if_statement(), while_statement())",
 	} {
 		if !strings.Contains(formatted, want) {
@@ -681,7 +682,7 @@ func TestParseGrammarListTermAllowsUntilStopSets(t *testing.T) {
 	}
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
-		"statements = list(state.statement(), \";\", until(\"end\", token(TokenKind.EOF)))",
+		"statements = separated state.statement() by \";\" until(\"end\", token(TokenKind.EOF))",
 		"items = list(state.variable_decl(), until(\"begin\"))",
 	} {
 		if !strings.Contains(formatted, want) {
@@ -721,7 +722,7 @@ func TestParseGrammarRepeatAndSeparatedTerms(t *testing.T) {
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
 		"items = repeat(state.statement(), until(\"end\", token(TokenKind.EOF)))",
-		"values = separated(state.expression(), \",\", until(\")\", token(TokenKind.EOF)))",
+		"values = separated state.expression() by \",\" until(\")\", token(TokenKind.EOF))",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
@@ -775,7 +776,7 @@ func TestParseGrammarDeclAllowsOptionalAndRepeatSuffixShorthand(t *testing.T) {
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
 		"many = repeat(.IDENT, until(\")\", token(TokenKind.EOF)))",
-		"maybe = optional(.IDENT)",
+		"maybe = .IDENT?",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
@@ -1451,7 +1452,9 @@ func TestParseGrammarDeclAllowsSeqTerm(t *testing.T) {
 	}
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
-		"value = seq(\"else\", .IDENT recover(ParseMessageKey.ExpectedProgramName, until(\";\", token(TokenKind.EOF)), expr(state.current_token())))",
+		"value = seq:",
+		"\"else\"",
+		".IDENT recover(ParseMessageKey.ExpectedProgramName, until(\";\", token(TokenKind.EOF)), expr(state.current_token()))",
 		"return value",
 	} {
 		if !strings.Contains(formatted, want) {
@@ -1489,7 +1492,10 @@ func TestParseGrammarDeclAllowsSeqBindingsAndAssignments(t *testing.T) {
 	}
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
-		"value = seq(.IDENT(token), span <- expr(token.span), expr(token))",
+		"value = seq:",
+		".IDENT(token)",
+		"span <- expr(token.span)",
+		"expr(token)",
 		"return value",
 	} {
 		if !strings.Contains(formatted, want) {

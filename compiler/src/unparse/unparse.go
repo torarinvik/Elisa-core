@@ -299,12 +299,15 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		if n.AllocExpr != nil {
 			f.writeLine(level+1, "alloc "+formatExpr(n.AllocExpr))
 		}
-		for _, alias := range n.TokenAliases {
-			line := "token ." + alias.Kind
-			if alias.HasLiteral {
-				line += " " + strconv.Quote(alias.Literal)
+		if len(n.TokenAliases) != 0 {
+			f.writeLine(level+1, "token:")
+			for _, alias := range n.TokenAliases {
+				line := alias.Kind
+				if alias.HasLiteral {
+					line += " " + strconv.Quote(alias.Literal)
+				}
+				f.writeLine(level+2, line)
 			}
-			f.writeLine(level+1, line)
 		}
 		for _, channel := range n.Channels {
 			line := "channel " + channel.Name
@@ -540,6 +543,10 @@ func (f *formatter) writeGrammarTerm(level int, term ast.GrammarTerm) {
 			f.writeLine(level, "."+tokenKind.Kind+"("+bind.Name+")")
 			return
 		}
+		if seq, ok := bind.Term.(*ast.GrammarSeqTerm); ok {
+			f.writeBoundSeqTerm(level, bind.Name, seq)
+			return
+		}
 		if suffix, ok := bind.Term.(*ast.GrammarSuffixTerm); ok {
 			f.writeBoundSuffixTerm(level, bind.Name, suffix)
 			return
@@ -552,6 +559,16 @@ func (f *formatter) writeGrammarTerm(level int, term ast.GrammarTerm) {
 			f.writeBoundPrecedenceTerm(level, bind.Name, precedence)
 			return
 		}
+	}
+	if assign, ok := term.(*ast.GrammarAssignTerm); ok {
+		if seq, ok := assign.Term.(*ast.GrammarSeqTerm); ok {
+			f.writeAssignedSeqTerm(level, assign.Name, seq)
+			return
+		}
+	}
+	if seq, ok := term.(*ast.GrammarSeqTerm); ok {
+		f.writeSeqTerm(level, seq)
+		return
 	}
 	if suffix, ok := term.(*ast.GrammarSuffixTerm); ok {
 		f.writeSuffixTerm(level, suffix)
@@ -566,6 +583,39 @@ func (f *formatter) writeGrammarTerm(level int, term ast.GrammarTerm) {
 		return
 	}
 	f.writeLine(level, formatGrammarTerm(term))
+}
+
+func (f *formatter) writeBoundSeqTerm(level int, name string, seq *ast.GrammarSeqTerm) {
+	if seq == nil {
+		f.writeLine(level, name+" = <invalid_grammar_term>")
+		return
+	}
+	f.writeLine(level, name+" = seq:")
+	for _, term := range seq.Terms {
+		f.writeGrammarTerm(level+1, term)
+	}
+}
+
+func (f *formatter) writeAssignedSeqTerm(level int, name string, seq *ast.GrammarSeqTerm) {
+	if seq == nil {
+		f.writeLine(level, name+" <- <invalid_grammar_term>")
+		return
+	}
+	f.writeLine(level, name+" <- seq:")
+	for _, term := range seq.Terms {
+		f.writeGrammarTerm(level+1, term)
+	}
+}
+
+func (f *formatter) writeSeqTerm(level int, seq *ast.GrammarSeqTerm) {
+	if seq == nil {
+		f.writeLine(level, "<invalid_grammar_term>")
+		return
+	}
+	f.writeLine(level, "seq:")
+	for _, term := range seq.Terms {
+		f.writeGrammarTerm(level+1, term)
+	}
 }
 
 func (f *formatter) writeBoundSuffixTerm(level int, name string, suffix *ast.GrammarSuffixTerm) {
@@ -747,50 +797,30 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 	case *ast.GrammarCutTerm:
 		return "cut"
 	case *ast.GrammarOptionalTerm:
-		return "optional(" + formatGrammarTerm(n.Term) + ")"
+		return formatGrammarTerm(n.Term) + "?"
 	case *ast.GrammarListTerm:
-		parts := []string{formatGrammarTerm(n.Elem)}
 		if n.Separator != nil {
-			parts = append(parts, formatGrammarTerm(n.Separator))
+			return formatReadableSeparatedTerm(n.Elem, n.Separator, n.Until)
 		}
+		parts := []string{formatGrammarTerm(n.Elem)}
 		if len(n.Until) != 0 {
-			untilParts := make([]string, 0, len(n.Until))
-			for _, stop := range n.Until {
-				untilParts = append(untilParts, formatGrammarTerm(stop))
-			}
-			parts = append(parts, "until("+strings.Join(untilParts, ", ")+")")
+			parts = append(parts, formatGrammarUntil(n.Until))
 		}
 		return "list(" + strings.Join(parts, ", ") + ")"
 	case *ast.GrammarRepeatTerm:
 		parts := []string{formatGrammarTerm(n.Elem)}
 		if len(n.Until) != 0 {
-			untilParts := make([]string, 0, len(n.Until))
-			for _, stop := range n.Until {
-				untilParts = append(untilParts, formatGrammarTerm(stop))
-			}
-			parts = append(parts, "until("+strings.Join(untilParts, ", ")+")")
+			parts = append(parts, formatGrammarUntil(n.Until))
 		}
 		return "repeat(" + strings.Join(parts, ", ") + ")"
 	case *ast.GrammarFlatRepeatTerm:
 		parts := []string{formatGrammarTerm(n.Elem)}
 		if len(n.Until) != 0 {
-			untilParts := make([]string, 0, len(n.Until))
-			for _, stop := range n.Until {
-				untilParts = append(untilParts, formatGrammarTerm(stop))
-			}
-			parts = append(parts, "until("+strings.Join(untilParts, ", ")+")")
+			parts = append(parts, formatGrammarUntil(n.Until))
 		}
 		return "flatrepeat(" + strings.Join(parts, ", ") + ")"
 	case *ast.GrammarSeparatedTerm:
-		parts := []string{formatGrammarTerm(n.Elem), formatGrammarTerm(n.Separator)}
-		if len(n.Until) != 0 {
-			untilParts := make([]string, 0, len(n.Until))
-			for _, stop := range n.Until {
-				untilParts = append(untilParts, formatGrammarTerm(stop))
-			}
-			parts = append(parts, "until("+strings.Join(untilParts, ", ")+")")
-		}
-		return "separated(" + strings.Join(parts, ", ") + ")"
+		return formatReadableSeparatedTerm(n.Elem, n.Separator, n.Until)
 	case *ast.GrammarSuffixTerm:
 		return "suffix(" + n.LeftName + " = " + formatGrammarTerm(n.Seed) + "):"
 	case *ast.GrammarPostfixTerm:
@@ -809,6 +839,22 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 	default:
 		return "<grammar-term>"
 	}
+}
+
+func formatGrammarUntil(until []ast.GrammarTerm) string {
+	untilParts := make([]string, 0, len(until))
+	for _, stop := range until {
+		untilParts = append(untilParts, formatGrammarTerm(stop))
+	}
+	return "until(" + strings.Join(untilParts, ", ") + ")"
+}
+
+func formatReadableSeparatedTerm(elem ast.GrammarTerm, separator ast.GrammarTerm, until []ast.GrammarTerm) string {
+	text := "separated " + formatGrammarTerm(elem) + " by " + formatGrammarTerm(separator)
+	if len(until) != 0 {
+		text += " " + formatGrammarUntil(until)
+	}
+	return text
 }
 
 func (f *formatter) writeField(level int, field ast.FieldDecl) {
