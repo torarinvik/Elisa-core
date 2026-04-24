@@ -257,6 +257,7 @@ func (c *analyzerASTCensus) countExpr(expr ast.Expr) {
 		c.countExpr(n.Value)
 	case *ast.AllocExpr:
 		c.countExpr(n.Owner)
+		c.countExpr(n.NodeSpan)
 		c.countExpr(n.Value)
 	case *ast.CanExpr:
 		c.countExpr(n.Expr)

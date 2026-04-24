@@ -243,10 +243,11 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 	case *ast.AllocExpr:
 		owner := cloneDefaultArgExpr(n.Owner)
 		value := cloneDefaultArgExpr(n.Value)
-		if (n.Owner != nil && owner == nil) || (n.Value != nil && value == nil) {
+		nodeSpan := cloneDefaultArgExpr(n.NodeSpan)
+		if (n.Owner != nil && owner == nil) || (n.Value != nil && value == nil) || (n.NodeSpan != nil && nodeSpan == nil) {
 			return nil
 		}
-		return &ast.AllocExpr{Position: n.Position, Owner: owner, Value: value}
+		return &ast.AllocExpr{Position: n.Position, Owner: owner, Value: value, NodeSugar: n.NodeSugar, NodeSpan: nodeSpan}
 	case *ast.CanExpr:
 		exprClone := cloneDefaultArgExpr(n.Expr)
 		if n.Expr != nil && exprClone == nil {

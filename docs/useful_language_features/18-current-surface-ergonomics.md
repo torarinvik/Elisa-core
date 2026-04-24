@@ -246,6 +246,9 @@ def rotate_into(owner: Arena, node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     return new[alloc] node{left, right}
 
+def make_binary(alloc: mutable Arena&, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr:
+    return node[span = combine_span(left.span, right.span)] Lua.Expr.Binary(left: left, right: right)
+
 def simplify(node: Lua.Node) -> Lua.Node:
     in perm:
         return rewrite node as Lua.Node:
@@ -263,6 +266,9 @@ Current rules:
 - tree exact updates preserve the exact member tag and copy every unchanged field from the source handle
 - bare tree exact updates still require an active tree owner such as `in perm:` or `in owner:` because the result is a fresh tree value
 - `new[owner] member{...}` is the explicit-owner form when no active owner scope should be used
+- `node Tree.Member(...)` is canonical sugar for tree construction through an in-scope `alloc` binding
+- `node[span = expr] Tree.Member(...)` injects the common `span` field without repeating it in the constructor arguments
+- `node[alloc = owner, span = expr] Tree.Member(...)` is the explicit-owner form for parser helpers that name the arena something other than `alloc`
 - inside an exact `rewrite` arm, `default` rebuilds the current exact member using the already rewritten child results
 - `default` is contextual rather than a new global keyword; outside an exact `rewrite` arm it is rejected
 - `default` also rebuilds `children` sequence fields, materializing fresh arrays in the active tree owner when needed
@@ -510,7 +516,7 @@ Current implementation notes:
 - `prefix(...)` currently lowers to `seq(op = choice(...), operand = ..., expr(...))`
 - token aliases are rewritten before lowering, so `.IDENT` can map onto the real token kind expression
 - recovery and required terms depend on the grammar `cursor` declaration to restore or advance parser state correctly
-- tree AST construction remains ordinary llcontext code, so teams can use low-level `new[alloc] Tree.Node(...)` directly or wrap common span/child patterns in helpers such as `make_binary_expr(...)`
+- tree AST construction remains ordinary llcontext code, so teams can use canonical `node[span = ...] Tree.Node(...)` sugar or drop to low-level `new[alloc] Tree.Node(span: ..., ...)` when exact control is clearer
 
 ## Filtered iterable `for`
 

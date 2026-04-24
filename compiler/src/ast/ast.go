@@ -1098,9 +1098,11 @@ type OptionalBindExpr struct {
 }
 
 type AllocExpr struct {
-	Position lexer.Pos
-	Owner    Expr
-	Value    Expr
+	Position  lexer.Pos
+	Owner     Expr
+	Value     Expr
+	NodeSugar bool
+	NodeSpan  Expr
 }
 
 type CanExpr struct {

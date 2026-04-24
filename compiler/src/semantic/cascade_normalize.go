@@ -296,6 +296,7 @@ func normalizeCascadeExpr(expr ast.Expr, target ast.Expr, rewriteShorthand bool)
 	case *ast.AllocExpr:
 		n.Owner = normalizeCascadeExpr(n.Owner, target, rewriteShorthand)
 		n.Value = normalizeCascadeExpr(n.Value, target, rewriteShorthand)
+		n.NodeSpan = normalizeCascadeExpr(n.NodeSpan, target, rewriteShorthand)
 		return n
 	case *ast.CanExpr:
 		n.Expr = normalizeCascadeExpr(n.Expr, target, rewriteShorthand)

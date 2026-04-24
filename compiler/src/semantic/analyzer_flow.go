@@ -934,6 +934,7 @@ func (a *Analyzer) validateDeferStmtBodyExpr(expr ast.Expr) {
 		a.validateDeferStmtBodyExpr(n.Value)
 	case *ast.AllocExpr:
 		a.validateDeferStmtBodyExpr(n.Owner)
+		a.validateDeferStmtBodyExpr(n.NodeSpan)
 		a.validateDeferStmtBodyExpr(n.Value)
 	case *ast.CanExpr:
 		a.validateDeferStmtBodyExpr(n.Expr)
@@ -6655,7 +6656,7 @@ func exprReferencesVariantFields(expr ast.Expr, name string) bool {
 	case *ast.OptionalBindExpr:
 		return exprReferencesVariantFields(n.Value, name)
 	case *ast.AllocExpr:
-		return exprReferencesVariantFields(n.Owner, name) || exprReferencesVariantFields(n.Value, name)
+		return exprReferencesVariantFields(n.Owner, name) || exprReferencesVariantFields(n.NodeSpan, name) || exprReferencesVariantFields(n.Value, name)
 	case *ast.CanExpr:
 		return exprReferencesVariantFields(n.Expr, name)
 	case *ast.MatchExpr:

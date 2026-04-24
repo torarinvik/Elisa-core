@@ -1509,6 +1509,36 @@ func formatWithBundleUse(bundle ast.WithBundleUse) string {
 	return bundle.Name + "(" + strings.Join(parts, ", ") + ")"
 }
 
+func formatNodeSugarValue(expr *ast.AllocExpr) string {
+	if expr == nil || expr.NodeSpan == nil {
+		return formatExpr(expr.Value)
+	}
+	call, ok := expr.Value.(*ast.CallExpr)
+	if !ok || call == nil || len(call.Args) == 0 || call.ArgName(len(call.Args)-1) != "span" {
+		return formatExpr(expr.Value)
+	}
+	trimmed := *call
+	trimmed.Args = append([]ast.Expr(nil), call.Args[:len(call.Args)-1]...)
+	if len(call.ArgNames) >= len(call.Args) {
+		trimmed.ArgNames = append([]string(nil), call.ArgNames[:len(call.Args)-1]...)
+	}
+	if len(call.ArgShorthand) >= len(call.Args) {
+		trimmed.ArgShorthand = append([]bool(nil), call.ArgShorthand[:len(call.Args)-1]...)
+	}
+	if len(call.ArgItemOrder) != 0 {
+		items := make([]ast.CallArgItem, 0, len(call.ArgItemOrder))
+		removedIndex := len(call.Args) - 1
+		for _, item := range call.ArgItemOrder {
+			if !item.IsPack && item.ArgIndex == removedIndex {
+				continue
+			}
+			items = append(items, item)
+		}
+		trimmed.ArgItemOrder = items
+	}
+	return formatExpr(&trimmed)
+}
+
 func formatWithValueClause(bundles []ast.WithBundleUse, args []ast.WithArg, order []ast.WithItem) string {
 	parts := make([]string, 0, len(bundles)+len(args))
 	if len(order) != 0 {
@@ -2029,6 +2059,21 @@ func formatExpr(expr ast.Expr) string {
 	case *ast.OptionalBindExpr:
 		return "let " + n.Name + " = " + formatExpr(n.Value)
 	case *ast.AllocExpr:
+		if n.NodeSugar {
+			options := make([]string, 0, 2)
+			if n.Owner != nil {
+				if ident, ok := n.Owner.(*ast.Ident); !ok || ident.Name != "alloc" {
+					options = append(options, "alloc = "+formatExpr(n.Owner))
+				}
+			}
+			if n.NodeSpan != nil {
+				options = append(options, "span = "+formatExpr(n.NodeSpan))
+			}
+			if len(options) != 0 {
+				return "node[" + strings.Join(options, ", ") + "] " + formatNodeSugarValue(n)
+			}
+			return "node " + formatNodeSugarValue(n)
+		}
 		if n.Owner != nil {
 			return "new[" + formatExpr(n.Owner) + "] " + formatExpr(n.Value)
 		}

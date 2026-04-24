@@ -644,6 +644,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.Value)
 	case *ast.AllocExpr:
 		c.collectExpr(n.Owner)
+		c.collectExpr(n.NodeSpan)
 		c.collectExpr(n.Value)
 	case *ast.CanExpr:
 		if n.SuppressPermissionInference {
@@ -949,6 +950,7 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		if n.Owner != nil {
 			a.validatePermissionExpr(n.Owner, granted)
 		}
+		a.validatePermissionExpr(n.NodeSpan, granted)
 		a.validatePermissionExpr(n.Value, granted)
 	case *ast.CanExpr:
 		families := a.resolvePermissionFamilies(n.Permissions, false)

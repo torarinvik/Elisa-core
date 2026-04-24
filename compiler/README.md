@@ -33,7 +33,7 @@ That reference covers the currently implemented syntax for:
 - brace destructuring, field punning, record updates, and filtered iterable loops
 - grammar DSL parser features: `token:` blocks, `seq:` blocks, comma-free `seq(...)`, `prefix(...)`, readable list/repeat forms, recovery, lookahead/cut, and precedence/suffix/postfix helpers
 - `do:` blocks, `defer`, index fallback, store/dict sugar, char literals, and explicit `parallel for`
-- cascade blocks and expressions, lambda literals, tree `rewrite`, and postfix cast hooks
+- cascade blocks and expressions, lambda literals, `node[span = ...]` tree construction, tree `rewrite`, and postfix cast hooks
 - static interfaces, associated types, extension methods, UFCS rewriting, safe call chaining, and the preferred generic specialization surface
 
 ## Syntax cheat sheet

@@ -85,6 +85,41 @@ func TestParseTreeDeclWithAnnotationsAndMembers(t *testing.T) {
 	}
 }
 
+func TestParseNodeConstructionSugar(t *testing.T) {
+	file, errs := parseSourceFile(t, `def build(alloc: mutable Arena&, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr:
+    return node[span = combine_span(left.span, right.span)] Lua.Expr.Binary(left: left, right: right)
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected function decl, got %T", file.Decls[0])
+	}
+	ret, ok := fn.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return stmt, got %T", fn.Body[0])
+	}
+	alloc, ok := ret.Value.(*ast.AllocExpr)
+	if !ok || !alloc.NodeSugar {
+		t.Fatalf("expected node construction sugar to parse as sugared alloc expr, got %T %#v", ret.Value, ret.Value)
+	}
+	if ident, ok := alloc.Owner.(*ast.Ident); !ok || ident.Name != "alloc" {
+		t.Fatalf("expected omitted node alloc owner to default to alloc, got %#v", alloc.Owner)
+	}
+	call, ok := alloc.Value.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected sugared node value to be constructor call, got %T", alloc.Value)
+	}
+	if call.ArgName(len(call.Args)-1) != "span" {
+		t.Fatalf("expected node span option to inject trailing span arg, got names %#v", call.ArgNames)
+	}
+	formatted := unparse.FormatFile(file)
+	if !strings.Contains(formatted, "return node[span = combine_span(left.span, right.span)] Lua.Expr.Binary(left: left, right: right)") {
+		t.Fatalf("expected formatter to preserve node construction sugar, got:\n%s", formatted)
+	}
+}
+
 func TestParseTreeDeclPreservesGenericCategoryNames(t *testing.T) {
 	file, errs := parseSourceFile(t, "tree Compiler:\n    @role(pattern)\n    node Pattern:\n        Bind(name: Symbol)\n")
 	if len(errs) != 0 {

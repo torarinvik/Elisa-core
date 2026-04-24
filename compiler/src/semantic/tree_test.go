@@ -483,6 +483,22 @@ def build_perm() -> Lua.Expr:
 `)
 }
 
+func TestAnalyzeNodeConstructionSugarInjectsAllocAndSpan(t *testing.T) {
+	analyzeTreeTestSource(t, "tree_node_construction_sugar.llcontext", `tree Lua:
+	common:
+		span: i64
+	@role(expr)
+	node Expr:
+		Nil
+		Binary(left: Expr, right: Expr)
+
+def build(alloc: mutable Arena&) -> Lua.Expr:
+	left: Lua.Expr = node[span = 1] Lua.Expr.Nil
+	right: Lua.Expr = node[alloc = alloc, span = 2] Lua.Expr.Nil
+	return node[span = 3] Lua.Expr.Binary(left: left, right: right)
+`)
+}
+
 func TestAnalyzeRejectsBareTreeConstructorsOutsideOwnerScope(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_owner_required.llcontext", `tree Lua:
 	common:

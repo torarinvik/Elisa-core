@@ -877,6 +877,9 @@ func (p *Parser) parseUnary() ast.Expr {
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "new" {
 		return p.parseAllocExpr()
 	}
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "node" && p.looksLikeNodeAllocExpr() {
+		return p.parseNodeAllocExpr()
+	}
 	if p.matchIdentText("submit") {
 		pos := p.tokens[p.pos-1].Pos
 		var explicitPool ast.Expr
@@ -971,6 +974,89 @@ func (p *Parser) parseAllocExpr() ast.Expr {
 	}
 	value := p.parseExpr()
 	return &ast.AllocExpr{Position: pos, Owner: owner, Value: value}
+}
+
+func (p *Parser) looksLikeNodeAllocExpr() bool {
+	if p.pos+1 >= len(p.tokens) {
+		return false
+	}
+	if p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+		return true
+	}
+	if p.tokens[p.pos+1].Kind != lexer.TOKEN_LBRACKET {
+		return false
+	}
+	depth := 0
+	for i := p.pos + 1; i < len(p.tokens); i++ {
+		switch p.tokens[i].Kind {
+		case lexer.TOKEN_LBRACKET:
+			depth++
+		case lexer.TOKEN_RBRACKET:
+			depth--
+			if depth == 0 {
+				return i+1 < len(p.tokens) && p.tokens[i+1].Kind == lexer.TOKEN_IDENT
+			}
+		case lexer.TOKEN_EOF, lexer.TOKEN_NEWLINE:
+			return false
+		}
+	}
+	return false
+}
+
+func (p *Parser) parseNodeAllocExpr() ast.Expr {
+	pos := p.cur().Pos
+	p.expectIdentText("node")
+	owner := ast.Expr(&ast.Ident{Position: pos, Name: "alloc"})
+	var span ast.Expr
+	if p.match(lexer.TOKEN_LBRACKET) {
+		for p.peek() != lexer.TOKEN_RBRACKET && p.peek() != lexer.TOKEN_EOF {
+			if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ASSIGN {
+				name := p.advance().Text
+				p.expect(lexer.TOKEN_ASSIGN)
+				value := p.parseExpr()
+				switch name {
+				case "alloc":
+					owner = value
+				case "span":
+					span = value
+				default:
+					p.errorf("unknown node construction option %q", name)
+				}
+			} else {
+				owner = p.parseExpr()
+			}
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+		p.expect(lexer.TOKEN_RBRACKET)
+	}
+	value := p.parseExpr()
+	if span != nil {
+		value = p.injectNodeSpanArg(value, span)
+	}
+	return &ast.AllocExpr{Position: pos, Owner: owner, Value: value, NodeSugar: true, NodeSpan: span}
+}
+
+func (p *Parser) injectNodeSpanArg(value ast.Expr, span ast.Expr) ast.Expr {
+	call, ok := value.(*ast.CallExpr)
+	if !ok || call == nil {
+		return &ast.CallExpr{Position: value.Pos(), Func: value, Args: []ast.Expr{span}, ArgNames: []string{"span"}, ArgShorthand: []bool{false}}
+	}
+	for _, name := range call.ArgNames {
+		if name == "span" {
+			p.errorf("node constructor span supplied both in node[...] and constructor arguments")
+			return value
+		}
+	}
+	index := len(call.Args)
+	call.Args = append(call.Args, span)
+	call.ArgNames = append(call.ArgNames, "span")
+	call.ArgShorthand = append(call.ArgShorthand, false)
+	if len(call.ArgItemOrder) != 0 {
+		call.ArgItemOrder = append(call.ArgItemOrder, ast.CallArgItem{Position: span.Pos(), ArgIndex: index})
+	}
+	return value
 }
 
 func (p *Parser) parseMatchExpr() ast.Expr {
